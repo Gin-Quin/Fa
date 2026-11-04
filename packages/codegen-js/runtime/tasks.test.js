@@ -4,6 +4,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { FaChannel, FaMutex, faUnlock } from "./concurrency.js";
+import { faRunTests } from "./main.js";
+import { FaStop } from "./stops.js";
 import {
 	Cancelled,
 	ChannelClosed,
@@ -23,6 +25,7 @@ import {
 	faStart,
 	faStartValue,
 	FaTask,
+	faTestTask,
 	faYield,
 } from "./tasks.js";
 
@@ -228,6 +231,48 @@ describe("the coop budget", () => {
 			await faYield(self);
 		}
 		expect(fired).toBe(true);
+	});
+});
+
+describe("tests that await", () => {
+	test("run one after the other as tasks; a failed assert fails only its test", async () => {
+		/** @type {string[]} */
+		const order = [];
+		const tests = [
+			{
+				name: "first",
+				file: "a.test.fa",
+				line: 1,
+				modifier: undefined,
+				async: true,
+				run: async (/** @type {FaTask} */ task) => {
+					order.push("first starts");
+					await faYield(task);
+					order.push("first ends");
+				},
+			},
+			{
+				name: "failing",
+				file: "a.test.fa",
+				line: 2,
+				modifier: undefined,
+				async: true,
+				run: async (/** @type {FaTask} */ task) => {
+					await faYield(task);
+					throw new FaStop("assertion failed: x == 1", "a.test.fa:2:1");
+				},
+			},
+			{
+				name: "blocking",
+				file: "a.test.fa",
+				line: 3,
+				modifier: undefined,
+				run: () => order.push("blocking"),
+			},
+		];
+		const code = await faRunTests(tests, () => {}, faTestTask);
+		expect(code).toBe(1);
+		expect(order).toEqual(["first starts", "first ends", "blocking"]);
 	});
 });
 

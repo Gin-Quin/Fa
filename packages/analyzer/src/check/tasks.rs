@@ -1351,7 +1351,7 @@ impl crate::Session {
 		}
 		if tests {
 			parts.extend(program.tests.iter().map(|&file| (file, TOP_LEVEL)));
-			name = "the tests".to_string();
+			name = "a test".to_string();
 		}
 		for (file, key) in parts {
 			if let Some(part) = self.source_file(file).interface.async_summaries.get(&key) {

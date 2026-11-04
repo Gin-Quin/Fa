@@ -803,6 +803,36 @@ export function faRunAsync(main) {
 	faRunTask(root, main, [], true);
 }
 
+// @fa-helper faTestTask deps: FaTask faSched faEnd
+/**
+ * Runs a test that awaits (`fa test`, `faRunTests`): its body is an async
+ * function taking its task. The promise ends once the test and the
+ * detached tasks it started are done, rejected with what the test threw
+ * (an `assert` that failed, a Fa error); the tasks it still owns are
+ * cancelled.
+ * @param {(task: FaTask) => Promise<unknown>} run
+ * @returns {Promise<void>}
+ */
+export async function faTestTask(run) {
+	const task = new FaTask(null);
+	try {
+		await run(task);
+	} finally {
+		if (task.state === 0) {
+			task.state = 1;
+			faEnd(task);
+		}
+		if (faSched.live > 0) {
+			await new Promise((resolve) => {
+				faSched.idle = () => {
+					faSched.idle = null;
+					resolve(undefined);
+				};
+			});
+		}
+	}
+}
+
 // @fa-helper faPromise deps: FaTask faWhenDone faRunTask Cancelled
 /**
  * The Promise API of an exported async function, for JavaScript callers:

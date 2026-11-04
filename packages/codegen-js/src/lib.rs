@@ -379,7 +379,8 @@ pub fn generate_program_into(
 	}
 	let mut options = options.clone();
 	if options.asynchronous.is_none() {
-		options.asynchronous = Some(program.asynchronous && !entry.tests);
+		// for `fa test`, the mode of the tests (`Session::configure_asynchronous`)
+		options.asynchronous = Some(program.asynchronous);
 	}
 	let options = &options;
 	let session: &Session = session;
@@ -560,9 +561,18 @@ pub fn entry_module(
 			.entry
 			.as_ref()
 			.is_some_and(|entry_module| entry_module.asynchronous);
-	let mut used = vec![if asynchronous { "faRunAsync" } else { "faRun" }];
+	// a test that awaits: the test modules use `faTestTask` (modules.rs)
+	let asynchronous_tests = entry.tests && helpers.contains("faTestTask");
+	let mut used = vec![if asynchronous || asynchronous_tests {
+		"faRunAsync"
+	} else {
+		"faRun"
+	}];
 	if entry.tests {
 		used.push("faRunTests");
+	}
+	if asynchronous_tests {
+		used.push("faTestTask");
 	}
 	helpers.extend(used.iter().copied());
 	main.push_str(&format!(
@@ -591,13 +601,20 @@ pub fn entry_module(
 			));
 			lists.push(format!("...$tests{index}"));
 		}
+		let run = if asynchronous_tests {
+			format!(
+				"faRunAsync(async () => await faRunTests([{}], $init, faTestTask));",
+				lists.join(", ")
+			)
+		} else {
+			format!("faRun(() => faRunTests([{}], $init));", lists.join(", "))
+		};
 		main.push_str(&format!(
-			"\nfunction $init() {{\n{}}}\n\nfaRun(() => faRunTests([{}], $init));\n",
+			"\nfunction $init() {{\n{}}}\n\n{run}\n",
 			init_calls
 				.iter()
 				.map(|call| format!("\t{call}\n"))
 				.collect::<String>(),
-			lists.join(", ")
 		));
 	} else {
 		let mut body = init_calls

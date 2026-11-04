@@ -122,11 +122,16 @@ export function faRun(main) {
  * - Before each test, `init` initializes the module-level values again (D33).
  * - A false `assert` or an escaping error fails the test; a stop fails it
  *   too, and the remaining tests of its file are reported as not run.
- * @param {Array<{ name: string, file: string, line: number, modifier: string | undefined, run: () => void }>} tests
+ * - A test that awaits (`async: true`, in an asynchronous program) is an
+ *   async function taking its task: `runAsync` (`faTestTask`) runs it as a
+ *   task, and the runner waits for it before the next test; the result is
+ *   then a promise of the exit code.
+ * @param {Array<{ name: string, file: string, line: number, modifier: string | undefined, run: Function, async?: boolean }>} tests
  * @param {() => void} init
- * @returns {number}
+ * @param {(run: Function) => Promise<void>} [runAsync]
+ * @returns {number | Promise<number>}
  */
-export function faRunTests(tests, init) {
+export function faRunTests(tests, init, runAsync) {
 	const focused = tests.some((test) => test.modifier === "only");
 	let passed = 0;
 	let failed = 0;
@@ -134,49 +139,85 @@ export function faRunTests(tests, init) {
 	let notRun = 0;
 	/** @type {string | undefined} */
 	let stopped;
-	for (const test of tests) {
-		const where = `${test.file}:${test.line}`;
-		if (test.file === stopped) {
-			notRun += 1;
-			console.log(`- ${test.name} (${where}): not run`);
-			continue;
+	/** @param {{ name: string }} test */
+	const pass = (test) => {
+		passed += 1;
+		console.log(`✓ ${test.name}`);
+	};
+	/**
+	 * @param {{ name: string, file: string }} test
+	 * @param {string} where
+	 * @param {unknown} exception
+	 */
+	const fail = (test, where, exception) => {
+		failed += 1;
+		let report;
+		if (exception instanceof FaStop && exception.reason.startsWith("assertion failed: ")) {
+			const condition = exception.reason.slice("assertion failed: ".length);
+			report = `  assert ${condition.replace(/\n {7}/g, "\n         ")}`;
+		} else if (exception instanceof FaStop) {
+			report = `  ${faStopMessage(exception)}`;
+			stopped = test.file;
+		} else if (faIsError(exception)) {
+			report = `  error: ${String(exception)}`;
+		} else if (faIsStackOverflow(exception)) {
+			report = "  stop: stack overflow";
+			stopped = test.file;
+		} else {
+			throw exception;
 		}
-		if (test.modifier === "skip" || (focused && test.modifier !== "only")) {
-			skipped += 1;
-			continue;
-		}
-		try {
-			init();
-			test.run();
-			passed += 1;
-			console.log(`✓ ${test.name}`);
-		} catch (exception) {
-			failed += 1;
-			let report;
-			if (exception instanceof FaStop && exception.reason.startsWith("assertion failed: ")) {
-				const condition = exception.reason.slice("assertion failed: ".length);
-				report = `  assert ${condition.replace(/\n {7}/g, "\n         ")}`;
-			} else if (exception instanceof FaStop) {
-				report = `  ${faStopMessage(exception)}`;
-				stopped = test.file;
-			} else if (faIsError(exception)) {
-				report = `  error: ${String(exception)}`;
-			} else if (faIsStackOverflow(exception)) {
-				report = "  stop: stack overflow";
-				stopped = test.file;
-			} else {
-				throw exception;
+		console.log(`✗ ${test.name} (${where})\n${report}`);
+	};
+	/**
+	 * Runs the tests from `index` on.
+	 * @param {number} index
+	 * @returns {number | Promise<number>}
+	 */
+	const step = (index) => {
+		for (; index < tests.length; index += 1) {
+			const test = tests[index];
+			const where = `${test.file}:${test.line}`;
+			if (test.file === stopped) {
+				notRun += 1;
+				console.log(`- ${test.name} (${where}): not run`);
+				continue;
 			}
-			console.log(`✗ ${test.name} (${where})\n${report}`);
+			if (test.modifier === "skip" || (focused && test.modifier !== "only")) {
+				skipped += 1;
+				continue;
+			}
+			let result;
+			try {
+				init();
+				result = test.async && runAsync !== undefined ? runAsync(test.run) : test.run();
+			} catch (exception) {
+				fail(test, where, exception);
+				continue;
+			}
+			if (result instanceof Promise) {
+				const next = index + 1;
+				return result.then(
+					() => {
+						pass(test);
+						return step(next);
+					},
+					(exception) => {
+						fail(test, where, exception);
+						return step(next);
+					},
+				);
+			}
+			pass(test);
 		}
-	}
-	const parts = [`${passed} passed`, `${failed} failed`];
-	if (skipped > 0) {
-		parts.push(`${skipped} skipped`);
-	}
-	if (notRun > 0) {
-		parts.push(`${notRun} not run`);
-	}
-	console.log(`\n${parts.join(", ")}`);
-	return failed > 0 ? 1 : 0;
+		const parts = [`${passed} passed`, `${failed} failed`];
+		if (skipped > 0) {
+			parts.push(`${skipped} skipped`);
+		}
+		if (notRun > 0) {
+			parts.push(`${notRun} not run`);
+		}
+		console.log(`\n${parts.join(", ")}`);
+		return failed > 0 ? 1 : 0;
+	};
+	return step(0);
 }

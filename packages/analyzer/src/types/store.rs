@@ -761,6 +761,7 @@ impl TypeStore {
 			effects: EffectSetId::EMPTY,
 			stored: 0,
 			ignorable: 0,
+			generics: ListId::EMPTY,
 			is_async: false,
 		}
 	}

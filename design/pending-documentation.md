@@ -23,3 +23,11 @@ Add after "With a `timeout`, …": the task of `submit` also fails with the erro
 ## `documentation/types/types-at-runtime.md`, table of `Schema` members
 
 No change: `signed: Boolean = true` of `Schema.Integer` is now what the prelude declares (built-in object types have field defaults).
+
+## `documentation/types/generics.md`, "Generic functions as values" (new, after "Explicit parameters")
+
+Generic function values (phase 2 of "Generic functions carry their list on the function value"): a function type can be generic, `type Identity = <T>(value: T) => T`, and a parameter of that type is called at several types (`(transform: <T>(value: T) => T) => "{transform(1)} {transform("a")}"`). Values: a generic lambda `<T>(value: T) => value`, a generic `function` (`describe(identity)`), `function same: Identity = <T>(value: T): T => value`; stored in fields and collections, returned. Explicit arguments: `transform<String>("a")`. Given where a function type that isn't generic is expected, the value is instantiated by it (`[1, 2].map(<T>(value: T) => value)`). A function satisfies a generic function type with as many parameters when each constraint of the type satisfies the function's: `E-GEN-1` for a narrower constraint or another number of parameters, `E-GEN-2` for a function that isn't generic. `let f = <T>(…) => …` is still `E-DECL-6`: declare it with `function`.
+
+## `documentation/types/generics.md`, `:::implementation` section (native generic function values)
+
+A generic function value is the pair of any function value: a constant table of the instances of its type that the program calls (found by the whole-program compilation), and the environment of its lambda. No box; an instance set that keeps growing (a polymorphic recursion) is an error naming its first types. JavaScript: a plain function. See `design/llvm-backend-plan.md`, "Generic function values".

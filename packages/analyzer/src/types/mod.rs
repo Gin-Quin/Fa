@@ -496,6 +496,13 @@ pub struct FnSig {
 	/// `names.map(identity)` is valid. A backend calling such a function value
 	/// passes the arguments it declares (JavaScript ignores the extra ones).
 	pub ignorable: u8,
+	/// The generic parameters of a generic function type, `<T>(value: T) => T`
+	/// (`Param` types, in order; empty for a function that isn't generic):
+	/// bound by the type, so they are not free parameters of the types
+	/// containing it. A call or a conversion to a function type that isn't
+	/// generic instantiates them (decision "Generic functions carry their
+	/// list on the function value", phase 2).
+	pub generics: ListId,
 }
 
 /// A compile-time value.

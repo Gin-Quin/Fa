@@ -105,12 +105,6 @@ use crate::symbols::{Resolution, ScopeKind};
 use crate::syntax::{self, Name, View};
 use crate::types::{Mode, Reason, TypeKind, TypeStore};
 
-/// What `AN001` names for a generic function used as a value: a lambda or a
-/// function type with its own generic list (phase 2 of the decision "Generic
-/// functions carry their list on the function value"). A generic list on the
-/// value of a `function` declaration is its own (phase 1, `syntax::lifted_generics`).
-pub(crate) const GENERIC_FUNCTION_VALUE: &str = "a generic function used as a value, like `<T>(value: T) => value` or the type `<T>(value: T) => T`,";
-
 /// The function being analyzed (design §3.5). Grows with the function work.
 #[derive(Clone, Debug)]
 pub struct FnCx {
@@ -712,9 +706,9 @@ impl Walker<'_> {
 			} => self.hoisted(n, |w| {
 				w.check_function_decl(n, name, is_async, generics, annotation, value)
 			}),
-			// a generic lambda (phase 2 of "Generic functions carry their list on the function value")
-			View::Lambda { signature, .. } if !signature.generics.is_empty() => {
-				self.unsupported_message(n, GENERIC_FUNCTION_VALUE)
+			// a generic lambda (phase 2 of "Generic functions carry their list on the function value", functions.rs)
+			View::Lambda { signature, body } if !signature.generics.is_empty() => {
+				self.check_generic_lambda(n, signature, body, expected)
 			}
 			View::Lambda { signature, body } => self.check_lambda(n, signature, body, expected),
 			View::Parameters { items } => self.check_parameters(n, items),
@@ -941,6 +935,11 @@ impl Walker<'_> {
 		if self.is_integer_sink(actual, target) {
 			return self.sink_integer(n, actual, target);
 		}
+		// a generic function declaration given where a generic function type is
+		// expected: a generic function value (generics.rs)
+		let actual = self
+			.generic_declaration_value(n, actual, target)
+			.unwrap_or(actual);
 		// a generic function given where a function type is expected (generics.rs)
 		let actual = match self.instantiate_function_value(n, actual, target) {
 			Some(instance) if self.s.types.is_recovering(instance) => return,
@@ -965,6 +964,10 @@ impl Walker<'_> {
 			Err(_) if self.nominal_mismatch(n, actual, target) => {}
 			// an `async` function where the type isn't `async` (tasks.rs)
 			Err(_) if self.async_mismatch(n, actual, target) => {}
+			// a generic function type expected (generics.rs)
+			Err(_) if let Some(diagnostic) = self.generic_function_problem(n, actual, target) => {
+				self.report_flow(diagnostic);
+			}
 			Err(_) if actual == TypeId::NONE => {
 				let message = format!(
 					"a `{}` can't be `none`: make the type optional, ex: `{}?`",

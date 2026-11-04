@@ -177,7 +177,9 @@ impl Walker<'_> {
 		let binding = self.bind_arguments(n, &syntaxes, &params, kind);
 
 		// a generic callee: its free parameters are inferred (generics.rs)
-		let free = self.free_params(callee_ty);
+		let mut free = self.free_params(callee_ty);
+		// a value of a generic function type: each call instantiates its own parameters
+		free.extend(self.own_generics(callee_ty));
 		let (inferred, mut generic_problems, synthesized) = if free.is_empty() {
 			(None, Vec::new(), Vec::new())
 		} else {
@@ -631,7 +633,7 @@ impl Walker<'_> {
 	}
 
 	/// Whether a callee is a type name: a local `type`, or a type of the prelude.
-	fn is_type_name(&mut self, callee: NodeId) -> bool {
+	pub(super) fn is_type_name(&mut self, callee: NodeId) -> bool {
 		let tree = Arc::clone(&self.tree);
 		let View::Name(name) = syntax::view(&tree, callee) else {
 			return false;

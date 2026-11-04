@@ -123,10 +123,15 @@ impl TypeStore {
 				let ret = self.substitute_in(sig.ret, bindings, cache);
 				let throws = self.substitute_in(sig.throws, bindings, cache);
 				let params = self.param_list(&params);
+				// binding its own parameters instantiates a generic function type
+				let opened = self.list_items(sig.generics).iter().any(|&generic| {
+					matches!(self.kind(generic), TypeKind::Param(param) if bindings.get(param).is_some())
+				});
 				self.function(FnSig {
 					params,
 					ret,
 					throws,
+					generics: if opened { ListId::EMPTY } else { sig.generics },
 					..sig
 				})
 			}

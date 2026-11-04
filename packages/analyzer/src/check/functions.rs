@@ -126,11 +126,67 @@ impl Walker<'_> {
 			return self.check_extern_decl(n, annotation, value);
 		}
 		let ty = match syntax::view(&tree, value) {
-			// `function f: Identity = <T>(…) => …`: a generic function value (phase 2)
-			View::Lambda { signature, .. }
+			// `function f: Identity = <T>(value: T): T => value`: a generic
+			// function whose type must satisfy the annotation (phase 2)
+			View::Lambda { signature, body }
 				if !signature.generics.is_empty() && !syntax::is_lifted_lambda(&tree, n, value) =>
 			{
-				self.unsupported_message(value, crate::check::GENERIC_FUNCTION_VALUE)
+				let declared = annotation.map(|annotation| self.check_type_expr(annotation));
+				let saved_scope = self.body.scope;
+				let (params, generics) = self.declare_lambda_generics(value, signature.generics);
+				let expected = declared
+					.and_then(|declared| self.expected_for_generic(declared, &generics))
+					.and_then(|expected| self.signature_of(expected));
+				let rigid = self.rigid_params.len();
+				self.rigid_params.extend(params.iter().copied());
+				let scope = self.body.scope;
+				let inside_loop = self.body.inside_loop || !self.body.loops.is_empty();
+				let saved = std::mem::replace(&mut self.body, BodyCx::new(scope));
+				self.body.inside_loop = inside_loop;
+				let ty = self.check_function(value, signature, body, owner, expected);
+				self.body = saved;
+				self.rigid_params.truncate(rigid);
+				self.body.scope = saved_scope;
+				for key in [n, value] {
+					if let Some(info) = self.a.functions.get_mut(&key) {
+						info.generics = params.clone();
+					}
+				}
+				let ty = self.generic_function_type(ty, &generics);
+				if let Some(declared) = declared
+					&& !self.s.types.is_recovering(declared)
+					&& !self.s.types.is_recovering(ty)
+					&& self
+						.s
+						.types
+						.assignable(ty, declared, crate::types::Mode::Read)
+						.is_err()
+				{
+					let diagnostic = match self.generic_function_problem(value, ty, declared) {
+						Some(diagnostic) => diagnostic,
+						None => {
+							let message = format!(
+								"this function, a `{}`, doesn't satisfy its type `{}`",
+								self.display(ty),
+								self.display(declared)
+							);
+							self.diagnostic(&E_TYPE_1, value, message)
+						}
+					};
+					self.report(diagnostic);
+				}
+				self.set_type(value, ty);
+				// the function is called as its type says (the parameters of a
+				// generic type are the function's, in order)
+				match declared {
+					Some(declared)
+						if !self.s.types.is_recovering(declared)
+							&& self.own_generics(declared).len() == generics.len() =>
+					{
+						declared
+					}
+					_ => ty,
+				}
 			}
 			View::Lambda { signature, body } => {
 				// `function ascending: Comparator = (a, b) => a - b`: the type is the contract
@@ -184,6 +240,89 @@ impl Walker<'_> {
 			self.a.symbols.symbol_mut(symbol).ty = ty;
 		}
 		TypeId::VOID
+	}
+
+	/// The generic parameters of a generic lambda or function, declared in a
+	/// scope of its own (the caller restores the scope), with their `Param`
+	/// types.
+	fn declare_lambda_generics(
+		&mut self,
+		lambda: NodeId,
+		generics: NodeList<'_>,
+	) -> (Vec<crate::ids::ParamId>, Vec<TypeId>) {
+		let params = self.declare_generics(lambda, "this function", generics);
+		let types = params
+			.iter()
+			.map(|&param| self.s.types.intern(TypeKind::Param(param)))
+			.collect();
+		(params, types)
+	}
+
+	/// An expected generic function type read with a generic lambda's own
+	/// parameters (`<T>(value: T) => T` for `<U>(value) => value`), so that the
+	/// lambda takes its parameter types from it. `None` when it isn't one with
+	/// as many parameters.
+	fn expected_for_generic(&mut self, expected: TypeId, own: &[TypeId]) -> Option<TypeId> {
+		let TypeKind::Function(sig) = self.s.types.kind(expected) else {
+			return None;
+		};
+		let theirs = self
+			.s
+			.types
+			.list_items(self.s.types.sig(sig).generics)
+			.to_vec();
+		if theirs.is_empty() || theirs.len() != own.len() {
+			return None;
+		}
+		let params: Vec<crate::ids::ParamId> = theirs
+			.iter()
+			.filter_map(|&ty| match self.s.types.kind(ty) {
+				TypeKind::Param(param) => Some(param),
+				_ => None,
+			})
+			.collect();
+		let mut bindings = crate::types::Bindings::new(&params);
+		bindings.types = own.to_vec();
+		Some(self.s.types.substitute(expected, &bindings))
+	}
+
+	/// The generic function type of a function whose type `ty` is written with
+	/// its own parameters `generics`.
+	pub(super) fn generic_function_type(&mut self, ty: TypeId, generics: &[TypeId]) -> TypeId {
+		let TypeKind::Function(sig) = self.s.types.kind(ty) else {
+			return ty;
+		};
+		let sig = self.s.types.sig(sig);
+		let generics = self.s.types.list(generics);
+		self.s.types.function(FnSig { generics, ..sig })
+	}
+
+	/// A generic lambda, `<T>(value: T) => value` (phase 2 of "Generic
+	/// functions carry their list on the function value"): its parameters are
+	/// rigid in its body, and its type is a generic function type. An expected
+	/// generic function type gives the types of its parameters; an expected
+	/// function type that isn't generic instantiates it (`sink`).
+	pub(super) fn check_generic_lambda(
+		&mut self,
+		n: NodeId,
+		signature: SignatureView<'_>,
+		body: NodeId,
+		expected: Option<TypeId>,
+	) -> TypeId {
+		let saved = self.body.scope;
+		let (params, generics) = self.declare_lambda_generics(n, signature.generics);
+		let expected = expected.and_then(|expected| self.expected_for_generic(expected, &generics));
+		let rigid = self.rigid_params.len();
+		self.rigid_params.extend(params.iter().copied());
+		let ty = self.check_lambda(n, signature, body, expected);
+		self.rigid_params.truncate(rigid);
+		self.body.scope = saved;
+		if let Some(info) = self.a.functions.get_mut(&n) {
+			info.generics = params;
+		}
+		let ty = self.generic_function_type(ty, &generics);
+		self.set_type(n, ty);
+		ty
 	}
 
 	/// A lambda: its parameter types, return type and effects come from the

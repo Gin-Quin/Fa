@@ -180,6 +180,25 @@ impl TypeStore {
 				if sig.is_async {
 					out.push_str("async ");
 				}
+				// a generic function type: `<T, Value: Integer | Float>(…) => …`
+				let generics = self.list_items(sig.generics);
+				if !generics.is_empty() {
+					out.push('<');
+					for (index, &generic) in generics.iter().enumerate() {
+						if index > 0 {
+							out.push_str(", ");
+						}
+						self.write_type(out, generic, false);
+						if let TypeKind::Param(param) = self.kind(generic) {
+							let constraint = self.param(param).constraint;
+							if constraint != TypeId::UNKNOWN && !constraint.is_unset() {
+								out.push_str(": ");
+								self.write_type(out, constraint, false);
+							}
+						}
+					}
+					out.push('>');
+				}
 				out.push('(');
 				for (index, param) in self.params(sig.params).iter().enumerate() {
 					if index > 0 {

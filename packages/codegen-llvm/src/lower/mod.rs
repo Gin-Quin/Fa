@@ -296,6 +296,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The map types the program may keep a reference into the values of
 	/// (`program::unsafe_maps`).
 	unsafe_maps: rustc_hash::FxHashSet<TypeId>,
+	/// The map types some `deleteWhere` iterates over while deleting: their
+	/// entries stay out of the probe array (`tables.rs`, `inline`).
+	no_inline_maps: rustc_hash::FxHashSet<TypeId>,
 	/// The relation sides of the object types of the program (`relations.rs`).
 	relation_sides: relations::RelationSides,
 	/// The targets an object literal gave to relation sides, linked by the
@@ -430,6 +433,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			virtual_code_points: FxHashMap::default(),
 			whole_program: false,
 			unsafe_maps: program::unsafe_maps(session, files),
+			no_inline_maps: program::no_inline_maps(session, files),
 			relation_sides: relations::relation_sides(
 				files.iter().map(|(file, _)| session.analysis(*file)),
 			),

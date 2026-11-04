@@ -227,7 +227,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.builder.position_at_end(fetch);
 				let next = self.builder.build_int_nsw_add(position, one, "")?;
 				self.builder.build_store(counter.pointer, next)?;
-				let live = self.entry_live(pointer, position)?;
+				let live = self.entry_live(pointer, table, position)?;
 				self.builder.build_conditional_branch(live, block, test)?;
 				self.builder.position_at_end(block);
 				let entry = self.entry_at(pointer, table, position)?;

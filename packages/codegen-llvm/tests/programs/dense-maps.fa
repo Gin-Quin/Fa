@@ -1,5 +1,6 @@
 -- Maps whose values nothing keeps a reference into store their entries in
--- one array that moves when it grows (`design/decisions.md`, "Dense maps").
+-- one array that moves when it grows (`design/decisions.md`, "Dense maps"),
+-- and small ones (`Map<Int32, UInt32>`) in their probe array itself.
 mutable squares = Map<Int32, UInt32>.from([], capacity = 4)
 for index in 0..1000 {
 	let key: Int32 = index * 7
@@ -50,3 +51,16 @@ for word in ["a", "b", "a", "c", "a"] {
 	count += 1
 }
 console.log(counts.get("a") ?? 0, counts.size) -- prints: 3 3
+
+-- deleteWhere on a small map keeps its entries out of the probe array
+mutable small = Map<Int16, Int16>.from([], capacity = 2)
+for index in 0..100 {
+	let key: Int16 = index
+	small[key] = key
+}
+small.deleteWhere((key, value) => key %% 2 == 0)
+mutable smallTotal = 0
+for (key, value) in small {
+	smallTotal += Integer(key) + Integer(value)
+}
+console.log(small.size, smallTotal) -- prints: 50 5000

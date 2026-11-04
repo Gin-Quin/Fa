@@ -38,10 +38,16 @@ pub(crate) struct Table<'ctx> {
 	/// A map whose entries are dense (one contiguous array that moves):
 	/// no reference into its values outlives an insertion ([`Lowering::dense_map`]).
 	pub dense: bool,
+	/// A dense map of small entries stored in its probe array itself
+	/// (`TABLE_INLINE` of the runtime): integer keys and fields of at most
+	/// 32 bits, and no `deleteWhere` on maps of its type.
+	pub inline: bool,
 }
 
 /// `TABLE_DENSE` of the runtime: a flag of `entry_size`.
 const TABLE_DENSE: u64 = 1 << 40;
+/// `TABLE_INLINE` of the runtime: a flag of `entry_size`.
+const TABLE_INLINE: u64 = 1 << 41;
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	// ── layouts ─────────────────────────────────────────────────────────
@@ -95,12 +101,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(value) = value {
 			fields.push(self.llvm_type(value));
 		}
+		let dense = kind == CollKind::Map && self.dense_map(ty);
+		let small = |repr: Repr| match repr {
+			Repr::Int(int) => int.bits <= 32,
+			Repr::Bool | Repr::F32 => true,
+			_ => false,
+		};
+		let inline = dense
+			&& matches!(key, Repr::Int(int) if matches!(int.bits, 8 | 16 | 32))
+			&& value.is_some_and(small)
+			&& !self.no_inline_maps.contains(&ty);
 		Ok(Table {
 			key,
 			value,
 			entry: self.context.struct_type(&fields, false),
 			growing: matches!(kind, CollKind::GrowingMap | CollKind::GrowingSet),
-			dense: kind == CollKind::Map && self.dense_map(ty),
+			dense,
+			inline,
 		})
 	}
 
@@ -108,6 +125,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// dense entries: the runtime then finds them in one array).
 	pub(crate) fn entry_size(&self, table: Table<'ctx>) -> IntValue<'ctx> {
 		let size = table.entry.size_of().expect("a sized entry");
+		if table.inline {
+			let flag = size.get_type().const_int(TABLE_INLINE, false);
+			// the size is far below the flag: xor sets it
+			return size.const_xor(flag);
+		}
 		if table.dense {
 			let flag = size.get_type().const_int(TABLE_DENSE, false);
 			// the size is far below the flag: xor sets it
@@ -500,9 +522,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<PointerValue<'ctx>, Error> {
 		let new = self.runtime.function("fa_table_new")?;
 		let pointer = self
-			.call_value(new, &[capacity.into()])?
+			.call_value(new, &[capacity.into(), self.entry_size(table).into()])?
 			.into_pointer_value();
-		if table.dense && capacity.get_zero_extended_constant() != Some(0) {
+		if table.dense && !table.inline && capacity.get_zero_extended_constant() != Some(0) {
 			// the dense entries too, up front
 			let hash_at = self.hash_at_function(table.key)?;
 			self.call_runtime(
@@ -566,12 +588,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn entry_live(
 		&self,
 		pointer: PointerValue<'ctx>,
+		table: Table<'ctx>,
 		position: IntValue<'ctx>,
 	) -> Result<IntValue<'ctx>, Error> {
 		let live = self
 			.call_value(
 				self.runtime.function("fa_table_live")?,
-				&[pointer.into(), position.into()],
+				&[
+					pointer.into(),
+					position.into(),
+					self.entry_size(table).into(),
+				],
 			)?
 			.into_int_value();
 		Ok(self.builder.build_int_compare(
@@ -844,12 +871,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		match hash {
 			Some(hash) => self.builder.build_call(
 				self.runtime.function("fa_table_kill")?,
-				&[pointer.into(), hash.into(), position.into()],
+				&[
+					pointer.into(),
+					hash.into(),
+					position.into(),
+					self.entry_size(table).into(),
+				],
 				"",
 			)?,
 			None => self.builder.build_call(
 				self.runtime.function("fa_table_release")?,
-				&[pointer.into(), position.into()],
+				&[
+					pointer.into(),
+					position.into(),
+					self.entry_size(table).into(),
+				],
 				"",
 			)?,
 		};
@@ -881,7 +917,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_int_compare(IntPredicate::SLT, position, used, "")?;
 		self.builder.build_conditional_branch(more, check, end)?;
 		self.builder.position_at_end(check);
-		let live = self.entry_live(pointer, position)?;
+		let live = self.entry_live(pointer, table, position)?;
 		self.builder.build_conditional_branch(live, block, step)?;
 		self.builder.position_at_end(block);
 		let entry = self.entry_at(pointer, table, position)?;
@@ -1258,7 +1294,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_int_compare(IntPredicate::SLT, position, used, "")?;
 		self.builder.build_conditional_branch(more, check, exit)?;
 		self.builder.position_at_end(check);
-		let live = self.entry_live(pointer, position)?;
+		let live = self.entry_live(pointer, table, position)?;
 		self.builder.build_conditional_branch(live, block, next)?;
 		self.builder.position_at_end(block);
 		let entry = self.entry_at(pointer, table, position)?;
@@ -1541,7 +1577,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						Ok(())
 					})?;
 				}
-				self.call_runtime("fa_table_clear", &[pointer.into()])?;
+				self.call_runtime(
+					"fa_table_clear",
+					&[pointer.into(), self.entry_size(table).into()],
+				)?;
 				Ok(Val::void())
 			}
 			("deleteWhere", [callback]) => {
@@ -2027,7 +2066,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let live = builder
 			.build_call(
 				self.runtime.function("fa_table_live")?,
-				&[pointer.into(), current.into()],
+				&[
+					pointer.into(),
+					current.into(),
+					self.entry_size(table).into(),
+				],
 				"",
 			)?
 			.try_as_basic_value()

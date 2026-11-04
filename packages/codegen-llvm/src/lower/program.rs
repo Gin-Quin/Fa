@@ -686,3 +686,38 @@ pub(crate) fn unsafe_maps(
 	}
 	unsafe_maps
 }
+
+/// The map types whose entries a `deleteWhere` deletes while it iterates
+/// over them: their entries stay in an array (deleting from the probe array
+/// shifts entries a running iteration still has to visit).
+pub(crate) fn no_inline_maps(
+	session: &Session,
+	files: &[(FileId, String)],
+) -> rustc_hash::FxHashSet<TypeId> {
+	use fa_analyzer::analysis::Callee;
+	use fa_analyzer::syntax::view;
+	let mut maps = rustc_hash::FxHashSet::default();
+	for (file, _) in files {
+		let tree = session.tree(*file);
+		let analysis = session.analysis(*file);
+		for index in 0..tree.nodes.len() {
+			let node = NodeId::new(index);
+			let View::Call { callee, .. } = view(tree, node) else {
+				continue;
+			};
+			let Some(Callee::Builtin(id)) = analysis.call(node).map(|info| info.callee) else {
+				continue;
+			};
+			if !fa_analyzer::builtins::get(id)
+				.path
+				.ends_with("#deleteWhere")
+			{
+				continue;
+			}
+			if let View::Access { target, .. } = view(tree, callee) {
+				maps.insert(analysis.type_of(target));
+			}
+		}
+	}
+	maps
+}

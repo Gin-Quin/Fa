@@ -487,10 +487,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			allocator.position_at_end(entry);
 		}
 		let snapshot = allocator.build_alloca(self.string_type, "inline_string")?;
+		// only an inline string is stored (a view or a heap string, like the
+		// parts of a split, needs no snapshot)
+		let before = builder.get_insert_block().expect("a block");
+		let store = self.context.append_basic_block(function, "inline_snapshot");
+		let join = self.context.append_basic_block(function, "string_bytes");
+		builder.build_conditional_branch(inline, store, join)?;
+		builder.position_at_end(store);
 		builder.build_store(snapshot, pair)?;
-		let bytes = builder
-			.build_select(inline, snapshot, bytes, "")?
-			.into_pointer_value();
+		builder.build_unconditional_branch(join)?;
+		builder.position_at_end(join);
+		let phi = builder.build_phi(self.pointer_type(), "bytes")?;
+		phi.add_incoming(&[(&snapshot, store), (&bytes, before)]);
+		let bytes = phi.as_basic_value().into_pointer_value();
 		let shifted = builder.build_right_shift(
 			capacity,
 			self.usize

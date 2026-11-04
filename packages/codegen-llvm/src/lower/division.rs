@@ -117,7 +117,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			&& let Some(&(safe, m)) = self.reciprocals.get(&(symbol, self.frame().function))
 			&& safe.get_type() == d.get_type()
 		{
-			return Ok((safe, m));
+			// the divisor actually used: `x %% -1` divides by 1 instead
+			// (`arith.rs`), which the `d == 1` case of the quotient handles
+			// whatever m is; otherwise it is the declared value
+			let i64 = self.context.i64_type();
+			let zero = self
+				.builder
+				.build_int_compare(IntPredicate::EQ, d, i64.const_zero(), "")?;
+			let actual = self
+				.builder
+				.build_select(zero, i64.const_int(1, false), d, "")?
+				.into_int_value();
+			return Ok((actual, m));
 		}
 		self.reciprocal(d)
 	}

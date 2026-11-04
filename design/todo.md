@@ -10,6 +10,8 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Bugs
 
+- Analyzer: a typed literal doesn't see the field defaults of a type declared in another file (`Counter { name = "a" }` of an imported type with defaults gives E-OBJ-2); `WorkerPool.submit` always throws `WorkerTimeout` even without a `timeout`, and a submitted task can't throw its own errors yet.
+- Native: `capacity`, `reserve` and `String.from(text, capacity = n)` not lowered yet (`collections/capacity.fa` skips native/wasm) — *assigned to the strings/copies engineer*.
 - Async follow-ups (after J1/W1): async lambdas and awaits through function values are blocking calls (native and JS); `fa test` runs tests in blocking mode; detached tasks don't copy their arguments on JavaScript; `.d.ts` files don't declare the two instances of an async function; J2 (workers on JavaScript) not done.
 - Async: the loop back-edge yield doesn't apply to the top level of a file or to tests (it broke narrowing of top-level loops): a long top-level loop never yields. Revisit when the native executor lands.
 - `Schema.Integer.signed` is `Boolean?` in the prelude (built-in types can't have defaults) while the docs say `Boolean = true`: the docs win; built-in object types must support field defaults (lead's decision).

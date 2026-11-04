@@ -699,10 +699,17 @@ impl Walker<'_> {
 			arguments,
 		}) = self.a.calls.get(&n).cloned()
 		{
+			// (the receiver of a method, `worker.squares(…)`, is not given)
+			let receiver = match self.view(self.strip_groups(callee)) {
+				View::Access { target, .. } => Some(self.strip_groups(target)),
+				_ => None,
+			};
 			let given: Vec<NodeId> = arguments
 				.iter()
 				.filter_map(|argument| match argument {
-					Argument::Given(value) => Some(*value),
+					Argument::Given(value) if Some(self.strip_groups(*value)) != receiver => {
+						Some(*value)
+					}
 					_ => None,
 				})
 				.collect();

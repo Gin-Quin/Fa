@@ -805,7 +805,7 @@ impl Walker<'_> {
 		for &value in values {
 			let value = self.strip_groups(value);
 			if self.is_moved_handle(self.a.type_of(value)) {
-				self.note_resource_move(value);
+				self.consume_local(value, true);
 			}
 		}
 	}
@@ -813,6 +813,14 @@ impl Walker<'_> {
 	/// A copy of a local holding a resource (a type with `destroy`) moves
 	/// it: a later use is `MEM002`.
 	pub(crate) fn note_resource_move(&mut self, value: NodeId) {
+		// a worker's handle is shared by a copy (a `start` of its method):
+		// it moves where `move_handles` says
+		self.consume_local(value, false);
+	}
+
+	/// Consumes the local read at `value` when it holds a resource or a
+	/// task (or a worker's handle, with `handles`).
+	fn consume_local(&mut self, value: NodeId, handles: bool) {
 		let value = self.strip_groups(value);
 		if !matches!(self.view(value), View::Name(_)) {
 			return;
@@ -821,7 +829,8 @@ impl Walker<'_> {
 			return;
 		};
 		let ty = self.a.type_of(value);
-		let task = self.is_moved_handle(ty);
+		let task = matches!(self.s.types.kind(ty), crate::types::TypeKind::Task(..))
+			|| handles && self.is_moved_handle(ty);
 		// a task parameter is owned by its function (moved in): it moves on
 		let kind = self.a.symbols.symbol(symbol).kind;
 		if !matches!(kind, SymbolKind::Let | SymbolKind::Mutable)

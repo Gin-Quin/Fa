@@ -1,0 +1,32 @@
+-- An asynchronous package compiled per unit (design/parallel-pipeline.md
+-- §3.3): async functions of another unit awaited and started, a module value.
+-- file: library/greet.fa
+use { sleep } = std.time
+let greeting = "hello"
+export async function = (name: String, delay: Integer): String => {
+	await sleep(delay)
+	"{greeting} {name}"
+}
+-- file: library/count.fa
+export async function = (items: Array(String)): Integer => {
+	mutable total = 0
+	for item in items {
+		total += (await greet(item, 1)).length
+	}
+	total
+}
+-- file: application/main.fa
+export async function = (arguments: Array(String)): Integer => {
+	let slow = start library.greet("slow", 20)
+	let fast = start library.greet("fast", 5)
+	console.log(await library.greet("awaited", 1))
+	console.log(await fast)
+	console.log(await slow)
+	console.log(await library.count(["a", "bb"]))
+	3
+}
+-- prints: hello awaited
+-- prints: hello fast
+-- prints: hello slow
+-- prints: 15
+-- exit: 3

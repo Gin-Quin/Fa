@@ -282,13 +282,48 @@ impl Report {
 
 	/// A session of modules of the run analyzed again, alone, against the
 	/// published interfaces (deterministic, like `Session::rehydrate`): the
-	/// LLVM backend lowers the instances of their generic functions other
-	/// units request (design/parallel-pipeline.md §3.3, "instance waves").
-	/// `root`: the session of the run. The files of the modules found, in
-	/// the order given.
+	/// LLVM backend lowers the units the entry reaches, and the instances of
+	/// generic functions other units request (design/parallel-pipeline.md
+	/// §3.3). `root`: the session of the run. The files of the modules
+	/// found, in the order given.
 	pub fn reanalyze(&self, root: &mut Session, modules: &[&str]) -> (Session, Vec<FileId>) {
+		self.reanalyzer(root).analyze(modules)
+	}
+
+	/// What analyzes modules of the run again, from any thread
+	/// ([`Report::reanalyze`]).
+	pub fn reanalyzer<'r>(&'r self, root: &'r mut Session) -> Reanalyzer<'r> {
 		let prelude = root.global_prelude();
-		let mut session = root.unit_session(Arc::clone(&self.shared), prelude);
+		Reanalyzer {
+			report: self,
+			root,
+			prelude,
+		}
+	}
+
+	/// The report of a module.
+	pub fn module(&self, module: &str) -> Option<&ModuleReport> {
+		self.modules
+			.binary_search_by(|report| report.module.as_str().cmp(module))
+			.ok()
+			.map(|index| &self.modules[index])
+	}
+}
+
+/// Analyzes modules of a run again against its published interfaces
+/// ([`Report::reanalyzer`]); shared by threads.
+pub struct Reanalyzer<'r> {
+	report: &'r Report,
+	root: &'r Session,
+	prelude: Vec<Option<TypeId>>,
+}
+
+impl Reanalyzer<'_> {
+	/// A session of these modules analyzed again, and their files (in the
+	/// order given, the modules found).
+	pub fn analyze(&self, modules: &[&str]) -> (Session, Vec<FileId>) {
+		let root = self.root;
+		let mut session = root.unit_session(Arc::clone(&self.report.shared), self.prelude.clone());
 		let mut files = Vec::with_capacity(modules.len());
 		if let Some(resolver) = root.resolver_arc() {
 			for &path in modules {
@@ -304,14 +339,6 @@ impl Report {
 		session.types.set_visible(Some(visible));
 		session.settle_unit(&files);
 		(session, files)
-	}
-
-	/// The report of a module.
-	pub fn module(&self, module: &str) -> Option<&ModuleReport> {
-		self.modules
-			.binary_search_by(|report| report.module.as_str().cmp(module))
-			.ok()
-			.map(|index| &self.modules[index])
 	}
 }
 

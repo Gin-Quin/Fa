@@ -79,7 +79,7 @@ use crate::target::Target;
 use values::{IntRepr, Repr, Val};
 
 /// LLVM's number for the `fastcc` calling convention.
-const FAST_CALLING_CONVENTION: u32 = 8;
+pub(crate) const FAST_CALLING_CONVENTION: u32 = 8;
 
 /// A lowered function declaration.
 #[derive(Clone)]

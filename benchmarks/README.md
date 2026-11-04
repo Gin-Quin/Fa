@@ -515,3 +515,20 @@ Measured on 2026-11-04 with `/usr/bin/time -v` under `ulimit -v 8000000`, releas
 - **Size** of a 100-file program (the generated package, its entry reading `arguments` so that the program isn't folded at compile time): one module 1.13 MB, ThinLTO 592 KB, `FA_LTO=full` 447 KB. ThinLTO's default import limit (100 instructions) imported the runtime's allocator slow paths into every unit, where they were inlined: 1.32 MB; the link imports functions up to 40 instructions (`IMPORT_LIMIT` in `link.rs`).
 - **The benchmarks** are single files, compiled as one module as before: their native and wasm executables are byte-identical to `395f54c`'s.
 - **Determinism**: the objects of the 100-file package (`fa run`, 1 and 6 threads, two seeds) and its executable and `.wasm` module (`fa build`) are byte-identical.
+
+### After the follow-ups of step 6 (what the entry reaches, asynchronous packages)
+
+Measured on 2026-11-04 like the section above (the machine busier: load average 9 to 23), against `eff9d33` (step 6 merged). Units are compiled once the analysis is over, only for what the entry reaches (the call graph of the interfaces), each analyzed again.
+
+| What | Before (`eff9d33`) | After |
+| --- | --- | --- |
+| 1,000 files, `fa build --target=native` | 4 min 7 s, 534 s CPU, 319 MB | 1 min 27 s, 197 s CPU, 208 MB |
+| 1,000 files, `fa run --target=native`, empty cache | 14 min 15 s, 1,453 s CPU, 229 MB | 1 min 36 s, 185 s CPU, 231 MB |
+| 1,000 files, `fa run --target=native`, cached objects | | 8.1 s, 13 s CPU, 203 MB |
+| 100 files, `fa build` | | 10.1 s, 19 s CPU, 111 MB |
+| 100 files (entry reading `arguments`): ThinLTO / `FA_LTO=full` | 592 KB / 447 KB | 579 KB / 437 KB |
+
+- A cold `fa run` now costs about what `fa build` costs: neither compiles what the entry doesn't reach (99% of the generated package).
+- The size gap with full LTO stays at 32%: it isn't dead code (ThinLTO already dropped it) but what full LTO does across modules, inlining the functions called once and folding through them; importing the units' functions into their callers (`FA_IMPORT_LIMIT` up to 3,000) doesn't close it. The runtime's functions above 40 instructions are no longer imported (`noinline`), so the units import its small ones at the default limit's price.
+- Asynchronous packages, generic functions of another unit called from inside an instance and module values owning a resource are compiled per unit; no package of the end-to-end corpus falls back to one module.
+- The benchmarks' native and wasm executables are byte-identical to `eff9d33`'s; the objects (`fa run`) and executables (`fa build`) of the 100-file package are byte-identical with 1 and 6 threads.

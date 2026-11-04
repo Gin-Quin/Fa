@@ -876,6 +876,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 		}
+		// a part whose function builds its result in the destination
+		// (`destination.rs`): the parts are appended one after the other
+		if independent
+			&& parts.iter().any(|part| {
+				matches!(part, TemplatePart::Expression(node)
+					if self.destination_call(node, place).is_some())
+			}) {
+			for part in parts.iter() {
+				let appended = match part {
+					TemplatePart::Text("") => continue,
+					TemplatePart::Text(text) => {
+						let text = self.string_constant(text);
+						self.append_string(target, text)?;
+						continue;
+					}
+					TemplatePart::Expression(node) => self.append_part(target, place, node)?,
+				};
+				if appended.repr == Repr::Never {
+					return Ok(appended);
+				}
+			}
+			return Ok(Val::void());
+		}
 		if independent {
 			let mut values = Vec::new();
 			for part in parts.iter() {
@@ -951,7 +974,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Whether an expression reads the local a place is rooted at, or a
 	/// reference (which may designate it): a template reading its
 	/// destination is built aside.
-	fn reads_root_of(&self, node: NodeId, place: NodeId) -> bool {
+	pub(crate) fn reads_root_of(&self, node: NodeId, place: NodeId) -> bool {
 		use fa_analyzer::symbols::SymbolKind;
 		use fa_analyzer::syntax::View;
 		let mut root = place;

@@ -1,0 +1,55 @@
+-- A function building its result in an accumulator, appended to a string,
+-- builds it in that string (`src/lower/destination.rs`).
+function quoted = (text: String): String => {
+	mutable result = "\""
+	for character in text {
+		if character == "\"" or character == "\\" {
+			result += "\\"
+		}
+		result += character
+	}
+	result + "\""
+}
+
+function listed = (items: Array(String), separator: String): String => {
+	mutable result = "["
+	for item, index in items {
+		if index > 0 {
+			result += separator
+		}
+		result += quoted(item)
+	}
+	result + "]" + separator
+}
+
+function repeated = (word: String, count: Integer): String => {
+	mutable result = ""
+	for 0..count {
+		result += word
+	}
+	result
+}
+
+mutable out = "{{"
+out += "\"name\":{quoted("say \"hi\"")},"
+out += "\"list\":{listed(["a", "b\\c", "héllo"], ",")}"
+out += repeated("ab", 3)
+out += quoted(out)
+out += "}}"
+console.log(out) -- prints: {"name":"say \"hi\"","list":["a","b\\c","héllo"],ababab"{\"name\":\"say \\\"hi\\\"\",\"list\":[\"a\",\"b\\\\c\",\"héllo\"],ababab"}
+
+-- the destination read by an argument: built aside
+mutable echo = "x"
+echo += "<{repeated(echo, 2)}>"
+console.log(echo) -- prints: x<xx>
+
+-- the results are values too
+let kept = quoted("value")
+console.log(kept, kept.length) -- prints: "value" 7
+mutable lines: Array(String) = []
+for index in 0..3 {
+	mutable line = "#{index}:"
+	line += repeated("-", index)
+	lines.push(line)
+}
+console.log(lines.join(" ")) -- prints: #0: #1:- #2:--

@@ -1892,6 +1892,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let growing = matches!(array.repr, Repr::Growing(_));
 		let item = self.item_repr(item_type, node)?;
+		if growing {
+			self.iterating_views = false;
+		}
 		let array = array.value.expect("an array").into_pointer_value();
 		if !growing {
 			self.materialize_array(array, item)?;
@@ -1962,6 +1965,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			pointer,
 			repr: item,
 		};
+		if std::mem::take(&mut self.iterating_views) && item == Repr::Str {
+			// a view of a split text: never inline, so that reading its bytes
+			// tests nothing (`views.rs`)
+			let capacity_pointer =
+				self.builder
+					.build_struct_gep(self.string_type, pointer, 2, "")?;
+			let capacity = self
+				.builder
+				.build_load(self.usize, capacity_pointer, "")?
+				.into_int_value();
+			let flag = self
+				.builder
+				.build_and(capacity, self.string_inline_flag(), "")?;
+			let external = self.builder.build_int_compare(
+				IntPredicate::EQ,
+				flag,
+				self.usize.const_zero(),
+				"",
+			)?;
+			let assume = inkwell::intrinsics::Intrinsic::find("llvm.assume")
+				.and_then(|intrinsic| intrinsic.get_declaration(self.module, &[]))
+				.expect("llvm.assume");
+			self.builder.build_call(assume, &[external.into()], "")?;
+		}
 		let destructured = pattern.and_then(|pattern| self.analysis.pattern(pattern).cloned());
 		match (variable, copy_slot) {
 			_ if destructured.is_some() => {

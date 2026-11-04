@@ -1931,13 +1931,13 @@ FA_EXPORT void *fa_string_split(const uint8_t *text, size_t length, size_t capac
 	return split_text(text, length, capacity, separator, separator_length, 0);
 }
 
-/// `text.split(separator)` whose parts may be views of the text's bytes
-/// (`split_views` in `src/lower/views.rs`): the bytes of an inline text are
-/// the value itself, maybe a temporary copy, so its parts are copies.
+/// `text.split(separator)` whose parts are views of the text's bytes
+/// (`src/lower/views.rs`): `text` points to bytes that outlive the parts
+/// unchanged (for an inline text, its snapshot in the caller's frame). An
+/// empty separator still gives characters.
 FA_EXPORT void *fa_string_split_views(const uint8_t *text, size_t length, size_t capacity,
                                       const uint8_t *separator, size_t separator_length) {
-	return split_text(text, length, capacity, separator, separator_length,
-	                  !(capacity & STRING_INLINE));
+	return split_text(text, length, capacity, separator, separator_length, 1);
 }
 
 /// `text.codePoints()`: an `Array(UInt32)`.

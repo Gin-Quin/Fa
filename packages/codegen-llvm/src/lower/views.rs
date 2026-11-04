@@ -23,10 +23,14 @@
 //!   test or watcher than the one declaring `source` (those may run at any
 //!   time).
 //!
-//! The runtime still copies the parts of an inline source (its bytes are the
-//! value, maybe a temporary copy of it): `fa_string_split_views`.
+//! The parts of an inline source are views of the snapshot that
+//! `string_parts` stores in the frame of the function (the source's own
+//! place would have to escape, and stay in memory): the frame outlives the
+//! holder, which this call alone initializes. A loop over the
+//! parts of a split by a non-empty literal knows that they are never inline
+//! ([`Lowering::holds_only_views`], `for_items`): its reads take no test.
 
-use fa_analyzer::analysis::{Callee, NodeFlags};
+use fa_analyzer::analysis::{Argument, Callee, NodeFlags};
 use fa_analyzer::ids::{NodeId, SymbolId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{BindingKind, View};
@@ -71,6 +75,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.split_views().values().any(|&holder| holder == symbol)
 	}
 
+	/// Whether every item of a local is a view (never an inline string): it
+	/// holds the parts of a split by a non-empty literal (an empty one gives
+	/// characters, which may be inline).
+	pub(crate) fn holds_only_views(&self, symbol: SymbolId) -> bool {
+		self.split_views().iter().any(|(&call, &holder)| {
+			holder == symbol
+				&& self.analysis.call(call).is_some_and(|info| {
+					info.arguments.iter().any(|argument| {
+						matches!(argument, Argument::Given(separator)
+							if matches!(self.view(*separator), View::String(text) if !text.is_empty()))
+					})
+				})
+		})
+	}
+
 	/// The `let` holding the parts of this call, when they can be views.
 	fn split_view_holder(&self, call: NodeId) -> Option<SymbolId> {
 		if self.builtin_path(call) != Some("String#split") {
@@ -98,6 +117,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let source_data = self.analysis.symbols.symbol(source);
 		if !matches!(source_data.kind, SymbolKind::Let | SymbolKind::Mutable)
 			|| self.referenced_locals().contains(&source)
+			|| self.shared.contains_key(&source)
 		{
 			return None;
 		}
@@ -164,6 +184,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				at = parent;
 			}
 		};
+		// the bytes of an inline text are read from a snapshot in the frame of
+		// the function lowering the split: a module file's top level runs in
+		// an initializer whose frame ends before its values do
+		if self.module_file && matches!(self.view(NodeId::new(block)), View::Module { .. }) {
+			return None;
+		}
 		let region = self.tree.spans[declaration.index()].end..self.tree.spans[block].end;
 		// the source is declared around the holder's block (its scope encloses it)
 		let declared = self.tree.spans[source_data.decl_node.index()];

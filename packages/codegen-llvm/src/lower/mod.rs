@@ -29,6 +29,7 @@ mod chunks;
 mod closures;
 mod columns;
 mod constants;
+mod destination;
 mod division;
 mod foreign;
 mod growing;
@@ -200,6 +201,12 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The `push` calls of a counted loop whose array reserved room for
 	/// every round first (`arrays.rs`, `reserve_for_pushes`): no capacity check.
 	reserved_pushes: FxHashMap<NodeId, ()>,
+	/// The `for` being lowered iterates over parts that are all views
+	/// (`views.rs`): its items are never inline strings.
+	iterating_views: bool,
+	/// The functions whose bodies are being expanded into the function being
+	/// lowered (`destination.rs`): their locals are its own.
+	expanded_functions: Vec<NodeId>,
 	/// The `text += character` of a counted loop with room reserved before
 	/// it (`appends.rs`): the loop's counter slot, its end and whether it is
 	/// inclusive, to keep the room for the rounds left after a longer append.
@@ -377,6 +384,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			shared: FxHashMap::default(),
 			nullable_references: FxHashMap::default(),
 			reserved_pushes: FxHashMap::default(),
+			iterating_views: false,
+			expanded_functions: Vec::new(),
 			reserved_appends: FxHashMap::default(),
 			frame: None,
 			constants: FxHashMap::default(),
@@ -1748,7 +1757,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			};
 			self.global_slots.insert(symbol, slot);
 			return Ok(slot);
-		} else if owner == self.frame().owner {
+		} else if owner == self.frame().owner
+			|| owner.is_some_and(|owner| self.expanded_functions.contains(&owner))
+		{
+			// a local of this function, or of a function whose body is
+			// expanded into it (`destination.rs`)
 			self.alloca(repr, "local")?
 		} else {
 			return Err(self.unsupported(
@@ -2521,6 +2534,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return match value.repr {
 				Repr::Str => self.for_characters(node, pattern, has_index, value, body),
 				Repr::Array(_) | Repr::Growing(_) => {
+					let mut source = iterable;
+					while let View::Group(inner) = self.view(source) {
+						source = inner;
+					}
+					self.iterating_views = matches!(self.view(source), View::Name(_))
+						&& matches!(self.analysis.resolution(source),
+							Resolution::Local(symbol) if self.holds_only_views(symbol));
 					self.for_items(node, pattern, has_index, value, body)
 				}
 				Repr::Map(_) | Repr::Set(_) => self.for_entries(node, pattern, value, body),

@@ -262,6 +262,14 @@ pub fn ordering(types: &mut TypeStore) -> TypeId {
 	sync(types, SyncKind::Ordering, TypeId::NONE)
 }
 
+/// Whether workers and worker pools exist on a target (`CONC010`
+/// elsewhere): threads of `native`, `worker_threads` on Bun and Node, Web
+/// Workers on the web (step J2, `design/decisions.md`). Their calls can be
+/// blocking only on `native`; the JavaScript targets await them.
+pub fn has_workers(target: &str) -> bool {
+	matches!(target, "native" | "bun" | "node" | "web")
+}
+
 /// Whether a built-in method waits (`lock`, `send`, `receive`): it can only
 /// be called blocking on `native` (D31, `CONC010` elsewhere).
 pub fn waits(path: &str) -> bool {

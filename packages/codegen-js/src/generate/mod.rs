@@ -35,6 +35,7 @@ mod system;
 pub(crate) mod tasks;
 mod typed_arrays;
 mod when;
+mod workers;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 

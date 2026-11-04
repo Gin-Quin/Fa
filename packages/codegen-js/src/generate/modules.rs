@@ -136,7 +136,7 @@ impl Generator<'_> {
 	}
 
 	/// The external declaration a resolution designates.
-	fn external(&self, resolution: Resolution) -> Option<External> {
+	pub(crate) fn external(&self, resolution: Resolution) -> Option<External> {
 		self.program?;
 		let (module, decl) = self.session.external_node(resolution)?;
 		// read from the other module's interface (one shared lookup, §4 #13)

@@ -188,9 +188,9 @@ impl Walker<'_> {
 			if kind == SyncKind::WorkerPool {
 				w.a.reads_target = true;
 				let target_name = w.s.target().to_string();
-				if target_name != "native" && w.reported_once.insert((n, CONC010.id)) {
+				if !builtins::concurrency::has_workers(&target_name) && w.reported_once.insert((n, CONC010.id)) {
 					let message = format!(
-						"a worker pool can't be used on target `{target_name}` yet: its workers run on threads of `native` (workers on JavaScript and WebAssembly come with `async`)"
+						"a worker pool can't be used on target `{target_name}` yet: its workers are threads of `native`, or workers of Bun, Node and the web"
 					);
 					let diagnostic = w.diagnostic(&CONC010, n, message);
 					w.report(diagnostic);
@@ -772,9 +772,11 @@ impl Walker<'_> {
 		}
 		self.a.reads_target = true;
 		let target_name = self.s.target().to_string();
-		if target_name != "native" && self.reported_once.insert((n, CONC010.id)) {
+		if !builtins::concurrency::has_workers(&target_name)
+			&& self.reported_once.insert((n, CONC010.id))
+		{
 			let message = format!(
-				"a worker can't be used on target `{target_name}` yet: its calls wait for the worker, which only threads of `native` can do (workers on JavaScript and WebAssembly come with `async`)"
+				"a worker can't be used on target `{target_name}` yet: its thread is a thread of `native`, or a worker of Bun, Node and the web"
 			);
 			let diagnostic = self.diagnostic(&CONC010, n, message);
 			self.report(diagnostic);

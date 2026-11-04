@@ -77,8 +77,23 @@ impl Generator<'_> {
 		};
 		// `AtomicInteger { value = 0 }`, `Mutex(T) { … }`, `Channel(T) { … }`
 		if let TypeKind::Sync(kind, _) = self.types.kind(info.ty) {
+			// a worker pool (workers.rs)
+			if kind == fa_analyzer::types::SyncKind::WorkerPool {
+				return self.pool_literal(n, &info);
+			}
 			return self.sync_literal(kind, &info);
 		}
+		// `MathWorker { … }`: a worker made from the state built (workers.rs)
+		if self.is_worker(n) {
+			let state = self.object_value(&info);
+			return self.worker_literal(state);
+		}
+		self.object_value(&info)
+	}
+
+	/// An object literal of an object type: the fields in declaration order.
+	fn object_value(&mut self, info: &fa_analyzer::analysis::ObjectInfo) -> Expr {
+		let info = info.clone();
 		let spreads = info
 			.fields
 			.iter()

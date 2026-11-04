@@ -735,6 +735,14 @@ impl Walker<'_> {
 				block(acc, TargetSet::NATIVE, || {
 					primitive_chain("a worker call", TargetSet::NATIVE)
 				});
+				// workers of JavaScript are awaited (J2): a blocking call
+				// needs a thread of `native`
+				if mode == Mode::Blocking
+					&& !TargetSet::NATIVE.contains(current)
+					&& builtins::concurrency::has_workers(self.s.target())
+				{
+					self.report_blocking_primitive(n, callee, "worker");
+				}
 			}
 			Target::Local(key, name) => {
 				self.acc().deps.push((key, mode, name.clone()));
@@ -869,7 +877,11 @@ impl Walker<'_> {
 			"receive" => "`await`, `tryReceive()`",
 			_ => "`await`",
 		};
-		let message = if name == "WorkerPool.submit" {
+		let message = if name == "worker" {
+			format!(
+				"a worker's method can't be called blocking on target `{target}`: its call waits for the worker's thread, which only threads of `native` can do; use `await` or `start`"
+			)
+		} else if name == "WorkerPool.submit" {
 			format!(
 				"`submit` can't be called blocking on target `{target}`: it waits while the pool's queue is full (`maxQueueSize`); await it, `await pool.submit(…)`, which gives the task of the work"
 			)

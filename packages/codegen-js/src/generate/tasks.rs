@@ -1102,11 +1102,23 @@ impl Generator<'_> {
 		if !matches!(self.types.kind(ty), TypeKind::Task(..)) {
 			return false;
 		}
+		// a task given to a call is moved (`kept.push(task)`), even in one
+		// branch only: a task is move-only, so the call keeps it
+		let arguments: HashSet<NodeId> = self
+			.analysis
+			.calls
+			.values()
+			.flat_map(|info| info.arguments.iter())
+			.filter_map(|argument| match argument {
+				Argument::Given(value) => Some(self.strip_groups(*value)),
+				_ => None,
+			})
+			.collect();
 		!(0..self.tree.nodes.len()).any(|index| {
 			let node = NodeId::new(index);
 			matches!(self.view(node), View::Name(_))
 				&& self.analysis.resolution(node) == Resolution::Local(symbol)
-				&& self.is_move(node)
+				&& (self.is_move(node) || arguments.contains(&node))
 				&& !self.is_awaited(node)
 		})
 	}

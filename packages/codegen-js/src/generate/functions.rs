@@ -357,6 +357,10 @@ impl Generator<'_> {
 		if self.analysis.extern_calls.contains_key(&n) {
 			return self.foreign_call(n, callee, &info.arguments);
 		}
+		// a method of a worker: a message to its thread (workers.rs)
+		if let Some(call) = self.worker_call(n, callee, &info, arguments) {
+			return call;
+		}
 		match info.callee {
 			Callee::Conversion(target) => match info.arguments.first() {
 				Some(Argument::Given(value)) => self.conversion(n, target, *value),
@@ -538,7 +542,7 @@ impl Generator<'_> {
 	/// are written, after `first` (the callee or the receiver). `omitted`
 	/// says, per argument, whether an omitted one is passed as `faOmitted`
 	/// (otherwise `undefined`) when a later one is given.
-	fn arguments(
+	pub(crate) fn arguments(
 		&mut self,
 		call: NodeId,
 		first: Expr,
@@ -687,6 +691,10 @@ impl Generator<'_> {
 		}
 		// the sockets of `std.net` (system.rs)
 		if let Some(call) = self.net_call(n, callee, path) {
+			return call;
+		}
+		// workers and worker pools (workers.rs)
+		if let Some(call) = self.worker_builtin(n, callee, path, arguments) {
 			return call;
 		}
 		match path {

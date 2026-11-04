@@ -27,8 +27,8 @@ async function main = () => {
 	}
 	let task: Task(Integer) throws WorkerTimeout = await scalers.submit((worker) => await worker.scale(2))
 	console.log(await task catch error => 0)
-	-- `submit` waits while the queue is full: it is awaited
-	let unawaited = scalers.submit((worker) => await worker.scale(3)) -- error: CONC010
+	-- `submit` waits while the queue is full: awaited, or blocking (natively)
+	let blocking = scalers.submit((worker) => await worker.scale(3))
 	scalers.shutdown()
 	mutable counters = WorkerPool(Counter) { count = 2 } -- `Counter {}` for each worker
 	counters.shutdown()

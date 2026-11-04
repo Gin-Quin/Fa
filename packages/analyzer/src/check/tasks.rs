@@ -155,8 +155,9 @@ fn primitive(path: &str) -> Option<(&'static str, TargetSet)> {
 		"TcpStream.connect" => ("TcpStream.connect", TargetSet::NATIVE),
 		"TcpStream#read" => ("TcpStream.read", TargetSet::NATIVE),
 		"TcpStream#write" => ("TcpStream.write", TargetSet::NATIVE),
-		// it waits while the pool's queue is full (`maxQueueSize`): awaited only
-		"WorkerPool#submit" => ("WorkerPool.submit", TargetSet::empty()),
+		// it waits while the pool's queue is full (`maxQueueSize`): blocking
+		// natively (the pools exist only there)
+		"WorkerPool#submit" => ("WorkerPool.submit", TargetSet::NATIVE),
 		_ => return None,
 	})
 }
@@ -869,7 +870,9 @@ impl Walker<'_> {
 			_ => "`await`",
 		};
 		let message = if name == "WorkerPool.submit" {
-			"`submit` waits while the pool's queue is full (`maxQueueSize`): await it, `await pool.submit(…)`, which gives the task of the work".to_string()
+			format!(
+				"`submit` can't be called blocking on target `{target}`: it waits while the pool's queue is full (`maxQueueSize`); await it, `await pool.submit(…)`, which gives the task of the work"
+			)
 		} else if name.starts_with("Tcp") {
 			format!(
 				"`{name}` can't be called blocking on target `{target}`: sockets can only be awaited there; use {instead}, or branch with `@if target`"

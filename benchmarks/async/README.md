@@ -83,11 +83,13 @@ Measured on 2026-11-04 with the scheduler that serves woken tasks before yielded
 
 | config | lateness p50 µs | lateness p99 µs | lateness max µs | connections | ttfb p50 µs | ttfb p99 µs | ttfb max µs | old p99 µs | unanswered | errors |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| fa | 4763 | 18673 | 115007 | 274385 | 245841 | 1363194 | 4429731 | 1473125 | 3335 | 1105 |
+| fa (timers checked every 8 turns, run 1) | 117 | 4781 | 95682 | 74354 | 240686 | 1301616 | 1385819 | 243724 | 116 | 4118 |
+| fa (run 2) | 144 | 8654 | 122750 | 63371 | 101733 | 402754 | 537938 | 435508 | 0 | 245 |
+| fa (timers between ticks only) | 4763 | 18673 | 115007 | 274385 | 245841 | 1363194 | 4429731 | 1473125 | 3335 | 1105 |
 | tokio current | 3984 | 14005 | 73872 | 193403 | 335835 | 1477389 | 8511572 | 1439375 | 374 | 4097 |
 | go GOMAXPROCS=1 | 19209 | 39432 | 73130 | 1299 | 41132410 | 61747500 | 61748199 | 20522592 | 1579 | 3437 |
 
-With the previous single FIFO queue, the same machine gave Fa a `starve` lateness p99 of 25 ms (17–19 ms now). The `starve` errors are mostly the connections still pending when the server exits, which then get reset. The second `echo` and `starve` runs only measured the three single-thread configurations.
+With the previous single FIFO queue, the same machine gave Fa a `starve` lateness p99 of 25 ms; with the two queues alone, 17–19 ms. A later A/B of `fairness` (`yield`) with and without the timer checks gave the same p50 (about 18 ms) on a busier machine: the timer checks cost nothing there. The `starve` errors are mostly the connections still pending when the server exits, which then get reset. The second `echo` and `starve` runs only measured the three single-thread configurations.
 
 ## Acceptance targets (design/async.md §6)
 
@@ -95,7 +97,7 @@ With the previous single FIFO queue, the same machine gave Fa a `starve` latenes
 | --- | --- |
 | `spawn` and `ping-pong` match or beat Tokio current_thread | **Met**: 7.6× and 2.8× faster. |
 | `echo` within 10% of Tokio current_thread in throughput and p99 | **Met**: −0.2% throughput, p99 +3%. |
-| Timer lateness p99 under 2 ms in `starve` | **Not met**: 17–19 ms (Tokio 14 ms, Go 39 ms). Woken tasks now run first in the next tick, but timers only fire *between* ticks, and a tick of 61 turns, each of which spends a full coop budget on channel operations, lasts about 5 ms (the p50 lateness). Reaching 2 ms needs the timers checked inside a tick (a clock read every few turns, about 25 ns), or shorter ticks while timers are pending. |
+| Timer lateness p99 under 2 ms in `starve` | **Not met on this machine**: with the expired timers fired every 8 turns inside a tick (`design/decisions.md`), the p50 lateness fell from 4.8 ms to 0.12–0.14 ms and the p99 from 17–19 ms to 4.8–8.7 ms (Tokio 14–22 ms in the same runs, Go 39 ms). The runs had a load average of 7–10 on 6 cores, with the server sharing core 0 with other jobs. What remains is preemption of the pinned server and the accept loop's turns (up to 128 accepts, writes and closes per turn). A quiet machine is needed to tell the two apart. |
 | Bytes per suspended task at most 1.5× Tokio's | **Met**: 0.58× (`timers`: 223 MB against 384 MB for 1M sleeping tasks). |
 
 Other observations:

@@ -37,7 +37,7 @@ pub(crate) struct FileState<'a, 'ctx> {
 	pub(crate) module_file: bool,
 	functions: FxHashMap<NodeId, Function<'ctx>>,
 	generic_functions: FxHashMap<NodeId, FnInfo>,
-	instances: FxHashMap<(NodeId, Vec<Repr>), NodeId>,
+	instances: FxHashMap<(NodeId, Vec<Repr>, Vec<TypeId>), NodeId>,
 	scope_owners: FxHashMap<ScopeId, Option<NodeId>>,
 	shared: FxHashMap<SymbolId, ()>,
 	global_slots: FxHashMap<SymbolId, Slot<'ctx>>,

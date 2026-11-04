@@ -1,0 +1,13 @@
+-- note: compile-time value parameters, natively one instance per value
+function repeatText = <times: Integer<min = 0>>(text: String): String => {
+	mutable result = ""
+	for 0..times {
+		result += text
+	}
+	result
+}
+function tag = <label: String>(value: Integer) => "{label}: {value}"
+function apply = (f: (text: String) => String) => f("z")
+console.log(repeatText<2>("x"), repeatText<3>("y")) -- prints: xx yyy
+console.log(tag<"n">(4), tag<"m">(5)) -- prints: n: 4 m: 5
+console.log(apply((text) => repeatText<4>(text))) -- prints: zzzz

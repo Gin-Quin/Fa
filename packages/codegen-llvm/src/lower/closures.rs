@@ -133,7 +133,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.collect();
 		entries.sort_by_key(|(param, _)| *param);
 		let reprs: Vec<Repr> = entries.iter().map(|(_, repr)| *repr).collect();
-		if let Some(key) = self.instances.get(&(node, reprs.clone())) {
+		let values = self.sorted_value_bindings();
+		if let Some(key) = self.instances.get(&(node, reprs.clone(), values.clone())) {
 			return Ok(*key);
 		}
 		let saved = self.bindings.replace(bindings);
@@ -144,7 +145,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// a key that is no node of the tree
 		let key = NodeId::new(self.tree.nodes.len() + self.instances.len() + 1);
 		self.functions.insert(key, function);
-		self.instances.insert((node, reprs), key);
+		self.instances.insert((node, reprs, values), key);
 		self.pending_instances.push((self.file, key));
 		Ok(key)
 	}

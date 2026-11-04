@@ -747,6 +747,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			captures: Vec::new(),
 			declaration: NO_NODE,
 			bindings,
+			values: FxHashMap::default(),
 		};
 		Ok(function)
 	}

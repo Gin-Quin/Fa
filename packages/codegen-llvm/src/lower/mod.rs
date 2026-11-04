@@ -112,6 +112,9 @@ pub(crate) struct Function<'ctx> {
 	declaration: NodeId,
 	/// The types of the generic parameters of an instance.
 	bindings: FxHashMap<fa_analyzer::ids::ParamId, Repr>,
+	/// The literal types of the compile-time value parameters of an
+	/// instance (`repeatText<2>`), by the symbol its body reads.
+	values: FxHashMap<SymbolId, TypeId>,
 }
 
 /// The storage of a local: a pointer (an alloca or a global) and its representation.
@@ -223,13 +226,18 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	union_ids: std::cell::RefCell<FxHashMap<(fa_analyzer::ids::NominalId, u16), u64>>,
 	/// The generic functions, declared per instance.
 	generic_functions: FxHashMap<NodeId, FnInfo>,
-	/// The instances of generic functions: the key of their `Function`.
-	instances: FxHashMap<(NodeId, Vec<Repr>), NodeId>,
+	/// The instances of generic functions: the key of their `Function`,
+	/// by representations of the type parameters and literal types of the
+	/// value parameters.
+	instances: FxHashMap<(NodeId, Vec<Repr>, Vec<TypeId>), NodeId>,
 	/// The instances still to lower, with their file.
 	pending_instances: Vec<(FileId, NodeId)>,
 	/// The representations of the generic parameters of the function being
 	/// lowered (an instance).
 	bindings: std::cell::RefCell<FxHashMap<fa_analyzer::ids::ParamId, Repr>>,
+	/// The literal types of the compile-time value parameters of the
+	/// function being lowered (an instance), by symbol.
+	value_bindings: std::cell::RefCell<FxHashMap<SymbolId, TypeId>>,
 	/// Whether integer overflows are checked (`Options::overflow_checks`).
 	overflow_checks: bool,
 	/// The slots of the top-level locals that functions read (globals).
@@ -417,6 +425,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			instances: FxHashMap::default(),
 			pending_instances: Vec::new(),
 			bindings: std::cell::RefCell::new(FxHashMap::default()),
+			value_bindings: std::cell::RefCell::new(FxHashMap::default()),
 			global_slots: FxHashMap::default(),
 			invariant_globals: rustc_hash::FxHashSet::default(),
 			overflow_checks: true,
@@ -1291,6 +1300,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				captures,
 				declaration: node,
 				bindings: self.bindings.borrow().clone(),
+				values: self.value_bindings.borrow().clone(),
 			})
 		}
 	}
@@ -1395,10 +1405,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let saved_slots = std::mem::take(&mut self.slots);
 		let saved_owned = std::mem::take(&mut self.owned_locals);
 		let saved_bindings = self.bindings.replace(self.functions[&key].bindings.clone());
+		let saved_values = self
+			.value_bindings
+			.replace(self.functions[&key].values.clone());
 		let result = self.lower_function_body(key);
 		self.slots = saved_slots;
 		self.owned_locals = saved_owned;
 		self.bindings.replace(saved_bindings);
+		self.value_bindings.replace(saved_values);
 		result
 	}
 
@@ -2348,6 +2362,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 				if matches!(kind, SymbolKind::Derived) {
 					return self.derived_read(symbol, node);
+				}
+				// a compile-time value parameter of the instance (`times`)
+				let bound = self.value_bindings.borrow().get(&symbol).copied();
+				if let Some(literal) = bound {
+					return self.value_parameter(symbol, literal, node);
 				}
 				let slot = self.slot_of(symbol, node)?;
 				if self.nullable_references.contains_key(&symbol)

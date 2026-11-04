@@ -4,7 +4,8 @@
 
 use ethnum::I256;
 use fa_analyzer::analysis::{Argument, CallInfo, Callee, NodeFlags};
-use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
+use fa_analyzer::symbols::SymbolKind;
 use fa_analyzer::syntax::View;
 use inkwell::FloatPredicate;
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, PointerValue};
@@ -623,16 +624,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.analysis
 			.instantiation(call)
 			.or_else(|| match self.view(call) {
-				// not with compile-time values, which instances don't take yet
-				View::Call { callee, .. } => self.analysis.instantiation(callee).filter(|&list| {
-					!self.types().list_items(list).iter().any(|&argument| {
-						matches!(
-							self.types().kind(argument),
-							fa_analyzer::types::TypeKind::Const(_)
-								| fa_analyzer::types::TypeKind::Int(_)
-						) && self.types().is_literal(argument)
-					})
-				}),
+				View::Call { callee, .. } => self.analysis.instantiation(callee),
 				_ => None,
 			})
 	}
@@ -661,20 +653,138 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			None if own == 0 => Vec::new(),
 			None => return Err(self.unsupported(call.index(), "this generic call")),
 		};
-		// the type arguments, as the types the instance being lowered (if
-		// any) stands for (`units.rs`)
-		let arguments: Vec<TypeId> = type_arguments
+		let generics = self.generic_functions[&declaration].generics.clone();
+		let given: Vec<TypeId> = type_arguments
 			.into_iter()
 			.chain(list.iter().rev().take(own).rev().copied())
+			.collect();
+		// the compile-time value parameters (`repeatText<2>`): bound to the
+		// literal types, an instance per value
+		let mut values = Vec::new();
+		let mut value_bindings = Vec::new();
+		for (&param, &argument) in generics.iter().zip(&given) {
+			if !self.types().param(param).value {
+				continue;
+			}
+			let Some(literal) = self.value_argument(argument) else {
+				return Err(self.unsupported(call.index(), "this compile-time value argument"));
+			};
+			let Some(symbol) = self.value_parameter_symbol(declaration, param) else {
+				return Err(self.unsupported(call.index(), "this compile-time value parameter"));
+			};
+			values.push(literal);
+			value_bindings.push((symbol, literal));
+		}
+		// the type arguments, as the types the instance being lowered (if
+		// any) stands for (`units.rs`)
+		let arguments: Vec<TypeId> = given
+			.into_iter()
 			.map(|argument| self.concrete_type(argument))
 			.collect();
 		let mut reprs = Vec::new();
 		for argument in &arguments {
 			reprs.push(self.repr_of(*argument, call.index())?);
 		}
-		let generics = self.generic_functions[&declaration].generics.clone();
 		self.note_instance_types(&generics, &arguments, &reprs);
-		self.instance_of(declaration, reprs)
+		if value_bindings.is_empty() {
+			return self.instance_of(declaration, reprs);
+		}
+		let saved = self
+			.value_bindings
+			.replace(value_bindings.into_iter().collect());
+		let instance = self.instance_with_values(declaration, reprs, values);
+		self.value_bindings.replace(saved);
+		instance
+	}
+
+	/// The literal type a compile-time value argument stands for: itself, or
+	/// the binding of the enclosing instance's own value parameter.
+	fn value_argument(&self, argument: TypeId) -> Option<TypeId> {
+		use fa_analyzer::types::TypeKind;
+		let types = self.types();
+		match types.kind(argument) {
+			TypeKind::Param(param) => {
+				let name = types.param(param).name;
+				let bindings = self.value_bindings.borrow();
+				bindings
+					.iter()
+					.find(|(symbol, _)| self.analysis.symbols.symbol(**symbol).name == name)
+					.map(|(_, literal)| *literal)
+			}
+			TypeKind::Int(_) | TypeKind::StringLit(_) | TypeKind::BoolLit(_)
+				if types.is_literal(argument) =>
+			{
+				Some(argument)
+			}
+			_ => None,
+		}
+	}
+
+	/// The `Static` symbol a value parameter's name resolves to in the body
+	/// of a generic function declaration.
+	fn value_parameter_symbol(
+		&self,
+		declaration: NodeId,
+		param: fa_analyzer::ids::ParamId,
+	) -> Option<SymbolId> {
+		let name = self.types().param(param).name;
+		let span = self.tree.spans[declaration.index()];
+		self.analysis
+			.symbols
+			.symbols()
+			.iter()
+			.position(|symbol| {
+				symbol.kind == SymbolKind::Static && symbol.name == name && {
+					let declared = self.tree.spans[symbol.decl_node.index()];
+					span.start <= declared.start && declared.end <= span.end
+				}
+			})
+			.map(SymbolId::new)
+	}
+
+	/// The current value bindings, in a stable order (a part of the key of
+	/// the instances declared under them).
+	pub(crate) fn sorted_value_bindings(&self) -> Vec<TypeId> {
+		let mut entries: Vec<(SymbolId, TypeId)> = self
+			.value_bindings
+			.borrow()
+			.iter()
+			.map(|(&symbol, &literal)| (symbol, literal))
+			.collect();
+		entries.sort_by_key(|(symbol, _)| *symbol);
+		entries.into_iter().map(|(_, literal)| literal).collect()
+	}
+
+	/// The value of a compile-time value parameter in an instance: its
+	/// literal, of the parameter's declared type.
+	pub(crate) fn value_parameter(
+		&mut self,
+		symbol: SymbolId,
+		literal: TypeId,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		use fa_analyzer::types::TypeKind;
+		use fa_interpreter::Value;
+		let types = self.types();
+		let value = match types.kind(literal) {
+			TypeKind::Int(_) => types
+				.as_int(literal)
+				.filter(|int| int.min == int.max)
+				.map(|int| Value::Integer(int.min)),
+			TypeKind::StringLit(text) => Some(Value::string(types.syms.resolve(text))),
+			TypeKind::BoolLit(value) => Some(Value::Boolean(value)),
+			_ => None,
+		};
+		let Some(value) = value else {
+			return Err(self.unsupported(node.index(), "this compile-time value parameter"));
+		};
+		let declared = self.analysis.symbols.symbol(symbol).ty;
+		let built = self.constant_value(&value, declared, node)?;
+		Ok(if self.needs_drop(built.repr) {
+			self.fresh(built)
+		} else {
+			built
+		})
 	}
 
 	/// The arguments of the generic type of a call's receiver
@@ -697,15 +807,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		reprs: Vec<Repr>,
 	) -> Result<NodeId, Error> {
+		self.instance_with_values(declaration, reprs, Vec::new())
+	}
+
+	/// The instance of a generic function of the file for these
+	/// representations of its type arguments and literal types of its value
+	/// arguments (bound in `value_bindings` by the caller).
+	fn instance_with_values(
+		&mut self,
+		declaration: NodeId,
+		reprs: Vec<Repr>,
+		values: Vec<TypeId>,
+	) -> Result<NodeId, Error> {
 		let info = self.generic_functions[&declaration].clone();
-		if let Some(key) = self.instances.get(&(declaration, reprs.clone())) {
-			return Ok(*key);
+		let key = (declaration, reprs, values);
+		if let Some(instance) = self.instances.get(&key) {
+			return Ok(*instance);
 		}
 		let bindings: rustc_hash::FxHashMap<_, _> = info
 			.generics
 			.iter()
 			.copied()
-			.zip(reprs.iter().copied())
+			.zip(key.1.iter().copied())
 			.collect();
 		let saved = self.bindings.replace(bindings);
 		let suffix = format!(".{}", self.instances.len());
@@ -713,11 +836,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.bindings.replace(saved);
 		let function = function?;
 		// a key that is no node of the tree
-		let key = NodeId::new(self.tree.nodes.len() + self.instances.len() + 1);
-		self.functions.insert(key, function);
-		self.instances.insert((declaration, reprs), key);
-		self.pending_instances.push((self.file, key));
-		Ok(key)
+		let instance = NodeId::new(self.tree.nodes.len() + self.instances.len() + 1);
+		self.functions.insert(instance, function);
+		self.instances.insert(key, instance);
+		self.pending_instances.push((self.file, instance));
+		Ok(instance)
 	}
 
 	/// The arguments of `Array.from(source, capacity = n)`.

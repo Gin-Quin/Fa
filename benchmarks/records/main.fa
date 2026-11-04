@@ -61,8 +61,8 @@ for 0..passes {
 		total += when event is {
 			Event.Tick => 1
 			Event.Move as move => move.id + move.dx + move.dy
-			-- A character's code is only reachable through `codePoints()`.
-			Event.Say as say => say.id + say.text.length + (try say.text.codePoints()[0])
+			-- The first byte of the text (ASCII: its first letter's code).
+			Event.Say as say => say.id + say.text.length + (try say.text.bytes()[0])
 			Event.Quit as quit => quit.id + quit.code
 		}
 	}

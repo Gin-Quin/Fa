@@ -32,8 +32,8 @@ let words = text.split(" ").filter((word) => not word.isEmpty())
 mutable total = 0
 for 0..passes {
 	for word in words {
-		-- A character's code is only reachable through `codePoints()`.
-		let codes = word.codePoints()
+		-- The first and last bytes (ASCII: the codes of the first and last letters).
+		let codes = word.bytes()
 		total += word.length + (try codes[0]) + (try codes[codes.length - 1])
 	}
 }

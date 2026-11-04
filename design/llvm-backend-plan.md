@@ -184,6 +184,10 @@ What `design/decisions.md` records under "Relations", "Columnars by columns", "C
 
 What `design/decisions.md` records under "Simple strings" and the entries after it: an ASCII flag in the capacity word of strings (constant-time positions, static one-byte characters, no allocation for `letters[i]`), native string slicing, loop bounds checks shaped for `irce` (run after `default<O3>` with `licm`, `reassociate` and a second vectorization), scalar TBAA, 16-bit arithmetic for byte sums, early boxes for recursive fields, moving `filter` of a temporary array, template appends, code points read without their array, and a wasm loader with only the imports used. Profiled with callgrind (instruction counts are stable on the shared machine) and CPU-time medians; `tests/checks.rs` checks the vectorized byte kernel, the 16-bit arithmetic, the string flags and the early boxes.
 
+## Byte access (sixth shift)
+
+`text.bytes()` (`design/decisions.md`, "Strings: byte access") read in place natively, and the Goose ports reading bytes where Goose does: `calc` and `sexp` parse `self.text.bytes()` instead of an `Array(Character)` (24 bytes per character). The shift also built inline strings, nullable `Node?` edges, statement regions and early boxes for pushed recursive items, which the merged `perf/native-goose` work replaced (its inline strings, nullable edges, root arenas and inline recursive collection items): measured on top of it, statement regions gained nothing on `binary-trees` and `calc` (their trees are already in its arenas, without a drop walk), and `scene` already runs at Goose's speed. They are kept on the branch `sixth-wip` of the shift's worktree, not merged.
+
 ## Next steps
 
 1. Pools built in place by `add`; `OrderedColumnar` by columns; vectorized single-field loops over full occupancy words.

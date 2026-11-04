@@ -267,7 +267,9 @@ function buildFa(
 		...extraArguments,
 	]);
 	if (!build.ok) return { status: "build failed", detail: lastLines(build.stderr + build.stdout) };
-	const files = readdirSync(directory).map((name) => join(directory, name));
+	// `fa build --output=<dir>` writes into `<dir>/<target>/`
+	const written = existsSync(join(directory, target)) ? join(directory, target) : directory;
+	const files = readdirSync(written).map((name) => join(written, name));
 	const script = files.find((file) => file.endsWith(".js") || file.endsWith(".mjs"));
 	if (target === "native") {
 		const executable = files.find(

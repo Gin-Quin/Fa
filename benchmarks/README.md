@@ -69,7 +69,7 @@ and looks in the directory for:
 | `wasm` | a `.wasm` file and a `.js` or `.mjs` loader | `bun <loader>` | the `.wasm` file |
 | `bun` | a `.js` or `.mjs` file | `bun <file>` | the `.js` file |
 
-The `--output` option is the runner's assumption: the documentation gives `fa build [<package> | <file.fa>] [--target=...]` and an `output` directory in the build configuration, but no command-line option yet. If the CLI ends up different, adapt `buildFa` in `run.ts`.
+`fa build --output=<directory>` writes into `<directory>/<target>/`, where the runner looks for the output (`buildFa` in `run.ts`). The `native` and `wasm` targets need `fa-native` next to `fa` (`cargo build --release -p fa` builds both).
 
 A failure doesn't stop the run: the cell shows `build fail`, `no output`, `run fail` or `mismatch` (the output differs from Rust's), and the reason is printed under the table.
 
@@ -120,7 +120,7 @@ The defaults run in about 0.25 to 2 seconds in Rust (see the [baseline](#rust-ba
 - **`bintrees` is `binary-trees`**: the same Benchmarks Game program. `binary-trees/main.goose` is Goose's `bintrees.goose` with the output of `main.rs`. `words` stays separate from `word-count`: same idea, but a different generator, text and output.
 - The other ten benchmarks got a Goose version written for them (`main.goose`, a direct port of `main.rs` reading its size from its arguments): inline `u8[..8]` strings where the words fit (`word-count`, `sort-objects`), `dictionary` for the maps, `sort` with a block for the comparator.
 
-Deviations: `sexp` keeps the children of a list in an `Array` (Rust: `Vec<Node>`) instead of Goose's first-child and next-sibling links; `graph` stores vertex ids as `Integer` (8 bytes) where Rust and Goose use 4; `scene` writes the 3x3 matrix as nine `Float32` fields (Fa has no fixed-size arrays); `respond`, `strlist`, `records`, `words` and `sexp` read the bytes of an (ASCII) string through `codePoints()`, since Fa has no byte access to a `String`.
+Deviations: `sexp` keeps the children of a list in an `Array` (Rust: `Vec<Node>`) instead of Goose's first-child and next-sibling links; `graph` stores vertex ids as `Integer` (8 bytes) where Rust and Goose use 4; `scene` writes the 3x3 matrix as nine `Float32` fields (Fa has no fixed-size arrays); `respond`, `strlist`, `records`, `words`, `sexp` and `calc` read the bytes of a string with `text.bytes()` (sixth native shift), as Goose reads its `u8` buffers: the parsers of `calc` and `sexp` index `self.text.bytes()` (read in place, no array) instead of an `Array(Character)`, and `sexp` slices its symbols out of the text.
 
 #### What the ports found missing or wrong in Fa
 
@@ -148,7 +148,7 @@ Misleading diagnostics:
 - `W-NUM-1` on `Integer(value).bitXor(pass)` (`value: Int32`) says the conversion "does nothing", but without it `value.bitXor(pass)` fails with `E-NUM-14` (`pass` doesn't fit in an `Int32`).
 - `W-ERR-1` says a string slice "can't fail", while the documentation says it throws `IndexError`.
 
-Missing in the library: **a cheap way to read a character's code or a string's bytes**. `codePoints()` allocates an `Array(UInt32)` per call (FNV-1a over a response in `respond`, `strlist`'s `codes` local); natively, `text.codePoints()[i]` and `text.codePoints().get(i)` read the code point without building the array (`sexp`, `records`).
+~~Missing in the library: **a cheap way to read a character's code or a string's bytes**~~: `text.bytes()` (`design/decisions.md`, "Strings: byte access"), read in place when only indexed, measured or iterated.
 
 Slow (the [comparison](#fa-rust-and-goose) has the numbers), and what the fifth native shift did about it (`design/decisions.md`, "Simple strings" and the entries after it):
 
@@ -267,29 +267,31 @@ What it says:
 
 ### Against Goose on its own suite
 
-The goal set for the native backend is to be faster than Goose on Goose's own benchmarks (release builds: `fa build`, overflow checks off). CPU time (user + system, median of 3, `/usr/bin/time`) of the Fa and Goose executables measured one after the other at the end of the fifth shift, on the same busy machine (two runs of the same program still differ by up to 30%):
+The goal set for the native backend is to be faster than Goose on Goose's own benchmarks (release builds: `fa build`, overflow checks off). CPU time (user + system, median of 7, Fa and Goose executables run one after the other at their default sizes) on 2026-11-04, `compiler` with the merged `perf/native-goose` work and `bytes()` (the sixth native shift), on the same busy machine (load average 6 to 8; two passes differ by up to 40% on the shortest programs). The fifth shift's column is the previous version of this table.
 
-| Benchmark | Fa | Goose | Fa / Goose | What Goose does that Fa doesn't (yet) |
-| --- | ---: | ---: | ---: | --- |
-| `sum` | 0.37 s | 0.27 s | 1.37x | nothing: the same loops (Fa within noise) |
-| `push` | 0.37 s | 0.33 s | 1.12x | nothing (Fa within noise) |
-| `strlist` | 0.32 s | 0.15 s | 2.13x | words as slices of the text (Fa copies each word into its own block) |
-| `records` | 0.36 s | 0.22 s | 1.64x | inline strings and records (Fa boxes each event and allocates each text) |
-| `tree` | 0.30 s | 0.35 s | 0.86x | 32-bit relative references (Fa: 40-byte nodes with `{i1, ptr}` optionals) |
-| `interp` | 0.08 s | 0.03 s | 2.66x | 12-byte nodes in one pool (Fa: a 24-byte box per node) |
-| `graph` | 0.24 s | 0.41 s | 0.59x | nothing (Fa faster) |
-| `words` | 0.19 s | 0.07 s | 2.71x | slices as map keys, its own open addressing (Fa copies each word, two-level table) |
-| `particles` | 0.15 s | 0.15 s | 1.00x | nothing (Fa level) |
-| `sexp` | 0.65 s | 0.18 s | 3.61x | inline symbols, first-child/next-sibling links (Fa: a string and a box per node, `Character` as strings) |
-| `lru` | 0.93 s | 0.32 s | 2.91x | `i32` fields and 8-byte table slots (Fa: `Integer` fields, 32-byte entries plus an index) |
-| `scene` | 0.11 s | 0.02 s | 5.47x | `f32` children inline (Fa: arrays of 112-byte nodes, `Transform` copies) |
-| `calc` | 0.80 s | 0.24 s | 3.33x | bytes for characters, nodes in a pool (Fa: `Character` is a string, a box per node) |
-| `respond` | 0.61 s | 0.25 s | 2.44x | a byte buffer (Fa: `String` appends, `codePoints()`) |
-| `blur` | 0.09 s | 0.08 s | 1.12x | nothing (Fa vectorizes, Goose doesn't) |
-| `binary-trees` | 0.46 s | 0.12 s | 3.83x | one pool per tree, freed at once (Fa: a block per node, freed one by one) |
-| geometric mean | | | 1.94x | |
+| Benchmark | Fa | Goose | Fa / Goose | Fifth shift | What Goose still does that Fa doesn't |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `sum` | 0.30 s | 0.27 s | 1.13x | 1.37x | nothing: the same loops (within noise) |
+| `push` | 0.40 s | 0.36 s | 1.11x | 1.12x | nothing (within noise) |
+| `strlist` | 0.37 s | 0.19 s | 1.97x | 2.13x | one character appended per step from registers; words as slices of the text |
+| `records` | 0.38 s | 0.22 s | 1.75x | 1.64x | variable-size records inline in one buffer (Fa boxes the larger events) |
+| `tree` | 0.18 s | 0.42 s | 0.42x | 0.86x | nothing (Fa faster) |
+| `interp` | 0.03 s | 0.04 s | 0.68x | 2.66x | nothing (Fa faster) |
+| `graph` | 0.16 s | 0.38 s | 0.43x | 0.59x | nothing (Fa faster) |
+| `words` | 0.11 s | 0.07 s | 1.62x | 2.71x | slices as map keys, its own open addressing |
+| `particles` | 0.12 s | 0.14 s | 0.89x | 1.00x | nothing (Fa level) |
+| `sexp` | 0.24 s | 0.19 s | 1.26x | 3.61x | first-child/next-sibling links, inline symbols; the port now parses `text.bytes()` |
+| `lru` | 0.74 s | 0.25 s | 2.97x | 2.91x | `i32` fields, 8-byte table slots, a presized table, a probe reused by `get` and `delete` |
+| `scene` | 0.02 s | 0.02 s | 1.07x | 5.47x | nothing (children inline in their arrays now) |
+| `calc` | 0.45 s | 0.22 s | 1.99x | 3.33x | text edited in place, number templates appended without growth; the port now parses `text.bytes()` |
+| `respond` | 0.62 s | 0.27 s | 2.29x | 2.44x | one byte buffer per response (Fa grows strings and builds templates) |
+| `blur` | 0.09 s | 0.10 s | 0.96x | 1.12x | nothing (Fa vectorizes, Goose doesn't) |
+| `binary-trees` | 0.15 s | 0.12 s | 1.24x | 3.83x | 32-bit relative links (Fa's arenas hold 16-byte nodes of two pointers) |
+| geometric mean | | | 1.19x | 1.94x | |
 
-Instruction counts (callgrind, deterministic) tell the same story: at the default sizes Fa executes 1.1x Goose's instructions on `interp`, 1.7x on `scene`, 1.8x on `strlist`, 2.1x on `words`, 2.2x on `records`, 2.7x on `respond`, 3.1x on `sexp`, 4.2x on `calc`, and misses the last-level cache 3 to 60 times more often where its values are larger (`lru`, `tree`, `interp`). What is left is structural: inline (small) strings and `Character` as a scalar, optionals of references as nullable pointers (`Node?` in 8 bytes), narrower layouts when the analyzer proves the ranges of a field, pools for the boxes of a recursive value, and a table whose entries hold no hash; see `design/todo.md`.
+Fa is ahead of or level with Goose on `tree`, `interp`, `graph`, `particles`, `blur`, `push`, `sum` and `scene`, and behind on string building (`strlist`, `respond`, `calc`, `records`) and maps (`lru`, `words`). What changed since the fifth shift: inline strings, nullable recursive edges, root arenas, inline recursive collection items, borrowed parameters and module constants (`perf/native-goose`, `design/native-goose-performance.md`), and `text.bytes()` read in place, which `calc` and `sexp` parse instead of an `Array(Character)` and the other ports read where Goose reads bytes.
+
+The full three-way table below (`run.ts`, wall times) was not run again; a run on 2026-11-04 (wall times, three runs, busier machine) gave Fa / Goose 1.21x on `binary-trees`, 1.48x on `calc`, 1.58x on `sexp`, 1.89x on `strlist`, 1.83x on `records`, 1.82x on `respond`, 3.95x on `lru`, 1.12x on `scene`, 0.43x on `words`, and Fa native at 0.16x (`binary-trees`) to 1.62x (`lru`) Rust on the Goose suite.
 
 ### Against Goose's published results
 

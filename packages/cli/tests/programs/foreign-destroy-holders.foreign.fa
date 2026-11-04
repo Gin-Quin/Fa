@@ -1,0 +1,41 @@
+-- skip-target: wasm native-freestanding bun
+-- (bun: JavaScript destroys a resource local only, not one inside another value)
+-- an object holding a value with `destroy` is move-only, like one holding a
+-- task: it moves into a function, a field moved out is destroyed by its new
+-- owner, and the holder's drop skips it
+function allocate: (size: Int64) => Pointer<Int32> = @extern("malloc")
+function release: (block: Pointer<Int32>) => Void = @extern("free")
+
+type Buffer = {
+	block: Pointer<Int32>
+	name: String
+	function make = (name: String): Self => Self { block = allocate(4), name = name }
+	function destroy = (self) => {
+		console.log("destroyed {self.name}")
+		release(self.block)
+	}
+}
+
+type Holder = { label: String, buffer: Buffer }
+
+function consume = (holder: Holder) => {
+	console.log("consumed {holder.label}")
+}
+
+function unwrap = (holder: Holder): Buffer => holder.buffer
+
+do {
+	let first = Holder { label = "first", buffer = Buffer.make("a") }
+	consume(first) -- prints: consumed first
+	-- prints: destroyed a
+	let second = Holder { label = "second", buffer = Buffer.make("b") }
+	let buffer = unwrap(second)
+	console.log(buffer.name) -- prints: b
+	mutable third = Holder { label = "third", buffer = Buffer.make("c") }
+	let moved = third.buffer
+	third.buffer = Buffer.make("d")
+	console.log(moved.name, third.label) -- prints: c third
+} -- prints: destroyed c
+-- prints: destroyed d
+-- prints: destroyed b
+console.log("end") -- prints: end

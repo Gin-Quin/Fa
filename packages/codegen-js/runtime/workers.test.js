@@ -54,8 +54,34 @@ describe("thread-safe values given to a worker", () => {
 		faUnlock(mine);
 	});
 
-	test("a channel can't be given to a worker yet", () => {
-		expect(() => faShare([new FaChannel(1)])).toThrow(FaStop);
+	test("a channel shares its queue through a structured clone", () => {
+		const channel = new FaChannel(2);
+		channel.trySend(1n);
+		faShare([channel]);
+		const [other] = faRevive(structuredClone([channel]));
+		expect(other).toBeInstanceOf(FaChannel);
+		expect(other.trySend(undefined)).toBe(true);
+		expect(channel.trySend(3)).toBe(false);
+		expect(other.tryReceive()).toBe(1n);
+		expect(channel.trySend("three")).toBe(true);
+		expect(channel.tryReceive()).toBeUndefined();
+		expect(other.tryReceive()).toBe("three");
+		expect(channel.tryReceive()).toBeUndefined();
+		other.close();
+		expect(channel.trySend(4)).toBe(false);
+		expect(channel.pollReceive(FaChannel)).toBeUndefined();
+	});
+
+	test("without shared memory, giving one to a worker stops with what to do", () => {
+		const shared = globalThis.SharedArrayBuffer;
+		// @ts-ignore a web page that isn't cross-origin isolated
+		delete globalThis.SharedArrayBuffer;
+		try {
+			expect(() => faShare([new FaChannel(1)])).toThrow(FaStop);
+			expect(() => faShare([new FaAtomic(1)])).toThrow(FaStop);
+		} finally {
+			globalThis.SharedArrayBuffer = shared;
+		}
 	});
 });
 

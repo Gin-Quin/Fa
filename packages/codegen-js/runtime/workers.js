@@ -32,7 +32,7 @@
 // Each helper starts at a `// @fa-helper <name> deps: <names>` line and ends at
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
 
-import { FaAtomic, FaMutex } from "./concurrency.js";
+import { FaAtomic, FaChannel, FaMutex } from "./concurrency.js";
 import { FaError } from "./errors.js";
 import { faExit, faIsError, faWriteError } from "./main.js";
 import { FaStop, faStopMessage } from "./stops.js";
@@ -57,7 +57,7 @@ export class WorkerTimeout extends FaError {
 /**
  * Before a value is sent to (or by) a worker: its atomics and mutexes move
  * into shared memory (`share` of `concurrency.js`), so that both threads
- * use the same; a channel stops the program (not shared yet).
+ * use the same; a channel's queue too.
  * @param {any} value
  * @param {number} [depth]
  * @returns {void}
@@ -81,7 +81,7 @@ export function faShare(value, depth = 0) {
 	}
 }
 
-// @fa-helper faRevive deps: FaAtomic FaMutex
+// @fa-helper faRevive deps: FaAtomic FaMutex FaChannel
 /**
  * After a value came from another thread: its shared atomics and mutexes
  * (plain objects after the structured clone, marked `$faShared`) get their
@@ -100,6 +100,11 @@ export function faRevive(value, depth = 0) {
 	if (value.$faShared === "mutex") {
 		value.waiters = [];
 		return Object.setPrototypeOf(value, FaMutex.prototype);
+	}
+	if (value.$faShared === "channel") {
+		value.receivers = [];
+		value.senders = [];
+		return Object.setPrototypeOf(value, FaChannel.prototype);
 	}
 	if (Array.isArray(value)) {
 		for (const item of value) {

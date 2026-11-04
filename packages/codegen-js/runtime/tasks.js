@@ -692,7 +692,7 @@ export async function faLock(task, mutex, where) {
 	return /** @type {FaGuard} */ (guard);
 }
 
-// @fa-helper faSend deps: ChannelClosed faReady faAlive faRemove
+// @fa-helper faSend deps: ChannelClosed faReady faAlive faRemove faTick
 /**
  * `await channel.send(value)`: waits while the channel is full; throws
  * `ChannelClosed` when it is (or gets) closed.
@@ -703,6 +703,19 @@ export async function faLock(task, mutex, where) {
  * @returns {Promise<void>}
  */
 export async function faSend(task, channel, value, where) {
+	// shared with a worker: tried again every millisecond
+	if (channel.cell != null) {
+		for (;;) {
+			const sent = channel.pollSend(value);
+			if (sent === 1) {
+				return;
+			}
+			if (sent === -1) {
+				throw new ChannelClosed();
+			}
+			await faTick(task, `Channel.send at ${where}`);
+		}
+	}
 	if (channel.closed) {
 		throw new ChannelClosed();
 	}
@@ -727,7 +740,7 @@ export async function faSend(task, channel, value, where) {
 	}
 }
 
-// @fa-helper faReceive deps: faReady faAlive faRemove
+// @fa-helper faReceive deps: faReady faAlive faRemove faTick faWaiting
 /**
  * `await channel.receive()`: the next value, `none` once the channel is
  * closed and empty.
@@ -737,6 +750,16 @@ export async function faSend(task, channel, value, where) {
  * @returns {Promise<any>}
  */
 export async function faReceive(task, channel, where) {
+	// shared with a worker: tried again every millisecond
+	if (channel.cell != null) {
+		for (;;) {
+			const value = channel.pollReceive(faWaiting);
+			if (value !== faWaiting) {
+				return value;
+			}
+			await faTick(task, `Channel.receive at ${where}`);
+		}
+	}
 	if (channel.head < channel.items.length || channel.closed) {
 		const value = channel.tryReceive();
 		await faReady();
@@ -755,6 +778,88 @@ export async function faReceive(task, channel, where) {
 	task.wake = null;
 	faAlive(task);
 	return value;
+}
+
+// @fa-helper faTick deps: faAlive
+/**
+ * A task waiting for something shared with a worker: a millisecond, or
+ * until it is cancelled (it then throws `faCancelSignal`).
+ * @param {FaTask} task
+ * @param {string} where what it waits on, for deadlock reports
+ * @returns {Promise<void>}
+ */
+export async function faTick(task, where) {
+	await new Promise((resolve) => {
+		const timer = setTimeout(resolve, 1);
+		task.wake = () => {
+			clearTimeout(timer);
+			resolve(undefined);
+		};
+		task.where = where;
+	});
+	task.wake = null;
+	faAlive(task);
+}
+
+// @fa-helper faOnWorker
+/** @returns {boolean} whether this code runs on a worker's thread */
+export function faOnWorker() {
+	/** @type {any} */
+	const host = globalThis;
+	return (
+		host.process?.getBuiltinModule?.("node:worker_threads")?.isMainThread === false ||
+		typeof host.WorkerGlobalScope !== "undefined"
+	);
+}
+
+// @fa-helper faSendSync deps: faWaitSync faOnWorker ChannelClosed
+/**
+ * `channel.send(value)` in a blocking call: on the thread of a worker, a
+ * channel shared with it is waited for (`Atomics.wait` on its version);
+ * anywhere else nothing could make room (`faWaitSync`).
+ * @param {any} channel
+ * @param {any} value
+ * @param {string} where
+ * @returns {void}
+ */
+export function faSendSync(channel, value, where) {
+	if (channel?.cell != null && faOnWorker()) {
+		for (;;) {
+			const version = Atomics.load(channel.cell, 3);
+			const sent = channel.pollSend(value);
+			if (sent === 1) {
+				return;
+			}
+			if (sent === -1) {
+				throw new ChannelClosed();
+			}
+			Atomics.wait(channel.cell, 3, version, 20);
+		}
+	}
+	faWaitSync("Channel.send", where);
+}
+
+// @fa-helper faReceiveSync deps: faWaitSync faOnWorker faWaiting
+/**
+ * `channel.receive()` in a blocking call: on the thread of a worker, a
+ * channel shared with it is waited for (`Atomics.wait` on its version);
+ * anywhere else nothing could send (`faWaitSync`).
+ * @param {any} channel
+ * @param {string} where
+ * @returns {any}
+ */
+export function faReceiveSync(channel, where) {
+	if (channel?.cell != null && faOnWorker()) {
+		for (;;) {
+			const version = Atomics.load(channel.cell, 3);
+			const value = channel.pollReceive(faWaiting);
+			if (value !== faWaiting) {
+				return value;
+			}
+			Atomics.wait(channel.cell, 3, version, 20);
+		}
+	}
+	return faWaitSync("Channel.receive", where);
 }
 
 // @fa-helper faWaitSync deps: faStop
@@ -911,7 +1016,11 @@ export const faWaiting = Symbol("fa.waiting");
  * @returns {any}
  */
 export function faReceiveNow(channel) {
-	if (faSched.resolutions >= 127 || (channel.head === channel.items.length && !channel.closed)) {
+	if (
+		faSched.resolutions >= 127 ||
+		channel.cell != null ||
+		(channel.head === channel.items.length && !channel.closed)
+	) {
 		return faWaiting;
 	}
 	faSched.resolutions += 1;
@@ -927,7 +1036,12 @@ export function faReceiveNow(channel) {
  * @returns {boolean}
  */
 export function faSendNow(channel, value) {
-	if (faSched.resolutions >= 127 || channel.closed || !channel.trySend(value)) {
+	if (
+		faSched.resolutions >= 127 ||
+		channel.cell != null ||
+		channel.closed ||
+		!channel.trySend(value)
+	) {
 		return false;
 	}
 	faSched.resolutions += 1;

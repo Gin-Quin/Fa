@@ -773,9 +773,16 @@ impl Generator<'_> {
 					return self.guard_temporary(call, result);
 				}
 				if !asynchronous {
-					let helper = self.helper("faWaitSync");
-					let what = js::string_literal(name);
-					return js::call(helper, &[what, location]);
+					// on a worker's thread, a channel shared with it is waited for
+					let helper = self.helper(if name == "Channel.send" {
+						"faSendSync"
+					} else {
+						"faReceiveSync"
+					});
+					let mut all = vec![receiver.text];
+					all.extend(values);
+					all.push(location);
+					return js::call(helper, &all);
 				}
 				// ready at once: no `await` (an `await` that doesn't wait is a
 				// plain call, A1), the wait otherwise

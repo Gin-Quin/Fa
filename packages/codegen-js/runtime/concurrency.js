@@ -11,15 +11,33 @@
 // moved into shared memory (`share`: a `SharedArrayBuffer`, which the
 // structured clone of the message shares): an atomic's value is then a
 // cell updated with `Atomics`, a mutex's lock a word taken with
-// `compareExchange` and its value JSON text read by whoever holds it. A
-// channel can't be given to a worker yet (a stop).
+// `compareExchange` and its value JSON text read by whoever holds it; a
+// channel's queue is JSON text too, behind a lock word, with a version
+// word that a blocked worker waits on. Without shared memory (a web page
+// that isn't cross-origin isolated) the program stops with what to do
+// (`faNeedSharedMemory`): Bun and Node always have it.
 //
 // Each helper starts at a `// @fa-helper <name> deps: <names>` line and ends at
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
 
 import { faStop } from "./stops.js";
 
-// @fa-helper FaAtomic
+// @fa-helper faNeedSharedMemory deps: faStop
+/**
+ * Stops the program when this platform can't share memory with a worker:
+ * a web page that isn't cross-origin isolated has no `SharedArrayBuffer`.
+ * @param {string} what like `a Channel`
+ * @returns {void}
+ */
+export function faNeedSharedMemory(what) {
+	if (typeof SharedArrayBuffer === "undefined") {
+		faStop(
+			`${what} given to a worker needs memory shared between threads (\`SharedArrayBuffer\`), which a web page only has when it is cross-origin isolated: serve it with the headers \`Cross-Origin-Opener-Policy: same-origin\` and \`Cross-Origin-Embedder-Policy: require-corp\``,
+		);
+	}
+}
+
+// @fa-helper FaAtomic deps: faNeedSharedMemory
 /**
  * An `AtomicInteger` (a number) or an `AtomicBoolean`. The orderings make no
  * difference on one thread.
@@ -39,9 +57,10 @@ export class FaAtomic {
 
 	/** Moves the value into shared memory, before it is sent to a worker. */
 	share() {
-		if (this.cell !== null || typeof SharedArrayBuffer === "undefined") {
+		if (this.cell !== null) {
 			return;
 		}
+		faNeedSharedMemory("an atomic");
 		this.cell =
 			typeof this.value === "boolean"
 				? new Int32Array(new SharedArrayBuffer(4))
@@ -164,7 +183,7 @@ export class FaGuard {
 	}
 }
 
-// @fa-helper FaMutex deps: FaGuard
+// @fa-helper FaMutex deps: FaGuard faNeedSharedMemory
 /**
  * A `Mutex(T)`: the value, and whether a guard holds it.
  */
@@ -194,9 +213,10 @@ export class FaMutex {
 	 * documentation asks; strings and arrays of them work too).
 	 */
 	share() {
-		if (this.cell !== null || typeof SharedArrayBuffer === "undefined") {
+		if (this.cell !== null) {
 			return;
 		}
+		faNeedSharedMemory("a Mutex");
 		const size = Math.max(65536, 4 * this.text(this.value).length);
 		const memory = new SharedArrayBuffer(8 + size);
 		this.cell = new Int32Array(memory, 0, 2);
@@ -299,9 +319,15 @@ export function faUnlock(guard) {
 	}
 }
 
-// @fa-helper FaChannel deps: faStop
+// @fa-helper FaChannel deps: faNeedSharedMemory
 /**
  * A `Channel(T)`: a queue, bounded by its capacity (`Infinity` without one).
+ * Given to a worker (`share`), its queue moves into shared memory: the
+ * words `[lock, closed, length of the text, version]`, then the queue as
+ * JSON text (`none` and big integers tagged, as a shared mutex's value).
+ * The waits of tasks then try again every millisecond (`faSend`,
+ * `faReceive`), those of a worker's thread wait for the version to change
+ * (`faSendSync`, `faReceiveSync`).
  */
 export class FaChannel {
 	/** @param {number | undefined} capacity */
@@ -318,6 +344,13 @@ export class FaChannel {
 		this.receivers = [];
 		/** @type {Array<{ resolve: (sent: boolean) => void, value: any }>} the tasks waiting to send, in order */
 		this.senders = [];
+		/**
+		 * Once shared with a worker (`share`): its words in shared memory.
+		 * @type {Int32Array | null}
+		 */
+		this.cell = null;
+		/** @type {Uint8Array | null} */
+		this.bytes = null;
 	}
 
 	/**
@@ -325,6 +358,9 @@ export class FaChannel {
 	 * @returns {boolean} whether it was sent (`false` when full or closed)
 	 */
 	trySend(value) {
+		if (this.cell !== null) {
+			return this.pollSend(value) === 1;
+		}
 		if (this.closed) {
 			return false;
 		}
@@ -342,6 +378,10 @@ export class FaChannel {
 
 	/** @returns {any} the next value, `none` when there is none */
 	tryReceive() {
+		if (this.cell !== null) {
+			const value = this.pollReceive(FaChannel);
+			return value === FaChannel ? undefined : value;
+		}
 		if (this.head === this.items.length) {
 			return undefined;
 		}
@@ -359,12 +399,145 @@ export class FaChannel {
 		return value;
 	}
 
-	/** A channel can't cross to a JavaScript worker yet: a stop. */
+	/**
+	 * Moves the queue into shared memory, before the channel is sent to a
+	 * worker: the values waiting to be sent join it, the tasks waiting to
+	 * receive try again every millisecond.
+	 */
 	share() {
-		faStop("a Channel can't be passed to a JavaScript worker yet (atomics and mutexes can)");
+		if (this.cell !== null) {
+			return;
+		}
+		faNeedSharedMemory("a Channel");
+		const memory = new SharedArrayBuffer(16 + (1 << 20));
+		this.cell = new Int32Array(memory, 0, 4);
+		this.bytes = new Uint8Array(memory, 16);
+		const items = this.items.slice(this.head);
+		for (const sender of this.senders.splice(0)) {
+			items.push(sender.value);
+			sender.resolve(true);
+		}
+		this.write(items);
+		Atomics.store(this.cell, 1, this.closed ? 1 : 0);
+		this.items = [];
+		this.head = 0;
+		/** @type {string} */
+		this.$faShared = "channel";
+		for (const receiver of this.receivers.splice(0)) {
+			const poll = () => {
+				const value = this.pollReceive(FaChannel);
+				if (value === FaChannel) {
+					setTimeout(poll, 1);
+				} else {
+					receiver.resolve(value);
+				}
+			};
+			poll();
+		}
+	}
+
+	/** Takes the lock word of the shared queue (held for a few operations). */
+	lock() {
+		const cell = /** @type {Int32Array} */ (this.cell);
+		while (Atomics.compareExchange(cell, 0, 0, 1) !== 0) {
+			// another thread holds it briefly
+		}
+	}
+
+	/**
+	 * Gives the lock word back; a change wakes the waiting threads.
+	 * @param {boolean} changed
+	 */
+	unlock(changed) {
+		const cell = /** @type {Int32Array} */ (this.cell);
+		Atomics.store(cell, 0, 0);
+		if (changed) {
+			Atomics.add(cell, 3, 1);
+			Atomics.notify(cell, 3);
+		}
+	}
+
+	/** @returns {any[]} the shared queue (the lock is held) */
+	read() {
+		const cell = /** @type {Int32Array} */ (this.cell);
+		const shared = /** @type {Uint8Array} */ (this.bytes);
+		const bytes = shared.slice(0, Atomics.load(cell, 2));
+		return JSON.parse(new TextDecoder().decode(bytes), (_, item) => {
+			if (item !== null && typeof item === "object") {
+				if ("$b" in item) return BigInt(item.$b);
+				if ("$n" in item) return undefined;
+			}
+			return item;
+		});
+	}
+
+	/**
+	 * Writes the shared queue (the lock is held, or the channel not shared yet).
+	 * @param {any[]} items
+	 */
+	write(items) {
+		const cell = /** @type {Int32Array} */ (this.cell);
+		const text = JSON.stringify(items, (_, item) =>
+			typeof item === "bigint" ? { $b: item.toString() } : item === undefined ? { $n: 0 } : item,
+		);
+		const bytes = /** @type {Uint8Array} */ (this.bytes);
+		const { read, written } = new TextEncoder().encodeInto(text, bytes);
+		if (read < text.length) {
+			throw new RangeError("the values in a channel shared with a worker are too large");
+		}
+		Atomics.store(cell, 2, written);
+	}
+
+	/**
+	 * Sends a value through the shared queue.
+	 * @param {any} value
+	 * @returns {number} 1: sent, 0: full, -1: closed
+	 */
+	pollSend(value) {
+		const cell = /** @type {Int32Array} */ (this.cell);
+		this.lock();
+		if (Atomics.load(cell, 1) === 1) {
+			this.unlock(false);
+			return -1;
+		}
+		const items = this.read();
+		if (items.length >= this.capacity) {
+			this.unlock(false);
+			return 0;
+		}
+		items.push(value);
+		this.write(items);
+		this.unlock(true);
+		return 1;
+	}
+
+	/**
+	 * Receives a value from the shared queue.
+	 * @param {any} waiting what to give while there is none and the channel is open
+	 * @returns {any} the value, `none` once closed and empty, else `waiting`
+	 */
+	pollReceive(waiting) {
+		const cell = /** @type {Int32Array} */ (this.cell);
+		this.lock();
+		const items = this.read();
+		if (items.length === 0) {
+			const closed = Atomics.load(cell, 1) === 1;
+			this.unlock(false);
+			return closed ? undefined : waiting;
+		}
+		const value = items.shift();
+		this.write(items);
+		this.unlock(true);
+		return value;
 	}
 
 	close() {
+		if (this.cell !== null) {
+			this.lock();
+			Atomics.store(this.cell, 1, 1);
+			this.unlock(true);
+			return;
+		}
 		this.closed = true;
 		for (const receiver of this.receivers.splice(0)) {
 			receiver.resolve(undefined);

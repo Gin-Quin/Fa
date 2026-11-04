@@ -36,18 +36,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let point = self.tree.spans[at.index()];
 		let declaration = self.tree.spans[data.decl_node.index()];
-		(0..self.tree.nodes.len())
-			.filter_map(|index| {
-				let body = match self.view(NodeId::new(index)) {
+		let bodies = self.loop_bodies.get_or_init(|| {
+			(0..self.tree.nodes.len())
+				.filter_map(|index| match self.view(NodeId::new(index)) {
 					View::For { body, .. }
 					| View::While { body, .. }
 					| View::WhileLet { body, .. }
-					| View::Loop(body) => body,
-					_ => return None,
-				};
-				let span = self.tree.spans[body.index()];
-				(span.start <= point.start && span.end >= point.end).then_some(span)
-			})
+					| View::Loop(body) => Some(self.tree.spans[body.index()]),
+					_ => None,
+				})
+				.collect()
+		});
+		bodies
+			.iter()
+			.filter(|span| span.start <= point.start && span.end >= point.end)
 			.min_by_key(|span| span.end - span.start)
 			.is_some_and(|span| declaration.end <= span.start)
 	}

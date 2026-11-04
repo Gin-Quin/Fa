@@ -32,7 +32,7 @@ function word = (seed: UInt64): String => {
 	word
 }
 
-let n = try Integer.parse(arguments.get(0) ?? "4000000")
+let n = 4_000_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
 
 mutable log: Array<Event> = []
 mutable r: UInt64 = 12345

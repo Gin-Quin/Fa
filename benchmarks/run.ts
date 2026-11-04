@@ -32,6 +32,8 @@ const gooseCompiler = findGooseCompiler();
 const gooseModulesDirectory = join(benchmarksDirectory, "goose");
 /** The line of a Goose program that holds its size, as in the Goose benchmark suite. */
 const gooseSizeLine = /^(\s*let\s+\w+\s*=\s*)(\d+)(\s*;.*\/\/\s*BENCH_N.*)$/m;
+/** The same line in a Fa port of the Goose suite: a module constant, as in the Goose version. */
+const faSizeLine = /^(let\s+\w+\s*=\s*)([\d_]+)(\s*--\s*BENCH_N.*)$/m;
 
 /** Small sizes for `--quick`: each runs in a few milliseconds, to check that everything works. */
 const quickSizes: Record<string, number> = {
@@ -332,9 +334,20 @@ function runBenchmark(name: string, options: Options): BenchmarkResult {
 	const directory = join(buildDirectory, name);
 	mkdirSync(directory, { recursive: true });
 	const rustSource = join(benchmarksDirectory, name, "main.rs");
-	const faSource = join(benchmarksDirectory, name, "main.fa");
 	const size = options.quick ? quickSizes[name] : options.size;
 	const sizeArguments = size === undefined ? [] : [String(size)];
+	// a port with a `-- BENCH_N` constant takes its size there (rewritten), not from its arguments
+	let faSource = join(benchmarksDirectory, name, "main.fa");
+	let faArguments = sizeArguments;
+	if (existsSync(faSource) && faSizeLine.test(readFileSync(faSource, "utf8"))) {
+		faArguments = [];
+		if (size !== undefined) {
+			const sized = join(directory, "fa-source", "main.fa");
+			mkdirSync(join(directory, "fa-source"), { recursive: true });
+			writeFileSync(sized, readFileSync(faSource, "utf8").replace(faSizeLine, `$1${size}$3`));
+			faSource = sized;
+		}
+	}
 
 	const rustBinary = join(directory, "rust");
 	const rustCheckedBinary = join(directory, "rust-checked");
@@ -398,7 +411,7 @@ function runBenchmark(name: string, options: Options): BenchmarkResult {
 			continue;
 		}
 		result.fa[target] = {
-			...timeProgram([...built.command, ...sizeArguments], expected, options.runs),
+			...timeProgram([...built.command, ...faArguments], expected, options.runs),
 			bytes: built.bytes,
 		};
 	}
@@ -408,7 +421,7 @@ function runBenchmark(name: string, options: Options): BenchmarkResult {
 	result.faNativeChecked =
 		"status" in checked
 			? checked
-			: timeProgram([...checked.command, ...sizeArguments], expected, options.runs);
+			: timeProgram([...checked.command, ...faArguments], expected, options.runs);
 	const goose = buildGoose(
 		join(benchmarksDirectory, name, "main.goose"),
 		join(directory, "goose"),

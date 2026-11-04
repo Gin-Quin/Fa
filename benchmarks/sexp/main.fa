@@ -141,7 +141,7 @@ function walk = (node: Sexp, pass: Integer): Integer => when node is {
 	}
 }
 
-let n = try Integer.parse(arguments.get(0) ?? "20000")
+let n = 20_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
 
 mutable generator = Generator { text = "" }
 mutable seed: UInt64 = 12345

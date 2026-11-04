@@ -250,7 +250,7 @@ function evaluate = (expression: Expression): UInt64 throws CalcError => when ex
 	}
 }
 
-let n = try Integer.parse(arguments.get(0) ?? "400000")
+let n = 400_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
 
 mutable seed: UInt64 = 12345
 mutable ok = 0

@@ -54,7 +54,7 @@ function allocate = (nodes: Array<Node>, free: Array<UInt32>, node: Node): UInt3
 	index
 }
 
-let n = try Integer.parse(arguments.get(0) ?? "2000000")
+let n = 2_000_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
 let capacity = n // 8
 let keyCount = capacity * 2
 assert keyCount > 0

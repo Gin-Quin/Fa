@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::analysis::{FieldDecl, FieldValue, ObjectInfo};
+use crate::analysis::{FieldDecl, FieldValue, NodeFlags, ObjectInfo};
 use crate::builtins;
 use crate::check::{PlaceInfo, Walker};
 use crate::diagnostics::Code;
@@ -1387,6 +1387,12 @@ impl Walker<'_> {
 		match self.view(target) {
 			View::Name(_) | View::Access { .. } | View::Index { .. } => {
 				let mut place = self.check_place(target);
+				// below a narrowed local, the place is its payload (`maybe.count
+				// = 1` after `if maybe is not none`): the read's narrowed type
+				let name = self.strip_groups(target);
+				if self.a.flags_of(name).contains(NodeFlags::NARROWED) {
+					place.ty = self.type_of(name);
+				}
 				// a parameter is changed through `mutates` (M2: effects)
 				if let Some(symbol) = place.symbol
 					&& matches!(

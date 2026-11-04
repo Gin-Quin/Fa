@@ -12,7 +12,7 @@
 //!   it succeeded. A raised error goes to the innermost `catch` of the
 //!   function, else to the caller, else (top level) ends the program.
 
-use fa_analyzer::analysis::FieldValue;
+use fa_analyzer::analysis::{FieldValue, NodeFlags};
 use fa_analyzer::builtins::errors::{ERRORS, PRELUDE_MODULE};
 use fa_analyzer::ids::{NodeId, NominalId, TypeId};
 use fa_analyzer::symbols::Resolution;
@@ -1347,7 +1347,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let Resolution::Local(symbol) = resolution else {
 					return Err(self.unsupported(node.index(), "this place"));
 				};
-				self.slot_of(symbol, node)
+				let slot = self.slot_of(symbol, node)?;
+				if self.flags(node).contains(NodeFlags::NARROWED) {
+					// a narrowed local designates its payload (patterns.rs)
+					let narrowed = self.node_repr(node)?;
+					return self.payload_place(slot, narrowed, node);
+				}
+				Ok(slot)
 			}
 			View::Group(inner) => self.place(inner),
 			View::Index { target, index } => match self.tuple_place(target, index)? {

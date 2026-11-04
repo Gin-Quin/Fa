@@ -4828,34 +4828,47 @@ define i32 @fa_next_code_point(ptr nocapture noundef readonly %0, i64 noundef %1
 ; Function Attrs: nounwind optsize
 define noundef i32 @fa_string_get(ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3, ptr nocapture noundef writeonly %4) local_unnamed_addr #2 {
   %6 = icmp sgt i64 %2, -1
-  br i1 %6, label %19, label %7
+  br i1 %6, label %25, label %7
 
 7:                                                ; preds = %5
   %8 = icmp slt i64 %3, 0
   %9 = select i1 %8, i64 %1, i64 0
   %10 = add nsw i64 %9, %3
   %11 = icmp ult i64 %10, %1
-  br i1 %11, label %12, label %21
+  br i1 %11, label %12, label %27
 
 12:                                               ; preds = %7
-  %13 = getelementptr inbounds i8, ptr %0, i64 %10
-  %14 = load i8, ptr %13, align 1, !tbaa !2
-  %15 = zext i8 %14 to i64
-  %16 = getelementptr inbounds i8, ptr @ascii_table, i64 %15
-  store ptr %16, ptr %4, align 8, !tbaa.struct !13
-  %17 = getelementptr inbounds i8, ptr %4, i64 8
-  store i64 1, ptr %17, align 8, !tbaa.struct !14
-  %18 = getelementptr inbounds i8, ptr %4, i64 16
+  %13 = and i64 %2, 9223372036854775807
+  %14 = icmp eq i64 %13, 0
+  %15 = getelementptr inbounds i8, ptr %0, i64 %10
+  br i1 %14, label %16, label %19
+
+16:                                               ; preds = %12
+  store ptr %15, ptr %4, align 8, !tbaa !16
+  %17 = getelementptr inbounds %struct.FaString, ptr %4, i64 0, i32 1
+  store i64 1, ptr %17, align 8, !tbaa !21
+  %18 = getelementptr inbounds %struct.FaString, ptr %4, i64 0, i32 2
   store i64 -9223372036854775808, ptr %18, align 8, !tbaa !22
-  br label %21
+  br label %27
 
-19:                                               ; preds = %5
-  %20 = tail call fastcc i32 @string_get_slow(ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3, ptr noundef %4) #49
-  br label %21
+19:                                               ; preds = %12
+  %20 = load i8, ptr %15, align 1, !tbaa !2
+  %21 = zext i8 %20 to i64
+  %22 = getelementptr inbounds i8, ptr @ascii_table, i64 %21
+  store ptr %22, ptr %4, align 8, !tbaa.struct !13
+  %23 = getelementptr inbounds i8, ptr %4, i64 8
+  store i64 1, ptr %23, align 8, !tbaa.struct !14
+  %24 = getelementptr inbounds i8, ptr %4, i64 16
+  store i64 -9223372036854775808, ptr %24, align 8, !tbaa !22
+  br label %27
 
-21:                                               ; preds = %7, %19, %12
-  %22 = phi i32 [ 1, %12 ], [ %20, %19 ], [ 0, %7 ]
-  ret i32 %22
+25:                                               ; preds = %5
+  %26 = tail call fastcc i32 @string_get_slow(ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3, ptr noundef %4) #49
+  br label %27
+
+27:                                               ; preds = %7, %25, %19, %16
+  %28 = phi i32 [ 1, %16 ], [ 1, %19 ], [ %26, %25 ], [ 0, %7 ]
+  ret i32 %28
 }
 
 ; Function Attrs: noinline nounwind optsize

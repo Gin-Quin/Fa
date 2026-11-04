@@ -2004,6 +2004,14 @@ FA_EXPORT int32_t fa_string_get(const uint8_t *text, size_t length, size_t capac
 		if ((uint64_t)index >= (uint64_t)length) {
 			return 0;
 		}
+		if ((capacity & ~SIMPLE) == 0) {
+			// a static text (a literal) lives as long as the program: the
+			// character is a view of it, whose byte an append then loads once
+			out->bytes = text + index;
+			out->length = 1;
+			out->capacity = SIMPLE;
+			return 1;
+		}
 		*out = ascii_string(text[index]);
 		out->capacity = SIMPLE; // the source already excludes '\r'
 		return 1;

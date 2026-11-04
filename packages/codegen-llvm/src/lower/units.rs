@@ -81,6 +81,10 @@ pub(crate) struct Split<'ctx> {
 	reached: Option<FxHashSet<String>>,
 	/// The module of each function of another unit declared.
 	remote_modules: FxHashMap<FunctionValue<'ctx>, String>,
+	/// The type each type parameter stands for in the instances made so
+	/// far, by its representation there: the type arguments of a call of
+	/// another unit's generic function from inside an instance.
+	param_types: FxHashMap<(fa_analyzer::ids::ParamId, Repr), TypeId>,
 }
 
 /// An instance of another unit's generic function: its key and its type
@@ -149,6 +153,7 @@ impl<'ctx> Split<'ctx> {
 			elsewhere: FxHashSet::default(),
 			reached: None,
 			remote_modules: FxHashMap::default(),
+			param_types: FxHashMap::default(),
 		}
 	}
 }
@@ -264,6 +269,44 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 		}
 		Ok(())
+	}
+
+	/// A type argument as the type it stands for in the instance being
+	/// lowered (a type parameter of the instance: the type it was made for).
+	fn concrete_type(&self, ty: TypeId) -> TypeId {
+		let Some(split) = self.split.as_ref() else {
+			return ty;
+		};
+		match self.types().kind(ty) {
+			TypeKind::Param(param) => self
+				.bindings
+				.borrow()
+				.get(&param)
+				.and_then(|&repr| split.param_types.get(&(param, repr)).copied())
+				.unwrap_or(ty),
+			_ => ty,
+		}
+	}
+
+	/// Notes the types an instance of a generic function is made for (its
+	/// type parameters' representations in it, `calls.rs`).
+	pub(crate) fn note_instance_types(
+		&mut self,
+		generics: &[fa_analyzer::ids::ParamId],
+		arguments: &[TypeId],
+		reprs: &[Repr],
+	) {
+		if self.split.is_none() {
+			return;
+		}
+		let concrete: Vec<TypeId> = arguments
+			.iter()
+			.map(|&argument| self.concrete_type(argument))
+			.collect();
+		let split = self.split_mut();
+		for ((&param, &argument), &repr) in generics.iter().zip(&concrete).zip(reprs) {
+			split.param_types.entry((param, repr)).or_insert(argument);
+		}
 	}
 
 	/// Whether the program is compiled per unit.
@@ -496,7 +539,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let Some(list) = self.analysis.instantiation(node) else {
 				return Err(self.unsupported(node.index(), "this generic call"));
 			};
-			let arguments: Vec<TypeId> = self.types().list_items(list).to_vec();
+			let arguments: Vec<TypeId> = self
+				.types()
+				.list_items(list)
+				.iter()
+				.map(|&argument| self.concrete_type(argument))
+				.collect();
 			if arguments
 				.iter()
 				.any(|&argument| self.mentions_param(argument))
@@ -865,6 +913,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			for &argument in arguments {
 				reprs.push(self.repr_of(argument, keyed.node.index())?);
 			}
+			let generics = self.generic_functions[&keyed.node].generics.clone();
+			self.note_instance_types(&generics, arguments, &reprs);
 			let instance = self.instance_of(keyed.node, reprs)?;
 			let name = instance_symbol(self.types(), *key, arguments);
 			let value = self.functions[&instance].value;

@@ -558,6 +558,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		for argument in &arguments {
 			reprs.push(self.repr_of(*argument, call.index())?);
 		}
+		if self.is_split() {
+			// the types of the instance (`units.rs`)
+			let generics = self.generic_functions[&declaration].generics.clone();
+			self.note_instance_types(&generics, &arguments, &reprs);
+		}
 		self.instance_of(declaration, reprs)
 	}
 

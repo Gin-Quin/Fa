@@ -51,6 +51,11 @@ export namespace = {
 	function pair(Value) = (value: Value): Array(Value) => [value, value]
 	function measure(Value) = (values: Array(Value)): Integer => double(values.length) + base
 }
+-- file: library/wrap.fa
+export namespace = {
+	function pick(Item) = (items: Array(Item), fallback: Item): Item => generic.firstOr(items, fallback)
+	function twice(Item) = (item: Item): Integer => generic.pair(item).length
+}
 -- file: library/user.fa
 export function = (size: Integer): Integer => generic.firstOr([size], 0) + shapes.area(shapes.shape(size))
 -- file: application/main.fa
@@ -64,6 +69,7 @@ export function = (arguments: Array(String)): Integer => {
 	console.log(missing, library.shapes.describe(7))
 	console.log(library.generic.firstOr(["x"], "y"), library.generic.pair(3), library.generic.measure([1, 2, 3]))
 	console.log(library.user(2), library.shapes.count())
+	console.log(library.wrap.pick([9], 0), library.wrap.pick(["p"], "q"), library.wrap.twice(1.5))
 	library.shapes.count() - 5
 }
 -- prints: 12 a
@@ -73,4 +79,5 @@ export function = (arguments: Array(String)): Integer => {
 -- prints: -1 7 cm
 -- prints: x [3, 3] 16
 -- prints: 6 5
+-- prints: 9 p 2
 -- exit: 0

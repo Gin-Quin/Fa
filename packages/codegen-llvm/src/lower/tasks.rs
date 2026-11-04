@@ -337,7 +337,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A result read from a promise, as a function returns it.
-	fn from_promise_raw(
+	fn raw_of_promise(
 		&self,
 		raw: BasicValueEnum<'ctx>,
 		ret: Repr,
@@ -383,7 +383,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let raw = self
 			.builder
 			.build_load(self.promise_raw_type(ret), field, "result")?;
-		self.from_promise_raw(raw, ret, throws)
+		self.raw_of_promise(raw, ret, throws)
 	}
 
 	/// The result of the tasks of a `Task(T) throws E` type.
@@ -4046,7 +4046,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let raw = this
 				.builder
 				.build_load(this.promise_raw_type(ret), result, "")?;
-			match this.from_promise_raw(raw, ret, throws)? {
+			match this.raw_of_promise(raw, ret, throws)? {
 				Some(raw) => this.drop_raw(raw, ret, throws),
 				None => Ok(()),
 			}

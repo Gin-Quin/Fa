@@ -3,7 +3,7 @@ allocas:
   %local = alloca i64, align 8
   %owns_parameters = alloca i1, align 1
   %parameter = alloca i64, align 8
-  %promise = alloca { { ptr, ptr, ptr, i32, i32 }, i64 }, align 16
+  %promise = alloca { { ptr, ptr, ptr, i32, i32 }, { i64, ptr } }, align 16
   br label %start
 
 start:                                            ; preds = %allocas
@@ -19,7 +19,7 @@ coro_allocate:                                    ; preds = %start
 coro_begin:                                       ; preds = %coro_allocate, %start
   %memory = phi ptr [ null, %start ], [ %5, %coro_allocate ]
   %6 = call ptr @llvm.coro.begin(token %2, ptr %memory)
-  %7 = getelementptr inbounds { { ptr, ptr, ptr, i32, i32 }, i64 }, ptr %promise, i32 0, i32 0
+  %7 = getelementptr inbounds { { ptr, ptr, ptr, i32, i32 }, { i64, ptr } }, ptr %promise, i32 0, i32 0
   store { ptr, ptr, ptr, i32, i32 } { ptr null, ptr null, ptr null, i32 4, i32 0 }, ptr %7, align 8
   store i64 %0, ptr %parameter, align 8
   %8 = and i32 %1, 2
@@ -81,21 +81,22 @@ await:                                            ; preds = %first_turn
 
 awaited:                                          ; preds = %resumed1, %first_turn
   %promise3 = getelementptr inbounds i8, ptr %task, i64 16
-  %20 = getelementptr inbounds { { ptr, ptr, ptr, i32, i32 }, i64 }, ptr %promise3, i32 0, i32 1
-  %result = load i64, ptr %20, align 8
-  %21 = getelementptr inbounds { ptr, ptr, ptr, i32, i32 }, ptr %promise3, i32 0, i32 4
-  %22 = load i32, ptr %21, align 4
-  %23 = and i32 %22, -3
-  store i32 %23, ptr %21, align 4
-  %24 = getelementptr inbounds ptr, ptr %task, i64 1
-  %25 = load ptr, ptr %24, align 8
-  call fastcc void %25(ptr %task)
+  %20 = getelementptr inbounds { { ptr, ptr, ptr, i32, i32 }, { i64, ptr } }, ptr %promise3, i32 0, i32 1
+  %21 = getelementptr inbounds { i64, ptr }, ptr %20, i32 0, i32 0
+  %result = load i64, ptr %21, align 8
+  %22 = getelementptr inbounds { ptr, ptr, ptr, i32, i32 }, ptr %promise3, i32 0, i32 4
+  %23 = load i32, ptr %22, align 4
+  %24 = and i32 %23, -3
+  store i32 %24, ptr %22, align 4
+  %25 = getelementptr inbounds ptr, ptr %task, i64 1
+  %26 = load ptr, ptr %25, align 8
+  call fastcc void %26(ptr %task)
   store i64 %result, ptr %local, align 8
-  %26 = load i64, ptr %local, align 8
-  %27 = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %26, i64 2)
-  %28 = extractvalue { i64, i1 } %27, 0
-  %29 = extractvalue { i64, i1 } %27, 1
-  br i1 %29, label %check_failed, label %check_passed
+  %27 = load i64, ptr %local, align 8
+  %28 = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %27, i64 2)
+  %29 = extractvalue { i64, i1 } %28, 0
+  %30 = extractvalue { i64, i1 } %28, 1
+  br i1 %30, label %check_failed, label %check_passed
 
 resumed1:                                         ; preds = %await
   br label %awaited
@@ -105,17 +106,19 @@ cancelled2:                                       ; preds = %await
   br label %coro_cleanup
 
 check_failed:                                     ; preds = %awaited
-  %30 = sext i64 %26 to i128
-  %31 = mul i128 %30, 2
-  %32 = trunc i128 %31 to i64
-  %33 = lshr i128 %31, 64
-  %34 = trunc i128 %33 to i64
-  call void @fa_overflow(i64 %32, i64 %34, i32 1, ptr @fa.constant.1)
+  %31 = sext i64 %27 to i128
+  %32 = mul i128 %31, 2
+  %33 = trunc i128 %32 to i64
+  %34 = lshr i128 %32, 64
+  %35 = trunc i128 %34 to i64
+  call void @fa_overflow(i64 %33, i64 %35, i32 1, ptr @fa.constant.1)
   unreachable
 
 check_passed:                                     ; preds = %awaited
-  %35 = getelementptr inbounds { { ptr, ptr, ptr, i32, i32 }, i64 }, ptr %promise, i32 0, i32 1
-  store i64 %28, ptr %35, align 8
+  %36 = insertvalue { i64, ptr } undef, i64 %29, 0
+  %37 = insertvalue { i64, ptr } %36, ptr null, 1
+  %38 = getelementptr inbounds { { ptr, ptr, ptr, i32, i32 }, { i64, ptr } }, ptr %promise, i32 0, i32 1
+  store { i64, ptr } %37, ptr %38, align 8
   br label %coro_finish
 
 coro_resumed_after_end:                           ; preds = %coro_finish
@@ -129,7 +132,7 @@ define internal fastcc ptr @fa.fetch.async(i64 %0, i32 %1) {
 allocas:
   %owns_parameters = alloca i1, align 1
   %parameter = alloca i64, align 8
-  %promise = alloca { { ptr, ptr, ptr, i32, i32 }, i64 }, align 16
+  %promise = alloca { { ptr, ptr, ptr, i32, i32 }, { i64, ptr } }, align 16
   br label %start
 
 start:                                            ; preds = %allocas
@@ -145,7 +148,7 @@ coro_allocate:                                    ; preds = %start
 coro_begin:                                       ; preds = %coro_allocate, %start
   %memory = phi ptr [ null, %start ], [ %5, %coro_allocate ]
   %6 = call ptr @llvm.coro.begin(token %2, ptr %memory)
-  %7 = getelementptr inbounds { { ptr, ptr, ptr, i32, i32 }, i64 }, ptr %promise, i32 0, i32 0
+  %7 = getelementptr inbounds { { ptr, ptr, ptr, i32, i32 }, { i64, ptr } }, ptr %promise, i32 0, i32 0
   store { ptr, ptr, ptr, i32, i32 } { ptr null, ptr null, ptr null, i32 4, i32 0 }, ptr %7, align 8
   store i64 %0, ptr %parameter, align 8
   %8 = and i32 %1, 2
@@ -218,8 +221,10 @@ check_failed:                                     ; preds = %resumed1
   unreachable
 
 check_passed:                                     ; preds = %resumed1
-  %28 = getelementptr inbounds { { ptr, ptr, ptr, i32, i32 }, i64 }, ptr %promise, i32 0, i32 1
-  store i64 %21, ptr %28, align 8
+  %28 = insertvalue { i64, ptr } undef, i64 %21, 0
+  %29 = insertvalue { i64, ptr } %28, ptr null, 1
+  %30 = getelementptr inbounds { { ptr, ptr, ptr, i32, i32 }, { i64, ptr } }, ptr %promise, i32 0, i32 1
+  store { i64, ptr } %29, ptr %30, align 8
   br label %coro_finish
 
 coro_resumed_after_end:                           ; preds = %coro_finish

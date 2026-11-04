@@ -5,7 +5,7 @@ async function compute = (value: Integer): Integer => value + 1
 async function wait = (task: Task(Integer)): Integer => await task catch error => -1
 async function main = () => {
 	let local = start compute(1)
-	console.log(await local catch error => -1) -- prints: 2
+	console.log(await local) -- prints: 2
 	let holder = Holder { task = start compute(10) }
 	console.log(await holder.task catch error => -1) -- prints: 11
 	console.log(await wait(start compute(20))) -- prints: 21

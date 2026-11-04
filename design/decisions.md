@@ -401,7 +401,7 @@ What the merged Goose work decided for the native backend (details and condition
 - **Optimizations are generic.** A representation or a shortcut is chosen from types, proven uses and the target; never from a program's name, an input size or an expected output. A check (bounds, keys, divisors, conversions) stays until the analyzer proves it away.
 - **One region mechanism: root arenas.** Recursive values built by their builders live in page-aligned chunks owned by the root (`trees.rs`), under a closed, conservative proof; any other shape keeps the general ownership path. The sixth shift's statement regions were measured on top of it, gained nothing, and were not merged.
 - **Small unions are inline, up to 3 machine words of payload** (the size of a string value). Larger payloads stay boxed: inlining a 40-byte payload widened `Array(Event)` and slowed `records` by 40 %. The next step is variable-size payloads in collection buffers, not a larger budget.
-- **Recursive edges are nullable pointers**, and collection slots store recursive objects directly: an edge is boxed only where the layout would otherwise be infinite.
+- **An optional pointer is a nullable pointer** (recursive edges, boxed unions, arrays), and collection slots store recursive objects directly: an edge is boxed only where the layout would otherwise be infinite.
 - **Direct calls borrow aggregates** by address (the "Parameters are never copied" decision above, for synchronous direct calls; indirect calls and coroutines to follow).
 - **Huge pages on native Linux**: 2 MiB spans advised `MADV_HUGEPAGE`, with an ordinary fallback; a larger RSS for small programs is accepted for the faster address translation of large heaps.
 

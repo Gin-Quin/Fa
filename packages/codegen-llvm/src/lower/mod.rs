@@ -23,6 +23,7 @@ mod aliasing;
 mod arith;
 mod arrays;
 mod calls;
+mod capacity;
 mod closures;
 mod columns;
 mod constants;
@@ -216,6 +217,10 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	overflow_checks: bool,
 	/// The slots of the top-level locals that functions read (globals).
 	global_slots: FxHashMap<SymbolId, Slot<'ctx>>,
+	/// The globals of module-level `let` values computed at run time: set
+	/// once before any function reads them, so a function's loads of them
+	/// are `!invariant.load` (not reloaded after calls and stores).
+	invariant_globals: rustc_hash::FxHashSet<PointerValue<'ctx>>,
 	/// The global id of every member type of an anonymous union.
 	type_ids: std::cell::RefCell<FxHashMap<TypeId, u64>>,
 	/// The `mutable use` references: the slot holding the address of the
@@ -354,6 +359,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			pending_instances: Vec::new(),
 			bindings: std::cell::RefCell::new(FxHashMap::default()),
 			global_slots: FxHashMap::default(),
+			invariant_globals: rustc_hash::FxHashSet::default(),
 			overflow_checks: true,
 			cleanups: std::cell::RefCell::new(Vec::new()),
 			item_results: Vec::new(),
@@ -676,6 +682,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.build_load(self.llvm_type(slot.repr), slot.pointer, "")?;
 		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&value) {
 			self.tag(instruction, false)?;
+			// a module `let` read by a function: initialized before any call
+			if self
+				.frame
+				.as_ref()
+				.is_some_and(|frame| frame.owner.is_some())
+				&& self.invariant_globals.contains(&slot.pointer)
+			{
+				let kind = self.context.get_kind_id("invariant.load");
+				instruction
+					.set_metadata(self.context.metadata_node(&[]), kind)
+					.map_err(|error| Error::Llvm(error.to_string()))?;
+			}
 		}
 		let value = self.freeze_union_padding(&self.builder, slot.repr, value);
 		Ok(Val::new(slot.repr, value))
@@ -923,6 +941,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		Ok(())
 	}
 
+	/// Whether a parameter of this representation is passed as a pointer to
+	/// the caller's value (never copied): every aggregate but a function
+	/// value, outside of asynchronous programs (whose tasks may outlive the
+	/// caller's places). The same for direct and indirect calls.
+	pub(crate) fn borrows_parameter(&self, repr: Repr) -> bool {
+		!self.tasks.asynchronous
+			&& !matches!(repr, Repr::Function(_))
+			&& self.llvm_type(repr).is_struct_type()
+	}
+
 	/// Declares a function (or an instance of a generic one, under the
 	/// current bindings): its IR signature.
 	pub(crate) fn declare_function(
@@ -979,27 +1007,29 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				if !repr.has_value() {
 					return Err(self.unsupported(param.node.index(), "this parameter type"));
 				}
-				// Keep the coroutine and indirect-call ABI unchanged. Synchronous
-				// direct calls borrow aggregates instead of expanding them into
-				// registers and spilling a new copy in every recursive callee.
-				if !self.tasks.asynchronous
-					&& !lambda && param.default.is_none()
-					&& !by_pointer[position]
-					&& !matches!(repr, Repr::Function(_))
-					&& self.llvm_type(repr).is_struct_type()
-				{
+				// Parameters are never copied: synchronous calls, direct or through
+				// a function value, borrow aggregates instead of expanding them
+				// into registers and spilling a new copy in every callee.
+				if !by_pointer[position] && self.borrows_parameter(repr) {
 					by_pointer[position] = true;
 					borrowed[position] = true;
 				}
 				if by_pointer[position] {
-					if param.default.is_some() {
+					if param.default.is_some() && !borrowed[position] {
 						return Err(self.unsupported(
 							param.node.index(),
 							"a changed parameter with a default value",
 						));
 					}
+					// a borrowed parameter with a default: the caller's place,
+					// or null and a false flag for the default (a lambda's
+					// callers give every argument)
+					let has_default = param.default.is_some() && !is_lambda;
 					types.push(self.pointer_type().into());
-					params.push((repr, false));
+					if has_default {
+						types.push(self.context.bool_type().into());
+					}
+					params.push((repr, has_default));
 					continue;
 				}
 				types.push(self.llvm_type(repr).into());
@@ -1240,6 +1270,50 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					.expect("a parameter")
 					.into_pointer_value();
 				index += 1;
+				let pointer = match (has_default, param.default) {
+					(true, Some(default)) => {
+						// not given: the default, in a slot the function owns
+						let flag = value.get_nth_param(index).expect("a flag").into_int_value();
+						index += 1;
+						let own = self.alloca(repr, "default_parameter")?;
+						let owned = self
+							.needs_drop(repr)
+							.then(|| self.alloca(Repr::Bool, "default"))
+							.transpose()?;
+						if let Some(owned) = owned {
+							self.builder.build_store(
+								owned.pointer,
+								self.context.bool_type().const_zero(),
+							)?;
+						}
+						let given_block = self.builder.get_insert_block().expect("a block");
+						let use_default = self.append_block("default");
+						let join = self.append_block("given");
+						self.builder
+							.build_conditional_branch(flag, join, use_default)?;
+						self.builder.position_at_end(use_default);
+						let default_value =
+							self.region(Some(repr), default, |this| this.expr(default))?;
+						self.store(own, default_value, default)?;
+						if let Some(owned) = owned {
+							self.builder.build_store(
+								owned.pointer,
+								self.context.bool_type().const_int(1, false),
+							)?;
+						}
+						let default_end = self.builder.get_insert_block().expect("a block");
+						self.branch_to(join)?;
+						self.builder.position_at_end(join);
+						let chosen = self.builder.build_phi(self.pointer_type(), "parameter")?;
+						chosen
+							.add_incoming(&[(&pointer, given_block), (&own.pointer, default_end)]);
+						if let Some(owned) = owned {
+							self.own_flagged(own, owned.pointer);
+						}
+						chosen.as_basic_value().into_pointer_value()
+					}
+					_ => pointer,
+				};
 				self.slots.insert(param.symbol, Slot { pointer, repr });
 				continue;
 			}
@@ -1597,6 +1671,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				global.set_constant(true);
 			} else {
 				global.set_initializer(&zero_of(ty));
+				if data.kind == SymbolKind::Let && !self.reactive_sources.contains_key(&symbol) {
+					self.invariant_globals.insert(global.as_pointer_value());
+				}
 			}
 			let slot = Slot {
 				pointer: global.as_pointer_value(),
@@ -1632,13 +1709,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		else {
 			return Ok(None);
 		};
-		let constant = self.comptime_value(node).or_else(|| match self.view(node) {
-			View::Integer(value) => Some(Value::Integer(value)),
-			View::Float(value) => Some(Value::Float(value)),
-			View::Boolean(value) => Some(Value::Boolean(value)),
-			View::String(value) => Some(Value::String(value.into())),
-			_ => None,
-		});
+		// the analyzer's constant expressions (literals, constant arithmetic,
+		// templates, other constants), then the values computed at compile time
+		let module_constant = self.analysis.module_constant(symbol).cloned();
+		let constant = module_constant
+			.or_else(|| self.comptime_value(node))
+			.or_else(|| match self.view(node) {
+				View::Integer(value) => Some(Value::Integer(value)),
+				View::Float(value) => Some(Value::Float(value)),
+				View::Boolean(value) => Some(Value::Boolean(value)),
+				View::String(value) => Some(Value::String(value.into())),
+				_ => None,
+			});
 		let Some(
 			value @ (Value::Integer(_) | Value::Float(_) | Value::Boolean(_) | Value::String(_)),
 		) = constant
@@ -2144,6 +2226,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// `target = value`: a local, a field.
 	fn assignment(&mut self, target: NodeId, value: NodeId) -> Result<Val<'ctx>, Error> {
+		if let Resolution::Local(symbol) = self.analysis.resolution(target)
+			&& self.analysis.symbols.symbol(symbol).kind == SymbolKind::Mutable
+			&& self.node_repr(target)? == Repr::Str
+			&& let View::Template { parts } = self.view(value)
+		{
+			let slot = self.place(target)?;
+			if let Some(result) = self.string_template(parts, Some(slot))? {
+				return Ok(result);
+			}
+		}
 		let value_lowered = self.expr(value)?;
 		if value_lowered.repr == Repr::Never {
 			return Ok(Val::never());
@@ -2173,6 +2265,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(Val::void());
 		}
 		let slot = self.place(target)?;
+		if slot.repr == Repr::Str
+			&& self
+				.constant_text(value)
+				.is_some_and(|text| text.is_empty())
+		{
+			self.call_runtime(
+				"fa_string_replace_buffer",
+				&[
+					self.usize.const_zero().into(),
+					self.simple_flag().into(),
+					slot.pointer.into(),
+				],
+			)?;
+			return Ok(Val::void());
+		}
 		let value_lowered = self.owned_as(value_lowered, slot.repr, Some(value))?;
 		// the value it replaces is dropped
 		let old = self.load(slot)?;

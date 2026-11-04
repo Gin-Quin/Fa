@@ -169,10 +169,17 @@ static FA_NORETURN void out_of_memory(void) {
 }
 
 static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length) {
-	// up to 16 bytes (words, characters): two overlapping loads and stores
-	// in place, without a call
-	if (length <= 16) {
-		if (length >= 8) {
+	// Up to 32 bytes: two bounded overlapping loads and stores, without
+	// a library call. Load both ends before writing either of them.
+	if (length <= 32) {
+		if (length >= 16) {
+			uint8_t first[16];
+			uint8_t last[16];
+			__builtin_memcpy(first, from, 16);
+			__builtin_memcpy(last, from + length - 16, 16);
+			__builtin_memcpy(to, first, 16);
+			__builtin_memcpy(to + length - 16, last, 16);
+		} else if (length >= 8) {
 			uint64_t first;
 			uint64_t last;
 			__builtin_memcpy(&first, from, 8);
@@ -206,6 +213,25 @@ static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length) {
 FA_EXPORT __attribute__((always_inline)) void fa_copy_bytes(uint8_t *to, const uint8_t *from,
                                                           size_t length) {
 	copy_bytes(to, from, length);
+}
+
+/// Small padding runs need only bounded stores, rather than a libc call.
+static void fill_bytes(uint8_t *to, uint8_t byte, size_t length) {
+	if (length <= 16) {
+		uint64_t word = UINT64_C(0x0101010101010101) * byte;
+		if (length >= 8) {
+			__builtin_memcpy(to, &word, 8);
+			__builtin_memcpy(to + length - 8, &word, 8);
+		} else if (length >= 4) {
+			uint32_t half = (uint32_t)word;
+			__builtin_memcpy(to, &half, 4);
+			__builtin_memcpy(to + length - 4, &half, 4);
+		} else if (length) {
+			to[0] = byte;
+			to[length / 2] = byte;
+			to[length - 1] = byte;
+		}
+	} else { __builtin_memset(to, byte, length); }
 }
 
 static size_t c_length(const char *text) {
@@ -278,6 +304,10 @@ FA_EXPORT FA_NORETURN void fa_terminate(int32_t code) {
 static FA_THREAD_LOCAL uint8_t *builder;
 static FA_THREAD_LOCAL size_t builder_length;
 static FA_THREAD_LOCAL size_t builder_capacity;
+/// The length of a prefix of the built text known to be simple (`SIMPLE`):
+/// pieces known to be simple extend it while it covers the whole text, so
+/// that taking the text scans only the rest.
+static FA_THREAD_LOCAL size_t builder_simple;
 
 static void reserve(size_t extra) {
 	if (builder_length + extra <= builder_capacity) {
@@ -298,12 +328,40 @@ static void reserve(size_t extra) {
 
 FA_EXPORT void fa_b_reset(void) {
 	builder_length = 0;
+	builder_simple = 0;
 }
 
 FA_EXPORT void fa_b_bytes(const uint8_t *bytes, size_t length) {
 	reserve(length);
 	copy_bytes(builder + builder_length, bytes, length);
 	builder_length += length;
+}
+
+/// Appends bytes known to be simple (ASCII other than '\r').
+static void append_simple(const uint8_t *bytes, size_t length) {
+	int covered = builder_simple == builder_length;
+	fa_b_bytes(bytes, length);
+	if (covered) {
+		builder_simple = builder_length;
+	}
+}
+
+/// Appends a string, simple when its capacity word says so.
+FA_EXPORT void fa_b_string(const uint8_t *bytes, size_t length, size_t capacity) {
+	if (capacity & SIMPLE) {
+		append_simple(bytes, length);
+	} else {
+		fa_b_bytes(bytes, length);
+	}
+}
+
+static size_t simple_flag(const uint8_t *bytes, size_t length);
+
+/// The `SIMPLE` flag of the built text: only its unknown part is scanned.
+static size_t builder_flag(void) {
+	return builder_simple == builder_length
+	           ? SIMPLE
+	           : simple_flag(builder + builder_simple, builder_length - builder_simple);
 }
 
 static void append_c(const char *text) {
@@ -321,9 +379,27 @@ FA_EXPORT void fa_b_line(int32_t fd) {
 	append_byte('\n');
 	fa_out(fd, builder, builder_length);
 	builder_length = 0;
+	builder_simple = 0;
 }
 
 static FaString owned_copy_with(const uint8_t *bytes, size_t length, size_t simple);
+
+static uint32_t size_class(size_t size, size_t *block);
+
+/// The size of the block that `fa_heap_alloc` gives for `size` bytes: a
+/// heap string's capacity, the room it has anyway, so that it grows less
+/// often (larger sizes are not rounded).
+static __attribute__((always_inline)) inline size_t string_block(size_t size) {
+	if (size <= 128) {
+		return size <= 8 ? 8 : (size + 7) & ~(size_t)7;
+	}
+	if (size > 8192) {
+		return size;
+	}
+	size_t block;
+	size_class(size, &block);
+	return block;
+}
 
 /// A new string owning a copy of `length` bytes (the empty string and the
 /// ASCII characters are static).
@@ -350,11 +426,12 @@ static FaString owned_copy_with(const uint8_t *bytes, size_t length, size_t simp
 		inline_string_tag(&small, length, simple ? simple : simple_flag(bytes, length));
 		return small;
 	}
-	uint8_t *copy = fa_alloc(length, 1);
+	size_t block = string_block(length);
+	uint8_t *copy = fa_alloc(block, 1);
 	copy_bytes(copy, bytes, length);
 	string.bytes = copy;
 	string.length = length;
-	string.capacity = length | (simple ? simple : simple_flag(copy, length));
+	string.capacity = block | (simple ? simple : simple_flag(copy, length));
 	return string;
 }
 
@@ -365,8 +442,9 @@ FA_EXPORT void fa_string_own(const uint8_t *bytes, size_t length, size_t capacit
 
 /// The built text as a new string.
 FA_EXPORT void fa_b_take(FaString *out) {
-	*out = owned_copy(builder, builder_length);
+	*out = owned_copy_with(builder, builder_length, builder_flag());
 	builder_length = 0;
+	builder_simple = 0;
 }
 
 // ── integers ────────────────────────────────────────────────────────────
@@ -381,16 +459,32 @@ static __attribute__((always_inline)) size_t decimal_u64(uint64_t value, int neg
 	    "6061626364656667686970717273747576777879"
 	    "8081828384858687888990919293949596979899";
 	size_t position = 24;
-	while (value >= 100) {
+	while (value > UINT32_MAX) {
 		uint64_t pair = value % 100;
 		value /= 100;
 		position -= 2;
 		__builtin_memcpy(digits + position, pairs + pair * 2, 2);
 	}
-	if (value >= 10) {
+	// Once the remainder fits, narrower division avoids a 128-bit multiply
+	// on 64-bit targets (and an i64 division on wasm).
+	uint32_t remaining = (uint32_t)value;
+	while (remaining >= 10000) {
+		uint32_t group = remaining % 10000;
+		remaining /= 10000;
+		position -= 4;
+		__builtin_memcpy(digits + position, pairs + (group / 100) * 2, 2);
+		__builtin_memcpy(digits + position + 2, pairs + (group % 100) * 2, 2);
+	}
+	if (remaining >= 100) {
+		uint32_t pair = remaining % 100;
+		remaining /= 100;
 		position -= 2;
-		__builtin_memcpy(digits + position, pairs + value * 2, 2);
-	} else { digits[--position] = (uint8_t)('0' + value); }
+		__builtin_memcpy(digits + position, pairs + pair * 2, 2);
+	}
+	if (remaining >= 10) {
+		position -= 2;
+		__builtin_memcpy(digits + position, pairs + remaining * 2, 2);
+	} else { digits[--position] = (uint8_t)('0' + remaining); }
 	if (negative) {
 		position -= 1;
 		digits[position] = '-';
@@ -398,10 +492,20 @@ static __attribute__((always_inline)) size_t decimal_u64(uint64_t value, int neg
 	return position;
 }
 
+/// Decimal parts of an interpolation live in the caller's 24-byte scratch
+/// buffer. Return the offset of the first digit, without packing a String.
+FA_EXPORT size_t fa_decimal_i64(int64_t value, uint8_t *digits) {
+	return decimal_u64(value < 0 ? 0 - (uint64_t)value : (uint64_t)value, value < 0, digits);
+}
+
+FA_EXPORT size_t fa_decimal_u64(uint64_t value, uint8_t *digits) {
+	return decimal_u64(value, 0, digits);
+}
+
 static void append_u64(uint64_t value, int negative) {
 	uint8_t digits[24];
 	size_t position = decimal_u64(value, negative, digits);
-	fa_b_bytes(digits + position, sizeof digits - position);
+	append_simple(digits + position, sizeof digits - position);
 }
 
 static void string_u64(uint64_t value, int negative, FaString *out) {
@@ -466,7 +570,7 @@ static void append_u128(unsigned __int128 value, int negative) {
 		position -= 1;
 		digits[position] = '-';
 	}
-	fa_b_bytes((const uint8_t *)digits + position, sizeof digits - position);
+	append_simple((const uint8_t *)digits + position, sizeof digits - position);
 }
 
 FA_EXPORT void fa_b_i64(int64_t value) {
@@ -493,7 +597,7 @@ FA_EXPORT void fa_b_u128(uint64_t low, uint64_t high) {
 }
 
 FA_EXPORT void fa_b_bool(int32_t value) {
-	append_c(value ? "true" : "false");
+	append_simple((const uint8_t *)(value ? "true" : "false"), value ? 4 : 5);
 }
 
 // ── floats (values brief D-5, D-6) ──────────────────────────────────────
@@ -774,12 +878,58 @@ FA_EXPORT void fa_concat(const uint8_t *left, size_t left_length, const uint8_t 
 		*out = small;
 		return;
 	}
-	uint8_t *bytes = fa_alloc(length, 1);
+	size_t block = string_block(length);
+	uint8_t *bytes = fa_alloc(block, 1);
 	copy_bytes(bytes, left, left_length);
 	copy_bytes(bytes + left_length, right, right_length);
 	out->bytes = bytes;
 	out->length = length;
-	out->capacity = length | simple_flag(bytes, length);
+	out->capacity = block | simple_flag(bytes, length);
+}
+
+/// A checked byte count for concatenation, bounded by the string layout.
+FA_EXPORT size_t fa_string_size(size_t left, size_t right) {
+	if (right >= KIND_MASK - left) { out_of_memory(); }
+	return left + right;
+}
+
+/// Allocate a template once all its expressions have been evaluated. Its
+/// caller fills exactly `length` bytes before exposing the owning string.
+FA_EXPORT uint8_t *fa_string_allocate(size_t length, size_t simple, FaString *out) {
+	*out = (FaString){0};
+	if (length <= INLINE_STRING_BYTES) {
+		inline_string_tag(out, length, simple);
+		return (uint8_t *)out;
+	}
+	// the whole block of its size class: room for later appends
+	size_t block = string_block(length);
+	uint8_t *bytes = fa_alloc(block, 1);
+	out->bytes = bytes;
+	out->length = length;
+	out->capacity = block | simple;
+	return bytes;
+}
+
+/// Replace a string whose new parts are proven disjoint from its buffer.
+/// Empty assignments retain capacity, like clearing a mutable collection.
+FA_EXPORT __attribute__((always_inline)) uint8_t *fa_string_replace_buffer(size_t length, size_t simple, FaString *out) {
+	int owned = string_owned(out->capacity);
+	size_t capacity = out->capacity & KIND_MASK;
+	const uint8_t *previous = out->bytes;
+	if (owned && length <= capacity) {
+		out->length = length;
+		out->capacity = capacity | simple;
+		return (uint8_t *)previous;
+	}
+	uint8_t *bytes = fa_string_allocate(length, simple, out);
+	if (owned) { fa_free((void *)previous, capacity, 1); }
+	return bytes;
+}
+
+FA_EXPORT void fa_string_finish(FaString *string) {
+	if (!(string->capacity & SIMPLE)) {
+		string->capacity |= simple_flag(string_bytes(string), string_length(string));
+	}
 }
 
 /// A template whose expressions have already been evaluated. The parts are
@@ -830,9 +980,10 @@ static __attribute__((noinline)) void string_grow(FaString *string, const uint8_
 	int owned = string_owned(string->capacity);
 	size_t grown = owned && capacity * 2 > needed ? capacity * 2 : needed;
 	if (grown >= KIND_MASK) { grown = KIND_MASK - 1; }
-	if (grown < 16) {
-		grown = 16;
+	if (grown < 32) {
+		grown = 32;
 	}
+	grown = string_block(grown);
 	uint8_t *block = fa_alloc(grown, 1);
 	copy_bytes(block, string_bytes(string), old_length);
 	copy_bytes(block + old_length, bytes, length);
@@ -918,6 +1069,115 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_append(FaString *string,
 		return;
 	}
 	string_append_slow(string, bytes, length, suffix_capacity);
+}
+
+/// `string + suffix` off its common path: a new string of the exact size
+/// (a sum is seldom grown further), the old block freed when owned.
+static __attribute__((noinline)) void string_plus_slow(FaString *string, const uint8_t *bytes,
+                                                       size_t length) {
+	FaString result;
+	fa_concat(string_bytes(string), string_length(string), bytes, length, &result);
+	if (string_owned(string->capacity)) {
+		fa_free((void *)string->bytes, string->capacity & KIND_MASK, 1);
+	}
+	*string = result;
+}
+
+/// `left + suffix` where the generated code owns `left` (a local at its last
+/// use): appended in place when its heap block has room, else a new string.
+FA_EXPORT __attribute__((always_inline)) void fa_string_plus(FaString *string,
+                                                             const uint8_t *bytes, size_t length,
+                                                             size_t suffix_capacity) {
+	size_t kind = string->capacity & ~SIMPLE;
+	if (__builtin_expect((suffix_capacity & SIMPLE) && kind < KIND_MASK &&
+	                         string->length + length <= kind,
+	                     1)) {
+		copy_bytes((uint8_t *)string->bytes + string->length, bytes, length);
+		string->length += length;
+		return;
+	}
+	if (length == 0) {
+		return;
+	}
+	if ((string->capacity & STRING_INLINE) || string_length(string) + length <= INLINE_STRING_BYTES) {
+		// short: inline, as an append makes it
+		fa_string_append(string, bytes, length, suffix_capacity);
+		return;
+	}
+	FaString copy = *string;
+	string_plus_slow(&copy, bytes, length);
+	*string = copy;
+}
+
+/// `fa_string_reserve` when the string has no room: a heap block twice as
+/// large, or as large as needed.
+static __attribute__((noinline)) void string_reserve_slow(FaString *string, size_t needed) {
+	size_t capacity = string->capacity;
+	size_t old_length = string_length(string);
+	int owned = string_owned(capacity);
+	size_t kind = capacity & KIND_MASK;
+	size_t grown = owned && kind * 2 > needed ? kind * 2 : needed;
+	if (grown < 32) {
+		grown = 32;
+	}
+	if (grown >= KIND_MASK) {
+		out_of_memory();
+	}
+	grown = string_block(grown);
+	uint8_t *block = fa_alloc(grown, 1);
+	copy_bytes(block, string_bytes(string), old_length);
+	if (owned) {
+		fa_free((void *)string->bytes, kind, 1);
+	}
+	string->bytes = block;
+	string->length = old_length;
+	string->capacity = grown | (old_length != 0 ? capacity & SIMPLE : SIMPLE);
+}
+
+/// Room for `extra` more bytes in a string (`text += "… {value} …"` before
+/// its parts, `reserve`): an inline string keeps its room when it is enough.
+FA_EXPORT __attribute__((always_inline)) void fa_string_reserve(FaString *string, size_t extra) {
+	size_t capacity = string->capacity;
+	size_t kind = capacity & ~SIMPLE;
+	size_t needed = string_length(string) + extra;
+	if (needed < extra) {
+		out_of_memory();
+	}
+	if (__builtin_expect(needed <= INLINE_STRING_BYTES || (kind < KIND_MASK && needed <= kind), 1)) {
+		return;
+	}
+	FaString copy = *string;
+	string_reserve_slow(&copy, needed);
+	*string = copy;
+}
+
+/// `text.capacity`: the bytes a string holds without a new block (its
+/// inline room, its heap block, its length when it shares static bytes).
+FA_EXPORT __attribute__((always_inline)) size_t fa_string_room(size_t length, size_t capacity) {
+	if (capacity & STRING_INLINE) {
+		return INLINE_STRING_BYTES;
+	}
+	size_t kind = capacity & KIND_MASK;
+	return kind == 0 || kind == KIND_MASK ? length : kind;
+}
+
+/// `String.from(text, capacity = n)`: a copy of the text with room for `n`
+/// bytes (inline when they fit).
+FA_EXPORT void fa_string_from(const uint8_t *bytes, size_t length, size_t capacity,
+                              size_t room, FaString *out) {
+	if (room <= length || room <= INLINE_STRING_BYTES) {
+		*out = owned_copy_with(bytes, length, capacity & SIMPLE);
+		return;
+	}
+	if (room >= KIND_MASK) {
+		out_of_memory();
+	}
+	size_t block = string_block(room);
+	uint8_t *copy = fa_alloc(block, 1);
+	copy_bytes(copy, bytes, length);
+	out->bytes = copy;
+	out->length = length;
+	out->capacity = block | (length == 0 ? SIMPLE : capacity & SIMPLE);
 }
 
 static __attribute__((noinline)) int32_t string_equal_bytes(const uint8_t *left,
@@ -1202,8 +1462,9 @@ FA_EXPORT size_t fa_graphemes(const uint8_t *bytes, size_t length) {
 
 /// `text += "… {value} …"`: appends the built text to a string.
 FA_EXPORT void fa_b_append_into(FaString *string) {
-	fa_string_append(string, builder, builder_length, simple_flag(builder, builder_length));
+	fa_string_append(string, builder, builder_length, builder_flag());
 	builder_length = 0;
+	builder_simple = 0;
 }
 
 /// Whether a byte offset is a grapheme cluster boundary.
@@ -1262,11 +1523,26 @@ static int at_boundary(Boundaries *boundaries, size_t offset) {
 }
 
 /// The offset of the first `byte` at or after `offset`, or `length`:
-/// eight bytes at a time (the lowest byte that "has a zero byte" flags is
-/// exact).
+/// sixteen bytes at a time, with bounded word and byte tails.
 static size_t next_byte(const uint8_t *text, size_t length, size_t offset, uint8_t byte) {
 	const uint64_t ones = 0x0101010101010101u;
 	uint64_t pattern = ones * byte;
+	// A bounded vector comparison skips twice as many bytes per iteration.
+	// Inspect the comparison mask to locate the first matching byte.
+	typedef uint8_t ByteVector __attribute__((vector_size(16)));
+	ByteVector wanted = {byte, byte, byte, byte, byte, byte, byte, byte,
+	                     byte, byte, byte, byte, byte, byte, byte, byte};
+	for (; offset + 16 <= length; offset += 16) {
+		ByteVector word;
+		__builtin_memcpy(&word, text + offset, 16);
+		ByteVector matches = word == wanted;
+		uint64_t halves[2];
+		__builtin_memcpy(halves, &matches, 16);
+		uint64_t found = halves[0] ? halves[0] : halves[1];
+		if (found) {
+			return offset + (halves[0] ? 0 : 8) + (size_t)(__builtin_ctzll(found) >> 3);
+		}
+	}
 	for (; offset + 8 <= length; offset += 8) {
 		uint64_t word;
 		__builtin_memcpy(&word, text + offset, 8);
@@ -1823,6 +2099,30 @@ FA_EXPORT void fa_array_join(const void *header, const uint8_t *separator,
 	join_strings(items, (size_t)array->length, separator, separator_length, out);
 }
 
+/// The length of a join needs no output buffer when every byte is simple.
+/// Otherwise join normally: graphemes may span the boundaries of parts.
+FA_EXPORT size_t fa_array_join_length(void *header, const uint8_t *separator, size_t separator_length) {
+	FaArrayHeader *array = header;
+	fa_array_materialize(array);
+	size_t count = (size_t)array->length;
+	if (count > 1 && !simple_flag(separator, separator_length)) { goto materialize; }
+	if (separator_length && count > 1 && count - 1 >= KIND_MASK / separator_length) { out_of_memory(); }
+	size_t length = count > 1 ? (count - 1) * separator_length : 0;
+	const FaString *parts = (const FaString *)array->items;
+	for (size_t i = 0; i < count; i += 1) {
+		size_t size = string_length(parts + i);
+		if (size && !(parts[i].capacity & SIMPLE)) { goto materialize; }
+		length = fa_string_size(length, size);
+	}
+	return length;
+materialize:;
+	FaString joined;
+	fa_array_join(header, separator, separator_length, &joined);
+	size_t result = fa_string_length(string_bytes(&joined), string_length(&joined), joined.capacity);
+	if (string_owned(joined.capacity)) { fa_free((void *)joined.bytes, joined.capacity & KIND_MASK, 1); }
+	return result;
+}
+
 /// `padStart` (`at_start` 1) and `padEnd` (0), in grapheme clusters.
 static __attribute__((noinline)) void string_pad_slow(const uint8_t *bytes, size_t length, int64_t width,
                              const uint8_t *filler, size_t filler_length, int32_t at_start,
@@ -1859,11 +2159,11 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_pad(const uint8_t *bytes
 	FaString result = {0};
 	uint8_t *target = total <= INLINE_STRING_BYTES ? (uint8_t *)&result : fa_alloc(total, 1);
 	if (at_start) {
-		__builtin_memset(target, filler[0], missing);
+		fill_bytes(target, filler[0], missing);
 		copy_bytes(target + missing, bytes, length);
 	} else {
 		copy_bytes(target, bytes, length);
-		__builtin_memset(target + length, filler[0], missing);
+		fill_bytes(target + length, filler[0], missing);
 	}
 	if (total <= INLINE_STRING_BYTES) { inline_string_tag(&result, total, SIMPLE); }
 	else { result.bytes = target; result.length = total; result.capacity = total | SIMPLE; }
@@ -4569,13 +4869,12 @@ static void table_free_index(void *index, int64_t mask) {
 	fa_free(index, (size_t)(mask + 1) * table_slot_size(mask), 8);
 }
 
-/// Rebuilds the index with twice the slots: from the old index while the
-/// hashes it holds are enough, else from the keys of the live entries.
-static FA_COLD void table_grow_index(FaTable *table, uint64_t (*hash_at)(const void *),
-                                     int64_t entry_size) {
+/// Rebuilds the index with more slots (a power of two): from the old index
+/// while the hashes it holds are enough, else from the keys of the live entries.
+static FA_COLD void table_grow_index(FaTable *table, int64_t slots,
+                                     uint64_t (*hash_at)(const void *), int64_t entry_size) {
 	void *old = table->index;
 	int64_t old_mask = table->mask;
-	int64_t slots = (old_mask + 1) * 2;
 	int narrow = table_narrow(old_mask);
 	table_new_index(table, slots);
 	if (narrow && !table_narrow(slots - 1)) {
@@ -4626,6 +4925,30 @@ FA_EXPORT FaTable *fa_table_new(int64_t capacity) {
 	return table;
 }
 
+/// `map.capacity`, `set.capacity`: the entries it holds without a rehash
+/// (the index is at most half full; the entries never move).
+FA_EXPORT int64_t fa_table_capacity(const FaTable *table) {
+	return (table->mask + 1) / 2;
+}
+
+/// `map.reserve(additional)`, `set.reserve(additional)`: room for
+/// `additional` more entries without a rehash. Only the index grows: the
+/// chunks of entries come with the entries, and never move.
+FA_EXPORT void fa_table_reserve(FaTable *table, int64_t additional, int64_t entry_size,
+                                uint64_t (*hash_at)(const void *)) {
+	if (additional <= 0) {
+		return;
+	}
+	int64_t wanted = table->length + additional;
+	if (wanted < table->length || wanted > (int64_t)(SIZE_MAX / 4) / (entry_size + 16)) {
+		out_of_memory();
+	}
+	int64_t slots = index_slots(wanted);
+	if (slots > table->mask + 1) {
+		table_grow_index(table, slots, hash_at, entry_size);
+	}
+}
+
 /// Allocates one more chunk of entries, all free: the first of the list.
 static FA_COLD void table_new_chunk(FaTable *table, int64_t entry_size) {
 	int64_t chunk = table->capacity >> TABLE_CHUNK_BITS;
@@ -4655,7 +4978,7 @@ fa_table_append(FaTable *table, uint64_t hash, int64_t entry_size, int64_t probe
                 uint64_t (*hash_at)(const void *)) {
 	int64_t slot = probe < 0 ? ~probe : -1;
 	if (__builtin_expect((table->length + 1) * 2 > table->mask + 1, 0)) {
-		table_grow_index(table, hash_at, entry_size);
+		table_grow_index(table, (table->mask + 1) * 2, hash_at, entry_size);
 		slot = -1;
 	}
 	if (__builtin_expect(table->free == 0, 0)) {
@@ -5091,6 +5414,8 @@ typedef struct FaWait {
 	int32_t status;
 	/// Woken by another thread, through the remote queue.
 	int32_t remote;
+	/// A timer that calls this when it fires instead of waking its task.
+	void (*fired)(struct FaWait *wait);
 } FaWait;
 
 /// The size the generated code reserves for a wait (`[16 x i64]`).
@@ -5335,11 +5660,6 @@ static void ready_unlink(FaExecutor *e, FaTask *task) {
 		e->woken -= 1;
 	}
 	e->ready -= 1;
-}
-
-/// Whether a task is in one of the ready queues.
-static int ready_linked(FaExecutor *e, FaTask *task) {
-	return task->prev != 0 || task->next != 0 || e->head == task || e->yield_head == task;
 }
 
 /// The next task of a tick: a woken one while `woken_turns` is under
@@ -5639,15 +5959,28 @@ static void timer_remove(FaExecutor *e, int64_t index) {
 
 /// `await sleep(milliseconds)` in the task of `frame`: it waits in `wait`
 /// until the deadline (a sleep of 0 or less lets the others run first).
+static void timer_insert(FaExecutor *e, FaWait *wait, int64_t deadline);
+
 FA_EXPORT void fa_sleep_async(FaWait *wait, void *frame, int64_t milliseconds) {
 	FaExecutor *e = executor();
 	wait->frame = frame;
 	wait->executor = e;
 	wait->index = -1;
+	wait->fired = 0;
 	if (milliseconds <= 0) {
 		yield_push(e, task_of(frame));
 		return;
 	}
+	timer_insert(e, wait, fa_clock() + milliseconds * 1000000);
+	set_task_state(task_of(frame), TASK_WAITING);
+	if (frame == e->root || e->root == 0) {
+		e->root_site = 0;
+	}
+}
+
+/// Puts a wait in the timer heap of `e`, until `deadline`.
+static void timer_insert(FaExecutor *e, FaWait *wait, int64_t deadline) {
+	wait->executor = e;
 	if (e->timer_count == e->timer_room) {
 		int64_t room = e->timer_room < 16 ? 16 : e->timer_room * 2;
 		FaTimer *timers = fa_alloc((size_t)room * sizeof(FaTimer), 64);
@@ -5660,17 +5993,13 @@ FA_EXPORT void fa_sleep_async(FaWait *wait, void *frame, int64_t milliseconds) {
 		e->timers = timers;
 		e->timer_room = room;
 	}
-	wait->deadline = fa_clock() + milliseconds * 1000000;
+	wait->deadline = deadline;
 	wait->sequence = e->sequence;
 	e->sequence += 1;
 	e->timer_count += 1;
 	FaTimer timer = {wait->deadline, wait};
 	timer_place(e, e->timer_count - 1, timer);
 	timer_up(e, e->timer_count - 1);
-	set_task_state(task_of(frame), TASK_WAITING);
-	if (frame == e->root || e->root == 0) {
-		e->root_site = 0;
-	}
 }
 
 /// The destroy edge of a sleep: its timer is removed.
@@ -5691,7 +6020,11 @@ static void fire_timers(FaExecutor *e, int64_t now) {
 	while (e->timer_count > 0 && e->timers[0].deadline <= now) {
 		FaWait *wait = e->timers[0].wait;
 		timer_remove(e, 0);
-		ready_push(e, task_of(wait->frame));
+		if (wait->fired != 0) {
+			wait->fired(wait);
+		} else {
+			ready_push(e, task_of(wait->frame));
+		}
 	}
 }
 
@@ -7205,7 +7538,7 @@ FA_EXPORT const void *fa_file_finish(FaFileJob *file, void *out) {
 // - Without threads (freestanding), a call runs at once on the caller's thread.
 
 #define WORKER_STATE 256
-#define WORKER_FRAME 96
+#define WORKER_FRAME 144
 
 enum { CALL_QUEUED, CALL_RUNNING, CALL_DONE, CALL_ABANDONED };
 
@@ -7223,7 +7556,18 @@ typedef struct FaCall {
 	void *arguments;
 	int64_t size;
 	int32_t state;
-	int32_t reserved;
+	/// The owners of a job of a pool (its task, its worker's side).
+	int32_t refs;
+	/// A job of a pool: its pool, when a worker took it, its result as the
+	/// worker writes it (`raw_size` bytes), the timer of its timeout, and
+	/// what writes `WorkerTimeout` into its promise or drops a result.
+	struct FaWorkerPool *pool;
+	int64_t started_at;
+	void *scratch;
+	int64_t raw_size;
+	struct FaWait *timer;
+	void (*timeout_error)(void *frame);
+	void (*drop_result)(void *result);
 } FaCall;
 
 _Static_assert(sizeof(FaCall) <= WORKER_FRAME, "the header of a call");
@@ -7245,7 +7589,12 @@ typedef struct FaWorker {
 	/// Replaced in its pool (a call timed out): its thread ends its call,
 	/// then exits and releases the worker (it holds a handle).
 	int32_t detached;
+	/// The pool of a worker of a pool, which takes its jobs from it.
+	struct FaWorkerPool *pool;
 } FaWorker;
+
+/// The worker whose thread this is (its own calls run in place).
+static FA_THREAD_LOCAL FaWorker *current_worker;
 
 _Static_assert(sizeof(FaWorker) <= WORKER_STATE, "the header of a worker");
 
@@ -7328,6 +7677,16 @@ FA_EXPORT void fa_worker_stop(FaWorker *worker) {
 	}
 	worker->stopped = 1;
 	if (!worker->started) {
+		return;
+	}
+	if (worker->pool != 0) {
+		// a worker of a pool: the pool's shutdown made it stop
+#if !defined(__wasm__)
+		if (pthread_join != 0) {
+			pthread_join(worker->thread, 0);
+		}
+#endif
+		__atomic_fetch_sub(&workers_alive, 1, __ATOMIC_ACQ_REL);
 		return;
 	}
 	// the queued detached calls are cancelled (nothing awaits them); the
@@ -7456,8 +7815,8 @@ FA_EXPORT void fa_worker_call(FaWorker *worker, void *frame,
 	call->next = 0;
 	fa_shared_retain(worker);
 	FaTask *task = task_of(frame);
-	if (!worker->started || worker->stopped) {
-		// no thread: the call runs now
+	if (!worker->started || worker->stopped || worker == current_worker) {
+		// no thread (or the worker's own thread, running a pool's job): the call runs now
 		call->state = CALL_RUNNING;
 		int32_t depth = fa_blocking_depth;
 		fa_blocking_depth = 1;
@@ -7570,37 +7929,49 @@ FA_EXPORT void fa_call_destroy(void *frame) {
 
 // ── worker pools (`WorkerPool(T)`: `design/decisions.md`, `src/lower/tasks.rs`)
 //
-// A pool is a block of the handles (`FaWorkerPool`, then the pool's copy of the
-// workers' state at `POOL_STATE`) holding its workers and the free ones.
-// It is used by one thread, the one of its owner: `submit` makes a task
-// (a generated coroutine) that takes a free worker (or waits in the pool's
-// line, FIFO), runs the work with it, and gives it back. With a `timeout`,
-// the task also arms a timer: when it fires first, the work is cancelled
-// (the worker's call abandoned), the worker is replaced by a new one made
-// from a fresh copy of the state (`spawn`), and the old one is detached: it
-// ends its call, then its thread exits and frees it.
+// A pool is a block of the handles (`FaWorkerPool`, then the pool's copy of
+// the workers' state at `POOL_STATE`) holding its workers and a queue of
+// jobs under a lock. The workers' threads pull the jobs themselves: a job
+// is the submitted function (its closure) run with the worker, on the
+// worker's thread (its calls of the worker's methods run in place), and a
+// frame laid out like a task's, which is the job's task: the caller's
+// executor ends it through its remote queue.
 //
-// `submit` counts the calls queued (submitted, without a worker yet): with a
-// `maxQueueSize`, an awaited `submit` waits for room in a second line, and
-// each call taking a worker (or cancelled before) hands its place over.
+// - **The queue** counts the jobs submitted that no worker took yet; with a
+//   `maxQueueSize`, a blocking `submit` waits on a condition variable, an
+//   awaited one in a line of the pool (woken remotely), until a worker
+//   takes a job.
+// - **A timeout** is a timer of the caller's executor: when it fires while
+//   the job ran longer than `timeout`, the job is abandoned (its result,
+//   when the worker ends it, dropped there), the task ends with
+//   `WorkerTimeout`, and the worker is replaced by a new one made from a
+//   fresh copy of the state (`spawn`); the old one is detached: it ends the
+//   job, then its thread exits and frees it.
+// - **A job** has two owners, the task and the worker's side, counted
+//   (`refs`); its result is written by the worker in a scratch area, copied
+//   into the promise when the job ends in time.
 
-#define POOL_STATE 128
+#define POOL_STATE 384
 
-typedef struct {
+typedef struct FaWorkerPool {
 	FaShared shared;
+	FaSystemLock lock;
+	/// Signalled when a job is queued, and when the pool stops.
+	FaSystemLock jobs_changed;
+	/// Signalled when a worker takes a job (room for a blocking `submit`).
+	FaSystemLock room_changed;
 	FaWorker **workers;
 	int64_t count;
-	FaWorker **free;
-	int64_t free_count;
-	/// The tasks waiting for a worker (`FaWait`, circular).
-	FaWait *waiters;
-	int64_t timeout;
-	/// `maxQueueSize` (0: no limit), the calls queued, and the `submit`s
-	/// waiting for room (`FaWait`, circular).
-	int64_t max_queue;
+	FaCall *head;
+	FaCall *tail;
+	/// The jobs queued (submitted, not taken), and `maxQueueSize` (0: no limit).
 	int64_t queued;
+	int64_t max_queue;
+	/// `timeout` in milliseconds (0: none).
+	int64_t timeout;
+	/// The awaited `submit`s waiting for room (`FaWait`, circular).
 	FaWait *room;
-	/// A new worker made from a copy of the state (generated).
+	/// A new worker of the pool, made from a copy of the state (generated).
 	FaWorker *(*spawn)(void *pool);
 	/// Drops the pool's copy of the state, given the block.
 	void (*drop_state)(void *block);
@@ -7609,26 +7980,36 @@ typedef struct {
 
 _Static_assert(sizeof(FaWorkerPool) <= POOL_STATE, "the header of a pool");
 
-static void workers_drop(void *block) {
-	FaWorkerPool *pool = block;
+static void workers_shut(FaWorkerPool *pool) {
+	if (pool->shut) {
+		return;
+	}
+	system_lock(&pool->lock);
+	pool->shut = 1;
+	pthread_cond_broadcast(&pool->jobs_changed);
+	system_unlock(&pool->lock);
 	for (int64_t index = 0; index < pool->count; index += 1) {
 		fa_worker_stop(pool->workers[index]);
+	}
+}
+
+static void workers_drop(void *block) {
+	FaWorkerPool *pool = block;
+	workers_shut(pool);
+	for (int64_t index = 0; index < pool->count; index += 1) {
 		fa_shared_release(pool->workers[index]);
 	}
-	if (pool->count > 0) {
-		fa_free(pool->workers, (size_t)pool->count * sizeof(void *), sizeof(void *));
-		fa_free(pool->free, (size_t)pool->count * sizeof(void *), sizeof(void *));
-	}
+	fa_free(pool->workers, (size_t)pool->count * sizeof(void *), sizeof(void *));
 	if (pool->drop_state != 0) {
 		pool->drop_state(block);
 	}
 }
 
-/// A new pool of `count` workers (made by `fa_workers_fill`, once the state is
-/// stored at `POOL_STATE`); `timeout` in milliseconds, 0 for none.
+/// A new pool of `count` workers (made by `fa_workers_fill`, once the
+/// state is stored at `POOL_STATE`); `timeout` in milliseconds, 0 for none.
 FA_EXPORT FaWorkerPool *fa_workers_new(int64_t count, int64_t timeout, int64_t max_queue,
-                                        int64_t state_size,
-                              void (*drop_state)(void *block), FaWorker *(*spawn)(void *pool)) {
+                                       int64_t state_size, void (*drop_state)(void *block),
+                                       FaWorker *(*spawn)(void *pool)) {
 	if (count < 1) {
 		count = 1;
 	}
@@ -7638,7 +8019,6 @@ FA_EXPORT FaWorkerPool *fa_workers_new(int64_t count, int64_t timeout, int64_t m
 	pool->timeout = timeout > 0 ? timeout : 0;
 	pool->max_queue = max_queue > 0 ? max_queue : 0;
 	pool->workers = fa_alloc((size_t)count * sizeof(void *), sizeof(void *));
-	pool->free = fa_alloc((size_t)count * sizeof(void *), sizeof(void *));
 	pool->count = count;
 	return pool;
 }
@@ -7646,62 +8026,13 @@ FA_EXPORT FaWorkerPool *fa_workers_new(int64_t count, int64_t timeout, int64_t m
 /// Starts the workers of a pool.
 FA_EXPORT void fa_workers_fill(FaWorkerPool *pool) {
 	for (int64_t index = 0; index < pool->count; index += 1) {
-		FaWorker *worker = pool->spawn(pool);
-		pool->workers[index] = worker;
-		pool->free[index] = worker;
+		pool->workers[index] = pool->spawn(pool);
 	}
-	pool->free_count = pool->count;
 }
 
-/// A free worker for the task of `frame`, or null: it waits in `wait`, and
-/// `wait->item` is its worker once woken.
-FA_EXPORT FaWorker *fa_workers_acquire(FaWorkerPool *pool, FaWait *wait, void *frame) {
-	if (pool->free_count > 0) {
-		pool->free_count -= 1;
-		return pool->free[pool->free_count];
-	}
-	line_push(&pool->waiters, wait, frame, "WorkerPool.submit");
-	return 0;
-}
-
-/// Gives a worker back: to the first waiting task, or to the free ones.
-FA_EXPORT void fa_workers_release(FaWorkerPool *pool, FaWorker *worker) {
-	FaWait *waiting = line_pop(&pool->waiters);
-	if (waiting != 0) {
-		waiting->item = worker;
-		waiting->status = WAIT_DONE;
-		wake(waiting);
-		return;
-	}
-	pool->free[pool->free_count] = worker;
-	pool->free_count += 1;
-}
-
-/// An awaited `submit` for the task of `frame`: a place in the queue
-/// (`AWAIT_READY`), or it waits in `wait` until one is handed over.
-FA_EXPORT int32_t fa_workers_reserve(FaWorkerPool *pool, FaWait *wait, void *frame) {
-	if (pool->max_queue == 0 || pool->queued < pool->max_queue) {
-		pool->queued += 1;
-		return AWAIT_READY;
-	}
-	line_push(&pool->room, wait, frame, "WorkerPool.submit (the queue is full)");
-	return AWAIT_SUSPEND;
-}
-
-/// A `submit` called blocking: a place in the queue, at once. A full queue
-/// is only freed by the tasks of this thread, which can't run while it
-/// waits: the program stops.
-FA_EXPORT void fa_workers_reserve_now(FaWorkerPool *pool) {
-	if (pool->max_queue > 0 && pool->queued >= pool->max_queue) {
-		deadlock("`submit` called blocking on a worker pool whose queue is full: only the "
-		         "tasks of this thread free it (await it: `await pool.submit(…)`)");
-	}
-	pool->queued += 1;
-}
-
-/// A queued call took a worker (or was cancelled): its place goes to the
-/// first `submit` waiting for room, or is freed.
-FA_EXPORT void fa_workers_dequeued(FaWorkerPool *pool) {
+/// A worker took a job (the pool's lock held): its place in the queue goes
+/// to the first awaited `submit` waiting for room, or is freed.
+static void workers_room(FaWorkerPool *pool) {
 	FaWait *waiting = line_pop(&pool->room);
 	if (waiting != 0) {
 		waiting->status = WAIT_DONE;
@@ -7709,125 +8040,332 @@ FA_EXPORT void fa_workers_dequeued(FaWorkerPool *pool) {
 		return;
 	}
 	pool->queued -= 1;
+	pthread_cond_broadcast(&pool->room_changed);
+}
+
+/// An awaited `submit` for the task of `frame`: a place in the queue
+/// (`AWAIT_READY`), or it waits in `wait` until one is handed over.
+FA_EXPORT int32_t fa_workers_reserve(FaWorkerPool *pool, FaWait *wait, void *frame) {
+	executor();
+	system_lock(&pool->lock);
+	if (pool->max_queue == 0 || pool->queued < pool->max_queue) {
+		pool->queued += 1;
+		system_unlock(&pool->lock);
+		return AWAIT_READY;
+	}
+	line_push(&pool->room, wait, frame, "WorkerPool.submit (the queue is full)");
+	system_unlock(&pool->lock);
+	return AWAIT_SUSPEND;
+}
+
+/// A blocking `submit`: a place in the queue, waiting on the calling thread
+/// while it is full (the workers take the jobs themselves).
+FA_EXPORT void fa_workers_reserve_now(FaWorkerPool *pool) {
+	system_lock(&pool->lock);
+	while (pool->max_queue > 0 && pool->queued >= pool->max_queue) {
+		pthread_cond_wait(&pool->room_changed, &pool->lock);
+	}
+	pool->queued += 1;
+	system_unlock(&pool->lock);
 }
 
 /// The destroy edge of a `submit` waiting for room.
 FA_EXPORT void fa_workers_unreserve(FaWorkerPool *pool, FaWait *wait) {
+	system_lock(&pool->lock);
 	if (wait->status == WAIT_DONE) {
-		fa_workers_dequeued(pool);
-		return;
+		workers_room(pool);
+	} else {
+		line_remove(&pool->room, wait);
 	}
-	line_remove(&pool->room, wait);
+	system_unlock(&pool->lock);
 }
 
-/// The worker a waiting task was given.
-FA_EXPORT FaWorker *fa_workers_given(FaWait *wait) {
-	return wait->item;
+static void *job_frame(FaCall *job) {
+	return (uint8_t *)job + WORKER_FRAME;
 }
 
-/// The destroy edge of a task waiting for a worker: it leaves the line, or
-/// gives back the worker it was given.
-FA_EXPORT void fa_workers_cancel(FaWorkerPool *pool, FaWait *wait) {
-	if (wait->status == WAIT_DONE) {
-		fa_workers_release(pool, wait->item);
-		return;
+/// Releases one owner of a job: the last one drops its result (unless
+/// taken) and frees it.
+static void job_release(FaCall *job) {
+	if (__atomic_fetch_sub(&job->refs, 1, __ATOMIC_ACQ_REL) == 1) {
+		job->dispose(job_frame(job));
 	}
-	line_remove(&pool->waiters, wait);
 }
 
-/// Arms the timer of a task's work (a pool with a `timeout`).
-FA_EXPORT void fa_workers_arm(FaWorkerPool *pool, FaWait *timer, void *frame) {
-	timer->index = -1;
-	timer->status = WAIT_CLOSED;
-	if (pool->timeout <= 0) {
+#if !defined(__wasm__)
+static void *pool_worker_thread(void *argument) {
+	FaWorker *worker = argument;
+	FaWorkerPool *pool = worker->pool;
+	current_worker = worker;
+	// every job is a blocking call of the submitted function
+	fa_blocking_depth = 1;
+	system_lock(&pool->lock);
+	for (;;) {
+		while (pool->head == 0 && !worker->stopping && !pool->shut) {
+			pthread_cond_wait(&pool->jobs_changed, &pool->lock);
+		}
+		FaCall *job = pool->head;
+		if (job == 0 || worker->stopping) {
+			break;
+		}
+		pool->head = job->next;
+		if (pool->head == 0) {
+			pool->tail = 0;
+		}
+		job->state = CALL_RUNNING;
+		job->worker = worker;
+		job->started_at = fa_clock();
+		workers_room(pool);
+		system_unlock(&pool->lock);
+		job->run(worker, job->arguments, job->scratch);
+		system_lock(&pool->lock);
+		if (job->state == CALL_ABANDONED) {
+			// cancelled, or timed out: its result goes
+			system_unlock(&pool->lock);
+			job->drop_result(job->scratch);
+			job_release(job);
+			system_lock(&pool->lock);
+			continue;
+		}
+		void *frame = job_frame(job);
+		copy_bytes((uint8_t *)frame + TASK_AT + sizeof(FaTask), job->scratch,
+		           (size_t)job->raw_size);
+		task_of(frame)->flags |= TASK_RESULT;
+		job->state = CALL_DONE;
+		FaExecutor *owner = job->owner;
+		remote_push(owner, task_of(frame));
+		fa_remote_source_end(owner);
+		job_release(job);
+	}
+	int32_t detached = worker->detached;
+	system_unlock(&pool->lock);
+	fa_release_builder();
+	if (detached) {
+		__atomic_fetch_sub(&workers_alive, 1, __ATOMIC_ACQ_REL);
+		fa_shared_release(worker);
+		fa_shared_release(pool);
+	}
+	return 0;
+}
+#endif
+
+/// Starts the thread of a worker of a pool (none without threads: its jobs
+/// run on the submitting thread).
+FA_EXPORT void fa_worker_start_in_pool(FaWorker *worker, FaWorkerPool *pool) {
+	worker->pool = pool;
+	if (!has_threads()) {
 		return;
 	}
+#if !defined(__wasm__)
+	worker->started = 1;
+	__atomic_fetch_add(&workers_alive, 1, __ATOMIC_ACQ_REL);
+	pthread_create(&worker->thread, 0, pool_worker_thread, worker);
+#endif
+}
+
+/// A new job whose frame takes `frame_size` bytes and whose result
+/// `raw_size`: its frame.
+FA_EXPORT void *fa_job_new(int64_t frame_size, int64_t raw_size) {
+	size_t frame = ((size_t)frame_size + 15) & ~(size_t)15;
+	size_t scratch = ((size_t)raw_size + 15) & ~(size_t)15;
+	size_t size = WORKER_FRAME + frame + scratch + sizeof(FaWait);
+	FaCall *job = fa_alloc(size, 16);
+	__builtin_memset(job, 0, WORKER_FRAME + TASK_AT + sizeof(FaTask));
+	job->size = (int64_t)size;
+	job->scratch = (uint8_t *)job + WORKER_FRAME + frame;
+	job->timer = (FaWait *)((uint8_t *)job->scratch + scratch);
+	job->timer->index = -1;
+	job->timer->status = WAIT_CLOSED;
+	job->raw_size = raw_size;
+	job->refs = 2;
+	return (uint8_t *)job + WORKER_FRAME;
+}
+
+static void job_timer_fired(FaWait *timer);
+
+/// Arms (or arms again) the timer of a job, at `deadline`.
+static void job_arm(FaCall *job, int64_t deadline) {
+	FaWait *timer = job->timer;
+	timer->frame = job_frame(job);
+	timer->item = job;
+	timer->fired = job_timer_fired;
 	timer->status = WAIT_WAITING;
-	FaExecutor *e = executor();
-	timer->frame = frame;
-	timer->executor = e;
-	if (e->timer_count == e->timer_room) {
-		int64_t room = e->timer_room < 16 ? 16 : e->timer_room * 2;
-		FaTimer *timers = fa_alloc((size_t)room * sizeof(FaTimer), 64);
-		for (int64_t index = 0; index < e->timer_count; index += 1) {
-			timers[index] = e->timers[index];
-		}
-		if (e->timer_room > 0) {
-			fa_free(e->timers, (size_t)e->timer_room * sizeof(FaTimer), 64);
-		}
-		e->timers = timers;
-		e->timer_room = room;
-	}
-	timer->deadline = fa_clock() + pool->timeout * 1000000;
-	timer->sequence = e->sequence;
-	e->sequence += 1;
-	e->timer_count += 1;
-	FaTimer entry = {timer->deadline, timer};
-	timer_place(e, e->timer_count - 1, entry);
-	timer_up(e, e->timer_count - 1);
+	timer_insert(job->owner, timer, deadline);
 }
 
-/// Disarms the timer of a task's work (it ended, or the task is cancelled):
-/// a timer that fired already queued the task, which is taken out.
-static void workers_disarm(FaWait *timer, void *frame) {
-	if (timer->status != WAIT_WAITING) {
-		return;
-	}
-	timer->status = WAIT_CLOSED;
-	if (timer->index >= 0) {
+static void job_disarm(FaCall *job) {
+	FaWait *timer = job->timer;
+	if (timer->status == WAIT_WAITING && timer->index >= 0) {
 		timer_remove(timer->executor, timer->index);
+	}
+	timer->status = WAIT_CLOSED;
+}
+
+/// Queues a job (`frame` from `fa_job_new`; its place in the queue was
+/// reserved): the closure (`arguments`) runs with a free worker of the pool.
+FA_EXPORT void fa_workers_enqueue(FaWorkerPool *pool, void *frame,
+                                  void (*run)(void *worker, void *closure, void *result),
+                                  void *closure, void (*drop_closure)(void *closure),
+                                  void (*dispose)(void *frame), void (*timeout_error)(void *frame),
+                                  void (*drop_result)(void *result)) {
+	FaCall *job = call_of(frame);
+	FaExecutor *e = executor();
+	job->pool = pool;
+	job->run = (void (*)(void *, void *, void *))run;
+	job->arguments = closure;
+	job->drop_arguments = drop_closure;
+	job->dispose = dispose;
+	job->timeout_error = timeout_error;
+	job->drop_result = drop_result;
+	job->owner = e;
+	fa_shared_retain(pool);
+	FaTask *task = task_of(frame);
+	if (!has_threads()) {
+		// no threads: the job runs now, with the first worker
+		run(pool->workers[0], closure, job->scratch);
+		copy_bytes((uint8_t *)frame + TASK_AT + sizeof(FaTask), job->scratch,
+		           (size_t)job->raw_size);
+		task->flags |= TASK_RESULT;
+		job->state = CALL_DONE;
+		*(void **)frame = 0;
+		set_task_state(task, TASK_DONE);
+		pool->queued -= 1;
+		job->refs = 1;
 		return;
 	}
-	FaTask *task = task_of(frame);
-	if (ready_linked(timer->executor, task)) {
-		ready_unlink(timer->executor, task);
+	fa_remote_source_start(e);
+	set_task_state(task, TASK_WAITING);
+	system_lock(&pool->lock);
+	job->state = CALL_QUEUED;
+	job->next = 0;
+	if (pool->tail != 0) {
+		pool->tail->next = job;
+	} else {
+		pool->head = job;
+	}
+	pool->tail = job;
+	pthread_cond_signal(&pool->jobs_changed);
+	system_unlock(&pool->lock);
+	if (pool->timeout > 0) {
+		job_arm(job, fa_clock() + pool->timeout * 1000000);
 	}
 }
 
-/// After the task of `frame` waited for its work (`work`, a frame): 1 when
-/// the work is done (its timer disarmed); 0 when the timer fired first: the
-/// work is cancelled and `worker` replaced (it is not given back).
-FA_EXPORT int32_t fa_workers_settle(FaWorkerPool *pool, FaWait *timer, void *work, FaWorker *worker,
-                                 void *frame) {
-	if (frame_done(work)) {
-		workers_disarm(timer, frame);
-		return 1;
-	}
+/// The timer of a job (the caller's thread): while the job is queued, or
+/// ran for less than the timeout, it is armed again; else the job times out.
+static void job_timer_fired(FaWait *timer) {
+	FaCall *job = timer->item;
+	FaWorkerPool *pool = job->pool;
+	int64_t now = fa_clock();
+	int64_t limit = pool->timeout * 1000000;
 	timer->status = WAIT_CLOSED;
-	task_of(work)->parent = 0;
-	fa_task_drop(work);
-	// a new worker from a fresh copy of the state; the old one ends its
-	// call, then frees itself
+	system_lock(&pool->lock);
+	if (job->state == CALL_QUEUED) {
+		system_unlock(&pool->lock);
+		job_arm(job, now + limit);
+		return;
+	}
+	if (job->state != CALL_RUNNING) {
+		system_unlock(&pool->lock);
+		return;
+	}
+	if (now - job->started_at < limit) {
+		system_unlock(&pool->lock);
+		job_arm(job, job->started_at + limit);
+		return;
+	}
+	// timed out: abandoned to its worker, which is replaced
+	job->state = CALL_ABANDONED;
+	FaWorker *old = job->worker;
+	system_unlock(&pool->lock);
+	void *frame = job_frame(job);
+	job->timeout_error(frame);
+	task_of(frame)->flags |= TASK_RESULT;
+	fa_remote_source_end(job->owner);
 	FaWorker *fresh = pool->spawn(pool);
 	for (int64_t index = 0; index < pool->count; index += 1) {
-		if (pool->workers[index] == worker) {
+		if (pool->workers[index] == old) {
 			pool->workers[index] = fresh;
 		}
 	}
-	fa_worker_detach(worker);
-	fa_shared_release(worker);
-	fa_workers_release(pool, fresh);
-	return 0;
+	// the old worker ends the job, then its thread exits and frees it
+	fa_shared_retain(old);
+	fa_shared_retain(pool);
+	system_lock(&pool->lock);
+	old->detached = 1;
+	old->stopping = 1;
+	pthread_cond_broadcast(&pool->jobs_changed);
+	system_unlock(&pool->lock);
+	old->stopped = 1;
+#if !defined(__wasm__)
+	if (pthread_detach != 0) {
+		pthread_detach(old->thread);
+	}
+#endif
+	fa_shared_release(old);
+	ready_push(job->owner, task_of(frame));
 }
 
-/// The destroy edge of a task waiting for its work: the work is cancelled,
-/// the timer disarmed, the worker given back.
-FA_EXPORT void fa_workers_abandon(FaWorkerPool *pool, FaWait *timer, void *work, FaWorker *worker,
-                               void *frame) {
-	workers_disarm(timer, frame);
-	fa_task_drop(work);
-	fa_workers_release(pool, worker);
+/// The resume of a job's frame (its generated resume function): the job
+/// ended, or timed out: the task ends.
+FA_EXPORT void fa_job_resume(void *frame) {
+	job_disarm(call_of(frame));
+	*(void **)frame = 0;
+	fa_task_finish(frame);
 }
 
-/// `pool.shutdown()`: the workers stop (each one after the calls it runs).
+/// The destroy of a job's frame (its task dropped, or its result taken).
+FA_EXPORT void fa_job_destroy(void *frame) {
+	FaCall *job = call_of(frame);
+	FaWorkerPool *pool = job->pool;
+	job_disarm(job);
+	system_lock(&pool->lock);
+	switch (job->state) {
+	case CALL_QUEUED: {
+		FaCall **link = &pool->head;
+		FaCall *previous = 0;
+		while (*link != job) {
+			previous = *link;
+			link = &(*link)->next;
+		}
+		*link = job->next;
+		if (pool->tail == job) {
+			pool->tail = previous;
+		}
+		workers_room(pool);
+		system_unlock(&pool->lock);
+		job->drop_arguments(job->arguments);
+		fa_remote_source_end(job->owner);
+		job_release(job);
+		break;
+	}
+	case CALL_RUNNING:
+		// its worker drops the result
+		job->state = CALL_ABANDONED;
+		system_unlock(&pool->lock);
+		fa_remote_source_end(job->owner);
+		break;
+	default: {
+		// done (its wake may still be in the remote queue), or timed out
+		system_unlock(&pool->lock);
+		FaExecutor *e = current_executor;
+		FaTask *task = task_of(frame);
+		if (e != 0 && job->owner == e && task_state(task) == TASK_REMOTE) {
+			drain_remote(e);
+			if (task_state(task) == TASK_QUEUED) {
+				ready_unlink(e, task);
+			}
+		}
+		break;
+	}
+	}
+	job_release(job);
+	fa_shared_release(pool);
+}
+
+/// `pool.shutdown()`: the workers take the queued jobs, then stop.
 FA_EXPORT void fa_workers_shutdown(FaWorkerPool *pool) {
-	if (pool->shut) {
-		return;
-	}
-	pool->shut = 1;
-	for (int64_t index = 0; index < pool->count; index += 1) {
-		fa_worker_stop(pool->workers[index]);
-	}
+	workers_shut(pool);
 }
 
 /// `WorkerTimeout`.

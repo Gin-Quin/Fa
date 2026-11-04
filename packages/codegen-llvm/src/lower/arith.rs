@@ -174,14 +174,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					if value.repr == Repr::Never {
 						return Ok(Val::never());
 					}
-					values.push(value);
+					values.push((value, operand));
 				}
 				let mut values = values.into_iter();
-				let mut result = values.next().expect("an operand");
-				for right in values {
-					result = self.concat(result, right)?;
+				let (mut result, first) = values.next().expect("an operand");
+				// a local read for the last time (a string being built, whose
+				// block has room) grows in place; else each `+` makes a string
+				let owned = matches!(self.view(first), View::Name(_))
+					&& self.take_local(result, first)?.is_some();
+				for (right, _) in values {
+					result = if owned {
+						self.append_in_place(result, right)?
+					} else {
+						self.concat(result, right)?
+					};
 				}
-				Ok(result)
+				Ok(if owned { self.fresh(result) } else { result })
 			}
 			_ => Err(self.unsupported(node.index(), &format!("`{}` on these values", op.symbol()))),
 		}
@@ -818,7 +826,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Str if op == ArithOp::Add => {
 				if let View::Template { parts } = self.view(value) {
-					return self.append_template(slot.pointer, parts);
+					return self.append_template(slot.pointer, target, parts);
 				}
 				let right = self.expr(value)?;
 				if right.repr == Repr::Never {

@@ -12,8 +12,9 @@ use crate::lower::values::{IntRepr, Repr, Val};
 use crate::lower::{Lowering, Slot};
 
 impl<'ctx> Lowering<'_, 'ctx> {
-	/// Decimal integers through 64 bits fit directly in the native small
-	/// string. No shared text builder, scratch collection, or heap copy.
+	/// Decimal text borrows a private scratch buffer until the statement
+	/// ends. `take` copies the view when a string must escape into an owner;
+	/// immediate consumers (padding, parsing, interpolation) need no copy.
 	pub(crate) fn integer_string(&mut self, value: Val<'ctx>) -> Result<Option<Val<'ctx>>, Error> {
 		let Repr::Int(int) = value.repr else {
 			return Ok(None);
@@ -21,6 +22,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if int.bits > 64 {
 			return Ok(None);
 		}
+		let scratch = self.alloca_type(self.context.i8_type().array_type(24).into(), "digits")?;
 		let raw = if int.signed {
 			self.builder
 				.build_int_s_extend_or_bit_cast(value.int(), self.context.i64_type(), "")?
@@ -29,12 +31,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.build_int_z_extend_or_bit_cast(value.int(), self.context.i64_type(), "")?
 		};
 		let name = if int.signed {
-			"fa_string_i64"
+			"fa_decimal_i64"
 		} else {
-			"fa_string_u64"
+			"fa_decimal_u64"
 		};
-		let text = self.call_with_pair(name, &[raw.into()], Repr::Str)?;
-		Ok(Some(self.fresh(text)))
+		let function = self.runtime.function(name)?;
+		let offset = self
+			.call_value(function, &[raw.into(), scratch.into()])?
+			.into_int_value();
+		let bytes = unsafe {
+			self.builder
+				.build_in_bounds_gep(self.context.i8_type(), scratch, &[offset], "")?
+		};
+		let length = self
+			.builder
+			.build_int_sub(self.usize.const_int(24, false), offset, "")?;
+		let pair = self
+			.builder
+			.build_insert_value(self.string_type.get_undef(), bytes, 0, "")?;
+		let pair = self.builder.build_insert_value(pair, length, 1, "")?;
+		let capacity = self
+			.builder
+			.build_or(self.simple_flag(), self.string_kind_mask(), "")?;
+		let pair = self.builder.build_insert_value(pair, capacity, 2, "")?;
+		// Not a fresh owning temporary: an escaping value must be copied.
+		Ok(Some(Val::new(Repr::Str, pair.into_struct_value())))
 	}
 
 	fn single_integer_template(
@@ -59,53 +80,110 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Common textual/scalar templates need no shared builder. Evaluate all
 	/// expressions first, then borrow their values for one exact-sized join.
-	fn string_template(&mut self, parts: TemplateParts<'_>) -> Result<Option<Val<'ctx>>, Error> {
+	pub(crate) fn string_template(
+		&mut self,
+		parts: TemplateParts<'_>,
+		destination: Option<Slot<'ctx>>,
+	) -> Result<Option<Val<'ctx>>, Error> {
 		for part in parts.iter() {
 			if let TemplatePart::Expression(node) = part {
 				match self.node_repr(node)? {
-					Repr::Str => {}
+					Repr::Str => {
+						if let Some(destination) = destination {
+							// Only independent owning locals can be read while the
+							// destination's buffer is reused. References and calls
+							// keep the ordinary allocating path.
+							let Resolution::Local(symbol) = self.analysis.resolution(node) else {
+								return Ok(None);
+							};
+							if !matches!(
+								self.analysis.symbols.symbol(symbol).kind,
+								fa_analyzer::symbols::SymbolKind::Let
+									| fa_analyzer::symbols::SymbolKind::Mutable
+							) || self.slot_of(symbol, node)?.pointer == destination.pointer
+							{
+								return Ok(None);
+							}
+						}
+					}
 					Repr::Int(int) if int.bits <= 64 => {}
 					_ => return Ok(None),
 				}
 			}
 		}
 		let mut values = Vec::new();
+		let mut simple = self.simple_flag();
 		for part in parts.iter() {
 			let value = match part {
 				TemplatePart::Text("") => continue,
 				TemplatePart::Text(text) => self.string_constant(text),
-				TemplatePart::Expression(node) => {
-					let value = self.expr(node)?;
-					if value.repr == Repr::Never {
-						return Ok(Some(value));
-					}
-					if value.repr == Repr::Str {
-						value
-					} else {
-						self.integer_string(value)?.expect("a checked integer")
-					}
-				}
+				TemplatePart::Expression(node) => self.expr(node)?,
 			};
-			values.push(value);
+			if value.repr == Repr::Never {
+				return Ok(Some(value));
+			}
+			let value = if value.repr == Repr::Str {
+				value
+			} else {
+				self.integer_string(value)?.expect("a checked integer")
+			};
+			let (bytes, length) = self.string_parts(value)?;
+			let empty = self.builder.build_int_compare(
+				IntPredicate::EQ,
+				length,
+				self.usize.const_zero(),
+				"",
+			)?;
+			let flag = self
+				.builder
+				.build_select(empty, self.simple_flag(), self.string_capacity(value)?, "")?
+				.into_int_value();
+			simple = self.builder.build_and(simple, flag, "")?;
+			values.push((bytes, length));
 		}
-		let ty = self.string_type.array_type(values.len() as u32);
-		let storage = self.alloca_type(ty.into(), "template_parts")?;
-		let zero = self.context.i32_type().const_zero();
-		for (index, value) in values.iter().enumerate() {
-			let index = self.context.i32_type().const_int(index as u64, false);
-			let slot = unsafe {
+		let mut total = self.usize.const_zero();
+		for &(_, length) in &values {
+			total = self
+				.call_value(
+					self.runtime.function("fa_string_size")?,
+					&[total.into(), length.into()],
+				)?
+				.into_int_value();
+		}
+		// Keep each byte range in SSA rather than in an addressable array.
+		// Writes to the result cannot obscure literal lengths or flags.
+		let result = match destination {
+			Some(slot) => slot,
+			None => self.alloca(Repr::Str, "template")?,
+		};
+		let allocate = if destination.is_some() {
+			"fa_string_replace_buffer"
+		} else {
+			"fa_string_allocate"
+		};
+		let bytes = self
+			.call_value(
+				self.runtime.function(allocate)?,
+				&[total.into(), simple.into(), result.pointer.into()],
+			)?
+			.into_pointer_value();
+		let mut offset = self.usize.const_zero();
+		for (part, length) in values {
+			let target = unsafe {
 				self.builder
-					.build_in_bounds_gep(ty, storage, &[zero, index], "")?
+					.build_in_bounds_gep(self.context.i8_type(), bytes, &[offset], "")?
 			};
-			self.builder
-				.build_store(slot, value.value.expect("a string"))?;
+			self.call_runtime(
+				"fa_copy_bytes",
+				&[target.into(), part.into(), length.into()],
+			)?;
+			offset = self.builder.build_int_add(offset, length, "")?;
 		}
-		let count = self.usize.const_int(values.len() as u64, false);
-		let result = self.call_with_pair(
-			"fa_strings_join",
-			&[storage.into(), count.into()],
-			Repr::Str,
-		)?;
+		self.call_runtime("fa_string_finish", &[result.pointer.into()])?;
+		if destination.is_some() {
+			return Ok(Some(Val::void()));
+		}
+		let result = self.load(result)?;
 		Ok(Some(self.fresh(result)))
 	}
 
@@ -260,6 +338,97 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_store(target, updated)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(grow);
+		// one simple byte into an inline string with room (a character
+		// appended to a short string): the byte is ORed into its word of the
+		// value (the unused bytes are zero), the length in the tag byte grows,
+		// all in registers
+		let word_bits = self.usize.get_bit_width() as u64;
+		let word_bytes = word_bits / 8;
+		let length_shift = self.usize.const_int(word_bits - 8, false);
+		let inline = self
+			.builder
+			.build_and(capacity, self.string_inline_flag(), "")?;
+		let inline = self.builder.build_int_compare(
+			IntPredicate::NE,
+			inline,
+			self.usize.const_zero(),
+			"",
+		)?;
+		let tag_length = self
+			.builder
+			.build_right_shift(capacity, length_shift, false, "")?;
+		let tag_length = self
+			.builder
+			.build_and(tag_length, self.usize.const_int(31, false), "")?;
+		let room = self.builder.build_int_compare(
+			IntPredicate::ULT,
+			tag_length,
+			self.usize.const_int(3 * word_bytes - 1, false),
+			"",
+		)?;
+		let one_byte = self.builder.build_int_compare(
+			IntPredicate::EQ,
+			suffix_length,
+			self.usize.const_int(1, false),
+			"",
+		)?;
+		let small = self.builder.build_and(inline, room, "")?;
+		let small = self.builder.build_and(small, one_byte, "")?;
+		let small = self.builder.build_and(small, simple, "")?;
+		let inline_append = self.append_block("append_inline");
+		let snapshot_append = self.append_block("append_snapshot");
+		self.builder
+			.build_conditional_branch(small, inline_append, snapshot_append)?;
+		self.builder.position_at_end(inline_append);
+		let byte = self
+			.builder
+			.build_load(self.context.i8_type(), suffix_bytes, "")?
+			.into_int_value();
+		let byte = self.builder.build_int_z_extend(byte, self.usize, "")?;
+		let word_index = self.builder.build_right_shift(
+			tag_length,
+			self.usize
+				.const_int(word_bytes.trailing_zeros() as u64, false),
+			false,
+			"",
+		)?;
+		let offset =
+			self.builder
+				.build_and(tag_length, self.usize.const_int(word_bytes - 1, false), "")?;
+		let offset = self
+			.builder
+			.build_left_shift(offset, self.usize.const_int(3, false), "")?;
+		let piece = self.builder.build_left_shift(byte, offset, "")?;
+		let first = self.builder.build_ptr_to_int(bytes, self.usize, "")?;
+		let mut words = [first, length, capacity];
+		for (index, word) in words.iter_mut().enumerate() {
+			let here = self.builder.build_int_compare(
+				IntPredicate::EQ,
+				word_index,
+				self.usize.const_int(index as u64, false),
+				"",
+			)?;
+			let part = self
+				.builder
+				.build_select(here, piece, self.usize.const_zero(), "")?
+				.into_int_value();
+			*word = self.builder.build_or(*word, part, "")?;
+		}
+		let longer = self.builder.build_int_add(
+			words[2],
+			self.usize.const_int(1 << (word_bits - 8), false),
+			"",
+		)?;
+		let first = self
+			.builder
+			.build_int_to_ptr(words[0], self.pointer_type(), "")?;
+		let updated = self.string_type.get_undef();
+		let updated = self.builder.build_insert_value(updated, first, 0, "")?;
+		let updated = self.builder.build_insert_value(updated, words[1], 1, "")?;
+		let updated = self.builder.build_insert_value(updated, longer, 2, "")?;
+		self.builder.build_store(target, updated)?;
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(snapshot_append);
 		let snapshot = self.alloca(Repr::Str, "append_header")?;
 		self.builder
 			.build_store(snapshot.pointer, current.value.expect("a string"))?;
@@ -373,12 +542,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(self.fresh(result))
 	}
 
+	/// `left + right` where the caller owns `left`: `right` appended to it in
+	/// place when its block has room (`fa_string_plus`), the new value.
+	pub(crate) fn append_in_place(
+		&mut self,
+		left: Val<'ctx>,
+		right: Val<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
+		let slot = self.alloca(Repr::Str, "concatenation")?;
+		self.builder
+			.build_store(slot.pointer, left.value.expect("a string"))?;
+		let (bytes, length) = self.string_parts(right)?;
+		let capacity = self.string_capacity(right)?;
+		self.call_runtime(
+			"fa_string_plus",
+			&[
+				slot.pointer.into(),
+				bytes.into(),
+				length.into(),
+				capacity.into(),
+			],
+		)?;
+		self.load(slot)
+	}
+
 	/// Appends the `toString` of a value to the runtime's text builder.
 	pub(crate) fn append_value(&mut self, value: Val<'ctx>, node: NodeId) -> Result<(), Error> {
 		match value.repr {
 			Repr::Str => {
 				let (bytes, length) = self.string_parts(value)?;
-				self.call_runtime("fa_b_bytes", &[bytes.into(), length.into()])
+				// its `SIMPLE` flag spares the builder a scan of its bytes
+				let capacity = self.string_capacity(value)?;
+				self.call_runtime(
+					"fa_b_string",
+					&[bytes.into(), length.into(), capacity.into()],
+				)
 			}
 			Repr::Int(int) => {
 				let raw = value.int();
@@ -598,7 +796,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(value) = self.single_integer_template(parts)? {
 			return Ok(value);
 		}
-		if let Some(value) = self.string_template(parts)? {
+		if let Some(value) = self.string_template(parts, None)? {
 			return Ok(value);
 		}
 		if !self.build_template(parts)? {
@@ -613,6 +811,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn append_template(
 		&mut self,
 		target: PointerValue<'ctx>,
+		place: NodeId,
 		parts: TemplateParts<'_>,
 	) -> Result<Val<'ctx>, Error> {
 		if let Some(value) = self.single_integer_template(parts)? {
@@ -620,6 +819,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return Ok(value);
 			}
 			self.append_string(target, value)?;
+			return Ok(Val::void());
+		}
+		// Strings and integers that don't read the destination are evaluated
+		// first (the template's snapshot), then appended in place after one
+		// reservation for them all: no global builder, rescan or copy.
+		let mut independent = true;
+		for part in parts.iter() {
+			if let TemplatePart::Expression(node) = part {
+				let textual = match self.node_repr(node)? {
+					Repr::Str => true,
+					Repr::Int(int) => int.bits <= 64,
+					_ => false,
+				};
+				if !textual || self.reads_root_of(node, place) {
+					independent = false;
+					break;
+				}
+			}
+		}
+		if independent {
+			let mut values = Vec::new();
+			for part in parts.iter() {
+				let value = match part {
+					TemplatePart::Text("") => continue,
+					TemplatePart::Text(text) => self.string_constant(text),
+					TemplatePart::Expression(node) => {
+						let value = self.expr(node)?;
+						if value.repr == Repr::Never {
+							return Ok(value);
+						}
+						if value.repr == Repr::Str {
+							value
+						} else {
+							self.integer_string(value)?.expect("a checked integer")
+						}
+					}
+				};
+				values.push(value);
+			}
+			let mut extra = self.usize.const_zero();
+			for value in &values {
+				let (_, length) = self.string_parts(*value)?;
+				extra = self.builder.build_int_nuw_add(extra, length, "")?;
+			}
+			self.call_runtime("fa_string_reserve", &[target.into(), extra.into()])?;
+			for value in values {
+				self.append_string(target, value)?;
+			}
 			return Ok(Val::void());
 		}
 		// A template of disjoint string locals and literals can be appended
@@ -661,6 +908,38 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		self.call_runtime("fa_b_append_into", &[target.into()])?;
 		Ok(Val::void())
+	}
+
+	/// Whether an expression reads the local a place is rooted at, or a
+	/// reference (which may designate it): a template reading its
+	/// destination is built aside.
+	fn reads_root_of(&self, node: NodeId, place: NodeId) -> bool {
+		use fa_analyzer::symbols::SymbolKind;
+		use fa_analyzer::syntax::View;
+		let mut root = place;
+		loop {
+			match self.view(root) {
+				View::Group(inner) => root = inner,
+				View::Access { target, .. } | View::Index { target, .. } => root = target,
+				_ => break,
+			}
+		}
+		let Resolution::Local(root) = self.analysis.resolution(root) else {
+			return true;
+		};
+		let mut stack = vec![node.index()];
+		while let Some(index) = stack.pop() {
+			if let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(index))
+				&& (symbol == root
+					|| matches!(
+						self.analysis.symbols.symbol(symbol).kind,
+						SymbolKind::Use | SymbolKind::MutableUse
+					)) {
+				return true;
+			}
+			self.tree.nodes[index].for_each_child(|child| stack.push(child));
+		}
+		false
 	}
 
 	/// Builds a template in the text builder; `false` when a part never ends.
@@ -784,6 +1063,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 
 			"Set#size" | "Map#size" => self.table_size(value),
+			path if path.ends_with("#capacity") => self.capacity_property(node, value),
 			"Pool#size" | "Columnar#size" => self.pool_size(value),
 			"RelationPool#size" => self.links_size_value(value),
 			"OrderedColumnar#length" => self.array_length(value),

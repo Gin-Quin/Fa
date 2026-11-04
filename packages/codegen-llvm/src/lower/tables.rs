@@ -88,7 +88,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The size of an entry, an `i64` constant.
-	fn entry_size(&self, table: Table<'ctx>) -> IntValue<'ctx> {
+	pub(crate) fn entry_size(&self, table: Table<'ctx>) -> IntValue<'ctx> {
 		table.entry.size_of().expect("a sized entry")
 	}
 
@@ -130,7 +130,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// `fa.hash_at.<shape>(ptr key) -> i64`, the hash of a key in an entry:
 	/// the runtime calls it for the rare rebuilds of the index that need
 	/// the hashes of the keys (a set compacting its entries, a wide index).
-	fn hash_at_function(&self, repr: Repr) -> Result<FunctionValue<'ctx>, Error> {
+	pub(crate) fn hash_at_function(&self, repr: Repr) -> Result<FunctionValue<'ctx>, Error> {
 		let key = format!("hash_at {repr:?}");
 		if let Some(function) = self.drop_functions.borrow().get(&key) {
 			return Ok(*function);
@@ -1703,8 +1703,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if source.repr == Repr::Never {
 			return Ok(source);
 		}
-		let zero = self.context.i64_type().const_zero();
-		let result = self.table_new(table, zero)?;
+		// `capacity = n`: the table is sized for it (`Map.from(source,
+		// capacity)`, `Set.from(source, key, capacity)`)
+		let capacity_position = if matches!(repr, Repr::Set(_)) { 2 } else { 1 };
+		let capacity = match info.arguments.get(capacity_position) {
+			Some(Argument::Given(capacity_node)) => {
+				let capacity = self.expr(*capacity_node)?;
+				if capacity.repr == Repr::Never {
+					return Ok(capacity);
+				}
+				self.convert(capacity, Repr::Int(IntRepr::I64), capacity_node.index())?
+					.int()
+			}
+			_ => self.context.i64_type().const_zero(),
+		};
+		let result = self.table_new(table, capacity)?;
 		match source.repr {
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, node)?;

@@ -43,7 +43,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The size of an item, in bytes, as an `i64`.
-	fn item_size(&self, item: Repr) -> Result<IntValue<'ctx>, Error> {
+	pub(crate) fn item_size(&self, item: Repr) -> Result<IntValue<'ctx>, Error> {
 		let size = inkwell::types::BasicType::size_of(&self.llvm_type(item)).expect("a sized item");
 		Ok(self
 			.builder
@@ -1500,8 +1500,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Val::void()
 				})
 			}
-			("Array#join", [separator]) if item == Repr::Str => {
+			("Array#join" | "Array#joinedLength", [separator]) if item == Repr::Str => {
 				let (bytes, length) = self.string_parts(*separator)?;
+				if path == "Array#joinedLength" {
+					let length = self
+						.call_value(
+							self.runtime.function("fa_array_join_length")?,
+							&[array.into(), bytes.into(), length.into()],
+						)?
+						.into_int_value();
+					let length = self
+						.builder
+						.build_int_z_extend_or_bit_cast(length, i64, "")?;
+					return Ok(Val::new(Repr::Int(IntRepr::I64), length));
+				}
 				let result = self.call_with_pair(
 					"fa_array_join",
 					&[array.into(), bytes.into(), length.into()],

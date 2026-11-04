@@ -822,3 +822,44 @@ un objectif ouvert, notamment pour les unions et les tables.
 
 Les [données complètes](native-goose-round4-results.json) contiennent les
 échantillons, commandes, tailles, RSS, empreintes et contrôles de mesure.
+
+## String-building : optimisation proposée des comptages après split
+
+**Proposition non implémentée, à conserver pour une prochaine étape.**
+À la demande de l’utilisateur, cette note ne déclenche pas son implémentation.
+
+Après les corrections du formatage, des copies temporaires, de la réutilisation
+des buffers et de la recherche des séparateurs, la dernière série de 21 passages
+à 3 millions d’entrées donne une médiane CPU de 0,163227 s pour Fa contre
+0,143751 s pour Goose : Fa reste environ 14 % plus lent. Une partie du coût
+restant vient de `split`, qui alloue et libère une copie possédée de chaque
+fragment, alors que le programme ne demande que leur nombre et la longueur
+de leur jointure.
+
+La proposition consiste à éviter ce tableau intermédiaire lorsque le compilateur
+prouve que le résultat de `split` ne s’échappe pas et sert uniquement à `.length`
+ou à `.join(separator).length`. Ces opérations pourraient calculer les résultats
+sans construire les fragments. La transformation serait générique : elle ne
+dépendrait ni du nom du benchmark, ni de sa taille, ni des réponses attendues.
+
+Cette optimisation est recommandée sous les conditions suivantes :
+
+- Prouver tous les usages admissibles du résultat. Toute utilisation non prouvée,
+  notamment une capture, un alias ou une mutation, conserve le chemin ordinaire.
+- Évaluer les entrées exactement une fois et dans leur ordre initial. Conserver
+  leurs valeurs par des snapshots possédés, avec les mécanismes habituels de
+  nettoyage, pour que les mutations ultérieures ne changent pas le résultat.
+- Respecter les règles Unicode de découpage et de comptage des graphèmes. Une
+  jointure peut modifier les frontières entre fragments : conserver le chemin
+  ordinaire lorsque le calcul direct ne peut pas être prouvé équivalent.
+- Tester les mutations des sources et séparateurs, les captures et autres cas
+  exclus, l’ordre d’évaluation, les chaînes et séparateurs vides, les frontières
+  Unicode, ainsi que la durée de vie et la libération des snapshots.
+
+Éviter une collection intermédiaire pour une requête agrégée est une optimisation
+de compilateur pertinente. Elle est toutefois plus complexe que les corrections
+du runtime : la sûreté dépend de la preuve des usages et du nettoyage. Elle ne
+doit donc pas être présentée comme validée avant son implémentation et ses tests,
+ni comme suffisante pour atteindre Goose avant de nouvelles mesures. Elle ne
+nécessite pas de changer la représentation publique des tableaux ou d’introduire
+des fragments empruntés dans les tableaux ordinaires.

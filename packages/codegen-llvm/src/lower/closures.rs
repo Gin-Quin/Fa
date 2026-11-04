@@ -361,24 +361,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			});
 		}
 		let target = function.value;
-		let borrowed = function.borrowed.clone();
-		let params = function.params.clone();
 		let name = format!("{}.thunk", target.get_name().to_string_lossy());
 		let thunk = match self.module.get_function(&name) {
 			Some(thunk) => thunk,
 			None => {
 				let target_type = target.get_type();
+				let target_parameters = target_type.get_param_types();
+				let params = function.params.clone();
+				let by_pointer = function.by_pointer.clone();
+				// the indirect ABI (`indirect_type`): every argument, the
+				// aggregates borrowed (`borrows_parameter`), no default flags;
+				// then the target's other parameters (requirements)
 				let mut parameters: Vec<BasicMetadataTypeEnum<'ctx>> =
 					vec![self.pointer_type().into()];
-				let mut target_parameters = target_type.get_param_types();
 				let mut at = 0;
-				for (index, (repr, default)) in params.iter().enumerate() {
-					if borrowed[index] {
-						target_parameters[at] = self.llvm_type(*repr).into();
-					}
-					at += 1 + usize::from(*default);
+				for (repr, has_default) in &params {
+					parameters.push(if self.borrows_parameter(*repr) {
+						self.pointer_type().into()
+					} else {
+						self.llvm_type(*repr).into()
+					});
+					at += 1 + usize::from(*has_default);
 				}
-				parameters.extend(target_parameters);
+				parameters.extend(target_parameters.iter().skip(at).copied());
 				let thunk_type = match target_type.get_return_type() {
 					Some(ret) => ret.fn_type(&parameters, false),
 					None => self.context.void_type().fn_type(&parameters, false),
@@ -390,20 +395,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.runtime.add_attributes(thunk, &["nounwind"]);
 				let builder = self.context.create_builder();
 				builder.position_at_end(self.context.append_basic_block(thunk, "entry"));
-				let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> =
-					thunk.get_param_iter().skip(1).map(Into::into).collect();
-				let mut at = 0;
-				for (index, (repr, default)) in params.iter().enumerate() {
-					if borrowed[index] {
-						let slot = builder.build_alloca(self.llvm_type(*repr), "borrowed")?;
-						builder.build_store(
-							slot,
-							thunk.get_nth_param(at as u32 + 1).expect("an argument"),
-						)?;
-						arguments[at] = slot.into();
+				let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
+				let mut given = thunk.get_param_iter().skip(1);
+				for (index, (repr, has_default)) in params.iter().enumerate() {
+					let argument = given.next().expect("an argument");
+					if by_pointer[index] && !self.borrows_parameter(*repr) {
+						// a parameter the target changes: a copy of the value
+						let slot = builder.build_alloca(self.llvm_type(*repr), "argument")?;
+						builder.build_store(slot, argument)?;
+						arguments.push(slot.into());
+					} else {
+						arguments.push(argument.into());
 					}
-					at += 1 + usize::from(*default);
+					if *has_default {
+						arguments.push(self.context.bool_type().const_int(1, false).into());
+					}
 				}
+				arguments.extend(given.map(BasicMetadataValueEnum::from));
 				let call = builder.build_call(target, &arguments, "")?;
 				call.set_call_convention(FAST_CALLING_CONVENTION);
 				match call.try_as_basic_value().basic() {
@@ -445,11 +453,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		throws: bool,
 	) -> FunctionType<'ctx> {
 		let mut types: Vec<BasicMetadataTypeEnum<'ctx>> = vec![self.pointer_type().into()];
-		types.extend(
-			params
-				.iter()
-				.map(|repr| BasicMetadataTypeEnum::from(self.llvm_type(*repr))),
-		);
+		types.extend(params.iter().map(|repr| {
+			if self.borrows_parameter(*repr) {
+				self.pointer_type().into()
+			} else {
+				BasicMetadataTypeEnum::from(self.llvm_type(*repr))
+			}
+		}));
 		match (ret.has_value(), throws) {
 			(true, false) => self.llvm_type(ret).fn_type(&types, false),
 			(false, false) => self.context.void_type().fn_type(&types, false),
@@ -475,12 +485,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (params, _, _) = self.value_signature(ty, node)?;
 		let mark = self.mark();
 		let mut arguments = before.to_vec();
+		let mut places = vec![None; before.len()];
 		for &slot in items {
 			let expected = params.get(arguments.len()).copied().unwrap_or(slot.repr);
+			// an item of the parameter's representation: lent in place
+			places.push(
+				(slot.repr == expected && self.borrows_parameter(expected)).then_some(slot.pointer),
+			);
 			arguments.push(self.collection_item_view(slot, expected, node.index())?);
 		}
 		arguments.extend_from_slice(after);
-		let result = self.call_closure(callback, ty, &arguments, node)?;
+		let result = self.call_closure_lending(callback, ty, &arguments, &places, node)?;
 		self.end_scope(mark, Some(result))?;
 		Ok(result)
 	}
@@ -492,6 +507,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		closure: Val<'ctx>,
 		ty: TypeId,
 		arguments: &[Val<'ctx>],
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		self.call_closure_lending(closure, ty, arguments, &[], node)
+	}
+
+	/// `call_closure` where some arguments are places (`places`, by
+	/// position) that a borrowed parameter may see directly.
+	fn call_closure_lending(
+		&mut self,
+		closure: Val<'ctx>,
+		ty: TypeId,
+		arguments: &[Val<'ctx>],
+		places: &[Option<PointerValue<'ctx>>],
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
 		// a value of an `async` function type (tasks.rs)
@@ -515,7 +543,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// as a recursive edge). Their temporaries belong to this call, which
 		// may itself be inside a conditional callback branch.
 		let mark = self.mark();
-		for (repr, argument) in params.iter().zip(arguments) {
+		for (position, (repr, argument)) in params.iter().zip(arguments).enumerate() {
+			if self.borrows_parameter(*repr) {
+				// a borrowed parameter: the place itself, or the value in a
+				// slot of the caller for the call
+				let pointer = match places.get(position).copied().flatten() {
+					Some(pointer) => pointer,
+					None => {
+						let argument = self.convert(*argument, *repr, node.index())?;
+						let slot = self.alloca(*repr, "argument")?;
+						self.builder
+							.build_store(slot.pointer, argument.value.expect("an argument"))?;
+						slot.pointer
+					}
+				};
+				lowered.push(pointer.into());
+				continue;
+			}
 			let argument = self.convert(*argument, *repr, node.index())?;
 			lowered.push(argument.value.expect("an argument").into());
 		}

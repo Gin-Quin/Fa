@@ -1,0 +1,49 @@
+-- Capacity natively: `capacity`, `reserve(additional)` and `from(…, capacity = n)` keep the
+-- contents; only the room before the next block changes.
+mutable text = String.from("abc", capacity = 100)
+console.log(text, text.length, text.capacity >= 100)
+-- prints: abc 3 true
+text.reserve(500)
+console.log(text.capacity >= 503)
+-- prints: true
+for index in 0..200 {
+	text += "{index %% 10}"
+}
+console.log(text.length, text.capacity >= 203)
+-- prints: 203 true
+mutable small = "ab"
+small.reserve(5)
+small += "cde"
+console.log(small, small.capacity >= small.length)
+-- prints: abcde true
+
+mutable numbers = Array(Integer).from([1, 2, 3], capacity = 10)
+console.log(numbers.capacity >= 10, numbers.length)
+-- prints: true 3
+numbers.reserve(100)
+console.log(numbers.capacity >= 103, numbers)
+-- prints: true [1, 2, 3]
+
+mutable words: Array(String) = []
+words.reserve(4)
+words.push("one")
+words.push("two")
+console.log(words, words.capacity >= 4)
+-- prints: ["one", "two"] true
+
+mutable counts = Map(String, Integer).from([], capacity = 8)
+counts["a"] = 1
+counts.delete("a")
+counts["b"] = 2
+counts.reserve(1000)
+counts["c"] = 3
+console.log(counts.size, counts.capacity >= 1001, counts.get("b") ?? 0, counts.get("a") ?? 0)
+-- prints: 2 true 2 0
+
+mutable seen = Set(Integer).from([3, 1], capacity = 2)
+seen.reserve(64)
+for value in 0..50 {
+	seen.add(value %% 7)
+}
+console.log(seen.size, seen.capacity >= 7)
+-- prints: 7 true

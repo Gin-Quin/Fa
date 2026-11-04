@@ -1222,6 +1222,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.emit_copy(value)
 	}
 
+	/// A local read for the last time (`node`), given up so that the caller
+	/// may change its value in place, without a copy; `None` otherwise.
+	pub(crate) fn take_local(
+		&self,
+		value: Val<'ctx>,
+		node: NodeId,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		if value.value.is_none() || !self.needs_drop(value.repr) {
+			return Ok(None);
+		}
+		match self.movable_local(node, value.repr) {
+			Some(slot)
+				if slot.repr == value.repr
+					&& !self.resource_flags.borrow().contains_key(&slot.pointer) =>
+			{
+				self.builder
+					.build_store(slot.pointer, self.llvm_type(slot.repr).const_zero())?;
+				Ok(Some(value))
+			}
+			_ => Ok(None),
+		}
+	}
+
 	/// Takes a value, then registers it as a temporary of the enclosing
 	/// statement: the value of a block, of an `if`.
 	pub(crate) fn own(&self, value: Val<'ctx>, node: Option<NodeId>) -> Result<Val<'ctx>, Error> {

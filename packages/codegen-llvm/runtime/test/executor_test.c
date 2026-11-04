@@ -630,6 +630,10 @@ static void check_unsigned_decimal(uint64_t value) {
 	CHECK(!string_owned(actual.capacity));
 	CHECK(string_length(&actual) == (size_t)length);
 	CHECK(fa_string_equal(string_bytes(&actual), (size_t)length, (const uint8_t *)expected, (size_t)length));
+	uint8_t digits[24];
+	size_t offset = fa_decimal_u64(value, digits);
+	CHECK(offset <= sizeof digits && sizeof digits - offset == (size_t)length);
+	CHECK(fa_string_equal(digits + offset, (size_t)length, (const uint8_t *)expected, (size_t)length));
 }
 
 static void check_signed_decimal(int64_t value) {
@@ -640,6 +644,10 @@ static void check_signed_decimal(int64_t value) {
 	CHECK(!string_owned(actual.capacity));
 	CHECK(string_length(&actual) == (size_t)length);
 	CHECK(fa_string_equal(string_bytes(&actual), (size_t)length, (const uint8_t *)expected, (size_t)length));
+	uint8_t digits[24];
+	size_t offset = fa_decimal_i64(value, digits);
+	CHECK(offset <= sizeof digits && sizeof digits - offset == (size_t)length);
+	CHECK(fa_string_equal(digits + offset, (size_t)length, (const uint8_t *)expected, (size_t)length));
 }
 
 static void test_integer_strings(void) {
@@ -647,6 +655,11 @@ static void test_integer_strings(void) {
 	const int64_t signed_edges[] = {INT64_MIN, INT64_MIN + 1, -100, -99, -10, -1, 0, 1, 9, 10, 99, 100, INT64_MAX - 1, INT64_MAX};
 	for (size_t i = 0; i < sizeof signed_edges / sizeof signed_edges[0]; i += 1) { check_signed_decimal(signed_edges[i]); }
 	check_unsigned_decimal(UINT64_MAX);
+	for (uint64_t value = (uint64_t)UINT32_MAX - 1; value <= (uint64_t)UINT32_MAX + 1; value += 1) {
+		check_unsigned_decimal(value);
+		check_signed_decimal((int64_t)value);
+		check_signed_decimal(-(int64_t)value);
+	}
 	for (uint64_t power = 1;;) {
 		check_unsigned_decimal(power - 1);
 		check_unsigned_decimal(power);
@@ -898,6 +911,38 @@ static void test_character_views(void) {
 	}
 }
 
+static void test_short_copies(void) {
+	// Exact allocation ends catch overreads; varied alignment and lengths
+	// cover every short-copy branch and the transition to memcpy.
+	for (size_t length = 0; length <= 65; length += 1) {
+		for (size_t offset = 0; offset < 16; offset += 1) {
+			uint8_t *source = malloc(length + offset + 1);
+			uint8_t *target = malloc(length + offset + 1);
+			for (size_t i = 0; i <= length + offset; i += 1) {
+				source[i] = (uint8_t)(i * 17);
+				target[i] = 0xa5;
+			}
+			copy_bytes(target + offset + 1, source + offset + 1, length);
+			for (size_t i = 0; i <= offset; i += 1) { CHECK(target[i] == 0xa5); }
+			for (size_t i = offset + 1; i <= offset + length; i += 1) { CHECK(target[i] == source[i]); }
+			uint8_t byte = (uint8_t)(offset * 17);
+			fill_bytes(target + offset + 1, byte, length);
+			for (size_t i = 0; i <= offset; i += 1) { CHECK(target[i] == 0xa5); }
+			for (size_t i = offset + 1; i <= offset + length; i += 1) { CHECK(target[i] == byte); }
+			const uint8_t *text = source + offset + 1;
+			for (unsigned needle = 0; needle <= 255; needle += 1) {
+				for (size_t start = 0; start <= length; start += length / 2 + 1) {
+					size_t expected = start;
+					while (expected < length && text[expected] != needle) { expected += 1; }
+					CHECK(next_byte(text, length, start, (uint8_t)needle) == expected);
+				}
+			}
+			free(source);
+			free(target);
+		}
+	}
+}
+
 static void test_string_equal(void) {
 	// End exactly at the allocation boundary so ASan detects overreads in
 	// short tails. Also exercise unaligned inputs and every mismatching byte.
@@ -1042,6 +1087,14 @@ static void test_tables(void) {
 		CHECK(table->capacity == 32 && table->used == 2);
 	}
 	CHECK(table_test_find(table, -1) == 0);
+	// `reserve` grows the index only, from its own hashes: no entry moves
+	CHECK(fa_table_capacity(table) == 4);
+	TestTableEntry *kept = (TestTableEntry *)fa_table_entry(table, 0, sizeof(TestTableEntry));
+	fa_table_reserve(table, 100, sizeof(TestTableEntry), table_test_hash);
+	CHECK(fa_table_capacity(table) >= 101 && table->mask + 1 == 256 && table->capacity == 32);
+	CHECK(table_test_find(table, -1) == 0 && kept->key == -1);
+	fa_table_reserve(table, 10, sizeof(TestTableEntry), table_test_hash);
+	CHECK(table->mask + 1 == 256);
 	// a full chunk leaves the list of chunks with a free entry, and returns to it
 	for (int64_t key = 0; key < 70; key += 1) {
 		table_test_insert(table, key);
@@ -1278,6 +1331,7 @@ int main(void) {
 	test_arguments();
 	test_character_views();
 	test_allocator_fast_paths();
+	test_short_copies();
 	test_string_equal();
 	printf("test_yields\n");
 	test_yields();

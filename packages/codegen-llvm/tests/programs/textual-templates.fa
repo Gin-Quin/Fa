@@ -15,11 +15,55 @@ for length in 0..65 {
 	let built = "{piece}:{integer}:{piece}"
 	assert built == piece + ":-1234567890:" + piece
 	assert built.length == length * 2 + 13
+	-- Enough parts to exercise specialization of the join copy loop.
+	let wrapped = "<{piece}>({integer})[{piece}]"
+	assert wrapped == "<" + piece + ">(-1234567890)[" + piece + "]"
 }
 let maximum: UInt64 = 18446744073709551615
 let minimum: Integer = -9223372036854775808
 assert "{maximum}" == "18446744073709551615"
 assert minimum.toString() == "-9223372036854775808"
 assert "<{maximum};{minimum}>" == "<18446744073709551615;-9223372036854775808>"
+-- Decimal scratch storage must not escape through owners or function returns.
+function decimal = (value: Integer): String => value.toString()
+function optionalDecimal = (value: Integer): String? => "{value}"
+mutable decimals: Array(String) = []
+for value in -20..20 {
+	decimals.push(decimal(value))
+}
+for text, index in decimals {
+	assert text == (index - 20).toString()
+}
+assert optionalDecimal(-9223372036854775808) == "-9223372036854775808"
+let keptOptional = optionalDecimal(12345)
+assert optionalDecimal(98765) == "98765"
+assert keptOptional == "12345"
+assert decimal(9223372036854775807) == "9223372036854775807"
+let kept = decimal(12345)
+assert decimal(67890) == "67890"
+assert kept == "12345"
+
+-- Replacements cross inline/heap boundaries and preserve independent values.
+mutable buffer = ""
+for length in 0..65 {
+	let piece = "é".repeat(length)
+	buffer = "{piece}:{length}:{piece}"
+	let saved = buffer
+	buffer = "<{piece}>"
+	assert saved == piece + ":" + length.toString() + ":" + piece
+	assert buffer == "<" + piece + ">"
+	buffer = ""
+	assert buffer.isEmpty()
+}
+buffer = "a long string that owns its buffer"
+buffer = "{buffer}:{buffer}"
+assert buffer == "a long string that owns its buffer:a long string that owns its buffer"
+function replaceDuringEvaluation = (): Integer mutates buffer => {
+	buffer = "changed while evaluating the template"
+	42
+}
+let independent = "independent string data"
+buffer = "{independent}:{replaceDuringEvaluation()}"
+assert buffer == "independent string data:42"
 console.log("textual templates ok")
 -- prints: textual templates ok

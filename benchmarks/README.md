@@ -265,6 +265,36 @@ What it says:
 - **Fa is 1.65x slower than Goose** overall (2.8x before the shift), 1.90x on the Goose suite (3.96x before) and 1.28x on the original ten. Fa is ahead of or level with Goose on `sum`, `push`, `tree`, `graph`, `particles`, `blur`, `fib`, `nbody`, `fannkuch-redux` and `sieve`; behind where Goose's design avoids allocations and indirections (see below).
 - **Size**: Fa's native executables (15 to 45 KiB) and Goose's (18 to 35 KiB, runtime included with `--standalone`) are both an order of magnitude below Rust's 330 KiB.
 
+### After the native costs of the minimalism audit
+
+Measured on 2026-11-04 with the same command (`--runs 3`, `ulimit -v 8000000`), `fa` at `102d4ee` (before the `bytes()` ports): the native-goose work (inline strings and unions, arenas, borrowed parameters) and the follow-ups of [the minimalism audit](../design/minimalism-audit.md) (size-class string blocks, templates appended in place, in-place `+`, one-byte appends in registers, parameters never copied, module constants, `capacity`/`reserve`, presized maps in `lru` and `words`). The machine was busy again (load average 5 to 7): `respond` took 818 ms without overflow checks and 440 ms with them, so read the times as ±30%.
+
+| Benchmark | Fa native | Goose | Fa / Goose | | Benchmark | Fa native | Goose | Fa / Goose |
+| --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: |
+| `binary-trees` | 238 ms | 164 ms | 1.46x | | `records` | 343 ms | 248 ms | 1.38x |
+| `blur` | 186 ms | 82 ms | 2.26x | | `respond` | 818 ms | 269 ms | 3.05x |
+| `calc` | 520 ms | 255 ms | 2.04x | | `scene` | 22 ms | 22 ms | 0.97x |
+| `fannkuch-redux` | 441 ms | 470 ms | 0.94x | | `sexp` | 321 ms | 196 ms | 1.64x |
+| `fib` | 1.49 s | 1.59 s | 0.94x | | `sieve` | 914 ms | 1.17 s | 0.78x |
+| `graph` | 228 ms | 670 ms | 0.34x | | `sort-objects` | 437 ms | 368 ms | 1.19x |
+| `interp` | 70 ms | 49 ms | 1.43x | | `spectral-norm` | 1.01 s | 1.14 s | 0.89x |
+| `lru` | 813 ms | 289 ms | 2.82x | | `string-building` | 557 ms | 149 ms | 3.74x |
+| `mandelbrot` | 1.30 s | 1.31 s | 0.99x | | `strlist` | 344 ms | 181 ms | 1.91x |
+| `nbody` | 1.14 s | 1.22 s | 0.94x | | `sum` | 272 ms | 255 ms | 1.07x |
+| `particles` | 191 ms | 173 ms | 1.11x | | `tree` | 125 ms | 330 ms | 0.38x |
+| `push` | 385 ms | 435 ms | 0.88x | | `word-count` | 570 ms | 361 ms | 1.58x |
+| | | | | | `words` | 129 ms | 69 ms | 1.86x |
+
+Fa / Goose is 1.26x in geometric mean (1.65x on 2026-11-02). The instructions executed (callgrind, the audit sizes of `benchmarks/audit/sizes.txt`) are steadier than these times; Fa / Goose:
+
+| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| audit (2026-11-02) | 2.22 | 1.83 | 2.73 | 1.15 | 2.14 | 2.08 | 4.19 | 3.09 | 2.39 | 1.63 |
+| `compiler` with `bytes()` (`da95d6f`) | 1.80 | 1.88 | 1.84 | 0.98 | 2.03 | 2.38 | 2.23 | 1.48 | 1.22 | 1.17 |
+| and the follow-ups above | 1.70 | 1.89 | 1.69 | 0.98 | 1.92 | 2.22 | 2.24 | 1.49 | 1.22 | 1.17 |
+
+The times above predate the ports reading `bytes()` (`calc` and `sexp` still parsed an `Array(Character)` then); the instructions are on top of them. `lru` pays three map probes per miss and unproven index checks; `strlist` and `words` copy every word out of `split`.
+
 ### Against Goose on its own suite
 
 The goal set for the native backend is to be faster than Goose on Goose's own benchmarks (release builds: `fa build`, overflow checks off). CPU time (user + system, median of 7, Fa and Goose executables run one after the other at their default sizes) on 2026-11-04, `compiler` with the merged `perf/native-goose` work and `bytes()` (the sixth native shift), on the same busy machine (load average 6 to 8; two passes differ by up to 40% on the shortest programs). The fifth shift's column is the previous version of this table.

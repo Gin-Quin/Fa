@@ -1514,7 +1514,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 								owned[position] = copy.value.expect("a copy").into();
 							}
 						}
-						position += 1 + usize::from(*has_default && !by_pointer);
+						position += 1 + usize::from(*has_default);
 					}
 				}
 				let eager = |this: &mut Self| -> Result<Option<PointerValue<'ctx>>, Error> {
@@ -3487,7 +3487,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 // ── worker pools (`WorkerPool(T)`, `design/decisions.md`) ──────────────────
 
 /// Where a pool's copy of the state is in its block (`POOL_STATE`).
-const POOL_STATE: u64 = 128;
+const POOL_STATE: u64 = 384;
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// `WorkerPool(T) { count, state, timeout }`: a pool block holding a copy
@@ -3612,18 +3612,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		builder.build_store(to, copy)?;
 		builder.build_call(
-			self.runtime.function("fa_worker_start")?,
-			&[worker.into()],
+			self.runtime.function("fa_worker_start_in_pool")?,
+			&[worker.into(), pool.into()],
 			"",
 		)?;
 		builder.build_return(Some(&worker))?;
 		Ok(spawn)
 	}
 
-	/// `pool.submit(work)`: a task (queued) that takes a free worker of the
-	/// pool, runs the work with it, and gives it back. Awaited (`awaited`, in
-	/// an async instance), it first waits for room in the pool's queue
-	/// (`maxQueueSize`).
+	/// `pool.submit(work)`: a job queued in the pool, which a worker's thread
+	/// takes and runs (the work called with the worker); its frame is the
+	/// task. A place in the queue first (`maxQueueSize`): awaited (in an
+	/// async instance), the task waits for it; else the thread does.
 	pub(crate) fn pool_submit(
 		&mut self,
 		node: NodeId,
@@ -3677,16 +3677,270 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let task = self.type_of(node);
 		let (ret, throws) = self.task_layout(task, node)?;
 		let work_type = self.type_of(work);
-		let function = self.pool_submit_function(node, task, work_type, ret, throws)?;
-		self.call_runtime("fa_shared_retain", &[pool.into()])?;
-		let frame = self.call_async(
-			function,
-			&[pool.into(), closure.value.expect("a function").into()],
-			MODE_LAZY,
+		// the job: a frame laid out like a task's, and room for its result
+		let promise_type = self.promise_type(ret, throws);
+		let frame_size = self.finished_size(promise_type);
+		let i64 = self.context.i64_type();
+		let frame_size = self.builder.build_int_cast(frame_size, i64, "")?;
+		let raw_size = match self.raw_type(ret, throws) {
+			Some(raw_type) => {
+				let size = inkwell::types::BasicType::size_of(&raw_type).expect("a sized result");
+				self.builder.build_int_cast(size, i64, "")?
+			}
+			None => i64.const_zero(),
+		};
+		let frame = self
+			.runtime_value("fa_job_new", &[frame_size.into(), raw_size.into()])?
+			.into_pointer_value();
+		let pointer = self.pointer_type();
+		let (resume, destroy) = self.job_frame_functions()?;
+		self.builder
+			.build_store(frame, resume.as_global_value().as_pointer_value())?;
+		let destroy_slot = unsafe {
+			self.builder.build_in_bounds_gep(
+				pointer,
+				frame,
+				&[self.usize.const_int(1, false)],
+				"",
+			)?
+		};
+		self.builder
+			.build_store(destroy_slot, destroy.as_global_value().as_pointer_value())?;
+		// the closure, owned by the job
+		let block = self.allocate(self.usize.const_int(16, false))?;
+		self.builder
+			.build_store(block, closure.value.expect("a function"))?;
+		let (run, drop_closure) = self.job_run_functions(node, work_type, ret, throws)?;
+		let dispose = self.worker_dispose(ret, throws)?;
+		let (timeout_error, drop_result) = self.job_result_functions(ret, throws)?;
+		let global = |function: FunctionValue<'ctx>| -> BasicMetadataValueEnum<'ctx> {
+			function.as_global_value().as_pointer_value().into()
+		};
+		self.call_runtime(
+			"fa_workers_enqueue",
+			&[
+				pool.into(),
+				frame.into(),
+				global(run),
+				block.into(),
+				global(drop_closure),
+				global(dispose),
+				global(timeout_error),
+				global(drop_result),
+			],
 		)?;
-		let kept = self.context.i32_type().const_zero();
-		self.call_runtime("fa_task_spawn", &[frame.into(), kept.into()])?;
 		Ok(self.fresh(Val::new(Repr::Task(task), frame)))
+	}
+
+	/// The resume and destroy functions of the frames of jobs (`fastcc`):
+	/// they call `fa_job_resume` and `fa_job_destroy`.
+	fn job_frame_functions(&self) -> Result<(FunctionValue<'ctx>, FunctionValue<'ctx>), Error> {
+		let make = |name: &str, target: &str| -> Result<FunctionValue<'ctx>, Error> {
+			if let Some(function) = self.module.get_function(name) {
+				return Ok(function);
+			}
+			let pointer = self.pointer_type();
+			let function = self.module.add_function(
+				name,
+				self.context.void_type().fn_type(&[pointer.into()], false),
+				Some(Linkage::Internal),
+			);
+			function.set_call_conventions(FAST_CALLING_CONVENTION);
+			self.runtime.add_attributes(function, &["nounwind"]);
+			let builder = self.context.create_builder();
+			builder.position_at_end(self.context.append_basic_block(function, "entry"));
+			let frame = function.get_nth_param(0).expect("a frame");
+			builder.build_call(self.runtime.function(target)?, &[frame.into()], "")?;
+			builder.build_return(None)?;
+			Ok(function)
+		};
+		Ok((
+			make("fa.job.resume", "fa_job_resume")?,
+			make("fa.job.destroy", "fa_job_destroy")?,
+		))
+	}
+
+	/// `fa.job.run(ptr worker, ptr closure, ptr result)`: on the worker's
+	/// thread, calls the submitted function (its synchronous entry) with the
+	/// worker, writes the task's raw result, then drops the closure; and
+	/// `fa.job.drop_closure(ptr closure)` (a job cancelled while queued).
+	fn job_run_functions(
+		&mut self,
+		node: NodeId,
+		work_type: TypeId,
+		ret: Repr,
+		throws: bool,
+	) -> Result<(FunctionValue<'ctx>, FunctionValue<'ctx>), Error> {
+		let pointer = self.pointer_type();
+		let (params, work_ret, work_throws) = self.value_signature(work_type, node)?;
+		let sync_type = self.indirect_type(&params, work_ret, work_throws);
+		let closure_repr = Repr::Function(work_type);
+		let closure_type = self.closure_type();
+		// drops the closure and frees its block
+		let drop_closure = self.module.add_function(
+			"fa.job.drop_closure",
+			self.context.void_type().fn_type(&[pointer.into()], false),
+			Some(Linkage::Internal),
+		);
+		{
+			let builder = self.context.create_builder();
+			builder.position_at_end(self.context.append_basic_block(drop_closure, "entry"));
+			let block = drop_closure
+				.get_nth_param(0)
+				.expect("a closure")
+				.into_pointer_value();
+			let closure = builder.build_load(closure_type, block, "")?;
+			self.call_drop(&builder, closure_repr, closure)?;
+			builder.build_call(
+				self.runtime.free()?,
+				&[
+					block.into(),
+					self.usize.const_int(16, false).into(),
+					self.usize.const_int(16, false).into(),
+				],
+				"",
+			)?;
+			builder.build_return(None)?;
+		}
+		let run = self.module.add_function(
+			"fa.job.run",
+			self.context
+				.void_type()
+				.fn_type(&[pointer.into(), pointer.into(), pointer.into()], false),
+			Some(Linkage::Internal),
+		);
+		let builder = self.context.create_builder();
+		let entry_block = self.context.append_basic_block(run, "entry");
+		let tagged_block = self.context.append_basic_block(run, "tagged");
+		let call_block = self.context.append_basic_block(run, "call");
+		builder.position_at_end(entry_block);
+		let worker = run.get_nth_param(0).expect("a worker");
+		let block = run
+			.get_nth_param(1)
+			.expect("a closure")
+			.into_pointer_value();
+		let result = run.get_nth_param(2).expect("a result").into_pointer_value();
+		let closure = builder
+			.build_load(closure_type, block, "")?
+			.into_struct_value();
+		let entry = builder
+			.build_extract_value(closure, 0, "")?
+			.into_pointer_value();
+		let environment = builder.build_extract_value(closure, 1, "")?;
+		// an async function's value: its synchronous entry is in its table
+		let address = builder.build_ptr_to_int(entry, self.usize, "")?;
+		let tag = builder.build_and(address, self.usize.const_int(1, false), "")?;
+		let tagged =
+			builder.build_int_compare(IntPredicate::NE, tag, self.usize.const_zero(), "")?;
+		builder.build_conditional_branch(tagged, tagged_block, call_block)?;
+		builder.position_at_end(tagged_block);
+		let table = unsafe {
+			builder.build_gep(
+				self.context.i8_type(),
+				entry,
+				&[self.context.i64_type().const_all_ones()],
+				"",
+			)?
+		};
+		let sync_entry = builder.build_load(pointer, table, "")?.into_pointer_value();
+		builder.build_unconditional_branch(call_block)?;
+		builder.position_at_end(call_block);
+		let function = builder.build_phi(pointer, "entry")?;
+		function.add_incoming(&[(&entry, entry_block), (&sync_entry, tagged_block)]);
+		let call = builder.build_indirect_call(
+			sync_type,
+			function.as_basic_value().into_pointer_value(),
+			&[environment.into(), worker.into()],
+			"",
+		)?;
+		call.set_call_convention(FAST_CALLING_CONVENTION);
+		// the task's raw result: the function's, with no error when it can't throw
+		if let Some(raw_type) = self.raw_type(ret, throws) {
+			let raw = call.try_as_basic_value().basic();
+			let raw = match (work_throws, raw) {
+				(true, Some(raw)) => raw,
+				_ if !ret.has_value() => pointer.const_null().into(),
+				(_, raw) => {
+					let pair = raw_type.into_struct_type();
+					let value = raw.unwrap_or_else(|| super::zero_of(self.llvm_type(ret)));
+					let pair = builder.build_insert_value(pair.get_undef(), value, 0, "")?;
+					builder
+						.build_insert_value(pair, pointer.const_null(), 1, "")?
+						.as_basic_value_enum()
+				}
+			};
+			builder.build_store(result, raw)?;
+		}
+		builder.build_call(drop_closure, &[block.into()], "")?;
+		builder.build_return(None)?;
+		Ok((run, drop_closure))
+	}
+
+	/// `fa.job.timeout_error(ptr frame)`: writes `WorkerTimeout` as the raw
+	/// result of a job's promise; `fa.job.drop_result(ptr result)`: drops a
+	/// raw result (a job abandoned). Called by the runtime.
+	fn job_result_functions(
+		&mut self,
+		ret: Repr,
+		throws: bool,
+	) -> Result<(FunctionValue<'ctx>, FunctionValue<'ctx>), Error> {
+		let pointer = self.pointer_type();
+		let make = |this: &mut Self,
+		            name: &str,
+		            body: &dyn Fn(&mut Self, PointerValue<'ctx>) -> Result<(), Error>|
+		 -> Result<FunctionValue<'ctx>, Error> {
+			let function = this.module.add_function(
+				name,
+				this.context.void_type().fn_type(&[pointer.into()], false),
+				Some(Linkage::Internal),
+			);
+			let resume = this.builder.get_insert_block().expect("a block");
+			let outer = this.frame.take();
+			this.begin_function(
+				function,
+				Repr::Void,
+				outer.as_ref().and_then(|frame| frame.owner),
+			);
+			let parameter = function
+				.get_nth_param(0)
+				.expect("a pointer")
+				.into_pointer_value();
+			let result = body(this, parameter).and_then(|()| {
+				this.builder.build_return(None)?;
+				Ok(())
+			});
+			let ended = this.end_function();
+			this.frame = outer;
+			this.builder.position_at_end(resume);
+			result?;
+			ended?;
+			Ok(function)
+		};
+		let timeout_error = make(self, "fa.job.timeout_error", &|this, frame| {
+			let Some(raw_type) = this.raw_type(ret, throws) else {
+				return Ok(());
+			};
+			let _ = raw_type;
+			let error = this
+				.runtime_value("fa_error_worker_timeout", &[])?
+				.into_pointer_value();
+			let raw = this.raw_of_error(error, ret)?;
+			let promise_type = this.promise_type(ret, throws);
+			let promise = this.promise_of(frame)?;
+			let at = this
+				.builder
+				.build_struct_gep(promise_type, promise, 1, "")?;
+			this.builder.build_store(at, raw)?;
+			Ok(())
+		})?;
+		let drop_result = make(self, "fa.job.drop_result", &|this, result| {
+			let Some(raw_type) = this.raw_type(ret, throws) else {
+				return Ok(());
+			};
+			let raw = this.builder.build_load(raw_type, result, "")?;
+			this.drop_raw(raw, ret, throws)
+		})?;
+		Ok((timeout_error, drop_result))
 	}
 
 	/// `pool.shutdown()`.
@@ -3697,260 +3951,5 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		self.call_runtime("fa_workers_shutdown", &[pool.value.expect("a pool").into()])?;
 		Ok(Val::void())
-	}
-
-	/// The coroutine of a submitted work: `ptr (ptr pool, {ptr, ptr} work,
-	/// i32 mode)`. It owns a handle on the pool and the work.
-	fn pool_submit_function(
-		&mut self,
-		node: NodeId,
-		task: TypeId,
-		work_type: TypeId,
-		ret: Repr,
-		throws: bool,
-	) -> Result<FunctionValue<'ctx>, Error> {
-		let key = format!("pool_submit.{work_type:?}.{task:?}.{}", self.file.0);
-		let generic = !self.bindings.borrow().is_empty();
-		if !generic && let Some(function) = self.tasks.joins.get(&key) {
-			return Ok(*function);
-		}
-		let pointer = self.pointer_type();
-		let function = self.module.add_function(
-			"fa.pool_submit.async",
-			pointer.fn_type(
-				&[
-					pointer.into(),
-					self.closure_type().into(),
-					self.context.i32_type().into(),
-				],
-				false,
-			),
-			Some(Linkage::Internal),
-		);
-		function.set_call_conventions(FAST_CALLING_CONVENTION);
-		self.runtime.add_attributes(function, &["nounwind"]);
-		if !generic {
-			self.tasks.joins.insert(key, function);
-		}
-		self.nested_function(function, ret, |this| {
-			this.frame_mut().throws = throws;
-			let pool = function
-				.get_nth_param(0)
-				.expect("a pool")
-				.into_pointer_value();
-			let closure = function.get_nth_param(1).expect("a work");
-			let mode = function.get_nth_param(2).expect("a mode").into_int_value();
-			this.begin_coroutine(ret, throws, mode, false, false, "WorkerPool.submit".into())?;
-			let work = Val::new(Repr::Function(work_type), closure);
-			let release = |this: &mut Self| -> Result<(), Error> {
-				this.emit_drop(work)?;
-				this.call_runtime("fa_shared_release", &[pool.into()])
-			};
-			// cancelled while queued: its place in the queue is given back
-			let dequeued = |this: &mut Self| -> Result<(), Error> {
-				this.call_runtime("fa_workers_dequeued", &[pool.into()])
-			};
-			this.lazy_suspend(mode, |this| {
-				dequeued(this)?;
-				release(this)
-			})?;
-			let handle = this.coroutine().expect("a coroutine").handle;
-			// a free worker
-			let wait = this.words(WAIT_WORDS, "wait")?;
-			let worker_slot = this.alloca_type(pointer.into(), "worker")?;
-			let got = this
-				.runtime_value(
-					"fa_workers_acquire",
-					&[pool.into(), wait.into(), handle.into()],
-				)?
-				.into_pointer_value();
-			this.builder.build_store(worker_slot, got)?;
-			let none = this.builder.build_is_null(got, "")?;
-			let waiting = this.append_block("pool_waiting");
-			let acquired = this.append_block("pool_acquired");
-			this.builder
-				.build_conditional_branch(none, waiting, acquired)?;
-			this.builder.position_at_end(waiting);
-			this.suspend(Some(node), |this| {
-				this.call_runtime("fa_workers_cancel", &[pool.into(), wait.into()])?;
-				dequeued(this)?;
-				release(this)
-			})?;
-			let given = this.runtime_value("fa_workers_given", &[wait.into()])?;
-			this.builder.build_store(worker_slot, given)?;
-			this.builder.build_unconditional_branch(acquired)?;
-			this.builder.position_at_end(acquired);
-			dequeued(this)?;
-			let worker = this
-				.builder
-				.build_load(pointer, worker_slot, "")?
-				.into_pointer_value();
-			// the work, given the worker
-			let (params, work_ret, work_throws) = this.value_signature(work_type, node)?;
-			let pair = closure.into_struct_value();
-			let entry = this
-				.builder
-				.build_extract_value(pair, 0, "")?
-				.into_pointer_value();
-			let environment = this.builder.build_extract_value(pair, 1, "")?;
-			let arguments: Vec<BasicMetadataValueEnum<'ctx>> =
-				vec![environment.into(), worker.into()];
-			let sync_type = this.indirect_type(&params, work_ret, work_throws);
-			let mut async_params = sync_type.get_param_types();
-			async_params.push(this.context.i32_type().into());
-			let async_type = pointer.fn_type(&async_params, false);
-			let raw_type = this.raw_type(ret, throws);
-			let result = match raw_type {
-				Some(raw_type) => Some(this.alloca_type(raw_type, "result")?),
-				None => None,
-			};
-			let address = this.builder.build_ptr_to_int(entry, this.usize, "")?;
-			let tag = this
-				.builder
-				.build_and(address, this.usize.const_int(1, false), "")?;
-			let tagged = this.builder.build_int_compare(
-				IntPredicate::NE,
-				tag,
-				this.usize.const_zero(),
-				"",
-			)?;
-			let with_async = this.append_block("work_async");
-			let without = this.append_block("work_sync");
-			let ended = this.append_block("work_ended");
-			this.builder
-				.build_conditional_branch(tagged, with_async, without)?;
-			// awaited, with the pool's timeout
-			this.builder.position_at_end(with_async);
-			let table = unsafe {
-				this.builder.build_gep(
-					this.context.i8_type(),
-					entry,
-					&[this.context.i64_type().const_all_ones()],
-					"table",
-				)?
-			};
-			let instance = this.load_entry(table, 1)?;
-			let mut async_arguments = arguments.clone();
-			async_arguments.push(this.context.i32_type().const_zero().into());
-			let call =
-				this.builder
-					.build_indirect_call(async_type, instance, &async_arguments, "work")?;
-			call.set_call_convention(FAST_CALLING_CONVENTION);
-			let child = call
-				.try_as_basic_value()
-				.basic()
-				.expect("a frame")
-				.into_pointer_value();
-			let timer = this.words(WAIT_WORDS, "timer")?;
-			this.call_runtime(
-				"fa_workers_arm",
-				&[pool.into(), timer.into(), handle.into()],
-			)?;
-			let done = this.frame_done(child)?;
-			let suspended = this.append_block("work_waiting");
-			let settle = this.append_block("work_settle");
-			this.builder
-				.build_conditional_branch(done, settle, suspended)?;
-			this.builder.position_at_end(suspended);
-			this.call_runtime("fa_task_await", &[child.into(), handle.into()])?;
-			this.suspend(Some(node), |this| {
-				this.call_runtime(
-					"fa_workers_abandon",
-					&[
-						pool.into(),
-						timer.into(),
-						child.into(),
-						worker.into(),
-						handle.into(),
-					],
-				)?;
-				release(this)
-			})?;
-			this.builder.build_unconditional_branch(settle)?;
-			this.builder.position_at_end(settle);
-			let settled = this
-				.runtime_value(
-					"fa_workers_settle",
-					&[
-						pool.into(),
-						timer.into(),
-						child.into(),
-						worker.into(),
-						handle.into(),
-					],
-				)?
-				.into_int_value();
-			let in_time = this.builder.build_int_compare(
-				IntPredicate::NE,
-				settled,
-				this.context.i32_type().const_zero(),
-				"",
-			)?;
-			let took = this.append_block("work_took");
-			let late = this.append_block("work_late");
-			this.builder.build_conditional_branch(in_time, took, late)?;
-			this.builder.position_at_end(took);
-			let raw = this.take_result(child, work_ret, work_throws)?;
-			let raw = this.task_raw(raw, work_ret, work_throws, ret)?;
-			if let (Some(slot), Some(raw)) = (result, raw) {
-				this.builder.build_store(slot, raw)?;
-			}
-			this.call_runtime("fa_workers_release", &[pool.into(), worker.into()])?;
-			this.builder.build_unconditional_branch(ended)?;
-			this.builder.position_at_end(late);
-			let error = this
-				.runtime_value("fa_error_worker_timeout", &[])?
-				.into_pointer_value();
-			let raw = this.raw_of_error(error, ret)?;
-			if let Some(slot) = result {
-				this.builder.build_store(slot, raw)?;
-			}
-			this.builder.build_unconditional_branch(ended)?;
-			// a work that isn't async: called
-			this.builder.position_at_end(without);
-			let call = this
-				.builder
-				.build_indirect_call(sync_type, entry, &arguments, "")?;
-			call.set_call_convention(FAST_CALLING_CONVENTION);
-			let raw = this.task_raw(
-				call.try_as_basic_value().basic(),
-				work_ret,
-				work_throws,
-				ret,
-			)?;
-			if let (Some(slot), Some(raw)) = (result, raw) {
-				this.builder.build_store(slot, raw)?;
-			}
-			this.call_runtime("fa_workers_release", &[pool.into(), worker.into()])?;
-			this.builder.build_unconditional_branch(ended)?;
-			this.builder.position_at_end(ended);
-			release(this)?;
-			let raw = match (result, raw_type) {
-				(Some(slot), Some(raw_type)) => Some(this.builder.build_load(raw_type, slot, "")?),
-				_ => None,
-			};
-			this.return_raw(raw)?;
-			this.end_coroutine()
-		})?;
-		Ok(function)
-	}
-
-	/// The raw result of a pool's task (it throws: `WorkerTimeout`) made of
-	/// the raw result of its work.
-	fn task_raw(
-		&self,
-		raw: Option<BasicValueEnum<'ctx>>,
-		work_ret: Repr,
-		work_throws: bool,
-		ret: Repr,
-	) -> Result<Option<BasicValueEnum<'ctx>>, Error> {
-		if work_throws {
-			return Ok(raw);
-		}
-		let value = match raw {
-			Some(raw) => Val::new(work_ret, raw),
-			None => Val::void(),
-		};
-		self.raw_of_value(value, ret, true)
 	}
 }

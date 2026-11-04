@@ -62,7 +62,8 @@ mutable nodes: Array(Node) = [
 	{ key = -1, value = 0, previous = head, next = tail },
 ]
 mutable free: Array(Integer) = []
-mutable positions: Map(Integer, Integer) = []
+-- Sized for the cached entries up front, as Goose sizes its table.
+mutable positions = Map(Integer, Integer).from([], capacity = Math.max(capacity * 2, 0))
 mutable count = 0
 mutable hits = 0
 mutable misses = 0

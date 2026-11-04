@@ -191,6 +191,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			if let Some(pointer) = places.get(&position) {
 				arguments.push((*pointer).into());
+				if has_default {
+					arguments.push(self.context.bool_type().const_int(1, false).into());
+				}
 				continue;
 			}
 			match argument {
@@ -209,6 +212,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					if has_default {
 						arguments.push(self.context.bool_type().const_int(1, false).into());
 					}
+				}
+				Argument::Default if has_default && function.borrowed[position] => {
+					arguments.push(self.pointer_type().const_null().into());
+					arguments.push(self.context.bool_type().const_zero().into());
 				}
 				Argument::Default if has_default => {
 					let ty = self.llvm_type(repr);
@@ -323,6 +330,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"std.time.monotonic" | "File.read" | "File.readBytes" | "File.write"
 			| "TcpListener#accept" | "TcpListener#close" | "TcpStream.connect"
 			| "TcpStream#read" | "TcpStream#write" | "TcpStream#close" => self.io_builtin(node, path, info),
+			// capacity (capacity.rs)
+			_ if path.ends_with("#reserve") => self.reserve_call(node, info),
+			"String.from" => self.string_from(node, info),
 			"console.log" | "console.error" => {
 				let mut values = Vec::new();
 				for argument in &info.arguments {

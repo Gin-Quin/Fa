@@ -932,6 +932,24 @@ impl Generator<'_> {
 			Some(reused) => reused,
 			None => self.copy_into(value_node, value, true),
 		};
+		// a value holding a resource: the old one dropped (resources.rs)
+		if place.map.is_none()
+			&& let Some((drop, flag)) = self.drop_replaced(target_node)
+		{
+			let temp = self.temp();
+			self.out.line(format!("const {temp} = {};", value.text));
+			match &flag {
+				Some(flag) => self
+					.out
+					.line(format!("if ({flag}) {drop}({});", place.text)),
+				None => self.out.line(format!("{drop}({});", place.text)),
+			}
+			self.out.line(place.write(&temp));
+			if let Some(flag) = flag {
+				self.out.line(format!("{flag} = true;"));
+			}
+			return;
+		}
 		self.out.line(place.write(&value.text));
 	}
 

@@ -1,5 +1,4 @@
--- skip-target: wasm native-freestanding bun
--- (bun: JavaScript destroys a resource local only, not one inside another value)
+-- skip-target: wasm native-freestanding
 -- an object holding a value with `destroy` is move-only, like one holding a
 -- task: it moves into a function, a field moved out is destroyed by its new
 -- owner, and the holder's drop skips it

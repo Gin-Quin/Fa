@@ -320,6 +320,10 @@ impl Generator<'_> {
 			return Expr::constant(value.to_string(), Prec::Primary);
 		}
 		let members: Vec<NodeId> = members.iter().collect();
+		// a field holding a resource moved out of its local (resources.rs)
+		if let Some(moved) = self.field_moved_out(n, target, &members) {
+			return moved;
+		}
 		// a constant of the number API (`Int8.maxValue`, `Float.nan`)
 		if let [member] = members.as_slice()
 			&& let Resolution::Builtin(builtin) = self.analysis.resolution(*member)

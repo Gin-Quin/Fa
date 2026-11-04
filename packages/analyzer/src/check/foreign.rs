@@ -840,9 +840,13 @@ impl Walker<'_> {
 			{
 				self.strip_groups(target)
 			}
-			_ => return,
+			_ => {
+				self.report_item_moved_out(value);
+				return;
+			}
 		};
 		if !matches!(syntax::view(&tree, root), View::Name(_)) {
+			self.report_item_moved_out(value);
 			return;
 		}
 		let Resolution::Local(symbol) = self.a.resolution(root) else {
@@ -871,6 +875,24 @@ impl Walker<'_> {
 			return;
 		}
 		// a field moved out
+		if let View::Access { members, .. } = syntax::view(&tree, value) {
+			let count = members.len();
+			let holders = std::iter::once(root).chain(members.iter().take(count - 1));
+			let resource = holders
+				.into_iter()
+				.find(|&holder| self.s.types.is_resource(self.a.type_of(holder)));
+			if let Some(resource) = resource {
+				let text = tree.text(value.index()).to_string();
+				let name = tree.text(resource.index()).to_string();
+				let message = format!(
+					"`{text}` can't be moved out of `{name}`: its type has `destroy`, which uses every field; move the whole value instead"
+				);
+				let diagnostic =
+					self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value, message);
+				self.report_flow(diagnostic);
+				return;
+			}
+		}
 		if !owned {
 			let text = tree.text(value.index()).to_string();
 			let name = tree.text(root.index()).to_string();
@@ -892,6 +914,29 @@ impl Walker<'_> {
 		{
 			self.body.flow.moved_fields.push((place, value));
 		}
+	}
+
+	/// A move-only value read out of an item of a collection (`items[0]`,
+	/// `items[0].task`): it can't leave a hole in the collection (MEM002).
+	fn report_item_moved_out(&mut self, value: NodeId) {
+		let tree = std::sync::Arc::clone(&self.tree);
+		let mut current = value;
+		let collection = loop {
+			match syntax::view(&tree, current) {
+				View::Group(inner) => current = inner,
+				View::Access { target, .. } => current = target,
+				View::Index { target, .. } => break target,
+				_ => return,
+			}
+		};
+		let text = tree.text(value.index()).to_string();
+		let name = tree.text(collection.index()).to_string();
+		let message = format!(
+			"`{text}` can't be moved out of `{name}`: its value can't be copied, and a collection can't keep a hole; take it out with `{name}.take(…)`, or move the whole collection"
+		);
+		let diagnostic =
+			self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value, message);
+		self.report_flow(diagnostic);
 	}
 
 	/// `MEM002` when an access reads a field moved out of its local, or

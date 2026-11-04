@@ -15,7 +15,7 @@
 use fa_parser::{SourceSpan, TypedSyntaxTree};
 
 use crate::analysis::{Analysis, NodeFlags};
-use crate::ids::NodeId;
+use crate::ids::{NodeId, TypeId};
 use crate::syntax::{self, NodeList, View};
 
 /// A replacement of `source[start..end]` by `text`.
@@ -81,6 +81,9 @@ impl Migration {
 pub fn angle_bracket_generics(tree: &TypedSyntaxTree, analysis: &Analysis) -> Migration {
 	let source: &str = &tree.source;
 	let mut migration = Migration::default();
+	// the parenthesized applications, then the calls of capitalized names left
+	let mut applications = vec![false; tree.nodes.len()];
+	let mut calls = Vec::new();
 	for index in 0..tree.nodes.len() {
 		let n = NodeId::new(index);
 		match syntax::view(tree, n) {
@@ -103,31 +106,85 @@ pub fn angle_bracket_generics(tree: &TypedSyntaxTree, analysis: &Analysis) -> Mi
 				declaration(source, tree, start, parameters, &mut migration);
 			}
 			View::Call { callee, arguments } => {
-				let callee_span = tree.span(callee.index());
-				let Some(open) = skip_trivia(source, callee_span.end) else {
-					continue;
-				};
-				// `Array<Integer>` maps to the same view: only the parenthesized lists move
-				if source.as_bytes()[open] != b'(' {
+				if parenthesized_call(source, tree, index, callee, arguments).is_none() {
 					continue;
 				}
-				let flags = analysis.flags_of(n);
-				let is_application = flags
+				let callee_text = text(source, tree, callee);
+				if analysis
+					.flags_of(n)
 					.intersects(NodeFlags::TYPE_EXPR | NodeFlags::GENERIC_APPLICATION)
-					&& !source[callee_span.start..callee_span.end].starts_with('@')
-					&& !arguments.is_empty();
-				let close = tree.span(index).end.saturating_sub(1);
-				if is_application && source.as_bytes().get(close) == Some(&b')') {
-					list(source, tree, open, close, arguments, true, &mut migration);
-				} else if is_capitalized_callee(&source[callee_span.start..callee_span.end]) {
-					migration.kept_calls.push(tree.span(index));
+					&& !callee_text.starts_with('@')
+				{
+					applications[index] = true;
+				} else if is_capitalized_callee(callee_text) {
+					calls.push(n);
 				}
 			}
 			_ => {}
 		}
 	}
+	// the arguments of a type application that the analysis didn't reach (a type function it
+	// doesn't evaluate yet, like `Parameters(Type(f))`): a call of a capitalized name there is
+	// the application of a type
+	let mut pending: Vec<usize> = (0..tree.nodes.len())
+		.filter(|index| applications[*index])
+		.collect();
+	while let Some(index) = pending.pop() {
+		if !analysis
+			.flags_of(NodeId::new(index))
+			.contains(NodeFlags::TYPE_EXPR)
+		{
+			continue;
+		}
+		let View::Call { arguments, .. } = syntax::view(tree, NodeId::new(index)) else {
+			continue;
+		};
+		for argument in arguments.iter() {
+			if calls.contains(&argument) && analysis.type_of(argument) == TypeId::UNSET {
+				applications[argument.index()] = true;
+				calls.retain(|call| *call != argument);
+				pending.push(argument.index());
+			}
+		}
+	}
+	for (index, is_application) in applications.into_iter().enumerate() {
+		if !is_application {
+			continue;
+		}
+		let View::Call { callee, arguments } = syntax::view(tree, NodeId::new(index)) else {
+			continue;
+		};
+		if let Some((open, close)) = parenthesized_call(source, tree, index, callee, arguments) {
+			list(source, tree, open, close, arguments, true, &mut migration);
+		}
+	}
+	migration.kept_calls = calls.iter().map(|call| tree.span(call.index())).collect();
 	migration.edits.sort_by_key(|edit| (edit.start, edit.end));
 	migration
+}
+
+/// The `(` and the `)` of a call written with parentheses and at least one argument
+/// (`Array<Integer>` has the same view).
+fn parenthesized_call(
+	source: &str,
+	tree: &TypedSyntaxTree,
+	index: usize,
+	callee: NodeId,
+	arguments: NodeList<'_>,
+) -> Option<(usize, usize)> {
+	if arguments.is_empty() {
+		return None;
+	}
+	let open = skip_trivia(source, tree.span(callee.index()).end)?;
+	let close = tree.span(index).end.checked_sub(1)?;
+	let bytes = source.as_bytes();
+	(bytes[open] == b'(' && bytes.get(close) == Some(&b')')).then_some((open, close))
+}
+
+/// The text of a node.
+fn text<'s>(source: &'s str, tree: &TypedSyntaxTree, n: NodeId) -> &'s str {
+	let span = tree.span(n.index());
+	&source[span.start..span.end]
 }
 
 /// The parenthesized generic parameters of a declaration, after `after` (the declared name, or

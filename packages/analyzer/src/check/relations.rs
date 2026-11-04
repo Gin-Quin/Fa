@@ -188,6 +188,13 @@ impl Walker<'_> {
 				return None;
 			}
 		};
+		// `Pool(…)` is the application of a type (read by `migrate.rs`)
+		if matches!(
+			found,
+			Found::Reference { many: true, .. } | Found::Reverse { many: true, .. }
+		) {
+			self.set_flag(inner, crate::analysis::NodeFlags::TYPE_EXPR);
+		}
 		// neither side is initialized (REL013)
 		if let Some(default) = default {
 			let text = self.s.types.syms.resolve(name).to_string();

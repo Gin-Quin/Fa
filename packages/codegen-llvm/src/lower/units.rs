@@ -1117,6 +1117,24 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 						self.resource_flags
 							.borrow_mut()
 							.insert(slot.pointer, global.as_pointer_value());
+						let fields = self.field_flags.borrow().get(&slot.pointer).cloned();
+						if let Some(fields) = fields {
+							let mut moved = Vec::new();
+							for field in fields {
+								let owned = self.module.add_global(bool_type, None, "fa.owns");
+								owned.set_linkage(Linkage::Internal);
+								owned.set_initializer(&bool_type.const_zero());
+								if !self.terminated() {
+									let set = self.builder.build_load(bool_type, field.flag, "")?;
+									self.builder.build_store(owned.as_pointer_value(), set)?;
+								}
+								moved.push(super::ownership::FieldFlag {
+									path: field.path,
+									flag: owned.as_pointer_value(),
+								});
+							}
+							self.field_flags.borrow_mut().insert(slot.pointer, moved);
+						}
 						entries.push(Cleanup::Flagged(slot, global.as_pointer_value()));
 					}
 					_ => {

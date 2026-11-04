@@ -1786,13 +1786,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			&& let Ok(slot) = self.place(inner)
 			&& slot.repr == value.repr
 		{
-			// the place gives it up: a zero, which its drop skips
-			self.builder
-				.build_store(slot.pointer, self.llvm_type(slot.repr).const_zero())?;
-			if let Some(&flag) = self.resource_flags.borrow().get(&slot.pointer) {
-				self.builder
-					.build_store(flag, self.context.bool_type().const_zero())?;
-			}
+			self.give_up_place(inner, slot)?;
 			return Ok(value);
 		}
 		self.take(value, Some(operand))

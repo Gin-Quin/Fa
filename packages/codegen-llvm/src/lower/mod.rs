@@ -78,6 +78,7 @@ use rustc_hash::FxHashMap;
 use crate::error::Error;
 use crate::runtime::Runtime;
 use crate::target::Target;
+use ownership::FieldFlag;
 use values::{IntRepr, Repr, Val};
 
 /// LLVM's number for the `fastcc` calling convention.
@@ -287,6 +288,11 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The drop flags of the locals holding a resource of foreign code (a
 	/// type with `destroy`), by slot: cleared when the local moves out.
 	resource_flags: std::cell::RefCell<FxHashMap<PointerValue<'ctx>, PointerValue<'ctx>>>,
+	/// The drop flags of the fields holding a resource that may move out of
+	/// a local (`let moved = holder.buffer`), by slot of the local: the
+	/// path of field indices and its flag, cleared when the field moves out
+	/// and set again when it is assigned (`ownership.rs`, `drop_place`).
+	field_flags: std::cell::RefCell<FxHashMap<PointerValue<'ctx>, Vec<FieldFlag<'ctx>>>>,
 	/// The `let` locals bound to `text.codePoints()` that are only indexed
 	/// and measured, by symbol: the call, evaluated again (on an immutable
 	/// text) where they are read, so that the array is never built.
@@ -434,6 +440,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			pending_box: std::cell::Cell::new(None),
 			effectful_drops: std::cell::Cell::new(false),
 			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
+			field_flags: std::cell::RefCell::new(FxHashMap::default()),
 			virtual_code_points: FxHashMap::default(),
 			whole_program: false,
 			unsafe_maps: program::unsafe_maps(session, files),
@@ -2335,7 +2342,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				let value = self.load(slot)?;
 				// a move-only value moved out: the local gives it up
 				if self.analysis.moved_reads.contains(&node) && value.repr == slot.repr {
-					self.give_up_place(slot)?;
+					self.give_up_place(node, slot)?;
 					let value = self.fresh(value);
 					let narrowed = self.node_repr(node).unwrap_or(value.repr);
 					return self.narrow_to(value, narrowed, node);
@@ -2450,10 +2457,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(Val::void());
 		}
 		let value_lowered = self.owned_as(value_lowered, slot.repr, Some(value))?;
-		// the value it replaces is dropped
-		let old = self.load(slot)?;
-		self.emit_drop(old)?;
+		// the value it replaces is dropped (but what moved out of it)
+		let flags = self.drop_replaced(target, slot)?;
 		self.store(slot, value_lowered, value)?;
+		for flag in flags {
+			self.builder
+				.build_store(flag, self.context.bool_type().const_int(1, false))?;
+		}
 		Ok(Val::void())
 	}
 

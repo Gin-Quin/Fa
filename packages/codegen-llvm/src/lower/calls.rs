@@ -681,6 +681,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					if spread.repr == Repr::Never {
 						return Ok(None);
 					}
+					// a set or a map spreads its items: an array of them first
+					let spread = match spread.repr {
+						Repr::Set(_) | Repr::Map(_) => self.array_of_table(spread, repr, inner)?,
+						_ => spread,
+					};
 					let size = inkwell::types::BasicType::size_of(&self.llvm_type(item))
 						.expect("a sized item");
 					let size = self.builder.build_int_cast(size, i64, "")?;

@@ -30,6 +30,20 @@ pub(super) struct TreeArenas {
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// Arena nodes must fit one runtime page, including FaArena's five-pointer
+	/// header (rounded to 16 bytes) and the allocator's eight-byte size rounding.
+	fn arena_type_fits(&self, ty: inkwell::types::BasicTypeEnum<'ctx>) -> bool {
+		let layout = self.module.get_data_layout();
+		let data =
+			inkwell::targets::TargetData::create(layout.as_str().to_str().expect("a data layout"));
+		let header = (5 * u64::from(self.usize.get_bit_width() / 8)).next_multiple_of(16);
+		let align = u64::from(data.get_abi_alignment(&ty));
+		let offset = header.next_multiple_of(align);
+		let size = data.get_abi_size(&ty);
+		const PAGE_SIZE: u64 = 65536;
+		offset <= PAGE_SIZE && size <= PAGE_SIZE && size.next_multiple_of(8) <= PAGE_SIZE - offset
+	}
+
 	/// Passive owning fields of a recursive member. Recursive
 	/// edges belong to the region and must never be followed by its cleanup.
 	fn arena_payload_slots(
@@ -300,14 +314,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let valid = match self.types().kind(ty) {
 				TypeKind::Object(_) if self.destroy_function(ty).is_none() => {
 					shapes.insert(ty);
-					self.object_fields(ty).iter().all(|r| {
-						if matches!(r, Repr::Optional(Scalar::Rec(target)) if *target == ty) {
-							recursive = true;
-							true
-						} else {
-							!self.needs_drop(*r)
-						}
-					})
+					self.arena_type_fits(self.object_type(ty).into())
+						&& self.object_fields(ty).iter().all(|r| {
+							if matches!(r, Repr::Optional(Scalar::Rec(target)) if *target == ty) {
+								recursive = true;
+								true
+							} else {
+								!self.needs_drop(*r)
+							}
+						})
 				}
 				TypeKind::NamedUnion(n, _) => {
 					nominal = Some(n);
@@ -317,6 +332,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						};
 						if !matches!(self.types().kind(data), TypeKind::Object(_))
 							|| self.destroy_function(data).is_some()
+							|| !self.arena_type_fits(self.box_type(Some(Repr::Object(data))).into())
 						{
 							return false;
 						}
@@ -328,7 +344,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 								recursive = true;
 								true
 							} else {
-								!self.tree_value_type(f.ty, ty) && self.arena_payload_type(f.ty)
+								// Direct Union fields are reserved for recursive root
+								// edges by arena_payload_slots; unrelated boxes need
+								// the general ownership path to release their payload.
+								!self.tree_value_type(f.ty, ty)
+									&& self.repr_of(f.ty, 0).is_ok_and(|r| r != Repr::Union)
+									&& self.arena_payload_type(f.ty)
 							}
 						})
 					})

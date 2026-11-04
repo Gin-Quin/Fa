@@ -129,3 +129,33 @@ limit. The focused validation adds:
 The fixtures live in [the LLVM program tests](../../packages/codegen-llvm/tests/programs/).
 After changing `runtime/fa_runtime.c`, regenerate both checked-in IR files with
 `packages/codegen-llvm/runtime/generate.sh` before validating or measuring.
+
+## Independent review
+
+Commit `665acf4` records the implementation and this audit. A fresh independent
+agent reviewed its Rust/C changes, reproduced two arena regressions, then
+independently confirmed a recursive optional alias regression found during
+follow-up validation. The subsequent fixes keep the existing general paths:
+
+- An unrelated anonymous union stored directly in a tree member now disables
+  its arena proof. Its owning box is released by ordinary destruction; recursive
+  root edges remain owned by the region.
+- Every complete node, including a union's tag, must fit one arena page using
+  the target ABI's size and alignment, the arena header and allocation rounding.
+  Larger nodes use general allocation without imposing a value-size limit.
+- Recursive aliases whose transparent representation has no optional scalar
+  retain their nullable box in optional positions. After a presence test,
+  narrowing exposes the underlying value as a borrowed view.
+
+Regression programs cover [union payload cleanup](../../packages/codegen-llvm/tests/programs/tree-arena-union-payload.fa),
+[oversized nodes](../../packages/codegen-llvm/tests/programs/tree-arena-large-payload.fa)
+and [recursive optional aliases](../../packages/codegen-llvm/tests/programs/recursive-collection-aliases.fa).
+Their focused matrix has 17 successful runs at `-O0`/`-O3` across native,
+freestanding and wasm, with overflow and leak checks. The oversized wasm case
+passes at `-O3`; at `-O0` it reaches Node's 1000-parameter engine limit and is
+excluded from this matrix. The ordinary optimized workspace test still runs it.
+
+The reviewer rechecked the fixes and the original counterexamples without
+finding another actionable defect. All 25 native benchmark executables remain
+byte-for-byte identical to the timed binaries after these fixes. Formatting,
+workspace Clippy and the full workspace tests were rerun with LLVM 18 enabled.

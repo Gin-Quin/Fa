@@ -374,7 +374,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let items = types.list_items(list);
 				let mut common: Option<Repr> = None;
 				for &item in items.iter().filter(|&&item| item != TypeId::NONE) {
-					let repr = self.repr_of(item, node)?;
+					let mut repr = self.repr_of(item, node)?;
+					// Some pointer-backed aliases have no optional scalar layout.
+					// Preserve their existing nullable box only in that position.
+					if items.contains(&TypeId::NONE)
+						&& Scalar::of(repr).is_none()
+						&& matches!(types.kind(item), TypeKind::Rec(_))
+						&& let Some(target) = types.rec_target(item)
+					{
+						repr = Repr::Rec(target);
+					}
 					common = Some(match (common, repr) {
 						(None, repr) => repr,
 						(Some(Repr::Int(a)), Repr::Int(b)) => Repr::Int(a.common(b)),

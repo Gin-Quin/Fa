@@ -33,6 +33,23 @@ console.log(pools)
 -- prints: [[]]
 assert pools.size == 1
 
+-- Optional aliases retain their nullable box when their transparent container
+-- has no scalar optional representation.
+type OptionalPool = Pool(OptionalPool?)
+let emptyOptionalPool: OptionalPool = []
+mutable optionalPools: OptionalPool = [none, emptyOptionalPool]
+let optionalPoolsCopy = optionalPools
+optionalPools.clear()
+assert optionalPoolsCopy.size == 2
+function optionalPoolSize = (items: OptionalPool): Integer => items.size
+for item in optionalPoolsCopy {
+	if item is not none {
+		assert optionalPoolSize(item) == 0
+	}
+}
+console.log(optionalPoolsCopy)
+-- prints: [none, []]
+
 type TupleTree = (Integer, Array(TupleTree))
 let tuple: TupleTree = (1, [(2, [])])
 let tupleCopy = tuple

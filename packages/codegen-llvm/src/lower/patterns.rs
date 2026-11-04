@@ -35,7 +35,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		&self,
 		value: Val<'ctx>,
 		narrowed: Repr,
-		_node: NodeId,
+		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
 		if value.repr == narrowed {
 			return Ok(value);
@@ -60,6 +60,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if narrowed == scalar.repr() {
 			let (_, inner) = self.optional_split(value)?;
 			return Ok(inner.expect("a value"));
+		}
+		if let Scalar::Rec(target) = scalar
+			&& self.repr_of(target, node.index())? == narrowed
+		{
+			let (_, inner) = self.optional_split(value)?;
+			return self.convert(inner.expect("a recursive value"), narrowed, node.index());
 		}
 		if narrowed == Repr::None {
 			return Ok(Val {

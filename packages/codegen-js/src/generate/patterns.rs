@@ -18,6 +18,25 @@ use crate::generate::Generator;
 use crate::js::{Expr, Prec};
 
 impl Generator<'_> {
+	/// The names a pattern declares, nested patterns included, in order.
+	pub(crate) fn pattern_symbols(&self, pattern: NodeId) -> Vec<SymbolId> {
+		let mut symbols = Vec::new();
+		let mut pending = vec![pattern];
+		while let Some(pattern) = pending.pop() {
+			let Some(info) = self.analysis.pattern(pattern) else {
+				continue;
+			};
+			for element in info.elements.iter().rev() {
+				match element.binding {
+					PatternBinding::Symbol(symbol) => symbols.push(symbol),
+					PatternBinding::Nested(nested) => pending.push(nested),
+					PatternBinding::None => {}
+				}
+			}
+		}
+		symbols
+	}
+
 	/// Binds the names of a pattern to the parts of `value`: `const` (or
 	/// `let` when `mutable`) declarations. `copy` copies the composite
 	/// parts (a mutable binding, or a value read from a mutable place).

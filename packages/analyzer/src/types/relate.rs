@@ -333,7 +333,23 @@ impl TypeStore {
 		source: crate::ids::SigId,
 		target: crate::ids::SigId,
 	) -> Result<(), Reason> {
-		let (source, target) = (self.sig(source), self.sig(target));
+		let (mut source, target) = (self.sig(source), self.sig(target));
+		// generic function types (phase 2 of "Generic functions carry their
+		// list on the function value"): a generic function satisfies a generic
+		// type with as many parameters when each constraint of the type
+		// satisfies the function's (the function accepts at least what the type
+		// accepts), its signature read with the type's parameters
+		let source_generics = self.list_items(source.generics).to_vec();
+		let target_generics = self.list_items(target.generics).to_vec();
+		if !source_generics.is_empty() || !target_generics.is_empty() {
+			let renamed = self.generic_renaming(&source_generics, &target_generics)?;
+			let function = self.function(source);
+			let renamed = self.substitute(function, &renamed);
+			let TypeKind::Function(renamed) = self.kind(renamed) else {
+				return Err(Reason::Mismatch);
+			};
+			source = self.sig(renamed);
+		}
 		let source_params = self.params(source.params).to_vec();
 		let target_params = self.params(target.params).to_vec();
 		let fewest = target_params
@@ -366,6 +382,39 @@ impl TypeStore {
 			return Err(Reason::Mismatch);
 		}
 		Ok(())
+	}
+
+	/// The bindings that read a generic function's parameters as a generic
+	/// function type's (`source` and `target` are their `Param` types): as many
+	/// parameters, and the constraint of each parameter of the type satisfies
+	/// the function's (it can't be narrower than the type's).
+	pub fn generic_renaming(
+		&mut self,
+		source: &[TypeId],
+		target: &[TypeId],
+	) -> Result<crate::types::Bindings, Reason> {
+		if source.len() != target.len() {
+			return Err(Reason::Arity);
+		}
+		let mut params = Vec::with_capacity(source.len());
+		for (&source, &target) in source.iter().zip(target) {
+			let (TypeKind::Param(source), TypeKind::Param(target_param)) =
+				(self.kind(source), self.kind(target))
+			else {
+				return Err(Reason::Mismatch);
+			};
+			let wanted = self.param_constraint(source);
+			if !wanted.is_unset() && wanted != TypeId::UNKNOWN {
+				let given = self.param_constraint(target_param);
+				if given.is_unset() || given == TypeId::UNKNOWN || !self.satisfies(given, wanted) {
+					return Err(Reason::Field);
+				}
+			}
+			params.push(source);
+		}
+		let mut bindings = crate::types::Bindings::new(&params);
+		bindings.types = target.to_vec();
+		Ok(bindings)
 	}
 
 	/// The type of a value that is one of `a` or `b` with no expected type

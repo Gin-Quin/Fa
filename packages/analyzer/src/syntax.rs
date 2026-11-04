@@ -729,6 +729,15 @@ pub fn lifted_generics<'t>(
 	}
 }
 
+/// Whether a call view is a generic list written with angle brackets,
+/// `f<Integer>`: always an application, never a call.
+pub fn is_angle_application(tree: &TypedSyntaxTree, n: NodeId) -> bool {
+	matches!(
+		tree.nodes.get(n.index()),
+		Some(Node::GenericApplication { .. })
+	)
+}
+
 /// Whether a lambda's generic list is lifted into the `function` declaration
 /// whose value it is (see [`lifted_generics`]).
 pub fn is_lifted_lambda(tree: &TypedSyntaxTree, declaration: NodeId, lambda: NodeId) -> bool {

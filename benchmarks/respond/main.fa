@@ -119,7 +119,7 @@ function handle = (seed: UInt64): Tuple<UInt64, Integer> => {
 	(fnv1a(out), out.length)
 }
 
-let n = try Integer.parse(arguments.get(0) ?? "400000")
+let n = 400_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
 
 mutable seed: UInt64 = 12345
 mutable hash: UInt64 = 0

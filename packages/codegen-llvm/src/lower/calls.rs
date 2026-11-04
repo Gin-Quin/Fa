@@ -40,6 +40,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			{
 				return self.absolute(node, target);
 			}
+			// `transform<Integer>`: a generic function value's instance
+			// (`generic_values.rs`, through `expr`)
+			if let View::Call { callee, .. } = self.view(node)
+				&& self
+					.analysis
+					.flags_of(node)
+					.contains(fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION)
+				&& self.is_generic_function_type(self.type_of(callee))
+			{
+				return self.expr(callee);
+			}
 			return Err(self.unsupported(node.index(), "this call"));
 		};
 		match info.callee {
@@ -553,8 +564,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The instance of a generic function for the type arguments of a call
 	/// (monomorphization): declared on first use, lowered at the end.
+	/// The type arguments of a call of a generic function: the call's, or
+	/// those written before it (`first<Integer>(items)`, `sum(Float)([1])`).
+	pub(crate) fn call_instantiation(&self, call: NodeId) -> Option<fa_analyzer::ids::ListId> {
+		self.analysis
+			.instantiation(call)
+			.or_else(|| match self.view(call) {
+				// not with compile-time values, which instances don't take yet
+				View::Call { callee, .. } => self.analysis.instantiation(callee).filter(|&list| {
+					!self.types().list_items(list).iter().any(|&argument| {
+						matches!(
+							self.types().kind(argument),
+							fa_analyzer::types::TypeKind::Const(_)
+								| fa_analyzer::types::TypeKind::Int(_)
+						) && self.types().is_literal(argument)
+					})
+				}),
+				_ => None,
+			})
+	}
+
 	pub(crate) fn instance(&mut self, declaration: NodeId, call: NodeId) -> Result<NodeId, Error> {
-		let Some(list) = self.analysis.instantiation(call) else {
+		let Some(list) = self.call_instantiation(call) else {
 			return Err(self.unsupported(call.index(), "this generic call"));
 		};
 		// the type arguments, as the types the instance being lowered (if

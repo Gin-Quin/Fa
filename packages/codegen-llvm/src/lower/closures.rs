@@ -114,9 +114,57 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(saved)
 	}
 
+	/// The instance of a lambda of a generic function (or of a generic
+	/// lambda, whose own parameters are `own`): declared for the bindings of
+	/// the instance being lowered, lowered at the end. Its key in
+	/// `instances` is the lambda and the representations of every bound
+	/// parameter, in the order of their ids.
+	pub(crate) fn lambda_instance(&mut self, node: NodeId, own: &[Repr]) -> Result<NodeId, Error> {
+		let Some(info) = self.generic_functions.get(&node).cloned() else {
+			return Err(self.unsupported(node.index(), "this lambda"));
+		};
+		let mut bindings = self.bindings.borrow().clone();
+		for (&param, &repr) in info.generics.iter().zip(own) {
+			bindings.insert(param, repr);
+		}
+		let mut entries: Vec<(fa_analyzer::ids::ParamId, Repr)> = bindings
+			.iter()
+			.map(|(&param, &repr)| (param, repr))
+			.collect();
+		entries.sort_by_key(|(param, _)| *param);
+		let reprs: Vec<Repr> = entries.iter().map(|(_, repr)| *repr).collect();
+		if let Some(key) = self.instances.get(&(node, reprs.clone())) {
+			return Ok(*key);
+		}
+		let saved = self.bindings.replace(bindings);
+		let suffix = format!(".{}", self.instances.len());
+		let function = self.declare_function(node, info, &suffix);
+		self.bindings.replace(saved);
+		let function = function?;
+		// a key that is no node of the tree
+		let key = NodeId::new(self.tree.nodes.len() + self.instances.len() + 1);
+		self.functions.insert(key, function);
+		self.instances.insert((node, reprs), key);
+		self.pending_instances.push((self.file, key));
+		Ok(key)
+	}
+
 	/// A lambda evaluated: its function and a new environment.
 	pub(crate) fn lambda_value(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
-		let Some(function) = self.functions.get(&node).cloned() else {
+		// a generic lambda (`generic_values.rs`)
+		if self
+			.generic_functions
+			.get(&node)
+			.is_some_and(|info| !info.generics.is_empty() && info.declaration.is_none())
+		{
+			return self.generic_lambda_value(node);
+		}
+		let key = if self.functions.contains_key(&node) {
+			node
+		} else {
+			self.lambda_instance(node, &[])?
+		};
+		let Some(function) = self.functions.get(&key).cloned() else {
 			return Err(self.unsupported(node.index(), "this lambda"));
 		};
 		let (value, captures) = (function.value, function.captures.clone());
@@ -358,6 +406,33 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
 		let Some(function) = self.functions.get(&declaration).cloned() else {
+			// a generic function used as a generic function value (`generic_values.rs`)
+			if self.generic_functions.contains_key(&declaration) {
+				// given where an instance is expected (`names.map(identity)`)
+				if self.analysis.instantiation(node).is_some()
+					&& !self.is_generic_function_type(self.type_of(node))
+				{
+					let key = self.instance(declaration, node)?;
+					let function = self.functions[&key].clone();
+					let thunk = self.thunk_of(&function)?;
+					// the type of the instance
+					let list = self.analysis.instantiation(node).expect("an instantiation");
+					let arguments: Vec<TypeId> = self
+						.types()
+						.list_items(list)
+						.iter()
+						.map(|&argument| self.concrete_type(argument))
+						.collect();
+					let generics = self.generic_functions[&declaration].generics.clone();
+					let ty = self.substitute_params(self.type_of(node), &generics, &arguments);
+					return self.make_closure_of(
+						thunk.as_global_value().as_pointer_value(),
+						self.pointer_type().const_null(),
+						ty,
+					);
+				}
+				return self.generic_declaration_value(declaration, node);
+			}
 			return Err(self.unsupported(node.index(), "this function value"));
 		};
 		if function.lambda {
@@ -383,67 +458,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// given where more errors are allowed: adapted (`adapt_function_errors`)
 			return self.convert(closure, Repr::Function(self.type_of(node)), node.index());
 		}
-		let target = function.value;
-		let name = format!("{}.thunk", target.get_name().to_string_lossy());
-		let thunk = match self.module.get_function(&name) {
-			Some(thunk) => thunk,
-			None => {
-				let target_type = target.get_type();
-				let target_parameters = target_type.get_param_types();
-				let params = function.params.clone();
-				let by_pointer = function.by_pointer.clone();
-				// the indirect ABI (`indirect_type`): every argument, the
-				// aggregates borrowed (`borrows_parameter`), no default flags;
-				// then the target's other parameters (requirements)
-				let mut parameters: Vec<BasicMetadataTypeEnum<'ctx>> =
-					vec![self.pointer_type().into()];
-				let mut at = 0;
-				for (repr, has_default) in &params {
-					parameters.push(if self.borrows_parameter(*repr) {
-						self.pointer_type().into()
-					} else {
-						self.llvm_type(*repr).into()
-					});
-					at += 1 + usize::from(*has_default);
-				}
-				parameters.extend(target_parameters.iter().skip(at).copied());
-				let thunk_type = match target_type.get_return_type() {
-					Some(ret) => ret.fn_type(&parameters, false),
-					None => self.context.void_type().fn_type(&parameters, false),
-				};
-				let thunk = self
-					.module
-					.add_function(&name, thunk_type, Some(Linkage::Internal));
-				thunk.set_call_conventions(FAST_CALLING_CONVENTION);
-				self.runtime.add_attributes(thunk, &["nounwind"]);
-				let builder = self.context.create_builder();
-				builder.position_at_end(self.context.append_basic_block(thunk, "entry"));
-				let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
-				let mut given = thunk.get_param_iter().skip(1);
-				for (index, (repr, has_default)) in params.iter().enumerate() {
-					let argument = given.next().expect("an argument");
-					if by_pointer[index] && !self.borrows_parameter(*repr) {
-						// a parameter the target changes: a copy of the value
-						let slot = builder.build_alloca(self.llvm_type(*repr), "argument")?;
-						builder.build_store(slot, argument)?;
-						arguments.push(slot.into());
-					} else {
-						arguments.push(argument.into());
-					}
-					if *has_default {
-						arguments.push(self.context.bool_type().const_int(1, false).into());
-					}
-				}
-				arguments.extend(given.map(BasicMetadataValueEnum::from));
-				let call = builder.build_call(target, &arguments, "")?;
-				call.set_call_convention(FAST_CALLING_CONVENTION);
-				match call.try_as_basic_value().basic() {
-					Some(result) => builder.build_return(Some(&result))?,
-					None => builder.build_return(None)?,
-				};
-				thunk
-			}
-		};
+		let thunk = self.thunk_of(&function)?;
 		// an async function: its async instance too (tasks.rs)
 		let entry =
 			self.async_value_entry(&function, thunk.as_global_value().as_pointer_value(), true)?;
@@ -451,6 +466,72 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let closure = self.make_closure_of(entry, self.pointer_type().const_null(), ty)?;
 		// given where more errors are allowed: adapted (`adapt_function_errors`)
 		self.convert(closure, Repr::Function(self.type_of(node)), node.index())
+	}
+
+	/// The thunk of a function declaration used as a value: the indirect
+	/// call convention, whose environment it ignores.
+	pub(crate) fn thunk_of(
+		&mut self,
+		function: &super::Function<'ctx>,
+	) -> Result<FunctionValue<'ctx>, Error> {
+		let target = function.value;
+		let name = format!("{}.thunk", target.get_name().to_string_lossy());
+		if let Some(thunk) = self.module.get_function(&name) {
+			return Ok(thunk);
+		}
+		let target_type = target.get_type();
+		let target_parameters = target_type.get_param_types();
+		let params = function.params.clone();
+		let by_pointer = function.by_pointer.clone();
+		// the indirect ABI (`indirect_type`): every argument, the
+		// aggregates borrowed (`borrows_parameter`), no default flags;
+		// then the target's other parameters (requirements)
+		let mut parameters: Vec<BasicMetadataTypeEnum<'ctx>> = vec![self.pointer_type().into()];
+		let mut at = 0;
+		for (repr, has_default) in &params {
+			parameters.push(if self.borrows_parameter(*repr) {
+				self.pointer_type().into()
+			} else {
+				self.llvm_type(*repr).into()
+			});
+			at += 1 + usize::from(*has_default);
+		}
+		parameters.extend(target_parameters.iter().skip(at).copied());
+		let thunk_type = match target_type.get_return_type() {
+			Some(ret) => ret.fn_type(&parameters, false),
+			None => self.context.void_type().fn_type(&parameters, false),
+		};
+		let thunk = self
+			.module
+			.add_function(&name, thunk_type, Some(Linkage::Internal));
+		thunk.set_call_conventions(FAST_CALLING_CONVENTION);
+		self.runtime.add_attributes(thunk, &["nounwind"]);
+		let builder = self.context.create_builder();
+		builder.position_at_end(self.context.append_basic_block(thunk, "entry"));
+		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
+		let mut given = thunk.get_param_iter().skip(1);
+		for (index, (repr, has_default)) in params.iter().enumerate() {
+			let argument = given.next().expect("an argument");
+			if by_pointer[index] && !self.borrows_parameter(*repr) {
+				// a parameter the target changes: a copy of the value
+				let slot = builder.build_alloca(self.llvm_type(*repr), "argument")?;
+				builder.build_store(slot, argument)?;
+				arguments.push(slot.into());
+			} else {
+				arguments.push(argument.into());
+			}
+			if *has_default {
+				arguments.push(self.context.bool_type().const_int(1, false).into());
+			}
+		}
+		arguments.extend(given.map(BasicMetadataValueEnum::from));
+		let call = builder.build_call(target, &arguments, "")?;
+		call.set_call_convention(FAST_CALLING_CONVENTION);
+		match call.try_as_basic_value().basic() {
+			Some(result) => builder.build_return(Some(&result))?,
+			None => builder.build_return(None)?,
+		};
+		Ok(thunk)
 	}
 
 	/// A function value given where its type throws errors and its own
@@ -762,7 +843,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		items: &[Slot<'ctx>],
 		after: &[Val<'ctx>],
 	) -> Result<Val<'ctx>, Error> {
-		let ty = self.type_of(node);
+		// the type of the value given (an instance of a generic lambda, `generic_values.rs`)
+		let ty = match callback.repr {
+			Repr::Function(ty)
+				if self.is_generic_function_type(self.type_of(node))
+					|| self.value_signature(self.type_of(node), node).is_err() =>
+			{
+				ty
+			}
+			_ => self.type_of(node),
+		};
 		let (params, _, _) = self.value_signature(ty, node)?;
 		let mark = self.mark();
 		let mut arguments = before.to_vec();
@@ -807,6 +897,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(value) = self.async_value_call(closure, ty, arguments, node)? {
 			return Ok(value);
 		}
+		// a value of a generic function type: its instance for the call (`generic_values.rs`)
+		let (closure, ty) = if self.is_generic_function_type(ty) {
+			let instance = self.generic_instance_value(closure, node)?;
+			let Repr::Function(instance_type) = instance.repr else {
+				return Err(self.unsupported(node.index(), "calling this generic function value"));
+			};
+			(instance, instance_type)
+		} else {
+			(closure, ty)
+		};
 		let (mut params, ret, throws) = self.value_signature(ty, node)?;
 		// a lambda or a function may declare fewer parameters than its type
 		// (the `index` of a callback): it gets the ones it declares

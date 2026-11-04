@@ -526,4 +526,50 @@ mod with_llvm {
 		assert!(!build.contains("@fa_alloc("), "{build}");
 		assert!(!build.contains("@fa_arena_enter("), "{build}");
 	}
+
+	/// The whole IR of a program (not only its functions).
+	fn full_ir(name: &str, source: &str) -> Result<String, fa_codegen_llvm::Error> {
+		let mut session = Session::new();
+		let file = session.set_source("main", Arc::from(source));
+		session.analyze_file(file);
+		let options = Options {
+			emit_ir: true,
+			opt_level: OptLevel::O0,
+			..Options::default()
+		};
+		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+			.join("fa-checks")
+			.join(name);
+		let artifact = compile(&session, file, "test.fa", Target::Native, &options, &output)?;
+		Ok(std::fs::read_to_string(artifact.ir.expect("the IR")).expect("the IR file"))
+	}
+
+	#[test]
+	fn a_generic_function_value_is_a_table_of_the_instances_its_type_is_called_at() {
+		// `transform` is called at two types: the lambda's table holds its two
+		// instances, and the value is the usual pair (no box)
+		let ir = full_ir(
+			"generic-values",
+			"function describe = (transform: <T>(value: T) => T): String => \"{transform(1)} {transform(\"a\")}\"\nconsole.log(describe(<T>(value: T) => value))\n",
+		)
+		.expect("compiled");
+		let table = ir
+			.lines()
+			.find(|line| line.contains("@fa.generic_table.0.entries ="))
+			.expect("a table");
+		assert!(table.contains("[2 x ptr]"), "{table}");
+		assert!(table.contains("constant"), "{table}");
+	}
+
+	#[test]
+	fn a_generic_function_type_called_at_growing_types_is_an_error() {
+		let error = full_ir(
+			"generic-values-growth",
+			"type Grow = <T>(value: T, depth: Integer, again: Grow) => Integer\nfunction grow: Grow = <T>(value: T, depth: Integer, again: Grow): Integer => {\n\tif depth == 0 {\n\t\treturn 0\n\t}\n\tagain([value], depth - 1, again)\n}\nconsole.log(grow(1, 3, grow))\n",
+		)
+		.expect_err("a polymorphic recursion");
+		let message = error.to_string();
+		assert!(message.contains("test.fa:6:2: error"), "{message}");
+		assert!(message.contains("`Array<Array<Integer>>`"), "{message}");
+	}
 }

@@ -173,7 +173,23 @@ impl Walker<'_> {
 			if node.index() >= tree.nodes.len() {
 				continue;
 			}
-			if let Some(symbol) = self.a.symbols.symbol_of_decl(node) {
+			// a destructuring declares the names of its pattern, which its
+			// value initializes: its whole subtree is theirs (the
+			// initialization order reads what each value uses)
+			let mut candidates = vec![node];
+			if let View::Destructuring { pattern, .. } = syntax::view(&tree, node) {
+				let mut names = vec![pattern];
+				while let Some(name) = names.pop() {
+					if self.a.symbols.symbol_of_decl(name).is_some() {
+						candidates.push(name);
+					}
+					names.extend(syntax::children(&tree, name));
+				}
+			}
+			for node in candidates {
+				let Some(symbol) = self.a.symbols.symbol_of_decl(node) else {
+					continue;
+				};
 				let data = self.a.symbols.symbol(symbol);
 				let tracked = match data.kind {
 					SymbolKind::Function => true,

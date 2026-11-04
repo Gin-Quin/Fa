@@ -1,0 +1,20 @@
+-- Module values declared by destructuring (every pattern form), read by
+-- another module's value through a function: initialized in dependency order.
+-- file: library/shape.fa
+let { width, label } = { width = 4, label = "box" }
+let [first, second] = ["a", "bc"]
+let (left, right) = (1, "r")
+let { inner { deep } } = { inner = { deep = 9 } }
+export namespace = {
+	function size = (): Integer => width
+	function show = (): String => "{label} {first}{second} {left}{right} {deep}"
+}
+-- file: library/scale.fa
+let { factor } = { factor = shape.size() + 1 }
+let doubled = shape.size() * 2
+export function = (x: Integer): Integer => x * factor + doubled
+-- file: application/main.fa
+export function = (arguments: Array<String>) => {
+	console.log(library.scale(3), library.shape.show())
+}
+-- prints: 23 box abc 1r 9

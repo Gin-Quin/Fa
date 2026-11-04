@@ -1,8 +1,33 @@
 -- note: generic function values (phase 2 of "Generic functions carry their list on the
--- function value") are reported as not supported yet, without a crash
-type Identity = <T>(value: T) => T -- error: AN001
-function f: Identity = <T>(value: T): T => value -- error: AN001
-function apply = (transform: (value: Integer) => Integer): Integer => transform(1)
-console.log(apply(<T>(value: T) => value)) -- error: AN001
-function constrained = <Value: Integer>(value: Value): Value => value
-console.log(constrained(2))
+-- function value"): a generic function type is called at several types
+type Identity = <T>(value: T) => T
+function same: Identity = <T>(value: T): T => value
+function describe = (transform: <T>(value: T) => T): String => {
+	let number = transform(1) -- type number: Integer
+	let text = transform("a") -- type text: String
+	"{number} {text}"
+}
+console.log(describe(<T>(value: T) => value)) -- prints: 1 a
+console.log(describe(same)) -- prints: 1 a
+function identity = <T>(value: T) => value
+console.log(describe(identity)) -- prints: 1 a
+console.log(same(3), same<String>("b")) -- prints: 3 b
+
+-- stored in fields and collections, returned
+type Toolbox = { identity: Identity }
+let box = Toolbox { identity = <T>(value: T) => value }
+console.log(box.identity(2), box.identity("c")) -- prints: 2 c
+let tools: Array<Identity> = [<T>(value: T) => value, same]
+for tool in tools {
+	console.log(tool(5), tool("d"))
+}
+-- prints: 5 d
+-- prints: 5 d
+function make = (): Identity => <T>(value: T) => value
+let made = make() -- type made: <T>(T) => T
+console.log(made(6), made<Boolean>(true)) -- prints: 6 true
+
+-- instantiated where a function type that isn't generic is expected
+let numbers = [1, 2].map(<T>(value: T) => value) -- type numbers: Array<Integer>
+function apply = (transform: (value: Integer) => Integer): Integer => transform(7)
+console.log(numbers, apply(same), apply(made)) -- prints: [1, 2] 7 7

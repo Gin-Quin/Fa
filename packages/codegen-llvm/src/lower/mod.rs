@@ -32,6 +32,7 @@ mod constants;
 mod destination;
 mod division;
 mod foreign;
+mod generic_values;
 mod growing;
 mod inline_unions;
 mod inlining;
@@ -296,6 +297,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The map types the program may keep a reference into the values of
 	/// (`program::unsafe_maps`).
 	unsafe_maps: rustc_hash::FxHashSet<TypeId>,
+	/// The map types some `deleteWhere` iterates over while deleting: their
+	/// entries stay out of the probe array (`tables.rs`, `inline`).
+	no_inline_maps: rustc_hash::FxHashSet<TypeId>,
 	/// The relation sides of the object types of the program (`relations.rs`).
 	relation_sides: relations::RelationSides,
 	/// The targets an object literal gave to relation sides, linked by the
@@ -339,6 +343,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The unit being lowered, when the program is compiled per unit
 	/// (`units.rs`); `None`: the whole program in one module.
 	split: Option<Box<units::Split<'ctx>>>,
+	/// The classes of generic function values and the tables of their
+	/// producers (`generic_values.rs`).
+	generic_values: generic_values::GenericValues<'ctx>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -430,6 +437,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			virtual_code_points: FxHashMap::default(),
 			whole_program: false,
 			unsafe_maps: program::unsafe_maps(session, files),
+			no_inline_maps: program::no_inline_maps(session, files),
 			relation_sides: relations::relation_sides(
 				files.iter().map(|(file, _)| session.analysis(*file)),
 			),
@@ -449,6 +457,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			loop_bodies: std::cell::OnceCell::new(),
 			instance_types: std::cell::RefCell::new(FxHashMap::default()),
 			split: None,
+			generic_values: generic_values::GenericValues::default(),
 		};
 		lowering.module_file = state.module_file;
 		lowering
@@ -556,10 +565,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				continue;
 			}
 			// the async instances, requested by the code lowered so far
-			if !self.lower_next_async_instance()? {
+			if self.lower_next_async_instance()? {
+				continue;
+			}
+			// the entries of the tables of generic function values, which may
+			// need instances to lower (`generic_values.rs`)
+			if !self.fill_generic_tables()? {
 				break;
 			}
 		}
+		self.finish_generic_tables()?;
 		self.switch_file(self.entry);
 		self.define_coroutine_shims()?;
 
@@ -1011,10 +1026,37 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.generic_functions.insert(node, info);
 				continue;
 			}
+			if info.declaration.is_none() && self.inside_generic_function(node) {
+				// a lambda of a generic function: declared per instance of the
+				// function around it, when evaluated (`closures.rs`)
+				self.generic_functions.insert(node, info);
+				continue;
+			}
 			let function = self.declare_function(node, info, "")?;
 			self.functions.insert(node, function);
 		}
 		Ok(())
+	}
+
+	/// Whether a node is inside a generic function (or a generic lambda):
+	/// its types may name the parameters of that function.
+	pub(crate) fn inside_generic_function(&self, node: NodeId) -> bool {
+		let parents = self.parents();
+		let mut at = node.index();
+		loop {
+			let parent = parents.get(at).copied().unwrap_or(usize::MAX);
+			if parent == usize::MAX {
+				return false;
+			}
+			if self
+				.analysis
+				.function(NodeId::new(parent))
+				.is_some_and(|info| !info.generics.is_empty())
+			{
+				return true;
+			}
+			at = parent;
+		}
 	}
 
 	/// Whether a parameter of this representation is passed as a pointer to
@@ -1938,6 +1980,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		// a read of a reactive place is tracked before it happens
 		self.track_read(node)?;
 		let value = self.expr_inner(node)?;
+		// a generic function value given where a function type that isn't
+		// generic is expected, or `transform<Integer>`: its instance
+		// (`generic_values.rs`)
+		let value = match value.repr {
+			Repr::Function(ty)
+				if self.analysis.instantiation(node).is_some()
+					&& self.is_generic_function_type(ty) =>
+			{
+				self.generic_instance_value(value, node)?
+			}
+			_ => value,
+		};
 		if matches!(self.view(node), View::Call { .. }) && value.repr != Repr::Never {
 			self.notify_call(node)?;
 		}

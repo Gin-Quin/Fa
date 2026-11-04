@@ -34,7 +34,7 @@ mod with_llvm {
 	use std::path::{Path, PathBuf};
 	use std::sync::{Condvar, Mutex};
 
-	use fa_codegen_llvm::{Error, Options, Target, compile_file, run};
+	use fa_codegen_llvm::{Error, Options, Target, compile_file};
 
 	/// A program and what it must do.
 	struct Program {
@@ -316,15 +316,23 @@ mod with_llvm {
 	/// Runs a compiled program: what it does that its annotations don't say.
 	fn expect(program: &Program, artifact: &fa_codegen_llvm::Artifact) -> Option<String> {
 		let arguments: Vec<&str> = program.arguments.iter().map(String::as_str).collect();
-		let result = match run(artifact, &arguments) {
+		let result = match run_within(artifact, &arguments, None) {
 			Ok(result) => result,
-			Err(error) => return Some(format!("does not run: {error}")),
+			Err(reason) => return Some(reason),
 		};
 		let stdout = String::from_utf8_lossy(&result.stdout);
 		let stderr = String::from_utf8_lossy(&result.stderr);
 		let printed: Vec<&str> = stdout.lines().collect();
 		let expected: Vec<&str> = program.prints.iter().map(String::as_str).collect();
-		let code = result.status.code().unwrap_or(-1);
+		let code = match result.status.code() {
+			Some(code) => code,
+			None => {
+				return Some(format!(
+					"ended by {}, after printing {printed:?}\n{stderr}",
+					signal_of(&result.status)
+				));
+			}
+		};
 		let missing_stderr = program
 			.stderr
 			.iter()
@@ -336,6 +344,120 @@ mod with_llvm {
 			));
 		}
 		None
+	}
+
+	/// The time a program may run: `FA_PROGRAM_TIMEOUT` seconds, else two
+	/// minutes, times the load of the machine per core when it is above
+	/// one (a full workspace run on a busy machine).
+	fn time_limit() -> std::time::Duration {
+		let base = std::env::var("FA_PROGRAM_TIMEOUT")
+			.ok()
+			.and_then(|value| value.parse().ok())
+			.unwrap_or(120.0);
+		let cores = std::thread::available_parallelism().map_or(1, usize::from) as f64;
+		let load = std::fs::read_to_string("/proc/loadavg")
+			.ok()
+			.and_then(|text| text.split_whitespace().next()?.parse::<f64>().ok())
+			.unwrap_or(0.0);
+		std::time::Duration::from_secs_f64(base * (load / cores).max(1.0))
+	}
+
+	/// Runs a compiled program like `fa_codegen_llvm::run`, killed when it
+	/// runs longer than [`time_limit`]; the error says why it didn't run.
+	fn run_within(
+		artifact: &fa_codegen_llvm::Artifact,
+		arguments: &[&str],
+		limit: Option<std::time::Duration>,
+	) -> Result<std::process::Output, String> {
+		use std::io::Read;
+		use std::process::{Command, Stdio};
+		let mut command = match (&artifact.loader, artifact.target) {
+			(Some(loader), Target::Wasm) => {
+				let runtime = fa_codegen_llvm::javascript_runtime()
+					.map_err(|error| format!("does not run: {error}"))?;
+				let mut command = Command::new(runtime);
+				command.arg(loader);
+				command
+			}
+			_ => Command::new(&artifact.output),
+		};
+		let mut child = command
+			.args(arguments)
+			.stdout(Stdio::piped())
+			.stderr(Stdio::piped())
+			.spawn()
+			.map_err(|error| format!("does not run: {error}"))?;
+		// the pipes are read while it runs (a full pipe would block it)
+		let mut stdout = child.stdout.take().expect("a pipe");
+		let mut stderr = child.stderr.take().expect("a pipe");
+		let out = std::thread::spawn(move || {
+			let mut bytes = Vec::new();
+			let _ = stdout.read_to_end(&mut bytes);
+			bytes
+		});
+		let err = std::thread::spawn(move || {
+			let mut bytes = Vec::new();
+			let _ = stderr.read_to_end(&mut bytes);
+			bytes
+		});
+		let limit = limit.unwrap_or_else(time_limit);
+		let started = std::time::Instant::now();
+		let status = loop {
+			match child.try_wait() {
+				Ok(Some(status)) => break status,
+				Ok(None) if started.elapsed() > limit => {
+					let _ = child.kill();
+					let _ = child.wait();
+					let printed =
+						String::from_utf8_lossy(&out.join().unwrap_or_default()).into_owned();
+					return Err(format!(
+						"timed out after {:.0} s (the limit scales with the load; FA_PROGRAM_TIMEOUT), after printing {:?}",
+						limit.as_secs_f64(),
+						printed.lines().collect::<Vec<_>>()
+					));
+				}
+				Ok(None) => std::thread::sleep(std::time::Duration::from_millis(5)),
+				Err(error) => return Err(format!("does not run: {error}")),
+			}
+		};
+		Ok(std::process::Output {
+			status,
+			stdout: out.join().unwrap_or_default(),
+			stderr: err.join().unwrap_or_default(),
+		})
+	}
+
+	/// A program that never ends is killed and reported as a timeout.
+	#[test]
+	fn a_program_running_too_long_is_a_timeout() {
+		let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fa-timeout");
+		std::fs::create_dir_all(&directory).expect("a directory");
+		let source = directory.join("forever.fa");
+		std::fs::write(&source, "while true {\n\tconsole.log(1)\n}\n").expect("a file");
+		let artifact = compile_file(
+			&source,
+			Target::Native,
+			&Options::default(),
+			&directory.join("forever"),
+		)
+		.expect("it compiles");
+		let limit = std::time::Duration::from_millis(300);
+		match run_within(&artifact, &[], Some(limit)) {
+			Err(reason) => assert!(reason.starts_with("timed out after"), "{reason}"),
+			Ok(output) => panic!("it ended: {:?}", output.status),
+		}
+	}
+
+	/// How a process ended without an exit code.
+	fn signal_of(status: &std::process::ExitStatus) -> String {
+		#[cfg(unix)]
+		{
+			use std::os::unix::process::ExitStatusExt as _;
+			if let Some(signal) = status.signal() {
+				return format!("signal {signal}");
+			}
+		}
+		format!("{status}")
 	}
 
 	/// How many programs compile at the same time, all targets together (the
@@ -511,7 +633,13 @@ mod with_llvm {
 				eprintln!("skipped {reason}");
 			}
 		}
-		assert!(failures.is_empty(), "\n{}", failures.join("\n\n"));
+		assert!(
+			failures.is_empty(),
+			"{} programs failed on {}:\n{}",
+			failures.len(),
+			target.name(),
+			failures.join("\n\n")
+		);
 	}
 
 	#[test]

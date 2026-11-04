@@ -383,6 +383,15 @@ impl<'s> Generator<'s> {
 					}
 					values.push(statement);
 				}
+				// a destructuring declares several module-level values
+				View::Destructuring { pattern, .. }
+					if module_file || members.contains(&statement) =>
+				{
+					for symbol in self.pattern_symbols(pattern) {
+						self.module_values.insert(symbol);
+					}
+					values.push(statement);
+				}
 				_ => others.push(statement),
 			}
 		}
@@ -423,11 +432,32 @@ impl<'s> Generator<'s> {
 			let temps = std::mem::take(&mut self.fcx.inline_temps);
 			body.blank();
 			body.line(format!("function {function}() {{"));
+			// a destructuring's values: each is initialized by name (the
+			// program's order), the destructuring runs once
+			let names: Vec<NodeId> = match self.view(value) {
+				View::Destructuring { pattern, .. } => self
+					.pattern_symbols(pattern)
+					.into_iter()
+					.map(|symbol| self.analysis.symbols.symbol(symbol).decl_node)
+					.collect(),
+				_ => Vec::new(),
+			};
+			if !names.is_empty() {
+				body.line(format!("\tif ({function}.done) return;"));
+				body.line(format!("\t{function}.done = true;"));
+			}
 			if !temps.is_empty() {
 				body.line(format!("\tlet {};", temps.join(", ")));
 			}
 			body.append(inner);
 			body.line("}");
+			let mut exported = vec![value];
+			for name in names {
+				if !exported.contains(&name) {
+					exported.push(name);
+					inits.push((function.clone(), format!("$init{}", name.index())));
+				}
+			}
 			inits.push((function, format!("$init{}", value.index())));
 		}
 

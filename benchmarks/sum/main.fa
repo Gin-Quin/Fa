@@ -12,7 +12,7 @@ function xorshift = (x: UInt64): UInt64 => {
 	v.bitXor(v.shiftLeft(17))
 }
 
-let n = Math.max(try Integer.parse(arguments.get(0) ?? "32000000"), 0)
+let n = 32_000_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
 
 mutable data = Array<Int32>.from([], capacity = n)
 mutable r: UInt64 = 12345

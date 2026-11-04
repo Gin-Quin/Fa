@@ -424,7 +424,7 @@ fn integer_conversions_are_builtin_calls() {
 #[test]
 fn ranged_integer_types() {
 	let (session, file) =
-		analyze_source("let a: Integer(min = 0, max = 10) = 5\nlet b: Int8(min = -3) = 1\n");
+		analyze_source("let a: Integer<min = 0, max = 10> = 5\nlet b: Int8<min = -3> = 1\n");
 	assert!(session.diagnostics(file).is_empty());
 	assert_eq!(
 		symbol_type(&session, file, "a"),
@@ -432,13 +432,13 @@ fn ranged_integer_types() {
 	);
 	assert_eq!(symbol_type(&session, file, "b"), "Int8(min = -3)");
 	assert_eq!(
-		codes("let a: Integer(min = 5, max = 1) = 5\n"),
+		codes("let a: Integer<min = 5, max = 1> = 5\n"),
 		["E-NUM-13"]
 	);
-	assert_eq!(codes("let a: Int8(max = 300) = 1\n"), ["E-NUM-13"]);
-	assert_eq!(codes("let a: Int8(size = 3) = 1\n"), ["E-NUM-13"]);
+	assert_eq!(codes("let a: Int8<max = 300> = 1\n"), ["E-NUM-13"]);
+	assert_eq!(codes("let a: Int8<size = 3> = 1\n"), ["E-NUM-13"]);
 	assert_eq!(
-		codes("let a: Integer(min = 0, max = 10) = 11\n"),
+		codes("let a: Integer<min = 0, max = 10> = 11\n"),
 		["E-NUM-6"]
 	);
 }
@@ -502,7 +502,7 @@ fn a_string_where_a_character_is_expected() {
 #[test]
 fn ranged_values_keep_their_type() {
 	let (session, file) = analyze_source(
-		"function clamp = (x: Integer(min = 0)) => x\nlet c = clamp(1)\nlet d: Integer(min = 0) = 1\nlet e = d\n",
+		"function clamp = (x: Integer<min = 0>) => x\nlet c = clamp(1)\nlet d: Integer<min = 0> = 1\nlet e = d\n",
 	);
 	assert!(session.diagnostics(file).is_empty());
 	assert_eq!(symbol_type(&session, file, "c"), "Integer(min = 0)");

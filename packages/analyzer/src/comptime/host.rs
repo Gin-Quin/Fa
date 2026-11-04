@@ -132,7 +132,7 @@ mod tests {
 	#[test]
 	fn computed_configurations_run_on_the_interpreter() {
 		let (value, codes) = configuration(
-			"let version = \"2.1.0\"\nfunction withServerTargets = (targets: Array(Target)): Array(Target) => [...targets, \"bun\", \"node\"]\nexport = {\n\tname = \"farm\"\n\tversion = version\n\tdescription = \"Farm utilities, version {version}\"\n\ttargets = withServerTargets([\"web\"])\n}\n",
+			"let version = \"2.1.0\"\nfunction withServerTargets = (targets: Array<Target>): Array<Target> => [...targets, \"bun\", \"node\"]\nexport = {\n\tname = \"farm\"\n\tversion = version\n\tdescription = \"Farm utilities, version {version}\"\n\ttargets = withServerTargets([\"web\"])\n}\n",
 		);
 		assert!(codes.is_empty(), "{codes:?}");
 		let value = value.expect("a configuration");

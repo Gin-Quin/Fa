@@ -42,10 +42,10 @@ console.log(total)
 	const VALUES: &str = r#"
 type Shape = Union {
 	Circle = { radius: Float, label: String }
-	Polygon = { points: Array(Integer), name: String }
+	Polygon = { points: Array<Integer>, name: String }
 	Point
 }
-type Box = { name: String, items: Array(String), best: String? }
+type Box = { name: String, items: Array<String>, best: String? }
 
 function make = (index: Integer): Shape => when index %% 3 is {
 	0 => Shape.Circle { radius = 1.0, label = "circle {index}" }
@@ -59,7 +59,7 @@ function check = (text: String): Integer throws ParseError => {
 }
 
 mutable count = 0
-mutable keep: Array(Shape) = []
+mutable keep: Array<Shape> = []
 for index in 0..200_000 {
 	let shape = make(index)
 	mutable holder: Box = { name = "box {index}", items = ["a" + "b", "c".repeat(200)], best = none }

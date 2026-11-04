@@ -709,7 +709,7 @@ mod tests {
 	#[test]
 	fn pascal_case_names_are_types() {
 		assert_eq!(
-			classes("let a: Array(String) = Shape.Circle"),
+			classes("let a: Array<String> = Shape.Circle"),
 			[
 				"let:Keyword",
 				"a:Variable+d+r",

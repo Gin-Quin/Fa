@@ -27,13 +27,13 @@ fn package(levels: usize, errors: &[usize]) -> Vec<(String, String)> {
 			"library/town.fa",
 			"export namespace = {
 	type Town = {
-		people: Pool(Person) = []
+		people: Pool<Person> = []
 		type Person = {
 			name: String
 			bestFriend: (Person in people)?
-			bestFriendOf: Pool(people->bestFriend)
-			friends: Pool(Person in people)
-			friendOf: Pool(in people->friends)
+			bestFriendOf: Pool<people->bestFriend>
+			friends: Pool<Person in people>
+			friendOf: Pool<in people->friends>
 		}
 	}
 	function count = (): Integer => {
@@ -91,9 +91,9 @@ fn package(levels: usize, errors: &[usize]) -> Vec<(String, String)> {
 		(
 			"library/tree.fa",
 			"export namespace = {
-	type Tree(Value) = { value: Value, children: Array(Tree(Value)) }
-	function leaf(Value) = (value: Value): Tree(Value) => Tree { value, children = [] }
-	function size(Value) = (tree: Tree(Value)): Integer => {
+	type Tree<Value> = { value: Value, children: Array<Tree<Value>> }
+	function leaf = <Value>(value: Value): Tree<Value> => Tree { value, children = [] }
+	function size = <Value>(tree: Tree<Value>): Integer => {
 		mutable total = 1
 		for child in tree.children {
 			total += size(child)

@@ -106,7 +106,7 @@ mod tests {
 		);
 		assert_eq!(
 			access_of(
-				"function at = (items: Array(Integer), i: Integer) => try items[i]\nconsole.log(at([1], 0) catch error => 0)\n"
+				"function at = (items: Array<Integer>, i: Integer) => try items[i]\nconsole.log(at([1], 0) catch error => 0)\n"
 			),
 			IndexAccess::Checked
 		);

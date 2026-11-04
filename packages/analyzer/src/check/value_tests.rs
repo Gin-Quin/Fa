@@ -61,7 +61,7 @@ fn object_patterns_record_their_fields_defaults_and_symbols() {
 
 #[test]
 fn array_patterns_say_when_the_length_is_checked() {
-	let source = "function f = (values: Array(Integer)): Integer throws IndexError => {\n\ttry let [first, ...rest] = values\n\tfirst\n}\nlet [x, y] = [1, 2]\nconsole.log(f([1]) catch e => 0, x, y)\n";
+	let source = "function f = (values: Array<Integer>): Integer throws IndexError => {\n\ttry let [first, ...rest] = values\n\tfirst\n}\nlet [x, y] = [1, 2]\nconsole.log(f([1]) catch e => 0, x, y)\n";
 	let (session, file) = analyze_source(source);
 	assert!(
 		session.diagnostics(file).is_empty(),
@@ -90,7 +90,7 @@ fn array_patterns_say_when_the_length_is_checked() {
 
 #[test]
 fn math_and_from_calls_are_recorded() {
-	let source = "let n = 4\nlet m = Math.max(n, 1)\nmutable a = Array(Integer).from([], capacity = n)\nlet b = Array.from([1.5])\nconsole.log(m, a, b)\n";
+	let source = "let n = 4\nlet m = Math.max(n, 1)\nmutable a = Array<Integer>.from([], capacity = n)\nlet b = Array.from([1.5])\nconsole.log(m, a, b)\n";
 	let (session, file) = analyze_source(source);
 	assert!(
 		session.diagnostics(file).is_empty(),
@@ -108,7 +108,7 @@ fn math_and_from_calls_are_recorded() {
 	let from = find(
 		&session,
 		file,
-		"Array(Integer).from([], capacity = n)",
+		"Array<Integer>.from([], capacity = n)",
 		|view| matches!(view, View::Call { .. }),
 	);
 	let call = analysis.call(from).unwrap();

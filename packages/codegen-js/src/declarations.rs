@@ -173,7 +173,7 @@ mod tests {
 	#[test]
 	fn an_async_export_declares_its_two_instances() {
 		let (session, file) = fa_analyzer::analyze_source(
-			"use { sleep } = std.time\nexport async function = (arguments: Array(String)): Integer => {\n\tawait sleep(1)\n\targuments.length\n}\n",
+			"use { sleep } = std.time\nexport async function = (arguments: Array<String>): Integer => {\n\tawait sleep(1)\n\targuments.length\n}\n",
 		);
 		let text = declarations(&session, file);
 		assert!(

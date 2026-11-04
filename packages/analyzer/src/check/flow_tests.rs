@@ -884,12 +884,12 @@ fn indices_proven_by_lengths() {
 	assert_eq!(codes("let s = \"abc\"\nlet c = s[1]\n"), Vec::<&str>::new());
 	// an index fact (T-NUM-54)
 	assert_eq!(
-		codes("let i: Integer(min = 0, max = 2) = 1\nlet array = [1, 2, 3]\nlet x = array[i]\n"),
+		codes("let i: Integer<min = 0, max = 2> = 1\nlet array = [1, 2, 3]\nlet x = array[i]\n"),
 		Vec::<&str>::new()
 	);
 	// not proven: a check and the IndexError path
 	let c = analyze(
-		"function f = (xs: Array(Integer), i: Integer) throws IndexError => {\n\tlet x = try xs[i]\n}\n",
+		"function f = (xs: Array<Integer>, i: Integer) throws IndexError => {\n\tlet x = try xs[i]\n}\n",
 	);
 	assert_eq!(c.codes(), Vec::<&str>::new());
 	assert!(
@@ -897,7 +897,7 @@ fn indices_proven_by_lengths() {
 			.contains(NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL)
 	);
 	assert_eq!(
-		codes("function f = (xs: Array(Integer), i: Integer) => {\n\tlet x = xs[i]\n}\n"),
+		codes("function f = (xs: Array<Integer>, i: Integer) => {\n\tlet x = xs[i]\n}\n"),
 		["E-ERR-3"]
 	);
 	// the methods of arrays update their length: one more after `push`, none after `clear`
@@ -912,7 +912,7 @@ fn indices_proven_by_lengths() {
 	// a function changing the collection drops its length
 	assert_eq!(
 		codes(
-			"function grow = (items: Array(Integer)) => items.push(1)\nmutable xs = [1, 2]\ngrow(xs)\nlet b = xs[1]\n"
+			"function grow = (items: Array<Integer>) => items.push(1)\nmutable xs = [1, 2]\ngrow(xs)\nlet b = xs[1]\n"
 		),
 		["E-ERR-3"]
 	);
@@ -920,19 +920,19 @@ fn indices_proven_by_lengths() {
 
 #[test]
 fn indices_proven_by_relations() {
-	let source = "function sum = (xs: Array(Integer)): Integer => {\n\tmutable total = 0\n\tfor i in 0..xs.length {\n\t\ttotal = xs[i]\n\t}\n\tfor i in 0..xs.length - 1 {\n\t\ttotal = xs[i + 1]\n\t}\n\tfor x, i in xs {\n\t\ttotal = xs[i]\n\t}\n\tmutable j = 0\n\twhile j < xs.length {\n\t\ttotal = xs[j]\n\t\tj += 1\n\t}\n\tif j < xs.length {\n\t\ttotal = xs[j]\n\t}\n\ttotal\n}\n";
+	let source = "function sum = (xs: Array<Integer>): Integer => {\n\tmutable total = 0\n\tfor i in 0..xs.length {\n\t\ttotal = xs[i]\n\t}\n\tfor i in 0..xs.length - 1 {\n\t\ttotal = xs[i + 1]\n\t}\n\tfor x, i in xs {\n\t\ttotal = xs[i]\n\t}\n\tmutable j = 0\n\twhile j < xs.length {\n\t\ttotal = xs[j]\n\t\tj += 1\n\t}\n\tif j < xs.length {\n\t\ttotal = xs[j]\n\t}\n\ttotal\n}\n";
 	assert_eq!(codes(source), Vec::<&str>::new());
 	// beyond the relation: `i + 2` with `i < xs.length - 1`
 	assert_eq!(
 		codes(
-			"function f = (xs: Array(Integer)) => {\n\tfor i in 0..xs.length - 1 {\n\t\tlet x = xs[i + 2]\n\t}\n}\n"
+			"function f = (xs: Array<Integer>) => {\n\tfor i in 0..xs.length - 1 {\n\t\tlet x = xs[i + 2]\n\t}\n}\n"
 		),
 		["E-ERR-3"]
 	);
 	// an assignment ends the relation
 	assert_eq!(
 		codes(
-			"function f = (xs: Array(Integer)) => {\n\tmutable j = 0\n\tif j < xs.length {\n\t\tj = 5\n\t\tlet x = xs[j]\n\t}\n}\n"
+			"function f = (xs: Array<Integer>) => {\n\tmutable j = 0\n\tif j < xs.length {\n\t\tj = 5\n\t\tlet x = xs[j]\n\t}\n}\n"
 		),
 		["E-ERR-3"]
 	);

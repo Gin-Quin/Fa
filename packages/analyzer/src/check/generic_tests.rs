@@ -3,8 +3,8 @@
 use super::test_support::{analyzed, codes, node, symbol_type};
 use crate::analysis::Callee;
 
-const FIRST: &str = "function first(Item) = (items: Array(Item)): Item? => items.get(0)\n";
-const PICK: &str = "function pick(Value: Integer | Float) = (value: Value): Value => value\n";
+const FIRST: &str = "function first = <Item>(items: Array<Item>): Item? => items.get(0)\n";
+const PICK: &str = "function pick = <Value: Integer | Float>(value: Value): Value => value\n";
 
 #[test]
 fn inference_from_arguments_and_expected_type() {
@@ -31,26 +31,26 @@ fn explicit_arguments_and_constraints() {
 		["GN010"]
 	);
 	assert_eq!(
-		codes("function empty(Item) = (): Array(Item) => []\nlet nothing = empty()\n"),
+		codes("function empty = <Item>(): Array<Item> => []\nlet nothing = empty()\n"),
 		["GN015"]
 	);
 	analyzed(
-		"function empty(Item) = (): Array(Item) => []\nlet numbers: Array(Integer) = empty()\n",
+		"function empty = <Item>(): Array<Item> => []\nlet numbers: Array<Integer> = empty()\n",
 	);
-	assert_eq!(codes("function f(A, A) = (a: A) => a\n"), ["GN004"]);
+	assert_eq!(codes("function f = <A, A>(a: A) => a\n"), ["GN004"]);
 	assert_eq!(
-		codes("function f(A = Integer, B) = (a: A) => a\n"),
+		codes("function f = <A = Integer, B>(a: A) => a\n"),
 		["GN005"]
 	);
 	assert_eq!(
-		codes("function f(A: Integer = String) = (a: A) => a\n"),
+		codes("function f = <A: Integer = String>(a: A) => a\n"),
 		["GN003"]
 	);
 }
 
 #[test]
 fn generic_types() {
-	let point = "type Point(N) = { x: N, y: N }\n";
+	let point = "type Point<N> = { x: N, y: N }\n";
 	let (session, file) = analyzed(&format!(
 		"{point}let p: Point(Float) = {{ x = 1, y = 2 }}\nlet q = Point {{ x = 1, y = 2 }}\nlet x = p.x\n"
 	));
@@ -75,13 +75,13 @@ fn generic_types() {
 
 #[test]
 fn generic_unions_and_methods() {
-	let result = "type Result(Value, Failure) = Union { Ok = Value, Failed = Failure }\n";
+	let result = "type Result<Value, Failure> = Union { Ok = Value, Failed = Failure }\n";
 	let (session, file) = analyzed(&format!(
 		"{result}let a: Result(Integer, String) = Result.Ok(1)\nlet b = Result(Integer, String).Failed(\"no\")\n"
 	));
 	assert_eq!(symbol_type(&session, file, "b"), "Result(Integer, String)");
 	assert_eq!(codes(&format!("{result}let c = Result.Ok(1)\n")), ["GN015"]);
-	let stack = "type Stack(Item) = {\n\titems: Array(Item)\n\tfunction top = (self): Item? => self.items.get(0)\n}\n";
+	let stack = "type Stack<Item> = {\n\titems: Array<Item>\n\tfunction top = (self): Item? => self.items.get(0)\n}\n";
 	let (session, file) = analyzed(&format!(
 		"{stack}let s = Stack(Integer) {{ items = [1] }}\nlet t = s.top()\n"
 	));
@@ -91,17 +91,17 @@ fn generic_unions_and_methods() {
 #[test]
 fn constraints_give_members_in_generic_bodies() {
 	analyzed(
-		"type User = { id: Integer, name: String }\nfunction idOf(Entity: { id: Integer }) = (entity: Entity): Integer => entity.id\nlet i = idOf(User { id = 1, name = \"a\" })\n",
+		"type User = { id: Integer, name: String }\nfunction idOf = <Entity: { id: Integer }>(entity: Entity): Integer => entity.id\nlet i = idOf(User { id = 1, name = \"a\" })\n",
 	);
 	assert_eq!(
-		codes("function nameOf(Value) = (value: Value) => value.name\n"),
+		codes("function nameOf = <Value>(value: Value) => value.name\n"),
 		["GN016"]
 	);
 }
 
 #[test]
 fn generic_functions_as_values() {
-	let identity = "function identity(Value) = (value: Value): Value => value\n";
+	let identity = "function identity = <Value>(value: Value): Value => value\n";
 	let (session, file) = analyzed(&format!("{identity}let names = [\"Ada\"].map(identity)\n"));
 	assert_eq!(symbol_type(&session, file, "names"), "Array(String)");
 	assert_eq!(codes(&format!("{identity}let f = identity\n")), ["GN015"]);
@@ -134,7 +134,7 @@ fn array_methods() {
 
 #[test]
 fn constraints_may_require_methods() {
-	let describe = "function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)) => {\n\tfor item in items {\n\t\tconsole.log(item.describe())\n\t}\n}\n";
+	let describe = "function describeAll = <Item: { describe: (self) => String }>(items: Array<Item>) => {\n\tfor item in items {\n\t\tconsole.log(item.describe())\n\t}\n}\n";
 	let (session, file) = analyzed(&format!(
 		"type Dog = {{ name: String, function describe = (self): String => \"dog\" }}\n{describe}describeAll([Dog {{ name = \"Rex\" }}])\n"
 	));
@@ -162,7 +162,7 @@ fn constraints_may_require_methods() {
 #[test]
 fn compile_time_value_parameters() {
 	let (session, file) = analyzed(
-		"type Matrix(Element, rows: Integer, columns: Integer) = { values: Array(Element) }\ntype A = Matrix(Float, 4, 4)\ntype B = Matrix(Float, 2 + 2, 4)\nlet a: A = { values = [] }\nlet b: B = a\nfunction repeatText(times: Integer(min = 0)) = (text: String): String => {\n\tmutable result = \"\"\n\tfor 0..times {\n\t\tresult += text\n\t}\n\tresult\n}\nlet twice = repeatText(2)(\"ab\")\n",
+		"type Matrix<Element, rows: Integer, columns: Integer> = { values: Array<Element> }\ntype A = Matrix<Float, 4, 4>\ntype B = Matrix<Float, 2 + 2, 4>\nlet a: A = { values = [] }\nlet b: B = a\nfunction repeatText = <times: Integer<min = 0>>(text: String): String => {\n\tmutable result = \"\"\n\tfor 0..times {\n\t\tresult += text\n\t}\n\tresult\n}\nlet twice = repeatText<2>(\"ab\")\n",
 	);
 	assert_eq!(symbol_type(&session, file, "twice"), "String");
 	// the value is bound to its literal type
@@ -175,9 +175,9 @@ fn compile_time_value_parameters() {
 		session.display_type(session.types().list_items(list)[0]),
 		"2"
 	);
-	assert_eq!(codes("type Bad(scale: Float) = { x: Float }\n"), ["GN006"]);
+	assert_eq!(codes("type Bad<scale: Float> = { x: Float }\n"), ["GN006"]);
 	assert_eq!(
-		codes("type M(rows: Integer) = { x: Integer }\nlet n = 3\ntype T = M(n)\n"),
+		codes("type M<rows: Integer> = { x: Integer }\nlet n = 3\ntype T = M<n>\n"),
 		["GN008"]
 	);
 }

@@ -72,8 +72,8 @@ fn destructured_parameters() {
 		"function draw = ({ x as left, y as top }: Point): Integer => left",
 	);
 	assert_statement(
-		"function sum = ([first, second]: Array(Integer)) => first + second",
-		"function sum = ([first, second]: Array(Integer)) => (first + second)",
+		"function sum = ([first, second]: Array<Integer>) => first + second",
+		"function sum = ([first, second]: Array<Integer>) => (first + second)",
 	);
 }
 

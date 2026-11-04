@@ -55,9 +55,9 @@ fn recursion_needs_an_indirection_and_its_own_parameters() {
 	);
 	assert_eq!(codes("type A = { b: B }\ntype B = { a: A }\n"), ["TY060"]);
 	assert!(codes("type A = { b: B? }\ntype B = { a: A? }\n").is_empty());
-	assert!(codes("type Folder = { name: String, folders: Array(Folder) }\n").is_empty());
+	assert!(codes("type Folder = { name: String, folders: Array<Folder> }\n").is_empty());
 	assert_eq!(
-		codes("type List(Item) = { head: Item, tail: List(Array(Item))? }\n"),
+		codes("type List<Item> = { head: Item, tail: List<Array<Item>>? }\n"),
 		["GN020"]
 	);
 }
@@ -81,13 +81,13 @@ fn recursive_types_are_compared_coinductively() {
 #[test]
 fn generic_recursive_types_instantiate() {
 	let (session, file) = analyzed(
-		"type List(Item) = { head: Item, tail: List(Item)? }\nlet l = List { head = 1, tail = List { head = 2, tail = none } }\nlet second = l.tail?.head\nlet typed: List(String) = { head = \"a\", tail = { head = \"b\", tail = none } }\n",
+		"type List<Item> = { head: Item, tail: List<Item>? }\nlet l = List { head = 1, tail = List { head = 2, tail = none } }\nlet second = l.tail?.head\nlet typed: List<String> = { head = \"a\", tail = { head = \"b\", tail = none } }\n",
 	);
 	assert_eq!(symbol_type(&session, file, "second"), "Integer?");
 	assert_eq!(symbol_type(&session, file, "typed"), "List(String)");
 	assert_eq!(
 		codes(
-			"type List(Item) = { head: Item, tail: List(Item)? }\nlet bad: List(String) = { head = \"a\", tail = { head = 2, tail = none } }\n"
+			"type List<Item> = { head: Item, tail: List<Item>? }\nlet bad: List<String> = { head = \"a\", tail = { head = 2, tail = none } }\n"
 		),
 		["E-TYPE-1"]
 	);
@@ -98,7 +98,7 @@ fn generic_recursive_types_instantiate() {
 #[test]
 fn differences_remove_members() {
 	let (session, file) = analyzed(
-		"type A = \"hello\" | \"world\" | \"you\"\ntype B = A - \"hello\"\nlet b: B = \"world\"\ntype R = Integer(min = 0, max = 10) - 0\nlet r: R = 1\ntype Split = Integer(min = 0, max = 10) - 5\nlet s: Split = 6\ntype Shape = Union { Circle = { radius: Float }, Point, Square = { side: Float } }\ntype Round = Shape - Shape.Point\nlet round: Round = Shape.Circle { radius = 1.0 }\nlet shape: Shape = round\nlet name = when round is { Shape.Circle => \"c\", Shape.Square => \"s\" }\n",
+		"type A = \"hello\" | \"world\" | \"you\"\ntype B = A - \"hello\"\nlet b: B = \"world\"\ntype R = Integer<min = 0, max = 10> - 0\nlet r: R = 1\ntype Split = Integer<min = 0, max = 10> - 5\nlet s: Split = 6\ntype Shape = Union { Circle = { radius: Float }, Point, Square = { side: Float } }\ntype Round = Shape - Shape.Point\nlet round: Round = Shape.Circle { radius = 1.0 }\nlet shape: Shape = round\nlet name = when round is { Shape.Circle => \"c\", Shape.Square => \"s\" }\n",
 	);
 	assert_eq!(
 		symbol_type(&session, file, "r"),
@@ -111,7 +111,7 @@ fn differences_remove_members() {
 	assert_eq!(codes("type B = (\"a\" | \"b\") - \"c\"\n"), ["TY111"]);
 	assert_eq!(codes("type B = String - \"a\"\n"), ["TY110"]);
 	assert_eq!(
-		codes("type R = Integer(min = 0, max = 10) - 0\nlet r: R = 0\n"),
+		codes("type R = Integer<min = 0, max = 10> - 0\nlet r: R = 0\n"),
 		["E-NUM-6"]
 	);
 	// `?` > `-` > `|`
@@ -148,23 +148,23 @@ fn spreads_in_object_types() {
 #[test]
 fn object_type_functions() {
 	analyzed(
-		"type User = { id: Integer, name: String, address: { city: String, zip: String } }\ntype Slim = Omit(User, { address })\ntype Ids = Pick(User, { id, address { city } })\ntype Draft = Partial(User)\ntype K = KeyType(Map(String, Integer))\nlet slim: Slim = { id = 1, name = \"a\" }\nlet ids: Ids = { id = 1, address = { city = \"c\" } }\nlet draft: Draft = {}\nlet k: K = \"key\"\n",
+		"type User = { id: Integer, name: String, address: { city: String, zip: String } }\ntype Slim = Omit<User, { address }>\ntype Ids = Pick<User, { id, address { city } }>\ntype Draft = Partial<User>\ntype K = KeyType<Map<String, Integer>>\nlet slim: Slim = { id = 1, name = \"a\" }\nlet ids: Ids = { id = 1, address = { city = \"c\" } }\nlet draft: Draft = {}\nlet k: K = \"key\"\n",
 	);
 	assert_eq!(
-		codes("type User = { id: Integer }\ntype Q = Pick(User, { missing })\n"),
+		codes("type User = { id: Integer }\ntype Q = Pick<User, { missing }>\n"),
 		["TF010"]
 	);
-	assert_eq!(codes("type Q = Partial(Integer)\n"), ["TF021"]);
-	assert_eq!(codes("type Q = KeyType(Array(Integer))\n"), ["TF022"]);
+	assert_eq!(codes("type Q = Partial<Integer>\n"), ["TF021"]);
+	assert_eq!(codes("type Q = KeyType<Array<Integer>>\n"), ["TF022"]);
 	assert_eq!(
 		codes(
-			"type User = { id: Integer, name: String }\ntype Back = Required(Partial(User))\nlet u: Back = { id = 1 }\n"
+			"type User = { id: Integer, name: String }\ntype Back = Required<Partial<User>>\nlet u: Back = { id = 1 }\n"
 		),
 		["E-OBJ-2"]
 	);
 	assert!(
 		codes(
-			"type A = { foo: String }\ntype B = { foo: Integer }\ntype C = { ...A, ...Omit(B, { foo }) }\n"
+			"type A = { foo: String }\ntype B = { foo: Integer }\ntype C = { ...A, ...Omit<B, { foo }> }\n"
 		)
 		.is_empty()
 	);
@@ -286,7 +286,7 @@ fn missing_fields_and_nominal_types() {
 	);
 	assert_eq!(
 		codes(
-			"function readId(Item: { id: Integer }) = (item: Item): Integer => item.id\ntype Comment = { text: String }\nlet x = readId(Comment { text = \"Hello\" })\n"
+			"function readId = <Item: { id: Integer }>(item: Item): Integer => item.id\ntype Comment = { text: String }\nlet x = readId(Comment { text = \"Hello\" })\n"
 		),
 		["STR001"]
 	);
@@ -307,5 +307,5 @@ fn type_of_a_parameter_is_an_implicit_generic() {
 		"renamed(Human { name = \"Ana\" }, \"John\")",
 	);
 	assert!(analysis.instantiation(call).is_some());
-	assert_eq!(codes("let x: Type(Integer) = 1\n"), ["TF020"]);
+	assert_eq!(codes("let x: Type<Integer> = 1\n"), ["TF020"]);
 }

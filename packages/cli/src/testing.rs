@@ -211,7 +211,7 @@ pub(crate) fn run_native_tests(
 			View::String(text) => text.to_string(),
 			_ => tree.text(name.index()).trim_matches('"').to_string(),
 		};
-		let start = (tree.spans[test.index()].start as usize).min(tree.source.len());
+		let start = tree.spans[test.index()].start.min(tree.source.len());
 		let line = tree.source[..start]
 			.bytes()
 			.filter(|&byte| byte == b'\n')

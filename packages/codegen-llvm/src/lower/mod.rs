@@ -23,6 +23,7 @@ mod aliasing;
 mod appends;
 mod arith;
 mod arrays;
+mod big_integers;
 pub(crate) mod c_library;
 mod calls;
 mod capacity;
@@ -49,6 +50,7 @@ mod json;
 mod numbers;
 mod objects;
 mod ownership;
+mod packed;
 mod parallel;
 mod patterns;
 mod pools;
@@ -337,7 +339,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// units of `units.rs`): whole-program layouts may apply (dense maps).
 	whole_program: bool,
 	/// The indices proven by the index proofs of fields (`index_proofs.rs`).
-	index_proofs: std::cell::RefCell<Option<index_proofs::IndexProofs>>,
+	index_proofs: std::cell::RefCell<Option<fa_analyzer::proofs::IndexFacts>>,
 	/// The facts merged from every unit of a build per unit (`facts.rs`).
 	program_facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
 	/// The facts this lowering consulted (the key of a cached unit).
@@ -348,6 +350,11 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The map types some `deleteWhere` iterates over while deleting: their
 	/// entries stay out of the probe array (`tables.rs`, `inline`).
 	no_inline_maps: rustc_hash::FxHashSet<TypeId>,
+	/// The union types whose arrays the program only builds with `push` and
+	/// reads with `for` (`packed::packable_items`).
+	packable_items: rustc_hash::FxHashSet<TypeId>,
+	/// The layouts of packed arrays, per item type (`packed.rs`).
+	packed_layouts: std::cell::RefCell<FxHashMap<TypeId, Option<packed::PackedLayout>>>,
 	/// The relation sides of the object types of the program (`relations.rs`).
 	relation_sides: relations::RelationSides,
 	/// The relation sides found in the program's facts, by object type
@@ -511,6 +518,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			index_proofs: std::cell::RefCell::new(None),
 			unsafe_maps: program::unsafe_maps(session, files),
 			no_inline_maps: program::no_inline_maps(session, files),
+			packable_items: packed::packable_items(session, files),
+			packed_layouts: std::cell::RefCell::new(FxHashMap::default()),
 			relation_sides: relations::relation_sides(
 				files.iter().map(|(file, _)| session.analysis(*file)),
 			),
@@ -693,6 +702,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.switch_file(self.entry);
 		self.define_coroutine_shims()?;
 
+		self.define_equal_box()?;
 		self.define_format_union()?;
 		self.define_boxes()?;
 		// the drops at the end of `main` only free memory: the system takes
@@ -1456,6 +1466,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.tree.nodes[node].for_each_child(|child| stack.push(child));
 			}
 		}
+		self.share_detached_reads();
 		// the default values of fields, evaluated in any function (a typed
 		// literal, the reader of `Json.parse`): the top-level values they read
 		let mut defaults: Vec<NodeId> = self
@@ -1480,6 +1491,37 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 		}
 		self.mark_module_values();
+	}
+
+	/// The top-level values the blocks of detached tasks use become
+	/// globals: a detached task reads them (a module-level value is not
+	/// captured, `concurrency.md`, tasks), and may outlive the top level.
+	fn share_detached_reads(&mut self) {
+		let mut detached: Vec<NodeId> = self
+			.analysis
+			.starts
+			.values()
+			.filter(|info| info.detached)
+			.filter_map(|info| info.block)
+			.collect();
+		detached.sort();
+		for block in detached {
+			let span = self.tree.spans[block.index()];
+			let mut stack = vec![block.index()];
+			while let Some(node) = stack.pop() {
+				if let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(node)) {
+					let data = self.analysis.symbols.symbol(symbol);
+					let declared = self.tree.spans[data.decl_node.index()];
+					let outside = declared.start < span.start || declared.start >= span.end;
+					if matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable)
+						&& outside && self.owner_of_scope(data.scope).is_none()
+					{
+						self.shared.insert(symbol, ());
+					}
+				}
+				self.tree.nodes[node].for_each_child(|child| stack.push(child));
+			}
+		}
 	}
 
 	/// Starts lowering a function: its allocas block and its first block.
@@ -2220,6 +2262,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		match self.view(node) {
 			View::Error => Err(self.unsupported(node.index(), "code with errors")),
 			View::Integer(value) => self.integer_literal(value, node),
+			View::BigInt(text) => self.big_literal(text, node),
 			View::Float(value) => match self.node_repr(node)? {
 				Repr::F32 => Ok(Val::new(
 					Repr::F32,
@@ -2844,6 +2887,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 							Resolution::Local(symbol) if self.holds_only_views(symbol));
 					if let Repr::Array(_) = value.repr {
 						self.reserve_for_item_appends(body, value)?;
+					}
+					if let Repr::Array(item) = value.repr
+						&& let Some(layout) = self.packed_layout(item)
+					{
+						let array = value.value.expect("an array").into_pointer_value();
+						return self.for_packed(&layout, node, pattern, has_index, array, body);
 					}
 					self.for_items(node, pattern, has_index, value, body)
 				}

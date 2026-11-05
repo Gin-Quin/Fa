@@ -838,12 +838,16 @@ fn entry_object(
 			owners.entry(id).or_insert(unit.name.as_str());
 		}
 	}
-	let switches: [(&str, inkwell::types::FunctionType<'_>); 3] = [
+	let switches: [(&str, inkwell::types::FunctionType<'_>); 4] = [
 		("fa.drop_box", void.fn_type(&[pointer.into()], false)),
 		("fa.copy_box", pointer.fn_type(&[pointer.into()], false)),
 		(
 			"fa_format_union",
 			void.fn_type(&[pointer.into(), i32.into()], false),
+		),
+		(
+			"fa.equal_box",
+			i32.fn_type(&[pointer.into(), pointer.into()], false),
 		),
 	];
 	for (name, ty) in switches {
@@ -872,6 +876,29 @@ fn entry_object(
 		builder.position_at_end(present);
 		let id = builder.build_load(i64, box_pointer, "id")?.into_int_value();
 		let switch_block = builder.get_insert_block().expect("a block");
+		// `==`: a member no unit registers has no data, its id is its value
+		let unowned = if name == "fa.equal_box" {
+			let unowned = context.append_basic_block(function, "unowned");
+			builder.position_at_end(unowned);
+			let other = function
+				.get_nth_param(1)
+				.expect("a box")
+				.into_pointer_value();
+			let compare = context.append_basic_block(function, "compare_ids");
+			let different = context.append_basic_block(function, "different");
+			let null = builder.build_is_null(other, "")?;
+			builder.build_conditional_branch(null, different, compare)?;
+			builder.position_at_end(different);
+			builder.build_return(Some(&i32.const_zero()))?;
+			builder.position_at_end(compare);
+			let other_id = builder.build_load(i64, other, "")?.into_int_value();
+			let same = builder.build_int_compare(inkwell::IntPredicate::EQ, id, other_id, "")?;
+			let same = builder.build_int_z_extend(same, i32, "")?;
+			builder.build_return(Some(&same))?;
+			unowned
+		} else {
+			end
+		};
 		let mut cases = Vec::new();
 		for (&box_id, unit) in &owners {
 			let case = context.append_basic_block(function, "case");
@@ -885,10 +912,20 @@ fn entry_object(
 			cases.push((i64.const_int(box_id, false), case));
 		}
 		builder.position_at_end(switch_block);
-		builder.build_switch(id, end, &cases)?;
+		builder.build_switch(id, unowned, &cases)?;
 		builder.position_at_end(end);
 		if name == "fa.copy_box" {
 			builder.build_return(Some(&box_pointer))?;
+		} else if name == "fa.equal_box" {
+			// a null box: equal to itself only
+			let other = function
+				.get_nth_param(1)
+				.expect("a box")
+				.into_pointer_value();
+			let same =
+				builder.build_int_compare(inkwell::IntPredicate::EQ, box_pointer, other, "")?;
+			let same = builder.build_int_z_extend(same, i32, "")?;
+			builder.build_return(Some(&same))?;
 		} else {
 			builder.build_return(None)?;
 		}
@@ -1171,8 +1208,7 @@ pub fn link_program(
 	link::link_objects(target, options, split, &objects, &output, libraries)?;
 	timings.link = start.elapsed();
 	let loader = if target == Target::Wasm {
-		let imports = link::wasm_imports(&output)?;
-		Some(link::write_loader(&output, &imports)?)
+		Some(link::write_loader(&output, options.leak_check)?)
 	} else {
 		None
 	};

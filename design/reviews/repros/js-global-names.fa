@@ -1,0 +1,12 @@
+-- module-level values named like JavaScript globals the runtime uses
+mutable TextEncoder = 1
+mutable Uint8Array = 2
+mutable Promise = 3
+mutable Date = 4
+function bump = () mutates TextEncoder, Uint8Array => {
+	TextEncoder += 1
+	Uint8Array += 1
+}
+bump()
+let long = "é".repeat(300)
+console.log(TextEncoder, Uint8Array, Promise, Date, long.length, long[150..152] catch e => "?")

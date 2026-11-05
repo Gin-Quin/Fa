@@ -64,6 +64,10 @@ void fa_write(int32_t fd, const uint8_t *bytes, size_t length);
 FA_NORETURN void fa_exit(int32_t code);
 void *fa_alloc(size_t size, size_t align);
 void fa_free(void *bytes, size_t size, size_t align);
+/// A block of `fa_alloc` of `old` bytes replaced by one of at least `size`
+/// bytes holding its first `used` bytes (`fa_heap_grow`); null when the
+/// system has no more memory.
+void *fa_grow(void *bytes, size_t old, size_t used, size_t size);
 
 #if defined(__wasm__)
 #define FA_IMPORT(name) __attribute__((import_module("fa"), import_name(name)))
@@ -174,6 +178,23 @@ static FA_NORETURN void out_of_memory(void) {
 	static const char message[] = "stop: out of memory\n";
 	fa_write(2, (const uint8_t *)message, sizeof(message) - 1);
 	fa_exit(101);
+}
+
+static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length);
+
+/// A block of `old` bytes replaced by one of `size` bytes holding its first
+/// `used` bytes: a large block by `fa_grow` (which moves the pages of a
+/// mapped block), a small one by a new block and a copy, as before.
+static __attribute__((always_inline)) inline void *grow_block(void *bytes, size_t old, size_t used, size_t size, size_t align) {
+	if (old < ((size_t)1 << 20)) {
+		uint8_t *grown = fa_alloc(size, align);
+		copy_bytes(grown, bytes, used);
+		fa_free(bytes, old, align);
+		return grown;
+	}
+	void *grown = fa_grow(bytes, old, used, size);
+	if (grown == 0) { out_of_memory(); }
+	return grown;
 }
 
 static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length) {
@@ -608,6 +629,645 @@ FA_EXPORT void fa_b_bool(int32_t value) {
 	append_simple((const uint8_t *)(value ? "true" : "false"), value ? 4 : 5);
 }
 
+// ── big integers (`BigInt`, numbers page, `src/lower/big_integers.rs`) ──
+
+/// A `BigInt` is one 64-bit word (`i64` in the generated code). An odd word
+/// is a small value, inline: the value is the word shifted right by one
+/// (arithmetic), from -2^62 to 2^62 - 1, and needs no allocation. An even
+/// word is the address of a block holding the magnitude in 32-bit limbs,
+/// least significant first, and the sign. The form is canonical: a value
+/// that fits inline is never in a block, so that two equal values have the
+/// same form. The word 0 is no value (a moved-from local): dropping it does
+/// nothing. A block of capacity 0 is a constant of the program (a literal),
+/// never freed. Every operation borrows its operands and returns a value
+/// the caller owns. Limbs of 32 bits keep every product and division in 64
+/// bits (wasm32 and the freestanding target have no 128-bit routines).
+typedef struct {
+	uint32_t length;
+	uint32_t capacity;
+	uint32_t negative;
+	uint32_t padding;
+	uint32_t limbs[];
+} FaBig;
+
+#define BIG_HEADER 16
+#define BIG_SMALL_MAX (((int64_t)1 << 62) - 1)
+#define BIG_SMALL_MIN (-((int64_t)1 << 62))
+
+/// A read-only view of a value: its magnitude and sign (an inline value's
+/// limbs are copied into `small`, which the view must not outlive).
+typedef struct {
+	const uint32_t *limbs;
+	uint32_t length;
+	uint32_t negative;
+	uint32_t small[2];
+} BigView;
+
+static int64_t big_inline(int64_t value) {
+	return (int64_t)(((uint64_t)value << 1) | 1);
+}
+
+static FaBig *big_block(int64_t word) {
+	return (FaBig *)(uintptr_t)(uint64_t)word;
+}
+
+static void big_view(int64_t word, BigView *view) {
+	if (word & 1) {
+		int64_t value = word >> 1;
+		uint64_t magnitude = value < 0 ? 0 - (uint64_t)value : (uint64_t)value;
+		view->small[0] = (uint32_t)magnitude;
+		view->small[1] = (uint32_t)(magnitude >> 32);
+		view->length = magnitude == 0 ? 0 : (magnitude >> 32) != 0 ? 2 : 1;
+		view->negative = value < 0;
+		view->limbs = view->small;
+	} else {
+		FaBig *block = big_block(word);
+		view->limbs = block->limbs;
+		view->length = block->length;
+		view->negative = block->negative;
+	}
+}
+
+static FaBig *big_allocate(uint32_t capacity) {
+	if (capacity == 0) {
+		capacity = 1;
+	}
+	FaBig *block = fa_alloc(BIG_HEADER + (size_t)capacity * 4, 8);
+	block->length = 0;
+	block->capacity = capacity;
+	block->negative = 0;
+	block->padding = 0;
+	for (uint32_t index = 0; index < capacity; index += 1) {
+		block->limbs[index] = 0;
+	}
+	return block;
+}
+
+static void big_free(FaBig *block) {
+	if (block->capacity != 0) {
+		fa_free(block, BIG_HEADER + (size_t)block->capacity * 4, 8);
+	}
+}
+
+/// The canonical value of a block whose limbs are computed: trimmed, inline
+/// (and the block freed) when it fits.
+static int64_t big_finish(FaBig *block, uint32_t length, uint32_t negative) {
+	while (length > 0 && block->limbs[length - 1] == 0) {
+		length -= 1;
+	}
+	if (length <= 2) {
+		uint64_t magnitude = length == 0 ? 0
+		                     : length == 1
+		                         ? block->limbs[0]
+		                         : ((uint64_t)block->limbs[1] << 32) | block->limbs[0];
+		if (magnitude <= (uint64_t)BIG_SMALL_MAX || (negative && magnitude == (uint64_t)1 << 62)) {
+			big_free(block);
+			int64_t value = negative ? (int64_t)(0 - magnitude) : (int64_t)magnitude;
+			return big_inline(value);
+		}
+	}
+	block->length = length;
+	block->negative = negative;
+	return (int64_t)(uintptr_t)block;
+}
+
+/// A value of a magnitude given as 64 bits and a sign.
+static int64_t big_from_magnitude(uint64_t magnitude, uint32_t negative) {
+	if (magnitude <= (uint64_t)BIG_SMALL_MAX) {
+		return big_inline(negative ? -(int64_t)magnitude : (int64_t)magnitude);
+	}
+	FaBig *block = big_allocate(2);
+	block->limbs[0] = (uint32_t)magnitude;
+	block->limbs[1] = (uint32_t)(magnitude >> 32);
+	return big_finish(block, 2, negative);
+}
+
+FA_EXPORT int64_t fa_bigint_from_i64(int64_t value) {
+	if (value >= BIG_SMALL_MIN && value <= BIG_SMALL_MAX) {
+		return big_inline(value);
+	}
+	return big_from_magnitude(value < 0 ? 0 - (uint64_t)value : (uint64_t)value, value < 0);
+}
+
+FA_EXPORT int64_t fa_bigint_from_u64(uint64_t value) {
+	return big_from_magnitude(value, 0);
+}
+
+/// A 128-bit integer (two's complement when `is_signed`), as two halves.
+FA_EXPORT int64_t fa_bigint_from_128(uint64_t low, uint64_t high, int32_t is_signed) {
+	uint32_t negative = is_signed && (int64_t)high < 0;
+	if (negative) {
+		// the magnitude: 0 - value, on two words
+		low = ~low + 1;
+		high = ~high + (low == 0);
+	}
+	if (high == 0) {
+		return big_from_magnitude(low, negative);
+	}
+	FaBig *block = big_allocate(4);
+	block->limbs[0] = (uint32_t)low;
+	block->limbs[1] = (uint32_t)(low >> 32);
+	block->limbs[2] = (uint32_t)high;
+	block->limbs[3] = (uint32_t)(high >> 32);
+	return big_finish(block, 4, negative);
+}
+
+FA_EXPORT void fa_bigint_drop(int64_t word) {
+	if (word != 0 && !(word & 1)) {
+		big_free(big_block(word));
+	}
+}
+
+FA_EXPORT int64_t fa_bigint_copy(int64_t word) {
+	if (word == 0 || (word & 1) || big_block(word)->capacity == 0) {
+		return word;
+	}
+	FaBig *from = big_block(word);
+	FaBig *to = big_allocate(from->length);
+	for (uint32_t index = 0; index < from->length; index += 1) {
+		to->limbs[index] = from->limbs[index];
+	}
+	to->length = from->length;
+	to->negative = from->negative;
+	return (int64_t)(uintptr_t)to;
+}
+
+static int big_compare_magnitudes(const uint32_t *a, uint32_t a_length, const uint32_t *b,
+                                  uint32_t b_length) {
+	if (a_length != b_length) {
+		return a_length < b_length ? -1 : 1;
+	}
+	for (uint32_t index = a_length; index > 0; index -= 1) {
+		if (a[index - 1] != b[index - 1]) {
+			return a[index - 1] < b[index - 1] ? -1 : 1;
+		}
+	}
+	return 0;
+}
+
+/// -1, 0 or 1 as `a` is less than, equal to or greater than `b`.
+FA_EXPORT int32_t fa_bigint_compare(int64_t a, int64_t b) {
+	if ((a & 1) && (b & 1)) {
+		return a < b ? -1 : a > b ? 1 : 0;
+	}
+	BigView x, y;
+	big_view(a, &x);
+	big_view(b, &y);
+	int x_sign = x.length == 0 ? 0 : x.negative ? -1 : 1;
+	int y_sign = y.length == 0 ? 0 : y.negative ? -1 : 1;
+	if (x_sign != y_sign) {
+		return x_sign < y_sign ? -1 : 1;
+	}
+	int order = big_compare_magnitudes(x.limbs, x.length, y.limbs, y.length);
+	return x_sign < 0 ? -order : order;
+}
+
+FA_EXPORT int32_t fa_bigint_equal(int64_t a, int64_t b) {
+	if ((a & 1) || (b & 1)) {
+		return a == b;
+	}
+	return fa_bigint_compare(a, b) == 0;
+}
+
+/// -1, 0 or 1: the sign of a value.
+FA_EXPORT int32_t fa_bigint_sign(int64_t word) {
+	if (word & 1) {
+		return word < 1 ? -1 : word > 1 ? 1 : 0;
+	}
+	return big_block(word)->negative ? -1 : 1;
+}
+
+/// `a + b` (`b` negated when `subtract`), from views.
+static int64_t big_add_views(const BigView *x, const BigView *y, int subtract) {
+	uint32_t y_negative = y->negative ^ (subtract && y->length != 0);
+	uint32_t length = (x->length > y->length ? x->length : y->length) + 1;
+	FaBig *block = big_allocate(length);
+	if (x->negative == y_negative || x->length == 0 || y->length == 0) {
+		uint64_t carry = 0;
+		for (uint32_t index = 0; index < length; index += 1) {
+			uint64_t sum = carry;
+			if (index < x->length) {
+				sum += x->limbs[index];
+			}
+			if (index < y->length) {
+				sum += y->limbs[index];
+			}
+			block->limbs[index] = (uint32_t)sum;
+			carry = sum >> 32;
+		}
+		return big_finish(block, length, x->length != 0 ? x->negative : y_negative);
+	}
+	// different signs: the smaller magnitude from the larger
+	int order = big_compare_magnitudes(x->limbs, x->length, y->limbs, y->length);
+	const BigView *large = order >= 0 ? x : y;
+	const BigView *small = order >= 0 ? y : x;
+	uint32_t negative = order >= 0 ? x->negative : y_negative;
+	int64_t borrow = 0;
+	for (uint32_t index = 0; index < large->length; index += 1) {
+		int64_t difference = (int64_t)large->limbs[index] - borrow;
+		if (index < small->length) {
+			difference -= small->limbs[index];
+		}
+		borrow = difference < 0;
+		block->limbs[index] = (uint32_t)(difference + (borrow << 32));
+	}
+	return big_finish(block, large->length, order == 0 ? 0 : negative);
+}
+
+FA_EXPORT int64_t fa_bigint_add(int64_t a, int64_t b) {
+	if ((a & 1) && (b & 1)) {
+		return fa_bigint_from_i64((a >> 1) + (b >> 1));
+	}
+	BigView x, y;
+	big_view(a, &x);
+	big_view(b, &y);
+	return big_add_views(&x, &y, 0);
+}
+
+FA_EXPORT int64_t fa_bigint_subtract(int64_t a, int64_t b) {
+	if ((a & 1) && (b & 1)) {
+		return fa_bigint_from_i64((a >> 1) - (b >> 1));
+	}
+	BigView x, y;
+	big_view(a, &x);
+	big_view(b, &y);
+	return big_add_views(&x, &y, 1);
+}
+
+FA_EXPORT int64_t fa_bigint_multiply(int64_t a, int64_t b) {
+	if ((a & 1) && (b & 1)) {
+		int64_t x = a >> 1, y = b >> 1;
+		// both within 31 bits: the product fits in 62 bits
+		if (x >= -0x7FFFFFFF && x <= 0x7FFFFFFF && y >= -0x7FFFFFFF && y <= 0x7FFFFFFF) {
+			return fa_bigint_from_i64(x * y);
+		}
+	}
+	BigView x, y;
+	big_view(a, &x);
+	big_view(b, &y);
+	if (x.length == 0 || y.length == 0) {
+		return big_inline(0);
+	}
+	uint32_t length = x.length + y.length;
+	FaBig *block = big_allocate(length);
+	for (uint32_t i = 0; i < x.length; i += 1) {
+		uint64_t carry = 0;
+		uint64_t limb = x.limbs[i];
+		for (uint32_t j = 0; j < y.length; j += 1) {
+			uint64_t product = limb * y.limbs[j] + block->limbs[i + j] + carry;
+			block->limbs[i + j] = (uint32_t)product;
+			carry = product >> 32;
+		}
+		block->limbs[i + y.length] = (uint32_t)carry;
+	}
+	return big_finish(block, length, x.negative ^ y.negative);
+}
+
+/// The number of leading zero bits of a nonzero limb.
+static uint32_t big_leading_zeros(uint32_t limb) {
+	return (uint32_t)__builtin_clz(limb);
+}
+
+/// The quotient and remainder of magnitudes (Knuth's algorithm D, with
+/// 32-bit limbs): `quotient` has room for `a_length - b_length + 1` limbs,
+/// `remainder` for `b_length`; `b_length` > 0 and `a` >= `b`.
+static void big_divide_magnitudes(const uint32_t *a, uint32_t a_length, const uint32_t *b,
+                                  uint32_t b_length, uint32_t *quotient, uint32_t *remainder) {
+	if (b_length == 1) {
+		uint64_t rest = 0;
+		for (uint32_t index = a_length; index > 0; index -= 1) {
+			uint64_t current = (rest << 32) | a[index - 1];
+			quotient[index - 1] = (uint32_t)(current / b[0]);
+			rest = current % b[0];
+		}
+		remainder[0] = (uint32_t)rest;
+		return;
+	}
+	// normalized copies: the divisor's top bit set
+	uint32_t shift = big_leading_zeros(b[b_length - 1]);
+	size_t bytes = ((size_t)a_length + 1 + b_length) * 4;
+	uint32_t *u = fa_alloc(bytes, 4);
+	uint32_t *v = u + a_length + 1;
+	for (uint32_t index = b_length - 1; index > 0; index -= 1) {
+		v[index] = shift == 0 ? b[index] : (b[index] << shift) | (b[index - 1] >> (32 - shift));
+	}
+	v[0] = b[0] << shift;
+	u[a_length] = shift == 0 ? 0 : a[a_length - 1] >> (32 - shift);
+	for (uint32_t index = a_length - 1; index > 0; index -= 1) {
+		u[index] = shift == 0 ? a[index] : (a[index] << shift) | (a[index - 1] >> (32 - shift));
+	}
+	u[0] = a[0] << shift;
+	const uint64_t base = (uint64_t)1 << 32;
+	for (uint32_t j = a_length - b_length + 1; j > 0; j -= 1) {
+		uint32_t at = j - 1;
+		uint64_t numerator = ((uint64_t)u[at + b_length] << 32) | u[at + b_length - 1];
+		uint64_t estimate = numerator / v[b_length - 1];
+		uint64_t rest = numerator % v[b_length - 1];
+		while (estimate >= base ||
+		       estimate * v[b_length - 2] > ((rest << 32) | u[at + b_length - 2])) {
+			estimate -= 1;
+			rest += v[b_length - 1];
+			if (rest >= base) {
+				break;
+			}
+		}
+		// multiply and subtract
+		int64_t borrow = 0;
+		uint64_t carry = 0;
+		for (uint32_t index = 0; index < b_length; index += 1) {
+			uint64_t product = estimate * v[index] + carry;
+			carry = product >> 32;
+			int64_t difference = (int64_t)u[index + at] - borrow - (int64_t)(uint32_t)product;
+			u[index + at] = (uint32_t)difference;
+			borrow = difference < 0;
+		}
+		int64_t top = (int64_t)u[at + b_length] - borrow - (int64_t)carry;
+		u[at + b_length] = (uint32_t)top;
+		if (top < 0) {
+			// the estimate was one too large: add back
+			estimate -= 1;
+			uint64_t sum = 0;
+			for (uint32_t index = 0; index < b_length; index += 1) {
+				sum = (uint64_t)u[index + at] + v[index] + (sum >> 32);
+				u[index + at] = (uint32_t)sum;
+			}
+			u[at + b_length] += (uint32_t)(sum >> 32);
+		}
+		quotient[at] = (uint32_t)estimate;
+	}
+	for (uint32_t index = 0; index < b_length; index += 1) {
+		remainder[index] = shift == 0 ? u[index]
+		                              : (u[index] >> shift) | (u[index + 1] << (32 - shift));
+	}
+	fa_free(u, bytes, 4);
+}
+
+/// `a // b` (`modulo` 0) or `a %% b` (`modulo` 1), rounded towards −∞; the
+/// caller checked that `b` is not 0.
+static int64_t big_floor_divide(int64_t a, int64_t b, int modulo) {
+	if ((a & 1) && (b & 1)) {
+		int64_t x = a >> 1, y = b >> 1;
+		int64_t quotient = x / y, remainder = x % y;
+		if (remainder != 0 && ((remainder < 0) != (y < 0))) {
+			quotient -= 1;
+			remainder += y;
+		}
+		return fa_bigint_from_i64(modulo ? remainder : quotient);
+	}
+	BigView x, y;
+	big_view(a, &x);
+	big_view(b, &y);
+	int order = big_compare_magnitudes(x.limbs, x.length, y.limbs, y.length);
+	FaBig *quotient;
+	FaBig *remainder = big_allocate(y.length);
+	uint32_t quotient_length;
+	if (order < 0) {
+		// |a| < |b|: the quotient 0, the remainder `a`
+		quotient = big_allocate(2);
+		quotient_length = 1;
+		for (uint32_t index = 0; index < x.length; index += 1) {
+			remainder->limbs[index] = x.limbs[index];
+		}
+	} else {
+		quotient_length = x.length - y.length + 1;
+		quotient = big_allocate(quotient_length + 1);
+		big_divide_magnitudes(x.limbs, x.length, y.limbs, y.length, quotient->limbs,
+		                      remainder->limbs);
+	}
+	uint32_t remainder_length = y.length;
+	while (remainder_length > 0 && remainder->limbs[remainder_length - 1] == 0) {
+		remainder_length -= 1;
+	}
+	uint32_t differ = x.negative != y.negative;
+	if (remainder_length != 0 && differ) {
+		if (modulo) {
+			// r + b, signs differing: |b| - |r|, with the sign of b
+			for (uint32_t index = 0, borrow = 0; index < y.length; index += 1) {
+				int64_t difference = (int64_t)y.limbs[index] - remainder->limbs[index] - borrow;
+				borrow = difference < 0;
+				remainder->limbs[index] = (uint32_t)difference;
+			}
+			big_free(quotient);
+			return big_finish(remainder, y.length, y.negative);
+		}
+		// q - 1 on a negative quotient: |q| + 1
+		uint64_t carry = 1;
+		for (uint32_t index = 0; index < quotient_length + 1 && carry != 0; index += 1) {
+			uint64_t sum = (uint64_t)quotient->limbs[index] + carry;
+			quotient->limbs[index] = (uint32_t)sum;
+			carry = sum >> 32;
+		}
+		quotient_length += 1;
+	}
+	if (modulo) {
+		big_free(quotient);
+		return big_finish(remainder, remainder_length, x.negative);
+	}
+	big_free(remainder);
+	return big_finish(quotient, quotient_length, differ);
+}
+
+FA_EXPORT int64_t fa_bigint_floor_divide(int64_t a, int64_t b) {
+	return big_floor_divide(a, b, 0);
+}
+
+FA_EXPORT int64_t fa_bigint_floor_modulo(int64_t a, int64_t b) {
+	return big_floor_divide(a, b, 1);
+}
+
+/// `-a`.
+FA_EXPORT int64_t fa_bigint_negate(int64_t word) {
+	if (word & 1) {
+		return fa_bigint_from_i64(-(word >> 1));
+	}
+	int64_t copy = fa_bigint_copy(word);
+	FaBig *block = big_block(copy);
+	if (block->capacity == 0) {
+		// a constant: a block of its own
+		block = big_allocate(block->length);
+		FaBig *from = big_block(word);
+		for (uint32_t index = 0; index < from->length; index += 1) {
+			block->limbs[index] = from->limbs[index];
+		}
+		block->length = from->length;
+		block->negative = from->negative;
+	}
+	return big_finish(block, block->length, !block->negative);
+}
+
+/// A word that equal values share (the inline word, or one mixed from the
+/// limbs and the sign of a block), for hash tables.
+FA_EXPORT int64_t fa_bigint_hash(int64_t word) {
+	if (word & 1) {
+		return word;
+	}
+	FaBig *block = big_block(word);
+	uint64_t hash = block->negative ? 0x9E3779B97F4A7C15u : 0;
+	for (uint32_t index = 0; index < block->length; index += 1) {
+		hash = (hash ^ block->limbs[index]) * 0x100000001B3u;
+	}
+	return (int64_t)(hash & ~(uint64_t)1);
+}
+
+/// `|a|`.
+FA_EXPORT int64_t fa_bigint_abs(int64_t word) {
+	return fa_bigint_sign(word) < 0 ? fa_bigint_negate(word) : fa_bigint_copy(word);
+}
+
+/// `a ** b`; the caller checked that `b` is not negative. An exponent of
+/// more than 32 bits only fits for a base of 0, 1 or -1.
+FA_EXPORT int64_t fa_bigint_power(int64_t a, int64_t b) {
+	BigView e;
+	big_view(b, &e);
+	if (e.length > 1) {
+		if (a == big_inline(0) || a == big_inline(1)) {
+			return a;
+		}
+		if (a == big_inline(-1)) {
+			return big_inline((e.limbs[0] & 1) ? -1 : 1);
+		}
+		fa_out(2, (const uint8_t *)"BigInt exponent too large\n", 26);
+		fa_exit(101);
+	}
+	uint32_t exponent = e.length == 0 ? 0 : e.limbs[0];
+	int64_t result = big_inline(1);
+	int64_t base = fa_bigint_copy(a);
+	while (exponent != 0) {
+		if (exponent & 1) {
+			int64_t next = fa_bigint_multiply(result, base);
+			fa_bigint_drop(result);
+			result = next;
+		}
+		exponent >>= 1;
+		if (exponent != 0) {
+			int64_t squared = fa_bigint_multiply(base, base);
+			fa_bigint_drop(base);
+			base = squared;
+		}
+	}
+	fa_bigint_drop(base);
+	return result;
+}
+
+/// The nearest `Float` (`Number(a)` in JavaScript: ties to even).
+FA_EXPORT double fa_bigint_to_f64(int64_t word) {
+	if (word & 1) {
+		return (double)(word >> 1);
+	}
+	FaBig *block = big_block(word);
+	uint32_t length = block->length;
+	uint32_t top_bits = 32 - big_leading_zeros(block->limbs[length - 1]);
+	uint64_t bits = (uint64_t)(length - 1) * 32 + top_bits;
+	double magnitude;
+	if (bits <= 64) {
+		uint64_t value = 0;
+		for (uint32_t index = length; index > 0; index -= 1) {
+			value = (value << 32) | block->limbs[index - 1];
+		}
+		magnitude = (double)value;
+	} else if (bits > 1024) {
+		magnitude = __builtin_inf();
+	} else {
+		// the top 64 bits, the lower ones folded into a sticky bit
+		uint64_t drop = bits - 64;
+		uint64_t top = 0;
+		int sticky = 0;
+		for (uint64_t bit = bits; bit > drop; bit -= 1) {
+			uint64_t position = bit - 1;
+			top = (top << 1) | ((block->limbs[position / 32] >> (position % 32)) & 1);
+		}
+		for (uint64_t limb = 0; limb < drop / 32 && !sticky; limb += 1) {
+			sticky = block->limbs[limb] != 0;
+		}
+		if (!sticky && drop % 32 != 0) {
+			sticky = (block->limbs[drop / 32] & (((uint32_t)1 << (drop % 32)) - 1)) != 0;
+		}
+		magnitude = (double)(top | (uint64_t)sticky);
+		// times 2^drop (at most 2^960: one exact multiplication)
+		union {
+			uint64_t bits;
+			double value;
+		} scale = {(uint64_t)(1023 + drop) << 52};
+		magnitude *= scale.value;
+	}
+	return block->negative ? -magnitude : magnitude;
+}
+
+/// The value as a 128-bit two's complement integer in `out` (low, high);
+/// 0 when it doesn't fit in 128 signed bits.
+FA_EXPORT int32_t fa_bigint_to_128(int64_t word, uint64_t *out) {
+	if (word & 1) {
+		int64_t value = word >> 1;
+		out[0] = (uint64_t)value;
+		out[1] = value < 0 ? UINT64_MAX_VALUE : 0;
+		return 1;
+	}
+	FaBig *block = big_block(word);
+	if (block->length > 4) {
+		return 0;
+	}
+	uint32_t limbs[4] = {0, 0, 0, 0};
+	for (uint32_t index = 0; index < block->length; index += 1) {
+		limbs[index] = block->limbs[index];
+	}
+	uint64_t low = ((uint64_t)limbs[1] << 32) | limbs[0];
+	uint64_t high = ((uint64_t)limbs[3] << 32) | limbs[2];
+	if (block->negative) {
+		// up to 2^127 in magnitude
+		if (high > ((uint64_t)1 << 63) || (high == ((uint64_t)1 << 63) && low != 0)) {
+			return 0;
+		}
+		low = ~low + 1;
+		high = ~high + (low == 0);
+	} else if (high >> 63) {
+		return 0;
+	}
+	out[0] = low;
+	out[1] = high;
+	return 1;
+}
+
+/// Appends the decimal digits of a value to the text builder.
+FA_EXPORT void fa_b_bigint(int64_t word) {
+	if (word & 1) {
+		fa_b_i64(word >> 1);
+		return;
+	}
+	FaBig *block = big_block(word);
+	uint32_t length = block->length;
+	// chunks of 9 digits, least significant first
+	size_t work_bytes = (size_t)length * 4;
+	size_t digits_size = (size_t)length * 10 + 2;
+	uint32_t *work = fa_alloc(work_bytes, 4);
+	uint8_t *digits = fa_alloc(digits_size, 1);
+	for (uint32_t index = 0; index < length; index += 1) {
+		work[index] = block->limbs[index];
+	}
+	size_t position = digits_size;
+	while (length > 0) {
+		uint64_t rest = 0;
+		for (uint32_t index = length; index > 0; index -= 1) {
+			uint64_t current = (rest << 32) | work[index - 1];
+			work[index - 1] = (uint32_t)(current / 1000000000u);
+			rest = current % 1000000000u;
+		}
+		while (length > 0 && work[length - 1] == 0) {
+			length -= 1;
+		}
+		uint32_t chunk = (uint32_t)rest;
+		for (int digit = 0; digit < 9 && (length != 0 || chunk != 0); digit += 1) {
+			digits[--position] = (uint8_t)('0' + chunk % 10);
+			chunk /= 10;
+		}
+	}
+	if (block->negative) {
+		digits[--position] = '-';
+	}
+	append_simple(digits + position, digits_size - position);
+	fa_free(digits, digits_size, 1);
+	fa_free(work, work_bytes, 4);
+}
+
 // ── floats (values brief D-5, D-6) ──────────────────────────────────────
 
 #if !defined(__wasm__)
@@ -994,11 +1654,18 @@ static __attribute__((noinline)) void string_grow(FaString *string, const uint8_
 		grown = 64;
 	}
 	grown = string_block(grown);
-	uint8_t *block = fa_alloc(grown, 1);
-	copy_bytes(block, string_bytes(string), old_length);
-	copy_bytes(block + old_length, bytes, length);
-	if (owned) {
-		fa_free((void *)string->bytes, capacity, 1);
+	uint8_t *block;
+	if (owned && (bytes + length <= string->bytes || bytes >= string->bytes + capacity)) {
+		// a large block moves its pages instead of its bytes (`fa_heap_grow`)
+		block = grow_block((void *)string->bytes, capacity, old_length, grown, 1);
+		copy_bytes(block + old_length, bytes, length);
+	} else {
+		block = fa_alloc(grown, 1);
+		copy_bytes(block, string_bytes(string), old_length);
+		copy_bytes(block + old_length, bytes, length);
+		if (owned) {
+			fa_free((void *)string->bytes, capacity, 1);
+		}
 	}
 	string->bytes = block;
 	string->length = needed;
@@ -1144,10 +1811,12 @@ static __attribute__((noinline)) void string_reserve_slow(FaString *string, size
 		out_of_memory();
 	}
 	grown = string_block(grown);
-	uint8_t *block = fa_alloc(grown, 1);
-	copy_bytes(block, string_bytes(string), old_length);
+	uint8_t *block;
 	if (owned) {
-		fa_free((void *)string->bytes, kind, 1);
+		block = grow_block((void *)string->bytes, kind, old_length, grown, 1);
+	} else {
+		block = fa_alloc(grown, 1);
+		copy_bytes(block, string_bytes(string), old_length);
 	}
 	string->bytes = block;
 	string->length = old_length;
@@ -1210,10 +1879,12 @@ static __attribute__((noinline)) void string_reserve_owned_slow(FaString *string
 	}
 	size_t grown = owned && kind * 2 > needed ? kind * 2 : needed;
 	grown = string_block(grown);
-	uint8_t *block = fa_alloc(grown, 1);
-	copy_bytes(block, string_bytes(string), length);
+	uint8_t *block;
 	if (owned) {
-		fa_free((void *)string->bytes, kind, 1);
+		block = grow_block((void *)string->bytes, kind, length, grown, 1);
+	} else {
+		block = fa_alloc(grown, 1);
+		copy_bytes(block, string_bytes(string), length);
 	}
 	string->bytes = block;
 	string->length = length;
@@ -2164,41 +2835,118 @@ static void append_code_point(uint32_t code) {
 	}
 }
 
-/// `toUpperCase` (`upper` 1) and `toLowerCase` (0): ASCII, Latin-1, Greek
-/// and Cyrillic, and `ß` → `SS` (the full Unicode tables come with the
-/// standard library).
-FA_EXPORT void fa_string_case(const uint8_t *bytes, size_t length, int32_t upper, FaString *out) {
-	fa_b_reset();
-	size_t index = 0;
+// ── case conversion ─────────────────────────────────────────────────────
+
+// The full Unicode tables, generated from the JavaScript engine's by
+// `case_tables.js`: native code converts case as JavaScript does.
+#include "fa_case_tables.h"
+
+#define COUNT_OF(table) (sizeof(table) / sizeof((table)[0]))
+
+/// The single code point a code point maps to (itself when unchanged).
+static uint32_t case_run(uint32_t code, const CaseRun *runs, size_t count) {
+	size_t low = 0;
+	size_t high = count;
+	while (low < high) {
+		size_t middle = (low + high) / 2;
+		const CaseRun *run = &runs[middle];
+		if (code < run->first) {
+			high = middle;
+		} else if (code >= run->first + (uint32_t)run->count * run->stride) {
+			low = middle + 1;
+		} else {
+			if ((code - run->first) % run->stride == 0) {
+				return (uint32_t)((int32_t)code + run->delta);
+			}
+			return code;
+		}
+	}
+	return code;
+}
+
+/// The UTF-8 text a code point maps to when it maps to several, or null.
+static const char *case_special(uint32_t code, const CaseSpecial *specials, size_t count) {
+	size_t low = 0;
+	size_t high = count;
+	while (low < high) {
+		size_t middle = (low + high) / 2;
+		if (code < specials[middle].code) {
+			high = middle;
+		} else if (code > specials[middle].code) {
+			low = middle + 1;
+		} else {
+			return specials[middle].text;
+		}
+	}
+	return 0;
+}
+
+/// Whether a capital sigma at `start..end` ends a word (Unicode's
+/// Final_Sigma): a cased letter before it and none after it, skipping the
+/// case-ignorable code points.
+static int final_sigma(const uint8_t *bytes, size_t length, size_t start, size_t end) {
+	int before = 0;
+	size_t index = start;
+	while (index > 0) {
+		size_t previous = index - 1;
+		while (previous > 0 && (bytes[previous] & 0xC0) == 0x80) {
+			previous -= 1;
+		}
+		size_t cursor = previous;
+		uint32_t code = decode(bytes, length, &cursor);
+		index = previous;
+		if (!in_ranges(code, CASE_IGNORABLE, COUNT_OF(CASE_IGNORABLE))) {
+			before = in_ranges(code, CASED, COUNT_OF(CASED));
+			break;
+		}
+	}
+	if (!before) {
+		return 0;
+	}
+	index = end;
 	while (index < length) {
 		uint32_t code = decode(bytes, length, &index);
-		if (upper) {
-			if ((code >= 'a' && code <= 'z') || (code >= 0xE0 && code <= 0xFE && code != 0xF7) ||
-			    (code >= 0x3B1 && code <= 0x3C9 && code != 0x3C2) || (code >= 0x430 && code <= 0x44F)) {
-				code -= 0x20;
-			} else if (code >= 0x450 && code <= 0x45F) {
-				code -= 0x50;
-			} else if (code == 0xFF) {
-				code = 0x178;
-			} else if (code == 0xB5) {
-				code = 0x39C;
-			} else if (code == 0x3C2) {
-				code = 0x3A3;
-			} else if (code == 0xDF) {
-				append_c("SS");
-				continue;
-			}
-		} else {
-			if ((code >= 'A' && code <= 'Z') || (code >= 0xC0 && code <= 0xDE && code != 0xD7) ||
-			    (code >= 0x391 && code <= 0x3A9 && code != 0x3A2) || (code >= 0x410 && code <= 0x42F)) {
-				code += 0x20;
-			} else if (code >= 0x400 && code <= 0x40F) {
-				code += 0x50;
-			} else if (code == 0x178) {
-				code = 0xFF;
-			}
+		if (!in_ranges(code, CASE_IGNORABLE, COUNT_OF(CASE_IGNORABLE))) {
+			return !in_ranges(code, CASED, COUNT_OF(CASED));
 		}
-		append_code_point(code);
+	}
+	return 1;
+}
+
+/// `toUpperCase` (`upper` 1) and `toLowerCase` (0), with the full Unicode
+/// tables: the mappings to several code points (`ß` → `SS`) and the final
+/// sigma included. ASCII text takes a fast path.
+FA_EXPORT void fa_string_case(const uint8_t *bytes, size_t length, int32_t upper, FaString *out) {
+	fa_b_reset();
+	const CaseRun *runs = upper ? UPPER_RUNS : LOWER_RUNS;
+	size_t run_count = upper ? COUNT_OF(UPPER_RUNS) : COUNT_OF(LOWER_RUNS);
+	const CaseSpecial *specials = upper ? UPPER_SPECIAL : LOWER_SPECIAL;
+	size_t special_count = upper ? COUNT_OF(UPPER_SPECIAL) : COUNT_OF(LOWER_SPECIAL);
+	size_t index = 0;
+	while (index < length) {
+		uint8_t byte = bytes[index];
+		if (byte < 0x80) {
+			if (upper && byte >= 'a' && byte <= 'z') {
+				byte -= 0x20;
+			} else if (!upper && byte >= 'A' && byte <= 'Z') {
+				byte += 0x20;
+			}
+			append_byte(byte);
+			index += 1;
+			continue;
+		}
+		size_t start = index;
+		uint32_t code = decode(bytes, length, &index);
+		if (!upper && code == 0x3A3) {
+			append_code_point(final_sigma(bytes, length, start, index) ? 0x3C2 : 0x3C3);
+			continue;
+		}
+		const char *special = case_special(code, specials, special_count);
+		if (special != 0) {
+			append_c(special);
+			continue;
+		}
+		append_code_point(case_run(code, runs, run_count));
 	}
 	fa_b_take(out);
 }
@@ -2472,9 +3220,15 @@ static __attribute__((noinline)) void array_grow(FaArrayHeader *array, int64_t i
 		return;
 	}
 	int64_t capacity = array->capacity < 4 ? 4 : array->capacity * 2;
-	uint8_t *items = fa_alloc((size_t)(capacity * item_size), 16);
-	copy_bytes(items, array->items, (size_t)(array->length * item_size));
-	free_array_items(array, item_size);
+	uint8_t *items;
+	if (inline_items(array)) {
+		items = fa_alloc((size_t)(capacity * item_size), 16);
+		copy_bytes(items, array->items, (size_t)(array->length * item_size));
+		mark_items(array, 0);
+	} else {
+		items = grow_block(array->items, (size_t)(array->capacity * item_size),
+		                   (size_t)(array->length * item_size), (size_t)(capacity * item_size), 16);
+	}
 	array->items = items;
 	array->capacity = capacity;
 }
@@ -2487,6 +3241,91 @@ FA_EXPORT void *fa_array_push_slot(void *header, int64_t item_size) {
 	void *slot = array->items + array->length * item_size;
 	array->length += 1;
 	return slot;
+}
+
+/// The largest items moved into the block of their header by
+/// `fa_array_compact`.
+#define COMPACT_LIMIT ((size_t)512)
+
+/// An array that the generated code owns and stores into a value it builds
+/// (`compact_moved_array` of `src/lower/arrays.rs`): when its items are
+/// small and in a block of their own, they move into a new block holding
+/// the header and them, of their exact size. The array is unique, so that
+/// the address of its header may change.
+FA_EXPORT void *fa_array_compact(void *header, int64_t item_size) {
+	FaArrayHeader *array = header;
+	if (array->capacity < 0 || inline_items(array)) {
+		return array;
+	}
+	size_t bytes = (size_t)(array->length * item_size);
+	if (bytes > COMPACT_LIMIT) {
+		return array;
+	}
+	FaArrayHeader *compact = fa_alloc(INLINE_ITEMS + bytes, 16);
+	mark_items(compact, 1);
+	compact->items = (uint8_t *)compact + INLINE_ITEMS;
+	compact->length = array->length;
+	compact->capacity = array->length;
+	copy_bytes(compact->items, array->items, bytes);
+	fa_free(array->items, (size_t)(array->capacity * item_size), 16);
+	fa_free(array, INLINE_ITEMS, sizeof(int64_t));
+	return compact;
+}
+
+/// A packed array (`src/lower/packed.rs`): the items of an `Array` of a
+/// union whose arrays are only built by `push` and read by `for`, each
+/// stored as the index of its member (a byte) followed by its data, with no
+/// padding, one after the other. `length` counts the items, `capacity` is
+/// the size of the block of the items in bytes and `used` the bytes in use.
+typedef struct {
+	uint8_t *items;
+	int64_t length;
+	int64_t capacity;
+	int64_t used;
+} FaPacked;
+
+FA_EXPORT void *fa_packed_new(void) {
+	FaPacked *array = fa_alloc(sizeof(FaPacked), sizeof(int64_t));
+	array->items = 0;
+	array->length = 0;
+	array->capacity = 0;
+	array->used = 0;
+	return array;
+}
+
+/// `fa_packed_push` on a full block: one at least twice as large.
+static __attribute__((noinline)) void packed_grow(FaPacked *array, int64_t bytes) {
+	int64_t capacity = array->capacity < 64 ? 64 : array->capacity;
+	while (capacity - array->used < bytes) {
+		if (capacity > INT64_MAX / 2) { out_of_memory(); }
+		capacity *= 2;
+	}
+	uint8_t *items = array->items == 0
+	                     ? fa_alloc((size_t)capacity, 16)
+	                     : grow_block(array->items, (size_t)array->capacity, (size_t)array->used,
+	                                  (size_t)capacity, 16);
+	array->items = items;
+	array->capacity = capacity;
+}
+
+/// Room for an item of `bytes` bytes at the end (`push`): its address.
+FA_EXPORT __attribute__((always_inline)) uint8_t *fa_packed_push(void *header, int64_t bytes) {
+	FaPacked *array = header;
+	if (__builtin_expect(array->capacity - array->used < bytes, 0)) {
+		packed_grow(array, bytes);
+	}
+	uint8_t *slot = array->items + array->used;
+	array->used += bytes;
+	array->length += 1;
+	return slot;
+}
+
+FA_EXPORT void fa_packed_free(void *header) {
+	FaPacked *array = header;
+	if (array->items != 0) {
+		fa_free(array->items, (size_t)array->capacity, 16);
+	}
+	fa_free(array, sizeof(FaPacked), sizeof(int64_t));
 }
 
 /// Appends the items of `source` to `array` (bytewise).
@@ -2828,6 +3667,16 @@ FA_EXPORT FaSegmented *fa_segmented_from_array(FaArrayHeader *flat, int64_t item
 #define PAGE_HEADER ((size_t)16)
 #define SMALL_LIMIT ((size_t)8192)
 #define LARGE_CLASS 0xFFFFu
+/// The class of a block with a mapping of its own (native Linux): blocks of
+/// at least `MAPPED_LIMIT` bytes, which grow by moving their pages
+/// (`fa_heap_grow`) and are given back to the system when freed.
+#define MAPPED_CLASS 0xFFFEu
+#define MAPPED_LIMIT ((size_t)1 << 20)
+
+/// Anonymous mappings (`src/runtime.rs`): null where there are none.
+void *fa_os_map(size_t length, int32_t protection);
+void fa_os_unmap(void *start, size_t length);
+void *fa_os_remap(void *start, size_t old_length, size_t length, void *at);
 
 /// `count` new pages, aligned on `PAGE_SIZE`, or null (tier 0).
 void *fa_pages(size_t count);
@@ -2990,8 +3839,45 @@ FA_EXPORT __attribute__((always_inline)) void *fa_heap_alloc(size_t size, size_t
 	return heap_alloc_slow(size);
 }
 
+/// A new mapping of `length` bytes (a multiple of `PAGE_SIZE`) aligned on
+/// `PAGE_SIZE`, readable and writable, or only reserved; null without one.
+/// No huge pages: with `defrag` set to `madvise`, a fault in an advised
+/// mapping may compact memory synchronously, which cost the strings and
+/// arrays of the benchmarks more system time than the page faults it saved.
+static uint8_t *map_aligned(size_t length, int32_t protection) {
+	size_t alignment = PAGE_SIZE;
+	uint8_t *start = fa_os_map(length + alignment, protection);
+	if (start == 0) {
+		return 0;
+	}
+	uint8_t *aligned = (uint8_t *)(((uintptr_t)start + alignment - 1) & ~(uintptr_t)(alignment - 1));
+	if (aligned > start) {
+		fa_os_unmap(start, (size_t)(aligned - start));
+	}
+	size_t tail = (size_t)((start + length + alignment) - (aligned + length));
+	if (tail > 0) {
+		fa_os_unmap(aligned + length, tail);
+	}
+	return aligned;
+}
+
+/// The length of the mapping of a block of `size` bytes.
+static size_t mapped_length(size_t size) {
+	return (size + PAGE_HEADER + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+}
+
 /// `fa_heap_alloc` off its common path: a new block of a page, or pages.
 static __attribute__((noinline)) void *heap_alloc_slow(size_t size) {
+	if (size >= MAPPED_LIMIT && size <= (SIZE_MAX >> 18)) {
+		size_t length = mapped_length(size);
+		uint8_t *start = map_aligned(length, 3);
+		if (start != 0) {
+			PageHeader *header = (PageHeader *)start;
+			header->class = MAPPED_CLASS;
+			header->pages = (uint32_t)(length / PAGE_SIZE);
+			return start + PAGE_HEADER;
+		}
+	}
 	if (size > SMALL_LIMIT) {
 		size_t pages = (size + PAGE_HEADER + PAGE_SIZE - 1) / PAGE_SIZE;
 		if (pages == 0) {
@@ -3037,9 +3923,46 @@ FA_EXPORT void fa_heap_free(void *bytes) {
 		give_pages(page, header->pages);
 		return;
 	}
+	if (header->class == MAPPED_CLASS) {
+		fa_os_unmap(page, (size_t)header->pages * PAGE_SIZE);
+		return;
+	}
 	FreeBlock *block = bytes;
 	block->next = free_blocks[header->class];
 	free_blocks[header->class] = block;
+}
+
+/// `fa_grow` with the allocator of the runtime: a block with a mapping of its
+/// own moves its pages to a larger mapping, without copying its bytes or
+/// touching new pages; another block is copied into a new one.
+FA_EXPORT void *fa_heap_grow(void *bytes, size_t old, size_t used, size_t size) {
+	uint8_t *page = (uint8_t *)((uintptr_t)bytes & ~(uintptr_t)(PAGE_SIZE - 1));
+	PageHeader *header = (PageHeader *)page;
+	if (header->class == MAPPED_CLASS && size <= (SIZE_MAX >> 18)) {
+		size_t length = mapped_length(size);
+		size_t old_length = (size_t)header->pages * PAGE_SIZE;
+		if (length <= old_length) {
+			return bytes;
+		}
+		// a reservation, aligned, that the pages replace
+		uint8_t *at = map_aligned(length, 0);
+		if (at != 0) {
+			uint8_t *moved = fa_os_remap(page, old_length, length, at);
+			if (moved != 0) {
+				((PageHeader *)moved)->pages = (uint32_t)(length / PAGE_SIZE);
+				return moved + PAGE_HEADER;
+			}
+			fa_os_unmap(at, length);
+		}
+	}
+	(void)old;
+	void *grown = fa_heap_alloc(size, 16);
+	if (grown == 0) {
+		return 0;
+	}
+	copy_bytes(grown, bytes, used);
+	fa_heap_free(bytes);
+	return grown;
 }
 
 // ── root-owned recursive regions ──────────────────────────────────────
@@ -4510,8 +5433,11 @@ FA_EXPORT FA_COLD FA_NORETURN void fa_assert_failed(const char *site) {
 
 #if !defined(__wasm__)
 // A stack overflow is a stop (values brief D-26): on native, the guard page
-// below the stack raises SIGSEGV, handled on an alternate stack. Linux
-// layouts of `stack_t` and of glibc's `struct sigaction`.
+// below the stack raises SIGSEGV, handled on an alternate stack. Any other
+// segmentation fault is a crash, a bug of the compiler (or of foreign code):
+// reported with its address, then raised again with the default action, so
+// that the process ends by the signal. Linux layouts of `stack_t`, of
+// glibc's `struct sigaction` and of the start of `siginfo_t`.
 typedef struct {
 	void *pointer;
 	int32_t flags;
@@ -4519,31 +5445,96 @@ typedef struct {
 } AlternateStack;
 
 typedef struct {
-	void (*handler)(int);
+	void (*handler)(int, void *, void *);
 	uint64_t mask[16];
 	int32_t flags;
 	void (*restorer)(void);
 } SignalAction;
 
+typedef struct {
+	int32_t number;
+	int32_t error;
+	int32_t code;
+	int32_t padding;
+	uintptr_t address;
+} SignalInformation;
+
 int sigaltstack(const AlternateStack *stack, AlternateStack *old);
 int sigaction(int signal, const SignalAction *action, SignalAction *old);
 FA_NORETURN void _exit(int status);
+int raise(int signal);
+// the size limit of the main thread's stack (one system call; glibc's
+// `pthread_getattr_np` reads `/proc/self/maps`, 90 000 instructions)
+typedef struct {
+	uint64_t current;
+	uint64_t maximum;
+} ResourceLimit;
+__attribute__((weak)) int getrlimit(int resource, ResourceLimit *limit);
 
 static uint8_t signal_stack[16384];
+/// The lowest address of the main thread's stack (0: unknown), estimated
+/// from the stack pointer at the start of the program: the arguments and
+/// the environment above it make it up to [`STACK_ABOVE`] lower.
+static uintptr_t stack_low;
+/// How far below the stack a fault counts as a stack overflow: the guard
+/// gap the kernel keeps below a growing stack (256 pages by default).
+#define STACK_GUARD_GAP ((uintptr_t)1 << 20)
+/// How far above the estimated lowest address the real one may be.
+#define STACK_ABOVE ((uintptr_t)8 << 20)
 
-static void on_fault(int signal) {
+static void on_fault(int signal, void *information, void *context) {
 	(void)signal;
+	(void)context;
+	const SignalInformation *info = (const SignalInformation *)information;
 	fa_flush();
-	static const char message[] = "stop: stack overflow\n";
-	fa_write(2, (const uint8_t *)message, sizeof message - 1);
-	_exit(101);
+	// raised by the kernel (`code > 0`) at an address of the guard below
+	// the stack
+	uintptr_t address = info->address;
+	if (info->code > 0 && stack_low != 0 && address < stack_low + STACK_ABOVE &&
+	    address + STACK_GUARD_GAP >= stack_low) {
+		static const char message[] = "stop: stack overflow\n";
+		fa_write(2, (const uint8_t *)message, sizeof message - 1);
+		_exit(101);
+	}
+	static const char prefix[] = "crash: segmentation fault";
+	fa_write(2, (const uint8_t *)prefix, sizeof prefix - 1);
+	if (info->code > 0) {
+		char text[32] = " at 0x";
+		size_t length = 6;
+		int started = 0;
+		for (int shift = 60; shift >= 0; shift -= 4) {
+			unsigned digit = (unsigned)(address >> shift) & 15;
+			if (digit != 0 || started || shift == 0) {
+				text[length++] = (char)(digit < 10 ? '0' + digit : 'a' + digit - 10);
+				started = 1;
+			}
+		}
+		fa_write(2, (const uint8_t *)text, length);
+	}
+	static const char suffix[] = " (a bug of the compiler or of foreign code)\n";
+	fa_write(2, (const uint8_t *)suffix, sizeof suffix - 1);
+	// the default action, when the faulting instruction runs again (or now,
+	// for a signal sent by a process)
+	SignalAction action = {0, {0}, 0, 0};
+	sigaction(11 /* SIGSEGV */, &action, 0);
+	if (info->code <= 0) {
+		raise(11);
+	}
 }
 
 /// Reports a stack overflow as a stop (native with the C library only).
 FA_EXPORT void fa_guard_stack(void) {
+	ResourceLimit limit = {0, 0};
+	// (the address of a local: a frame address would make every function
+	// this is inlined into keep a frame pointer)
+	uintptr_t here = (uintptr_t)&limit;
+	// `RLIMIT_STACK`; an unlimited stack (all ones) has no guard to tell
+	if (getrlimit != 0 && getrlimit(3, &limit) == 0 && limit.current < here) {
+		stack_low = here - (uintptr_t)limit.current;
+	}
 	AlternateStack stack = {signal_stack, 0, sizeof signal_stack};
 	sigaltstack(&stack, 0);
-	SignalAction action = {on_fault, {0}, 0x08000000 /* SA_ONSTACK */, 0};
+	SignalAction action = {on_fault, {0}, 0x08000000 /* SA_ONSTACK */ | 4 /* SA_SIGINFO */, 0};
 	sigaction(11 /* SIGSEGV */, &action, 0);
 }
 #endif
@@ -4644,6 +5635,23 @@ FA_EXPORT FA_COLD const void *fa_error_negative_exponent(int64_t exponent) {
 	fa_b_reset();
 	append_c("negative exponent: ");
 	fa_b_i64(exponent);
+	return arithmetic_error_from_builder();
+}
+
+/// `ArithmeticError { message = "negative exponent: <exponent>" }` of a `BigInt`.
+FA_EXPORT FA_COLD const void *fa_error_big_negative_exponent(int64_t exponent) {
+	fa_b_reset();
+	append_c("negative exponent: ");
+	fa_b_bigint(exponent);
+	return arithmetic_error_from_builder();
+}
+
+/// `ArithmeticError { message = "<value> doesn't fit in <type>" }` of a `BigInt`.
+FA_EXPORT FA_COLD const void *fa_error_big_conversion(int64_t value, const char *site) {
+	fa_b_reset();
+	fa_b_bigint(value);
+	append_c(" doesn't fit in ");
+	append_c(site);
 	return arithmetic_error_from_builder();
 }
 
@@ -4965,19 +5973,21 @@ static __attribute__((always_inline)) inline void inline_shift(FaTable *table, u
                                                                int64_t entry_size) {
 	uint64_t mask = (uint64_t)table->mask;
 	int64_t stride = inline_stride(entry_size);
+	// read once: the slots moved below can't be the table's own fields
+	uint8_t *slots = (uint8_t *)table->index;
 	for (uint64_t next = (hole + 1) & mask;; next = (next + 1) & mask) {
-		uint8_t *at = inline_slot(table, (int64_t)next, entry_size);
+		uint8_t *at = slots + (int64_t)next * stride;
 		uint32_t found = inline_tag(at);
 		if (found == 0) {
 			break;
 		}
 		uint64_t home = found & mask;
 		if (((next - home) & mask) >= ((next - hole) & mask)) {
-			copy_bytes(inline_slot(table, (int64_t)hole, entry_size), at, (size_t)stride);
+			__builtin_memcpy(slots + (int64_t)hole * stride, at, (size_t)stride);
 			hole = next;
 		}
 	}
-	inline_set_tag(inline_slot(table, (int64_t)hole, entry_size), 0);
+	inline_set_tag(slots + (int64_t)hole * stride, 0);
 	table->length -= 1;
 }
 
@@ -5039,12 +6049,37 @@ FA_EXPORT __attribute__((always_inline)) int32_t fa_table_live(const FaTable *ta
 	        >> (position & (TABLE_CHUNK_SLOTS - 1))) & 1;
 }
 
+/// `key_size` of a table of strings (`src/lower/tables.rs`).
+#define STRING_KEY ((int64_t)-1)
+
+/// `==` of two strings read in place (`strings_equal` of the backend): two
+/// inline strings compare in three words (their padding is zero), without
+/// their `SIMPLE` flag; other strings by their lengths and bytes.
+static __attribute__((always_inline)) inline int string_keys_equal(const uint8_t *stored,
+                                                                   const void *key) {
+	FaString a;
+	FaString b;
+	__builtin_memcpy(&a, stored, sizeof(FaString));
+	__builtin_memcpy(&b, key, sizeof(FaString));
+	if (a.capacity & b.capacity & STRING_INLINE) {
+		return ((uintptr_t)a.bytes == (uintptr_t)b.bytes) & (a.length == b.length) &
+		       (((a.capacity ^ b.capacity) & ~SIMPLE) == 0);
+	}
+	const FaString *left = (const FaString *)stored;
+	const FaString *right = (const FaString *)key;
+	return fa_string_equal(string_bytes(left), string_length(left), string_bytes(right),
+	                       string_length(right));
+}
+
 /// Whether a stored key equals a key.
 static __attribute__((always_inline)) inline int table_keys_equal(
 	const uint8_t *stored, const void *key, int32_t (*equals)(const void *, const void *),
 	int64_t key_size) {
 	if (equals != 0) {
 		return equals(stored, key);
+	}
+	if (key_size == STRING_KEY) {
+		return string_keys_equal(stored, key);
 	}
 	const uint8_t *other = (const uint8_t *)key;
 	switch (key_size) {

@@ -51,6 +51,7 @@ impl Session {
 			.map(|resolver| resolver.modules())
 			.unwrap_or_default();
 		// every file is read and parsed first, in parallel
+		self.set_entry(entry);
 		let mut all: Vec<String> = entry.map(str::to_string).into_iter().collect();
 		all.extend(modules.iter().cloned());
 		self.load_modules(&all);

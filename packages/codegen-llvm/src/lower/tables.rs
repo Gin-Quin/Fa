@@ -334,6 +334,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let word = builder.build_int_z_extend(value.into_int_value(), i64, "")?;
 				self.mix_integer(builder, word)?
 			}
+			// the canonical form: an inline word, or the limbs of a block
+			Repr::BigInt => {
+				let word = builder
+					.build_call(
+						self.runtime.function("fa_bigint_hash")?,
+						&[value.into()],
+						"",
+					)?
+					.try_as_basic_value()
+					.basic()
+					.expect("a hash")
+					.into_int_value();
+				self.mix_integer(builder, word)?
+			}
 			Repr::F64 | Repr::F32 | Repr::Percentage => {
 				// SameValueZero: `-0` is `0`, every `NaN` is one
 				let float = value.into_float_value();
@@ -715,9 +729,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let slot = self.alloca(table.key, "key")?;
 		self.builder
 			.build_store(slot.pointer, key.value.expect("a key"))?;
-		let bitwise = Self::bitwise_key_size(table);
-		// integers are compared bitwise in the probe loop, the other keys
-		// with their `==`
+		// integers are compared bitwise in the probe loop, strings by the
+		// runtime (`STRING_KEY`: in place, three words when both are inline),
+		// the other keys with their `==`
+		let bitwise = match table.key {
+			Repr::Str => u64::MAX,
+			_ => Self::bitwise_key_size(table),
+		};
 		let equals = if bitwise > 0 {
 			self.pointer_type().const_null()
 		} else {

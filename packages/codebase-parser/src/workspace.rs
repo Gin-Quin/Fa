@@ -89,13 +89,10 @@ pub enum Closest {
 }
 
 impl Discovered {
-	/// The closest of the two: the package, unless the workspace is
-	/// closer (the folder is in the workspace but outside the package).
+	/// The closest of the two: the package, else the workspace ([`discover`]
+	/// stops at the workspace, so a package found is inside it).
 	pub fn closest(&self) -> Closest {
 		match (&self.package, &self.workspace) {
-			(Some(package), Some(workspace)) if !package.starts_with(workspace) => {
-				Closest::Workspace(workspace.clone())
-			}
 			(Some(package), _) => Closest::Package(package.clone()),
 			(None, Some(workspace)) => Closest::Workspace(workspace.clone()),
 			(None, None) => Closest::Nothing,

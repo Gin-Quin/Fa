@@ -71,6 +71,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		Ok(match self.node_repr(node)? {
 			Repr::Int(int) => Val::new(Repr::Int(int), self.const_int(int.bits, value)),
+			Repr::BigInt => self.big_constant(value),
 			Repr::F64 => Val::new(
 				Repr::F64,
 				self.context.f64_type().const_float(value.as_f64()),
@@ -170,6 +171,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let result = self.int_to(result, work, compute)?;
 				Ok(Val::new(Repr::Int(compute), result))
 			}
+			Repr::BigInt => self.big_arithmetic(node, op, operands),
 			Repr::F64 | Repr::F32 | Repr::Percentage => self.float_arithmetic(op, operands, repr),
 			Repr::Str if op == ArithOp::Add => {
 				let mut values = Vec::new();
@@ -617,6 +619,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let value = self.float_value(value, repr, operand)?;
 				Ok(Val::new(repr, self.builder.build_float_neg(value, "")?))
 			}
+			Repr::BigInt => self.big_negate(operand),
 			_ => Err(self.unsupported(node.index(), "`-` on this value")),
 		}
 	}
@@ -643,6 +646,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let value = self.float_value(value, repr, operand)?;
 				let fabs = self.intrinsic("llvm.fabs", &[value.get_type().into()])?;
 				Ok(Val::new(repr, self.call_value(fabs, &[value.into()])?))
+			}
+			Repr::BigInt => {
+				let value = self.expr(operand)?;
+				if value.repr == Repr::Never {
+					return Ok(value);
+				}
+				self.big_absolute(value)
 			}
 			_ => Err(self.unsupported(node.index(), "`abs` on this value")),
 		}
@@ -832,6 +842,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Val::new(slot.repr, result)
 			}
+			// `total += 1n`: the new value replaces the old one, which is dropped
+			Repr::BigInt => {
+				let Some(right) = self.big_operand(value)? else {
+					return Ok(Val::never());
+				};
+				let result = self.big_step(node, op, current.int(), right)?;
+				let result = Val::new(Repr::BigInt, result);
+				self.unregister(result);
+				self.emit_drop(current)?;
+				result
+			}
 			Repr::Percentage => {
 				let right = self.expr(value)?;
 				let left = self.float_value(current, Repr::F64, target)?;
@@ -915,6 +936,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.convert(right, common, node.index())?,
 				)
 			}
+			// a `BigInt` and an integer (`==`): the integer converted
+			(Repr::BigInt, Repr::Int(int)) => {
+				let right = self.big_from_int(right.int(), int)?;
+				(left, right)
+			}
+			(Repr::Int(int), Repr::BigInt) => (self.big_from_int(left.int(), int)?, right),
 			(a, b) if float(a) || float(b) => {
 				let work = if a == Repr::F32 && b == Repr::F32 {
 					Repr::F32
@@ -959,6 +986,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.builder
 					.build_int_compare(predicate, left.int(), right.int(), "")?)
 			}
+			Repr::BigInt => self.big_compare(left, right, op),
 			Repr::Bool | Repr::Enum(_) if op.is_none() => {
 				Ok(self
 					.builder
@@ -1111,6 +1139,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(self
 					.builder
 					.build_int_compare(IntPredicate::EQ, left.int(), right.int(), "")?)
+			}
+			// values of unions: the same member, equal data (objects.rs)
+			_ if op.is_none()
+				&& [left.repr, right.repr]
+					.iter()
+					.any(|repr| matches!(repr, Repr::Union | Repr::InlineUnion(_))) =>
+			{
+				self.unions_equal(left, right, node)
 			}
 			_ => Err(self.unsupported(node.index(), "comparing these values")),
 		}

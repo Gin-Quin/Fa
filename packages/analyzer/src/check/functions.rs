@@ -93,7 +93,10 @@ impl Walker<'_> {
 		params.extend(implicit);
 		let rigid = self.rigid_params.len();
 		self.rigid_params.extend(params.iter().copied());
+		let derived = std::mem::take(&mut self.pending_derived);
 		let ty = self.function_decl(n, is_async, annotation, value);
+		// `Pick<Entity, keys>`: bound at each call from the others (type_ops.rs)
+		params.extend(std::mem::replace(&mut self.pending_derived, derived));
 		self.pending_implicit.clear();
 		self.rigid_params.truncate(rigid);
 		self.body.scope = saved;
@@ -614,7 +617,8 @@ impl Walker<'_> {
 		// the entry function of a program infers its effects (advanced brief D51)
 		let entry = owner.declaration.is_some_and(|declaration| {
 			matches!(self.view(declaration), View::ExportFunction { .. })
-				&& self.s.role(self.file) == crate::modules::FileRole::Program
+				&& (self.s.role(self.file) == crate::modules::FileRole::Program
+					|| self.s.is_entry(self.file))
 		});
 		let coverage = (!entry && (written_effects || (block_body && owner.symbol.is_some())))
 			.then_some(declared_effects);

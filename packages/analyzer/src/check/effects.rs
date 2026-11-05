@@ -322,11 +322,6 @@ impl Walker<'_> {
 		let Some(top) = self.body.functions.last() else {
 			return Owner::Outside;
 		};
-		// a value of another file: its writes are not tracked as effects yet
-		if self.modules.proxies.contains_key(&symbol) || self.modules.aliases.contains_key(&symbol)
-		{
-			return Owner::Outside;
-		}
 		let entry = self.a.symbols.symbol(symbol);
 		let is_param = matches!(
 			entry.kind,
@@ -346,7 +341,12 @@ impl Walker<'_> {
 			{
 				return Owner::Captured;
 			}
-			if matches!(data.kind, ScopeKind::Module | ScopeKind::Namespace) {
+			// a value of another file (its proxy) is a module-level value too:
+			// its writes are effects, declared and seen by the callers
+			if matches!(
+				data.kind,
+				ScopeKind::Module | ScopeKind::Namespace | ScopeKind::Imports
+			) {
 				return if matches!(
 					entry.kind,
 					SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
@@ -534,7 +534,9 @@ impl Walker<'_> {
 			SymbolKind::SelfParameter => PathRoot::SelfParam,
 			SymbolKind::Parameter { index } => PathRoot::Param(index),
 			SymbolKind::Requirement { index } => PathRoot::Requirement(index),
-			SymbolKind::Let | SymbolKind::Mutable => PathRoot::ModuleValue(self.module_key(symbol)),
+			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive => {
+				PathRoot::ModuleValue(self.module_key(symbol))
+			}
 			_ => return None,
 		};
 		let mut steps = Vec::new();
@@ -976,7 +978,7 @@ impl Walker<'_> {
 						SymbolKind::Requirement { index } => {
 							Some((PathRoot::Requirement(index), ty))
 						}
-						SymbolKind::Let | SymbolKind::Mutable
+						SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
 							if matches!(
 								self.a.symbols.scope(entry.scope).kind,
 								ScopeKind::Module | ScopeKind::Namespace
@@ -1012,8 +1014,48 @@ impl Walker<'_> {
 				Some((self.s.types.path(root, &[]), ty))
 			}
 			View::Access { target, members } => {
-				let (mut path, mut ty) = self.signature_path(target)?;
-				for member in members.iter() {
+				let all: Vec<NodeId> = members.iter().collect();
+				// a value of another file reached through namespaces
+				// (`mutates library.people`): rooted at its key
+				let (mut path, mut ty, rest) = match self.namespace_target(target) {
+					Some(_) => {
+						self.check_module_access(node, target, members);
+						let found = all
+							.iter()
+							.enumerate()
+							.find_map(|(index, &member)| match self.a.resolution(member) {
+								Resolution::Local(symbol) if !self.is_namespace(symbol) => {
+									Some((index, symbol))
+								}
+								_ => None,
+							});
+						let Some((index, symbol)) = found.filter(|&(_, symbol)| {
+							matches!(
+								self.a.symbols.symbol(symbol).kind,
+								SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
+							)
+						}) else {
+							let text = tree.text(node.index()).to_string();
+							let diagnostic = self.diagnostic(
+								&EFF008,
+								node,
+								format!(
+									"`{text}` is not a parameter, `self` or a module-level value: an effect path starts at one of them"
+								),
+							);
+							self.report(diagnostic);
+							return None;
+						};
+						let ty = self.proxy_type(symbol, node).unwrap_or(TypeId::UNKNOWN);
+						let root = PathRoot::ModuleValue(self.module_key(symbol));
+						(self.s.types.path(root, &[]), ty, all[index + 1..].to_vec())
+					}
+					None => {
+						let (path, ty) = self.signature_path(target)?;
+						(path, ty, all.clone())
+					}
+				};
+				for member in rest {
 					let View::Name(name) = syntax::view(&tree, member) else {
 						return None;
 					};
@@ -1214,21 +1256,12 @@ impl Walker<'_> {
 				// EFF011: a declared path nothing in the body changes
 				if cx.coverage.is_some() && !cx.uncovered && self.body_complete(cx) {
 					let (mutates, invalidated) = self.s.types.effects(declared);
-					let module = self.s.module_id(self.file);
 					let unused: Vec<(PathId, bool)> = mutates
 						.iter()
 						.map(|&path| (path, false))
 						.chain(invalidated.iter().map(|&path| (path, true)))
 						.filter(|&(path, invalidates)| {
 							!covers_any(&self.s.types, path, invalidates, &own)
-						})
-						// the writes of another file's value are not tracked yet:
-						// its declaration is accepted (`mutates people`)
-						.filter(|&(path, _)| match self.s.types.path_data(path).0.root {
-							PathRoot::ModuleValue(key) => {
-								self.s.types.decl_key_data(key).module == module
-							}
-							_ => true,
 						})
 						.collect();
 					for (path, invalidates) in unused {
@@ -1832,7 +1865,11 @@ impl Walker<'_> {
 				(place, node)
 			}
 			PathRoot::ModuleValue(key) => {
-				let symbol = *self.module_values.get(&key)?;
+				let symbol = match self.module_values.get(&key) {
+					Some(&symbol) => symbol,
+					// a value of another file this one doesn't name: a proxy of it
+					None => self.module_value_proxy(key)?,
+				};
 				(self.symbol_target(symbol)?, receiver.unwrap_or(NodeId(0)))
 			}
 			PathRoot::Requirement(index) => {

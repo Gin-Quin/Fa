@@ -1,4 +1,6 @@
-// helpers: faQuote, faFormatError, FaError, faCaught, FaStop, faStop, faOverflow, faCheckInteger, faFormatArray, faSides, faFormatObject, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat, faNeedSharedMemory, FaChannel, faSched, faLater, faMacrotask, faCancelSignal, faAlive, faCoop, FaTask, faIsError, faCancel, faEnd, faExit, faStopMessage, faIsStackOverflow, faWriteError, faReport, faFatal, faSettle, faRunTask, faStart, faDetach, faReady, faWhenDone, Cancelled, faResult, faJoin, faCombine, faYield, faSleep, faSleepSync, ChannelClosed, faRemove, faWaitShared, faSend, faWaiting, faReceive, faRunAsync, faReceiveNow, faSendNow
+// helpers: faQuote, faFormatError, FaError, faCaught, FaStop, faStop, faOverflow, faCheckInteger, faFormatArray, faNeedSharedMemory, FaChannel, faSched, faLater, faMacrotask, faCancelSignal, faAlive, faCoop, FaTask, faIsError, faCancel, faEnd, faExit, faStopMessage, faIsStackOverflow, faWriteError, faReport, faFatal, faSettle, faRunTask, faStart, faDetach, faReady, faWhenDone, Cancelled, faResult, faJoin, faCombine, faYield, faSleep, faSleepSync, ChannelClosed, faRemove, faWaitShared, faSend, faWaiting, faReceive, faRunAsync, faReceiveNow, faSendNow
+
+const format = (value) => faFormatArray(value, String);
 
 async function pause___async($task, milliseconds) {
 	await faSleep($task, milliseconds);
@@ -43,7 +45,7 @@ async function main($task) {
 	console.log(String(await faJoin($task, draining)));
 	console.log(String(faCheckInteger(await pause___async($task, 2) + blocking(), "tasks.fa:30:13")));
 	const both = await faJoin($task, faCombine($task, [faStart($task, pause___async, 3), faStart($task, pause___async, 4)], 0));
-	console.log(faFormat(both));
+	console.log(format(both));
 	faDetach(faStart($task, async ($task) => {
 		await faYield($task);
 		console.log("detached");

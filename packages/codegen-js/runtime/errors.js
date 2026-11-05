@@ -24,6 +24,14 @@ export class FaError {
 	/** @type {string | undefined} */
 	static faName;
 
+	/**
+	 * What recognizes a Fa error (`faIsError`): its qualified name.
+	 * @returns {string}
+	 */
+	get [Symbol.for("fa.error")]() {
+		return /** @type {any} */ (this.constructor).faName ?? this.constructor.name;
+	}
+
 	/** @returns {string} */
 	toString() {
 		return faFormatError(this);

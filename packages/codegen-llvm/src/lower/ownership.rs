@@ -75,6 +75,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn needs_drop(&self, repr: Repr) -> bool {
 		match repr {
 			Repr::Str
+			| Repr::BigInt
 			| Repr::Array(_)
 			| Repr::Union
 			| Repr::Function(_)
@@ -424,6 +425,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(());
 		}
 		match repr {
+			// the runtime frees a block, never an inline value nor a constant
+			Repr::BigInt => {
+				builder.build_call(
+					self.runtime.function("fa_bigint_drop")?,
+					&[value.into()],
+					"",
+				)?;
+			}
 			Repr::Str => {
 				let pair = value.into_struct_value();
 				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
@@ -469,6 +478,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					builder.build_return(None)?;
 					Ok(())
 				})?;
+				if self.packed_layout(item_type).is_some() {
+					// its items own nothing (`packed.rs`)
+					builder.build_call(
+						self.runtime.function("fa_packed_free")?,
+						&[array.into()],
+						"",
+					)?;
+					return Ok(());
+				}
 				if item == Repr::Str {
 					let cap_pointer = builder.build_struct_gep(self.header_type(), array, 2, "")?;
 					let cap = builder
@@ -660,6 +678,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value: BasicValueEnum<'ctx>,
 	) -> Result<BasicValueEnum<'ctx>, Error> {
 		Ok(match repr {
+			Repr::BigInt => builder
+				.build_call(
+					self.runtime.function("fa_bigint_copy")?,
+					&[value.into()],
+					"",
+				)?
+				.try_as_basic_value()
+				.basic()
+				.expect("a copy"),
 			Repr::Str => {
 				let pair = value.into_struct_value();
 				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
@@ -705,6 +732,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.try_as_basic_value()
 					.basic()
 					.expect("a copied string")
+			}
+			Repr::Array(item_type) if self.packed_layout(item_type).is_some() => {
+				// `packed::packable_items` admits no copy
+				return Err(Error::Llvm("a copy of a packed array".into()));
 			}
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, NodeId::new(0))?;
@@ -1821,7 +1852,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				continue;
 			}
 			match at {
-				Repr::Str => {}
+				Repr::Str | Repr::BigInt => {}
 				Repr::Object(ty) if self.destroy_function(ty).is_none() => {
 					stack.extend(self.object_fields(ty));
 				}

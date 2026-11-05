@@ -131,7 +131,7 @@ pub const KINDS: &[FactKind] = &[
 		name: PROOF_CLAIMS,
 		collect: proof_claims,
 		merge: union,
-		finish: crate::proofs::resolve_claims_owned,
+		finish: fa_analyzer::proofs::resolve_claims_owned,
 	},
 	FactKind {
 		name: WRITTEN_FIELDS,
@@ -144,26 +144,26 @@ pub const KINDS: &[FactKind] = &[
 /// See [`WRITTEN_FIELDS`].
 fn written_fields(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 	let types = session.types();
-	let proof_files: Vec<crate::proofs::ProofFile<'_>> = files
+	let proof_files: Vec<fa_analyzer::proofs::ProofFile<'_>> = files
 		.iter()
 		.map(|&file| {
-			crate::proofs::ProofFile::new(session.tree(file), session.analysis(file), types)
+			fa_analyzer::proofs::ProofFile::new(session.tree(file), session.analysis(file), types)
 		})
 		.collect();
-	crate::proofs::written_fields(&proof_files)
+	fa_analyzer::proofs::written_fields(&proof_files)
 }
 
 /// See [`PROOF_CLAIMS`].
 fn proof_claims(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 	let types = session.types();
-	let proof_files: Vec<crate::proofs::ProofFile<'_>> = files
+	let proof_files: Vec<fa_analyzer::proofs::ProofFile<'_>> = files
 		.iter()
 		.map(|&file| {
-			crate::proofs::ProofFile::new(session.tree(file), session.analysis(file), types)
+			fa_analyzer::proofs::ProofFile::new(session.tree(file), session.analysis(file), types)
 				.with_module(session.module(file))
 		})
 		.collect();
-	crate::proofs::unit_claims(&proof_files)
+	fa_analyzer::proofs::unit_claims(&proof_files)
 }
 
 /// The facts a lowering consulted: `(kind, key)` → the answer it got. A
@@ -286,200 +286,7 @@ impl ProgramFacts {
 	}
 }
 
-/// The name of a type that is the same in the session of every unit, if it
-/// has one: a canonical spelling built from declaration identities
-/// (`DeclKey`: module path, enclosing names, disambiguator, as the symbols of
-/// units are named) and type arguments, independent of how a unit imported
-/// or aliased the type. Anonymous structural types are spelled from their
-/// parts (an object's fields, already sorted by name; a union's members,
-/// sorted); a recursive reference is `^n` (n levels up). Built-in scalars are
-/// spelled as Fa writes them. A function type is spelled from its signature,
-/// a type parameter by its position (`$i`) and constraint, a task by its
-/// result and errors. `None` for a type without a spelling that is stable
-/// (references, iterators…).
-pub fn stable_type_name(types: &TypeStore, ty: TypeId) -> Option<String> {
-	let mut out = String::new();
-	let mut stack = Vec::new();
-	write_stable(types, ty, &mut stack, &mut out).then_some(out)
-}
-
-/// A declaration's identity: `fa.<module path>.<names>[#<n>]`.
-fn decl_spelling(types: &TypeStore, key: fa_analyzer::ids::DeclKey) -> String {
-	let data = types.decl_key_data(key);
-	let mut name = format!("fa.{}", types.module_path(data.module));
-	for &sym in types.sym_list(data.names) {
-		name.push('.');
-		name.push_str(types.syms.resolve(sym));
-	}
-	if data.disambiguator != 0 {
-		name.push_str(&format!("#{}", data.disambiguator));
-	}
-	name
-}
-
-/// Writes the spelling of a nominal type: its declaration, then its type
-/// arguments.
-fn write_nominal(
-	types: &TypeStore,
-	nominal: fa_analyzer::ids::NominalId,
-	stack: &mut Vec<TypeId>,
-	out: &mut String,
-) -> bool {
-	let info = types.nominal(nominal);
-	out.push_str(&decl_spelling(types, info.key));
-	let args = types.list_items(info.args).to_vec();
-	if !args.is_empty() {
-		out.push('<');
-		for (index, arg) in args.into_iter().enumerate() {
-			if index > 0 {
-				out.push_str(", ");
-			}
-			if !write_stable(types, arg, stack, out) {
-				return false;
-			}
-		}
-		out.push('>');
-	}
-	true
-}
-
-fn write_stable(types: &TypeStore, ty: TypeId, stack: &mut Vec<TypeId>, out: &mut String) -> bool {
-	if let Some(depth) = stack.iter().rev().position(|&outer| outer == ty) {
-		out.push_str(&format!("^{depth}"));
-		return true;
-	}
-	stack.push(ty);
-	let written = match types.kind(ty) {
-		TypeKind::Boolean
-		| TypeKind::BoolLit(_)
-		| TypeKind::Int(_)
-		| TypeKind::Float(_)
-		| TypeKind::FloatLit(..)
-		| TypeKind::BigInt
-		| TypeKind::BigIntLit(_)
-		| TypeKind::Percentage
-		| TypeKind::String
-		| TypeKind::StringLit(_)
-		| TypeKind::Character
-		| TypeKind::None
-		| TypeKind::Void
-		| TypeKind::Never
-		| TypeKind::Range => {
-			out.push_str(&types.display(ty));
-			true
-		}
-		TypeKind::Object(shape) => match types.shape(shape).nominal {
-			Some(nominal) => write_nominal(types, nominal, stack, out),
-			None => {
-				let fields: Vec<(String, TypeId)> = types
-					.shape_fields(shape)
-					.iter()
-					.map(|field| (types.syms.resolve(field.name).to_string(), field.ty))
-					.collect();
-				out.push('{');
-				let mut written = true;
-				for (index, (name, field)) in fields.into_iter().enumerate() {
-					if index > 0 {
-						out.push_str(", ");
-					}
-					out.push_str(&name);
-					out.push_str(": ");
-					written &= write_stable(types, field, stack, out);
-				}
-				out.push('}');
-				written
-			}
-		},
-		TypeKind::Tuple(list) => {
-			let items = types.list_items(list).to_vec();
-			out.push_str("Tuple<");
-			let mut written = true;
-			for (index, item) in items.into_iter().enumerate() {
-				if index > 0 {
-					out.push_str(", ");
-				}
-				written &= write_stable(types, item, stack, out);
-			}
-			out.push('>');
-			written
-		}
-		TypeKind::Union(list) => {
-			let mut members = Vec::new();
-			let mut written = true;
-			for member in types.list_items(list).to_vec() {
-				let mut spelled = String::new();
-				written &= write_stable(types, member, stack, &mut spelled);
-				members.push(spelled);
-			}
-			members.sort();
-			out.push('(');
-			out.push_str(&members.join(" | "));
-			out.push(')');
-			written
-		}
-		TypeKind::NamedUnion(nominal, mask) | TypeKind::Enum(nominal, mask) => {
-			let written = write_nominal(types, nominal, stack, out);
-			// the members it holds, by index (a mask's id is the session's)
-			let count = types.sym_list(types.nominal(nominal).members).len() as u16;
-			let held: Vec<String> = (0..count)
-				.filter(|&index| types.mask_has(mask, index))
-				.map(|index| index.to_string())
-				.collect();
-			out.push_str(&format!("/{}", held.join(",")));
-			written
-		}
-		TypeKind::Member(nominal, index) | TypeKind::EnumMember(nominal, index) => {
-			let written = write_nominal(types, nominal, stack, out);
-			out.push_str(&format!(".{index}"));
-			written
-		}
-		TypeKind::CStruct(nominal) => write_nominal(types, nominal, stack, out),
-		TypeKind::Function(sig) => write_signature(types, sig, stack, out),
-		TypeKind::Task(result, error) => {
-			out.push_str("Task<");
-			let mut written = write_stable(types, result, stack, out);
-			out.push_str(", ");
-			written &= write_stable(types, error, stack, out);
-			out.push('>');
-			written
-		}
-		// a type parameter by its position, with its constraint: types equal
-		// up to the renaming of their parameters share a name
-		TypeKind::Param(param) => {
-			let info = types.param(param);
-			out.push_str(&format!("${}", info.index));
-			if info.value {
-				out.push_str(" value");
-			}
-			if info.constraint != TypeId::UNKNOWN {
-				out.push_str(": ");
-				if !write_stable(types, info.constraint, stack, out) {
-					stack.pop();
-					return false;
-				}
-			}
-			true
-		}
-		TypeKind::ImplicitParam(_, index) => {
-			out.push_str(&format!("$implicit{index}"));
-			true
-		}
-		TypeKind::Collection(kind, item, key) => {
-			out.push_str(&format!("{kind:?}<"));
-			let mut written = true;
-			if matches!(kind, CollKind::Map | CollKind::GrowingMap) {
-				written &= write_stable(types, key, stack, out);
-				out.push_str(", ");
-			}
-			written &= write_stable(types, item, stack, out);
-			out.push('>');
-			written
-		}
-		_ => false,
-	};
-	stack.pop();
-	written
-}
+pub use fa_analyzer::stable_names::stable_type_name;
 
 /// Whether a type is a plain `Map`.
 fn is_map(types: &TypeStore, ty: TypeId) -> bool {
@@ -600,67 +407,6 @@ pub(crate) fn declaration_lambdas(
 	lambdas
 }
 
-/// Writes a function type: its requirements, parameters (variadic marked),
-/// result, errors, effects (paths rooted at parameters by position), the
-/// callbacks it stores, and whether it is asynchronous.
-fn write_signature(
-	types: &TypeStore,
-	sig: fa_analyzer::ids::SigId,
-	stack: &mut Vec<TypeId>,
-	out: &mut String,
-) -> bool {
-	let sig = types.sig(sig);
-	let mut written = true;
-	if sig.is_async {
-		out.push_str("async ");
-	}
-	out.push('(');
-	let params = types.params(sig.params).to_vec();
-	for (index, param) in params.into_iter().enumerate() {
-		if index > 0 {
-			out.push_str(", ");
-		}
-		if param.variadic {
-			out.push_str("...");
-		}
-		written &= write_stable(types, param.ty, stack, out);
-	}
-	out.push_str(") => ");
-	written &= write_stable(types, sig.ret, stack, out);
-	if sig.throws != TypeId::NEVER {
-		out.push_str(" throws ");
-		written &= write_stable(types, sig.throws, stack, out);
-	}
-	let requirements = types.requirements(sig.requires).to_vec();
-	if !requirements.is_empty() {
-		out.push_str(" requires ");
-		for (index, requirement) in requirements.into_iter().enumerate() {
-			if index > 0 {
-				out.push_str(", ");
-			}
-			out.push_str(types.syms.resolve(requirement.name));
-			out.push_str(": ");
-			written &= write_stable(types, requirement.ty, stack, out);
-		}
-	}
-	let (mutates, invalidates) = types.effects(sig.effects);
-	for (word, paths) in [("mutates", mutates), ("invalidates", invalidates)] {
-		if paths.is_empty() {
-			continue;
-		}
-		let mut texts: Vec<String> = paths
-			.iter()
-			.map(|&path| fa_analyzer::effects::path_text(types, path, &|_| None))
-			.collect();
-		texts.sort();
-		out.push_str(&format!(" {word} {}", texts.join(", ")));
-	}
-	if sig.stored != 0 {
-		out.push_str(&format!(" stores {:#x}", sig.stored));
-	}
-	written
-}
-
 /// The parent of every node of a tree (`usize::MAX` for the root).
 pub(crate) fn parents_of(tree: &fa_parser::TypedSyntaxTree) -> Vec<usize> {
 	let mut parents = vec![usize::MAX; tree.nodes.len()];
@@ -732,8 +478,7 @@ pub(crate) fn short_reference(
 					let path = fa_analyzer::builtins::get(id).path;
 					// `getOrInsert` of the reference's own value is the one
 					// insertion allowed: it happens before the reference exists
-					let own = at == node.index()
-						|| matches!(view(tree, NodeId::new(parents[at])), View::Use { .. });
+					let own = parents.get(at) == Some(&node.index());
 					if path.starts_with("Map#") && !reads.contains(&path) && !own {
 						let _ = callee;
 						return false;
@@ -743,11 +488,18 @@ pub(crate) fn short_reference(
 				_ => return false,
 			},
 			View::Assignment { target, .. } | View::CompoundAssignment { target, .. } => {
-				if matches!(view(tree, target), View::Index { target: map, .. }
-					if matches!(view(tree, map), View::Name(_) | View::Access { .. })
-						&& matches!(types.kind(analysis.type_of(map)), TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)))
-				{
-					return false;
+				// an item of a map stored, whatever names the map (`m[k]`,
+				// `self.m[k]`, `tables[0][k]`), also in a destructuring
+				let mut places = vec![target.index()];
+				while let Some(place) = places.pop() {
+					if let View::Index { target: map, .. } = view(tree, NodeId::new(place))
+						&& matches!(
+							types.kind(analysis.type_of(map)),
+							TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)
+						) {
+						return false;
+					}
+					tree.nodes[place].for_each_child(|child| places.push(child));
 				}
 			}
 			_ => {}

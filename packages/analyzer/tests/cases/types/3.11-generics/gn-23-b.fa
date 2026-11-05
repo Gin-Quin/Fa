@@ -1,0 +1,21 @@
+-- brief: gn-23 with several key sets, `Omit`, `DeepKeys` and a result used further
+type Address = { city: String, zip: String }
+type User = { name: String, email: String, password: String, address: Address }
+function select = <Entity, keys: Keys<Entity>>(entity: Entity): Pick<Entity, keys> => pick(entity, keys)
+function without = <Entity, keys: Keys<Entity>>(entity: Entity): Omit<Entity, keys> => omit(entity, keys)
+function deep = <Entity, keys: DeepKeys<Entity>>(entity: Entity): Pick<Entity, keys> => pick(entity, keys)
+let user = User { name = "Ada", email = "a@b", password = "s", address = { city = "Paris", zip = "75001" } }
+console.log(select<User, { name, email }>(user))
+console.log(select<User, { address }>(user))
+let public = without<User, { password }>(user)
+console.log(public)
+console.log(public.address.city)
+console.log(deep<User, { name, address { zip } }>(user))
+let names = [select<User, { name }>(user), select<User, { name }>(user)]
+console.log(names.length, names[0].name)
+-- prints: { name = "Ada", email = "a@b" }
+-- prints: { address = { city = "Paris", zip = "75001" } }
+-- prints: { name = "Ada", email = "a@b", address = { city = "Paris", zip = "75001" } }
+-- prints: Paris
+-- prints: { name = "Ada", address = { zip = "75001" } }
+-- prints: 2 Ada

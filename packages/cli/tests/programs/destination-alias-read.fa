@@ -1,0 +1,17 @@
+-- Destination passing: the destination is a reference to a module-level
+-- value that the body reads
+mutable text = "ab"
+function quoted = (value: String): String => {
+	mutable result = "["
+	for character in value {
+		result += character
+	}
+	result += text
+	result + "]"
+}
+function extend = () mutates text => {
+	mutable use out = text
+	out += quoted("x")
+}
+extend()
+console.log(text) -- prints: ab[xab]

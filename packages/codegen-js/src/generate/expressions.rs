@@ -5,6 +5,7 @@ use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{CompareOp, LogicOp, View};
+use fa_analyzer::types::TypeKind;
 
 use crate::generate::{Dest, Generator, Kind, Repr};
 use crate::js::{self, Expr, Prec};
@@ -363,7 +364,18 @@ impl Generator<'_> {
 				Repr::Number | Repr::BigInt | Repr::String | Repr::Boolean | Repr::None
 			)
 		};
-		if comparable(left_repr) || comparable(right_repr) {
+		// enumeration members are numbers (or optionals of them: `undefined`)
+		let enumeration = |ty: TypeId| {
+			matches!(
+				self.types.kind(ty),
+				TypeKind::Enum(..) | TypeKind::EnumMember(..)
+			)
+		};
+		if comparable(left_repr)
+			|| comparable(right_repr)
+			|| enumeration(left_ty)
+			|| enumeration(right_ty)
+		{
 			return js::binary(&left_value, operator, &right_value, Prec::Equality);
 		}
 		// two values of one object type: its fields only (structural typing)

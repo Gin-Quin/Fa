@@ -1,0 +1,6 @@
+-- a JSON escape of a lone surrogate: native replaces it with U+FFFD (strings
+-- are UTF-8); JavaScript keeps an invalid UTF-16 string
+use { Json } = std.json
+let value: Array<String> = Json.parse("[\"\\ud800\"]") catch error => []
+let text = value.get(0) ?? ""
+console.log(text == "\u{fffd}", Json.stringify(value), text.bytes().length)

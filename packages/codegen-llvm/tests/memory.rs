@@ -86,7 +86,12 @@ console.log(count)
 		std::fs::create_dir_all(&directory).expect("a directory");
 		let path = directory.join(format!("{name}.fa"));
 		std::fs::write(&path, source).expect("a program");
-		compile_file(&path, target, &Options::default(), &directory.join(name))
+		// the loader checks the memory cap of a leak-checked build
+		let options = Options {
+			leak_check: target == Target::Wasm,
+			..Options::default()
+		};
+		compile_file(&path, target, &options, &directory.join(name))
 			.unwrap_or_else(|error| panic!("{name} does not compile: {error}"))
 	}
 

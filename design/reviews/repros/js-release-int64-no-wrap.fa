@@ -1,0 +1,11 @@
+-- release build (`fa build`, overflow checks off): sized integers wrap on native
+function double = (x: Int64): Int64 => x + x
+function grow = (x: UInt64): UInt64 => x * 2
+mutable c: Int64 = 1
+mutable u: UInt64 = 1
+for k in 0..64 {
+	c = double(c)
+	u = grow(u)
+}
+let values: Array<Int64> = [c]
+console.log(c, u, c == 0, values[0] == c, Int32(c) catch e => -1)

@@ -205,10 +205,50 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return None;
 		}
 		let plan = self.accumulator_plan(function)?;
-		if plan.params.len() != info.arguments.len() || self.reads_root_of(node, place) {
+		if plan.params.len() != info.arguments.len()
+			|| self.reads_root_of(node, place)
+			|| self.reads_outer_values(function)
+		{
 			return None;
 		}
 		Some(plan)
+	}
+
+	/// Whether a function's body reads a value declared outside of it that
+	/// may change, so may be (or alias) a destination: a module-level
+	/// `mutable` (`out += quoted("x")` with `quoted` reading `out`), a
+	/// reference, a reactive value; or a function of the program given to a
+	/// built-in (`items.map(describe)`), whose body may read anything.
+	/// Constants and types can't.
+	fn reads_outer_values(&self, function: NodeId) -> bool {
+		let parents = self.parents();
+		let inside = |mut at: usize| loop {
+			if at == function.index() {
+				return true;
+			}
+			match parents.get(at) {
+				Some(&parent) if parent != usize::MAX => at = parent,
+				_ => return false,
+			}
+		};
+		let mut stack = vec![function.index()];
+		while let Some(at) = stack.pop() {
+			if let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(at)) {
+				let data = self.analysis.symbols.symbol(symbol);
+				if !matches!(
+					data.kind,
+					SymbolKind::Let
+						| SymbolKind::Static
+						| SymbolKind::Type | SymbolKind::TypeParameter
+						| SymbolKind::Namespace
+				) && !inside(data.decl_node.index())
+				{
+					return true;
+				}
+			}
+			self.tree.nodes[at].for_each_child(|child| stack.push(child));
+		}
+		false
 	}
 
 	/// Appends the result of a call (see the module) to `destination`.

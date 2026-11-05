@@ -64,6 +64,7 @@ pub enum Scalar {
 	F32,
 	Percentage,
 	Str,
+	BigInt,
 	Enum(NominalId),
 	Union,
 	InlineUnion(NominalId),
@@ -96,6 +97,7 @@ impl Scalar {
 			Scalar::F32 => Repr::F32,
 			Scalar::Percentage => Repr::Percentage,
 			Scalar::Str => Repr::Str,
+			Scalar::BigInt => Repr::BigInt,
 			Scalar::Enum(nominal) => Repr::Enum(nominal),
 			Scalar::Union => Repr::Union,
 			Scalar::InlineUnion(nominal) => Repr::InlineUnion(nominal),
@@ -121,6 +123,7 @@ impl Scalar {
 			Repr::F32 => Scalar::F32,
 			Repr::Percentage => Scalar::Percentage,
 			Repr::Str => Scalar::Str,
+			Repr::BigInt => Scalar::BigInt,
 			Repr::Enum(nominal) => Scalar::Enum(nominal),
 			Repr::Union => Scalar::Union,
 			Repr::InlineUnion(nominal) => Scalar::InlineUnion(nominal),
@@ -159,6 +162,9 @@ pub enum Repr {
 	Percentage,
 	/// A string: `{ ptr, usize }`, UTF-8 bytes.
 	Str,
+	/// A `BigInt`: an `i64` word, inline when odd, else the address of a
+	/// block of limbs (`big_integers.rs`, the runtime's `FaBig`).
+	BigInt,
 	/// `none`: no value at run time.
 	None,
 	/// `T?`: a nullable pointer for boxes/recursive edges, otherwise `{ i1, T }`.
@@ -280,6 +286,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::Float(FloatBits::F32) | TypeKind::FloatLit(FloatBits::F32, _) => Repr::F32,
 			TypeKind::Percentage => Repr::Percentage,
 			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => Repr::Str,
+			TypeKind::BigInt | TypeKind::BigIntLit(_) => Repr::BigInt,
 			TypeKind::None => Repr::None,
 			TypeKind::Enum(nominal, _) | TypeKind::EnumMember(nominal, _) => Repr::Enum(nominal),
 			// an unsigned integer, one bit per flag (fields.rs)
@@ -536,6 +543,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		match repr {
 			Repr::Bool => self.context.bool_type().into(),
 			Repr::Int(int) => self.int_type(int.bits).into(),
+			Repr::BigInt => self.context.i64_type().into(),
 			Repr::F64 | Repr::Percentage => self.context.f64_type().into(),
 			Repr::F32 => self.context.f32_type().into(),
 			Repr::Str => self.string_type.into(),
@@ -661,7 +669,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			// arrays of items with the same representation (an instance's
 			// `Array(Item)` and the `Array(String)` it was made for)
-			(Repr::Array(a), Repr::Array(b)) | (Repr::Growing(a), Repr::Growing(b)) => {
+			// pools too (a generic `Pool<Item>` parameter of another file)
+			(Repr::Array(a), Repr::Array(b))
+			| (Repr::Growing(a), Repr::Growing(b))
+			| (Repr::Pool(a), Repr::Pool(b)) => {
 				return match (self.repr_of(a, 0), self.repr_of(b, 0)) {
 					(Ok(a), Ok(b)) => a == b || self.same_layout(a, b),
 					_ => false,
@@ -836,6 +847,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						self.builder.build_unsigned_int_to_float(raw, target, "")?
 					},
 				)
+			}
+			(Repr::Int(from), Repr::BigInt) => self.big_from_int(raw.into_int_value(), from)?,
+			(Repr::BigInt, Repr::F64 | Repr::F32) => {
+				let wide = self.big_to_float(value)?;
+				if to == Repr::F64 {
+					Val::new(to, wide)
+				} else {
+					Val::new(
+						to,
+						self.builder
+							.build_float_trunc(wide, self.context.f32_type(), "")?,
+					)
+				}
 			}
 			(Repr::F32, Repr::F64) => Val::new(
 				to,

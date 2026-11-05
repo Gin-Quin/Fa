@@ -61,10 +61,12 @@ impl Place {
 impl Generator<'_> {
 	// ── objects ──────────────────────────────────────────────────────────
 
-	/// The JavaScript property of a field (`#secret` → `$p_secret`).
+	/// The JavaScript property of a field (`#secret` → `$p_secret`, a
+	/// property of `Object.prototype` gets a `$` suffix: `constructor$`).
 	pub(crate) fn property(name: &str) -> String {
 		match name.strip_prefix('#') {
 			Some(private) => format!("$p_{private}"),
+			None if crate::names::is_object_property(name) => format!("{name}$"),
 			None => name.to_string(),
 		}
 	}
@@ -745,6 +747,25 @@ impl Generator<'_> {
 				g.helper("faArraySlice")
 			}
 		};
+		// a compile-time range (`static span = 1..5`): its bounds
+		if !matches!(self.view(self.strip_groups(range)), View::Range { .. })
+			&& let Some((start, end, inclusive)) = self.constant_range(range)
+		{
+			let container = self.expr(target);
+			let bound = |value: Option<ethnum::I256>| {
+				value.map_or("undefined".to_string(), |value| value.to_string())
+			};
+			let helper = helper(self);
+			return Some(js::call(
+				helper,
+				&[
+					container.text,
+					bound(start),
+					bound(end),
+					inclusive.to_string(),
+				],
+			));
+		}
 		let View::Range {
 			start,
 			end,
@@ -1220,6 +1241,15 @@ impl Generator<'_> {
 			owns,
 		) && !self.copies_links(node, ty)
 		{
+			// erased generic code: an element with relation sides read from a
+			// place is stored as a copy without links (D18), found at run time
+			if matches!(self.types.kind(ty), TypeKind::Param(_))
+				&& !self.is_move(node)
+				&& self.value_place_root(node).is_some()
+			{
+				let helper = self.helper("faUnlinked");
+				return js::call(helper, &[value.text]);
+			}
 			return value;
 		}
 		self.copy_of(value, ty)
@@ -1450,6 +1480,15 @@ impl Generator<'_> {
 							.iter()
 							.map(|field| Self::property(self.types.syms.resolve(field.name)))
 							.collect()
+					})
+					.or_else(|| {
+						// a type built by `Pick` or `Omit`: its subject's order
+						self.analysis.inline_field_orders.get(&ty).map(|names| {
+							names
+								.iter()
+								.map(|&name| Self::property(self.types.syms.resolve(name)))
+								.collect()
+						})
 					})
 					.unwrap_or_else(|| fields.iter().map(|(name, _)| name.clone()).collect());
 				let mut parts = Vec::new();

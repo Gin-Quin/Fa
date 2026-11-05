@@ -1,0 +1,71 @@
+-- Packed arrays (`src/lower/packed.rs`): an array of a boxed union that the program only builds
+-- with `push` and reads with `for` and `length` stores its items one after the other, each as its
+-- member and its data, strings included; a `for` reads each item from a box on the stack.
+type Event = Union {
+	Tick
+	Move = { id: Int32, dx: Int16, dy: Int16 }
+	Say = { id: Int32, text: String, loud: Boolean }
+	Quit = { id: Int32, code: UInt8, rate: Float }
+}
+
+function describe = (event: Event): String => when event is {
+	Event.Tick => "tick"
+	Event.Move as move => "move {move.id} {move.dx} {move.dy}"
+	Event.Say as say => "say {say.id} {say.text} {say.loud} {say.text.length}"
+	Event.Quit as quit => "quit {quit.id} {quit.code} {quit.rate}"
+}
+
+mutable log: Array<Event> = []
+log.push(Event.Move { id = 1, dx = -3, dy = 400 })
+log.push(Event.Tick)
+mutable word = "short"
+log.push(Event.Say { id = 2, text = word, loud = true })
+word = "a text longer than the inline strings and than one hundred and twenty-seven bytes, so that its length takes a whole word: abcdefghijklmnopqrstuvwxyz0123456789"
+log.push(Event.Say { id = 3, text = word, loud = false })
+log.push(Event.Say { id = 4, text = "naïve", loud = false })
+log.push(Event.Quit { id = 5, code = 255, rate = 0.5 })
+let kept = Event.Move { id = 6, dx = 7, dy = -8 }
+log.push(kept)
+console.log(log.length) -- prints: 7
+for event in log {
+	console.log(describe(event))
+}
+-- prints: move 1 -3 400
+-- prints: tick
+-- prints: say 2 short true 5
+-- prints: say 3 a text longer than the inline strings and than one hundred and twenty-seven bytes, so that its length takes a whole word: abcdefghijklmnopqrstuvwxyz0123456789 false 158
+-- prints: say 4 naïve false 5
+-- prints: quit 5 255 0.5
+-- prints: move 6 7 -8
+console.log(describe(kept)) -- prints: move 6 7 -8
+
+-- a copy of an item outlives the array's block: it owns its text
+mutable copy: Event = Event.Tick
+mutable total = 0
+for event, index in log {
+	total += index
+	if index == 3 {
+		copy = event
+	}
+}
+console.log(total, describe(copy)) -- prints: 21 say 3 a text longer than the inline strings and than one hundred and twenty-seven bytes, so that its length takes a whole word: abcdefghijklmnopqrstuvwxyz0123456789 false 158
+
+-- many items: the block grows
+mutable many: Array<Event> = []
+for step in 0..10000 {
+	if step %% 3 == 0 {
+		many.push(Event.Say { id = step, text = "word{step}", loud = step %% 2 == 0 })
+	} else {
+		many.push(Event.Move { id = step, dx = 1, dy = 2 })
+	}
+}
+mutable sum = 0
+for event in many {
+	sum += when event is {
+		Event.Say as say => say.id + say.text.length
+		Event.Move as move => move.dx + move.dy
+		Event.Tick => 0
+		Event.Quit => 0
+	}
+}
+console.log(many.length, sum) -- prints: 10000 16714631

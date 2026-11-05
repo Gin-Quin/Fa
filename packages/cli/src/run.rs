@@ -87,11 +87,15 @@ pub(crate) fn run(arguments: &[OsString]) -> i32 {
 		};
 		let mut options = Options::new(Target::Bun, String::new());
 		options.overflow_checks = native.overflow_checks;
-		let main = match streaming::build(project, Target::Bun, &options, purpose, |_| directory) {
+		let main = match streaming::build(project, Target::Bun, &options, purpose, |_| {
+			directory.clone()
+		}) {
 			streaming::Built::Written(modules) => modules[0].clone(),
 			streaming::Built::Failed(code) => return code,
 		};
-		return run_with_bun(&main, program_arguments);
+		let code = run_with_bun(&main, program_arguments);
+		let _ = fs::remove_dir_all(&directory);
+		return code;
 	}
 	let mut loaded = match Loaded::new(&path) {
 		Ok(loaded) => loaded,
@@ -123,7 +127,13 @@ pub(crate) fn run(arguments: &[OsString]) -> i32 {
 			return 1;
 		}
 	};
-	run_with_bun(&script, program_arguments)
+	let code = run_with_bun(&script, program_arguments);
+	if matches!(generated, JsBuild::Program(_))
+		&& let Some(directory) = script.parent()
+	{
+		let _ = fs::remove_dir_all(directory);
+	}
+	code
 }
 
 /// The message of `CLI005`, when Bun can't be found.
@@ -147,13 +157,49 @@ pub(crate) fn run_with_bun(script: &Path, arguments: &[OsString]) -> i32 {
 }
 
 /// The folder of the cache a program of several modules is compiled into
-/// to be run (`fa run`, `fa test`): one per source path.
+/// to be run (`fa run`, `fa test`): one per source path and process
+/// (`program.<pid>`), so that concurrent runs of a package never replace
+/// the modules another one runs. The folders of finished processes are
+/// removed first.
 pub(crate) fn run_directory(source: &Path) -> PathBuf {
 	let absolute = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
 	let key = fnv1a(absolute.to_string_lossy().as_bytes());
-	cache_directory()
-		.join(format!("{key:016x}"))
-		.join("program")
+	let parent = cache_directory().join(format!("{key:016x}"));
+	remove_stale_programs(&parent);
+	parent.join(format!("program.{}", std::process::id()))
+}
+
+/// Removes the `program.<pid>` folders (and their `.partial` folders) of
+/// processes that ended: on Linux, a process without `/proc/<pid>`;
+/// elsewhere, a folder unchanged for a day.
+fn remove_stale_programs(parent: &Path) {
+	let Ok(entries) = fs::read_dir(parent) else {
+		return;
+	};
+	let proc = Path::new("/proc/self").exists();
+	for entry in entries.flatten() {
+		let name = entry.file_name().to_string_lossy().to_string();
+		let Some(rest) = name.strip_prefix("program.") else {
+			continue;
+		};
+		let pid = rest.split('.').next().unwrap_or_default();
+		if pid.parse::<u32>().is_err() || pid == std::process::id().to_string() {
+			continue;
+		}
+		let ended = if proc {
+			!Path::new("/proc").join(pid).exists()
+		} else {
+			entry
+				.metadata()
+				.and_then(|metadata| metadata.modified())
+				.ok()
+				.and_then(|modified| modified.elapsed().ok())
+				.is_some_and(|age| age.as_secs() > 24 * 60 * 60)
+		};
+		if ended && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+			let _ = fs::remove_dir_all(entry.path());
+		}
+	}
 }
 
 /// `fa run --target=native|wasm`: compiles into the cache and runs.
@@ -251,9 +297,11 @@ pub(crate) fn write_run_script(source: &Path, code: &JsBuild) -> std::io::Result
 	let code = match code {
 		JsBuild::Single(output) => &output.code,
 		JsBuild::Program(output) => {
-			// one module per file, in a folder of its own (a new one per run, renamed into place)
-			let modules = directory.join("program");
-			let partial = directory.join(format!("program.{}.tmp", std::process::id()));
+			// one module per file, in a folder of this process (see `run_directory`)
+			let modules = run_directory(source);
+			let mut partial = modules.clone().into_os_string();
+			partial.push(".partial");
+			let partial = PathBuf::from(partial);
 			let _ = fs::remove_dir_all(&partial);
 			project::write_modules(&partial, &output.modules)?;
 			let _ = fs::remove_dir_all(&modules);

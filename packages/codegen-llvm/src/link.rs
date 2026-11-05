@@ -383,6 +383,28 @@ pub fn wasm_imports(path: &Path) -> Result<Vec<String>, Error> {
 		at += 1;
 		let size = leb(&bytes, &mut at).ok_or_else(invalid)? as usize;
 		let end = at + size;
+		if id == 7 {
+			// the exports: `fa_run` makes the program asynchronous
+			let mut cursor = at;
+			let exports = |at: &mut usize| -> Option<bool> {
+				let count = leb(&bytes, at)?;
+				for _ in 0..count {
+					let field = name(&bytes, at)?;
+					let kind = *bytes.get(*at)?;
+					*at += 1;
+					leb(&bytes, at)?;
+					if kind == 0 && field == b"fa_run" {
+						return Some(true);
+					}
+				}
+				Some(false)
+			};
+			if exports(&mut cursor).ok_or_else(invalid)? {
+				imports.push("@async".to_string());
+			}
+			at = end;
+			continue;
+		}
 		if id != 2 {
 			at = end;
 			continue;
@@ -408,34 +430,53 @@ pub fn wasm_imports(path: &Path) -> Result<Vec<String>, Error> {
 				}
 				if kind == 0 && module == b"fa" {
 					imports.push(String::from_utf8_lossy(field).into_owned());
+				} else if kind == 0
+					&& module == b"env"
+					&& !imports.iter().any(|name| name == "@env")
+				{
+					imports.push("@env".to_string());
 				}
 			}
 			Some(())
 		};
 		parse(&mut at, &mut imports).ok_or_else(invalid)?;
-		break;
+		at = end;
 	}
 	Ok(imports)
 }
 
-/// The loader for a module importing these functions from `fa`: the parts
-/// between `// @import <name>` and `// @end` stay only when `<name>` is
-/// imported.
+/// The loader for a module importing these functions from `fa` (with the
+/// markers of [`wasm_imports`], and `@memory`): the parts between `// @import
+/// <name>` and `// @end` stay only when `<name>` is imported (`!<name>`:
+/// when it isn't); the comments, the blank lines and the indentation go.
 pub fn loader_for(imports: &[String]) -> String {
 	let mut loader = String::new();
 	let mut kept = true;
+	let mut comment = false;
 	for line in LOADER.lines() {
 		let trimmed = line.trim();
 		if let Some(name) = trimmed.strip_prefix("// @import ") {
-			kept = imports.iter().any(|import| import == name);
+			kept = match name.strip_prefix('!') {
+				Some(name) => !imports.iter().any(|import| import == name),
+				None => imports.iter().any(|import| import == name),
+			};
 			continue;
 		}
 		if trimmed == "// @end" {
 			kept = true;
 			continue;
 		}
-		if kept {
-			loader.push_str(line);
+		// JSDoc blocks
+		if trimmed.starts_with("/*") {
+			comment = !trimmed.ends_with("*/");
+			continue;
+		}
+		if comment {
+			comment = !trimmed.ends_with("*/");
+			continue;
+		}
+		if kept && !trimmed.is_empty() && !trimmed.starts_with("//") {
+			loader.push_str(trimmed);
 			loader.push('\n');
 		}
 	}
@@ -444,7 +485,11 @@ pub fn loader_for(imports: &[String]) -> String {
 
 /// Writes the JavaScript loader of a `.wasm` module next to it
 /// (`program.wasm` → `program.mjs`), for the functions it imports.
-pub fn write_loader(wasm: &Path, imports: &[String]) -> Result<PathBuf, Error> {
+pub fn write_loader(wasm: &Path, memory_check: bool) -> Result<PathBuf, Error> {
+	let mut imports = wasm_imports(wasm)?;
+	if memory_check {
+		imports.push("@memory".to_string());
+	}
 	let name = wasm
 		.file_name()
 		.map(|name| name.to_string_lossy().into_owned())
@@ -454,7 +499,7 @@ pub fn write_loader(wasm: &Path, imports: &[String]) -> Result<PathBuf, Error> {
 		Path::new(stem.strip_suffix(".wasm").unwrap_or(&stem)),
 		".mjs",
 	);
-	std::fs::write(&loader, loader_for(imports).replace("__FA_WASM__", &name))?;
+	std::fs::write(&loader, loader_for(&imports).replace("__FA_WASM__", &name))?;
 	Ok(loader)
 }
 

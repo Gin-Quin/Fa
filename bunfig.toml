@@ -16,6 +16,7 @@ ignorePatterns = [
 	"/sandbox/",
 	"/packages/benchmark-typescript/fixtures/",
 	"/packages/codebase-parser/",
+	"/packages/codegen-js/tests/golden/",
 	"/packages/language-server/",
 	"/packages/library/",
 	"/packages/parser/",

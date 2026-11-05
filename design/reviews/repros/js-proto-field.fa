@@ -1,0 +1,20 @@
+type Weird = { constructor: Integer, length: Integer, toString: String, valueOf: Integer, __proto__: Integer }
+let w = Weird { constructor = 1, length = 2, toString = "t", valueOf = 3, __proto__ = 4 }
+console.log(w)
+console.log(w.constructor + w.length + w.valueOf + w.__proto__, w.toString)
+mutable m = Map<String, Integer>.from([], capacity = 2)
+m["__proto__"] = 1
+m["constructor"] = 2
+m["hasOwnProperty"] = 3
+console.log(m.size, m.get("__proto__") ?? -1, m.get("toString") ?? -1, m)
+let s = Set.from(["__proto__", "constructor", "__proto__"])
+console.log(s.size, s.includes("__proto__"), s.includes("valueOf"))
+let undefined = 5
+let NaN = 6
+let Symbol = 7
+let globalThis = 8
+let faRun = 9
+console.log(undefined + NaN + Symbol + globalThis + faRun)
+let copy = w
+let other = Weird { ...w, length = 9 }
+console.log(copy == w, other == w, other.length)

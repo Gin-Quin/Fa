@@ -363,6 +363,14 @@ pub struct Walker<'s> {
 	pub(crate) in_type_function_code: bool,
 	/// The bindings of each instance of a generic type (its functions are substituted).
 	pub(crate) instance_bindings: FxHashMap<TypeId, crate::types::Bindings>,
+	/// The fields written into values typed by an implicit generic
+	/// parameter (`copy.name = name` of `mutable copy = human` with
+	/// `Type<human>`): each path and the written type (structural.rs).
+	pub(crate) implicit_writes: FxHashMap<crate::ids::ParamId, Vec<(Vec<crate::ids::Sym>, TypeId)>>,
+	/// The calls of functions of this file, by callee text and declaration,
+	/// with their arguments: checked against `implicit_writes` once every
+	/// body is walked (`EF004`, structural.rs).
+	pub(crate) implicit_write_calls: Vec<(String, NodeId, Vec<crate::analysis::Argument>)>,
 	/// Key sets and `Fields` types (fields.rs).
 	pub(crate) key_sets: key_sets::KeySetState,
 	/// The type parameters of the generic built-in methods (`Array.map`), per owner.
@@ -396,6 +404,9 @@ pub struct Walker<'s> {
 	/// The parameters of the function being declared that `Type(parameter)`
 	/// names, and their hidden generic parameters (structural.rs).
 	pub(crate) pending_implicit: Vec<(crate::ids::Sym, crate::ids::ParamId)>,
+	/// The derived generic parameters of the function being declared
+	/// (`Analysis::derived_params`), added to its generics after it.
+	pub(crate) pending_derived: Vec<crate::ids::ParamId>,
 	/// The blocks whose hoisted declarations are declared (a block is walked
 	/// again in loop rounds: its statements are scanned once).
 	pub(crate) hoisted_blocks: rustc_hash::FxHashSet<NodeId>,
@@ -564,6 +575,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		receiver_decl: None,
 		lambda_requirements: FxHashMap::default(),
 		pending_implicit: Vec::new(),
+		pending_derived: Vec::new(),
 		hoisted_blocks: rustc_hash::FxHashSet::default(),
 		generic_params: FxHashMap::default(),
 		rigid_params: Vec::new(),
@@ -574,6 +586,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		constraint_depth: 0,
 		builtin_params: FxHashMap::default(),
 		instance_bindings: FxHashMap::default(),
+		implicit_writes: FxHashMap::default(),
+		implicit_write_calls: Vec::new(),
 		key_sets: key_sets::KeySetState::default(),
 		aliases: FxHashMap::default(),
 		foreign: foreign::ForeignState::default(),
@@ -621,6 +635,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		walker.finish_modules(root);
 		// the async summaries, settled (tasks.rs)
 		walker.finish_tasks(root);
+		// the fields written into copies of `Type<parameter>` (structural.rs)
+		walker.finish_implicit_writes();
 		// the API of a C library (c_library.rs)
 		walker.finish_c_library(root);
 	}
@@ -1065,6 +1081,17 @@ impl Walker<'_> {
 				self.record_narrowing_copy(n, actual, target);
 			}
 			Err(Reason::Range) => self.sink_integer(n, actual, target),
+			// `Array<Int64>` for `Array<Integer>`: the same values, stored
+			// differently (types brief D2)
+			Err(Reason::Storage) => {
+				let message = format!(
+					"a `{}` is not a `{}`: the same values are stored differently inside them (a 64-bit integer is a `bigint` on JavaScript, an `Integer` a number), convert the items, ex: `values.map((value) => Integer(value))`",
+					self.display(actual),
+					self.display(target)
+				);
+				let diagnostic = self.diagnostic(&codes::types::CV005, n, message);
+				self.report_flow(diagnostic);
+			}
 			Err(_) if self.string_sink_mismatch(n, actual, target) => {}
 			Err(_) if self.inexact_collection(n, actual, target) => {}
 			Err(_) if self.nominal_mismatch(n, actual, target) => {}

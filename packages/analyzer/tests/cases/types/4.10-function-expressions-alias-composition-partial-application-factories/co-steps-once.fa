@@ -1,0 +1,15 @@
+-- brief: `then` evaluates its steps once, when the composition is built (lead, 2026-11-05)
+function double = (x: Integer) => x * 2
+function labeller = (prefix: String) => (x: Integer) => "{prefix}{x}"
+function inc = (x: Integer) => x + 1
+function big = (x: Integer) => x + 100
+mutable step = inc
+mutable prefix = "a:"
+let composed = double then step then labeller(prefix)
+step = big
+prefix = "b:"
+console.log(composed(1))
+let other = double then double
+console.log(other(3))
+-- prints: a:3
+-- prints: 12

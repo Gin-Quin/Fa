@@ -1,0 +1,19 @@
+-- Fields never written after construction (audit of the backends review):
+-- a field written through a type parameter while a method reads it
+type Gauge = {
+	text: String
+	level: Integer
+
+	function read = (self): Integer mutates self => {
+		let before = self.level
+		raise(self)
+		before * 10 + self.level
+	}
+}
+
+function raise = <Item: { level: Integer }>(item: Item) mutates item => {
+	item.level += 1
+}
+
+mutable gauge = Gauge { text = "g", level = 1 }
+console.log(gauge.read()) -- prints: 12

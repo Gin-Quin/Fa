@@ -151,3 +151,18 @@ Document what foreign-code.md and relations.md use: a type can declare types in 
 ## `documentation/types/fields.md`, `:::implementation` section (native)
 
 Add: "**Fields set once.** When no code of the program writes a field after the literal that builds its object (no assignment, append or changing reference of the field, no whole value of the type replaced but by a declaration), a method reads it once at its entry, a string with its bytes and length, and the small methods it calls on `self` (like `function current = (self): Byte => self.text.bytes().get(self.position) ?? 0`) are expanded into its body to use that read: a parser scanning `self.text` tests whether the text is inline once per call, not once per byte."
+
+## `documentation/architecture/testing.md`, "How tests run"
+
+Add a bullet: "A test file that is still running after `FA_TEST_TIMEOUT` seconds (300 by default) is stopped, and reported as failed with that reason: a test that never ends can't block `fa test`." (Note: the per-test `test.timeout` of the configuration is parsed but not enforced by the Bun runner yet; this per-file limit is the backstop.)
+
+## `documentation/architecture/dependencies.md`, sources and lockfile (decision "Dependency security")
+
+Add to the list of sources: "`file://` URLs, paths (`../shared`) and Git repositories on the disk (`git+file://…`, `git+/srv/x.git`) are allowed only in the root package and the packages of the workspace (and the path dependencies they name): a dependency fetched from Git or a remote source that declares or `@import`s one is `DEP008`. An `http://` source gets a `DEP004` warning: its first content is not authenticated." Add to the lockfile section: "A `hash` is `sha256:` followed by 64 lowercase hexadecimal digits and a `commit` 40 or 64 of them; anything else makes the lockfile invalid. The paths of a remote folder's `manifest.fa` (and of a Git tree) are relative paths with `/` separators, without `.`, `..`, empty segments, backslashes, colons or control characters (`DEP007` otherwise)." In "Unversioned URLs" (`DEP004`): only the path of a URL names a version (`/v3/`, `@2.1.0`, `-1.2`), never its host.
+
+## `documentation/architecture/packages.md` (or the page of `fa check`)
+
+Add: "With diagnostics in several files, the text report ends with one total line (`3 errors, 1 warning in 2 files`) instead of a summary per file. An error that stops the load for another target of the package (`DEP009`) is reported with `note: for the target \`web\``." And: "A standalone file reads only the files and folders next to it whose names its files mention, transitively."
+## `documentation/collections/arrays.md`, `:::implementation` section (native)
+
+Add: "**Packed arrays.** An array of a named union that the program only builds with `push` from an empty literal, reads with `for` and measures with `length` stores its items one after the other, each as its member and its data without padding (a string as its length and bytes), so that an item takes the bytes its member needs, with no box per item. **Large blocks.** Natively on Linux, the items of an array (and the bytes of a string) of 1 MiB or more have a mapping of their own, which grows by moving its pages rather than copying its bytes. **Arrays wrapped into values.** A small array built in a local, then stored into a field of a literal (`Sexp.List { items }`), moves its items next to its header, of their exact size." (See "Packed arrays" and the two entries after it in `design/decisions.md`.)

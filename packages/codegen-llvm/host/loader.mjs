@@ -5,8 +5,10 @@
 // It instantiates `program.wasm`, next to it, with the few functions the
 // module imports from `fa`, and runs `_start`. The compiler keeps the parts
 // between `// @import <name>` and `// @end` only when the module imports
-// `<name>`. The program's exit code is
-// the process's.
+// `<name>` (`@async`: it exports `fa_run`; `@env`: it imports C functions
+// from `env`; `@memory`: a leak-checked build, for the tests' memory cap;
+// `!<name>`: when it doesn't), then strips the comments and indentation
+// (`link::loader_for`). The program's exit code is the process's.
 //
 // An asynchronous program (design/async.md §4, step W1) exports `fa_run`:
 // `_start` returns once the top level waits, and the loader runs a batch of
@@ -178,8 +180,9 @@ const imports = {
 	},
 };
 
-// the event loop of an asynchronous program
 let timer;
+// @import @async
+// the event loop of an asynchronous program
 let running = false;
 
 /** Runs a callback in a macrotask. */
@@ -217,6 +220,7 @@ function step() {
 		checkMemory();
 	}
 }
+// @end
 
 /** The end of the program by an exception of `_start` or `fa_run`. */
 function ended(error) {
@@ -235,6 +239,7 @@ function ended(error) {
 }
 
 const module = await WebAssembly.compile(readFileSync(WASM));
+// @import @env
 // the C functions of foreign code the module imports from `env` (those no C
 // linked with it defines): exported by `env.mjs`, next to this loader, which
 // may also export `attach(exports)` to reach the module's memory
@@ -257,9 +262,12 @@ if (hosted.length > 0) {
 		imports.env[name] = host[name];
 	}
 }
+// @end
 const instance = await WebAssembly.instantiate(module, imports);
 memory = instance.exports.memory;
+// @import @env
 host?.attach?.(instance.exports);
+// @end
 let started = false;
 try {
 	instance.exports._start();
@@ -267,12 +275,21 @@ try {
 } catch (error) {
 	ended(error);
 }
-if (started && instance.exports.fa_run !== undefined) {
+// @import @async
+if (started) {
 	later(step);
-} else if (started) {
+}
+// @end
+// @import !@async
+if (started) {
 	checkMemory();
 }
+// @end
 
+// @import !@memory
+function checkMemory() {}
+// @end
+// @import @memory
 /** The tests' memory cap: the size the memory grew to, in bytes. */
 function checkMemory() {
 	const limit = Number(process.env.FA_MEMORY_LIMIT ?? Infinity);
@@ -281,3 +298,4 @@ function checkMemory() {
 		process.exitCode = 103;
 	}
 }
+// @end

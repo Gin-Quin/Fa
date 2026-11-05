@@ -14,6 +14,7 @@ import {
 	faFormatObject,
 	faFormatOptional,
 	faFormatRange,
+	faFormatRecord,
 	faFormatSet,
 	faFormatTagged,
 	faFormatTuple,
@@ -63,8 +64,8 @@ describe("nested strings are quoted with Fa escapes", () => {
 
 describe("typed formatters", () => {
 	test("optionals", () => {
-		expect(faFormatOptional(undefined)).toBe("none");
-		expect(faFormatOptional("a")).toBe('"a"');
+		expect(faFormatOptional(undefined, faQuote)).toBe("none");
+		expect(faFormatOptional("a", faQuote)).toBe('"a"');
 		expect(faFormatOptional(Math.fround(0.1), faFloat32ToString)).toBe("0.1");
 		expect(faFormatOptional(undefined, faFloat32ToString)).toBe("none");
 	});
@@ -74,13 +75,13 @@ describe("typed formatters", () => {
 			"[0.1, 1.5]",
 		);
 		expect(faFormatArray([0.1, 0.125], faPercentageToString)).toBe("[10%, 12.5%]");
-		expect(faFormatArray(new Set([1, 2]))).toBe("[1, 2]");
+		expect(faFormatArray(new Set([1, 2]), String)).toBe("[1, 2]");
 	});
 
 	test("tuples", () => {
-		expect(faFormatTuple([1, "one"])).toBe('(1, "one")');
-		expect(faFormatTuple([Math.fround(0.1), 2], [faFloat32ToString])).toBe("(0.1, 2)");
-		expect(faFormatTuple([])).toBe("()");
+		expect(faFormatTuple([1, "one"], [String, faQuote])).toBe('(1, "one")');
+		expect(faFormatTuple([Math.fround(0.1), 2], [faFloat32ToString, String])).toBe("(0.1, 2)");
+		expect(faFormatTuple([], [])).toBe("()");
 	});
 
 	test("objects in declaration order, relation fields left out", () => {
@@ -91,7 +92,9 @@ describe("typed formatters", () => {
 				["id", faFormatNested],
 			]),
 		).toBe('{ name = "Ana", id = 1 }');
-		expect(faFormatObject({ $t: 3, radius: 1 })).toBe("{ radius = 1 }");
+		expect(faFormatRecord({ $t: 3, radius: 1 })).toBe("{ radius = 1 }");
+		expect(faFormatRecord({ constructor$: 1 })).toBe("{ constructor = 1 }");
+		expect(faFormatObject({ valueOf$: 2 }, [["valueOf$", String]])).toBe("{ valueOf = 2 }");
 		expect(faFormatObject({}, [])).toBe("{}");
 		expect(faFormatObject({ ratio: 0.5 }, [["ratio", faPercentageToString]])).toBe(
 			"{ ratio = 50% }",
@@ -100,7 +103,7 @@ describe("typed formatters", () => {
 
 	test("union members", () => {
 		expect(faFormatMember("Shape.Point")).toBe("Shape.Point");
-		expect(faFormatMember("Shape.Circle", faFormatObject({ radius: 1 }), true)).toBe(
+		expect(faFormatMember("Shape.Circle", faFormatRecord({ radius: 1 }), true)).toBe(
 			"Shape.Circle { radius = 1 }",
 		);
 		expect(faFormatMember("UserId.User", "12")).toBe("UserId.User(12)");
@@ -124,13 +127,15 @@ describe("typed formatters", () => {
 					["a", 1],
 					["b", 2],
 				]),
+				faQuote,
+				String,
 			),
 		).toBe('[("a", 1), ("b", 2)]');
-		expect(faFormatMap(new Map())).toBe("[]");
+		expect(faFormatMap(new Map(), String, String)).toBe("[]");
 		expect(faFormat(new Map([[1, "Ana"]]))).toBe('[(1, "Ana")]');
 		expect(faFormat(new FaHashMap([[{ x: 1 }, [2]]]))).toBe("[({ x = 1 }, [2])]");
 		expect(faFormatMap(new Map([[1, 0.5]]), String, faPercentageToString)).toBe("[(1, 50%)]");
-		expect(faFormatSet(new Set(["a"]))).toBe('["a"]');
+		expect(faFormatSet(new Set(["a"]), faQuote)).toBe('["a"]');
 		expect(faFormat(new FaSet([{ a: 1 }]))).toBe("[{ a = 1 }]");
 		expect(faFormat(new Set())).toBe("[]");
 	});

@@ -33,7 +33,9 @@ export function faDeepEquals(a, b, sameValueZero) {
 	while (pending.length > 0) {
 		const y = /** @type {any} */ (pending.pop());
 		const x = /** @type {any} */ (pending.pop());
-		if (x === y) {
+		// a composite equals itself only when it holds no NaN: no identity
+		// shortcut, except for SameValueZero (where NaN finds NaN)
+		if (x === y && (sameValueZero || typeof x !== "object" || x === null)) {
 			continue;
 		}
 		const typeX = typeof x;
@@ -141,13 +143,14 @@ export function faDeepEquals(a, b, sameValueZero) {
 
 // @fa-helper faEquals deps: faDeepEquals
 /**
- * Fa `==` on any two values of the same type: deep, IEEE on floats.
+ * Fa `==` on any two values of the same type: deep, IEEE on floats (a
+ * composite holding NaN doesn't equal itself, so identity isn't enough).
  * @param {unknown} a
  * @param {unknown} b
  * @returns {boolean}
  */
 export function faEquals(a, b) {
-	return a === b || faDeepEquals(a, b, false);
+	return (a === b && (typeof a !== "object" || a === null)) || faDeepEquals(a, b, false);
 }
 
 // @fa-helper faKeyEquals deps: faDeepEquals

@@ -250,6 +250,9 @@ pub(crate) struct Generator<'s> {
 	pub(crate) guard_frames: Vec<Vec<String>>,
 	/// Whether the file calls `Mutex#tryLock` (computed at the first need).
 	has_try_lock: Option<bool>,
+	/// The index proofs and never-negative places of the analysis
+	/// (`fa_analyzer::proofs`), computed at the first index.
+	index_facts: std::cell::OnceCell<fa_analyzer::proofs::IndexFacts>,
 	/// Async: the mode of the program, the instances (`tasks.rs`).
 	pub(crate) tasks: tasks::TasksCx,
 }
@@ -337,6 +340,7 @@ pub(crate) fn generate_module(
 		parents: None,
 		guard_frames: Vec::new(),
 		has_try_lock: None,
+		index_facts: std::cell::OnceCell::new(),
 		tasks: tasks::TasksCx {
 			// a module of a program built in streaming: its own summaries
 			asynchronous: options.asynchronous.unwrap_or_else(|| {
@@ -508,52 +512,7 @@ impl<'s> Generator<'s> {
 		}
 
 		// the top-level statements, in `main`
-		let main_name = if others.is_empty() {
-			None
-		} else {
-			Some(self.scopes.declare("main"))
-		};
-		let mut main = Writer::new();
-		let asynchronous = self.tasks.asynchronous;
-		if let Some(main_name) = &main_name {
-			self.scopes.push();
-			self.fcx = FnCx {
-				mode: if asynchronous {
-					tasks::Mode::Async { coop: true }
-				} else {
-					tasks::Mode::Blocking
-				},
-				..FnCx::default()
-			};
-			self.out = Writer::at(1);
-			self.statements(&others, Dest::Discard);
-			let inner = std::mem::take(&mut self.out);
-			let temps = std::mem::take(&mut self.fcx.inline_temps);
-			self.scopes.pop();
-			if asynchronous {
-				main.line(format!("async function {main_name}($task) {{"));
-			} else {
-				main.line(format!("function {main_name}() {{"));
-			}
-			if !temps.is_empty() {
-				main.line(format!("\tlet {};", temps.join(", ")));
-			}
-			main.append(inner);
-			main.line("}");
-			main.blank();
-			if self.program.is_some() {
-				// run by the entry module of the program (modules.rs)
-				inits.push((main_name.clone(), "$main".to_string()));
-				self.has_main = true;
-			} else {
-				let run = if asynchronous {
-					self.helper("faRunAsync")
-				} else {
-					self.helper("faRun")
-				};
-				main.line(format!("{run}({main_name});"));
-			}
-		}
+		let main = self.main_function(&others, &mut inits);
 		// `fa test`: the tests of a test file, as functions (modules.rs)
 		let tests = self.test_functions(&all);
 		body.append(tests);
@@ -978,6 +937,87 @@ impl<'s> Generator<'s> {
 		);
 		self.helpers.insert(name);
 		name
+	}
+
+	/// The top-level statements of a file, in a `main` function run by
+	/// `faRun` (`faRunAsync`), or called plainly when it can't fail; in a
+	/// program, run by the entry module (`$main` of `inits`).
+	fn main_function(&mut self, others: &[NodeId], inits: &mut Vec<(String, String)>) -> Writer {
+		let main_name = if others.is_empty() {
+			None
+		} else {
+			Some(self.scopes.declare("main"))
+		};
+		let mut main = Writer::new();
+		let asynchronous = self.tasks.asynchronous;
+		if let Some(main_name) = &main_name {
+			self.scopes.push();
+			self.fcx = FnCx {
+				mode: if asynchronous {
+					tasks::Mode::Async { coop: true }
+				} else {
+					tasks::Mode::Blocking
+				},
+				..FnCx::default()
+			};
+			self.out = Writer::at(1);
+			self.statements(&others, Dest::Discard);
+			let inner = std::mem::take(&mut self.out);
+			let temps = std::mem::take(&mut self.fcx.inline_temps);
+			self.scopes.pop();
+			if asynchronous {
+				main.line(format!("async function {main_name}($task) {{"));
+			} else {
+				main.line(format!("function {main_name}() {{"));
+			}
+			if !temps.is_empty() {
+				main.line(format!("\tlet {};", temps.join(", ")));
+			}
+			main.append(inner);
+			main.line("}");
+			main.blank();
+			if self.program.is_some() {
+				// run by the entry module of the program (modules.rs)
+				inits.push((main_name.clone(), "$main".to_string()));
+				self.has_main = true;
+			} else if !asynchronous && self.cannot_fail() {
+				// nothing to report and no exit code: a plain call
+				main.line(format!("{main_name}();"));
+			} else {
+				let run = if asynchronous {
+					self.helper("faRunAsync")
+				} else {
+					self.helper("faRun")
+				};
+				main.line(format!("{run}({main_name});"));
+			}
+		}
+		main
+	}
+
+	/// Whether the program generated so far can't stop, throw, overflow the
+	/// stack nor give an exit code: no function (no recursion), no `throw`,
+	/// `try`, `return` nor `assert`, and only printing helpers (which can't
+	/// fail). Its `main` needs no `faRun` (`console.log("Hello")`).
+	fn cannot_fail(&self) -> bool {
+		let printing = |name: &str| {
+			name.starts_with("faFormat")
+				|| matches!(
+					name,
+					"faQuote" | "faSides" | "faFloat32ToString" | "faPercentageToString"
+				)
+		};
+		self.helpers.iter().all(|name| printing(name))
+			&& (0..self.tree.nodes.len()).all(|index| {
+				!matches!(
+					self.view(NodeId::new(index)),
+					View::Function { .. }
+						| View::ExportFunction { .. }
+						| View::Lambda { .. }
+						| View::Return(_) | View::Try(_)
+						| View::Throw(_) | View::Assert(_)
+				)
+			})
 	}
 
 	/// Reports an error at a node.

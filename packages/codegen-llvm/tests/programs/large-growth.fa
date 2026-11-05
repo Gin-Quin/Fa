@@ -1,0 +1,37 @@
+-- Large blocks (a mebibyte and more) have a mapping of their own natively, which grows by moving
+-- its pages instead of copying its bytes: arrays, strings and packed arrays keep their items.
+mutable numbers: Array<Integer> = []
+for index in 0..400000 {
+	numbers.push(index * 3)
+}
+mutable sum = 0
+for number in numbers {
+	sum += number
+}
+console.log(numbers.length, try numbers[0], try numbers[399999], sum) -- prints: 400000 0 1199997 239999400000
+
+mutable text = ""
+for index in 0..300000 {
+	text += "{index %% 10}"
+}
+-- an append of the text to itself, copied before the block grows
+text += text
+console.log(text.length, try text.bytes()[299999], try text.bytes()[599999]) -- prints: 600000 57 57
+
+type Entry = Union {
+	Mark
+	Named = { name: String }
+}
+mutable entries: Array<Entry> = []
+for index in 0..200000 {
+	entries.push(Entry.Named { name = "entry number {index}" })
+	entries.push(Entry.Mark)
+}
+mutable letters = 0
+for entry in entries {
+	letters += when entry is {
+		Entry.Mark => 1
+		Entry.Named as named => named.name.length
+	}
+}
+console.log(entries.length, letters) -- prints: 400000 3888890

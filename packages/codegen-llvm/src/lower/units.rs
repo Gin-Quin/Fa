@@ -434,7 +434,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	pub(crate) fn remote(&self, key: DeclKey) -> Option<(DeclKey, bool)> {
 		match self.remote_decl(key)?.kind {
 			SymbolKind::Function => Some((key, true)),
-			SymbolKind::Let | SymbolKind::Mutable => Some((key, false)),
+			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive => Some((key, false)),
 			_ => None,
 		}
 	}
@@ -957,6 +957,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 		// the instances and the unit's functions what is lowered calls
 		self.lower_used_functions(&files)?;
+		self.define_equal_box()?;
 		self.define_format_union()?;
 		self.define_boxes()?;
 		self.export_box_functions();
@@ -1055,6 +1056,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				location,
 			});
 		}
+		self.define_equal_box()?;
 		self.define_format_union()?;
 		self.define_boxes()?;
 		self.export_box_functions();
@@ -1125,7 +1127,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.map(|keyed| keyed.node)
 			.filter(|node| {
 				interface.declared.get(node).is_some_and(|declared| {
-					matches!(declared.kind, SymbolKind::Let | SymbolKind::Mutable)
+					matches!(
+						declared.kind,
+						SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
+					)
 				})
 			})
 			.collect();
@@ -1365,7 +1370,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// own uses call the entry object's.
 	fn export_box_functions(&mut self) {
 		let unit = self.split.as_ref().expect("a unit").name.clone();
-		for name in ["fa.drop_box", "fa.copy_box", "fa_format_union"] {
+		for name in [
+			"fa.drop_box",
+			"fa.copy_box",
+			"fa_format_union",
+			"fa.equal_box",
+		] {
 			let Some(function) = self.module.get_function(name) else {
 				continue;
 			};

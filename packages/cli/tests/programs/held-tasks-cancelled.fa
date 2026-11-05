@@ -1,0 +1,32 @@
+-- Tasks held in an array or an object are cancelled when the value is
+-- dropped at the end of its scope (backends review 2026-11-05, finding 13)
+use { sleep } = std.time
+
+async function work = (n: Integer): String => {
+	await sleep(n)
+	console.log("finished {n}")
+	"result {n} with padding to be on the heap for sure"
+}
+
+-- tasks left in an array when it is dropped are cancelled
+async function many = () => {
+	mutable tasks: Array<Task<String>> = []
+	for index in 0..4 {
+		tasks.push(start work(10 + index))
+	}
+	await sleep(1)
+	console.log(tasks.length) -- prints: 4
+}
+await many()
+await sleep(40)
+
+-- a task held in an object field, the object dropped
+type Holder = { task: Task<String>, name: String }
+async function scope = () => {
+	let holder = Holder { task = start work(30), name = "holder name long enough for heap" }
+	await sleep(1)
+	console.log(holder.name.length) -- prints: 32
+}
+await scope()
+await sleep(40)
+console.log("end") -- prints: end

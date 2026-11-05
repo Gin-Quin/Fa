@@ -1,0 +1,68 @@
+-- `BigInt` natively: multi-limb arithmetic, floor division and modulo,
+-- powers, conversions and comparisons across the 63-bit boundary (the
+-- expected output is JavaScript's `bigint`).
+let a = 123_456_789_012_345_678_901_234_567_890n
+let b = 98_765_432_109_876_543_210_987_654_321n
+console.log(a * b)
+console.log(a + b, a - b, b - a)
+console.log((try a // b), (try a %% b))
+console.log((try -a // b), (try -a %% b), (try a // -b), (try a %% -b), (try -a // -b), (try -a %% -b))
+let square = a * a
+console.log((try square // b), (try square %% b), square // 7n, square %% -7n)
+let big = 2n ** 200n
+console.log(big, (try big // (2n ** 100n + 1n)), big %% 1_000_000_007n)
+console.log(3n ** 100n, (-3n) ** 51n, 0n ** 0n, (-1n) ** 1001n)
+let edge = 4_611_686_018_427_387_903n
+console.log(edge + 1n, -edge - 1n, -edge - 2n, edge * 2n)
+console.log(edge + 1n > edge, -edge - 2n < -edge - 1n, edge + 1n == 4_611_686_018_427_387_904n)
+console.log(9_223_372_036_854_775_807n + 1n, -9_223_372_036_854_775_808n - 1n)
+let wide: Int64 = 9_223_372_036_854_775_807
+console.log(BigInt(wide) * BigInt(wide), BigInt(wide) + 1n)
+console.log((try Int64(edge)), Float(big), Float(a), Float(-b))
+console.log("interpolated {a * b}")
+let values = [a, -b, 0n, edge + 1n]
+console.log(values)
+let product = a * b * a * b
+console.log((try product // (a * b)), (try product %% (b * b + 1n)), (try product // (b * b + 1n)))
+console.log(1n - 1n, 0n * a, (-a).abs(), a.abs() == a)
+console.log((10n ** 30n).toString(), 10n ** 30n - 1n)
+mutable total = 0n
+for index in 1..=30 {
+	total = total * 3n + BigInt(index)
+}
+console.log(total)
+mutable factorial = 1n
+for index in 1..=40 {
+	factorial *= BigInt(index)
+}
+console.log(factorial, (try factorial // (2n ** 64n)), (try factorial %% (2n ** 64n)))
+-- prints: 12193263113702179522618503273362292333223746380111126352690
+-- prints: 222222221122222222112222222211 24691356902469135690246913569 -24691356902469135690246913569
+-- prints: 1 24691356902469135690246913569
+-- prints: -2 74074075207407407520740740752 -2 -74074075207407407520740740752 1 -24691356902469135690246913569
+-- prints: 154320984859182111300371335969 69348005106934800510693480051 2177368393319833821499335937505171255357415028553574150300 0
+-- prints: 1606938044258990275541962092341162602522202993782792835301376 1267650600228229401496703205375 499445072
+-- prints: 515377520732011331036461129765621272702107522001 -2153693963075557766310747 1 -1
+-- prints: 4611686018427387904 -4611686018427387904 -4611686018427387905 9223372036854775806
+-- prints: true true true
+-- prints: 9223372036854775808 -9223372036854775809
+-- prints: 85070591730234615847396907784232501249 9223372036854775808
+-- prints: 4611686018427387903 1.6069380442589903e+60 1.2345678901234568e+29 -9.876543210987655e+28
+-- prints: interpolated 12193263113702179522618503273362292333223746380111126352690
+-- prints: [123456789012345678901234567890, -98765432109876543210987654321, 0, 4611686018427387904]
+-- prints: 12193263113702179522618503273362292333223746380111126352690 4267642406462428301249809236176802279411644563880560889984 15241578753238836750495351562536198787501905199875019052098
+-- prints: 0 0 123456789012345678901234567890 true
+-- prints: 1000000000000000000000000000000 999999999999999999999999999999
+-- prints: 154418349070971
+-- prints: 815915283247897734345611269596115894272000000000 44230856133074821290134593124 18376134811363311616
+let huge = 2n ** 70n
+let items = [huge, -huge, 3n]
+mutable sum = 0n
+for value in items {
+	sum += value
+}
+console.log(sum, items[0] == huge, items[1] < items[2])
+console.log(try Int64(huge - 1n))
+-- prints: 3 true true
+-- exit: 1
+-- stderr: ArithmeticError { message = "1180591620717411303423 doesn't fit in Int64" }

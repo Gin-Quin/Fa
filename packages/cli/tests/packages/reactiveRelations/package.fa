@@ -1,0 +1,9 @@
+-- Reactivity across files: the functions of the library declare no
+-- reactivity, but they write relation sides and a `reactive` field of the
+-- application's reactive town: the application's `watch` blocks run again,
+-- only those that read what changed.
+export = {
+	name = "reactiveRelations"
+	version = "0.1.0"
+	targets = ["bun", "native"]
+}

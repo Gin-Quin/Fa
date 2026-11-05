@@ -123,6 +123,33 @@ impl<'s> Generator<'s> {
 		format!("(value) => {helper}(value, {names})")
 	}
 
+	/// The table of the dotted paths of the keys of each application of a
+	/// key-set parameter, by its hidden index (`pick(entity, keys)`).
+	pub(crate) fn key_set_path_table(&mut self, param: ParamId) -> String {
+		let instances = self
+			.analysis
+			.key_set_instances
+			.get(&param)
+			.cloned()
+			.unwrap_or_default();
+		let mut tables = Vec::with_capacity(instances.len());
+		for (_, key_set) in instances {
+			let mut paths = Vec::new();
+			if let TypeKind::Tuple(list) = self.types.kind(key_set)
+				&& let [fields, bits] = *self.types.list_items(list)
+				&& let Some(bits) = self.types.as_int(bits).and_then(|int| int.literal())
+			{
+				for (index, path) in self.types.fields_leaves(fields).iter().enumerate() {
+					if (bits >> index as u32) & ethnum::I256::ONE == ethnum::I256::ONE {
+						paths.push(js::string_literal(path));
+					}
+				}
+			}
+			tables.push(format!("Object.freeze([{}])", paths.join(", ")));
+		}
+		self.constant("keys", format!("Object.freeze([{}])", tables.join(", ")))
+	}
+
 	/// The index of the application of a key-set parameter, its hidden
 	/// value: `binding` is the parameter's binding, `subject` the binding of
 	/// its subject. `None` for another parameter.

@@ -109,6 +109,9 @@ pub(crate) struct Tasks<'ctx> {
 	immediate: Option<NodeId>,
 	/// The literal of a worker whose state is being built (`worker_literal`).
 	worker_state: Option<NodeId>,
+	/// The awaited calls lowered as plain calls (the callee can't
+	/// suspend): not blocking calls (`blocking_starter`).
+	awaited_plain: rustc_hash::FxHashSet<NodeId>,
 }
 
 /// An async instance of a function.
@@ -771,8 +774,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(())
 	}
 
+	/// Whether a call of `function` is a blocking call of an `async`
+	/// function that starts tasks without suspending (not awaited nor
+	/// started): the caller raises the blocking depth around it, so that
+	/// its `start`s run at once.
+	pub(crate) fn blocking_starter(&self, node: NodeId, function: &Function<'ctx>) -> bool {
+		self.tasks.asynchronous
+			&& self.is_async_function(function)
+			&& !self.tasks.awaited_plain.contains(&node)
+			&& !matches!(self.frame().task, FrameTask::Blocking { .. })
+			&& self
+				.analysis
+				.async_summaries
+				.get(&function.declaration)
+				.is_some_and(|summary| summary.starts && !summary.suspends)
+	}
+
 	/// Adds to the thread's blocking depth.
-	fn add_blocking_depth(&self, delta: i64) -> Result<(), Error> {
+	pub(crate) fn add_blocking_depth(&self, delta: i64) -> Result<(), Error> {
 		let i32 = self.context.i32_type();
 		let depth = self.runtime_global("fa_blocking_depth")?;
 		let value = self.builder.build_load(i32, depth, "")?.into_int_value();
@@ -827,11 +846,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !self.tasks.asynchronous || !self.is_async_function(function) {
 			return Ok(());
 		}
-		let counted = self
-			.analysis
-			.async_summaries
-			.get(&function.declaration)
-			.is_some_and(|summary| summary.starts);
+		let summary = self.analysis.async_summaries.get(&function.declaration);
+		// one that starts tasks without suspending is called plain when
+		// awaited (its tasks start later, `concurrency.md`), and its blocking
+		// callers raise the blocking depth (`blocking_starter`)
+		if summary.is_some_and(|summary| summary.starts && !summary.suspends) {
+			return Ok(());
+		}
+		let counted = summary.is_some_and(|summary| summary.starts);
 		if counted {
 			self.add_blocking_depth(1)?;
 		}
@@ -1687,7 +1709,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if waits && info.suspends && matches!(self.view(operand), View::Call { .. }) {
 					self.tasks.call_modes.insert(operand, CallMode::Await);
 				}
+				// awaited, a call that can't suspend is a plain call, not a
+				// blocking one
+				self.tasks.awaited_plain.insert(operand);
 				let value = self.expr(operand);
+				self.tasks.awaited_plain.remove(&operand);
 				self.tasks.call_modes.remove(&operand);
 				value
 			}
@@ -2850,8 +2876,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let value_of = |this: &mut Self,
 		                value: Option<BasicValueEnum<'ctx>>|
 		 -> Result<Option<BasicValueEnum<'ctx>>, Error> {
+			// moved out of the task (`take_raw`): owned, no copy
 			let value = match value {
-				Some(value) => Val::new(ret, value),
+				Some(value) => this.fresh(Val::new(ret, value)),
 				None => return Ok(None),
 			};
 			let converted = if item_repr == Repr::Union && value.repr != Repr::Union {

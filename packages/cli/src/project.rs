@@ -50,6 +50,18 @@ pub(crate) struct Loaded {
 }
 
 /// The package folder containing `start` (itself, or a parent), if any.
+/// The module of a file from its path relative to the package
+/// (`library/math.fa` → `library/math`): `/` separators, and only the last
+/// `.fa` removed (`x.fa.fa` → `x.fa`).
+pub(crate) fn module_of(relative: &Path) -> String {
+	without_fa(&relative.to_string_lossy().replace('\\', "/")).to_string()
+}
+
+/// A file name or path without its `.fa` extension (removed once).
+pub(crate) fn without_fa(name: &str) -> &str {
+	name.strip_suffix(".fa").unwrap_or(name)
+}
+
 fn find_package(start: &Path) -> Option<PathBuf> {
 	fa_codebase_parser::discover(start).package
 }
@@ -70,11 +82,7 @@ pub(crate) fn locate(path: Option<&Path>) -> Result<Project, String> {
 			&& let Ok(relative) = absolute.strip_prefix(&package)
 			&& relative.starts_with("scripts")
 		{
-			let module = relative
-				.to_string_lossy()
-				.replace('\\', "/")
-				.trim_end_matches(".fa")
-				.to_string();
+			let module = module_of(relative);
 			let shown = shown_base(&path, relative);
 			return Ok(Project {
 				package: true,
@@ -88,7 +96,7 @@ pub(crate) fn locate(path: Option<&Path>) -> Result<Project, String> {
 			.map_or_else(|| PathBuf::from("."), Path::to_path_buf);
 		let stem = absolute
 			.file_name()
-			.map(|name| name.to_string_lossy().trim_end_matches(".fa").to_string())
+			.map(|name| without_fa(&name.to_string_lossy()).to_string())
 			.unwrap_or_default();
 		return Ok(Project {
 			package: false,
@@ -200,13 +208,14 @@ fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 			None => return Err(format!("fa: can't read the script `{script}.fa`")),
 		},
 		None => {
-			let entry = configuration
-				.as_ref()
-				.map_or("application/main.fa", |configuration| {
-					configuration.entry.as_str()
-				})
-				.trim_end_matches(".fa")
-				.to_string();
+			let entry = without_fa(
+				configuration
+					.as_ref()
+					.map_or("application/main.fa", |configuration| {
+						configuration.entry.as_str()
+					}),
+			)
+			.to_string();
 			// every file is read and parsed first (in parallel), in the
 			// order of `analyze_package`, so that the analysis phase is
 			// measured alone
@@ -288,13 +297,14 @@ fn prepare_package_with(
 		}
 		configuration
 	});
-	let entry = configuration
-		.as_ref()
-		.map_or("application/main.fa", |configuration| {
-			configuration.entry.as_str()
-		})
-		.trim_end_matches(".fa")
-		.to_string();
+	let entry = without_fa(
+		configuration
+			.as_ref()
+			.map_or("application/main.fa", |configuration| {
+				configuration.entry.as_str()
+			}),
+	)
+	.to_string();
 	Ok(Prepared {
 		session,
 		project,

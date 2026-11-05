@@ -2172,9 +2172,11 @@ pub(crate) fn mount(
 			LibraryKind::Package | LibraryKind::Git => {
 				ModuleEntry::Folder(format!("{}/library", found.prefix))
 			}
-			LibraryKind::File { name } => {
-				ModuleEntry::File(format!("{}/{}", found.prefix, name.trim_end_matches(".fa")))
-			}
+			LibraryKind::File { name } => ModuleEntry::File(format!(
+				"{}/{}",
+				found.prefix,
+				crate::project::without_fa(name)
+			)),
 			LibraryKind::Folder { .. } => ModuleEntry::Folder(found.prefix.clone()),
 		}
 	};

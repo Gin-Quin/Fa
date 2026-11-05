@@ -264,11 +264,7 @@ fn load(path: &Path, text: &str) -> (Session, String) {
 		&& let Ok(project) = crate::project::locate(Some(&package))
 		&& let Ok(loaded) = crate::project::load(project, "bun")
 	{
-		let module = relative
-			.to_string_lossy()
-			.replace('\\', "/")
-			.trim_end_matches(".fa")
-			.to_string();
+		let module = crate::project::module_of(relative);
 		let mut session = loaded.session;
 		if session.loaded_module(&module).is_none() {
 			session.file_of_module(&module);

@@ -212,8 +212,7 @@ fn apply_edits(loaded: &mut Loaded, modified: &[PathBuf]) -> Vec<String> {
 		let Ok(relative) = path.strip_prefix(&base) else {
 			continue;
 		};
-		let relative = relative.to_string_lossy().replace('\\', "/");
-		let module = relative.trim_end_matches(".fa").to_string();
+		let module = crate::project::module_of(relative);
 		let Ok(text) = fs::read_to_string(path) else {
 			continue;
 		};
@@ -251,11 +250,7 @@ fn texts_before(loaded: &Loaded, modified: &[PathBuf]) -> Vec<(String, String)> 
 		.iter()
 		.filter_map(|path| {
 			let relative = path.strip_prefix(base).ok()?;
-			let module = relative
-				.to_string_lossy()
-				.replace('\\', "/")
-				.trim_end_matches(".fa")
-				.to_string();
+			let module = crate::project::module_of(relative);
 			let file = loaded.inner.session.loaded_module(&module)?;
 			let text = loaded.inner.session.text(file).to_string();
 			Some((module, text))

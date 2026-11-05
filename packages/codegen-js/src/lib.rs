@@ -660,15 +660,23 @@ pub fn entry_module(
 			main.push_str(&format!(
 				"import {{ tests as $tests{index} }} from \"./{path}\";\n"
 			));
-			lists.push(format!("...$tests{index}"));
+			// by module: `fa test` runs each file in a process of its own
+			// (`--fa-test-file=<module>`)
+			lists.push(format!(
+				"[{}, $tests{index}]",
+				crate::js::string_literal(module)
+			));
 		}
 		let run = if asynchronous_tests {
 			format!(
-				"faRunAsync(async () => await faRunTests([{}], $init, faTestTask));",
+				"faRunAsync(async () => await faRunTests([{}], $init, faTestTask, {arguments}));",
 				lists.join(", ")
 			)
 		} else {
-			format!("faRun(() => faRunTests([{}], $init));", lists.join(", "))
+			format!(
+				"faRun(() => faRunTests([{}], $init, undefined, {arguments}));",
+				lists.join(", ")
+			)
 		};
 		main.push_str(&format!(
 			"\nfunction $init() {{\n{}}}\n\n{run}\n",

@@ -628,7 +628,18 @@ fn a_package_runs_its_tests() {
 		&cache,
 		&[("FA_PIPELINE", "0")],
 	);
-	assert_eq!(sequential, (stdout, stderr, code));
+	assert_eq!(sequential, (stdout.clone(), stderr.clone(), code));
+	// each test file runs in a process of its own: one at a time, or many
+	// at once, the report is the same, in the order of the files
+	for workers in ["1", "3"] {
+		let again = fa_with(
+			&["test", "modules"],
+			&fixtures(),
+			&cache,
+			&[("FA_TEST_WORKERS", workers)],
+		);
+		assert_eq!(again, (stdout.clone(), stderr.clone(), code), "{workers}");
+	}
 }
 
 /// `fa test --target=native`: the same tests compiled by the LLVM backend,

@@ -56,6 +56,7 @@ mod help;
 mod hot;
 mod migrate;
 pub mod native;
+mod offline;
 mod preview;
 mod project;
 mod report;
@@ -66,7 +67,7 @@ mod testing;
 mod timings;
 mod workspace;
 
-pub use project::{EditorSession, editor_session};
+pub use project::{EditorSession, editor_session, offline_editor_session};
 
 use build::*;
 use help::HELP;

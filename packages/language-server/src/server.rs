@@ -10,14 +10,15 @@ use tokio::sync::{mpsc, oneshot};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
 	CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+	DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
 	DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-	DocumentFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
-	FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
-	GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-	InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent, MarkupKind,
-	MessageType, OneOf, Range, SelectionRange, SelectionRangeParams,
-	SelectionRangeProviderCapability, SemanticTokens, SemanticTokensFullOptions,
-	SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+	DocumentFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FileSystemWatcher,
+	FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability, GlobPattern,
+	GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
+	HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, Location,
+	MarkupContent, MarkupKind, MessageType, OneOf, Range, Registration, SelectionRange,
+	SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
+	SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
 	SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
 	TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url,
 	WorkDoneProgressOptions,
@@ -35,7 +36,13 @@ pub struct FaLanguageServer {
 	client: Client,
 	worker: Sender<Message>,
 	cancel: Option<Arc<AtomicBool>>,
+	/// Whether the client can register file watchers after `initialize`.
+	can_watch: AtomicBool,
 }
+
+/// The files whose changes on the disk the server follows: the sources, and the lockfile (the
+/// other configuration files are `.fa` files).
+pub const WATCHED_FILES: [&str; 2] = ["**/*.fa", "**/dependencies.lock"];
 
 /// The service to serve over a transport, with the analyzer.
 pub fn service() -> (LspService<FaLanguageServer>, tower_lsp::ClientSocket) {
@@ -58,6 +65,7 @@ impl FaLanguageServer {
 			client,
 			worker,
 			cancel,
+			can_watch: AtomicBool::new(false),
 		}
 	}
 
@@ -131,6 +139,33 @@ pub fn capabilities(encoding: PositionEncoding) -> ServerCapabilities {
 	}
 }
 
+/// Ask the editor to report the changes of the `WATCHED_FILES` on the disk
+/// (`workspace/didChangeWatchedFiles`).
+async fn register_watchers(client: Client) {
+	let options = DidChangeWatchedFilesRegistrationOptions {
+		watchers: WATCHED_FILES
+			.iter()
+			.map(|glob| FileSystemWatcher {
+				glob_pattern: GlobPattern::String(glob.to_string()),
+				kind: None,
+			})
+			.collect(),
+	};
+	let registration = Registration {
+		id: "fa-watched-files".to_string(),
+		method: "workspace/didChangeWatchedFiles".to_string(),
+		register_options: serde_json::to_value(options).ok(),
+	};
+	if let Err(error) = client.register_capability(vec![registration]).await {
+		client
+			.log_message(
+				MessageType::WARNING,
+				format!("The changes of the files on the disk are not followed: {error}"),
+			)
+			.await;
+	}
+}
+
 /// The range of a span of any document: an open one, or else the file on disk.
 fn range_in(context: &QueryContext<'_>, uri: &Url, span: SourceSpan) -> Option<Range> {
 	if let Some(document) = context.documents.get(uri) {
@@ -150,6 +185,14 @@ impl LanguageServer for FaLanguageServer {
 			.and_then(|general| general.position_encodings.as_deref());
 		let encoding = PositionEncoding::negotiate(supported);
 		self.send(Message::Configure { encoding });
+		let can_watch = params
+			.capabilities
+			.workspace
+			.as_ref()
+			.and_then(|workspace| workspace.did_change_watched_files.as_ref())
+			.and_then(|watched| watched.dynamic_registration)
+			.unwrap_or(false);
+		self.can_watch.store(can_watch, Ordering::SeqCst);
 		Ok(InitializeResult {
 			capabilities: capabilities(encoding),
 			server_info: Some(ServerInfo {
@@ -160,6 +203,10 @@ impl LanguageServer for FaLanguageServer {
 	}
 
 	async fn initialized(&self, _: InitializedParams) {
+		if self.can_watch.load(Ordering::SeqCst) {
+			// the editor answers the registration later: don't hold the notification
+			tokio::spawn(register_watchers(self.client.clone()));
+		}
 		self.client
 			.log_message(MessageType::INFO, "The Fa language server is ready")
 			.await;
@@ -202,6 +249,12 @@ impl LanguageServer for FaLanguageServer {
 	async fn did_close(&self, params: DidCloseTextDocumentParams) {
 		self.send(Message::Close {
 			uri: params.text_document.uri,
+		});
+	}
+
+	async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+		self.send(Message::Watched {
+			changes: params.changes,
 		});
 	}
 

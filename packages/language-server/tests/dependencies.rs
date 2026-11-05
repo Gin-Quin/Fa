@@ -10,6 +10,7 @@
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
 
 use fa_language_server::{AnalysisBackend, AnalyzerBackend};
 use tower_lsp::lsp_types::Url;
@@ -40,6 +41,9 @@ fn write_files(root: &Path, files: &[(&str, &str)]) {
 		std::fs::write(path, text).unwrap();
 	}
 }
+
+/// How long a background resolution may take.
+const WAIT: Duration = Duration::from_secs(30);
 
 fn codes(backend: &AnalyzerBackend, uri: &Url) -> Vec<String> {
 	backend
@@ -109,11 +113,20 @@ fn the_dependencies_of_a_package_are_resolved_like_fa_check() {
 	let main = Url::from_file_path(package.join("application/main.fa")).unwrap();
 	let mut backend = AnalyzerBackend::new();
 	backend.set_document(&main, Arc::from(main_text));
+	// the repository is cloned in the background: meanwhile, a note only
+	assert!(backend.has_background_work());
+	assert_eq!(codes(&backend, &main), [""]);
+	assert_eq!(backend.wait_for_background(WAIT), vec![main.clone()]);
 	assert!(
 		backend.diagnostics(&main).is_empty(),
 		"{:?}",
 		backend.diagnostics(&main)
 	);
+	// in the cache now: a new load needs no network
+	let dependencies_url = Url::from_file_path(package.join("dependencies.fa")).unwrap();
+	assert_eq!(backend.saved(&dependencies_url), vec![main.clone()]);
+	assert!(!backend.has_background_work());
+	assert!(backend.diagnostics(&main).is_empty());
 	assert!(
 		!package.join("dependencies.lock").exists(),
 		"the lockfile is never written"
@@ -143,6 +156,8 @@ fn the_dependencies_of_a_package_are_resolved_like_fa_check() {
 	.unwrap();
 	let saved = Url::from_file_path(&dependencies_path).unwrap();
 	assert_eq!(backend.saved(&saved), vec![main.clone()]);
+	// a range that isn't locked: the repository is fetched again
+	assert_eq!(backend.wait_for_background(WAIT), vec![main.clone()]);
 	let diagnostics = backend.diagnostics(&main);
 	assert_eq!(codes(&backend, &main), ["DEP002"], "{diagnostics:?}");
 	assert!(
@@ -163,8 +178,11 @@ fn the_dependencies_of_a_package_are_resolved_like_fa_check() {
 	);
 	std::fs::write(&dependencies_path, &fixed).unwrap();
 	backend.saved(&saved);
+	backend.wait_for_background(WAIT);
 	assert!(backend.diagnostics(&main).is_empty());
 	backend.set_document(&saved, Arc::from(fixed.as_str()));
+	// the remote file isn't locked (the lockfile is never written): fetched again
+	backend.wait_for_background(WAIT);
 	assert_eq!(codes(&backend, &saved), ["DEP004"]);
 	assert!(backend.diagnostics(&main).is_empty());
 }

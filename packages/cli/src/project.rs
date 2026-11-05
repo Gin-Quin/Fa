@@ -353,6 +353,18 @@ pub fn editor_session(
 	})
 }
 
+/// [`editor_session`] without the network: the dependencies come from the
+/// lockfile and the cache only, so that it answers at once. `None` when a
+/// source must be fetched (cloned, fetched again, downloaded): the editor
+/// then resolves with [`editor_session`] on another thread.
+pub fn offline_editor_session(
+	package: &Path,
+	wrap: impl FnOnce(Box<dyn ModuleResolver>) -> Box<dyn ModuleResolver>,
+) -> Option<Result<EditorSession, String>> {
+	let (found, fetched) = crate::offline::offline(|| editor_session(package, wrap));
+	(!fetched).then_some(found)
+}
+
 /// The session of a package for an editor ([`editor_session`]).
 pub struct EditorSession {
 	pub session: Session,

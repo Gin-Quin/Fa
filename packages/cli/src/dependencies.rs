@@ -679,6 +679,9 @@ fn store(hash: &str, files: &[(String, Vec<u8>)]) -> Result<PathBuf, String> {
 
 /// Runs `git` and returns its standard output.
 fn git(arguments: &[&str], directory: Option<&Path>) -> Result<Vec<u8>, String> {
+	if matches!(arguments.first(), Some(&("clone" | "fetch" | "remote"))) {
+		crate::offline::network()?;
+	}
 	let mut command = Command::new("git");
 	if let Some(directory) = directory {
 		command.arg("--git-dir").arg(directory);
@@ -794,6 +797,7 @@ fn files_at(mirror: &Path, commit: &str) -> Result<Vec<(String, Vec<u8>)>, Strin
 
 /// Fetches a URL: `file://` from the disk, `http(s)://` with `curl`.
 fn fetch(url: &str) -> Result<Vec<u8>, String> {
+	crate::offline::network()?;
 	let failed = |error: String| {
 		format!(
 			"error[DEP006]: can't fetch `{url}`: {error}\n  help: check the network and the source"

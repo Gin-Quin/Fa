@@ -914,8 +914,23 @@ fn spawn(
 	std::process::Child,
 	std::sync::Arc<std::sync::Mutex<String>>,
 ) {
+	spawn_with(scratch, arguments, directory, runs, &[])
+}
+
+/// [`spawn`], with more environment variables.
+fn spawn_with(
+	scratch: &Scratch,
+	arguments: &[&str],
+	directory: &Path,
+	runs: usize,
+	variables: &[(&str, &str)],
+) -> (
+	std::process::Child,
+	std::sync::Arc<std::sync::Mutex<String>>,
+) {
 	let mut child = scratch
 		.command(arguments, directory)
+		.envs(variables.iter().copied())
 		.env("FA_DEVELOP_RUNS", runs.to_string())
 		.env("FA_WATCH_INTERVAL_MS", "50")
 		.stdout(Stdio::piped())
@@ -1052,7 +1067,9 @@ fn develop_serves_the_web_build_and_swaps_its_modules() {
 		&[
 			(
 				"package.fa",
-				&format!("export = {{\n\tname = \"site\"\n\tdevelop = {{ port = {port} }}\n}}\n"),
+				&format!(
+					"export = {{\n\tname = \"site\"\n\tdevelop = {{ port = {port}, open = true }}\n}}\n"
+				),
 			),
 			("library/greet.fa", &greet("one", "name: String")),
 			(
@@ -1061,12 +1078,43 @@ fn develop_serves_the_web_build_and_swaps_its_modules() {
 			),
 		],
 	);
-	let (child, output) = spawn(&scratch, &["develop", "--target=web"], &package, 1);
+	// `develop.open`: the command opening a browser writes the URL it is given
+	let opener = scratch.write(
+		"opener",
+		&[(
+			"open.sh",
+			"#!/bin/sh\necho \"$1\" > \"$(dirname \"$0\")/opened\"\n",
+		)],
+	);
+	let script = opener.join("open.sh");
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::PermissionsExt as _;
+		fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+	}
+	let script_text = script.display().to_string();
+	let (child, output) = spawn_with(
+		&scratch,
+		&["develop", "--target=web"],
+		&package,
+		1,
+		&[("FA_OPEN_COMMAND", script_text.as_str())],
+	);
 	assert!(
 		wait_for(&output, &format!("on http://localhost:{port}"), 30),
 		"{}",
 		output.lock().unwrap()
 	);
+	if cfg!(unix) {
+		let start = Instant::now();
+		while !opener.join("opened").is_file() && start.elapsed() < Duration::from_secs(10) {
+			std::thread::sleep(Duration::from_millis(50));
+		}
+		assert_eq!(
+			fs::read_to_string(opener.join("opened")).unwrap_or_default(),
+			format!("http://localhost:{port}/\n")
+		);
+	}
 	let page = http_get(port, "/");
 	assert!(page.contains("src=\"/main.js\""), "{page}");
 	assert!(http_get(port, "/main.js").contains("faHotListen"));

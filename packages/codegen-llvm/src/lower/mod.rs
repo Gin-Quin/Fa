@@ -28,6 +28,7 @@ mod capacity;
 mod chunks;
 mod closures;
 mod columns;
+mod compose;
 mod constants;
 mod destination;
 mod division;
@@ -2164,6 +2165,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		// strings; the other values are compiled from their expression
 		if let Some(value) = self.compile_time_scalar(node)? {
 			return Ok(value);
+		}
+		// `f then g`, `chain[1..]` (compose.rs)
+		if self.analysis.compositions.contains_key(&node) {
+			return self.composition_value(node);
 		}
 		match self.view(node) {
 			View::Error => Err(self.unsupported(node.index(), "code with errors")),

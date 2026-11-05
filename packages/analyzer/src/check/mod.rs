@@ -19,6 +19,7 @@
 pub(crate) mod arrays;
 mod calls;
 mod collections;
+mod compose;
 mod comptime;
 mod concurrency;
 mod control;

@@ -222,6 +222,19 @@ impl Walker<'_> {
 				self.body = saved;
 				ty
 			}
+			// `function f = g then h`, `function f = chain[1..]` (compose.rs)
+			View::Compose { .. } | View::Index { .. } if annotation.is_none() => {
+				let ty = self.check(value, None);
+				if !self.s.types.is_recovering(ty) && self.signature_of(ty).is_none() {
+					let message = format!(
+						"`{}` is not a function: a `function` declaration needs a function",
+						self.display(ty)
+					);
+					let diagnostic = self.diagnostic(&E_TYPE_1, value, message);
+					self.report(diagnostic);
+				}
+				ty
+			}
 			View::Name(_) if annotation.is_none() => {
 				let ty = self.check(value, None);
 				if !self.s.types.is_recovering(ty) && self.signature_of(ty).is_none() {
@@ -1307,11 +1320,6 @@ impl Walker<'_> {
 		_annotation: NodeId,
 	) -> TypeId {
 		self.unsupported(n, "destructured parameters")
-	}
-
-	/// `f then g`
-	pub(super) fn check_compose(&mut self, n: NodeId, _operands: NodeList<'_>) -> TypeId {
-		self.unsupported(n, "`then`")
 	}
 
 	/// `f with (y = 0)`

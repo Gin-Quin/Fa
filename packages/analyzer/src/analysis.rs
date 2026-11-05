@@ -599,6 +599,10 @@ pub struct Analysis {
 	/// `pick(value, { foo })`, `omit(value, { foo })` (the backends copy the
 	/// value's fields that the node's type has).
 	pub forwards: FxHashMap<NodeId, NodeId>,
+	/// The compositions (`f then g`, a slice of a known chain): their steps,
+	/// in order, flat (a step is a node of this file evaluating to a
+	/// function). A `function` declared with one is a known chain.
+	pub compositions: FxHashMap<NodeId, Vec<NodeId>>,
 	/// Integer nodes whose flow fact is narrower than their type (hover,
 	/// proofs): an id into `interval_values`. Read it with [`Analysis::interval`].
 	pub intervals: FxHashMap<NodeId, IntervalId>,
@@ -1353,6 +1357,7 @@ impl Analysis {
 			arith: FxHashMap::default(),
 			coercions: FxHashMap::default(),
 			forwards: FxHashMap::default(),
+			compositions: FxHashMap::default(),
 			intervals: FxHashMap::default(),
 			interval_values: Interner::new(),
 			instantiations: FxHashMap::default(),

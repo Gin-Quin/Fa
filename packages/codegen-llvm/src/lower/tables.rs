@@ -84,8 +84,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		// per unit: the merged facts of every unit, by stable name (`facts.rs`)
 		self.program_facts.as_ref().is_some_and(|facts| {
-			crate::facts::stable_type_name(self.types(), ty)
-				.is_some_and(|name| !facts.contains(crate::facts::REFERENCED_MAPS, &name))
+			crate::facts::stable_type_name(self.types(), ty).is_some_and(|name| {
+				!facts
+					.consulted(crate::facts::REFERENCED_MAPS, self.fact_log.as_deref())
+					.contains(&name)
+			})
 		})
 	}
 
@@ -96,8 +99,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return self.no_inline_maps.contains(&ty);
 		}
 		self.program_facts.as_ref().is_none_or(|facts| {
-			crate::facts::stable_type_name(self.types(), ty)
-				.is_none_or(|name| facts.contains(crate::facts::DELETED_WHILE_ITERATED_MAPS, &name))
+			crate::facts::stable_type_name(self.types(), ty).is_none_or(|name| {
+				facts
+					.consulted(
+						crate::facts::DELETED_WHILE_ITERATED_MAPS,
+						self.fact_log.as_deref(),
+					)
+					.contains(&name)
+			})
 		})
 	}
 

@@ -12,6 +12,7 @@ use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::syntax::{NodeList, View};
 use fa_analyzer::types::TypeKind;
 use inkwell::IntPredicate;
+use inkwell::types::BasicType;
 use inkwell::types::{BasicTypeEnum, StructType};
 use inkwell::values::IntValue;
 
@@ -45,6 +46,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn tuple_items(&self, ty: TypeId) -> Vec<TypeId> {
 		match self.types().kind(ty) {
 			TypeKind::Tuple(list) => self.types().list_items(list).to_vec(),
+			TypeKind::CArray(item, count) => vec![item; count as usize],
 			_ => Vec::new(),
 		}
 	}
@@ -96,8 +98,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<(), Error> {
 		let structure = value.value.expect("a tuple").into_struct_value();
+		// a `CArray` prints like an array
+		let c_array = matches!(self.types().kind(ty), TypeKind::CArray(..));
+		let (open, close) = if c_array { ("[", "]") } else { ("(", ")") };
 		for (index, item_type) in self.tuple_items(ty).into_iter().enumerate() {
-			let prefix = if index == 0 { "(" } else { ", " };
+			let prefix = if index == 0 { open } else { ", " };
 			let prefix = self.string_constant(prefix);
 			self.append_value(prefix, node)?;
 			let repr = self.repr_of(item_type, node.index())?;
@@ -106,8 +111,148 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.build_extract_value(structure, index as u32, "")?;
 			self.append_nested_of(Val::new(repr, raw), item_type, node)?;
 		}
-		let close = self.string_constant(")");
+		let close = self.string_constant(if self.tuple_items(ty).is_empty() {
+			if c_array { "[]" } else { "()" }
+		} else {
+			close
+		});
 		self.append_value(close, node)
+	}
+
+	/// The `n` of a `CArray(T, n)` type.
+	pub(crate) fn c_array_count(&self, ty: TypeId) -> Option<u32> {
+		match self.types().kind(ty) {
+			TypeKind::CArray(_, count) => Some(count),
+			_ => None,
+		}
+	}
+
+	/// The address of item `index` of the `CArray` at `pointer`: counted
+	/// from the end when negative, `IndexError` outside (unless proven).
+	pub(crate) fn c_array_element(
+		&mut self,
+		pointer: inkwell::values::PointerValue<'ctx>,
+		ty: TypeId,
+		index: NodeId,
+		node: NodeId,
+	) -> Result<Option<Slot<'ctx>>, Error> {
+		let Some(count) = self.c_array_count(ty) else {
+			return Ok(None);
+		};
+		let item_type = self
+			.tuple_items(ty)
+			.first()
+			.copied()
+			.unwrap_or(TypeId::INTEGER);
+		let repr = self.repr_of(item_type, node.index())?;
+		let i64 = self.context.i64_type();
+		let index_value = self.expr(index)?;
+		if index_value.repr == Repr::Never {
+			return Ok(None);
+		}
+		let index_value = self
+			.convert(
+				index_value,
+				Repr::Int(crate::lower::values::IntRepr::I64),
+				index.index(),
+			)?
+			.int();
+		let length = i64.const_int(u64::from(count), false);
+		let negative = self.builder.build_int_compare(
+			inkwell::IntPredicate::SLT,
+			index_value,
+			i64.const_zero(),
+			"",
+		)?;
+		let from_end = self.builder.build_int_add(index_value, length, "")?;
+		let position = self
+			.builder
+			.build_select(negative, from_end, index_value, "")?
+			.into_int_value();
+		if self
+			.flags(node)
+			.contains(fa_analyzer::analysis::NodeFlags::INDEX_CHECK)
+		{
+			let outside =
+				self.builder
+					.build_int_compare(inkwell::IntPredicate::UGE, position, length, "")?;
+			self.guard(outside, |this| {
+				this.raise_runtime("fa_error_index", &[index_value.into(), length.into()])
+			})?;
+		}
+		let array_type = self.llvm_type(repr).array_type(count);
+		let element = unsafe {
+			self.builder.build_in_bounds_gep(
+				array_type,
+				pointer,
+				&[i64.const_zero(), position],
+				"",
+			)?
+		};
+		Ok(Some(Slot {
+			pointer: element,
+			repr,
+		}))
+	}
+
+	/// `for item, index in values` over a `CArray`: over an array of its
+	/// items, written back to its place after the loop (what the loop
+	/// variable wrote).
+	pub(crate) fn for_c_array(
+		&mut self,
+		node: NodeId,
+		pattern: Option<NodeId>,
+		has_index: bool,
+		iterable: NodeId,
+		value: Val<'ctx>,
+		body: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let Repr::Tuple(ty) = value.repr else {
+			return Err(self.unsupported(iterable.index(), "`for` over this value"));
+		};
+		let item_types = self.tuple_items(ty);
+		let Some(&item_type) = item_types.first() else {
+			return Ok(Val::void());
+		};
+		let item = self.repr_of(item_type, node.index())?;
+		let count = self
+			.context
+			.i64_type()
+			.const_int(item_types.len() as u64, false);
+		let array = self.new_array(item, count, count)?;
+		let (items, _) = self.array_parts(array)?;
+		let structure = value.value.expect("a CArray").into_struct_value();
+		for index in 0..item_types.len() {
+			let raw = self
+				.builder
+				.build_extract_value(structure, index as u32, "")?;
+			let position = self.context.i64_type().const_int(index as u64, false);
+			let slot = self.item_pointer(items, item, position)?;
+			self.builder.build_store(slot, raw)?;
+		}
+		let array_value = self.fresh(Val::new(Repr::Array(item_type), array));
+		let result = self.for_items(node, pattern, has_index, array_value, body)?;
+		// what the loop variable wrote, back into the place
+		if self.is_place(iterable) {
+			let place = self.place(iterable)?;
+			let array_type = self.llvm_type(item).array_type(item_types.len() as u32);
+			let i64 = self.context.i64_type();
+			for index in 0..item_types.len() {
+				let position = i64.const_int(index as u64, false);
+				let source = self.item_pointer(items, item, position)?;
+				let loaded = self.builder.build_load(self.llvm_type(item), source, "")?;
+				let target = unsafe {
+					self.builder.build_in_bounds_gep(
+						array_type,
+						place.pointer,
+						&[i64.const_zero(), position],
+						"",
+					)?
+				};
+				self.builder.build_store(target, loaded)?;
+			}
+		}
+		Ok(result)
 	}
 
 	/// The constant index of a tuple item (`pair[0]`).
@@ -131,6 +276,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		index: NodeId,
 	) -> Result<Option<Val<'ctx>>, Error> {
 		match self.node_repr(target)? {
+			// `values[i]` of a `CArray`: from memory
+			Repr::Tuple(ty) if self.c_array_count(ty).is_some() => {
+				let value = self.expr(target)?;
+				if value.repr == Repr::Never {
+					return Ok(Some(value));
+				}
+				let memory = self.alloca(value.repr, "c_array")?;
+				self.builder
+					.build_store(memory.pointer, value.value.expect("a CArray"))?;
+				match self.c_array_element(memory.pointer, ty, index, node)? {
+					Some(slot) => Ok(Some(self.load(slot)?)),
+					None => Ok(Some(Val::never())),
+				}
+			}
 			Repr::Tuple(ty) => {
 				let Some(position) = self.tuple_index(index) else {
 					return Err(self.unsupported(index.index(), "this tuple index"));
@@ -267,12 +426,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// The place `tuple[0]`, or `None` for another target.
 	pub(crate) fn tuple_place(
 		&mut self,
+		node: NodeId,
 		target: NodeId,
 		index: NodeId,
 	) -> Result<Option<Slot<'ctx>>, Error> {
 		let Repr::Tuple(ty) = self.node_repr(target)? else {
 			return Ok(None);
 		};
+		// `values[i] = …` of a `CArray`: in its place
+		if self.c_array_count(ty).is_some() {
+			let slot = self.place(target)?;
+			return self.c_array_element(slot.pointer, ty, index, node);
+		}
 		let Some(position) = self.tuple_index(index) else {
 			return Err(self.unsupported(index.index(), "this tuple index"));
 		};

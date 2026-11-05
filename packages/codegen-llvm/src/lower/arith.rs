@@ -847,12 +847,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						if integer.repr == Repr::Never {
 							return Ok(integer);
 						}
+						let inline_capable = self.inline_reserved.contains(&node);
 						self.reserved_integer_append(
 							slot.pointer,
 							integer,
 							counter,
 							end,
 							inclusive,
+							inline_capable,
 						)?;
 						return Ok(Val::void());
 					}
@@ -875,7 +877,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => right,
 				};
 				if let Some(&(counter, end, inclusive)) = self.reserved_appends.get(&node) {
-					self.reserved_append(slot.pointer, right, counter, end, inclusive)?;
+					let inline_capable = self.inline_reserved.contains(&node);
+					self.reserved_append(
+						slot.pointer,
+						right,
+						counter,
+						end,
+						inclusive,
+						inline_capable,
+					)?;
 					return Ok(Val::void());
 				}
 				self.append_string(slot.pointer, right)?;

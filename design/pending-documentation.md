@@ -12,6 +12,7 @@ Replace the bullet "The parts of `split` are views…" with these two bullets:
 ## `documentation/collections/maps.md`, `:::implementation` section (native maps)
 
 Add after the description of the stable chunks: "When nothing in the program can keep a reference into the values of maps of a type (no `use`, `reuse` or `provide` of one, no value passed to a function of the program, none read in a lambda) and the program is compiled as one module, their entries are dense: one array that moves when it grows, so that a lookup reads the index slot and the entry, without the chunk directory (`design/decisions.md`, "Dense maps"). `GrowingMap` keeps its stable chunks."
+
 ## `documentation/values/errors.md`, "Throwing errors" (or wherever `throws` in types is described)
 
 Add: a value that throws fewer errors is accepted where a type throws more. A `Task(T)` is a `Task(T) throws E`, and a `(x: Integer) => Integer` is a `(x: Integer) => Integer throws E`: in a variable, an array, a field, an argument or a returned value. `:::implementation`: natively, a task's result always has room for an error (null when the task can't fail), so the task keeps its frame; a function value that throws nothing goes through an adapter (a closure holding a copy of it) where its type throws.
@@ -39,6 +40,7 @@ After "Some parts of `std` exist only on some targets: using one on a target tha
 ## `documentation/advanced/concurrency.md`, table of what blocks per target
 
 The WebAssembly column says "blocking (WASI)" for the file system and standard input: the target is not WASI (`design/decisions.md`, "WebAssembly target"); files go through the generated JavaScript loader's imports (`fileRun`/`fileTake`, `node:fs`), blocking. Write "blocking (through the loader)".
+
 ## `documentation/advanced/foreign-code.md`, the JavaScript target (around line 307)
 
 Replace "`destroy` is called for a local at the end of its block when nothing moves it out; not yet for a resource inside another value or a collection, nor for the old value of a replaced local." by: `destroy` is called at the same points as natively: at the end of the block of the local or parameter owning the value (unless it moved out), for a resource inside another value or a collection, for the old value of a replaced local or field, and for a new value discarded; not yet for a resource of a type declared in another file. A resource may be all zero (a file descriptor 0): a move is tracked by a drop flag, never by its bytes (`design/decisions.md`, "A type holding a task is move-only").
@@ -57,7 +59,8 @@ Table row "`Mutex`, atomics shared with a worker": make it "`Mutex`, atomics, ch
 
 ## `documentation/advanced/concurrency.md`, "1. Parallel loops" (the paragraph on `parallel()`)
 
-Make precise: `parallel()` gives a view for one operation, called at once on it: `map`, `filter`, `reduce`, `some`, `every` or `sum` (`let view = numbers.parallel()` alone is an error). `filter` keeps the collection's kind. The function of `reduce` combines two items (its accumulator is of the items' type), since the items are grouped in any way. `parallel()` of a `Map` is not available yet.
+Make precise: `parallel()` gives a view for one operation, called at once on it: `map`, `filter`, `reduce`, `some`, `every` or `sum` (`let view = numbers.parallel()` alone is an error). `filter` keeps the collection's kind. The function of `reduce` combines two items (its accumulator is of the items' type), since the items are grouped in any way. A parallel view of a `Map` runs over its entries (`(key, value)`, in the map's order) and has `map`, `filter`, `some` and `every` (`map` and `filter` give a map with the same keys); `reduce` isn't available on it (use `Array.from(map.values()).parallel().reduce(…)`).
+
 ## `documentation/architecture/dependencies.md`, "Sibling packages" (and the table of "Sources")
 
 Add after the paragraph on sibling packages: "A package outside a workspace can depend on a local folder that holds a package, with a relative path too (`shared = "../shared"`). Unlike a sibling package, it is locked like any other source: the lockfile records the path and the hash of its `package.fa`, `dependencies.fa` and `library/`, and a change of these files fails the build until `fa update shared` accepts it." In the table of sources, the row "Sibling package of the workspace" becomes "Local package (a sibling in a workspace, a folder outside one)".
@@ -65,6 +68,7 @@ Add after the paragraph on sibling packages: "A package outside a workspace can 
 ## The rt-5 example (`@typeToString(getDigitCount)`, types-at-runtime or function composition page)
 
 A function name is a value: write `@typeToString(Type<getDigitCount>)` (metaprogramming page: "use `Type(value)` to get the type of a value"; `TY008` otherwise).
+
 ## `documentation/guides/web-server.md`, "Typed request and response bodies" (JSON of named unions)
 
 A member of a named union is read and written tagged by a `"type"` property holding its name (`{ "type": "Circle", "radius": 1 }`); a member without data is `{ "type": "Point" }`, data that isn't an object (or an object with its own `type` field) is under `"value"`, a literal member is the literal. An unknown `"type"` is a `JsonError` naming the accepted members.
@@ -75,6 +79,27 @@ A member of a named union is read and written tagged by a `"type"` property hold
 ## The rt-5 example (`@typeToString(getDigitCount)`, types-at-runtime or function composition page)
 
 A function name is a value: write `@typeToString(Type<getDigitCount>)` (metaprogramming page: "use `Type(value)` to get the type of a value"; `TY008` otherwise).
+
+
+## `documentation/advanced/foreign-code.md`, "Targets" and `:::implementation` ("JavaScript", "State of the implementation")
+
+`bun` passes `CStruct`s by value now: drop "(a `CStruct` can't be passed by value)" from the table, and from the JavaScript state. Implementation: a C function taking or returning a `CStruct` by value goes through a shim that Bun's TinyCC compiles on its first call (`bun:ffi`'s `cc`): the arguments are written into memory with the C layout the compiler computes, the shim calls the function with them by value under the platform's C ABI, and writes the result back.
+
+## `documentation/advanced/foreign-code.md`, "`CStruct`" (after the `Vertex` example)
+
+Add: a `CArray(T, n)` value is written as an array literal of exactly `n` items (`position = [1.0, 2.0, 3.0]`); it is indexed like an array (`try vertex.color[i]`, from the end when negative), written in place (`vertex.position[1] = 5.5`), iterated (`for value, index in vertex.color`), and has a `length`. It is a value: copying the `CStruct` copies it.
+
+## `documentation/advanced/foreign-code.md`, `:::implementation` ("Native", "State of the implementation")
+
+`CStruct`s by value now follow the C ABI of the target: x86-64 System V, AAPCS64 (homogeneous aggregates of 1 to 4 floats or doubles in floating-point registers, other structs up to 16 bytes as integers, larger ones through a pointer to a copy, or `sret`) and wasm32 (a struct of one scalar is that scalar, others `byval`/`sret`). Windows x64 isn't classified yet. Replace "`CStruct` by value on x86-64 System V only" in the state.
+
+## `documentation/advanced/foreign-code.md`, `:::implementation` ("State of the implementation")
+
+The analyzer and the native backend (and wasm) support `Pointer.allocate(value)` and `pointer.free()`: a Fa value in such a block is read as a copy (`read`), written with the old value destroyed (`write`), and `pointer.value` is a view of it. Bun doesn't yet.
+
+## `documentation/advanced/foreign-code.md`, "Targets" and `:::implementation` ("WebAssembly", "State of the implementation")
+
+On `wasm`, an `@extern` function is an import of the `env` module unless C compiled to WebAssembly and linked with the program (`build.link`: `.o`/`.a` files built with `clang --target=wasm32`) defines it. The host gives the others: the loader imports them from `env.mjs`, next to it (`fa build` copies the `env.mjs` found next to the program's file or at the root of its package); `env.mjs` exports one function per C name, and may export `attach(exports)` to reach the module's memory. A missing function stops the loader with the list of names. Replace "WebAssembly: not yet" in the state.
 
 ## `documentation/types/fields.md`, "Field sets" and "String representation"
 

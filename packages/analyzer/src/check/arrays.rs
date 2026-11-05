@@ -189,6 +189,12 @@ impl Walker<'_> {
 		items: NodeList<'_>,
 		expected: Option<TypeId>,
 	) -> TypeId {
+		// `[1.0, 2.0, 3.0]` as a `CArray(Float32, 3)` (foreign.rs)
+		if let Some(expected) = expected
+			&& let TypeKind::CArray(item, count) = self.s.types.kind(expected)
+		{
+			return self.check_c_array_literal(n, items, expected, item, count);
+		}
 		let target = expected.and_then(|expected| self.expected_collection(expected));
 		if let Some((kind @ (CollKind::Map | CollKind::GrowingMap), value, key)) = target {
 			return self.check_map_literal(n, items, kind, key, value);
@@ -324,6 +330,7 @@ impl Walker<'_> {
 	/// value that can't be iterated (yet).
 	pub fn iteration_item(&mut self, ty: TypeId) -> Option<TypeId> {
 		match self.s.types.kind(ty) {
+			TypeKind::CArray(item, _) => Some(item),
 			TypeKind::Collection(
 				CollKind::Array
 				| CollKind::GrowingArray

@@ -272,12 +272,17 @@ fn own_edits(loaded: &Loaded, changes: &Changes) -> Vec<(String, String)> {
 	texts_before(loaded, &changes.modified)
 }
 
-/// Loads a project again after a change, or applies the edits of its own
-/// sources. `Err` when it can't be read.
-fn refresh(loaded: &mut Loaded, path: Option<&Path>, changes: &Changes) -> Result<String, String> {
+/// Loads a project again after a change (for `target`), or applies the
+/// edits of its own sources. `Err` when it can't be read.
+fn refresh(
+	loaded: &mut Loaded,
+	path: Option<&Path>,
+	changes: &Changes,
+	target: &str,
+) -> Result<String, String> {
 	match reload_reason(loaded, changes) {
 		Some(reason) => {
-			*loaded = Loaded::load(path, "bun")?;
+			*loaded = Loaded::load(path, target)?;
 			Ok(reason)
 		}
 		None => {
@@ -290,8 +295,67 @@ fn refresh(loaded: &mut Loaded, path: Option<&Path>, changes: &Changes) -> Resul
 	}
 }
 
+/// What `fa develop` runs the program on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DevelopTarget {
+	/// Bun, its modules swapped in the process.
+	Bun,
+	/// A browser: the web build served by a development server
+	/// (`develop_server.js`, on `develop.port`), its modules swapped in the
+	/// pages, a page reloaded when a swap isn't possible.
+	Web,
+	/// An executable, rebuilt per unit (the objects of the unchanged units
+	/// cached) and restarted after each change.
+	Native,
+}
+
+impl DevelopTarget {
+	fn name(self) -> &'static str {
+		match self {
+			DevelopTarget::Bun => "bun",
+			DevelopTarget::Web => "web",
+			DevelopTarget::Native => "native",
+		}
+	}
+}
+
+/// Opens a page in the user's browser (`develop.open`): `xdg-open` (Linux),
+/// `open` (macOS), `start` (Windows), or the command `FA_OPEN_COMMAND`
+/// names (given the URL as its argument); says where to go when it can't.
+fn open_browser(url: &str) {
+	let mut command = match std::env::var_os("FA_OPEN_COMMAND") {
+		Some(program) => Command::new(program),
+		None if cfg!(windows) => {
+			let mut command = Command::new("cmd");
+			command.args(["/C", "start", ""]);
+			command
+		}
+		None if cfg!(target_os = "macos") => Command::new("open"),
+		None => Command::new("xdg-open"),
+	};
+	let opened = command
+		.arg(url)
+		.stdin(std::process::Stdio::null())
+		.stdout(std::process::Stdio::null())
+		.stderr(std::process::Stdio::null())
+		.spawn();
+	if opened.is_err() {
+		eprintln!("fa develop: can't open a browser: open {url}");
+	}
+}
+
+/// The development server of `--target=web`, its root and port filled in.
+fn server_script(root: &Path, port: u16) -> String {
+	let quoted = format!("{:?}", root.display().to_string());
+	include_str!("develop_server.js")
+		.replace("const root = __ROOT__;", &format!("const root = {quoted};"))
+		.replace("const port = __PORT__;", &format!("const port = {port};"))
+}
+
 /// A package being developed.
 struct Developed {
+	/// What the program runs on.
+	target: DevelopTarget,
 	/// The path given to [`Loaded::load`].
 	path: Option<PathBuf>,
 	/// Its name, in messages.
@@ -320,11 +384,13 @@ enum Reload {
 impl Developed {
 	/// Whether the program is generated for hot reloading.
 	fn hot_enabled(&self) -> bool {
-		self.loaded
-			.inner
-			.configuration
-			.as_ref()
-			.is_none_or(|configuration| configuration.develop.hot_reload)
+		self.target != DevelopTarget::Native
+			&& self
+				.loaded
+				.inner
+				.configuration
+				.as_ref()
+				.is_none_or(|configuration| configuration.develop.hot_reload)
 	}
 
 	/// Runs the tests that cover edited modules (architecture/hot-reloading:
@@ -400,7 +466,7 @@ impl Developed {
 			);
 			return Reload::Errors;
 		}
-		let mut options = Options::new(Target::Bun, self.loaded.shown.clone());
+		let mut options = Options::new(self.javascript_target(), self.loaded.shown.clone());
 		options.hot = true;
 		let output = match self.loaded.generate(&options) {
 			Ok(JsBuild::Program(output)) => output,
@@ -439,7 +505,12 @@ impl Developed {
 			);
 			return false;
 		}
-		let mut options = Options::new(Target::Bun, self.loaded.shown.clone());
+		if self.target == DevelopTarget::Native {
+			return self.start_native();
+		}
+		// the server of the pages runs on: the new build replaces the old one
+		let serving = self.target == DevelopTarget::Web && self.child.is_some();
+		let mut options = Options::new(self.javascript_target(), self.loaded.shown.clone());
 		options.hot = self.hot_enabled();
 		let generated = match self.loaded.generate(&options) {
 			Ok(generated) => generated,
@@ -462,7 +533,19 @@ impl Developed {
 			}
 			_ => None,
 		};
-		self.channel = if self.hot.is_some() {
+		if serving {
+			// the pages load the new build again
+			if let Some(channel) = self.channel.as_mut()
+				&& let Err(reason) = channel.reload()
+			{
+				eprintln!(
+					"fa develop: {}can't reload the pages: {reason}",
+					self.prefix()
+				);
+			}
+			return true;
+		}
+		self.channel = if self.hot.is_some() || self.target == DevelopTarget::Web {
 			hot::Channel::open()
 		} else {
 			None
@@ -471,7 +554,23 @@ impl Developed {
 			self.hot = None;
 		}
 		let mut command = Command::new(bun);
-		command.arg(&script);
+		if self.target == DevelopTarget::Web {
+			let root = script.parent().map(Path::to_path_buf).unwrap_or_default();
+			let port = self
+				.loaded
+				.inner
+				.configuration
+				.as_ref()
+				.map_or(3000, |configuration| configuration.develop.port);
+			let server = root.with_file_name("develop-server.mjs");
+			if let Err(error) = fs::write(&server, server_script(&root, port)) {
+				eprintln!("fa develop: can't write the development server: {error}");
+				return false;
+			}
+			command.arg(&server);
+		} else {
+			command.arg(&script);
+		}
 		if let Some(channel) = &self.channel {
 			command.env("FA_HOT_CHANNEL", channel.port().to_string());
 		}
@@ -479,6 +578,15 @@ impl Developed {
 		match command.spawn() {
 			Ok(child) => {
 				self.child = Some(child);
+				// `develop.open`: a browser on the served pages
+				let configuration = self.loaded.inner.configuration.as_ref();
+				if self.target == DevelopTarget::Web
+					&& configuration.is_some_and(|configuration| configuration.develop.open)
+				{
+					let port =
+						configuration.map_or(3000, |configuration| configuration.develop.port);
+					open_browser(&format!("http://localhost:{port}/"));
+				}
 				true
 			}
 			Err(error) => {
@@ -486,6 +594,82 @@ impl Developed {
 				false
 			}
 		}
+	}
+
+	/// The JavaScript target of the program.
+	fn javascript_target(&self) -> Target {
+		match self.target {
+			DevelopTarget::Web => Target::Web,
+			_ => Target::Bun,
+		}
+	}
+
+	/// `--target=native`: builds the executable (per unit, the objects of
+	/// the unchanged units from the cache) and starts it, saying how long
+	/// the build took.
+	fn start_native(&mut self) -> bool {
+		let Some(backend) = crate::native::backend() else {
+			eprintln!("fa develop: the `native` target needs `fa-native`");
+			return false;
+		};
+		let base = self.loaded.inner.project.base.clone();
+		let directory = crate::cache_directory().join(format!(
+			"develop-native-{:016x}",
+			crate::fnv1a(base.to_string_lossy().as_bytes())
+		));
+		let path = match &self.path {
+			Some(path) => path.clone(),
+			None => base,
+		};
+		let start = std::time::Instant::now();
+		let mode = crate::Mode {
+			asynchronous: None,
+			verbose: false,
+		};
+		let artifact = match crate::build_native(
+			backend,
+			&path,
+			fa_codegen_llvm::Target::Native,
+			&fa_codegen_llvm::Options::default(),
+			mode,
+			Some(&directory),
+			true,
+		) {
+			Ok(artifact) => artifact,
+			Err(message) => {
+				crate::color::eprint_diagnostics(&message);
+				eprintln!(
+					"fa develop: {}fix the errors to run the program again",
+					self.prefix()
+				);
+				return false;
+			}
+		};
+		eprintln!(
+			"fa develop: {}built for native in {} ms",
+			self.prefix(),
+			start.elapsed().as_millis()
+		);
+		let _ = std::io::stdout().flush();
+		match Command::new(&artifact.output).spawn() {
+			Ok(child) => {
+				self.child = Some(child);
+				true
+			}
+			Err(error) => {
+				eprintln!("fa develop: can't start the program: {error}");
+				false
+			}
+		}
+	}
+
+	/// Runs the program again after a change: a new build in the pages of
+	/// `--target=web` (the server runs on), else a restart.
+	fn restart(&mut self, bun: &Path) -> bool {
+		if self.target != DevelopTarget::Web {
+			self.stop();
+		}
+		self.start(bun)
 	}
 
 	/// Stops the running program.
@@ -520,17 +704,23 @@ fn paths(selection: Selection) -> Vec<(String, Option<PathBuf>)> {
 /// `fa develop [<package>] [--target=bun]`.
 pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 	let mut given = Vec::new();
+	let mut target = DevelopTarget::Bun;
 	for argument in arguments {
 		let text = argument.to_string_lossy();
-		if let Some(target) = text.strip_prefix("--target=") {
-			if target != "bun" {
-				eprintln!(
-					"fa develop: the `{target}` target is not available in development yet: `fa develop` runs on `bun`; build and run other targets with `fa build` and `fa preview`"
-				);
-				return USAGE;
-			}
+		if let Some(value) = text.strip_prefix("--target=") {
+			target = match value {
+				"bun" => DevelopTarget::Bun,
+				"web" => DevelopTarget::Web,
+				"native" => DevelopTarget::Native,
+				_ => {
+					eprintln!(
+						"fa develop: `fa develop` runs on `bun` (the default), `web` or `native`: build and run the `{value}` target with `fa build` and `fa preview`"
+					);
+					return USAGE;
+				}
+			};
 		} else if text.starts_with("--") {
-			eprintln!("fa develop: unknown option `{text}`");
+			eprintln!("fa develop: unknown option `{text}`: see `fa help develop`");
 			return USAGE;
 		} else {
 			given.push(PathBuf::from(argument));
@@ -555,13 +745,21 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 		);
 		return 1;
 	}
-	let Some(bun) = find_bun() else {
-		eprintln!("{}", crate::BUN_MISSING);
-		return 1;
+	// the LLVM backend is in `fa-native` (`native.rs`)
+	if target == DevelopTarget::Native && crate::native::backend().is_none() {
+		return crate::native::delegate("develop", arguments, "native");
+	}
+	let bun = match find_bun() {
+		Some(bun) => bun,
+		None if target == DevelopTarget::Native => PathBuf::new(),
+		None => {
+			eprintln!("{}", crate::BUN_MISSING);
+			return 1;
+		}
 	};
 	let mut developed = Vec::new();
 	for (name, path) in paths {
-		let loaded = match Loaded::load(path.as_deref(), "bun") {
+		let loaded = match Loaded::load(path.as_deref(), target.name()) {
 			Ok(loaded) => loaded,
 			Err(message) => {
 				crate::color::eprintln_message(&message);
@@ -574,6 +772,7 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 		}
 		let watcher = Watcher::new(watched_roots(&loaded));
 		developed.push(Developed {
+			target,
 			path,
 			name,
 			loaded,
@@ -587,8 +786,9 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 	let mut runs = 0;
 	for package in &mut developed {
 		eprintln!(
-			"fa develop: {}running on bun, watching for changes",
-			package.prefix()
+			"fa develop: {}running on {}, watching for changes",
+			package.prefix(),
+			package.target.name()
 		);
 		package.start(&bun);
 	}
@@ -641,13 +841,14 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 					Reload::Errors => {}
 					Reload::Restart(why) => {
 						runs += 1;
-						eprintln!(
-							"fa develop: {}{reason}: restarting ({why})",
-							package.prefix()
-						);
-						package.stop();
+						let verb = if package.target == DevelopTarget::Web {
+							"reloading the pages"
+						} else {
+							"restarting"
+						};
+						eprintln!("fa develop: {}{reason}: {verb} ({why})", package.prefix());
 						package.watcher = Watcher::new(watched_roots(&package.loaded));
-						if package.start(&bun) {
+						if package.restart(&bun) {
 							package.run_covering_tests(&before);
 						}
 					}
@@ -656,20 +857,26 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 			}
 			let edited = own_edits(&package.loaded, &changes);
 			let path = package.path.clone();
-			match refresh(&mut package.loaded, path.as_deref(), &changes) {
+			match refresh(
+				&mut package.loaded,
+				path.as_deref(),
+				&changes,
+				package.target.name(),
+			) {
 				Ok(reason) => {
 					if package.child.is_some() {
 						runs += 1;
 					}
-					let verb = if package.child.is_some() {
+					let verb = if package.child.is_some() && package.target == DevelopTarget::Web {
+						"reloading the pages"
+					} else if package.child.is_some() {
 						"restarting"
 					} else {
 						"running again"
 					};
 					eprintln!("fa develop: {}{reason}: {verb}", package.prefix());
-					package.stop();
 					package.watcher = Watcher::new(watched_roots(&package.loaded));
-					if package.start(&bun) {
+					if package.restart(&bun) {
 						package.run_covering_tests(&edited);
 					}
 				}
@@ -743,7 +950,7 @@ pub(crate) fn watch_tests(selection: Selection) -> i32 {
 			}
 			std::thread::sleep(Duration::from_millis(30));
 			let changes = merge(changes, watcher.poll());
-			match refresh(loaded, path.as_deref(), &changes) {
+			match refresh(loaded, path.as_deref(), &changes, "bun") {
 				Ok(reason) => {
 					eprintln!("fa test: {reason}: running the tests again");
 					*watcher = Watcher::new(watched_roots(loaded));

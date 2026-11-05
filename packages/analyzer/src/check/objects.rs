@@ -1235,6 +1235,13 @@ impl Walker<'_> {
 				let ty = builtins::value_type(&mut self.s.types, builtin)?;
 				Some((ty, MemberKind::Builtin))
 			}
+			// `CArray(T, n)`: its count, and indexing (`index_type`)
+			TypeKind::CArray(..) if text == "length" => {
+				let builtin = builtins::by_path("CArray#length")?;
+				self.set_resolution(member, Resolution::Builtin(builtin));
+				let ty = builtins::value_type(&mut self.s.types, builtin)?;
+				Some((ty, MemberKind::Builtin))
+			}
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) if text == "toString" => {
 				let builtin = builtins::by_path("Enum#toString")?;
 				self.set_resolution(member, Resolution::Builtin(builtin));
@@ -1545,6 +1552,7 @@ impl Walker<'_> {
 		}
 		match self.s.types.kind(target_ty) {
 			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => item,
+			TypeKind::CArray(item, _) => item,
 			TypeKind::Collection(kind @ (CollKind::Set | CollKind::GrowingSet), ..) => {
 				let message = format!(
 					"a `{}` has no positions: it can't be indexed; test an element with `includes`",

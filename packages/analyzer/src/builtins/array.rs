@@ -66,6 +66,11 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Array#length",
 		kind: Property(Ty::Natural),
 	},
+	// `CArray(T, n)`: its count (`check/foreign.rs`)
+	Builtin {
+		path: "CArray#length",
+		kind: Property(Ty::Natural),
+	},
 	// the room of every collection (`GrowingArray` shares these paths)
 	Builtin {
 		path: "Array#capacity",

@@ -410,6 +410,10 @@ Measured on 2026-11-05 after the section above. `calc`'s port damages its genera
 | before (previous section) | 95.7 (1.18) | 227.3 (1.20) | 159.1 (1.45) |
 | after | 95.1 (1.17) | 225.3 (1.19) | 141.5 (1.29) |
 
+An append to a string in memory (a field, an item) now leaves its slow path to one cold runtime call (`fa_string_append_cold`) instead of the inline-string and snapshot code: `calc`'s generator frame is 40 bytes instead of 120, 141.5 M → 139.2 M instructions (1.27x). It still saves six registers per call: the hoisted 64-bit masks of the room check and the values kept across the recursive calls (tail-recursion elimination puts the leaf path inside the loop, so the prologue can't be shrink-wrapped; marking the self-call `notail` changed nothing). The parser's inline-or-heap test per byte read of `self.text` stays: hoisting it needs the field to be known unchanged across the recursive calls.
+
+A counted loop with a known number of rounds that fits an inline string (`for 0..4 { sku += "{digit}" }`) keeps an inline string inline (its bytes stored in the value, its tag counting one more) instead of moving it to a heap block before the loop (`src/lower/appends.rs`): `respond`'s `sku` no longer allocates, 225.3 M → 208.0 M instructions (1.10x Goose).
+
 ### Against Goose's published results
 
 [Goose's results page](https://aardappel.github.io/goose/bench/results.html) (2026-10-16; Ryzen 9 9950X3D, Windows 11, clang-cl 22 `/O2`, rustc 1.98 `-O -C codegen-units=1`) compares Goose with the fastest safe Rust row of each benchmark at its large size (the "vs rust (clang)" column, inverted here into a ratio of times). This run uses the Rust row whose data structure matches the Fa port, at our default size, on Linux with clang 18:

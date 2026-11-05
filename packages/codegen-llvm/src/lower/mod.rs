@@ -217,6 +217,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// Inside a loop over characters lowered twice, for a simple text and
 	/// for another (`for_characters`): a nested one is lowered once.
 	pub(crate) versioned_characters: bool,
+	/// The reserved appends (`appends.rs`) of loops with a constant number of
+	/// rounds that fits an inline string: such a string stays inline.
+	pub(crate) inline_reserved: rustc_hash::FxHashSet<NodeId>,
 	/// The arrays indexed by a counted loop being lowered, read before it
 	/// (`hoisting.rs`): the array value of each local, and the items and
 	/// length of each such value.
@@ -328,6 +331,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	index_proofs: std::cell::RefCell<Option<index_proofs::IndexProofs>>,
 	/// The facts merged from every unit of a build per unit (`facts.rs`).
 	program_facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
+	/// The facts this lowering consulted (the key of a cached unit).
+	pub(crate) fact_log: Option<std::sync::Arc<crate::facts::FactLog>>,
 	/// The map types the program may keep a reference into the values of
 	/// (`program::unsafe_maps`).
 	unsafe_maps: rustc_hash::FxHashSet<TypeId>,
@@ -441,6 +446,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			reserved_pushes: FxHashMap::default(),
 			iterating_views: false,
 			versioned_characters: false,
+			inline_reserved: rustc_hash::FxHashSet::default(),
 			hoisted_arrays: FxHashMap::default(),
 			hoisted_parts: FxHashMap::default(),
 			expanded_functions: Vec::new(),
@@ -481,6 +487,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			virtual_code_points: FxHashMap::default(),
 			whole_program: false,
 			program_facts: None,
+			fact_log: None,
 			index_proofs: std::cell::RefCell::new(None),
 			unsafe_maps: program::unsafe_maps(session, files),
 			no_inline_maps: program::no_inline_maps(session, files),
@@ -519,6 +526,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
 	) -> Self {
 		self.program_facts = facts;
+		self
+	}
+
+	/// Records the facts the lowering consults (`facts::FactLog`).
+	pub(crate) fn with_fact_log(mut self, log: std::sync::Arc<crate::facts::FactLog>) -> Self {
+		self.fact_log = Some(log);
 		self
 	}
 
@@ -951,9 +964,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		function: FunctionValue<'ctx>,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<inkwell::values::BasicValueEnum<'ctx>, Error> {
-		Ok(self
-			.builder
-			.build_call(function, arguments, "")?
+		let call = self.builder.build_call(function, arguments, "")?;
+		Ok(call
 			.try_as_basic_value()
 			.basic()
 			.expect("a function with a result"))
@@ -2782,6 +2794,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				Repr::Pool(_) | Repr::Columnar(_) => self.for_pool(node, pattern, value, body),
 				Repr::Links(_) => self.for_links(node, pattern, value, body),
 				Repr::Range => self.for_range_value(node, pattern, value, body),
+				Repr::Tuple(ty) if self.c_array_count(ty).is_some() => {
+					self.for_c_array(node, pattern, has_index, iterable, value, body)
+				}
 				Repr::Never => Ok(value),
 				_ => Err(self.unsupported(iterable.index(), "`for` over this value")),
 			};

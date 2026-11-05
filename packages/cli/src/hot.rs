@@ -269,6 +269,11 @@ impl Channel {
 			.map_or(0, |address| address.port())
 	}
 
+	/// Asks the development server of `--target=web` to reload its pages.
+	pub(crate) fn reload(&mut self) -> Result<(), String> {
+		self.request("reload").map(|_| ())
+	}
+
 	/// Sends a request to the program and waits for its answer.
 	fn request(&mut self, request: &str) -> Result<String, String> {
 		let timeout = Duration::from_secs(10);

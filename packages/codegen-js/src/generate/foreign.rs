@@ -6,7 +6,11 @@
 //! `Uint8Array`, an array a typed array (copied back after the call when the
 //! parameter is `mutates`), a value given by address a one-item typed array
 //! (written back to its place), a function a `JSCallback` closed after the
-//! call. A `CStruct` can't be passed by value.
+//! call. A function taking or returning a `CStruct` by value goes through
+//! a shim compiled by Bun's TinyCC (`bun:ffi`'s `cc`, `faFfiBindStruct`):
+//! its arguments are written into memory with the C layout the compiler
+//! computes (`c_layout`), and the shim calls the function with them by
+//! value, under the platform's C ABI.
 
 use fa_analyzer::analysis::{Argument, ForeignArg};
 use fa_analyzer::ids::{NodeId, TypeId};
@@ -15,6 +19,15 @@ use fa_analyzer::types::{CollKind, FloatBits, TypeKind};
 
 use crate::generate::Generator;
 use crate::js::{self, Expr, Prec};
+
+/// The C declarations of the shim of a function taking `CStruct`s by value.
+#[derive(Default)]
+struct CDeclarations {
+	/// The `CStruct` types declared: their C name, spec, size and alignment.
+	structs: Vec<(TypeId, String, String, u64, u64)>,
+	/// Their `typedef`s, each after those of its fields.
+	typedefs: Vec<String>,
+}
 
 impl Generator<'_> {
 	/// The C type name of a Fa type (`bun:ffi`'s names), or `None` for a type
@@ -69,9 +82,24 @@ impl Generator<'_> {
 			return;
 		};
 		let sig = self.types.sig(sig);
+		let param_types: Vec<TypeId> = self
+			.types
+			.params(sig.params)
+			.iter()
+			.map(|param| param.ty)
+			.collect();
+		// a `CStruct` by value: through a shim (`faFfiBindStruct`)
+		if param_types
+			.iter()
+			.chain([&sig.ret])
+			.any(|&ty| self.is_c_struct(ty))
+		{
+			self.extern_struct_declaration(n, name, symbol, &param_types, sig.ret);
+			return;
+		}
 		let mut args = Vec::new();
-		for param in self.types.params(sig.params) {
-			match self.c_type_name(param.ty) {
+		for &param in &param_types {
+			match self.c_type_name(param) {
 				Some(name) => args.push(js::string_literal(name)),
 				None => {
 					self.foreign_by_value(n);
@@ -97,6 +125,198 @@ impl Generator<'_> {
 			js::string_literal(symbol),
 			args.join(", "),
 			js::string_literal(returns)
+		));
+		self.out.line(format!("\treturn {name}.c(...values);"));
+		self.out.line("}");
+	}
+
+	/// Whether a type is a `CStruct`.
+	fn is_c_struct(&self, ty: TypeId) -> bool {
+		match self.types.kind(ty) {
+			TypeKind::Object(shape) => self.types.shape(shape).nominal.is_some_and(|nominal| {
+				self.types.nominal(nominal).kind == fa_analyzer::types::NominalKind::CStruct
+			}),
+			_ => false,
+		}
+	}
+
+	/// The C layout of a type in memory (64-bit platforms: Bun runs on no
+	/// other): its size, its alignment, its C type (`int`, `fa_struct0`,
+	/// `float[3]`), and its spec for `faCWrite`/`faCRead`: a C type name,
+	/// `{ size, fields: [[name, spec, offset, bigint], …] }`, or
+	/// `{ array: spec, count, stride, bigint }`. A `CStruct` is declared
+	/// once, as a `typedef` of `declarations`.
+	fn c_layout(
+		&self,
+		ty: TypeId,
+		declarations: &mut CDeclarations,
+	) -> Option<(u64, u64, String, String)> {
+		let types = self.types;
+		if let TypeKind::CArray(item, count) = types.kind(ty) {
+			let (size, align, c, spec) = self.c_layout(item, declarations)?;
+			let bigint = self.is_bigint(item);
+			return Some((
+				size * u64::from(count),
+				align,
+				format!("{c}[{count}]"),
+				format!("{{ array: {spec}, count: {count}, stride: {size}, bigint: {bigint} }}"),
+			));
+		}
+		if self.is_c_struct(ty) {
+			if let Some((_, c_name, spec, size, align)) =
+				declarations.structs.iter().find(|(other, ..)| *other == ty)
+			{
+				return Some((*size, *align, c_name.clone(), spec.clone()));
+			}
+			let fields: Vec<(String, TypeId)> = types
+				.fields_of(ty)
+				.iter()
+				.map(|field| (types.syms.resolve(field.name).to_string(), field.ty))
+				.collect();
+			let (mut offset, mut align) = (0u64, 1u64);
+			let mut members = Vec::new();
+			let mut specs = Vec::new();
+			for (name, field_type) in fields {
+				let (size, field_align, c, spec) = self.c_layout(field_type, declarations)?;
+				offset = offset.div_ceil(field_align) * field_align;
+				align = align.max(field_align);
+				// `c` is `type` or `type[n]`: the name goes before the brackets
+				members.push(match c.find('[') {
+					Some(bracket) => format!("{} f_{name}{}", &c[..bracket], &c[bracket..]),
+					None => format!("{c} f_{name}"),
+				});
+				let bigint = self.is_bigint(field_type);
+				specs.push(format!(
+					"[{}, {spec}, {offset}, {bigint}]",
+					js::string_literal(&Self::property(&name))
+				));
+				offset += size;
+			}
+			let size = offset.div_ceil(align).max(1) * align;
+			let c_name = format!("fa_struct{}", declarations.structs.len());
+			let spec = format!("{{ size: {size}, fields: [{}] }}", specs.join(", "));
+			if members.is_empty() {
+				members.push("char f_empty".to_string());
+			}
+			declarations.typedefs.push(format!(
+				"typedef struct {{ {}; }} {c_name};",
+				members.join("; ")
+			));
+			declarations
+				.structs
+				.push((ty, c_name.clone(), spec.clone(), size, align));
+			return Some((size, align, c_name, spec));
+		}
+		let name = self.c_type_name(ty)?;
+		let (size, c) = match name {
+			"bool" => (1, "_Bool"),
+			"i8" => (1, "signed char"),
+			"u8" => (1, "unsigned char"),
+			"i16" => (2, "short"),
+			"u16" => (2, "unsigned short"),
+			"i32" => (4, "int"),
+			"u32" => (4, "unsigned int"),
+			"f32" => (4, "float"),
+			"i64" => (8, "long long"),
+			"u64" => (8, "unsigned long long"),
+			"f64" => (8, "double"),
+			"ptr" | "function" => (8, "void *"),
+			_ => return None,
+		};
+		let spec = if name == "function" { "ptr" } else { name };
+		Some((size, size, c.to_string(), js::string_literal(spec)))
+	}
+
+	/// Whether values of a type are JavaScript `bigint`s.
+	fn is_bigint(&self, ty: TypeId) -> bool {
+		match self.types.kind(ty) {
+			TypeKind::Int(id) => self.types.int(id).storage.is_js_bigint(),
+			_ => false,
+		}
+	}
+
+	/// An `@extern` function taking or returning a `CStruct` by value: a
+	/// shim, compiled by TinyCC on first call, calls it with its arguments
+	/// read from memory (`faFfiBindStruct`).
+	fn extern_struct_declaration(
+		&mut self,
+		n: NodeId,
+		name: &str,
+		symbol: &str,
+		params: &[TypeId],
+		ret: TypeId,
+	) {
+		let mut declarations = CDeclarations::default();
+		let mut param_c = Vec::new();
+		let mut param_specs = Vec::new();
+		for &param in params {
+			let Some((_, _, c, spec)) = self.c_layout(param, &mut declarations) else {
+				self.foreign_by_value(n);
+				return;
+			};
+			param_c.push(c);
+			param_specs.push(spec);
+		}
+		let (ret_c, ret_spec, ret_size) = match self.types.kind(ret) {
+			TypeKind::Void | TypeKind::Never => ("void".to_string(), "\"void\"".to_string(), 0),
+			_ => match self.c_layout(ret, &mut declarations) {
+				Some((size, _, c, spec)) => (c, spec, size),
+				None => {
+					self.foreign_by_value(n);
+					return;
+				}
+			},
+		};
+		// the C source: the struct declarations, then the shim
+		let mut source = String::new();
+		for text in &declarations.typedefs {
+			source.push_str(text);
+			source.push('\n');
+		}
+		let shim_params: Vec<String> = (0..params.len())
+			.map(|index| format!("void *p{index}"))
+			.collect();
+		let arguments: Vec<String> = param_c
+			.iter()
+			.enumerate()
+			.map(|(index, c)| format!("*({c} *)p{index}"))
+			.collect();
+		let call = format!(
+			"(({ret_c} (*)({}))f)({})",
+			if param_c.is_empty() {
+				"void".to_string()
+			} else {
+				param_c.join(", ")
+			},
+			arguments.join(", ")
+		);
+		let mut all_params = vec!["void *f".to_string()];
+		all_params.extend(shim_params);
+		all_params.push("void *out".to_string());
+		let body = if ret_c == "void" {
+			format!("{call};")
+		} else {
+			format!("*({ret_c} *)out = {call};")
+		};
+		source.push_str(&format!(
+			"void fa_shim({}) {{ {body} }}\n",
+			all_params.join(", ")
+		));
+		let bigint = self.is_bigint(ret);
+		let bind = self.helper("faFfiBindStruct");
+		let libraries: Vec<String> = self
+			.options
+			.libraries
+			.iter()
+			.map(|library| js::string_literal(library))
+			.collect();
+		self.out.line(format!("function {name}(...values) {{"));
+		self.out.line(format!(
+			"\t{name}.c ??= {bind}([{}], {}, {}, [{}], [{ret_spec}, {ret_size}, {bigint}]);",
+			libraries.join(", "),
+			js::string_literal(symbol),
+			js::string_literal(&source),
+			param_specs.join(", "),
 		));
 		self.out.line(format!("\treturn {name}.c(...values);"));
 		self.out.line("}");

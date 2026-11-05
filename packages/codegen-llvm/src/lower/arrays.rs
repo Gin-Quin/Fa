@@ -124,6 +124,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Repr::Map(_) | Repr::Set(_) = repr {
 			return self.table_literal(node, repr, items);
 		}
+		// `[1.0, 2.0, 3.0]` as a `CArray(Float32, 3)`: its items inline
+		if let Repr::Tuple(ty) = repr
+			&& self.c_array_count(ty).is_some()
+		{
+			let structure = self.tuple_type(ty);
+			let item_types = self.tuple_items(ty);
+			let mut value = structure.get_undef();
+			for (index, (item_node, item_type)) in items.iter().zip(item_types).enumerate() {
+				let item = self.repr_of(item_type, item_node.index())?;
+				let lowered = self.expr(item_node)?;
+				if lowered.repr == Repr::Never {
+					return Ok(lowered);
+				}
+				let lowered = self.owned_as(lowered, item, Some(item_node))?;
+				if let Some(raw) = lowered.value {
+					value = self
+						.builder
+						.build_insert_value(value, raw, index as u32, "")?
+						.into_struct_value();
+				}
+			}
+			return Ok(Val::new(repr, value));
+		}
 		let (Repr::Array(item_type)
 		| Repr::Growing(item_type)
 		| Repr::Pool(item_type)

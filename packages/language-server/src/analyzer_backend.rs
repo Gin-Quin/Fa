@@ -10,7 +10,14 @@
 //!   does (`fa::editor_session`, the lockfile read, never written), and
 //!   every module analyzed in parallel, unit by unit. The open documents'
 //!   units keep their session (trees, analyses) for the queries; the other
-//!   files keep only their interfaces (their trees are dropped).
+//!   files keep only their interfaces (their trees are dropped). An error
+//!   of the resolution is, like for `fa check`, the only diagnostic of the
+//!   package's documents (the package is then analyzed without its
+//!   dependencies, for the queries); its warnings (`DEP004`) are shown on
+//!   `dependencies.fa`.
+//! - **Save** of a configuration file (`package.fa`, `dependencies.fa`,
+//!   `workspace.fa`, `dependencies.lock`): the packages below its folder are
+//!   loaded again (their dependencies resolved again).
 //! - **Edit, open**: the document's text replaces the disk's (an overlay of
 //!   the module system), and an incremental run analyzes its module again,
 //!   compares its interface hash, and analyzes the units that read it again
@@ -201,6 +208,12 @@ pub struct Package {
 	pending: FxHashSet<String>,
 	/// The size of the global type store after the initial load.
 	baseline: usize,
+	/// The error of the resolution of the dependencies, as `fa check`
+	/// prints it: the package is then analyzed without its dependencies,
+	/// and its documents show this error only (like `fa check`).
+	resolution_error: Option<String>,
+	/// The warnings of the resolution (`DEP004`), shown on `dependencies.fa`.
+	resolution_warnings: Vec<String>,
 }
 
 impl Package {
@@ -212,10 +225,16 @@ impl Package {
 				texts: Arc::clone(&texts),
 			})
 		};
+		let mut resolution_error = None;
+		let mut resolution_warnings = Vec::new();
 		let (mut session, entry) = match fa::editor_session(root, overlay) {
-			Ok(found) => found,
+			Ok(found) => {
+				resolution_warnings = found.warnings;
+				(found.session, found.entry)
+			}
 			// the dependencies can't be resolved: the package's own files
-			Err(_) => {
+			Err(error) => {
+				resolution_error = Some(error);
 				let mut session = Session::new();
 				if let Ok(codebase) = fa_codebase_parser::Codebase::scan_package(root) {
 					let resolver = CodebaseResolver::new(codebase, Some(root.to_path_buf()));
@@ -236,7 +255,24 @@ impl Package {
 			units: Vec::new(),
 			pending: FxHashSet::default(),
 			baseline: 0,
+			resolution_error,
+			resolution_warnings,
 		}
+	}
+
+	/// The diagnostics of the resolution of the dependencies for a module:
+	/// its error for every module (instead of their own diagnostics), its
+	/// warnings on `dependencies.fa`.
+	fn resolution_diagnostics(&self, module: &str) -> Option<Vec<FileDiagnostic>> {
+		if let Some(error) = &self.resolution_error {
+			return Some(vec![resolution_diagnostic(error, Severity::Error)]);
+		}
+		(module == "dependencies" && !self.resolution_warnings.is_empty()).then(|| {
+			self.resolution_warnings
+				.iter()
+				.map(|warning| resolution_diagnostic(warning, Severity::Warning))
+				.collect()
+		})
 	}
 
 	/// Whether the module system of the package knows a module.
@@ -678,6 +714,50 @@ impl AnalyzerBackend {
 	}
 }
 
+/// A message of the resolution of the dependencies (`<file>: error[DEP008]:
+/// …`, `warning[DEP004]: …`, `error: …`) as a diagnostic at the start of a
+/// file.
+fn resolution_diagnostic(message: &str, severity: Severity) -> FileDiagnostic {
+	let marker = match severity {
+		Severity::Error => "error",
+		_ => "warning",
+	};
+	let (code, text) = match message.find(&format!("{marker}[")) {
+		Some(start) => {
+			let rest = &message[start + marker.len() + 1..];
+			match rest.split_once("]: ") {
+				Some((code, text)) => (Some(code.to_string()), text),
+				None => (None, message),
+			}
+		}
+		None => (
+			None,
+			message
+				.find(&format!("{marker}: "))
+				.map_or(message, |start| &message[start + marker.len() + 2..]),
+		),
+	};
+	FileDiagnostic {
+		severity,
+		code,
+		message: text.trim_end().to_string(),
+		span: SourceSpan::new(0, 0),
+		related: Vec::new(),
+		unnecessary: false,
+	}
+}
+
+/// Whether a file is a configuration file of packages: their dependencies
+/// or their configuration are read again when it is saved.
+fn is_configuration(path: &Path) -> bool {
+	path.file_name().is_some_and(|name| {
+		matches!(
+			name.to_str(),
+			Some("package.fa" | "dependencies.fa" | "workspace.fa" | "dependencies.lock")
+		)
+	})
+}
+
 fn span(span: fa_analyzer::diagnostics::SourceSpan) -> SourceSpan {
 	SourceSpan::new(span.start as usize, span.end as usize)
 }
@@ -767,22 +847,36 @@ impl AnalysisBackend for AnalyzerBackend {
 	}
 
 	fn diagnostics(&self, uri: &Url) -> Vec<FileDiagnostic> {
+		// the diagnostics of the dependencies of a package's document: like
+		// `fa check`, an error of the resolution alone
+		let in_package = self
+			.documents
+			.get(uri)
+			.is_some_and(|document| document.package.is_some());
+		let resolution =
+			self.package_of(uri)
+				.filter(|_| in_package)
+				.and_then(|(package, module)| {
+					let found = package.resolution_diagnostics(&module)?;
+					Some((found, package.resolution_error.is_some()))
+				});
+		let resolution = match resolution {
+			Some((found, true)) => return found,
+			Some((found, false)) => found,
+			None => Vec::new(),
+		};
 		let Some((session, file)) = self.located(uri) else {
-			return Vec::new();
+			return resolution;
 		};
 		// a package's module: the diagnostics of the last complete run
 		// (the program's checks included)
 		let found = match self.package_of(uri) {
-			Some((package, module))
-				if self.documents.get(uri).is_some_and(|d| d.package.is_some()) =>
-			{
-				package
-					.diagnostics(&module)
-					.unwrap_or(session.diagnostics(file))
-			}
+			Some((package, module)) if in_package => package
+				.diagnostics(&module)
+				.unwrap_or(session.diagnostics(file)),
 			_ => session.diagnostics(file),
 		};
-		found
+		let mut converted: Vec<FileDiagnostic> = found
 			.iter()
 			.filter(|diagnostic| self.show_unsupported || diagnostic.code.id != "AN001")
 			.map(|diagnostic| FileDiagnostic {
@@ -809,7 +903,43 @@ impl AnalysisBackend for AnalyzerBackend {
 				// unreachable code (values brief §2.5)
 				unnecessary: diagnostic.code.id == "W-DO-2",
 			})
-			.collect()
+			.collect();
+		converted.extend(resolution);
+		converted
+	}
+
+	fn saved(&mut self, uri: &Url) -> Vec<Url> {
+		let Ok(path) = uri.to_file_path() else {
+			return Vec::new();
+		};
+		if !is_configuration(&path) {
+			return Vec::new();
+		}
+		// the packages it configures: its own, or every package of a workspace below it
+		let folder = path.parent().unwrap_or(Path::new("")).to_path_buf();
+		let roots: Vec<PathBuf> = self
+			.packages
+			.keys()
+			.filter(|root| root.starts_with(&folder))
+			.cloned()
+			.collect();
+		let mut changed = Vec::new();
+		for root in roots {
+			let Some(old) = self.packages.remove(&root) else {
+				continue;
+			};
+			let mut package = Package::new(&root, old.texts, &self.cancel);
+			package.run(None);
+			self.packages.insert(root.clone(), package);
+			changed.extend(
+				self.documents
+					.iter()
+					.filter(|(_, document)| document.package.as_ref() == Some(&root))
+					.map(|(uri, _)| uri.clone()),
+			);
+		}
+		changed.sort();
+		changed
 	}
 
 	fn hover(&self, uri: &Url, offset: usize) -> Option<HoverInfo> {

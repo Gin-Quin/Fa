@@ -65,7 +65,7 @@ mod testing;
 mod timings;
 mod workspace;
 
-pub use project::editor_session;
+pub use project::{EditorSession, editor_session};
 
 use build::*;
 use help::HELP;

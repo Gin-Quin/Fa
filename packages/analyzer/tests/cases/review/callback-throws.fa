@@ -1,0 +1,23 @@
+-- review item 22, decision "Callbacks that throw, in user functions": a function-typed parameter the function only calls accepts a callback that throws; the call throws its errors
+type E = Errors { Bad }
+function fail = (): Integer throws E => {
+	throw E.Bad
+}
+function one = (): Integer => 1
+function run = (f: () => Integer): Integer => f()
+function twice = (f: () => Integer, g: () => Integer): Integer => {
+	let first = f()
+	first + g()
+}
+function main = () throws E => {
+	let v = run(one)
+	let w = twice(one, one)
+	console.log(v, w)
+	let x = try run(fail)
+	console.log(x)
+}
+main() catch error => console.log("caught {error}")
+-- prints: 1 2
+-- prints: caught E.Bad
+console.log(run(() => try fail()) catch error => -1, twice(one, fail) catch error => -2)
+-- prints: -1 -2

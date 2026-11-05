@@ -18,6 +18,7 @@
 
 pub(crate) mod arrays;
 mod c_library;
+mod callbacks;
 mod calls;
 mod collections;
 mod compose;
@@ -426,6 +427,9 @@ pub struct Walker<'s> {
 	/// The places the lambdas of the call being checked write (with the
 	/// write): their facts aren't valid at the entry of a sibling lambda.
 	pub(crate) lambda_entry_writes: Vec<(PlaceId, bool, NodeId)>,
+	/// The function-typed parameters each function only calls, by
+	/// declaration node (`callbacks.rs`).
+	pub(crate) only_called: FxHashMap<NodeId, u32>,
 	/// The parent of each node of the tree, built on first use.
 	pub(crate) parents: std::cell::OnceCell<Vec<Option<NodeId>>>,
 	/// The places the lambda arguments of the call being checked write
@@ -602,6 +606,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		relation_pool_places: rustc_hash::FxHashSet::default(),
 		closure_effects: FxHashMap::default(),
 		lambda_entry_writes: Vec::new(),
+		only_called: FxHashMap::default(),
 		parents: std::cell::OnceCell::new(),
 		lambda_call_writes: None,
 		callee_name_node: None,

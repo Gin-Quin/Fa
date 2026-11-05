@@ -44,6 +44,9 @@ struct BindParam {
 	builtin_name: Option<Sym>,
 	/// Whether it has a default value.
 	has_default: bool,
+	/// A function-typed parameter the callee only calls: its argument may
+	/// throw, and the call then throws its errors (`callbacks.rs`).
+	passed: bool,
 }
 
 /// The result of binding the arguments of a call to the callee's parameters.
@@ -270,15 +273,26 @@ impl Walker<'_> {
 				if let Some(expected) = expected {
 					// a callback that throws, given to a built-in: the built-in
 					// throws its errors (design/decisions.md)
-					let expected = match kind {
-						Callee::Builtin(_) => match self.callback_throws(expected, actual) {
+					// (decision "Callbacks that throw, in user functions"): a
+					// parameter the callee only calls too
+					let passed = matches!(kind, Callee::Builtin(_))
+						|| binding
+							.arguments
+							.iter()
+							.position(
+								|argument| matches!(argument, Argument::Given(given) if *given == value),
+							)
+							.and_then(|index| params.get(index))
+							.is_some_and(|param| param.passed);
+					let expected = match passed {
+						true => match self.callback_throws(expected, actual) {
 							Some((widened, errors)) => {
 								callback_errors.push(errors);
 								widened
 							}
 							None => expected,
 						},
-						_ => expected,
+						false => expected,
 					};
 					// a parameter is a view of its argument; a built-in method
 					// (`push`, `add`) stores a copy (advanced brief §10.4)
@@ -313,6 +327,9 @@ impl Walker<'_> {
 		let throws = substitute(self, sig.throws);
 		// `Integer.round(2.7)`, `a.shiftLeft(2)`: proven, they can't fail (math.rs)
 		let throws = self.number_api_throws(n, callee, kind, &binding.arguments, throws);
+		if !callback_errors.is_empty() && !matches!(kind, Callee::Builtin(_)) {
+			self.set_flag(n, NodeFlags::PASSES_ERRORS);
+		}
 		let throws = if callback_errors.is_empty() {
 			throws
 		} else {
@@ -452,6 +469,7 @@ impl Walker<'_> {
 					named: None,
 					builtin_name: None,
 					has_default: false,
+					passed: false,
 				})
 				.collect();
 			(kind, params)
@@ -504,11 +522,12 @@ impl Walker<'_> {
 					let params = external
 						.into_iter()
 						.zip(sigs)
-						.map(|((named, has_default), &sig)| BindParam {
+						.map(|((named, has_default, passed), &sig)| BindParam {
 							sig,
 							named,
 							builtin_name: None,
 							has_default,
+							passed,
 						})
 						.collect();
 					return (Callee::Value, params);
@@ -529,16 +548,23 @@ impl Walker<'_> {
 				if info.params.len() != sigs.len() + skip {
 					return plain(Callee::Value);
 				}
-				let params = info
+				let params: Vec<(SymbolId, bool)> = info
 					.params
 					.iter()
 					.skip(skip)
+					.map(|param| (param.symbol, param.default.is_some()))
+					.collect();
+				let passed = self.only_called(declaration) >> skip;
+				let params = params
+					.into_iter()
 					.zip(sigs)
-					.map(|(param, &sig)| BindParam {
+					.enumerate()
+					.map(|(index, ((symbol, has_default), &sig))| BindParam {
 						sig,
-						named: Some((self.a.symbols.symbol(param.symbol).name, param.symbol)),
+						named: Some((self.a.symbols.symbol(symbol).name, symbol)),
 						builtin_name: None,
-						has_default: param.default.is_some(),
+						has_default,
+						passed: index < 32 && passed & (1 << index) != 0,
 					})
 					.collect();
 				(Callee::Function(declaration), params)

@@ -1,0 +1,33 @@
+-- the body of an `@for` over a key set is checked per key: `value[key]` has
+-- the type of its field (arithmetic on integer fields, locals of each type)
+type Counts = { apples: Integer, pears: Integer, label: String, nested: { plums: Integer } }
+
+function bump = <Value, keys: DeepKeys<Value>>(value: Value) => {
+	@for key in keys {
+		console.log("{key}: {value[key] + 1}")
+	}
+}
+
+function describe = <Value, keys: Keys<Value>>(value: Value) => {
+	@for key in keys {
+		let field = value[key]
+		console.log(key, field)
+	}
+}
+
+let counts: Counts = { apples = 1, pears = 2, label = "fruit", nested = { plums = 3 } }
+bump<Counts, { apples, nested { plums } }>(counts)
+bump<Counts, { pears }>(counts)
+describe<Counts, { label, apples }>(counts)
+
+static numbers: Keys<Counts> = { apples, pears }
+@for key in numbers {
+	console.log(counts[key] * 10)
+}
+-- prints: apples: 2
+-- prints: nested.plums: 4
+-- prints: pears: 3
+-- prints: apples 1
+-- prints: label fruit
+-- prints: 10
+-- prints: 20

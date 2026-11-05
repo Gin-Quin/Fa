@@ -234,12 +234,12 @@ impl Generator<'_> {
 		iterable: NodeId,
 		body: NodeId,
 	) {
+		// over a key set (fields.rs)
+		if self.analysis.key_loops.contains(&n) {
+			self.key_loop(n, pattern, iterable, body);
+			return;
+		}
 		let Some(items) = self.analysis.unrolled.get(&n).cloned() else {
-			// over a key-set parameter (fields.rs)
-			if self.analysis.key_loops.contains(&n) {
-				self.key_loop(pattern, iterable, body);
-				return;
-			}
 			self.for_statement(n, pattern, has_index, iterable, body);
 			return;
 		};

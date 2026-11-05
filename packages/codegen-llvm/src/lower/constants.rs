@@ -395,14 +395,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		iterable: NodeId,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		// over a key set: its keys, and the body's analysis for each (fields.rs)
 		let key_loop = self.analysis.key_loops.contains(&node);
-		let items = match self.analysis.unrolled.get(&node).cloned() {
-			Some(items) => items,
-			// over a key-set parameter: the keys of its binding (fields.rs)
-			None => match key_loop.then(|| self.key_set_items(iterable)).flatten() {
-				Some(items) => items,
-				None => return self.for_loop(node, pattern, has_index, iterable, body),
-			},
+		let key_analyses = if key_loop {
+			self.key_loop_analyses(node, iterable)
+		} else {
+			None
+		};
+		let items = match (&key_analyses, self.analysis.unrolled.get(&node)) {
+			(Some((keys, _)), _) => keys.iter().map(|key| Value::string(key)).collect(),
+			(None, Some(items)) => items.clone(),
+			(None, None) if key_loop => {
+				return Err(self.unsupported(node.index(), "this `@for` over a key set"));
+			}
+			(None, None) => return self.for_loop(node, pattern, has_index, iterable, body),
 		};
 		let variable = pattern.and_then(|pattern| self.analysis.symbols.symbol_of_decl(pattern));
 		let index = if has_index {
@@ -435,7 +441,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				&& let Some(key) = item.as_str()
 			{
 				self.current_keys.insert(symbol, key.to_string());
-				self.bind_key_reads(body, symbol, key)?;
+				// the locals of the body may have another type for this key
+				self.forget_body_slots(body);
 			}
 			if let Some(symbol) = variable {
 				let ty = self.analysis.symbols.symbol(symbol).ty;
@@ -456,7 +463,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				);
 				self.store(slot, value, node)?;
 			}
+			// the body as analyzed for this key
+			let main = self.analysis;
+			if let Some((_, analyses)) = &key_analyses
+				&& let Some(analysis) = analyses.get(position)
+			{
+				self.analysis = analysis;
+			}
 			let result = self.block(body, false);
+			self.analysis = main;
 			if overlay {
 				self.item_results.pop();
 			}

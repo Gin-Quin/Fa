@@ -2225,7 +2225,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Destructuring { .. } if self.is_name_alias(node) => Ok(Val::void()),
 			View::Destructuring { pattern, value, .. } => self.destructure(pattern, value),
 			// the field at a key of a key set (fields.rs)
-			View::Index { target, index } if self.analysis.key_reads.contains_key(&node) => {
+			View::Index { target, index } if self.analysis.key_reads.contains(&node) => {
 				self.key_read(node, target, index)
 			}
 			View::Index { target, index } => match self.index_special(node, target, index)? {

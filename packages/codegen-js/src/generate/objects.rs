@@ -770,7 +770,7 @@ impl Generator<'_> {
 	/// `target[index]`: an array item or a character of a string.
 	pub(crate) fn index(&mut self, n: NodeId, target: NodeId, index: NodeId) -> Expr {
 		// the field at a key of a key set (fields.rs)
-		if self.analysis.key_reads.contains_key(&n) {
+		if self.analysis.key_reads.contains(&n) {
 			return self.key_read(target, index);
 		}
 		if let Some(slice) = self.slice(target, index) {

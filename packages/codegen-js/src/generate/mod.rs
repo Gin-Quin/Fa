@@ -146,6 +146,8 @@ pub(crate) struct Generator<'s> {
 	scopes: Scopes,
 	/// The statements being written.
 	pub(crate) out: Writer,
+	/// The key whose fields an unrolled `@for` over a key set reads (fields.rs).
+	pub(crate) direct_key: Option<String>,
 	/// The current function.
 	fcx: FnCx,
 	/// The scope of the module.
@@ -295,6 +297,7 @@ pub(crate) fn generate_module(
 		names: HashMap::new(),
 		scopes: Scopes::new(),
 		out: Writer::new(),
+		direct_key: None,
 		fcx: FnCx::default(),
 		module_scope: None,
 		module_values: HashSet::new(),

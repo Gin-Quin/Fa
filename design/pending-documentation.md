@@ -151,3 +151,7 @@ Document what foreign-code.md and relations.md use: a type can declare types in 
 ## `documentation/types/fields.md`, `:::implementation` section (native)
 
 Add: "**Fields set once.** When no code of the program writes a field after the literal that builds its object (no assignment, append or changing reference of the field, no whole value of the type replaced but by a declaration), a method reads it once at its entry, a string with its bytes and length, and the small methods it calls on `self` (like `function current = (self): Byte => self.text.bytes().get(self.position) ?? 0`) are expanded into its body to use that read: a parser scanning `self.text` tests whether the text is inline once per call, not once per byte."
+
+## `documentation/architecture/testing.md`, "How tests run"
+
+Add a bullet: "A test file that is still running after `FA_TEST_TIMEOUT` seconds (300 by default) is stopped, and reported as failed with that reason: a test that never ends can't block `fa test`." (Note: the per-test `test.timeout` of the configuration is parsed but not enforced by the Bun runner yet; this per-file limit is the backstop.)

@@ -1,6 +1,8 @@
 //! `fa test`: the tests of the `*.test.fa` files, compiled with the
 //! package and run with Bun.
 
+use std::time::Duration;
+
 use super::*;
 
 /// `fa test [<package>] [--watch]` (advanced brief §18.2): runs the tests
@@ -88,24 +90,28 @@ pub(crate) fn test(arguments: &[OsString]) -> i32 {
 	})
 }
 
-/// Whether the `package.fa` of a package sets `build.asynchronous`: the
-/// checks of a configured asynchronous mode (`WCONC001`, `CONC010`) read
-/// the whole program, so it runs on the sequential analysis.
+/// The value of `build.asynchronous` in the `package.fa` of a package, if
+/// it sets one.
+fn asynchronous_setting(package: &Path) -> Option<fa_analyzer::configuration::ConfigValue> {
+	workspace::package_configuration(package)?
+		.field("build")?
+		.field("asynchronous")
+		.cloned()
+}
+
 /// The asynchronous mode `build.asynchronous` of a package sets, if any.
 pub(crate) fn configured_asynchronous(package: &Path) -> Option<bool> {
-	match workspace::package_configuration(package)?
-		.field("build")?
-		.field("asynchronous")?
-	{
-		fa_analyzer::configuration::ConfigValue::Boolean(value) => Some(*value),
+	match asynchronous_setting(package)? {
+		fa_analyzer::configuration::ConfigValue::Boolean(value) => Some(value),
 		_ => None,
 	}
 }
 
+/// Whether the `package.fa` of a package sets `build.asynchronous`: the
+/// checks of a configured asynchronous mode (`WCONC001`, `CONC010`) read
+/// the whole program, so it runs on the sequential analysis.
 pub(crate) fn configures_asynchronous(package: &Path) -> bool {
-	workspace::package_configuration(package)
-		.and_then(|value| value.field("build").cloned())
-		.is_some_and(|build| build.field("asynchronous").is_some())
+	asynchronous_setting(package).is_some()
 }
 
 /// `fa test` of a package on the parallel and streaming pipeline: its
@@ -205,6 +211,150 @@ fn test_modules<'p>(paths: impl IntoIterator<Item = &'p str>) -> Vec<String> {
 /// (`faRunTests`, `--fa-test-file`).
 const TEST_SUMMARY: &str = "\u{1}fa-test-summary ";
 
+/// How long a test file may run before it is stopped and reported as
+/// failed: `FA_TEST_TIMEOUT` seconds, else 300.
+fn test_timeout() -> Duration {
+	let seconds = std::env::var("FA_TEST_TIMEOUT")
+		.ok()
+		.and_then(|value| value.parse().ok())
+		.filter(|&seconds: &u64| seconds > 0)
+		.unwrap_or(300);
+	Duration::from_secs(seconds)
+}
+
+/// What a test file that ran for too long says (`None`: the tests of a
+/// standalone file).
+fn timed_out(module: Option<&str>, timeout: Duration) -> String {
+	let what = match module {
+		Some(module) => format!("{module}.fa: its tests"),
+		None => "the tests".to_string(),
+	};
+	format!(
+		"✗ {what} didn't finish in {} s, so they were stopped (set `FA_TEST_TIMEOUT` to give them more seconds)",
+		timeout.as_secs()
+	)
+}
+
+/// Waits for a process, killing it after `timeout`: its status, `None`
+/// when it was killed.
+fn wait_with_timeout(
+	child: &mut std::process::Child,
+	timeout: Duration,
+) -> std::io::Result<Option<std::process::ExitStatus>> {
+	let start = std::time::Instant::now();
+	let mut pause = Duration::from_millis(1);
+	loop {
+		if let Some(status) = child.try_wait()? {
+			return Ok(Some(status));
+		}
+		if start.elapsed() >= timeout {
+			let _ = child.kill();
+			let _ = child.wait();
+			return Ok(None);
+		}
+		std::thread::sleep(pause);
+		pause = (pause * 2).min(Duration::from_millis(20));
+	}
+}
+
+/// Runs the tests of a compiled program in place (its output as it
+/// comes), stopped after [`test_timeout`].
+fn run_in_place(main: &Path, module: Option<&str>) -> i32 {
+	let Some(bun) = find_bun() else {
+		eprintln!("{BUN_MISSING}");
+		return 1;
+	};
+	let _ = std::io::stdout().flush();
+	let mut child = match Command::new(&bun).arg(main).spawn() {
+		Ok(child) => child,
+		Err(error) => {
+			eprintln!("fa: can't start `{}`: {error}", bun.display());
+			return 1;
+		}
+	};
+	let timeout = test_timeout();
+	match wait_with_timeout(&mut child, timeout) {
+		Ok(Some(status)) => exit_code(status),
+		Ok(None) => {
+			println!("{}", timed_out(module, timeout));
+			1
+		}
+		Err(error) => {
+			eprintln!("fa test: can't wait for Bun: {error}");
+			1
+		}
+	}
+}
+
+/// Runs a test file in a Bun process of its own, its output collected,
+/// stopped after `timeout`: its output (what it printed until then when
+/// it was stopped), and whether it was stopped.
+fn run_test_file(
+	bun: &Path,
+	main: &Path,
+	module: &str,
+	timeout: Duration,
+) -> std::io::Result<(std::process::Output, bool)> {
+	use std::io::Read as _;
+	let mut child = Command::new(bun)
+		.arg(main)
+		.arg(format!("--fa-test-file={module}"))
+		.stdin(std::process::Stdio::null())
+		.stdout(std::process::Stdio::piped())
+		.stderr(std::process::Stdio::piped())
+		.spawn()?;
+	// the outputs are read while it runs (a full pipe would block it)
+	let (sender, receiver) = std::sync::mpsc::channel();
+	for (index, stream) in [
+		child
+			.stdout
+			.take()
+			.map(|stream| Box::new(stream) as Box<dyn std::io::Read + Send>),
+		child
+			.stderr
+			.take()
+			.map(|stream| Box::new(stream) as Box<dyn std::io::Read + Send>),
+	]
+	.into_iter()
+	.enumerate()
+	{
+		let sender = sender.clone();
+		std::thread::spawn(move || {
+			let mut bytes = Vec::new();
+			if let Some(mut stream) = stream {
+				let _ = stream.read_to_end(&mut bytes);
+			}
+			let _ = sender.send((index, bytes));
+		});
+	}
+	drop(sender);
+	let status = wait_with_timeout(&mut child, timeout)?;
+	let mut outputs = [Vec::new(), Vec::new()];
+	// a process it started may keep the pipes open: not waited for long
+	let deadline = std::time::Instant::now() + Duration::from_secs(1);
+	for _ in 0..2 {
+		let left = deadline.saturating_duration_since(std::time::Instant::now());
+		match receiver.recv_timeout(left) {
+			Ok((index, bytes)) => outputs[index] = bytes,
+			Err(_) => break,
+		}
+	}
+	let [stdout, stderr] = outputs;
+	let stopped = status.is_none();
+	let status = match status {
+		Some(status) => status,
+		None => child.wait()?,
+	};
+	Ok((
+		std::process::Output {
+			status,
+			stdout,
+			stderr,
+		},
+		stopped,
+	))
+}
+
 /// The number of test files run at once: `FA_TEST_WORKERS`, else the
 /// number of cores.
 fn test_workers() -> usize {
@@ -247,7 +397,7 @@ impl Counts {
 /// done, then the counts added up. A single test file runs in place.
 pub(crate) fn run_test_files(main: &Path, modules: &[String]) -> i32 {
 	if modules.len() <= 1 {
-		return run_with_bun(main, &[]);
+		return run_in_place(main, modules.first().map(String::as_str));
 	}
 	run_test_processes(main, modules)
 }
@@ -261,6 +411,7 @@ pub(crate) fn run_test_processes(main: &Path, modules: &[String]) -> i32 {
 	};
 	let _ = std::io::stdout().flush();
 	let workers = test_workers().min(modules.len());
+	let timeout = test_timeout();
 	let next = std::sync::atomic::AtomicUsize::new(0);
 	let mut totals = Counts::default();
 	let mut crashed = false;
@@ -275,11 +426,7 @@ pub(crate) fn run_test_processes(main: &Path, modules: &[String]) -> i32 {
 					let Some(module) = modules.get(index) else {
 						break;
 					};
-					let output = Command::new(bun)
-						.arg(main)
-						.arg(format!("--fa-test-file={module}"))
-						.stdin(std::process::Stdio::null())
-						.output();
+					let output = run_test_file(bun, main, module, timeout);
 					if sender.send((index, output)).is_err() {
 						break;
 					}
@@ -292,7 +439,7 @@ pub(crate) fn run_test_processes(main: &Path, modules: &[String]) -> i32 {
 		for (index, output) in receiver {
 			done.insert(index, output);
 			while let Some(output) = done.remove(&printed) {
-				match print_test_file(&modules[printed], output) {
+				match print_test_file(&modules[printed], output, timeout) {
 					Some(counts) => totals.add(counts),
 					None => {
 						crashed = true;
@@ -309,8 +456,12 @@ pub(crate) fn run_test_processes(main: &Path, modules: &[String]) -> i32 {
 
 /// Prints the output of a test file's process, and returns its counts;
 /// `None` when it ended without them (reported as a failure).
-fn print_test_file(module: &str, output: std::io::Result<std::process::Output>) -> Option<Counts> {
-	let output = match output {
+fn print_test_file(
+	module: &str,
+	output: std::io::Result<(std::process::Output, bool)>,
+	timeout: Duration,
+) -> Option<Counts> {
+	let (output, stopped) = match output {
 		Ok(output) => output,
 		Err(error) => {
 			println!("✗ {module}.fa: can't start Bun: {error}");
@@ -332,6 +483,10 @@ fn print_test_file(module: &str, output: std::io::Result<std::process::Output>) 
 	print!("{text}");
 	let _ = std::io::stdout().flush();
 	eprint!("{}", String::from_utf8_lossy(&output.stderr));
+	if stopped {
+		println!("{}", timed_out(Some(module), timeout));
+		return None;
+	}
 	if counts.is_none() {
 		println!(
 			"✗ {module}.fa: its tests didn't finish (exit code {})",

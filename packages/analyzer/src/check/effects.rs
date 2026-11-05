@@ -1488,6 +1488,9 @@ impl Walker<'_> {
 				info.arguments.clone()
 			};
 			self.check_aliasing(n, &name, &changed, &arguments, receiver);
+			if let Callee::Function(declaration) = info.callee {
+				self.check_module_read_aliasing(n, &name, declaration, &changed, &arguments);
+			}
 		}
 		// the relation sides the changes also write (relations.rs, §8.6, D47)
 		let implied = if receiver_place.is_none() {
@@ -1678,6 +1681,108 @@ impl Walker<'_> {
 		}
 	}
 
+	/// `REF013` for an argument that a callee of this file changes, while
+	/// the callee also reads a module-level value it may designate
+	/// (reference-checking.md, "Arguments that alias").
+	fn check_module_read_aliasing(
+		&mut self,
+		n: NodeId,
+		callee: &str,
+		declaration: NodeId,
+		changed: &[(PlaceId, bool, Option<NodeId>)],
+		arguments: &[Argument],
+	) {
+		// the changes of its parameters' arguments, not of its module values
+		let given: Vec<NodeId> = arguments
+			.iter()
+			.filter_map(|argument| match argument {
+				Argument::Given(node) => Some(*node),
+				_ => None,
+			})
+			.collect();
+		let changed: Vec<(PlaceId, bool, Option<NodeId>)> = changed
+			.iter()
+			.copied()
+			.filter(|&(_, _, from)| from.is_some_and(|from| given.contains(&from)))
+			.collect();
+		if changed.is_empty() {
+			return;
+		}
+		let Some(body) = self.a.functions.get(&declaration).map(|info| info.body) else {
+			return;
+		};
+		// the module-level `mutable` values its body names
+		let mut read: Vec<SymbolId> = Vec::new();
+		let mut stack = vec![body];
+		while let Some(node) = stack.pop() {
+			if let View::Name(_) = self.view(node)
+				&& let Resolution::Local(symbol) = self.a.resolution(node)
+				&& self.a.symbols.symbol(symbol).kind == SymbolKind::Mutable
+				&& self.is_module_level(symbol)
+				&& !read.contains(&symbol)
+			{
+				read.push(symbol);
+			}
+			stack.extend(syntax::children(&self.tree, node));
+		}
+		for symbol in read {
+			let Some(module_place) = self.symbol_target(symbol) else {
+				continue;
+			};
+			for &(place, _, _) in &changed {
+				if !self.may_overlap(place, module_place) {
+					continue;
+				}
+				let name = self
+					.s
+					.types
+					.syms
+					.resolve(self.a.symbols.symbol(symbol).name)
+					.to_string();
+				let message = format!(
+					"`{callee}` changes `{}`, and also reads `{name}`, which it may designate: pass a copy, or let `{callee}` use `{name}` directly",
+					self.place_text(place)
+				);
+				let diagnostic =
+					self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
+				self.report_flow(diagnostic);
+				return;
+			}
+		}
+	}
+
+	/// Whether a symbol is declared outside every function of the file.
+	fn is_module_level(&self, symbol: SymbolId) -> bool {
+		let mut current = Some(self.a.symbols.symbol(symbol).scope);
+		while let Some(scope) = current {
+			let data = self.a.symbols.scope(scope);
+			if data.kind == ScopeKind::Function {
+				return false;
+			}
+			current = data.parent;
+		}
+		true
+	}
+
+	/// The local a place expression starts from: `hero` in `hero.power`.
+	fn root_symbol(&self, n: NodeId) -> Option<SymbolId> {
+		let mut n = self.strip_groups(n);
+		loop {
+			match self.view(n) {
+				View::Name(_) => {
+					return match self.a.resolution(n) {
+						Resolution::Local(symbol) => Some(symbol),
+						_ => None,
+					};
+				}
+				View::Access { target, .. } | View::Index { target, .. } => {
+					n = self.strip_groups(target);
+				}
+				_ => return None,
+			}
+		}
+	}
+
 	/// The name of a callee for messages: `push`, `addBonus`.
 	fn callee_name(&self, callee: NodeId) -> String {
 		let callee = self.strip_groups(callee);
@@ -1774,6 +1879,25 @@ impl Walker<'_> {
 		callee: &str,
 		method: bool,
 	) -> bool {
+		// a set element or a map key is read-only (`CL031`, collections.rs)
+		if let Some(symbol) = self.root_symbol(node)
+			&& self.readonly_elements.contains(&symbol)
+		{
+			let name = self
+				.s
+				.types
+				.syms
+				.resolve(self.a.symbols.symbol(symbol).name)
+				.to_string();
+			let message = format!(
+				"`{callee}` changes `{}`, but `{name}` is a key or an element of a set: it can't be modified; delete it and add the new value",
+				self.place_text(base)
+			);
+			let diagnostic =
+				self.diagnostic(&crate::diagnostics::codes::types::CL031, node, message);
+			self.report_flow(diagnostic);
+			return false;
+		}
 		let Writable::No(symbol) = self.place_writable(base) else {
 			return true;
 		};

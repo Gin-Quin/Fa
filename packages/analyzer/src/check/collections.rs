@@ -804,6 +804,27 @@ impl Walker<'_> {
 		}
 	}
 
+	/// Whether `n` is `map.keys()`: its items are the map's keys.
+	pub(super) fn is_map_keys_call(&self, n: NodeId) -> bool {
+		let n = self.strip_groups(n);
+		let View::Call { callee, .. } = self.view(n) else {
+			return false;
+		};
+		let View::Access {
+			target, members, ..
+		} = self.view(self.strip_groups(callee))
+		else {
+			return false;
+		};
+		members
+			.last()
+			.is_some_and(|member| self.tree.text(member.index()) == "keys")
+			&& members.len() == 1
+			&& self
+				.map_key(self.type_of(self.strip_groups(target)))
+				.is_some()
+	}
+
 	/// `CL031`: writing a set element or a map key (a read-only reference),
 	/// instead of `E-DECL-3`. Type part.
 	pub(super) fn report_readonly_element(&mut self, target: NodeId, symbol: SymbolId) -> bool {

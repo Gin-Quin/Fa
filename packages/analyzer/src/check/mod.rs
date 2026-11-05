@@ -412,6 +412,11 @@ pub struct Walker<'s> {
 	/// The places the lambdas of the call being checked write (with the
 	/// write): their facts aren't valid at the entry of a sibling lambda.
 	pub(crate) lambda_entry_writes: Vec<(PlaceId, bool, NodeId)>,
+	/// The callee name of the call being checked (`moves.rs`).
+	pub(crate) callee_name_node: Option<NodeId>,
+	/// The locals captured by a local function used as a value (`let call =
+	/// show`): read whenever it is called, never moved (`moves.rs`).
+	pub(crate) pinned_captures: rustc_hash::FxHashSet<SymbolId>,
 	/// The effects written in each function's signature, by lambda node.
 	pub(crate) declared_effect_sets: FxHashMap<NodeId, crate::ids::EffectSetId>,
 	/// The captured locals each closure writes, with the write (by lambda
@@ -575,6 +580,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		relation_pool_places: rustc_hash::FxHashSet::default(),
 		closure_effects: FxHashMap::default(),
 		lambda_entry_writes: Vec::new(),
+		callee_name_node: None,
+		pinned_captures: rustc_hash::FxHashSet::default(),
 		parallel: Vec::new(),
 		parallel_callbacks: rustc_hash::FxHashSet::default(),
 		parallel_views: Vec::new(),

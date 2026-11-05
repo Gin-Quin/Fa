@@ -787,6 +787,10 @@ impl Walker<'_> {
 							// the elements of a set are read-only (collections.rs)
 							let iterable_ty = w.type_of(iterable);
 							w.mark_if_readonly_element(symbol, iterable_ty);
+							// the keys of a map (`for key in map.keys()`)
+							if w.is_map_keys_call(iterable) {
+								w.readonly_elements.insert(symbol);
+							}
 						}
 						item
 					});

@@ -1,0 +1,20 @@
+-- review 12: the elements of a set and the keys of a map can't be changed through a call either
+type Hero = { name: String, power: Integer }
+function boost = (hero: Hero) mutates hero.power => {
+	hero.power += 1
+}
+function run = () => {
+	mutable heroes: Set<Hero> = [Hero { name = "Ana", power = 1 }, Hero { name = "Ana", power = 2 }]
+	for hero in heroes {
+		boost(hero) -- error: CL031
+	}
+	console.log(heroes.size)
+	mutable scores: Map<Array<String>, Integer> = [(["a"], 1)]
+	for key in scores.keys() {
+		key.push("b") -- error: CL031
+	}
+	for (key, value) in scores {
+		key.push("c") -- error: CL031
+	}
+}
+run()

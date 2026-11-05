@@ -147,7 +147,10 @@ impl Walker<'_> {
 			// `String(x)`, type functions: later milestones
 			return self.unsupported(n, "calling a type");
 		}
+		// a local function called by name is not used as a value (moves.rs)
+		let saved_callee = self.callee_name_node.replace(self.strip_groups(callee));
 		let callee_ty = self.check(callee, None);
+		self.callee_name_node = saved_callee;
 		// `numbers.parallel().map(f)`: `f` follows the rules of a parallel body
 		self.parallel_operation(n, callee, arguments);
 		// `a?.f()`: called when `a` is not `none`, `none` otherwise

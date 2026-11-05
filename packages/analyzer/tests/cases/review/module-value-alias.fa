@@ -1,0 +1,13 @@
+-- review 11: an argument the callee changes may not alias a module-level value it reads
+type Config = { names: Array<String> }
+mutable config = Config { names = ["a"] }
+mutable other = Config { names = ["b"] }
+function grow = (target: Config) throws IndexError mutates target => {
+	use first = try config.names[0]
+	for index in 0..100 {
+		target.names.push("x")
+	}
+	console.log(first)
+}
+try grow(config) -- error: REF013
+try grow(other)

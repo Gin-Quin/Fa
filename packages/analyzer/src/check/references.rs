@@ -433,6 +433,31 @@ impl Walker<'_> {
 			return;
 		};
 		for symbol in captures {
+			// a captured task (worker's handle, resource) moved away since
+			if self.body.flow.reachable
+				&& let Some(&(_, at)) = self
+					.body
+					.flow
+					.consumed
+					.iter()
+					.find(|&&(other, _)| other == symbol)
+				&& self.reported_once.insert((n, "MEM002"))
+			{
+				let name = self
+					.s
+					.types
+					.syms
+					.resolve(self.a.symbols.symbol(symbol).name)
+					.to_string();
+				let message = format!(
+					"this call runs `{}`, which uses `{name}`, but `{name}` was consumed on line {}: a task, a worker's handle or a resource can't be used after it is moved or awaited",
+					self.function_name_of(function),
+					self.line_of(at)
+				);
+				let diagnostic =
+					self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, n, message);
+				self.report_flow(diagnostic);
+			}
 			let kind = self.a.symbols.symbol(symbol).kind;
 			if matches!(kind, SymbolKind::Use | SymbolKind::MutableUse)
 				|| self.iterator_locals.contains_key(&symbol)

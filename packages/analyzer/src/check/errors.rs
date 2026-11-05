@@ -245,8 +245,16 @@ impl Walker<'_> {
 			}
 			_ => None,
 		};
+		// (an index anywhere in the target can fail: `try kept[0].count = 1`)
 		let infallible_assignment = assignment_target.is_some_and(|target| {
-			!matches!(self.view(self.strip_groups(target)), View::Index { .. })
+			let mut node = self.strip_groups(target);
+			loop {
+				match self.view(node) {
+					View::Index { .. } => return false,
+					View::Access { target, .. } => node = self.strip_groups(target),
+					_ => return true,
+				}
+			}
 		});
 		if infallible_assignment && self.reported_once.insert((n, "E-DECL-15")) {
 			let target = assignment_target.unwrap_or(value);

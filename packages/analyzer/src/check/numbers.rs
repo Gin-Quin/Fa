@@ -373,12 +373,16 @@ impl Walker<'_> {
 			return;
 		}
 		let set = match self.s.types.as_int(ty) {
-			// a value checked at the sink (`let y: Int8 = x + 126`) wraps
-			// without overflow checks: any value of the type
+			// a value that may overflow or not fit (`let y: Int8 = x + 126`)
+			// wraps without overflow checks: any value of the type (decision
+			// "Bounds stay memory-safe in release builds"); the intervals
+			// recorded for the nodes stay (the backends wrap by them)
 			Some(_)
 				if self
 					.a
-					.has_flags(self.strip_groups(value), NodeFlags::SINK_CHECK) =>
+					.flags_of(self.strip_groups(value))
+					.intersects(NodeFlags::SINK_CHECK | NodeFlags::OVERFLOW_NATIVE)
+					&& self.s.types.interval_of(ty).is_some_and(narrow) =>
 			{
 				None
 			}
@@ -1181,19 +1185,7 @@ impl Walker<'_> {
 			},
 		);
 		if let Some(range) = self.s.types.interval_of(ty) {
-			// an operation that may overflow wraps in a build without overflow
-			// checks: its values are its type's (decision "Bounds stay
-			// memory-safe in release builds"), so no proof leans on a trap
-			// (an unbounded operand comes from a counter or a widened loop
-			// bound: a non-negative 64-bit count that can't wrap in practice)
-			let unbounded = interval.lo <= -crate::types::int::INFINITY
-				|| interval.hi >= crate::types::int::INFINITY;
-			// (beyond JavaScript's safe integers a number loses precision, keeps its sign)
-			if steps.flags.contains(NodeFlags::OVERFLOW_NATIVE) && !unbounded {
-				self.record_interval(n, range, range);
-			} else {
-				self.record_interval(n, interval, range);
-			}
+			self.record_interval(n, interval, range);
 		}
 		if steps.zero_divisor {
 			let diagnostic = self.diagnostic(
@@ -1633,8 +1625,9 @@ impl Walker<'_> {
 			// checks: the place may then hold any value of its type, except a
 			// non-negative 64-bit counter growing by `+= 1` (it can't reach
 			// the limit in practice)
-			let wraps = step_flags.contains(NodeFlags::OVERFLOW_NATIVE)
-				|| !range.contains_interval(checked);
+			let wraps = narrow(range)
+				&& (step_flags.contains(NodeFlags::OVERFLOW_NATIVE)
+					|| !range.contains_interval(checked));
 			let counter = op == ArithOp::Add
 				&& right.as_exact() == Some(I256::ONE)
 				&& current.hull.lo >= I256::ZERO
@@ -1949,4 +1942,12 @@ impl Walker<'_> {
 			TypeId::RANGE
 		})
 	}
+}
+
+/// Whether an integer type is narrower than 64 bits: its values wrap after
+/// a few steps without overflow checks. A 64-bit value derived from lengths
+/// and counters can't reach its limits in practice (the argument of
+/// `proofs::reliable_interval`).
+fn narrow(range: Interval) -> bool {
+	range.hi < I256::from(i64::MAX)
 }

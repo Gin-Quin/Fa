@@ -134,6 +134,16 @@ describe("equality (values brief section 13, types brief D17, D63)", () => {
 	});
 });
 
+describe("collections compare by value, never by identity", () => {
+	test("a pool of objects (a Set of them): its elements in order", () => {
+		const a = new Set([{ name: "ant" }, { name: "cat" }]);
+		const b = new Set([{ name: "ant" }, { name: "cat" }]);
+		expect(faEquals(a, b)).toBe(true);
+		expect(faEquals(a, new Set([{ name: "ant" }, { name: "dog" }]))).toBe(false);
+		expect(faEquals(new Set([1, 2]), new Set([2, 1]))).toBe(true);
+	});
+});
+
 describe("hashing", () => {
 	test("is a 32-bit unsigned integer", () => {
 		for (const value of [0, -1, 1.5, NaN, "a", "", true, [1], { a: 1 }, 2n ** 100n, undefined]) {

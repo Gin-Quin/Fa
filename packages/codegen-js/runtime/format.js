@@ -91,6 +91,7 @@ export function faFormatNested(value) {
 					return faFormatMap(/** @type {Iterable<[unknown, unknown]>} */ (value));
 				case "Set":
 				case "fa:Set":
+				case "fa:ValuePool":
 					return faFormatSet(/** @type {Iterable<unknown>} */ (value));
 				case "fa:Range":
 					return faFormatRange(/** @type {any} */ (value));

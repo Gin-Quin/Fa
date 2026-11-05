@@ -1026,6 +1026,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.arrays_equal(left, right, item_type, node)
 			}
 			Repr::Map(_) | Repr::Set(_) if op.is_none() => self.tables_equal(left, right, node),
+			// pools and columnars: their elements in slot order
+			Repr::Pool(item_type) | Repr::Columnar(item_type) if op.is_none() => {
+				let right = self.convert(right, left.repr, node.index())?;
+				let left = self.pool_view(left, node)?;
+				let right = self.pool_view(right, node)?;
+				self.arrays_equal(left, right, item_type, node)
+			}
 			Repr::Rec(target) if op.is_none() => {
 				let right = self.convert(right, left.repr, node.index())?;
 				let target = self.repr_of(target, node.index())?;

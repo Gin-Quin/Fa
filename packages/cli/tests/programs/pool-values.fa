@@ -1,0 +1,52 @@
+-- Pools of values that are not objects: references to their elements
+-- (`find`, `add`), removals through them, and the other methods.
+mutable scores = Pool<Integer>.from([3, 7, 9, 7])
+use seven = scores.find((score) => score == 7)
+if seven is not none {
+	seven += 1
+}
+use added = scores.add(5)
+added *= 2
+console.log(scores, scores.size, added)
+console.log(scores.map((score) => score * 10))
+console.log(scores.reduce((total, score) => total + score, 0), scores.sum())
+console.log(scores.some((score) => score == 9), scores.every((score) => score > 0))
+console.log(scores.includes(10), scores.includes(4), scores.isEmpty())
+mutable copy = scores
+copy.add(1)
+console.log(copy.size, scores.size)
+use nine = scores.find((score) => score == 9)
+if nine is not none {
+	let taken = scores.take(nine)
+	console.log(taken, scores)
+}
+mutable use current = scores.find((score) => score == 3)
+reuse current = scores.find((score) => score == 7)
+if current is not none {
+	current = 70
+}
+console.log(scores)
+scores.deleteWhere((score) => score > 50)
+console.log(scores)
+mutable words = GrowingPool<String>.from(["a", "bb"])
+use word = words.find((word) => word.length == 2)
+if word is not none {
+	word += "!"
+}
+console.log(words)
+function total = (pool: Pool<Integer>): Integer => pool.sum()
+console.log(total(scores))
+scores.clear()
+console.log(scores, scores.isEmpty())
+-- prints: [3, 8, 9, 7, 10] 5 10
+-- prints: [30, 80, 90, 70, 100]
+-- prints: 37 37
+-- prints: true true
+-- prints: true false false
+-- prints: 6 5
+-- prints: 9 [3, 8, 7, 10]
+-- prints: [3, 8, 70, 10]
+-- prints: [3, 8, 10]
+-- prints: ["a", "bb!"]
+-- prints: 21
+-- prints: [] true

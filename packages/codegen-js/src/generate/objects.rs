@@ -1435,6 +1435,14 @@ impl Generator<'_> {
 				let wanted = format!("{item_copy}$array");
 				(wanted, format!("(value) => value.map({item_copy})"))
 			}
+			// a pool of values: its values, in new slots
+			TypeKind::Collection(..) if self.is_value_pool(ty) => {
+				let class = self.helper("FaValuePool");
+				(
+					"copy$valuePool".to_string(),
+					format!("(value) => new {class}(value)"),
+				)
+			}
 			// a pool or a columnar: a `Set` of objects, copied one by one
 			TypeKind::Collection(kind, item, _) if crate::generate::collections::is_pool(kind) => {
 				let item_copy = self.copy_function(item)?;

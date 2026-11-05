@@ -1331,10 +1331,11 @@ pub fn compile_package(
 		.into_inner()
 		.unwrap_or_else(|poisoned| poisoned.into_inner());
 	// every unit's facts, merged, for every lowering (`facts.rs`)
-	let facts = recorder
+	let mut facts = recorder
 		.facts
 		.into_inner()
 		.unwrap_or_else(|poisoned| poisoned.into_inner());
+	facts.finish();
 	let split = &SplitOptions {
 		facts: Some(std::sync::Arc::new(facts)),
 		..split.clone()

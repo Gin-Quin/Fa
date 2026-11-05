@@ -49,3 +49,10 @@ mutable mixed = "x"
 mixed += "{small}"
 mixed += "{large}"
 console.log(mixed) -- prints: x25518446744073709551615
+
+-- an inline string whose bytes fill its length word (UTF-8 above 0x7f): never
+-- taken for a heap block with room
+mutable accented = "0123456789abcdeé"
+accented += "x"
+accented += "{7}"
+console.log(accented) -- prints: 0123456789abcdeéx7

@@ -177,6 +177,27 @@ fn units_agree_on_the_layout_of_maps() {
 	}
 }
 
+/// Never-negative fields in a build per unit (`fa-codegen-llvm`,
+/// `proofs.rs`): a field counted up from zero in its own unit is proven, one
+/// stored negative in another unit is not, and `get` counts it from the end.
+#[test]
+fn units_agree_on_never_negative_fields() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let cache = scratch("packages-cursors");
+	for target in ["native", "bun"] {
+		if target == "bun" && !fa_bun() {
+			continue;
+		}
+		let option = format!("--target={target}");
+		let (stdout, stderr, code) = fa(&["run", &option, "cursors"], &fixtures(), &cache);
+		assert_eq!(stdout, "294 122\n", "{target}, stderr: {stderr}");
+		assert_eq!(code, 0, "{target}, stderr: {stderr}");
+	}
+}
+
 /// A package compiled per unit (design/parallel-pipeline.md §3.3): the
 /// objects of its units (the cache of `fa run`) and its executable
 /// (`fa build`, ThinLTO) are the same whatever the threads and the order

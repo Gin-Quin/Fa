@@ -546,8 +546,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// comparison with small constants only: `(2 * kind + 2) >> 1`
 	/// (arithmetic) is `kind + 1` when `kind < KIND_MASK`, and negative
 	/// otherwise (the `INLINE` bit becomes the sign; a view's
-	/// `2^63 - 2 + 2` too). Only the capacity is transformed, so that a loop
-	/// computing `needed` keeps no shifted copy of it.
+	/// `2^63 - 2 + 2` too), made 0 then. Only the capacity is transformed,
+	/// so that a loop computing `needed` keeps no shifted copy of it.
 	pub(crate) fn owned_room(
 		&self,
 		capacity: IntValue<'ctx>,
@@ -558,9 +558,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let kind = self.builder.build_left_shift(capacity, one, "")?;
 		let kind = self.builder.build_int_add(kind, two, "")?;
 		let above = self.builder.build_right_shift(kind, one, true, "")?;
+		// 0 for a string that owns no block: the length word of an inline
+		// string holds its bytes, so `needed` may be anything there
+		let smax = self.intrinsic("llvm.smax", &[self.usize.into()])?;
+		let above = self
+			.call_value(smax, &[above.into(), self.usize.const_zero().into()])?
+			.into_int_value();
 		Ok(self
 			.builder
-			.build_int_compare(IntPredicate::SLT, needed, above, "")?)
+			.build_int_compare(IntPredicate::ULT, needed, above, "")?)
 	}
 
 	/// The most digits of an integer that [`Lowering::append_integer`]

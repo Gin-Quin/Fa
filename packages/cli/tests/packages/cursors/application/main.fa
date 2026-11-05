@@ -1,0 +1,13 @@
+export function = (arguments: Array<String>): Integer => {
+	mutable cursor = library.Cursor { text = "abc", position = 0 }
+	mutable total = 0
+	while cursor.current() != 0 {
+		total += cursor.current()
+		cursor.advance()
+	}
+	-- stored negative here: the last byte
+	mutable mark = library.Mark { text = "xyz", at = 0 }
+	mark.at = 0 - 1
+	console.log(total, mark.current())
+	0
+}

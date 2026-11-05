@@ -1,0 +1,7 @@
+-- A field read in this unit and stored negative in another.
+export type = {
+	text: String
+	at: Integer
+
+	function current = (self): Byte => self.text.bytes().get(self.at) ?? 0
+}

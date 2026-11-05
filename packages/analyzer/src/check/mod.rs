@@ -1014,6 +1014,17 @@ impl Walker<'_> {
 				self.record_narrowing_copy(n, actual, target);
 			}
 			Err(Reason::Range) => self.sink_integer(n, actual, target),
+			// `Array<Int64>` for `Array<Integer>`: the same values, stored
+			// differently (types brief D2)
+			Err(Reason::Storage) => {
+				let message = format!(
+					"a `{}` is not a `{}`: the same values are stored differently inside them (a 64-bit integer is a `bigint` on JavaScript, an `Integer` a number), convert the items, ex: `values.map((value) => Integer(value))`",
+					self.display(actual),
+					self.display(target)
+				);
+				let diagnostic = self.diagnostic(&codes::types::CV005, n, message);
+				self.report_flow(diagnostic);
+			}
 			Err(_) if self.string_sink_mismatch(n, actual, target) => {}
 			Err(_) if self.inexact_collection(n, actual, target) => {}
 			Err(_) if self.nominal_mismatch(n, actual, target) => {}

@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- error: CV005
 -- brief: ✗ cv-11: CV005 (D2: views between number and bigint integer storage)
 function total = (values: Array<Integer>) => values.length

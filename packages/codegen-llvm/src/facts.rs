@@ -857,6 +857,22 @@ mod tests {
 		);
 	}
 
+	/// The runtime links and unlinks relation sides (an assignment of the
+	/// other side, a removal): both sides count as written without any store
+	/// to them, so no method reads them once.
+	#[test]
+	fn relation_sides_are_written() {
+		let found = written(
+			"type Dance = {\n\tpeople: Pool<Person> = []\n\ttype Person = {\n\t\tname: String\n\t\tteam: (Team in teams)?\n\t}\n\tteams: Pool<Team> = []\n\ttype Team = { title: String, players: Pool<people->team> }\n}\nmutable dance: Dance = {}\n",
+		);
+		assert!(found.iter().any(|key| key.ends_with(".team")), "{found:?}");
+		assert!(
+			found.iter().any(|key| key.ends_with(".players")),
+			"{found:?}"
+		);
+		assert!(!found.iter().any(|key| key.ends_with(".name")), "{found:?}");
+	}
+
 	#[test]
 	fn function_types_have_names() {
 		let found = names(

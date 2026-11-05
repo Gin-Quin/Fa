@@ -86,3 +86,22 @@ mutable pair = Pair { left = "a", right = "bb" }
 console.log(pair.both()) -- prints: 4
 pair = Pair { left = "ccc", right = "" }
 console.log(pair.both()) -- prints: 6
+
+-- a relation side, written by the link and unlink operations of the other side (never by a store
+-- to this field): a method that reads it twice reads it from the element each time
+type Dance = {
+	people: Pool<Person> = []
+	type Person = {
+		name: String
+		partner: (people->partner)?
+		function partnerName = (self): String => self.partner?.name ?? "none"
+		function both = (self): String => "{self.partnerName()} {self.partnerName()}"
+	}
+}
+mutable dance: Dance = {}
+use ana = dance.people.add({ name = "Ana" })
+use bao = dance.people.add({ name = "Bao" })
+ana.partner = bao
+console.log(ana.both()) -- prints: Bao Bao
+bao.partner = none
+console.log(ana.both()) -- prints: none none

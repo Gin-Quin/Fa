@@ -2627,6 +2627,24 @@ mod tests {
 	}
 
 	#[test]
+	fn a_command_resolves_each_scope_once() {
+		let directory = tempfile_folder("shared");
+		fs::write(directory.join("package.fa"), "export = { name = \"x\" }\n").unwrap();
+		let scope = Scope {
+			root: directory.clone(),
+			packages: vec![("x".to_string(), directory.clone())],
+			workspace: false,
+		};
+		let sharing = share_resolutions();
+		assert!(resolve_shared(&scope, false).is_ok());
+		// read once: a later change is not seen while sharing
+		fs::write(directory.join("dependencies.fa"), "export = { x = 1 }\n").unwrap();
+		assert!(resolve_shared(&scope, false).is_ok());
+		drop(sharing);
+		assert!(resolve_shared(&scope, false).is_err());
+	}
+
+	#[test]
 	fn a_forged_lockfile_is_rejected() {
 		let directory = tempfile_folder("forged");
 		let path = directory.join(LOCKFILE);

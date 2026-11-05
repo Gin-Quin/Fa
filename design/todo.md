@@ -28,6 +28,6 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 ## Features still missing (from the engineers' reports)
 
 - WebAssembly: `build.cLibrary` (the API's functions as exports of the module); JS foreign code: `Pointer.allocate`/`free` on Bun.
-- Analyzer: `@extern` (*foreign code*); `TypeFromSchema` inside a generic type other than as its value. Key sets: a key-set compile-time parameter applied from another file (`GN008`; `Pick<Entity, keys>` of gn-22/gn-23 too); sets as `is` patterns. Native: `Color.members.length` in one expression.
+- Analyzer: `@extern` (*foreign code*); `TypeFromSchema` inside a generic type other than as its value. Key sets: a key-set compile-time parameter applied from another file (`GN008`; then `Pick<Entity, keys>` of gn-22/gn-23 needs its derived parameter in the interface, and gn-24 the writes into `Type<parameter>` copies: case gn-23-c); sets as `is` patterns. Native: `Color.members.length` in one expression.
 - Native: compile-time named union members (`Schema` values).
 - Reviews to schedule: a second analyzer review (M2/M3 features), a review of the tooling (CLI, formatter, workspaces), a final review of both backends.

@@ -635,6 +635,10 @@ pub struct Analysis {
 	/// reads that are declared in other files: their constants
 	/// ([`Analysis::field_constants`]), by type and field name.
 	pub json_defaults: FxHashMap<(TypeId, crate::ids::Sym), u32>,
+	/// The fields of the object types written as the data of a member of a
+	/// named union of this file (`Circle = { radius: Float }`), in the
+	/// order they are written: their declaration order (JSON, printing).
+	pub inline_field_orders: FxHashMap<TypeId, Vec<crate::ids::Sym>>,
 	/// The reads that move a move-only value out of its place (a local, a
 	/// parameter, a field of one: `holder.task` returned or passed): the
 	/// place gives the value up (a zero, which its drop skips).
@@ -1322,6 +1326,7 @@ impl Analysis {
 			objects: FxHashMap::default(),
 			field_constants: Vec::new(),
 			json_defaults: FxHashMap::default(),
+			inline_field_orders: FxHashMap::default(),
 			moved_reads: rustc_hash::FxHashSet::default(),
 			patterns: FxHashMap::default(),
 			relations: Vec::new(),

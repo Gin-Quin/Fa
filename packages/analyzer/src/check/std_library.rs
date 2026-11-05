@@ -410,8 +410,13 @@ impl Walker<'_> {
 			}
 			// a `Union` type: its members tagged by `"type"` (design/decisions.md,
 			// "JSON form of named union members")
+			// an enumeration: its pinned values, else its member names
+			TypeKind::Enum(..) | TypeKind::EnumMember(..) => None,
 			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _)
-				if self.s.types.nominal(nominal).kind == crate::types::NominalKind::Union =>
+				if matches!(
+					self.s.types.nominal(nominal).kind,
+					crate::types::NominalKind::Union | crate::types::NominalKind::Errors
+				) =>
 			{
 				let count = self
 					.s

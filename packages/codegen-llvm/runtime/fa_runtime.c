@@ -8667,6 +8667,21 @@ static const uint8_t *json_skip(const uint8_t *schema) {
 		}
 		return schema;
 	}
+	case 'E': {
+		schema += 1;
+		int64_t count = json_schema_number(&schema, &present);
+		for (int64_t member = 0; member < count; member += 1) {
+			int64_t length = json_schema_number(&schema, &present);
+			schema += length;
+			if (*schema == 'p') {
+				schema += 1;
+				json_schema_number(&schema, &present);
+			} else {
+				schema += 1;
+			}
+		}
+		return schema;
+	}
 	default:
 		return schema + 1;
 	}
@@ -8694,6 +8709,38 @@ static const uint8_t *json_member_at(const uint8_t *cursor, JsonMember *member) 
 	member->kind = cursor[length];
 	member->data = cursor + length + 1;
 	return member->kind == 'e' ? member->data : json_skip(member->data);
+}
+
+/// The member of an enumeration a value is (its position in the schema),
+/// or -1: its pinned value (a number), else its name (a string).
+static int64_t json_enum_of(const FaJson *node, const uint8_t *schema) {
+	int present;
+	const uint8_t *cursor = schema + 1;
+	int64_t count = json_schema_number(&cursor, &present);
+	for (int64_t index = 0; index < count; index += 1) {
+		int64_t length = json_schema_number(&cursor, &present);
+		const uint8_t *name = cursor;
+		cursor += length;
+		if (*cursor == 'p') {
+			cursor += 1;
+			int64_t value = json_schema_number(&cursor, &present);
+			if (node->kind == JSON_NUMBER && (node->flags & JSON_FITS) && node->integer == value) {
+				return index;
+			}
+			continue;
+		}
+		cursor += 1;
+		if (node->kind == JSON_STRING && node->length == (size_t)length) {
+			int same = 1;
+			for (size_t at = 0; at < (size_t)length; at += 1) {
+				same &= node->bytes[at] == name[at];
+			}
+			if (same) {
+				return index;
+			}
+		}
+	}
+	return -1;
 }
 
 /// The member of a named union a value is (its position in the schema),
@@ -8948,6 +8995,37 @@ static int json_check(JsonCheck *check, const FaJson *node, const uint8_t *schem
 		}
 		return json_mismatch(check, node, "one of the members of its union", 0, report);
 	}
+	case 'E': {
+		if (json_enum_of(node, schema) >= 0) {
+			return 1;
+		}
+		if (report) {
+			// `<path> should be one of "red", "green", not string` (or the values)
+			json_error_start(check);
+			append_c(" should be one of ");
+			const uint8_t *cursor = schema + 1;
+			int64_t count = json_schema_number(&cursor, &present);
+			for (int64_t member = 0; member < count; member += 1) {
+				int64_t length = json_schema_number(&cursor, &present);
+				const uint8_t *name = cursor;
+				cursor += length;
+				if (member > 0) {
+					append_c(", ");
+				}
+				if (*cursor == 'p') {
+					cursor += 1;
+					fa_b_i64(json_schema_number(&cursor, &present));
+				} else {
+					cursor += 1;
+					fa_b_json_string(name, (size_t)length);
+				}
+			}
+			append_c(", not ");
+			append_c(json_found(node));
+			json_error_end(check);
+		}
+		return 0;
+	}
 	case 'N': {
 		const FaJson *tag;
 		int64_t index = json_member_of(node, schema, &tag);
@@ -9075,6 +9153,12 @@ FA_EXPORT const void *fa_json_parse(const uint8_t *text, size_t length, const ui
 	}
 	*out = document;
 	return 0;
+}
+
+/// The member of an enumeration a value (that fits) is: its position in
+/// the schema.
+FA_EXPORT int64_t fa_json_enum(const FaJson *node, const uint8_t *schema) {
+	return json_enum_of(node, schema);
 }
 
 /// The member of a named union a value (that fits) is: its position in

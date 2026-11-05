@@ -5,7 +5,6 @@ type Shape = Union {
 	Circle = { radius: Float }
 	Point
 }
-type Color = Enum { red, green }
 
 function parsePoint = (text: String): Point throws JsonError => try Json.parse(text)
 let point: Point = Json.parse("{{\"x\": 1, \"y\": 2}}") catch error => Point { x = 0.0, y = 0.0 } -- type point: Point
@@ -15,7 +14,6 @@ let points: Array<Point>? = Json.parse("[]") catch error => none
 let unknown = Json.parse("1") catch error => 0 -- error E-DECL-11
 -- a type without a JSON form
 let handler: (Integer) => Integer = Json.parse("1") catch error => (x) => x -- error AN005
-let color: Color = Json.parse("1") catch error => Color.red -- error AN005
 -- a named union is tagged by `"type"` (design/decisions.md)
 let shape: Shape = Json.parse("{{\"type\": \"Point\"}}") catch error => Shape.Circle { radius = 1.0 }
 

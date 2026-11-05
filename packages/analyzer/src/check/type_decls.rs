@@ -575,7 +575,36 @@ impl Walker<'_> {
 						}
 					}
 				}
-				(_, Some(definition)) => self.check_type_expr(definition),
+				(_, Some(definition)) => {
+					let payload = self.check_type_expr(definition);
+					// an object written inline: the order of its fields
+					let tree = std::sync::Arc::clone(&self.tree);
+					if let View::Object { items } = syntax::view(&tree, definition)
+						&& matches!(
+							self.s.types.kind(payload),
+							crate::types::TypeKind::Object(_)
+						) {
+						let names: Vec<String> = items
+							.iter()
+							.filter_map(|item| match syntax::view(&tree, item) {
+								View::Assignment { target, .. } => {
+									match syntax::view(&tree, target) {
+										View::Name(name) => Some(tree.name(name).to_string()),
+										_ => None,
+									}
+								}
+								View::Name(name) => Some(tree.name(name).to_string()),
+								_ => None,
+							})
+							.collect();
+						let names: Vec<crate::ids::Sym> = names
+							.iter()
+							.map(|name| self.s.types.syms.intern(name))
+							.collect();
+						self.a.inline_field_orders.entry(payload).or_insert(names);
+					}
+					payload
+				}
 			};
 			// (a pinned value of an enumeration is `TY082` above)
 			if kind != NominalKind::Enum

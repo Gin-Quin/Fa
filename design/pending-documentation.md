@@ -68,3 +68,10 @@ A function name is a value: write `@typeToString(Type<getDigitCount>)` (metaprog
 ## `documentation/guides/web-server.md`, "Typed request and response bodies" (JSON of named unions)
 
 A member of a named union is read and written tagged by a `"type"` property holding its name (`{ "type": "Circle", "radius": 1 }`); a member without data is `{ "type": "Point" }`, data that isn't an object (or an object with its own `type` field) is under `"value"`, a literal member is the literal. An unknown `"type"` is a `JsonError` naming the accepted members.
+## `documentation/guides/web-server.md`, "Typed request and response bodies" (JSON of named unions)
+
+A member of a named union is read and written tagged by a `"type"` property holding its name (`{ "type": "Circle", "radius": 1 }`); a member without data is `{ "type": "Point" }`, data that isn't an object (or an object with its own `type` field) is under `"value"`, a literal member is the literal. An unknown `"type"` is a `JsonError` naming the accepted members.
+
+## The rt-5 example (`@typeToString(getDigitCount)`, types-at-runtime or function composition page)
+
+A function name is a value: write `@typeToString(Type<getDigitCount>)` (metaprogramming page: "use `Type(value)` to get the type of a value"; `TY008` otherwise).

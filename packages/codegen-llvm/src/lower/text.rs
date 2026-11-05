@@ -764,6 +764,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		builder: &inkwell::builder::Builder<'ctx>,
 		value: Val<'ctx>,
 	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
+		// a field read once at the entry of the method (`frozen.rs`)
+		if let Some(parts) = self.frozen_parts(value) {
+			return Ok(parts);
+		}
 		let pair = value.value.expect("a string").into_struct_value();
 		let bytes = builder
 			.build_extract_value(pair, 0, "")?

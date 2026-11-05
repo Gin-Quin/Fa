@@ -1,0 +1,88 @@
+-- Fields never written after construction (`src/lower/frozen.rs`): a method reads such a field
+-- of `self` once, at its entry, and a small method it calls on `self` is expanded into it, so
+-- that its reads use that value. Each case below where the fact must fail changes the field
+-- while a method reads it, and must see the change.
+type Scanner = {
+	text: String
+	position: Integer
+	count: Integer
+
+	function current = (self): Byte => self.text.bytes().get(self.position) ?? 0
+
+	function skipSpaces = (self) mutates self => {
+		while self.current() == 32 {
+			self.position += 1
+		}
+	}
+
+	function words = (self): Integer mutates self => {
+		loop {
+			self.skipSpaces()
+			if self.current() == 0 {
+				break
+			}
+			while self.current() != 32 and self.current() != 0 {
+				self.position += 1
+			}
+			self.count += 1
+		}
+		self.count
+	}
+}
+
+mutable scanner = Scanner { text = "one two  three", position = 0, count = 0 }
+console.log(scanner.words()) -- prints: 3
+-- a heap text, and an inline one
+mutable long = Scanner { text = "a b c d e f g h i j k l m n o p q r s t u v w x y z", position = 0, count = 0 }
+console.log(long.words()) -- prints: 26
+mutable empty = Scanner { text = "", position = 0, count = 0 }
+console.log(empty.words()) -- prints: 0
+
+-- a field written by a method: read again after each call
+type Tape = {
+	text: String
+	position: Integer
+
+	function current = (self): Byte => self.text.bytes().get(self.position) ?? 0
+
+	function damage = (self) mutates self => {
+		self.text = "x"
+	}
+
+	function sum = (self): Integer mutates self => {
+		mutable total = 0
+		while self.current() != 0 {
+			total += self.current()
+			self.position += 1
+			if self.position == 2 {
+				self.damage()
+				self.position = 0
+			}
+		}
+		total
+	}
+}
+
+mutable tape = Tape { text = "abc", position = 0 }
+console.log(tape.sum()) -- prints: 315
+
+-- a field appended to elsewhere
+type Log = {
+	text: String
+	function size = (self): Integer => self.text.length
+	function twice = (self): Integer => self.size() + self.size()
+}
+mutable log = Log { text = "ab" }
+log.text += "cd"
+console.log(log.twice()) -- prints: 8
+
+-- a whole value of the type replaced: the reads of the fields after it see the new one
+type Pair = {
+	left: String
+	right: String
+	function both = (self): Integer => self.left.length + self.right.length + self.left.length
+}
+mutable pair = Pair { left = "a", right = "bb" }
+console.log(pair.both()) -- prints: 4
+pair = Pair { left = "ccc", right = "" }
+console.log(pair.both()) -- prints: 6

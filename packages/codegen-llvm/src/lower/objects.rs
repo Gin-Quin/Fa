@@ -1361,6 +1361,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return self.narrow_to(value, narrowed, node);
 			}
 		}
+		// `self.text` read once at the entry of the method (`frozen.rs`)
+		if !self.analysis.moved_reads.contains(&node)
+			&& let Some(first) = members.first()
+			&& let Some((mut value, mut current_type)) = self.frozen_value(target, first)
+		{
+			for member in members.iter().skip(1) {
+				if value.repr == Repr::Never {
+					return Ok(value);
+				}
+				(value, current_type) = self.apply_member(node, value, current_type, member)?;
+			}
+			if value.repr == Repr::Never {
+				return Ok(value);
+			}
+			let narrowed = self.node_repr(node).unwrap_or(value.repr);
+			return self.narrow_to(value, narrowed, node);
+		}
 		// `node.world.translation` of a local or a parameter object: load the
 		// field alone, not the whole object (whose aggregate load LLVM may then
 		// turn into an object passed by value, `sumWorld` of `scene`)
@@ -1630,6 +1647,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			&& let Some(slot) = self.namespace_place(callee, target, &list[..count])?
 		{
 			return self.load(slot);
+		}
+		// `self.text.bytes()`: the field read once by the method (`frozen.rs`)
+		if count >= 1
+			&& let Some(first) = members.first()
+			&& let Some((mut value, mut current_type)) = self.frozen_value(target, first)
+		{
+			for member in members.iter().take(count).skip(1) {
+				if value.repr == Repr::Never {
+					return Ok(value);
+				}
+				(value, current_type) = self.apply_member(callee, value, current_type, member)?;
+			}
+			return Ok(value);
 		}
 		let value = self.expr(target)?;
 		self.apply_members(callee, value, self.type_of(target), members, count)

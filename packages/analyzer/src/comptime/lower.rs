@@ -877,6 +877,18 @@ impl<'a> Lowerer<'a> {
 			let first = values.next().unwrap_or_else(Expr::none);
 			return values.fold(first, |acc, value| Expr::Builtin(path, vec![acc, value]));
 		}
+		// `"a" + "b"`: a concatenation
+		if op == ArithOp::Add
+			&& matches!(
+				self.types().kind(self.a.type_of(n)),
+				TypeKind::String | TypeKind::StringLit(_)
+			) {
+			let parts = operands
+				.iter()
+				.map(|operand| Part::Value(self.expr(operand)))
+				.collect();
+			return Expr::Template(parts);
+		}
 		let num = self.num(self.a.type_of(n));
 		let op_ir = Self::arith_op(op);
 		let mut values: Vec<Expr> = operands.iter().map(|operand| self.expr(operand)).collect();

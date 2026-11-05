@@ -1,0 +1,4 @@
+-- review 20: a generic parameter constrained to an ordered type can be ordered (generics.md)
+function largest = <Item: Integer>(a: Item, b: Item): Item => if a > b { a } else { b }
+function wrong = <Item>(a: Item, b: Item): Boolean => a > b -- error: E-CMP-2
+console.log(largest(1, 2)) -- prints: 2

@@ -466,6 +466,25 @@ impl Walker<'_> {
 		if covered.iter().any(|&ty| self.s.types.is_recovering(ty)) {
 			return;
 		}
+		let mut missing: Vec<String> = Vec::new();
+		self.when_missing(subject, covered, &mut missing, true);
+		if missing.is_empty() {
+			return;
+		}
+		let message = format!("this `when` doesn't handle {}", missing.join(", "));
+		let diagnostic = self.diagnostic(&E_WHEN_1, n, message);
+		self.report(diagnostic);
+	}
+
+	/// The values of `subject` no pattern of `covered` handles, for `E-WHEN-1`
+	/// (`top`: the subject itself, not a member of it).
+	fn when_missing(
+		&mut self,
+		subject: TypeId,
+		covered: &[TypeId],
+		missing: &mut Vec<String>,
+		top: bool,
+	) {
 		let covers = |w: &mut Self, ty: TypeId| {
 			covered
 				.iter()
@@ -474,7 +493,6 @@ impl Walker<'_> {
 		if covers(self, subject) {
 			return;
 		}
-		let mut missing: Vec<String> = Vec::new();
 		match self.s.types.kind(subject) {
 			TypeKind::NamedUnion(nominal, mask) | TypeKind::Enum(nominal, mask) => {
 				let enumeration = matches!(self.s.types.kind(subject), TypeKind::Enum(..));
@@ -512,6 +530,14 @@ impl Walker<'_> {
 					if self.s.types.as_int(member).is_some() {
 						continue;
 					}
+					// a named union, an enumeration or `Boolean` inside: by member
+					if matches!(
+						self.s.types.kind(member),
+						TypeKind::NamedUnion(..) | TypeKind::Enum(..) | TypeKind::Boolean
+					) {
+						self.when_missing(member, covered, missing, false);
+						continue;
+					}
 					if !covers(self, member) {
 						// the value `none`, not its type `None`
 						let text = if member == TypeId::NONE {
@@ -524,14 +550,9 @@ impl Walker<'_> {
 				}
 			}
 			// integers by literals and ranges: E2
-			TypeKind::Int(_) => return,
-			_ => missing.push("the other values (add an `else` arm)".to_string()),
+			TypeKind::Int(_) => {}
+			_ if top => missing.push("the other values (add an `else` arm)".to_string()),
+			_ => missing.push(format!("`{}`", self.display(subject))),
 		}
-		if missing.is_empty() {
-			return;
-		}
-		let message = format!("this `when` doesn't handle {}", missing.join(", "));
-		let diagnostic = self.diagnostic(&E_WHEN_1, n, message);
-		self.report(diagnostic);
 	}
 }

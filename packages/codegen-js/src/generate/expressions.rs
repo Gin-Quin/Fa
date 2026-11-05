@@ -108,8 +108,26 @@ impl Generator<'_> {
 						test
 					};
 				}
-				let helper = self.helper("faRangeIncludes");
-				let test = js::call(helper, &[values[1].text.clone(), values[0].text.clone()]);
+				// an array: an item `==` to the value; a set or a map: `has`
+				let test = match self.types.kind(set_ty) {
+					fa_analyzer::types::TypeKind::Collection(
+						fa_analyzer::types::CollKind::Array
+						| fa_analyzer::types::CollKind::GrowingArray,
+						..,
+					) => {
+						let helper = self.helper("faArrayIncludes");
+						js::call(helper, &[values[1].text.clone(), values[0].text.clone()])
+					}
+					fa_analyzer::types::TypeKind::Collection(..) => Expr::primary(format!(
+						"{}.has({})",
+						values[1].primary_text(),
+						values[0].text
+					)),
+					_ => {
+						let helper = self.helper("faRangeIncludes");
+						js::call(helper, &[values[1].text.clone(), values[0].text.clone()])
+					}
+				};
 				if negated {
 					js::prefix("!", &test)
 				} else {

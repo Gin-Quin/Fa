@@ -1,0 +1,7 @@
+-- review 21: string `+` runs at compile time
+function f = (): String => "a" + "b"
+function g = (name: String): String => "hello " + name + "!"
+static value = @f()
+static greeting = @g("Ana")
+console.log(value) -- prints: ab
+console.log(greeting) -- prints: hello Ana!

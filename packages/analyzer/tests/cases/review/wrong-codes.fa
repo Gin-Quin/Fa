@@ -1,0 +1,3 @@
+-- review 39: the documented codes of documented mistakes
+let x = 4
+console.log(x is in 4) -- error: E-CMP-6

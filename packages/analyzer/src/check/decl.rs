@@ -512,6 +512,20 @@ impl Walker<'_> {
 		if let (Some(symbol), Some(value)) = (self.a.symbols.symbol_of_decl(n), value) {
 			self.reset_consumed(symbol);
 			self.bind_value(symbol, value);
+			// a member of a named union: known to hold it (unions.md)
+			let declared = self.a.symbols.symbol(symbol).ty;
+			if self.body.flow.reachable
+				&& matches!(self.s.types.kind(declared), TypeKind::NamedUnion(..))
+			{
+				let actual = self.type_of(self.strip_groups(value));
+				let narrowed = self.assignment_narrowing(declared, actual);
+				if !narrowed.is_unset() {
+					let place = self.places.symbol(symbol);
+					let mut state = std::mem::take(&mut self.body.flow);
+					self.narrow_place_in(&mut state, place, declared, narrowed, n);
+					self.body.flow = state;
+				}
+			}
 
 			// a copy of its value, maybe a move (moves.rs)
 			self.note_copy_site(value);

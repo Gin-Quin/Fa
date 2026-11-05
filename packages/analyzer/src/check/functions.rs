@@ -502,6 +502,22 @@ impl Walker<'_> {
 		let declared_return = signature
 			.returns
 			.map(|returns| self.check_type_expr(returns));
+		// errors are thrown, never returned (errors.md, `E-ERR-7`)
+		if let (Some(returns), Some(ty)) = (signature.returns, declared_return)
+			&& let Some(error) = self.error_member(ty)
+			&& self.reported_once.insert((returns, "E-ERR-7"))
+		{
+			let error = self.s.types.display(error);
+			let shown = self.s.types.display(ty);
+			let diagnostic = self.diagnostic(
+				&crate::diagnostics::codes::values::E_ERR_7,
+				returns,
+				format!(
+					"errors are never part of the return type: remove `{error}` from `{shown}`, and declare `throws {error}`"
+				),
+			);
+			self.report(diagnostic);
+		}
 		// a return type with parameters still being inferred is inferred from the body
 		let expected_return = expected
 			.map(|sig| sig.ret)
@@ -607,6 +623,13 @@ impl Walker<'_> {
 			is_async: owner.is_async,
 			..FnCx::new(lambda, owner.symbol, mode, scope)
 		});
+		// `: T in owner`: a parameter or a module-level value (references.rs)
+		let ref_owner = signature
+			.returns
+			.and_then(|returns| self.reference_return_owner(returns));
+		if let Some(cx) = self.body.functions.last_mut() {
+			cx.ref_owner = ref_owner;
+		}
 		// a default value runs inside the function: its errors and effects
 		// are the function's (defining-functions.md)
 		for (default, expected, quiet) in defaults {
@@ -647,6 +670,12 @@ impl Walker<'_> {
 			// the value of the function is a copy, maybe a move (moves.rs)
 			if !matches!(mode, TypeId::VOID | TypeId::NEVER) {
 				self.note_copy_site(value_node);
+				if !block_body || !matches!(self.view(value_node), View::Return(_)) {
+					self.check_returned_reference(
+						value_node,
+						cx.as_ref().and_then(|cx| cx.ref_owner),
+					);
+				}
 			}
 			// a task it returns can't use its locals (tasks.rs)
 			if let Some(cx) = &cx {
@@ -1332,6 +1361,8 @@ impl Walker<'_> {
 				let ty = self.check(value, Some(returns));
 				self.sink(value, ty, returns);
 				self.note_copy_site(value);
+				let owner = self.body.functions.last().and_then(|cx| cx.ref_owner);
+				self.check_returned_reference(value, owner);
 			}
 			None if returns == TypeId::NEVER => {
 				self.memo(n, |w| {
@@ -1420,6 +1451,24 @@ impl Walker<'_> {
 				let next = self.facts.refs.state(current);
 				self.body.flow.set_ref_state(symbol, next);
 			}
+		}
+	}
+
+	/// An `Errors` type of a type or of its union members.
+	fn error_member(&self, ty: TypeId) -> Option<TypeId> {
+		match self.s.types.kind(ty) {
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _)
+				if self.s.types.nominal(nominal).kind == crate::types::NominalKind::Errors =>
+			{
+				Some(ty)
+			}
+			TypeKind::Union(list) => self
+				.s
+				.types
+				.list_items(list)
+				.iter()
+				.find_map(|&member| self.error_member(member)),
+			_ => None,
 		}
 	}
 

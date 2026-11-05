@@ -1,0 +1,14 @@
+-- review 15: a reference return type names a parameter or a module-level value, and the returned place is inside it
+type Person = { name: String }
+mutable everyone: Array<Person> = [Person { name = "Ana" }]
+function leak = (): Person in local => { -- error: REF008
+	mutable local: Array<Person> = [Person { name = "Ana" }]
+	return local[0]
+}
+function leak2 = (people: Array<Person>): Person in people => {
+	mutable local: Array<Person> = [Person { name = "Ana" }]
+	return local[0] -- error: REF009
+}
+function first = (people: Array<Person>): Person in people throws IndexError => try people[0]
+function anyone = (): Person in everyone throws IndexError => try everyone[0]
+function wrong = (people: Array<Person>): Person in people throws IndexError => try everyone[0] -- error: REF009

@@ -165,6 +165,8 @@ pub struct FnCx {
 	pub is_async: bool,
 	/// What its body contributes to its async summary (`tasks.rs`).
 	pub async_acc: tasks::Acc,
+	/// The owner of the reference it returns (`: T in owner`, references.rs).
+	pub ref_owner: Option<PlaceId>,
 }
 
 impl FnCx {
@@ -193,6 +195,7 @@ impl FnCx {
 			reactive: None,
 			is_async: false,
 			async_acc: tasks::Acc::new(),
+			ref_owner: None,
 		}
 	}
 }

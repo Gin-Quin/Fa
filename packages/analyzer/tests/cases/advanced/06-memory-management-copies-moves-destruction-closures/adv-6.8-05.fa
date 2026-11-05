@@ -1,4 +1,3 @@
--- pending: JS backend (dropping a 1,000,000-long chain fails on Bun)
 -- deep recursive value: copying and dropping must not overflow the native stack
 type Link = { value: Integer, next: Link? }
 mutable head: Link? = none

@@ -1,0 +1,5 @@
+-- review 16: errors are never part of the return type (errors.md)
+type E = Errors { Bad }
+function f = (): Integer | E => 1 -- error: E-ERR-7
+function g = (): E.Bad? => none -- error: E-ERR-7
+console.log(f(), g())

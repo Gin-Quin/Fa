@@ -111,6 +111,83 @@ impl Walker<'_> {
 		TypeId::VOID
 	}
 
+	/// The owner of a reference return type `T in owner`: its path must
+	/// start at a parameter or a module-level value (`REF008`).
+	pub(super) fn reference_return_owner(&mut self, returns: NodeId) -> Option<PlaceId> {
+		let View::RefType { owner, .. } = self.view(returns) else {
+			return None;
+		};
+		// the root name of the path
+		let mut root = self.strip_groups(owner);
+		while let View::Access { target, .. } = self.view(root) {
+			root = self.strip_groups(target);
+		}
+		let View::Name(name) = self.view(root) else {
+			return None;
+		};
+		let sym = self.s.types.syms.intern(self.tree.name(name));
+		let symbol = self.a.symbols.lookup(self.body.scope, sym);
+		let allowed = symbol.is_some_and(|symbol| {
+			let entry = self.a.symbols.symbol(symbol);
+			matches!(
+				entry.kind,
+				SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
+			) || self.declared_outside_functions(symbol)
+		});
+		if !allowed {
+			if self.reported_once.insert((owner, "REF008")) {
+				let text = self.tree.text(owner.index()).to_string();
+				let diagnostic = self.diagnostic(
+					&crate::diagnostics::codes::advanced::REF008,
+					owner,
+					format!(
+						"`{text}` is not a parameter nor a module-level value: a returned reference must point into something that outlives the call"
+					),
+				);
+				self.report(diagnostic);
+			}
+			return None;
+		}
+		self.quiet += 1;
+		self.check(owner, None);
+		self.quiet -= 1;
+		self.place_of(owner)
+	}
+
+	/// `REF009`: a returned reference must designate a place below the
+	/// declared owner.
+	pub(super) fn check_returned_reference(&mut self, value: NodeId, owner: Option<PlaceId>) {
+		let Some(owner) = owner else {
+			return;
+		};
+		if !self.body.flow.reachable {
+			return;
+		}
+		let Some(place) = self.reference_place(value) else {
+			return;
+		};
+		if self.may_be_at_or_below(place, owner) || self.may_be_at_or_below(owner, place) {
+			return;
+		}
+		// a reference given by a parameter or a module-level value of the
+		// same owner: unknown, accepted
+		if let Some(symbol) = self.place_symbol(place)
+			&& self.aliases.contains_key(&symbol)
+		{
+			return;
+		}
+		let text = self.tree.text(value.index()).to_string();
+		let owner_text = self.place_text(owner);
+		let diagnostic = self.diagnostic(
+			&crate::diagnostics::codes::advanced::REF009,
+			value,
+			format!(
+				"`{text}` is not inside `{owner_text}`, the owner the return type declares: return an element of `{owner_text}`, or change the return type"
+			),
+		);
+		self.report_flow(diagnostic);
+	}
+
 	/// The place a `use` designates: a place expression (through `try`).
 	fn reference_place(&mut self, value: NodeId) -> Option<PlaceId> {
 		let value = self.strip_groups(value);

@@ -1,0 +1,6 @@
+type Tag = { faName: String }
+type Holder = { constructor: Tag, value: Integer }
+let h = Holder { constructor = { faName = "Fake" }, value = 1 }
+let g = Holder { constructor = { faName = "Fake" }, value = 2 }
+console.log(h)
+console.log(h == g, [h])

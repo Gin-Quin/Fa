@@ -1,0 +1,17 @@
+use { sleep } = std.time
+
+async function main = () => {
+	mutable store = Store { names = [] }
+	let a = start store.add("first name long enough for the heap")
+	console.log(await a)
+	console.log(await store.slowAdd("second"))
+	console.log(await store.joined())
+	-- a cancelled started call: does it still run on the worker?
+	let d = start store.slowAdd("cancelled")
+	d.cancel()
+	console.log(await store.joined())
+	await sleep(200)
+	console.log(await store.joined())
+	store.stop()
+}
+await main()

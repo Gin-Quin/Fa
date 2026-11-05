@@ -1,0 +1,11 @@
+-- Never-negative: a superset object narrowed into the type, and a generic
+-- instance, escape the field claim; a negative index counts from the end
+type Cursor = { at: Integer }
+type Box(Value) = { value: Value }
+function wrap(Value) = (value: Value): Box(Value) => Box(Value) { value }
+let items = [10, 20, 30]
+let wide = { at = -1, extra = 5 }
+let cursor: Cursor = wide
+function read = (cursor: Cursor): Integer => items[cursor.at] catch error => 99
+function open = (box: Box(Integer)): Integer => items[box.value] catch error => 99
+console.log(read(cursor), read(Cursor { at = 1 }), open(wrap(-1)), open(Box(Integer) { value = 0 }))

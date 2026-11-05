@@ -327,6 +327,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	index_proofs: std::cell::RefCell<Option<index_proofs::IndexProofs>>,
 	/// The facts merged from every unit of a build per unit (`facts.rs`).
 	program_facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
+	/// The facts this lowering consulted (the key of a cached unit).
+	pub(crate) fact_log: Option<std::sync::Arc<crate::facts::FactLog>>,
 	/// The map types the program may keep a reference into the values of
 	/// (`program::unsafe_maps`).
 	unsafe_maps: rustc_hash::FxHashSet<TypeId>,
@@ -480,6 +482,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			virtual_code_points: FxHashMap::default(),
 			whole_program: false,
 			program_facts: None,
+			fact_log: None,
 			index_proofs: std::cell::RefCell::new(None),
 			unsafe_maps: program::unsafe_maps(session, files),
 			no_inline_maps: program::no_inline_maps(session, files),
@@ -518,6 +521,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
 	) -> Self {
 		self.program_facts = facts;
+		self
+	}
+
+	/// Records the facts the lowering consults (`facts::FactLog`).
+	pub(crate) fn with_fact_log(mut self, log: std::sync::Arc<crate::facts::FactLog>) -> Self {
+		self.fact_log = Some(log);
 		self
 	}
 

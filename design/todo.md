@@ -30,5 +30,4 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 - Native: foreign code: `build.cLibrary`; JS foreign code: `Pointer.allocate`/`free` on Bun.
 - Analyzer: relations across files, `@extern` (*foreign code*); implied relation effects for reactivity; `Fields` types (not built by the analyzer, `AN001`) and `TypeFromSchema` of them; `TypeFromSchema` inside a generic type other than as its value.
 - Native: compile-time named union members (`Schema` values).
-- Native: the key of a unit in the object cache of development builds hashes the whole-program facts, so the first edit that changes them recompiles every unit (`fa develop --target=native`: 12 s instead of ~1.5 s on 100 files; `design/decisions.md`).
 - Reviews to schedule: a second analyzer review (M2/M3 features), a review of the tooling (CLI, formatter, workspaces), a final review of both backends.

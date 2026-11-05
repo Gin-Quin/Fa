@@ -319,6 +319,31 @@ impl DevelopTarget {
 	}
 }
 
+/// Opens a page in the user's browser (`develop.open`): `xdg-open` (Linux),
+/// `open` (macOS), `start` (Windows), or the command `FA_OPEN_COMMAND`
+/// names (given the URL as its argument); says where to go when it can't.
+fn open_browser(url: &str) {
+	let mut command = match std::env::var_os("FA_OPEN_COMMAND") {
+		Some(program) => Command::new(program),
+		None if cfg!(windows) => {
+			let mut command = Command::new("cmd");
+			command.args(["/C", "start", ""]);
+			command
+		}
+		None if cfg!(target_os = "macos") => Command::new("open"),
+		None => Command::new("xdg-open"),
+	};
+	let opened = command
+		.arg(url)
+		.stdin(std::process::Stdio::null())
+		.stdout(std::process::Stdio::null())
+		.stderr(std::process::Stdio::null())
+		.spawn();
+	if opened.is_err() {
+		eprintln!("fa develop: can't open a browser: open {url}");
+	}
+}
+
 /// The development server of `--target=web`, its root and port filled in.
 fn server_script(root: &Path, port: u16) -> String {
 	let quoted = format!("{:?}", root.display().to_string());
@@ -553,6 +578,15 @@ impl Developed {
 		match command.spawn() {
 			Ok(child) => {
 				self.child = Some(child);
+				// `develop.open`: a browser on the served pages
+				let configuration = self.loaded.inner.configuration.as_ref();
+				if self.target == DevelopTarget::Web
+					&& configuration.is_some_and(|configuration| configuration.develop.open)
+				{
+					let port =
+						configuration.map_or(3000, |configuration| configuration.develop.port);
+					open_browser(&format!("http://localhost:{port}/"));
+				}
 				true
 			}
 			Err(error) => {

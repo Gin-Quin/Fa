@@ -109,6 +109,46 @@ impl Walker<'_> {
 		}
 	}
 
+	/// `[a, b, c]` where a `CArray(T, n)` is expected: `n` items of type `T`
+	/// (`E-TYPE-1` for another count, or a spread).
+	pub(super) fn check_c_array_literal(
+		&mut self,
+		n: NodeId,
+		items: crate::syntax::NodeList<'_>,
+		expected: TypeId,
+		item: TypeId,
+		count: u32,
+	) -> TypeId {
+		let mut given = 0u32;
+		let mut spreads = false;
+		for value in items.iter() {
+			if let View::Spread(spread) = self.view(value) {
+				spreads = true;
+				self.check(spread, None);
+				let diagnostic = self.diagnostic(
+					&crate::diagnostics::codes::values::E_TYPE_1,
+					value,
+					"a `CArray` is written with its items, without spreads",
+				);
+				self.report(diagnostic);
+				continue;
+			}
+			let ty = self.check(value, Some(item));
+			self.sink(value, ty, item);
+			given += 1;
+		}
+		if given != count && !spreads {
+			let message = format!(
+				"a `{}` holds {count} items, not {given}",
+				self.display(expected)
+			);
+			let diagnostic =
+				self.diagnostic(&crate::diagnostics::codes::values::E_TYPE_1, n, message);
+			self.report(diagnostic);
+		}
+		self.memo(n, |_| expected)
+	}
+
 	/// `Pointer(T)` and `CArray(T, n)`.
 	pub(super) fn foreign_type_application(
 		&mut self,

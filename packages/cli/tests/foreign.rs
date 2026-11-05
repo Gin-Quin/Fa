@@ -65,6 +65,13 @@ type Triple = CStruct {
 	c: Float64
 }
 
+type Color = CStruct {
+	rgba: CArray<UInt8, 4>
+	weight: Float32
+}
+
+function colorSum: (color: Color) => Int32 = @extern(\"color_sum\")
+function makeColor: (value: UInt8) => Color = @extern(\"color_make\")
 function scale: (point: Point, factor: Int32) => Point = @extern(\"point_scale\")
 function sum: (triple: Triple) => Float64 = @extern(\"triple_sum\")
 function makeTriple: (value: Float64) => Triple = @extern(\"triple_make\")
@@ -102,6 +109,11 @@ export type = {
 
 	function tripled = (value: Float64): Float64 => sum(makeTriple(value))
 
+	function colors = (): String => {
+		let made = makeColor(7)
+		\"{colorSum(Color { rgba = [1, 2, 3, 4], weight = 10.0 })} {made.rgba} {made.weight}\"
+	}
+
 	function destroy = (self) => {
 		closeFarm(self.#raw)
 	}
@@ -120,6 +132,7 @@ export type = {
 	console.log(library.Farm.counted(40))
 	console.log(library.Farm.scaled(3, 1.5, 2))
 	console.log(library.Farm.tripled(1.5))
+	console.log(library.Farm.colors())
 }
 "
 			.to_string(),
@@ -160,7 +173,7 @@ fn a_package_calls_its_c_library_on_bun() {
 	let cache = scratch("foreign-cache");
 	let (stdout, stderr, code) = fa(&["run", "."], &directory, &cache);
 	assert_eq!(code, 0, "stderr: {stderr}");
-	assert_eq!(stdout, "7\nGreen Acres\n42\n6 3\n9\n");
+	assert_eq!(stdout, "7\nGreen Acres\n42\n6 3\n9\n20 [7, 8, 9, 10] 2.5\n");
 	let (_, stderr, code) = fa(&["check"], &directory, &cache);
 	assert_eq!(code, 0, "stderr: {stderr}");
 }

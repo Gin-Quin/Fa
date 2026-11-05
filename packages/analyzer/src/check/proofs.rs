@@ -342,6 +342,17 @@ impl Walker<'_> {
 			| TypeKind::String
 			| TypeKind::StringLit(_) => "IndexError",
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..) => "KeyNotFound",
+			// a `CArray`: an index within its count is proven (from the end too)
+			TypeKind::CArray(_, count) => {
+				let index_ty = self.type_of(self.strip_groups(index));
+				if let Some(int) = self.s.types.as_int(index_ty) {
+					let count = ethnum::I256::from(count);
+					if int.min >= -count && int.max < count {
+						return;
+					}
+				}
+				"IndexError"
+			}
 			_ => return,
 		};
 		if !self.body.flow.reachable {

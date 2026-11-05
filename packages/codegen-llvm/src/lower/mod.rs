@@ -2773,6 +2773,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				Repr::Pool(_) | Repr::Columnar(_) => self.for_pool(node, pattern, value, body),
 				Repr::Links(_) => self.for_links(node, pattern, value, body),
 				Repr::Range => self.for_range_value(node, pattern, value, body),
+				Repr::Tuple(ty) if self.c_array_count(ty).is_some() => {
+					self.for_c_array(node, pattern, has_index, iterable, value, body)
+				}
 				Repr::Never => Ok(value),
 				_ => Err(self.unsupported(iterable.index(), "`for` over this value")),
 			};

@@ -85,6 +85,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			None
 		};
+		if path == "BigInt#abs"
+			&& let Some(receiver) = receiver
+		{
+			return self.big_absolute(receiver);
+		}
 		let Some(values) = self.given_values(info)? else {
 			return Ok(Val::never());
 		};

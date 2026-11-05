@@ -322,6 +322,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let word = builder.build_int_z_extend(value.into_int_value(), i64, "")?;
 				self.mix_integer(builder, word)?
 			}
+			// the canonical form: an inline word, or the limbs of a block
+			Repr::BigInt => {
+				let word = builder
+					.build_call(
+						self.runtime.function("fa_bigint_hash")?,
+						&[value.into()],
+						"",
+					)?
+					.try_as_basic_value()
+					.basic()
+					.expect("a hash")
+					.into_int_value();
+				self.mix_integer(builder, word)?
+			}
 			Repr::F64 | Repr::F32 | Repr::Percentage => {
 				// SameValueZero: `-0` is `0`, every `NaN` is one
 				let float = value.into_float_value();

@@ -647,12 +647,12 @@ pub(crate) fn build_native(
 		// set by `compile_package` from the libraries
 		c_library: None,
 	};
-	// a C library (`build.cLibrary`): the API file is the entry
-	let c_library =
-		match crate::build::c_library_of(prepared.configuration.as_ref(), &prepared.project.base) {
-			Ok(c_library) => c_library,
-			Err(message) => return NativeBuilt::Failed(message),
-		};
+	// a C library (`build.cLibrary`, `fa build` only): the API file is the entry
+	let configuration = prepared.configuration.as_ref().filter(|_| !development);
+	let c_library = match crate::build::c_library_of(configuration, &prepared.project.base) {
+		Ok(c_library) => c_library,
+		Err(message) => return NativeBuilt::Failed(message),
+	};
 	let entry = c_library
 		.as_ref()
 		.map_or_else(|| prepared.entry.clone(), |library| library.api_module());

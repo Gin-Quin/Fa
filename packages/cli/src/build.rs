@@ -710,16 +710,18 @@ fn build_native_artifact(
 			target.name()
 		));
 	}
-	// a C library (`build.cLibrary`): always in synchronous mode
-	let library = crate::project::locate(Some(path))
-		.ok()
-		.filter(|project| project.package && project.entry.is_none())
-		.is_some_and(|project| {
-			configuration_for(&project.base, target.language_target())
-				.build
-				.c_library
-				.is_some()
-		});
+	// a C library (`build.cLibrary`, `fa build` only: `fa run` runs the
+	// application): always in synchronous mode
+	let library = !development
+		&& crate::project::locate(Some(path))
+			.ok()
+			.filter(|project| project.package && project.entry.is_none())
+			.is_some_and(|project| {
+				configuration_for(&project.base, target.language_target())
+					.build
+					.c_library
+					.is_some()
+			});
 	// a package: compiled per unit on the pipeline (design/parallel-pipeline.md
 	// §3.3), unless it is asynchronous or uses what the units don't compile yet
 	if crate::pipeline_enabled()
@@ -756,11 +758,9 @@ fn build_native_artifact(
 	}
 	let mut loaded = Loaded::load(Some(path), target.analysis_target())?;
 	let c_library = c_library_of(
-		loaded
-			.inner
-			.configuration
-			.as_ref()
-			.filter(|_| loaded.inner.project.package && loaded.inner.project.entry.is_none()),
+		loaded.inner.configuration.as_ref().filter(|_| {
+			!development && loaded.inner.project.package && loaded.inner.project.entry.is_none()
+		}),
 		&loaded.inner.project.base,
 	)?;
 	loaded.configure_asynchronous(

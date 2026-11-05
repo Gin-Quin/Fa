@@ -75,3 +75,11 @@ A member of a named union is read and written tagged by a `"type"` property hold
 ## The rt-5 example (`@typeToString(getDigitCount)`, types-at-runtime or function composition page)
 
 A function name is a value: write `@typeToString(Type<getDigitCount>)` (metaprogramming page: "use `Type(value)` to get the type of a value"; `TY008` otherwise).
+
+## `documentation/types/fields.md`, "Field sets" and "String representation"
+
+Add: `+=` and `-=` work on a `mutable` set (`permissions += Permissions.admin`); any other operator is an error. `Integer(set)` needs an integer type holding every value of the set (a set of 64 flags or more converts to `UInt64`/`UInt128`). A set prints as a key set: `console.log(MyFields { foo, nested { baz1 } })` prints `{ foo, nested { baz1 } }`, and `{}` when empty. A group may list no flag in a value (`nested {}`), not in a declaration.
+
+## `documentation/types/fields.md`, "Key sets as compile-time parameters"
+
+Make precise: the type parameter whose keys a key set holds comes before it (`<Value, keys: DeepKeys<Value>>`). For now the body uses the parameter only as the iterable of `@for`, and the body is checked once, `value[key]` having a type of its own that stands for every field (like a type parameter): it can be printed, passed on or compared, not used as a number or a string. A `value[key]` whose target is not a value of that type is `TF011`.

@@ -19,3 +19,7 @@ console.log(some)
 -- prints: ({ admin }, 1)
 -- prints: none
 -- prints: { admin }
+let set: Set<Permissions> = [Permissions.read, { write, admin }]
+console.log(set) -- prints: [{ read }, { write, admin }]
+let map: Map<String, Permissions> = [("ana", Permissions.read)]
+console.log(map) -- prints: [("ana", { read })]

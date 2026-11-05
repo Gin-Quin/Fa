@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- error: TF028
 -- brief: ✗ tf-16: TF028
 type U = Uppercase<Integer>

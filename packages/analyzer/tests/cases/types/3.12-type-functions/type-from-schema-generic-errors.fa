@@ -1,0 +1,8 @@
+-- note: a type `TypeFromSchema` builds in a generic type function accepts only its values
+function shout = (schema: Schema): Schema => when schema is {
+	Schema.StringLiteral as { value } => Schema.StringLiteral { value = value.toUpperCase() }
+	else => schema
+}
+type Shouted<Input> = TypeFromSchema<@shout(@typeToSchema(Input))>
+type Loud = Shouted<"hello">
+let wrong: Loud = "hello" -- error: E-TYPE-1

@@ -22,9 +22,8 @@ use ethnum::I256;
 
 pub use crate::ids::TypeId;
 use crate::ids::{
-	ConstId, DeclKey, EffectSetId, FieldsShapeId, IntId, ListId, MaskId, ModuleId, NominalId,
-	ParamId, ParamListId, PathId, RecId, ReqListId, ShapeId, SigId, StepListId, Sym, SymIntId,
-	SymListId,
+	ConstId, DeclKey, EffectSetId, IntId, ListId, MaskId, ModuleId, NominalId, ParamId,
+	ParamListId, PathId, RecId, ReqListId, ShapeId, SigId, StepListId, Sym, SymIntId, SymListId,
 };
 pub use int::{ComputeType, IntStorage, IntType, Interval};
 pub use relate::{Mode, Reason};
@@ -82,8 +81,10 @@ pub enum TypeKind {
 	Enum(NominalId, MaskId),
 	/// One member of an enumeration.
 	EnumMember(NominalId, u16),
-	/// A `Fields` flag tree (M2).
-	Fields(FieldsShapeId),
+	/// A `Fields` flag tree, a key set (`Keys<T>`): its keys in order, a
+	/// leaf a string literal type of its name, a group a tuple of its name
+	/// and the `Fields` type of its children.
+	Fields(ListId),
 	/// A C structure (M3).
 	CStruct(NominalId),
 	/// `Pointer(T)` (foreign code): a `T` in memory that Fa doesn't manage,

@@ -288,7 +288,70 @@ impl Walker<'_> {
 			return TypeId::UNKNOWN;
 		};
 		self.check_json_type(n, expected, "Json.parse");
+		self.note_json_defaults(expected, &mut Vec::new());
 		expected
+	}
+
+	/// The default values of the fields of the object types declared in
+	/// other files that `Json.parse` reads (`Analysis::json_defaults`): a
+	/// missing field takes its default value.
+	fn note_json_defaults(&mut self, ty: TypeId, seen: &mut Vec<TypeId>) {
+		if seen.contains(&ty) || seen.len() > 64 {
+			return;
+		}
+		seen.push(ty);
+		match self.s.types.kind(ty) {
+			TypeKind::Object(shape) => {
+				let fields: Vec<TypeId> = self
+					.s
+					.types
+					.shape_fields(shape)
+					.iter()
+					.map(|field| field.ty)
+					.collect();
+				if self.declared_fields(ty).is_none()
+					&& let Some(defaults) = self.external_field_defaults(ty)
+				{
+					for (name, value) in defaults {
+						if let Some(value) = value
+							&& !self.a.json_defaults.contains_key(&(ty, name))
+						{
+							let index = self.a.field_constants.len() as u32;
+							self.a.field_constants.push(value);
+							self.a.json_defaults.insert((ty, name), index);
+						}
+					}
+				}
+				for field in fields {
+					self.note_json_defaults(field, seen);
+				}
+			}
+			TypeKind::Rec(_) => {
+				if let Some(target) = self.s.types.rec_target(ty) {
+					self.note_json_defaults(target, seen);
+				}
+			}
+			TypeKind::Union(list) | TypeKind::Tuple(list) => {
+				for member in self.s.types.list_items(list).to_vec() {
+					self.note_json_defaults(member, seen);
+				}
+			}
+			TypeKind::Collection(_, item, _) => self.note_json_defaults(item, seen),
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _) => {
+				let count = self
+					.s
+					.types
+					.sym_list(self.s.types.nominal(nominal).members)
+					.len() as u16;
+				for index in 0..count {
+					let payload = self.s.types.payload(nominal, index);
+					if !payload.is_unset() {
+						self.note_json_defaults(payload, seen);
+					}
+				}
+			}
+			_ => {}
+		}
 	}
 
 	/// `AN005` when values of `ty` have no JSON form.
@@ -344,6 +407,29 @@ impl Walker<'_> {
 				members
 					.into_iter()
 					.find_map(|member| self.not_json(member, depth + 1))
+			}
+			// a `Union` type: its members tagged by `"type"` (design/decisions.md,
+			// "JSON form of named union members")
+			// an enumeration: its pinned values, else its member names
+			TypeKind::Enum(..) | TypeKind::EnumMember(..) => None,
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _)
+				if matches!(
+					self.s.types.nominal(nominal).kind,
+					crate::types::NominalKind::Union | crate::types::NominalKind::Errors
+				) =>
+			{
+				let count = self
+					.s
+					.types
+					.sym_list(self.s.types.nominal(nominal).members)
+					.len() as u16;
+				let payloads: Vec<TypeId> = (0..count)
+					.map(|index| self.s.types.payload(nominal, index))
+					.filter(|payload| !payload.is_unset())
+					.collect();
+				payloads
+					.into_iter()
+					.find_map(|payload| self.not_json(payload, depth + 1))
 			}
 			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
 				self.not_json(item, depth + 1)

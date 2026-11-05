@@ -1,0 +1,35 @@
+-- A string replaced by slices of itself (`src/lower/edits.rs`): edited in
+-- place when it owns its block, is simple and the replacement has the
+-- replaced bytes' length; as written otherwise.
+type Holder = { text: String }
+
+function edit = (seed: Integer): String throws IndexError => {
+	mutable text = "the quick brown fox jumps over the lazy dog"
+	text = text[..4] + "QUICK" + text[9..]
+	text = try text[..seed] + "#" + try text[seed + 1..]
+	-- another length: built as written
+	text = try text[..0] + "A" + try text[3..]
+	-- a negative bound counts from the end
+	text = try text[..-1] + "G" + try text[text.length..]
+	text = try text[..text.length // 2]
+	text
+}
+console.log(edit(10) catch error => "") -- prints: A QUICK #rown fox ju
+console.log(edit(-3) catch error => "") -- prints: A QUICK brown fox ju
+console.log(edit(99) catch error => "out of bounds") -- prints: out of bounds
+
+-- a field, an inline text, a text that isn't simple, a local replacement
+mutable holder = Holder { text = "0123456789012345678901234567890123456789" }
+let mark = "*"
+holder.text = try holder.text[..5] + mark + try holder.text[6..]
+mutable short = "abc"
+short = short[..1] + "X" + short[2..]
+mutable accents = "héllo wörld, héllo wörld, héllo wörld"
+accents = accents[..1] + "e" + accents[2..]
+accents = try accents[..7] + "o" + try accents[8..]
+console.log(holder.text, short, accents) -- prints: 01234*6789012345678901234567890123456789 aXc hello world, héllo wörld, héllo wörld
+
+-- a start after the end: the slices overlap, as written
+mutable overlap = "abcdefghijklmnopqrstuvwxyz0123456789"
+overlap = overlap[..5] + "-" + overlap[2..]
+console.log(overlap) -- prints: abcde-cdefghijklmnopqrstuvwxyz0123456789

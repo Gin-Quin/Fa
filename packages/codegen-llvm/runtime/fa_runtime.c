@@ -8654,9 +8654,124 @@ static const uint8_t *json_skip(const uint8_t *schema) {
 		}
 		return schema;
 	}
+	case 'N': {
+		schema += 1;
+		int64_t count = json_schema_number(&schema, &present);
+		for (int64_t member = 0; member < count; member += 1) {
+			int64_t length = json_schema_number(&schema, &present);
+			uint8_t kind = schema[length];
+			schema += length + 1;
+			if (kind != 'e') {
+				schema = json_skip(schema);
+			}
+		}
+		return schema;
+	}
+	case 'E': {
+		schema += 1;
+		int64_t count = json_schema_number(&schema, &present);
+		for (int64_t member = 0; member < count; member += 1) {
+			int64_t length = json_schema_number(&schema, &present);
+			schema += length;
+			if (*schema == 'p') {
+				schema += 1;
+				json_schema_number(&schema, &present);
+			} else {
+				schema += 1;
+			}
+		}
+		return schema;
+	}
 	default:
 		return schema + 1;
 	}
+}
+
+static int json_check(JsonCheck *check, const FaJson *node, const uint8_t *schema, int report);
+FA_EXPORT const FaJson *fa_json_field(const FaJson *node, const uint8_t *name, size_t length);
+
+/// A member of the schema of a named union (`N<count>;` then, for each,
+/// `<length>;<name><kind>` and the schema of its data unless `kind` is
+/// `e`): its name, its kind (`e` no data, `l` a literal, `r` an object next
+/// to `"type"`, `v` data under `"value"`), its data's schema.
+typedef struct {
+	const uint8_t *name;
+	size_t length;
+	uint8_t kind;
+	const uint8_t *data;
+} JsonMember;
+
+static const uint8_t *json_member_at(const uint8_t *cursor, JsonMember *member) {
+	int present;
+	int64_t length = json_schema_number(&cursor, &present);
+	member->name = cursor;
+	member->length = (size_t)length;
+	member->kind = cursor[length];
+	member->data = cursor + length + 1;
+	return member->kind == 'e' ? member->data : json_skip(member->data);
+}
+
+/// The member of an enumeration a value is (its position in the schema),
+/// or -1: its pinned value (a number), else its name (a string).
+static int64_t json_enum_of(const FaJson *node, const uint8_t *schema) {
+	int present;
+	const uint8_t *cursor = schema + 1;
+	int64_t count = json_schema_number(&cursor, &present);
+	for (int64_t index = 0; index < count; index += 1) {
+		int64_t length = json_schema_number(&cursor, &present);
+		const uint8_t *name = cursor;
+		cursor += length;
+		if (*cursor == 'p') {
+			cursor += 1;
+			int64_t value = json_schema_number(&cursor, &present);
+			if (node->kind == JSON_NUMBER && (node->flags & JSON_FITS) && node->integer == value) {
+				return index;
+			}
+			continue;
+		}
+		cursor += 1;
+		if (node->kind == JSON_STRING && node->length == (size_t)length) {
+			int same = 1;
+			for (size_t at = 0; at < (size_t)length; at += 1) {
+				same &= node->bytes[at] == name[at];
+			}
+			if (same) {
+				return index;
+			}
+		}
+	}
+	return -1;
+}
+
+/// The member of a named union a value is (its position in the schema),
+/// or -1: a literal it equals, else the member its `"type"` names.
+static int64_t json_member_of(const FaJson *node, const uint8_t *schema, const FaJson **tag) {
+	int present;
+	const uint8_t *cursor = schema + 1;
+	int64_t count = json_schema_number(&cursor, &present);
+	*tag = node->kind == JSON_OBJECT ? fa_json_field(node, (const uint8_t *)"type", 4) : 0;
+	int64_t found = -1;
+	for (int64_t index = 0; index < count && found < 0; index += 1) {
+		JsonMember member;
+		cursor = json_member_at(cursor, &member);
+		if (member.kind == 'l') {
+			JsonCheck check = {0};
+			if (json_check(&check, node, member.data, 0)) {
+				found = index;
+			}
+			continue;
+		}
+		if (*tag != 0 && (*tag)->kind == JSON_STRING && (*tag)->length == member.length) {
+			int same = 1;
+			for (size_t at = 0; at < member.length; at += 1) {
+				same &= (*tag)->bytes[at] == member.name[at];
+			}
+			if (same) {
+				found = index;
+			}
+		}
+	}
+	return found;
 }
 
 /// What a value is, in the words of `faJsonParse`.
@@ -8880,6 +8995,99 @@ static int json_check(JsonCheck *check, const FaJson *node, const uint8_t *schem
 		}
 		return json_mismatch(check, node, "one of the members of its union", 0, report);
 	}
+	case 'E': {
+		if (json_enum_of(node, schema) >= 0) {
+			return 1;
+		}
+		if (report) {
+			// `<path> should be one of "red", "green", not string` (or the values)
+			json_error_start(check);
+			append_c(" should be one of ");
+			const uint8_t *cursor = schema + 1;
+			int64_t count = json_schema_number(&cursor, &present);
+			for (int64_t member = 0; member < count; member += 1) {
+				int64_t length = json_schema_number(&cursor, &present);
+				const uint8_t *name = cursor;
+				cursor += length;
+				if (member > 0) {
+					append_c(", ");
+				}
+				if (*cursor == 'p') {
+					cursor += 1;
+					fa_b_i64(json_schema_number(&cursor, &present));
+				} else {
+					cursor += 1;
+					fa_b_json_string(name, (size_t)length);
+				}
+			}
+			append_c(", not ");
+			append_c(json_found(node));
+			json_error_end(check);
+		}
+		return 0;
+	}
+	case 'N': {
+		const FaJson *tag;
+		int64_t index = json_member_of(node, schema, &tag);
+		if (index < 0) {
+			if (tag == 0 || tag->kind != JSON_STRING) {
+				return json_mismatch(check, node, "one of the members of its union", 0, report);
+			}
+			if (report) {
+				// `<path>.type should be one of "A", "B", not "C"`
+				json_error_start(check);
+				append_c(".type should be one of ");
+				const uint8_t *cursor = schema + 1;
+				int64_t count = json_schema_number(&cursor, &present);
+				int first = 1;
+				for (int64_t member = 0; member < count; member += 1) {
+					JsonMember found;
+					cursor = json_member_at(cursor, &found);
+					if (found.kind == 'l') {
+						continue;
+					}
+					if (!first) {
+						append_c(", ");
+					}
+					first = 0;
+					fa_b_json_string(found.name, found.length);
+				}
+				append_c(", not ");
+				fa_b_json_string(tag->bytes, tag->length);
+				json_error_end(check);
+			}
+			return 0;
+		}
+		const uint8_t *cursor = schema + 1;
+		json_schema_number(&cursor, &present);
+		JsonMember member;
+		for (int64_t at = 0; at <= index; at += 1) {
+			cursor = json_member_at(cursor, &member);
+		}
+		switch (member.kind) {
+		case 'e':
+		case 'l':
+			return 1;
+		case 'r':
+			return json_check(check, node, member.data, report);
+		default: {
+			const FaJson *value = fa_json_field(node, (const uint8_t *)"value", 5);
+			if (value == 0) {
+				if (report) {
+					json_error_start(check);
+					append_c(" has no field `value`");
+					json_error_end(check);
+				}
+				return 0;
+			}
+			size_t length = check->length;
+			json_path(check, (const uint8_t *)".value", 6);
+			int fits = json_check(check, value, member.data, report);
+			check->length = length;
+			return fits;
+		}
+		}
+	}
 	default:
 		if (report) {
 			json_error_start(check);
@@ -8945,6 +9153,19 @@ FA_EXPORT const void *fa_json_parse(const uint8_t *text, size_t length, const ui
 	}
 	*out = document;
 	return 0;
+}
+
+/// The member of an enumeration a value (that fits) is: its position in
+/// the schema.
+FA_EXPORT int64_t fa_json_enum(const FaJson *node, const uint8_t *schema) {
+	return json_enum_of(node, schema);
+}
+
+/// The member of a named union a value (that fits) is: its position in
+/// the schema.
+FA_EXPORT int64_t fa_json_member(const FaJson *node, const uint8_t *schema) {
+	const FaJson *tag;
+	return json_member_of(node, schema, &tag);
 }
 
 /// Whether a value fits a schema (the member of a union it is read as).

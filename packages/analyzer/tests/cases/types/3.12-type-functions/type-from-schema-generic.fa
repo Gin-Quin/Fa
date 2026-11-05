@@ -1,0 +1,11 @@
+-- note: `TypeFromSchema` inside a generic type function, built for each application
+function shout = (schema: Schema): Schema => when schema is {
+	Schema.StringLiteral as { value } => Schema.StringLiteral { value = value.toUpperCase() }
+	else => schema
+}
+type Shouted<Input> = TypeFromSchema<@shout(@typeToSchema(Input))>
+type Loud = Shouted<"hello">
+type Other = Shouted<"bye">
+let loud: Loud = "HELLO"
+let other: Other = "BYE"
+console.log(loud, other, @typeToString(Loud), @typeToString(Other)) -- prints: HELLO BYE "HELLO" "BYE"

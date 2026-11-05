@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- error: TF026
 -- brief: ✗ tf-14: TF026
 type Bad = Parameters<(Integer, Integer) => Integer>

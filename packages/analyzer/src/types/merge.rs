@@ -210,6 +210,7 @@ impl Merger<'_> {
 			K::StringLit(sym) => K::StringLit(self.sym(sym)),
 			K::Object(shape) => K::Object(self.shape(shape)),
 			K::Tuple(list) => K::Tuple(self.list(list)),
+			K::Fields(list) => K::Fields(self.list(list)),
 			K::Union(list) => K::Union(self.list(list)),
 			K::NamedUnion(nominal, mask) => K::NamedUnion(self.nominal(nominal), self.mask(mask)),
 			K::Enum(nominal, mask) => K::Enum(self.nominal(nominal), self.mask(mask)),

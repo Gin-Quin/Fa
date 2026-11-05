@@ -163,8 +163,8 @@ impl Walker<'_> {
 				let ty = self.type_of(first);
 				let ty = self.s.types.substitute(ty, bindings);
 				let schema = crate::comptime::schema::schema(&self.s.types, ty);
-				let defaults = self.schema_defaults(ty);
-				let schema = crate::comptime::schema::with_defaults(schema, &defaults);
+				let (defaults, order) = self.schema_defaults(ty);
+				let schema = crate::comptime::schema::with_defaults(schema, &defaults, &order);
 				self.a.constants.insert(node, schema);
 			}
 		}
@@ -483,15 +483,21 @@ impl Walker<'_> {
 			}
 			names.push(sym);
 			if is_enum {
-				// the values are the positions (pinned values are read from a declaration)
+				// a value other than the position is pinned (its literal payload)
 				let value = member.get("value").and_then(Value::as_int);
-				if value.is_some_and(|value| value != I256::from(index as u64)) {
-					return self.unsupported(
-						n,
-						"an enumeration built by `TypeFromSchema` whose values are not the positions",
-					);
+				match value {
+					Some(value) if value != I256::from(index as u64) => {
+						if value < 0 {
+							return self.invalid_schema(
+								n,
+								&TF042,
+								"the value of a member is a non-negative integer",
+							);
+						}
+						definitions.push(Some(Value::Integer(value)));
+					}
+					_ => definitions.push(None),
 				}
-				definitions.push(None);
 			} else {
 				definitions.push(match member.get("definition") {
 					Some(Value::None) | None => None,
@@ -528,6 +534,11 @@ impl Walker<'_> {
 		let payloads: Vec<TypeId> = definitions
 			.iter()
 			.map(|definition| match definition {
+				// a pinned value of an enumeration: its literal
+				Some(Value::Integer(value)) if is_enum => {
+					let storage = IntStorage::Default;
+					self.s.types.int_range(*value, *value, storage)
+				}
 				Some(definition) => self.schema_type(n, definition, named, depth + 1),
 				None => TypeId::UNSET,
 			})

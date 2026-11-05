@@ -74,3 +74,7 @@ A member of a named union is read and written tagged by a `"type"` property hold
 ## `documentation/advanced/foreign-code.md`, "`CStruct`" (after the `Vertex` example)
 
 Add: a `CArray(T, n)` value is written as an array literal of exactly `n` items (`position = [1.0, 2.0, 3.0]`); it is indexed like an array (`try vertex.color[i]`, from the end when negative), written in place (`vertex.position[1] = 5.5`), iterated (`for value, index in vertex.color`), and has a `length`. It is a value: copying the `CStruct` copies it.
+
+## `documentation/advanced/foreign-code.md`, `:::implementation` ("Native", "State of the implementation")
+
+`CStruct`s by value now follow the C ABI of the target: x86-64 System V, AAPCS64 (homogeneous aggregates of 1 to 4 floats or doubles in floating-point registers, other structs up to 16 bytes as integers, larger ones through a pointer to a copy, or `sret`) and wasm32 (a struct of one scalar is that scalar, others `byval`/`sret`). Windows x64 isn't classified yet. Replace "`CStruct` by value on x86-64 System V only" in the state.

@@ -6,8 +6,11 @@
 //! - An `@extern` function is declared once, `ccc`, with C types: integers
 //!   of their width (`signext`/`zeroext` below 32 bits), `float`/`double`,
 //!   `ptr` for pointers and C strings (`Pointer(T)?` is `NULL` when absent),
-//!   and a `CStruct` by value classified like clang does on x86-64 System V
-//!   (up to two eightbytes in registers, else `byval`/`sret`).
+//!   and a `CStruct` by value classified like clang does for the target's
+//!   C ABI (`CAbi`): x86-64 System V (up to two eightbytes in registers,
+//!   else `byval`/`sret`), AAPCS64 (homogeneous float aggregates as float
+//!   arrays, up to 16 bytes as integers, else a pointer to a copy or
+//!   `sret`) and WebAssembly (a single scalar as itself, else `byval`/`sret`).
 //! - A `String` given to a `CString` is copied into a zero-terminated block
 //!   of the runtime allocator, freed after the call; an `Array(T)` given to a
 //!   `Pointer(T)` is the pointer to its items; a value given to a
@@ -29,7 +32,6 @@ use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, Poi
 use crate::error::Error;
 use crate::lower::values::{IntRepr, Repr, Val};
 use crate::lower::{FAST_CALLING_CONVENTION, Lowering};
-use crate::target::Target;
 
 /// The C type of a parameter or a result.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -47,7 +49,18 @@ pub(crate) enum CType {
 	Struct(TypeId),
 }
 
-/// How a C value crosses the ABI (x86-64 System V for structs).
+/// The C ABI of the target, for structs by value.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum CAbi {
+	/// x86-64 System V.
+	SysV,
+	/// AArch64 (AAPCS64).
+	Aapcs64,
+	/// WebAssembly (clang's C ABI for wasm32).
+	Wasm,
+}
+
+/// How a C value crosses the ABI.
 enum Passing<'ctx> {
 	/// As is.
 	Direct(BasicTypeEnum<'ctx>),
@@ -55,6 +68,8 @@ enum Passing<'ctx> {
 	Coerced(Vec<BasicTypeEnum<'ctx>>),
 	/// A struct in memory: a pointer (`byval` for a parameter, `sret` for a result).
 	Memory(StructType<'ctx>),
+	/// A struct parameter as a pointer to a copy the caller makes (AAPCS64).
+	Reference,
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -120,26 +135,83 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		TargetData::create(layout.as_str().to_str().unwrap_or(""))
 	}
 
-	/// How a C value is passed (x86-64 System V, and every scalar elsewhere).
-	fn passing(&self, c: CType, node: NodeId) -> Result<Option<Passing<'ctx>>, Error> {
+	/// The C ABI of the module's target.
+	fn c_abi(&self) -> CAbi {
+		let triple = self.module.get_triple();
+		let triple = triple.as_str().to_str().unwrap_or("");
+		if triple.starts_with("wasm") {
+			CAbi::Wasm
+		} else if triple.starts_with("aarch64") || triple.starts_with("arm64") {
+			CAbi::Aapcs64
+		} else {
+			CAbi::SysV
+		}
+	}
+
+	/// How a C value is passed as a parameter, or as the result
+	/// (`result`): scalars as themselves, structs by the target's C ABI.
+	fn passing(
+		&self,
+		c: CType,
+		_node: NodeId,
+		result: bool,
+	) -> Result<Option<Passing<'ctx>>, Error> {
 		let CType::Struct(ty) = c else {
 			return Ok(self.c_llvm_type(c).map(Passing::Direct));
 		};
-		if self.target != Target::Native {
-			return Err(self.unsupported(
-				node.index(),
-				"a `CStruct` by value outside x86-64 System V (pass a `Pointer` to it)",
-			));
-		}
 		let structure = self.object_type(ty);
 		let data = self.target_data();
 		let size = data.get_abi_size(&structure);
+		let mut leaves: Vec<(u64, BasicTypeEnum<'ctx>)> = Vec::new();
+		self.struct_leaves(&data, structure, 0, &mut leaves);
+		match self.c_abi() {
+			CAbi::Wasm => {
+				// a struct of one scalar is that scalar, else in memory
+				return Ok(Some(match leaves.as_slice() {
+					[(_, scalar)] => Passing::Coerced(vec![*scalar]),
+					_ => Passing::Memory(structure),
+				}));
+			}
+			CAbi::Aapcs64 => {
+				// a homogeneous aggregate of 1 to 4 floats or doubles: in
+				// floating-point registers
+				let homogeneous = !leaves.is_empty()
+					&& leaves.len() <= 4
+					&& leaves.iter().all(|(_, leaf)| leaf.is_float_type())
+					&& leaves.iter().all(|(_, leaf)| *leaf == leaves[0].1);
+				if homogeneous {
+					return Ok(Some(if result {
+						Passing::Direct(structure.into())
+					} else {
+						Passing::Coerced(vec![leaves[0].1.array_type(leaves.len() as u32).into()])
+					}));
+				}
+				if size > 16 {
+					return Ok(Some(if result {
+						Passing::Memory(structure)
+					} else {
+						Passing::Reference
+					}));
+				}
+				let i64 = self.context.i64_type();
+				let register: BasicTypeEnum<'ctx> = if size > 8 {
+					if data.get_abi_alignment(&structure) >= 16 {
+						self.context.i128_type().into()
+					} else {
+						i64.array_type(2).into()
+					}
+				} else if result {
+					self.int_type((size * 8) as u32).into()
+				} else {
+					i64.into()
+				};
+				return Ok(Some(Passing::Coerced(vec![register])));
+			}
+			CAbi::SysV => {}
+		}
 		if size > 16 {
 			return Ok(Some(Passing::Memory(structure)));
 		}
-		// the scalar leaves with their offsets
-		let mut leaves: Vec<(u64, BasicTypeEnum<'ctx>)> = Vec::new();
-		self.struct_leaves(&data, structure, 0, &mut leaves);
 		let mut registers = Vec::new();
 		for eightbyte in 0..size.div_ceil(8) {
 			let (start, end) = (eightbyte * 8, (eightbyte * 8 + 8).min(size));
@@ -164,6 +236,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			});
 		}
 		Ok(Some(Passing::Coerced(registers)))
+	}
+
+	/// A block holding a struct and its registers, which may be larger
+	/// (AAPCS64 passes a 4-byte struct in a 64-bit register).
+	fn coercion_slot(
+		&self,
+		structure: BasicTypeEnum<'ctx>,
+		coerced: StructType<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let data = self.target_data();
+		let ty = if data.get_abi_size(&coerced) > data.get_abi_size(&structure) {
+			coerced.into()
+		} else {
+			structure
+		};
+		let slot = self.alloca_type(ty, "c_struct")?;
+		// the larger alignment of the two
+		let align = data
+			.get_abi_alignment(&coerced)
+			.max(data.get_abi_alignment(&structure));
+		if let Some(instruction) = slot.as_instruction() {
+			let _ = instruction.set_alignment(align);
+		}
+		Ok(slot)
 	}
 
 	/// The scalar leaves of a struct, with their offsets.
@@ -221,14 +317,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut ir_params: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
 		let mut attributes: Vec<(u32, &str, Option<inkwell::types::AnyTypeEnum<'ctx>>)> =
 			Vec::new();
-		let ret_passing = self.passing(c_ret, node)?;
+		let ret_passing = self.passing(c_ret, node, true)?;
 		if let Some(Passing::Memory(structure)) = &ret_passing {
 			attributes.push((0, "sret", Some((*structure).into())));
 			ir_params.push(self.pointer_type().into());
 		}
 		for &c in &c_params {
 			let position = ir_params.len() as u32;
-			match self.passing(c, node)? {
+			match self.passing(c, node, false)? {
 				Some(Passing::Direct(ty)) => {
 					match c {
 						CType::Int(bits, signed) if bits < 32 => {
@@ -247,11 +343,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					attributes.push((position, "byval", Some(structure.into())));
 					ir_params.push(self.pointer_type().into());
 				}
+				Some(Passing::Reference) => ir_params.push(self.pointer_type().into()),
 				None => return Err(self.unsupported(node.index(), "a `Void` parameter")),
 			}
 		}
 		let function_type = match &ret_passing {
-			None | Some(Passing::Memory(_)) => self.context.void_type().fn_type(&ir_params, false),
+			None | Some(Passing::Memory(_) | Passing::Reference) => {
+				self.context.void_type().fn_type(&ir_params, false)
+			}
 			Some(Passing::Direct(ty)) => ty.fn_type(&ir_params, false),
 			Some(Passing::Coerced(registers)) => {
 				if registers.len() == 1 {
@@ -389,7 +488,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.map(|param| param.ty)
 			.collect();
 		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
-		let ret_passing = self.passing(c_ret, node)?;
+		let ret_passing = self.passing(c_ret, node, true)?;
 		let sret = match &ret_passing {
 			Some(Passing::Memory(structure)) => {
 				let slot = self.alloca_type((*structure).into(), "sret")?;
@@ -480,13 +579,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.to_c(lowered, c, value)?
 				}
 			};
-			match self.passing(c, value)? {
+			match self.passing(c, value, false)? {
 				Some(Passing::Coerced(registers)) => {
-					// a struct loaded as its registers
+					// a struct loaded as its registers (from a block as large as both)
 					let structure = self.c_llvm_type(c).expect("a struct");
-					let slot = self.alloca_type(structure, "c_struct")?;
-					self.builder.build_store(slot, raw)?;
 					let coerced = self.context.struct_type(&registers, false);
+					let slot = self.coercion_slot(structure, coerced)?;
+					self.builder.build_store(slot, raw)?;
 					for (position, register) in registers.iter().enumerate() {
 						let pointer =
 							self.builder
@@ -494,7 +593,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						arguments.push(self.builder.build_load(*register, pointer, "")?.into());
 					}
 				}
-				Some(Passing::Memory(_)) => {
+				Some(Passing::Memory(_) | Passing::Reference) => {
 					let structure = self.c_llvm_type(c).expect("a struct");
 					let slot = self.alloca_type(structure, "c_struct")?;
 					self.builder.build_store(slot, raw)?;
@@ -528,10 +627,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			(Some(Passing::Coerced(registers)), _) => {
 				let structure = self.c_llvm_type(c_ret).expect("a struct");
-				let slot = self.alloca_type(structure, "c_result")?;
+				let coerced = self.context.struct_type(&registers, false);
+				let slot = self.coercion_slot(structure, coerced)?;
 				let returned = result.try_as_basic_value().basic().expect("a result");
 				self.builder.build_store(slot, returned)?;
-				let _ = registers;
 				self.builder.build_load(structure, slot, "")?
 			}
 			_ => result.try_as_basic_value().basic().expect("a result"),

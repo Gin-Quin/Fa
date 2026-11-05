@@ -12,7 +12,12 @@ pub use crate::options::{OptLevel, Options, Target};
 impl Target {
 	pub fn triple(self) -> TargetTriple {
 		match self {
-			Target::Native => TargetMachine::get_default_triple(),
+			// `FA_NATIVE_TRIPLE`: another architecture's triple, for the tests of
+			// its C ABI (`tests/abi.rs`: the IR only, nothing links)
+			Target::Native => match std::env::var("FA_NATIVE_TRIPLE") {
+				Ok(triple) if !triple.is_empty() => TargetTriple::create(&triple),
+				_ => TargetMachine::get_default_triple(),
+			},
 			Target::NativeFreestanding => TargetTriple::create("x86_64-unknown-linux-gnu"),
 			Target::Wasm => TargetTriple::create("wasm32-unknown-unknown"),
 		}
@@ -32,7 +37,14 @@ impl Target {
 		}
 		let triple = self.triple();
 		let (cpu, features, reloc_mode) = match self {
-			Target::Native if cfg!(target_arch = "x86_64") => ("x86-64", "", RelocMode::PIC),
+			Target::Native
+				if triple
+					.as_str()
+					.to_str()
+					.is_ok_and(|triple| triple.starts_with("x86_64")) =>
+			{
+				("x86-64", "", RelocMode::PIC)
+			}
 			Target::Native => ("generic", "", RelocMode::PIC),
 			Target::NativeFreestanding => ("x86-64", "", RelocMode::Static),
 			Target::Wasm => (
@@ -71,9 +83,7 @@ fn initialize_targets() {
 	static INITIALIZE: Once = Once::new();
 	INITIALIZE.call_once(|| {
 		let config = InitializationConfig::default();
-		#[cfg(target_arch = "x86_64")]
 		LlvmTarget::initialize_x86(&config);
-		#[cfg(target_arch = "aarch64")]
 		LlvmTarget::initialize_aarch64(&config);
 		LlvmTarget::initialize_webassembly(&config);
 	});

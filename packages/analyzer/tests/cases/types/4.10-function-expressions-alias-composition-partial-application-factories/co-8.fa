@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: FN092
 -- brief: ✗ co-8: FN092
 type Box = { value: Integer }

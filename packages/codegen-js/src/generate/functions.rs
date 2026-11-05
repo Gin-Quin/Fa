@@ -117,10 +117,33 @@ impl Generator<'_> {
 				let alias = self.expr(value);
 				self.out.line(format!("const {name} = {};", alias.text));
 			}
+			// `function f = g then h` (expressions.rs)
+			_ if self.analysis.compositions.contains_key(&value) => {
+				let composed = self.expr(value);
+				self.out.line(format!("const {name} = {};", composed.text));
+			}
 			_ => {
 				self.unsupported(n, "this function declaration");
 			}
 		}
+	}
+
+	/// A composition of steps: `(...a) => h(g(f(...a)))`, the steps evaluated
+	/// once (an error stops the chain: it is thrown).
+	pub(crate) fn composition(&mut self, steps: &[NodeId]) -> Expr {
+		let functions: Vec<String> = steps
+			.iter()
+			.map(|&step| self.expr(step).primary_text())
+			.collect();
+		let mut call = String::from("...a");
+		for (index, function) in functions.iter().enumerate() {
+			call = if index == 0 {
+				format!("{function}(...a)")
+			} else {
+				format!("{function}({call})")
+			};
+		}
+		Expr::primary(format!("((...a) => {call})"))
 	}
 
 	/// A lambda: an arrow function.

@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ co-1: → 8 / 64
 function increment = (x: Integer): Integer => x + 1
 function double = (x: Integer): Integer => x * 2

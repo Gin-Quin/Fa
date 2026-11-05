@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: FN095
 -- brief: ✗ co-5: FN095
 function runFromTwo = (pipeline: (Integer) => Integer) => pipeline[1..](1)

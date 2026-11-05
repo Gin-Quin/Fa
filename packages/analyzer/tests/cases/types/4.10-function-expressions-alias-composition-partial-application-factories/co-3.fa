@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ co-3: errors accumulate, first error stops the chain → 0
 type DatabaseError = Errors { Down }
 function loadUser = (id: Integer): String throws DatabaseError => throw DatabaseError.Down

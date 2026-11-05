@@ -783,7 +783,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						FieldValue::Given(value) | FieldValue::Default(value) => Some(value),
 						_ => None,
 					};
-					self.owned_as(lowered, repr, source)
+					let owned = self.owned_as(lowered, repr, source)?;
+					self.compact_moved_array(owned, source)
 				}
 				other => other,
 			};

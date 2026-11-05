@@ -114,6 +114,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
+	/// An owned array stored into a value being built (a field of a literal,
+	/// the data of a member) from a local, usually built by pushes: when
+	/// small, its items move into the block of its header, of their exact
+	/// size (`fa_array_compact`), so that reading it takes one block instead
+	/// of two, without the room its growth left.
+	pub(crate) fn compact_moved_array(
+		&mut self,
+		value: Val<'ctx>,
+		source: Option<NodeId>,
+	) -> Result<Val<'ctx>, Error> {
+		let (Repr::Array(item_type), Some(source), Some(raw)) = (value.repr, source, value.value)
+		else {
+			return Ok(value);
+		};
+		if !matches!(self.view(source), View::Name(_)) || self.packed_layout(item_type).is_some() {
+			return Ok(value);
+		}
+		let item = self.item_repr(item_type, source)?;
+		let size = self.item_size(item)?;
+		let compact = self.runtime.function("fa_array_compact")?;
+		let compacted = self.call_value(compact, &[raw.into(), size.into()])?;
+		Ok(Val::new(value.repr, compacted))
+	}
+
 	/// `[a, b, c]`.
 	pub(crate) fn array_literal(
 		&mut self,

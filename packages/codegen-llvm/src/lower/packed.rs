@@ -626,7 +626,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_memcpy(destination, 1, bytes, 1, length)
 			.map_err(|e| Error::Llvm(e.to_string()))?;
-		Ok(self.packed_offset(destination, length)?)
+		self.packed_offset(destination, length)
 	}
 
 	/// Reads a string written by [`Self::packed_store_string`] at `cursor`:

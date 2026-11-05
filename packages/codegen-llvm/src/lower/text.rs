@@ -58,6 +58,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(Some(Val::new(Repr::Str, pair.into_struct_value())))
 	}
 
+	/// The only part of a template, an integer of at most 64 bits.
+	pub(crate) fn integer_part(&self, parts: TemplateParts<'_>) -> Option<NodeId> {
+		let mut meaningful = parts
+			.iter()
+			.filter(|p| !matches!(p, TemplatePart::Text(text) if text.is_empty()));
+		let Some(TemplatePart::Expression(node)) = meaningful.next() else {
+			return None;
+		};
+		if meaningful.next().is_some() {
+			return None;
+		}
+		match self.node_repr(node) {
+			Ok(Repr::Int(int)) if int.bits <= 64 => Some(node),
+			_ => None,
+		}
+	}
+
 	fn single_integer_template(
 		&mut self,
 		parts: TemplateParts<'_>,
@@ -288,24 +305,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (suffix_bytes, suffix_length) = self.string_parts(suffix)?;
 		let suffix_capacity = self.string_capacity(suffix)?;
 		let needed = self.builder.build_int_add(length, suffix_length, "")?;
-		let mask = self.string_kind_mask();
-		let kind = self
-			.builder
-			.build_and(capacity, self.simple_flag().const_not(), "")?;
 		let simple = self.builder.build_int_compare(
 			IntPredicate::SLT,
 			suffix_capacity,
 			self.usize.const_zero(),
 			"",
 		)?;
-		let room = self
-			.builder
-			.build_int_compare(IntPredicate::ULE, needed, kind, "")?;
-		let owned = self
-			.builder
-			.build_int_compare(IntPredicate::ULT, kind, mask, "")?;
+		let room = self.owned_room(capacity, needed)?;
 		let fast = self.builder.build_and(simple, room, "")?;
-		let fast = self.builder.build_and(fast, owned, "")?;
 		let append = self.append_block("append");
 		let grow = self.append_block("append_slow");
 		let join = self.append_block("appended");
@@ -329,13 +336,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				],
 			)?;
 		}
-		let updated = self.builder.build_insert_value(
-			current.value.expect("a string").into_struct_value(),
-			needed,
-			1,
-			"",
-		)?;
-		self.builder.build_store(target, updated)?;
+		// only the length changes: the bytes and the capacity stay
+		let length_pointer = self
+			.builder
+			.build_struct_gep(self.string_type, target, 1, "")?;
+		self.builder.build_store(length_pointer, needed)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(grow);
 		// one simple byte into an inline string with room (a character
@@ -459,6 +464,264 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let updated = self.load(snapshot)?;
 		self.builder
 			.build_store(target, updated.value.expect("a string"))?;
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(join);
+		Ok(())
+	}
+
+	/// The length and `SIMPLE` flag shared by every string a node may
+	/// evaluate to, when each is a literal: a literal, or an `if` or a `when`
+	/// whose every branch is one (`when op is { 0 => " + ", … }`). Literals
+	/// are static strings (`string_constant`), passed unchanged through the
+	/// branches, so the appended value's length and capacity are constants.
+	pub(crate) fn literal_shape(&self, node: NodeId) -> Option<(u64, bool)> {
+		use fa_analyzer::syntax::View;
+		let shape = |text: &str| {
+			(
+				text.len() as u64,
+				text.bytes().all(|byte| byte < 0x80 && byte != b'\r'),
+			)
+		};
+		match self.view(node) {
+			View::String(text) => Some(shape(text)),
+			View::Group(inner) => self.literal_shape(inner),
+			View::Block { statements } if statements.len() == 1 => {
+				self.literal_shape(statements.first().expect("one statement"))
+			}
+			View::If {
+				then_body,
+				else_body: Some(else_body),
+				compile_time: false,
+				..
+			} => {
+				let then_shape = self.literal_shape(then_body)?;
+				(self.literal_shape(else_body)? == then_shape).then_some(then_shape)
+			}
+			View::When { arms, .. } => {
+				let mut common = None;
+				for arm in arms.iter() {
+					let arm = self.literal_shape(arm.value)?;
+					if common.is_some_and(|common| common != arm) {
+						return None;
+					}
+					common = Some(arm);
+				}
+				common
+			}
+			_ => None,
+		}
+	}
+
+	/// A string value whose length and `SIMPLE` flag are known statically
+	/// ([`Lowering::literal_shape`]): its bytes pointer with the constants.
+	pub(crate) fn with_literal_shape(
+		&self,
+		value: Val<'ctx>,
+		(length, simple): (u64, bool),
+	) -> Result<Val<'ctx>, Error> {
+		let pair = value.value.expect("a string").into_struct_value();
+		let bytes = self.builder.build_extract_value(pair, 0, "")?;
+		let capacity = if simple {
+			self.simple_flag()
+		} else {
+			self.usize.const_zero()
+		};
+		let updated =
+			self.builder
+				.build_insert_value(self.string_type.get_undef(), bytes, 0, "")?;
+		let updated =
+			self.builder
+				.build_insert_value(updated, self.usize.const_int(length, false), 1, "")?;
+		let updated = self.builder.build_insert_value(updated, capacity, 2, "")?;
+		Ok(Val {
+			value: Some(updated.into_struct_value().into()),
+			..value
+		})
+	}
+
+	/// Whether a string with this capacity word owns a heap block of at
+	/// least `needed` bytes: `needed <= kind < KIND_MASK`, where `kind` is
+	/// the capacity without its `SIMPLE` flag (an inline string has its
+	/// `INLINE` bit, a view `KIND_MASK`, a static string 0). One signed
+	/// comparison with small constants only: `(2 * kind + 2) >> 1`
+	/// (arithmetic) is `kind + 1` when `kind < KIND_MASK`, and negative
+	/// otherwise (the `INLINE` bit becomes the sign; a view's
+	/// `2^63 - 2 + 2` too). Only the capacity is transformed, so that a loop
+	/// computing `needed` keeps no shifted copy of it.
+	pub(crate) fn owned_room(
+		&self,
+		capacity: IntValue<'ctx>,
+		needed: IntValue<'ctx>,
+	) -> Result<IntValue<'ctx>, Error> {
+		let one = self.usize.const_int(1, false);
+		let two = self.usize.const_int(2, false);
+		let kind = self.builder.build_left_shift(capacity, one, "")?;
+		let kind = self.builder.build_int_add(kind, two, "")?;
+		let above = self.builder.build_right_shift(kind, one, true, "")?;
+		Ok(self
+			.builder
+			.build_int_compare(IntPredicate::SLT, needed, above, "")?)
+	}
+
+	/// The most digits of an integer that [`Lowering::append_integer`]
+	/// writes in place.
+	const IN_PLACE_DIGITS: u32 = 4;
+
+	/// `text += "{value}"` for an integer of at most 64 bits: a value below
+	/// 10^4 is written in place, one case per number of digits, after one
+	/// room check, without a scratch buffer, a copy or a call (a value whose
+	/// range LLVM knows keeps only its cases); a larger or negative value,
+	/// or a string without room, takes the decimal text and `append_string`.
+	pub(crate) fn append_integer(
+		&mut self,
+		target: PointerValue<'ctx>,
+		value: Val<'ctx>,
+	) -> Result<(), Error> {
+		let Repr::Int(int) = value.repr else {
+			return Err(Error::Llvm("an integer is appended".into()));
+		};
+		let usize = self.usize;
+		let current = self.load(Slot {
+			pointer: target,
+			repr: Repr::Str,
+		})?;
+		let pair = current.value.expect("a string").into_struct_value();
+		let bytes = self
+			.builder
+			.build_extract_value(pair, 0, "")?
+			.into_pointer_value();
+		let length = self
+			.builder
+			.build_extract_value(pair, 1, "")?
+			.into_int_value();
+		let capacity = self.string_capacity(current)?;
+		let digits = Self::IN_PLACE_DIGITS;
+		let needed =
+			self.builder
+				.build_int_add(length, usize.const_int(digits as u64, false), "")?;
+		let room = self.owned_room(capacity, needed)?;
+		// a negative value is a large unsigned one
+		let wide = if int.signed {
+			self.builder
+				.build_int_s_extend_or_bit_cast(value.int(), self.context.i64_type(), "")?
+		} else {
+			self.builder
+				.build_int_z_extend_or_bit_cast(value.int(), self.context.i64_type(), "")?
+		};
+		let i64 = self.context.i64_type();
+		let small = self.builder.build_int_compare(
+			IntPredicate::ULT,
+			wide,
+			i64.const_int(10u64.pow(digits), false),
+			"",
+		)?;
+		let fast = self.builder.build_and(room, small, "")?;
+		let write = self.append_block("digits_in_place");
+		let slow = self.append_block("digits_slow");
+		let join = self.append_block("digits_appended");
+		let branch = self.builder.build_conditional_branch(fast, write, slow)?;
+		self.likely(branch)?;
+		self.builder.position_at_end(write);
+		let destination = unsafe {
+			self.builder
+				.build_in_bounds_gep(self.context.i8_type(), bytes, &[length], "")?
+		};
+		let length_pointer = self
+			.builder
+			.build_struct_gep(self.string_type, target, 1, "")?;
+		for count in 1..=digits {
+			let next = if count < digits {
+				let case = self.append_block("digits_case");
+				let next = self.append_block("digits_more");
+				let fits = self.builder.build_int_compare(
+					IntPredicate::ULT,
+					wide,
+					i64.const_int(10u64.pow(count), false),
+					"",
+				)?;
+				self.builder.build_conditional_branch(fits, case, next)?;
+				self.builder.position_at_end(case);
+				Some(next)
+			} else {
+				None
+			};
+			for position in 0..count {
+				let power = 10u64.pow(count - 1 - position);
+				let mut digit = wide;
+				if power > 1 {
+					digit = self.builder.build_int_unsigned_div(
+						digit,
+						i64.const_int(power, false),
+						"",
+					)?;
+				}
+				if position > 0 {
+					digit =
+						self.builder
+							.build_int_unsigned_rem(digit, i64.const_int(10, false), "")?;
+				}
+				let character =
+					self.builder
+						.build_int_truncate(digit, self.context.i8_type(), "")?;
+				let character = self.builder.build_or(
+					character,
+					self.context.i8_type().const_int(b'0' as u64, false),
+					"",
+				)?;
+				let address = unsafe {
+					self.builder.build_in_bounds_gep(
+						self.context.i8_type(),
+						destination,
+						&[usize.const_int(position as u64, false)],
+						"",
+					)?
+				};
+				self.builder.build_store(address, character)?;
+			}
+			let longer =
+				self.builder
+					.build_int_nuw_add(length, usize.const_int(count as u64, false), "")?;
+			self.builder.build_store(length_pointer, longer)?;
+			self.builder.build_unconditional_branch(join)?;
+			if let Some(next) = next {
+				self.builder.position_at_end(next);
+			}
+		}
+		self.builder.position_at_end(slow);
+		// one digit: a static one-byte string, which `append_string` adds to
+		// an inline string in registers
+		let digit = self.append_block("digit_alone");
+		let decimal = self.append_block("digits_decimal");
+		let alone = self.builder.build_int_compare(
+			IntPredicate::ULT,
+			wide,
+			i64.const_int(10, false),
+			"",
+		)?;
+		self.builder
+			.build_conditional_branch(alone, digit, decimal)?;
+		self.builder.position_at_end(digit);
+		let digits = self.constant_bytes(b"0123456789");
+		let offset = self
+			.builder
+			.build_int_truncate_or_bit_cast(wide, usize, "")?;
+		let pointer = unsafe {
+			self.builder
+				.build_in_bounds_gep(self.context.i8_type(), digits, &[offset], "")?
+		};
+		let one = self.string_type.const_named_struct(&[
+			self.pointer_type().const_null().into(),
+			usize.const_int(1, false).into(),
+			self.simple_flag().into(),
+		]);
+		let one = self.builder.build_insert_value(one, pointer, 0, "")?;
+		self.append_string(target, Val::new(Repr::Str, one.into_struct_value()))?;
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(decimal);
+		let text = self
+			.integer_string(value)?
+			.expect("an integer of at most 64 bits");
+		self.append_string(target, text)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(join);
 		Ok(())
@@ -852,11 +1115,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		place: NodeId,
 		parts: TemplateParts<'_>,
 	) -> Result<Val<'ctx>, Error> {
-		if let Some(value) = self.single_integer_template(parts)? {
+		if let Some(node) = self.integer_part(parts) {
+			let value = self.expr(node)?;
 			if value.repr == Repr::Never {
 				return Ok(value);
 			}
-			self.append_string(target, value)?;
+			self.append_integer(target, value)?;
 			return Ok(Val::void());
 		}
 		// Strings and integers that don't read the destination are evaluated

@@ -1172,7 +1172,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Unregisters a temporary: whether the value was one.
-	fn unregister(&self, value: Val<'ctx>) -> bool {
+	pub(crate) fn unregister(&self, value: Val<'ctx>) -> bool {
 		let Some(raw) = value.value else {
 			return false;
 		};

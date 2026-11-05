@@ -1,0 +1,51 @@
+-- Integers appended to strings (`src/lower/text.rs`, `append_integer`): below
+-- 10^4 in place, one case per number of digits; negative, larger, or into an
+-- inline string or a view, through the decimal text. Counted loops reserve one
+-- byte per round (`src/lower/appends.rs`), and loops over an array reserve the
+-- least their template appends add.
+type Line = { name: String, count: Integer }
+
+function digits = (values: Array<Integer>): String => {
+	mutable text = ""
+	for value in values {
+		text += "{value}"
+		text += ","
+	}
+	text
+}
+
+console.log(digits([0, 7, 10, 99, 100, 999, 1000, 9999, 10000, 123456, -1, -12345])) -- prints: 0,7,10,99,100,999,1000,9999,10000,123456,-1,-12345,
+
+-- a counted loop of one digit per round, and one of more digits
+mutable code = "AB"
+for round in 0..4 {
+	code += "{round * 3}"
+}
+mutable wide = ""
+for round in 0..3 {
+	wide += "{round * 5000}"
+}
+console.log(code, wide) -- prints: AB0369 0500010000
+
+-- a loop over an array: room reserved for the literal parts
+function render = (lines: Array<Line>): String => {
+	mutable out = "["
+	for line, index in lines {
+		if index > 0 {
+			out += ","
+		}
+		out += "{{\"name\":\"{line.name}\",\"count\":{line.count}}}"
+	}
+	out += "]"
+	out
+}
+console.log(render([{ name = "a", count = 1 }, { name = "bc", count = 22 }, { name = "", count = -3 }])) -- prints: [{"name":"a","count":1},{"name":"bc","count":22},{"name":"","count":-3}]
+console.log(render([])) -- prints: []
+
+-- unsigned and narrow integers
+let small: Byte = 255
+let large: UInt64 = 18446744073709551615
+mutable mixed = "x"
+mixed += "{small}"
+mixed += "{large}"
+console.log(mixed) -- prints: x25518446744073709551615

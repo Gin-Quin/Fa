@@ -55,7 +55,31 @@ pub(crate) struct IndexProofs {
 	arrays: FxHashSet<SymbolId>,
 	/// The index nodes proven.
 	proven: FxHashSet<NodeId>,
+	/// The integer nodes proven never negative (`Goal::NonNegative`).
+	non_negative: FxHashSet<NodeId>,
 }
+
+/// What a proof establishes of the values stored in its places.
+#[derive(Copy, Clone)]
+enum Goal<'p> {
+	/// An index of one of these arrays (the array and its parameters),
+	/// whose initial length is `initial`.
+	Index {
+		arrays: &'p FxHashSet<SymbolId>,
+		initial: u64,
+	},
+	/// Never negative. With overflow checks (`checked`), sums and products
+	/// of such values are too; without, an overflow wraps around, so the
+	/// values stored are at most [`STEP_BOUND`] and the places only grow by
+	/// steps of at most one (`position += 1`): each place holds at most
+	/// `STEP_BOUND` plus the number of steps executed so far, which stays
+	/// far below 2^63.
+	NonNegative { checked: bool },
+}
+
+/// The largest value stored into a never-negative place without overflow
+/// checks (see [`Goal::NonNegative`]).
+const STEP_BOUND: u64 = 1 << 32;
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// Whether the index of this `array[index]` node is proven.
@@ -70,14 +94,37 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.is_some_and(|proofs| proofs.proven.contains(&node))
 	}
 
+	/// Whether an integer node is proven never negative by the facts of
+	/// the places it reads (fields, locals, parameters, results).
+	pub(crate) fn proven_non_negative(&self, node: NodeId) -> bool {
+		if self.index_proofs.borrow().is_none() {
+			let proofs = self.compute_index_proofs();
+			*self.index_proofs.borrow_mut() = Some(proofs);
+		}
+		self.index_proofs
+			.borrow()
+			.as_ref()
+			.is_some_and(|proofs| proofs.non_negative.contains(&node))
+	}
+
 	fn compute_index_proofs(&self) -> IndexProofs {
 		let mut result = IndexProofs::default();
 		if !self.whole_program || !self.other_files.is_empty() || self.tasks.asynchronous {
 			return result;
 		}
+		let count = self.tree.nodes.len();
+		// `Json.parse` builds objects, arrays and maps out of any integers
+		let parses = (0..count).any(|at| {
+			matches!(self.analysis.call(NodeId::new(at)).map(|info| info.callee),
+				Some(Callee::Builtin(id)) if fa_analyzer::builtins::get(id).path == "Json.parse")
+		});
+		if parses {
+			return result;
+		}
+		let parents = self.parents();
+		result.non_negative = self.compute_non_negative(&parents);
 		// the candidate arrays: a let or mutable of an array of objects
 		let types = self.types();
-		let count = self.tree.nodes.len();
 		let mut by_type: FxHashMap<TypeId, Vec<SymbolId>> = FxHashMap::default();
 		for (index, symbol) in self.analysis.symbols.symbols().iter().enumerate() {
 			if !matches!(symbol.kind, SymbolKind::Let | SymbolKind::Mutable) {
@@ -92,7 +139,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.push(SymbolId(index as u32));
 			}
 		}
-		let parents = self.parents();
 		for (array_type, symbols) in by_type {
 			let [array] = symbols[..] else {
 				continue;
@@ -113,8 +159,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let mut prover = Prover {
 				lowering: self,
 				parents: &parents,
-				arrays: &arrays,
-				initial,
+				goal: Goal::Index {
+					arrays: &arrays,
+					initial,
+				},
 				failed: FxHashSet::default(),
 				claims: FxHashSet::default(),
 			};
@@ -127,21 +175,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => None,
 				})
 				.collect();
-			loop {
-				let before = prover.failed.len();
-				for &(_, index) in &indices {
-					prover.proves(index);
-				}
-				let claims: Vec<Claim> = prover.claims.iter().copied().collect();
-				for claim in claims {
-					if !prover.failed.contains(&claim) && !prover.holds(claim) {
-						prover.failed.insert(claim);
-					}
-				}
-				if prover.failed.len() == before {
-					break;
-				}
-			}
+			let roots: Vec<NodeId> = indices.iter().map(|&(_, index)| index).collect();
+			prover.fixpoint(&roots);
 			for (node, index) in indices {
 				if prover.proves(index) {
 					result.proven.insert(node);
@@ -150,6 +185,61 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			result.arrays.extend(arrays);
 		}
 		result
+	}
+
+	/// The never-negative proofs of the indices that may be negative by
+	/// their types and intervals: the index of every `x[index]` and every
+	/// argument of a built-in `get`.
+	fn compute_non_negative(&self, parents: &[usize]) -> FxHashSet<NodeId> {
+		let mut roots = Vec::new();
+		for at in 0..self.tree.nodes.len() {
+			let node = NodeId::new(at);
+			match self.view(node) {
+				View::Index { index, .. } => roots.push(index),
+				View::Call { .. } => {
+					let Some(info) = self.analysis.call(node) else {
+						continue;
+					};
+					let Callee::Builtin(id) = info.callee else {
+						continue;
+					};
+					if !fa_analyzer::builtins::get(id).path.ends_with("#get") {
+						continue;
+					}
+					for argument in &info.arguments {
+						if let Argument::Given(value) = argument {
+							roots.push(*value);
+						}
+					}
+				}
+				_ => {}
+			}
+		}
+		let types = self.types();
+		roots.retain(|&root| {
+			types.as_int(self.analysis.type_of(root)).is_some()
+				&& self
+					.analysis
+					.interval(root)
+					.is_none_or(|interval| interval.lo < ethnum::I256::ZERO)
+		});
+		if roots.is_empty() {
+			return FxHashSet::default();
+		}
+		let mut prover = Prover {
+			lowering: self,
+			parents,
+			goal: Goal::NonNegative {
+				checked: self.overflow_checks(),
+			},
+			failed: FxHashSet::default(),
+			claims: FxHashSet::default(),
+		};
+		prover.fixpoint(&roots);
+		roots
+			.into_iter()
+			.filter(|&root| prover.proves(root))
+			.collect()
 	}
 
 	/// The array and the parameters that receive it, when it is the only
@@ -321,31 +411,80 @@ impl<'ctx> Lowering<'_, 'ctx> {
 struct Prover<'p, 'l, 'a, 'ctx> {
 	lowering: &'l Lowering<'a, 'ctx>,
 	parents: &'p [usize],
-	arrays: &'p FxHashSet<SymbolId>,
-	initial: u64,
+	goal: Goal<'p>,
 	failed: FxHashSet<Claim>,
 	claims: FxHashSet<Claim>,
 }
 
 impl Prover<'_, '_, '_, '_> {
 	fn is_array(&self, node: NodeId) -> bool {
+		let Goal::Index { arrays, .. } = self.goal else {
+			return false;
+		};
 		matches!(self.lowering.view(node), View::Name(_))
 			&& matches!(self.lowering.analysis.resolution(node),
-				Resolution::Local(symbol) if self.arrays.contains(&symbol))
+				Resolution::Local(symbol) if arrays.contains(&symbol))
+	}
+
+	/// The greatest fixpoint of the claims the roots depend on: every claim
+	/// holds until one of its stores is not proven.
+	fn fixpoint(&mut self, roots: &[NodeId]) {
+		loop {
+			let before = self.failed.len();
+			for &root in roots {
+				self.proves(root);
+			}
+			let claims: Vec<Claim> = self.claims.iter().copied().collect();
+			for claim in claims {
+				if !self.failed.contains(&claim) && !self.holds(claim) {
+					self.failed.insert(claim);
+				}
+			}
+			if self.failed.len() == before {
+				break;
+			}
+		}
+	}
+
+	/// Whether a constant satisfies the goal.
+	fn constant(&self, value: ethnum::I256) -> bool {
+		match self.goal {
+			Goal::Index { initial, .. } => {
+				value >= ethnum::I256::ZERO && value < ethnum::I256::from(initial)
+			}
+			Goal::NonNegative { checked } => {
+				value >= ethnum::I256::ZERO && (checked || value <= ethnum::I256::from(STEP_BOUND))
+			}
+		}
+	}
+
+	/// Whether every value of an interval satisfies the goal.
+	fn within(&self, lo: ethnum::I256, hi: ethnum::I256) -> bool {
+		self.constant(lo) && self.constant(hi)
 	}
 
 	/// `P(e)` under the claims not failed so far (recording the claims used).
 	fn proves(&mut self, node: NodeId) -> bool {
 		let lowering = self.lowering;
 		if let Some(interval) = lowering.analysis.interval(node)
-			&& interval.lo >= ethnum::I256::ZERO
-			&& interval.hi < ethnum::I256::from(self.initial)
+			&& self.within(interval.lo, interval.hi)
+		{
+			return true;
+		}
+		if matches!(self.goal, Goal::NonNegative { .. })
+			&& let Some(range) = lowering.types().as_int(lowering.analysis.type_of(node))
+			&& self.within(range.min, range.max)
 		{
 			return true;
 		}
 		match lowering.view(node) {
-			View::Integer(value) => {
-				value >= ethnum::I256::ZERO && value < ethnum::I256::from(self.initial)
+			View::Integer(value) => self.constant(value),
+			// with overflow checks, sums and products of non-negative values
+			View::Arithmetic {
+				op: ArithOp::Add | ArithOp::Multiply,
+				operands,
+			} if matches!(self.goal, Goal::NonNegative { checked: true }) => {
+				operands.iter().all(|operand| self.proves(operand))
 			}
 			View::Group(inner) | View::Try(inner) => self.proves(inner),
 			View::None => true,
@@ -413,7 +552,9 @@ impl Prover<'_, '_, '_, '_> {
 			View::Arithmetic {
 				op: ArithOp::Subtract,
 				operands,
-			} if operands.len() == 2 && self.initial >= 1 => {
+			} if operands.len() == 2
+				&& matches!(self.goal, Goal::Index { initial, .. } if initial >= 1) =>
+			{
 				let first = operands.first().expect("two operands");
 				let second = operands.get(1).expect("two operands");
 				let one = lowering.analysis.interval(second).is_some_and(|interval| {
@@ -455,27 +596,43 @@ impl Prover<'_, '_, '_, '_> {
 					_ => false,
 				};
 				initial
-					&& (0..count).all(|at| match lowering.view(NodeId::new(at)) {
-						View::Assignment { target, value, .. } if self.names(target, symbol) => {
-							value.is_some_and(|value| self.proves(value))
+					&& (0..count).all(|at| {
+						let node = NodeId::new(at);
+						match lowering.view(node) {
+							View::Assignment { target, value, .. }
+								if self.names(target, symbol) =>
+							{
+								value.is_some_and(|value| self.proves(value))
+							}
+							View::CompoundAssignment { op, target, value }
+								if self.names(target, symbol) =>
+							{
+								self.step(op, value)
+							}
+							View::UpdateFields { target, .. } => !self.names(target, symbol),
+							View::Name(_) if self.names(node, symbol) => {
+								!self.changed_elsewhere(node)
+							}
+							_ => true,
 						}
-						View::CompoundAssignment { target, .. }
-						| View::UpdateFields { target, .. } => !self.names(target, symbol),
-						_ => true,
 					})
 			}
-			Claim::Param(function, index) => (0..count).all(|at| {
-				let node = NodeId::new(at);
-				match lowering.analysis.call(node) {
-					Some(info) if info.callee == Callee::Function(function) => {
-						match info.arguments.get(index) {
-							Some(Argument::Given(value)) => self.proves(*value),
-							_ => false,
+			// every call is seen: the function is never a value
+			Claim::Param(function, index) => {
+				self.called_directly(function)
+					&& (0..count).all(|at| {
+						let node = NodeId::new(at);
+						match lowering.analysis.call(node) {
+							Some(info) if info.callee == Callee::Function(function) => {
+								match info.arguments.get(index) {
+									Some(Argument::Given(value)) => self.proves(*value),
+									_ => false,
+								}
+							}
+							_ => true,
 						}
-					}
-					_ => true,
-				}
-			}),
+					})
+			}
 			Claim::Return(function) => {
 				let Some(info) = lowering.analysis.function(function) else {
 					return false;
@@ -526,11 +683,24 @@ impl Prover<'_, '_, '_, '_> {
 						}
 						_ => true,
 					},
-					View::CompoundAssignment { target, .. } => {
-						!matches!(self.field_target(target, name),
-						Some(target_owner) if target_owner == owner || target_owner == TypeId::UNKNOWN)
+					View::CompoundAssignment { op, target, value } => {
+						match self.field_target(target, name) {
+							Some(target_owner)
+								if target_owner == owner || target_owner == TypeId::UNKNOWN =>
+							{
+								self.step(op, value)
+							}
+							_ => true,
+						}
 					}
 					View::UpdateFields { .. } => false,
+					// a reference to the field, or the field given to a
+					// parameter that the callee changes
+					View::Access { .. } => {
+						!matches!(self.field_target(node, name),
+							Some(target_owner) if target_owner == owner || target_owner == TypeId::UNKNOWN)
+							|| !self.changed_elsewhere(node)
+					}
 					_ => true,
 				}
 			}),
@@ -548,8 +718,19 @@ impl Prover<'_, '_, '_, '_> {
 						}
 						_ => true,
 					},
-					View::CompoundAssignment { target, .. } => !matches!(lowering.view(target),
-						View::Index { target: array, .. } if lowering.analysis.type_of(array) == array_type),
+					View::CompoundAssignment { op, target, value } => match lowering.view(target) {
+						View::Index { target: array, .. }
+							if lowering.analysis.type_of(array) == array_type =>
+						{
+							self.step(op, value)
+						}
+						_ => true,
+					},
+					View::Index { target: array, .. }
+						if lowering.analysis.type_of(array) == array_type =>
+					{
+						!self.changed_elsewhere(node)
+					}
 					View::Call { callee, .. } => {
 						let View::Access { target, .. } = lowering.view(callee) else {
 							return true;
@@ -588,8 +769,19 @@ impl Prover<'_, '_, '_, '_> {
 						}
 						_ => true,
 					},
-					View::CompoundAssignment { target, .. } => !matches!(lowering.view(target),
-						View::Index { target: map, .. } if lowering.analysis.type_of(map) == map_type),
+					View::CompoundAssignment { op, target, value } => match lowering.view(target) {
+						View::Index { target: map, .. }
+							if lowering.analysis.type_of(map) == map_type =>
+						{
+							self.step(op, value)
+						}
+						_ => true,
+					},
+					View::Index { target: map, .. }
+						if lowering.analysis.type_of(map) == map_type =>
+					{
+						!self.changed_elsewhere(node)
+					}
 					View::Use { .. } | View::Reuse { .. } | View::Provide { .. } => true,
 					View::Call { callee, .. } => {
 						let View::Access { target, .. } = lowering.view(callee) else {
@@ -616,6 +808,148 @@ impl Prover<'_, '_, '_, '_> {
 					_ => true,
 				}
 			}),
+		}
+	}
+
+	/// Whether a function is only called by name (`f(…)`, `x.f(…)`), never
+	/// used as a value whose calls the claims of its parameters wouldn't see.
+	/// A method is matched by its name, whatever its type.
+	fn called_directly(&self, function: NodeId) -> bool {
+		let lowering = self.lowering;
+		let Some(symbol) = lowering
+			.analysis
+			.function(function)
+			.and_then(|info| info.symbol)
+		else {
+			return false;
+		};
+		let name = lowering.analysis.symbols.symbol(symbol).name;
+		(0..lowering.tree.nodes.len()).all(|at| {
+			let node = NodeId::new(at);
+			let named = match lowering.analysis.resolution(node) {
+				Resolution::Local(used) => used == symbol && node != function,
+				Resolution::Method(_, method) => method == name,
+				_ => false,
+			};
+			if !named || lowering.analysis.symbols.symbol_of_decl(node) == Some(symbol) {
+				return true;
+			}
+			// the callee: the name itself, or the access whose last member it is
+			let mut callee = node;
+			let parent = self.parents.get(at).copied().unwrap_or(usize::MAX);
+			if parent != usize::MAX
+				&& matches!(lowering.view(NodeId::new(parent)),
+					View::Access { members, .. } if members.last() == Some(node))
+			{
+				callee = NodeId::new(parent);
+			}
+			let call = self.parents.get(callee.index()).copied().unwrap_or(usize::MAX);
+			call != usize::MAX
+				&& matches!(lowering.view(NodeId::new(call)), View::Call { callee: called, .. } if called == callee)
+		})
+	}
+
+	/// Whether a compound assignment keeps a place's values under the goal:
+	/// never for an index; for a never-negative place, adding (or, with
+	/// overflow checks, multiplying by) a never-negative value, and without
+	/// overflow checks only a step of at most one (see [`Goal::NonNegative`]).
+	fn step(&mut self, op: ArithOp, value: NodeId) -> bool {
+		match self.goal {
+			Goal::Index { .. } => false,
+			Goal::NonNegative { checked: true } => {
+				matches!(op, ArithOp::Add | ArithOp::Multiply) && self.proves(value)
+			}
+			Goal::NonNegative { checked: false } => {
+				op == ArithOp::Add
+					&& self
+						.lowering
+						.analysis
+						.interval(value)
+						.map(|interval| (interval.lo, interval.hi))
+						.or(match self.lowering.view(value) {
+							View::Integer(value) => Some((value, value)),
+							_ => None,
+						})
+						.is_some_and(|(lo, hi)| lo >= ethnum::I256::ZERO && hi <= ethnum::I256::ONE)
+			}
+		}
+	}
+
+	/// Whether a place (a node designating it) may be changed under another
+	/// name: the value of a `use`, `mutable use`, `reuse` or `provide`, or
+	/// an argument (or receiver) of a call whose callee changes that
+	/// parameter, or of a function value.
+	fn changed_elsewhere(&self, place: NodeId) -> bool {
+		let lowering = self.lowering;
+		let mut at = place.index();
+		// through groups
+		let parent = loop {
+			let parent = self.parents.get(at).copied().unwrap_or(usize::MAX);
+			if parent == usize::MAX {
+				return false;
+			}
+			if matches!(lowering.view(NodeId::new(parent)), View::Group(_)) {
+				at = parent;
+				continue;
+			}
+			break NodeId::new(parent);
+		};
+		let place = NodeId::new(at);
+		match lowering.view(parent) {
+			View::Use { value, mutable, .. } => mutable && value == place,
+			View::Reuse { value, .. } | View::Provide { value, .. } => value == place,
+			// a named argument: the call is one level up
+			View::Assignment { value, .. } if value == Some(place) => {
+				let grand = self
+					.parents
+					.get(parent.index())
+					.copied()
+					.unwrap_or(usize::MAX);
+				grand != usize::MAX && self.changed_by_call(NodeId::new(grand), place)
+			}
+			View::Call { .. } => self.changed_by_call(parent, place),
+			// the receiver of a method call: `place.method(…)`
+			View::Access { target, .. } if target == place => {
+				let grand = self
+					.parents
+					.get(parent.index())
+					.copied()
+					.unwrap_or(usize::MAX);
+				grand != usize::MAX
+					&& matches!(lowering.view(NodeId::new(grand)), View::Call { callee, .. } if callee == parent)
+					&& self.changed_by_call(NodeId::new(grand), place)
+			}
+			_ => false,
+		}
+	}
+
+	/// Whether a call may change the argument `place` through its parameter.
+	fn changed_by_call(&self, call: NodeId, place: NodeId) -> bool {
+		let lowering = self.lowering;
+		let Some(info) = lowering.analysis.call(call) else {
+			return false;
+		};
+		let Some(position) = info.arguments.iter().position(|argument| match argument {
+			Argument::Given(value) | Argument::Receiver(value) => *value == place,
+			Argument::Variadic(values) => values.contains(&place),
+			_ => false,
+		}) else {
+			return false;
+		};
+		match info.callee {
+			Callee::Function(function) => match lowering.analysis.function(function) {
+				Some(function) => lowering.changed_parameters(function.ty).contains(&position),
+				None => true,
+			},
+			Callee::Value => {
+				let View::Call { callee, .. } = lowering.view(call) else {
+					return true;
+				};
+				lowering
+					.changed_parameters(lowering.analysis.type_of(callee))
+					.contains(&position)
+			}
+			Callee::Builtin(_) | Callee::Conversion(_) | Callee::Member(_) => false,
 		}
 	}
 

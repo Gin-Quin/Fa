@@ -229,6 +229,32 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn a_field_counted_up_from_zero_is_never_negative() {
+		// `get(self.position)` counts a negative index from the end: a select
+		// on `position < 0`, which the proof that every store of the field
+		// is non-negative (`index_proofs.rs`) takes out, with or without
+		// overflow checks (a step of one), unless a store may be negative
+		let program = "type Cursor = {\n\ttext: String\n\tposition: Integer\n\tfunction current = (self): Byte => self.text.bytes().get(self.position) ?? 0\n\tfunction advance = (self) mutates self => {\n\t\tself.position += 1\n\t}\n}\nmutable cursor = Cursor { text = \"ab\", position = 0 }\nwhile cursor.current() != 0 {\n\tcursor.advance()\n}\nconsole.log(cursor.position)\n";
+		for checked in [true, false] {
+			let ir = ir_with("cursor", program, checked);
+			let current = function(&ir, "fa.current");
+			assert_eq!(count(current, "icmp slt"), 0, "{current}");
+		}
+		let negative = program.replace(
+			"self.position += 1",
+			"self.position += 1\n\t\tself.position -= 2",
+		);
+		let ir = ir_of("cursor-negative", &negative);
+		assert!(count(function(&ir, "fa.current"), "icmp slt") > 0);
+		// a step of more than one may wrap without overflow checks
+		let large = program.replace("self.position += 1", "self.position += 2");
+		let ir = ir_with("cursor-large", &large, true);
+		assert_eq!(count(function(&ir, "fa.current"), "icmp slt"), 0);
+		let ir = ir_with("cursor-large-wrap", &large, false);
+		assert!(count(function(&ir, "fa.current"), "icmp slt") > 0);
+	}
+
+	#[test]
 	fn byte_arithmetic_is_computed_in_16_bits() {
 		let ir = ir_of(
 			"narrow",

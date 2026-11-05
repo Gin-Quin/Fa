@@ -257,3 +257,178 @@ pub(crate) fn new_workspace(folder: &Path, name: &str) -> Result<(), String> {
 	}
 	Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A scratch folder of a test, with files.
+	fn scratch(name: &str, files: &[(&str, &str)]) -> PathBuf {
+		let directory =
+			std::env::temp_dir().join(format!("fa-workspace-{name}-{}", std::process::id()));
+		let _ = fs::remove_dir_all(&directory);
+		fs::create_dir_all(&directory).unwrap();
+		for (path, text) in files {
+			let path = directory.join(path);
+			fs::create_dir_all(path.parent().unwrap()).unwrap();
+			fs::write(path, text).unwrap();
+		}
+		fs::canonicalize(&directory).unwrap()
+	}
+
+	const FARM: &[(&str, &str)] = &[
+		("workspace.fa", "export = { name = \"farm\" }\n"),
+		(
+			"packages/api/package.fa",
+			"export = { name = \"server\" }\n",
+		),
+		(
+			"packages/api/application/main.fa",
+			"export function = () => {}\n",
+		),
+		(
+			"packages/group/shared/package.fa",
+			"export = { name = \"shared\" }\n",
+		),
+		("packages/group/shared/library/greet.fa", "export = 1\n"),
+		(
+			"packages/group/shared/library/deep/greet.test.fa",
+			"test \"greets\" {\n\tassert 1 == 1\n}\n",
+		),
+		(
+			"packages/tool/package.fa",
+			"export = {\n\tname = \"tool\"\n\tentry = \"application/cli.fa\"\n}\n",
+		),
+		(
+			"packages/tool/application/cli.fa",
+			"export function = () => {}\n",
+		),
+		(
+			"packages/tool/application/node_modules/x.test.fa",
+			"test \"skipped\" {}\n",
+		),
+	];
+
+	fn names(selection: &Selection) -> Vec<String> {
+		match selection {
+			Selection::Packages(packages) => {
+				packages.iter().map(|(name, _)| name.clone()).collect()
+			}
+			Selection::One(path) => panic!("one: {path:?}"),
+		}
+	}
+
+	#[test]
+	fn a_workspace_lists_its_packages_with_what_they_implement() {
+		let root = scratch("load", FARM);
+		let workspace = load(&root).unwrap();
+		assert_eq!(workspace.root, root);
+		let members: Vec<(&str, bool, bool)> = workspace
+			.members
+			.iter()
+			.map(|member| {
+				(
+					member.name.as_str(),
+					member.has_application,
+					member.has_tests,
+				)
+			})
+			.collect();
+		assert_eq!(
+			members,
+			[
+				("server", true, false),
+				("shared", false, true),
+				("tool", true, false),
+			]
+		);
+		let all = implementing(&workspace, Implements::All);
+		assert_eq!(names(&all), ["server", "shared", "tool"]);
+		let applications = implementing(&workspace, Implements::Application);
+		assert_eq!(names(&applications), ["server", "tool"]);
+		assert_eq!(
+			names(&implementing(&workspace, Implements::Tests)),
+			["shared"]
+		);
+		let _ = fs::remove_dir_all(root);
+	}
+
+	#[test]
+	fn a_folder_selects_the_packages_of_its_workspace_or_its_package() {
+		let root = scratch("select", FARM);
+		let selection = select(Some(&root), Implements::Tests).unwrap();
+		assert_eq!(names(&selection), ["shared"]);
+		// the `packages/` folder is in the workspace too
+		let selection = select(Some(&root.join("packages")), Implements::Application).unwrap();
+		assert_eq!(names(&selection), ["server", "tool"]);
+		// a package folder, or a folder inside it: that one
+		let shared = root.join("packages/group/shared/library");
+		assert!(matches!(
+			select(Some(&shared), Implements::All).unwrap(),
+			Selection::One(Some(path)) if path == shared
+		));
+		// a file, even one that doesn't exist yet
+		let file = root.join("packages/api/application/missing.fa");
+		assert!(matches!(
+			select(Some(&file), Implements::All).unwrap(),
+			Selection::One(Some(path)) if path == file
+		));
+		let _ = fs::remove_dir_all(root);
+	}
+
+	#[test]
+	fn package_names_are_unique_and_packages_are_not_nested() {
+		let twice = scratch(
+			"twice",
+			&[
+				("workspace.fa", "export = {}\n"),
+				("packages/a/package.fa", "export = { name = \"same\" }\n"),
+				("packages/b/package.fa", "export = { name = \"same\" }\n"),
+			],
+		);
+		let error = load(&twice).unwrap_err();
+		assert!(
+			error.starts_with("error[CFG004]: two packages of the workspace are named `same`"),
+			"{error}"
+		);
+		let nested = scratch(
+			"nested",
+			&[
+				("workspace.fa", "export = {}\n"),
+				("packages/a/package.fa", "export = { name = \"a\" }\n"),
+				("packages/a/inner/package.fa", "export = { name = \"b\" }\n"),
+			],
+		);
+		let error = load(&nested).unwrap_err();
+		assert!(error.contains("error[CFG006]"), "{error}");
+		// a package without a name is named after its folder
+		let unnamed = scratch(
+			"unnamed",
+			&[
+				("workspace.fa", "export = {}\n"),
+				("packages/cows/package.fa", "export = {}\n"),
+			],
+		);
+		assert_eq!(load(&unnamed).unwrap().members[0].name, "cows");
+		for directory in [twice, nested, unnamed] {
+			let _ = fs::remove_dir_all(directory);
+		}
+	}
+
+	#[test]
+	fn a_new_workspace_is_written_once() {
+		let folder = scratch("new", &[]).join("farmland");
+		new_workspace(&folder, "farmland").unwrap();
+		assert_eq!(
+			fs::read_to_string(folder.join("workspace.fa")).unwrap(),
+			"export = {\n\tname = \"farmland\"\n}\n"
+		);
+		assert!(folder.join("dependencies.fa").is_file());
+		assert!(folder.join("packages").is_dir());
+		let workspace = load(&folder).unwrap();
+		assert!(workspace.members.is_empty());
+		let error = new_workspace(&folder, "farmland").unwrap_err();
+		assert!(error.starts_with("error[CLI007]"), "{error}");
+		let _ = fs::remove_dir_all(folder.parent().unwrap());
+	}
+}

@@ -72,6 +72,11 @@ pub(crate) fn format(arguments: &[OsString]) -> i32 {
 	for file in &files {
 		let source = match fs::read_to_string(file) {
 			Ok(source) => source,
+			Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+				eprintln!("{}: is not UTF-8 text: save it as UTF-8", file.display());
+				failed = true;
+				continue;
+			}
 			Err(error) => {
 				eprintln!("{}: {error}", file.display());
 				failed = true;
@@ -144,7 +149,8 @@ fn find_root(start: &Path) -> Option<PathBuf> {
 		.map(Path::to_path_buf)
 }
 
-/// The `.fa` files inside `directory`.
+/// The `.fa` files inside `directory`; symbolic links are skipped (a link
+/// may lead out of the folder, or into a loop).
 fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) {
 	let Ok(entries) = fs::read_dir(directory) else {
 		return;
@@ -153,7 +159,13 @@ fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) {
 		let path = entry.path();
 		let name = entry.file_name();
 		let name = name.to_string_lossy();
-		if path.is_dir() {
+		let Ok(kind) = entry.file_type() else {
+			continue;
+		};
+		if kind.is_symlink() {
+			continue;
+		}
+		if kind.is_dir() {
 			if !name.starts_with('.') && !SKIPPED_FOLDERS.contains(&name.as_ref()) {
 				collect_files(&path, files);
 			}
@@ -207,6 +219,35 @@ mod tests {
 
 		assert_eq!(format(&arguments), 0);
 		let _ = fs::remove_dir_all(&directory);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn skips_symbolic_links_and_their_loops() {
+		let directory = setup_test_directory("links");
+		fs::create_dir_all(directory.join("library")).unwrap();
+		fs::write(directory.join("package.fa"), "export = { name = \"x\" }\n").unwrap();
+		fs::write(directory.join("library/a.fa"), "let a=1\n").unwrap();
+		let outside = setup_test_directory("links-outside");
+		fs::write(outside.join("b.fa"), "let b=1\n").unwrap();
+		std::os::unix::fs::symlink("..", directory.join("library/up")).unwrap();
+		std::os::unix::fs::symlink(&outside, directory.join("library/outside")).unwrap();
+		std::os::unix::fs::symlink(outside.join("b.fa"), directory.join("library/b.fa")).unwrap();
+
+		let mut files = Vec::new();
+		collect_files(&directory, &mut files);
+		files.sort();
+		assert_eq!(
+			files,
+			[directory.join("library/a.fa"), directory.join("package.fa")]
+		);
+		assert_eq!(format(&[directory.clone().into_os_string()]), 0);
+		assert_eq!(
+			fs::read_to_string(outside.join("b.fa")).unwrap(),
+			"let b=1\n"
+		);
+		let _ = fs::remove_dir_all(&directory);
+		let _ = fs::remove_dir_all(&outside);
 	}
 
 	#[test]

@@ -5,6 +5,7 @@
 //! adds the diagnostics that the first analysis didn't find, marked with
 //! their target ([`Report::merge_target`]).
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use fa_analyzer::diagnostics::{SourceView, render};
@@ -55,6 +56,8 @@ pub(crate) struct Report {
 	/// Messages rendered already (`DEP004`), printed first.
 	warnings: Vec<String>,
 	files: Vec<File>,
+	/// The index of each file in `files`, by path.
+	index: HashMap<String, usize>,
 }
 
 impl Report {
@@ -68,21 +71,29 @@ impl Report {
 		if diagnostics.is_empty() {
 			return;
 		}
-		let entries = diagnostics
+		let entries: Vec<Entry> = diagnostics
 			.iter()
 			.map(|diagnostic| Entry {
 				diagnostic: diagnostic.clone(),
 				target: None,
 			})
 			.collect();
-		match self.files.iter_mut().find(|file| file.path == path) {
-			Some(file) => file.entries.extend(entries),
-			None => self.files.push(File {
-				path: path.to_string(),
-				text: text.to_string(),
-				entries,
-			}),
+		let index = self.index_of(path, text);
+		self.files[index].entries.extend(entries);
+	}
+
+	/// The index of the file of a path, added with no diagnostic when new.
+	fn index_of(&mut self, path: &str, text: &str) -> usize {
+		if let Some(&index) = self.index.get(path) {
+			return index;
 		}
+		self.files.push(File {
+			path: path.to_string(),
+			text: text.to_string(),
+			entries: Vec::new(),
+		});
+		self.index.insert(path.to_string(), self.files.len() - 1);
+		self.files.len() - 1
 	}
 
 	/// Adds the diagnostics of the report of another target that this one
@@ -90,17 +101,7 @@ impl Report {
 	/// marked with the target. The other report's warnings are the same.
 	pub(crate) fn merge_target(&mut self, other: Report, target: &str) {
 		for file in other.files {
-			let index = match self.files.iter().position(|known| known.path == file.path) {
-				Some(index) => index,
-				None => {
-					self.files.push(File {
-						path: file.path,
-						text: file.text,
-						entries: Vec::new(),
-					});
-					self.files.len() - 1
-				}
-			};
+			let index = self.index_of(&file.path, &file.text);
 			let known = &mut self.files[index];
 			for entry in file.entries {
 				let same = |other: &Entry| {
@@ -119,14 +120,22 @@ impl Report {
 		}
 	}
 
-	/// The report as text: the warnings, then each file's diagnostics and
-	/// its summary line (`2 errors, 1 warning`); hints are left out.
+	/// The report as text: the warnings, then each file's diagnostics, then
+	/// a summary line: `2 errors, 1 warning` for one file, `3 errors in 2
+	/// files` for several; hints are left out.
 	pub(crate) fn text(&self) -> String {
 		let mut out = String::new();
 		for warning in &self.warnings {
 			out.push_str(warning);
 			out.push_str("\n\n");
 		}
+		let shown = |file: &&File| {
+			file.entries
+				.iter()
+				.any(|entry| entry.diagnostic.severity != Severity::Hint)
+		};
+		let several = self.files.iter().filter(shown).count() > 1;
+		let (mut total_errors, mut total_warnings, mut total_files) = (0, 0, 0);
 		for file in &self.files {
 			let source = SourceView::new(&file.path, &file.text);
 			let (mut errors, mut warnings) = (0, 0);
@@ -142,9 +151,15 @@ impl Report {
 				}
 				out.push('\n');
 			}
-			if let Some(summary) = summary(errors, warnings) {
+			total_errors += errors;
+			total_warnings += warnings;
+			total_files += usize::from(errors + warnings > 0);
+			if !several && let Some(summary) = summary(errors, warnings) {
 				let _ = writeln!(out, "{summary}");
 			}
+		}
+		if several && let Some(summary) = summary(total_errors, total_warnings) {
+			let _ = writeln!(out, "{summary} in {total_files} files");
 		}
 		out
 	}

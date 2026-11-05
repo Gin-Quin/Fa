@@ -88,6 +88,43 @@ impl Watcher {
 		found
 	}
 
+	/// Watches other folders (after the package was loaded again), keeping
+	/// the snapshot of the last poll for the files watched before: a file
+	/// changed, added or removed while the package was loading is reported
+	/// by the next poll instead of being absorbed by a new snapshot. The
+	/// files of the folders watched only now are taken as they are.
+	pub(crate) fn watch(&mut self, roots: Vec<(PathBuf, bool)>) {
+		let fresh = Watcher {
+			roots,
+			snapshot: BTreeMap::new(),
+		};
+		let now = fresh.scan();
+		let mut snapshot: BTreeMap<PathBuf, Stamp> = std::mem::take(&mut self.snapshot)
+			.into_iter()
+			.filter(|(path, _)| fresh.covers(path))
+			.collect();
+		for (path, stamp) in now {
+			if !self.covers(&path) {
+				snapshot.insert(path, stamp);
+			}
+		}
+		*self = Watcher {
+			roots: fresh.roots,
+			snapshot,
+		};
+	}
+
+	/// Whether a file is in one of the watched folders.
+	fn covers(&self, path: &Path) -> bool {
+		self.roots.iter().any(|(root, recursive)| {
+			if *recursive {
+				path.starts_with(root)
+			} else {
+				path.parent() == Some(root.as_path())
+			}
+		})
+	}
+
 	/// The changes since the last poll.
 	pub(crate) fn poll(&mut self) -> Changes {
 		let now = self.scan();
@@ -168,6 +205,20 @@ fn watched_roots(loaded: &Loaded) -> Vec<(PathBuf, bool)> {
 	roots
 }
 
+/// Loads a project for a command that watches it, with its watcher: the
+/// files of the project are listed before the load, so that a change made
+/// while it loads is reported by the first poll.
+fn load_watched(path: Option<&Path>, target: &str) -> Result<(Loaded, Watcher), String> {
+	let before = crate::project::locate(path).map_or_else(
+		|_| Vec::new(),
+		|project| vec![(project.base, project.package)],
+	);
+	let mut watcher = Watcher::new(before);
+	let loaded = Loaded::load(path, target)?;
+	watcher.watch(watched_roots(&loaded));
+	Ok((loaded, watcher))
+}
+
 /// Why a change needs the package to be loaded again rather than analyzed
 /// incrementally; `None` for edits of the package's own sources.
 fn reload_reason(loaded: &Loaded, changes: &Changes) -> Option<String> {
@@ -212,13 +263,23 @@ fn apply_edits(loaded: &mut Loaded, modified: &[PathBuf]) -> Vec<String> {
 		let Ok(relative) = path.strip_prefix(&base) else {
 			continue;
 		};
-		let relative = relative.to_string_lossy().replace('\\', "/");
-		let module = relative.trim_end_matches(".fa").to_string();
-		let Ok(text) = fs::read_to_string(path) else {
-			continue;
+		let module = crate::project::module_of(relative);
+		let text = match fs::read_to_string(path) {
+			Ok(text) => text,
+			Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+				eprintln!(
+					"fa: `{}` is not UTF-8 text: save it as UTF-8",
+					relative.display()
+				);
+				continue;
+			}
+			Err(error) => {
+				eprintln!("fa: can't read `{}`: {error}", relative.display());
+				continue;
+			}
 		};
 		loaded.inner.session.update(&module, text.into());
-		shown.push(relative);
+		shown.push(relative.to_string_lossy().replace('\\', "/"));
 	}
 	let entry = loaded
 		.inner
@@ -251,11 +312,7 @@ fn texts_before(loaded: &Loaded, modified: &[PathBuf]) -> Vec<(String, String)> 
 		.iter()
 		.filter_map(|path| {
 			let relative = path.strip_prefix(base).ok()?;
-			let module = relative
-				.to_string_lossy()
-				.replace('\\', "/")
-				.trim_end_matches(".fa")
-				.to_string();
+			let module = crate::project::module_of(relative);
 			let file = loaded.inner.session.loaded_module(&module)?;
 			let text = loaded.inner.session.text(file).to_string();
 			Some((module, text))
@@ -572,7 +629,7 @@ impl Developed {
 			command.arg(&script);
 		}
 		if let Some(channel) = &self.channel {
-			command.env("FA_HOT_CHANNEL", channel.port().to_string());
+			command.env("FA_HOT_CHANNEL", channel.variable());
 		}
 		let _ = std::io::stdout().flush();
 		match command.spawn() {
@@ -759,7 +816,7 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 	};
 	let mut developed = Vec::new();
 	for (name, path) in paths {
-		let loaded = match Loaded::load(path.as_deref(), target.name()) {
+		let (loaded, watcher) = match load_watched(path.as_deref(), target.name()) {
 			Ok(loaded) => loaded,
 			Err(message) => {
 				crate::color::eprintln_message(&message);
@@ -770,7 +827,6 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 			eprintln!("fa develop: the package has no application to run (`application/main.fa`)");
 			return 1;
 		}
-		let watcher = Watcher::new(watched_roots(&loaded));
 		developed.push(Developed {
 			target,
 			path,
@@ -847,7 +903,6 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 							"restarting"
 						};
 						eprintln!("fa develop: {}{reason}: {verb} ({why})", package.prefix());
-						package.watcher = Watcher::new(watched_roots(&package.loaded));
 						if package.restart(&bun) {
 							package.run_covering_tests(&before);
 						}
@@ -875,7 +930,8 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 						"running again"
 					};
 					eprintln!("fa develop: {}{reason}: {verb}", package.prefix());
-					package.watcher = Watcher::new(watched_roots(&package.loaded));
+					// the changes made while it loaded are seen by the next poll
+					package.watcher.watch(watched_roots(&package.loaded));
 					if package.restart(&bun) {
 						package.run_covering_tests(&edited);
 					}
@@ -891,15 +947,26 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 	}
 }
 
-/// The changes of two polls together.
+/// The changes of two polls together: a file removed then added again
+/// (an editor saving through a new file) is modified, a file added then
+/// removed is no change.
 fn merge(mut first: Changes, second: Changes) -> Changes {
 	for path in second.added {
-		if !first.added.contains(&path) {
+		if let Some(index) = first.removed.iter().position(|other| *other == path) {
+			first.removed.remove(index);
+			if !first.modified.contains(&path) {
+				first.modified.push(path);
+			}
+		} else if !first.added.contains(&path) {
 			first.added.push(path);
 		}
 	}
 	for path in second.removed {
-		first.added.retain(|other| *other != path);
+		if let Some(index) = first.added.iter().position(|other| *other == path) {
+			first.added.remove(index);
+			continue;
+		}
+		first.modified.retain(|other| *other != path);
 		if !first.removed.contains(&path) {
 			first.removed.push(path);
 		}
@@ -923,14 +990,13 @@ pub(crate) fn watch_tests(selection: Selection) -> i32 {
 	let mut runs = 0;
 	let mut watched: Vec<(Option<PathBuf>, Loaded, Watcher)> = Vec::new();
 	for (_, path) in paths {
-		let loaded = match Loaded::load(path.as_deref(), "bun") {
+		let (loaded, watcher) = match load_watched(path.as_deref(), "bun") {
 			Ok(loaded) => loaded,
 			Err(message) => {
 				crate::color::eprintln_message(&message);
 				return 1;
 			}
 		};
-		let watcher = Watcher::new(watched_roots(&loaded));
 		watched.push((path, loaded, watcher));
 	}
 	for (_, loaded, _) in &mut watched {
@@ -953,12 +1019,272 @@ pub(crate) fn watch_tests(selection: Selection) -> i32 {
 			match refresh(loaded, path.as_deref(), &changes, "bun") {
 				Ok(reason) => {
 					eprintln!("fa test: {reason}: running the tests again");
-					*watcher = Watcher::new(watched_roots(loaded));
+					// the changes made while it loaded are seen by the next poll
+					watcher.watch(watched_roots(loaded));
 					crate::run_tests(loaded);
 					runs += 1;
 				}
 				Err(message) => eprintln!("{message}"),
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// An empty scratch folder of a test.
+	fn scratch(name: &str) -> PathBuf {
+		let directory =
+			std::env::temp_dir().join(format!("fa-develop-{name}-{}", std::process::id()));
+		let _ = fs::remove_dir_all(&directory);
+		fs::create_dir_all(&directory).unwrap();
+		fs::canonicalize(&directory).unwrap()
+	}
+
+	/// Writes files into a folder.
+	fn write(folder: &Path, files: &[(&str, &str)]) {
+		for (path, text) in files {
+			let path = folder.join(path);
+			fs::create_dir_all(path.parent().unwrap()).unwrap();
+			fs::write(path, text).unwrap();
+		}
+	}
+
+	fn names(paths: &[PathBuf], base: &Path) -> Vec<String> {
+		paths
+			.iter()
+			.map(|path| path.strip_prefix(base).unwrap().display().to_string())
+			.collect()
+	}
+
+	#[test]
+	fn the_watcher_reports_the_files_added_removed_and_modified() {
+		let base = scratch("poll");
+		write(
+			&base,
+			&[
+				("package.fa", "export = {}\n"),
+				("library/a.fa", "export = 1\n"),
+				("library/b.fa", "export = 2\n"),
+				("library/notes.txt", "not watched\n"),
+				(".hidden/c.fa", "export = 3\n"),
+				("node_modules/d.fa", "export = 4\n"),
+			],
+		);
+		let mut watcher = Watcher::new(vec![(base.clone(), true)]);
+		assert!(watcher.poll().is_empty());
+		write(
+			&base,
+			&[
+				("library/a.fa", "export = 100\n"),
+				("library/new.fa", "export = 5\n"),
+				("library/notes.txt", "still not watched\n"),
+				(".hidden/c.fa", "export = 30\n"),
+				("node_modules/d.fa", "export = 40\n"),
+			],
+		);
+		fs::remove_file(base.join("library/b.fa")).unwrap();
+		let changes = watcher.poll();
+		assert_eq!(names(&changes.added, &base), ["library/new.fa"]);
+		assert_eq!(names(&changes.removed, &base), ["library/b.fa"]);
+		assert_eq!(names(&changes.modified, &base), ["library/a.fa"]);
+		assert!(watcher.poll().is_empty());
+		// a folder watched without its subfolders
+		let mut files = Watcher::new(vec![(base.clone(), false)]);
+		write(&base, &[("library/a.fa", "export = 1000\n")]);
+		assert!(files.poll().is_empty());
+		write(&base, &[("dependencies.lock", "changed\n")]);
+		assert_eq!(names(&files.poll().added, &base), ["dependencies.lock"]);
+		let _ = fs::remove_dir_all(base);
+	}
+
+	/// Item 4 of the tooling review: the changes made while the package
+	/// loads again are reported by the next poll, not absorbed by a new
+	/// snapshot.
+	#[test]
+	fn the_changes_made_while_loading_are_seen_by_the_next_poll() {
+		let base = scratch("during-load");
+		let other = scratch("during-load-other");
+		let gone = scratch("during-load-gone");
+		write(
+			&base,
+			&[
+				("library/a.fa", "export = 1\n"),
+				("library/b.fa", "export = 2\n"),
+			],
+		);
+		write(&other, &[("library/x.fa", "export = 1\n")]);
+		write(&gone, &[("library/y.fa", "export = 1\n")]);
+		let mut watcher = Watcher::new(vec![(base.clone(), true), (gone.clone(), true)]);
+		write(&base, &[("library/zz.fa", "export = 1\n")]);
+		let changes = watcher.poll();
+		assert_eq!(names(&changes.added, &base), ["library/zz.fa"]);
+		// the package loads again; meanwhile, an edit, a new file, a
+		// removal
+		write(
+			&base,
+			&[
+				("library/a.fa", "export = 100\n"),
+				("library/c.fa", "export = 3\n"),
+			],
+		);
+		fs::remove_file(base.join("library/b.fa")).unwrap();
+		// loaded: it now uses `other`, and no longer `gone`
+		watcher.watch(vec![(base.clone(), true), (other.clone(), true)]);
+		let changes = watcher.poll();
+		assert_eq!(names(&changes.modified, &base), ["library/a.fa"]);
+		assert_eq!(names(&changes.added, &base), ["library/c.fa"]);
+		assert_eq!(names(&changes.removed, &base), ["library/b.fa"]);
+		assert!(watcher.poll().is_empty());
+		// the files of a folder watched from now on are taken as they are
+		write(&other, &[("library/x.fa", "export = 100\n")]);
+		assert_eq!(names(&watcher.poll().modified, &other), ["library/x.fa"]);
+		for directory in [base, other, gone] {
+			let _ = fs::remove_dir_all(directory);
+		}
+	}
+
+	#[test]
+	fn merged_polls_see_a_file_saved_through_a_new_file_as_modified() {
+		let path = |name: &str| PathBuf::from(format!("library/{name}.fa"));
+		// vim: the file removed, then written again
+		let first = Changes {
+			removed: vec![path("a")],
+			..Changes::default()
+		};
+		let second = Changes {
+			added: vec![path("a")],
+			..Changes::default()
+		};
+		let merged = merge(first, second);
+		assert!(merged.added.is_empty() && merged.removed.is_empty());
+		assert_eq!(merged.modified, [path("a")]);
+		// a file added then removed: no change
+		let first = Changes {
+			added: vec![path("b")],
+			modified: vec![path("c")],
+			..Changes::default()
+		};
+		let second = Changes {
+			removed: vec![path("b"), path("c")],
+			modified: vec![path("d")],
+			..Changes::default()
+		};
+		let merged = merge(first, second);
+		assert!(merged.added.is_empty());
+		assert_eq!(merged.removed, [path("c")]);
+		assert_eq!(merged.modified, [path("d")]);
+		// an added file modified again is still added
+		let first = Changes {
+			added: vec![path("e")],
+			..Changes::default()
+		};
+		let second = Changes {
+			modified: vec![path("e")],
+			..Changes::default()
+		};
+		let merged = merge(first, second);
+		assert_eq!(merged.added, [path("e")]);
+		assert!(merged.modified.is_empty());
+	}
+
+	#[test]
+	fn only_the_edits_of_the_own_sources_are_applied_without_a_reload() {
+		let workspace = scratch("reload-reason");
+		write(
+			&workspace,
+			&[
+				("workspace.fa", "export = { name = \"farm\" }\n"),
+				("packages/farm/package.fa", "export = { name = \"farm\" }\n"),
+				(
+					"packages/farm/library/greet.fa",
+					"export function = (): String => \"hi\"\n",
+				),
+				(
+					"packages/farm/application/main.fa",
+					"export function = () => {\n\tconsole.log(library.greet())\n}\n",
+				),
+			],
+		);
+		let package = workspace.join("packages/farm");
+		let (loaded, mut watcher) = load_watched(Some(&package), "bun").expect("it loads");
+		assert!(!loaded.has_errors(), "{}", loaded.rendered());
+		assert!(watcher.poll().is_empty());
+		let modified = |path: PathBuf| Changes {
+			modified: vec![path],
+			..Changes::default()
+		};
+		let reason = |changes: Changes| reload_reason(&loaded, &changes);
+		assert_eq!(reason(modified(package.join("library/greet.fa"))), None);
+		assert_eq!(
+			reason(Changes {
+				added: vec![package.join("library/new.fa")],
+				..Changes::default()
+			}),
+			Some("`library/new.fa` was added".to_string())
+		);
+		assert_eq!(
+			reason(Changes {
+				removed: vec![package.join("library/greet.fa")],
+				..Changes::default()
+			}),
+			Some("`library/greet.fa` was removed".to_string())
+		);
+		assert_eq!(
+			reason(modified(package.join("package.fa"))),
+			Some("the configuration `package.fa` changed".to_string())
+		);
+		assert_eq!(
+			reason(modified(package.join("dependencies.lock"))),
+			Some("the configuration `dependencies.lock` changed".to_string())
+		);
+		assert!(
+			reason(modified(workspace.join("workspace.fa")))
+				.is_some_and(|reason| reason.starts_with("the configuration `")),
+		);
+		assert!(
+			reason(modified(workspace.join("packages/other/library/x.fa")))
+				.is_some_and(|reason| reason.ends_with("x.fa` changed")),
+		);
+		// the root files of the workspace are watched, not its other folders
+		write(
+			&workspace,
+			&[
+				("workspace.fa", "export = { name = \"farms\" }\n"),
+				("scratch/notes.fa", "export = 1\n"),
+			],
+		);
+		let changes = watcher.poll();
+		assert_eq!(changes.modified, [workspace.join("workspace.fa")]);
+		assert!(changes.added.is_empty());
+		let _ = fs::remove_dir_all(workspace);
+	}
+
+	#[test]
+	fn an_unreadable_edit_is_reported_and_skipped() {
+		let package = scratch("unreadable");
+		write(
+			&package,
+			&[
+				("package.fa", "export = { name = \"farm\" }\n"),
+				(
+					"library/greet.fa",
+					"export function = (): String => \"hi\"\n",
+				),
+				(
+					"application/main.fa",
+					"export function = () => {\n\tconsole.log(library.greet())\n}\n",
+				),
+			],
+		);
+		let (mut loaded, _) = load_watched(Some(&package), "bun").expect("it loads");
+		let greet = package.join("library/greet.fa");
+		fs::write(&greet, b"export = \"\xff\"\n").unwrap();
+		assert!(apply_edits(&mut loaded, &[greet]).is_empty());
+		let main = package.join("application/main.fa");
+		assert_eq!(apply_edits(&mut loaded, &[main]), ["application/main.fa"]);
+		let _ = fs::remove_dir_all(package);
 	}
 }

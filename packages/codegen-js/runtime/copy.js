@@ -108,6 +108,23 @@ export function faCopy(value) {
 	return root;
 }
 
+// @fa-helper faUnlinked deps: faCopy faSides
+/**
+ * A value of a type parameter read from a place and stored (erased generic
+ * code shares values): an element with relation sides is copied without
+ * its links (D18), any other value is itself.
+ * @template T
+ * @param {T} value
+ * @returns {T}
+ */
+export function faUnlinked(value) {
+	const element = /** @type {any} */ (value);
+	if (typeof element === "object" && element !== null && element[faSides] !== undefined) {
+		return faCopy(value);
+	}
+	return value;
+}
+
 // @fa-helper faCopyGraph deps: faCopyShell FaHashMap FaSet faSides
 /**
  * A copy of an owner of related collections (advanced brief 8.5, copies):

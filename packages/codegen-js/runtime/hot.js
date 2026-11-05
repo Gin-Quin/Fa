@@ -123,8 +123,8 @@ export async function faHotSwap(root) {
 
 // @fa-helper faHotListen deps: faHotSwap
 /**
- * Connects to the channel of `fa develop` (a local socket, its port in
- * `FA_HOT_CHANNEL`): each line `swap` swaps the modules (`faHotSwap`), and
+ * Connects to the channel of `fa develop` (a local socket, its port and
+ * the token to send first in `FA_HOT_CHANNEL`): each line `swap` swaps the modules (`faHotSwap`), and
  * its answer is sent back as a line of JSON. The channel doesn't keep the
  * program running; without the variable, nothing happens. In a browser
  * (`fa develop --target=web`), the channel is the WebSocket `/$fa-hot` of
@@ -146,15 +146,18 @@ export function faHotListen(root) {
 		};
 		return;
 	}
-	const port = Number(host.process?.env?.FA_HOT_CHANNEL);
-	if (!port) {
+	// `<port>:<token>`: the token is sent first, `fa develop` closes a
+	// connection without it
+	const [port, token] = String(host.process?.env?.FA_HOT_CHANNEL ?? "").split(":");
+	if (!Number(port)) {
 		return;
 	}
 	const net = host.process.getBuiltinModule("node:net");
-	const socket = net.connect(port, "127.0.0.1");
+	const socket = net.connect(Number(port), "127.0.0.1");
 	socket.unref();
 	socket.setEncoding("utf8");
 	socket.on("error", () => {});
+	socket.write(`${token}\n`);
 	let buffer = "";
 	socket.on("data", async (/** @type {string} */ data) => {
 		buffer += data;

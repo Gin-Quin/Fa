@@ -181,7 +181,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	pub(crate) fn mark_module_values(&mut self) {
 		let symbols = &self.analysis.symbols;
 		for (index, symbol) in symbols.symbols().iter().enumerate() {
-			if !matches!(symbol.kind, SymbolKind::Let | SymbolKind::Mutable) {
+			if !matches!(
+				symbol.kind,
+				SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
+			) {
 				continue;
 			}
 			let kind = symbols.scope(symbol.scope).kind;
@@ -218,7 +221,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		};
 		match analysis.symbols.symbol(symbol).kind {
 			SymbolKind::Function => Some(Reached::Function(file, *functions.get(&symbol)?)),
-			SymbolKind::Let | SymbolKind::Mutable => Some(Reached::Value(file, symbol)),
+			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive => {
+				Some(Reached::Value(file, symbol))
+			}
 			_ => None,
 		}
 	}

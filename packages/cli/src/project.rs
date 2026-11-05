@@ -50,6 +50,30 @@ pub(crate) struct Loaded {
 }
 
 /// The package folder containing `start` (itself, or a parent), if any.
+/// The module of a file from its path relative to the package
+/// (`library/math.fa` → `library/math`): `/` separators, and only the last
+/// `.fa` removed (`x.fa.fa` → `x.fa`).
+pub(crate) fn module_of(relative: &Path) -> String {
+	without_fa(&relative.to_string_lossy().replace('\\', "/")).to_string()
+}
+
+/// A file name or path without its `.fa` extension (removed once).
+pub(crate) fn without_fa(name: &str) -> &str {
+	name.strip_suffix(".fa").unwrap_or(name)
+}
+
+/// The message of a file that can't be read, with the reason.
+pub(crate) fn unreadable(file: &Path) -> String {
+	match fs::read_to_string(file) {
+		Err(error) if error.kind() == std::io::ErrorKind::InvalidData => format!(
+			"fa: `{}` is not UTF-8 text: save it as UTF-8",
+			file.display()
+		),
+		Err(error) => format!("fa: can't read `{}`: {error}", file.display()),
+		Ok(_) => format!("fa: can't read `{}`", file.display()),
+	}
+}
+
 fn find_package(start: &Path) -> Option<PathBuf> {
 	fa_codebase_parser::discover(start).package
 }
@@ -70,11 +94,7 @@ pub(crate) fn locate(path: Option<&Path>) -> Result<Project, String> {
 			&& let Ok(relative) = absolute.strip_prefix(&package)
 			&& relative.starts_with("scripts")
 		{
-			let module = relative
-				.to_string_lossy()
-				.replace('\\', "/")
-				.trim_end_matches(".fa")
-				.to_string();
+			let module = module_of(relative);
 			let shown = shown_base(&path, relative);
 			return Ok(Project {
 				package: true,
@@ -88,7 +108,7 @@ pub(crate) fn locate(path: Option<&Path>) -> Result<Project, String> {
 			.map_or_else(|| PathBuf::from("."), Path::to_path_buf);
 		let stem = absolute
 			.file_name()
-			.map(|name| name.to_string_lossy().trim_end_matches(".fa").to_string())
+			.map(|name| without_fa(&name.to_string_lossy()).to_string())
 			.unwrap_or_default();
 		return Ok(Project {
 			package: false,
@@ -168,7 +188,7 @@ fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 	if !project.package {
 		let entry = project.entry.clone().unwrap_or_default();
 		let file = project.base.join(format!("{entry}.fa"));
-		let (codebase, _) = timings::phase("scan", || Codebase::scan_standalone(&file))
+		let (codebase, _) = timings::phase("scan", || Codebase::scan_standalone_reached(&file))
 			.map_err(|error| format!("fa: can't read `{}`: {error}", file.display()))?;
 		session.set_resolver(Box::new(CodebaseResolver::new(
 			codebase,
@@ -176,7 +196,7 @@ fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 		)));
 		// the files are parsed when the analysis reaches them
 		let program = timings::phase("analysis", || session.analyze_program(&entry))
-			.ok_or_else(|| format!("fa: can't read `{}`", file.display()))?;
+			.ok_or_else(|| unreadable(&file))?;
 		return Ok(Loaded {
 			session,
 			program,
@@ -200,13 +220,14 @@ fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 			None => return Err(format!("fa: can't read the script `{script}.fa`")),
 		},
 		None => {
-			let entry = configuration
-				.as_ref()
-				.map_or("application/main.fa", |configuration| {
-					configuration.entry.as_str()
-				})
-				.trim_end_matches(".fa")
-				.to_string();
+			let entry = without_fa(
+				configuration
+					.as_ref()
+					.map_or("application/main.fa", |configuration| {
+						configuration.entry.as_str()
+					}),
+			)
+			.to_string();
 			// every file is read and parsed first (in parallel), in the
 			// order of `analyze_package`, so that the analysis phase is
 			// measured alone
@@ -288,13 +309,14 @@ fn prepare_package_with(
 		}
 		configuration
 	});
-	let entry = configuration
-		.as_ref()
-		.map_or("application/main.fa", |configuration| {
-			configuration.entry.as_str()
-		})
-		.trim_end_matches(".fa")
-		.to_string();
+	let entry = without_fa(
+		configuration
+			.as_ref()
+			.map_or("application/main.fa", |configuration| {
+				configuration.entry.as_str()
+			}),
+	)
+	.to_string();
 	Ok(Prepared {
 		session,
 		project,
@@ -329,6 +351,18 @@ pub fn editor_session(
 		entry: prepared.entry,
 		warnings: prepared.warnings,
 	})
+}
+
+/// [`editor_session`] without the network: the dependencies come from the
+/// lockfile and the cache only, so that it answers at once. `None` when a
+/// source must be fetched (cloned, fetched again, downloaded): the editor
+/// then resolves with [`editor_session`] on another thread.
+pub fn offline_editor_session(
+	package: &Path,
+	wrap: impl FnOnce(Box<dyn ModuleResolver>) -> Box<dyn ModuleResolver>,
+) -> Option<Result<EditorSession, String>> {
+	let (found, fetched) = crate::offline::offline(|| editor_session(package, wrap));
+	(!fetched).then_some(found)
 }
 
 /// The session of a package for an editor ([`editor_session`]).
@@ -393,7 +427,7 @@ fn with_dependencies(
 	write_lockfile: bool,
 ) -> Result<(MountedResolver, Vec<String>), String> {
 	let scope = scope_of(package)?;
-	let resolution = dependencies::resolve(&scope, &dependencies::Update::None, write_lockfile)?;
+	let resolution = dependencies::resolve_shared(&scope, write_lockfile)?;
 	let resolver = dependencies::mount(main, package, &resolution, target)?;
 	Ok((resolver, resolution.warnings))
 }
@@ -658,14 +692,18 @@ pub(crate) fn focus_forbidden(base: &Path) -> Option<String> {
 	};
 	let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"])?;
 	let default = git(&["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-		.map(|reference| {
-			reference
-				.rsplit('/')
-				.next()
-				.unwrap_or(&reference)
-				.to_string()
-		})
+		.map(|reference| remote_branch(&reference).to_string())
 		.or_else(|| git(&["config", "init.defaultBranch"]))
 		.unwrap_or_else(|| "main".to_string());
 	(branch == default).then(|| format!("`{branch}` is the default branch"))
 }
+
+/// The branch of a reference of the remote (`origin/release/1.0` →
+/// `release/1.0`).
+fn remote_branch(reference: &str) -> &str {
+	reference.strip_prefix("origin/").unwrap_or(reference)
+}
+
+#[cfg(test)]
+#[path = "project_tests.rs"]
+mod tests;

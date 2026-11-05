@@ -42,6 +42,8 @@ impl Scratch {
 				"FA_GITHUB_BASE",
 				format!("file://{}", self.directory.join("remote").display()),
 			)
+			// the "remote" sources of the tests are `file://` URLs
+			.env("FA_TEST_FILE_SOURCES", "1")
 			.env_remove("CI")
 			.env_remove("FA_DEVELOP_RUNS");
 		command
@@ -177,6 +179,17 @@ impl Repository {
 
 fn lockfile(folder: &Path) -> String {
 	fs::read_to_string(folder.join("dependencies.lock")).unwrap_or_default()
+}
+
+/// A lockfile whose first hash is changed (still a valid hash).
+fn tamper_hash(lockfile: &str) -> String {
+	let start = lockfile.find("hash = \"sha256:").expect("a hash") + "hash = \"sha256:".len();
+	let digit = if lockfile[start..].starts_with('0') {
+		"1"
+	} else {
+		"0"
+	};
+	format!("{}{digit}{}", &lockfile[..start], &lockfile[start + 1..])
 }
 
 #[test]
@@ -410,7 +423,7 @@ fn git_dependencies_are_resolved_locked_and_updated() {
 	);
 	// a content that doesn't match its hash (an empty cache, a changed hash)
 	fs::remove_dir_all(scratch.directory.join("cache/sources")).unwrap();
-	let tampered = updated.replacen("hash = \"sha256:", "hash = \"sha256:0", 1);
+	let tampered = tamper_hash(&updated);
 	fs::write(package.join("dependencies.lock"), &tampered).unwrap();
 	let (_, stderr, code) = scratch.fa(&["check"], &package);
 	assert_eq!(code, 1);
@@ -892,6 +905,325 @@ fn remote_files_are_locked_by_their_content() {
 	assert!(stderr.contains("error[DEP007]"), "{stderr}");
 }
 
+/// Runs `fa` without the test permission for `file://` sources in
+/// dependencies (`FA_TEST_FILE_SOURCES`): what a user runs.
+fn fa_strict(scratch: &Scratch, arguments: &[&str], directory: &Path) -> (String, i32) {
+	let output = scratch
+		.command(arguments, directory)
+		.env_remove("FA_TEST_FILE_SOURCES")
+		.output()
+		.expect("`fa` runs");
+	(
+		String::from_utf8_lossy(&output.stderr).to_string(),
+		output.status.code().unwrap_or(-1),
+	)
+}
+
+/// A package depending on a remote file, checked once (locked and cached);
+/// returns the package, the served folder and the URL.
+fn locked_remote_file(scratch: &Scratch) -> (PathBuf, PathBuf, String) {
+	let served = scratch.write(
+		"served",
+		&[("v1/types.fa", "export function = (): Integer => 21\n")],
+	);
+	let types = format!("file://{}/v1/types.fa", served.display());
+	let package = scratch.write(
+		"app",
+		&[
+			("package.fa", "export = { name = \"app\" }\n"),
+			(
+				"dependencies.fa",
+				&format!("export = {{ weather = \"{types}\" }}\n"),
+			),
+			(
+				"application/main.fa",
+				"export function = () => {\n\tconsole.log(weather())\n}\n",
+			),
+		],
+	);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	(package, served, types)
+}
+
+/// The hexadecimal digits of the first hash of a lockfile.
+fn first_hash(lockfile: &str) -> String {
+	let start = lockfile.find("hash = \"sha256:").expect("a hash") + "hash = \"sha256:".len();
+	lockfile[start..start + 64].to_string()
+}
+
+#[test]
+fn a_forged_lockfile_never_deletes_a_folder() {
+	let scratch = Scratch::new("forged");
+	let (package, _, _) = locked_remote_file(&scratch);
+	let locked = lockfile(&package);
+	let hash = first_hash(&locked);
+	let victim = scratch.write("victim", &[("keep.txt", "precious\n")]);
+	// a hash naming a folder: absolute, or relative to the cache
+	for forged in [victim.display().to_string(), "../../victim".to_string()] {
+		let text = locked.replace(&hash, &forged);
+		fs::write(package.join("dependencies.lock"), &text).unwrap();
+		let (_, stderr, code) = scratch.fa(&["check"], &package);
+		assert_eq!(code, 1, "{stderr}");
+		assert!(stderr.contains("is not a valid lockfile"), "{stderr}");
+		assert!(victim.join("keep.txt").is_file(), "{forged}");
+	}
+	// an entry of the cache that links to another folder is not removed
+	// through the link
+	fs::write(package.join("dependencies.lock"), &locked).unwrap();
+	let entry = scratch.directory.join("cache/sources").join(&hash);
+	fs::remove_dir_all(&entry).unwrap();
+	#[cfg(unix)]
+	{
+		std::os::unix::fs::symlink(&victim, &entry).unwrap();
+		let (_, stderr, _) = scratch.fa(&["check"], &package);
+		assert!(victim.join("keep.txt").is_file(), "{stderr}");
+		fs::remove_file(&entry).unwrap();
+	}
+	// a damaged entry of the cache is fetched again
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	fs::write(
+		entry.join("types.fa"),
+		"export function = (): Integer => 666\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	assert_eq!(
+		fs::read_to_string(entry.join("types.fa")).unwrap(),
+		"export function = (): Integer => 21\n"
+	);
+	// a lockfile that is not one
+	fs::write(package.join("dependencies.lock"), "export = [ {").unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("is not a valid lockfile\n  help: delete it, then run `fa update`"),
+		"{stderr}"
+	);
+}
+
+#[test]
+fn hostile_sources_and_manifests_are_rejected() {
+	let scratch = Scratch::new("hostile");
+	let marker = scratch.directory.join("pwned");
+	let package = scratch.write(
+		"app",
+		&[
+			("package.fa", "export = { name = \"app\" }\n"),
+			(
+				"dependencies.fa",
+				&format!(
+					"export = {{ bad = \"git+--upload-pack=touch {}@1\" }}\n",
+					marker.display()
+				),
+			),
+		],
+	);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(stderr.contains("is not a repository"), "{stderr}");
+	assert!(!marker.exists());
+	// the paths of a manifest stay inside the folder, on every system
+	for path in [
+		"../x.fa",
+		"a/../../x.fa",
+		"/etc/passwd",
+		"..\\\\x.fa",
+		"C:\\\\x.fa",
+		"\\\\\\\\host\\\\x.fa",
+		"./x.fa",
+	] {
+		let served = scratch.write(
+			"served",
+			&[("ui@1.0.0/manifest.fa", &format!("export = [\"{path}\"]\n"))],
+		);
+		let ui = format!("file://{}/ui@1.0.0/", served.display());
+		fs::write(
+			package.join("dependencies.fa"),
+			format!("export = {{ ui = \"{ui}\" }}\n"),
+		)
+		.unwrap();
+		let (_, stderr, code) = scratch.fa(&["check"], &package);
+		assert_eq!(code, 1, "{path}");
+		assert!(
+			stderr.contains("error[DEP007]") && stderr.contains("which is outside the folder"),
+			"{path}: {stderr}"
+		);
+	}
+}
+
+#[test]
+fn a_fetched_dependency_cannot_read_local_files() {
+	if !has_tool("git") {
+		return;
+	}
+	let scratch = Scratch::new("local-sources");
+	let secret = scratch.write("secret", &[("key.fa", "export = \"secret\"\n")]);
+	let other = Repository::new(&scratch, "evil", "other");
+	other.release(
+		"other",
+		"1.0.0",
+		"1.0.0",
+		&[("library/x.fa", "export = 1\n")],
+	);
+	let bare = scratch.directory.join("remote/evil/other.git");
+	for (index, source) in [
+		format!("file://{}/key.fa", secret.display()),
+		format!("git+file://{}@1", bare.display()),
+		format!("git+{}@1", bare.display()),
+	]
+	.iter()
+	.enumerate()
+	{
+		let name = format!("lib{index}");
+		let evil = Repository::new(&scratch, "evil", &name);
+		evil.release(
+			&name,
+			"1.0.0",
+			"1.0.0",
+			&[
+				("library/y.fa", "export = 2\n"),
+				(
+					"dependencies.fa",
+					&format!("export = {{ secret = \"{source}\" }}\n"),
+				),
+			],
+		);
+		let package = scratch.write(
+			&format!("app{index}"),
+			&[
+				("package.fa", "export = { name = \"app\" }\n"),
+				(
+					"dependencies.fa",
+					&format!("export = {{ lib = \"github:evil/{name}@1\" }}\n"),
+				),
+			],
+		);
+		let (stderr, code) = fa_strict(&scratch, &["check"], &package);
+		assert_eq!(code, 1, "{stderr}");
+		assert!(
+			stderr.contains(&format!(
+				"error[DEP008]: `github:evil/{name}@1.0.0` depends on `secret` by a local source"
+			)),
+			"{stderr}"
+		);
+	}
+	// the root package may use local sources
+	let package = scratch.write(
+		"root",
+		&[
+			("package.fa", "export = { name = \"root\" }\n"),
+			(
+				"dependencies.fa",
+				&format!(
+					"export = {{ key = \"file://{}/key.fa\" }}\n",
+					secret.display()
+				),
+			),
+		],
+	);
+	let (stderr, code) = fa_strict(&scratch, &["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+}
+
+#[test]
+fn bad_versions_unreachable_repositories_and_targets_are_reported() {
+	if !has_tool("git") {
+		return;
+	}
+	let scratch = Scratch::new("dep-codes");
+	// DEP003: the tag is not the version of `package.fa`
+	let farm = Repository::new(&scratch, "farmers", "farm");
+	farm.release(
+		"farm",
+		"1.0.1",
+		"v1.0.0",
+		&[("library/x.fa", "export = 1\n")],
+	);
+	let package = scratch.write(
+		"app",
+		&[
+			("package.fa", "export = { name = \"app\" }\n"),
+			(
+				"dependencies.fa",
+				"export = { farm = \"github:farmers/farm@1\" }\n",
+			),
+		],
+	);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("error[DEP003]: the version 1.0.0 of `github:farmers/farm` is rejected: the `version` of its `package.fa` is `1.0.1`"),
+		"{stderr}"
+	);
+	// DEP006: a repository that doesn't exist
+	fs::write(
+		package.join("dependencies.fa"),
+		"export = { farm = \"github:nobody/missing@1\" }\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("error[DEP006]: can't reach the repository"),
+		"{stderr}"
+	);
+	// DEP009: a dependency that doesn't support the target, found for the
+	// first target, and for another one (code that reads `target`)
+	scratch.write(
+		"shared",
+		&[
+			(
+				"package.fa",
+				"export = {\n\tname = \"shared\"\n\ttargets = [\"web\"]\n}\n",
+			),
+			("library/x.fa", "export = 1\n"),
+		],
+	);
+	let package = scratch.write(
+		"targets",
+		&[
+			("package.fa", "export = { name = \"targets\" }\n"),
+			("dependencies.fa", "export = { shared = \"../shared\" }\n"),
+			(
+				"application/main.fa",
+				"export function = () => {\n\tconsole.log(shared.x)\n}\n",
+			),
+		],
+	);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("error[DEP009]: `shared` doesn't support the target `bun`"),
+		"{stderr}"
+	);
+	fs::write(
+		scratch.directory.join("shared/package.fa"),
+		"export = {\n\tname = \"shared\"\n\ttargets = [\"bun\"]\n}\n",
+	)
+	.unwrap();
+	fs::remove_file(package.join("dependencies.lock")).unwrap();
+	fs::write(
+		package.join("package.fa"),
+		"export = {\n\tname = \"targets\"\n\ttargets = [\"bun\", \"web\"]\n}\n",
+	)
+	.unwrap();
+	fs::write(
+		package.join("application/main.fa"),
+		"export function = () => {\n\t@if target is \"web\" {\n\t\tconsole.log(shared.x)\n\t}\n}\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1, "{stderr}");
+	assert!(
+		stderr.contains("error[DEP009]: `shared` doesn't support the target `web`")
+			&& stderr.contains("note: for the target `web`"),
+		"{stderr}"
+	);
+}
+
 /// Reads the output of a child until a text appears, or the time runs out.
 fn wait_for(output: &std::sync::Arc<std::sync::Mutex<String>>, text: &str, seconds: u64) -> bool {
 	let start = Instant::now();
@@ -1265,7 +1597,7 @@ fn develop_swaps_the_edited_modules_in_the_running_program() {
 	let scratch = Scratch::new("hot");
 	let greet = |word: &str, cow: &str| {
 		format!(
-			"type Cow = {{ {cow} }}\n\nreactive calls = 0\n\nexport function = (): String => {{\n\tcalls += 1\n\t\"{word} {{calls}}\"\n}}\n"
+			"type Cow = {{ {cow} }}\n\nreactive calls = 0\n\nexport function = (): String mutates calls => {{\n\tcalls += 1\n\t\"{word} {{calls}}\"\n}}\n"
 		)
 	};
 	let package = scratch.write(
@@ -1360,6 +1692,93 @@ fn develop_swaps_the_edited_modules_in_the_running_program() {
 	let _ = finish(child, 30);
 	let output = output.lock().unwrap().clone();
 	assert!(!output.contains("is not run again"), "{output}");
+}
+
+/// `develop.hotReload = false`: an edit of the package's own sources
+/// restarts the program instead of swapping its modules.
+#[test]
+fn develop_restarts_the_program_without_hot_reloading() {
+	if !has_tool("bun") {
+		return;
+	}
+	let scratch = Scratch::new("hot-off");
+	let greet = |word: &str| format!("export function = (): String => \"{word}\"\n");
+	let package = scratch.write(
+		"farm",
+		&[
+			(
+				"package.fa",
+				"export = {\n\tname = \"farm\"\n\tdevelop = { hotReload = false }\n}\n",
+			),
+			("library/greet.fa", &greet("one")),
+			(
+				"application/main.fa",
+				"use { sleep } = std.time\n\nexport async function = () => {\n\tmutable ticks = 0\n\twhile ticks < 40 {\n\t\tticks += 1\n\t\tconsole.log(\"{library.greet()} {ticks}\")\n\t\tawait sleep(50)\n\t}\n}\n",
+			),
+		],
+	);
+	let (child, output) = spawn(&scratch, &["develop"], &package, 1);
+	assert!(
+		wait_for(&output, "one 2\n", 30),
+		"{}",
+		output.lock().unwrap()
+	);
+	fs::write(package.join("library/greet.fa"), greet("two")).unwrap();
+	assert!(
+		wait_for(&output, "two 1\n", 20),
+		"{}",
+		output.lock().unwrap()
+	);
+	let code = finish(child, 30);
+	let output = output.lock().unwrap().clone();
+	assert_eq!(code, Some(0), "{output}");
+	assert!(
+		output.contains("fa develop: `library/greet.fa` changed: restarting\n"),
+		"{output}"
+	);
+	assert!(!output.contains("reloaded"), "{output}");
+}
+
+/// A swap that fails restarts the program, with the reason: here the
+/// program is busy and never answers on the channel (`hot.rs`, 10 s).
+#[test]
+fn develop_restarts_the_program_when_a_swap_fails() {
+	if !has_tool("bun") {
+		return;
+	}
+	let scratch = Scratch::new("hot-fails");
+	let busy = |milliseconds: u32| format!("export function = (): Integer => {milliseconds}\n");
+	let package = scratch.write(
+		"farm",
+		&[
+			("package.fa", "export = { name = \"farm\" }\n"),
+			("library/busy.fa", &busy(16000)),
+			(
+				"application/main.fa",
+				"use { now } = std.time\n\nexport function = () => {\n\tlet start = now()\n\tmutable spins = 0\n\twhile now() - start < library.busy() {\n\t\tspins += 1\n\t}\n\tconsole.log(\"done after {library.busy()}\")\n}\n",
+			),
+		],
+	);
+	let (child, output) = spawn(&scratch, &["develop"], &package, 1);
+	assert!(
+		wait_for(&output, "watching for changes", 30),
+		"{}",
+		output.lock().unwrap()
+	);
+	// the program is now busy, its channel not connected
+	std::thread::sleep(Duration::from_millis(1500));
+	fs::write(package.join("library/busy.fa"), busy(0)).unwrap();
+	let code = finish(child, 60);
+	let output = output.lock().unwrap().clone();
+	assert_eq!(code, Some(0), "{output}");
+	assert!(
+		output.contains(
+			"fa develop: `library/busy.fa` changed: restarting (the program isn't connected to `fa develop`)"
+		),
+		"{output}"
+	);
+	assert!(output.contains("done after 0\n"), "{output}");
+	assert!(!output.contains("done after 16000"), "{output}");
 }
 
 #[test]

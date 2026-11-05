@@ -1,0 +1,23 @@
+-- The review of 2026-11-05 (design/reviews/repros/cross-file-write/): a
+-- function writing another file's `mutable` declares it (`EFF003`, accepted
+-- before), so that the caller's narrowing of `library.counter` doesn't
+-- outlive the call; a function called at compile time can't write it.
+-- file: application/main.fa
+static value = @library.getter() -- error META002
+export function = () => {
+	if library.counter != none {
+		library.bump()
+		console.log(library.counter ?? 0, value)
+	}
+}
+-- file: library/bump.fa
+export function = () => {
+	counter = none -- error EFF003
+}
+-- file: library/counter.fa
+export mutable: Integer? = 3
+-- file: library/getter.fa
+export function = (): Integer => {
+	counter = 5 -- error EFF003
+	1
+}

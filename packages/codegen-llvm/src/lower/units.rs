@@ -434,7 +434,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	pub(crate) fn remote(&self, key: DeclKey) -> Option<(DeclKey, bool)> {
 		match self.remote_decl(key)?.kind {
 			SymbolKind::Function => Some((key, true)),
-			SymbolKind::Let | SymbolKind::Mutable => Some((key, false)),
+			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive => Some((key, false)),
 			_ => None,
 		}
 	}
@@ -1125,7 +1125,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.map(|keyed| keyed.node)
 			.filter(|node| {
 				interface.declared.get(node).is_some_and(|declared| {
-					matches!(declared.kind, SymbolKind::Let | SymbolKind::Mutable)
+					matches!(
+						declared.kind,
+						SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
+					)
 				})
 			})
 			.collect();

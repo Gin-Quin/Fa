@@ -6,6 +6,9 @@
 //!
 //! Edits are debounced: the backend analyzes a changed document once no edit has arrived for
 //! `Options::debounce` (50 ms). A query on a document with pending edits analyzes it first.
+//!
+//! While the backend has work running in the background (a resolution of dependencies), the
+//! thread asks it every `Options::poll` (50 ms) for the results, and publishes what changed.
 
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -17,7 +20,9 @@ use std::time::{Duration, Instant};
 
 use fa_parser::TypedSyntaxTree;
 use tokio::sync::mpsc::UnboundedSender;
-use tower_lsp::lsp_types::{Diagnostic, MessageType, TextDocumentContentChangeEvent, Url};
+use tower_lsp::lsp_types::{
+	Diagnostic, FileEvent, MessageType, TextDocumentContentChangeEvent, Url,
+};
 
 use crate::backend::AnalysisBackend;
 use crate::document::Document;
@@ -30,12 +35,15 @@ pub struct Options {
 	/// How long to wait after an edit before analyzing, so that typing doesn't trigger an
 	/// analysis per keystroke.
 	pub debounce: Duration,
+	/// How often to look for the results of the backend's background work.
+	pub poll: Duration,
 }
 
 impl Default for Options {
 	fn default() -> Self {
 		Options {
 			debounce: Duration::from_millis(50),
+			poll: Duration::from_millis(50),
 		}
 	}
 }
@@ -66,6 +74,10 @@ pub enum Message {
 	/// The editor saved a document (a configuration file is read again).
 	Save {
 		uri: Url,
+	},
+	/// Files changed on the disk outside the editor.
+	Watched {
+		changes: Vec<FileEvent>,
 	},
 	Query {
 		uri: Url,
@@ -140,17 +152,31 @@ struct Worker<B> {
 impl<B: AnalysisBackend> Worker<B> {
 	fn run(mut self, receiver: Receiver<Message>) {
 		loop {
-			let message = match self.deadline {
+			let polling = self.backend.has_background_work();
+			let wake = match (self.deadline, polling) {
+				(deadline, false) => deadline,
+				(None, true) => Some(Instant::now() + self.options.poll),
+				(Some(deadline), true) => Some(deadline.min(Instant::now() + self.options.poll)),
+			};
+			let message = match wake {
 				None => match receiver.recv() {
 					Ok(message) => message,
 					Err(_) => return,
 				},
-				Some(deadline) => {
-					let timeout = deadline.saturating_duration_since(Instant::now());
+				Some(wake) => {
+					let timeout = wake.saturating_duration_since(Instant::now());
 					match receiver.recv_timeout(timeout) {
 						Ok(message) => message,
 						Err(RecvTimeoutError::Timeout) => {
-							self.guarded(|worker| worker.flush_all());
+							if self
+								.deadline
+								.is_some_and(|deadline| deadline <= Instant::now())
+							{
+								self.guarded(|worker| worker.flush_all());
+							}
+							if polling {
+								self.guarded(|worker| worker.poll());
+							}
 							continue;
 						}
 						Err(RecvTimeoutError::Disconnected) => return,
@@ -161,6 +187,10 @@ impl<B: AnalysisBackend> Worker<B> {
 				return;
 			}
 			self.guarded(|worker| worker.handle(message));
+			// a stream of messages (typing) doesn't delay the results
+			if polling {
+				self.guarded(|worker| worker.poll());
+			}
 		}
 	}
 
@@ -222,6 +252,11 @@ impl<B: AnalysisBackend> Worker<B> {
 					self.publish(&uri);
 				}
 			}
+			Message::Watched { changes } => {
+				for uri in self.backend.files_changed(&changes) {
+					self.publish(&uri);
+				}
+			}
 			Message::Query { uri, run } => {
 				if self.dirty.contains(&uri) && !self.flush(&uri) {
 					// a newer edit stopped the analysis: the kept tree is
@@ -240,6 +275,13 @@ impl<B: AnalysisBackend> Worker<B> {
 				run(context);
 			}
 			Message::Shutdown => {}
+		}
+	}
+
+	/// Publish the diagnostics changed by the background work that finished.
+	fn poll(&mut self) {
+		for uri in self.backend.poll() {
+			self.publish(&uri);
 		}
 	}
 
@@ -338,6 +380,7 @@ mod tests {
 	fn options(milliseconds: u64) -> Options {
 		Options {
 			debounce: Duration::from_millis(milliseconds),
+			..Options::default()
 		}
 	}
 

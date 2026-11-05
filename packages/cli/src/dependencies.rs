@@ -25,6 +25,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 
 use fa_analyzer::comptime::host::{DependencySource, dependency_sources, run_generate};
 use fa_analyzer::configuration::{self, ConfigValue, ConfigurationKind};
@@ -263,6 +264,11 @@ impl Source {
 		}
 		if let Some(rest) = text.strip_prefix("git+") {
 			let (url, range) = split_range(rest)?;
+			if url.is_empty() || url.starts_with('-') {
+				return Err(format!(
+					"`{text}` is not a repository: write its URL after `git+`, ex: `git+https://example.com/farm.git@4`"
+				));
+			}
 			return Ok(Source::Git {
 				repository: format!("git+{url}"),
 				url: url.to_string(),
@@ -310,22 +316,114 @@ fn split_range(text: &str) -> Result<(&str, Option<Range>), String> {
 	}
 }
 
-/// Whether a URL names a version (`@2.1.0`, `/v3/`, `1.2`): an unversioned
-/// URL is `DEP004`.
+/// Whether the path of a URL names a version (`ui@2.1.0`, `/v3/`,
+/// `types-1.2.fa`), not its host (`dev1.example.com`, an IP address): an
+/// unversioned URL is `DEP004`.
 fn is_versioned(url: &str) -> bool {
-	let bytes = url.as_bytes();
-	bytes
-		.windows(3)
-		.any(|window| window[0].is_ascii_digit() && window[1] == b'.' && window[2].is_ascii_digit())
-		|| bytes
-			.windows(2)
-			.any(|window| (window[0] == b'@' || window[0] == b'v') && window[1].is_ascii_digit())
+	let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+	let rest = rest.split(['?', '#']).next().unwrap_or(rest);
+	let Some((_, path)) = rest.split_once('/') else {
+		return false;
+	};
+	path.split('/').any(|segment| {
+		let numbered = segment.as_bytes().windows(3).any(|window| {
+			window[0].is_ascii_digit() && window[1] == b'.' && window[2].is_ascii_digit()
+		});
+		let tagged = segment
+			.split('@')
+			.skip(1)
+			.any(|version| version.starts_with(|c: char| c.is_ascii_digit()));
+		let major = segment
+			.strip_prefix('v')
+			.is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()));
+		numbered || tagged || major
+	})
+}
+
+/// Whether a Git URL names a remote repository (`https://`, `ssh://`,
+/// `git://`, `user@host:path`), not one on the disk (a path, `file://`) nor
+/// a transport helper (`ext::`).
+fn is_remote_git(url: &str) -> bool {
+	if let Some((scheme, _)) = url.split_once("://") {
+		return matches!(scheme, "https" | "http" | "ssh" | "git");
+	}
+	// scp-like: `[user@]host:path`
+	match url.split_once(':') {
+		Some((host, path)) => {
+			host.len() > 1 && !host.contains(['/', '\\']) && !path.starts_with(':')
+		}
+		None => false,
+	}
+}
+
+/// The source as written when it reads the local disk: a path, a `file://`
+/// URL, or a Git repository that is not remote.
+fn local_source(source: &Source) -> Option<&str> {
+	match source {
+		Source::Path(path) => Some(path),
+		Source::Remote { url, .. } | Source::Generated { url, .. } => {
+			(!url.starts_with("https://") && !url.starts_with("http://")).then_some(url.as_str())
+		}
+		Source::Git { repository, .. } => repository
+			.strip_prefix("git+")
+			.filter(|url| !is_remote_git(url))
+			.map(|_| repository.as_str()),
+	}
+}
+
+/// `DEP008` when a dependency fetched from Git or a remote source (`name`)
+/// declares a source on the local disk (decision "Dependency security").
+fn check_fetched_source(name: &str, key: &str, source: &Source) -> Result<(), String> {
+	// the tests serve their "remote" files and repositories with `file://`
+	let served = |local: &str| {
+		std::env::var_os("FA_TEST_FILE_SOURCES").is_some_and(|value| value == "1")
+			&& local.trim_start_matches("git+").starts_with("file://")
+	};
+	match local_source(source) {
+		Some(local) if !served(local) => Err(format!(
+			"error[DEP008]: `{name}` depends on `{key}` by a local source (`{local}`): a dependency fetched from Git or a remote source can only depend on remote sources"
+		)),
+		_ => Ok(()),
+	}
+}
+
+/// Whether a path from a manifest or a Git tree is a relative path inside
+/// its folder on every system: `/` separators, no empty, `.` or `..`
+/// segment, no backslash, colon (drive letter) or control character.
+pub(crate) fn is_portable_path(path: &str) -> bool {
+	!path.is_empty()
+		&& !path
+			.chars()
+			.any(|c| c == '\\' || c == ':' || c.is_control())
+		&& path
+			.split('/')
+			.all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+/// Whether a text is a hash of the lockfile: `sha256:` and 64 lowercase
+/// hexadecimal digits.
+fn is_lock_hash(text: &str) -> bool {
+	text.strip_prefix("sha256:").is_some_and(|hex| {
+		hex.len() == 64
+			&& hex
+				.bytes()
+				.all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+	})
+}
+
+/// Whether a text is a Git commit: 40 (SHA-1) or 64 (SHA-256) lowercase
+/// hexadecimal digits.
+fn is_commit(text: &str) -> bool {
+	matches!(text.len(), 40 | 64)
+		&& text
+			.bytes()
+			.all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 // --------------------------------------------------------------- lockfile
 
 /// An entry of `dependencies.lock`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct LockEntry {
 	pub source: String,
 	pub version: Option<String>,
@@ -360,10 +458,24 @@ pub(crate) fn read_lockfile(path: &Path) -> Result<Vec<LockEntry>, String> {
 		let (Some(source), Some(hash)) = (field("source"), field("hash")) else {
 			return Err(invalid());
 		};
+		// the hash names a folder of the cache, the commit is given to `git`
+		if !is_lock_hash(&hash) {
+			return Err(format!(
+				"{}\n  note: the hash of `{source}` is not `sha256:` followed by 64 hexadecimal digits",
+				invalid()
+			));
+		}
+		let commit = field("commit");
+		if let Some(commit) = commit.as_deref().filter(|commit| !is_commit(commit)) {
+			return Err(format!(
+				"{}\n  note: the commit of `{source}` is not a commit (`{commit}`)",
+				invalid()
+			));
+		}
 		entries.push(LockEntry {
 			source,
 			version: field("version"),
-			commit: field("commit"),
+			commit,
 			hash,
 		});
 	}
@@ -458,8 +570,11 @@ pub(crate) fn hash_files(files: &[(String, Vec<u8>)]) -> String {
 	format!("sha256:{}", sha256::to_hex(&hash.finish()))
 }
 
-/// The files under a folder, by relative path (`/` separators).
+/// The files under a folder, by relative path (`/` separators). A symbolic
+/// link is read only when it names a file inside the folder; a linked
+/// folder is skipped (no escape, no loop).
 fn read_tree(directory: &Path) -> std::io::Result<Vec<(String, Vec<u8>)>> {
+	let root = fs::canonicalize(directory)?;
 	let mut files = Vec::new();
 	let mut stack = vec![(directory.to_path_buf(), String::new())];
 	while let Some((folder, prefix)) = stack.pop() {
@@ -471,8 +586,15 @@ fn read_tree(directory: &Path) -> std::io::Result<Vec<(String, Vec<u8>)>> {
 			} else {
 				format!("{prefix}/{name}")
 			};
-			if entry.file_type()?.is_dir() {
+			let kind = entry.file_type()?;
+			if kind.is_dir() {
 				stack.push((entry.path(), relative));
+			} else if kind.is_symlink() {
+				let inside = fs::canonicalize(entry.path())
+					.is_ok_and(|target| target.starts_with(&root) && target.is_file());
+				if inside {
+					files.push((relative, fs::read(entry.path())?));
+				}
 			} else {
 				files.push((relative, fs::read(entry.path())?));
 			}
@@ -482,11 +604,26 @@ fn read_tree(directory: &Path) -> std::io::Result<Vec<(String, Vec<u8>)>> {
 	Ok(files)
 }
 
-/// The folder of the cache holding the content of a hash.
+/// The folder of the cache holding the content of a hash (checked by
+/// `read_lockfile`, or computed).
 fn source_folder(hash: &str) -> PathBuf {
+	assert!(is_lock_hash(hash), "not a hash: {hash}");
 	cache_root()
 		.join("sources")
 		.join(hash.trim_start_matches("sha256:"))
+}
+
+/// Removes a damaged entry of the cache: only a folder directly inside
+/// the `sources` folder of the cache, after resolving both paths.
+fn remove_cached(folder: &Path) {
+	let root = fs::canonicalize(cache_root().join("sources"));
+	let resolved = fs::canonicalize(folder);
+	if let (Ok(root), Ok(resolved)) = (root, resolved)
+		&& resolved.parent() == Some(root.as_path())
+		&& fs::symlink_metadata(folder).is_ok_and(|metadata| metadata.is_dir())
+	{
+		let _ = fs::remove_dir_all(resolved);
+	}
 }
 
 /// Stores files into the cache under their hash, atomically (written into a
@@ -502,6 +639,11 @@ fn store(hash: &str, files: &[(String, Vec<u8>)]) -> Result<PathBuf, String> {
 		std::process::id(),
 		hash.trim_start_matches("sha256:")
 	));
+	if let Some((path, _)) = files.iter().find(|(path, _)| !is_portable_path(path)) {
+		return Err(format!(
+			"error: can't write `{path}` into the cache: it is not a relative path inside the folder"
+		));
+	}
 	let write = || -> std::io::Result<()> {
 		let _ = fs::remove_dir_all(&partial);
 		for (path, bytes) in files {
@@ -537,6 +679,9 @@ fn store(hash: &str, files: &[(String, Vec<u8>)]) -> Result<PathBuf, String> {
 
 /// Runs `git` and returns its standard output.
 fn git(arguments: &[&str], directory: Option<&Path>) -> Result<Vec<u8>, String> {
+	if matches!(arguments.first(), Some(&("clone" | "fetch" | "remote"))) {
+		crate::offline::network()?;
+	}
 	let mut command = Command::new("git");
 	if let Some(directory) = directory {
 		command.arg("--git-dir").arg(directory);
@@ -569,7 +714,11 @@ fn mirror(url: &str, refresh: bool) -> Result<PathBuf, String> {
 		let partial = parent.join(format!(".partial-{}-{key}.git", std::process::id()));
 		let _ = fs::remove_dir_all(&partial);
 		let partial_text = partial.to_string_lossy().to_string();
-		git(&["clone", "--quiet", "--mirror", url, &partial_text], None).map_err(unreachable)?;
+		git(
+			&["clone", "--quiet", "--mirror", "--", url, &partial_text],
+			None,
+		)
+		.map_err(unreachable)?;
 		if fs::rename(&partial, &folder).is_err() {
 			let _ = fs::remove_dir_all(&partial);
 		}
@@ -631,6 +780,12 @@ fn files_at(mirror: &Path, commit: &str) -> Result<Vec<(String, Vec<u8>)>, Strin
 		let Some(object) = object else {
 			continue;
 		};
+		if !is_portable_path(path) {
+			return Err(format!(
+				"the file `{}` has a path that is not portable (a backslash, a colon, `.` or `..`)",
+				path.escape_debug()
+			));
+		}
 		let bytes = git(&["cat-file", "blob", object], Some(mirror))?;
 		files.push((path.to_string(), bytes));
 	}
@@ -642,6 +797,7 @@ fn files_at(mirror: &Path, commit: &str) -> Result<Vec<(String, Vec<u8>)>, Strin
 
 /// Fetches a URL: `file://` from the disk, `http(s)://` with `curl`.
 fn fetch(url: &str) -> Result<Vec<u8>, String> {
+	crate::offline::network()?;
 	let failed = |error: String| {
 		format!(
 			"error[DEP006]: can't fetch `{url}`: {error}\n  help: check the network and the source"
@@ -1006,7 +1162,11 @@ fn package_imports(directory: &Path) -> Result<BTreeMap<String, Source>, String>
 				continue;
 			}
 			let path = entry.path();
-			if path.is_dir() {
+			// a symbolic link to a folder is not followed (no loop)
+			let Ok(kind) = entry.file_type() else {
+				continue;
+			};
+			if kind.is_dir() {
 				if recursive && !fa_codebase_parser::SKIPPED_FOLDERS.contains(&name.as_str()) {
 					walk(&path, true, files);
 				}
@@ -1119,47 +1279,7 @@ pub(crate) fn resolve(scope: &Scope, update: &Update, write: bool) -> Result<Res
 			resolver.resolution.warnings.push(warning);
 		}
 	}
-	for entry in &resolver.locked {
-		if !entries.iter().any(|other| other == entry) {
-			// the same source, and the same major version for a repository
-			let major = |entry: &LockEntry| {
-				entry
-					.version
-					.as_deref()
-					.and_then(Version::parse)
-					.map(|version| version.major)
-			};
-			let after = entries
-				.iter()
-				.find(|other| other.source == entry.source && major(other) == major(entry))
-				.map(|other| other.version.clone().unwrap_or_else(|| other.hash.clone()));
-			resolver.resolution.changes.push((
-				entry.source.clone(),
-				Some(entry.version.clone().unwrap_or_else(|| entry.hash.clone())),
-				after,
-			));
-		}
-	}
-	for entry in &entries {
-		let major = |entry: &LockEntry| {
-			entry
-				.version
-				.as_deref()
-				.and_then(Version::parse)
-				.map(|version| version.major)
-		};
-		if !resolver
-			.locked
-			.iter()
-			.any(|other| other.source == entry.source && major(other) == major(entry))
-		{
-			resolver.resolution.changes.push((
-				entry.source.clone(),
-				None,
-				Some(entry.version.clone().unwrap_or_else(|| entry.hash.clone())),
-			));
-		}
-	}
+	resolver.resolution.changes = lock_changes(&resolver.locked, &entries);
 	if write {
 		let text = render_lockfile(&entries);
 		let previous = fs::read_to_string(&lock_path).ok();
@@ -1174,6 +1294,95 @@ pub(crate) fn resolve(scope: &Scope, update: &Update, write: bool) -> Result<Res
 		}
 	}
 	Ok(resolver.resolution)
+}
+
+/// The resolutions shared: (scope root, lockfile written, result).
+type Shared = Option<Vec<(PathBuf, bool, Result<Resolution, String>)>>;
+
+/// The resolutions of a command, shared by its packages and targets: on
+/// while a [`Sharing`] lives.
+static SHARED: Mutex<Shared> = Mutex::new(None);
+
+/// While it lives, [`resolve_shared`] resolves each scope once: a command
+/// that checks or builds several packages or targets (never a watcher,
+/// which must see the changes) reads every file once.
+pub(crate) struct Sharing;
+
+impl Drop for Sharing {
+	fn drop(&mut self) {
+		*SHARED.lock().unwrap_or_else(|error| error.into_inner()) = None;
+	}
+}
+
+/// Shares the resolutions until the result is dropped.
+pub(crate) fn share_resolutions() -> Sharing {
+	*SHARED.lock().unwrap_or_else(|error| error.into_inner()) = Some(Vec::new());
+	Sharing
+}
+
+/// [`resolve`] without update, once per scope while a [`Sharing`] lives.
+pub(crate) fn resolve_shared(scope: &Scope, write: bool) -> Result<Resolution, String> {
+	let known = |shared: &Shared| {
+		shared.as_ref().and_then(|shared| {
+			shared
+				.iter()
+				.find(|(root, written, _)| *root == scope.root && *written == write)
+				.map(|(_, _, result)| result.clone())
+		})
+	};
+	if let Some(result) = known(&SHARED.lock().unwrap_or_else(|error| error.into_inner())) {
+		return result;
+	}
+	let result = resolve(scope, &Update::None, write);
+	if let Some(shared) = SHARED
+		.lock()
+		.unwrap_or_else(|error| error.into_inner())
+		.as_mut()
+	{
+		shared.push((scope.root.clone(), write, result.clone()));
+	}
+	result
+}
+
+/// The changes from a lockfile to another, `(source, before, after)`: an
+/// entry is the same dependency in both when it has the same source and,
+/// for a repository, the same major version.
+fn lock_changes(
+	before: &[LockEntry],
+	after: &[LockEntry],
+) -> Vec<(String, Option<String>, Option<String>)> {
+	let key = |entry: &'_ LockEntry| -> (String, Option<u64>) {
+		let major = entry
+			.version
+			.as_deref()
+			.and_then(Version::parse)
+			.map(|version| version.major);
+		(entry.source.clone(), major)
+	};
+	let shown = |entry: &LockEntry| entry.version.clone().unwrap_or_else(|| entry.hash.clone());
+	let after_by_key: BTreeMap<_, &LockEntry> = after
+		.iter()
+		.rev()
+		.map(|entry| (key(entry), entry))
+		.collect();
+	let before_keys: BTreeSet<_> = before.iter().map(key).collect();
+	let after_set: BTreeSet<&LockEntry> = after.iter().collect();
+	let mut changes = Vec::new();
+	for entry in before {
+		if !after_set.contains(entry) {
+			changes.push((
+				entry.source.clone(),
+				Some(shown(entry)),
+				after_by_key.get(&key(entry)).map(|other| shown(other)),
+			));
+		}
+	}
+	for entry in after {
+		if !before_keys.contains(&key(entry)) {
+			changes.push((entry.source.clone(), None, Some(shown(entry))));
+		}
+	}
+	changes
 }
 
 /// A chosen version of a repository (for one major version).
@@ -1207,6 +1416,8 @@ struct Resolver<'s> {
 	packages: BTreeMap<PathBuf, usize>,
 	/// The chosen version of each (repository, major).
 	chosen: BTreeMap<(String, u64), Chosen>,
+	/// The versions materialized, by (repository, version, commit).
+	materialized: BTreeMap<(String, String, String), Chosen>,
 	/// The remote files and folders, by URL.
 	remote: BTreeMap<String, Fetched>,
 	/// The libraries generated by a `DependencySource`, by declaring file
@@ -1235,6 +1446,7 @@ impl<'s> Resolver<'s> {
 			resolution: Resolution::default(),
 			packages: BTreeMap::new(),
 			chosen: BTreeMap::new(),
+			materialized: BTreeMap::new(),
 			remote: BTreeMap::new(),
 			paths: BTreeMap::new(),
 			generated: BTreeMap::new(),
@@ -1292,6 +1504,9 @@ impl<'s> Resolver<'s> {
 	/// no choice changes.
 	fn resolve_git(&mut self) -> Result<(), String> {
 		let requesters = self.requesters.clone();
+		for requester in &requesters {
+			check_requester(requester)?;
+		}
 		for _ in 0..32 {
 			let mut requests: Vec<GitRequest> = Vec::new();
 			for requester in &requesters {
@@ -1313,6 +1528,13 @@ impl<'s> Resolver<'s> {
 			}
 			for ((repository, _), chosen) in &self.chosen {
 				for (key, source) in &chosen.declared {
+					if !matches!(source, Source::Path(_)) {
+						check_fetched_source(
+							&format!("{repository}@{}", chosen.version),
+							key,
+							source,
+						)?;
+					}
 					match source {
 						Source::Git {
 							repository: other,
@@ -1368,10 +1590,13 @@ impl<'s> Resolver<'s> {
 	/// The latest major version of an unversioned repository (its locked
 	/// one, unless updated).
 	fn latest_major(&mut self, request: &GitRequest) -> Result<u64, String> {
-		self.resolution.warnings.push(format!(
+		let warning = format!(
 			"warning[DEP004]: `{}` has no version range: {} gets its latest version, which can change; write `{}@<major>`",
 			request.repository, request.requester, request.repository
-		));
+		);
+		if !self.resolution.warnings.contains(&warning) {
+			self.resolution.warnings.push(warning);
+		}
 		if !self.updating(&request.repository)
 			&& let Some(version) = self
 				.locked
@@ -1486,6 +1711,29 @@ impl<'s> Resolver<'s> {
 		commit: String,
 		locked_hash: Option<String>,
 	) -> Result<Chosen, String> {
+		// a version already materialized in this run (each iteration of
+		// `resolve_git` chooses every group again)
+		let id = (repository.to_string(), version.to_string(), commit.clone());
+		if let Some(chosen) = self.materialized.get(&id) {
+			return Ok(Chosen {
+				library: None,
+				..chosen.clone()
+			});
+		}
+		let chosen = self.materialize_new(repository, url, version, commit, locked_hash)?;
+		self.materialized.insert(id, chosen.clone());
+		Ok(chosen)
+	}
+
+	/// [`Self::materialize`] of a version not materialized yet.
+	fn materialize_new(
+		&mut self,
+		repository: &str,
+		url: &str,
+		version: Version,
+		commit: String,
+		locked_hash: Option<String>,
+	) -> Result<Chosen, String> {
 		let found = |bootstrap: &mut Bootstrap,
 		             hash: String,
 		             directory: PathBuf|
@@ -1508,7 +1756,7 @@ impl<'s> Resolver<'s> {
 					return found(&mut self.bootstrap, hash.clone(), folder);
 				}
 				// a damaged entry of the cache
-				let _ = fs::remove_dir_all(&folder);
+				remove_cached(&folder);
 			}
 		}
 		let mut mirror = self.mirror(url, false)?;
@@ -1569,6 +1817,11 @@ impl<'s> Resolver<'s> {
 				"warning[DEP004]: `{url}` has no version: its content can change, and the build then fails; prefer a URL with a version"
 			));
 		}
+		if url.starts_with("http://") {
+			self.resolution.warnings.push(format!(
+				"warning[DEP004]: `{url}` is fetched over `http://`: its first content is not authenticated, and the lockfile records whatever arrives; prefer `https://`"
+			));
+		}
 		let updating = self.updating(url);
 		let locked = self
 			.locked
@@ -1597,7 +1850,7 @@ impl<'s> Resolver<'s> {
 						.collect();
 					cached = Some((hash.clone(), directory, listed));
 				} else {
-					let _ = fs::remove_dir_all(&directory);
+					remove_cached(&directory);
 				}
 			}
 		}
@@ -1620,9 +1873,10 @@ impl<'s> Resolver<'s> {
 						})?;
 					let mut files = vec![("manifest.fa".to_string(), manifest)];
 					for path in &paths {
-						if path.starts_with('/') || path.split('/').any(|part| part == "..") {
+						if !is_portable_path(path) || path == "manifest.fa" {
 							return Err(format!(
-								"error[DEP007]: the `manifest.fa` of `{url}` lists `{path}`, which is outside the folder"
+								"error[DEP007]: the `manifest.fa` of `{url}` lists `{}`, which is outside the folder\n  help: list relative paths inside the folder, with `/` separators",
+								path.escape_debug()
 							));
 						}
 						files.push((path.clone(), fetch(&format!("{url}{path}"))?));
@@ -1958,6 +2212,7 @@ impl<'s> Resolver<'s> {
 
 	/// The libraries of a requester's keys.
 	fn key_map(&mut self, requester: &Requester) -> Result<BTreeMap<String, usize>, String> {
+		check_requester(requester)?;
 		let mut map = BTreeMap::new();
 		for (key, source) in &requester.dependencies {
 			let library = self.library_of(requester, key, source)?;
@@ -1998,6 +2253,27 @@ impl<'s> Resolver<'s> {
 		entries.sort_by(|a, b| a.source.cmp(&b.source));
 		entries
 	}
+}
+
+/// Whether a folder holds a dependency fetched from Git or a remote
+/// source: it is inside the cache.
+fn is_fetched(directory: &Path) -> bool {
+	let root = cache_root();
+	let root = fs::canonicalize(&root).unwrap_or(root);
+	let directory = fs::canonicalize(directory).unwrap_or_else(|_| directory.to_path_buf());
+	directory.starts_with(root)
+}
+
+/// `DEP008` when a requester fetched from Git or a remote source (or the
+/// `dependencies.fa` of one) declares a source on the local disk.
+fn check_requester(requester: &Requester) -> Result<(), String> {
+	if !is_fetched(&requester.directory) {
+		return Ok(());
+	}
+	for (key, source) in &requester.dependencies {
+		check_fetched_source(&requester.name, key, source)?;
+	}
+	Ok(())
 }
 
 /// Adds the packages that the path dependencies of a package outside a
@@ -2152,16 +2428,14 @@ pub(crate) fn mount(
 		});
 	};
 	// the libraries reached from the package
-	let mut reached: Vec<usize> = Vec::new();
+	let mut seen = BTreeSet::new();
 	let mut stack: Vec<usize> = keys.values().copied().collect();
 	while let Some(library) = stack.pop() {
-		if reached.contains(&library) {
-			continue;
+		if seen.insert(library) {
+			stack.extend(resolution.libraries[library].dependencies.values().copied());
 		}
-		reached.push(library);
-		stack.extend(resolution.libraries[library].dependencies.values().copied());
 	}
-	reached.sort_unstable();
+	let reached: Vec<usize> = seen.into_iter().collect();
 	let entry_of = |library: usize| -> ModuleEntry {
 		let found = &resolution.libraries[library];
 		if found.directory == package {
@@ -2172,9 +2446,11 @@ pub(crate) fn mount(
 			LibraryKind::Package | LibraryKind::Git => {
 				ModuleEntry::Folder(format!("{}/library", found.prefix))
 			}
-			LibraryKind::File { name } => {
-				ModuleEntry::File(format!("{}/{}", found.prefix, name.trim_end_matches(".fa")))
-			}
+			LibraryKind::File { name } => ModuleEntry::File(format!(
+				"{}/{}",
+				found.prefix,
+				crate::project::without_fa(name)
+			)),
 			LibraryKind::Folder { .. } => ModuleEntry::Folder(found.prefix.clone()),
 		}
 	};
@@ -2328,19 +2604,19 @@ mod tests {
 				source: "https://api.weather.com/fa/types.fa".to_string(),
 				version: None,
 				commit: None,
-				hash: "sha256:ef".to_string(),
+				hash: format!("sha256:{}", "e".repeat(64)),
 			},
 			LockEntry {
 				source: "github:farmers/farm".to_string(),
 				version: Some("4.10.0".to_string()),
-				commit: Some("9f2c".to_string()),
-				hash: "sha256:3a".to_string(),
+				commit: Some("9".repeat(40)),
+				hash: format!("sha256:{}", "a".repeat(64)),
 			},
 			LockEntry {
 				source: "github:farmers/farm".to_string(),
 				version: Some("3.2.0".to_string()),
-				commit: Some("1b2c".to_string()),
-				hash: "sha256:4b".to_string(),
+				commit: Some("1".repeat(40)),
+				hash: format!("sha256:{}", "b".repeat(64)),
 			},
 		];
 		let text = render_lockfile(&entries);
@@ -2352,6 +2628,156 @@ mod tests {
 		assert_eq!(read.len(), 3);
 		assert_eq!(render_lockfile(&read), text);
 		assert!(fa_parser::parse(&text).diagnostics.is_empty());
+	}
+
+	#[test]
+	fn a_command_resolves_each_scope_once() {
+		let directory = tempfile_folder("shared");
+		fs::write(directory.join("package.fa"), "export = { name = \"x\" }\n").unwrap();
+		let scope = Scope {
+			root: directory.clone(),
+			packages: vec![("x".to_string(), directory.clone())],
+			workspace: false,
+		};
+		let sharing = share_resolutions();
+		assert!(resolve_shared(&scope, false).is_ok());
+		// read once: a later change is not seen while sharing
+		fs::write(directory.join("dependencies.fa"), "export = { x = 1 }\n").unwrap();
+		assert!(resolve_shared(&scope, false).is_ok());
+		drop(sharing);
+		assert!(resolve_shared(&scope, false).is_err());
+	}
+
+	#[test]
+	fn a_forged_lockfile_is_rejected() {
+		let directory = tempfile_folder("forged");
+		let path = directory.join(LOCKFILE);
+		let entry = |hash: &str, commit: &str| {
+			format!(
+				"export = [\n\t{{\n\t\tsource = \"github:a/b\"\n\t\tversion = \"1.0.0\"\n\t\tcommit = \"{commit}\"\n\t\thash = \"{hash}\"\n\t}}\n]\n"
+			)
+		};
+		let good_hash = format!("sha256:{}", "0".repeat(64));
+		let good_commit = "a".repeat(40);
+		fs::write(&path, entry(&good_hash, &good_commit)).unwrap();
+		assert_eq!(read_lockfile(&path).unwrap().len(), 1);
+		for (hash, commit) in [
+			("sha256:/tmp/victim", good_commit.as_str()),
+			("sha256:../../victim", good_commit.as_str()),
+			(&format!("sha256:{}", "A".repeat(64)), good_commit.as_str()),
+			("sha256:00", good_commit.as_str()),
+			(good_hash.as_str(), "--output=/tmp/x"),
+			(good_hash.as_str(), "HEAD"),
+		] {
+			fs::write(&path, entry(hash, commit)).unwrap();
+			let error = read_lockfile(&path).unwrap_err();
+			assert!(error.contains("is not a valid lockfile"), "{error}");
+		}
+		fs::write(&path, "export = [ {").unwrap();
+		assert!(
+			read_lockfile(&path)
+				.unwrap_err()
+				.contains("is not a valid lockfile")
+		);
+	}
+
+	#[test]
+	fn paths_of_manifests_and_trees_are_portable() {
+		for path in ["button.fa", "layout/grid.fa", "library/a.b.fa", "a-b_c"] {
+			assert!(is_portable_path(path), "{path}");
+		}
+		for path in [
+			"",
+			"/etc/passwd",
+			"../x",
+			"a/../../x",
+			"a//b",
+			"./a",
+			"a/.",
+			"..\\x",
+			"C:\\x",
+			"C:x",
+			"\\\\host\\x",
+			"a\0b",
+			"a/\n",
+		] {
+			assert!(!is_portable_path(path), "{path:?}");
+		}
+	}
+
+	#[test]
+	fn local_sources_are_recognized() {
+		let local = |text: &str| local_source(&Source::parse(text).unwrap()).is_some();
+		for text in [
+			"file:///home/u/.ssh/id_rsa",
+			"git+file:///srv/repository.git@1",
+			"git+/srv/repository.git@1",
+			"git+../repository@1",
+			"git+C:\\repository@1",
+			"git+ext::sh -c touch% /tmp/x@1",
+			"../shared",
+		] {
+			assert!(local(text), "{text}");
+		}
+		for text in [
+			"https://example.com/types@1.0.fa",
+			"http://example.com/types@1.0.fa",
+			"github:farmers/farm@4",
+			"git+https://example.com/farm.git@4",
+			"git+ssh://git@example.com/farm.git@4",
+			"git+git@example.com:farmers/farm.git@4",
+		] {
+			assert!(!local(text), "{text}");
+		}
+		assert!(Source::parse("git+--upload-pack=touch /tmp/x@1").is_err());
+	}
+
+	#[test]
+	fn only_the_path_of_a_url_names_its_version() {
+		for url in [
+			"https://example.com/ui@2.1.0/",
+			"https://example.com/v3/types.fa",
+			"https://example.com/types-1.2.fa",
+		] {
+			assert!(is_versioned(url), "{url}");
+		}
+		for url in [
+			"https://dev1.example.com/x.fa",
+			"https://192.168.1.10/x.fa",
+			"https://example.com/types.fa?v=2",
+			"https://v2.example.com/types.fa",
+		] {
+			assert!(!is_versioned(url), "{url}");
+		}
+	}
+
+	#[test]
+	fn the_changes_of_the_lockfile_pair_majors() {
+		let entry = |version: &str, hash: char| LockEntry {
+			source: "github:a/b".to_string(),
+			version: Some(version.to_string()),
+			commit: None,
+			hash: format!("sha256:{}", hash.to_string().repeat(64)),
+		};
+		let changes = lock_changes(
+			&[entry("1.0.0", 'a'), entry("2.0.0", 'b')],
+			&[
+				entry("1.1.0", 'c'),
+				entry("2.0.0", 'b'),
+				entry("3.0.0", 'd'),
+			],
+		);
+		assert_eq!(
+			changes,
+			[
+				(
+					"github:a/b".to_string(),
+					Some("1.0.0".to_string()),
+					Some("1.1.0".to_string())
+				),
+				("github:a/b".to_string(), None, Some("3.0.0".to_string())),
+			]
+		);
 	}
 
 	#[test]

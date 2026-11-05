@@ -318,8 +318,9 @@ fn the_diagnostics_of_the_pipeline_are_deterministic_with_errors() {
 
 #[test]
 fn a_second_target_analyzes_nothing_when_no_file_reads_it() {
-	// async code (`await`, `start`) doesn't read the target: only a blocking
-	// call of something that may block does (review 27)
+	// async code (`await`, `start`) and calls of functions that never wait
+	// don't read the target: only a blocking call of something that may
+	// block does (review 27)
 	let files: Vec<(String, String)> = [
 		(
 			"package.fa",
@@ -330,8 +331,12 @@ fn a_second_target_analyzes_nothing_when_no_file_reads_it() {
 			"export async function = (n: Integer): Integer => n * 2\n",
 		),
 		(
+			"library/add.fa",
+			"export function = (a: Integer, b: Integer): Integer => a + b\n",
+		),
+		(
 			"application/main.fa",
-			"export async function = () => {\n\tlet task = start library.twice(1)\n\tconsole.log(await task, await library.twice(2))\n}\n",
+			"export async function = () => {\n\tlet task = start library.twice(1)\n\tconsole.log(await task, await library.twice(2), library.add(1, 2))\n}\n",
 		),
 	]
 	.into_iter()

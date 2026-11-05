@@ -744,7 +744,7 @@ impl Walker<'_> {
 		match target {
 			Target::Primitive(name, blocking) => {
 				// a blocking call: whether it may block depends on the target
-				self.a.reads_target |= mode == Mode::Blocking;
+				self.a.reads_target |= mode == Mode::Blocking && !blocking.is_all();
 				let acc = &mut self.acc().own;
 				if mode == Mode::Awaited {
 					acc.suspends = true;
@@ -781,12 +781,11 @@ impl Walker<'_> {
 			Target::Local(key, name) => {
 				self.acc().deps.push((key, mode, name.clone()));
 				if mode == Mode::Blocking {
-					self.a.reads_target = true;
 					self.tasks.blocking_calls.push((n, key, name));
 				}
 			}
 			Target::External(Some(summary), name) => {
-				self.a.reads_target |= mode == Mode::Blocking;
+				self.a.reads_target |= mode == Mode::Blocking && !summary.blocking.is_all();
 				merge(&mut self.acc().own, &summary, mode, &name, true);
 				if mode == Mode::Blocking && !summary.blocking.contains(current) {
 					self.report_blocking_call(n, &name, &summary);
@@ -1335,6 +1334,13 @@ impl Walker<'_> {
 		// the blocking calls they make impossible on the target
 		let current = self.current_target();
 		for (call, key, name) in std::mem::take(&mut self.tasks.blocking_calls) {
+			// a call that can't block everywhere: its check depends on the target
+			if settled
+				.get(&key)
+				.is_some_and(|summary| !summary.blocking.is_all())
+			{
+				self.a.reads_target = true;
+			}
 			if let Some(summary) = settled.get(&key)
 				&& !summary.blocking.contains(current)
 			{

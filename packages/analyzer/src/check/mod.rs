@@ -444,6 +444,11 @@ pub struct Walker<'s> {
 	pub(crate) foreign: foreign::ForeignState,
 	/// The `for parallel` loops whose body is being walked (`concurrency.rs`).
 	pub(crate) parallel: Vec<concurrency::ParallelFrame>,
+	/// The lambdas given to an operation of a parallel view: their bodies
+	/// follow the rules of a parallel body (`concurrency.rs`).
+	pub(crate) parallel_callbacks: rustc_hash::FxHashSet<NodeId>,
+	/// The `parallel()` members resolved, and those an operation follows.
+	pub(crate) parallel_views: Vec<(NodeId, bool)>,
 	/// Async: awaited and started calls, summaries (`tasks.rs`).
 	pub(crate) tasks: tasks::TaskState,
 	/// The effect being applied only adds elements (`push`, `insert`): the
@@ -559,6 +564,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		relation_pool_places: rustc_hash::FxHashSet::default(),
 		closure_effects: FxHashMap::default(),
 		parallel: Vec::new(),
+		parallel_callbacks: rustc_hash::FxHashSet::default(),
+		parallel_views: Vec::new(),
 		tasks: tasks::TaskState::default(),
 		declared_effect_sets: FxHashMap::default(),
 		module_values: FxHashMap::default(),

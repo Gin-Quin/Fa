@@ -38,7 +38,7 @@ pub(crate) enum Cursor<'a> {
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// The representation of the elements of a pool.
-	fn pool_element(&self, pool: Repr, node: NodeId) -> Result<Repr, Error> {
+	pub(crate) fn pool_element(&self, pool: Repr, node: NodeId) -> Result<Repr, Error> {
 		let (Repr::Pool(item) | Repr::Columnar(item)) = pool else {
 			return Err(self.unsupported(node.index(), "this pool"));
 		};
@@ -119,7 +119,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Stores an element at an address of a pool, or into the columns of a
 	/// columnar.
-	fn element_write(
+	pub(crate) fn element_write(
 		&self,
 		builder: &Builder<'ctx>,
 		place: Repr,

@@ -1076,4 +1076,474 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.cleanups.borrow_mut().clear();
 		Ok(())
 	}
+
+	// ── parallel views ───────────────────────────────────────────────────
+
+	/// `collection.parallel().operation(…)` (`Analysis::parallel_operations`):
+	/// the callbacks run on the threads of `fa_parallel_for` over the items
+	/// of the collection (an array, or a view of it as one), each writing
+	/// its own slot of a result; `filter`, `some` and `every` then read the
+	/// flags in order, `reduce` combines the partial results of chunks of
+	/// items (its function is associative: concurrency.md), `sum` adds in
+	/// order.
+	pub(crate) fn parallel_operation(
+		&mut self,
+		node: NodeId,
+		operation: &str,
+		info: &CallInfo,
+	) -> Result<Val<'ctx>, Error> {
+		let collection = self.receiver(node)?;
+		let view = match collection.repr {
+			Repr::Never => return Ok(collection),
+			Repr::Array(_) => collection,
+			Repr::Growing(_) => self.growing_view(collection)?,
+			Repr::Pool(_) | Repr::Columnar(_) => self.pool_view(collection, node)?,
+			Repr::Set(set) => {
+				let TypeKind::Collection(_, item, _) = self.types().kind(set) else {
+					return Err(self.unsupported(node.index(), "`parallel()` of this set"));
+				};
+				self.array_of_table(collection, Repr::Array(item), node)?
+			}
+			_ => return Err(self.unsupported(node.index(), "`parallel()` of this collection")),
+		};
+		let arguments: Vec<NodeId> = info
+			.arguments
+			.iter()
+			.filter_map(|argument| match argument {
+				Argument::Given(value) => Some(*value),
+				_ => None,
+			})
+			.collect();
+		let mut values = Vec::with_capacity(arguments.len());
+		for &argument in &arguments {
+			let value = self.expr(argument)?;
+			if value.repr == Repr::Never {
+				return Ok(value);
+			}
+			values.push(value);
+		}
+		let (array, item) = self.array_of(view, node)?;
+		let (_, length) = self.array_parts(array)?;
+		let i64 = self.context.i64_type();
+		match (operation, values.as_slice()) {
+			("map", [callback]) => {
+				let Repr::Array(result_type) = self.node_repr(node)? else {
+					return Err(self.unsupported(node.index(), "this `map`"));
+				};
+				let result_item = self.item_repr(result_type, node)?;
+				let result = self.zeroed_array(result_item, length)?;
+				// dropped with the statement if an iteration fails
+				let result_value = self.fresh(Val::new(Repr::Array(result_type), result));
+				let callback_node = arguments[0];
+				let closure = callback.value.expect("a function");
+				let closure_repr = callback.repr;
+				self.parallel_each(
+					length,
+					&[closure, array.into(), result.into()],
+					|this, env, index| {
+						let callback = Val::new(closure_repr, env[0]);
+						let array = env[1].into_pointer_value();
+						let result = env[2].into_pointer_value();
+						let slot = this.array_item_slot(array, item, index)?;
+						let index_value = Val::new(Repr::Int(IntRepr::I64), index);
+						let mapped = this.call_collection_callback(
+							callback,
+							callback_node,
+							&[],
+							&[slot],
+							&[index_value],
+						)?;
+						let mapped = this.owned_as(mapped, result_item, None)?;
+						let target = this.array_item_slot(result, result_item, index)?;
+						if let Some(raw) = mapped.value {
+							this.builder.build_store(target.pointer, raw)?;
+						}
+						Ok(())
+					},
+				)?;
+				Ok(result_value)
+			}
+			("filter" | "some" | "every", [callback]) => {
+				let flags = self.parallel_flags(array, item, length, *callback, arguments[0])?;
+				let flag_at =
+					|this: &mut Self, index: IntValue<'ctx>| -> Result<IntValue<'ctx>, Error> {
+						let slot = this.array_item_slot(flags, Repr::Bool, index)?;
+						Ok(this.load(slot)?.int())
+					};
+				if operation == "filter" {
+					// the kept items in order, copied as `filter` copies them
+					let result = self.empty_array(item, length)?;
+					let result_value = Val::new(view.repr, result);
+					self.for_each_index(length, |this, index| {
+						let keep = flag_at(this, index)?;
+						let push = this.append_block("parallel_keep");
+						let next = this.append_block("parallel_next");
+						this.builder.build_conditional_branch(keep, push, next)?;
+						this.builder.position_at_end(push);
+						let value = this.load(this.array_item_slot(array, item, index)?)?;
+						this.array_push(result_value, value, node, None)?;
+						this.builder.build_unconditional_branch(next)?;
+						this.builder.position_at_end(next);
+						Ok(())
+					})?;
+					let filtered = self.fresh(result_value);
+					// a filter of another collection gives its kind back
+					let repr = self.node_repr(node)?;
+					return self.collection_of_items(filtered, repr, node);
+				}
+				// `some`: one set flag; `every`: no clear one
+				let found = self.alloca(Repr::Bool, "found")?;
+				let every = operation == "every";
+				let bool_type = self.context.bool_type();
+				self.builder
+					.build_store(found.pointer, bool_type.const_int(u64::from(every), false))?;
+				self.for_each_index(length, |this, index| {
+					let flag = flag_at(this, index)?;
+					let current = this.load(found)?.int();
+					let next = if every {
+						this.builder.build_and(current, flag, "")?
+					} else {
+						this.builder.build_or(current, flag, "")?
+					};
+					this.builder.build_store(found.pointer, next)?;
+					Ok(())
+				})?;
+				let found = self.load(found)?;
+				Ok(found)
+			}
+			("reduce", [callback, initial]) => {
+				let repr = self.node_repr(node)?;
+				let callback_node = arguments[0];
+				// chunks of items, each folded on a thread from its first item
+				let chunks = i64.const_int(256, false);
+				let fewer =
+					self.builder
+						.build_int_compare(IntPredicate::SLT, length, chunks, "")?;
+				let chunks = self
+					.builder
+					.build_select(fewer, length, chunks, "chunks")?
+					.into_int_value();
+				let partials = self.zeroed_array(repr, chunks)?;
+				let partials_value =
+					self.fresh(Val::new(Repr::Array(self.type_of(node)), partials));
+				let closure = callback.value.expect("a function");
+				let closure_repr = callback.repr;
+				self.parallel_each(
+					chunks,
+					&[
+						closure,
+						array.into(),
+						partials.into(),
+						length.into(),
+						chunks.into(),
+					],
+					|this, env, chunk| {
+						let callback = Val::new(closure_repr, env[0]);
+						let array = env[1].into_pointer_value();
+						let partials = env[2].into_pointer_value();
+						let length = env[3].into_int_value();
+						let chunks = env[4].into_int_value();
+						let i64 = this.context.i64_type();
+						// items [chunk × length / chunks, (chunk + 1) × length / chunks)
+						let first = this.builder.build_int_mul(chunk, length, "")?;
+						let first = this.builder.build_int_signed_div(first, chunks, "")?;
+						let after =
+							this.builder
+								.build_int_add(chunk, i64.const_int(1, false), "")?;
+						let end = this.builder.build_int_mul(after, length, "")?;
+						let end = this.builder.build_int_signed_div(end, chunks, "")?;
+						let accumulator = this.alloca(repr, "partial")?;
+						let start = this.load(this.array_item_slot(array, item, first)?)?;
+						let start = this.owned_as(start, repr, None)?;
+						this.store(accumulator, start, node)?;
+						let rest = this.builder.build_int_sub(end, first, "")?;
+						let rest = this
+							.builder
+							.build_int_sub(rest, i64.const_int(1, false), "")?;
+						this.for_each_index(rest, |this, offset| {
+							let index = this.builder.build_int_add(first, offset, "")?;
+							let index =
+								this.builder
+									.build_int_add(index, i64.const_int(1, false), "")?;
+							let slot = this.array_item_slot(array, item, index)?;
+							let current = this.load(accumulator)?;
+							let index_value = Val::new(Repr::Int(IntRepr::I64), index);
+							let next = this.call_collection_callback(
+								callback,
+								callback_node,
+								&[current],
+								&[slot],
+								&[index_value],
+							)?;
+							let next = this.owned_as(next, repr, None)?;
+							this.emit_drop(current)?;
+							this.store(accumulator, next, node)?;
+							Ok(())
+						})?;
+						let partial = this.load(accumulator)?;
+						let target = this.array_item_slot(partials, repr, chunk)?;
+						if let Some(raw) = partial.value {
+							this.builder.build_store(target.pointer, raw)?;
+						}
+						Ok(())
+					},
+				)?;
+				// the partial results, in order, from the initial value
+				let combined = self.array_method_more(
+					node,
+					"Array#reduce",
+					partials_value,
+					&[*callback, *initial],
+					&arguments,
+				)?;
+				Ok(combined)
+			}
+			("sum", []) => self.array_method_more(node, "Array#sum", view, &[], &[]),
+			_ => Err(self.unsupported(node.index(), &format!("`{operation}` of a parallel view"))),
+		}
+	}
+
+	/// A collection of copies of the items of an array (dropped with the
+	/// statement): the array itself when it is of that kind.
+	fn collection_of_items(
+		&mut self,
+		array: Val<'ctx>,
+		repr: Repr,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		if repr == array.repr {
+			return Ok(array);
+		}
+		let (pointer, item) = self.array_of(array, node)?;
+		let (_, length) = self.array_parts(pointer)?;
+		match repr {
+			Repr::Pool(_) | Repr::Columnar(_) => {
+				let element = self.pool_element(repr, node)?;
+				let place = self.pool_place(repr, node)?;
+				let pool = self.collection_new(&self.builder, repr, element)?;
+				let add = self.runtime.function("fa_pool_add_slot")?;
+				self.for_each_item_value(pointer, item, length, |this, value| {
+					let copy = this.emit_copy(value)?;
+					let copy = this.convert(copy, element, node.index())?;
+					let slot = this.call_value(add, &[pool.into()])?.into_pointer_value();
+					this.element_write(&this.builder, place, slot, copy.value.expect("an element"))
+				})?;
+				Ok(self.fresh(Val::new(repr, pool)))
+			}
+			Repr::Set(_) => {
+				let table = self.table_of(repr)?;
+				let set = self.table_new(table, length)?;
+				self.for_each_item_value(pointer, item, length, |this, value| {
+					let copy = this.emit_copy(value)?;
+					let copy = this.convert(copy, table.key, node.index())?;
+					this.table_insert(set, table, copy, None, node)?;
+					Ok(())
+				})?;
+				Ok(self.fresh(Val::new(repr, set)))
+			}
+			_ => self.convert(array, repr, node.index()),
+		}
+	}
+
+	/// An array of `length` items set to zero (a value whose drop does
+	/// nothing until it is written).
+	fn zeroed_array(
+		&mut self,
+		item: Repr,
+		length: IntValue<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let array = self.new_array(item, length, length)?;
+		let (items, _) = self.array_parts(array)?;
+		let size = self.item_size(item)?;
+		let bytes = self.builder.build_int_mul(size, length, "")?;
+		self.builder
+			.build_memset(items, 8, self.context.i8_type().const_zero(), bytes)?;
+		Ok(array)
+	}
+
+	/// The results of a predicate on every item, computed in parallel: an
+	/// array of `Boolean`s.
+	fn parallel_flags(
+		&mut self,
+		array: PointerValue<'ctx>,
+		item: Repr,
+		length: IntValue<'ctx>,
+		callback: Val<'ctx>,
+		callback_node: NodeId,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let flags = self.zeroed_array(Repr::Bool, length)?;
+		self.fresh(Val::new(Repr::Array(TypeId::BOOLEAN), flags));
+		let closure = callback.value.expect("a function");
+		let closure_repr = callback.repr;
+		self.parallel_each(
+			length,
+			&[closure, array.into(), flags.into()],
+			|this, env, index| {
+				let callback = Val::new(closure_repr, env[0]);
+				let array = env[1].into_pointer_value();
+				let flags = env[2].into_pointer_value();
+				let slot = this.array_item_slot(array, item, index)?;
+				let index_value = Val::new(Repr::Int(IntRepr::I64), index);
+				let holds = this.call_collection_callback(
+					callback,
+					callback_node,
+					&[],
+					&[slot],
+					&[index_value],
+				)?;
+				let holds = this.convert(holds, Repr::Bool, callback_node.index())?;
+				let target = this.array_item_slot(flags, Repr::Bool, index)?;
+				this.builder
+					.build_store(target.pointer, holds.value.expect("a flag"))?;
+				Ok(())
+			},
+		)?;
+		Ok(flags)
+	}
+
+	/// Runs `body` for every index in `0..count` on the threads of
+	/// `fa_parallel_for` (in order on one thread without threads): an
+	/// outlined function reading `values` from an environment, whose errors
+	/// are raised here (the one of the smallest failing index).
+	fn parallel_each(
+		&mut self,
+		count: IntValue<'ctx>,
+		values: &[BasicValueEnum<'ctx>],
+		mut body: impl FnMut(&mut Self, &[BasicValueEnum<'ctx>], IntValue<'ctx>) -> Result<(), Error>,
+	) -> Result<(), Error> {
+		let i64 = self.context.i64_type();
+		let pointer = self.pointer_type();
+		let fields: Vec<BasicTypeEnum<'ctx>> =
+			values.iter().map(|value| value.get_type()).collect();
+		let structure = self.context.struct_type(&fields, false);
+		let environment = self.alloca_type(structure.into(), "parallel")?;
+		for (index, value) in values.iter().enumerate() {
+			let field = self
+				.builder
+				.build_struct_gep(structure, environment, index as u32, "")?;
+			self.builder.build_store(field, *value)?;
+		}
+		let function_type = pointer.fn_type(
+			&[pointer.into(), i64.into(), i64.into(), pointer.into()],
+			false,
+		);
+		let function = self.module.add_function(
+			"fa.parallel.operation",
+			function_type,
+			Some(Linkage::Internal),
+		);
+		self.runtime.add_attributes(function, &["nounwind"]);
+		let resume = self.builder.get_insert_block().expect("a block");
+		let outer_frame = self.frame.take();
+		let owner = outer_frame.as_ref().and_then(|frame| frame.owner);
+		let saved_slots = self.slots.clone();
+		let saved_provided = self.provided.clone();
+		let saved_owned = std::mem::take(&mut self.owned_locals);
+		self.begin_function(function, Repr::Void, owner);
+		self.frame_mut().throws = true;
+		let result = self.parallel_each_body(function, structure, &fields, &mut body);
+		self.cleanups.borrow_mut().clear();
+		let ended = self.end_function();
+		self.frame = outer_frame;
+		self.slots = saved_slots;
+		self.provided = saved_provided;
+		self.owned_locals = saved_owned;
+		self.builder.position_at_end(resume);
+		result?;
+		ended?;
+		let function_pointer = function.as_global_value().as_pointer_value();
+		let error = if self.target == Target::Native {
+			let drop_error = self
+				.box_drop_function()
+				.as_global_value()
+				.as_pointer_value();
+			self.call_value(
+				self.runtime.function("fa_parallel_for")?,
+				&[
+					count.into(),
+					function_pointer.into(),
+					environment.into(),
+					i64.const_zero().into(),
+					drop_error.into(),
+				],
+			)?
+			.into_pointer_value()
+		} else {
+			// no threads: the iterations in order
+			let failed = self.alloca(Repr::Int(IntRepr::I64), "failed")?;
+			self.builder
+				.build_call(
+					function,
+					&[
+						environment.into(),
+						i64.const_zero().into(),
+						count.into(),
+						failed.pointer.into(),
+					],
+					"",
+				)?
+				.try_as_basic_value()
+				.basic()
+				.expect("an error")
+				.into_pointer_value()
+		};
+		self.raise_if_error(error)
+	}
+
+	/// The body of the function of `parallel_each`: the iterations of its range.
+	fn parallel_each_body(
+		&mut self,
+		function: FunctionValue<'ctx>,
+		structure: inkwell::types::StructType<'ctx>,
+		fields: &[BasicTypeEnum<'ctx>],
+		body: &mut impl FnMut(&mut Self, &[BasicValueEnum<'ctx>], IntValue<'ctx>) -> Result<(), Error>,
+	) -> Result<(), Error> {
+		let i64 = self.context.i64_type();
+		let pointer = self.pointer_type();
+		let environment = function
+			.get_nth_param(0)
+			.expect("an environment")
+			.into_pointer_value();
+		let start = function.get_nth_param(1).expect("a start").into_int_value();
+		let end = function.get_nth_param(2).expect("an end").into_int_value();
+		let failed = function
+			.get_nth_param(3)
+			.expect("a failed index")
+			.into_pointer_value();
+		let mut values = Vec::with_capacity(fields.len());
+		for (index, field_type) in fields.iter().enumerate() {
+			let field = self
+				.builder
+				.build_struct_gep(structure, environment, index as u32, "")?;
+			values.push(self.builder.build_load(*field_type, field, "")?);
+		}
+		let counter = self.alloca(Repr::Int(IntRepr::I64), "iteration")?;
+		self.builder.build_store(counter.pointer, start)?;
+		let test = self.append_block("parallel_test");
+		let body_block = self.append_block("parallel_body");
+		let exit = self.append_block("parallel_end");
+		self.builder.build_unconditional_branch(test)?;
+		self.builder.position_at_end(test);
+		let position = self.load(counter)?.int();
+		let more = self
+			.builder
+			.build_int_compare(IntPredicate::SLT, position, end, "")?;
+		self.builder
+			.build_conditional_branch(more, body_block, exit)?;
+		self.builder.position_at_end(body_block);
+		// an error of this iteration reports its index
+		self.builder.build_store(failed, position)?;
+		let mark = self.mark();
+		body(self, &values, position)?;
+		self.end_scope(mark, None)?;
+		let position = self.load(counter)?.int();
+		let next = self
+			.builder
+			.build_int_nsw_add(position, i64.const_int(1, false), "")?;
+		self.builder.build_store(counter.pointer, next)?;
+		self.builder.build_unconditional_branch(test)?;
+		self.builder.position_at_end(exit);
+		self.builder.build_return(Some(&pointer.const_null()))?;
+		Ok(())
+	}
 }

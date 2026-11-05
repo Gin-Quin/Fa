@@ -50,6 +50,9 @@ pub(crate) struct ParallelFrame {
 	pub indexed: Vec<SymbolId>,
 	/// Whether the elements are written through the loop variable.
 	pub through_variable: bool,
+	/// A callback of an operation of a parallel view (a lambda): its
+	/// `return` is its own.
+	pub callback: bool,
 }
 
 impl Walker<'_> {
@@ -563,6 +566,7 @@ impl Walker<'_> {
 			function_depth: self.body.functions.len(),
 			indexed: Vec::new(),
 			through_variable: false,
+			callback: false,
 		});
 	}
 
@@ -814,6 +818,10 @@ impl Walker<'_> {
 		else {
 			return false;
 		};
+		// a callback of a parallel view returns from itself
+		if frame.callback {
+			return false;
+		}
 		// a `break` of a loop inside the body is fine
 		if keyword == "break"
 			&& self
@@ -858,6 +866,158 @@ impl Walker<'_> {
 				self.display(ty)
 			);
 			let diagnostic = self.diagnostic(&CONC005, iterable, message);
+			self.report(diagnostic);
+		}
+	}
+
+	// ── parallel views ───────────────────────────────────────────────────
+
+	/// `collection.parallel()`: a view of the collection whose next
+	/// operation runs in parallel (concurrency.md, "1. Parallel loops"): the
+	/// collection's own type, on `native` only (`CONC001`); a map isn't
+	/// supported yet.
+	pub(super) fn parallel_view_member(
+		&mut self,
+		member: NodeId,
+		receiver: TypeId,
+		kind: CollKind,
+	) -> Option<(TypeId, super::objects::MemberKind)> {
+		self.a.reads_target = true;
+		let target = self.s.target().to_string();
+		if target != "native" && self.reported_once.insert((member, CONC001.id)) {
+			let message = format!(
+				"`parallel()` is only available on `native`, not on `{target}`: branch with `@if target is \"native\"`, or call the operation on the collection itself"
+			);
+			let diagnostic = self.diagnostic(&CONC001, member, message);
+			self.report(diagnostic);
+		}
+		if matches!(
+			kind,
+			CollKind::Map | CollKind::GrowingMap | CollKind::RelationPool(_)
+		) {
+			let message = format!(
+				"`parallel()` of a `{}` is not supported yet by the analyzer: run the operation on `.values()`, or on the collection itself",
+				kind.name()
+			);
+			let diagnostic =
+				self.diagnostic(&crate::diagnostics::codes::analyzer::AN001, member, message);
+			self.report(diagnostic);
+			return None;
+		}
+		let builtin = builtins::by_path("Collection#parallel")?;
+		self.set_resolution(member, Resolution::Builtin(builtin));
+		self.parallel_views.push((member, false));
+		let ty = self.method(&[], receiver);
+		Some((ty, super::objects::MemberKind::Builtin))
+	}
+
+	/// A call `view.op(…)` whose target is `collection.parallel()`: the
+	/// operation must be one a parallel view has, and the lambdas given to
+	/// it follow the rules of a parallel body. Called before the arguments
+	/// are checked.
+	pub(super) fn parallel_operation(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		arguments: NodeList<'_>,
+	) {
+		let View::Access { target, members } = self.view(self.strip_groups(callee)) else {
+			return;
+		};
+		let View::Call { callee: inner, .. } = self.view(self.strip_groups(target)) else {
+			return;
+		};
+		let View::Access {
+			members: inner_members,
+			..
+		} = self.view(self.strip_groups(inner))
+		else {
+			return;
+		};
+		let Some(view_member) = inner_members.last() else {
+			return;
+		};
+		let Some(position) = self
+			.parallel_views
+			.iter()
+			.position(|&(member, _)| member == view_member)
+		else {
+			return;
+		};
+		let Some(op_member) = members.last() else {
+			return;
+		};
+		self.parallel_views[position].1 = true;
+		let operation = match self.view(op_member) {
+			View::Name(name) => self.tree.name(name).to_string(),
+			_ => String::new(),
+		};
+		let Some(operation) = ["map", "filter", "reduce", "some", "every", "sum"]
+			.into_iter()
+			.find(|known| *known == operation)
+		else {
+			let message = format!(
+				"a parallel view has `map`, `filter`, `reduce`, `some`, `every` and `sum`, not `{operation}`: call it on the collection itself"
+			);
+			let diagnostic = self.diagnostic(&CONC001, op_member, message);
+			self.report(diagnostic);
+			return;
+		};
+		self.a.parallel_operations.insert(n, operation);
+		for argument in arguments.iter() {
+			let value = self.strip_groups(argument);
+			if matches!(self.view(value), View::Lambda { .. }) {
+				self.parallel_callbacks.insert(value);
+			}
+		}
+	}
+
+	/// `reduce` of a parallel view groups the items in any way: its
+	/// function combines two items (the accumulator is of the items' type).
+	pub(super) fn check_parallel_reduce(&mut self, n: NodeId, callee: NodeId, result: TypeId) {
+		if self.a.parallel_operations.get(&n) != Some(&"reduce") {
+			return;
+		}
+		let View::Access { target, .. } = self.view(self.strip_groups(callee)) else {
+			return;
+		};
+		let receiver = self.type_of(target);
+		let TypeKind::Collection(_, item, _) = self.s.types.kind(receiver) else {
+			return;
+		};
+		if self.s.types.is_recovering(result) || self.s.types.is_recovering(item) {
+			return;
+		}
+		let fits = self
+			.s
+			.types
+			.assignable(item, result, crate::types::relate::Mode::Copy)
+			.is_ok();
+		if !fits {
+			let message = format!(
+				"`reduce` of a parallel view combines the items in any grouping: its accumulator must be of their type (`{}`), not `{}`; `map` them first",
+				self.display(item),
+				self.display(result)
+			);
+			let diagnostic = self.diagnostic(&E_TYPE_1, n, message);
+			self.report(diagnostic);
+		}
+	}
+
+	/// The `parallel()` views no operation follows (at the end of the file).
+	pub(super) fn check_parallel_views(&mut self) {
+		let unused: Vec<NodeId> = self
+			.parallel_views
+			.iter()
+			.filter(|(_, used)| !used)
+			.map(|(member, _)| *member)
+			.collect();
+		for member in unused {
+			let diagnostic = self.diagnostic(
+				&CONC001,
+				member,
+				"`parallel()` gives a view for one operation: call `map`, `filter`, `reduce`, `some`, `every` or `sum` on it at once, ex: `numbers.parallel().map((n) => n * 2)`",
+			);
 			self.report(diagnostic);
 		}
 	}

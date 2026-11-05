@@ -1,0 +1,33 @@
+-- docs: concurrency.md, "1. Parallel loops": `parallel()` gives a view whose next operation (`map`, `filter`, `reduce`, `some`, `every`, `sum`) runs in parallel; its callbacks follow the rules of a parallel body; `reduce` combines items in any grouping
+-- analysis-target: native
+use { AtomicInteger } = std.concurrency
+
+let numbers = [1, -2, 3, 4]
+mutable total = 0
+mutable calls = AtomicInteger { value = 0 }
+
+let doubled = numbers.parallel().map((number) => {
+	calls.add(1)
+	let twice = number * 2
+	if twice > 100 {
+		return 100
+	}
+	twice
+})
+let positive = numbers.parallel().filter((number) => number > 0).sum()
+let sum = numbers.parallel().reduce((a, b) => a + b, 0)
+let words: Set<String> = ["a", "bb"]
+let lengths = words.parallel().map((word) => word.length)
+
+-- a callback writes only its own values
+let counted = numbers.parallel().map((number) => {
+	total += number -- error CONC002
+	number
+})
+-- the accumulator of a parallel `reduce` is of the items' type
+let text = numbers.parallel().reduce((joined, number) => "{joined}{number}", "") -- error E-TYPE-1
+-- a view is for one operation at once
+let view = numbers.parallel() -- error CONC001
+let first = numbers.parallel().find((number) => number > 0) -- error CONC001
+mutable scores: Map<String, Integer> = [("a", 1)]
+let values = scores.parallel().map((name, score) => score) -- error AN001

@@ -546,7 +546,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		path: &str,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
+		// `numbers.parallel().map(f)` (parallel.rs)
+		if let Some(operation) = self.analysis.parallel_operations.get(&node).copied() {
+			return self.parallel_operation(node, operation, info);
+		}
 		match path {
+			// `collection.parallel()`: the collection, which the operation reads
+			"Collection#parallel" => self.receiver(node),
 			// tasks (tasks.rs)
 			"Task.yield" | "Task.all" | "Task.any" | "Task.settled" | "Task#cancel"
 			| "std.time.sleep" => self.task_builtin(node, path, info),

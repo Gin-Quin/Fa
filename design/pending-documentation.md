@@ -50,3 +50,7 @@ Replace "`destroy` is called for a local at the end of its block when nothing mo
 ## `documentation/advanced/concurrency.md`, the table of targets and the `:::implementation` section (JavaScript)
 
 Table row "`Mutex`, atomics shared with a worker": make it "`Mutex`, atomics, channels shared with a worker" (JavaScript: with `SharedArrayBuffer`, flat values only; on the web, the page must be cross-origin isolated, else giving one to a worker stops the program with the headers to send: `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`). In the implementation section, replace "A `Channel` crossing a worker boundary becomes a `MessagePort`" by: a `Channel` given to a worker moves its queue into a `SharedArrayBuffer` (JSON text behind a lock word; a waiting task uses `Atomics.waitAsync` on a version word, a worker's blocking wait `Atomics.wait`), like a `Mutex`.
+
+## `documentation/advanced/concurrency.md`, "1. Parallel loops" (the paragraph on `parallel()`)
+
+Make precise: `parallel()` gives a view for one operation, called at once on it: `map`, `filter`, `reduce`, `some`, `every` or `sum` (`let view = numbers.parallel()` alone is an error). `filter` keeps the collection's kind. The function of `reduce` combines two items (its accumulator is of the items' type), since the items are grouped in any way. `parallel()` of a `Map` is not available yet.

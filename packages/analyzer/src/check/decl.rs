@@ -30,6 +30,8 @@ impl Walker<'_> {
 		// the ones not hoisted in order, then the hoisted ones not analyzed yet (modules.rs)
 		self.walk_declarations(statements);
 		self.body.scope = saved;
+		// a `parallel()` that no operation follows (concurrency.rs)
+		self.check_parallel_views();
 		// what the backends may keep in the frames (locals.rs)
 		self.record_non_escaping();
 		TypeId::VOID

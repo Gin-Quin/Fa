@@ -1,0 +1,6 @@
+function f = (x: Integer): String => when x is {
+	0..=10 => "small"
+	5 => "five"
+	else => "big"
+}
+console.log(f(3))

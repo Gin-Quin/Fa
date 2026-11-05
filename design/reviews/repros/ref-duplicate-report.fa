@@ -1,0 +1,11 @@
+function run = () => {
+	mutable numbers: Array<Integer> = [1, 2, 3]
+	mutable iterator = numbers.values()
+	numbers.push(4)
+	console.log(iterator.next())
+	mutable second = numbers.values()
+	function grow = () => numbers.push(5)
+	grow()
+	console.log(second.next())
+}
+run()

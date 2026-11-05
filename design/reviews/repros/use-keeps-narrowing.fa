@@ -1,0 +1,7 @@
+type Box = { value: String? }
+mutable box = Box { value = "hi" }
+if box.value is not none {
+	use v = box.value
+	box.value = none
+	console.log(v.length)
+}

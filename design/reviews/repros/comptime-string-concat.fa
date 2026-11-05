@@ -1,0 +1,2 @@
+function f = (): String => "a" + "b"
+static value = @f()

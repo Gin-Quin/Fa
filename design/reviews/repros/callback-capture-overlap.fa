@@ -1,0 +1,9 @@
+type Person = { name: String, age: Integer }
+function run = () => {
+	mutable people: Pool<Person> = []
+	use ana = people.add(Person { name = "Ana", age = 31 })
+	function younger = (person: Person) => person.age < ana.age
+	people.deleteWhere(younger)
+	people.deleteWhere((person) => person.age < ana.age)
+}
+run()

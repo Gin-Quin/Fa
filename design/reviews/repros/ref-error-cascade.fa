@@ -1,0 +1,11 @@
+type Person = { name: String }
+function run = (leaving: Boolean) => {
+	mutable people: Pool<Person> = []
+	use ana = people.add(Person { name = "Ana" })
+	if leaving {
+		people.delete(ana)
+	}
+	console.log(ana.name)
+	console.log(ana.name)
+}
+run(true)

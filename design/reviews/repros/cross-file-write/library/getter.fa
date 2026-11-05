@@ -1,0 +1,4 @@
+export function = (): Integer => {
+	counter = 5
+	1
+}

@@ -688,6 +688,7 @@ impl Walker<'_> {
 		if parts.incomplete {
 			return TypeId::UNKNOWN;
 		}
+		let names: Vec<crate::ids::Sym> = parts.fields.iter().map(|field| field.name).collect();
 		let entries: Vec<crate::types::FieldEntry> = parts
 			.fields
 			.iter()
@@ -697,7 +698,10 @@ impl Walker<'_> {
 				flags: field.flags,
 			})
 			.collect();
-		self.s.types.object(&entries, None)
+		let ty = self.s.types.object(&entries, None);
+		// the order `Keys<T>` lists them in (fields.rs)
+		self.record_field_order(ty, names);
+		ty
 	}
 
 	/// `Shape.Circle`, `Color.red`: a member of a named union or of an

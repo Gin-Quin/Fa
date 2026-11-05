@@ -107,7 +107,7 @@ impl Walker<'_> {
 	}
 
 	/// `Keys<T>`, `DeepKeys<T>`: the key set of an object type.
-	fn keys_type(&mut self, n: NodeId, subject: TypeId, deep: bool) -> TypeId {
+	pub(super) fn keys_type(&mut self, n: NodeId, subject: TypeId, deep: bool) -> TypeId {
 		let object = self.s.types.unfold(subject);
 		if !matches!(self.s.types.kind(object), TypeKind::Object(_)) {
 			let name = if deep { "DeepKeys" } else { "Keys" };
@@ -123,7 +123,8 @@ impl Walker<'_> {
 	}
 
 	fn key_set_of(&mut self, object: TypeId, deep: bool, depth: u32) -> TypeId {
-		let fields = self.s.types.fields_of(object).to_vec();
+		// in declaration order (fields.rs)
+		let fields = self.ordered_fields(object);
 		let mut keys = Vec::with_capacity(fields.len());
 		for field in fields {
 			if field

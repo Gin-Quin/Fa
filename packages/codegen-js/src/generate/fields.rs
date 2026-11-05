@@ -4,12 +4,18 @@
 //! key set) as a compile-time value; the operations are bit operations:
 //! `+` is `|`, `-` is `& ~`, `x is in s` is `(s & x) === x`. A 32-flag set
 //! has its bit 31: the result of a bit operation goes through `>>> 0`.
+//!
+//! A key-set compile-time parameter (`keys: DeepKeys<Value>`) is a hidden
+//! parameter holding the array of the dotted paths of its keys; an `@for`
+//! over it is a `for…of` loop, and `value[key]` reads the field at the
+//! path (`faFieldAt`), printed from its representation like any value of
+//! a type parameter.
 
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::syntax::ArithOp;
 use fa_analyzer::types::TypeKind;
 
-use crate::generate::Generator;
+use crate::generate::{Dest, Generator, LoopCx};
 use crate::js::{self, Expr, Prec};
 
 impl Generator<'_> {
@@ -112,5 +118,58 @@ impl Generator<'_> {
 		let names = self.fields_names(ty);
 		let helper = self.helper("faFormatFields");
 		format!("(value) => {helper}(value, {names})")
+	}
+
+	/// The array of the dotted paths of the keys of a key set bound to a
+	/// key-set parameter (`Tuple(Fields type, bits)`). `None` for another type.
+	pub(crate) fn key_set_paths(&mut self, ty: TypeId) -> Option<String> {
+		let TypeKind::Tuple(list) = self.types.kind(ty) else {
+			return None;
+		};
+		let [fields, bits] = self.types.list_items(list) else {
+			return None;
+		};
+		let (fields, bits) = (*fields, *bits);
+		if !self.is_fields(fields) {
+			return None;
+		}
+		let bits = self.types.as_int(bits).and_then(|int| int.literal())?;
+		let paths: Vec<String> = self
+			.types
+			.fields_leaves(fields)
+			.iter()
+			.enumerate()
+			.filter(|(index, _)| (bits >> *index as u32) & ethnum::I256::ONE == ethnum::I256::ONE)
+			.map(|(_, path)| js::string_literal(path))
+			.collect();
+		Some(self.constant("keys", format!("Object.freeze([{}])", paths.join(", "))))
+	}
+
+	/// `@for key in keys` over a key-set parameter: a `for…of` loop over the
+	/// paths of its keys.
+	pub(crate) fn key_loop(&mut self, pattern: Option<NodeId>, iterable: NodeId, body: NodeId) {
+		let keys = self.expr(iterable);
+		self.push_scope();
+		let variable =
+			match pattern.and_then(|pattern| self.analysis.symbols.symbol_of_decl(pattern)) {
+				Some(symbol) => self.declare(symbol),
+				None => self.temp(),
+			};
+		self.out
+			.open(format!("for (const {variable} of {})", keys.text));
+		self.fcx.loops.push(LoopCx {
+			dest: Dest::Discard,
+		});
+		self.block_into(body, Dest::Discard);
+		self.fcx.loops.pop();
+		self.out.close("");
+		self.pop_scope();
+	}
+
+	/// `value[key]`, `key` the dotted path of a key: the field at that path.
+	pub(crate) fn key_read(&mut self, target: NodeId, index: NodeId) -> Expr {
+		let values = self.in_order(&[target, index], |g, node| g.expr(node));
+		let helper = self.helper("faFieldAt");
+		js::call(helper, &[values[0].text.clone(), values[1].text.clone()])
 	}
 }

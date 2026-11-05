@@ -647,6 +647,10 @@ impl Walker<'_> {
 		// `@for`: its items are evaluated, then it is checked as a loop (comptime.rs)
 		if compile_time {
 			self.check_module_for_body(body);
+			// over a key set (fields.rs)
+			if let Some(ty) = self.check_key_loop(n, pattern, index, iterable, body) {
+				return ty;
+			}
 			self.evaluate_comptime_for(n, iterable);
 			// its body read its variable at compile time: once per item
 			if let Some(ty) = self.check_comptime_for_per_item(n, pattern, index, iterable, body) {
@@ -760,7 +764,7 @@ impl Walker<'_> {
 
 	/// `for item, index in collection { … }` (written by E1): the variable
 	/// holds the items (read-only until M2), the index an `Integer(min = 0)`.
-	fn check_for_items(
+	pub(super) fn check_for_items(
 		&mut self,
 		n: NodeId,
 		pattern: Option<NodeId>,

@@ -8,9 +8,11 @@
 
 use ethnum::I256;
 use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::{ArithOp, NodeList, View};
 use fa_analyzer::types::TypeKind;
 use fa_analyzer::types::store::fields_mask;
+use fa_interpreter::Value;
 use inkwell::IntPredicate;
 use inkwell::values::IntValue;
 
@@ -307,5 +309,135 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let close = self.string_constant(" }");
 		self.append_value(close, node)
+	}
+
+	/// The `Fields` type and the bits of a key set bound to a key-set
+	/// parameter (`Tuple(Fields type, bits)`).
+	pub(crate) fn key_set_bits(&self, literal: TypeId) -> Option<(TypeId, I256)> {
+		let types = self.types();
+		let TypeKind::Tuple(list) = types.kind(literal) else {
+			return None;
+		};
+		let [fields, bits] = types.list_items(list) else {
+			return None;
+		};
+		if !self.is_fields(*fields) {
+			return None;
+		}
+		let bits = types.as_int(*bits).and_then(|int| int.literal())?;
+		Some((*fields, bits))
+	}
+
+	/// The keys of the key-set parameter an `@for` goes through, in the
+	/// instance being lowered: the dotted paths of the keys of its binding.
+	pub(crate) fn key_set_items(&self, iterable: NodeId) -> Option<Vec<Value>> {
+		let Resolution::Local(symbol) = self.analysis.resolution(iterable) else {
+			return None;
+		};
+		let literal = self.value_bindings.borrow().get(&symbol).copied()?;
+		let (fields, bits) = self.key_set_bits(literal)?;
+		Some(
+			self.types()
+				.fields_leaves(fields)
+				.iter()
+				.enumerate()
+				.filter(|(index, _)| (bits >> *index as u32) & I256::ONE == I256::ONE)
+				.map(|(_, path)| Value::string(path))
+				.collect(),
+		)
+	}
+
+	/// `value[key]`, `key` the variable of an `@for` over a key set: the
+	/// field of `value` at the key's path, a view of it. The read's type
+	/// parameter stands for the field's type while the key is lowered.
+	pub(crate) fn key_read(
+		&mut self,
+		node: NodeId,
+		target: NodeId,
+		index: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let key = match self.analysis.resolution(index) {
+			Resolution::Local(symbol) => self.current_keys.get(&symbol).cloned(),
+			_ => None,
+		};
+		let Some(key) = key else {
+			return Err(self.unsupported(node.index(), "this key of a key set"));
+		};
+		let mut value = self.expr(target)?;
+		if value.repr == Repr::Never {
+			return Ok(value);
+		}
+		let mut ty = self.concrete_type(self.type_of(target));
+		for name in key.split('.') {
+			if let Repr::Rec(rec) = value.repr {
+				value = self.unfold_rec(value, rec, node.index())?;
+			}
+			let Repr::Object(object) = value.repr else {
+				return Err(self.unsupported(node.index(), "this key of a key set"));
+			};
+			let types = self.types();
+			let position = types
+				.fields_of(object)
+				.iter()
+				.position(|field| types.syms.resolve(field.name) == name);
+			let Some(position) = position else {
+				return Err(self.unsupported(node.index(), "this key of a key set"));
+			};
+			ty = types.fields_of(object)[position].ty;
+			let repr = self.field_repr(object, position, node.index())?;
+			let structure = value.value.expect("an object").into_struct_value();
+			let raw = self
+				.builder
+				.build_extract_value(structure, position as u32, "")?;
+			value = Val::new(repr, raw);
+		}
+		if let Some(&param) = self.analysis.key_reads.get(&node) {
+			self.bindings.borrow_mut().insert(param, value.repr);
+			self.instance_types
+				.borrow_mut()
+				.insert((param, value.repr), ty);
+		}
+		Ok(value)
+	}
+
+	/// Binds the type parameter of each read of a field at the key `key`
+	/// (the variable `variable`) in `body` to the field's type, before the
+	/// body is lowered for that key.
+	pub(crate) fn bind_key_reads(
+		&mut self,
+		body: NodeId,
+		variable: fa_analyzer::ids::SymbolId,
+		key: &str,
+	) -> Result<(), Error> {
+		let mut stack = vec![body];
+		while let Some(node) = stack.pop() {
+			stack.extend(fa_analyzer::syntax::children(self.tree, node));
+			let Some(&param) = self.analysis.key_reads.get(&node) else {
+				continue;
+			};
+			let View::Index { target, index } = self.view(node) else {
+				continue;
+			};
+			if self.analysis.resolution(index) != Resolution::Local(variable) {
+				continue;
+			}
+			let mut ty = self.concrete_type(self.type_of(target));
+			for name in key.split('.') {
+				let types = self.types();
+				let object = types.unfold(ty);
+				let Some(field) = types
+					.fields_of(object)
+					.iter()
+					.find(|field| types.syms.resolve(field.name) == name)
+				else {
+					return Err(self.unsupported(node.index(), "this key of a key set"));
+				};
+				ty = field.ty;
+			}
+			let repr = self.repr_of(ty, node.index())?;
+			self.bindings.borrow_mut().insert(param, repr);
+			self.instance_types.borrow_mut().insert((param, repr), ty);
+		}
+		Ok(())
 	}
 }

@@ -395,8 +395,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		iterable: NodeId,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		let Some(items) = self.analysis.unrolled.get(&node).cloned() else {
-			return self.for_loop(node, pattern, has_index, iterable, body);
+		let key_loop = self.analysis.key_loops.contains(&node);
+		let items = match self.analysis.unrolled.get(&node).cloned() {
+			Some(items) => items,
+			// over a key-set parameter: the keys of its binding (fields.rs)
+			None => match key_loop.then(|| self.key_set_items(iterable)).flatten() {
+				Some(items) => items,
+				None => return self.for_loop(node, pattern, has_index, iterable, body),
+			},
 		};
 		let variable = pattern.and_then(|pattern| self.analysis.symbols.symbol_of_decl(pattern));
 		let index = if has_index {
@@ -424,6 +430,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.item_results.push(per_item);
 			}
 			let mark = self.mark();
+			if key_loop
+				&& let Some(symbol) = variable
+				&& let Some(key) = item.as_str()
+			{
+				self.current_keys.insert(symbol, key.to_string());
+				self.bind_key_reads(body, symbol, key)?;
+			}
 			if let Some(symbol) = variable {
 				let ty = self.analysis.symbols.symbol(symbol).ty;
 				let value = self.constant_value(item, ty, node)?;

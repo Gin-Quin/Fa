@@ -72,6 +72,8 @@ impl Walker<'_> {
 			let sym = w.s.types.syms.intern(text);
 			if let Some(symbol) = w.a.symbols.lookup(w.body.scope, sym) {
 				w.set_resolution(n, Resolution::Local(symbol));
+				// a key-set parameter: the iterable of an `@for` (fields.rs)
+				w.check_key_set_read(n, symbol);
 				if w.a.symbols.symbol(symbol).kind == SymbolKind::Type {
 					return w.type_as_value(n, text);
 				}
@@ -302,6 +304,10 @@ impl Walker<'_> {
 
 	/// `items[index]` (M1b).
 	pub(super) fn check_index(&mut self, n: NodeId, target: NodeId, index: NodeId) -> TypeId {
+		// `value[key]` in an `@for` over a key set (fields.rs)
+		if let Some(ty) = self.check_key_read(n, target, index) {
+			return ty;
+		}
 		let target_ty = self.check(target, None);
 		if let Some(key) = self.map_key(target_ty) {
 			// `map[key]`: `KeyNotFound` unless the key is proven present (D32)

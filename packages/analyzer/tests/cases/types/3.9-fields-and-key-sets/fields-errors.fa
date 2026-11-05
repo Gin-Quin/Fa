@@ -1,0 +1,27 @@
+-- the errors of `Fields` types, field sets and key sets
+type Duplicated = Fields { read, write, read } -- error: TY090
+type EmptyGroup = Fields { read, nested {} } -- error: TY090
+type Permissions = Fields { read, write, admin }
+type Flags = Fields { a, b }
+
+let unknown = Permissions.delete -- error: TY092
+let mixed = Permissions.read + Flags.a -- error: E-TYPE-1
+let product = Permissions.read * Permissions.write -- error: E-TYPE-1
+let keySet: Permissions = { read, nested { a } } -- error: TY092
+
+type Settings = { port: Integer, host: String }
+let settings: Settings = { port = 1, host = "h" }
+static logged: Keys<Settings> = { port }
+@for key in logged {
+	console.log(key.length)
+	let other = { size = 2 }
+	console.log(other[key]) -- error: TF011
+}
+
+function show = <Value, keys: Keys<Value>>(value: Value) => {
+	console.log(keys) -- error: AN001
+	@for key in keys {
+		console.log(settings[key]) -- error: TF011
+	}
+}
+show<Settings, { port, size }>(settings) -- error: TF010

@@ -276,6 +276,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The compile-time results of the `@for` items being lowered,
 	/// innermost last (`Analysis::unrolled_items`, constants.rs).
 	item_results: Vec<fa_analyzer::analysis::ItemResults>,
+	/// The key each variable of an `@for` over a key set stands for, while
+	/// its body is lowered (fields.rs).
+	current_keys: FxHashMap<SymbolId, String>,
 	/// The cleanup stacks of the functions whose lowering is suspended.
 	saved_cleanups: Vec<Vec<ownership::Cleanup<'ctx>>>,
 	/// The locals of the function being lowered that own their value.
@@ -458,6 +461,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			overflow_checks: true,
 			cleanups: std::cell::RefCell::new(Vec::new()),
 			item_results: Vec::new(),
+			current_keys: FxHashMap::default(),
 			pending_receiver: None,
 			provided: FxHashMap::default(),
 			references: FxHashMap::default(),
@@ -2208,6 +2212,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			} => self.is_in(node, value, collection, negated),
 			View::Destructuring { .. } if self.is_name_alias(node) => Ok(Val::void()),
 			View::Destructuring { pattern, value, .. } => self.destructure(pattern, value),
+			// the field at a key of a key set (fields.rs)
+			View::Index { target, index } if self.analysis.key_reads.contains_key(&node) => {
+				self.key_read(node, target, index)
+			}
 			View::Index { target, index } => match self.index_special(node, target, index)? {
 				Some(value) => Ok(value),
 				None => self.index_read(node, target, index),

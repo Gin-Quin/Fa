@@ -29,6 +29,21 @@ export function faFieldsToStringArray(value, names) {
 	return flags;
 }
 
+// @fa-helper faFieldAt
+/**
+ * `value[key]` in an `@for` over a key set: the field at a dotted path.
+ * @param {any} value
+ * @param {string} path
+ * @returns {unknown}
+ */
+export function faFieldAt(value, path) {
+	let current = value;
+	for (const name of path.split(".")) {
+		current = current[name];
+	}
+	return current;
+}
+
 // @fa-helper faFormatFields deps: faFieldsToStringArray
 /**
  * Prints a set as a key set: `{ read, nested { a, b } }`, `{}` when empty.

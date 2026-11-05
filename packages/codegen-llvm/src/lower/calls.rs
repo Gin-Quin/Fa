@@ -889,6 +889,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			{
 				Some(argument)
 			}
+			// a key set: its `Fields` type and its bits (fields.rs)
+			TypeKind::Tuple(_) if self.key_set_bits(argument).is_some() => Some(argument),
 			_ => None,
 		}
 	}

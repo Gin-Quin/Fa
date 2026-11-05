@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use fa_parser::{SourceSpan, TypedSyntaxTree};
-use tower_lsp::lsp_types::{CompletionItemKind, Url};
+use tower_lsp::lsp_types::{CompletionItemKind, FileEvent, Url};
 
 /// How serious a diagnostic is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +115,25 @@ pub trait AnalysisBackend: Send + 'static {
 	/// packages it configures read their configuration and dependencies again. Return the
 	/// documents whose diagnostics may have changed.
 	fn saved(&mut self, _uri: &Url) -> Vec<Url> {
+		Vec::new()
+	}
+
+	/// Files changed on the disk outside the editor (`workspace/didChangeWatchedFiles`): the
+	/// ones that aren't open are read again or forgotten, and a configuration file reloads the
+	/// packages it configures. Return the documents whose diagnostics may have changed.
+	fn files_changed(&mut self, _changes: &[FileEvent]) -> Vec<Url> {
+		Vec::new()
+	}
+
+	/// Whether work runs in the background (a resolution of dependencies): the analysis thread
+	/// then calls `poll` regularly.
+	fn has_background_work(&self) -> bool {
+		false
+	}
+
+	/// Take the results of the background work that finished. Return the documents whose
+	/// diagnostics may have changed.
+	fn poll(&mut self) -> Vec<Url> {
 		Vec::new()
 	}
 }

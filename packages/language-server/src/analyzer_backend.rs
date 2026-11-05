@@ -8,7 +8,12 @@
 //! - **Initial load**: when the first document of a package opens, the
 //!   package is scanned, its dependencies resolved like the command line
 //!   does (`fa::editor_session`, the lockfile read, never written), and
-//!   every module analyzed in parallel, unit by unit. The open documents'
+//!   every module analyzed in parallel, unit by unit. The resolution first
+//!   runs without the network (`fa::offline_editor_session`: the lockfile
+//!   and the cache); when a source must be fetched, the package is analyzed
+//!   without its dependencies at once (its documents show their syntax
+//!   errors and a note only), the resolution runs on a thread of its own,
+//!   and the package is loaded again with its result (`poll`). The open documents'
 //!   units keep their session (trees, analyses) for the queries; the other
 //!   files keep only their interfaces (their trees are dropped). An error
 //!   of the resolution is, like for `fa check`, the only diagnostic of the
@@ -16,8 +21,14 @@
 //!   dependencies, for the queries); its warnings (`DEP004`) are shown on
 //!   `dependencies.fa`.
 //! - **Save** of a configuration file (`package.fa`, `dependencies.fa`,
-//!   `workspace.fa`, `dependencies.lock`): the packages below its folder are
-//!   loaded again (their dependencies resolved again).
+//!   `workspace.fa`, `dependencies.lock`), or its change on the disk: the
+//!   packages below its folder are loaded again (their dependencies
+//!   resolved again).
+//! - **Changes on the disk** of files that aren't open
+//!   (`workspace/didChangeWatchedFiles`): a changed file is read again (its
+//!   module analyzed again, with its readers), a file created or deleted
+//!   loads its package again; the standalone documents of the folders above
+//!   it are analyzed again. The open documents keep the editor's text.
 //! - **Edit, open**: the document's text replaces the disk's (an overlay of
 //!   the module system), and an incremental run analyzes its module again,
 //!   compares its interface hash, and analyzes the units that read it again
@@ -43,9 +54,12 @@
 //! size after the load.
 
 use std::collections::HashMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 use fa_analyzer::ide::CompletionKind;
 use fa_analyzer::ids::FileId;
@@ -54,7 +68,7 @@ use fa_analyzer::pipeline::{self, Report, UnitSink};
 use fa_analyzer::{CodebaseResolver, ModuleResolver, Session};
 use fa_parser::{SourceSpan, TypedSyntaxTree};
 use rustc_hash::FxHashSet;
-use tower_lsp::lsp_types::{CompletionItemKind, Url};
+use tower_lsp::lsp_types::{CompletionItemKind, FileChangeType, FileEvent, Url};
 
 use crate::backend::{
 	AnalysisBackend, CompletionInfo, DefinitionTarget, FileDiagnostic, HoverInfo,
@@ -214,27 +228,41 @@ pub struct Package {
 	resolution_error: Option<String>,
 	/// The warnings of the resolution (`DEP004`), shown on `dependencies.fa`.
 	resolution_warnings: Vec<String>,
+	/// Whether its dependencies are being fetched in the background: it is
+	/// analyzed without them meanwhile, and its documents show only their
+	/// syntax errors and a note.
+	resolving: bool,
+}
+
+/// The module system of a package's runs given to `fa::editor_session`:
+/// the texts of the open documents in place of the disk's.
+fn overlay(texts: &Texts) -> impl FnOnce(Box<dyn ModuleResolver>) -> Box<dyn ModuleResolver> {
+	let texts = Arc::clone(texts);
+	move |inner| Box::new(OverlayResolver { inner, texts })
 }
 
 impl Package {
-	/// Scans a package (its dependencies resolved), not analyzed yet.
-	fn new(root: &Path, texts: Texts, cancel: &Arc<AtomicBool>) -> Package {
-		let overlay = |inner: Box<dyn ModuleResolver>| -> Box<dyn ModuleResolver> {
-			Box::new(OverlayResolver {
-				inner,
-				texts: Arc::clone(&texts),
-			})
-		};
+	/// A package, not analyzed yet, from its session with its dependencies
+	/// resolved (`fa::editor_session`), or from the error of the
+	/// resolution; `None` while the resolution runs in the background.
+	fn new(
+		root: &Path,
+		texts: Texts,
+		cancel: &Arc<AtomicBool>,
+		found: Option<Result<fa::EditorSession, String>>,
+	) -> Package {
 		let mut resolution_error = None;
 		let mut resolution_warnings = Vec::new();
-		let (mut session, entry) = match fa::editor_session(root, overlay) {
-			Ok(found) => {
+		let resolving = found.is_none();
+		let (mut session, entry) = match found {
+			Some(Ok(found)) => {
 				resolution_warnings = found.warnings;
 				(found.session, found.entry)
 			}
-			// the dependencies can't be resolved: the package's own files
-			Err(error) => {
-				resolution_error = Some(error);
+			// the dependencies can't be resolved (or not yet): the
+			// package's own files
+			found => {
+				resolution_error = found.and_then(Result::err);
 				let mut session = Session::new();
 				if let Ok(codebase) = fa_codebase_parser::Codebase::scan_package(root) {
 					let resolver = CodebaseResolver::new(codebase, Some(root.to_path_buf()));
@@ -257,7 +285,28 @@ impl Package {
 			baseline: 0,
 			resolution_error,
 			resolution_warnings,
+			resolving,
 		}
+	}
+
+	/// The module of a file on the disk that the package reads: one of its
+	/// sources, or a file of a dependency.
+	fn module_of_file(&self, root: &Path, path: &Path) -> Option<String> {
+		if let Ok(relative) = path.strip_prefix(root) {
+			if !fa_codebase_parser::is_package_source(relative) {
+				return None;
+			}
+			return package_module(root, path);
+		}
+		// the modules of the dependencies the last run analyzed
+		let resolver = self.root.resolver()?;
+		self.report
+			.as_ref()?
+			.modules
+			.iter()
+			.map(|module| &module.module)
+			.find(|module| resolver.file(module).as_deref() == Some(path))
+			.cloned()
 	}
 
 	/// The diagnostics of the resolution of the dependencies for a module:
@@ -404,6 +453,22 @@ pub struct AnalyzerBackend {
 	/// Whether to publish `AN001` ("not supported yet by the analyzer"). Off by
 	/// default: it says nothing about the user's code.
 	pub show_unsupported: bool,
+	/// The resolutions of dependencies running in the background: the
+	/// generation of the latest one of each package (an older one's result
+	/// is dropped).
+	resolutions: HashMap<PathBuf, u64>,
+	generation: u64,
+	/// The number of background resolutions whose result wasn't taken yet.
+	running: usize,
+	/// The results of the background resolutions.
+	resolved: (Sender<Resolved>, Receiver<Resolved>),
+}
+
+/// The result of a resolution of dependencies run in the background.
+struct Resolved {
+	root: PathBuf,
+	generation: u64,
+	found: Result<fa::EditorSession, String>,
 }
 
 impl Default for AnalyzerBackend {
@@ -428,7 +493,86 @@ impl AnalyzerBackend {
 			rebuild_minimum: MINIMUM_REBUILD_SIZE,
 			cancel,
 			show_unsupported: false,
+			resolutions: HashMap::new(),
+			generation: 0,
+			running: 0,
+			resolved: std::sync::mpsc::channel(),
 		}
+	}
+
+	/// Scans a package, its dependencies resolved from the lockfile and the
+	/// cache; when a source must be fetched, the resolution runs on another
+	/// thread, and the package waits for it (`poll`) without its
+	/// dependencies.
+	fn load_package(&mut self, root: &Path, texts: Texts) -> Package {
+		// a newer load replaces the resolution running for the package
+		self.resolutions.remove(root);
+		let found = fa::offline_editor_session(root, overlay(&texts));
+		if found.is_none() {
+			self.generation += 1;
+			let generation = self.generation;
+			self.resolutions.insert(root.to_path_buf(), generation);
+			let sender = self.resolved.0.clone();
+			let (root, texts) = (root.to_path_buf(), Arc::clone(&texts));
+			std::thread::Builder::new()
+				.name("fa-dependencies".to_string())
+				.spawn(move || {
+					let found = catch_unwind(AssertUnwindSafe(|| {
+						fa::editor_session(&root, overlay(&texts))
+					}))
+					.unwrap_or_else(|_| {
+						Err("error: the resolution of the dependencies failed".to_string())
+					});
+					let _ = sender.send(Resolved {
+						root,
+						generation,
+						found,
+					});
+				})
+				.expect("the thread of the resolution should start");
+			self.running += 1;
+		}
+		Package::new(root, texts, &self.cancel, found)
+	}
+
+	/// Loads packages again (their configuration or their files changed),
+	/// and analyzes them; their open documents.
+	fn reload_packages(&mut self, roots: Vec<PathBuf>) -> Vec<Url> {
+		let mut changed = Vec::new();
+		for root in roots {
+			let Some(old) = self.packages.remove(&root) else {
+				continue;
+			};
+			let mut package = self.load_package(&root, old.texts);
+			package.run(None);
+			self.packages.insert(root.clone(), package);
+			changed.extend(self.documents_of(&root));
+		}
+		changed.sort();
+		changed.dedup();
+		changed
+	}
+
+	/// The open documents of a package.
+	fn documents_of(&self, root: &Path) -> Vec<Url> {
+		self.documents
+			.iter()
+			.filter(|(_, document)| document.package.as_deref() == Some(root))
+			.map(|(uri, _)| uri.clone())
+			.collect()
+	}
+
+	/// Waits until the background resolutions finish (at most `timeout`),
+	/// and loads their packages again (for tests and tools); the documents
+	/// whose diagnostics may have changed.
+	pub fn wait_for_background(&mut self, timeout: Duration) -> Vec<Url> {
+		let deadline = Instant::now() + timeout;
+		let mut changed = Vec::new();
+		while self.has_background_work() && Instant::now() < deadline {
+			changed.extend(self.poll());
+			std::thread::sleep(Duration::from_millis(5));
+		}
+		changed
 	}
 
 	/// The analyzer's shared standalone session (the documents that aren't
@@ -561,7 +705,7 @@ impl AnalyzerBackend {
 				Some(package) => package.texts,
 				None => Arc::default(),
 			};
-			let package = Package::new(&root, texts, &self.cancel);
+			let package = self.load_package(&root, texts);
 			self.packages.insert(root.clone(), package);
 		}
 		let package = self.packages.get_mut(&root).expect("inserted above");
@@ -820,6 +964,7 @@ impl AnalysisBackend for AnalyzerBackend {
 					.any(|other| other.package.as_ref() == Some(root));
 				if !open {
 					self.packages.remove(root);
+					self.resolutions.remove(root);
 				} else if let Some(package) = self.packages.get_mut(root)
 					&& package.report.is_some()
 				{
@@ -905,6 +1050,21 @@ impl AnalysisBackend for AnalyzerBackend {
 			})
 			.collect();
 		converted.extend(resolution);
+		if let Some((package, _)) = self.package_of(uri).filter(|_| in_package)
+			&& package.resolving
+		{
+			// without its dependencies, the analysis would report every
+			// name they declare: the syntax errors only (they have no code)
+			converted.retain(|diagnostic| diagnostic.code.is_none());
+			converted.push(FileDiagnostic {
+				severity: Severity::Information,
+				code: None,
+				message: "The dependencies of the package are being fetched: the other diagnostics come after".to_string(),
+				span: SourceSpan::new(0, 0),
+				related: Vec::new(),
+				unnecessary: false,
+			});
+		}
 		converted
 	}
 
@@ -923,20 +1083,125 @@ impl AnalysisBackend for AnalyzerBackend {
 			.filter(|root| root.starts_with(&folder))
 			.cloned()
 			.collect();
-		let mut changed = Vec::new();
-		for root in roots {
-			let Some(old) = self.packages.remove(&root) else {
+		self.reload_packages(roots)
+	}
+
+	fn files_changed(&mut self, changes: &[FileEvent]) -> Vec<Url> {
+		let mut reload: Vec<PathBuf> = Vec::new();
+		let mut edited: Vec<(PathBuf, String)> = Vec::new();
+		let mut readers: Vec<Url> = Vec::new();
+		for change in changes {
+			let Ok(path) = change.uri.to_file_path() else {
 				continue;
 			};
-			let mut package = Package::new(&root, old.texts, &self.cancel);
-			package.run(None);
-			self.packages.insert(root.clone(), package);
-			changed.extend(
-				self.documents
+			let folder = path.parent().unwrap_or(Path::new("")).to_path_buf();
+			if is_configuration(&path) {
+				// the packages it configures, open in the editor or not
+				reload.extend(
+					self.packages
+						.keys()
+						.filter(|root| root.starts_with(&folder))
+						.cloned(),
+				);
+				continue;
+			}
+			// an open document keeps the editor's text
+			if self.documents.contains_key(&change.uri) {
+				continue;
+			}
+			for (root, package) in &self.packages {
+				let Some(module) = package.module_of_file(root, &path) else {
+					continue;
+				};
+				if change.typ == FileChangeType::CHANGED && package.knows(&module) {
+					edited.push((root.clone(), module));
+				} else if change.typ == FileChangeType::CHANGED
+					|| change.typ == FileChangeType::DELETED
+					|| path.starts_with(root)
+				{
+					// a new or deleted file: the module system changes
+					reload.push(root.clone());
+				}
+			}
+			// the standalone documents that may see it (their folder's
+			// module system is scanned again)
+			readers.extend(
+				self.standalone
 					.iter()
-					.filter(|(_, document)| document.package.as_ref() == Some(&root))
+					.filter(|(_, standalone)| folder.starts_with(&standalone.folder))
 					.map(|(uri, _)| uri.clone()),
 			);
+		}
+		reload.sort();
+		reload.dedup();
+		let mut changed = Vec::new();
+		// the disk's text again at the next run of the packages not loaded again
+		let mut runs: Vec<PathBuf> = Vec::new();
+		for (root, module) in edited {
+			if reload.contains(&root) {
+				continue;
+			}
+			if let Some(package) = self.packages.get_mut(&root)
+				&& package.report.is_some()
+			{
+				package.pending.insert(module);
+				if !runs.contains(&root) {
+					runs.push(root);
+				}
+			}
+		}
+		for root in runs {
+			let Some(package) = self.packages.get_mut(&root) else {
+				continue;
+			};
+			let analyzed = package.run(None).unwrap_or_default();
+			let package = &self.packages[&root];
+			changed.extend(
+				analyzed
+					.iter()
+					.filter_map(|module| package.file_path(module))
+					.filter_map(|path| Url::from_file_path(path).ok())
+					.filter(|url| self.documents.contains_key(url)),
+			);
+		}
+		changed.extend(self.reload_packages(reload));
+		readers.sort();
+		readers.dedup();
+		for reader in readers {
+			self.rebuild_standalone(&reader);
+			changed.push(reader);
+		}
+		changed.sort();
+		changed.dedup();
+		changed
+	}
+
+	fn has_background_work(&self) -> bool {
+		// the results no package waits for are taken too (their sessions freed)
+		self.running > 0
+	}
+
+	fn poll(&mut self) -> Vec<Url> {
+		let mut changed = Vec::new();
+		while let Ok(resolved) = self.resolved.1.try_recv() {
+			self.running -= 1;
+			if self.resolutions.get(&resolved.root) != Some(&resolved.generation) {
+				// a newer load of the package, or the package was closed
+				continue;
+			}
+			self.resolutions.remove(&resolved.root);
+			let Some(old) = self.packages.remove(&resolved.root) else {
+				continue;
+			};
+			let mut package = Package::new(
+				&resolved.root,
+				old.texts,
+				&self.cancel,
+				Some(resolved.found),
+			);
+			package.run(None);
+			self.packages.insert(resolved.root.clone(), package);
+			changed.extend(self.documents_of(&resolved.root));
 		}
 		changed.sort();
 		changed
@@ -1333,6 +1598,107 @@ mod tests {
 		assert!(backend.diagnostics(&main).is_empty());
 		assert!(backend.close_document(&main).is_empty());
 		assert!(backend.folders.is_empty());
+	}
+
+	fn event(path: &Path, typ: FileChangeType) -> FileEvent {
+		FileEvent::new(Url::from_file_path(path).unwrap(), typ)
+	}
+
+	/// A sibling of a standalone document changed on the disk: the
+	/// document is analyzed again with its new text.
+	#[test]
+	fn a_sibling_changed_on_the_disk_is_read_again() {
+		let directory = tempfile::TempDir::new().unwrap();
+		let root = directory.path().canonicalize().unwrap();
+		write_files(
+			&root,
+			&[
+				("helper.fa", "export function = (): Integer => 42\n"),
+				(
+					"main.fa",
+					"let value: Integer = helper()\nconsole.log(value)\n",
+				),
+			],
+		);
+		let main = Url::from_file_path(root.join("main.fa")).unwrap();
+		let text = std::fs::read_to_string(root.join("main.fa")).unwrap();
+		let mut backend = AnalyzerBackend::new();
+		backend.set_document(&main, Arc::from(text.as_str()));
+		assert!(backend.diagnostics(&main).is_empty());
+		let helper = root.join("helper.fa");
+		std::fs::write(&helper, "export function = (): String => \"x\"\n").unwrap();
+		let changed = backend.files_changed(&[event(&helper, FileChangeType::CHANGED)]);
+		assert_eq!(changed, vec![main.clone()]);
+		let codes: Vec<_> = backend
+			.diagnostics(&main)
+			.into_iter()
+			.filter_map(|diagnostic| diagnostic.code)
+			.collect();
+		assert_eq!(codes, ["E-TYPE-1"]);
+	}
+
+	/// A configuration file changed on the disk loads the package again
+	/// (its dependencies resolved again); a file the package doesn't read
+	/// changes nothing.
+	#[test]
+	fn a_configuration_changed_on_the_disk_reloads_the_package() {
+		let directory = tempfile::TempDir::new().unwrap();
+		let root = directory.path().canonicalize().unwrap();
+		write_files(
+			&root,
+			&[
+				("workspace.fa", "export = { name = \"w\" }\n"),
+				(
+					"packages/shared/package.fa",
+					"export = { name = \"shared\" }\n",
+				),
+				(
+					"packages/shared/library/greet.fa",
+					"export function = (name: String): String => \"hello {name}\"\n",
+				),
+				("packages/app/package.fa", "export = { name = \"app\" }\n"),
+				("packages/app/dependencies.fa", "export = {}\n"),
+				(
+					"packages/app/application/main.fa",
+					"export function = () => {\n\tconsole.log(shared.greet(\"you\"))\n}\n",
+				),
+				("packages/app/notes/draft.fa", "let a = 1\n"),
+			],
+		);
+		let app = root.join("packages/app");
+		let main = Url::from_file_path(app.join("application/main.fa")).unwrap();
+		let text = std::fs::read_to_string(app.join("application/main.fa")).unwrap();
+		let mut backend = AnalyzerBackend::new();
+		backend.set_document(&main, Arc::from(text.as_str()));
+		assert!(
+			!backend.diagnostics(&main).is_empty(),
+			"`shared` is unknown"
+		);
+		let draft = app.join("notes/draft.fa");
+		assert!(
+			backend
+				.files_changed(&[event(&draft, FileChangeType::CHANGED)])
+				.is_empty()
+		);
+		let dependencies = app.join("dependencies.fa");
+		std::fs::write(&dependencies, "export = {\n\tshared = \"../shared\"\n}\n").unwrap();
+		let changed = backend.files_changed(&[event(&dependencies, FileChangeType::CHANGED)]);
+		assert_eq!(changed, vec![main.clone()]);
+		assert!(
+			backend.diagnostics(&main).is_empty(),
+			"{:?}",
+			backend.diagnostics(&main)
+		);
+		// a file of the dependency changed on the disk
+		let greet = root.join("packages/shared/library/greet.fa");
+		std::fs::write(
+			&greet,
+			"export function = (name: Integer): String => \"x\"\n",
+		)
+		.unwrap();
+		let changed = backend.files_changed(&[event(&greet, FileChangeType::CHANGED)]);
+		assert_eq!(changed, vec![main.clone()]);
+		assert!(!backend.diagnostics(&main).is_empty());
 	}
 
 	#[test]

@@ -75,3 +75,16 @@ A member of a named union is read and written tagged by a `"type"` property hold
 ## The rt-5 example (`@typeToString(getDigitCount)`, types-at-runtime or function composition page)
 
 A function name is a value: write `@typeToString(Type<getDigitCount>)` (metaprogramming page: "use `Type(value)` to get the type of a value"; `TY008` otherwise).
+
+## `documentation/advanced/relations.md`, "Copies and references" (the module-level form)
+
+After "In the second form, there is one collection for the whole program, and every file can add people to it.", add: "Both sides of a relation are declared in the same file, the one that declares the types of the elements; the collection can be in another file. That file reads the relation's file for the type of its elements, and reports there a collection whose elements move or are of another type." The example's functions that write `people` from another file declare it (`mutates people`), as in "Exporting a mutable value" of the modules page.
+
+## `documentation/advanced/relations.md`, "Effects" (reactivity)
+
+Add a paragraph: "Implied effects count for reactivity too. A relation side of an element of a reactive collection is observed like a `reactive` field: a `derived` value or a `watch` block reading `bao.bestFriendOf` runs again when a write adds Bao to it or removes Bao from it (`ana.bestFriend = bao`, `ana.bestFriend = cleo` afterwards, deleting Ana), and not for the writes that leave it unchanged. Since relation fields are not data, these writes don't change the collection itself: reading `people.size` doesn't depend on them. A `watch` block that writes a direct side and reads its reverse side writes what it reads (compile error)." `:::implementation`: "each side of an object has its own source, created when an observer reads it; the two-sided update notifies the sources of the sides it changes (JavaScript: a callback given to the runtime helpers; native: the runtime's relation functions, the sources of sides keyed by their offset)."
+
+## `documentation/advanced/relations.md`, `:::implementation` section (JavaScript, generic code)
+
+Add to the JavaScript lowering: "An element of a type with relation sides carries a symbol-keyed property naming its sides, read by the generic copy, printing, equality and hashing of erased generic code."
+

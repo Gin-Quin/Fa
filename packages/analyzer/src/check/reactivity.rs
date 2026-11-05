@@ -1633,10 +1633,22 @@ fn is_param_of(w: &Walker<'_>, function: Option<NodeId>, symbol: SymbolId) -> bo
 }
 
 /// Whether the relation sides below a path are sources: the path is
-/// rooted at a reactive value, below a reactive field, or at a parameter
-/// (a function's reads of the sides are tracked wherever it runs).
+/// rooted at a reactive value, below a reactive field, or at a parameter (a
+/// function's, a callback's: `people.find((person) => person.bestFriend …)`),
+/// whose reads of the sides are tracked wherever it runs.
 fn reactive_sides(w: &Walker<'_>, path: &SPath) -> bool {
-	matches!(path.root, SRoot::Param(_)) || w.path_is_reactive(path)
+	match path.root {
+		SRoot::Param(_) => true,
+		SRoot::Symbol(symbol)
+			if matches!(
+				w.a.symbols.symbol(symbol).kind,
+				SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
+			) =>
+		{
+			true
+		}
+		_ => w.path_is_reactive(path),
+	}
 }
 
 /// A path of an implied write, its last field (a relation side) marked as a

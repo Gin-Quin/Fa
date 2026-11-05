@@ -261,10 +261,12 @@
 //!   `OrderedColumnar` is positional (`delete(index)`, `pop`, `c[i]`).
 //!   Iteration order is the slot order. `==` compares as multisets (D63).
 //! - Relations (advanced brief §8, `relations.md`): [`Analysis::relations`]
-//!   lists the relations declared in the file ([`Relation`]: kind, the types
-//!   and fields of both sides, the holder and target collections);
-//!   [`Analysis::relation_fields`] says which fields of a type declaration
-//!   are relation sides. A direct side `(T in c)?` and a reverse one-to-one
+//!   lists the relations declared in the file, then those of the files it
+//!   reads ([`Relation`]: kind, the object types and fields of both sides,
+//!   the holder and target collections, of this file or another one);
+//!   [`Analysis::relation_sides`] finds the sides of a value by its type
+//!   (whichever file declared them), [`Analysis::relation_fields`] the sides
+//!   declared by a type declaration of the file. A direct side `(T in c)?` and a reverse one-to-one
 //!   or symmetric side are typed `T?`; a many-to-many direct side and the
 //!   `Pool` reverse sides are `Collection(RelationPool(0), T)` (direct,
 //!   writable: `RelationPool#add`/`#delete`/`#clear` link and unlink, `add`

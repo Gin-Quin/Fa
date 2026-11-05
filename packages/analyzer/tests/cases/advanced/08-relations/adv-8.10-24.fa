@@ -1,0 +1,20 @@
+-- A relation side read by a callback (the predicate of `find`) is tracked
+-- too: the derived value is computed again when a side it read changes.
+reactive people: Pool<Person> = []
+type Person = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool<people->bestFriend>
+}
+use ana = people.add({ name = "Ana" })
+use bao = people.add({ name = "Bao" })
+derived alone = people.find((person) => person.bestFriendOf.size == 0)?.name ?? "nobody"
+watch {
+	console.log("alone {alone}")
+}
+-- prints: alone Ana
+ana.bestFriend = bao -- Ana is still alone: the derived value is the same
+bao.bestFriend = ana
+-- prints: alone nobody
+ana.bestFriend = none
+-- prints: alone Bao

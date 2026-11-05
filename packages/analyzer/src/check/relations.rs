@@ -25,6 +25,12 @@
 //! - A collection that owner fields point into is modified only through its
 //!   owner (`REL016`, D48), and a local can't have a reference type
 //!   (`REF010`, D17).
+//! - **Across files** ([`Walker::import_relations_for`]): a relation may
+//!   name a module-level collection of another file, by key; both sides are
+//!   declared in one file. Each file publishes its relations in its
+//!   interface; the files whose values may be of their types import them,
+//!   so their writes and removals get the checks and the two-sided updates.
+//!   The collection's file checks it ([`Walker::check_external_collections`]).
 
 use std::sync::Arc;
 

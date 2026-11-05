@@ -166,3 +166,11 @@ Add: "With diagnostics in several files, the text report ends with one total lin
 ## `documentation/collections/arrays.md`, `:::implementation` section (native)
 
 Add: "**Packed arrays.** An array of a named union that the program only builds with `push` from an empty literal, reads with `for` and measures with `length` stores its items one after the other, each as its member and its data without padding (a string as its length and bytes), so that an item takes the bytes its member needs, with no box per item. **Large blocks.** Natively on Linux, the items of an array (and the bytes of a string) of 1 MiB or more have a mapping of their own, which grows by moving its pages rather than copying its bytes. **Arrays wrapped into values.** A small array built in a local, then stored into a field of a literal (`Sexp.List { items }`), moves its items next to its header, of their exact size." (See "Packed arrays" and the two entries after it in `design/decisions.md`.)
+
+## `documentation/` page of recursive types (the arena section of its `:::implementation`, native)
+
+Add: "**Compressed links.** On 64-bit Linux, the recursive edges of a type whose nodes live in arenas are 32-bit links (the node's address divided by 8): every arena page comes from one range reserved between 2 GiB and 32 GiB of the address space, so a `Tree` of two optional children takes 8 bytes. When that range is full, the program stops with `stop: out of memory (the range of the arenas of recursive values is full)` (exit code 101). wasm keeps its 32-bit pointers."
+
+## `documentation/` page of `when`, `:::implementation` section (native)
+
+Add: "A `when` choosing among string literals of one length by the integers `0` to `n - 1` and `else` reads the chosen one from a single constant holding them all, at `start + length × index` (any other integer reads the `else` literal): no branch and no table."

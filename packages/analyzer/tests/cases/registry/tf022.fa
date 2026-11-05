@@ -1,0 +1,2 @@
+-- TF022: KeyType of a type that isn't a map
+type Key = KeyType<Array<Integer>> -- error: TF022

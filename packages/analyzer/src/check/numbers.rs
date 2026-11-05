@@ -373,6 +373,15 @@ impl Walker<'_> {
 			return;
 		}
 		let set = match self.s.types.as_int(ty) {
+			// a value checked at the sink (`let y: Int8 = x + 126`) wraps
+			// without overflow checks: any value of the type
+			Some(_)
+				if self
+					.a
+					.has_flags(self.strip_groups(value), NodeFlags::SINK_CHECK) =>
+			{
+				None
+			}
 			Some(_) => self.value_set(value),
 			None => None,
 		};
@@ -1172,7 +1181,19 @@ impl Walker<'_> {
 			},
 		);
 		if let Some(range) = self.s.types.interval_of(ty) {
-			self.record_interval(n, interval, range);
+			// an operation that may overflow wraps in a build without overflow
+			// checks: its values are its type's (decision "Bounds stay
+			// memory-safe in release builds"), so no proof leans on a trap
+			// (an unbounded operand comes from a counter or a widened loop
+			// bound: a non-negative 64-bit count that can't wrap in practice)
+			let unbounded = interval.lo <= -crate::types::int::INFINITY
+				|| interval.hi >= crate::types::int::INFINITY;
+			// (beyond JavaScript's safe integers a number loses precision, keeps its sign)
+			if steps.flags.contains(NodeFlags::OVERFLOW_NATIVE) && !unbounded {
+				self.record_interval(n, range, range);
+			} else {
+				self.record_interval(n, interval, range);
+			}
 		}
 		if steps.zero_divisor {
 			let diagnostic = self.diagnostic(
@@ -1575,6 +1596,7 @@ impl Walker<'_> {
 		);
 		let mut steps = StepFlags::default();
 		let interval = self.step(op, &current, &right, compute, target_storage, &mut steps);
+		let step_flags = steps.flags;
 		self.finish_arith(n, interval, compute, place.ty, steps);
 		// the sink: the target's declared type, for the values that pass the compute type
 		let range = self
@@ -1607,7 +1629,22 @@ impl Walker<'_> {
 			}
 		}
 		if let Some(symbol) = symbol {
-			self.set_symbol_values(symbol, Some(IntervalSet::of(checked)));
+			// a write that may overflow or not fit wraps without overflow
+			// checks: the place may then hold any value of its type, except a
+			// non-negative 64-bit counter growing by `+= 1` (it can't reach
+			// the limit in practice)
+			let wraps = step_flags.contains(NodeFlags::OVERFLOW_NATIVE)
+				|| !range.contains_interval(checked);
+			let counter = op == ArithOp::Add
+				&& right.as_exact() == Some(I256::ONE)
+				&& current.hull.lo >= I256::ZERO
+				&& range.hi >= I256::from(i64::MAX);
+			let values = if wraps && !counter {
+				None
+			} else {
+				checked.intersect(range).map(IntervalSet::of)
+			};
+			self.set_symbol_values(symbol, values);
 		}
 	}
 

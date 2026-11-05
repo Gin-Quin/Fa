@@ -176,6 +176,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.call_function(node, function, info)
 	}
 
+	/// A call of `target` (a function's body) neither awaited nor started:
+	/// a blocking call of an `async` function that starts tasks raises the
+	/// blocking depth around it (`blocking_starter`).
+	fn plain_call(
+		&mut self,
+		function: &super::Function<'ctx>,
+		node: NodeId,
+		info: &CallInfo,
+		target: inkwell::values::FunctionValue<'ctx>,
+		arguments: &[BasicMetadataValueEnum<'ctx>],
+	) -> Result<Option<inkwell::values::BasicValueEnum<'ctx>>, Error> {
+		let blocking = self.blocking_starter(node, function);
+		if blocking {
+			self.add_blocking_depth(1)?;
+		}
+		let raw = match self.invariant_remainder_call(function, node, info, arguments)? {
+			Some(result) => Some(result),
+			None => self.recursive_base_call(function, target, arguments)?,
+		};
+		if blocking {
+			self.add_blocking_depth(-1)?;
+		}
+		Ok(raw)
+	}
+
 	/// A direct call of a function (of this file or another), the
 	/// arguments in parameter order from `info`.
 	pub(crate) fn call_function(
@@ -350,10 +375,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return Ok(task);
 			}
 			Some(super::tasks::TaskCall::Result(raw)) => raw,
-			None => match self.invariant_remainder_call(&function, node, info, &arguments)? {
-				Some(result) => Some(result),
-				None => self.recursive_base_call(&function, value, &arguments)?,
-			},
+			None => self.plain_call(&function, node, info, value, &arguments)?,
 		};
 		for write_back in write_backs {
 			self.write_back(write_back)?;

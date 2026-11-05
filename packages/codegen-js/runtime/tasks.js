@@ -276,6 +276,28 @@ export function faDrop(task) {
 	}
 }
 
+// @fa-helper faDropTasks deps: FaTask faDrop
+/**
+ * The end of the scope of a value holding tasks (an array, a map, an
+ * object, an optional…): each task still running is cancelled, in order.
+ * @param {unknown} value
+ * @returns {void}
+ */
+export function faDropTasks(value) {
+	/** @type {unknown[]} */
+	const pending = [value];
+	while (pending.length > 0) {
+		const item = /** @type {any} */ (pending.shift());
+		if (item instanceof FaTask) {
+			faDrop(item);
+		} else if (typeof item === "object" && item !== null) {
+			const parts =
+				typeof item[Symbol.iterator] === "function" ? Array.from(item) : Object.values(item);
+			pending.unshift(...parts);
+		}
+	}
+}
+
 // @fa-helper faFatal deps: faReport faExit
 /**
  * A stop (or a foreign exception) in a task: the program ends.
@@ -375,6 +397,24 @@ export function faStartCall(parent, body, ...args) {
 	const task = new FaTask(parent);
 	queueMicrotask(() => faRunTask(task, body, args, false));
 	return task;
+}
+
+// @fa-helper faBlocking deps: faSched
+/**
+ * A blocking call of an `async` function that starts tasks without
+ * suspending: its `start`s run their tasks at once (the blocking depth).
+ * Awaited, the same function is a plain call, and its tasks start later.
+ * @param {Function} f
+ * @param {...any} args
+ * @returns {any}
+ */
+export function faBlocking(f, ...args) {
+	faSched.depth += 1;
+	try {
+		return f(...args);
+	} finally {
+		faSched.depth -= 1;
+	}
 }
 
 // @fa-helper faFinished deps: FaTask faIsError

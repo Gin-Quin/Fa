@@ -351,16 +351,18 @@ function faJsonConvert(data, schema, where) {
 			/** @type {Record<string, any>} */
 			const value = {};
 			for (const [name, field, optional, initial] of schema[1]) {
-				const item = data[name];
+				// a field named like a property of `Object.prototype` has a `$`
+				const property = name in Object.prototype ? `${name}$` : name;
+				const item = Object.hasOwn(data, name) ? data[name] : undefined;
 				if (item === undefined) {
 					if (typeof initial === "function") {
-						value[name] = initial();
+						value[property] = initial();
 						continue;
 					}
 					if (!optional) throw new JsonError(`${where} has no field \`${name}\``);
-					value[name] = undefined;
+					value[property] = undefined;
 				} else {
-					value[name] = faJsonConvert(item, field, `${where}.${name}`);
+					value[property] = faJsonConvert(item, field, `${where}.${name}`);
 				}
 			}
 			return value;
@@ -384,7 +386,7 @@ function faJsonConvert(data, schema, where) {
 				for (const [index, name] of names.entries()) {
 					if (name === flag || name.startsWith(prefix)) {
 						if (big) bits = /** @type {bigint} */ (bits) | (1n << BigInt(index));
-						else bits = /** @type {number} */ ((bits) | (1 << index)) >>> 0;
+						else bits = /** @type {number} */ (bits | (1 << index)) >>> 0;
 					}
 				}
 			}
@@ -425,7 +427,11 @@ function faJsonConvert(data, schema, where) {
 					const value = faJsonConvert(data.value, field, `${where}.value`);
 					fields = names.length === 1 && names[0] === "$v" ? { $v: value } : value;
 				}
-				return new error(...names.map((/** @type {string} */ name) => fields[name]));
+				return new error(
+					...names.map(
+						(/** @type {string} */ name) => fields[name in Object.prototype ? `${name}$` : name],
+					),
+				);
 			}
 			if (kind === "e") return Object.freeze({ $t: tag });
 			if (kind === "r") return Object.assign({ $t: tag }, faJsonConvert(data, field, where));
@@ -562,17 +568,20 @@ function faJsonWrite(value, schema) {
 	if (Array.isArray(value) || value instanceof Set) {
 		return `[${Array.from(value, (item) => faJsonWrite(item, null) ?? "null").join(",")}]`;
 	}
+	const map = value instanceof Map || value[Symbol.toStringTag] === "fa:HashMap";
 	/** @type {Iterable<[any, any]>} */
-	const entries =
-		value instanceof Map || value[Symbol.toStringTag] === "fa:HashMap"
-			? value.entries()
-			: Object.entries(value);
+	const entries = map ? value.entries() : Object.entries(value);
 	const parts = [];
 	for (const [key, item] of entries) {
-		if (typeof key === "string" && key.startsWith("$")) continue;
+		let name = String(key);
+		if (!map) {
+			if (name.startsWith("$")) continue;
+			// a field named like a property of `Object.prototype` (`constructor$`)
+			if (name.endsWith("$")) name = name.slice(0, -1);
+		}
 		const written = faJsonWrite(item, null);
 		if (written !== undefined) {
-			parts.push(`${JSON.stringify(String(key))}:${written}`);
+			parts.push(`${JSON.stringify(name)}:${written}`);
 		}
 	}
 	return `{${parts.join(",")}}`;
@@ -662,7 +671,7 @@ function faJsonWriteAs(value, schema) {
 function faJsonFields(value, fields, open) {
 	const parts = [];
 	for (const [name, field] of fields) {
-		const written = faJsonWrite(value[name], field);
+		const written = faJsonWrite(value[name in Object.prototype ? `${name}$` : name], field);
 		if (written !== undefined) parts.push(`${JSON.stringify(name)}:${written}`);
 	}
 	if (parts.length === 0 && open !== "{") return `${open.slice(0, -1)}}`;

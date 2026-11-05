@@ -55,18 +55,15 @@ export function faExit(code) {
 // @fa-helper faIsError
 /**
  * Whether an exception is a Fa error: an instance of a member class of an
- * `Errors` type, which sets the static `faName`. Recognized without the
+ * `Errors` type, whose `Symbol.for("fa.error")` property is its qualified
+ * name (see `FaError`), never a field of the value. Recognized without the
  * `FaError` class, so that a program that throws no error doesn't contain it,
  * nor the formatting helpers its `toString` needs.
  * @param {unknown} exception
  * @returns {boolean}
  */
 export function faIsError(exception) {
-	return (
-		typeof exception === "object" &&
-		exception !== null &&
-		typeof (/** @type {any} */ (exception).constructor?.faName) === "string"
-	);
+	return typeof (/** @type {any} */ (exception)?.[Symbol.for("fa.error")]) === "string";
 }
 
 // @fa-helper faReport deps: FaStop faIsError faIsStackOverflow faStopMessage faWriteError

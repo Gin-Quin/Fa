@@ -1,7 +1,8 @@
-// helpers: FaStop, faStop, faOverflow, faCheckInteger, faQuote, faFormatArray, faSides, faFormatObject, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat, faExit, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
+// helpers: FaStop, faStop, faOverflow, faCheckInteger, faFormatObject, faExit, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
 
 const copy$Point = (value) => ({ x: value.x, y: value.y });
 const Shape$Empty = Object.freeze({ $t: "Shape.Empty" });
+const format = (value) => faFormatObject(value, [["x", String], ["y", String]]);
 const Color$names = ["red", "green"];
 
 function Point$length2(self) {
@@ -25,7 +26,7 @@ function main() {
 	point.x = faCheckInteger(point.x + 1, "types.fa:19:1");
 	const copy = copy$Point(point);
 	const color = 1;
-	console.log(`${Point$length2(point)} ${faFormat(copy)} ${describe({ $t: "Shape.Label", $v: "hi" })} ${describe(Shape$Empty)} ${Color$names[color]}`);
+	console.log(`${Point$length2(point)} ${format(copy)} ${describe({ $t: "Shape.Label", $v: "hi" })} ${describe(Shape$Empty)} ${Color$names[color]}`);
 	let items = [1, 2];
 	items.push(3);
 	for (let index = 0; index < items.length; index++) {

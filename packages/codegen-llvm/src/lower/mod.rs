@@ -1458,6 +1458,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.tree.nodes[node].for_each_child(|child| stack.push(child));
 			}
 		}
+		self.share_detached_reads();
 		// the default values of fields, evaluated in any function (a typed
 		// literal, the reader of `Json.parse`): the top-level values they read
 		let mut defaults: Vec<NodeId> = self
@@ -1482,6 +1483,37 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 		}
 		self.mark_module_values();
+	}
+
+	/// The top-level values the blocks of detached tasks use become
+	/// globals: a detached task reads them (a module-level value is not
+	/// captured, `concurrency.md`, tasks), and may outlive the top level.
+	fn share_detached_reads(&mut self) {
+		let mut detached: Vec<NodeId> = self
+			.analysis
+			.starts
+			.values()
+			.filter(|info| info.detached)
+			.filter_map(|info| info.block)
+			.collect();
+		detached.sort();
+		for block in detached {
+			let span = self.tree.spans[block.index()];
+			let mut stack = vec![block.index()];
+			while let Some(node) = stack.pop() {
+				if let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(node)) {
+					let data = self.analysis.symbols.symbol(symbol);
+					let declared = self.tree.spans[data.decl_node.index()];
+					let outside = declared.start < span.start || declared.start >= span.end;
+					if matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable)
+						&& outside && self.owner_of_scope(data.scope).is_none()
+					{
+						self.shared.insert(symbol, ());
+					}
+				}
+				self.tree.nodes[node].for_each_child(|child| stack.push(child));
+			}
+		}
 	}
 
 	/// Starts lowering a function: its allocas block and its first block.

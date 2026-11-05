@@ -21,10 +21,10 @@
 use std::collections::{HashMap, HashSet};
 
 use fa_analyzer::analysis::{Argument, AsyncSummary, AwaitKind, Callee, TargetSet};
-use fa_analyzer::ids::NodeId;
+use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::View;
-use fa_analyzer::types::TypeKind;
+use fa_analyzer::types::{TypeFlags, TypeKind};
 
 use crate::generate::{Dest, Generator};
 use crate::js::{self, Expr, Prec, Writer};
@@ -133,69 +133,11 @@ impl Generator<'_> {
 	/// functions that may suspend are needed (from the top level, the tests,
 	/// the exports and the functions used as values), then names them.
 	pub(crate) fn plan_instances(&mut self) {
-		for &node in self.analysis.awaits.keys() {
-			let View::Await(operand) = self.view(node) else {
-				continue;
-			};
-			let operand = self.strip_groups(operand);
-			match self.view(operand) {
-				View::Call { .. } => {
-					self.tasks.awaited_calls.insert(operand);
-				}
-				View::Start(call) => {
-					let call = self.strip_groups(call);
-					if matches!(self.view(call), View::Call { .. }) {
-						self.tasks.awaited_calls.insert(call);
-					}
-				}
-				_ => {}
-			}
-		}
-		for (&node, info) in self.analysis.starts.iter() {
-			if info.block.is_some() {
-				continue;
-			}
-			if let View::Start(call) = self.view(node) {
-				let call = self.strip_groups(call);
-				if matches!(self.view(call), View::Call { .. }) {
-					self.tasks.awaited_calls.insert(call);
-				}
-			}
-		}
+		self.find_awaited_calls();
 		if !self.tasks.asynchronous {
 			return;
 		}
-		// every function declaration of the file
-		let mut declarations = Vec::new();
-		for index in 0..self.tree.nodes.len() {
-			let node = NodeId::new(index);
-			if matches!(
-				self.view(node),
-				View::Function { .. } | View::ExportFunction { .. }
-			) && self.analysis.symbols.symbol_of_decl(node).is_some()
-			{
-				declarations.push(node);
-			}
-		}
-		for &declaration in &declarations {
-			let Some(info) = self.function_info(declaration) else {
-				continue;
-			};
-			let is_async = info.sig.is_some_and(|sig| self.types.sig(sig).is_async);
-			let suspends = self
-				.summary(declaration)
-				.is_some_and(|summary| summary.suspends);
-			// an `async` function that loops gets an async instance (its loops
-			// spend the coop budget), unless it starts tasks: one that can't
-			// suspend is a blocking call, whose `start`s run at once on every
-			// target (design/decisions.md, the async divergences)
-			let starts = self
-				.summary(declaration)
-				.is_some_and(|summary| summary.starts);
-			if suspends || (is_async && !starts && self.has_loop(info.body)) {
-				self.tasks.async_functions.insert(declaration);
-			}
-		}
+		let declarations = self.find_async_functions();
 		let mut wanted: HashMap<NodeId, (bool, bool)> = HashMap::new();
 		let mut pending: Vec<(NodeId, Mode)> = Vec::new();
 		let mut walks: Vec<(NodeId, Mode)> = Vec::new();
@@ -284,6 +226,75 @@ impl Generator<'_> {
 			}
 			self.tasks.instances.insert(declaration, instances);
 		}
+	}
+
+	/// The calls awaited or started (`awaited_calls`).
+	fn find_awaited_calls(&mut self) {
+		for &node in self.analysis.awaits.keys() {
+			let View::Await(operand) = self.view(node) else {
+				continue;
+			};
+			let operand = self.strip_groups(operand);
+			match self.view(operand) {
+				View::Call { .. } => {
+					self.tasks.awaited_calls.insert(operand);
+				}
+				View::Start(call) => {
+					let call = self.strip_groups(call);
+					if matches!(self.view(call), View::Call { .. }) {
+						self.tasks.awaited_calls.insert(call);
+					}
+				}
+				_ => {}
+			}
+		}
+		for (&node, info) in self.analysis.starts.iter() {
+			if info.block.is_some() {
+				continue;
+			}
+			if let View::Start(call) = self.view(node) {
+				let call = self.strip_groups(call);
+				if matches!(self.view(call), View::Call { .. }) {
+					self.tasks.awaited_calls.insert(call);
+				}
+			}
+		}
+	}
+
+	/// The function declarations of the file; those with an async instance
+	/// go to `async_functions`.
+	fn find_async_functions(&mut self) -> Vec<NodeId> {
+		// every function declaration of the file
+		let mut declarations = Vec::new();
+		for index in 0..self.tree.nodes.len() {
+			let node = NodeId::new(index);
+			if matches!(
+				self.view(node),
+				View::Function { .. } | View::ExportFunction { .. }
+			) && self.analysis.symbols.symbol_of_decl(node).is_some()
+			{
+				declarations.push(node);
+			}
+		}
+		for &declaration in &declarations {
+			let Some(info) = self.function_info(declaration) else {
+				continue;
+			};
+			let is_async = info.sig.is_some_and(|sig| self.types.sig(sig).is_async);
+			let suspends = self
+				.summary(declaration)
+				.is_some_and(|summary| summary.suspends);
+			// an `async` function that loops gets an async instance (its loops
+			// spend the coop budget), unless it starts tasks: one that can't
+			// suspend has one instance, as natively (`single_instance_mode`)
+			let starts = self
+				.summary(declaration)
+				.is_some_and(|summary| summary.starts);
+			if suspends || (is_async && !starts && self.has_loop(info.body)) {
+				self.tasks.async_functions.insert(declaration);
+			}
+		}
+		declarations
 	}
 
 	/// Whether a function declaration is exported (to the other modules of
@@ -454,18 +465,43 @@ impl Generator<'_> {
 	}
 
 	/// The mode of the one instance of a function: an `async` function that
-	/// can't suspend is a blocking call (A4: its `start`s run at once, with
-	/// the blocking depth raised, as natively), any other is `Dynamic`.
+	/// can't suspend is a blocking call (A4), any other is `Dynamic`. One
+	/// that starts tasks is `Dynamic` too: awaited, it is not a blocking
+	/// call, so its tasks start later (`concurrency.md`); called blocking,
+	/// the caller raises the blocking depth ([`Generator::blocking_starter`]).
 	fn single_instance_mode(&self, declaration: NodeId) -> Mode {
 		let is_async = self
 			.function_info(declaration)
 			.and_then(|info| info.sig)
 			.is_some_and(|sig| self.types.sig(sig).is_async);
-		if is_async && self.tasks.asynchronous {
+		let starts = self
+			.summary(declaration)
+			.is_some_and(|summary| summary.starts);
+		if is_async && !starts && self.tasks.asynchronous {
 			Mode::Blocking
 		} else {
 			Mode::Dynamic
 		}
+	}
+
+	/// Whether a call of `declaration` is a blocking call of an `async`
+	/// function that starts tasks without suspending: not awaited nor
+	/// started, outside a blocking call. The caller raises the blocking
+	/// depth around it, so that its `start`s run at once.
+	fn blocking_starter(&self, n: NodeId, declaration: NodeId) -> bool {
+		let Some(summary) = self.summary(declaration) else {
+			return false;
+		};
+		let is_async = self
+			.function_info(declaration)
+			.and_then(|info| info.sig)
+			.is_some_and(|sig| self.types.sig(sig).is_async);
+		self.tasks.asynchronous
+			&& is_async
+			&& summary.starts
+			&& !self.suspends(declaration)
+			&& !self.tasks.awaited_calls.contains(&n)
+			&& self.mode() != Mode::Blocking
 	}
 
 	/// The mode of the instance of `declaration` generated next.
@@ -629,6 +665,11 @@ impl Generator<'_> {
 		}
 		if suspends {
 			return js::call(&sync_name, &values);
+		}
+		if declaration.is_some_and(|declaration| self.blocking_starter(n, declaration)) {
+			let helper = self.helper("faBlocking");
+			values.insert(0, function);
+			return js::call(helper, &values);
 		}
 		js::call(&function, &values)
 	}
@@ -942,15 +983,12 @@ impl Generator<'_> {
 			.unwrap_or_default();
 		let task = match info.as_ref().and_then(|info| info.block) {
 			Some(block) => {
-				let mut symbols: Vec<fa_analyzer::ids::SymbolId> = copied
+				// the module-level values (the top level's too) are read, not
+				// copied: they are not captured (`concurrency.md`, tasks)
+				let symbols: Vec<fa_analyzer::ids::SymbolId> = copied
 					.iter()
 					.filter_map(|&node| self.analysis.symbols.symbol_of_decl(node))
 					.collect();
-				// at the top level, the top-level values it uses too (they
-				// are the top level's locals natively: design/decisions.md)
-				if detached && self.at_top_level(n) {
-					symbols.extend(self.module_values_used(block));
-				}
 				let saved = self.copy_values(&symbols, true);
 				let task = self.start_block(n, block);
 				self.restore_captures(saved);
@@ -973,42 +1011,6 @@ impl Generator<'_> {
 			return js::call(helper, &[task.text]);
 		}
 		task
-	}
-
-	/// Whether a node is outside every function (the top level's code).
-	fn at_top_level(&mut self, n: NodeId) -> bool {
-		let parents = self.parents();
-		let mut current = n;
-		while let Some(parent) = parents[current.index()] {
-			if matches!(self.view(parent), View::Lambda { .. } | View::Test { .. }) {
-				return false;
-			}
-			current = parent;
-		}
-		true
-	}
-
-	/// The module-level values of this file a block uses, in order, once.
-	fn module_values_used(&self, block: NodeId) -> Vec<fa_analyzer::ids::SymbolId> {
-		let mut symbols = Vec::new();
-		let mut stack = vec![block];
-		while let Some(node) = stack.pop() {
-			if matches!(self.view(node), View::Name(_))
-				&& let Resolution::Local(symbol) = self.analysis.resolution(node)
-				&& matches!(
-					self.analysis
-						.symbols
-						.scope(self.analysis.symbols.symbol(symbol).scope)
-						.kind,
-					fa_analyzer::symbols::ScopeKind::Module
-				) && !symbols.contains(&symbol)
-			{
-				symbols.push(symbol);
-			}
-			stack.extend(fa_analyzer::syntax::children(self.tree, node));
-		}
-		symbols.sort();
-		symbols
 	}
 
 	/// `start f(…)`: the task of a call.
@@ -1169,14 +1171,65 @@ impl Generator<'_> {
 		}
 	}
 
-	/// Whether a declaration holds a task that its block drops (cancels)
-	/// at its end: a `Task` never moved elsewhere.
+	/// Whether a value of a type holds tasks: a `Task`, or a collection,
+	/// an object, a tuple or a union holding one (a move-only type, the
+	/// types with `destroy` and subscriptions aside).
+	pub(crate) fn contains_task(&self, ty: TypeId) -> bool {
+		let mut seen = HashSet::new();
+		let mut pending = vec![ty];
+		while let Some(ty) = pending.pop() {
+			if !self.types.flags(ty).contains(TypeFlags::MOVE_ONLY) || !seen.insert(ty) {
+				continue;
+			}
+			match self.types.kind(ty) {
+				TypeKind::Task(..) => return true,
+				TypeKind::Collection(_, item, key) => pending.extend([item, key]),
+				TypeKind::Tuple(list) | TypeKind::Union(list) => {
+					pending.extend(self.types.list_items(list).iter().copied());
+				}
+				TypeKind::Object(_) => {
+					pending.extend(self.types.fields_of(ty).iter().map(|field| field.ty));
+				}
+				TypeKind::NamedUnion(nominal, _) => {
+					let count = self
+						.types
+						.sym_list(self.types.nominal(nominal).members)
+						.len();
+					pending
+						.extend((0..count as u16).map(|index| self.types.payload(nominal, index)));
+				}
+				_ => {}
+			}
+		}
+		false
+	}
+
+	/// The helper dropping the tasks a declaration holds at the end of its
+	/// block: `faDrop` for a task, `faDropTasks` for a value holding tasks.
+	pub(crate) fn task_drop(&mut self, n: NodeId) -> String {
+		let ty = self
+			.analysis
+			.symbols
+			.symbol_of_decl(n)
+			.map_or(TypeId::UNKNOWN, |symbol| {
+				self.analysis.symbols.symbol(symbol).ty
+			});
+		if matches!(self.types.kind(ty), TypeKind::Task(..)) {
+			self.helper("faDrop").to_string()
+		} else {
+			self.helper("faDropTasks").to_string()
+		}
+	}
+
+	/// Whether a declaration holds tasks that its block drops (cancels) at
+	/// its end: a `Task`, or a value holding tasks (an array, an object, an
+	/// optional…), never moved elsewhere.
 	pub(crate) fn holds_task(&self, n: NodeId) -> bool {
 		let Some(symbol) = self.analysis.symbols.symbol_of_decl(n) else {
 			return false;
 		};
 		let ty = self.analysis.symbols.symbol(symbol).ty;
-		if !matches!(self.types.kind(ty), TypeKind::Task(..)) {
+		if !self.contains_task(ty) {
 			return false;
 		}
 		// a task given to a call is moved (`kept.push(task)`), even in one

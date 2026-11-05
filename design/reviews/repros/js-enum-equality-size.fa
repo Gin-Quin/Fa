@@ -1,0 +1,7 @@
+type Color = Enum { red, green, blue }
+type Point = { x: Integer, y: Integer, function sum = (self): Integer => self.x + self.y }
+type Shape = Union { Circle = { radius: Float }, Empty }
+function pick = (index: Integer): Color => if index == 0 { .red } else { .blue }
+let color = pick(1)
+let shape: Shape = Shape.Empty
+console.log(color == Color.blue, shape is Shape.Empty)

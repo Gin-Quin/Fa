@@ -1795,9 +1795,15 @@ impl Walker<'_> {
 			if provided {
 				self.report_detached_use(n, "a requirement".to_string());
 			}
+			// the module-level values (the top level's included) are read,
+			// not copied: they are not captured (`concurrency.md`, tasks)
 			let copies = cx
 				.captures
 				.iter()
+				.filter(|&&symbol| {
+					let scope = self.a.symbols.symbol(symbol).scope;
+					!matches!(self.a.symbols.scope(scope).kind, ScopeKind::Module)
+				})
 				.map(|&symbol| (self.a.symbols.symbol(symbol).decl_node, false))
 				.collect();
 			if let Some(info) = self.a.starts.get_mut(&n) {

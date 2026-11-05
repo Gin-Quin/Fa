@@ -259,7 +259,7 @@ impl Generator<'_> {
 					self.types.member_name(nominal, index)
 				);
 				tests.push(format!(
-					"{}?.constructor?.faName === {}",
+					"{}?.[Symbol.for(\"fa.error\")] === {}",
 					subject.primary_text(),
 					js::string_literal(&qualified)
 				));

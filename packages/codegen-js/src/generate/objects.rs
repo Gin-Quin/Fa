@@ -61,10 +61,12 @@ impl Place {
 impl Generator<'_> {
 	// ── objects ──────────────────────────────────────────────────────────
 
-	/// The JavaScript property of a field (`#secret` → `$p_secret`).
+	/// The JavaScript property of a field (`#secret` → `$p_secret`, a
+	/// property of `Object.prototype` gets a `$` suffix: `constructor$`).
 	pub(crate) fn property(name: &str) -> String {
 		match name.strip_prefix('#') {
 			Some(private) => format!("$p_{private}"),
+			None if crate::names::is_object_property(name) => format!("{name}$"),
 			None => name.to_string(),
 		}
 	}
@@ -745,6 +747,25 @@ impl Generator<'_> {
 				g.helper("faArraySlice")
 			}
 		};
+		// a compile-time range (`static span = 1..5`): its bounds
+		if !matches!(self.view(self.strip_groups(range)), View::Range { .. })
+			&& let Some((start, end, inclusive)) = self.constant_range(range)
+		{
+			let container = self.expr(target);
+			let bound = |value: Option<ethnum::I256>| {
+				value.map_or("undefined".to_string(), |value| value.to_string())
+			};
+			let helper = helper(self);
+			return Some(js::call(
+				helper,
+				&[
+					container.text,
+					bound(start),
+					bound(end),
+					inclusive.to_string(),
+				],
+			));
+		}
 		let View::Range {
 			start,
 			end,

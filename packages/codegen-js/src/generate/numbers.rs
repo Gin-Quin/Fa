@@ -6,7 +6,9 @@
 //! - `OVERFLOW_JS` on a number-represented integer node: `faCheckInteger`
 //!   (±(2^53 − 1)) on the steps of the node that may exceed it;
 //! - `OVERFLOW_NATIVE` on a bigint-represented node (`Int64`, `UInt64`, the
-//!   128-bit types): `faCheckWidth` against the compute type;
+//!   128-bit types): `faCheckWidth` against the compute type; with overflow
+//!   checks off, `BigInt.asIntN` wraps it to the compute type instead, as
+//!   native code wraps (design/decisions.md, "After the backends review");
 //! - `SINK_CHECK` with the coercion of the node: `faCheckRange` against the
 //!   sink type;
 //! - `DIVISOR_CHECK`: the floor division helpers throw `DivisionByZero`;
@@ -466,6 +468,10 @@ impl Generator<'_> {
 					ComputeType::Int128 => (128, true, "Int128"),
 					ComputeType::UInt128 => (128, false, "UInt128"),
 				};
+				// checks off: the step wraps, as natively
+				if !self.options.overflow_checks {
+					return big_wrap(value, bits, signed);
+				}
 				let helper = self.helper("faCheckWidth");
 				js::call(
 					helper,
@@ -487,11 +493,7 @@ impl Generator<'_> {
 	/// does), at least the last one.
 	fn step_checks(&self, n: NodeId, op: ArithOp, nodes: &[NodeId], repr: IntRepr) -> Vec<bool> {
 		let steps = nodes.len().saturating_sub(1);
-		let flag = match repr {
-			IntRepr::Number => NodeFlags::OVERFLOW_JS,
-			IntRepr::BigInt => NodeFlags::OVERFLOW_NATIVE,
-		};
-		if !self.has(n, flag) || steps == 0 {
+		if !self.overflows(n, repr) || steps == 0 {
 			return vec![false; steps];
 		}
 		let Some(info) = self.analysis.arith(n) else {
@@ -598,11 +600,7 @@ impl Generator<'_> {
 						operand
 					};
 				let negated = js::prefix("-", &operand);
-				let flag = match repr {
-					IntRepr::Number => NodeFlags::OVERFLOW_JS,
-					IntRepr::BigInt => NodeFlags::OVERFLOW_NATIVE,
-				};
-				if self.has(n, flag) {
+				if self.overflows(n, repr) {
 					let compute = self
 						.analysis
 						.arith(n)
@@ -639,7 +637,7 @@ impl Generator<'_> {
 					&js::prefix("-", &later),
 					&later,
 				);
-				if self.has(n, NodeFlags::OVERFLOW_NATIVE) {
+				if self.overflows(n, IntRepr::BigInt) {
 					let compute = self
 						.analysis
 						.arith(n)
@@ -742,14 +740,10 @@ impl Generator<'_> {
 						operand
 					};
 				let exponent_check = self.has(n, NodeFlags::EXPONENT_CHECK);
-				let flag = match repr {
-					IntRepr::Number => NodeFlags::OVERFLOW_JS,
-					IntRepr::BigInt => NodeFlags::OVERFLOW_NATIVE,
-				};
-				let overflow = self.has(n, flag);
+				let overflow = self.overflows(n, repr);
 				let sink = self.has(n, NodeFlags::SINK_CHECK);
 				let target_ty = self.analysis.coercion(n).unwrap_or(place_ty);
-				let wraps = repr == IntRepr::Number && self.wrapped_width(n, target_ty).is_some();
+				let wraps = self.wrapped_width(n, target_ty).is_some();
 				if !overflow
 					&& !sink && !wraps
 					&& !(repr == IntRepr::Number && op == ArithOp::Power)
@@ -773,7 +767,7 @@ impl Generator<'_> {
 				if sink {
 					result = self.range_check(result, target_ty, repr, &location);
 				}
-				if wraps && let Some(wrapped) = self.wrap_unchecked(n, &result, target_ty) {
+				if wraps && let Some(wrapped) = self.wrap_unchecked(n, &result, repr, target_ty) {
 					result = wrapped;
 				}
 				result
@@ -800,8 +794,14 @@ impl Generator<'_> {
 		}
 		let source = self.type_of(n);
 		let mut value = value;
-		// overflow checks off: a sized integer of 32 bits or fewer wraps
-		if let Some(wrapped) = self.wrap_unchecked(n, &value, target) {
+		// overflow checks off: a sized integer wraps (a number becomes a
+		// bigint first when the target is one: wrapped after the conversion)
+		let source_repr = match self.repr(source) {
+			Repr::BigInt => IntRepr::BigInt,
+			_ => IntRepr::Number,
+		};
+		let wrap_after = source_repr == IntRepr::Number && self.repr(target) == Repr::BigInt;
+		if !wrap_after && let Some(wrapped) = self.wrap_unchecked(n, &value, source_repr, target) {
 			value = wrapped;
 		}
 		if self.has(n, NodeFlags::SINK_CHECK) && self.types.as_int(target).is_some() {
@@ -827,13 +827,32 @@ impl Generator<'_> {
 		{
 			return js::call(&copy, &[value.text]);
 		}
-		self.convert_representation(n, value, source, target)
+		let converted = self.convert_representation(n, value, source, target);
+		if wrap_after
+			&& let Some(wrapped) = self.wrap_unchecked(n, &converted, IntRepr::BigInt, target)
+		{
+			return wrapped;
+		}
+		converted
 	}
 
-	/// The width of a sized integer type of 32 bits or fewer that a value
-	/// at a node wraps to: with overflow checks off, where the analyzer
-	/// asked for a range check at the sink (design/decisions.md, "Backends
-	/// (after the backend review)"). `Integer` and the bigint types don't wrap.
+	/// Whether an integer node needs an overflow check (checks on), or a
+	/// wrap to its compute type (checks off, a bigint: `Int64` and wider
+	/// wrap as natively; `Integer` doesn't).
+	fn overflows(&self, n: NodeId, repr: IntRepr) -> bool {
+		match repr {
+			IntRepr::Number => self.has(n, NodeFlags::OVERFLOW_JS),
+			IntRepr::BigInt if self.options.overflow_checks => {
+				self.has(n, NodeFlags::OVERFLOW_NATIVE)
+			}
+			IntRepr::BigInt => self.analysis.has_flags(n, NodeFlags::OVERFLOW_NATIVE),
+		}
+	}
+
+	/// The width of a sized integer type that a value at a node wraps to:
+	/// with overflow checks off, where the analyzer asked for a range check
+	/// at the sink (design/decisions.md, "Backends (after the backend
+	/// review)", "After the backends review"). `Integer` doesn't wrap.
 	pub(crate) fn wrapped_width(&self, n: NodeId, target: TypeId) -> Option<u32> {
 		if self.options.overflow_checks || !self.analysis.has_flags(n, NodeFlags::SINK_CHECK) {
 			return None;
@@ -843,19 +862,31 @@ impl Generator<'_> {
 			IntStorage::I8 | IntStorage::U8 => Some(8),
 			IntStorage::I16 | IntStorage::U16 => Some(16),
 			IntStorage::I32 | IntStorage::U32 => Some(32),
-			_ => None,
+			IntStorage::I64 | IntStorage::U64 => Some(64),
+			IntStorage::I128 | IntStorage::U128 => Some(128),
+			IntStorage::Default => None,
 		}
 	}
 
-	/// A value wrapped in two's complement to its sink's type
-	/// ([`Generator::wrapped_width`]): `(x << 24) >> 24`, `x & 255`,
-	/// `x | 0`, `x >>> 0`.
-	fn wrap_unchecked(&self, n: NodeId, value: &Expr, target: TypeId) -> Option<Expr> {
+	/// A value (of representation `repr`) wrapped in two's complement to
+	/// its sink's type ([`Generator::wrapped_width`]): `(x << 24) >> 24`,
+	/// `x & 255`, `x | 0`, `x >>> 0` on numbers, `BigInt.asIntN(64, x)` on
+	/// bigints.
+	fn wrap_unchecked(
+		&self,
+		n: NodeId,
+		value: &Expr,
+		repr: IntRepr,
+		target: TypeId,
+	) -> Option<Expr> {
 		let bits = self.wrapped_width(n, target)?;
 		let signed = matches!(
 			self.types.as_int(target)?.storage,
-			IntStorage::I8 | IntStorage::I16 | IntStorage::I32
+			IntStorage::I8 | IntStorage::I16 | IntStorage::I32 | IntStorage::I64 | IntStorage::I128
 		);
+		if repr == IntRepr::BigInt {
+			return Some(big_wrap(value.clone(), bits, signed));
+		}
 		Some(crate::generate::number_api::wrap(
 			value.clone(),
 			bits,
@@ -1120,4 +1151,15 @@ fn fold_left(values: &[Expr], mut f: impl FnMut(&Expr, &Expr) -> Expr) -> Expr {
 		result = f(&result, value);
 	}
 	result
+}
+
+/// A bigint wrapped in two's complement to `bits`: `BigInt.asIntN(64, x)`,
+/// `BigInt.asUintN(64, x)`.
+fn big_wrap(value: Expr, bits: u32, signed: bool) -> Expr {
+	let function = if signed {
+		"BigInt.asIntN"
+	} else {
+		"BigInt.asUintN"
+	};
+	js::call(function, &[bits.to_string(), value.text])
 }

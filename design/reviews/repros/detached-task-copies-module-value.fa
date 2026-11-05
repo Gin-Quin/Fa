@@ -1,0 +1,12 @@
+use { sleep } = std.time
+
+mutable shared = 1
+start do {
+	console.log("task starts")
+	await sleep(5)
+	console.log("shared", shared)
+}
+console.log("after start")
+shared = 2
+await sleep(10)
+console.log("end", shared)

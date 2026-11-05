@@ -378,6 +378,44 @@ impl Walker<'_> {
 		self.s.interface(module)?.complete.then_some((module, decl))
 	}
 
+	/// The key of the declaration of another file a proxy (or an alias of
+	/// one) stands for. The export of a file is keyed by its module and the
+	/// file's name, without analyzing it: a relation names a collection of
+	/// another file by key, and that file reads this one for the type of its
+	/// elements (relations.rs).
+	pub(super) fn external_value_key(&mut self, symbol: SymbolId) -> Option<DeclKey> {
+		let mut symbol = symbol;
+		let mut seen = 0;
+		while let Some(&target) = self.modules.aliases.get(&symbol) {
+			symbol = target;
+			seen += 1;
+			if seen > 32 {
+				return None;
+			}
+		}
+		if let Some(Proxy::Export { module }) = self.modules.proxies.get(&symbol).cloned() {
+			if let Some(export) = self
+				.s
+				.interface(module)
+				.and_then(|interface| interface.export)
+			{
+				return Some(export.key);
+			}
+			let file = self.s.file_of(module)?;
+			let name = self.s.own_name(file).unwrap_or_else(|| {
+				let path = self.s.module(file);
+				path.rsplit('/').next().unwrap_or(path).to_string()
+			});
+			let name = self.s.types.syms.intern(&name);
+			let names = self.s.types.intern_sym_list(&[name]);
+			return Some(self.s.types.decl_key_of(module, names, 0));
+		}
+		match self.external_resolution(symbol)? {
+			Resolution::External(key) => Some(key),
+			_ => None,
+		}
+	}
+
 	/// The parameters of a function of another file called directly: per
 	/// parameter, its name (a proxy of the parameter) and whether it has a
 	/// default, so that named arguments and defaults work across files.

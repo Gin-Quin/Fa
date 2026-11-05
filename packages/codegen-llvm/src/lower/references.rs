@@ -253,11 +253,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let View::Access { target, members } = self.view(callee) else {
 			return Ok(None);
 		};
+		let count = members.len() - 1;
+		// a value of another file reached through namespaces (`library.people`)
+		let list: Vec<NodeId> = members.iter().collect();
+		if count > 0
+			&& let Some(slot) = self.namespace_place(callee, target, &list[..count])?
+		{
+			return Ok(Some(slot));
+		}
 		if !self.is_place(target) {
 			return Ok(None);
 		}
 		let slot = self.place(target)?;
-		let count = members.len() - 1;
 		let slot = self.place_members(slot, self.type_of(target), members.iter().take(count))?;
 		Ok(Some(slot))
 	}

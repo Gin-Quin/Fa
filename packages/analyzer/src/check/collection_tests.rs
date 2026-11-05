@@ -298,7 +298,7 @@ fn relations_are_recorded_for_the_backends() {
 	assert_eq!(session.types().syms.resolve(reverse), "bestFriendOf");
 	assert_eq!(
 		analysis
-			.relation_fields
+			.relation_sides
 			.get(&(relation.target_type, reverse)),
 		Some(&(0, RelationSide::Reverse))
 	);

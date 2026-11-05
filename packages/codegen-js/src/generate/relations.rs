@@ -18,8 +18,6 @@
 //!   owner of related collections copies the graph and relinks the copies
 //!   (`faCopyGraph`). Printing and `==` skip relation sides (D21).
 
-use std::collections::HashMap;
-
 use fa_analyzer::analysis::{
 	Argument, CollectionRef, FieldValue, Relation, RelationKind, RelationSide,
 };
@@ -31,37 +29,23 @@ use fa_analyzer::types::{CollKind, TypeKind};
 use crate::generate::Generator;
 use crate::js::{self, Expr};
 
-/// The cache of the declarations of object types (for their relation sides).
-pub(crate) type DeclsOfTypes = HashMap<TypeId, Option<NodeId>>;
-
 impl Generator<'_> {
-	/// The `type` declaration of an object type.
-	fn declaration_of(&mut self, ty: TypeId) -> Option<NodeId> {
-		if let Some(&decl) = self.decls_of_types.get(&ty) {
-			return decl;
-		}
-		let decl = self
-			.analysis
-			.type_decls
-			.iter()
-			.find(|(_, decl)| decl.ty == ty)
-			.map(|(&node, _)| node);
-		self.decls_of_types.insert(ty, decl);
-		decl
-	}
-
-	/// The relation side a field of an object type is, if any.
+	/// The relation side a field of an object type is, if any (whichever
+	/// file declared the relation: `Analysis::relation_sides`).
 	pub(crate) fn relation_side(&mut self, ty: TypeId, name: Sym) -> Option<(u32, RelationSide)> {
-		if self.analysis.relation_fields.is_empty() {
+		if self.analysis.relation_sides.is_empty() {
 			return None;
 		}
-		let decl = self.declaration_of(ty)?;
-		self.analysis.relation_fields.get(&(decl, name)).copied()
+		let ty = match self.types.kind(ty) {
+			TypeKind::Rec(_) => self.types.unfold(ty),
+			_ => ty,
+		};
+		self.analysis.relation_sides.get(&(ty, name)).copied()
 	}
 
 	/// The JavaScript properties of the relation sides of an object type.
 	pub(crate) fn relation_properties(&mut self, ty: TypeId) -> Vec<String> {
-		if self.analysis.relation_fields.is_empty() {
+		if self.analysis.relation_sides.is_empty() {
 			return Vec::new();
 		}
 		let names: Vec<Sym> = self
@@ -91,7 +75,7 @@ impl Generator<'_> {
 
 	/// Whether an object type has relation sides.
 	pub(crate) fn has_relation_sides(&mut self, ty: TypeId) -> bool {
-		if self.analysis.relation_fields.is_empty() {
+		if self.analysis.relation_sides.is_empty() {
 			return false;
 		}
 		let names: Vec<Sym> = self
@@ -108,7 +92,7 @@ impl Generator<'_> {
 	/// Whether a type owns a collection of elements with relation sides: a
 	/// copy of it relinks the copies (`faCopyGraph`).
 	pub(crate) fn owns_related_elements(&mut self, ty: TypeId) -> bool {
-		if self.analysis.relation_fields.is_empty() {
+		if self.analysis.relation_sides.is_empty() {
 			return false;
 		}
 		let items: Vec<TypeId> = self
@@ -332,7 +316,9 @@ impl Generator<'_> {
 			_ => return None,
 		};
 		let matches = |g: &Self, reference: CollectionRef| match reference {
-			CollectionRef::Field { name, .. } => g.types.syms.resolve(name) == g.text(collection),
+			CollectionRef::Field { name, .. } | CollectionRef::ExternalField { name, .. } => {
+				g.types.syms.resolve(name) == g.text(collection)
+			}
 			CollectionRef::Module { declaration } => match g.analysis.resolution(collection) {
 				Resolution::Local(symbol) => {
 					let decl = g.analysis.symbols.symbol(symbol).decl_node;
@@ -341,7 +327,17 @@ impl Generator<'_> {
 				}
 				_ => false,
 			},
+			CollectionRef::External { key } => {
+				g.analysis.resolution(collection) == Resolution::External(key)
+			}
 		};
+		// a module-level value of another file reached through a namespace
+		// (`library.people`) has no owner
+		let external = matches!(
+			self.analysis.resolution(collection),
+			Resolution::External(_)
+		);
+		let owner = owner.filter(|_| !external);
 		let mut entries = Vec::new();
 		for id in ids {
 			let relation = self.analysis.relations[id as usize].clone();

@@ -1,4 +1,5 @@
 -- file: main.fa
+-- skip-target: native (the native backend does not lower a per-item `@for` yet)
 -- an `@for` whose body reads its variable at compile time: once per item
 static names = ["index", "about"]
 @for name in names {

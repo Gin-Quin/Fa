@@ -240,11 +240,7 @@ impl Walker<'_> {
 			return None;
 		};
 		let members: Vec<NodeId> = members.iter().collect();
-		let mut place = self.place_of(target)?;
-		for &member in members.iter().take(members.len().saturating_sub(1)) {
-			place = self.member_step(place, member)?;
-		}
-		Some(place)
+		self.access_place(target, &members[..members.len().saturating_sub(1)])
 	}
 
 	/// The type of the receiver of a method call `a.b.method(…)`: `a.b`'s.

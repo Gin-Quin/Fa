@@ -91,11 +91,8 @@ impl Walker<'_> {
 				self.symbol_target(symbol)
 			}
 			View::Access { target, members } => {
-				let mut place = self.place_of(target)?;
-				for member in members.iter() {
-					place = self.member_step(place, member)?;
-				}
-				Some(place)
+				let members: Vec<NodeId> = members.iter().collect();
+				self.access_place(target, &members)
 			}
 			View::Index { target, index } => {
 				let place = self.place_of(target)?;
@@ -108,6 +105,28 @@ impl Walker<'_> {
 			}
 			_ => None,
 		}
+	}
+
+	/// The place of `target.members…`. A value of another file reached
+	/// through namespaces (`library.people`) is the place of its proxy.
+	pub(crate) fn access_place(&mut self, target: NodeId, members: &[NodeId]) -> Option<PlaceId> {
+		let mut members = members.iter().copied();
+		let mut place = match self.place_of(target) {
+			Some(place) => place,
+			None => loop {
+				let member = members.next()?;
+				let Resolution::Local(symbol) = self.a.resolution(member) else {
+					return None;
+				};
+				if !self.is_namespace(symbol) {
+					break self.symbol_target(symbol)?;
+				}
+			},
+		};
+		for member in members {
+			place = self.member_step(place, member)?;
+		}
+		Some(place)
 	}
 
 	/// The place a symbol stands for: the place a `use` or a `for` variable
@@ -303,6 +322,11 @@ impl Walker<'_> {
 		let Some(top) = self.body.functions.last() else {
 			return Owner::Outside;
 		};
+		// a value of another file: its writes are not tracked as effects yet
+		if self.modules.proxies.contains_key(&symbol) || self.modules.aliases.contains_key(&symbol)
+		{
+			return Owner::Outside;
+		}
 		let entry = self.a.symbols.symbol(symbol);
 		let is_param = matches!(
 			entry.kind,
@@ -538,7 +562,16 @@ impl Walker<'_> {
 
 	/// The identity of a module-level value in effect paths.
 	pub(crate) fn module_key(&mut self, symbol: SymbolId) -> crate::ids::DeclKey {
-		let key = self.symbol_key(symbol);
+		// the export of another file: its own key (a function of this file
+		// may change it, `mutates people`)
+		let key = match self.modules.proxies.contains_key(&symbol)
+			|| self.modules.aliases.contains_key(&symbol)
+		{
+			true => self
+				.external_value_key(symbol)
+				.unwrap_or_else(|| self.symbol_key(symbol)),
+			false => self.symbol_key(symbol),
+		};
 		self.module_values.insert(key, symbol);
 		key
 	}
@@ -951,6 +984,13 @@ impl Walker<'_> {
 						{
 							Some((PathRoot::ModuleValue(self.module_key(symbol)), ty))
 						}
+						// the export of another file (`export mutable`)
+						SymbolKind::Let | SymbolKind::Mutable
+							if self.a.symbols.scope(entry.scope).kind == ScopeKind::Imports =>
+						{
+							let ty = self.proxy_type(symbol, node).unwrap_or(TypeId::UNKNOWN);
+							Some((PathRoot::ModuleValue(self.module_key(symbol)), ty))
+						}
 						_ => None,
 					}
 				});
@@ -1174,12 +1214,21 @@ impl Walker<'_> {
 				// EFF011: a declared path nothing in the body changes
 				if cx.coverage.is_some() && !cx.uncovered && self.body_complete(cx) {
 					let (mutates, invalidated) = self.s.types.effects(declared);
+					let module = self.s.module_id(self.file);
 					let unused: Vec<(PathId, bool)> = mutates
 						.iter()
 						.map(|&path| (path, false))
 						.chain(invalidated.iter().map(|&path| (path, true)))
 						.filter(|&(path, invalidates)| {
 							!covers_any(&self.s.types, path, invalidates, &own)
+						})
+						// the writes of another file's value are not tracked yet:
+						// its declaration is accepted (`mutates people`)
+						.filter(|&(path, _)| match self.s.types.path_data(path).0.root {
+							PathRoot::ModuleValue(key) => {
+								self.s.types.decl_key_data(key).module == module
+							}
+							_ => true,
 						})
 						.collect();
 					for (path, invalidates) in unused {

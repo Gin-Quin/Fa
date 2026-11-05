@@ -705,6 +705,15 @@ pub fn is_reactive(tree: &TypedSyntaxTree, n: NodeId) -> bool {
 	)
 }
 
+/// Whether node `n` belongs to a relation declaration: a reverse side
+/// (`c->f`, `in c->f`) or a reference type (`T in c`).
+pub fn is_relation_syntax(tree: &TypedSyntaxTree, n: NodeId) -> bool {
+	matches!(
+		tree.nodes.get(n.index()),
+		Some(Node::Relation { .. } | Node::InRelation { .. } | Node::In { .. })
+	)
+}
+
 /// The view of node `n`. A node index out of range is [`View::Error`].
 /// The generic parameters of a `function` declaration: `(Item)` in the
 /// parenthesized spelling of the transition, `function first(Item) = …`, or

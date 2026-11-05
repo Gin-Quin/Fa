@@ -600,6 +600,12 @@ pub struct Interface {
 	/// The async summaries of its functions, by declaration node
 	/// (`design/async.md` §2.1, `check/tasks.rs`).
 	pub async_summaries: FxHashMap<NodeId, crate::analysis::AsyncSummary>,
+	/// The relations declared by the file (relations across files): their
+	/// collections are named by key or by owner type
+	/// ([`CollectionRef::External`](crate::analysis::CollectionRef),
+	/// `ExternalField`), so that every file whose values may be of their
+	/// types writes and deletes them with both sides.
+	pub relations: Vec<crate::analysis::Relation>,
 }
 
 impl Interface {
@@ -678,6 +684,29 @@ impl Interface {
 			}
 		}
 		parts.push((4, u128::from(self.reads_target), 0, 0));
+		// the relations: their kind, types, sides and collections
+		for relation in &self.relations {
+			use crate::analysis::CollectionRef;
+			let name = |sym: crate::ids::Sym| {
+				rustc_hash::FxBuildHasher.hash_one(types.syms.resolve(sym)) as u128
+			};
+			let collection = |reference: CollectionRef| match reference {
+				CollectionRef::External { key } => types.decl_hash(key),
+				CollectionRef::ExternalField { owner, name: field } => {
+					types.stable_hash(owner) ^ name(field)
+				}
+				CollectionRef::Field { .. } | CollectionRef::Module { .. } => 0,
+			};
+			parts.push((
+				6,
+				types.stable_hash(relation.holder_type) ^ name(relation.direct),
+				kind_hash(SymbolKind::Let) ^ relation.kind as u128,
+				types.stable_hash(relation.target_type)
+					^ relation.reverse.map_or(0, name)
+					^ collection(relation.holder).rotate_left(7)
+					^ collection(relation.target).rotate_left(13),
+			));
+		}
 		parts.sort_unstable();
 		let mut hasher = crate::types::store::StableHasher::new();
 		for (owner, key, kind, ty) in parts {

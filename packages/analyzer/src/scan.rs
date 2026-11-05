@@ -39,6 +39,9 @@ pub struct FileScan {
 	pub export: Option<(NodeId, SymbolKind)>,
 	/// Whether the file declares `reactive` or `derived` values or `watch`es.
 	pub has_reactivity: bool,
+	/// Whether the file may declare relations (reverse sides, reference
+	/// types): the files reading it import them (check/relations.rs).
+	pub has_relations: bool,
 	/// The names of `std` its `use { … } = std.module` bring, by the name
 	/// they take in the file (`check/std_library.rs`).
 	pub std_uses: Vec<(Box<str>, crate::ids::BuiltinId)>,
@@ -144,6 +147,9 @@ pub fn scan(
 		let node = NodeId::new(index);
 		if syntax::is_reactive(tree, node) {
 			out.has_reactivity = true;
+		}
+		if syntax::is_relation_syntax(tree, node) {
+			out.has_relations = true;
 		}
 		match syntax::view(tree, node) {
 			View::Destructuring {

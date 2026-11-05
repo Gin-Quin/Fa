@@ -2,7 +2,8 @@
 //! package fixtures of `tests/packages/` run through `fa run <package>` and
 //! `fa test <package>`, `fa new package`, and the multi-file cases of the
 //! analyzer (`-- file:` sections) that say what they print, written into a
-//! folder and run through `fa run`.
+//! folder and run through `fa run`, on Bun and natively (when the LLVM
+//! backend is built; `-- skip-target: native` leaves a case out there).
 //!
 //! Bun is found on the `PATH` or in `~/.bun/bin`; without it, the tests
 //! print a message and pass.
@@ -768,6 +769,8 @@ struct Case {
 	stdout: Vec<String>,
 	exit: i32,
 	pending: bool,
+	/// `-- skip-target: …`: the targets it doesn't run on.
+	skip_targets: Vec<String>,
 }
 
 /// Reads the `-- file:` sections and the `prints:` / `exit:` annotations.
@@ -777,8 +780,16 @@ fn parse_case(text: &str) -> Option<Case> {
 		stdout: Vec::new(),
 		exit: 0,
 		pending: false,
+		skip_targets: Vec::new(),
 	};
 	for line in text.lines() {
+		if let Some(position) = line.find("-- skip-target:") {
+			case.skip_targets.extend(
+				line[position + "-- skip-target:".len()..]
+					.split_whitespace()
+					.map(str::to_string),
+			);
+		}
 		let trimmed = line.trim_start();
 		if let Some(path) = trimmed.strip_prefix("-- file:") {
 			case.files.push((path.trim().to_string(), String::new()));
@@ -810,6 +821,22 @@ fn multi_file_cases_print_what_they_say() {
 	if !has_bun() {
 		return;
 	}
+	multi_file_cases("bun");
+}
+
+/// The same cases compiled by the LLVM backend (per unit, as `fa run`
+/// compiles a package).
+#[test]
+fn multi_file_cases_print_what_they_say_natively() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	multi_file_cases("native");
+}
+
+/// Runs the multi-file cases that print on a target.
+fn multi_file_cases(target: &str) {
 	let cases = Path::new(env!("CARGO_MANIFEST_DIR")).join("../analyzer/tests/cases");
 	let mut paths = Vec::new();
 	let mut pending = vec![cases.clone()];
@@ -830,10 +857,10 @@ fn multi_file_cases_print_what_they_say() {
 		let Some(case) = parse_case(&fs::read_to_string(path).unwrap()) else {
 			continue;
 		};
-		if case.pending {
+		if case.pending || case.skip_targets.iter().any(|skipped| skipped == target) {
 			continue;
 		}
-		let directory = scratch(&format!("packages-case-{index}"));
+		let directory = scratch(&format!("packages-case-{target}-{index}"));
 		let is_package = case
 			.files
 			.iter()
@@ -850,12 +877,17 @@ fn multi_file_cases_print_what_they_say() {
 			fs::create_dir_all(file.parent().unwrap()).unwrap();
 			fs::write(file, text).unwrap();
 		}
-		let target = if is_package {
+		let program = if is_package {
 			".".to_string()
 		} else {
 			case.files[0].0.clone()
 		};
-		let (stdout, stderr, code) = fa(&["run", &target], &directory, &directory.join("cache"));
+		let option = format!("--target={target}");
+		let (stdout, stderr, code) = fa(
+			&["run", &option, &program],
+			&directory,
+			&directory.join("cache"),
+		);
 		ran += 1;
 		let printed: Vec<String> = stdout.lines().map(str::to_string).collect();
 		if printed != case.stdout || code != case.exit {
@@ -867,6 +899,6 @@ fn multi_file_cases_print_what_they_say() {
 			));
 		}
 	}
-	eprintln!("{ran} multi-file cases ran");
+	eprintln!("{ran} multi-file cases ran on {target}");
 	assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

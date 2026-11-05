@@ -1131,6 +1131,34 @@ fn merge_interface(
 		complete: interface.complete,
 		// node keys and plain data: nothing to translate (check/tasks.rs)
 		async_summaries: interface.async_summaries.clone(),
+		relations: interface
+			.relations
+			.iter()
+			.map(|relation| {
+				use crate::analysis::{CollectionRef, Relation};
+				let mut collection = |reference: CollectionRef| match reference {
+					CollectionRef::External { key } => CollectionRef::External {
+						key: merger.decl_key(key),
+					},
+					CollectionRef::ExternalField { owner, name } => CollectionRef::ExternalField {
+						owner: merger.ty(owner),
+						name: merger.sym(name),
+					},
+					local => local,
+				};
+				let holder = collection(relation.holder);
+				let target = collection(relation.target);
+				Relation {
+					kind: relation.kind,
+					holder_type: merger.ty(relation.holder_type),
+					direct: merger.sym(relation.direct),
+					target_type: merger.ty(relation.target_type),
+					reverse: relation.reverse.map(|reverse| merger.sym(reverse)),
+					holder,
+					target,
+				}
+			})
+			.collect(),
 	}
 }
 

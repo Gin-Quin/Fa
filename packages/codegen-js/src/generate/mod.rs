@@ -164,8 +164,6 @@ pub(crate) struct Generator<'s> {
 	pub(crate) map_aliases: HashMap<SymbolId, (String, String)>,
 	/// What `references.rs` knows of each reference (`use`, `mutable use`).
 	pub(crate) references: HashMap<SymbolId, references::Reference>,
-	/// The declarations of object types, by type (`relations.rs`).
-	decls_of_types: relations::DeclsOfTypes,
 	/// Module-level `let`s of the references read by functions: the
 	/// container and the key of a primitive place (`references.rs`).
 	pub(crate) module_slots: Vec<String>,
@@ -304,7 +302,6 @@ pub(crate) fn generate_module(
 		references: HashMap::new(),
 		referenced_roots: None,
 		module_slots: Vec::new(),
-		decls_of_types: HashMap::new(),
 		requirement_scopes: Vec::new(),
 		provided: HashMap::new(),
 		copies: HashMap::new(),

@@ -43,13 +43,12 @@ pub(crate) type RelationSides = FxHashMap<TypeId, FxHashMap<Sym, Repr>>;
 pub(crate) fn relation_sides<'a>(analyses: impl Iterator<Item = &'a Analysis>) -> RelationSides {
 	let mut sides = RelationSides::default();
 	for analysis in analyses {
-		let type_of = |decl: NodeId| analysis.type_decls.get(&decl).map(|decl| decl.ty);
+		// declared by the file, or by a file it reads (relations across files)
 		for relation in &analysis.relations {
-			let (Some(holder), Some(target)) =
-				(type_of(relation.holder_type), type_of(relation.target_type))
-			else {
+			let (holder, target) = (relation.holder_type, relation.target_type);
+			if holder == TypeId::UNKNOWN || target == TypeId::UNKNOWN {
 				continue;
-			};
+			}
 			let direct = match relation.kind {
 				RelationKind::ManyToMany => Repr::Links(target),
 				_ => Repr::Link(target),
@@ -150,25 +149,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.ok_or_else(|| Error::Llvm("a field without an offset".into()))
 	}
 
-	/// The object type a type declaration declares.
-	fn declared_type(&self, decl: NodeId) -> Result<TypeId, Error> {
-		self.analysis
-			.type_decls
-			.get(&decl)
-			.map(|decl| decl.ty)
-			.ok_or_else(|| Error::Llvm("a relation without its type".into()))
-	}
-
 	/// The offsets of the direct and reverse sides of a relation (the
 	/// direct one twice without a reverse side).
 	fn side_offsets(&self, relation: &Relation) -> Result<(u64, u64), Error> {
-		let holder = self.declared_type(relation.holder_type)?;
-		let direct = self.field_offset(holder, relation.direct)?;
+		let direct = self.field_offset(relation.holder_type, relation.direct)?;
 		let reverse = match relation.reverse {
-			Some(reverse) => {
-				let target = self.declared_type(relation.target_type)?;
-				self.field_offset(target, reverse)?
-			}
+			Some(reverse) => self.field_offset(relation.target_type, reverse)?,
 			None => direct,
 		};
 		Ok((direct, reverse))
@@ -343,18 +329,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(ids) = self.analysis.relation_writes.get(&node).cloned() else {
 			return Ok(());
 		};
-		let Some(decl) = self
-			.analysis
-			.type_decls
-			.iter()
-			.find(|(_, decl)| decl.ty == element_type)
-			.map(|(node, _)| *node)
-		else {
-			return Ok(());
+		let element_type = match self.types().kind(element_type) {
+			fa_analyzer::types::TypeKind::Rec(_) => self.types().unfold(element_type),
+			_ => element_type,
 		};
 		for (name, targets) in pending {
 			let Some(&(id, RelationSide::Direct)) =
-				self.analysis.relation_fields.get(&(decl, name))
+				self.analysis.relation_sides.get(&(element_type, name))
 			else {
 				continue;
 			};
@@ -671,7 +652,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ => return Ok(Vec::new()),
 		};
 		let matches = |this: &Self, reference: CollectionRef| match reference {
-			CollectionRef::Field { name, .. } => {
+			CollectionRef::Field { name, .. } | CollectionRef::ExternalField { name, .. } => {
 				this.types().syms.resolve(name) == this.tree.text(collection.index())
 			}
 			CollectionRef::Module { declaration } => match this.analysis.resolution(collection) {
@@ -682,7 +663,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				_ => false,
 			},
+			CollectionRef::External { key } => {
+				this.analysis.resolution(collection) == Resolution::External(key)
+			}
 		};
+		// a module-level value of another file reached through a namespace
+		// (`library.people`) has no owner
+		let external = matches!(
+			self.analysis.resolution(collection),
+			Resolution::External(_)
+		);
+		let owner = owner.filter(|_| !external);
 		let mut entries = Vec::new();
 		let null = self.pointer_type().const_null();
 		for id in ids {

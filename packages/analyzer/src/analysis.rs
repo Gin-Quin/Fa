@@ -497,7 +497,8 @@ use rustc_hash::FxHashMap;
 
 use crate::diagnostics::Diagnostic;
 use crate::ids::{
-	BuiltinId, FileId, IntervalId, ListId, NodeId, ParamId, ScopeId, SigId, Sym, SymbolId, TypeId,
+	BuiltinId, DeclKey, FileId, IntervalId, ListId, NodeId, ParamId, ScopeId, SigId, Sym, SymbolId,
+	TypeId,
 };
 use crate::intern::Interner;
 use crate::symbols::{Resolution, Symbol, SymbolTable};
@@ -647,12 +648,18 @@ pub struct Analysis {
 	/// `TuplePattern`) of a declaration, a `for` or a parameter: what each
 	/// element reads and binds ([`PatternInfo`]).
 	pub patterns: FxHashMap<NodeId, PatternInfo>,
-	/// The relations declared in the file (advanced brief §8), indexed by
+	/// The relations declared in the file (advanced brief §8), then the
+	/// relations of the other files whose types it may see (declared by the
+	/// files it reads, directly or not: relations across files), indexed by
 	/// the `u32` of the tables below.
 	pub relations: Vec<Relation>,
-	/// The relation sides: by (type declaration node, field name), the
-	/// relation and the side.
+	/// The relation sides declared in the file: by (type declaration node,
+	/// field name), the relation and the side.
 	pub relation_fields: FxHashMap<(NodeId, Sym), (u32, RelationSide)>,
+	/// Every relation side of [`Analysis::relations`]: by (object type,
+	/// field name), the relation and the side. The backends find the sides
+	/// of a value by its type, whichever file declared it.
+	pub relation_sides: FxHashMap<(TypeId, Sym), (u32, RelationSide)>,
 	/// Every write of a direct side (an assignment `x.f = t`, a call
 	/// `x.f.add(t)` / `delete(t)` / `clear()` of a many-to-many side, a
 	/// literal given to `add` that sets direct sides): the relation(s).
@@ -989,12 +996,12 @@ pub struct ItemResults {
 pub struct Relation {
 	/// What a write does (§8.5).
 	pub kind: RelationKind,
-	/// The type declaration whose elements carry the direct side.
-	pub holder_type: NodeId,
+	/// The object type whose elements carry the direct side.
+	pub holder_type: TypeId,
 	/// The direct side (`bestFriend`, `friends`, `spouse`, an owner field).
 	pub direct: Sym,
-	/// The type declaration of the targets.
-	pub target_type: NodeId,
+	/// The object type of the targets.
+	pub target_type: TypeId,
 	/// The reverse side, on the targets (`bestFriendOf`); the direct side
 	/// itself for a symmetric relation; `None` for an owner field.
 	pub reverse: Option<Sym>,
@@ -1034,13 +1041,18 @@ pub enum RelationSide {
 
 /// A collection named by a relation: a field of an owner type (`people` of
 /// `Town`: instantiated with the owner value at each use) or a module-level
-/// value.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// value, of this file or of another one (relations across files).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CollectionRef {
-	/// A field of the type declared by `owner`.
+	/// A field of the type declared by `owner` (in this file).
 	Field { owner: NodeId, name: Sym },
-	/// A module-level value, by its declaration node.
+	/// A module-level value of this file, by its declaration node.
 	Module { declaration: NodeId },
+	/// A module-level value of another file, by its key (what a
+	/// [`Resolution::External`] names it by).
+	External { key: DeclKey },
+	/// A field of an object type declared in another file.
+	ExternalField { owner: TypeId, name: Sym },
 }
 
 /// A destructuring pattern (values brief §16): `let { a, b as c } = o`,
@@ -1331,6 +1343,7 @@ impl Analysis {
 			patterns: FxHashMap::default(),
 			relations: Vec::new(),
 			relation_fields: FxHashMap::default(),
+			relation_sides: FxHashMap::default(),
 			relation_writes: FxHashMap::default(),
 			relation_unlinks: FxHashMap::default(),
 			constants: FxHashMap::default(),

@@ -1,0 +1,52 @@
+-- Relations across files (the module-level form of the relations page):
+-- the collection is exported by `people.fa`, the relation declared by
+-- `Person.fa`, and other files write and delete both sides.
+-- file: library/people.fa
+export mutable: Pool<Person> = []
+-- file: library/Person.fa
+export type = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool<people->bestFriend>
+	friends: Pool<Person in people>
+	friendOf: Pool<in people->friends>
+	mentor: (Person in people)?
+	mentee: (people->mentor)?
+	spouse: (people->spouse)?
+}
+-- file: library/befriend.fa
+export function = (person: Person in people, friend: Person in people) mutates person.bestFriend => {
+	person.bestFriend = friend
+}
+-- file: library/introduce.fa
+export function = () mutates people => {
+	use ana = people.add({ name = "Ana" })
+	use bao = people.add({ name = "Bao" })
+	use cleo = people.add({ name = "Cleo", bestFriend = bao, friends = [ana, bao] })
+	befriend(ana, bao)
+	console.log(bao.bestFriendOf.size, ana.friendOf.size)
+	ana.mentor = bao
+	cleo.mentor = bao
+	console.log(bao.mentee?.name ?? "none", ana.mentor?.name ?? "none")
+	ana.spouse = cleo
+	console.log(cleo.spouse?.name ?? "none")
+	people.delete(bao)
+	console.log(ana.bestFriend?.name ?? "none", cleo.friends.size, cleo.mentor?.name ?? "none")
+}
+-- file: application/main.fa
+export function = () => {
+	library.introduce()
+	use dan = library.people.add({ name = "Dan" })
+	use eve = library.people.add({ name = "Eve", bestFriend = dan })
+	console.log(dan.bestFriendOf.size, library.people.size)
+	library.people.delete(dan)
+	console.log(eve.bestFriend?.name ?? "none")
+	console.log(eve)
+}
+-- prints: 2 1
+-- prints: Cleo none
+-- prints: Ana
+-- prints: none 1 none
+-- prints: 1 4
+-- prints: none
+-- prints: { name = "Eve" }

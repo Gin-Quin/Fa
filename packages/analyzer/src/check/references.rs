@@ -137,13 +137,7 @@ impl Walker<'_> {
 			_ => return None,
 		};
 		// the collection: the target and the members before the method
-		let mut collection = self.place_of(target)?;
-		for (position, &step) in members.iter().enumerate() {
-			if position + 1 == members.len() {
-				break;
-			}
-			collection = self.member_step(collection, step)?;
-		}
+		let collection = self.access_place(target, &members[..members.len() - 1])?;
 		Some(self.places.child(collection, Step::Index(identity)))
 	}
 

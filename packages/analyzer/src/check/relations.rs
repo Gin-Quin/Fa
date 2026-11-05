@@ -28,7 +28,7 @@
 
 use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::analysis::{CollectionRef, Relation, RelationKind, RelationSide};
 use crate::check::Walker;
@@ -38,7 +38,7 @@ use crate::diagnostics::codes::advanced::{
 	REF010, REL001, REL002, REL003, REL004, REL005, REL006, REL007, REL008, REL009, REL010, REL011,
 	REL012, REL013, REL015, REL016, REL018, REL019, REL021,
 };
-use crate::ids::{NodeId, Sym, SymbolId, TypeId};
+use crate::ids::{DeclKey, ModuleId, NodeId, Sym, SymbolId, TypeId};
 use crate::symbols::{Resolution, ScopeKind, SymbolKind};
 use crate::syntax::{self, BindingKind, NodeList, View};
 use crate::types::{CollKind, TypeKind};
@@ -85,6 +85,20 @@ pub(crate) struct SideDecl {
 	/// The collection it names: the targets of a direct side or owner field,
 	/// the holders of a reverse side.
 	collection: Option<CollectionInfo>,
+	/// A side of a relation declared by another file: the index of the
+	/// relation in [`RelationState::imported`] (its `node` and `type_decl`
+	/// mean nothing here).
+	imported: Option<u32>,
+}
+
+/// A relation as paired in this file: the relation, and the type
+/// declarations of its sides (`None` for a relation of another file, whose
+/// types are known).
+#[derive(Clone, Debug)]
+struct Paired {
+	relation: Relation,
+	holder_decl: Option<NodeId>,
+	target_decl: Option<NodeId>,
 }
 
 /// The relation state of a file's walk.
@@ -102,6 +116,17 @@ pub(crate) struct RelationState {
 	unlinks: Vec<(NodeId, CollectionRef)>,
 	/// The type expressions `T in c` (reference types).
 	pub(crate) reference_types: rustc_hash::FxHashSet<NodeId>,
+	/// The relations declared by other files whose types this file may
+	/// see (relations across files), their collections as this file names
+	/// them.
+	imported: Vec<Relation>,
+	/// The modules whose relations are imported.
+	imported_modules: FxHashSet<ModuleId>,
+	/// The object types whose declaring files were looked at.
+	imported_types: FxHashSet<TypeId>,
+	/// The proxy symbol of each module-level collection of another file
+	/// named here (the place of its implied effects).
+	external_collections: FxHashMap<DeclKey, SymbolId>,
 }
 
 impl Walker<'_> {
@@ -260,10 +285,30 @@ impl Walker<'_> {
 				many,
 				inside,
 			} => {
-				let info = self.find_collection(collection, items);
-				let element_ty = info
-					.and_then(|info| info.element_node)
-					.map_or(TypeId::UNKNOWN, |node| self.check_type_expr(node));
+				let mut info = self.find_collection(collection, items);
+				// a collection of another file: its elements are the type of
+				// this file declaring the direct side (both sides of a
+				// relation are declared in one file)
+				if let Some(found) = &mut info
+					&& matches!(found.reference, CollectionRef::External { .. })
+				{
+					let text = self.tree.text(field_node.index()).to_string();
+					// a symmetric side (`spouse: (people->spouse)?`) is its own
+					found.element_decl = self.direct_side_declarer(&text).or_else(|| {
+						(self.s.types.syms.get(&text) == Some(name)).then_some(type_decl)
+					});
+				}
+				let element_ty = match info {
+					Some(CollectionInfo {
+						element_node: Some(node),
+						..
+					}) => self.check_type_expr(node),
+					Some(CollectionInfo {
+						element_decl: Some(decl),
+						..
+					}) => self.declared_type_at(decl, field),
+					_ => TypeId::UNKNOWN,
+				};
 				let direct = self.s.types.syms.intern(self.tree.text(field_node.index()));
 				if !optional && !many {
 					let diagnostic = self.diagnostic(
@@ -348,6 +393,7 @@ impl Walker<'_> {
 			field: name,
 			shape,
 			collection,
+			imported: None,
 		});
 		self.memo(annotation, |_| ty);
 		Some(ty)
@@ -408,11 +454,18 @@ impl Walker<'_> {
 		}
 		// a module-level value
 		let sym = self.s.types.syms.intern(&text);
-		let declaration = match self.a.symbols.lookup(self.body.scope, sym) {
+		let found = self.a.symbols.lookup(self.body.scope, sym);
+		// of another file: named by its key (relations across files)
+		if let Some(symbol) = found
+			&& self.is_proxy(symbol)
+		{
+			return self.external_collection(symbol);
+		}
+		let declaration = match found {
 			Some(symbol)
 				if matches!(
 					self.a.symbols.symbol(symbol).kind,
-					SymbolKind::Let | SymbolKind::Mutable
+					SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
 				) =>
 			{
 				Some(self.a.symbols.symbol(symbol).decl_node)
@@ -435,7 +488,7 @@ impl Walker<'_> {
 			return None;
 		};
 		let mut info = self.collection_info(annotation, CollectionRef::Module { declaration });
-		info.mutable = kind == BindingKind::Mutable;
+		info.mutable = matches!(kind, BindingKind::Mutable | BindingKind::Reactive);
 		Some(info)
 	}
 
@@ -465,6 +518,99 @@ impl Walker<'_> {
 			return Some(self.collection_info(annotation, CollectionRef::Field { owner, name }));
 		}
 		None
+	}
+
+	/// Whether a symbol stands for a declaration of another file (a proxy,
+	/// or an alias of one).
+	fn is_proxy(&self, symbol: SymbolId) -> bool {
+		self.modules.proxies.contains_key(&symbol) || self.modules.aliases.contains_key(&symbol)
+	}
+
+	/// A module-level value of another file named by a relation: its key,
+	/// without analyzing that file (which reads this one, for the type of
+	/// its elements). Its kind and its element type are checked in its own
+	/// file ([`Walker::check_external_collections`]).
+	fn external_collection(&mut self, symbol: SymbolId) -> Option<CollectionInfo> {
+		let kind = self.a.symbols.symbol(symbol).kind;
+		if !matches!(
+			kind,
+			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
+		) {
+			return None;
+		}
+		let key = self.external_value_key(symbol)?;
+		self.relations.external_collections.insert(key, symbol);
+		Some(CollectionInfo {
+			reference: CollectionRef::External { key },
+			kind: None,
+			element_decl: None,
+			element_node: None,
+			mutable: kind != SymbolKind::Let,
+		})
+	}
+
+	/// The type declaration of this file that declares a direct side named
+	/// `field` (a field typed `(T in c)?` or `Pool<T in c>`).
+	fn direct_side_declarer(&self, field: &str) -> Option<NodeId> {
+		let tree = Arc::clone(&self.tree);
+		for index in 0..tree.nodes.len() {
+			let node = NodeId::new(index);
+			let value = match syntax::view(&tree, node) {
+				View::TypeDecl { value, .. } | View::ExportType { value, .. } => value,
+				_ => continue,
+			};
+			let View::Object { items } = syntax::view(&tree, value) else {
+				continue;
+			};
+			for item in items.iter() {
+				let item = match syntax::view(&tree, item) {
+					View::Readonly(inner) => inner,
+					_ => item,
+				};
+				let View::Assignment {
+					target,
+					annotation: Some(annotation),
+					..
+				} = syntax::view(&tree, item)
+				else {
+					continue;
+				};
+				if matches!(syntax::view(&tree, target), View::Name(name) if tree.name(name) == field)
+					&& self.is_reference_annotation(annotation)
+				{
+					return Some(node);
+				}
+			}
+		}
+		None
+	}
+
+	/// Whether a field's annotation is a direct side: `(T in c)?`,
+	/// `Pool<T in c>`.
+	fn is_reference_annotation(&self, annotation: NodeId) -> bool {
+		let inner = match self.view(annotation) {
+			View::Optional(inner) => self.strip_groups(inner),
+			_ => self.strip_groups(annotation),
+		};
+		match self.view(inner) {
+			View::RefType { .. } => true,
+			View::Call { callee, arguments } => {
+				matches!(self.view(callee), View::Name(name) if self.tree.name(name) == "Pool")
+					&& arguments.first().is_some_and(|argument| {
+						matches!(self.view(self.strip_groups(argument)), View::RefType { .. })
+					})
+			}
+			_ => false,
+		}
+	}
+
+	/// The type a type declaration of this file declares, read at `at`
+	/// (the declaration in progress: a recursive reference).
+	fn declared_type_at(&mut self, decl: NodeId, at: NodeId) -> TypeId {
+		match self.a.symbols.symbol_of_decl(decl) {
+			Some(symbol) => self.symbol_type(symbol, at),
+			None => TypeId::UNKNOWN,
+		}
 	}
 
 	/// What a collection's written type says: its kind and element type.
@@ -528,7 +674,7 @@ impl Walker<'_> {
 	/// Whether an assignment target is a relation field of a value that is
 	/// not an element of a collection (a copy): `REL011` replaces the
 	/// mutability error there.
-	pub(super) fn is_relation_copy_write(&self, target: NodeId) -> bool {
+	pub(super) fn is_relation_copy_write(&mut self, target: NodeId) -> bool {
 		let target = self.strip_groups(target);
 		let View::Access {
 			target: holder,
@@ -540,8 +686,8 @@ impl Walker<'_> {
 		let Some(member) = members.first().filter(|_| members.len() == 1) else {
 			return false;
 		};
-		let field = self.tree.text(member.index());
-		if self.side_of(self.type_of(holder), field).is_none() {
+		let field = self.tree.text(member.index()).to_string();
+		if self.side_of(self.type_of(holder), &field).is_none() {
 			return false;
 		}
 		match self.a.resolution(self.strip_groups(holder)) {
@@ -553,20 +699,44 @@ impl Walker<'_> {
 	// ── pairing ──────────────────────────────────────────────────────────
 
 	/// Pairs the direct and reverse sides of the file into relations
-	/// (advanced brief §8.2), and resolves the recorded writes and removals.
+	/// (advanced brief §8.2), imports the relations of the files it reads,
+	/// resolves the recorded writes and removals, and publishes the file's
+	/// relations in its interface (relations across files).
 	pub(super) fn finish_relations(&mut self) {
+		// the relations of the files this one reads: its values may be of
+		// their types (literals, copies and printing skip their sides)
+		self.import_closure_relations();
+		self.check_external_collections();
 		let sides = std::mem::take(&mut self.relations.sides);
 		if sides.is_empty() {
+			let interface = &mut self.s.source_file_mut(self.file).interface;
+			interface.relations.clear();
 			return;
 		}
 		let mut relation_of: Vec<Option<u32>> = vec![None; sides.len()];
 		// a direct side whose reverse side was reported: no `REL001`
 		let mut explained: Vec<bool> = vec![false; sides.len()];
-		let mut relations: Vec<Relation> = Vec::new();
-		let push = |relations: &mut Vec<Relation>, relation: Relation| -> u32 {
+		let mut relations: Vec<Paired> = Vec::new();
+		let push = |relations: &mut Vec<Paired>, relation: Paired| -> u32 {
 			relations.push(relation);
 			(relations.len() - 1) as u32
 		};
+		let local =
+			|kind, holder_decl: NodeId, direct, target_decl: NodeId, reverse, holder, target| {
+				Paired {
+					relation: Relation {
+						kind,
+						holder_type: TypeId::UNKNOWN,
+						direct,
+						target_type: TypeId::UNKNOWN,
+						reverse,
+						holder,
+						target,
+					},
+					holder_decl: Some(holder_decl),
+					target_decl: Some(target_decl),
+				}
+			};
 		for (index, side) in sides.iter().enumerate() {
 			let Shape::Reverse {
 				field,
@@ -576,6 +746,9 @@ impl Walker<'_> {
 			else {
 				continue;
 			};
+			if side.imported.is_some() {
+				continue;
+			}
 			let Some(holder) = side.collection else {
 				continue;
 			};
@@ -585,21 +758,22 @@ impl Walker<'_> {
 			if field == side.field && !many && holder.element_decl == Some(side.type_decl) {
 				let id = push(
 					&mut relations,
-					Relation {
-						kind: RelationKind::Symmetric,
-						holder_type: side.type_decl,
-						direct: field,
-						target_type: side.type_decl,
-						reverse: Some(field),
-						holder: holder.reference,
-						target: holder.reference,
-					},
+					local(
+						RelationKind::Symmetric,
+						side.type_decl,
+						field,
+						side.type_decl,
+						Some(field),
+						holder.reference,
+						holder.reference,
+					),
 				);
 				relation_of[index] = Some(id);
 				continue;
 			}
 			let direct = sides.iter().position(|other| {
-				Some(other.type_decl) == holder.element_decl
+				other.imported.is_none()
+					&& Some(other.type_decl) == holder.element_decl
 					&& other.field == field
 					&& matches!(other.shape, Shape::Direct { .. })
 			});
@@ -607,6 +781,12 @@ impl Walker<'_> {
 				if holder.element_decl.is_some() {
 					let message = format!(
 						"the elements of `{holder_text}` have no direct side `{field_text}`: a reverse side names a field `(T in c)?` or `Pool<T in c>` of the elements of its collection"
+					);
+					let diagnostic = self.diagnostic(&REL008, side.node, message);
+					self.report(diagnostic);
+				} else if matches!(holder.reference, CollectionRef::External { .. }) {
+					let message = format!(
+						"no type of this file declares the direct side `{field_text}`: both sides of a relation are declared in the same file, ex: `{field_text}: (T in {holder_text})?`"
 					);
 					let diagnostic = self.diagnostic(&REL008, side.node, message);
 					self.report(diagnostic);
@@ -665,20 +845,23 @@ impl Walker<'_> {
 				.map_or(holder.reference, |info| info.reference);
 			let id = push(
 				&mut relations,
-				Relation {
+				local(
 					kind,
-					holder_type: direct_side.type_decl,
-					direct: field,
-					target_type: side.type_decl,
-					reverse: Some(side.field),
-					holder: holder.reference,
+					direct_side.type_decl,
+					field,
+					side.type_decl,
+					Some(side.field),
+					holder.reference,
 					target,
-				},
+				),
 			);
 			relation_of[direct] = Some(id);
 			relation_of[index] = Some(id);
 		}
 		for (index, side) in sides.iter().enumerate() {
+			if side.imported.is_some() {
+				continue;
+			}
 			match side.shape {
 				Shape::Direct { many } if relation_of[index].is_none() && !explained[index] => {
 					let Some(target) = side.collection else {
@@ -703,19 +886,31 @@ impl Walker<'_> {
 					};
 					let id = push(
 						&mut relations,
-						Relation {
-							kind: RelationKind::OwnerField,
-							holder_type: side.type_decl,
-							direct: side.field,
-							target_type: target.element_decl.unwrap_or(side.type_decl),
-							reverse: None,
-							holder: target.reference,
-							target: target.reference,
-						},
+						local(
+							RelationKind::OwnerField,
+							side.type_decl,
+							side.field,
+							target.element_decl.unwrap_or(side.type_decl),
+							None,
+							target.reference,
+							target.reference,
+						),
 					);
 					relation_of[index] = Some(id);
 				}
 				_ => {}
+			}
+		}
+		// the types of the sides, now that the declarations are done
+		for paired in &mut relations {
+			paired.relation.holder_type = self.decl_object_type(paired.holder_decl);
+			paired.relation.target_type = self.decl_object_type(paired.target_decl);
+		}
+		// the sides of the relations of other files, after this file's own
+		let count = relations.len() as u32;
+		for (index, side) in sides.iter().enumerate() {
+			if let Some(imported) = side.imported {
+				relation_of[index] = Some(count + imported);
 			}
 		}
 		// the tables of the backends
@@ -723,11 +918,14 @@ impl Walker<'_> {
 			let Some(id) = relation_of[index] else {
 				continue;
 			};
+			if side.imported.is_some() {
+				continue;
+			}
 			let role = match side.shape {
 				Shape::Owner => RelationSide::Owner,
 				Shape::Reverse { field, .. }
 					if field == side.field
-						&& relations[id as usize].kind == RelationKind::Symmetric =>
+						&& relations[id as usize].relation.kind == RelationKind::Symmetric =>
 				{
 					RelationSide::Direct
 				}
@@ -737,6 +935,30 @@ impl Walker<'_> {
 			self.a
 				.relation_fields
 				.insert((side.type_decl, side.field), (id, role));
+		}
+		let mut all: Vec<Relation> = relations
+			.iter()
+			.map(|paired| paired.relation.clone())
+			.collect();
+		all.extend(self.relations.imported.iter().cloned());
+		for (id, relation) in all.iter().enumerate() {
+			let id = id as u32;
+			let direct_role = match relation.kind {
+				RelationKind::OwnerField => RelationSide::Owner,
+				_ => RelationSide::Direct,
+			};
+			self.a
+				.relation_sides
+				.entry((relation.holder_type, relation.direct))
+				.or_insert((id, direct_role));
+			if let Some(reverse) = relation.reverse
+				&& relation.kind != RelationKind::Symmetric
+			{
+				self.a
+					.relation_sides
+					.entry((relation.target_type, reverse))
+					.or_insert((id, RelationSide::Reverse));
+			}
 		}
 		let writes = std::mem::take(&mut self.relations.writes);
 		for (node, side) in writes {
@@ -749,7 +971,7 @@ impl Walker<'_> {
 		}
 		let unlinks = std::mem::take(&mut self.relations.unlinks);
 		for (node, collection) in unlinks {
-			let ids: Vec<u32> = relations
+			let ids: Vec<u32> = all
 				.iter()
 				.enumerate()
 				.filter(|(_, relation)| {
@@ -761,42 +983,325 @@ impl Walker<'_> {
 				self.a.relation_unlinks.insert(node, ids);
 			}
 		}
-		self.a.relations = relations;
+		// what the other files see of the file's own relations
+		let published: Vec<Relation> = relations
+			.iter()
+			.map(|paired| {
+				let mut relation = paired.relation.clone();
+				relation.holder = self.published_collection(relation.holder);
+				relation.target = self.published_collection(relation.target);
+				relation
+			})
+			.collect();
+		self.s.source_file_mut(self.file).interface.relations = published;
+		self.a.relations = all;
 		self.relations.sides = sides;
+	}
+
+	/// The object type a type declaration of this file declares.
+	fn decl_object_type(&self, decl: Option<NodeId>) -> TypeId {
+		let Some(ty) = decl
+			.and_then(|decl| self.a.type_decls.get(&decl))
+			.map(|decl| decl.ty)
+		else {
+			return TypeId::UNKNOWN;
+		};
+		match self.s.types.kind(ty) {
+			TypeKind::Rec(_) => self.s.types.unfold(ty),
+			_ => ty,
+		}
+	}
+
+	/// A collection as other files name it: by key, or by owner type.
+	fn published_collection(&mut self, reference: CollectionRef) -> CollectionRef {
+		match reference {
+			CollectionRef::Field { owner, name } => CollectionRef::ExternalField {
+				owner: self.decl_object_type(Some(owner)),
+				name,
+			},
+			CollectionRef::Module { declaration } => match self.node_key(declaration) {
+				Some(key) => CollectionRef::External { key },
+				None => reference,
+			},
+			other => other,
+		}
 	}
 
 	/// The name of a collection for messages.
 	fn collection_text(&self, reference: CollectionRef) -> String {
 		match reference {
-			CollectionRef::Field { name, .. } => self.s.types.syms.resolve(name).to_string(),
+			CollectionRef::Field { name, .. } | CollectionRef::ExternalField { name, .. } => {
+				self.s.types.syms.resolve(name).to_string()
+			}
 			CollectionRef::Module { declaration } => match self.view(declaration) {
 				View::Declaration { name, .. } => self.tree.name(name).to_string(),
 				_ => "the collection".to_string(),
 			},
+			CollectionRef::External { key } => {
+				let names = self.s.types.decl_key_data(key).names;
+				self.s.types.sym_list(names).last().map_or_else(
+					|| "the collection".to_string(),
+					|&name| self.s.types.syms.resolve(name).to_string(),
+				)
+			}
+		}
+	}
+
+	// ── relations across files ───────────────────────────────────────────
+
+	/// Imports the relations of the files this one may read that declare
+	/// some (their scan says so), in the order of their paths.
+	fn import_closure_relations(&mut self) {
+		if self.s.source_file(self.file).scan.dependencies.is_empty() {
+			return;
+		}
+		if self.modules.closure.is_none() {
+			self.modules.closure = Some(self.s.dependency_closure(self.file));
+		}
+		let own = self.s.module_id(self.file);
+		let mut modules: Vec<(String, ModuleId)> = self
+			.modules
+			.closure
+			.iter()
+			.flatten()
+			.copied()
+			.filter(|&module| module != own)
+			.map(|module| (self.s.types.module_path(module).to_string(), module))
+			.filter(|(path, _)| self.s.scan_of(path).is_some_and(|scan| scan.has_relations))
+			.collect();
+		modules.sort();
+		for (_, module) in modules {
+			self.import_module_relations(module);
+		}
+	}
+
+	/// Imports the relations of the files that declared the object type
+	/// `ty`, once per type.
+	fn import_relations_for(&mut self, ty: TypeId) {
+		if !matches!(self.s.types.kind(ty), TypeKind::Object(_))
+			|| !self.relations.imported_types.insert(ty)
+		{
+			return;
+		}
+		let own = self.s.module_id(self.file);
+		let modules: Vec<ModuleId> = self
+			.s
+			.type_origins(ty, |module| module != own)
+			.map(|key| self.s.types.decl_key_data(key).module)
+			.collect();
+		for module in modules {
+			self.import_module_relations(module);
+		}
+	}
+
+	/// Imports the relations another file published. A file of a cycle
+	/// whose walk is in progress hasn't published them yet: this file is
+	/// then walked again once it is done.
+	fn import_module_relations(&mut self, module: ModuleId) {
+		if self.relations.imported_modules.contains(&module) {
+			return;
+		}
+		let Some(interface) = self.s.interface(module) else {
+			return;
+		};
+		let complete = interface.complete;
+		let relations = interface.relations.clone();
+		if !complete {
+			let path = self.s.types.module_path(module).to_string();
+			if self.s.scan_of(&path).is_some_and(|scan| scan.has_relations) {
+				self.modules.deferred = true;
+			}
+			return;
+		}
+		self.relations.imported_modules.insert(module);
+		for relation in relations {
+			self.add_imported_relation(relation);
+		}
+	}
+
+	/// Registers a relation of another file: its collections as this file
+	/// names them, and its sides by type.
+	fn add_imported_relation(&mut self, relation: Relation) {
+		let mut relation = relation;
+		relation.holder = self.localized_collection(relation.holder);
+		relation.target = self.localized_collection(relation.target);
+		let id = self.relations.imported.len() as u32;
+		let direct = relation.direct;
+		let (direct_shape, reverse_shape) = match relation.kind {
+			RelationKind::OneToMany => (
+				Shape::Direct { many: false },
+				Some(Shape::Reverse {
+					field: direct,
+					many: true,
+					inside: false,
+				}),
+			),
+			RelationKind::OneToOne => (
+				Shape::Direct { many: false },
+				Some(Shape::Reverse {
+					field: direct,
+					many: false,
+					inside: false,
+				}),
+			),
+			RelationKind::ManyToMany => (
+				Shape::Direct { many: true },
+				Some(Shape::Reverse {
+					field: direct,
+					many: true,
+					inside: true,
+				}),
+			),
+			RelationKind::Symmetric => (
+				Shape::Reverse {
+					field: direct,
+					many: false,
+					inside: false,
+				},
+				None,
+			),
+			RelationKind::OwnerField => (Shape::Owner, None),
+		};
+		self.push_imported_side(relation.holder_type, direct, direct_shape, id);
+		if let (Some(reverse), Some(shape)) = (relation.reverse, reverse_shape) {
+			self.push_imported_side(relation.target_type, reverse, shape, id);
+		}
+		self.relations.imported.push(relation);
+	}
+
+	/// A side of a relation of another file, found by type.
+	fn push_imported_side(&mut self, ty: TypeId, field: Sym, shape: Shape, id: u32) {
+		if self.relations.by_type.contains_key(&(ty, field)) {
+			return;
+		}
+		let index = self.relations.sides.len();
+		self.relations.sides.push(SideDecl {
+			node: NodeId(u32::MAX),
+			type_decl: NodeId(u32::MAX),
+			field,
+			shape,
+			collection: None,
+			imported: Some(id),
+		});
+		self.relations.by_type.insert((ty, field), index);
+	}
+
+	/// A collection of a published relation as this file names it: its own
+	/// module-level value by its declaration.
+	fn localized_collection(&mut self, reference: CollectionRef) -> CollectionRef {
+		let CollectionRef::External { key } = reference else {
+			return reference;
+		};
+		if self.s.types.decl_key_data(key).module != self.s.module_id(self.file) {
+			return reference;
+		}
+		if let Some(&symbol) = self.modules.keyed.get(&key) {
+			return CollectionRef::Module {
+				declaration: self.a.symbols.symbol(symbol).decl_node,
+			};
+		}
+		if let Some((node, export)) = self.modules.export
+			&& self.symbol_key(export) == key
+		{
+			return CollectionRef::Module { declaration: node };
+		}
+		reference
+	}
+
+	/// The module-level collections of this file that relations of the
+	/// files it reads name (they read this file for the type of their
+	/// elements): a `Pool`, a `Columnar` or their growing variants
+	/// (`REL003`), of the type that declares the sides (`REL004`).
+	fn check_external_collections(&mut self) {
+		let own: Vec<Relation> = self
+			.relations
+			.imported
+			.iter()
+			.filter(|relation| {
+				matches!(relation.holder, CollectionRef::Module { .. })
+					|| matches!(relation.target, CollectionRef::Module { .. })
+			})
+			.cloned()
+			.collect();
+		for relation in own {
+			for (reference, elements) in [
+				(relation.holder, relation.holder_type),
+				(relation.target, relation.target_type),
+			] {
+				let CollectionRef::Module { declaration } = reference else {
+					continue;
+				};
+				let Some(symbol) = self.a.symbols.symbol_of_decl(declaration) else {
+					continue;
+				};
+				let ty = self.a.symbols.symbol(symbol).ty;
+				let TypeKind::Collection(kind, item, _) = self.s.types.kind(ty) else {
+					continue;
+				};
+				let name = self
+					.s
+					.types
+					.syms
+					.resolve(self.a.symbols.symbol(symbol).name)
+					.to_string();
+				if !has_stable_addresses(kind) {
+					if self.reported_once.insert((declaration, REL003.id)) {
+						let message = format!(
+							"`{name}` is a `{}`, whose elements move: a relation of another file links them, which needs a `Pool`, a `Columnar`, a `GrowingPool` or a `GrowingColumnar`",
+							kind.name()
+						);
+						let diagnostic = self.diagnostic(&REL003, declaration, message);
+						self.report(diagnostic);
+					}
+					continue;
+				}
+				let item = match self.s.types.kind(item) {
+					TypeKind::Rec(_) => self.s.types.unfold(item),
+					_ => item,
+				};
+				if item != elements
+					&& item != TypeId::UNKNOWN
+					&& elements != TypeId::UNKNOWN
+					&& self.reported_once.insert((declaration, REL004.id))
+				{
+					let message = format!(
+						"a relation of another file links the elements of `{name}` as `{}`, but they are `{}`",
+						self.s.types.display(elements),
+						self.s.types.display(item)
+					);
+					let diagnostic = self.diagnostic(&REL004, declaration, message);
+					self.report(diagnostic);
+				}
+			}
 		}
 	}
 
 	// ── reads and writes ─────────────────────────────────────────────────
 
 	/// Whether `field` of a value of type `ty` is a reverse relation side.
-	pub(crate) fn is_reverse_side(&self, ty: TypeId, field: &str) -> bool {
+	pub(crate) fn is_reverse_side(&mut self, ty: TypeId, field: &str) -> bool {
 		self.side_of(ty, field)
 			.is_some_and(|side| matches!(self.relations.sides[side].shape, Shape::Reverse { .. }))
 	}
 
 	/// Whether `field` of a value of type `ty` is a relation side (written
 	/// by the writes of its other side too: never narrowed).
-	pub(crate) fn is_relation_side(&self, ty: TypeId, field: &str) -> bool {
-		!self.relations.by_type.is_empty() && self.side_of(ty, field).is_some()
+	pub(crate) fn is_relation_side(&mut self, ty: TypeId, field: &str) -> bool {
+		self.side_of(ty, field).is_some()
 	}
 
-	/// The relation field `field` of a value of type `ty`, if any.
-	fn side_of(&self, ty: TypeId, field: &str) -> Option<usize> {
+	/// The relation field `field` of a value of type `ty`, if any: declared
+	/// in this file, or by the file that declared the type.
+	fn side_of(&mut self, ty: TypeId, field: &str) -> Option<usize> {
 		let ty = match self.s.types.kind(ty) {
 			TypeKind::Rec(_) => self.s.types.unfold(ty),
 			_ => ty,
 		};
 		let sym = self.s.types.syms.get(field)?;
+		if let Some(&side) = self.relations.by_type.get(&(ty, sym)) {
+			return Some(side);
+		}
+		self.import_relations_for(ty);
 		self.relations.by_type.get(&(ty, sym)).copied()
 	}
 
@@ -834,9 +1339,6 @@ impl Walker<'_> {
 	/// `x.f = t` (and `x = literal`): the checks of a relation write
 	/// (advanced brief §8.4). Called after the assignment is checked.
 	pub(super) fn check_relation_write(&mut self, n: NodeId, target: NodeId, value: NodeId) {
-		if self.relations.by_type.is_empty() {
-			return;
-		}
 		let target = self.strip_groups(target);
 		match self.view(target) {
 			View::Access {
@@ -1002,11 +1504,7 @@ impl Walker<'_> {
 		let base = match self.view(self.strip_groups(callee)) {
 			View::Access { target, members } => {
 				let members: Vec<NodeId> = members.iter().collect();
-				let mut place = self.place_of(target);
-				for &member in &members[..members.len().saturating_sub(1)] {
-					place = place.and_then(|place| self.member_step(place, member));
-				}
-				place
+				self.access_place(target, &members[..members.len().saturating_sub(1)])
 			}
 			_ => None,
 		};
@@ -1116,49 +1614,93 @@ impl Walker<'_> {
 		match members.len() {
 			0 => None,
 			1 => self.collection_ref(target),
-			count => {
-				let member = members[count - 2];
-				let owner_ty = if count == 2 {
-					self.type_of(target)
-				} else {
-					self.type_of(members[count - 3])
-				};
-				let owner = *self.decls_by_type.get(&owner_ty)?.first()?;
-				let name = self.s.types.syms.intern(self.tree.text(member.index()));
-				Some(CollectionRef::Field { owner, name })
-			}
+			count => self.member_collection_ref(target, &members[..count - 1]),
 		}
 	}
 
 	/// The collection a receiver names: a field of an owner type, or a
-	/// module-level value.
+	/// module-level value (of this file or of another one).
 	fn collection_ref(&mut self, receiver: NodeId) -> Option<CollectionRef> {
 		let receiver = self.strip_groups(receiver);
 		match self.view(receiver) {
 			View::Access { target, members } => {
-				let member = members.last()?;
-				let owner_ty = if members.len() == 1 {
-					self.type_of(target)
-				} else {
-					self.type_of(members.get(members.len() - 2)?)
-				};
-				let owner = *self.decls_by_type.get(&owner_ty)?.first()?;
-				let name = self.s.types.syms.intern(self.tree.text(member.index()));
-				Some(CollectionRef::Field { owner, name })
+				let members: Vec<NodeId> = members.iter().collect();
+				self.member_collection_ref(target, &members)
 			}
 			View::Name(_) => {
 				let Resolution::Local(symbol) = self.a.resolution(receiver) else {
 					return None;
 				};
+				if self.is_proxy(symbol) {
+					return self.external_collection_ref(symbol);
+				}
 				let entry = self.a.symbols.symbol(symbol);
-				matches!(entry.kind, SymbolKind::Let | SymbolKind::Mutable).then_some(
-					CollectionRef::Module {
-						declaration: entry.decl_node,
-					},
+				matches!(
+					entry.kind,
+					SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
 				)
+				.then_some(CollectionRef::Module {
+					declaration: entry.decl_node,
+				})
 			}
 			_ => None,
 		}
+	}
+
+	/// The collection `target.members…` names (its last member): a
+	/// module-level value of another file reached through a namespace
+	/// (`library.people`), or a field of an owner type.
+	fn member_collection_ref(
+		&mut self,
+		target: NodeId,
+		members: &[NodeId],
+	) -> Option<CollectionRef> {
+		let (&member, before) = members.split_last()?;
+		if let Resolution::Local(symbol) = self.a.resolution(member)
+			&& self.is_proxy(symbol)
+		{
+			return self.external_collection_ref(symbol);
+		}
+		let owner_ty = match before.last() {
+			Some(&previous) => self.type_of(previous),
+			None => self.type_of(target),
+		};
+		let name = self.s.types.syms.intern(self.tree.text(member.index()));
+		Some(self.field_collection_ref(owner_ty, name))
+	}
+
+	/// The field `name` of a value of type `owner` as a collection: of a
+	/// type of this file by its declaration, else by type.
+	fn field_collection_ref(&mut self, owner: TypeId, name: Sym) -> CollectionRef {
+		if let Some(&decl) = self
+			.decls_by_type
+			.get(&owner)
+			.and_then(|decls| decls.first())
+		{
+			return CollectionRef::Field { owner: decl, name };
+		}
+		let owner = match self.s.types.kind(owner) {
+			TypeKind::Rec(_) => self.s.types.unfold(owner),
+			_ => owner,
+		};
+		CollectionRef::ExternalField { owner, name }
+	}
+
+	/// A module-level value of another file a proxy stands for, as a
+	/// collection.
+	fn external_collection_ref(&mut self, symbol: SymbolId) -> Option<CollectionRef> {
+		if !matches!(
+			self.a.symbols.symbol(symbol).kind,
+			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
+		) {
+			return None;
+		}
+		let key = self.external_value_key(symbol)?;
+		self.relations
+			.external_collections
+			.entry(key)
+			.or_insert(symbol);
+		Some(CollectionRef::External { key })
 	}
 
 	/// `REL016` (D48): a collection that owner fields point into can't be
@@ -1266,11 +1808,31 @@ impl Walker<'_> {
 	// ── implied effects (§8.6, D47) ──────────────────────────────────────
 
 	/// The relations as paired so far, without diagnostics
-	/// ([`Walker::finish_relations`] pairs them for good at the end).
-	fn paired_relations(&self) -> Vec<Relation> {
+	/// ([`Walker::finish_relations`] pairs them for good at the end), then
+	/// the relations of other files.
+	fn paired_relations(&self) -> Vec<Paired> {
 		let sides = &self.relations.sides;
 		let mut relations = Vec::new();
+		let local =
+			|kind, holder_decl: NodeId, direct, target_decl: NodeId, reverse, holder, target| {
+				Paired {
+					relation: Relation {
+						kind,
+						holder_type: TypeId::UNKNOWN,
+						direct,
+						target_type: TypeId::UNKNOWN,
+						reverse,
+						holder,
+						target,
+					},
+					holder_decl: Some(holder_decl),
+					target_decl: Some(target_decl),
+				}
+			};
 		for side in sides {
+			if side.imported.is_some() {
+				continue;
+			}
 			match side.shape {
 				Shape::Reverse {
 					field,
@@ -1281,19 +1843,20 @@ impl Walker<'_> {
 						continue;
 					};
 					if field == side.field && !many && holder.element_decl == Some(side.type_decl) {
-						relations.push(Relation {
-							kind: RelationKind::Symmetric,
-							holder_type: side.type_decl,
-							direct: field,
-							target_type: side.type_decl,
-							reverse: Some(field),
-							holder: holder.reference,
-							target: holder.reference,
-						});
+						relations.push(local(
+							RelationKind::Symmetric,
+							side.type_decl,
+							field,
+							side.type_decl,
+							Some(field),
+							holder.reference,
+							holder.reference,
+						));
 						continue;
 					}
 					let Some(direct) = sides.iter().find(|other| {
-						Some(other.type_decl) == holder.element_decl
+						other.imported.is_none()
+							&& Some(other.type_decl) == holder.element_decl
 							&& other.field == field
 							&& matches!(other.shape, Shape::Direct { .. })
 					}) else {
@@ -1308,36 +1871,55 @@ impl Walker<'_> {
 						(true, true, true) => RelationKind::ManyToMany,
 						_ => continue,
 					};
-					relations.push(Relation {
+					relations.push(local(
 						kind,
-						holder_type: direct.type_decl,
-						direct: field,
-						target_type: side.type_decl,
-						reverse: Some(side.field),
-						holder: holder.reference,
-						target: direct
+						direct.type_decl,
+						field,
+						side.type_decl,
+						Some(side.field),
+						holder.reference,
+						direct
 							.collection
 							.map_or(holder.reference, |info| info.reference),
-					});
+					));
 				}
 				Shape::Owner => {
 					let Some(target) = side.collection else {
 						continue;
 					};
-					relations.push(Relation {
-						kind: RelationKind::OwnerField,
-						holder_type: side.type_decl,
-						direct: side.field,
-						target_type: target.element_decl.unwrap_or(side.type_decl),
-						reverse: None,
-						holder: target.reference,
-						target: target.reference,
-					});
+					relations.push(local(
+						RelationKind::OwnerField,
+						side.type_decl,
+						side.field,
+						target.element_decl.unwrap_or(side.type_decl),
+						None,
+						target.reference,
+						target.reference,
+					));
 				}
 				Shape::Direct { .. } => {}
 			}
 		}
+		relations.extend(self.relations.imported.iter().map(|relation| Paired {
+			relation: relation.clone(),
+			holder_decl: None,
+			target_decl: None,
+		}));
 		relations
+	}
+
+	/// The relation whose direct side is the side `side`.
+	fn relation_of_direct_side(&self, side: usize) -> Option<Relation> {
+		let decl = &self.relations.sides[side];
+		if let Some(imported) = decl.imported {
+			return self.relations.imported.get(imported as usize).cloned();
+		}
+		self.paired_relations()
+			.into_iter()
+			.find(|paired| {
+				paired.holder_decl == Some(decl.type_decl) && paired.relation.direct == decl.field
+			})
+			.map(|paired| paired.relation)
 	}
 
 	/// The place of a relation's collection for the owner `owner` (`None`:
@@ -1352,8 +1934,13 @@ impl Walker<'_> {
 				let symbol = self.a.symbols.symbol_of_decl(declaration)?;
 				Some(self.places.symbol(symbol))
 			}
-			CollectionRef::Field { name, .. } => {
+			CollectionRef::Field { name, .. } | CollectionRef::ExternalField { name, .. } => {
 				Some(self.places.child(owner?, crate::flow::Step::Field(name)))
+			}
+			// a module-level value of another file: its proxy here
+			CollectionRef::External { key } => {
+				let symbol = *self.relations.external_collections.get(&key)?;
+				Some(self.places.symbol(symbol))
 			}
 		}
 	}
@@ -1391,15 +1978,11 @@ impl Walker<'_> {
 			TypeKind::Rec(_) => self.s.types.unfold(ty),
 			_ => ty,
 		};
-		let Some(&side) = self.relations.by_type.get(&(ty, field)) else {
+		let field_text = self.s.types.syms.resolve(field).to_string();
+		let Some(side) = self.side_of(ty, &field_text) else {
 			return out;
 		};
-		let type_decl = self.relations.sides[side].type_decl;
-		let Some(relation) = self
-			.paired_relations()
-			.into_iter()
-			.find(|relation| relation.holder_type == type_decl && relation.direct == field)
-		else {
+		let Some(relation) = self.relation_of_direct_side(side) else {
 			return out;
 		};
 		let owner = self.collection_owner(holder);
@@ -1438,7 +2021,8 @@ impl Walker<'_> {
 			return out;
 		};
 		let owner = self.places.parent(collection);
-		for relation in self.paired_relations() {
+		for paired in self.paired_relations() {
+			let relation = paired.relation;
 			if relation.kind == RelationKind::OwnerField {
 				if relation.holder == reference
 					&& let Some(owner) = owner
@@ -1471,17 +2055,21 @@ impl Walker<'_> {
 		match (entry.parent, entry.step) {
 			(Some(parent), Some(crate::flow::Step::Field(name))) => {
 				let ty = self.place_type(parent)?;
-				let owner = *self.decls_by_type.get(&ty)?.first()?;
-				Some(CollectionRef::Field { owner, name })
+				Some(self.field_collection_ref(ty, name))
 			}
 			(None, _) => {
 				let symbol = self.place_symbol(place)?;
+				if self.is_proxy(symbol) {
+					return self.external_collection_ref(symbol);
+				}
 				let entry = self.a.symbols.symbol(symbol);
-				matches!(entry.kind, SymbolKind::Let | SymbolKind::Mutable).then_some(
-					CollectionRef::Module {
-						declaration: entry.decl_node,
-					},
+				matches!(
+					entry.kind,
+					SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
 				)
+				.then_some(CollectionRef::Module {
+					declaration: entry.decl_node,
+				})
 			}
 			_ => None,
 		}

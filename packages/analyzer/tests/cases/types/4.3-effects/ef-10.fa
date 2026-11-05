@@ -1,4 +1,3 @@
--- pending: M3 (an effect path on a module-level value of another file is EFF008: `Resolution::External` has no place yet)
 -- brief: ✓ ef-10: module-level value mutation declared with its path
 -- file: Person.fa
 export type = { name: String }

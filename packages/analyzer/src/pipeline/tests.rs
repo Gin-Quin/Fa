@@ -135,7 +135,11 @@ fn a_run_publishes_every_interface_and_reports_in_path_order() {
 	assert_eq!(order.len(), 4);
 	for module in &report.modules {
 		assert!(
-			module.analyzed && module.diagnostics.is_empty(),
+			module.analyzed
+				&& module
+					.diagnostics
+					.iter()
+					.all(|diagnostic| diagnostic.code.id == "W-DECL-2"),
 			"{module:?}"
 		);
 		assert!(report.interface(&session, &module.module).is_some());

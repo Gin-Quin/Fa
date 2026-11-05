@@ -10,6 +10,8 @@ pub(super) fn codes(source: &str) -> Vec<&'static str> {
 	session
 		.diagnostics(file)
 		.iter()
+		// the unused-value warning is tested by its own cases
+		.filter(|diagnostic| diagnostic.code.id != "W-DECL-2")
 		.map(|diagnostic| diagnostic.code.id)
 		.collect()
 }
@@ -20,6 +22,8 @@ pub(super) fn analyzed(source: &str) -> (Session, FileId) {
 	let found: Vec<String> = session
 		.diagnostics(file)
 		.iter()
+		// the unused-value warning is tested by its own cases
+		.filter(|diagnostic| diagnostic.code.id != "W-DECL-2")
 		.map(|diagnostic| format!("{} {}", diagnostic.code.id, diagnostic.message))
 		.collect();
 	assert!(found.is_empty(), "{source}\n{found:#?}");

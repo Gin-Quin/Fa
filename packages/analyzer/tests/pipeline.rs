@@ -248,6 +248,8 @@ fn sequential(files: &[(String, String)]) -> BTreeSet<String> {
 			session
 				.diagnostics(file)
 				.iter()
+				// the unused-value warning is tested by its own cases
+				.filter(|found| found.code.id != "W-DECL-2")
 				.map(|found| diagnostic(&module, found))
 				.collect::<Vec<_>>()
 		})
@@ -262,6 +264,8 @@ fn diagnostic_lines(outputs: &str) -> BTreeSet<String> {
 			!line.contains(" analyzed=")
 				&& !line.starts_with("init ")
 				&& !line.starts_with("entry ")
+				// the unused-value warning is tested by its own cases
+				&& !line.contains("W-DECL-2")
 		})
 		.map(|line| format!("{line}\n"))
 		.collect()

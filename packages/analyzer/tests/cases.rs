@@ -23,7 +23,8 @@
 //! after `error`/`warning` is optional and codes may be followed by a note in
 //! parentheses. Every expected diagnostic must be emitted on its line with its
 //! code or an alias; every emitted error or warning must be expected (hints
-//! are ignored).
+//! are ignored, and so is the unused-value warning `W-DECL-2` in the files
+//! that don't name it).
 //!
 //! `FA_STRICT_PENDING=1` makes a pending case that passes fail the run.
 //! `FA_CASES=filter` runs only the cases whose path contains `filter`.
@@ -348,6 +349,8 @@ fn compare(session: &Session, id: fa_analyzer::ids::FileId, file: &CaseFile) -> 
 		.diagnostics(id)
 		.iter()
 		.filter(|d| d.severity != Severity::Hint)
+		// the unused-value warning is checked by the cases that name it
+		.filter(|d| d.code.id != "W-DECL-2" || file.text.contains("W-DECL-2"))
 		.map(|d| {
 			(
 				lines.line(d.location.span.start),

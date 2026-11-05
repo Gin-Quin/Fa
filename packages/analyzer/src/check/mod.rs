@@ -68,6 +68,7 @@ mod type_expr;
 mod type_functions;
 mod type_logic;
 mod type_ops;
+mod unused;
 mod value_params;
 
 pub use tests::is_test_module;
@@ -651,6 +652,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 	walker.finish_moves();
 	// the static sets of reactivity, and its tables (reactivity.rs)
 	walker.finish_reactivity();
+	// the values never used (unused.rs)
+	walker.report_unused();
 
 	let Walker {
 		s, mut a, output, ..

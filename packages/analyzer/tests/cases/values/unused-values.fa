@@ -1,0 +1,12 @@
+-- declaring-values.md, "Unused values": a local value, a parameter or the error of a `catch` never used is W-DECL-2, unless its name starts with `_`
+let moduleValue = 1
+function f = (used: Integer, unused: Integer, _ignored: Integer): Integer => { -- warning: W-DECL-2
+	let local = 2 -- warning: W-DECL-2
+	let _kept = 3
+	mutable written = 0
+	written = 1
+	let value = Integer.parse("4") catch error => 0 -- warning: W-DECL-2
+	let other = Integer.parse("5") catch _error => 0
+	used + value + other
+}
+console.log(f(1, 2, 3))

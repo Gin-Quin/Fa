@@ -1,0 +1,55 @@
+-- skip-target: native-freestanding (JSON needs the C library's floats)
+-- `std.json` of named unions: a member is tagged by a `"type"` property
+-- holding its name (design/decisions.md, "JSON form of named union
+-- members"): an object member's fields are next to it, other data (or an
+-- object with its own `type` field) is under `"value"`, a member without
+-- data is `{ "type": … }` alone, a literal member is the literal itself
+use { Json } = std.json
+
+type Shape = Union {
+	Circle = { radius: Float }
+	Labelled = String
+	Tagged = { type: String, size: Integer }
+	Point
+	Origin = "origin"
+}
+type Drawing = { name: String, shapes: Array<Shape> }
+
+let text = "{{\"name\": \"d\", \"shapes\": [{{\"type\": \"Circle\", \"radius\": 2}}, {{\"type\": \"Labelled\", \"value\": \"hi\"}}, {{\"type\": \"Tagged\", \"value\": {{\"type\": \"t\", \"size\": 3}}}}, {{\"type\": \"Point\"}}, \"origin\"]}}"
+let drawing: Drawing = try Json.parse(text)
+for shape in drawing.shapes {
+	console.log(when shape is {
+		Shape.Circle as { radius } => "circle {radius}"
+		Shape.Labelled as label => "labelled {label}"
+		Shape.Tagged as { type, size } => "tagged {type} {size}"
+		Shape.Point => "point"
+		Shape.Origin => "origin"
+	})
+}
+-- prints: circle 2
+-- prints: labelled hi
+-- prints: tagged t 3
+-- prints: point
+-- prints: origin
+console.log(Json.stringify(drawing))
+-- prints: {"name":"d","shapes":[{"type":"Circle","radius":2},{"type":"Labelled","value":"hi"},{"type":"Tagged","value":{"size":3,"type":"t"}},{"type":"Point"},"origin"]}
+let circle: Shape = try Json.parse("{{\"type\": \"Circle\", \"radius\": 1.5}}")
+console.log(Json.stringify(circle)) -- prints: {"type":"Circle","radius":1.5}
+
+function attempt = (text: String) => {
+	let shape: Shape = Json.parse(text) catch error => {
+		console.log("{error}")
+		return
+	}
+	console.log("parsed", Json.stringify(shape))
+}
+attempt("{{\"type\": \"Square\"}}")
+-- prints: JsonError { message = "the value.type should be one of \"Circle\", \"Labelled\", \"Tagged\", \"Point\", not \"Square\"" }
+attempt("{{\"radius\": 1}}")
+-- prints: JsonError { message = "the value should be one of the members of its union, not object" }
+attempt("{{\"type\": \"Labelled\"}}")
+-- prints: JsonError { message = "the value has no field `value`" }
+attempt("{{\"type\": \"Circle\", \"radius\": \"big\"}}")
+-- prints: JsonError { message = "the value.radius should be a number, not string" }
+attempt("\"elsewhere\"")
+-- prints: JsonError { message = "the value should be one of the members of its union, not string" }

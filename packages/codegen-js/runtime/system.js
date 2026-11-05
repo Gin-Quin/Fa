@@ -252,7 +252,13 @@ export function faMonotonic() {
  *   in declaration order: a field with a default value (`initial`, a
  *   function giving it, else `null`) or optional may be absent (its default
  *   value, else `none`), extra fields are ignored;
- * - `["u", [schema, …]]` an anonymous union: the first member that fits.
+ * - `["u", [schema, …]]` an anonymous union: the first member that fits;
+ * - `["N", [[name, tag, kind, data], …]]` a named union, its members
+ *   tagged by a `"type"` property holding their name: `"e"` a member
+ *   without data (`{ "type": "Empty" }`), `"l"` a literal (`data`, written
+ *   as itself), `"r"` an object (`data` its schema; its fields next to
+ *   `"type"`), `"w"` an object with its own `type` field and `"v"` other
+ *   data (under `"value"`).
  *
  * @param {string} text
  * @param {any} schema
@@ -351,6 +357,28 @@ function faJsonConvert(data, schema, where) {
 			}
 			return value;
 		}
+		case "N": {
+			const tagged = schema[1].filter((/** @type {any} */ member) => member[2] !== "l");
+			for (const [, , kind, literal] of schema[1]) {
+				if (kind === "l" && data === literal) return literal;
+			}
+			const type =
+				data !== null && typeof data === "object" && !Array.isArray(data) ? data.type : undefined;
+			if (typeof type !== "string") throw fail("one of the members of its union");
+			const member = tagged.find((/** @type {any} */ member) => member[0] === type);
+			if (member === undefined) {
+				const names = tagged.map((/** @type {any} */ member) => JSON.stringify(member[0]));
+				throw new JsonError(
+					`${where}.type should be one of ${names.join(", ")}, not ${JSON.stringify(type)}`,
+				);
+			}
+			const [, tag, kind, field] = member;
+			if (kind === "e") return Object.freeze({ $t: tag });
+			if (kind === "r") return Object.assign({ $t: tag }, faJsonConvert(data, field, where));
+			if (data.value === undefined) throw new JsonError(`${where} has no field \`value\``);
+			const value = faJsonConvert(data.value, field, `${where}.value`);
+			return kind === "w" ? Object.assign({ $t: tag }, value) : { $t: tag, $v: value };
+		}
 		case "u": {
 			for (const member of schema[1]) {
 				try {
@@ -394,6 +422,18 @@ function faJsonWrite(value) {
 			return undefined;
 	}
 	if (value === null) return "null";
+	// a member of a named union: tagged by `"type"`, its data under `"value"`
+	// when it isn't an object, or when its object has its own `type` field
+	if (typeof value.$t === "string") {
+		const type = JSON.stringify(value.$t.slice(value.$t.lastIndexOf(".") + 1));
+		if ("$v" in value) {
+			const data = faJsonWrite(value.$v);
+			return data === undefined ? `{"type":${type}}` : `{"type":${type},"value":${data}}`;
+		}
+		const fields = faJsonWrite(Object.fromEntries(Object.entries(value).filter(([key]) => key !== "$t")));
+		if (Object.hasOwn(value, "type")) return `{"type":${type},"value":${fields}}`;
+		return fields === "{}" ? `{"type":${type}}` : `{"type":${type},${fields.slice(1)}`;
+	}
 	if (Array.isArray(value) || value instanceof Set) {
 		return `[${Array.from(value, (item) => faJsonWrite(item) ?? "null").join(",")}]`;
 	}

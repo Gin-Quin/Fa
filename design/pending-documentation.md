@@ -61,3 +61,7 @@ Make precise: `parallel()` gives a view for one operation, called at once on it:
 ## `documentation/architecture/dependencies.md`, "Sibling packages" (and the table of "Sources")
 
 Add after the paragraph on sibling packages: "A package outside a workspace can depend on a local folder that holds a package, with a relative path too (`shared = "../shared"`). Unlike a sibling package, it is locked like any other source: the lockfile records the path and the hash of its `package.fa`, `dependencies.fa` and `library/`, and a change of these files fails the build until `fa update shared` accepts it." In the table of sources, the row "Sibling package of the workspace" becomes "Local package (a sibling in a workspace, a folder outside one)".
+
+## `documentation/guides/web-server.md`, "Typed request and response bodies" (JSON of named unions)
+
+A member of a named union is read and written tagged by a `"type"` property holding its name (`{ "type": "Circle", "radius": 1 }`); a member without data is `{ "type": "Point" }`, data that isn't an object (or an object with its own `type` field) is under `"value"`, a literal member is the literal. An unknown `"type"` is a `JsonError` naming the accepted members.

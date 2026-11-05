@@ -627,6 +627,10 @@ pub struct Analysis {
 	/// The default values of the fields of types declared in other files,
 	/// which their files evaluated at compile time ([`FieldValue::Constant`]).
 	pub field_constants: Vec<fa_interpreter::Value>,
+	/// The default values of the fields of the object types `Json.parse`
+	/// reads that are declared in other files: their constants
+	/// ([`Analysis::field_constants`]), by type and field name.
+	pub json_defaults: FxHashMap<(TypeId, crate::ids::Sym), u32>,
 	/// The reads that move a move-only value out of its place (a local, a
 	/// parameter, a field of one: `holder.task` returned or passed): the
 	/// place gives the value up (a zero, which its drop skips).
@@ -1312,6 +1316,7 @@ impl Analysis {
 			type_decls: FxHashMap::default(),
 			objects: FxHashMap::default(),
 			field_constants: Vec::new(),
+			json_defaults: FxHashMap::default(),
 			moved_reads: rustc_hash::FxHashSet::default(),
 			patterns: FxHashMap::default(),
 			relations: Vec::new(),

@@ -31,7 +31,7 @@ use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, Poi
 
 use crate::error::Error;
 use crate::lower::values::{IntRepr, Repr, Val};
-use crate::lower::{FAST_CALLING_CONVENTION, Lowering};
+use crate::lower::{FAST_CALLING_CONVENTION, Lowering, Slot};
 
 /// The C type of a parameter or a result.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -729,8 +729,50 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ => None,
 		});
 		let target_type = self.types().pointer_target(pointer_type);
+		// a Fa value in a block of `Pointer.allocate` (no C type): by its
+		// representation
+		let fa_value = target_type.filter(|&target| self.c_type(target, node).is_err());
+		if let Some(target) = fa_value {
+			let repr = self.repr_of(target, node.index())?;
+			let slot = Slot { pointer, repr };
+			match (path, argument) {
+				("Pointer#read", _) => {
+					let value = self.load(slot)?;
+					let copy = self.emit_copy(value)?;
+					return Ok(self.fresh(copy));
+				}
+				("Pointer#write", Some(argument)) => {
+					let value = self.expr(argument)?;
+					if value.repr == Repr::Never {
+						return Ok(value);
+					}
+					let value = self.owned_as(value, repr, Some(argument))?;
+					let old = self.load(slot)?;
+					self.emit_drop(old)?;
+					self.builder
+						.build_store(pointer, value.value.expect("a value"))?;
+					return Ok(Val::void());
+				}
+				("Pointer#free", _) => {
+					let old = self.load(slot)?;
+					self.emit_drop(old)?;
+					self.free_block(pointer, repr)?;
+					return Ok(Val::void());
+				}
+				_ => return Err(self.unsupported(node.index(), "this pointer method")),
+			}
+		}
 		match (path, target_type, argument) {
 			("Pointer#read", Some(target), _) => self.load_c(pointer, target, node),
+			("Pointer#free", Some(target), _) => {
+				let c = self.c_type(target, node)?;
+				let repr = self.repr_of(target, node.index())?;
+				if self.c_llvm_type(c).is_none() {
+					return Err(self.unsupported(node.index(), "`free` of this pointer"));
+				}
+				self.free_block(pointer, repr)?;
+				Ok(Val::void())
+			}
 			("Pointer#write", Some(target), Some(argument)) => {
 				let value = self.expr(argument)?;
 				if value.repr == Repr::Never {
@@ -809,7 +851,51 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
 		let pointer = value.value.expect("a pointer").into_pointer_value();
+		// a Fa value of `Pointer.allocate`: a view of it
+		if self.c_type(target, node).is_err() {
+			let repr = self.repr_of(target, node.index())?;
+			return self.load(Slot { pointer, repr });
+		}
 		self.load_c(pointer, target, node)
+	}
+
+	/// `Pointer.allocate(value)`: the value moved into a new block of the
+	/// runtime allocator (as `allocate_for` gives boxes), the pointer to it.
+	pub(crate) fn pointer_allocate(
+		&mut self,
+		node: NodeId,
+		info: &fa_analyzer::analysis::CallInfo,
+	) -> Result<Val<'ctx>, Error> {
+		let Some(Argument::Given(argument)) = info.arguments.first() else {
+			return Err(self.unsupported(node.index(), "this `Pointer.allocate`"));
+		};
+		let value = self.expr(*argument)?;
+		if value.repr == Repr::Never {
+			return Ok(value);
+		}
+		let Some(target) = self.types().pointer_target(self.type_of(node)) else {
+			return Err(self.unsupported(node.index(), "this `Pointer.allocate`"));
+		};
+		let repr = self.repr_of(target, node.index())?;
+		let value = self.owned_as(value, repr, Some(*argument))?;
+		let block = self.allocate_for(self.llvm_type(repr))?;
+		if let Some(raw) = value.value {
+			self.builder.build_store(block, raw)?;
+		}
+		Ok(Val::new(Repr::Pointer, block))
+	}
+
+	/// Frees a block of `Pointer.allocate` holding a value of `repr`.
+	fn free_block(&mut self, pointer: PointerValue<'ctx>, repr: Repr) -> Result<(), Error> {
+		let ty = self.llvm_type(repr);
+		let size = BasicType::size_of(&ty).expect("a sized value");
+		let size = self.builder.build_int_cast(size, self.usize, "")?;
+		let wide = matches!(ty, BasicTypeEnum::IntType(int) if int.get_bit_width() > 64);
+		let align = self.usize.const_int(if wide { 16 } else { 8 }, false);
+		let free = self.runtime.free()?;
+		self.builder
+			.build_call(free, &[pointer.into(), size.into(), align.into()], "")?;
+		Ok(())
 	}
 
 	// ── destroy ─────────────────────────────────────────────────────────

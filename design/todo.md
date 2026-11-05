@@ -27,7 +27,7 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Features still missing (from the engineers' reports)
 
-- Native: foreign code: `Pointer.allocate`/`free`, WebAssembly imports, `build.cLibrary`.
+- Native: foreign code: WebAssembly imports, `build.cLibrary`; JS foreign code: `Pointer.allocate`/`free` on Bun.
 - Analyzer: relations across files, `@import`, `@extern` (*foreign code*); implied relation effects for reactivity; `TypeFromSchema` of `Fields` (waits for `Fields` types, which the analyzer doesn't build yet: `AN001`) and inside a generic type other than as its value.
 - Tooling: `fa develop` running again the tests that cover a reloaded change, keeping reactive sources by declaration path across a swap, `--target=web` (reload channel) and `--target=native`; `@import` sources in `dependencies.fa`.
 - Native: compile-time named union members (`Schema` values).

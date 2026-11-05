@@ -1,0 +1,2 @@
+-- docs: foreign-code.md, "Pointers": `Pointer.allocate` and `free` are for foreign files
+let block = Pointer.allocate(41) -- error FFI002

@@ -109,6 +109,76 @@ impl Walker<'_> {
 		}
 	}
 
+	/// `Pointer.allocate(value)` (foreign files only): the value moves into a
+	/// new block of memory, and the call is a `Pointer(T)` to it, `T` the
+	/// value's type (or the target of the expected pointer). `None` for
+	/// another callee.
+	pub(super) fn check_pointer_allocate(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		arguments: crate::syntax::NodeList<'_>,
+		expected: Option<TypeId>,
+	) -> Option<TypeId> {
+		let tree = std::sync::Arc::clone(&self.tree);
+		let View::Access { target, members } = crate::syntax::view(&tree, callee) else {
+			return None;
+		};
+		let member = members.first()?;
+		if members.len() != 1 || tree.text(member.index()) != "allocate" {
+			return None;
+		}
+		let View::Name(name) = crate::syntax::view(&tree, target) else {
+			return None;
+		};
+		if tree.name(name) != "Pointer" {
+			return None;
+		}
+		let sym = self.s.types.syms.intern("Pointer");
+		if self.a.symbols.lookup(self.body.scope, sym).is_some() {
+			return None;
+		}
+		self.require_foreign_file(target, "Pointer");
+		let allocate = crate::builtins::by_path("Pointer.allocate")?;
+		self.set_flag(target, crate::analysis::NodeFlags::TYPE_EXPR);
+		let expected_target = expected.and_then(|expected| self.s.types.pointer_target(expected));
+		let values: Vec<NodeId> = arguments.iter().collect();
+		let [value] = values.as_slice() else {
+			for &value in &values {
+				self.check(value, None);
+			}
+			let diagnostic = self.diagnostic(
+				&crate::diagnostics::codes::values::E_TYPE_1,
+				n,
+				"`Pointer.allocate` takes the value to move into the new block: `Pointer.allocate(value)`",
+			);
+			self.report(diagnostic);
+			return Some(TypeId::UNKNOWN);
+		};
+		let value = *value;
+		let actual = self.check(value, expected_target);
+		if let Some(target_ty) = expected_target {
+			self.sink(value, actual, target_ty);
+		}
+		let pointed = expected_target.unwrap_or_else(|| self.s.types.widen(actual));
+		self.memo(member, |w| {
+			w.set_resolution(member, Resolution::Builtin(allocate));
+			TypeId::UNKNOWN
+		});
+		self.memo(callee, |_| TypeId::UNKNOWN);
+		let ty = self.memo(n, |w| {
+			w.a.calls.insert(
+				n,
+				crate::analysis::CallInfo {
+					callee: crate::analysis::Callee::Builtin(allocate),
+					arguments: vec![crate::analysis::Argument::Given(value)],
+				},
+			);
+			w.s.types.pointer(pointed)
+		});
+		Some(ty)
+	}
+
 	/// `[a, b, c]` where a `CArray(T, n)` is expected: `n` items of type `T`
 	/// (`E-TYPE-1` for another count, or a spread).
 	pub(super) fn check_c_array_literal(

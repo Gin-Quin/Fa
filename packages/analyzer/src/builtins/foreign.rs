@@ -60,6 +60,32 @@ pub static BUILTINS: &[Builtin] = &[
 			throws: None,
 		}),
 	},
+	// `pointer.free()`: destroys the value of a block of `Pointer.allocate`
+	// and frees it
+	Builtin {
+		path: "Pointer#free",
+		kind: Function(&Signature {
+			params: &[],
+			variadic: false,
+			ret: Ty::Is(TypeId::VOID),
+			throws: None,
+		}),
+	},
+	// `Pointer.allocate(value)`: typed by `check/foreign.rs` (the pointer
+	// to the value's type)
+	Builtin {
+		path: "Pointer.allocate",
+		kind: Function(&Signature {
+			params: &[Param {
+				name: "value",
+				ty: Ty::Is(TypeId::UNKNOWN),
+				default: false,
+			}],
+			variadic: false,
+			ret: Ty::Is(TypeId::UNKNOWN),
+			throws: None,
+		}),
+	},
 	Builtin {
 		path: "CString#toString",
 		kind: Function(&Signature {

@@ -78,3 +78,7 @@ Add: a `CArray(T, n)` value is written as an array literal of exactly `n` items 
 ## `documentation/advanced/foreign-code.md`, `:::implementation` ("Native", "State of the implementation")
 
 `CStruct`s by value now follow the C ABI of the target: x86-64 System V, AAPCS64 (homogeneous aggregates of 1 to 4 floats or doubles in floating-point registers, other structs up to 16 bytes as integers, larger ones through a pointer to a copy, or `sret`) and wasm32 (a struct of one scalar is that scalar, others `byval`/`sret`). Windows x64 isn't classified yet. Replace "`CStruct` by value on x86-64 System V only" in the state.
+
+## `documentation/advanced/foreign-code.md`, `:::implementation` ("State of the implementation")
+
+The analyzer and the native backend (and wasm) support `Pointer.allocate(value)` and `pointer.free()`: a Fa value in such a block is read as a copy (`read`), written with the old value destroyed (`write`), and `pointer.value` is a view of it. Bun doesn't yet.

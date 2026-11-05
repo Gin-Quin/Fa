@@ -668,14 +668,18 @@ pub(crate) fn focus_forbidden(base: &Path) -> Option<String> {
 	};
 	let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"])?;
 	let default = git(&["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-		.map(|reference| {
-			reference
-				.rsplit('/')
-				.next()
-				.unwrap_or(&reference)
-				.to_string()
-		})
+		.map(|reference| remote_branch(&reference).to_string())
 		.or_else(|| git(&["config", "init.defaultBranch"]))
 		.unwrap_or_else(|| "main".to_string());
 	(branch == default).then(|| format!("`{branch}` is the default branch"))
 }
+
+/// The branch of a reference of the remote (`origin/release/1.0` →
+/// `release/1.0`).
+fn remote_branch(reference: &str) -> &str {
+	reference.strip_prefix("origin/").unwrap_or(reference)
+}
+
+#[cfg(test)]
+#[path = "project_tests.rs"]
+mod tests;

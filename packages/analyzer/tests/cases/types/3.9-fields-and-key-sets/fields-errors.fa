@@ -25,5 +25,10 @@ function show = <Value, keys: Keys<Value>>(value: Value) => {
 	}
 }
 show<Settings, { port, size }>(settings) -- error: TF010
+show<Settings, { port }>(settings)
 let numbers: Permissions = 1 + 2 -- error: E-TYPE-1
 let either: Permissions | { a: Integer } = { a = 1 }
+let partial = when Permissions.write is { -- error: E-WHEN-1
+	Permissions.read => 1
+	Permissions.write => 2
+}

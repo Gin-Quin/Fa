@@ -246,6 +246,20 @@ impl Generator<'_> {
 			TypeKind::EnumMember(nominal, index) => {
 				format!("[\"E\", [{}]]", self.json_enum_member(nominal, index))
 			}
+			// `["F", [path, …]]`: the dotted paths of the flags (fields.rs)
+			TypeKind::Fields(_) => {
+				let accepted: Vec<String> = self
+					.types
+					.fields_names(ty)
+					.iter()
+					.map(|(name, _)| js::string_literal(name))
+					.collect();
+				format!(
+					"[\"F\", {}, [{}]]",
+					self.fields_names(ty),
+					accepted.join(", ")
+				)
+			}
 			TypeKind::Object(_) => {
 				let fields: Vec<(String, TypeId)> = self
 					.types

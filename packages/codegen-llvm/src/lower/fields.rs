@@ -12,7 +12,6 @@ use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::{ArithOp, NodeList, View};
 use fa_analyzer::types::TypeKind;
 use fa_analyzer::types::store::fields_mask;
-use fa_interpreter::Value;
 use inkwell::IntPredicate;
 use inkwell::values::IntValue;
 
@@ -20,7 +19,7 @@ use crate::error::Error;
 use crate::lower::Lowering;
 use crate::lower::values::{IntRepr, Repr, Val};
 
-impl<'ctx> Lowering<'_, 'ctx> {
+impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// Whether a type is a `Fields` type.
 	pub(crate) fn is_fields(&self, ty: TypeId) -> bool {
 		matches!(self.types().kind(ty), TypeKind::Fields(_))
@@ -328,23 +327,39 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Some((*fields, bits))
 	}
 
-	/// The keys of the key-set parameter an `@for` goes through, in the
-	/// instance being lowered: the dotted paths of the keys of its binding.
-	pub(crate) fn key_set_items(&self, iterable: NodeId) -> Option<Vec<Value>> {
-		let Resolution::Local(symbol) = self.analysis.resolution(iterable) else {
-			return None;
+	/// The keys of an `@for` over a key set and the analyses of its body
+	/// for each: of the `static` key set, or of the application of the
+	/// key-set parameter the instance being lowered stands for.
+	pub(crate) fn key_loop_analyses(
+		&self,
+		node: NodeId,
+		iterable: NodeId,
+	) -> Option<(
+		Vec<String>,
+		&'a [std::sync::Arc<fa_analyzer::analysis::Analysis>],
+	)> {
+		let main: &'a fa_analyzer::analysis::Analysis = self.analysis;
+		let instances = main.key_loop_bodies.get(&node)?;
+		let instance = match instances.as_slice() {
+			[instance] if instance.param.is_none() => instance,
+			_ => {
+				let Resolution::Local(symbol) = main.resolution(iterable) else {
+					return None;
+				};
+				let literal = self.value_bindings.borrow().get(&symbol).copied()?;
+				instances.iter().find(|instance| {
+					instance.key_set == literal
+						&& instance.param.is_none_or(|param| {
+							let repr = self.bindings.borrow().get(&param).copied();
+							repr.and_then(|repr| {
+								self.instance_types.borrow().get(&(param, repr)).copied()
+							})
+							.is_none_or(|subject| subject == instance.subject)
+						})
+				})?
+			}
 		};
-		let literal = self.value_bindings.borrow().get(&symbol).copied()?;
-		let (fields, bits) = self.key_set_bits(literal)?;
-		Some(
-			self.types()
-				.fields_leaves(fields)
-				.iter()
-				.enumerate()
-				.filter(|(index, _)| (bits >> *index as u32) & I256::ONE == I256::ONE)
-				.map(|(_, path)| Value::string(path))
-				.collect(),
-		)
+		Some((instance.keys.clone(), instance.analyses.as_slice()))
 	}
 
 	/// `value[key]`, `key` the variable of an `@for` over a key set: the
@@ -367,7 +382,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if value.repr == Repr::Never {
 			return Ok(value);
 		}
-		let mut ty = self.concrete_type(self.type_of(target));
 		for name in key.split('.') {
 			if let Repr::Rec(rec) = value.repr {
 				value = self.unfold_rec(value, rec, node.index())?;
@@ -383,7 +397,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let Some(position) = position else {
 				return Err(self.unsupported(node.index(), "this key of a key set"));
 			};
-			ty = types.fields_of(object)[position].ty;
 			let repr = self.field_repr(object, position, node.index())?;
 			let structure = value.value.expect("an object").into_struct_value();
 			let raw = self
@@ -391,53 +404,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.build_extract_value(structure, position as u32, "")?;
 			value = Val::new(repr, raw);
 		}
-		if let Some(&param) = self.analysis.key_reads.get(&node) {
-			self.bindings.borrow_mut().insert(param, value.repr);
-			self.instance_types
-				.borrow_mut()
-				.insert((param, value.repr), ty);
-		}
 		Ok(value)
 	}
 
-	/// Binds the type parameter of each read of a field at the key `key`
-	/// (the variable `variable`) in `body` to the field's type, before the
-	/// body is lowered for that key.
-	pub(crate) fn bind_key_reads(
-		&mut self,
-		body: NodeId,
-		variable: fa_analyzer::ids::SymbolId,
-		key: &str,
-	) -> Result<(), Error> {
-		let mut stack = vec![body];
-		while let Some(node) = stack.pop() {
-			stack.extend(fa_analyzer::syntax::children(self.tree, node));
-			let Some(&param) = self.analysis.key_reads.get(&node) else {
-				continue;
-			};
-			let View::Index { target, index } = self.view(node) else {
-				continue;
-			};
-			if self.analysis.resolution(index) != Resolution::Local(variable) {
-				continue;
-			}
-			let mut ty = self.concrete_type(self.type_of(target));
-			for name in key.split('.') {
-				let types = self.types();
-				let object = types.unfold(ty);
-				let Some(field) = types
-					.fields_of(object)
-					.iter()
-					.find(|field| types.syms.resolve(field.name) == name)
-				else {
-					return Err(self.unsupported(node.index(), "this key of a key set"));
-				};
-				ty = field.ty;
-			}
-			let repr = self.repr_of(ty, node.index())?;
-			self.bindings.borrow_mut().insert(param, repr);
-			self.instance_types.borrow_mut().insert((param, repr), ty);
+	/// Forgets the slots of the locals declared in the body of a key loop:
+	/// each key's analysis gives them their own types.
+	pub(crate) fn forget_body_slots(&mut self, body: NodeId) {
+		let span = self.tree.spans[body.index()];
+		let inside: Vec<fa_analyzer::ids::SymbolId> = self
+			.analysis
+			.symbols
+			.symbols()
+			.iter()
+			.enumerate()
+			.filter(|(_, symbol)| {
+				let declared = self.tree.spans[symbol.decl_node.index()];
+				span.start <= declared.start && declared.end <= span.end
+			})
+			.map(|(index, _)| fa_analyzer::ids::SymbolId::new(index))
+			.collect();
+		for symbol in inside {
+			self.slots.remove(&symbol);
 		}
-		Ok(())
 	}
 }

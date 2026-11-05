@@ -1,0 +1,21 @@
+-- the JSON form of a set of flags: the array of the dotted paths of its
+-- flags; a group's name reads as all its flags
+use { Json } = std.json
+
+type MyFields = Fields { foo, bar, nested { baz1, baz2 } }
+type User = { name: String, flags: MyFields }
+
+console.log(Json.stringify(MyFields { foo, nested { baz2 } }))
+console.log(Json.stringify(User { name = "Ana", flags = {} }))
+let parsed: User = Json.parse("{{\"name\": \"Bo\", \"flags\": [\"bar\", \"nested\"]}}") catch error => User { name = "none", flags = {} }
+console.log(parsed.flags, Integer(parsed.flags))
+let wrong: MyFields = Json.parse("[\"foo\", \"qux\"]") catch error => {
+	console.log(error)
+	MyFields { foo }
+}
+console.log(wrong)
+-- prints: ["foo","nested.baz2"]
+-- prints: {"name":"Ana","flags":[]}
+-- prints: { bar, nested { baz1, baz2 } } 14
+-- prints: JsonError { message = "the value[1] should be one of \"foo\", \"bar\", \"nested\", \"nested.baz1\", \"nested.baz2\", not string" }
+-- prints: { foo }

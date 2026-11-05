@@ -1,0 +1,17 @@
+-- note: the never-negative proofs of a package, per unit on both backends:
+-- a wider object of another unit viewed as the type, and a literal of a
+-- generic function of another unit, escape the claim of the field; a
+-- negative index counts from the end
+-- file: library/Cursor.fa
+export type = { at: Integer }
+-- file: library/far.fa
+export function = () => ({ at = -1, extra = 5 })
+-- file: library/wrap.fa
+export function = <Value>(value: Value) => ({ value = value })
+-- file: application/main.fa
+let items = [10, 20, 30]
+function read = (cursor: library.Cursor): Integer => items[cursor.at] catch error => 99
+function open = (box: { value: Integer }): Integer => items[box.value] catch error => 99
+export function = () => {
+	console.log(read(library.far()), read({ at = 1 }), open(library.wrap(-1)), open({ value = 0 })) -- prints: 30 20 30 10
+}

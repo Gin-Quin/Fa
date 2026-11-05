@@ -2850,8 +2850,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let value_of = |this: &mut Self,
 		                value: Option<BasicValueEnum<'ctx>>|
 		 -> Result<Option<BasicValueEnum<'ctx>>, Error> {
+			// moved out of the task (`take_raw`): owned, no copy
 			let value = match value {
-				Some(value) => Val::new(ret, value),
+				Some(value) => this.fresh(Val::new(ret, value)),
 				None => return Ok(None),
 			};
 			let converted = if item_repr == Repr::Union && value.repr != Repr::Union {

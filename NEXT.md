@@ -6,7 +6,7 @@ The compiler work lives on branch `compiler` (lead worktree `.claude/worktrees/l
 
 - `compiler` passes the full suite with LLVM (`cargo test --workspace --no-fail-fast`, under `ulimit -v 8000000`) and the JavaScript runtime tests, at the last merge before this file.
 - Three engineers were stopped mid-shift. Each wrote a `NEXT.md` at the root of its worktree, committed on its branch:
-  - `worktree-agent-aca08cbb0b8394a82` — proofs: JavaScript package builds through re-analysis, proofs in async natively, async soundness tests.
+  - `worktree-agent-aca08cbb0b8394a82` (head `a3d64ac`) — proofs: JavaScript package builds collect claims and rebuild dependent modules from a re-analysis (`c5b9c8a`); proofs enabled in async natively, with async/parallel/worker soundness tests (`a1b2996`). Its full suite was cut short (wasm programs and later crates not run): rerun before merging. Not done: index proofs for packages (units must publish which file stores to each field or collection; plan in its `NEXT.md`). Package build on 1,000 files: user time 22 s → 25 s, 140–165 MB.
   - `worktree-agent-a375af73b4e738f36` — native performance against Goose: compressed 32-bit arena links, `sexp` node packing, `lru` slots, `calc` packed literals.
   - `worktree-agent-a2f066f35c6147839` — analyzer: lengths bounded by 2^48, callbacks that throw in user functions, documented rules still unimplemented.
 - To resume: read each branch's `NEXT.md`, merge the branches whose work is green (`git merge <branch>` in the lead worktree, then the full suite), and start fresh engineers from those notes.

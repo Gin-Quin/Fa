@@ -297,15 +297,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.into_int_value())
 	}
 
-	/// Whether an integer node may hold a negative value (its facts, else its type).
+	/// Whether an integer node may hold a negative value (its facts, else its
+	/// type), unless the places it reads are proven never negative
+	/// (`index_proofs.rs`).
 	pub(crate) fn may_be_negative(&self, node: NodeId) -> bool {
-		if let Some(interval) = self.analysis.interval(node) {
-			return interval.lo < ethnum::I256::ZERO;
-		}
-		match self.types().as_int(self.type_of(node)) {
-			Some(range) => range.min < ethnum::I256::ZERO,
-			None => true,
-		}
+		let negative = if let Some(interval) = self.analysis.interval(node) {
+			interval.lo < ethnum::I256::ZERO
+		} else {
+			match self.types().as_int(self.type_of(node)) {
+				Some(range) => range.min < ethnum::I256::ZERO,
+				None => true,
+			}
+		};
+		negative && !self.proven_non_negative(node)
 	}
 
 	/// The place `array[index]`.

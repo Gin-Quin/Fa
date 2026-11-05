@@ -1,0 +1,12 @@
+-- A cursor counted up from zero in this unit: `get(self.position)` would
+-- count a negative position from the end.
+export type = {
+	text: String
+	position: Integer
+
+	function current = (self): Byte => self.text.bytes().get(self.position) ?? 0
+
+	function advance = (self) mutates self => {
+		self.position += 1
+	}
+}

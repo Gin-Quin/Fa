@@ -399,7 +399,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The positions of the parameters a function type changes (`mutates`,
 	/// `invalidates`).
-	fn changed_parameters(&self, ty: TypeId) -> Vec<usize> {
+	pub(crate) fn changed_parameters(&self, ty: TypeId) -> Vec<usize> {
 		let fa_analyzer::types::TypeKind::Function(sig) = self.types().kind(ty) else {
 			return Vec::new();
 		};

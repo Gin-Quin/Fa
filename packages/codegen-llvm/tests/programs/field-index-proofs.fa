@@ -50,3 +50,10 @@ mutable steps: Array<Step> = [{ back = 0 }, { back = 1 }]
 function back = (items: Array<Step>): UInt32 throws IndexError => try items[try items[1].back].back
 let removed = steps.pop()
 console.log(back(steps) catch error => 99, removed is none) -- prints: 99 false
+
+-- a function given as a value: its calls are not seen, its parameter proves nothing
+type Jump = { to: UInt32 }
+mutable jumps: Array<Jump> = [{ to = 0 }]
+function landing = (at: UInt32): UInt32 throws IndexError => try jumps[at].to
+let pick = landing
+console.log(landing(0) catch error => 99, pick(5) catch error => 99) -- prints: 0 99

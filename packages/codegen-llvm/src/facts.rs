@@ -34,6 +34,14 @@ pub struct FactKind {
 	pub collect: fn(&Session, &[FileId]) -> BTreeSet<String>,
 	/// Merges a unit's contribution into what is merged so far.
 	pub merge: fn(&mut BTreeSet<String>, BTreeSet<String>),
+	/// Turns the merged set into the program's facts, once every unit's is
+	/// merged (the driver, `ProgramFacts::finish`).
+	pub finish: fn(BTreeSet<String>) -> BTreeSet<String>,
+}
+
+/// A merged set that is the program's facts as is.
+pub fn unchanged(merged: BTreeSet<String>) -> BTreeSet<String> {
+	merged
 }
 
 /// A set merged by union: a fact that holds when one unit makes it hold
@@ -49,19 +57,45 @@ pub const REFERENCED_MAPS: &str = "maps.referenced";
 /// the probe array.
 pub const DELETED_WHILE_ITERATED_MAPS: &str = "maps.deleted-while-iterated";
 
+/// The claims of the never-negative places (`proofs.rs`): each unit's part
+/// of them (`proofs::unit_claims`), merged, then resolved by the driver into
+/// the places that fail (`proofs::resolve_claims`).
+pub const PROOF_CLAIMS: &str = "proofs.claims";
+
 /// Every fact kind, in a fixed order.
 pub const KINDS: &[FactKind] = &[
 	FactKind {
 		name: REFERENCED_MAPS,
 		collect: referenced_maps,
 		merge: union,
+		finish: unchanged,
 	},
 	FactKind {
 		name: DELETED_WHILE_ITERATED_MAPS,
 		collect: deleted_while_iterated_maps,
 		merge: union,
+		finish: unchanged,
+	},
+	FactKind {
+		name: PROOF_CLAIMS,
+		collect: proof_claims,
+		merge: union,
+		finish: crate::proofs::resolve_claims_owned,
 	},
 ];
+
+/// See [`PROOF_CLAIMS`].
+fn proof_claims(session: &Session, files: &[FileId]) -> BTreeSet<String> {
+	let types = session.types();
+	let proof_files: Vec<crate::proofs::ProofFile<'_>> = files
+		.iter()
+		.map(|&file| {
+			crate::proofs::ProofFile::new(session.tree(file), session.analysis(file), types)
+				.with_module(session.module(file))
+		})
+		.collect();
+	crate::proofs::unit_claims(&proof_files)
+}
 
 /// The merged facts of a program (or one unit's contribution).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -85,6 +119,20 @@ impl ProgramFacts {
 			let contribution = other.facts.get(kind.name).cloned().unwrap_or_default();
 			(kind.merge)(self.facts.entry(kind.name).or_default(), contribution);
 		}
+	}
+
+	/// Turns every merged set into the program's facts (after the last
+	/// unit's merge).
+	pub fn finish(&mut self) {
+		for kind in KINDS {
+			let merged = self.facts.remove(kind.name).unwrap_or_default();
+			self.facts.insert(kind.name, (kind.finish)(merged));
+		}
+	}
+
+	/// The set of a kind.
+	pub fn set(&self, kind: &str) -> Option<&BTreeSet<String>> {
+		self.facts.get(kind)
 	}
 
 	/// Whether the set of a kind holds a key.

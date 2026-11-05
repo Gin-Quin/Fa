@@ -1,0 +1,7 @@
+-- Never-negative fields (`fa-codegen-llvm`, `proofs.rs`): in a build per unit,
+-- a field is proven never negative only when every unit's stores are.
+export = {
+	name = "cursors"
+	version = "0.1.0"
+	targets = ["bun", "native"]
+}

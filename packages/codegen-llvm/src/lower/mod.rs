@@ -212,6 +212,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The `for` being lowered iterates over parts that are all views
 	/// (`views.rs`): its items are never inline strings.
 	iterating_views: bool,
+	/// Inside a loop over characters lowered twice, for a simple text and
+	/// for another (`for_characters`): a nested one is lowered once.
+	pub(crate) versioned_characters: bool,
 	/// The arrays indexed by a counted loop being lowered, read before it
 	/// (`hoisting.rs`): the array value of each local, and the items and
 	/// length of each such value.
@@ -432,6 +435,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			nullable_references: FxHashMap::default(),
 			reserved_pushes: FxHashMap::default(),
 			iterating_views: false,
+			versioned_characters: false,
 			hoisted_arrays: FxHashMap::default(),
 			hoisted_parts: FxHashMap::default(),
 			expanded_functions: Vec::new(),
@@ -2746,6 +2750,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					self.iterating_views = matches!(self.view(source), View::Name(_))
 						&& matches!(self.analysis.resolution(source),
 							Resolution::Local(symbol) if self.holds_only_views(symbol));
+					if let Repr::Array(_) = value.repr {
+						self.reserve_for_item_appends(body, value)?;
+					}
 					self.for_items(node, pattern, has_index, value, body)
 				}
 				Repr::Map(_) | Repr::Set(_) => self.for_entries(node, pattern, value, body),

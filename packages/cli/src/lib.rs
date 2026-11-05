@@ -53,6 +53,7 @@ mod dependencies;
 mod develop;
 mod format;
 mod help;
+mod hot;
 mod migrate;
 pub mod native;
 mod preview;

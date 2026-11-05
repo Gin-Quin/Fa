@@ -10,11 +10,14 @@
 //! configuration file or lockfile, or a change in another package reloads
 //! the package.
 //!
-//! Hot reloading (decision D43) is not there yet: after a change without
-//! errors, the program is restarted, and a change with errors keeps the
-//! running program until it is fixed (design/decisions.md, "Development
-//! mode"). `FA_DEVELOP_RUNS=<n>` ends the command after `n` runs of the
-//! program or the tests (the tests of the command).
+//! Hot reloading (decision D43, `hot.rs`): while the program runs, an edit
+//! of the package's own sources that keeps the shape of the program swaps
+//! the changed modules in the running Bun process (`develop.hotReload`,
+//! on by default); any other change restarts the program, with the
+//! reason. A change with errors keeps the running program until it is
+//! fixed (design/decisions.md, "Development mode"). `FA_DEVELOP_RUNS=<n>`
+//! ends the command after `n` runs of the program or the tests (the tests
+//! of the command).
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -27,7 +30,7 @@ use std::time::{Duration, SystemTime};
 use fa_codegen_js::{Options, Target};
 
 use crate::workspace::{self, Implements, Selection};
-use crate::{Loaded, USAGE, find_bun, write_run_script};
+use crate::{JsBuild, Loaded, USAGE, find_bun, hot, write_run_script};
 
 /// The state of a watched file: its modification time and length.
 type Stamp = (SystemTime, u64);
@@ -239,6 +242,26 @@ fn apply_edits(loaded: &mut Loaded, modified: &[PathBuf]) -> Vec<String> {
 	shown
 }
 
+/// The modules of the edited files of the package's own sources, with
+/// their texts before the edit.
+fn texts_before(loaded: &Loaded, modified: &[PathBuf]) -> Vec<(String, String)> {
+	let base = &loaded.inner.project.base;
+	modified
+		.iter()
+		.filter_map(|path| {
+			let relative = path.strip_prefix(base).ok()?;
+			let module = relative
+				.to_string_lossy()
+				.replace('\\', "/")
+				.trim_end_matches(".fa")
+				.to_string();
+			let file = loaded.inner.session.loaded_module(&module)?;
+			let text = loaded.inner.session.text(file).to_string();
+			Some((module, text))
+		})
+		.collect()
+}
+
 /// Loads a project again after a change, or applies the edits of its own
 /// sources. `Err` when it can't be read.
 fn refresh(loaded: &mut Loaded, path: Option<&Path>, changes: &Changes) -> Result<String, String> {
@@ -268,9 +291,69 @@ struct Developed {
 	watcher: Watcher,
 	/// The running program.
 	child: Option<Child>,
+	/// The running program as generated, when its modules can be swapped.
+	hot: Option<hot::Running>,
+}
+
+/// What an edit did to the running program.
+enum Reload {
+	/// The changed modules were swapped.
+	Swapped(Vec<String>),
+	/// The program has errors: it keeps running.
+	Errors,
+	/// It must restart, for this reason.
+	Restart(String),
 }
 
 impl Developed {
+	/// Whether the program is generated for hot reloading.
+	fn hot_enabled(&self) -> bool {
+		hot::available()
+			&& self
+				.loaded
+				.inner
+				.configuration
+				.as_ref()
+				.is_none_or(|configuration| configuration.develop.hot_reload)
+	}
+
+	/// After edits of the package's own sources (`edited`: the modules and
+	/// their texts before), swaps the changed modules in the running
+	/// program, or says why it restarts.
+	fn reload(&mut self, edited: &[(String, String)]) -> Reload {
+		if self.loaded.has_errors() {
+			crate::color::eprint_diagnostics(&self.loaded.rendered());
+			eprintln!(
+				"fa develop: {}fix the errors to reload the program",
+				self.prefix()
+			);
+			return Reload::Errors;
+		}
+		let mut options = Options::new(Target::Bun, self.loaded.shown.clone());
+		options.hot = true;
+		let output = match self.loaded.generate(&options) {
+			Ok(JsBuild::Program(output)) => output,
+			Ok(JsBuild::Single(_)) => return Reload::Restart("one module".to_string()),
+			Err(rendered) => {
+				crate::color::eprint_diagnostics(&rendered);
+				return Reload::Errors;
+			}
+		};
+		crate::color::eprint_diagnostics(&self.loaded.rendered());
+		let (Some(running), Some(child)) = (self.hot.as_mut(), self.child.as_ref()) else {
+			return Reload::Restart("the program isn't running".to_string());
+		};
+		let plan = match running.plan(&self.loaded, &output, edited) {
+			Ok(plan) => plan,
+			Err(reason) => return Reload::Restart(reason),
+		};
+		let changed = plan.changed.clone();
+		match running.swap(plan, child.id()) {
+			Ok(()) => Reload::Swapped(changed),
+			Err(reason) => Reload::Restart(reason),
+		}
+	}
+
 	/// Compiles the program and starts it; `false` when it has errors.
 	fn start(&mut self, bun: &Path) -> bool {
 		crate::color::eprint_diagnostics(&self.loaded.rendered());
@@ -281,7 +364,8 @@ impl Developed {
 			);
 			return false;
 		}
-		let options = Options::new(Target::Bun, self.loaded.shown.clone());
+		let mut options = Options::new(Target::Bun, self.loaded.shown.clone());
+		options.hot = self.hot_enabled();
 		let generated = match self.loaded.generate(&options) {
 			Ok(generated) => generated,
 			Err(rendered) => {
@@ -296,6 +380,12 @@ impl Developed {
 				eprintln!("fa develop: can't write the compiled program: {error}");
 				return false;
 			}
+		};
+		self.hot = match &generated {
+			JsBuild::Program(output) if options.hot => {
+				Some(hot::Running::new(&script, output, &self.loaded))
+			}
+			_ => None,
 		};
 		let _ = std::io::stdout().flush();
 		match Command::new(bun).arg(&script).spawn() {
@@ -401,6 +491,7 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 			loaded,
 			watcher,
 			child: None,
+			hot: None,
 		});
 	}
 	let limit = run_limit();
@@ -435,6 +526,42 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 			std::thread::sleep(Duration::from_millis(30));
 			let more = package.watcher.poll();
 			let changes = merge(changes, more);
+			// edits of its own sources while it runs: swapped (D43)
+			if package.child.is_some()
+				&& package.hot.is_some()
+				&& reload_reason(&package.loaded, &changes).is_none()
+			{
+				let before = texts_before(&package.loaded, &changes.modified);
+				let edited = apply_edits(&mut package.loaded, &changes.modified);
+				let reason = match edited.as_slice() {
+					[one] => format!("`{one}` changed"),
+					_ => format!("{} files changed", edited.len()),
+				};
+				match package.reload(&before) {
+					Reload::Swapped(modules) => {
+						let shown: Vec<String> =
+							modules.iter().map(|module| format!("`{module}`")).collect();
+						let what = if shown.is_empty() {
+							"no code changed".to_string()
+						} else {
+							format!("reloaded {}", shown.join(", "))
+						};
+						eprintln!("fa develop: {}{reason}: {what}", package.prefix());
+					}
+					Reload::Errors => {}
+					Reload::Restart(why) => {
+						runs += 1;
+						eprintln!(
+							"fa develop: {}{reason}: restarting ({why})",
+							package.prefix()
+						);
+						package.stop();
+						package.watcher = Watcher::new(watched_roots(&package.loaded));
+						package.start(&bun);
+					}
+				}
+				continue;
+			}
 			let path = package.path.clone();
 			match refresh(&mut package.loaded, path.as_deref(), &changes) {
 				Ok(reason) => {

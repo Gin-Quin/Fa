@@ -28,6 +28,6 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 - Native: relations, columnar per-field layout, reactivity, compile-time maps/sets/enums/ranges (*assigned to the LLVM fourth shift*); foreign code: `CArray` values, `CStruct` by value off x86-64, `Pointer.allocate`/`free`, WebAssembly imports, `build.cLibrary`; JS foreign code: structs by value. Concurrency: `parallel()` views, `WorkerPool`, `for parallel` over growing collections and columnars, requirements and `mutable use` in parallel bodies.
 - Analyzer: relations across files, `@import`, `@extern` (*foreign code*); implied relation effects for reactivity; `TypeFromSchema` of `Fields`, of enumerations with pinned values, and inside a generic type other than as its value; JSON default values and named unions.
+- Tooling: `fa develop` running again the tests that cover a reloaded change, keeping reactive sources by declaration path across a swap, `--target=web` (reload channel) and `--target=native`; `@import` sources in `dependencies.fa`.
 - Native: compile-time named union members (`Schema` values).
-- Tooling: hot reloading by module swap (D43; `fa develop` restarts today).
 - Reviews to schedule: a second analyzer review (M2/M3 features), a review of the tooling (CLI, formatter, workspaces), a final review of both backends.

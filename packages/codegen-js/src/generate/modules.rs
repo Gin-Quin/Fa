@@ -122,8 +122,22 @@ pub(crate) fn program_context(session: &Session, file: FileId) -> ProgramCx {
 }
 
 impl Generator<'_> {
-	/// The local name of an import (declared on first use).
+	/// The local name of an import (declared on first use). In a hot
+	/// build (D43), the expression reading it through the registry of its
+	/// module: `$h0.ns.name`.
 	pub(crate) fn import(&mut self, path: &str, export: &str) -> String {
+		if self.options.hot {
+			self.helper("faHotModule");
+			let holder = match self.hot_modules.get(path) {
+				Some(holder) => holder.clone(),
+				None => {
+					let holder = self.scopes.declare_global("$h");
+					self.hot_modules.insert(path.to_string(), holder.clone());
+					holder
+				}
+			};
+			return format!("{holder}.ns.{export}");
+		}
 		if let Some(local) = self.imports.get(path).and_then(|names| names.get(export)) {
 			return local.clone();
 		}
@@ -328,6 +342,18 @@ impl Generator<'_> {
 			return Vec::new();
 		};
 		let mut lines = Vec::new();
+		// a hot build: each module through its registry (`faHotModule`)
+		let hot: BTreeMap<&String, &String> = self.hot_modules.iter().collect();
+		for (path, holder) in hot {
+			lines.push(format!(
+				"import * as {holder}$m from \"{}\";",
+				relative(&program.path, path)
+			));
+			lines.push(format!(
+				"const {holder} = faHotModule({}, {holder}$m);",
+				crate::js::string_literal(path)
+			));
+		}
 		let imports: BTreeMap<&String, &BTreeMap<String, String>> = self.imports.iter().collect();
 		for (path, names) in imports {
 			let names: Vec<String> = names

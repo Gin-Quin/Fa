@@ -932,6 +932,81 @@ fn develop_runs_the_program_again_after_a_change() {
 	assert!(output.contains("library/greet.fa` changed"), "{output}");
 }
 
+/// `fa develop` swaps the edited module in the running program (D43): its
+/// module-level values are kept; a change of a type restarts it.
+#[test]
+fn develop_swaps_the_edited_modules_in_the_running_program() {
+	if !has_tool("bun") || cfg!(not(unix)) {
+		return;
+	}
+	let scratch = Scratch::new("hot");
+	let package = scratch.write(
+		"farm",
+		&[
+			("package.fa", "export = { name = \"farm\" }\n"),
+			(
+				"library/greet.fa",
+				"type Cow = { name: String }\n\nexport function = (): String => \"one\"\n",
+			),
+			(
+				"application/main.fa",
+				"use { sleep } = std.time\n\nmutable ticks = 0\n\nexport async function = () mutates ticks => {\n\twhile ticks < 60 {\n\t\tticks += 1\n\t\tconsole.log(\"{library.greet()} {ticks}\")\n\t\tawait sleep(50)\n\t}\n}\n",
+			),
+		],
+	);
+	let (child, output) = spawn(&scratch, &["develop"], &package, 2);
+	assert!(
+		wait_for(&output, "one 2\n", 30),
+		"{}",
+		output.lock().unwrap()
+	);
+	// a body edit: swapped, the count goes on
+	fs::write(
+		package.join("library/greet.fa"),
+		"type Cow = { name: String }\n\nexport function = (): String => \"two\"\n",
+	)
+	.unwrap();
+	assert!(
+		wait_for(
+			&output,
+			"fa develop: `library/greet.fa` changed: reloaded `library/greet.js`",
+			20
+		),
+		"{}",
+		output.lock().unwrap()
+	);
+	assert!(wait_for(&output, "two ", 10), "{}", output.lock().unwrap());
+	let text = output.lock().unwrap().clone();
+	let first = text
+		.lines()
+		.find_map(|line| line.strip_prefix("two "))
+		.and_then(|count| count.parse::<u32>().ok())
+		.expect("a count");
+	assert!(first > 2, "the module-level value is kept: {text}");
+	assert!(!text.contains("restarting"), "{text}");
+	// a type changes: restarted
+	fs::write(
+		package.join("library/greet.fa"),
+		"type Cow = { name: String, age: Integer }\n\nexport function = (): String => \"three\"\n",
+	)
+	.unwrap();
+	assert!(
+		wait_for(
+			&output,
+			"`library/greet.fa` changed: restarting (a type of `library/greet.fa` changed)",
+			20
+		),
+		"{}",
+		output.lock().unwrap()
+	);
+	assert!(
+		wait_for(&output, "three 1\n", 20),
+		"{}",
+		output.lock().unwrap()
+	);
+	let _ = finish(child, 30);
+}
+
 #[test]
 fn test_watch_runs_the_tests_again_after_a_change() {
 	if !has_tool("bun") {

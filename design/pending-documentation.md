@@ -93,6 +93,7 @@ Add a paragraph: "Implied effects count for reactivity too. A relation side of a
 Add to the JavaScript lowering: "An element of a type with relation sides carries a symbol-keyed property naming its sides, read by the generic copy, printing, equality and hashing of erased generic code."
 
 
+
 ## `documentation/advanced/foreign-code.md`, "Targets" and `:::implementation` ("JavaScript", "State of the implementation")
 
 `bun` passes `CStruct`s by value now: drop "(a `CStruct` can't be passed by value)" from the table, and from the JavaScript state. Implementation: a C function taking or returning a `CStruct` by value goes through a shim that Bun's TinyCC compiles on its first call (`bun:ffi`'s `cc`): the arguments are written into memory with the C layout the compiler computes, the shim calls the function with them by value under the platform's C ABI, and writes the result back.
@@ -124,3 +125,26 @@ Make precise: the type parameter whose keys a key set holds comes before it (`<V
 ## `documentation/types/fields.md`, a new section "JSON and `when`" (after "String representation")
 
 A set is written in JSON as the array of the paths of its flags, like `toStringArray()`: `Json.stringify(MyFields { foo, nested { baz2 } })` is `["foo","nested.baz2"]`. `Json.parse` reads such an array, a group's name standing for all its flags (`["nested"]`); another name is a `JsonError`. In `when`, an arm whose pattern is a value of the set's type (`Permissions { read, write }`, `Permissions.read`, `{}`) matches an equal set; the other sets need an `else`.
+
+## `documentation/advanced/foreign-code.md`, "Exposing a library to C"
+
+Make precise (decided, see "C libraries" in `design/decisions.md`):
+
+- `fa build --target=native` writes `libfarm.a`, `libfarm.so` and `farm.h` (named after the prefix) into `build/native/` of the package, and no executable. A C program links the static library with `-lm -pthread` and the libraries of `build.link`.
+- The C types of the header: `int8_t`… `uint64_t` for the integers (`c.Int` is an `int32_t`), `bool`, `float`, `double`, `const char *` for a `CString`, `T *` for a `Pointer(T)` (`NULL` for `none`), a `CStruct` defined with its fields in order (`typedef struct farm_Point { int32_t x; float y; } farm_Point;`), a Fa value an opaque `struct` named `prefix_` and its type's name. `Integer`, callbacks and generic functions can't be exported (`FFI014`).
+- A function that `throws` throws the members of one `Errors` type, declared as `typedef enum farm_FarmError { FARM_FARM_ERROR_EMPTY = 1, … } farm_FarmError;`; its result goes through the last parameter, `result`, which may be `NULL`. `farm_last_error_message()` returns `""` before the first error, and isn't reset by a success; a message longer than 1023 bytes is cut.
+- A shared library is loaded at the program's start or with `dlopen` (Python's `ctypes`); only the API is visible. Its module values are dropped when it is unloaded if a `destroy` needs it. The output of `console.log` is flushed at the end of each call, so it keeps its order with C's.
+- The example's `Farm.Error` is a type declared inside `Farm` (`type Error = Errors { … }`): show it, as the first example shows `Self.OpenError`. The header names it `farm_FarmError` (the path joined), its message reads `Error.Empty`.
+
+## `documentation/advanced/foreign-code.md`, `:::implementation` ("Native", "State of the implementation")
+
+- Native: add "A C library's thread-local variables use the general dynamic model (`dlopen` can't give the static TLS the runtime's `initial-exec` variables take), the shared library exports the API through a version script, and the static library is one relocatable object (`ld.lld -r`, then `llvm-objcopy --keep-global-symbol`). The error message goes to a thread-local buffer of 1024 bytes. `.init_array` and `.fini_array` hold the load and unload functions (`DllMain` on Windows is not done)."
+- State: drop "and `build.cLibrary`" from the analyzer's gaps; add to the native state "`build.cLibrary` (Linux and macOS; not on `wasm` yet: the table's "yes: the functions are exports of the module" is not implemented)".
+
+## `documentation/architecture/configuration.md`, "`build`" (`cLibrary`)
+
+Add: "`cLibrary` applies to the `native` target (`FFI013` when the package also lists a JavaScript target: put it in `overrides.native.build`). `prefix` is a C identifier, `header` a file name; the libraries and the header are written into `<output>/native/`."
+
+## `documentation/types/objects.md` (or the page on type declarations), "Types inside a type"
+
+Document what foreign-code.md and relations.md use: a type can declare types in its body (`type Database = { type OpenError = Errors { … } }`). Inside the type they are named directly (`OpenError`) or `Self.OpenError`; outside, `Database.OpenError` (and `library.Database.OpenError` from another file), in types and in values: its members (`Database.OpenError.Failed { code }`), typed literals, `when` patterns, its functions (`Palette.Swatch.make(…)`), `members` of an enumeration. `Error` can name such a type (`Farm.Error`), though the word alone is the prelude's `Error`. A value prints with the type's own name (`Error.Empty`).

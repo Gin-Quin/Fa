@@ -1063,6 +1063,22 @@ fn merge_interface(
 				(decl, functions)
 			})
 			.collect(),
+		nested_types: interface
+			.nested_types
+			.iter()
+			.map(|(&decl, nested)| {
+				let nested = nested
+					.iter()
+					.map(|nested| TypeFunction {
+						name: merger.sym(nested.name),
+						ty: merger.ty(nested.ty),
+						key: merger.decl_key(nested.key),
+						..*nested
+					})
+					.collect();
+				(decl, nested)
+			})
+			.collect(),
 		parameters: interface
 			.parameters
 			.iter()

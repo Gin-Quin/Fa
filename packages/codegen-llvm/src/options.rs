@@ -107,6 +107,47 @@ pub struct Libraries {
 	pub link: Vec<String>,
 	/// Extra folders where the libraries are searched (and found at run time).
 	pub paths: Vec<std::path::PathBuf>,
+	/// Build the program as a C library instead of an executable
+	/// (`build.cLibrary`).
+	pub c_library: Option<CLibrary>,
+}
+
+/// A program built as a C library (`build.cLibrary`, foreign-code.md,
+/// "Exposing a library to C"): `lib<prefix>.a`, `lib<prefix>.so` and the
+/// header, written next to the output; the module values are initialized
+/// when the library is loaded, and the functions of the namespace the API
+/// file exports are C functions named `<prefix>_<name in snake case>`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct CLibrary {
+	/// The header's file name (`farm.h`).
+	pub header: String,
+	/// The prefix of the C names (`farm`).
+	pub prefix: String,
+	/// The API file, as written in the configuration (`library/capi.foreign.fa`).
+	pub api: String,
+}
+
+impl CLibrary {
+	/// The module of the API file (`library/capi.foreign`).
+	pub fn api_module(&self) -> String {
+		let path = self.api.replace('\\', "/");
+		let path = path.trim_start_matches("./");
+		path.strip_suffix(".fa").unwrap_or(path).to_string()
+	}
+
+	/// The static library's file name (`libfarm.a`).
+	pub fn static_name(&self) -> String {
+		format!("lib{}.a", self.prefix)
+	}
+
+	/// The shared library's file name (`libfarm.so`, `libfarm.dylib` on macOS).
+	pub fn shared_name(&self) -> String {
+		if cfg!(target_os = "macos") {
+			format!("lib{}.dylib", self.prefix)
+		} else {
+			format!("lib{}.so", self.prefix)
+		}
+	}
 }
 
 impl Default for Options {

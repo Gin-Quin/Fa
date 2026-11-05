@@ -27,6 +27,8 @@ pub struct UnitSymbols {
 	pub exports: Vec<String>,
 	/// The symbols of other units it uses: `(module, symbol)`.
 	pub needs: Vec<(String, String)>,
+	/// The functions of a C library it exports (`lower/c_library.rs`).
+	pub c_exports: Vec<String>,
 	/// What it holds of the generic function values: tables and indices the
 	/// driver defines (types of the run: an object holding some is never
 	/// cached, so they are not in the text form).
@@ -145,6 +147,9 @@ impl UnitSymbols {
 		for (module, symbol) in &self.needs {
 			text.push_str(&format!("need {module} {symbol}\n"));
 		}
+		for symbol in &self.c_exports {
+			text.push_str(&format!("cexport {symbol}\n"));
+		}
 		text.push_str(&format!(
 			"flags {} {} {}\n",
 			u8::from(self.effectful_drops),
@@ -173,6 +178,7 @@ impl UnitSymbols {
 				"entry" => symbols.entry = Some(rest.to_string()),
 				"box" => symbols.boxes.push(rest.parse().ok()?),
 				"export" => symbols.exports.push(rest.to_string()),
+				"cexport" => symbols.c_exports.push(rest.to_string()),
 				"need" => {
 					let (module, symbol) = rest.split_once(' ')?;
 					symbols.needs.push((module.to_string(), symbol.to_string()));
@@ -240,6 +246,9 @@ pub struct SplitOptions {
 	/// (`facts.rs`): set by `compile_package` for the lowering of the units,
 	/// the instance waves and the entry, and hashed into the cache keys.
 	pub facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
+	/// The program is a C library (`build.cLibrary`): set by
+	/// `compile_package` from its `Libraries`.
+	pub c_library: Option<crate::options::CLibrary>,
 }
 
 /// What [`crate::compile_package`] gives besides the analysis' report.
@@ -284,6 +293,7 @@ mod tests {
 			exit_status: true,
 			exports: vec!["fa.library/a.f<1,2>".to_string()],
 			needs: vec![("library/b".to_string(), "fa.library/b.g".to_string())],
+			c_exports: vec!["farm_count".to_string()],
 			generic_values: GenericValueNeeds::default(),
 		};
 		assert_eq!(UnitSymbols::from_text(&symbols.to_text()), Some(symbols));

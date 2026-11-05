@@ -219,6 +219,127 @@ pub fn link_objects(
 	Ok(())
 }
 
+/// Links the objects of a C library (`build.cLibrary`): the shared library
+/// at `shared` (`cc -shared`, only `exports` visible: a version script) and
+/// the static one at `archive` (`ld.lld -r` into one object, every other
+/// symbol made local by `llvm-objcopy`, then `llvm-ar`). With `split.lto`,
+/// both links optimize the bitcode (ThinLTO, or full LTO). The static
+/// library leaves the libraries of `build.link`, the C library, `libm` and
+/// the threads to the program that links it.
+#[allow(clippy::too_many_arguments)]
+pub fn link_c_library(
+	target: Target,
+	options: &Options,
+	split: Option<&crate::split::SplitOptions>,
+	objects: &[PathBuf],
+	exports: &[String],
+	shared: &Path,
+	archive: &Path,
+	libraries: &Libraries,
+) -> Result<(), Error> {
+	if target != Target::Native {
+		return Err(Error::Unsupported {
+			message: format!(
+				"a C library on the `{}` target (only `native` builds one)",
+				target.name()
+			),
+			location: String::new(),
+		});
+	}
+	let lto = split.is_some_and(|split| split.lto);
+	let jobs = split.map_or(1, |split| match split.jobs {
+		0 => std::thread::available_parallelism().map_or(1, usize::from),
+		jobs => jobs,
+	});
+	let lto_level = match options.opt_level {
+		_ if options.size => "2",
+		crate::OptLevel::O0 | crate::OptLevel::O1 => "1",
+		crate::OptLevel::O2 => "2",
+		crate::OptLevel::O3 => "3",
+	};
+	// the shared library: only the API is visible
+	let script = crate::compile::with_suffix(shared, ".map");
+	let mut text = String::from("{\n  global:\n");
+	for name in exports {
+		text.push_str(&format!("    {name};\n"));
+	}
+	text.push_str("  local: *;\n};\n");
+	std::fs::write(&script, text)?;
+	let mut command = Command::new(env::var_os("CC").unwrap_or_else(|| "cc".into()));
+	command.arg("-shared").args(objects).arg("-o").arg(shared);
+	let mut lld_directory = OsString::from("-B");
+	lld_directory.push(llvm_prefix().join("bin"));
+	command.arg("-fuse-ld=lld").arg(lld_directory);
+	command.arg("-lm").arg("-pthread");
+	let mut version = OsString::from("-Wl,--version-script=");
+	version.push(&script);
+	command.arg(version);
+	if let Some(name) = shared.file_name() {
+		let mut soname = OsString::from("-Wl,-soname,");
+		soname.push(name);
+		command.arg(soname);
+	}
+	if options.optimized() || lto {
+		command.arg("-Wl,--gc-sections");
+	}
+	if lto {
+		command.arg(format!("-Wl,--thinlto-jobs={jobs}"));
+		command.arg(format!("-Wl,--lto-O{lto_level}"));
+		command.arg(format!("-Wl,-mllvm,-import-instr-limit={}", import_limit()));
+	}
+	if options.size {
+		command.args(["-s", "-Wl,--build-id=none"]);
+	}
+	for path in &libraries.paths {
+		command.arg(format!("-L{}", path.display()));
+		command.arg(format!("-Wl,-rpath,{}", path.display()));
+	}
+	for library in &libraries.link {
+		let file = [".a", ".so", ".o", ".dylib"]
+			.iter()
+			.any(|extension| library.ends_with(extension))
+			|| library.contains('/');
+		if file {
+			command.arg(library);
+		} else {
+			command.arg(format!("-l{library}"));
+		}
+	}
+	let linked = checked(&mut command);
+	let _ = std::fs::remove_file(&script);
+	linked?;
+	// the static library: one relocatable object, the API its only globals
+	// (`libfarm.o`: the name of the archive's member)
+	let merged = archive.with_extension("o");
+	let mut command = Command::new(llvm_prefix().join("bin/ld.lld"));
+	command.arg("-r").args(objects).arg("-o").arg(&merged);
+	if lto {
+		command.arg(format!("--thinlto-jobs={jobs}"));
+		command.arg(format!("--lto-O{lto_level}"));
+		command.args(["-mllvm", &format!("-import-instr-limit={}", import_limit())]);
+	}
+	let result = (|| {
+		checked(&mut command)?;
+		let mut command = Command::new(llvm_prefix().join("bin/llvm-objcopy"));
+		for name in exports {
+			command.arg(format!("--keep-global-symbol={name}"));
+		}
+		if options.size {
+			command.arg("--strip-unneeded");
+		}
+		command.arg(&merged);
+		checked(&mut command)?;
+		let _ = std::fs::remove_file(archive);
+		let mut command = Command::new(llvm_prefix().join("bin/llvm-ar"));
+		// `D`: no timestamps, the archive is reproducible
+		command.arg("rcsD").arg(archive).arg(&merged);
+		checked(&mut command)?;
+		Ok(())
+	})();
+	let _ = std::fs::remove_file(&merged);
+	result
+}
+
 /// The functions a `.wasm` module imports from the `fa` module of its
 /// loader (its import section).
 pub fn wasm_imports(path: &Path) -> Result<Vec<String>, Error> {

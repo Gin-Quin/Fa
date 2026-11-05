@@ -72,6 +72,7 @@ codes! {
 	FFI011 = "FFI011", Error, [], "Can't throw or be async";
 	FFI012 = "FFI012", Error, [], "an API function that uses a module-level mutable value not thread-safe; module-level values initialized at load time";
 	FFI013 = "FFI013", Error, [], "cLibrary with a JavaScript target";
+	FFI014 = "FFI014", Error, [], "a cLibrary API that isn't a namespace of functions with C types, throwing one Errors type";
 	MEM001 = "MEM001", Error, [], "a recursive type without an indirection through a union or an optional: \"Node has infinite size\" (next: Node). Recursion through T?, a…";
 	MEM002 = "MEM002", Error, [], "on a later use). Without a binding, the watch lives to the end of its scope; at module level, for the program";
 	MEM003 = "MEM003", Error, [], "a Database can't be copied";

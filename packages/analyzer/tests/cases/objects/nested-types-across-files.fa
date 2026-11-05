@@ -1,0 +1,48 @@
+-- note: types declared inside a type of another file (`library.Farm.Error`):
+-- in types, members, typed literals, patterns and functions
+-- file: library/Farm.fa
+export type = {
+	name: String
+	animals: Int64
+
+	type Error = Errors {
+		Empty
+		TooMany = { count: Int64 }
+	}
+
+	type Animal = {
+		kind: String
+
+		function make = (kind: String): Self => Self { kind }
+	}
+
+	function count = (self): Int64 throws Self.Error => {
+		if self.animals == 0 {
+			throw Self.Error.Empty
+		}
+		if self.animals > 10 {
+			throw Self.Error.TooMany { count = self.animals }
+		}
+		self.animals
+	}
+}
+-- file: application/main.fa
+function describe = (error: library.Farm.Error): String => when error is {
+	library.Farm.Error.Empty => "empty"
+	library.Farm.Error.TooMany as many => "too many: {many.count}"
+}
+
+function attempt = (farm: library.Farm): String => {
+	let count = farm.count() catch error => return describe(error)
+	"{count}"
+}
+
+export function = () => {
+	console.log(attempt(library.Farm { name = "a", animals = 0 })) -- prints: empty
+	console.log(attempt(library.Farm { name = "b", animals = 3 })) -- prints: 3
+	console.log(attempt(library.Farm { name = "c", animals = 30 })) -- prints: too many: 30
+	let animal = library.Farm.Animal { kind = "cow" }
+	console.log(animal.kind, library.Farm.Animal.make("pig").kind) -- prints: cow pig
+	let error: library.Farm.Error = library.Farm.Error.TooMany { count = 2 }
+	console.log(error) -- prints: Error.TooMany { count = 2 }
+}

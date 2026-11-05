@@ -1218,6 +1218,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		target: NodeId,
 		members: NodeList<'_>,
 	) -> Result<Val<'ctx>, Error> {
+		// `Palette.Color.red`, `Self.Shade.Dark`: the types declared inside
+		// types first; the rest reads like a member of the last of them
+		let nested = members
+			.iter()
+			.take_while(|&member| {
+				self.analysis
+					.has_flags(member, fa_analyzer::analysis::NodeFlags::TYPE_EXPR)
+			})
+			.count();
+		if nested > 0
+			&& nested < members.len()
+			&& let Some(inner) = members.get(nested - 1)
+		{
+			return self.member_access(node, inner, members.skip(nested));
+		}
 		let first = members.first().expect("a member");
 		if members.len() == 1
 			&& let Resolution::Builtin(property) = self.analysis.resolution(first)
@@ -1265,9 +1280,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let chain: Vec<NodeId> = before.iter().chain(members.iter()).collect();
 			return self.optional_chain(node, inner, &chain);
 		}
-		// `Color.red`, `E.Boom`: a member of a nominal type
+		// `Color.red`, `E.Boom`: a member of a nominal type; after types
+		// declared inside types (`Database.OpenError.Failed`,
+		// `library.Farm.Error.Empty`), the path before it names types only
+		let nested = members.len() > 1
+			&& members.iter().take(members.len() - 1).any(|member| {
+				self.analysis
+					.has_flags(member, fa_analyzer::analysis::NodeFlags::TYPE_EXPR)
+			});
+		let first = if nested {
+			members.last().unwrap_or(first)
+		} else {
+			first
+		};
 		if let Resolution::Member(nominal, index) = self.analysis.resolution(first)
-			&& members.len() == 1
+			&& (members.len() == 1 || nested)
 		{
 			return match self.node_repr(node)? {
 				Repr::Enum(_) => Ok(Val::new(
@@ -1728,6 +1755,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if let fa_analyzer::types::TypeKind::Sync(_, item) = self.types().kind(guard_type) {
 					current_type = item;
 				}
+				continue;
+			}
+			// `pointer.value` of a Fa value in a block of `Pointer.allocate`:
+			// the block (foreign.rs, `pointer_value`)
+			if let Resolution::Builtin(builtin) = self.analysis.resolution(member)
+				&& fa_analyzer::builtins::get(builtin).path == "Pointer#value"
+				&& slot.repr == Repr::Pointer
+				&& let Some(target) = self.types().pointer_target(current_type)
+				&& self.c_type(target, member).is_err()
+			{
+				let pointer = self
+					.builder
+					.build_load(self.pointer_type(), slot.pointer, "")?
+					.into_pointer_value();
+				slot = Slot {
+					pointer,
+					repr: self.repr_of(target, member.index())?,
+				};
+				current_type = target;
 				continue;
 			}
 			let Resolution::Field(_, index) = self.analysis.resolution(member) else {

@@ -78,8 +78,8 @@ fn main() {
 }
 
 /// Compiles the C++ part of the backend (`shim/`: what the C API of LLVM
-/// lacks, the ThinLTO bitcode writer) into a static library, linked before
-/// LLVM.
+/// lacks: the ThinLTO bitcode writer, `.init_array` constructors) into a
+/// static library, linked before LLVM.
 fn build_shim(llvm_config: &Path) {
 	println!("cargo::rerun-if-changed=shim/thin_bitcode.cpp");
 	println!("cargo::rerun-if-env-changed=CXX");

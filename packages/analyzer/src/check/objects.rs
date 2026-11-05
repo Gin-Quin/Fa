@@ -935,6 +935,12 @@ impl Walker<'_> {
 						w.set_type(member, ty);
 						ty
 					}
+					// a type declared inside a type: `Town.Person { … }`
+					None if let Some(ty) = w.nested_type(base_ty, &text, member) => {
+						w.set_type(member, ty);
+						w.set_flag(member, crate::analysis::NodeFlags::TYPE_EXPR);
+						ty
+					}
 					None if w.s.types.is_recovering(base_ty) => TypeId::UNKNOWN,
 					None => {
 						let message = format!("`{}` has no member `{text}`", w.display(base_ty));
@@ -954,7 +960,33 @@ impl Walker<'_> {
 		if self.s.types.is_recovering(ty) {
 			return TypeId::UNKNOWN;
 		}
-		let Some(first) = members.first() else {
+		// the types declared inside types first (`Database.OpenError.Failed`)
+		let mut ty = ty;
+		let mut skipped = 0;
+		for member in members.iter() {
+			let View::Name(name) = self.view(member) else {
+				break;
+			};
+			let text = self.tree.name(name).to_string();
+			if self.nominal_member(ty, &text).is_some() {
+				break;
+			}
+			let Some(nested) = self.nested_type(ty, &text, member) else {
+				break;
+			};
+			self.set_type(member, nested);
+			self.set_flag(member, crate::analysis::NodeFlags::TYPE_EXPR);
+			ty = nested;
+			skipped += 1;
+		}
+		let Some(first) = members.iter().nth(skipped) else {
+			let message = format!(
+				"`{}` is a type, not a value: use one of its members, or build a value of it",
+				self.display(ty)
+			);
+			let last = members.last().unwrap_or(target);
+			let diagnostic = self.diagnostic(&E_TYPE_1, last, message);
+			self.report(diagnostic);
 			return TypeId::UNKNOWN;
 		};
 		let View::Name(name) = self.view(first) else {
@@ -995,7 +1027,7 @@ impl Walker<'_> {
 			self.report(diagnostic);
 			return TypeId::UNKNOWN;
 		};
-		for member in members.iter().skip(1) {
+		for member in members.iter().skip(skipped + 1) {
 			match self.member_of(member, current) {
 				Some((ty, _)) => current = ty,
 				None => return TypeId::UNKNOWN,
@@ -1015,7 +1047,7 @@ impl Walker<'_> {
 	}
 
 	/// Records that a node names a member of a nominal type.
-	fn set_member_resolution(&mut self, node: NodeId, member: TypeId) {
+	pub(super) fn set_member_resolution(&mut self, node: NodeId, member: TypeId) {
 		if let TypeKind::Member(nominal, index) | TypeKind::EnumMember(nominal, index) =
 			self.s.types.kind(member)
 		{

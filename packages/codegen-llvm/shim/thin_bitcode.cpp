@@ -4,12 +4,14 @@
 // only writes bitcode without a summary (a regular, whole-program LTO input).
 
 #include "llvm-c/Core.h"
+#include "llvm-c/TargetMachine.h"
 #include "llvm/Analysis/ModuleSummaryAnalysis.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/ModuleSummaryIndex.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetMachine.h"
 
 extern "C" int fa_write_thin_bitcode(LLVMModuleRef module, const char *path) {
 	llvm::Module *m = llvm::unwrap(module);
@@ -24,4 +26,12 @@ extern "C" int fa_write_thin_bitcode(LLVMModuleRef module, const char *path) {
 	llvm::WriteBitcodeToFile(*m, out, false, &index, true);
 	out.close();
 	return out.has_error() ? 1 : 0;
+}
+
+// Makes a target machine put the constructors and destructors of a module
+// (`llvm.global_ctors`, `llvm.global_dtors`: the load and unload functions
+// of a C library) in `.init_array` and `.fini_array` on ELF, as clang does:
+// `ld.lld` runs nothing from the `.ctors` sections LLVM writes by default.
+extern "C" void fa_use_init_array(LLVMTargetMachineRef machine) {
+	reinterpret_cast<llvm::TargetMachine *>(machine)->Options.UseInitArray = true;
 }

@@ -847,6 +847,30 @@ pub struct BuildOptions {
 	pub link: Vec<String>,
 	/// Extra folders where the C libraries are searched.
 	pub library_paths: Vec<String>,
+	/// Build the package as a C library (`cLibrary`).
+	pub c_library: Option<CLibraryOptions>,
+}
+
+/// `CLibraryOptions`: the package built as a C library, with a generated
+/// header (foreign-code.md, "Exposing a library to C").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CLibraryOptions {
+	/// The file name of the header (`farm.h`).
+	pub header: String,
+	/// The prefix of the C names (`farm`).
+	pub prefix: String,
+	/// The foreign file whose export is the C interface, relative to the
+	/// package (`library/capi.foreign.fa`).
+	pub api: String,
+}
+
+impl CLibraryOptions {
+	/// The module of the API file (`library/capi.foreign`).
+	pub fn api_module(&self) -> String {
+		let path = self.api.replace('\\', "/");
+		let path = path.trim_start_matches("./");
+		path.strip_suffix(".fa").unwrap_or(path).to_string()
+	}
 }
 
 /// `TestOptions` with their defaults.
@@ -943,6 +967,13 @@ impl PackageConfiguration {
 				asynchronous: build.field("asynchronous").and_then(ConfigValue::as_bool),
 				link: strings(build, "link"),
 				library_paths: strings(build, "libraryPaths"),
+				c_library: build.field("cLibrary").and_then(|options| {
+					Some(CLibraryOptions {
+						header: string(options, "header")?,
+						prefix: string(options, "prefix")?,
+						api: string(options, "api")?,
+					})
+				}),
 			},
 			test: TestOptions {
 				include: test

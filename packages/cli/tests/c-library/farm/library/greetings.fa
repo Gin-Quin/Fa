@@ -1,0 +1,5 @@
+-- Module values, initialized when the library is loaded
+export namespace = {
+	let greeting = "Hello"
+	let squares: Array<Int64> = [1, 4, 9, 16]
+}

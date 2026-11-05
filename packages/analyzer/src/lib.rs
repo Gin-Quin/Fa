@@ -26,6 +26,7 @@
 
 pub mod analysis;
 pub mod builtins;
+pub mod c_library;
 pub mod check;
 pub mod comptime;
 pub mod configuration;

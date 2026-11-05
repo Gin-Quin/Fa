@@ -60,6 +60,7 @@ mod tests;
 mod tuples;
 mod type_decls;
 mod type_expr;
+mod type_functions;
 mod type_logic;
 mod type_ops;
 mod value_params;

@@ -1,6 +1,5 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-18: defaults → "{ index: Integer }"
 type Collection<Item, Index = Integer> = { get: (index: Index) => Item? }
 let names: Collection<String> = { get = (index) => none }
 console.log(@typeToString(Parameters<Type<names.get>>))
--- prints: "{ index: Integer }"
+-- prints: { index: Integer }

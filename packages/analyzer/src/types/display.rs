@@ -38,6 +38,27 @@ pub fn type_application(name: &str, arguments: &[String]) -> String {
 }
 
 impl TypeStore {
+	/// The keys of a key set, in braces: `{ foo, nested { bar } }`.
+	fn write_keys(&self, ty: TypeId, out: &mut String) {
+		let keys = self.fields_keys(ty);
+		if keys.is_empty() {
+			out.push_str("{}");
+			return;
+		}
+		out.push_str("{ ");
+		for (index, (name, children)) in keys.iter().enumerate() {
+			if index > 0 {
+				out.push_str(", ");
+			}
+			out.push_str(name);
+			if !children.is_unset() {
+				out.push(' ');
+				self.write_keys(*children, out);
+			}
+		}
+		out.push_str(" }");
+	}
+
 	/// The type as written in Fa: `Integer<min = 0>`, `String?`, `"a" | "b"`,
 	/// `{ name: String, age: Integer }`, `(Integer) => String`.
 	pub fn display(&self, ty: TypeId) -> String {
@@ -170,7 +191,10 @@ impl TypeStore {
 					.map_or("?", |&sym| self.syms.resolve(sym));
 				let _ = write!(out, "{}.{member}", self.decl_name(info.key));
 			}
-			TypeKind::Fields(_) => out.push_str("Fields<…>"),
+			TypeKind::Fields(_) => {
+				out.push_str("Fields ");
+				self.write_keys(ty, out);
+			}
 			TypeKind::CStruct(nominal) => out.push_str(self.decl_name(self.nominal(nominal).key)),
 			TypeKind::Function(sig) => {
 				let sig = self.sig(sig);

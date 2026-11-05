@@ -204,7 +204,15 @@ impl Walker<'_> {
 						return self.select_type(at, arm.value, bindings);
 					}
 				}
-				TypeId::NEVER
+				// no branch for the subject: an error at the application
+				let message = format!(
+					"no branch of this `when` matches `{}`: add a branch for it, or an `else`",
+					self.display(subject_ty)
+				);
+				let diagnostic =
+					self.diagnostic(&crate::diagnostics::codes::types::TF007, at, message);
+				self.report(diagnostic);
+				TypeId::UNKNOWN
 			}
 			View::Do(body) => self.select_type(at, body, bindings),
 			View::Block { statements } => match statements.last() {

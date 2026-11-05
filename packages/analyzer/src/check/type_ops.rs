@@ -286,6 +286,10 @@ impl Walker<'_> {
 		name: &str,
 		arguments: NodeList<'_>,
 	) -> Option<TypeId> {
+		// `Keys`, `Values`, `Parameters`, `Uppercase`… (type_functions.rs)
+		if let Some(ty) = self.key_or_function_type_function(n, callee, name, arguments) {
+			return Some(ty);
+		}
 		if !matches!(name, "Pick" | "Omit" | "Partial" | "Required" | "KeyType") {
 			return None;
 		}

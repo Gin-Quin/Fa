@@ -102,6 +102,49 @@ impl Walker<'_> {
 					}
 					return None;
 				}
+				// `Parameters<F>`: the parameters' order; `Record<keys, T>`: the
+				// keys' order
+				if matches!(text, "Parameters" | "Record")
+					&& self.type_declaration(callee, text).is_none()
+					&& let Some(first) = arguments.first()
+				{
+					let order: Vec<String> = if text == "Parameters" {
+						self.parameter_names(first, 0)?
+							.into_iter()
+							.map(Option::unwrap_or_default)
+							.collect()
+					} else {
+						match syntax::view(&tree, first) {
+							View::Object { items } => items
+								.iter()
+								.filter_map(|item| match syntax::view(&tree, item) {
+									View::Name(name) => Some(tree.name(name).to_string()),
+									View::TypedObject { target, .. } => {
+										match syntax::view(&tree, target) {
+											View::Name(name) => Some(tree.name(name).to_string()),
+											_ => None,
+										}
+									}
+									_ => None,
+								})
+								.collect(),
+							_ => return None,
+						}
+					};
+					let Some(Spelled::Object(result)) = self.result_fields(n) else {
+						return None;
+					};
+					let mut fields: Vec<(String, String)> = order
+						.iter()
+						.filter_map(|name| result.iter().find(|(other, _)| other == name).cloned())
+						.collect();
+					for field in result {
+						if !fields.iter().any(|(name, _)| *name == field.0) {
+							fields.push(field);
+						}
+					}
+					return Some(Spelled::Object(fields));
+				}
 				// a built-in operation on an object type keeps the order its
 				// argument writes the fields in (`Partial<P>`)
 				if matches!(text, "Partial" | "Required" | "Pick" | "Omit")
@@ -453,7 +496,12 @@ const TYPE_OPERATIONS: &[&str] = &[
 	"Pick",
 	"Omit",
 	"KeyType",
+	"Keys",
+	"DeepKeys",
+	"Values",
+	"Record",
 	"Parameters",
+	"Return",
 	"ReturnType",
 	"Uppercase",
 	"Lowercase",

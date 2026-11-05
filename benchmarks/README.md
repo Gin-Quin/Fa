@@ -120,7 +120,7 @@ The defaults run in about 0.25 to 2 seconds in Rust (see the [baseline](#rust-ba
 - **`bintrees` is `binary-trees`**: the same Benchmarks Game program. `binary-trees/main.goose` is Goose's `bintrees.goose` with the output of `main.rs`. `words` stays separate from `word-count`: same idea, but a different generator, text and output.
 - The other ten benchmarks got a Goose version written for them (`main.goose`, a direct port of `main.rs` reading its size from its arguments): inline `u8[..8]` strings where the words fit (`word-count`, `sort-objects`), `dictionary` for the maps, `sort` with a block for the comparator.
 
-The ports use the integer widths of their sources (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys, values and `UInt32` links in `lru`, `Int32` vertex ids and distances in `graph`, `Int32` numbers in `interp` and `sexp`, `Int32` ids in `scene`; `calc` reuses one generator text, as its sources do. Deviations: `sexp` keeps the children of a list in an `Array` (Rust: `Vec<Node>`) instead of Goose's first-child and next-sibling links; `scene` writes the 3x3 matrix as nine `Float32` fields (Fa has no fixed-size arrays); `respond`, `strlist`, `records`, `words`, `sexp` and `calc` read the bytes of a string with `text.bytes()` (sixth native shift), as Goose reads its `u8` buffers: the parsers of `calc` and `sexp` index `self.text.bytes()` (read in place, no array) instead of an `Array(Character)`, and `sexp` slices its symbols out of the text.
+The ports use the integer widths of their sources (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys, values and `UInt32` links in `lru`, `Int32` vertex ids and distances in `graph`, `Int32` numbers in `interp` and `sexp`, `Int32` ids in `scene`; `calc` reuses one generator text and damages it in place with string slices (`text = text[..index] + "#" + text[index + 1..]`, edited in place natively), as its sources do. Deviations: `sexp` keeps the children of a list in an `Array` (Rust: `Vec<Node>`) instead of Goose's first-child and next-sibling links; `scene` writes the 3x3 matrix as nine `Float32` fields (Fa has no fixed-size arrays); `respond`, `strlist`, `records`, `words`, `sexp` and `calc` read the bytes of a string with `text.bytes()` (sixth native shift), as Goose reads its `u8` buffers: the parsers of `calc` and `sexp` index `self.text.bytes()` (read in place, no array) instead of an `Array(Character)`, and `sexp` slices its symbols out of the text.
 
 #### What the ports found missing or wrong in Fa
 
@@ -400,6 +400,15 @@ Measured on 2026-11-05 (instructions at the audit sizes, callgrind; "before" is 
 CPU time (`audit/compare.py --default-sizes --runs 7`, median, busy machine): `calc` 0.27 s against 0.23 s (1.20x), `respond` 0.33 s against 0.26 s (1.29x), `sexp` 0.26 s against 0.18 s (1.45x, noisy: its instructions are 1.24x).
 
 What remains of `calc` (159 M against Goose's 110 M): the generator (47 M against 32 M: six registers saved per call where Goose saves one, the call being a leaf four times in five), `edited` (about 15 M: the port copies the text a character at a time where Goose edits a byte in place; string slices compiled natively would make it a few copies) and the parser (67 M against 59 M: the inline-or-heap test of `self.text` at each byte read). `respond` (227 M against 190 M): the heap block of each `sku` (reserved for its four digits, then freed with its item; Goose keeps it inline in the item) and the growths of `out` beyond the reserved literal parts.
+
+### Slices edited in place
+
+Measured on 2026-11-05 after the section above. `calc`'s port damages its generator's text in place with slices (`self.text = self.text[..index] + "#" + self.text[index + 1..]`, `self.text = self.text[..length // 2]`) instead of copying it a character at a time; natively, a string replaced by slices of itself writes the replacement over the replaced bytes, or shortens its length, when it owns its block, is simple and the replacement has the replaced bytes' length (`src/lower/edits.rs`). The check of an append's room is back to two comparisons with 64-bit constants (the shifted form cost `strlist` an instruction per word and saved no register in `calc`). Instructions (M) and Fa / Goose:
+
+| | `strlist` | `respond` | `calc` |
+| --- | ---: | ---: | ---: |
+| before (previous section) | 95.7 (1.18) | 227.3 (1.20) | 159.1 (1.45) |
+| after | 95.1 (1.17) | 225.3 (1.19) | 141.5 (1.29) |
 
 ### Against Goose's published results
 

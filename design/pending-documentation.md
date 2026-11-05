@@ -107,4 +107,8 @@ Add: `+=` and `-=` work on a `mutable` set (`permissions += Permissions.admin`);
 
 ## `documentation/types/fields.md`, "Key sets as compile-time parameters"
 
-Make precise: the type parameter whose keys a key set holds comes before it (`<Value, keys: DeepKeys<Value>>`). For now the body uses the parameter only as the iterable of `@for`, and the body is checked once, `value[key]` having a type of its own that stands for every field (like a type parameter): it can be printed, passed on or compared, not used as a number or a string. A `value[key]` whose target is not a value of that type is `TF011`.
+Make precise: the type parameter whose keys a key set holds comes before it (`<Value, keys: DeepKeys<Value>>`); for now the body uses the parameter only as the iterable of `@for`, and only applications from the parameter's own file are accepted. An error in the body for one key is `TF011`, reported once with the key that causes it and a note at the key set of the application.
+
+## `documentation/types/fields.md`, a new section "JSON and `when`" (after "String representation")
+
+A set is written in JSON as the array of the paths of its flags, like `toStringArray()`: `Json.stringify(MyFields { foo, nested { baz2 } })` is `["foo","nested.baz2"]`. `Json.parse` reads such an array, a group's name standing for all its flags (`["nested"]`); another name is a `JsonError`. In `when`, an arm whose pattern is a value of the set's type (`Permissions { read, write }`, `Permissions.read`, `{}`) matches an equal set; the other sets need an `else`.

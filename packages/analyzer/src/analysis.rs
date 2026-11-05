@@ -729,6 +729,10 @@ pub struct Analysis {
 	/// argument of its subject and its binding (`Tuple(Fields type, bits)`).
 	/// On JavaScript the hidden parameter is the index of the application.
 	pub key_set_instances: FxHashMap<ParamId, Vec<(TypeId, TypeId)>>,
+	/// The patterns of `when` arms that are values of a `Fields` subject
+	/// (`Permissions { read }`, `Permissions.read`, `{}`): the arm matches
+	/// a set equal to the pattern's bits (`Analysis::constants`).
+	pub fields_patterns: rustc_hash::FxHashSet<NodeId>,
 
 	// ── reactivity (advanced brief §11, `check/reactivity.rs`) ──
 	/// Every read of a reactive place that may run while a `derived` value
@@ -1394,6 +1398,7 @@ impl Analysis {
 			key_reads: rustc_hash::FxHashSet::default(),
 			key_loop_bodies: FxHashMap::default(),
 			key_set_instances: FxHashMap::default(),
+			fields_patterns: rustc_hash::FxHashSet::default(),
 			reactive_reads: FxHashMap::default(),
 			reactive_writes: FxHashMap::default(),
 			reactive_args: FxHashMap::default(),

@@ -458,4 +458,33 @@ impl Walker<'_> {
 		self.sink(value, value_ty, fields);
 		self.memo(n, |_| TypeId::BOOLEAN)
 	}
+
+	/// The pattern of a `when` arm over a set of flags, when it is a value
+	/// of the subject's `Fields` type (`T { … }`, `T.flag`, a key set): its
+	/// bits, compared with the subject's. `None` for another pattern.
+	pub(super) fn fields_when_pattern(
+		&mut self,
+		pattern: NodeId,
+		subject: TypeId,
+	) -> Option<TypeId> {
+		let fields = self.expected_fields(Some(subject))?;
+		let tree = Arc::clone(&self.tree);
+		let value = match syntax::view(&tree, self.strip_groups(pattern)) {
+			View::Object { .. } | View::TypedObject { .. } => true,
+			View::Access { target, .. } => {
+				matches!(syntax::view(&tree, target), View::Name(_))
+					&& self
+						.type_of_target(target)
+						.is_some_and(|ty| self.is_fields(ty))
+			}
+			_ => false,
+		};
+		if !value {
+			return None;
+		}
+		let ty = self.check(pattern, Some(fields));
+		self.sink(pattern, ty, fields);
+		self.a.fields_patterns.insert(pattern);
+		Some(fields)
+	}
 }

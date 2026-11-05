@@ -142,6 +142,12 @@ impl Walker<'_> {
 		for (position, arm) in arms.iter().enumerate() {
 			self.body.flow = remaining.fork();
 			let matched = match arm.pattern {
+				// a value of a set of flags: compared, covers no type (fields.rs)
+				Some(pattern)
+					if let Some(fields) = self.fields_when_pattern(pattern, subject_ty) =>
+				{
+					fields
+				}
 				Some(pattern) => {
 					let ty = self.check_when_pattern(pattern, subject_ty);
 					// the subject narrowed in the arm, and what is left (narrowing.rs)

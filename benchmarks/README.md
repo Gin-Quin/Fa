@@ -397,6 +397,8 @@ Measured on 2026-11-05 (instructions at the audit sizes, callgrind; "before" is 
 | Fa / Goose before | 1.20 | 1.17 | 1.44 | 0.99 | 1.40 | 1.43 | 1.75 | 1.36 | 1.22 | 1.18 |
 | Fa / Goose after | 1.20 | 1.18 | 1.20 | 0.99 | 1.40 | 1.43 | 1.45 | 1.24 | 1.22 | 1.18 |
 
+CPU time (`audit/compare.py --default-sizes --runs 7`, median, busy machine): `calc` 0.27 s against 0.23 s (1.20x), `respond` 0.33 s against 0.26 s (1.29x), `sexp` 0.26 s against 0.18 s (1.45x, noisy: its instructions are 1.24x).
+
 What remains of `calc` (159 M against Goose's 110 M): the generator (47 M against 32 M: six registers saved per call where Goose saves one, the call being a leaf four times in five), `edited` (about 15 M: the port copies the text a character at a time where Goose edits a byte in place; string slices compiled natively would make it a few copies) and the parser (67 M against 59 M: the inline-or-heap test of `self.text` at each byte read). `respond` (227 M against 190 M): the heap block of each `sku` (reserved for its four digits, then freed with its item; Goose keeps it inline in the item) and the growths of `out` beyond the reserved literal parts.
 
 ### Against Goose's published results

@@ -1127,7 +1127,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.collect::<Vec<_>>()
 			})
 		};
+		// a member's inline data, a type built by `Pick` or `Omit`
+		let inline = || self.analysis.inline_field_orders.get(&ty).cloned();
 		let order: Vec<fa_analyzer::ids::Sym> = declared
+			.or_else(inline)
 			.or_else(literal)
 			.unwrap_or_else(|| shape.iter().map(|field| field.name).collect());
 		order

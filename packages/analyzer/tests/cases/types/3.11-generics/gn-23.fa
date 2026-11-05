@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-23: … and the valid call → { name = "Ada", email = "a@b" }
 -- context: declarations reused from gn-12, gn-22
 type Matrix<Element, rows: Integer, columns: Integer> = { values: Array<Element> }

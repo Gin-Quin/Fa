@@ -644,7 +644,8 @@ pub struct Analysis {
 	pub json_defaults: FxHashMap<(TypeId, crate::ids::Sym), u32>,
 	/// The fields of the object types written as the data of a member of a
 	/// named union of this file (`Circle = { radius: Float }`), in the
-	/// order they are written: their declaration order (JSON, printing).
+	/// order they are written, and of the types `Pick`/`Omit` build, in
+	/// their subject's order: their declaration order (JSON, printing).
 	pub inline_field_orders: FxHashMap<TypeId, Vec<crate::ids::Sym>>,
 	/// The reads that move a move-only value out of its place (a local, a
 	/// parameter, a field of one: `holder.task` returned or passed): the
@@ -733,6 +734,12 @@ pub struct Analysis {
 	/// stands for the type of the field of each key. The target is an object
 	/// value; its field at the dotted path is read.
 	pub key_reads: FxHashMap<NodeId, crate::ids::ParamId>,
+	/// The hidden generic parameters a generic function's signature or body
+	/// derives from its own parameters: `Pick<Entity, keys>` and
+	/// `pick(entity, keys)` over a type parameter and a key-set parameter
+	/// (gn-22, gn-23). Each call binds it to the picked (or omitted) type of
+	/// its arguments, like the other parameters of its instantiation.
+	pub derived_params: FxHashMap<crate::ids::ParamId, DerivedParam>,
 
 	// ── reactivity (advanced brief §11, `check/reactivity.rs`) ──
 	/// Every read of a reactive place that may run while a `derived` value
@@ -825,6 +832,20 @@ impl TargetSet {
 		.map(|(_, name)| name)
 		.collect()
 	}
+}
+
+/// A generic parameter derived from others (`Analysis::derived_params`):
+/// `Pick<subject, keys>` (`pick` false: `Omit`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct DerivedParam {
+	/// The type parameter whose fields are picked.
+	pub subject: crate::ids::ParamId,
+	/// The key-set parameter listing them.
+	pub keys: crate::ids::ParamId,
+	/// `Pick` (else `Omit`).
+	pub pick: bool,
+	/// Where the keys are named, for messages.
+	pub node: NodeId,
 }
 
 /// The async summary of a function (`design/async.md` §2.1): transitive
@@ -1392,6 +1413,7 @@ impl Analysis {
 			key_set_params: rustc_hash::FxHashSet::default(),
 			key_loops: rustc_hash::FxHashSet::default(),
 			key_reads: FxHashMap::default(),
+			derived_params: FxHashMap::default(),
 			reactive_reads: FxHashMap::default(),
 			reactive_writes: FxHashMap::default(),
 			reactive_args: FxHashMap::default(),

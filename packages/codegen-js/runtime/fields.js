@@ -3,6 +3,8 @@
 // does the bit operations itself; the helpers take the table of the dotted
 // paths of the flags, by bit (`["read", "nested.a"]`).
 
+import { faCopy } from "./copy.js";
+
 // @fa-helper faFieldsToStringArray
 /**
  * `set.toStringArray()`: the paths of the flags of a set, in bit order.
@@ -80,4 +82,54 @@ export function faFormatFields(value, names) {
 					.map(([name, members]) => (members === undefined ? name : `${name} ${write(members)}`))
 					.join(", ")} }`;
 	return write(root);
+}
+
+// @fa-helper faPick deps: faCopy
+/**
+ * `pick(value, keys)` with a key set only known at run time (a key-set
+ * parameter of a generic function): a new object holding a copy of the
+ * fields at the dotted paths, in their order.
+ * @param {any} value
+ * @param {readonly string[]} paths
+ * @returns {any}
+ */
+export function faPick(value, paths) {
+	/** @type {any} */
+	const result = {};
+	for (const path of paths) {
+		const parts = path.split(".");
+		let source = value;
+		let target = result;
+		for (let index = 0; index < parts.length - 1; index++) {
+			const name = /** @type {string} */ (parts[index]);
+			source = source[name];
+			target[name] ??= {};
+			target = target[name];
+		}
+		const name = /** @type {string} */ (parts[parts.length - 1]);
+		target[name] = faCopy(source[name]);
+	}
+	return result;
+}
+
+// @fa-helper faOmit deps: faCopy
+/**
+ * `omit(value, keys)` with a key set only known at run time: a copy of the
+ * value without the fields at the dotted paths.
+ * @param {any} value
+ * @param {readonly string[]} paths
+ * @returns {any}
+ */
+export function faOmit(value, paths) {
+	/** @type {any} */
+	const result = faCopy(value);
+	for (const path of paths) {
+		const parts = path.split(".");
+		let target = result;
+		for (let index = 0; index < parts.length - 1; index++) {
+			target = target[/** @type {string} */ (parts[index])];
+		}
+		delete target[/** @type {string} */ (parts[parts.length - 1])];
+	}
+	return result;
 }

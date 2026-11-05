@@ -1400,6 +1400,15 @@ impl Generator<'_> {
 							.map(|field| Self::property(self.types.syms.resolve(field.name)))
 							.collect()
 					})
+					.or_else(|| {
+						// a type built by `Pick` or `Omit`: its subject's order
+						self.analysis.inline_field_orders.get(&ty).map(|names| {
+							names
+								.iter()
+								.map(|&name| Self::property(self.types.syms.resolve(name)))
+								.collect()
+						})
+					})
 					.unwrap_or_else(|| fields.iter().map(|(name, _)| name.clone()).collect());
 				let mut parts = Vec::new();
 				let relation_sides = self.relation_properties(ty);

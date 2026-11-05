@@ -404,8 +404,17 @@ impl Generator<'_> {
 	pub(crate) fn call(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
 		// `pick(value, { foo })`: the value copied to the node's type
 		if let Some(&value) = self.analysis.forwards.get(&n) {
-			let value = self.expr(value);
 			let ty = self.type_of(n);
+			// `pick(entity, keys)` of a key-set parameter: its paths at run time
+			if let TypeKind::Param(param) = self.types.kind(ty)
+				&& let Some(derived) = self.analysis.derived_params.get(&param).copied()
+				&& let Some(keys) = arguments.get(1)
+			{
+				let values = self.in_order(&[value, keys], |g, node| g.expr(node));
+				let helper = self.helper(if derived.pick { "faPick" } else { "faOmit" });
+				return js::call(helper, &[values[0].text.clone(), values[1].text.clone()]);
+			}
+			let value = self.expr(value);
 			return self.copy_value(value, ty);
 		}
 		let Some(info) = self.analysis.call(n).cloned() else {

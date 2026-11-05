@@ -391,6 +391,9 @@ pub struct Walker<'s> {
 	/// The parameters of the function being declared that `Type(parameter)`
 	/// names, and their hidden generic parameters (structural.rs).
 	pub(crate) pending_implicit: Vec<(crate::ids::Sym, crate::ids::ParamId)>,
+	/// The derived generic parameters of the function being declared
+	/// (`Analysis::derived_params`), added to its generics after it.
+	pub(crate) pending_derived: Vec<crate::ids::ParamId>,
 	/// The blocks whose hoisted declarations are declared (a block is walked
 	/// again in loop rounds: its statements are scanned once).
 	pub(crate) hoisted_blocks: rustc_hash::FxHashSet<NodeId>,
@@ -546,6 +549,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		receiver_decl: None,
 		lambda_requirements: FxHashMap::default(),
 		pending_implicit: Vec::new(),
+		pending_derived: Vec::new(),
 		hoisted_blocks: rustc_hash::FxHashSet::default(),
 		generic_params: FxHashMap::default(),
 		rigid_params: Vec::new(),

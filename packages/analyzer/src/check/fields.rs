@@ -27,7 +27,8 @@
 //!   whose subject is a type parameter of the same declaration: an
 //!   application binds it to `Tuple(Fields type, bits)`, the key set
 //!   checked against the keys of the subject's argument (`TF010`). In the
-//!   body, it is only the iterable of an `@for`.
+//!   body, it is the iterable of an `@for` or the keys of `pick`/`omit`
+//!   (a derived generic parameter, `type_ops.rs`).
 //! - `@for key in keys` over such a parameter, a `static` key set or a key
 //!   set literal: `key` is the dotted path of each key (a `String`), and
 //!   `value[key]` reads the field at that path. Its type is a type
@@ -591,6 +592,22 @@ impl Walker<'_> {
 		);
 		self.a.key_set_params.insert(param);
 		true
+	}
+
+	/// The key-set parameter a name node reads (`keys` in `Pick<Entity,
+	/// keys>`, `pick(entity, keys)`), resolved; `None` for another node.
+	pub(super) fn key_set_param_named(&mut self, n: NodeId) -> Option<KeySetParam> {
+		let tree = Arc::clone(&self.tree);
+		let View::Name(name) = syntax::view(&tree, self.strip_groups(n)) else {
+			return None;
+		};
+		let sym = self.s.types.syms.intern(tree.name(name));
+		let symbol = self.a.symbols.lookup(self.body.scope, sym)?;
+		let entry = *self.key_sets.params.get(&symbol)?;
+		self.set_resolution(n, Resolution::Local(symbol));
+		let ty = self.a.symbols.symbol(symbol).ty;
+		self.memo(n, |_| ty);
+		Some(entry)
 	}
 
 	/// The key-set parameter declared by `param`, if it is one.

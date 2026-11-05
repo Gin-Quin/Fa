@@ -469,6 +469,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					builder.build_return(None)?;
 					Ok(())
 				})?;
+				if self.packed_layout(item_type).is_some() {
+					// its items own nothing (`packed.rs`)
+					builder.build_call(
+						self.runtime.function("fa_packed_free")?,
+						&[array.into()],
+						"",
+					)?;
+					return Ok(());
+				}
 				if item == Repr::Str {
 					let cap_pointer = builder.build_struct_gep(self.header_type(), array, 2, "")?;
 					let cap = builder
@@ -705,6 +714,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.try_as_basic_value()
 					.basic()
 					.expect("a copied string")
+			}
+			Repr::Array(item_type) if self.packed_layout(item_type).is_some() => {
+				// `packed::packable_items` admits no copy
+				return Err(Error::Llvm("a copy of a packed array".into()));
 			}
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, NodeId::new(0))?;

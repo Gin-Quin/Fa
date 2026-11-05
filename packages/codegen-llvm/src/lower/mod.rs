@@ -49,6 +49,7 @@ mod json;
 mod numbers;
 mod objects;
 mod ownership;
+mod packed;
 mod parallel;
 mod patterns;
 mod pools;
@@ -348,6 +349,11 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The map types some `deleteWhere` iterates over while deleting: their
 	/// entries stay out of the probe array (`tables.rs`, `inline`).
 	no_inline_maps: rustc_hash::FxHashSet<TypeId>,
+	/// The union types whose arrays the program only builds with `push` and
+	/// reads with `for` (`packed::packable_items`).
+	packable_items: rustc_hash::FxHashSet<TypeId>,
+	/// The layouts of packed arrays, per item type (`packed.rs`).
+	packed_layouts: std::cell::RefCell<FxHashMap<TypeId, Option<packed::PackedLayout>>>,
 	/// The relation sides of the object types of the program (`relations.rs`).
 	relation_sides: relations::RelationSides,
 	/// The relation sides found in the program's facts, by object type
@@ -511,6 +517,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			index_proofs: std::cell::RefCell::new(None),
 			unsafe_maps: program::unsafe_maps(session, files),
 			no_inline_maps: program::no_inline_maps(session, files),
+			packable_items: packed::packable_items(session, files),
+			packed_layouts: std::cell::RefCell::new(FxHashMap::default()),
 			relation_sides: relations::relation_sides(
 				files.iter().map(|(file, _)| session.analysis(*file)),
 			),
@@ -2844,6 +2852,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 							Resolution::Local(symbol) if self.holds_only_views(symbol));
 					if let Repr::Array(_) = value.repr {
 						self.reserve_for_item_appends(body, value)?;
+					}
+					if let Repr::Array(item) = value.repr
+						&& let Some(layout) = self.packed_layout(item)
+					{
+						let array = value.value.expect("an array").into_pointer_value();
+						return self.for_packed(&layout, node, pattern, has_index, array, body);
 					}
 					self.for_items(node, pattern, has_index, value, body)
 				}

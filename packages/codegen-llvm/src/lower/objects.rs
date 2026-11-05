@@ -385,6 +385,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			)?;
 			return Ok(self.fresh(self.load(out)?));
 		}
+		if self.packed_push_argument(node) {
+			// copied by the push (`packed.rs`): a box on the stack, its data
+			// dropped with the statement's temporaries
+			let pointer = self.alloca_type(ty.into(), "packed_member")?;
+			let id_pointer = self.builder.build_struct_gep(ty, pointer, 0, "")?;
+			self.builder.build_store(id_pointer, id)?;
+			let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
+			self.builder
+				.build_store(data_pointer, data.value.expect("data"))?;
+			self.fresh(data);
+			return Ok(Val::new(Repr::Union, pointer));
+		}
 		let pointer = if self.arena_member(nominal) {
 			self.allocate_tree_type(&self.builder, ty.into())?
 		} else {

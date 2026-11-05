@@ -154,6 +154,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		else {
 			return Err(self.unsupported(node.index(), "this array"));
 		};
+		if items.is_empty()
+			&& matches!(repr, Repr::Array(_))
+			&& self.packed_layout(item_type).is_some()
+		{
+			return self.packed_new(item_type);
+		}
 		let item = self.item_repr(item_type, node)?;
 		let mut values = Vec::new();
 		for value in items.iter() {
@@ -384,6 +390,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Repr::Array(item_type) = array.repr else {
 			return Err(self.unsupported(node.index(), "`push` on this value"));
 		};
+		if let Some(layout) = self.packed_layout(item_type) {
+			// the item's bytes are copied: the value stays with its owner
+			let array = array.value.expect("an array").into_pointer_value();
+			return self.packed_push(&layout, array, value);
+		}
 		let item = self.item_repr(item_type, node)?;
 		let value = self.owned_as(value, item, source)?;
 		let array = array.value.expect("an array").into_pointer_value();
@@ -2286,6 +2297,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let Repr::Array(item_type) = slot.repr else {
 				continue;
 			};
+			// a packed array grows by bytes (`packed.rs`)
+			if self.packed_layout(item_type).is_some() {
+				continue;
+			}
 			let item = self.item_repr(item_type, target)?;
 			let i64 = self.context.i64_type();
 			let saturating = |this: &Self, name: &str, a: IntValue<'ctx>, b: IntValue<'ctx>| {

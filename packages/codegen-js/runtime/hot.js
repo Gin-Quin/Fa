@@ -2,7 +2,10 @@
 // build read the declarations of the other modules through a registry, one
 // entry per module (`faHotModule`); a swap loads the new versions of the
 // changed modules, points their entries to them and initializes again the
-// module-level values `fa` names (`faHotListen`).
+// module-level values `fa` names (`faHotSwap`), when `fa develop` asks for
+// it on the channel it opened for the program (`faHotListen`). Reactive
+// values keep their value and their source across a swap, by declaration
+// path (`faHotValue`, `faHotKeep`).
 //
 // Each helper starts at a `// @fa-helper <name> deps: <names>` line and ends at
 // the next one (`runtime.rs`).
@@ -30,28 +33,73 @@ export function faHotModule(path, namespace) {
 	return entry;
 }
 
+// @fa-helper faHotKeep deps:
+/**
+ * An object kept across the swaps of its module, by its key (the source of
+ * a module-level `reactive` value: `library/state.js#count$s`): created by
+ * the first version of the module, reused by the next ones.
+ * @template T
+ * @param {string} key
+ * @param {() => T} create
+ * @returns {T}
+ */
+export function faHotKeep(key, create) {
+	/** @type {any} */
+	const host = globalThis;
+	/** @type {Map<string, any>} */
+	const kept = (host.$faHotKept ??= new Map());
+	if (!kept.has(key)) {
+		kept.set(key, create());
+	}
+	return kept.get(key);
+}
+
+// @fa-helper faHotValue deps:
+/**
+ * At the initialization of a module-level `reactive` value (`library/state.js#count`):
+ * when a previous version of its module holds it, its value is given to
+ * the new version (`set`) and `true` is returned (the initializer doesn't
+ * run); `get` reads the value of this version from now on.
+ * @param {string} key
+ * @param {() => unknown} get
+ * @param {(value: any) => void} set
+ * @returns {boolean}
+ */
+export function faHotValue(key, get, set) {
+	/** @type {any} */
+	const host = globalThis;
+	/** @type {Map<string, () => unknown>} */
+	const values = (host.$faHotValues ??= new Map());
+	const previous = values.get(key);
+	values.set(key, get);
+	if (previous === undefined) {
+		return false;
+	}
+	set(previous());
+	return true;
+}
+
 // @fa-helper faHotSwap deps: faHotModule
 /**
  * Swaps modules of a running development build: reads `$hot.json` in the
  * output folder `root` (`{ version, modules: [{ path, file }], inits: [[path,
  * name]] }`), imports each new version (`file`, written next to the module),
  * points the registry entries to them, then calls the initialization
- * functions in order. Writes `$hot-done.json` (`{ version, ok, error? }`)
- * for `fa develop`, which restarts the program when the swap failed.
+ * functions in order. The answer says whether it worked; `fa develop`
+ * restarts the program when it didn't.
  * @param {string} root the URL of the output folder
- * @returns {Promise<void>}
+ * @returns {Promise<{ version: number, ok: boolean, error?: string }>}
  */
 export async function faHotSwap(root) {
 	/** @type {any} */
 	const host = globalThis;
 	const fs = host.process.getBuiltinModule("node:fs");
 	const url = host.process.getBuiltinModule("node:url");
-	const at = (/** @type {string} */ name) => url.fileURLToPath(new URL(name, root));
 	let version = 0;
-	/** @type {{ version: number, ok: boolean, error?: string }} */
-	let result;
 	try {
-		const manifest = JSON.parse(fs.readFileSync(at("./$hot.json"), "utf8"));
+		const manifest = JSON.parse(
+			fs.readFileSync(url.fileURLToPath(new URL("./$hot.json", root)), "utf8"),
+		);
 		version = manifest.version;
 		/** @type {Array<[string, any]>} */
 		const loaded = [];
@@ -64,23 +112,42 @@ export async function faHotSwap(root) {
 		for (const [path, name] of manifest.inits) {
 			faHotModule(path).ns[name]();
 		}
-		result = { version, ok: true };
+		return { version, ok: true };
 	} catch (exception) {
-		result = { version, ok: false, error: String(exception) };
+		return { version, ok: false, error: String(exception) };
 	}
-	fs.writeFileSync(at("./$hot-done.json"), JSON.stringify(result));
 }
 
 // @fa-helper faHotListen deps: faHotSwap
 /**
- * Swaps modules when `fa develop` sends `SIGUSR2` (`faHotSwap`); the
- * listener doesn't keep the program running.
+ * Connects to the channel of `fa develop` (a local socket, its port in
+ * `FA_HOT_CHANNEL`): each line `swap` swaps the modules (`faHotSwap`), and
+ * its answer is sent back as a line of JSON. The channel doesn't keep the
+ * program running; without the variable, nothing happens.
  * @param {string} root the URL of the output folder
  */
 export function faHotListen(root) {
 	/** @type {any} */
 	const host = globalThis;
-	host.process?.on?.("SIGUSR2", () => {
-		void faHotSwap(root);
+	const port = Number(host.process?.env?.FA_HOT_CHANNEL);
+	if (!port) {
+		return;
+	}
+	const net = host.process.getBuiltinModule("node:net");
+	const socket = net.connect(port, "127.0.0.1");
+	socket.unref();
+	socket.setEncoding("utf8");
+	socket.on("error", () => {});
+	let buffer = "";
+	socket.on("data", async (/** @type {string} */ data) => {
+		buffer += data;
+		let end;
+		while ((end = buffer.indexOf("\n")) >= 0) {
+			const line = buffer.slice(0, end);
+			buffer = buffer.slice(end + 1);
+			if (line === "swap") {
+				socket.write(`${JSON.stringify(await faHotSwap(root))}\n`);
+			}
+		}
 	});
 }

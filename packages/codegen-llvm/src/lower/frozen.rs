@@ -101,11 +101,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(field) = self.types().fields_of(owner).get(index as usize) else {
 			return false;
 		};
-		// a relation side changes with the other side (`proofs::written_fields`
-		// counts it written too)
-		if self.side_repr(owner, field.name).is_some() {
-			return false;
-		}
 		crate::proofs::frozen_field(written, self.types(), owner, field.name)
 	}
 

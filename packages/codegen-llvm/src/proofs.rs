@@ -1165,25 +1165,6 @@ impl Prover<'_> {
 				None => format!("field:*.{name}"),
 			})
 		};
-		// a relation side is written by the runtime's link and unlink
-		// operations (an assignment of the other side, a removal from a
-		// collection, maybe in another file), which no store here shows
-		for relation in &file.analysis.relations {
-			let sides = [
-				(relation.holder_type, Some(relation.direct)),
-				(relation.target_type, relation.reverse),
-			];
-			for (object, side) in sides {
-				let Some(side) = side else {
-					continue;
-				};
-				let name = types.syms.resolve(side);
-				out.insert(match stable_type_name(types, object) {
-					Some(owner) => format!("field:{owner}.{name}"),
-					None => format!("field:*.{name}"),
-				});
-			}
-		}
 		for at in 0..file.tree.nodes.len() {
 			let node = NodeId::new(at);
 			match file.view(node) {

@@ -92,3 +92,22 @@ The analyzer and the native backend (and wasm) support `Pointer.allocate(value)`
 ## `documentation/advanced/foreign-code.md`, "Targets" and `:::implementation` ("WebAssembly", "State of the implementation")
 
 On `wasm`, an `@extern` function is an import of the `env` module unless C compiled to WebAssembly and linked with the program (`build.link`: `.o`/`.a` files built with `clang --target=wasm32`) defines it. The host gives the others: the loader imports them from `env.mjs`, next to it (`fa build` copies the `env.mjs` found next to the program's file or at the root of its package); `env.mjs` exports one function per C name, and may export `attach(exports)` to reach the module's memory. A missing function stops the loader with the list of names. Replace "WebAssembly: not yet" in the state.
+
+## `documentation/advanced/foreign-code.md`, "Exposing a library to C"
+
+Make precise (decided, see "C libraries" in `design/decisions.md`):
+
+- `fa build --target=native` writes `libfarm.a`, `libfarm.so` and `farm.h` (named after the prefix) into `build/native/` of the package, and no executable. A C program links the static library with `-lm -pthread` and the libraries of `build.link`.
+- The C types of the header: `int8_t`… `uint64_t` for the integers (`c.Int` is an `int32_t`), `bool`, `float`, `double`, `const char *` for a `CString`, `T *` for a `Pointer(T)` (`NULL` for `none`), a `CStruct` defined with its fields in order (`typedef struct farm_Point { int32_t x; float y; } farm_Point;`), a Fa value an opaque `struct` named `prefix_` and its type's name. `Integer`, callbacks and generic functions can't be exported (`FFI014`).
+- A function that `throws` throws the members of one `Errors` type, declared as `typedef enum farm_FarmError { FARM_FARM_ERROR_EMPTY = 1, … } farm_FarmError;`; its result goes through the last parameter, `result`, which may be `NULL`. `farm_last_error_message()` returns `""` before the first error, and isn't reset by a success; a message longer than 1023 bytes is cut.
+- A shared library is loaded at the program's start or with `dlopen` (Python's `ctypes`); only the API is visible. Its module values are dropped when it is unloaded if a `destroy` needs it. The output of `console.log` is flushed at the end of each call, so it keeps its order with C's.
+- Fix the example: `farm.value.countAnimals()` throws `Farm.Error`, a type declared inside `Farm` (`type Error = Errors { … }` in an object type isn't parsed yet: the test fixture declares `FarmError` in its own file).
+
+## `documentation/advanced/foreign-code.md`, `:::implementation` ("Native", "State of the implementation")
+
+- Native: add "A C library's thread-local variables use the general dynamic model (`dlopen` can't give the static TLS the runtime's `initial-exec` variables take), the shared library exports the API through a version script, and the static library is one relocatable object (`ld.lld -r`, then `llvm-objcopy --keep-global-symbol`). The error message goes to a thread-local buffer of 1024 bytes. `.init_array` and `.fini_array` hold the load and unload functions (`DllMain` on Windows is not done)."
+- State: drop "and `build.cLibrary`" from the analyzer's gaps; add to the native state "`build.cLibrary` (Linux and macOS; not on `wasm` yet: the table's "yes: the functions are exports of the module" is not implemented)".
+
+## `documentation/architecture/configuration.md`, "`build`" (`cLibrary`)
+
+Add: "`cLibrary` applies to the `native` target (`FFI013` when the package also lists a JavaScript target: put it in `overrides.native.build`). `prefix` is a C identifier, `header` a file name; the libraries and the header are written into `<output>/native/`."

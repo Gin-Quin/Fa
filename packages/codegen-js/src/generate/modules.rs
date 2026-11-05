@@ -384,6 +384,16 @@ impl Generator<'_> {
 					"export const {export}$ref = {{ get v() {{ return {local}; }}, set v(value) {{ {local} = value; }} }};"
 				));
 			}
+			// its integer variants (`integer_variants.rs`)
+			for variant in self
+				.integer_variants
+				.get(&decl)
+				.cloned()
+				.unwrap_or_default()
+			{
+				let suffix = self.variant_suffix(decl, &variant);
+				exported.push(format!("{local}{suffix} as {export}{suffix}"));
+			}
 			exported.push(if local == *export {
 				local
 			} else {

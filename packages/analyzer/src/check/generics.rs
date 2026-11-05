@@ -1124,6 +1124,65 @@ impl Walker<'_> {
 	}
 
 	/// Records the type arguments of a call or a typed literal for the backends.
+	/// The generic parameters of the function a call calls (a declaration
+	/// of this file or another one), in declaration order; empty for a value.
+	pub(super) fn callee_generics(
+		&mut self,
+		callee: NodeId,
+		kind: crate::analysis::Callee,
+	) -> Vec<ParamId> {
+		if let crate::analysis::Callee::Function(declaration) = kind {
+			return self
+				.a
+				.function(declaration)
+				.map(|info| info.generics.clone())
+				.unwrap_or_default();
+		}
+		let named = match self.view(callee) {
+			View::Name(_) => callee,
+			View::Access { members, .. } => match members.last() {
+				Some(member) => member,
+				None => return Vec::new(),
+			},
+			_ => return Vec::new(),
+		};
+		let crate::symbols::Resolution::Local(symbol) = self.a.resolution(named) else {
+			return Vec::new();
+		};
+		if self.a.symbols.symbol(symbol).kind != SymbolKind::Function {
+			return Vec::new();
+		}
+		match self.direct_function(symbol) {
+			Some(declaration) => self
+				.a
+				.function(declaration)
+				.map(|info| info.generics.clone())
+				.unwrap_or_default(),
+			None => self.exported_generics(symbol),
+		}
+	}
+
+	/// Inferred bindings with the declared generic parameters last, in
+	/// declaration order (inference finds them in order of appearance):
+	/// what the backends read by position (`<A, B>(b: B, a: A)`).
+	pub(super) fn declaration_order(&self, bindings: &Bindings, declared: &[ParamId]) -> Bindings {
+		if declared.is_empty() || !declared.iter().all(|param| bindings.params.contains(param)) {
+			return bindings.clone();
+		}
+		let mut params: Vec<ParamId> = bindings
+			.params
+			.iter()
+			.copied()
+			.filter(|param| !declared.contains(param))
+			.collect();
+		params.extend(declared.iter().copied());
+		let types = params
+			.iter()
+			.map(|&param| bindings.get(param).unwrap_or(TypeId::UNKNOWN))
+			.collect();
+		Bindings { params, types }
+	}
+
 	pub(super) fn record_instantiation(&mut self, n: NodeId, bindings: &Bindings) -> ListId {
 		let list = self.s.types.list(&bindings.types);
 		self.a.instantiations.insert(n, list);

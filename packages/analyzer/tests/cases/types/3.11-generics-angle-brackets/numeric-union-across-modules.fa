@@ -1,0 +1,19 @@
+-- note: an integer instance of an imported function's `Integer | Float` parameter checks its
+-- overflow (JavaScript: the integer variant the defining module exports)
+-- file: library/scaling.fa
+export namespace = {
+	function double = <Value: Integer | Float>(value: Value): Value => value * 2
+	function quadruple = <Value: Integer | Float>(value: Value): Value => double(double(value))
+	function pick = <Left: Integer | Float, Right: Integer | Float>(right: Right, left: Left): Left => left * 2
+}
+-- file: application/main.fa
+export function = () => {
+	console.log(library.scaling.double(4), library.scaling.quadruple(0.5), library.scaling.pick(1.5, 3)) -- prints: 8 2 6
+	mutable value = 4_503_599_627_370_496
+	for 0..12 {
+		value = library.scaling.double(value)
+	}
+	console.log(value)
+}
+-- exit: 101
+-- stderr: overflow

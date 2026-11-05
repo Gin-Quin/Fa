@@ -1,0 +1,26 @@
+# Next actions (lead, paused 2026-11-05)
+
+The compiler work lives on branch `compiler` (lead worktree `.claude/worktrees/lead`; never work in the main checkout, which is shared). Every arbitration is in `design/decisions.md`, open items in `design/todo.md`, documentation notes waiting for the external rewrite in `design/pending-documentation.md`, review reports in `design/reviews/`.
+
+## State at the pause
+
+- `compiler` passes the full suite with LLVM (`cargo test --workspace --no-fail-fast`, under `ulimit -v 8000000`) and the JavaScript runtime tests, at the last merge before this file.
+- Three engineers were stopped mid-shift. Each wrote a `NEXT.md` at the root of its worktree, committed on its branch:
+  - `worktree-agent-aca08cbb0b8394a82` — proofs: JavaScript package builds through re-analysis, proofs in async natively, async soundness tests.
+  - `worktree-agent-a375af73b4e738f36` — native performance against Goose: compressed 32-bit arena links, `sexp` node packing, `lru` slots, `calc` packed literals.
+  - `worktree-agent-a2f066f35c6147839` — analyzer: lengths bounded by 2^48, callbacks that throw in user functions, documented rules still unimplemented.
+- To resume: read each branch's `NEXT.md`, merge the branches whose work is green (`git merge <branch>` in the lead worktree, then the full suite), and start fresh engineers from those notes.
+
+## Next, in order
+
+1. Merge the three paused branches (each after its suite passes; conflicts in the runtime IR: regenerate with `packages/codegen-llvm/runtime/generate.sh`; expected LLVM skips: `FA_UPDATE_SKIPS=1`, review the diff).
+2. Generics flag day, step 2, once the rewritten documentation lands (`design/decisions.md`, "Flag day of the generics migration"): the old parenthesized spelling becomes an error, the transition code goes; then apply `design/pending-documentation.md` to the rewritten pages.
+3. Goal of the user: Fa faster than Goose on every Goose benchmark (sync, release). Latest Fa/Goose instructions: records 1.14, strlist 1.17, respond 1.09, interp 0.99, words 1.36, lru 1.29, calc 1.19, sexp 1.21, binary-trees 1.07, scene 1.19 (CPU noisy: sexp and lru furthest).
+4. Fuse the analyzer's passes (about nine per file, against the single-walk design), measured on the 1,000-file package.
+5. Remaining items of `design/todo.md`: Pick/Omit and `EF004` from another file, `is` with sets, `@for` over key sets of another file, WebAssembly C libraries, `Pointer.allocate`/`free` on Bun, native AArch64 runtime, `Color.members.length` natively.
+
+## Rules that held
+
+- Engineers in their own worktrees, briefed with the files to read, told not to edit `documentation/` (external rewrite) and to commit often.
+- Before assigning an item, check that no other engineer holds it (two duplicates happened).
+- Delete the `target/` of finished worktrees after merging: the disk filled up once.

@@ -1,0 +1,13 @@
+-- review 5: the writes of a lambda to a parameter are effects of the enclosing function
+type Player = { score: Integer }
+function run = (f: () => Void) => f()
+function bump = (p: Player) => {
+	run(() => {
+		p.score += 1 -- error: EFF003
+	})
+}
+function declared = (p: Player) mutates p.score => {
+	run(() => {
+		p.score += 1
+	})
+}

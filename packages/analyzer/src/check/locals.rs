@@ -48,15 +48,9 @@ impl Walker<'_> {
 	pub(super) fn record_non_escaping(&mut self) {
 		let tree = std::sync::Arc::clone(&self.tree);
 		let count = tree.nodes.len();
-		let mut parents: Vec<Option<NodeId>> = vec![None; count];
-		for index in 0..count {
-			let node = NodeId::new(index);
-			for child in syntax::children(&tree, node) {
-				if let Some(slot) = parents.get_mut(child.index()) {
-					*slot = Some(node);
-				}
-			}
-		}
+		// the parent table of the walk (built once per file)
+		self.parent(NodeId::new(0));
+		let parents = self.parents.take().unwrap_or_default();
 		let mut candidates: FxHashSet<SymbolId> = FxHashSet::default();
 		let mut escaped: FxHashSet<SymbolId> = FxHashSet::default();
 		// `into[t]`: the locals whose values went into `t`

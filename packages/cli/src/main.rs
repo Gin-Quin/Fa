@@ -3,8 +3,8 @@
 /// Counts the heap in use, so that compile-time evaluation stays within its
 /// memory budget (`fa_interpreter::memory`).
 #[global_allocator]
-static ALLOCATOR: fa_interpreter::memory::CountingAllocator =
-	fa_interpreter::memory::CountingAllocator;
+static ALLOCATOR: fa_interpreter::memory::CountingAllocator<mimalloc::MiMalloc> =
+	fa_interpreter::memory::CountingAllocator(mimalloc::MiMalloc);
 
 fn main() {
 	let code = fa::main(std::env::args_os().skip(1).collect());

@@ -1,0 +1,26 @@
+-- review 3: a write inside a lambda drops the facts of the written place where the lambda is created
+function run = (f: () => Void) => f()
+function main = () => {
+	mutable divisor = 1
+	run(() => {
+		divisor = 0
+	})
+	console.log(10 // divisor) -- error: E-ERR-3
+	mutable x: Integer? = 1
+	if x != none {
+		run(() => {
+			x = none
+		})
+		console.log(x + 1) -- error: E-OPT-1
+	}
+	mutable a = [1, 2, 3]
+	run(() => a.clear())
+	console.log(a[2]) -- error: E-ERR-3
+	mutable d = 1
+	function reset = () => {
+		d = 0
+	}
+	d = 2
+	reset()
+	console.log(10 // d) -- error: E-ERR-3
+}

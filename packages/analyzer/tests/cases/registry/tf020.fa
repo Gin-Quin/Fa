@@ -1,0 +1,2 @@
+-- TF020: Type<…> of something that is already a type
+let x: Type<Integer> = 1 -- error: TF020

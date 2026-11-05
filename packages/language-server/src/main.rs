@@ -7,8 +7,8 @@ use tower_lsp::jsonrpc::Request;
 /// Counts the heap in use, so that compile-time evaluation stays within its
 /// memory budget (`fa_interpreter::memory`).
 #[global_allocator]
-static ALLOCATOR: fa_interpreter::memory::CountingAllocator =
-	fa_interpreter::memory::CountingAllocator;
+static ALLOCATOR: fa_interpreter::memory::CountingAllocator<mimalloc::MiMalloc> =
+	fa_interpreter::memory::CountingAllocator(mimalloc::MiMalloc);
 
 /// Serve the language server over stdin and stdout.
 #[tokio::main]

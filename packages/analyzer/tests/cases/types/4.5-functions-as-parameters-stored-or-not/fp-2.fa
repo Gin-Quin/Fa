@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: EF015
 -- brief: ✗ fp-2: EF015 (map throws what its callback throws)
 -- context: declarations reused from fp-1

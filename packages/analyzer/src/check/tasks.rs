@@ -254,7 +254,6 @@ impl Walker<'_> {
 		value: NodeId,
 		expected: Option<TypeId>,
 	) -> TypeId {
-		self.a.reads_target = true;
 		let in_context = self.in_async_context();
 		if !in_context && self.reported_once.insert((n, CONC014.id)) {
 			let message = self.await_context_message();
@@ -465,7 +464,6 @@ impl Walker<'_> {
 		value: NodeId,
 		expected: Option<TypeId>,
 	) -> TypeId {
-		self.a.reads_target = true;
 		let detached = self.is_statement(n);
 		if let Some(statement) = self.statement
 			&& let View::Declaration {
@@ -745,7 +743,8 @@ impl Walker<'_> {
 		let current = self.current_target();
 		match target {
 			Target::Primitive(name, blocking) => {
-				self.a.reads_target = true;
+				// a blocking call: whether it may block depends on the target
+				self.a.reads_target |= mode == Mode::Blocking && !blocking.is_all();
 				let acc = &mut self.acc().own;
 				if mode == Mode::Awaited {
 					acc.suspends = true;
@@ -771,6 +770,7 @@ impl Walker<'_> {
 				});
 				// workers of JavaScript are awaited (J2): a blocking call
 				// needs a thread of `native`
+				self.a.reads_target |= mode == Mode::Blocking;
 				if mode == Mode::Blocking
 					&& !TargetSet::NATIVE.contains(current)
 					&& builtins::concurrency::has_workers(self.s.target())
@@ -785,7 +785,7 @@ impl Walker<'_> {
 				}
 			}
 			Target::External(Some(summary), name) => {
-				self.a.reads_target = true;
+				self.a.reads_target |= mode == Mode::Blocking && !summary.blocking.is_all();
 				merge(&mut self.acc().own, &summary, mode, &name, true);
 				if mode == Mode::Blocking && !summary.blocking.contains(current) {
 					self.report_blocking_call(n, &name, &summary);
@@ -1334,6 +1334,13 @@ impl Walker<'_> {
 		// the blocking calls they make impossible on the target
 		let current = self.current_target();
 		for (call, key, name) in std::mem::take(&mut self.tasks.blocking_calls) {
+			// a call that can't block everywhere: its check depends on the target
+			if settled
+				.get(&key)
+				.is_some_and(|summary| !summary.blocking.is_all())
+			{
+				self.a.reads_target = true;
+			}
 			if let Some(summary) = settled.get(&key)
 				&& !summary.blocking.contains(current)
 			{
@@ -1520,6 +1527,7 @@ impl Walker<'_> {
 			}
 			let next = self.facts.refs.state(crate::flow::refs::RefState {
 				invalidated: Some((n, false)),
+				reported: false,
 				..current
 			});
 			self.body.flow.set_ref_state(symbol, next);

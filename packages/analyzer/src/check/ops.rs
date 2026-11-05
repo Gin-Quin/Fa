@@ -11,15 +11,15 @@ use smallvec::SmallVec;
 use crate::check::Walker;
 use crate::check::numbers::NumKind;
 use crate::diagnostics::codes::values::{
-	E_BOOL_1, E_CMP_1, E_CMP_2, E_CMP_3, E_CMP_4, E_CMP_5, E_OPT_1, E_OPT_6, E_RNG_4, W_NUM_2,
-	W_RNG_1,
+	E_BOOL_1, E_CMP_1, E_CMP_2, E_CMP_3, E_CMP_4, E_CMP_5, E_CMP_6, E_OPT_1, E_OPT_6, E_RNG_4,
+	W_NUM_2, W_RNG_1,
 };
 use crate::flow::{FlowState, IntervalSet};
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::Resolution;
 use crate::syntax::{self, CompareOp, CompareOps, LogicOp, NodeList, View};
 use crate::types::int::INFINITY;
-use crate::types::{Interval, Mode, TypeFlags, TypeKind};
+use crate::types::{CollKind, Interval, Mode, TypeFlags, TypeKind};
 
 /// A test between two integer values that refines them.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -154,6 +154,29 @@ impl Walker<'_> {
 					(when_true, when_false)
 				}
 			}
+			// `role is in ["admin", "moderator"]`: narrows to the literals
+			View::IsIn {
+				value,
+				collection,
+				negated,
+			} if self.literal_array_items(collection).is_some() => {
+				let entry = self.body.flow.clone();
+				self.check(n, Some(TypeId::BOOLEAN));
+				self.body.flow = entry;
+				let items = self.literal_array_items(collection).unwrap_or_default();
+				let mut when_true = FlowState::impossible();
+				for item in items {
+					let (item_true, item_false) = self.pattern_test(n, value, item, None);
+					when_true = self.join_states(&when_true, &item_true);
+					self.body.flow = item_false;
+				}
+				let when_false = std::mem::take(&mut self.body.flow);
+				if negated {
+					(when_false, when_true)
+				} else {
+					(when_true, when_false)
+				}
+			}
 			View::Boolean(value) => {
 				self.check(n, Some(TypeId::BOOLEAN));
 				let live = self.body.flow.fork();
@@ -172,6 +195,20 @@ impl Walker<'_> {
 				(std::mem::take(&mut self.body.flow), when_false)
 			}
 		}
+	}
+
+	/// The items of a literal array of literals (`["admin", "owner"]`).
+	fn literal_array_items(&self, n: NodeId) -> Option<Vec<NodeId>> {
+		let View::Array { items } = self.view(self.strip_groups(n)) else {
+			return None;
+		};
+		let items: Vec<NodeId> = items.iter().collect();
+		let literal = |item: NodeId| match self.view(item) {
+			View::Integer(_) | View::Float(_) | View::String(_) | View::Boolean(_) => true,
+			View::Negate(inner) => matches!(self.view(inner), View::Integer(_) | View::Float(_)),
+			_ => false,
+		};
+		(!items.is_empty() && items.iter().all(|&item| literal(item))).then_some(items)
 	}
 
 	/// A `Boolean` operand or condition (`E-BOOL-1` otherwise).
@@ -431,6 +468,9 @@ impl Walker<'_> {
 			self.report(diagnostic);
 			return;
 		}
+		// a generic parameter is ordered when its constraint is (`<Item: Integer>`)
+		let types: Vec<TypeId> = types.iter().map(|&ty| self.constraint_of(ty)).collect();
+		let types = &types[..];
 		for (&node, &ty) in nodes.iter().zip(types) {
 			if self.s.types.is_recovering(ty) || ty.is_unset() {
 				return;
@@ -466,6 +506,27 @@ impl Walker<'_> {
 				return;
 			}
 		}
+	}
+
+	/// The constraint of a generic parameter (followed), or the type itself.
+	fn constraint_of(&self, ty: TypeId) -> TypeId {
+		let mut ty = ty;
+		for _ in 0..16 {
+			match self.s.types.kind(ty) {
+				TypeKind::Param(param) => {
+					let constraint = self.s.types.param_constraint(param);
+					if constraint.is_unset()
+						|| constraint == ty
+						|| self.s.types.is_recovering(constraint)
+					{
+						return ty;
+					}
+					ty = constraint;
+				}
+				_ => return ty,
+			}
+		}
+		ty
 	}
 
 	/// Whether two ordered types can be compared: integers of any storage,
@@ -984,8 +1045,53 @@ impl Walker<'_> {
 		if self.is_fields(collection_ty) {
 			return self.check_fields_is_in(n, value, collection_ty);
 		}
+		// an array, a set (an element equal to the value) or a map (a key)
+		let item = match self.s.types.kind(collection_ty) {
+			TypeKind::Collection(
+				CollKind::Array | CollKind::GrowingArray | CollKind::Set | CollKind::GrowingSet,
+				item,
+				_,
+			) => Some(item),
+			_ => self.map_key(collection_ty),
+		};
+		if let Some(item) = item {
+			let value_ty = self.check(value, Some(item));
+			return self.memo(n, |w| {
+				let comparable = w.s.types.is_recovering(value_ty)
+					|| w.s.types.is_recovering(item)
+					|| w.s.types.satisfies(value_ty, item)
+					|| w.s.types.satisfies(item, value_ty)
+					|| w.s
+						.types
+						.satisfies(w.s.types.widen(value_ty), w.s.types.widen(item));
+				if !comparable {
+					let message = format!(
+						"a `{}` is never equal to an item of a `{}`: `is in` compares the value with the items",
+						w.display(w.s.types.widen(value_ty)),
+						w.display(collection_ty)
+					);
+					let diagnostic = w.diagnostic(&E_CMP_6, n, message);
+					w.report(diagnostic);
+				}
+				TypeId::BOOLEAN
+			});
+		}
+		if matches!(self.s.types.kind(collection_ty), TypeKind::Collection(..)) {
+			return self.unsupported(n, "`is in` on this collection");
+		}
 		if collection_ty != TypeId::RANGE {
-			return self.unsupported(n, "`is in` on a collection");
+			let value_ty = self.check(value, None);
+			return self.memo(n, |w| {
+				if !w.s.types.is_recovering(collection_ty) && !w.s.types.is_recovering(value_ty) {
+					let message = format!(
+						"`is in` takes an array, a set, a map or a range, not a `{}`: compare with `==`, or test a pattern with `is`",
+						w.display(w.s.types.widen(collection_ty))
+					);
+					let diagnostic = w.diagnostic(&E_CMP_6, collection, message);
+					w.report(diagnostic);
+				}
+				TypeId::BOOLEAN
+			});
 		}
 		let value_ty = self.check(value, Some(TypeId::INTEGER));
 		self.memo(n, |w| {

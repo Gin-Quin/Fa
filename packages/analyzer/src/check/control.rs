@@ -16,8 +16,8 @@ use smallvec::SmallVec;
 use crate::check::numbers::NumKind;
 use crate::check::{LoopCx, Walker};
 use crate::diagnostics::codes::values::{
-	E_DO_1, E_IF_1, E_IF_2, E_IF_3, E_LOOP_1, E_LOOP_3, E_LOOP_6, E_LOOP_7, E_LOOP_11, E_LOOP_12,
-	E_LOOP_13, E_RNG_3, W_BOOL_1, W_DO_2, W_LOOP_1,
+	E_DO_1, E_IF_1, E_IF_2, E_IF_3, E_LOOP_1, E_LOOP_2, E_LOOP_3, E_LOOP_6, E_LOOP_7, E_LOOP_11,
+	E_LOOP_12, E_LOOP_13, E_LOOP_14, E_RNG_3, W_BOOL_1, W_DO_2, W_LOOP_1,
 };
 use crate::flow::{FlowState, IntervalSet, PlaceRoot};
 use crate::ids::{NodeId, PlaceId, TypeId};
@@ -787,6 +787,10 @@ impl Walker<'_> {
 							// the elements of a set are read-only (collections.rs)
 							let iterable_ty = w.type_of(iterable);
 							w.mark_if_readonly_element(symbol, iterable_ty);
+							// the keys of a map (`for key in map.keys()`)
+							if w.is_map_keys_call(iterable) {
+								w.readonly_elements.insert(symbol);
+							}
 						}
 						item
 					});
@@ -794,6 +798,23 @@ impl Walker<'_> {
 				// `for (key, value) in map`: the key is read-only (collections.rs)
 				View::TuplePattern { items } if self.map_key(self.type_of(iterable)).is_some() => {
 					self.bind_loop_tuple(pattern, items, item)
+				}
+				// `for [a, b] in pairs`: an array pattern may not match (`E-LOOP-2`)
+				View::ArrayPattern { .. } => {
+					if self.reported_once.insert((pattern, "E-LOOP-2")) {
+						let diagnostic = self.diagnostic(
+							&E_LOOP_2,
+							pattern,
+							"a `for` can't destructure an array: its length isn't known. Destructure a tuple, `for (a, b) in pairs`, or read the items in the body with `try`",
+						);
+						self.report(diagnostic);
+					}
+					// its names, quietly (no `E-ERR-3` for a pattern rejected already)
+					self.quiet += 1;
+					let mut names = super::destructuring::PatternNames::default();
+					let kind = SymbolKind::LoopVariable { copy: false };
+					self.destructure(pattern, item, kind, None, &mut names);
+					self.quiet -= 1;
 				}
 				// `for (key, value) in pairs`, `for { name } in people` (destructuring.rs)
 				_ => {
@@ -1091,6 +1112,31 @@ impl Walker<'_> {
 			}
 			self.body.flow.set_unreachable();
 			return TypeId::NEVER;
+		}
+		// `break outer`: a name declared nowhere is a label (`E-LOOP-14`)
+		if let Some(value) = value
+			&& let View::Name(name) = self.view(self.strip_groups(value))
+			&& !name.is_empty()
+		{
+			let label = self.tree.name(name).to_string();
+			let sym = self.s.types.syms.intern(&label);
+			if self.a.symbols.lookup(self.body.scope, sym).is_none()
+				&& self.lookup_builtin(&label).is_none()
+			{
+				if self.reported_once.insert((value, "E-LOOP-14")) {
+					let text = label;
+					let diagnostic = self.diagnostic(
+						&E_LOOP_14,
+						value,
+						format!(
+							"Fa has no labeled loops: `break {text}` can't name a loop. `break` leaves the innermost loop; to leave several, put them in a function and `return`"
+						),
+					);
+					self.report(diagnostic);
+				}
+				// then a plain `break`
+				return self.check_break(n, None);
+			}
 		}
 		let target = self
 			.body

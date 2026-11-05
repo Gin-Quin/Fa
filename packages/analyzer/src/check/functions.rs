@@ -21,7 +21,7 @@ use crate::diagnostics::codes::types::{
 	FN011, FN012, FN013, FN020, FN028, FN040, FN041, FN061, FN062, WFN001,
 };
 use crate::diagnostics::codes::values::{E_DECL_9, E_DO_2, E_TYPE_1};
-use crate::ids::{NodeId, SigId, SymbolId, TypeId};
+use crate::ids::{NodeId, PlaceId, SigId, SymbolId, TypeId};
 use crate::symbols::{DeclState, Resolution, ScopeKind, SymbolKind};
 use crate::syntax::{self, Name, NodeList, SignatureView, View};
 use crate::types::{CollKind, FnSig, ParamSig, TypeKind};
@@ -45,6 +45,10 @@ struct ParamSyntax {
 	/// parameter is then an anonymous symbol named by the pattern's text.
 	pattern: Option<NodeId>,
 }
+
+/// A default value, checked in the function's context: the value, its
+/// expected type, and whether it is checked quietly (`FN020`).
+type DeferredDefault = (NodeId, Option<TypeId>, bool);
 
 /// What is being analyzed: a `function` declaration or a lambda.
 #[derive(Copy, Clone, Debug)]
@@ -354,32 +358,92 @@ impl Walker<'_> {
 	) -> TypeId {
 		let lenient = expected.is_some_and(|expected| self.s.types.is_recovering(expected));
 		let expected = expected.and_then(|expected| self.signature_of(expected));
-		// it sees the facts of its creation (values brief D-102); `break`,
-		// `continue` and `return` don't cross it
-		let inner = BodyCx {
-			scope: self.body.scope,
-			flow: self.body.flow.fork(),
-			functions: Vec::new(),
-			loops: Vec::new(),
-			flow_buffers: std::mem::take(&mut self.body.flow_buffers),
-			requirements: std::mem::take(&mut self.body.requirements),
-			handlers: Vec::new(),
-			inside_loop: self.body.inside_loop || !self.body.loops.is_empty(),
-			provides: self.body.provides.clone(),
+		// it sees the facts of its creation (values brief D-102) that stay
+		// valid at each of its calls: the ones of the places it (or a sibling
+		// lambda of the call) writes go, as at a loop head (decision "After
+		// the analyzer review"); `break`, `continue` and `return` don't cross it
+		// (only the arguments of the call see the writes of their siblings)
+		let entry_writes = std::mem::take(&mut self.lambda_entry_writes);
+		let mut dropped: Vec<(PlaceId, bool, NodeId)> = entry_writes.clone();
+		let mut rounds = 0u32;
+		let ty = loop {
+			rounds += 1;
+			let inner = BodyCx {
+				scope: self.body.scope,
+				flow: self.body.flow.fork(),
+				functions: Vec::new(),
+				loops: Vec::new(),
+				flow_buffers: std::mem::take(&mut self.body.flow_buffers),
+				requirements: std::mem::take(&mut self.body.requirements),
+				handlers: Vec::new(),
+				inside_loop: self.body.inside_loop || !self.body.loops.is_empty(),
+				provides: self.body.provides.clone(),
+			};
+			let saved = std::mem::replace(&mut self.body, inner);
+			let entry = self.body.flow.clone();
+			for &(place, invalidates, at) in &dropped {
+				self.drop_entry_facts(place, invalidates, at);
+			}
+			self.push_flow_buffer();
+			// `async` written, or expected (tasks.rs)
+			let is_async = self.lambda_is_async(n, signature.is_async, false, expected);
+			let owner = FnOwner {
+				declaration: None,
+				symbol: None,
+				lenient,
+				is_async,
+			};
+			let ty = self.check_function(n, signature, body, owner, expected);
+			// the places it writes whose facts it saw: walked again without them
+			let written: Vec<(PlaceId, bool, NodeId)> = self
+				.closure_effects
+				.get(&n)
+				.map(|entries| {
+					entries
+						.iter()
+						.map(|entry| (entry.place, entry.invalidates, entry.node))
+						.collect()
+				})
+				.unwrap_or_default();
+			let mut again = false;
+			if rounds < 3 {
+				for (place, invalidates, at) in written {
+					if dropped
+						.iter()
+						.any(|&(other, both, _)| other == place && both == invalidates)
+					{
+						continue;
+					}
+					let saved_flow = std::mem::replace(&mut self.body.flow, entry.clone());
+					self.drop_entry_facts(place, invalidates, at);
+					let changed = self.body.flow != entry;
+					self.body.flow = saved_flow;
+					if changed {
+						dropped.push((place, invalidates, at));
+						again = true;
+					}
+				}
+			}
+			self.pop_flow_buffer(!again);
+			let inner = std::mem::replace(&mut self.body, saved);
+			self.body.flow_buffers = inner.flow_buffers;
+			self.body.requirements = inner.requirements;
+			if !again {
+				break ty;
+			}
 		};
-		let saved = std::mem::replace(&mut self.body, inner);
-		// `async` written, or expected (tasks.rs)
-		let is_async = self.lambda_is_async(n, signature.is_async, false, expected);
-		let owner = FnOwner {
-			declaration: None,
-			symbol: None,
-			lenient,
-			is_async,
-		};
-		let ty = self.check_function(n, signature, body, owner, expected);
-		let inner = std::mem::replace(&mut self.body, saved);
-		self.body.flow_buffers = inner.flow_buffers;
-		self.body.requirements = inner.requirements;
+		// its writes of captured places happen where it is created: the facts
+		// of the written places go (effects.rs)
+		if let Some(entries) = self.closure_effects.remove(&n) {
+			for entry in entries {
+				self.drop_place_facts(entry.place);
+				self.record_effect(entry.place, entry.invalidates, entry.node, entry.call);
+				if let Some(writes) = &mut self.lambda_call_writes {
+					writes.push((entry.place, entry.invalidates, entry.node));
+				}
+			}
+		}
+		self.lambda_entry_writes = entry_writes;
 		// a captured task or worker's handle moves into the closure
 		let captured: Vec<SymbolId> = self
 			.a
@@ -440,13 +504,29 @@ impl Walker<'_> {
 		}
 
 		// 1. the signature
-		let (params, incomplete) =
+		let (params, incomplete, defaults) =
 			self.check_params(lambda, signature.parameters, expected, owner.lenient);
 		// the parameters named by `Type(…)` are declared: the body's lambdas are not
 		self.pending_implicit.clear();
 		let declared_return = signature
 			.returns
 			.map(|returns| self.check_type_expr(returns));
+		// errors are thrown, never returned (errors.md, `E-ERR-7`)
+		if let (Some(returns), Some(ty)) = (signature.returns, declared_return)
+			&& let Some(error) = self.error_member(ty)
+			&& self.reported_once.insert((returns, "E-ERR-7"))
+		{
+			let error = self.s.types.display(error);
+			let shown = self.s.types.display(ty);
+			let diagnostic = self.diagnostic(
+				&crate::diagnostics::codes::values::E_ERR_7,
+				returns,
+				format!(
+					"errors are never part of the return type: remove `{error}` from `{shown}`, and declare `throws {error}`"
+				),
+			);
+			self.report(diagnostic);
+		}
 		// a return type with parameters still being inferred is inferred from the body
 		let expected_return = expected
 			.map(|sig| sig.ret)
@@ -455,7 +535,6 @@ impl Walker<'_> {
 		let throws = signature
 			.throws
 			.map_or(TypeId::NEVER, |throws| self.check_type_expr(throws));
-		let effects = false;
 		// `requires name: Type` (requirements.rs)
 		let requires = self.declare_requirements(signature.requires);
 		let mut declared_requires: Vec<crate::types::Requirement> = requires
@@ -554,14 +633,28 @@ impl Walker<'_> {
 			is_async: owner.is_async,
 			..FnCx::new(lambda, owner.symbol, mode, scope)
 		});
-		// with effects the analyzer doesn't know yet, the body is walked quietly
-		self.quiet += u32::from(effects);
+		// `: T in owner`: a parameter or a module-level value (references.rs)
+		let ref_owner = signature
+			.returns
+			.and_then(|returns| self.reference_return_owner(returns));
+		if let Some(cx) = self.body.functions.last_mut() {
+			cx.ref_owner = ref_owner;
+		}
+		// a default value runs inside the function: its errors and effects
+		// are the function's (defining-functions.md)
+		for (default, expected, quiet) in defaults {
+			self.quiet += u32::from(quiet);
+			let actual = self.check(default, expected);
+			if let Some(expected) = expected {
+				self.sink(default, actual, expected);
+			}
+			self.quiet -= u32::from(quiet);
+		}
 		let body_ty = if block_body {
 			self.check_block_body(body, mode, owner)
 		} else {
 			self.check_expression_body(body, mode)
 		};
-		self.quiet -= u32::from(effects);
 		let cx = self.body.functions.pop();
 		if parallel_callback {
 			self.parallel.pop();
@@ -587,6 +680,12 @@ impl Walker<'_> {
 			// the value of the function is a copy, maybe a move (moves.rs)
 			if !matches!(mode, TypeId::VOID | TypeId::NEVER) {
 				self.note_copy_site(value_node);
+				if !block_body || !matches!(self.view(value_node), View::Return(_)) {
+					self.check_returned_reference(
+						value_node,
+						cx.as_ref().and_then(|cx| cx.ref_owner),
+					);
+				}
 			}
 			// a task it returns can't use its locals (tasks.rs)
 			if let Some(cx) = &cx {
@@ -718,7 +817,7 @@ impl Walker<'_> {
 		parameters: NodeList<'_>,
 		expected: Option<FnSig>,
 		lenient: bool,
-	) -> (Vec<(FnParam, ParamSig)>, bool) {
+	) -> (Vec<(FnParam, ParamSig)>, bool, Vec<DeferredDefault>) {
 		let expected_params: Vec<ParamSig> = expected
 			.map(|sig| self.s.types.params(sig.params).to_vec())
 			.unwrap_or_default();
@@ -739,6 +838,8 @@ impl Walker<'_> {
 		let mut syntaxes = Vec::with_capacity(parameters.len());
 		let mut incomplete = false;
 		let mut params = Vec::with_capacity(parameters.len());
+		// the default values, checked in the function's context
+		let mut defaults = Vec::new();
 		for (position, parameter) in parameters.iter().enumerate() {
 			if let Some(name) = self.self_parameter(parameter) {
 				match self.declare_self(parameter, name, position == 0) {
@@ -776,13 +877,8 @@ impl Walker<'_> {
 					.map(|later| tree.name(later.name))
 					.collect();
 				later_use = self.find_name_use(default, &later);
-				self.quiet += u32::from(later_use.is_some());
 				let expected = (!declared.is_unset()).then_some(declared);
-				let actual = self.check(default, expected);
-				if let Some(expected) = expected {
-					self.sink(default, actual, expected);
-				}
-				self.quiet -= u32::from(later_use.is_some());
+				defaults.push((default, expected, later_use.is_some()));
 			}
 			let last = index + 1 == syntaxes.len();
 			let ty = self.memo(param.node, |w| {
@@ -819,7 +915,7 @@ impl Walker<'_> {
 				},
 			));
 		}
-		(params, incomplete)
+		(params, incomplete, defaults)
 	}
 
 	/// The name of a `self` parameter (`self`, or `self: T`, which is `FN041`).
@@ -1144,7 +1240,7 @@ impl Walker<'_> {
 
 	/// Whether computing an expression has no effect (no call, no assignment,
 	/// nothing that can fail but arithmetic).
-	fn is_pure_expression(&self, n: NodeId) -> bool {
+	pub(super) fn is_pure_expression(&self, n: NodeId) -> bool {
 		let pure = matches!(
 			self.view(n),
 			View::Integer(_)
@@ -1275,6 +1371,8 @@ impl Walker<'_> {
 				let ty = self.check(value, Some(returns));
 				self.sink(value, ty, returns);
 				self.note_copy_site(value);
+				let owner = self.body.functions.last().and_then(|cx| cx.ref_owner);
+				self.check_returned_reference(value, owner);
 			}
 			None if returns == TypeId::NEVER => {
 				self.memo(n, |w| {
@@ -1339,6 +1437,51 @@ impl Walker<'_> {
 	/// The `function` declaration with a signature that a call of `symbol`
 	/// reaches: the function itself, or the target of an alias
 	/// (`function f = add`), which keeps the named arguments and the defaults.
+	/// At the entry of a lambda that writes `place`: the facts of the place
+	/// go, and the references the write invalidates may be invalid (the
+	/// lambda may run again after its write).
+	fn drop_entry_facts(&mut self, place: PlaceId, invalidates: bool, n: NodeId) {
+		self.drop_place_facts(place);
+		if self.body.flow.refs.is_empty() {
+			return;
+		}
+		let before = self.body.flow.refs.clone();
+		self.invalidate_references(place, invalidates, n);
+		let after = self.body.flow.refs.clone();
+		for (symbol, state) in after {
+			if before
+				.iter()
+				.any(|&(other, old)| other == symbol && old == state)
+			{
+				continue;
+			}
+			let mut current = self.facts.refs.get(state).clone();
+			if let Some((by, _)) = current.invalidated {
+				current.invalidated = Some((by, true));
+				let next = self.facts.refs.state(current);
+				self.body.flow.set_ref_state(symbol, next);
+			}
+		}
+	}
+
+	/// An `Errors` type of a type or of its union members.
+	fn error_member(&self, ty: TypeId) -> Option<TypeId> {
+		match self.s.types.kind(ty) {
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _)
+				if self.s.types.nominal(nominal).kind == crate::types::NominalKind::Errors =>
+			{
+				Some(ty)
+			}
+			TypeKind::Union(list) => self
+				.s
+				.types
+				.list_items(list)
+				.iter()
+				.find_map(|&member| self.error_member(member)),
+			_ => None,
+		}
+	}
+
 	pub(super) fn direct_function(&self, symbol: SymbolId) -> Option<NodeId> {
 		let mut visited = FxHashSet::default();
 		let mut current = symbol;

@@ -315,3 +315,38 @@ fn the_diagnostics_of_the_pipeline_are_deterministic_with_errors() {
 	assert!(first.contains("library/m03"), "{first}");
 	assert!(first.contains("library/m09"), "{first}");
 }
+
+#[test]
+fn a_second_target_analyzes_nothing_when_no_file_reads_it() {
+	// async code (`await`, `start`) and calls of functions that never wait
+	// don't read the target: only a blocking call of something that may
+	// block does (review 27)
+	let files: Vec<(String, String)> = [
+		(
+			"package.fa",
+			"export = {\n\tname = \"p\"\n\tversion = \"0.1.0\"\n\ttargets = [\"bun\", \"native\"]\n}\n",
+		),
+		(
+			"library/twice.fa",
+			"export async function = (n: Integer): Integer => n * 2\n",
+		),
+		(
+			"library/add.fa",
+			"export function = (a: Integer, b: Integer): Integer => a + b\n",
+		),
+		(
+			"application/main.fa",
+			"export async function = () => {\n\tlet task = start library.twice(1)\n\tconsole.log(await task, await library.twice(2), library.add(1, 2))\n}\n",
+		),
+	]
+	.into_iter()
+	.map(|(path, text)| (path.to_string(), text.to_string()))
+	.collect();
+	let (first, again) = parallel(&files, 2, 0);
+	assert!(
+		diagnostic_lines(&first).is_empty(),
+		"unexpected diagnostics:\n{first}"
+	);
+	assert!(!first.contains("reads_target=true"), "{first}");
+	assert!(!again.contains("analyzed=true"), "{first}\n{again}");
+}

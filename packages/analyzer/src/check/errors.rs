@@ -20,7 +20,7 @@ use crate::analysis::NodeFlags;
 use crate::builtins::errors::error_type;
 use crate::check::Walker;
 use crate::diagnostics::codes::values::{
-	E_ERR_1, E_ERR_2, E_ERR_3, E_ERR_4, E_ERR_6, E_ERR_9, W_ERR_1, W_ERR_2, W_ERR_3,
+	E_DECL_15, E_ERR_1, E_ERR_2, E_ERR_3, E_ERR_4, E_ERR_6, E_ERR_9, W_ERR_1, W_ERR_2, W_ERR_3,
 };
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::{ScopeKind, SymbolKind};
@@ -237,6 +237,37 @@ impl Walker<'_> {
 				&& matches!(syntax::view(&self.tree, handler.node), View::Catch { expression, .. }
 					if self.parenthesized(expression) == n)
 		});
+		// `try x = f()`: the assignment can't fail, its value can
+		// (arithmetic.md, `E-DECL-15`); `try scores[index] = 0` can
+		let assignment_target = match self.view(self.strip_groups(value)) {
+			View::Assignment { target, .. } | View::CompoundAssignment { target, .. } => {
+				Some(target)
+			}
+			_ => None,
+		};
+		// (an index anywhere in the target can fail: `try kept[0].count = 1`)
+		let infallible_assignment = assignment_target.is_some_and(|target| {
+			let mut node = self.strip_groups(target);
+			loop {
+				match self.view(node) {
+					View::Index { .. } => return false,
+					View::Access { target, .. } => node = self.strip_groups(target),
+					_ => return true,
+				}
+			}
+		});
+		if infallible_assignment && self.reported_once.insert((n, "E-DECL-15")) {
+			let target = assignment_target.unwrap_or(value);
+			let text = self.tree.text(target.index()).to_string();
+			let diagnostic = self.diagnostic(
+				&E_DECL_15,
+				n,
+				format!(
+					"assigning `{text}` can't fail: put `try` on the value instead, `{text} = try …`"
+				),
+			);
+			self.report(diagnostic);
+		}
 		self.open_handler(HandlerKind::Try, n);
 		let ty = self.check(value, expected);
 		let errors = self.close_handler();
@@ -252,7 +283,8 @@ impl Walker<'_> {
 			ty
 		});
 		if errors == TypeId::NEVER {
-			if self.body.flow.reachable && !self.s.types.is_recovering(ty) {
+			if self.body.flow.reachable && !self.s.types.is_recovering(ty) && !infallible_assignment
+			{
 				let diagnostic =
 					self.diagnostic(&W_ERR_1, n, "this expression can't fail: remove the `try`");
 				self.report_flow(diagnostic);

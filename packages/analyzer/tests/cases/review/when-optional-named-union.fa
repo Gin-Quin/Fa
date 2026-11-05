@@ -1,0 +1,14 @@
+-- review 19: a `when` over an optional named union is exhaustive with each member and `none`
+type Shape = Union {
+	Circle = { r: Integer }
+	Square = { s: Integer }
+}
+function f = (s: Shape?): Integer => when s is {
+	Shape.Circle => 1
+	Shape.Square => 2
+	none => 0
+}
+function g = (s: Shape?): Integer => when s is { -- error: E-WHEN-1
+	Shape.Circle => 1
+	none => 0
+}

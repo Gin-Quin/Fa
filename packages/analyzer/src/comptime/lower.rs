@@ -877,6 +877,18 @@ impl<'a> Lowerer<'a> {
 			let first = values.next().unwrap_or_else(Expr::none);
 			return values.fold(first, |acc, value| Expr::Builtin(path, vec![acc, value]));
 		}
+		// `"a" + "b"`: a concatenation
+		if op == ArithOp::Add
+			&& matches!(
+				self.types().kind(self.a.type_of(n)),
+				TypeKind::String | TypeKind::StringLit(_)
+			) {
+			let parts = operands
+				.iter()
+				.map(|operand| Part::Value(self.expr(operand)))
+				.collect();
+			return Expr::Template(parts);
+		}
 		let num = self.num(self.a.type_of(n));
 		let op_ir = Self::arith_op(op);
 		let mut values: Vec<Expr> = operands.iter().map(|operand| self.expr(operand)).collect();
@@ -1416,7 +1428,8 @@ impl<'a> Lowerer<'a> {
 				let method = path.contains('#');
 				let mut values = Vec::new();
 				let place = if method {
-					if mutates(path) {
+					// the effects table of the built-ins (one source, `builtins/array.rs`)
+					if crate::builtins::effects::changes_receiver(path) {
 						let target = match syntax::view(self.tree, callee) {
 							View::Access { target, members } if members.len() == 1 => Some(target),
 							_ => None,
@@ -1742,32 +1755,6 @@ impl<'a> Lowerer<'a> {
 		}
 		Expr::Block(statements)
 	}
-}
-
-/// Whether a built-in method changes its receiver.
-fn mutates(path: &str) -> bool {
-	matches!(
-		path,
-		"Array#push"
-			| "Array#pop"
-			| "Array#insert"
-			| "Array#delete"
-			| "Array#take"
-			| "Array#clear"
-			| "Array#reverseInPlace"
-			| "Array#sortInPlace"
-			| "Array#deleteWhere"
-			| "Set#add"
-			| "Set#delete"
-			| "Set#take"
-			| "Set#clear"
-			| "Set#deleteWhere"
-			| "Map#delete"
-			| "Map#take"
-			| "Map#clear"
-			| "Map#getOrInsert"
-			| "Map#deleteWhere"
-	)
 }
 
 /// The node of a function's `FnInfo`: its declaration, or the lambda of an

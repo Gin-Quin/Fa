@@ -373,6 +373,19 @@ impl Walker<'_> {
 			return;
 		}
 		let set = match self.s.types.as_int(ty) {
+			// a value that may overflow or not fit (`let y: Int8 = x + 126`)
+			// wraps without overflow checks: any value of the type (decision
+			// "Bounds stay memory-safe in release builds"); the intervals
+			// recorded for the nodes stay (the backends wrap by them)
+			Some(_)
+				if self
+					.a
+					.flags_of(self.strip_groups(value))
+					.intersects(NodeFlags::SINK_CHECK | NodeFlags::OVERFLOW_NATIVE)
+					&& self.s.types.interval_of(ty).is_some_and(narrow) =>
+			{
+				None
+			}
 			Some(_) => self.value_set(value),
 			None => None,
 		};
@@ -816,7 +829,13 @@ impl Walker<'_> {
 				}
 				Err(()) => {
 					let operand = operands.get(index).unwrap_or(n);
-					self.report_kind_mix(n, op, result_ty, types[index], operand);
+					// the left operand: the first one, or the chain before
+					let left = if index == 1 {
+						operands.get(0).unwrap_or(n)
+					} else {
+						n
+					};
+					self.report_kind_mix((n, left), op, result_ty, types[index], operand);
 					return TypeId::UNKNOWN;
 				}
 			}
@@ -984,14 +1003,14 @@ impl Walker<'_> {
 	/// `E-NUM-18` (an operand isn't a number) or `E-NUM-11` (number kinds mixed).
 	fn report_kind_mix(
 		&mut self,
-		n: NodeId,
+		(n, left_node): (NodeId, NodeId),
 		op: ArithOp,
 		left: TypeId,
 		right: TypeId,
 		operand: NodeId,
 	) {
 		// an optional or a union operand (narrowing.rs)
-		if self.union_operand(operand, right) || self.union_operand(n, left) {
+		if self.union_operand(operand, right) || self.union_operand(left_node, left) {
 			return;
 		}
 		let (left_kind, right_kind) = (self.num_kind(left), self.num_kind(right));
@@ -1494,7 +1513,7 @@ impl Walker<'_> {
 			_ => match self.combine(op, left, right) {
 				Ok((_, ty)) => ty,
 				Err(()) => {
-					self.report_kind_mix(n, op, place.ty, actual, n);
+					self.report_kind_mix((n, n), op, place.ty, actual, n);
 					return;
 				}
 			},
@@ -1569,6 +1588,7 @@ impl Walker<'_> {
 		);
 		let mut steps = StepFlags::default();
 		let interval = self.step(op, &current, &right, compute, target_storage, &mut steps);
+		let step_flags = steps.flags;
 		self.finish_arith(n, interval, compute, place.ty, steps);
 		// the sink: the target's declared type, for the values that pass the compute type
 		let range = self
@@ -1601,7 +1621,23 @@ impl Walker<'_> {
 			}
 		}
 		if let Some(symbol) = symbol {
-			self.set_symbol_values(symbol, Some(IntervalSet::of(checked)));
+			// a write that may overflow or not fit wraps without overflow
+			// checks: the place may then hold any value of its type, except a
+			// non-negative 64-bit counter growing by `+= 1` (it can't reach
+			// the limit in practice)
+			let wraps = narrow(range)
+				&& (step_flags.contains(NodeFlags::OVERFLOW_NATIVE)
+					|| !range.contains_interval(checked));
+			let counter = op == ArithOp::Add
+				&& right.as_exact() == Some(I256::ONE)
+				&& current.hull.lo >= I256::ZERO
+				&& range.hi >= I256::from(i64::MAX);
+			let values = if wraps && !counter {
+				None
+			} else {
+				checked.intersect(range).map(IntervalSet::of)
+			};
+			self.set_symbol_values(symbol, values);
 		}
 	}
 
@@ -1820,14 +1856,13 @@ impl Walker<'_> {
 	/// Whether a node is the receiver of a member (`x.f()`) or an operand of
 	/// an arithmetic or comparison node: its type decides the operation.
 	fn is_operand_or_receiver(&self, n: NodeId) -> bool {
-		(0..self.tree.nodes.len()).map(NodeId::new).any(|parent| {
-			match syntax::view(&self.tree, parent) {
+		self.parent(n)
+			.is_some_and(|parent| match syntax::view(&self.tree, parent) {
 				View::Access { target, .. } => target == n,
 				View::Arithmetic { operands, .. } => operands.iter().any(|operand| operand == n),
 				View::Comparison { operands, .. } => operands.iter().any(|operand| operand == n),
 				_ => false,
-			}
-		})
+			})
 	}
 
 	/// `x.abs()`: the receiver's type; for an integer, an arithmetic node
@@ -1907,4 +1942,12 @@ impl Walker<'_> {
 			TypeId::RANGE
 		})
 	}
+}
+
+/// Whether an integer type is narrower than 64 bits: its values wrap after
+/// a few steps without overflow checks. A 64-bit value derived from lengths
+/// and counters can't reach its limits in practice (the argument of
+/// `proofs::reliable_interval`).
+fn narrow(range: Interval) -> bool {
+	range.hi < I256::from(i64::MAX)
 }

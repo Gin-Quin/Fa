@@ -7,7 +7,9 @@ use crate::analysis::NodeFlags;
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::types::TY057;
-use crate::diagnostics::codes::values::{E_OBJ_5, E_RNG_4, E_WHEN_1, E_WHEN_3, E_WHEN_5, E_WHEN_8};
+use crate::diagnostics::codes::values::{
+	E_OBJ_5, E_RNG_4, E_WHEN_1, E_WHEN_3, E_WHEN_5, E_WHEN_8, W_WHEN_1, W_WHEN_2,
+};
 use crate::flow::FlowState;
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::{ScopeKind, SymbolKind};
@@ -94,6 +96,10 @@ struct WhenCoverage {
 	covered: Vec<TypeId>,
 	/// Whether an arm is `else`.
 	has_else: bool,
+	/// The covered types, for `W-WHEN-1` in linear time: each one exactly,
+	/// and the members of named unions and enumerations by mask.
+	exact: rustc_hash::FxHashSet<TypeId>,
+	masks: Vec<(crate::ids::NominalId, crate::ids::MaskId)>,
 }
 
 impl Walker<'_> {
@@ -152,14 +158,41 @@ impl Walker<'_> {
 					let ty = self.check_when_pattern(pattern, subject_ty);
 					// the subject narrowed in the arm, and what is left (narrowing.rs)
 					self.when_arm(n, subject, pattern, &mut remaining);
+					// `W-WHEN-1`: by the types matched above (members, literals),
+					// or by the values left (integers)
+					if self.covered_above(ty, &coverage) {
+						self.report_unreachable_arm(pattern);
+					} else if !self.body.flow.reachable
+						&& entry.reachable && self
+						.s
+						.types
+						.union_members(&subject_ty)
+						.iter()
+						.all(|&part| matches!(self.s.types.kind(part), TypeKind::Int(_)))
+					{
+						self.unreachable_arm(n, subject, pattern, &mut entry);
+					}
 					integer_patterns.push(pattern);
-					coverage
-						.covered
-						.extend(self.s.types.union_members(&ty).iter().copied());
+					let members: Vec<TypeId> = self.s.types.union_members(&ty).to_vec();
+					for member in members {
+						self.note_covered(&mut coverage, member);
+					}
 					ty
 				}
 				None => {
 					coverage.has_else = true;
+					// the arms above handle every value of the subject's type,
+					// whatever is known of it (`W-WHEN-2`)
+					if position > 0
+						&& entry.reachable && self.covers_every_member(subject_ty, &coverage.covered)
+					{
+						let diagnostic = self.diagnostic(
+							&W_WHEN_2,
+							arm.value,
+							"this `else` never runs: the other arms handle every value. Remove it",
+						);
+						self.report_flow(diagnostic);
+					}
 					if position + 1 != count {
 						let diagnostic = self.diagnostic(
 							&E_WHEN_8,
@@ -366,6 +399,109 @@ impl Walker<'_> {
 		self.report_once(pattern, diagnostic);
 	}
 
+	/// Whether patterns cover every member of a union-like subject (named
+	/// unions, enumerations, `Boolean`, literal unions; never integers).
+	fn covers_every_member(&mut self, subject: TypeId, covered: &[TypeId]) -> bool {
+		if self.s.types.is_recovering(subject)
+			|| covered.iter().any(|&ty| self.s.types.is_recovering(ty))
+			|| self
+				.members_of(subject)
+				.iter()
+				.any(|&member| self.s.types.as_int(member).is_some())
+		{
+			return false;
+		}
+		if !matches!(
+			self.s.types.kind(subject),
+			TypeKind::NamedUnion(..) | TypeKind::Enum(..) | TypeKind::Boolean | TypeKind::Union(_)
+		) {
+			return false;
+		}
+		let mut missing = Vec::new();
+		self.when_missing(subject, covered, &mut missing, true);
+		missing.is_empty()
+	}
+
+	/// `W-WHEN-1`: an arm no value reaches. Reported when the earlier arms
+	/// match all its values (not when the facts known before the `when`
+	/// exclude them).
+	fn unreachable_arm(
+		&mut self,
+		n: NodeId,
+		subject: NodeId,
+		pattern: NodeId,
+		entry: &mut FlowState,
+	) {
+		let saved = std::mem::replace(&mut self.body.flow, entry.fork());
+		let (matching, _) = self.pattern_test(n, subject, pattern, None);
+		self.body.flow = saved;
+		if matching.reachable {
+			self.report_unreachable_arm(pattern);
+		}
+	}
+
+	/// Records a type a pattern matches.
+	fn note_covered(&mut self, coverage: &mut WhenCoverage, ty: TypeId) {
+		coverage.covered.push(ty);
+		coverage.exact.insert(ty);
+		if let Some((nominal, mask, _)) = self.s.types.nominal_mask(ty) {
+			match coverage
+				.masks
+				.iter_mut()
+				.find(|(other, _)| *other == nominal)
+			{
+				Some((_, union)) => *union = self.s.types.mask_union(*union, mask),
+				None => coverage.masks.push((nominal, mask)),
+			}
+		}
+	}
+
+	/// Whether the arms above match every value of a pattern's type (a
+	/// literal, a member, a subset of members; not integers).
+	fn covered_above(&mut self, ty: TypeId, coverage: &WhenCoverage) -> bool {
+		if coverage.covered.is_empty() || ty.is_unset() || self.s.types.is_recovering(ty) {
+			return false;
+		}
+		let parts: Vec<TypeId> = self.s.types.union_members(&ty).to_vec();
+		// integers: by the values left (`unreachable_arm`)
+		if parts
+			.iter()
+			.any(|&part| self.s.types.as_int(part).is_some())
+		{
+			return false;
+		}
+		parts.into_iter().all(|part| {
+			// a literal matches one value (a pattern on a `Character` is typed
+			// `Character`: it matches one character, not every one)
+			if matches!(
+				self.s.types.kind(part),
+				TypeKind::StringLit(_) | TypeKind::BoolLit(_) | TypeKind::None
+			) {
+				return coverage.exact.contains(&part);
+			}
+			// a pattern's type may be wider than what it matches (a
+			// character literal is a `Character`): only exact types and
+			// members count
+			match self.s.types.nominal_mask(part) {
+				Some((nominal, mask, _)) => coverage.masks.iter().any(|&(other, union)| {
+					other == nominal && self.s.types.mask_subset(mask, union)
+				}),
+				None => false,
+			}
+		})
+	}
+
+	/// Reports `W-WHEN-1` on an arm's pattern.
+	fn report_unreachable_arm(&mut self, pattern: NodeId) {
+		let text = self.tree.text(pattern.index()).to_string();
+		let diagnostic = self.diagnostic(
+			&W_WHEN_1,
+			pattern,
+			format!("this arm never runs: the arms above already match every value of `{text}`. Remove it, or move it up"),
+		);
+		self.report_flow(diagnostic);
+	}
+
 	/// Reports a type diagnostic attached to a node checked several times
 	/// (a pattern in a loop): once.
 	pub(super) fn report_once(&mut self, n: NodeId, diagnostic: crate::diagnostics::Diagnostic) {
@@ -466,6 +602,25 @@ impl Walker<'_> {
 		if covered.iter().any(|&ty| self.s.types.is_recovering(ty)) {
 			return;
 		}
+		let mut missing: Vec<String> = Vec::new();
+		self.when_missing(subject, covered, &mut missing, true);
+		if missing.is_empty() {
+			return;
+		}
+		let message = format!("this `when` doesn't handle {}", missing.join(", "));
+		let diagnostic = self.diagnostic(&E_WHEN_1, n, message);
+		self.report(diagnostic);
+	}
+
+	/// The values of `subject` no pattern of `covered` handles, for `E-WHEN-1`
+	/// (`top`: the subject itself, not a member of it).
+	fn when_missing(
+		&mut self,
+		subject: TypeId,
+		covered: &[TypeId],
+		missing: &mut Vec<String>,
+		top: bool,
+	) {
 		let covers = |w: &mut Self, ty: TypeId| {
 			covered
 				.iter()
@@ -474,7 +629,6 @@ impl Walker<'_> {
 		if covers(self, subject) {
 			return;
 		}
-		let mut missing: Vec<String> = Vec::new();
 		match self.s.types.kind(subject) {
 			TypeKind::NamedUnion(nominal, mask) | TypeKind::Enum(nominal, mask) => {
 				let enumeration = matches!(self.s.types.kind(subject), TypeKind::Enum(..));
@@ -483,8 +637,19 @@ impl Walker<'_> {
 					.types
 					.sym_list(self.s.types.nominal(nominal).members)
 					.len() as u16;
+				// the members the patterns of this type cover, as one mask
+				let empty = self.s.types.mask(&[]);
+				let mut handled = empty;
+				for &pattern in covered {
+					if let Some((other, pattern_mask, _)) = self.s.types.nominal_mask(pattern)
+						&& other == nominal
+					{
+						handled = self.s.types.mask_union(handled, pattern_mask);
+					}
+				}
 				for index in 0..count {
-					if !self.s.types.mask_has(mask, index) {
+					if !self.s.types.mask_has(mask, index) || self.s.types.mask_has(handled, index)
+					{
 						continue;
 					}
 					let member = if enumeration {
@@ -512,6 +677,14 @@ impl Walker<'_> {
 					if self.s.types.as_int(member).is_some() {
 						continue;
 					}
+					// a named union, an enumeration or `Boolean` inside: by member
+					if matches!(
+						self.s.types.kind(member),
+						TypeKind::NamedUnion(..) | TypeKind::Enum(..) | TypeKind::Boolean
+					) {
+						self.when_missing(member, covered, missing, false);
+						continue;
+					}
 					if !covers(self, member) {
 						// the value `none`, not its type `None`
 						let text = if member == TypeId::NONE {
@@ -524,14 +697,9 @@ impl Walker<'_> {
 				}
 			}
 			// integers by literals and ranges: E2
-			TypeKind::Int(_) => return,
-			_ => missing.push("the other values (add an `else` arm)".to_string()),
+			TypeKind::Int(_) => {}
+			_ if top => missing.push("the other values (add an `else` arm)".to_string()),
+			_ => missing.push(format!("`{}`", self.display(subject))),
 		}
-		if missing.is_empty() {
-			return;
-		}
-		let message = format!("this `when` doesn't handle {}", missing.join(", "));
-		let diagnostic = self.diagnostic(&E_WHEN_1, n, message);
-		self.report(diagnostic);
 	}
 }

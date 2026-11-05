@@ -1,0 +1,23 @@
+-- decision "Bounds stay memory-safe in release builds": without overflow checks, an operation that may overflow wraps; no index proof leans on a trap
+-- overflow-checks: false
+let items = [10, 20, 30]
+function pick = (x: Int8): Integer => {
+	if x > 0 {
+		let y: Int8 = x + 126
+		let index: Int8 = y - 127
+		return items[index] catch error => -1 -- check: INDEX_CHECK
+	}
+	return 0
+}
+function count = (start: Int8): Integer => {
+	mutable index: Int8 = start
+	if index >= 0 and index < 2 {
+		index += 127
+		index -= 127
+		return items[index] catch error => -1 -- check: INDEX_CHECK
+	}
+	return 0
+}
+console.log(pick(1)) -- prints: 10
+console.log(pick(4)) -- prints: -1
+console.log(count(1)) -- prints: 20

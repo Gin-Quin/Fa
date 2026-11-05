@@ -147,7 +147,10 @@ impl Walker<'_> {
 			// `String(x)`, type functions: later milestones
 			return self.unsupported(n, "calling a type");
 		}
+		// a local function called by name is not used as a value (moves.rs)
+		let saved_callee = self.callee_name_node.replace(self.strip_groups(callee));
 		let callee_ty = self.check(callee, None);
+		self.callee_name_node = saved_callee;
 		// `numbers.parallel().map(f)`: `f` follows the rules of a parallel body
 		self.parallel_operation(n, callee, arguments);
 		// `a?.f()`: called when `a` is not `none`, `none` otherwise
@@ -219,43 +222,86 @@ impl Walker<'_> {
 			.collect();
 		// the errors of the callbacks given to a built-in, which it throws
 		let mut callback_errors: Vec<TypeId> = Vec::new();
-		// the arguments: every visit (they carry flow)
-		for &(value, expected) in &binding.expected {
-			let expected = expected.map(|expected| substitute(self, expected));
-			if is_extern && let Some(expected) = expected {
-				let index = positions
-					.iter()
-					.position(|&given| given == Some(value.index()))
-					.unwrap_or(usize::MAX);
-				let mutated = self.param_mutated(sig, index);
-				self.check_c_argument(value, expected, mutated);
-				continue;
+		// the arguments: every visit (they carry flow). With several lambdas,
+		// a second round when one writes places another may read: each lambda
+		// may run after the others (decision "After the analyzer review")
+		let siblings = binding
+			.expected
+			.iter()
+			.filter(|(value, _)| {
+				matches!(self.view(self.strip_groups(*value)), View::Lambda { .. })
+			})
+			.count() >= 2;
+		let start = siblings.then(|| self.body.flow.clone());
+		let saved_writes = if siblings {
+			self.push_flow_buffer();
+			self.lambda_call_writes.replace(Vec::new())
+		} else {
+			self.lambda_call_writes.take()
+		};
+		let mut rounds = 1;
+		let mut round = 0;
+		while round < rounds {
+			if round == 1 {
+				self.pop_flow_buffer(false);
+				self.push_flow_buffer();
+				if let Some(start) = &start {
+					self.body.flow = start.clone();
+				}
+				callback_errors.clear();
+				self.lambda_entry_writes = self.lambda_call_writes.take().unwrap_or_default();
 			}
-			let actual = if synthesized.contains(&value) {
-				self.type_of(value)
-			} else {
-				self.check(value, expected)
-			};
-			if let Some(expected) = expected {
-				// a callback that throws, given to a built-in: the built-in
-				// throws its errors (design/decisions.md)
-				let expected = match kind {
-					Callee::Builtin(_) => match self.callback_throws(expected, actual) {
-						Some((widened, errors)) => {
-							callback_errors.push(errors);
-							widened
-						}
-						None => expected,
-					},
-					_ => expected,
+			for &(value, expected) in &binding.expected {
+				let expected = expected.map(|expected| substitute(self, expected));
+				if is_extern && let Some(expected) = expected {
+					let index = positions
+						.iter()
+						.position(|&given| given == Some(value.index()))
+						.unwrap_or(usize::MAX);
+					let mutated = self.param_mutated(sig, index);
+					self.check_c_argument(value, expected, mutated);
+					continue;
+				}
+				let actual = if synthesized.contains(&value) {
+					self.type_of(value)
+				} else {
+					self.check(value, expected)
 				};
-				// a parameter is a view of its argument; a built-in method
-				// (`push`, `add`) stores a copy (advanced brief §10.4)
-				self.view_sink = !matches!(kind, Callee::Builtin(_));
-				self.sink(value, actual, expected);
-				self.view_sink = false;
+				if let Some(expected) = expected {
+					// a callback that throws, given to a built-in: the built-in
+					// throws its errors (design/decisions.md)
+					let expected = match kind {
+						Callee::Builtin(_) => match self.callback_throws(expected, actual) {
+							Some((widened, errors)) => {
+								callback_errors.push(errors);
+								widened
+							}
+							None => expected,
+						},
+						_ => expected,
+					};
+					// a parameter is a view of its argument; a built-in method
+					// (`push`, `add`) stores a copy (advanced brief §10.4)
+					self.view_sink = !matches!(kind, Callee::Builtin(_));
+					self.sink(value, actual, expected);
+					self.view_sink = false;
+				}
 			}
+			if round == 0
+				&& siblings && self
+				.lambda_call_writes
+				.as_ref()
+				.is_some_and(|writes| !writes.is_empty())
+			{
+				rounds = 2;
+			}
+			round += 1;
 		}
+		if siblings {
+			self.pop_flow_buffer(true);
+			self.lambda_entry_writes.clear();
+		}
+		self.lambda_call_writes = saved_writes;
 		for &(spread, value, item) in &binding.spreads {
 			let item = substitute(self, item);
 			let actual = self.check(value, None);

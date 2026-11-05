@@ -6,6 +6,7 @@ edition = "2024"
 description = "The language server of Fa"
 
 [dependencies]
+mimalloc = { version = "0.1", default-features = false }
 fa = { path = "../cli" }
 fa-analyzer = { path = "../analyzer" }
 fa-parser = { path = "../parser" }

@@ -1,0 +1,27 @@
+-- review 13: a copy is not a move while the value is still read through a function value, or through a `mutable use` reseated on one branch only
+type Person = { name: String }
+function run = () => {
+	let numbers: Array<Integer> = [1, 2, 3]
+	function show = () => console.log(numbers.length)
+	let call = show
+	mutable other = numbers -- no-check: MOVE
+	other.push(4)
+	call()
+	console.log(other.length)
+}
+function branch = (flag: Boolean) => {
+	mutable alice = Person { name = "Ana" }
+	mutable bob = Person { name = "Bao" }
+	mutable use current = alice
+	if flag {
+		reuse current = bob
+	}
+	mutable moved = alice -- no-check: MOVE
+	moved.name = "Xavier"
+	console.log(current.name)
+}
+run()
+branch(false)
+-- prints: 3
+-- prints: 4
+-- prints: Ana

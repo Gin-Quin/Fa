@@ -1,0 +1,16 @@
+-- review 17: `is in` takes an array, a set or a map (logical.md); a literal array narrows the value to its literals
+function describe = (role: String): String => {
+	if role is in ["admin", "moderator"] {
+		let narrowed: "admin" | "moderator" = role
+		return narrowed
+	}
+	return "user"
+}
+let ids: Set<Integer> = [1, 2]
+let ages: Map<String, Integer> = [("Ana", 3)]
+let names = ["Ana", "Bao"]
+console.log(describe("admin")) -- prints: admin
+console.log(describe("guest")) -- prints: user
+console.log(2 is in ids, 3 is not in ids) -- prints: true true
+console.log("Ana" is in ages, "Cid" is in ages) -- prints: true false
+console.log("Bao" is in names) -- prints: true

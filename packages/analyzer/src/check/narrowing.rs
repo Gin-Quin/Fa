@@ -331,26 +331,50 @@ impl Walker<'_> {
 		} else {
 			return (matching, others);
 		};
-		let members = self.members_of(current);
-		let (yes, no): (SmallVec<[TypeId; 4]>, SmallVec<[TypeId; 4]>) = members
-			.into_iter()
-			.partition(|&member| self.s.types.satisfies(member, ty));
-		match (yes.is_empty(), no.is_empty()) {
+		// members of one named union or enumeration: by mask, not by member
+		let split = match (
+			self.s.types.nominal_mask(current),
+			self.s.types.nominal_mask(ty),
+		) {
+			(Some((nominal, mask, is_enum)), Some((other, tested, _))) if nominal == other => {
+				let (both, rest) = self.s.types.mask_split(mask, tested);
+				let masked = |types: &mut crate::types::TypeStore, mask| {
+					if is_enum {
+						types.enumeration(nominal, mask)
+					} else {
+						types.named_union(nominal, mask)
+					}
+				};
+				Some((
+					masked(&mut self.s.types, both),
+					masked(&mut self.s.types, rest),
+				))
+			}
+			_ => None,
+		};
+		let (yes, no) = match split {
+			Some(split) => split,
+			None => {
+				let members = self.members_of(current);
+				let (yes, no): (SmallVec<[TypeId; 4]>, SmallVec<[TypeId; 4]>) = members
+					.into_iter()
+					.partition(|&member| self.s.types.satisfies(member, ty));
+				(self.union_of(&yes), self.union_of(&no))
+			}
+		};
+		match (yes == TypeId::NEVER, no == TypeId::NEVER) {
 			(true, _) => matching = FlowState::impossible(),
 			(_, true) => others = FlowState::impossible(),
-			_ => {
-				let (yes, no) = (self.union_of(&yes), self.union_of(&no));
-				match field {
-					Err(symbol) => {
-						self.narrow_in(&mut matching, symbol, yes, n);
-						self.narrow_in(&mut others, symbol, no, n);
-					}
-					Ok((place, declared)) => {
-						self.narrow_place_in(&mut matching, place, declared, yes, n);
-						self.narrow_place_in(&mut others, place, declared, no, n);
-					}
+			_ => match field {
+				Err(symbol) => {
+					self.narrow_in(&mut matching, symbol, yes, n);
+					self.narrow_in(&mut others, symbol, no, n);
 				}
-			}
+				Ok((place, declared)) => {
+					self.narrow_place_in(&mut matching, place, declared, yes, n);
+					self.narrow_place_in(&mut others, place, declared, no, n);
+				}
+			},
 		}
 		(matching, others)
 	}

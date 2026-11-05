@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `true true`
 let role = "admin"
 console.log(role is in ["admin", "moderator"], role is not in ["guest"])

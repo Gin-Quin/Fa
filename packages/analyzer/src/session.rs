@@ -861,6 +861,31 @@ impl Session {
 						source.analysis.diagnostics.extend(diagnostics);
 					}
 				}
+				// on a thread with the stack of the workers: the walk recurses
+				// deeply, and its depth must not depend on the caller's stack
+				// (`parallel.rs`); one thread, not the pool (a memory budget)
+				_ if rayon::current_thread_index().is_none() => {
+					let session = &mut *self;
+					let ran = std::thread::scope(|scope| {
+						let spawned = std::thread::Builder::new()
+							.name("fa-analysis".to_string())
+							.stack_size(crate::parallel::STACK_SIZE)
+							.spawn_scoped(scope, || crate::check::analyze(session, file));
+						match spawned {
+							Ok(handle) => {
+								if let Err(panic) = handle.join() {
+									std::panic::resume_unwind(panic);
+								}
+								true
+							}
+							Err(_) => false,
+						}
+					});
+					// no thread available: on this one
+					if !ran {
+						crate::check::analyze(self, file);
+					}
+				}
 				_ => crate::check::analyze(self, file),
 			}
 			self.files[file.index()].done = true;

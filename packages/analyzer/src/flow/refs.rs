@@ -16,6 +16,9 @@ pub struct RefState {
 	/// `None` while valid; else the operation that invalidated it, and
 	/// whether only some paths did (`maybe`: `REF002`, else `REF001`).
 	pub invalidated: Option<(NodeId, bool)>,
+	/// The invalidation was reported at a use on this path: the later uses
+	/// are not reported again (a join forgets it: each path reports).
+	pub reported: bool,
 }
 
 impl RefState {
@@ -24,6 +27,7 @@ impl RefState {
 		Self {
 			places: SmallVec::from_slice(&[place]),
 			invalidated: None,
+			reported: false,
 		}
 	}
 }
@@ -73,6 +77,7 @@ impl RefStore {
 		self.state(RefState {
 			places,
 			invalidated,
+			reported: false,
 		})
 	}
 }

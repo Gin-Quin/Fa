@@ -1,0 +1,17 @@
+-- review 6: a default value runs inside the function: its errors are the function's
+type E = Errors { Bad }
+function fail = (): Integer throws E => {
+	throw E.Bad
+}
+function f = (x: Integer = try fail()) => x + 1
+function g = (x: Integer = try fail()): Integer throws E => {
+	return x + 1
+}
+function h = (x: Integer = try fail()): Integer => { -- error: E-ERR-4
+	return x + 1
+}
+function main = () throws E => {
+	console.log(try f())
+	console.log(try g(1))
+	console.log(f()) -- error: E-ERR-3
+}

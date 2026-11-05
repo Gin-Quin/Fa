@@ -150,6 +150,21 @@ pub(crate) fn check(project: Project, format: diagnostics::Format) -> i32 {
 	let mut rendered = timings::phase("render", || render(&prepared, &report, &[]));
 	let mut errors = report.has_errors() || has_errors(&prepared.session);
 	let dirty = report.modules.iter().any(|module| module.reads_target);
+	// `--timings`: why the other targets are analyzed
+	if timings::enabled() {
+		let readers: Vec<&str> = report
+			.modules
+			.iter()
+			.filter(|module| module.reads_target)
+			.map(|module| module.module.as_str())
+			.collect();
+		if let Some(first) = readers.first() {
+			eprintln!(
+				"timings: {} modules read the target (first: {first})",
+				readers.len()
+			);
+		}
+	}
 	if dirty {
 		let targets = prepared.configuration.as_ref().map_or_else(
 			|| vec!["web".to_string(), "bun".to_string(), "native".to_string()],

@@ -1,0 +1,18 @@
+-- review 9, 10: a local function reads the references it captures where it is called, or given to a callee
+type Person = { name: String, age: Integer }
+function run = () => {
+	mutable people: Array<Person> = [Person { name = "Ana", age = 3 }]
+	use first = people[0]
+	function show = () => console.log(first.name)
+	show()
+	people.push(Person { name = "Bao", age = 4 })
+	show() -- error: REF001
+}
+function callback = () => {
+	mutable people: Pool<Person> = []
+	use ana = people.add(Person { name = "Ana", age = 31 })
+	function younger = (person: Person) => person.age < ana.age
+	people.deleteWhere(younger) -- error: REF013
+}
+run()
+callback()

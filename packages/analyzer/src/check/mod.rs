@@ -165,6 +165,8 @@ pub struct FnCx {
 	pub is_async: bool,
 	/// What its body contributes to its async summary (`tasks.rs`).
 	pub async_acc: tasks::Acc,
+	/// The owner of the reference it returns (`: T in owner`, references.rs).
+	pub ref_owner: Option<PlaceId>,
 }
 
 impl FnCx {
@@ -193,6 +195,7 @@ impl FnCx {
 			reactive: None,
 			is_async: false,
 			async_acc: tasks::Acc::new(),
+			ref_owner: None,
 		}
 	}
 }
@@ -420,6 +423,19 @@ pub struct Walker<'s> {
 	/// The effects of each local function on the places it captures, applied
 	/// at its calls (`effects.rs`), by declaration node.
 	pub(crate) closure_effects: FxHashMap<NodeId, Vec<effects::EffectEntry>>,
+	/// The places the lambdas of the call being checked write (with the
+	/// write): their facts aren't valid at the entry of a sibling lambda.
+	pub(crate) lambda_entry_writes: Vec<(PlaceId, bool, NodeId)>,
+	/// The parent of each node of the tree, built on first use.
+	pub(crate) parents: std::cell::OnceCell<Vec<Option<NodeId>>>,
+	/// The places the lambda arguments of the call being checked write
+	/// (`Some` while a call has several lambda arguments).
+	pub(crate) lambda_call_writes: Option<Vec<(PlaceId, bool, NodeId)>>,
+	/// The callee name of the call being checked (`moves.rs`).
+	pub(crate) callee_name_node: Option<NodeId>,
+	/// The locals captured by a local function used as a value (`let call =
+	/// show`): read whenever it is called, never moved (`moves.rs`).
+	pub(crate) pinned_captures: rustc_hash::FxHashSet<SymbolId>,
 	/// The effects written in each function's signature, by lambda node.
 	pub(crate) declared_effect_sets: FxHashMap<NodeId, crate::ids::EffectSetId>,
 	/// The captured locals each closure writes, with the write (by lambda
@@ -585,6 +601,11 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		relations: relations::RelationState::default(),
 		relation_pool_places: rustc_hash::FxHashSet::default(),
 		closure_effects: FxHashMap::default(),
+		lambda_entry_writes: Vec::new(),
+		parents: std::cell::OnceCell::new(),
+		lambda_call_writes: None,
+		callee_name_node: None,
+		pinned_captures: rustc_hash::FxHashSet::default(),
 		parallel: Vec::new(),
 		parallel_callbacks: rustc_hash::FxHashSet::default(),
 		parallel_views: Vec::new(),
@@ -888,8 +909,54 @@ impl Walker<'_> {
 		self.check(n, None);
 		self.quiet -= u32::from(broken);
 		self.statement = saved;
+		if !broken {
+			self.warn_pure_statement(n);
+		}
 		// the `watch` blocks may run after it (reactivity.rs)
 		self.after_outer_statement();
+	}
+
+	/// `W-DO-1`: a statement whose value is dropped and whose computation
+	/// has no effect (`a + 1`). The last value of a function body without
+	/// return type is `WFN001` (functions.rs).
+	fn warn_pure_statement(&mut self, n: NodeId) {
+		if !self.is_value_statement(n) || !self.is_pure_expression(n) {
+			return;
+		}
+		let ty = self.type_of(n);
+		if matches!(ty, TypeId::VOID | TypeId::NEVER)
+			|| ty.is_unset()
+			|| self.s.types.is_recovering(ty)
+		{
+			return;
+		}
+		// a statement of a block or of the module (not an arm's value)
+		let Some(parent) = self.parent(n) else {
+			return;
+		};
+		if !matches!(self.view(parent), View::Block { .. } | View::Module { .. }) {
+			return;
+		}
+		if let View::Block { statements } = self.view(parent)
+			&& statements.last() == Some(n)
+			&& self.body.functions.last().is_some_and(|cx| {
+				self.a
+					.functions
+					.get(&cx.node)
+					.is_some_and(|info| info.body == parent)
+			}) {
+			return;
+		}
+		if !self.reported_once.insert((n, "W-DO-1")) {
+			return;
+		}
+		let text = self.tree.text(n.index()).to_string();
+		let diagnostic = self.diagnostic(
+			&codes::values::W_DO_1,
+			n,
+			format!("`{text}` computes a value and drops it: this statement has no effect. Remove it, or use its value"),
+		);
+		self.report(diagnostic);
 	}
 
 	/// Checks the last statement of a block whose value is used (see
@@ -1145,8 +1212,8 @@ impl Walker<'_> {
 			None => &mut self.output,
 		};
 		// one operation with two effects (`pool.delete`: the element and the
-		// size) breaks a rule once
-		let repeated = target.last().is_some_and(|last| {
+		// size), or a node read twice by the walk, breaks a rule once
+		let repeated = target.iter().rev().take(16).any(|last| {
 			std::ptr::eq(last.code, diagnostic.code) && last.location == diagnostic.location
 		});
 		if !repeated {
@@ -1158,6 +1225,24 @@ impl Walker<'_> {
 		if std::ptr::eq(diagnostic.code, &codes::analyzer::AN001) {
 			self.unsupported_seen += 1;
 		}
+	}
+
+	/// The parent of a node (`None` for the root), from a table built once.
+	pub(crate) fn parent(&self, n: NodeId) -> Option<NodeId> {
+		let parents = self.parents.get_or_init(|| {
+			let count = self.tree.nodes.len();
+			let mut parents: Vec<Option<NodeId>> = vec![None; count];
+			for index in 0..count {
+				let node = NodeId::new(index);
+				for child in syntax::children(&self.tree, node) {
+					if let Some(slot) = parents.get_mut(child.index()) {
+						*slot = Some(node);
+					}
+				}
+			}
+			parents
+		});
+		parents.get(n.index()).copied().flatten()
 	}
 
 	/// Starts buffering the flow diagnostics of a loop round or an SCC round.

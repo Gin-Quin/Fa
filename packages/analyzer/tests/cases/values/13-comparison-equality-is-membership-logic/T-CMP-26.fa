@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- error: E-CMP-6
 -- brief: ⇒ E-CMP-6
 let found = "a" is in "abc"

@@ -63,12 +63,21 @@ impl Walker<'_> {
 		match kind {
 			SymbolKind::Let | SymbolKind::Mutable => self.note_use(n, symbol),
 			SymbolKind::Use | SymbolKind::MutableUse | SymbolKind::LoopVariable { copy: false } => {
-				if let Some(&place) = self.aliases.get(&symbol)
-					&& let Some(root) = self.place_symbol(place)
-					&& root != symbol
-				{
-					// a read through the alias is not a copy of the root
-					self.note_use(NodeId(u32::MAX), root);
+				// every place it may designate here (a `reuse` on one branch only)
+				let mut places: Vec<crate::ids::PlaceId> = self
+					.body
+					.flow
+					.ref_state(symbol)
+					.map(|state| self.facts.refs.get(state).places.to_vec())
+					.unwrap_or_default();
+				places.extend(self.aliases.get(&symbol).copied());
+				for place in places {
+					if let Some(root) = self.place_symbol(place)
+						&& root != symbol
+					{
+						// a read through the alias is not a copy of the root
+						self.note_use(NodeId(u32::MAX), root);
+					}
 				}
 			}
 			SymbolKind::Function => {
@@ -76,8 +85,13 @@ impl Walker<'_> {
 				if let Some(declaration) = self.direct_function(symbol)
 					&& let Some(info) = self.a.functions.get(&declaration)
 				{
+					// used as a value: it may run at any later point
+					let value = self.callee_name_node != Some(n);
 					for capture in info.captures.clone() {
 						self.note_use(NodeId(u32::MAX), capture);
+						if value {
+							self.pinned_captures.insert(capture);
+						}
 					}
 				}
 			}
@@ -93,7 +107,11 @@ impl Walker<'_> {
 			.map(|(&symbol, &last)| (symbol, last))
 			.collect();
 		for (symbol, last) in uses {
-			if !last.movable || last.node.0 == u32::MAX || !self.copy_sites.contains(&last.node) {
+			if !last.movable
+				|| last.node.0 == u32::MAX
+				|| !self.copy_sites.contains(&last.node)
+				|| self.pinned_captures.contains(&symbol)
+			{
 				continue;
 			}
 			let ty = self.a.symbols.symbol(symbol).ty;

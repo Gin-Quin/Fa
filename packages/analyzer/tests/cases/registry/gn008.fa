@@ -1,0 +1,4 @@
+-- GN008: the argument of a value parameter of a type must be known at compile time
+type Matrix<rows: Integer> = { x: Integer }
+let n = 3
+type T = Matrix<n> -- error: GN008

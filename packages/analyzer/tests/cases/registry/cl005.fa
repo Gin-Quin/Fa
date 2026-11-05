@@ -1,0 +1,2 @@
+-- CL005: an item of a map literal must be a (key, value) pair
+let m: Map<String, Integer> = [1] -- error: CL005

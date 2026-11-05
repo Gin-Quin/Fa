@@ -415,6 +415,9 @@ pub struct Walker<'s> {
 	/// The places the lambdas of the call being checked write (with the
 	/// write): their facts aren't valid at the entry of a sibling lambda.
 	pub(crate) lambda_entry_writes: Vec<(PlaceId, bool, NodeId)>,
+	/// The places the lambda arguments of the call being checked write
+	/// (`Some` while a call has several lambda arguments).
+	pub(crate) lambda_call_writes: Option<Vec<(PlaceId, bool, NodeId)>>,
 	/// The callee name of the call being checked (`moves.rs`).
 	pub(crate) callee_name_node: Option<NodeId>,
 	/// The locals captured by a local function used as a value (`let call =
@@ -583,6 +586,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		relation_pool_places: rustc_hash::FxHashSet::default(),
 		closure_effects: FxHashMap::default(),
 		lambda_entry_writes: Vec::new(),
+		lambda_call_writes: None,
 		callee_name_node: None,
 		pinned_captures: rustc_hash::FxHashSet::default(),
 		parallel: Vec::new(),

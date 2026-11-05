@@ -359,7 +359,9 @@ impl Walker<'_> {
 		// valid at each of its calls: the ones of the places it (or a sibling
 		// lambda of the call) writes go, as at a loop head (decision "After
 		// the analyzer review"); `break`, `continue` and `return` don't cross it
-		let mut dropped: Vec<(PlaceId, bool, NodeId)> = self.lambda_entry_writes.clone();
+		// (only the arguments of the call see the writes of their siblings)
+		let entry_writes = std::mem::take(&mut self.lambda_entry_writes);
+		let mut dropped: Vec<(PlaceId, bool, NodeId)> = entry_writes.clone();
 		let mut rounds = 0u32;
 		let ty = loop {
 			rounds += 1;
@@ -433,8 +435,12 @@ impl Walker<'_> {
 			for entry in entries {
 				self.drop_place_facts(entry.place);
 				self.record_effect(entry.place, entry.invalidates, entry.node, entry.call);
+				if let Some(writes) = &mut self.lambda_call_writes {
+					writes.push((entry.place, entry.invalidates, entry.node));
+				}
 			}
 		}
+		self.lambda_entry_writes = entry_writes;
 		// a captured task or worker's handle moves into the closure
 		let captured: Vec<SymbolId> = self
 			.a

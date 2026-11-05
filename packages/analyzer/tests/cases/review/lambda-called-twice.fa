@@ -3,6 +3,10 @@ function twice = (f: () => Void) => {
 	f()
 	f()
 }
+function both = (f: () => Void, g: () => Void) => {
+	g()
+	f()
+}
 type Person = { name: String }
 function main = () => {
 	mutable x: Integer? = 3
@@ -23,4 +27,10 @@ function main = () => {
 		console.log(ana.name) -- error: REF002
 		people.delete(ana) -- error: REF002
 	})
+	mutable y: Integer? = 3
+	if y != none {
+		both(() => console.log(y + 1), () => { -- error: E-OPT-1
+			y = none
+		})
+	}
 }

@@ -1,0 +1,16 @@
+type Hero = { name: String, power: Integer }
+function boost = (hero: Hero) mutates hero.power => {
+	hero.power += 1
+}
+function run = () => {
+	mutable heroes: Set<Hero> = [Hero { name = "Ana", power = 1 }, Hero { name = "Ana", power = 2 }]
+	for hero in heroes {
+		boost(hero)
+	}
+	console.log(heroes.size)
+	mutable scores: Map<Array<String>, Integer> = [(["a"], 1)]
+	for key in scores.keys() {
+		key.push("b")
+	}
+}
+run()

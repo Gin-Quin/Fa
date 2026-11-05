@@ -1,0 +1,9 @@
+-- no reactivity declared here: its writes still notify what they change
+export function = (town: Town, name: String, friend: String) mutates town => {
+	use person = town.people.find((someone) => someone.name == name)
+	use other = town.people.find((someone) => someone.name == friend)
+	if person is not none {
+		person.bestFriend = other
+		person.mood = "happy with {other?.name ?? "nobody"}"
+	}
+}

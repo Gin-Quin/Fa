@@ -538,7 +538,8 @@ impl Walker<'_> {
 		// the entry function of a program infers its effects (advanced brief D51)
 		let entry = owner.declaration.is_some_and(|declaration| {
 			matches!(self.view(declaration), View::ExportFunction { .. })
-				&& self.s.role(self.file) == crate::modules::FileRole::Program
+				&& (self.s.role(self.file) == crate::modules::FileRole::Program
+					|| self.s.is_entry(self.file))
 		});
 		let coverage = (!entry && (written_effects || (block_body && owner.symbol.is_some())))
 			.then_some(declared_effects);

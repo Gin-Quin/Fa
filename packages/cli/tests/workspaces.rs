@@ -1265,7 +1265,7 @@ fn develop_swaps_the_edited_modules_in_the_running_program() {
 	let scratch = Scratch::new("hot");
 	let greet = |word: &str, cow: &str| {
 		format!(
-			"type Cow = {{ {cow} }}\n\nreactive calls = 0\n\nexport function = (): String => {{\n\tcalls += 1\n\t\"{word} {{calls}}\"\n}}\n"
+			"type Cow = {{ {cow} }}\n\nreactive calls = 0\n\nexport function = (): String mutates calls => {{\n\tcalls += 1\n\t\"{word} {{calls}}\"\n}}\n"
 		)
 	};
 	let package = scratch.write(

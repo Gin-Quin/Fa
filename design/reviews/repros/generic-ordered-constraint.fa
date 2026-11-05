@@ -1,0 +1,2 @@
+function largest = <Item: Integer>(a: Item, b: Item): Item => if a > b { a } else { b }
+let x = largest(1, 2)

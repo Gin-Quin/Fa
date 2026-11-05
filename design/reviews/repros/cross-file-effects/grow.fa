@@ -1,0 +1,1 @@
+export function = (list: Array<String>) => list.push("x")

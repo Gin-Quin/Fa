@@ -207,6 +207,35 @@ fn a_package_relates_the_types_of_its_files() {
 	}
 }
 
+/// Reactivity across files: functions of the library, which declare no
+/// reactivity, write relation sides and a `reactive` field of the
+/// application's reactive town; only the `watch` blocks reading what changed
+/// run again, on Bun and natively (per unit, then as one module).
+#[test]
+fn a_package_reacts_to_the_writes_of_its_library() {
+	let expected = "Bao has 0\nCleo has 0\nAna is calm\nBao has 1\nAna is happy with Bao\nBao has 0\nCleo has 1\nAna is happy with Cleo\nCleo has 2\n";
+	let cache = scratch("packages-reactive-relations");
+	if fa_bun() {
+		let (stdout, stderr, code) = fa(&["run", "reactiveRelations"], &fixtures(), &cache);
+		assert_eq!(stdout, expected, "bun, stderr: {stderr}");
+		assert_eq!(code, 0, "bun, stderr: {stderr}");
+	}
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	for split in ["1", "0"] {
+		let (stdout, stderr, code) = fa_with(
+			&["run", "--target=native", "reactiveRelations"],
+			&fixtures(),
+			&cache,
+			&[("FA_SPLIT", split)],
+		);
+		assert_eq!(stdout, expected, "native (split {split}), stderr: {stderr}");
+		assert_eq!(code, 0, "native (split {split}), stderr: {stderr}");
+	}
+}
+
 /// Never-negative fields in a build per unit (`fa-codegen-llvm`,
 /// `proofs.rs`): a field counted up from zero in its own unit is proven, one
 /// stored negative in another unit is not, and `get` counts it from the end.

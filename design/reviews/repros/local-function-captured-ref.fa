@@ -1,0 +1,9 @@
+type Person = { name: String }
+function run = () => {
+	mutable people: Array<Person> = [Person { name = "Ana" }]
+	use first = people[0]
+	function show = () => console.log(first.name)
+	people.push(Person { name = "Bao" })
+	show()
+}
+run()

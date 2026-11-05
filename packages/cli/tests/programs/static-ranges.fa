@@ -1,0 +1,14 @@
+-- Compile-time ranges (`static`): printed, iterated and used to slice, as
+-- the range literals they were.
+static span = 1..5
+static open = 3..
+static closed = 0..=2
+console.log(span, open, closed) -- prints: 1..5 3.. 0..=2
+mutable total = 0
+for index in span {
+	total += index
+}
+console.log(total) -- prints: 10
+let letters = try "abcdefg"[span]
+let numbers = try [10, 20, 30][closed]
+console.log(letters, numbers) -- prints: bcde [10, 20, 30]

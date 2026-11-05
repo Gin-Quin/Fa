@@ -182,8 +182,24 @@ impl Generator<'_> {
 				}
 			}
 			Value::Member(member) => return self.member_constant(member, ty),
-			// ranges and functions are built by the runtime: not yet
-			Value::Range { .. } | Value::Function(_) => return None,
+			// a range: a `FaRange`, as a range literal builds it (objects.rs)
+			Value::Range {
+				start,
+				end,
+				inclusive,
+			} => {
+				let bound = |bound: &Option<ethnum::I256>| {
+					bound.map_or_else(|| "undefined".to_string(), |bound| bound.to_string())
+				};
+				let class = self.helper("FaRange");
+				Expr::primary(format!(
+					"new {class}({}, {}, {inclusive})",
+					bound(start),
+					bound(end)
+				))
+			}
+			// functions are built by the runtime: not yet
+			Value::Function(_) => return None,
 		})
 	}
 

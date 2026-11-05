@@ -1,0 +1,13 @@
+-- a callback that throws makes its built-in throw: it needs `try` or
+-- `catch`; a callback that can't fail needs neither
+type Failure = Errors { Bad = { message: String } }
+function label = (value: Integer): String throws Failure => {
+	if value == 3 {
+		throw Failure.Bad { message = "bad {value}" }
+	}
+	"item {value}"
+}
+let numbers = [1, 2, 3]
+let unhandled = numbers.map(label) -- error: E-ERR-3
+let needless = try numbers.map((value, index) => value * 2) -- warning: W-ERR-1
+let sorted = numbers.sort((left, right) => (try label(left)).length - right) -- error: E-ERR-3

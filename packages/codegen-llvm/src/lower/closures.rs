@@ -872,6 +872,48 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(result)
 	}
 
+	/// Whether a callback given to a built-in may throw (its type's errors):
+	/// the built-in then throws them (`design/decisions.md`).
+	pub(crate) fn callback_may_throw(&self, node: NodeId) -> bool {
+		self.value_signature(self.type_of(node), node)
+			.is_ok_and(|(_, _, throws)| throws)
+	}
+
+	/// A callback call of a built-in's loop whose error must restore what
+	/// the loop changed first (`fixup`: drops what was built, closes a gap),
+	/// then leaves like any error (`raise`). Without errors, just `call`.
+	pub(crate) fn callback_with_fixup(
+		&mut self,
+		callback_node: NodeId,
+		call: impl FnOnce(&mut Self) -> Result<Val<'ctx>, Error>,
+		fixup: impl FnOnce(&mut Self) -> Result<(), Error>,
+	) -> Result<Val<'ctx>, Error> {
+		if !self.callback_may_throw(callback_node) {
+			return call(self);
+		}
+		let handler = self.append_block("callback_failed");
+		let error_slot = self.alloca(Repr::Union, "callback_error")?;
+		let mark = self.mark();
+		self.frame_mut()
+			.catches
+			.push((handler, error_slot.pointer, mark));
+		let result = call(self);
+		self.frame_mut().catches.pop();
+		let result = result?;
+		let resume = self.builder.get_insert_block();
+		self.builder.position_at_end(handler);
+		fixup(self)?;
+		let error = self
+			.builder
+			.build_load(self.pointer_type(), error_slot.pointer, "")?
+			.into_pointer_value();
+		self.raise(error)?;
+		if let Some(resume) = resume {
+			self.builder.position_at_end(resume);
+		}
+		Ok(result)
+	}
+
 	/// Calls a function value of type `ty` with lowered arguments (as many as
 	/// its type declares: extra ones, like the `index` of a callback, are left out).
 	pub(crate) fn call_closure(

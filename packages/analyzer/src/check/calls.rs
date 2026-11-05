@@ -203,6 +203,8 @@ impl Walker<'_> {
 			})
 			.map(|value| value.map(|value| value.index()))
 			.collect();
+		// the errors of the callbacks given to a built-in, which it throws
+		let mut callback_errors: Vec<TypeId> = Vec::new();
 		// the arguments: every visit (they carry flow)
 		for &(value, expected) in &binding.expected {
 			let expected = expected.map(|expected| substitute(self, expected));
@@ -221,6 +223,18 @@ impl Walker<'_> {
 				self.check(value, expected)
 			};
 			if let Some(expected) = expected {
+				// a callback that throws, given to a built-in: the built-in
+				// throws its errors (design/decisions.md)
+				let expected = match kind {
+					Callee::Builtin(_) => match self.callback_throws(expected, actual) {
+						Some((widened, errors)) => {
+							callback_errors.push(errors);
+							widened
+						}
+						None => expected,
+					},
+					_ => expected,
+				};
 				// a parameter is a view of its argument; a built-in method
 				// (`push`, `add`) stores a copy (advanced brief §10.4)
 				self.view_sink = !matches!(kind, Callee::Builtin(_));
@@ -239,6 +253,12 @@ impl Walker<'_> {
 		let throws = substitute(self, sig.throws);
 		// `Integer.round(2.7)`, `a.shiftLeft(2)`: proven, they can't fail (math.rs)
 		let throws = self.number_api_throws(n, callee, kind, &binding.arguments, throws);
+		let throws = if callback_errors.is_empty() {
+			throws
+		} else {
+			callback_errors.push(throws);
+			self.s.types.union(&callback_errors)
+		};
 		self.can_fail(n, if comptime { TypeId::NEVER } else { throws });
 
 		let ty = self.memo(n, |w| {
@@ -912,5 +932,50 @@ impl Walker<'_> {
 			);
 			target
 		})
+	}
+}
+
+impl Walker<'_> {
+	/// A callback that throws, given where a built-in expects one that
+	/// can't (`items.map(parse)`): the expected function type with the
+	/// callback's errors, and those errors. Through an optional (`sort`'s
+	/// comparator).
+	pub(super) fn callback_throws(
+		&mut self,
+		expected: TypeId,
+		actual: TypeId,
+	) -> Option<(TypeId, TypeId)> {
+		let TypeKind::Function(actual_sig) = self.s.types.kind(actual) else {
+			return None;
+		};
+		let errors = self.s.types.sig(actual_sig).throws;
+		if errors == TypeId::NEVER || self.s.types.is_recovering(errors) {
+			return None;
+		}
+		let (function, optional) = match self.s.types.kind(expected) {
+			TypeKind::Function(_) => (expected, false),
+			_ => {
+				let (inner, had_none) = self.strip_none(expected);
+				if !had_none || !matches!(self.s.types.kind(inner), TypeKind::Function(_)) {
+					return None;
+				}
+				(inner, true)
+			}
+		};
+		let TypeKind::Function(expected_sig) = self.s.types.kind(function) else {
+			return None;
+		};
+		let mut sig = self.s.types.sig(expected_sig);
+		if sig.throws != TypeId::NEVER {
+			return None;
+		}
+		sig.throws = errors;
+		let widened = self.s.types.function(sig);
+		let widened = if optional {
+			self.s.types.union(&[widened, TypeId::NONE])
+		} else {
+			widened
+		};
+		Some((widened, errors))
 	}
 }

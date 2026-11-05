@@ -76,7 +76,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// The chain of an iterator node, its callbacks evaluated in order.
 	fn iterator_plan(&mut self, node: NodeId) -> Result<Plan<'ctx>, Error> {
 		let mut inner = node;
-		while let View::Group(group) = self.view(inner) {
+		// `try items.values().map(parse)`: its callbacks' errors leave the function
+		while let View::Group(group) | View::Try(group) = self.view(inner) {
 			inner = group;
 		}
 		// a local naming an iterator: its chain
@@ -420,11 +421,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				let item = self.item_repr(item_type, node)?;
 				let zero = self.context.i64_type().const_zero();
 				let array = self.new_array(item, zero, zero)?;
-				let result = Val::new(Repr::Array(item_type), array);
+				// owned while it is built: dropped by an error of a callback
+				let result = self.fresh(Val::new(Repr::Array(item_type), array));
 				self.run_iterator(receiver, |this, value, _, _, _, _| {
 					this.array_push(result, value, node, None)
 				})?;
-				Ok(self.fresh(result))
+				Ok(result)
 			}
 			("Iterator#find", [callback]) => {
 				let predicate = self.expr(*callback)?;
@@ -494,6 +496,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				let start = self.owned_as(start, repr, Some(*initial))?;
 				let accumulator = self.alloca(repr, "accumulator")?;
 				self.store(accumulator, start, node)?;
+				// owned while it is computed: dropped by an error of a callback
+				if self.needs_drop(repr) {
+					self.cleanups
+						.borrow_mut()
+						.push(super::ownership::Cleanup::Local(accumulator));
+				}
 				let ty = self.type_of(*callback);
 				let callback = *callback;
 				self.run_iterator(receiver, |this, value, _, _, _, _| {
@@ -503,6 +511,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					this.emit_drop(current)?;
 					this.store(accumulator, next, node)
 				})?;
+				self.forget_local(accumulator);
 				let result = self.load(accumulator)?;
 				Ok(self.fresh(result))
 			}

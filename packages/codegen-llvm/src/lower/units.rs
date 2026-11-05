@@ -287,13 +287,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if params.is_empty() {
 			return ty;
 		}
-		let Some(types) = params
+		// the parameters bound by the instance (a generic function type's own
+		// parameters stay: `<Item>(value: Item) => Prefix` in an instance)
+		let (params, types): (Vec<_>, Vec<TypeId>) = params
 			.iter()
-			.map(|&param| stands_for(param))
-			.collect::<Option<Vec<TypeId>>>()
-		else {
+			.filter_map(|&param| stands_for(param).map(|bound| (param, bound)))
+			.unzip();
+		if params.is_empty() {
 			return ty;
-		};
+		}
 		// a composite (`Array(Item)`): substituted in the global store, which
 		// every unit reads (a scratch view interns, the merge publishes)
 		let module = self.session.module_id(self.file);
@@ -331,6 +333,23 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// Whether the program is compiled per unit.
 	pub(crate) fn is_split(&self) -> bool {
 		self.split.is_some()
+	}
+
+	/// What the unit holds of the generic function values (`generic_values.rs`).
+	pub(crate) fn generic_needs_mut(&mut self) -> &mut crate::split::GenericValueNeeds {
+		&mut self.split_mut().symbols.generic_values
+	}
+
+	/// Whether the unit exports a symbol.
+	pub(crate) fn is_exported(&self, name: &str) -> bool {
+		self.split
+			.as_ref()
+			.is_some_and(|split| split.exports.contains(name))
+	}
+
+	/// Exports a symbol the unit defines.
+	pub(crate) fn export_symbol(&mut self, name: String) {
+		self.split_mut().exports.insert(name);
 	}
 
 	fn split_mut(&mut self) -> &mut Split<'ctx> {
@@ -802,6 +821,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	fn collect_params(&self, ty: TypeId, found: &mut Vec<fa_analyzer::ids::ParamId>) {
 		let mut stack = vec![ty];
 		let mut seen = FxHashSet::default();
+		// the own parameters of generic function types: bound by them
+		let mut bound = Vec::new();
+		let before = found.len();
 		while let Some(ty) = stack.pop() {
 			if !seen.insert(ty) || seen.len() > 4096 {
 				continue;
@@ -823,6 +845,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				TypeKind::Sync(_, value) => stack.push(value),
 				TypeKind::Function(sig) => {
 					let sig = self.types().sig(sig);
+					bound.extend(self.types().list_items(sig.generics).iter().copied());
 					stack.extend(self.types().params(sig.params).iter().map(|param| param.ty));
 					stack.push(sig.ret);
 				}
@@ -832,6 +855,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					}
 				}
 				_ => {}
+			}
+		}
+		if !bound.is_empty() {
+			let types = self.types();
+			let mut index = before;
+			while index < found.len() {
+				let param = found[index];
+				if bound
+					.iter()
+					.any(|&generic| types.kind(generic) == TypeKind::Param(param))
+				{
+					found.remove(index);
+				} else {
+					index += 1;
+				}
 			}
 		}
 	}
@@ -935,6 +973,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	pub(crate) fn lower_instances(
 		mut self,
 		requests: &[Request],
+		entries: &[crate::split::GenericEntryRequest],
 	) -> Result<(UnitSymbols, Vec<Request>), Error> {
 		self.split_mut().wave = true;
 		let mut files: Vec<FileId> = self.other_files.keys().copied().collect();
@@ -990,6 +1029,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			value.as_global_value().set_name(&name);
 			self.split_mut().exports.insert(name);
+		}
+		// the entries of the tables of generic function values
+		for entry in entries {
+			self.define_generic_entry(entry, &files)?;
 		}
 		// the instances, then the private functions they call
 		self.lower_used_functions(&files)?;

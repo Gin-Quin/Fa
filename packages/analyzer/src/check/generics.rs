@@ -261,6 +261,10 @@ impl Walker<'_> {
 					instance,
 					&crate::types::display::type_application(&name, &args),
 				);
+				// a substitution of the instance names its result too
+				self.s
+					.types
+					.record_application(instance, &name, &bindings.types);
 			}
 			// a generic type of another file (`library.Pair<Integer, String>`):
 			// its functions are found from the instance too
@@ -491,6 +495,20 @@ impl Walker<'_> {
 			}
 			let constraint = self.s.types.substitute(constraint, bindings);
 			let name = self.param_name(param);
+			// a parameter of the generic code around, whose own constraint is
+			// as narrow (`double(value)` in `<Value: Integer | Float>`): bound
+			// to it, each instance then binds it to one member
+			if let TypeKind::Union(_) = self.s.types.kind(constraint)
+				&& let TypeKind::Param(own) = self.s.types.kind(ty)
+			{
+				let own = self.s.types.param(own).constraint;
+				if own != TypeId::UNKNOWN
+					&& !own.is_unset()
+					&& self.s.types.satisfies(own, constraint)
+				{
+					continue;
+				}
+			}
 			if let TypeKind::Union(list) = self.s.types.kind(constraint) {
 				let members = self.s.types.list_items(list).to_vec();
 				let fitting: Vec<TypeId> = members
@@ -946,14 +964,23 @@ impl Walker<'_> {
 		if self.own_generics(target).is_empty() || !self.own_generics(actual).is_empty() {
 			return None;
 		}
-		let View::Name(_) = self.view(n) else {
+		// the name, or the last member of a path (`library.transforms.identity`)
+		let named = match self.view(n) {
+			View::Name(_) => n,
+			View::Access { members, .. } => members.last()?,
+			_ => return None,
+		};
+		let crate::symbols::Resolution::Local(symbol) = self.a.resolution(named) else {
 			return None;
 		};
-		let crate::symbols::Resolution::Local(symbol) = self.a.resolution(n) else {
-			return None;
+		let generics = match self.direct_function(symbol) {
+			Some(declaration) => self.a.function(declaration)?.generics.clone(),
+			// a function of another file: the parameters its export publishes
+			None if self.a.symbols.symbol(symbol).kind == SymbolKind::Function => {
+				self.exported_generics(symbol)
+			}
+			None => return None,
 		};
-		let declaration = self.direct_function(symbol)?;
-		let generics = self.a.function(declaration)?.generics.clone();
 		if generics.is_empty() {
 			return None;
 		}

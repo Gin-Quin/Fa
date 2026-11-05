@@ -21,6 +21,7 @@ mod expressions;
 mod foreign;
 mod functions;
 mod generics;
+mod integer_variants;
 pub(crate) mod modules;
 mod number_api;
 mod numbers;
@@ -219,6 +220,12 @@ pub(crate) struct Generator<'s> {
 	param_sources: HashMap<SymbolId, String>,
 	/// The functions that get a reactive instance (D24), by declaration.
 	reactive_instances: HashSet<NodeId>,
+	/// The integer variants of the generic functions of the file
+	/// (`integer_variants.rs`), by declaration.
+	integer_variants: HashMap<NodeId, Vec<integer_variants::Variant>>,
+	/// The integer storages of the numeric-union parameters of the variant
+	/// being generated.
+	numeric_bindings: HashMap<fa_analyzer::ids::ParamId, fa_analyzer::types::IntStorage>,
 	/// The parameters of the reactive instance whose parameters are being
 	/// declared (taken by `function_parts`).
 	instance_params: Option<Vec<SymbolId>>,
@@ -311,6 +318,8 @@ pub(crate) fn generate_module(
 		sources: HashMap::new(),
 		param_sources: HashMap::new(),
 		reactive_instances: HashSet::new(),
+		integer_variants: HashMap::new(),
+		numeric_bindings: HashMap::new(),
 		instance_params: None,
 		untracked: 0,
 		top_statements: HashSet::new(),
@@ -362,6 +371,7 @@ impl<'s> Generator<'s> {
 			|| !self.analysis.reactive_writes.is_empty()
 			|| !self.analysis.watches.is_empty();
 		self.find_reactive_instances();
+		self.find_integer_variants();
 
 		// module-level names: the functions (hoisted), then the values read by functions
 		let mut functions = Vec::new();
@@ -878,6 +888,10 @@ impl<'s> Generator<'s> {
 		let TypeKind::Param(param) = self.types.kind(ty) else {
 			return self.kind(ty);
 		};
+		// an integer variant (`integer_variants.rs`)
+		if let Some(&storage) = self.numeric_bindings.get(&param) {
+			return Kind::Int(storage);
+		}
 		let constraint = self.types.param(param).constraint;
 		let members: Vec<TypeId> = match self.types.kind(constraint) {
 			TypeKind::Union(list) => self.types.list_items(list).to_vec(),

@@ -36,7 +36,8 @@ use crate::lower::Lowering;
 use crate::options::Libraries;
 use crate::runtime::Runtime;
 use crate::split::{
-	EntryInputs, InstanceRequest, PackageOutcome, SplitOptions, UnitOutput, UnitSymbols,
+	EntryInputs, GenericEntryRequest, GenericInstance, GenericProducer, GenericTables,
+	InstanceRequest, PackageOutcome, SplitOptions, UnitOutput, UnitSymbols,
 };
 use crate::target::{Options, Target};
 
@@ -291,9 +292,11 @@ pub fn compile_unit(
 				.lower_unit()
 		},
 	)?;
-	// an object with instance requests holds types of this run: not cached
+	// an object with instance requests or generic function values holds
+	// types of this run: not cached
 	if let Some(key) = cache
 		&& requests.is_empty()
+		&& symbols.generic_values.is_empty()
 	{
 		let partial = crate::compile::with_suffix(key, ".symbols.partial");
 		fs::write(&partial, symbols.to_text())?;
@@ -396,6 +399,7 @@ fn compile_instances(
 	session: &Session,
 	files: &[FileId],
 	requests: &[InstanceRequest],
+	entries: &[GenericEntryRequest],
 	wave: usize,
 	target: Target,
 	options: &Options,
@@ -422,7 +426,7 @@ fn compile_instances(
 		|lowering| {
 			lowering
 				.into_unit(name.clone(), files, None, None)
-				.lower_instances(&wanted)
+				.lower_instances(&wanted, entries)
 		},
 	)?;
 	Ok(UnitOutput {
@@ -558,6 +562,27 @@ fn entry_object(
 	flag.set_constant(true);
 	flag.set_visibility(GlobalVisibility::Hidden);
 	let declare = |name: &str, ty| declare_hidden(&module, name, ty);
+	// the tables and indices of the generic function values
+	for (symbol, value) in &inputs.generic_tables.indices {
+		let global = module.add_global(usize, None, symbol);
+		global.set_initializer(&usize.const_int(*value, false));
+		global.set_constant(true);
+		global.set_visibility(GlobalVisibility::Hidden);
+	}
+	for (symbol, entries) in &inputs.generic_tables.tables {
+		let entries: Vec<inkwell::values::PointerValue<'_>> = entries
+			.iter()
+			.map(|entry| {
+				declare(entry, void.fn_type(&[], false))
+					.as_global_value()
+					.as_pointer_value()
+			})
+			.collect();
+		let global = module.add_global(pointer.array_type(entries.len() as u32), None, symbol);
+		global.set_initializer(&pointer.const_array(&entries));
+		global.set_constant(true);
+		global.set_visibility(GlobalVisibility::Hidden);
+	}
 	let defined_inits: std::collections::HashSet<(&str, u32)> = units
 		.iter()
 		.flat_map(|unit| unit.symbols.inits.iter())
@@ -1434,6 +1459,9 @@ fn link_units(
 		for unit in instances {
 			outputs.insert(unit.name.clone(), unit);
 		}
+		// the entries of the tables of generic function values, by waves of
+		// the producers' modules (they may request instances, and more)
+		generic_waves(root, report, settings, &mut outputs, &mut seen, &mut wave).map_err(Some)?;
 		// what a unit calls that no unit defines (the reachability of the
 		// interfaces missed it): its unit compiled again, reaching it
 		let exported: FxHashSet<&str> = outputs
@@ -1467,7 +1495,12 @@ fn link_units(
 				.map(|(module, node)| (module.clone(), node.0))
 				.filter(|(module, node)| defined.contains(&(module.as_str(), *node)))
 				.collect();
-			let inputs = EntryInputs { init_order, units };
+			let generic_tables = generic_tables(&units).map_err(Some)?;
+			let inputs = EntryInputs {
+				init_order,
+				units,
+				generic_tables,
+			};
 			return link_program(
 				settings.target,
 				&settings.options,
@@ -1549,6 +1582,7 @@ fn instance_waves(
 				&session,
 				&files,
 				&requests,
+				&[],
 				*wave,
 				settings.target,
 				&settings.options,
@@ -1560,6 +1594,152 @@ fn instance_waves(
 		}
 	}
 	Ok(units)
+}
+
+/// The classes of generic function types the units call, each with its
+/// instances by key (sorted: the indices), and the producers of values,
+/// by table.
+type GenericClasses = (
+	std::collections::BTreeMap<String, std::collections::BTreeMap<String, GenericInstance>>,
+	std::collections::BTreeMap<String, GenericProducer>,
+);
+
+fn generic_classes(units: &[&UnitOutput]) -> Result<GenericClasses, Error> {
+	let mut classes: std::collections::BTreeMap<
+		String,
+		std::collections::BTreeMap<String, GenericInstance>,
+	> = Default::default();
+	let mut producers: std::collections::BTreeMap<String, GenericProducer> = Default::default();
+	for unit in units {
+		let needs = &unit.symbols.generic_values;
+		for instance in &needs.instances {
+			classes
+				.entry(instance.class.clone())
+				.or_default()
+				.entry(instance.key.clone())
+				.or_insert_with(|| instance.clone());
+		}
+		for producer in &needs.producers {
+			classes.entry(producer.class.clone()).or_default();
+			producers
+				.entry(producer.table.clone())
+				.or_insert_with(|| producer.clone());
+		}
+	}
+	// a class that keeps growing: a polymorphic recursion (as in one module)
+	if classes
+		.values()
+		.any(|instances| instances.len() > crate::lower::generic_values::MOST_INSTANCES)
+	{
+		return Err(Error::Diagnostics(
+			"error: a generic function type is called at a new type in each of its instances: a polymorphic recursion has no end of instances to compile; call it at types that don't grow\n".to_string(),
+		));
+	}
+	Ok((classes, producers))
+}
+
+/// The waves making the entries of the tables of generic function values
+/// (design/decisions.md, "Generic function tables per unit"): each producer
+/// gets an entry for each instance of its class, made by its module
+/// analyzed again; what these entries call makes instance waves, and the
+/// instances may call generic function values at new types, until nothing
+/// is new.
+fn generic_waves(
+	root: &mut Session,
+	report: &fa_analyzer::pipeline::Report,
+	settings: &Settings<'_>,
+	outputs: &mut std::collections::BTreeMap<String, UnitOutput>,
+	seen: &mut std::collections::HashSet<(String, String)>,
+	wave: &mut usize,
+) -> Result<(), Error> {
+	let mut requested: FxHashSet<String> = FxHashSet::default();
+	loop {
+		let units: Vec<&UnitOutput> = outputs.values().collect();
+		let (classes, producers) = generic_classes(&units)?;
+		let defined: FxHashSet<&str> = units
+			.iter()
+			.flat_map(|unit| unit.symbols.generic_values.entries.iter())
+			.map(String::as_str)
+			.collect();
+		// by producer's module, in a fixed order
+		let mut groups: std::collections::BTreeMap<String, Vec<GenericEntryRequest>> =
+			Default::default();
+		for producer in producers.values() {
+			for instance in classes[&producer.class].values() {
+				let symbol = producer.entry_symbol(instance);
+				if defined.contains(symbol.as_str()) || !requested.insert(symbol) {
+					continue;
+				}
+				groups
+					.entry(producer.module.clone())
+					.or_default()
+					.push(GenericEntryRequest {
+						producer: producer.clone(),
+						instance: instance.clone(),
+					});
+			}
+		}
+		if groups.is_empty() {
+			return Ok(());
+		}
+		*wave += 1;
+		if *wave > 64 {
+			return Err(Error::Unsupported {
+				message: "generic function values nested this deep (split build)".to_string(),
+				location: String::new(),
+			});
+		}
+		let mut requests = Vec::new();
+		for (module, entries) in groups {
+			let (session, files) = report.reanalyze(root, &[module.as_str()]);
+			if files.is_empty() {
+				return Err(Error::Unsupported {
+					message: format!("generic function values of `{module}` (split build)"),
+					location: String::new(),
+				});
+			}
+			let unit = compile_instances(
+				&session,
+				&files,
+				&[],
+				&entries,
+				*wave,
+				settings.target,
+				&settings.options,
+				settings.split,
+				settings.directory,
+			)?;
+			requests.extend(unit.requests.iter().cloned());
+			outputs.insert(unit.name.clone(), unit);
+		}
+		for unit in instance_waves(root, report, settings, requests, seen, wave)? {
+			outputs.insert(unit.name.clone(), unit);
+		}
+	}
+}
+
+/// The tables and the indices the entry object defines: an index is the
+/// position of its instance in its class (sorted by key), a table holds
+/// its producer's entry for each.
+fn generic_tables(units: &[UnitOutput]) -> Result<GenericTables, Error> {
+	let units: Vec<&UnitOutput> = units.iter().collect();
+	let (classes, producers) = generic_classes(&units)?;
+	let mut tables = GenericTables::default();
+	for instances in classes.values() {
+		for (position, instance) in instances.values().enumerate() {
+			tables
+				.indices
+				.push((instance.index_symbol(), position as u64));
+		}
+	}
+	for producer in producers.values() {
+		let entries = classes[&producer.class]
+			.values()
+			.map(|instance| producer.entry_symbol(instance))
+			.collect();
+		tables.tables.push((producer.table.clone(), entries));
+	}
+	Ok(tables)
 }
 
 /// Whether the program runs in asynchronous mode (design/async.md A6): its

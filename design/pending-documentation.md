@@ -50,3 +50,7 @@ Replace "`destroy` is called for a local at the end of its block when nothing mo
 ## `documentation/advanced/concurrency.md`, the table of targets and the `:::implementation` section (JavaScript)
 
 Table row "`Mutex`, atomics shared with a worker": make it "`Mutex`, atomics, channels shared with a worker" (JavaScript: with `SharedArrayBuffer`, flat values only; on the web, the page must be cross-origin isolated, else giving one to a worker stops the program with the headers to send: `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`). In the implementation section, replace "A `Channel` crossing a worker boundary becomes a `MessagePort`" by: a `Channel` given to a worker moves its queue into a `SharedArrayBuffer` (JSON text behind a lock word; a waiting task uses `Atomics.waitAsync` on a version word, a worker's blocking wait `Atomics.wait`), like a `Mutex`.
+
+## `documentation/architecture/dependencies.md`, "Sibling packages" (and the table of "Sources")
+
+Add after the paragraph on sibling packages: "A package outside a workspace can depend on a local folder that holds a package, with a relative path too (`shared = "../shared"`). Unlike a sibling package, it is locked like any other source: the lockfile records the path and the hash of its `package.fa`, `dependencies.fa` and `library/`, and a change of these files fails the build until `fa update shared` accepts it." In the table of sources, the row "Sibling package of the workspace" becomes "Local package (a sibling in a workspace, a folder outside one)".

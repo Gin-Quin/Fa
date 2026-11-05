@@ -555,6 +555,95 @@ fn versions_are_shared_by_the_workspace_and_transitive() {
 	assert_eq!((stdout.as_str(), code), ("49\n", 0), "{stderr}");
 }
 
+/// A package outside a workspace depends on a local folder holding a
+/// package, locked by its content (design/decisions.md, "Path dependencies
+/// outside a workspace").
+#[test]
+fn path_dependencies_outside_a_workspace_are_locked_by_their_content() {
+	let scratch = Scratch::new("paths");
+	let shared = scratch.write(
+		"shared",
+		&[
+			("package.fa", "export = { name = \"shared\" }\n"),
+			("dependencies.fa", "export = {\n\tunits = \"../units\"\n}\n"),
+			(
+				"library/greet.fa",
+				"export function = (name: String): String => \"Hello, {name}{units.mark()}\"\n",
+			),
+		],
+	);
+	scratch.write(
+		"units",
+		&[
+			("package.fa", "export = { name = \"units\" }\n"),
+			("library/mark.fa", "export function = (): String => \"!\"\n"),
+		],
+	);
+	let package = scratch.write(
+		"app",
+		&[
+			("package.fa", "export = { name = \"app\" }\n"),
+			(
+				"dependencies.fa",
+				"export = {\n\tshared = \"../shared\"\n}\n",
+			),
+			(
+				"application/main.fa",
+				"export function = () => {\n\tconsole.log(shared.greet(\"Ada\"))\n}\n",
+			),
+		],
+	);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	let locked = lockfile(&package);
+	assert!(
+		locked.contains("source = \"../shared\"\n\t\thash = \"sha256:"),
+		"{locked}"
+	);
+	assert!(
+		locked.contains("source = \"../units\"\n\t\thash = \"sha256:"),
+		"the path of a path dependency, from the lockfile's folder: {locked}"
+	);
+	if has_tool("bun") {
+		let (stdout, stderr, code) = scratch.fa(&["run", "."], &package);
+		assert_eq!((stdout.as_str(), code), ("Hello, Ada!\n", 0), "{stderr}");
+	}
+	// the folder changes: locked like any other source
+	fs::write(
+		shared.join("library/greet.fa"),
+		"export function = (name: String): String => \"Hi, {name}\"\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains(
+			"error[DEP001]: the content of `shared` changed since it was locked\n  source: ../shared\n  help: run `fa update shared`"
+		),
+		"{stderr}"
+	);
+	let (_, stderr, code) = scratch.fa(&["update", "shared"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	assert_ne!(lockfile(&package), locked);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	// a folder that holds no package
+	fs::write(
+		package.join("dependencies.fa"),
+		"export = {\n\tshared = \"../shared\"\n\tnothing = \"../nothing\"\n}\n",
+	)
+	.unwrap();
+	fs::create_dir_all(scratch.directory.join("nothing")).unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains(
+			"error[DEP008]: `nothing` = \"../nothing\" is not a folder holding a package"
+		),
+		"{stderr}"
+	);
+}
+
 #[test]
 fn remote_files_are_locked_by_their_content() {
 	let scratch = Scratch::new("remote");

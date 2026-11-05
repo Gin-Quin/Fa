@@ -100,3 +100,7 @@ The analyzer and the native backend (and wasm) support `Pointer.allocate(value)`
 ## `documentation/advanced/foreign-code.md`, "Targets" and `:::implementation` ("WebAssembly", "State of the implementation")
 
 On `wasm`, an `@extern` function is an import of the `env` module unless C compiled to WebAssembly and linked with the program (`build.link`: `.o`/`.a` files built with `clang --target=wasm32`) defines it. The host gives the others: the loader imports them from `env.mjs`, next to it (`fa build` copies the `env.mjs` found next to the program's file or at the root of its package); `env.mjs` exports one function per C name, and may export `attach(exports)` to reach the module's memory. A missing function stops the loader with the list of names. Replace "WebAssembly: not yet" in the state.
+
+## `documentation/types/fields.md`, `:::implementation` section (native)
+
+Add: "**Fields set once.** When no code of the program writes a field after the literal that builds its object (no assignment, append or changing reference of the field, no whole value of the type replaced but by a declaration), a method reads it once at its entry, a string with its bytes and length, and the small methods it calls on `self` (like `function current = (self): Byte => self.text.bytes().get(self.position) ?? 0`) are expanded into its body to use that read: a parser scanning `self.text` tests whether the text is inline once per call, not once per byte."

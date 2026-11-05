@@ -61,3 +61,7 @@ Make precise: `parallel()` gives a view for one operation, called at once on it:
 ## `documentation/architecture/dependencies.md`, "Sibling packages" (and the table of "Sources")
 
 Add after the paragraph on sibling packages: "A package outside a workspace can depend on a local folder that holds a package, with a relative path too (`shared = "../shared"`). Unlike a sibling package, it is locked like any other source: the lockfile records the path and the hash of its `package.fa`, `dependencies.fa` and `library/`, and a change of these files fails the build until `fa update shared` accepts it." In the table of sources, the row "Sibling package of the workspace" becomes "Local package (a sibling in a workspace, a folder outside one)".
+
+## The rt-5 example (`@typeToString(getDigitCount)`, types-at-runtime or function composition page)
+
+A function name is a value: write `@typeToString(Type<getDigitCount>)` (metaprogramming page: "use `Type(value)` to get the type of a value"; `TY008` otherwise).

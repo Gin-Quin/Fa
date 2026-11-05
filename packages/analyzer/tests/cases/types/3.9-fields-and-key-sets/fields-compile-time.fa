@@ -1,0 +1,15 @@
+-- sets of flags in compile-time code: `+`, `-`, `+=`, `is in`, `toStringArray`
+type Permissions = Fields { read, write, admin }
+
+function describe = (permissions: Permissions): String => {
+	mutable granted = permissions + Permissions.read
+	granted -= { admin }
+	let admin = Permissions.admin is in permissions
+	"{granted.toStringArray()} {admin} {Integer(granted)} {granted}"
+}
+
+static described = @describe(Permissions { write, admin })
+console.log(described) -- prints: ["read", "write"] true 3 { read, write }
+console.log(describe(Permissions.admin)) -- prints: ["read"] true 1 { read }
+static all: Permissions = { read, write, admin }
+console.log(Integer(all - Permissions.write)) -- prints: 5

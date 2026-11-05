@@ -1,0 +1,26 @@
+-- `@typeToSchema` of a `Fields` type: its flags in order, a group with its
+-- own flags; `TypeFromSchema` gives the same structural type back
+type MyFields = Fields { foo, bar, nested { baz1, baz2 } }
+
+static schema = @typeToSchema(MyFields)
+static flags = when schema is {
+	Schema.Named as { definition } => when definition is {
+		Schema.Fields as { flags } => flags.map((flag) => "{flag.name}: {flag.flags.length}")
+		else => []
+	}
+	else => []
+}
+console.log(flags) -- prints: ["foo: 0", "bar: 0", "nested: 2"]
+
+type Copy = TypeFromSchema<@typeToSchema(MyFields)>
+let copy: Copy = MyFields { foo, nested { baz2 } }
+console.log(Integer(copy)) -- prints: 9
+
+type Built = TypeFromSchema<Schema.Fields {
+	flags = [
+		{ name = "read", flags = [] }
+		{ name = "write", flags = [] }
+	]
+}>
+let built: Built = { write }
+console.log(Integer(built), @typeToString(Built)) -- prints: 2 Built

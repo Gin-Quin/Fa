@@ -1,0 +1,20 @@
+-- Effects on another file's values are tracked: a write of another file's
+-- value is declared, like a write of the file's own values.
+-- file: library/items.fa
+export mutable: Array<Integer> = [1, 2, 3]
+-- file: library/shrink.fa
+export function = () => {
+	items = [7] -- error EFF003
+}
+-- file: library/grow.fa
+export function = () mutates items => {
+	items.push(4)
+}
+-- file: library/forgetful.fa
+export function = () => {
+	grow() -- error EFF001
+}
+-- file: library/declared.fa
+export function = () mutates items.length => {
+	grow() -- error EFF004
+}

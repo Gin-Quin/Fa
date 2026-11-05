@@ -428,6 +428,7 @@ pub fn analyze_package(
 	let Some(resolver) = root.resolver_arc() else {
 		return Report::empty();
 	};
+	root.set_entry(options.entry.as_deref());
 	let mut stats = Stats::default();
 	let reuse = (options.retarget || options.dirty.is_some())
 		.then_some(previous)

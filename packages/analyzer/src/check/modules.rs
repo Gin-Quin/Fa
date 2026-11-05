@@ -378,6 +378,54 @@ impl Walker<'_> {
 		self.s.interface(module)?.complete.then_some((module, decl))
 	}
 
+	/// A proxy of a module-level value of another file this file doesn't
+	/// name (the effect of a call on it, `mutates people` of a function it
+	/// calls): the place of that effect here.
+	pub(crate) fn module_value_proxy(&mut self, key: DeclKey) -> Option<SymbolId> {
+		let module = self.s.types.decl_key_data(key).module;
+		if module == self.s.module_id(self.file) {
+			return None;
+		}
+		if let Some(&existing) = self.modules.decl_proxies.get(&key) {
+			return Some(existing);
+		}
+		let interface = self.s.interface(module)?;
+		let exported = interface
+			.export
+			.iter()
+			.chain(interface.members.values())
+			.find(|exported| exported.key == key)
+			.copied()?;
+		if !matches!(
+			exported.kind,
+			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
+		) {
+			return None;
+		}
+		let names = self.s.types.decl_key_data(key).names;
+		let name = *self.s.types.sym_list(names).last()?;
+		let text = self.s.types.syms.resolve(name).to_string();
+		let scope = match self.modules.method_scope {
+			Some(scope) => scope,
+			None => {
+				let owner = NodeId(self.modules.next_owner);
+				self.modules.next_owner -= 1;
+				let scope = self.a.symbols.scope_for(owner, None, ScopeKind::Namespace);
+				self.modules.method_scope = Some(scope);
+				scope
+			}
+		};
+		let proxy = Proxy::Decl {
+			module,
+			decl: exported.decl,
+			key,
+		};
+		let symbol = self.declare_proxy(scope, &text, exported.kind, proxy, exported.ty);
+		self.modules.decl_proxies.insert(key, symbol);
+		self.module_values.insert(key, symbol);
+		Some(symbol)
+	}
+
 	/// The key of the declaration of another file a proxy (or an alias of
 	/// one) stands for. The export of a file is keyed by its module and the
 	/// file's name, without analyzing it: a relation names a collection of

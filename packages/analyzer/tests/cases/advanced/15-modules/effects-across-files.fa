@@ -1,0 +1,25 @@
+-- Effects on another file's values are tracked (decisions, 2026-11-05): the
+-- write of `items` by `shrink`, through `shrinkLater` whose effects are
+-- inferred, drops what `demo` knew of `items.length` (a stale proof would
+-- read `items[2]` out of bounds).
+-- file: library/items.fa
+export mutable: Array<Integer> = [1, 2, 3]
+-- file: library/shrink.fa
+export function = () mutates items => {
+	items = [7]
+}
+-- file: library/shrinkLater.fa
+-- an expression body: its effects are inferred, the write of `items` too
+export function = () => shrink()
+-- file: library/demo.fa
+export function = () mutates items => {
+	if items.length == 3 {
+		shrinkLater()
+		console.log(items.length, items[2] catch error => -1)
+	}
+}
+-- file: application/main.fa
+export function = () => {
+	library.demo()
+}
+-- prints: 1 -1

@@ -1,0 +1,16 @@
+-- The review of 2026-11-05, declared: `bump` writes `counter` of another
+-- file, so the caller's narrowing of `library.counter` ends at the call.
+-- file: application/main.fa
+export function = () => {
+	if library.counter != none {
+		library.bump()
+		console.log(library.counter ?? 0)
+	}
+}
+-- file: library/bump.fa
+export function = () mutates counter => {
+	counter = none
+}
+-- file: library/counter.fa
+export mutable: Integer? = 3
+-- prints: 0

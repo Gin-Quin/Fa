@@ -420,6 +420,27 @@ impl Walker<'_> {
 		if let Some(&existing) = self.modules.decl_proxies.get(&key) {
 			return Some(existing);
 		}
+		// a name of this file standing for it (`shared`, `library.shared`):
+		// the effect is on the place the file reads
+		let mut named: Vec<SymbolId> = self
+			.modules
+			.proxies
+			.iter()
+			.filter(|(_, proxy)| match proxy {
+				Proxy::Export { module: other } | Proxy::Member { module: other, .. } => {
+					*other == module
+				}
+				_ => false,
+			})
+			.map(|(&symbol, _)| symbol)
+			.collect();
+		named.sort();
+		for symbol in named {
+			if self.external_value_key(symbol) == Some(key) {
+				self.module_values.insert(key, symbol);
+				return Some(symbol);
+			}
+		}
 		let interface = self.s.interface(module)?;
 		let exported = interface
 			.export

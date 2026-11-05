@@ -571,6 +571,14 @@ impl Generator<'_> {
 	/// The value pinned to a member of an enumeration (`archived = 9`),
 	/// read from its declaration: the analysis doesn't record it.
 	fn pinned_value(&self, nominal: NominalId, index: u16) -> Option<String> {
+		// recorded as the member's literal (any file, `TypeFromSchema`)
+		if let Some(int) = self
+			.types
+			.as_int(self.types.payload(nominal, index))
+			.filter(|int| int.min == int.max)
+		{
+			return Some(int.min.to_string());
+		}
 		let (&node, _) = self.analysis.type_decls.iter().find(|(_, decl)| {
 			matches!(
 				self.types.kind(decl.ty),

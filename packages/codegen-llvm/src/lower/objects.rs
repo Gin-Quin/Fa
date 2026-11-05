@@ -448,7 +448,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The id of the member in a box.
-	fn box_id(&self, value: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
+	pub(crate) fn box_id(&self, value: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
 		if matches!(value.repr, Repr::InlineUnion(_)) {
 			return Ok(self
 				.builder

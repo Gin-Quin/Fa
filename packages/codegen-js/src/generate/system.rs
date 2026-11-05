@@ -4,7 +4,7 @@
 //! and `Json.parse(text)` is `faJsonParse(text, schema)` with the schema of
 //! the expected type (the call's type), written as a JavaScript literal.
 
-use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::ids::{NodeId, NominalId, TypeId};
 use fa_analyzer::types::{CollKind, TypeKind};
 
 use crate::generate::{Generator, Repr};
@@ -88,6 +88,34 @@ impl Generator<'_> {
 		Some((self.helper(helper), receiver))
 	}
 
+	/// A member of a named union in the schema of `faJsonParse`.
+	fn json_member(&mut self, nominal: NominalId, index: u16, depth: u32) -> Option<String> {
+		let name = js::string_literal(self.types.member_name(nominal, index));
+		let tag = js::string_literal(&self.member_qualified_name(nominal, index));
+		let payload = self.types.payload(nominal, index);
+		if payload.is_unset() {
+			return Some(format!("[{name}, {tag}, \"e\", null]"));
+		}
+		if let Some(literal) = self.literal_of(payload) {
+			return Some(format!("[{name}, {tag}, \"l\", {}]", literal.text));
+		}
+		let data = self.json_schema(payload, depth + 1)?;
+		let kind = match self.types.kind(payload) {
+			TypeKind::Object(_)
+				if self
+					.types
+					.fields_of(payload)
+					.iter()
+					.any(|field| self.types.syms.resolve(field.name) == "type") =>
+			{
+				"w"
+			}
+			TypeKind::Object(_) => "r",
+			_ => "v",
+		};
+		Some(format!("[{name}, {tag}, \"{kind}\", {data}]"))
+	}
+
 	/// The schema `faJsonParse` reads a value of `ty` with (see `system.js`).
 	fn json_schema(&mut self, ty: TypeId, depth: u32) -> Option<String> {
 		if depth > 32 {
@@ -135,6 +163,24 @@ impl Generator<'_> {
 					parts.push(self.json_schema(member, depth + 1)?);
 				}
 				format!("[\"u\", [{}]]", parts.join(", "))
+			}
+			// `["N", [[name, tag, kind, data], …]]`: a member without data
+			// (`"e"`), a literal (`"l"`, its value), an object (`"r"`: its fields
+			// next to `"type"`), an object with a `type` field (`"w"`) or other
+			// data (`"v"`): under `"value"`
+			TypeKind::NamedUnion(nominal, mask) => {
+				let count = self
+					.types
+					.sym_list(self.types.nominal(nominal).members)
+					.len() as u16;
+				let mut parts = Vec::new();
+				for index in (0..count).filter(|&index| self.types.mask_has(mask, index)) {
+					parts.push(self.json_member(nominal, index, depth)?);
+				}
+				format!("[\"N\", [{}]]", parts.join(", "))
+			}
+			TypeKind::Member(nominal, index) => {
+				format!("[\"N\", [{}]]", self.json_member(nominal, index, depth)?)
 			}
 			TypeKind::Object(_) => {
 				let fields: Vec<(String, TypeId)> = self
@@ -192,7 +238,23 @@ impl Generator<'_> {
 							}
 							format!("() => ({})", value.text)
 						}
-						_ => "null".to_string(),
+						// a type of another file: the constant its file evaluated
+						_ => {
+							let sym = fields_of_sym(self, ty, &name);
+							match sym.and_then(|sym| self.analysis.json_defaults.get(&(ty, sym))) {
+								Some(&constant) => {
+									let value = self
+										.analysis
+										.field_constants
+										.get(constant as usize)?
+										.clone();
+									let value =
+										self.constant_value(NodeId::new(0), &value, field_ty);
+									format!("() => ({})", value.text)
+								}
+								None => "null".to_string(),
+							}
+						}
 					};
 					parts.push(format!(
 						"[{}, {schema}, {optional}, {default}]",
@@ -204,4 +266,13 @@ impl Generator<'_> {
 			_ => return None,
 		})
 	}
+}
+
+/// The name of a field of an object type, as a symbol.
+fn fields_of_sym(g: &Generator<'_>, ty: TypeId, name: &str) -> Option<fa_analyzer::ids::Sym> {
+	g.types
+		.fields_of(ty)
+		.iter()
+		.find(|field| g.types.syms.resolve(field.name) == name)
+		.map(|field| field.name)
 }

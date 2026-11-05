@@ -216,6 +216,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// Inside a loop over characters lowered twice, for a simple text and
 	/// for another (`for_characters`): a nested one is lowered once.
 	pub(crate) versioned_characters: bool,
+	/// The reserved appends (`appends.rs`) of loops with a constant number of
+	/// rounds that fits an inline string: such a string stays inline.
+	pub(crate) inline_reserved: rustc_hash::FxHashSet<NodeId>,
 	/// The arrays indexed by a counted loop being lowered, read before it
 	/// (`hoisting.rs`): the array value of each local, and the items and
 	/// length of each such value.
@@ -437,6 +440,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			reserved_pushes: FxHashMap::default(),
 			iterating_views: false,
 			versioned_characters: false,
+			inline_reserved: rustc_hash::FxHashSet::default(),
 			hoisted_arrays: FxHashMap::default(),
 			hoisted_parts: FxHashMap::default(),
 			expanded_functions: Vec::new(),

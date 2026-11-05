@@ -718,6 +718,11 @@ mod tests {
 				"cursor.text += \"c\"\n",
 				"field:{position: Integer, text: String}.text",
 			),
+			// a built-in method changing the field (its receiver)
+			(
+				"cursor.text.reserve(10)\n",
+				"field:{position: Integer, text: String}.text",
+			),
 			(
 				"cursor = Cursor { text = \"\", position = 0 }\n",
 				"whole:{position: Integer, text: String}",

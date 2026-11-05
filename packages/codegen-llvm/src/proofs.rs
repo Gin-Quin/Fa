@@ -1231,8 +1231,8 @@ impl Prover<'_> {
 			// field `f`), or moving or replacing the items of a collection
 			if let Some(info) = file.analysis.call(node)
 				&& let Callee::Builtin(id) = info.callee
-				&& let Some(Argument::Receiver(callee)) = info.arguments.first()
-				&& let View::Access { target, members } = file.view(*callee)
+				&& let View::Call { callee, .. } = file.view(node)
+				&& let View::Access { target, members } = file.view(callee)
 			{
 				use fa_analyzer::builtins::effects::{BuiltinEffect, effects_of};
 				let effects = effects_of(fa_analyzer::builtins::get(id).path);

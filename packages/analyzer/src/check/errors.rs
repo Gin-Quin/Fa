@@ -215,7 +215,7 @@ impl Walker<'_> {
 	}
 
 	/// The node inside the parentheses around `n`, if any.
-	fn parenthesized(&self, n: NodeId) -> NodeId {
+	pub(super) fn parenthesized(&self, n: NodeId) -> NodeId {
 		let mut current = n;
 		while let View::Group(inner) = syntax::view(&self.tree, current) {
 			current = inner;

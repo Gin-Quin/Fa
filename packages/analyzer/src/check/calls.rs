@@ -147,7 +147,22 @@ impl Walker<'_> {
 				// values are always built with braces (E-OBJ-6)
 				return self.braces_needed(n, callee, arguments);
 			}
-			// `String(x)`, type functions: later milestones
+			// there is no `String(x)` (type-conversion.md): `CV002`
+			if ty == TypeId::STRING {
+				for argument in arguments.iter() {
+					self.check(argument, None);
+				}
+				return self.memo(n, |w| {
+					let diagnostic = w.diagnostic(
+						&crate::diagnostics::codes::types::CV002,
+						n,
+						"there is no `String(value)`: write `value.toString()`, or a template like `\"{value}\"`",
+					);
+					w.report(diagnostic);
+					TypeId::STRING
+				});
+			}
+			// type functions: later milestones
 			return self.unsupported(n, "calling a type");
 		}
 		// a local function called by name is not used as a value (moves.rs)
@@ -393,6 +408,27 @@ impl Walker<'_> {
 						w.check_printable(value, ty);
 					}
 				}
+			}
+			// `items.sort()`: the natural order needs ordered items (`CL025`)
+			if let Callee::Builtin(builtin) = kind
+				&& builtins::get(builtin).path.ends_with("#sort")
+					| builtins::get(builtin).path.ends_with("#sortInPlace")
+				&& !binding
+					.arguments
+					.iter()
+					.any(|argument| matches!(argument, Argument::Given(_)))
+				&& let Some(receiver) = w.callee_receiver_type(callee)
+				&& let TypeKind::Collection(_, item, ..) = w.s.types.kind(receiver)
+				&& !w.s.types.is_recovering(item)
+				&& w.members_of(item).iter().any(|&member| {
+					!w.s.types.flags(member).contains(crate::types::TypeFlags::ORDERED)
+				}) {
+				let message = format!(
+					"the natural order needs items that can be compared with `<`, and a `{}` can't: give `sort` a comparator, like `(a, b) => a.key - b.key`",
+					w.display(item)
+				);
+				let diagnostic = w.diagnostic(&crate::diagnostics::codes::types::CL025, n, message);
+				w.report(diagnostic);
 			}
 			for (code, node, message) in binding.errors {
 				let diagnostic = w.diagnostic(code, node, message);

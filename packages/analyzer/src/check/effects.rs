@@ -1453,6 +1453,7 @@ impl Walker<'_> {
 					let Some((place, base, argument)) =
 						self.substitute(path, &info.arguments, receiver, (n, &name))
 					else {
+						self.temporary_mutated(path, &info.arguments, &name);
 						continue;
 					};
 					// a parameter of the payload's type changes the payload only:
@@ -2026,6 +2027,32 @@ impl Walker<'_> {
 					.map(|(place, _, _)| (place, invalidates, n))
 			})
 			.collect()
+	}
+
+	/// `EF012`: an object literal given to a parameter the callee mutates:
+	/// the mutation would be lost (defining-functions.md, "Mutating
+	/// parameters"). An array literal stays allowed (`add([name])`).
+	fn temporary_mutated(&mut self, path: PathId, arguments: &[Argument], callee: &str) {
+		let PathRoot::Param(index) = self.s.types.path_data(path).0.root else {
+			return;
+		};
+		let Some(Argument::Given(argument)) = arguments.get(index as usize) else {
+			return;
+		};
+		let argument = self.strip_groups(*argument);
+		let temporary = matches!(
+			self.view(argument),
+			View::Object { .. } | View::TypedObject { .. }
+		);
+		if !temporary || self.place_of(argument).is_some() {
+			return;
+		}
+		let message = format!(
+			"`{callee}` mutates this argument, but it is a temporary value: the mutation would be lost (store it in a `mutable` first)"
+		);
+		let diagnostic =
+			self.diagnostic(&crate::diagnostics::codes::types::EF012, argument, message);
+		self.report_flow(diagnostic);
 	}
 
 	/// `EFF007`: a mutated argument must be a writable place. Returns whether it is.

@@ -257,6 +257,59 @@ fn units_agree_on_never_negative_fields() {
 	}
 }
 
+/// The files of a folder, recursively, by their path in it.
+fn files_under(directory: &Path) -> Vec<(String, Vec<u8>)> {
+	let mut files = Vec::new();
+	let mut pending = vec![directory.to_path_buf()];
+	while let Some(folder) = pending.pop() {
+		for entry in fs::read_dir(&folder).unwrap() {
+			let path = entry.unwrap().path();
+			if path.is_dir() {
+				pending.push(path);
+			} else {
+				let name = path.strip_prefix(directory).unwrap().display().to_string();
+				files.push((name, fs::read(&path).unwrap()));
+			}
+		}
+	}
+	files.sort();
+	files
+}
+
+/// A JavaScript package build generates the modules that depend on the
+/// program's proofs once every unit is analyzed, from a re-analysis of
+/// their unit (design/decisions.md, "JavaScript package builds use the
+/// program's proofs like native per-unit builds"): generated that way
+/// (`FA_DEFER_UNITS=1`: every unit), the modules are the same.
+#[test]
+fn a_re_analyzed_unit_generates_the_same_javascript() {
+	let cache = scratch("packages-deferred");
+	let mut outputs = Vec::new();
+	for defer in ["0", "1"] {
+		let output = cache.join(format!("out-{defer}"));
+		let (_, stderr, code) = fa_with(
+			&[
+				"build",
+				"--target=bun",
+				"--minify=false",
+				&format!("--output={}", output.display()),
+				"modules",
+			],
+			&fixtures(),
+			&cache,
+			&[("FA_DEFER_UNITS", defer)],
+		);
+		assert_eq!(code, 0, "stderr: {stderr}");
+		outputs.push(files_under(&output));
+	}
+	assert!(outputs[0].len() > 3, "{:?}", outputs[0]);
+	for (first, second) in outputs[0].iter().zip(&outputs[1]) {
+		assert_eq!(first.0, second.0);
+		assert!(first.1 == second.1, "{} differs", first.0);
+	}
+	assert_eq!(outputs[0].len(), outputs[1].len());
+}
+
 /// A package compiled per unit (design/parallel-pipeline.md §3.3): the
 /// objects of its units (the cache of `fa run`) and its executable
 /// (`fa build`, ThinLTO) are the same whatever the threads and the order

@@ -1,0 +1,12 @@
+-- Destination passing: the body reads the destination through a module-level value
+mutable out = "ab"
+function quoted = (text: String): String => {
+	mutable result = "["
+	for character in text {
+		result += character
+	}
+	result += out
+	result + "]"
+}
+out += quoted("x")
+console.log(out)

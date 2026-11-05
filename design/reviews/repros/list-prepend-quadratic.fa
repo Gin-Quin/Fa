@@ -1,0 +1,12 @@
+type List = { head: Integer, tail: List? }
+mutable list: List? = none
+for index in 0..20000 {
+	list = List { head = index, tail = list }
+}
+mutable length = 0
+mutable cursor = list
+while cursor is not none {
+	length += 1
+	cursor = cursor.tail
+}
+console.log(length)

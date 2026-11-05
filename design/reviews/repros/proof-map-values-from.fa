@@ -1,0 +1,9 @@
+-- Index proof: map values given by Map.from
+type Cell = { value: UInt32 }
+mutable cells: Array<Cell> = [{ value = 7 }]
+mutable named = Map<Int32, UInt32>.from([(1, 900000)], capacity = 4)
+function read = (items: Array<Cell>, at: UInt32): UInt32 throws IndexError => try items[at].value
+let at = named.get(1)
+if at is not none {
+	console.log(read(cells, at) catch error => 99)
+}

@@ -1,0 +1,9 @@
+-- Never-negative without overflow checks: an Int8 place stepping by one
+-- wraps to -1 after 255 steps; `items[-1]` is the last item
+let items = [10, 20, 30]
+mutable position: Int8 = 0
+for 0..255 {
+	position += 1
+}
+function read = (at: Int8): Integer => items[at] catch error => 99
+console.log(position, read(position), items[position] catch error => 99)

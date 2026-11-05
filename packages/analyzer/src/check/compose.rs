@@ -28,6 +28,8 @@ impl Walker<'_> {
 		let mut steps = Vec::new();
 		for operand in operands.iter() {
 			self.check(operand, None);
+			// the composition holds its steps: a closure copies what it captures
+			self.escape(operand, n);
 			match self.known_chain(operand) {
 				Some(chain) => steps.extend(chain),
 				None => steps.push(operand),

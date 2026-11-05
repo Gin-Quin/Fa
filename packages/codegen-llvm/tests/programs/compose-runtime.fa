@@ -1,0 +1,99 @@
+-- Compositions of function values only known at run time: parameters,
+-- lambdas capturing values, chains, compositions stored and called later.
+type Step = (x: Integer) => Integer
+type Render = (x: Integer) => String
+type CheckedStep = (x: Integer) => Integer throws Failure
+
+function increment = (x: Integer): Integer => x + 1
+function double = (x: Integer): Integer => x * 2
+
+function composeTwice = (first: Step, second: Step): Step => first then second
+
+let pipeline = composeTwice(increment, double)
+console.log(pipeline(1))
+-- prints: 4
+
+function labeller = (prefix: String): Render => {
+	let label = prefix + ": "
+	(x: Integer) => label + "{x}"
+}
+
+function describe = (prefix: String): Render => {
+	let render = labeller(prefix)
+	double then render
+}
+
+let described = describe("value")
+console.log(described(21))
+-- prints: value: 42
+
+function shout = (text: String): String => text + "!"
+
+function chain = (prefix: String, offset: Integer): Render => {
+	function shift = (x: Integer): Integer => x + offset
+	shift then double then labeller(prefix) then shout
+}
+
+console.log(chain("chain", 3)(4))
+-- prints: chain: 14!
+
+let steps = [composeTwice(increment, double), composeTwice(double, increment), (x: Integer) => x * 10]
+for step in steps {
+	console.log(step(5))
+}
+-- prints: 12
+-- prints: 11
+-- prints: 50
+
+function apply = (transform: Render, value: Integer): String => transform(value)
+
+console.log(apply(increment then labeller("passed"), 9))
+-- prints: passed: 10
+
+type Failure = Errors { Negative }
+
+function checked = (x: Integer): Integer throws Failure => {
+	if x < 0 {
+		throw Failure.Negative
+	}
+	x
+}
+
+function safely = (transform: Step): CheckedStep => checked then transform
+
+let guarded = safely(double)
+console.log(guarded(4) catch error => -1)
+console.log(guarded(-4) catch error => -1)
+-- prints: 8
+-- prints: -1
+
+-- a step that fails after one that built a string
+function named = (x: Integer): String => "item {x}"
+function parse = (text: String): Integer throws Failure => {
+	if text.length > 6 {
+		throw Failure.Negative
+	}
+	text.length
+}
+function measuring = (render: Render) => render then parse
+let measured = measuring((x: Integer) => named(x))
+console.log(measured(5) catch error => -1)
+console.log(measured(50) catch error => -1)
+-- prints: 6
+-- prints: -1
+
+-- compositions made in a loop, of captured values, and of compositions
+mutable total = 0
+for index in 0..3 {
+	let offset = "+{index}"
+	function tagged = (text: String): String => text + offset
+	let step = named then tagged then shout
+	console.log(step(index))
+	let again = pipeline then pipeline
+	total += again(index)
+}
+console.log(total)
+-- prints: item 0+0!
+-- prints: item 1+1!
+-- prints: item 2+2!
+-- prints: 30

@@ -914,6 +914,15 @@ impl Walker<'_> {
 		}
 		self.enter_loop(n, LoopKind::For, None, false);
 		let exit = self.run_loop(|w| {
+			// a position is below a length, at most 2^48 (decision
+			// "Collection lengths are at most 2^48")
+			if let Some(symbol) = index_symbol {
+				let positions = crate::types::Interval::new(
+					ethnum::I256::ZERO,
+					crate::types::int::LENGTH_MAX - 1,
+				);
+				w.set_symbol_values(symbol, Some(crate::flow::IntervalSet::of(positions)));
+			}
 			if let (Some(symbol), Some(relation)) = (index_symbol, relation) {
 				w.relate_below(symbol, relation);
 			}

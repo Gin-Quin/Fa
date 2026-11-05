@@ -1,0 +1,41 @@
+-- decision "Collection lengths are at most 2^48": lengths, indices and counts start from 0..=2^48, so arithmetic on them is exact in 64 bits and stays proven when overflows wrap
+-- overflow-checks: false
+function sieve = (size: Integer<min = 2, max = 1_000_000>): Integer => {
+	mutable marks: Array<Boolean> = []
+	for 0..size {
+		marks.push(true)
+	}
+	mutable count = 0
+	for i in 2..marks.length {
+		if marks[i] { -- no-check: INDEX_CHECK
+			count += 1
+			if i <= marks.length // i {
+				mutable multiple = i * i
+				while multiple < marks.length {
+					marks[multiple] = false -- no-check: INDEX_CHECK
+					multiple += i
+				}
+			}
+		}
+	}
+	count
+}
+function primes = (limit: Integer): Integer => {
+	mutable isPrime = Array<Boolean>.from([], capacity = 10)
+	for 0..=limit {
+		isPrime.push(true)
+	}
+	mutable count = 0
+	for i in 2..isPrime.length {
+		if isPrime[i] { -- no-check: INDEX_CHECK
+			count += 1
+			mutable multiple = i + i
+			while multiple < isPrime.length {
+				isPrime[multiple] = false -- no-check: INDEX_CHECK
+				multiple += i
+			}
+		}
+	}
+	count
+}
+console.log(sieve(100), primes(30)) -- prints: 25 10

@@ -1,0 +1,31 @@
+-- review 30: an arm the arms above already match is a warning, and so is an `else` after every value is handled (conditionals.md)
+function f = (x: Integer): String => when x is {
+	0..=10 => "small"
+	5 => "five" -- warning: W-WHEN-1
+	else => "big"
+}
+type Shape = Union {
+	Circle = { r: Integer }
+	Square = { s: Integer }
+}
+function g = (s: Shape): Integer => when s is {
+	Shape.Circle => 1
+	Shape.Square => 2
+	else => 3 -- warning: W-WHEN-2
+}
+function h = (c: "a" | "b"): Integer => when c is {
+	"a" => 1
+	"b" => 2
+	"a" => 3 -- warning: W-WHEN-1
+}
+function k = (x: Integer): Integer => {
+	if x > 10 {
+		return 0
+	}
+	-- facts known before the `when` don't make an arm unreachable
+	return when x is {
+		0..=5 => 1
+		else => 2
+	}
+}
+console.log(f(3), g(Shape.Circle { r = 1 }), h("a"), k(3))

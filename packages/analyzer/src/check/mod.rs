@@ -893,8 +893,54 @@ impl Walker<'_> {
 		self.check(n, None);
 		self.quiet -= u32::from(broken);
 		self.statement = saved;
+		if !broken {
+			self.warn_pure_statement(n);
+		}
 		// the `watch` blocks may run after it (reactivity.rs)
 		self.after_outer_statement();
+	}
+
+	/// `W-DO-1`: a statement whose value is dropped and whose computation
+	/// has no effect (`a + 1`). The last value of a function body without
+	/// return type is `WFN001` (functions.rs).
+	fn warn_pure_statement(&mut self, n: NodeId) {
+		if !self.is_value_statement(n) || !self.is_pure_expression(n) {
+			return;
+		}
+		let ty = self.type_of(n);
+		if matches!(ty, TypeId::VOID | TypeId::NEVER)
+			|| ty.is_unset()
+			|| self.s.types.is_recovering(ty)
+		{
+			return;
+		}
+		// a statement of a block or of the module (not an arm's value)
+		let Some(parent) = self.parent(n) else {
+			return;
+		};
+		if !matches!(self.view(parent), View::Block { .. } | View::Module { .. }) {
+			return;
+		}
+		if let View::Block { statements } = self.view(parent)
+			&& statements.last() == Some(n)
+			&& self.body.functions.last().is_some_and(|cx| {
+				self.a
+					.functions
+					.get(&cx.node)
+					.is_some_and(|info| info.body == parent)
+			}) {
+			return;
+		}
+		if !self.reported_once.insert((n, "W-DO-1")) {
+			return;
+		}
+		let text = self.tree.text(n.index()).to_string();
+		let diagnostic = self.diagnostic(
+			&codes::values::W_DO_1,
+			n,
+			format!("`{text}` computes a value and drops it: this statement has no effect. Remove it, or use its value"),
+		);
+		self.report(diagnostic);
 	}
 
 	/// Checks the last statement of a block whose value is used (see

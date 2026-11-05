@@ -1236,7 +1236,7 @@ impl Walker<'_> {
 
 	/// Whether computing an expression has no effect (no call, no assignment,
 	/// nothing that can fail but arithmetic).
-	fn is_pure_expression(&self, n: NodeId) -> bool {
+	pub(super) fn is_pure_expression(&self, n: NodeId) -> bool {
 		let pure = matches!(
 			self.view(n),
 			View::Integer(_)

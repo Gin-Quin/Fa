@@ -1,2 +1,2 @@
 -- brief: between two literals is valid: the integer literal adapts)
-1 == 1.0
+1 == 1.0 -- warning: W-DO-1

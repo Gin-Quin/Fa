@@ -1,0 +1,10 @@
+-- review 30: a statement that computes a value without effect is a warning (defining-functions.md)
+let x = 3
+x + 1 -- warning: W-DO-1
+x -- warning: W-DO-1
+console.log(x)
+function f = () => {
+	x * 2 -- warning: W-DO-1
+	console.log(x)
+}
+f()

@@ -1,0 +1,9 @@
+-- Relations across files (the module-level form of the relations page): the
+-- collection of `people.fa`, the relation of `Person.fa`, written and deleted
+-- by the other files; a generic module that doesn't read `Person.fa` copies
+-- people (a build per unit lays `Person` out from the program's facts).
+export = {
+	name = "relations"
+	version = "0.1.0"
+	targets = ["bun", "native"]
+}

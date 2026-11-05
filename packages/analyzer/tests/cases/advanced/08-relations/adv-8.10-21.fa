@@ -1,0 +1,16 @@
+-- Relations across files: the file of the collection checks it (it reads
+-- the relation's file for the type of its elements), and the reverse side
+-- stays read-only in the other files.
+-- file: library/people.fa
+export mutable: Array<Person> = [] -- error REL003
+-- file: library/Person.fa
+export type = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool<people->bestFriend>
+}
+-- file: library/write.fa
+export function = (ana: Person in people, bao: Person in people) mutates ana.bestFriend => {
+	bao.bestFriendOf.add(ana) -- error REL010
+	ana.bestFriend = bao
+}

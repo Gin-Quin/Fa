@@ -1,0 +1,15 @@
+-- Relations across files: both sides of a relation are declared in one
+-- file.
+-- file: library/people.fa
+export mutable: Pool<Person> = []
+-- file: library/Person.fa
+export type = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool<people->bestFriend>
+	mentee: (people->mentor)? -- error REL008
+}
+-- file: library/Mentor.fa
+export type = {
+	mentor: (Person in people)? -- error REL001
+}

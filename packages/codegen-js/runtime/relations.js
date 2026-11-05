@@ -6,6 +6,15 @@
 // and before every removal from a related collection, so that both sides
 // always agree.
 
+// @fa-helper faSides
+/**
+ * The property of an object whose type has relation sides: the names of its
+ * sides (a constant of the type). Erased generic code reads it, so that a
+ * copy has no links and printing, equality and hashing leave the sides out
+ * (D18, D21), as the code generated per type does.
+ */
+export const faSides = Symbol.for("fa.sides");
+
 // @fa-helper faRelateOne
 /**
  * `holder.direct = target` for a one-to-many relation (`many`: the reverse

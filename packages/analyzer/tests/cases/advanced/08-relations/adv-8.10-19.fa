@@ -1,0 +1,30 @@
+-- Relations across files, the owner form: `Town` and its people are
+-- declared by `Town.fa`, written, deleted and copied by another file.
+-- file: library/Town.fa
+export type = {
+	people: Pool<Person> = []
+	type Person = {
+		name: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Pool<people->bestFriend>
+		spouse: (people->spouse)?
+	}
+}
+-- file: application/main.fa
+export function = () => {
+	mutable town: library.Town = {}
+	use ana = town.people.add({ name = "Ana" })
+	use bao = town.people.add({ name = "Bao" })
+	use cleo = town.people.add({ name = "Cleo", bestFriend = bao })
+	ana.bestFriend = bao
+	ana.spouse = cleo
+	console.log(bao.bestFriendOf.size, cleo.spouse?.name ?? "none")
+	let copiedTown = town
+	town.people.delete(bao)
+	console.log(ana.bestFriend?.name ?? "none", cleo.bestFriend?.name ?? "none")
+	use copiedBao = copiedTown.people.find((person) => person.name == "Bao")
+	console.log(copiedBao?.bestFriendOf.size ?? 0, town.people.size, copiedTown.people.size)
+}
+-- prints: 2 Ana
+-- prints: none none
+-- prints: 2 2 3

@@ -12,6 +12,7 @@
 // and shared.
 
 import { FaHashMap, FaSet } from "./collections.js";
+import { faSides } from "./relations.js";
 
 // @fa-helper faCopyShell deps: FaHashMap FaSet
 /**
@@ -43,7 +44,7 @@ export function faCopyShell(source) {
 	return Object.create(Object.getPrototypeOf(source));
 }
 
-// @fa-helper faCopy deps: faCopyShell FaHashMap FaSet
+// @fa-helper faCopy deps: faCopyShell FaHashMap FaSet faSides
 /**
  * A deep structural copy of a Fa value. Iterative: long recursive chains
  * (linked lists) don't overflow the stack.
@@ -90,15 +91,24 @@ export function faCopy(value) {
 				target.add(item);
 			}
 		} else {
+			// an element of a type with relation sides: the copy has no links
+			const sides = source[faSides];
 			for (const key of Object.keys(source)) {
-				target[key] = copyLater(source[key]);
+				if (sides !== undefined && sides.includes(key)) {
+					target[key] = source[key] instanceof Set ? new Set() : undefined;
+				} else {
+					target[key] = copyLater(source[key]);
+				}
+			}
+			if (sides !== undefined) {
+				target[faSides] = sides;
 			}
 		}
 	}
 	return root;
 }
 
-// @fa-helper faCopyGraph deps: faCopyShell FaHashMap FaSet
+// @fa-helper faCopyGraph deps: faCopyShell FaHashMap FaSet faSides
 /**
  * A copy of an owner of related collections (advanced brief 8.5, copies):
  * every object is copied once, and every reference to an object of the
@@ -152,6 +162,9 @@ export function faCopyGraph(value) {
 		} else {
 			for (const key of Object.keys(source)) {
 				target[key] = copyOf(source[key]);
+			}
+			if (source[faSides] !== undefined) {
+				target[faSides] = source[faSides];
 			}
 		}
 	}

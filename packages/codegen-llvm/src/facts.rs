@@ -62,6 +62,42 @@ pub const DELETED_WHILE_ITERATED_MAPS: &str = "maps.deleted-while-iterated";
 /// the places that fail (`proofs::resolve_claims`).
 pub const PROOF_CLAIMS: &str = "proofs.claims";
 
+/// The relation sides of the program's object types (relations across
+/// files): `<stable type name>\u{1f}<field>`. A side's layout (the address
+/// of its target, or a set of links) differs from a field of the same type
+/// (a copy), so every unit, and every instance emitted by a module that
+/// doesn't read the relation's file, lays the type out the same way.
+pub const RELATION_SIDES: &str = "relations.sides";
+
+/// The key of a relation side in [`RELATION_SIDES`].
+pub fn relation_side_key(types: &TypeStore, object: TypeId, field: &str) -> Option<String> {
+	stable_type_name(types, object).map(|name| format!("{name}\u{1f}{field}"))
+}
+
+/// See [`RELATION_SIDES`]: the sides of the relations the unit's files
+/// declare or import.
+fn relation_sides(session: &Session, files: &[FileId]) -> BTreeSet<String> {
+	let types = session.types();
+	let mut found = BTreeSet::new();
+	for &file in files {
+		for relation in &session.analysis(file).relations {
+			let sides = [
+				(relation.holder_type, Some(relation.direct)),
+				(relation.target_type, relation.reverse),
+			];
+			for (object, field) in sides {
+				let Some(field) = field else {
+					continue;
+				};
+				if let Some(key) = relation_side_key(types, object, types.syms.resolve(field)) {
+					found.insert(key);
+				}
+			}
+		}
+	}
+	found
+}
+
 /// Every fact kind, in a fixed order.
 pub const KINDS: &[FactKind] = &[
 	FactKind {
@@ -73,6 +109,12 @@ pub const KINDS: &[FactKind] = &[
 	FactKind {
 		name: DELETED_WHILE_ITERATED_MAPS,
 		collect: deleted_while_iterated_maps,
+		merge: union,
+		finish: unchanged,
+	},
+	FactKind {
+		name: RELATION_SIDES,
+		collect: relation_sides,
 		merge: union,
 		finish: unchanged,
 	},

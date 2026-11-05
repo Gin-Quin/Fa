@@ -89,14 +89,79 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	// ── layouts ─────────────────────────────────────────────────────────
 
 	/// The representation of a field of an object type when it is a
-	/// relation side.
+	/// relation side: declared or imported by the files of this module, else
+	/// known from the whole program's facts in a build per unit (a unit, or
+	/// an instance emitted by a module that doesn't read the relation's file).
 	pub(crate) fn side_repr(&self, object: TypeId, name: Sym) -> Option<Repr> {
-		self.relation_sides.get(&object)?.get(&name).copied()
+		if let Some(repr) = self
+			.relation_sides
+			.get(&object)
+			.and_then(|sides| sides.get(&name))
+		{
+			return Some(*repr);
+		}
+		self.fact_sides(object)?.get(&name).copied()
 	}
 
 	/// Whether an object type has relation sides.
 	pub(crate) fn has_sides(&self, object: TypeId) -> bool {
 		self.relation_sides.contains_key(&object)
+			|| self
+				.fact_sides(object)
+				.is_some_and(|sides| !sides.is_empty())
+	}
+
+	/// The relation sides of an object type the program's facts list
+	/// (`facts::RELATION_SIDES`), by field: their representation follows
+	/// from the field's type (`T?`: the target's address; a relation pool:
+	/// its links).
+	fn fact_sides(&self, object: TypeId) -> Option<FxHashMap<Sym, Repr>> {
+		let facts = self.program_facts.as_ref()?;
+		if let Some(found) = self.fact_side_cache.borrow().get(&object) {
+			return found.clone();
+		}
+		let types = self.types();
+		let mut sides = FxHashMap::default();
+		if matches!(types.kind(object), fa_analyzer::types::TypeKind::Object(_)) {
+			for field in types.fields_of(object) {
+				let Some(key) =
+					crate::facts::relation_side_key(types, object, types.syms.resolve(field.name))
+				else {
+					continue;
+				};
+				if !facts.contains(crate::facts::RELATION_SIDES, &key) {
+					continue;
+				}
+				let unfold = |ty: TypeId| match types.kind(ty) {
+					fa_analyzer::types::TypeKind::Rec(_) => types.unfold(ty),
+					_ => ty,
+				};
+				let repr = match types.kind(field.ty) {
+					fa_analyzer::types::TypeKind::Collection(
+						fa_analyzer::types::CollKind::RelationPool(_),
+						item,
+						_,
+					) => Repr::Links(unfold(item)),
+					fa_analyzer::types::TypeKind::Union(list) => {
+						let Some(&target) = types
+							.list_items(list)
+							.iter()
+							.find(|&&member| member != TypeId::NONE)
+						else {
+							continue;
+						};
+						Repr::Link(unfold(target))
+					}
+					_ => continue,
+				};
+				sides.insert(field.name, repr);
+			}
+		}
+		let found = (!sides.is_empty()).then_some(sides);
+		self.fact_side_cache
+			.borrow_mut()
+			.insert(object, found.clone());
+		found
 	}
 
 	/// The representation of the field at `index` of an object type.

@@ -64,6 +64,20 @@ impl Generator<'_> {
 			.collect()
 	}
 
+	/// The property naming the relation sides of an object of type `ty`
+	/// (`[faSides]: $sides`), read by erased generic code (copies, printing,
+	/// equality: `faSides`); `None` for a type without sides.
+	pub(crate) fn sides_property(&mut self, ty: TypeId) -> Option<String> {
+		let sides = self.relation_properties(ty);
+		if sides.is_empty() {
+			return None;
+		}
+		let names: Vec<String> = sides.iter().map(|side| js::string_literal(side)).collect();
+		let constant = self.constant("sides", format!("[{}]", names.join(", ")));
+		let key = self.helper("faSides");
+		Some(format!("[{key}]: {constant}"))
+	}
+
 	/// The initial value of a relation side in a new element: `new Set()`
 	/// for a side that holds several elements, `undefined` otherwise.
 	pub(crate) fn empty_side(&self, field_ty: TypeId) -> &'static str {
@@ -100,6 +114,8 @@ impl Generator<'_> {
 			.fields_of(ty)
 			.iter()
 			.filter_map(|field| match self.types.kind(field.ty) {
+				// a relation pool holds links, not elements
+				TypeKind::Collection(CollKind::RelationPool(_), ..) => None,
 				TypeKind::Collection(_, item, _) => Some(item),
 				_ => None,
 			})

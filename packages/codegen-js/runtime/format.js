@@ -13,6 +13,8 @@
 // the backend composes the typed formatters below (`faFormatArray(items,
 // faFloat32ToString)`...), passing the formatter of each part.
 
+import { faSides } from "./relations.js";
+
 /** @typedef {(value: any) => string} FaFormatter */
 
 // @fa-helper faQuote
@@ -151,7 +153,7 @@ export function faFormatTuple(tuple, formats) {
 	return `(${parts.join(", ")})`;
 }
 
-// @fa-helper faFormatObject deps: faFormatNested
+// @fa-helper faFormatObject deps: faFormatNested faSides
 /**
  * An object: `{ x = 1, y = 2 }`, `{}`. `fields` lists the fields to print, in
  * declaration order, with their formatters (`[["x", faFormatNested]]`), so
@@ -165,8 +167,10 @@ export function faFormatObject(object, fields) {
 	const record = /** @type {Record<string, unknown>} */ (object);
 	const parts = [];
 	if (fields === undefined) {
+		// relation sides are left out (D21)
+		const sides = /** @type {any} */ (object)[faSides];
 		for (const key of Object.keys(record)) {
-			if (!key.startsWith("$")) {
+			if (!key.startsWith("$") && !(sides !== undefined && sides.includes(key))) {
 				parts.push(`${key} = ${faFormatNested(record[key])}`);
 			}
 		}

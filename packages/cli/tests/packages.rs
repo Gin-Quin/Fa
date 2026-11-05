@@ -178,6 +178,35 @@ fn units_agree_on_the_layout_of_maps() {
 	}
 }
 
+/// Relations across files (the module-level form of the relations page):
+/// the collection of `people.fa`, the relation of `Person.fa`, written and
+/// deleted by the other files, on Bun and natively (per unit, then as one
+/// module).
+#[test]
+fn a_package_relates_the_types_of_its_files() {
+	let expected = "2 1\n1 1\n{ name = \"Ana\" }\n{ name = \"Bao\" }\n{ name = \"Cleo\" }\nAna none 0\nBao none 0\nCleo none 0\nnone 0 0\n2 3\n";
+	let cache = scratch("packages-relations");
+	if fa_bun() {
+		let (stdout, stderr, code) = fa(&["run", "relations"], &fixtures(), &cache);
+		assert_eq!(stdout, expected, "bun, stderr: {stderr}");
+		assert_eq!(code, 0, "bun, stderr: {stderr}");
+	}
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	for split in ["1", "0"] {
+		let (stdout, stderr, code) = fa_with(
+			&["run", "--target=native", "relations"],
+			&fixtures(),
+			&cache,
+			&[("FA_SPLIT", split)],
+		);
+		assert_eq!(stdout, expected, "native (split {split}), stderr: {stderr}");
+		assert_eq!(code, 0, "native (split {split}), stderr: {stderr}");
+	}
+}
+
 /// Never-negative fields in a build per unit (`fa-codegen-llvm`,
 /// `proofs.rs`): a field counted up from zero in its own unit is proven, one
 /// stored negative in another unit is not, and `get` counts it from the end.

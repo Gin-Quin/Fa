@@ -1,7 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
-import { faCopyGraph } from "./copy.js";
-import { faRelateAdd, faRelateClear, faRelateDelete, faRelateOne, faUnlink } from "./relations.js";
+import { faCopy, faCopyGraph } from "./copy.js";
+import { faDeepEquals, faHash } from "./equality.js";
+import { faFormat } from "./format.js";
+import {
+	faRelateAdd,
+	faRelateClear,
+	faRelateDelete,
+	faRelateOne,
+	faSides,
+	faUnlink,
+} from "./relations.js";
 
 /** A person of the brief's `Town` (advanced brief 8.10), unlinked. */
 function person(name) {
@@ -101,5 +110,38 @@ describe("copies of owners (8.5)", () => {
 		expect([...anaCopy.bestFriendOf]).toEqual([baoCopy]);
 		copy.people.clear();
 		expect(ana.bestFriendOf.size).toBe(1);
+	});
+});
+
+describe("erased generic code and relation sides (faSides)", () => {
+	/** @param {string} name */
+	const element = (name) => ({
+		name,
+		bestFriend: undefined,
+		bestFriendOf: new Set(),
+		[faSides]: ["bestFriend", "bestFriendOf"],
+	});
+
+	test("a copy has no links (D18)", () => {
+		const ana = element("Ana");
+		const bao = element("Bao");
+		faRelateOne(ana, "bestFriend", "bestFriendOf", bao, true);
+		const copy = faCopy(ana);
+		expect(copy.name).toBe("Ana");
+		expect(copy.bestFriend).toBeUndefined();
+		const baoCopy = faCopy(bao);
+		expect(baoCopy.bestFriendOf.size).toBe(0);
+		expect(baoCopy[faSides]).toEqual(["bestFriend", "bestFriendOf"]);
+		expect(bao.bestFriendOf.size).toBe(1);
+	});
+
+	test("printing, equality and hashing leave the sides out (D21)", () => {
+		const ana = element("Ana");
+		const bao = element("Bao");
+		faRelateOne(ana, "bestFriend", "bestFriendOf", bao, true);
+		expect(faFormat(ana)).toBe('{ name = "Ana" }');
+		const other = element("Ana");
+		expect(faDeepEquals(ana, other)).toBe(true);
+		expect(faHash(ana)).toBe(faHash(other));
 	});
 });

@@ -1,4 +1,4 @@
-// helpers: FaStop, faStop, faOverflow, faCheckInteger, faIsSimpleText, faSegmenter, faCharacters, faStringLength, faPadding, faStringPadStart, faSortIntegers, faSortFloats, faStringCompare, faCompare, faArraySortInPlace, faSortStrings, faQuote, faFormatArray, faFormatObject, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat
+// helpers: FaStop, faStop, faOverflow, faCheckInteger, faIsSimpleText, faSegmenter, faCharacters, faStringLength, faPadding, faStringPadStart, faSortIntegers, faSortFloats, faStringCompare, faCompare, faArraySortInPlace, faSortStrings, faQuote, faFormatArray, faSides, faFormatObject, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat
 
 function primes(limit) {
 	let isPrime = new Uint8Array(Math.max(limit + 1, 0)).fill(1);

@@ -8,9 +8,10 @@
 // share a representation).
 
 import { FaHashMap, FaSet } from "./collections.js";
+import { faSides } from "./relations.js";
 import { faStringCompare } from "./strings.js";
 
-// @fa-helper faDeepEquals deps: FaHashMap FaSet
+// @fa-helper faDeepEquals deps: FaHashMap FaSet faSides
 /**
  * Deep structural equality of two Fa values. Numbers compare with `===`
  * (NaN is never equal, `-0` equals `0`), or with SameValueZero when
@@ -122,8 +123,12 @@ export function faDeepEquals(a, b, sameValueZero) {
 			return false;
 		}
 		// An absent optional field is `none`, like a field set to `undefined`.
+		// Relation sides are not data (D21).
+		const sides = x[faSides];
 		for (const key of Object.keys(x)) {
-			pending.push(x[key], y[key]);
+			if (sides === undefined || !sides.includes(key)) {
+				pending.push(x[key], y[key]);
+			}
 		}
 		for (const key of Object.keys(y)) {
 			if (y[key] !== undefined && !Object.hasOwn(x, key)) {
@@ -208,7 +213,7 @@ export function faHashNumber(value) {
 	return faHashMix(faHashString(String(value)));
 }
 
-// @fa-helper faHash deps: faHashMix faHashNumber faHashString FaHashMap FaSet
+// @fa-helper faHash deps: faHashMix faHashNumber faHashString FaHashMap FaSet faSides
 /**
  * A 32-bit structural hash consistent with `faKeyEquals`: two equal keys
  * have the same hash. Arrays hash in order; objects, maps and sets don't
@@ -259,9 +264,10 @@ export function faHash(value) {
 				return faHashMix(sum ^ 0xc2b2ae35);
 			}
 			const record = /** @type {Record<string, unknown>} */ (value);
+			const sides = /** @type {any} */ (value)[faSides];
 			for (const key of Object.keys(record)) {
-				if (record[key] === undefined) {
-					continue; // like an absent optional field
+				if (record[key] === undefined || (sides !== undefined && sides.includes(key))) {
+					continue; // like an absent optional field; relation sides are not data
 				}
 				sum = (sum + faHashMix(Math.imul(faHashString(key), 31) + faHash(record[key]))) | 0;
 			}

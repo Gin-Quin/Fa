@@ -166,6 +166,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let boxed = self.inject(inner, ty, node)?;
 				self.take(boxed, None)?
 			}
+			// an empty pool or columnar (a field default of a type of another file)
+			(Value::Array(items), Repr::Pool(item_type) | Repr::Columnar(item_type))
+				if items.is_empty() =>
+			{
+				let element = self.item_repr(item_type, node)?;
+				let pool = self.collection_new(&self.builder, repr, element)?;
+				Val::new(repr, pool)
+			}
 			(Value::Array(items), Repr::Array(item_type) | Repr::Growing(item_type)) => {
 				let item = self.item_repr(item_type, node)?;
 				let count = self.context.i64_type().const_int(items.len() as u64, false);

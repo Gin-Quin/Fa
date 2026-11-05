@@ -101,6 +101,42 @@ impl Generator<'_> {
 			}
 			Value::Float(value) | Value::Percentage(value) => js::float_literal(*value),
 			Value::String(text) => Expr::constant(js::string_literal(text), Prec::Primary),
+			// an empty pool, set or map (a field default of a type of another
+			// file): an empty collection of its class
+			Value::Array(items)
+				if items.is_empty()
+					&& matches!(
+						types.kind(ty),
+						TypeKind::Collection(kind, ..)
+							if !matches!(kind, CollKind::Array | CollKind::GrowingArray)
+					) =>
+			{
+				let class = match types.kind(ty) {
+					TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, item, _) => {
+						if self.is_primitive(item) {
+							"Set".to_string()
+						} else {
+							self.helper("FaSet").to_string()
+						}
+					}
+					TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, key) => {
+						if self.is_primitive(key) {
+							"Map".to_string()
+						} else {
+							self.helper("FaHashMap").to_string()
+						}
+					}
+					TypeKind::Collection(kind, ..) if super::collections::is_pool(kind) => {
+						if self.is_value_pool(ty) {
+							self.helper("FaValuePool").to_string()
+						} else {
+							"Set".to_string()
+						}
+					}
+					_ => return None,
+				};
+				Expr::primary(format!("new {class}()"))
+			}
 			Value::Array(items) | Value::Tuple(items) => {
 				let item_types: Vec<TypeId> = match types.kind(ty) {
 					TypeKind::Collection(_, item, _) => vec![item; items.len()],

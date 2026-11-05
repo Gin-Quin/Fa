@@ -1,0 +1,4 @@
+-- the function of the relations page ("Effects"), in a file of its own
+export function = (person: Person in people, friend: Person in people) mutates person.bestFriend => {
+	person.bestFriend = friend -- also updates `bestFriendOf` of the previous best friend and of `friend`
+}

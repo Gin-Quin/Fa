@@ -1,0 +1,7 @@
+export type = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool<people->bestFriend>
+	friends: Pool<Person in people>
+	friendOf: Pool<in people->friends>
+}

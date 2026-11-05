@@ -659,7 +659,11 @@ impl Walker<'_> {
 						return None;
 					}
 					match self.view(symbol.decl_node) {
-						View::TypeDecl { value, .. } if value == body => Some(symbol.decl_node),
+						View::TypeDecl { value, .. } | View::ExportType { value, .. }
+							if value == body =>
+						{
+							Some(symbol.decl_node)
+						}
 						_ => None,
 					}
 				});

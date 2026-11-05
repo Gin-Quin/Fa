@@ -1,4 +1,4 @@
-// helpers: FaStop, faStop, faOverflow, faCheckInteger, faQuote, faFormatArray, faFormatObject, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat, faExit, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
+// helpers: FaStop, faStop, faOverflow, faCheckInteger, faQuote, faFormatArray, faSides, faFormatObject, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat, faExit, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
 
 const copy$Point = (value) => ({ x: value.x, y: value.y });
 const Shape$Empty = Object.freeze({ $t: "Shape.Empty" });

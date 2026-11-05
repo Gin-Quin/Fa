@@ -1,0 +1,7 @@
+-- a generic function that knows nothing of `Person`: printing an element
+-- leaves its relation sides out
+export function = <Item>(items: Array<Item>) => {
+	for item in items {
+		console.log(item)
+	}
+}

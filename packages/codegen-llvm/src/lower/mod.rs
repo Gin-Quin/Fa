@@ -332,6 +332,10 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	no_inline_maps: rustc_hash::FxHashSet<TypeId>,
 	/// The relation sides of the object types of the program (`relations.rs`).
 	relation_sides: relations::RelationSides,
+	/// The relation sides found in the program's facts, by object type
+	/// (`relations.rs`, builds per unit).
+	fact_side_cache:
+		std::cell::RefCell<FxHashMap<TypeId, Option<FxHashMap<fa_analyzer::ids::Sym, Repr>>>>,
 	/// The targets an object literal gave to relation sides, linked by the
 	/// `add` that stores it.
 	pending_links: Vec<(fa_analyzer::ids::Sym, Vec<PointerValue<'ctx>>)>,
@@ -482,6 +486,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			relation_sides: relations::relation_sides(
 				files.iter().map(|(file, _)| session.analysis(*file)),
 			),
+			fact_side_cache: std::cell::RefCell::new(FxHashMap::default()),
 			pending_links: Vec::new(),
 			referenced: std::cell::RefCell::new(None),
 			split_views: std::cell::RefCell::new(FxHashMap::default()),

@@ -1,0 +1,22 @@
+export function = () => {
+	use ana = library.people.add({ name = "Ana" })
+	use bao = library.people.add({ name = "Bao" })
+	use cleo = library.people.add({ name = "Cleo", friends = [ana, bao] })
+	library.befriend(ana, bao)
+	library.befriend(cleo, bao)
+	console.log(bao.bestFriendOf.size, ana.friendOf.size)
+	library.befriend(ana, cleo)
+	console.log(bao.bestFriendOf.size, cleo.bestFriendOf.size)
+	-- copies out of the pool: no links
+	mutable copied: Array<library.Person> = []
+	for person in library.people {
+		copied.push(person)
+	}
+	library.copies(copied)
+	for copy in copied {
+		console.log(copy.name, copy.bestFriend?.name ?? "none", copy.bestFriendOf.size)
+	}
+	library.people.delete(cleo)
+	console.log(ana.bestFriend?.name ?? "none", bao.bestFriendOf.size, ana.friendOf.size)
+	console.log(library.people.size, copied.length)
+}

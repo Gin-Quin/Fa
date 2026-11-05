@@ -198,6 +198,10 @@ impl Generator<'_> {
 				.collect();
 			return self.new_error(nominal, index, values);
 		}
+		// the names of its relation sides, for erased generic code
+		if let Some(sides) = self.sides_property(info.ty) {
+			parts.push(sides);
+		}
 		if parts.is_empty() {
 			return Expr::primary("{}");
 		}
@@ -1420,6 +1424,9 @@ impl Generator<'_> {
 					parts.push(format!("{name}: {}", copied.text));
 				}
 				self.copies.remove(&ty);
+				if let Some(sides) = self.sides_property(ty) {
+					parts.push(sides);
+				}
 				let wanted = match self.types.type_name(ty) {
 					Some(name) => format!("copy${name}"),
 					None => "copy$object".to_string(),

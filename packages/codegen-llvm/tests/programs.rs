@@ -4,6 +4,7 @@
 //! ```fa
 //! console.log(x) -- prints: 3        one line of the standard output, in order
 //! -- exit: 101                       the exit code (0 by default)
+//! -- signal: 11                      ended by this signal instead (native)
 //! -- arguments: one two              the arguments given to the program (or `-- args:`)
 //! -- stderr: text                     a text the standard error contains
 //! -- overflow-checks: false           compiled without overflow checks
@@ -14,13 +15,17 @@
 //!
 //! `FA_PROGRAMS=filter` runs the programs whose path contains `filter`.
 //!
-//! The programs are `tests/programs/*.fa`, which must all compile, the
-//! programs of the `fa` command (`packages/cli/tests/programs`), and the
-//! cases of the analyzer (`packages/analyzer/tests/cases`) that print
-//! something and expect no diagnostic: those that use a construct this
-//! backend doesn't compile yet are counted as skipped. Without LLVM
-//! (`LLVM_SYS_181_PREFIX` unset at build time), a single test prints why the
-//! others were not built.
+//! The programs are `tests/programs/*.fa`, the programs of the `fa` command
+//! (`packages/cli/tests/programs`), and the cases of the analyzer
+//! (`packages/analyzer/tests/cases`) that print something and expect no
+//! diagnostic. Every one must compile, but those listed for the target in
+//! `tests/expected-skips/<target>.txt` (a construct this backend doesn't
+//! compile yet, with the reason): any other compile error fails, and so does
+//! a listed program that compiles now (remove it from the list).
+//! `FA_UPDATE_SKIPS=1` rewrites the list of each target run from what
+//! doesn't compile (review the diff). Without LLVM (`LLVM_SYS_181_PREFIX`
+//! unset at build time), a single test prints why the others were not
+//! built.
 
 #[cfg(not(fa_llvm))]
 #[test]
@@ -41,6 +46,8 @@ mod with_llvm {
 		path: PathBuf,
 		prints: Vec<String>,
 		exit: i32,
+		/// `-- signal: 11`: ended by this signal, not by an exit code.
+		signal: Option<i32>,
 		arguments: Vec<String>,
 		/// From `tests/programs`: it must compile.
 		required: bool,
@@ -66,6 +73,7 @@ mod with_llvm {
 			path: path.to_path_buf(),
 			prints: Vec::new(),
 			exit: 0,
+			signal: None,
 			arguments: Vec::new(),
 			required,
 			skip_targets: Vec::new(),
@@ -110,6 +118,14 @@ mod with_llvm {
 					.trim()
 					.parse()
 					.expect("an exit code");
+			}
+			if let Some(index) = line.find("-- signal:") {
+				program.signal = Some(
+					line[index + "-- signal:".len()..]
+						.trim()
+						.parse()
+						.expect("a signal number"),
+				);
 			}
 			if let Some(index) = line.find("-- skip-target:") {
 				program.skip_targets.extend(
@@ -229,6 +245,8 @@ mod with_llvm {
 	enum Outcome {
 		Passed,
 		Skipped(String),
+		/// Doesn't compile: fails unless listed as an expected skip.
+		Unsupported(String),
 		Failed(String),
 	}
 
@@ -277,11 +295,11 @@ mod with_llvm {
 			Err(error @ (Error::Unsupported { .. } | Error::Diagnostics(_)))
 				if !program.required =>
 			{
-				return Outcome::Skipped(error.to_string());
+				return Outcome::Unsupported(error.to_string());
 			}
 			// floats need the C library
 			Err(error @ Error::Unsupported { .. }) if target == Target::NativeFreestanding => {
-				return Outcome::Skipped(error.to_string());
+				return Outcome::Unsupported(error.to_string());
 			}
 			Err(error) => return Outcome::Failed(format!("does not compile: {error}")),
 		};
@@ -324,8 +342,25 @@ mod with_llvm {
 		let stderr = String::from_utf8_lossy(&result.stderr);
 		let printed: Vec<&str> = stdout.lines().collect();
 		let expected: Vec<&str> = program.prints.iter().map(String::as_str).collect();
+		let missing_stderr = program
+			.stderr
+			.iter()
+			.any(|text| !stderr.contains(text.as_str()));
 		let code = match result.status.code() {
 			Some(code) => code,
+			None if program.signal.is_some()
+				&& signal_of(&result.status)
+					== format!("signal {}", program.signal.unwrap_or_default())
+				&& printed
+					== program
+						.prints
+						.iter()
+						.map(String::as_str)
+						.collect::<Vec<_>>()
+				&& !missing_stderr =>
+			{
+				return None;
+			}
 			None => {
 				return Some(format!(
 					"ended by {}, after printing {printed:?}\n{stderr}",
@@ -333,10 +368,11 @@ mod with_llvm {
 				));
 			}
 		};
-		let missing_stderr = program
-			.stderr
-			.iter()
-			.any(|text| !stderr.contains(text.as_str()));
+		if let Some(signal) = program.signal {
+			return Some(format!(
+				"expected the signal {signal}, got exit {code} after printing {printed:?}\n{stderr}"
+			));
+		}
 		if printed != expected || code != program.exit || missing_stderr {
 			return Some(format!(
 				"expected {expected:?} and exit {}, got {printed:?} and exit {code}\n{stderr}",
@@ -614,13 +650,57 @@ mod with_llvm {
 		let mut results = results.into_inner().unwrap();
 		results.sort_by_key(|(index, _)| *index);
 		let (mut passed, mut skipped, mut failures) = (0, Vec::new(), Vec::new());
+		let expected = expected_skips(target);
+		let update = std::env::var_os("FA_UPDATE_SKIPS").is_some();
+		let mut unsupported = std::collections::BTreeMap::new();
 		for (index, outcome) in results {
 			let path = programs[index].path.display().to_string();
+			let key = skip_key(&programs[index].path);
 			match outcome {
+				Outcome::Passed if expected.contains_key(&key) && !update => {
+					failures.push(format!(
+						"{path}: compiles now, remove it from tests/expected-skips/{}.txt",
+						target.name()
+					))
+				}
 				Outcome::Passed => passed += 1,
 				Outcome::Skipped(reason) => skipped.push(format!("{path}: {reason}")),
+				Outcome::Unsupported(reason) => {
+					let reason = reason.lines().next().unwrap_or_default().trim();
+					// without the error's absolute location: `line 3: …`
+					let reason = match reason.split_once(".fa:") {
+						Some((path, rest)) if path.starts_with('/') && rest.starts_with(' ') => {
+							rest.trim().to_string()
+						}
+						Some((path, rest)) if path.starts_with('/') => {
+							let mut parts = rest.splitn(3, ':');
+							match (parts.next(), parts.next(), parts.next()) {
+								(Some(line), Some(_), Some(text)) => {
+									format!("line {line}: {}", text.trim())
+								}
+								_ => reason.to_string(),
+							}
+						}
+						_ => reason.to_string(),
+					};
+					if expected.contains_key(&key) || update {
+						skipped.push(format!("{path}: {reason}"));
+					} else {
+						failures.push(format!(
+							"{path}: does not compile: {reason} (fix it, or list it with the reason in tests/expected-skips/{}.txt)",
+							target.name()
+						));
+					}
+					// the reason written in the list stays (a person may have
+					// written a clearer one)
+					let reason = expected.get(&key).cloned().unwrap_or(reason);
+					unsupported.insert(key, reason);
+				}
 				Outcome::Failed(reason) => failures.push(format!("{path}: {reason}")),
 			}
+		}
+		if update && std::env::var_os("FA_PROGRAMS").is_none() {
+			write_expected_skips(target, &unsupported);
 		}
 		eprintln!(
 			"{}: {passed} passed, {} skipped, {} failed",
@@ -640,6 +720,53 @@ mod with_llvm {
 			target.name(),
 			failures.join("\n\n")
 		);
+	}
+
+	/// The key of a program in the lists of expected skips: its path from
+	/// `packages/`.
+	fn skip_key(path: &Path) -> String {
+		let packages = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+		let packages = packages.canonicalize().unwrap_or(packages);
+		let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+		path.strip_prefix(&packages)
+			.unwrap_or(&path)
+			.to_string_lossy()
+			.replace('\\', "/")
+	}
+
+	/// The file of the expected skips of a target.
+	fn skips_file(target: Target) -> PathBuf {
+		Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join("tests/expected-skips")
+			.join(format!("{}.txt", target.name()))
+	}
+
+	/// The programs a target doesn't compile yet, with the reason: lines
+	/// `path: reason` (`#` starts a comment).
+	fn expected_skips(target: Target) -> std::collections::BTreeMap<String, String> {
+		let text = std::fs::read_to_string(skips_file(target)).unwrap_or_default();
+		text.lines()
+			.map(str::trim)
+			.filter(|line| !line.is_empty() && !line.starts_with('#'))
+			.filter_map(|line| {
+				let (path, reason) = line.split_once(": ")?;
+				Some((path.trim().to_string(), reason.trim().to_string()))
+			})
+			.collect()
+	}
+
+	/// Writes the list of a target (`FA_UPDATE_SKIPS=1`).
+	fn write_expected_skips(target: Target, skips: &std::collections::BTreeMap<String, String>) {
+		let mut text = format!(
+			"# The programs the {} target doesn't compile yet, with the reason\n# (`tests/programs.rs`): any other compile error fails.\n",
+			target.name()
+		);
+		for (path, reason) in skips {
+			text.push_str(&format!("{path}: {reason}\n"));
+		}
+		let file = skips_file(target);
+		std::fs::create_dir_all(file.parent().expect("a directory")).expect("a directory");
+		std::fs::write(file, text).expect("the list of expected skips");
 	}
 
 	#[test]

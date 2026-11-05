@@ -1,0 +1,15 @@
+-- skip-target: wasm native-freestanding
+-- A segmentation fault that isn't a stack overflow (its address is not in
+-- the guard below the stack) is a crash: reported with its address, the
+-- program ends by the signal
+use c = std.c
+
+function allocate: (size: c.SizeT) => Pointer<Int32> = @extern("malloc")
+function far = (block: Pointer<Int32>): Int32 => block.offset(1099511627776).read()
+
+console.log("before") -- prints: before
+let block = allocate(4)
+console.log(far(block))
+-- signal: 11
+-- stderr: crash: segmentation fault at 0x
+-- opt-level: 0

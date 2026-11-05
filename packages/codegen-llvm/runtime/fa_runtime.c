@@ -4510,8 +4510,11 @@ FA_EXPORT FA_COLD FA_NORETURN void fa_assert_failed(const char *site) {
 
 #if !defined(__wasm__)
 // A stack overflow is a stop (values brief D-26): on native, the guard page
-// below the stack raises SIGSEGV, handled on an alternate stack. Linux
-// layouts of `stack_t` and of glibc's `struct sigaction`.
+// below the stack raises SIGSEGV, handled on an alternate stack. Any other
+// segmentation fault is a crash, a bug of the compiler (or of foreign code):
+// reported with its address, then raised again with the default action, so
+// that the process ends by the signal. Linux layouts of `stack_t`, of
+// glibc's `struct sigaction` and of the start of `siginfo_t`.
 typedef struct {
 	void *pointer;
 	int32_t flags;
@@ -4519,31 +4522,96 @@ typedef struct {
 } AlternateStack;
 
 typedef struct {
-	void (*handler)(int);
+	void (*handler)(int, void *, void *);
 	uint64_t mask[16];
 	int32_t flags;
 	void (*restorer)(void);
 } SignalAction;
 
+typedef struct {
+	int32_t number;
+	int32_t error;
+	int32_t code;
+	int32_t padding;
+	uintptr_t address;
+} SignalInformation;
+
 int sigaltstack(const AlternateStack *stack, AlternateStack *old);
 int sigaction(int signal, const SignalAction *action, SignalAction *old);
 FA_NORETURN void _exit(int status);
+int raise(int signal);
+// the size limit of the main thread's stack (one system call; glibc's
+// `pthread_getattr_np` reads `/proc/self/maps`, 90 000 instructions)
+typedef struct {
+	uint64_t current;
+	uint64_t maximum;
+} ResourceLimit;
+__attribute__((weak)) int getrlimit(int resource, ResourceLimit *limit);
 
 static uint8_t signal_stack[16384];
+/// The lowest address of the main thread's stack (0: unknown), estimated
+/// from the stack pointer at the start of the program: the arguments and
+/// the environment above it make it up to [`STACK_ABOVE`] lower.
+static uintptr_t stack_low;
+/// How far below the stack a fault counts as a stack overflow: the guard
+/// gap the kernel keeps below a growing stack (256 pages by default).
+#define STACK_GUARD_GAP ((uintptr_t)1 << 20)
+/// How far above the estimated lowest address the real one may be.
+#define STACK_ABOVE ((uintptr_t)8 << 20)
 
-static void on_fault(int signal) {
+static void on_fault(int signal, void *information, void *context) {
 	(void)signal;
+	(void)context;
+	const SignalInformation *info = (const SignalInformation *)information;
 	fa_flush();
-	static const char message[] = "stop: stack overflow\n";
-	fa_write(2, (const uint8_t *)message, sizeof message - 1);
-	_exit(101);
+	// raised by the kernel (`code > 0`) at an address of the guard below
+	// the stack
+	uintptr_t address = info->address;
+	if (info->code > 0 && stack_low != 0 && address < stack_low + STACK_ABOVE &&
+	    address + STACK_GUARD_GAP >= stack_low) {
+		static const char message[] = "stop: stack overflow\n";
+		fa_write(2, (const uint8_t *)message, sizeof message - 1);
+		_exit(101);
+	}
+	static const char prefix[] = "crash: segmentation fault";
+	fa_write(2, (const uint8_t *)prefix, sizeof prefix - 1);
+	if (info->code > 0) {
+		char text[32] = " at 0x";
+		size_t length = 6;
+		int started = 0;
+		for (int shift = 60; shift >= 0; shift -= 4) {
+			unsigned digit = (unsigned)(address >> shift) & 15;
+			if (digit != 0 || started || shift == 0) {
+				text[length++] = (char)(digit < 10 ? '0' + digit : 'a' + digit - 10);
+				started = 1;
+			}
+		}
+		fa_write(2, (const uint8_t *)text, length);
+	}
+	static const char suffix[] = " (a bug of the compiler or of foreign code)\n";
+	fa_write(2, (const uint8_t *)suffix, sizeof suffix - 1);
+	// the default action, when the faulting instruction runs again (or now,
+	// for a signal sent by a process)
+	SignalAction action = {0, {0}, 0, 0};
+	sigaction(11 /* SIGSEGV */, &action, 0);
+	if (info->code <= 0) {
+		raise(11);
+	}
 }
 
 /// Reports a stack overflow as a stop (native with the C library only).
 FA_EXPORT void fa_guard_stack(void) {
+	ResourceLimit limit = {0, 0};
+	// (the address of a local: a frame address would make every function
+	// this is inlined into keep a frame pointer)
+	uintptr_t here = (uintptr_t)&limit;
+	// `RLIMIT_STACK`; an unlimited stack (all ones) has no guard to tell
+	if (getrlimit != 0 && getrlimit(3, &limit) == 0 && limit.current < here) {
+		stack_low = here - (uintptr_t)limit.current;
+	}
 	AlternateStack stack = {signal_stack, 0, sizeof signal_stack};
 	sigaltstack(&stack, 0);
-	SignalAction action = {on_fault, {0}, 0x08000000 /* SA_ONSTACK */, 0};
+	SignalAction action = {on_fault, {0}, 0x08000000 /* SA_ONSTACK */ | 4 /* SA_SIGINFO */, 0};
 	sigaction(11 /* SIGSEGV */, &action, 0);
 }
 #endif

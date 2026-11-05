@@ -1521,6 +1521,7 @@ impl Walker<'_> {
 			}
 			let next = self.facts.refs.state(crate::flow::refs::RefState {
 				invalidated: Some((n, false)),
+				reported: false,
 				..current
 			});
 			self.body.flow.set_ref_state(symbol, next);

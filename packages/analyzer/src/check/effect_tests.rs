@@ -296,7 +296,10 @@ run(true)
 		.collect();
 	assert_eq!(messages.len(), 1, "{messages:#?}");
 	assert!(messages[0].contains("find"), "{messages:#?}");
-	assert!(!messages[0].contains("use ana = people.add"), "{messages:#?}");
+	assert!(
+		!messages[0].contains("use ana = people.add"),
+		"{messages:#?}"
+	);
 }
 
 /// Review 37: `E-OPT-1` quotes the operand that may be `none`.
@@ -310,5 +313,8 @@ fn an_optional_operand_is_quoted_alone() {
 		.map(|diagnostic| diagnostic.message.as_str())
 		.collect();
 	assert_eq!(messages.len(), 1, "{messages:#?}");
-	assert!(messages[0].starts_with("`x` may be `none`"), "{messages:#?}");
+	assert!(
+		messages[0].starts_with("`x` may be `none`"),
+		"{messages:#?}"
+	);
 }

@@ -556,6 +556,9 @@ impl Walker<'_> {
 		let Some((by, maybe)) = self.facts.refs.get(state).invalidated else {
 			return;
 		};
+		if self.facts.refs.get(state).reported {
+			return;
+		}
 		let kind = self.a.symbols.symbol(symbol).kind;
 		let entry = self.a.symbols.symbol(symbol);
 		let name = self.s.types.syms.resolve(entry.name).to_string();
@@ -600,7 +603,7 @@ impl Walker<'_> {
 		// reported once: its later uses on this path are not reported again
 		let current = self.facts.refs.get(state).clone();
 		let quiet = self.facts.refs.state(RefState {
-			invalidated: None,
+			reported: true,
 			..current
 		});
 		self.body.flow.set_ref_state(symbol, quiet);
@@ -770,6 +773,7 @@ impl Walker<'_> {
 			}
 			let next = self.facts.refs.state(RefState {
 				invalidated: Some((n, false)),
+				reported: false,
 				..current
 			});
 			self.body.flow.set_ref_state(symbol, next);

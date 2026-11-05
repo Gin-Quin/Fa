@@ -1,3 +1,10 @@
 -- review 39: the documented codes of documented mistakes
 let x = 4
 console.log(x is in 4) -- error: E-CMP-6
+for i in 0..3 {
+	break outer -- error: E-LOOP-14
+}
+let pairs = [[1, 2]]
+for [a, b] in pairs { -- error: E-LOOP-2
+	console.log(a)
+}

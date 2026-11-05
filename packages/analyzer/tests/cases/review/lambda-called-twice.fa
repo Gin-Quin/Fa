@@ -25,7 +25,7 @@ function main = () => {
 	use ana = people.add(Person { name = "Ana" })
 	twice(() => {
 		console.log(ana.name) -- error: REF002
-		people.delete(ana) -- error: REF002
+		people.delete(ana)
 	})
 	mutable y: Integer? = 3
 	if y != none {

@@ -639,6 +639,83 @@ fn generated_dependencies_run_generate_on_their_locked_source() {
 	);
 }
 
+/// `@import` (architecture/dependencies.md, "Inline imports" and "Loading
+/// types from an API"): a remote module imported in the code, and a
+/// library imported by `dependencies.fa` whose function makes the
+/// `DependencySource` of a dependency; every source is locked.
+#[test]
+fn imported_sources_are_resolved_and_locked() {
+	if !has_tool("git") {
+		return;
+	}
+	let scratch = Scratch::new("import");
+	let openapi = Repository::new(&scratch, "example", "fa-openapi");
+	openapi.release(
+		"openapi",
+		"1.0.0",
+		"v1.0.0",
+		&[(
+			"library/openapi.fa",
+			"export function = (url: String): { source: String, generate: (content: String) => String } => {\n\treturn {\n\t\tsource = url\n\t\tgenerate = (content: String): String => \"export function = (): String => \\\"{content}\\\"\\n\"\n\t}\n}\n",
+		)],
+	);
+	let served = scratch.write(
+		"served",
+		&[
+			("v1/schema.txt", "celsius"),
+			(
+				"v2/types.fa",
+				"export namespace = {\n\tfunction degrees = (): Integer => 21\n}\n",
+			),
+		],
+	);
+	let schema = format!("file://{}/v1/schema.txt", served.display());
+	let types = format!("file://{}/v2/types.fa", served.display());
+	let package = scratch.write(
+		"app",
+		&[
+			("package.fa", "export = { name = \"app\" }\n"),
+			(
+				"dependencies.fa",
+				&format!(
+					"use {{ openapi }} = @import(\"github:example/fa-openapi@1\")\n\nexport = {{\n\tweather = openapi(\"{schema}\")\n}}\n"
+				),
+			),
+			(
+				"application/main.fa",
+				&format!(
+					"use remote = @import(\"{types}\")\n\nexport function = () => {{\n\tconsole.log(weather(), remote.degrees())\n}}\n"
+				),
+			),
+		],
+	);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	let locked = lockfile(&package);
+	for source in ["github:example/fa-openapi", &schema, &types] {
+		assert!(
+			locked.contains(&format!("source = \"{source}\"")),
+			"{source}: {locked}"
+		);
+	}
+	if has_tool("bun") {
+		let (stdout, stderr, code) = scratch.fa(&["run", "."], &package);
+		assert_eq!((stdout.as_str(), code), ("celsius 21\n", 0), "{stderr}");
+	}
+	// a local source
+	fs::write(
+		package.join("application/main.fa"),
+		"use helper = @import(\"./helper.fa\")\n\nexport function = () => {}\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("error[META010]: `@import(\"./helper.fa\")` names a local folder"),
+		"{stderr}"
+	);
+}
+
 /// A package outside a workspace depends on a local folder holding a
 /// package, locked by its content (design/decisions.md, "Path dependencies
 /// outside a workspace").

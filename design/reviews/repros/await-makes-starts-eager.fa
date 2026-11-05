@@ -1,0 +1,13 @@
+use { sleep } = std.time
+
+async function run = () => {
+	start do {
+		console.log("task starts")
+		await sleep(5)
+		console.log("task ends")
+	}
+	console.log("run returns")
+}
+await run()
+console.log("after run")
+await sleep(20)

@@ -1,0 +1,19 @@
+export type = {
+	names: Array<String>
+
+	function add = (self, name: String): Integer mutates self => {
+		self.names.push(name)
+		self.names.length
+	}
+
+	function joined = (self): String => self.names.join(",")
+
+	function slowAdd = (self, name: String): Integer mutates self => {
+		mutable spin = 0
+		for index in 0..3000000 {
+			spin += index %% 7
+		}
+		self.names.push("{name}{spin %% 2}")
+		self.names.length
+	}
+}

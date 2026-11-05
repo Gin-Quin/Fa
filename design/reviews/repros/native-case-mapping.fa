@@ -1,0 +1,3 @@
+-- native case mapping covers ASCII, Latin-1, Greek and Cyrillic only
+-- (fa_runtime.c `fa_string_case`); JavaScript applies the full Unicode tables
+console.log("łódź čeština".toUpperCase(), "ΣΑΣ".toLowerCase(), "ǅ".toUpperCase(), "ＡＢ".toLowerCase())

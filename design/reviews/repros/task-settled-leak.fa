@@ -1,0 +1,15 @@
+use { sleep } = std.time
+
+type Oops = Errors { Bad = { code: Integer }, Worse }
+
+async function failing = (n: Integer, delay: Integer): String throws Oops => {
+	let held = "a heap string held across the await {n} padding padding"
+	await sleep(delay)
+	if n == 2 {
+		throw Oops.Worse
+	}
+	held
+}
+
+let outcomes = await Task.settled([start failing(0, 2), start failing(2, 3)])
+console.log(outcomes.length)

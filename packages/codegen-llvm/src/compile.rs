@@ -300,6 +300,9 @@ fn compile_files(
 	.with_c_library(libraries.c_library.clone())
 	.lower()?;
 	timings.build = start.elapsed();
+	if libraries.c_library.is_some() {
+		crate::lower::c_library::use_dynamic_tls(&module);
+	}
 
 	let start = Instant::now();
 	module.verify()?;

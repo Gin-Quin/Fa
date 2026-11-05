@@ -97,7 +97,12 @@ fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: 
 	options.leak_check.hash(hasher);
 	split.lto.hash(hasher);
 	split.full_lto.hash(hasher);
+	// a C library: its wrappers, and the dynamic model of its thread-local
+	// variables (`lower/c_library.rs`)
 	split.c_library.hash(hasher);
+	if split.c_library.is_some() {
+		"dynamic-tls".hash(hasher);
+	}
 	// the layouts that depend on the whole program (`facts.rs`)
 	match &split.facts {
 		Some(facts) => facts.hash_into(hasher),
@@ -122,6 +127,9 @@ fn emit(
 	timings: &mut Timings,
 ) -> Result<(), Error> {
 	let start = Instant::now();
+	if split.c_library.is_some() {
+		crate::lower::c_library::use_dynamic_tls(module);
+	}
 	if !options.size {
 		// the size attributes of the runtime's IR must not override the
 		// program's speed pipeline (as `compile.rs` does)
@@ -903,8 +911,7 @@ fn entry_object(
 /// the initializations in the program's order and the API file's top
 /// level, `fa.library.fini` (in `llvm.global_dtors`) the drops of the
 /// module values (when one does more than free memory, or the leaks are
-/// counted), the release of the last error message, the leak report and
-/// the flush.
+/// counted), the leak report and the flush.
 #[allow(clippy::too_many_arguments)]
 fn library_entry<'c>(
 	module: &Module<'c>,
@@ -973,8 +980,6 @@ fn library_entry<'c>(
 			}
 		}
 	}
-	let release = declare(crate::lower::c_library::RELEASE, void.fn_type(&[], false));
-	builder.build_call(release, &[], "")?;
 	if options.leak_check {
 		builder.build_call(runtime.function("fa_leak_check")?, &[], "")?;
 	}

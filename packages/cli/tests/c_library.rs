@@ -92,7 +92,7 @@ fn check_c_program(directory: &Path) {
 	let dynamically = directory.join("dynamic");
 	let search = format!("-L{}", directory.display());
 	let rpath = format!("-Wl,-rpath,{}", directory.display());
-	compile(&dynamically, &[&search, "-lfarm", &rpath]);
+	compile(&dynamically, &[&search, "-lfarm", &rpath, "-pthread"]);
 	let expected = fs::read_to_string(fixture().join("expected.txt")).unwrap();
 	let valgrind = has_valgrind();
 	for program in [&statically, &dynamically] {
@@ -138,6 +138,25 @@ fn check_c_program(directory: &Path) {
 		}
 		assert!(text.contains("farm_last_error_message"));
 	}
+	// loaded with `dlopen` after the program's start (as `ctypes` does)
+	let loader = directory.join("loader");
+	let status = Command::new(c_compiler())
+		.args(["-std=c11", "-Wall", "-Werror"])
+		.arg(fixture().join("dlopen.c"))
+		.args(["-ldl", "-o"])
+		.arg(&loader)
+		.status()
+		.expect("the C compiler runs");
+	assert!(status.success(), "dlopen.c compiles");
+	let output = Command::new(&loader)
+		.arg(directory.join("libfarm.so"))
+		.output()
+		.expect("the loader runs");
+	assert_eq!(
+		String::from_utf8_lossy(&output.stdout),
+		"30 1 MathError.DivisionByZero\ninternal: hidden\nunloaded\n"
+	);
+	assert_eq!(output.status.code(), Some(0));
 }
 
 /// Copies the fixture's package into a scratch folder.

@@ -7,6 +7,8 @@ add status: 0
 count status: 0, count: 7
 add status: 2 (too many: 1), message: FarmError.TooMany { count = 207 }
 count without a result: 0
+rename: 0, length 10
+long name: 3 (1), message of 1022 bytes, ending with a whole character: 1
 maybe: a farm, length 5
 maybe not: none
 scaled: 12 2.50
@@ -17,3 +19,4 @@ divide by zero: 1 (1), MathError.DivisionByZero
 negative: 2 (1), MathError.Negative { value = -4 }
 even: 1 0
 half: 2.50
+thread: 1 MathError.DivisionByZero; here: MathError.Negative { value = -4 }

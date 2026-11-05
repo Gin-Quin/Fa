@@ -1,10 +1,19 @@
 /* A C program using the Fa library of `farm/` through its generated header
  * (`packages/cli/tests/c_library.rs`): linked with `libfarm.a`, then with
  * `libfarm.so`. Its output is compared with `expected.txt`. */
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "farm.h"
+
+/* A call on another thread: an error, and its message. */
+static void *on_thread(void *message) {
+	int32_t quotient = 0;
+	int status = farm_divide(1, 0, &quotient);
+	snprintf(message, 200, "%d %s", status, farm_last_error_message());
+	return NULL;
+}
 
 int main(void) {
 	/* the module values were initialized when the library was loaded */
@@ -30,6 +39,21 @@ int main(void) {
 	       status == FARM_FARM_ERROR_TOO_MANY, farm_last_error_message());
 	status = farm_animal_count(farm, NULL);
 	printf("count without a result: %d\n", status);
+	status = farm_rename(farm, "Blue Hills");
+	printf("rename: %d, length %lld\n", status, (long long)farm_name_length(farm));
+	/* a message longer than its buffer: cut before a character */
+	char name[2003] = "xy";
+	for (int at = 2; at < 2002; at += 2) {
+		name[at] = (char)0xc3;
+		name[at + 1] = (char)0xa9;
+	}
+	name[2002] = 0;
+	status = farm_rename(farm, name);
+	const char *long_message = farm_last_error_message();
+	size_t length = strlen(long_message);
+	printf("long name: %d (%d), message of %zu bytes, ending with a whole character: %d\n", status,
+	       status == FARM_FARM_ERROR_BAD_NAME, length,
+	       (unsigned char)long_message[length - 2] == 0xc3);
 	farm_destroy_farm(farm);
 
 	/* optional pointers */
@@ -59,5 +83,12 @@ int main(void) {
 	/* scalars */
 	printf("even: %d %d\n", farm_is_even(10), farm_is_even(7));
 	printf("half: %.2f\n", farm_half(5.0f));
+
+	/* another thread: its own last error */
+	char message[200];
+	pthread_t thread;
+	pthread_create(&thread, NULL, on_thread, message);
+	pthread_join(thread, NULL);
+	printf("thread: %s; here: %s\n", message, farm_last_error_message());
 	return 0;
 }

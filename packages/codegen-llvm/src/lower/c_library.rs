@@ -8,9 +8,12 @@
 //!   returns an `int`: 0 on success (its result stored through a last
 //!   pointer parameter, when it isn't null), else the position of the
 //!   error's member in its `Errors` type, from 1; the error's text goes to
-//!   a thread-local block of `malloc`, which `<prefix>_last_error_message()`
-//!   returns (`""` before the first error). A wrapper flushes the output
-//!   of `console` before returning, so that it keeps its order with C's.
+//!   a thread-local buffer of [`MESSAGE_SIZE`] bytes (a longer text is cut
+//!   at a character), which `<prefix>_last_error_message()` returns (`""`
+//!   before the first error): nothing to free, on any thread. A wrapper
+//!   flushes the output of `console` before returning, so that it keeps
+//!   its order with C's, and releases the thread's text builder (a thread
+//!   of C may end after any call).
 //! - **Load and unload**: `fa.library.init` (in `llvm.global_ctors`:
 //!   `.init_array` on ELF, `__mod_init_func` on Mach-O) initializes the
 //!   module values in the program's order and runs the API file's top
@@ -32,10 +35,10 @@ use crate::lower::foreign::{CType, Passing};
 use crate::lower::values::{Repr, Val};
 use crate::lower::{FAST_CALLING_CONVENTION, Lowering};
 
-/// The thread-local message of the last error (a block of `malloc`).
+/// The thread-local message of the last error, zero-terminated.
 const ERROR_MESSAGE: &str = "fa.c_library.error";
-/// Frees the calling thread's message (the unload).
-pub(crate) const RELEASE: &str = "fa.c_library.release";
+/// The size of the message's buffer, its final zero byte included.
+const MESSAGE_SIZE: u32 = 1024;
 
 /// Adds a function to `llvm.global_ctors` (`constructors`) or
 /// `llvm.global_dtors`: run when the library is loaded, or unloaded.
@@ -64,6 +67,19 @@ pub(crate) fn add_structor<'ctx>(
 	global.set_initializer(&array);
 }
 
+/// Makes the thread-local variables of a module of a C library (the
+/// runtime's are `initial-exec`) use the general dynamic model, which a
+/// shared library loaded with `dlopen` (Python's `ctypes`) needs: the
+/// static model takes a block of the static TLS area, which a library
+/// loaded after the program's start can't get.
+pub(crate) fn use_dynamic_tls(module: &Module<'_>) {
+	for global in module.get_globals() {
+		if global.is_thread_local() {
+			global.set_thread_local_mode(Some(inkwell::ThreadLocalMode::GeneralDynamicTLSModel));
+		}
+	}
+}
+
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// Whether the file being lowered is the API file of the C library.
 	pub(crate) fn is_c_api_file(&self) -> bool {
@@ -72,35 +88,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.is_some_and(|library| library.api_module() == self.session.module(self.file))
 	}
 
-	/// The thread-local message of the last error.
+	/// The thread-local buffer of the last error's message.
 	fn error_message_global(&self) -> GlobalValue<'ctx> {
 		if let Some(global) = self.module.get_global(ERROR_MESSAGE) {
 			return global;
 		}
-		let global = self
-			.module
-			.add_global(self.pointer_type(), None, ERROR_MESSAGE);
-		global.set_initializer(&self.pointer_type().const_null());
+		let ty = self.context.i8_type().array_type(MESSAGE_SIZE);
+		let global = self.module.add_global(ty, None, ERROR_MESSAGE);
+		global.set_initializer(&ty.const_zero());
 		global.set_thread_local(true);
 		global.set_linkage(Linkage::Internal);
 		global
 	}
 
-	/// A function of the C library (`malloc`, `free`), declared once.
-	fn libc_function(&self, name: &str) -> FunctionValue<'ctx> {
-		if let Some(function) = self.module.get_function(name) {
-			return function;
-		}
-		let pointer = self.pointer_type();
-		let ty = match name {
-			"malloc" => pointer.fn_type(&[self.usize.into()], false),
-			_ => self.context.void_type().fn_type(&[pointer.into()], false),
-		};
-		self.module.add_function(name, ty, Some(Linkage::External))
+	/// `llvm.threadlocal.address.p0`: the address of a thread-local global
+	/// on the calling thread.
+	fn thread_local_address(&self) -> FunctionValue<'ctx> {
+		let name = "llvm.threadlocal.address.p0";
+		self.module.get_function(name).unwrap_or_else(|| {
+			let pointer = self.pointer_type();
+			self.module
+				.add_function(name, pointer.fn_type(&[pointer.into()], false), None)
+		})
 	}
 
 	/// The wrappers of the API file's functions (the file being lowered),
-	/// `<prefix>_last_error_message` and the release of the message.
+	/// and `<prefix>_last_error_message`.
 	pub(crate) fn lower_c_api(&mut self) -> Result<(), Error> {
 		let Some(library) = self.c_library.clone() else {
 			return Ok(());
@@ -120,8 +133,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.c_wrapper(function)?;
 		}
 		self.last_error_message(&library.prefix)?;
-		self.release_function()?;
 		Ok(())
+	}
+
+	/// The end of a call from C: the output of `console` flushed (it keeps
+	/// its order with C's), and the text builder of the thread released (a
+	/// thread of C may end after any call).
+	fn end_c_call(&self) -> Result<(), Error> {
+		self.call_runtime("fa_flush", &[])?;
+		self.call_runtime("fa_release_builder", &[])
 	}
 
 	/// `<prefix>_last_error_message()`.
@@ -133,34 +153,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let builder = self.context.create_builder();
 		builder.position_at_end(self.context.append_basic_block(function, "entry"));
 		let global = self.error_message_global();
+		// the address of the calling thread's buffer
 		let message = builder
-			.build_load(self.pointer_type(), global.as_pointer_value(), "")?
-			.into_pointer_value();
-		let empty = self.constant_bytes(&[0]);
-		let missing = builder.build_is_null(message, "")?;
-		let result = builder.build_select(missing, empty, message, "")?;
-		builder.build_return(Some(&result))?;
+			.build_call(
+				self.thread_local_address(),
+				&[global.as_pointer_value().into()],
+				"",
+			)?
+			.try_as_basic_value()
+			.basic()
+			.expect("an address");
+		builder.build_return(Some(&message))?;
 		self.c_exports.push(name);
-		Ok(())
-	}
-
-	/// `fa.c_library.release()`: frees the calling thread's message.
-	fn release_function(&mut self) -> Result<(), Error> {
-		let ty = self.context.void_type().fn_type(&[], false);
-		let function = self
-			.module
-			.add_function(RELEASE, ty, Some(Linkage::External));
-		self.runtime.add_attributes(function, &["nounwind"]);
-		let builder = self.context.create_builder();
-		builder.position_at_end(self.context.append_basic_block(function, "entry"));
-		let global = self.error_message_global().as_pointer_value();
-		let message = builder.build_load(self.pointer_type(), global, "")?;
-		builder.build_call(self.libc_function("free"), &[message.into()], "")?;
-		builder.build_store(global, self.pointer_type().const_null())?;
-		builder.build_return(None)?;
-		if self.is_split() {
-			self.export_symbol(RELEASE.to_string());
-		}
 		Ok(())
 	}
 
@@ -315,7 +319,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.build_conditional_branch(is_error, failed, succeeded)?;
 			self.builder.position_at_end(failed);
 			let status = self.c_error_status(nominal, error)?;
-			self.call_runtime("fa_flush", &[])?;
+			self.end_c_call()?;
 			self.builder.build_return(Some(&status))?;
 			self.builder.position_at_end(succeeded);
 		}
@@ -338,12 +342,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.builder.build_unconditional_branch(after)?;
 					self.builder.position_at_end(after);
 				}
-				self.call_runtime("fa_flush", &[])?;
+				self.end_c_call()?;
 				self.builder.build_return(Some(&i32.const_zero()))?;
 			}
 			(None, Some(raw)) if c_ret != CType::Void => {
 				let c_value = self.to_c(Val::new(callee.ret, raw), c_ret, node)?;
-				self.call_runtime("fa_flush", &[])?;
+				self.end_c_call()?;
 				match ret_passing {
 					Some(Passing::Memory(_)) => {
 						self.builder
@@ -371,7 +375,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if callee.ret == Repr::Never {
 					self.builder.build_unreachable()?;
 				} else {
-					self.call_runtime("fa_flush", &[])?;
+					self.end_c_call()?;
 					self.builder.build_return(None)?;
 				}
 			}
@@ -417,29 +421,62 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let text = self.call_with_pair("fa_b_take", &[], Repr::Str)?;
 		let (bytes, length) = self.string_parts(text)?;
 		let length = self.builder.build_int_cast(length, self.usize, "")?;
-		let size = self
+		// at most the buffer's size but one, cut before a continuation byte
+		let limit = self.usize.const_int(u64::from(MESSAGE_SIZE - 1), false);
+		let fits = self
 			.builder
-			.build_int_add(length, self.usize.const_int(1, false), "")?;
-		let block = self
+			.build_int_compare(inkwell::IntPredicate::ULE, length, limit, "")?;
+		let cut = self.append_block("c_message_cut");
+		let copy = self.append_block("c_message_copy");
+		let before = self.builder.get_insert_block().expect("a block");
+		self.builder.build_conditional_branch(fits, copy, cut)?;
+		self.builder.position_at_end(cut);
+		let at = self.builder.build_phi(self.usize, "at")?;
+		let position = at.as_basic_value().into_int_value();
+		// SAFETY: `position` is below `length`
+		let byte_pointer = unsafe {
+			self.builder
+				.build_in_bounds_gep(self.context.i8_type(), bytes, &[position], "")?
+		};
+		let byte = self
 			.builder
-			.build_call(self.libc_function("malloc"), &[size.into()], "")?
+			.build_load(self.context.i8_type(), byte_pointer, "")?
+			.into_int_value();
+		let high =
+			self.builder
+				.build_and(byte, self.context.i8_type().const_int(0xc0, false), "")?;
+		let continuation = self.builder.build_int_compare(
+			inkwell::IntPredicate::EQ,
+			high,
+			self.context.i8_type().const_int(0x80, false),
+			"",
+		)?;
+		let previous = self
+			.builder
+			.build_int_sub(position, self.usize.const_int(1, false), "")?;
+		at.add_incoming(&[(&limit, before), (&previous, cut)]);
+		self.builder
+			.build_conditional_branch(continuation, cut, copy)?;
+		self.builder.position_at_end(copy);
+		let size = self.builder.build_phi(self.usize, "size")?;
+		size.add_incoming(&[(&length, before), (&position, cut)]);
+		let size = size.as_basic_value().into_int_value();
+		let global = self.error_message_global().as_pointer_value();
+		let buffer = self
+			.builder
+			.build_call(self.thread_local_address(), &[global.into()], "")?
 			.try_as_basic_value()
 			.basic()
-			.expect("a block")
+			.expect("an address")
 			.into_pointer_value();
-		self.builder.build_memcpy(block, 1, bytes, 1, length)?;
-		// SAFETY: the block holds `length + 1` bytes
+		self.builder.build_memcpy(buffer, 1, bytes, 1, size)?;
+		// SAFETY: `size` is below the buffer's size
 		let end = unsafe {
 			self.builder
-				.build_in_bounds_gep(self.context.i8_type(), block, &[length], "")?
+				.build_in_bounds_gep(self.context.i8_type(), buffer, &[size], "")?
 		};
 		self.builder
 			.build_store(end, self.context.i8_type().const_zero())?;
-		let global = self.error_message_global().as_pointer_value();
-		let previous = self.builder.build_load(self.pointer_type(), global, "")?;
-		self.builder
-			.build_call(self.libc_function("free"), &[previous.into()], "")?;
-		self.builder.build_store(global, block)?;
 		self.emit_drop(text)?;
 		self.emit_drop(Val::new(Repr::Union, error))?;
 		Ok(status)
@@ -492,9 +529,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.drop_at_exit()?;
 		}
 		if !self.terminated() {
-			if let Some(release) = self.module.get_function(RELEASE) {
-				self.builder.build_call(release, &[], "")?;
-			}
 			if self.leak_check {
 				self.call_runtime("fa_leak_check", &[])?;
 			}

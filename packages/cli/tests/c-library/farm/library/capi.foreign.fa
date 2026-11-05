@@ -70,4 +70,12 @@ export namespace = {
 	}
 
 	function half = (value: Float32): Float32 => value / 2.0
+
+	function rename = (farm: Pointer<Farm>, name: CString) throws FarmError => {
+		let text = name.toString()
+		if text.length > 40 {
+			throw FarmError.BadName { name = text }
+		}
+		farm.write(Farm { name = text, animals = farm.read().animals })
+	}
 }

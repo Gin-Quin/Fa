@@ -2,4 +2,5 @@
 export type = Errors {
 	Empty
 	TooMany = { count: Int64 }
+	BadName = { name: String }
 }

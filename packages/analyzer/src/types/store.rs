@@ -472,6 +472,50 @@ impl TypeStore {
 	}
 
 	/// A string literal type.
+	/// A key set (`Fields { foo, nested { bar } }`): its keys, each a name and
+	/// its children (empty for a leaf).
+	pub fn fields_type(&mut self, keys: &[(String, TypeId)]) -> TypeId {
+		let items: Vec<TypeId> = keys
+			.iter()
+			.map(|(name, children)| {
+				let name = self.string_literal(name);
+				if children.is_unset() {
+					name
+				} else {
+					self.tuple(&[name, *children])
+				}
+			})
+			.collect();
+		let list = self.list(&items);
+		self.intern(TypeKind::Fields(list))
+	}
+
+	/// The keys of a key set: each name and its children's key set (`UNSET`
+	/// for a leaf).
+	pub fn fields_keys(&self, ty: TypeId) -> Vec<(String, TypeId)> {
+		let TypeKind::Fields(list) = self.kind(ty) else {
+			return Vec::new();
+		};
+		self.list_items(list)
+			.iter()
+			.filter_map(|&item| match self.kind(item) {
+				TypeKind::StringLit(name) => {
+					Some((self.syms.resolve(name).to_string(), TypeId::UNSET))
+				}
+				TypeKind::Tuple(pair) => match self.list_items(pair) {
+					[name, children] => match self.kind(*name) {
+						TypeKind::StringLit(name) => {
+							Some((self.syms.resolve(name).to_string(), *children))
+						}
+						_ => None,
+					},
+					_ => None,
+				},
+				_ => None,
+			})
+			.collect()
+	}
+
 	pub fn string_literal(&mut self, text: &str) -> TypeId {
 		let sym = self.syms.intern(text);
 		self.intern(TypeKind::StringLit(sym))
@@ -1613,7 +1657,7 @@ impl TypeStore {
 				.tag(21)
 				.hash(self.nominal_hash(nominal))
 				.u32(index as u32),
-			TypeKind::Fields(id) => hasher.tag(22).u32(id.0),
+			TypeKind::Fields(list) => hasher.tag(22).hash(self.list_hash(list)),
 			TypeKind::CStruct(nominal) => hasher.tag(23).hash(self.nominal_hash(nominal)),
 			TypeKind::Function(sig) => {
 				let sig = self.sig(sig);

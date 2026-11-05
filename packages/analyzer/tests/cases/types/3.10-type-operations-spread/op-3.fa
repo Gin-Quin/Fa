@@ -1,8 +1,7 @@
--- pending: M3 (`@typeToString` prints the declared name, not the spelling of D49)
 -- brief: ✓ op-3: Omit resolves the conflict → "{ foo: String }"
 -- context: declarations reused from op-2
 type ParentA = { foo: String }
 type ParentB = { foo: Integer }
 type Child = { ...ParentA, ...Omit<ParentB, { foo }> }
 console.log(@typeToString(Child))
--- prints: "{ foo: String }"
+-- prints: { foo: String }

@@ -592,6 +592,10 @@ pub struct Analysis {
 	/// target type of a union injection, `Integer` ↔ `Int64`, `Float32` →
 	/// `Float`, `Character` → `String`, and of a `SINK_CHECK` range check.
 	pub coercions: FxHashMap<NodeId, TypeId>,
+	/// The nodes whose value is another node's, copied to their own type:
+	/// `pick(value, { foo })`, `omit(value, { foo })` (the backends copy the
+	/// value's fields that the node's type has).
+	pub forwards: FxHashMap<NodeId, NodeId>,
 	/// Integer nodes whose flow fact is narrower than their type (hover,
 	/// proofs): an id into `interval_values`. Read it with [`Analysis::interval`].
 	pub intervals: FxHashMap<NodeId, IntervalId>,
@@ -627,6 +631,14 @@ pub struct Analysis {
 	/// The default values of the fields of types declared in other files,
 	/// which their files evaluated at compile time ([`FieldValue::Constant`]).
 	pub field_constants: Vec<fa_interpreter::Value>,
+	/// The default values of the fields of the object types `Json.parse`
+	/// reads that are declared in other files: their constants
+	/// ([`Analysis::field_constants`]), by type and field name.
+	pub json_defaults: FxHashMap<(TypeId, crate::ids::Sym), u32>,
+	/// The fields of the object types written as the data of a member of a
+	/// named union of this file (`Circle = { radius: Float }`), in the
+	/// order they are written: their declaration order (JSON, printing).
+	pub inline_field_orders: FxHashMap<TypeId, Vec<crate::ids::Sym>>,
 	/// The reads that move a move-only value out of its place (a local, a
 	/// parameter, a field of one: `holder.task` returned or passed): the
 	/// place gives the value up (a zero, which its drop skips).
@@ -1301,6 +1313,7 @@ impl Analysis {
 			diagnostics: Vec::new(),
 			arith: FxHashMap::default(),
 			coercions: FxHashMap::default(),
+			forwards: FxHashMap::default(),
 			intervals: FxHashMap::default(),
 			interval_values: Interner::new(),
 			instantiations: FxHashMap::default(),
@@ -1312,6 +1325,8 @@ impl Analysis {
 			type_decls: FxHashMap::default(),
 			objects: FxHashMap::default(),
 			field_constants: Vec::new(),
+			json_defaults: FxHashMap::default(),
+			inline_field_orders: FxHashMap::default(),
 			moved_reads: rustc_hash::FxHashSet::default(),
 			patterns: FxHashMap::default(),
 			relations: Vec::new(),

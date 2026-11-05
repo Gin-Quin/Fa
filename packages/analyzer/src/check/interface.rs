@@ -195,6 +195,8 @@ impl Walker<'_> {
 					SymbolKind::Function => true,
 					SymbolKind::Let
 					| SymbolKind::Mutable
+					| SymbolKind::Reactive
+					| SymbolKind::Derived
 					| SymbolKind::Namespace
 					| SymbolKind::Static
 					| SymbolKind::Type => module_level(self, symbol),

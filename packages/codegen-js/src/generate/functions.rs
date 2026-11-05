@@ -379,6 +379,12 @@ impl Generator<'_> {
 
 	/// A call.
 	pub(crate) fn call(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
+		// `pick(value, { foo })`: the value copied to the node's type
+		if let Some(&value) = self.analysis.forwards.get(&n) {
+			let value = self.expr(value);
+			let ty = self.type_of(n);
+			return self.copy_value(value, ty);
+		}
 		let Some(info) = self.analysis.call(n).cloned() else {
 			// `repeatText(2)`: a generic application, as a value
 			if let Some(function) = self.generic_application(n, callee) {

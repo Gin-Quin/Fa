@@ -48,6 +48,35 @@ pub struct FileScan {
 	pub resolved: bool,
 }
 
+/// The source of an `@import("…")` call (architecture/dependencies.md,
+/// "Inline imports"), when it is a string literal.
+pub fn import_source(tree: &TypedSyntaxTree, node: NodeId) -> Option<&str> {
+	let mut node = node;
+	while let View::Group(inner) = syntax::view(tree, node) {
+		node = inner;
+	}
+	let View::Call { callee, arguments } = syntax::view(tree, node) else {
+		return None;
+	};
+	let View::Name(name) = syntax::view(tree, callee) else {
+		return None;
+	};
+	if tree.name(name) != "@import" || arguments.len() != 1 {
+		return None;
+	}
+	match syntax::view(tree, arguments.iter().next()?) {
+		View::String(source) => Some(source),
+		_ => None,
+	}
+}
+
+/// The name the module system resolves the source of an `@import` under
+/// (`fa` resolves the sources, then gives them under these keys, like the
+/// keys of `dependencies.fa`): no name written in a file can be it.
+pub fn import_name(source: &str) -> String {
+	format!("@import {source}")
+}
+
 /// The names a `use { … } = std.module` brings (`value`: `std.module`).
 fn std_uses(
 	tree: &TypedSyntaxTree,
@@ -108,6 +137,7 @@ pub fn scan(
 	let mut chains: FxHashMap<&str, Vec<Vec<&str>>> = FxHashMap::default();
 	let mut targets: FxHashSet<NodeId> = FxHashSet::default();
 	let mut alone: Vec<(NodeId, &str)> = Vec::new();
+	let mut imported: Vec<String> = Vec::new();
 	// a lone file has no imports: only the rest is collected
 	let resolving = resolver.is_some();
 	for index in 0..tree.nodes.len() {
@@ -122,6 +152,12 @@ pub fn scan(
 				value,
 			} => std_uses(tree, pattern, value, &mut out.std_uses),
 			View::Name(_) | View::Access { .. } if !resolving => {}
+			// `@import("source")`: its source, used whole
+			View::Call { .. } if resolving && import_source(tree, node).is_some() => {
+				if let Some(source) = import_source(tree, node) {
+					imported.push(import_name(source));
+				}
+			}
 			View::Name(name) => {
 				let text = tree.name(name);
 				let text = text.strip_prefix('@').unwrap_or(text);
@@ -165,11 +201,17 @@ pub fn scan(
 	};
 	out.resolved = true;
 	// a name used alone (not as the target of an access) may be a folder used whole
-	let alone: FxHashSet<&str> = alone
+	let mut alone: FxHashSet<&str> = alone
 		.into_iter()
 		.filter(|(node, _)| !targets.contains(node))
 		.map(|(_, text)| text)
 		.collect();
+	imported.sort();
+	imported.dedup();
+	for name in &imported {
+		names.push(name);
+		alone.insert(name);
+	}
 	let mut dependencies: Vec<String> = Vec::new();
 	let mut all_modules: Option<Vec<String>> = None;
 	for text in names {

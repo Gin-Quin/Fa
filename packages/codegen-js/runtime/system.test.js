@@ -133,7 +133,27 @@ describe("faJsonStringify", () => {
 		expect(faJsonStringify([1, undefined, 2n, Number.NaN])).toBe("[1,null,2,null]");
 		expect(faJsonStringify(new Map([["a", true]]))).toBe('{"a":true}');
 		expect(faJsonStringify(new Set(["x"]))).toBe('["x"]');
-		expect(faJsonStringify({ $t: "Shape.Circle", radius: 1 })).toBe('{"radius":1}');
+		// a member of a named union: tagged by `"type"` (design/decisions.md)
+		expect(faJsonStringify({ $t: "Shape.Circle", radius: 1 })).toBe('{"type":"Circle","radius":1}');
+		expect(faJsonStringify({ $t: "Shape.Label", $v: "a" })).toBe('{"type":"Label","value":"a"}');
+		// by a schema: an enumeration's names or pinned values, fields in order
+		const color = [
+			"E",
+			[
+				["red", 0, false],
+				["green", 1, false],
+			],
+		];
+		expect(faJsonStringify([1, 0], ["a", color])).toBe('["green","red"]');
+		expect(faJsonStringify(9, ["E", [["archived", 9, true]]])).toBe("9");
+		const point = [
+			"o",
+			[
+				["y", "f", false, null],
+				["x", "f", false, null],
+			],
+		];
+		expect(faJsonStringify({ x: 1, y: 2 }, point)).toBe('{"y":2,"x":1}');
 		expect(faJsonStringify(undefined)).toBe("null");
 		expect(faJsonStringify('say "hi"')).toBe('"say \\"hi\\""');
 	});

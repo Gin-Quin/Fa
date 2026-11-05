@@ -20,12 +20,16 @@
 //! `$hot.json` (the modules, then the initialization functions to call:
 //! every module-level value of a swapped module, the values whose
 //! initializers read one of them, and the values new to the program, in
-//! initialization order), sends `SIGUSR2` to Bun (`faHotListen`), and waits
-//! for `$hot-done.json`. The values of the other modules keep their
-//! current values. Unix only; elsewhere, `fa develop` restarts.
+//! initialization order), asks Bun to swap them (`faHotListen`), and waits
+//! for its answer on the channel `fa develop` opened for the program (a
+//! local socket, [`Channel`], on every system). The values of the other
+//! modules keep their current values; a module-level `reactive` value keeps
+//! its value and its source (by declaration path, `faHotValue`).
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{BufRead as _, BufReader, Write as _};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -57,11 +61,6 @@ pub(crate) struct Plan {
 	modules: BTreeMap<String, String>,
 	/// The initialization functions of the new program.
 	all_inits: Vec<(String, String)>,
-}
-
-/// Whether hot reloading is possible here (the swap is signaled).
-pub(crate) fn available() -> bool {
-	cfg!(unix)
 }
 
 /// The initialization functions of a program, in order.
@@ -151,6 +150,11 @@ impl Running {
 				let module = path.strip_suffix(".js").unwrap_or(path);
 				return Err(format!("the change reaches `{module}.fa`"));
 			}
+			// its `watch` blocks would run next to those of the old version
+			if code.contains("faWatch(") {
+				let module = path.strip_suffix(".js").unwrap_or(path);
+				return Err(format!("`{module}.fa` has `watch` blocks"));
+			}
 			changed.push(path.clone());
 		}
 		// the values to initialize again: of the swapped modules, reading
@@ -182,9 +186,10 @@ impl Running {
 		})
 	}
 
-	/// Swaps the changed modules in the running program (`pid`): `Err` with
-	/// the reason when it failed (the program is then restarted).
-	pub(crate) fn swap(&mut self, plan: Plan, pid: u32) -> Result<(), String> {
+	/// Swaps the changed modules in the running program, through its
+	/// channel: `Err` with the reason when it failed (the program is then
+	/// restarted).
+	pub(crate) fn swap(&mut self, plan: Plan, channel: &mut Channel) -> Result<(), String> {
 		if plan.changed.is_empty() && plan.inits.is_empty() {
 			self.modules = plan.modules;
 			return Ok(());
@@ -212,8 +217,6 @@ impl Running {
 			.iter()
 			.map(|(path, name)| format!("[{}, {}]", json_string(path), json_string(name)))
 			.collect();
-		let done = self.directory.join("$hot-done.json");
-		let _ = fs::remove_file(&done);
 		write(
 			"$hot.json",
 			&format!(
@@ -222,26 +225,10 @@ impl Running {
 				inits.join(", ")
 			),
 		)?;
-		let signaled = std::process::Command::new("kill")
-			.arg("-USR2")
-			.arg(pid.to_string())
-			.status()
-			.is_ok_and(|status| status.success());
-		if !signaled {
-			return Err("the program can't be signaled".to_string());
+		let answer = channel.request("swap")?;
+		if !answer.contains(&format!("\"version\":{version},")) {
+			return Err(format!("the program answered `{}`", answer.trim()));
 		}
-		let start = Instant::now();
-		let answer = loop {
-			if let Ok(text) = fs::read_to_string(&done)
-				&& text.contains(&format!("\"version\":{version},"))
-			{
-				break text;
-			}
-			if start.elapsed() > Duration::from_secs(10) {
-				return Err("the program didn't answer".to_string());
-			}
-			std::thread::sleep(Duration::from_millis(10));
-		};
 		self.version = version;
 		if !answer.contains("\"ok\":true") {
 			let error = answer
@@ -252,6 +239,80 @@ impl Running {
 		self.modules = plan.modules;
 		self.inits = plan.all_inits;
 		Ok(())
+	}
+}
+
+/// The channel of `fa develop` with the program it runs: a local socket
+/// the program connects to (its port in `FA_HOT_CHANNEL`, `faHotListen`),
+/// the same on every system. A request is a line, its answer a line of
+/// JSON.
+pub(crate) struct Channel {
+	listener: TcpListener,
+	connection: Option<BufReader<TcpStream>>,
+}
+
+impl Channel {
+	/// A new channel, for one run of the program.
+	pub(crate) fn open() -> Option<Channel> {
+		let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
+		listener.set_nonblocking(true).ok()?;
+		Some(Channel {
+			listener,
+			connection: None,
+		})
+	}
+
+	/// The port the program connects to.
+	pub(crate) fn port(&self) -> u16 {
+		self.listener
+			.local_addr()
+			.map_or(0, |address| address.port())
+	}
+
+	/// Sends a request to the program and waits for its answer.
+	fn request(&mut self, request: &str) -> Result<String, String> {
+		let timeout = Duration::from_secs(10);
+		if self.connection.is_none() {
+			// the program connects as it starts
+			let start = Instant::now();
+			let stream = loop {
+				match self.listener.accept() {
+					Ok((stream, _)) => break stream,
+					Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+						if start.elapsed() > timeout {
+							return Err("the program isn't connected to `fa develop`".to_string());
+						}
+						std::thread::sleep(Duration::from_millis(10));
+					}
+					Err(error) => return Err(format!("the channel failed: {error}")),
+				}
+			};
+			let failed = |error: std::io::Error| format!("the channel failed: {error}");
+			stream.set_nonblocking(false).map_err(failed)?;
+			stream.set_read_timeout(Some(timeout)).map_err(failed)?;
+			self.connection = Some(BufReader::new(stream));
+		}
+		let Some(connection) = self.connection.as_mut() else {
+			return Err("the program isn't connected to `fa develop`".to_string());
+		};
+		let result = connection
+			.get_mut()
+			.write_all(format!("{request}\n").as_bytes())
+			.and_then(|()| {
+				let mut answer = String::new();
+				connection.read_line(&mut answer).map(|_| answer)
+			});
+		match result {
+			Ok(answer) if !answer.is_empty() => Ok(answer),
+			Ok(_) => {
+				self.connection = None;
+				Err("the program closed the channel".to_string())
+			}
+			Err(error) => {
+				self.connection = None;
+				Err(format!("the program didn't answer: {error}"))
+			}
+		}
 	}
 }
 

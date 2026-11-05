@@ -656,14 +656,32 @@ impl Walker<'_> {
 						w.s.types.string_literal(&text)
 					} else {
 						let schema = comptime::schema::schema(&w.s.types, ty);
-						let defaults = w.schema_defaults(ty);
-						let schema = comptime::schema::with_defaults(schema, &defaults);
+						let (defaults, order) = w.schema_defaults(ty);
+						let schema = comptime::schema::with_defaults(schema, &defaults, &order);
 						w.a.constants.insert(n, schema);
 						crate::builtins::schema::schema(&mut w.s.types)
 					}
 				}));
 			}
-			"import" | "extern" => {
+			// `use name = @import("…")` (modules.rs) is the form resolved
+			"import" => {
+				let tree = Arc::clone(&self.tree);
+				let message = match crate::scan::import_source(&tree, n) {
+					None => "the source of `@import` is a string literal: `@import(\"https://…/types.fa\")`".to_string(),
+					Some(source) if source.starts_with('.') => format!(
+						"`@import(\"{source}\")` names a local folder: local files are reached by their names, sibling packages through `dependencies.fa`"
+					),
+					Some(source) if self.import_proxy(n).is_none() => format!(
+						"the source `{source}` of `@import` isn't resolved: `fa` resolves it when it builds the package (`fa check`)"
+					),
+					Some(_) => "`@import` is written in a `use`: `use weather = @import(\"https://…/types.fa\")`".to_string(),
+				};
+				let diagnostic =
+					self.diagnostic(&crate::diagnostics::codes::advanced::META010, n, message);
+				self.report(diagnostic);
+				return Some(TypeId::UNKNOWN);
+			}
+			"extern" => {
 				return Some(self.unsupported(n, &format!("`@{operation}`")));
 			}
 			_ => {}
@@ -787,11 +805,15 @@ impl Walker<'_> {
 
 	/// The schemas of the literal default values of an object type's fields
 	/// (`@typeToSchema`: `default = Schema.StringLiteral { value = "hello" }`).
-	pub(super) fn schema_defaults(&mut self, ty: TypeId) -> Vec<(String, Value)> {
+	pub(super) fn schema_defaults(&mut self, ty: TypeId) -> (Vec<(String, Value)>, Vec<String>) {
 		if !matches!(self.s.types.kind(ty), TypeKind::Object(_)) {
-			return Vec::new();
+			return (Vec::new(), Vec::new());
 		}
 		let (_, fields) = self.object_declaration(ty);
+		let order: Vec<String> = fields
+			.iter()
+			.map(|field| self.s.types.syms.resolve(field.name).to_string())
+			.collect();
 		let mut defaults = Vec::new();
 		for field in fields {
 			let Some(default) = field.default else {
@@ -812,7 +834,7 @@ impl Walker<'_> {
 			let name = self.s.types.syms.resolve(field.name).to_string();
 			defaults.push((name, comptime::schema::schema(&self.s.types, literal)));
 		}
-		defaults
+		(defaults, order)
 	}
 
 	/// After the checks of a call written `@f(…)`: evaluates it once.

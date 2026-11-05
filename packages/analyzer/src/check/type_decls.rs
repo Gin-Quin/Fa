@@ -559,6 +559,10 @@ impl Walker<'_> {
 								self.report(diagnostic);
 							}
 							pinned_values.push(pinned);
+							// the value, as the member's literal (the backends,
+							// `@typeToSchema`, other files read it)
+							let storage = crate::types::IntStorage::Default;
+							self.s.types.int_range(pinned, pinned, storage)
 						}
 						_ => {
 							let diagnostic = self.diagnostic(
@@ -567,13 +571,46 @@ impl Walker<'_> {
 								"the value of a member is a non-negative integer literal",
 							);
 							self.report(diagnostic);
+							TypeId::UNSET
 						}
 					}
-					TypeId::UNSET
 				}
-				(_, Some(definition)) => self.check_type_expr(definition),
+				(_, Some(definition)) => {
+					let payload = self.check_type_expr(definition);
+					// an object written inline: the order of its fields
+					let tree = std::sync::Arc::clone(&self.tree);
+					if let View::Object { items } = syntax::view(&tree, definition)
+						&& matches!(
+							self.s.types.kind(payload),
+							crate::types::TypeKind::Object(_)
+						) {
+						let names: Vec<String> = items
+							.iter()
+							.filter_map(|item| match syntax::view(&tree, item) {
+								View::Assignment { target, .. } => {
+									match syntax::view(&tree, target) {
+										View::Name(name) => Some(tree.name(name).to_string()),
+										_ => None,
+									}
+								}
+								View::Name(name) => Some(tree.name(name).to_string()),
+								_ => None,
+							})
+							.collect();
+						let names: Vec<crate::ids::Sym> = names
+							.iter()
+							.map(|name| self.s.types.syms.intern(name))
+							.collect();
+						self.a.inline_field_orders.entry(payload).or_insert(names);
+					}
+					payload
+				}
 			};
-			if self.s.types.is_literal(payload) && payloads.contains(&payload) {
+			// (a pinned value of an enumeration is `TY082` above)
+			if kind != NominalKind::Enum
+				&& self.s.types.is_literal(payload)
+				&& payloads.contains(&payload)
+			{
 				let message = format!(
 					"two members accept `{}`: a literal belongs to one member",
 					self.display(payload)

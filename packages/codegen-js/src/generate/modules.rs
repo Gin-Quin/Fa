@@ -277,6 +277,10 @@ impl Generator<'_> {
 			match self.view(current) {
 				View::Access { target, .. } => current = target,
 				View::Name(_) => break,
+				// `use weather = @import("…")`: resolved by the analyzer
+				View::Call { .. } => {
+					return fa_analyzer::scan::import_source(self.tree, current).is_some();
+				}
 				_ => return false,
 			}
 		}

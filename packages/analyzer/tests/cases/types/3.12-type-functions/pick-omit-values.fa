@@ -1,0 +1,8 @@
+-- note: `pick` and `omit` copy the fields they keep, from a place or a temporary, nested groups too (an anonymous object prints its fields by name)
+type Profile = { name: String, tags: Array<String>, address: { city: String, street: String } }
+function make = (name: String): Profile => Profile { name, tags = ["a"], address = { city = "Paris", street = "Rue" } }
+let profile = make("Ada")
+console.log(pick(profile, { name, address { city } })) -- prints: { address = { city = "Paris" }, name = "Ada" }
+console.log(omit(make("Alan"), { tags, address { street } })) -- prints: { address = { city = "Paris" }, name = "Alan" }
+let kept = pick(profile, { tags })
+console.log(kept.tags, profile.name) -- prints: ["a"] Ada

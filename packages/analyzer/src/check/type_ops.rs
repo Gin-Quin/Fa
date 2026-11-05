@@ -286,6 +286,10 @@ impl Walker<'_> {
 		name: &str,
 		arguments: NodeList<'_>,
 	) -> Option<TypeId> {
+		// `Keys`, `Values`, `Parameters`, `Uppercase`… (type_functions.rs)
+		if let Some(ty) = self.key_or_function_type_function(n, callee, name, arguments) {
+			return Some(ty);
+		}
 		if !matches!(name, "Pick" | "Omit" | "Partial" | "Required" | "KeyType") {
 			return None;
 		}
@@ -351,6 +355,68 @@ impl Walker<'_> {
 		});
 		self.memo(callee, |_| ty);
 		Some(ty)
+	}
+
+	/// `pick(value, keys)`, `omit(value, keys)`: the value-level `Pick` and
+	/// `Omit`, with a key set known at compile time (a literal, or a
+	/// compile-time value parameter of a key-set type). The node's value is
+	/// the value copied to the result type (`Analysis::forwards`).
+	pub(super) fn check_pick_or_omit_value(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		arguments: NodeList<'_>,
+	) -> Option<TypeId> {
+		let tree = Arc::clone(&self.tree);
+		let View::Name(name) = syntax::view(&tree, callee) else {
+			return None;
+		};
+		let text = tree.name(name);
+		if !matches!(text, "pick" | "omit") || self.is_declared(name) {
+			return None;
+		}
+		let pick = text == "pick";
+		let (Some(value), Some(keys_node), 2) =
+			(arguments.first(), arguments.get(1), arguments.len())
+		else {
+			let message =
+				format!("`{text}` takes a value and a key set, ex: `{text}(user, {{ id, name }})`");
+			let ty = self.memo(n, |w| {
+				let diagnostic = w.diagnostic(&crate::diagnostics::codes::types::TY003, n, message);
+				w.report(diagnostic);
+				TypeId::UNKNOWN
+			});
+			return Some(ty);
+		};
+		self.set_flag(callee, NodeFlags::TYPE_EXPR);
+		let ty = self.check(value, None);
+		let keys = self.value_key_set(keys_node);
+		self.a.forwards.insert(n, value);
+		Some(self.memo(n, |w| {
+			if w.s.types.is_recovering(ty) {
+				return TypeId::UNKNOWN;
+			}
+			let object = w.s.types.unfold(ty);
+			if !matches!(w.s.types.kind(object), TypeKind::Object(_)) {
+				let message = format!("`{text}` takes an object, not a `{}`", w.display(ty));
+				let diagnostic = w.diagnostic(&TF021, n, message);
+				w.report(diagnostic);
+				return TypeId::UNKNOWN;
+			}
+			match keys {
+				Some(keys) => w
+					.pick_or_omit(object, &keys, pick)
+					.unwrap_or(TypeId::UNKNOWN),
+				None => TypeId::UNKNOWN,
+			}
+		}))
+	}
+
+	/// The keys of the key set a value argument gives: a literal (`{ foo }`),
+	/// or a value parameter bound to a key set.
+	fn value_key_set(&mut self, n: NodeId) -> Option<Vec<Key>> {
+		self.set_flag(n, NodeFlags::TYPE_EXPR);
+		self.key_set(n)
 	}
 
 	/// `Partial(T)`: every field optional; `Required(T)`: `none` removed

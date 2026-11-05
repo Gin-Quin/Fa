@@ -465,6 +465,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				View::Access { target, .. } => current = target,
 				View::Group(inner) => current = inner,
 				View::Name(_) => break,
+				// `use weather = @import("…")`: resolved by the analyzer
+				View::Call { .. } => {
+					return fa_analyzer::scan::import_source(self.tree, current).is_some();
+				}
 				_ => return false,
 			}
 		}

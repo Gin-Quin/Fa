@@ -199,6 +199,21 @@ impl Walker<'_> {
 				&& w.rec_references.get(&symbol) == Some(&generic)
 			{
 				let own = w.s.types.rec_info(rec).args;
+				// the whole definition is the application: a type function
+				// applying itself at new arguments never stops (TF001)
+				let whole = match syntax::view(&w.tree, w.a.symbols.symbol(symbol).decl_node) {
+					View::TypeDecl { value, .. } => w.strip_groups(value) == n,
+					_ => false,
+				};
+				if whole && w.s.types.list_items(own) != args.as_slice() {
+					let name = w.display(generic);
+					let message = format!(
+						"`{name}` applies itself at new arguments each time: its applications nest without end (more than 256)"
+					);
+					let diagnostic = w.diagnostic(&crate::diagnostics::codes::types::TF001, n, message);
+					w.report(diagnostic);
+					return TypeId::UNKNOWN;
+				}
 				if w.s.types.list_items(own) != args.as_slice() {
 					let name = w.display(generic);
 					let message = format!(

@@ -96,6 +96,10 @@ struct WhenCoverage {
 	covered: Vec<TypeId>,
 	/// Whether an arm is `else`.
 	has_else: bool,
+	/// The covered types, for `W-WHEN-1` in linear time: each one exactly,
+	/// and the members of named unions and enumerations by mask.
+	exact: rustc_hash::FxHashSet<TypeId>,
+	masks: Vec<(crate::ids::NominalId, crate::ids::MaskId)>,
 }
 
 impl Walker<'_> {
@@ -156,15 +160,23 @@ impl Walker<'_> {
 					self.when_arm(n, subject, pattern, &mut remaining);
 					// `W-WHEN-1`: by the types matched above (members, literals),
 					// or by the values left (integers)
-					if self.covered_above(ty, &coverage.covered) {
+					if self.covered_above(ty, &coverage) {
 						self.report_unreachable_arm(pattern);
-					} else if !self.body.flow.reachable && entry.reachable {
+					} else if !self.body.flow.reachable
+						&& entry.reachable && self
+						.s
+						.types
+						.union_members(&subject_ty)
+						.iter()
+						.all(|&part| matches!(self.s.types.kind(part), TypeKind::Int(_)))
+					{
 						self.unreachable_arm(n, subject, pattern, &mut entry);
 					}
 					integer_patterns.push(pattern);
-					coverage
-						.covered
-						.extend(self.s.types.union_members(&ty).iter().copied());
+					let members: Vec<TypeId> = self.s.types.union_members(&ty).to_vec();
+					for member in members {
+						self.note_covered(&mut coverage, member);
+					}
 					ty
 				}
 				None => {
@@ -428,33 +440,57 @@ impl Walker<'_> {
 		}
 	}
 
+	/// Records a type a pattern matches.
+	fn note_covered(&mut self, coverage: &mut WhenCoverage, ty: TypeId) {
+		coverage.covered.push(ty);
+		coverage.exact.insert(ty);
+		match self.s.types.nominal_mask(ty) {
+			Some((nominal, mask, _)) => {
+				match coverage
+					.masks
+					.iter_mut()
+					.find(|(other, _)| *other == nominal)
+				{
+					Some((_, union)) => *union = self.s.types.mask_union(*union, mask),
+					None => coverage.masks.push((nominal, mask)),
+				}
+			}
+			None => {}
+		}
+	}
+
 	/// Whether the arms above match every value of a pattern's type (a
 	/// literal, a member, a subset of members; not integers).
-	fn covered_above(&mut self, ty: TypeId, covered: &[TypeId]) -> bool {
-		if covered.is_empty()
-			|| ty.is_unset()
-			|| self.s.types.is_recovering(ty)
-			|| covered
-				.iter()
-				.any(|&other| self.s.types.is_recovering(other))
+	fn covered_above(&mut self, ty: TypeId, coverage: &WhenCoverage) -> bool {
+		if coverage.covered.is_empty() || ty.is_unset() || self.s.types.is_recovering(ty) {
+			return false;
+		}
+		let parts: Vec<TypeId> = self.s.types.union_members(&ty).to_vec();
+		// integers: by the values left (`unreachable_arm`)
+		if parts
+			.iter()
+			.any(|&part| self.s.types.as_int(part).is_some())
 		{
 			return false;
 		}
-		let members = self.members_of(ty);
-		members.iter().all(|&member| {
-			self.s.types.as_int(member).is_none()
-				&& matches!(
-					self.s.types.kind(member),
-					TypeKind::StringLit(_)
-						| TypeKind::BoolLit(_)
-						| TypeKind::EnumMember(..)
-						| TypeKind::Member(..)
-						| TypeKind::Enum(..)
-						| TypeKind::NamedUnion(..)
-						| TypeKind::None
-				) && covered
-				.iter()
-				.any(|&other| self.s.types.satisfies(member, other))
+		parts.into_iter().all(|part| {
+			// a literal matches one value (a pattern on a `Character` is typed
+			// `Character`: it matches one character, not every one)
+			if matches!(
+				self.s.types.kind(part),
+				TypeKind::StringLit(_) | TypeKind::BoolLit(_) | TypeKind::None
+			) {
+				return coverage.exact.contains(&part);
+			}
+			// a pattern's type may be wider than what it matches (a
+			// character literal is a `Character`): only exact types and
+			// members count
+			match self.s.types.nominal_mask(part) {
+				Some((nominal, mask, _)) => coverage.masks.iter().any(|&(other, union)| {
+					other == nominal && self.s.types.mask_subset(mask, union)
+				}),
+				None => false,
+			}
 		})
 	}
 
@@ -604,8 +640,19 @@ impl Walker<'_> {
 					.types
 					.sym_list(self.s.types.nominal(nominal).members)
 					.len() as u16;
+				// the members the patterns of this type cover, as one mask
+				let empty = self.s.types.mask(&[]);
+				let mut handled = empty;
+				for &pattern in covered {
+					if let Some((other, pattern_mask, _)) = self.s.types.nominal_mask(pattern)
+						&& other == nominal
+					{
+						handled = self.s.types.mask_union(handled, pattern_mask);
+					}
+				}
 				for index in 0..count {
-					if !self.s.types.mask_has(mask, index) {
+					if !self.s.types.mask_has(mask, index) || self.s.types.mask_has(handled, index)
+					{
 						continue;
 					}
 					let member = if enumeration {

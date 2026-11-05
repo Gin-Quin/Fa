@@ -1086,6 +1086,43 @@ impl TypeStore {
 			.is_some_and(|word| word & (1 << (index % 64)) != 0)
 	}
 
+	/// The members of `a` in `b`, and those not in `b`.
+	pub fn mask_split(&mut self, a: MaskId, b: MaskId) -> (MaskId, MaskId) {
+		let (both, rest): (smallvec::SmallVec<[u64; 2]>, smallvec::SmallVec<[u64; 2]>) = {
+			let (a, b) = (self.mask_bits(a), self.mask_bits(b));
+			a.iter()
+				.enumerate()
+				.map(|(i, word)| {
+					let other = b.get(i).copied().unwrap_or(0);
+					(word & other, word & !other)
+				})
+				.unzip()
+		};
+		(self.mask(&both), self.mask(&rest))
+	}
+
+	/// The union of two masks.
+	pub fn mask_union(&mut self, a: MaskId, b: MaskId) -> MaskId {
+		let words: smallvec::SmallVec<[u64; 2]> = {
+			let (a, b) = (self.mask_bits(a), self.mask_bits(b));
+			(0..a.len().max(b.len()))
+				.map(|i| a.get(i).copied().unwrap_or(0) | b.get(i).copied().unwrap_or(0))
+				.collect()
+		};
+		self.mask(&words)
+	}
+
+	/// A named union, an enumeration or one of their members as a mask of
+	/// its nominal type: `(nominal, mask, is_enum)`.
+	pub fn nominal_mask(&mut self, ty: TypeId) -> Option<(NominalId, MaskId, bool)> {
+		match self.kind(ty) {
+			TypeKind::NamedUnion(nominal, mask) => Some((nominal, mask, false)),
+			TypeKind::Enum(nominal, mask) => Some((nominal, mask, true)),
+			TypeKind::Member(nominal, index) => Some((nominal, self.single_mask(index), false)),
+			_ => None,
+		}
+	}
+
 	/// Whether every member of `a` is in `b`.
 	pub fn mask_subset(&self, a: MaskId, b: MaskId) -> bool {
 		let (a, b) = (self.mask_bits(a), self.mask_bits(b));

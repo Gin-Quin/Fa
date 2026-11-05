@@ -31,6 +31,9 @@ mutable points = Pool<Point>.from([Point { x = 1, y = 2 }, Point { x = 3, y = 4 
 console.log(points.parallel().map((point) => point.x + point.y))
 mutable rows = Columnar<Point>.from([Point { x = 5, y = 6 }])
 console.log(rows.parallel().filter((row) => row.x > 1))
+mutable ages: Map<String, Integer> = [("ana", 30), ("bao", 7), ("cy", 51)]
+console.log(ages.parallel().map((name, age) => "{name}:{age}"))
+console.log(ages.parallel().filter((name, age) => age > 18), ages.parallel().some((name, age) => age < 10))
 let empty: Array<Integer> = []
 console.log(empty.parallel().reduce((a, b) => a + b, 7), empty.parallel().map((n) => n))
 -- prints: [2, -4, 6, 8]
@@ -44,4 +47,6 @@ console.log(empty.parallel().reduce((a, b) => a + b, 7), empty.parallel().map((n
 -- prints: 33334
 -- prints: [3, 7]
 -- prints: [{ x = 5, y = 6 }]
+-- prints: [("ana", "ana:30"), ("bao", "bao:7"), ("cy", "cy:51")]
+-- prints: [("ana", 30), ("cy", 51)] true
 -- prints: 7 []

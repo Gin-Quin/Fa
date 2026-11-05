@@ -304,6 +304,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			},
 			TypeKind::Function(_) => Repr::Function(ty),
 			TypeKind::Tuple(_) => Repr::Tuple(ty),
+			// a `CArray(T, n)` is laid out as a tuple of `n` items: C's layout
+			// of `T[n]` (`tuples.rs`)
+			TypeKind::CArray(..) => Repr::Tuple(ty),
 			TypeKind::Range => Repr::Range,
 			TypeKind::Pointer(_) | TypeKind::CString => Repr::Pointer,
 			TypeKind::Subscription => Repr::Watch,

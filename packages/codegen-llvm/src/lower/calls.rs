@@ -596,6 +596,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.print(if path == "console.log" { 1 } else { 2 }, &values)
 			}
 			_ if path.starts_with("String#") => self.string_method(node, path, info),
+			"Pointer.allocate" => self.pointer_allocate(node, info),
 			_ if path.starts_with("Pointer#") || path.starts_with("CString#") => {
 				self.pointer_method(node, path, info)
 			}

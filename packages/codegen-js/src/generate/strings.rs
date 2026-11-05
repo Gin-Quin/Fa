@@ -263,90 +263,101 @@ impl Generator<'_> {
 					format!("(value) => {helper}(value, {key_format}, {item_format})")
 				}
 			}
-			TypeKind::Union(list) => {
-				let members: Vec<TypeId> = self.types.list_items(list).to_vec();
-				let optional = members.contains(&TypeId::NONE);
-				let values: Vec<TypeId> = members
-					.into_iter()
-					.filter(|&member| member != TypeId::NONE)
-					.collect();
-				let formats: Vec<Option<String>> = values
-					.iter()
-					.map(|&member| self.formatter(member))
-					.collect();
-				let tuples = values
-					.iter()
-					.all(|&member| matches!(self.types.kind(member), TypeKind::Tuple(_)));
-				let inner = match formats.first() {
-					// the same formatter for every member (`(1, 2)` or `(0, 0)`)
-					Some(Some(first))
-						if formats.iter().all(|format| format.as_ref() == Some(first)) =>
-					{
-						first.clone()
-					}
-					_ if tuples => {
-						let helper = self.helper("faFormatTuple");
-						let nested = self.helper("faFormatNested");
-						let code = format!("(value) => {helper}(value, value.map(() => {nested}))");
-						self.constant("format", code)
-					}
-					_ => return None,
-				};
-				if !optional {
-					return Some(Ok(inner));
-				}
-				let helper = self.helper("faFormatOptional");
-				format!("(value) => {helper}(value, {inner})")
-			}
-			TypeKind::Object(_) => {
-				let mut fields: Vec<(String, TypeId)> = self
-					.types
-					.fields_of(ty)
-					.iter()
-					.map(|field| (self.types.syms.resolve(field.name).to_string(), field.ty))
-					.collect();
-				// the declaration order, when the type is declared, or the
-				// order an inline member's data is written in; otherwise
-				// literals of the type may write the fields in any order, which
-				// their properties keep: printed from the representation
-				let order: Vec<String> =
-					match self.analysis.type_decls.values().find(|decl| decl.ty == ty) {
-						Some(decl) => decl
-							.fields
-							.iter()
-							.map(|field| self.types.syms.resolve(field.name).to_string())
-							.collect(),
-						None => self
-							.analysis
-							.inline_field_orders
-							.get(&ty)?
-							.iter()
-							.map(|&name| self.types.syms.resolve(name).to_string())
-							.collect(),
-					};
-				fields.sort_by_key(|(name, _)| order.iter().position(|field| field == name));
-				// printing omits relation sides (D21)
-				let relation_sides = self.relation_properties(ty);
-				let related = !relation_sides.is_empty();
-				fields.retain(|(name, _)| !relation_sides.contains(&Self::property(name)));
-				let _ = related;
-				let mut entries = Vec::new();
-				for (name, field_ty) in fields {
-					if name.starts_with('#') {
-						continue;
-					}
-					let format = self.nested_formatter(field_ty);
-					entries.push(format!(
-						"[{}, {format}]",
-						js::string_literal(&Self::property(&name))
-					));
-				}
-				let helper = self.helper("faFormatObject");
-				format!("(value) => {helper}(value, [{}])", entries.join(", "))
-			}
+			TypeKind::Union(list) => return self.union_formatter(list),
+			TypeKind::Object(_) => self.object_formatter(ty)?,
 			_ => return None,
 		};
 		Some(Err(code))
+	}
+
+	/// The formatter of a union ([`Generator::formatter_code`]): of an
+	/// optional, or of members that print alike; `None` for another.
+	fn union_formatter(
+		&mut self,
+		list: fa_analyzer::ids::ListId,
+	) -> Option<Result<String, String>> {
+		let members: Vec<TypeId> = self.types.list_items(list).to_vec();
+		let optional = members.contains(&TypeId::NONE);
+		let values: Vec<TypeId> = members
+			.into_iter()
+			.filter(|&member| member != TypeId::NONE)
+			.collect();
+		let formats: Vec<Option<String>> = values
+			.iter()
+			.map(|&member| self.formatter(member))
+			.collect();
+		let tuples = values
+			.iter()
+			.all(|&member| matches!(self.types.kind(member), TypeKind::Tuple(_)));
+		let inner = match formats.first() {
+			// the same formatter for every member (`(1, 2)` or `(0, 0)`)
+			Some(Some(first)) if formats.iter().all(|format| format.as_ref() == Some(first)) => {
+				first.clone()
+			}
+			_ if tuples => {
+				let helper = self.helper("faFormatTuple");
+				let nested = self.helper("faFormatNested");
+				let code = format!("(value) => {helper}(value, value.map(() => {nested}))");
+				self.constant("format", code)
+			}
+			_ => return None,
+		};
+		if !optional {
+			return Some(Ok(inner));
+		}
+		let helper = self.helper("faFormatOptional");
+		Some(Err(format!("(value) => {helper}(value, {inner})")))
+	}
+
+	/// The code of the formatter of an object type: its fields in
+	/// declaration order, relation sides and private fields left out; `None`
+	/// for an anonymous type, whose literals may order the fields their way.
+	fn object_formatter(&mut self, ty: TypeId) -> Option<String> {
+		let mut fields: Vec<(String, TypeId)> = self
+			.types
+			.fields_of(ty)
+			.iter()
+			.map(|field| (self.types.syms.resolve(field.name).to_string(), field.ty))
+			.collect();
+		// the declaration order, when the type is declared, or the
+		// order an inline member's data is written in; otherwise
+		// literals of the type may write the fields in any order, which
+		// their properties keep: printed from the representation
+		let order: Vec<String> = match self.analysis.type_decls.values().find(|decl| decl.ty == ty)
+		{
+			Some(decl) => decl
+				.fields
+				.iter()
+				.map(|field| self.types.syms.resolve(field.name).to_string())
+				.collect(),
+			None => self
+				.analysis
+				.inline_field_orders
+				.get(&ty)?
+				.iter()
+				.map(|&name| self.types.syms.resolve(name).to_string())
+				.collect(),
+		};
+		fields.sort_by_key(|(name, _)| order.iter().position(|field| field == name));
+		// printing omits relation sides (D21)
+		let relation_sides = self.relation_properties(ty);
+		fields.retain(|(name, _)| !relation_sides.contains(&Self::property(name)));
+		let mut entries = Vec::new();
+		for (name, field_ty) in fields {
+			if name.starts_with('#') {
+				continue;
+			}
+			let format = self.nested_formatter(field_ty);
+			entries.push(format!(
+				"[{}, {format}]",
+				js::string_literal(&Self::property(&name))
+			));
+		}
+		let helper = self.helper("faFormatObject");
+		Some(format!(
+			"(value) => {helper}(value, [{}])",
+			entries.join(", ")
+		))
 	}
 
 	/// `console.log(values…)` and `console.error(values…)`: one line, the

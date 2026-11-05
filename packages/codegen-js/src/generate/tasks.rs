@@ -133,68 +133,11 @@ impl Generator<'_> {
 	/// functions that may suspend are needed (from the top level, the tests,
 	/// the exports and the functions used as values), then names them.
 	pub(crate) fn plan_instances(&mut self) {
-		for &node in self.analysis.awaits.keys() {
-			let View::Await(operand) = self.view(node) else {
-				continue;
-			};
-			let operand = self.strip_groups(operand);
-			match self.view(operand) {
-				View::Call { .. } => {
-					self.tasks.awaited_calls.insert(operand);
-				}
-				View::Start(call) => {
-					let call = self.strip_groups(call);
-					if matches!(self.view(call), View::Call { .. }) {
-						self.tasks.awaited_calls.insert(call);
-					}
-				}
-				_ => {}
-			}
-		}
-		for (&node, info) in self.analysis.starts.iter() {
-			if info.block.is_some() {
-				continue;
-			}
-			if let View::Start(call) = self.view(node) {
-				let call = self.strip_groups(call);
-				if matches!(self.view(call), View::Call { .. }) {
-					self.tasks.awaited_calls.insert(call);
-				}
-			}
-		}
+		self.find_awaited_calls();
 		if !self.tasks.asynchronous {
 			return;
 		}
-		// every function declaration of the file
-		let mut declarations = Vec::new();
-		for index in 0..self.tree.nodes.len() {
-			let node = NodeId::new(index);
-			if matches!(
-				self.view(node),
-				View::Function { .. } | View::ExportFunction { .. }
-			) && self.analysis.symbols.symbol_of_decl(node).is_some()
-			{
-				declarations.push(node);
-			}
-		}
-		for &declaration in &declarations {
-			let Some(info) = self.function_info(declaration) else {
-				continue;
-			};
-			let is_async = info.sig.is_some_and(|sig| self.types.sig(sig).is_async);
-			let suspends = self
-				.summary(declaration)
-				.is_some_and(|summary| summary.suspends);
-			// an `async` function that loops gets an async instance (its loops
-			// spend the coop budget), unless it starts tasks: one that can't
-			// suspend has one instance, as natively (`single_instance_mode`)
-			let starts = self
-				.summary(declaration)
-				.is_some_and(|summary| summary.starts);
-			if suspends || (is_async && !starts && self.has_loop(info.body)) {
-				self.tasks.async_functions.insert(declaration);
-			}
-		}
+		let declarations = self.find_async_functions();
 		let mut wanted: HashMap<NodeId, (bool, bool)> = HashMap::new();
 		let mut pending: Vec<(NodeId, Mode)> = Vec::new();
 		let mut walks: Vec<(NodeId, Mode)> = Vec::new();
@@ -283,6 +226,75 @@ impl Generator<'_> {
 			}
 			self.tasks.instances.insert(declaration, instances);
 		}
+	}
+
+	/// The calls awaited or started (`awaited_calls`).
+	fn find_awaited_calls(&mut self) {
+		for &node in self.analysis.awaits.keys() {
+			let View::Await(operand) = self.view(node) else {
+				continue;
+			};
+			let operand = self.strip_groups(operand);
+			match self.view(operand) {
+				View::Call { .. } => {
+					self.tasks.awaited_calls.insert(operand);
+				}
+				View::Start(call) => {
+					let call = self.strip_groups(call);
+					if matches!(self.view(call), View::Call { .. }) {
+						self.tasks.awaited_calls.insert(call);
+					}
+				}
+				_ => {}
+			}
+		}
+		for (&node, info) in self.analysis.starts.iter() {
+			if info.block.is_some() {
+				continue;
+			}
+			if let View::Start(call) = self.view(node) {
+				let call = self.strip_groups(call);
+				if matches!(self.view(call), View::Call { .. }) {
+					self.tasks.awaited_calls.insert(call);
+				}
+			}
+		}
+	}
+
+	/// The function declarations of the file; those with an async instance
+	/// go to `async_functions`.
+	fn find_async_functions(&mut self) -> Vec<NodeId> {
+		// every function declaration of the file
+		let mut declarations = Vec::new();
+		for index in 0..self.tree.nodes.len() {
+			let node = NodeId::new(index);
+			if matches!(
+				self.view(node),
+				View::Function { .. } | View::ExportFunction { .. }
+			) && self.analysis.symbols.symbol_of_decl(node).is_some()
+			{
+				declarations.push(node);
+			}
+		}
+		for &declaration in &declarations {
+			let Some(info) = self.function_info(declaration) else {
+				continue;
+			};
+			let is_async = info.sig.is_some_and(|sig| self.types.sig(sig).is_async);
+			let suspends = self
+				.summary(declaration)
+				.is_some_and(|summary| summary.suspends);
+			// an `async` function that loops gets an async instance (its loops
+			// spend the coop budget), unless it starts tasks: one that can't
+			// suspend has one instance, as natively (`single_instance_mode`)
+			let starts = self
+				.summary(declaration)
+				.is_some_and(|summary| summary.starts);
+			if suspends || (is_async && !starts && self.has_loop(info.body)) {
+				self.tasks.async_functions.insert(declaration);
+			}
+		}
+		declarations
 	}
 
 	/// Whether a function declaration is exported (to the other modules of

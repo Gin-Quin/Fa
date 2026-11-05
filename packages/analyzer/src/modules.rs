@@ -582,6 +582,9 @@ pub struct Interface {
 	pub members: FxHashMap<(NodeId, Sym), Exported>,
 	/// The functions of its types, by type declaration.
 	pub type_functions: FxHashMap<NodeId, Vec<TypeFunction>>,
+	/// The types declared inside its types (`Database.OpenError`), by type
+	/// declaration (`method` is always false).
+	pub nested_types: FxHashMap<NodeId, Vec<TypeFunction>>,
 	/// The parameters of its functions other files may call, by declaration.
 	pub parameters: FxHashMap<NodeId, Vec<Parameter>>,
 	/// The C symbols of its `@extern` functions, by declaration.
@@ -663,6 +666,17 @@ impl Interface {
 					types.decl_hash(function.key),
 					u128::from(function.method),
 					types.stable_hash(function.ty),
+				));
+			}
+		}
+		for (&decl, nested) in &self.nested_types {
+			let owner = key_hash(decl);
+			for nested in nested {
+				parts.push((
+					owner,
+					types.decl_hash(nested.key),
+					6,
+					types.stable_hash(nested.ty),
 				));
 			}
 		}

@@ -366,6 +366,11 @@ impl Writer {
 		self.lines.extend(tail);
 	}
 
+	/// The lines written.
+	pub fn lines(&self) -> &[String] {
+		&self.lines
+	}
+
 	/// The number of lines written.
 	pub fn len(&self) -> usize {
 		self.lines.len()

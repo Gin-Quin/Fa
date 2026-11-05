@@ -406,6 +406,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		// `function f = g then h` (compose.rs)
+		if let fa_analyzer::syntax::View::Function { value, .. } = self.view(declaration)
+			&& self.analysis.compositions.contains_key(&value)
+		{
+			return self.composition_value(value);
+		}
 		let Some(function) = self.functions.get(&declaration).cloned() else {
 			// a generic function used as a generic function value (`generic_values.rs`)
 			if self.generic_functions.contains_key(&declaration) {

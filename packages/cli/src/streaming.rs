@@ -644,8 +644,20 @@ pub(crate) fn build_native(
 		jobs: 0,
 		// merged from the units by `compile_package`
 		facts: None,
+		// set by `compile_package` from the libraries
+		c_library: None,
 	};
+	// a C library (`build.cLibrary`, `fa build` only): the API file is the entry
+	let configuration = prepared.configuration.as_ref().filter(|_| !development);
+	let c_library = match crate::build::c_library_of(configuration, &prepared.project.base) {
+		Ok(c_library) => c_library,
+		Err(message) => return NativeBuilt::Failed(message),
+	};
+	let entry = c_library
+		.as_ref()
+		.map_or_else(|| prepared.entry.clone(), |library| library.api_module());
 	let libraries = fa_codegen_llvm::Libraries {
+		c_library,
 		link: prepared
 			.configuration
 			.as_ref()
@@ -664,7 +676,7 @@ pub(crate) fn build_native(
 			})
 			.unwrap_or_default(),
 	};
-	let run = run_options(&prepared.entry);
+	let run = run_options(&entry);
 	let (report, outcome) = timings::phase("pipeline", || {
 		backend.compile_package(
 			&mut prepared.session,

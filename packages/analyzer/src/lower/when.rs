@@ -145,6 +145,13 @@ fn add_tests<'t>(
 	pattern: NodeId,
 	tests: &mut SmallVec<[Test<'t>; 2]>,
 ) -> Result<(), LowerError> {
+	// a set of flags: equal to the pattern's bits (check/fields.rs)
+	if let Some(fa_interpreter::Value::Integer(bits)) = analysis.constant(pattern)
+		&& analysis.fields_patterns.contains(&pattern)
+	{
+		tests.push(Test::Equals(Literal::Integer(*bits)));
+		return Ok(());
+	}
 	// a type pattern, as the analysis resolved it
 	if analysis.has_flags(pattern, NodeFlags::TYPE_EXPR) {
 		let ty = analysis.type_of(pattern);

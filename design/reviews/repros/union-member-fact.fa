@@ -1,0 +1,6 @@
+type Shape = Union {
+	Circle = { r: Integer }
+	Square = { s: Integer }
+}
+let s = Shape.Circle { r = 1 }
+console.log(s.r)

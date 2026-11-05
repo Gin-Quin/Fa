@@ -100,7 +100,9 @@ impl Walker<'_> {
 					if let Some(annotation) = annotation {
 						return self.spell(annotation, &Bindings::default(), depth + 1);
 					}
-					return None;
+					// a function: its parameters with their names (a composition:
+					// those of its first step)
+					return self.function_spelling(argument);
 				}
 				// `Parameters<F>`: the parameters' order; `Record<keys, T>`: the
 				// keys' order
@@ -340,6 +342,38 @@ impl Walker<'_> {
 			},
 			_ => None,
 		}
+	}
+
+	/// `(n: Integer) => Integer`: a function value's type with the names of
+	/// its parameters, where they are written.
+	fn function_spelling(&mut self, value: NodeId) -> Option<Spelled> {
+		let ty = self.type_of(value);
+		let crate::types::TypeKind::Function(sig) = self.s.types.kind(ty) else {
+			return None;
+		};
+		let named = match self.known_chain(value) {
+			Some(steps) => *steps.first()?,
+			None => value,
+		};
+		let names = self.value_parameter_names(named, 0)?;
+		let sig = self.s.types.sig(sig);
+		let params = self.s.types.params(sig.params).to_vec();
+		if names.len() != params.len() {
+			return None;
+		}
+		let mut parts = Vec::with_capacity(params.len());
+		for (name, param) in names.iter().zip(&params) {
+			let shown = self.display(param.ty);
+			parts.push(match name {
+				Some(name) => format!("{name}: {shown}"),
+				None => shown,
+			});
+		}
+		let mut text = format!("({}) => {}", parts.join(", "), self.display(sig.ret));
+		if sig.throws != crate::ids::TypeId::NEVER {
+			text.push_str(&format!(" throws {}", self.display(sig.throws)));
+		}
+		Some(Spelled::Text(text))
 	}
 
 	/// The member nodes of a union written directly or by a type of this

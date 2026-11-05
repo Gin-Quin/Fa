@@ -308,6 +308,10 @@ impl Walker<'_> {
 		if let Some(ty) = self.check_key_read(n, target, index) {
 			return ty;
 		}
+		// `chain[1..]`: some steps of a composition (compose.rs)
+		if let Some(ty) = self.check_composition_slice(n, target, index) {
+			return ty;
+		}
 		let target_ty = self.check(target, None);
 		if let Some(key) = self.map_key(target_ty) {
 			// `map[key]`: `KeyNotFound` unless the key is proven present (D32)

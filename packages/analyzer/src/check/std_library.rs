@@ -412,6 +412,8 @@ impl Walker<'_> {
 			// "JSON form of named union members")
 			// an enumeration: its pinned values, else its member names
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) => None,
+			// a set of flags: the array of their paths (fields.rs)
+			TypeKind::Fields(_) => None,
 			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _)
 				if matches!(
 					self.s.types.nominal(nominal).kind,

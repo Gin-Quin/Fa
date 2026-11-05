@@ -99,6 +99,12 @@ fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: 
 	options.leak_check.hash(hasher);
 	split.lto.hash(hasher);
 	split.full_lto.hash(hasher);
+	// a C library: its wrappers, and the dynamic model of its thread-local
+	// variables (`lower/c_library.rs`)
+	split.c_library.hash(hasher);
+	if split.c_library.is_some() {
+		"dynamic-tls".hash(hasher);
+	}
 	split.facts.is_some().hash(hasher);
 }
 
@@ -119,6 +125,9 @@ fn emit(
 	timings: &mut Timings,
 ) -> Result<(), Error> {
 	let start = Instant::now();
+	if split.c_library.is_some() {
+		crate::lower::c_library::use_dynamic_tls(module);
+	}
 	if !options.size {
 		// the size attributes of the runtime's IR must not override the
 		// program's speed pipeline (as `compile.rs` does)
@@ -363,7 +372,8 @@ fn lower_and_emit(
 	.with_overflow_checks(options.overflow_checks)
 	.with_leak_check(options.leak_check)
 	.with_asynchronous(options.asynchronous == Some(true), options.dev())
-	.with_program_facts(split.facts.clone());
+	.with_program_facts(split.facts.clone())
+	.with_c_library(split.c_library.clone());
 	let (symbols, requests) = lower(lowering)?;
 	timings.build = start.elapsed();
 	module.verify()?;
@@ -543,6 +553,7 @@ fn entry_object(
 	split: &SplitOptions,
 	inputs: &EntryInputs,
 	path: &Path,
+	library: bool,
 ) -> Result<(), Error> {
 	let machine = target.machine(options)?;
 	let context = Context::create();
@@ -597,190 +608,204 @@ fn entry_object(
 		.flat_map(|unit| unit.symbols.drops.iter())
 		.map(|(module, node)| (module.as_str(), *node))
 		.collect();
-	// `main(argc, argv)`, `_start()` on wasm
-	let main = match target {
-		Target::Wasm => {
-			module.add_function("_start", void.fn_type(&[], false), Some(Linkage::External))
-		}
-		_ => module.add_function(
-			"main",
-			i32.fn_type(&[i32.into(), pointer.into()], false),
-			Some(Linkage::External),
-		),
-	};
-	runtime.add_attributes(main, &["nounwind"]);
-	builder.position_at_end(context.append_basic_block(main, "start"));
-	if target == Target::Native {
-		builder.build_call(runtime.function("fa_guard_stack")?, &[], "")?;
-	}
-	if units.iter().any(|unit| unit.symbols.uses_arguments) {
-		let (argc, argv) = match target {
-			Target::Wasm => (i32.const_zero().into(), pointer.const_null().into()),
-			_ => (
-				main.get_nth_param(0).expect("argc").into(),
-				main.get_nth_param(1).expect("argv").into(),
+	if library {
+		library_entry(
+			&module,
+			&runtime,
+			options,
+			inputs,
+			&defined_inits,
+			&defined_drops,
+			effectful,
+		)?;
+	} else {
+		// `main(argc, argv)`, `_start()` on wasm
+		let main = match target {
+			Target::Wasm => {
+				module.add_function("_start", void.fn_type(&[], false), Some(Linkage::External))
+			}
+			_ => module.add_function(
+				"main",
+				i32.fn_type(&[i32.into(), pointer.into()], false),
+				Some(Linkage::External),
 			),
 		};
-		builder.build_call(runtime.function("fa_arguments_init")?, &[argc, argv], "")?;
-	}
-	let mut seen = std::collections::HashSet::new();
-	let mut initialized = Vec::new();
-	for (module_path, node) in &inputs.init_order {
-		if !seen.insert((module_path.as_str(), *node)) {
-			continue;
+		runtime.add_attributes(main, &["nounwind"]);
+		builder.position_at_end(context.append_basic_block(main, "start"));
+		if target == Target::Native {
+			builder.build_call(runtime.function("fa_guard_stack")?, &[], "")?;
 		}
-		if !defined_inits.contains(&(module_path.as_str(), *node)) {
-			return Err(Error::Unsupported {
-				message: format!("the initialization of a value of `{module_path}` (split build)"),
-				location: String::new(),
-			});
+		if units.iter().any(|unit| unit.symbols.uses_arguments) {
+			let (argc, argv) = match target {
+				Target::Wasm => (i32.const_zero().into(), pointer.const_null().into()),
+				_ => (
+					main.get_nth_param(0).expect("argc").into(),
+					main.get_nth_param(1).expect("argv").into(),
+				),
+			};
+			builder.build_call(runtime.function("fa_arguments_init")?, &[argc, argv], "")?;
 		}
-		let init = declare(
-			&format!("fa.init.{module_path}.{node}"),
-			void.fn_type(&[], false),
-		);
-		builder.build_call(init, &[], "")?;
-		initialized.push((module_path.as_str(), *node));
-	}
-	let entry = units.iter().find_map(|unit| unit.symbols.entry.as_ref());
-	// the module values, dropped in the reverse order when a drop does
-	// more than free memory (or the leaks are counted)
-	let drops = |builder: &inkwell::builder::Builder<'_>| -> Result<(), Error> {
-		if effectful || options.leak_check {
-			for (module_path, node) in initialized.iter().rev() {
-				if defined_drops.contains(&(*module_path, *node)) {
-					let drop = declare(
-						&format!("fa.drop.{module_path}.{node}"),
-						void.fn_type(&[], false),
-					);
-					builder.build_call(drop, &[], "")?;
+		let mut seen = std::collections::HashSet::new();
+		let mut initialized = Vec::new();
+		for (module_path, node) in &inputs.init_order {
+			if !seen.insert((module_path.as_str(), *node)) {
+				continue;
+			}
+			if !defined_inits.contains(&(module_path.as_str(), *node)) {
+				return Err(Error::Unsupported {
+					message: format!(
+						"the initialization of a value of `{module_path}` (split build)"
+					),
+					location: String::new(),
+				});
+			}
+			let init = declare(
+				&format!("fa.init.{module_path}.{node}"),
+				void.fn_type(&[], false),
+			);
+			builder.build_call(init, &[], "")?;
+			initialized.push((module_path.as_str(), *node));
+		}
+		let entry = units.iter().find_map(|unit| unit.symbols.entry.as_ref());
+		// the module values, dropped in the reverse order when a drop does
+		// more than free memory (or the leaks are counted)
+		let drops = |builder: &inkwell::builder::Builder<'_>| -> Result<(), Error> {
+			if effectful || options.leak_check {
+				for (module_path, node) in initialized.iter().rev() {
+					if defined_drops.contains(&(*module_path, *node)) {
+						let drop = declare(
+							&format!("fa.drop.{module_path}.{node}"),
+							void.fn_type(&[], false),
+						);
+						builder.build_call(drop, &[], "")?;
+					}
 				}
-			}
-		}
-		Ok(())
-	};
-	if options.asynchronous == Some(true) {
-		// the top level is a coroutine (`lower/units.rs`), run by the event loop
-		let top_type = pointer.fn_type(&[i32.into()], false);
-		let root = match entry {
-			Some(entry) => {
-				let top = declare(&format!("fa.main.{entry}"), top_type);
-				top.set_call_conventions(crate::lower::FAST_CALLING_CONVENTION);
-				let call = builder.build_call(top, &[i32.const_zero().into()], "root")?;
-				call.set_call_convention(crate::lower::FAST_CALLING_CONVENTION);
-				call.try_as_basic_value()
-					.basic()
-					.expect("a frame")
-					.into_pointer_value()
-			}
-			None => pointer.const_null(),
-		};
-		let dev = i32.const_int(u64::from(options.dev()), false);
-		let status = units.iter().any(|unit| unit.symbols.exit_status).then(|| {
-			let global = module.add_global(i32, None, "fa.exit_status");
-			global.set_visibility(GlobalVisibility::Hidden);
-			global
-		});
-		// the end of the program: drops, flush, leaks, exit code
-		let finish = |builder: &inkwell::builder::Builder<'_>| -> Result<(), Error> {
-			drops(builder)?;
-			builder.build_call(runtime.function("fa_flush")?, &[], "")?;
-			if options.leak_check {
-				builder.build_call(runtime.function("fa_leak_check")?, &[], "")?;
-			}
-			if let Some(status) = status {
-				let code = builder.build_load(i32, status.as_pointer_value(), "")?;
-				builder.build_call(runtime.exit()?, &[code.into()], "")?;
 			}
 			Ok(())
 		};
-		if target == Target::Wasm {
-			// the host's event loop drives the executor (`tasks.rs`, step W1)
-			let finished = module.add_function(
-				"fa.finish",
-				void.fn_type(&[], false),
-				Some(Linkage::Internal),
-			);
-			runtime.add_attributes(finished, &["nounwind"]);
-			let ending = context.create_builder();
-			ending.position_at_end(context.append_basic_block(finished, "entry"));
-			finish(&ending)?;
-			ending.build_return(None)?;
-			let run =
-				module.add_function("fa_run", i32.fn_type(&[], false), Some(Linkage::External));
-			let other = context.create_builder();
-			other.position_at_end(context.append_basic_block(run, "entry"));
-			let status = other
-				.build_call(runtime.function("fa_wasm_run")?, &[], "")?
-				.try_as_basic_value()
-				.basic()
-				.expect("a status");
-			other.build_return(Some(&status))?;
-			let wake = module.add_function(
-				"fa_wake",
-				void.fn_type(&[pointer.into()], false),
-				Some(Linkage::External),
-			);
-			other.position_at_end(context.append_basic_block(wake, "entry"));
-			let token = wake.get_nth_param(0).expect("a token");
-			other.build_call(runtime.function("fa_wasm_wake")?, &[token.into()], "")?;
-			other.build_return(None)?;
-			// the exports of the loader
-			for (name, function) in [("fa_run", run), ("fa_wake", wake)] {
-				function.add_attribute(
-					AttributeLoc::Function,
-					context.create_string_attribute("wasm-export-name", name),
+		if options.asynchronous == Some(true) {
+			// the top level is a coroutine (`lower/units.rs`), run by the event loop
+			let top_type = pointer.fn_type(&[i32.into()], false);
+			let root = match entry {
+				Some(entry) => {
+					let top = declare(&format!("fa.main.{entry}"), top_type);
+					top.set_call_conventions(crate::lower::FAST_CALLING_CONVENTION);
+					let call = builder.build_call(top, &[i32.const_zero().into()], "root")?;
+					call.set_call_convention(crate::lower::FAST_CALLING_CONVENTION);
+					call.try_as_basic_value()
+						.basic()
+						.expect("a frame")
+						.into_pointer_value()
+				}
+				None => pointer.const_null(),
+			};
+			let dev = i32.const_int(u64::from(options.dev()), false);
+			let status = units.iter().any(|unit| unit.symbols.exit_status).then(|| {
+				let global = module.add_global(i32, None, "fa.exit_status");
+				global.set_visibility(GlobalVisibility::Hidden);
+				global
+			});
+			// the end of the program: drops, flush, leaks, exit code
+			let finish = |builder: &inkwell::builder::Builder<'_>| -> Result<(), Error> {
+				drops(builder)?;
+				builder.build_call(runtime.function("fa_flush")?, &[], "")?;
+				if options.leak_check {
+					builder.build_call(runtime.function("fa_leak_check")?, &[], "")?;
+				}
+				if let Some(status) = status {
+					let code = builder.build_load(i32, status.as_pointer_value(), "")?;
+					builder.build_call(runtime.exit()?, &[code.into()], "")?;
+				}
+				Ok(())
+			};
+			if target == Target::Wasm {
+				// the host's event loop drives the executor (`tasks.rs`, step W1)
+				let finished = module.add_function(
+					"fa.finish",
+					void.fn_type(&[], false),
+					Some(Linkage::Internal),
 				);
-				runtime.add_attributes(function, &["nounwind"]);
-			}
-			let finished = finished.as_global_value().as_pointer_value();
-			builder.build_call(
-				runtime.function("fa_wasm_start")?,
-				&[root.into(), dev.into(), finished.into()],
-				"",
-			)?;
-			builder.build_return(None)?;
-		} else {
-			builder.build_call(
-				runtime.function("fa_run_main")?,
-				&[root.into(), dev.into()],
-				"",
-			)?;
-			finish(&builder)?;
-			builder.build_return(Some(&i32.const_zero()))?;
-		}
-	} else {
-		let code = match entry {
-			Some(entry) => {
-				let body = declare(&format!("fa.main.{entry}"), i32.fn_type(&[], false));
-				builder
-					.build_call(body, &[], "code")?
+				runtime.add_attributes(finished, &["nounwind"]);
+				let ending = context.create_builder();
+				ending.position_at_end(context.append_basic_block(finished, "entry"));
+				finish(&ending)?;
+				ending.build_return(None)?;
+				let run =
+					module.add_function("fa_run", i32.fn_type(&[], false), Some(Linkage::External));
+				let other = context.create_builder();
+				other.position_at_end(context.append_basic_block(run, "entry"));
+				let status = other
+					.build_call(runtime.function("fa_wasm_run")?, &[], "")?
 					.try_as_basic_value()
 					.basic()
-					.expect("an exit code")
-					.into_int_value()
+					.expect("a status");
+				other.build_return(Some(&status))?;
+				let wake = module.add_function(
+					"fa_wake",
+					void.fn_type(&[pointer.into()], false),
+					Some(Linkage::External),
+				);
+				other.position_at_end(context.append_basic_block(wake, "entry"));
+				let token = wake.get_nth_param(0).expect("a token");
+				other.build_call(runtime.function("fa_wasm_wake")?, &[token.into()], "")?;
+				other.build_return(None)?;
+				// the exports of the loader
+				for (name, function) in [("fa_run", run), ("fa_wake", wake)] {
+					function.add_attribute(
+						AttributeLoc::Function,
+						context.create_string_attribute("wasm-export-name", name),
+					);
+					runtime.add_attributes(function, &["nounwind"]);
+				}
+				let finished = finished.as_global_value().as_pointer_value();
+				builder.build_call(
+					runtime.function("fa_wasm_start")?,
+					&[root.into(), dev.into(), finished.into()],
+					"",
+				)?;
+				builder.build_return(None)?;
+			} else {
+				builder.build_call(
+					runtime.function("fa_run_main")?,
+					&[root.into(), dev.into()],
+					"",
+				)?;
+				finish(&builder)?;
+				builder.build_return(Some(&i32.const_zero()))?;
 			}
-			None => i32.const_zero(),
-		};
-		drops(&builder)?;
-		if options.leak_check {
-			builder.build_call(runtime.function("fa_leak_check")?, &[], "")?;
+		} else {
+			let code = match entry {
+				Some(entry) => {
+					let body = declare(&format!("fa.main.{entry}"), i32.fn_type(&[], false));
+					builder
+						.build_call(body, &[], "code")?
+						.try_as_basic_value()
+						.basic()
+						.expect("an exit code")
+						.into_int_value()
+				}
+				None => i32.const_zero(),
+			};
+			drops(&builder)?;
+			if options.leak_check {
+				builder.build_call(runtime.function("fa_leak_check")?, &[], "")?;
+			}
+			builder.build_call(runtime.function("fa_flush")?, &[], "")?;
+			let exit = runtime.exit()?;
+			let exits = context.append_basic_block(main, "exit");
+			let returns = context.append_basic_block(main, "return");
+			let nonzero =
+				builder.build_int_compare(inkwell::IntPredicate::NE, code, i32.const_zero(), "")?;
+			builder.build_conditional_branch(nonzero, exits, returns)?;
+			builder.position_at_end(exits);
+			builder.build_call(exit, &[code.into()], "")?;
+			builder.build_unreachable()?;
+			builder.position_at_end(returns);
+			match target {
+				Target::Wasm => builder.build_return(None)?,
+				_ => builder.build_return(Some(&i32.const_zero()))?,
+			};
 		}
-		builder.build_call(runtime.function("fa_flush")?, &[], "")?;
-		let exit = runtime.exit()?;
-		let exits = context.append_basic_block(main, "exit");
-		let returns = context.append_basic_block(main, "return");
-		let nonzero =
-			builder.build_int_compare(inkwell::IntPredicate::NE, code, i32.const_zero(), "")?;
-		builder.build_conditional_branch(nonzero, exits, returns)?;
-		builder.position_at_end(exits);
-		builder.build_call(exit, &[code.into()], "")?;
-		builder.build_unreachable()?;
-		builder.position_at_end(returns);
-		match target {
-			Target::Wasm => builder.build_return(None)?,
-			_ => builder.build_return(Some(&i32.const_zero()))?,
-		};
 	}
 	// `fa_resume` and `fa_destroy`, which the runtime calls (`tasks.rs`):
 	// the first and the second pointer of a frame, called `fastcc`
@@ -883,6 +908,90 @@ fn entry_object(
 		path,
 		&mut Timings::default(),
 	)
+}
+
+/// The load and unload functions of a C library compiled per unit
+/// (`lower/c_library.rs`): `fa.library.init` (in `llvm.global_ctors`) runs
+/// the initializations in the program's order and the API file's top
+/// level, `fa.library.fini` (in `llvm.global_dtors`) the drops of the
+/// module values (when one does more than free memory, or the leaks are
+/// counted), the leak report and the flush.
+#[allow(clippy::too_many_arguments)]
+fn library_entry<'c>(
+	module: &Module<'c>,
+	runtime: &Runtime<'c, '_>,
+	options: &Options,
+	inputs: &EntryInputs,
+	defined_inits: &std::collections::HashSet<(&str, u32)>,
+	defined_drops: &std::collections::HashSet<(&str, u32)>,
+	effectful: bool,
+) -> Result<(), Error> {
+	let context = module.get_context();
+	let void = context.void_type();
+	let i32 = context.i32_type();
+	let builder = context.create_builder();
+	let declare = |name: &str, ty| declare_hidden(module, name, ty);
+	let init = module.add_function(
+		"fa.library.init",
+		void.fn_type(&[], false),
+		Some(Linkage::Internal),
+	);
+	runtime.add_attributes(init, &["nounwind"]);
+	builder.position_at_end(context.append_basic_block(init, "start"));
+	let mut seen = std::collections::HashSet::new();
+	let mut initialized = Vec::new();
+	for (module_path, node) in &inputs.init_order {
+		if !seen.insert((module_path.as_str(), *node)) {
+			continue;
+		}
+		if !defined_inits.contains(&(module_path.as_str(), *node)) {
+			return Err(Error::Unsupported {
+				message: format!("the initialization of a value of `{module_path}` (split build)"),
+				location: String::new(),
+			});
+		}
+		let init = declare(
+			&format!("fa.init.{module_path}.{node}"),
+			void.fn_type(&[], false),
+		);
+		builder.build_call(init, &[], "")?;
+		initialized.push((module_path.as_str(), *node));
+	}
+	if let Some(entry) = inputs
+		.units
+		.iter()
+		.find_map(|unit| unit.symbols.entry.as_ref())
+	{
+		let body = declare(&format!("fa.main.{entry}"), i32.fn_type(&[], false));
+		builder.build_call(body, &[], "")?;
+	}
+	builder.build_return(None)?;
+	let fini = module.add_function(
+		"fa.library.fini",
+		void.fn_type(&[], false),
+		Some(Linkage::Internal),
+	);
+	runtime.add_attributes(fini, &["nounwind"]);
+	builder.position_at_end(context.append_basic_block(fini, "start"));
+	if effectful || options.leak_check {
+		for (module_path, node) in initialized.iter().rev() {
+			if defined_drops.contains(&(*module_path, *node)) {
+				let drop = declare(
+					&format!("fa.drop.{module_path}.{node}"),
+					void.fn_type(&[], false),
+				);
+				builder.build_call(drop, &[], "")?;
+			}
+		}
+	}
+	if options.leak_check {
+		builder.build_call(runtime.function("fa_leak_check")?, &[], "")?;
+	}
+	builder.build_call(runtime.function("fa_flush")?, &[], "")?;
+	builder.build_return(None)?;
+	crate::lower::c_library::add_structor(module, init, true);
+	crate::lower::c_library::add_structor(module, fini, false);
+	Ok(())
 }
 
 /// A function of another object, hidden.
@@ -1006,7 +1115,14 @@ pub fn link_program(
 		split
 	};
 	let entry = directory.join(format!("$entry.{}", object_extension(split)));
-	entry_object(target, options, split, inputs, &entry)?;
+	entry_object(
+		target,
+		options,
+		split,
+		inputs,
+		&entry,
+		libraries.c_library.is_some(),
+	)?;
 	let runtime = runtime_object(target, options, split, directory)?;
 	timings.emit = start.elapsed();
 	let mut objects: Vec<PathBuf> = inputs
@@ -1017,6 +1133,41 @@ pub fn link_program(
 	objects.push(entry);
 	objects.push(runtime);
 	let start = Instant::now();
+	if let Some(library) = &libraries.c_library {
+		// a C library: its shared and static libraries (the header is
+		// written by `link_units`)
+		let folder = output.parent().unwrap_or(Path::new(".")).to_path_buf();
+		let shared = folder.join(library.shared_name());
+		let archive = folder.join(library.static_name());
+		let mut exports: Vec<String> = inputs
+			.units
+			.iter()
+			.flat_map(|unit| unit.symbols.c_exports.iter().cloned())
+			.collect();
+		exports.sort();
+		exports.dedup();
+		link::link_c_library(
+			target,
+			options,
+			Some(split),
+			&objects,
+			&exports,
+			&shared,
+			&archive,
+			libraries,
+		)?;
+		timings.link = start.elapsed();
+		return Ok(Artifact {
+			target,
+			options: *options,
+			output_size: fs::metadata(&shared)?.len(),
+			output: shared,
+			loader: None,
+			ir: None,
+			c_library: Some((archive, PathBuf::new())),
+			timings,
+		});
+	}
 	link::link_objects(target, options, split, &objects, &output, libraries)?;
 	timings.link = start.elapsed();
 	let loader = if target == Target::Wasm {
@@ -1032,6 +1183,7 @@ pub fn link_program(
 		output,
 		loader,
 		ir: None,
+		c_library: None,
 		timings,
 	})
 }
@@ -1091,12 +1243,17 @@ fn reach(
 	report: &fa_analyzer::pipeline::Report,
 	entry: &str,
 	asynchronous: bool,
+	library: bool,
 ) -> Reach {
 	let types = root.types();
 	let mut stack: Vec<DeclKey> = Vec::new();
 	if let Some(interface) = report.interface(root, entry) {
 		stack.extend(interface.uses.iter().copied());
 		stack.extend(interface.export.iter().map(|export| export.key));
+		// the API file of a C library: C calls every declaration of it
+		if library {
+			stack.extend(interface.keys.keys().copied());
+		}
 	}
 	let mut seen: FxHashSet<DeclKey> = FxHashSet::default();
 	// the functions that may suspend, whose async instances an asynchronous
@@ -1372,7 +1529,16 @@ pub fn compile_package(
 	facts.finish();
 	let split = &SplitOptions {
 		facts: Some(std::sync::Arc::new(facts)),
+		c_library: libraries.c_library.clone(),
 		..split.clone()
+	};
+	// a C library runs in synchronous mode (`lower/c_library.rs`)
+	let options = &Options {
+		asynchronous: match libraries.c_library {
+			Some(_) => Some(false),
+			None => options.asynchronous,
+		},
+		..*options
 	};
 	let settings = Settings {
 		target,
@@ -1430,7 +1596,13 @@ fn link_units(
 		},
 		..*settings
 	};
-	let mut reached = reach(root, report, &entry, asynchronous);
+	let mut reached = reach(
+		root,
+		report,
+		&entry,
+		asynchronous,
+		settings.split.c_library.is_some(),
+	);
 	units.sort();
 	// the units holding the entry or a declaration it reaches
 	let holds = |modules: &Vec<String>, wanted: &FxHashSet<String>| {
@@ -1549,7 +1721,32 @@ fn link_units(
 					started.elapsed().as_millis()
 				);
 			}
-			return linked;
+			let mut artifact = linked?;
+			// the header of a C library, from its API file's interface
+			if let (Some(library), Some((archive, _))) =
+				(&libraries.c_library, artifact.c_library.clone())
+			{
+				let interface = report
+					.interface(root, &entry)
+					.ok_or_else(|| unsupported("the API file of the C library was not analyzed"))?;
+				let text = crate::header::c_header(root.types(), interface, library).map_err(
+					|message| {
+						Some(Error::Unsupported {
+							message: format!("the header of the C library: {message}"),
+							location: library.api.clone(),
+						})
+					},
+				)?;
+				let directory = artifact
+					.output
+					.parent()
+					.map(Path::to_path_buf)
+					.unwrap_or_default();
+				let header = directory.join(&library.header);
+				fs::write(&header, text).map_err(|error| Some(Error::from(error)))?;
+				artifact.c_library = Some((archive, header));
+			}
+			return Ok(artifact);
 		}
 		if std::env::var_os("FA_SPLIT_TRACE").is_some() {
 			eprintln!("split: missing {missing:?}");

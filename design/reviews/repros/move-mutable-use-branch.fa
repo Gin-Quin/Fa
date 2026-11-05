@@ -1,0 +1,13 @@
+type Person = { name: String }
+function run = (flag: Boolean) => {
+	mutable alice = Person { name = "Ana" }
+	mutable bob = Person { name = "Bao" }
+	mutable use current = alice
+	if flag {
+		reuse current = bob
+	}
+	mutable moved = alice
+	moved.name = "Xavier"
+	console.log(current.name)
+}
+run(false)

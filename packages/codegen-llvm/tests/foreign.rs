@@ -44,6 +44,7 @@ mod with_llvm {
 		archived.success().then(|| Libraries {
 			link: vec!["farm".into()],
 			paths: vec![directory.to_path_buf()],
+			..Libraries::default()
 		})
 	}
 
@@ -134,6 +135,7 @@ mod with_llvm {
 		let libraries = Libraries {
 			link: vec![object.display().to_string()],
 			paths: Vec::new(),
+			..Libraries::default()
 		};
 		let path = sources.join("geometry.foreign.fa");
 		let output = directory.join("geometry");

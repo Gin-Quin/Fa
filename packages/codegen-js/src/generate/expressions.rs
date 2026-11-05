@@ -30,6 +30,10 @@ impl Generator<'_> {
 
 	/// The JavaScript of an expression, before its reactive instrumentation.
 	fn expr_value(&mut self, n: NodeId) -> Expr {
+		// `f then g`, `chain[1..]`: a function calling the steps in turn
+		if let Some(steps) = self.analysis.compositions.get(&n).cloned() {
+			return self.composition(&steps);
+		}
 		match self.view(n) {
 			View::Group(inner) | View::Try(inner) => self.expr(inner),
 			View::Error => Expr::constant("undefined", Prec::Primary),

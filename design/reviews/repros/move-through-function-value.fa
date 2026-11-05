@@ -1,0 +1,10 @@
+function run = () => {
+	let numbers: Array<Integer> = [1, 2, 3]
+	function show = () => console.log(numbers.length)
+	let call = show
+	mutable other = numbers
+	other.push(4)
+	call()
+	console.log(other.length)
+}
+run()

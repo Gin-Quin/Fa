@@ -17,8 +17,10 @@
 //! flow buffers (decision A3) so that only the stable round's are kept.
 
 pub(crate) mod arrays;
+mod c_library;
 mod calls;
 mod collections;
+mod compose;
 mod comptime;
 mod concurrency;
 mod control;
@@ -34,6 +36,7 @@ mod functions;
 mod generics;
 mod interface;
 mod iterators;
+mod key_sets;
 mod locals;
 mod math;
 pub(crate) mod modules;
@@ -358,7 +361,7 @@ pub struct Walker<'s> {
 	/// The bindings of each instance of a generic type (its functions are substituted).
 	pub(crate) instance_bindings: FxHashMap<TypeId, crate::types::Bindings>,
 	/// Key sets and `Fields` types (fields.rs).
-	pub(crate) key_sets: fields::KeySetState,
+	pub(crate) key_sets: key_sets::KeySetState,
 	/// The type parameters of the generic built-in methods (`Array.map`), per owner.
 	pub(crate) builtin_params: FxHashMap<&'static str, TypeId>,
 	/// Inside the constraint of a generic parameter (a union there is not a runtime union).
@@ -555,7 +558,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		constraint_depth: 0,
 		builtin_params: FxHashMap::default(),
 		instance_bindings: FxHashMap::default(),
-		key_sets: fields::KeySetState::default(),
+		key_sets: key_sets::KeySetState::default(),
 		aliases: FxHashMap::default(),
 		foreign: foreign::ForeignState::default(),
 		std_library: std_library::StdState::default(),
@@ -597,6 +600,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		walker.finish_modules(root);
 		// the async summaries, settled (tasks.rs)
 		walker.finish_tasks(root);
+		// the API of a C library (c_library.rs)
+		walker.finish_c_library(root);
 	}
 	// the relations of the file (relations.rs)
 	walker.finish_relations();

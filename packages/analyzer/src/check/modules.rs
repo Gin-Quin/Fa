@@ -252,6 +252,37 @@ impl Walker<'_> {
 	/// it (its methods take `self`). Every file that declared a type of
 	/// this structure is looked at, in the order of their paths (two files
 	/// may declare the same object type, each with its functions).
+	/// The type named `name` declared inside a type of another file
+	/// (`Database.OpenError`), from that file's interface.
+	pub(super) fn external_nested_type(&mut self, ty: TypeId, name: Sym) -> Option<TypeId> {
+		let own = self.s.module_id(self.file);
+		if self.modules.closure.is_none() {
+			self.modules.closure = Some(self.s.dependency_closure(self.file));
+		}
+		let closure = self.modules.closure.as_ref()?;
+		let origins = self
+			.s
+			.type_origins(ty, |module| module != own && closure.contains(&module));
+		for origin in origins {
+			let module = self.s.types.decl_key_data(origin).module;
+			let Some(interface) = self.s.interface(module) else {
+				continue;
+			};
+			let nested = interface
+				.node_of(origin)
+				.and_then(|decl| interface.nested_types.get(&decl))
+				.and_then(|nested| nested.iter().find(|nested| nested.name == name))
+				.map(|nested| nested.ty);
+			match nested {
+				Some(nested) => return Some(nested),
+				// a file whose walk is in progress (a cycle)
+				None if !interface.complete => self.modules.deferred = true,
+				None => {}
+			}
+		}
+		None
+	}
+
 	pub(super) fn external_type_function(&mut self, ty: TypeId, name: &str) -> Option<SymbolId> {
 		let ty = match self.s.types.kind(ty) {
 			crate::types::TypeKind::Member(nominal, _)
@@ -521,7 +552,10 @@ impl Walker<'_> {
 			if matches!(info.kind, ScopeKind::Module | ScopeKind::Imports) || depth > 64 {
 				break;
 			}
-			if let Some(name) = self.owner_name(info.owner) {
+			if let Some(name) = self
+				.owner_name(info.owner)
+				.or_else(|| self.type_body_name(info.owner, info.parent))
+			{
 				names.push(name);
 			}
 			scope = info.parent;
@@ -551,6 +585,25 @@ impl Walker<'_> {
 	pub(crate) fn node_key(&mut self, node: NodeId) -> Option<DeclKey> {
 		let symbol = self.a.symbols.symbol_of_decl(node)?;
 		Some(self.symbol_key(symbol))
+	}
+
+	/// The name of the type whose body is `owner`, declared in `parent`: the
+	/// declarations inside a type are keyed under its name (`Farm.Error`,
+	/// which a C header names `farm_FarmError`).
+	pub(super) fn type_body_name(&self, owner: NodeId, parent: Option<ScopeId>) -> Option<Sym> {
+		let parent = parent?;
+		self.a
+			.symbols
+			.scope(parent)
+			.symbols
+			.iter()
+			.map(|&symbol| self.a.symbols.symbol(symbol))
+			.filter(|symbol| symbol.kind == SymbolKind::Type)
+			.find(|symbol| match syntax::view(&self.tree, symbol.decl_node) {
+				View::TypeDecl { value, .. } | View::ExportType { value, .. } => value == owner,
+				_ => false,
+			})
+			.map(|symbol| symbol.name)
 	}
 
 	/// The name of the declaration owning a scope (a namespace's block, a
@@ -1278,6 +1331,9 @@ impl Walker<'_> {
 	fn module_type_members(&mut self, ty: TypeId, rest: NodeList<'_>, value: bool) -> TypeId {
 		let tree = Arc::clone(&self.tree);
 		let mut current = ty;
+		// after a type declared inside a type, the members are resolved (the
+		// backends build `library.Farm.Error.Empty` from its last member)
+		let mut nested = false;
 		for member in rest.iter() {
 			if self.s.types.is_recovering(current) {
 				return TypeId::UNKNOWN;
@@ -1296,6 +1352,16 @@ impl Walker<'_> {
 				self.set_type(member, ty);
 				return ty;
 			}
+			// `library.Database.OpenError`: a type declared inside the type
+			if self.nominal_member(current, text).is_none()
+				&& let Some(nested_type) = self.nested_type(current, text, member)
+			{
+				self.set_type(member, nested_type);
+				self.set_flag(member, crate::analysis::NodeFlags::TYPE_EXPR);
+				current = nested_type;
+				nested = true;
+				continue;
+			}
 			let Some(found) = self.nominal_member(current, text) else {
 				let message = format!(
 					"`{}` has no member `{}`",
@@ -1307,6 +1373,9 @@ impl Walker<'_> {
 				return TypeId::UNKNOWN;
 			};
 			self.set_type(member, found);
+			if nested {
+				self.set_member_resolution(member, found);
+			}
 			current = found;
 		}
 		current

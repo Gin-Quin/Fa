@@ -1,0 +1,17 @@
+-- an error in the body of an `@for` over a key set names the key (TF011)
+type Counts = { apples: Integer, label: String }
+
+function bump = <Value, keys: Keys<Value>>(value: Value) => {
+	@for key in keys {
+		console.log(value[key] + 1) -- error: TF011
+	}
+}
+
+let counts: Counts = { apples = 1, label = "fruit" }
+bump<Counts, { apples }>(counts)
+bump<Counts, { apples, label }>(counts)
+
+static all: Keys<Counts> = { apples, label }
+@for key in all {
+	let doubled: Integer = counts[key] * 2 -- error: TF011
+}

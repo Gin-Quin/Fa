@@ -193,6 +193,14 @@ impl Generator<'_> {
 		// the last member of the module path: a function of a type follows its type
 		let mut reached = None;
 		for (index, &member) in members.iter().enumerate() {
+			// a type declared inside the type reached (`library.Farm.Animal.make`)
+			if reached.is_some()
+				&& self
+					.analysis
+					.has_flags(member, fa_analyzer::analysis::NodeFlags::TYPE_EXPR)
+			{
+				continue;
+			}
 			match self.analysis.resolution(member) {
 				Resolution::Folder(_) => {}
 				Resolution::External(..) => {

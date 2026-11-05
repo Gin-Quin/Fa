@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ co-4: slices → 9 / 1 / 6
 function one = (x: Integer): Integer => x + 1
 function two = (x: Integer): Integer => x * 2

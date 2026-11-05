@@ -733,6 +733,16 @@ fn resolve_contextual_keywords(tokens: &mut [Token]) {
 		let declares_a_name = tokens
 			.get(index + 1)
 			.is_some_and(|token| is_identifier_like(token.kind));
+		// `type Error = Errors { … }` in a type: a name, reached as `Self.Error`
+		// (the word alone stays the prelude's `Error`)
+		if kind == TokenKind::Type
+			&& index + 2 < tokens.len()
+			&& tokens[index + 1].kind == TokenKind::Error
+			&& tokens[index + 2].kind == TokenKind::Equal
+		{
+			tokens[index + 1].kind = TokenKind::Identifier;
+			continue;
+		}
 		if !is_exported && !declares_a_name {
 			tokens[index].kind = TokenKind::Identifier;
 		}

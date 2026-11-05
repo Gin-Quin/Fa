@@ -31,13 +31,16 @@ impl Timings {
 pub struct Artifact {
 	pub target: Target,
 	pub options: Options,
-	/// The executable, or the `.wasm` module.
+	/// The executable, the `.wasm` module, or the shared library of a C library.
 	pub output: PathBuf,
 	/// The JavaScript loader of a wasm module (`<name>.mjs`), which runs it
 	/// with Node or Bun: `node <name>.mjs arguments…`.
 	pub loader: Option<PathBuf>,
 	/// The optimized IR, with [`Options::emit_ir`].
 	pub ir: Option<PathBuf>,
+	/// A C library (`output` is its shared library): its static library
+	/// and its header.
+	pub c_library: Option<(PathBuf, PathBuf)>,
 	pub output_size: u64,
 	pub timings: Timings,
 }

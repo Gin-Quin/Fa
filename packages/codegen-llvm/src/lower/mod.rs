@@ -23,11 +23,13 @@ mod aliasing;
 mod appends;
 mod arith;
 mod arrays;
+pub(crate) mod c_library;
 mod calls;
 mod capacity;
 mod chunks;
 mod closures;
 mod columns;
+mod compose;
 mod constants;
 mod destination;
 mod division;
@@ -393,6 +395,10 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// generic parameters (their first ones, given by the receiver) and the
 	/// declared type.
 	generic_type_methods: FxHashMap<(FileId, NodeId), (Vec<fa_analyzer::ids::ParamId>, TypeId)>,
+	/// The program is a C library (`c_library.rs`).
+	c_library: Option<crate::options::CLibrary>,
+	/// The functions the C library exports (its wrappers).
+	c_exports: Vec<String>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -517,6 +523,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			split: None,
 			generic_values: generic_values::GenericValues::default(),
 			generic_type_methods: FxHashMap::default(),
+			c_library: None,
+			c_exports: Vec::new(),
 		};
 		lowering.module_file = state.module_file;
 		lowering
@@ -532,6 +540,17 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	) -> Self {
 		self.program_facts = facts;
 		self
+	}
+
+	/// The program is a C library (`build.cLibrary`, `c_library.rs`).
+	pub(crate) fn with_c_library(mut self, library: Option<crate::options::CLibrary>) -> Self {
+		self.c_library = library;
+		self
+	}
+
+	/// The functions the C library exports.
+	pub(crate) fn c_exports(&self) -> &[String] {
+		&self.c_exports
 	}
 
 	/// Records the facts the lowering consults (`facts::FactLog`).
@@ -576,7 +595,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// Lowers the whole program: the runtime, the functions of every file,
 	/// then `main` (the module-level values, the top level of the entry).
-	pub(crate) fn lower(mut self) -> Result<(), Error> {
+	/// Lowers the program; the functions a C library exports.
+	pub(crate) fn lower(mut self) -> Result<Vec<String>, Error> {
 		self.runtime.link_tier1()?;
 		// A materializing read must not race another thread holding the same
 		// collection. Keep the eager representation in parallel/foreign and
@@ -628,7 +648,17 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 		}
 		self.switch_file(self.entry);
-		if self.tests.is_empty() {
+		if self.c_library.is_some() {
+			// a C library: its wrappers, and its load and unload functions
+			if !self.is_c_api_file() {
+				return Err(Error::Unsupported {
+					message: "a C library whose API file is not the program's entry".to_string(),
+					location: self.path.clone(),
+				});
+			}
+			self.lower_c_api()?;
+			self.lower_library_entry()?;
+		} else if self.tests.is_empty() {
 			self.lower_main()?;
 		} else {
 			self.lower_test_main()?;
@@ -662,7 +692,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			flag.set_initializer(&self.context.bool_type().const_int(needed as u64, false));
 		}
 		self.runtime.internalize()?;
-		Ok(())
+		self.keep_c_exports();
+		Ok(std::mem::take(&mut self.c_exports))
 	}
 
 	// ── locations and errors ────────────────────────────────────────────
@@ -2165,6 +2196,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if let Some(value) = self.compile_time_scalar(node)? {
 			return Ok(value);
 		}
+		// `f then g`, `chain[1..]` (compose.rs)
+		if self.analysis.compositions.contains_key(&node) {
+			return self.composition_value(node);
+		}
 		match self.view(node) {
 			View::Error => Err(self.unsupported(node.index(), "code with errors")),
 			View::Integer(value) => self.integer_literal(value, node),
@@ -2230,7 +2265,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Destructuring { .. } if self.is_name_alias(node) => Ok(Val::void()),
 			View::Destructuring { pattern, value, .. } => self.destructure(pattern, value),
 			// the field at a key of a key set (fields.rs)
-			View::Index { target, index } if self.analysis.key_reads.contains_key(&node) => {
+			View::Index { target, index } if self.analysis.key_reads.contains(&node) => {
 				self.key_read(node, target, index)
 			}
 			View::Index { target, index } => match self.index_special(node, target, index)? {

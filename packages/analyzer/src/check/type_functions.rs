@@ -303,7 +303,11 @@ impl Walker<'_> {
 	/// The names of the parameters of the function a value is: a function
 	/// declaration, a value annotated with a function type, a field of an
 	/// object type declared with one.
-	fn value_parameter_names(&mut self, n: NodeId, depth: u32) -> Option<Vec<Option<String>>> {
+	pub(super) fn value_parameter_names(
+		&mut self,
+		n: NodeId,
+		depth: u32,
+	) -> Option<Vec<Option<String>>> {
 		let tree = Arc::clone(&self.tree);
 		match syntax::view(&tree, n) {
 			View::Group(inner) => self.value_parameter_names(inner, depth + 1),

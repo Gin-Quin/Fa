@@ -1,0 +1,10 @@
+type Config = { names: Array<String> }
+mutable config = Config { names = ["a"] }
+function grow = (target: Config) throws IndexError mutates target => {
+	use first = try config.names[0]
+	for index in 0..100 {
+		target.names.push("x")
+	}
+	console.log(first)
+}
+try grow(config)

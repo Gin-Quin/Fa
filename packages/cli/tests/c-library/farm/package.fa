@@ -1,0 +1,7 @@
+export = {
+	name = "farm"
+	targets = ["native"]
+	build = {
+		cLibrary = { header = "farm.h", prefix = "farm", api = "library/capi.foreign.fa" }
+	}
+}

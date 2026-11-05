@@ -1,0 +1,24 @@
+-- `when` over a set of flags: an arm whose pattern is a value of the set's
+-- type matches an equal set; the other sets need an `else` (fields-errors.fa)
+type Permissions = Fields { read, write, admin }
+
+function describe = (permissions: Permissions): String => when permissions is {
+	{} => "nothing"
+	Permissions.read => "read only"
+	Permissions { read, write } => "read and write"
+	else => "other"
+}
+
+console.log(describe({})) -- prints: nothing
+console.log(describe(Permissions.read)) -- prints: read only
+console.log(describe({ write, read })) -- prints: read and write
+console.log(describe({ admin })) -- prints: other
+
+type Wide = Fields { f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27, f28, f29, f30, f31, f32, f33 }
+let wide: Wide = { f0, f33 }
+let found = when wide is {
+	Wide.f33 => "f33"
+	Wide { f0, f33 } => "both"
+	else => "other"
+}
+console.log(found) -- prints: both

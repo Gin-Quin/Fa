@@ -1,0 +1,10 @@
+type E = Errors { Bad }
+function fail = (): Integer throws E => {
+	throw E.Bad
+}
+function run = (f: () => Integer): Integer => f()
+function main = () throws E => {
+	let v = try run(fail)
+	let w = try run(() => try fail())
+	console.log(v, w)
+}

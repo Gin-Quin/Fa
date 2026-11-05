@@ -638,8 +638,8 @@ impl Walker<'_> {
 						w.s.types.string_literal(&text)
 					} else {
 						let schema = comptime::schema::schema(&w.s.types, ty);
-						let defaults = w.schema_defaults(ty);
-						let schema = comptime::schema::with_defaults(schema, &defaults);
+						let (defaults, order) = w.schema_defaults(ty);
+						let schema = comptime::schema::with_defaults(schema, &defaults, &order);
 						w.a.constants.insert(n, schema);
 						crate::builtins::schema::schema(&mut w.s.types)
 					}
@@ -769,11 +769,15 @@ impl Walker<'_> {
 
 	/// The schemas of the literal default values of an object type's fields
 	/// (`@typeToSchema`: `default = Schema.StringLiteral { value = "hello" }`).
-	fn schema_defaults(&mut self, ty: TypeId) -> Vec<(String, Value)> {
+	fn schema_defaults(&mut self, ty: TypeId) -> (Vec<(String, Value)>, Vec<String>) {
 		if !matches!(self.s.types.kind(ty), TypeKind::Object(_)) {
-			return Vec::new();
+			return (Vec::new(), Vec::new());
 		}
 		let (_, fields) = self.object_declaration(ty);
+		let order: Vec<String> = fields
+			.iter()
+			.map(|field| self.s.types.syms.resolve(field.name).to_string())
+			.collect();
 		let mut defaults = Vec::new();
 		for field in fields {
 			let Some(default) = field.default else {
@@ -794,7 +798,7 @@ impl Walker<'_> {
 			let name = self.s.types.syms.resolve(field.name).to_string();
 			defaults.push((name, comptime::schema::schema(&self.s.types, literal)));
 		}
-		defaults
+		(defaults, order)
 	}
 
 	/// After the checks of a call written `@f(…)`: evaluates it once.

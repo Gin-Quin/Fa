@@ -950,6 +950,19 @@ impl Walker<'_> {
 			self.report_impure(iterable, &what);
 			return;
 		}
+		// a key set: the dotted paths of its keys (fields.rs)
+		let key_set = self.type_of(iterable);
+		if self.is_fields(key_set) {
+			match self.run(&expr, slots) {
+				Ok(Value::Integer(bits)) => {
+					let items = self.key_items(key_set, bits);
+					self.a.unrolled.insert(n, items);
+				}
+				Ok(_) => {}
+				Err(error) => self.report_comptime_error(iterable, &error),
+			}
+			return;
+		}
 		match self.run(&expr, slots) {
 			Ok(value) => match fa_interpreter::builtins::iterate(&value) {
 				Ok(items) => {

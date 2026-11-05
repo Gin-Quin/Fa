@@ -140,6 +140,9 @@ impl Generator<'_> {
 	pub(crate) fn arithmetic(&mut self, n: NodeId, op: ArithOp, operands: NodeList<'_>) -> Expr {
 		let ty = self.type_of(n);
 		let nodes: Vec<NodeId> = operands.iter().collect();
+		if self.is_fields(ty) {
+			return self.fields_arithmetic(n, op, &nodes);
+		}
 		if let Some(folded) = self.folded(n, ty) {
 			return folded;
 		}
@@ -696,6 +699,10 @@ impl Generator<'_> {
 			_ => None,
 		};
 		let result = match kind {
+			// `set += flags`, `set -= flags` (fields.rs)
+			Kind::Other if self.is_fields(place_ty) => {
+				self.fields_step(place_ty, op, &place, &operand)
+			}
 			Kind::Text | Kind::Percentage | Kind::Float(FloatBits::F64) => {
 				if let Some(operator) = simple(op) {
 					self.out
@@ -948,6 +955,10 @@ impl Generator<'_> {
 				js::call("Math.fround", &[value.text])
 			}
 			(Kind::Float(_), _) => value,
+			// `Integer(set)`: the bits of a `Fields` value (fields.rs)
+			(Kind::Int(_), Kind::Other) if self.is_fields(source) => {
+				self.convert_representation(argument, value, source, target)
+			}
 			(Kind::BigInt, Kind::Int(_)) => match self.repr(source) {
 				Repr::Number => self.big_int_of(argument, &value),
 				_ => value,

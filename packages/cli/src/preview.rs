@@ -21,7 +21,7 @@ pub(crate) fn preview(arguments: &[OsString]) -> i32 {
 			}
 			target = Some(value.to_string());
 		} else if text.starts_with("--") {
-			eprintln!("fa preview: unknown option `{text}`");
+			eprintln!("fa preview: unknown option `{text}`: see `fa help preview`");
 			return USAGE;
 		} else {
 			paths.push(argument.clone());

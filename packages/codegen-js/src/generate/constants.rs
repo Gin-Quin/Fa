@@ -81,6 +81,7 @@ impl Generator<'_> {
 			Value::Integer(integer) => {
 				let bigint = match types.kind(ty) {
 					TypeKind::BigInt | TypeKind::BigIntLit(_) => true,
+					TypeKind::Fields(_) => types.fields_width(ty) > 32,
 					TypeKind::Int(_) => types
 						.as_int(ty)
 						.is_some_and(|int| int.storage.is_js_bigint()),
@@ -218,8 +219,24 @@ impl Generator<'_> {
 				}
 			}
 			Value::Member(member) => return self.member_constant(member, ty),
-			// ranges and functions are built by the runtime: not yet
-			Value::Range { .. } | Value::Function(_) => return None,
+			// a range: a `FaRange`, as a range literal builds it (objects.rs)
+			Value::Range {
+				start,
+				end,
+				inclusive,
+			} => {
+				let bound = |bound: &Option<ethnum::I256>| {
+					bound.map_or_else(|| "undefined".to_string(), |bound| bound.to_string())
+				};
+				let class = self.helper("FaRange");
+				Expr::primary(format!(
+					"new {class}({}, {}, {inclusive})",
+					bound(start),
+					bound(end)
+				))
+			}
+			// functions are built by the runtime: not yet
+			Value::Function(_) => return None,
 		})
 	}
 
@@ -254,6 +271,11 @@ impl Generator<'_> {
 		body: NodeId,
 	) {
 		let Some(items) = self.analysis.unrolled.get(&n).cloned() else {
+			// over a key-set parameter (fields.rs)
+			if self.analysis.key_loops.contains(&n) {
+				self.key_loop(pattern, iterable, body);
+				return;
+			}
 			self.for_statement(n, pattern, has_index, iterable, body);
 			return;
 		};

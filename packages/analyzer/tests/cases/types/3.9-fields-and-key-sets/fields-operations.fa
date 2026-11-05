@@ -1,0 +1,43 @@
+-- `+`, `-`, `+=`, `is in`, `==`, printing, `toStringArray`
+type Permissions = Fields { read, write, admin }
+type MyFields = Fields { foo, bar, nested { baz1, baz2 } }
+
+function grant = (permissions: Permissions, extra: Permissions): Permissions => permissions + extra
+
+mutable current: Permissions = {}
+current += Permissions.read
+current = current + { admin }
+console.log(Integer(current))
+console.log(current)
+console.log("now {current}")
+console.log(Permissions.write is not in current)
+console.log({ read, admin } is in current)
+console.log(current == Permissions { read, admin })
+console.log(current != Permissions { read })
+let all: Permissions = { read, write, admin }
+let some = all - { admin }
+console.log(some.toStringArray())
+console.log(grant(some, Permissions.admin))
+let nested = MyFields { foo, nested { baz2 } }
+console.log(nested)
+console.log(MyFields { nested } is in nested)
+console.log(MyFields.nested.baz2 is in nested)
+console.log([nested, MyFields { bar }])
+let empty: MyFields = {}
+console.log(empty)
+console.log(empty.toStringArray())
+-- prints: 5
+-- prints: { read, admin }
+-- prints: now { read, admin }
+-- prints: true
+-- prints: true
+-- prints: true
+-- prints: true
+-- prints: ["read", "write"]
+-- prints: { read, write, admin }
+-- prints: { foo, nested { baz2 } }
+-- prints: false
+-- prints: true
+-- prints: [{ foo, nested { baz2 } }, { bar }]
+-- prints: {}
+-- prints: []

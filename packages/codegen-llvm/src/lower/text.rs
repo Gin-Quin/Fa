@@ -70,7 +70,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return None;
 		}
 		match self.node_repr(node) {
-			Ok(Repr::Int(int)) if int.bits <= 64 => Some(node),
+			Ok(Repr::Int(int)) if int.bits <= 64 && !self.prints_flags(node) => Some(node),
 			_ => None,
 		}
 	}
@@ -85,6 +85,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(TemplatePart::Expression(node)) = meaningful.next()
 			&& meaningful.next().is_none()
 			&& matches!(self.node_repr(node)?, Repr::Int(int) if int.bits <= 64)
+			&& !self.prints_flags(node)
 		{
 			let value = self.expr(node)?;
 			if value.repr == Repr::Never {
@@ -123,7 +124,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 							}
 						}
 					}
-					Repr::Int(int) if int.bits <= 64 => {}
+					Repr::Int(int) if int.bits <= 64 && !self.prints_flags(node) => {}
 					_ => return Ok(None),
 				}
 			}
@@ -343,6 +344,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_store(length_pointer, needed)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(grow);
+		// a string in memory anyway (a field, an item: not a local the
+		// optimizer keeps in registers): the runtime appends to it in place,
+		// one call, so that the caller keeps few values alive around it
+		if target.as_instruction().is_none_or(|instruction| {
+			instruction.get_opcode() != inkwell::values::InstructionOpcode::Alloca
+		}) {
+			self.call_runtime(
+				"fa_string_append_cold",
+				&[
+					target.into(),
+					suffix_bytes.into(),
+					suffix_length.into(),
+					suffix_capacity.into(),
+				],
+			)?;
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(join);
+			return Ok(());
+		}
 		// one simple byte into an inline string with room (a character
 		// appended to a short string): the byte is ORed into its word of the
 		// value (the unused bytes are zero), the length in the tag byte grows,
@@ -880,6 +900,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					&[bytes.into(), length.into(), capacity.into()],
 				)
 			}
+			// a set of flags: `{ read, write }` (fields.rs)
+			Repr::Int(_)
+				if let Some(ty) = self.printed_fields_type(node)
+					&& self.fields_repr(ty) == value.repr =>
+			{
+				self.append_fields(value, ty, node)
+			}
 			Repr::Int(int) => {
 				let raw = value.int();
 				if int.bits <= 64 {
@@ -1132,7 +1159,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if let TemplatePart::Expression(node) = part {
 				let textual = match self.node_repr(node)? {
 					Repr::Str => true,
-					Repr::Int(int) => int.bits <= 64,
+					Repr::Int(int) => int.bits <= 64 && !self.prints_flags(node),
 					_ => false,
 				};
 				if !textual || self.reads_root_of(node, place) {
@@ -1350,6 +1377,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"Pointer#value" => {
 				let target = self.type_of(member);
 				self.pointer_value(value, target, member)
+			}
+			"CArray#length" => {
+				let count = match value.repr {
+					Repr::Tuple(ty) => self.c_array_count(ty).unwrap_or(0),
+					_ => 0,
+				};
+				Ok(Val::new(
+					Repr::Int(IntRepr::I64),
+					self.context.i64_type().const_int(u64::from(count), false),
+				))
 			}
 			"String#length" => {
 				let (bytes, length) = self.string_parts(value)?;

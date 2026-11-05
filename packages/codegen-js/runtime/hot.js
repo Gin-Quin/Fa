@@ -93,13 +93,16 @@ export function faHotValue(key, get, set) {
 export async function faHotSwap(root) {
 	/** @type {any} */
 	const host = globalThis;
-	const fs = host.process.getBuiltinModule("node:fs");
-	const url = host.process.getBuiltinModule("node:url");
 	let version = 0;
 	try {
-		const manifest = JSON.parse(
-			fs.readFileSync(url.fileURLToPath(new URL("./$hot.json", root)), "utf8"),
-		);
+		const at = new URL("./$hot.json", root);
+		// on a server, the file; in a browser, from the development server
+		const fs = host.process?.getBuiltinModule?.("node:fs");
+		const manifest = fs
+			? JSON.parse(
+					fs.readFileSync(host.process.getBuiltinModule("node:url").fileURLToPath(at), "utf8"),
+				)
+			: await (await fetch(at, { cache: "no-store" })).json();
 		version = manifest.version;
 		/** @type {Array<[string, any]>} */
 		const loaded = [];
@@ -123,12 +126,26 @@ export async function faHotSwap(root) {
  * Connects to the channel of `fa develop` (a local socket, its port in
  * `FA_HOT_CHANNEL`): each line `swap` swaps the modules (`faHotSwap`), and
  * its answer is sent back as a line of JSON. The channel doesn't keep the
- * program running; without the variable, nothing happens.
+ * program running; without the variable, nothing happens. In a browser
+ * (`fa develop --target=web`), the channel is the WebSocket `/$fa-hot` of
+ * the development server, which also asks for a full reload (`reload`).
  * @param {string} root the URL of the output folder
  */
 export function faHotListen(root) {
 	/** @type {any} */
 	const host = globalThis;
+	if (host.process === undefined && host.location !== undefined && host.WebSocket) {
+		const scheme = host.location.protocol === "https:" ? "wss" : "ws";
+		const socket = new host.WebSocket(`${scheme}://${host.location.host}/$fa-hot`);
+		socket.onmessage = async (/** @type {{ data: string }} */ event) => {
+			if (event.data === "reload") {
+				host.location.reload();
+			} else if (event.data === "swap") {
+				socket.send(JSON.stringify(await faHotSwap(root)));
+			}
+		};
+		return;
+	}
 	const port = Number(host.process?.env?.FA_HOT_CHANNEL);
 	if (!port) {
 		return;

@@ -76,6 +76,10 @@ impl Walker<'_> {
 			}
 			_ => {
 				let ty = self.check_type_expr(value);
+				// `type Permissions = Fields { … }`: named in messages (fields.rs)
+				if matches!(self.s.types.kind(ty), crate::types::TypeKind::Fields(_)) {
+					self.s.types.name_type(ty, &text);
+				}
 				self.finish_type(n, symbol, ty, ObjectTypeParts::default(), None);
 			}
 		}

@@ -29,6 +29,7 @@ pub const RUNTIME_FILES: &[(&str, &str)] = &[
 	("floats.js", include_str!("../runtime/floats.js")),
 	("strings.js", include_str!("../runtime/strings.js")),
 	("collections.js", include_str!("../runtime/collections.js")),
+	("fields.js", include_str!("../runtime/fields.js")),
 	("equality.js", include_str!("../runtime/equality.js")),
 	("format.js", include_str!("../runtime/format.js")),
 	("copy.js", include_str!("../runtime/copy.js")),

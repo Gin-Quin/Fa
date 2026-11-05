@@ -192,6 +192,10 @@ impl TypeStore {
 				let _ = write!(out, "{}.{member}", self.decl_name(info.key));
 			}
 			TypeKind::Fields(_) => {
+				if let Some(name) = self.type_name(ty) {
+					out.push_str(name);
+					return;
+				}
 				out.push_str("Fields ");
 				self.write_keys(ty, out);
 			}

@@ -1,0 +1,32 @@
+-- `CArray` values (foreign-code.md, "C types"): built from a literal of
+-- their count, indexed (from the end too, `IndexError` outside), written in
+-- place, iterated, copied with their struct, compared and printed like
+-- arrays.
+type Vertex = CStruct {
+	position: CArray<Float32, 3>
+	color: CArray<UInt8, 4>
+}
+mutable vertex = Vertex { position = [1.0, 2.0, 3.0], color = [255, 0, 0, 255] }
+console.log(vertex.position, vertex.color)
+vertex.position[1] = 5.5
+console.log(vertex.position[1], vertex.color.length, vertex.color[-1])
+mutable copy = vertex
+copy.color[0] = 9
+console.log(copy.color[0], vertex.color[0])
+mutable vertices: Array<Vertex> = [vertex, Vertex { position = [0.0, 0.0, 0.0], color = [1, 2, 3, 4] }]
+console.log(vertices.length, copy == vertex)
+mutable total = 0
+for value, index in vertex.color {
+	total += value + index
+}
+console.log(total)
+let at = 3
+console.log(try vertex.color[at])
+console.log(vertex)
+-- prints: [1, 2, 3] [255, 0, 0, 255]
+-- prints: 5.5 4 255
+-- prints: 9 255
+-- prints: 2 false
+-- prints: 516
+-- prints: 255
+-- prints: { position = [1, 5.5, 3], color = [255, 0, 0, 255] }

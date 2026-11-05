@@ -458,7 +458,7 @@ impl Generator<'_> {
 					let helper = self.helper("faStringLength");
 					js::call(helper, &[value.text])
 				}
-				"Array#length" | "OrderedColumnar#length" => {
+				"Array#length" | "OrderedColumnar#length" | "CArray#length" => {
 					Expr::primary(format!("{}{dot}length", value.primary_text()))
 						.with_purity(value.pure, false)
 				}
@@ -773,6 +773,10 @@ impl Generator<'_> {
 
 	/// `target[index]`: an array item or a character of a string.
 	pub(crate) fn index(&mut self, n: NodeId, target: NodeId, index: NodeId) -> Expr {
+		// the field at a key of a key set (fields.rs)
+		if self.analysis.key_reads.contains_key(&n) {
+			return self.key_read(target, index);
+		}
 		if let Some(slice) = self.slice(target, index) {
 			return slice;
 		}
@@ -1042,7 +1046,7 @@ impl Generator<'_> {
 	}
 
 	/// A value evaluated once: stable, or kept in a temporary.
-	fn keep(&mut self, value: Expr) -> Expr {
+	pub(crate) fn keep(&mut self, value: Expr) -> Expr {
 		if value.stable {
 			return value;
 		}
@@ -1112,6 +1116,7 @@ impl Generator<'_> {
 			TypeKind::Object(_)
 			| TypeKind::Tuple(_)
 			| TypeKind::Collection(..)
+			| TypeKind::CArray(..)
 			| TypeKind::NamedUnion(..)
 			| TypeKind::Member(..)
 			| TypeKind::Range => true,
@@ -1445,11 +1450,17 @@ impl Generator<'_> {
 					format!("(value) => new {class}(value.start, value.end, value.includesEnd)"),
 				)
 			}
-			TypeKind::Collection(CollKind::Array, item, _) if self.is_composite(item) => {
+			TypeKind::Collection(CollKind::Array, item, _) | TypeKind::CArray(item, _)
+				if self.is_composite(item) =>
+			{
 				let item_copy = self.copy_function(item)?;
 				let wanted = format!("{item_copy}$array");
 				(wanted, format!("(value) => value.map({item_copy})"))
 			}
+			TypeKind::CArray(..) => (
+				"copy$cArray".to_string(),
+				"(value) => value.slice()".to_string(),
+			),
 			// a pool of values: its values, in new slots
 			TypeKind::Collection(..) if self.is_value_pool(ty) => {
 				let class = self.helper("FaValuePool");
@@ -1553,7 +1564,9 @@ impl Generator<'_> {
 	/// The copy of a composite field read as `value.name`.
 	fn copy_field(&mut self, read: Expr, ty: TypeId) -> Option<Expr> {
 		match self.types.kind(ty) {
-			TypeKind::Collection(CollKind::Array, item, _) if !self.is_composite(item) => {
+			TypeKind::Collection(CollKind::Array, item, _) | TypeKind::CArray(item, _)
+				if !self.is_composite(item) =>
+			{
 				Some(Expr::primary(format!("{}.slice()", read.text)))
 			}
 			TypeKind::Union(list) => {

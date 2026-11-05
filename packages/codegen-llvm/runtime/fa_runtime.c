@@ -1081,6 +1081,14 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_append(FaString *string,
 	string_append_slow(string, bytes, length, suffix_capacity);
 }
 
+/// `fa_string_append` out of line, for the slow path of an append to a
+/// string in memory (a field, an item: `src/lower/text.rs`), so that the
+/// caller's hot path keeps few values alive around one call.
+FA_EXPORT __attribute__((noinline, cold)) void fa_string_append_cold(FaString *string, const uint8_t *bytes,
+                                                                    size_t length, size_t suffix_capacity) {
+	fa_string_append(string, bytes, length, suffix_capacity);
+}
+
 /// `string + suffix` off its common path: a new string of the exact size
 /// (a sum is seldom grown further), the old block freed when owned.
 static __attribute__((noinline)) void string_plus_slow(FaString *string, const uint8_t *bytes,

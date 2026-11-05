@@ -335,6 +335,47 @@ fn callback(
 	interpreter.call_value(function, arguments)
 }
 
+/// The paths of the flags of a `Fields` value (`names`: the path of each bit).
+fn fields_flags(bits: I256, names: &Value) -> Vec<Value> {
+	names
+		.items()
+		.unwrap_or_default()
+		.iter()
+		.enumerate()
+		.filter(|(index, _)| (bits >> *index as u32) & I256::ONE == I256::ONE)
+		.map(|(_, name)| name.clone())
+		.collect()
+}
+
+/// A set of flags as a key set, from the dotted paths of its flags (a
+/// group's flags are next to each other): `{ read, nested { a, b } }`.
+fn format_fields(paths: &[&str]) -> String {
+	if paths.is_empty() {
+		return "{}".to_string();
+	}
+	let mut entries: Vec<String> = Vec::new();
+	let mut index = 0;
+	while index < paths.len() {
+		match paths[index].split_once('.') {
+			None => {
+				entries.push(paths[index].to_string());
+				index += 1;
+			}
+			Some((group, _)) => {
+				let prefix = format!("{group}.");
+				let members: Vec<&str> = paths[index..]
+					.iter()
+					.take_while(|path| path.starts_with(&prefix))
+					.map(|path| &path[prefix.len()..])
+					.collect();
+				index += members.len();
+				entries.push(format!("{group} {}", format_fields(&members)));
+			}
+		}
+	}
+	format!("{{ {} }}", entries.join(", "))
+}
+
 fn list(items: Vec<Value>) -> Value {
 	Value::Array(Arc::new(items))
 }
@@ -559,6 +600,23 @@ pub fn call(
 		| "BigInt#toString"
 		| "Percentage#toString"
 		| "Enum#toString" => Value::String(Arc::from(receiver.to_text())),
+
+		// ── `Fields` values: their bits (the lowering's own paths) ──
+		"Fields#union" => Value::Integer(integer(&receiver)? | integer(arg(1)?)?),
+		"Fields#difference" => Value::Integer(integer(&receiver)? & !integer(arg(1)?)?),
+		// `value is in set`: the set first
+		"Fields#includes" => {
+			let (set, value) = (integer(&receiver)?, integer(arg(1)?)?);
+			Value::Boolean(set & value == value)
+		}
+		// the paths of the flags of the set (`names`: the path of each bit)
+		"Fields#toStringArray" => list(fields_flags(integer(&receiver)?, arg(1)?)),
+		// the set as a key set: `{ read, nested { a } }`
+		"Fields#format" => {
+			let flags = fields_flags(integer(&receiver)?, arg(1)?);
+			let paths: Vec<&str> = flags.iter().filter_map(Value::as_str).collect();
+			Value::string(&format_fields(&paths))
+		}
 
 		// ── numbers ──
 		"Integer.parse" => parse_integer(text(&receiver)?)?,

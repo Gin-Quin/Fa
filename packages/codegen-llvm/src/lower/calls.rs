@@ -596,6 +596,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.print(if path == "console.log" { 1 } else { 2 }, &values)
 			}
 			_ if path.starts_with("String#") => self.string_method(node, path, info),
+			"Pointer.allocate" => self.pointer_allocate(node, info),
 			_ if path.starts_with("Pointer#") || path.starts_with("CString#") => {
 				self.pointer_method(node, path, info)
 			}
@@ -625,6 +626,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				self.array_method(node, path, &arguments)
 			}
+			"Fields#toStringArray" => self.fields_to_string_array(node),
 			"Enum#toString" => {
 				let value = self.receiver(node)?;
 				match value.repr {
@@ -888,6 +890,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			{
 				Some(argument)
 			}
+			// a key set: its `Fields` type and its bits (fields.rs)
+			TypeKind::Tuple(_) if self.key_set_bits(argument).is_some() => Some(argument),
 			_ => None,
 		}
 	}

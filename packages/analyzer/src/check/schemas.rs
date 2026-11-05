@@ -437,12 +437,67 @@ impl Walker<'_> {
 				sig.is_async = is_async;
 				self.s.types.function(sig)
 			}
-			"Fields" => self.unsupported(n, "`TypeFromSchema` of a `Schema.Fields`"),
+			// its flags in order, a group with its own flags (fields.rs)
+			"Fields" => {
+				let flags = items("flags");
+				match self.schema_flags(n, &flags, 0) {
+					Some(ty) if self.s.types.fields_width(ty) <= 128 => ty,
+					Some(_) => self.invalid_schema(
+						n,
+						&TF042,
+						"a `Fields` type has at most 128 flags, counting the members of its groups",
+					),
+					None => TypeId::UNKNOWN,
+				}
+			}
 			_ => {
 				let message = format!("`{}` is not a member of `Schema`", member.name);
 				self.invalid_schema(n, &TF042, &message)
 			}
 		}
+	}
+
+	/// The `Fields` type of a list of `SchemaFlag`s: `None` when one is
+	/// invalid (reported).
+	fn schema_flags(&mut self, n: NodeId, flags: &[Value], depth: u32) -> Option<TypeId> {
+		if depth > 16 {
+			self.invalid_schema(
+				n,
+				&TF042,
+				"the groups of a `Schema.Fields` are nested too deeply",
+			);
+			return None;
+		}
+		let mut keys: Vec<(String, TypeId)> = Vec::with_capacity(flags.len());
+		for flag in flags {
+			let Value::Object(flag) = flag else {
+				self.invalid_schema(n, &TF042, "a flag is a `SchemaFlag`");
+				return None;
+			};
+			let Some(name) = flag
+				.get("name")
+				.and_then(|name| name.as_str().map(str::to_string))
+			else {
+				self.invalid_schema(n, &TF042, "a `SchemaFlag` has a `name`");
+				return None;
+			};
+			if keys.iter().any(|(other, _)| *other == name) {
+				let message = format!("two flags are named `{name}`");
+				self.invalid_schema(n, &TF041, &message);
+				return None;
+			}
+			let members: Vec<Value> = flag
+				.get("flags")
+				.and_then(|members| members.items().map(<[Value]>::to_vec))
+				.unwrap_or_default();
+			let children = if members.is_empty() {
+				TypeId::UNSET
+			} else {
+				self.schema_flags(n, &members, depth + 1)?
+			};
+			keys.push((name, children));
+		}
+		Some(self.s.types.fields_type(&keys))
 	}
 
 	/// A `Schema.Named` whose definition is a `Schema.NamedUnion` or a

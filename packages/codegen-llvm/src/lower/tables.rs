@@ -84,8 +84,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		// per unit: the merged facts of every unit, by stable name (`facts.rs`)
 		self.program_facts.as_ref().is_some_and(|facts| {
-			crate::facts::stable_type_name(self.types(), ty)
-				.is_some_and(|name| !facts.contains(crate::facts::REFERENCED_MAPS, &name))
+			crate::facts::stable_type_name(self.types(), ty).is_some_and(|name| {
+				!facts
+					.consulted(crate::facts::REFERENCED_MAPS, self.fact_log.as_deref())
+					.contains(&name)
+			})
 		})
 	}
 
@@ -96,8 +99,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return self.no_inline_maps.contains(&ty);
 		}
 		self.program_facts.as_ref().is_none_or(|facts| {
-			crate::facts::stable_type_name(self.types(), ty)
-				.is_none_or(|name| facts.contains(crate::facts::DELETED_WHILE_ITERATED_MAPS, &name))
+			crate::facts::stable_type_name(self.types(), ty).is_none_or(|name| {
+				facts
+					.consulted(
+						crate::facts::DELETED_WHILE_ITERATED_MAPS,
+						self.fact_log.as_deref(),
+					)
+					.contains(&name)
+			})
 		})
 	}
 
@@ -1165,6 +1174,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Appends `[1, 2]` (a set) or `[("a", 1)]` (a map).
 	pub(crate) fn append_table(&mut self, value: Val<'ctx>, node: NodeId) -> Result<(), Error> {
 		let table = self.table_of(value.repr)?;
+		// the types of the keys and values: a set of flags prints its flags (fields.rs)
+		let (key_type, value_type) = match value.repr {
+			Repr::Set(ty) | Repr::Map(ty) => match self.types().kind(ty) {
+				fa_analyzer::types::TypeKind::Collection(_, item, key)
+					if matches!(value.repr, Repr::Map(_)) =>
+				{
+					(key, item)
+				}
+				fa_analyzer::types::TypeKind::Collection(_, item, _) => (item, TypeId::UNKNOWN),
+				_ => (TypeId::UNKNOWN, TypeId::UNKNOWN),
+			},
+			_ => (TypeId::UNKNOWN, TypeId::UNKNOWN),
+		};
 		let pointer = value.value.expect("a table").into_pointer_value();
 		let first = self.alloca(Repr::Bool, "first")?;
 		self.builder
@@ -1186,15 +1208,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.build_store(first.pointer, this.context.bool_type().const_zero())?;
 			let key = this.load(this.entry_slot(entry, table, false)?)?;
 			match table.value {
-				None => this.append_nested(key, node),
+				None => this.append_nested_of(key, key_type, node),
 				Some(_) => {
 					let open = this.string_constant("(");
 					this.append_value(open, node)?;
-					this.append_nested(key, node)?;
+					this.append_nested_of(key, key_type, node)?;
 					let comma = this.string_constant(", ");
 					this.append_value(comma, node)?;
 					let value = this.load(this.entry_slot(entry, table, true)?)?;
-					this.append_nested(value, node)?;
+					this.append_nested_of(value, value_type, node)?;
 					let close = this.string_constant(")");
 					this.append_value(close, node)
 				}

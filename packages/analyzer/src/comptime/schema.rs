@@ -90,6 +90,24 @@ pub fn with_defaults(schema: Value, defaults: &[(String, Value)], order: &[Strin
 	}))
 }
 
+/// The `SchemaFlag`s of a `Fields` type: `{ name, flags }`, `flags` empty
+/// for a leaf.
+fn schema_flags(types: &TypeStore, ty: TypeId, depth: u32) -> Value {
+	let flags = types
+		.fields_keys(ty)
+		.into_iter()
+		.map(|(name, children)| {
+			let members = if children.is_unset() || depth > 32 {
+				Value::array(Vec::new())
+			} else {
+				schema_flags(types, children, depth + 1)
+			};
+			Value::object(vec![("name", Value::string(&name)), ("flags", members)])
+		})
+		.collect();
+	Value::array(flags)
+}
+
 /// The schema of a type.
 pub fn schema(types: &TypeStore, ty: TypeId) -> Value {
 	describe(types, ty, 0, true)
@@ -231,6 +249,8 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 				),
 			)],
 		),
+		// its flags in order, a group with its own flags
+		TypeKind::Fields(_) => member("Fields", vec![("flags", schema_flags(types, ty, depth))]),
 		TypeKind::Tuple(list) => member(
 			"Tuple",
 			vec![(

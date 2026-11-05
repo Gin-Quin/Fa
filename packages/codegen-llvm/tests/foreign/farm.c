@@ -24,6 +24,21 @@ point point_scale(point p, int32_t factor) {
 	return result;
 }
 
+/* a struct with an array field, by value */
+typedef struct {
+	uint8_t rgba[4];
+	float weight;
+} color;
+
+int32_t color_sum(color c) {
+	return c.rgba[0] + c.rgba[1] + c.rgba[2] + c.rgba[3] + (int32_t)c.weight;
+}
+
+color color_make(uint8_t value) {
+	color c = {{value, (uint8_t)(value + 1), (uint8_t)(value + 2), (uint8_t)(value + 3)}, 2.5f};
+	return c;
+}
+
 double triple_sum(triple t) {
 	return t.a + t.b + t.c;
 }

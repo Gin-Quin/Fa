@@ -1674,6 +1674,30 @@ impl<'s> Resolver<'s> {
 				library: Some(index),
 			},
 		);
+		// its `@import`s (a remote file or folder sees no other dependency)
+		let mut sources = Vec::new();
+		let files = match &kind {
+			LibraryKind::File { name } => vec![name.clone()],
+			LibraryKind::Folder { files } => files.clone(),
+			_ => Vec::new(),
+		};
+		for file in &files {
+			if let Ok(text) = fs::read_to_string(directory.join(file)) {
+				sources.extend(imports_of_text(&text));
+			}
+		}
+		sources.sort();
+		sources.dedup();
+		if !sources.is_empty() {
+			let shown = url.trim_end_matches('/').to_string();
+			let requester = Requester {
+				name: shown.clone(),
+				directory: directory.clone(),
+				dependencies: import_dependencies(&shown, &sources)?,
+			};
+			let map = self.key_map(&requester)?;
+			self.resolution.libraries[index].dependencies = map;
+		}
 		Ok(index)
 	}
 
@@ -1695,18 +1719,33 @@ impl<'s> Resolver<'s> {
 			Source::Remote { url, folder } => self.fetch_remote(url, *folder),
 			Source::Generated { url, file, key } => self.generated_library(key, url, file),
 			Source::Git {
-				repository, range, ..
+				repository,
+				range,
+				url,
 			} => {
-				let major = match range {
-					Some(range) => range.major,
-					None => self
-						.chosen
-						.keys()
-						.filter(|(other, _)| other == repository)
-						.map(|(_, major)| *major)
-						.max()
-						.unwrap_or(0),
+				let chosen_major = self
+					.chosen
+					.keys()
+					.filter(|(other, _)| other == repository)
+					.map(|(_, major)| *major)
+					.max();
+				let request = GitRequest {
+					repository: repository.clone(),
+					url: url.clone(),
+					range: range.clone(),
+					requester: format!("`{}`", requester.name),
 				};
+				let major = match (range, chosen_major) {
+					(Some(range), _) => range.major,
+					(None, Some(major)) => major,
+					(None, None) => self.latest_major(&request)?,
+				};
+				// a repository only an `@import` of a remote file asks for:
+				// chosen now, for this request alone
+				if !self.chosen.contains_key(&(repository.clone(), major)) {
+					let chosen = self.choose(repository, major, &[request])?;
+					self.chosen.insert((repository.clone(), major), chosen);
+				}
 				self.git_library(repository, major)
 			}
 		}

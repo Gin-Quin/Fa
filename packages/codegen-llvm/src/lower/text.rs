@@ -343,6 +343,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_store(length_pointer, needed)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(grow);
+		// a string in memory anyway (a field, an item: not a local the
+		// optimizer keeps in registers): the runtime appends to it in place,
+		// one call, so that the caller keeps few values alive around it
+		if target.as_instruction().is_none_or(|instruction| {
+			instruction.get_opcode() != inkwell::values::InstructionOpcode::Alloca
+		}) {
+			self.call_runtime(
+				"fa_string_append_cold",
+				&[
+					target.into(),
+					suffix_bytes.into(),
+					suffix_length.into(),
+					suffix_capacity.into(),
+				],
+			)?;
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(join);
+			return Ok(());
+		}
 		// one simple byte into an inline string with room (a character
 		// appended to a short string): the byte is ORed into its word of the
 		// value (the unused bytes are zero), the length in the tag byte grows,

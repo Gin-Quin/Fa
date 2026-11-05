@@ -138,10 +138,53 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let rounds = self
 				.builder
 				.build_int_truncate_or_bit_cast(rounds, self.usize, "")?;
-			self.call_runtime(
-				"fa_string_reserve_owned",
-				&[slot.pointer.into(), rounds.into()],
-			)?;
+			// a few rounds, known: an inline string with room for them all
+			// stays inline (no heap block for a short result)
+			let room = self.inline_room();
+			let known = match (
+				start.get_sign_extended_constant(),
+				end.get_sign_extended_constant(),
+			) {
+				(Some(start), Some(end)) => Some(end - start + i64::from(inclusive)),
+				_ => None,
+			};
+			if known.is_some_and(|rounds| (0..room as i64).contains(&rounds)) {
+				let header = self
+					.load(slot)?
+					.value
+					.expect("a string")
+					.into_struct_value();
+				let capacity = self
+					.builder
+					.build_extract_value(header, 2, "")?
+					.into_int_value();
+				let (inline, length) = self.inline_tag(capacity)?;
+				let total = self.builder.build_int_nuw_add(length, rounds, "")?;
+				let fits = self.builder.build_int_compare(
+					IntPredicate::ULE,
+					total,
+					self.usize.const_int(room, false),
+					"",
+				)?;
+				let fits = self.builder.build_and(inline, fits, "")?;
+				let reserve = self.append_block("reserve_owned");
+				let reserved_block = self.append_block("reserved");
+				self.builder
+					.build_conditional_branch(fits, reserved_block, reserve)?;
+				self.builder.position_at_end(reserve);
+				self.call_runtime(
+					"fa_string_reserve_owned",
+					&[slot.pointer.into(), rounds.into()],
+				)?;
+				self.builder.build_unconditional_branch(reserved_block)?;
+				self.builder.position_at_end(reserved_block);
+				self.inline_reserved.insert(statement);
+			} else {
+				self.call_runtime(
+					"fa_string_reserve_owned",
+					&[slot.pointer.into(), rounds.into()],
+				)?;
+			}
 			self.reserved_appends
 				.insert(statement, (counter, end, inclusive));
 			reserved.push(statement);
@@ -289,6 +332,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		counter: PointerValue<'ctx>,
 		end: IntValue<'ctx>,
 		inclusive: bool,
+		inline_capable: bool,
 	) -> Result<(), Error> {
 		let Repr::Int(int) = value.repr else {
 			return Err(Error::Llvm("an integer is appended".into()));
@@ -334,6 +378,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let byte = self
 			.builder
 			.build_or(byte, i8.const_int(b'0' as u64, false), "")?;
+		if inline_capable {
+			self.reserved_inline_byte(target, header, byte, join)?;
+		}
 		let destination = unsafe { self.builder.build_in_bounds_gep(i8, bytes, &[length], "")? };
 		self.builder.build_store(destination, byte)?;
 		let longer = self
@@ -357,6 +404,72 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(())
 	}
 
+	/// The bytes an inline string holds (23 natively).
+	fn inline_room(&self) -> u64 {
+		3 * u64::from(self.usize.get_bit_width() / 8) - 1
+	}
+
+	/// Whether a capacity word is an inline string's, and its length.
+	fn inline_tag(
+		&self,
+		capacity: IntValue<'ctx>,
+	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
+		let flag = self
+			.builder
+			.build_and(capacity, self.string_inline_flag(), "")?;
+		let inline =
+			self.builder
+				.build_int_compare(IntPredicate::NE, flag, self.usize.const_zero(), "")?;
+		let shift = self
+			.usize
+			.const_int(u64::from(self.usize.get_bit_width()) - 8, false);
+		let length = self.builder.build_right_shift(capacity, shift, false, "")?;
+		let length = self
+			.builder
+			.build_and(length, self.usize.const_int(31, false), "")?;
+		Ok((inline, length))
+	}
+
+	/// In a reserved append of a loop whose string may stay inline: when it
+	/// is inline, the byte is stored in the string's own bytes and its tag
+	/// counts one more (its room was checked before the loop), then `join`;
+	/// otherwise the builder continues with the heap block's store.
+	fn reserved_inline_byte(
+		&mut self,
+		target: PointerValue<'ctx>,
+		header: inkwell::values::StructValue<'ctx>,
+		byte: IntValue<'ctx>,
+		join: inkwell::basic_block::BasicBlock<'ctx>,
+	) -> Result<(), Error> {
+		let capacity = self
+			.builder
+			.build_extract_value(header, 2, "")?
+			.into_int_value();
+		let (inline, length) = self.inline_tag(capacity)?;
+		let in_place = self.append_block("reserved_inline");
+		let heap = self.append_block("reserved_heap");
+		self.builder
+			.build_conditional_branch(inline, in_place, heap)?;
+		self.builder.position_at_end(in_place);
+		let i8 = self.context.i8_type();
+		let destination = unsafe {
+			self.builder
+				.build_in_bounds_gep(i8, target, &[length], "")?
+		};
+		self.builder.build_store(destination, byte)?;
+		let one = self
+			.usize
+			.const_int(1 << (u64::from(self.usize.get_bit_width()) - 8), false);
+		let longer = self.builder.build_int_add(capacity, one, "")?;
+		let capacity_pointer = self
+			.builder
+			.build_struct_gep(self.string_type, target, 2, "")?;
+		self.builder.build_store(capacity_pointer, longer)?;
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(heap);
+		Ok(())
+	}
+
 	/// A reserved append (see the module): a one-byte simple character is
 	/// stored at the end of the heap block; anything else is appended as
 	/// usual, then the room of the rounds left is reserved again.
@@ -367,6 +480,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		counter: PointerValue<'ctx>,
 		end: IntValue<'ctx>,
 		inclusive: bool,
+		inline_capable: bool,
 	) -> Result<(), Error> {
 		let (suffix_bytes, suffix_length) = self.string_parts(suffix)?;
 		let suffix_capacity = self.string_capacity(suffix)?;
@@ -407,7 +521,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_extract_value(header, 1, "")?
 			.into_int_value();
-		let byte = self.builder.build_load(i8, suffix_bytes, "")?;
+		let byte = self
+			.builder
+			.build_load(i8, suffix_bytes, "")?
+			.into_int_value();
+		if inline_capable {
+			self.reserved_inline_byte(target, header, byte, join)?;
+		}
 		let destination = unsafe { self.builder.build_in_bounds_gep(i8, bytes, &[length], "")? };
 		self.builder.build_store(destination, byte)?;
 		let longer = self

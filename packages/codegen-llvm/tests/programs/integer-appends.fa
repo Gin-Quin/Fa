@@ -56,3 +56,18 @@ mutable accented = "0123456789abcdeé"
 accented += "x"
 accented += "{7}"
 console.log(accented) -- prints: 0123456789abcdeéx7
+
+-- a few known rounds: an inline string stays inline when they fit, and moves
+-- to a heap block when they don't
+let letters = "abcdefghij"
+mutable fits = "0123456789012345678"
+mutable spills = "01234567890123456789"
+for round in 0..4 {
+	fits += letters[round]
+	spills += "{round + 7}"
+}
+mutable wider = "x"
+for round in 0..3 {
+	wider += if round == 1 { "é" } else { letters[round] }
+}
+console.log(fits, fits.length, spills, spills.length, wider) -- prints: 0123456789012345678abcd 23 0123456789012345678978910 25 xaéc

@@ -28,7 +28,6 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 ## Features still missing (from the engineers' reports)
 
 - WebAssembly: `build.cLibrary` (the API's functions as exports of the module); JS foreign code: `Pointer.allocate`/`free` on Bun.
-- Analyzer: relations across files, `@extern` (*foreign code*), `@import` in remote files and folders; implied relation effects for reactivity; `Fields` types (not built by the analyzer, `AN001`) and `TypeFromSchema` of them; `TypeFromSchema` inside a generic type other than as its value.
-- Tooling: `fa develop --target=web` (reload channel) and `--target=native`.
+- Analyzer: relations across files, `@extern` (*foreign code*); implied relation effects for reactivity; `Fields` types (not built by the analyzer, `AN001`) and `TypeFromSchema` of them; `TypeFromSchema` inside a generic type other than as its value.
 - Native: compile-time named union members (`Schema` values).
 - Reviews to schedule: a second analyzer review (M2/M3 features), a review of the tooling (CLI, formatter, workspaces), a final review of both backends.

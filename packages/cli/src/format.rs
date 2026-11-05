@@ -24,7 +24,7 @@ pub(crate) fn format(arguments: &[OsString]) -> i32 {
 		match argument.to_str() {
 			Some("--check") => check = true,
 			Some(option) if option.starts_with("--") => {
-				eprintln!("fa format: unknown option `{option}`");
+				eprintln!("fa format: unknown option `{option}`: see `fa help format`");
 				return USAGE;
 			}
 			_ => paths.push(PathBuf::from(argument)),

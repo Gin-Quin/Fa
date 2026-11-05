@@ -80,7 +80,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if let Some(failed) = self
 				.program_facts
 				.as_ref()
-				.and_then(|facts| facts.set(crate::facts::PROOF_CLAIMS))
+				.map(|facts| facts.consulted(crate::facts::PROOF_CLAIMS, self.fact_log.as_deref()))
 			{
 				let file = ProofFile::new(self.tree, self.analysis, self.types())
 					.with_module(self.session.module(self.file));
@@ -169,7 +169,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	fn compute_non_negative(
 		&self,
 		file: &ProofFile<'_>,
-		program: Option<&std::collections::BTreeSet<String>>,
+		program: Option<crate::facts::Consulted<'_>>,
 	) -> FxHashSet<NodeId> {
 		let mut roots = Vec::new();
 		for at in 0..self.tree.nodes.len() {

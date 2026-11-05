@@ -8,17 +8,20 @@
 //! computes the facts of its own files ([`ProgramFacts::of_unit`], called
 //! by the driver's unit sink), keyed by stable names; the driver merges the
 //! facts of every unit ([`ProgramFacts::merge`]) and gives the result to the
-//! lowering of every unit, instance wave and entry (`SplitOptions::facts`),
-//! and hashes it into each object's cache key, so that a cached object never
-//! keeps a layout the program changed. Deterministic: sets of strings,
-//! merged in any order to the same result.
+//! lowering of every unit, instance wave and entry (`SplitOptions::facts`).
+//! A unit's lowering records the facts it consults ([`FactLog`]: each kind,
+//! key and answer), and its cached object is reused only while every one of
+//! them still has the same answer (`units.rs`): an edit that changes a fact
+//! rebuilds only the units that read it, and a cached object never keeps a
+//! layout the program changed. Deterministic: sets of strings, merged in any
+//! order to the same result.
 //!
 //! A fact kind is a [`FactKind`]: a name, what a unit contributes, and how
 //! two contributions merge. Its keys are stable names: the same in every
 //! unit's session ([`stable_type_name`] for types).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 use fa_analyzer::analysis::{Argument, Callee};
 use fa_analyzer::ids::{FileId, NodeId, TypeId};
@@ -97,6 +100,73 @@ fn proof_claims(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 	crate::proofs::unit_claims(&proof_files)
 }
 
+/// The facts a lowering consulted: `(kind, key)` → the answer it got. A
+/// cached object depends on these only (`units.rs`, `cached_unit`).
+#[derive(Debug, Default)]
+pub struct FactLog {
+	consulted: std::sync::Mutex<BTreeMap<(&'static str, String), bool>>,
+}
+
+impl FactLog {
+	/// Records an answer.
+	pub fn record(&self, kind: &'static str, key: &str, answer: bool) {
+		self.consulted
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.insert((kind, key.to_string()), answer);
+	}
+
+	/// The facts consulted, one per line (`kind`, `key`, `0` or `1`, tab
+	/// separated), sorted: the `.facts` file next to a cached object.
+	pub fn to_text(&self) -> String {
+		let consulted = self
+			.consulted
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner());
+		let mut text = String::new();
+		for ((kind, key), answer) in consulted.iter() {
+			text.push_str(&format!("{kind}\t{key}\t{}\n", u8::from(*answer)));
+		}
+		text
+	}
+
+	/// Whether the facts a text of [`FactLog::to_text`] recorded still have
+	/// the same answers (no facts: every answer is "absent").
+	pub fn still_holds(text: &str, facts: Option<&ProgramFacts>) -> bool {
+		text.lines().all(|line| {
+			let mut parts = line.splitn(3, '\t');
+			let (Some(kind), Some(key), Some(answer)) = (parts.next(), parts.next(), parts.next())
+			else {
+				return false;
+			};
+			let now = facts.is_some_and(|facts| facts.contains(kind, key));
+			(answer == "1") == now
+		})
+	}
+}
+
+/// A set of facts read through a lowering's [`FactLog`].
+#[derive(Clone, Copy, Debug)]
+pub struct Consulted<'f> {
+	set: &'f BTreeSet<String>,
+	kind: &'static str,
+	log: Option<&'f FactLog>,
+}
+
+impl Consulted<'_> {
+	/// Whether the set holds a key (recorded).
+	pub fn contains(&self, key: &str) -> bool {
+		let answer = self.set.contains(key);
+		if let Some(log) = self.log {
+			log.record(self.kind, key, answer);
+		}
+		answer
+	}
+}
+
+/// The empty set of a kind no unit contributed to.
+static EMPTY: BTreeSet<String> = BTreeSet::new();
+
 /// The merged facts of a program (or one unit's contribution).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct ProgramFacts {
@@ -135,20 +205,18 @@ impl ProgramFacts {
 		self.facts.get(kind)
 	}
 
+	/// The set of a kind, read through a log of the facts consulted.
+	pub fn consulted<'f>(&'f self, kind: &'static str, log: Option<&'f FactLog>) -> Consulted<'f> {
+		Consulted {
+			set: self.facts.get(kind).unwrap_or(&EMPTY),
+			kind,
+			log,
+		}
+	}
+
 	/// Whether the set of a kind holds a key.
 	pub fn contains(&self, kind: &str, key: &str) -> bool {
 		self.facts.get(kind).is_some_and(|set| set.contains(key))
-	}
-
-	/// A stable hash of every fact (object cache keys).
-	pub fn hash_into(&self, hasher: &mut impl Hasher) {
-		for (kind, keys) in &self.facts {
-			kind.hash(hasher);
-			keys.len().hash(hasher);
-			for key in keys {
-				key.hash(hasher);
-			}
-		}
 	}
 }
 

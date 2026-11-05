@@ -103,7 +103,7 @@ pub(crate) fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32>
 				}
 			};
 		} else if text.starts_with("--") {
-			eprintln!("fa build: unknown option `{text}`");
+			eprintln!("fa build: unknown option `{text}`: see `fa help build`");
 			return Err(USAGE);
 		} else {
 			files.push(argument.clone());

@@ -85,7 +85,9 @@ impl Hasher for StableHasher {
 	}
 }
 
-/// The options that change an object.
+/// The options that change an object. Not the whole-program facts: a
+/// unit's object depends on the facts its lowering consulted only (checked
+/// by `cached_unit` against its `.facts` file), the runtime on none.
 fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: &mut StableHasher) {
 	VERSION.hash(hasher);
 	// the runtime's IR, so that editing `fa_runtime.c` invalidates the objects
@@ -103,11 +105,7 @@ fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: 
 	if split.c_library.is_some() {
 		"dynamic-tls".hash(hasher);
 	}
-	// the layouts that depend on the whole program (`facts.rs`)
-	match &split.facts {
-		Some(facts) => facts.hash_into(hasher),
-		None => 0u8.hash(hasher),
-	}
+	split.facts.is_some().hash(hasher);
 }
 
 /// The target machine and the pointer-sized integer of a module.
@@ -287,6 +285,7 @@ pub fn compile_unit(
 		Some(key) => crate::compile::with_suffix(key, &format!(".{extension}")),
 		None => directory.join(format!("{}.{extension}", file_name(&name))),
 	};
+	let log = std::sync::Arc::new(crate::facts::FactLog::default());
 	let (symbols, requests) = lower_and_emit(
 		session,
 		files,
@@ -297,6 +296,7 @@ pub fn compile_unit(
 		&object,
 		|lowering| {
 			lowering
+				.with_fact_log(std::sync::Arc::clone(&log))
 				.into_unit(name.clone(), files, entry, reached.cloned())
 				.lower_unit()
 		},
@@ -307,6 +307,9 @@ pub fn compile_unit(
 		&& requests.is_empty()
 		&& symbols.generic_values.is_empty()
 	{
+		// the facts it consulted: the object stays valid while they hold
+		let facts = crate::compile::with_suffix(key, ".facts");
+		fs::write(&facts, log.to_text())?;
 		let partial = crate::compile::with_suffix(key, ".symbols.partial");
 		fs::write(&partial, symbols.to_text())?;
 		fs::rename(&partial, crate::compile::with_suffix(key, ".symbols"))?;
@@ -468,6 +471,7 @@ fn runtime_object(
 	directory: &Path,
 ) -> Result<PathBuf, Error> {
 	let mut hasher = StableHasher::default();
+	// the runtime reads no fact of the program: compiled once per target and options
 	options_key(target, options, split, &mut hasher);
 	"runtime".hash(&mut hasher);
 	crate::runtime::tier1_text(target).hash(&mut hasher);
@@ -1478,6 +1482,11 @@ fn compile_units(
 /// A unit of the object cache, if its object and symbols are there.
 fn cached_unit(key: &Path, name: &str, split: &SplitOptions) -> Option<UnitOutput> {
 	let object = crate::compile::with_suffix(key, &format!(".{}", object_extension(split)));
+	// the facts its lowering consulted still have the same answers
+	let consulted = fs::read_to_string(crate::compile::with_suffix(key, ".facts")).ok()?;
+	if !crate::facts::FactLog::still_holds(&consulted, split.facts.as_deref()) {
+		return None;
+	}
 	let text = fs::read_to_string(crate::compile::with_suffix(key, ".symbols")).ok()?;
 	let symbols = UnitSymbols::from_text(&text)?;
 	object.is_file().then(|| UnitOutput {
@@ -1617,8 +1626,23 @@ fn link_units(
 				reached.symbols.len()
 			);
 		}
+		let trace = std::env::var_os("FA_SPLIT_TRACE").is_some();
+		let started = Instant::now();
 		let compiled = compile_units(root, report, &pending, &entry, &reached.symbols, settings)
 			.map_err(Some)?;
+		if trace {
+			let built: Vec<&str> = compiled
+				.iter()
+				.filter(|unit| !unit.cached)
+				.map(|unit| unit.name.as_str())
+				.collect();
+			eprintln!(
+				"split: units in {} ms, {} compiled: {built:?}",
+				started.elapsed().as_millis(),
+				built.len()
+			);
+		}
+		let started = Instant::now();
 		let requests: Vec<InstanceRequest> = compiled
 			.iter()
 			.flat_map(|unit| unit.requests.iter().cloned())
@@ -1635,6 +1659,12 @@ fn link_units(
 		// the entries of the tables of generic function values, by waves of
 		// the producers' modules (they may request instances, and more)
 		generic_waves(root, report, settings, &mut outputs, &mut seen, &mut wave).map_err(Some)?;
+		if trace {
+			eprintln!(
+				"split: instance waves in {} ms",
+				started.elapsed().as_millis()
+			);
+		}
 		// what a unit calls that no unit defines (the reachability of the
 		// interfaces missed it): its unit compiled again, reaching it
 		let exported: FxHashSet<&str> = outputs
@@ -1669,12 +1699,13 @@ fn link_units(
 				.filter(|(module, node)| defined.contains(&(module.as_str(), *node)))
 				.collect();
 			let generic_tables = generic_tables(&units).map_err(Some)?;
+			let started = Instant::now();
 			let inputs = EntryInputs {
 				init_order,
 				units,
 				generic_tables,
 			};
-			let mut artifact = link_program(
+			let linked = link_program(
 				settings.target,
 				&settings.options,
 				settings.split,
@@ -1683,7 +1714,14 @@ fn link_units(
 				output,
 				libraries,
 			)
-			.map_err(Some)?;
+			.map_err(Some);
+			if trace {
+				eprintln!(
+					"split: entry and link in {} ms",
+					started.elapsed().as_millis()
+				);
+			}
+			let mut artifact = linked?;
 			// the header of a C library, from its API file's interface
 			if let (Some(library), Some((archive, _))) =
 				(&libraries.c_library, artifact.c_library.clone())

@@ -234,7 +234,7 @@ pub(crate) struct Prover<'p> {
 	/// fail here, and, when given, the claims failed in the whole program
 	/// (the merged facts, by key) decide every claim.
 	per_unit: bool,
-	program_failed: Option<&'p BTreeSet<String>>,
+	program_failed: Option<crate::facts::Consulted<'p>>,
 }
 
 impl<'p> Prover<'p> {
@@ -261,7 +261,7 @@ impl<'p> Prover<'p> {
 
 	/// A prover deciding every claim by the program's failed claims
 	/// ([`unit_claims`], merged and resolved by [`resolve_claims`]).
-	pub(crate) fn with_program(mut self, failed: &'p BTreeSet<String>) -> Self {
+	pub(crate) fn with_program(mut self, failed: crate::facts::Consulted<'p>) -> Self {
 		self.per_unit = true;
 		self.program_failed = Some(failed);
 		self

@@ -37,7 +37,7 @@ pub(crate) fn test(arguments: &[OsString]) -> i32 {
 			eprintln!("fa test: `--coverage` is not available yet: run the tests without it");
 			return USAGE;
 		} else if text.starts_with("--") {
-			eprintln!("fa test: unknown option `{text}`");
+			eprintln!("fa test: unknown option `{text}`: see `fa help test`");
 			return USAGE;
 		} else {
 			paths.push(argument.clone());

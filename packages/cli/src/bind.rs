@@ -186,7 +186,7 @@ pub(crate) fn command(arguments: &[OsString]) -> i32 {
 		if let Some(value) = text.strip_prefix("--output=") {
 			output = Some(PathBuf::from(value));
 		} else if text.starts_with('-') && text.len() > 1 {
-			eprintln!("fa bind: unknown option `{text}`");
+			eprintln!("fa bind: unknown option `{text}`: see `fa help bind`");
 			return USAGE;
 		} else if header.is_some() {
 			eprintln!("fa bind: unexpected argument `{text}`: give one header");

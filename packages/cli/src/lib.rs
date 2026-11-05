@@ -308,7 +308,7 @@ fn optional_path(arguments: &[OsString], command: &str) -> Result<Option<PathBuf
 		[path] => Ok(Some(PathBuf::from(path))),
 		_ => {
 			eprintln!(
-				"fa {command}: unexpected argument `{}`",
+				"fa {command}: unexpected argument `{}`: give one file or package, see `fa help {command}`",
 				arguments[1].to_string_lossy()
 			);
 			Err(USAGE)
@@ -455,7 +455,7 @@ fn check(arguments: &[OsString]) -> i32 {
 			};
 			format = value;
 		} else if text.starts_with("--") {
-			eprintln!("fa check: unknown option `{text}`");
+			eprintln!("fa check: unknown option `{text}`: see `fa help check`");
 			return USAGE;
 		} else {
 			paths.push(argument.clone());
@@ -570,7 +570,7 @@ fn update(arguments: &[OsString]) -> i32 {
 	for argument in arguments {
 		let text = argument.to_string_lossy();
 		if text.starts_with("--") {
-			eprintln!("fa update: unknown option `{text}`");
+			eprintln!("fa update: unknown option `{text}`: see `fa help update`");
 			return USAGE;
 		}
 		keys.insert(text.to_string());
@@ -584,7 +584,7 @@ fn update(arguments: &[OsString]) -> i32 {
 		(Some(package), _) => project::scope_of(&package),
 		(None, Some(root)) => project::scope_of_workspace(&root),
 		(None, None) => Err(
-			"error[CLI001]: no `package.fa` or `workspace.fa` found in this folder or its parents"
+			"error[CLI001]: no `package.fa` or `workspace.fa` found in this folder or its parents: run `fa update` in a package or a workspace"
 				.to_string(),
 		),
 	};

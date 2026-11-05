@@ -31,6 +31,7 @@ mod columns;
 mod constants;
 mod destination;
 mod division;
+mod edits;
 mod foreign;
 pub(crate) mod generic_values;
 mod growing;
@@ -2490,6 +2491,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// `target = value`: a local, a field.
 	fn assignment(&mut self, target: NodeId, value: NodeId) -> Result<Val<'ctx>, Error> {
+		// a string replaced by slices of itself (`edits.rs`)
+		if let Some(edited) = self.edit_in_place(target, value)? {
+			return Ok(edited);
+		}
+		self.assignment_as_written(target, value)
+	}
+
+	/// `target = value`.
+	pub(crate) fn assignment_as_written(
+		&mut self,
+		target: NodeId,
+		value: NodeId,
+	) -> Result<Val<'ctx>, Error> {
 		if let Resolution::Local(symbol) = self.analysis.resolution(target)
 			&& self.analysis.symbols.symbol(symbol).kind == SymbolKind::Mutable
 			&& self.node_repr(target)? == Repr::Str

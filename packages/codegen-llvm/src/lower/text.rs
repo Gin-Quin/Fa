@@ -542,31 +542,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Whether a string with this capacity word owns a heap block of at
 	/// least `needed` bytes: `needed <= kind < KIND_MASK`, where `kind` is
 	/// the capacity without its `SIMPLE` flag (an inline string has its
-	/// `INLINE` bit, a view `KIND_MASK`, a static string 0). One signed
-	/// comparison with small constants only: `(2 * kind + 2) >> 1`
-	/// (arithmetic) is `kind + 1` when `kind < KIND_MASK`, and negative
-	/// otherwise (the `INLINE` bit becomes the sign; a view's
-	/// `2^63 - 2 + 2` too), made 0 then. Only the capacity is transformed,
-	/// so that a loop computing `needed` keeps no shifted copy of it.
+	/// `INLINE` bit, a view `KIND_MASK`, a static string 0). The length word
+	/// of an inline string holds its bytes: `needed` may be anything there,
+	/// and only `kind` decides. (A shifted form without 64-bit constants was
+	/// measured: one more instruction per check in `strlist`'s loops, and no
+	/// fewer saved registers in `calc`'s generator.)
 	pub(crate) fn owned_room(
 		&self,
 		capacity: IntValue<'ctx>,
 		needed: IntValue<'ctx>,
 	) -> Result<IntValue<'ctx>, Error> {
-		let one = self.usize.const_int(1, false);
-		let two = self.usize.const_int(2, false);
-		let kind = self.builder.build_left_shift(capacity, one, "")?;
-		let kind = self.builder.build_int_add(kind, two, "")?;
-		let above = self.builder.build_right_shift(kind, one, true, "")?;
-		// 0 for a string that owns no block: the length word of an inline
-		// string holds its bytes, so `needed` may be anything there
-		let smax = self.intrinsic("llvm.smax", &[self.usize.into()])?;
-		let above = self
-			.call_value(smax, &[above.into(), self.usize.const_zero().into()])?
-			.into_int_value();
-		Ok(self
+		let kind = self
 			.builder
-			.build_int_compare(IntPredicate::ULT, needed, above, "")?)
+			.build_and(capacity, self.simple_flag().const_not(), "")?;
+		let room = self
+			.builder
+			.build_int_compare(IntPredicate::ULE, needed, kind, "")?;
+		let owned =
+			self.builder
+				.build_int_compare(IntPredicate::ULT, kind, self.string_kind_mask(), "")?;
+		Ok(self.builder.build_and(room, owned, "")?)
 	}
 
 	/// The most digits of an integer that [`Lowering::append_integer`]

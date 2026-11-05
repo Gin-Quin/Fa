@@ -561,32 +561,38 @@ impl Generator<'_> {
 		}
 	}
 
-	/// The index proofs of the file: only when it is the whole program (a
-	/// single file reading no other module) and synchronous.
+	/// The index proofs of the file (`Options::proofs`): all of them when it
+	/// is the whole program, the never-negative places by the program's
+	/// failed claims in a program of several files. Tasks change nothing:
+	/// the claims see the stores of their bodies like any other.
 	fn index_facts(&self) -> &fa_analyzer::proofs::IndexFacts {
 		self.index_facts.get_or_init(|| {
-			let alone = self.program.is_none()
-				&& self
-					.session
-					.dependency_closure(self.file)
-					.iter()
-					.all(|&module| {
-						self.session
-							.file_of(module)
-							.is_none_or(|file| file == self.file)
-					});
-			let scope = if alone && !self.tasks.asynchronous {
-				fa_analyzer::proofs::ProofScope::WholeFile
-			} else {
-				fa_analyzer::proofs::ProofScope::Nothing
-			};
-			fa_analyzer::proofs::index_facts(
-				self.tree,
-				self.analysis,
-				self.types,
-				scope,
-				self.options.overflow_checks,
-			)
+			use fa_analyzer::proofs::{ProofScope, index_facts};
+			let checks = self.options.overflow_checks;
+			match &self.options.proofs {
+				crate::ProgramProofs::None => index_facts(
+					self.tree,
+					self.analysis,
+					self.types,
+					ProofScope::Nothing,
+					checks,
+				),
+				crate::ProgramProofs::Alone => index_facts(
+					self.tree,
+					self.analysis,
+					self.types,
+					ProofScope::WholeFile,
+					checks,
+				),
+				crate::ProgramProofs::Claims(failed) => {
+					let failed = |key: &str| failed.contains(key);
+					let scope = ProofScope::Unit {
+						module: self.session.module(self.file),
+						failed: &failed,
+					};
+					index_facts(self.tree, self.analysis, self.types, scope, checks)
+				}
+			}
 		})
 	}
 

@@ -961,7 +961,7 @@ impl<'s> Generator<'s> {
 				..FnCx::default()
 			};
 			self.out = Writer::at(1);
-			self.statements(&others, Dest::Discard);
+			self.statements(others, Dest::Discard);
 			let inner = std::mem::take(&mut self.out);
 			let temps = std::mem::take(&mut self.fcx.inline_temps);
 			self.scopes.pop();

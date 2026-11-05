@@ -93,6 +93,49 @@ pub struct Options {
 	/// the module swapped last (`faHotModule`: `$h0.ns.name`), and `main.js`
 	/// listens for swaps (`faHotListen`).
 	pub hot: bool,
+	/// What the index proofs of the analysis (`fa_analyzer::proofs`) may
+	/// rely on: [`ProgramProofs::None`] in a build that doesn't see every
+	/// file first (the streaming build of a package).
+	pub proofs: ProgramProofs,
+}
+
+/// What the index proofs of a module see (`fa_analyzer::proofs`).
+#[derive(Clone, Debug, Default)]
+pub enum ProgramProofs {
+	/// Nothing: every index keeps its checks.
+	#[default]
+	None,
+	/// The module is the whole program: the index proofs and the
+	/// never-negative places, over its own stores.
+	Alone,
+	/// A module of a program: the never-negative places, by the failed
+	/// claims of the whole program ([`program_claims`]).
+	Claims(std::sync::Arc<BTreeSet<String>>),
+}
+
+/// The failed claims of the proofs of a program's files: each file's part
+/// (`fa_analyzer::proofs::unit_claims`), merged and resolved, as natively
+/// the facts of the units of a build per unit.
+pub fn program_claims(session: &Session, files: &[FileId]) -> std::sync::Arc<BTreeSet<String>> {
+	let types = session.types();
+	let proof_files: Vec<fa_analyzer::proofs::ProofFile<'_>> = files
+		.iter()
+		.map(|&file| {
+			fa_analyzer::proofs::ProofFile::new(session.tree(file), session.analysis(file), types)
+				.with_module(session.module(file))
+		})
+		.collect();
+	let edges = fa_analyzer::proofs::unit_claims(&proof_files);
+	std::sync::Arc::new(fa_analyzer::proofs::resolve_claims(&edges))
+}
+
+/// Whether a file reads no other file of the session: alone, it is the
+/// whole program.
+fn alone(session: &Session, file: FileId) -> bool {
+	session
+		.dependency_closure(file)
+		.iter()
+		.all(|&module| session.file_of(module).is_none_or(|other| other == file))
 }
 
 impl Options {
@@ -107,6 +150,7 @@ impl Options {
 			libraries: Vec::new(),
 			asynchronous: None,
 			hot: false,
+			proofs: ProgramProofs::None,
 		}
 	}
 }
@@ -197,6 +241,9 @@ pub fn generate(
 	let mut options = options.clone();
 	if options.asynchronous.is_none() {
 		options.asynchronous = Some(detect_asynchronous(session, file));
+	}
+	if alone(session, file) {
+		options.proofs = ProgramProofs::Alone;
 	}
 	let options = &options;
 	let generated = generate::generate_file(session, file, options);
@@ -395,6 +442,11 @@ pub fn generate_program_into(
 		// for `fa test`, the mode of the tests (`Session::configure_asynchronous`)
 		options.asynchronous = Some(program.asynchronous);
 	}
+	// every file is analyzed: the proofs see the whole program
+	options.proofs = match files[..] {
+		[file] if alone(session, file) => ProgramProofs::Alone,
+		_ => ProgramProofs::Claims(program_claims(session, &files)),
+	};
 	let options = &options;
 	let session: &Session = session;
 	let done: Vec<std::io::Result<Result<UnitModule, Vec<Diagnostic>>>> =

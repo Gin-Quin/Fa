@@ -25,3 +25,5 @@ function show = <Value, keys: Keys<Value>>(value: Value) => {
 	}
 }
 show<Settings, { port, size }>(settings) -- error: TF010
+let numbers: Permissions = 1 + 2 -- error: E-TYPE-1
+let either: Permissions | { a: Integer } = { a = 1 }

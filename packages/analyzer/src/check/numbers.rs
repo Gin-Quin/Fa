@@ -688,12 +688,12 @@ impl Walker<'_> {
 		operands: NodeList<'_>,
 		expected: Option<TypeId>,
 	) -> TypeId {
-		// `a + b`, `a - b` of `Fields` values (fields.rs)
-		if let Some(ty) = self.check_fields_arithmetic(n, op, operands, expected) {
-			return ty;
-		}
 		let nodes: SmallVec<[NodeId; 4]> = operands.iter().collect();
-		let types = self.check_operands(&nodes, expected);
+		// `a + b`, `a - b` of `Fields` values (fields.rs)
+		let types = match self.check_fields_operands(op, &nodes, expected) {
+			Some(types) => types,
+			None => self.check_operands(&nodes, expected),
+		};
 		if types.iter().any(|&ty| self.is_fields(ty)) {
 			return self.fields_operation(n, op, &nodes, &types);
 		}

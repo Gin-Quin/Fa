@@ -104,10 +104,11 @@ impl Walker<'_> {
 		if self.is_fields(expected) {
 			return Some(expected);
 		}
-		let members = self.s.types.union_members(&expected);
-		let mut found = members.iter().copied().filter(|&ty| self.is_fields(ty));
-		let first = found.next()?;
-		found.next().is_none().then_some(first)
+		match self.s.types.union_members(&expected) {
+			[a, b] if *b == TypeId::NONE && self.is_fields(*a) => Some(*a),
+			[a, b] if *a == TypeId::NONE && self.is_fields(*b) => Some(*b),
+			_ => None,
+		}
 	}
 
 	// ── types ────────────────────────────────────────────────────────────
@@ -381,20 +382,20 @@ impl Walker<'_> {
 
 	// ── operations ───────────────────────────────────────────────────────
 
-	/// `a + b`, `a - b` when an operand is a key set literal or a `Fields`
-	/// type is expected: the operands are checked here. `None` otherwise
-	/// (the operands are checked as numbers, then [`Walker::fields_operation`]).
-	pub(super) fn check_fields_arithmetic(
+	/// The operands of `a + b`, `a - b` when one is a key set literal or a
+	/// `Fields` type is expected: checked here, a key set with the `Fields`
+	/// type of the others. `None` otherwise (they are checked as numbers).
+	/// Then [`Walker::fields_operation`] types the operation when an operand
+	/// is a `Fields` value.
+	pub(super) fn check_fields_operands(
 		&mut self,
-		n: NodeId,
 		op: ArithOp,
-		operands: NodeList<'_>,
+		nodes: &[NodeId],
 		expected: Option<TypeId>,
-	) -> Option<TypeId> {
+	) -> Option<SmallVec<[TypeId; 4]>> {
 		if !matches!(op, ArithOp::Add | ArithOp::Subtract) {
 			return None;
 		}
-		let nodes: SmallVec<[NodeId; 4]> = operands.iter().collect();
 		let is_key_set = |w: &Self, node: NodeId| {
 			matches!(
 				syntax::view(&w.tree, w.strip_groups(node)),
@@ -421,7 +422,7 @@ impl Walker<'_> {
 				types[index] = self.check(node, fields);
 			}
 		}
-		Some(self.fields_operation(n, op, &nodes, &types))
+		Some(types)
 	}
 
 	/// The type of `a + b` or `a - b` whose operands are checked, one of them

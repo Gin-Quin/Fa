@@ -1813,6 +1813,11 @@ impl<'s> Resolver<'s> {
 				"warning[DEP004]: `{url}` has no version: its content can change, and the build then fails; prefer a URL with a version"
 			));
 		}
+		if url.starts_with("http://") {
+			self.resolution.warnings.push(format!(
+				"warning[DEP004]: `{url}` is fetched over `http://`: its first content is not authenticated, and the lockfile records whatever arrives; prefer `https://`"
+			));
+		}
 		let updating = self.updating(url);
 		let locked = self
 			.locked

@@ -1,0 +1,12 @@
+-- Dense maps: a reference into a map lives while a nested `use` inserts
+-- into the same map (the insertion may move the entries)
+mutable counts = Map<String, Integer>.from([], capacity = 1)
+for round in 0..3 {
+	use count = counts.getOrInsert("a", 0)
+	for index in 0..500 {
+		use other = counts.getOrInsert("key {round} {index}", 0)
+		other += 1
+	}
+	count += 1
+}
+console.log(counts.get("a") ?? -1, counts.size) -- prints: 3 1501

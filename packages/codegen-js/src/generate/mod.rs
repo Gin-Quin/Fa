@@ -250,6 +250,9 @@ pub(crate) struct Generator<'s> {
 	pub(crate) guard_frames: Vec<Vec<String>>,
 	/// Whether the file calls `Mutex#tryLock` (computed at the first need).
 	has_try_lock: Option<bool>,
+	/// The index proofs and never-negative places of the analysis
+	/// (`fa_analyzer::proofs`), computed at the first index.
+	index_facts: std::cell::OnceCell<fa_analyzer::proofs::IndexFacts>,
 	/// Async: the mode of the program, the instances (`tasks.rs`).
 	pub(crate) tasks: tasks::TasksCx,
 }
@@ -337,6 +340,7 @@ pub(crate) fn generate_module(
 		parents: None,
 		guard_frames: Vec::new(),
 		has_try_lock: None,
+		index_facts: std::cell::OnceCell::new(),
 		tasks: tasks::TasksCx {
 			// a module of a program built in streaming: its own summaries
 			asynchronous: options.asynchronous.unwrap_or_else(|| {

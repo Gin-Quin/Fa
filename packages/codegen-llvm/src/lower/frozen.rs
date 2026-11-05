@@ -70,19 +70,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.written_fields
 			.get_or_init(|| {
 				if self.whole_program {
-					let mut files = vec![crate::proofs::ProofFile::new(
+					let mut files = vec![fa_analyzer::proofs::ProofFile::new(
 						self.tree,
 						self.analysis,
 						self.types(),
 					)];
 					for state in self.other_files.values() {
-						files.push(crate::proofs::ProofFile::new(
+						files.push(fa_analyzer::proofs::ProofFile::new(
 							state.tree,
 							state.analysis,
 							self.types(),
 						));
 					}
-					return Some(crate::proofs::written_fields(&files));
+					return Some(fa_analyzer::proofs::written_fields(&files));
 				}
 				self.program_facts
 					.as_ref()
@@ -101,7 +101,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(field) = self.types().fields_of(owner).get(index as usize) else {
 			return false;
 		};
-		crate::proofs::frozen_field(written, self.types(), owner, field.name)
+		fa_analyzer::proofs::frozen_field(written, self.types(), owner, field.name)
 	}
 
 	/// The slot of a local an access may read a field of directly: its

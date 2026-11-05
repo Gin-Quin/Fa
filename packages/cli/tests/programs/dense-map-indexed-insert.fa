@@ -1,0 +1,11 @@
+-- Dense maps: a short reference into a map held by an array; an insertion
+-- through `tables[0][key]` is not seen as a change of the map
+mutable tables: Array<Map<String, Integer>> = [Map<String, Integer>.from([], capacity = 1)]
+for round in 0..3 {
+	use count = tables[0].getOrInsert("a", 0)
+	for index in 0..500 {
+		tables[0]["key {round} {index}"] = index
+	}
+	count += 1
+}
+console.log(tables[0].get("a") ?? -1, tables[0].size) -- prints: 3 1501

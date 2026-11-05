@@ -229,6 +229,19 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn an_index_read_from_a_proven_field_is_not_checked() {
+		// every store of `Link.next` is an index of `links`, which never
+		// shrinks (`fa_analyzer::proofs`): `items[from].next` is checked,
+		// `items[items[from].next]` is not; a store out of bounds keeps it
+		let program = "type Link = { next: UInt32 }\nmutable links: Array<Link> = [{ next = 1 }, { next = 0 }]\nfunction hop = (items: Array<Link>, from: UInt32): UInt32 throws IndexError => try items[try items[from].next].next\nfunction grow = (items: Array<Link>) mutates items => {\n\tlet last: UInt32 = items.length - 1\n\titems.push({ next = last })\n}\ngrow(links)\nconsole.log(hop(links, 2) catch error => 99)\n";
+		let ir = ir_of("hop", program);
+		assert_eq!(count(function(&ir, "fa.hop"), "fa_error_index"), 1);
+		let wide = program.replace("{ next = last }", "{ next = last + 5 }");
+		let ir = ir_of("hop-wide", &wide);
+		assert_eq!(count(function(&ir, "fa.hop"), "fa_error_index"), 2);
+	}
+
+	#[test]
 	fn a_field_counted_up_from_zero_is_never_negative() {
 		// `get(self.position)` counts a negative index from the end: a select
 		// on `position < 0`, which the proof that every store of the field

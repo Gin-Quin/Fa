@@ -339,7 +339,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// units of `units.rs`): whole-program layouts may apply (dense maps).
 	whole_program: bool,
 	/// The indices proven by the index proofs of fields (`index_proofs.rs`).
-	index_proofs: std::cell::RefCell<Option<index_proofs::IndexProofs>>,
+	index_proofs: std::cell::RefCell<Option<fa_analyzer::proofs::IndexFacts>>,
 	/// The facts merged from every unit of a build per unit (`facts.rs`).
 	program_facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
 	/// The facts this lowering consulted (the key of a cached unit).

@@ -354,7 +354,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// type), unless the places it reads are proven never negative
 	/// (`index_proofs.rs`).
 	pub(crate) fn may_be_negative(&self, node: NodeId) -> bool {
-		let negative = if let Some(interval) = self.analysis.interval(node) {
+		let negative = if let Some(interval) = self.reliable_interval(node) {
 			interval.lo < ethnum::I256::ZERO
 		} else {
 			match self.types().as_int(self.type_of(node)) {

@@ -1,0 +1,4 @@
+-- brief: a `BigInt` has no negative zero: `-0n` prints `0`, like JavaScript
+let zero = 0n
+console.log(-0n, zero - zero, -(zero), "{-0n}")
+-- prints: 0 0 0 0

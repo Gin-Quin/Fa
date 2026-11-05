@@ -128,13 +128,36 @@ impl Generator<'_> {
 		}
 	}
 
-	/// A composition of steps: `(...a) => h(g(f(...a)))`, the steps evaluated
-	/// once (an error stops the chain: it is thrown).
+	/// A composition of steps: `(...a) => h(g(f(...a)))`. Each step is
+	/// evaluated once, when the composition is built (lead, "`then`
+	/// evaluates its steps once"): a step that may change or that computes
+	/// (a mutable variable, a call, a lambda) is bound by an enclosing
+	/// arrow, `((s0) => (...a) => h(s0(...a)))(labeller(prefix))`; a name
+	/// that can't change is used as is. An error stops the chain: it is
+	/// thrown.
 	pub(crate) fn composition(&mut self, steps: &[NodeId]) -> Expr {
-		let functions: Vec<String> = steps
-			.iter()
-			.map(|&step| self.expr(step).primary_text())
-			.collect();
+		let mut bound: Vec<(String, String)> = Vec::new();
+		let mut functions: Vec<String> = Vec::with_capacity(steps.len());
+		for &step in steps {
+			let text = self.expr(step).primary_text();
+			let named = self.strip_groups(step);
+			let fixed = match self.view(named) {
+				View::Name(_) => match self.analysis.resolution(named) {
+					fa_analyzer::symbols::Resolution::Local(symbol) => {
+						!self.is_mutable_place(symbol)
+					}
+					_ => true,
+				},
+				_ => false,
+			};
+			if fixed {
+				functions.push(text);
+			} else {
+				let name = format!("$s{}", bound.len());
+				functions.push(name.clone());
+				bound.push((name, text));
+			}
+		}
 		let mut call = String::from("...a");
 		for (index, function) in functions.iter().enumerate() {
 			call = if index == 0 {
@@ -143,7 +166,16 @@ impl Generator<'_> {
 				format!("{function}({call})")
 			};
 		}
-		Expr::primary(format!("((...a) => {call})"))
+		if bound.is_empty() {
+			return Expr::primary(format!("((...a) => {call})"));
+		}
+		let names: Vec<&str> = bound.iter().map(|(name, _)| name.as_str()).collect();
+		let values: Vec<&str> = bound.iter().map(|(_, value)| value.as_str()).collect();
+		Expr::primary(format!(
+			"(({}) => (...a) => {call})({})",
+			names.join(", "),
+			values.join(", ")
+		))
 	}
 
 	/// A lambda: an arrow function.

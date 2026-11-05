@@ -73,13 +73,21 @@ impl Generator<'_> {
 			let unsigned = text.strip_prefix('-').unwrap_or(text);
 			!unsigned.is_empty() && unsigned.bytes().all(|byte| byte.is_ascii_digit())
 		};
+		// an integer has no negative zero: `-0n` prints `0`
+		let integer = |text: &str| {
+			if text.bytes().all(|byte| byte == b'-' || byte == b'0') {
+				"0".to_string()
+			} else {
+				text.to_string()
+			}
+		};
 		match self.kind(ty) {
 			Kind::Boolean if text == "true" || text == "false" => Some(text.to_string()),
-			Kind::Int(storage) if !storage.is_js_bigint() && digits(text) => Some(text.to_string()),
+			Kind::Int(storage) if !storage.is_js_bigint() && digits(text) => Some(integer(text)),
 			Kind::Int(_) | Kind::BigInt => text
 				.strip_suffix('n')
 				.filter(|number| digits(number))
-				.map(str::to_string),
+				.map(integer),
 			Kind::Float(FloatBits::F64) => {
 				let number: f64 = text.parse().ok()?;
 				let plain = !text.contains('e') && text != "-0";

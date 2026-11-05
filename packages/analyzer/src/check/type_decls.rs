@@ -559,6 +559,10 @@ impl Walker<'_> {
 								self.report(diagnostic);
 							}
 							pinned_values.push(pinned);
+							// the value, as the member's literal (the backends,
+							// `@typeToSchema`, other files read it)
+							let storage = crate::types::IntStorage::Default;
+							self.s.types.int_range(pinned, pinned, storage)
 						}
 						_ => {
 							let diagnostic = self.diagnostic(
@@ -567,13 +571,17 @@ impl Walker<'_> {
 								"the value of a member is a non-negative integer literal",
 							);
 							self.report(diagnostic);
+							TypeId::UNSET
 						}
 					}
-					TypeId::UNSET
 				}
 				(_, Some(definition)) => self.check_type_expr(definition),
 			};
-			if self.s.types.is_literal(payload) && payloads.contains(&payload) {
+			// (a pinned value of an enumeration is `TY082` above)
+			if kind != NominalKind::Enum
+				&& self.s.types.is_literal(payload)
+				&& payloads.contains(&payload)
+			{
 				let message = format!(
 					"two members accept `{}`: a literal belongs to one member",
 					self.display(payload)

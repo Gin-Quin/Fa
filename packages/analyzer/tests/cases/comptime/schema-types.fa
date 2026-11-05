@@ -18,6 +18,14 @@ type ColorCopy = TypeFromSchema<@typeToSchema(Color)>
 let color: ColorCopy = ColorCopy.green
 console.log(color == ColorCopy.green) -- prints: true
 
+type Status = Enum {
+	pending = 0
+	active = 1
+	archived = 9
+}
+type StatusCopy = TypeFromSchema<@typeToSchema(Status)>
+console.log(Integer(StatusCopy.archived), Integer(Status.archived)) -- prints: 9 9
+
 type Describe = TypeFromSchema<@typeToSchema((value: Integer) => String)>
 function describe: Describe = (value: Integer) => "value {value}"
 console.log(describe(3)) -- prints: value 3

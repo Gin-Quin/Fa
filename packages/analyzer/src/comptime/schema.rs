@@ -280,12 +280,20 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 			let members: Vec<Value> = (0..count as u16)
 				.filter(|&index| types.mask_has(mask, index))
 				.map(|index| {
-					// an enumeration member: its position (pinned values are
-					// in the declaration, not in the store)
+					// an enumeration member: its pinned value (its literal
+					// payload), else its position
 					if info.kind == crate::types::NominalKind::Enum {
+						let pinned = types
+							.as_int(types.payload(nominal, index))
+							.filter(|int| int.min == int.max)
+							.map(|int| int.min);
+						let value = match pinned {
+							Some(pinned) => Value::Integer(pinned),
+							None => Value::int(i64::from(index)),
+						};
 						return Value::object(vec![
 							("name", Value::string(types.member_name(nominal, index))),
-							("value", Value::int(i64::from(index))),
+							("value", value),
 						]);
 					}
 					let payload = types.payload(nominal, index);

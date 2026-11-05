@@ -23,6 +23,7 @@ mod aliasing;
 mod appends;
 mod arith;
 mod arrays;
+mod big_integers;
 mod calls;
 mod capacity;
 mod chunks;
@@ -2173,6 +2174,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		match self.view(node) {
 			View::Error => Err(self.unsupported(node.index(), "code with errors")),
 			View::Integer(value) => self.integer_literal(value, node),
+			View::BigInt(text) => self.big_literal(text, node),
 			View::Float(value) => match self.node_repr(node)? {
 				Repr::F32 => Ok(Val::new(
 					Repr::F32,

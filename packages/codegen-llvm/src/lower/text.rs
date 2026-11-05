@@ -942,6 +942,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						.build_int_z_extend(value.int(), self.context.i32_type(), "")?;
 				self.call_runtime("fa_b_bool", &[wide.into()])
 			}
+			Repr::BigInt => self.call_runtime("fa_b_bigint", &[value.int().into()]),
 			Repr::F64 => self.call_runtime("fa_b_f64", &[value.value.expect("a float").into()]),
 			Repr::F32 => self.call_runtime("fa_b_f32", &[value.value.expect("a float").into()]),
 			Repr::Percentage => {

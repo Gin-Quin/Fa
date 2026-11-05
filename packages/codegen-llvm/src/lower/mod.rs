@@ -694,6 +694,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.switch_file(self.entry);
 		self.define_coroutine_shims()?;
 
+		self.define_equal_box()?;
 		self.define_format_union()?;
 		self.define_boxes()?;
 		// the drops at the end of `main` only free memory: the system takes

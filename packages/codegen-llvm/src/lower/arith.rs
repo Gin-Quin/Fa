@@ -1140,6 +1140,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.builder
 					.build_int_compare(IntPredicate::EQ, left.int(), right.int(), "")?)
 			}
+			// values of unions: the same member, equal data (objects.rs)
+			_ if op.is_none()
+				&& [left.repr, right.repr]
+					.iter()
+					.any(|repr| matches!(repr, Repr::Union | Repr::InlineUnion(_))) =>
+			{
+				self.unions_equal(left, right, node)
+			}
 			_ => Err(self.unsupported(node.index(), "comparing these values")),
 		}
 	}

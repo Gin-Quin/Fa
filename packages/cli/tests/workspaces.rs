@@ -1362,6 +1362,93 @@ fn develop_swaps_the_edited_modules_in_the_running_program() {
 	assert!(!output.contains("is not run again"), "{output}");
 }
 
+/// `develop.hotReload = false`: an edit of the package's own sources
+/// restarts the program instead of swapping its modules.
+#[test]
+fn develop_restarts_the_program_without_hot_reloading() {
+	if !has_tool("bun") {
+		return;
+	}
+	let scratch = Scratch::new("hot-off");
+	let greet = |word: &str| format!("export function = (): String => \"{word}\"\n");
+	let package = scratch.write(
+		"farm",
+		&[
+			(
+				"package.fa",
+				"export = {\n\tname = \"farm\"\n\tdevelop = { hotReload = false }\n}\n",
+			),
+			("library/greet.fa", &greet("one")),
+			(
+				"application/main.fa",
+				"use { sleep } = std.time\n\nexport async function = () => {\n\tmutable ticks = 0\n\twhile ticks < 40 {\n\t\tticks += 1\n\t\tconsole.log(\"{library.greet()} {ticks}\")\n\t\tawait sleep(50)\n\t}\n}\n",
+			),
+		],
+	);
+	let (child, output) = spawn(&scratch, &["develop"], &package, 1);
+	assert!(
+		wait_for(&output, "one 2\n", 30),
+		"{}",
+		output.lock().unwrap()
+	);
+	fs::write(package.join("library/greet.fa"), greet("two")).unwrap();
+	assert!(
+		wait_for(&output, "two 1\n", 20),
+		"{}",
+		output.lock().unwrap()
+	);
+	let code = finish(child, 30);
+	let output = output.lock().unwrap().clone();
+	assert_eq!(code, Some(0), "{output}");
+	assert!(
+		output.contains("fa develop: `library/greet.fa` changed: restarting\n"),
+		"{output}"
+	);
+	assert!(!output.contains("reloaded"), "{output}");
+}
+
+/// A swap that fails restarts the program, with the reason: here the
+/// program is busy and never answers on the channel (`hot.rs`, 10 s).
+#[test]
+fn develop_restarts_the_program_when_a_swap_fails() {
+	if !has_tool("bun") {
+		return;
+	}
+	let scratch = Scratch::new("hot-fails");
+	let busy = |milliseconds: u32| format!("export function = (): Integer => {milliseconds}\n");
+	let package = scratch.write(
+		"farm",
+		&[
+			("package.fa", "export = { name = \"farm\" }\n"),
+			("library/busy.fa", &busy(16000)),
+			(
+				"application/main.fa",
+				"use { now } = std.time\n\nexport function = () => {\n\tlet start = now()\n\tmutable spins = 0\n\twhile now() - start < library.busy() {\n\t\tspins += 1\n\t}\n\tconsole.log(\"done after {library.busy()}\")\n}\n",
+			),
+		],
+	);
+	let (child, output) = spawn(&scratch, &["develop"], &package, 1);
+	assert!(
+		wait_for(&output, "watching for changes", 30),
+		"{}",
+		output.lock().unwrap()
+	);
+	// the program is now busy, its channel not connected
+	std::thread::sleep(Duration::from_millis(1500));
+	fs::write(package.join("library/busy.fa"), busy(0)).unwrap();
+	let code = finish(child, 60);
+	let output = output.lock().unwrap().clone();
+	assert_eq!(code, Some(0), "{output}");
+	assert!(
+		output.contains(
+			"fa develop: `library/busy.fa` changed: restarting (the program isn't connected to `fa develop`)"
+		),
+		"{output}"
+	);
+	assert!(output.contains("done after 0\n"), "{output}");
+	assert!(!output.contains("done after 16000"), "{output}");
+}
+
 #[test]
 fn test_watch_runs_the_tests_again_after_a_change() {
 	if !has_tool("bun") {

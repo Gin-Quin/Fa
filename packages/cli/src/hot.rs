@@ -397,4 +397,41 @@ mod tests {
 		assert_ne!(type_declarations(before), type_declarations(shape));
 		assert_eq!(json_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
 	}
+
+	/// Review item 19: a local process that connects first, without the
+	/// token or with another one, doesn't take the program's place.
+	#[test]
+	fn the_channel_answers_only_the_program_with_its_token() {
+		let mut channel = Channel::open().expect("a local socket");
+		let variable = channel.variable();
+		let (port, token) = variable.split_once(':').expect("<port>:<token>");
+		let port: u16 = port.parse().unwrap();
+		assert_eq!(token.len(), 32);
+		assert_ne!(Channel::open().unwrap().token, channel.token);
+		let intruders: Vec<TcpStream> = ["wrong\n", ""]
+			.into_iter()
+			.map(|first| {
+				let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+				stream.write_all(first.as_bytes()).unwrap();
+				stream
+			})
+			.collect();
+		let token = token.to_string();
+		let program = std::thread::spawn(move || {
+			let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+			stream.write_all(format!("{token}\n").as_bytes()).unwrap();
+			let mut reader = BufReader::new(stream.try_clone().unwrap());
+			let mut request = String::new();
+			reader.read_line(&mut request).unwrap();
+			stream
+				.write_all(format!("{{\"answer\":{:?}}}\n", request.trim()).as_bytes())
+				.unwrap();
+		});
+		assert_eq!(
+			channel.request("swap").unwrap().trim(),
+			"{\"answer\":\"swap\"}"
+		);
+		program.join().unwrap();
+		drop(intruders);
+	}
 }

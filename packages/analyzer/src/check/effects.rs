@@ -534,7 +534,9 @@ impl Walker<'_> {
 			SymbolKind::SelfParameter => PathRoot::SelfParam,
 			SymbolKind::Parameter { index } => PathRoot::Param(index),
 			SymbolKind::Requirement { index } => PathRoot::Requirement(index),
-			SymbolKind::Let | SymbolKind::Mutable => PathRoot::ModuleValue(self.module_key(symbol)),
+			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive => {
+				PathRoot::ModuleValue(self.module_key(symbol))
+			}
 			_ => return None,
 		};
 		let mut steps = Vec::new();
@@ -976,7 +978,7 @@ impl Walker<'_> {
 						SymbolKind::Requirement { index } => {
 							Some((PathRoot::Requirement(index), ty))
 						}
-						SymbolKind::Let | SymbolKind::Mutable
+						SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
 							if matches!(
 								self.a.symbols.scope(entry.scope).kind,
 								ScopeKind::Module | ScopeKind::Namespace
@@ -1018,14 +1020,15 @@ impl Walker<'_> {
 				let (mut path, mut ty, rest) = match self.namespace_target(target) {
 					Some(_) => {
 						self.check_module_access(node, target, members);
-						let found = all.iter().enumerate().find_map(|(index, &member)| {
-							match self.a.resolution(member) {
+						let found = all
+							.iter()
+							.enumerate()
+							.find_map(|(index, &member)| match self.a.resolution(member) {
 								Resolution::Local(symbol) if !self.is_namespace(symbol) => {
 									Some((index, symbol))
 								}
 								_ => None,
-							}
-						});
+							});
 						let Some((index, symbol)) = found.filter(|&(_, symbol)| {
 							matches!(
 								self.a.symbols.symbol(symbol).kind,

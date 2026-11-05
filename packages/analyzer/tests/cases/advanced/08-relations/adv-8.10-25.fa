@@ -1,0 +1,37 @@
+-- Erased generic code (JavaScript) copies the linked elements it stores:
+-- the copies have no links (D18), and printing them leaves the sides out.
+-- skip-target: native (a generic `Pool<Item>` parameter of another file is not lowered natively yet)
+-- file: library/people.fa
+export mutable: Pool<Person> = []
+-- file: library/Person.fa
+export type = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool<people->bestFriend>
+}
+-- file: library/copies.fa
+export function = <Item>(items: Pool<Item>): Array<Item> => {
+	mutable copied: Array<Item> = []
+	for item in items {
+		copied.push(item)
+	}
+	for item in copied {
+		console.log(item)
+	}
+	copied
+}
+-- file: application/main.fa
+export function = () => {
+	use ana = library.people.add({ name = "Ana" })
+	use bao = library.people.add({ name = "Bao", bestFriend = ana })
+	let copied = library.copies(library.people)
+	for copy in copied {
+		console.log(copy.name, copy.bestFriend?.name ?? "none", copy.bestFriendOf.size)
+	}
+	console.log(ana.bestFriendOf.size)
+}
+-- prints: { name = "Ana" }
+-- prints: { name = "Bao" }
+-- prints: Ana none 0
+-- prints: Bao none 0
+-- prints: 1

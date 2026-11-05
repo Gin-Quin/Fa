@@ -54,6 +54,21 @@ fn write_package(directory: &Path, targets: &str) {
 
 type RawFarm = CStruct { }
 
+type Point = CStruct {
+	x: Int32
+	y: Float32
+}
+
+type Triple = CStruct {
+	a: Float64
+	b: Float64
+	c: Float64
+}
+
+function scale: (point: Point, factor: Int32) => Point = @extern(\"point_scale\")
+function sum: (triple: Triple) => Float64 = @extern(\"triple_sum\")
+function makeTriple: (value: Float64) => Triple = @extern(\"triple_make\")
+
 function openFarm: (name: CString) => Pointer<RawFarm> = @extern(\"farm_open\")
 function addAnimals: (farm: Pointer<RawFarm>, count: Int32) => Void = @extern(\"farm_add\")
 function animals: (farm: Pointer<RawFarm>) => Int32 = @extern(\"farm_animals\")
@@ -80,6 +95,13 @@ export type = {
 		counter
 	}
 
+	function scaled = (x: Int32, y: Float32, factor: Int32): String => {
+		let point = scale(Point { x, y }, factor)
+		\"{point.x} {point.y}\"
+	}
+
+	function tripled = (value: Float64): Float64 => sum(makeTriple(value))
+
 	function destroy = (self) => {
 		closeFarm(self.#raw)
 	}
@@ -96,6 +118,8 @@ export type = {
 	console.log(farm.count())
 	console.log(farm.name())
 	console.log(library.Farm.counted(40))
+	console.log(library.Farm.scaled(3, 1.5, 2))
+	console.log(library.Farm.tripled(1.5))
 }
 "
 			.to_string(),
@@ -136,7 +160,7 @@ fn a_package_calls_its_c_library_on_bun() {
 	let cache = scratch("foreign-cache");
 	let (stdout, stderr, code) = fa(&["run", "."], &directory, &cache);
 	assert_eq!(code, 0, "stderr: {stderr}");
-	assert_eq!(stdout, "7\nGreen Acres\n42\n");
+	assert_eq!(stdout, "7\nGreen Acres\n42\n6 3\n9\n");
 	let (_, stderr, code) = fa(&["check"], &directory, &cache);
 	assert_eq!(code, 0, "stderr: {stderr}");
 }

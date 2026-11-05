@@ -68,3 +68,5 @@ A function name is a value: write `@typeToString(Type<getDigitCount>)` (metaprog
 ## `documentation/guides/web-server.md`, "Typed request and response bodies" (JSON of named unions)
 
 A member of a named union is read and written tagged by a `"type"` property holding its name (`{ "type": "Circle", "radius": 1 }`); a member without data is `{ "type": "Point" }`, data that isn't an object (or an object with its own `type` field) is under `"value"`, a literal member is the literal. An unknown `"type"` is a `JsonError` naming the accepted members.
+## `documentation/advanced/foreign-code.md`, "Targets" and `:::implementation` ("JavaScript", "State of the implementation")
+`bun` passes `CStruct`s by value now: drop "(a `CStruct` can't be passed by value)" from the table, and from the JavaScript state. Implementation: a C function taking or returning a `CStruct` by value goes through a shim that Bun's TinyCC compiles on its first call (`bun:ffi`'s `cc`): the arguments are written into memory with the C layout the compiler computes, the shim calls the function with them by value under the platform's C ABI, and writes the result back.

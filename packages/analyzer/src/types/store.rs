@@ -1119,6 +1119,7 @@ impl TypeStore {
 			TypeKind::NamedUnion(nominal, mask) => Some((nominal, mask, false)),
 			TypeKind::Enum(nominal, mask) => Some((nominal, mask, true)),
 			TypeKind::Member(nominal, index) => Some((nominal, self.single_mask(index), false)),
+			TypeKind::EnumMember(nominal, index) => Some((nominal, self.single_mask(index), true)),
 			_ => None,
 		}
 	}

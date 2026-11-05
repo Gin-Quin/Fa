@@ -86,10 +86,13 @@ async function swap() {
 	return await Promise.race([answer, late]);
 }
 
-const channel = Number(process.env.FA_HOT_CHANNEL);
-if (channel) {
-	const socket = connect(channel, "127.0.0.1");
+// `<port>:<token>`: the token is sent first, `fa develop` closes a
+// connection without it
+const [channel, token] = (process.env.FA_HOT_CHANNEL ?? "").split(":");
+if (Number(channel)) {
+	const socket = connect(Number(channel), "127.0.0.1");
 	socket.setEncoding("utf8");
+	socket.write(`${token}\n`);
 	socket.on("error", () => process.exit(0));
 	socket.on("close", () => process.exit(0));
 	let buffer = "";

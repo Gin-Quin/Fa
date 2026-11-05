@@ -243,12 +243,37 @@ impl Running {
 }
 
 /// The channel of `fa develop` with the program it runs: a local socket
-/// the program connects to (its port in `FA_HOT_CHANNEL`, `faHotListen`),
-/// the same on every system. A request is a line, its answer a line of
+/// the program connects to (`FA_HOT_CHANNEL` is `<port>:<token>`,
+/// `faHotListen`), the same on every system. The program first sends the
+/// token, a random secret, as a line: a connection without it (another
+/// local process) is closed. A request is a line, its answer a line of
 /// JSON.
 pub(crate) struct Channel {
 	listener: TcpListener,
+	/// The secret the program sends first.
+	token: String,
 	connection: Option<BufReader<TcpStream>>,
+}
+
+/// A random secret: 16 bytes of the system's random source, else of the
+/// randomly keyed hasher of the standard library, as hexadecimal.
+fn random_token() -> String {
+	use std::hash::{BuildHasher as _, Hasher as _};
+	let mut bytes = [0u8; 16];
+	let read = fs::File::open("/dev/urandom")
+		.and_then(|mut file| std::io::Read::read_exact(&mut file, &mut bytes));
+	if read.is_err() {
+		let time = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.map_or(0, |time| time.as_nanos());
+		for half in bytes.chunks_mut(8) {
+			let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+			hasher.write_u128(time);
+			hasher.write_u32(std::process::id());
+			half.copy_from_slice(&hasher.finish().to_le_bytes());
+		}
+	}
+	bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 impl Channel {
@@ -258,15 +283,35 @@ impl Channel {
 		listener.set_nonblocking(true).ok()?;
 		Some(Channel {
 			listener,
+			token: random_token(),
 			connection: None,
 		})
 	}
 
-	/// The port the program connects to.
-	pub(crate) fn port(&self) -> u16 {
-		self.listener
+	/// The value of `FA_HOT_CHANNEL` for the program: `<port>:<token>`.
+	pub(crate) fn variable(&self) -> String {
+		let port = self
+			.listener
 			.local_addr()
-			.map_or(0, |address| address.port())
+			.map_or(0, |address| address.port());
+		format!("{port}:{}", self.token)
+	}
+
+	/// Whether a new connection is the program's: its first line is the
+	/// token, sent within 2 s.
+	fn authenticated(&self, stream: &TcpStream) -> bool {
+		let ready = stream.set_nonblocking(false).is_ok()
+			&& stream
+				.set_read_timeout(Some(Duration::from_secs(2)))
+				.is_ok();
+		let Ok(reader) = stream.try_clone() else {
+			return false;
+		};
+		let mut line = String::new();
+		ready
+			&& BufReader::new(std::io::Read::take(reader, self.token.len() as u64 + 2))
+				.read_line(&mut line)
+				.is_ok() && line.trim_end() == self.token
 	}
 
 	/// Asks the development server of `--target=web` to reload its pages.
@@ -282,7 +327,9 @@ impl Channel {
 			let start = Instant::now();
 			let stream = loop {
 				match self.listener.accept() {
-					Ok((stream, _)) => break stream,
+					Ok((stream, _)) if self.authenticated(&stream) => break stream,
+					// another process: closed
+					Ok(_) => {}
 					Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
 						if start.elapsed() > timeout {
 							return Err("the program isn't connected to `fa develop`".to_string());

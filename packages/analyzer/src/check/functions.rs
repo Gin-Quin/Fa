@@ -1322,8 +1322,6 @@ impl Walker<'_> {
 		self.unsupported(n, "destructured parameters")
 	}
 
-	/// `f then g`
-
 	/// `f with (y = 0)`
 	pub(super) fn check_partial_application(
 		&mut self,

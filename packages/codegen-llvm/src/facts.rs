@@ -101,6 +101,12 @@ fn relation_sides(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 	found
 }
 
+/// The fields that may be written after the literal that built their
+/// object, and the types whose whole values may be replaced
+/// (`proofs::written_fields`): every other field is never written after
+/// construction, and a method reads it once (`lower/frozen.rs`).
+pub const WRITTEN_FIELDS: &str = "fields.written";
+
 /// Every fact kind, in a fixed order.
 pub const KINDS: &[FactKind] = &[
 	FactKind {
@@ -127,7 +133,25 @@ pub const KINDS: &[FactKind] = &[
 		merge: union,
 		finish: crate::proofs::resolve_claims_owned,
 	},
+	FactKind {
+		name: WRITTEN_FIELDS,
+		collect: written_fields,
+		merge: union,
+		finish: unchanged,
+	},
 ];
+
+/// See [`WRITTEN_FIELDS`].
+fn written_fields(session: &Session, files: &[FileId]) -> BTreeSet<String> {
+	let types = session.types();
+	let proof_files: Vec<crate::proofs::ProofFile<'_>> = files
+		.iter()
+		.map(|&file| {
+			crate::proofs::ProofFile::new(session.tree(file), session.analysis(file), types)
+		})
+		.collect();
+	crate::proofs::written_fields(&proof_files)
+}
 
 /// See [`PROOF_CLAIMS`].
 fn proof_claims(session: &Session, files: &[FileId]) -> BTreeSet<String> {
@@ -767,6 +791,68 @@ mod tests {
 		assert_eq!(
 			found[0].as_deref(),
 			Some("Map<Int32, {column: Int32, row: Int32}>"),
+			"{found:?}"
+		);
+	}
+
+	/// The program's writes of fields (`proofs::written_fields`).
+	fn written(source: &str) -> std::collections::BTreeSet<String> {
+		let (session, file) = fa_analyzer::session::analyze_source(source);
+		super::ProgramFacts::of_unit(&session, &[file])
+			.set(super::WRITTEN_FIELDS)
+			.cloned()
+			.unwrap_or_default()
+	}
+
+	#[test]
+	fn fields_written_after_construction_are_found() {
+		let base = "type Cursor = { text: String, position: Integer }\nmutable cursor = Cursor { text = \"ab\", position = 0 }\ncursor.position += 1\n";
+		let found = written(base);
+		assert!(
+			found.contains("field:{position: Integer, text: String}.position"),
+			"{found:?}"
+		);
+		assert!(
+			!found
+				.iter()
+				.any(|key| key.ends_with(".text") || key.starts_with("whole:")),
+			"{found:?}"
+		);
+		// a store to the field, an append, a whole value assigned, an item replaced
+		for (change, key) in [
+			(
+				"cursor.text = \"\"\n",
+				"field:{position: Integer, text: String}.text",
+			),
+			(
+				"cursor.text += \"c\"\n",
+				"field:{position: Integer, text: String}.text",
+			),
+			// a built-in method changing the field (its receiver)
+			(
+				"cursor.text.reserve(10)\n",
+				"field:{position: Integer, text: String}.text",
+			),
+			(
+				"cursor = Cursor { text = \"\", position = 0 }\n",
+				"whole:{position: Integer, text: String}",
+			),
+			(
+				"mutable all = [cursor]\nall[0] = Cursor { text = \"\", position = 0 }\n",
+				"whole:{position: Integer, text: String}",
+			),
+			(
+				"mutable all = [cursor]\nall.reverseInPlace()\n",
+				"whole:{position: Integer, text: String}",
+			),
+		] {
+			let found = written(&format!("{base}{change}"));
+			assert!(found.contains(key), "{change}: {found:?}");
+		}
+		// a push moves no item
+		let found = written(&format!("{base}mutable all = [cursor]\nall.push(cursor)\n"));
+		assert!(
+			!found.iter().any(|key| key.starts_with("whole:")),
 			"{found:?}"
 		);
 	}

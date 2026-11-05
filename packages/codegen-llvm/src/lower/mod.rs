@@ -36,6 +36,7 @@ mod division;
 mod edits;
 mod fields;
 mod foreign;
+mod frozen;
 pub(crate) mod generic_values;
 mod growing;
 mod hoisting;
@@ -230,6 +231,12 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The functions whose bodies are being expanded into the function being
 	/// lowered (`destination.rs`): their locals are its own.
 	expanded_functions: Vec<NodeId>,
+	/// The fields of `self` read once at the entry of the method being
+	/// lowered, and the bytes and length of the strings among them
+	/// (`frozen.rs`); the program's writes of fields, once computed.
+	frozen_reads: Vec<frozen::FrozenRead<'ctx>>,
+	frozen_string_parts: Vec<frozen::FrozenParts<'ctx>>,
+	written_fields: std::cell::OnceCell<Option<std::collections::BTreeSet<String>>>,
 	/// The `text += character` of a counted loop with room reserved before
 	/// it (`appends.rs`): the loop's counter slot, its end and whether it is
 	/// inclusive, to keep the room for the rounds left after a longer append.
@@ -460,6 +467,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			hoisted_arrays: FxHashMap::default(),
 			hoisted_parts: FxHashMap::default(),
 			expanded_functions: Vec::new(),
+			frozen_reads: Vec::new(),
+			frozen_string_parts: Vec::new(),
+			written_fields: std::cell::OnceCell::new(),
 			reserved_appends: FxHashMap::default(),
 			frame: None,
 			constants: FxHashMap::default(),
@@ -1687,12 +1697,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.receive_argument_sources(declaration, &params)?;
 		// a started task waits here until its first turn
 		self.initial_suspend(&info.params, &by_pointer)?;
+		// the fields of `self` never written after construction (`frozen.rs`)
+		let frozen = (
+			std::mem::take(&mut self.frozen_reads),
+			std::mem::take(&mut self.frozen_string_parts),
+		);
+		self.read_frozen_fields(&info)?;
 		let result = if info.block_body {
 			self.block(info.body, ret.has_value())?
 		} else {
 			self.expr(info.body)?
 		};
 		self.build_return(result, info.body)?;
+		(self.frozen_reads, self.frozen_string_parts) = frozen;
 		self.cleanups.borrow_mut().clear();
 		for (symbol, slot) in saved {
 			match slot {

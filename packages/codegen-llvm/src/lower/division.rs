@@ -34,6 +34,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			return false;
 		}
+		// a value known to the analysis (`let keyCount = capacity * 2` of
+		// constants): LLVM divides by the constant
+		let exact = |node: NodeId| {
+			self.analysis
+				.interval(node)
+				.is_some_and(|interval| interval.lo == interval.hi)
+		};
+		if exact(divisor)
+			|| matches!(self.view(data.decl_node),
+				View::Declaration { value: Some(value), .. } if exact(value))
+		{
+			return false;
+		}
 		let point = self.tree.spans[at.index()];
 		let declaration = self.tree.spans[data.decl_node.index()];
 		let bodies = self.loop_bodies.get_or_init(|| {

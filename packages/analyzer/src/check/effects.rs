@@ -1269,11 +1269,10 @@ impl Walker<'_> {
 				self.closure_effects.insert(declaration, captured);
 			}
 			Some(_) => {}
-			// a lambda: they happen where it is created (it runs in the call it is given to)
+			// a lambda: they happen where it is created (it runs in the call it
+			// is given to), replayed by `check_lambda` in the enclosing context
 			None => {
-				for entry in captured {
-					self.record_effect(entry.place, entry.invalidates, entry.node, entry.call);
-				}
+				self.closure_effects.insert(cx.node, captured);
 			}
 		}
 		set
@@ -1309,6 +1308,12 @@ impl Walker<'_> {
 			_ => None,
 		};
 		let name = self.callee_name(callee);
+		// the local functions it calls or is given: the references they
+		// capture are read here
+		let closures = self.called_closures(&info);
+		for &function in &closures {
+			self.check_captured_references(n, function);
+		}
 		// the places the call changes, with the argument each one comes from
 		let mut changed: Vec<(PlaceId, bool, Option<NodeId>)> = Vec::new();
 		let mut builtin_effects: Vec<BuiltinEffect> = Vec::new();
@@ -1537,6 +1542,17 @@ impl Walker<'_> {
 		}
 		self.kept_narrowings.clear();
 		// a local function called or given: its effects on captured places
+		for declaration in closures {
+			if let Some(entries) = self.closure_effects.get(&declaration).cloned() {
+				for entry in entries {
+					self.record_effect(entry.place, entry.invalidates, n, true);
+				}
+			}
+		}
+	}
+
+	/// The local functions a call runs or is given (by declaration).
+	fn called_closures(&self, info: &crate::analysis::CallInfo) -> Vec<NodeId> {
 		let mut closures: Vec<NodeId> = Vec::new();
 		if let Callee::Function(declaration) = info.callee {
 			closures.push(declaration);
@@ -1550,13 +1566,7 @@ impl Walker<'_> {
 				closures.push(declaration);
 			}
 		}
-		for declaration in closures {
-			if let Some(entries) = self.closure_effects.get(&declaration).cloned() {
-				for entry in entries {
-					self.record_effect(entry.place, entry.invalidates, n, true);
-				}
-			}
-		}
+		closures
 	}
 
 	/// `REF013` (advanced brief §5.9): the call changes a place that another
@@ -1582,7 +1592,15 @@ impl Walker<'_> {
 		// a callback capturing a reference into a changed place (types brief
 		// po-12: `ps.deleteWhere((person) => person.age < ana.age)`)
 		for &argument in &used {
-			let lambda = self.strip_groups(argument);
+			let mut lambda = self.strip_groups(argument);
+			// a local function given by name
+			if let View::Name(_) = self.view(lambda)
+				&& let Resolution::Local(symbol) = self.a.resolution(lambda)
+				&& let Some(declaration) = self.direct_function(symbol)
+				&& let Some(info) = self.a.functions.get(&declaration)
+			{
+				lambda = info.lambda;
+			}
 			if !matches!(self.view(lambda), View::Lambda { .. }) {
 				continue;
 			}

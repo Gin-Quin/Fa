@@ -29,7 +29,7 @@ function twice = (value: Integer): Integer => value * 2
 
 function nested = (): Integer => count() + 1
 
-async function main = () => {
+async function main = () mutates total => {
 	mutable scalers = WorkerPool<Scaler> { count = 2, state = Scaler { factor = 3 } }
 	let fine = await scalers.submit((worker) => await worker.scale(twice(2)))
 	let direct = await scalers.submit((worker) => await worker.scale(count())) -- error: CONC008

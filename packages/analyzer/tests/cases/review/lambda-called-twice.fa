@@ -1,0 +1,26 @@
+-- review 4: a lambda's facts are those valid at each of its calls: the places it writes lose theirs at its entry
+function twice = (f: () => Void) => {
+	f()
+	f()
+}
+type Person = { name: String }
+function main = () => {
+	mutable x: Integer? = 3
+	if x != none {
+		twice(() => {
+			console.log(x + 1) -- error: E-OPT-1
+			x = none
+		})
+	}
+	mutable d = 1
+	twice(() => {
+		console.log(10 // d) -- error: E-ERR-3
+		d = 0
+	})
+	mutable people: Pool<Person> = []
+	use ana = people.add(Person { name = "Ana" })
+	twice(() => {
+		console.log(ana.name) -- error: REF002
+		people.delete(ana) -- error: REF002
+	})
+}

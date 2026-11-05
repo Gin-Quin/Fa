@@ -26,7 +26,7 @@ let base = 10
 
 function current = (): Integer => total
 
-async function main = () => {
+async function main = () mutates total => {
 	mutable scalers = WorkerPool<Scaler> { count = 2, state = Scaler { factor = 3 } }
 	provide Logger = {
 		info = (message) => console.log(message)

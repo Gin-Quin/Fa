@@ -409,6 +409,9 @@ pub struct Walker<'s> {
 	/// The effects of each local function on the places it captures, applied
 	/// at its calls (`effects.rs`), by declaration node.
 	pub(crate) closure_effects: FxHashMap<NodeId, Vec<effects::EffectEntry>>,
+	/// The places the lambdas of the call being checked write (with the
+	/// write): their facts aren't valid at the entry of a sibling lambda.
+	pub(crate) lambda_entry_writes: Vec<(PlaceId, bool, NodeId)>,
 	/// The effects written in each function's signature, by lambda node.
 	pub(crate) declared_effect_sets: FxHashMap<NodeId, crate::ids::EffectSetId>,
 	/// The captured locals each closure writes, with the write (by lambda
@@ -571,6 +574,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		relations: relations::RelationState::default(),
 		relation_pool_places: rustc_hash::FxHashSet::default(),
 		closure_effects: FxHashMap::default(),
+		lambda_entry_writes: Vec::new(),
 		parallel: Vec::new(),
 		parallel_callbacks: rustc_hash::FxHashSet::default(),
 		parallel_views: Vec::new(),

@@ -1,0 +1,9 @@
+-- review 7: a `use` declared on a narrowed place loses the narrowing when the place changes
+type Box = { value: String? }
+mutable box = Box { value = "hi" }
+if box.value is not none {
+	use v = box.value
+	console.log(v.length)
+	box.value = none
+	console.log(v.length) -- error: E-OPT-1
+}

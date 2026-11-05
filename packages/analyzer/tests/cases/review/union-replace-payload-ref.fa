@@ -1,0 +1,21 @@
+-- review 8: replacing a union invalidates the references into the payload of its old member
+type Shape = Union {
+	Circle = { tags: Array<String> }
+	Square = { side: Integer }
+}
+type Holder = { shape: Shape }
+function run = () throws IndexError => {
+	mutable holder = Holder { shape = Shape.Circle { tags = ["a"] } }
+	if holder.shape is Shape.Circle {
+		use tag = try holder.shape.tags[0]
+		holder.shape = Shape.Square { side = 1 }
+		console.log(tag) -- error: REF001
+	}
+	mutable shape: Shape = Shape.Circle { tags = ["a"] }
+	if shape is Shape.Circle {
+		use first = try shape.tags[0]
+		shape = Shape.Square { side = 1 }
+		console.log(first) -- error: REF001
+	}
+}
+try run()

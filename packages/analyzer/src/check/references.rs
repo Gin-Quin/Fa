@@ -66,7 +66,14 @@ impl Walker<'_> {
 			// a collection that owner fields point into (REL016, relations.rs)
 			w.check_owned_collection_alias(value);
 			if !name.is_empty() {
-				let ty = declared.unwrap_or_else(|| w.s.types.widen(actual));
+				// the place's declared type: a narrowing is a fact of the
+				// alias, gone when the place changes (`box.value = none`)
+				let ty = declared.unwrap_or_else(|| {
+					place
+						.and_then(|place| w.place_type(place))
+						.filter(|&ty| w.s.types.satisfies(actual, ty))
+						.unwrap_or_else(|| w.s.types.widen(actual))
+				});
 				let symbol = w.declare_reference(n, name, kind);
 				let entry = w.a.symbols.symbol_mut(symbol);
 				entry.ty = ty;
@@ -85,6 +92,20 @@ impl Walker<'_> {
 			if self.body.flow.reachable {
 				let state = self.facts.refs.state(RefState::valid(place));
 				self.body.flow.set_ref_state(symbol, state);
+				// the narrowing of the place, as a fact of the alias
+				let declared_ty = self.a.symbols.symbol(symbol).ty;
+				let narrowed = self.s.types.widen(actual);
+				if annotation.is_none()
+					&& narrowed != declared_ty
+					&& self.is_union_like(declared_ty)
+					&& !self.s.types.is_recovering(narrowed)
+					&& self.s.types.satisfies(narrowed, declared_ty)
+				{
+					let own = self.places.symbol(symbol);
+					let mut state = std::mem::take(&mut self.body.flow);
+					self.narrow_place_in(&mut state, own, declared_ty, narrowed, n);
+					self.body.flow = state;
+				}
 			}
 		}
 		TypeId::VOID
@@ -397,6 +418,33 @@ impl Walker<'_> {
 			self.report(diagnostic);
 			return;
 		}
+		self.check_reference_valid(n, symbol, None);
+	}
+
+	/// The captured references a local function reads are read at its calls
+	/// (and where it is given to a callee): each must still be valid there.
+	pub(crate) fn check_captured_references(&mut self, n: NodeId, function: NodeId) {
+		let Some(captures) = self
+			.a
+			.functions
+			.get(&function)
+			.map(|info| info.captures.clone())
+		else {
+			return;
+		};
+		for symbol in captures {
+			let kind = self.a.symbols.symbol(symbol).kind;
+			if matches!(kind, SymbolKind::Use | SymbolKind::MutableUse)
+				|| self.iterator_locals.contains_key(&symbol)
+			{
+				self.check_reference_valid(n, symbol, Some(function));
+			}
+		}
+	}
+
+	/// `REF001`/`REF002` when the reference `symbol`, read at `n` (or by the
+	/// local function `through` called at `n`), is invalidated here.
+	fn check_reference_valid(&mut self, n: NodeId, symbol: SymbolId, through: Option<NodeId>) {
 		if !self.body.flow.reachable {
 			return;
 		}
@@ -406,6 +454,7 @@ impl Walker<'_> {
 		let Some((by, maybe)) = self.facts.refs.get(state).invalidated else {
 			return;
 		};
+		let kind = self.a.symbols.symbol(symbol).kind;
 		let entry = self.a.symbols.symbol(symbol);
 		let name = self.s.types.syms.resolve(entry.name).to_string();
 		let operation = self.operation_text(by);
@@ -420,19 +469,46 @@ impl Walker<'_> {
 				self.fix_text(entry.decl_node)
 			),
 		};
+		let reads = match through {
+			Some(function) => format!(
+				"this call runs `{}`, which reads `{name}`: ",
+				self.function_name_of(function)
+			),
+			None => String::new(),
+		};
 		let (code, message) = if maybe {
 			(
 				&REF002,
-				format!("`{name}` may have been invalidated by `{operation}` (line {line}): {fix}"),
+				format!(
+					"{reads}`{name}` may have been invalidated by `{operation}` (line {line}): {fix}"
+				),
 			)
 		} else {
 			(
 				&REF001,
-				format!("`{name}` was invalidated by `{operation}` (line {line}): {fix}"),
+				format!("{reads}`{name}` was invalidated by `{operation}` (line {line}): {fix}"),
 			)
 		};
 		let diagnostic = self.diagnostic(code, n, message);
 		self.report_flow(diagnostic);
+	}
+
+	/// The name of a local function (or `the function` for a lambda).
+	fn function_name_of(&self, function: NodeId) -> String {
+		self.a
+			.functions
+			.get(&function)
+			.and_then(|info| info.symbol)
+			.map_or_else(
+				|| "the function".to_string(),
+				|symbol| {
+					self.s
+						.types
+						.syms
+						.resolve(self.a.symbols.symbol(symbol).name)
+						.to_string()
+				},
+			)
 	}
 
 	/// Whether a symbol is a local of an enclosing function (a capture).
@@ -587,6 +663,16 @@ impl Walker<'_> {
 			return true;
 		};
 		for step in &r_steps[p_steps.len()..] {
+			// below a union (or an optional) the change may replace the member
+			// that held the payload (reference-checking.md, owning edges)
+			if matches!(
+				self.s.types.kind(ty),
+				TypeKind::Union(_) | TypeKind::NamedUnion(..)
+			) && !matches!(step, Step::Length | Step::Size | Step::Capacity)
+				&& !self.kept_narrowings.contains(&p)
+			{
+				return true;
+			}
 			match step {
 				Step::Field(name) => {
 					let field = self

@@ -60,8 +60,12 @@ enum CAbi {
 	Wasm,
 }
 
+/// An attribute of a parameter of a C function: its position, its name,
+/// its type (`byval`, `sret`).
+pub(super) type CAttribute<'ctx> = (u32, &'static str, Option<inkwell::types::AnyTypeEnum<'ctx>>);
+
 /// How a C value crosses the ABI.
-enum Passing<'ctx> {
+pub(super) enum Passing<'ctx> {
 	/// As is.
 	Direct(BasicTypeEnum<'ctx>),
 	/// A struct loaded as these registers (one or two eightbytes).
@@ -117,7 +121,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The IR type of a C type.
-	fn c_llvm_type(&self, c: CType) -> Option<BasicTypeEnum<'ctx>> {
+	pub(super) fn c_llvm_type(&self, c: CType) -> Option<BasicTypeEnum<'ctx>> {
 		Some(match c {
 			CType::Void => return None,
 			CType::Bool => self.context.bool_type().into(),
@@ -150,7 +154,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// How a C value is passed as a parameter, or as the result
 	/// (`result`): scalars as themselves, structs by the target's C ABI.
-	fn passing(
+	pub(super) fn passing(
 		&self,
 		c: CType,
 		_node: NodeId,
@@ -240,7 +244,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// A block holding a struct and its registers, which may be larger
 	/// (AAPCS64 passes a 4-byte struct in a 64-bit register).
-	fn coercion_slot(
+	pub(super) fn coercion_slot(
 		&self,
 		structure: BasicTypeEnum<'ctx>,
 		coerced: StructType<'ctx>,
@@ -314,15 +318,42 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(function) = self.module.get_function(symbol) {
 			return Ok((function, c_params, c_ret));
 		}
+		let (function_type, attributes) = self.c_function_type(&c_params, c_ret, node)?;
+		let function = self
+			.module
+			.add_function(symbol, function_type, Some(Linkage::External));
+		// on wasm, an import of the `env` module unless C compiled to
+		// WebAssembly and linked with the program defines it (the loader
+		// takes the host's from `env.mjs`)
+		if self.c_abi() == CAbi::Wasm {
+			for (key, value) in [("wasm-import-module", "env"), ("wasm-import-name", symbol)] {
+				function.add_attribute(
+					AttributeLoc::Function,
+					self.context.create_string_attribute(key, value),
+				);
+			}
+		}
+		self.add_c_attributes(function, attributes, c_ret);
+		Ok((function, c_params, c_ret))
+	}
+
+	/// The IR type of a C function with these C types (structs by the
+	/// target's C ABI: an `sret` first parameter for a result in memory),
+	/// and the attributes of its parameters.
+	pub(super) fn c_function_type(
+		&self,
+		c_params: &[CType],
+		c_ret: CType,
+		node: NodeId,
+	) -> Result<(inkwell::types::FunctionType<'ctx>, Vec<CAttribute<'ctx>>), Error> {
 		let mut ir_params: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
-		let mut attributes: Vec<(u32, &str, Option<inkwell::types::AnyTypeEnum<'ctx>>)> =
-			Vec::new();
+		let mut attributes: Vec<CAttribute<'ctx>> = Vec::new();
 		let ret_passing = self.passing(c_ret, node, true)?;
 		if let Some(Passing::Memory(structure)) = &ret_passing {
 			attributes.push((0, "sret", Some((*structure).into())));
 			ir_params.push(self.pointer_type().into());
 		}
-		for &c in &c_params {
+		for &c in c_params {
 			let position = ir_params.len() as u32;
 			match self.passing(c, node, false)? {
 				Some(Passing::Direct(ty)) => {
@@ -362,20 +393,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 		};
-		let function = self
-			.module
-			.add_function(symbol, function_type, Some(Linkage::External));
-		// on wasm, an import of the `env` module unless C compiled to
-		// WebAssembly and linked with the program defines it (the loader
-		// takes the host's from `env.mjs`)
-		if self.c_abi() == CAbi::Wasm {
-			for (key, value) in [("wasm-import-module", "env"), ("wasm-import-name", symbol)] {
-				function.add_attribute(
-					AttributeLoc::Function,
-					self.context.create_string_attribute(key, value),
-				);
-			}
-		}
+		Ok((function_type, attributes))
+	}
+
+	/// Adds the attributes of [`Lowering::c_function_type`] to a C
+	/// function, and those of its result.
+	pub(super) fn add_c_attributes(
+		&self,
+		function: FunctionValue<'ctx>,
+		attributes: Vec<CAttribute<'ctx>>,
+		c_ret: CType,
+	) {
 		for (position, name, ty) in attributes {
 			let kind = Attribute::get_named_enum_kind_id(name);
 			let attribute = match ty {
@@ -384,21 +412,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			};
 			function.add_attribute(AttributeLoc::Param(position), attribute);
 		}
-		if let CType::Int(bits, signed) = c_ret
-			&& bits < 32
-		{
-			let kind =
-				Attribute::get_named_enum_kind_id(if signed { "signext" } else { "zeroext" });
+		let extension = match c_ret {
+			CType::Int(bits, signed) if bits < 32 => {
+				Some(if signed { "signext" } else { "zeroext" })
+			}
+			CType::Bool => Some("zeroext"),
+			_ => None,
+		};
+		if let Some(name) = extension {
+			let kind = Attribute::get_named_enum_kind_id(name);
 			function.add_attribute(
 				AttributeLoc::Return,
 				self.context.create_enum_attribute(kind, 0),
 			);
 		}
-		Ok((function, c_params, c_ret))
 	}
 
 	/// The signature of a function type.
-	fn signature(&self, ty: TypeId) -> Option<fa_analyzer::types::FnSig> {
+	pub(super) fn signature(&self, ty: TypeId) -> Option<fa_analyzer::types::FnSig> {
 		match self.types().kind(ty) {
 			TypeKind::Function(sig) => Some(self.types().sig(sig)),
 			_ => None,
@@ -406,7 +437,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A Fa value converted to its C type.
-	fn to_c(
+	pub(super) fn to_c(
 		&self,
 		value: Val<'ctx>,
 		c: CType,
@@ -437,7 +468,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A C value converted to the Fa representation of `ty`.
-	fn c_to_fa(
+	pub(super) fn c_to_fa(
 		&self,
 		raw: BasicValueEnum<'ctx>,
 		ty: TypeId,

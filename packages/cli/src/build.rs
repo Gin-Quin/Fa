@@ -264,6 +264,52 @@ pub(crate) fn configuration_for(
 	)
 }
 
+/// The C library a package builds (`build.cLibrary` of its configuration
+/// merged for the target), checked: its API is a foreign file of the
+/// package, its prefix a C identifier, its header a file name.
+pub(crate) fn c_library_of(
+	configuration: Option<&fa_analyzer::configuration::PackageConfiguration>,
+	base: &Path,
+) -> Result<Option<fa_codegen_llvm::CLibrary>, String> {
+	let Some(options) =
+		configuration.and_then(|configuration| configuration.build.c_library.as_ref())
+	else {
+		return Ok(None);
+	};
+	let library = fa_codegen_llvm::CLibrary {
+		header: options.header.clone(),
+		prefix: options.prefix.clone(),
+		api: options.api.clone(),
+	};
+	let identifier = !library.prefix.is_empty()
+		&& !library
+			.prefix
+			.starts_with(|character: char| character.is_ascii_digit())
+		&& library
+			.prefix
+			.chars()
+			.all(|character| character.is_ascii_alphanumeric() || character == '_');
+	if !identifier {
+		return Err(format!(
+			"fa build: the prefix of `build.cLibrary`, `{}`, must be a C identifier (letters, digits and `_`, not starting with a digit)\n",
+			library.prefix
+		));
+	}
+	if library.header.is_empty() || library.header.contains(['/', '\\']) {
+		return Err(format!(
+			"fa build: the header of `build.cLibrary`, `{}`, must be a file name (`{}.h`), written next to the libraries\n",
+			library.header, library.prefix
+		));
+	}
+	if !library.api.ends_with(".foreign.fa") || !base.join(&library.api).is_file() {
+		return Err(format!(
+			"fa build: the API of `build.cLibrary`, `{}`, must be a foreign file of the package (`library/api.foreign.fa`)\n",
+			library.api
+		));
+	}
+	Ok(Some(library))
+}
+
 /// `fa build` for `native`, `native-freestanding` or `wasm`: on `fa-native`
 /// (`native.rs`).
 pub(crate) fn build_native_target(options: &BuildOptions, target: fa_codegen_llvm::Target) -> i32 {
@@ -293,6 +339,15 @@ pub(crate) fn build_native_target(options: &BuildOptions, target: fa_codegen_llv
 	);
 	match built {
 		Ok(artifact) => {
+			if let Some((archive, header)) = &artifact.c_library {
+				eprintln!(
+					"fa build: wrote {}, {} and {}",
+					dependencies::shown_path(&artifact.output),
+					dependencies::shown_path(archive),
+					dependencies::shown_path(header)
+				);
+				return 0;
+			}
 			let written = artifact.loader.as_ref().unwrap_or(&artifact.output);
 			eprintln!("fa build: wrote {}", dependencies::shown_path(written));
 			0
@@ -655,17 +710,27 @@ fn build_native_artifact(
 			target.name()
 		));
 	}
+	// a C library (`build.cLibrary`): always in synchronous mode
+	let library = crate::project::locate(Some(path))
+		.ok()
+		.filter(|project| project.package && project.entry.is_none())
+		.is_some_and(|project| {
+			configuration_for(&project.base, target.language_target())
+				.build
+				.c_library
+				.is_some()
+		});
 	// a package: compiled per unit on the pipeline (design/parallel-pipeline.md
 	// §3.3), unless it is asynchronous or uses what the units don't compile yet
 	if crate::pipeline_enabled()
-		&& mode.asynchronous != Some(false)
+		&& (library || mode.asynchronous != Some(false))
 		&& std::env::var("FA_SPLIT").map_or(true, |value| value != "0")
 		&& let Some(project) = crate::streaming::locate(Some(path))
 		&& let configured = mode
 			.asynchronous
 			.or_else(|| crate::testing::configured_asynchronous(&project.base))
 		// asynchronous mode off by choice: checked on the whole program (CONC010)
-		&& configured != Some(false)
+		&& (library || configured != Some(false))
 	{
 		let options = &fa_codegen_llvm::Options {
 			asynchronous: configured,
@@ -690,7 +755,33 @@ fn build_native_artifact(
 		}
 	}
 	let mut loaded = Loaded::load(Some(path), target.analysis_target())?;
-	loaded.configure_asynchronous(mode.asynchronous, false);
+	let c_library = c_library_of(
+		loaded
+			.inner
+			.configuration
+			.as_ref()
+			.filter(|_| loaded.inner.project.package && loaded.inner.project.entry.is_none()),
+		&loaded.inner.project.base,
+	)?;
+	loaded.configure_asynchronous(
+		if c_library.is_some() {
+			Some(false)
+		} else {
+			mode.asynchronous
+		},
+		false,
+	);
+	// a C library: the API file is the program's entry
+	if let Some(library) = &c_library {
+		let module = library.api_module();
+		let Some(api) = loaded.inner.session.loaded_module(&module) else {
+			return Err(format!(
+				"fa build: the API of `build.cLibrary`, `{}`, is not a file of the package\n",
+				library.api
+			));
+		};
+		loaded.inner.program.entry = Some(api);
+	}
 	if mode.verbose {
 		eprintln!(
 			"fa build: asynchronous mode {}",
@@ -733,6 +824,7 @@ fn build_native_artifact(
 		.configuration
 		.as_ref()
 		.map(|configuration| fa_codegen_llvm::Libraries {
+			c_library: c_library.clone(),
 			link: configuration.build.link.clone(),
 			paths: configuration
 				.build
@@ -743,7 +835,7 @@ fn build_native_artifact(
 		})
 		.unwrap_or_default();
 	// a program of several files: one LLVM module (advanced brief §15.7)
-	let input = if loaded.inner.is_single_file() {
+	let input = if loaded.inner.is_single_file() && c_library.is_none() {
 		native::Input::File {
 			file: loaded.file,
 			shown: &loaded.shown,

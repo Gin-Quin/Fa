@@ -1,0 +1,12 @@
+-- A farm: a Fa value, which C holds behind a pointer
+export type = {
+	name: String
+	animals: Int64
+
+	function countAnimals = (self): Int64 throws FarmError => {
+		if self.animals == 0 {
+			throw FarmError.Empty
+		}
+		self.animals
+	}
+}

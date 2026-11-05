@@ -7,6 +7,11 @@ use inkwell::targets::{
 
 use crate::error::Error;
 
+unsafe extern "C" {
+	/// `shim/thin_bitcode.cpp`: constructors in `.init_array` (ELF).
+	fn fa_use_init_array(machine: llvm_sys::target_machine::LLVMTargetMachineRef);
+}
+
 pub use crate::options::{OptLevel, Options, Target};
 
 impl Target {
@@ -54,7 +59,7 @@ impl Target {
 			),
 		};
 		let target = LlvmTarget::from_triple(&triple)?;
-		target
+		let machine = target
 			.create_target_machine(
 				&triple,
 				cpu,
@@ -63,7 +68,10 @@ impl Target {
 				reloc_mode,
 				CodeModel::Default,
 			)
-			.ok_or_else(|| Error::Llvm(format!("no target machine for {triple}")))
+			.ok_or_else(|| Error::Llvm(format!("no target machine for {triple}")))?;
+		// SAFETY: the machine is alive
+		unsafe { fa_use_init_array(machine.as_mut_ptr()) };
+		Ok(machine)
 	}
 }
 

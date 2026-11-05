@@ -279,14 +279,17 @@ fn compile_files(
 	let context = Context::create();
 	let usize = context.ptr_sized_int_type(&machine.get_target_data(), None);
 
-	let asynchronous = options
-		.asynchronous
-		.unwrap_or_else(|| detect_asynchronous(session, entry));
+	// a C library runs in synchronous mode: its `async` functions are
+	// exported as their blocking versions
+	let asynchronous = libraries.c_library.is_none()
+		&& options
+			.asynchronous
+			.unwrap_or_else(|| detect_asynchronous(session, entry));
 	let start = Instant::now();
 	let module = context.create_module("program");
 	module.set_triple(&target.triple());
 	module.set_data_layout(&machine.get_target_data().get_data_layout());
-	Lowering::new(
+	let c_exports = Lowering::new(
 		session, files, entry, init_order, &context, &module, target, usize,
 	)
 	.with_whole_program()
@@ -294,6 +297,7 @@ fn compile_files(
 	.with_leak_check(options.leak_check)
 	.with_tests(tests)
 	.with_asynchronous(asynchronous, options.dev())
+	.with_c_library(libraries.c_library.clone())
 	.lower()?;
 	timings.build = start.elapsed();
 
@@ -387,6 +391,36 @@ fn compile_files(
 	timings.emit = start.elapsed();
 
 	let start = Instant::now();
+	if let Some(library) = &libraries.c_library {
+		// a C library: its shared and static libraries, and its header
+		let directory = output.parent().unwrap_or(Path::new(".")).to_path_buf();
+		let shared = directory.join(library.shared_name());
+		let archive = directory.join(library.static_name());
+		let linked = link::link_c_library(
+			target,
+			options,
+			None,
+			std::slice::from_ref(&object),
+			&c_exports,
+			&shared,
+			&archive,
+			libraries,
+		);
+		let _ = fs::remove_file(&object);
+		linked?;
+		timings.link = start.elapsed();
+		let header = write_header(session, entry, library, &directory)?;
+		return Ok(Artifact {
+			target,
+			options: *options,
+			output_size: fs::metadata(&shared)?.len(),
+			output: shared,
+			loader: None,
+			ir,
+			c_library: Some((archive, header)),
+			timings,
+		});
+	}
 	let linked = link::link(target, options, &object, &output, libraries);
 	let _ = fs::remove_file(&object);
 	linked?;
@@ -405,8 +439,29 @@ fn compile_files(
 		output,
 		loader,
 		ir,
+		c_library: None,
 		timings,
 	})
+}
+
+/// Writes the header of a C library (`header.rs`) into `directory`, from
+/// the interface of its API file.
+pub(crate) fn write_header(
+	session: &Session,
+	api: FileId,
+	library: &crate::options::CLibrary,
+	directory: &Path,
+) -> Result<PathBuf, Error> {
+	let interface = &session.source_file(api).interface;
+	let text = crate::header::c_header(session.types(), interface, library).map_err(|message| {
+		Error::Unsupported {
+			message: format!("the header of the C library: {message}"),
+			location: session.display_path(api),
+		}
+	})?;
+	let path = directory.join(&library.header);
+	fs::write(&path, text)?;
+	Ok(path)
 }
 
 /// The asynchronous mode of a standalone file (A6): its top level or its

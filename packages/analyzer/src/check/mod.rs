@@ -17,6 +17,7 @@
 //! flow buffers (decision A3) so that only the stable round's are kept.
 
 pub(crate) mod arrays;
+mod c_library;
 mod calls;
 mod collections;
 mod comptime;
@@ -593,6 +594,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		walker.finish_modules(root);
 		// the async summaries, settled (tasks.rs)
 		walker.finish_tasks(root);
+		// the API of a C library (c_library.rs)
+		walker.finish_c_library(root);
 	}
 	// the relations of the file (relations.rs)
 	walker.finish_relations();

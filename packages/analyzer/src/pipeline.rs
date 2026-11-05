@@ -769,7 +769,11 @@ impl Program<'_> {
 		for (module, diagnostic) in root.worker_diagnostics(&program_ids) {
 			extra.entry(module).or_default().push(diagnostic);
 		}
+		// the API file of a C library is the entry of its build: no entry function
+		let library_api = crate::c_library::configured(root.comptime.configuration.as_ref())
+			.is_some_and(|library| Some(library.api_module().as_str()) == self.entry);
 		if let (Some(entry_id), Some(entry)) = (entry_id, self.entry)
+			&& !library_api
 			&& let Some(diagnostic) = root.entry_function_diagnostic(entry_id, true)
 		{
 			extra.entry(entry.to_string()).or_default().push(diagnostic);

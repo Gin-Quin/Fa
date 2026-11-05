@@ -24,6 +24,7 @@ mod artifact;
 mod compile;
 mod error;
 pub mod facts;
+mod header;
 mod host;
 #[cfg(fa_llvm)]
 mod link;
@@ -46,8 +47,9 @@ pub use compile::{
 	compile_program_linking, compile_tests_linking, lowered_ir, run,
 };
 pub use error::Error;
+pub use header::c_header;
 pub use host::javascript_runtime;
-pub use options::{Libraries, OptLevel, Options, Target};
+pub use options::{CLibrary, Libraries, OptLevel, Options, Target};
 pub use split::{
 	EntryInputs, GenericEntryRequest, GenericInstance, GenericProducer, GenericTables,
 	GenericValueNeeds, PackageOutcome, SplitOptions, UnitOutput, UnitSymbols,

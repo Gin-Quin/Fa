@@ -1723,6 +1723,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				continue;
 			}
+			// `pointer.value` of a Fa value in a block of `Pointer.allocate`:
+			// the block (foreign.rs, `pointer_value`)
+			if let Resolution::Builtin(builtin) = self.analysis.resolution(member)
+				&& fa_analyzer::builtins::get(builtin).path == "Pointer#value"
+				&& slot.repr == Repr::Pointer
+				&& let Some(target) = self.types().pointer_target(current_type)
+				&& self.c_type(target, member).is_err()
+			{
+				let pointer = self
+					.builder
+					.build_load(self.pointer_type(), slot.pointer, "")?
+					.into_pointer_value();
+				slot = Slot {
+					pointer,
+					repr: self.repr_of(target, member.index())?,
+				};
+				current_type = target;
+				continue;
+			}
 			let Resolution::Field(_, index) = self.analysis.resolution(member) else {
 				return Err(self.unsupported(member.index(), "this place"));
 			};

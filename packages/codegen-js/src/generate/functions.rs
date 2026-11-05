@@ -75,7 +75,7 @@ impl Generator<'_> {
 				}
 				// the integer variants (`integer_variants.rs`)
 				for variant in self.integer_variants.get(&n).cloned().unwrap_or_default() {
-					let suffix = Self::variant_suffix(&variant);
+					let suffix = self.variant_suffix(n, &variant);
 					self.numeric_bindings = variant.into_iter().collect();
 					for (mode, instance) in self.instance_modes(n) {
 						self.tasks.next_mode = Some(mode);
@@ -543,9 +543,26 @@ impl Generator<'_> {
 									.get(&declaration)
 									.is_some_and(|variants| variants.contains(&variant)) =>
 							{
-								let suffix = Self::variant_suffix(&variant);
+								let suffix = self.variant_suffix(declaration, &variant);
 								Expr::name(format!("{}{suffix}", self.name_of(symbol)), true)
 							}
+							_ => function,
+						}
+					}
+					// a function of another module: the variant it exports
+					(None, Callee::Value) => {
+						let site = if application { stripped } else { n };
+						match (
+							self.external_variant_suffix(site, callee),
+							self.external_of_callee(callee),
+						) {
+							(Some(suffix), Some(external)) => Expr::name(
+								self.import(
+									&external.path,
+									&format!("{}{suffix}", external.export),
+								),
+								true,
+							),
 							_ => function,
 						}
 					}

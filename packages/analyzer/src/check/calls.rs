@@ -174,6 +174,9 @@ impl Walker<'_> {
 			}
 		};
 		let (kind, params) = self.callee_parameters(callee, sig.params);
+		// the generic parameters of the function called, in declaration
+		// order: the order of its recorded instantiation
+		let declared = self.callee_generics(callee, kind);
 		let binding = self.bind_arguments(n, &syntaxes, &params, kind);
 
 		// a generic callee: its free parameters are inferred (generics.rs)
@@ -305,7 +308,8 @@ impl Walker<'_> {
 				w.report(diagnostic);
 			}
 			if let Some(bindings) = &inferred {
-				w.record_instantiation(n, bindings);
+				let ordered = w.declaration_order(bindings, &declared);
+				w.record_instantiation(n, &ordered);
 			}
 			// `Json.parse(text)`, `File.read(path)` (std_library.rs)
 			let ret = match kind {

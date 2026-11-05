@@ -1,0 +1,58 @@
+-- `==` of values of unions: the same member and equal data, nested,
+-- recursive, inside arrays and objects (like `faEquals` on JavaScript).
+type Shape = Union {
+	Empty
+	Circle = { radius: Integer }
+	Label = { text: String, tags: Array<String> }
+}
+let a = Shape.Label { text = "a".repeat(30), tags = ["x", "y"] }
+let b = Shape.Label { text = "a".repeat(30), tags = ["x", "y"] }
+let c = Shape.Label { text = "a".repeat(30), tags = ["x"] }
+console.log(a == b, a == c, a != c, Shape.Empty == Shape.Empty)
+-- prints: true false true true
+let empty: Shape = Shape.Empty
+let circle: Shape = Shape.Circle { radius = 2 }
+console.log(empty == Shape.Empty, circle == Shape.Circle { radius = 2 }, circle == empty)
+-- prints: true true false
+
+type Tree = Union {
+	Leaf = { value: Integer }
+	Branch = { left: Tree, right: Tree }
+}
+let one = Tree.Branch { left = Tree.Leaf { value = 1 }, right = Tree.Branch { left = Tree.Leaf { value = 2 }, right = Tree.Leaf { value = 3 } } }
+let same = Tree.Branch { left = Tree.Leaf { value = 1 }, right = Tree.Branch { left = Tree.Leaf { value = 2 }, right = Tree.Leaf { value = 3 } } }
+let other = Tree.Branch { left = Tree.Leaf { value = 1 }, right = Tree.Leaf { value = 3 } }
+console.log(one == same, one == other)
+-- prints: true false
+
+let shapes: Array<Shape> = [Shape.Empty, Shape.Circle { radius = 1 }, Shape.Label { text = "t", tags = [] }]
+let copies: Array<Shape> = [Shape.Empty, Shape.Circle { radius = 1 }, Shape.Label { text = "t", tags = [] }]
+let changed: Array<Shape> = [Shape.Empty, Shape.Circle { radius = 5 }, Shape.Label { text = "t", tags = [] }]
+console.log(shapes == copies, shapes == changed)
+-- prints: true false
+
+type Holder = { name: String, shape: Shape, maybe: Shape? }
+let first = Holder { name = "h", shape = Shape.Circle { radius = 4 }, maybe = none }
+let second = Holder { name = "h", shape = Shape.Circle { radius = 4 }, maybe = none }
+let third = Holder { name = "h", shape = Shape.Circle { radius = 4 }, maybe = Shape.Empty }
+console.log(first == second, first == third)
+-- prints: true false
+
+let mixed: Integer | String = 3
+let text: Integer | String = "3"
+console.log(mixed == 3, text == "3", mixed == text)
+-- prints: true true false
+
+mutable values: Array<Integer | String> = []
+for i in 0..5 {
+	values.push(i)
+	values.push("v{i}")
+}
+mutable found = 0
+for value in values {
+	if value == "v2" or value == 4 {
+		found += 1
+	}
+}
+console.log(found)
+-- prints: 2

@@ -1,0 +1,56 @@
+-- `TypeFromSchema` of named unions, enumerations, functions and recursive
+-- types, and as the value of a generic type function (built per application)
+-- skip-target: native wasm native-freestanding (compile-time named union members are not built natively yet)
+type Shape = Union {
+	Circle = { radius: Float }
+	Point
+}
+type ShapeCopy = TypeFromSchema<@typeToSchema(Shape)>
+let shape: ShapeCopy = ShapeCopy.Circle { radius = 2.0 }
+function area = (shape: ShapeCopy): Float => when shape is {
+	ShapeCopy.Circle as { radius } => radius * radius
+	ShapeCopy.Point => 0.0
+}
+console.log(area(shape)) -- prints: 4
+
+type Color = Enum { red, green, blue }
+type ColorCopy = TypeFromSchema<@typeToSchema(Color)>
+let color: ColorCopy = ColorCopy.green
+console.log(color == ColorCopy.green) -- prints: true
+
+type Describe = TypeFromSchema<@typeToSchema((value: Integer) => String)>
+function describe: Describe = (value: Integer) => "value {value}"
+console.log(describe(3)) -- prints: value 3
+
+type Tree = { value: Integer, children: Array<Tree> }
+type TreeCopy = TypeFromSchema<@typeToSchema(Tree)>
+let tree: TreeCopy = { value = 1, children = [{ value = 2, children = [] }] }
+for child in tree.children {
+	console.log(child.value, child.children.length) -- prints: 2 0
+}
+
+function shout = (schema: Schema): Schema => when schema is {
+	Schema.StringLiteral as { value } => Schema.StringLiteral { value = value.toUpperCase() }
+	Schema.Union as { items } => {
+		mutable shouted: Array<Schema> = []
+		for item in items {
+			shouted.push(shout(item))
+		}
+		Schema.Union { items = shouted }
+	}
+	else => schema
+}
+type Shouted<Input> = TypeFromSchema<@shout(@typeToSchema(Input))>
+type Loud = Shouted<"yes" | "no">
+let loud: Loud = "YES"
+let quiet: Loud = "yes" -- error: E-TYPE-1
+console.log(loud) -- prints: YES
+
+type Failing = Errors { Unsupported = { message: String } }
+function onlyLiterals = (schema: Schema): Schema throws Failing => when schema is {
+	Schema.StringLiteral => schema
+	else => throw Failing.Unsupported { message = "only string literals" }
+}
+type Literal<Input> = TypeFromSchema<@onlyLiterals(@typeToSchema(Input))>
+type Fine = Literal<"a">
+type Broken = Literal<Integer> -- error: TF004

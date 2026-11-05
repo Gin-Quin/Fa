@@ -324,6 +324,9 @@ impl Generator<'_> {
 		if let Some(moved) = self.field_moved_out(n, target, &members) {
 			return moved;
 		}
+		if let Some(read) = self.temporary_access(n, target, &members) {
+			return read;
+		}
 		// a constant of the number API (`Int8.maxValue`, `Float.nan`)
 		if let [member] = members.as_slice()
 			&& let Resolution::Builtin(builtin) = self.analysis.resolution(*member)

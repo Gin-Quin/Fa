@@ -421,10 +421,10 @@ impl Generator<'_> {
 					.cloned()
 					.collect();
 				let optional = matches!(self.view(callee), View::OptionalAccess { .. });
-				let receiver = if optional {
-					self.keep_value(receiver)
+				let (receiver, drop) = if optional {
+					(self.keep_value(receiver), None)
 				} else {
-					receiver
+					self.temporary_receiver(callee, receiver)
 				};
 				let omitted = self.sentinel_slots(declaration, 1);
 				let (receiver, mut values) =
@@ -432,7 +432,7 @@ impl Generator<'_> {
 				values.insert(0, receiver.text.clone());
 				let result = self.finish_call(n, Some(declaration), function, values);
 				if !optional {
-					return result;
+					return self.after_call_drop(result, drop);
 				}
 				// `receiver?.method()`: `none` when the receiver is `none`
 				let none = Expr::constant("undefined", Prec::Primary);
@@ -456,6 +456,7 @@ impl Generator<'_> {
 					return self.unsupported(n, "this method of another file");
 				};
 				let receiver = self.receiver(callee);
+				let (receiver, drop) = self.temporary_receiver(callee, receiver);
 				let rest: Vec<Argument> = info
 					.arguments
 					.iter()
@@ -464,7 +465,8 @@ impl Generator<'_> {
 					.collect();
 				let (receiver, mut values) = self.arguments(n, receiver, &rest, arguments, &[]);
 				values.insert(0, receiver.text.clone());
-				self.finish_call(n, None, function.text, values)
+				let result = self.finish_call(n, None, function.text, values);
+				self.after_call_drop(result, drop)
 			}
 			Callee::Value if self.constraint_method_call(callee).is_some() => {
 				// `item.describe()` on a type parameter: the hidden function

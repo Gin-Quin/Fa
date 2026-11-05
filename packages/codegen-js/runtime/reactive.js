@@ -116,19 +116,24 @@ export function faSource() {
 /**
  * The source of a `reactive` field of an object: created on demand, and
  * kept outside the object, so that a copy of the object (which copies its
- * properties) starts without dependents.
+ * properties) starts without dependents. With `existing`, `undefined` when
+ * nothing created it yet.
  * @param {object} object
  * @param {string} name
- * @returns {FaSource}
+ * @param {boolean} [existing]
+ * @returns {FaSource | undefined}
  */
-export function faFieldSource(object, name) {
+export function faFieldSource(object, name, existing) {
 	let sources = faFieldSources.get(object);
 	if (sources === undefined) {
+		if (existing) {
+			return undefined;
+		}
 		sources = new Map();
 		faFieldSources.set(object, sources);
 	}
 	let source = sources.get(name);
-	if (source === undefined) {
+	if (source === undefined && !existing) {
 		source = new FaSource();
 		sources.set(name, source);
 	}
@@ -137,6 +142,21 @@ export function faFieldSource(object, name) {
 
 /** @type {WeakMap<object, Map<string, FaSource>>} */
 const faFieldSources = new WeakMap();
+
+// @fa-helper faNotifyField deps: faFieldSource faNotify
+/**
+ * Notifies the source of a side of an object, if something read it: the
+ * other sides a relation write or removal changes (relations.js).
+ * @param {object} object
+ * @param {string} name
+ * @returns {void}
+ */
+export function faNotifyField(object, name) {
+	const source = faFieldSource(object, name, true);
+	if (source !== undefined) {
+		faNotify(source);
+	}
+}
 
 // @fa-helper faTrack deps: faReactive
 /**

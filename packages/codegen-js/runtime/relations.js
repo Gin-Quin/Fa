@@ -19,15 +19,18 @@ export const faSides = Symbol.for("fa.sides");
 /**
  * `holder.direct = target` for a one-to-many relation (`many`: the reverse
  * side is a `Set` of holders), a one-to-one relation (the reverse side holds
- * the holder) or a symmetric one (`reverse` is `direct`).
+ * the holder) or a symmetric one (`reverse` is `direct`). `notify`, given
+ * when the sides are reactive, is called with each object and side changed
+ * (`faNotifyField`).
  * @param {any} holder
  * @param {string} direct
  * @param {string} reverse
  * @param {any} target the new target, or `undefined`
  * @param {boolean} many
+ * @param {(object: any, side: string) => void} [notify]
  * @returns {void}
  */
-export function faRelateOne(holder, direct, reverse, target, many) {
+export function faRelateOne(holder, direct, reverse, target, many, notify) {
 	const old = holder[direct];
 	if (old === target) {
 		return;
@@ -35,25 +38,32 @@ export function faRelateOne(holder, direct, reverse, target, many) {
 	if (many) {
 		if (old !== undefined) {
 			old[reverse].delete(holder);
+			notify?.(old, reverse);
 		}
 		holder[direct] = target;
+		notify?.(holder, direct);
 		if (target !== undefined) {
 			target[reverse].add(holder);
+			notify?.(target, reverse);
 		}
 		return;
 	}
 	if (old !== undefined) {
 		old[reverse] = undefined;
+		notify?.(old, reverse);
 	}
 	if (target !== undefined) {
 		// the previous holder of the target loses it
 		const previous = target[reverse];
 		if (previous !== undefined) {
 			previous[direct] = undefined;
+			notify?.(previous, direct);
 		}
 		target[reverse] = holder;
+		notify?.(target, reverse);
 	}
 	holder[direct] = target;
+	notify?.(holder, direct);
 }
 
 // @fa-helper faRelateAdd
@@ -64,14 +74,17 @@ export function faRelateOne(holder, direct, reverse, target, many) {
  * @param {string} direct
  * @param {string} reverse
  * @param {any} target
+ * @param {(object: any, side: string) => void} [notify]
  * @returns {boolean}
  */
-export function faRelateAdd(holder, direct, reverse, target) {
+export function faRelateAdd(holder, direct, reverse, target, notify) {
 	if (holder[direct].has(target)) {
 		return false;
 	}
 	holder[direct].add(target);
 	target[reverse].add(holder);
+	notify?.(holder, direct);
+	notify?.(target, reverse);
 	return true;
 }
 
@@ -83,14 +96,17 @@ export function faRelateAdd(holder, direct, reverse, target) {
  * @param {string} direct
  * @param {string} reverse
  * @param {any} target
+ * @param {(object: any, side: string) => void} [notify]
  * @returns {boolean}
  */
-export function faRelateDelete(holder, direct, reverse, target) {
+export function faRelateDelete(holder, direct, reverse, target, notify) {
 	if (!holder[direct].has(target)) {
 		return false;
 	}
 	holder[direct].delete(target);
 	target[reverse].delete(holder);
+	notify?.(holder, direct);
+	notify?.(target, reverse);
 	return true;
 }
 
@@ -100,13 +116,16 @@ export function faRelateDelete(holder, direct, reverse, target) {
  * @param {any} holder
  * @param {string} direct
  * @param {string} reverse
+ * @param {(object: any, side: string) => void} [notify]
  * @returns {void}
  */
-export function faRelateClear(holder, direct, reverse) {
+export function faRelateClear(holder, direct, reverse, notify) {
 	for (const target of holder[direct]) {
 		target[reverse].delete(holder);
+		notify?.(target, reverse);
 	}
 	holder[direct].clear();
+	notify?.(holder, direct);
 }
 
 // @fa-helper faUnlink
@@ -118,19 +137,22 @@ export function faRelateClear(holder, direct, reverse) {
  * `kind` 0 one-to-many, 1 one-to-one, 2 many-to-many, 3 symmetric, 4 owner
  * field; `holder` 1 when the element holds the direct side, 0 when it is a
  * target. `owner` is the owner of the collection (owner fields), or
- * `undefined`.
+ * `undefined`. `notify`, given when the sides are reactive, is called with
+ * each other object and side changed.
  * @param {any} element
  * @param {Array<[number, number, string, string]>} links
  * @param {any} owner
+ * @param {(object: any, side: string) => void} [notify]
  * @returns {void}
  */
-export function faUnlink(element, links, owner) {
+export function faUnlink(element, links, owner, notify) {
 	for (const [kind, holder, direct, reverse] of links) {
 		if (holder === 1) {
 			const target = element[direct];
 			if (kind === 2) {
 				for (const item of target) {
 					item[reverse].delete(element);
+					notify?.(item, reverse);
 				}
 				element[direct] = new Set();
 			} else if (target !== undefined) {
@@ -139,6 +161,7 @@ export function faUnlink(element, links, owner) {
 				} else {
 					target[reverse] = undefined;
 				}
+				notify?.(target, reverse);
 				element[direct] = undefined;
 			}
 			continue;
@@ -147,18 +170,21 @@ export function faUnlink(element, links, owner) {
 			case 0:
 				for (const item of element[reverse]) {
 					item[direct] = undefined;
+					notify?.(item, direct);
 				}
 				element[reverse] = new Set();
 				break;
 			case 1:
 				if (element[reverse] !== undefined) {
 					element[reverse][direct] = undefined;
+					notify?.(element[reverse], direct);
 					element[reverse] = undefined;
 				}
 				break;
 			case 2:
 				for (const item of element[reverse]) {
 					item[direct].delete(element);
+					notify?.(item, direct);
 				}
 				element[reverse] = new Set();
 				break;
@@ -166,6 +192,7 @@ export function faUnlink(element, links, owner) {
 				if (element[direct] !== undefined) {
 					if (element[direct] !== element) {
 						element[direct][direct] = undefined;
+						notify?.(element[direct], direct);
 					}
 					element[direct] = undefined;
 				}
@@ -173,6 +200,7 @@ export function faUnlink(element, links, owner) {
 			default:
 				if (owner !== undefined && owner[direct] === element) {
 					owner[direct] = undefined;
+					notify?.(owner, direct);
 				}
 		}
 	}

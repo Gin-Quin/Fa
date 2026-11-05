@@ -1,0 +1,52 @@
+-- The implied effects of relations for reactivity: writing a direct side
+-- notifies the other sides it changes, and only them (fine-grained): a
+-- `watch` reading `bao.bestFriendOf` runs again when `ana.bestFriend`
+-- changes to or from Bao, not when it changes between two others.
+reactive town: Town = {}
+type Town = {
+	people: Pool<Person> = []
+	type Person = {
+		name: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Pool<people->bestFriend>
+		mentor: (Person in people)?
+		mentee: (people->mentor)?
+		friends: Pool<Person in people>
+		friendOf: Pool<in people->friends>
+	}
+}
+use ana = town.people.add({ name = "Ana" })
+use bao = town.people.add({ name = "Bao" })
+use cleo = town.people.add({ name = "Cleo" })
+use dan = town.people.add({ name = "Dan" })
+derived baoFans = bao.bestFriendOf.size
+watch {
+	console.log("bao {baoFans}")
+}
+watch {
+	console.log("cleo {cleo.bestFriendOf.size}")
+}
+watch {
+	console.log("ana mentors {ana.mentee?.name ?? "nobody"}")
+}
+watch {
+	console.log("people {town.people.size}")
+}
+-- prints: bao 0
+-- prints: cleo 0
+-- prints: ana mentors nobody
+-- prints: people 4
+dan.bestFriend = bao
+-- prints: bao 1
+dan.bestFriend = cleo
+-- prints: bao 0
+-- prints: cleo 1
+bao.mentor = ana
+-- prints: ana mentors Bao
+cleo.mentor = ana -- one-to-one: `bao.mentor` becomes `none`
+-- prints: ana mentors Cleo
+dan.friends.add(ana)
+town.people.delete(cleo) -- `dan.bestFriend` becomes `none`, `ana.mentee` too
+-- prints: ana mentors nobody
+-- prints: people 3
+console.log(dan.bestFriend?.name ?? "none") -- prints: none

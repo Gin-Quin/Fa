@@ -171,7 +171,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					members[..member as usize].iter().copied(),
 				)?;
 				let key = match self.analysis.resolution(field) {
-					Resolution::Field(_, index) => u64::from(index),
+					// a relation side: its offset, as the runtime notifies it
+					// (relations.rs, `relation_notifies`)
+					Resolution::Field(_, index) => match slot.repr {
+						Repr::Object(object) => self
+							.types()
+							.fields_of(object)
+							.get(index as usize)
+							.and_then(|field| self.side_source_key(object, field.name))
+							.unwrap_or(u64::from(index)),
+						_ => u64::from(index),
+					},
 					_ => 0,
 				};
 				self.reactive_call(

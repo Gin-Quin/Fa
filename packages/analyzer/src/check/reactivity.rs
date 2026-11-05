@@ -1049,6 +1049,8 @@ impl Pass {
 		if w.path_is_reactive(&chain.path) {
 			effects.writes_reactive = true;
 		}
+		// the other sides of a relation write or removal (§8.6)
+		self.implied_relation_writes(w, n, chain, effects);
 		effects.write(chain.path.clone(), n);
 		let mut places: Vec<ReactivePlace> = chain.outer.clone();
 		places.extend(chain.place.clone());
@@ -1058,6 +1060,75 @@ impl Pass {
 				if !entry.contains(&place) {
 					entry.push(place);
 				}
+			}
+		}
+	}
+
+	/// The implied writes of a relation write or of a removal from a related
+	/// collection (`n` in `relation_writes` or `relation_unlinks`, the write
+	/// of `chain`): the other sides they change, as static paths (a `watch`
+	/// that writes `ana.bestFriend` and reads `bao.bestFriendOf` writes what
+	/// it reads); when the elements are reactive, the update notifies the
+	/// sides it changes on the other elements (`relation_notifies`).
+	fn implied_relation_writes(
+		&mut self,
+		w: &mut Walker<'_>,
+		n: NodeId,
+		chain: &Chain,
+		effects: &mut Effects,
+	) {
+		let writes = w.a.relation_writes.contains_key(&n);
+		if !writes && !w.a.relation_unlinks.contains_key(&n) {
+			return;
+		}
+		let reactive = reactive_sides(w, &chain.path) || w.path_is_reactive(&chain.path);
+		if reactive {
+			w.a.relation_notifies.insert(n);
+			effects.writes_reactive = true;
+		}
+		// the flow place of what is written: `holder.side`, or the collection
+		let implied = match (writes, w.view(n)) {
+			(true, View::Assignment { target, .. }) => match w.view(w.strip_groups(target)) {
+				View::Access {
+					target: holder,
+					members,
+				} if members.len() == 1 => {
+					let field = members
+						.first()
+						.map(|member| w.s.types.syms.intern(w.tree.text(member.index())));
+					match (w.place_of(holder), field) {
+						(Some(place), Some(field)) => w.implied_write(place, field),
+						_ => Vec::new(),
+					}
+				}
+				_ => Vec::new(),
+			},
+			(true, View::Call { callee, .. }) => match w.view(w.strip_groups(callee)) {
+				// `holder.side.add(t)`
+				View::Access {
+					target: holder,
+					members,
+				} if members.len() == 2 => {
+					let field = members
+						.first()
+						.map(|member| w.s.types.syms.intern(w.tree.text(member.index())));
+					match (w.place_of(holder), field) {
+						(Some(place), Some(field)) => w.implied_write(place, field),
+						_ => Vec::new(),
+					}
+				}
+				_ => Vec::new(),
+			},
+			(false, View::Call { callee, .. }) => match w.callee_receiver_place(callee) {
+				Some(collection) => w.implied_delete(collection),
+				None => Vec::new(),
+			},
+			_ => Vec::new(),
+		};
+		for place in implied {
+			if let Some(path) = w.flow_path(place) {
+				let path = mark_sides_reactive(w, path, reactive);
+				effects.write(path, n);
 			}
 		}
 	}
@@ -1434,11 +1505,25 @@ impl Pass {
 				temporary(target)
 			}
 		};
+		let all: Vec<NodeId> = members.iter().collect();
 		for (index, member) in members.iter().take(count).enumerate() {
 			match w.a.resolution(member) {
 				Resolution::Field(shape, field) => {
 					let entry = w.s.types.shape_fields(shape).get(field as usize).copied()?;
-					let reactive = entry.flags.contains(FieldFlags::REACTIVE);
+					// a relation side of an element below a reactive place (or
+					// of a parameter's): a source of its object, like a
+					// `reactive` field, which the writes of the other side
+					// notify (relation_notifies)
+					let owner = match index {
+						0 => w.type_of(w.strip_groups(target)),
+						_ => w.type_of(all[index - 1]),
+					};
+					let side = w.is_relation_side(
+						owner,
+						w.s.types.syms.resolve(entry.name).to_string().as_str(),
+					);
+					let reactive = entry.flags.contains(FieldFlags::REACTIVE)
+						|| (side && reactive_sides(w, &chain.path));
 					chain.path.steps.push(SStep::Field(entry.name, reactive));
 					if reactive {
 						if let Some(outer) = chain.place.take() {
@@ -1545,6 +1630,27 @@ fn is_param_of(w: &Walker<'_>, function: Option<NodeId>, symbol: SymbolId) -> bo
 	function
 		.and_then(|function| w.a.function(function))
 		.is_some_and(|info| info.params.iter().any(|param| param.symbol == symbol))
+}
+
+/// Whether the relation sides below a path are sources: the path is
+/// rooted at a reactive value, below a reactive field, or at a parameter
+/// (a function's reads of the sides are tracked wherever it runs).
+fn reactive_sides(w: &Walker<'_>, path: &SPath) -> bool {
+	matches!(path.root, SRoot::Param(_)) || w.path_is_reactive(path)
+}
+
+/// A path of an implied write, its last field (a relation side) marked as a
+/// source when the write is reactive.
+fn mark_sides_reactive(w: &Walker<'_>, path: SPath, reactive: bool) -> SPath {
+	let mut path = path;
+	if reactive
+		&& !w.path_is_reactive(&path)
+		&& let Some(SStep::Field(name, _)) = path.steps.last().copied()
+	{
+		path.steps.pop();
+		path.steps.push(SStep::Field(name, true));
+	}
+	path
 }
 
 /// The value of an index node when it is an integer literal.

@@ -726,6 +726,13 @@ pub struct Analysis {
 	/// The statements of the outermost running code (top level, test body,
 	/// entry function) after which the pending `watch` blocks run.
 	pub flush_after: rustc_hash::FxHashSet<NodeId>,
+	/// The relation writes and removals (`relation_writes`,
+	/// `relation_unlinks`) whose sides are reactive (the elements are below
+	/// a reactive place, or reached through a parameter): the two-sided
+	/// update also notifies the sides it changes on the other elements
+	/// (the previous and new targets, the holders that lose their target),
+	/// each a source of its object like a `reactive` field.
+	pub relation_notifies: rustc_hash::FxHashSet<NodeId>,
 	/// Every `watch` node: its cleanup and whether its value is kept.
 	pub watches: FxHashMap<NodeId, WatchInfo>,
 	/// The `@extern` functions of the file (foreign code): the C symbol of
@@ -1361,6 +1368,7 @@ impl Analysis {
 			reactive_writes: FxHashMap::default(),
 			reactive_args: FxHashMap::default(),
 			flush_after: rustc_hash::FxHashSet::default(),
+			relation_notifies: rustc_hash::FxHashSet::default(),
 			watches: FxHashMap::default(),
 			externs: FxHashMap::default(),
 			extern_calls: FxHashMap::default(),

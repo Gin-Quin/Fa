@@ -412,6 +412,11 @@ impl Generator<'_> {
 					.map(|value| self.keep_value(value))
 					.collect();
 				let unlink = self.helper("faUnlink");
+				// reactive sides: the other elements' sides notify (relations.rs)
+				let owner = match self.relation_notify(n) {
+					Some(notify) => format!("{owner}, {notify}"),
+					None => owner,
+				};
 				let (before, values) = crate::generate::relations::unlinking_call(
 					unlink, &table, &owner, name, &receiver, &values,
 				);

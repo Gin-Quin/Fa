@@ -145,3 +145,30 @@ describe("erased generic code and relation sides (faSides)", () => {
 		expect(faHash(ana)).toBe(faHash(other));
 	});
 });
+
+describe("reactive sides (notify)", () => {
+	test("a write notifies the sides it changes, and only them", () => {
+		const ana = person("Ana");
+		const bao = person("Bao");
+		const cleo = person("Cleo");
+		/** @type {string[]} */
+		const changed = [];
+		/**
+		 * @param {any} object
+		 * @param {string} side
+		 */
+		const notify = (object, side) => changed.push(`${object.name}.${side}`);
+		faRelateOne(ana, "bestFriend", "bestFriendOf", bao, true, notify);
+		faRelateOne(ana, "bestFriend", "bestFriendOf", cleo, true, notify);
+		expect(changed).toEqual([
+			"Ana.bestFriend",
+			"Bao.bestFriendOf",
+			"Bao.bestFriendOf",
+			"Ana.bestFriend",
+			"Cleo.bestFriendOf",
+		]);
+		changed.length = 0;
+		faUnlink(cleo, [[0, 0, "bestFriend", "bestFriendOf"]], undefined, notify);
+		expect(changed).toEqual(["Ana.bestFriend"]);
+	});
+});

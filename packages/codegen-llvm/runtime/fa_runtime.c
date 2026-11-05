@@ -3697,11 +3697,17 @@ static void **side_of(void *element, int64_t offset) {
 	return (void **)((uint8_t *)element + offset);
 }
 
+/// Notifies the source of the relation side at `offset` of `object`, when
+/// `notify` (the sides are reactive) and something read it (reactivity,
+/// below).
+static void notify_side(int32_t notify, void *object, int64_t offset);
+
 /// `holder.direct = target` (null: `none`): the two-sided update of a
 /// one-to-many relation (`many`: the reverse sides are sets), of a
-/// one-to-one one, or of a symmetric one (`reverse` is `direct`).
+/// one-to-one one, or of a symmetric one (`reverse` is `direct`). With
+/// `notify`, each side changed notifies its source.
 FA_EXPORT void fa_relate_one(void *holder, int64_t direct, int64_t reverse, void *target,
-                             int32_t many) {
+                             int32_t many, int32_t notify) {
 	void **slot = side_of(holder, direct);
 	void *old = *slot;
 	if (old == target) {
@@ -3710,49 +3716,62 @@ FA_EXPORT void fa_relate_one(void *holder, int64_t direct, int64_t reverse, void
 	if (many) {
 		if (old != 0) {
 			fa_links_delete(*(FaLinks **)side_of(old, reverse), holder);
+			notify_side(notify, old, reverse);
 		}
 		*slot = target;
+		notify_side(notify, holder, direct);
 		if (target != 0) {
 			fa_links_add((FaLinks **)side_of(target, reverse), holder);
+			notify_side(notify, target, reverse);
 		}
 		return;
 	}
 	if (old != 0) {
 		*side_of(old, reverse) = 0;
+		notify_side(notify, old, reverse);
 	}
 	if (target != 0) {
 		// the previous holder of the target loses it
 		void *previous = *side_of(target, reverse);
 		if (previous != 0) {
 			*side_of(previous, direct) = 0;
+			notify_side(notify, previous, direct);
 		}
 		*side_of(target, reverse) = holder;
+		notify_side(notify, target, reverse);
 	}
 	*slot = target;
+	notify_side(notify, holder, direct);
 }
 
 /// `holder.direct.add(target)` of a many-to-many relation: whether the
 /// link is new.
-FA_EXPORT int32_t fa_relate_add(void *holder, int64_t direct, int64_t reverse, void *target) {
+FA_EXPORT int32_t fa_relate_add(void *holder, int64_t direct, int64_t reverse, void *target,
+                                int32_t notify) {
 	if (!fa_links_add((FaLinks **)side_of(holder, direct), target)) {
 		return 0;
 	}
 	fa_links_add((FaLinks **)side_of(target, reverse), holder);
+	notify_side(notify, holder, direct);
+	notify_side(notify, target, reverse);
 	return 1;
 }
 
 /// `holder.direct.delete(target)` of a many-to-many relation: whether there
 /// was a link.
-FA_EXPORT int32_t fa_relate_delete(void *holder, int64_t direct, int64_t reverse, void *target) {
+FA_EXPORT int32_t fa_relate_delete(void *holder, int64_t direct, int64_t reverse, void *target,
+                                   int32_t notify) {
 	if (!fa_links_delete(*(FaLinks **)side_of(holder, direct), target)) {
 		return 0;
 	}
 	fa_links_delete(*(FaLinks **)side_of(target, reverse), holder);
+	notify_side(notify, holder, direct);
+	notify_side(notify, target, reverse);
 	return 1;
 }
 
 /// `holder.direct.clear()` of a many-to-many relation.
-FA_EXPORT void fa_relate_clear(void *holder, int64_t direct, int64_t reverse) {
+FA_EXPORT void fa_relate_clear(void *holder, int64_t direct, int64_t reverse, int32_t notify) {
 	FaLinks *links = *(FaLinks **)side_of(holder, direct);
 	if (links == 0) {
 		return;
@@ -3761,10 +3780,12 @@ FA_EXPORT void fa_relate_clear(void *holder, int64_t direct, int64_t reverse) {
 		void *target = links->items[position];
 		if (target != 0) {
 			fa_links_delete(*(FaLinks **)side_of(target, reverse), holder);
+			notify_side(notify, target, reverse);
 		}
 	}
 	fa_links_free(links);
 	*side_of(holder, direct) = 0;
+	notify_side(notify, holder, direct);
 }
 
 /// Unlinks an element about to leave its collection (8.5 `unlink`), from
@@ -3773,7 +3794,7 @@ FA_EXPORT void fa_relate_clear(void *holder, int64_t direct, int64_t reverse) {
 /// side, 0 when it is a target. `owner` is the address of the owner field
 /// (kind 4), or null.
 FA_EXPORT void fa_unlink(void *element, int32_t kind, int32_t holder, int64_t direct,
-                         int64_t reverse, void **owner) {
+                         int64_t reverse, void **owner, int32_t notify) {
 	if (holder) {
 		void *target = *side_of(element, direct);
 		if (kind == 2) {
@@ -3782,6 +3803,7 @@ FA_EXPORT void fa_unlink(void *element, int32_t kind, int32_t holder, int64_t di
 				void *item = links->items[position];
 				if (item != 0) {
 					fa_links_delete(*(FaLinks **)side_of(item, reverse), element);
+					notify_side(notify, item, reverse);
 				}
 			}
 		} else if (target != 0) {
@@ -3790,6 +3812,7 @@ FA_EXPORT void fa_unlink(void *element, int32_t kind, int32_t holder, int64_t di
 			} else {
 				*side_of(target, reverse) = 0;
 			}
+			notify_side(notify, target, reverse);
 		}
 		return;
 	}
@@ -3807,6 +3830,7 @@ FA_EXPORT void fa_unlink(void *element, int32_t kind, int32_t holder, int64_t di
 			} else {
 				fa_links_delete(*(FaLinks **)side_of(item, direct), element);
 			}
+			notify_side(notify, item, direct);
 		}
 		break;
 	}
@@ -3814,6 +3838,7 @@ FA_EXPORT void fa_unlink(void *element, int32_t kind, int32_t holder, int64_t di
 		void *other = *side_of(element, reverse);
 		if (other != 0) {
 			*side_of(other, direct) = 0;
+			notify_side(notify, other, direct);
 		}
 		break;
 	}
@@ -3821,6 +3846,7 @@ FA_EXPORT void fa_unlink(void *element, int32_t kind, int32_t holder, int64_t di
 		void *other = *side_of(element, direct);
 		if (other != 0 && other != element) {
 			*side_of(other, direct) = 0;
+			notify_side(notify, other, direct);
 		}
 		break;
 	}
@@ -4069,6 +4095,26 @@ FA_EXPORT FaSource *fa_field_source(const void *object, int64_t field) {
 	field_sources[field_source_count] = (FaChild){address, field, source};
 	field_source_count += 1;
 	return source;
+}
+
+/// The key of the source of a relation side in `fa_field_source`: its byte
+/// offset, apart from the indices of `reactive` fields.
+#define FA_SIDE_KEY ((int64_t)1 << 62)
+
+FA_EXPORT void fa_notify(FaSource *source);
+
+static void notify_side(int32_t notify, void *object, int64_t offset) {
+	if (!notify || object == 0) {
+		return;
+	}
+	int64_t address = (int64_t)(uintptr_t)object;
+	for (int64_t index = 0; index < field_source_count; index += 1) {
+		FaChild *entry = &field_sources[index];
+		if (entry->kind == address && entry->key == (FA_SIDE_KEY | offset)) {
+			fa_notify(entry->source);
+			return;
+		}
+	}
 }
 
 /// Records that the observer being computed read `source` (nothing outside

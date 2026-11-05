@@ -123,6 +123,16 @@ impl Generator<'_> {
 		items.into_iter().any(|item| self.has_relation_sides(item))
 	}
 
+	/// The callback a relation write or removal `n` gives the runtime to
+	/// notify the sides it changes, when they are reactive
+	/// (`Analysis::relation_notifies`): `faNotifyField`.
+	pub(crate) fn relation_notify(&mut self, n: NodeId) -> Option<String> {
+		if !self.analysis.relation_notifies.contains(&n) {
+			return None;
+		}
+		Some(self.helper("faNotifyField").to_string())
+	}
+
 	/// The kind code of a relation for the runtime (`faUnlink`).
 	fn kind_code(kind: RelationKind) -> u8 {
 		match kind {
@@ -178,10 +188,13 @@ impl Generator<'_> {
 				format!("{}.{direct} = {};", holder.primary_text(), values[1].text)
 			}
 			kind => {
-				let helper = self.helper("faRelateOne");
+				let helper = self.helper("faRelateOne").to_string();
 				let many = kind == RelationKind::OneToMany;
+				let notify = self
+					.relation_notify(assignment)
+					.map_or_else(String::new, |notify| format!(", {notify}"));
 				format!(
-					"{helper}({}, {}, {}, {}, {many});",
+					"{helper}({}, {}, {}, {}, {many}{notify});",
 					holder.text,
 					js::string_literal(&direct),
 					js::string_literal(&reverse),
@@ -240,14 +253,15 @@ impl Generator<'_> {
 				"delete" => "faRelateDelete",
 				_ => "faRelateClear",
 			};
-			let helper = self.helper(helper);
+			let helper = self.helper(helper).to_string();
 			let mut all = vec![
 				holder.text,
 				js::string_literal(&direct),
 				js::string_literal(&reverse),
 			];
 			all.extend(values.into_iter().map(|value| value.text));
-			return js::call(helper, &all);
+			all.extend(self.relation_notify(n));
+			return js::call(&helper, &all);
 		}
 		// a read: the `Set` of the side
 		let receiver = self.receiver(callee);
@@ -284,6 +298,9 @@ impl Generator<'_> {
 			let (direct, reverse) = self.side_names(&relation);
 			let (direct_text, reverse_text) =
 				(js::string_literal(&direct), js::string_literal(&reverse));
+			let notify = self
+				.relation_notify(n)
+				.map_or_else(String::new, |notify| format!(", {notify}"));
 			let target = self.temp();
 			match relation.kind {
 				RelationKind::OwnerField => {}
@@ -294,7 +311,7 @@ impl Generator<'_> {
 						"const {target} = {element}.{direct}; {element}.{direct} = new Set();"
 					));
 					self.out.line(format!(
-						"for (const $item of {target}) {helper}({element}, {direct_text}, {reverse_text}, $item);"
+						"for (const $item of {target}) {helper}({element}, {direct_text}, {reverse_text}, $item{notify});"
 					));
 				}
 				kind => {
@@ -304,7 +321,7 @@ impl Generator<'_> {
 						"const {target} = {element}.{direct}; {element}.{direct} = undefined;"
 					));
 					self.out.line(format!(
-						"{helper}({element}, {direct_text}, {reverse_text}, {target}, {many});"
+						"{helper}({element}, {direct_text}, {reverse_text}, {target}, {many}{notify});"
 					));
 				}
 			}

@@ -83,6 +83,8 @@ struct Unlink<'ctx> {
 	direct: u64,
 	reverse: u64,
 	owner: PointerValue<'ctx>,
+	/// The sides are reactive: the runtime notifies those it changes.
+	notify: bool,
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -223,6 +225,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			None => direct,
 		};
 		Ok((direct, reverse))
+	}
+
+	/// Whether the relation write or removal `node` notifies the sides it
+	/// changes (`Analysis::relation_notifies`), for the runtime.
+	fn notify_flag(&self, node: NodeId) -> IntValue<'ctx> {
+		let notify = self.analysis.relation_notifies.contains(&node);
+		self.context.i32_type().const_int(u64::from(notify), false)
+	}
+
+	/// The key of the source of a relation side of an object type in
+	/// `fa_field_source`: its byte offset, apart from the indices of
+	/// `reactive` fields (`FA_SIDE_KEY` of the runtime); `None` for another
+	/// field.
+	pub(crate) fn side_source_key(&self, object: TypeId, name: Sym) -> Option<u64> {
+		self.side_repr(object, name)?;
+		let offset = self.field_offset(object, name).ok()?;
+		Some((1u64 << 62) | offset)
 	}
 
 	fn offset_value(&self, offset: u64) -> IntValue<'ctx> {
@@ -374,6 +393,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						self.offset_value(reverse).into(),
 						target.into(),
 						many.into(),
+						self.notify_flag(node).into(),
 					],
 				)?;
 			}
@@ -418,6 +438,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 							self.offset_value(direct).into(),
 							self.offset_value(reverse).into(),
 							target.into(),
+							self.notify_flag(node).into(),
 						],
 					)?;
 				}
@@ -503,7 +524,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let changed = self
 						.call_value(
 							self.runtime.function(function)?,
-							&[holder.into(), offsets[0], offsets[1], target.into()],
+							&[
+								holder.into(),
+								offsets[0],
+								offsets[1],
+								target.into(),
+								self.notify_flag(node).into(),
+							],
 						)?
 						.into_int_value();
 					let changed = self.builder.build_int_compare(
@@ -515,7 +542,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Ok(Val::new(Repr::Bool, changed))
 				}
 				("clear", []) => {
-					self.call_runtime("fa_relate_clear", &[holder.into(), offsets[0], offsets[1]])?;
+					self.call_runtime(
+						"fa_relate_clear",
+						&[
+							holder.into(),
+							offsets[0],
+							offsets[1],
+							self.notify_flag(node).into(),
+						],
+					)?;
 					Ok(Val::void())
 				}
 				_ => Err(self.unsupported(node.index(), path)),
@@ -760,12 +795,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			} else {
 				(true, true)
 			};
+			let notify = self.analysis.relation_notifies.contains(&node);
 			let entry = |holder: bool, owner: PointerValue<'ctx>| Unlink {
 				kind,
 				holder,
 				direct,
 				reverse,
 				owner,
+				notify,
 			};
 			match relation.kind {
 				RelationKind::OwnerField => {
@@ -822,6 +859,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.offset_value(entry.direct).into(),
 					self.offset_value(entry.reverse).into(),
 					entry.owner.into(),
+					i32.const_int(u64::from(entry.notify), false).into(),
 				],
 			)?;
 		}

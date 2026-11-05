@@ -1,0 +1,14 @@
+-- A `watch` block that writes a direct side writes its reverse side too
+-- (§8.6): reading the reverse side there would run forever.
+reactive people: Pool<Person> = []
+type Person = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool<people->bestFriend>
+}
+use ana = people.add({ name = "Ana" })
+use bao = people.add({ name = "Bao" })
+watch {
+	console.log(bao.bestFriendOf.size)
+	ana.bestFriend = bao -- error REA003
+}

@@ -1,0 +1,40 @@
+-- docs: concurrency.md, "Workers": the work given to `submit` can't use a
+-- module-level `mutable` value through the functions it calls either, of
+-- this file or of another one
+-- analysis-target: native
+-- file: Scaler.worker.fa
+export type = {
+	factor: Integer
+
+	function scale = (self, value: Integer): Integer => value * self.factor
+}
+-- file: counter.fa
+export mutable = 0
+-- file: bump.fa
+export function = (): Integer => {
+	let next = counter + 1
+	next
+}
+-- file: main.fa
+use { WorkerPool } = std.concurrency
+
+mutable total = 0
+
+function count = (): Integer mutates total => {
+	total += 1
+	total
+}
+
+function twice = (value: Integer): Integer => value * 2
+
+function nested = (): Integer => count() + 1
+
+async function main = () => {
+	mutable scalers = WorkerPool<Scaler> { count = 2, state = Scaler { factor = 3 } }
+	let fine = await scalers.submit((worker) => await worker.scale(twice(2)))
+	let direct = await scalers.submit((worker) => await worker.scale(count())) -- error: CONC008
+	let deeper = await scalers.submit((worker) => await worker.scale(nested())) -- error: CONC008
+	let other = await scalers.submit((worker) => await worker.scale(bump())) -- error: CONC008
+	scalers.shutdown()
+}
+await main()

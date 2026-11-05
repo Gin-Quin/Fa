@@ -531,6 +531,59 @@ impl Session {
 				found.push((path.clone(), diagnostic));
 			}
 		}
+		// the work given to `submit`, through the functions it calls
+		for &module in modules {
+			let path = self.types.module_path(module).to_string();
+			let Some(interface) = self.interface(module) else {
+				continue;
+			};
+			for (span, keys) in &interface.submitted {
+				let shared = keys.iter().find_map(|&key| {
+					let declared = self.declared(key)?;
+					match declared.kind {
+						SymbolKind::Function => {
+							let (value, mut chain) = self.shared_value_of(key)?;
+							chain.insert(0, key);
+							Some((value, chain))
+						}
+						// a value of another file (this file's: checked by the walk)
+						SymbolKind::Mutable
+							if !declared.thread_safe && self.module_of_decl(key) != module =>
+						{
+							Some((key, Vec::new()))
+						}
+						_ => None,
+					}
+				});
+				let Some((value, chain)) = shared else {
+					continue;
+				};
+				let through = match chain.as_slice() {
+					[] => String::new(),
+					functions => format!(
+						" (through {})",
+						functions
+							.iter()
+							.map(|&function| format!("`{}`", self.decl_name(function)))
+							.collect::<Vec<_>>()
+							.join(", ")
+					),
+				};
+				let message = format!(
+					"the work given to `submit` runs on a worker's thread: it can't use the module-level `mutable` value `{}`{through}, which every thread shares, unless it is thread-safe (a `Mutex`, an atomic, a `Channel`); pass a copy as an argument",
+					self.decl_name(value),
+				);
+				let diagnostic = Diagnostic::new(
+					&CONC008,
+					Location {
+						file: FileId::new(0),
+						span: *span,
+					},
+					message,
+				);
+				found.push((path.clone(), diagnostic));
+			}
+		}
 		found
 	}
 
@@ -552,10 +605,8 @@ impl Session {
 				let Some(declared) = self.declared(next) else {
 					continue;
 				};
-				if declared.kind == SymbolKind::Mutable
-					&& !declared.thread_safe
-					&& self.is_value(next)
-				{
+				// a module-level `mutable` value of any file, the program's too
+				if declared.kind == SymbolKind::Mutable && !declared.thread_safe {
 					let mut chain = Vec::new();
 					let mut at = current;
 					while at != function {

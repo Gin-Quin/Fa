@@ -1116,6 +1116,14 @@ fn merge_interface(
 			.iter()
 			.map(|(&key, &keyed)| (merger.decl_key(key), keyed))
 			.collect(),
+		submitted: interface
+			.submitted
+			.iter()
+			.map(|(span, keys)| {
+				let keys = keys.iter().map(|&key| merger.decl_key(key)).collect();
+				(*span, keys)
+			})
+			.collect(),
 		reads_target: interface.reads_target,
 		complete: interface.complete,
 		// node keys and plain data: nothing to translate (check/tasks.rs)

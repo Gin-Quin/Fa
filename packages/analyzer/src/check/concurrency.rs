@@ -965,13 +965,16 @@ impl Walker<'_> {
 	/// worker code apply to it (`CONC008`, concurrency.md "Workers"): it
 	/// can't use a module-level `mutable` value that isn't thread-safe, nor
 	/// a requirement. Checked on its body (a lambda, or a function of this
-	/// file given by name); the functions it calls are not followed (those
-	/// of the methods of `*.worker.fa` files are: `worker_diagnostics` of
-	/// the program analysis). A
+	/// file given by name); the functions it calls, of any file, are
+	/// followed by the program analysis (`Interface::submitted`,
+	/// `worker_diagnostics`), like the methods of `*.worker.fa` files. A
 	/// requirement a call of the work needs from outside it is `REQ007`
 	/// already (the work is stored).
 	pub(super) fn check_submitted_work(&mut self, work: NodeId) {
 		let work = self.strip_groups(work);
+		if !self.submitted_work.contains(&work) {
+			self.submitted_work.push(work);
+		}
 		let body = match self.view(work) {
 			View::Lambda { .. } => work,
 			View::Name(_) => {

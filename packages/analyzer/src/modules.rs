@@ -596,6 +596,10 @@ pub struct Interface {
 	/// The async summaries of its functions, by declaration node
 	/// (`design/async.md` §2.1, `check/tasks.rs`).
 	pub async_summaries: FxHashMap<NodeId, crate::analysis::AsyncSummary>,
+	/// The work given to `pool.submit(work)`: its span and the declarations
+	/// it uses (by key, sorted), whose functions the program follows for
+	/// `CONC008` (`program.rs`, `worker_diagnostics`).
+	pub submitted: Vec<(crate::diagnostics::SourceSpan, Vec<DeclKey>)>,
 }
 
 impl Interface {

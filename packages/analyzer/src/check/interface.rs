@@ -250,6 +250,34 @@ impl Walker<'_> {
 		}
 		uses.sort_unstable();
 		uses.dedup();
+		// the work given to `submit`: the declarations it uses
+		let works = self.submitted_work.clone();
+		let mut submitted = Vec::new();
+		for work in works {
+			let mut keys = Vec::new();
+			let mut pending = vec![work];
+			while let Some(node) = pending.pop() {
+				let used = match self.a.resolution(node) {
+					Resolution::Local(symbol)
+						if module_level(self, symbol)
+							|| self.a.symbols.symbol(symbol).kind == SymbolKind::Function =>
+					{
+						Some(self.symbol_key(symbol))
+					}
+					Resolution::External(key) => Some(key),
+					_ => None,
+				};
+				let called = match self.a.calls.get(&node).map(|call| &call.callee) {
+					Some(&Callee::Function(function)) => self.node_key(function),
+					_ => None,
+				};
+				keys.extend(used.into_iter().chain(called));
+				pending.extend(syntax::children(&tree, node));
+			}
+			keys.sort_unstable();
+			keys.dedup();
+			submitted.push((self.span(work), keys));
+		}
 
 		let export_names = self.export_names(root);
 		let reads_target = self.a.reads_target;
@@ -280,6 +308,7 @@ impl Walker<'_> {
 		interface.export_names = export_names;
 		interface.declared = declared;
 		interface.uses = uses;
+		interface.submitted = submitted;
 		interface.reads_target = reads_target;
 		interface.complete = true;
 	}

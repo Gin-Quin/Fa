@@ -339,6 +339,9 @@ pub struct Walker<'s> {
 	pub(crate) generic_params: FxHashMap<NodeId, Vec<crate::ids::ParamId>>,
 	/// The parameters of the generic declarations being walked: rigid, not inferred.
 	pub(crate) rigid_params: Vec<crate::ids::ParamId>,
+	/// The work given to `pool.submit(work)` (`concurrency.rs`): what it
+	/// uses is published (`Interface::submitted`).
+	pub(crate) submitted_work: Vec<NodeId>,
 	/// The `TypeFromSchema` applications that are the value of a generic
 	/// type function (or a result of its logic): built per application
 	/// (`schemas.rs`).
@@ -539,6 +542,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		hoisted_blocks: rustc_hash::FxHashSet::default(),
 		generic_params: FxHashMap::default(),
 		rigid_params: Vec::new(),
+		submitted_work: Vec::new(),
 		schema_logic: rustc_hash::FxHashSet::default(),
 		deferred_comptime: 0,
 		schema_identity: None,

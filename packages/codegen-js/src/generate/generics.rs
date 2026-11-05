@@ -138,7 +138,8 @@ impl Generator<'_> {
 		for entry in hidden {
 			let value = match entry {
 				Hidden::Value(param) => match binding(param) {
-					Some(ty) => self.hidden_value(ty),
+					// a key set: the paths of its keys (fields.rs)
+					Some(ty) => self.key_set_paths(ty).or_else(|| self.hidden_value(ty)),
 					None => None,
 				},
 				Hidden::Method(param, method) => match binding(param) {

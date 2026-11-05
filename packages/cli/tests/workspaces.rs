@@ -639,6 +639,89 @@ fn generated_dependencies_run_generate_on_their_locked_source() {
 	);
 }
 
+/// `@import` (architecture/dependencies.md, "Inline imports" and "Loading
+/// types from an API"): a remote module imported in the code, and a
+/// library imported by `dependencies.fa` whose function makes the
+/// `DependencySource` of a dependency; every source is locked.
+#[test]
+fn imported_sources_are_resolved_and_locked() {
+	if !has_tool("git") {
+		return;
+	}
+	let scratch = Scratch::new("import");
+	let openapi = Repository::new(&scratch, "example", "fa-openapi");
+	openapi.release(
+		"openapi",
+		"1.0.0",
+		"v1.0.0",
+		&[(
+			"library/openapi.fa",
+			"export function = (url: String): { source: String, generate: (content: String) => String } => {\n\treturn {\n\t\tsource = url\n\t\tgenerate = (content: String): String => \"export function = (): String => \\\"{content}\\\"\\n\"\n\t}\n}\n",
+		)],
+	);
+	// a remote file imports another one
+	let served = scratch.directory.join("served");
+	let units = format!("file://{}/v3/units.fa", served.display());
+	scratch.write(
+		"served",
+		&[
+			("v1/schema.txt", "celsius"),
+			(
+				"v2/types.fa",
+				&format!(
+					"use units = @import(\"{units}\")\nuse {{ openapi }} = @import(\"github:example/fa-openapi@1\")\n\nexport namespace = {{\n\tfunction degrees = (): Integer => units() * 3\n\tfunction origin = (): String => openapi(\"x\").source\n}}\n"
+				),
+			),
+			("v3/units.fa", "export function = (): Integer => 7\n"),
+		],
+	);
+	let schema = format!("file://{}/v1/schema.txt", served.display());
+	let types = format!("file://{}/v2/types.fa", served.display());
+	let package = scratch.write(
+		"app",
+		&[
+			("package.fa", "export = { name = \"app\" }\n"),
+			(
+				"dependencies.fa",
+				&format!(
+					"use {{ openapi }} = @import(\"github:example/fa-openapi@1\")\n\nexport = {{\n\tweather = openapi(\"{schema}\")\n}}\n"
+				),
+			),
+			(
+				"application/main.fa",
+				&format!(
+					"use remote = @import(\"{types}\")\n\nexport function = () => {{\n\tconsole.log(weather(), remote.degrees(), remote.origin())\n}}\n"
+				),
+			),
+		],
+	);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	let locked = lockfile(&package);
+	for source in ["github:example/fa-openapi", &schema, &types, &units] {
+		assert!(
+			locked.contains(&format!("source = \"{source}\"")),
+			"{source}: {locked}"
+		);
+	}
+	if has_tool("bun") {
+		let (stdout, stderr, code) = scratch.fa(&["run", "."], &package);
+		assert_eq!((stdout.as_str(), code), ("celsius 21 x\n", 0), "{stderr}");
+	}
+	// a local source
+	fs::write(
+		package.join("application/main.fa"),
+		"use helper = @import(\"./helper.fa\")\n\nexport function = () => {}\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("error[META010]: `@import(\"./helper.fa\")` names a local folder"),
+		"{stderr}"
+	);
+}
+
 /// A package outside a workspace depends on a local folder holding a
 /// package, locked by its content (design/decisions.md, "Path dependencies
 /// outside a workspace").
@@ -831,8 +914,23 @@ fn spawn(
 	std::process::Child,
 	std::sync::Arc<std::sync::Mutex<String>>,
 ) {
+	spawn_with(scratch, arguments, directory, runs, &[])
+}
+
+/// [`spawn`], with more environment variables.
+fn spawn_with(
+	scratch: &Scratch,
+	arguments: &[&str],
+	directory: &Path,
+	runs: usize,
+	variables: &[(&str, &str)],
+) -> (
+	std::process::Child,
+	std::sync::Arc<std::sync::Mutex<String>>,
+) {
 	let mut child = scratch
 		.command(arguments, directory)
+		.envs(variables.iter().copied())
 		.env("FA_DEVELOP_RUNS", runs.to_string())
 		.env("FA_WATCH_INTERVAL_MS", "50")
 		.stdout(Stdio::piped())
@@ -932,21 +1030,256 @@ fn develop_runs_the_program_again_after_a_change() {
 	assert!(output.contains("library/greet.fa` changed"), "{output}");
 }
 
-/// `fa develop` swaps the edited module in the running program (D43): its
-/// module-level values are kept; a change of a type restarts it.
+/// An HTTP GET on the local port: the body (empty on an error).
+fn http_get(port: u16, path: &str) -> String {
+	use std::io::Write as _;
+	let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) else {
+		return String::new();
+	};
+	let _ = write!(
+		stream,
+		"GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+	);
+	let mut response = String::new();
+	let _ = stream.read_to_string(&mut response);
+	response
+}
+
+/// `fa develop --target=web`: the development server serves the web build,
+/// and relays the swaps to the pages (a page simulated by a Bun script
+/// connected to `/$fa-hot`), or asks them to reload.
+#[test]
+fn develop_serves_the_web_build_and_swaps_its_modules() {
+	if !has_tool("bun") {
+		return;
+	}
+	let scratch = Scratch::new("develop-web");
+	let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+		.unwrap()
+		.local_addr()
+		.unwrap()
+		.port();
+	let greet = |word: &str, cow: &str| {
+		format!("type Cow = {{ {cow} }}\n\nexport function = (): String => \"{word}\"\n")
+	};
+	let package = scratch.write(
+		"site",
+		&[
+			(
+				"package.fa",
+				&format!(
+					"export = {{\n\tname = \"site\"\n\tdevelop = {{ port = {port}, open = true }}\n}}\n"
+				),
+			),
+			("library/greet.fa", &greet("one", "name: String")),
+			(
+				"application/main.fa",
+				"export function = () => {\n\tconsole.log(library.greet())\n}\n",
+			),
+		],
+	);
+	// `develop.open`: the command opening a browser writes the URL it is given
+	let opener = scratch.write(
+		"opener",
+		&[(
+			"open.sh",
+			"#!/bin/sh\necho \"$1\" > \"$(dirname \"$0\")/opened\"\n",
+		)],
+	);
+	let script = opener.join("open.sh");
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::PermissionsExt as _;
+		fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+	}
+	let script_text = script.display().to_string();
+	let (child, output) = spawn_with(
+		&scratch,
+		&["develop", "--target=web"],
+		&package,
+		1,
+		&[("FA_OPEN_COMMAND", script_text.as_str())],
+	);
+	assert!(
+		wait_for(&output, &format!("on http://localhost:{port}"), 30),
+		"{}",
+		output.lock().unwrap()
+	);
+	if cfg!(unix) {
+		let start = Instant::now();
+		while !opener.join("opened").is_file() && start.elapsed() < Duration::from_secs(10) {
+			std::thread::sleep(Duration::from_millis(50));
+		}
+		assert_eq!(
+			fs::read_to_string(opener.join("opened")).unwrap_or_default(),
+			format!("http://localhost:{port}/\n")
+		);
+	}
+	let page = http_get(port, "/");
+	assert!(page.contains("src=\"/main.js\""), "{page}");
+	assert!(http_get(port, "/main.js").contains("faHotListen"));
+	// a page: answers the swaps like `faHotSwap`, says when it reloads
+	let client = scratch.write(
+		"page",
+		&[(
+			"page.mjs",
+			&format!(
+				"const socket = new WebSocket('ws://localhost:{port}/$fa-hot');\nsocket.onopen = () => console.log('page open');\nsocket.onmessage = async (event) => {{\n\tconsole.log('page got ' + event.data);\n\tif (event.data === 'swap') {{\n\t\tconst manifest = await (await fetch('http://localhost:{port}/$hot.json')).json();\n\t\tsocket.send(JSON.stringify({{ version: manifest.version, ok: true }}));\n\t}} else {{\n\t\tprocess.exit(0);\n\t}}\n}};\n"
+			),
+		)],
+	);
+	let bun = std::env::var_os("PATH")
+		.and_then(|path| {
+			std::env::split_paths(&path)
+				.map(|folder| folder.join("bun"))
+				.find(|candidate| candidate.is_file())
+		})
+		.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap()).join(".bun/bin/bun"));
+	let mut browser = Command::new(bun)
+		.arg(client.join("page.mjs"))
+		.stdout(Stdio::piped())
+		.spawn()
+		.unwrap();
+	let mut page_output = browser.stdout.take().unwrap();
+	let seen = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+	{
+		let seen = std::sync::Arc::clone(&seen);
+		std::thread::spawn(move || {
+			let mut buffer = [0; 1024];
+			while let Ok(count) = page_output.read(&mut buffer) {
+				if count == 0 {
+					break;
+				}
+				seen.lock()
+					.unwrap()
+					.push_str(&String::from_utf8_lossy(&buffer[..count]));
+			}
+		});
+	}
+	assert!(wait_for(&seen, "page open", 20), "{}", seen.lock().unwrap());
+	// a body edit: swapped in the page
+	fs::write(
+		package.join("library/greet.fa"),
+		greet("two", "name: String"),
+	)
+	.unwrap();
+	assert!(
+		wait_for(
+			&output,
+			"`library/greet.fa` changed: reloaded `library/greet.js`",
+			20
+		),
+		"{}",
+		output.lock().unwrap()
+	);
+	assert!(
+		wait_for(&seen, "page got swap", 10),
+		"{}",
+		seen.lock().unwrap()
+	);
+	assert!(http_get(port, "/library/greet.js").contains("\"one\""));
+	// a type changes: the pages reload the new build
+	fs::write(
+		package.join("library/greet.fa"),
+		greet("three", "name: String, age: Integer"),
+	)
+	.unwrap();
+	assert!(
+		wait_for(
+			&output,
+			"`library/greet.fa` changed: reloading the pages (a type of `library/greet.fa` changed)",
+			20
+		),
+		"{}",
+		output.lock().unwrap()
+	);
+	assert!(
+		wait_for(&seen, "page got reload", 10),
+		"{}",
+		seen.lock().unwrap()
+	);
+	assert!(http_get(port, "/library/greet.js").contains("\"three\""));
+	let _ = browser.wait();
+	let _ = finish(child, 1);
+}
+
+/// `fa develop --target=native`: rebuilt (per unit, from the object cache)
+/// and run again after a change.
+#[test]
+fn develop_rebuilds_the_native_program_after_a_change() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let scratch = Scratch::new("develop-native");
+	let package = scratch.write(
+		"tool",
+		&[
+			("package.fa", "export = { name = \"tool\" }\n"),
+			(
+				"library/greet.fa",
+				"export function = (): String => \"one\"\n",
+			),
+			(
+				"application/main.fa",
+				"export function = () => {\n\tconsole.log(library.greet())\n}\n",
+			),
+		],
+	);
+	let (child, output) = spawn(&scratch, &["develop", "--target=native"], &package, 2);
+	assert!(
+		wait_for(&output, "one\n", 120),
+		"{}",
+		output.lock().unwrap()
+	);
+	assert!(
+		wait_for(&output, "watching for changes", 10),
+		"{}",
+		output.lock().unwrap()
+	);
+	fs::write(
+		package.join("library/greet.fa"),
+		"export function = (): String => \"two\"\n",
+	)
+	.unwrap();
+	let code = finish(child, 120);
+	let output = output.lock().unwrap().clone();
+	assert_eq!(code, Some(0), "{output}");
+	assert!(output.contains("two\n"), "{output}");
+	assert_eq!(
+		output.matches("built for native in ").count(),
+		2,
+		"{output}"
+	);
+}
+
+/// `fa develop` swaps the edited module in the running program (D43): the
+/// module-level values of the other modules are kept, a `reactive` value
+/// of the swapped module too (by declaration path), the tests covering the
+/// edit run again; a change of a type restarts it.
 #[test]
 fn develop_swaps_the_edited_modules_in_the_running_program() {
-	if !has_tool("bun") || cfg!(not(unix)) {
+	if !has_tool("bun") {
 		return;
 	}
 	let scratch = Scratch::new("hot");
+	let greet = |word: &str, cow: &str| {
+		format!(
+			"type Cow = {{ {cow} }}\n\nreactive calls = 0\n\nexport function = (): String => {{\n\tcalls += 1\n\t\"{word} {{calls}}\"\n}}\n"
+		)
+	};
 	let package = scratch.write(
 		"farm",
 		&[
 			("package.fa", "export = { name = \"farm\" }\n"),
+			("library/greet.fa", &greet("one", "name: String")),
 			(
-				"library/greet.fa",
-				"type Cow = { name: String }\n\nexport function = (): String => \"one\"\n",
+				"library/greet.test.fa",
+				"test \"greets\" {\n\tassert greet() != \"\"\n}\n",
+			),
+			(
+				"library/other.test.fa",
+				"test \"is not run again\" {\n\tassert 1 == 1\n}\n",
 			),
 			(
 				"application/main.fa",
@@ -956,14 +1289,14 @@ fn develop_swaps_the_edited_modules_in_the_running_program() {
 	);
 	let (child, output) = spawn(&scratch, &["develop"], &package, 2);
 	assert!(
-		wait_for(&output, "one 2\n", 30),
+		wait_for(&output, "one 2 2\n", 30),
 		"{}",
 		output.lock().unwrap()
 	);
-	// a body edit: swapped, the count goes on
+	// a body edit: swapped, the counts go on
 	fs::write(
 		package.join("library/greet.fa"),
-		"type Cow = { name: String }\n\nexport function = (): String => \"two\"\n",
+		greet("two", "name: String"),
 	)
 	.unwrap();
 	assert!(
@@ -977,17 +1310,37 @@ fn develop_swaps_the_edited_modules_in_the_running_program() {
 	);
 	assert!(wait_for(&output, "two ", 10), "{}", output.lock().unwrap());
 	let text = output.lock().unwrap().clone();
-	let first = text
+	let (calls, ticks) = text
 		.lines()
 		.find_map(|line| line.strip_prefix("two "))
-		.and_then(|count| count.parse::<u32>().ok())
-		.expect("a count");
-	assert!(first > 2, "the module-level value is kept: {text}");
+		.and_then(|counts| counts.split_once(' '))
+		.map(|(calls, ticks)| (calls.parse::<u32>().unwrap(), ticks.parse::<u32>().unwrap()))
+		.expect("the counts");
+	assert!(
+		ticks > 2,
+		"the values of the other modules are kept: {text}"
+	);
+	assert_eq!(calls, ticks, "the reactive value is kept: {text}");
 	assert!(!text.contains("restarting"), "{text}");
+	// the tests that cover the edit ran again
+	assert!(
+		wait_for(
+			&output,
+			"running the tests of `library/greet.test.fa`\n",
+			20
+		),
+		"{}",
+		output.lock().unwrap()
+	);
+	assert!(
+		wait_for(&output, "✓ greets", 20),
+		"{}",
+		output.lock().unwrap()
+	);
 	// a type changes: restarted
 	fs::write(
 		package.join("library/greet.fa"),
-		"type Cow = { name: String, age: Integer }\n\nexport function = (): String => \"three\"\n",
+		greet("three", "name: String, age: Integer"),
 	)
 	.unwrap();
 	assert!(
@@ -1000,11 +1353,13 @@ fn develop_swaps_the_edited_modules_in_the_running_program() {
 		output.lock().unwrap()
 	);
 	assert!(
-		wait_for(&output, "three 1\n", 20),
+		wait_for(&output, "three 1 1\n", 20),
 		"{}",
 		output.lock().unwrap()
 	);
 	let _ = finish(child, 30);
+	let output = output.lock().unwrap().clone();
+	assert!(!output.contains("is not run again"), "{output}");
 }
 
 #[test]
@@ -1104,4 +1459,34 @@ fn help_describes_the_commands() {
 	let (_, stderr, code) = scratch.fa(&["help", "deploy"], &scratch.directory);
 	assert_eq!(code, 1, "a usage error exits with 1");
 	assert!(stderr.contains("unknown command `deploy`"), "{stderr}");
+	// every command has its page, and a usage error says where to look
+	for command in [
+		"run", "check", "build", "test", "develop", "preview", "format", "update", "new", "bind",
+		"help", "version",
+	] {
+		let (stdout, _, code) = scratch.fa(&["help", command], &scratch.directory);
+		assert_eq!(code, 0, "{command}");
+		assert!(
+			stdout.starts_with(&format!("Usage: fa {command}")),
+			"{command}: {stdout}"
+		);
+	}
+	let (stdout, _, _) = scratch.fa(&["help", "develop"], &scratch.directory);
+	assert!(stdout.contains("--target=bun|web|native"), "{stdout}");
+	for command in [
+		"check", "build", "test", "develop", "preview", "update", "format",
+	] {
+		let (_, stderr, code) = scratch.fa(&[command, "--frobnicate"], &scratch.directory);
+		assert_eq!(code, 1, "{command}: a usage error exits with 1");
+		assert!(
+			stderr.contains(&format!("see `fa help {command}`")),
+			"{command}: {stderr}"
+		);
+	}
+	let (_, stderr, code) = scratch.fa(&["develop", "--target=wasm"], &scratch.directory);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("`bun` (the default), `web` or `native`"),
+		"{stderr}"
+	);
 }

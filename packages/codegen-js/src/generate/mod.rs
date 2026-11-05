@@ -18,6 +18,7 @@ pub(crate) mod collections;
 mod constants;
 mod errors;
 mod expressions;
+mod fields;
 mod foreign;
 mod functions;
 mod generics;
@@ -489,6 +490,11 @@ impl<'s> Generator<'s> {
 			if !temps.is_empty() {
 				body.line(format!("\tlet {};", temps.join(", ")));
 			}
+			// a hot build (D43): a `reactive` value keeps its value across a
+			// swap of its module, by its declaration path
+			if let Some(line) = self.hot_reactive_value(value) {
+				body.line(line);
+			}
 			body.append(inner);
 			body.line("}");
 			let mut exported = vec![value];
@@ -750,6 +756,27 @@ impl<'s> Generator<'s> {
 	}
 
 	/// Records a module value as a module-level constant.
+	/// In a hot build, the first line of the initialization function of a
+	/// module-level `reactive` value: the value of the module's previous
+	/// version, when there is one (`faHotValue`).
+	fn hot_reactive_value(&mut self, value: NodeId) -> Option<String> {
+		let program = self.program.filter(|_| self.options.hot)?;
+		let View::Declaration {
+			kind: syntax::BindingKind::Reactive,
+			..
+		} = self.view(value)
+		else {
+			return None;
+		};
+		let symbol = self.analysis.symbols.symbol_of_decl(value)?;
+		let name = self.names.get(&symbol)?.clone();
+		let key = crate::js::string_literal(&format!("{}#{name}", program.path));
+		let helper = self.helper("faHotValue");
+		Some(format!(
+			"\tif ({helper}({key}, () => {name}, (value) => {{ {name} = value; }})) return;"
+		))
+	}
+
 	pub(crate) fn module_constant(&mut self, name: String, value: String) {
 		self.module_constants.push((name, value));
 	}
@@ -881,6 +908,9 @@ impl<'s> Generator<'s> {
 			}
 			TypeKind::Float(_) | TypeKind::FloatLit(..) | TypeKind::Percentage => Repr::Number,
 			TypeKind::BigInt | TypeKind::BigIntLit(_) => Repr::BigInt,
+			// up to 32 flags a number, a `bigint` above (fields.rs)
+			TypeKind::Fields(_) if self.fields_are_big(ty) => Repr::BigInt,
+			TypeKind::Fields(_) => Repr::Number,
 			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => Repr::String,
 			TypeKind::Boolean | TypeKind::BoolLit(_) => Repr::Boolean,
 			TypeKind::None => Repr::None,

@@ -305,9 +305,12 @@ impl Session {
 
 	/// Whether a declaration is a module-level value (initialized at runtime).
 	fn is_value(&self, decl: Decl) -> bool {
-		self.declared(decl)
-			.is_some_and(|declared| matches!(declared.kind, SymbolKind::Let | SymbolKind::Mutable))
-			&& self.module_role(self.module_of_decl(decl)).is_module()
+		self.declared(decl).is_some_and(|declared| {
+			matches!(
+				declared.kind,
+				SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive | SymbolKind::Derived
+			)
+		}) && self.module_role(self.module_of_decl(decl)).is_module()
 	}
 
 	/// For each value of a program's [`Program::init_order`], the indices

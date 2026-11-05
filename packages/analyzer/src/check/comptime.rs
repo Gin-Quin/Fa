@@ -663,7 +663,25 @@ impl Walker<'_> {
 					}
 				}));
 			}
-			"import" | "extern" => {
+			// `use name = @import("…")` (modules.rs) is the form resolved
+			"import" => {
+				let tree = Arc::clone(&self.tree);
+				let message = match crate::scan::import_source(&tree, n) {
+					None => "the source of `@import` is a string literal: `@import(\"https://…/types.fa\")`".to_string(),
+					Some(source) if source.starts_with('.') => format!(
+						"`@import(\"{source}\")` names a local folder: local files are reached by their names, sibling packages through `dependencies.fa`"
+					),
+					Some(source) if self.import_proxy(n).is_none() => format!(
+						"the source `{source}` of `@import` isn't resolved: `fa` resolves it when it builds the package (`fa check`)"
+					),
+					Some(_) => "`@import` is written in a `use`: `use weather = @import(\"https://…/types.fa\")`".to_string(),
+				};
+				let diagnostic =
+					self.diagnostic(&crate::diagnostics::codes::advanced::META010, n, message);
+				self.report(diagnostic);
+				return Some(TypeId::UNKNOWN);
+			}
+			"extern" => {
 				return Some(self.unsupported(n, &format!("`@{operation}`")));
 			}
 			_ => {}
@@ -930,6 +948,19 @@ impl Walker<'_> {
 		};
 		if let Some(what) = self.expr_impurity(&expr) {
 			self.report_impure(iterable, &what);
+			return;
+		}
+		// a key set: the dotted paths of its keys (fields.rs)
+		let key_set = self.type_of(iterable);
+		if self.is_fields(key_set) {
+			match self.run(&expr, slots) {
+				Ok(Value::Integer(bits)) => {
+					let items = self.key_items(key_set, bits);
+					self.a.unrolled.insert(n, items);
+				}
+				Ok(_) => {}
+				Err(error) => self.report_comptime_error(iterable, &error),
+			}
 			return;
 		}
 		match self.run(&expr, slots) {

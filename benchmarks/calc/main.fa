@@ -65,46 +65,27 @@ type Generator = {
 		}
 		self.expression(depth - 1, xorshift(random))
 	}
-}
 
--- The first `length` characters of a text, with the one at `index` replaced. (Slices like
--- `text[..index]` would be shorter, but the native backend doesn't compile them yet.)
-function edited = (text: String, length: Integer, index: Integer, replacement: String): String => {
-	mutable result = ""
-	for character, position in text {
-		if position == length {
-			break
+	-- One input in four is damaged after generation, in place, as the Rust and Goose
+	-- versions do.
+	function corrupt = (self, seed: UInt64) throws IndexError mutates self => {
+		let kind = below(seed, 16)
+		if kind == 0 {
+			let last = self.text.lastIndexOf(")") ?? -1
+			if last < 0 {
+				self.text = try self.text[..0] + "#" + try self.text[1..]
+			} else {
+				self.text = try self.text[..last] + " " + try self.text[last + 1..]
+			}
+		} else if kind == 1 {
+			let index = Integer(seed.shiftRight(8) %% self.text.length) catch error => 0
+			self.text = try self.text[..index] + "#" + try self.text[index + 1..]
+		} else if kind == 2 {
+			self.text = try self.text[..self.text.length // 2]
+		} else if kind == 3 {
+			self.text += " / 0"
 		}
-		if position == index {
-			result += replacement
-		} else {
-			result += character
-		}
 	}
-	result
-}
-
--- One input in four is damaged after generation.
-function corrupt = (text: String, seed: UInt64): String => {
-	let kind = below(seed, 16)
-	if kind == 0 {
-		let last = text.lastIndexOf(")")
-		if last is none {
-			return edited(text, text.length, 0, "#")
-		}
-		return edited(text, text.length, last, " ")
-	}
-	if kind == 1 {
-		let index = Integer(seed.shiftRight(8) %% text.length) catch error => 0
-		return edited(text, text.length, index, "#")
-	}
-	if kind == 2 {
-		return edited(text, text.length // 2, -1, "")
-	}
-	if kind == 3 {
-		return text + " / 0"
-	}
-	text
 }
 
 -- --- parsing -------------------------------------------------------------------------------
@@ -267,7 +248,8 @@ for 0..n {
 	seed = xorshift(seed)
 	generator.text = ""
 	let state = generator.expression(3 + below(seed, 4), seed.shiftRight(8))
-	let text = corrupt(generator.text, state)
+	try generator.corrupt(state)
+	let text = generator.text
 	characters += text.length
 	mutable parser = Parser { text, position = 0, nodes = 0 }
 	let value = parser.run() catch error => {

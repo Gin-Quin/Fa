@@ -139,6 +139,21 @@ impl ModuleResolver for MountedResolver {
 		self.main.modules()
 	}
 
+	fn modules_in(&self, folder: &str) -> Vec<String> {
+		let Some((mount, inner)) = self.split(folder) else {
+			return self.main.modules_in(folder);
+		};
+		let modules = if inner.is_empty() {
+			mount.resolver.modules()
+		} else {
+			mount.resolver.modules_in(inner)
+		};
+		modules
+			.into_iter()
+			.map(|module| format!("{}/{module}", mount.prefix))
+			.collect()
+	}
+
 	fn configurations(&self) -> Vec<String> {
 		self.main.configurations()
 	}

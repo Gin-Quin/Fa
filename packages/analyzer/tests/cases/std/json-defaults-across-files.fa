@@ -1,0 +1,17 @@
+-- note: `Json.parse` gives a missing field of a type declared in another
+-- file the default value that file evaluated
+-- file: application/main.fa
+use { Json } = std.json
+
+export function = () => {
+	let settings: Settings = Json.parse("{{\"name\": \"a\"}}") catch error => Settings { name = "fallback" }
+	console.log(settings.host, settings.port, settings.name) -- prints: localhost 8080 a
+	let given: Settings = Json.parse("{{\"name\": \"b\", \"port\": 1}}") catch error => Settings { name = "fallback" }
+	console.log(given.host, given.port, given.name) -- prints: localhost 1 b
+}
+-- file: application/Settings.fa
+export type = {
+	host: String = "localhost"
+	port: Integer = 8000 + 80
+	name: String
+}

@@ -980,6 +980,10 @@ impl Walker<'_> {
 		_negated: bool,
 	) -> TypeId {
 		let collection_ty = self.check(collection, None);
+		// `Permissions.write is in permissions` (fields.rs)
+		if self.is_fields(collection_ty) {
+			return self.check_fields_is_in(n, value, collection_ty);
+		}
 		if collection_ty != TypeId::RANGE {
 			return self.unsupported(n, "`is in` on a collection");
 		}

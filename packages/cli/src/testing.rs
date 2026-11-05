@@ -37,7 +37,7 @@ pub(crate) fn test(arguments: &[OsString]) -> i32 {
 			eprintln!("fa test: `--coverage` is not available yet: run the tests without it");
 			return USAGE;
 		} else if text.starts_with("--") {
-			eprintln!("fa test: unknown option `{text}`");
+			eprintln!("fa test: unknown option `{text}`: see `fa help test`");
 			return USAGE;
 		} else {
 			paths.push(argument.clone());
@@ -249,6 +249,12 @@ pub(crate) fn run_test_files(main: &Path, modules: &[String]) -> i32 {
 	if modules.len() <= 1 {
 		return run_with_bun(main, &[]);
 	}
+	run_test_processes(main, modules)
+}
+
+/// Runs the tests of some test files of a compiled program (`main.js`),
+/// each in a Bun process of its own ([`run_test_files`]).
+pub(crate) fn run_test_processes(main: &Path, modules: &[String]) -> i32 {
 	let Some(bun) = find_bun() else {
 		eprintln!("{BUN_MISSING}");
 		return 1;

@@ -590,7 +590,7 @@ impl<'a> Lowerer<'a> {
 					.iter()
 					.map(|part| match part {
 						TemplatePart::Text(text) => Part::Text(Arc::from(text)),
-						TemplatePart::Expression(value) => Part::Value(self.expr(value)),
+						TemplatePart::Expression(value) => Part::Value(self.printed(value)),
 					})
 					.collect(),
 			),
@@ -686,6 +686,26 @@ impl<'a> Lowerer<'a> {
 			View::Is { value, ty, negated } => {
 				let test = self.type_test(self.a.type_of(ty));
 				Expr::Is(self.expr(value).boxed(), test, negated)
+			}
+			// a set of flags: a bit test
+			View::IsIn {
+				value,
+				collection,
+				negated,
+			} if matches!(
+				self.types().kind(self.a.type_of(collection)),
+				TypeKind::Fields(_)
+			) =>
+			{
+				let test = Expr::Builtin(
+					"Fields#includes",
+					vec![self.expr(collection), self.expr(value)],
+				);
+				if negated {
+					Expr::Not(test.boxed())
+				} else {
+					test
+				}
 			}
 			View::IsIn {
 				value,
@@ -822,8 +842,41 @@ impl<'a> Lowerer<'a> {
 		}
 	}
 
+	/// A value interpolated in a template: a set of flags prints its flags.
+	fn printed(&mut self, n: NodeId) -> Expr {
+		let value = self.expr(n);
+		let ty = self.a.type_of(n);
+		if !matches!(self.types().kind(ty), TypeKind::Fields(_)) {
+			return value;
+		}
+		let names = self.fields_names(ty);
+		Expr::Builtin("Fields#format", vec![value, names])
+	}
+
+	/// The dotted paths of the flags of a `Fields` type, by bit.
+	fn fields_names(&self, ty: crate::ids::TypeId) -> Expr {
+		let names = self
+			.types()
+			.fields_leaves(ty)
+			.iter()
+			.map(|name| Value::string(name))
+			.collect();
+		Expr::Const(Value::array(names))
+	}
+
 	/// A chain of one arithmetic operator, by its associativity.
 	fn arithmetic(&mut self, n: NodeId, op: ArithOp, operands: NodeList<'_>) -> Expr {
+		// `a + b`, `a - b` of field sets: bit operations
+		if matches!(self.types().kind(self.a.type_of(n)), TypeKind::Fields(_)) {
+			let path = if op == ArithOp::Add {
+				"Fields#union"
+			} else {
+				"Fields#difference"
+			};
+			let mut values = operands.iter().map(|operand| self.expr(operand));
+			let first = values.next().unwrap_or_else(Expr::none);
+			return values.fold(first, |acc, value| Expr::Builtin(path, vec![acc, value]));
+		}
 		let num = self.num(self.a.type_of(n));
 		let op_ir = Self::arith_op(op);
 		let mut values: Vec<Expr> = operands.iter().map(|operand| self.expr(operand)).collect();
@@ -850,6 +903,21 @@ impl<'a> Lowerer<'a> {
 		};
 		let num = self.num(self.a.type_of(target));
 		let value = self.expr(value);
+		// `set += flags`, `set -= flags`
+		if matches!(
+			self.types().kind(self.a.type_of(target)),
+			TypeKind::Fields(_)
+		) {
+			let path = if op == ArithOp::Add {
+				"Fields#union"
+			} else {
+				"Fields#difference"
+			};
+			return Expr::Assign(
+				place.clone(),
+				Expr::Builtin(path, vec![Expr::Read(place), value]).boxed(),
+			);
+		}
 		let num = if matches!(op, ArithOp::Add)
 			&& matches!(self.types().kind(self.a.type_of(target)), TypeKind::String)
 		{
@@ -1383,6 +1451,12 @@ impl<'a> Lowerer<'a> {
 					&& !matches!(path, "Map#getOrInsert")
 				{
 					values.pop();
+				}
+				// the paths of the flags, by bit
+				if path == "Fields#toStringArray"
+					&& let View::Access { target, .. } = syntax::view(self.tree, callee)
+				{
+					values.push(self.fields_names(self.a.type_of(target)));
 				}
 				match place {
 					Some(place) => Expr::Mutate(path, place, values),

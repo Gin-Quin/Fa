@@ -30,6 +30,12 @@ impl Walker<'_> {
 		annotation: Option<NodeId>,
 		default: Option<NodeId>,
 	) {
+		// `keys: DeepKeys<Value>` (fields.rs)
+		if let Some(annotation) = annotation
+			&& self.declare_key_set_param(param, generic, target, name, annotation)
+		{
+			return;
+		}
 		let ty = match annotation {
 			Some(annotation) => self.check_type_expr(annotation),
 			// without a type: `GN001`, reported by the parser
@@ -178,6 +184,13 @@ impl Walker<'_> {
 				.is_some_and(|&param| self.s.types.param(param).value);
 			if !value {
 				types.push(self.check_type_expr(argument));
+				continue;
+			}
+			// a key set (fields.rs)
+			if let Some(&param) = params.get(index)
+				&& let Some(ty) = self.key_set_argument(param, argument, params, &types)
+			{
+				types.push(ty);
 				continue;
 			}
 			self.set_flag(argument, crate::analysis::NodeFlags::TYPE_EXPR);

@@ -1093,6 +1093,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
 		let collection = self.receiver(node)?;
+		if let Repr::Map(_) = collection.repr {
+			return self.parallel_map_operation(node, operation, collection, info);
+		}
 		let view = match collection.repr {
 			Repr::Never => return Ok(collection),
 			Repr::Array(_) => collection,
@@ -1300,6 +1303,192 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			("sum", []) => self.array_method_more(node, "Array#sum", view, &[], &[]),
 			_ => Err(self.unsupported(node.index(), &format!("`{operation}` of a parallel view"))),
+		}
+	}
+
+	/// An operation of a parallel view of a map: its callbacks take a key
+	/// and a value, read from arrays of views of the entries (in the map's
+	/// order); `map` and `filter` give a map with the same keys in the same
+	/// order.
+	fn parallel_map_operation(
+		&mut self,
+		node: NodeId,
+		operation: &str,
+		map: Val<'ctx>,
+		info: &CallInfo,
+	) -> Result<Val<'ctx>, Error> {
+		let Some(&Argument::Given(callback_node)) = info
+			.arguments
+			.iter()
+			.find(|argument| matches!(argument, Argument::Given(_)))
+		else {
+			return Err(self.unsupported(node.index(), "this parallel operation of a map"));
+		};
+		let callback = self.expr(callback_node)?;
+		if callback.repr == Repr::Never {
+			return Ok(callback);
+		}
+		let table = self.table_of(map.repr)?;
+		let Some(value_repr) = table.value else {
+			return Err(self.unsupported(node.index(), "this map"));
+		};
+		let key_repr = table.key;
+		let pointer = map.value.expect("a map").into_pointer_value();
+		let length = self.table_size(map)?.int();
+		// the keys and the values, as views, in the map's order
+		let zero = self.context.i64_type().const_zero();
+		let keys = self.new_array(key_repr, zero, length)?;
+		let values = self.new_array(value_repr, zero, length)?;
+		let key_size = self.item_size_const(key_repr);
+		let value_size = self.item_size_const(value_repr);
+		let push = self.runtime.function("fa_array_push_slot")?;
+		self.for_each_entry(pointer, table, |this, entry, _| {
+			for (array, size, is_value) in [(keys, key_size, false), (values, value_size, true)] {
+				let loaded = this.load(this.entry_slot(entry, table, is_value)?)?;
+				let slot = this
+					.call_value(push, &[array.into(), size.into()])?
+					.into_pointer_value();
+				if let Some(raw) = loaded.value {
+					this.builder.build_store(slot, raw)?;
+				}
+			}
+			Ok(())
+		})?;
+		for (array, size) in [(keys, key_size), (values, value_size)] {
+			self.cleanups
+				.borrow_mut()
+				.push(super::ownership::Cleanup::Shallow(array, size));
+		}
+		let closure = callback.value.expect("a function");
+		let closure_repr = callback.repr;
+		let entry_slots =
+			|this: &mut Self, keys: PointerValue<'ctx>, values: PointerValue<'ctx>, index| {
+				Ok::<_, Error>([
+					this.array_item_slot(keys, key_repr, index)?,
+					this.array_item_slot(values, value_repr, index)?,
+				])
+			};
+		if operation == "map" {
+			let result_repr = self.node_repr(node)?;
+			let result_table = self.table_of(result_repr)?;
+			let Some(result_item) = result_table.value else {
+				return Err(self.unsupported(node.index(), "this `map`"));
+			};
+			let results = self.zeroed_array(result_item, length)?;
+			let item_type = match self.types().kind(self.type_of(node)) {
+				TypeKind::Collection(_, item, _) => item,
+				_ => return Err(self.unsupported(node.index(), "this `map`")),
+			};
+			// dropped with the statement (the map keeps copies)
+			self.fresh(Val::new(Repr::Array(item_type), results));
+			self.parallel_each(
+				length,
+				&[closure, keys.into(), values.into(), results.into()],
+				|this, env, index| {
+					let callback = Val::new(closure_repr, env[0]);
+					let slots = entry_slots(
+						this,
+						env[1].into_pointer_value(),
+						env[2].into_pointer_value(),
+						index,
+					)?;
+					let mapped =
+						this.call_collection_callback(callback, callback_node, &[], &slots, &[])?;
+					let mapped = this.owned_as(mapped, result_item, None)?;
+					let target =
+						this.array_item_slot(env[3].into_pointer_value(), result_item, index)?;
+					if let Some(raw) = mapped.value {
+						this.builder.build_store(target.pointer, raw)?;
+					}
+					Ok(())
+				},
+			)?;
+			let result = self.table_new(result_table, length)?;
+			self.for_each_index(length, |this, index| {
+				let key = this.load(this.array_item_slot(keys, key_repr, index)?)?;
+				let key = this.emit_copy(key)?;
+				let key = this.convert(key, result_table.key, node.index())?;
+				let value = this.load(this.array_item_slot(results, result_item, index)?)?;
+				let value = this.emit_copy(value)?;
+				this.table_insert(result, result_table, key, Some(value), node)?;
+				Ok(())
+			})?;
+			return Ok(self.fresh(Val::new(result_repr, result)));
+		}
+		// a flag per entry
+		let flags = self.zeroed_array(Repr::Bool, length)?;
+		self.fresh(Val::new(Repr::Array(TypeId::BOOLEAN), flags));
+		self.parallel_each(
+			length,
+			&[closure, keys.into(), values.into(), flags.into()],
+			|this, env, index| {
+				let callback = Val::new(closure_repr, env[0]);
+				let slots = entry_slots(
+					this,
+					env[1].into_pointer_value(),
+					env[2].into_pointer_value(),
+					index,
+				)?;
+				let holds =
+					this.call_collection_callback(callback, callback_node, &[], &slots, &[])?;
+				let holds = this.convert(holds, Repr::Bool, callback_node.index())?;
+				let target =
+					this.array_item_slot(env[3].into_pointer_value(), Repr::Bool, index)?;
+				this.builder
+					.build_store(target.pointer, holds.value.expect("a flag"))?;
+				Ok(())
+			},
+		)?;
+		match operation {
+			"filter" => {
+				let result_repr = self.node_repr(node)?;
+				let result_table = self.table_of(result_repr)?;
+				let result = self.table_new(result_table, zero)?;
+				self.for_each_index(length, |this, index| {
+					let keep = this
+						.load(this.array_item_slot(flags, Repr::Bool, index)?)?
+						.int();
+					let copy = this.append_block("parallel_keep");
+					let next = this.append_block("parallel_next");
+					this.builder.build_conditional_branch(keep, copy, next)?;
+					this.builder.position_at_end(copy);
+					let key = this.load(this.array_item_slot(keys, key_repr, index)?)?;
+					let key = this.emit_copy(key)?;
+					let value = this.load(this.array_item_slot(values, value_repr, index)?)?;
+					let value = this.emit_copy(value)?;
+					this.table_insert(result, result_table, key, Some(value), node)?;
+					this.builder.build_unconditional_branch(next)?;
+					this.builder.position_at_end(next);
+					Ok(())
+				})?;
+				Ok(self.fresh(Val::new(result_repr, result)))
+			}
+			"some" | "every" => {
+				let every = operation == "every";
+				let found = self.alloca(Repr::Bool, "found")?;
+				self.builder.build_store(
+					found.pointer,
+					self.context.bool_type().const_int(u64::from(every), false),
+				)?;
+				self.for_each_index(length, |this, index| {
+					let flag = this
+						.load(this.array_item_slot(flags, Repr::Bool, index)?)?
+						.int();
+					let current = this.load(found)?.int();
+					let next = if every {
+						this.builder.build_and(current, flag, "")?
+					} else {
+						this.builder.build_or(current, flag, "")?
+					};
+					this.builder.build_store(found.pointer, next)?;
+					Ok(())
+				})?;
+				self.load(found)
+			}
+			_ => Err(self.unsupported(
+				node.index(),
+				&format!("`{operation}` of a parallel view of a map"),
+			)),
 		}
 	}
 

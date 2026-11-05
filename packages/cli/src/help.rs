@@ -12,7 +12,7 @@ Commands:
   check    analyze a file, a package or every package of a workspace
   build    compile a file or the application of a package for its targets (into build/<target>/)
   test     run the tests of the `*.test.fa` files (`--watch` to run them again after each change)
-  develop  run the application, and run it again after each change
+  develop  run the application, and reload or restart it after each change
   preview  run the output of `fa build`
   format   format the source files
   update   resolve the dependencies again and rewrite `dependencies.lock`
@@ -85,7 +85,9 @@ which mode the program builds in, and why.
 Usage: fa test [<package>] [--watch] [--target=bun|native] [--asynchronous=true|false]
 
 Runs the tests of the `*.test.fa` files on Bun, each with freshly initialized
-module-level values; exits with 1 when a test fails. `--watch` runs them again
+module-level values, each test file in a Bun process of its own (as many at once
+as cores, `FA_TEST_WORKERS`), reported in the order of the files; exits with 1
+when a test fails. `--watch` runs them again
 after each change. In a workspace, without a package, the tests of every package
 with test files run. `--target=native` compiles them with the LLVM backend and runs
 each test in its own run of the executable. `--coverage` is not available yet.
@@ -93,16 +95,19 @@ each test in its own run of the executable. `--coverage` is not available yet.
 		}
 		"develop" => {
 			"\
-Usage: fa develop [<package>] [--target=bun]
+Usage: fa develop [<package>] [--target=bun|web|native]
 
 Compiles the application for Bun, runs it, watches the files of the package
 (and of the packages of the workspace it uses), and reloads the edited modules
 in the running program after each change (their module-level values initialized
-again, the others kept), or restarts it when the change can't be reloaded (a
-type, the exports or the files changed; `develop.hotReload = false` always
-restarts); a change with errors keeps the running program until it is fixed.
-In a workspace, without a package, every package with an application is
-developed.
+again, `reactive` values and the others kept), or restarts it when the change
+can't be reloaded (a type, the exports or the files changed;
+`develop.hotReload = false` always restarts); a change with errors keeps the
+running program until it is fixed. The test files that read an edited file run
+again. `--target=web` serves the web build on `develop.port` and reloads the
+modules in the open pages (or the pages); `--target=native` rebuilds the
+executable (the unchanged units from the cache) and restarts it. In a
+workspace, without a package, every package with an application is developed.
 "
 		}
 		"preview" => {
@@ -131,7 +136,8 @@ Usage: fa update [<dependency>...]
 
 Resolves the dependencies again, to the latest versions their ranges allow, and
 rewrites `dependencies.lock`: all of them, or the ones named (the keys of
-`dependencies.fa`). Other commands never change a locked version.
+`dependencies.fa`, or the source of an `@import`). Other commands never change a
+locked version.
 "
 		}
 		"new" => {

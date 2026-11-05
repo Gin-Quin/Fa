@@ -1,0 +1,10 @@
+-- docs: foreign-code.md, "C types": a `CArray(T, n)` is written with its `n` items
+type Vertex = CStruct {
+	position: CArray<Float32, 3>
+}
+let short = Vertex { position = [1.0, 2.0] } -- error E-TYPE-1
+let items = [1.0, 2.0, 3.0]
+let spread = Vertex { position = [...items] } -- error E-TYPE-1
+let fine = Vertex { position = [1.0, 2.0, 3.0] }
+let first: Float32 = fine.position[0]
+let count = fine.position.length

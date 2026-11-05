@@ -27,8 +27,7 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Features still missing (from the engineers' reports)
 
-- Native: foreign code: `CArray` values, `CStruct` by value off x86-64, `Pointer.allocate`/`free`, WebAssembly imports, `build.cLibrary`; JS foreign code: structs by value. Concurrency: `parallel()` of maps. JavaScript: compile-time ranges (`static span = 1..5`, `AN001`).
-- Analyzer: relations across files, `@import`, `@extern` (*foreign code*); implied relation effects for reactivity; `TypeFromSchema` of `Fields`, of enumerations with pinned values, and inside a generic type other than as its value; JSON named unions (form decided in `design/decisions.md`, not implemented).
-- Tooling: `fa develop` running again the tests that cover a reloaded change, keeping reactive sources by declaration path across a swap, `--target=web` (reload channel) and `--target=native`; `@import` sources in `dependencies.fa`.
+- Native: foreign code: `build.cLibrary`; JS foreign code: `Pointer.allocate`/`free` on Bun.
+- Analyzer: relations across files, `@extern` (*foreign code*); implied relation effects for reactivity; `TypeFromSchema` inside a generic type other than as its value. Key sets: a key-set compile-time parameter used elsewhere than as the iterable of `@for` (`Pick<Entity, keys>`, `pick(entity, keys)`: gn-22, gn-23), and the per-key check of an `@for` body (`value[key]` typed by each field's type, `TF011`); JSON and `when` patterns of `Fields` values.
 - Native: compile-time named union members (`Schema` values).
 - Reviews to schedule: a second analyzer review (M2/M3 features), a review of the tooling (CLI, formatter, workspaces), a final review of both backends.

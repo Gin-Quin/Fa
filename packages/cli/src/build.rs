@@ -103,7 +103,7 @@ pub(crate) fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32>
 				}
 			};
 		} else if text.starts_with("--") {
-			eprintln!("fa build: unknown option `{text}`");
+			eprintln!("fa build: unknown option `{text}`: see `fa help build`");
 			return Err(USAGE);
 		} else {
 			files.push(argument.clone());
@@ -605,8 +605,42 @@ pub(crate) fn write_build(
 /// `main.wasm` and `main.mjs`) into `output`, else into
 /// `<package>/<build.output>/<target>/` for a package (D36) and
 /// `build/<target>/` next to a standalone file; on failure, the message to
-/// print.
+/// print. On wasm, the `env.mjs` of the program (next to the file, or at the
+/// root of the package: the C functions the host gives) goes next to the
+/// loader, which imports it.
 pub(crate) fn build_native(
+	backend: &dyn native::Backend,
+	path: &Path,
+	target: fa_codegen_llvm::Target,
+	options: &fa_codegen_llvm::Options,
+	mode: Mode,
+	output: Option<&Path>,
+	development: bool,
+) -> Result<fa_codegen_llvm::Artifact, String> {
+	let artifact =
+		build_native_artifact(backend, path, target, options, mode, output, development)?;
+	if let Some(loader) = &artifact.loader {
+		let directory = if path.is_dir() {
+			Some(path)
+		} else {
+			path.parent()
+		};
+		if let Some(host) = directory
+			.map(|directory| directory.join("env.mjs"))
+			.filter(|host| host.is_file())
+		{
+			fs::copy(&host, loader.with_file_name("env.mjs")).map_err(|error| {
+				format!(
+					"fa: can't copy `{}` next to the loader: {error}\n",
+					host.display()
+				)
+			})?;
+		}
+	}
+	Ok(artifact)
+}
+
+fn build_native_artifact(
 	backend: &dyn native::Backend,
 	path: &Path,
 	target: fa_codegen_llvm::Target,

@@ -635,6 +635,14 @@ pub struct Analysis {
 	/// The default values of the fields of types declared in other files,
 	/// which their files evaluated at compile time ([`FieldValue::Constant`]).
 	pub field_constants: Vec<fa_interpreter::Value>,
+	/// The default values of the fields of the object types `Json.parse`
+	/// reads that are declared in other files: their constants
+	/// ([`Analysis::field_constants`]), by type and field name.
+	pub json_defaults: FxHashMap<(TypeId, crate::ids::Sym), u32>,
+	/// The fields of the object types written as the data of a member of a
+	/// named union of this file (`Circle = { radius: Float }`), in the
+	/// order they are written: their declaration order (JSON, printing).
+	pub inline_field_orders: FxHashMap<TypeId, Vec<crate::ids::Sym>>,
 	/// The reads that move a move-only value out of its place (a local, a
 	/// parameter, a field of one: `holder.task` returned or passed): the
 	/// place gives the value up (a zero, which its drop skips).
@@ -698,6 +706,24 @@ pub struct Analysis {
 	/// (`numbers.parallel().map(f)`), with its name: `map`, `filter`,
 	/// `reduce`, `some`, `every` or `sum` (native: `lower/parallel.rs`).
 	pub parallel_operations: FxHashMap<NodeId, &'static str>,
+
+	// ── key sets (`check/fields.rs`) ──
+	/// The compile-time value parameters holding a key set (`keys:
+	/// DeepKeys<Value>`). Their binding in `instantiations` is the tuple
+	/// type of the key set's `Fields` type and the integer literal of its
+	/// bits; their only use is the iterable of an `@for` (`key_loops`). In
+	/// JavaScript, the hidden parameter is the array of the dotted paths of
+	/// its keys.
+	pub key_set_params: rustc_hash::FxHashSet<crate::ids::ParamId>,
+	/// The `@for` loops over a key set (a `static` one, unrolled in
+	/// `unrolled`, or a key-set value parameter, unrolled per instance):
+	/// the variable is the dotted path of a key (`"nested.foo"`), a `String`.
+	pub key_loops: rustc_hash::FxHashSet<NodeId>,
+	/// The reads of the field at a key (`value[key]`, the variable of a key
+	/// loop as the index): the type parameter typing the result, which
+	/// stands for the type of the field of each key. The target is an object
+	/// value; its field at the dotted path is read.
+	pub key_reads: FxHashMap<NodeId, crate::ids::ParamId>,
 
 	// ── reactivity (advanced brief §11, `check/reactivity.rs`) ──
 	/// Every read of a reactive place that may run while a `derived` value
@@ -1322,6 +1348,8 @@ impl Analysis {
 			type_decls: FxHashMap::default(),
 			objects: FxHashMap::default(),
 			field_constants: Vec::new(),
+			json_defaults: FxHashMap::default(),
+			inline_field_orders: FxHashMap::default(),
 			moved_reads: rustc_hash::FxHashSet::default(),
 			patterns: FxHashMap::default(),
 			relations: Vec::new(),
@@ -1339,6 +1367,9 @@ impl Analysis {
 			reads_target: false,
 			submitted_works: Vec::new(),
 			parallel_operations: FxHashMap::default(),
+			key_set_params: rustc_hash::FxHashSet::default(),
+			key_loops: rustc_hash::FxHashSet::default(),
+			key_reads: FxHashMap::default(),
 			reactive_reads: FxHashMap::default(),
 			reactive_writes: FxHashMap::default(),
 			reactive_args: FxHashMap::default(),

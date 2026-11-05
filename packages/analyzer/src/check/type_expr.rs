@@ -59,6 +59,14 @@ impl Walker<'_> {
 				operands,
 			} => self.type_difference(n, operands),
 			View::Object { items } => self.memo(n, |w| w.anonymous_object_type(items)),
+			// `Fields { read, write }` (fields.rs)
+			View::TypedObject { target, members }
+				if matches!(syntax::view(&tree, target), View::Name(name)
+					if tree.name(name) == "Fields" && !self.is_declared(name)) =>
+			{
+				self.set_flag(target, NodeFlags::TYPE_EXPR);
+				self.fields_type_expr(n, members)
+			}
 			View::Access { target, members } => self.type_path(n, target, members),
 			// `(A, B)`, `()`: tuples.rs
 			View::Tuple { items } => self.tuple_type(n, items),
@@ -680,6 +688,7 @@ impl Walker<'_> {
 		if parts.incomplete {
 			return TypeId::UNKNOWN;
 		}
+		let names: Vec<crate::ids::Sym> = parts.fields.iter().map(|field| field.name).collect();
 		let entries: Vec<crate::types::FieldEntry> = parts
 			.fields
 			.iter()
@@ -689,7 +698,10 @@ impl Walker<'_> {
 				flags: field.flags,
 			})
 			.collect();
-		self.s.types.object(&entries, None)
+		let ty = self.s.types.object(&entries, None);
+		// the order `Keys<T>` lists them in (fields.rs)
+		self.record_field_order(ty, names);
+		ty
 	}
 
 	/// `Shape.Circle`, `Color.red`: a member of a named union or of an
@@ -839,10 +851,9 @@ pub(super) fn is_later_prelude_name(text: &str) -> bool {
 				| "Pool" | "GrowingPool"
 				| "Columnar" | "GrowingColumnar"
 				| "OrderedColumnar"
-				| "Type" | "Fields"
-				| "Partial" | "Required"
-				| "Pick" | "Omit"
-				| "Parameters"
+				| "Type" | "Partial"
+				| "Required" | "Pick"
+				| "Omit" | "Parameters"
 				| "ReturnType"
 				| "Uppercase"
 				| "Lowercase"

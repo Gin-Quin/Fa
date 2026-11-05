@@ -1,0 +1,25 @@
+-- a set of flags in an object, a tuple, an optional: printed and compared
+type Permissions = Fields { read, write, admin }
+type User = { name: String, permissions: Permissions }
+
+let ana = User { name = "Ana", permissions = { read, write } }
+console.log(ana)
+console.log(ana.permissions)
+let bob = User { name = "Bob", permissions = Permissions.read }
+console.log(ana == bob, ana.permissions == bob.permissions + Permissions.write)
+let pair = (Permissions.admin, 1)
+console.log(pair)
+let maybe: Permissions? = none
+console.log(maybe)
+let some: Permissions? = Permissions { admin }
+console.log(some)
+-- prints: { name = "Ana", permissions = { read, write } }
+-- prints: { read, write }
+-- prints: false true
+-- prints: ({ admin }, 1)
+-- prints: none
+-- prints: { admin }
+let set: Set<Permissions> = [Permissions.read, { write, admin }]
+console.log(set) -- prints: [{ read }, { write, admin }]
+let map: Map<String, Permissions> = [("ana", Permissions.read)]
+console.log(map) -- prints: [("ana", { read })]

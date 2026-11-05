@@ -11,6 +11,18 @@ function allocate: (size: c.SizeT) => Pointer<Int32> = @extern("malloc")
 function release: (block: Pointer<Int32>) => Void = @extern("free")
 function sort: (base: Pointer<Void>, count: c.SizeT, size: c.SizeT, compare: (a: Pointer<Void>, b: Pointer<Void>) => c.Int) => Void mutates base = @extern("qsort")
 
+type Division = CStruct {
+	quotient: c.Int
+	remainder: c.Int
+}
+type LongDivision = CStruct {
+	quotient: c.LongLong
+	remainder: c.LongLong
+}
+-- structs by value (on Bun, through a shim compiled by TinyCC)
+function divide: (numerator: c.Int, denominator: c.Int) => Division = @extern("div")
+function divideLong: (numerator: c.LongLong, denominator: c.LongLong) => LongDivision = @extern("lldiv")
+
 function descending = (a: Pointer<Int32>, b: Pointer<Int32>): c.Int => {
 	if a.read() > b.read() {
 		return -1
@@ -43,3 +55,8 @@ release(block)
 mutable numbers: Array<Int32> = [3, 1, 2, -7]
 sort(numbers, numbers.length, 4, descending)
 console.log(numbers) -- prints: [3, 2, 1, -7]
+
+let division = divide(17, 5)
+console.log(division.quotient, division.remainder) -- prints: 3 2
+let long = divideLong(100000000000, 7)
+console.log(long.quotient, long.remainder) -- prints: 14285714285 5

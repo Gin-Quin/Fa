@@ -83,7 +83,17 @@ impl Generator<'_> {
 		let helper = self.helper("faSource");
 		let name = if Some(info.scope) == self.module_scope {
 			let name = self.scopes.declare_global(&wanted);
-			self.module_constant(name.clone(), format!("{helper}()"));
+			// a hot build (D43): the source survives a swap of its module,
+			// kept by its declaration path (its observers stay subscribed)
+			let created = match self.program.filter(|_| self.options.hot) {
+				Some(program) => {
+					let keep = self.helper("faHotKeep");
+					let key = js::string_literal(&format!("{}#{name}", program.path));
+					format!("{keep}({key}, {helper})")
+				}
+				None => format!("{helper}()"),
+			};
+			self.module_constant(name.clone(), created);
 			name
 		} else {
 			let name = self.scopes.declare(&wanted);

@@ -1,0 +1,42 @@
+-- `Keys` and `DeepKeys` in declaration order, `@for` over a `static` key
+-- set and over a key-set parameter with several instances
+type Settings = {
+	port: Integer
+	host: String
+	ratio: Float
+	nested: {
+		name: String
+		enabled: Boolean
+	}
+}
+type Point = { y: Integer, x: Integer }
+
+console.log(@typeToString(Keys<Settings>)) -- prints: Fields { port, host, ratio, nested }
+console.log(@typeToString(DeepKeys<Settings>)) -- prints: Fields { port, host, ratio, nested { name, enabled } }
+
+let settings: Settings = {
+	port = 8080
+	host = "localhost"
+	ratio = 0.5
+	nested = { name = "inner", enabled = true }
+}
+
+static logged: DeepKeys<Settings> = { host, nested { enabled } }
+@for key in logged {
+	console.log("{key}: {settings[key]}")
+}
+-- prints: host: localhost
+-- prints: nested.enabled: true
+
+function show = <Value, keys: Keys<Value>>(value: Value) => {
+	@for key in keys {
+		console.log(key, value[key])
+	}
+}
+show<Settings, { ratio, nested }>(settings)
+-- prints: ratio 0.5
+-- prints: nested { enabled = true, name = "inner" }
+show<Point, { x }>({ x = 1, y = 2 })
+-- prints: x 1
+let full: Keys<Point> = { y, x }
+console.log(Integer(full), full) -- prints: 3 { y, x }

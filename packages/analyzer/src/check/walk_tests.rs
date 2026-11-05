@@ -72,9 +72,12 @@ fn sinks_check_assignability() {
 
 #[test]
 fn unsupported_constructs_report_an001_once_and_quietly() {
-	// the unknown names inside the unsupported composition are not reported,
-	// and one AN001 stands for the outermost unsupported construct
-	assert_eq!(codes("let x = nope then (other then nope)\n"), ["AN001"]);
+	// the unknown names inside the unsupported partial application are not
+	// reported, and one AN001 stands for the outermost unsupported construct
+	assert_eq!(
+		codes("let x = nope with (y = other with (z = nope))\n"),
+		["AN001"]
+	);
 }
 
 #[test]

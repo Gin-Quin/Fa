@@ -14,7 +14,8 @@ let points: Array<Point>? = Json.parse("[]") catch error => none
 let unknown = Json.parse("1") catch error => 0 -- error E-DECL-11
 -- a type without a JSON form
 let handler: (Integer) => Integer = Json.parse("1") catch error => (x) => x -- error AN005
-let shape: Shape = Json.parse("1") catch error => Shape.Point -- error AN005
+-- a named union is tagged by `"type"` (design/decisions.md)
+let shape: Shape = Json.parse("{{\"type\": \"Point\"}}") catch error => Shape.Circle { radius = 1.0 }
 
 console.log(Json.stringify(point)) -- prints: {"x":1,"y":2}
 console.log(Json.stringify([1, 2])) -- prints: [1,2]

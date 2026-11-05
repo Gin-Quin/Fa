@@ -31,6 +31,8 @@ mod columns;
 mod constants;
 mod destination;
 mod division;
+mod edits;
+mod fields;
 mod foreign;
 pub(crate) mod generic_values;
 mod growing;
@@ -215,6 +217,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// Inside a loop over characters lowered twice, for a simple text and
 	/// for another (`for_characters`): a nested one is lowered once.
 	pub(crate) versioned_characters: bool,
+	/// The reserved appends (`appends.rs`) of loops with a constant number of
+	/// rounds that fits an inline string: such a string stays inline.
+	pub(crate) inline_reserved: rustc_hash::FxHashSet<NodeId>,
 	/// The arrays indexed by a counted loop being lowered, read before it
 	/// (`hoisting.rs`): the array value of each local, and the items and
 	/// length of each such value.
@@ -274,6 +279,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The compile-time results of the `@for` items being lowered,
 	/// innermost last (`Analysis::unrolled_items`, constants.rs).
 	item_results: Vec<fa_analyzer::analysis::ItemResults>,
+	/// The key each variable of an `@for` over a key set stands for, while
+	/// its body is lowered (fields.rs).
+	current_keys: FxHashMap<SymbolId, String>,
 	/// The cleanup stacks of the functions whose lowering is suspended.
 	saved_cleanups: Vec<Vec<ownership::Cleanup<'ctx>>>,
 	/// The locals of the function being lowered that own their value.
@@ -323,6 +331,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	index_proofs: std::cell::RefCell<Option<index_proofs::IndexProofs>>,
 	/// The facts merged from every unit of a build per unit (`facts.rs`).
 	program_facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
+	/// The facts this lowering consulted (the key of a cached unit).
+	pub(crate) fact_log: Option<std::sync::Arc<crate::facts::FactLog>>,
 	/// The map types the program may keep a reference into the values of
 	/// (`program::unsafe_maps`).
 	unsafe_maps: rustc_hash::FxHashSet<TypeId>,
@@ -436,6 +446,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			reserved_pushes: FxHashMap::default(),
 			iterating_views: false,
 			versioned_characters: false,
+			inline_reserved: rustc_hash::FxHashSet::default(),
 			hoisted_arrays: FxHashMap::default(),
 			hoisted_parts: FxHashMap::default(),
 			expanded_functions: Vec::new(),
@@ -456,6 +467,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			overflow_checks: true,
 			cleanups: std::cell::RefCell::new(Vec::new()),
 			item_results: Vec::new(),
+			current_keys: FxHashMap::default(),
 			pending_receiver: None,
 			provided: FxHashMap::default(),
 			references: FxHashMap::default(),
@@ -475,6 +487,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			virtual_code_points: FxHashMap::default(),
 			whole_program: false,
 			program_facts: None,
+			fact_log: None,
 			index_proofs: std::cell::RefCell::new(None),
 			unsafe_maps: program::unsafe_maps(session, files),
 			no_inline_maps: program::no_inline_maps(session, files),
@@ -513,6 +526,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
 	) -> Self {
 		self.program_facts = facts;
+		self
+	}
+
+	/// Records the facts the lowering consults (`facts::FactLog`).
+	pub(crate) fn with_fact_log(mut self, log: std::sync::Arc<crate::facts::FactLog>) -> Self {
+		self.fact_log = Some(log);
 		self
 	}
 
@@ -945,9 +964,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		function: FunctionValue<'ctx>,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<inkwell::values::BasicValueEnum<'ctx>, Error> {
-		Ok(self
-			.builder
-			.build_call(function, arguments, "")?
+		let call = self.builder.build_call(function, arguments, "")?;
+		Ok(call
 			.try_as_basic_value()
 			.basic()
 			.expect("a function with a result"))
@@ -2206,6 +2224,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			} => self.is_in(node, value, collection, negated),
 			View::Destructuring { .. } if self.is_name_alias(node) => Ok(Val::void()),
 			View::Destructuring { pattern, value, .. } => self.destructure(pattern, value),
+			// the field at a key of a key set (fields.rs)
+			View::Index { target, index } if self.analysis.key_reads.contains_key(&node) => {
+				self.key_read(node, target, index)
+			}
 			View::Index { target, index } => match self.index_special(node, target, index)? {
 				Some(value) => Ok(value),
 				None => self.index_read(node, target, index),
@@ -2513,6 +2535,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// `target = value`: a local, a field.
 	fn assignment(&mut self, target: NodeId, value: NodeId) -> Result<Val<'ctx>, Error> {
+		// a string replaced by slices of itself (`edits.rs`)
+		if let Some(edited) = self.edit_in_place(target, value)? {
+			return Ok(edited);
+		}
+		self.assignment_as_written(target, value)
+	}
+
+	/// `target = value`.
+	pub(crate) fn assignment_as_written(
+		&mut self,
+		target: NodeId,
+		value: NodeId,
+	) -> Result<Val<'ctx>, Error> {
 		if let Resolution::Local(symbol) = self.analysis.resolution(target)
 			&& self.analysis.symbols.symbol(symbol).kind == SymbolKind::Mutable
 			&& self.node_repr(target)? == Repr::Str
@@ -2759,6 +2794,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				Repr::Pool(_) | Repr::Columnar(_) => self.for_pool(node, pattern, value, body),
 				Repr::Links(_) => self.for_links(node, pattern, value, body),
 				Repr::Range => self.for_range_value(node, pattern, value, body),
+				Repr::Tuple(ty) if self.c_array_count(ty).is_some() => {
+					self.for_c_array(node, pattern, has_index, iterable, value, body)
+				}
 				Repr::Never => Ok(value),
 				_ => Err(self.unsupported(iterable.index(), "`for` over this value")),
 			};

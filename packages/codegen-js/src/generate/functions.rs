@@ -973,6 +973,11 @@ impl Generator<'_> {
 			_ if crate::generate::number_api::is_number_api(path) => {
 				self.number_api_call(n, callee, path, arguments)
 			}
+			"Fields#toStringArray" => {
+				let receiver = self.receiver(callee);
+				let ty = self.receiver_type(callee);
+				self.fields_to_string_array(ty, receiver)
+			}
 			"Enum#toString" => {
 				let receiver = self.receiver(callee);
 				match self.types.kind(self.receiver_type(callee)) {

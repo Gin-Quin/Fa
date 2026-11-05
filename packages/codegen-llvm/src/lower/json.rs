@@ -164,6 +164,45 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					}
 				}
 			}
+			// a named union: its members tagged by `"type"` (`fa_runtime.c`, `JsonMember`)
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _)
+				if matches!(
+					types.nominal(nominal).kind,
+					fa_analyzer::types::NominalKind::Union
+						| fa_analyzer::types::NominalKind::Errors
+				) =>
+			{
+				let members = self.json_members(ty);
+				out.extend_from_slice(format!("N{};", members.len()).as_bytes());
+				for (nominal, index) in members {
+					let name = self.types().member_name(nominal, index).to_string();
+					out.extend_from_slice(format!("{};", name.len()).as_bytes());
+					out.extend_from_slice(name.as_bytes());
+					let kind = self.json_member_kind(nominal, index);
+					out.push(kind);
+					if kind != b'e' {
+						let data = self.types().payload(nominal, index);
+						if !self.json_schema(data, depth + 1, out) {
+							return false;
+						}
+					}
+				}
+			}
+			// an enumeration: `E<count>;` then `<length>;<name>` and `p<value>;`
+			// (pinned) or `n` (written as its name)
+			TypeKind::Enum(..) | TypeKind::EnumMember(..) => {
+				let members = self.json_enum_members(ty);
+				out.extend_from_slice(format!("E{};", members.len()).as_bytes());
+				for (nominal, index) in members {
+					let name = types.member_name(nominal, index);
+					out.extend_from_slice(format!("{};", name.len()).as_bytes());
+					out.extend_from_slice(name.as_bytes());
+					match self.json_pinned(nominal, index) {
+						Some(value) => out.extend_from_slice(format!("p{value};").as_bytes()),
+						None => out.push(b'n'),
+					}
+				}
+			}
 			TypeKind::Object(_) => {
 				let fields = self.json_fields(ty);
 				out.extend_from_slice(format!("o{};", fields.len()).as_bytes());
@@ -172,7 +211,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					out.extend_from_slice(name.as_bytes());
 					// may be absent: optional, or with a default value
 					let optional = types.union_members(&field_type).contains(&TypeId::NONE)
-						|| self.json_default(ty, &name).is_some();
+						|| self.json_default(ty, &name).is_some()
+						|| types
+							.fields_of(ty)
+							.iter()
+							.find(|field| types.syms.resolve(field.name) == name)
+							.is_some_and(|field| {
+								self.analysis.json_defaults.contains_key(&(ty, field.name))
+							});
 					out.push(if optional { b'1' } else { b'0' });
 					if !self.json_schema(field_type, depth + 1, out) {
 						return false;
@@ -182,6 +228,71 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ => return false,
 		}
 		true
+	}
+
+	/// The members of an enumeration type (or the one of a member).
+	fn json_enum_members(&self, ty: TypeId) -> Vec<(fa_analyzer::ids::NominalId, u16)> {
+		let types = self.types();
+		match types.kind(ty) {
+			TypeKind::EnumMember(nominal, index) => vec![(nominal, index)],
+			TypeKind::Enum(nominal, mask) => {
+				let count = types.sym_list(types.nominal(nominal).members).len() as u16;
+				(0..count)
+					.filter(|&index| types.mask_has(mask, index))
+					.map(|index| (nominal, index))
+					.collect()
+			}
+			_ => Vec::new(),
+		}
+	}
+
+	/// The pinned value of a member of an enumeration (its literal payload).
+	fn json_pinned(&self, nominal: fa_analyzer::ids::NominalId, index: u16) -> Option<I256> {
+		self.types()
+			.as_int(self.types().payload(nominal, index))
+			.filter(|int| int.min == int.max)
+			.map(|int| int.min)
+	}
+
+	/// The members of a named union type (or the one of a member type).
+	fn json_members(&self, ty: TypeId) -> Vec<(fa_analyzer::ids::NominalId, u16)> {
+		let types = self.types();
+		match types.kind(ty) {
+			TypeKind::Member(nominal, index) => vec![(nominal, index)],
+			TypeKind::NamedUnion(nominal, mask) => {
+				let count = types.sym_list(types.nominal(nominal).members).len() as u16;
+				(0..count)
+					.filter(|&index| types.mask_has(mask, index))
+					.map(|index| (nominal, index))
+					.collect()
+			}
+			_ => Vec::new(),
+		}
+	}
+
+	/// How a member is written: `e` without data, `l` a literal, `r` an
+	/// object next to `"type"`, `v` data under `"value"` (an object with
+	/// its own `type` field too).
+	fn json_member_kind(&self, nominal: fa_analyzer::ids::NominalId, index: u16) -> u8 {
+		let types = self.types();
+		let data = types.payload(nominal, index);
+		if data.is_unset() {
+			return b'e';
+		}
+		if types.is_literal(data) {
+			return b'l';
+		}
+		match types.kind(data) {
+			TypeKind::Object(_)
+				if !types
+					.fields_of(data)
+					.iter()
+					.any(|field| types.syms.resolve(field.name) == "type") =>
+			{
+				b'r'
+			}
+			_ => b'v',
+		}
 	}
 
 	/// The default value of a field of an object type declared in this
@@ -205,18 +316,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let types = self.types();
 		let shape = types.fields_of(ty);
 		let mut order: Vec<usize> = Vec::new();
-		if let Some(declaration) = self
+		let declared: Vec<fa_analyzer::ids::Sym> = match self
 			.analysis
 			.type_decls
 			.values()
 			.find(|declaration| declaration.ty == ty)
 		{
-			for field in &declaration.fields {
-				if let Some(index) = shape.iter().position(|entry| entry.name == field.name)
-					&& !order.contains(&index)
-				{
-					order.push(index);
-				}
+			Some(declaration) => declaration.fields.iter().map(|field| field.name).collect(),
+			// an object written inline as a member's data: as written
+			None => self
+				.analysis
+				.inline_field_orders
+				.get(&ty)
+				.cloned()
+				.unwrap_or_default(),
+		};
+		for name in declared {
+			if let Some(index) = shape.iter().position(|entry| entry.name == name)
+				&& !order.contains(&index)
+			{
+				order.push(index);
 			}
 		}
 		for index in 0..shape.len() {
@@ -299,6 +418,71 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(function)
 	}
 
+	/// A value of a named union: the member the tree is (`fa_json_member`),
+	/// with its data read from the tree or its `"value"`.
+	fn json_named(
+		&mut self,
+		tree: PointerValue<'ctx>,
+		ty: TypeId,
+		repr: Repr,
+		call: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let mut schema = Vec::new();
+		if !self.json_schema(ty, 0, &mut schema) {
+			return Err(self.unsupported(call.index(), "`Json.parse` of this union"));
+		}
+		schema.push(0);
+		let schema = self.constant_bytes(&schema);
+		let position = self
+			.call_value(
+				self.runtime.function("fa_json_member")?,
+				&[tree.into(), schema.into()],
+			)?
+			.into_int_value();
+		let slot = self.alloca(repr, "json_member")?;
+		let join = self.append_block("json_member_read");
+		for (at, (nominal, index)) in self.json_members(ty).into_iter().enumerate() {
+			let is = self.builder.build_int_compare(
+				IntPredicate::EQ,
+				position,
+				position.get_type().const_int(at as u64, false),
+				"",
+			)?;
+			let read = self.append_block("json_member");
+			let next = self.append_block("json_next_member");
+			self.builder.build_conditional_branch(is, read, next)?;
+			self.builder.position_at_end(read);
+			let data = match self.json_member_kind(nominal, index) {
+				b'e' | b'l' => None,
+				kind => {
+					let source = if kind == b'r' {
+						tree
+					} else {
+						let name = self.constant_bytes(b"value");
+						let length = self.usize.const_int(5, false);
+						self.call_value(
+							self.runtime.function("fa_json_field")?,
+							&[tree.into(), name.into(), length.into()],
+						)?
+						.into_pointer_value()
+					};
+					let data_type = self.types().payload(nominal, index);
+					Some(self.json_value(source, data_type, call)?)
+				}
+			};
+			let member = self.build_member(nominal, index, data, call)?;
+			let member = self.take(member, None)?;
+			let member = self.convert(member, repr, call.index())?;
+			self.builder
+				.build_store(slot.pointer, member.value.expect("a member"))?;
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(next);
+		}
+		self.builder.build_unreachable()?;
+		self.builder.position_at_end(join);
+		self.load(slot)
+	}
+
 	/// The body of a reader.
 	fn json_build(
 		&mut self,
@@ -308,6 +492,42 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		call: NodeId,
 	) -> Result<Val<'ctx>, Error> {
 		let i64 = self.context.i64_type();
+		if !self.json_members(ty).is_empty() {
+			return self.json_named(tree, ty, repr, call);
+		}
+		// an enumeration: the member the tree names (`fa_json_enum`)
+		if let [(nominal, _), ..] = self.json_enum_members(ty).as_slice() {
+			let nominal = *nominal;
+			let mut schema = Vec::new();
+			if !self.json_schema(ty, 0, &mut schema) {
+				return Err(self.unsupported(call.index(), "`Json.parse` of this enumeration"));
+			}
+			schema.push(0);
+			let schema = self.constant_bytes(&schema);
+			let position = self
+				.call_value(
+					self.runtime.function("fa_json_enum")?,
+					&[tree.into(), schema.into()],
+				)?
+				.into_int_value();
+			// the position among the members of the type → the member's index
+			let i32 = self.context.i32_type();
+			let mut value = i32.const_zero();
+			for (at, (_, index)) in self.json_enum_members(ty).into_iter().enumerate().rev() {
+				let is = self.builder.build_int_compare(
+					IntPredicate::EQ,
+					position,
+					position.get_type().const_int(at as u64, false),
+					"",
+				)?;
+				value = self
+					.builder
+					.build_select(is, i32.const_int(u64::from(index), false), value, "")?
+					.into_int_value();
+			}
+			let member = Val::new(Repr::Enum(nominal), value);
+			return self.convert(member, repr, call.index());
+		}
 		match self.types().kind(ty) {
 			TypeKind::Boolean | TypeKind::BoolLit(_) => {
 				let flag = self
@@ -435,6 +655,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if !repr.has_value() {
 				continue;
 			}
+			let field_name = name;
 			let name = self.types().syms.resolve(name).to_string();
 			let bytes = self.constant_bytes(name.as_bytes());
 			let length = self.usize.const_int(name.len() as u64, false);
@@ -446,7 +667,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.union_members(&field_type)
 				.contains(&TypeId::NONE);
 			let default = self.json_default(ty, &name);
-			let value = if optional || default.is_some() {
+			// a type of another file: the constant its file evaluated
+			let constant = self.analysis.json_defaults.get(&(ty, field_name)).copied();
+			let value = if optional || default.is_some() || constant.is_some() {
 				// absent: its default value, else `none`
 				let slot = self.alloca(repr, "json_field")?;
 				let absent = self.builder.build_is_null(member, "")?;
@@ -456,12 +679,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder
 					.build_conditional_branch(absent, missing, present)?;
 				self.builder.position_at_end(missing);
-				let initial = match default {
-					Some(default) => {
+				let initial = match (default, constant) {
+					(Some(default), _) => {
 						let value = self.expr(default)?;
 						self.owned_as(value, repr, Some(default))?
 					}
-					None => {
+					(None, Some(constant)) => {
+						let Some(value) = self
+							.analysis
+							.field_constants
+							.get(constant as usize)
+							.cloned()
+						else {
+							return Err(self.unsupported(call.index(), "this default value"));
+						};
+						let built = self.constant_value(&value, field_type, call)?;
+						self.owned_as(built, repr, None)?
+					}
+					(None, None) => {
 						let none = Val {
 							repr: Repr::None,
 							value: None,
@@ -663,6 +898,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.json_write(value, target, call)
 			}
 			TypeKind::Union(_) => self.json_write_union(value, ty, call),
+			TypeKind::NamedUnion(..) | TypeKind::Member(..) => {
+				self.json_write_named(value, ty, call)
+			}
+			TypeKind::Enum(..) | TypeKind::EnumMember(..) => self.json_write_enum(value, ty),
 			TypeKind::Object(_)
 			| TypeKind::Collection(
 				CollKind::Array | CollKind::GrowingArray | CollKind::Map | CollKind::GrowingMap,
@@ -753,6 +992,111 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => self.json_write_scalar(value, call),
 		}
+	}
+
+	/// A member of an enumeration: its pinned value, else its name.
+	fn json_write_enum(&mut self, value: Val<'ctx>, ty: TypeId) -> Result<(), Error> {
+		let index = value.int();
+		let join = self.append_block("json_written");
+		for (nominal, member) in self.json_enum_members(ty) {
+			let is = self.builder.build_int_compare(
+				IntPredicate::EQ,
+				index,
+				index.get_type().const_int(u64::from(member), false),
+				"",
+			)?;
+			let taken = self.append_block("json_enum");
+			let next = self.append_block("json_next");
+			self.builder.build_conditional_branch(is, taken, next)?;
+			self.builder.position_at_end(taken);
+			let text = match self.json_pinned(nominal, member) {
+				Some(pinned) => pinned.to_string(),
+				None => json_quoted(self.types().member_name(nominal, member)),
+			};
+			self.json_text(&text)?;
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(next);
+		}
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(join);
+		Ok(())
+	}
+
+	/// A member of a named union: tagged by `"type"`, its data next to it
+	/// (an object) or under `"value"`, a literal member as itself.
+	fn json_write_named(
+		&mut self,
+		value: Val<'ctx>,
+		ty: TypeId,
+		call: NodeId,
+	) -> Result<(), Error> {
+		let members = self.json_members(ty);
+		let id = match members.as_slice() {
+			[_] => None,
+			_ => Some(self.box_id(value)?),
+		};
+		let join = self.append_block("json_written");
+		for (nominal, index) in members {
+			let next = self.append_block("json_next");
+			if let Some(id) = id {
+				let expected = id
+					.get_type()
+					.const_int(self.member_id(nominal, index), false);
+				let is = self
+					.builder
+					.build_int_compare(IntPredicate::EQ, id, expected, "")?;
+				let taken = self.append_block("json_member");
+				self.builder.build_conditional_branch(is, taken, next)?;
+				self.builder.position_at_end(taken);
+			}
+			let name = self.types().member_name(nominal, index).to_string();
+			let mut tag = String::from("{\"type\":");
+			tag.push_str(&json_quoted(&name));
+			let data_type = self.types().payload(nominal, index);
+			match self.json_member_kind(nominal, index) {
+				b'e' => self.json_text(&format!("{tag}}}"))?,
+				b'l' => {
+					let literal = match self.types().kind(data_type) {
+						TypeKind::StringLit(text) => json_quoted(self.types().syms.resolve(text)),
+						TypeKind::BoolLit(value) => value.to_string(),
+						_ => self
+							.types()
+							.as_int(data_type)
+							.map_or("null".to_string(), |int| int.min.to_string()),
+					};
+					self.json_text(&literal)?;
+				}
+				kind => {
+					let repr = self.repr_of(data_type, call.index())?;
+					let boxed = self.union_view(value)?;
+					let structure = self.box_type(Some(repr));
+					let pointer = boxed.value.expect("a box").into_pointer_value();
+					let data_pointer = self.builder.build_struct_gep(structure, pointer, 1, "")?;
+					let loaded = self
+						.builder
+						.build_load(self.llvm_type(repr), data_pointer, "")?;
+					let data = Val::new(repr, loaded);
+					if kind == b'r' {
+						// the fields after `"type"`
+						self.json_text(&tag)?;
+						let first = self.json_first()?;
+						self.builder
+							.build_store(first, self.context.bool_type().const_zero())?;
+						self.json_write_fields(first, data, data_type, call)?;
+						self.json_text("}")?;
+					} else {
+						self.json_text(&format!("{tag},\"value\":"))?;
+						self.json_write(data, data_type, call)?;
+						self.json_text("}")?;
+					}
+				}
+			}
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(next);
+		}
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(join);
+		Ok(())
 	}
 
 	/// The writer of an object or collection type: `fa.json.write(value)`.
@@ -904,16 +1248,43 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<(), Error> {
 		self.json_text("{")?;
 		let first = self.json_first()?;
+		self.json_write_fields(first, value, ty, call)?;
+		self.json_text("}")
+	}
+
+	/// The fields of an object, `"<name>":<value>` each (`first`: no comma yet).
+	fn json_write_fields(
+		&mut self,
+		first: PointerValue<'ctx>,
+		value: Val<'ctx>,
+		ty: TypeId,
+		call: NodeId,
+	) -> Result<(), Error> {
 		let structure = value.value.expect("an object").into_struct_value();
-		for (name, index, field_type) in self.printed_fields(ty) {
-			let repr = self.field_repr(ty, index as usize, call.index())?;
+		// in declaration order (`json_fields`)
+		let shape: Vec<fa_analyzer::ids::Sym> = self
+			.types()
+			.fields_of(ty)
+			.iter()
+			.map(|field| field.name)
+			.collect();
+		for (name, field_type) in self.json_fields(ty) {
+			let Some(index) = shape
+				.iter()
+				.position(|&field| self.types().syms.resolve(field) == name)
+			else {
+				continue;
+			};
+			let repr = self.field_repr(ty, index, call.index())?;
 			if !repr.has_value() {
 				continue;
 			}
-			let raw = self.builder.build_extract_value(structure, index, "")?;
+			let raw = self
+				.builder
+				.build_extract_value(structure, index as u32, "")?;
 			self.json_write_member(first, None, &name, Val::new(repr, raw), field_type, call)?;
 		}
-		self.json_text("}")
+		Ok(())
 	}
 
 	fn json_write_array(
@@ -967,4 +1338,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})?;
 		self.json_text("}")
 	}
+}
+
+/// A text as a JSON string (the names of members, literals).
+fn json_quoted(text: &str) -> String {
+	let mut quoted = String::from('"');
+	for character in text.chars() {
+		match character {
+			'"' => quoted.push_str("\\\""),
+			'\\' => quoted.push_str("\\\\"),
+			'\n' => quoted.push_str("\\n"),
+			'\t' => quoted.push_str("\\t"),
+			'\r' => quoted.push_str("\\r"),
+			other if (other as u32) < 0x20 => quoted.push_str(&format!("\\u{:04x}", other as u32)),
+			other => quoted.push(other),
+		}
+	}
+	quoted.push('"');
+	quoted
 }

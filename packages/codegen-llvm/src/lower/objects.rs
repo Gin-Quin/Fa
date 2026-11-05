@@ -448,7 +448,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The id of the member in a box.
-	fn box_id(&self, value: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
+	pub(crate) fn box_id(&self, value: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
 		if matches!(value.repr, Repr::InlineUnion(_)) {
 			return Ok(self
 				.builder
@@ -1179,7 +1179,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.append_value(prefix, node)?;
 			let repr = self.repr_of(field_type, node.index())?;
 			let raw = self.builder.build_extract_value(structure, index, "")?;
-			self.append_nested(Val::new(repr, raw), node)?;
+			self.append_nested_of(Val::new(repr, raw), field_type, node)?;
 		}
 		let suffix = self.string_constant(" }");
 		self.append_value(suffix, node)
@@ -1666,7 +1666,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(slot)
 			}
 			View::Group(inner) => self.place(inner),
-			View::Index { target, index } => match self.tuple_place(target, index)? {
+			View::Index { target, index } => match self.tuple_place(node, target, index)? {
 				Some(slot) => Ok(slot),
 				None if matches!(self.node_repr(target)?, Repr::Map(_)) => {
 					let map = self.expr(target)?;

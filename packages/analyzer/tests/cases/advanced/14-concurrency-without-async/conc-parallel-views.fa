@@ -30,4 +30,5 @@ let text = numbers.parallel().reduce((joined, number) => "{joined}{number}", "")
 let view = numbers.parallel() -- error CONC001
 let first = numbers.parallel().find((number) => number > 0) -- error CONC001
 mutable scores: Map<String, Integer> = [("a", 1)]
-let values = scores.parallel().map((name, score) => score) -- error AN001
+let doubledScores = scores.parallel().map((name, score) => score * 2)
+let scoreTotal = scores.parallel().reduce((sum, name, score) => sum + score, 0) -- error CONC001

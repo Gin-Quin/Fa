@@ -1416,6 +1416,12 @@ impl Walker<'_> {
 	fn module_path_symbol(&mut self, value: NodeId) -> Option<SymbolId> {
 		let tree = Arc::clone(&self.tree);
 		match syntax::view(&tree, value) {
+			View::Call { .. } => {
+				let symbol = self.import_proxy(value)?;
+				self.set_resolution(value, Resolution::Local(symbol));
+				self.set_type(value, TypeId::UNKNOWN);
+				self.is_namespace(symbol).then_some(symbol)
+			}
 			View::Name(_) => {
 				let symbol = self.namespace_target(value)?;
 				self.set_resolution(value, Resolution::Local(symbol));
@@ -1451,8 +1457,19 @@ impl Walker<'_> {
 			}
 			View::Access { target, .. } => self.namespace_target(target).is_some(),
 			View::Group(inner) => self.is_module_path(inner),
+			View::Call { .. } => self.import_proxy(value).is_some(),
 			_ => false,
 		}
+	}
+
+	/// The proxy of the module an `@import("source")` designates: `fa`
+	/// resolved its source (scan.rs, `import_name`).
+	pub(super) fn import_proxy(&mut self, value: NodeId) -> Option<SymbolId> {
+		let tree = Arc::clone(&self.tree);
+		let source = crate::scan::import_source(&tree, value)?;
+		let sym = self.s.types.syms.intern(&crate::scan::import_name(source));
+		let symbol = self.a.symbols.lookup(self.body.scope, sym)?;
+		self.modules.proxies.contains_key(&symbol).then_some(symbol)
 	}
 
 	/// `use Name = path`: a name alias of a module path.
@@ -1464,6 +1481,14 @@ impl Walker<'_> {
 					// a file's export: the proxy itself
 					let sym = w.s.types.syms.intern(tree.name(target_name));
 					let symbol = w.a.symbols.lookup(w.body.scope, sym);
+					if let Some(symbol) = symbol {
+						w.set_resolution(value, Resolution::Local(symbol));
+					}
+					symbol
+				}
+				// `use weather = @import("…")`: the proxy of its source
+				View::Call { .. } => {
+					let symbol = w.import_proxy(value);
 					if let Some(symbol) = symbol {
 						w.set_resolution(value, Resolution::Local(symbol));
 					}

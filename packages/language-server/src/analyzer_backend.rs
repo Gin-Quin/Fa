@@ -232,6 +232,33 @@ pub struct Package {
 	/// analyzed without them meanwhile, and its documents show only their
 	/// syntax errors and a note.
 	resolving: bool,
+	/// The configuration files on the disk it was loaded with
+	/// ([`configuration_fingerprint`]): a save, or a change on the disk,
+	/// that leaves them the same doesn't load it again.
+	fingerprint: u64,
+}
+
+/// The fingerprint of the files that configure a package and its
+/// dependencies on the disk: its `package.fa`, `dependencies.fa` and
+/// `dependencies.lock`, and those of its workspace (with `workspace.fa`).
+fn configuration_fingerprint(root: &Path) -> u64 {
+	use std::hash::{Hash, Hasher};
+	let mut hasher = std::collections::hash_map::DefaultHasher::new();
+	let mut folders = vec![root.to_path_buf()];
+	if let Some(workspace) = root.parent().and_then(fa_codebase_parser::find_workspace) {
+		folders.push(workspace);
+	}
+	for folder in folders {
+		for name in [
+			"package.fa",
+			"workspace.fa",
+			"dependencies.fa",
+			"dependencies.lock",
+		] {
+			std::fs::read(folder.join(name)).ok().hash(&mut hasher);
+		}
+	}
+	hasher.finish()
 }
 
 /// The module system of a package's runs given to `fa::editor_session`:
@@ -286,6 +313,7 @@ impl Package {
 			resolution_error,
 			resolution_warnings,
 			resolving,
+			fingerprint: configuration_fingerprint(root),
 		}
 	}
 
@@ -453,15 +481,29 @@ pub struct AnalyzerBackend {
 	/// Whether to publish `AN001` ("not supported yet by the analyzer"). Off by
 	/// default: it says nothing about the user's code.
 	pub show_unsupported: bool,
-	/// The resolutions of dependencies running in the background: the
-	/// generation of the latest one of each package (an older one's result
-	/// is dropped).
-	resolutions: HashMap<PathBuf, u64>,
+	/// The resolutions of dependencies running in the background, one per
+	/// package at most: a load with the same configuration waits for the
+	/// one running, another one starts when it ends.
+	resolutions: HashMap<PathBuf, Flight>,
 	generation: u64,
 	/// The number of background resolutions whose result wasn't taken yet.
 	running: usize,
 	/// The results of the background resolutions.
 	resolved: (Sender<Resolved>, Receiver<Resolved>),
+	/// How many times a package was loaded (scanned, its dependencies
+	/// resolved), for tests.
+	pub loads: usize,
+}
+
+/// The resolution of a package's dependencies running in the background.
+struct Flight {
+	generation: u64,
+	/// The configuration of the latest load ([`configuration_fingerprint`]).
+	fingerprint: u64,
+	/// The configuration changed since it started: its result is dropped,
+	/// and, if the package still waits, the latest configuration is
+	/// resolved when it ends.
+	outdated: bool,
 }
 
 /// The result of a resolution of dependencies run in the background.
@@ -497,6 +539,7 @@ impl AnalyzerBackend {
 			generation: 0,
 			running: 0,
 			resolved: std::sync::mpsc::channel(),
+			loads: 0,
 		}
 	}
 
@@ -505,34 +548,60 @@ impl AnalyzerBackend {
 	/// thread, and the package waits for it (`poll`) without its
 	/// dependencies.
 	fn load_package(&mut self, root: &Path, texts: Texts) -> Package {
-		// a newer load replaces the resolution running for the package
-		self.resolutions.remove(root);
+		self.loads += 1;
+		let fingerprint = configuration_fingerprint(root);
+		// the resolution running for the same configuration gives the result
+		if let Some(flight) = self.resolutions.get_mut(root) {
+			if flight.fingerprint == fingerprint {
+				// the resolution running (or the one queued after it)
+				return Package::new(root, texts, &self.cancel, None);
+			}
+			flight.outdated = true;
+			flight.fingerprint = fingerprint;
+		}
 		let found = fa::offline_editor_session(root, overlay(&texts));
-		if found.is_none() {
-			self.generation += 1;
-			let generation = self.generation;
-			self.resolutions.insert(root.to_path_buf(), generation);
-			let sender = self.resolved.0.clone();
-			let (root, texts) = (root.to_path_buf(), Arc::clone(&texts));
-			std::thread::Builder::new()
-				.name("fa-dependencies".to_string())
-				.spawn(move || {
-					let found = catch_unwind(AssertUnwindSafe(|| {
-						fa::editor_session(&root, overlay(&texts))
-					}))
-					.unwrap_or_else(|_| {
-						Err("error: the resolution of the dependencies failed".to_string())
-					});
-					let _ = sender.send(Resolved {
-						root,
-						generation,
-						found,
-					});
-				})
-				.expect("the thread of the resolution should start");
-			self.running += 1;
+		match (&found, self.resolutions.get(root)) {
+			// another configuration: started when the one running ends
+			// (a result found from the cache makes it useless)
+			(None, Some(_)) => {}
+			(None, None) => self.start_resolution(root, &texts, fingerprint),
+			// resolved from the cache: the one running is useless
+			(Some(_), _) => {}
 		}
 		Package::new(root, texts, &self.cancel, found)
+	}
+
+	/// Starts resolving the dependencies of a package on a thread of its own.
+	fn start_resolution(&mut self, root: &Path, texts: &Texts, fingerprint: u64) {
+		self.generation += 1;
+		let generation = self.generation;
+		self.resolutions.insert(
+			root.to_path_buf(),
+			Flight {
+				generation,
+				fingerprint,
+				outdated: false,
+			},
+		);
+		let sender = self.resolved.0.clone();
+		let (root, texts) = (root.to_path_buf(), Arc::clone(texts));
+		std::thread::Builder::new()
+			.name("fa-dependencies".to_string())
+			.spawn(move || {
+				let found = catch_unwind(AssertUnwindSafe(|| {
+					fa::editor_session(&root, overlay(&texts))
+				}))
+				.unwrap_or_else(|_| {
+					Err("error: the resolution of the dependencies failed".to_string())
+				});
+				let _ = sender.send(Resolved {
+					root,
+					generation,
+					found,
+				});
+			})
+			.expect("the thread of the resolution should start");
+		self.running += 1;
 	}
 
 	/// Loads packages again (their configuration or their files changed),
@@ -543,6 +612,7 @@ impl AnalyzerBackend {
 			let Some(old) = self.packages.remove(&root) else {
 				continue;
 			};
+
 			let mut package = self.load_package(&root, old.texts);
 			package.run(None);
 			self.packages.insert(root.clone(), package);
@@ -551,6 +621,16 @@ impl AnalyzerBackend {
 		changed.sort();
 		changed.dedup();
 		changed
+	}
+
+	/// Whether the configuration of a package changed on the disk since it
+	/// was loaded (or its resolution failed, to try again): the save of a
+	/// configuration file and its change on the disk load it once.
+	fn configuration_changed(&self, root: &Path) -> bool {
+		self.packages.get(root).is_some_and(|package| {
+			package.resolution_error.is_some()
+				|| package.fingerprint != configuration_fingerprint(root)
+		})
 	}
 
 	/// The open documents of a package.
@@ -695,8 +775,10 @@ impl AnalyzerBackend {
 				package: Some(root.clone()),
 			},
 		);
+		let configuration = uri.to_file_path().is_ok_and(|path| is_configuration(&path));
 		let reload = self.packages.get(&root).is_none_or(|package| {
-			!package.knows(&module) || package.outgrown(self.rebuild_minimum)
+			// a configuration file is read again when it is saved
+			(!package.knows(&module) && !configuration) || package.outgrown(self.rebuild_minimum)
 		});
 		if reload {
 			// a new package, a file the last scan didn't see, or a store
@@ -1080,7 +1162,7 @@ impl AnalysisBackend for AnalyzerBackend {
 		let roots: Vec<PathBuf> = self
 			.packages
 			.keys()
-			.filter(|root| root.starts_with(&folder))
+			.filter(|root| root.starts_with(&folder) && self.configuration_changed(root))
 			.cloned()
 			.collect();
 		self.reload_packages(roots)
@@ -1100,7 +1182,9 @@ impl AnalysisBackend for AnalyzerBackend {
 				reload.extend(
 					self.packages
 						.keys()
-						.filter(|root| root.starts_with(&folder))
+						.filter(|root| {
+							root.starts_with(&folder) && self.configuration_changed(root)
+						})
 						.cloned(),
 				);
 				continue;
@@ -1185,14 +1269,28 @@ impl AnalysisBackend for AnalyzerBackend {
 		let mut changed = Vec::new();
 		while let Ok(resolved) = self.resolved.1.try_recv() {
 			self.running -= 1;
-			if self.resolutions.get(&resolved.root) != Some(&resolved.generation) {
-				// a newer load of the package, or the package was closed
+			let Some(flight) = self
+				.resolutions
+				.get(&resolved.root)
+				.filter(|flight| flight.generation == resolved.generation)
+			else {
+				// the package was closed
 				continue;
-			}
+			};
+			let (outdated, fingerprint) = (flight.outdated, flight.fingerprint);
 			self.resolutions.remove(&resolved.root);
 			let Some(old) = self.packages.remove(&resolved.root) else {
 				continue;
 			};
+			if outdated {
+				// the configuration changed meanwhile: resolve it now, unless
+				// the package doesn't wait anymore
+				if old.resolving {
+					self.start_resolution(&resolved.root, &old.texts, fingerprint);
+				}
+				self.packages.insert(resolved.root.clone(), old);
+				continue;
+			}
 			let mut package = Package::new(
 				&resolved.root,
 				old.texts,
@@ -1640,6 +1738,73 @@ mod tests {
 	/// A configuration file changed on the disk loads the package again
 	/// (its dependencies resolved again); a file the package doesn't read
 	/// changes nothing.
+	/// One resolution in the background per package: a load with the same
+	/// configuration waits for it, and a changed configuration is resolved
+	/// once the running one ends (a remote source that is a named pipe
+	/// blocks like a slow network until the test writes it).
+	#[cfg(unix)]
+	#[test]
+	fn one_background_resolution_runs_per_package() {
+		let directory = tempfile::TempDir::new().unwrap();
+		let root = directory.path().canonicalize().unwrap();
+		let pipe = root.join("slow.fa");
+		assert!(
+			std::process::Command::new("mkfifo")
+				.arg(&pipe)
+				.status()
+				.unwrap()
+				.success()
+		);
+		let declared =
+			|key: &str| format!("export = {{ {key} = \"file://{}\" }}\n", pipe.display());
+		let app = root.join("app");
+		write_files(
+			&app,
+			&[
+				("package.fa", "export = { name = \"app\" }\n"),
+				("dependencies.fa", &declared("slow")),
+				(
+					"application/main.fa",
+					"export function = () => {\n\tconsole.log(1)\n}\n",
+				),
+			],
+		);
+		let main = Url::from_file_path(app.join("application/main.fa")).unwrap();
+		let mut backend = AnalyzerBackend::new();
+		backend.set_document(
+			&main,
+			Arc::from("export function = () => {\n\tconsole.log(1)\n}\n"),
+		);
+		assert_eq!(backend.running, 1);
+		// the same configuration: the resolution running gives the result
+		let texts = Arc::clone(&backend.packages[&app].texts);
+		let package = backend.load_package(&app, texts);
+		backend.packages.insert(app.clone(), package);
+		assert_eq!(backend.running, 1);
+		// another configuration: resolved after the one running
+		std::fs::write(app.join("dependencies.fa"), declared("other")).unwrap();
+		let uri = Url::from_file_path(app.join("dependencies.fa")).unwrap();
+		backend.saved(&uri);
+		assert_eq!(backend.running, 1);
+		assert!(backend.resolutions[&app].outdated);
+		// the slow source arrives: the outdated result starts the next one
+		std::fs::write(&pipe, "export = 1\n").unwrap();
+		let deadline = Instant::now() + Duration::from_secs(20);
+		while backend
+			.resolutions
+			.get(&app)
+			.is_some_and(|flight| flight.outdated)
+			&& Instant::now() < deadline
+		{
+			backend.poll();
+			std::thread::sleep(Duration::from_millis(5));
+		}
+		assert_eq!(backend.running, 1);
+		std::fs::write(&pipe, "export = 1\n").unwrap();
+		backend.wait_for_background(Duration::from_secs(20));
+		assert_eq!(backend.running, 0);
+	}
+
 	#[test]
 	fn a_configuration_changed_on_the_disk_reloads_the_package() {
 		let directory = tempfile::TempDir::new().unwrap();
@@ -1699,6 +1864,17 @@ mod tests {
 		let changed = backend.files_changed(&[event(&greet, FileChangeType::CHANGED)]);
 		assert_eq!(changed, vec![main.clone()]);
 		assert!(!backend.diagnostics(&main).is_empty());
+		// the save of the same file, reported too: loaded once
+		let loads = backend.loads;
+		let uri = Url::from_file_path(&dependencies).unwrap();
+		assert!(backend.saved(&uri).is_empty());
+		// typing in a configuration file doesn't load the package again
+		backend.set_document(&uri, Arc::from("export = {\n\tshared = \"../sha"));
+		backend.set_document(
+			&uri,
+			Arc::from("export = {\n\tshared = \"../shared2\"\n}\n"),
+		);
+		assert_eq!(backend.loads, loads);
 	}
 
 	#[test]

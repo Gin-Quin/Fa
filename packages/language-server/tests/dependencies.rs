@@ -122,7 +122,15 @@ fn the_dependencies_of_a_package_are_resolved_like_fa_check() {
 		"{:?}",
 		backend.diagnostics(&main)
 	);
-	// in the cache now: a new load needs no network
+	// in the cache now: a new load needs no network (a save that changes
+	// nothing on the disk loads nothing)
+	let dependencies_url = Url::from_file_path(package.join("dependencies.fa")).unwrap();
+	assert!(backend.saved(&dependencies_url).is_empty());
+	std::fs::write(
+		package.join("dependencies.fa"),
+		format!("{dependencies}-- changed\n"),
+	)
+	.unwrap();
 	let dependencies_url = Url::from_file_path(package.join("dependencies.fa")).unwrap();
 	assert_eq!(backend.saved(&dependencies_url), vec![main.clone()]);
 	assert!(!backend.has_background_work());

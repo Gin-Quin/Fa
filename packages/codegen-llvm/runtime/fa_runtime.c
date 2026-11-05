@@ -2164,41 +2164,118 @@ static void append_code_point(uint32_t code) {
 	}
 }
 
-/// `toUpperCase` (`upper` 1) and `toLowerCase` (0): ASCII, Latin-1, Greek
-/// and Cyrillic, and `ß` → `SS` (the full Unicode tables come with the
-/// standard library).
-FA_EXPORT void fa_string_case(const uint8_t *bytes, size_t length, int32_t upper, FaString *out) {
-	fa_b_reset();
-	size_t index = 0;
+// ── case conversion ─────────────────────────────────────────────────────
+
+// The full Unicode tables, generated from the JavaScript engine's by
+// `case_tables.js`: native code converts case as JavaScript does.
+#include "fa_case_tables.h"
+
+#define COUNT_OF(table) (sizeof(table) / sizeof((table)[0]))
+
+/// The single code point a code point maps to (itself when unchanged).
+static uint32_t case_run(uint32_t code, const CaseRun *runs, size_t count) {
+	size_t low = 0;
+	size_t high = count;
+	while (low < high) {
+		size_t middle = (low + high) / 2;
+		const CaseRun *run = &runs[middle];
+		if (code < run->first) {
+			high = middle;
+		} else if (code >= run->first + (uint32_t)run->count * run->stride) {
+			low = middle + 1;
+		} else {
+			if ((code - run->first) % run->stride == 0) {
+				return (uint32_t)((int32_t)code + run->delta);
+			}
+			return code;
+		}
+	}
+	return code;
+}
+
+/// The UTF-8 text a code point maps to when it maps to several, or null.
+static const char *case_special(uint32_t code, const CaseSpecial *specials, size_t count) {
+	size_t low = 0;
+	size_t high = count;
+	while (low < high) {
+		size_t middle = (low + high) / 2;
+		if (code < specials[middle].code) {
+			high = middle;
+		} else if (code > specials[middle].code) {
+			low = middle + 1;
+		} else {
+			return specials[middle].text;
+		}
+	}
+	return 0;
+}
+
+/// Whether a capital sigma at `start..end` ends a word (Unicode's
+/// Final_Sigma): a cased letter before it and none after it, skipping the
+/// case-ignorable code points.
+static int final_sigma(const uint8_t *bytes, size_t length, size_t start, size_t end) {
+	int before = 0;
+	size_t index = start;
+	while (index > 0) {
+		size_t previous = index - 1;
+		while (previous > 0 && (bytes[previous] & 0xC0) == 0x80) {
+			previous -= 1;
+		}
+		size_t cursor = previous;
+		uint32_t code = decode(bytes, length, &cursor);
+		index = previous;
+		if (!in_ranges(code, CASE_IGNORABLE, COUNT_OF(CASE_IGNORABLE))) {
+			before = in_ranges(code, CASED, COUNT_OF(CASED));
+			break;
+		}
+	}
+	if (!before) {
+		return 0;
+	}
+	index = end;
 	while (index < length) {
 		uint32_t code = decode(bytes, length, &index);
-		if (upper) {
-			if ((code >= 'a' && code <= 'z') || (code >= 0xE0 && code <= 0xFE && code != 0xF7) ||
-			    (code >= 0x3B1 && code <= 0x3C9 && code != 0x3C2) || (code >= 0x430 && code <= 0x44F)) {
-				code -= 0x20;
-			} else if (code >= 0x450 && code <= 0x45F) {
-				code -= 0x50;
-			} else if (code == 0xFF) {
-				code = 0x178;
-			} else if (code == 0xB5) {
-				code = 0x39C;
-			} else if (code == 0x3C2) {
-				code = 0x3A3;
-			} else if (code == 0xDF) {
-				append_c("SS");
-				continue;
-			}
-		} else {
-			if ((code >= 'A' && code <= 'Z') || (code >= 0xC0 && code <= 0xDE && code != 0xD7) ||
-			    (code >= 0x391 && code <= 0x3A9 && code != 0x3A2) || (code >= 0x410 && code <= 0x42F)) {
-				code += 0x20;
-			} else if (code >= 0x400 && code <= 0x40F) {
-				code += 0x50;
-			} else if (code == 0x178) {
-				code = 0xFF;
-			}
+		if (!in_ranges(code, CASE_IGNORABLE, COUNT_OF(CASE_IGNORABLE))) {
+			return !in_ranges(code, CASED, COUNT_OF(CASED));
 		}
-		append_code_point(code);
+	}
+	return 1;
+}
+
+/// `toUpperCase` (`upper` 1) and `toLowerCase` (0), with the full Unicode
+/// tables: the mappings to several code points (`ß` → `SS`) and the final
+/// sigma included. ASCII text takes a fast path.
+FA_EXPORT void fa_string_case(const uint8_t *bytes, size_t length, int32_t upper, FaString *out) {
+	fa_b_reset();
+	const CaseRun *runs = upper ? UPPER_RUNS : LOWER_RUNS;
+	size_t run_count = upper ? COUNT_OF(UPPER_RUNS) : COUNT_OF(LOWER_RUNS);
+	const CaseSpecial *specials = upper ? UPPER_SPECIAL : LOWER_SPECIAL;
+	size_t special_count = upper ? COUNT_OF(UPPER_SPECIAL) : COUNT_OF(LOWER_SPECIAL);
+	size_t index = 0;
+	while (index < length) {
+		uint8_t byte = bytes[index];
+		if (byte < 0x80) {
+			if (upper && byte >= 'a' && byte <= 'z') {
+				byte -= 0x20;
+			} else if (!upper && byte >= 'A' && byte <= 'Z') {
+				byte += 0x20;
+			}
+			append_byte(byte);
+			index += 1;
+			continue;
+		}
+		size_t start = index;
+		uint32_t code = decode(bytes, length, &index);
+		if (!upper && code == 0x3A3) {
+			append_code_point(final_sigma(bytes, length, start, index) ? 0x3C2 : 0x3C3);
+			continue;
+		}
+		const char *special = case_special(code, specials, special_count);
+		if (special != 0) {
+			append_c(special);
+			continue;
+		}
+		append_code_point(case_run(code, runs, run_count));
 	}
 	fa_b_take(out);
 }

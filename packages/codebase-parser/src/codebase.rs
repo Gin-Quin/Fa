@@ -545,6 +545,76 @@ impl Codebase {
 		Ok((codebase, index))
 	}
 
+	/// Scans the part of the folder of a standalone file that the file can
+	/// reach: the files and folders of the folder whose names its files
+	/// mention, transitively (a folder mentioned: all its files). A large
+	/// folder, or one holding other projects, is not read whole.
+	pub fn scan_standalone_reached(file: &Path) -> io::Result<(Codebase, usize)> {
+		let directory = match file.parent() {
+			Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+			_ => PathBuf::from("."),
+		};
+		let file_name = file
+			.file_name()
+			.map(|name| name.to_string_lossy().to_string())
+			.unwrap_or_default();
+		// the entries of the folder by the name a file mentions them with
+		// (`api.foreign.fa`: `api`), not yet reached
+		let mut entries: BTreeMap<String, Vec<(String, bool)>> = BTreeMap::new();
+		for entry in fs::read_dir(&directory)?.filter_map(Result::ok) {
+			let name = entry.file_name().to_string_lossy().to_string();
+			let Ok(kind) = entry.file_type() else {
+				continue;
+			};
+			if name.starts_with('.') || name == file_name {
+				continue;
+			}
+			let folder = kind.is_dir() && !SKIPPED_FOLDERS.contains(&name.as_str());
+			if folder || (kind.is_file() && name.ends_with(".fa")) {
+				let key = name.split('.').next().unwrap_or_default().to_string();
+				entries.entry(key).or_default().push((name, folder));
+			}
+		}
+		let mut paths = vec![file_name.clone()];
+		let mut next = 0;
+		while next < paths.len() && !entries.is_empty() && paths.len() < STANDALONE_LIMIT {
+			let text = fs::read_to_string(directory.join(&paths[next])).unwrap_or_default();
+			next += 1;
+			let words: std::collections::HashSet<&str> = text
+				.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+				.filter(|word| !word.is_empty())
+				.collect();
+			let reached: Vec<String> = entries
+				.keys()
+				.filter(|key| words.contains(key.as_str()))
+				.cloned()
+				.collect();
+			for key in reached {
+				for (name, folder) in entries.remove(&key).unwrap_or_default() {
+					if folder {
+						let _ = collect_fa_files(
+							&directory.join(&name),
+							&name,
+							&mut paths,
+							STANDALONE_LIMIT,
+						);
+					} else {
+						paths.push(name);
+					}
+				}
+			}
+		}
+		let codebase = Codebase::from_paths(
+			Layout::Standalone,
+			paths.iter().map(String::as_str),
+			Some(&file_name),
+		);
+		let index = codebase
+			.file_by_path(&file_name)
+			.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "the file is not a .fa file"))?;
+		Ok((codebase, index))
+	}
+
 	/// The index of the file with this relative path.
 	pub fn file_by_path(&self, path: &str) -> Option<usize> {
 		self.files.iter().position(|file| file.path == path)
@@ -967,5 +1037,33 @@ mod tests {
 		let (standalone, index) = Codebase::scan_standalone(&root.join("library/math.fa")).unwrap();
 		assert_eq!(standalone.files[index].path, "math.fa");
 		assert_eq!(standalone.files[index].kind, FileKind::Program);
+	}
+
+	#[test]
+	fn a_standalone_file_reaches_only_the_names_it_mentions() {
+		let root = std::env::temp_dir().join(format!("fa-codebase-reached-{}", std::process::id()));
+		let _ = fs::remove_dir_all(&root);
+		for (path, text) in [
+			("main.fa", "use shapes\nlet x = math.add(1, 2)\n"),
+			("math.fa", "let add = (a, b) => a + b -- uses helper\n"),
+			("helper.fa", "let one = 1\n"),
+			("unrelated.fa", "let z = 0\n"),
+			("shapes/circle.fa", "let r = 1\n"),
+			("project/package.fa", "export = { name = \"other\" }\n"),
+			("project/library/big.fa", "let big = 1\n"),
+		] {
+			let path = root.join(path);
+			fs::create_dir_all(path.parent().unwrap()).unwrap();
+			fs::write(path, text).unwrap();
+		}
+		let (codebase, index) = Codebase::scan_standalone_reached(&root.join("main.fa")).unwrap();
+		let mut paths: Vec<&str> = codebase.files.iter().map(|f| f.path.as_str()).collect();
+		paths.sort_unstable();
+		assert_eq!(
+			paths,
+			["helper.fa", "main.fa", "math.fa", "shapes/circle.fa"]
+		);
+		assert_eq!(codebase.files[index].path, "main.fa");
+		let _ = fs::remove_dir_all(&root);
 	}
 }

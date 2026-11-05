@@ -56,6 +56,7 @@ mod help;
 mod hot;
 mod migrate;
 pub mod native;
+mod offline;
 mod preview;
 mod project;
 mod report;
@@ -66,7 +67,7 @@ mod testing;
 mod timings;
 mod workspace;
 
-pub use project::{EditorSession, editor_session};
+pub use project::{EditorSession, editor_session, offline_editor_session};
 
 use build::*;
 use help::HELP;
@@ -96,6 +97,11 @@ pub fn main(arguments: Vec<OsString>) -> i32 {
 		rest.remove(position);
 		timings::enable();
 	}
+	// one resolution of the dependencies per scope for the whole command
+	// (not while watching: `develop`, `test --watch` see the changes)
+	let _sharing = (matches!(command.to_str(), Some("check" | "build" | "run" | "test"))
+		&& !rest.iter().any(|argument| argument == "--watch"))
+	.then(dependencies::share_resolutions);
 	match command.to_str() {
 		Some("check") => {
 			let code = check(&rest);
@@ -187,7 +193,6 @@ impl Loaded {
 		Ok(Self { inner, file, shown })
 	}
 
-	/// Whether the analysis found errors.
 	/// The C libraries of foreign code for `bun:ffi`:
 	/// `build.link`, a name found in a folder of `build.libraryPaths` as
 	/// the path of its shared library.
@@ -195,6 +200,7 @@ impl Loaded {
 		c_libraries(self.inner.configuration.as_ref(), &self.inner.project.base)
 	}
 
+	/// Whether the analysis found errors.
 	pub(crate) fn has_errors(&self) -> bool {
 		self.inner.has_errors()
 	}
@@ -501,8 +507,13 @@ fn check_one(path: Option<&Path>, format: report::Format) -> i32 {
 			|configuration| configuration.targets.clone(),
 		);
 		for target in targets.iter().filter(|target| *target != "bun") {
-			let Ok(other) = Loaded::load(path, target) else {
-				continue;
+			let other = match Loaded::load(path, target) {
+				Ok(other) => other,
+				Err(message) => {
+					report_target_error(&message, target);
+					errors = true;
+					continue;
+				}
 			};
 			errors |= other.has_errors();
 			report.merge_target(other.report(), target);
@@ -510,6 +521,15 @@ fn check_one(path: Option<&Path>, format: report::Format) -> i32 {
 	}
 	report.print(format);
 	i32::from(errors)
+}
+
+/// Prints the error that stopped the load of a package for another target
+/// than the first one (`DEP009`), naming the target.
+pub(crate) fn report_target_error(message: &str, target: &str) {
+	crate::color::eprintln_message(&format!(
+		"{}\n  note: for the target `{target}`",
+		message.trim_end()
+	));
 }
 
 /// Whether `fa check` and `fa build` of a package run on the parallel

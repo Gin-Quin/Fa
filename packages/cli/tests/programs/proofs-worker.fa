@@ -1,0 +1,26 @@
+-- skip-target: wasm
+-- The proofs of indices (`fa_analyzer::proofs`) and a worker: a position the
+-- worker's own code only counts up is given negative by the file creating
+-- the worker, while the caller waits for its calls. The claims see the
+-- stores of every file: `get` counts it from the end.
+-- file: Reader.worker.fa
+export type = {
+	text: String
+	position: Integer
+
+	function current = (self): Byte => self.text.bytes().get(self.position) ?? 0
+
+	function advance = (self): Byte mutates self => {
+		self.position += 1
+		self.text.bytes().get(self.position) ?? 0
+	}
+}
+-- file: main.fa
+mutable ahead = Reader { text = "abc", position = 0 }
+mutable behind = Reader { text = "xyz", position = 0 - 1 }
+let first = start ahead.advance()
+let last = start behind.current()
+console.log(await first, await last) -- prints: 98 122
+console.log(await behind.advance()) -- prints: 120
+ahead.stop()
+behind.stop()

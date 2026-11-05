@@ -1171,8 +1171,7 @@ pub fn link_program(
 	link::link_objects(target, options, split, &objects, &output, libraries)?;
 	timings.link = start.elapsed();
 	let loader = if target == Target::Wasm {
-		let imports = link::wasm_imports(&output)?;
-		Some(link::write_loader(&output, &imports)?)
+		Some(link::write_loader(&output, options.leak_check)?)
 	} else {
 		None
 	};

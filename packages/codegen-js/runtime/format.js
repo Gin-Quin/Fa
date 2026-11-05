@@ -62,7 +62,7 @@ export function faFormat(value) {
 	return typeof value === "string" ? value : faFormatNested(value);
 }
 
-// @fa-helper faFormatNested deps: faQuote faFormatArray faFormatObject faFormatTagged faFormatMap faFormatSet faFormatRange
+// @fa-helper faFormatNested deps: faQuote faFormatArray faFormatRecord faFormatTagged faFormatMap faFormatSet faFormatRange
 /**
  * The Fa notation of a value nested in a composite, decided from its
  * JavaScript representation: strings are quoted, `undefined` is `none`,
@@ -83,18 +83,19 @@ export function faFormatNested(value) {
 				return "none";
 			}
 			if (Array.isArray(value)) {
-				return faFormatArray(value);
+				return faFormatArray(value, faFormatNested);
 			}
 			// recognized by their tags, so that printing doesn't bring the
 			// collection classes into programs that don't use them
 			switch (/** @type {any} */ (value)[Symbol.toStringTag]) {
 				case "Map":
 				case "fa:HashMap":
-					return faFormatMap(/** @type {Iterable<[unknown, unknown]>} */ (value));
+					// (a cast on a line of its own would read as a doc comment)
+					return faFormatMap(/** @type {any} */ (value), faFormatNested, faFormatNested);
 				case "Set":
 				case "fa:Set":
 				case "fa:ValuePool":
-					return faFormatSet(/** @type {Iterable<unknown>} */ (value));
+					return faFormatSet(/** @type {Iterable<unknown>} */ (value), faFormatNested);
 				case "fa:Range":
 					return faFormatRange(/** @type {any} */ (value));
 			}
@@ -105,7 +106,7 @@ export function faFormatNested(value) {
 			if (typeof (/** @type {any} */ (value).$t) === "string") {
 				return faFormatTagged(value);
 			}
-			return faFormatObject(value);
+			return faFormatRecord(value);
 		case "function":
 			return "<function>";
 		default:
@@ -113,27 +114,27 @@ export function faFormatNested(value) {
 	}
 }
 
-// @fa-helper faFormatOptional deps: faFormatNested
+// @fa-helper faFormatOptional
 /**
  * An optional: `none`, or the value with its formatter.
  * @template T
  * @param {T | undefined} value
- * @param {(value: T) => string} [format]
+ * @param {(value: T) => string} format
  * @returns {string}
  */
-export function faFormatOptional(value, format = faFormatNested) {
+export function faFormatOptional(value, format) {
 	return value === undefined ? "none" : format(value);
 }
 
-// @fa-helper faFormatArray deps: faFormatNested
+// @fa-helper faFormatArray
 /**
  * An array (or growing array): `[1, 2, 3]`, `[]`.
  * @template T
  * @param {Iterable<T>} items
- * @param {(item: T) => string} [format] the formatter of the items
+ * @param {(item: T) => string} format the formatter of the items
  * @returns {string}
  */
-export function faFormatArray(items, format = faFormatNested) {
+export function faFormatArray(items, format) {
 	const parts = [];
 	for (const item of items) {
 		parts.push(format(item));
@@ -141,46 +142,53 @@ export function faFormatArray(items, format = faFormatNested) {
 	return `[${parts.join(", ")}]`;
 }
 
-// @fa-helper faFormatTuple deps: faFormatNested
+// @fa-helper faFormatTuple
 /**
  * A tuple: `(1, "one")`.
  * @param {unknown[]} tuple
- * @param {FaFormatter[]} [formats] the formatter of each item
+ * @param {FaFormatter[]} formats the formatter of each item
  * @returns {string}
  */
 export function faFormatTuple(tuple, formats) {
-	const parts = tuple.map((item, index) => (formats?.[index] ?? faFormatNested)(item));
+	const parts = tuple.map((item, index) => formats[index](item));
 	return `(${parts.join(", ")})`;
 }
 
-// @fa-helper faFormatObject deps: faFormatNested faSides
+// @fa-helper faFormatObject
 /**
- * An object: `{ x = 1, y = 2 }`, `{}`. `fields` lists the fields to print, in
- * declaration order, with their formatters (`[["x", faFormatNested]]`), so
- * that relation fields and private fields are left out; without it, every
- * own property not starting with `$`, in property order. A property ending
- * with `$` is a field named like a property of `Object.prototype`
- * (`constructor$`): it prints without the `$`.
+ * An object of a known type: `{ x = 1, y = 2 }`, `{}`. `fields` lists the
+ * properties to print, in declaration order, with their formatters
+ * (`[["x", String]]`), so that relation fields and private fields are left
+ * out. A property ending with `$` is a field named like a property of
+ * `Object.prototype` (`constructor$`): it prints without the `$`.
  * @param {object} object
- * @param {[string, FaFormatter][]} [fields]
+ * @param {[string, FaFormatter][]} fields
  * @returns {string}
  */
 export function faFormatObject(object, fields) {
 	const record = /** @type {Record<string, unknown>} */ (object);
 	const parts = [];
-	if (fields === undefined) {
-		// relation sides are left out (D21)
-		const sides = /** @type {any} */ (object)[faSides];
-		for (const key of Object.keys(record)) {
-			if (!key.startsWith("$") && !(sides !== undefined && sides.includes(key))) {
-				parts.push(
-					`${key.endsWith("$") ? key.slice(0, -1) : key} = ${faFormatNested(record[key])}`,
-				);
-			}
-		}
-	} else {
-		for (const [key, format] of fields) {
-			parts.push(`${key.endsWith("$") ? key.slice(0, -1) : key} = ${format(record[key])}`);
+	for (const [key, format] of fields) {
+		parts.push(`${key.endsWith("$") ? key.slice(0, -1) : key} = ${format(record[key])}`);
+	}
+	return parts.length === 0 ? "{}" : `{ ${parts.join(", ")} }`;
+}
+
+// @fa-helper faFormatRecord deps: faFormatNested faSides
+/**
+ * An object printed from its representation: every own property not
+ * starting with `$`, in property order, relation sides left out (D21);
+ * `constructor$` prints as `constructor` (see `faFormatObject`).
+ * @param {object} object
+ * @returns {string}
+ */
+export function faFormatRecord(object) {
+	const record = /** @type {Record<string, unknown>} */ (object);
+	const sides = /** @type {any} */ (object)[faSides];
+	const parts = [];
+	for (const key of Object.keys(record)) {
+		if (!key.startsWith("$") && !(sides !== undefined && sides.includes(key))) {
+			parts.push(`${key.endsWith("$") ? key.slice(0, -1) : key} = ${faFormatNested(record[key])}`);
 		}
 	}
 	return parts.length === 0 ? "{}" : `{ ${parts.join(", ")} }`;
@@ -204,7 +212,7 @@ export function faFormatMember(name, payload, object = false) {
 	return object ? `${name} ${payload}` : `${name}(${payload})`;
 }
 
-// @fa-helper faFormatTagged deps: faFormatNested faFormatObject faFormatMember
+// @fa-helper faFormatTagged deps: faFormatNested faFormatRecord faFormatMember
 /**
  * A member of a named union, as compiled: `{ $t: "Shape.Circle", radius: 1 }`
  * (data fields), `{ $t: "UserId.User", $v: 12 }` (data that is not an object)
@@ -217,7 +225,7 @@ export function faFormatTagged(member) {
 		return faFormatMember(member.$t, faFormatNested(member.$v));
 	}
 	const hasFields = Object.keys(member).some((key) => !key.startsWith("$"));
-	return faFormatMember(member.$t, hasFields ? faFormatObject(member) : undefined, true);
+	return faFormatMember(member.$t, hasFields ? faFormatRecord(member) : undefined, true);
 }
 
 // @fa-helper faFormatError deps: faQuote
@@ -247,7 +255,7 @@ export function faFormatError(error) {
 	return parts.length === 0 ? name : `${name} { ${parts.join(", ")} }`;
 }
 
-// @fa-helper faFormatErrorFields deps: faFormatObject faFormatMember
+// @fa-helper faFormatErrorFields deps: faFormatRecord faFormatMember
 /**
  * The `toString()` of an error whose fields hold composite values (objects,
  * collections, unions): each field in Fa notation.
@@ -258,19 +266,19 @@ export function faFormatErrorFields(error) {
 	const type = /** @type {{ faName?: string, name: string }} */ (error.constructor);
 	const name = type.faName ?? type.name;
 	const hasFields = Object.keys(error).some((key) => !key.startsWith("$"));
-	return faFormatMember(name, hasFields ? faFormatObject(error) : undefined, true);
+	return faFormatMember(name, hasFields ? faFormatRecord(error) : undefined, true);
 }
 
-// @fa-helper faFormatMap deps: faFormatNested
+// @fa-helper faFormatMap
 /**
  * A map, like its literal: `[("a", 1), ("b", 2)]`, `[]`.
  * @template K, V
  * @param {Iterable<[K, V]>} map
- * @param {(key: K) => string} [formatKey]
- * @param {(value: V) => string} [formatValue]
+ * @param {(key: K) => string} formatKey
+ * @param {(value: V) => string} formatValue
  * @returns {string}
  */
-export function faFormatMap(map, formatKey = faFormatNested, formatValue = faFormatNested) {
+export function faFormatMap(map, formatKey, formatValue) {
 	const parts = [];
 	for (const [key, value] of map) {
 		parts.push(`(${formatKey(key)}, ${formatValue(value)})`);
@@ -278,15 +286,15 @@ export function faFormatMap(map, formatKey = faFormatNested, formatValue = faFor
 	return `[${parts.join(", ")}]`;
 }
 
-// @fa-helper faFormatSet deps: faFormatArray faFormatNested
+// @fa-helper faFormatSet deps: faFormatArray
 /**
  * A set, like its literal: `[1, 2]`, `[]`.
  * @template T
  * @param {Iterable<T>} set
- * @param {(item: T) => string} [format]
+ * @param {(item: T) => string} format
  * @returns {string}
  */
-export function faFormatSet(set, format = faFormatNested) {
+export function faFormatSet(set, format) {
 	return faFormatArray(set, format);
 }
 

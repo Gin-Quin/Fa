@@ -1,4 +1,7 @@
-// helpers: FaStop, faStop, faOverflow, faCheckInteger, faIsSimpleText, faSegmenter, faCharacters, faStringLength, faPadding, faStringPadStart, faSortIntegers, faSortFloats, faStringCompare, faCompare, faArraySortInPlace, faSortStrings, faQuote, faFormatArray, faSides, faFormatObject, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat
+// helpers: FaStop, faStop, faOverflow, faCheckInteger, faIsSimpleText, faSegmenter, faCharacters, faStringLength, faPadding, faStringPadStart, faSortIntegers, faSortFloats, faStringCompare, faCompare, faArraySortInPlace, faSortStrings, faQuote, faFormatArray
+
+const format = (value) => faFormatArray(value, String);
+const format$1 = (value) => faFormatArray(value, faQuote);
 
 function primes(limit) {
 	let isPrime = new Uint8Array(Math.max(limit + 1, 0)).fill(1);
@@ -22,7 +25,7 @@ function shown(size) {
 	for (let $t0 = 0; $t0 < size; $t0++) {
 		flags.push(false);
 	}
-	console.log(faFormat(flags));
+	console.log(format(flags));
 	return count(flags);
 }
 
@@ -40,7 +43,7 @@ function sorted(numbers, floats, words) {
 	faSortIntegers(numbers);
 	const ordered = faSortFloats(floats.slice());
 	const names = faSortStrings(words.slice());
-	console.log(`${faFormat(numbers)} ${faFormat(ordered)} ${faFormat(names)}`);
+	console.log(`${format(numbers)} ${format(ordered)} ${format$1(names)}`);
 }
 
 function middle(a, b) {

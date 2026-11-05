@@ -339,6 +339,22 @@ impl Generator<'_> {
 			.or_else(|| self.analysis.comptime_branch(n))
 	}
 
+	/// The bounds of a node whose value is a compile-time range (`static
+	/// span = 1..5`), folded where it is printed, iterated or sliced with.
+	pub(crate) fn constant_range(
+		&self,
+		n: NodeId,
+	) -> Option<(Option<ethnum::I256>, Option<ethnum::I256>, bool)> {
+		match self.comptime_value(n)? {
+			Value::Range {
+				start,
+				end,
+				inclusive,
+			} => Some((start, end, inclusive)),
+			_ => None,
+		}
+	}
+
 	/// The compile-time value of a node: the item's being emitted, else the analysis'.
 	pub(crate) fn comptime_value(&self, n: NodeId) -> Option<Value> {
 		self.item_results

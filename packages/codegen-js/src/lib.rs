@@ -159,8 +159,15 @@ fn without_documentation(code: &str) -> String {
 			continue;
 		}
 		if trimmed.starts_with("/**") {
-			in_comment = !trimmed.ends_with("*/");
-			continue;
+			match trimmed.find("*/") {
+				// a cast starting a line (`/** @type {T} */ (value),`): code
+				Some(end) if !trimmed[end + 2..].trim().is_empty() => {}
+				Some(_) => continue,
+				None => {
+					in_comment = true;
+					continue;
+				}
+			}
 		}
 		out.push_str(line);
 	}

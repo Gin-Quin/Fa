@@ -545,6 +545,9 @@ impl<'s> Generator<'s> {
 				// run by the entry module of the program (modules.rs)
 				inits.push((main_name.clone(), "$main".to_string()));
 				self.has_main = true;
+			} else if !asynchronous && self.cannot_fail() {
+				// nothing to report and no exit code: a plain call
+				main.line(format!("{main_name}();"));
 			} else {
 				let run = if asynchronous {
 					self.helper("faRunAsync")
@@ -978,6 +981,31 @@ impl<'s> Generator<'s> {
 		);
 		self.helpers.insert(name);
 		name
+	}
+
+	/// Whether the program generated so far can't stop, throw, overflow the
+	/// stack nor give an exit code: no function (no recursion), no `throw`,
+	/// `try`, `return` nor `assert`, and only printing helpers (which can't
+	/// fail). Its `main` needs no `faRun` (`console.log("Hello")`).
+	fn cannot_fail(&self) -> bool {
+		let printing = |name: &str| {
+			name.starts_with("faFormat")
+				|| matches!(
+					name,
+					"faQuote" | "faSides" | "faFloat32ToString" | "faPercentageToString"
+				)
+		};
+		self.helpers.iter().all(|name| printing(name))
+			&& (0..self.tree.nodes.len()).all(|index| {
+				!matches!(
+					self.view(NodeId::new(index)),
+					View::Function { .. }
+						| View::ExportFunction { .. }
+						| View::Lambda { .. }
+						| View::Return(_) | View::Try(_)
+						| View::Throw(_) | View::Assert(_)
+				)
+			})
 	}
 
 	/// Reports an error at a node.

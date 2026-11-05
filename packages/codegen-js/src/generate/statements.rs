@@ -414,21 +414,37 @@ impl Generator<'_> {
 		body: NodeId,
 	) {
 		let iterable = self.strip_groups(iterable);
-		let View::Range {
-			start: Some(start),
-			end,
-			inclusive,
-		} = self.view(iterable)
-		else {
-			self.for_items(n, pattern, has_index, iterable, body);
-			return;
+		let (values, end, inclusive) = match self.view(iterable) {
+			View::Range {
+				start: Some(start),
+				end,
+				inclusive,
+			} => {
+				let bounds: Vec<NodeId> = std::iter::once(start).chain(end).collect();
+				let values = self.in_order(&bounds, |g, bound| g.expr(bound));
+				(values, end.map(|_| ()), inclusive)
+			}
+			// a compile-time range (`static span = 1..5`): its bounds
+			_ => match self.constant_range(iterable) {
+				Some((Some(start), end, inclusive)) if !has_index => {
+					let constant = |value: ethnum::I256| {
+						Expr::constant(value.to_string(), crate::js::Prec::Primary)
+					};
+					let values: Vec<Expr> = std::iter::once(constant(start))
+						.chain(end.map(constant))
+						.collect();
+					(values, end.map(|_| ()), inclusive)
+				}
+				_ => {
+					self.for_items(n, pattern, has_index, iterable, body);
+					return;
+				}
+			},
 		};
 		if has_index {
 			self.unsupported(n, "an index in a `for` loop over a range");
 			return;
 		}
-		let bounds: Vec<NodeId> = std::iter::once(start).chain(end).collect();
-		let values = self.in_order(&bounds, |g, bound| g.expr(bound));
 		self.push_scope();
 		let variable = match pattern.map(|pattern| (pattern, self.view(pattern))) {
 			Some((pattern, View::Name(_))) => match self.analysis.symbols.symbol_of_decl(pattern) {

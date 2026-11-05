@@ -35,7 +35,10 @@ function mappings(convert) {
 		const text = String.fromCodePoint(code);
 		const converted = convert(text);
 		if (converted === text) continue;
-		const points = Array.from(converted, (character) => /** @type {number} */ (character.codePointAt(0)));
+		const points = Array.from(
+			converted,
+			(character) => /** @type {number} */ (character.codePointAt(0)),
+		);
 		if (points.length === 1) {
 			single.push([code, points[0] - code]);
 		} else {
@@ -110,7 +113,10 @@ const hex = (value) => `0x${value.toString(16).toUpperCase().padStart(4, "0")}`;
  * @param {string} text
  */
 function cString(text) {
-	return Array.from(new TextEncoder().encode(text), (byte) => `\\x${byte.toString(16).padStart(2, "0")}`).join("");
+	return Array.from(
+		new TextEncoder().encode(text),
+		(byte) => `\\x${byte.toString(16).padStart(2, "0")}`,
+	).join("");
 }
 
 /**
@@ -142,7 +148,11 @@ function tables(name, table) {
 	const grouped = runs(table.single);
 	return [
 		`static const CaseRun ${name}_RUNS[] = {`,
-		wrap(grouped.map(([first, count, stride, delta]) => `{${hex(first)}, ${count}, ${stride}, ${delta}}`)),
+		wrap(
+			grouped.map(
+				([first, count, stride, delta]) => `{${hex(first)}, ${count}, ${stride}, ${delta}}`,
+			),
+		),
 		"};",
 		`static const CaseSpecial ${name}_SPECIAL[] = {`,
 		wrap(table.multiple.map(([code, text]) => `{${hex(code)}, "${cString(text)}"}`)),

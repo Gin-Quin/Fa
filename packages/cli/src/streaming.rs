@@ -156,8 +156,13 @@ pub(crate) fn check(project: Project, format: diagnostics::Format) -> i32 {
 			|configuration| configuration.targets.clone(),
 		);
 		for target in targets.iter().filter(|target| *target != "bun") {
-			let Ok(mut other) = prepare(&project, target, Some(&prepared.session)) else {
-				continue;
+			let mut other = match prepare(&project, target, Some(&prepared.session)) {
+				Ok(other) => other,
+				Err(message) => {
+					crate::report_target_error(&message, target);
+					errors = true;
+					continue;
+				}
 			};
 			let options = pipeline::Options {
 				retarget: true,
@@ -300,6 +305,18 @@ pub(crate) struct Purpose {
 	pub replace: bool,
 }
 
+impl Purpose {
+	/// The command, in messages: `fa test`, `fa run` (the cache replaced
+	/// as a whole), else `fa build`.
+	fn command(&self) -> &'static str {
+		match (self.tests, self.replace) {
+			(true, _) => "fa test",
+			(false, true) => "fa run",
+			(false, false) => "fa build",
+		}
+	}
+}
+
 /// `fa build` of a package for a JavaScript target into `directory`: the
 /// modules are written into `<directory>.partial/` by the threads that
 /// analyzed them, then moved into the directory (deleted on an error).
@@ -318,7 +335,7 @@ pub(crate) fn build(
 		}
 	};
 	let directory = directory_of(&prepared);
-	let Some(partial) = partial_directory(&directory) else {
+	let Some(partial) = partial_directory(&directory, purpose.command()) else {
 		return Built::Failed(1);
 	};
 	let directory_sink = project::DirectorySink::new(&partial);
@@ -361,7 +378,8 @@ pub(crate) fn build(
 	if let Err(error) = result {
 		let _ = fs::remove_dir_all(&partial);
 		eprintln!(
-			"fa build: can't write into `{}`: {error}",
+			"{}: can't write into `{}`: {error}",
+			purpose.command(),
 			directory.display()
 		);
 		return Built::Failed(1);
@@ -372,14 +390,14 @@ pub(crate) fn build(
 /// The folder the modules of a build are written into before they are
 /// moved into `directory`: one per process, so that two runs of the same
 /// package don't share it; `None` (the error printed) when it can't be made.
-fn partial_directory(directory: &Path) -> Option<PathBuf> {
+fn partial_directory(directory: &Path, command: &str) -> Option<PathBuf> {
 	let mut partial = directory.as_os_str().to_owned();
 	partial.push(format!(".{}.partial", std::process::id()));
 	let partial = PathBuf::from(partial);
 	let _ = fs::remove_dir_all(&partial);
 	if let Err(error) = fs::create_dir_all(&partial) {
 		eprintln!(
-			"fa build: can't write into `{}`: {error}",
+			"{command}: can't write into `{}`: {error}",
 			partial.display()
 		);
 		return None;
@@ -431,7 +449,8 @@ impl<'a> BuildSink<'a> {
 			.unwrap_or_else(|poisoned| poisoned.into_inner());
 		if let Some(error) = &io_error {
 			eprintln!(
-				"fa build: can't write into `{}`: {error}",
+				"{}: can't write into `{}`: {error}",
+				purpose.command(),
 				directory.display()
 			);
 		}

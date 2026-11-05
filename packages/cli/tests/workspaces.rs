@@ -42,6 +42,8 @@ impl Scratch {
 				"FA_GITHUB_BASE",
 				format!("file://{}", self.directory.join("remote").display()),
 			)
+			// the "remote" sources of the tests are `file://` URLs
+			.env("FA_TEST_FILE_SOURCES", "1")
 			.env_remove("CI")
 			.env_remove("FA_DEVELOP_RUNS");
 		command
@@ -177,6 +179,17 @@ impl Repository {
 
 fn lockfile(folder: &Path) -> String {
 	fs::read_to_string(folder.join("dependencies.lock")).unwrap_or_default()
+}
+
+/// A lockfile whose first hash is changed (still a valid hash).
+fn tamper_hash(lockfile: &str) -> String {
+	let start = lockfile.find("hash = \"sha256:").expect("a hash") + "hash = \"sha256:".len();
+	let digit = if lockfile[start..].starts_with('0') {
+		"1"
+	} else {
+		"0"
+	};
+	format!("{}{digit}{}", &lockfile[..start], &lockfile[start + 1..])
 }
 
 #[test]
@@ -410,7 +423,7 @@ fn git_dependencies_are_resolved_locked_and_updated() {
 	);
 	// a content that doesn't match its hash (an empty cache, a changed hash)
 	fs::remove_dir_all(scratch.directory.join("cache/sources")).unwrap();
-	let tampered = updated.replacen("hash = \"sha256:", "hash = \"sha256:0", 1);
+	let tampered = tamper_hash(&updated);
 	fs::write(package.join("dependencies.lock"), &tampered).unwrap();
 	let (_, stderr, code) = scratch.fa(&["check"], &package);
 	assert_eq!(code, 1);

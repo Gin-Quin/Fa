@@ -62,6 +62,18 @@ pub(crate) fn without_fa(name: &str) -> &str {
 	name.strip_suffix(".fa").unwrap_or(name)
 }
 
+/// The message of a file that can't be read, with the reason.
+pub(crate) fn unreadable(file: &Path) -> String {
+	match fs::read_to_string(file) {
+		Err(error) if error.kind() == std::io::ErrorKind::InvalidData => format!(
+			"fa: `{}` is not UTF-8 text: save it as UTF-8",
+			file.display()
+		),
+		Err(error) => format!("fa: can't read `{}`: {error}", file.display()),
+		Ok(_) => format!("fa: can't read `{}`", file.display()),
+	}
+}
+
 fn find_package(start: &Path) -> Option<PathBuf> {
 	fa_codebase_parser::discover(start).package
 }
@@ -176,7 +188,7 @@ fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 	if !project.package {
 		let entry = project.entry.clone().unwrap_or_default();
 		let file = project.base.join(format!("{entry}.fa"));
-		let (codebase, _) = timings::phase("scan", || Codebase::scan_standalone(&file))
+		let (codebase, _) = timings::phase("scan", || Codebase::scan_standalone_reached(&file))
 			.map_err(|error| format!("fa: can't read `{}`: {error}", file.display()))?;
 		session.set_resolver(Box::new(CodebaseResolver::new(
 			codebase,
@@ -184,7 +196,7 @@ fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 		)));
 		// the files are parsed when the analysis reaches them
 		let program = timings::phase("analysis", || session.analyze_program(&entry))
-			.ok_or_else(|| format!("fa: can't read `{}`", file.display()))?;
+			.ok_or_else(|| unreadable(&file))?;
 		return Ok(Loaded {
 			session,
 			program,
@@ -403,7 +415,7 @@ fn with_dependencies(
 	write_lockfile: bool,
 ) -> Result<(MountedResolver, Vec<String>), String> {
 	let scope = scope_of(package)?;
-	let resolution = dependencies::resolve(&scope, &dependencies::Update::None, write_lockfile)?;
+	let resolution = dependencies::resolve_shared(&scope, write_lockfile)?;
 	let resolver = dependencies::mount(main, package, &resolution, target)?;
 	Ok((resolver, resolution.warnings))
 }

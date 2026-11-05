@@ -375,7 +375,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.as_int(target)
 				.copied()
 				.ok_or_else(|| self.unsupported(node.index(), "this conversion"))?;
-			let i128 = self.context.i128_type();
 			let clamp = |bound: I256| {
 				let bound = bound.clamp(I256::from(i128::MIN), I256::from(i128::MAX));
 				self.const_int(128, bound)
@@ -400,7 +399,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.guard(failed, |this| {
 				this.raise_runtime("fa_error_big_conversion", &[word.into(), site.into()])
 			})?;
-			let _ = i128;
 		}
 		Ok(Val::new(Repr::Int(to), self.int_to(raw, wide, to)?))
 	}

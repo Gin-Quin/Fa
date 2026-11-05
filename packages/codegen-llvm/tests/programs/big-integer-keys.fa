@@ -1,0 +1,10 @@
+-- `BigInt` keys of sets and maps natively: hashed by their canonical form.
+let big = 2n ** 80n
+let seen = Set.from([big, 2n ** 80n, 1n, 1n, -big])
+console.log(seen.size, seen)
+mutable counts: Map<BigInt, Integer> = [(big, 1), (3n, 2)]
+counts[2n ** 80n] = 5
+counts[-big] = 7
+console.log((try counts[2n ** 80n]), (try counts[3n]), (try counts[-(2n ** 80n)]), counts.size)
+-- prints: 3 [1208925819614629174706176, 1, -1208925819614629174706176]
+-- prints: 5 2 7 3

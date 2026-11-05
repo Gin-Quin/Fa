@@ -1,0 +1,89 @@
+-- Compressed links (`design/decisions.md`): the recursive edges of arena
+-- types are 32-bit links on 64-bit Linux. Values leave their arena (copies,
+-- optional roots, subtrees), are copied back into new trees, compared and
+-- printed; a list type links through one edge; nodes hold owned strings.
+type Tree = {
+	value: Integer
+	left: Tree?
+	right: Tree?
+
+	function build = (depth: Integer, start: Integer): Tree => if depth > 0 {
+		Tree {
+			value = start
+			left = Tree.build(depth - 1, start * 2)
+			right = Tree.build(depth - 1, start * 2 + 1)
+		}
+	} else {
+		Tree { value = start }
+	}
+
+	function count = (self): Integer => 1 + (self.left?.count() ?? 0) + (self.right?.count() ?? 0)
+
+	function sum = (self): Integer => self.value + (self.left?.sum() ?? 0) + (self.right?.sum() ?? 0)
+
+	function leftmost = (self): Integer => if self.left is not none {
+		self.left.leftmost()
+	} else {
+		self.value
+	}
+
+	-- a copy of a root back into a new tree
+	function graft = (base: Tree, depth: Integer): Tree => Tree {
+		value = 0
+		left = base
+		right = Tree.build(depth, 1)
+	}
+}
+
+function optional = (tree: Tree): Tree? => tree
+
+type Chain = {
+	label: String
+	next: Chain?
+
+	function make = (count: Integer): Chain => if count > 0 {
+		Chain { label = "node {count} of a chain long enough to own its text", next = Chain.make(count - 1) }
+	} else {
+		Chain { label = "end" }
+	}
+
+	function length = (self): Integer => 1 + (self.next?.length() ?? 0)
+
+	function letters = (self): Integer => self.label.length + (self.next?.letters() ?? 0)
+}
+
+for round in 0..3 {
+	let root = Tree.build(10, 1)
+	let copy = root
+	assert root.count() == 2047
+	assert copy.sum() == root.sum()
+	assert copy == root
+	let left = root.left
+	assert left?.count() == 1023
+	assert root.left?.left?.value == 4
+	assert root.right?.right?.value == 7
+	assert root.leftmost() == 1024
+	let both = Tree.graft(copy, 3)
+	assert both.count() == 2047 + 15 + 1
+	assert both.left == root
+	assert both.right != root
+	let boxed = optional(root)
+	assert boxed?.count() == 2047
+	let other = Tree.build(4, round)
+	assert other.count() == 31
+	let chain = Chain.make(200)
+	assert chain.length() == 201
+	assert chain.next?.next?.label == "node 198 of a chain long enough to own its text"
+	let kept = chain
+	assert kept.letters() == chain.letters()
+}
+
+let small = Tree.build(1, 5)
+console.log(small)
+console.log(small.left?.value ?? -1)
+console.log(Tree.build(2, 1) == Tree.build(2, 1))
+console.log(Chain.make(2).letters())
+-- prints: { value = 5, left = { value = 10, left = none, right = none }, right = { value = 11, left = none, right = none } }
+-- prints: 10
+-- prints: true
+-- prints: 93

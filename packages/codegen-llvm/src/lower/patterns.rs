@@ -107,10 +107,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if let Repr::Rec(target) = inner.repr
 					&& self.repr_of(target, node.index())? == narrowed
 				{
-					let pointer = self
-						.builder
-						.build_load(self.pointer_type(), inner.pointer, "")?
-						.into_pointer_value();
+					let pointer = self.load_edge(inner)?;
 					return Ok(Slot {
 						pointer,
 						repr: narrowed,
@@ -197,6 +194,114 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// `when subject is { … }`: the subject once, then the tests of each arm
 	/// in order; the last arm runs by default when there is no `else` (every
 	/// `when` of a checked program is exhaustive).
+	/// A `when` choosing among string literals of one length by an integer
+	/// (`0 => " + "`, `1 => " - "`, …, `else => " / "`): the literals packed
+	/// into one constant in the order of the integers, `else` last, and the
+	/// chosen one at `base + length × index` (the index clamped to the
+	/// `else` one), with no branch nor table load. The arms are the integers
+	/// `0` to `count - 1`, one per arm, without `as` nor escapes.
+	fn packed_literal_choice(
+		&mut self,
+		list: &fa_analyzer::lower::when::DecisionList<'_>,
+		subject: Val<'ctx>,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		let Repr::Int(int) = subject.repr else {
+			return Ok(None);
+		};
+		if int.bits > 64 || !list.has_else() || list.decisions.len() < 3 {
+			return Ok(None);
+		}
+		let count = list.decisions.len() - 1;
+		let mut texts: Vec<Option<&str>> = vec![None; count + 1];
+		for (position, decision) in list.decisions.iter().enumerate() {
+			if decision.binding.is_some() {
+				return Ok(None);
+			}
+			let mut value = decision.value;
+			loop {
+				match self.view(value) {
+					View::Group(inner) => value = inner,
+					View::Block { statements } if statements.len() == 1 => {
+						value = statements.first().expect("one statement")
+					}
+					_ => break,
+				}
+			}
+			let View::String(text) = self.view(value) else {
+				return Ok(None);
+			};
+			if text.is_empty() || text.contains(['\\', '{', '}']) {
+				return Ok(None);
+			}
+			let index = if decision.is_else() {
+				count
+			} else {
+				let [Test::Equals(Literal::Integer(value))] = decision.tests.as_slice() else {
+					return Ok(None);
+				};
+				match usize::try_from(*value) {
+					Ok(index) if index < count => index,
+					_ => return Ok(None),
+				}
+			};
+			if position == count && index != count || texts[index].is_some() {
+				return Ok(None);
+			}
+			texts[index] = Some(text);
+		}
+		let Some(texts) = texts.into_iter().collect::<Option<Vec<&str>>>() else {
+			return Ok(None);
+		};
+		let length = texts[0].len();
+		let simple = |text: &str| text.bytes().all(|byte| byte < 0x80 && byte != b'\r');
+		if texts.len() != count + 1
+			|| texts
+				.iter()
+				.any(|text| text.len() != length || simple(text) != simple(texts[0]))
+		{
+			return Ok(None);
+		}
+		let packed: String = texts.concat();
+		let base = self.constant_bytes(packed.as_bytes());
+		// the subject as an unsigned index: a negative one is above `count`
+		let i64 = self.context.i64_type();
+		let raw = subject.value.expect("an integer").into_int_value();
+		let index = if int.bits < 64 {
+			self.builder
+				.build_int_cast_sign_flag(raw, i64, int.signed, "")?
+		} else {
+			self.builder.build_int_truncate_or_bit_cast(raw, i64, "")?
+		};
+		let last = i64.const_int(count as u64, false);
+		let inside = self
+			.builder
+			.build_int_compare(IntPredicate::ULT, index, last, "")?;
+		let index = self
+			.builder
+			.build_select(inside, index, last, "")?
+			.into_int_value();
+		let offset =
+			self.builder
+				.build_int_nuw_mul(index, i64.const_int(length as u64, false), "")?;
+		let bytes = unsafe {
+			self.builder
+				.build_in_bounds_gep(self.context.i8_type(), base, &[offset], "literal")?
+		};
+		let value = self
+			.builder
+			.build_insert_value(self.string_type.get_undef(), bytes, 0, "")?;
+		let value = self.builder.build_insert_value(
+			value,
+			self.usize.const_int(length as u64, false),
+			1,
+			"",
+		)?;
+		let value = self
+			.builder
+			.build_insert_value(value, self.static_capacity(&packed), 2, "")?;
+		Ok(Some(Val::new(Repr::Str, value.into_struct_value())))
+	}
+
 	pub(crate) fn when_expression(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
 		let list = decision_list(self.tree, self.analysis, node)
 			.map_err(|_| self.unsupported(node.index(), "this `when`"))?;
@@ -225,6 +330,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let subject = self.expr(list.subject)?;
 		if subject.repr == Repr::Never {
 			return Ok(subject);
+		}
+		if repr == Repr::Str
+			&& let Some(value) = self.packed_literal_choice(&list, subject)?
+		{
+			return Ok(value);
 		}
 		let end = self.append_block("end_when");
 		let count = list.decisions.len();

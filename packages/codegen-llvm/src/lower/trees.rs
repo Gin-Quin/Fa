@@ -24,9 +24,28 @@ use super::{FAST_CALLING_CONVENTION, Lowering};
 use crate::error::Error;
 
 #[derive(Default)]
-pub(super) struct TreeArenas {
+pub(super) struct TreeArenas<'ctx> {
+	/// The links of the nodes allocated through them (`through_links`), by
+	/// address. A link dominates every use of its address: both are made
+	/// where the node is allocated.
+	links: std::cell::RefCell<
+		rustc_hash::FxHashMap<PointerValue<'ctx>, inkwell::values::IntValue<'ctx>>,
+	>,
 	objects: FxHashSet<TypeId>,
 	unions: FxHashSet<NominalId>,
+	/// The arena object types whose recursive edges are compressed: 32-bit
+	/// offsets, in units of 8 bytes, from the runtime's `fa_arena_base`, 0
+	/// for an absent edge, in memory and as values (`design/decisions.md`,
+	/// "Compressed links for arena-allocated recursive values").
+	compressed: FxHashSet<TypeId>,
+}
+
+impl TreeArenas<'_> {
+	/// Whether some edges are compressed: the runtime takes the arena pages
+	/// from the range of `fa_arena_base` (`fa_compressed_links`).
+	pub(super) fn compressed_any(&self) -> bool {
+		!self.compressed.is_empty()
+	}
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -140,6 +159,134 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		b.build_unconditional_branch(end)?;
 		b.position_at_end(end);
 		Ok(())
+	}
+
+	/// Whether the recursive edges to this type are compressed links.
+	pub(crate) fn compressed(&self, target: TypeId) -> bool {
+		self.tree_arenas.compressed.contains(&target)
+	}
+
+	/// Whether a representation is an edge (or an optional edge) held as a
+	/// compressed link: an `i32`.
+	pub(crate) fn compressed_edge(&self, repr: Repr) -> bool {
+		matches!(repr, Repr::Rec(target) | Repr::Optional(Scalar::Rec(target)) if self.compressed(target))
+	}
+
+	/// The address an edge value of this representation designates (null for
+	/// an absent optional edge): the value itself, or a compressed link
+	/// decoded (the address divided by 8: the runtime keeps the arena nodes
+	/// in the first 32 GiB, and link 0, address 0, is the absent edge).
+	pub(crate) fn edge_address(
+		&self,
+		b: &Builder<'ctx>,
+		repr: Repr,
+		raw: BasicValueEnum<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		if !self.compressed_edge(repr) {
+			return Ok(raw.into_pointer_value());
+		}
+		let i64 = self.context.i64_type();
+		let link = b.build_int_z_extend(raw.into_int_value(), i64, "")?;
+		let address = b.build_int_nuw_mul(link, i64.const_int(8, false), "")?;
+		Ok(b.build_int_to_ptr(address, self.pointer_type(), "node")?)
+	}
+
+	/// The edge value of this representation designating an address (null
+	/// for an absent optional edge): the address, or its compressed link.
+	pub(crate) fn address_edge(
+		&self,
+		b: &Builder<'ctx>,
+		repr: Repr,
+		address: PointerValue<'ctx>,
+	) -> Result<BasicValueEnum<'ctx>, Error> {
+		if !self.compressed_edge(repr) {
+			return Ok(address.into());
+		}
+		if let Some(link) = self.tree_arenas.links.borrow().get(&address) {
+			return Ok((*link).into());
+		}
+		let i64 = self.context.i64_type();
+		let at = b.build_ptr_to_int(address, i64, "")?;
+		let link = b.build_right_shift(at, i64.const_int(3, false), false, "")?;
+		Ok(b.build_int_truncate(link, self.context.i32_type(), "link")?
+			.into())
+	}
+
+	/// New arena nodes of this representation (at `block`, plus each of
+	/// `units` of 8 bytes), addressed through their compressed links when
+	/// edges to them are compressed: the code keeps one link alive across the
+	/// calls that build the nodes' fields, instead of addresses and links both.
+	pub(crate) fn through_links(
+		&self,
+		b: &Builder<'ctx>,
+		repr: Repr,
+		block: PointerValue<'ctx>,
+		units: &[u64],
+	) -> Result<Vec<PointerValue<'ctx>>, Error> {
+		let edge = match repr {
+			Repr::Object(target) => Repr::Rec(target),
+			_ => Repr::Void,
+		};
+		if !self.compressed_edge(edge) {
+			return Ok(units
+				.iter()
+				.map(|&units| unsafe {
+					b.build_in_bounds_gep(
+						self.context.i8_type(),
+						block,
+						&[self.usize.const_int(units * 8, false)],
+						"",
+					)
+				})
+				.collect::<Result<_, _>>()?);
+		}
+		let i64 = self.context.i64_type();
+		let node = block;
+		let address = b.build_ptr_to_int(node, i64, "")?;
+		let link = b.build_right_shift(address, i64.const_int(3, false), false, "")?;
+		// an identity the optimizer can't see through: without it, LLVM
+		// rewrites the address as `node & 0x7fffffff8` and keeps both again
+		let opaque = self.context.create_inline_asm(
+			i64.fn_type(&[i64.into()], false),
+			String::new(),
+			"=r,0".to_string(),
+			false,
+			false,
+			None,
+			false,
+		);
+		let link = b
+			.build_indirect_call(
+				i64.fn_type(&[i64.into()], false),
+				opaque,
+				&[link.into()],
+				"",
+			)?
+			.try_as_basic_value()
+			.basic()
+			.expect("a link")
+			.into_int_value();
+		units
+			.iter()
+			.map(|&units| {
+				let link = b.build_int_nuw_add(link, i64.const_int(units, false), "")?;
+				let address = b.build_int_nuw_mul(link, i64.const_int(8, false), "")?;
+				let node = b.build_int_to_ptr(address, self.pointer_type(), "node")?;
+				// its link, without a shift back that LLVM can't fold (`address_edge`)
+				let link = b.build_int_truncate(link, self.context.i32_type(), "link")?;
+				self.tree_arenas.links.borrow_mut().insert(node, link);
+				Ok(node)
+			})
+			.collect()
+	}
+
+	/// The address held by a slot of an edge (`Repr::Rec`, or an optional
+	/// edge narrowed to its value), decoded when it holds a compressed link.
+	pub(crate) fn load_edge(&self, slot: super::Slot<'ctx>) -> Result<PointerValue<'ctx>, Error> {
+		let raw = self
+			.builder
+			.build_load(self.llvm_type(slot.repr), slot.pointer, "")?;
+		self.edge_address(&self.builder, slot.repr, raw)
 	}
 
 	pub(super) fn arena_object(&self, ty: TypeId) -> bool {
@@ -304,8 +451,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			return Ok(());
 		}
-		let candidates: FxHashSet<TypeId> =
-			self.analysis.type_decls.values().map(|d| d.ty).collect();
+		let mut candidates: Vec<TypeId> = self.analysis.type_decls.values().map(|d| d.ty).collect();
+		candidates.sort();
+		candidates.dedup();
+		let mut wraps = Vec::new();
 		for ty in candidates {
 			let Some((nominal, shapes)) = self.tree_shapes(ty) else {
 				continue;
@@ -324,9 +473,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			} else {
 				self.tree_arenas.objects.insert(ty);
 			}
-			for key in builders {
-				self.wrap_tree_builder(key, nominal)?;
+			wraps.extend(builders.into_iter().map(|key| (key, nominal)));
+		}
+		self.compress_tree_links()?;
+		wraps.sort_by_key(|(key, _)| *key);
+		for (key, nominal) in wraps {
+			self.wrap_tree_builder(key, nominal)?;
+		}
+		Ok(())
+	}
+
+	/// Compressed links (`design/decisions.md`, "Compressed links for
+	/// arena-allocated recursive values"): where the runtime reserves the
+	/// range of the arenas (64-bit Linux), the edges of the arena object
+	/// types are 32-bit offsets. Their layouts change, so the functions
+	/// declared with the previous layouts are declared again.
+	fn compress_tree_links(&mut self) -> Result<(), Error> {
+		if !crate::runtime::Runtime::reserves_arena_space(self.target)
+			|| self.is_split()
+			|| std::env::var_os("FA_COMPRESSED_LINKS").is_some_and(|value| value == "0")
+		{
+			return Ok(());
+		}
+		let mut objects: Vec<TypeId> = self.tree_arenas.objects.iter().copied().collect();
+		objects.sort();
+		for ty in objects {
+			if self
+				.object_fields(ty)
+				.iter()
+				.any(|field| matches!(field, Repr::Optional(Scalar::Rec(target)) if *target == ty))
+			{
+				self.tree_arenas.compressed.insert(ty);
 			}
+		}
+		if self.tree_arenas.compressed.is_empty() {
+			return Ok(());
+		}
+		self.object_types.borrow_mut().clear();
+		let mut keys: Vec<NodeId> = self.functions.keys().copied().collect();
+		keys.sort();
+		for key in keys {
+			let old = self.functions[&key].clone();
+			let name = old.value.get_name().to_string_lossy().into_owned();
+			old.value.as_global_value().set_name("");
+			let mut function = self.declare_function(key, old.info.clone(), "")?;
+			function.value.as_global_value().set_name(&name);
+			function.captures = old.captures;
+			unsafe { old.value.delete() };
+			self.functions.insert(key, function);
 		}
 		Ok(())
 	}
@@ -593,7 +787,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value: BasicValueEnum<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
 		if matches!(repr, Repr::Rec(_) | Repr::Union) {
-			return Ok(value.into_pointer_value());
+			return self.edge_address(b, repr, value);
 		}
 		let Repr::Object(ty) = repr else {
 			unreachable!("an arena root")
@@ -601,9 +795,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut pointer = self.pointer_type().const_null();
 		for (index, field) in self.object_fields(ty).iter().enumerate() {
 			if matches!(field, Repr::Optional(Scalar::Rec(_))) {
-				let edge = b
-					.build_extract_value(value.into_struct_value(), index as u32, "")?
-					.into_pointer_value();
+				let edge = b.build_extract_value(value.into_struct_value(), index as u32, "")?;
+				let edge = self.edge_address(b, *field, edge)?;
 				pointer = b
 					.build_select(b.build_is_null(pointer, "")?, edge, pointer, "")?
 					.into_pointer_value();

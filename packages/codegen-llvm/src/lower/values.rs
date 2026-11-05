@@ -540,6 +540,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The IR type of a representation with values.
 	pub(crate) fn llvm_type(&self, repr: Repr) -> BasicTypeEnum<'ctx> {
+		if self.compressed_edge(repr) {
+			return self.context.i32_type().into();
+		}
 		match repr {
 			Repr::Bool => self.context.bool_type().into(),
 			Repr::Int(int) => self.int_type(int.bits).into(),
@@ -596,6 +599,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			unreachable!("an optional")
 		};
 		let raw = value.value.expect("an optional");
+		if self.compressed_edge(value.repr) {
+			let link = raw.into_int_value();
+			return Ok((
+				builder.build_int_compare(
+					inkwell::IntPredicate::NE,
+					link,
+					link.get_type().const_zero(),
+					"",
+				)?,
+				Val::new(scalar.repr(), raw),
+			));
+		}
 		if scalar.nullable() {
 			return Ok((
 				builder.build_is_not_null(raw.into_pointer_value(), "")?,
@@ -616,6 +631,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		present: IntValue<'ctx>,
 		inner: BasicValueEnum<'ctx>,
 	) -> Result<BasicValueEnum<'ctx>, Error> {
+		if self.compressed_edge(scalar.repr()) {
+			return Ok(builder.build_select(
+				present,
+				inner,
+				self.context.i32_type().const_zero().into(),
+				"",
+			)?);
+		}
 		if scalar.nullable() {
 			return Ok(builder.build_select(
 				present,
@@ -659,6 +682,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// with the same unfolding, `Node` and `Link`). Recursive edges are
 	/// compared by their layout: pointers.
 	pub(crate) fn same_layout(&self, from: Repr, to: Repr) -> bool {
+		if self.compressed_edge(from) != self.compressed_edge(to) {
+			return false;
+		}
 		let (from, to) = match (from, to) {
 			(Repr::Rec(a), Repr::Rec(b)) => match (self.repr_of(a, 0), self.repr_of(b, 0)) {
 				(Ok(a), Ok(b)) => (a, b),

@@ -1113,7 +1113,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(paired);
 		}
 		let ty = self.llvm_type(target);
-		let size = self.target_data().get_abi_size(&ty);
+		// every node on 8 bytes, as `fa_arena_alloc` places them: a compressed
+		// link counts in units of 8 bytes
+		let size = self.target_data().get_abi_size(&ty).next_multiple_of(8);
 		let align = u64::from(self.target_data().get_abi_alignment(&ty));
 		let block = self
 			.call_value(
@@ -1126,12 +1128,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				],
 			)?
 			.into_pointer_value();
-		for (rank, (position, target)) in candidates.into_iter().enumerate() {
-			let offset = self.usize.const_int(size * rank as u64, false);
-			let pointer = unsafe {
-				self.builder
-					.build_in_bounds_gep(self.context.i8_type(), block, &[offset], "")?
-			};
+		let units: Vec<u64> = (0..candidates.len() as u64)
+			.map(|rank| size / 8 * rank)
+			.collect();
+		let nodes = self.through_links(&self.builder, target, block, &units)?;
+		for ((position, target), pointer) in candidates.into_iter().zip(nodes) {
 			paired.insert(position, (pointer, target));
 		}
 		Ok(paired)
@@ -1932,10 +1933,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				slot = self.box_data_pointer(pointer, current_type, member)?;
 			}
 			if let Repr::Rec(target) = slot.repr {
-				let pointer = self
-					.builder
-					.build_load(self.pointer_type(), slot.pointer, "")?
-					.into_pointer_value();
+				let pointer = self.load_edge(slot)?;
 				slot = Slot {
 					pointer,
 					repr: self.repr_of(target, member.index())?,

@@ -155,7 +155,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: usize,
 	) -> Result<Val<'ctx>, Error> {
 		let repr = self.repr_of(target, node)?;
-		let pointer = value.value.expect("an edge").into_pointer_value();
+		let pointer = self.edge_address(
+			&self.builder,
+			Repr::Rec(target),
+			value.value.expect("an edge"),
+		)?;
 		let loaded = self.builder.build_load(self.llvm_type(repr), pointer, "")?;
 		Ok(Val::new(repr, loaded))
 	}
@@ -196,7 +200,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				"",
 			)?;
 		}
-		let edge = Val::new(to, pointer);
+		let edge = Val::new(to, self.address_edge(&self.builder, to, pointer)?);
 		if owned {
 			self.transfer(value, edge);
 			Ok(edge)
@@ -208,7 +212,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// A block for the box of a recursive edge to a value of this representation.
 	pub(crate) fn alloc_rec(&self, repr: Repr) -> Result<PointerValue<'ctx>, Error> {
 		if self.arena_repr(repr) {
-			return self.allocate_tree_node(&self.builder, repr);
+			let node = self.allocate_tree_node(&self.builder, repr)?;
+			return Ok(self.through_links(&self.builder, repr, node, &[0])?[0]);
 		}
 		self.allocate_for(self.llvm_type(repr))
 	}
@@ -827,7 +832,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let size = builder.build_int_cast(size, self.usize, "")?;
 				let align = self.usize.const_int(16, false);
 				let pointer_type = self.pointer_type();
-				let first = value.into_pointer_value();
+				// an edge, or a compressed link (`trees.rs`)
+				let optional_edge = Repr::Optional(super::values::Scalar::Rec(target));
+				let edge_type = self.llvm_type(repr);
+				let first = self.edge_address(builder, optional_edge, value)?;
 				let present = builder.build_is_not_null(first, "")?;
 				self.helper_when(builder, function, present, |builder| {
 					if self.arena_object(target) {
@@ -837,12 +845,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 							"",
 						)?;
 					}
-					builder.build_return(Some(&first))?;
+					builder.build_return(Some(&value))?;
 					Ok(())
 				})?;
 				// where the next copy goes: a slot holding the first copy, then
 				// the edge field of the last copy
-				let root = builder.build_alloca(pointer_type, "root")?;
+				let root = builder.build_alloca(edge_type, "root")?;
 				let before = builder.get_insert_block().expect("a block");
 				let test = self.context.append_basic_block(function, "edge");
 				let body = self.context.append_basic_block(function, "edge_body");
@@ -868,15 +876,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						.expect("a block")
 						.into_pointer_value()
 				};
-				builder.build_store(destination_pointer, copy)?;
+				builder.build_store(
+					destination_pointer,
+					self.address_edge(builder, optional_edge, copy)?,
+				)?;
 				let loaded = builder.build_load(target_type, source_pointer, "")?;
 				let (next, next_destination) = match self.last_edge(target_repr) {
 					Some(index) => {
 						let structure = loaded.into_struct_value();
 						let edge = builder.build_extract_value(structure, index as u32, "")?;
+						let Repr::Object(object) = target_repr else {
+							unreachable!("an edge field of an object")
+						};
+						let field = self.object_fields(object)[index];
+						let edge = self.edge_address(builder, field, edge)?;
 						let rest = builder.build_insert_value(
 							structure,
-							pointer_type.const_null(),
+							super::zero_of(self.llvm_type(field)),
 							index as u32,
 							"",
 						)?;
@@ -885,7 +901,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						builder.build_store(copy, copied)?;
 						let field =
 							builder.build_struct_gep(target_type, copy, index as u32, "")?;
-						(edge.into_pointer_value(), field)
+						(edge, field)
 					}
 					None => {
 						let copied = self.call_copy(builder, target_repr, loaded)?;
@@ -898,7 +914,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				destination.add_incoming(&[(&next_destination, last)]);
 				builder.build_unconditional_branch(test)?;
 				builder.position_at_end(end);
-				builder.build_load(pointer_type, root, "")?
+				builder.build_load(edge_type, root, "")?
 			}
 			Repr::Function(_) => {
 				let pair = value.into_struct_value();

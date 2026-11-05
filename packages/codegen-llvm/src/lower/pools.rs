@@ -61,7 +61,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The place representation of the elements of a pool or a columnar.
-	fn pool_place(&self, pool: Repr, node: NodeId) -> Result<Repr, Error> {
+	pub(crate) fn pool_place(&self, pool: Repr, node: NodeId) -> Result<Repr, Error> {
 		let (Repr::Pool(item) | Repr::Columnar(item)) = pool else {
 			return Err(self.unsupported(node.index(), "this pool"));
 		};
@@ -231,7 +231,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// `body` gets the address of each element and the exit block. The
 	/// position moves past the element before the body runs, so that the
 	/// body may remove it.
-	fn pool_each(
+	pub(crate) fn pool_each(
 		&mut self,
 		pool: PointerValue<'ctx>,
 		mut body: impl FnMut(&mut Self, PointerValue<'ctx>, BasicBlock<'ctx>) -> Result<(), Error>,

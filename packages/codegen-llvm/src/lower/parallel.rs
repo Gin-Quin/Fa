@@ -55,6 +55,36 @@ enum Iterated<'ctx> {
 	Range(IntValue<'ctx>),
 	/// An array: its pointer.
 	Array(PointerValue<'ctx>, TypeId),
+	/// A `GrowingArray`: its segments (`fa_segmented_at` finds each item).
+	Growing(PointerValue<'ctx>, TypeId),
+	/// A pool or a columnar: an array of the addresses of its elements, in
+	/// slot order (taken before the loop), and how an element is held.
+	Elements(PointerValue<'ctx>, Repr),
+}
+
+/// What the body of a parallel loop reads its items from (`Iterated`
+/// without the values of the function around it).
+#[derive(Copy, Clone)]
+enum Items {
+	Range,
+	Array(TypeId),
+	Growing(TypeId),
+	Elements(Repr),
+}
+
+/// The places of the function around a parallel body that it uses: its
+/// locals, the values given with `provide`, the requirements it was given.
+struct Outer<'ctx> {
+	locals: Vec<(SymbolId, Slot<'ctx>)>,
+	provided: Vec<(NodeId, Slot<'ctx>)>,
+	requirements: Vec<(PointerValue<'ctx>, TypeId)>,
+}
+
+impl Outer<'_> {
+	/// The number of places, the first fields of the environment.
+	fn len(&self) -> usize {
+		self.locals.len() + self.provided.len() + self.requirements.len()
+	}
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -662,39 +692,87 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						let (_, length) = self.array_parts(array)?;
 						(Iterated::Array(array, item), length)
 					}
+					Repr::Growing(item) => {
+						let array = value.value.expect("a growing array").into_pointer_value();
+						let length = self.growing_length(&self.builder, array)?;
+						(Iterated::Growing(array, item), length)
+					}
+					Repr::Pool(_) | Repr::Columnar(_) => {
+						// the addresses of the elements, in slot order: an
+						// iteration finds its element in one load
+						let place = self.pool_place(value.repr, iterable)?;
+						let size = self.pool_size(value)?.int();
+						let addresses = self.new_array(Repr::Pointer, i64.const_zero(), size)?;
+						let address_size = self.item_size_const(Repr::Pointer);
+						let pool = value.value.expect("a pool").into_pointer_value();
+						self.pool_each(pool, |this, element, _| {
+							let slot = this
+								.call_value(
+									this.runtime.function("fa_array_push_slot")?,
+									&[addresses.into(), address_size.into()],
+								)?
+								.into_pointer_value();
+							this.builder.build_store(slot, element)?;
+							Ok(())
+						})?;
+						self.cleanups
+							.borrow_mut()
+							.push(super::ownership::Cleanup::Shallow(addresses, address_size));
+						(Iterated::Elements(addresses, place), size)
+					}
 					Repr::Never => return Ok(value),
 					_ => {
-						return Err(self.unsupported(
-							iterable.index(),
-							"`for parallel` over this value (a range or an array)",
-						));
+						return Err(
+							self.unsupported(iterable.index(), "`for parallel` over this value")
+						);
 					}
 				}
 			}
 		};
 		let captures = self.parallel_captures(node, body);
-		let mut capture_slots = Vec::with_capacity(captures.len());
+		let mut locals = Vec::with_capacity(captures.len());
 		for &symbol in &captures {
-			capture_slots.push((symbol, self.slot_of(symbol, node)?));
+			locals.push((symbol, self.slot_of(symbol, node)?));
 		}
-		// the environment: the captured places, then the array or the start
+		// the values given with `provide` and the requirements the function
+		// was given, which the calls of the body pass on
+		let mut provided: Vec<(NodeId, Slot<'ctx>)> = self
+			.provided
+			.iter()
+			.map(|(&key, &slot)| (key, slot))
+			.collect();
+		provided.sort_by_key(|(key, _)| *key);
+		let outer = Outer {
+			locals,
+			provided,
+			requirements: self.frame().requirements.clone(),
+		};
+		// the environment: the outer places, then the array or the start
 		let pointer = self.pointer_type();
 		let mut fields: Vec<BasicTypeEnum<'ctx>> =
-			captures.iter().map(|_| pointer.into()).collect();
+			(0..outer.len()).map(|_| pointer.into()).collect();
 		fields.push(pointer.into());
 		fields.push(i64.into());
 		let structure = self.context.struct_type(&fields, false);
 		let environment = self.alloca_type(structure.into(), "parallel")?;
-		for (index, (_, slot)) in capture_slots.iter().enumerate() {
+		let places = outer
+			.locals
+			.iter()
+			.map(|(_, slot)| slot.pointer)
+			.chain(outer.provided.iter().map(|(_, slot)| slot.pointer))
+			.chain(outer.requirements.iter().map(|(pointer, _)| *pointer));
+		for (index, place) in places.enumerate() {
 			let field = self
 				.builder
 				.build_struct_gep(structure, environment, index as u32, "")?;
-			self.builder.build_store(field, slot.pointer)?;
+			self.builder.build_store(field, place)?;
 		}
-		let extra = captures.len() as u32;
+		let extra = outer.len() as u32;
 		let (array_value, start_value) = match iterated {
 			Iterated::Range(start) => (pointer.const_null(), start),
-			Iterated::Array(array, _) => (array, i64.const_zero()),
+			Iterated::Array(array, _)
+			| Iterated::Growing(array, _)
+			| Iterated::Elements(array, _) => (array, i64.const_zero()),
 		};
 		let field = self
 			.builder
@@ -704,19 +782,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_struct_gep(structure, environment, extra + 1, "")?;
 		self.builder.build_store(field, start_value)?;
-		let item_type = match iterated {
-			Iterated::Array(_, item) => Some(item),
-			Iterated::Range(_) => None,
+		let items = match iterated {
+			Iterated::Range(_) => Items::Range,
+			Iterated::Array(_, item) => Items::Array(item),
+			Iterated::Growing(_, item) => Items::Growing(item),
+			Iterated::Elements(_, place) => Items::Elements(place),
 		};
-		let function = self.outline_parallel_body(
-			node,
-			pattern,
-			has_index,
-			body,
-			item_type,
-			structure,
-			&capture_slots,
-		)?;
+		let function =
+			self.outline_parallel_body(node, pattern, has_index, body, items, structure, &outer)?;
 		let function_pointer = function.as_global_value().as_pointer_value();
 		let error = if self.target == Target::Native {
 			let drop_error = self
@@ -772,9 +845,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		pattern: Option<NodeId>,
 		has_index: bool,
 		body: NodeId,
-		item_type: Option<TypeId>,
+		items: Items,
 		structure: inkwell::types::StructType<'ctx>,
-		captures: &[(SymbolId, Slot<'ctx>)],
+		outer: &Outer<'ctx>,
 	) -> Result<FunctionValue<'ctx>, Error> {
 		let pointer = self.pointer_type();
 		let i64 = self.context.i64_type();
@@ -791,15 +864,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let outer_frame = self.frame.take();
 		let owner = outer_frame.as_ref().and_then(|frame| frame.owner);
 		let saved_slots = self.slots.clone();
+		let saved_provided = self.provided.clone();
 		let saved_owned = std::mem::take(&mut self.owned_locals);
 		self.begin_function(function, Repr::Void, owner);
 		self.frame_mut().throws = true;
 		let result = self.parallel_body(
-			function, node, pattern, has_index, body, item_type, structure, captures,
+			function, node, pattern, has_index, body, items, structure, outer,
 		);
 		let ended = self.end_function();
 		self.frame = outer_frame;
 		self.slots = saved_slots;
+		self.provided = saved_provided;
 		self.owned_locals = saved_owned;
 		self.builder.position_at_end(resume);
 		result?;
@@ -815,9 +890,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		pattern: Option<NodeId>,
 		has_index: bool,
 		body: NodeId,
-		item_type: Option<TypeId>,
+		items: Items,
 		structure: inkwell::types::StructType<'ctx>,
-		captures: &[(SymbolId, Slot<'ctx>)],
+		outer: &Outer<'ctx>,
 	) -> Result<(), Error> {
 		let i64 = self.context.i64_type();
 		let pointer = self.pointer_type();
@@ -831,15 +906,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.get_nth_param(3)
 			.expect("a failed index")
 			.into_pointer_value();
-		// the places of the function around it
-		for (index, (symbol, slot)) in captures.iter().enumerate() {
+		// the places of the function around it, from the environment
+		let mut places = Vec::with_capacity(outer.len());
+		for index in 0..outer.len() {
 			let field = self
 				.builder
 				.build_struct_gep(structure, environment, index as u32, "")?;
-			let place = self
-				.builder
-				.build_load(pointer, field, "")?
-				.into_pointer_value();
+			places.push(
+				self.builder
+					.build_load(pointer, field, "")?
+					.into_pointer_value(),
+			);
+		}
+		let mut places = places.into_iter();
+		for (symbol, slot) in &outer.locals {
+			let place = places.next().expect("a local");
 			self.slots.insert(
 				*symbol,
 				Slot {
@@ -848,7 +929,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				},
 			);
 		}
-		let extra = captures.len() as u32;
+		for (key, slot) in &outer.provided {
+			let place = places.next().expect("a provided value");
+			self.provided.insert(
+				*key,
+				Slot {
+					pointer: place,
+					repr: slot.repr,
+				},
+			);
+		}
+		let requirements: Vec<(PointerValue<'ctx>, TypeId)> = outer
+			.requirements
+			.iter()
+			.map(|(_, key)| (places.next().expect("a requirement"), *key))
+			.collect();
+		self.frame_mut().requirements = requirements;
+		let extra = outer.len() as u32;
 		let field = self
 			.builder
 			.build_struct_gep(structure, environment, extra, "")?;
@@ -887,7 +984,39 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// an error of this iteration reports its index
 		self.builder.build_store(failed, position)?;
 		let mark = self.mark();
-		match item_type {
+		let item_slot = match items {
+			Items::Range => None,
+			Items::Array(item_type) => {
+				let item = self.item_repr(item_type, node)?;
+				let (items, _) = self.array_parts(array)?;
+				let item_pointer = self.item_pointer(items, item, position)?;
+				Some(Slot {
+					pointer: item_pointer,
+					repr: item,
+				})
+			}
+			Items::Growing(item_type) => {
+				let item = self.item_repr(item_type, node)?;
+				let item_pointer = self.growing_at(&self.builder, array, item, position)?;
+				Some(Slot {
+					pointer: item_pointer,
+					repr: item,
+				})
+			}
+			Items::Elements(place) => {
+				let (addresses, _) = self.array_parts(array)?;
+				let address = self.item_pointer(addresses, Repr::Pointer, position)?;
+				let element = self
+					.builder
+					.build_load(pointer, address, "element")?
+					.into_pointer_value();
+				Some(Slot {
+					pointer: element,
+					repr: place,
+				})
+			}
+		};
+		match item_slot {
 			None => {
 				let value = self.builder.build_int_add(first, position, "")?;
 				if let Some(symbol) = variable {
@@ -895,14 +1024,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.store(slot, Val::new(Repr::Int(IntRepr::I64), value), node)?;
 				}
 			}
-			Some(item_type) => {
-				let item = self.item_repr(item_type, node)?;
-				let (items, _) = self.array_parts(array)?;
-				let item_pointer = self.item_pointer(items, item, position)?;
-				let item_slot = Slot {
-					pointer: item_pointer,
-					repr: item,
-				};
+			Some(item_slot) => {
 				let copied = variable.is_some_and(|symbol| {
 					matches!(
 						self.analysis.symbols.symbol(symbol).kind,

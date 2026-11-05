@@ -254,7 +254,6 @@ impl Walker<'_> {
 		value: NodeId,
 		expected: Option<TypeId>,
 	) -> TypeId {
-		self.a.reads_target = true;
 		let in_context = self.in_async_context();
 		if !in_context && self.reported_once.insert((n, CONC014.id)) {
 			let message = self.await_context_message();
@@ -465,7 +464,6 @@ impl Walker<'_> {
 		value: NodeId,
 		expected: Option<TypeId>,
 	) -> TypeId {
-		self.a.reads_target = true;
 		let detached = self.is_statement(n);
 		if let Some(statement) = self.statement
 			&& let View::Declaration {
@@ -745,7 +743,8 @@ impl Walker<'_> {
 		let current = self.current_target();
 		match target {
 			Target::Primitive(name, blocking) => {
-				self.a.reads_target = true;
+				// a blocking call: whether it may block depends on the target
+				self.a.reads_target |= mode == Mode::Blocking;
 				let acc = &mut self.acc().own;
 				if mode == Mode::Awaited {
 					acc.suspends = true;
@@ -771,6 +770,7 @@ impl Walker<'_> {
 				});
 				// workers of JavaScript are awaited (J2): a blocking call
 				// needs a thread of `native`
+				self.a.reads_target |= mode == Mode::Blocking;
 				if mode == Mode::Blocking
 					&& !TargetSet::NATIVE.contains(current)
 					&& builtins::concurrency::has_workers(self.s.target())
@@ -781,11 +781,12 @@ impl Walker<'_> {
 			Target::Local(key, name) => {
 				self.acc().deps.push((key, mode, name.clone()));
 				if mode == Mode::Blocking {
+					self.a.reads_target = true;
 					self.tasks.blocking_calls.push((n, key, name));
 				}
 			}
 			Target::External(Some(summary), name) => {
-				self.a.reads_target = true;
+				self.a.reads_target |= mode == Mode::Blocking;
 				merge(&mut self.acc().own, &summary, mode, &name, true);
 				if mode == Mode::Blocking && !summary.blocking.contains(current) {
 					self.report_blocking_call(n, &name, &summary);

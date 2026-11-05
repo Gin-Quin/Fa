@@ -833,6 +833,11 @@ impl Session {
 						source.analysis.diagnostics.extend(diagnostics);
 					}
 				}
+				// on a worker thread: the walk recurses deeply, and its depth
+				// must not depend on the caller's stack (`parallel.rs`)
+				_ if rayon::current_thread_index().is_none() => {
+					crate::parallel::install(|| crate::check::analyze(self, file));
+				}
 				_ => crate::check::analyze(self, file),
 			}
 			self.files[file.index()].done = true;

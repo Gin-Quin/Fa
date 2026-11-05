@@ -415,6 +415,8 @@ pub struct Walker<'s> {
 	/// The places the lambdas of the call being checked write (with the
 	/// write): their facts aren't valid at the entry of a sibling lambda.
 	pub(crate) lambda_entry_writes: Vec<(PlaceId, bool, NodeId)>,
+	/// The parent of each node of the tree, built on first use.
+	pub(crate) parents: std::cell::OnceCell<Vec<Option<NodeId>>>,
 	/// The places the lambda arguments of the call being checked write
 	/// (`Some` while a call has several lambda arguments).
 	pub(crate) lambda_call_writes: Option<Vec<(PlaceId, bool, NodeId)>>,
@@ -586,6 +588,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		relation_pool_places: rustc_hash::FxHashSet::default(),
 		closure_effects: FxHashMap::default(),
 		lambda_entry_writes: Vec::new(),
+		parents: std::cell::OnceCell::new(),
 		lambda_call_writes: None,
 		callee_name_node: None,
 		pinned_captures: rustc_hash::FxHashSet::default(),
@@ -1149,6 +1152,24 @@ impl Walker<'_> {
 		if std::ptr::eq(diagnostic.code, &codes::analyzer::AN001) {
 			self.unsupported_seen += 1;
 		}
+	}
+
+	/// The parent of a node (`None` for the root), from a table built once.
+	pub(crate) fn parent(&self, n: NodeId) -> Option<NodeId> {
+		let parents = self.parents.get_or_init(|| {
+			let count = self.tree.nodes.len();
+			let mut parents: Vec<Option<NodeId>> = vec![None; count];
+			for index in 0..count {
+				let node = NodeId::new(index);
+				for child in syntax::children(&self.tree, node) {
+					if let Some(slot) = parents.get_mut(child.index()) {
+						*slot = Some(node);
+					}
+				}
+			}
+			parents
+		});
+		parents.get(n.index()).copied().flatten()
 	}
 
 	/// Starts buffering the flow diagnostics of a loop round or an SCC round.

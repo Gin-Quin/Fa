@@ -81,22 +81,33 @@ impl TypeStore {
 		scratch.dedup();
 		// 5. masked forms first, so that absorption sees whole subsets
 		self.merge_nominal_members(&mut scratch);
-		// 3. absorption of non-object members
-		let mut index = 0;
-		while index < scratch.len() {
-			let member = scratch[index];
-			let absorbable = self.is_absorbable(member);
-			let absorbed = absorbable
-				&& (0..scratch.len()).any(|other| {
+		// 3. absorption of non-object members, by the members that hold more
+		// than one value (a literal only absorbs itself, already deduped):
+		// near-linear for a union of literals
+		let absorbers: SmallVec<[usize; 8]> = (0..scratch.len())
+			.filter(|&index| !self.is_singleton(scratch[index]))
+			.collect();
+		if !absorbers.is_empty() {
+			let mut kept: SmallVec<[bool; 16]> = SmallVec::from_elem(true, scratch.len());
+			for index in 0..scratch.len() {
+				let member = scratch[index];
+				if !self.is_absorbable(member) {
+					continue;
+				}
+				let absorbed = absorbers.iter().any(|&other| {
 					other != index
-						&& scratch[other] != member
+						&& kept[other] && scratch[other] != member
 						&& self.assignable(member, scratch[other], Mode::View).is_ok()
 				});
-			if absorbed {
-				scratch.remove(index);
-			} else {
-				index += 1;
+				if absorbed {
+					kept[index] = false;
+				}
 			}
+			let mut index = 0;
+			scratch.retain(|_| {
+				index += 1;
+				kept[index - 1]
+			});
 		}
 		// 4. merge touching ranges of one storage
 		self.merge_ranges(&mut scratch);
@@ -120,6 +131,23 @@ impl TypeStore {
 		match self.kind(*ty) {
 			TypeKind::Union(list) => self.list_items(list),
 			_ => std::slice::from_ref(ty),
+		}
+	}
+
+	/// Whether a type holds one value: it absorbs no other member of a union.
+	fn is_singleton(&self, ty: TypeId) -> bool {
+		match self.kind(ty) {
+			TypeKind::BoolLit(_)
+			| TypeKind::FloatLit(..)
+			| TypeKind::BigIntLit(_)
+			| TypeKind::StringLit(_)
+			| TypeKind::None
+			| TypeKind::EnumMember(..) => true,
+			TypeKind::Int(int) => {
+				let int = self.int(int);
+				int.min == int.max
+			}
+			_ => false,
 		}
 	}
 

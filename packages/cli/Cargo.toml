@@ -16,6 +16,7 @@ name = "fa-native"
 path = "src/native_main.rs"
 
 [dependencies]
+mimalloc = { version = "0.1", default-features = false }
 fa-analyzer = { path = "../analyzer" }
 fa-codebase-parser = { path = "../codebase-parser" }
 fa-codegen-js = { path = "../codegen-js" }

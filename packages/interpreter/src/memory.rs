@@ -39,17 +39,23 @@ fn count(bytes: usize, freed: bool) {
 	});
 }
 
-/// The system allocator, counting the bytes in use per thread. A program
-/// installs it with `#[global_allocator]`; the counting costs an addition
-/// to a thread-local counter per allocation.
-pub struct CountingAllocator;
+/// An allocator (the system's by default; mimalloc in the `fa` binaries,
+/// design/parallel-pipeline.md P8), counting the bytes in use per thread. A
+/// program installs it with `#[global_allocator]`; the counting costs an
+/// addition to a thread-local counter per allocation.
+pub struct CountingAllocator<A = System>(pub A);
 
-// SAFETY: every method forwards to `System` with the same arguments; the
-// counter is only statistics.
-unsafe impl GlobalAlloc for CountingAllocator {
+impl CountingAllocator {
+	/// The system allocator, counted.
+	pub const SYSTEM: Self = CountingAllocator(System);
+}
+
+// SAFETY: every method forwards to the inner allocator with the same
+// arguments; the counter is only statistics.
+unsafe impl<A: GlobalAlloc> GlobalAlloc for CountingAllocator<A> {
 	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
 		// SAFETY: forwarded as is (same contract).
-		let pointer = unsafe { System.alloc(layout) };
+		let pointer = unsafe { self.0.alloc(layout) };
 		if !pointer.is_null() {
 			count(layout.size(), false);
 		}
@@ -58,7 +64,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
 
 	unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
 		// SAFETY: forwarded as is (same contract).
-		let pointer = unsafe { System.alloc_zeroed(layout) };
+		let pointer = unsafe { self.0.alloc_zeroed(layout) };
 		if !pointer.is_null() {
 			count(layout.size(), false);
 		}
@@ -67,13 +73,13 @@ unsafe impl GlobalAlloc for CountingAllocator {
 
 	unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
 		// SAFETY: forwarded as is (same contract).
-		unsafe { System.dealloc(pointer, layout) };
+		unsafe { self.0.dealloc(pointer, layout) };
 		count(layout.size(), true);
 	}
 
 	unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
 		// SAFETY: forwarded as is (same contract).
-		let new = unsafe { System.realloc(pointer, layout, new_size) };
+		let new = unsafe { self.0.realloc(pointer, layout, new_size) };
 		if !new.is_null() {
 			if new_size >= layout.size() {
 				count(new_size - layout.size(), false);

@@ -1820,14 +1820,13 @@ impl Walker<'_> {
 	/// Whether a node is the receiver of a member (`x.f()`) or an operand of
 	/// an arithmetic or comparison node: its type decides the operation.
 	fn is_operand_or_receiver(&self, n: NodeId) -> bool {
-		(0..self.tree.nodes.len()).map(NodeId::new).any(|parent| {
-			match syntax::view(&self.tree, parent) {
+		self.parent(n)
+			.is_some_and(|parent| match syntax::view(&self.tree, parent) {
 				View::Access { target, .. } => target == n,
 				View::Arithmetic { operands, .. } => operands.iter().any(|operand| operand == n),
 				View::Comparison { operands, .. } => operands.iter().any(|operand| operand == n),
 				_ => false,
-			}
-		})
+			})
 	}
 
 	/// `x.abs()`: the receiver's type; for an integer, an arithmetic node

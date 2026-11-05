@@ -154,7 +154,16 @@ impl Walker<'_> {
 						}),
 					_ => {
 						let ty = self.check(argument, None);
-						self.s.types.widen(ty)
+						// the declared type, without the facts known here
+						// (`if value is String`: still the union)
+						let declared = match self.a.resolution(argument) {
+							crate::symbols::Resolution::Local(symbol) => {
+								let ty = self.a.symbols.symbol(symbol).ty;
+								(!ty.is_unset() && !self.s.types.is_recovering(ty)).then_some(ty)
+							}
+							_ => None,
+						};
+						self.s.types.widen(declared.unwrap_or(ty))
 					}
 				}
 			}

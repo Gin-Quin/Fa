@@ -85,6 +85,54 @@ impl Walker<'_> {
 					return None;
 				};
 				let text = tree.name(name);
+				// `Type<value>`: the annotation the value is declared with
+				if text == "Type"
+					&& self.type_declaration(callee, text).is_none()
+					&& let [argument] = arguments.iter().collect::<Vec<_>>()[..]
+					&& let Resolution::Local(symbol) = self.a.resolution(argument)
+				{
+					let declaration = self.a.symbols.symbol(symbol).decl_node;
+					let annotation = match syntax::view(&tree, declaration) {
+						View::Assignment { annotation, .. }
+						| View::Declaration { annotation, .. } => annotation,
+						_ => None,
+					};
+					if let Some(annotation) = annotation {
+						return self.spell(annotation, &Bindings::default(), depth + 1);
+					}
+					return None;
+				}
+				// a built-in operation on an object type keeps the order its
+				// argument writes the fields in (`Partial<P>`)
+				if matches!(text, "Partial" | "Required" | "Pick" | "Omit")
+					&& self.type_declaration(callee, text).is_none()
+					&& let Some(first) = arguments.first()
+				{
+					let order = match self.spell_fields(first, bindings, depth + 1) {
+						Some(Spelled::Object(fields)) => fields,
+						_ => Vec::new(),
+					};
+					let Some(Spelled::Object(result)) = self.result_fields(n) else {
+						return None;
+					};
+					let bare = |name: &str| {
+						name.trim_start_matches("readonly ")
+							.trim_start_matches("reactive ")
+							.to_string()
+					};
+					let mut fields: Vec<(String, String)> = Vec::with_capacity(result.len());
+					for (name, _) in &order {
+						if let Some(field) = result.iter().find(|(other, _)| *other == bare(name)) {
+							fields.push(field.clone());
+						}
+					}
+					for field in result {
+						if !fields.iter().any(|(name, _)| *name == field.0) {
+							fields.push(field);
+						}
+					}
+					return Some(Spelled::Object(fields));
+				}
 				// a type of this file applied: `Point(Integer)`, or a type
 				// function expanded; anything else is displayed
 				let (parameters, value) = self.type_declaration(callee, text)?;
@@ -179,6 +227,32 @@ impl Walker<'_> {
 					_ => Some(Spelled::Text(members.join(" | "))),
 				}
 			}
+			// `A - B`: the members of `A` kept, in the order `A` writes them
+			View::Arithmetic {
+				op: crate::syntax::ArithOp::Subtract,
+				operands,
+			} => {
+				let result = self.type_of(n);
+				let kept: Vec<crate::ids::TypeId> = match self.s.types.kind(result) {
+					crate::types::TypeKind::Union(list) => self.s.types.list_items(list).to_vec(),
+					_ => vec![result],
+				};
+				let first = operands.first()?;
+				let mut members = Vec::new();
+				for operand in self.union_operands(first, depth + 1)? {
+					if !kept.contains(&self.type_of(operand)) {
+						continue;
+					}
+					let member = match self.spell(operand, bindings, depth + 1) {
+						Some(member) => member.text(),
+						None => self.display(self.type_of(operand)),
+					};
+					if !members.contains(&member) {
+						members.push(member);
+					}
+				}
+				(!members.is_empty()).then(|| Spelled::Text(members.join(" | ")))
+			}
 			View::Optional(inner) => {
 				let spelled = self.spell(inner, bindings, depth + 1)?.text();
 				let union = matches!(syntax::view(&tree, inner), View::Union { .. });
@@ -215,12 +289,54 @@ impl Walker<'_> {
 				}
 				self.spell_fields(value, &Bindings::default(), depth + 1)
 			}
-			View::Call { .. } | View::Object { .. } => match self.spell(n, bindings, depth + 1)? {
-				Spelled::Object(fields) => Some(Spelled::Object(fields)),
-				Spelled::Text(_) => None,
+			View::Call { .. } | View::Object { .. } => match self.spell(n, bindings, depth + 1) {
+				Some(Spelled::Object(fields)) => Some(Spelled::Object(fields)),
+				Some(Spelled::Text(_)) => None,
+				// a type function's result (`...Omit<ParentB, { foo }>`): its fields
+				None => self.result_fields(n),
 			},
 			_ => None,
 		}
+	}
+
+	/// The member nodes of a union written directly or by a type of this
+	/// file without parameters (`TypeA` of `type TypeA = "a" | "b"`).
+	fn union_operands(&mut self, n: NodeId, depth: u32) -> Option<Vec<NodeId>> {
+		if depth > 32 {
+			return None;
+		}
+		let tree = Arc::clone(&self.tree);
+		match syntax::view(&tree, n) {
+			View::Group(inner) => self.union_operands(inner, depth + 1),
+			View::Union { operands } => Some(operands.iter().collect()),
+			View::Name(name) => {
+				let (parameters, value) = self.type_declaration(n, tree.name(name))?;
+				if !parameters.is_empty() {
+					return None;
+				}
+				self.union_operands(value, depth + 1)
+			}
+			_ => None,
+		}
+	}
+
+	/// The fields of the object type a type expression gives, displayed in
+	/// the order of the type (a type function's result).
+	fn result_fields(&mut self, n: NodeId) -> Option<Spelled> {
+		let ty = self.s.types.unfold(self.type_of(n));
+		if !matches!(self.s.types.kind(ty), crate::types::TypeKind::Object(_)) {
+			return None;
+		}
+		let fields = self.s.types.fields_of(ty).to_vec();
+		let mut spelled = Vec::with_capacity(fields.len());
+		for field in fields {
+			if field.flags.contains(crate::types::FieldFlags::PRIVATE) {
+				continue;
+			}
+			let name = self.s.types.syms.resolve(field.name).to_string();
+			spelled.push((name, self.display(field.ty)));
+		}
+		Some(Spelled::Object(spelled))
 	}
 
 	/// The declaration of the type a name of this file designates: its

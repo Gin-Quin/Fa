@@ -30,6 +30,8 @@ impl Walker<'_> {
 		// the ones not hoisted in order, then the hoisted ones not analyzed yet (modules.rs)
 		self.walk_declarations(statements);
 		self.body.scope = saved;
+		// the loops over key-set parameters, per key of each application (key_sets.rs)
+		self.check_deferred_key_loops();
 		// a `parallel()` that no operation follows (concurrency.rs)
 		self.check_parallel_views();
 		// what the backends may keep in the frames (locals.rs)

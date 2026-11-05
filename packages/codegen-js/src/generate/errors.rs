@@ -226,11 +226,13 @@ impl Generator<'_> {
 	}
 
 	/// The test that a value is a member (or any member) of an `Errors` type.
+	/// A generated class is tested by its qualified name, like the members of
+	/// a named union by their tag: each module declares the classes it uses,
+	/// so an error thrown by another module is an instance of another class.
+	/// The built-in errors are the runtime's classes (`instanceof`).
 	pub(crate) fn error_test(&mut self, subject: &Expr, ty: TypeId) -> Option<Expr> {
-		let classes: Vec<String> = match self.types.kind(ty) {
-			TypeKind::Member(nominal, index) if self.is_errors(nominal) => {
-				vec![self.error_class(nominal, index)]
-			}
+		let members: Vec<(NominalId, u16)> = match self.types.kind(ty) {
+			TypeKind::Member(nominal, index) if self.is_errors(nominal) => vec![(nominal, index)],
 			TypeKind::NamedUnion(nominal, mask) if self.is_errors(nominal) => {
 				let count = self
 					.types
@@ -238,15 +240,31 @@ impl Generator<'_> {
 					.len();
 				(0..count as u16)
 					.filter(|&index| self.types.mask_has(mask, index))
-					.map(|index| self.error_class(nominal, index))
+					.map(|index| (nominal, index))
 					.collect()
 			}
 			_ => return None,
 		};
-		let tests: Vec<String> = classes
-			.iter()
-			.map(|class| format!("{} instanceof {class}", subject.primary_text()))
-			.collect();
+		let mut tests: Vec<String> = Vec::with_capacity(members.len());
+		for (nominal, index) in members {
+			let key = self.types.nominal(nominal).key;
+			let module = self.types.decl_key_data(key).module;
+			if self.types.module_path(module) == PRELUDE {
+				let class = self.error_class(nominal, index);
+				tests.push(format!("{} instanceof {class}", subject.primary_text()));
+			} else {
+				let qualified = format!(
+					"{}.{}",
+					self.types.decl_name(key),
+					self.types.member_name(nominal, index)
+				);
+				tests.push(format!(
+					"{}?.constructor?.faName === {}",
+					subject.primary_text(),
+					js::string_literal(&qualified)
+				));
+			}
+		}
 		Some(Expr::new(tests.join(" || "), Prec::Or))
 	}
 

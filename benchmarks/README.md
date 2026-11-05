@@ -414,6 +414,22 @@ An append to a string in memory (a field, an item) now leaves its slow path to o
 
 A counted loop with a known number of rounds that fits an inline string (`for 0..4 { sku += "{digit}" }`) keeps an inline string inline (its bytes stored in the value, its tag counting one more) instead of moving it to a heap block before the loop (`src/lower/appends.rs`): `respond`'s `sku` no longer allocates, 225.3 M → 208.0 M instructions (1.10x Goose).
 
+### Fields set once, constant divisors
+
+Measured on 2026-11-05 (instructions at the audit sizes, callgrind; "before" is `compiler` at `335e776`, built and profiled the same day). A field that no code writes after the literal building its object (`design/decisions.md`, "Fields never written after construction") is read once by a method, a string with its bytes and length, and the small methods it calls on `self` are expanded into it (`src/lower/frozen.rs`): `calc`'s parser tests whether `self.text` is inline once per call instead of once per byte, and now runs as many instructions as Goose's (`factor`, `term`, `expression`: 59.2 M against 59.3 M). A `let` divisor whose value the analysis knows is divided by LLVM as a constant rather than through its run-time reciprocal (`lru`'s and `words`' key computations), and integer keys of at most 32 bits are hashed with one multiplication.
+
+| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| before (M) | 87.8 | 95.1 | 208.0 | 17.3 | 31.4 | 25.6 | 139.2 | 94.8 | 156.0 | 9.4 |
+| after (M) | 87.8 | 95.1 | 208.0 | 17.3 | 31.0 | 23.2 | 130.7 | 91.0 | 156.0 | 9.4 |
+| Goose (M) | 73.4 | 81.1 | 189.7 | 17.6 | 22.4 | 17.9 | 109.6 | 77.5 | 128.1 | 7.9 |
+| Fa / Goose | 1.20 | 1.17 | 1.10 | 0.99 | 1.38 | 1.30 | 1.19 | 1.17 | 1.22 | 1.18 |
+| CPU, Fa / Goose | 1.96 | 1.23 | 1.19 | 0.69 | 1.29 | 1.36 | 1.13 | 2.13 | 1.31 | 1.09 |
+
+CPU time: `audit/compare.py --default-sizes --runs 7`, medians, on a loaded machine (`records` and `sexp` at their default sizes are dominated by memory traffic, which the instruction counts don't see).
+
+What remains, measured: `calc`'s generator (43.0 M against Goose's 32.1 M) saves six registers per call. The room checks' 64-bit masks are not the cause alone: with the check rewritten as signed comparisons without constants, LLVM keeps the addresses of the operator literals in the freed registers instead (calc 130.7 M → 131.4 M, `strlist` +0.4 M, `respond` −3.3 M; reverted; a single comparison is unsound, the length word of an inline string holding bytes). The position-independent code is what costs them: the same IR compiled without PIC saves three registers. Marking the self-calls `notail` (no tail-recursion elimination) also saves three, but the calls it adds cost more (130.6 M → 130.9 M). `lru` (23.2 M against 17.9 M): the deletions' backward shifts (3.0 M against Goose's 0.9 M) and the probe of the index (a tag compared, then the key); `words` (31.0 M against 22.4 M): the map lookup of a string key copies an inline key of the entry to the stack to compare it.
+
 ### Against Goose's published results
 
 [Goose's results page](https://aardappel.github.io/goose/bench/results.html) (2026-10-16; Ryzen 9 9950X3D, Windows 11, clang-cl 22 `/O2`, rustc 1.98 `-O -C codegen-units=1`) compares Goose with the fastest safe Rust row of each benchmark at its large size (the "vs rust (clang)" column, inverted here into a ratio of times). This run uses the Rust row whose data structure matches the Fa port, at our default size, on Linux with clang 18:

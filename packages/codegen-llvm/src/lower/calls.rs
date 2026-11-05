@@ -167,6 +167,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
+		// `self.current()`: a small method expanded into the method being
+		// lowered (`frozen.rs`)
+		if let Some(plan) = self.method_expansion(info) {
+			return self.expand_method(node, info, plan);
+		}
 		let function = self.function_in(self.file, declaration, node)?;
 		self.call_function(node, function, info)
 	}

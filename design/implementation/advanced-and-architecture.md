@@ -2681,6 +2681,7 @@ Pointers made from Fa values are valid for the duration of the call.
 - A `throws` function returns `int` (0 success, else the 1-based position of the error member, declared in an `enum`), its result through a last out-parameter; `prefix_last_error_message()` is thread-local.
 - `REQ006` `requires` on an API function; `FFI012` an API function that uses a module-level `mutable` value not thread-safe; module-level values initialized at load time.
 - `FFI013` `cLibrary` with a JavaScript target.
+- `FFI014` a `cLibrary` API that isn't a namespace of functions with C types, throwing one `Errors` type.
 
 ### 13.7 Targets
 

@@ -255,6 +255,10 @@ export function faMonotonic() {
  * - `["u", [schema, …]]` an anonymous union: the first member that fits;
  * - `["E", [[name, value, pinned], …]]` an enumeration: its pinned
  *   values (numbers), else its member names (strings);
+ * - `["F", [path, …], [name, …]]` a `Fields` value: the array of the
+ *   dotted paths of its flags (`path`: the path of each bit; `name`: the
+ *   accepted names, flags and groups, a group standing for all its flags),
+ *   a number up to 32 flags, a bigint above;
  * - `["N", [[name, tag, kind, data], …]]` a named union, its members
  *   tagged by a `"type"` property holding their name: `"e"` a member
  *   without data (`{ "type": "Empty" }`), `"l"` a literal (`data`, written
@@ -360,6 +364,31 @@ function faJsonConvert(data, schema, where) {
 				}
 			}
 			return value;
+		}
+		case "F": {
+			if (!Array.isArray(data)) throw fail("an array of flags");
+			/** @type {string[]} */
+			const names = schema[1];
+			const big = names.length > 32;
+			let bits = big ? 0n : 0;
+			/** @type {string[]} */
+			const accepted = schema[2];
+			for (const [position, flag] of data.entries()) {
+				if (typeof flag !== "string" || !accepted.includes(flag)) {
+					const found = flag === null ? "null" : Array.isArray(flag) ? "an array" : typeof flag;
+					throw new JsonError(
+						`${where}[${position}] should be one of ${accepted.map((name) => JSON.stringify(name)).join(", ")}, not ${found}`,
+					);
+				}
+				const prefix = `${flag}.`;
+				for (const [index, name] of names.entries()) {
+					if (name === flag || name.startsWith(prefix)) {
+						if (big) bits = /** @type {bigint} */ (bits) | (1n << BigInt(index));
+						else bits = /** @type {number} */ ((bits) | (1 << index)) >>> 0;
+					}
+				}
+			}
+			return bits;
 		}
 		case "E": {
 			const pinned = schema[1].some((/** @type {any} */ member) => member[2]);
@@ -467,6 +496,8 @@ function faJsonIs(value, schema) {
 			return (
 				value !== null && typeof value === "object" && !Array.isArray(value) && !("$t" in value)
 			);
+		case "F":
+			return typeof value === (schema[1].length > 32 ? "bigint" : "number");
 		case "E":
 			return schema[1].some((/** @type {any} */ member) => member[1] === value);
 		case "N":
@@ -574,6 +605,16 @@ function faJsonWriteAs(value, schema) {
 		case "u": {
 			const member = schema[1].find((/** @type {any} */ member) => faJsonIs(value, member));
 			return member === undefined ? null : faJsonWrite(value, member);
+		}
+		case "F": {
+			/** @type {string[]} */
+			const names = schema[1];
+			const flags = names.filter((_, index) =>
+				typeof value === "bigint"
+					? ((value >> BigInt(index)) & 1n) === 1n
+					: ((value >>> index) & 1) === 1,
+			);
+			return JSON.stringify(flags);
 		}
 		case "E": {
 			const member = schema[1].find((/** @type {any} */ member) => member[1] === value);

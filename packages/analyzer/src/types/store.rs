@@ -551,6 +551,48 @@ impl TypeStore {
 		}
 	}
 
+	/// The names a `Fields` value accepts in its JSON form, with their bits:
+	/// every flag and every group, as dotted paths, a group before its
+	/// members (`nested`, `nested.a`, `nested.b`).
+	pub fn fields_names(&self, ty: TypeId) -> Vec<(String, u128)> {
+		let mut names = Vec::new();
+		self.collect_names(ty, "", 0, &mut names, 0);
+		names
+	}
+
+	fn collect_names(
+		&self,
+		ty: TypeId,
+		prefix: &str,
+		mut offset: u32,
+		names: &mut Vec<(String, u128)>,
+		depth: u32,
+	) {
+		if depth > 32 {
+			return;
+		}
+		for (name, children) in self.fields_keys(ty) {
+			let path = if prefix.is_empty() {
+				name
+			} else {
+				format!("{prefix}.{name}")
+			};
+			let width = if children.is_unset() {
+				1
+			} else {
+				self.fields_width(children)
+			};
+			names.push((
+				path.clone(),
+				fields_mask(width).checked_shl(offset).unwrap_or(0),
+			));
+			if !children.is_unset() {
+				self.collect_names(children, &path, offset, names, depth + 1);
+			}
+			offset += width;
+		}
+	}
+
 	/// The number of leaves (bits) of a `Fields` type.
 	pub fn fields_width(&self, ty: TypeId) -> u32 {
 		self.fields_width_of_kind(self.kind(ty))

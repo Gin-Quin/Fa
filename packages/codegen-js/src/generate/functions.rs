@@ -411,8 +411,10 @@ impl Generator<'_> {
 				&& let Some(keys) = arguments.get(1)
 			{
 				let values = self.in_order(&[value, keys], |g, node| g.expr(node));
+				let table = self.key_set_path_table(derived.keys);
 				let helper = self.helper(if derived.pick { "faPick" } else { "faOmit" });
-				return js::call(helper, &[values[0].text.clone(), values[1].text.clone()]);
+				let paths = format!("{table}[{}]", values[1].text);
+				return js::call(helper, &[values[0].text.clone(), paths]);
 			}
 			let value = self.expr(value);
 			return self.copy_value(value, ty);

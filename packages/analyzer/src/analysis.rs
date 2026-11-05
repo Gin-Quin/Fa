@@ -572,6 +572,7 @@ impl NodeFlags {
 }
 
 /// The analysis of one file.
+#[derive(Clone)]
 pub struct Analysis {
 	/// The analyzed file.
 	pub file: FileId,
@@ -719,21 +720,33 @@ pub struct Analysis {
 
 	// ── key sets (`check/fields.rs`) ──
 	/// The compile-time value parameters holding a key set (`keys:
-	/// DeepKeys<Value>`). Their binding in `instantiations` is the tuple
+	/// DeepKeys<Value>`), with the type parameter whose keys they hold. Their binding in `instantiations` is the tuple
 	/// type of the key set's `Fields` type and the integer literal of its
 	/// bits; their only use is the iterable of an `@for` (`key_loops`). In
 	/// JavaScript, the hidden parameter is the array of the dotted paths of
 	/// its keys.
-	pub key_set_params: rustc_hash::FxHashSet<crate::ids::ParamId>,
-	/// The `@for` loops over a key set (a `static` one, unrolled in
-	/// `unrolled`, or a key-set value parameter, unrolled per instance):
-	/// the variable is the dotted path of a key (`"nested.foo"`), a `String`.
+	pub key_set_params: FxHashMap<ParamId, ParamId>,
+	/// The `@for` loops over a key set (a `static` one, or a key-set value
+	/// parameter): the variable is the dotted path of a key
+	/// (`"nested.foo"`), a `String`.
 	pub key_loops: rustc_hash::FxHashSet<NodeId>,
 	/// The reads of the field at a key (`value[key]`, the variable of a key
-	/// loop as the index): the type parameter typing the result, which
-	/// stands for the type of the field of each key. The target is an object
-	/// value; its field at the dotted path is read.
-	pub key_reads: FxHashMap<NodeId, crate::ids::ParamId>,
+	/// loop as the index): the target's field at the key's path.
+	pub key_reads: rustc_hash::FxHashSet<NodeId>,
+	/// Per key loop, its body analyzed once per key (the spec's unrolling):
+	/// one entry for a `static` key set, one per application for a key-set
+	/// parameter (in the order of `key_set_instances`). A backend lowers the
+	/// body for key `k` with `analyses[k]` (the whole file's analysis with
+	/// the body checked for that key) instead of this one.
+	pub key_loop_bodies: FxHashMap<NodeId, Vec<KeyLoopInstance>>,
+	/// Per key-set parameter, its applications in this file: the type
+	/// argument of its subject and its binding (`Tuple(Fields type, bits)`).
+	/// On JavaScript the hidden parameter is the index of the application.
+	pub key_set_instances: FxHashMap<ParamId, Vec<(TypeId, TypeId)>>,
+	/// The patterns of `when` arms that are values of a `Fields` subject
+	/// (`Permissions { read }`, `Permissions.read`, `{}`): the arm matches
+	/// a set equal to the pattern's bits (`Analysis::constants`).
+	pub fields_patterns: rustc_hash::FxHashSet<NodeId>,
 	/// The hidden generic parameters a generic function's signature or body
 	/// derives from its own parameters: `Pick<Entity, keys>` and
 	/// `pick(entity, keys)` over a type parameter and a key-set parameter
@@ -1039,6 +1052,24 @@ pub struct ItemResults {
 	pub branches: FxHashMap<NodeId, bool>,
 	/// The value of each `@` call of the body.
 	pub constants: FxHashMap<NodeId, fa_interpreter::Value>,
+}
+
+/// The body of an `@for` over a key set, analyzed for each key
+/// ([`Analysis::key_loop_bodies`]).
+#[derive(Clone)]
+pub struct KeyLoopInstance {
+	/// The type parameter whose keys the key set holds (`None` for a
+	/// `static` key set).
+	pub param: Option<ParamId>,
+	/// The type argument of the key set's subject (`UNSET` for a `static`
+	/// key set).
+	pub subject: TypeId,
+	/// The binding of the key-set parameter (`UNSET` for a `static` key set).
+	pub key_set: TypeId,
+	/// The keys, as dotted paths, in order.
+	pub keys: Vec<String>,
+	/// The analysis of the file with the body checked for each key.
+	pub analyses: Vec<std::sync::Arc<Analysis>>,
 }
 
 /// A relation (advanced brief §8.2): a direct side `direct` on the elements
@@ -1410,9 +1441,12 @@ impl Analysis {
 			reads_target: false,
 			submitted_works: Vec::new(),
 			parallel_operations: FxHashMap::default(),
-			key_set_params: rustc_hash::FxHashSet::default(),
+			key_set_params: FxHashMap::default(),
 			key_loops: rustc_hash::FxHashSet::default(),
-			key_reads: FxHashMap::default(),
+			key_reads: rustc_hash::FxHashSet::default(),
+			key_loop_bodies: FxHashMap::default(),
+			key_set_instances: FxHashMap::default(),
+			fields_patterns: rustc_hash::FxHashSet::default(),
 			derived_params: FxHashMap::default(),
 			reactive_reads: FxHashMap::default(),
 			reactive_writes: FxHashMap::default(),

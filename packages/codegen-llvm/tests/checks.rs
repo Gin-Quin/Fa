@@ -255,6 +255,36 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn a_field_never_written_after_construction_is_read_once_by_a_method() {
+		// `self.text` is only set by the literal: `words` reads it (and its
+		// bytes and length, past the inline-or-heap test) once at its entry,
+		// and the small methods it calls on `self` are expanded into it
+		// (`frozen.rs`); a store anywhere, or a whole value of the type
+		// assigned, makes it read at each use again
+		let program = "type Scanner = {\n\ttext: String\n\tposition: Integer\n\tcount: Integer\n\tfunction current = (self): Byte => self.text.bytes().get(self.position) ?? 0\n\tfunction skipSpaces = (self) mutates self => {\n\t\twhile self.current() == 32 {\n\t\t\tself.position += 1\n\t\t}\n\t}\n\tfunction words = (self): Integer mutates self => {\n\t\tloop {\n\t\t\tself.skipSpaces()\n\t\t\tif self.current() == 0 {\n\t\t\t\tbreak\n\t\t\t}\n\t\t\twhile self.current() != 32 and self.current() != 0 {\n\t\t\t\tself.position += 1\n\t\t\t}\n\t\t\tself.count += 1\n\t\t}\n\t\tself.count\n\t}\n}\nmutable scanner = Scanner { text = \"one two\", position = 0, count = 0 }\nconsole.log(scanner.words())\n";
+		let inline_test = "4611686018427387904";
+		let ir = ir_of("frozen", program);
+		let words = function(&ir, "fa.words");
+		assert!(
+			!words.contains("@fa.current(") && !words.contains("@fa.skipSpaces("),
+			"{words}"
+		);
+		assert_eq!(count(words, inline_test), 1, "{words}");
+		for (name, change) in [
+			("frozen-field-written", "scanner.text = \"x\"\n"),
+			("frozen-field-appended", "scanner.text += \"x\"\n"),
+			(
+				"frozen-whole-written",
+				"scanner = Scanner { text = \"\", position = 0, count = 0 }\n",
+			),
+		] {
+			let ir = ir_of(name, &format!("{program}{change}"));
+			let words = function(&ir, "fa.words");
+			assert!(words.contains("@fa.current("), "{name}: {words}");
+		}
+	}
+
+	#[test]
 	fn byte_arithmetic_is_computed_in_16_bits() {
 		let ir = ir_of(
 			"narrow",

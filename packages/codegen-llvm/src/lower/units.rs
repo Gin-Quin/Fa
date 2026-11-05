@@ -948,6 +948,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 		}
 		self.reached_async_instances(&files)?;
+		// the wrappers of a C library's API (`c_library.rs`)
+		for &file in &files {
+			self.switch_file(file);
+			if self.is_c_api_file() {
+				self.lower_c_api()?;
+			}
+		}
 		// the instances and the unit's functions what is lowered calls
 		self.lower_used_functions(&files)?;
 		self.define_format_union()?;
@@ -955,6 +962,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.export_box_functions();
 		self.finish_linkage()?;
 		let mut symbols = std::mem::take(&mut self.split_mut().symbols);
+		symbols.c_exports = self.c_exports().to_vec();
 		symbols.effectful_drops = self.effectful_drops.get();
 		symbols.uses_arguments = self.uses_arguments();
 		let mut boxes: Vec<u64> = self.union_ids.borrow().values().copied().collect();
@@ -1420,6 +1428,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				function
 					.as_global_value()
 					.set_visibility(GlobalVisibility::Hidden);
+			} else if self.c_exports().iter().any(|export| *export == name) {
+				// a function of a C library: visible to C
+				function.set_linkage(Linkage::External);
 			} else {
 				function.set_linkage(Linkage::Internal);
 			}

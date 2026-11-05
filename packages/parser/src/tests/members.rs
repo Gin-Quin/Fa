@@ -138,6 +138,18 @@ fn generic_types() {
 }
 
 #[test]
+fn a_type_declares_a_type_named_error() {
+	// a nested `Errors` type of a type, reached as `Self.Error` or `Farm.Error`
+	assert_statement(
+		"type Farm = { type Error = Errors { Empty } }",
+		"type Farm = {\n\ttype Error = Errors {\n\t\tEmpty\n\t}\n}",
+	);
+	assert_statement("let e = Farm.Error.Empty", "let e = Farm.Error.Empty");
+	// the word alone is still the prelude's `Error`
+	assert_statement("let e: Error = x", "let e: Error = x");
+}
+
+#[test]
 fn typed_object_construction() {
 	assert_statement(
 		"let point = Point<Integer> { x = 12, y = 13 }",

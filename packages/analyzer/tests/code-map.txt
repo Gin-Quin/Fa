@@ -58,7 +58,6 @@
 #   REF008, REF009, REF017  returned references and references into temporaries:
 #            not implemented (pending cases adversarial/ref-24, -25, -34, -35)
 #   FFI007   C unions, bit fields, variadic functions: only met by `fa bind`
-#   FFI012, FFI013, REQ006 (on API functions)  `cLibrary` packages: not implemented
 #   TEST004, CLI*, CFG*, DEP*  reported by the `fa` command (packages/cli), not the
 #            analyzer
 # The codes of the types brief that are never emitted (EF*, FN*, TF*, TY*, CV*,

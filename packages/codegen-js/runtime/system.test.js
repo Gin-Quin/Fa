@@ -93,6 +93,17 @@ describe("faJsonParse", () => {
 		],
 	];
 
+	test("writes and reads a Fields value as the paths of its flags", () => {
+		const names = ["foo", "bar", "nested.baz1", "nested.baz2"];
+		const schema = ["F", names, ["foo", "bar", "nested", "nested.baz1", "nested.baz2"]];
+		expect(faJsonStringify(0b1001, schema)).toBe('["foo","nested.baz2"]');
+		expect(faJsonParse('["bar", "nested"]', schema)).toBe(0b1110);
+		expect(faJsonParse("[]", schema)).toBe(0);
+		const wide = Array.from({ length: 40 }, (_, index) => `f${index}`);
+		expect(faJsonParse('["f39"]', ["F", wide, wide])).toBe(1n << 39n);
+		expect(() => faJsonParse('["qux"]', schema)).toThrow(JsonError);
+	});
+
 	test("reads a value of the expected type", () => {
 		const value = faJsonParse('{"age": 36, "name": "Ada", "extra": 1}', user);
 		expect(value).toEqual({ name: "Ada", age: 36, email: undefined });

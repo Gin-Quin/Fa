@@ -1020,6 +1020,263 @@ impl<'p> Prover<'p> {
 	}
 }
 
+/// The writes of a unit's files that may change a field after the literal
+/// that built its object (`facts::WRITTEN_FIELDS`, `design/decisions.md`,
+/// "Fields never written after construction"): `field:T.f` for a store to
+/// the field `f` of a `T` (an assignment, a compound assignment, a reference
+/// to it that a callee or a `mutable use` may change, a built-in method
+/// changing it), `field:*.f` when the owner is not known (a deeper chain),
+/// and `whole:T` for a store of a whole value that may hold a `T` (an
+/// assignment of any type containing it, `.=`, a built-in method moving or
+/// replacing the items of a collection of them); `whole:*` when such a type
+/// has no stable name or is a type parameter. A field is never written after
+/// construction when none of `field:T.f`, `field:*.f`, `whole:T` and
+/// `whole:*` is in the program's union of these sets ([`frozen_field`]).
+pub(crate) fn written_fields(files: &[ProofFile<'_>]) -> BTreeSet<String> {
+	let mut out = BTreeSet::new();
+	for file in files {
+		let prover = Prover::new(file, Goal::NonNegative { checked: true });
+		prover.written_fields(&mut out);
+	}
+	out
+}
+
+/// Whether a field is never written after construction, by the program's
+/// [`written_fields`].
+pub(crate) fn frozen_field(
+	written: &BTreeSet<String>,
+	types: &TypeStore,
+	owner: TypeId,
+	name: fa_analyzer::ids::Sym,
+) -> bool {
+	let Some(owner) = stable_type_name(types, owner) else {
+		return false;
+	};
+	let name = types.syms.resolve(name);
+	!written.contains("whole:*")
+		&& !written.contains(&format!("whole:{owner}"))
+		&& !written.contains(&format!("field:*.{name}"))
+		&& !written.contains(&format!("field:{owner}.{name}"))
+}
+
+/// Adds `whole:T` for every object type a value of `ty` may hold (itself,
+/// its fields, items, members), `whole:*` for a type parameter or a type
+/// without a stable name.
+fn whole_writes(types: &TypeStore, ty: TypeId, out: &mut BTreeSet<String>) {
+	let mut seen = FxHashSet::default();
+	let mut stack = vec![ty];
+	while let Some(at) = stack.pop() {
+		if !seen.insert(at) {
+			continue;
+		}
+		match types.kind(at) {
+			TypeKind::Object(_) => {
+				match stable_type_name(types, at) {
+					Some(name) => out.insert(format!("whole:{name}")),
+					None => out.insert("whole:*".to_string()),
+				};
+				stack.extend(types.fields_of(at).iter().map(|field| field.ty));
+			}
+			TypeKind::Rec(_) => stack.extend(types.rec_target(at)),
+			TypeKind::Union(list) | TypeKind::Tuple(list) => {
+				stack.extend(types.list_items(list).iter().copied())
+			}
+			TypeKind::Member(nominal, index) => stack.push(types.payload(nominal, index)),
+			TypeKind::NamedUnion(nominal, _) => {
+				for index in 0..types.sym_list(types.nominal(nominal).members).len() {
+					stack.push(types.payload(nominal, index as u16));
+				}
+			}
+			TypeKind::Collection(_, item, key) | TypeKind::Task(item, key) => {
+				stack.push(item);
+				stack.push(key);
+			}
+			TypeKind::Pointer(item)
+			| TypeKind::Sync(_, item)
+			| TypeKind::Ref(item, _)
+			| TypeKind::CArray(item, _) => stack.push(item),
+			TypeKind::Param(_)
+			| TypeKind::ImplicitParam(..)
+			| TypeKind::Unknown
+			| TypeKind::ErrorTop => {
+				out.insert("whole:*".to_string());
+			}
+			_ => {}
+		}
+	}
+}
+
+impl Prover<'_> {
+	/// The type of the values a place holds (an assignment's target has no
+	/// type of its own): a local's declared type, a field's, an item's;
+	/// `UNKNOWN` otherwise.
+	fn place_type(&self, place: NodeId) -> TypeId {
+		let file = self.file;
+		let ty = file.analysis.type_of(place);
+		if !ty.is_unset() && ty != TypeId::UNKNOWN {
+			return ty;
+		}
+		match file.view(place) {
+			View::Group(inner) => self.place_type(inner),
+			View::Name(_) => match file.analysis.resolution(place) {
+				Resolution::Local(symbol) => file.analysis.symbols.symbol(symbol).ty,
+				_ => TypeId::UNKNOWN,
+			},
+			View::Access { members, .. } => {
+				let Some(last) = members.last() else {
+					return TypeId::UNKNOWN;
+				};
+				let ty = file.analysis.type_of(last);
+				if !ty.is_unset() {
+					return ty;
+				}
+				let Resolution::Field(shape, index) = file.analysis.resolution(last) else {
+					return TypeId::UNKNOWN;
+				};
+				file.types()
+					.shape_fields(shape)
+					.get(index as usize)
+					.map_or(TypeId::UNKNOWN, |field| field.ty)
+			}
+			View::Index { target, .. } => match file.types().kind(self.place_type(target)) {
+				TypeKind::Collection(_, item, _) => item,
+				_ => TypeId::UNKNOWN,
+			},
+			_ => TypeId::UNKNOWN,
+		}
+	}
+
+	/// See [`written_fields`].
+	fn written_fields(&self, out: &mut BTreeSet<String>) {
+		let file = self.file;
+		let types = file.types();
+		// the field a place designates: `x.f` (its owner), `a.b.f` (unknown)
+		let field_of = |place: NodeId| -> Option<String> {
+			let View::Access { target, members } = file.view(place) else {
+				return None;
+			};
+			let name = self.field_name(members.last()?)?;
+			let owner = (members.len() == 1)
+				.then(|| stable_type_name(types, file.analysis.type_of(target)))
+				.flatten();
+			let name = types.syms.resolve(name);
+			Some(match owner {
+				Some(owner) => format!("field:{owner}.{name}"),
+				None => format!("field:*.{name}"),
+			})
+		};
+		for at in 0..file.tree.nodes.len() {
+			let node = NodeId::new(at);
+			match file.view(node) {
+				View::Assignment { target, .. } | View::CompoundAssignment { target, .. } => {
+					// a named argument or a field of a literal is no store
+					let parent = self.parents.get(at).copied().unwrap_or(usize::MAX);
+					if parent != usize::MAX
+						&& matches!(
+							file.view(NodeId::new(parent)),
+							View::Call { .. } | View::Object { .. }
+						) {
+						continue;
+					}
+					// a store: to a local, a field or an item (a declaration's
+					// name, a parameter list or a member of a type is none)
+					let mut place = target;
+					while let View::Group(inner) = file.view(place) {
+						place = inner;
+					}
+					match file.view(place) {
+						View::Name(_) => {
+							if !matches!(file.analysis.resolution(place), Resolution::Local(_)) {
+								continue;
+							}
+						}
+						View::Access { members, .. } => {
+							if !members.last().is_some_and(|member| {
+								matches!(file.analysis.resolution(member), Resolution::Field(..))
+							}) {
+								continue;
+							}
+						}
+						View::Index { .. } => {}
+						// a destructuring store
+						View::Tuple { .. }
+						| View::Array { .. }
+						| View::TuplePattern { .. }
+						| View::ArrayPattern { .. } => {
+							out.insert("whole:*".to_string());
+							continue;
+						}
+						_ => continue,
+					}
+					if let Some(key) = field_of(place) {
+						out.insert(key);
+					}
+					whole_writes(types, self.place_type(place), out);
+				}
+				View::UpdateFields { target, .. } => {
+					whole_writes(types, self.place_type(target), out);
+				}
+				// a field changed under another name
+				View::Access { .. } => {
+					if let Some(key) = field_of(node)
+						&& self.changed_elsewhere(node)
+					{
+						out.insert(key);
+						whole_writes(types, file.analysis.type_of(node), out);
+					}
+				}
+				_ => {}
+			}
+			// a built-in method changing its receiver (`a.f.push(…)`: the
+			// field `f`), or moving or replacing the items of a collection
+			if let Some(info) = file.analysis.call(node)
+				&& let Callee::Builtin(id) = info.callee
+				&& let View::Call { callee, .. } = file.view(node)
+				&& let View::Access { target, members } = file.view(callee)
+			{
+				use fa_analyzer::builtins::effects::{BuiltinEffect, effects_of};
+				let effects = effects_of(fa_analyzer::builtins::get(id).path);
+				if effects.is_empty() {
+					continue;
+				}
+				// the receiver: the access without its last member
+				let count = members.len();
+				let receiver_type = match count {
+					0 | 1 => file.analysis.type_of(target),
+					_ => file
+						.analysis
+						.type_of(members.get(count - 2).expect("a member")),
+				};
+				if count >= 2
+					&& let Some(name) = self.field_name(members.get(count - 2).expect("a member"))
+				{
+					let owner = (count == 2)
+						.then(|| stable_type_name(types, file.analysis.type_of(target)))
+						.flatten();
+					let name = types.syms.resolve(name);
+					out.insert(match owner {
+						Some(owner) => format!("field:{owner}.{name}"),
+						None => format!("field:*.{name}"),
+					});
+				}
+				// adding an item replaces none (`push` may move the items of
+				// an array, not change them)
+				let builtin = fa_analyzer::builtins::get(id);
+				let moves = !matches!(builtin.name(), "push" | "reserve" | "add" | "getOrInsert")
+					&& effects.iter().any(|effect| {
+						!matches!(
+							effect,
+							BuiltinEffect::MutatesSize | BuiltinEffect::MutatesCapacity
+						)
+					});
+				if moves {
+					whole_writes(types, receiver_type, out);
+				}
+			}
+		}
+	}
+}
+
 /// A unit's part of the program's claims for the never-negative places, in
 /// a build per unit (`facts::PROOF_CLAIMS`): for each goal (`n` with
 /// overflow checks, `w` without) and each place its files store to or

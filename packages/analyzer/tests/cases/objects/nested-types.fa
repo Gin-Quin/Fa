@@ -1,0 +1,65 @@
+-- note: types declared inside a type (foreign-code.md, `Self.OpenError`):
+-- reached as `Self.Name` inside it and `Type.Name` outside, in types and
+-- values (members, typed literals, patterns, functions); `Error` can name one
+type Palette = {
+	name: String
+
+	type Color = Enum { red, green, blue }
+
+	type Shade = Union {
+		Light
+		Dark = { depth: Int64 }
+	}
+
+	type Error = Errors {
+		Empty
+		TooDark = { depth: Int64 }
+	}
+
+	type Swatch = {
+		color: Self.Color
+
+		function make = (color: Palette.Color): Palette.Swatch => Palette.Swatch { color }
+	}
+
+	function first = (self): Self.Color => Self.Color.green
+
+	function shade = (self, dark: Boolean): Self.Shade => {
+		if dark {
+			return Self.Shade.Dark { depth = 3 }
+		}
+		Self.Shade.Light
+	}
+
+	function check = (self, depth: Int64): Int64 throws Self.Error => {
+		if self.name == "" {
+			throw Self.Error.Empty
+		}
+		if depth > 5 {
+			throw Palette.Error.TooDark { depth }
+		}
+		depth
+	}
+}
+
+let palette = Palette { name = "p" }
+let colors = Palette.Color.members
+console.log(palette.first(), Palette.Color.blue, colors.length) -- prints: green blue 3
+console.log(palette.shade(true), palette.shade(false)) -- prints: Shade.Dark { depth = 3 } Shade.Light
+let shade: Palette.Shade = palette.shade(true)
+console.log(when shade is {
+	Palette.Shade.Light => "light"
+	Palette.Shade.Dark as dark => "dark {dark.depth}"
+}) -- prints: dark 3
+console.log(Palette.Swatch.make(Palette.Color.red).color) -- prints: red
+
+function describe = (palette: Palette, depth: Int64): String => {
+	let checked = palette.check(depth) catch error => return when error is {
+		Palette.Error.Empty => "empty"
+		Palette.Error.TooDark as dark => "too dark: {dark.depth}"
+	}
+	"{checked}"
+}
+console.log(describe(palette, 2), describe(palette, 9), describe(Palette { name = "" }, 1)) -- prints: 2 too dark: 9 empty
+let error: Palette.Error = Palette.Error.TooDark { depth = 7 }
+console.log(error) -- prints: Error.TooDark { depth = 7 }

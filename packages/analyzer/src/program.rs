@@ -515,12 +515,25 @@ impl Session {
 	/// files of the diagnostics are to be set).
 	pub(crate) fn worker_diagnostics(&self, modules: &[ModuleId]) -> Vec<(String, Diagnostic)> {
 		let mut found = Vec::new();
+		// the API of a C library: C calls it from any thread (`FFI012`)
+		let api = crate::c_library::configured(self.comptime.configuration.as_ref());
 		for &module in modules {
 			let path = self.types.module_path(module).to_string();
 			let Some(interface) = self.interface(module) else {
 				continue;
 			};
 			let mut code: Vec<(String, Vec<Decl>, SourceSpan)> = Vec::new();
+			if let Some(api) = api.as_ref().filter(|api| api.api_module() == path) {
+				for function in crate::c_library::api_functions(&self.types, interface, &api.prefix)
+					.unwrap_or_default()
+				{
+					if let Some(declared) = self.declared(function.key) {
+						let what = format!("`{}`, a function of the C library,", function.name);
+						code.push((what, vec![function.key], declared.span));
+					}
+				}
+			}
+			let workers = code.len();
 			if path.ends_with(".worker") {
 				let mut methods: Vec<Decl> = interface
 					.type_functions
@@ -543,7 +556,7 @@ impl Session {
 			}
 			// a call and its callee's name lead to the same value: once
 			let mut reported: Vec<(SourceSpan, Decl)> = Vec::new();
-			for (what, roots, span) in code {
+			for (position, (what, roots, span)) in code.into_iter().enumerate() {
 				let Some((value, chain)) = self.shared_value_of(&roots) else {
 					continue;
 				};
@@ -565,12 +578,25 @@ impl Session {
 							.join(", ")
 					),
 				};
-				let message = format!(
-					"{what} runs on a worker's thread: it can't use the module-level `mutable` value `{}`{through}, which every thread shares, unless it is thread-safe (a `Mutex`, an atomic, a `Channel`); keep it in the worker's fields, or pass a copy as an argument",
-					self.decl_name(value),
-				);
+				let (code, message) = if position < workers {
+					(
+						&crate::diagnostics::codes::advanced::FFI012,
+						format!(
+							"{what} may be called from any thread: it can't use the module-level `mutable` value `{}`{through}, which every thread shares, unless it is thread-safe (a `Mutex`, an atomic, a `Channel`); keep the state in a value C holds behind a `Pointer`",
+							self.decl_name(value),
+						),
+					)
+				} else {
+					(
+						&CONC008,
+						format!(
+							"{what} runs on a worker's thread: it can't use the module-level `mutable` value `{}`{through}, which every thread shares, unless it is thread-safe (a `Mutex`, an atomic, a `Channel`); keep it in the worker's fields, or pass a copy as an argument",
+							self.decl_name(value),
+						),
+					)
+				};
 				let diagnostic = Diagnostic::new(
-					&CONC008,
+					code,
 					Location {
 						file: FileId::new(0),
 						span,

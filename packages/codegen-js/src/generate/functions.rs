@@ -73,6 +73,26 @@ impl Generator<'_> {
 					self.out.append(parts.body);
 					self.out.line("}");
 				}
+				// the integer variants (`integer_variants.rs`)
+				for variant in self.integer_variants.get(&n).cloned().unwrap_or_default() {
+					let suffix = self.variant_suffix(n, &variant);
+					self.numeric_bindings = variant.into_iter().collect();
+					for (mode, instance) in self.instance_modes(n) {
+						self.tasks.next_mode = Some(mode);
+						let parts = self.function_parts(&info, indent, false);
+						let keyword = if matches!(mode, Mode::Async { .. }) {
+							"async function"
+						} else {
+							"function"
+						};
+						let name = format!("{}{suffix}", instance.unwrap_or_else(|| name.clone()));
+						self.out
+							.line(format!("{keyword} {name}{} {{", parts.parameters));
+						self.out.append(parts.body);
+						self.out.line("}");
+					}
+					self.numeric_bindings.clear();
+				}
 				if let Some((name, code)) = self.promise_api(n) {
 					self.out.line(format!("const {name} = {code};"));
 				}
@@ -421,10 +441,10 @@ impl Generator<'_> {
 					.cloned()
 					.collect();
 				let optional = matches!(self.view(callee), View::OptionalAccess { .. });
-				let receiver = if optional {
-					self.keep_value(receiver)
+				let (receiver, drop) = if optional {
+					(self.keep_value(receiver), None)
 				} else {
-					receiver
+					self.temporary_receiver(callee, receiver)
 				};
 				let omitted = self.sentinel_slots(declaration, 1);
 				let (receiver, mut values) =
@@ -432,7 +452,7 @@ impl Generator<'_> {
 				values.insert(0, receiver.text.clone());
 				let result = self.finish_call(n, Some(declaration), function, values);
 				if !optional {
-					return result;
+					return self.after_call_drop(result, drop);
 				}
 				// `receiver?.method()`: `none` when the receiver is `none`
 				let none = Expr::constant("undefined", Prec::Primary);
@@ -456,6 +476,7 @@ impl Generator<'_> {
 					return self.unsupported(n, "this method of another file");
 				};
 				let receiver = self.receiver(callee);
+				let (receiver, drop) = self.temporary_receiver(callee, receiver);
 				let rest: Vec<Argument> = info
 					.arguments
 					.iter()
@@ -464,7 +485,8 @@ impl Generator<'_> {
 					.collect();
 				let (receiver, mut values) = self.arguments(n, receiver, &rest, arguments, &[]);
 				values.insert(0, receiver.text.clone());
-				self.finish_call(n, None, function.text, values)
+				let result = self.finish_call(n, None, function.text, values);
+				self.after_call_drop(result, drop)
 			}
 			Callee::Value if self.constraint_method_call(callee).is_some() => {
 				// `item.describe()` on a type parameter: the hidden function
@@ -502,6 +524,46 @@ impl Generator<'_> {
 						match self.analysis.symbols.symbol_of_decl(declaration) {
 							Some(symbol) => Expr::name(self.reactive_instance_name(symbol), true),
 							None => function,
+						}
+					}
+					_ => function,
+				};
+				// an integer instance of a numeric-union parameter: the
+				// integer variant (`integer_variants.rs`)
+				let function = match (&sources, info.callee) {
+					(None, Callee::Function(declaration)) => {
+						let site = if application { stripped } else { n };
+						match (
+							self.call_variant(site, declaration),
+							self.analysis.symbols.symbol_of_decl(declaration),
+						) {
+							(Some(variant), Some(symbol))
+								if self
+									.integer_variants
+									.get(&declaration)
+									.is_some_and(|variants| variants.contains(&variant)) =>
+							{
+								let suffix = self.variant_suffix(declaration, &variant);
+								Expr::name(format!("{}{suffix}", self.name_of(symbol)), true)
+							}
+							_ => function,
+						}
+					}
+					// a function of another module: the variant it exports
+					(None, Callee::Value) => {
+						let site = if application { stripped } else { n };
+						match (
+							self.external_variant_suffix(site, callee),
+							self.external_of_callee(callee),
+						) {
+							(Some(suffix), Some(external)) => Expr::name(
+								self.import(
+									&external.path,
+									&format!("{}{suffix}", external.export),
+								),
+								true,
+							),
+							_ => function,
 						}
 					}
 					_ => function,

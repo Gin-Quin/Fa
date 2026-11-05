@@ -10,9 +10,8 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Bugs
 
-- Analyzer: the rule "worker code uses no non-thread-safe module-level `mutable` value" is checked on the work given to `WorkerPool.submit` on its own body only: the functions it calls are not followed (the methods of `*.worker.fa` files are, through every function they call).
-- Async follow-ups: a `Channel` can't be given to a JavaScript worker yet (a stop; atomics and mutexes are shared through `SharedArrayBuffer`, which the web only has when cross-origin isolated); `.d.ts` files of programs of several modules aren't written (only a standalone file's); the error classes a worker's call may throw are rebuilt from the method's `throws` (another class of the same name is rebuilt with a plain class); `fa test --target=native` runs on `native` only (not `wasm`), one process per test.
-- Analyzer: `TypeFromSchema` for named unions, enums, functions, recursive references and inside generic type functions.
+- Async follow-ups: the error classes a worker's call may throw are rebuilt from the method's `throws` (another class of the same name is rebuilt with a plain class); `fa test --target=native` runs on `native` only (not `wasm`), one process per test.
+- Analyzer: a callback that throws given to a collection method (`try items.map(capitalizeLiterals)`, `tf-19`, `rt-4`): `map` rethrowing its callback's errors.
 - `W-ERR-1` on a string slice (Goose ports): not reproduced (unproven slices are `E-ERR-3`, proven ones `W-ERR-1` by design); needs the snippet.
 
 ## Performance (Goose suite, native, vs Rust)
@@ -25,11 +24,12 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 - **`lru`'s narrow fields and index proofs (native gaps work, 2026-11-04)**: not provable with today's facts. The analyzer's ranges are intervals of expressions and of declared types; it has no per-field fact over every store (`analysis.rs`), and `Node.previous`/`next` receive parameters (`index`), map values and other fields, all `Integer`. A sound 32-bit `previous`/`next` (and `unlink` without its four checks) needs a relational invariant: every value stored into those fields, into `free` and into the values of `positions` is an index of `nodes`, and `nodes` never shrinks (Goose's typed pool references; in Fa, an index type tied to an array, or a whole-program value-flow analysis with array-length bounds checked at growth). `key` and `value` can't narrow at all: `key` comes from the run-time size, `value` grows by `+= 1`. So proofs give at most 24-byte nodes; 16 bytes needs the program to say `Int32`. `unlink` is now inlined (leaves of up to 64 nodes, `src/lower/mod.rs`).
 - Bun: `push` exceeds a 4 GB cap through the generator's dead bigints, and the 64-bit generator compiled to `BigInt` dominates the Goose-suite times on Bun (inline shifts helped; see `design/decisions.md`). Next step: 64-bit values as two 32-bit numbers in JavaScript, at least in functions that only use bitwise operations.
 
+- **Index proofs across units**: the never-negative fact is published per unit; the index proofs themselves still need a single-file program (which array a claim refers to across units). Design in `design/decisions.md`. After the Goose gaps.
+
 ## Features still missing (from the engineers' reports)
 
-- Native: relations, columnar per-field layout, reactivity, compile-time maps/sets/enums/ranges (*assigned to the LLVM fourth shift*); foreign code: `CArray` values, `CStruct` by value off x86-64, `Pointer.allocate`/`free`, WebAssembly imports, `build.cLibrary`; JS foreign code: structs by value, `destroy` of resources of a type of another file, inside unions of several objects, recursive types or the other fields of a temporary. Concurrency: `parallel()` views, `WorkerPool`, `for parallel` over growing collections and columnars, requirements and `mutable use` in parallel bodies.
-- Analyzer: relations across files, `@import`, `@extern` (*foreign code*); implied relation effects for reactivity; `TypeFromSchema` of named unions, enumerations, functions, recursive references and inside generic type functions; JSON default values and named unions.
+- Native: foreign code: `CArray` values, `CStruct` by value off x86-64, `Pointer.allocate`/`free`, WebAssembly imports, `build.cLibrary`; JS foreign code: structs by value. Concurrency: `parallel()` of maps. JavaScript: compile-time ranges (`static span = 1..5`, `AN001`).
+- Analyzer: relations across files, `@import`, `@extern` (*foreign code*); implied relation effects for reactivity; `TypeFromSchema` of `Fields`, of enumerations with pinned values, and inside a generic type other than as its value; JSON default values and named unions.
 - Native: compile-time named union members (`Schema` values).
 - Tooling: hot reloading by module swap (D43; `fa develop` restarts today), the language server resolving dependencies, `fa build` without `--target` building every configured target, `fa test` running test files in separate workers, `DependencySource.generate`, path dependencies outside a workspace (decided: allowed).
-- JavaScript: a reference to a primitive element of a `Pool` (`pool.find(…)`), the guard of an awaited `lock()` used as a temporary. (User functions returning a reference to a primitive are rejected by the analyzer, `REF004`.)
 - Reviews to schedule: a second analyzer review (M2/M3 features), a review of the tooling (CLI, formatter, workspaces), a final review of both backends.

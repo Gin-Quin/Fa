@@ -3,6 +3,7 @@
 -- like any other: a move is known by a drop flag, never by a zero value
 type Handle = {
 	descriptor: Int32
+	function describe = (self): String => "handle {self.descriptor}"
 	function destroy = (self) => console.log("closed {self.descriptor}")
 }
 
@@ -47,5 +48,7 @@ do {
 open(7) -- prints: closed 7
 mutable kept: Array<Handle> = [open(4), open(5)]
 kept.take(0) -- prints: closed 4
+console.log(open(8).describe()) -- prints: handle 8
+-- prints: closed 8
 console.log("end") -- prints: end
 -- prints: closed 5

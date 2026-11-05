@@ -602,3 +602,89 @@ mod with_llvm {
 		assert!(message.contains("`Array<Array<Integer>>`"), "{message}");
 	}
 }
+
+/// A resource moved on every path or on none has no drop flag left in the
+/// optimized IR: only a move on some paths keeps one (`design/decisions.md`,
+/// "A type holding a task is move-only").
+#[cfg(fa_llvm)]
+mod drop_flags {
+	use std::path::PathBuf;
+	use std::sync::Arc;
+
+	use fa_analyzer::session::Session;
+	use fa_codegen_llvm::{OptLevel, Options, Target, compile};
+
+	/// The optimized IR of `main` of a foreign file.
+	fn foreign_main(name: &str, source: &str) -> String {
+		let mut session = Session::new();
+		let file = session.set_source("main.foreign", Arc::from(source));
+		session.analyze_file(file);
+		let options = Options {
+			emit_ir: true,
+			opt_level: OptLevel::O3,
+			..Options::default()
+		};
+		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+			.join("fa-checks")
+			.join(name);
+		let artifact = compile(
+			&session,
+			file,
+			"test.foreign.fa",
+			Target::Native,
+			&options,
+			&output,
+		)
+		.unwrap_or_else(|error| panic!("{name}: {error}"));
+		let ir = std::fs::read_to_string(artifact.ir.expect("the IR")).expect("the IR file");
+		let start = ir.find(" @main(").expect("main");
+		let start = ir[..start].rfind("define").expect("main");
+		let end = ir[start..].find("\n}\n").expect("the end of main");
+		ir[start..start + end].to_string()
+	}
+
+	#[test]
+	fn only_a_move_on_some_paths_keeps_a_drop_flag() {
+		// `destroy` calls `usleep` with the descriptor: one call per drop
+		let head = "function release: (microseconds: UInt32) => Int32 = @extern(\"usleep\")\ntype Handle = {\n\tdescriptor: UInt32\n\tfunction destroy = (self) => {\n\t\trelease(self.descriptor)\n\t}\n}\nfunction close = (handle: Handle) => console.log(\"closing\")\n";
+		let cases = [
+			// moved on every path: destroyed by `close` only, no flag
+			(
+				"moved",
+				"do {\n\tlet handle = Handle { descriptor = 1 }\n\tclose(handle)\n\tconsole.log(\"after\")\n}\n",
+				1,
+				false,
+			),
+			// never moved: destroyed at the end of its block, no flag
+			(
+				"kept",
+				"do {\n\tlet handle = Handle { descriptor = 2 }\n\tconsole.log(\"after\")\n}\n",
+				1,
+				false,
+			),
+			// moved on one path: destroyed by `close` or at the end, by its flag
+			(
+				"maybe",
+				"do {\n\tlet handle = Handle { descriptor = 3 }\n\tif arguments.length > 1 {\n\t\tclose(handle)\n\t}\n\tconsole.log(\"after\")\n}\n",
+				2,
+				true,
+			),
+			// a field moved out, then assigned again: no flag either
+			(
+				"field",
+				"type Holder = { label: String, handle: Handle }\ndo {\n\tmutable holder = Holder { label = \"h\", handle = Handle { descriptor = 4 } }\n\tclose(holder.handle)\n\tholder.handle = Handle { descriptor = 5 }\n\tconsole.log(holder.label)\n}\n",
+				2,
+				false,
+			),
+		];
+		for (name, body, drops, flagged) in cases {
+			let ir = foreign_main(name, &format!("{head}{body}"));
+			assert_eq!(
+				ir.matches("call i32 @usleep(").count(),
+				drops,
+				"{name}:\n{ir}"
+			);
+			assert_eq!(ir.contains("label %drop_owned"), flagged, "{name}:\n{ir}");
+		}
+	}
+}

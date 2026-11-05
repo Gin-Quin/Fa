@@ -576,7 +576,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.load(self.array_item_slot(array, item, index)?)
 	}
 
-	fn array_item_slot(
+	pub(crate) fn array_item_slot(
 		&self,
 		array: PointerValue<'ctx>,
 		item: Repr,
@@ -627,7 +627,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The items and the representation of an array value.
-	fn array_of(
+	pub(crate) fn array_of(
 		&self,
 		value: Val<'ctx>,
 		node: NodeId,
@@ -1052,7 +1052,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A new empty array of items of this representation, with room for `capacity`.
-	fn empty_array(
+	pub(crate) fn empty_array(
 		&mut self,
 		item: Repr,
 		capacity: IntValue<'ctx>,

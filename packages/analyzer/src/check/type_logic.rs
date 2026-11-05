@@ -35,7 +35,7 @@ impl Walker<'_> {
 		matches!(
 			self.view(n),
 			View::If { .. } | View::When { .. } | View::Do(_)
-		)
+		) || self.schema_logic.contains(&n)
 	}
 
 	/// The logic of a type declaration: its value node, when it is one.
@@ -133,7 +133,15 @@ impl Walker<'_> {
 			}
 		}
 		self.type_function_depth += 1;
+		let owner = self
+			.s
+			.types
+			.syms
+			.resolve(self.a.symbols.symbol(symbol).name)
+			.to_string();
+		let saved = self.schema_identity.replace((owner, 0));
 		let ty = self.select_type(at, value, bindings);
+		self.schema_identity = saved;
 		self.type_function_depth -= 1;
 		for (param_symbol, previous) in bound {
 			match previous {
@@ -207,6 +215,10 @@ impl Walker<'_> {
 				TypeId::NEVER
 			}
 			View::Do(body) => self.select_type(at, body, bindings),
+			// `TypeFromSchema`: its schema evaluated for this application (schemas.rs)
+			View::Call { arguments, .. } if self.schema_logic.contains(&n) => {
+				self.apply_type_from_schema(at, arguments, bindings)
+			}
 			View::Block { statements } => match statements.last() {
 				Some(last) => self.select_type(at, last, bindings),
 				None => TypeId::NONE,

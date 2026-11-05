@@ -1,4 +1,4 @@
--- pending: M3 (`TypeFromSchema` inside a generic type function is AN001; `items.map(capitalizeLiterals)` is E-TYPE-1: a named function given where `(item, index)` is expected)
+-- pending: M3 (`try items.map(capitalizeLiterals)`: a callback that throws, whose errors `map` would rethrow, is E-TYPE-1)
 -- brief: ✗ tf-19: TF004 (the compile-time function throws) "Only string literals are supported"
 -- (types-at-runtime.md: `type Invalid = CapitalizeSecondLetter(Integer)`)
 type SchemaError = Errors {

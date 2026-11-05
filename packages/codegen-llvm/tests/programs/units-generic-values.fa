@@ -1,0 +1,31 @@
+-- A package compiled per unit with generic function values across units
+-- (design/decisions.md, "Generic function tables per unit"): the tables and
+-- indices are defined by the entry object once every instance is known.
+-- file: library/transforms.fa
+export namespace = {
+	-- a generic lambda made inside an instance of a generic function
+	function wrapper = <Prefix>(prefix: Prefix) => <Item>(value: Item) => (prefix, value)
+	-- a generic function value called inside a generic function
+	function applyTwice = <Item>(transform: <Value>(value: Value) => Value, value: Item): Item => transform(transform(value))
+}
+-- file: library/printing.fa
+export function = (transform: <Value>(value: Value) => Value) => {
+	console.log(transform(1), transform("one"), transform(true))
+}
+-- file: application/main.fa
+function identity = <Item>(value: Item): Item => value
+function pairUp = <Item>(value: Item): Tuple<Item, Item> => (value, value)
+export function = () => {
+	library.printing(identity)
+	let twice = library.transforms.applyTwice(identity, 4)
+	let words = library.transforms.applyTwice(<Value>(value: Value) => value, "same")
+	console.log(twice, words)
+	let tagged = library.transforms.wrapper("tag")
+	console.log(tagged(1), tagged(2.5))
+	let tuple: <Item>(value: Item) => Tuple<Item, Item> = pairUp
+	console.log(tuple(7), tuple("x"))
+}
+-- prints: 1 one true
+-- prints: 4 same
+-- prints: ("tag", 1) ("tag", 2.5)
+-- prints: (7, 7) ("x", "x")

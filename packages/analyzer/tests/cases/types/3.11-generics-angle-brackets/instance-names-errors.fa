@@ -1,0 +1,9 @@
+-- note: a mismatch between instances of a named generic type names both
+type Pair<Left, Right> = {
+	left: Left
+	right: Right
+	function swap = (self) => Pair<Right, Left> { left = self.right, right = self.left }
+}
+let pair = Pair<Integer, String> { left = 1, right = "one" }
+let swapped = pair.swap()
+let wrong: Pair<Integer, Integer> = swapped -- error: E-TYPE-1 (`a `Pair<String, Integer>` is not accepted where a `Pair<Integer, Integer>` is expected`)

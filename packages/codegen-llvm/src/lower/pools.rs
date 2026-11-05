@@ -38,7 +38,7 @@ pub(crate) enum Cursor<'a> {
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// The representation of the elements of a pool.
-	fn pool_element(&self, pool: Repr, node: NodeId) -> Result<Repr, Error> {
+	pub(crate) fn pool_element(&self, pool: Repr, node: NodeId) -> Result<Repr, Error> {
 		let (Repr::Pool(item) | Repr::Columnar(item)) = pool else {
 			return Err(self.unsupported(node.index(), "this pool"));
 		};
@@ -61,7 +61,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The place representation of the elements of a pool or a columnar.
-	fn pool_place(&self, pool: Repr, node: NodeId) -> Result<Repr, Error> {
+	pub(crate) fn pool_place(&self, pool: Repr, node: NodeId) -> Result<Repr, Error> {
 		let (Repr::Pool(item) | Repr::Columnar(item)) = pool else {
 			return Err(self.unsupported(node.index(), "this pool"));
 		};
@@ -119,7 +119,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Stores an element at an address of a pool, or into the columns of a
 	/// columnar.
-	fn element_write(
+	pub(crate) fn element_write(
 		&self,
 		builder: &Builder<'ctx>,
 		place: Repr,
@@ -231,7 +231,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// `body` gets the address of each element and the exit block. The
 	/// position moves past the element before the body runs, so that the
 	/// body may remove it.
-	fn pool_each(
+	pub(crate) fn pool_each(
 		&mut self,
 		pool: PointerValue<'ctx>,
 		mut body: impl FnMut(&mut Self, PointerValue<'ctx>, BasicBlock<'ctx>) -> Result<(), Error>,
@@ -649,6 +649,50 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				self.call_runtime("fa_pool_clear", &[pointer.into()])?;
 				Ok(Val::void())
+			}
+			// a new collection of the same kind: copies of the elements kept
+			("filter", [callback]) => {
+				let predicate = self.expr(*callback)?;
+				if predicate.repr == Repr::Never {
+					return Ok(predicate);
+				}
+				let callback_node = *callback;
+				let repr = self.node_repr(node)?;
+				let kept_element = self.pool_element(repr, node)?;
+				let kept_place = self.pool_place(repr, node)?;
+				let kept = self.collection_new(&self.builder, repr, kept_element)?;
+				let add = self.runtime.function("fa_pool_add_slot")?;
+				self.pool_each(pointer, |this, address, _| {
+					let slot = Slot {
+						pointer: address,
+						repr: place,
+					};
+					let holds =
+						this.call_collection_callback(predicate, callback_node, &[], &[slot], &[])?;
+					let holds = this
+						.convert(holds, Repr::Bool, callback_node.index())?
+						.int();
+					let copy_block = this.append_block("pool_keep");
+					let next = this.append_block("pool_next");
+					this.builder
+						.build_conditional_branch(holds, copy_block, next)?;
+					this.builder.position_at_end(copy_block);
+					let value = this.load(slot)?;
+					let value = this.without_links(value)?;
+					let copy = this.emit_copy(value)?;
+					let copy = this.convert(copy, kept_element, node.index())?;
+					let target = this.call_value(add, &[kept.into()])?.into_pointer_value();
+					this.element_write(
+						&this.builder,
+						kept_place,
+						target,
+						copy.value.expect("an element"),
+					)?;
+					this.builder.build_unconditional_branch(next)?;
+					this.builder.position_at_end(next);
+					Ok(())
+				})?;
+				Ok(self.fresh(Val::new(repr, kept)))
 			}
 			// the other methods read a view of the elements
 			(_, _) if !matches!(self.node_repr(node)?, Repr::Pool(_)) => {

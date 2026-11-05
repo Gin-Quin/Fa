@@ -441,9 +441,10 @@
 //! literal's type node (the `target` of its `TypedObject`), the object
 //! `T {}` with the defaults of `T`'s fields (recorded when they are all
 //! known). The task given to `submit` escapes (its captures are copies),
-//! and `submit` starts a task (`starts`). Its own body follows the rules
-//! of worker code (`CONC008`: no module-level `mutable` value that isn't
-//! thread-safe). Workers and pools also exist on Bun, Node and the web
+//! and `submit` starts a task (`starts`). It follows the rules of worker
+//! code (`CONC008`: no module-level `mutable` value that isn't
+//! thread-safe, through every function it calls: the program's check,
+//! from `submitted_works`). Workers and pools also exist on Bun, Node and the web
 //! (step J2: `worker_threads`, Web Workers), where a call of a worker is
 //! awaited or started: blocking, it is `CONC010` off `native`.
 //!
@@ -681,6 +682,14 @@ pub struct Analysis {
 	/// The analysis read `target` or `configuration`: it depends on the
 	/// target (D22).
 	pub reads_target: bool,
+	/// The bodies of the work given to `WorkerPool.submit` (a lambda, or
+	/// the name of a function): what they use is published for the
+	/// program's worker rule (`CONC008`, `Interface::worker_work`).
+	pub submitted_works: Vec<NodeId>,
+	/// The calls of an operation of a parallel view
+	/// (`numbers.parallel().map(f)`), with its name: `map`, `filter`,
+	/// `reduce`, `some`, `every` or `sum` (native: `lower/parallel.rs`).
+	pub parallel_operations: FxHashMap<NodeId, &'static str>,
 
 	// ── reactivity (advanced brief §11, `check/reactivity.rs`) ──
 	/// Every read of a reactive place that may run while a `derived` value
@@ -1318,6 +1327,8 @@ impl Analysis {
 			comptime_locals: FxHashMap::default(),
 			build_inputs: Vec::new(),
 			reads_target: false,
+			submitted_works: Vec::new(),
+			parallel_operations: FxHashMap::default(),
 			reactive_reads: FxHashMap::default(),
 			reactive_writes: FxHashMap::default(),
 			reactive_args: FxHashMap::default(),

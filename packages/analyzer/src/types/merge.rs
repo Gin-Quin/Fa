@@ -174,6 +174,18 @@ impl Merger<'_> {
 				names.push((module, 0, name));
 			}
 		}
+		if let Some(&(name, arguments)) = self.view.applications.get(&local)
+			&& let Some(module) = self.module
+		{
+			let name = self.sym(name);
+			let module = self.module(module);
+			let arguments = self.list(arguments);
+			let mut late = self.late(&global);
+			let applications = late.applications.entry(global).or_default();
+			if !applications.iter().any(|(other, _, _)| *other == module) {
+				applications.push((module, name, arguments));
+			}
+		}
 	}
 
 	/// The shard of the late-bound data of the global types that holds the

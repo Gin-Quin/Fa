@@ -119,6 +119,10 @@ pub struct GlobalLate {
 	/// their declarations: a view shows the first one among the modules it
 	/// may read (deterministic whatever the order of the merges).
 	pub(crate) names: FxHashMap<TypeId, Vec<(ModuleId, u32, Sym)>>,
+	/// The instances of named generic object types: the generic type's
+	/// name and the type arguments, with the module that made them (a view
+	/// reads the first among the modules it may read, as for `names`).
+	pub(crate) applications: FxHashMap<TypeId, Vec<(ModuleId, Sym, ListId)>>,
 	pub(crate) generic_nominals: FxHashMap<DeclKey, (NominalId, Vec<ParamId>)>,
 	/// The recursive reference of each declaration and arguments, once its
 	/// target is set (what the views read).
@@ -273,6 +277,10 @@ pub struct TypeStore {
 	/// The name an object type was first declared with in this view
 	/// (display only: the type stays structural).
 	pub(crate) names: FxHashMap<TypeId, Sym>,
+	/// The instances of named generic object types made in this view
+	/// (`Pair<Integer, String>`): the generic type's name and the type
+	/// arguments, so that a substitution of an instance names its result.
+	pub(crate) applications: FxHashMap<TypeId, (Sym, ListId)>,
 	/// The declaration of each generic nominal type, by its key: the nominal
 	/// whose payloads use the parameters, and the parameters.
 	pub(crate) generic_nominals: FxHashMap<DeclKey, (NominalId, Vec<ParamId>)>,
@@ -339,6 +347,7 @@ impl TypeStore {
 			spellings: ValueLayer::new(Arc::clone(&global.spellings)),
 			payloads: FxHashMap::default(),
 			names: FxHashMap::default(),
+			applications: FxHashMap::default(),
 			generic_nominals: FxHashMap::default(),
 			recs: RecordLayer::new(Arc::clone(&global.recs)),
 			rec_by_args: FxHashMap::default(),
@@ -599,6 +608,9 @@ impl TypeStore {
 		}
 		seen.push(ty);
 		match self.kind(ty) {
+			TypeKind::Rec(_) => self
+				.rec_target(ty)
+				.is_some_and(|target| self.holds_move_only(target, holds, seen)),
 			TypeKind::Task(..) => holds != Holds::Resource,
 			TypeKind::Sync(crate::types::SyncKind::Worker, _) => holds == Holds::MoveOnly,
 			TypeKind::Object(shape) => {
@@ -955,6 +967,39 @@ impl TypeStore {
 		}
 		let name = self.syms.intern(name);
 		self.names.entry(ty).or_insert(name);
+	}
+
+	/// Records an instance of a named generic object type (`Pair<Integer,
+	/// String>`): its generic type's name and its type arguments.
+	pub fn record_application(&mut self, ty: TypeId, name: &str, arguments: &[TypeId]) {
+		if !matches!(self.kind(ty), TypeKind::Object(_)) {
+			return;
+		}
+		let name = self.syms.intern(name);
+		let arguments = self.list(arguments);
+		self.applications.entry(ty).or_insert((name, arguments));
+	}
+
+	/// The generic type's name and the type arguments of an instance of a
+	/// named generic object type, if `ty` is one.
+	pub fn application(&self, ty: TypeId) -> Option<(Sym, ListId)> {
+		if let Some(&found) = self.applications.get(&ty) {
+			return Some(found);
+		}
+		if is_local(ty.0) {
+			return None;
+		}
+		let late = self.global_late(&ty);
+		let applications = late.applications.get(&ty)?;
+		applications
+			.iter()
+			.filter(|(module, _, _)| {
+				self.visible
+					.as_ref()
+					.is_none_or(|visible| visible.contains(module))
+			})
+			.min_by(|(a, _, _), (b, _, _)| self.module_path(*a).cmp(self.module_path(*b)))
+			.map(|&(_, name, arguments)| (name, arguments))
 	}
 
 	/// The declared name of an object type, if any: the one of this view,

@@ -251,6 +251,7 @@ impl Walker<'_> {
 		uses.sort_unstable();
 		uses.dedup();
 
+		let worker_work = self.worker_work();
 		let export_names = self.export_names(root);
 		let reads_target = self.a.reads_target;
 		let externs = self.a.externs.clone();
@@ -281,7 +282,46 @@ impl Walker<'_> {
 		interface.declared = declared;
 		interface.uses = uses;
 		interface.reads_target = reads_target;
+		interface.worker_work = worker_work;
 		interface.complete = true;
+	}
+
+	/// What the work given to `WorkerPool.submit` uses (`worker_work`): the
+	/// names of module-level declarations and the calls of functions in its
+	/// body, or the function given by name.
+	fn worker_work(&mut self) -> Vec<(DeclKey, crate::diagnostics::SourceSpan)> {
+		let mut found = Vec::new();
+		let works = self.a.submitted_works.clone();
+		let tree = std::sync::Arc::clone(&self.tree);
+		for work in works {
+			let mut stack = vec![work];
+			while let Some(node) = stack.pop() {
+				let used = match self.a.resolution(node) {
+					Resolution::Local(symbol) => {
+						let data = self.a.symbols.symbol(symbol);
+						let module_level = matches!(
+							self.a.symbols.scope(data.scope).kind,
+							ScopeKind::Module | ScopeKind::Namespace
+						);
+						(module_level || data.kind == SymbolKind::Function)
+							.then(|| self.symbol_key(symbol))
+					}
+					Resolution::External(key) => Some(key),
+					_ => None,
+				};
+				let called = match self.a.calls.get(&node).map(|call| &call.callee) {
+					Some(&Callee::Function(function)) => self.node_key(function),
+					_ => None,
+				};
+				for key in used.into_iter().chain(called) {
+					found.push((key, self.span(node)));
+				}
+				stack.extend(syntax::children(&tree, node));
+			}
+		}
+		found.sort_by_key(|&(key, span)| (span.start, span.end, key));
+		found.dedup();
+		found
 	}
 
 	/// The names the declarations other files may use are exported as: the

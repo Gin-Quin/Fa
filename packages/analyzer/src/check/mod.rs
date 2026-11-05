@@ -339,6 +339,20 @@ pub struct Walker<'s> {
 	pub(crate) generic_params: FxHashMap<NodeId, Vec<crate::ids::ParamId>>,
 	/// The parameters of the generic declarations being walked: rigid, not inferred.
 	pub(crate) rigid_params: Vec<crate::ids::ParamId>,
+	/// The `TypeFromSchema` applications that are the value of a generic
+	/// type function (or a result of its logic): built per application
+	/// (`schemas.rs`).
+	pub(crate) schema_logic: rustc_hash::FxHashSet<NodeId>,
+	/// Inside such an application at its declaration: the `@` calls are
+	/// evaluated per application, not there.
+	pub(crate) deferred_comptime: u32,
+	/// The declaration applying `TypeFromSchema` and the hash of its schema:
+	/// the identity of the named unions, enumerations and recursive types it
+	/// builds (`schemas.rs`).
+	pub(crate) schema_identity: Option<(String, u64)>,
+	/// An error thrown by the compile-time code of a type function's
+	/// application is `TF004` (`schemas.rs`).
+	pub(crate) in_type_function_code: bool,
 	/// The bindings of each instance of a generic type (its functions are substituted).
 	pub(crate) instance_bindings: FxHashMap<TypeId, crate::types::Bindings>,
 	/// The type parameters of the generic built-in methods (`Array.map`), per owner.
@@ -430,6 +444,11 @@ pub struct Walker<'s> {
 	pub(crate) foreign: foreign::ForeignState,
 	/// The `for parallel` loops whose body is being walked (`concurrency.rs`).
 	pub(crate) parallel: Vec<concurrency::ParallelFrame>,
+	/// The lambdas given to an operation of a parallel view: their bodies
+	/// follow the rules of a parallel body (`concurrency.rs`).
+	pub(crate) parallel_callbacks: rustc_hash::FxHashSet<NodeId>,
+	/// The `parallel()` members resolved, and those an operation follows.
+	pub(crate) parallel_views: Vec<(NodeId, bool)>,
 	/// Async: awaited and started calls, summaries (`tasks.rs`).
 	pub(crate) tasks: tasks::TaskState,
 	/// The effect being applied only adds elements (`push`, `insert`): the
@@ -525,6 +544,10 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		hoisted_blocks: rustc_hash::FxHashSet::default(),
 		generic_params: FxHashMap::default(),
 		rigid_params: Vec::new(),
+		schema_logic: rustc_hash::FxHashSet::default(),
+		deferred_comptime: 0,
+		schema_identity: None,
+		in_type_function_code: false,
 		constraint_depth: 0,
 		builtin_params: FxHashMap::default(),
 		instance_bindings: FxHashMap::default(),
@@ -541,6 +564,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		relation_pool_places: rustc_hash::FxHashSet::default(),
 		closure_effects: FxHashMap::default(),
 		parallel: Vec::new(),
+		parallel_callbacks: rustc_hash::FxHashSet::default(),
+		parallel_views: Vec::new(),
 		tasks: tasks::TaskState::default(),
 		declared_effect_sets: FxHashMap::default(),
 		module_values: FxHashMap::default(),

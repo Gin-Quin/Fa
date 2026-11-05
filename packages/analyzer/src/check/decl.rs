@@ -30,6 +30,8 @@ impl Walker<'_> {
 		// the ones not hoisted in order, then the hoisted ones not analyzed yet (modules.rs)
 		self.walk_declarations(statements);
 		self.body.scope = saved;
+		// a `parallel()` that no operation follows (concurrency.rs)
+		self.check_parallel_views();
 		// what the backends may keep in the frames (locals.rs)
 		self.record_non_escaping();
 		TypeId::VOID
@@ -737,6 +739,7 @@ impl Walker<'_> {
 		let params = self.declare_generics(n, &text, parameters);
 		let rigid = self.rigid_params.len();
 		self.rigid_params.extend(params.iter().copied());
+		self.note_schema_logic(value);
 		let ty = self.declare_type(n, name, value);
 		self.rigid_params.truncate(rigid);
 		self.body.scope = saved;

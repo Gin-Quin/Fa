@@ -904,6 +904,17 @@ impl Walker<'_> {
 			};
 			results.push((member, result));
 		}
+		// an integer member: an instance computes as that integer, its
+		// overflow checked (the flow can't bound a parameter's values)
+		if matches!(
+			op,
+			ArithOp::Add | ArithOp::Subtract | ArithOp::Multiply | ArithOp::Power
+		) && results
+			.iter()
+			.any(|&(_, result)| self.s.types.as_int(result).is_some())
+		{
+			self.set_flag(n, NodeFlags::OVERFLOW_NATIVE | NodeFlags::OVERFLOW_JS);
+		}
 		let widen = |w: &Self, ty: TypeId| w.s.types.widen(ty);
 		if results
 			.iter()
@@ -1502,7 +1513,13 @@ impl Walker<'_> {
 			_ => false,
 		};
 		self.a.coercions.remove(&n);
-		self.clear_flag(n, ARITH_BITS | NodeFlags::SINK_CHECK);
+		// a type parameter with a union constraint keeps the bits its check
+		// set (`constrained_arithmetic`): the flow can't bound its values
+		let constrained = self.constraint_members(place.ty).is_some()
+			|| self.constraint_members(actual).is_some();
+		if !constrained {
+			self.clear_flag(n, ARITH_BITS | NodeFlags::SINK_CHECK);
+		}
 		let symbol = place.symbol.filter(|_| place.assignable && !place.below);
 		if !int || !self.body.flow.reachable {
 			self.a.arith.remove(&n);

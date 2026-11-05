@@ -1,0 +1,45 @@
+-- skip-target: wasm native-freestanding
+-- Channels given to workers (concurrency.md, "Thread safety and
+-- synchronization"): the same channel on both sides. A worker squares what
+-- it receives until the channel is closed, and sends the squares back
+-- (natively the same memory; on JavaScript shared memory, which a web page
+-- only has when it is cross-origin isolated).
+-- file: Squarer.worker.fa
+use { Channel } = std.concurrency
+
+export type = {
+	label: String
+
+	async function serve = (self, inputs: Channel<Integer>, outputs: Channel<Integer>): Integer => {
+		mutable count = 0
+		while let value = await inputs.receive() {
+			await outputs.send(value * value) catch error => return count
+			count += 1
+		}
+		count
+	}
+}
+-- file: main.fa
+use { Channel } = std.concurrency
+
+async function main = () => {
+	mutable inputs = Channel<Integer> { capacity = 4 }
+	mutable outputs = Channel<Integer> { capacity = 100 }
+	mutable squarer = Squarer { label = "a" }
+	let served = start squarer.serve(inputs, outputs)
+	mutable total = 0
+	for value in 1..=20 {
+		await inputs.send(value) catch error => console.log("closed")
+	}
+	inputs.close()
+	console.log(await served)
+	for index in 0..20 {
+		let square = await outputs.receive()
+		total += square ?? 0
+	}
+	console.log(total)
+}
+
+await main()
+-- prints: 20
+-- prints: 2870

@@ -1,0 +1,81 @@
+-- skip-target: wasm
+-- `for parallel` over growing arrays, pools and columnars (each iteration
+-- writes its own element), with requirements and `mutable use` in the body
+-- (on `native-freestanding`, the iterations run in order on one thread).
+use { AtomicInteger } = std.concurrency
+
+type Particle = { position: Integer, speed: Integer }
+type Scale = { factor: Integer }
+
+function scaled = (value: Integer): Integer requires scale: Scale => value * scale.factor
+
+function scaleAll = (values: GrowingArray<Integer>) requires scale: Scale mutates values => {
+	for parallel value in values {
+		value = scaled(value)
+	}
+}
+
+mutable numbers = GrowingArray<Integer>.from([])
+for index in 0..20000 {
+	numbers.push(index)
+}
+for parallel number, index in numbers {
+	number = number * 2 + index
+}
+mutable total = 0
+for number in numbers {
+	total += number
+}
+console.log(numbers.length, total)
+
+mutable particles = Pool<Particle>.from([])
+for index in 0..10000 {
+	particles.add(Particle { position = index, speed = 3 })
+}
+mutable columns = Columnar<Particle>.from([])
+for index in 0..10000 {
+	columns.add(Particle { position = 1, speed = index })
+}
+for parallel particle in particles {
+	particle.position += particle.speed
+}
+for parallel row in columns {
+	row.position += row.speed
+}
+mutable positions = 0
+for particle in particles {
+	positions += particle.position
+}
+for row in columns {
+	positions += row.position
+}
+console.log(positions)
+
+-- requirements given with `provide`, and those of the function around
+provide Scale = { factor = 3 }
+mutable small = GrowingArray<Integer>.from([1, 2, 3])
+scaleAll(small)
+console.log(small)
+mutable tripled = [0, 0, 0]
+for parallel value, index in tripled {
+	value = scaled(index + 1)
+}
+console.log(tripled)
+
+-- `mutable use` of the element in the body
+mutable counted = AtomicInteger { value = 0 }
+for parallel particle in particles {
+	mutable use speed = particle.speed
+	speed += 1
+	counted.add(1)
+}
+mutable speeds = 0
+for particle in particles {
+	speeds += particle.speed
+}
+console.log(speeds, counted.load())
+-- prints: 20000 599970000
+-- prints: 100030000
+-- prints: [3, 6, 9]
+-- prints: [3, 6, 9]
+-- prints: 40000 10000

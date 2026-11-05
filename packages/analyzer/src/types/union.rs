@@ -77,7 +77,8 @@ impl TypeStore {
 				_ => scratch.push(member),
 			}
 		}
-		scratch.sort_unstable_by(|&a, &b| self.canonical_order(a, b));
+		// a stable sort: run-adaptive, a join of two normalized unions is a merge
+		scratch.sort_by(|&a, &b| self.canonical_order(a, b));
 		scratch.dedup();
 		// 5. masked forms first, so that absorption sees whole subsets
 		self.merge_nominal_members(&mut scratch);
@@ -112,7 +113,7 @@ impl TypeStore {
 		// 4. merge touching ranges of one storage
 		self.merge_ranges(&mut scratch);
 		// 6. sort, dedupe
-		scratch.sort_unstable_by(|&a, &b| self.canonical_order(a, b));
+		scratch.sort_by(|&a, &b| self.canonical_order(a, b));
 		scratch.dedup();
 		let result = match scratch.len() {
 			0 => TypeId::NEVER,

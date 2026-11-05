@@ -1139,8 +1139,8 @@ impl Walker<'_> {
 			None => &mut self.output,
 		};
 		// one operation with two effects (`pool.delete`: the element and the
-		// size) breaks a rule once
-		let repeated = target.last().is_some_and(|last| {
+		// size), or a node read twice by the walk, breaks a rule once
+		let repeated = target.iter().rev().take(16).any(|last| {
 			std::ptr::eq(last.code, diagnostic.code) && last.location == diagnostic.location
 		});
 		if !repeated {

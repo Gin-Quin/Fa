@@ -566,6 +566,10 @@ impl Walker<'_> {
 			SymbolKind::Let | SymbolKind::Mutable => {
 				"an iterator reads its collection: ask for a new one with `values()`".to_string()
 			}
+			// a call initializer would run again (`people.add(…)` adds another)
+			_ if self.initialized_by_call(entry.decl_node) => format!(
+				"find the element again (`use {name} = ….find(…)`), or copy what you need with `let` before `{operation}`"
+			),
 			_ => format!(
 				"declare it again with `use {name} = {}`",
 				self.fix_text(entry.decl_node)
@@ -593,6 +597,13 @@ impl Walker<'_> {
 		};
 		let diagnostic = self.diagnostic(code, n, message);
 		self.report_flow(diagnostic);
+		// reported once: its later uses on this path are not reported again
+		let current = self.facts.refs.get(state).clone();
+		let quiet = self.facts.refs.state(RefState {
+			invalidated: None,
+			..current
+		});
+		self.body.flow.set_ref_state(symbol, quiet);
 	}
 
 	/// The name of a local function (or `the function` for a lambda).
@@ -670,6 +681,18 @@ impl Walker<'_> {
 			.count() + 1
 	}
 
+	/// Whether a `use` declaration's value is a call (through `try`).
+	fn initialized_by_call(&self, declaration: NodeId) -> bool {
+		let View::Use { value, .. } = self.view(declaration) else {
+			return false;
+		};
+		let mut value = self.strip_groups(value);
+		if let View::Try(inner) = self.view(value) {
+			value = self.strip_groups(inner);
+		}
+		matches!(self.view(value), View::Call { .. })
+	}
+
 	/// The value of a `use` declaration with its index replaced by `...`
 	/// when not a literal: `persons[...]`.
 	fn fix_text(&self, declaration: NodeId) -> String {
@@ -677,6 +700,10 @@ impl Walker<'_> {
 			return "…".to_string();
 		};
 		let value = self.strip_groups(value);
+		let value = match self.view(value) {
+			View::Try(inner) => self.strip_groups(inner),
+			_ => value,
+		};
 		match self.view(value) {
 			View::Index { target, index }
 				if !matches!(self.view(self.strip_groups(index)), View::Integer(_)) =>

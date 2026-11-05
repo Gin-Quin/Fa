@@ -816,7 +816,13 @@ impl Walker<'_> {
 				}
 				Err(()) => {
 					let operand = operands.get(index).unwrap_or(n);
-					self.report_kind_mix(n, op, result_ty, types[index], operand);
+					// the left operand: the first one, or the chain before
+					let left = if index == 1 {
+						operands.get(0).unwrap_or(n)
+					} else {
+						n
+					};
+					self.report_kind_mix((n, left), op, result_ty, types[index], operand);
 					return TypeId::UNKNOWN;
 				}
 			}
@@ -984,14 +990,14 @@ impl Walker<'_> {
 	/// `E-NUM-18` (an operand isn't a number) or `E-NUM-11` (number kinds mixed).
 	fn report_kind_mix(
 		&mut self,
-		n: NodeId,
+		(n, left_node): (NodeId, NodeId),
 		op: ArithOp,
 		left: TypeId,
 		right: TypeId,
 		operand: NodeId,
 	) {
 		// an optional or a union operand (narrowing.rs)
-		if self.union_operand(operand, right) || self.union_operand(n, left) {
+		if self.union_operand(operand, right) || self.union_operand(left_node, left) {
 			return;
 		}
 		let (left_kind, right_kind) = (self.num_kind(left), self.num_kind(right));
@@ -1494,7 +1500,7 @@ impl Walker<'_> {
 			_ => match self.combine(op, left, right) {
 				Ok((_, ty)) => ty,
 				Err(()) => {
-					self.report_kind_mix(n, op, place.ty, actual, n);
+					self.report_kind_mix((n, n), op, place.ty, actual, n);
 					return;
 				}
 			},

@@ -257,3 +257,58 @@ fn last_uses_that_copy_are_moves() {
 	let source = "function main = () => {\n\tlet item = [1]\n\tfunction show = () => console.log(item)\n\tlet copy = item\n\tshow()\n}\n";
 	assert!(!moved(source, 4, "item"));
 }
+
+/// Review 34-35: an invalidated reference is reported once per invalidation,
+/// and the fix never repeats a call that would add another element.
+#[test]
+fn an_invalidated_reference_is_reported_once_with_a_useful_fix() {
+	let duplicate = "function run = () => {
+	mutable numbers: Array<Integer> = [1, 2, 3]
+	mutable iterator = numbers.values()
+	numbers.push(4)
+	console.log(iterator.next())
+}
+run()
+";
+	let found = codes(duplicate);
+	assert_eq!(
+		found.iter().filter(|&&code| code == "REF001").count(),
+		1,
+		"{found:?}"
+	);
+	let cascade = "type Person = { name: String }
+function run = (leaving: Boolean) => {
+	mutable people: Pool<Person> = []
+	use ana = people.add(Person { name = \"Ana\" })
+	if leaving {
+		people.delete(ana)
+	}
+	console.log(ana.name)
+	console.log(ana.name)
+}
+run(true)
+";
+	let (session, file) = analyze_source(cascade);
+	let messages: Vec<&str> = session
+		.diagnostics(file)
+		.iter()
+		.map(|diagnostic| diagnostic.message.as_str())
+		.collect();
+	assert_eq!(messages.len(), 1, "{messages:#?}");
+	assert!(messages[0].contains("find"), "{messages:#?}");
+	assert!(!messages[0].contains("use ana = people.add"), "{messages:#?}");
+}
+
+/// Review 37: `E-OPT-1` quotes the operand that may be `none`.
+#[test]
+fn an_optional_operand_is_quoted_alone() {
+	let source = "function f = (x: Integer?): Integer => x + 1\n";
+	let (session, file) = analyze_source(source);
+	let messages: Vec<&str> = session
+		.diagnostics(file)
+		.iter()
+		.map(|diagnostic| diagnostic.message.as_str())
+		.collect();
+	assert_eq!(messages.len(), 1, "{messages:#?}");
+	assert!(messages[0].starts_with("`x` may be `none`"), "{messages:#?}");
+}

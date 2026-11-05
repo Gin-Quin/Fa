@@ -1209,6 +1209,9 @@ impl Walker<'_> {
 				self.report(diagnostic);
 				None
 			}
+			TypeKind::Collection(kind, ..) if text == "parallel" => {
+				self.parallel_view_member(member, receiver, kind)
+			}
 			TypeKind::Collection(kind @ (CollKind::Array | CollKind::GrowingArray), item, _) => {
 				self.array_member(member, kind, item, text)
 			}

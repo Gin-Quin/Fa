@@ -686,6 +686,10 @@ pub struct Analysis {
 	/// the name of a function): what they use is published for the
 	/// program's worker rule (`CONC008`, `Interface::worker_work`).
 	pub submitted_works: Vec<NodeId>,
+	/// The calls of an operation of a parallel view
+	/// (`numbers.parallel().map(f)`), with its name: `map`, `filter`,
+	/// `reduce`, `some`, `every` or `sum` (native: `lower/parallel.rs`).
+	pub parallel_operations: FxHashMap<NodeId, &'static str>,
 
 	// ── reactivity (advanced brief §11, `check/reactivity.rs`) ──
 	/// Every read of a reactive place that may run while a `derived` value
@@ -1324,6 +1328,7 @@ impl Analysis {
 			build_inputs: Vec::new(),
 			reads_target: false,
 			submitted_works: Vec::new(),
+			parallel_operations: FxHashMap::default(),
 			reactive_reads: FxHashMap::default(),
 			reactive_writes: FxHashMap::default(),
 			reactive_args: FxHashMap::default(),

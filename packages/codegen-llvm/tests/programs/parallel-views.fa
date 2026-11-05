@@ -1,0 +1,47 @@
+-- skip-target: wasm
+-- `parallel()` views (concurrency.md): `map`, `filter`, `reduce`, `some`,
+-- `every` and `sum` of arrays, growing arrays, sets, pools and columnars,
+-- their callbacks run on several threads (in order on
+-- `native-freestanding`); the results keep the order of the items.
+use { AtomicInteger } = std.concurrency
+
+type Point = { x: Integer, y: Integer }
+
+let numbers = [1, -2, 3, 4]
+console.log(numbers.parallel().map((number) => number * 2))
+console.log(numbers.parallel().filter((number) => number > 0).sum())
+console.log(numbers.parallel().reduce((a, b) => a + b, 0))
+console.log(numbers.parallel().some((n) => n < 0), numbers.parallel().every((n) => n < 0))
+let words: Set<String> = ["a", "bb", "ccc"]
+console.log(words.parallel().map((word) => word.length))
+console.log(words.parallel().filter((word) => word.length > 1))
+mutable large = GrowingArray<Integer>.from([])
+for index in 0..100000 {
+	large.push(index)
+}
+mutable calls = AtomicInteger { value = 0 }
+let texts = large.parallel().map((n) => {
+	calls.add(1)
+	"{n}"
+})
+console.log(texts.length, texts.get(99999) ?? "", calls.load())
+console.log(large.parallel().reduce((a, b) => a + b, 0), large.parallel().sum())
+console.log(large.parallel().filter((n) => n %% 3 == 0).length)
+mutable points = Pool<Point>.from([Point { x = 1, y = 2 }, Point { x = 3, y = 4 }])
+console.log(points.parallel().map((point) => point.x + point.y))
+mutable rows = Columnar<Point>.from([Point { x = 5, y = 6 }])
+console.log(rows.parallel().filter((row) => row.x > 1))
+let empty: Array<Integer> = []
+console.log(empty.parallel().reduce((a, b) => a + b, 7), empty.parallel().map((n) => n))
+-- prints: [2, -4, 6, 8]
+-- prints: 8
+-- prints: 6
+-- prints: true false
+-- prints: [1, 2, 3]
+-- prints: ["bb", "ccc"]
+-- prints: 100000 99999 100000
+-- prints: 4999950000 4999950000
+-- prints: 33334
+-- prints: [3, 7]
+-- prints: [{ x = 5, y = 6 }]
+-- prints: 7 []

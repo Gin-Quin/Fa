@@ -47,6 +47,10 @@ Replace "`destroy` is called for a local at the end of its block when nothing mo
 
 `@typeToSchema` of a named union or an enumeration (all its members) is a `Schema.Named` whose definition is the `Schema.NamedUnion` / `Schema.Enum`, like the other types used through a name; a `Schema.Function` names its parameters by position (`parameter1`, `parameter2`…: a function type keeps no names). `TypeFromSchema` builds every member but `Schema.Fields`: a `Schema.NamedUnion` / `Schema.Enum` gives a named union / enumeration named by its `Schema.Named` (else by the declaration applying it), a `Schema.Reference` to an enclosing `Schema.Named` a recursive type; an enumeration whose values are not the positions is not supported yet. As the value of a generic type function (`type Shouted<Input> = TypeFromSchema<@shout(@typeToSchema(Input))>`), the schema is evaluated per application; an error its code throws is `TF004` at the application, with the error's `message`.
 
+## `documentation/guides/web-server.md`, "Typed request and response bodies"
+
+A field missing from the JSON text takes its default value (a new one for each value read), even when it is optional; without a default, an optional field is `none` and another field is an error (`has no field`).
+
 ## `documentation/advanced/concurrency.md`, the table of targets and the `:::implementation` section (JavaScript)
 
 Table row "`Mutex`, atomics shared with a worker": make it "`Mutex`, atomics, channels shared with a worker" (JavaScript: with `SharedArrayBuffer`, flat values only; on the web, the page must be cross-origin isolated, else giving one to a worker stops the program with the headers to send: `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`). In the implementation section, replace "A `Channel` crossing a worker boundary becomes a `MessagePort`" by: a `Channel` given to a worker moves its queue into a `SharedArrayBuffer` (JSON text behind a lock word; a waiting task uses `Atomics.waitAsync` on a version word, a worker's blocking wait `Atomics.wait`), like a `Mutex`.

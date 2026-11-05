@@ -1388,6 +1388,29 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.tree.nodes[node].for_each_child(|child| stack.push(child));
 			}
 		}
+		// the default values of fields, evaluated in any function (a typed
+		// literal, the reader of `Json.parse`): the top-level values they read
+		let mut defaults: Vec<NodeId> = self
+			.analysis
+			.type_decls
+			.values()
+			.flat_map(|decl| decl.fields.iter().filter_map(|field| field.default))
+			.collect();
+		defaults.sort();
+		for default in defaults {
+			let mut stack = vec![default.index()];
+			while let Some(node) = stack.pop() {
+				if let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(node)) {
+					let data = self.analysis.symbols.symbol(symbol);
+					if matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable)
+						&& self.owner_of_scope(data.scope).is_none()
+					{
+						self.shared.insert(symbol, ());
+					}
+				}
+				self.tree.nodes[node].for_each_child(|child| stack.push(child));
+			}
+		}
 		self.mark_module_values();
 	}
 

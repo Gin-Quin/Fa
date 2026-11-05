@@ -1522,6 +1522,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		matches!(data.kind, SymbolKind::Parameter { .. }) && self.types().owns_unique(data.ty)
 	}
 
+	/// Stops dropping a slot registered with `Cleanup::Local` (a value built
+	/// by a loop whose callbacks may throw, owned by its result now).
+	pub(crate) fn forget_local(&self, slot: Slot<'ctx>) {
+		let mut cleanups = self.cleanups.borrow_mut();
+		if let Some(position) = cleanups.iter().rposition(
+			|cleanup| matches!(cleanup, Cleanup::Local(local) if local.pointer == slot.pointer),
+		) {
+			cleanups.remove(position);
+		}
+	}
+
 	/// Starts owning a local when `flag` is set at run time.
 	pub(crate) fn own_flagged(&self, slot: Slot<'ctx>, flag: PointerValue<'ctx>) {
 		if self.needs_drop(slot.repr) {

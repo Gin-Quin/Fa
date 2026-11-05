@@ -248,9 +248,10 @@ export function faMonotonic() {
  *   bounds are strings, `null` without a bound);
  * - `["l", value]` a literal (string, boolean or number);
  * - `["a", item]` an array, `["m", value]` a map with `String` keys;
- * - `["o", [[name, schema, optional], …]]` an object, its fields in
- *   declaration order: an optional field may be absent (`none`), extra
- *   fields are ignored;
+ * - `["o", [[name, schema, optional, initial], …]]` an object, its fields
+ *   in declaration order: a field with a default value (`initial`, a
+ *   function giving it, else `null`) or optional may be absent (its default
+ *   value, else `none`), extra fields are ignored;
  * - `["u", [schema, …]]` an anonymous union: the first member that fits.
  *
  * @param {string} text
@@ -335,9 +336,13 @@ function faJsonConvert(data, schema, where) {
 			}
 			/** @type {Record<string, any>} */
 			const value = {};
-			for (const [name, field, optional] of schema[1]) {
+			for (const [name, field, optional, initial] of schema[1]) {
 				const item = data[name];
 				if (item === undefined) {
+					if (typeof initial === "function") {
+						value[name] = initial();
+						continue;
+					}
 					if (!optional) throw new JsonError(`${where} has no field \`${name}\``);
 					value[name] = undefined;
 				} else {

@@ -178,14 +178,23 @@ export function faArrayTake(array, index) {
  */
 export function faArrayDeleteWhere(array, predicate) {
 	let kept = 0;
-	for (let index = 0; index < array.length; index += 1) {
-		const item = array[index];
-		if (!predicate(item)) {
-			array[kept] = item;
+	let index = 0;
+	try {
+		for (; index < array.length; index += 1) {
+			const item = array[index];
+			if (!predicate(item)) {
+				array[kept] = item;
+				kept += 1;
+			}
+		}
+	} finally {
+		// an error of the predicate: the items not tested yet stay, after the kept ones
+		for (let rest = index; rest < array.length; rest += 1) {
+			array[kept] = array[rest];
 			kept += 1;
 		}
+		array.length = kept;
 	}
-	array.length = kept;
 }
 
 // @fa-helper faComparator
@@ -934,21 +943,25 @@ export function faSetIsSubsetOf(a, b) {
  */
 export function faDeleteWhere(collection, predicate) {
 	const removed = [];
-	if (collection instanceof Map || collection instanceof FaHashMap) {
-		for (const [key, value] of collection) {
-			if (predicate(key, value)) {
-				removed.push(key);
+	try {
+		if (collection instanceof Map || collection instanceof FaHashMap) {
+			for (const [key, value] of collection) {
+				if (predicate(key, value)) {
+					removed.push(key);
+				}
+			}
+		} else {
+			for (const value of collection) {
+				if (predicate(value, undefined)) {
+					removed.push(value);
+				}
 			}
 		}
-	} else {
-		for (const value of collection) {
-			if (predicate(value, undefined)) {
-				removed.push(value);
-			}
+	} finally {
+		// an error of the predicate: the entries it matched before are deleted
+		for (const item of removed) {
+			collection.delete(item);
 		}
-	}
-	for (const item of removed) {
-		collection.delete(item);
 	}
 }
 

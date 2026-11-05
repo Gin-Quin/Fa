@@ -1127,7 +1127,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.collect::<Vec<_>>()
 			})
 		};
+		// a member's inline data, a type built by `Pick` or `Omit`
+		let inline = || self.analysis.inline_field_orders.get(&ty).cloned();
 		let order: Vec<fa_analyzer::ids::Sym> = declared
+			.or_else(inline)
 			.or_else(literal)
 			.unwrap_or_else(|| shape.iter().map(|field| field.name).collect());
 		order
@@ -1979,6 +1982,188 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 		}
 		self.define_box_functions(&cases)
+	}
+
+	/// `fa.equal_box(ptr a, ptr b) -> i32`: `==` of two values of unions
+	/// (boxes), defined last ([`Lowering::define_equal_box`]).
+	pub(crate) fn box_equal_function(&self) -> inkwell::values::FunctionValue<'ctx> {
+		self.module.get_function("fa.equal_box").unwrap_or_else(|| {
+			let pointer = self.pointer_type();
+			let r#type = self
+				.context
+				.i32_type()
+				.fn_type(&[pointer.into(), pointer.into()], false);
+			let function = self.module.add_function(
+				"fa.equal_box",
+				r#type,
+				Some(inkwell::module::Linkage::Internal),
+			);
+			self.runtime.add_attributes(function, &["nounwind"]);
+			function
+		})
+	}
+
+	/// `a == b` on values of unions: the same member, and equal data (like
+	/// `faEquals` on JavaScript). A value of a member type is boxed first.
+	pub(crate) fn unions_equal(
+		&mut self,
+		left: Val<'ctx>,
+		right: Val<'ctx>,
+		node: NodeId,
+	) -> Result<IntValue<'ctx>, Error> {
+		let union = |repr: Repr| matches!(repr, Repr::Union | Repr::InlineUnion(_));
+		let (left, right) = if union(left.repr) {
+			(left, right)
+		} else {
+			(right, left)
+		};
+		let right = if union(right.repr) {
+			right
+		} else {
+			self.convert(right, left.repr, node.index())?
+		};
+		let left = self.union_view(left)?;
+		let right = self.union_view(right)?;
+		let function = self.box_equal_function();
+		let equal = self
+			.builder
+			.build_call(
+				function,
+				&[
+					left.value.expect("a box").into(),
+					right.value.expect("a box").into(),
+				],
+				"",
+			)?
+			.try_as_basic_value()
+			.basic()
+			.expect("equality")
+			.into_int_value();
+		Ok(self.builder.build_int_compare(
+			IntPredicate::NE,
+			equal,
+			self.context.i32_type().const_zero(),
+			"",
+		)?)
+	}
+
+	/// Defines `fa.equal_box` when a comparison declared it: the same box,
+	/// or the same member id and equal data (a switch on the id).
+	pub(crate) fn define_equal_box(&mut self) -> Result<(), Error> {
+		// per unit, always: the entry object's switch calls each unit's
+		let function = match self.module.get_function("fa.equal_box") {
+			Some(function) => function,
+			None if self.split.is_some() => self.box_equal_function(),
+			None => return Ok(()),
+		};
+		if function.count_basic_blocks() > 0 {
+			return Ok(());
+		}
+		let saved_frame = self.frame.take();
+		let saved_block = self.builder.get_insert_block();
+		self.begin_function(function, Repr::Void, None);
+		let i32 = self.context.i32_type();
+		let i64 = self.context.i64_type();
+		let a = function.get_nth_param(0).expect("a").into_pointer_value();
+		let b = function.get_nth_param(1).expect("b").into_pointer_value();
+		let yes = self.append_block("equal_boxes");
+		let no = self.append_block("different_boxes");
+		let same = self.builder.build_int_compare(IntPredicate::EQ, a, b, "")?;
+		let next = self.append_block("other_boxes");
+		self.builder.build_conditional_branch(same, yes, next)?;
+		self.builder.position_at_end(next);
+		let a_null = self.builder.build_is_null(a, "")?;
+		let b_null = self.builder.build_is_null(b, "")?;
+		let null = self.builder.build_or(a_null, b_null, "")?;
+		let next = self.append_block("present_boxes");
+		self.builder.build_conditional_branch(null, no, next)?;
+		self.builder.position_at_end(next);
+		let a_id = self.builder.build_load(i64, a, "")?.into_int_value();
+		let b_id = self.builder.build_load(i64, b, "")?.into_int_value();
+		let same_id = self
+			.builder
+			.build_int_compare(IntPredicate::EQ, a_id, b_id, "")?;
+		let switch_block = self.append_block("same_member");
+		self.builder
+			.build_conditional_branch(same_id, switch_block, no)?;
+		// the members with data: their layout, the representation of each part
+		let mut cases: Vec<(u64, StructType<'ctx>, Vec<Repr>)> = Vec::new();
+		let mut members: Vec<((NominalId, u16), u64)> = self
+			.union_ids
+			.borrow()
+			.iter()
+			.map(|(key, id)| (*key, *id))
+			.collect();
+		members.sort_by_key(|(_, id)| *id);
+		members.dedup_by_key(|(_, id)| *id);
+		for ((nominal, index), id) in members {
+			let fields: Vec<Repr> = match self.builtin_error_id(nominal) {
+				Some(error) => ERRORS[error as usize - 1]
+					.fields
+					.iter()
+					.map(|(_, ty)| self.repr_of(*ty, 0))
+					.collect::<Result<_, _>>()?,
+				None => match self.member_data(nominal, index) {
+					Some(data) => vec![self.repr_of(data, 0)?],
+					None => Vec::new(),
+				},
+			};
+			let fields: Vec<Repr> = fields.into_iter().filter(|repr| repr.has_value()).collect();
+			if fields.is_empty() {
+				continue;
+			}
+			let mut types: Vec<BasicTypeEnum<'ctx>> = vec![i64.into()];
+			types.extend(fields.iter().map(|repr| self.llvm_type(*repr)));
+			cases.push((id, self.context.struct_type(&types, false), fields));
+		}
+		let mut types: Vec<(TypeId, u64)> = self
+			.type_ids
+			.borrow()
+			.iter()
+			.map(|(ty, id)| (*ty, *id))
+			.collect();
+		types.sort_by_key(|(_, id)| *id);
+		for (ty, id) in types {
+			let repr = self.repr_of(ty, 0)?;
+			if repr.has_value() {
+				cases.push((id, self.box_type(Some(repr)), vec![repr]));
+			}
+		}
+		let node = NodeId::new(0);
+		let mut blocks = Vec::with_capacity(cases.len());
+		for (id, layout, fields) in cases {
+			let block = self.append_block("compare_member");
+			self.builder.position_at_end(block);
+			let mut equal = self.context.bool_type().const_int(1, false);
+			for (position, repr) in fields.into_iter().enumerate() {
+				let index = position as u32 + 1;
+				let left = self.builder.build_struct_gep(layout, a, index, "")?;
+				let right = self.builder.build_struct_gep(layout, b, index, "")?;
+				let left = self.builder.build_load(self.llvm_type(repr), left, "")?;
+				let right = self.builder.build_load(self.llvm_type(repr), right, "")?;
+				let mark = self.mark();
+				let part =
+					self.values_equal_any(Val::new(repr, left), Val::new(repr, right), node)?;
+				self.end_scope(mark, None)?;
+				equal = self.builder.build_and(equal, part, "")?;
+			}
+			let result = self.builder.build_int_z_extend(equal, i32, "")?;
+			self.builder.build_return(Some(&result))?;
+			blocks.push((i64.const_int(id, false), block));
+		}
+		self.builder.position_at_end(switch_block);
+		// a member without data: the same id is the same value
+		self.builder.build_switch(a_id, yes, &blocks)?;
+		self.builder.position_at_end(yes);
+		self.builder.build_return(Some(&i32.const_int(1, false)))?;
+		self.builder.position_at_end(no);
+		self.builder.build_return(Some(&i32.const_zero()))?;
+		self.end_function()?;
+		self.frame = saved_frame;
+		if let Some(block) = saved_block {
+			self.builder.position_at_end(block);
+		}
+		Ok(())
 	}
 
 	/// Defines `fa_format_union(box, nested)`, which printing the values of

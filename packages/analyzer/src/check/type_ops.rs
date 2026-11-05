@@ -301,6 +301,14 @@ impl Walker<'_> {
 		if let Some(keys_node) = keys_node {
 			self.set_flag(keys_node, NodeFlags::TYPE_EXPR);
 		}
+		// `Pick<Entity, keys>` in a generic signature: evaluated at each call
+		if let (Some(subject), Some(keys_node), 2) = (subject, keys_node, arguments.len())
+			&& let Some(ty) = self.derived_pick(subject, keys_node, name == "Pick")
+		{
+			self.memo(n, |_| ty);
+			self.memo(callee, |_| ty);
+			return Some(ty);
+		}
 		let ty = self.memo(n, |w| {
 			let Some(subject) = subject.filter(|_| arguments.len() == expected) else {
 				let message = if keyed {
@@ -390,8 +398,12 @@ impl Walker<'_> {
 		};
 		self.set_flag(callee, NodeFlags::TYPE_EXPR);
 		let ty = self.check(value, None);
-		let keys = self.value_key_set(keys_node);
 		self.a.forwards.insert(n, value);
+		// `pick(entity, keys)` in a generic body: a type bound at each call
+		if let Some(derived) = self.derived_pick(ty, keys_node, pick) {
+			return Some(self.memo(n, |_| derived));
+		}
+		let keys = self.value_key_set(keys_node);
 		Some(self.memo(n, |w| {
 			if w.s.types.is_recovering(ty) {
 				return TypeId::UNKNOWN;
@@ -410,6 +422,132 @@ impl Walker<'_> {
 				None => TypeId::UNKNOWN,
 			}
 		}))
+	}
+
+	/// `Pick<Entity, keys>` / `pick(entity, keys)` (`Omit`, `omit` when not
+	/// `pick`) over a type parameter of the function being declared and a
+	/// key-set parameter of it: its hidden derived parameter
+	/// (`Analysis::derived_params`), one per subject, keys and kind, bound at
+	/// each call to the picked type (`derived_binding`). Lead's decision
+	/// (2026-11-05): such applications are evaluated at each call. `None`
+	/// when it isn't one.
+	pub(super) fn derived_pick(
+		&mut self,
+		subject: TypeId,
+		keys_node: NodeId,
+		pick: bool,
+	) -> Option<TypeId> {
+		let TypeKind::Param(param) = self.s.types.kind(subject) else {
+			return None;
+		};
+		if !self.rigid_params.contains(&param) {
+			return None;
+		}
+		let entry = self.key_set_param_named(keys_node)?;
+		if entry.subject != param {
+			return None;
+		}
+		let existing = self.a.derived_params.iter().find_map(|(&derived, info)| {
+			(info.subject == param && info.keys == entry.param && info.pick == pick)
+				.then_some(derived)
+		});
+		let derived = match existing {
+			Some(derived) => derived,
+			None => {
+				let function = if pick { "Pick" } else { "Omit" };
+				let text = format!(
+					"{function}<{}, {}>",
+					self.param_name(param),
+					self.param_name(entry.param)
+				);
+				let key = self.nominal_key(&text);
+				let name = self.s.types.syms.intern(&text);
+				let derived = self.s.types.add_param(crate::types::ParamInfo {
+					owner: key,
+					index: 0,
+					name,
+					constraint: TypeId::UNKNOWN,
+					default: TypeId::UNSET,
+					value: false,
+				});
+				self.a.derived_params.insert(
+					derived,
+					crate::analysis::DerivedParam {
+						subject: param,
+						keys: entry.param,
+						pick,
+						node: keys_node,
+					},
+				);
+				self.pending_derived.push(derived);
+				self.rigid_params.push(derived);
+				derived
+			}
+		};
+		Some(self.s.types.intern(TypeKind::Param(derived)))
+	}
+
+	/// The binding of a derived parameter (`Analysis::derived_params`) once
+	/// the others are bound: the subject's argument picked (or omitted) by
+	/// the keys of the key set bound to the key-set parameter
+	/// (`Tuple(Fields type, bits)`). `UNKNOWN` when they aren't known.
+	pub(super) fn derived_binding(
+		&mut self,
+		derived: crate::analysis::DerivedParam,
+		bindings: &crate::types::Bindings,
+	) -> TypeId {
+		let bound = |param| {
+			bindings
+				.params
+				.iter()
+				.position(|&other| other == param)
+				.map(|index| bindings.types[index])
+		};
+		let (Some(subject), Some(keys)) = (bound(derived.subject), bound(derived.keys)) else {
+			return TypeId::UNKNOWN;
+		};
+		if subject.is_unset() || self.s.types.is_recovering(subject) {
+			return TypeId::UNKNOWN;
+		}
+		let TypeKind::Tuple(list) = self.s.types.kind(keys) else {
+			return TypeId::UNKNOWN;
+		};
+		let [fields, bits] = *self.s.types.list_items(list) else {
+			return TypeId::UNKNOWN;
+		};
+		let Some(bits) = self.s.types.as_int(bits).and_then(|int| int.literal()) else {
+			return TypeId::UNKNOWN;
+		};
+		let object = self.s.types.unfold(subject);
+		if !matches!(self.s.types.kind(object), TypeKind::Object(_)) {
+			return TypeId::UNKNOWN;
+		}
+		// the selected leaves, as a key tree (a group of every field of a
+		// nested object is the whole field)
+		let mut keys: Vec<Key> = Vec::new();
+		for (index, path) in self.s.types.fields_leaves(fields).iter().enumerate() {
+			if (bits >> index as u32) & I256::ONE != I256::ONE {
+				continue;
+			}
+			let mut level = &mut keys;
+			for part in path.split('.') {
+				let name = self.s.types.syms.intern(part);
+				let position = match level.iter().position(|key| key.name == name) {
+					Some(position) => position,
+					None => {
+						level.push(Key {
+							name,
+							node: derived.node,
+							children: Vec::new(),
+						});
+						level.len() - 1
+					}
+				};
+				level = &mut level[position].children;
+			}
+		}
+		self.pick_or_omit(object, &keys, derived.pick)
+			.unwrap_or(TypeId::UNKNOWN)
 	}
 
 	/// The keys of the key set a value argument gives: a literal (`{ foo }`),
@@ -519,7 +657,8 @@ impl Walker<'_> {
 	/// names every field of it is the whole field (D15). `TF010` for a key
 	/// that is not a field.
 	fn pick_or_omit(&mut self, object: TypeId, keys: &[Key], pick: bool) -> Option<TypeId> {
-		let fields = self.s.types.fields_of(object).to_vec();
+		// in declaration order: the result's order (printing, JSON)
+		let fields = self.ordered_fields(object);
 		for key in keys {
 			if !fields.iter().any(|field| field.name == key.name) {
 				let name = self.s.types.syms.resolve(key.name).to_string();
@@ -563,6 +702,10 @@ impl Walker<'_> {
 		}
 		// a selection of the fields is a new structural type
 		entries.retain(|entry| !entry.flags.contains(FieldFlags::PRIVATE));
-		Some(self.s.types.object(&entries, None))
+		let names: Vec<Sym> = entries.iter().map(|entry| entry.name).collect();
+		let ty = self.s.types.object(&entries, None);
+		self.record_field_order(ty, names.clone());
+		self.a.inline_field_orders.entry(ty).or_insert(names);
+		Some(ty)
 	}
 }

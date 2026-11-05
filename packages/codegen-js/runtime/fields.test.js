@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { faFieldsToStringArray, faFormatFields } from "./fields.js";
+import { faFieldsToStringArray, faFormatFields, faOmit, faPick } from "./fields.js";
 
 const names = ["foo", "bar", "nested.baz1", "nested.baz2"];
 
@@ -24,5 +24,22 @@ describe("faFormatFields", () => {
 		expect(faFormatFields(0b0100, names)).toBe("{ nested { baz1 } }");
 		expect(faFormatFields(0, names)).toBe("{}");
 		expect(faFormatFields(0b11n, names)).toBe("{ foo, bar }");
+	});
+});
+
+describe("faPick and faOmit", () => {
+	const user = { name: "Ada", email: "a@b", nested: { a: [1, 2], b: 3 } };
+
+	test("copies the fields at the paths", () => {
+		expect(faPick(user, ["name", "email"])).toEqual({ name: "Ada", email: "a@b" });
+		const picked = faPick(user, ["nested.a"]);
+		expect(picked).toEqual({ nested: { a: [1, 2] } });
+		picked.nested.a.push(3);
+		expect(user.nested.a).toEqual([1, 2]);
+	});
+
+	test("copies the value without the fields at the paths", () => {
+		expect(faOmit(user, ["email", "nested.b"])).toEqual({ name: "Ada", nested: { a: [1, 2] } });
+		expect(user.nested.b).toBe(3);
 	});
 });

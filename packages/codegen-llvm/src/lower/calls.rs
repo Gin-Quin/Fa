@@ -731,6 +731,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				|| path.starts_with("Integer#")
 				|| path.starts_with("Float#")
 				|| path.starts_with("Percentage#")
+				|| path.starts_with("BigInt#")
 				|| matches!(
 					path,
 					"Integer.round" | "Integer.floor" | "Integer.ceil" | "Integer.truncate"
@@ -1490,6 +1491,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.builder.build_float_to_unsigned_int(wide, ty, "")?
 				};
 				Ok(Val::new(to, result))
+			}
+			(Repr::BigInt, Repr::Int(int)) => self.big_to_int(node, value, target, int, checked),
+			// `Percentage(25)`: the number divided by 100
+			(Repr::Int(_) | Repr::F64 | Repr::F32, Repr::Percentage) => {
+				let number = self.convert(value, Repr::F64, node.index())?;
+				let fraction = self.builder.build_float_div(
+					number.value.expect("a float").into_float_value(),
+					self.context.f64_type().const_float(100.0),
+					"",
+				)?;
+				Ok(Val::new(Repr::Percentage, fraction))
 			}
 			(Repr::Percentage, Repr::F64 | Repr::F32) => {
 				let as_double = Val {

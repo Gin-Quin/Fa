@@ -96,6 +96,144 @@ impl Walker<'_> {
 		params
 	}
 
+	/// Notes a write into a field of a value whose type is an implicit
+	/// generic parameter (`copy.name = name` with `copy: Type<human>`): the
+	/// path and the written type.
+	pub(super) fn note_implicit_write(&mut self, target: NodeId, written: TypeId) {
+		let tree = Arc::clone(&self.tree);
+		let View::Access {
+			target: root,
+			members,
+		} = syntax::view(&tree, self.strip_groups(target))
+		else {
+			return;
+		};
+		let TypeKind::Param(param) = self.s.types.kind(self.type_of(root)) else {
+			return;
+		};
+		if !self.is_implicit_param(param) {
+			return;
+		}
+		let mut path = Vec::with_capacity(members.len());
+		for member in members.iter() {
+			let View::Name(name) = syntax::view(&tree, member) else {
+				return;
+			};
+			path.push(self.s.types.syms.intern(tree.name(name)));
+		}
+		let writes = self.implicit_writes.entry(param).or_default();
+		if !writes.iter().any(|(known, _)| *known == path) {
+			writes.push((path, written));
+		}
+	}
+
+	/// Whether a type parameter is the hidden one of `Type(parameter)`.
+	fn is_implicit_param(&self, param: ParamId) -> bool {
+		self.s
+			.types
+			.syms
+			.resolve(self.s.types.param(param).name)
+			.starts_with("Type<")
+	}
+
+	/// Notes a call of a function of this file whose parameters may be
+	/// implicit generic ones: checked once every body is walked
+	/// ([`Walker::finish_implicit_writes`]), so that a call checked before
+	/// the callee's body (recursion) sees its writes.
+	pub(super) fn note_implicit_write_call(
+		&mut self,
+		callee: NodeId,
+		declaration: NodeId,
+		arguments: &[crate::analysis::Argument],
+	) {
+		let implicit = self.a.function(declaration).is_some_and(|info| {
+			info.params.iter().any(|param| {
+				matches!(
+					self.s.types.kind(self.a.symbols.symbol(param.symbol).ty),
+					TypeKind::Param(param) if self.is_implicit_param(param)
+				)
+			})
+		});
+		if implicit {
+			let text = self.tree.text(callee.index()).to_string();
+			self.implicit_write_calls
+				.push((text, declaration, arguments.to_vec()));
+		}
+	}
+
+	/// At each call noted by [`Walker::note_implicit_write_call`]: a field
+	/// the callee writes into a copy of an argument typed `Type<parameter>`
+	/// has exactly the written type in the argument (`EF004`, like `STR004`
+	/// for a write through the parameter itself): the copy is returned as
+	/// the argument's type.
+	pub(super) fn finish_implicit_writes(&mut self) {
+		let calls = std::mem::take(&mut self.implicit_write_calls);
+		for (callee, declaration, arguments) in calls {
+			let Some(info) = self.a.function(declaration).cloned() else {
+				continue;
+			};
+			for (index, param) in info.params.iter().enumerate() {
+				let TypeKind::Param(implicit) =
+					self.s.types.kind(self.a.symbols.symbol(param.symbol).ty)
+				else {
+					continue;
+				};
+				let Some(writes) = self.implicit_writes.get(&implicit).cloned() else {
+					continue;
+				};
+				let Some(&crate::analysis::Argument::Given(argument)) = arguments.get(index) else {
+					continue;
+				};
+				for (path, written) in writes {
+					let mut actual = self.type_of(argument);
+					for &name in &path {
+						let object = self.s.types.unfold(actual);
+						let Some(field) = self
+							.s
+							.types
+							.fields_of(object)
+							.iter()
+							.find(|field| field.name == name)
+							.copied()
+						else {
+							actual = TypeId::UNKNOWN;
+							break;
+						};
+						actual = field.ty;
+					}
+					let unsettled = |w: &Self, ty: TypeId| {
+						w.s.types.is_recovering(ty)
+							|| w.s.types.flags(ty).intersects(
+								crate::types::TypeFlags::HAS_PARAM
+									| crate::types::TypeFlags::HAS_UNKNOWN,
+							)
+					};
+					if actual == written || unsettled(self, actual) || unsettled(self, written) {
+						continue;
+					}
+					let field: Vec<&str> = path
+						.iter()
+						.map(|&name| self.s.types.syms.resolve(name))
+						.collect();
+					let field = field.join(".");
+					let message = format!(
+						"`{callee}` writes `{field}: {}` into a copy of `{}` that it returns as its type, whose `{field}` is a `{}`: a written field has exactly the type the function writes",
+						self.display(written),
+						self.tree.text(argument.index()),
+						self.display(actual)
+					);
+					let diagnostic = self.diagnostic(
+						&crate::diagnostics::codes::types::EF004,
+						argument,
+						message,
+					);
+					self.report(diagnostic);
+					break;
+				}
+			}
+		}
+	}
+
 	/// The declared type of a parameter named by `Type(parameter)`: its
 	/// hidden generic parameter, constrained by the written type.
 	pub(super) fn implicit_parameter_type(&mut self, name: Sym, declared: TypeId) -> TypeId {

@@ -636,6 +636,8 @@ impl Walker<'_> {
 		if place.assignable {
 			self.write_effect(target, n);
 		}
+		// a field of a value of an implicit generic type (structural.rs)
+		self.note_implicit_write(target, place.ty);
 		// a field moved out has a value again (foreign.rs)
 		self.restore_moved_fields(target);
 		// a relation side: written through its direct side (relations.rs)

@@ -89,7 +89,10 @@ impl Walker<'_> {
 		params.extend(implicit);
 		let rigid = self.rigid_params.len();
 		self.rigid_params.extend(params.iter().copied());
+		let derived = std::mem::take(&mut self.pending_derived);
 		let ty = self.function_decl(n, is_async, annotation, value);
+		// `Pick<Entity, keys>`: bound at each call from the others (type_ops.rs)
+		params.extend(std::mem::replace(&mut self.pending_derived, derived));
 		self.pending_implicit.clear();
 		self.rigid_params.truncate(rigid);
 		self.body.scope = saved;

@@ -1,6 +1,5 @@
 -- Erased generic code (JavaScript) copies the linked elements it stores:
 -- the copies have no links (D18), and printing them leaves the sides out.
--- skip-target: native (a generic `Pool<Item>` parameter of another file is not lowered natively yet)
 -- file: library/people.fa
 export mutable: Pool<Person> = []
 -- file: library/Person.fa

@@ -6,7 +6,8 @@
 //!   whose subject is a type parameter of the same declaration: an
 //!   application binds it to `Tuple(Fields type, bits)`, the key set
 //!   checked against the keys of the subject's argument (`TF010`). In the
-//!   body, it is only the iterable of an `@for`.
+//!   body, it is the iterable of an `@for` or the keys of `pick`/`omit`
+//!   (a derived generic parameter, `type_ops.rs`).
 //! - `@for key in keys` over such a parameter or a `static` key set is
 //!   unrolled: its body is checked once per key, `key` the dotted path of
 //!   the key (a `String`) and `value[key]` the field at that path, of the
@@ -185,6 +186,22 @@ impl Walker<'_> {
 		);
 		self.a.key_set_params.insert(param, subject);
 		true
+	}
+
+	/// The key-set parameter a name node reads (`keys` in `Pick<Entity,
+	/// keys>`, `pick(entity, keys)`), resolved; `None` for another node.
+	pub(super) fn key_set_param_named(&mut self, n: NodeId) -> Option<KeySetParam> {
+		let tree = Arc::clone(&self.tree);
+		let View::Name(name) = syntax::view(&tree, self.strip_groups(n)) else {
+			return None;
+		};
+		let sym = self.s.types.syms.intern(tree.name(name));
+		let symbol = self.a.symbols.lookup(self.body.scope, sym)?;
+		let entry = *self.key_sets.params.get(&symbol)?;
+		self.set_resolution(n, Resolution::Local(symbol));
+		let ty = self.a.symbols.symbol(symbol).ty;
+		self.memo(n, |_| ty);
+		Some(entry)
 	}
 
 	/// The key-set parameter declared by `param`, if it is one.
@@ -529,6 +546,17 @@ impl Walker<'_> {
 	/// application of the file (once the module is walked), in the context
 	/// saved at each loop.
 	pub(super) fn check_deferred_key_loops(&mut self) {
+		// every application, also of a parameter no loop goes through
+		// (`pick(entity, keys)`: the JavaScript index of its paths)
+		for (&param, instances) in &self.key_sets.instances {
+			self.a.key_set_instances.insert(
+				param,
+				instances
+					.iter()
+					.map(|instance| (instance.subject, instance.key_set))
+					.collect(),
+			);
+		}
 		let deferred = std::mem::take(&mut self.key_sets.deferred);
 		for entry in deferred {
 			let subject = self.a.key_set_params[&entry.param];

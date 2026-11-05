@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: TF010
 -- brief: ✗ gn-22: constraints using earlier parameters: TF010
 -- context: declarations reused from gn-12

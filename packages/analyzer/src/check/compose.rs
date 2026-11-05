@@ -20,7 +20,7 @@ use crate::diagnostics::codes::types::{FN090, FN091, FN092, FN093, FN095};
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::{self, NodeList, View};
-use crate::types::{FnSig, PathRoot, TypeKind};
+use crate::types::{Bindings, Candidates, FnSig, PathRoot, TypeKind};
 
 impl Walker<'_> {
 	/// `f then g then …`
@@ -28,6 +28,8 @@ impl Walker<'_> {
 		let mut steps = Vec::new();
 		for operand in operands.iter() {
 			self.check(operand, None);
+			// the composition holds its steps: a closure copies what it captures
+			self.escape(operand, n);
 			match self.known_chain(operand) {
 				Some(chain) => steps.extend(chain),
 				None => steps.push(operand),
@@ -84,8 +86,17 @@ impl Walker<'_> {
 		let mut result = first.ret;
 		let mut throws = vec![first.throws];
 		let mut is_async = first.is_async;
-		for (index, sig) in signatures.iter().enumerate().skip(1) {
+		for index in 1..signatures.len() {
 			let step = steps[index];
+			// a generic step (`double then identity`): its instance for the
+			// result it receives
+			if let Some(instance) = self.instantiate_step(n, step, types[index], result) {
+				let TypeKind::Function(sig) = self.s.types.kind(instance) else {
+					return TypeId::UNKNOWN;
+				};
+				signatures[index] = self.s.types.sig(sig);
+			}
+			let sig = &signatures[index];
 			let name = self.tree.text(step.index()).to_string();
 			let params = self.s.types.params(sig.params).to_vec();
 			let [param] = params.as_slice() else {
@@ -136,6 +147,53 @@ impl Walker<'_> {
 			is_async,
 			..first
 		})
+	}
+
+	/// A following step whose type is generic, instantiated by the type of
+	/// the result it receives: the node records the arguments and has the
+	/// instance's type (the backends make that instance). `None` when it
+	/// isn't generic, or can't be instantiated (`FN091` follows); a
+	/// constraint the result doesn't satisfy is reported (`GN010`).
+	fn instantiate_step(
+		&mut self,
+		n: NodeId,
+		step: NodeId,
+		ty: TypeId,
+		received: TypeId,
+	) -> Option<TypeId> {
+		let mut free = self.free_params(ty);
+		free.extend(self.own_generics(ty));
+		if free.is_empty() {
+			return None;
+		}
+		let TypeKind::Function(sig) = self.s.types.kind(ty) else {
+			return None;
+		};
+		let params = self.s.types.params(self.s.types.sig(sig).params).to_vec();
+		let [param] = params.as_slice() else {
+			return None;
+		};
+		let mut bindings = Bindings::new(&free);
+		let mut candidates = Candidates::default();
+		self.s
+			.types
+			.unify(param.ty, received, &bindings, &mut candidates);
+		let mut problems = Vec::new();
+		self.resolve_candidates(&mut bindings, &candidates, &mut problems);
+		if bindings.types.iter().any(|ty| ty.is_unset()) {
+			return None;
+		}
+		self.finish_bindings(&mut bindings, &mut problems);
+		self.check_constraints(&mut bindings, &mut problems, true);
+		if let Some((code, message)) = problems.into_iter().next() {
+			let diagnostic = self.diagnostic(code, n, message);
+			self.report(diagnostic);
+			return Some(TypeId::UNKNOWN);
+		}
+		self.record_instantiation(step, &bindings);
+		let instance = self.s.types.substitute(ty, &bindings);
+		self.set_type(step, instance);
+		Some(instance)
 	}
 
 	/// `chain[range]`, `chain[index]` on a known composition: some of its

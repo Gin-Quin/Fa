@@ -472,6 +472,11 @@ impl Walker<'_> {
 				continue;
 			}
 			let param = bindings.params[index];
+			// `Pick<Entity, keys>`: from the others (type_ops.rs)
+			if let Some(derived) = self.a.derived_params.get(&param).copied() {
+				bindings.types[index] = self.derived_binding(derived, bindings);
+				continue;
+			}
 			let default = self.s.types.param(param).default;
 			if !default.is_unset() {
 				bindings.types[index] = self.s.types.substitute(default, bindings);

@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: EF004
 -- brief: ✗ gn-24: D5 write-set through a type parameter: EF004 at the call
 -- context: declarations reused from gn-12

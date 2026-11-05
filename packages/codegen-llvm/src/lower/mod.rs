@@ -23,6 +23,7 @@ mod aliasing;
 mod appends;
 mod arith;
 mod arrays;
+mod big_integers;
 pub(crate) mod c_library;
 mod calls;
 mod capacity;
@@ -693,6 +694,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.switch_file(self.entry);
 		self.define_coroutine_shims()?;
 
+		self.define_equal_box()?;
 		self.define_format_union()?;
 		self.define_boxes()?;
 		// the drops at the end of `main` only free memory: the system takes
@@ -2220,6 +2222,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		match self.view(node) {
 			View::Error => Err(self.unsupported(node.index(), "code with errors")),
 			View::Integer(value) => self.integer_literal(value, node),
+			View::BigInt(text) => self.big_literal(text, node),
 			View::Float(value) => match self.node_repr(node)? {
 				Repr::F32 => Ok(Val::new(
 					Repr::F32,

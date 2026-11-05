@@ -235,6 +235,13 @@ impl Walker<'_> {
 				matches!(self.view(self.strip_groups(*value)), View::Lambda { .. })
 			})
 			.count() >= 2;
+		// a lambda argument may run inside the callee after the callee's own
+		// effects: its entry facts drop the places they change (found once
+		// the arguments before it are checked), and those its siblings write
+		let callee_effects = matches!(kind, Callee::Function(_) | Callee::Value)
+			&& sig.effects != crate::ids::EffectSetId::EMPTY;
+		let mut sibling_writes: Vec<(crate::ids::PlaceId, bool, NodeId)> = Vec::new();
+		let saved_entry = std::mem::take(&mut self.lambda_entry_writes);
 		let start = siblings.then(|| self.body.flow.clone());
 		let saved_writes = if siblings {
 			self.push_flow_buffer();
@@ -252,7 +259,8 @@ impl Walker<'_> {
 					self.body.flow = start.clone();
 				}
 				callback_errors.clear();
-				self.lambda_entry_writes = self.lambda_call_writes.take().unwrap_or_default();
+				sibling_writes = self.lambda_call_writes.take().unwrap_or_default();
+				self.lambda_entry_writes = sibling_writes.clone();
 			}
 			for &(value, expected) in &binding.expected {
 				let expected = expected.map(|expected| substitute(self, expected));
@@ -264,6 +272,14 @@ impl Walker<'_> {
 					let mutated = self.param_mutated(sig, index);
 					self.check_c_argument(value, expected, mutated);
 					continue;
+				}
+				if callee_effects
+					&& matches!(self.view(self.strip_groups(value)), View::Lambda { .. })
+				{
+					let mut writes =
+						self.callee_effect_places(n, callee, sig.effects, &binding.arguments);
+					writes.extend(sibling_writes.iter().copied());
+					self.lambda_entry_writes = writes;
 				}
 				let actual = if synthesized.contains(&value) {
 					self.type_of(value)
@@ -313,8 +329,8 @@ impl Walker<'_> {
 		}
 		if siblings {
 			self.pop_flow_buffer(true);
-			self.lambda_entry_writes.clear();
 		}
+		self.lambda_entry_writes = saved_entry;
 		self.lambda_call_writes = saved_writes;
 		for &(spread, value, item) in &binding.spreads {
 			let item = substitute(self, item);

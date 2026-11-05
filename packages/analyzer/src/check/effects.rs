@@ -1523,6 +1523,8 @@ impl Walker<'_> {
 			self.check_aliasing(n, &name, &changed, &arguments, receiver);
 			if let Callee::Function(declaration) = info.callee {
 				self.check_module_read_aliasing(n, &name, declaration, &changed, &arguments);
+			} else if info.callee == Callee::Value {
+				self.check_external_read_aliasing(n, callee, &name, &changed, &arguments);
 			}
 		}
 		// the relation sides the changes also write (relations.rs, §8.6, D47)
@@ -1725,22 +1727,9 @@ impl Walker<'_> {
 		changed: &[(PlaceId, bool, Option<NodeId>)],
 		arguments: &[Argument],
 	) {
-		// the changes of its parameters' arguments, not of its module values
-		let given: Vec<NodeId> = arguments
-			.iter()
-			.filter_map(|argument| match argument {
-				Argument::Given(node) => Some(*node),
-				_ => None,
-			})
-			.collect();
-		let changed: Vec<(PlaceId, bool, Option<NodeId>)> = changed
-			.iter()
-			.copied()
-			.filter(|&(_, _, from)| from.is_some_and(|from| given.contains(&from)))
-			.collect();
-		if changed.is_empty() {
+		let Some(changed) = self.changed_arguments(changed, arguments) else {
 			return;
-		}
+		};
 		let Some(body) = self.a.functions.get(&declaration).map(|info| info.body) else {
 			return;
 		};
@@ -1758,11 +1747,106 @@ impl Walker<'_> {
 			}
 			stack.extend(syntax::children(&self.tree, node));
 		}
+		self.report_read_aliasing(n, callee, &changed, read);
+	}
+
+	/// The changes of a call to its parameters' arguments, not to its
+	/// module values (`None`: none).
+	fn changed_arguments(
+		&self,
+		changed: &[(PlaceId, bool, Option<NodeId>)],
+		arguments: &[Argument],
+	) -> Option<Vec<(PlaceId, bool, Option<NodeId>)>> {
+		let given: Vec<NodeId> = arguments
+			.iter()
+			.filter_map(|argument| match argument {
+				Argument::Given(node) => Some(*node),
+				_ => None,
+			})
+			.collect();
+		let changed: Vec<(PlaceId, bool, Option<NodeId>)> = changed
+			.iter()
+			.copied()
+			.filter(|&(_, _, from)| from.is_some_and(|from| given.contains(&from)))
+			.collect();
+		(!changed.is_empty()).then_some(changed)
+	}
+
+	/// [`Walker::check_module_read_aliasing`] for a function of another
+	/// file: the module-level `mutable` values its declaration uses, from
+	/// its file's interface (review finding 11).
+	fn check_external_read_aliasing(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		name: &str,
+		changed: &[(PlaceId, bool, Option<NodeId>)],
+		arguments: &[Argument],
+	) {
+		let Some(changed) = self.changed_arguments(changed, arguments) else {
+			return;
+		};
+		let symbol = match self.view(self.strip_groups(callee)) {
+			View::Name(_) => self.a.resolution(self.strip_groups(callee)),
+			View::Access { members, .. } => members
+				.last()
+				.map_or(Resolution::Unresolved, |member| self.a.resolution(member)),
+			_ => Resolution::Unresolved,
+		};
+		let Resolution::Local(symbol) = symbol else {
+			return;
+		};
+		let Some((module, decl)) = self.proxy_decl(symbol) else {
+			return;
+		};
+		let Some(uses) = self
+			.s
+			.interface(module)
+			.and_then(|interface| interface.declared.get(&decl))
+			.map(|declared| declared.uses.clone())
+		else {
+			return;
+		};
+		let mut read: Vec<SymbolId> = Vec::new();
+		for key in uses {
+			let owner = self.s.types.decl_key_data(key).module;
+			let mutable = self.s.interface(owner).is_some_and(|interface| {
+				interface
+					.keys
+					.get(&key)
+					.and_then(|keyed| interface.declared.get(&keyed.node))
+					.is_some_and(|declared| declared.kind == SymbolKind::Mutable)
+			});
+			if !mutable {
+				continue;
+			}
+			let value = match self.module_values.get(&key) {
+				Some(&symbol) => Some(symbol),
+				None => self.module_value_proxy(key),
+			};
+			if let Some(value) = value
+				&& !read.contains(&value)
+			{
+				read.push(value);
+			}
+		}
+		self.report_read_aliasing(n, name, &changed, read);
+	}
+
+	/// `REF013` when a changed argument may overlap a module-level value
+	/// the callee reads.
+	fn report_read_aliasing(
+		&mut self,
+		n: NodeId,
+		callee: &str,
+		changed: &[(PlaceId, bool, Option<NodeId>)],
+		read: Vec<SymbolId>,
+	) {
 		for symbol in read {
 			let Some(module_place) = self.symbol_target(symbol) else {
 				continue;
 			};
-			for &(place, _, _) in &changed {
+			for &(place, _, _) in changed {
 				if !self.may_overlap(place, module_place) {
 					continue;
 				}
@@ -1906,6 +1990,42 @@ impl Walker<'_> {
 			place = self.places.child(place, step);
 		}
 		Some((place, base, node))
+	}
+
+	/// The places a call of a function of the program changes by its own
+	/// effects (`mutates`, `invalidates`), with whether it invalidates them:
+	/// a lambda argument may run after them, so its entry facts drop them
+	/// (`functions.rs`). Arguments not checked yet have no place: skipped.
+	pub(crate) fn callee_effect_places(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		effects: EffectSetId,
+		arguments: &[Argument],
+	) -> Vec<(PlaceId, bool, NodeId)> {
+		let paths: Vec<(PathId, bool)> = {
+			let (mutates, invalidates) = self.s.types.effects(effects);
+			mutates
+				.iter()
+				.map(|&path| (path, false))
+				.chain(invalidates.iter().map(|&path| (path, true)))
+				.collect()
+		};
+		if paths.is_empty() {
+			return Vec::new();
+		}
+		let receiver = match self.view(self.strip_groups(callee)) {
+			View::Access { target, .. } => Some(target),
+			_ => None,
+		};
+		let name = self.callee_name(callee);
+		paths
+			.into_iter()
+			.filter_map(|(path, invalidates)| {
+				self.substitute(path, arguments, receiver, (n, &name))
+					.map(|(place, _, _)| (place, invalidates, n))
+			})
+			.collect()
 	}
 
 	/// `EFF007`: a mutated argument must be a writable place. Returns whether it is.

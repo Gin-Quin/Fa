@@ -246,6 +246,25 @@ mod tests {
 	use super::*;
 
 	#[test]
+	fn a_type_declared_inside_a_type_is_named_after_it() {
+		let (session, file) = crate::analyze_source(
+			"type Farm = {\n\tname: String\n\ttype Error = Errors { Empty }\n\tfunction f = (self): Int64 throws Self.Error => 1\n}\n",
+		);
+		let types = session.types();
+		let mut names: Vec<String> = session
+			.analysis(file)
+			.type_decls
+			.values()
+			.filter_map(|decl| match types.kind(decl.ty) {
+				TypeKind::NamedUnion(nominal, _) => Some(nominal_name(types, nominal)),
+				_ => None,
+			})
+			.collect();
+		names.sort();
+		assert_eq!(names, ["FarmError"]);
+	}
+
+	#[test]
 	fn snake_case_splits_words() {
 		assert_eq!(snake_case("createFarm"), "create_farm");
 		assert_eq!(snake_case("animalCount"), "animal_count");

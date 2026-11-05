@@ -726,7 +726,12 @@ impl Walker<'_> {
 					return TypeId::UNKNOWN;
 				};
 				let text = w.tree.name(name).to_string();
-				match w.nominal_member(current, &text) {
+				// a member of a named union, else a type declared inside a type
+				let found = match w.nominal_member(current, &text) {
+					Some(ty) => Some(ty),
+					None => w.nested_type(current, &text, member),
+				};
+				match found {
 					Some(ty) => {
 						w.set_type(member, ty);
 						w.set_flag(member, NodeFlags::TYPE_EXPR);

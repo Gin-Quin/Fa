@@ -2,10 +2,10 @@ squares: 30
 Hello, C!
 after greet
 name length: 11
-count status: 1 (empty: 1), count: -1, message: FarmError.Empty
+count status: 1 (empty: 1), count: -1, message: Error.Empty
 add status: 0
 count status: 0, count: 7
-add status: 2 (too many: 1), message: FarmError.TooMany { count = 207 }
+add status: 2 (too many: 1), message: Error.TooMany { count = 207 }
 count without a result: 0
 rename: 0, length 10
 long name: 3 (1), message of 1022 bytes, ending with a whole character: 1

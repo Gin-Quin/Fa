@@ -3,9 +3,16 @@ export type = {
 	name: String
 	animals: Int64
 
-	function countAnimals = (self): Int64 throws FarmError => {
+	-- C receives the position of the member as a status
+	type Error = Errors {
+		Empty
+		TooMany = { count: Int64 }
+		BadName = { name: String }
+	}
+
+	function countAnimals = (self): Int64 throws Self.Error => {
 		if self.animals == 0 {
-			throw FarmError.Empty
+			throw Self.Error.Empty
 		}
 		self.animals
 	}

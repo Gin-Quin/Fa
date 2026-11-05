@@ -70,6 +70,42 @@ impl Walker<'_> {
 			}
 			type_functions.insert(decl, published);
 		}
+		// the types declared inside the types (`Database.OpenError`)
+		let mut nested_types: FxHashMap<NodeId, Vec<TypeFunction>> = FxHashMap::default();
+		let mut scopes: Vec<(NodeId, crate::ids::ScopeId)> = self
+			.a
+			.type_decls
+			.iter()
+			.filter_map(|(&decl, info)| Some((decl, info.scope?)))
+			.collect();
+		scopes.sort_unstable_by_key(|&(decl, _)| decl);
+		for (decl, scope) in scopes {
+			let types: Vec<SymbolId> = self
+				.a
+				.symbols
+				.scope(scope)
+				.symbols
+				.iter()
+				.copied()
+				.filter(|&symbol| self.a.symbols.symbol(symbol).kind == SymbolKind::Type)
+				.collect();
+			if types.is_empty() {
+				continue;
+			}
+			let mut published = Vec::with_capacity(types.len());
+			for symbol in types {
+				let key = self.symbol_key(symbol);
+				let data = self.a.symbols.symbol(symbol);
+				published.push(TypeFunction {
+					name: data.name,
+					decl: data.decl_node,
+					key,
+					ty: data.ty,
+					method: false,
+				});
+			}
+			nested_types.insert(decl, published);
+		}
 		// the default values of the fields of the types, evaluated once here
 		// when they are constant expressions (the typed literals of other
 		// files fill them in: `FieldValue::Constant`)
@@ -277,6 +313,7 @@ impl Walker<'_> {
 		interface.keys = keys;
 		interface.externs = externs;
 		interface.type_functions = type_functions;
+		interface.nested_types = nested_types;
 		interface.parameters = parameters;
 		interface.statics = statics;
 		interface.field_defaults = field_defaults;
@@ -358,8 +395,40 @@ impl Walker<'_> {
 			}
 		}
 		let types = &self.s.types;
-		for decl in self.a.type_decls.values() {
-			let type_name = types.syms.resolve(self.a.symbols.symbol(decl.symbol).name);
+		// a type declared inside a type is named after it: `Farm$Animal$make`
+		let mut outer_of: FxHashMap<NodeId, NodeId> = FxHashMap::default();
+		let mut decls: Vec<NodeId> = self.a.type_decls.keys().copied().collect();
+		decls.sort_unstable();
+		for &decl in &decls {
+			let info = &self.a.type_decls[&decl];
+			let Some(scope) = info.scope else {
+				continue;
+			};
+			for &symbol in &self.a.symbols.scope(scope).symbols {
+				let data = self.a.symbols.symbol(symbol);
+				if data.kind == SymbolKind::Type {
+					outer_of.insert(data.decl_node, decl);
+				}
+			}
+		}
+		let type_name_of = |decl: NodeId| {
+			let mut parts = Vec::new();
+			let mut current = decl;
+			for _ in 0..64 {
+				let Some(info) = self.a.type_decls.get(&current) else {
+					break;
+				};
+				parts.push(types.syms.resolve(self.a.symbols.symbol(info.symbol).name));
+				match outer_of.get(&current) {
+					Some(&outer) => current = outer,
+					None => break,
+				}
+			}
+			parts.reverse();
+			parts.join("$")
+		};
+		for (&decl_node, decl) in &self.a.type_decls {
+			let type_name = type_name_of(decl_node);
 			for &function in &decl.functions {
 				let symbol = self.a.symbols.symbol(function);
 				let name = types.syms.resolve(symbol.name);

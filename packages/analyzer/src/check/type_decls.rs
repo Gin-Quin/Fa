@@ -159,7 +159,7 @@ impl Walker<'_> {
 			None
 		};
 		let nominal = kind.map(|kind| {
-			let key = self.nominal_key(name);
+			let key = self.type_nominal_key(n, name);
 			let args = self.s.types.list(&[]);
 			let members = self.s.types.intern_sym_list(&[]);
 			self.s.types.intern_nominal(NominalInfo {
@@ -495,7 +495,7 @@ impl Walker<'_> {
 			names.push(sym);
 			definitions.push((target, definition));
 		}
-		let key = self.nominal_key(name);
+		let key = self.type_nominal_key(n, name);
 		// a generic union: its declaration has its parameters as arguments
 		let params = self.generic_params.get(&n).cloned().unwrap_or_default();
 		let param_types: Vec<TypeId> = params
@@ -729,6 +729,33 @@ impl Walker<'_> {
 		self.s.types.decl_key(module, &[name], disambiguator)
 	}
 
+	/// The key of the nominal type a `type` declaration (node `n`) declares:
+	/// a type declared inside types is keyed under their names
+	/// (`Farm.Error`), as its symbol is.
+	fn type_nominal_key(&mut self, n: NodeId, name: &str) -> DeclKey {
+		let mut path: Vec<String> = vec![name.to_string()];
+		if let Some(symbol) = self.a.symbols.symbol_of_decl(n) {
+			let mut scope = Some(self.a.symbols.symbol(symbol).scope);
+			while let Some(current) = scope {
+				let info = self.a.symbols.scope(current);
+				let (owner, parent) = (info.owner, info.parent);
+				let Some(outer) = self.type_body_name(owner, parent) else {
+					break;
+				};
+				path.push(self.s.types.syms.resolve(outer).to_string());
+				scope = parent;
+			}
+		}
+		path.reverse();
+		let count = self.nominal_names.entry(path.join(".")).or_insert(0);
+		let disambiguator = *count;
+		*count += 1;
+		let module_name = self.s.module(self.file).to_string();
+		let module = self.s.types.module(&module_name);
+		let names: Vec<&str> = path.iter().map(String::as_str).collect();
+		self.s.types.decl_key(module, &names, disambiguator)
+	}
+
 	/// The `type` declarations whose type is `ty` (a member: its union's).
 	pub(super) fn declarations_of(&mut self, ty: TypeId) -> Vec<NodeId> {
 		let ty = match self.s.types.kind(ty) {
@@ -765,6 +792,40 @@ impl Walker<'_> {
 		}
 		// a type declared in another file (modules.rs)
 		self.external_type_function(ty, name)
+	}
+
+	/// The type named `name` declared inside a type whose type is `ty`
+	/// (`type Database = { type OpenError = Errors { … } }`): what
+	/// `Self.OpenError` and `Database.OpenError` designate, in a type or as
+	/// the start of a value (`Database.OpenError.Failed { code }`).
+	pub(super) fn nested_type(
+		&mut self,
+		ty: TypeId,
+		name: &str,
+		use_node: NodeId,
+	) -> Option<TypeId> {
+		let sym = self.s.types.syms.get(name)?;
+		for decl in self.declarations_of(ty) {
+			let Some(scope) = self.a.type_decls.get(&decl).and_then(|info| info.scope) else {
+				continue;
+			};
+			let found = self
+				.a
+				.symbols
+				.scope(scope)
+				.symbols
+				.iter()
+				.copied()
+				.find(|&symbol| {
+					let symbol = self.a.symbols.symbol(symbol);
+					symbol.kind == SymbolKind::Type && symbol.name == sym
+				});
+			if let Some(symbol) = found {
+				return Some(self.symbol_type(symbol, use_node));
+			}
+		}
+		// a type declared in another file (modules.rs)
+		self.external_nested_type(ty, sym)
 	}
 
 	/// The fields as declared of a type whose type is `ty`, when it has a declaration.

@@ -340,6 +340,16 @@ impl Generator<'_> {
 	/// `target.a.b…` for the given members (all of an access, or all but the
 	/// last for the receiver of a method).
 	pub(crate) fn access_chain(&mut self, n: NodeId, target: NodeId, members: &[NodeId]) -> Expr {
+		// `Database.OpenError.Failed`, `library.Farm.Error.Empty`: a member of a
+		// type declared inside a type (the path before it names types only)
+		if let Some((&last, before)) = members.split_last()
+			&& before.iter().any(|&member| {
+				self.analysis
+					.has_flags(member, fa_analyzer::analysis::NodeFlags::TYPE_EXPR)
+			}) && let Resolution::Member(nominal, index) = self.analysis.resolution(last)
+		{
+			return self.nominal_member_value(last, nominal, index);
+		}
 		// `library.math.add`, `counter.count`: through namespaces (modules.rs)
 		if let Some((mut value, used)) = self.namespace_prefix(target, members) {
 			for &member in &members[used..] {
@@ -347,13 +357,23 @@ impl Generator<'_> {
 			}
 			return value;
 		}
-		let mut members = members.iter().copied();
+		let mut members = members.iter().copied().peekable();
 		let mut value = if self.is_type_name(target) {
+			// the types declared inside types (`Palette.Color.red`)
+			let mut type_node = target;
+			while let Some(&next) = members.peek()
+				&& self
+					.analysis
+					.has_flags(next, fa_analyzer::analysis::NodeFlags::TYPE_EXPR)
+			{
+				type_node = next;
+				members.next();
+			}
 			// `Shape.Circle`, `Point.origin`, `Color.members`, `Self.create`
 			let Some(first) = members.next() else {
 				return self.unsupported(n, "a type as a value");
 			};
-			self.type_member(target, first)
+			self.type_member(type_node, first)
 		} else if let Resolution::Builtin(builtin) = self.analysis.resolution(target) {
 			let path = builtins::get(builtin).path;
 			// a constant of the number API (`Float.nan` in `Float.nan.isNaN()`)
@@ -852,38 +872,69 @@ impl Generator<'_> {
 
 	// ── types ────────────────────────────────────────────────────────────
 
-	/// `type Name = …`: its functions, as module-level functions.
+	/// `type Name = …`: its functions, as module-level functions, then
+	/// those of the types declared inside it.
 	pub(crate) fn type_declaration(&mut self, n: NodeId) {
 		let Some(decl) = self.analysis.type_decl(n).cloned() else {
 			return;
 		};
-		for function in decl.functions {
+		for &function in &decl.functions {
 			let node = self.analysis.symbols.symbol(function).decl_node;
 			self.out.blank();
 			self.function_declaration(node);
 		}
+		for nested in self.nested_type_decls(&decl) {
+			self.type_declaration(nested);
+		}
+	}
+
+	/// The declarations of the types declared inside a type
+	/// (`type Palette = { type Swatch = { … } }`).
+	fn nested_type_decls(&self, decl: &fa_analyzer::analysis::TypeDecl) -> Vec<NodeId> {
+		let Some(scope) = decl.scope else {
+			return Vec::new();
+		};
+		self.analysis
+			.symbols
+			.scope(scope)
+			.symbols
+			.iter()
+			.map(|&symbol| self.analysis.symbols.symbol(symbol))
+			.filter(|symbol| symbol.kind == SymbolKind::Type)
+			.map(|symbol| symbol.decl_node)
+			.filter(|&node| self.analysis.type_decl(node).is_some())
+			.collect()
 	}
 
 	/// The JavaScript names of the functions of the types declared in a
-	/// list of statements: `Type$function`.
+	/// list of statements: `Type$function` (`Palette$Swatch$make` for a
+	/// type declared inside a type).
 	pub(crate) fn type_function_names(&mut self, statements: &[NodeId]) {
 		for &statement in statements {
-			let Some(decl) = self.analysis.type_decl(statement).cloned() else {
-				continue;
-			};
-			let type_name = self
-				.types
+			self.type_function_names_of(statement, "");
+		}
+	}
+
+	fn type_function_names_of(&mut self, statement: NodeId, prefix: &str) {
+		let Some(decl) = self.analysis.type_decl(statement).cloned() else {
+			return;
+		};
+		let type_name = format!(
+			"{prefix}{}",
+			self.types
 				.syms
 				.resolve(self.analysis.symbols.symbol(decl.symbol).name)
+		);
+		for &function in &decl.functions {
+			let name = self
+				.types
+				.syms
+				.resolve(self.analysis.symbols.symbol(function).name)
 				.to_string();
-			for function in decl.functions {
-				let name = self
-					.types
-					.syms
-					.resolve(self.analysis.symbols.symbol(function).name)
-					.to_string();
-				self.declare_as(function, &format!("{type_name}${name}"));
-			}
+			self.declare_as(function, &format!("{type_name}${name}"));
+		}
+		for nested in self.nested_type_decls(&decl) {
+			self.type_function_names_of(nested, &format!("{type_name}$"));
 		}
 	}
 

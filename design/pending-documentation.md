@@ -101,7 +101,7 @@ Make precise (decided, see "C libraries" in `design/decisions.md`):
 - The C types of the header: `int8_t`… `uint64_t` for the integers (`c.Int` is an `int32_t`), `bool`, `float`, `double`, `const char *` for a `CString`, `T *` for a `Pointer(T)` (`NULL` for `none`), a `CStruct` defined with its fields in order (`typedef struct farm_Point { int32_t x; float y; } farm_Point;`), a Fa value an opaque `struct` named `prefix_` and its type's name. `Integer`, callbacks and generic functions can't be exported (`FFI014`).
 - A function that `throws` throws the members of one `Errors` type, declared as `typedef enum farm_FarmError { FARM_FARM_ERROR_EMPTY = 1, … } farm_FarmError;`; its result goes through the last parameter, `result`, which may be `NULL`. `farm_last_error_message()` returns `""` before the first error, and isn't reset by a success; a message longer than 1023 bytes is cut.
 - A shared library is loaded at the program's start or with `dlopen` (Python's `ctypes`); only the API is visible. Its module values are dropped when it is unloaded if a `destroy` needs it. The output of `console.log` is flushed at the end of each call, so it keeps its order with C's.
-- Fix the example: `farm.value.countAnimals()` throws `Farm.Error`, a type declared inside `Farm` (`type Error = Errors { … }` in an object type isn't parsed yet: the test fixture declares `FarmError` in its own file).
+- The example's `Farm.Error` is a type declared inside `Farm` (`type Error = Errors { … }`): show it, as the first example shows `Self.OpenError`. The header names it `farm_FarmError` (the path joined), its message reads `Error.Empty`.
 
 ## `documentation/advanced/foreign-code.md`, `:::implementation` ("Native", "State of the implementation")
 
@@ -111,3 +111,7 @@ Make precise (decided, see "C libraries" in `design/decisions.md`):
 ## `documentation/architecture/configuration.md`, "`build`" (`cLibrary`)
 
 Add: "`cLibrary` applies to the `native` target (`FFI013` when the package also lists a JavaScript target: put it in `overrides.native.build`). `prefix` is a C identifier, `header` a file name; the libraries and the header are written into `<output>/native/`."
+
+## `documentation/types/objects.md` (or the page on type declarations), "Types inside a type"
+
+Document what foreign-code.md and relations.md use: a type can declare types in its body (`type Database = { type OpenError = Errors { … } }`). Inside the type they are named directly (`OpenError`) or `Self.OpenError`; outside, `Database.OpenError` (and `library.Database.OpenError` from another file), in types and in values: its members (`Database.OpenError.Failed { code }`), typed literals, `when` patterns, its functions (`Palette.Swatch.make(…)`), `members` of an enumeration. `Error` can name such a type (`Farm.Error`), though the word alone is the prelude's `Error`. A value prints with the type's own name (`Error.Empty`).

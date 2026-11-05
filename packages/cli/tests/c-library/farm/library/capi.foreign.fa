@@ -20,15 +20,15 @@ export namespace = {
 
 	function destroyFarm = (farm: Pointer<Farm>) => farm.free()
 
-	function addAnimals = (farm: Pointer<Farm>, count: Int64) throws FarmError => {
+	function addAnimals = (farm: Pointer<Farm>, count: Int64) throws Farm.Error => {
 		let current = farm.read()
 		if current.animals + count > 100 {
-			throw FarmError.TooMany { count = current.animals + count }
+			throw Farm.Error.TooMany { count = current.animals + count }
 		}
 		farm.write(Farm { name = current.name, animals = current.animals + count })
 	}
 
-	function animalCount = (farm: Pointer<Farm>): Int64 throws FarmError => try farm.value.countAnimals()
+	function animalCount = (farm: Pointer<Farm>): Int64 throws Farm.Error => try farm.value.countAnimals()
 
 	function nameLength = (farm: Pointer<Farm>): Int64 => farm.value.name.length
 
@@ -71,10 +71,10 @@ export namespace = {
 
 	function half = (value: Float32): Float32 => value / 2.0
 
-	function rename = (farm: Pointer<Farm>, name: CString) throws FarmError => {
+	function rename = (farm: Pointer<Farm>, name: CString) throws Farm.Error => {
 		let text = name.toString()
 		if text.length > 40 {
-			throw FarmError.BadName { name = text }
+			throw Farm.Error.BadName { name = text }
 		}
 		farm.write(Farm { name = text, animals = farm.read().animals })
 	}

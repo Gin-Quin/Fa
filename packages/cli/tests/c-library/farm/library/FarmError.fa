@@ -1,6 +1,0 @@
--- The errors of a farm: C receives their position as a status
-export type = Errors {
-	Empty
-	TooMany = { count: Int64 }
-	BadName = { name: String }
-}

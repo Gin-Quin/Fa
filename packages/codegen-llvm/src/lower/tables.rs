@@ -302,6 +302,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					)?;
 					let high = builder.build_int_truncate(high, i64, "")?;
 					builder.build_xor(low, high, "")?
+				} else if int.bits <= 32 {
+					// no high half to fold: its bits, multiplied, then the
+					// high half of the product folded into the low half
+					let word = builder.build_int_z_extend_or_bit_cast(raw, i64, "")?;
+					let product = builder.build_int_mul(
+						word,
+						i64.const_int(0x9E3779B97F4A7C15, false),
+						"",
+					)?;
+					let shifted =
+						builder.build_right_shift(product, i64.const_int(32, false), false, "")?;
+					return Ok(builder.build_xor(product, shifted, "")?);
 				} else if int.signed {
 					builder.build_int_s_extend_or_bit_cast(raw, i64, "")?
 				} else {

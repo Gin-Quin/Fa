@@ -51,8 +51,9 @@ impl Walker<'_> {
 				w.report(diagnostic);
 				return TypeId::UNKNOWN;
 			};
+			// in a generic type function: built at each application (type_logic.rs)
 			if !w.rigid_params.is_empty() {
-				return w.unsupported(n, "`TypeFromSchema` inside a generic type function");
+				return TypeId::UNKNOWN;
 			}
 			let Some(value) = w.evaluate_at(argument, argument) else {
 				return TypeId::UNKNOWN;
@@ -63,7 +64,7 @@ impl Walker<'_> {
 	}
 
 	/// The type a schema value describes; `named`: the enclosing `Schema.Named`.
-	fn schema_type(
+	pub(super) fn schema_type(
 		&mut self,
 		n: NodeId,
 		value: &Value,

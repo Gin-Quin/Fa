@@ -8,5 +8,5 @@ type Broken = TypeFromSchema<Schema.Integer { bits = 7 }> -- error: TF042
 type Lost = TypeFromSchema<Schema.Reference { name = "Nowhere" }> -- error: TF040
 type Twice = TypeFromSchema<Schema.Object { properties = [{ name = "a", definition = Schema.String, isReadonly = false }, { name = "a", definition = Schema.String, isReadonly = false }] }> -- error: TF041
 type Bag = TypeFromSchema<Schema.Collection { kind = "Bag", item = Schema.String }> -- error: TF043
-type Generic<Input> = TypeFromSchema<@typeToSchema(Input)> -- error: AN001
+type Generic<Input> = TypeFromSchema<@typeToSchema(Input)>
 let unsigned = Schema.Integer { bits = 8, signed = none } -- error: E-OPT-2

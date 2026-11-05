@@ -365,6 +365,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let function = self
 			.module
 			.add_function(symbol, function_type, Some(Linkage::External));
+		// on wasm, an import of the `env` module unless C compiled to
+		// WebAssembly and linked with the program defines it (the loader
+		// takes the host's from `env.mjs`)
+		if self.c_abi() == CAbi::Wasm {
+			for (key, value) in [("wasm-import-module", "env"), ("wasm-import-name", symbol)] {
+				function.add_attribute(
+					AttributeLoc::Function,
+					self.context.create_string_attribute(key, value),
+				);
+			}
+		}
 		for (position, name, ty) in attributes {
 			let kind = Attribute::get_named_enum_kind_id(name);
 			let attribute = match ty {

@@ -82,3 +82,7 @@ Add: a `CArray(T, n)` value is written as an array literal of exactly `n` items 
 ## `documentation/advanced/foreign-code.md`, `:::implementation` ("State of the implementation")
 
 The analyzer and the native backend (and wasm) support `Pointer.allocate(value)` and `pointer.free()`: a Fa value in such a block is read as a copy (`read`), written with the old value destroyed (`write`), and `pointer.value` is a view of it. Bun doesn't yet.
+
+## `documentation/advanced/foreign-code.md`, "Targets" and `:::implementation` ("WebAssembly", "State of the implementation")
+
+On `wasm`, an `@extern` function is an import of the `env` module unless C compiled to WebAssembly and linked with the program (`build.link`: `.o`/`.a` files built with `clang --target=wasm32`) defines it. The host gives the others: the loader imports them from `env.mjs`, next to it (`fa build` copies the `env.mjs` found next to the program's file or at the root of its package); `env.mjs` exports one function per C name, and may export `attach(exports)` to reach the module's memory. A missing function stops the loader with the list of names. Replace "WebAssembly: not yet" in the state.

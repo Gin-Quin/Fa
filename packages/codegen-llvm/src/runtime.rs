@@ -259,6 +259,11 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		self.exit()?;
 		self.alloc()?;
 		self.pages()?;
+		if self.module.get_function("fa_os_map").is_some()
+			|| self.module.get_function("fa_grow").is_some()
+		{
+			self.mappings()?;
+		}
 		if self.module.get_function("fa_clock").is_some() {
 			self.clock()?;
 			self.nanosleep()?;
@@ -481,6 +486,167 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 			builder.build_return(None)?;
 			Ok(())
 		})
+	}
+
+	/// The mappings of large blocks, which grow without a copy (`fa_heap_grow`
+	/// of the tier 1 runtime, native Linux only; elsewhere `fa_os_map` and
+	/// `fa_os_remap` return null and blocks grow by copying):
+	/// `fa_os_map(usize length, i32 protection) -> ptr` (anonymous, private),
+	/// `fa_os_unmap(ptr, usize length)`, `fa_os_remap(ptr old, usize
+	/// old_length, usize length, ptr at) -> ptr` (moves the pages to `at`).
+	pub fn mappings(&self) -> Result<(), Error> {
+		let ptr = self.context.ptr_type(AddressSpace::default());
+		let usize = self.usize;
+		// `fa_grow(ptr bytes, usize old, usize used, usize size) -> ptr`: the
+		// allocator's `fa_heap_grow`, `realloc` under leak checks (`fa_alloc`
+		// is `malloc` then)
+		self.define(
+			"fa_grow",
+			ptr.fn_type(
+				&[ptr.into(), usize.into(), usize.into(), usize.into()],
+				false,
+			),
+			&[],
+			|builder, function| {
+				let bytes = function.get_nth_param(0).unwrap();
+				let size = function.get_nth_param(3).unwrap();
+				let result = if self.target == Target::Native && self.leak_check {
+					let realloc =
+						self.declare("realloc", ptr.fn_type(&[ptr.into(), usize.into()], false));
+					builder.build_call(realloc, &[bytes.into(), size.into()], "")?
+				} else {
+					let grow = self
+						.module
+						.get_function("fa_heap_grow")
+						.ok_or_else(|| Error::Llvm("the runtime has no `fa_heap_grow`".into()))?;
+					let arguments: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = function
+						.get_param_iter()
+						.map(|parameter| parameter.into())
+						.collect();
+					builder.build_call(grow, &arguments, "")?
+				};
+				let result = result.try_as_basic_value().basic().unwrap();
+				builder.build_return(Some(&result))?;
+				Ok(())
+			},
+		)?;
+		let i32 = self.context.i32_type();
+		let available = self.target == Target::Native && cfg!(target_os = "linux");
+		// `MAP_FAILED`, -1, as null
+		let checked = |builder: &Builder<'ctx>, result: PointerValue<'ctx>| {
+			let failed = builder.build_int_compare(
+				IntPredicate::EQ,
+				builder.build_ptr_to_int(result, usize, "")?,
+				usize.const_all_ones(),
+				"",
+			)?;
+			Ok::<_, Error>(builder.build_select(failed, ptr.const_null(), result, "")?)
+		};
+		self.define(
+			"fa_os_map",
+			ptr.fn_type(&[usize.into(), i32.into()], false),
+			&[],
+			|builder, function| {
+				if !available {
+					builder.build_return(Some(&ptr.const_null()))?;
+					return Ok(());
+				}
+				let mmap = self.declare(
+					"mmap",
+					ptr.fn_type(
+						&[
+							ptr.into(),
+							usize.into(),
+							i32.into(),
+							i32.into(),
+							i32.into(),
+							self.context.i64_type().into(),
+						],
+						false,
+					),
+				);
+				const MAP_PRIVATE_ANONYMOUS: u64 = 0x22;
+				let result = builder
+					.build_call(
+						mmap,
+						&[
+							ptr.const_null().into(),
+							function.get_nth_param(0).unwrap().into(),
+							function.get_nth_param(1).unwrap().into(),
+							i32.const_int(MAP_PRIVATE_ANONYMOUS, false).into(),
+							i32.const_all_ones().into(),
+							self.context.i64_type().const_zero().into(),
+						],
+						"",
+					)?
+					.try_as_basic_value()
+					.basic()
+					.unwrap()
+					.into_pointer_value();
+				let result = checked(builder, result)?;
+				builder.build_return(Some(&result))?;
+				Ok(())
+			},
+		)?;
+		self.define(
+			"fa_os_unmap",
+			self.context
+				.void_type()
+				.fn_type(&[ptr.into(), usize.into()], false),
+			&[],
+			|builder, function| {
+				if available {
+					let munmap =
+						self.declare("munmap", i32.fn_type(&[ptr.into(), usize.into()], false));
+					builder.build_call(
+						munmap,
+						&[
+							function.get_nth_param(0).unwrap().into(),
+							function.get_nth_param(1).unwrap().into(),
+						],
+						"",
+					)?;
+				}
+				builder.build_return(None)?;
+				Ok(())
+			},
+		)?;
+		self.define(
+			"fa_os_remap",
+			ptr.fn_type(&[ptr.into(), usize.into(), usize.into(), ptr.into()], false),
+			&[],
+			|builder, function| {
+				if !available {
+					builder.build_return(Some(&ptr.const_null()))?;
+					return Ok(());
+				}
+				let mremap = self.declare(
+					"mremap",
+					ptr.fn_type(&[ptr.into(), usize.into(), usize.into(), i32.into()], true),
+				);
+				const MREMAP_MAYMOVE_FIXED: u64 = 3;
+				let result = builder
+					.build_call(
+						mremap,
+						&[
+							function.get_nth_param(0).unwrap().into(),
+							function.get_nth_param(1).unwrap().into(),
+							function.get_nth_param(2).unwrap().into(),
+							i32.const_int(MREMAP_MAYMOVE_FIXED, false).into(),
+							function.get_nth_param(3).unwrap().into(),
+						],
+						"",
+					)?
+					.try_as_basic_value()
+					.basic()
+					.unwrap()
+					.into_pointer_value();
+				let result = checked(builder, result)?;
+				builder.build_return(Some(&result))?;
+				Ok(())
+			},
+		)?;
+		Ok(())
 	}
 
 	/// `fa_pages(usize count) -> ptr`: `count` new pages of 64 KiB, aligned

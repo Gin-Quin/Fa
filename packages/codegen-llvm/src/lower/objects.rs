@@ -385,6 +385,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			)?;
 			return Ok(self.fresh(self.load(out)?));
 		}
+		if self.packed_push_argument(node) {
+			// copied by the push (`packed.rs`): a box on the stack, its data
+			// dropped with the statement's temporaries
+			let pointer = self.alloca_type(ty.into(), "packed_member")?;
+			let id_pointer = self.builder.build_struct_gep(ty, pointer, 0, "")?;
+			self.builder.build_store(id_pointer, id)?;
+			let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
+			self.builder
+				.build_store(data_pointer, data.value.expect("data"))?;
+			self.fresh(data);
+			return Ok(Val::new(Repr::Union, pointer));
+		}
 		let pointer = if self.arena_member(nominal) {
 			self.allocate_tree_type(&self.builder, ty.into())?
 		} else {
@@ -732,6 +744,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		});
 		let mut lowered_fields = Vec::new();
 		let mut spreads: rustc_hash::FxHashMap<NodeId, Val<'ctx>> = Default::default();
+		let paired = self.paired_boxes(&info, &order, node)?;
 		for position in order {
 			let (name, field) = info.fields[position];
 			let Some(index) = self.field_index(info.ty, name) else {
@@ -744,6 +757,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// it. `box_rec` takes the block (an inner literal of the same
 			// type may take it first), else it is freed.
 			let early = match field {
+				_ if paired.contains_key(&position) => paired.get(&position).copied(),
 				FieldValue::Given(value) => self.early_box(repr, value)?,
 				_ => None,
 			};
@@ -771,14 +785,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						FieldValue::Given(value) | FieldValue::Default(value) => Some(value),
 						_ => None,
 					};
-					self.owned_as(lowered, repr, source)
+					let owned = self.owned_as(lowered, repr, source)?;
+					self.compact_moved_array(owned, source)
 				}
 				other => other,
 			};
 			if let Some(saved) = saved {
 				self.bindings.replace(saved);
 			}
-			if let Some((unused, _)) = self.pending_box.replace(outer) {
+			// (a box of a pair lives in the arena: nothing to free)
+			if let Some((unused, _)) = self.pending_box.replace(outer)
+				&& !paired.contains_key(&position)
+			{
 				let one = self.usize.const_int(1, false);
 				self.builder.build_call(
 					self.runtime.free()?,
@@ -1060,6 +1078,97 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// the target type that can't leave the expression early (no `try`,
 	/// `throw`, `return`, `break`, `continue`): a block for its box, and the
 	/// representation of the value.
+	/// The boxes of the recursive fields of a literal whose values are calls
+	/// or literals (see [`Self::early_box`]), when at least two of the same
+	/// type live in a root's arena: one allocation for all of them, side by
+	/// side in the order of the fields, so that the children of a node share
+	/// a cache line and an allocation check (`binary-trees`), keyed by the
+	/// field's position in the literal.
+	fn paired_boxes(
+		&self,
+		info: &fa_analyzer::analysis::ObjectInfo,
+		order: &[usize],
+		node: NodeId,
+	) -> Result<rustc_hash::FxHashMap<usize, (PointerValue<'ctx>, Repr)>, Error> {
+		let mut paired = rustc_hash::FxHashMap::default();
+		let mut candidates = Vec::new();
+		for &position in order {
+			let (name, FieldValue::Given(value)) = info.fields[position] else {
+				continue;
+			};
+			let Some(index) = self.field_index(info.ty, name) else {
+				continue;
+			};
+			let repr = self.field_repr(info.ty, index as usize, node.index())?;
+			if let Some(target) = self.early_box_target(repr, value)?
+				&& self.arena_repr(target)
+			{
+				candidates.push((position, target));
+			}
+		}
+		let Some(&(_, target)) = candidates.first() else {
+			return Ok(paired);
+		};
+		if candidates.len() < 2 || candidates.iter().any(|(_, other)| *other != target) {
+			return Ok(paired);
+		}
+		let ty = self.llvm_type(target);
+		let size = self.target_data().get_abi_size(&ty);
+		let align = u64::from(self.target_data().get_abi_alignment(&ty));
+		let block = self
+			.call_value(
+				self.runtime.function("fa_arena_alloc")?,
+				&[
+					self.usize
+						.const_int(size * candidates.len() as u64, false)
+						.into(),
+					self.usize.const_int(align, false).into(),
+				],
+			)?
+			.into_pointer_value();
+		for (rank, (position, target)) in candidates.into_iter().enumerate() {
+			let offset = self.usize.const_int(size * rank as u64, false);
+			let pointer = unsafe {
+				self.builder
+					.build_in_bounds_gep(self.context.i8_type(), block, &[offset], "")?
+			};
+			paired.insert(position, (pointer, target));
+		}
+		Ok(paired)
+	}
+
+	/// The representation of the box [`Self::early_box`] allocates, if any.
+	fn early_box_target(&self, field: Repr, value: NodeId) -> Result<Option<Repr>, Error> {
+		let (Repr::Rec(target) | Repr::Optional(super::values::Scalar::Rec(target))) = field else {
+			return Ok(None);
+		};
+		let target_repr = self.repr_of(target, value.index())?;
+		if !matches!(target_repr, Repr::Object(_))
+			|| self.node_repr(value)? != target_repr
+			|| !matches!(
+				self.view(value),
+				View::Call { .. } | View::TypedObject { .. } | View::Object { .. }
+			) {
+			return Ok(None);
+		}
+		let mut stack = vec![value.index()];
+		while let Some(current) = stack.pop() {
+			if matches!(
+				self.view(NodeId::new(current)),
+				View::Try(_)
+					| View::Throw(_)
+					| View::Return(_)
+					| View::Break(_)
+					| View::Continue
+					| View::Lambda { .. }
+			) {
+				return Ok(None);
+			}
+			self.tree.nodes[current].for_each_child(|child| stack.push(child));
+		}
+		Ok(Some(target_repr))
+	}
+
 	fn early_box(
 		&self,
 		field: Repr,

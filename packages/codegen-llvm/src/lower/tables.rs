@@ -729,9 +729,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let slot = self.alloca(table.key, "key")?;
 		self.builder
 			.build_store(slot.pointer, key.value.expect("a key"))?;
-		let bitwise = Self::bitwise_key_size(table);
-		// integers are compared bitwise in the probe loop, the other keys
-		// with their `==`
+		// integers are compared bitwise in the probe loop, strings by the
+		// runtime (`STRING_KEY`: in place, three words when both are inline),
+		// the other keys with their `==`
+		let bitwise = match table.key {
+			Repr::Str => u64::MAX,
+			_ => Self::bitwise_key_size(table),
+		};
 		let equals = if bitwise > 0 {
 			self.pointer_type().const_null()
 		} else {

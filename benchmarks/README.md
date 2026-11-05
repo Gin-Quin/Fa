@@ -430,6 +430,28 @@ CPU time: `audit/compare.py --default-sizes --runs 7`, medians, on a loaded mach
 
 What remains, measured: `calc`'s generator (43.0 M against Goose's 32.1 M) saves six registers per call. The room checks' 64-bit masks are not the cause alone: with the check rewritten as signed comparisons without constants, LLVM keeps the addresses of the operator literals in the freed registers instead (calc 130.7 M → 131.4 M, `strlist` +0.4 M, `respond` −3.3 M; reverted; a single comparison is unsound, the length word of an inline string holding bytes). The position-independent code is what costs them: the same IR compiled without PIC saves three registers. Marking the self-calls `notail` (no tail-recursion elimination) also saves three, but the calls it adds cost more (130.6 M → 130.9 M). `lru` (23.2 M against 17.9 M): the deletions' backward shifts (3.0 M against Goose's 0.9 M) and the probe of the index (a tag compared, then the key); `words` (31.0 M against 22.4 M): the map lookup of a string key copies an inline key of the entry to the stack to compare it.
 
+### Memory: packed arrays, mapped blocks, compact lists
+
+Measured on 2026-11-05 (instructions at the audit sizes, callgrind; cache figures from callgrind `--cache-sim=yes` with an 8 MB L3 at the default sizes; CPU from `audit/compare.py --default-sizes --runs 9`, medians, load average 25 to 29). The CPU gaps far larger than the instruction gaps were memory: `records` used 125 MB (Goose 38 MB) and missed the last level 10.6 M times (Goose 2.9 M), `sexp` 84 MB (27 MB) and 6.0 M misses (1.6 M), `binary-trees` twice the first-level misses. What changed (`design/decisions.md`, "Packed arrays" and the four entries after it):
+
+- **Packed arrays**: `records`' log stores each event as its member's byte and its data without padding (a word as its length and letters), 38 MB like Goose's, no box per event, the event built on the stack by the push.
+- **Large blocks have their own mapping** (native Linux, 1 MiB and more) and grow with `mremap`: `records` 9.4 k page faults instead of 25.5 k, `strlist` 8.7 k instead of 25.6 k (Goose 13.8 k).
+- **Small arrays wrapped into a value are compacted** next to their header: `sexp`'s lists take one block each, 0.6 M fewer last-level misses for 2.6 M more instructions.
+- **Sibling recursive fields share one arena allocation**: `binary-trees` 1.45 G → 1.27 G instructions at its default size (Goose 1.19 G).
+- **String keys compare in place** in the probe (`words` 31.0 M → 30.5 M); the inline map's backward shift reads its slots from a local base.
+
+| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| before (M) | 87.8 | 95.1 | 208.0 | 17.3 | 31.0 | 23.2 | 130.7 | 91.0 | 156.0 | 9.4 |
+| after (M) | 83.7 | 94.7 | 207.7 | 17.3 | 30.5 | 23.2 | 130.9 | 93.6 | 136.8 | 9.4 |
+| Fa / Goose | 1.14 | 1.17 | 1.09 | 0.99 | 1.36 | 1.29 | 1.19 | 1.21 | 1.07 | 1.19 |
+| CPU, Fa / Goose before | 1.96 | 1.23 | 1.19 | 0.69 | 1.29 | 1.36 | 1.13 | 2.13 | 1.31 | 1.09 |
+| CPU, Fa / Goose after | 1.16 | 1.00 | 1.18 | 0.81 | 1.14 | 1.33 | 1.00 | 1.89 | 1.22 | 1.12 |
+
+Peak RSS after: `records` 38 MB (Goose 38 MB), `strlist` 73 MB (57 MB: 24-byte string values against Goose's 16-byte slices), `sexp` 80 MB (27 MB).
+
+What remains, measured: `sexp`'s nodes are 32-byte inline unions (an 8-byte tag and a 24-byte string or array header pointer) against Goose's variable-size pool items of about 11 bytes, and its walk still misses 3.6 M times (Goose 0.9 M); its system time varies from 0.04 s to 0.57 s between runs of the same executable on this loaded machine, in the faults of the advised huge-page spans of the small-block heap (`defrag` is `madvise`: synchronous compaction), which Goose's `malloc` doesn't ask for. A packed layout for recursive unions (`List` data being an array header) and a decision on huge pages under memory pressure are the next steps. `binary-trees` keeps 16-byte nodes of two pointers against Goose's 8-byte nodes of two 32-bit pool indices: 32-bit links need every node of a root in one 4 GiB region (a reserved range for the arenas), a representation decision left to the lead. `lru`'s deletions are short runs (1.4 slots on average); its gap is the hit path and 12-byte inline map slots against Goose's 8. `calc`'s packed literal choice (`base + length * index`) is not done.
+
 ### Against Goose's published results
 
 [Goose's results page](https://aardappel.github.io/goose/bench/results.html) (2026-10-16; Ryzen 9 9950X3D, Windows 11, clang-cl 22 `/O2`, rustc 1.98 `-O -C codegen-units=1`) compares Goose with the fastest safe Rust row of each benchmark at its large size (the "vs rust (clang)" column, inverted here into a ratio of times). This run uses the Rust row whose data structure matches the Fa port, at our default size, on Linux with clang 18:

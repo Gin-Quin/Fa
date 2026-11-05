@@ -64,6 +64,10 @@ void fa_write(int32_t fd, const uint8_t *bytes, size_t length);
 FA_NORETURN void fa_exit(int32_t code);
 void *fa_alloc(size_t size, size_t align);
 void fa_free(void *bytes, size_t size, size_t align);
+/// A block of `fa_alloc` of `old` bytes replaced by one of at least `size`
+/// bytes holding its first `used` bytes (`fa_heap_grow`); null when the
+/// system has no more memory.
+void *fa_grow(void *bytes, size_t old, size_t used, size_t size);
 
 #if defined(__wasm__)
 #define FA_IMPORT(name) __attribute__((import_module("fa"), import_name(name)))
@@ -174,6 +178,23 @@ static FA_NORETURN void out_of_memory(void) {
 	static const char message[] = "stop: out of memory\n";
 	fa_write(2, (const uint8_t *)message, sizeof(message) - 1);
 	fa_exit(101);
+}
+
+static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length);
+
+/// A block of `old` bytes replaced by one of `size` bytes holding its first
+/// `used` bytes: a large block by `fa_grow` (which moves the pages of a
+/// mapped block), a small one by a new block and a copy, as before.
+static __attribute__((always_inline)) inline void *grow_block(void *bytes, size_t old, size_t used, size_t size, size_t align) {
+	if (old < ((size_t)1 << 20)) {
+		uint8_t *grown = fa_alloc(size, align);
+		copy_bytes(grown, bytes, used);
+		fa_free(bytes, old, align);
+		return grown;
+	}
+	void *grown = fa_grow(bytes, old, used, size);
+	if (grown == 0) { out_of_memory(); }
+	return grown;
 }
 
 static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length) {
@@ -1633,11 +1654,18 @@ static __attribute__((noinline)) void string_grow(FaString *string, const uint8_
 		grown = 64;
 	}
 	grown = string_block(grown);
-	uint8_t *block = fa_alloc(grown, 1);
-	copy_bytes(block, string_bytes(string), old_length);
-	copy_bytes(block + old_length, bytes, length);
-	if (owned) {
-		fa_free((void *)string->bytes, capacity, 1);
+	uint8_t *block;
+	if (owned && (bytes + length <= string->bytes || bytes >= string->bytes + capacity)) {
+		// a large block moves its pages instead of its bytes (`fa_heap_grow`)
+		block = grow_block((void *)string->bytes, capacity, old_length, grown, 1);
+		copy_bytes(block + old_length, bytes, length);
+	} else {
+		block = fa_alloc(grown, 1);
+		copy_bytes(block, string_bytes(string), old_length);
+		copy_bytes(block + old_length, bytes, length);
+		if (owned) {
+			fa_free((void *)string->bytes, capacity, 1);
+		}
 	}
 	string->bytes = block;
 	string->length = needed;
@@ -1783,10 +1811,12 @@ static __attribute__((noinline)) void string_reserve_slow(FaString *string, size
 		out_of_memory();
 	}
 	grown = string_block(grown);
-	uint8_t *block = fa_alloc(grown, 1);
-	copy_bytes(block, string_bytes(string), old_length);
+	uint8_t *block;
 	if (owned) {
-		fa_free((void *)string->bytes, kind, 1);
+		block = grow_block((void *)string->bytes, kind, old_length, grown, 1);
+	} else {
+		block = fa_alloc(grown, 1);
+		copy_bytes(block, string_bytes(string), old_length);
 	}
 	string->bytes = block;
 	string->length = old_length;
@@ -1849,10 +1879,12 @@ static __attribute__((noinline)) void string_reserve_owned_slow(FaString *string
 	}
 	size_t grown = owned && kind * 2 > needed ? kind * 2 : needed;
 	grown = string_block(grown);
-	uint8_t *block = fa_alloc(grown, 1);
-	copy_bytes(block, string_bytes(string), length);
+	uint8_t *block;
 	if (owned) {
-		fa_free((void *)string->bytes, kind, 1);
+		block = grow_block((void *)string->bytes, kind, length, grown, 1);
+	} else {
+		block = fa_alloc(grown, 1);
+		copy_bytes(block, string_bytes(string), length);
 	}
 	string->bytes = block;
 	string->length = length;
@@ -3188,9 +3220,15 @@ static __attribute__((noinline)) void array_grow(FaArrayHeader *array, int64_t i
 		return;
 	}
 	int64_t capacity = array->capacity < 4 ? 4 : array->capacity * 2;
-	uint8_t *items = fa_alloc((size_t)(capacity * item_size), 16);
-	copy_bytes(items, array->items, (size_t)(array->length * item_size));
-	free_array_items(array, item_size);
+	uint8_t *items;
+	if (inline_items(array)) {
+		items = fa_alloc((size_t)(capacity * item_size), 16);
+		copy_bytes(items, array->items, (size_t)(array->length * item_size));
+		mark_items(array, 0);
+	} else {
+		items = grow_block(array->items, (size_t)(array->capacity * item_size),
+		                   (size_t)(array->length * item_size), (size_t)(capacity * item_size), 16);
+	}
 	array->items = items;
 	array->capacity = capacity;
 }
@@ -3203,6 +3241,91 @@ FA_EXPORT void *fa_array_push_slot(void *header, int64_t item_size) {
 	void *slot = array->items + array->length * item_size;
 	array->length += 1;
 	return slot;
+}
+
+/// The largest items moved into the block of their header by
+/// `fa_array_compact`.
+#define COMPACT_LIMIT ((size_t)512)
+
+/// An array that the generated code owns and stores into a value it builds
+/// (`compact_moved_array` of `src/lower/arrays.rs`): when its items are
+/// small and in a block of their own, they move into a new block holding
+/// the header and them, of their exact size. The array is unique, so that
+/// the address of its header may change.
+FA_EXPORT void *fa_array_compact(void *header, int64_t item_size) {
+	FaArrayHeader *array = header;
+	if (array->capacity < 0 || inline_items(array)) {
+		return array;
+	}
+	size_t bytes = (size_t)(array->length * item_size);
+	if (bytes > COMPACT_LIMIT) {
+		return array;
+	}
+	FaArrayHeader *compact = fa_alloc(INLINE_ITEMS + bytes, 16);
+	mark_items(compact, 1);
+	compact->items = (uint8_t *)compact + INLINE_ITEMS;
+	compact->length = array->length;
+	compact->capacity = array->length;
+	copy_bytes(compact->items, array->items, bytes);
+	fa_free(array->items, (size_t)(array->capacity * item_size), 16);
+	fa_free(array, INLINE_ITEMS, sizeof(int64_t));
+	return compact;
+}
+
+/// A packed array (`src/lower/packed.rs`): the items of an `Array` of a
+/// union whose arrays are only built by `push` and read by `for`, each
+/// stored as the index of its member (a byte) followed by its data, with no
+/// padding, one after the other. `length` counts the items, `capacity` is
+/// the size of the block of the items in bytes and `used` the bytes in use.
+typedef struct {
+	uint8_t *items;
+	int64_t length;
+	int64_t capacity;
+	int64_t used;
+} FaPacked;
+
+FA_EXPORT void *fa_packed_new(void) {
+	FaPacked *array = fa_alloc(sizeof(FaPacked), sizeof(int64_t));
+	array->items = 0;
+	array->length = 0;
+	array->capacity = 0;
+	array->used = 0;
+	return array;
+}
+
+/// `fa_packed_push` on a full block: one at least twice as large.
+static __attribute__((noinline)) void packed_grow(FaPacked *array, int64_t bytes) {
+	int64_t capacity = array->capacity < 64 ? 64 : array->capacity;
+	while (capacity - array->used < bytes) {
+		if (capacity > INT64_MAX / 2) { out_of_memory(); }
+		capacity *= 2;
+	}
+	uint8_t *items = array->items == 0
+	                     ? fa_alloc((size_t)capacity, 16)
+	                     : grow_block(array->items, (size_t)array->capacity, (size_t)array->used,
+	                                  (size_t)capacity, 16);
+	array->items = items;
+	array->capacity = capacity;
+}
+
+/// Room for an item of `bytes` bytes at the end (`push`): its address.
+FA_EXPORT __attribute__((always_inline)) uint8_t *fa_packed_push(void *header, int64_t bytes) {
+	FaPacked *array = header;
+	if (__builtin_expect(array->capacity - array->used < bytes, 0)) {
+		packed_grow(array, bytes);
+	}
+	uint8_t *slot = array->items + array->used;
+	array->used += bytes;
+	array->length += 1;
+	return slot;
+}
+
+FA_EXPORT void fa_packed_free(void *header) {
+	FaPacked *array = header;
+	if (array->items != 0) {
+		fa_free(array->items, (size_t)array->capacity, 16);
+	}
+	fa_free(array, sizeof(FaPacked), sizeof(int64_t));
 }
 
 /// Appends the items of `source` to `array` (bytewise).
@@ -3544,6 +3667,16 @@ FA_EXPORT FaSegmented *fa_segmented_from_array(FaArrayHeader *flat, int64_t item
 #define PAGE_HEADER ((size_t)16)
 #define SMALL_LIMIT ((size_t)8192)
 #define LARGE_CLASS 0xFFFFu
+/// The class of a block with a mapping of its own (native Linux): blocks of
+/// at least `MAPPED_LIMIT` bytes, which grow by moving their pages
+/// (`fa_heap_grow`) and are given back to the system when freed.
+#define MAPPED_CLASS 0xFFFEu
+#define MAPPED_LIMIT ((size_t)1 << 20)
+
+/// Anonymous mappings (`src/runtime.rs`): null where there are none.
+void *fa_os_map(size_t length, int32_t protection);
+void fa_os_unmap(void *start, size_t length);
+void *fa_os_remap(void *start, size_t old_length, size_t length, void *at);
 
 /// `count` new pages, aligned on `PAGE_SIZE`, or null (tier 0).
 void *fa_pages(size_t count);
@@ -3706,8 +3839,45 @@ FA_EXPORT __attribute__((always_inline)) void *fa_heap_alloc(size_t size, size_t
 	return heap_alloc_slow(size);
 }
 
+/// A new mapping of `length` bytes (a multiple of `PAGE_SIZE`) aligned on
+/// `PAGE_SIZE`, readable and writable, or only reserved; null without one.
+/// No huge pages: with `defrag` set to `madvise`, a fault in an advised
+/// mapping may compact memory synchronously, which cost the strings and
+/// arrays of the benchmarks more system time than the page faults it saved.
+static uint8_t *map_aligned(size_t length, int32_t protection) {
+	size_t alignment = PAGE_SIZE;
+	uint8_t *start = fa_os_map(length + alignment, protection);
+	if (start == 0) {
+		return 0;
+	}
+	uint8_t *aligned = (uint8_t *)(((uintptr_t)start + alignment - 1) & ~(uintptr_t)(alignment - 1));
+	if (aligned > start) {
+		fa_os_unmap(start, (size_t)(aligned - start));
+	}
+	size_t tail = (size_t)((start + length + alignment) - (aligned + length));
+	if (tail > 0) {
+		fa_os_unmap(aligned + length, tail);
+	}
+	return aligned;
+}
+
+/// The length of the mapping of a block of `size` bytes.
+static size_t mapped_length(size_t size) {
+	return (size + PAGE_HEADER + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+}
+
 /// `fa_heap_alloc` off its common path: a new block of a page, or pages.
 static __attribute__((noinline)) void *heap_alloc_slow(size_t size) {
+	if (size >= MAPPED_LIMIT && size <= (SIZE_MAX >> 18)) {
+		size_t length = mapped_length(size);
+		uint8_t *start = map_aligned(length, 3);
+		if (start != 0) {
+			PageHeader *header = (PageHeader *)start;
+			header->class = MAPPED_CLASS;
+			header->pages = (uint32_t)(length / PAGE_SIZE);
+			return start + PAGE_HEADER;
+		}
+	}
 	if (size > SMALL_LIMIT) {
 		size_t pages = (size + PAGE_HEADER + PAGE_SIZE - 1) / PAGE_SIZE;
 		if (pages == 0) {
@@ -3753,9 +3923,46 @@ FA_EXPORT void fa_heap_free(void *bytes) {
 		give_pages(page, header->pages);
 		return;
 	}
+	if (header->class == MAPPED_CLASS) {
+		fa_os_unmap(page, (size_t)header->pages * PAGE_SIZE);
+		return;
+	}
 	FreeBlock *block = bytes;
 	block->next = free_blocks[header->class];
 	free_blocks[header->class] = block;
+}
+
+/// `fa_grow` with the allocator of the runtime: a block with a mapping of its
+/// own moves its pages to a larger mapping, without copying its bytes or
+/// touching new pages; another block is copied into a new one.
+FA_EXPORT void *fa_heap_grow(void *bytes, size_t old, size_t used, size_t size) {
+	uint8_t *page = (uint8_t *)((uintptr_t)bytes & ~(uintptr_t)(PAGE_SIZE - 1));
+	PageHeader *header = (PageHeader *)page;
+	if (header->class == MAPPED_CLASS && size <= (SIZE_MAX >> 18)) {
+		size_t length = mapped_length(size);
+		size_t old_length = (size_t)header->pages * PAGE_SIZE;
+		if (length <= old_length) {
+			return bytes;
+		}
+		// a reservation, aligned, that the pages replace
+		uint8_t *at = map_aligned(length, 0);
+		if (at != 0) {
+			uint8_t *moved = fa_os_remap(page, old_length, length, at);
+			if (moved != 0) {
+				((PageHeader *)moved)->pages = (uint32_t)(length / PAGE_SIZE);
+				return moved + PAGE_HEADER;
+			}
+			fa_os_unmap(at, length);
+		}
+	}
+	(void)old;
+	void *grown = fa_heap_alloc(size, 16);
+	if (grown == 0) {
+		return 0;
+	}
+	copy_bytes(grown, bytes, used);
+	fa_heap_free(bytes);
+	return grown;
 }
 
 // ── root-owned recursive regions ──────────────────────────────────────
@@ -5698,19 +5905,21 @@ static __attribute__((always_inline)) inline void inline_shift(FaTable *table, u
                                                                int64_t entry_size) {
 	uint64_t mask = (uint64_t)table->mask;
 	int64_t stride = inline_stride(entry_size);
+	// read once: the slots moved below can't be the table's own fields
+	uint8_t *slots = (uint8_t *)table->index;
 	for (uint64_t next = (hole + 1) & mask;; next = (next + 1) & mask) {
-		uint8_t *at = inline_slot(table, (int64_t)next, entry_size);
+		uint8_t *at = slots + (int64_t)next * stride;
 		uint32_t found = inline_tag(at);
 		if (found == 0) {
 			break;
 		}
 		uint64_t home = found & mask;
 		if (((next - home) & mask) >= ((next - hole) & mask)) {
-			copy_bytes(inline_slot(table, (int64_t)hole, entry_size), at, (size_t)stride);
+			__builtin_memcpy(slots + (int64_t)hole * stride, at, (size_t)stride);
 			hole = next;
 		}
 	}
-	inline_set_tag(inline_slot(table, (int64_t)hole, entry_size), 0);
+	inline_set_tag(slots + (int64_t)hole * stride, 0);
 	table->length -= 1;
 }
 
@@ -5772,12 +5981,37 @@ FA_EXPORT __attribute__((always_inline)) int32_t fa_table_live(const FaTable *ta
 	        >> (position & (TABLE_CHUNK_SLOTS - 1))) & 1;
 }
 
+/// `key_size` of a table of strings (`src/lower/tables.rs`).
+#define STRING_KEY ((int64_t)-1)
+
+/// `==` of two strings read in place (`strings_equal` of the backend): two
+/// inline strings compare in three words (their padding is zero), without
+/// their `SIMPLE` flag; other strings by their lengths and bytes.
+static __attribute__((always_inline)) inline int string_keys_equal(const uint8_t *stored,
+                                                                   const void *key) {
+	FaString a;
+	FaString b;
+	__builtin_memcpy(&a, stored, sizeof(FaString));
+	__builtin_memcpy(&b, key, sizeof(FaString));
+	if (a.capacity & b.capacity & STRING_INLINE) {
+		return ((uintptr_t)a.bytes == (uintptr_t)b.bytes) & (a.length == b.length) &
+		       (((a.capacity ^ b.capacity) & ~SIMPLE) == 0);
+	}
+	const FaString *left = (const FaString *)stored;
+	const FaString *right = (const FaString *)key;
+	return fa_string_equal(string_bytes(left), string_length(left), string_bytes(right),
+	                       string_length(right));
+}
+
 /// Whether a stored key equals a key.
 static __attribute__((always_inline)) inline int table_keys_equal(
 	const uint8_t *stored, const void *key, int32_t (*equals)(const void *, const void *),
 	int64_t key_size) {
 	if (equals != 0) {
 		return equals(stored, key);
+	}
+	if (key_size == STRING_KEY) {
+		return string_keys_equal(stored, key);
 	}
 	const uint8_t *other = (const uint8_t *)key;
 	switch (key_size) {

@@ -217,7 +217,7 @@ fn apply_edits(loaded: &mut Loaded, modified: &[PathBuf]) -> Vec<String> {
 			continue;
 		};
 		loaded.inner.session.update(&module, text.into());
-		shown.push(relative);
+		shown.push(relative.to_string_lossy().replace('\\', "/"));
 	}
 	let entry = loaded
 		.inner

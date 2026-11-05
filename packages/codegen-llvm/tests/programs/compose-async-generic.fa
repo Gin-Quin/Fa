@@ -1,0 +1,56 @@
+-- `then` with `async` steps (run in turn, like JavaScript calls them) and
+-- generic steps (instantiated by the result they receive), known functions
+-- and values only known at run time.
+async function fetchLength = (text: String): Integer => {
+	await std.time.sleep(1)
+	text.length
+}
+async function slowDouble = (value: Integer): Integer => {
+	await std.time.sleep(1)
+	value * 2
+}
+function double = (value: Integer): Integer => value * 2
+function describe = (value: Integer): String => "got {value}"
+function identity = <T>(value: T): T => value
+function wrap = <T>(value: T): Array<T> => [value, value]
+function joined = (values: Array<String>): String => values.join("+")
+function shout = (text: String): String => "{text}!"
+
+function measure = fetchLength then double
+function measureBoth = fetchLength then slowDouble then describe
+async function composeAt = (first: async (text: String) => Integer, second: (value: Integer) => String) => {
+	let both = first then second
+	console.log(both("hello"))
+}
+async function main = () => {
+	console.log(measure("abcd"))
+	console.log(measureBoth("abc"))
+	await composeAt(fetchLength, describe)
+	let suffix = "!"
+	await composeAt(fetchLength, (value) => "{value}{suffix}")
+}
+await main()
+-- prints: 8
+-- prints: got 6
+-- prints: got 5
+-- prints: 5!
+
+function viaGeneric = double then identity
+console.log(viaGeneric(21))
+-- prints: 42
+function twice = shout then wrap then joined
+console.log(twice("hey"))
+-- prints: hey!+hey!
+function explicit = identity<Integer> then double
+console.log(explicit(4))
+-- prints: 8
+function chained = (step: (value: Integer) => Integer): Array<Integer> => {
+	let composed = step then identity then wrap
+	return composed(5)
+}
+console.log(chained(double))
+-- prints: [10, 10]
+let prefix = "<"
+let labels = [((text: String): String => "{prefix}{text}") then wrap then joined]
+console.log(labels[0]("a"))
+-- prints: <a+<a

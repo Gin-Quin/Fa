@@ -34,8 +34,10 @@ type Signature = (Vec<Repr>, Repr, bool);
 enum Callee<'ctx> {
 	/// A known function's thunk, called without environment.
 	Direct(FunctionValue<'ctx>),
-	/// The closure at this position of the composition's environment.
-	Field(u32),
+	/// The closure at this position of the composition's environment; an
+	/// `async` function's value may be the tagged table of its entries
+	/// (`tasks.rs`, `async_value_entry`): its synchronous entry is called.
+	Field(u32, bool),
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -78,7 +80,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if data.kind != SymbolKind::Function {
 			return Err(unsupported(self));
 		}
-		let Some(function) = self.functions.get(&data.decl_node).cloned() else {
+		let declaration = data.decl_node;
+		// a generic function: its instance for the arguments the analyzer
+		// recorded at the step (`check/compose.rs`)
+		if self.generic_functions.contains_key(&declaration) {
+			if self.analysis.instantiation(node).is_none()
+				&& self.analysis.instantiation(step).is_none()
+			{
+				return Err(unsupported(self));
+			}
+			let at = if self.analysis.instantiation(node).is_some() {
+				node
+			} else {
+				step
+			};
+			let key = self.instance(declaration, at)?;
+			let function = self.functions[&key].clone();
+			return self.thunk_of(&function);
+		}
+		let Some(function) = self.functions.get(&declaration).cloned() else {
 			return Err(unsupported(self));
 		};
 		if function.lambda || !function.captures.is_empty() {
@@ -170,11 +190,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let Repr::Function(step_type) = value.repr else {
 				return Err(self.unsupported(step.index(), "this step of a composition"));
 			};
-			if self.is_generic_function_type(step_type) || self.is_async_function_type(step_type) {
+			if self.is_generic_function_type(step_type) {
 				return Err(self.unsupported(step.index(), "this step of a composition"));
 			}
 			let signature = self.value_signature(step_type, step)?;
-			parts.push((Callee::Field(position as u32), signature));
+			// only an asynchronous program tags the values of `async` functions
+			let is_async = self.tasks.asynchronous && self.is_async_function_type(step_type);
+			parts.push((Callee::Field(position as u32, is_async), signature));
 			values.push(value);
 		}
 		self.check_step_conventions(node, &params, &parts)?;
@@ -229,6 +251,48 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)?;
 		let pair = self.builder.build_insert_value(pair, environment, 1, "")?;
 		Ok(self.fresh(Val::new(Repr::Function(ty), pair.into_struct_value())))
+	}
+
+	/// The synchronous entry of the value of an `async` function: the entry
+	/// itself, or the first entry of the table its tagged address points
+	/// one byte into (`tasks.rs`, `async_value_entry`). A composition calls
+	/// its steps' synchronous entries in turn, as JavaScript calls them: an
+	/// async step runs blocking.
+	fn synchronous_entry(
+		&self,
+		function: FunctionValue<'ctx>,
+		builder: &Builder<'ctx>,
+		entry: PointerValue<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let pointer = self.pointer_type();
+		let from = builder.get_insert_block().expect("a block");
+		let tagged_block = self.context.append_basic_block(function, "tagged");
+		let call_block = self.context.append_basic_block(function, "untagged");
+		let address = builder.build_ptr_to_int(entry, self.usize, "")?;
+		let tag = builder.build_and(address, self.usize.const_int(1, false), "")?;
+		let tagged = builder.build_int_compare(
+			inkwell::IntPredicate::NE,
+			tag,
+			self.usize.const_zero(),
+			"",
+		)?;
+		builder.build_conditional_branch(tagged, tagged_block, call_block)?;
+		builder.position_at_end(tagged_block);
+		// SAFETY: a tagged address is one byte into its table
+		let table = unsafe {
+			builder.build_gep(
+				self.context.i8_type(),
+				entry,
+				&[self.context.i64_type().const_all_ones()],
+				"",
+			)?
+		};
+		let sync_entry = builder.build_load(pointer, table, "")?.into_pointer_value();
+		builder.build_unconditional_branch(call_block)?;
+		builder.position_at_end(call_block);
+		let target = builder.build_phi(pointer, "entry")?;
+		target.add_incoming(&[(&entry, from), (&sync_entry, tagged_block)]);
+		Ok(target.as_basic_value().into_pointer_value())
 	}
 
 	/// Whether a function type is `async`.
@@ -385,16 +449,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					thunk.as_global_value().as_pointer_value(),
 					self.pointer_type().const_null(),
 				),
-				Callee::Field(position) => {
+				Callee::Field(position, is_async) => {
 					let layout = layout.expect("the layout of the environment");
 					let field = builder.build_struct_gep(layout, environment, position + 2, "")?;
 					let closure = builder
 						.build_load(self.closure_type(), field, "")?
 						.into_struct_value();
+					let entry = builder
+						.build_extract_value(closure, 0, "")?
+						.into_pointer_value();
+					let entry = if is_async {
+						self.synchronous_entry(function, builder, entry)?
+					} else {
+						entry
+					};
 					(
-						builder
-							.build_extract_value(closure, 0, "")?
-							.into_pointer_value(),
+						entry,
 						builder
 							.build_extract_value(closure, 1, "")?
 							.into_pointer_value(),

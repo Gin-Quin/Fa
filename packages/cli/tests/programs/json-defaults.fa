@@ -1,0 +1,28 @@
+-- skip-target: native-freestanding (JSON needs the C library's floats)
+-- `Json.parse`: a field with a default value may be absent (its default
+-- value, a new one for each value read), an optional field with a default
+-- takes the default too
+use { Json } = std.json
+
+let base = 8000
+type Settings = {
+	host: String = "localhost"
+	port: Integer = base + 80
+	tags: Array<String> = ["default"]
+	limit: Integer? = 10
+	name: String
+}
+
+let empty: Settings = try Json.parse("{{\"name\": \"a\"}}")
+console.log(empty) -- prints: { host = "localhost", port = 8080, tags = ["default"], limit = 10, name = "a" }
+let given: Settings = try Json.parse("{{\"name\": \"b\", \"host\": \"example.org\", \"port\": 1, \"tags\": [], \"limit\": null}}")
+console.log(given) -- prints: { host = "example.org", port = 1, tags = [], limit = none, name = "b" }
+let many: Array<Settings> = try Json.parse("[{{\"name\": \"c\"}}, {{\"name\": \"d\"}}]")
+for settings in many {
+	console.log(settings.name, settings.port) -- prints: c 8080
+	-- prints: d 8080
+}
+let missing: Settings = Json.parse("{{}}") catch error => {
+	console.log("{error}") -- prints: JsonError { message = "the value has no field `name`" }
+	empty
+}

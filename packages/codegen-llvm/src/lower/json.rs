@@ -170,7 +170,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				for (name, field_type) in fields {
 					out.extend_from_slice(format!("{};", name.len()).as_bytes());
 					out.extend_from_slice(name.as_bytes());
-					let optional = types.union_members(&field_type).contains(&TypeId::NONE);
+					// may be absent: optional, or with a default value
+					let optional = types.union_members(&field_type).contains(&TypeId::NONE)
+						|| self.json_default(ty, &name).is_some();
 					out.push(if optional { b'1' } else { b'0' });
 					if !self.json_schema(field_type, depth + 1, out) {
 						return false;
@@ -180,6 +182,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ => return false,
 		}
 		true
+	}
+
+	/// The default value of a field of an object type declared in this
+	/// file, given to a value read without the field.
+	fn json_default(&self, ty: TypeId, name: &str) -> Option<NodeId> {
+		let declaration = self
+			.analysis
+			.type_decls
+			.values()
+			.find(|decl| decl.ty == ty)?;
+		declaration
+			.fields
+			.iter()
+			.find(|field| self.types().syms.resolve(field.name) == name)?
+			.default
 	}
 
 	/// The fields of an object type: the declaration's order, then the
@@ -428,8 +445,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.types()
 				.union_members(&field_type)
 				.contains(&TypeId::NONE);
-			let value = if optional {
-				// absent: `none`
+			let default = self.json_default(ty, &name);
+			let value = if optional || default.is_some() {
+				// absent: its default value, else `none`
 				let slot = self.alloca(repr, "json_field")?;
 				let absent = self.builder.build_is_null(member, "")?;
 				let missing = self.append_block("json_missing");
@@ -438,13 +456,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder
 					.build_conditional_branch(absent, missing, present)?;
 				self.builder.position_at_end(missing);
-				let none = Val {
-					repr: Repr::None,
-					value: None,
+				let initial = match default {
+					Some(default) => {
+						let value = self.expr(default)?;
+						self.owned_as(value, repr, Some(default))?
+					}
+					None => {
+						let none = Val {
+							repr: Repr::None,
+							value: None,
+						};
+						self.json_adapt(none, repr, call)?
+					}
 				};
-				let none = self.json_adapt(none, repr, call)?;
 				self.builder
-					.build_store(slot.pointer, none.value.expect("a field"))?;
+					.build_store(slot.pointer, initial.value.expect("a field"))?;
 				self.builder.build_unconditional_branch(join)?;
 				self.builder.position_at_end(present);
 				let value = self.json_value(member, field_type, call)?;

@@ -46,3 +46,7 @@ Replace "`destroy` is called for a local at the end of its block when nothing mo
 ## `documentation/types/types-at-runtime.md`, "The `Schema` type" and "`TypeFromSchema(Schema): Type`"
 
 `@typeToSchema` of a named union or an enumeration (all its members) is a `Schema.Named` whose definition is the `Schema.NamedUnion` / `Schema.Enum`, like the other types used through a name; a `Schema.Function` names its parameters by position (`parameter1`, `parameter2`…: a function type keeps no names). `TypeFromSchema` builds every member but `Schema.Fields`: a `Schema.NamedUnion` / `Schema.Enum` gives a named union / enumeration named by its `Schema.Named` (else by the declaration applying it), a `Schema.Reference` to an enclosing `Schema.Named` a recursive type; an enumeration whose values are not the positions is not supported yet. As the value of a generic type function (`type Shouted<Input> = TypeFromSchema<@shout(@typeToSchema(Input))>`), the schema is evaluated per application; an error its code throws is `TF004` at the application, with the error's `message`.
+
+## `documentation/guides/web-server.md`, "Typed request and response bodies"
+
+A field missing from the JSON text takes its default value (a new one for each value read), even when it is optional; without a default, an optional field is `none` and another field is an error (`has no field`).

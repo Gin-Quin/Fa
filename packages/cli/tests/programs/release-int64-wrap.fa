@@ -1,0 +1,25 @@
+-- overflow-checks: false
+-- Release builds wrap the sized integers on every target, 64-bit ones
+-- included (`BigInt.asIntN` on JavaScript); `Integer` doesn't wrap
+-- (backends review 2026-11-05, finding 17).
+function double = (x: Int64): Int64 => x + x
+function grow = (x: UInt64): UInt64 => x * 2
+mutable c: Int64 = 1
+mutable u: UInt64 = 1
+for k in 0..64 {
+	c = double(c)
+	u = grow(u)
+}
+let values: Array<Int64> = [c]
+console.log(c, u, c == 0, values[0] == c, Int32(c) catch e => -1) -- prints: 0 0 true true 0
+
+function negate = (x: Int64): Int64 => -x
+function minus = (x: UInt64): UInt64 => x - 1
+let low = Int64.minValue
+console.log(negate(low), minus(0)) -- prints: -9223372036854775808 18446744073709551615
+function bump = (x: Int64): Int64 => {
+	mutable y = x
+	y += 1
+	y
+}
+console.log(bump(Int64.maxValue)) -- prints: -9223372036854775808

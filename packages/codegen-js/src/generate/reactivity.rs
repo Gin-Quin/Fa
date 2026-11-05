@@ -598,7 +598,7 @@ impl Generator<'_> {
 		let helper = if self.holds_guard(n) {
 			self.helper("faUnlock").to_string()
 		} else if self.holds_task(n) {
-			self.helper("faDrop").to_string()
+			self.task_drop(n)
 		} else {
 			self.helper("faDispose").to_string()
 		};

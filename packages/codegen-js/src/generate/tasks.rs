@@ -21,10 +21,10 @@
 use std::collections::{HashMap, HashSet};
 
 use fa_analyzer::analysis::{Argument, AsyncSummary, AwaitKind, Callee, TargetSet};
-use fa_analyzer::ids::NodeId;
+use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::View;
-use fa_analyzer::types::TypeKind;
+use fa_analyzer::types::{TypeFlags, TypeKind};
 
 use crate::generate::{Dest, Generator};
 use crate::js::{self, Expr, Prec, Writer};
@@ -1159,14 +1159,65 @@ impl Generator<'_> {
 		}
 	}
 
-	/// Whether a declaration holds a task that its block drops (cancels)
-	/// at its end: a `Task` never moved elsewhere.
+	/// Whether a value of a type holds tasks: a `Task`, or a collection,
+	/// an object, a tuple or a union holding one (a move-only type, the
+	/// types with `destroy` and subscriptions aside).
+	pub(crate) fn contains_task(&self, ty: TypeId) -> bool {
+		let mut seen = HashSet::new();
+		let mut pending = vec![ty];
+		while let Some(ty) = pending.pop() {
+			if !self.types.flags(ty).contains(TypeFlags::MOVE_ONLY) || !seen.insert(ty) {
+				continue;
+			}
+			match self.types.kind(ty) {
+				TypeKind::Task(..) => return true,
+				TypeKind::Collection(_, item, key) => pending.extend([item, key]),
+				TypeKind::Tuple(list) | TypeKind::Union(list) => {
+					pending.extend(self.types.list_items(list).iter().copied());
+				}
+				TypeKind::Object(_) => {
+					pending.extend(self.types.fields_of(ty).iter().map(|field| field.ty));
+				}
+				TypeKind::NamedUnion(nominal, _) => {
+					let count = self
+						.types
+						.sym_list(self.types.nominal(nominal).members)
+						.len();
+					pending
+						.extend((0..count as u16).map(|index| self.types.payload(nominal, index)));
+				}
+				_ => {}
+			}
+		}
+		false
+	}
+
+	/// The helper dropping the tasks a declaration holds at the end of its
+	/// block: `faDrop` for a task, `faDropTasks` for a value holding tasks.
+	pub(crate) fn task_drop(&mut self, n: NodeId) -> String {
+		let ty = self
+			.analysis
+			.symbols
+			.symbol_of_decl(n)
+			.map_or(TypeId::UNKNOWN, |symbol| {
+				self.analysis.symbols.symbol(symbol).ty
+			});
+		if matches!(self.types.kind(ty), TypeKind::Task(..)) {
+			self.helper("faDrop").to_string()
+		} else {
+			self.helper("faDropTasks").to_string()
+		}
+	}
+
+	/// Whether a declaration holds tasks that its block drops (cancels) at
+	/// its end: a `Task`, or a value holding tasks (an array, an object, an
+	/// optional…), never moved elsewhere.
 	pub(crate) fn holds_task(&self, n: NodeId) -> bool {
 		let Some(symbol) = self.analysis.symbols.symbol_of_decl(n) else {
 			return false;
 		};
 		let ty = self.analysis.symbols.symbol(symbol).ty;
-		if !matches!(self.types.kind(ty), TypeKind::Task(..)) {
+		if !self.contains_task(ty) {
 			return false;
 		}
 		// a task given to a call is moved (`kept.push(task)`), even in one

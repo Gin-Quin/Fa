@@ -291,7 +291,10 @@ impl Generator<'_> {
 						continue;
 					}
 					let format = format.unwrap_or_else(|| self.nested_formatter(field_ty));
-					entries.push(format!("[{}, {format}]", js::string_literal(&name)));
+					entries.push(format!(
+						"[{}, {format}]",
+						js::string_literal(&Self::property(&name))
+					));
 				}
 				let helper = self.helper("faFormatObject");
 				format!("(value) => {helper}(value, [{}])", entries.join(", "))

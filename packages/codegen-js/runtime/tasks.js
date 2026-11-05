@@ -276,6 +276,28 @@ export function faDrop(task) {
 	}
 }
 
+// @fa-helper faDropTasks deps: FaTask faDrop
+/**
+ * The end of the scope of a value holding tasks (an array, a map, an
+ * object, an optional…): each task still running is cancelled, in order.
+ * @param {unknown} value
+ * @returns {void}
+ */
+export function faDropTasks(value) {
+	/** @type {unknown[]} */
+	const pending = [value];
+	while (pending.length > 0) {
+		const item = /** @type {any} */ (pending.shift());
+		if (item instanceof FaTask) {
+			faDrop(item);
+		} else if (typeof item === "object" && item !== null) {
+			const parts =
+				typeof item[Symbol.iterator] === "function" ? Array.from(item) : Object.values(item);
+			pending.unshift(...parts);
+		}
+	}
+}
+
 // @fa-helper faFatal deps: faReport faExit
 /**
  * A stop (or a foreign exception) in a task: the program ends.

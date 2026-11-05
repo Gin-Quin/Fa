@@ -1,0 +1,51 @@
+-- Names that mean something to JavaScript: fields named like the properties
+-- of `Object.prototype`, module-level values named like the globals the
+-- runtime uses, and `==` of a value holding NaN with itself (backends review
+-- 2026-11-05, findings 11, 12, 14 and 16).
+use { Json } = std.json
+
+type Weird = { constructor: Integer, length: Integer, toString: String, valueOf: Integer, __proto__: Integer }
+let w = Weird { constructor = 1, length = 2, toString = "t", valueOf = 3, __proto__ = 4 }
+console.log(w) -- prints: { constructor = 1, length = 2, toString = "t", valueOf = 3, __proto__ = 4 }
+console.log(w.constructor + w.length + w.valueOf + w.__proto__, w.toString) -- prints: 10 t
+let other = Weird { ...w, length = 9 }
+console.log(w == w, other == w, other.length) -- prints: true false 9
+
+mutable m = Map<String, Integer>.from([], capacity = 2)
+m["__proto__"] = 1
+m["constructor"] = 2
+console.log(m.size, m.get("__proto__") ?? -1, m.get("toString") ?? -1) -- prints: 2 1 -1
+
+-- an error is recognized by what it is, not by a field
+type Tag = { faName: String }
+type Holder = { constructor: Tag, value: Integer }
+let h = Holder { constructor = { faName = "Fake" }, value = 1 }
+console.log(h, [h]) -- prints: { constructor = { faName = "Fake" }, value = 1 } [{ constructor = { faName = "Fake" }, value = 1 }]
+
+-- JSON keeps the Fa names
+type Named = { constructor: String, hasOwnProperty: Boolean }
+let text = Json.stringify(Named { constructor = "c", hasOwnProperty = true })
+console.log(text) -- prints: {"constructor":"c","hasOwnProperty":true}
+let named: Named = Json.parse(text) catch error => Named { constructor = "?", hasOwnProperty = false }
+console.log(named.constructor, named.hasOwnProperty) -- prints: c true
+
+-- module-level values named like globals
+mutable TextEncoder = 1
+mutable Uint8Array = 2
+mutable Promise = 3
+function bump = () mutates TextEncoder, Uint8Array => {
+	TextEncoder += 1
+	Uint8Array += 1
+}
+bump()
+let long = "é".repeat(300)
+console.log(TextEncoder, Uint8Array, Promise, long.length, long[150..152] catch e => "?") -- prints: 2 3 3 300 éé
+
+-- NaN is never equal, even to the value holding it
+type P = { v: Float }
+let nan = 0.0 / 0.0
+let values = [1.0, nan]
+let copy = values
+let p = P { v = nan }
+let points = [p]
+console.log(values == copy, points == points, nan == nan) -- prints: false false false

@@ -940,9 +940,13 @@ mod tests {
 	fn overflow_checks_can_be_turned_off() {
 		let program = program(false);
 		assert!(!program.contains("faCheck"), "{program}");
-		// an `Int8` wraps like native code; `Integer` and `Int64` don't
+		// an `Int8` and an `Int64` wrap like native code; `Integer` doesn't
+		// (design/decisions.md, "After the backends review")
 		assert!(program.contains("return a + b << 24 >> 24;"), "{program}");
 		assert!(program.contains("return x + 1;"), "{program}");
-		assert!(program.contains("return x * 3n;"), "{program}");
+		assert!(
+			program.contains("return BigInt.asIntN(64, x * 3n);"),
+			"{program}"
+		);
 	}
 }

@@ -98,7 +98,7 @@ export function faFormatNested(value) {
 				case "fa:Range":
 					return faFormatRange(/** @type {any} */ (value));
 			}
-			if (typeof (/** @type {any} */ (value).constructor?.faName) === "string") {
+			if (typeof (/** @type {any} */ (value)[Symbol.for("fa.error")]) === "string") {
 				// a Fa error (see `faIsError`)
 				return String(value);
 			}
@@ -158,7 +158,9 @@ export function faFormatTuple(tuple, formats) {
  * An object: `{ x = 1, y = 2 }`, `{}`. `fields` lists the fields to print, in
  * declaration order, with their formatters (`[["x", faFormatNested]]`), so
  * that relation fields and private fields are left out; without it, every
- * own property not starting with `$`, in property order.
+ * own property not starting with `$`, in property order. A property ending
+ * with `$` is a field named like a property of `Object.prototype`
+ * (`constructor$`): it prints without the `$`.
  * @param {object} object
  * @param {[string, FaFormatter][]} [fields]
  * @returns {string}
@@ -171,12 +173,14 @@ export function faFormatObject(object, fields) {
 		const sides = /** @type {any} */ (object)[faSides];
 		for (const key of Object.keys(record)) {
 			if (!key.startsWith("$") && !(sides !== undefined && sides.includes(key))) {
-				parts.push(`${key} = ${faFormatNested(record[key])}`);
+				parts.push(
+					`${key.endsWith("$") ? key.slice(0, -1) : key} = ${faFormatNested(record[key])}`,
+				);
 			}
 		}
 	} else {
 		for (const [key, format] of fields) {
-			parts.push(`${key} = ${format(record[key])}`);
+			parts.push(`${key.endsWith("$") ? key.slice(0, -1) : key} = ${format(record[key])}`);
 		}
 	}
 	return parts.length === 0 ? "{}" : `{ ${parts.join(", ")} }`;
@@ -236,7 +240,7 @@ export function faFormatError(error) {
 			const value = record[key];
 			const text =
 				typeof value === "string" ? faQuote(value) : value === undefined ? "none" : String(value);
-			parts.push(`${key} = ${text}`);
+			parts.push(`${key.endsWith("$") ? key.slice(0, -1) : key} = ${text}`);
 		}
 	}
 	const name = type.faName ?? type.name;

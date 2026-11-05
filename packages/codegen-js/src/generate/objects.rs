@@ -61,10 +61,12 @@ impl Place {
 impl Generator<'_> {
 	// ── objects ──────────────────────────────────────────────────────────
 
-	/// The JavaScript property of a field (`#secret` → `$p_secret`).
+	/// The JavaScript property of a field (`#secret` → `$p_secret`, a
+	/// property of `Object.prototype` gets a `$` suffix: `constructor$`).
 	pub(crate) fn property(name: &str) -> String {
 		match name.strip_prefix('#') {
 			Some(private) => format!("$p_{private}"),
+			None if crate::names::is_object_property(name) => format!("{name}$"),
 			None => name.to_string(),
 		}
 	}

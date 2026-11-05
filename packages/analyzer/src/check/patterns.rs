@@ -444,18 +444,15 @@ impl Walker<'_> {
 	fn note_covered(&mut self, coverage: &mut WhenCoverage, ty: TypeId) {
 		coverage.covered.push(ty);
 		coverage.exact.insert(ty);
-		match self.s.types.nominal_mask(ty) {
-			Some((nominal, mask, _)) => {
-				match coverage
-					.masks
-					.iter_mut()
-					.find(|(other, _)| *other == nominal)
-				{
-					Some((_, union)) => *union = self.s.types.mask_union(*union, mask),
-					None => coverage.masks.push((nominal, mask)),
-				}
+		if let Some((nominal, mask, _)) = self.s.types.nominal_mask(ty) {
+			match coverage
+				.masks
+				.iter_mut()
+				.find(|(other, _)| *other == nominal)
+			{
+				Some((_, union)) => *union = self.s.types.mask_union(*union, mask),
+				None => coverage.masks.push((nominal, mask)),
 			}
-			None => {}
 		}
 	}
 

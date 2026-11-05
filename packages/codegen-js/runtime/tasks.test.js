@@ -271,7 +271,7 @@ describe("tests that await", () => {
 				run: () => order.push("blocking"),
 			},
 		];
-		const code = await faRunTests(tests, () => {}, faTestTask);
+		const code = await faRunTests([["a.test", tests]], () => {}, faTestTask);
 		expect(code).toBe(1);
 		expect(order).toEqual(["first starts", "first ends", "blocking"]);
 	});

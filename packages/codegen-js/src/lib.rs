@@ -88,6 +88,11 @@ pub struct Options {
 	/// for a standalone file (its top level starts a task or awaits
 	/// something that may suspend); a program takes `Program::asynchronous`.
 	pub asynchronous: Option<bool>,
+	/// A development build for hot reloading (`fa develop`, decision D43):
+	/// the declarations of other modules are read through the registry of
+	/// the module swapped last (`faHotModule`: `$h0.ns.name`), and `main.js`
+	/// listens for swaps (`faHotListen`).
+	pub hot: bool,
 }
 
 impl Options {
@@ -101,6 +106,7 @@ impl Options {
 			overflow_checks: true,
 			libraries: Vec::new(),
 			asynchronous: None,
+			hot: false,
 		}
 	}
 }
@@ -635,11 +641,35 @@ pub fn entry_module(
 	if asynchronous_tests {
 		used.push("faTestTask");
 	}
+	// a hot build (D43): the modules with values registered, the swaps listened for
+	let hot = options.hot && !entry.tests;
+	if hot {
+		used.push("faHotModule");
+		used.push("faHotListen");
+	}
 	helpers.extend(used.iter().copied());
 	main.push_str(&format!(
 		"import {{ {} }} from \"./$runtime.js\";\n",
 		used.join(", ")
 	));
+	if hot {
+		let mut registered: Vec<&String> = inputs
+			.init_order
+			.iter()
+			.map(|(module, _)| module)
+			.chain(inputs.entry.as_ref().map(|entry| &entry.module))
+			.collect();
+		registered.sort();
+		registered.dedup();
+		for (index, module) in registered.into_iter().enumerate() {
+			let path = generate::modules::js_path(module);
+			main.push_str(&format!(
+				"import * as $m{index} from \"./{path}\";\nfaHotModule({}, $m{index});\n",
+				crate::js::string_literal(&path)
+			));
+		}
+		main.push_str("faHotListen(import.meta.url);\n");
+	}
 	let mut init_calls = Vec::new();
 	for (index, (module, decl)) in inputs.init_order.iter().enumerate() {
 		let path = generate::modules::js_path(module);
@@ -660,15 +690,23 @@ pub fn entry_module(
 			main.push_str(&format!(
 				"import {{ tests as $tests{index} }} from \"./{path}\";\n"
 			));
-			lists.push(format!("...$tests{index}"));
+			// by module: `fa test` runs each file in a process of its own
+			// (`--fa-test-file=<module>`)
+			lists.push(format!(
+				"[{}, $tests{index}]",
+				crate::js::string_literal(module)
+			));
 		}
 		let run = if asynchronous_tests {
 			format!(
-				"faRunAsync(async () => await faRunTests([{}], $init, faTestTask));",
+				"faRunAsync(async () => await faRunTests([{}], $init, faTestTask, {arguments}));",
 				lists.join(", ")
 			)
 		} else {
-			format!("faRun(() => faRunTests([{}], $init));", lists.join(", "))
+			format!(
+				"faRun(() => faRunTests([{}], $init, undefined, {arguments}));",
+				lists.join(", ")
+			)
 		};
 		main.push_str(&format!(
 			"\nfunction $init() {{\n{}}}\n\n{run}\n",

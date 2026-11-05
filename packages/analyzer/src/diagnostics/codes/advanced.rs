@@ -44,6 +44,7 @@ codes! {
 	DEP007 = "DEP007", Error, [], "see the advanced brief";
 	DEP008 = "DEP008", Error, [], "see the advanced brief";
 	DEP009 = "DEP009", Error, [], "farm doesn't support target wasm";
+	DEP010 = "DEP010", Error, [], "the generate of stripe failed: …";
 	EFF001 = "EFF001", Error, [], "reset mutates player, but its signature doesn't say so: add mutates player";
 	EFF002 = "EFF002", Error, [], "for an uncovered invalidation";
 	EFF003 = "EFF003", Error, [], "writing through a parameter not covered by a declared mutates in a block body";

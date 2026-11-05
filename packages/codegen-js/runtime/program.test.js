@@ -119,6 +119,29 @@ describe("the entry point", () => {
 		expect(runProgram(`import { faRun } from "$/main.js"; faRun(() => 4n);`).code).toBe(4);
 	});
 
+	test("the tests of one file run alone, and their counts end the output", () => {
+		const files = `[
+			["a.test", [
+				{ name: "one", file: "a.test.fa", line: 1, run: () => {} },
+				{ name: "two", file: "a.test.fa", line: 2, modifier: "skip", run: () => {} },
+			]],
+			["b.test", [{ name: "three", file: "b.test.fa", line: 1, run: () => { throw new Error("no"); } }]],
+		]`;
+		const program = (/** @type {string[]} */ argv) => `
+			import { faRun, faRunTests } from "$/main.js";
+			faRun(() => faRunTests(${files}, () => {}, undefined, ${JSON.stringify(argv)}));
+		`;
+		expect(runProgram(program(["--fa-test-file=a.test"]))).toEqual({
+			code: 0,
+			stdout: "✓ one\n\u0001fa-test-summary 1 0 1 0\n",
+			stderr: "",
+		});
+		// every file, without the argument
+		const all = runProgram(program([]));
+		expect(all.stdout.startsWith("✓ one\n")).toBe(true);
+		expect(all.code).not.toBe(0);
+	});
+
 	test("an escaped error prints `error: <toString>` and exits with 1", () => {
 		const result = runProgram(`
 			import { faRun } from "$/main.js";

@@ -209,6 +209,8 @@ pub(crate) struct Generator<'s> {
 	pub(crate) program: Option<&'s modules::ProgramCx>,
 	/// The imports of other modules: path → export → local name.
 	pub(crate) imports: HashMap<String, std::collections::BTreeMap<String, String>>,
+	/// A hot build: the registry entry (`$h0`) of each module used, by path.
+	pub(crate) hot_modules: HashMap<String, String>,
 	/// Whether the module exports `$main`.
 	has_main: bool,
 	/// In a program built with declarations: the lines of the module's
@@ -318,6 +320,7 @@ pub(crate) fn generate_module(
 		module_constants: Vec::new(),
 		program,
 		imports: HashMap::new(),
+		hot_modules: HashMap::new(),
 		has_main: false,
 		typings: Vec::new(),
 		has_reactivity: false,

@@ -63,6 +63,10 @@ pub enum Message {
 	Close {
 		uri: Url,
 	},
+	/// The editor saved a document (a configuration file is read again).
+	Save {
+		uri: Url,
+	},
 	Query {
 		uri: Url,
 		run: Query,
@@ -210,6 +214,11 @@ impl<B: AnalysisBackend> Worker<B> {
 					version: None,
 				});
 				for uri in changed {
+					self.publish(&uri);
+				}
+			}
+			Message::Save { uri } => {
+				for uri in self.backend.saved(&uri) {
 					self.publish(&uri);
 				}
 			}

@@ -310,11 +310,13 @@ fn prepare_package_with(
 /// line does (the lockfile is read, never written), its configuration
 /// evaluated for the target `bun`, its module system given to `wrap` (the
 /// texts of the open documents). Also gives the module of the application's
-/// entry (`application/main`).
+/// entry (`application/main`) and the warnings of the resolution
+/// (`DEP004`); `Err` holds the error of the resolution, as `fa check`
+/// prints it.
 pub fn editor_session(
 	package: &Path,
 	wrap: impl FnOnce(Box<dyn ModuleResolver>) -> Box<dyn ModuleResolver>,
-) -> Result<(Session, String), String> {
+) -> Result<EditorSession, String> {
 	let project = Project {
 		package: true,
 		base: package.to_path_buf(),
@@ -322,7 +324,21 @@ pub fn editor_session(
 		shown: package.to_path_buf(),
 	};
 	let prepared = prepare_package_with(project, "bun", Session::new(), false, wrap)?;
-	Ok((prepared.session, prepared.entry))
+	Ok(EditorSession {
+		session: prepared.session,
+		entry: prepared.entry,
+		warnings: prepared.warnings,
+	})
+}
+
+/// The session of a package for an editor ([`editor_session`]).
+pub struct EditorSession {
+	pub session: Session,
+	/// The module of the application's entry (`application/main`).
+	pub entry: String,
+	/// The warnings of the resolution of the dependencies (`DEP004`), as
+	/// `fa check` prints them.
+	pub warnings: Vec<String>,
 }
 
 /// What resolves the dependencies of a package: its workspace (the

@@ -310,6 +310,36 @@ impl Session {
 			&& self.module_role(self.module_of_decl(decl)).is_module()
 	}
 
+	/// For each value of a program's [`Program::init_order`], the indices
+	/// (in that order) of the values its initializer reads, directly or
+	/// through the functions it calls: `fa develop` initializes again the
+	/// values that read the values of a swapped module (decision D43).
+	pub fn initializer_reads(&self, program: &Program) -> Vec<Vec<usize>> {
+		let keys: Vec<Option<Decl>> = program
+			.init_order
+			.iter()
+			.map(|&(file, node)| {
+				self.source_file(file)
+					.interface
+					.keys
+					.iter()
+					.find(|(_, keyed)| keyed.node == node)
+					.map(|(&key, _)| key)
+			})
+			.collect();
+		keys.iter()
+			.map(|key| {
+				let Some(key) = key else {
+					return Vec::new();
+				};
+				self.value_dependencies(*key)
+					.into_iter()
+					.filter_map(|read| keys.iter().position(|other| *other == Some(read)))
+					.collect()
+			})
+			.collect()
+	}
+
 	/// The module-level values a declaration reads, directly or through the
 	/// functions it calls.
 	fn value_dependencies(&self, decl: Decl) -> Vec<Decl> {

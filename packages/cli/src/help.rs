@@ -96,9 +96,13 @@ each test in its own run of the executable. `--coverage` is not available yet.
 Usage: fa develop [<package>] [--target=bun]
 
 Compiles the application for Bun, runs it, watches the files of the package
-(and of the packages of the workspace it uses), and runs it again after each
-change; a change with errors keeps the running program until it is fixed. In a
-workspace, without a package, every package with an application is developed.
+(and of the packages of the workspace it uses), and reloads the edited modules
+in the running program after each change (their module-level values initialized
+again, the others kept), or restarts it when the change can't be reloaded (a
+type, the exports or the files changed; `develop.hotReload = false` always
+restarts); a change with errors keeps the running program until it is fixed.
+In a workspace, without a package, every package with an application is
+developed.
 "
 		}
 		"preview" => {

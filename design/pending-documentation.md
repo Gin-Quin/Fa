@@ -58,3 +58,6 @@ Table row "`Mutex`, atomics shared with a worker": make it "`Mutex`, atomics, ch
 ## `documentation/advanced/concurrency.md`, "1. Parallel loops" (the paragraph on `parallel()`)
 
 Make precise: `parallel()` gives a view for one operation, called at once on it: `map`, `filter`, `reduce`, `some`, `every` or `sum` (`let view = numbers.parallel()` alone is an error). `filter` keeps the collection's kind. The function of `reduce` combines two items (its accumulator is of the items' type), since the items are grouped in any way. `parallel()` of a `Map` is not available yet.
+## `documentation/architecture/dependencies.md`, "Sibling packages" (and the table of "Sources")
+
+Add after the paragraph on sibling packages: "A package outside a workspace can depend on a local folder that holds a package, with a relative path too (`shared = "../shared"`). Unlike a sibling package, it is locked like any other source: the lockfile records the path and the hash of its `package.fa`, `dependencies.fa` and `library/`, and a change of these files fails the build until `fa update shared` accepts it." In the table of sources, the row "Sibling package of the workspace" becomes "Local package (a sibling in a workspace, a folder outside one)".

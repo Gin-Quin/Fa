@@ -10,15 +10,17 @@ use tokio::sync::{mpsc, oneshot};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
 	CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-	DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-	DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
-	FoldingRangeProviderCapability, GotoDefinitionParams, GotoDefinitionResponse, Hover,
-	HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-	InitializedParams, Location, MarkupContent, MarkupKind, MessageType, OneOf, Range,
-	SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
-	SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+	DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+	DocumentFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FoldingRange,
+	FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
+	GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
+	InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent, MarkupKind,
+	MessageType, OneOf, Range, SelectionRange, SelectionRangeParams,
+	SelectionRangeProviderCapability, SemanticTokens, SemanticTokensFullOptions,
+	SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
 	SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
-	TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Url, WorkDoneProgressOptions,
+	TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url,
+	WorkDoneProgressOptions,
 };
 use tower_lsp::{Client, LanguageServer, LspService};
 
@@ -103,6 +105,7 @@ pub fn capabilities(encoding: PositionEncoding) -> ServerCapabilities {
 			TextDocumentSyncOptions {
 				open_close: Some(true),
 				change: Some(TextDocumentSyncKind::INCREMENTAL),
+				save: Some(TextDocumentSyncSaveOptions::Supported(true)),
 				..Default::default()
 			},
 		)),
@@ -187,6 +190,12 @@ impl LanguageServer for FaLanguageServer {
 			uri: params.text_document.uri,
 			version: params.text_document.version,
 			changes: params.content_changes,
+		});
+	}
+
+	async fn did_save(&self, params: DidSaveTextDocumentParams) {
+		self.send(Message::Save {
+			uri: params.text_document.uri,
 		});
 	}
 

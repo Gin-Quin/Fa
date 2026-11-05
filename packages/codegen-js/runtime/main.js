@@ -126,13 +126,26 @@ export function faRun(main) {
  *   async function taking its task: `runAsync` (`faTestTask`) runs it as a
  *   task, and the runner waits for it before the next test; the result is
  *   then a promise of the exit code.
- * @param {Array<{ name: string, file: string, line: number, modifier: string | undefined, run: Function, async?: boolean }>} tests
+ * - `fa test` runs each test file in a process of its own: the argument
+ *   `--fa-test-file=<module>` runs the tests of that file only (a `test
+ *   only` of another file still hides them), and the counts are printed
+ *   as the last line, after `FA_TEST_SUMMARY`, for `fa` to add them up.
+ * @param {Array<[string, Array<{ name: string, file: string, line: number, modifier: string | undefined, run: Function, async?: boolean }>]>} files
+ *   the tests of each test file, by module
  * @param {() => void} init
  * @param {(run: Function) => Promise<void>} [runAsync]
+ * @param {string[]} [argv] the arguments of the program
  * @returns {number | Promise<number>}
  */
-export function faRunTests(tests, init, runAsync) {
-	const focused = tests.some((test) => test.modifier === "only");
+export function faRunTests(files, init, runAsync, argv = []) {
+	const all = files.flatMap(([, tests]) => tests);
+	const focused = all.some((test) => test.modifier === "only");
+	const option = argv.find((argument) => argument.startsWith("--fa-test-file="));
+	const worker = option?.slice("--fa-test-file=".length);
+	const tests =
+		worker === undefined
+			? all
+			: files.filter(([module]) => module === worker).flatMap(([, tests]) => tests);
 	let passed = 0;
 	let failed = 0;
 	let skipped = 0;
@@ -208,6 +221,11 @@ export function faRunTests(tests, init, runAsync) {
 				);
 			}
 			pass(test);
+		}
+		if (worker !== undefined) {
+			// FA_TEST_SUMMARY: read by `fa test`, which prints the total
+			console.log(`\u0001fa-test-summary ${passed} ${failed} ${skipped} ${notRun}`);
+			return failed > 0 ? 1 : 0;
 		}
 		const parts = [`${passed} passed`, `${failed} failed`];
 		if (skipped > 0) {

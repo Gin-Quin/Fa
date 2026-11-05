@@ -240,14 +240,19 @@ pub fn scan(
 					whole |= !reached;
 				}
 				if whole {
-					let modules = all_modules.get_or_insert_with(|| resolver.modules());
-					let prefix = format!("{folder}/");
-					dependencies.extend(
-						modules
-							.iter()
-							.filter(|other| other.starts_with(&prefix))
-							.cloned(),
-					);
+					if folder.starts_with(crate::mounts::DEPENDENCY_PREFIX) {
+						// a folder of a dependency (`use { cows } = farm`)
+						dependencies.extend(resolver.modules_in(folder));
+					} else {
+						let modules = all_modules.get_or_insert_with(|| resolver.modules());
+						let prefix = format!("{folder}/");
+						dependencies.extend(
+							modules
+								.iter()
+								.filter(|other| other.starts_with(&prefix))
+								.cloned(),
+						);
+					}
 				}
 			}
 		}

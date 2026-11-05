@@ -82,6 +82,15 @@ pub trait ModuleResolver: Send + Sync {
 	/// The modules the program is made of: every file of the roots, the
 	/// configuration files excepted.
 	fn modules(&self) -> Vec<String>;
+	/// The modules below a folder (`library/math` → `library/math/add`…),
+	/// a folder of a dependency included (`$dependencies/farm@4.2.1/library`).
+	fn modules_in(&self, folder: &str) -> Vec<String> {
+		let prefix = format!("{folder}/");
+		self.modules()
+			.into_iter()
+			.filter(|module| module.starts_with(&prefix))
+			.collect()
+	}
 	/// The configuration files of the package (`package`, `dependencies`…).
 	fn configurations(&self) -> Vec<String> {
 		Vec::new()
@@ -438,6 +447,10 @@ impl ModuleResolver for OverlayResolver {
 
 	fn modules(&self) -> Vec<String> {
 		self.inner.modules()
+	}
+
+	fn modules_in(&self, folder: &str) -> Vec<String> {
+		self.inner.modules_in(folder)
 	}
 
 	fn configurations(&self) -> Vec<String> {

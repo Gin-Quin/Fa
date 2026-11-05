@@ -188,6 +188,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					}
 				}
 			}
+			// a set of flags: an array of its accepted names, checked as the
+			// names of an enumeration (fields.rs)
+			TypeKind::Fields(_) => {
+				out.push(b'a');
+				out.extend_from_slice(&fields_names_schema(types, ty));
+			}
 			// an enumeration: `E<count>;` then `<length>;<name>` and `p<value>;`
 			// (pinned) or `n` (written as its name)
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) => {
@@ -494,6 +500,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let i64 = self.context.i64_type();
 		if !self.json_members(ty).is_empty() {
 			return self.json_named(tree, ty, repr, call);
+		}
+		// a set of flags: the bits of the names of the array (fields.rs)
+		if self.is_fields(ty) {
+			return self.json_read_fields(tree, ty, repr);
 		}
 		// an enumeration: the member the tree names (`fa_json_enum`)
 		if let [(nominal, _), ..] = self.json_enum_members(ty).as_slice() {
@@ -902,6 +912,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.json_write_named(value, ty, call)
 			}
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) => self.json_write_enum(value, ty),
+			TypeKind::Fields(_) => self.json_write_flags(value, ty),
 			TypeKind::Object(_)
 			| TypeKind::Collection(
 				CollKind::Array | CollKind::GrowingArray | CollKind::Map | CollKind::GrowingMap,
@@ -1356,4 +1367,119 @@ fn json_quoted(text: &str) -> String {
 	}
 	quoted.push('"');
 	quoted
+}
+
+/// The names a set of flags accepts in JSON, as the schema of an
+/// enumeration written as its names: `E<count>;` then `<length>;<name>n`.
+pub(crate) fn fields_names_schema(types: &fa_analyzer::types::TypeStore, ty: TypeId) -> Vec<u8> {
+	let names = types.fields_names(ty);
+	let mut out = format!("E{};", names.len()).into_bytes();
+	for (name, _) in names {
+		out.extend_from_slice(format!("{};", name.len()).as_bytes());
+		out.extend_from_slice(name.as_bytes());
+		out.push(b'n');
+	}
+	out
+}
+
+impl<'ctx> Lowering<'_, 'ctx> {
+	/// A set of flags from its JSON form, an array of names checked by the
+	/// schema: the bits of each name (a group: all its flags).
+	fn json_read_fields(
+		&mut self,
+		tree: PointerValue<'ctx>,
+		ty: TypeId,
+		repr: Repr,
+	) -> Result<Val<'ctx>, Error> {
+		let Repr::Int(int) = repr else {
+			return Ok(Val::new(repr, self.context.i8_type().const_zero()));
+		};
+		let names = self.types().fields_names(ty);
+		let mut schema = fields_names_schema(self.types(), ty);
+		schema.push(0);
+		let schema = self.constant_bytes(&schema);
+		let bits = self.alloca(repr, "json_flags")?;
+		let width = self.int_type(int.bits);
+		self.builder.build_store(bits.pointer, width.const_zero())?;
+		let count = self
+			.call_value(self.runtime.function("fa_json_count")?, &[tree.into()])?
+			.into_int_value();
+		let item_function = self.runtime.function("fa_json_item")?;
+		let enum_function = self.runtime.function("fa_json_enum")?;
+		self.for_each_index(count, |this, index| {
+			let child = this
+				.call_value(item_function, &[tree.into(), index.into()])?
+				.into_pointer_value();
+			let position = this
+				.call_value(enum_function, &[child.into(), schema.into()])?
+				.into_int_value();
+			let mut mask = width.const_zero();
+			for (at, (_, bits)) in names.iter().enumerate() {
+				let is = this.builder.build_int_compare(
+					IntPredicate::EQ,
+					position,
+					position.get_type().const_int(at as u64, false),
+					"",
+				)?;
+				let value = this.const_int(int.bits, I256::from(*bits));
+				mask = this
+					.builder
+					.build_select(is, value, mask, "")?
+					.into_int_value();
+			}
+			let current = this.load(bits)?.int();
+			let next = this.builder.build_or(current, mask, "")?;
+			this.builder.build_store(bits.pointer, next)?;
+			Ok(())
+		})?;
+		self.load(bits)
+	}
+
+	/// A set of flags as JSON: the array of the dotted paths of its flags.
+	fn json_write_flags(&mut self, value: Val<'ctx>, ty: TypeId) -> Result<(), Error> {
+		let bits = value.int();
+		let width = bits.get_type().get_bit_width();
+		self.json_text("[")?;
+		for (index, path) in self.types().fields_leaves(ty).iter().enumerate() {
+			let bit = self.const_int(width, I256::from(1u128 << index));
+			let common = self.builder.build_and(bits, bit, "")?;
+			let present = self.builder.build_int_compare(
+				IntPredicate::NE,
+				common,
+				bits.get_type().const_zero(),
+				"",
+			)?;
+			let taken = self.append_block("json_flag");
+			let next = self.append_block("json_next");
+			self.builder
+				.build_conditional_branch(present, taken, next)?;
+			self.builder.position_at_end(taken);
+			if index > 0 {
+				// a comma when a flag before it is written
+				let before = self.const_int(
+					width,
+					I256::from(fa_analyzer::types::store::fields_mask(index as u32)),
+				);
+				let earlier = self.builder.build_and(bits, before, "")?;
+				let separated = self.builder.build_int_compare(
+					IntPredicate::NE,
+					earlier,
+					bits.get_type().const_zero(),
+					"",
+				)?;
+				let comma = self.append_block("json_comma");
+				let name = self.append_block("json_name");
+				self.builder
+					.build_conditional_branch(separated, comma, name)?;
+				self.builder.position_at_end(comma);
+				self.json_text(",")?;
+				self.builder.build_unconditional_branch(name)?;
+				self.builder.position_at_end(name);
+			}
+			self.json_text(&json_quoted(path))?;
+			self.builder.build_unconditional_branch(next)?;
+			self.builder.position_at_end(next);
+		}
+		self.json_text("]")
+	}
 }

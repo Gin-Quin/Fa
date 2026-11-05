@@ -234,6 +234,15 @@ impl GlobalStore {
 	}
 }
 
+/// The `width` low bits set (a `Fields` type of `width` flags has them all).
+pub fn fields_mask(width: u32) -> u128 {
+	if width >= 128 {
+		u128::MAX
+	} else {
+		(1u128 << width) - 1
+	}
+}
+
 /// Interns a module path into the global store (the modules of a parallel
 /// run, before any unit: their ids are global in every view).
 pub fn intern_module(global: &GlobalStore, path: &str) -> ModuleId {
@@ -514,6 +523,92 @@ impl TypeStore {
 				_ => None,
 			})
 			.collect()
+	}
+
+	/// The leaves of a `Fields` type, in bit order (declaration order, the
+	/// members of a group in its place): their dotted paths (`nested.baz1`).
+	pub fn fields_leaves(&self, ty: TypeId) -> Vec<String> {
+		let mut leaves = Vec::new();
+		self.collect_leaves(ty, "", &mut leaves, 0);
+		leaves
+	}
+
+	fn collect_leaves(&self, ty: TypeId, prefix: &str, leaves: &mut Vec<String>, depth: u32) {
+		if depth > 32 {
+			return;
+		}
+		for (name, children) in self.fields_keys(ty) {
+			let path = if prefix.is_empty() {
+				name
+			} else {
+				format!("{prefix}.{name}")
+			};
+			if children.is_unset() {
+				leaves.push(path);
+			} else {
+				self.collect_leaves(children, &path, leaves, depth + 1);
+			}
+		}
+	}
+
+	/// The number of leaves (bits) of a `Fields` type.
+	pub fn fields_width(&self, ty: TypeId) -> u32 {
+		self.fields_width_of_kind(self.kind(ty))
+	}
+
+	fn fields_width_of_kind(&self, kind: TypeKind) -> u32 {
+		let TypeKind::Fields(list) = kind else {
+			return 0;
+		};
+		self.list_items(list)
+			.iter()
+			.map(|&item| match self.kind(item) {
+				TypeKind::Tuple(pair) => match self.list_items(pair) {
+					[_, children] => self.fields_width(*children),
+					_ => 0,
+				},
+				_ => 1,
+			})
+			.sum()
+	}
+
+	/// The bits of a key path of a `Fields` type (`["nested", "baz1"]`): one
+	/// bit for a leaf, the bits of all its leaves for a group. `None` when a
+	/// name is not a key of its level.
+	pub fn fields_path_bits(&self, ty: TypeId, path: &[&str]) -> Option<u128> {
+		let (first, rest) = path.split_first()?;
+		let mut offset = 0u32;
+		for (name, children) in self.fields_keys(ty) {
+			let width = if children.is_unset() {
+				1
+			} else {
+				self.fields_width(children)
+			};
+			if name == *first {
+				let bits = if rest.is_empty() {
+					fields_mask(width)
+				} else if children.is_unset() {
+					return None;
+				} else {
+					self.fields_path_bits(children, rest)?
+				};
+				return Some(bits.checked_shl(offset).unwrap_or(0));
+			}
+			offset += width;
+		}
+		None
+	}
+
+	/// The storage of a `Fields` type: the smallest unsigned integer of 8,
+	/// 16, 32, 64 or 128 bits holding its bits.
+	pub fn fields_storage_bits(&self, ty: TypeId) -> u32 {
+		match self.fields_width(ty) {
+			0..=8 => 8,
+			9..=16 => 16,
+			17..=32 => 32,
+			33..=64 => 64,
+			_ => 128,
+		}
 	}
 
 	pub fn string_literal(&mut self, text: &str) -> TypeId {
@@ -1006,7 +1101,7 @@ impl TypeStore {
 	/// Gives an object type the name it is declared with, for messages and
 	/// hover (the first declaration wins; the type stays structural).
 	pub fn name_type(&mut self, ty: TypeId, name: &str) {
-		if !matches!(self.kind(ty), TypeKind::Object(_)) {
+		if !matches!(self.kind(ty), TypeKind::Object(_) | TypeKind::Fields(_)) {
 			return;
 		}
 		let name = self.syms.intern(name);
@@ -1460,6 +1555,10 @@ impl TypeStore {
 			}
 			TypeKind::NamedUnion(..) | TypeKind::Member(..) => {
 				F::COMPARABLE.with_runtime_kind(RuntimeKind::Object)
+			}
+			// a JavaScript number up to 32 flags, a `bigint` above (D14)
+			TypeKind::Fields(_) if self.fields_width_of_kind(kind) > 32 => {
+				(scalar | F::JS_BIGINT).with_runtime_kind(RuntimeKind::BigInt)
 			}
 			TypeKind::Fields(_) => scalar.with_runtime_kind(RuntimeKind::Number),
 			TypeKind::CStruct(_) => {

@@ -104,7 +104,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let raw = self
 				.builder
 				.build_extract_value(structure, index as u32, "")?;
-			self.append_nested(Val::new(repr, raw), node)?;
+			self.append_nested_of(Val::new(repr, raw), item_type, node)?;
 		}
 		let close = self.string_constant(")");
 		self.append_value(close, node)
@@ -537,6 +537,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let holds = match container.repr {
 			Repr::Range => self.in_range(lowered, container, node)?,
+			// a set of flags (fields.rs)
+			Repr::Int(_) if self.is_fields(self.concrete_type(self.type_of(collection))) => {
+				self.fields_is_in(lowered, container)?
+			}
 			Repr::Array(_) => self
 				.array_method_more(node, "Array#includes", container, &[lowered], &[value])?
 				.int(),

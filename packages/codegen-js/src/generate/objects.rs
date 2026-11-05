@@ -1038,7 +1038,7 @@ impl Generator<'_> {
 	}
 
 	/// A value evaluated once: stable, or kept in a temporary.
-	fn keep(&mut self, value: Expr) -> Expr {
+	pub(crate) fn keep(&mut self, value: Expr) -> Expr {
 		if value.stable {
 			return value;
 		}

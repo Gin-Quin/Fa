@@ -18,6 +18,7 @@ pub(crate) mod collections;
 mod constants;
 mod errors;
 mod expressions;
+mod fields;
 mod foreign;
 mod functions;
 mod generics;
@@ -907,6 +908,9 @@ impl<'s> Generator<'s> {
 			}
 			TypeKind::Float(_) | TypeKind::FloatLit(..) | TypeKind::Percentage => Repr::Number,
 			TypeKind::BigInt | TypeKind::BigIntLit(_) => Repr::BigInt,
+			// up to 32 flags a number, a `bigint` above (fields.rs)
+			TypeKind::Fields(_) if self.fields_are_big(ty) => Repr::BigInt,
+			TypeKind::Fields(_) => Repr::Number,
 			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => Repr::String,
 			TypeKind::Boolean | TypeKind::BoolLit(_) => Repr::Boolean,
 			TypeKind::None => Repr::None,

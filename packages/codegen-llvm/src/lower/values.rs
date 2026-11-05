@@ -282,6 +282,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => Repr::Str,
 			TypeKind::None => Repr::None,
 			TypeKind::Enum(nominal, _) | TypeKind::EnumMember(nominal, _) => Repr::Enum(nominal),
+			// an unsigned integer, one bit per flag (fields.rs)
+			TypeKind::Fields(_) => self.fields_repr(ty),
 			TypeKind::ErrorTop => Repr::Union,
 			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _)
 				if matches!(

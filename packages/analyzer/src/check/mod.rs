@@ -27,6 +27,7 @@ mod destructuring;
 pub mod effects;
 mod errors;
 mod expr;
+mod fields;
 mod foreign;
 mod from;
 mod functions;

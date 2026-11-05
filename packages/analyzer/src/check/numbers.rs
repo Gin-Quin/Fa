@@ -688,8 +688,15 @@ impl Walker<'_> {
 		operands: NodeList<'_>,
 		expected: Option<TypeId>,
 	) -> TypeId {
+		// `a + b`, `a - b` of `Fields` values (fields.rs)
+		if let Some(ty) = self.check_fields_arithmetic(n, op, operands, expected) {
+			return ty;
+		}
 		let nodes: SmallVec<[NodeId; 4]> = operands.iter().collect();
 		let types = self.check_operands(&nodes, expected);
+		if types.iter().any(|&ty| self.is_fields(ty)) {
+			return self.fields_operation(n, op, &nodes, &types);
+		}
 		let ty = self.memo(n, |w| w.arithmetic_type(n, op, operands, &types));
 		if self.s.types.as_int(ty).is_some() {
 			self.arithmetic_flow(n, op, operands, ty);
@@ -1046,7 +1053,7 @@ impl Walker<'_> {
 
 	/// Removes the arithmetic info of a node that is not (or no longer) an
 	/// integer operation here.
-	fn clear_arith(&mut self, n: NodeId) {
+	pub(super) fn clear_arith(&mut self, n: NodeId) {
 		if self.a.arith.remove(&n).is_some() {
 			self.clear_flag(n, ARITH_BITS);
 			self.a.intervals.remove(&n);
@@ -1393,6 +1400,19 @@ impl Walker<'_> {
 				place.ty = narrowed;
 				narrowed_field = Some((field, declared));
 			}
+		}
+		// `permissions += Permissions.read` (fields.rs)
+		if self.is_fields(place.ty) {
+			let actual = self.check(value, Some(place.ty));
+			self.memo(n, |w| {
+				w.check_assignable(target, &place);
+				w.fields_operation_type(n, op, &[target, value], &[place.ty, actual]);
+				TypeId::VOID
+			});
+			if place.assignable {
+				self.write_effect(target, n);
+			}
+			return TypeId::VOID;
 		}
 		let expected = match self.num_kind(place.ty) {
 			NumKind::Int(_) | NumKind::Float(_) | NumKind::BigInt => {
@@ -1748,10 +1768,15 @@ impl Walker<'_> {
 			&& matches!(
 				self.s.types.kind(source),
 				TypeKind::Enum(..) | TypeKind::EnumMember(..)
-			));
+			)) || (matches!(to, K::Int(_))
+			&& self.is_fields(source)
+			&& self.fields_fit(source, target));
 
 		if !exists {
 			let hint = match (to, from) {
+				_ if self.is_fields(source) && matches!(to, K::Int(_)) => {
+					": it doesn't hold every value of the set (one bit per flag): convert to a wider integer type, like `UInt128`"
+				}
 				(K::BigInt, K::Float(_)) => ": round it first, ex: `BigInt(Integer.round(x))`",
 				(K::Int(_), K::Percentage) => ": convert it to a `Float` first, ex: `Float(p)`",
 				_ => "",

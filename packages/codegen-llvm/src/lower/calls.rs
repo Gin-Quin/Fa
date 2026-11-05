@@ -625,6 +625,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				self.array_method(node, path, &arguments)
 			}
+			"Fields#toStringArray" => self.fields_to_string_array(node),
 			"Enum#toString" => {
 				let value = self.receiver(node)?;
 				match value.repr {

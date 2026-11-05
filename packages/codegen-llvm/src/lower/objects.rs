@@ -1179,7 +1179,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.append_value(prefix, node)?;
 			let repr = self.repr_of(field_type, node.index())?;
 			let raw = self.builder.build_extract_value(structure, index, "")?;
-			self.append_nested(Val::new(repr, raw), node)?;
+			self.append_nested_of(Val::new(repr, raw), field_type, node)?;
 		}
 		let suffix = self.string_constant(" }");
 		self.append_value(suffix, node)

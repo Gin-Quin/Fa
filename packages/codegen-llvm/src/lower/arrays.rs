@@ -1839,7 +1839,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			pointer,
 			repr: item,
 		})?;
-		self.append_nested(value, node)?;
+		self.append_nested_of(value, item_type, node)?;
 		let next = self
 			.builder
 			.build_int_nsw_add(index, i64.const_int(1, false), "")?;

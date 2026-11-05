@@ -95,6 +95,15 @@ impl Generator<'_> {
 				negated,
 			} => {
 				let values = self.in_order(&[value, collection], |g, node| g.expr(node));
+				let set_ty = self.type_of(collection);
+				if self.is_fields(set_ty) {
+					let test = self.fields_is_in(set_ty, &values[1], &values[0]);
+					return if negated {
+						js::prefix("!", &test)
+					} else {
+						test
+					};
+				}
 				let helper = self.helper("faRangeIncludes");
 				let test = js::call(helper, &[values[1].text.clone(), values[0].text.clone()]);
 				if negated {

@@ -70,7 +70,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return None;
 		}
 		match self.node_repr(node) {
-			Ok(Repr::Int(int)) if int.bits <= 64 => Some(node),
+			Ok(Repr::Int(int)) if int.bits <= 64 && !self.prints_flags(node) => Some(node),
 			_ => None,
 		}
 	}
@@ -85,6 +85,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(TemplatePart::Expression(node)) = meaningful.next()
 			&& meaningful.next().is_none()
 			&& matches!(self.node_repr(node)?, Repr::Int(int) if int.bits <= 64)
+			&& !self.prints_flags(node)
 		{
 			let value = self.expr(node)?;
 			if value.repr == Repr::Never {
@@ -123,7 +124,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 							}
 						}
 					}
-					Repr::Int(int) if int.bits <= 64 => {}
+					Repr::Int(int) if int.bits <= 64 && !self.prints_flags(node) => {}
 					_ => return Ok(None),
 				}
 			}
@@ -880,6 +881,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					&[bytes.into(), length.into(), capacity.into()],
 				)
 			}
+			// a set of flags: `{ read, write }` (fields.rs)
+			Repr::Int(_)
+				if let Some(ty) = self.printed_fields_type(node)
+					&& self.fields_repr(ty) == value.repr =>
+			{
+				self.append_fields(value, ty, node)
+			}
 			Repr::Int(int) => {
 				let raw = value.int();
 				if int.bits <= 64 {
@@ -1132,7 +1140,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if let TemplatePart::Expression(node) = part {
 				let textual = match self.node_repr(node)? {
 					Repr::Str => true,
-					Repr::Int(int) => int.bits <= 64,
+					Repr::Int(int) => int.bits <= 64 && !self.prints_flags(node),
 					_ => false,
 				};
 				if !textual || self.reads_root_of(node, place) {

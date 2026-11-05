@@ -68,6 +68,10 @@ impl Walker<'_> {
 				TypeId::UNKNOWN
 			});
 		}
+		// a key set where a `Fields` type is expected (fields.rs)
+		if let Some(fields) = self.expected_fields(expected) {
+			return self.check_fields_literal(n, fields, items, false);
+		}
 		// `{ ...value, field = … }` (spreads.rs)
 		if self.has_spread(items) {
 			let target = expected.and_then(|expected| self.literal_target(expected));
@@ -219,6 +223,10 @@ impl Walker<'_> {
 		members: NodeList<'_>,
 	) -> TypeId {
 		let ty = self.literal_target_type(target);
+		// `Permissions { read, write }` (fields.rs)
+		if self.is_fields(ty) {
+			return self.check_fields_literal(n, ty, members, false);
+		}
 		// `AtomicInteger { value = 0 }`, `Mutex(T) { value = … }` (concurrency.rs)
 		if let TypeKind::Sync(kind, item) = self.s.types.kind(ty)
 			&& (kind.is_handle() || kind == crate::types::SyncKind::TcpListener)
@@ -790,6 +798,10 @@ impl Walker<'_> {
 		members: NodeList<'_>,
 	) -> TypeId {
 		if let Some(ty) = self.type_target(target) {
+			// `Permissions.read` (fields.rs)
+			if self.is_fields(ty) {
+				return self.memo(n, |w| w.fields_member_value(n, ty, members));
+			}
 			return self.memo(n, |w| w.type_member_chain(target, ty, members));
 		}
 		self.access_roots.insert(self.strip_groups(target));
@@ -1217,6 +1229,12 @@ impl Walker<'_> {
 			}
 			TypeKind::Collection(..) => self.collection_member(member, receiver, text),
 			TypeKind::Iterator(item, _) => self.iterator_member(member, receiver, item, text),
+			TypeKind::Fields(_) if text == "toStringArray" => {
+				let builtin = builtins::by_path("Fields#toStringArray")?;
+				self.set_resolution(member, Resolution::Builtin(builtin));
+				let ty = builtins::value_type(&mut self.s.types, builtin)?;
+				Some((ty, MemberKind::Builtin))
+			}
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) if text == "toString" => {
 				let builtin = builtins::by_path("Enum#toString")?;
 				self.set_resolution(member, Resolution::Builtin(builtin));

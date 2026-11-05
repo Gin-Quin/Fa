@@ -81,6 +81,7 @@ impl Generator<'_> {
 			Value::Integer(integer) => {
 				let bigint = match types.kind(ty) {
 					TypeKind::BigInt | TypeKind::BigIntLit(_) => true,
+					TypeKind::Fields(_) => types.fields_width(ty) > 32,
 					TypeKind::Int(_) => types
 						.as_int(ty)
 						.is_some_and(|int| int.storage.is_js_bigint()),

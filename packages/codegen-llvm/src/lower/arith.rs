@@ -132,6 +132,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		op: ArithOp,
 		operands: NodeList<'_>,
 	) -> Result<Val<'ctx>, Error> {
+		// `a + b`, `a - b` of field sets (fields.rs)
+		if self.is_fields(self.concrete_type(self.type_of(node))) {
+			return self.fields_arithmetic(node, op, operands);
+		}
 		let repr = self.node_repr(node)?;
 		match repr {
 			Repr::Int(_) => {
@@ -785,6 +789,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// a local, a field, an item: the place is computed once
 		let slot = self.place(target)?;
 		let current = self.load(slot)?;
+		// `set += flags`, `set -= flags` (fields.rs)
+		if self.is_fields(self.concrete_type(self.type_of(target))) {
+			let right = self.expr(value)?;
+			if right.repr == Repr::Never {
+				return Ok(right);
+			}
+			let result = self.fields_step(op, current, right)?;
+			self.store(slot, result, node)?;
+			return Ok(Val::void());
+		}
 		let result = match slot.repr {
 			Repr::Int(storage) => {
 				let compute = self.compute_of(node, slot.repr);

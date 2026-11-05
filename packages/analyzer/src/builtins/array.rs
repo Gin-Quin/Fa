@@ -33,11 +33,24 @@ static TO_STRING: Signature = Signature {
 	throws: None,
 };
 
+/// `toStringArray()`: the dotted paths of the flags of a `Fields` value.
+static TO_STRING_ARRAY: Signature = Signature {
+	params: &[],
+	variadic: false,
+	ret: Ty::Array(&Ty::Is(TypeId::STRING)),
+	throws: None,
+};
+
 /// The members of arrays and enumerations.
 pub static BUILTINS: &[Builtin] = &[
 	Builtin {
 		path: "Enum#toString",
 		kind: Function(&TO_STRING),
+	},
+	// `permissions.toStringArray()`: the flags of a `Fields` value (check/fields.rs)
+	Builtin {
+		path: "Fields#toStringArray",
+		kind: Function(&TO_STRING_ARRAY),
 	},
 	// `Color.members`: an `Array(Color)` in declaration order (typed by the walk)
 	Builtin {

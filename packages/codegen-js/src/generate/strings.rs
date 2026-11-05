@@ -194,6 +194,7 @@ impl Generator<'_> {
 				let names = self.enum_names(nominal);
 				format!("(value) => {names}[value]")
 			}
+			TypeKind::Fields(_) => self.fields_formatter(ty),
 			TypeKind::Tuple(list) => {
 				let items = self.types.list_items(list).to_vec();
 				let formats: Vec<String> = items

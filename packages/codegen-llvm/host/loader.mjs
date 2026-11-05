@@ -234,8 +234,32 @@ function ended(error) {
 	}
 }
 
-const { instance } = await WebAssembly.instantiate(readFileSync(WASM), imports);
+const module = await WebAssembly.compile(readFileSync(WASM));
+// the C functions of foreign code the module imports from `env` (those no C
+// linked with it defines): exported by `env.mjs`, next to this loader, which
+// may also export `attach(exports)` to reach the module's memory
+const hosted = WebAssembly.Module.imports(module).filter((entry) => entry.module === "env");
+let host;
+if (hosted.length > 0) {
+	const wanted = hosted.map((entry) => `\`${entry.name}\``).join(", ");
+	try {
+		host = await import(new URL("./env.mjs", import.meta.url).href);
+	} catch (error) {
+		throw new Error(
+			`the program calls the C functions ${wanted}, which the host gives: export them from \`env.mjs\`, next to ${new URL(import.meta.url).pathname} (${error})`,
+		);
+	}
+	imports.env = {};
+	for (const { name } of hosted) {
+		if (typeof host[name] !== "function") {
+			throw new Error(`\`env.mjs\` doesn't export the C function \`${name}\``);
+		}
+		imports.env[name] = host[name];
+	}
+}
+const instance = await WebAssembly.instantiate(module, imports);
 memory = instance.exports.memory;
+host?.attach?.(instance.exports);
 let started = false;
 try {
 	instance.exports._start();

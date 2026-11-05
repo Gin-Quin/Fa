@@ -27,7 +27,7 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Features still missing (from the engineers' reports)
 
-- Native: foreign code: `CArray` values, `CStruct` by value off x86-64, `Pointer.allocate`/`free`, WebAssembly imports, `build.cLibrary`; JS foreign code: structs by value. Concurrency: `parallel()` of maps. JavaScript: compile-time ranges (`static span = 1..5`, `AN001`).
+- Native: foreign code: `build.cLibrary`; JS foreign code: `Pointer.allocate`/`free` on Bun.
 - Analyzer: relations across files, `@extern` (*foreign code*), `@import` in remote files and folders; implied relation effects for reactivity; `Fields` types (not built by the analyzer, `AN001`) and `TypeFromSchema` of them; `TypeFromSchema` inside a generic type other than as its value.
 - Tooling: `fa develop --target=web` (reload channel) and `--target=native`.
 - Native: compile-time named union members (`Schema` values).

@@ -13,7 +13,15 @@ type Triple = CStruct {
 	c: Float64
 }
 
+type Color = CStruct {
+	rgba: CArray<UInt8, 4>
+	weight: Float32
+}
+
 type RawFarm = CStruct { }
+
+function colorSum: (color: Color) => Int32 = @extern("color_sum")
+function makeColor: (value: UInt8) => Color = @extern("color_make")
 
 function scale: (point: Point, factor: Int32) => Point = @extern("point_scale")
 function sum: (triple: Triple) => Float64 = @extern("triple_sum")
@@ -54,6 +62,9 @@ function main = () => {
 	console.log(sum(Triple { a = 1.0, b = 2.0, c = 3.5 })) -- prints: 6.5
 	let made = makeTriple(2.0)
 	console.log(made.c) -- prints: 6
+	console.log(colorSum(Color { rgba = [1, 2, 3, 4], weight = 10.0 })) -- prints: 20
+	let color = makeColor(7)
+	console.log(color.rgba, color.weight) -- prints: [7, 8, 9, 10] 2.5
 	mutable counter: Int64 = 40
 	increment(counter, 2)
 	console.log(counter) -- prints: 42

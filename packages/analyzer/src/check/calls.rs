@@ -118,6 +118,10 @@ impl Walker<'_> {
 		if let Some(ty) = self.check_task_call(n, callee, arguments) {
 			return ty;
 		}
+		// `Pointer.allocate(value)`: foreign.rs
+		if let Some(ty) = self.check_pointer_allocate(n, callee, arguments, expected) {
+			return ty;
+		}
 		// `Array(T).from(source, capacity = n)`: from.rs
 		if let Some(ty) = self.check_collection_from(n, callee, arguments) {
 			// `WCL001` when a literal would do (collections.rs)

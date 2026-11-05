@@ -809,6 +809,7 @@ impl Walker<'_> {
 					..
 				) | TypeKind::String
 					| TypeKind::StringLit(_)
+					| TypeKind::CArray(..)
 					| TypeKind::Unknown
 			);
 			let parallel = w.parallel.last().is_some_and(|frame| frame.node == n);

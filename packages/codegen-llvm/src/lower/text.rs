@@ -1351,6 +1351,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let target = self.type_of(member);
 				self.pointer_value(value, target, member)
 			}
+			"CArray#length" => {
+				let count = match value.repr {
+					Repr::Tuple(ty) => self.c_array_count(ty).unwrap_or(0),
+					_ => 0,
+				};
+				Ok(Val::new(
+					Repr::Int(IntRepr::I64),
+					self.context.i64_type().const_int(u64::from(count), false),
+				))
+			}
 			"String#length" => {
 				let (bytes, length) = self.string_parts(value)?;
 				let capacity = self.string_capacity(value)?;

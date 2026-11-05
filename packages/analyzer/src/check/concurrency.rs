@@ -874,8 +874,8 @@ impl Walker<'_> {
 
 	/// `collection.parallel()`: a view of the collection whose next
 	/// operation runs in parallel (concurrency.md, "1. Parallel loops"): the
-	/// collection's own type, on `native` only (`CONC001`); a map isn't
-	/// supported yet.
+	/// collection's own type, on `native` only (`CONC001`); a relation side
+	/// isn't supported yet.
 	pub(super) fn parallel_view_member(
 		&mut self,
 		member: NodeId,
@@ -891,12 +891,9 @@ impl Walker<'_> {
 			let diagnostic = self.diagnostic(&CONC001, member, message);
 			self.report(diagnostic);
 		}
-		if matches!(
-			kind,
-			CollKind::Map | CollKind::GrowingMap | CollKind::RelationPool(_)
-		) {
+		if matches!(kind, CollKind::RelationPool(_)) {
 			let message = format!(
-				"`parallel()` of a `{}` is not supported yet by the analyzer: run the operation on `.values()`, or on the collection itself",
+				"`parallel()` of a `{}` is not supported yet by the analyzer: run the operation on a copy (`Array.from(…)`), or on the collection itself",
 				kind.name()
 			);
 			let diagnostic =
@@ -963,6 +960,21 @@ impl Walker<'_> {
 			self.report(diagnostic);
 			return;
 		};
+		// a map's entries: its function takes a key and a value, so it can't
+		// combine two partial results
+		let receiver = self.type_of(target);
+		if matches!(operation, "reduce" | "sum")
+			&& matches!(
+				self.s.types.kind(receiver),
+				TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)
+			) {
+			let message = format!(
+				"a parallel view of a map has `map`, `filter`, `some` and `every`: `{operation}` combines partial results, which a function of a key and a value can't: use `Array.from(map.values()).parallel().{operation}(…)`"
+			);
+			let diagnostic = self.diagnostic(&CONC001, op_member, message);
+			self.report(diagnostic);
+			return;
+		}
 		self.a.parallel_operations.insert(n, operation);
 		for argument in arguments.iter() {
 			let value = self.strip_groups(argument);

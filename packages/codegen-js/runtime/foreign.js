@@ -342,3 +342,195 @@ export function faCStringRead(pointer) {
 	const ffi = faFfiRuntime();
 	return new ffi.CString(pointer).toString();
 }
+
+// @fa-helper faCWrite
+/**
+ * Writes a Fa value into memory with the C layout `spec` (from the
+ * compiler: a C type name, a struct `{ size, fields }`, or an array
+ * `{ array, count, stride, bigint }`), little-endian.
+ * @param {DataView} view
+ * @param {number} offset
+ * @param {any} spec
+ * @param {any} value
+ * @returns {void}
+ */
+export function faCWrite(view, offset, spec, value) {
+	if (typeof spec === "string") {
+		switch (spec) {
+			case "bool":
+				view.setUint8(offset, value ? 1 : 0);
+				return;
+			case "i8":
+				view.setInt8(offset, value);
+				return;
+			case "u8":
+				view.setUint8(offset, value);
+				return;
+			case "i16":
+				view.setInt16(offset, value, true);
+				return;
+			case "u16":
+				view.setUint16(offset, value, true);
+				return;
+			case "i32":
+				view.setInt32(offset, value, true);
+				return;
+			case "u32":
+				view.setUint32(offset, value, true);
+				return;
+			case "i64":
+				view.setBigInt64(offset, BigInt(value), true);
+				return;
+			case "u64":
+				view.setBigUint64(offset, BigInt(value), true);
+				return;
+			case "f32":
+				view.setFloat32(offset, value, true);
+				return;
+			case "f64":
+				view.setFloat64(offset, value, true);
+				return;
+			default:
+				// a pointer: a number, `none` is `NULL`
+				view.setBigUint64(offset, value === undefined ? 0n : BigInt(value), true);
+				return;
+		}
+	}
+	if (spec.array !== undefined) {
+		for (let index = 0; index < spec.count; index += 1) {
+			faCWrite(view, offset + index * spec.stride, spec.array, value[index]);
+		}
+		return;
+	}
+	for (const [name, field, at] of spec.fields) {
+		faCWrite(view, offset + at, field, value[name]);
+	}
+}
+
+// @fa-helper faCRead
+/**
+ * Reads a Fa value from memory with the C layout `spec` (see `faCWrite`):
+ * an `Int64` stays a `bigint` when `bigint`, else it is a number.
+ * @param {DataView} view
+ * @param {number} offset
+ * @param {any} spec
+ * @param {boolean} bigint
+ * @returns {any}
+ */
+export function faCRead(view, offset, spec, bigint) {
+	if (typeof spec === "string") {
+		switch (spec) {
+			case "bool":
+				return view.getUint8(offset) !== 0;
+			case "i8":
+				return view.getInt8(offset);
+			case "u8":
+				return view.getUint8(offset);
+			case "i16":
+				return view.getInt16(offset, true);
+			case "u16":
+				return view.getUint16(offset, true);
+			case "i32":
+				return view.getInt32(offset, true);
+			case "u32":
+				return view.getUint32(offset, true);
+			case "i64": {
+				const value = view.getBigInt64(offset, true);
+				return bigint ? value : Number(value);
+			}
+			case "u64": {
+				const value = view.getBigUint64(offset, true);
+				return bigint ? value : Number(value);
+			}
+			case "f32":
+				return view.getFloat32(offset, true);
+			case "f64":
+				return view.getFloat64(offset, true);
+			default: {
+				const address = view.getBigUint64(offset, true);
+				return address === 0n ? undefined : Number(address);
+			}
+		}
+	}
+	if (spec.array !== undefined) {
+		const items = [];
+		for (let index = 0; index < spec.count; index += 1) {
+			items.push(faCRead(view, offset + index * spec.stride, spec.array, spec.bigint));
+		}
+		return items;
+	}
+	/** @type {Record<string, any>} */
+	const value = {};
+	for (const [name, field, at, big] of spec.fields) {
+		value[name] = faCRead(view, offset + at, field, big);
+	}
+	return value;
+}
+
+// @fa-helper faFfiBindStruct deps: faFfiRuntime faFfiLibraries faCWrite faCRead
+/**
+ * A C function taking or returning a `CStruct` by value, which `bun:ffi`
+ * can't pass: its address from the first library that has `symbol`, and a
+ * shim compiled by TinyCC (`cc`) from `source` (`fa_shim(f, p0…, out)`)
+ * that calls it with the arguments read from memory, under the platform's
+ * C ABI.
+ * @param {string[]} libraries the libraries of `build.link`
+ * @param {string} symbol
+ * @param {string} source the C source of the shim
+ * @param {any[]} params the C layouts of the parameters (`faCWrite`)
+ * @param {[any, number, boolean]} returns the layout of the result, its
+ *   size, and whether it is a `bigint`
+ * @returns {(...values: any[]) => any}
+ */
+export function faFfiBindStruct(libraries, symbol, source, params, returns) {
+	const ffi = faFfiRuntime();
+	/** @type {number | undefined} */
+	let address;
+	/** @type {unknown} */
+	let problem;
+	for (const path of faFfiLibraries(libraries)) {
+		try {
+			const library = ffi.dlopen(path, { [symbol]: { args: [], returns: "void" } });
+			address = library.symbols[symbol].ptr;
+			break;
+		} catch (error) {
+			problem = error;
+		}
+	}
+	if (address === undefined) {
+		throw new Error(`the C function \`${symbol}\` was not found: ${String(problem)}`);
+	}
+	/** @type {any} */
+	const process = /** @type {any} */ (globalThis).process;
+	const fs = process.getBuiltinModule("node:fs");
+	const os = process.getBuiltinModule("node:os");
+	// `cc` reads a file: one per source, named by its hash
+	let hash = 0;
+	for (let index = 0; index < source.length; index += 1) {
+		hash = (Math.imul(hash, 31) + source.charCodeAt(index)) | 0;
+	}
+	const file = `${os.tmpdir()}/fa-shim-${(hash >>> 0).toString(16)}-${source.length}.c`;
+	fs.writeFileSync(file, source);
+	const shim = ffi.cc({
+		source: file,
+		symbols: { fa_shim: { args: Array(params.length + 2).fill("ptr"), returns: "void" } },
+	}).symbols.fa_shim;
+	const [result, resultSize, bigint] = returns;
+	return (/** @type {any[]} */ ...values) => {
+		const pointers = params.map((spec, index) => {
+			const value = values[index];
+			const size = typeof spec === "string" ? 8 : spec.size;
+			const memory = new Uint8Array(Math.max(size, 8));
+			// a value already in memory (a C string, an array): its address
+			const given = ArrayBuffer.isView(value) ? ffi.ptr(value) : value;
+			faCWrite(new DataView(memory.buffer), 0, spec, given);
+			return memory;
+		});
+		const out = new Uint8Array(Math.max(resultSize, 8));
+		shim(address, ...pointers.map((memory) => ffi.ptr(memory)), ffi.ptr(out));
+		if (result === "void") {
+			return undefined;
+		}
+		return faCRead(new DataView(out.buffer), 0, result, bigint);
+	};
+}

@@ -187,8 +187,7 @@ impl Generator<'_> {
 				.is_some_and(|summary| summary.suspends);
 			// an `async` function that loops gets an async instance (its loops
 			// spend the coop budget), unless it starts tasks: one that can't
-			// suspend is a blocking call, whose `start`s run at once on every
-			// target (design/decisions.md, the async divergences)
+			// suspend has one instance, as natively (`single_instance_mode`)
 			let starts = self
 				.summary(declaration)
 				.is_some_and(|summary| summary.starts);
@@ -454,18 +453,43 @@ impl Generator<'_> {
 	}
 
 	/// The mode of the one instance of a function: an `async` function that
-	/// can't suspend is a blocking call (A4: its `start`s run at once, with
-	/// the blocking depth raised, as natively), any other is `Dynamic`.
+	/// can't suspend is a blocking call (A4), any other is `Dynamic`. One
+	/// that starts tasks is `Dynamic` too: awaited, it is not a blocking
+	/// call, so its tasks start later (`concurrency.md`); called blocking,
+	/// the caller raises the blocking depth ([`Generator::blocking_starter`]).
 	fn single_instance_mode(&self, declaration: NodeId) -> Mode {
 		let is_async = self
 			.function_info(declaration)
 			.and_then(|info| info.sig)
 			.is_some_and(|sig| self.types.sig(sig).is_async);
-		if is_async && self.tasks.asynchronous {
+		let starts = self
+			.summary(declaration)
+			.is_some_and(|summary| summary.starts);
+		if is_async && !starts && self.tasks.asynchronous {
 			Mode::Blocking
 		} else {
 			Mode::Dynamic
 		}
+	}
+
+	/// Whether a call of `declaration` is a blocking call of an `async`
+	/// function that starts tasks without suspending: not awaited nor
+	/// started, outside a blocking call. The caller raises the blocking
+	/// depth around it, so that its `start`s run at once.
+	fn blocking_starter(&self, n: NodeId, declaration: NodeId) -> bool {
+		let Some(summary) = self.summary(declaration) else {
+			return false;
+		};
+		let is_async = self
+			.function_info(declaration)
+			.and_then(|info| info.sig)
+			.is_some_and(|sig| self.types.sig(sig).is_async);
+		self.tasks.asynchronous
+			&& is_async
+			&& summary.starts
+			&& !self.suspends(declaration)
+			&& !self.tasks.awaited_calls.contains(&n)
+			&& self.mode() != Mode::Blocking
 	}
 
 	/// The mode of the instance of `declaration` generated next.
@@ -629,6 +653,11 @@ impl Generator<'_> {
 		}
 		if suspends {
 			return js::call(&sync_name, &values);
+		}
+		if declaration.is_some_and(|declaration| self.blocking_starter(n, declaration)) {
+			let helper = self.helper("faBlocking");
+			values.insert(0, function);
+			return js::call(helper, &values);
 		}
 		js::call(&function, &values)
 	}
@@ -942,15 +971,12 @@ impl Generator<'_> {
 			.unwrap_or_default();
 		let task = match info.as_ref().and_then(|info| info.block) {
 			Some(block) => {
-				let mut symbols: Vec<fa_analyzer::ids::SymbolId> = copied
+				// the module-level values (the top level's too) are read, not
+				// copied: they are not captured (`concurrency.md`, tasks)
+				let symbols: Vec<fa_analyzer::ids::SymbolId> = copied
 					.iter()
 					.filter_map(|&node| self.analysis.symbols.symbol_of_decl(node))
 					.collect();
-				// at the top level, the top-level values it uses too (they
-				// are the top level's locals natively: design/decisions.md)
-				if detached && self.at_top_level(n) {
-					symbols.extend(self.module_values_used(block));
-				}
 				let saved = self.copy_values(&symbols, true);
 				let task = self.start_block(n, block);
 				self.restore_captures(saved);
@@ -973,42 +999,6 @@ impl Generator<'_> {
 			return js::call(helper, &[task.text]);
 		}
 		task
-	}
-
-	/// Whether a node is outside every function (the top level's code).
-	fn at_top_level(&mut self, n: NodeId) -> bool {
-		let parents = self.parents();
-		let mut current = n;
-		while let Some(parent) = parents[current.index()] {
-			if matches!(self.view(parent), View::Lambda { .. } | View::Test { .. }) {
-				return false;
-			}
-			current = parent;
-		}
-		true
-	}
-
-	/// The module-level values of this file a block uses, in order, once.
-	fn module_values_used(&self, block: NodeId) -> Vec<fa_analyzer::ids::SymbolId> {
-		let mut symbols = Vec::new();
-		let mut stack = vec![block];
-		while let Some(node) = stack.pop() {
-			if matches!(self.view(node), View::Name(_))
-				&& let Resolution::Local(symbol) = self.analysis.resolution(node)
-				&& matches!(
-					self.analysis
-						.symbols
-						.scope(self.analysis.symbols.symbol(symbol).scope)
-						.kind,
-					fa_analyzer::symbols::ScopeKind::Module
-				) && !symbols.contains(&symbol)
-			{
-				symbols.push(symbol);
-			}
-			stack.extend(fa_analyzer::syntax::children(self.tree, node));
-		}
-		symbols.sort();
-		symbols
 	}
 
 	/// `start f(…)`: the task of a call.

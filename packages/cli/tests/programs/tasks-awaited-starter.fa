@@ -1,0 +1,38 @@
+-- An awaited `async` function that only starts tasks is not a blocking call:
+-- its tasks start later (`concurrency.md`). Called blocking, they run at
+-- once. A detached task reads a module-level `mutable`, it doesn't copy it.
+-- (backends review 2026-11-05, findings 9 and 10)
+use { sleep } = std.time
+
+async function run = (name: String) => {
+	start do {
+		console.log("{name} task starts")
+		await Task.yield()
+		console.log("{name} task ends")
+	}
+	console.log("{name} returns")
+}
+
+await run("awaited")
+console.log("after awaited")
+await sleep(5)
+-- prints: awaited returns
+-- prints: after awaited
+-- prints: awaited task starts
+-- prints: awaited task ends
+
+run("blocking")
+console.log("after blocking")
+-- prints: blocking task starts
+-- prints: blocking task ends
+-- prints: blocking returns
+-- prints: after blocking
+
+mutable shared = 1
+start do {
+	await sleep(5)
+	console.log("shared", shared) -- prints: shared 2
+}
+shared = 2
+await sleep(30)
+console.log("end", shared) -- prints: end 2

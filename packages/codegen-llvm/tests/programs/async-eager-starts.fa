@@ -1,19 +1,19 @@
--- The same order on every target (design/decisions.md, the async
--- divergences): an `async` function that can't suspend is a blocking call,
--- so the tasks it starts run at once; a detached `start do` at the top
--- level copies the top-level values it uses.
+-- The same order on every target (`concurrency.md`, tasks; backends review
+-- 2026-11-05): an awaited `async` function that can't suspend is not a
+-- blocking call, so the tasks it starts run when the top level waits or
+-- ends; a detached `start do` at the top level reads the top-level values
+-- it uses (module-level values are not captured).
 async function report = (label: String) => {
 	console.log(label)
 }
 
--- it awaits nothing that suspends: one instance, a blocking call
+-- it awaits nothing that suspends: one instance, called plain when awaited
 async function starter = () => {
 	start report("started")
 	console.log("after the start")
 }
 
 await starter()
--- prints: started
 -- prints: after the start
 
 mutable count = 1
@@ -24,4 +24,5 @@ start do {
 count += 1
 console.log("top level sees {count}")
 -- prints: top level sees 2
--- prints: task sees 11
+-- prints: started
+-- prints: task sees 12

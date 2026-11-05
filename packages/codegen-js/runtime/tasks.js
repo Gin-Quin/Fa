@@ -377,6 +377,24 @@ export function faStartCall(parent, body, ...args) {
 	return task;
 }
 
+// @fa-helper faBlocking deps: faSched
+/**
+ * A blocking call of an `async` function that starts tasks without
+ * suspending: its `start`s run their tasks at once (the blocking depth).
+ * Awaited, the same function is a plain call, and its tasks start later.
+ * @param {Function} f
+ * @param {...any} args
+ * @returns {any}
+ */
+export function faBlocking(f, ...args) {
+	faSched.depth += 1;
+	try {
+		return f(...args);
+	} finally {
+		faSched.depth -= 1;
+	}
+}
+
 // @fa-helper faFinished deps: FaTask faIsError
 /**
  * `start` in a blocking call: the task runs to its end at once, and the

@@ -946,9 +946,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		function: FunctionValue<'ctx>,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<inkwell::values::BasicValueEnum<'ctx>, Error> {
-		Ok(self
-			.builder
-			.build_call(function, arguments, "")?
+		let call = self.builder.build_call(function, arguments, "")?;
+		Ok(call
 			.try_as_basic_value()
 			.basic()
 			.expect("a function with a result"))

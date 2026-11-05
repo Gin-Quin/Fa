@@ -102,6 +102,81 @@ pub fn evaluate_export(session: &mut Session, file: FileId) -> Result<Value, Box
 		.map_err(|error| Box::new((value, error)))
 }
 
+/// A source of `dependencies.fa`, evaluated (architecture/dependencies.md,
+/// `DependencySource`).
+#[derive(Clone, Debug)]
+pub enum DependencySource {
+	/// A source written as a string.
+	Source(String),
+	/// `{ source, generate }`: the source is fetched, then `generate` turns
+	/// its content into the Fa source of the dependency.
+	Generated { source: String, generate: Value },
+}
+
+/// The sources of an analyzed `dependencies.fa` file, by key, its export
+/// evaluated on the interpreter; `Err` holds the message of what is not a
+/// `DependencySource`.
+pub fn dependency_sources(
+	session: &mut Session,
+	file: FileId,
+) -> Result<Vec<(String, DependencySource)>, String> {
+	let value = evaluate_export(session, file).map_err(|failure| failure.1.message())?;
+	let Value::Object(object) = value else {
+		return Err(
+			"`dependencies.fa` exports an object: `export = { farm = \"github:farmers/farm@4\" }`"
+				.to_string(),
+		);
+	};
+	let mut sources = Vec::new();
+	for (key, value) in &object.fields {
+		let source = match value {
+			Value::String(text) => DependencySource::Source(text.to_string()),
+			Value::Object(fields) => match (fields.get("source"), fields.get("generate")) {
+				(Some(Value::String(source)), Some(generate @ Value::Function(_))) => {
+					DependencySource::Generated {
+						source: source.to_string(),
+						generate: generate.clone(),
+					}
+				}
+				(Some(Value::String(source)), None) => DependencySource::Source(source.to_string()),
+				_ => {
+					return Err(format!(
+						"the source of `{key}` is a string, or `{{ source = \"https://…\", generate = (content: String): String => … }}`"
+					));
+				}
+			},
+			_ => {
+				return Err(format!(
+					"the source of `{key}` is a string, ex: `\"github:owner/repository@4\"`"
+				));
+			}
+		};
+		sources.push((key.to_string(), source));
+	}
+	Ok(sources)
+}
+
+/// Runs the `generate` function of a `DependencySource` on the content of
+/// its source, on the interpreter (pure, bounded like any compile-time
+/// evaluation): the Fa source of the dependency, or the message of its
+/// failure.
+pub fn run_generate(
+	session: &mut Session,
+	generate: &Value,
+	content: &str,
+) -> Result<String, String> {
+	let result = fa_interpreter::on_large_stack(|| {
+		let mut host = SessionHost { session };
+		Interpreter::new(&mut host, Limits::default())
+			.call_value(generate, vec![Value::string(content)])
+	});
+	match result {
+		Ok(Value::String(text)) => Ok(text.to_string()),
+		Ok(other) => Err(format!("it returned `{}`, not a `String`", other.to_text())),
+		Err(error) => Err(error.message()),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use crate::CodebaseResolver;

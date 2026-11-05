@@ -555,6 +555,90 @@ fn versions_are_shared_by_the_workspace_and_transitive() {
 	assert_eq!((stdout.as_str(), code), ("49\n", 0), "{stderr}");
 }
 
+/// A `DependencySource` with `generate` (architecture/dependencies.md,
+/// "Loading types from an API"): the source is fetched and locked, then
+/// `generate` runs on its content on the compile-time interpreter, and the
+/// Fa source it returns is the dependency.
+#[test]
+fn generated_dependencies_run_generate_on_their_locked_source() {
+	let scratch = Scratch::new("generated");
+	let served = scratch.write("served", &[("v1/schema.txt", "celsius")]);
+	let schema = format!("file://{}/v1/schema.txt", served.display());
+	let dependencies = format!(
+		"type Generated = {{\n\tsource: String\n\tgenerate: (content: String) => String\n}}\n\nfunction quoted = (url: String): Generated => {{\n\treturn {{\n\t\tsource = url\n\t\tgenerate = (content: String): String => \"export function = (): String => \\\"{{content}}\\\"\\n\"\n\t}}\n}}\n\nexport = {{\n\tweather = quoted(\"{schema}\")\n\tplain = {{\n\t\tsource = \"{schema}\"\n\t\tgenerate = (content: String): String => \"export = \\\"{{content}}!\\\"\\n\"\n\t}}\n}}\n"
+	);
+	let package = scratch.write(
+		"app",
+		&[
+			("package.fa", "export = { name = \"app\" }\n"),
+			("dependencies.fa", &dependencies),
+			(
+				"application/main.fa",
+				"export function = () => {\n\tconsole.log(weather(), plain)\n}\n",
+			),
+		],
+	);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	let locked = lockfile(&package);
+	assert!(
+		locked.contains(&format!("source = \"{schema}\"\n\t\thash = \"sha256:")),
+		"the source is locked: {locked}"
+	);
+	if has_tool("bun") {
+		let (stdout, stderr, code) = scratch.fa(&["run", "."], &package);
+		assert_eq!(
+			(stdout.as_str(), code),
+			("celsius celsius!\n", 0),
+			"{stderr}"
+		);
+	}
+	// the generated code is checked like any dependency
+	fs::write(
+		package.join("application/main.fa"),
+		"export function = () => {\n\tlet degrees: Integer = weather()\n}\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(stderr.contains("E-TYPE-1"), "{stderr}");
+	// the source changes: locked like any other
+	fs::write(served.join("v1/schema.txt"), "kelvin").unwrap();
+	fs::remove_dir_all(scratch.directory.join("cache")).unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("error[DEP001]: the content of `plain` changed since it was locked"),
+		"{stderr}"
+	);
+	// a `generate` that stops
+	fs::write(
+		package.join("dependencies.fa"),
+		format!(
+			"export = {{\n\tweather = {{\n\t\tsource = \"{schema}\"\n\t\tgenerate = (content: String): String => {{\n\t\t\tassert content == \"rain\"\n\t\t\treturn content\n\t\t}}\n\t}}\n}}\n"
+		),
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["update"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("error[DEP010]: the `generate` of `weather` failed: "),
+		"{stderr}"
+	);
+	// a source that isn't a file
+	fs::write(
+		package.join("dependencies.fa"),
+		"export = {\n\tweather = {\n\t\tsource = \"github:farmers/farm@1\"\n\t\tgenerate = (content: String): String => content\n\t}\n}\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("the `source` of `weather` is the URL of a file"),
+		"{stderr}"
+	);
+}
+
 /// A package outside a workspace depends on a local folder holding a
 /// package, locked by its content (design/decisions.md, "Path dependencies
 /// outside a workspace").

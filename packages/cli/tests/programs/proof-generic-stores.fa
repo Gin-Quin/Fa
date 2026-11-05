@@ -1,0 +1,25 @@
+-- Index proofs (audit of the backends review): values reaching a proven
+-- place through generic code, a wider object changed after its literal, or
+-- a field read through a type parameter
+type Cell = { value: UInt32 }
+type Link = { next: UInt32 }
+
+mutable cells: Array<Cell> = [{ value = 7 }]
+mutable free: Array<UInt32> = []
+function put = <Value>(items: Array<Value>, value: Value) mutates items => {
+	items.push(value)
+}
+function read = (items: Array<Cell>, at: UInt32): UInt32 throws IndexError => try items[at].value
+put(free, UInt32(1000000))
+let at = free.pop() ?? 0
+console.log(read(cells, at) catch error => 99) -- prints: 99
+
+mutable links: Array<Link> = [{ next = 0 }]
+mutable wide = { next = UInt32(0), extra = 1 }
+wide.next = 1000000
+links.push(wide)
+function hop = (items: Array<Link>, from: UInt32): UInt32 throws IndexError => try items[try items[from].next].next
+console.log(hop(links, 1) catch error => 99) -- prints: 99
+
+function follow = <Item: { next: UInt32 }>(items: Array<Link>, item: Item): UInt32 throws IndexError => try items[item.next].next
+console.log(follow(links, { next = UInt32(2000000) }) catch error => 99) -- prints: 99

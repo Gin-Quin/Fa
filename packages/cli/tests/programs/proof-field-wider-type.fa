@@ -1,0 +1,8 @@
+-- Index proof: a superset literal narrowed into the array escapes the field claim
+type Link = { next: UInt32 }
+mutable links: Array<Link> = [{ next = 0 }]
+let wide = { next = UInt32(1000000), extra = 1 }
+let narrow: Link = wide
+links.push(narrow)
+function hop = (items: Array<Link>, from: UInt32): UInt32 throws IndexError => try items[try items[from].next].next
+console.log(hop(links, 1) catch error => 99) -- prints: 99

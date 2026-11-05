@@ -1,0 +1,8 @@
+-- Index proof: the items of an array built by a builtin on another receiver
+type Cell = { value: UInt32 }
+mutable cells: Array<Cell> = [{ value = 7 }]
+function read = (items: Array<Cell>, at: UInt32): UInt32 throws IndexError => try items[at].value
+function pick = (codes: Array<UInt32>): UInt32 throws IndexError => try codes[0]
+let codes: Array<UInt32> = [1, 2].map((x) => UInt32(x * 500000) catch error => 0)
+let at = pick(codes) catch error => 0
+console.log(read(cells, at) catch error => 99) -- prints: 99

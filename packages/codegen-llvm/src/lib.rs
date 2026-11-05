@@ -31,7 +31,6 @@ mod link;
 #[cfg(fa_llvm)]
 mod lower;
 mod options;
-mod proofs;
 #[cfg(fa_llvm)]
 pub mod runtime;
 mod split;

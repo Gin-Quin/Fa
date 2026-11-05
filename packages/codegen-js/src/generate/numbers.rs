@@ -544,8 +544,48 @@ impl Generator<'_> {
 
 	/// How `items[index]` (the `Index` node `n`) is checked and normalized
 	/// (`fa_analyzer::lower::index`).
+	/// The proofs of the analysis drop more checks (`fa_analyzer::proofs`,
+	/// as natively): an index proven in bounds is read directly, and a
+	/// proven one proven never negative doesn't count from the end.
 	pub(crate) fn index_access(&self, n: NodeId, index: NodeId) -> IndexAccess {
-		fa_analyzer::lower::index::index_access(self.tree, self.analysis, self.types, n, index)
+		let access =
+			fa_analyzer::lower::index::index_access(self.tree, self.analysis, self.types, n, index);
+		match access {
+			IndexAccess::Checked if self.index_facts().proven_index(n) => IndexAccess::Direct,
+			IndexAccess::FromEnd if self.index_facts().proven_non_negative(index) => {
+				IndexAccess::Direct
+			}
+			_ => access,
+		}
+	}
+
+	/// The index proofs of the file: only when it is the whole program (a
+	/// single file reading no other module) and synchronous.
+	fn index_facts(&self) -> &fa_analyzer::proofs::IndexFacts {
+		self.index_facts.get_or_init(|| {
+			let alone = self.program.is_none()
+				&& self
+					.session
+					.dependency_closure(self.file)
+					.iter()
+					.all(|&module| {
+						self.session
+							.file_of(module)
+							.is_none_or(|file| file == self.file)
+					});
+			let scope = if alone && !self.tasks.asynchronous {
+				fa_analyzer::proofs::ProofScope::WholeFile
+			} else {
+				fa_analyzer::proofs::ProofScope::Nothing
+			};
+			fa_analyzer::proofs::index_facts(
+				self.tree,
+				self.analysis,
+				self.types,
+				scope,
+				self.options.overflow_checks,
+			)
+		})
 	}
 
 	/// Whether a written index must go through `faNormalizeIndex` (`faIndexSet`):

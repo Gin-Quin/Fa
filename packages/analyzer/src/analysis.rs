@@ -591,6 +591,10 @@ pub struct Analysis {
 	/// target type of a union injection, `Integer` ↔ `Int64`, `Float32` →
 	/// `Float`, `Character` → `String`, and of a `SINK_CHECK` range check.
 	pub coercions: FxHashMap<NodeId, TypeId>,
+	/// The nodes whose value is another node's, copied to their own type:
+	/// `pick(value, { foo })`, `omit(value, { foo })` (the backends copy the
+	/// value's fields that the node's type has).
+	pub forwards: FxHashMap<NodeId, NodeId>,
 	/// Integer nodes whose flow fact is narrower than their type (hover,
 	/// proofs): an id into `interval_values`. Read it with [`Analysis::interval`].
 	pub intervals: FxHashMap<NodeId, IntervalId>,
@@ -1288,6 +1292,7 @@ impl Analysis {
 			diagnostics: Vec::new(),
 			arith: FxHashMap::default(),
 			coercions: FxHashMap::default(),
+			forwards: FxHashMap::default(),
 			intervals: FxHashMap::default(),
 			interval_values: Interner::new(),
 			instantiations: FxHashMap::default(),

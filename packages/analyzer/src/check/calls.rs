@@ -98,6 +98,10 @@ impl Walker<'_> {
 		expected: Option<TypeId>,
 		comptime: bool,
 	) -> TypeId {
+		// `pick(value, { foo })`, `omit(value, { foo })` (type_ops.rs)
+		if let Some(ty) = self.check_pick_or_omit_value(n, callee, arguments) {
+			return ty;
+		}
 		if let Some((builtin, target)) = self.conversion_target(callee) {
 			return self.check_conversion_call(n, callee, builtin, target, arguments);
 		}

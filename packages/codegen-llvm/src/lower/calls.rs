@@ -16,6 +16,15 @@ use crate::lower::values::{IntRepr, Repr, Scalar, Val};
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn call(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		// `pick(value, { foo })`: the value's fields the node's type keeps
+		if let Some(&value) = self.analysis.forwards.get(&node) {
+			let source = self.expr(value)?;
+			if source.repr == Repr::Never {
+				return Ok(source);
+			}
+			let picked = self.picked_copy(source, self.node_repr(node)?, node)?;
+			return Ok(self.fresh(picked));
+		}
 		// `value?.method()`
 		if let View::Call { callee, .. } = self.view(node)
 			&& let View::OptionalAccess { target, members } = self.view(callee)

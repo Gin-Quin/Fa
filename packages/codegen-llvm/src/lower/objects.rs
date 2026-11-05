@@ -835,6 +835,61 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
+	/// A new object of representation `to` holding copies of the fields of
+	/// `source` it has, by name (`pick(value, { foo })`); a nested object of
+	/// another shape is picked the same way. `source` is only read.
+	pub(crate) fn picked_copy(
+		&mut self,
+		source: Val<'ctx>,
+		to: Repr,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let (Repr::Object(from_type), Repr::Object(to_type)) = (source.repr, to) else {
+			return Err(self.unsupported(node.index(), "this `pick` or `omit`"));
+		};
+		let raw = source.value.expect("an object").into_struct_value();
+		let structure = self.object_type(to_type);
+		let mut result = structure.get_undef();
+		let fields = self.types().fields_of(to_type).to_vec();
+		for field in fields {
+			let (Some(from_index), Some(to_index)) = (
+				self.field_index(from_type, field.name),
+				self.field_index(to_type, field.name),
+			) else {
+				return Err(self.unsupported(node.index(), "this `pick` or `omit`"));
+			};
+			let from_field = self
+				.types()
+				.fields_of(from_type)
+				.iter()
+				.find(|other| other.name == field.name)
+				.map(|other| other.ty)
+				.expect("a field");
+			let from_repr = self.repr_of(from_field, node.index())?;
+			let to_repr = self.repr_of(field.ty, node.index())?;
+			let extracted = self.builder.build_extract_value(raw, from_index, "")?;
+			let value = Val::new(from_repr, extracted);
+			let value = match (from_repr, to_repr) {
+				(Repr::Object(_), Repr::Object(_)) if from_repr != to_repr => {
+					self.picked_copy(value, to_repr, node)?
+				}
+				_ if self.needs_drop(from_repr) => {
+					let copy = self.copy_function(from_repr)?;
+					let copied = self.call_value(copy, &[extracted.into()])?;
+					self.convert(Val::new(from_repr, copied), to_repr, node.index())?
+				}
+				_ => self.convert(value, to_repr, node.index())?,
+			};
+			if let Some(raw) = value.value {
+				result = self
+					.builder
+					.build_insert_value(result, raw, to_index, "")?
+					.into_struct_value();
+			}
+		}
+		Ok(Val::new(to, result))
+	}
+
 	/// The representations of the parameters of a generic type (declared in
 	/// this file) in an application of it, `Stack<Integer>`: `None` for any
 	/// other type.

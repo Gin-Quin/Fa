@@ -166,7 +166,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			// a named union: its members tagged by `"type"` (`fa_runtime.c`, `JsonMember`)
 			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _)
-				if types.nominal(nominal).kind == fa_analyzer::types::NominalKind::Union =>
+				if matches!(
+					types.nominal(nominal).kind,
+					fa_analyzer::types::NominalKind::Union
+						| fa_analyzer::types::NominalKind::Errors
+				) =>
 			{
 				let members = self.json_members(ty);
 				out.extend_from_slice(format!("N{};", members.len()).as_bytes());
@@ -181,6 +185,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						if !self.json_schema(data, depth + 1, out) {
 							return false;
 						}
+					}
+				}
+			}
+			// an enumeration: `E<count>;` then `<length>;<name>` and `p<value>;`
+			// (pinned) or `n` (written as its name)
+			TypeKind::Enum(..) | TypeKind::EnumMember(..) => {
+				let members = self.json_enum_members(ty);
+				out.extend_from_slice(format!("E{};", members.len()).as_bytes());
+				for (nominal, index) in members {
+					let name = types.member_name(nominal, index);
+					out.extend_from_slice(format!("{};", name.len()).as_bytes());
+					out.extend_from_slice(name.as_bytes());
+					match self.json_pinned(nominal, index) {
+						Some(value) => out.extend_from_slice(format!("p{value};").as_bytes()),
+						None => out.push(b'n'),
 					}
 				}
 			}
@@ -209,6 +228,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ => return false,
 		}
 		true
+	}
+
+	/// The members of an enumeration type (or the one of a member).
+	fn json_enum_members(&self, ty: TypeId) -> Vec<(fa_analyzer::ids::NominalId, u16)> {
+		let types = self.types();
+		match types.kind(ty) {
+			TypeKind::EnumMember(nominal, index) => vec![(nominal, index)],
+			TypeKind::Enum(nominal, mask) => {
+				let count = types.sym_list(types.nominal(nominal).members).len() as u16;
+				(0..count)
+					.filter(|&index| types.mask_has(mask, index))
+					.map(|index| (nominal, index))
+					.collect()
+			}
+			_ => Vec::new(),
+		}
+	}
+
+	/// The pinned value of a member of an enumeration (its literal payload).
+	fn json_pinned(&self, nominal: fa_analyzer::ids::NominalId, index: u16) -> Option<I256> {
+		self.types()
+			.as_int(self.types().payload(nominal, index))
+			.filter(|int| int.min == int.max)
+			.map(|int| int.min)
 	}
 
 	/// The members of a named union type (or the one of a member type).
@@ -273,18 +316,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let types = self.types();
 		let shape = types.fields_of(ty);
 		let mut order: Vec<usize> = Vec::new();
-		if let Some(declaration) = self
+		let declared: Vec<fa_analyzer::ids::Sym> = match self
 			.analysis
 			.type_decls
 			.values()
 			.find(|declaration| declaration.ty == ty)
 		{
-			for field in &declaration.fields {
-				if let Some(index) = shape.iter().position(|entry| entry.name == field.name)
-					&& !order.contains(&index)
-				{
-					order.push(index);
-				}
+			Some(declaration) => declaration.fields.iter().map(|field| field.name).collect(),
+			// an object written inline as a member's data: as written
+			None => self
+				.analysis
+				.inline_field_orders
+				.get(&ty)
+				.cloned()
+				.unwrap_or_default(),
+		};
+		for name in declared {
+			if let Some(index) = shape.iter().position(|entry| entry.name == name)
+				&& !order.contains(&index)
+			{
+				order.push(index);
 			}
 		}
 		for index in 0..shape.len() {
@@ -443,6 +494,39 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let i64 = self.context.i64_type();
 		if !self.json_members(ty).is_empty() {
 			return self.json_named(tree, ty, repr, call);
+		}
+		// an enumeration: the member the tree names (`fa_json_enum`)
+		if let [(nominal, _), ..] = self.json_enum_members(ty).as_slice() {
+			let nominal = *nominal;
+			let mut schema = Vec::new();
+			if !self.json_schema(ty, 0, &mut schema) {
+				return Err(self.unsupported(call.index(), "`Json.parse` of this enumeration"));
+			}
+			schema.push(0);
+			let schema = self.constant_bytes(&schema);
+			let position = self
+				.call_value(
+					self.runtime.function("fa_json_enum")?,
+					&[tree.into(), schema.into()],
+				)?
+				.into_int_value();
+			// the position among the members of the type → the member's index
+			let i32 = self.context.i32_type();
+			let mut value = i32.const_zero();
+			for (at, (_, index)) in self.json_enum_members(ty).into_iter().enumerate().rev() {
+				let is = self.builder.build_int_compare(
+					IntPredicate::EQ,
+					position,
+					position.get_type().const_int(at as u64, false),
+					"",
+				)?;
+				value = self
+					.builder
+					.build_select(is, i32.const_int(u64::from(index), false), value, "")?
+					.into_int_value();
+			}
+			let member = Val::new(Repr::Enum(nominal), value);
+			return self.convert(member, repr, call.index());
 		}
 		match self.types().kind(ty) {
 			TypeKind::Boolean | TypeKind::BoolLit(_) => {
@@ -817,6 +901,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::NamedUnion(..) | TypeKind::Member(..) => {
 				self.json_write_named(value, ty, call)
 			}
+			TypeKind::Enum(..) | TypeKind::EnumMember(..) => self.json_write_enum(value, ty),
 			TypeKind::Object(_)
 			| TypeKind::Collection(
 				CollKind::Array | CollKind::GrowingArray | CollKind::Map | CollKind::GrowingMap,
@@ -907,6 +992,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => self.json_write_scalar(value, call),
 		}
+	}
+
+	/// A member of an enumeration: its pinned value, else its name.
+	fn json_write_enum(&mut self, value: Val<'ctx>, ty: TypeId) -> Result<(), Error> {
+		let index = value.int();
+		let join = self.append_block("json_written");
+		for (nominal, member) in self.json_enum_members(ty) {
+			let is = self.builder.build_int_compare(
+				IntPredicate::EQ,
+				index,
+				index.get_type().const_int(u64::from(member), false),
+				"",
+			)?;
+			let taken = self.append_block("json_enum");
+			let next = self.append_block("json_next");
+			self.builder.build_conditional_branch(is, taken, next)?;
+			self.builder.position_at_end(taken);
+			let text = match self.json_pinned(nominal, member) {
+				Some(pinned) => pinned.to_string(),
+				None => json_quoted(self.types().member_name(nominal, member)),
+			};
+			self.json_text(&text)?;
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(next);
+		}
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(join);
+		Ok(())
 	}
 
 	/// A member of a named union: tagged by `"type"`, its data next to it
@@ -1148,12 +1261,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		call: NodeId,
 	) -> Result<(), Error> {
 		let structure = value.value.expect("an object").into_struct_value();
-		for (name, index, field_type) in self.printed_fields(ty) {
-			let repr = self.field_repr(ty, index as usize, call.index())?;
+		// in declaration order (`json_fields`)
+		let shape: Vec<fa_analyzer::ids::Sym> = self
+			.types()
+			.fields_of(ty)
+			.iter()
+			.map(|field| field.name)
+			.collect();
+		for (name, field_type) in self.json_fields(ty) {
+			let Some(index) = shape
+				.iter()
+				.position(|&field| self.types().syms.resolve(field) == name)
+			else {
+				continue;
+			};
+			let repr = self.field_repr(ty, index, call.index())?;
 			if !repr.has_value() {
 				continue;
 			}
-			let raw = self.builder.build_extract_value(structure, index, "")?;
+			let raw = self
+				.builder
+				.build_extract_value(structure, index as u32, "")?;
 			self.json_write_member(first, None, &name, Val::new(repr, raw), field_type, call)?;
 		}
 		Ok(())

@@ -32,7 +32,7 @@ for shape in drawing.shapes {
 -- prints: point
 -- prints: origin
 console.log(Json.stringify(drawing))
--- prints: {"name":"d","shapes":[{"type":"Circle","radius":2},{"type":"Labelled","value":"hi"},{"type":"Tagged","value":{"size":3,"type":"t"}},{"type":"Point"},"origin"]}
+-- prints: {"name":"d","shapes":[{"type":"Circle","radius":2},{"type":"Labelled","value":"hi"},{"type":"Tagged","value":{"type":"t","size":3}},{"type":"Point"},"origin"]}
 let circle: Shape = try Json.parse("{{\"type\": \"Circle\", \"radius\": 1.5}}")
 console.log(Json.stringify(circle)) -- prints: {"type":"Circle","radius":1.5}
 
@@ -53,3 +53,31 @@ attempt("{{\"type\": \"Circle\", \"radius\": \"big\"}}")
 -- prints: JsonError { message = "the value.radius should be a number, not string" }
 attempt("\"elsewhere\"")
 -- prints: JsonError { message = "the value should be one of the members of its union, not string" }
+
+-- enumerations: their pinned values, else their names; `Errors`: tagged
+type Color = Enum { red, green, blue }
+type Status = Enum {
+	pending = 0
+	archived = 9
+}
+type Failure = Errors {
+	Timeout = { seconds: Integer }
+	Lost
+}
+type Report = { color: Color, status: Status, failure: Failure, failures: Array<Failure> }
+let report: Report = try Json.parse("{{\"color\": \"green\", \"status\": 9, \"failure\": {{\"type\": \"Timeout\", \"seconds\": 3}}, \"failures\": [{{\"type\": \"Lost\"}}]}}")
+console.log(report.color == Color.green, report.status == Status.archived) -- prints: true true
+console.log(Json.stringify(report))
+-- prints: {"color":"green","status":9,"failure":{"type":"Timeout","seconds":3},"failures":[{"type":"Lost"}]}
+console.log(Json.stringify([Color.red, Color.blue]), Json.stringify(Status.pending)) -- prints: ["red","blue"] 0
+function readColor = (text: String) => {
+	let color: Color = Json.parse(text) catch error => {
+		console.log("{error}")
+		return
+	}
+	console.log("color", Json.stringify(color))
+}
+readColor("\"purple\"")
+-- prints: JsonError { message = "the value should be one of \"red\", \"green\", \"blue\", not string" }
+readColor("1")
+-- prints: JsonError { message = "the value should be one of \"red\", \"green\", \"blue\", not number" }

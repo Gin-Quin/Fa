@@ -171,6 +171,9 @@ pub static BUILTINS: &[Builtin] = &[
 	method("Pool#clear", &NONE),
 	method("Pool#includes", &ONE),
 	method("Pool#find", &ONE),
+	// `collection.parallel()`: a view whose next operation runs in parallel
+	// (`check/concurrency.rs`, native only)
+	method("Collection#parallel", &NONE),
 	method("Pool#filter", &ONE),
 	method("Pool#map", &ONE),
 	method("Pool#reduce", &TWO),

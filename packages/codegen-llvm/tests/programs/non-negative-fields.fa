@@ -1,0 +1,74 @@
+-- Never-negative places (`src/lower/index_proofs.rs`): an index read from a
+-- field, a local or a parameter whose every store is a non-negative value,
+-- or a step of one, never counts from the end. Each case below where the
+-- proof must fail reads a negative index, which counts from the end.
+type Cursor = {
+	text: String
+	position: Integer
+
+	function current = (self): Byte => self.text.bytes().get(self.position) ?? 0
+
+	function advance = (self) mutates self => {
+		self.position += 1
+	}
+}
+
+mutable cursor = Cursor { text = "abc", position = 0 }
+mutable seen = ""
+while cursor.current() != 0 {
+	seen += "{cursor.current()},"
+	cursor.advance()
+}
+console.log(seen) -- prints: 97,98,99,
+
+-- a decrement: the proof fails, -1 is the last byte
+type Back = { text: String, position: Integer }
+mutable back = Back { text = "xyz", position = 0 }
+back.position -= 1
+console.log(back.text.bytes().get(back.position) ?? 0) -- prints: 122
+
+-- a negative store
+type Store = { items: Array<Integer>, at: Integer }
+mutable store = Store { items = [1, 2, 3], at = 0 }
+store.at = 0 - 2
+console.log(store.items.get(store.at) ?? 0) -- prints: 2
+
+-- through a parameter the callee changes
+type Shift = { items: Array<Integer>, at: Integer }
+function lower = (moved: Shift) mutates moved => {
+	moved.at = -1
+}
+mutable shift = Shift { items = [4, 5, 6], at = 0 }
+lower(shift)
+console.log(shift.items.get(shift.at) ?? 0) -- prints: 6
+
+-- through a reference
+type Alias = { items: Array<Integer>, at: Integer }
+mutable alias = Alias { items = [7, 8, 9], at = 1 }
+do {
+	mutable use at = alias.at
+	at = -3
+}
+console.log(alias.items.get(alias.at) ?? 0) -- prints: 7
+
+-- a local counted up from zero
+mutable index = 0
+mutable total = 0
+let values = [10, 20, 30]
+while index < 3 {
+	total += values.get(index) ?? 0
+	index += 1
+}
+console.log(total) -- prints: 60
+
+-- a choice of literals appended: one length, or several
+mutable operators = ""
+for step in 0..4 {
+	operators += when step is {
+		0 => " + "
+		1 => " - "
+		else => " * "
+	}
+	operators += if step == 2 { "<" } else { "<=" }
+}
+console.log("[{operators}]") -- prints: [ + <= - <= * < * <=]

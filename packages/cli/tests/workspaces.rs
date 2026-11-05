@@ -555,6 +555,179 @@ fn versions_are_shared_by_the_workspace_and_transitive() {
 	assert_eq!((stdout.as_str(), code), ("49\n", 0), "{stderr}");
 }
 
+/// A `DependencySource` with `generate` (architecture/dependencies.md,
+/// "Loading types from an API"): the source is fetched and locked, then
+/// `generate` runs on its content on the compile-time interpreter, and the
+/// Fa source it returns is the dependency.
+#[test]
+fn generated_dependencies_run_generate_on_their_locked_source() {
+	let scratch = Scratch::new("generated");
+	let served = scratch.write("served", &[("v1/schema.txt", "celsius")]);
+	let schema = format!("file://{}/v1/schema.txt", served.display());
+	let dependencies = format!(
+		"type Generated = {{\n\tsource: String\n\tgenerate: (content: String) => String\n}}\n\nfunction quoted = (url: String): Generated => {{\n\treturn {{\n\t\tsource = url\n\t\tgenerate = (content: String): String => \"export function = (): String => \\\"{{content}}\\\"\\n\"\n\t}}\n}}\n\nexport = {{\n\tweather = quoted(\"{schema}\")\n\tplain = {{\n\t\tsource = \"{schema}\"\n\t\tgenerate = (content: String): String => \"export = \\\"{{content}}!\\\"\\n\"\n\t}}\n}}\n"
+	);
+	let package = scratch.write(
+		"app",
+		&[
+			("package.fa", "export = { name = \"app\" }\n"),
+			("dependencies.fa", &dependencies),
+			(
+				"application/main.fa",
+				"export function = () => {\n\tconsole.log(weather(), plain)\n}\n",
+			),
+		],
+	);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	let locked = lockfile(&package);
+	assert!(
+		locked.contains(&format!("source = \"{schema}\"\n\t\thash = \"sha256:")),
+		"the source is locked: {locked}"
+	);
+	if has_tool("bun") {
+		let (stdout, stderr, code) = scratch.fa(&["run", "."], &package);
+		assert_eq!(
+			(stdout.as_str(), code),
+			("celsius celsius!\n", 0),
+			"{stderr}"
+		);
+	}
+	// the generated code is checked like any dependency
+	fs::write(
+		package.join("application/main.fa"),
+		"export function = () => {\n\tlet degrees: Integer = weather()\n}\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(stderr.contains("E-TYPE-1"), "{stderr}");
+	// the source changes: locked like any other
+	fs::write(served.join("v1/schema.txt"), "kelvin").unwrap();
+	fs::remove_dir_all(scratch.directory.join("cache")).unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("error[DEP001]: the content of `plain` changed since it was locked"),
+		"{stderr}"
+	);
+	// a `generate` that stops
+	fs::write(
+		package.join("dependencies.fa"),
+		format!(
+			"export = {{\n\tweather = {{\n\t\tsource = \"{schema}\"\n\t\tgenerate = (content: String): String => {{\n\t\t\tassert content == \"rain\"\n\t\t\treturn content\n\t\t}}\n\t}}\n}}\n"
+		),
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["update"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("error[DEP010]: the `generate` of `weather` failed: "),
+		"{stderr}"
+	);
+	// a source that isn't a file
+	fs::write(
+		package.join("dependencies.fa"),
+		"export = {\n\tweather = {\n\t\tsource = \"github:farmers/farm@1\"\n\t\tgenerate = (content: String): String => content\n\t}\n}\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("the `source` of `weather` is the URL of a file"),
+		"{stderr}"
+	);
+}
+
+/// A package outside a workspace depends on a local folder holding a
+/// package, locked by its content (design/decisions.md, "Path dependencies
+/// outside a workspace").
+#[test]
+fn path_dependencies_outside_a_workspace_are_locked_by_their_content() {
+	let scratch = Scratch::new("paths");
+	let shared = scratch.write(
+		"shared",
+		&[
+			("package.fa", "export = { name = \"shared\" }\n"),
+			("dependencies.fa", "export = {\n\tunits = \"../units\"\n}\n"),
+			(
+				"library/greet.fa",
+				"export function = (name: String): String => \"Hello, {name}{units.mark()}\"\n",
+			),
+		],
+	);
+	scratch.write(
+		"units",
+		&[
+			("package.fa", "export = { name = \"units\" }\n"),
+			("library/mark.fa", "export function = (): String => \"!\"\n"),
+		],
+	);
+	let package = scratch.write(
+		"app",
+		&[
+			("package.fa", "export = { name = \"app\" }\n"),
+			(
+				"dependencies.fa",
+				"export = {\n\tshared = \"../shared\"\n}\n",
+			),
+			(
+				"application/main.fa",
+				"export function = () => {\n\tconsole.log(shared.greet(\"Ada\"))\n}\n",
+			),
+		],
+	);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	let locked = lockfile(&package);
+	assert!(
+		locked.contains("source = \"../shared\"\n\t\thash = \"sha256:"),
+		"{locked}"
+	);
+	assert!(
+		locked.contains("source = \"../units\"\n\t\thash = \"sha256:"),
+		"the path of a path dependency, from the lockfile's folder: {locked}"
+	);
+	if has_tool("bun") {
+		let (stdout, stderr, code) = scratch.fa(&["run", "."], &package);
+		assert_eq!((stdout.as_str(), code), ("Hello, Ada!\n", 0), "{stderr}");
+	}
+	// the folder changes: locked like any other source
+	fs::write(
+		shared.join("library/greet.fa"),
+		"export function = (name: String): String => \"Hi, {name}\"\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains(
+			"error[DEP001]: the content of `shared` changed since it was locked\n  source: ../shared\n  help: run `fa update shared`"
+		),
+		"{stderr}"
+	);
+	let (_, stderr, code) = scratch.fa(&["update", "shared"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	assert_ne!(lockfile(&package), locked);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	// a folder that holds no package
+	fs::write(
+		package.join("dependencies.fa"),
+		"export = {\n\tshared = \"../shared\"\n\tnothing = \"../nothing\"\n}\n",
+	)
+	.unwrap();
+	fs::create_dir_all(scratch.directory.join("nothing")).unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains(
+			"error[DEP008]: `nothing` = \"../nothing\" is not a folder holding a package"
+		),
+		"{stderr}"
+	);
+}
+
 #[test]
 fn remote_files_are_locked_by_their_content() {
 	let scratch = Scratch::new("remote");
@@ -757,6 +930,81 @@ fn develop_runs_the_program_again_after_a_change() {
 		"{output}"
 	);
 	assert!(output.contains("library/greet.fa` changed"), "{output}");
+}
+
+/// `fa develop` swaps the edited module in the running program (D43): its
+/// module-level values are kept; a change of a type restarts it.
+#[test]
+fn develop_swaps_the_edited_modules_in_the_running_program() {
+	if !has_tool("bun") || cfg!(not(unix)) {
+		return;
+	}
+	let scratch = Scratch::new("hot");
+	let package = scratch.write(
+		"farm",
+		&[
+			("package.fa", "export = { name = \"farm\" }\n"),
+			(
+				"library/greet.fa",
+				"type Cow = { name: String }\n\nexport function = (): String => \"one\"\n",
+			),
+			(
+				"application/main.fa",
+				"use { sleep } = std.time\n\nmutable ticks = 0\n\nexport async function = () mutates ticks => {\n\twhile ticks < 60 {\n\t\tticks += 1\n\t\tconsole.log(\"{library.greet()} {ticks}\")\n\t\tawait sleep(50)\n\t}\n}\n",
+			),
+		],
+	);
+	let (child, output) = spawn(&scratch, &["develop"], &package, 2);
+	assert!(
+		wait_for(&output, "one 2\n", 30),
+		"{}",
+		output.lock().unwrap()
+	);
+	// a body edit: swapped, the count goes on
+	fs::write(
+		package.join("library/greet.fa"),
+		"type Cow = { name: String }\n\nexport function = (): String => \"two\"\n",
+	)
+	.unwrap();
+	assert!(
+		wait_for(
+			&output,
+			"fa develop: `library/greet.fa` changed: reloaded `library/greet.js`",
+			20
+		),
+		"{}",
+		output.lock().unwrap()
+	);
+	assert!(wait_for(&output, "two ", 10), "{}", output.lock().unwrap());
+	let text = output.lock().unwrap().clone();
+	let first = text
+		.lines()
+		.find_map(|line| line.strip_prefix("two "))
+		.and_then(|count| count.parse::<u32>().ok())
+		.expect("a count");
+	assert!(first > 2, "the module-level value is kept: {text}");
+	assert!(!text.contains("restarting"), "{text}");
+	// a type changes: restarted
+	fs::write(
+		package.join("library/greet.fa"),
+		"type Cow = { name: String, age: Integer }\n\nexport function = (): String => \"three\"\n",
+	)
+	.unwrap();
+	assert!(
+		wait_for(
+			&output,
+			"`library/greet.fa` changed: restarting (a type of `library/greet.fa` changed)",
+			20
+		),
+		"{}",
+		output.lock().unwrap()
+	);
+	assert!(
+		wait_for(&output, "three 1\n", 20),
+		"{}",
+		output.lock().unwrap()
+	);
+	let _ = finish(child, 30);
 }
 
 #[test]

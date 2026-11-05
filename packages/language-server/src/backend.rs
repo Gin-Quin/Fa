@@ -110,6 +110,13 @@ pub trait AnalysisBackend: Send + 'static {
 	fn cancel_flag(&self) -> Option<Arc<AtomicBool>> {
 		None
 	}
+
+	/// A document was saved: a configuration file (`package.fa`, `dependencies.fa`…) makes the
+	/// packages it configures read their configuration and dependencies again. Return the
+	/// documents whose diagnostics may have changed.
+	fn saved(&mut self, _uri: &Url) -> Vec<Url> {
+		Vec::new()
+	}
 }
 
 /// The diagnostic of the parser, as a `FileDiagnostic` of `uri`.

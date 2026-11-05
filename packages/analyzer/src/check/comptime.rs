@@ -185,6 +185,24 @@ impl Walker<'_> {
 
 	/// Reports why an evaluation failed, at `at`.
 	pub(super) fn report_comptime_error(&mut self, at: NodeId, error: &Error) {
+		// thrown by the code of a type function's application: its message
+		if self.in_type_function_code
+			&& let Error::Thrown(value) = error
+		{
+			let message = match value {
+				Value::Member(member) => match &member.data {
+					Some(Value::Object(object)) => object
+						.get("message")
+						.and_then(|message| message.as_str().map(str::to_string)),
+					_ => None,
+				},
+				_ => None,
+			}
+			.unwrap_or_else(|| format!("this type function's code throws `{}`", value.to_text()));
+			let diagnostic = self.diagnostic(&crate::diagnostics::codes::types::TF004, at, message);
+			self.report(diagnostic);
+			return;
+		}
 		let (code, message) = match error {
 			Error::Thrown(value) => (
 				&META005,
@@ -769,7 +787,7 @@ impl Walker<'_> {
 
 	/// The schemas of the literal default values of an object type's fields
 	/// (`@typeToSchema`: `default = Schema.StringLiteral { value = "hello" }`).
-	fn schema_defaults(&mut self, ty: TypeId) -> (Vec<(String, Value)>, Vec<String>) {
+	pub(super) fn schema_defaults(&mut self, ty: TypeId) -> (Vec<(String, Value)>, Vec<String>) {
 		if !matches!(self.s.types.kind(ty), TypeKind::Object(_)) {
 			return (Vec::new(), Vec::new());
 		}
@@ -803,7 +821,8 @@ impl Walker<'_> {
 
 	/// After the checks of a call written `@f(…)`: evaluates it once.
 	pub(super) fn evaluate_call(&mut self, n: NodeId) {
-		if self.comptime_evaluated.contains(&n) {
+		// known per application of a type function only (schemas.rs)
+		if self.comptime_evaluated.contains(&n) || self.deferred_comptime > 0 {
 			return;
 		}
 		let value = self.evaluate_at(n, n);

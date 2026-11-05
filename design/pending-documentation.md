@@ -39,3 +39,29 @@ After "Some parts of `std` exist only on some targets: using one on a target tha
 ## `documentation/advanced/concurrency.md`, table of what blocks per target
 
 The WebAssembly column says "blocking (WASI)" for the file system and standard input: the target is not WASI (`design/decisions.md`, "WebAssembly target"); files go through the generated JavaScript loader's imports (`fileRun`/`fileTake`, `node:fs`), blocking. Write "blocking (through the loader)".
+## `documentation/advanced/foreign-code.md`, the JavaScript target (around line 307)
+
+Replace "`destroy` is called for a local at the end of its block when nothing moves it out; not yet for a resource inside another value or a collection, nor for the old value of a replaced local." by: `destroy` is called at the same points as natively: at the end of the block of the local or parameter owning the value (unless it moved out), for a resource inside another value or a collection, for the old value of a replaced local or field, and for a new value discarded; not yet for a resource of a type declared in another file. A resource may be all zero (a file descriptor 0): a move is tracked by a drop flag, never by its bytes (`design/decisions.md`, "A type holding a task is move-only").
+
+## `documentation/types/types-at-runtime.md`, "The `Schema` type" and "`TypeFromSchema(Schema): Type`"
+
+`@typeToSchema` of a named union or an enumeration (all its members) is a `Schema.Named` whose definition is the `Schema.NamedUnion` / `Schema.Enum`, like the other types used through a name; a `Schema.Function` names its parameters by position (`parameter1`, `parameter2`…: a function type keeps no names). `TypeFromSchema` builds every member but `Schema.Fields`: a `Schema.NamedUnion` / `Schema.Enum` gives a named union / enumeration named by its `Schema.Named` (else by the declaration applying it), a `Schema.Reference` to an enclosing `Schema.Named` a recursive type; an enumeration whose values are not the positions is not supported yet. As the value of a generic type function (`type Shouted<Input> = TypeFromSchema<@shout(@typeToSchema(Input))>`), the schema is evaluated per application; an error its code throws is `TF004` at the application, with the error's `message`.
+
+## `documentation/guides/web-server.md`, "Typed request and response bodies"
+
+A field missing from the JSON text takes its default value (a new one for each value read), even when it is optional; without a default, an optional field is `none` and another field is an error (`has no field`).
+
+## `documentation/advanced/concurrency.md`, the table of targets and the `:::implementation` section (JavaScript)
+
+Table row "`Mutex`, atomics shared with a worker": make it "`Mutex`, atomics, channels shared with a worker" (JavaScript: with `SharedArrayBuffer`, flat values only; on the web, the page must be cross-origin isolated, else giving one to a worker stops the program with the headers to send: `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`). In the implementation section, replace "A `Channel` crossing a worker boundary becomes a `MessagePort`" by: a `Channel` given to a worker moves its queue into a `SharedArrayBuffer` (JSON text behind a lock word; a waiting task uses `Atomics.waitAsync` on a version word, a worker's blocking wait `Atomics.wait`), like a `Mutex`.
+
+## `documentation/advanced/concurrency.md`, "1. Parallel loops" (the paragraph on `parallel()`)
+
+Make precise: `parallel()` gives a view for one operation, called at once on it: `map`, `filter`, `reduce`, `some`, `every` or `sum` (`let view = numbers.parallel()` alone is an error). `filter` keeps the collection's kind. The function of `reduce` combines two items (its accumulator is of the items' type), since the items are grouped in any way. `parallel()` of a `Map` is not available yet.
+## `documentation/architecture/dependencies.md`, "Sibling packages" (and the table of "Sources")
+
+Add after the paragraph on sibling packages: "A package outside a workspace can depend on a local folder that holds a package, with a relative path too (`shared = "../shared"`). Unlike a sibling package, it is locked like any other source: the lockfile records the path and the hash of its `package.fa`, `dependencies.fa` and `library/`, and a change of these files fails the build until `fa update shared` accepts it." In the table of sources, the row "Sibling package of the workspace" becomes "Local package (a sibling in a workspace, a folder outside one)".
+
+## The rt-5 example (`@typeToString(getDigitCount)`, types-at-runtime or function composition page)
+
+A function name is a value: write `@typeToString(Type<getDigitCount>)` (metaprogramming page: "use `Type(value)` to get the type of a value"; `TY008` otherwise).

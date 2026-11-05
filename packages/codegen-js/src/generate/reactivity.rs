@@ -455,7 +455,7 @@ impl Generator<'_> {
 				.any(|&member| guard(member))
 	}
 
-	/// `mutex.tryLock()` (the JavaScript `call`) whose guard is a
+	/// `mutex.tryLock()` or `await mutex.lock()` (the JavaScript `call`) whose guard is a
 	/// temporary of its statement (`m.tryLock()?.value`, `m.tryLock() ==
 	/// none`): kept in a temporary, released after the statement
 	/// ([`Generator::guarded`]). A guard held by a value is released at the
@@ -465,8 +465,10 @@ impl Generator<'_> {
 			return call;
 		}
 		let temp = self.inline_temp();
+		let helper = self.helper("faUnlock");
+		let release = format!("{helper}({temp});");
 		if let Some(frame) = self.guard_frames.last_mut() {
-			frame.push(temp.clone());
+			frame.push(release);
 		}
 		Expr::primary(format!("({temp} = {})", call.text))
 	}
@@ -478,7 +480,8 @@ impl Generator<'_> {
 		let mut child = n;
 		while let Some(parent) = parents[child.index()] {
 			match self.view(parent) {
-				View::Group(_) => child = parent,
+				// `(await mutex.lock()).value`: the awaited guard
+				View::Group(_) | View::Await(_) => child = parent,
 				View::Access { target, .. } | View::OptionalAccess { target, .. } => {
 					return target == child;
 				}
@@ -493,15 +496,25 @@ impl Generator<'_> {
 	/// temporaries hold: after it, or in a `finally` when it leaves the
 	/// block (`return`, `throw`, `break`, `continue`, a value returned).
 	pub(crate) fn guarded(&mut self, n: NodeId, dest: &Dest, generate: impl FnOnce(&mut Self)) {
+		// a guard of `tryLock`, a new value holding a resource (resources.rs)
 		let has_try_lock = match self.has_try_lock {
 			Some(known) => known,
 			None => {
 				let known = (0..self.tree.nodes.len()).any(|index| {
+					let node = NodeId::new(index);
 					matches!(
-						self.analysis.call(NodeId::new(index)).map(|call| call.callee),
+						self.analysis.call(node).map(|call| call.callee),
 						Some(fa_analyzer::analysis::Callee::Builtin(builtin))
-							if fa_analyzer::builtins::get(builtin).path == "Mutex#tryLock"
-					)
+							if matches!(
+								fa_analyzer::builtins::get(builtin).path,
+								"Mutex#tryLock" | "Mutex#lock"
+							)
+					) || matches!(
+						self.view(node),
+						View::Call { .. }
+							| View::TypedObject { .. }
+							| View::Object { .. } | View::Tuple { .. }
+					) && self.types.contains_resource(self.type_of(node))
 				});
 				self.has_try_lock = Some(known);
 				known
@@ -513,16 +526,13 @@ impl Generator<'_> {
 		}
 		self.guard_frames.push(Vec::new());
 		let (lines, ()) = self.capture(generate);
-		let temps = self.guard_frames.pop().unwrap_or_default();
-		if temps.is_empty() {
+		let mut release = self.guard_frames.pop().unwrap_or_default();
+		if release.is_empty() {
 			self.out.append(lines);
 			return;
 		}
-		let helper = self.helper("faUnlock");
-		let release: Vec<String> = temps
-			.iter()
-			.map(|temp| format!("{helper}({temp});"))
-			.collect();
+		// the last temporary first
+		release.reverse();
 		let leaves = *dest == Dest::Return
 			|| matches!(
 				self.view(n),
@@ -537,45 +547,6 @@ impl Generator<'_> {
 			self.out.append(lines);
 			self.out.line(release.join(" "));
 		}
-	}
-
-	/// The `destroy` function of the value a declaration owns until the
-	/// end of its block: a local of a type of foreign code with `destroy`,
-	/// never moved out (`let other = local`, returned). A local moved on
-	/// some path only, a resource inside another value, a replaced one and
-	/// a resource of a collection are not destroyed on JavaScript.
-	pub(crate) fn owned_resource(&self, n: NodeId) -> Option<SymbolId> {
-		if !matches!(self.view(n), View::Declaration { .. }) {
-			return None;
-		}
-		let symbol = self.analysis.symbols.symbol_of_decl(n)?;
-		let info = self.analysis.symbols.symbol(symbol);
-		if !matches!(info.kind, SymbolKind::Let | SymbolKind::Mutable)
-			|| !self.types.is_resource(info.ty)
-		{
-			return None;
-		}
-		let declaration = self
-			.analysis
-			.type_decls
-			.values()
-			.find(|decl| decl.ty == info.ty)?;
-		let destroy = declaration.functions.iter().copied().find(|&function| {
-			self.types
-				.syms
-				.resolve(self.analysis.symbols.symbol(function).name)
-				== "destroy"
-		})?;
-		let moved = (0..self.tree.nodes.len()).any(|index| {
-			let node = NodeId::new(index);
-			matches!(self.view(node), View::Name(_))
-				&& self.analysis.resolution(node) == Resolution::Local(symbol)
-				&& self.is_move(node)
-		});
-		if moved {
-			return None;
-		}
-		Some(destroy)
 	}
 
 	/// A `watch` statement or subscription disposed at the end of its block:
@@ -600,10 +571,21 @@ impl Generator<'_> {
 		if self.flushes_after(n) {
 			self.flush();
 		}
-		let resource = self.owned_resource(n);
-		let helper = if let Some(destroy) = resource {
-			self.name_of(destroy)
-		} else if self.holds_guard(n) {
+		// a value holding a resource: dropped unless it moved out (resources.rs)
+		if let Some(symbol) = self.owned_resource(n) {
+			let Some(drop) = self.own_resource(symbol) else {
+				return self.statements(rest, dest);
+			};
+			if rest.is_empty() {
+				self.out.line(drop);
+				return;
+			}
+			self.out.open("try");
+			self.statements(rest, dest);
+			self.out.close(&format!("finally {{ {drop} }}"));
+			return;
+		}
+		let helper = if self.holds_guard(n) {
 			self.helper("faUnlock").to_string()
 		} else if self.holds_task(n) {
 			self.helper("faDrop").to_string()
@@ -611,7 +593,7 @@ impl Generator<'_> {
 			self.helper("faDispose").to_string()
 		};
 		if rest.is_empty() {
-			if dest == Dest::Discard || resource.is_some() {
+			if dest == Dest::Discard {
 				self.out.line(format!("{helper}({node});"));
 			}
 			return;

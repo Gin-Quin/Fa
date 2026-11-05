@@ -1,0 +1,37 @@
+-- an object holding a task is move-only: used after a move, after a field
+-- moved out (until the field is assigned again), or a field moved out of a
+-- value not owned here: MEM002
+type Holder = {
+	name: String
+	task: Task<Integer>
+	function steal = (self): Task<Integer> => self.task -- error: MEM002
+}
+async function compute = (value: Integer): Integer => value + 1
+function take = (holder: Holder): Task<Integer> => holder.task
+async function main = (flag: Boolean) => {
+	let a = Holder { name = "a", task = start compute(1) }
+	let first = take(a)
+	console.log(a.name)                  -- error: MEM002
+	mutable b = Holder { name = "b", task = start compute(2) }
+	let moved = b.task
+	console.log(b.task)                  -- error: MEM002
+	console.log(b)                       -- error: MEM002
+	console.log(b.name)
+	b.task = start compute(3)
+	let again = b
+	let c = Holder { name = "c", task = start compute(4) }
+	if flag {
+		let gone = take(c)
+	}
+	console.log(c.name)                  -- error: MEM002
+	mutable holders: Array<Holder> = []
+	let d = Holder { name = "d", task = start compute(5) }
+	for index in 0..2 {
+		holders.push(d)                  -- error: MEM002
+	}
+	for holder in holders {
+		let task = holder.task           -- error: MEM002
+	}
+	console.log(await first, await moved, again.name)
+}
+await main(true)

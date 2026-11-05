@@ -5,7 +5,14 @@
 //! need no test of the representation), and each
 //! append of a one-byte simple character is a store and a new length, with
 //! no capacity check. A longer append takes the general path, then reserves
-//! again for the rounds left, so that the room always covers them.
+//! again for the rounds left, so that the room always covers them. An
+//! integer appended alone (`text += "{digit}"`) is one stored byte when it
+//! is below 10, and goes the general way otherwise.
+//!
+//! A loop over the items of an array reserves, in each string local its
+//! block appends to unconditionally, the least those appends add per item
+//! (the literal parts of the templates) times the number of items
+//! (`reserve_for_item_appends`): never more than the loop appends.
 //!
 //! Conditions (syntactic, like the reserved pushes of `arrays.rs`): the
 //! append is a statement of the loop's block, of a `let`/`mutable` string
@@ -15,7 +22,7 @@
 //! string during the loop.
 
 use fa_analyzer::analysis::Callee;
-use fa_analyzer::ids::NodeId;
+use fa_analyzer::ids::{NodeId, SymbolId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{ArithOp, View};
 use inkwell::IntPredicate;
@@ -89,9 +96,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			else {
 				continue;
 			};
-			if matches!(self.view(value), View::Template { .. })
-				|| !matches!(self.view(target), View::Name(_))
-			{
+			// a template is reserved for when it is one integer (one digit per
+			// round, `text += "{digit}"`)
+			let template = match self.view(value) {
+				View::Template { parts } => Some(self.integer_part(parts).is_some()),
+				_ => None,
+			};
+			if template == Some(false) || !matches!(self.view(target), View::Name(_)) {
 				continue;
 			}
 			let Resolution::Local(symbol) = self.analysis.resolution(target) else {
@@ -138,6 +149,103 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(reserved)
 	}
 
+	/// Before a loop over the items of an array: room in each string local
+	/// that the body appends to unconditionally (`out += "{{\"sku\":…}}"`,
+	/// a statement of the loop's block) for the bytes those appends add at
+	/// least, times the number of items: the literal parts of a template or
+	/// a literal, one byte per integer part, nothing for a string part. A
+	/// lower bound, so the reservation never exceeds what the loop appends;
+	/// the string's geometric growth covers the rest. The body has no early
+	/// exit and the local is declared outside of it.
+	pub(crate) fn reserve_for_item_appends(
+		&mut self,
+		body: NodeId,
+		array: Val<'ctx>,
+	) -> Result<(), Error> {
+		if self.tasks.asynchronous {
+			return Ok(());
+		}
+		let View::Block { statements } = self.view(body) else {
+			return Ok(());
+		};
+		let mut inside = rustc_hash::FxHashSet::default();
+		let mut stack = vec![body.index()];
+		while let Some(node) = stack.pop() {
+			if matches!(
+				self.view(NodeId::new(node)),
+				View::Break(_) | View::Return(_) | View::Throw(_) | View::Try(_)
+			) {
+				return Ok(());
+			}
+			inside.insert(node);
+			self.tree.nodes[node].for_each_child(|child| stack.push(child));
+		}
+		let mut bytes: Vec<(SymbolId, NodeId, u64)> = Vec::new();
+		for statement in statements.iter() {
+			let View::CompoundAssignment {
+				op: ArithOp::Add,
+				target,
+				value,
+			} = self.view(statement)
+			else {
+				continue;
+			};
+			let least = match self.view(value) {
+				View::String(text) => text.len() as u64,
+				View::Template { parts } => {
+					let mut least = 0;
+					for part in parts.iter() {
+						least += match part {
+							fa_analyzer::syntax::TemplatePart::Text(text) => text.len() as u64,
+							fa_analyzer::syntax::TemplatePart::Expression(node) => {
+								u64::from(matches!(self.node_repr(node)?, Repr::Int(_)))
+							}
+						};
+					}
+					least
+				}
+				_ => 0,
+			};
+			if least == 0 || !matches!(self.view(target), View::Name(_)) {
+				continue;
+			}
+			let Resolution::Local(symbol) = self.analysis.resolution(target) else {
+				continue;
+			};
+			let declaration = self.analysis.symbols.symbol(symbol).decl_node;
+			if !matches!(
+				self.analysis.symbols.symbol(symbol).kind,
+				SymbolKind::Let | SymbolKind::Mutable
+			) || inside.contains(&declaration.index())
+				|| self.references.contains_key(&symbol)
+				|| self.shared.contains_key(&symbol)
+				|| self.reactive_sources.contains_key(&symbol)
+				|| self.node_repr(target)? != Repr::Str
+			{
+				continue;
+			}
+			match bytes.iter_mut().find(|(known, _, _)| *known == symbol) {
+				Some((_, _, total)) => *total += least,
+				None => bytes.push((symbol, target, least)),
+			}
+		}
+		if bytes.is_empty() {
+			return Ok(());
+		}
+		let rounds = self.array_length(array)?.int();
+		for (symbol, target, least) in bytes {
+			let slot = self.slot_of(symbol, target)?;
+			let rounds = self
+				.builder
+				.build_int_truncate_or_bit_cast(rounds, self.usize, "")?;
+			let extra =
+				self.builder
+					.build_int_nuw_mul(rounds, self.usize.const_int(least, false), "")?;
+			self.call_runtime("fa_string_reserve", &[slot.pointer.into(), extra.into()])?;
+		}
+		Ok(())
+	}
+
 	/// `end - from` (plus one when inclusive, minus one after the current
 	/// round), saturated, and at least 0.
 	fn rounds_left(
@@ -169,6 +277,84 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_select(negative, i64.const_zero(), rounds, "")?
 			.into_int_value())
+	}
+
+	/// A reserved append of an integer (`text += "{digit}"`): a value below
+	/// 10 is one byte stored at the end of the heap block; another is
+	/// appended as usual, then the room of the rounds left is reserved again.
+	pub(crate) fn reserved_integer_append(
+		&mut self,
+		target: PointerValue<'ctx>,
+		value: Val<'ctx>,
+		counter: PointerValue<'ctx>,
+		end: IntValue<'ctx>,
+		inclusive: bool,
+	) -> Result<(), Error> {
+		let Repr::Int(int) = value.repr else {
+			return Err(Error::Llvm("an integer is appended".into()));
+		};
+		let i64 = self.context.i64_type();
+		let wide = if int.signed {
+			self.builder
+				.build_int_s_extend_or_bit_cast(value.int(), i64, "")?
+		} else {
+			self.builder
+				.build_int_z_extend_or_bit_cast(value.int(), i64, "")?
+		};
+		let digit = self.builder.build_int_compare(
+			IntPredicate::ULT,
+			wide,
+			i64.const_int(10, false),
+			"",
+		)?;
+		let store = self.append_block("reserved_digit");
+		let other = self.append_block("reserved_digits_other");
+		let join = self.append_block("reserved_digits_appended");
+		let branch = self.builder.build_conditional_branch(digit, store, other)?;
+		self.likely(branch)?;
+		self.builder.position_at_end(store);
+		let i8 = self.context.i8_type();
+		let header = self
+			.load(Slot {
+				pointer: target,
+				repr: Repr::Str,
+			})?
+			.value
+			.expect("a string")
+			.into_struct_value();
+		let bytes = self
+			.builder
+			.build_extract_value(header, 0, "")?
+			.into_pointer_value();
+		let length = self
+			.builder
+			.build_extract_value(header, 1, "")?
+			.into_int_value();
+		let byte = self.builder.build_int_truncate(wide, i8, "")?;
+		let byte = self
+			.builder
+			.build_or(byte, i8.const_int(b'0' as u64, false), "")?;
+		let destination = unsafe { self.builder.build_in_bounds_gep(i8, bytes, &[length], "")? };
+		self.builder.build_store(destination, byte)?;
+		let longer = self
+			.builder
+			.build_int_nuw_add(length, self.usize.const_int(1, false), "")?;
+		let length_pointer = self
+			.builder
+			.build_struct_gep(self.string_type, target, 1, "")?;
+		self.builder.build_store(length_pointer, longer)?;
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(other);
+		self.append_integer(target, value)?;
+		let current = self.builder.build_load(i64, counter, "")?.into_int_value();
+		let left = self.rounds_left(current, end, inclusive, true)?;
+		let left = self
+			.builder
+			.build_int_truncate_or_bit_cast(left, self.usize, "")?;
+		self.call_runtime("fa_string_reserve_owned", &[target.into(), left.into()])?;
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(join);
+		Ok(())
 	}
 
 	/// A reserved append (see the module): a one-byte simple character is

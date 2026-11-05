@@ -12,7 +12,7 @@ function apply = (step: Step, value: Integer): Integer => step(value) catch erro
 function pick = (flag: Boolean): Step => if flag { check } else { double }
 async function compute = (value: Integer): Integer => value + 1
 async function fail = (value: Integer): Integer throws Failure => if value > 0 { throw Failure.Odd { value = value } } else { value }
-function accept = (task: Pending): Integer => 1
+function accept = (task: Pending): Pending => task
 async function wait = (task: Pending): Integer => await task catch error => -1
 function give = (): Pending => start compute(1)
 
@@ -44,7 +44,7 @@ async function main = () => {
 	console.log(holder.run(4) catch error => -1, await holder.task catch error => -1)
 	console.log(await give() catch error => -1)
 	let started = start compute(20)
-	console.log(accept(started), await started)
+	console.log(1, await accept(started) catch error => -1)
 	console.log(await wait(start compute(30)), await wait(start fail(1)))
 }
 await main()

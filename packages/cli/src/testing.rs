@@ -119,11 +119,18 @@ pub(crate) fn stream_tests(project: project::Project) -> i32 {
 		replace: true,
 	};
 	let options = Options::new(Target::Bun, String::new());
-	let main = match streaming::build(project, Target::Bun, &options, purpose, |_| directory) {
-		streaming::Built::Written(modules) => modules[0].clone(),
+	let written = match streaming::build(project, Target::Bun, &options, purpose, |_| directory) {
+		streaming::Built::Written(modules) => modules,
 		streaming::Built::Failed(code) => return code,
 	};
-	run_with_bun(&main, &[])
+	let main = written[0].clone();
+	let root = main.parent().map(Path::to_path_buf).unwrap_or_default();
+	let paths: Vec<String> = written
+		.iter()
+		.filter_map(|path| path.strip_prefix(&root).ok())
+		.map(|path| path.to_string_lossy().replace('\\', "/"))
+		.collect();
+	run_test_files(&main, &test_modules(paths.iter().map(String::as_str)))
 }
 
 /// Runs the tests of a loaded package.
@@ -173,7 +180,159 @@ pub(crate) fn run_tests(loaded: &mut Loaded) -> i32 {
 			return 1;
 		}
 	};
-	run_with_bun(&script, &[])
+	let modules = match &generated {
+		JsBuild::Program(output) => {
+			test_modules(output.modules.iter().map(|(path, _)| path.as_str()))
+		}
+		JsBuild::Single(_) => Vec::new(),
+	};
+	run_test_files(&script, &modules)
+}
+
+/// The modules of the test files among the paths of a program's
+/// JavaScript modules (`library/greet.test.js` is `library/greet.test`).
+fn test_modules<'p>(paths: impl IntoIterator<Item = &'p str>) -> Vec<String> {
+	paths
+		.into_iter()
+		.filter(|path| !path.starts_with(fa_analyzer::mounts::DEPENDENCY_PREFIX))
+		.filter_map(|path| path.strip_suffix(".js"))
+		.filter(|module| module.ends_with(".test"))
+		.map(str::to_string)
+		.collect()
+}
+
+/// The line a test file's process ends its output with: its counts
+/// (`faRunTests`, `--fa-test-file`).
+const TEST_SUMMARY: &str = "\u{1}fa-test-summary ";
+
+/// The number of test files run at once: `FA_TEST_WORKERS`, else the
+/// number of cores.
+fn test_workers() -> usize {
+	std::env::var("FA_TEST_WORKERS")
+		.ok()
+		.and_then(|value| value.parse().ok())
+		.filter(|&workers: &usize| workers > 0)
+		.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, usize::from))
+}
+
+/// The counts of a run of tests: passed, failed, skipped, not run.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Counts([u64; 4]);
+
+impl Counts {
+	fn add(&mut self, other: Counts) {
+		for (total, count) in self.0.iter_mut().zip(other.0) {
+			*total += count;
+		}
+	}
+
+	/// The last line of the output of `faRunTests`.
+	fn summary(&self) -> String {
+		let [passed, failed, skipped, not_run] = self.0;
+		let mut parts = vec![format!("{passed} passed"), format!("{failed} failed")];
+		if skipped > 0 {
+			parts.push(format!("{skipped} skipped"));
+		}
+		if not_run > 0 {
+			parts.push(format!("{not_run} not run"));
+		}
+		parts.join(", ")
+	}
+}
+
+/// Runs the tests of a compiled program (`main.js`), each test file in a
+/// Bun process of its own, [`test_workers`] at once (decision "`fa test`
+/// runs each test file in a process"): the outputs are printed in the
+/// order of the files, each as soon as it and the files before it are
+/// done, then the counts added up. A single test file runs in place.
+pub(crate) fn run_test_files(main: &Path, modules: &[String]) -> i32 {
+	if modules.len() <= 1 {
+		return run_with_bun(main, &[]);
+	}
+	let Some(bun) = find_bun() else {
+		eprintln!("{BUN_MISSING}");
+		return 1;
+	};
+	let _ = std::io::stdout().flush();
+	let workers = test_workers().min(modules.len());
+	let next = std::sync::atomic::AtomicUsize::new(0);
+	let mut totals = Counts::default();
+	let mut crashed = false;
+	std::thread::scope(|scope| {
+		let (sender, receiver) = std::sync::mpsc::channel();
+		for _ in 0..workers {
+			let sender = sender.clone();
+			let (next, bun) = (&next, &bun);
+			scope.spawn(move || {
+				loop {
+					let index = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+					let Some(module) = modules.get(index) else {
+						break;
+					};
+					let output = Command::new(bun)
+						.arg(main)
+						.arg(format!("--fa-test-file={module}"))
+						.stdin(std::process::Stdio::null())
+						.output();
+					if sender.send((index, output)).is_err() {
+						break;
+					}
+				}
+			});
+		}
+		drop(sender);
+		let mut done = std::collections::BTreeMap::new();
+		let mut printed = 0;
+		for (index, output) in receiver {
+			done.insert(index, output);
+			while let Some(output) = done.remove(&printed) {
+				match print_test_file(&modules[printed], output) {
+					Some(counts) => totals.add(counts),
+					None => {
+						crashed = true;
+						totals.add(Counts([0, 1, 0, 0]));
+					}
+				}
+				printed += 1;
+			}
+		}
+	});
+	println!("\n{}", totals.summary());
+	i32::from(crashed || totals.0[1] > 0)
+}
+
+/// Prints the output of a test file's process, and returns its counts;
+/// `None` when it ended without them (reported as a failure).
+fn print_test_file(module: &str, output: std::io::Result<std::process::Output>) -> Option<Counts> {
+	let output = match output {
+		Ok(output) => output,
+		Err(error) => {
+			println!("✗ {module}.fa: can't start Bun: {error}");
+			return None;
+		}
+	};
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let (text, counts) = match stdout.rfind(TEST_SUMMARY) {
+		Some(start) => {
+			let counts: Vec<u64> = stdout[start + TEST_SUMMARY.len()..]
+				.split_whitespace()
+				.filter_map(|count| count.parse().ok())
+				.collect();
+			let counts = <[u64; 4]>::try_from(counts).ok().map(Counts);
+			(&stdout[..start], counts)
+		}
+		None => (&stdout[..], None),
+	};
+	print!("{text}");
+	let _ = std::io::stdout().flush();
+	eprint!("{}", String::from_utf8_lossy(&output.stderr));
+	if counts.is_none() {
+		println!(
+			"✗ {module}.fa: its tests didn't finish (exit code {})",
+			exit_code(output.status)
+		);
+	}
+	counts
 }
 
 /// `fa test --target=native`: the tests compiled by the LLVM backend into

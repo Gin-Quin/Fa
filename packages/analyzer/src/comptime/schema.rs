@@ -99,8 +99,19 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 	if depth > 32 {
 		return member("Never", Vec::new());
 	}
+	// a named union or an enumeration with all its members: used through its name
+	let nominal_name = match types.kind(ty) {
+		TypeKind::NamedUnion(nominal, mask) | TypeKind::Enum(nominal, mask) => {
+			let info = types.nominal(nominal);
+			let count = types.sym_list(info.members).len() as u16;
+			(0..count)
+				.all(|index| types.mask_has(mask, index))
+				.then(|| types.decl_name(info.key))
+		}
+		_ => None,
+	};
 	if named
-		&& let Some(name) = types.type_name(ty)
+		&& let Some(name) = types.type_name(ty).or(nominal_name)
 		&& !matches!(
 			types.kind(ty),
 			TypeKind::Int(_) | TypeKind::Float(_) | TypeKind::String | TypeKind::Boolean
@@ -254,6 +265,38 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 					("kind", Value::string(name)),
 					("key", key),
 					("item", next(item)),
+				],
+			)
+		}
+		// its parameters (named by position: a function type keeps no names),
+		// result, errors and `async`; not its effects
+		TypeKind::Function(sig) => {
+			let sig = types.sig(sig);
+			let parameters: Vec<Value> = types
+				.params(sig.params)
+				.iter()
+				.enumerate()
+				.map(|(index, parameter)| {
+					Value::object(vec![
+						("name", Value::string(&format!("parameter{}", index + 1))),
+						("definition", next(parameter.ty)),
+						("isReadonly", Value::Boolean(false)),
+						("default", Value::None),
+					])
+				})
+				.collect();
+			let throws = if sig.throws == TypeId::NEVER {
+				Value::None
+			} else {
+				next(sig.throws)
+			};
+			member(
+				"Function",
+				vec![
+					("parameters", Value::array(parameters)),
+					("returns", next(sig.ret)),
+					("throws", throws),
+					("async", Value::Boolean(sig.is_async)),
 				],
 			)
 		}

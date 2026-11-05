@@ -33,6 +33,17 @@ impl Generator<'_> {
 		}
 	}
 
+	/// Whether a type is a pool of values that are not objects
+	/// (`Pool<Integer>`): a `FaValuePool` of the runtime, whose elements
+	/// have slots (references.rs).
+	pub(crate) fn is_value_pool(&self, ty: TypeId) -> bool {
+		matches!(
+			self.types.kind(ty),
+			TypeKind::Collection(CollKind::Pool | CollKind::GrowingPool, item, _)
+				if self.is_primitive(item)
+		)
+	}
+
 	/// A list literal whose type is a set or a map: `new Set([…])`,
 	/// `new Map([[key, value], …])`; `None` for an array.
 	pub(crate) fn collection_literal(&mut self, n: NodeId, items: NodeList<'_>) -> Option<Expr> {
@@ -41,6 +52,9 @@ impl Generator<'_> {
 		};
 		let class = match kind {
 			CollKind::Set | CollKind::GrowingSet => self.set_class(item),
+			_ if is_pool(kind) && self.is_value_pool(self.type_of(n)) => {
+				self.helper("FaValuePool").to_string()
+			}
 			_ if is_pool(kind) => "Set".to_string(),
 			CollKind::Map | CollKind::GrowingMap => self.map_class(key),
 			_ => return None,
@@ -183,7 +197,11 @@ impl Generator<'_> {
 					js::call("Array.from", &[items.text])
 				}
 			}
-			// a pool or a columnar: a `Set` of its objects
+			// a pool of values, a pool or a columnar of objects (a `Set`)
+			"Pool.from" if self.is_value_pool(ty) => {
+				let class = self.helper("FaValuePool");
+				Expr::primary(format!("new {class}({})", items.text))
+			}
 			"Pool.from" => Expr::primary(format!("new Set({})", items.text)),
 			"Set.from" => match key.map(|_| values[1].clone()) {
 				Some(key) => {
@@ -349,10 +367,17 @@ impl Generator<'_> {
 		arguments: &[Argument],
 	) -> Expr {
 		let (owner, name) = path.split_once('#').unwrap_or((path, ""));
-		if let TypeKind::Collection(_, item, _) = self.types.kind(self.receiver_type(callee))
+		let receiver_type = self.receiver_type(callee);
+		if self.is_value_pool(receiver_type) {
+			return self.value_pool_call(n, callee, name, arguments);
+		}
+		if let TypeKind::Collection(_, item, _) = self.types.kind(receiver_type)
 			&& !matches!(self.types.kind(item), TypeKind::Object(_))
 		{
-			return self.unsupported(n, "a pool or a columnar of values that are not objects");
+			return self.unsupported(
+				n,
+				"a pool or a columnar of values that are neither objects nor primitive values",
+			);
 		}
 		if owner == "OrderedColumnar" && name != "add" {
 			return self.array_method(n, callee, &format!("Array#{name}"), arguments);
@@ -422,6 +447,57 @@ impl Generator<'_> {
 				js::call(helper, &all)
 			}
 			// `clear()` after unlinking: the elements are removed one by one
+			_ => self.collection_method(n, &format!("Set#{name}"), receiver, values),
+		}
+	}
+
+	/// A method of a pool of values (`FaValuePool`): `delete` and `take`
+	/// take the slot of the reference they are given; the other methods
+	/// read the values.
+	fn value_pool_call(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		name: &str,
+		arguments: &[Argument],
+	) -> Expr {
+		let receiver = self.receiver(callee);
+		let nodes: Vec<NodeId> = arguments
+			.iter()
+			.filter_map(|argument| match argument {
+				Argument::Given(value) => Some(*value),
+				_ => None,
+			})
+			.collect();
+		if let ("delete" | "take", Some(&element)) = (name, nodes.first()) {
+			// the slot of the reference (`use element = pool.find(…)`)
+			let Some(slot) = self.reference_slot(element) else {
+				return self.unsupported(
+					n,
+					"removing an element of a pool of values that is not a `use` reference to it",
+				);
+			};
+			return Expr::primary(format!("{}.{name}({slot})", receiver.primary_text()));
+		}
+		let (lines, values) = self.capture(|g| g.in_order(&nodes, |g, node| g.expr(node)));
+		let receiver = self.keep_before(receiver, &lines);
+		self.out.append(lines);
+		let texts: Vec<String> = values.iter().map(|value| value.text.clone()).collect();
+		let method = |method: &str| {
+			Expr::primary(format!(
+				"{}.{method}({})",
+				receiver.primary_text(),
+				texts.join(", ")
+			))
+		};
+		match name {
+			"add" => method("addValue"),
+			"deleteWhere" | "filter" | "clear" => method(name),
+			"includes" => {
+				let helper = self.helper("faArrayIncludes");
+				let array = format!("Array.from({})", receiver.text);
+				js::call(helper, &[array, texts.first().cloned().unwrap_or_default()])
+			}
 			_ => self.collection_method(n, &format!("Set#{name}"), receiver, values),
 		}
 	}

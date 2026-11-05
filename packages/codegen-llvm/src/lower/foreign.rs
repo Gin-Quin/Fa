@@ -720,11 +720,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !self.types().is_resource(ty) {
 			return None;
 		}
-		let declaration = self
-			.analysis
-			.type_decls
-			.values()
-			.find(|decl| decl.ty == ty)?;
+		let Some(declaration) = self.analysis.type_decls.values().find(|decl| decl.ty == ty) else {
+			// a type of another file of the program
+			return self
+				.destroy_in_other_files(ty)
+				.or_else(|| self.remote_destroy(ty));
+		};
 		let symbols = &self.analysis.symbols;
 		declaration
 			.functions

@@ -156,6 +156,25 @@ impl Generator<'_> {
 							.collect()
 					})
 					.unwrap_or_else(|| fields.iter().map(|(name, _)| name.clone()).collect());
+				// the default values of the declared fields: a function giving a
+				// new one for each value read without the field
+				let defaults: Vec<(String, Option<NodeId>)> = self
+					.analysis
+					.type_decls
+					.values()
+					.find(|decl| decl.ty == ty)
+					.map(|decl| {
+						decl.fields
+							.iter()
+							.map(|field| {
+								(
+									self.types.syms.resolve(field.name).to_string(),
+									field.default,
+								)
+							})
+							.collect()
+					})
+					.unwrap_or_default();
 				let mut parts = Vec::new();
 				for name in order {
 					let Some(&(_, field_ty)) = fields.iter().find(|(field, _)| *field == name)
@@ -164,8 +183,19 @@ impl Generator<'_> {
 					};
 					let optional = self.types.union_members(&field_ty).contains(&TypeId::NONE);
 					let schema = self.json_schema(field_ty, depth + 1)?;
+					let default = match defaults.iter().find(|(field, _)| *field == name) {
+						Some((_, Some(node))) => {
+							let indent = self.out.indentation();
+							let (lines, value) = self.capture_at(indent, |g| g.expr(*node));
+							if !lines.is_empty() {
+								return None;
+							}
+							format!("() => ({})", value.text)
+						}
+						_ => "null".to_string(),
+					};
 					parts.push(format!(
-						"[{}, {schema}, {optional}]",
+						"[{}, {schema}, {optional}, {default}]",
 						js::string_literal(&name)
 					));
 				}

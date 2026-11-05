@@ -30,6 +30,8 @@ impl Walker<'_> {
 		// the ones not hoisted in order, then the hoisted ones not analyzed yet (modules.rs)
 		self.walk_declarations(statements);
 		self.body.scope = saved;
+		// a `parallel()` that no operation follows (concurrency.rs)
+		self.check_parallel_views();
 		// what the backends may keep in the frames (locals.rs)
 		self.record_non_escaping();
 		TypeId::VOID
@@ -591,6 +593,8 @@ impl Walker<'_> {
 		let (None, Some(value)) = (annotation, value) else {
 			return self.unsupported(n, "a field declaration outside an object");
 		};
+		// a name assigned as a whole is written, not used (foreign.rs)
+		self.access_roots.insert(self.strip_groups(target));
 		let place = self.check_place(target);
 		// a name assigned as a whole is written, not read: it has its declared
 		// type, and no narrowing to re-validate in the next rounds of a loop
@@ -630,6 +634,8 @@ impl Walker<'_> {
 		if place.assignable {
 			self.write_effect(target, n);
 		}
+		// a field moved out has a value again (foreign.rs)
+		self.restore_moved_fields(target);
 		// a relation side: written through its direct side (relations.rs)
 		self.check_relation_write(n, target, value);
 		// a closure stored into a place escapes; a copy, maybe a move (moves.rs)
@@ -733,6 +739,7 @@ impl Walker<'_> {
 		let params = self.declare_generics(n, &text, parameters);
 		let rigid = self.rigid_params.len();
 		self.rigid_params.extend(params.iter().copied());
+		self.note_schema_logic(value);
 		let ty = self.declare_type(n, name, value);
 		self.rigid_params.truncate(rigid);
 		self.body.scope = saved;

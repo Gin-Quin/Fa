@@ -35,6 +35,7 @@ mod foreign;
 pub(crate) mod generic_values;
 mod growing;
 mod hoisting;
+mod index_proofs;
 mod inline_unions;
 mod inlining;
 mod io;
@@ -80,6 +81,7 @@ use rustc_hash::FxHashMap;
 use crate::error::Error;
 use crate::runtime::Runtime;
 use crate::target::Target;
+use ownership::FieldFlag;
 use values::{IntRepr, Repr, Val};
 
 /// LLVM's number for the `fastcc` calling convention.
@@ -210,6 +212,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The `for` being lowered iterates over parts that are all views
 	/// (`views.rs`): its items are never inline strings.
 	iterating_views: bool,
+	/// Inside a loop over characters lowered twice, for a simple text and
+	/// for another (`for_characters`): a nested one is lowered once.
+	pub(crate) versioned_characters: bool,
 	/// The arrays indexed by a counted loop being lowered, read before it
 	/// (`hoisting.rs`): the array value of each local, and the items and
 	/// length of each such value.
@@ -302,6 +307,11 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The drop flags of the locals holding a resource of foreign code (a
 	/// type with `destroy`), by slot: cleared when the local moves out.
 	resource_flags: std::cell::RefCell<FxHashMap<PointerValue<'ctx>, PointerValue<'ctx>>>,
+	/// The drop flags of the fields holding a resource that may move out of
+	/// a local (`let moved = holder.buffer`), by slot of the local: the
+	/// path of field indices and its flag, cleared when the field moves out
+	/// and set again when it is assigned (`ownership.rs`, `drop_place`).
+	field_flags: std::cell::RefCell<FxHashMap<PointerValue<'ctx>, Vec<FieldFlag<'ctx>>>>,
 	/// The `let` locals bound to `text.codePoints()` that are only indexed
 	/// and measured, by symbol: the call, evaluated again (on an immutable
 	/// text) where they are read, so that the array is never built.
@@ -309,6 +319,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The whole program is lowered in this module (`compile.rs`, not the
 	/// units of `units.rs`): whole-program layouts may apply (dense maps).
 	whole_program: bool,
+	/// The indices proven by the index proofs of fields (`index_proofs.rs`).
+	index_proofs: std::cell::RefCell<Option<index_proofs::IndexProofs>>,
 	/// The facts merged from every unit of a build per unit (`facts.rs`).
 	program_facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
 	/// The map types the program may keep a reference into the values of
@@ -423,6 +435,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			nullable_references: FxHashMap::default(),
 			reserved_pushes: FxHashMap::default(),
 			iterating_views: false,
+			versioned_characters: false,
 			hoisted_arrays: FxHashMap::default(),
 			hoisted_parts: FxHashMap::default(),
 			expanded_functions: Vec::new(),
@@ -458,9 +471,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			pending_box: std::cell::Cell::new(None),
 			effectful_drops: std::cell::Cell::new(false),
 			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
+			field_flags: std::cell::RefCell::new(FxHashMap::default()),
 			virtual_code_points: FxHashMap::default(),
 			whole_program: false,
 			program_facts: None,
+			index_proofs: std::cell::RefCell::new(None),
 			unsafe_maps: program::unsafe_maps(session, files),
 			no_inline_maps: program::no_inline_maps(session, files),
 			relation_sides: relations::relation_sides(
@@ -1126,8 +1141,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// value, outside of asynchronous programs (whose tasks may outlive the
 	/// caller's places). The same for direct and indirect calls.
 	pub(crate) fn borrows_parameter(&self, repr: Repr) -> bool {
+		// a move-only value moves into its function: by value
+		let moved =
+			matches!(repr, Repr::Object(ty) | Repr::Tuple(ty) if self.types().owns_unique(ty));
 		!self.tasks.asynchronous
-			&& !matches!(repr, Repr::Function(_))
+			&& !moved && !matches!(repr, Repr::Function(_))
 			&& self.llvm_type(repr).is_struct_type()
 	}
 
@@ -1374,6 +1392,29 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.tree.nodes[node].for_each_child(|child| stack.push(child));
 			}
 		}
+		// the default values of fields, evaluated in any function (a typed
+		// literal, the reader of `Json.parse`): the top-level values they read
+		let mut defaults: Vec<NodeId> = self
+			.analysis
+			.type_decls
+			.values()
+			.flat_map(|decl| decl.fields.iter().filter_map(|field| field.default))
+			.collect();
+		defaults.sort();
+		for default in defaults {
+			let mut stack = vec![default.index()];
+			while let Some(node) = stack.pop() {
+				if let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(node)) {
+					let data = self.analysis.symbols.symbol(symbol);
+					if matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable)
+						&& self.owner_of_scope(data.scope).is_none()
+					{
+						self.shared.insert(symbol, ());
+					}
+				}
+				self.tree.nodes[node].for_each_child(|child| stack.push(child));
+			}
+		}
 		self.mark_module_values();
 	}
 
@@ -1563,6 +1604,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 				_ => {
 					self.builder.build_store(slot.pointer, given)?;
+					// a move-only parameter is moved in: the function owns it
+					if self.is_moved_parameter(param.symbol) {
+						self.own_local(param.symbol, slot);
+					}
 				}
 			}
 		}
@@ -2406,6 +2451,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					return self.optional_element(slot.pointer, slot.repr, node);
 				}
 				let value = self.load(slot)?;
+				// a move-only value moved out: the local gives it up
+				if self.analysis.moved_reads.contains(&node) && value.repr == slot.repr {
+					self.give_up_place(node, slot)?;
+					let value = self.fresh(value);
+					let narrowed = self.node_repr(node).unwrap_or(value.repr);
+					return self.narrow_to(value, narrowed, node);
+				}
 				let narrowed = self.node_repr(node).unwrap_or(value.repr);
 				self.narrow_to(value, narrowed, node)
 			}
@@ -2516,10 +2568,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(Val::void());
 		}
 		let value_lowered = self.owned_as(value_lowered, slot.repr, Some(value))?;
-		// the value it replaces is dropped
-		let old = self.load(slot)?;
-		self.emit_drop(old)?;
+		// the value it replaces is dropped (but what moved out of it)
+		let flags = self.drop_replaced(target, slot)?;
 		self.store(slot, value_lowered, value)?;
+		for flag in flags {
+			self.builder
+				.build_store(flag, self.context.bool_type().const_int(1, false))?;
+		}
 		Ok(Val::void())
 	}
 
@@ -2695,6 +2750,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					self.iterating_views = matches!(self.view(source), View::Name(_))
 						&& matches!(self.analysis.resolution(source),
 							Resolution::Local(symbol) if self.holds_only_views(symbol));
+					if let Repr::Array(_) = value.repr {
+						self.reserve_for_item_appends(body, value)?;
+					}
 					self.for_items(node, pattern, has_index, value, body)
 				}
 				Repr::Map(_) | Repr::Set(_) => self.for_entries(node, pattern, value, body),

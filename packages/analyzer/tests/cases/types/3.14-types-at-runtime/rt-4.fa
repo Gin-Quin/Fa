@@ -1,4 +1,3 @@
--- pending: M3 (the printed spelling of a type built by `TypeFromSchema`)
 -- brief: ✓ rt-4: TypeFromSchema round trip (types-at-runtime.md example)
 type SchemaError = Errors {
 	Unsupported = { message: String }

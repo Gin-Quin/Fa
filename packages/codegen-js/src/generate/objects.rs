@@ -320,6 +320,13 @@ impl Generator<'_> {
 			return Expr::constant(value.to_string(), Prec::Primary);
 		}
 		let members: Vec<NodeId> = members.iter().collect();
+		// a field holding a resource moved out of its local (resources.rs)
+		if let Some(moved) = self.field_moved_out(n, target, &members) {
+			return moved;
+		}
+		if let Some(read) = self.temporary_access(n, target, &members) {
+			return read;
+		}
 		// a constant of the number API (`Int8.maxValue`, `Float.nan`)
 		if let [member] = members.as_slice()
 			&& let Resolution::Builtin(builtin) = self.analysis.resolution(*member)
@@ -1427,6 +1434,14 @@ impl Generator<'_> {
 				let item_copy = self.copy_function(item)?;
 				let wanted = format!("{item_copy}$array");
 				(wanted, format!("(value) => value.map({item_copy})"))
+			}
+			// a pool of values: its values, in new slots
+			TypeKind::Collection(..) if self.is_value_pool(ty) => {
+				let class = self.helper("FaValuePool");
+				(
+					"copy$valuePool".to_string(),
+					format!("(value) => new {class}(value)"),
+				)
 			}
 			// a pool or a columnar: a `Set` of objects, copied one by one
 			TypeKind::Collection(kind, item, _) if crate::generate::collections::is_pool(kind) => {

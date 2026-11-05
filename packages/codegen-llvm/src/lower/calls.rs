@@ -138,6 +138,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					if value.repr == Repr::Never {
 						return Ok(value);
 					}
+					// a task moves into the callee, which owns it
+					let value = self.give_task(value, *argument)?;
 					arguments.push(value);
 					places.push(None);
 				}
@@ -293,6 +295,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Argument::Given(argument) => {
 					let lowered = evaluated[&position];
+					// a task moves into the callee, which owns it
+					let lowered = self.give_task(lowered, *argument)?;
 					let lowered =
 						self.convert_argument(&function, lowered, repr, argument.index())?;
 					arguments.push(lowered.value.expect("an argument").into());
@@ -404,7 +408,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The positions of the parameters a function type changes (`mutates`,
 	/// `invalidates`).
-	fn changed_parameters(&self, ty: TypeId) -> Vec<usize> {
+	pub(crate) fn changed_parameters(&self, ty: TypeId) -> Vec<usize> {
 		let fa_analyzer::types::TypeKind::Function(sig) = self.types().kind(ty) else {
 			return Vec::new();
 		};
@@ -551,7 +555,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		path: &str,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
+		// `numbers.parallel().map(f)` (parallel.rs)
+		if let Some(operation) = self.analysis.parallel_operations.get(&node).copied() {
+			return self.parallel_operation(node, operation, info);
+		}
 		match path {
+			// `collection.parallel()`: the collection, which the operation reads
+			"Collection#parallel" => self.receiver(node),
 			// tasks (tasks.rs)
 			"Task.yield" | "Task.all" | "Task.any" | "Task.settled" | "Task#cancel"
 			| "std.time.sleep" => self.task_builtin(node, path, info),

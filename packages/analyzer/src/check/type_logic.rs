@@ -32,72 +32,10 @@ const MAX_NESTING: u32 = 256;
 impl Walker<'_> {
 	/// Whether a node is the logic of a type function (`if`, `when`, `do`).
 	pub(super) fn is_type_logic(&self, n: NodeId) -> bool {
-		match self.view(n) {
-			View::If { .. } | View::When { .. } | View::Do(_) => true,
-			// `TypeFromSchema<@f(@typeToSchema(Input))>`: evaluated again for
-			// each application
-			View::Call { callee, .. } => {
-				matches!(self.view(callee), View::Name(name) if self.tree.name(name) == "TypeFromSchema")
-			}
-			_ => false,
-		}
-	}
-
-	/// `TypeFromSchema<…>` of a generic type function, for an application:
-	/// its argument evaluated with the `@typeToSchema` of the parameters
-	/// bound (the declaration evaluated it on the parameters themselves).
-	fn applied_type_from_schema(
-		&mut self,
-		n: NodeId,
-		argument: NodeId,
-		bindings: &Bindings,
-	) -> TypeId {
-		let mut nodes = vec![argument];
-		let mut index = 0;
-		while index < nodes.len() && nodes.len() < 4096 {
-			let node = nodes[index];
-			nodes.extend(syntax::children(&self.tree, node));
-			index += 1;
-		}
-		let mut saved: Vec<(NodeId, Option<fa_interpreter::Value>)> = Vec::new();
-		for &node in &nodes {
-			let View::Call { callee, arguments } = self.view(node) else {
-				continue;
-			};
-			let View::Name(name) = self.view(callee) else {
-				continue;
-			};
-			if self.tree.name(name) == "@typeToSchema"
-				&& let Some(first) = arguments.first()
-			{
-				let ty = self.s.types.substitute(self.type_of(first), bindings);
-				let schema = crate::comptime::schema::schema(&self.s.types, ty);
-				let previous = self.a.constants.insert(node, schema);
-				saved.push((node, previous));
-			} else if self.tree.name(name).starts_with('@') {
-				// a compile-time call: evaluated again
-				let previous = self.a.constants.remove(&node);
-				saved.push((node, previous));
-			}
-		}
-		for &node in &nodes {
-			self.comptime_evaluated.remove(&node);
-		}
-		let ty = match self.evaluate_at(argument, n) {
-			Some(value) => {
-				let mut named = Vec::new();
-				self.schema_type(n, &value, &mut named, 0)
-			}
-			None => TypeId::UNKNOWN,
-		};
-		for (node, previous) in saved {
-			match previous {
-				Some(previous) => self.a.constants.insert(node, previous),
-				None => self.a.constants.remove(&node),
-			};
-			self.comptime_evaluated.remove(&node);
-		}
-		ty
+		matches!(
+			self.view(n),
+			View::If { .. } | View::When { .. } | View::Do(_)
+		) || self.schema_logic.contains(&n)
 	}
 
 	/// The logic of a type declaration: its value node, when it is one.
@@ -195,7 +133,15 @@ impl Walker<'_> {
 			}
 		}
 		self.type_function_depth += 1;
+		let owner = self
+			.s
+			.types
+			.syms
+			.resolve(self.a.symbols.symbol(symbol).name)
+			.to_string();
+		let saved = self.schema_identity.replace((owner, 0));
 		let ty = self.select_type(at, value, bindings);
+		self.schema_identity = saved;
 		self.type_function_depth -= 1;
 		for (param_symbol, previous) in bound {
 			match previous {
@@ -277,9 +223,9 @@ impl Walker<'_> {
 				TypeId::UNKNOWN
 			}
 			View::Do(body) => self.select_type(at, body, bindings),
-			View::Call { arguments, .. } if self.is_type_logic(n) && arguments.len() == 1 => {
-				let argument = arguments.first().expect("an argument");
-				self.applied_type_from_schema(at, argument, bindings)
+			// `TypeFromSchema`: its schema evaluated for this application (schemas.rs)
+			View::Call { arguments, .. } if self.schema_logic.contains(&n) => {
+				self.apply_type_from_schema(at, arguments, bindings)
 			}
 			View::Block { statements } => match statements.last() {
 				Some(last) => self.select_type(at, last, bindings),

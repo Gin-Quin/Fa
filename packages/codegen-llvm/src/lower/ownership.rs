@@ -43,6 +43,14 @@ use crate::error::Error;
 use crate::lower::values::{Repr, Val};
 use crate::lower::{Lowering, Slot};
 
+/// The drop flag of a field that may move out of a local: its path of
+/// field indices from the local, and the flag (set while the local owns it).
+#[derive(Clone, Debug)]
+pub(crate) struct FieldFlag<'ctx> {
+	pub(crate) path: Vec<u32>,
+	pub(crate) flag: PointerValue<'ctx>,
+}
+
 /// An entry of the cleanup stack.
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum Cleanup<'ctx> {
@@ -614,7 +622,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Repr::Tuple(ty) => self.tuple_reprs(ty),
 					_ => unreachable!(),
 				};
-				// a resource of foreign code: its `destroy` first (foreign.rs)
+				// a resource of foreign code: its `destroy` first (foreign.rs);
+				// a resource that moved out is never dropped (its drop flag,
+				// `own_local`), so every value here is owned, even all zero
 				if let Repr::Object(ty) = repr
 					&& let Some(destroy) = self.destroy_function(ty)
 				{
@@ -1162,7 +1172,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Unregisters a temporary: whether the value was one.
-	fn unregister(&self, value: Val<'ctx>) -> bool {
+	pub(crate) fn unregister(&self, value: Val<'ctx>) -> bool {
 		let Some(raw) = value.value else {
 			return false;
 		};
@@ -1257,28 +1267,270 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !self.needs_drop(slot.repr) {
 			return;
 		}
-		// a resource of foreign code: a drop flag, cleared when the local
-		// moves out (`let second = first`, a returned value), since its
-		// `destroy` must not run on the zeroed slot
-		if let Repr::Object(ty) = slot.repr
-			&& self.destroy_function(ty).is_some()
-			&& let Ok(flag) = self.alloca(Repr::Bool, "owns_resource")
-			&& self
-				.builder
-				.build_store(flag.pointer, self.context.bool_type().const_int(1, false))
-				.is_ok()
+		// a value holding a resource of foreign code: a drop flag, cleared
+		// when the local moves out (`let second = first`, a returned value),
+		// and one per field that may move out of it: a resource may be all
+		// zero, so a moved one is known by its flag, never by its bytes
+		if self
+			.types()
+			.contains_resource(self.analysis.symbols.symbol(symbol).ty)
+			&& let Ok(flag) = self.set_flag("owns_resource")
 		{
 			self.cleanups
 				.borrow_mut()
-				.push(Cleanup::Flagged(slot, flag.pointer));
-			self.resource_flags
-				.borrow_mut()
-				.insert(slot.pointer, flag.pointer);
+				.push(Cleanup::Flagged(slot, flag));
+			self.resource_flags.borrow_mut().insert(slot.pointer, flag);
+			let mut fields = Vec::new();
+			for path in self.moved_field_paths(symbol, slot.repr) {
+				if let Ok(flag) = self.set_flag("owns_field") {
+					fields.push(FieldFlag { path, flag });
+				}
+			}
+			if !fields.is_empty() {
+				self.field_flags.borrow_mut().insert(slot.pointer, fields);
+			}
 			self.owned_locals.insert(symbol, slot);
 			return;
 		}
 		self.cleanups.borrow_mut().push(Cleanup::Local(slot));
 		self.owned_locals.insert(symbol, slot);
+	}
+
+	/// A new drop flag, set here.
+	fn set_flag(&self, name: &str) -> Result<PointerValue<'ctx>, Error> {
+		let flag = self.alloca(Repr::Bool, name)?;
+		self.builder
+			.build_store(flag.pointer, self.context.bool_type().const_int(1, false))?;
+		Ok(flag.pointer)
+	}
+
+	/// The paths of the fields holding a resource that move out of a local
+	/// somewhere (`Analysis::moved_reads`), through objects stored inline.
+	fn moved_field_paths(&self, symbol: SymbolId, repr: Repr) -> Vec<Vec<u32>> {
+		let mut nodes: Vec<NodeId> = self.analysis.moved_reads.iter().copied().collect();
+		nodes.sort_unstable_by_key(|node| node.index());
+		let mut paths: Vec<Vec<u32>> = Vec::new();
+		for node in nodes {
+			if !self.types().contains_resource(self.type_of(node)) {
+				continue;
+			}
+			if let Some((root, path)) = self.field_path(node)
+				&& root == symbol
+				&& !path.is_empty()
+				&& self.inline_path(repr, &path).is_some()
+				&& !paths.contains(&path)
+			{
+				paths.push(path);
+			}
+		}
+		paths
+	}
+
+	/// The local at the root of a place made of fields (`holder.a.b`) and
+	/// the indices of those fields.
+	pub(crate) fn field_path(&self, node: NodeId) -> Option<(SymbolId, Vec<u32>)> {
+		match self.view(node) {
+			super::View::Group(inner) => self.field_path(inner),
+			super::View::Name(_) => match self.analysis.resolution(node) {
+				Resolution::Local(symbol) => Some((symbol, Vec::new())),
+				_ => None,
+			},
+			super::View::Access { target, members } => {
+				let (symbol, mut path) = self.field_path(target)?;
+				for member in members.iter() {
+					let Resolution::Field(_, index) = self.analysis.resolution(member) else {
+						return None;
+					};
+					path.push(u32::from(index));
+				}
+				Some((symbol, path))
+			}
+			_ => None,
+		}
+	}
+
+	/// The representation at the end of a path of fields stored inline
+	/// (objects of objects), if every step is one.
+	fn inline_path(&self, mut repr: Repr, path: &[u32]) -> Option<Repr> {
+		for &index in path {
+			let Repr::Object(object) = repr else {
+				return None;
+			};
+			if self.destroy_function(object).is_some() {
+				return None;
+			}
+			repr = *self.object_fields(object).get(index as usize)?;
+		}
+		Some(repr)
+	}
+
+	/// A place whose move-only value moved out (`node`, a local or a field
+	/// of one): a zero (a task's null, which its drop skips), and its drop
+	/// flag cleared when it holds a resource, which a zero can't mark (a
+	/// resource may be all zero).
+	pub(crate) fn give_up_place(&mut self, node: NodeId, slot: Slot<'ctx>) -> Result<(), Error> {
+		self.builder
+			.build_store(slot.pointer, self.llvm_type(slot.repr).const_zero())?;
+		if let Some(&flag) = self.resource_flags.borrow().get(&slot.pointer) {
+			self.builder
+				.build_store(flag, self.context.bool_type().const_zero())?;
+			return Ok(());
+		}
+		if !self.types().contains_resource(self.type_of(node)) {
+			return Ok(());
+		}
+		let flag = self.field_path(node).and_then(|(symbol, path)| {
+			let local = self.slots.get(&symbol)?;
+			let flags = self.field_flags.borrow();
+			flags
+				.get(&local.pointer)?
+				.iter()
+				.find(|field| field.path == path)
+				.map(|field| field.flag)
+		});
+		match flag {
+			Some(flag) => {
+				self.builder
+					.build_store(flag, self.context.bool_type().const_zero())?;
+				Ok(())
+			}
+			None => Err(self.unsupported(node.index(), "a resource moved out of this place")),
+		}
+	}
+
+	/// Drops the value of a place before it is replaced (`target = value`),
+	/// but the parts that moved out of it (their drop flags): the flags to
+	/// set once the new value is stored.
+	pub(crate) fn drop_replaced(
+		&mut self,
+		target: NodeId,
+		slot: Slot<'ctx>,
+	) -> Result<Vec<PointerValue<'ctx>>, Error> {
+		let mut flags: Vec<FieldFlag<'ctx>> = Vec::new();
+		if let Some((symbol, path)) = self.field_path(target)
+			&& let Some(local) = self.slots.get(&symbol).copied()
+		{
+			if path.is_empty()
+				&& let Some(&flag) = self.resource_flags.borrow().get(&local.pointer)
+			{
+				flags.push(FieldFlag {
+					path: Vec::new(),
+					flag,
+				});
+			}
+			if let Some(fields) = self.field_flags.borrow().get(&local.pointer) {
+				for field in fields {
+					if field.path.starts_with(&path) {
+						flags.push(FieldFlag {
+							path: field.path[path.len()..].to_vec(),
+							flag: field.flag,
+						});
+					}
+				}
+			}
+		}
+		if flags.is_empty() {
+			let old = self.load(slot)?;
+			self.emit_drop(old)?;
+			return Ok(Vec::new());
+		}
+		self.drop_place(slot, &flags)?;
+		Ok(flags.into_iter().map(|field| field.flag).collect())
+	}
+
+	/// Drops the value of a place but the parts whose flag is clear
+	/// (`flags`, by path from the place; an empty path is the whole).
+	fn drop_place(&self, slot: Slot<'ctx>, flags: &[FieldFlag<'ctx>]) -> Result<(), Error> {
+		if flags.is_empty() {
+			if self.needs_drop(slot.repr) {
+				let value = self.load(slot)?;
+				self.emit_drop(value)?;
+			}
+			return Ok(());
+		}
+		if let Some(whole) = flags.iter().find(|field| field.path.is_empty()) {
+			let rest: Vec<FieldFlag<'ctx>> = flags
+				.iter()
+				.filter(|field| !field.path.is_empty())
+				.cloned()
+				.collect();
+			let set = self
+				.builder
+				.build_load(self.context.bool_type(), whole.flag, "")?
+				.into_int_value();
+			let function = self.builder.get_insert_block().expect("a block");
+			let function = function.get_parent().expect("a function");
+			let then = self.context.append_basic_block(function, "drop_owned");
+			let end = self.context.append_basic_block(function, "dropped_owned");
+			self.builder.build_conditional_branch(set, then, end)?;
+			self.builder.position_at_end(then);
+			self.drop_place(slot, &rest)?;
+			self.builder.build_unconditional_branch(end)?;
+			self.builder.position_at_end(end);
+			return Ok(());
+		}
+		// the fields one by one, in the order of the drop function
+		let Repr::Object(object) = slot.repr else {
+			return Err(self.unsupported(0, "a resource moved out of this place"));
+		};
+		let structure = self.object_type(object);
+		let fields = self.object_fields(object);
+		for (index, repr) in fields.into_iter().enumerate().rev() {
+			let below: Vec<FieldFlag<'ctx>> = flags
+				.iter()
+				.filter(|field| field.path[0] == index as u32)
+				.map(|field| FieldFlag {
+					path: field.path[1..].to_vec(),
+					flag: field.flag,
+				})
+				.collect();
+			if below.is_empty() && !self.needs_drop(repr) {
+				continue;
+			}
+			let pointer =
+				self.builder
+					.build_struct_gep(structure, slot.pointer, index as u32, "")?;
+			self.drop_place(Slot { pointer, repr }, &below)?;
+		}
+		Ok(())
+	}
+
+	/// Drops the fields of a temporary object but one, which moves out of
+	/// it (a task, a resource): the object is no longer a temporary.
+	pub(crate) fn drop_all_but(&self, value: Val<'ctx>, kept: usize) -> Result<(), Error> {
+		self.unregister(value);
+		let Repr::Object(object) = value.repr else {
+			return Ok(());
+		};
+		let structure = value.value.expect("an object").into_struct_value();
+		for (index, repr) in self.object_fields(object).into_iter().enumerate().rev() {
+			if index != kept && self.needs_drop(repr) {
+				let raw = self
+					.builder
+					.build_extract_value(structure, index as u32, "")?;
+				self.emit_drop(Val::new(repr, raw))?;
+			}
+		}
+		Ok(())
+	}
+
+	/// Whether a parameter is moved in by its caller, so the function owns
+	/// it: a parameter (not `self`, which a method borrows) of a move-only
+	/// type (`TypeStore::owns_unique`).
+	pub(crate) fn is_moved_parameter(&self, symbol: SymbolId) -> bool {
+		let data = self.analysis.symbols.symbol(symbol);
+		matches!(data.kind, SymbolKind::Parameter { .. }) && self.types().owns_unique(data.ty)
+	}
+
+	/// Stops dropping a slot registered with `Cleanup::Local` (a value built
+	/// by a loop whose callbacks may throw, owned by its result now).
+	pub(crate) fn forget_local(&self, slot: Slot<'ctx>) {
+		let mut cleanups = self.cleanups.borrow_mut();
+		if let Some(position) = cleanups.iter().rposition(
+			|cleanup| matches!(cleanup, Cleanup::Local(local) if local.pointer == slot.pointer),
+		) {
+			cleanups.remove(position);
+		}
 	}
 
 	/// Starts owning a local when `flag` is set at run time.
@@ -1316,21 +1568,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(())
 			}
 			Cleanup::Flagged(slot, flag) => {
-				let set = self
-					.builder
-					.build_load(self.context.bool_type(), flag, "")?
-					.into_int_value();
-				let function = self.builder.get_insert_block().expect("a block");
-				let function = function.get_parent().expect("a function");
-				let then = self.context.append_basic_block(function, "drop_flagged");
-				let end = self.context.append_basic_block(function, "dropped_flagged");
-				self.builder.build_conditional_branch(set, then, end)?;
-				self.builder.position_at_end(then);
-				let value = self.load(slot)?;
-				self.emit_drop(value)?;
-				self.builder.build_unconditional_branch(end)?;
-				self.builder.position_at_end(end);
-				Ok(())
+				// the whole flag, then the flags of its fields
+				let mut flags = vec![FieldFlag {
+					path: Vec::new(),
+					flag,
+				}];
+				if let Some(fields) = self.field_flags.borrow().get(&slot.pointer) {
+					flags.extend(fields.iter().cloned());
+				}
+				self.drop_place(slot, &flags)
 			}
 		}
 	}
@@ -1491,7 +1737,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return None;
 		}
 		let data = self.analysis.symbols.symbol(symbol);
-		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable) {
+		// a move-only parameter is owned too (moved in by its caller)
+		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable)
+			&& !self.is_moved_parameter(symbol)
+		{
 			return None;
 		}
 		// views of a text's bytes must not leave their local (`views.rs`)

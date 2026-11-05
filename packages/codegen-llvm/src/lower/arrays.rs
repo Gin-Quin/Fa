@@ -221,6 +221,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.convert(index, Repr::Int(IntRepr::I64), node.index())?
 			.int();
 		let (items, length) = self.array_parts(array)?;
+		// an index of the array by a whole-program proof (`index_proofs.rs`)
+		if self.flags(node).contains(NodeFlags::INDEX_CHECK) && self.proven_index(node) {
+			return self.item_pointer(items, item, index);
+		}
 		let may_be_negative = index_node.is_none_or(|index_node| self.may_be_negative(index_node));
 		if self.flags(node).contains(NodeFlags::INDEX_CHECK) {
 			// `0 <= index < length` first, the form that LLVM's range check
@@ -293,15 +297,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.into_int_value())
 	}
 
-	/// Whether an integer node may hold a negative value (its facts, else its type).
+	/// Whether an integer node may hold a negative value (its facts, else its
+	/// type), unless the places it reads are proven never negative
+	/// (`index_proofs.rs`).
 	pub(crate) fn may_be_negative(&self, node: NodeId) -> bool {
-		if let Some(interval) = self.analysis.interval(node) {
-			return interval.lo < ethnum::I256::ZERO;
-		}
-		match self.types().as_int(self.type_of(node)) {
-			Some(range) => range.min < ethnum::I256::ZERO,
-			None => true,
-		}
+		let negative = if let Some(interval) = self.analysis.interval(node) {
+			interval.lo < ethnum::I256::ZERO
+		} else {
+			match self.types().as_int(self.type_of(node)) {
+				Some(range) => range.min < ethnum::I256::ZERO,
+				None => true,
+			}
+		};
+		negative && !self.proven_non_negative(node)
 	}
 
 	/// The place `array[index]`.
@@ -568,7 +576,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.load(self.array_item_slot(array, item, index)?)
 	}
 
-	fn array_item_slot(
+	pub(crate) fn array_item_slot(
 		&self,
 		array: PointerValue<'ctx>,
 		item: Repr,
@@ -619,7 +627,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The items and the representation of an array value.
-	fn array_of(
+	pub(crate) fn array_of(
 		&self,
 		value: Val<'ctx>,
 		node: NodeId,
@@ -1044,7 +1052,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A new empty array of items of this representation, with room for `capacity`.
-	fn empty_array(
+	pub(crate) fn empty_array(
 		&mut self,
 		item: Repr,
 		capacity: IntValue<'ctx>,
@@ -1076,12 +1084,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.for_each_index(length, |this, index| {
 					let slot = this.array_item_slot(array, item, index)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
-					let mapped = this.call_collection_callback(
-						*callback,
+					// an error: the items stored so far are dropped with the result
+					let mapped = this.callback_with_fixup(
 						callback_node,
-						&[],
-						&[slot],
-						&[index_value],
+						|this| {
+							this.call_collection_callback(
+								*callback,
+								callback_node,
+								&[],
+								&[slot],
+								&[index_value],
+							)
+						},
+						|this| {
+							let length_pointer =
+								this.builder
+									.build_struct_gep(this.header_type(), result, 1, "")?;
+							this.builder.build_store(length_pointer, index)?;
+							this.emit_drop(Val::new(Repr::Array(result_type), result))
+						},
 					)?;
 					let mapped = this.owned_as(mapped, result_item, None)?;
 					let (items, _) = this.array_parts(result)?;
@@ -1155,12 +1176,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let slot = this.array_item_slot(array, item, index)?;
 					let value = this.load(slot)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
-					let keep = this.call_collection_callback(
-						*callback,
+					let keep = this.callback_with_fixup(
 						callback_node,
-						&[],
-						&[slot],
-						&[index_value],
+						|this| {
+							this.call_collection_callback(
+								*callback,
+								callback_node,
+								&[],
+								&[slot],
+								&[index_value],
+							)
+						},
+						|this| this.emit_drop(result_value),
 					)?;
 					let push = this.append_block("filter_keep");
 					let next = this.append_block("filter_next");
@@ -1183,12 +1210,38 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let slot = this.array_item_slot(array, item, index)?;
 					let value = this.load(slot)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
-					let delete = this.call_collection_callback(
-						*callback,
+					let delete = this.callback_with_fixup(
 						callback_node,
-						&[],
-						&[slot],
-						&[index_value],
+						|this| {
+							this.call_collection_callback(
+								*callback,
+								callback_node,
+								&[],
+								&[slot],
+								&[index_value],
+							)
+						},
+						// an error: the items not tested yet move down after the kept ones
+						|this| {
+							let position = this.load(kept)?.int();
+							let rest = this.builder.build_int_sub(length, index, "")?;
+							this.for_each_index(rest, |this, offset| {
+								let from = this.builder.build_int_add(index, offset, "")?;
+								let to = this.builder.build_int_add(position, offset, "")?;
+								let source = this.array_item_slot(array, item, from)?;
+								let moved = this.load(source)?;
+								let target = this.array_item_slot(array, item, to)?;
+								this.builder
+									.build_store(target.pointer, moved.value.expect("an item"))?;
+								Ok(())
+							})?;
+							let header = this.header_type();
+							let length_pointer =
+								this.builder.build_struct_gep(header, array, 1, "")?;
+							let remaining = this.builder.build_int_add(position, rest, "")?;
+							this.builder.build_store(length_pointer, remaining)?;
+							Ok(())
+						},
 					)?;
 					let keep = this.append_block("delete_keep");
 					let drop = this.append_block("delete_drop");
@@ -1288,12 +1341,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let current = this.load(accumulator)?;
 					// `(total, value, index) => …`: the index too
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
-					let next = this.call_collection_callback(
-						*callback,
+					let next = this.callback_with_fixup(
 						callback_node,
-						&[current],
-						&[slot],
-						&[index_value],
+						|this| {
+							this.call_collection_callback(
+								*callback,
+								callback_node,
+								&[current],
+								&[slot],
+								&[index_value],
+							)
+						},
+						|this| this.emit_drop(current),
 					)?;
 					let next = this.owned_as(next, repr, None)?;
 					this.emit_drop(current)?;
@@ -1501,14 +1560,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					node,
 				)?;
 				let size = self.item_size(item)?;
-				let context = match values.first() {
+				// the context: the comparator, and the error it threw (null)
+				let (context, error) = match values.first() {
 					Some(callback) => {
-						let slot = self.alloca(callback.repr, "comparator")?;
+						let structure = self.context.struct_type(
+							&[self.llvm_type(callback.repr), self.pointer_type().into()],
+							false,
+						);
+						let slot = self.builder.build_alloca(structure, "comparator")?;
+						let function = self.builder.build_struct_gep(structure, slot, 0, "")?;
 						self.builder
-							.build_store(slot.pointer, callback.value.expect("a function"))?;
-						slot.pointer
+							.build_store(function, callback.value.expect("a function"))?;
+						let error = self.builder.build_struct_gep(structure, slot, 1, "")?;
+						self.builder
+							.build_store(error, self.pointer_type().const_null())?;
+						(slot, Some(error))
 					}
-					None => self.pointer_type().const_null(),
+					None => (self.pointer_type().const_null(), None),
+				};
+				let sorted = if path == "Array#sort" {
+					self.fresh(Val::new(array_value.repr, target))
+				} else {
+					Val::void()
 				};
 				self.call_runtime(
 					"fa_array_sort",
@@ -1519,11 +1592,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						context.into(),
 					],
 				)?;
-				Ok(if path == "Array#sort" {
-					self.fresh(Val::new(array_value.repr, target))
-				} else {
-					Val::void()
-				})
+				// a comparator that threw: the sort throws its error
+				if let (Some(error), Some(&callback_node)) = (error, arguments.first())
+					&& self.callback_may_throw(callback_node)
+				{
+					let error = self
+						.builder
+						.build_load(self.pointer_type(), error, "")?
+						.into_pointer_value();
+					self.raise_if_error(error)?;
+				}
+				Ok(sorted)
 			}
 			("Array#join" | "Array#joinedLength", [separator]) if item == Repr::Str => {
 				let (bytes, length) = self.string_parts(*separator)?;
@@ -1589,10 +1668,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.get_nth_param(0)
 					.expect("a context")
 					.into_pointer_value();
+				let structure = self.context.struct_type(
+					&[self.llvm_type(callback.repr), self.pointer_type().into()],
+					false,
+				);
+				let closure_pointer = self.builder.build_struct_gep(structure, context, 0, "")?;
+				let error_pointer = self.builder.build_struct_gep(structure, context, 1, "")?;
 				let closure = self.load(Slot {
-					pointer: context,
+					pointer: closure_pointer,
 					repr: callback.repr,
 				})?;
+				// a comparator that threw: the error kept for the sort, which
+				// ends comparing everything as equal
+				let throws = self.callback_may_throw(callback_node);
+				let failed_block = self.append_block("comparator_failed");
+				if throws {
+					let previous = self
+						.builder
+						.build_load(self.pointer_type(), error_pointer, "")?
+						.into_pointer_value();
+					let failed = self.builder.build_is_not_null(previous, "")?;
+					let compare = self.append_block("compare");
+					self.builder
+						.build_conditional_branch(failed, failed_block, compare)?;
+					self.builder.position_at_end(compare);
+					let mark = self.mark();
+					self.frame_mut()
+						.catches
+						.push((failed_block, error_pointer, mark));
+				}
 				let order = self.call_collection_callback(
 					closure,
 					callback_node,
@@ -1608,7 +1712,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						},
 					],
 					&[],
-				)?;
+				);
+				if throws {
+					self.frame_mut().catches.pop();
+				}
+				let order = order?;
+				let resume = self.builder.get_insert_block();
+				self.builder.position_at_end(failed_block);
+				self.builder
+					.build_return(Some(&self.context.i32_type().const_zero()))?;
+				if let Some(resume) = resume {
+					self.builder.position_at_end(resume);
+				}
 				match order.repr {
 					Repr::Int(int) => {
 						let zero = self.int_type(int.bits).const_zero();

@@ -122,8 +122,22 @@ pub(crate) fn program_context(session: &Session, file: FileId) -> ProgramCx {
 }
 
 impl Generator<'_> {
-	/// The local name of an import (declared on first use).
+	/// The local name of an import (declared on first use). In a hot
+	/// build (D43), the expression reading it through the registry of its
+	/// module: `$h0.ns.name`.
 	pub(crate) fn import(&mut self, path: &str, export: &str) -> String {
+		if self.options.hot {
+			self.helper("faHotModule");
+			let holder = match self.hot_modules.get(path) {
+				Some(holder) => holder.clone(),
+				None => {
+					let holder = self.scopes.declare_global("$h");
+					self.hot_modules.insert(path.to_string(), holder.clone());
+					holder
+				}
+			};
+			return format!("{holder}.ns.{export}");
+		}
 		if let Some(local) = self.imports.get(path).and_then(|names| names.get(export)) {
 			return local.clone();
 		}
@@ -328,6 +342,18 @@ impl Generator<'_> {
 			return Vec::new();
 		};
 		let mut lines = Vec::new();
+		// a hot build: each module through its registry (`faHotModule`)
+		let hot: BTreeMap<&String, &String> = self.hot_modules.iter().collect();
+		for (path, holder) in hot {
+			lines.push(format!(
+				"import * as {holder}$m from \"{}\";",
+				relative(&program.path, path)
+			));
+			lines.push(format!(
+				"const {holder} = faHotModule({}, {holder}$m);",
+				crate::js::string_literal(path)
+			));
+		}
 		let imports: BTreeMap<&String, &BTreeMap<String, String>> = self.imports.iter().collect();
 		for (path, names) in imports {
 			let names: Vec<String> = names
@@ -347,6 +373,97 @@ impl Generator<'_> {
 			));
 		}
 		lines
+	}
+
+	/// The TypeScript declarations of an export of the module (`.d.ts`): a
+	/// function with its instances when it may suspend (as
+	/// `instance_exports` exports them), a value with its accessor cell.
+	fn export_typings(&mut self, decl: NodeId, symbol: SymbolId, export: &str) {
+		let info = self.analysis.symbols.symbol(symbol);
+		let (kind, ty) = (info.kind, info.ty);
+		match kind {
+			SymbolKind::Function => {
+				let value = match self.view(decl) {
+					View::Function { value, .. } | View::ExportFunction { value, .. } => value,
+					_ => decl,
+				};
+				let Some((parameters, ret, is_async)) =
+					crate::declarations::signature(self.types, self.analysis, value)
+				else {
+					self.typings
+						.push(format!("export declare const {export}: unknown;"));
+					return;
+				};
+				let task_first = if parameters.is_empty() {
+					"task: unknown".to_string()
+				} else {
+					format!("task: unknown, {parameters}")
+				};
+				let suspends =
+					is_async && self.summary(decl).is_some_and(|summary| summary.suspends);
+				if !suspends {
+					self.typings.push(format!(
+						"export declare function {export}({parameters}): {ret};"
+					));
+					return;
+				}
+				match self.tasks.instances.get(&decl) {
+					// synchronous mode: one instance, blocking
+					None => {
+						self.typings.push(format!(
+							"export declare function {export}({parameters}): {ret};"
+						));
+						self.typings.push(format!(
+							"export declare function {export}$sync({parameters}): {ret};"
+						));
+					}
+					Some(instances) => {
+						let (promise, sync, asynchronous) = (
+							instances.promise_name.is_some(),
+							instances.sync_name.is_some(),
+							instances.async_name.is_some(),
+						);
+						if promise {
+							self.typings.push(format!(
+								"/** Runs the call as a task: the promise rejects with its Fa error. */\nexport declare function {export}({parameters}): Promise<{ret}>;"
+							));
+						} else if sync {
+							self.typings.push(format!(
+								"export declare function {export}({parameters}): {ret};"
+							));
+						} else if asynchronous {
+							self.typings.push(format!(
+								"export declare function {export}({task_first}): Promise<{ret}>;"
+							));
+						}
+						if sync {
+							self.typings.push(format!(
+								"/** The synchronous instance: a blocking call (Bun and Node). */\nexport declare function {export}$sync({parameters}): {ret};"
+							));
+						}
+						if asynchronous {
+							self.typings.push(format!(
+								"/** The async instance, for Fa modules: the caller's task first. */\nexport declare function {export}$async({task_first}): Promise<{ret}>;"
+							));
+						}
+					}
+				}
+			}
+			SymbolKind::Let => {
+				let ty = crate::declarations::typescript(self.types, ty);
+				self.typings
+					.push(format!("export declare const {export}: {ty};"));
+			}
+			SymbolKind::Mutable => {
+				let ty = crate::declarations::typescript(self.types, ty);
+				self.typings
+					.push(format!("export declare let {export}: {ty};"));
+				self.typings.push(format!(
+					"/** The value, read and written by other modules. */\nexport declare const {export}$ref: {{ v: {ty} }};"
+				));
+			}
+			_ => {}
+		}
 	}
 
 	/// The `export` lines of the module: its declarations other files use
@@ -374,6 +491,9 @@ impl Generator<'_> {
 			let Some(local) = self.names.get(&symbol).cloned() else {
 				continue;
 			};
+			if self.options.declarations {
+				self.export_typings(decl, symbol, export);
+			}
 			// a function that may suspend: its instances too (tasks.rs)
 			if let Some(instances) = self.instance_exports(decl, &local, export) {
 				exported.extend(instances);

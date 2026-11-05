@@ -364,6 +364,27 @@ impl Walker<'_> {
 		let inner = std::mem::replace(&mut self.body, saved);
 		self.body.flow_buffers = inner.flow_buffers;
 		self.body.requirements = inner.requirements;
+		// a captured task or worker's handle moves into the closure
+		let captured: Vec<SymbolId> = self
+			.a
+			.functions
+			.get(&n)
+			.map(|info| info.captures.clone())
+			.unwrap_or_default();
+		for symbol in captured {
+			let symbol_type = self.a.symbols.symbol(symbol).ty;
+			if self.is_moved_handle(symbol_type)
+				&& self.body.flow.reachable
+				&& !self
+					.body
+					.flow
+					.consumed
+					.iter()
+					.any(|&(other, _)| other == symbol)
+			{
+				self.body.flow.consumed.push((symbol, n));
+			}
+		}
 		ty
 	}
 
@@ -386,6 +407,21 @@ impl Walker<'_> {
 			.symbols
 			.scope_for(scope_owner, Some(parent), ScopeKind::Function);
 		self.body.scope = scope;
+		// a callback of a parallel view: the rules of a parallel body
+		// (concurrency.rs), its own locals and parameters being the iteration's
+		let parallel_callback = self.parallel_callbacks.contains(&lambda);
+		if parallel_callback {
+			self.parallel.push(super::concurrency::ParallelFrame {
+				node: lambda,
+				scope,
+				pattern: None,
+				range: false,
+				function_depth: self.body.functions.len() + 1,
+				indexed: Vec::new(),
+				through_variable: false,
+				callback: true,
+			});
+		}
 
 		// 1. the signature
 		let (params, incomplete) =
@@ -510,6 +546,9 @@ impl Walker<'_> {
 		};
 		self.quiet -= u32::from(effects);
 		let cx = self.body.functions.pop();
+		if parallel_callback {
+			self.parallel.pop();
+		}
 		self.body.scope = parent;
 		if let Some(cx) = &cx {
 			self.finish_captures(cx, lambda, owner.declaration);

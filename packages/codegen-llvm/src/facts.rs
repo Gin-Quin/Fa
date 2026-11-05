@@ -34,6 +34,14 @@ pub struct FactKind {
 	pub collect: fn(&Session, &[FileId]) -> BTreeSet<String>,
 	/// Merges a unit's contribution into what is merged so far.
 	pub merge: fn(&mut BTreeSet<String>, BTreeSet<String>),
+	/// Turns the merged set into the program's facts, once every unit's is
+	/// merged (the driver, `ProgramFacts::finish`).
+	pub finish: fn(BTreeSet<String>) -> BTreeSet<String>,
+}
+
+/// A merged set that is the program's facts as is.
+pub fn unchanged(merged: BTreeSet<String>) -> BTreeSet<String> {
+	merged
 }
 
 /// A set merged by union: a fact that holds when one unit makes it hold
@@ -49,19 +57,45 @@ pub const REFERENCED_MAPS: &str = "maps.referenced";
 /// the probe array.
 pub const DELETED_WHILE_ITERATED_MAPS: &str = "maps.deleted-while-iterated";
 
+/// The claims of the never-negative places (`proofs.rs`): each unit's part
+/// of them (`proofs::unit_claims`), merged, then resolved by the driver into
+/// the places that fail (`proofs::resolve_claims`).
+pub const PROOF_CLAIMS: &str = "proofs.claims";
+
 /// Every fact kind, in a fixed order.
 pub const KINDS: &[FactKind] = &[
 	FactKind {
 		name: REFERENCED_MAPS,
 		collect: referenced_maps,
 		merge: union,
+		finish: unchanged,
 	},
 	FactKind {
 		name: DELETED_WHILE_ITERATED_MAPS,
 		collect: deleted_while_iterated_maps,
 		merge: union,
+		finish: unchanged,
+	},
+	FactKind {
+		name: PROOF_CLAIMS,
+		collect: proof_claims,
+		merge: union,
+		finish: crate::proofs::resolve_claims_owned,
 	},
 ];
+
+/// See [`PROOF_CLAIMS`].
+fn proof_claims(session: &Session, files: &[FileId]) -> BTreeSet<String> {
+	let types = session.types();
+	let proof_files: Vec<crate::proofs::ProofFile<'_>> = files
+		.iter()
+		.map(|&file| {
+			crate::proofs::ProofFile::new(session.tree(file), session.analysis(file), types)
+				.with_module(session.module(file))
+		})
+		.collect();
+	crate::proofs::unit_claims(&proof_files)
+}
 
 /// The merged facts of a program (or one unit's contribution).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -85,6 +119,20 @@ impl ProgramFacts {
 			let contribution = other.facts.get(kind.name).cloned().unwrap_or_default();
 			(kind.merge)(self.facts.entry(kind.name).or_default(), contribution);
 		}
+	}
+
+	/// Turns every merged set into the program's facts (after the last
+	/// unit's merge).
+	pub fn finish(&mut self) {
+		for kind in KINDS {
+			let merged = self.facts.remove(kind.name).unwrap_or_default();
+			self.facts.insert(kind.name, (kind.finish)(merged));
+		}
+	}
+
+	/// The set of a kind.
+	pub fn set(&self, kind: &str) -> Option<&BTreeSet<String>> {
+		self.facts.get(kind)
 	}
 
 	/// Whether the set of a kind holds a key.
@@ -335,9 +383,12 @@ fn referenced_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 			}
 		};
 		let declared = declaration_lambdas(tree);
+		let parents = parents_of(tree);
 		for index in 0..tree.nodes.len() {
 			let node = NodeId::new(index);
 			match view(tree, node) {
+				// a reference that no change of a map can outlive is fine
+				View::Use { .. } if short_reference(tree, analysis, types, node, &parents) => {}
 				View::Use { value, .. }
 				| View::Reuse { value, .. }
 				| View::Provide { value, .. } => {
@@ -474,6 +525,102 @@ fn write_signature(
 		out.push_str(&format!(" stores {:#x}", sig.stored));
 	}
 	written
+}
+
+/// The parent of every node of a tree (`usize::MAX` for the root).
+pub(crate) fn parents_of(tree: &fa_parser::TypedSyntaxTree) -> Vec<usize> {
+	let mut parents = vec![usize::MAX; tree.nodes.len()];
+	for (index, node) in tree.nodes.iter().enumerate() {
+		node.for_each_child(|child| {
+			if child < parents.len() {
+				parents[child] = index;
+			}
+		});
+	}
+	parents
+}
+
+/// Whether a `use` reference dies before any map can change: in the rest of
+/// its block, nothing calls a function of the program (which may change a
+/// map), creates a closure, or calls a built-in method of a map other than a
+/// read (an insertion moves dense entries, a deletion the entries of a probe
+/// array). The reference's own writes (`count += 1`) change no map's layout.
+pub(crate) fn short_reference(
+	tree: &fa_parser::TypedSyntaxTree,
+	analysis: &fa_analyzer::analysis::Analysis,
+	types: &TypeStore,
+	node: NodeId,
+	parents: &[usize],
+) -> bool {
+	// the statement holding the reference, in its block
+	let mut statement = node.index();
+	let block = loop {
+		let parent = parents.get(statement).copied().unwrap_or(usize::MAX);
+		if parent == usize::MAX {
+			return false;
+		}
+		if matches!(
+			view(tree, NodeId::new(parent)),
+			View::Block { .. } | View::Module { .. }
+		) {
+			break parent;
+		}
+		statement = parent;
+	};
+	let statements: Vec<NodeId> = match view(tree, NodeId::new(block)) {
+		View::Block { statements } | View::Module { statements } => statements.iter().collect(),
+		_ => return false,
+	};
+	let Some(position) = statements.iter().position(|&at| at.index() == statement) else {
+		return false;
+	};
+	// the module's top level: functions may run while the reference lives
+	if matches!(view(tree, NodeId::new(block)), View::Module { .. }) {
+		return false;
+	}
+	let reads = [
+		"Map#get",
+		"Map#has",
+		"Map#size",
+		"Map#keys",
+		"Map#values",
+		"Map#includes",
+	];
+	let mut stack: Vec<usize> = std::iter::once(node.index())
+		.chain(statements[position + 1..].iter().map(|at| at.index()))
+		.collect();
+	while let Some(at) = stack.pop() {
+		let current = NodeId::new(at);
+		match view(tree, current) {
+			View::Lambda { .. } | View::Function { .. } | View::Start { .. } => return false,
+			View::Call { callee, .. } => match analysis.call(current).map(|info| info.callee) {
+				Some(Callee::Builtin(id)) => {
+					let path = fa_analyzer::builtins::get(id).path;
+					// `getOrInsert` of the reference's own value is the one
+					// insertion allowed: it happens before the reference exists
+					let own = at == node.index()
+						|| matches!(view(tree, NodeId::new(parents[at])), View::Use { .. });
+					if path.starts_with("Map#") && !reads.contains(&path) && !own {
+						let _ = callee;
+						return false;
+					}
+				}
+				Some(Callee::Conversion(_) | Callee::Member(_)) => {}
+				_ => return false,
+			},
+			View::Assignment { target, .. } | View::CompoundAssignment { target, .. } => {
+				if matches!(view(tree, target), View::Index { target: map, .. }
+					if matches!(view(tree, map), View::Name(_) | View::Access { .. })
+						&& matches!(types.kind(analysis.type_of(map)), TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)))
+				{
+					return false;
+				}
+			}
+			_ => {}
+		}
+		tree.nodes[at].for_each_child(|child| stack.push(child));
+	}
+	true
 }
 
 #[cfg(test)]

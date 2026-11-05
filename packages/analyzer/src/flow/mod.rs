@@ -230,6 +230,10 @@ pub struct FlowState {
 	/// The move-only locals consumed on some path (`subscription.stop()`,
 	/// advanced brief §11.3), with the consuming node: a later use is `MEM002`.
 	pub consumed: SmallVec<[(SymbolId, NodeId); 1]>,
+	/// The fields moved out of an owned move-only local on some path (a
+	/// task, a resource), with the moving node: the local can't be used as
+	/// a whole, nor the field, until the field is assigned again (`MEM002`).
+	pub moved_fields: SmallVec<[(PlaceId, NodeId); 1]>,
 	/// The kept tasks that may still run (their `start` nodes): they
 	/// borrow what they use until they end (`check/tasks.rs`).
 	pub tasks: SmallVec<[NodeId; 1]>,
@@ -258,6 +262,7 @@ impl FlowState {
 			iterating: SmallVec::new(),
 			time: 0,
 			consumed: SmallVec::new(),
+			moved_fields: SmallVec::new(),
 			tasks: SmallVec::new(),
 			cancelled: SmallVec::new(),
 		}
@@ -427,6 +432,12 @@ impl FlowState {
 		for &(symbol, node) in &other.consumed {
 			if !joined.consumed.iter().any(|&(other, _)| other == symbol) {
 				joined.consumed.push((symbol, node));
+			}
+		}
+		joined.moved_fields = self.moved_fields.clone();
+		for &(place, node) in &other.moved_fields {
+			if !joined.moved_fields.iter().any(|&(other, _)| other == place) {
+				joined.moved_fields.push((place, node));
 			}
 		}
 		joined.tasks = self.tasks.clone();

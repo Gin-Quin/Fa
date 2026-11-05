@@ -113,6 +113,28 @@ pub(crate) enum Reached {
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
+	/// The lowered `destroy` of a resource type declared in another file of
+	/// the program (`foreign.rs`, `destroy_function`).
+	pub(crate) fn destroy_in_other_files(
+		&self,
+		ty: TypeId,
+	) -> Option<inkwell::values::FunctionValue<'ctx>> {
+		self.other_files.values().find_map(|state| {
+			let declaration = state
+				.analysis
+				.type_decls
+				.values()
+				.find(|decl| decl.ty == ty)?;
+			declaration
+				.functions
+				.iter()
+				.map(|&function| state.analysis.symbols.symbol(function))
+				.find(|symbol| self.session.types().syms.resolve(symbol.name) == "destroy")
+				.and_then(|symbol| state.functions.get(&symbol.decl_node))
+				.map(|function| function.value)
+		})
+	}
+
 	/// Makes `file` the file being lowered.
 	pub(crate) fn switch_file(&mut self, file: FileId) {
 		if file == self.file {
@@ -649,9 +671,13 @@ pub(crate) fn unsafe_maps(
 		};
 		// a function's own body is no closure
 		let declared = crate::facts::declaration_lambdas(tree);
+		let parents = crate::facts::parents_of(tree);
 		for index in 0..tree.nodes.len() {
 			let node = NodeId::new(index);
 			match view(tree, node) {
+				// a reference that no change of a map can outlive is fine
+				View::Use { .. }
+					if crate::facts::short_reference(tree, analysis, types, node, &parents) => {}
 				View::Use { value, .. }
 				| View::Reuse { value, .. }
 				| View::Provide { value, .. } => {

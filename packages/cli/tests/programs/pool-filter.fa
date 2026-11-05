@@ -1,0 +1,20 @@
+-- `filter` of pools keeps the kind (copies of the elements kept), and `==`
+-- compares the elements in order.
+mutable scores = Pool<Integer>.from([3, 7, 9])
+let big = scores.filter((score) => score > 5)
+console.log(big, big.size) -- prints: [7, 9] 2
+mutable copy = scores
+console.log(copy == scores) -- prints: true
+copy.add(1)
+console.log(copy == scores, copy.size, scores.size) -- prints: false 4 3
+type Animal = { name: String, legs: Integer }
+mutable animals = Pool<Animal>.from([Animal { name = "ant", legs = 6 }, Animal { name = "cat", legs = 4 }])
+let walkers = animals.filter((animal) => animal.legs < 5)
+console.log(walkers) -- prints: [{ name = "cat", legs = 4 }]
+mutable words = GrowingPool<String>.from(["a", "bb", "ccc"])
+console.log(words.filter((word) => word.length > 1)) -- prints: ["bb", "ccc"]
+-- pools of objects compare by value too (identity is never observable)
+mutable others = Pool<Animal>.from([Animal { name = "ant", legs = 6 }, Animal { name = "cat", legs = 4 }])
+console.log(others == animals) -- prints: true
+others.add(Animal { name = "eel", legs = 0 })
+console.log(others == animals) -- prints: false

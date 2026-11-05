@@ -1,0 +1,54 @@
+-- skip-target: wasm native-freestanding
+-- a resource whose bytes are all zero (a file descriptor 0) is destroyed
+-- like any other: a move is known by a drop flag, never by a zero value
+type Handle = {
+	descriptor: Int32
+	function describe = (self): String => "handle {self.descriptor}"
+	function destroy = (self) => console.log("closed {self.descriptor}")
+}
+
+type Holder = { label: String, handle: Handle }
+
+function open = (descriptor: Int32): Handle => Handle { descriptor }
+
+function close = (handle: Handle) => console.log("closing {handle.descriptor}")
+
+function pick = (flag: Boolean) => {
+	let handle = Handle { descriptor = 0 }
+	if flag {
+		close(handle)
+	}
+	console.log("picked {flag}")
+}
+
+do {
+	let zero = Handle { descriptor = 0 }
+	console.log(zero.descriptor) -- prints: 0
+} -- prints: closed 0
+pick(true) -- prints: closing 0
+-- prints: closed 0
+-- prints: picked true
+pick(false) -- prints: picked false
+-- prints: closed 0
+do {
+	mutable holder = Holder { label = "h", handle = Handle { descriptor = 0 } }
+	let moved = holder.handle
+	holder.handle = Handle { descriptor = 1 }
+	holder.handle = Handle { descriptor = 2 } -- prints: closed 1
+	mutable replaced = Handle { descriptor = 3 }
+	replaced = Handle { descriptor = 0 } -- prints: closed 3
+	mutable handles: Array<Handle> = []
+	handles.push(Handle { descriptor = 0 })
+	handles.push(moved)
+	console.log(handles.length, holder.label) -- prints: 2 h
+} -- prints: closed 0
+-- prints: closed 0
+-- prints: closed 0
+-- prints: closed 2
+open(7) -- prints: closed 7
+mutable kept: Array<Handle> = [open(4), open(5)]
+kept.take(0) -- prints: closed 4
+console.log(open(8).describe()) -- prints: handle 8
+-- prints: closed 8
+console.log("end") -- prints: end
+-- prints: closed 5

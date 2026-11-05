@@ -864,6 +864,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			if let Some(&slot) = self.slots.get(&param.symbol)
 				&& self.needs_drop(slot.repr)
+				// a move-only parameter is owned already (moved in by the caller)
+				&& !self.is_moved_parameter(param.symbol)
 			{
 				self.own_flagged(slot, flag.pointer);
 			}
@@ -1757,29 +1759,37 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		operand: NodeId,
 	) -> Result<(PointerValue<'ctx>, bool), Error> {
 		let frame = value.value.expect("a task").into_pointer_value();
+		self.give_task(value, operand)?;
+		Ok((frame, true))
+	}
+
+	/// A task moves out of what holds it (`concurrency.md`: a task can't be
+	/// copied): a temporary is unregistered, a place (a local, a parameter,
+	/// a field, an item) gives it up (null, which its drop skips). For an
+	/// `await`, an argument (the callee owns its task parameters), a
+	/// returned or stored value.
+	pub(crate) fn give_task(
+		&mut self,
+		value: Val<'ctx>,
+		operand: NodeId,
+	) -> Result<Val<'ctx>, Error> {
 		let mut inner = operand;
 		while let View::Group(group) = self.view(inner) {
 			inner = group;
 		}
-		if !self.is_temporary(value) && self.is_place(inner) {
-			if let View::Name(_) = self.view(inner)
-				&& let fa_analyzer::symbols::Resolution::Local(symbol) =
-					self.analysis.resolution(inner)
-				&& matches!(
-					self.analysis.symbols.symbol(symbol).kind,
-					fa_analyzer::symbols::SymbolKind::Parameter { .. }
-				) {
-				return Ok((frame, false));
-			}
-			if let Ok(slot) = self.place(inner) {
-				// the place gives its task up
-				self.builder
-					.build_store(slot.pointer, self.pointer_type().const_null())?;
-				return Ok((frame, true));
-			}
+		// a task, a resource, a type holding one (`TypeStore::owns_unique`)
+		if !self.types().owns_unique(self.type_of(inner)) {
+			return Ok(value);
 		}
-		self.take(value, Some(operand))?;
-		Ok((frame, true))
+		if !self.is_temporary(value)
+			&& self.is_place(inner)
+			&& let Ok(slot) = self.place(inner)
+			&& slot.repr == value.repr
+		{
+			self.give_up_place(inner, slot)?;
+			return Ok(value);
+		}
+		self.take(value, Some(operand))
 	}
 
 	/// Raises `Cancelled` when the task was cancelled (it is 1).

@@ -826,6 +826,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Str if op == ArithOp::Add => {
 				if let View::Template { parts } = self.view(value) {
+					if let Some(&(counter, end, inclusive)) = self.reserved_appends.get(&node)
+						&& let Some(part) = self.integer_part(parts)
+					{
+						let integer = self.expr(part)?;
+						if integer.repr == Repr::Never {
+							return Ok(integer);
+						}
+						self.reserved_integer_append(
+							slot.pointer,
+							integer,
+							counter,
+							end,
+							inclusive,
+						)?;
+						return Ok(Val::void());
+					}
 					return self.append_template(slot.pointer, target, parts);
 				}
 				if let Some(plan) = self.destination_call(value, target) {
@@ -835,6 +851,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if right.repr == Repr::Never {
 					return Ok(Val::never());
 				}
+				// a choice of literals of one length: a constant-length copy
+				let right = match self.literal_shape(value) {
+					Some(shape) if !matches!(self.view(value), View::String(_)) => {
+						// a static string: nothing to drop
+						self.unregister(right);
+						self.with_literal_shape(right, shape)?
+					}
+					_ => right,
+				};
 				if let Some(&(counter, end, inclusive)) = self.reserved_appends.get(&node) {
 					self.reserved_append(slot.pointer, right, counter, end, inclusive)?;
 					return Ok(Val::void());
@@ -1026,6 +1051,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.arrays_equal(left, right, item_type, node)
 			}
 			Repr::Map(_) | Repr::Set(_) if op.is_none() => self.tables_equal(left, right, node),
+			// pools and columnars: their elements in slot order
+			Repr::Pool(item_type) | Repr::Columnar(item_type) if op.is_none() => {
+				let right = self.convert(right, left.repr, node.index())?;
+				let left = self.pool_view(left, node)?;
+				let right = self.pool_view(right, node)?;
+				self.arrays_equal(left, right, item_type, node)
+			}
 			Repr::Rec(target) if op.is_none() => {
 				let right = self.convert(right, left.repr, node.index())?;
 				let target = self.repr_of(target, node.index())?;

@@ -426,6 +426,10 @@ impl Walker<'_> {
 				immediate_task: immediate,
 			},
 		);
+		// awaiting a field moves it out of its local (foreign.rs)
+		if local.is_none() {
+			self.move_handles(&[operand]);
+		}
 		// awaiting consumes the task
 		if let Some(symbol) = local
 			&& self.body.flow.reachable
@@ -691,6 +695,29 @@ impl Walker<'_> {
 				self.body.flow.cancelled.push(symbol);
 			}
 			self.end_task_borrow(symbol);
+		}
+		// a task or a worker's handle given to a function moves into it
+		// (concurrency.md: they can't be copied; the callee owns them)
+		if let Some(CallInfo {
+			callee: crate::analysis::Callee::Function(_) | crate::analysis::Callee::Value,
+			arguments,
+		}) = self.a.calls.get(&n).cloned()
+		{
+			// (the receiver of a method, `worker.squares(…)`, is not given)
+			let receiver = match self.view(self.strip_groups(callee)) {
+				View::Access { target, .. } => Some(self.strip_groups(target)),
+				_ => None,
+			};
+			let given: Vec<NodeId> = arguments
+				.iter()
+				.filter_map(|argument| match argument {
+					Argument::Given(value) if Some(self.strip_groups(*value)) != receiver => {
+						Some(*value)
+					}
+					_ => None,
+				})
+				.collect();
+			self.move_handles(&given);
 		}
 		// `pool.submit(task)`: the task is stored until a worker is free, so it
 		// escapes, and its captures are copies (concurrency.md)

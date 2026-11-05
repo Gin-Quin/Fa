@@ -1321,6 +1321,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let narrowed = self.node_repr(node).unwrap_or(value.repr);
 			return self.narrow_to(value, narrowed, node);
 		}
+		// a move-only field moved out of its place: the place gives it up
+		if self.analysis.moved_reads.contains(&node)
+			&& self.is_place(node)
+			&& let Ok(slot) = self.place(node)
+		{
+			let value = self.load(slot)?;
+			if value.repr != Repr::Never {
+				self.give_up_place(node, slot)?;
+				let value = self.fresh(value);
+				let narrowed = self.node_repr(node).unwrap_or(value.repr);
+				return self.narrow_to(value, narrowed, node);
+			}
+		}
 		// `node.world.translation` of a local or a parameter object: load the
 		// field alone, not the whole object (whose aggregate load LLVM may then
 		// turn into an object passed by value, `sumWorld` of `scene`)
@@ -1381,6 +1394,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let raw = self
 					.builder
 					.build_extract_value(structure, index as u32, "")?;
+				// a move-only field (a task, a resource) moves out of a
+				// temporary object: its other fields are dropped now, the
+				// field is a temporary itself
+				if self.types().owns_unique(field_type)
+					&& self.destroy_function(object).is_none()
+					&& self.is_temporary(value)
+				{
+					self.drop_all_but(value, index as usize)?;
+					return Ok((self.fresh(Val::new(repr, raw)), field_type));
+				}
 				// a relation side holding one element reads as a view of it
 				let value = self.link_view(Val::new(repr, raw), member)?;
 				// a field narrowed by a test (`if h.items is not none`)
@@ -1660,7 +1683,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let slot = self.place(target)?;
 				self.place_members(slot, self.type_of(target), members.iter())
 			}
-
+			// a guard computed by the statement (`(await mutex.lock()).value`):
+			// a temporary, so the lock is released at the end of the statement
+			_ if matches!(self.node_repr(node), Ok(Repr::Sync(ty))
+				if matches!(self.types().kind(ty), fa_analyzer::types::TypeKind::Sync(fa_analyzer::types::SyncKind::Guard, _))) =>
+			{
+				let value = self.expr(node)?;
+				let Some(raw) = value.value else {
+					return Err(self.unsupported(node.index(), "this place"));
+				};
+				let slot = self.alloca(value.repr, "guard")?;
+				self.builder.build_store(slot.pointer, raw)?;
+				Ok(slot)
+			}
 			_ => Err(self.unsupported(node.index(), "this place")),
 		}
 	}

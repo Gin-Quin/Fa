@@ -26,6 +26,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use fa_analyzer::comptime::host::{DependencySource, dependency_sources, run_generate};
 use fa_analyzer::configuration::{self, ConfigValue, ConfigurationKind};
 use fa_analyzer::diagnostics::{SourceView, render_all};
 use fa_analyzer::modules::{CodebaseResolver, ModuleEntry};
@@ -220,6 +221,15 @@ pub(crate) enum Source {
 	},
 	/// A remote file or folder (a folder ends with `/`).
 	Remote { url: String, folder: bool },
+	/// A `DependencySource` with `generate`: a remote file, fetched and
+	/// locked, whose content the `generate` function of the key in the
+	/// `dependencies.fa` file turns into the Fa source of the dependency.
+	Generated {
+		url: String,
+		/// The `dependencies.fa` file declaring it.
+		file: PathBuf,
+		key: String,
+	},
 }
 
 impl Source {
@@ -273,12 +283,13 @@ impl Source {
 		))
 	}
 
-	/// The source as written in the lockfile.
+	/// The source as written in the lockfile (a path: only outside a
+	/// workspace).
 	fn locked(&self) -> Option<&str> {
 		match self {
-			Source::Path(_) => None,
+			Source::Path(path) => Some(path),
 			Source::Git { repository, .. } => Some(repository),
-			Source::Remote { url, .. } => Some(url),
+			Source::Remote { url, .. } | Source::Generated { url, .. } => Some(url),
 		}
 	}
 }
@@ -759,6 +770,11 @@ fn read_declared(file: &Path) -> Result<BTreeMap<String, Source>, String> {
 	let (value, diagnostics) =
 		configuration::evaluate_source(&text, ConfigurationKind::Dependencies);
 	let shown = file.display().to_string();
+	let has_object = matches!(&value, Some(ConfigValue::Object(fields))
+		if fields.iter().any(|(_, value)| matches!(value, ConfigValue::Object(_))));
+	if configuration::is_computed(&diagnostics) || has_object {
+		return read_computed(file, &text);
+	}
 	let errors: Vec<_> = diagnostics
 		.iter()
 		.filter(|diagnostic| diagnostic.severity == fa_analyzer::Severity::Error)
@@ -779,11 +795,6 @@ fn read_declared(file: &Path) -> Result<BTreeMap<String, Source>, String> {
 		}
 		let source = match &value {
 			ConfigValue::String(text) => text.clone(),
-			ConfigValue::Object(_) => {
-				return Err(format!(
-					"{shown}: error: the dependency `{key}` generates its code with `generate`, which needs the compile-time interpreter in `dependencies.fa`: not supported yet"
-				));
-			}
 			_ => {
 				return Err(format!(
 					"{shown}: error: the source of `{key}` is a string, ex: `\"github:owner/repository@4\"`"
@@ -792,6 +803,73 @@ fn read_declared(file: &Path) -> Result<BTreeMap<String, Source>, String> {
 		};
 		let source = Source::parse(&source)
 			.map_err(|message| format!("{shown}: error: `{key}`: {message}"))?;
+		declared.insert(key, source);
+	}
+	Ok(declared)
+}
+
+/// The session of a `dependencies.fa` file alone, analyzed (its export
+/// computed, or holding `generate` functions): the errors, rendered.
+fn dependency_session(
+	file: &Path,
+	text: &str,
+) -> Result<(fa_analyzer::Session, fa_analyzer::ids::FileId), String> {
+	let files = vec![
+		(
+			"package.fa".to_string(),
+			"export = { name = \"dependencies\" }\n".to_string(),
+		),
+		("dependencies.fa".to_string(), text.to_string()),
+	];
+	let mut session = fa_analyzer::Session::new();
+	session.set_resolver(Box::new(CodebaseResolver::from_texts(&files, None)));
+	let shown = file.display().to_string();
+	let Some(id) = session.file_of_module("dependencies") else {
+		return Err(format!("fa: can't read `{shown}`"));
+	};
+	session.analyze_file(id);
+	let errors: Vec<_> = session
+		.diagnostics(id)
+		.iter()
+		.filter(|diagnostic| diagnostic.severity == fa_analyzer::Severity::Error)
+		.cloned()
+		.collect();
+	if !errors.is_empty() {
+		return Err(render_all(&errors, &SourceView::new(&shown, text)));
+	}
+	Ok((session, id))
+}
+
+/// The dependencies of a `dependencies.fa` file that the compile-time
+/// interpreter evaluates: a computed export, or `DependencySource` objects.
+fn read_computed(file: &Path, text: &str) -> Result<BTreeMap<String, Source>, String> {
+	let shown = file.display().to_string();
+	let (mut session, id) = dependency_session(file, text)?;
+	let sources = dependency_sources(&mut session, id)
+		.map_err(|message| format!("{shown}: error: {message}"))?;
+	let mut declared = BTreeMap::new();
+	for (key, source) in sources {
+		if !fa_codebase_parser::codebase::is_identifier(&key) {
+			return Err(format!(
+				"{shown}: error[DEP005]: `{key}` can't name a dependency: a key is an identifier"
+			));
+		}
+		let source = match source {
+			DependencySource::Source(text) => Source::parse(&text)
+				.map_err(|message| format!("{shown}: error: `{key}`: {message}"))?,
+			DependencySource::Generated { source, .. } => match Source::parse(&source) {
+				Ok(Source::Remote { url, folder: false }) => Source::Generated {
+					url,
+					file: file.to_path_buf(),
+					key: key.clone(),
+				},
+				_ => {
+					return Err(format!(
+						"{shown}: error: the `source` of `{key}` is the URL of a file its `generate` reads, ex: `\"https://api.example.com/openapi.json\"`"
+					));
+				}
+			},
+		};
 		declared.insert(key, source);
 	}
 	Ok(declared)
@@ -827,6 +905,10 @@ pub(crate) fn resolve(scope: &Scope, update: &Update, write: bool) -> Result<Res
 			dependencies,
 		});
 	}
+	let own = requesters.len();
+	if !scope.workspace {
+		add_path_requesters(&mut requesters)?;
+	}
 	let mut resolver = Resolver {
 		scope,
 		locked,
@@ -835,6 +917,8 @@ pub(crate) fn resolve(scope: &Scope, update: &Update, write: bool) -> Result<Res
 		packages: BTreeMap::new(),
 		chosen: BTreeMap::new(),
 		remote: BTreeMap::new(),
+		paths: BTreeMap::new(),
+		generated: BTreeMap::new(),
 		mirrors: BTreeMap::new(),
 		refreshed: BTreeSet::new(),
 		requesters: requesters.clone(),
@@ -854,7 +938,7 @@ pub(crate) fn resolve(scope: &Scope, update: &Update, write: bool) -> Result<Res
 	}
 	resolver.resolve_git()?;
 	// the libraries, then the key maps
-	for requester in &requesters {
+	for requester in &requesters[..own] {
 		let map = resolver.key_map(requester)?;
 		resolver
 			.resolution
@@ -950,6 +1034,12 @@ struct Resolver<'s> {
 	chosen: BTreeMap<(String, u64), Chosen>,
 	/// The remote files and folders, by URL.
 	remote: BTreeMap<String, Fetched>,
+	/// The libraries generated by a `DependencySource`, by declaring file
+	/// and key.
+	generated: BTreeMap<(PathBuf, String), usize>,
+	/// The packages outside a workspace that a path names, by their path
+	/// from the lockfile's folder (locked by their content).
+	paths: BTreeMap<String, Fetched>,
 	/// The mirror of each repository URL.
 	mirrors: BTreeMap<String, PathBuf>,
 	/// The repositories whose mirror was fetched again in this run.
@@ -1040,7 +1130,7 @@ impl Resolver<'_> {
 								chosen.version
 							));
 						}
-						Source::Remote { .. } => {}
+						Source::Remote { .. } | Source::Generated { .. } => {}
 					}
 				}
 			}
@@ -1399,6 +1489,7 @@ impl Resolver<'_> {
 		match source {
 			Source::Path(path) => self.package_library(requester, key, path),
 			Source::Remote { url, folder } => self.fetch_remote(url, *folder),
+			Source::Generated { url, file, key } => self.generated_library(key, url, file),
 			Source::Git {
 				repository, range, ..
 			} => {
@@ -1415,6 +1506,62 @@ impl Resolver<'_> {
 				self.git_library(repository, major)
 			}
 		}
+	}
+
+	/// The library of a `DependencySource` with `generate`: its source is
+	/// fetched and locked like a remote file, then `generate` runs on its
+	/// content (the compile-time interpreter): the Fa source it returns is
+	/// the module of the dependency, stored in the cache by its hash.
+	/// `DEP010` when `generate` fails.
+	fn generated_library(&mut self, key: &str, url: &str, file: &Path) -> Result<usize, String> {
+		let id = (file.to_path_buf(), key.to_string());
+		if let Some(&library) = self.generated.get(&id) {
+			return Ok(library);
+		}
+		let raw = self.fetch_remote(url, false)?;
+		let fetched = &self.resolution.libraries[raw];
+		let LibraryKind::File { name } = &fetched.kind else {
+			return Err(format!("error: `{url}` is not a file"));
+		};
+		let content = fs::read(fetched.directory.join(name))
+			.map_err(|error| format!("error: can't read the cached content of `{url}`: {error}"))?;
+		let shown = file.display().to_string();
+		let failed = |message: String| {
+			format!("{shown}: error[DEP010]: the `generate` of `{key}` failed: {message}")
+		};
+		let content =
+			String::from_utf8(content).map_err(|_| failed(format!("`{url}` is not UTF-8 text")))?;
+		let text = fs::read_to_string(file)
+			.map_err(|error| format!("fa: can't read `{shown}`: {error}"))?;
+		let (mut session, declaration) = dependency_session(file, &text)?;
+		let generate = dependency_sources(&mut session, declaration)
+			.map_err(|message| format!("{shown}: error: {message}"))?
+			.into_iter()
+			.find_map(|(other, source)| match source {
+				DependencySource::Generated { generate, .. } if other == key => Some(generate),
+				_ => None,
+			})
+			.ok_or_else(|| failed("it is not declared anymore".to_string()))?;
+		let generated = run_generate(&mut session, &generate, &content).map_err(failed)?;
+		let bytes = generated.into_bytes();
+		let name = format!("{}.fa", sanitize(key));
+		let files = [(name.clone(), bytes)];
+		let hash = hash_files(&files);
+		let directory = store(&hash, &files)?;
+		let index = self.add_library(Library {
+			kind: LibraryKind::File { name },
+			directory,
+			prefix: format!(
+				"$dependencies/{}-{}",
+				sanitize(key),
+				&hash.trim_start_matches("sha256:")[..12]
+			),
+			shown: format!("{} (generated)", url.trim_end_matches('/')),
+			dependencies: BTreeMap::new(),
+			targets: None,
+		});
+		self.generated.insert(id, index);
+		Ok(index)
 	}
 
 	/// The library of a chosen version of a repository.
@@ -1470,10 +1617,17 @@ impl Resolver<'_> {
 				.cloned()
 		});
 		let Some((name, directory)) = package else {
+			// outside a workspace: a folder holding a package, locked by its content
+			if !self.scope.workspace
+				&& let Some(target) = target
+				&& target.join("package.fa").is_file()
+			{
+				return self.path_library(key, path, target);
+			}
 			let what = if self.scope.workspace {
 				"a package of the workspace"
 			} else {
-				"a package of a workspace: a package outside a workspace depends on others through Git or URLs"
+				"a folder holding a package (a `package.fa`)"
 			};
 			return Err(format!(
 				"{}: error[DEP008]: `{key}` = \"{path}\" is not {what}",
@@ -1505,6 +1659,60 @@ impl Resolver<'_> {
 		Ok(index)
 	}
 
+	/// The library of a package outside a workspace that a path names
+	/// (decision "Path dependencies outside a workspace"): built from its
+	/// folder, locked by the hash of its `package.fa`, `dependencies.fa` and
+	/// `library/` (`DEP001` when they changed since, until `fa update`).
+	fn path_library(&mut self, key: &str, path: &str, directory: PathBuf) -> Result<usize, String> {
+		let source = relative_path(&self.scope.root, &directory);
+		if let Some(fetched) = self.paths.get(&source)
+			&& let Some(library) = fetched.library
+		{
+			return Ok(library);
+		}
+		let files = package_files(&directory).map_err(|error| {
+			format!(
+				"error: can't read the dependency `{key}` (`{path}`): {error}\n  help: check the path in `dependencies.fa`"
+			)
+		})?;
+		let hash = hash_files(&files);
+		let updating = self.updating(&source) || self.updating(path);
+		if !updating
+			&& let Some(entry) = self.locked.iter().find(|entry| entry.source == source)
+			&& entry.hash != hash
+		{
+			return Err(format!(
+				"error[DEP001]: the content of `{key}` changed since it was locked\n  source: {source}\n  help: run `fa update {key}` to accept the new version"
+			));
+		}
+		let index = self.add_library(Library {
+			kind: LibraryKind::Package,
+			directory: directory.clone(),
+			prefix: format!("$dependencies/{}", sanitize(&package_name(&directory))),
+			shown: shown_path(&directory),
+			dependencies: BTreeMap::new(),
+			targets: package_targets(&directory),
+		});
+		self.paths.insert(
+			source,
+			Fetched {
+				hash,
+				library: Some(index),
+			},
+		);
+		self.packages.insert(directory.clone(), index);
+		if let Some(own) = self
+			.requesters
+			.iter()
+			.find(|other| other.directory == directory)
+			.cloned()
+		{
+			let map = self.key_map(&own)?;
+			self.resolution.libraries[index].dependencies = map;
+		}
+		Ok(index)
+	}
+
 	/// The libraries of a requester's keys.
 	fn key_map(&mut self, requester: &Requester) -> Result<BTreeMap<String, usize>, String> {
 		let mut map = BTreeMap::new();
@@ -1528,6 +1736,14 @@ impl Resolver<'_> {
 				hash: chosen.hash.clone(),
 			})
 			.collect();
+		for (path, fetched) in &self.paths {
+			entries.push(LockEntry {
+				source: path.clone(),
+				version: None,
+				commit: None,
+				hash: fetched.hash.clone(),
+			});
+		}
 		for (url, fetched) in &self.remote {
 			entries.push(LockEntry {
 				source: url.clone(),
@@ -1538,6 +1754,97 @@ impl Resolver<'_> {
 		}
 		entries.sort_by(|a, b| a.source.cmp(&b.source));
 		entries
+	}
+}
+
+/// Adds the packages that the path dependencies of a package outside a
+/// workspace name, transitively, as requesters: their Git dependencies are
+/// resolved with the others.
+fn add_path_requesters(requesters: &mut Vec<Requester>) -> Result<(), String> {
+	let mut index = 0;
+	while index < requesters.len() {
+		let requester = requesters[index].clone();
+		index += 1;
+		for source in requester.dependencies.values() {
+			let Source::Path(path) = source else {
+				continue;
+			};
+			// a path that names no package is `DEP008`, reported by `package_library`
+			let Ok(directory) = fs::canonicalize(requester.directory.join(path)) else {
+				continue;
+			};
+			let known = requesters.iter().any(|other| {
+				fs::canonicalize(&other.directory).is_ok_and(|other| other == directory)
+			});
+			if known || !directory.join("package.fa").is_file() {
+				continue;
+			}
+			requesters.push(Requester {
+				name: shown_path(&directory),
+				dependencies: read_declared(&directory.join("dependencies.fa"))?,
+				directory,
+			});
+		}
+	}
+	Ok(())
+}
+
+/// The files of a package that a dependency uses, by relative path:
+/// `package.fa`, `dependencies.fa` and `library/`.
+fn package_files(directory: &Path) -> std::io::Result<Vec<(String, Vec<u8>)>> {
+	let mut files = Vec::new();
+	for name in ["package.fa", "dependencies.fa"] {
+		match fs::read(directory.join(name)) {
+			Ok(bytes) => files.push((name.to_string(), bytes)),
+			Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+			Err(error) => return Err(error),
+		}
+	}
+	let library = directory.join("library");
+	if library.is_dir() {
+		for (path, bytes) in read_tree(&library)? {
+			files.push((format!("library/{path}"), bytes));
+		}
+	}
+	files.sort();
+	Ok(files)
+}
+
+/// The `name` of a package's `package.fa`, else the name of its folder.
+fn package_name(directory: &Path) -> String {
+	fs::read_to_string(directory.join("package.fa"))
+		.ok()
+		.and_then(|text| {
+			configuration::evaluate_source(&text, ConfigurationKind::Package)
+				.0?
+				.field("name")?
+				.as_str()
+				.map(str::to_string)
+		})
+		.or_else(|| {
+			directory
+				.file_name()
+				.map(|name| name.to_string_lossy().to_string())
+		})
+		.unwrap_or_else(|| "package".to_string())
+}
+
+/// The path from a folder to another, `/` separated (`../shared`).
+fn relative_path(from: &Path, to: &Path) -> String {
+	let from = fs::canonicalize(from).unwrap_or_else(|_| from.to_path_buf());
+	let from: Vec<_> = from.components().collect();
+	let to: Vec<_> = to.components().collect();
+	let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+	let mut parts: Vec<String> = vec!["..".to_string(); from.len() - common];
+	parts.extend(
+		to[common..]
+			.iter()
+			.map(|part| part.as_os_str().to_string_lossy().to_string()),
+	);
+	match parts.first().map(String::as_str) {
+		None => ".".to_string(),
+		Some("..") => parts.join("/"),
+		Some(_) => format!("./{}", parts.join("/")),
 	}
 }
 

@@ -864,7 +864,13 @@ impl Session {
 			span: session.span(file, node),
 		};
 		match crate::comptime::host::evaluate_export(self, file) {
-			Ok(value) => match crate::configuration::from_value(&value) {
+			// `dependencies.fa`: the `generate` functions of its sources are
+			// run by `fa` when it resolves them (not configuration values)
+			Ok(value) => match if kind == crate::configuration::ConfigurationKind::Dependencies {
+				crate::configuration::from_value_without_functions(&value)
+			} else {
+				crate::configuration::from_value(&value)
+			} {
 				Some(value) => {
 					let tree = Arc::clone(&self.files[file.index()].tree);
 					let (value, diagnostics) =
@@ -1117,6 +1123,11 @@ fn merge_interface(
 			.map(|(&key, &keyed)| (merger.decl_key(key), keyed))
 			.collect(),
 		reads_target: interface.reads_target,
+		worker_work: interface
+			.worker_work
+			.iter()
+			.map(|&(key, span)| (merger.decl_key(key), span))
+			.collect(),
 		complete: interface.complete,
 		// node keys and plain data: nothing to translate (check/tasks.rs)
 		async_summaries: interface.async_summaries.clone(),

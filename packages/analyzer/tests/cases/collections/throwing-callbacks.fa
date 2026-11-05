@@ -1,0 +1,89 @@
+-- a built-in that calls a callback throws what its callback throws: the
+-- error leaves the iteration at once, dropping what was built (design/decisions.md)
+type Failure = Errors { Bad = { message: String } }
+function label = (value: Integer): String throws Failure => {
+	if value == 3 {
+		throw Failure.Bad { message = "bad {value}" }
+	}
+	"item {value}"
+}
+function keep = (value: Integer): Boolean throws Failure => "{try label(value)}".length > 0
+function report = (error: Failure): String => when error is {
+	Failure.Bad as { message } => message
+}
+
+function arrays = (items: Array<Integer>): String throws Failure => {
+	let mapped = try items.map(label)
+	let filtered = try items.filter((value, index) => try keep(value))
+	let found = try items.find((value, index) => try keep(value) and value > 1)
+	let every = try items.every((value, index) => try keep(value))
+	let some = try items.some((value, index) => try keep(value) and value > 5)
+	let reduced = try items.reduce((total, value, index) => "{total}{try label(value)}", "")
+	let sorted = try items.sort((left, right) => (try label(left)).length - right)
+	mutable copy = items
+	try copy.sortInPlace((left, right) => (try label(left)).length - right)
+	try copy.deleteWhere((value) => try keep(value))
+	"{mapped.length} {filtered.length} {found} {every} {some} {reduced.length} {sorted.length} {copy.length}"
+}
+
+function sets = (items: Set<Integer>): String throws Failure => {
+	let mapped = try items.map(label)
+	let filtered = try items.filter(keep)
+	let found = try items.find(keep)
+	let every = try items.every(keep)
+	let some = try items.some(keep)
+	let reduced = try items.reduce((total, value) => "{total}{try label(value)}", "")
+	mutable copy = items
+	try copy.deleteWhere(keep)
+	"{mapped.length} {filtered.size} {found} {every} {some} {reduced.length} {copy.size}"
+}
+
+function maps = (items: Map<Integer, String>): String throws Failure => {
+	let mapped = try items.map((key, value) => try label(key))
+	let filtered = try items.filter((key, value) => try keep(key))
+	let found = try items.find((key, value) => try keep(key))
+	let every = try items.every((key, value) => try keep(key))
+	let some = try items.some((key, value) => try keep(key))
+	let reduced = try items.reduce((total, key, value) => "{total}{try label(key)}", "")
+	mutable copy = items
+	try copy.deleteWhere((key, value) => try keep(key))
+	"{mapped.size} {filtered.size} {found is none} {every} {some} {reduced.length} {copy.size}"
+}
+
+function iterators = (items: Array<Integer>): String throws Failure => {
+	let mapped = try items.values().map(label).toArray()
+	let filtered = try items.values().filter(keep).toArray()
+	let found = try items.values().find(keep)
+	let every = try items.values().every(keep)
+	let some = try items.values().some(keep)
+	let reduced = try items.values().reduce((total, value) => "{total}{try label(value)}", "")
+	mutable count = 0
+	for text in try items.values().map(label) {
+		count += text.length
+	}
+	"{mapped.length} {filtered.length} {found} {every} {some} {reduced.length} {count}"
+}
+
+let fine = [1, 2]
+let failing = [1, 2, 3, 4]
+console.log(arrays(fine) catch error => report(error)) -- prints: 2 2 2 true false 12 2 0
+console.log(arrays(failing) catch error => report(error)) -- prints: bad 3
+console.log(sets(Set.from(fine)) catch error => report(error)) -- prints: 2 2 1 true true 12 0
+console.log(sets(Set.from(failing)) catch error => report(error)) -- prints: bad 3
+let pairs: Map<Integer, String> = [(1, "a"), (2, "b")]
+let failingPairs: Map<Integer, String> = [(1, "a"), (3, "c")]
+console.log(maps(pairs) catch error => report(error)) -- prints: 2 2 false true true 12 0
+console.log(maps(failingPairs) catch error => report(error)) -- prints: bad 3
+console.log(iterators(fine) catch error => report(error)) -- prints: 2 2 1 true true 12 12
+console.log(iterators(failing) catch error => report(error)) -- prints: bad 3
+
+-- `catch` around the call
+let labels = failing.map(label) catch error => [report(error)]
+console.log(labels) -- prints: ["bad 3"]
+-- the items tested before the error are deleted, the others stay
+mutable numbers = [1, 2, 3, 4]
+numbers.deleteWhere((value) => value == 1 or (try keep(value) and false)) catch error => {}
+console.log(numbers) -- prints: [2, 3, 4]
+
+-- a callback that can't fail: no `try`
+console.log(fine.map((value, index) => value * 2)) -- prints: [2, 4]

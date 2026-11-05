@@ -613,9 +613,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.filter(|s| span.start <= s.start && s.end <= span.end)
 			.take(201)
 			.count() <= 200;
-		if self.tasks.asynchronous || !self.frame().loops.is_empty() || !small_body {
+		// one version inside another would double the code again
+		if self.tasks.asynchronous || self.versioned_characters || !small_body {
 			return self.for_character_path(node, pattern, has_index, text, body, None);
 		}
+		self.versioned_characters = true;
+		let lowered = self.for_character_versions(node, pattern, has_index, text, body);
+		self.versioned_characters = false;
+		lowered
+	}
+
+	/// The loop of `for_characters` twice: for a simple text, then another.
+	fn for_character_versions(
+		&mut self,
+		node: NodeId,
+		pattern: Option<NodeId>,
+		has_index: bool,
+		text: Val<'ctx>,
+		body: NodeId,
+	) -> Result<Val<'ctx>, Error> {
 		// A character's byte length and SIMPLE flag must stay known throughout
 		// the user body. LLVM's size-limited unswitching otherwise often keeps
 		// the Unicode branch and the string-view tests in every iteration.

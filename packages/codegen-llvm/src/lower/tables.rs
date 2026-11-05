@@ -1400,13 +1400,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		source: PointerValue<'ctx>,
 		table: Table<'ctx>,
 		repr: Repr,
-		mut keep: impl FnMut(&mut Self, PointerValue<'ctx>) -> Result<IntValue<'ctx>, Error>,
+		mut keep: impl FnMut(&mut Self, PointerValue<'ctx>, Val<'ctx>) -> Result<IntValue<'ctx>, Error>,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
 		let zero = self.context.i64_type().const_zero();
 		let result = self.table_new(table, zero)?;
 		self.for_each_entry(source, table, |this, entry, _| {
-			let holds = keep(this, entry)?;
+			let holds = keep(this, entry, Val::new(repr, result))?;
 			let add = this.append_block("filter_add");
 			let skip = this.append_block("filter_skip");
 			this.builder.build_conditional_branch(holds, add, skip)?;
@@ -1706,9 +1706,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					pointer,
 					table,
 					repr,
-					|this, entry| {
-						let holds =
-							this.entry_callback(*callback, callback_node, entry, table, &[])?;
+					|this, entry, built| {
+						// an error: the entries kept so far are dropped
+						let holds = this.callback_with_fixup(
+							callback_node,
+							|this| this.entry_callback(*callback, callback_node, entry, table, &[]),
+							|this| this.emit_drop(built),
+						)?;
 						Ok(holds.int())
 					},
 					node,
@@ -1725,8 +1729,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						let array = self.new_array(item, i64.const_zero(), length)?;
 						let array_value = Val::new(result_repr, array);
 						self.for_each_entry(pointer, table, |this, entry, _| {
-							let mapped =
-								this.entry_callback(*callback, callback_node, entry, table, &[])?;
+							let mapped = this.callback_with_fixup(
+								callback_node,
+								|this| {
+									this.entry_callback(*callback, callback_node, entry, table, &[])
+								},
+								|this| this.emit_drop(array_value),
+							)?;
 							this.array_push(array_value, mapped, node, None)
 						})?;
 						Ok(self.fresh(array_value))
@@ -1737,8 +1746,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						let length = self.table_field(pointer, 1)?;
 						let result = self.table_new(result_table, length)?;
 						self.for_each_entry(pointer, table, |this, entry, _| {
-							let mapped =
-								this.entry_callback(*callback, callback_node, entry, table, &[])?;
+							let mapped = this.callback_with_fixup(
+								callback_node,
+								|this| {
+									this.entry_callback(*callback, callback_node, entry, table, &[])
+								},
+								|this| this.emit_drop(Val::new(result_repr, result)),
+							)?;
 							let mapped =
 								this.owned_as(mapped, result_table.value.expect("a map"), None)?;
 							let key = this.load(this.entry_slot(entry, table, false)?)?;
@@ -1760,8 +1774,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.store(accumulator, initial, node)?;
 				self.for_each_entry(pointer, table, |this, entry, _| {
 					let current = this.load(accumulator)?;
-					let next =
-						this.entry_callback(*callback, callback_node, entry, table, &[current])?;
+					let next = this.callback_with_fixup(
+						callback_node,
+						|this| {
+							this.entry_callback(*callback, callback_node, entry, table, &[current])
+						},
+						|this| this.emit_drop(current),
+					)?;
 					let next = this.owned_as(next, repr, None)?;
 					this.emit_drop(current)?;
 					this.store(accumulator, next, node)?;
@@ -1817,7 +1836,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					pointer,
 					table,
 					receiver.repr,
-					|this, entry| {
+					|this, entry, _| {
 						let key = this.load(this.entry_slot(entry, table, false)?)?;
 						let found = this.table_includes(other_value, key, node)?;
 						Ok(if intersection {

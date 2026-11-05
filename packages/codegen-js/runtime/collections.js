@@ -178,14 +178,23 @@ export function faArrayTake(array, index) {
  */
 export function faArrayDeleteWhere(array, predicate) {
 	let kept = 0;
-	for (let index = 0; index < array.length; index += 1) {
-		const item = array[index];
-		if (!predicate(item)) {
-			array[kept] = item;
+	let index = 0;
+	try {
+		for (; index < array.length; index += 1) {
+			const item = array[index];
+			if (!predicate(item)) {
+				array[kept] = item;
+				kept += 1;
+			}
+		}
+	} finally {
+		// an error of the predicate: the items not tested yet stay, after the kept ones
+		for (let rest = index; rest < array.length; rest += 1) {
+			array[kept] = array[rest];
 			kept += 1;
 		}
+		array.length = kept;
 	}
-	array.length = kept;
 }
 
 // @fa-helper faComparator
@@ -934,21 +943,25 @@ export function faSetIsSubsetOf(a, b) {
  */
 export function faDeleteWhere(collection, predicate) {
 	const removed = [];
-	if (collection instanceof Map || collection instanceof FaHashMap) {
-		for (const [key, value] of collection) {
-			if (predicate(key, value)) {
-				removed.push(key);
+	try {
+		if (collection instanceof Map || collection instanceof FaHashMap) {
+			for (const [key, value] of collection) {
+				if (predicate(key, value)) {
+					removed.push(key);
+				}
+			}
+		} else {
+			for (const value of collection) {
+				if (predicate(value, undefined)) {
+					removed.push(value);
+				}
 			}
 		}
-	} else {
-		for (const value of collection) {
-			if (predicate(value, undefined)) {
-				removed.push(value);
-			}
+	} finally {
+		// an error of the predicate: the entries it matched before are deleted
+		for (const item of removed) {
+			collection.delete(item);
 		}
-	}
-	for (const item of removed) {
-		collection.delete(item);
 	}
 }
 
@@ -1200,4 +1213,158 @@ export function faIterable(source) {
 		return faCharacters(source);
 	}
 	return source instanceof FaRange ? faRangeValues(source) : source;
+}
+
+// @fa-helper FaValuePool
+/**
+ * A `Pool` (or `GrowingPool`) of values that are not objects
+ * (`Pool<Integer>`): its elements by slot, in a `Map` from a slot number to
+ * the value, iterated as its values. A reference to an element is the pool
+ * and its slot (`get`, `set`): `add` gives the slot, `slotOf` finds one,
+ * `delete` and `take` take one. Printed, copied and compared by its tag.
+ * @template T
+ */
+export class FaValuePool {
+	/** @type {Map<number, T>} */
+	#slots = new Map();
+	#next = 0;
+
+	/** @param {Iterable<T>} [values] */
+	constructor(values) {
+		if (values !== undefined) {
+			for (const value of values) {
+				this.add(value);
+			}
+		}
+	}
+
+	/** The tag that printing, copies and `==` recognize. */
+	get [Symbol.toStringTag]() {
+		return "fa:ValuePool";
+	}
+
+	/** @returns {number} */
+	get size() {
+		return this.#slots.size;
+	}
+
+	/**
+	 * Stores a value.
+	 * @param {T} value
+	 * @returns {number} its slot
+	 */
+	add(value) {
+		const slot = this.#next;
+		this.#next += 1;
+		this.#slots.set(slot, value);
+		return slot;
+	}
+
+	/**
+	 * Stores a value.
+	 * @param {T} value
+	 * @returns {T} the value
+	 */
+	addValue(value) {
+		this.add(value);
+		return value;
+	}
+
+	/**
+	 * @param {number} slot
+	 * @returns {T | undefined}
+	 */
+	get(slot) {
+		return this.#slots.get(slot);
+	}
+
+	/**
+	 * @param {number} slot
+	 * @param {T} value
+	 * @returns {this}
+	 */
+	set(slot, value) {
+		this.#slots.set(slot, value);
+		return this;
+	}
+
+	/**
+	 * @param {number} slot
+	 * @returns {boolean}
+	 */
+	delete(slot) {
+		return this.#slots.delete(slot);
+	}
+
+	/**
+	 * Removes an element.
+	 * @param {number} slot
+	 * @returns {T | undefined} its value
+	 */
+	take(slot) {
+		const value = this.#slots.get(slot);
+		this.#slots.delete(slot);
+		return value;
+	}
+
+	/** @returns {void} */
+	clear() {
+		this.#slots.clear();
+	}
+
+	/**
+	 * The slot of the first value the predicate accepts, or `undefined`.
+	 * @param {(value: T) => boolean} predicate
+	 * @returns {number | undefined}
+	 */
+	slotOf(predicate) {
+		for (const [slot, value] of this.#slots) {
+			if (predicate(value)) {
+				return slot;
+			}
+		}
+		return undefined;
+	}
+
+	/**
+	 * @param {(value: T) => boolean} predicate
+	 * @returns {void}
+	 */
+	deleteWhere(predicate) {
+		for (const [slot, value] of this.#slots) {
+			if (predicate(value)) {
+				this.#slots.delete(slot);
+			}
+		}
+	}
+
+	/**
+	 * A new pool of the values the predicate accepts.
+	 * @param {(value: T) => boolean} predicate
+	 * @returns {FaValuePool<T>}
+	 */
+	filter(predicate) {
+		const kept = new FaValuePool();
+		for (const value of this.#slots.values()) {
+			if (predicate(value)) {
+				kept.add(value);
+			}
+		}
+		return kept;
+	}
+
+	/** @returns {FaValuePool<T>} */
+	emptyCopy() {
+		return new FaValuePool();
+	}
+
+	/** @returns {IterableIterator<T>} */
+	values() {
+		return this.#slots.values();
+	}
+
+	/** @returns {IterableIterator<T>} */
+	[Symbol.iterator]() {
+		return this.#slots.values();
+	}
 }

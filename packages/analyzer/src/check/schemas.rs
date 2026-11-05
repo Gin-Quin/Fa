@@ -2,19 +2,27 @@
 //! known at compile time describes, the inverse of `@typeToSchema`.
 //!
 //! ```fa
-//! type Shouted = TypeFromSchema(@capitalizeLiterals(@typeToSchema("hello" | "world")))
+//! type Shouted = TypeFromSchema<@capitalizeLiterals(@typeToSchema("hello" | "world"))>
 //! ```
 //!
 //! The argument is a `Schema` (`builtins/schema.rs`) evaluated on the
 //! interpreter. A `Schema.Named` gives its definition (named for messages
-//! when it is an object type); a `Schema.Reference` must name an enclosing
-//! `Schema.Named` (`TF040`), and is not supported yet as a recursive type
-//! (`AN001`); the properties of an object have distinct names (`TF041`);
-//! bits other than 8–128 or 32/64 are `TF042` (`min > max` is `Never`); an
-//! unknown collection kind is `TF043`. Named unions and enumerations, whose
-//! identity is `(the applying declaration, the schema)`, are not built yet
-//! (`AN001`), nor is a `TypeFromSchema` inside a generic type function,
-//! whose argument is known per application only.
+//! when it is an object type); a `Schema.Reference` names an enclosing
+//! `Schema.Named` (`TF040`): a recursive type (`TypeKind::Rec`, or the
+//! named union itself). A `Schema.NamedUnion` or `Schema.Enum` gives a
+//! nominal type, named by its `Schema.Named` (else by the applying
+//! declaration), whose identity is the applying declaration and the schema
+//! (equal schemas applied by the same declaration give the same type). A `Schema.Function`
+//! gives a function type (no effects). The properties of an object, the
+//! members of a union have distinct names (`TF041`); bits other than 8–128
+//! or 32/64 are `TF042` (`min > max` is `Never`); an unknown collection kind
+//! is `TF043`.
+//!
+//! In a generic type function, `TypeFromSchema` as its value (or as a result
+//! of its logic, `type_logic.rs`) is built per application: its `@` calls
+//! are not evaluated at the declaration (`deferred_comptime`), and each
+//! application evaluates them with `@typeToSchema` of the bound types; an
+//! error the code throws is `TF004` at the application.
 
 use ethnum::I256;
 use fa_interpreter::Value;
@@ -23,8 +31,10 @@ use crate::analysis::NodeFlags;
 use crate::check::Walker;
 use crate::diagnostics::codes::types::{TF040, TF041, TF042, TF043, TY003};
 use crate::ids::{NodeId, TypeId};
-use crate::syntax::NodeList;
-use crate::types::{CollKind, FieldEntry, FieldFlags, IntStorage};
+use crate::syntax::{self, NodeList, View};
+use crate::types::{
+	Bindings, CollKind, FieldEntry, FieldFlags, IntStorage, NominalInfo, NominalKind,
+};
 
 impl Walker<'_> {
 	/// `TypeFromSchema(schema)` in a type.
@@ -37,38 +47,177 @@ impl Walker<'_> {
 		self.set_flag(callee, NodeFlags::TYPE_EXPR);
 		let schema = crate::builtins::schema::schema(&mut self.s.types);
 		let argument = arguments.first().filter(|_| arguments.len() == 1);
+		// the value of a generic type function: evaluated per application
+		let deferred = !self.rigid_params.is_empty() && self.schema_logic.contains(&n);
 		if let Some(argument) = argument {
+			if deferred {
+				self.deferred_comptime += 1;
+			}
 			let actual = self.check(argument, Some(schema));
 			self.sink(argument, actual, schema);
+			if deferred {
+				self.deferred_comptime -= 1;
+			}
 		}
 		self.memo(n, |w| {
 			let Some(argument) = argument else {
 				let diagnostic = w.diagnostic(
 					&TY003,
 					n,
-					"`TypeFromSchema` takes one `Schema` known at compile time, ex: `TypeFromSchema(@typeToSchema(User))`",
+					"`TypeFromSchema` takes one `Schema` known at compile time, ex: `TypeFromSchema<@typeToSchema(User)>`",
 				);
 				w.report(diagnostic);
 				return TypeId::UNKNOWN;
 			};
-			// in a generic type function: built at each application (type_logic.rs)
-			if !w.rigid_params.is_empty() {
+			if deferred {
 				return TypeId::UNKNOWN;
+			}
+			if !w.rigid_params.is_empty() {
+				return w.unsupported(
+					n,
+					"`TypeFromSchema` inside a generic type function, but as its value",
+				);
 			}
 			let Some(value) = w.evaluate_at(argument, argument) else {
 				return TypeId::UNKNOWN;
 			};
-			let mut named = Vec::new();
-			w.schema_type(n, &value, &mut named, 0)
+			let owner = w
+				.decl_stack
+				.last()
+				.map(|&symbol| {
+					w.s.types
+						.syms
+						.resolve(w.a.symbols.symbol(symbol).name)
+						.to_string()
+				})
+				.unwrap_or_default();
+			w.build_schema_type(n, owner, &value)
 		})
 	}
 
-	/// The type a schema value describes; `named`: the enclosing `Schema.Named`.
-	pub(super) fn schema_type(
+	/// The `TypeFromSchema` applications of a generic type declaration's
+	/// value that are built per application: the value, or a result of its
+	/// logic.
+	pub(super) fn note_schema_logic(&mut self, value: NodeId) {
+		let tree = std::sync::Arc::clone(&self.tree);
+		match syntax::view(&tree, value) {
+			View::Call { callee, .. } if matches!(syntax::view(&tree, callee), View::Name(name) if tree.name(name) == "TypeFromSchema") =>
+			{
+				self.schema_logic.insert(value);
+			}
+			View::If {
+				then_body,
+				else_body,
+				..
+			} => {
+				self.note_schema_logic(then_body);
+				if let Some(else_body) = else_body {
+					self.note_schema_logic(else_body);
+				}
+			}
+			View::When { arms, .. } => {
+				for arm in arms.iter() {
+					self.note_schema_logic(arm.value);
+				}
+			}
+			View::Do(body) => self.note_schema_logic(body),
+			View::Block { statements } => {
+				if let Some(last) = statements.last() {
+					self.note_schema_logic(last);
+				}
+			}
+			_ => {}
+		}
+	}
+
+	/// `TypeFromSchema` as the value of a generic type function, for the
+	/// bindings of an application (`at`): `@typeToSchema` of the bound
+	/// types, the other `@` calls evaluated again.
+	pub(super) fn apply_type_from_schema(
+		&mut self,
+		at: NodeId,
+		arguments: NodeList<'_>,
+		bindings: &Bindings,
+	) -> TypeId {
+		let Some(argument) = arguments.first() else {
+			return TypeId::UNKNOWN;
+		};
+		let tree = std::sync::Arc::clone(&self.tree);
+		// the `@` calls of the argument
+		let mut calls = Vec::new();
+		let mut pending = vec![argument];
+		while let Some(node) = pending.pop() {
+			if let View::Call { callee, arguments } = syntax::view(&tree, node)
+				&& let View::Name(name) = syntax::view(&tree, callee)
+				&& tree.name(name).starts_with('@')
+			{
+				calls.push((node, tree.name(name) == "@typeToSchema", arguments.first()));
+			}
+			pending.extend(syntax::children(&tree, node));
+		}
+		let mut saved = Vec::new();
+		for &(node, to_schema, first) in &calls {
+			saved.push((node, self.a.constants.remove(&node)));
+			self.comptime_evaluated.remove(&node);
+			if to_schema && let Some(first) = first {
+				let ty = self.type_of(first);
+				let ty = self.s.types.substitute(ty, bindings);
+				let schema = crate::comptime::schema::schema(&self.s.types, ty);
+				let (defaults, order) = self.schema_defaults(ty);
+				let schema = crate::comptime::schema::with_defaults(schema, &defaults, &order);
+				self.a.constants.insert(node, schema);
+			}
+		}
+		let saved_code = std::mem::replace(&mut self.in_type_function_code, true);
+		let value = self.evaluate_at(argument, at);
+		self.in_type_function_code = saved_code;
+		for (node, previous) in saved {
+			match previous {
+				Some(previous) => self.a.constants.insert(node, previous),
+				None => self.a.constants.remove(&node),
+			};
+		}
+		let Some(value) = value else {
+			return TypeId::UNKNOWN;
+		};
+		let owner = self
+			.schema_identity
+			.as_ref()
+			.map(|(owner, _)| owner.clone())
+			.unwrap_or_default();
+		self.build_schema_type(at, owner, &value)
+	}
+
+	/// The type of a schema value applied by the declaration `owner`.
+	fn build_schema_type(&mut self, n: NodeId, owner: String, value: &Value) -> TypeId {
+		use std::hash::{Hash, Hasher};
+		let mut hasher = rustc_hash::FxHasher::default();
+		value.to_text().hash(&mut hasher);
+		let saved = self.schema_identity.replace((owner, hasher.finish()));
+		let mut named = Vec::new();
+		let ty = self.schema_type(n, value, &mut named, 0);
+		self.schema_identity = saved;
+		ty
+	}
+
+	/// The identity of a nominal or recursive type named `name` built by
+	/// `TypeFromSchema`: the applying declaration, the schema, the name.
+	fn schema_key(&mut self, name: &str) -> crate::ids::DeclKey {
+		let (owner, hash) = self.schema_identity.clone().unwrap_or_default();
+		let module_name = self.s.module(self.file).to_string();
+		let module = self.s.types.module(&module_name);
+		let hash = format!("#{hash:016x}");
+		self.s.types.decl_key(module, &[&owner, &hash, name], 0)
+	}
+
+	/// The type a schema value describes; `named`: the enclosing
+	/// `Schema.Named`s, and what a reference to each is (its recursive
+	/// reference, created at the first one).
+	fn schema_type(
 		&mut self,
 		n: NodeId,
 		value: &Value,
-		named: &mut Vec<String>,
+		named: &mut Vec<NamedSchema>,
 		depth: u32,
 	) -> TypeId {
 		if depth > 64 {
@@ -132,9 +281,28 @@ impl Walker<'_> {
 				let Some(definition) = field("definition") else {
 					return self.invalid_schema(n, &TF042, "a `Named` schema has a `definition`");
 				};
-				named.push(name.clone());
+				// a named union or an enumeration: a nominal type of this name
+				if let Value::Member(inner) = &definition {
+					let inner_kind = inner.name.strip_prefix("Schema.").unwrap_or(&inner.name);
+					if matches!(inner_kind, "NamedUnion" | "Enum") {
+						return self.schema_nominal(n, &name, &definition, named, depth);
+					}
+				}
+				let object =
+					matches!(&definition, Value::Member(inner) if inner.name.ends_with("Object"));
+				named.push(NamedSchema {
+					name: name.clone(),
+					reference: None,
+					object,
+				});
 				let ty = self.schema_type(n, &definition, named, depth + 1);
-				named.pop();
+				let entry = named.pop().expect("the entry pushed");
+				// a recursive type: its references stand for it
+				if let Some(reference) = entry.reference
+					&& !self.s.types.is_recovering(ty)
+				{
+					self.s.types.set_rec_target(reference, ty);
+				}
 				self.s.types.name_type(ty, &name);
 				ty
 			}
@@ -142,14 +310,20 @@ impl Walker<'_> {
 				let name = field("name")
 					.and_then(|name| name.as_str().map(str::to_string))
 					.unwrap_or_default();
-				if named.contains(&name) {
-					self.unsupported(n, "a recursive `Schema.Reference`")
-				} else {
+				let Some(position) = named.iter().rposition(|entry| entry.name == name) else {
 					let message = format!(
 						"`Schema.Reference {{ name = \"{name}\" }}` refers to no enclosing `Schema.Named`"
 					);
-					self.invalid_schema(n, &TF040, &message)
+					return self.invalid_schema(n, &TF040, &message);
+				};
+				if let Some(reference) = named[position].reference {
+					return reference;
 				}
+				let key = self.schema_key(&name);
+				let object = named[position].object;
+				let reference = self.s.types.recursive_reference(key, &name, &[], object);
+				named[position].reference = Some(reference);
+				reference
 			}
 			"Object" => {
 				let mut fields: Vec<FieldEntry> = Vec::new();
@@ -227,14 +401,140 @@ impl Walker<'_> {
 				};
 				self.s.types.collection(kind, item, key)
 			}
-			"NamedUnion" | "Enum" | "Fields" | "Function" => {
-				self.unsupported(n, &format!("`TypeFromSchema` of a `Schema.{kind}`"))
+			// without a `Schema.Named`: named by the applying declaration
+			"NamedUnion" | "Enum" => {
+				let name = self
+					.schema_identity
+					.as_ref()
+					.map(|(owner, _)| owner.clone())
+					.filter(|owner| !owner.is_empty())
+					.unwrap_or_else(|| kind.to_string());
+				self.schema_nominal(n, &name, value, named, depth)
 			}
+			"Function" => {
+				let parameters: Vec<TypeId> = items("parameters")
+					.iter()
+					.filter_map(|parameter| match parameter {
+						Value::Object(parameter) => parameter.get("definition").cloned(),
+						_ => None,
+					})
+					.collect::<Vec<Value>>()
+					.iter()
+					.map(|definition| self.schema_type(n, definition, named, depth + 1))
+					.collect();
+				let returns = match field("returns") {
+					Some(returns) => self.schema_type(n, &returns, named, depth + 1),
+					None => return self.invalid_schema(n, &TF042, "a function has `returns`"),
+				};
+				let throws = match field("throws") {
+					Some(Value::None) | None => TypeId::NEVER,
+					Some(throws) => self.schema_type(n, &throws, named, depth + 1),
+				};
+				let is_async = field("async")
+					.and_then(|value| value.as_bool())
+					.unwrap_or(false);
+				let mut sig = self.s.types.simple_sig(&parameters, returns, throws);
+				sig.is_async = is_async;
+				self.s.types.function(sig)
+			}
+			"Fields" => self.unsupported(n, "`TypeFromSchema` of a `Schema.Fields`"),
 			_ => {
 				let message = format!("`{}` is not a member of `Schema`", member.name);
 				self.invalid_schema(n, &TF042, &message)
 			}
 		}
+	}
+
+	/// A `Schema.Named` whose definition is a `Schema.NamedUnion` or a
+	/// `Schema.Enum`: a nominal type named `name`, which its members' data
+	/// may refer to.
+	fn schema_nominal(
+		&mut self,
+		n: NodeId,
+		name: &str,
+		definition: &Value,
+		named: &mut Vec<NamedSchema>,
+		depth: u32,
+	) -> TypeId {
+		let Value::Member(member) = definition else {
+			return TypeId::UNKNOWN;
+		};
+		let is_enum = member.name.ends_with("Enum");
+		let field = |field: &str| match &member.data {
+			Some(Value::Object(object)) => object.get(field).cloned(),
+			_ => None,
+		};
+		let members: Vec<Value> = field("members")
+			.and_then(|value| value.items().map(<[Value]>::to_vec))
+			.unwrap_or_default();
+		let mut names = Vec::new();
+		let mut definitions = Vec::new();
+		for (index, member) in members.iter().enumerate() {
+			let Value::Object(member) = member else {
+				continue;
+			};
+			let Some(member_name) = member.get("name").and_then(|name| name.as_str()) else {
+				return self.invalid_schema(n, &TF042, "a member has a `name`");
+			};
+			let sym = self.s.types.syms.intern(member_name);
+			if names.contains(&sym) {
+				let message = format!("two members are named `{member_name}`");
+				return self.invalid_schema(n, &TF041, &message);
+			}
+			names.push(sym);
+			if is_enum {
+				// the values are the positions (pinned values are read from a declaration)
+				let value = member.get("value").and_then(Value::as_int);
+				if value.is_some_and(|value| value != I256::from(index as u64)) {
+					return self.unsupported(
+						n,
+						"an enumeration built by `TypeFromSchema` whose values are not the positions",
+					);
+				}
+				definitions.push(None);
+			} else {
+				definitions.push(match member.get("definition") {
+					Some(Value::None) | None => None,
+					Some(definition) => Some(definition.clone()),
+				});
+			}
+		}
+		let errors = field("errors")
+			.and_then(|value| value.as_bool())
+			.unwrap_or(false);
+		let kind = if is_enum {
+			NominalKind::Enum
+		} else if errors {
+			NominalKind::Errors
+		} else {
+			NominalKind::Union
+		};
+		let key = self.schema_key(name);
+		let args = self.s.types.list(&[]);
+		let member_list = self.s.types.intern_sym_list(&names);
+		let nominal = self.s.types.intern_nominal(NominalInfo {
+			key,
+			args,
+			kind,
+			members: member_list,
+		});
+		let ty = self.s.types.nominal_type(nominal);
+		// its members' data may refer to it
+		named.push(NamedSchema {
+			name: name.to_string(),
+			reference: Some(ty),
+			object: false,
+		});
+		let payloads: Vec<TypeId> = definitions
+			.iter()
+			.map(|definition| match definition {
+				Some(definition) => self.schema_type(n, definition, named, depth + 1),
+				None => TypeId::UNSET,
+			})
+			.collect();
+		named.pop();
+		self.s.types.set_payloads(nominal, payloads);
+		ty
 	}
 
 	/// `Schema.Integer { bits, signed, min, max }`.
@@ -289,4 +589,14 @@ impl Walker<'_> {
 		self.report(diagnostic);
 		TypeId::UNKNOWN
 	}
+}
+
+/// An enclosing `Schema.Named` of the schema being built.
+struct NamedSchema {
+	name: String,
+	/// What a `Schema.Reference` to it is: its recursive reference (created
+	/// at the first one), or the named union itself.
+	reference: Option<TypeId>,
+	/// Whether its definition is an object type.
+	object: bool,
 }

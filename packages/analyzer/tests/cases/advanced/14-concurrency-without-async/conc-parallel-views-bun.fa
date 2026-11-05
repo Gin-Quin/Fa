@@ -1,0 +1,3 @@
+-- docs: concurrency.md, "1. Parallel loops": `parallel()` exists on the targets of `for parallel` (`native`), not on JavaScript
+let numbers = [1, 2]
+let doubled = numbers.parallel().map((n) => n * 2) -- error CONC001

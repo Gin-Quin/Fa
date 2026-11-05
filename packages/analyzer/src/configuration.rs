@@ -302,7 +302,18 @@ pub fn to_value(value: &ConfigValue) -> fa_interpreter::Value {
 /// A compile-time value as a configuration value (`None` for a value a
 /// configuration can't hold: a function, a map…).
 pub fn from_value(value: &fa_interpreter::Value) -> Option<ConfigValue> {
+	convert_value(value, false)
+}
+
+/// [`from_value`], the fields holding functions left out (the `generate`
+/// of a `DependencySource`, run by `fa` when it resolves the dependency).
+pub fn from_value_without_functions(value: &fa_interpreter::Value) -> Option<ConfigValue> {
+	convert_value(value, true)
+}
+
+fn convert_value(value: &fa_interpreter::Value, skip_functions: bool) -> Option<ConfigValue> {
 	use fa_interpreter::Value;
+	let from_value = |value: &Value| convert_value(value, skip_functions);
 	Some(match value {
 		Value::None => ConfigValue::None,
 		Value::Boolean(value) => ConfigValue::Boolean(*value),
@@ -318,6 +329,7 @@ pub fn from_value(value: &fa_interpreter::Value) -> Option<ConfigValue> {
 				.iter()
 				// an omitted optional field stays absent (D32)
 				.filter(|(_, value)| !matches!(value, Value::None))
+				.filter(|(_, value)| !(skip_functions && matches!(value, Value::Function(_))))
 				.map(|(name, value)| Some((name.to_string(), from_value(value)?)))
 				.collect::<Option<_>>()?,
 		),

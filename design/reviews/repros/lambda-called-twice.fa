@@ -1,0 +1,13 @@
+function twice = (f: () => Void) => {
+	f()
+	f()
+}
+function main = () => {
+	mutable x: Integer? = 3
+	if x != none {
+		twice(() => {
+			console.log(x + 1)
+			x = none
+		})
+	}
+}

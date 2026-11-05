@@ -1,0 +1,8 @@
+static value = @library.getter()
+
+export function = () => {
+	if library.counter != none {
+		library.bump()
+		console.log(library.counter ?? 0, value)
+	}
+}

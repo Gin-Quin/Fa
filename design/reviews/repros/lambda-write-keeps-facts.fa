@@ -1,0 +1,8 @@
+function run = (f: () => Void) => f()
+function main = () => {
+	mutable divisor = 1
+	run(() => {
+		divisor = 0
+	})
+	console.log(10 // divisor)
+}

@@ -1116,15 +1116,12 @@ fn merge_interface(
 			.iter()
 			.map(|(&key, &keyed)| (merger.decl_key(key), keyed))
 			.collect(),
-		submitted: interface
-			.submitted
-			.iter()
-			.map(|(span, keys)| {
-				let keys = keys.iter().map(|&key| merger.decl_key(key)).collect();
-				(*span, keys)
-			})
-			.collect(),
 		reads_target: interface.reads_target,
+		worker_work: interface
+			.worker_work
+			.iter()
+			.map(|&(key, span)| (merger.decl_key(key), span))
+			.collect(),
 		complete: interface.complete,
 		// node keys and plain data: nothing to translate (check/tasks.rs)
 		async_summaries: interface.async_summaries.clone(),

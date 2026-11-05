@@ -73,6 +73,26 @@ impl Generator<'_> {
 					self.out.append(parts.body);
 					self.out.line("}");
 				}
+				// the integer variants (`integer_variants.rs`)
+				for variant in self.integer_variants.get(&n).cloned().unwrap_or_default() {
+					let suffix = self.variant_suffix(n, &variant);
+					self.numeric_bindings = variant.into_iter().collect();
+					for (mode, instance) in self.instance_modes(n) {
+						self.tasks.next_mode = Some(mode);
+						let parts = self.function_parts(&info, indent, false);
+						let keyword = if matches!(mode, Mode::Async { .. }) {
+							"async function"
+						} else {
+							"function"
+						};
+						let name = format!("{}{suffix}", instance.unwrap_or_else(|| name.clone()));
+						self.out
+							.line(format!("{keyword} {name}{} {{", parts.parameters));
+						self.out.append(parts.body);
+						self.out.line("}");
+					}
+					self.numeric_bindings.clear();
+				}
 				if let Some((name, code)) = self.promise_api(n) {
 					self.out.line(format!("const {name} = {code};"));
 				}
@@ -504,6 +524,46 @@ impl Generator<'_> {
 						match self.analysis.symbols.symbol_of_decl(declaration) {
 							Some(symbol) => Expr::name(self.reactive_instance_name(symbol), true),
 							None => function,
+						}
+					}
+					_ => function,
+				};
+				// an integer instance of a numeric-union parameter: the
+				// integer variant (`integer_variants.rs`)
+				let function = match (&sources, info.callee) {
+					(None, Callee::Function(declaration)) => {
+						let site = if application { stripped } else { n };
+						match (
+							self.call_variant(site, declaration),
+							self.analysis.symbols.symbol_of_decl(declaration),
+						) {
+							(Some(variant), Some(symbol))
+								if self
+									.integer_variants
+									.get(&declaration)
+									.is_some_and(|variants| variants.contains(&variant)) =>
+							{
+								let suffix = self.variant_suffix(declaration, &variant);
+								Expr::name(format!("{}{suffix}", self.name_of(symbol)), true)
+							}
+							_ => function,
+						}
+					}
+					// a function of another module: the variant it exports
+					(None, Callee::Value) => {
+						let site = if application { stripped } else { n };
+						match (
+							self.external_variant_suffix(site, callee),
+							self.external_of_callee(callee),
+						) {
+							(Some(suffix), Some(external)) => Expr::name(
+								self.import(
+									&external.path,
+									&format!("{}{suffix}", external.export),
+								),
+								true,
+							),
+							_ => function,
 						}
 					}
 					_ => function,

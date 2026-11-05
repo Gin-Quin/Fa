@@ -1,14 +1,54 @@
 //! The TypeScript declarations (`.d.ts`) of a generated module, so that
 //! JavaScript and TypeScript code can import Fa modules with their types.
 //!
-//! A standalone file exports nothing: its declarations are `export {};`.
-//! Exports come with the multi-file modules of the analyzer (M2); the
-//! mapping of types below is what they will use.
+//! A standalone file exports its entry function (its default export); the
+//! modules of a program of several files export their declarations under
+//! their export names (`numbers$increment`), declared as their JavaScript
+//! is generated (`export_typings` of `generate/modules.rs`), into a `.d.ts`
+//! next to each module.
 
 use fa_analyzer::Session;
 use fa_analyzer::ids::{FileId, NodeId, TypeId};
 use fa_analyzer::syntax::{self, View};
 use fa_analyzer::types::{CollKind, TypeKind, TypeStore};
+
+/// The parameters (`a: number, b?: number`), the result type and whether
+/// it is `async`, of the function whose value node is `value`.
+pub(crate) fn signature(
+	types: &TypeStore,
+	analysis: &fa_analyzer::analysis::Analysis,
+	value: NodeId,
+) -> Option<(String, String, bool)> {
+	let info = analysis.function(value)?;
+	let sig = types.sig(info.sig?);
+	let parameters: Vec<String> = info
+		.params
+		.iter()
+		.zip(types.params(sig.params))
+		.map(|(param, param_sig)| {
+			let name = types
+				.syms
+				.resolve(analysis.symbols.symbol(param.symbol).name);
+			// a name strict mode reserves (`arguments`): another one
+			let name = if crate::names::is_reserved(name) {
+				format!("{name}$")
+			} else {
+				name.to_string()
+			};
+			let optional = if param.default.is_some() { "?" } else { "" };
+			if param.variadic {
+				format!("...{name}: {}", typescript(types, param_sig.ty))
+			} else {
+				format!("{name}{optional}: {}", typescript(types, param_sig.ty))
+			}
+		})
+		.collect();
+	Some((
+		parameters.join(", "),
+		typescript(types, sig.ret),
+		sig.is_async,
+	))
+}
 
 /// The `.d.ts` of a file.
 pub(crate) fn declarations(session: &Session, file: FileId) -> String {

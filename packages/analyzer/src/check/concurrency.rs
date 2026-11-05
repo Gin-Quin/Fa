@@ -962,19 +962,17 @@ impl Walker<'_> {
 
 	/// The work given to `pool.submit(work)` runs on a worker's thread (its
 	/// calls of the worker do, natively the whole function): the rules of
-	/// worker code apply to it (`CONC008`, concurrency.md "Workers"): it
-	/// can't use a module-level `mutable` value that isn't thread-safe, nor
-	/// a requirement. Checked on its body (a lambda, or a function of this
-	/// file given by name); the functions it calls, of any file, are
-	/// followed by the program analysis (`Interface::submitted`,
-	/// `worker_diagnostics`), like the methods of `*.worker.fa` files. A
+	/// worker code apply to it (`CONC008`, concurrency.md "Workers"). A
+	/// requirement used in its body (a lambda, or a function of this file
+	/// given by name) is reported here: requirements don't cross threads (a
 	/// requirement a call of the work needs from outside it is `REQ007`
-	/// already (the work is stored).
+	/// already: the work is stored). The module-level `mutable` values that
+	/// aren't thread-safe are the program's check (`worker_diagnostics`):
+	/// the work is recorded, and what it uses published with the interface,
+	/// so that the functions it calls are followed into every file, as for
+	/// the methods of `*.worker.fa` files.
 	pub(super) fn check_submitted_work(&mut self, work: NodeId) {
 		let work = self.strip_groups(work);
-		if !self.submitted_work.contains(&work) {
-			self.submitted_work.push(work);
-		}
 		let body = match self.view(work) {
 			View::Lambda { .. } => work,
 			View::Name(_) => {
@@ -989,6 +987,9 @@ impl Walker<'_> {
 			}
 			_ => return,
 		};
+		if !self.a.submitted_works.contains(&work) {
+			self.a.submitted_works.push(work);
+		}
 		let mut nodes = Vec::new();
 		let mut stack = vec![body];
 		while let Some(node) = stack.pop() {
@@ -1003,24 +1004,18 @@ impl Walker<'_> {
 			let Resolution::Local(symbol) = self.a.resolution(node) else {
 				continue;
 			};
-			let entry = self.a.symbols.symbol(symbol);
-			let module_level = matches!(
-				self.a.symbols.scope(entry.scope).kind,
-				ScopeKind::Module | ScopeKind::Namespace
-			);
-			let thread_safe = matches!(
-				self.s.types.kind(entry.ty),
-				TypeKind::Sync(kind, _) if kind.is_handle()
-			);
-			let message = if matches!(entry.kind, SymbolKind::Requirement { .. }) {
-				"a requirement can't be used in the work given to `submit`: it runs on a worker's thread, and requirements don't cross threads; pass the value as an argument"
-			} else if entry.kind == SymbolKind::Mutable && module_level && !thread_safe {
-				"the work given to `submit` runs on a worker's thread: it can't use a module-level `mutable` value unless it is thread-safe (a `Mutex`, an atomic, a `Channel`); pass a copy as an argument"
-			} else {
+			if !matches!(
+				self.a.symbols.symbol(symbol).kind,
+				SymbolKind::Requirement { .. }
+			) {
 				continue;
-			};
+			}
 			if self.reported_once.insert((node, CONC008.id)) {
-				let diagnostic = self.diagnostic(&CONC008, node, message);
+				let diagnostic = self.diagnostic(
+					&CONC008,
+					node,
+					"a requirement can't be used in the work given to `submit`: it runs on a worker's thread, and requirements don't cross threads; pass the value as an argument",
+				);
 				self.report(diagnostic);
 			}
 		}

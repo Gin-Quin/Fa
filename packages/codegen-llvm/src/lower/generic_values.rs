@@ -23,8 +23,13 @@
 //! another instance; a class that keeps growing (a polymorphic recursion,
 //! `f` called at `Array<T>` from its instance at `T`) is an error naming it.
 //!
-//! A program compiled per unit compiles a program with generic function
-//! values as one module (its tables are a property of the whole program).
+//! A program compiled per unit (design/decisions.md, "Generic function
+//! tables per unit") reports its producers and the instances it calls to
+//! the driver: the tables (`fa.gv.table.<module>.<node>[.<bindings>]`) and
+//! the indices (`fa.gv.index.<class>.<instance>`) are external hidden
+//! symbols; once the instance waves are over, the waves of the producers'
+//! modules define their entries (`fa.gv.entry.…`), and the entry object
+//! defines the tables and the indices (`units.rs`).
 
 use fa_analyzer::ids::{FileId, NodeId, ParamId, TypeId};
 use fa_analyzer::types::{Bindings, TypeKind, TypeStore};
@@ -38,7 +43,7 @@ use crate::lower::{FAST_CALLING_CONVENTION, Lowering};
 
 /// The most instances a generic function type may have: more is a
 /// polymorphic recursion (its instances keep growing).
-const MOST_INSTANCES: usize = 64;
+pub(crate) const MOST_INSTANCES: usize = 64;
 
 /// The generic function types equal up to the names of their parameters.
 pub(crate) struct GenericClass {
@@ -275,28 +280,281 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		index
 	}
 
-	/// A program compiled per unit compiles generic function values as one
-	/// module.
-	fn generic_values_need_one_module(&self, node: NodeId) -> Result<(), Error> {
-		if self.is_split() {
-			return Err(self.unsupported(
-				node.index(),
-				"a generic function value in a program compiled per unit (compiled as one module)",
-			));
+	/// A type of this unit's view in the global store (shared by the units of
+	/// a build).
+	fn global_type(&self, ty: TypeId) -> TypeId {
+		let module = self.session.module_id(self.file);
+		let mut merger = self.types().merger(Some(module));
+		merger.ty(ty)
+	}
+
+	/// The key of the class of a (concrete) generic function type, the same
+	/// in every unit of a build: the stable hash of the type with its own
+	/// parameters replaced by markers, in order (their names and
+	/// constraints left out, as `generic_class` compares them).
+	fn class_key(&self, ty: TypeId) -> String {
+		let global = self.global_type(ty);
+		let mut scratch = TypeStore::view(self.types().global());
+		let own = scratch_generics(&scratch, global);
+		let markers: Vec<TypeId> = (0..own.len())
+			.map(|index| scratch.string_literal(&format!("\u{1}fa.generic.{index}")))
+			.collect();
+		let marked = scratch.substitute(
+			global,
+			&Bindings {
+				params: own,
+				types: markers,
+			},
+		);
+		format!("{:x}", scratch.stable_hash(marked))
+	}
+
+	/// The key of an instance: the stable hashes of its type arguments.
+	fn instance_key(&self, arguments: &[TypeId]) -> String {
+		let hashes: Vec<String> = arguments
+			.iter()
+			.map(|&argument| format!("{:x}", self.types().stable_hash(argument)))
+			.collect();
+		hashes.join("_")
+	}
+
+	/// The table of the values a node makes: a placeholder this module
+	/// defines at the end, or, compiled per unit, the table the entry
+	/// object defines once every instance of the class is known (the
+	/// producer reported to the driver).
+	fn generic_table_of(
+		&mut self,
+		ty: TypeId,
+		node: NodeId,
+		kind: ProducerKind,
+	) -> Result<PointerValue<'ctx>, Error> {
+		if !self.is_split() {
+			let class = self.generic_class(ty);
+			let producer = self.producer(class, node, kind);
+			return Ok(self.generic_values.producers[producer]
+				.placeholder
+				.as_pointer_value());
 		}
+		// the bindings of the instance around a lambda, by the position of
+		// each parameter in its owner's list (what another session can
+		// find again)
+		let mut bindings = Vec::new();
+		if matches!(kind, ProducerKind::Lambda) {
+			let current: Vec<(ParamId, Repr)> = self
+				.bindings
+				.borrow()
+				.iter()
+				.map(|(&param, &repr)| (param, repr))
+				.collect();
+			for (param, repr) in current {
+				let owner = self
+					.generic_functions
+					.iter()
+					.filter_map(|(owner, info)| {
+						info.generics
+							.iter()
+							.position(|&generic| generic == param)
+							.map(|index| (owner.index() as u32, index as u32))
+					})
+					.min();
+				let bound = self.instance_types.borrow().get(&(param, repr)).copied();
+				let (Some((owner, index)), Some(bound)) = (owner, bound) else {
+					return Err(self.unsupported(
+						node.index(),
+						"a generic lambda in this instance (split build)",
+					));
+				};
+				bindings.push((owner, index, self.global_type(bound)));
+			}
+			bindings.sort_by_key(|&(owner, index, _)| (owner, index));
+		}
+		let module = self.session.module(self.file).to_string();
+		let mut table = format!("fa.gv.table.{module}.{}", node.index());
+		if !bindings.is_empty() {
+			let types: Vec<TypeId> = bindings.iter().map(|&(_, _, ty)| ty).collect();
+			table.push('.');
+			table.push_str(&self.instance_key(&types));
+		}
+		let global = match self.module.get_global(&table) {
+			Some(global) => global,
+			None => {
+				let global = self.module.add_global(self.context.i8_type(), None, &table);
+				global.set_linkage(Linkage::External);
+				global.set_constant(true);
+				global.set_visibility(inkwell::GlobalVisibility::Hidden);
+				global
+			}
+		};
+		let producer = crate::split::GenericProducer {
+			table,
+			class: self.class_key(ty),
+			module,
+			node: node.index() as u32,
+			lambda: matches!(kind, ProducerKind::Lambda),
+			bindings,
+		};
+		let needs = self.generic_needs_mut();
+		if !needs.producers.contains(&producer) {
+			needs.producers.push(producer);
+		}
+		Ok(global.as_pointer_value())
+	}
+
+	/// The index of an instance in the tables of its class: a constant, or,
+	/// compiled per unit, the constant the entry object defines once every
+	/// instance of the class is known (`fa.gv.index.<class>.<instance>`,
+	/// folded by the link's optimization).
+	fn instance_index(
+		&mut self,
+		generic: TypeId,
+		reprs: Vec<Repr>,
+		arguments: &[TypeId],
+		node: NodeId,
+	) -> Result<inkwell::values::IntValue<'ctx>, Error> {
+		if !self.is_split() {
+			let class = self.generic_class(generic);
+			let index = self.class_instance(class, reprs, arguments.to_vec(), node)?;
+			return Ok(self.usize.const_int(index as u64, false));
+		}
+		let arguments: Vec<TypeId> = arguments
+			.iter()
+			.map(|&argument| self.global_type(argument))
+			.collect();
+		let instance = crate::split::GenericInstance {
+			class: self.class_key(generic),
+			key: self.instance_key(&arguments),
+			arguments,
+		};
+		let symbol = instance.index_symbol();
+		let global = match self.module.get_global(&symbol) {
+			Some(global) => global,
+			None => {
+				let global = self.module.add_global(self.usize, None, &symbol);
+				global.set_linkage(Linkage::External);
+				global.set_constant(true);
+				global.set_visibility(inkwell::GlobalVisibility::Hidden);
+				global
+			}
+		};
+		let needs = self.generic_needs_mut();
+		if !needs.instances.contains(&instance) {
+			needs.instances.push(instance);
+		}
+		Ok(self
+			.builder
+			.build_load(self.usize, global.as_pointer_value(), "")?
+			.into_int_value())
+	}
+
+	/// Defines the entry of a producer's table for an instance of its class
+	/// (an instance wave of the producer's module), exported for the table
+	/// the entry object defines.
+	pub(crate) fn define_generic_entry(
+		&mut self,
+		request: &crate::split::GenericEntryRequest,
+		files: &[FileId],
+	) -> Result<(), Error> {
+		let producer = &request.producer;
+		let unsupported = |message: &str| Error::Unsupported {
+			message: message.to_string(),
+			location: String::new(),
+		};
+		let Some(&file) = files
+			.iter()
+			.find(|&&file| self.session.module(file) == producer.module)
+		else {
+			return Err(unsupported(
+				"a generic function value of another unit (split build)",
+			));
+		};
+		let current = self.file;
+		self.switch_file(file);
+		let result = self.define_generic_entry_in_file(request);
+		self.switch_file(current);
+		result
+	}
+
+	fn define_generic_entry_in_file(
+		&mut self,
+		request: &crate::split::GenericEntryRequest,
+	) -> Result<(), Error> {
+		let producer = &request.producer;
+		let node = NodeId::new(producer.node as usize);
+		// the bindings of the instance around a lambda
+		let mut bindings = FxHashMap::default();
+		for &(owner, index, bound) in &producer.bindings {
+			let Some(param) = self
+				.generic_functions
+				.get(&NodeId::new(owner as usize))
+				.and_then(|info| info.generics.get(index as usize).copied())
+			else {
+				return Err(self.unsupported(node.index(), "this generic lambda (split build)"));
+			};
+			let repr = self.repr_of(bound, node.index())?;
+			self.note_instance_types(&[param], &[bound], &[repr]);
+			bindings.insert(param, repr);
+		}
+		let mut reprs = Vec::new();
+		for &argument in &request.instance.arguments {
+			reprs.push(self.repr_of(argument, node.index())?);
+		}
+		let kind = if producer.lambda {
+			ProducerKind::Lambda
+		} else {
+			ProducerKind::Declaration
+		};
+		let saved = self.bindings.replace(bindings);
+		let entry = self.generic_entry_in_file(node, kind, &reprs, &request.instance.arguments);
+		self.bindings.replace(saved);
+		let entry = entry?;
+		let name = producer.entry_symbol(&request.instance);
+		self.export_entry(entry, &name)?;
+		self.generic_needs_mut().entries.push(name);
+		Ok(())
+	}
+
+	/// Exports the function at `entry` as `name`: renamed when no other name
+	/// is needed, else through a function of its own that calls it.
+	fn export_entry(&mut self, entry: PointerValue<'ctx>, name: &str) -> Result<(), Error> {
+		let target_name = entry.get_name().to_string_lossy().into_owned();
+		let Some(target) = self.module.get_function(&target_name) else {
+			return Err(Error::Llvm(format!(
+				"the entry `{target_name}` is no function"
+			)));
+		};
+		let shared = target_name.starts_with("fa.gv.entry.")
+			|| target_name == "fa.generic_instance_never_called"
+			|| self.is_exported(&target_name);
+		if !shared {
+			target.as_global_value().set_name(name);
+			self.export_symbol(name.to_string());
+			return Ok(());
+		}
+		let ty = target.get_type();
+		let function = self.module.add_function(name, ty, None);
+		function.set_call_conventions(target.get_call_conventions());
+		let builder = self.context.create_builder();
+		builder.position_at_end(self.context.append_basic_block(function, "entry"));
+		let arguments: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = function
+			.get_param_iter()
+			.map(|param| param.into())
+			.collect();
+		let call = builder.build_call(target, &arguments, "")?;
+		call.set_call_convention(target.get_call_conventions());
+		call.set_tail_call(true);
+		match call.try_as_basic_value().basic() {
+			Some(value) => builder.build_return(Some(&value))?,
+			None => builder.build_return(None)?,
+		};
+		self.export_symbol(name.to_string());
 		Ok(())
 	}
 
 	/// A generic lambda evaluated, `<T>(value: T) => value`: its table and
 	/// a new environment.
 	pub(crate) fn generic_lambda_value(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
-		self.generic_values_need_one_module(node)?;
 		let ty = self.concrete_type(self.type_of(node));
-		let class = self.generic_class(ty);
-		let producer = self.producer(class, node, ProducerKind::Lambda);
-		let table = self.generic_values.producers[producer]
-			.placeholder
-			.as_pointer_value();
+		let table = self.generic_table_of(ty, node, ProducerKind::Lambda)?;
 		let captures = self.find_captures(node);
 		// the environment of every instance (`declare_function` decides the same)
 		let given_to_call = {
@@ -326,16 +584,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		self.generic_values_need_one_module(node)?;
 		let ty = self.concrete_type(self.type_of(node));
 		if !self.is_generic_function_type(ty) {
 			return Err(self.unsupported(node.index(), "this generic function value"));
 		}
-		let class = self.generic_class(ty);
-		let producer = self.producer(class, declaration, ProducerKind::Declaration);
-		let table = self.generic_values.producers[producer]
-			.placeholder
-			.as_pointer_value();
+		let table = self.generic_table_of(ty, declaration, ProducerKind::Declaration)?;
 		self.closure_pair(table, self.pointer_type().const_null(), self.type_of(node))
 	}
 
@@ -371,7 +624,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !self.is_generic_function_type(generic) {
 			return Ok(value);
 		}
-		self.generic_values_need_one_module(node)?;
 		let Some(list) = self.analysis.instantiation(node) else {
 			return Err(self.unsupported(node.index(), "this instance of a generic function"));
 		};
@@ -392,8 +644,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		for &argument in &arguments {
 			reprs.push(self.repr_of(argument, node.index())?);
 		}
-		let class = self.generic_class(generic);
-		let index = self.class_instance(class, reprs, arguments.clone(), node)?;
+		let index = self.instance_index(generic, reprs, &arguments, node)?;
 		let instance = self.instantiate_generic(generic, &arguments);
 		let Some(raw) = value.value else {
 			return Ok(value);
@@ -408,12 +659,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_extract_value(pair, 1, "")?
 			.into_pointer_value();
 		let slot = unsafe {
-			self.builder.build_in_bounds_gep(
-				self.pointer_type(),
-				table,
-				&[self.usize.const_int(index as u64, false)],
-				"",
-			)?
+			self.builder
+				.build_in_bounds_gep(self.pointer_type(), table, &[index], "")?
 		};
 		let entry = self
 			.builder

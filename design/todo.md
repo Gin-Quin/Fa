@@ -10,7 +10,7 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Bugs
 
-- Async follow-ups: a `Channel` can't be given to a JavaScript worker yet (a stop; atomics and mutexes are shared through `SharedArrayBuffer`, which the web only has when cross-origin isolated); `.d.ts` files of programs of several modules aren't written (only a standalone file's); the error classes a worker's call may throw are rebuilt from the method's `throws` (another class of the same name is rebuilt with a plain class); `fa test --target=native` runs on `native` only (not `wasm`), one process per test.
+- Async follow-ups: the error classes a worker's call may throw are rebuilt from the method's `throws` (another class of the same name is rebuilt with a plain class); `fa test --target=native` runs on `native` only (not `wasm`), one process per test.
 - `W-ERR-1` on a string slice (Goose ports): not reproduced (unproven slices are `E-ERR-3`, proven ones `W-ERR-1` by design); needs the snippet.
 
 ## Performance (Goose suite, native, vs Rust)
@@ -29,5 +29,4 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 - Analyzer: relations across files, `@import`, `@extern` (*foreign code*); implied relation effects for reactivity; `TypeFromSchema` of `Fields`, of enumerations with pinned values, and inside a generic type other than as its value; JSON named unions (no JSON form decided).
 - Native: compile-time named union members (`Schema` values).
 - Tooling: hot reloading by module swap (D43; `fa develop` restarts today), the language server resolving dependencies, `fa build` without `--target` building every configured target, `fa test` running test files in separate workers, `DependencySource.generate`, path dependencies outside a workspace (decided: allowed).
-- JavaScript: a reference to a primitive element of a `Pool` (`pool.find(…)`), the guard of an awaited `lock()` used as a temporary. (User functions returning a reference to a primitive are rejected by the analyzer, `REF004`.)
 - Reviews to schedule: a second analyzer review (M2/M3 features), a review of the tooling (CLI, formatter, workspaces), a final review of both backends.

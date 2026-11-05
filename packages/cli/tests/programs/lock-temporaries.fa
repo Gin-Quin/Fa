@@ -1,0 +1,18 @@
+-- The guard of an awaited `lock()` used as a temporary of its statement
+-- is released after the statement (else the next `lock()` would wait
+-- forever), as a place too.
+use { Mutex } = std.concurrency
+mutable shared = Mutex<Integer> { value = 1 }
+async function bump = () => {
+	(await shared.lock()).value += 1
+	console.log((await shared.lock()).value)
+}
+await bump()
+await bump()
+let after = start bump()
+await after
+console.log((await shared.lock()).value == 4)
+-- prints: 2
+-- prints: 3
+-- prints: 4
+-- prints: true

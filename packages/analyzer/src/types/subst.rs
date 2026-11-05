@@ -108,7 +108,29 @@ impl TypeStore {
 						..field
 					})
 					.collect();
-				self.object(&fields, nominal)
+				let result = self.object(&fields, nominal);
+				// an instance of a named generic type (`Pair<Right, Left>`):
+				// the result is named after its arguments substituted
+				if result != ty
+					&& let Some((name, arguments)) = self.application(ty)
+				{
+					let name = self.syms.resolve(name).to_string();
+					let arguments = self.list_items(arguments).to_vec();
+					let arguments: Vec<TypeId> = arguments
+						.into_iter()
+						.map(|argument| self.substitute_in(argument, bindings, cache))
+						.collect();
+					let shown: Vec<String> = arguments
+						.iter()
+						.map(|&argument| self.display(argument))
+						.collect();
+					self.name_type(
+						result,
+						&crate::types::display::type_application(&name, &shown),
+					);
+					self.record_application(result, &name, &arguments);
+				}
+				result
 			}
 			TypeKind::Function(sig) => {
 				let sig = self.sig(sig);

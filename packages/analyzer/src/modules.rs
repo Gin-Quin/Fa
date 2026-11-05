@@ -591,15 +591,15 @@ pub struct Interface {
 	pub keys: FxHashMap<DeclKey, KeyedDecl>,
 	/// Whether the analysis of the file read `target` or `configuration`.
 	pub reads_target: bool,
+	/// What the work given to `WorkerPool.submit` uses: the module-level
+	/// declarations and functions it names or calls, with the span of the
+	/// name or call (the program's worker rule, `CONC008`).
+	pub worker_work: Vec<(DeclKey, crate::diagnostics::SourceSpan)>,
 	/// Whether it is complete (the file's walk finished).
 	pub complete: bool,
 	/// The async summaries of its functions, by declaration node
 	/// (`design/async.md` §2.1, `check/tasks.rs`).
 	pub async_summaries: FxHashMap<NodeId, crate::analysis::AsyncSummary>,
-	/// The work given to `pool.submit(work)`: its span and the declarations
-	/// it uses (by key, sorted), whose functions the program follows for
-	/// `CONC008` (`program.rs`, `worker_diagnostics`).
-	pub submitted: Vec<(crate::diagnostics::SourceSpan, Vec<DeclKey>)>,
 }
 
 impl Interface {

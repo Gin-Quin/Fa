@@ -1,0 +1,9 @@
+-- note: an integer instance of an `Integer | Float` parameter computes as an integer on every
+-- backend (JavaScript: an integer variant of the function), its overflow checked
+function double = <Value: Integer | Float>(value: Value): Value => value * 2
+function quadruple = <Value: Integer | Float>(value: Value): Value => double(double(value))
+console.log(double(4), double(2.5), quadruple(3), quadruple(0.5)) -- prints: 8 5 12 2
+let large = 4_503_599_627_370_496
+console.log(quadruple(quadruple(quadruple(quadruple(quadruple(quadruple(large)))))))
+-- exit: 101
+-- stderr: overflow

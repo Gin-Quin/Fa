@@ -455,7 +455,7 @@ impl Generator<'_> {
 				.any(|&member| guard(member))
 	}
 
-	/// `mutex.tryLock()` (the JavaScript `call`) whose guard is a
+	/// `mutex.tryLock()` or `await mutex.lock()` (the JavaScript `call`) whose guard is a
 	/// temporary of its statement (`m.tryLock()?.value`, `m.tryLock() ==
 	/// none`): kept in a temporary, released after the statement
 	/// ([`Generator::guarded`]). A guard held by a value is released at the
@@ -480,7 +480,8 @@ impl Generator<'_> {
 		let mut child = n;
 		while let Some(parent) = parents[child.index()] {
 			match self.view(parent) {
-				View::Group(_) => child = parent,
+				// `(await mutex.lock()).value`: the awaited guard
+				View::Group(_) | View::Await(_) => child = parent,
 				View::Access { target, .. } | View::OptionalAccess { target, .. } => {
 					return target == child;
 				}
@@ -504,7 +505,10 @@ impl Generator<'_> {
 					matches!(
 						self.analysis.call(node).map(|call| call.callee),
 						Some(fa_analyzer::analysis::Callee::Builtin(builtin))
-							if fa_analyzer::builtins::get(builtin).path == "Mutex#tryLock"
+							if matches!(
+								fa_analyzer::builtins::get(builtin).path,
+								"Mutex#tryLock" | "Mutex#lock"
+							)
 					) || matches!(
 						self.view(node),
 						View::Call { .. }

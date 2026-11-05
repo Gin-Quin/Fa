@@ -349,6 +349,97 @@ impl Generator<'_> {
 		lines
 	}
 
+	/// The TypeScript declarations of an export of the module (`.d.ts`): a
+	/// function with its instances when it may suspend (as
+	/// `instance_exports` exports them), a value with its accessor cell.
+	fn export_typings(&mut self, decl: NodeId, symbol: SymbolId, export: &str) {
+		let info = self.analysis.symbols.symbol(symbol);
+		let (kind, ty) = (info.kind, info.ty);
+		match kind {
+			SymbolKind::Function => {
+				let value = match self.view(decl) {
+					View::Function { value, .. } | View::ExportFunction { value, .. } => value,
+					_ => decl,
+				};
+				let Some((parameters, ret, is_async)) =
+					crate::declarations::signature(self.types, self.analysis, value)
+				else {
+					self.typings
+						.push(format!("export declare const {export}: unknown;"));
+					return;
+				};
+				let task_first = if parameters.is_empty() {
+					"task: unknown".to_string()
+				} else {
+					format!("task: unknown, {parameters}")
+				};
+				let suspends =
+					is_async && self.summary(decl).is_some_and(|summary| summary.suspends);
+				if !suspends {
+					self.typings.push(format!(
+						"export declare function {export}({parameters}): {ret};"
+					));
+					return;
+				}
+				match self.tasks.instances.get(&decl) {
+					// synchronous mode: one instance, blocking
+					None => {
+						self.typings.push(format!(
+							"export declare function {export}({parameters}): {ret};"
+						));
+						self.typings.push(format!(
+							"export declare function {export}$sync({parameters}): {ret};"
+						));
+					}
+					Some(instances) => {
+						let (promise, sync, asynchronous) = (
+							instances.promise_name.is_some(),
+							instances.sync_name.is_some(),
+							instances.async_name.is_some(),
+						);
+						if promise {
+							self.typings.push(format!(
+								"/** Runs the call as a task: the promise rejects with its Fa error. */\nexport declare function {export}({parameters}): Promise<{ret}>;"
+							));
+						} else if sync {
+							self.typings.push(format!(
+								"export declare function {export}({parameters}): {ret};"
+							));
+						} else if asynchronous {
+							self.typings.push(format!(
+								"export declare function {export}({task_first}): Promise<{ret}>;"
+							));
+						}
+						if sync {
+							self.typings.push(format!(
+								"/** The synchronous instance: a blocking call (Bun and Node). */\nexport declare function {export}$sync({parameters}): {ret};"
+							));
+						}
+						if asynchronous {
+							self.typings.push(format!(
+								"/** The async instance, for Fa modules: the caller's task first. */\nexport declare function {export}$async({task_first}): Promise<{ret}>;"
+							));
+						}
+					}
+				}
+			}
+			SymbolKind::Let => {
+				let ty = crate::declarations::typescript(self.types, ty);
+				self.typings
+					.push(format!("export declare const {export}: {ty};"));
+			}
+			SymbolKind::Mutable => {
+				let ty = crate::declarations::typescript(self.types, ty);
+				self.typings
+					.push(format!("export declare let {export}: {ty};"));
+				self.typings.push(format!(
+					"/** The value, read and written by other modules. */\nexport declare const {export}$ref: {{ v: {ty} }};"
+				));
+			}
+			_ => {}
+		}
+	}
+
 	/// The `export` lines of the module: its declarations other files use
 	/// (and the accessors of its mutable ones), its initialization functions.
 	pub(crate) fn export_lines(&mut self, inits: &[(String, String)]) -> Vec<String> {
@@ -374,6 +465,9 @@ impl Generator<'_> {
 			let Some(local) = self.names.get(&symbol).cloned() else {
 				continue;
 			};
+			if self.options.declarations {
+				self.export_typings(decl, symbol, export);
+			}
 			// a function that may suspend: its instances too (tasks.rs)
 			if let Some(instances) = self.instance_exports(decl, &local, export) {
 				exported.extend(instances);
@@ -383,6 +477,16 @@ impl Generator<'_> {
 				lines.push(format!(
 					"export const {export}$ref = {{ get v() {{ return {local}; }}, set v(value) {{ {local} = value; }} }};"
 				));
+			}
+			// its integer variants (`integer_variants.rs`)
+			for variant in self
+				.integer_variants
+				.get(&decl)
+				.cloned()
+				.unwrap_or_default()
+			{
+				let suffix = self.variant_suffix(decl, &variant);
+				exported.push(format!("{local}{suffix} as {export}{suffix}"));
 			}
 			exported.push(if local == *export {
 				local

@@ -250,35 +250,8 @@ impl Walker<'_> {
 		}
 		uses.sort_unstable();
 		uses.dedup();
-		// the work given to `submit`: the declarations it uses
-		let works = self.submitted_work.clone();
-		let mut submitted = Vec::new();
-		for work in works {
-			let mut keys = Vec::new();
-			let mut pending = vec![work];
-			while let Some(node) = pending.pop() {
-				let used = match self.a.resolution(node) {
-					Resolution::Local(symbol)
-						if module_level(self, symbol)
-							|| self.a.symbols.symbol(symbol).kind == SymbolKind::Function =>
-					{
-						Some(self.symbol_key(symbol))
-					}
-					Resolution::External(key) => Some(key),
-					_ => None,
-				};
-				let called = match self.a.calls.get(&node).map(|call| &call.callee) {
-					Some(&Callee::Function(function)) => self.node_key(function),
-					_ => None,
-				};
-				keys.extend(used.into_iter().chain(called));
-				pending.extend(syntax::children(&tree, node));
-			}
-			keys.sort_unstable();
-			keys.dedup();
-			submitted.push((self.span(work), keys));
-		}
 
+		let worker_work = self.worker_work();
 		let export_names = self.export_names(root);
 		let reads_target = self.a.reads_target;
 		let externs = self.a.externs.clone();
@@ -308,9 +281,47 @@ impl Walker<'_> {
 		interface.export_names = export_names;
 		interface.declared = declared;
 		interface.uses = uses;
-		interface.submitted = submitted;
 		interface.reads_target = reads_target;
+		interface.worker_work = worker_work;
 		interface.complete = true;
+	}
+
+	/// What the work given to `WorkerPool.submit` uses (`worker_work`): the
+	/// names of module-level declarations and the calls of functions in its
+	/// body, or the function given by name.
+	fn worker_work(&mut self) -> Vec<(DeclKey, crate::diagnostics::SourceSpan)> {
+		let mut found = Vec::new();
+		let works = self.a.submitted_works.clone();
+		let tree = std::sync::Arc::clone(&self.tree);
+		for work in works {
+			let mut stack = vec![work];
+			while let Some(node) = stack.pop() {
+				let used = match self.a.resolution(node) {
+					Resolution::Local(symbol) => {
+						let data = self.a.symbols.symbol(symbol);
+						let module_level = matches!(
+							self.a.symbols.scope(data.scope).kind,
+							ScopeKind::Module | ScopeKind::Namespace
+						);
+						(module_level || data.kind == SymbolKind::Function)
+							.then(|| self.symbol_key(symbol))
+					}
+					Resolution::External(key) => Some(key),
+					_ => None,
+				};
+				let called = match self.a.calls.get(&node).map(|call| &call.callee) {
+					Some(&Callee::Function(function)) => self.node_key(function),
+					_ => None,
+				};
+				for key in used.into_iter().chain(called) {
+					found.push((key, self.span(node)));
+				}
+				stack.extend(syntax::children(&tree, node));
+			}
+		}
+		found.sort_by_key(|&(key, span)| (span.start, span.end, key));
+		found.dedup();
+		found
 	}
 
 	/// The names the declarations other files may use are exported as: the

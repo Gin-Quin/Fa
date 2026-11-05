@@ -250,7 +250,10 @@ impl Generator<'_> {
 						Some(Callee::Builtin(builtin)) => builtins::get(builtin).path,
 						_ => "",
 					};
-					(path.starts_with("Map#"), path != "Map#getOrInsert")
+					(
+						path.starts_with("Map#") || path.starts_with("Pool#"),
+						!matches!(path, "Map#getOrInsert" | "Pool#add"),
+					)
 				}
 				_ => (false, false),
 			};
@@ -488,16 +491,49 @@ impl Generator<'_> {
 					.collect()
 			})
 			.unwrap_or_default();
-		if !matches!(
-			path,
-			"Map#get" | "Map#getOrInsert" | "Array#get" | "Array#find"
-		) {
+		let value_pool = matches!(path, "Pool#find" | "Pool#add")
+			&& self.is_value_pool(self.receiver_type(callee));
+		if !value_pool
+			&& !matches!(
+				path,
+				"Map#get" | "Map#getOrInsert" | "Array#get" | "Array#find"
+			) {
 			self.unsupported(node, "a reference to a primitive value returned by a call");
 			return None;
 		}
 		let receiver = self.receiver(callee);
 		let receiver = self.keep_value_part(receiver);
 		let values = self.in_order(&arguments, |g, argument| g.expr(argument));
+		// an element of a pool of values: the pool and its slot
+		if path == "Pool#find" {
+			let (slot, container) = (self.temp(), self.temp());
+			let pool = receiver.primary_text();
+			self.out.line(format!(
+				"const {slot} = {pool}.slotOf({});",
+				values.first()?.text
+			));
+			self.out.line(format!(
+				"const {container} = {slot} !== undefined ? {pool} : undefined;"
+			));
+			return Some(Parts {
+				container: Some(Expr::name(container, true)),
+				key: Key::Entry(Expr::name(slot, true)),
+				optional: true,
+			});
+		}
+		if path == "Pool#add" {
+			let slot = self.temp();
+			self.out.line(format!(
+				"const {slot} = {}.add({});",
+				receiver.primary_text(),
+				values.first()?.text
+			));
+			return Some(Parts {
+				container: Some(receiver),
+				key: Key::Entry(Expr::name(slot, true)),
+				optional: false,
+			});
+		}
 		if path == "Array#find" {
 			// the item the predicate finds first: its index, `none` without one
 			let (position, container) = (self.temp(), self.temp());
@@ -560,6 +596,19 @@ impl Generator<'_> {
 					optional: true,
 				})
 			}
+		}
+	}
+
+	/// The slot of the element of a pool of values a reference designates
+	/// (`use element = pool.find(…)`), for `delete` and `take`.
+	pub(crate) fn reference_slot(&self, n: NodeId) -> Option<String> {
+		let n = self.strip_reference(n);
+		let Resolution::Local(symbol) = self.analysis.resolution(n) else {
+			return None;
+		};
+		match self.references.get(&symbol) {
+			Some(Reference::Pair { key, map: true, .. }) => Some(key.clone()),
+			_ => self.map_aliases.get(&symbol).map(|(_, key)| key.clone()),
 		}
 	}
 

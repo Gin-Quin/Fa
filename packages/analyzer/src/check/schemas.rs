@@ -163,8 +163,8 @@ impl Walker<'_> {
 				let ty = self.type_of(first);
 				let ty = self.s.types.substitute(ty, bindings);
 				let schema = crate::comptime::schema::schema(&self.s.types, ty);
-				let defaults = self.schema_defaults(ty);
-				let schema = crate::comptime::schema::with_defaults(schema, &defaults);
+				let (defaults, order) = self.schema_defaults(ty);
+				let schema = crate::comptime::schema::with_defaults(schema, &defaults, &order);
 				self.a.constants.insert(node, schema);
 			}
 		}

@@ -1,0 +1,15 @@
+-- error: EF004
+-- brief: gn-24 with a call before the declaration, a recursive call and an exact argument (no error)
+type Tight = { name: "a" | "b", age: Integer }
+type Loose = { name: String, age: Integer }
+let early = renamed(Tight { name = "a", age = 1 }, "zzz", 0)
+let fine = renamed(Loose { name = "a", age = 1 }, "zzz", 0)
+function renamed = (human: { name: String }, name: String, depth: Integer): Type<human> => {
+	if depth > 0 {
+		return renamed(human, name, depth - 1)
+	}
+	mutable copy = human
+	copy.name = name
+	copy
+}
+console.log(fine.name)

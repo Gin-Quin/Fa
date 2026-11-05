@@ -358,6 +358,14 @@ pub struct Walker<'s> {
 	pub(crate) in_type_function_code: bool,
 	/// The bindings of each instance of a generic type (its functions are substituted).
 	pub(crate) instance_bindings: FxHashMap<TypeId, crate::types::Bindings>,
+	/// The fields written into values typed by an implicit generic
+	/// parameter (`copy.name = name` of `mutable copy = human` with
+	/// `Type<human>`): each path and the written type (structural.rs).
+	pub(crate) implicit_writes: FxHashMap<crate::ids::ParamId, Vec<(Vec<crate::ids::Sym>, TypeId)>>,
+	/// The calls of functions of this file, by callee text and declaration,
+	/// with their arguments: checked against `implicit_writes` once every
+	/// body is walked (`EF004`, structural.rs).
+	pub(crate) implicit_write_calls: Vec<(String, NodeId, Vec<crate::analysis::Argument>)>,
 	/// Key sets and `Fields` types (fields.rs).
 	pub(crate) key_sets: fields::KeySetState,
 	/// The type parameters of the generic built-in methods (`Array.map`), per owner.
@@ -560,6 +568,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		constraint_depth: 0,
 		builtin_params: FxHashMap::default(),
 		instance_bindings: FxHashMap::default(),
+		implicit_writes: FxHashMap::default(),
+		implicit_write_calls: Vec::new(),
 		key_sets: fields::KeySetState::default(),
 		aliases: FxHashMap::default(),
 		foreign: foreign::ForeignState::default(),
@@ -602,6 +612,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		walker.finish_modules(root);
 		// the async summaries, settled (tasks.rs)
 		walker.finish_tasks(root);
+		// the fields written into copies of `Type<parameter>` (structural.rs)
+		walker.finish_implicit_writes();
 	}
 	// the relations of the file (relations.rs)
 	walker.finish_relations();

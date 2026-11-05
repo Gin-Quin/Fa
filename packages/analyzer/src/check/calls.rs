@@ -295,6 +295,10 @@ impl Walker<'_> {
 			{
 				binding.arguments.insert(0, Argument::Receiver(callee));
 			}
+			// the fields written into copies of `Type<parameter>` (structural.rs)
+			if let Callee::Function(declaration) = kind {
+				w.note_implicit_write_call(callee, declaration, &binding.arguments);
+			}
 			// `console.log(…)`: every value must be printable (strings.rs)
 			if let Callee::Builtin(builtin) = kind
 				&& builtins::console::prints(builtins::get(builtin).path)

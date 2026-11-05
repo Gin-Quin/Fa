@@ -386,6 +386,19 @@ Measured on 2026-11-04 (instructions at the audit sizes, callgrind). The parts o
 
 `strlist`'s word scan is now about 10 instructions per word (Goose: 12); what remains is building the text (24 instructions per letter against Goose's 16: Goose unrolls by two). `lru`'s remaining instructions, against Goose's: the key computation (a run-time divisor where Goose's is a constant of the program: about 37 instructions per operation against 25), the map's lookup (a probe slot, then the chunk directory and the entry: about 45 instructions per hit against 15, the values of a `Map` staying in stable chunks), the hit path's six bounds checks (`unlink` and `linkFront` read indices from fields, which nothing proves in bounds) and the deletions' backward shifts (4 M against 1.3 M).
 
+### Never-negative places, in-place integers
+
+Measured on 2026-11-05 (instructions at the audit sizes, callgrind; "before" is `compiler` at `5ed2fc7`, built and profiled the same day). A field, local or parameter whose every store is non-negative (counted up by steps of one in a release build) is never counted from the end (`src/proofs.rs`: `calc`'s `current()`, `sexp`); integers below 10^4 are appended in place, one case per number of digits, and one digit per round in a counted loop; an append's fast path checks one comparison and stores only the length; a choice of literals of one length (`when … { 0 => " + " … }`) is appended with a constant length and nothing to drop; a loop over an array reserves the literal parts of the templates its block appends; loops over characters nested in other loops are versioned for simple text (`respond`'s `quoted()` expanded into its destination).
+
+| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| before (M) | 87.8 | 95.1 | 273.9 | 17.3 | 31.4 | 25.6 | 191.4 | 105.7 | 156.0 | 9.4 |
+| after (M) | 87.8 | 95.7 | 227.3 | 17.3 | 31.4 | 25.6 | 159.1 | 96.3 | 156.0 | 9.4 |
+| Fa / Goose before | 1.20 | 1.17 | 1.44 | 0.99 | 1.40 | 1.43 | 1.75 | 1.36 | 1.22 | 1.18 |
+| Fa / Goose after | 1.20 | 1.18 | 1.20 | 0.99 | 1.40 | 1.43 | 1.45 | 1.24 | 1.22 | 1.18 |
+
+What remains of `calc` (159 M against Goose's 110 M): the generator (47 M against 32 M: six registers saved per call where Goose saves one, the call being a leaf four times in five), `edited` (about 15 M: the port copies the text a character at a time where Goose edits a byte in place; string slices compiled natively would make it a few copies) and the parser (67 M against 59 M: the inline-or-heap test of `self.text` at each byte read). `respond` (227 M against 190 M): the heap block of each `sku` (reserved for its four digits, then freed with its item; Goose keeps it inline in the item) and the growths of `out` beyond the reserved literal parts.
+
 ### Against Goose's published results
 
 [Goose's results page](https://aardappel.github.io/goose/bench/results.html) (2026-10-16; Ryzen 9 9950X3D, Windows 11, clang-cl 22 `/O2`, rustc 1.98 `-O -C codegen-units=1`) compares Goose with the fastest safe Rust row of each benchmark at its large size (the "vs rust (clang)" column, inverted here into a ratio of times). This run uses the Rust row whose data structure matches the Fa port, at our default size, on Linux with clang 18:

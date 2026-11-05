@@ -15,7 +15,8 @@
 //! the changed modules in the running Bun process (`develop.hotReload`,
 //! on by default); any other change restarts the program, with the
 //! reason. A change with errors keeps the running program until it is
-//! fixed (design/decisions.md, "Development mode"). `FA_DEVELOP_RUNS=<n>`
+//! fixed (design/decisions.md, "Development mode"). After an edit of its own
+//! sources, the tests that cover it run again (`run_covering_tests`). `FA_DEVELOP_RUNS=<n>`
 //! ends the command after `n` runs of the program or the tests (the tests
 //! of the command).
 
@@ -262,6 +263,15 @@ fn texts_before(loaded: &Loaded, modified: &[PathBuf]) -> Vec<(String, String)> 
 		.collect()
 }
 
+/// The edited files of the package's own sources (before they are
+/// applied), with their texts: none when the change reloads the package.
+fn own_edits(loaded: &Loaded, changes: &Changes) -> Vec<(String, String)> {
+	if reload_reason(loaded, changes).is_some() {
+		return Vec::new();
+	}
+	texts_before(loaded, &changes.modified)
+}
+
 /// Loads a project again after a change, or applies the edits of its own
 /// sources. `Err` when it can't be read.
 fn refresh(loaded: &mut Loaded, path: Option<&Path>, changes: &Changes) -> Result<String, String> {
@@ -293,6 +303,8 @@ struct Developed {
 	child: Option<Child>,
 	/// The running program as generated, when its modules can be swapped.
 	hot: Option<hot::Running>,
+	/// The channel with the running program (hot reloading).
+	channel: Option<hot::Channel>,
 }
 
 /// What an edit did to the running program.
@@ -308,13 +320,72 @@ enum Reload {
 impl Developed {
 	/// Whether the program is generated for hot reloading.
 	fn hot_enabled(&self) -> bool {
-		hot::available()
-			&& self
-				.loaded
-				.inner
-				.configuration
-				.as_ref()
-				.is_none_or(|configuration| configuration.develop.hot_reload)
+		self.loaded
+			.inner
+			.configuration
+			.as_ref()
+			.is_none_or(|configuration| configuration.develop.hot_reload)
+	}
+
+	/// Runs the tests that cover edited modules (architecture/hot-reloading:
+	/// "re-run the tests that cover what changed"): the test files that
+	/// read one of them, directly or through other files, each in a Bun
+	/// process of its own, while the program goes on.
+	fn run_covering_tests(&mut self, edited: &[(String, String)]) {
+		let session = &self.loaded.inner.session;
+		let tests: Vec<String> = self
+			.loaded
+			.inner
+			.program
+			.tests
+			.iter()
+			.map(|&file| session.module(file).to_string())
+			.collect();
+		if tests.is_empty() || edited.is_empty() || self.loaded.has_errors() {
+			return;
+		}
+		let mut reached: std::collections::BTreeSet<String> =
+			edited.iter().map(|(module, _)| module.clone()).collect();
+		let mut stack: Vec<String> = reached.iter().cloned().collect();
+		while let Some(module) = stack.pop() {
+			for reader in session.readers(&module) {
+				if reached.insert(reader.to_string()) {
+					stack.push(reader.to_string());
+				}
+			}
+		}
+		let covering: Vec<String> = tests
+			.into_iter()
+			.filter(|test| reached.contains(test))
+			.collect();
+		if covering.is_empty() {
+			return;
+		}
+		let shown: Vec<String> = covering
+			.iter()
+			.map(|module| format!("`{module}.fa`"))
+			.collect();
+		eprintln!(
+			"fa develop: {}running the tests of {}",
+			self.prefix(),
+			shown.join(", ")
+		);
+		let options = Options::new(Target::Bun, self.loaded.shown.clone());
+		let entry = fa_codegen_js::EntryOptions { tests: true };
+		let generated = match self.loaded.generate_program(&options, &entry) {
+			Ok(generated) => generated,
+			Err(rendered) => {
+				crate::color::eprint_diagnostics(&rendered);
+				return;
+			}
+		};
+		let marker = self.loaded.inner.project.base.join(".fa-develop-tests");
+		match write_run_script(&marker, &generated) {
+			Ok(main) => {
+				crate::run_test_processes(&main, &covering);
+			}
+			Err(error) => eprintln!("fa develop: can't write the compiled tests: {error}"),
+		}
 	}
 
 	/// After edits of the package's own sources (`edited`: the modules and
@@ -340,7 +411,11 @@ impl Developed {
 			}
 		};
 		crate::color::eprint_diagnostics(&self.loaded.rendered());
-		let (Some(running), Some(child)) = (self.hot.as_mut(), self.child.as_ref()) else {
+		let (Some(running), Some(channel), Some(_)) = (
+			self.hot.as_mut(),
+			self.channel.as_mut(),
+			self.child.as_ref(),
+		) else {
 			return Reload::Restart("the program isn't running".to_string());
 		};
 		let plan = match running.plan(&self.loaded, &output, edited) {
@@ -348,7 +423,7 @@ impl Developed {
 			Err(reason) => return Reload::Restart(reason),
 		};
 		let changed = plan.changed.clone();
-		match running.swap(plan, child.id()) {
+		match running.swap(plan, channel) {
 			Ok(()) => Reload::Swapped(changed),
 			Err(reason) => Reload::Restart(reason),
 		}
@@ -387,8 +462,21 @@ impl Developed {
 			}
 			_ => None,
 		};
+		self.channel = if self.hot.is_some() {
+			hot::Channel::open()
+		} else {
+			None
+		};
+		if self.channel.is_none() {
+			self.hot = None;
+		}
+		let mut command = Command::new(bun);
+		command.arg(&script);
+		if let Some(channel) = &self.channel {
+			command.env("FA_HOT_CHANNEL", channel.port().to_string());
+		}
 		let _ = std::io::stdout().flush();
-		match Command::new(bun).arg(&script).spawn() {
+		match command.spawn() {
 			Ok(child) => {
 				self.child = Some(child);
 				true
@@ -492,6 +580,7 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 			watcher,
 			child: None,
 			hot: None,
+			channel: None,
 		});
 	}
 	let limit = run_limit();
@@ -547,6 +636,7 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 							format!("reloaded {}", shown.join(", "))
 						};
 						eprintln!("fa develop: {}{reason}: {what}", package.prefix());
+						package.run_covering_tests(&before);
 					}
 					Reload::Errors => {}
 					Reload::Restart(why) => {
@@ -557,11 +647,14 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 						);
 						package.stop();
 						package.watcher = Watcher::new(watched_roots(&package.loaded));
-						package.start(&bun);
+						if package.start(&bun) {
+							package.run_covering_tests(&before);
+						}
 					}
 				}
 				continue;
 			}
+			let edited = own_edits(&package.loaded, &changes);
 			let path = package.path.clone();
 			match refresh(&mut package.loaded, path.as_deref(), &changes) {
 				Ok(reason) => {
@@ -576,7 +669,9 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 					eprintln!("fa develop: {}{reason}: {verb}", package.prefix());
 					package.stop();
 					package.watcher = Watcher::new(watched_roots(&package.loaded));
-					package.start(&bun);
+					if package.start(&bun) {
+						package.run_covering_tests(&edited);
+					}
 				}
 				Err(message) => eprintln!("{message}"),
 			}

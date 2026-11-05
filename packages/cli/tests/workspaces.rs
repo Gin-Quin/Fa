@@ -639,6 +639,83 @@ fn generated_dependencies_run_generate_on_their_locked_source() {
 	);
 }
 
+/// `@import` (architecture/dependencies.md, "Inline imports" and "Loading
+/// types from an API"): a remote module imported in the code, and a
+/// library imported by `dependencies.fa` whose function makes the
+/// `DependencySource` of a dependency; every source is locked.
+#[test]
+fn imported_sources_are_resolved_and_locked() {
+	if !has_tool("git") {
+		return;
+	}
+	let scratch = Scratch::new("import");
+	let openapi = Repository::new(&scratch, "example", "fa-openapi");
+	openapi.release(
+		"openapi",
+		"1.0.0",
+		"v1.0.0",
+		&[(
+			"library/openapi.fa",
+			"export function = (url: String): { source: String, generate: (content: String) => String } => {\n\treturn {\n\t\tsource = url\n\t\tgenerate = (content: String): String => \"export function = (): String => \\\"{content}\\\"\\n\"\n\t}\n}\n",
+		)],
+	);
+	let served = scratch.write(
+		"served",
+		&[
+			("v1/schema.txt", "celsius"),
+			(
+				"v2/types.fa",
+				"export namespace = {\n\tfunction degrees = (): Integer => 21\n}\n",
+			),
+		],
+	);
+	let schema = format!("file://{}/v1/schema.txt", served.display());
+	let types = format!("file://{}/v2/types.fa", served.display());
+	let package = scratch.write(
+		"app",
+		&[
+			("package.fa", "export = { name = \"app\" }\n"),
+			(
+				"dependencies.fa",
+				&format!(
+					"use {{ openapi }} = @import(\"github:example/fa-openapi@1\")\n\nexport = {{\n\tweather = openapi(\"{schema}\")\n}}\n"
+				),
+			),
+			(
+				"application/main.fa",
+				&format!(
+					"use remote = @import(\"{types}\")\n\nexport function = () => {{\n\tconsole.log(weather(), remote.degrees())\n}}\n"
+				),
+			),
+		],
+	);
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 0, "{stderr}");
+	let locked = lockfile(&package);
+	for source in ["github:example/fa-openapi", &schema, &types] {
+		assert!(
+			locked.contains(&format!("source = \"{source}\"")),
+			"{source}: {locked}"
+		);
+	}
+	if has_tool("bun") {
+		let (stdout, stderr, code) = scratch.fa(&["run", "."], &package);
+		assert_eq!((stdout.as_str(), code), ("celsius 21\n", 0), "{stderr}");
+	}
+	// a local source
+	fs::write(
+		package.join("application/main.fa"),
+		"use helper = @import(\"./helper.fa\")\n\nexport function = () => {}\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = scratch.fa(&["check"], &package);
+	assert_eq!(code, 1);
+	assert!(
+		stderr.contains("error[META010]: `@import(\"./helper.fa\")` names a local folder"),
+		"{stderr}"
+	);
+}
+
 /// A package outside a workspace depends on a local folder holding a
 /// package, locked by its content (design/decisions.md, "Path dependencies
 /// outside a workspace").
@@ -932,21 +1009,33 @@ fn develop_runs_the_program_again_after_a_change() {
 	assert!(output.contains("library/greet.fa` changed"), "{output}");
 }
 
-/// `fa develop` swaps the edited module in the running program (D43): its
-/// module-level values are kept; a change of a type restarts it.
+/// `fa develop` swaps the edited module in the running program (D43): the
+/// module-level values of the other modules are kept, a `reactive` value
+/// of the swapped module too (by declaration path), the tests covering the
+/// edit run again; a change of a type restarts it.
 #[test]
 fn develop_swaps_the_edited_modules_in_the_running_program() {
-	if !has_tool("bun") || cfg!(not(unix)) {
+	if !has_tool("bun") {
 		return;
 	}
 	let scratch = Scratch::new("hot");
+	let greet = |word: &str, cow: &str| {
+		format!(
+			"type Cow = {{ {cow} }}\n\nreactive calls = 0\n\nexport function = (): String => {{\n\tcalls += 1\n\t\"{word} {{calls}}\"\n}}\n"
+		)
+	};
 	let package = scratch.write(
 		"farm",
 		&[
 			("package.fa", "export = { name = \"farm\" }\n"),
+			("library/greet.fa", &greet("one", "name: String")),
 			(
-				"library/greet.fa",
-				"type Cow = { name: String }\n\nexport function = (): String => \"one\"\n",
+				"library/greet.test.fa",
+				"test \"greets\" {\n\tassert greet() != \"\"\n}\n",
+			),
+			(
+				"library/other.test.fa",
+				"test \"is not run again\" {\n\tassert 1 == 1\n}\n",
 			),
 			(
 				"application/main.fa",
@@ -956,14 +1045,14 @@ fn develop_swaps_the_edited_modules_in_the_running_program() {
 	);
 	let (child, output) = spawn(&scratch, &["develop"], &package, 2);
 	assert!(
-		wait_for(&output, "one 2\n", 30),
+		wait_for(&output, "one 2 2\n", 30),
 		"{}",
 		output.lock().unwrap()
 	);
-	// a body edit: swapped, the count goes on
+	// a body edit: swapped, the counts go on
 	fs::write(
 		package.join("library/greet.fa"),
-		"type Cow = { name: String }\n\nexport function = (): String => \"two\"\n",
+		greet("two", "name: String"),
 	)
 	.unwrap();
 	assert!(
@@ -977,17 +1066,37 @@ fn develop_swaps_the_edited_modules_in_the_running_program() {
 	);
 	assert!(wait_for(&output, "two ", 10), "{}", output.lock().unwrap());
 	let text = output.lock().unwrap().clone();
-	let first = text
+	let (calls, ticks) = text
 		.lines()
 		.find_map(|line| line.strip_prefix("two "))
-		.and_then(|count| count.parse::<u32>().ok())
-		.expect("a count");
-	assert!(first > 2, "the module-level value is kept: {text}");
+		.and_then(|counts| counts.split_once(' '))
+		.map(|(calls, ticks)| (calls.parse::<u32>().unwrap(), ticks.parse::<u32>().unwrap()))
+		.expect("the counts");
+	assert!(
+		ticks > 2,
+		"the values of the other modules are kept: {text}"
+	);
+	assert_eq!(calls, ticks, "the reactive value is kept: {text}");
 	assert!(!text.contains("restarting"), "{text}");
+	// the tests that cover the edit ran again
+	assert!(
+		wait_for(
+			&output,
+			"running the tests of `library/greet.test.fa`\n",
+			20
+		),
+		"{}",
+		output.lock().unwrap()
+	);
+	assert!(
+		wait_for(&output, "✓ greets", 20),
+		"{}",
+		output.lock().unwrap()
+	);
 	// a type changes: restarted
 	fs::write(
 		package.join("library/greet.fa"),
-		"type Cow = { name: String, age: Integer }\n\nexport function = (): String => \"three\"\n",
+		greet("three", "name: String, age: Integer"),
 	)
 	.unwrap();
 	assert!(
@@ -1000,11 +1109,13 @@ fn develop_swaps_the_edited_modules_in_the_running_program() {
 		output.lock().unwrap()
 	);
 	assert!(
-		wait_for(&output, "three 1\n", 20),
+		wait_for(&output, "three 1 1\n", 20),
 		"{}",
 		output.lock().unwrap()
 	);
 	let _ = finish(child, 30);
+	let output = output.lock().unwrap().clone();
+	assert!(!output.contains("is not run again"), "{output}");
 }
 
 #[test]

@@ -762,117 +762,274 @@ pub(crate) struct Resolution {
 	pub changes: Vec<(String, Option<String>, Option<String>)>,
 }
 
-/// The dependencies a `dependencies.fa` declares (none without the file).
-fn read_declared(file: &Path) -> Result<BTreeMap<String, Source>, String> {
-	let Ok(text) = fs::read_to_string(file) else {
-		return Ok(BTreeMap::new());
-	};
-	let (value, diagnostics) =
-		configuration::evaluate_source(&text, ConfigurationKind::Dependencies);
-	let shown = file.display().to_string();
-	let has_object = matches!(&value, Some(ConfigValue::Object(fields))
-		if fields.iter().any(|(_, value)| matches!(value, ConfigValue::Object(_))));
-	if configuration::is_computed(&diagnostics) || has_object {
-		return read_computed(file, &text);
-	}
-	let errors: Vec<_> = diagnostics
-		.iter()
-		.filter(|diagnostic| diagnostic.severity == fa_analyzer::Severity::Error)
-		.cloned()
-		.collect();
-	if !errors.is_empty() {
-		return Err(render_all(&errors, &SourceView::new(&shown, &text)));
-	}
-	let Some(ConfigValue::Object(fields)) = value else {
-		return Ok(BTreeMap::new());
-	};
-	let mut declared = BTreeMap::new();
-	for (key, value) in fields {
-		if !fa_codebase_parser::codebase::is_identifier(&key) {
-			return Err(format!(
-				"{shown}: error[DEP005]: `{key}` can't name a dependency: a key is an identifier"
-			));
+/// What evaluating `dependencies.fa` files needs (decision "`@import`"): the
+/// sources of their `@import`s, resolved first with the same lockfile (their
+/// entries join it) and mounted for the interpreter.
+#[derive(Clone, Debug)]
+struct Bootstrap {
+	/// The folder of the lockfile.
+	root: PathBuf,
+	workspace: bool,
+	locked: Vec<LockEntry>,
+	update: Update,
+	/// The nesting: a library whose `dependencies.fa` imports, …
+	depth: u32,
+	/// The entries of the lockfile of the sources resolved.
+	entries: Vec<LockEntry>,
+	/// Their warnings (`DEP004`).
+	warnings: Vec<String>,
+}
+
+impl Bootstrap {
+	/// The same lockfile and mode, one level deeper, nothing resolved yet.
+	fn nested(&self) -> Bootstrap {
+		Bootstrap {
+			depth: self.depth + 1,
+			entries: Vec::new(),
+			warnings: Vec::new(),
+			..self.clone()
 		}
-		let source = match &value {
-			ConfigValue::String(text) => text.clone(),
-			_ => {
+	}
+
+	/// The dependencies a `dependencies.fa` declares (none without the file).
+	fn read_declared(&mut self, file: &Path) -> Result<BTreeMap<String, Source>, String> {
+		let Ok(text) = fs::read_to_string(file) else {
+			return Ok(BTreeMap::new());
+		};
+		let (value, diagnostics) =
+			configuration::evaluate_source(&text, ConfigurationKind::Dependencies);
+		let shown = file.display().to_string();
+		let has_object = matches!(&value, Some(ConfigValue::Object(fields))
+		if fields.iter().any(|(_, value)| matches!(value, ConfigValue::Object(_))));
+		if configuration::is_computed(&diagnostics) || has_object {
+			return self.read_computed(file, &text);
+		}
+		let errors: Vec<_> = diagnostics
+			.iter()
+			.filter(|diagnostic| diagnostic.severity == fa_analyzer::Severity::Error)
+			.cloned()
+			.collect();
+		if !errors.is_empty() {
+			return Err(render_all(&errors, &SourceView::new(&shown, &text)));
+		}
+		let Some(ConfigValue::Object(fields)) = value else {
+			return Ok(BTreeMap::new());
+		};
+		let mut declared = BTreeMap::new();
+		for (key, value) in fields {
+			if !fa_codebase_parser::codebase::is_identifier(&key) {
 				return Err(format!(
-					"{shown}: error: the source of `{key}` is a string, ex: `\"github:owner/repository@4\"`"
+					"{shown}: error[DEP005]: `{key}` can't name a dependency: a key is an identifier"
 				));
 			}
-		};
-		let source = Source::parse(&source)
-			.map_err(|message| format!("{shown}: error: `{key}`: {message}"))?;
-		declared.insert(key, source);
-	}
-	Ok(declared)
-}
-
-/// The session of a `dependencies.fa` file alone, analyzed (its export
-/// computed, or holding `generate` functions): the errors, rendered.
-fn dependency_session(
-	file: &Path,
-	text: &str,
-) -> Result<(fa_analyzer::Session, fa_analyzer::ids::FileId), String> {
-	let files = vec![
-		(
-			"package.fa".to_string(),
-			"export = { name = \"dependencies\" }\n".to_string(),
-		),
-		("dependencies.fa".to_string(), text.to_string()),
-	];
-	let mut session = fa_analyzer::Session::new();
-	session.set_resolver(Box::new(CodebaseResolver::from_texts(&files, None)));
-	let shown = file.display().to_string();
-	let Some(id) = session.file_of_module("dependencies") else {
-		return Err(format!("fa: can't read `{shown}`"));
-	};
-	session.analyze_file(id);
-	let errors: Vec<_> = session
-		.diagnostics(id)
-		.iter()
-		.filter(|diagnostic| diagnostic.severity == fa_analyzer::Severity::Error)
-		.cloned()
-		.collect();
-	if !errors.is_empty() {
-		return Err(render_all(&errors, &SourceView::new(&shown, text)));
-	}
-	Ok((session, id))
-}
-
-/// The dependencies of a `dependencies.fa` file that the compile-time
-/// interpreter evaluates: a computed export, or `DependencySource` objects.
-fn read_computed(file: &Path, text: &str) -> Result<BTreeMap<String, Source>, String> {
-	let shown = file.display().to_string();
-	let (mut session, id) = dependency_session(file, text)?;
-	let sources = dependency_sources(&mut session, id)
-		.map_err(|message| format!("{shown}: error: {message}"))?;
-	let mut declared = BTreeMap::new();
-	for (key, source) in sources {
-		if !fa_codebase_parser::codebase::is_identifier(&key) {
-			return Err(format!(
-				"{shown}: error[DEP005]: `{key}` can't name a dependency: a key is an identifier"
-			));
-		}
-		let source = match source {
-			DependencySource::Source(text) => Source::parse(&text)
-				.map_err(|message| format!("{shown}: error: `{key}`: {message}"))?,
-			DependencySource::Generated { source, .. } => match Source::parse(&source) {
-				Ok(Source::Remote { url, folder: false }) => Source::Generated {
-					url,
-					file: file.to_path_buf(),
-					key: key.clone(),
-				},
+			let source = match &value {
+				ConfigValue::String(text) => text.clone(),
 				_ => {
 					return Err(format!(
-						"{shown}: error: the `source` of `{key}` is the URL of a file its `generate` reads, ex: `\"https://api.example.com/openapi.json\"`"
+						"{shown}: error: the source of `{key}` is a string, ex: `\"github:owner/repository@4\"`"
 					));
 				}
-			},
-		};
-		declared.insert(key, source);
+			};
+			let source = Source::parse(&source)
+				.map_err(|message| format!("{shown}: error: `{key}`: {message}"))?;
+			declared.insert(key, source);
+		}
+		Ok(declared)
 	}
-	Ok(declared)
+
+	/// The session of a `dependencies.fa` file alone, analyzed (its export
+	/// computed, or holding `generate` functions): the errors, rendered.
+	/// The sources it imports are resolved and mounted first.
+	fn session(
+		&mut self,
+		file: &Path,
+		text: &str,
+	) -> Result<(fa_analyzer::Session, fa_analyzer::ids::FileId), String> {
+		let files = vec![
+			(
+				"package.fa".to_string(),
+				"export = { name = \"dependencies\" }\n".to_string(),
+			),
+			("dependencies.fa".to_string(), text.to_string()),
+		];
+		let main = CodebaseResolver::from_texts(&files, None);
+		let shown = file.display().to_string();
+		let imports = import_dependencies(&shown, &imports_of_text(text))?;
+		let mut session = fa_analyzer::Session::new();
+		if imports.is_empty() {
+			session.set_resolver(Box::new(main));
+		} else {
+			session.set_resolver(Box::new(self.mount_imports(file, main, imports)?));
+		}
+		let Some(id) = session.file_of_module("dependencies") else {
+			return Err(format!("fa: can't read `{shown}`"));
+		};
+		session.analyze_file(id);
+		let errors: Vec<_> = session
+			.diagnostics(id)
+			.iter()
+			.filter(|diagnostic| diagnostic.severity == fa_analyzer::Severity::Error)
+			.cloned()
+			.collect();
+		if !errors.is_empty() {
+			return Err(render_all(&errors, &SourceView::new(&shown, text)));
+		}
+		Ok((session, id))
+	}
+
+	/// The dependencies of a `dependencies.fa` file that the compile-time
+	/// interpreter evaluates: a computed export, or `DependencySource` objects.
+	fn read_computed(
+		&mut self,
+		file: &Path,
+		text: &str,
+	) -> Result<BTreeMap<String, Source>, String> {
+		let shown = file.display().to_string();
+		let (mut session, id) = self.session(file, text)?;
+		let sources = dependency_sources(&mut session, id)
+			.map_err(|message| format!("{shown}: error: {message}"))?;
+		let mut declared = BTreeMap::new();
+		for (key, source) in sources {
+			if !fa_codebase_parser::codebase::is_identifier(&key) {
+				return Err(format!(
+					"{shown}: error[DEP005]: `{key}` can't name a dependency: a key is an identifier"
+				));
+			}
+			let source = match source {
+				DependencySource::Source(text) => Source::parse(&text)
+					.map_err(|message| format!("{shown}: error: `{key}`: {message}"))?,
+				DependencySource::Generated { source, .. } => match Source::parse(&source) {
+					Ok(Source::Remote { url, folder: false }) => Source::Generated {
+						url,
+						file: file.to_path_buf(),
+						key: key.clone(),
+					},
+					_ => {
+						return Err(format!(
+							"{shown}: error: the `source` of `{key}` is the URL of a file its `generate` reads, ex: `\"https://api.example.com/openapi.json\"`"
+						));
+					}
+				},
+			};
+			declared.insert(key, source);
+		}
+		Ok(declared)
+	}
+
+	/// The module system of a `dependencies.fa` file whose `@import`s are
+	/// resolved (`imports`: their keys, `fa_analyzer::scan::import_name`).
+	fn mount_imports(
+		&mut self,
+		file: &Path,
+		main: CodebaseResolver,
+		imports: BTreeMap<String, Source>,
+	) -> Result<MountedResolver, String> {
+		if self.depth > 4 {
+			return Err(format!(
+				"error: the `@import`s of `{}` import too deep",
+				file.display()
+			));
+		}
+		let directory = file.parent().unwrap_or(Path::new(".")).to_path_buf();
+		let requester = Requester {
+			name: file.display().to_string(),
+			directory: directory.clone(),
+			dependencies: imports,
+		};
+		let scope = Scope {
+			root: self.root.clone(),
+			packages: Vec::new(),
+			workspace: self.workspace,
+		};
+		let mut inner = Resolver::new(&scope, self.nested(), vec![requester.clone()]);
+		inner.resolve_git()?;
+		let map = inner.key_map(&requester)?;
+		inner.resolution.packages.insert(directory.clone(), map);
+		self.entries.extend(inner.lock_entries());
+		self.entries.extend(inner.bootstrap.entries.clone());
+		self.warnings.extend(inner.resolution.warnings.clone());
+		self.warnings.extend(inner.bootstrap.warnings.clone());
+		// compile-time code: no target to check
+		mount(main, &directory, &inner.resolution, "")
+	}
+}
+
+/// The sources of the `@import("…")` calls of a source, sorted.
+fn imports_of_text(text: &str) -> Vec<String> {
+	if !text.contains("@import") {
+		return Vec::new();
+	}
+	let tree = fa_parser::parse(text);
+	let mut found: Vec<String> = (0..tree.nodes.len())
+		.filter_map(|index| {
+			fa_analyzer::scan::import_source(&tree, fa_analyzer::ids::NodeId::new(index))
+				.map(str::to_string)
+		})
+		.collect();
+	found.sort();
+	found.dedup();
+	found
+}
+
+/// The `@import` sources as dependencies, under the keys the analyzer
+/// looks them up with; a local path is `META010`.
+fn import_dependencies(
+	shown: &str,
+	sources: &[String],
+) -> Result<BTreeMap<String, Source>, String> {
+	let mut found = BTreeMap::new();
+	for source in sources {
+		let parsed = match Source::parse(source) {
+			Ok(Source::Path(_)) => {
+				return Err(format!(
+					"{shown}: error[META010]: `@import(\"{source}\")` names a local folder: local files are reached by their names, sibling packages through `dependencies.fa`"
+				));
+			}
+			Ok(parsed) => parsed,
+			Err(message) => return Err(format!("{shown}: error: `@import`: {message}")),
+		};
+		found.insert(fa_analyzer::scan::import_name(source), parsed);
+	}
+	Ok(found)
+}
+
+/// The `@import` sources of the files of a package (its configuration
+/// files and the files of `library/`, `application/` and `scripts/`).
+fn package_imports(directory: &Path) -> Result<BTreeMap<String, Source>, String> {
+	fn walk(folder: &Path, recursive: bool, files: &mut Vec<PathBuf>) {
+		let Ok(entries) = fs::read_dir(folder) else {
+			return;
+		};
+		for entry in entries.flatten() {
+			let name = entry.file_name().to_string_lossy().to_string();
+			if name.starts_with('.') {
+				continue;
+			}
+			let path = entry.path();
+			if path.is_dir() {
+				if recursive && !fa_codebase_parser::SKIPPED_FOLDERS.contains(&name.as_str()) {
+					walk(&path, true, files);
+				}
+			} else if name.ends_with(".fa") {
+				files.push(path);
+			}
+		}
+	}
+	let mut files = Vec::new();
+	walk(directory, false, &mut files);
+	for root in ["library", "application", "scripts"] {
+		walk(&directory.join(root), true, &mut files);
+	}
+	files.sort();
+	let mut sources = Vec::new();
+	for file in &files {
+		if let Ok(text) = fs::read_to_string(file) {
+			sources.extend(imports_of_text(&text));
+		}
+	}
+	sources.sort();
+	sources.dedup();
+	import_dependencies(&directory.display().to_string(), &sources)
 }
 
 /// A request for a Git repository.
@@ -889,8 +1046,24 @@ struct GitRequest {
 pub(crate) fn resolve(scope: &Scope, update: &Update, write: bool) -> Result<Resolution, String> {
 	let lock_path = scope.root.join(LOCKFILE);
 	let locked = read_lockfile(&lock_path)?;
+	let mut bootstrap = Bootstrap {
+		root: scope.root.clone(),
+		workspace: scope.workspace,
+		locked,
+		update: update.clone(),
+		depth: 0,
+		entries: Vec::new(),
+		warnings: Vec::new(),
+	};
 	let shared = if scope.workspace {
-		read_declared(&scope.root.join("dependencies.fa"))?
+		let file = scope.root.join("dependencies.fa");
+		let mut shared = bootstrap.read_declared(&file)?;
+		let text = fs::read_to_string(&file).unwrap_or_default();
+		shared.extend(import_dependencies(
+			&file.display().to_string(),
+			&imports_of_text(&text),
+		)?);
+		shared
 	} else {
 		BTreeMap::new()
 	};
@@ -898,7 +1071,9 @@ pub(crate) fn resolve(scope: &Scope, update: &Update, write: bool) -> Result<Res
 	for (name, directory) in &scope.packages {
 		let mut dependencies = shared.clone();
 		// a key of the package replaces the same key of the workspace
-		dependencies.extend(read_declared(&directory.join("dependencies.fa"))?);
+		dependencies.extend(bootstrap.read_declared(&directory.join("dependencies.fa"))?);
+		// the sources of its `@import`s
+		dependencies.extend(package_imports(directory)?);
 		requesters.push(Requester {
 			name: name.clone(),
 			directory: directory.clone(),
@@ -907,29 +1082,18 @@ pub(crate) fn resolve(scope: &Scope, update: &Update, write: bool) -> Result<Res
 	}
 	let own = requesters.len();
 	if !scope.workspace {
-		add_path_requesters(&mut requesters)?;
+		add_path_requesters(&mut requesters, &mut bootstrap)?;
 	}
-	let mut resolver = Resolver {
-		scope,
-		locked,
-		update: update.clone(),
-		resolution: Resolution::default(),
-		packages: BTreeMap::new(),
-		chosen: BTreeMap::new(),
-		remote: BTreeMap::new(),
-		paths: BTreeMap::new(),
-		generated: BTreeMap::new(),
-		mirrors: BTreeMap::new(),
-		refreshed: BTreeSet::new(),
-		requesters: requesters.clone(),
-	};
-	// the keys `fa update` names must exist
+	let mut resolver = Resolver::new(scope, bootstrap, requesters.clone());
+	// the keys `fa update` names must exist (an `@import`: its source)
 	if let Update::Keys(keys) = update {
 		for key in keys {
-			if !requesters
-				.iter()
-				.any(|requester| requester.dependencies.contains_key(key))
-			{
+			if !requesters.iter().any(|requester| {
+				requester.dependencies.contains_key(key)
+					|| requester
+						.dependencies
+						.contains_key(&fa_analyzer::scan::import_name(key))
+			}) {
 				return Err(format!(
 					"error: no dependency is named `{key}` in `dependencies.fa`"
 				));
@@ -945,7 +1109,16 @@ pub(crate) fn resolve(scope: &Scope, update: &Update, write: bool) -> Result<Res
 			.packages
 			.insert(requester.directory.clone(), map);
 	}
-	let entries = resolver.lock_entries();
+	let mut entries = resolver.lock_entries();
+	entries.extend(resolver.bootstrap.entries.clone());
+	entries.sort_by(|a, b| a.source.cmp(&b.source));
+	entries.dedup();
+	let warnings = std::mem::take(&mut resolver.bootstrap.warnings);
+	for warning in warnings {
+		if !resolver.resolution.warnings.contains(&warning) {
+			resolver.resolution.warnings.push(warning);
+		}
+	}
 	for entry in &resolver.locked {
 		if !entries.iter().any(|other| other == entry) {
 			// the same source, and the same major version for a repository
@@ -1027,6 +1200,8 @@ struct Resolver<'s> {
 	scope: &'s Scope,
 	locked: Vec<LockEntry>,
 	update: Update,
+	/// The evaluation of `dependencies.fa` files and their `@import`s.
+	bootstrap: Bootstrap,
 	resolution: Resolution,
 	/// The library of each package of the scope that is a dependency.
 	packages: BTreeMap<PathBuf, usize>,
@@ -1048,17 +1223,40 @@ struct Resolver<'s> {
 	requesters: Vec<Requester>,
 }
 
-impl Resolver<'_> {
+impl<'s> Resolver<'s> {
+	/// A resolver of a scope's requesters, with the lockfile and the mode
+	/// of `bootstrap`.
+	fn new(scope: &'s Scope, bootstrap: Bootstrap, requesters: Vec<Requester>) -> Self {
+		Resolver {
+			scope,
+			locked: bootstrap.locked.clone(),
+			update: bootstrap.update.clone(),
+			bootstrap,
+			resolution: Resolution::default(),
+			packages: BTreeMap::new(),
+			chosen: BTreeMap::new(),
+			remote: BTreeMap::new(),
+			paths: BTreeMap::new(),
+			generated: BTreeMap::new(),
+			mirrors: BTreeMap::new(),
+			refreshed: BTreeSet::new(),
+			requesters,
+		}
+	}
+
 	/// Whether `fa update` resolves a locked source again.
 	fn updating(&self, source: &str) -> bool {
 		match &self.update {
 			Update::None => false,
 			Update::All => true,
 			Update::Keys(keys) => self.requesters.iter().any(|requester| {
-				requester
-					.dependencies
-					.iter()
-					.any(|(key, declared)| keys.contains(key) && declared.locked() == Some(source))
+				requester.dependencies.iter().any(|(key, declared)| {
+					let named = keys.contains(key)
+						|| key
+							.strip_prefix("@import ")
+							.is_some_and(|imported| keys.contains(imported));
+					named && declared.locked() == Some(source)
+				})
 			}),
 		}
 	}
@@ -1069,7 +1267,9 @@ impl Resolver<'_> {
 		self.requesters
 			.iter()
 			.flat_map(|requester| &requester.dependencies)
-			.find(|(_, declared)| declared.locked() == Some(source))
+			.find(|(key, declared)| {
+				!key.starts_with("@import ") && declared.locked() == Some(source)
+			})
 			.map_or_else(|| source.to_string(), |(key, _)| key.clone())
 	}
 
@@ -1286,8 +1486,12 @@ impl Resolver<'_> {
 		commit: String,
 		locked_hash: Option<String>,
 	) -> Result<Chosen, String> {
-		let found = |hash: String, directory: PathBuf| -> Result<Chosen, String> {
-			let declared = read_declared(&directory.join("dependencies.fa"))?;
+		let found = |bootstrap: &mut Bootstrap,
+		             hash: String,
+		             directory: PathBuf|
+		 -> Result<Chosen, String> {
+			let mut declared = bootstrap.read_declared(&directory.join("dependencies.fa"))?;
+			declared.extend(package_imports(&directory)?);
 			Ok(Chosen {
 				version: version.clone(),
 				commit: commit.clone(),
@@ -1301,7 +1505,7 @@ impl Resolver<'_> {
 			let folder = source_folder(hash);
 			if folder.is_dir() {
 				if read_tree(&folder).is_ok_and(|files| hash_files(&files) == *hash) {
-					return found(hash.clone(), folder);
+					return found(&mut self.bootstrap, hash.clone(), folder);
 				}
 				// a damaged entry of the cache
 				let _ = fs::remove_dir_all(&folder);
@@ -1349,7 +1553,7 @@ impl Resolver<'_> {
 			));
 		}
 		let directory = store(&hash, &files)?;
-		found(hash, directory)
+		found(&mut self.bootstrap, hash, directory)
 	}
 
 	/// A remote file or folder: from the cache when locked, else fetched
@@ -1533,7 +1737,7 @@ impl Resolver<'_> {
 			String::from_utf8(content).map_err(|_| failed(format!("`{url}` is not UTF-8 text")))?;
 		let text = fs::read_to_string(file)
 			.map_err(|error| format!("fa: can't read `{shown}`: {error}"))?;
-		let (mut session, declaration) = dependency_session(file, &text)?;
+		let (mut session, declaration) = self.bootstrap.session(file, &text)?;
 		let generate = dependency_sources(&mut session, declaration)
 			.map_err(|message| format!("{shown}: error: {message}"))?
 			.into_iter()
@@ -1760,7 +1964,10 @@ impl Resolver<'_> {
 /// Adds the packages that the path dependencies of a package outside a
 /// workspace name, transitively, as requesters: their Git dependencies are
 /// resolved with the others.
-fn add_path_requesters(requesters: &mut Vec<Requester>) -> Result<(), String> {
+fn add_path_requesters(
+	requesters: &mut Vec<Requester>,
+	bootstrap: &mut Bootstrap,
+) -> Result<(), String> {
 	let mut index = 0;
 	while index < requesters.len() {
 		let requester = requesters[index].clone();
@@ -1779,9 +1986,11 @@ fn add_path_requesters(requesters: &mut Vec<Requester>) -> Result<(), String> {
 			if known || !directory.join("package.fa").is_file() {
 				continue;
 			}
+			let mut dependencies = bootstrap.read_declared(&directory.join("dependencies.fa"))?;
+			dependencies.extend(package_imports(&directory)?);
 			requesters.push(Requester {
 				name: shown_path(&directory),
-				dependencies: read_declared(&directory.join("dependencies.fa"))?,
+				dependencies,
 				directory,
 			});
 		}
@@ -1948,6 +2157,7 @@ pub(crate) fn mount(
 	for &library in &reached {
 		let found = &resolution.libraries[library];
 		if let Some(targets) = &found.targets
+			&& !target.is_empty()
 			&& !targets.iter().any(|other| other == target)
 			&& found.directory != package
 		{

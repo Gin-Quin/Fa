@@ -114,6 +114,21 @@ def goose_source_at_size(source, size, runtime=False):
     return source
 
 
+FA_SIZE_LINE = re.compile(r"^(\s*let\s+\w+\s*=\s*)([\d_]+)(\s*--.*BENCH_N.*)$", re.M)
+
+
+def fa_source(name, size, fa_dir):
+    """The Fa program at the size: a Goose-suite port's `let n = … -- BENCH_N`
+    constant is rewritten in a copy, as `run.ts` and `build.sh` do."""
+    source = ROOT / "benchmarks" / name / "main.fa"
+    text = source.read_text()
+    if not FA_SIZE_LINE.search(text):
+        return source
+    copy = fa_dir / "main.fa"
+    copy.write_text(FA_SIZE_LINE.sub(lambda m: f"{m[1]}{size}{m[3]}", text, count=1))
+    return copy
+
+
 def goose_command(directory, size):
     source = (directory / "goose/main.goose").read_text()
     constant = SIZE_LINE.search(source) is not None
@@ -125,7 +140,7 @@ def build(name, size, directory, runtime_size=False):
     fa_dir, goose_dir = directory / "fa", directory / "goose"
     fa_dir.mkdir(parents=True, exist_ok=True)
     goose_dir.mkdir(parents=True, exist_ok=True)
-    execute([os.environ.get("FA", ROOT / "target/release/fa"), "build", source / "main.fa",
+    execute([os.environ.get("FA", ROOT / "target/release/fa"), "build", fa_source(name, size, fa_dir),
              "--target=native", "--emit-ir", f"--output={fa_dir}"], fa_dir / "build.log")
     fa = fa_dir / "native/main"
     goose_source = (source / "main.goose").read_text()
@@ -201,7 +216,7 @@ def main():
                 if args.rebuild_fa:
                     fa_dir = directory / "fa"
                     execute([os.environ.get("FA", ROOT / "target/release/fa"), "build",
-                             ROOT / "benchmarks" / name / "main.fa", "--target=native", "--emit-ir",
+                             fa_source(name, size, fa_dir), "--target=native", "--emit-ir",
                              f"--output={fa_dir}"], fa_dir / "build.log")
                     exe = fa_dir / "native/main"
                     exe.with_suffix(".s").write_bytes(execute(["objdump", "-d", "--no-show-raw-insn", exe]))

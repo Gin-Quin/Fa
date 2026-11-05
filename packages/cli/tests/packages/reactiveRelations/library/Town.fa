@@ -1,0 +1,9 @@
+export type = {
+	people: Pool<Person> = []
+	type Person = {
+		name: String
+		reactive mood: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Pool<people->bestFriend>
+	}
+}

@@ -1,0 +1,19 @@
+reactive town: library.Town = {}
+
+export function = () => {
+	use ana = town.people.add({ name = "Ana", mood = "calm" })
+	use bao = town.people.add({ name = "Bao", mood = "calm" })
+	use cleo = town.people.add({ name = "Cleo", mood = "calm" })
+	watch {
+		console.log("Bao has {bao.bestFriendOf.size}")
+	}
+	watch {
+		console.log("Cleo has {cleo.bestFriendOf.size}")
+	}
+	watch {
+		console.log("Ana is {ana.mood}")
+	}
+	library.befriend(town, "Ana", "Bao")
+	library.befriend(town, "Ana", "Cleo")
+	library.befriend(town, "Bao", "Cleo")
+}

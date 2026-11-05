@@ -1,0 +1,21 @@
+-- The review of 2026-11-05 (design/reviews/repros/cross-file-effects/):
+-- `touch` of another file pushes into `shared` of a third one. Its call is an
+-- effect on `shared`, like in one file: undeclared (`EFF001`), it
+-- invalidates `head` (`REF001`) and can't run while a loop iterates over
+-- `shared` (`REF012`; accepted before, an endless loop on Bun).
+-- file: main.fa
+function run = () throws IndexError => {
+	use head = try shared[0]
+	touch() -- error EFF001
+	console.log(head) -- error REF001
+	for item in shared {
+		touch() -- error EFF001, REF012
+	}
+}
+try run()
+-- file: shared.fa
+export mutable = ["a", "b"]
+-- file: touch.fa
+export function = () => shared.push("y")
+-- file: grow.fa
+export function = (list: Array<String>) => list.push("x")

@@ -1,0 +1,7 @@
+type Player = { score: Integer }
+function run = (f: () => Void) => f()
+function bump = (p: Player) => {
+	run(() => {
+		p.score += 1
+	})
+}

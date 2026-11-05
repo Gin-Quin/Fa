@@ -1220,6 +1220,15 @@ impl Generator<'_> {
 			owns,
 		) && !self.copies_links(node, ty)
 		{
+			// erased generic code: an element with relation sides read from a
+			// place is stored as a copy without links (D18), found at run time
+			if matches!(self.types.kind(ty), TypeKind::Param(_))
+				&& !self.is_move(node)
+				&& self.value_place_root(node).is_some()
+			{
+				let helper = self.helper("faUnlinked");
+				return js::call(helper, &[value.text]);
+			}
 			return value;
 		}
 		self.copy_of(value, ty)

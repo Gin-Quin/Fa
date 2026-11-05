@@ -1,0 +1,6 @@
+type E = Errors { Bad }
+function fail = (): Integer throws E => {
+	throw E.Bad
+}
+function f = (x: Integer = try fail()) => x + 1
+console.log(f())

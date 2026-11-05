@@ -1,0 +1,10 @@
+async function compute = (n: Integer): Integer => n * 2
+
+async function capture = () => {
+	let task = start compute(1)
+	async function later = () => await task
+	let moved = task
+	console.log(await moved)
+	console.log(await later())
+}
+await capture()

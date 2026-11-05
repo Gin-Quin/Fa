@@ -349,11 +349,17 @@ impl Walker<'_> {
 	pub(crate) fn finish_reactivity(&mut self) {
 		let tree = Arc::clone(&self.tree);
 		let root = NodeId::new(tree.root);
-		// a file without reactivity needs nothing (found by its scan, scan.rs)
-		if !self.s.source_file(self.file).scan.has_reactivity {
+		// a program without reactivity needs nothing (found by the scans of
+		// its files, scan.rs); a file of a program with reactivity that
+		// declares none still instruments what it writes and reads of the
+		// sources of objects (relation sides, `reactive` fields), which its
+		// functions may be given by other files
+		let declares = self.s.source_file(self.file).scan.has_reactivity;
+		if !declares && !self.s.program_has_reactivity() {
 			return;
 		}
 		let mut pass = Pass {
+			objects_only: !declares,
 			summaries: FxHashMap::default(),
 			in_progress: FxHashSet::default(),
 			derived: Vec::new(),
@@ -398,9 +404,12 @@ impl Walker<'_> {
 		self.report_derived_cycles(&pass);
 	}
 
-	/// The entry function of a program file: `export function = …`.
+	/// The entry function of a program file or of the package's entry
+	/// module: `export function = …`.
 	fn entry_function(&self, mut statements: impl Iterator<Item = NodeId>) -> Option<NodeId> {
-		if self.s.role(self.file) != crate::modules::FileRole::Program {
+		if self.s.role(self.file) != crate::modules::FileRole::Program
+			&& !self.s.is_entry(self.file)
+		{
 			return None;
 		}
 		statements.find(|&statement| matches!(self.view(statement), View::ExportFunction { .. }))
@@ -842,6 +851,10 @@ struct Chain {
 
 /// The state of the pass.
 struct Pass {
+	/// The file declares no reactivity: only the sources of objects
+	/// (relation sides, `reactive` fields) are instrumented, not its
+	/// parameters (no reactive instances).
+	objects_only: bool,
 	summaries: FxHashMap<NodeId, Summary>,
 	in_progress: FxHashSet<NodeId>,
 	/// The derived declarations met, with their value and the function
@@ -1290,6 +1303,19 @@ impl Pass {
 				}
 			}
 			Callee::Value | Callee::Conversion(_) | Callee::Member(_) => {
+				// a function of another file may write the sources of the
+				// objects it is given (relation sides, `reactive` fields): the
+				// pending blocks run after the statement
+				let external = match w.view(w.strip_groups(callee)) {
+					View::Name(_) => matches!(w.a.resolution(callee), Resolution::External(_)),
+					View::Access { members, .. } => members.last().is_some_and(|member| {
+						matches!(w.a.resolution(member), Resolution::External(_))
+					}),
+					_ => false,
+				};
+				if external {
+					effects.writes_reactive = true;
+				}
 				self.visit(w, callee, cx, effects);
 				self.visit_arguments(w, &info.arguments, cx, effects);
 			}
@@ -1416,7 +1442,9 @@ impl Pass {
 						steps: Vec::new(),
 					}),
 					SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
-						if is_param_of(w, cx.function, symbol) && !is_flat(w, symbol) =>
+						if !self.objects_only
+							&& is_param_of(w, cx.function, symbol)
+							&& !is_flat(w, symbol) =>
 					{
 						Some(ReactivePlace {
 							root: ReactiveRoot::Param(symbol),

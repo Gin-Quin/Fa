@@ -74,6 +74,9 @@ pub struct Session {
 	/// The reverse edges of the module graph: the loaded modules whose scan
 	/// reads each module (§4 #10), kept up to date as versions are added.
 	readers: FxHashMap<String, Vec<String>>,
+	/// The module of the package's entry (`application/main`): its exported
+	/// function infers its effects, like a program's (D51).
+	entry: Option<String>,
 }
 
 impl Default for Session {
@@ -123,6 +126,7 @@ impl Session {
 			comptime: crate::comptime::State::default(),
 			shared: None,
 			readers: FxHashMap::default(),
+			entry: None,
 		}
 	}
 
@@ -151,6 +155,7 @@ impl Session {
 			comptime,
 			shared: Some(shared),
 			readers: FxHashMap::default(),
+			entry: self.entry.clone(),
 		}
 	}
 
@@ -266,6 +271,29 @@ impl Session {
 		} else {
 			target.to_string()
 		};
+	}
+
+	/// The module of the package's entry (`application/main`): its exported
+	/// function infers its effects (D51). Set it before analyzing.
+	pub fn set_entry(&mut self, entry: Option<&str>) {
+		self.entry = entry.map(str::to_string);
+	}
+
+	/// Whether the program declares reactivity anywhere (a `reactive` value
+	/// or field, a `derived` value, a `watch` block), from the scans of its
+	/// files: a whole-program fact. Without it, no write anywhere notifies
+	/// observers (check/reactivity.rs).
+	pub(crate) fn program_has_reactivity(&self) -> bool {
+		self.files.iter().any(|file| file.scan.has_reactivity)
+			|| self
+				.shared
+				.as_ref()
+				.is_some_and(|shared| shared.scans.values().any(|scan| scan.has_reactivity))
+	}
+
+	/// Whether a file is the package's entry module.
+	pub(crate) fn is_entry(&self, file: FileId) -> bool {
+		self.entry.as_deref() == Some(self.module(file))
 	}
 
 	/// Whether the program is built without a C library

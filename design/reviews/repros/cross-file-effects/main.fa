@@ -1,0 +1,9 @@
+function run = () throws IndexError => {
+	use head = try shared[0]
+	touch()
+	console.log(head)
+	for item in shared {
+		touch()
+	}
+}
+try run()

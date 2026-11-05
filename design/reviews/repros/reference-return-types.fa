@@ -1,0 +1,15 @@
+type Person = { name: String }
+function run = () => {
+	mutable people: Array<Person> = [Person { name = "Ana" }]
+	mutable refs: Array<Person in people> = []
+	console.log(refs.length)
+}
+function leak = (): Person in local => {
+	mutable local: Array<Person> = [Person { name = "Ana" }]
+	return local[0]
+}
+function leak2 = (people: Array<Person>): Person in people => {
+	mutable local: Array<Person> = [Person { name = "Ana" }]
+	return local[0]
+}
+run()

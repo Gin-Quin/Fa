@@ -112,6 +112,12 @@ fa_sys_mmap:
 	mov $9, %eax
 	syscall
 	ret
+	.section .text.fa_sys_mprotect,"ax",@progbits
+	.globl fa_sys_mprotect
+fa_sys_mprotect:
+	mov $10, %eax
+	syscall
+	ret
 	.section .text.memcpy,"ax",@progbits
 	.globl memcpy
 memcpy:
@@ -245,6 +251,11 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		for global in self.module.get_globals() {
 			if !global.is_declaration() && !global.get_name().to_bytes().starts_with(b"llvm.") {
 				global.set_linkage(Linkage::Internal);
+				// a variable of the executable itself: one `%fs`-relative
+				// access (a C library takes the dynamic model, `use_dynamic_tls`)
+				if global.is_thread_local() && self.target != Target::Wasm {
+					global.set_thread_local_mode(Some(inkwell::ThreadLocalMode::LocalExecTLSModel));
+				}
 			}
 		}
 		Ok(())
@@ -263,6 +274,9 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 			|| self.module.get_function("fa_grow").is_some()
 		{
 			self.mappings()?;
+		}
+		if self.module.get_function("fa_os_reserve").is_some() {
+			self.arena_space()?;
 		}
 		if self.module.get_function("fa_clock").is_some() {
 			self.clock()?;
@@ -642,6 +656,155 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 					.unwrap()
 					.into_pointer_value();
 				let result = checked(builder, result)?;
+				builder.build_return(Some(&result))?;
+				Ok(())
+			},
+		)?;
+		Ok(())
+	}
+
+	/// Whether the target can reserve the range of compressed arena links
+	/// (`fa_os_reserve`): 64-bit Linux, with or without the C library.
+	pub fn reserves_arena_space(target: Target) -> bool {
+		match target {
+			Target::Native => cfg!(all(target_os = "linux", target_pointer_width = "64")),
+			Target::NativeFreestanding => true,
+			Target::Wasm => false,
+		}
+	}
+
+	/// The range of compressed arena links (the runtime's `take_arena_page`):
+	/// `fa_os_reserve(ptr start, usize length) -> ptr`, address space at
+	/// `start` (`MAP_FIXED_NOREPLACE`: an older kernel may place it elsewhere,
+	/// which the runtime checks) that is neither readable nor writable (so not
+	/// counted as committed memory), or null;
+	/// `fa_os_commit(ptr, usize length) -> i32`, which makes part of it
+	/// readable and writable, 0 on success. Elsewhere, null and -1.
+	fn arena_space(&self) -> Result<(), Error> {
+		let ptr = self.context.ptr_type(AddressSpace::default());
+		let usize = self.usize;
+		let i32 = self.context.i32_type();
+		let i64 = self.context.i64_type();
+		let available = Self::reserves_arena_space(self.target);
+		const PROT_NONE: u64 = 0;
+		const PROT_READ_WRITE: u64 = 0x3;
+		// MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE
+		const MAP_RESERVE: u64 = 0x10_4022;
+		let freestanding = self.target == Target::NativeFreestanding;
+		self.define(
+			"fa_os_reserve",
+			ptr.fn_type(&[ptr.into(), usize.into()], false),
+			&[],
+			|builder, function| {
+				if !available {
+					builder.build_return(Some(&ptr.const_null()))?;
+					return Ok(());
+				}
+				let start = function.get_nth_param(0).unwrap();
+				let length = function.get_nth_param(1).unwrap();
+				let arguments = [
+					builder
+						.build_ptr_to_int(start.into_pointer_value(), usize, "")?
+						.into(),
+					length.into(),
+					i32.const_int(PROT_NONE, false).into(),
+					i32.const_int(MAP_RESERVE, false).into(),
+					i32.const_all_ones().into(),
+					i64.const_zero().into(),
+				];
+				let parameters = [
+					usize.into(),
+					usize.into(),
+					i32.into(),
+					i32.into(),
+					i32.into(),
+					i64.into(),
+				];
+				let result = if freestanding {
+					let mmap = self.system_call("mmap", usize.fn_type(&parameters, false));
+					builder
+						.build_call(mmap, &arguments, "")?
+						.try_as_basic_value()
+						.basic()
+						.unwrap()
+						.into_int_value()
+				} else {
+					let parameters = [
+						ptr.into(),
+						usize.into(),
+						i32.into(),
+						i32.into(),
+						i32.into(),
+						i64.into(),
+					];
+					let arguments = [
+						start.into(),
+						length.into(),
+						i32.const_int(PROT_NONE, false).into(),
+						i32.const_int(MAP_RESERVE, false).into(),
+						i32.const_all_ones().into(),
+						i64.const_zero().into(),
+					];
+					let mmap = self.declare("mmap", ptr.fn_type(&parameters, false));
+					let result = builder
+						.build_call(mmap, &arguments, "")?
+						.try_as_basic_value()
+						.basic()
+						.unwrap()
+						.into_pointer_value();
+					builder.build_ptr_to_int(result, usize, "")?
+				};
+				// `MAP_FAILED` (-1), or -errno in [-4095, -1] from the system call
+				let failed = builder.build_int_compare(
+					IntPredicate::UGT,
+					result,
+					usize.const_int(-4096i64 as u64, true),
+					"",
+				)?;
+				let pointer = builder.build_int_to_ptr(result, ptr, "")?;
+				let result = builder.build_select(failed, ptr.const_null(), pointer, "")?;
+				builder.build_return(Some(&result))?;
+				Ok(())
+			},
+		)?;
+		self.define(
+			"fa_os_commit",
+			i32.fn_type(&[ptr.into(), usize.into()], false),
+			&[],
+			|builder, function| {
+				if !available {
+					builder.build_return(Some(&i32.const_all_ones()))?;
+					return Ok(());
+				}
+				let arguments = [
+					function.get_nth_param(0).unwrap().into(),
+					function.get_nth_param(1).unwrap().into(),
+					i32.const_int(PROT_READ_WRITE, false).into(),
+				];
+				let result = if freestanding {
+					let mprotect = self.system_call(
+						"mprotect",
+						usize.fn_type(&[ptr.into(), usize.into(), i32.into()], false),
+					);
+					let result = builder
+						.build_call(mprotect, &arguments, "")?
+						.try_as_basic_value()
+						.basic()
+						.unwrap()
+						.into_int_value();
+					builder.build_int_truncate(result, i32, "")?
+				} else {
+					let mprotect = self.declare(
+						"mprotect",
+						i32.fn_type(&[ptr.into(), usize.into(), i32.into()], false),
+					);
+					builder
+						.build_call(mprotect, &arguments, "")?
+						.try_as_basic_value()
+						.basic()
+						.unwrap()
+						.into_int_value()
+				};
 				builder.build_return(Some(&result))?;
 				Ok(())
 			},

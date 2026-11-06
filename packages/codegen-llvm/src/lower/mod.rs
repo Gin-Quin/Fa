@@ -388,7 +388,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// Async: the mode of the program, the async instances (`tasks.rs`).
 	tasks: tasks::Tasks<'ctx>,
 	/// Types whose construction and uses prove a single arena owner.
-	tree_arenas: trees::TreeArenas,
+	tree_arenas: trees::TreeArenas<'ctx>,
 	/// The payload words of each named union kept inline, `None` when boxed
 	/// (`inline_unions.rs`).
 	inline_unions: std::cell::RefCell<FxHashMap<fa_analyzer::ids::NominalId, Option<u32>>>,
@@ -658,6 +658,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.copy_cleanup_captures();
 		}
 		self.prepare_tree_arenas()?;
+		if let Some(flag) = self.module.get_global("fa_compressed_links") {
+			let compressed = self.tree_arenas.compressed_any();
+			flag.set_initializer(&self.context.i32_type().const_int(compressed as u64, false));
+			flag.set_constant(true);
+			flag.set_linkage(Linkage::Internal);
+		}
 		for &file in &files {
 			self.switch_file(file);
 			let mut declarations: Vec<NodeId> = self.functions.keys().copied().collect();

@@ -115,7 +115,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				&& self.repr_of(target, call.index())? == repr
 			{
 				self.pending_receiver = None;
-				return Ok((value.value.expect("an edge").into_pointer_value(), None));
+				let pointer =
+					self.edge_address(&self.builder, value.repr, value.value.expect("an edge"))?;
+				return Ok((pointer, None));
 			}
 		}
 		let place = match node {
@@ -142,10 +144,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			));
 		};
 		if let Repr::Rec(target) = place.repr {
-			let pointer = self
-				.builder
-				.build_load(self.pointer_type(), place.pointer, "")?
-				.into_pointer_value();
+			let pointer = self.load_edge(place)?;
 			place = Slot {
 				pointer,
 				repr: self.repr_of(target, call.index())?,

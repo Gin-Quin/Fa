@@ -12,6 +12,7 @@
 int printf(const char *format, ...);
 int fflush(void *stream);
 void *malloc(size_t size);
+void *realloc(void *pointer, size_t size);
 void *aligned_alloc(size_t align, size_t size);
 void free(void *pointer);
 void abort(void);
@@ -41,6 +42,46 @@ void fa_free(void *bytes, size_t size, size_t align) {
 	(void)align;
 	__atomic_fetch_sub(&allocated, 1, __ATOMIC_RELAXED);
 	free(bytes);
+}
+
+void *fa_grow(void *bytes, size_t old, size_t used, size_t size) {
+	(void)old;
+	(void)used;
+	return realloc(bytes, size);
+}
+
+// Like fa_pages below, refuse refills: allocator tests provide their pages
+// explicitly and check that a full page returns failure without overrunning it.
+void *fa_os_map(size_t length, int32_t protection) {
+	(void)length;
+	(void)protection;
+	return 0;
+}
+
+void fa_os_unmap(void *start, size_t length) {
+	(void)start;
+	(void)length;
+	abort(); // the test platform never creates a mapping
+}
+
+void *fa_os_remap(void *start, size_t old_length, size_t length, void *at) {
+	(void)start;
+	(void)old_length;
+	(void)length;
+	(void)at;
+	return 0;
+}
+
+void *fa_os_reserve(void *start, size_t length) {
+	(void)start;
+	(void)length;
+	return 0;
+}
+
+int32_t fa_os_commit(void *start, size_t length) {
+	(void)start;
+	(void)length;
+	return -1;
 }
 
 // generated with the program (the printing of unions)
@@ -1002,17 +1043,17 @@ static TestTableEntry *table_test_insert(FaTable *table, int64_t key) {
 // Every third key is removed in the walk that finds it, the others found then killed.
 static void table_test_kill(FaTable *table, int64_t key) {
 	int64_t position = table_test_find(table, key);
-	CHECK(position >= 0 && fa_table_live(table, position));
+	CHECK(position >= 0 && fa_table_live(table, position, sizeof(TestTableEntry)));
 	if (key % 3 == 0) {
 		int64_t removed = fa_table_remove(table, table_test_hash(&key), &key, table_test_equals,
 		                                  sizeof(TestTableEntry), 0);
 		CHECK(removed == position);
 		CHECK(table_test_find(table, key) < 0);
-		fa_table_release(table, position);
+		fa_table_release(table, position, sizeof(TestTableEntry));
 	} else {
-		fa_table_kill(table, table_test_hash(&key), position);
+		fa_table_kill(table, table_test_hash(&key), position, sizeof(TestTableEntry));
 	}
-	CHECK(table_test_find(table, key) < 0 && !fa_table_live(table, position));
+	CHECK(table_test_find(table, key) < 0 && !fa_table_live(table, position, sizeof(TestTableEntry)));
 	CHECK(fa_table_remove(table, table_test_hash(&key), &key, table_test_equals,
 	                      sizeof(TestTableEntry), 0) < 0);
 }
@@ -1021,7 +1062,7 @@ static void test_tables(void) {
 	long before = allocated;
 	for (int colliding = 0; colliding < 2; colliding += 1) {
 		table_test_colliding = colliding;
-		FaTable *table = fa_table_new(4);
+		FaTable *table = fa_table_new(4, sizeof(TestTableEntry));
 		TestTableEntry *first = table_test_insert(table, 0);
 		for (int64_t key = 1; key < 200; key += 1) {
 			TestTableEntry *entry = table_test_insert(table, key);
@@ -1043,7 +1084,7 @@ static void test_tables(void) {
 			if (position >= 0) {
 				TestTableEntry *entry =
 					(TestTableEntry *)fa_table_entry(table, position, sizeof(TestTableEntry));
-				CHECK(entry->key == key && fa_table_live(table, position));
+				CHECK(entry->key == key && fa_table_live(table, position, sizeof(TestTableEntry)));
 			}
 		}
 		// the dead entries are reused, lowest first in a chunk
@@ -1065,7 +1106,7 @@ static void test_tables(void) {
 		CHECK(table_test_find(table, 1000) < 0);
 		fa_table_free(copy, sizeof(TestTableEntry));
 		int64_t capacity = table->capacity;
-		fa_table_clear(table);
+		fa_table_clear(table, sizeof(TestTableEntry));
 		CHECK(table->length == 0 && table->used == 0 && table->capacity == capacity);
 		CHECK(table_test_find(table, 0) < 0);
 		// a cleared table fills its chunks in order again
@@ -1078,7 +1119,7 @@ static void test_tables(void) {
 	}
 	// A fixed-size live set under churn neither grows the entries nor the index.
 	table_test_colliding = 0;
-	FaTable *table = fa_table_new(4);
+	FaTable *table = fa_table_new(4, sizeof(TestTableEntry));
 	table_test_insert(table, -1);
 	for (int64_t key = 0; key < 10000; key += 1) {
 		table_test_insert(table, key);
@@ -1107,7 +1148,7 @@ static void test_tables(void) {
 	CHECK(table_test_find(table, 5) == 6 && table->free == 3);
 	fa_table_free(table, sizeof(TestTableEntry));
 	// Bitwise keys: an equal tag is not an equal key.
-	FaTable *bitwise = fa_table_new(4);
+	FaTable *bitwise = fa_table_new(4, sizeof(TestTableEntry));
 	for (int64_t key = 0; key < 50; key += 1) {
 		int64_t probe = fa_table_find(bitwise, 7, &key, 0, sizeof(TestTableEntry), 8);
 		CHECK(probe < 0);
@@ -1148,7 +1189,7 @@ static void test_tables(void) {
 	CHECK(fa_table_find(&header, 0x300000000ull, &absent, 0, sizeof(TestTableEntry), 8) == ~3ll);
 	// the full hash is compared: the same low bits are another key
 	CHECK(fa_table_find(&header, 0x100000001ull, &absent, 0, sizeof(TestTableEntry), 8) == ~3ll);
-	fa_table_kill(&header, hashes[0], 0);
+	fa_table_kill(&header, hashes[0], 0, sizeof(TestTableEntry));
 	CHECK(wide[0].position == 2 && wide[1].position == 3 && wide[2].position == 0);
 	CHECK(header.length == 2 && chunk.live == 6);
 	int64_t key = 30;

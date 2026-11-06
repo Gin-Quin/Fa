@@ -1112,18 +1112,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Rec(target) if op.is_none() => {
 				let right = self.convert(right, left.repr, node.index())?;
+				let edge = left.repr;
 				let target = self.repr_of(target, node.index())?;
 				let compare = self.nested_equals_function(target)?;
+				let left = self.edge_address(&self.builder, edge, left.value.expect("an edge"))?;
+				let right =
+					self.edge_address(&self.builder, edge, right.value.expect("an edge"))?;
 				let equal = self
 					.builder
-					.build_call(
-						compare,
-						&[
-							left.value.expect("an edge").into(),
-							right.value.expect("an edge").into(),
-						],
-						"",
-					)?
+					.build_call(compare, &[left.into(), right.into()], "")?
 					.try_as_basic_value()
 					.basic()
 					.expect("equality")

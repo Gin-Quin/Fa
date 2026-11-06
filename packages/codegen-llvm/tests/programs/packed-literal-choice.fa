@@ -1,0 +1,32 @@
+-- A choice among string literals of one length by an integer is one packed
+-- constant read at `base + length × index` (the `else` literal for any other
+-- integer, negative ones included).
+function operator = (index: Integer): String => when index is {
+	0 => " + "
+	1 => " - "
+	2 => " * "
+	else => " / "
+}
+
+function small = (index: Int32): String => when index is {
+	2 => "c"
+	0 => "a"
+	1 => "b"
+	else => "?"
+}
+
+-- lengths differ: the ordinary branches
+function word = (index: Integer): String => when index is {
+	0 => "zero"
+	1 => "one"
+	else => "many"
+}
+
+mutable text = ""
+for index in -2..6 {
+	text += operator(index)
+	text += small(Int32(index))
+	text += word(index)
+}
+console.log("[{text}]")
+-- prints: [ / ?many / ?many + azero - bone * cmany / ?many / ?many / ?many]

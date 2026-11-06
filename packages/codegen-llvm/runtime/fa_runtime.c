@@ -3988,7 +3988,111 @@ typedef struct FaArenaCleanup {
 
 static FA_THREAD_LOCAL FaArena *tree_arena;
 static FA_THREAD_LOCAL size_t tree_arena_depth;
+// The bump and the end of the current arena, while it is current (its own
+// `bump` and `end` are written back when it stops being current): one
+// thread-local access each in `fa_arena_alloc`, no arena pointer to load and
+// test. Both null without a current arena, so that any allocation refills.
+static FA_THREAD_LOCAL uint8_t *tree_bump;
+static FA_THREAD_LOCAL uint8_t *tree_end;
 static size_t live_tree_arenas;
+
+// Compressed links (`design/decisions.md`, "Compressed links for
+// arena-allocated recursive values"; the compiler's `trees.rs`): on 64-bit
+// Linux, the recursive edges of the arena types are 32-bit links, an
+// address divided by 8, so every arena node lies in the first 32 GiB of the
+// address space. The arena pages then come from one range reserved at the
+// first one, from 2 GiB (below it: a non-PIE executable and its `brk` heap)
+// to 32 GiB, or the largest power-of-two part of it the system grants (an
+// address-space limit), at least 64 MiB. Pages are committed 1 MiB at a
+// time and reused, never given back. No node is at address 0: link 0 is
+// the absent edge. A full range is the out-of-memory stop.
+
+/// Set by the compiler: whether arena links are compressed.
+int32_t fa_compressed_links = 0;
+
+/// A reservation of `length` bytes of address space at `start` exactly,
+/// neither readable nor writable, or null.
+void *fa_os_reserve(void *start, size_t length);
+/// Makes `length` reserved bytes at `start` readable and writable; 0 on success.
+int32_t fa_os_commit(void *start, size_t length);
+
+#if UINTPTR_MAX > 0xFFFFFFFFu
+#define ARENA_SPACE_START ((uintptr_t)1 << 31)
+#define ARENA_SPACE_END ((uintptr_t)1 << 35)
+#else
+#define ARENA_SPACE_START ((uintptr_t)1 << 30)
+#define ARENA_SPACE_END ((uintptr_t)1 << 31)
+#endif
+#define ARENA_SPACE_MINIMUM ((size_t)1 << 26)
+#define ARENA_COMMIT ((size_t)1 << 20)
+
+static uint8_t *arena_space_next;
+static uint8_t *arena_space_committed;
+static uint8_t *arena_space_end;
+static FreeBlock *free_arena_pages;
+static int32_t arena_space_lock;
+
+static uint8_t *take_arena_page_locked(void) {
+	if (free_arena_pages != 0) {
+		FreeBlock *page = free_arena_pages;
+		free_arena_pages = page->next;
+		return (uint8_t *)page;
+	}
+	if (arena_space_end == 0) {
+		uint8_t *start = (uint8_t *)ARENA_SPACE_START;
+		size_t length = (size_t)(ARENA_SPACE_END - ARENA_SPACE_START);
+		for (; length >= ARENA_SPACE_MINIMUM; length /= 2) {
+			if (fa_os_reserve(start, length) == start) {
+				arena_space_next = start;
+				arena_space_committed = start;
+				arena_space_end = start + length;
+				break;
+			}
+		}
+		if (arena_space_end == 0) {
+			return 0;
+		}
+	}
+	if (arena_space_next == arena_space_end) {
+		static const uint8_t message[] =
+			"stop: out of memory (the range of the arenas of recursive values is full)\n";
+		fa_write(2, message, sizeof(message) - 1);
+		fa_exit(101);
+		__builtin_unreachable();
+	}
+	if (arena_space_next == arena_space_committed) {
+		size_t room = (size_t)(arena_space_end - arena_space_committed);
+		size_t step = room < ARENA_COMMIT ? room : ARENA_COMMIT;
+		if (fa_os_commit(arena_space_committed, step) != 0) {
+			return 0;
+		}
+		arena_space_committed += step;
+	}
+	uint8_t *page = arena_space_next;
+	arena_space_next += PAGE_SIZE;
+	return page;
+}
+
+static __attribute__((noinline)) uint8_t *take_arena_page(void) {
+	if (!fa_compressed_links) {
+		return take_pages(1);
+	}
+	spin_lock(&arena_space_lock);
+	uint8_t *page = take_arena_page_locked();
+	spin_unlock(&arena_space_lock);
+	return page;
+}
+
+static void give_arena_page(uint8_t *page) {
+	if (!fa_compressed_links) {
+		give_pages(page, 1);
+		return;
+	}
+	spin_lock(&arena_space_lock);
+	((FreeBlock *)page)->next = free_arena_pages;
+	free_arena_pages = (FreeBlock *)page;
+	spin_unlock(&arena_space_lock);
+}
 
 FA_EXPORT __attribute__((always_inline)) void fa_arena_enter(void) {
 	tree_arena_depth += 1;
@@ -4001,7 +4105,14 @@ static FaArena *arena_of(const void *node) {
 // Boxing a moved root extends its existing region. A borrowed root is
 // deep-copied into the current/new region instead.
 FA_EXPORT void fa_arena_enter_owned(const void *root) {
-	if (tree_arena_depth == 0) { tree_arena = arena_of(root); }
+	if (tree_arena_depth == 0) {
+		FaArena *arena = arena_of(root);
+		tree_arena = arena;
+		if (arena != 0) {
+			tree_bump = arena->bump;
+			tree_end = arena->end;
+		}
+	}
 	tree_arena_depth += 1;
 }
 
@@ -4014,7 +4125,7 @@ static void release_arena(FaArena *arena) {
 	}
 	while (arena != 0) {
 		FaArena *next = arena->next;
-		give_pages((uint8_t *)arena, 1);
+		give_arena_page((uint8_t *)arena);
 		arena = next;
 	}
 }
@@ -4029,13 +4140,19 @@ FA_EXPORT __attribute__((always_inline)) void fa_arena_leave(const void *root) {
 	if (--tree_arena_depth == 0) {
 		FaArena *arena = tree_arena;
 		tree_arena = 0;
-		if (arena != 0 && arena_of(root) != arena) { release_arena(arena); }
+		if (arena != 0) {
+			arena->bump = tree_bump;
+			arena->end = tree_end;
+			tree_bump = 0;
+			tree_end = 0;
+			if (arena_of(root) != arena) { release_arena(arena); }
+		}
 	}
 }
 
 static __attribute__((noinline)) void *arena_refill(size_t size, size_t align) {
 	size_t offset = (ARENA_HEADER + align - 1) & ~(align - 1);
-	FaArena *chunk = (FaArena *)take_pages(1);
+	FaArena *chunk = (FaArena *)take_arena_page();
 	if (chunk == 0 || offset > PAGE_SIZE || size > PAGE_SIZE - offset) {
 		static const uint8_t message[] = "stop: out of memory\n";
 		fa_write(2, message, sizeof(message) - 1);
@@ -4055,24 +4172,24 @@ static __attribute__((noinline)) void *arena_refill(size_t size, size_t align) {
 	}
 	chunk->owner = arena;
 	uint8_t *result = (uint8_t *)chunk + offset;
-	arena->bump = result + size;
-	arena->end = (uint8_t *)chunk + PAGE_SIZE;
+	tree_bump = result + size;
+	tree_end = (uint8_t *)chunk + PAGE_SIZE;
 	return result;
 }
 
 // All bumps remain eight-byte aligned. Larger ABI alignments add padding
 // only when needed; common 24-byte nodes no longer consume 32 bytes.
 FA_EXPORT __attribute__((always_inline)) void *fa_arena_alloc(size_t size, size_t align) {
-	size = (size + 7) & ~(size_t)7;
-	FaArena *arena = tree_arena;
-	if (__builtin_expect(arena != 0, 1)) {
-		size_t padding = align <= 8 ? 0 : -(uintptr_t)arena->bump & (align - 1);
-		size_t available = (size_t)(arena->end - arena->bump);
-		if (__builtin_expect(padding <= available && size <= available - padding, 1)) {
-			uint8_t *result = arena->bump + padding;
-			arena->bump = result + size;
-			return result;
-		}
+	// at least 8 bytes: a node has an address of its own (without an arena,
+	// bump and end are both null)
+	size = size == 0 ? 8 : (size + 7) & ~(size_t)7;
+	uint8_t *bump = tree_bump;
+	size_t padding = align <= 8 ? 0 : -(uintptr_t)bump & (align - 1);
+	size_t available = (size_t)(tree_end - bump);
+	if (__builtin_expect(padding <= available && size <= available - padding, 1)) {
+		uint8_t *result = bump + padding;
+		tree_bump = result + size;
+		return result;
 	}
 	return arena_refill(size, align);
 }

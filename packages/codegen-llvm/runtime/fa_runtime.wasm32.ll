@@ -85,8 +85,11 @@ source_filename = "fa_runtime.c"
 @free_blocks = internal unnamed_addr global [40 x ptr] zeroinitializer, align 16
 @class_next = internal unnamed_addr global [40 x ptr] zeroinitializer, align 16
 @class_end = internal unnamed_addr global [40 x ptr] zeroinitializer, align 16
+@fa_compressed_links = hidden local_unnamed_addr global i32 0, align 4
 @tree_arena_depth = internal unnamed_addr global i32 0, align 4
 @tree_arena = internal unnamed_addr global ptr null, align 4
+@tree_bump = internal unnamed_addr global ptr null, align 4
+@tree_end = internal unnamed_addr global ptr null, align 4
 @builder_capacity = internal unnamed_addr global i32 0, align 4
 @fa_live_blocks = hidden global i32 0, align 4
 @live_tree_arenas = internal global i32 0, align 4
@@ -225,7 +228,12 @@ source_filename = "fa_runtime.c"
 @CASE_IGNORABLE = internal unnamed_addr constant [464 x %struct.Range] [%struct.Range { i32 39, i32 39 }, %struct.Range { i32 46, i32 46 }, %struct.Range { i32 58, i32 58 }, %struct.Range { i32 94, i32 94 }, %struct.Range { i32 96, i32 96 }, %struct.Range { i32 168, i32 168 }, %struct.Range { i32 173, i32 173 }, %struct.Range { i32 175, i32 175 }, %struct.Range { i32 180, i32 180 }, %struct.Range { i32 183, i32 184 }, %struct.Range { i32 688, i32 879 }, %struct.Range { i32 884, i32 885 }, %struct.Range { i32 890, i32 890 }, %struct.Range { i32 900, i32 901 }, %struct.Range { i32 903, i32 903 }, %struct.Range { i32 1155, i32 1161 }, %struct.Range { i32 1369, i32 1369 }, %struct.Range { i32 1375, i32 1375 }, %struct.Range { i32 1425, i32 1469 }, %struct.Range { i32 1471, i32 1471 }, %struct.Range { i32 1473, i32 1474 }, %struct.Range { i32 1476, i32 1477 }, %struct.Range { i32 1479, i32 1479 }, %struct.Range { i32 1524, i32 1524 }, %struct.Range { i32 1536, i32 1541 }, %struct.Range { i32 1552, i32 1562 }, %struct.Range { i32 1564, i32 1564 }, %struct.Range { i32 1600, i32 1600 }, %struct.Range { i32 1611, i32 1631 }, %struct.Range { i32 1648, i32 1648 }, %struct.Range { i32 1750, i32 1757 }, %struct.Range { i32 1759, i32 1768 }, %struct.Range { i32 1770, i32 1773 }, %struct.Range { i32 1807, i32 1807 }, %struct.Range { i32 1809, i32 1809 }, %struct.Range { i32 1840, i32 1866 }, %struct.Range { i32 1958, i32 1968 }, %struct.Range { i32 2027, i32 2037 }, %struct.Range { i32 2042, i32 2042 }, %struct.Range { i32 2045, i32 2045 }, %struct.Range { i32 2070, i32 2093 }, %struct.Range { i32 2137, i32 2139 }, %struct.Range { i32 2184, i32 2184 }, %struct.Range { i32 2192, i32 2193 }, %struct.Range { i32 2199, i32 2207 }, %struct.Range { i32 2249, i32 2306 }, %struct.Range { i32 2362, i32 2362 }, %struct.Range { i32 2364, i32 2364 }, %struct.Range { i32 2369, i32 2376 }, %struct.Range { i32 2381, i32 2381 }, %struct.Range { i32 2385, i32 2391 }, %struct.Range { i32 2402, i32 2403 }, %struct.Range { i32 2417, i32 2417 }, %struct.Range { i32 2433, i32 2433 }, %struct.Range { i32 2492, i32 2492 }, %struct.Range { i32 2497, i32 2500 }, %struct.Range { i32 2509, i32 2509 }, %struct.Range { i32 2530, i32 2531 }, %struct.Range { i32 2558, i32 2558 }, %struct.Range { i32 2561, i32 2562 }, %struct.Range { i32 2620, i32 2620 }, %struct.Range { i32 2625, i32 2626 }, %struct.Range { i32 2631, i32 2632 }, %struct.Range { i32 2635, i32 2637 }, %struct.Range { i32 2641, i32 2641 }, %struct.Range { i32 2672, i32 2673 }, %struct.Range { i32 2677, i32 2677 }, %struct.Range { i32 2689, i32 2690 }, %struct.Range { i32 2748, i32 2748 }, %struct.Range { i32 2753, i32 2757 }, %struct.Range { i32 2759, i32 2760 }, %struct.Range { i32 2765, i32 2765 }, %struct.Range { i32 2786, i32 2787 }, %struct.Range { i32 2810, i32 2815 }, %struct.Range { i32 2817, i32 2817 }, %struct.Range { i32 2876, i32 2876 }, %struct.Range { i32 2879, i32 2879 }, %struct.Range { i32 2881, i32 2884 }, %struct.Range { i32 2893, i32 2893 }, %struct.Range { i32 2901, i32 2902 }, %struct.Range { i32 2914, i32 2915 }, %struct.Range { i32 2946, i32 2946 }, %struct.Range { i32 3008, i32 3008 }, %struct.Range { i32 3021, i32 3021 }, %struct.Range { i32 3072, i32 3072 }, %struct.Range { i32 3076, i32 3076 }, %struct.Range { i32 3132, i32 3132 }, %struct.Range { i32 3134, i32 3136 }, %struct.Range { i32 3142, i32 3144 }, %struct.Range { i32 3146, i32 3149 }, %struct.Range { i32 3157, i32 3158 }, %struct.Range { i32 3170, i32 3171 }, %struct.Range { i32 3201, i32 3201 }, %struct.Range { i32 3260, i32 3260 }, %struct.Range { i32 3263, i32 3263 }, %struct.Range { i32 3270, i32 3270 }, %struct.Range { i32 3276, i32 3277 }, %struct.Range { i32 3298, i32 3299 }, %struct.Range { i32 3328, i32 3329 }, %struct.Range { i32 3387, i32 3388 }, %struct.Range { i32 3393, i32 3396 }, %struct.Range { i32 3405, i32 3405 }, %struct.Range { i32 3426, i32 3427 }, %struct.Range { i32 3457, i32 3457 }, %struct.Range { i32 3530, i32 3530 }, %struct.Range { i32 3538, i32 3540 }, %struct.Range { i32 3542, i32 3542 }, %struct.Range { i32 3633, i32 3633 }, %struct.Range { i32 3636, i32 3642 }, %struct.Range { i32 3654, i32 3662 }, %struct.Range { i32 3761, i32 3761 }, %struct.Range { i32 3764, i32 3772 }, %struct.Range { i32 3782, i32 3782 }, %struct.Range { i32 3784, i32 3790 }, %struct.Range { i32 3864, i32 3865 }, %struct.Range { i32 3893, i32 3893 }, %struct.Range { i32 3895, i32 3895 }, %struct.Range { i32 3897, i32 3897 }, %struct.Range { i32 3953, i32 3966 }, %struct.Range { i32 3968, i32 3972 }, %struct.Range { i32 3974, i32 3975 }, %struct.Range { i32 3981, i32 3991 }, %struct.Range { i32 3993, i32 4028 }, %struct.Range { i32 4038, i32 4038 }, %struct.Range { i32 4141, i32 4144 }, %struct.Range { i32 4146, i32 4151 }, %struct.Range { i32 4153, i32 4154 }, %struct.Range { i32 4157, i32 4158 }, %struct.Range { i32 4184, i32 4185 }, %struct.Range { i32 4190, i32 4192 }, %struct.Range { i32 4209, i32 4212 }, %struct.Range { i32 4226, i32 4226 }, %struct.Range { i32 4229, i32 4230 }, %struct.Range { i32 4237, i32 4237 }, %struct.Range { i32 4253, i32 4253 }, %struct.Range { i32 4348, i32 4348 }, %struct.Range { i32 4957, i32 4959 }, %struct.Range { i32 5906, i32 5908 }, %struct.Range { i32 5938, i32 5939 }, %struct.Range { i32 5970, i32 5971 }, %struct.Range { i32 6002, i32 6003 }, %struct.Range { i32 6068, i32 6069 }, %struct.Range { i32 6071, i32 6077 }, %struct.Range { i32 6086, i32 6086 }, %struct.Range { i32 6089, i32 6099 }, %struct.Range { i32 6103, i32 6103 }, %struct.Range { i32 6109, i32 6109 }, %struct.Range { i32 6155, i32 6159 }, %struct.Range { i32 6211, i32 6211 }, %struct.Range { i32 6277, i32 6278 }, %struct.Range { i32 6313, i32 6313 }, %struct.Range { i32 6432, i32 6434 }, %struct.Range { i32 6439, i32 6440 }, %struct.Range { i32 6450, i32 6450 }, %struct.Range { i32 6457, i32 6459 }, %struct.Range { i32 6679, i32 6680 }, %struct.Range { i32 6683, i32 6683 }, %struct.Range { i32 6742, i32 6742 }, %struct.Range { i32 6744, i32 6750 }, %struct.Range { i32 6752, i32 6752 }, %struct.Range { i32 6754, i32 6754 }, %struct.Range { i32 6757, i32 6764 }, %struct.Range { i32 6771, i32 6780 }, %struct.Range { i32 6783, i32 6783 }, %struct.Range { i32 6823, i32 6823 }, %struct.Range { i32 6832, i32 6877 }, %struct.Range { i32 6880, i32 6891 }, %struct.Range { i32 6912, i32 6915 }, %struct.Range { i32 6964, i32 6964 }, %struct.Range { i32 6966, i32 6970 }, %struct.Range { i32 6972, i32 6972 }, %struct.Range { i32 6978, i32 6978 }, %struct.Range { i32 7019, i32 7027 }, %struct.Range { i32 7040, i32 7041 }, %struct.Range { i32 7074, i32 7077 }, %struct.Range { i32 7080, i32 7081 }, %struct.Range { i32 7083, i32 7085 }, %struct.Range { i32 7142, i32 7142 }, %struct.Range { i32 7144, i32 7145 }, %struct.Range { i32 7149, i32 7149 }, %struct.Range { i32 7151, i32 7153 }, %struct.Range { i32 7212, i32 7219 }, %struct.Range { i32 7222, i32 7223 }, %struct.Range { i32 7288, i32 7293 }, %struct.Range { i32 7376, i32 7378 }, %struct.Range { i32 7380, i32 7392 }, %struct.Range { i32 7394, i32 7400 }, %struct.Range { i32 7405, i32 7405 }, %struct.Range { i32 7412, i32 7412 }, %struct.Range { i32 7416, i32 7417 }, %struct.Range { i32 7468, i32 7530 }, %struct.Range { i32 7544, i32 7544 }, %struct.Range { i32 7579, i32 7679 }, %struct.Range { i32 8125, i32 8125 }, %struct.Range { i32 8127, i32 8129 }, %struct.Range { i32 8141, i32 8143 }, %struct.Range { i32 8157, i32 8159 }, %struct.Range { i32 8173, i32 8175 }, %struct.Range { i32 8189, i32 8190 }, %struct.Range { i32 8203, i32 8207 }, %struct.Range { i32 8216, i32 8217 }, %struct.Range { i32 8228, i32 8228 }, %struct.Range { i32 8231, i32 8231 }, %struct.Range { i32 8234, i32 8238 }, %struct.Range { i32 8288, i32 8292 }, %struct.Range { i32 8294, i32 8303 }, %struct.Range { i32 8305, i32 8305 }, %struct.Range { i32 8319, i32 8319 }, %struct.Range { i32 8336, i32 8348 }, %struct.Range { i32 8400, i32 8432 }, %struct.Range { i32 11388, i32 11389 }, %struct.Range { i32 11503, i32 11505 }, %struct.Range { i32 11631, i32 11631 }, %struct.Range { i32 11647, i32 11647 }, %struct.Range { i32 11744, i32 11775 }, %struct.Range { i32 11823, i32 11823 }, %struct.Range { i32 12293, i32 12293 }, %struct.Range { i32 12330, i32 12333 }, %struct.Range { i32 12337, i32 12341 }, %struct.Range { i32 12347, i32 12347 }, %struct.Range { i32 12441, i32 12446 }, %struct.Range { i32 12540, i32 12542 }, %struct.Range { i32 40981, i32 40981 }, %struct.Range { i32 42232, i32 42237 }, %struct.Range { i32 42508, i32 42508 }, %struct.Range { i32 42607, i32 42610 }, %struct.Range { i32 42612, i32 42621 }, %struct.Range { i32 42623, i32 42623 }, %struct.Range { i32 42652, i32 42655 }, %struct.Range { i32 42736, i32 42737 }, %struct.Range { i32 42752, i32 42785 }, %struct.Range { i32 42864, i32 42864 }, %struct.Range { i32 42888, i32 42890 }, %struct.Range { i32 42993, i32 42996 }, %struct.Range { i32 43000, i32 43001 }, %struct.Range { i32 43010, i32 43010 }, %struct.Range { i32 43014, i32 43014 }, %struct.Range { i32 43019, i32 43019 }, %struct.Range { i32 43045, i32 43046 }, %struct.Range { i32 43052, i32 43052 }, %struct.Range { i32 43204, i32 43205 }, %struct.Range { i32 43232, i32 43249 }, %struct.Range { i32 43263, i32 43263 }, %struct.Range { i32 43302, i32 43309 }, %struct.Range { i32 43335, i32 43345 }, %struct.Range { i32 43392, i32 43394 }, %struct.Range { i32 43443, i32 43443 }, %struct.Range { i32 43446, i32 43449 }, %struct.Range { i32 43452, i32 43453 }, %struct.Range { i32 43471, i32 43471 }, %struct.Range { i32 43493, i32 43494 }, %struct.Range { i32 43561, i32 43566 }, %struct.Range { i32 43569, i32 43570 }, %struct.Range { i32 43573, i32 43574 }, %struct.Range { i32 43587, i32 43587 }, %struct.Range { i32 43596, i32 43596 }, %struct.Range { i32 43632, i32 43632 }, %struct.Range { i32 43644, i32 43644 }, %struct.Range { i32 43696, i32 43696 }, %struct.Range { i32 43698, i32 43700 }, %struct.Range { i32 43703, i32 43704 }, %struct.Range { i32 43710, i32 43711 }, %struct.Range { i32 43713, i32 43713 }, %struct.Range { i32 43741, i32 43741 }, %struct.Range { i32 43756, i32 43757 }, %struct.Range { i32 43763, i32 43764 }, %struct.Range { i32 43766, i32 43766 }, %struct.Range { i32 43867, i32 43871 }, %struct.Range { i32 43881, i32 43883 }, %struct.Range { i32 44005, i32 44005 }, %struct.Range { i32 44008, i32 44008 }, %struct.Range { i32 44013, i32 44013 }, %struct.Range { i32 64286, i32 64286 }, %struct.Range { i32 64434, i32 64450 }, %struct.Range { i32 65024, i32 65039 }, %struct.Range { i32 65043, i32 65043 }, %struct.Range { i32 65056, i32 65071 }, %struct.Range { i32 65106, i32 65106 }, %struct.Range { i32 65109, i32 65109 }, %struct.Range { i32 65279, i32 65279 }, %struct.Range { i32 65287, i32 65287 }, %struct.Range { i32 65294, i32 65294 }, %struct.Range { i32 65306, i32 65306 }, %struct.Range { i32 65342, i32 65342 }, %struct.Range { i32 65344, i32 65344 }, %struct.Range { i32 65392, i32 65392 }, %struct.Range { i32 65438, i32 65439 }, %struct.Range { i32 65507, i32 65507 }, %struct.Range { i32 65529, i32 65531 }, %struct.Range { i32 66045, i32 66045 }, %struct.Range { i32 66272, i32 66272 }, %struct.Range { i32 66422, i32 66426 }, %struct.Range { i32 67456, i32 67461 }, %struct.Range { i32 67463, i32 67504 }, %struct.Range { i32 67506, i32 67514 }, %struct.Range { i32 68097, i32 68099 }, %struct.Range { i32 68101, i32 68102 }, %struct.Range { i32 68108, i32 68111 }, %struct.Range { i32 68152, i32 68154 }, %struct.Range { i32 68159, i32 68159 }, %struct.Range { i32 68325, i32 68326 }, %struct.Range { i32 68900, i32 68903 }, %struct.Range { i32 68942, i32 68942 }, %struct.Range { i32 68969, i32 68973 }, %struct.Range { i32 68975, i32 68975 }, %struct.Range { i32 69291, i32 69292 }, %struct.Range { i32 69317, i32 69317 }, %struct.Range { i32 69370, i32 69375 }, %struct.Range { i32 69446, i32 69456 }, %struct.Range { i32 69506, i32 69509 }, %struct.Range { i32 69633, i32 69633 }, %struct.Range { i32 69688, i32 69702 }, %struct.Range { i32 69744, i32 69744 }, %struct.Range { i32 69747, i32 69748 }, %struct.Range { i32 69759, i32 69761 }, %struct.Range { i32 69811, i32 69814 }, %struct.Range { i32 69817, i32 69818 }, %struct.Range { i32 69821, i32 69821 }, %struct.Range { i32 69826, i32 69826 }, %struct.Range { i32 69837, i32 69837 }, %struct.Range { i32 69888, i32 69890 }, %struct.Range { i32 69927, i32 69931 }, %struct.Range { i32 69933, i32 69940 }, %struct.Range { i32 70003, i32 70003 }, %struct.Range { i32 70016, i32 70017 }, %struct.Range { i32 70070, i32 70078 }, %struct.Range { i32 70089, i32 70092 }, %struct.Range { i32 70095, i32 70095 }, %struct.Range { i32 70191, i32 70193 }, %struct.Range { i32 70196, i32 70196 }, %struct.Range { i32 70198, i32 70199 }, %struct.Range { i32 70206, i32 70206 }, %struct.Range { i32 70209, i32 70209 }, %struct.Range { i32 70367, i32 70367 }, %struct.Range { i32 70371, i32 70378 }, %struct.Range { i32 70400, i32 70401 }, %struct.Range { i32 70459, i32 70460 }, %struct.Range { i32 70464, i32 70464 }, %struct.Range { i32 70502, i32 70508 }, %struct.Range { i32 70512, i32 70516 }, %struct.Range { i32 70587, i32 70592 }, %struct.Range { i32 70606, i32 70606 }, %struct.Range { i32 70608, i32 70608 }, %struct.Range { i32 70610, i32 70610 }, %struct.Range { i32 70625, i32 70626 }, %struct.Range { i32 70712, i32 70719 }, %struct.Range { i32 70722, i32 70724 }, %struct.Range { i32 70726, i32 70726 }, %struct.Range { i32 70750, i32 70750 }, %struct.Range { i32 70835, i32 70840 }, %struct.Range { i32 70842, i32 70842 }, %struct.Range { i32 70847, i32 70848 }, %struct.Range { i32 70850, i32 70851 }, %struct.Range { i32 71090, i32 71093 }, %struct.Range { i32 71100, i32 71101 }, %struct.Range { i32 71103, i32 71104 }, %struct.Range { i32 71132, i32 71133 }, %struct.Range { i32 71219, i32 71226 }, %struct.Range { i32 71229, i32 71229 }, %struct.Range { i32 71231, i32 71232 }, %struct.Range { i32 71339, i32 71339 }, %struct.Range { i32 71341, i32 71341 }, %struct.Range { i32 71344, i32 71349 }, %struct.Range { i32 71351, i32 71351 }, %struct.Range { i32 71453, i32 71453 }, %struct.Range { i32 71455, i32 71455 }, %struct.Range { i32 71458, i32 71461 }, %struct.Range { i32 71463, i32 71467 }, %struct.Range { i32 71727, i32 71735 }, %struct.Range { i32 71737, i32 71738 }, %struct.Range { i32 71995, i32 71996 }, %struct.Range { i32 71998, i32 71998 }, %struct.Range { i32 72003, i32 72003 }, %struct.Range { i32 72148, i32 72151 }, %struct.Range { i32 72154, i32 72155 }, %struct.Range { i32 72160, i32 72160 }, %struct.Range { i32 72193, i32 72202 }, %struct.Range { i32 72243, i32 72248 }, %struct.Range { i32 72251, i32 72254 }, %struct.Range { i32 72263, i32 72263 }, %struct.Range { i32 72273, i32 72278 }, %struct.Range { i32 72281, i32 72283 }, %struct.Range { i32 72330, i32 72342 }, %struct.Range { i32 72344, i32 72345 }, %struct.Range { i32 72544, i32 72544 }, %struct.Range { i32 72546, i32 72548 }, %struct.Range { i32 72550, i32 72550 }, %struct.Range { i32 72752, i32 72758 }, %struct.Range { i32 72760, i32 72765 }, %struct.Range { i32 72767, i32 72767 }, %struct.Range { i32 72850, i32 72871 }, %struct.Range { i32 72874, i32 72880 }, %struct.Range { i32 72882, i32 72883 }, %struct.Range { i32 72885, i32 72886 }, %struct.Range { i32 73009, i32 73014 }, %struct.Range { i32 73018, i32 73018 }, %struct.Range { i32 73020, i32 73021 }, %struct.Range { i32 73023, i32 73029 }, %struct.Range { i32 73031, i32 73031 }, %struct.Range { i32 73104, i32 73105 }, %struct.Range { i32 73109, i32 73109 }, %struct.Range { i32 73111, i32 73111 }, %struct.Range { i32 73177, i32 73177 }, %struct.Range { i32 73459, i32 73460 }, %struct.Range { i32 73472, i32 73473 }, %struct.Range { i32 73526, i32 73530 }, %struct.Range { i32 73536, i32 73536 }, %struct.Range { i32 73538, i32 73538 }, %struct.Range { i32 73562, i32 73562 }, %struct.Range { i32 78896, i32 78912 }, %struct.Range { i32 78919, i32 78933 }, %struct.Range { i32 90398, i32 90409 }, %struct.Range { i32 90413, i32 90415 }, %struct.Range { i32 92912, i32 92916 }, %struct.Range { i32 92976, i32 92982 }, %struct.Range { i32 92992, i32 92995 }, %struct.Range { i32 93504, i32 93506 }, %struct.Range { i32 93547, i32 93548 }, %struct.Range { i32 94031, i32 94031 }, %struct.Range { i32 94095, i32 94111 }, %struct.Range { i32 94176, i32 94177 }, %struct.Range { i32 94179, i32 94180 }, %struct.Range { i32 94194, i32 94195 }, %struct.Range { i32 110576, i32 110579 }, %struct.Range { i32 110581, i32 110587 }, %struct.Range { i32 110589, i32 110590 }, %struct.Range { i32 113821, i32 113822 }, %struct.Range { i32 113824, i32 113827 }, %struct.Range { i32 118528, i32 118573 }, %struct.Range { i32 118576, i32 118598 }, %struct.Range { i32 119143, i32 119145 }, %struct.Range { i32 119155, i32 119170 }, %struct.Range { i32 119173, i32 119179 }, %struct.Range { i32 119210, i32 119213 }, %struct.Range { i32 119362, i32 119364 }, %struct.Range { i32 121344, i32 121398 }, %struct.Range { i32 121403, i32 121452 }, %struct.Range { i32 121461, i32 121461 }, %struct.Range { i32 121476, i32 121476 }, %struct.Range { i32 121499, i32 121503 }, %struct.Range { i32 121505, i32 121519 }, %struct.Range { i32 122880, i32 122886 }, %struct.Range { i32 122888, i32 122904 }, %struct.Range { i32 122907, i32 122913 }, %struct.Range { i32 122915, i32 122916 }, %struct.Range { i32 122918, i32 122922 }, %struct.Range { i32 122928, i32 122989 }, %struct.Range { i32 123023, i32 123023 }, %struct.Range { i32 123184, i32 123197 }, %struct.Range { i32 123566, i32 123566 }, %struct.Range { i32 123628, i32 123631 }, %struct.Range { i32 124139, i32 124143 }, %struct.Range { i32 124398, i32 124399 }, %struct.Range { i32 124643, i32 124643 }, %struct.Range { i32 124646, i32 124646 }, %struct.Range { i32 124654, i32 124655 }, %struct.Range { i32 124661, i32 124661 }, %struct.Range { i32 124671, i32 124671 }, %struct.Range { i32 125136, i32 125142 }, %struct.Range { i32 125252, i32 125259 }, %struct.Range { i32 127995, i32 127999 }, %struct.Range { i32 917505, i32 917505 }, %struct.Range { i32 917536, i32 917631 }, %struct.Range { i32 917760, i32 917999 }], align 16
 @CASED = internal unnamed_addr constant [158 x %struct.Range] [%struct.Range { i32 65, i32 90 }, %struct.Range { i32 97, i32 122 }, %struct.Range { i32 170, i32 170 }, %struct.Range { i32 181, i32 181 }, %struct.Range { i32 186, i32 186 }, %struct.Range { i32 192, i32 214 }, %struct.Range { i32 216, i32 246 }, %struct.Range { i32 248, i32 442 }, %struct.Range { i32 444, i32 447 }, %struct.Range { i32 452, i32 659 }, %struct.Range { i32 662, i32 696 }, %struct.Range { i32 704, i32 705 }, %struct.Range { i32 736, i32 740 }, %struct.Range { i32 837, i32 837 }, %struct.Range { i32 880, i32 883 }, %struct.Range { i32 886, i32 887 }, %struct.Range { i32 890, i32 893 }, %struct.Range { i32 895, i32 895 }, %struct.Range { i32 902, i32 902 }, %struct.Range { i32 904, i32 906 }, %struct.Range { i32 908, i32 908 }, %struct.Range { i32 910, i32 929 }, %struct.Range { i32 931, i32 1013 }, %struct.Range { i32 1015, i32 1153 }, %struct.Range { i32 1162, i32 1327 }, %struct.Range { i32 1329, i32 1366 }, %struct.Range { i32 1376, i32 1416 }, %struct.Range { i32 4256, i32 4293 }, %struct.Range { i32 4295, i32 4295 }, %struct.Range { i32 4301, i32 4301 }, %struct.Range { i32 4304, i32 4346 }, %struct.Range { i32 4348, i32 4351 }, %struct.Range { i32 5024, i32 5109 }, %struct.Range { i32 5112, i32 5117 }, %struct.Range { i32 7296, i32 7306 }, %struct.Range { i32 7312, i32 7354 }, %struct.Range { i32 7357, i32 7359 }, %struct.Range { i32 7424, i32 7615 }, %struct.Range { i32 7680, i32 7957 }, %struct.Range { i32 7960, i32 7965 }, %struct.Range { i32 7968, i32 8005 }, %struct.Range { i32 8008, i32 8013 }, %struct.Range { i32 8016, i32 8023 }, %struct.Range { i32 8025, i32 8025 }, %struct.Range { i32 8027, i32 8027 }, %struct.Range { i32 8029, i32 8029 }, %struct.Range { i32 8031, i32 8061 }, %struct.Range { i32 8064, i32 8116 }, %struct.Range { i32 8118, i32 8124 }, %struct.Range { i32 8126, i32 8126 }, %struct.Range { i32 8130, i32 8132 }, %struct.Range { i32 8134, i32 8140 }, %struct.Range { i32 8144, i32 8147 }, %struct.Range { i32 8150, i32 8155 }, %struct.Range { i32 8160, i32 8172 }, %struct.Range { i32 8178, i32 8180 }, %struct.Range { i32 8182, i32 8188 }, %struct.Range { i32 8305, i32 8305 }, %struct.Range { i32 8319, i32 8319 }, %struct.Range { i32 8336, i32 8348 }, %struct.Range { i32 8450, i32 8450 }, %struct.Range { i32 8455, i32 8455 }, %struct.Range { i32 8458, i32 8467 }, %struct.Range { i32 8469, i32 8469 }, %struct.Range { i32 8473, i32 8477 }, %struct.Range { i32 8484, i32 8484 }, %struct.Range { i32 8486, i32 8486 }, %struct.Range { i32 8488, i32 8488 }, %struct.Range { i32 8490, i32 8493 }, %struct.Range { i32 8495, i32 8500 }, %struct.Range { i32 8505, i32 8505 }, %struct.Range { i32 8508, i32 8511 }, %struct.Range { i32 8517, i32 8521 }, %struct.Range { i32 8526, i32 8526 }, %struct.Range { i32 8544, i32 8575 }, %struct.Range { i32 8579, i32 8580 }, %struct.Range { i32 9398, i32 9449 }, %struct.Range { i32 11264, i32 11492 }, %struct.Range { i32 11499, i32 11502 }, %struct.Range { i32 11506, i32 11507 }, %struct.Range { i32 11520, i32 11557 }, %struct.Range { i32 11559, i32 11559 }, %struct.Range { i32 11565, i32 11565 }, %struct.Range { i32 42560, i32 42605 }, %struct.Range { i32 42624, i32 42653 }, %struct.Range { i32 42786, i32 42887 }, %struct.Range { i32 42891, i32 42894 }, %struct.Range { i32 42896, i32 42972 }, %struct.Range { i32 42993, i32 42998 }, %struct.Range { i32 43000, i32 43002 }, %struct.Range { i32 43824, i32 43866 }, %struct.Range { i32 43868, i32 43881 }, %struct.Range { i32 43888, i32 43967 }, %struct.Range { i32 64256, i32 64262 }, %struct.Range { i32 64275, i32 64279 }, %struct.Range { i32 65313, i32 65338 }, %struct.Range { i32 65345, i32 65370 }, %struct.Range { i32 66560, i32 66639 }, %struct.Range { i32 66736, i32 66771 }, %struct.Range { i32 66776, i32 66811 }, %struct.Range { i32 66928, i32 66938 }, %struct.Range { i32 66940, i32 66954 }, %struct.Range { i32 66956, i32 66962 }, %struct.Range { i32 66964, i32 66965 }, %struct.Range { i32 66967, i32 66977 }, %struct.Range { i32 66979, i32 66993 }, %struct.Range { i32 66995, i32 67001 }, %struct.Range { i32 67003, i32 67004 }, %struct.Range { i32 67456, i32 67456 }, %struct.Range { i32 67459, i32 67461 }, %struct.Range { i32 67463, i32 67504 }, %struct.Range { i32 67506, i32 67514 }, %struct.Range { i32 68736, i32 68786 }, %struct.Range { i32 68800, i32 68850 }, %struct.Range { i32 68944, i32 68965 }, %struct.Range { i32 68976, i32 68997 }, %struct.Range { i32 71840, i32 71903 }, %struct.Range { i32 93760, i32 93823 }, %struct.Range { i32 93856, i32 93880 }, %struct.Range { i32 93883, i32 93907 }, %struct.Range { i32 119808, i32 119892 }, %struct.Range { i32 119894, i32 119964 }, %struct.Range { i32 119966, i32 119967 }, %struct.Range { i32 119970, i32 119970 }, %struct.Range { i32 119973, i32 119974 }, %struct.Range { i32 119977, i32 119980 }, %struct.Range { i32 119982, i32 119993 }, %struct.Range { i32 119995, i32 119995 }, %struct.Range { i32 119997, i32 120003 }, %struct.Range { i32 120005, i32 120069 }, %struct.Range { i32 120071, i32 120074 }, %struct.Range { i32 120077, i32 120084 }, %struct.Range { i32 120086, i32 120092 }, %struct.Range { i32 120094, i32 120121 }, %struct.Range { i32 120123, i32 120126 }, %struct.Range { i32 120128, i32 120132 }, %struct.Range { i32 120134, i32 120134 }, %struct.Range { i32 120138, i32 120144 }, %struct.Range { i32 120146, i32 120485 }, %struct.Range { i32 120488, i32 120512 }, %struct.Range { i32 120514, i32 120538 }, %struct.Range { i32 120540, i32 120570 }, %struct.Range { i32 120572, i32 120596 }, %struct.Range { i32 120598, i32 120628 }, %struct.Range { i32 120630, i32 120654 }, %struct.Range { i32 120656, i32 120686 }, %struct.Range { i32 120688, i32 120712 }, %struct.Range { i32 120714, i32 120744 }, %struct.Range { i32 120746, i32 120770 }, %struct.Range { i32 120772, i32 120779 }, %struct.Range { i32 122624, i32 122633 }, %struct.Range { i32 122635, i32 122654 }, %struct.Range { i32 122661, i32 122666 }, %struct.Range { i32 122928, i32 122989 }, %struct.Range { i32 125184, i32 125251 }, %struct.Range { i32 127280, i32 127305 }, %struct.Range { i32 127312, i32 127337 }, %struct.Range { i32 127344, i32 127369 }], align 16
 @free_spans = internal unnamed_addr global ptr null, align 4
+@free_arena_pages = internal unnamed_addr global ptr null, align 4
 @arena_refill.message = internal constant [21 x i8] c"stop: out of memory\0A\00", align 16
+@arena_space_end = internal unnamed_addr global ptr null, align 4
+@arena_space_next = internal unnamed_addr global ptr null, align 4
+@arena_space_committed = internal unnamed_addr global ptr null, align 4
+@take_arena_page_locked.message = internal constant [75 x i8] c"stop: out of memory (the range of the arenas of recursive values is full)\0A\00", align 16
 @.str.115 = private unnamed_addr constant [34 x i8] c"a derived value depends on itself\00", align 1
 @.str.116 = private unnamed_addr constant [7 x i8] c"stop: \00", align 1
 @.str.117 = private unnamed_addr constant [7 x i8] c"\0A  at \00", align 1
@@ -10228,27 +10236,37 @@ define hidden void @fa_arena_enter() local_unnamed_addr #32 {
 define hidden void @fa_arena_enter_owned(ptr noundef %0) local_unnamed_addr #33 {
   %2 = load i32, ptr @tree_arena_depth, align 4, !tbaa !4
   %3 = icmp eq i32 %2, 0
-  br i1 %3, label %4, label %13
+  br i1 %3, label %4, label %18
 
 4:                                                ; preds = %1
   %5 = icmp eq ptr %0, null
-  br i1 %5, label %11, label %6
+  br i1 %5, label %6, label %7
 
 6:                                                ; preds = %4
-  %7 = ptrtoint ptr %0 to i32
-  %8 = and i32 %7, -65536
-  %9 = inttoptr i32 %8 to ptr
-  %10 = load ptr, ptr %9, align 65536, !tbaa !185
-  br label %11
+  store ptr null, ptr @tree_arena, align 4, !tbaa !6
+  br label %18
 
-11:                                               ; preds = %4, %6
-  %12 = phi ptr [ %10, %6 ], [ null, %4 ]
-  store ptr %12, ptr @tree_arena, align 4, !tbaa !6
-  br label %13
+7:                                                ; preds = %4
+  %8 = ptrtoint ptr %0 to i32
+  %9 = and i32 %8, -65536
+  %10 = inttoptr i32 %9 to ptr
+  %11 = load ptr, ptr %10, align 65536, !tbaa !185
+  store ptr %11, ptr @tree_arena, align 4, !tbaa !6
+  %12 = icmp eq ptr %11, null
+  br i1 %12, label %18, label %13
 
-13:                                               ; preds = %11, %1
-  %14 = add i32 %2, 1
-  store i32 %14, ptr @tree_arena_depth, align 4, !tbaa !4
+13:                                               ; preds = %7
+  %14 = getelementptr inbounds %struct.FaArena, ptr %11, i32 0, i32 2
+  %15 = load ptr, ptr %14, align 4, !tbaa !187
+  store ptr %15, ptr @tree_bump, align 4, !tbaa !6
+  %16 = getelementptr inbounds %struct.FaArena, ptr %11, i32 0, i32 3
+  %17 = load ptr, ptr %16, align 4, !tbaa !188
+  store ptr %17, ptr @tree_end, align 4, !tbaa !6
+  br label %18
+
+18:                                               ; preds = %6, %7, %13, %1
+  %19 = add i32 %2, 1
+  store i32 %19, ptr @tree_arena_depth, align 4, !tbaa !4
   ret void
 }
 
@@ -10282,35 +10300,52 @@ define internal fastcc void @release_arena(ptr noundef %0) unnamed_addr #3 {
   %3 = getelementptr inbounds %struct.FaArena, ptr %0, i32 0, i32 4
   %4 = load ptr, ptr %3, align 4, !tbaa !6
   %5 = icmp eq ptr %4, null
-  br i1 %5, label %8, label %9
+  br i1 %5, label %8, label %10
 
-6:                                                ; preds = %9
+6:                                                ; preds = %10
   %7 = icmp eq ptr %0, null
-  br i1 %7, label %22, label %8
+  br i1 %7, label %31, label %8
 
 8:                                                ; preds = %1, %6
-  br label %17
+  %9 = load i32, ptr @fa_compressed_links, align 4, !tbaa !23
+  br label %18
 
-9:                                                ; preds = %1, %9
-  %10 = phi ptr [ %15, %9 ], [ %4, %1 ]
-  %11 = getelementptr inbounds %struct.FaArenaCleanup, ptr %10, i32 0, i32 1
-  %12 = load ptr, ptr %11, align 4, !tbaa !187
-  %13 = getelementptr inbounds %struct.FaArenaCleanup, ptr %10, i32 0, i32 2
-  %14 = load ptr, ptr %13, align 4, !tbaa !189
-  tail call void %12(ptr noundef %14) #62
-  %15 = load ptr, ptr %10, align 4, !tbaa !6
-  %16 = icmp eq ptr %15, null
-  br i1 %16, label %6, label %9, !llvm.loop !190
+10:                                               ; preds = %1, %10
+  %11 = phi ptr [ %16, %10 ], [ %4, %1 ]
+  %12 = getelementptr inbounds %struct.FaArenaCleanup, ptr %11, i32 0, i32 1
+  %13 = load ptr, ptr %12, align 4, !tbaa !189
+  %14 = getelementptr inbounds %struct.FaArenaCleanup, ptr %11, i32 0, i32 2
+  %15 = load ptr, ptr %14, align 4, !tbaa !191
+  tail call void %13(ptr noundef %15) #62
+  %16 = load ptr, ptr %11, align 4, !tbaa !6
+  %17 = icmp eq ptr %16, null
+  br i1 %17, label %6, label %10, !llvm.loop !192
 
-17:                                               ; preds = %8, %17
-  %18 = phi ptr [ %20, %17 ], [ %0, %8 ]
-  %19 = getelementptr inbounds %struct.FaArena, ptr %18, i32 0, i32 1
-  %20 = load ptr, ptr %19, align 4, !tbaa !191
-  tail call fastcc void @give_pages(ptr noundef nonnull %18, i32 noundef 1) #61
-  %21 = icmp eq ptr %20, null
-  br i1 %21, label %22, label %17, !llvm.loop !192
+18:                                               ; preds = %8, %28
+  %19 = phi i32 [ %29, %28 ], [ %9, %8 ]
+  %20 = phi ptr [ %22, %28 ], [ %0, %8 ]
+  %21 = getelementptr inbounds %struct.FaArena, ptr %20, i32 0, i32 1
+  %22 = load ptr, ptr %21, align 4, !tbaa !193
+  %23 = icmp eq i32 %19, 0
+  br i1 %23, label %24, label %26
 
-22:                                               ; preds = %17, %6
+24:                                               ; preds = %18
+  tail call fastcc void @give_pages(ptr noundef nonnull %20, i32 noundef 1) #61
+  %25 = load i32, ptr @fa_compressed_links, align 4, !tbaa !23
+  br label %28
+
+26:                                               ; preds = %18
+  %27 = load ptr, ptr @free_arena_pages, align 4, !tbaa !6
+  store ptr %27, ptr %20, align 4, !tbaa !179
+  store ptr %20, ptr @free_arena_pages, align 4, !tbaa !6
+  br label %28
+
+28:                                               ; preds = %24, %26
+  %29 = phi i32 [ %25, %24 ], [ %19, %26 ]
+  %30 = icmp eq ptr %22, null
+  br i1 %30, label %31, label %18, !llvm.loop !194
+
+31:                                               ; preds = %28, %6
   ret void
 }
 
@@ -10320,79 +10355,81 @@ define hidden void @fa_arena_leave(ptr noundef %0) local_unnamed_addr #16 {
   %3 = add i32 %2, -1
   store i32 %3, ptr @tree_arena_depth, align 4, !tbaa !4
   %4 = icmp eq i32 %3, 0
-  br i1 %4, label %5, label %19
+  br i1 %4, label %5, label %23
 
 5:                                                ; preds = %1
   %6 = load ptr, ptr @tree_arena, align 4, !tbaa !6
   store ptr null, ptr @tree_arena, align 4, !tbaa !6
   %7 = icmp eq ptr %6, null
-  br i1 %7, label %19, label %8
+  br i1 %7, label %23, label %8
 
 8:                                                ; preds = %5
-  %9 = icmp eq ptr %0, null
-  br i1 %9, label %15, label %10
+  %9 = load ptr, ptr @tree_bump, align 4, !tbaa !6
+  %10 = getelementptr inbounds %struct.FaArena, ptr %6, i32 0, i32 2
+  store ptr %9, ptr %10, align 4, !tbaa !187
+  %11 = load ptr, ptr @tree_end, align 4, !tbaa !6
+  %12 = getelementptr inbounds %struct.FaArena, ptr %6, i32 0, i32 3
+  store ptr %11, ptr %12, align 4, !tbaa !188
+  store ptr null, ptr @tree_bump, align 4, !tbaa !6
+  store ptr null, ptr @tree_end, align 4, !tbaa !6
+  %13 = icmp eq ptr %0, null
+  br i1 %13, label %19, label %14
 
-10:                                               ; preds = %8
-  %11 = ptrtoint ptr %0 to i32
-  %12 = and i32 %11, -65536
-  %13 = inttoptr i32 %12 to ptr
-  %14 = load ptr, ptr %13, align 65536, !tbaa !185
-  br label %15
-
-15:                                               ; preds = %8, %10
-  %16 = phi ptr [ %14, %10 ], [ null, %8 ]
-  %17 = icmp eq ptr %16, %6
-  br i1 %17, label %19, label %18
-
-18:                                               ; preds = %15
-  tail call fastcc void @release_arena(ptr noundef nonnull %6) #61
+14:                                               ; preds = %8
+  %15 = ptrtoint ptr %0 to i32
+  %16 = and i32 %15, -65536
+  %17 = inttoptr i32 %16 to ptr
+  %18 = load ptr, ptr %17, align 65536, !tbaa !185
   br label %19
 
-19:                                               ; preds = %5, %15, %18, %1
+19:                                               ; preds = %8, %14
+  %20 = phi ptr [ %18, %14 ], [ null, %8 ]
+  %21 = icmp eq ptr %20, %6
+  br i1 %21, label %23, label %22
+
+22:                                               ; preds = %19
+  tail call fastcc void @release_arena(ptr noundef nonnull %6) #61
+  br label %23
+
+23:                                               ; preds = %5, %22, %19, %1
   ret void
 }
 
 ; Function Attrs: alwaysinline nounwind optsize
 define hidden ptr @fa_arena_alloc(i32 noundef %0, i32 noundef %1) local_unnamed_addr #16 {
-  %3 = add i32 %0, 7
-  %4 = and i32 %3, -8
-  %5 = load ptr, ptr @tree_arena, align 4, !tbaa !6
-  %6 = icmp eq ptr %5, null
-  br i1 %6, label %28, label %7, !prof !74
-
-7:                                                ; preds = %2
+  %3 = icmp eq i32 %0, 0
+  %4 = add i32 %0, 7
+  %5 = and i32 %4, -8
+  %6 = select i1 %3, i32 8, i32 %5
+  %7 = load ptr, ptr @tree_bump, align 4, !tbaa !6
   %8 = icmp ult i32 %1, 9
-  %9 = getelementptr inbounds %struct.FaArena, ptr %5, i32 0, i32 2
-  %10 = load ptr, ptr %9, align 4, !tbaa !193
-  %11 = ptrtoint ptr %10 to i32
-  %12 = sub i32 0, %11
-  %13 = add i32 %1, -1
-  %14 = and i32 %13, %12
-  %15 = select i1 %8, i32 0, i32 %14
-  %16 = getelementptr inbounds %struct.FaArena, ptr %5, i32 0, i32 3
-  %17 = load ptr, ptr %16, align 4, !tbaa !194
-  %18 = ptrtoint ptr %17 to i32
-  %19 = sub i32 %18, %11
-  %20 = icmp ule i32 %15, %19
-  %21 = sub i32 %19, %15
-  %22 = icmp ule i32 %4, %21
-  %23 = and i1 %20, %22
-  br i1 %23, label %24, label %28, !prof !75
+  %9 = ptrtoint ptr %7 to i32
+  %10 = sub i32 0, %9
+  %11 = add i32 %1, -1
+  %12 = and i32 %11, %10
+  %13 = select i1 %8, i32 0, i32 %12
+  %14 = load ptr, ptr @tree_end, align 4, !tbaa !6
+  %15 = ptrtoint ptr %14 to i32
+  %16 = sub i32 %15, %9
+  %17 = icmp ule i32 %13, %16
+  %18 = sub i32 %16, %13
+  %19 = icmp ule i32 %6, %18
+  %20 = and i1 %17, %19
+  br i1 %20, label %21, label %24, !prof !75
 
-24:                                               ; preds = %7
-  %25 = getelementptr inbounds %struct.FaArena, ptr %5, i32 0, i32 2
-  %26 = getelementptr inbounds i8, ptr %10, i32 %15
-  %27 = getelementptr inbounds i8, ptr %26, i32 %4
-  store ptr %27, ptr %25, align 4, !tbaa !193
-  br label %30
+21:                                               ; preds = %2
+  %22 = getelementptr inbounds i8, ptr %7, i32 %13
+  %23 = getelementptr inbounds i8, ptr %22, i32 %6
+  store ptr %23, ptr @tree_bump, align 4, !tbaa !6
+  br label %26
 
-28:                                               ; preds = %7, %2
-  %29 = tail call fastcc ptr @arena_refill(i32 noundef %4, i32 noundef %1) #61
-  br label %30
+24:                                               ; preds = %2
+  %25 = tail call fastcc ptr @arena_refill(i32 noundef %6, i32 noundef %1) #61
+  br label %26
 
-30:                                               ; preds = %24, %28
-  %31 = phi ptr [ %29, %28 ], [ %26, %24 ]
-  ret ptr %31
+26:                                               ; preds = %24, %21
+  %27 = phi ptr [ %22, %21 ], [ %25, %24 ]
+  ret ptr %27
 }
 
 ; Function Attrs: noinline nounwind optsize
@@ -10400,7 +10437,7 @@ define internal fastcc ptr @arena_refill(i32 noundef %0, i32 noundef %1) unnamed
   %3 = add i32 %1, 31
   %4 = sub i32 0, %1
   %5 = and i32 %3, %4
-  %6 = tail call fastcc ptr @take_pages(i32 noundef 1) #61
+  %6 = tail call fastcc ptr @take_arena_page() #61
   %7 = icmp eq ptr %6, null
   %8 = icmp ugt i32 %5, 65536
   %9 = or i1 %8, %7
@@ -10421,7 +10458,7 @@ define internal fastcc ptr @arena_refill(i32 noundef %0, i32 noundef %1) unnamed
 
 17:                                               ; preds = %14
   %18 = getelementptr inbounds %struct.FaArena, ptr %6, i32 0, i32 1
-  store ptr null, ptr %18, align 4, !tbaa !191
+  store ptr null, ptr %18, align 4, !tbaa !193
   %19 = getelementptr inbounds %struct.FaArena, ptr %6, i32 0, i32 4
   store ptr null, ptr %19, align 4, !tbaa !195
   store ptr %6, ptr @tree_arena, align 4, !tbaa !6
@@ -10430,10 +10467,10 @@ define internal fastcc ptr @arena_refill(i32 noundef %0, i32 noundef %1) unnamed
 
 21:                                               ; preds = %14
   %22 = getelementptr inbounds %struct.FaArena, ptr %15, i32 0, i32 1
-  %23 = load ptr, ptr %22, align 4, !tbaa !191
+  %23 = load ptr, ptr %22, align 4, !tbaa !193
   %24 = getelementptr inbounds %struct.FaArena, ptr %6, i32 0, i32 1
-  store ptr %23, ptr %24, align 4, !tbaa !191
-  store ptr %6, ptr %22, align 4, !tbaa !191
+  store ptr %23, ptr %24, align 4, !tbaa !193
+  store ptr %6, ptr %22, align 4, !tbaa !193
   br label %25
 
 25:                                               ; preds = %21, %17
@@ -10441,52 +10478,42 @@ define internal fastcc ptr @arena_refill(i32 noundef %0, i32 noundef %1) unnamed
   store ptr %26, ptr %6, align 4, !tbaa !185
   %27 = getelementptr inbounds i8, ptr %6, i32 %5
   %28 = getelementptr inbounds i8, ptr %27, i32 %0
-  %29 = getelementptr inbounds %struct.FaArena, ptr %26, i32 0, i32 2
-  store ptr %28, ptr %29, align 4, !tbaa !193
-  %30 = getelementptr inbounds i8, ptr %6, i32 65536
-  %31 = getelementptr inbounds %struct.FaArena, ptr %26, i32 0, i32 3
-  store ptr %30, ptr %31, align 4, !tbaa !194
+  store ptr %28, ptr @tree_bump, align 4, !tbaa !6
+  %29 = getelementptr inbounds i8, ptr %6, i32 65536
+  store ptr %29, ptr @tree_end, align 4, !tbaa !6
   ret ptr %27
 }
 
 ; Function Attrs: cold noinline nounwind optsize
 define hidden void @fa_arena_cleanup(ptr noundef %0, ptr noundef %1) local_unnamed_addr #18 {
-  %3 = load ptr, ptr @tree_arena, align 4, !tbaa !6
-  %4 = icmp eq ptr %3, null
-  br i1 %4, label %16, label %5, !prof !74
+  %3 = load ptr, ptr @tree_bump, align 4, !tbaa !6
+  %4 = ptrtoint ptr %3 to i32
+  %5 = load ptr, ptr @tree_end, align 4, !tbaa !6
+  %6 = ptrtoint ptr %5 to i32
+  %7 = sub i32 %6, %4
+  %8 = icmp ugt i32 %7, 15
+  br i1 %8, label %9, label %11, !prof !75
 
-5:                                                ; preds = %2
-  %6 = getelementptr inbounds %struct.FaArena, ptr %3, i32 0, i32 3
-  %7 = load ptr, ptr %6, align 4, !tbaa !194
-  %8 = getelementptr inbounds %struct.FaArena, ptr %3, i32 0, i32 2
-  %9 = load ptr, ptr %8, align 4, !tbaa !193
-  %10 = ptrtoint ptr %7 to i32
-  %11 = ptrtoint ptr %9 to i32
-  %12 = sub i32 %10, %11
-  %13 = icmp ugt i32 %12, 15
-  br i1 %13, label %14, label %16, !prof !75
+9:                                                ; preds = %2
+  %10 = getelementptr inbounds i8, ptr %3, i32 16
+  store ptr %10, ptr @tree_bump, align 4, !tbaa !6
+  br label %13
 
-14:                                               ; preds = %5
-  %15 = getelementptr inbounds i8, ptr %9, i32 16
-  store ptr %15, ptr %8, align 4, !tbaa !193
-  br label %19
+11:                                               ; preds = %2
+  %12 = tail call fastcc ptr @arena_refill(i32 noundef 16, i32 noundef 4) #61
+  br label %13
 
-16:                                               ; preds = %5, %2
-  %17 = tail call fastcc ptr @arena_refill(i32 noundef 16, i32 noundef 4) #61
-  %18 = load ptr, ptr @tree_arena, align 4, !tbaa !6
-  br label %19
-
-19:                                               ; preds = %14, %16
-  %20 = phi ptr [ %18, %16 ], [ %3, %14 ]
-  %21 = phi ptr [ %17, %16 ], [ %9, %14 ]
-  %22 = getelementptr inbounds %struct.FaArena, ptr %20, i32 0, i32 4
-  %23 = load ptr, ptr %22, align 4, !tbaa !195
-  store ptr %23, ptr %21, align 4, !tbaa !196
-  %24 = getelementptr inbounds %struct.FaArenaCleanup, ptr %21, i32 0, i32 1
-  store ptr %1, ptr %24, align 4, !tbaa !187
-  %25 = getelementptr inbounds %struct.FaArenaCleanup, ptr %21, i32 0, i32 2
-  store ptr %0, ptr %25, align 4, !tbaa !189
-  store ptr %21, ptr %22, align 4, !tbaa !195
+13:                                               ; preds = %9, %11
+  %14 = phi ptr [ %3, %9 ], [ %12, %11 ]
+  %15 = load ptr, ptr @tree_arena, align 4, !tbaa !6
+  %16 = getelementptr inbounds %struct.FaArena, ptr %15, i32 0, i32 4
+  %17 = load ptr, ptr %16, align 4, !tbaa !195
+  store ptr %17, ptr %14, align 4, !tbaa !196
+  %18 = getelementptr inbounds %struct.FaArenaCleanup, ptr %14, i32 0, i32 1
+  store ptr %1, ptr %18, align 4, !tbaa !189
+  %19 = getelementptr inbounds %struct.FaArenaCleanup, ptr %14, i32 0, i32 2
+  store ptr %0, ptr %19, align 4, !tbaa !191
+  store ptr %14, ptr %16, align 4, !tbaa !195
   ret void
 }
 
@@ -24860,6 +24887,103 @@ declare ptr @fa_pages(i32 noundef) local_unnamed_addr #4
 ; Function Attrs: optsize
 declare ptr @fa_os_map(i32 noundef, i32 noundef) local_unnamed_addr #4
 
+; Function Attrs: noinline nounwind optsize
+define internal fastcc ptr @take_arena_page() unnamed_addr #17 {
+  %1 = load i32, ptr @fa_compressed_links, align 4, !tbaa !23
+  %2 = icmp eq i32 %1, 0
+  br i1 %2, label %3, label %5
+
+3:                                                ; preds = %0
+  %4 = tail call fastcc ptr @take_pages(i32 noundef 1) #61
+  br label %47
+
+5:                                                ; preds = %0
+  %6 = load ptr, ptr @free_arena_pages, align 4, !tbaa !6
+  %7 = icmp eq ptr %6, null
+  br i1 %7, label %10, label %8
+
+8:                                                ; preds = %5
+  %9 = load ptr, ptr %6, align 4, !tbaa !179
+  store ptr %9, ptr @free_arena_pages, align 4, !tbaa !6
+  br label %47
+
+10:                                               ; preds = %5
+  %11 = load ptr, ptr @arena_space_end, align 4, !tbaa !6
+  %12 = icmp eq ptr %11, null
+  br i1 %12, label %13, label %25
+
+13:                                               ; preds = %10, %19
+  %14 = phi i32 [ %20, %19 ], [ 1073741824, %10 ]
+  %15 = tail call ptr @fa_os_reserve(ptr noundef nonnull inttoptr (i32 1073741824 to ptr), i32 noundef %14) #62
+  %16 = icmp eq ptr %15, inttoptr (i32 1073741824 to ptr)
+  br i1 %16, label %17, label %19
+
+17:                                               ; preds = %13
+  store ptr inttoptr (i32 1073741824 to ptr), ptr @arena_space_next, align 4, !tbaa !6
+  store ptr inttoptr (i32 1073741824 to ptr), ptr @arena_space_committed, align 4, !tbaa !6
+  %18 = getelementptr inbounds i8, ptr inttoptr (i32 1073741824 to ptr), i32 %14
+  store ptr %18, ptr @arena_space_end, align 4, !tbaa !6
+  br label %25
+
+19:                                               ; preds = %13
+  %20 = lshr i32 %14, 1
+  %21 = icmp ugt i32 %14, 134217727
+  br i1 %21, label %13, label %22, !llvm.loop !557
+
+22:                                               ; preds = %19
+  %23 = load ptr, ptr @arena_space_end, align 4, !tbaa !6
+  %24 = icmp eq ptr %23, null
+  br i1 %24, label %47, label %25
+
+25:                                               ; preds = %22, %17, %10
+  %26 = phi ptr [ %23, %22 ], [ %11, %10 ], [ %18, %17 ]
+  %27 = load ptr, ptr @arena_space_next, align 4, !tbaa !6
+  %28 = icmp eq ptr %27, %26
+  br i1 %28, label %29, label %30
+
+29:                                               ; preds = %25
+  tail call void @fa_write(i32 noundef 2, ptr noundef nonnull @take_arena_page_locked.message, i32 noundef 74) #62
+  tail call void @fa_exit(i32 noundef 101) #63
+  unreachable
+
+30:                                               ; preds = %25
+  %31 = load ptr, ptr @arena_space_committed, align 4, !tbaa !6
+  %32 = icmp eq ptr %27, %31
+  br i1 %32, label %33, label %44
+
+33:                                               ; preds = %30
+  %34 = ptrtoint ptr %26 to i32
+  %35 = ptrtoint ptr %27 to i32
+  %36 = sub i32 %34, %35
+  %37 = tail call i32 @llvm.umin.i32(i32 %36, i32 1048576)
+  %38 = tail call i32 @fa_os_commit(ptr noundef %27, i32 noundef %37) #62
+  %39 = icmp eq i32 %38, 0
+  br i1 %39, label %40, label %47
+
+40:                                               ; preds = %33
+  %41 = load ptr, ptr @arena_space_committed, align 4, !tbaa !6
+  %42 = getelementptr inbounds i8, ptr %41, i32 %37
+  store ptr %42, ptr @arena_space_committed, align 4, !tbaa !6
+  %43 = load ptr, ptr @arena_space_next, align 4, !tbaa !6
+  br label %44
+
+44:                                               ; preds = %40, %30
+  %45 = phi ptr [ %43, %40 ], [ %27, %30 ]
+  %46 = getelementptr inbounds i8, ptr %45, i32 65536
+  store ptr %46, ptr @arena_space_next, align 4, !tbaa !6
+  br label %47
+
+47:                                               ; preds = %44, %33, %22, %8, %3
+  %48 = phi ptr [ %4, %3 ], [ %6, %8 ], [ null, %22 ], [ %45, %44 ], [ null, %33 ]
+  ret ptr %48
+}
+
+; Function Attrs: optsize
+declare ptr @fa_os_reserve(ptr noundef, i32 noundef) local_unnamed_addr #4
+
+; Function Attrs: optsize
+declare i32 @fa_os_commit(ptr noundef, i32 noundef) local_unnamed_addr #4
+
 ; Function Attrs: nounwind optsize
 define internal fastcc void @mark(ptr noundef %0) unnamed_addr #3 {
   %2 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 17
@@ -24902,7 +25026,7 @@ define internal fastcc void @mark(ptr noundef %0) unnamed_addr #3 {
 25:                                               ; preds = %21
   store i32 1, ptr %22, align 8, !tbaa !264
   %26 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 3
-  %27 = load i64, ptr %26, align 8, !tbaa !557
+  %27 = load i64, ptr %26, align 8, !tbaa !558
   %28 = icmp sgt i64 %27, 0
   br i1 %28, label %29, label %40
 
@@ -24912,15 +25036,15 @@ define internal fastcc void @mark(ptr noundef %0) unnamed_addr #3 {
 
 31:                                               ; preds = %29, %31
   %32 = phi i64 [ 0, %29 ], [ %37, %31 ]
-  %33 = load ptr, ptr %30, align 8, !tbaa !558
+  %33 = load ptr, ptr %30, align 8, !tbaa !559
   %34 = trunc i64 %32 to i32
   %35 = getelementptr inbounds ptr, ptr %33, i32 %34
   %36 = load ptr, ptr %35, align 4, !tbaa !6
   tail call fastcc void @mark(ptr noundef %36) #61
   %37 = add nuw nsw i64 %32, 1
-  %38 = load i64, ptr %26, align 8, !tbaa !557
+  %38 = load i64, ptr %26, align 8, !tbaa !558
   %39 = icmp slt i64 %37, %38
-  br i1 %39, label %31, label %40, !llvm.loop !559
+  br i1 %39, label %31, label %40, !llvm.loop !560
 
 40:                                               ; preds = %31, %25, %21, %5, %9, %13
   ret void
@@ -25139,7 +25263,7 @@ define internal fastcc noundef i32 @json_string(ptr nocapture noundef %0, ptr no
   store i8 %52, ptr %55, align 1, !tbaa !1
   %56 = add i32 %49, 1
   %57 = add nuw i32 %48, 1
-  br label %177, !llvm.loop !560
+  br label %177, !llvm.loop !561
 
 58:                                               ; preds = %47
   %59 = getelementptr i8, ptr %51, i32 1
@@ -25389,7 +25513,7 @@ define internal fastcc i32 @json_same(ptr nocapture noundef readonly %0, i32 nou
   %19 = phi i32 [ %20, %22 ], [ 0, %14 ]
   %20 = add nuw i32 %19, 1
   %21 = icmp eq i32 %20, %1
-  br i1 %21, label %28, label %22, !llvm.loop !561
+  br i1 %21, label %28, label %22, !llvm.loop !562
 
 22:                                               ; preds = %18
   %23 = getelementptr inbounds i8, ptr %0, i32 %20
@@ -25397,7 +25521,7 @@ define internal fastcc i32 @json_same(ptr nocapture noundef readonly %0, i32 nou
   %25 = getelementptr inbounds i8, ptr %2, i32 %20
   %26 = load i8, ptr %25, align 1, !tbaa !1
   %27 = icmp eq i8 %24, %26
-  br i1 %27, label %18, label %28, !llvm.loop !561
+  br i1 %27, label %18, label %28, !llvm.loop !562
 
 28:                                               ; preds = %22, %18
   %29 = icmp uge i32 %20, %1
@@ -25485,7 +25609,7 @@ define internal fastcc void @json_push(ptr nocapture noundef %0, ptr nocapture n
   %31 = phi i32 [ %4, %8 ], [ %29, %27 ]
   %32 = phi ptr [ %10, %8 ], [ %16, %27 ]
   %33 = getelementptr inbounds %struct.FaJson, ptr %32, i32 %31
-  tail call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 8 dereferenceable(48) %33, ptr noundef nonnull align 8 dereferenceable(48) %1, i32 48, i1 false), !tbaa.struct !562
+  tail call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 8 dereferenceable(48) %33, ptr noundef nonnull align 8 dereferenceable(48) %1, i32 48, i1 false), !tbaa.struct !563
   %34 = load i32, ptr %3, align 4, !tbaa !447
   %35 = add i32 %34, 1
   store i32 %35, ptr %3, align 4, !tbaa !447
@@ -25521,7 +25645,7 @@ define internal fastcc void @json_order(ptr nocapture noundef readonly %0, ptr n
   %21 = add i32 %12, %20
   %22 = add nuw i32 %13, 1
   %23 = icmp eq i32 %22, %4
-  br i1 %23, label %9, label %11, !llvm.loop !564
+  br i1 %23, label %9, label %11, !llvm.loop !565
 
 24:                                               ; preds = %9
   %25 = getelementptr inbounds %struct.JsonReader, ptr %0, i32 0, i32 3
@@ -25556,7 +25680,7 @@ define internal fastcc void @json_order(ptr nocapture noundef readonly %0, ptr n
 
 46:                                               ; preds = %32
   %47 = getelementptr inbounds %struct.FaJson, ptr %28, i32 %34
-  tail call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 8 dereferenceable(48) %47, ptr noundef nonnull align 8 dereferenceable(48) %37, i32 48, i1 false), !tbaa.struct !562
+  tail call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 8 dereferenceable(48) %47, ptr noundef nonnull align 8 dereferenceable(48) %37, i32 48, i1 false), !tbaa.struct !563
   %48 = add i32 %34, 1
   br label %66
 
@@ -25574,14 +25698,14 @@ define internal fastcc void @json_order(ptr nocapture noundef readonly %0, ptr n
 58:                                               ; preds = %49
   %59 = getelementptr inbounds %struct.FaJson, ptr %28, i32 %51
   %60 = getelementptr inbounds %struct.FaJson, ptr %28, i32 %50
-  tail call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 8 dereferenceable(48) %60, ptr noundef nonnull align 8 dereferenceable(48) %59, i32 48, i1 false), !tbaa.struct !562
+  tail call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 8 dereferenceable(48) %60, ptr noundef nonnull align 8 dereferenceable(48) %59, i32 48, i1 false), !tbaa.struct !563
   %61 = icmp eq i32 %51, 0
-  br i1 %61, label %62, label %49, !llvm.loop !565
+  br i1 %61, label %62, label %49, !llvm.loop !566
 
 62:                                               ; preds = %49, %58, %44
   %63 = phi i32 [ 0, %44 ], [ 0, %58 ], [ %50, %49 ]
   %64 = getelementptr inbounds %struct.FaJson, ptr %28, i32 %63
-  tail call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 8 dereferenceable(48) %64, ptr noundef nonnull align 8 dereferenceable(48) %37, i32 48, i1 false), !tbaa.struct !562
+  tail call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 8 dereferenceable(48) %64, ptr noundef nonnull align 8 dereferenceable(48) %37, i32 48, i1 false), !tbaa.struct !563
   %65 = add i32 %35, 1
   br label %66
 
@@ -25590,7 +25714,7 @@ define internal fastcc void @json_order(ptr nocapture noundef readonly %0, ptr n
   %68 = phi i32 [ %48, %46 ], [ %34, %62 ]
   %69 = add nuw i32 %33, 1
   %70 = icmp eq i32 %69, %4
-  br i1 %70, label %30, label %32, !llvm.loop !566
+  br i1 %70, label %30, label %32, !llvm.loop !567
 
 71:                                               ; preds = %2, %9, %30
   ret void
@@ -25601,13 +25725,13 @@ define internal fastcc ptr @json_alloc(ptr nocapture noundef %0, i32 noundef %1)
   %3 = add i32 %1, 15
   %4 = and i32 %3, -16
   %5 = getelementptr inbounds %struct.FaJsonDocument, ptr %0, i32 0, i32 3
-  %6 = load i32, ptr %5, align 8, !tbaa !567
+  %6 = load i32, ptr %5, align 8, !tbaa !568
   %7 = icmp ugt i32 %4, %6
   br i1 %7, label %11, label %8
 
 8:                                                ; preds = %2
   %9 = getelementptr inbounds %struct.FaJsonDocument, ptr %0, i32 0, i32 2
-  %10 = load ptr, ptr %9, align 4, !tbaa !568
+  %10 = load ptr, ptr %9, align 4, !tbaa !569
   br label %20
 
 11:                                               ; preds = %2
@@ -25629,9 +25753,9 @@ define internal fastcc ptr @json_alloc(ptr nocapture noundef %0, i32 noundef %1)
   %22 = phi ptr [ %10, %8 ], [ %18, %11 ]
   %23 = getelementptr inbounds %struct.FaJsonDocument, ptr %0, i32 0, i32 2
   %24 = getelementptr inbounds i8, ptr %22, i32 %4
-  store ptr %24, ptr %23, align 4, !tbaa !568
+  store ptr %24, ptr %23, align 4, !tbaa !569
   %25 = sub i32 %21, %4
-  store i32 %25, ptr %5, align 8, !tbaa !567
+  store i32 %25, ptr %5, align 8, !tbaa !568
   ret ptr %22
 }
 
@@ -25669,7 +25793,7 @@ define internal fastcc i64 @json_index(ptr nocapture noundef readonly %0, i32 no
   %22 = add i64 %21, %20
   %23 = add nuw i32 %12, 1
   %24 = icmp eq i32 %23, %1
-  br i1 %24, label %25, label %11, !llvm.loop !569
+  br i1 %24, label %25, label %11, !llvm.loop !570
 
 25:                                               ; preds = %18
   %26 = icmp slt i64 %22, 4294967295
@@ -25733,7 +25857,7 @@ define internal fastcc i32 @json_code_unit(ptr nocapture noundef readonly %0, i3
   %34 = add nuw nsw i32 %30, %33
   %35 = add nuw nsw i32 %11, 1
   %36 = icmp eq i32 %35, 4
-  br i1 %36, label %37, label %10, !llvm.loop !570
+  br i1 %36, label %37, label %10, !llvm.loop !571
 
 37:                                               ; preds = %29, %32, %25, %2
   %38 = phi i32 [ -1, %2 ], [ -1, %29 ], [ %34, %32 ], [ -1, %25 ]
@@ -25854,7 +25978,7 @@ define internal fastcc i64 @json_schema_number(ptr nocapture noundef %0, ptr noc
   %21 = getelementptr inbounds i8, ptr %16, i32 1
   %22 = load i8, ptr %21, align 1, !tbaa !1
   %23 = icmp eq i8 %22, 59
-  br i1 %23, label %24, label %13, !llvm.loop !571
+  br i1 %23, label %24, label %13, !llvm.loop !572
 
 24:                                               ; preds = %13, %2
   %25 = phi ptr [ %7, %2 ], [ %21, %13 ]
@@ -25963,7 +26087,7 @@ define internal fastcc ptr @json_skip(ptr noundef %0) unnamed_addr #55 {
   store ptr %36, ptr %2, align 4, !tbaa !6
   %37 = add nuw nsw i64 %30, 1
   %38 = icmp eq i64 %37, %25
-  br i1 %38, label %93, label %29, !llvm.loop !572
+  br i1 %38, label %93, label %29, !llvm.loop !573
 
 39:                                               ; preds = %1
   %40 = getelementptr inbounds i8, ptr %0, i32 1
@@ -25979,7 +26103,7 @@ define internal fastcc ptr @json_skip(ptr noundef %0) unnamed_addr #55 {
   %47 = tail call fastcc ptr @json_skip(ptr noundef %46) #61
   %48 = add nuw nsw i64 %45, 1
   %49 = icmp eq i64 %48, %41
-  br i1 %49, label %93, label %44, !llvm.loop !573
+  br i1 %49, label %93, label %44, !llvm.loop !574
 
 50:                                               ; preds = %1
   %51 = getelementptr inbounds i8, ptr %0, i32 1
@@ -26013,7 +26137,7 @@ define internal fastcc ptr @json_skip(ptr noundef %0) unnamed_addr #55 {
   %68 = phi ptr [ %66, %65 ], [ %63, %56 ]
   %69 = add nuw nsw i64 %57, 1
   %70 = icmp eq i64 %69, %52
-  br i1 %70, label %93, label %56, !llvm.loop !574
+  br i1 %70, label %93, label %56, !llvm.loop !575
 
 71:                                               ; preds = %1
   %72 = getelementptr inbounds i8, ptr %0, i32 1
@@ -26045,7 +26169,7 @@ define internal fastcc ptr @json_skip(ptr noundef %0) unnamed_addr #55 {
 88:                                               ; preds = %77, %86
   %89 = add nuw nsw i64 %78, 1
   %90 = icmp eq i64 %89, %73
-  br i1 %90, label %75, label %77, !llvm.loop !575
+  br i1 %90, label %75, label %77, !llvm.loop !576
 
 91:                                               ; preds = %1
   %92 = getelementptr inbounds i8, ptr %0, i32 1
@@ -26156,7 +26280,7 @@ define internal fastcc void @channel_push(ptr nocapture noundef %0, ptr nocaptur
   %49 = add nuw nsw i64 %35, 1
   %50 = load i64, ptr %3, align 16, !tbaa !536
   %51 = icmp slt i64 %49, %50
-  br i1 %51, label %34, label %30, !llvm.loop !576
+  br i1 %51, label %34, label %30, !llvm.loop !577
 
 52:                                               ; preds = %30
   %53 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 5
@@ -26494,16 +26618,16 @@ attributes #67 = { cold noreturn optsize }
 !184 = !{!182, !7, i64 0}
 !185 = !{!186, !7, i64 0}
 !186 = !{!"FaArena", !7, i64 0, !7, i64 4, !7, i64 8, !7, i64 12, !7, i64 16}
-!187 = !{!188, !7, i64 4}
-!188 = !{!"FaArenaCleanup", !7, i64 0, !7, i64 4, !7, i64 8}
-!189 = !{!188, !7, i64 8}
-!190 = distinct !{!190, !9}
-!191 = !{!186, !7, i64 4}
+!187 = !{!186, !7, i64 8}
+!188 = !{!186, !7, i64 12}
+!189 = !{!190, !7, i64 4}
+!190 = !{!"FaArenaCleanup", !7, i64 0, !7, i64 4, !7, i64 8}
+!191 = !{!190, !7, i64 8}
 !192 = distinct !{!192, !9}
-!193 = !{!186, !7, i64 8}
-!194 = !{!186, !7, i64 12}
+!193 = !{!186, !7, i64 4}
+!194 = distinct !{!194, !9}
 !195 = !{!186, !7, i64 16}
-!196 = !{!188, !7, i64 0}
+!196 = !{!190, !7, i64 0}
 !197 = !{!198, !24, i64 28}
 !198 = !{!"", !59, i64 0, !7, i64 8, !7, i64 12, !7, i64 16, !24, i64 20, !24, i64 24, !24, i64 28, !24, i64 32, !24, i64 36, !24, i64 40}
 !199 = distinct !{!199, !9}
@@ -26864,19 +26988,19 @@ attributes #67 = { cold noreturn optsize }
 !554 = !{i64 7, i64 65}
 !555 = distinct !{!555, !9}
 !556 = distinct !{!556, !9}
-!557 = !{!251, !59, i64 24}
-!558 = !{!251, !7, i64 16}
-!559 = distinct !{!559, !9}
+!557 = distinct !{!557, !9}
+!558 = !{!251, !59, i64 24}
+!559 = !{!251, !7, i64 16}
 !560 = distinct !{!560, !9}
 !561 = distinct !{!561, !9}
-!562 = !{i64 0, i64 4, !23, i64 4, i64 4, !23, i64 8, i64 8, !58, i64 16, i64 8, !563, i64 24, i64 4, !6, i64 28, i64 4, !4, i64 32, i64 4, !6, i64 36, i64 4, !4, i64 40, i64 4, !6, i64 44, i64 4, !4}
-!563 = !{!425, !425, i64 0}
-!564 = distinct !{!564, !9}
+!562 = distinct !{!562, !9}
+!563 = !{i64 0, i64 4, !23, i64 4, i64 4, !23, i64 8, i64 8, !58, i64 16, i64 8, !564, i64 24, i64 4, !6, i64 28, i64 4, !4, i64 32, i64 4, !6, i64 36, i64 4, !4, i64 40, i64 4, !6, i64 44, i64 4, !4}
+!564 = !{!425, !425, i64 0}
 !565 = distinct !{!565, !9}
 !566 = distinct !{!566, !9}
-!567 = !{!423, !5, i64 56}
-!568 = !{!423, !7, i64 52}
-!569 = distinct !{!569, !9}
+!567 = distinct !{!567, !9}
+!568 = !{!423, !5, i64 56}
+!569 = !{!423, !7, i64 52}
 !570 = distinct !{!570, !9}
 !571 = distinct !{!571, !9}
 !572 = distinct !{!572, !9}
@@ -26884,3 +27008,4 @@ attributes #67 = { cold noreturn optsize }
 !574 = distinct !{!574, !9}
 !575 = distinct !{!575, !9}
 !576 = distinct !{!576, !9}
+!577 = distinct !{!577, !9}

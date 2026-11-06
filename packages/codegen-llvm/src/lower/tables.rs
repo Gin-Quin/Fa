@@ -440,11 +440,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Rec(target) => {
 				let target_repr = self.repr_of(target, 0)?;
-				let loaded = builder.build_load(
-					self.llvm_type(target_repr),
-					value.into_pointer_value(),
-					"",
-				)?;
+				let address = self.edge_address(builder, Repr::Rec(target), value)?;
+				let loaded = builder.build_load(self.llvm_type(target_repr), address, "")?;
 				call_hash(target_repr, loaded)?
 			}
 			Repr::Array(item_type) => {

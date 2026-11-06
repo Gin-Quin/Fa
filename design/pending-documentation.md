@@ -176,3 +176,10 @@ Add: "**Packed arrays.** An array of a named union that the program only builds 
 - `documentation/advanced/metaprogramming.md`: the review's finding 42 (the undocumented "nests more than 3178 calls" limit) is still open.
 - `documentation/advanced/concurrency.md` (`:::implementation`): "A file depends on the target (and `fa check` analyzes it again for each target) when it reads `target` or `configuration`, uses a primitive missing on some target, or calls blocking something that can't block on every target; `await`, `start` and calls of functions that never wait don't."
 
+## `documentation/` page of recursive types (the arena section of its `:::implementation`, native)
+
+Add: "**Compressed links.** On 64-bit Linux, the recursive edges of a type whose nodes live in arenas are 32-bit links (the node's address divided by 8): every arena page comes from one range reserved between 2 GiB and 32 GiB of the address space, so a `Tree` of two optional children takes 8 bytes. When that range is full, the program stops with `stop: out of memory (the range of the arenas of recursive values is full)` (exit code 101). wasm keeps its 32-bit pointers."
+
+## `documentation/` page of `when`, `:::implementation` section (native)
+
+Add: "A `when` choosing among string literals of one length by the integers `0` to `n - 1` and `else` reads the chosen one from a single constant holding them all, at `start + length × index` (any other integer reads the `else` literal): no branch and no table."

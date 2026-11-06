@@ -2,11 +2,11 @@
 
 A **tuple** groups a fixed number of values of possibly different types, addressed by position rather than by name.
 
-The type of a tuple is written `Tuple(...)`, with the type of each element, and a tuple value is written with parentheses:
+The type of a tuple is written `Tuple<...>`, with the type of each element, and a tuple value is written with parentheses:
 
 ```fa
 let pair = (1, "one")
-let typedPair: Tuple(Integer, String) = (1, "one")
+let typedPair: Tuple<Integer, String> = (1, "one")
 ```
 
 Like objects, tuples are stored inline and are copied on assignment.
@@ -19,7 +19,7 @@ Use an [object](/values/objects) for anything that is passed around, stored, or 
 
 ```fa
 -- fine as a tuple
-function divide = (a: Integer, b: Integer(min = 1)): Tuple(Integer, Integer) => (a // b, a %% b)
+function divide = (a: Integer, b: Integer<min = 1>): Tuple<Integer, Integer> => (a // b, a %% b)
 
 -- better as an object
 type Measurement = { value: Float, unit: String }
@@ -75,7 +75,7 @@ See [destructuring](/operations/destructuring).
 Iterating over a collection of tuples destructures them directly. This is how maps are iterated:
 
 ```fa
-let usersById: Map(Integer, String) = [(1, "Ana"), (2, "Bao")]
+let usersById: Map<Integer, String> = [(1, "Ana"), (2, "Bao")]
 
 for (id, name) in usersById {
 	console.log("{id} -> {name}")
@@ -88,7 +88,7 @@ A `when` branch can bind the elements of a tuple with `as`:
 
 ```fa
 when entry is {
-	Tuple(Integer, String) as (id, name) => console.log("{id} -> {name}")
+	Tuple<Integer, String> as (id, name) => console.log("{id} -> {name}")
 	else => console.log("not an entry")
 }
 ```
@@ -100,7 +100,7 @@ Tuples and objects are **distinct** types, and there is no implicit conversion b
 ```fa
 type Point = { x: Integer, y: Integer }
 
-let tuple: Tuple(Integer, Integer) = (3, 4)
+let tuple: Tuple<Integer, Integer> = (3, 4)
 let point: Point = tuple -- error: a tuple is not an object
 ```
 
@@ -142,7 +142,7 @@ type Logger = {
 let logger: Logger = { report = log }
 ```
 
-`Void` is the unit type of Fa: it can be a type argument, as in `Task(Void)` for a task that returns nothing, but a value can't be declared with it (`let nothing: Void = ...` is an error). `Void` is not `None`: `None` is the type of the `none` value of [optionals](/values/optionals), while `Void` means that there is no value to use.
+`Void` is the unit type of Fa: it can be a type argument, as in `Task<Void>` for a task that returns nothing, but a value can't be declared with it (`let nothing: Void = ...` is an error). `Void` is not `None`: `None` is the type of the `none` value of [optionals](/values/optionals), while `Void` means that there is no value to use.
 
 :::implementation
 ## Implementation details

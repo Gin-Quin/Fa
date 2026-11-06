@@ -18,8 +18,10 @@ const add = (a: number, b: number): number => a + b
 The complete form of a function declaration is:
 
 ```
-[async] function name = (parameters): ReturnType throws Errors requires name: Type mutates path invalidates path => body
+[async] function name = <GenericParameters>(parameters): ReturnType throws Errors requires name: Type mutates path invalidates path => body
 ```
+
+- `<GenericParameters>` are the [generic parameters](#generic-functions) of the function, between angle brackets. They are part of its signature, so a lambda can have them too.
 
 - `async` marks a function that can be awaited. It is never inferred from the body: `await` is only allowed in an `async function`, an async lambda, a [`start do`](/control-flow/do#start-do) block, a test, and at the top level of a standalone file. See [concurrency](/advanced/concurrency).
 - `: ReturnType` is the type of the returned value.
@@ -28,7 +30,7 @@ The complete form of a function declaration is:
 - `mutates path` lists what the function modifies. See [mutating parameters](#mutating-parameters).
 - `invalidates path` lists the places the function can remove, or make designate another element. See [invalidating references](#invalidating-references).
 
-Every part except the name, the parameters and the body is optional, following the rules below. When several parts are present, they are always written in this order. [Generic parameters](#generic-functions) come right after the name: `function first(Item) = ...`.
+Every part except the name, the parameters and the body is optional, following the rules below. When several parts are present, they are always written in this order. [Generic parameters](#generic-functions) start the signature, before the parameters: `function first = <Item>(items: Array<Item>) => ...`.
 
 The return type, `throws`, `requires`, `mutates` and `invalidates` are the **effects** of the function: together, they tell everything a call can do, without reading the body.
 
@@ -67,7 +69,11 @@ A body made of an `if`, a `when` or a `do` is a single expression, even with blo
 
 A function that calls itself, directly or through other functions, must declare its return type; its effects are still inferred when its body is a single expression.
 
-A function can declare effects that its body doesn't have, like `throws ParseError` for a function that never throws yet: it is a warning, and callers handle the declared effects. A function whose return type is `Never` never returns: it always throws, stops the program, or loops forever.
+A function's declared `throws` and `mutates` must describe the effects of its body. Declaring `throws ParseError` when no `ParseError` can escape, or declaring a mutation that the body never performs, is an error. A declared mutation path can cover a more precise path in the body, as described in [reference checking](/advanced/reference-checking#what-a-body-may-do).
+
+A function whose return type is `Never` never returns: it always throws, stops the program, or loops forever.
+
+The unused pure-value warning also applies to other statements of a block or a file: `x + 1` on its own is a warning.
 
 ### Returning a value
 
@@ -146,7 +152,7 @@ sum(1, 2, 3) -- 6
 sum()        -- 0
 ```
 
-Inside the function, `values` is an `Array(Integer)`.
+Inside the function, `values` is an `Array<Integer>`.
 
 To pass the items of an existing collection to a variadic parameter, spread it with `...`:
 
@@ -209,11 +215,11 @@ function resetScore = (player: Player) mutates player.score => {
 	player.name = "" -- error: only `player.score` is declared as mutated
 }
 
-function resetAt = (scores: Array(Integer), index: Integer) throws IndexError mutates scores[index] => {
+function resetAt = (scores: Array<Integer>, index: Integer) throws IndexError mutates scores[index] => {
 	try scores[index] = 0 -- the index is not proven in bounds: the assignment can fail
 }
 
-function resetAll = (players: Array(Player)) mutates players[..].score => {
+function resetAll = (players: Array<Player>) mutates players[..].score => {
 	for player in players {
 		player.score = 0
 	}
@@ -239,7 +245,7 @@ function incremented = (value: Integer) => value + 1
 A function that modifies a [module-level value](/values/declaring-values#module-level-values) declares it the same way, with its full path:
 
 ```fa
--- `people` is exported by "people.fa" with `export mutable: Pool(Person) = []`
+-- `people` is exported by "people.fa" with `export mutable: Pool<Person> = []`
 function register = (name: String) mutates people.size => {
 	people.add({ name = name })
 	people = [] -- error: only `people.size` is declared as mutated
@@ -258,7 +264,7 @@ A function that can do this declares it with the `invalidates` effect:
 
 ```fa
 type Inventory = {
-	items: Pool(String)
+	items: Pool<String>
 
 	function remove = (self, item: String in self.items) invalidates item => {
 		self.items.delete(item)
@@ -288,7 +294,7 @@ Like the return type, `mutates` and `invalidates` are inferred when the body is 
 
 ```fa
 -- inferred: `mutates names`
-function addGuest = (names: Array(String)) => names.push("guest")
+function addGuest = (names: Array<String>) => names.push("guest")
 
 -- invalid: the block mutates `player`, but the signature doesn't say so
 function reset = (player: Player) => {
@@ -338,7 +344,7 @@ function main = () => {
 A function can call itself:
 
 ```fa
-function repeatText = (text: String, times: Integer(min = 0)): String =>
+function repeatText = (text: String, times: Integer<min = 0>): String =>
 	if times == 0 { "" } else { text + repeatText(text, times - 1) }
 
 repeatText("ab", 3) -- "ababab"
@@ -391,7 +397,7 @@ function main = () => {
 	greet("John") -- "Bye, John!": `greet` doesn't escape, it uses `greeting` itself
 }
 
-function sumOf = (numbers: Array(Integer)): Integer => {
+function sumOf = (numbers: Array<Integer>): Integer => {
 	mutable total = 0
 
 	function addToTotal = (value: Integer) => {
@@ -414,7 +420,7 @@ let greetings = [makeGreeter("Hello"), makeGreeter("Hi")]
 
 function main = () => {
 	mutable count = 0
-	mutable callbacks: Array(() => Void) = []
+	mutable callbacks: Array<() => Void> = []
 
 	use display = settings.display
 
@@ -460,7 +466,9 @@ function setHandler = (button: Button, handler: () => Void) mutates button.onCli
 setHandler(button, () => try save()) -- error: `onClick` is `() => Void`, which doesn't declare the errors of `save`
 ```
 
-Inside the function, a call to a parameter that is not stored needs no `try`: its errors are the caller's. The function can't catch them: a `catch` around such calls only is an error, and a `catch` around an expression that also has failing calls of its own only catches the errors of these calls.
+Inside the function, a call to a parameter that is not stored and whose type has no `throws` needs no `try`: any additional errors supplied by the caller belong to that caller. The function can't catch these additional errors. A `catch` around such calls only is an error, and a `catch` around an expression that also has failing calls of its own only catches the errors of those calls.
+
+If the parameter's type explicitly declares `throws E`, its declared errors follow the ordinary `try` and `catch` rules inside the function. The function can intercept them. Its own signature declares only the errors that can still escape: an error handled without being thrown again is absent from that signature; manually throwing it again makes it part of the signature.
 
 ## Function expressions
 
@@ -524,24 +532,24 @@ function ascending: Comparator = (a, b) => a - b
 
 ## Generic functions
 
-A function can take type parameters, written in parentheses right after its name. A capitalized parameter is a type parameter:
+A function can take type parameters, written between angle brackets at the start of its signature. A capitalized parameter is a type parameter:
 
 ```fa
-function first(Item) = (items: Array(Item)): Item? => items.get(0)
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
 
 first([1, 2, 3])     -- Item is inferred as Integer
-first(Float)([1, 2]) -- Item is given explicitly
+first<Float>([1, 2]) -- Item is given explicitly
 ```
 
-Inferred type parameters get the base type of the arguments: `[1, 2, 3]` is an `Array(Integer)`, so `Item` is `Integer`, not a literal or a ranged integer.
+Inferred type parameters get the base type of the arguments: `[1, 2, 3]` is an `Array<Integer>`, so `Item` is `Integer`, not a literal or a ranged integer.
 
 A type parameter can be constrained with `:`:
 
 ```fa
-function sum(Value: Integer | Float) = (values: Array(Value)): Value => values.reduce((total, value) => total + value, 0)
+function sum = <Value: Integer | Float>(values: Array<Value>): Value => values.reduce((total, value) => total + value, 0)
 ```
 
-The body of a generic function is checked once, against the constraints of its parameters. See [generics](/types/generics) for constraints, defaults, compile-time value parameters, and how an argument list is told apart from a list of generic arguments.
+The body of a generic function is checked once, against the constraints of its parameters. See [generics](/types/generics) for constraints, defaults, compile-time value parameters, [generic lambdas and function types](/types/generics#generic-lambdas-and-function-types), and how `<` and `>` are told apart from the comparison operators.
 
 ## Function types
 
@@ -577,7 +585,7 @@ A function `f` fits a function type `T` when:
 
 A function type may declare effects that the stored function doesn't have: callers handle them anyway. Inside a function type, a parameter that is itself a function counts as stored: its argument must declare every effect. The last parameter of a function type can be variadic, like `(...values: Integer) => Integer`, which only a function with a variadic parameter of the same type fits. Calling a value of a function type passes the arguments by position only: named arguments and default values don't go through function values.
 
-`Void` is the return type of a function that returns nothing. It's only written in function types: in a function declaration, a block without a return type already returns nothing. `Void` can be a type argument, like `Task(Void)`, but a value of type `Void` can't be bound with `let`. It is distinct from `None`, the type of `none` (see [special types](/types/operations#special-types)).
+`Void` is the return type of a function that returns nothing. It's only written in function types: in a function declaration, a block without a return type already returns nothing. `Void` can be a type argument, like `Task<Void>`, but a value of type `Void` can't be bound with `let`. It is distinct from `None`, the type of `none` (see [special types](/types/operations#special-types)).
 
 ## Methods and function pointers
 
@@ -697,3 +705,12 @@ function readPoint = (point: Point) => {
 	console.log(x, y, point)
 }
 ```
+
+
+:::implementation
+## Implementation details
+
+### Native and WebAssembly recursion
+
+A small base case of a direct recursive call is evaluated at the call site when its guard and result use only scalar parameters and operations; an empty node of an arena, whose optional fields are all `none`, is also such a base case. Arguments are evaluated once, in order. In speed builds, an integer sum through a final optional recursive call (`prefix + (child?.walk() ?? 0)`) exposes both return paths to LLVM's tail-recursion elimination, so that the last recursive edge can become an accumulator loop. Other effects and calls keep their evaluation order.
+:::

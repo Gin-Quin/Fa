@@ -142,12 +142,12 @@ Outside of generic parameter lists, naming is a **convention only**: whether som
 In a **generic parameter list**, capitalization carries meaning: a capitalized parameter is a type parameter, and a lowercase parameter is a compile-time value parameter.
 
 ```fa
-type Matrix(Element, rows: Integer, columns: Integer) = {
-	values: Array(Element)
+type Matrix<Element, rows: Integer, columns: Integer> = {
+	values: Array<Element>
 }
 
-let identity: Matrix(Float, 4, 4) = ...
-let percentage: Integer(min = 0, max = 100) = 50
+let identity: Matrix<Float, 4, 4> = ...
+let percentage: Integer<min = 0, max = 100> = 50
 ```
 
 See [generics](/types/generics).
@@ -157,8 +157,10 @@ See [generics](/types/generics).
 Every declaration in Fa has the same shape:
 
 ```
-<keyword> <name>[(<generic parameters>)][: <type>] = <value>
+<keyword> <name>[: <type>] = <value>
 ```
+
+A type declares its generic parameters between angle brackets after its name, and a function at the start of its signature: `type Pair<Left, Right> = ...`, `function first = <Item>(items: Array<Item>) => ...`. See [angle brackets](#angle-brackets).
 
 The declaration keywords are:
 
@@ -182,7 +184,7 @@ mutable count = 0
 use street = user.address.street
 static version = @readFile("version.txt")
 function double = (value: Integer): Integer => value * 2
-type Point(NumberType: Integer | Float) = { x: NumberType, y: NumberType }
+type Point<NumberType: Integer | Float> = { x: NumberType, y: NumberType }
 ```
 
 There is no way to introduce a name without one of these keywords. A bare `name = value` is always an **assignment** to an existing mutable value, never a declaration:
@@ -231,7 +233,24 @@ let points = values.map((value) => Point { x = value, y = 0 })
 let origin = readPoint() catch error => Point { x = 0, y = 0 }
 ```
 
-Inside an object literal, a field written alone is a shorthand: `{ id }` means `{ id = id }`. Where a [key set](/types/fields#key-sets) is expected, as in `Pick(User, { name, email })`, `{ name, email }` is a key set. See [objects](/values/objects#field-shorthand).
+Inside an object literal, a field written alone is a shorthand: `{ id }` means `{ id = id }`. Where a [key set](/types/fields#key-sets) is expected, as in `Pick<User, { name, email }>`, `{ name, email }` is a key set. See [objects](/values/objects#field-shorthand).
+
+## Angle brackets
+
+Generic parameters and arguments are written between angle brackets: `Array<Integer>`, `first<Float>([1, 2])`. Since `<` and `>` are also comparison operators, the tokenizer tells them apart with these rules:
+
+1. `<` followed by whitespace (a space, a tab or a line break) is the comparison operator. Any other `<` opens a generic list, whatever comes before it.
+2. Inside an open generic list, `>` always closes it. Outside one, `>` is the comparison operator.
+3. A comparison inside a generic list goes in parentheses: `Choose<(count > 255), UInt16, UInt8>`.
+4. `<=`, `>=`, `=>` and `->` are tokens of their own, so they are never generic brackets: in `Pool<people->bestFriend>`, `->` doesn't close the list.
+
+```fa
+if count < limit { ... } -- a comparison
+let names: Array<String> = [] -- a generic list
+if count<limit { ... } -- error: `<limit` opens a generic list; write `count < limit`
+```
+
+See [angle brackets and comparisons](/types/generics#angle-brackets-and-comparisons).
 
 ## Reserved keywords
 

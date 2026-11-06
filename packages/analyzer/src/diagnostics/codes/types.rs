@@ -78,6 +78,7 @@ codes! {
 	GN017 = "GN017", Error, [], "error in code checked after substitution (with the application site)";
 	GN020 = "GN020", Error, [], "polymorphic recursion";
 	GN030 = "GN030", Error, [], "generic parameters on a lambda";
+	GN031 = "GN031", Error, [], "generic arguments or parameters written with parentheses";
 	TF001 = "TF001", Error, [], "type function applications nest too deeply (256)";
 	TF002 = "TF002", Error, [], "error inside an applied type function";
 	TF004 = "TF004", Error, [], "compile-time call threw";

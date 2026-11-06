@@ -215,6 +215,8 @@ test only "the one I am debugging" {
 - When a test [stops](/values/errors) on a failed runtime check (an integer overflow, for example), the test fails, the remaining tests of its file are reported as not run, and the runner goes on with the next test file.
 - `fa test` exits with the code `0` when every test that ran passed, and `1` otherwise.
 
+- A test file still running after `FA_TEST_TIMEOUT` seconds (300 by default) is stopped and reported as failed with that reason.
+
 ## Coverage
 
 ```bash

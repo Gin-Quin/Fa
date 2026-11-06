@@ -15,10 +15,10 @@ Fa is designed for AI agents as much as for humans: code reads almost naturally,
 | `f"Hello {name}"` | `"Hello {name}"` |
 | `int`, `float` | `Integer`, `Float` |
 | `float(count)` | `Float(count)` |
-| `list[str]` | `Array(String)` |
-| `dict[str, int]` | `Map(String, Integer)` |
-| `set[int]` | `Set(Integer)` |
-| `tuple[int, str]` | `Tuple(Integer, String)` |
+| `list[str]` | `Array<String>` |
+| `dict[str, int]` | `Map<String, Integer>` |
+| `set[int]` | `Set<Integer>` |
+| `tuple[int, str]` | `Tuple<Integer, String>` |
 | `None` | `none` |
 | `Optional[T]` | `T?` |
 | `x is None` | `x is none` |
@@ -74,13 +74,13 @@ Type annotations are checked, not hints, but inference means you rarely write th
 let name = "Ada"        -- String
 let count = 42          -- Integer
 let ratio = 0.5         -- Float
-let names = ["Ada"]     -- Array(String)
+let names = ["Ada"]     -- Array<String>
 ```
 
 `Integer` and `Float` are separate types, with no implicit conversion between them: write `Float(count) * ratio`. As in Python 3, `/` always returns a `Float` and `//` is floor division. Integers can also carry a range that the compiler checks:
 
 ```fa
-let percent: Integer(min = 0, max = 100) = 50
+let percent: Integer<min = 0, max = 100> = 50
 ```
 
 ## Errors are declared
@@ -98,7 +98,7 @@ type ScoreError = Errors {
 	Malformed = { line: Integer }
 }
 
-function loadScore = (): Integer throws ScoreError => {
+function loadScore = (): Integer throws ScoreError.Missing => {
 	throw ScoreError.Missing
 }
 
@@ -106,11 +106,11 @@ let score = try loadScore()                -- propagate to the caller
 let score = loadScore() catch error => 0   -- or supply a fallback
 ```
 
-`try` is not a block: it marks one call whose errors propagate to the caller, which must declare them too. To handle each error differently, match on it:
+`try` is not a block: it marks one call whose errors propagate to the caller, which must declare them too. For a call to `readScore` that can fail with either `ScoreError` variant, match on the error:
 
 ```fa
 function printScore = () => {
-	let score = loadScore() catch error => when error is {
+	let score = readScore() catch error => when error is {
 		ScoreError.Missing => 0
 		ScoreError.Malformed as { line } => {
 			console.log("Bad line {line}")
@@ -202,7 +202,7 @@ type User = {
 ```fa
 type Admin = {
 	...User
-	permissions: Array(String)
+	permissions: Array<String>
 }
 ```
 
@@ -243,7 +243,7 @@ use b = a
 A function that modifies a parameter says so in its signature:
 
 ```fa
-function addBonus = (scores: Array(Integer), bonus: Integer) mutates scores => {
+function addBonus = (scores: Array<Integer>, bonus: Integer) mutates scores => {
 	for score in scores {
 		score += bonus
 	}

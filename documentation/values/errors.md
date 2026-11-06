@@ -72,7 +72,7 @@ What the compiler can prove is defined by the rules of [range analysis](/values/
 These operations are handled like any call that can fail:
 
 ```fa
-function third = (items: Array(Integer)): Integer throws IndexError => {
+function third = (items: Array<Integer>): Integer throws IndexError => {
 	return try items[2]
 }
 
@@ -88,7 +88,7 @@ A function that can fail declares its errors after its return type, with `throws
 Use the `throw` keyword to fail with an error. `throw` exits the current function, like `return`.
 
 ```fa
-function loadScore = (): Integer throws ApiError => {
+function loadScore = (): Integer throws ApiError.AuthenticationError => {
 	let response = request("/score")
 
 	if response.status == 401 {
@@ -119,6 +119,14 @@ function saveScore = (score: Integer) throws StorageError => {
 
 Errors are never part of the return type: a function does not return `Integer | ApiError`, it returns `Integer` and `throws ApiError`.
 
+A defined function must declare exactly the errors that can escape its body. Declaring an error that the body never propagates is an error, including when a `catch` handles every occurrence of that error. Throwing it again from the handler makes it part of the function's signature. This rule also applies to functions with single-expression bodies and explicitly typed declarations.
+
+The set is exact down to each variant. With `type E = Errors { Bad, Other }`, a function that can only propagate `E.Bad` declares `throws E.Bad`; `throws E` would also declare `E.Other` and is an error. A union lists exactly the possible variants.
+
+A value that throws fewer errors satisfies a type that throws more: `Task<T>` satisfies `Task<T> throws E`, and `(x: Integer) => Integer` satisfies `(x: Integer) => Integer throws E`. This applies to variables, collection items, fields, arguments and return values.
+
+Such a function type describes the effects a value is allowed to have. Assigning an existing function with fewer effects to it remains valid; defining a function whose declared effects exceed its body's effects does not.
+
 ## Propagating errors with `try`
 
 Calling a function that can fail requires an explicit choice: propagate the error, or handle it.
@@ -126,7 +134,7 @@ Calling a function that can fail requires an explicit choice: propagate the erro
 To propagate the error to the caller, use `try`. If the call fails, the current function fails with the same error. Otherwise, `try` returns the value.
 
 ```fa
-function printScore = () throws ApiError => {
+function printScore = () throws ApiError.AuthenticationError => {
 	let score = try loadScore()
 	console.log("Your score is: {score}")
 }
@@ -136,7 +144,7 @@ function printScore = () throws ApiError => {
 
 ```fa
 function printScore = () => {
-	let score = loadScore() -- error: `loadScore` can fail with `ApiError`. Use `try` to propagate the error, or `catch` to handle it.
+	let score = loadScore() -- error: `loadScore` can fail with `ApiError.AuthenticationError`. Use `try` to propagate the error, or `catch` to handle it.
 }
 ```
 
@@ -172,11 +180,11 @@ A `try` or a `catch` on an expression that can't fail is a warning, not an error
 
 A handler is not a function: `return`, `throw`, `break` and `continue` inside it act on the enclosing function or loop, as in the example below. The name bound by `catch` only exists inside the handler. See [order of operations](/operations/arithmetic#order-of-operations).
 
-To handle each kind of error differently, use a `when` expression. `when` is exhaustive: the compiler checks that every error is handled, and tells you if you forgot one. Members are always written with their type, like `ApiError.TimeoutError`, and their data is bound with `as`.
+For the next examples, `fetchScore` returns an `Integer` and can fail with any variant of `ApiError`. To handle each kind of error differently, use a `when` expression. `when` is exhaustive: the compiler checks that every error is handled, and tells you if you forgot one. Members are always written with their type, like `ApiError.TimeoutError`, and their data is bound with `as`.
 
 ```fa
 function printScore = () => {
-	let score = loadScore() catch error => when error is {
+	let score = fetchScore() catch error => when error is {
 		ApiError.AuthenticationError => 0
 		ApiError.TimeoutError as { duration } => {
 			console.log("Timeout after {duration} seconds")
@@ -194,8 +202,8 @@ function printScore = () => {
 An error can also be handled partially. The remaining errors are thrown again and must be declared in the signature:
 
 ```fa
-function printScore = () throws ApiError => {
-	let score = loadScore() catch error => when error is {
+function printScore = () throws ApiError.AuthenticationError | ApiError.NetworkError => {
+	let score = fetchScore() catch error => when error is {
 		ApiError.TimeoutError => 0
 		else => throw error
 	}
@@ -256,6 +264,8 @@ function loadUser = (id: Integer): User throws ApiError => ... -- may fail, with
 
 - A function that `throws` returns its error through a separate return slot (a tagged result: the error tag and payload next to the return value), never by unwinding. `try` is a branch on the tag; `catch` is a branch to the handler.
 - A stop calls a runtime routine that prints the message and the source location to stderr, then exits with code 101, without unwinding or running destructors.
+
+- Every task promise has an error slot, null for a task that cannot fail, so widening its error type keeps its frame. A function value widened to a throwing type uses an adapter holding a copy of the function.
 
 ### JavaScript
 

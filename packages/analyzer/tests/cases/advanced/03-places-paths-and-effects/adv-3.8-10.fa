@@ -1,5 +1,5 @@
 -- context: the brief's shared declarations (§1)
 type Player = { name: String, score: Integer }
-function noop = (player: Player) mutates player => { -- warning EFF011
+function noop = (player: Player) mutates player => { -- error EFF011
 	console.log(player.name)
 }

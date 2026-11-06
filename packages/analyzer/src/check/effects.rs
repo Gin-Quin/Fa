@@ -1255,11 +1255,15 @@ impl Walker<'_> {
 			Some(declared) => {
 				// EFF011: a declared path nothing in the body changes
 				if cx.coverage.is_some() && !cx.uncovered && self.body_complete(cx) {
-					let (mutates, invalidated) = self.s.types.effects(declared);
-					let unused: Vec<(PathId, bool)> = mutates
-						.iter()
-						.map(|&path| (path, false))
-						.chain(invalidated.iter().map(|&path| (path, true)))
+					let unused: Vec<(PathId, bool)> = std::iter::once(declared)
+						.chain(cx.extra_effect_contract)
+						.flat_map(|contract| {
+							let (mutates, invalidated) = self.s.types.effects(contract);
+							mutates
+								.iter()
+								.map(|&path| (path, false))
+								.chain(invalidated.iter().map(|&path| (path, true)))
+						})
 						.filter(|&(path, invalidates)| {
 							!covers_any(&self.s.types, path, invalidates, &own)
 						})

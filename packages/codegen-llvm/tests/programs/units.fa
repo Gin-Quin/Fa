@@ -32,7 +32,7 @@ export namespace = {
 		Shape.Square as { side } => side * side
 		Shape.Empty => 0
 	}
-	function find = (key: String): Integer throws Failure => {
+	function find = (key: String): Integer throws Failure.Missing => {
 		for index in 0..names.length {
 			if names[index] == key {
 				return index

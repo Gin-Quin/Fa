@@ -12,6 +12,8 @@
 //! call (`action()`), outside of any nested function. A local of the same
 //! name only makes the answer `false`, never wrongly `true`.
 
+use std::sync::Arc;
+
 use fa_parser::TypedSyntaxTree;
 
 use crate::check::Walker;
@@ -60,35 +62,50 @@ impl Walker<'_> {
 		index < 32 && self.only_called(declaration) & (1 << index) != 0
 	}
 
-	/// Whether `n` holds a call of a parameter that the enclosing function
-	/// only calls: its errors are the caller's (`EF018` when a `catch`
-	/// covers only such calls).
-	pub(crate) fn calls_passed_callback(&mut self, n: NodeId) -> bool {
+	/// A call whose extra callback errors belong to the enclosing function's
+	/// caller. An explicit `throws` keeps its existing handling convention.
+	pub(crate) fn is_passed_callback(&mut self, callee: NodeId) -> bool {
+		let callee = self.strip_groups(callee);
+		if let View::Call { callee: inner, .. } = self.view(callee)
+			&& self
+				.a
+				.has_flags(callee, crate::analysis::NodeFlags::GENERIC_APPLICATION)
+		{
+			return self.is_passed_callback(inner);
+		}
 		let Some(function) = self.body.functions.last().and_then(|cx| cx.symbol) else {
 			return false;
 		};
 		let declaration = self.a.symbols.symbol(function).decl_node;
+		let (View::Name(_), Resolution::Local(symbol)) =
+			(self.view(callee), self.a.resolution(callee))
+		else {
+			return false;
+		};
+		let parameter = self.a.symbols.symbol(symbol);
+		matches!(parameter.kind, SymbolKind::Parameter { .. })
+			&& matches!(self.s.types.kind(parameter.ty), TypeKind::Function(sig)
+				if self.s.types.sig(sig).throws == crate::ids::TypeId::NEVER)
+			&& self.is_only_called(declaration, symbol)
+	}
+
+	/// Whether `n` holds a call of a parameter that the enclosing function
+	/// only calls: its errors are the caller's (`EF018` when a `catch`
+	/// covers only such calls).
+	pub(crate) fn calls_passed_callback(&mut self, n: NodeId) -> bool {
 		let mut found = false;
 		let mut stack = vec![n];
+		let tree = Arc::clone(&self.tree);
 		while let Some(node) = stack.pop() {
-			match syntax::view(&self.tree, node) {
+			match syntax::view(&tree, node) {
 				View::Lambda { .. } | View::Function { .. } => continue,
-				View::Call { callee, .. } => {
-					let callee = self.strip_groups(callee);
-					if let (View::Name(_), Resolution::Local(symbol)) =
-						(syntax::view(&self.tree, callee), self.a.resolution(callee))
-						&& matches!(
-							self.a.symbols.symbol(symbol).kind,
-							SymbolKind::Parameter { .. }
-						) && self.is_only_called(declaration, symbol)
-					{
-						found = true;
-						break;
-					}
+				View::Call { callee, .. } if self.is_passed_callback(callee) => {
+					found = true;
+					break;
 				}
 				_ => {}
 			}
-			stack.extend(syntax::children(&self.tree, node));
+			stack.extend(syntax::children(&tree, node));
 		}
 		found
 	}
@@ -107,7 +124,7 @@ fn only_calls(tree: &TypedSyntaxTree, n: NodeId, name: &str, callee: bool, neste
 					.iter()
 					.all(|argument| only_calls(tree, argument, name, false, nested))
 		}
-		View::Lambda { .. } | View::Function { .. } => {
+		View::Lambda { .. } | View::Function { .. } | View::Start(_) => {
 			syntax::children(tree, n).all(|child| only_calls(tree, child, name, false, true))
 		}
 		_ => syntax::children(tree, n).all(|child| only_calls(tree, child, name, false, nested)),

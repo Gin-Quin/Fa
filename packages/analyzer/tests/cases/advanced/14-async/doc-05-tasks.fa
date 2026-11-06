@@ -1,7 +1,8 @@
 -- docs: concurrency.md, "Tasks", "Cancelling a task", "Awaiting several tasks"
 type Response = { body: String }
 type HttpError = Errors { HttpError = { status: Integer } }
-async function fetchData = (url: String): Response throws HttpError => Response { body = url }
+async function fetchData = (url: String): Response throws HttpError =>
+	if url == "" { throw HttpError.HttpError { status = 404 } } else { Response { body = url } }
 
 async function loadAll = (urls: Array<String>): Array<Response> throws HttpError => {
 	mutable tasks: Array<Task<Response> throws HttpError> = []

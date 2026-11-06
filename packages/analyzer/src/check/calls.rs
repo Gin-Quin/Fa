@@ -80,6 +80,9 @@ impl Walker<'_> {
 		}
 		let comptime = self.is_at_callee(callee);
 		let ty = self.check_runtime_call(n, callee, arguments, expected, comptime);
+		if self.is_passed_callback(callee) {
+			self.set_flag(n, NodeFlags::CALLBACK_CALL);
+		}
 		self.check_parallel_reduce(n, callee, ty);
 		// what it waits for, and where it can block (tasks.rs)
 		self.after_call(n, callee);
@@ -240,6 +243,7 @@ impl Walker<'_> {
 			.collect();
 		// the errors of the callbacks given to a built-in, which it throws
 		let mut callback_errors: Vec<TypeId> = Vec::new();
+		let mut callback_types = Vec::new();
 		// the arguments: every visit (they carry flow). With several lambdas,
 		// a second round when one writes places another may read: each lambda
 		// may run after the others (decision "After the analyzer review")
@@ -274,6 +278,7 @@ impl Walker<'_> {
 					self.body.flow = start.clone();
 				}
 				callback_errors.clear();
+				callback_types.clear();
 				sibling_writes = self.lambda_call_writes.take().unwrap_or_default();
 				self.lambda_entry_writes = sibling_writes.clone();
 			}
@@ -319,6 +324,7 @@ impl Walker<'_> {
 						true => match self.callback_throws(expected, actual) {
 							Some((widened, errors)) => {
 								callback_errors.push(errors);
+								callback_types.push((value, widened));
 								widened
 							}
 							None => expected,
@@ -360,6 +366,9 @@ impl Walker<'_> {
 		let throws = self.number_api_throws(n, callee, kind, &binding.arguments, throws);
 		if !callback_errors.is_empty() && !matches!(kind, Callee::Builtin(_)) {
 			self.set_flag(n, NodeFlags::PASSES_ERRORS);
+			self.a.callback_types.insert(n, callback_types);
+		} else {
+			self.a.callback_types.remove(&n);
 		}
 		let throws = if callback_errors.is_empty() {
 			throws

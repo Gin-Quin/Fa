@@ -127,6 +127,7 @@ mod tests {
 			("EF041", "EFF008"),
 			("EF044", "EFF009"),
 			("WEF001", "EFF011"),
+			("W-ERR-3", "E-ERR-10"),
 			("EF016", "REQ001"),
 		] {
 			assert_eq!(
@@ -143,7 +144,8 @@ mod tests {
 	fn severities_follow_the_briefs() {
 		assert_eq!(lookup("W-DO-2").unwrap().severity, Severity::Warning);
 		assert_eq!(lookup("WTY001").unwrap().severity, Severity::Warning);
-		assert_eq!(lookup("EFF011").unwrap().severity, Severity::Warning);
+		assert_eq!(lookup("EFF011").unwrap().severity, Severity::Error);
+		assert_eq!(lookup("W-ERR-3").unwrap().severity, Severity::Error);
 		assert_eq!(lookup("MOD013").unwrap().severity, Severity::Warning);
 		assert_eq!(lookup("E-NUM-10").unwrap().severity, Severity::Error);
 		assert_eq!(lookup("REF001").unwrap().severity, Severity::Error);

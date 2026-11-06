@@ -1,5 +1,53 @@
 # Analyzer engineer 2: state at pause (2026-11-05)
 
+## Callback and exact-effects lot (2026-11-06, validated)
+
+- `codex/analyzer-callbacks`, based on the initial green `0ab9c51`, implements
+  non-stored callback errors on JS and native. `CALLBACK_CALL` marks their
+  invocations; JS records exception identity only inside a catch, and native
+  compiles instances for the callback error signatures. Arguments are evaluated
+  before the bypass. Explicit `throws` on callback parameters remains catchable.
+  `start callback()` counts as storing it. Native unit requests carry the
+  callback signatures, including async instances; callback skips are removed.
+- User decisions: definitions must declare exactly the errors that leave their
+  bodies, down to `E.Bad`, and exactly the effects they have. Over-declaration
+  is an error everywhere, including expression bodies and function annotations.
+  Function types used as value/parameter constraints may still allow more
+  effects than the stored function has; foreign declarations remain boundaries.
+  Covering mutation paths keep their documented granularity.
+- `E-ERR-10` replaces warning `W-ERR-3` (lookup alias preserved); `EFF011` is
+  an error (`WEF001` remains an alias). Error-set checks run in the retained
+  flow round, and inferred callback error types follow sibling writes. An
+  unreachable throw doesn't enter a function's error set. The source generator
+  of diagnostic codes now retains all 106 aliases of the validated registry.
+- Tests so far: all 352 analyzer unit tests and every case pass. JS complete,
+  including golden files and the callback blocking/async test, passes. Native
+  callback programs, two error-set instances, nonthrowing ABI, and per-unit
+  async calls pass on native, freestanding and wasm. Final workspace clippy
+  is clean, and the strict complete workspace suite with LLVM exited 0 in
+  `/tmp/fa-exact-effects-workspace-fixed.log`. Its first run found only the
+  broad `throws Failure` of `units.fa`; the signature is now `Failure.Missing`,
+  and its targeted three-target rerun passes. C library fixture signatures
+  are likewise narrowed to their actual variants. No expected skips were added.
+  Logs: `/tmp/fa-exact-effects-*`, `/tmp/fa-callback-*`.
+- The compiler benchmark generator uses `<...>`, `_arguments`/`_error`, and
+  `throws Failure.Missing`. Its updated 20-file package has no diagnostic.
+  Bun formatting and website checks/snippets/build pass. Repository effect
+  audits covered 223 single-file programs plus package fixtures/review repros;
+  the few broad or artificial error signatures found are migrated.
+- Next, in the separate `analyzer-with` worktree: method selection by written
+  origin (including imported values, function values, generic owners and their
+  phantom arguments). The lead and metadata engineer shared focused patches
+  for the signature-only JS ABI and concrete generic native fields; these
+  must coalesce on merge. Then `with` (including its backends), factories and remaining documented
+  rules; then pass fusion and measurements. Finding 42 still applies: the
+  evaluator's Rust stack scales `Limits::depth=10000` down to 3178 under the
+  8,000,000 KiB/6-thread setup. Keep the promised step/heap/type-function
+  limits; implement explicit continuations rather than document a new limit.
+  Cross-file key-set specialization is being implemented by the proofs agent:
+  `Interface.key_loop_params`/`key_set_applications` and a finishing stage for
+  providers with `@for` only. No extra traversal of ordinary files is needed.
+
 ## Resumption (2026-11-06)
 
 - Initial integration is green: strict `cargo test --workspace --no-fail-fast

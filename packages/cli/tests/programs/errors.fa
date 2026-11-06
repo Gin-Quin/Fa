@@ -7,6 +7,9 @@ function load = (id: String): Integer throws ApiError => {
 	if id == "slow" {
 		throw ApiError.Timeout { seconds = 30 }
 	}
+	if id == "offline" {
+		throw ApiError.Offline
+	}
 	42
 }
 console.log(load("") catch error => 0, load("a") catch error => 0)

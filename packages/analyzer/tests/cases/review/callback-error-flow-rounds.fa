@@ -1,0 +1,21 @@
+-- A sibling callback can invalidate a division proof. The inferred
+-- signature and the exact-throws check use the stable round.
+function readAfter = (reader: () => Integer, writer: () => Integer): Integer => writer() + reader()
+mutable divisor = 1
+function write = (): Integer mutates divisor => {
+	divisor = 0
+	0
+}
+-- With named functions no surrounding fact is visible; the lambda below
+-- does see divisor=1 before the sibling writer's effects are considered.
+console.log(readAfter(
+	(): Integer throws DivisionByZero => try 10 // divisor,
+	() => write()
+) catch _error => 7)
+-- prints: 7
+divisor = 1
+console.log(readAfter(
+	() => try 10 // divisor,
+	() => write()
+) catch _error => 8)
+-- prints: 8

@@ -1,0 +1,11 @@
+-- An error inferred only after sibling writes is still part of the call.
+mutable divisor = 1
+function run = (reader: () => Integer, writer: () => Integer): Integer => writer() + reader()
+let result = run( -- error E-ERR-3
+	() => try 10 // divisor,
+	() => {
+		divisor = 0
+		0
+	}
+)
+console.log(result)

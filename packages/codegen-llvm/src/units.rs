@@ -338,15 +338,7 @@ fn lower_and_emit(
 	options: &Options,
 	split: &SplitOptions,
 	object: &Path,
-	lower: impl FnOnce(
-		Lowering<'_, '_>,
-	) -> Result<
-		(
-			UnitSymbols,
-			Vec<(fa_analyzer::ids::DeclKey, Vec<fa_analyzer::ids::TypeId>)>,
-		),
-		Error,
-	>,
+	lower: impl FnOnce(Lowering<'_, '_>) -> Result<Lowered, Error>,
 ) -> Result<Lowered, Error> {
 	let machine = target.machine(options)?;
 	let context = Context::create();
@@ -392,13 +384,23 @@ fn lower_and_emit(
 			let mut merger = session.types().merger(Some(module_id));
 			requests
 				.into_iter()
-				.map(|(key, arguments)| InstanceRequest {
-					key: merger.decl_key(key),
-					arguments: arguments
-						.into_iter()
-						.map(|argument| merger.ty(argument))
-						.collect(),
-				})
+				.map(
+					|InstanceRequest {
+					     key,
+					     arguments,
+					     callbacks,
+					 }| InstanceRequest {
+						key: merger.decl_key(key),
+						arguments: arguments
+							.into_iter()
+							.map(|argument| merger.ty(argument))
+							.collect(),
+						callbacks: callbacks
+							.into_iter()
+							.map(|(index, ty)| (index, merger.ty(ty)))
+							.collect(),
+					},
+				)
 				.collect()
 		}
 	};
@@ -424,10 +426,7 @@ fn compile_instances(
 	};
 	let name = format!("{}.inst{wave}", session.module(first));
 	let object = directory.join(format!("{}.{}", file_name(&name), object_extension(split)));
-	let wanted: Vec<_> = requests
-		.iter()
-		.map(|request| (request.key, request.arguments.clone()))
-		.collect();
+	let wanted = requests.to_vec();
 	let (symbols, requests) = lower_and_emit(
 		session,
 		files,
@@ -1836,8 +1835,12 @@ fn instance_waves(
 			let module = types
 				.module_path(types.decl_key_data(request.key).module)
 				.to_string();
-			let symbol =
-				crate::lower::units::instance_symbol(types, request.key, &request.arguments);
+			let symbol = crate::lower::units::callback_instance_symbol(
+				types,
+				request.key,
+				&request.arguments,
+				&request.callbacks,
+			);
 			if seen.insert((module.clone(), symbol)) {
 				groups.entry(module).or_default().push(request);
 			}

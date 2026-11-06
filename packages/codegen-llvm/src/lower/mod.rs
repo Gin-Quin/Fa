@@ -94,6 +94,8 @@ use values::{IntRepr, Repr, Val};
 /// LLVM's number for the `fastcc` calling convention.
 pub(crate) const FAST_CALLING_CONVENTION: u32 = 8;
 
+type CallbackInstanceKey<'ctx> = (FunctionValue<'ctx>, Vec<(usize, TypeId)>);
+
 /// A lowered function declaration.
 #[derive(Clone)]
 pub(crate) struct Function<'ctx> {
@@ -258,6 +260,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// by representations of the type parameters and literal types of the
 	/// value parameters.
 	instances: FxHashMap<(NodeId, Vec<Repr>, Vec<TypeId>), NodeId>,
+	/// A function instance for the precise throwing callback signatures.
+	callback_instances: FxHashMap<CallbackInstanceKey<'ctx>, (FileId, NodeId)>,
 	/// The instances still to lower, with their file.
 	pending_instances: Vec<(FileId, NodeId)>,
 	/// The representations of the generic parameters of the function being
@@ -486,6 +490,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			type_ids: std::cell::RefCell::new(FxHashMap::default()),
 			generic_functions: FxHashMap::default(),
 			instances: FxHashMap::default(),
+			callback_instances: FxHashMap::default(),
 			pending_instances: Vec::new(),
 			bindings: std::cell::RefCell::new(FxHashMap::default()),
 			value_bindings: std::cell::RefCell::new(FxHashMap::default()),
@@ -1231,6 +1236,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		info: FnInfo,
 		suffix: &str,
 	) -> Result<Function<'ctx>, Error> {
+		self.declare_function_with_callbacks(node, info, suffix, &[])
+	}
+
+	/// An instance for a set of callback errors. Only its callback parameter
+	/// signatures and its error return differ from the ordinary instance.
+	pub(crate) fn declare_function_with_callbacks(
+		&mut self,
+		node: NodeId,
+		info: FnInfo,
+		suffix: &str,
+		callbacks: &[(usize, TypeId)],
+	) -> Result<Function<'ctx>, Error> {
 		{
 			let is_lambda = info.declaration.is_none();
 			let captures = self.find_captures(info.lambda);
@@ -1274,7 +1291,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 			}
 			for (position, param) in info.params.iter().enumerate() {
-				let ty = self.analysis.symbols.symbol(param.symbol).ty;
+				let ty = callbacks
+					.iter()
+					.find(|(index, _)| *index == position)
+					.map_or(self.analysis.symbols.symbol(param.symbol).ty, |(_, ty)| *ty);
 				let repr = self.repr_of(ty, param.node.index())?;
 				if !repr.has_value() {
 					return Err(self.unsupported(param.node.index(), "this parameter type"));
@@ -1315,7 +1335,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			for _ in self.types().requirements(sig.requires) {
 				types.push(self.pointer_type().into());
 			}
-			let throws = info.throws != TypeId::NEVER;
+			let throws = info.throws != TypeId::NEVER || !callbacks.is_empty();
 			let fn_type = match (ret.has_value(), throws) {
 				(true, false) => self.llvm_type(ret).fn_type(&types, false),
 				(false, false) => self.context.void_type().fn_type(&types, false),

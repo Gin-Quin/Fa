@@ -45,6 +45,7 @@ codes! {
 	E_ERR_7 = "E-ERR-7", Error, [], "an error type in a return type or a value union (: Integer \\";
 	E_ERR_8 = "E-ERR-8", Error, [], "await try f(): \"write try await f()\"";
 	E_ERR_9 = "E-ERR-9", Error, [], "catch without a name, or a name reused in its handler scope";
+	E_ERR_10 = "E-ERR-10", Error, ["W-ERR-3"], "A defined function declares errors that its body never propagates";
 	E_IF_1 = "E-IF-1", Error, [], "if used as a value without else";
 	E_IF_2 = "E-IF-2", Error, ["TY006"], "branch types form an invalid union without expected type (number kinds mixed, overlapping integer types, indistinguishable members)";
 	E_IF_3 = "E-IF-3", Error, [], "a branch without a value where a value is needed (block ending with a statement, Void)";
@@ -144,7 +145,6 @@ codes! {
 	W_DO_2 = "W-DO-2", Warning, [], "unreachable code";
 	W_ERR_1 = "W-ERR-1", Warning, ["WEF002"], "try on an expression that can't fail [D-23]";
 	W_ERR_2 = "W-ERR-2", Warning, [], "catch on an expression that can't fail";
-	W_ERR_3 = "W-ERR-3", Warning, [], "throws E declared but never thrown (CF14)";
 	W_ERR_4 = "W-ERR-4", Warning, [], "is Error decided at compile time (always true; never true is E-CMP-7)";
 	W_LEX_1 = "W-LEX-1", Warning, [], "a comment above a declaration separated by a blank line *and* starting with --- (probably meant as documentation)";
 	W_LOOP_1 = "W-LOOP-1", Warning, [], "break <value> in a statement loop";

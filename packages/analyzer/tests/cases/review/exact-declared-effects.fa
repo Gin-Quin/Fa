@@ -1,0 +1,51 @@
+-- A definition describes precisely what it can propagate or mutate.
+type E = Errors { Bad }
+type F = Errors { Worse }
+function block = () throws E => {} -- error E-ERR-10
+function expression = (): Integer throws E => 1 -- error E-ERR-10
+function annotated: () => Integer throws E = () => 1 -- error E-ERR-10
+function partial = (): Integer throws E | F => throw E.Bad -- error E-ERR-10
+type Family = Errors { First, Second }
+function partialFamily = (): Integer throws Family => throw Family.First -- error E-ERR-10
+function exactVariant = (): Integer throws Family.First => throw Family.First
+function annotatedPartial: () => Integer throws Family = (): Integer throws Family.First => throw Family.First -- error E-ERR-10
+function both = (choose: Boolean): Integer throws E | F =>
+	if choose { throw E.Bad } else { throw F.Worse }
+
+-- A declared callback error is interceptable; a handler that absorbs it
+-- makes an enclosing throws clause erroneous. A rethrow keeps it exact.
+function absorbed = (action: () => Integer throws E): Integer throws E => -- error E-ERR-10
+	action() catch _error => 0
+function rethrown = (action: () => Integer throws E): Integer throws E =>
+	action() catch error => throw error
+function handled = (action: () => Integer throws E): Integer =>
+	action() catch _error => 0
+function unreachable = (): Integer throws E => { -- error E-ERR-10
+	return 1
+	throw E.Bad -- warning W-DO-2
+}
+
+type Point = { x: Integer, y: Integer }
+function noMutation = (point: Point) mutates point => { -- error EFF011
+	console.log(point.x)
+}
+function partialMutation = (left: Point, right: Point) mutates left, right => { -- error EFF011
+	left.x = 1
+	console.log(right.x)
+}
+function annotatedMutation: (point: Point) => Void mutates point = (point) => { -- error EFF011
+	console.log(point.x)
+}
+function covering = (point: Point) mutates point => { point.x = 1 }
+function extraAnnotation: (left: Point, right: Point) => Void mutates left, right = (left, right) mutates left => { -- error EFF011
+	left.x = 1
+	console.log(right.x)
+}
+
+-- Function types constrain values: accepting more errors or effects than
+-- the stored function has doesn't declare an extra effect of a body.
+function acceptsEffects = (_action: (point: Point) => Void mutates point) => {}
+function plain = (point: Point) => console.log(point.x)
+acceptsEffects(plain)
+function one = (): Integer => 1
+console.log(handled(one))

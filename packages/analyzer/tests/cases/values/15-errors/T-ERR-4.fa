@@ -1,7 +1,8 @@
 -- brief: → `9`
 type E = Errors { A, B }
-function f = (): Integer throws E => throw E.B
-function g = (): Integer throws E => {
+function f = (first: Boolean = false): Integer throws E =>
+	if first { throw E.A } else { throw E.B }
+function g = (): Integer throws E.B => {
 let v = f() catch error => when error is {
 E.A => 0
 else => throw error

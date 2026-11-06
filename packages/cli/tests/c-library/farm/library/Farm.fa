@@ -10,7 +10,7 @@ export type = {
 		BadName = { name: String }
 	}
 
-	function countAnimals = (self): Int64 throws Self.Error => {
+	function countAnimals = (self): Int64 throws Self.Error.Empty => {
 		if self.animals == 0 {
 			throw Self.Error.Empty
 		}

@@ -1,0 +1,9 @@
+-- A callback started in a task is stored, not only invoked during the call.
+type E = Errors { Bad }
+function fail = (): Integer throws E => {
+	throw E.Bad
+}
+function launch = (action: () => Integer) => {
+	start action()
+}
+launch(fail) -- error: E-TYPE-1

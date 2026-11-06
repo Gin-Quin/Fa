@@ -1,0 +1,40 @@
+-- A separate native instance for each callback error set, both as one
+-- LLVM module and per unit; nonthrowing calls keep their ordinary ABI.
+-- file: library/tools.fa
+export namespace = {
+	function run = (action: () => Integer): Integer => action()
+	function guarded = (action: () => Integer, text: String): Integer => do {
+		Integer.parse(text) + action()
+	} catch _error => 7
+	function twice = (first: () => Integer, second: () => Integer): Integer =>
+		first() + second()
+	function identity = <Value>(action: () => Value): Value => action()
+	async function runAsync = (action: async () => Integer): Integer => do {
+		let result = await action()
+		result + Integer.parse("0")
+	} catch _error => 7
+}
+-- file: application/main.fa
+type First = Errors { One }
+type Second = Errors { Two }
+function failFirst = (): Integer throws First => { throw First.One }
+function failSecond = (): Integer throws Second => { throw Second.Two }
+function good = (): Integer => 4
+async function failAsync = (): Integer throws First => {
+	await Task.yield()
+	throw First.One
+}
+export async function = (_arguments: Array<String>): Integer => {
+	console.log(library.tools.run(good), library.tools.run(failFirst) catch _error => 101, library.tools.run(failSecond) catch _error => 202)
+	console.log(library.tools.twice(failFirst, good) catch _error => 101, library.tools.twice(good, failSecond) catch _error => 202)
+	console.log(library.tools.identity(() => 3), library.tools.identity(failSecond) catch _error => 202)
+	console.log(library.tools.guarded(failFirst, "x") catch _error => 101, library.tools.guarded(failFirst, "1") catch _error => 101)
+	let task = start library.tools.runAsync(failAsync)
+	console.log(await task catch _error => 303)
+	0
+}
+-- prints: 4 101 202
+-- prints: 101 202
+-- prints: 3 202
+-- prints: 7 101
+-- prints: 303

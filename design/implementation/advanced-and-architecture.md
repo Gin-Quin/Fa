@@ -280,7 +280,7 @@ Reference types of the callee's parameters and return type are substituted the s
   - `EFF001` "`reset` mutates `player`, but its signature doesn't say so: add `mutates player`" (for an assignment through a parameter the documentation's wording is "`player` is not declared as mutated. Add `mutates player` to the signature.");
   - `EFF004` "only `player.score` is declared as mutated" when a declared path exists on the same root but doesn't cover;
   - `EFF002` for an uncovered invalidation.
-- A declared effect that the body doesn't have: warning `EFF011` (callers handle it anyway).
+- A declared effect that the body doesn't have: error `EFF011`. Covering paths keep their documented granularity (`mutates p` can cover a write of `p.x`). A function type used as a value constraint may allow more effects than the function stored there has.
 - Effects on the function's own locals are never effects of the function.
 
 `covers(D, A)`, with `D` declared and `A` actual:
@@ -372,7 +372,7 @@ function compute = (x: Integer): Integer mutates nothing => x -- error EFF008 (u
 ```
 
 ```fa
-function noop = (player: Player) mutates player => { -- warning EFF011
+function noop = (player: Player) mutates player => { -- error EFF011
 	console.log(player.name)
 }
 ```

@@ -1,4 +1,5 @@
 -- error: E-ERR-6
+-- error: E-ERR-10
 -- brief: ⇒ E-ERR-6
 type E = Errors { A }
 function f = (): Integer throws E => throw E.A

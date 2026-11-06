@@ -20,11 +20,12 @@ use crate::analysis::NodeFlags;
 use crate::builtins::errors::error_type;
 use crate::check::Walker;
 use crate::diagnostics::codes::values::{
-	E_DECL_15, E_ERR_1, E_ERR_2, E_ERR_3, E_ERR_4, E_ERR_6, E_ERR_9, W_ERR_1, W_ERR_2, W_ERR_3,
+	E_DECL_15, E_ERR_1, E_ERR_2, E_ERR_3, E_ERR_4, E_ERR_6, E_ERR_9, E_ERR_10, W_ERR_1, W_ERR_2,
 };
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::{ScopeKind, SymbolKind};
 use crate::syntax::{self, Name, View};
+use crate::types::TypeKind;
 
 /// What covers the failing expressions of its operand.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -64,6 +65,9 @@ impl Walker<'_> {
 			return;
 		}
 		self.set_flag(n, NodeFlags::CAN_FAIL);
+		if !self.body.flow.reachable {
+			return;
+		}
 		// a started call: its errors belong to its task (tasks.rs)
 		if self.task_absorbs(n, errors) {
 			return;
@@ -136,19 +140,17 @@ impl Walker<'_> {
 	/// `NEVER`), or `None` when they are inferred or unchecked (a
 	/// single-expression function without `throws`, a test body, the top level).
 	fn declared_throws(&self) -> Option<TypeId> {
-		let cx = self.body.functions.last()?;
-		let info = self.a.functions.get(&cx.node)?;
-		if info.throws == TypeId::NEVER && !info.block_body {
-			return None;
-		}
-		Some(info.throws)
+		self.body.functions.last()?.throws_contract
 	}
 
 	/// Errors leaving the current body (`try` or `throw` at `n`): checked
 	/// against its declared `throws` (`code` otherwise), accumulated in the
 	/// function context.
 	fn propagate(&mut self, n: NodeId, errors: TypeId, code: crate::diagnostics::Code, verb: &str) {
-		if errors == TypeId::NEVER || self.s.types.is_recovering(errors) {
+		if errors == TypeId::NEVER
+			|| self.s.types.is_recovering(errors)
+			|| !self.body.flow.reachable
+		{
 			return;
 		}
 		// a `watch` block or a `derived` value can't throw (reactivity.rs)
@@ -197,21 +199,48 @@ impl Walker<'_> {
 		)
 	}
 
-	/// `W-ERR-3`: a `throws` declared by a block body that never throws (type
-	/// part, at the end of the body; `thrown` is what the body propagated).
-	pub(crate) fn unused_throws(&mut self, n: NodeId, declared: TypeId, thrown: TypeId) {
+	/// A definition's `throws` is exact: every declared error must be able
+	/// to leave the body, including a single-expression or annotated body.
+	pub(crate) fn check_declared_throws(&mut self, n: NodeId, declared: TypeId, thrown: TypeId) {
+		let declared_set = self.error_set(declared);
+		let thrown_set = self.error_set(thrown);
 		if declared == TypeId::NEVER
-			|| thrown != TypeId::NEVER
 			|| self.s.types.is_recovering(declared)
+			|| self.s.types.is_recovering(thrown)
+			|| !self.s.types.satisfies(thrown_set, declared_set)
+			|| self.s.types.satisfies(declared_set, thrown_set)
 		{
 			return;
 		}
-		let message = format!(
-			"this function declares `throws {}` but never throws: remove it",
-			self.display(declared)
-		);
-		let diagnostic = self.diagnostic(&W_ERR_3, n, message);
-		self.report(diagnostic);
+		let message = if thrown == TypeId::NEVER {
+			format!(
+				"this function declares `throws {}` but never propagates an error: remove it",
+				self.display(declared)
+			)
+		} else {
+			format!(
+				"this function declares `throws {}` but only propagates `{}`: declare `throws {}`",
+				self.display(declared),
+				self.display(thrown),
+				self.display(thrown)
+			)
+		};
+		let diagnostic = self.diagnostic(&E_ERR_10, n, message);
+		self.report_flow(diagnostic);
+	}
+
+	/// A family declaration can keep `NamedUnion` even with one member;
+	/// normalize it to the same member set as the errors that leave a body.
+	fn error_set(&mut self, ty: TypeId) -> TypeId {
+		match self.s.types.kind(ty) {
+			TypeKind::NamedUnion(nominal, mask) => self.s.types.named_union(nominal, mask),
+			TypeKind::Union(list) => {
+				let parts = self.s.types.list_items(list).to_vec();
+				let parts: Vec<_> = parts.into_iter().map(|part| self.error_set(part)).collect();
+				self.s.types.union(&parts)
+			}
+			_ => ty,
+		}
 	}
 
 	/// The node inside the parentheses around `n`, if any.

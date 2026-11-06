@@ -36,14 +36,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// A call whose receiver, if any, is present.
 	pub(crate) fn call_present(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
-		// a callback that throws given to a function of the program: its
-		// instance for that error set is not implemented yet
-		if self.analysis.has_flags(node, NodeFlags::PASSES_ERRORS) {
-			return Err(self.unsupported(
-				node.index(),
-				"a callback that throws, given to a function of the program",
-			));
-		}
 		// a C function (foreign.rs)
 		if let Some(call) = self.analysis.extern_calls.get(&node).cloned() {
 			return self.foreign_call(node, &call);
@@ -124,7 +116,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if closure.repr == Repr::Never {
 					return Ok(closure);
 				}
-				let ty = self.type_of(callee);
+				let ty = match closure.repr {
+					Repr::Function(ty) => ty,
+					_ => self.type_of(callee),
+				};
 				// the parameters the function type says it changes: the
 				// caller's places, not copies (ft-1)
 				let changed = self.changed_parameters(ty);
@@ -151,7 +146,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					arguments.push(value);
 					places.push(None);
 				}
-				self.call_closure_lending(closure, ty, &arguments, &places, node)
+				let catches = self
+					.analysis
+					.has_flags(node, NodeFlags::CALLBACK_CALL)
+					.then(|| std::mem::take(&mut self.frame_mut().catches));
+				let result = self.call_closure_lending(closure, ty, &arguments, &places, node);
+				if let Some(catches) = catches {
+					self.frame_mut().catches = catches;
+				}
+				result
 			}
 			Callee::Member(member) => {
 				let Some((nominal, index)) = self.member_of_type(member) else {
@@ -217,6 +220,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		function: super::Function<'ctx>,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
+		let callbacks = self.call_callback_types(node, info);
+		let function = if callbacks.is_empty() {
+			function
+		} else {
+			self.callback_instance(function, callbacks)?
+		};
 		let (value, params, ret, sig, throws) = (
 			if self.frame().arena {
 				function.arena_body.unwrap_or(function.value)
@@ -1059,11 +1068,78 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.bindings.replace(saved);
 		let function = function?;
 		// a key that is no node of the tree
-		let instance = NodeId::new(self.tree.nodes.len() + self.instances.len() + 1);
+		let instance = NodeId::new(
+			self.tree.nodes.len() + self.instances.len() + self.callback_instances.len() + 1,
+		);
 		self.functions.insert(instance, function);
 		self.instances.insert(key, instance);
 		self.pending_instances.push((self.file, instance));
 		Ok(instance)
+	}
+
+	/// The parameter positions of throwing callbacks, after receiver binding.
+	pub(crate) fn call_callback_types(
+		&self,
+		node: NodeId,
+		info: &CallInfo,
+	) -> Vec<(usize, TypeId)> {
+		let Some(callbacks) = self.analysis.callback_types.get(&node) else {
+			return Vec::new();
+		};
+		info.arguments
+			.iter()
+			.enumerate()
+			.filter_map(|(index, argument)| {
+				let Argument::Given(node) = argument else {
+					return None;
+				};
+				callbacks
+					.iter()
+					.find(|(given, _)| given == node)
+					.map(|(_, ty)| (index, self.concrete_type(*ty)))
+			})
+			.collect()
+	}
+
+	/// Reuses the ordinary instance's bindings; no error ABI is added to
+	/// the instance called with nonthrowing callbacks.
+	pub(crate) fn callback_instance(
+		&mut self,
+		base: super::Function<'ctx>,
+		callbacks: Vec<(usize, TypeId)>,
+	) -> Result<super::Function<'ctx>, Error> {
+		let key = (base.value, callbacks);
+		if let Some(&(file, instance)) = self.callback_instances.get(&key) {
+			let current = self.file;
+			self.switch_file(file);
+			let function = self.functions[&instance].clone();
+			self.switch_file(current);
+			return Ok(function);
+		}
+		// A remote declaration already has the specialized signature; its
+		// defining unit creates the body through an instance request.
+		let Some((file, _)) = self.function_key(base.value) else {
+			return Ok(base);
+		};
+		let current = self.file;
+		self.switch_file(file);
+		let saved_bindings = self.bindings.replace(base.bindings.clone());
+		let saved_values = self.value_bindings.replace(base.values.clone());
+		let suffix = format!(".callback{}", self.callback_instances.len());
+		let result =
+			self.declare_function_with_callbacks(base.declaration, base.info, &suffix, &key.1);
+		self.bindings.replace(saved_bindings);
+		self.value_bindings.replace(saved_values);
+		let result = result.inspect(|function| {
+			let instance = NodeId::new(
+				self.tree.nodes.len() + self.instances.len() + self.callback_instances.len() + 1,
+			);
+			self.functions.insert(instance, function.clone());
+			self.callback_instances.insert(key, (file, instance));
+			self.pending_instances.push((file, instance));
+		});
+		self.switch_file(current);
+		result
 	}
 
 	/// The arguments of `Array.from(source, capacity = n)`.

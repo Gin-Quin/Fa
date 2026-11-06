@@ -1,0 +1,50 @@
+-- Non-stored callback errors belong to the caller, even when the callee
+-- catches one of its own errors of exactly the same class.
+type E = Errors { Bad }
+function fail = (): Integer throws E => {
+	throw E.Bad
+}
+function good = (): Integer => 3
+function guarded = (action: () => Integer, own: Boolean): Integer => do {
+	if own { fail() } else { action() }
+} catch _error => 7
+console.log(guarded(good, true), guarded(good, false), guarded(fail, false) catch _error => 99)
+-- prints: 7 3 99
+
+-- An argument's failure belongs to the callee; invoking the callback does not.
+function failArgument = (_value: Integer): Integer throws E => try fail()
+function parsed = (action: (Integer) => Integer, text: String): Integer =>
+	action(Integer.parse(text)) catch _error => 17
+console.log(parsed((value) => value, "x"), parsed(failArgument, "1") catch _error => 99)
+-- prints: 17 99
+
+-- Nested catches must all preserve that origin.
+function nested = (action: () => Integer): Integer => do {
+	let value = do { action() + Integer.parse("0") } catch _error => 10
+	value + Integer.parse("0")
+} catch _error => 20
+console.log(nested(good), nested(fail) catch _error => 99)
+-- prints: 3 99
+
+-- Errors declared by the callback type can be intercepted or rethrown.
+function handled = (action: () => Integer throws E): Integer =>
+	action() catch _error => 5
+function rethrown = (action: () => Integer throws E): Integer throws E =>
+	action() catch error => throw error
+console.log(handled(fail), rethrown(fail) catch _error => 99)
+-- prints: 5 99
+
+-- The same rule holds when invoking the callback suspends.
+async function failAsync = (): Integer throws E => {
+	await Task.yield()
+	throw E.Bad
+}
+async function guardedAsync = (action: async () => Integer): Integer => do {
+	let value = await action()
+	value + Integer.parse("0")
+} catch _error => 7
+async function runAsync = (): Integer => do {
+	let task = start guardedAsync(failAsync)
+	await task
+} catch _error => 99
+console.log(await runAsync()) -- prints: 99

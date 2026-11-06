@@ -1,6 +1,7 @@
 -- brief: ✓ ef-7: partial handling rethrows the rest (inferred throws in a single expression) → 0
 type ApiError2 = Errors { Timeout, Network }
-function load2 = (): Integer throws ApiError2 => throw ApiError2.Timeout
+function load2 = (network: Boolean = false): Integer throws ApiError2 =>
+	if network { throw ApiError2.Network } else { throw ApiError2.Timeout }
 function safe = () => load2() catch error => when error is {
 	ApiError2.Timeout => 0
 	else => throw error

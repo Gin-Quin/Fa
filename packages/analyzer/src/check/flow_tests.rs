@@ -734,7 +734,7 @@ fn errors_leaving_a_function_are_declared() {
 	);
 	assert_eq!(
 		codes("function f = (): Integer throws ParseError => {\n\t1\n}\n"),
-		["W-ERR-3"]
+		["E-ERR-10"]
 	);
 	assert_eq!(codes("function f = () => {\n\tthrow 5\n}\n"), ["E-ERR-1"]);
 	// a `return` in a handler leaves the function
@@ -854,7 +854,7 @@ fn type_level_verdicts_and_fallbacks() {
 	assert_eq!(c.symbol_type("r"), "Integer");
 	assert_eq!(
 		codes("function load = (): Integer throws ParseError => 1\nlet v = load() ?? 0\n"),
-		["E-OPT-6"]
+		["E-ERR-10", "E-OPT-6"]
 	);
 	// `?? return` (D-100)
 	assert_eq!(

@@ -96,7 +96,7 @@ The rules of a difference:
 
 - The left side is a union, anonymous or [named](/types/unions#named-unions). Each of its members that satisfies the right side is removed. The right side can itself be a union, whose members are removed one by one.
 - Removing a member that isn't there is an error.
-- From a ranged integer, removing values keeps the remaining ranges: `Integer(min = 0, max = 10) - 0` is `Integer(min = 1, max = 10)`.
+- From a ranged integer, removing values keeps the remaining ranges: `Integer<min = 0, max = 10> - 0` is `Integer<min = 1, max = 10>`.
 - Other types can't be split: `String - "hello"` is an error, since no type means "every string but one".
 - A difference of a named union is a named union with the same identity: `Shape - Shape.Point` is a `Shape`, without its `Point` member.
 - Removing every member gives `Never`.
@@ -109,7 +109,7 @@ To remove fields from an object type, use `Omit`.
 
 ```fa
 type MaybeInteger = Integer?
--- the same as Optional(Integer), and as Integer | None
+-- the same as Optional<Integer>, and as Integer | None
 ```
 
 Since `T?` is a union with `None`, adding `None` twice changes nothing: `Integer??` is `Integer?`.
@@ -137,7 +137,7 @@ function runForever = (): Never => {
 }
 ```
 
-`Void` is a type with a single, empty value, distinct from `None`. A function that returns nothing returns `Void`. A function declaration simply omits its return type, but a function type writes it, like `(message: String) => Void`, and `Void` can be given to a generic parameter, like `Task(Void)`. A `Void` result can't be stored: `let result = log("done")` is an error, and so is `items.map((item) => log(item))`, which would build an `Array(Void)`: use a `for` loop. See [defining functions](/functions/defining-functions).
+`Void` is a type with a single, empty value, distinct from `None`. A function that returns nothing returns `Void`. A function declaration simply omits its return type, but a function type writes it, like `(message: String) => Void`, and `Void` can be given to a generic parameter, like `Task<Void>`. A `Void` result can't be stored: `let result = log("done")` is an error, and so is `items.map((item) => log(item))`, which would build an `Array<Void>`: use a `for` loop. See [defining functions](/functions/defining-functions).
 
 Every member of an [`Errors`](/values/errors) type satisfies `Error`.
 

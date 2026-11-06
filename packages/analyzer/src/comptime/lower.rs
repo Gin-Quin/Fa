@@ -325,6 +325,26 @@ impl<'a> Lowerer<'a> {
 
 	// ── type tests ───────────────────────────────────────────────────────
 
+	/// A pattern may compare a Fields value or list alternatives, whose
+	/// expression type alone does not describe what the pattern matches.
+	fn is_pattern(&self, pattern: NodeId) -> TypeTest {
+		match syntax::view(self.tree, pattern) {
+			View::Group(inner) => self.is_pattern(inner),
+			View::Union { operands } => TypeTest::Union(
+				operands
+					.iter()
+					.map(|operand| self.is_pattern(operand))
+					.collect(),
+			),
+			_ if self.a.fields_patterns.contains(&pattern) => self
+				.a
+				.constant(pattern)
+				.cloned()
+				.map_or(TypeTest::Any, TypeTest::Literal),
+			_ => self.type_test(self.a.type_of(pattern)),
+		}
+	}
+
 	/// The test of a type (`is`, `when`).
 	pub fn type_test(&self, ty: TypeId) -> TypeTest {
 		let types = self.types();
@@ -684,7 +704,7 @@ impl<'a> Lowerer<'a> {
 				result
 			}
 			View::Is { value, ty, negated } => {
-				let test = self.type_test(self.a.type_of(ty));
+				let test = self.is_pattern(ty);
 				Expr::Is(self.expr(value).boxed(), test, negated)
 			}
 			// a set of flags: a bit test

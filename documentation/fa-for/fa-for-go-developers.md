@@ -13,8 +13,8 @@ Fa is designed for AI agents as much as for humans: everything a function does â
 | `func add(a int) int { return a }` | `function add = (a: Integer): Integer => a` |
 | `int64`, `float64`, `byte` | `Integer`, `Float`, `Byte` |
 | `float64(count)` | `Float(count)` |
-| `[]T` | `Array(T)` |
-| `map[K]V` | `Map(K, V)` |
+| `[]T` | `Array<T>` |
+| `map[K]V` | `Map<K, V>` |
 | `Point{X: 1, Y: 2}` | `Point { x = 1, y = 2 }` |
 | `*T` (optional) | `T?` |
 | `nil` | `none` |
@@ -29,9 +29,9 @@ Fa is designed for AI agents as much as for humans: everything a function does â
 | `!x`, `&&`, `\|\|` | `not x`, `and`, `or` |
 | `x & y`, `x << n` | `x.bitAnd(y)`, `x.shiftLeft(n)` |
 | `go f()` | `start f()`: a task that isn't kept is detached and copies its arguments, like `go` |
-| `chan T` | `Channel(T)` |
-| `make(chan T, 10)` | `Channel(T) { capacity = 10 }` |
-| `interface{ Read() []byte }` | a structural constraint: `{ read: () => Array(Byte) }` |
+| `chan T` | `Channel<T>` |
+| `make(chan T, 10)` | `Channel<T> { capacity = 10 }` |
+| `interface{ Read() []byte }` | a structural constraint: `{ read: () => Array<Byte> }` |
 | `import "fmt"` | nothing â€” files see their siblings |
 
 ## Errors, without the ceremony
@@ -97,7 +97,7 @@ A value is always initialised. A field with a default declares it, and a field t
 ```fa
 type Config = {
 	host: String
-	port: Integer(min = 1, max = 65535) = 8080
+	port: Integer<min = 1, max = 65535> = 8080
 	proxy: String?
 }
 ```
@@ -136,7 +136,7 @@ See [memory management](/advanced/memory-management).
 Go's implicit interfaces are the feature Fa generalises. In Go, a type satisfies an interface by having the methods. In Fa, *every* type relationship works that way, for fields as well as functions:
 
 ```fa
-function readId(Item: { id: Integer }) = (item: Item): Integer => item.id
+function readId = <Item: { id: Integer }>(item: Item): Integer => item.id
 ```
 
 There is no `interface` keyword because there is nothing to declare. See [structural typing](/advanced/structural-typing).
@@ -148,13 +148,13 @@ func First[T any](items []T) (T, bool)
 ```
 
 ```fa
-function first(Item) = (items: Array(Item)): Item? => items.get(0)
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
 
 first([1, 2, 3])
-first(Float)([1, 2, 3])
+first<Float>([1, 2, 3])
 ```
 
-Generic parameters come right after the name, like Go's square brackets. They are inferred from the arguments and the expected type. See [generics](/types/generics).
+Generic parameters use angle brackets where Go uses square brackets: a type declares them after its name, and a function at the start of its signature. They are inferred from the arguments and the expected type. A comparison is always written with whitespace after `<` (`a < b`): any other `<` opens a generic list. See [generics](/types/generics).
 
 ## Concurrency
 
@@ -163,7 +163,7 @@ Goroutines and channels map closely:
 ```fa
 use { Channel } = std.concurrency
 
-async function producer = (channel: Channel(String)) => {
+async function producer = (channel: Channel<String>) => {
 	for index in 1..=10 {
 		await channel.send("item {index}")
 	}
@@ -171,13 +171,13 @@ async function producer = (channel: Channel(String)) => {
 }
 
 async function main = () => {
-	mutable channel = Channel(String) { capacity = 10 }
+	mutable channel = Channel<String> { capacity = 10 }
 
 	await Task.all([start producer(channel), start consumer(channel)])
 }
 ```
 
-`start` is `go`, except that tasks run on one thread, like in JavaScript: CPU-bound work goes to `for parallel` or to workers. `Channel(T) { capacity = n }` is a buffered channel. A channel is a thread-safe type: its methods don't declare `mutates`, so several tasks can use the same channel at once. Ranging over a channel until it closes:
+`start` is `go`, except that tasks run on one thread, like in JavaScript: CPU-bound work goes to `for parallel` or to workers. `Channel<T> { capacity = n }` is a buffered channel. A channel is a thread-safe type: its methods don't declare `mutates`, so several tasks can use the same channel at once. Ranging over a channel until it closes:
 
 ```fa
 while let item = await channel.receive() {
@@ -229,5 +229,5 @@ A `#` prefix is Fa's lowercase: `#helper` is private to its namespace. To shorte
 | `defer` | scope-based release: every value is freed at the end of its block |
 | `panic`/`recover` | errors are typed values: `throws`, `try`, `catch`; a failed runtime check stops the program and can't be recovered |
 | Slices sharing an array | slicing an array copies (`xs[1..4]`), and so does assignment; only a string slice can be a reference (`use word = text[0..5]`) |
-| `append` in a loop | reserve with `Array(T).from([], capacity = n)` |
+| `append` in a loop | reserve with `Array<T>.from([], capacity = n)` |
 | Labeled `break` | there are no labeled loops |

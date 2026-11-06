@@ -35,7 +35,7 @@ console.log(utils.format("Hello"))
 
 The file given to `fa run` is the program: its top-level statements run in order, after the module-level values they use are initialized. They can use `try` and `await`: an error that escapes them ends the program with the exit code `1`, like an error escaping an [entry function](/architecture/modules#the-entry-point).
 
-The arguments given after the file name (`fa run myFile.fa first second`) are in `arguments`, an implicit `Array(String)` that the top level of a standalone file or a script sees: `arguments.get(0)` is the first one (`first`). If the file exports a function, it is called after the top-level statements, as an entry function: it receives the same arguments, and its result is the exit code.
+The arguments given after the file name (`fa run myFile.fa first second`) are in `arguments`, an implicit `Array<String>` that the top level of a standalone file or a script sees: `arguments.get(0)` is the first one (`first`). If the file exports a function, it is called after the top-level statements, as an entry function: it receives the same arguments, and its result is the exit code.
 
 The other files are modules: they contain only declarations, like the files of a package (see [module-level values and initialization](/architecture/modules#module-level-values-and-initialization)).
 

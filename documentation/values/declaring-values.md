@@ -34,7 +34,7 @@ let myString: String = "hello"
 
 -- declaring an immutable array
 let myArray = [1, 2, 3]
-let myTypedArray: Array(Integer) = [1, 2, 3]
+let myTypedArray: Array<Integer> = [1, 2, 3]
 
 -- declaring an immutable object
 let myObject = {
@@ -58,7 +58,7 @@ let myTypedObject = {
 -- an optional can take the value `none`
 let someNumber: Integer? = 12
 let noNumber: Integer? = none
-let otherNumber: Optional(Integer) = 24
+let otherNumber: Optional<Integer> = 24
 ```
 
 ## Inferred types
@@ -70,20 +70,20 @@ The type of a value declared without annotation is the **widened** type of its i
 ```fa
 let answer = 42          -- an Integer
 let status = "ready"     -- a String
-let numbers = [1, 2]     -- an Array(Integer)
+let numbers = [1, 2]     -- an Array<Integer>
 let ratio = if fast { 1.5 } else { 2.0 } -- a Float
 ```
 
 A value that gives no type, like `none` or an empty `[]`, needs an annotation: `mutable best = none` is an error, write `mutable best: Player? = none`.
 
-This is the type that `Type(answer)` returns and that generic inference uses. An annotated value has the annotated type: `let small: Int8 = 42` is an `Int8`. A [`static`](#compile-time-values) value is the exception: it keeps its literal type.
+This is the type that `Type<answer>` returns and that generic inference uses. An annotated value has the annotated type: `let small: Int8 = 42` is an `Int8`. A [`static`](#compile-time-values) value is the exception: it keeps its literal type.
 
 On top of the type, the compiler keeps **flow facts** about each place: its exact literal value, its integer range, the union member it was narrowed to, the length of a collection. Facts make more programs valid, without changing the type:
 
 ```fa
 let five = 5 -- an Integer, known to be 5
 
-let score: Integer(min = 0, max = 10) = five -- valid: `five` is known to be 5
+let score: Integer<min = 0, max = 10> = five -- valid: `five` is known to be 5
 let items = [10, 20, 30]
 let last = items[2] -- no error possible: `items` is known to have 3 items
 ```
@@ -145,7 +145,7 @@ myObject = { foo = 14 } -- and this works as well
 `let` and `mutable` copy the value they are given. `use` does not copy: it gives another name to an existing value. Reading or writing through the alias is reading or writing the original value.
 
 ```fa
-mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
+mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }]
 
 let copied = people[1]     -- a copy: changing it leaves the array untouched
 use referenced = people[1] -- an alias of the element inside the array
@@ -172,7 +172,7 @@ A reference declared with `use` designates the same place for its whole life: it
 To declare a reference that can designate another place later, declare it with `mutable use`, then move it with `reuse`:
 
 ```fa
-mutable players: Array(Player) = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
+mutable players: Array<Player> = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
 
 mutable use best = players[0]
 
@@ -326,7 +326,7 @@ function incremented = (value: Integer) => value + 1
 A value declared at the top of a module (a file of `library/` or `application/`, see [modules](/architecture/modules)), or as a member of a namespace, lives as long as the program. Its place never moves: its address is stable, whether it is modified field by field or replaced as a whole. Unlike a parameter, it can be replaced, even if it is a primitive.
 
 ```fa
-export mutable: Pool(Person) = []
+export mutable: Pool<Person> = []
 ```
 
 ```fa

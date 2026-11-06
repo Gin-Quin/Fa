@@ -42,7 +42,7 @@ Only the dependencies declared by a package are visible in it: the dependencies 
 | Source | Example |
 |---|---|
 | Git repository | `"github:farmers/farm@4"`, `"gitlab:farmers/farm@4"`, `"git+https://example.com/farm.git@4"` |
-| Sibling package of the workspace | `"../shared"` |
+| Local package (workspace sibling or external folder) | `"../shared"` |
 | Remote file | `"https://api.weather.com/fa/types.fa"` |
 | Remote folder | `"https://cdn.example.com/ui@2.1.0/"` |
 
@@ -56,6 +56,8 @@ type DependencySource = String | {
 	generate: (content: String) => String -- turns the fetched content into the Fa source of the dependency
 }
 ```
+
+`file://`, local paths and local Git repositories (`git+file://…`, `git+/srv/x.git`) are allowed only from the root package, workspace packages and their explicitly named local dependencies. A fetched dependency declaring or importing one is `DEP008`. An `http://` source gets `DEP004` because its first content is unauthenticated. Only the URL path identifies a version (`/v3/`, `@2.1.0`, `-1.2`), never its host.
 
 ### Git repositories
 
@@ -109,6 +111,8 @@ export = {
 ```
 
 The path goes from the folder of the package to the folder of the other package. Sibling packages are always built from source: a change in `shared` is picked up immediately by `fa develop`, with no publishing step and no version bump. They are not recorded in the lockfile.
+
+Outside a workspace, a package can depend on a local package folder, including a relative path such as `shared = "../shared"`. Unlike workspace siblings, it is locked by the hash of `package.fa`, `dependencies.fa` and `library/`; changed contents require `fa update shared`.
 
 ### Shared dependencies
 
@@ -172,6 +176,8 @@ A source added to `dependencies.fa` or to an `@import` is resolved and added to 
 fa update  # <-- resolve every range again, to the latest allowed versions
 fa update weather  # <-- only the dependency named `weather`
 ```
+
+A hash is `sha256:` followed by 64 lowercase hexadecimal digits; a Git commit has 40 or 64 hexadecimal digits. Other forms make the lockfile invalid. Remote manifests and Git trees use relative `/` paths without empty segments, `.`, `..`, backslashes, colons or control characters (`DEP007`).
 
 ## Cache
 

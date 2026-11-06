@@ -44,13 +44,13 @@ type Target = "web" | "bun" | "node" | "native" | "wasm"
 type PackageConfiguration = {
 	name: String
 	version: String?
-	targets: Array(Target) = ["web", "bun", "native"]
+	targets: Array<Target> = ["web", "bun", "native"]
 	entry: String = "application/main.fa"
 
 	description: String?
 	license: String?
 	repository: String?
-	authors: Array(String) = []
+	authors: Array<String> = []
 
 	build: BuildOptions = {}
 	develop: DevelopOptions = {}
@@ -65,8 +65,8 @@ type BuildOptions = {
 	output: String = "build"
 	minify: Boolean = true
 	asynchronous: Boolean? -- default: detected from the program
-	link: Array(String) = []
-	libraryPaths: Array(String) = []
+	link: Array<String> = []
+	libraryPaths: Array<String> = []
 	cLibrary: CLibraryOptions?
 }
 
@@ -77,14 +77,14 @@ type CLibraryOptions = {
 }
 
 type DevelopOptions = {
-	port: Integer(min = 1, max = 65535) = 3000
+	port: Integer<min = 1, max = 65535> = 3000
 	open: Boolean = false
 	hotReload: Boolean = true
 }
 
 type TestOptions = {
-	include: Array(String) = ["**/*.test.fa"]
-	timeout: Integer(min = 1) = 5000
+	include: Array<String> = ["**/*.test.fa"]
+	timeout: Integer<min = 1> = 5000
 }
 
 type TargetOverride = {
@@ -110,7 +110,7 @@ Values and functions can be used to build the configuration:
 ```fa
 let version = "2.1.0"
 
-function withServerTargets = (targets: Array(Target)): Array(Target) => [...targets, "bun", "node"]
+function withServerTargets = (targets: Array<Target>): Array<Target> => [...targets, "bun", "node"]
 
 export = {
 	name = "farm"
@@ -190,12 +190,12 @@ export = {
 |---|---|---|
 | `name` | `String` | Name of the package, unique in its workspace. Required. |
 | `version` | `String` | [Semantic version](https://semver.org) of the package. Required for a published library. |
-| `targets` | `Array(Target)` | Targets the application is compiled for. Defaults to `["web", "bun", "native"]`. |
+| `targets` | `Array<Target>` | Targets the application is compiled for. Defaults to `["web", "bun", "native"]`. |
 | `entry` | `String` | Entry file of the application. Defaults to `"application/main.fa"`. |
 | `description` | `String` | Short description of a published library. |
 | `license` | `String` | License of a published library. |
 | `repository` | `String` | Where the source code of a published library lives. |
-| `authors` | `Array(String)` | Authors of a published library. |
+| `authors` | `Array<String>` | Authors of a published library. |
 | `build` | `BuildOptions` | Options of `fa build`. |
 | `develop` | `DevelopOptions` | Options of `fa develop`. |
 | `test` | `TestOptions` | Options of `fa test`. |
@@ -256,6 +256,8 @@ export = {
 `asynchronous` says whether the program runs with an event loop (see [synchronous programs](/advanced/concurrency#synchronous-programs)). By default, the compiler decides: a program is asynchronous when its entry starts a task or awaits something that may wait. Set it to `false` to build a program as one blocking call (tasks then run to their end as soon as they are started, and the compiler warns that the output order may change), or to `true` to keep the event loop. It can differ per target (`overrides = { web = { build = { asynchronous = true } } }`). `fa build`, `fa run` and `fa test` take the same option as `--asynchronous=true|false`; `fa build -v` says which mode a program builds in, and why. The name is `asynchronous` because `async` is a keyword.
 
 `cLibrary` builds the package as a C library, with a generated header: `header` is the header's file name, `prefix` the prefix of the C names, and `api` the foreign file whose export is the C interface. See [foreign code](/advanced/foreign-code#exposing-a-library-to-c).
+
+`cLibrary` currently applies to `native`. A package with JavaScript targets places it in `overrides.native.build` (`FFI013` otherwise). Its `prefix` is a C identifier, its `header` is a file name, and outputs go to `<output>/native/`.
 
 ### `develop`
 

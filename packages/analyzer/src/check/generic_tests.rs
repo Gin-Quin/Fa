@@ -23,11 +23,11 @@ fn inference_from_arguments_and_expected_type() {
 
 #[test]
 fn explicit_arguments_and_constraints() {
-	let (session, file) = analyzed(&format!("{PICK}let f = pick(Float)(2)\n"));
+	let (session, file) = analyzed(&format!("{PICK}let f = pick<Float>(2)\n"));
 	assert_eq!(symbol_type(&session, file, "f"), "Float");
 	assert_eq!(codes(&format!("{PICK}let s = pick(\"a\")\n")), ["GN010"]);
 	assert_eq!(
-		codes(&format!("{PICK}let s = pick(String)(\"a\")\n")),
+		codes(&format!("{PICK}let s = pick<String>(\"a\")\n")),
 		["GN010"]
 	);
 	assert_eq!(

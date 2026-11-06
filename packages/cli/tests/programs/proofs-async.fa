@@ -6,32 +6,45 @@
 -- the program's proofs like native per-unit builds")
 use { sleep } = std.time
 
+-- Two-phase handshakes guarantee each store runs after its reader starts,
+-- and before that reader continues, even on a slow or emulated machine.
+
 -- a task shrinks the array while the function waits
 type Link = { next: UInt32 }
 mutable links: Array<Link> = [{ next = 1 }, { next = 0 }]
-async function walk = (from: UInt32): UInt32 throws IndexError => {
+mutable linksPhase = 0
+async function walk = (from: UInt32): UInt32 throws IndexError mutates linksPhase => {
 	let first = try links[from].next
+	linksPhase = 1
 	await sleep(5)
+	while linksPhase != 2 { await Task.yield() }
 	try links[first].next
 }
 start do {
+	while linksPhase != 1 { await Task.yield() }
 	await sleep(1)
 	let removed = links.pop()
 	console.log("popped", removed is not none) -- prints: popped true
+	linksPhase = 2
 }
 console.log(await walk(0) catch error => 99) -- prints: 99
 
 -- a task stores an index out of bounds into the field
 type Hop = { to: UInt32 }
 mutable hops: Array<Hop> = [{ to = 1 }, { to = 0 }]
-async function far = (): UInt32 throws IndexError => {
+mutable hopsPhase = 0
+async function far = (): UInt32 throws IndexError mutates hopsPhase => {
+	hopsPhase = 1
 	await sleep(5)
+	while hopsPhase != 2 { await Task.yield() }
 	let last: UInt32 = hops.length - 1
 	try hops[try hops[last].to].to
 }
 start do {
+	while hopsPhase != 1 { await Task.yield() }
 	await sleep(1)
 	hops.push({ to = 7 })
+	hopsPhase = 2
 }
 console.log(await far() catch error => 99) -- prints: 99
 
@@ -52,14 +65,19 @@ console.log(await leap() catch error => 99) -- prints: 99
 -- the same with in-bounds values: the proof holds, the result is the same
 type Step = { to: UInt32 }
 mutable steps: Array<Step> = [{ to = 1 }, { to = 0 }]
-async function stride = (): UInt32 throws IndexError => {
+mutable stepsPhase = 0
+async function stride = (): UInt32 throws IndexError mutates stepsPhase => {
+	stepsPhase = 1
 	await sleep(5)
+	while stepsPhase != 2 { await Task.yield() }
 	let last: UInt32 = steps.length - 1
 	try steps[try steps[last].to].to
 }
 start do {
+	while stepsPhase != 1 { await Task.yield() }
 	await sleep(1)
 	steps.push({ to = 0 })
+	stepsPhase = 2
 }
 console.log(await stride() catch error => 99) -- prints: 1
 
@@ -67,28 +85,38 @@ console.log(await stride() catch error => 99) -- prints: 1
 -- `get` counts it from the end
 type Cursor = { position: Integer }
 mutable cursor = Cursor { position = 0 }
-async function current = (text: String): Byte mutates cursor => {
+mutable cursorPhase = 0
+async function current = (text: String): Byte mutates cursor, cursorPhase => {
 	cursor.position += 1
+	cursorPhase = 1
 	await sleep(5)
+	while cursorPhase != 2 { await Task.yield() }
 	text.bytes().get(cursor.position) ?? 0
 }
 start do {
+	while cursorPhase != 1 { await Task.yield() }
 	await sleep(1)
 	cursor.position = 0 - 1
+	cursorPhase = 2
 }
 console.log(await current("xyz")) -- prints: 122
 
 -- a module-level position narrowed before an `await`, changed meanwhile
 mutable position: Integer = 0
-async function at = (text: String): Byte => {
+mutable positionPhase = 0
+async function at = (text: String): Byte mutates positionPhase => {
 	if position >= 0 {
+		positionPhase = 1
 		await sleep(5)
+		while positionPhase != 2 { await Task.yield() }
 		return text.bytes().get(position) ?? 0
 	}
 	0
 }
 start do {
+	while positionPhase != 1 { await Task.yield() }
 	await sleep(1)
 	position = 0 - 1
+	positionPhase = 2
 }
 console.log(await at("xyz")) -- prints: 122

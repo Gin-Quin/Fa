@@ -1,9 +1,9 @@
 -- Index proof: the object literal of a generic body is of another type than
 -- the instance whose field is read
 type Link = { next: UInt32 }
-type Holder(Value) = { at: Value }
-function hold(Value) = (at: Value): Holder(Value) => Holder(Value) { at }
+type Holder<Value> = { at: Value }
+function hold = <Value>(at: Value): Holder<Value> => Holder<Value> { at }
 mutable links: Array<Link> = [{ next = 0 }]
-function read = (items: Array<Link>, holder: Holder(UInt32)): UInt32 throws IndexError => try items[holder.at].next
+function read = (items: Array<Link>, holder: Holder<UInt32>): UInt32 throws IndexError => try items[holder.at].next
 let far: UInt32 = 1000000
-console.log(read(links, hold(far)) catch error => 99) -- prints: 99
+console.log(read(links, hold(far)) catch _error => 99) -- prints: 99

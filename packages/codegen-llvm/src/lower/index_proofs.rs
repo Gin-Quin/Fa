@@ -47,9 +47,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	fn compute_index_facts(&self) -> IndexFacts {
 		let checks = self.overflow_checks();
-		if self.tasks.asynchronous {
-			return IndexFacts::default();
-		}
+		// asynchronous code too: the claims are flow-insensitive (every
+		// store of a place, wherever and whenever it runs: a task, a callee
+		// running while a function waits at `await`, a parallel body, a
+		// worker), and an array proven never shrinks anywhere; only the
+		// analysis's intervals are flow facts, and it drops those of the
+		// values others may write at each `await`
 		// a build per unit: the places every unit stores to, resolved by the
 		// driver (`facts::PROOF_CLAIMS`); the index proofs stay whole-program
 		if !self.whole_program {

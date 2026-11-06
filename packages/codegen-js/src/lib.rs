@@ -29,7 +29,7 @@ use std::sync::Mutex;
 
 use rayon::prelude::*;
 
-use fa_analyzer::ids::FileId;
+use fa_analyzer::ids::{FileId, NodeId};
 use fa_analyzer::{Diagnostic, Program, Session, Severity};
 
 pub use runtime::{collect_helpers, collect_helpers_inline, helper_dependencies, runtime_helper};
@@ -116,7 +116,11 @@ pub enum ProgramProofs {
 /// The failed claims of the proofs of a program's files: each file's part
 /// (`fa_analyzer::proofs::unit_claims`), merged and resolved, as natively
 /// the facts of the units of a build per unit.
-pub fn program_claims(session: &Session, files: &[FileId]) -> std::sync::Arc<BTreeSet<String>> {
+pub fn program_claims(
+	session: &Session,
+	files: &[FileId],
+	overflow_checks: bool,
+) -> std::sync::Arc<BTreeSet<String>> {
 	let types = session.types();
 	let proof_files: Vec<fa_analyzer::proofs::ProofFile<'_>> = files
 		.iter()
@@ -125,8 +129,46 @@ pub fn program_claims(session: &Session, files: &[FileId]) -> std::sync::Arc<BTr
 				.with_module(session.module(file))
 		})
 		.collect();
-	let edges = fa_analyzer::proofs::unit_claims(&proof_files);
+	let edges = fa_analyzer::proofs::unit_claims_of_goal(&proof_files, overflow_checks);
 	std::sync::Arc::new(fa_analyzer::proofs::resolve_claims(&edges))
+}
+
+/// Whether the JavaScript of a file of a program of several files depends
+/// on the program's claims ([`ProgramProofs::Claims`]): an item index that
+/// may count from the end, and that its proofs say is never negative when
+/// no claim of the program fails. Failed claims only take proofs away, so
+/// a file without one is generated the same way whatever the claims: a
+/// streaming build writes it before every unit's claims are known.
+pub fn reads_program_claims(session: &Session, file: FileId, overflow_checks: bool) -> bool {
+	use fa_analyzer::lower::index::{IndexAccess, index_access};
+	use fa_analyzer::proofs::{ProofScope, index_facts};
+	use fa_analyzer::syntax::{View, view};
+	let tree = session.tree(file);
+	let analysis = session.analysis(file);
+	let types = session.types();
+	let from_end: Vec<NodeId> = (0..tree.nodes.len())
+		.map(NodeId::new)
+		.filter_map(|n| match view(tree, n) {
+			View::Index { index, .. }
+				if index_access(tree, analysis, types, n, index) == IndexAccess::FromEnd =>
+			{
+				Some(index)
+			}
+			_ => None,
+		})
+		.collect();
+	if from_end.is_empty() {
+		return false;
+	}
+	let nothing_failed = |_: &str| false;
+	let scope = ProofScope::Unit {
+		module: session.module(file),
+		failed: &nothing_failed,
+	};
+	let facts = index_facts(tree, analysis, types, scope, overflow_checks);
+	from_end
+		.into_iter()
+		.any(|index| facts.proven_non_negative(index))
 }
 
 /// Whether a file reads no other file of the session: alone, it is the
@@ -445,7 +487,7 @@ pub fn generate_program_into(
 	// every file is analyzed: the proofs see the whole program
 	options.proofs = match files[..] {
 		[file] if alone(session, file) => ProgramProofs::Alone,
-		_ => ProgramProofs::Claims(program_claims(session, &files)),
+		_ => ProgramProofs::Claims(program_claims(session, &files, options.overflow_checks)),
 	};
 	let options = &options;
 	let session: &Session = session;

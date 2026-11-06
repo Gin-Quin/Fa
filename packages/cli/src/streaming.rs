@@ -13,8 +13,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use fa_analyzer::ids::FileId;
 use fa_analyzer::pipeline::{self, Report, UnitSink};
+use fa_analyzer::proofs::ProofFile;
 use fa_analyzer::{Diagnostic, Session, Severity};
-use fa_codegen_js::{EntryInputs, EntryModule, EntryOptions, ModuleSink, Options, Target};
+use fa_codegen_js::{
+	EntryInputs, EntryModule, EntryOptions, ModuleSink, Options, ProgramProofs, Target,
+};
 
 use crate::project::{self, Prepared, Project};
 use crate::report as diagnostics;
@@ -227,6 +230,24 @@ struct BuildSink<'a> {
 	errors: Mutex<Vec<(String, Vec<Diagnostic>)>>,
 	/// The first error writing a module.
 	io_error: Mutex<Option<std::io::Error>>,
+	/// The claims of the proofs of the units analyzed so far
+	/// (`fa_analyzer::proofs::unit_claims`), resolved after the last one.
+	claims: Mutex<BTreeSet<String>>,
+	/// The units with files whose code depends on the program's claims
+	/// (`fa_codegen_js::reads_program_claims`): generated once every
+	/// unit is analyzed, from a re-analysis ([`BuildSink::generate_deferred`]).
+	deferred: Mutex<Vec<Deferred>>,
+	/// `FA_DEFER_UNITS=1` (tests): every unit is generated in the second
+	/// pass, which must write the same modules as the first.
+	defer_all: bool,
+}
+
+/// A unit generated after the last one ([`BuildSink::deferred`]).
+struct Deferred {
+	/// Its modules, analyzed again together.
+	unit: Vec<String>,
+	/// The modules generated then (the others are written already).
+	generated: Vec<String>,
 }
 
 impl UnitSink for BuildSink<'_> {
@@ -262,41 +283,113 @@ impl UnitSink for BuildSink<'_> {
 		if self.failed.load(Ordering::Relaxed) {
 			return;
 		}
+		// the unit's part of the program's proofs (design/decisions.md,
+		// "JavaScript package builds use the program's proofs like native
+		// per-unit builds")
+		let session: &Session = session;
+		let types = session.types();
+		let claims = {
+			let proof_files: Vec<ProofFile<'_>> = files
+				.iter()
+				.map(|&file| {
+					ProofFile::new(session.tree(file), session.analysis(file), types)
+						.with_module(session.module(file))
+				})
+				.collect();
+			fa_analyzer::proofs::unit_claims_of_goal(&proof_files, self.options.overflow_checks)
+		};
+		lock(&self.claims).extend(claims);
+		let mut generated = Vec::new();
 		for &file in files {
-			let module = session.module(file).to_string();
-			match fa_codegen_js::generate_unit_module(
-				session,
-				file,
-				&self.options,
-				self.tests,
-				self.sink,
-			) {
-				Ok(Ok(written)) => self
-					.written
-					.lock()
-					.unwrap_or_else(|poisoned| poisoned.into_inner())
-					.push((
-						module,
-						written.helpers,
-						written.has_main,
-						written.asynchronous,
-					)),
-				Ok(Err(diagnostics)) => {
-					self.failed.store(true, Ordering::Relaxed);
-					self.errors
-						.lock()
-						.unwrap_or_else(|poisoned| poisoned.into_inner())
-						.push((module, diagnostics));
-				}
-				Err(error) => {
-					self.failed.store(true, Ordering::Relaxed);
-					self.io_error
-						.lock()
-						.unwrap_or_else(|poisoned| poisoned.into_inner())
-						.get_or_insert(error);
-				}
+			if self.defer_all
+				|| fa_codegen_js::reads_program_claims(session, file, self.options.overflow_checks)
+			{
+				generated.push(session.module(file).to_string());
+			} else {
+				self.generate(session, file, &self.options);
 			}
 		}
+		if !generated.is_empty() {
+			lock(&self.deferred).push(Deferred {
+				unit: files
+					.iter()
+					.map(|&file| session.module(file).to_string())
+					.collect(),
+				generated,
+			});
+		}
+	}
+}
+
+/// Locks a mutex, even poisoned.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+	mutex
+		.lock()
+		.unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+impl BuildSink<'_> {
+	/// Generates and writes the module of a file.
+	fn generate(&self, session: &Session, file: FileId, options: &Options) {
+		let module = session.module(file).to_string();
+		match fa_codegen_js::generate_unit_module(session, file, options, self.tests, self.sink) {
+			Ok(Ok(written)) => lock(&self.written).push((
+				module,
+				written.helpers,
+				written.has_main,
+				written.asynchronous,
+			)),
+			Ok(Err(diagnostics)) => {
+				self.failed.store(true, Ordering::Relaxed);
+				lock(&self.errors).push((module, diagnostics));
+			}
+			Err(error) => {
+				self.failed.store(true, Ordering::Relaxed);
+				lock(&self.io_error).get_or_insert(error);
+			}
+		}
+	}
+
+	/// The second pass of a build, once every unit is analyzed: the
+	/// program's claims resolved, the deferred units analyzed again against
+	/// the published interfaces (`pipeline::Report::reanalyzer`, as the
+	/// native builds per unit), in parallel, and their files generated with
+	/// the claims. Each re-analysis is dropped once its files are written:
+	/// the memory stays that of the units in flight.
+	fn generate_deferred(&self, root: &mut Session, report: &Report) {
+		let deferred = std::mem::take(&mut *lock(&self.deferred));
+		if deferred.is_empty() || self.failed.load(Ordering::Relaxed) || report.has_errors() {
+			return;
+		}
+		let claims = std::mem::take(&mut *lock(&self.claims));
+		let failed = fa_analyzer::proofs::resolve_claims_owned(claims);
+		let options = Options {
+			proofs: ProgramProofs::Claims(std::sync::Arc::new(failed)),
+			..self.options.clone()
+		};
+		let reanalyzer = report.reanalyzer(root);
+		let generate = |unit: &Deferred| {
+			if self.failed.load(Ordering::Relaxed) {
+				return;
+			}
+			let paths: Vec<&str> = unit.unit.iter().map(String::as_str).collect();
+			let (session, files) = reanalyzer.analyze(&paths);
+			for &file in &files {
+				if unit
+					.generated
+					.iter()
+					.any(|module| module == session.module(file))
+				{
+					self.generate(&session, file, &options);
+				}
+			}
+		};
+		let generate = &generate;
+		fa_analyzer::parallel::pool().scope(|scope| {
+			for unit in &deferred {
+				scope.spawn(move |_| generate(unit));
+			}
+		});
 	}
 }
 
@@ -366,6 +459,9 @@ pub(crate) fn build(
 		pipeline::analyze_package(&mut prepared.session, &run, None, &sink)
 	});
 	record(&report);
+	timings::phase("proofs", || {
+		sink.generate_deferred(&mut prepared.session, &report)
+	});
 	let focused = sink.focused.load(Ordering::Relaxed);
 	let written = match sink.finish(&prepared, &report, purpose, &directory) {
 		Some(written) => written,
@@ -436,6 +532,9 @@ impl<'a> BuildSink<'a> {
 			written: Mutex::new(Vec::new()),
 			errors: Mutex::new(Vec::new()),
 			io_error: Mutex::new(None),
+			claims: Mutex::new(BTreeSet::new()),
+			deferred: Mutex::new(Vec::new()),
+			defer_all: std::env::var_os("FA_DEFER_UNITS").is_some_and(|value| value == "1"),
 		}
 	}
 

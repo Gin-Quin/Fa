@@ -1778,13 +1778,24 @@ impl Prover<'_> {
 /// another may become objects of that one (a wider object, an instance of a
 /// generic type). [`resolve_claims`] merges them.
 pub fn unit_claims(files: &[ProofFile<'_>]) -> BTreeSet<String> {
+	claims_of_goals(files, &[true, false])
+}
+
+/// [`unit_claims`] of one goal: with overflow checks (`n`) or without
+/// (`w`), for a build that reads only the goal of its own checks.
+pub fn unit_claims_of_goal(files: &[ProofFile<'_>], overflow_checks: bool) -> BTreeSet<String> {
+	claims_of_goals(files, &[overflow_checks])
+}
+
+/// [`unit_claims`] of some goals (`checked` of [`Goal::NonNegative`]).
+fn claims_of_goals(files: &[ProofFile<'_>], goals: &[bool]) -> BTreeSet<String> {
 	let mut out = BTreeSet::new();
 	for file in files {
 		if file.opaque() {
 			out.insert(OPAQUE.to_string());
 		}
 		let types = file.types();
-		for checked in [true, false] {
+		for &checked in goals {
 			let mut prover = Prover::new(file, Goal::NonNegative { checked }).per_unit();
 			let goal = prover.goal_name();
 			let mut pending: Vec<Claim> = prover.candidates();

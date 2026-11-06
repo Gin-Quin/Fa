@@ -1,0 +1,94 @@
+-- The proofs of indices (`fa_analyzer::proofs`) in asynchronous code: a task,
+-- or a callee running while a function waits at `await`, shrinks the proven
+-- array, stores an index out of bounds into the proven field, or a negative
+-- value into a never-negative field. The claims see every store, wherever it
+-- runs: the checks stay. (design/decisions.md, "JavaScript package builds use
+-- the program's proofs like native per-unit builds")
+use { sleep } = std.time
+
+-- a task shrinks the array while the function waits
+type Link = { next: UInt32 }
+mutable links: Array<Link> = [{ next = 1 }, { next = 0 }]
+async function walk = (from: UInt32): UInt32 throws IndexError => {
+	let first = try links[from].next
+	await sleep(5)
+	try links[first].next
+}
+start do {
+	await sleep(1)
+	let removed = links.pop()
+	console.log("popped", removed is not none) -- prints: popped true
+}
+console.log(await walk(0) catch error => 99) -- prints: 99
+
+-- a task stores an index out of bounds into the field
+type Hop = { to: UInt32 }
+mutable hops: Array<Hop> = [{ to = 1 }, { to = 0 }]
+async function far = (): UInt32 throws IndexError => {
+	await sleep(5)
+	let last: UInt32 = hops.length - 1
+	try hops[try hops[last].to].to
+}
+start do {
+	await sleep(1)
+	hops.push({ to = 7 })
+}
+console.log(await far() catch error => 99) -- prints: 99
+
+-- an awaited callee stores it, while the caller waits
+type Jump = { to: UInt32 }
+mutable jumps: Array<Jump> = [{ to = 1 }, { to = 0 }]
+async function grow = () mutates jumps => {
+	await Task.yield()
+	jumps.push({ to = 9 })
+}
+async function leap = (): UInt32 throws IndexError mutates jumps => {
+	await grow()
+	let last: UInt32 = jumps.length - 1
+	try jumps[try jumps[last].to].to
+}
+console.log(await leap() catch error => 99) -- prints: 99
+
+-- the same with in-bounds values: the proof holds, the result is the same
+type Step = { to: UInt32 }
+mutable steps: Array<Step> = [{ to = 1 }, { to = 0 }]
+async function stride = (): UInt32 throws IndexError => {
+	await sleep(5)
+	let last: UInt32 = steps.length - 1
+	try steps[try steps[last].to].to
+}
+start do {
+	await sleep(1)
+	steps.push({ to = 0 })
+}
+console.log(await stride() catch error => 99) -- prints: 1
+
+-- a task stores a negative position into a field counted up elsewhere:
+-- `get` counts it from the end
+type Cursor = { position: Integer }
+mutable cursor = Cursor { position = 0 }
+async function current = (text: String): Byte mutates cursor => {
+	cursor.position += 1
+	await sleep(5)
+	text.bytes().get(cursor.position) ?? 0
+}
+start do {
+	await sleep(1)
+	cursor.position = 0 - 1
+}
+console.log(await current("xyz")) -- prints: 122
+
+-- a module-level position narrowed before an `await`, changed meanwhile
+mutable position: Integer = 0
+async function at = (text: String): Byte => {
+	if position >= 0 {
+		await sleep(5)
+		return text.bytes().get(position) ?? 0
+	}
+	0
+}
+start do {
+	await sleep(1)
+	position = 0 - 1
+}
+console.log(await at("xyz")) -- prints: 122

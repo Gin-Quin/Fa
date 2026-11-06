@@ -24,9 +24,12 @@
 //!   it.
 
 pub mod builtins;
+mod callbacks;
+mod code;
 pub mod eval;
 pub mod ir;
 pub mod json;
+mod machine;
 pub mod memory;
 pub mod types;
 pub mod value;
@@ -34,16 +37,12 @@ pub mod value;
 pub use eval::{Error, Host, Interpreter, Limits};
 pub use value::Value;
 
-/// The stack of a thread an evaluation runs on: deep recursion in Fa code
-/// is deep recursion of the evaluator (and of a debug build's large frames).
+/// The stack of an evaluation thread, for lowering and host operations.
+/// Fa expressions and calls use heap continuations independently of it.
 /// Only the pages touched are committed.
-pub const STACK_SIZE: usize = 1 << 30;
+pub const STACK_SIZE: usize = 64 << 20;
 
 std::thread_local! {
-	/// The depth of nested calls the stack of the current thread holds
-	/// (set on the evaluation threads; `Interpreter::new` lowers
-	/// [`Limits::depth`] to it).
-	pub(crate) static STACK_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(u32::MAX) };
 	/// Whether this thread is an evaluation thread (a nested evaluation
 	/// runs in place).
 	static ON_LARGE_STACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -54,7 +53,7 @@ const MINIMUM_STACK_SIZE: usize = 16 << 20;
 
 /// The stack an evaluation thread is given at least, when the address
 /// space is limited and shared by several of them.
-const SHARED_STACK_SIZE: usize = 256 << 20;
+const SHARED_STACK_SIZE: usize = STACK_SIZE;
 
 /// An evaluation to run, its lifetime erased ([`on_large_stack`] waits for
 /// it to finish).
@@ -80,7 +79,7 @@ struct PoolState {
 	/// limited (they share a quarter of it), or when one couldn't start.
 	most: usize,
 	/// The stack of every thread (the first thread may lower it, when such
-	/// a stack can't be reserved: then every thread has the same depth).
+	/// a stack can't be reserved).
 	stack: usize,
 }
 
@@ -135,11 +134,10 @@ impl Pool {
 	fn start(&'static self, state: &mut PoolState) {
 		loop {
 			let stack = state.stack;
-			let depth = (Limits::default().depth as usize * stack / STACK_SIZE) as u32;
 			let started = std::thread::Builder::new()
 				.name("fa-interpreter".into())
 				.stack_size(stack)
-				.spawn(move || self.work(depth));
+				.spawn(move || self.work());
 			match started {
 				Ok(_) => {
 					state.threads += 1;
@@ -160,8 +158,7 @@ impl Pool {
 	}
 
 	/// The loop of an evaluation thread: runs the evaluations queued.
-	fn work(&self, depth: u32) {
-		STACK_DEPTH.set(depth);
+	fn work(&self) {
 		ON_LARGE_STACK.set(true);
 		let mut state = self.lock();
 		loop {
@@ -184,16 +181,16 @@ impl Pool {
 	}
 }
 
-/// Runs `f` on an evaluation thread, whose stack is [`STACK_SIZE`], so that
-/// the depth of nested calls is bounded by [`Limits::depth`] and not by the
-/// caller's stack. A panic of `f` is resumed in the caller.
+/// Runs `f` on an evaluation thread, whose stack is [`STACK_SIZE`] for
+/// lowering and host operations. Fa call depth uses the explicit stack and
+/// [`Limits::depth`]. A panic of `f` is resumed in the caller.
 ///
 /// The evaluation threads are a pool, started on demand up to one per
 /// core and reused: evaluations of parallel analyses run in parallel. When
 /// the address space is limited (`ulimit -v`), the threads share a quarter
 /// of it (fewer threads, smaller stacks), or when such a stack can't be
-/// reserved, a smaller one is used; the depth of nested calls is lowered in
-/// proportion. Called from an evaluation thread, `f` runs in place.
+/// reserved, a smaller one is used. Neither case lowers the Fa call limit.
+/// Called from an evaluation thread, `f` runs in place.
 pub fn on_large_stack<R: Send>(f: impl FnOnce() -> R + Send) -> R {
 	if ON_LARGE_STACK.get() {
 		return f();
@@ -306,6 +303,324 @@ mod tests {
 		assert_eq!(run(&mut host, &call, 0), Ok(Value::int(6)));
 		let call = Expr::CallFunction(FnKey(0, 1), vec![Arg::Value(int(2)), Arg::Default]);
 		assert_eq!(run(&mut host, &call, 0), Ok(Value::int(12)));
+	}
+
+	#[test]
+	fn deep_calls_defaults_and_callbacks_use_the_explicit_stack() {
+		std::thread::Builder::new()
+			.stack_size(256 << 10)
+			.spawn(|| {
+				for mode in ["direct", "value", "callback", "default", "mutual"] {
+					let mut host = Functions::default();
+					for (key, next) in [(FnKey(0, 10), FnKey(0, 11)), (FnKey(0, 11), FnKey(0, 10))]
+					{
+						let next = if mode == "mutual" { next } else { key };
+						let argument =
+							Expr::Arith(ArithOp::Subtract, INTEGER, local(0), int(1).boxed());
+						let call = match mode {
+							"value" => {
+								Expr::Call(Expr::Function(next).boxed(), vec![Arg::Value(argument)])
+							}
+							"callback" => Expr::Builtin(
+								"Array#get",
+								vec![
+									Expr::Builtin(
+										"Array#map",
+										vec![
+											Expr::Array(vec![Item::One(argument)]),
+											Expr::Function(next),
+										],
+									),
+									int(0),
+								],
+							),
+							"default" => {
+								Expr::CallFunction(next, vec![Arg::Value(argument), Arg::Default])
+							}
+							_ => Expr::CallFunction(next, vec![Arg::Value(argument)]),
+						};
+						let result = Expr::If(
+							Expr::Compare(CompareOp::Greater, local(0), int(0).boxed()).boxed(),
+							Expr::Arith(ArithOp::Add, INTEGER, int(1).boxed(), call.boxed())
+								.boxed(),
+							Some(int(0).boxed()),
+						);
+						let mut params = vec![Param {
+							slot: 0,
+							default: None,
+						}];
+						let (body, slots) = if mode == "default" {
+							params.push(Param {
+								slot: 1,
+								default: Some(result),
+							});
+							(Expr::Local(1), 2)
+						} else {
+							(result, 1)
+						};
+						host.0.insert(
+							key,
+							Arc::new(Function {
+								name: mode.into(),
+								params,
+								captures: Vec::new(),
+								slots,
+								body,
+							}),
+						);
+					}
+					let call = |n| {
+						Expr::CallFunction(
+							FnKey(0, 10),
+							if mode == "default" {
+								vec![Arg::Value(int(n)), Arg::Default]
+							} else {
+								vec![Arg::Value(int(n))]
+							},
+						)
+					};
+					assert_eq!(
+						run(&mut host, &call(9_000), 0),
+						Ok(Value::int(9_000)),
+						"{mode}"
+					);
+					let limits = Limits {
+						depth: 2_000,
+						..Limits::default()
+					};
+					let mut interpreter = Interpreter::new(&mut host, limits);
+					assert_eq!(
+						interpreter.evaluate(&call(9_000), 0),
+						Err(Error::Depth(2_000)),
+						"{mode}"
+					);
+					assert_eq!(
+						interpreter.evaluate(&call(3), 0),
+						Ok(Value::int(3)),
+						"{mode}"
+					);
+				}
+			})
+			.unwrap()
+			.join()
+			.unwrap();
+	}
+
+	#[test]
+	fn deep_thrown_errors_unwind_to_their_handler() {
+		std::thread::Builder::new()
+			.stack_size(256 << 10)
+			.spawn(|| {
+				let mut host = Functions::default();
+				let error = Value::error("DeepError", Vec::new());
+				host.0.insert(
+					FnKey(0, 12),
+					Arc::new(Function {
+						name: "fail".into(),
+						params: vec![Param {
+							slot: 0,
+							default: None,
+						}],
+						captures: Vec::new(),
+						slots: 1,
+						body: Expr::If(
+							Expr::Compare(CompareOp::Greater, local(0), int(0).boxed()).boxed(),
+							Expr::CallFunction(
+								FnKey(0, 12),
+								vec![Arg::Value(Expr::Arith(
+									ArithOp::Subtract,
+									INTEGER,
+									local(0),
+									int(1).boxed(),
+								))],
+							)
+							.boxed(),
+							Some(Expr::Throw(Expr::Const(error.clone()).boxed()).boxed()),
+						),
+					}),
+				);
+				let caught = Expr::Catch {
+					body: Expr::CallFunction(FnKey(0, 12), vec![Arg::Value(int(9_000))]).boxed(),
+					slot: Some(0),
+					handler: local(0),
+				};
+				assert_eq!(run(&mut host, &caught, 1), Ok(error));
+			})
+			.unwrap()
+			.join()
+			.unwrap();
+	}
+
+	#[test]
+	fn preparation_and_continuations_do_not_consume_evaluation_steps() {
+		let mut host = Functions::default();
+		host.0.insert(FnKey(0, 1), Arc::new(add()));
+		let call = Expr::CallFunction(FnKey(0, 1), vec![Arg::Value(int(2)), Arg::Default]);
+		let mut interpreter = Interpreter::new(&mut host, Limits::default());
+		assert_eq!(interpreter.evaluate(&call, 0), Ok(Value::int(12)));
+		assert_eq!(interpreter.steps(), 6);
+		let mapped = Expr::Builtin(
+			"Array#map",
+			vec![
+				Expr::Array(vec![Item::One(int(1)), Item::One(int(2))]),
+				Expr::Function(FnKey(0, 1)),
+			],
+		);
+		let mut interpreter = Interpreter::new(&mut host, Limits::default());
+		assert_eq!(
+			interpreter
+				.evaluate(&mapped, 0)
+				.map(|value| value.to_text()),
+			Ok("[1, 3]".into())
+		);
+		assert_eq!(interpreter.steps(), 11);
+	}
+
+	#[test]
+	fn callback_builtins_preserve_results_and_atomic_mutations() {
+		let mut host = Functions::default();
+		let predicate = Expr::Equals(
+			Expr::Arith(ArithOp::Remainder, INTEGER, local(0), int(2).boxed()).boxed(),
+			int(0).boxed(),
+			false,
+		);
+		for (key, body, slots) in [
+			(20, predicate, 1),
+			(
+				21,
+				Expr::Arith(ArithOp::Add, INTEGER, local(0), local(1)),
+				2,
+			),
+			(
+				22,
+				Expr::Arith(ArithOp::Subtract, INTEGER, local(0), local(1)),
+				2,
+			),
+			(
+				23,
+				Expr::If(
+					Expr::Equals(local(0), int(2).boxed(), false).boxed(),
+					Expr::Throw(Expr::Const(Value::error("Bad", Vec::new())).boxed()).boxed(),
+					Some(Expr::Const(Value::Boolean(true)).boxed()),
+				),
+				1,
+			),
+		] {
+			host.0.insert(
+				FnKey(0, key),
+				Arc::new(Function {
+					name: "callback".into(),
+					params: (0..slots)
+						.map(|slot| Param {
+							slot,
+							default: None,
+						})
+						.collect(),
+					captures: Vec::new(),
+					slots,
+					body,
+				}),
+			);
+		}
+		let values = || {
+			Expr::Array(
+				[1, 2, 3, 4]
+					.into_iter()
+					.map(|n| Item::One(int(n)))
+					.collect(),
+			)
+		};
+		let callback = |key| Expr::Function(FnKey(0, key));
+		for (path, expected) in [
+			("Array#filter", "[2, 4]"),
+			("Array#find", "2"),
+			("Array#some", "true"),
+			("Array#every", "false"),
+		] {
+			let expression = Expr::Builtin(path, vec![values(), callback(20)]);
+			assert_eq!(
+				run(&mut host, &expression, 0).map(|value| value.to_text()),
+				Ok(expected.into())
+			);
+		}
+		let reduce = Expr::Builtin("Array#reduce", vec![values(), callback(21), int(0)]);
+		assert_eq!(run(&mut host, &reduce, 0), Ok(Value::int(10)));
+		let set = Expr::Set(
+			[1, 2, 3, 4]
+				.into_iter()
+				.map(|n| Item::One(int(n)))
+				.collect(),
+		);
+		let filtered = Expr::Builtin("Set#filter", vec![set, callback(20)]);
+		assert_eq!(
+			run(&mut host, &filtered, 0),
+			Ok(Value::Set(Arc::new(vec![Value::int(2), Value::int(4)])))
+		);
+		host.0.insert(
+			FnKey(0, 24),
+			Arc::new(Function {
+				name: "evenKey".into(),
+				params: vec![Param {
+					slot: 0,
+					default: None,
+				}],
+				captures: Vec::new(),
+				slots: 1,
+				body: Expr::CallFunction(
+					FnKey(0, 20),
+					vec![Arg::Value(Expr::Index(local(0), int(0).boxed()))],
+				),
+			}),
+		);
+		let map = Expr::Map(
+			[1, 2]
+				.into_iter()
+				.map(|n| Item::One(Expr::Tuple(vec![int(n), int(n * 10)])))
+				.collect(),
+		);
+		let filtered = Expr::Builtin("Map#filter", vec![map, callback(24)]);
+		assert_eq!(
+			run(&mut host, &filtered, 0),
+			Ok(Value::Map(Arc::new(vec![(Value::int(2), Value::int(20))])))
+		);
+		for compare in [None, Some(callback(22))] {
+			let mut arguments = vec![Expr::Array(
+				[3, 1, 2].into_iter().map(|n| Item::One(int(n))).collect(),
+			)];
+			arguments.extend(compare);
+			assert_eq!(
+				run(&mut host, &Expr::Builtin("Array#sort", arguments), 0)
+					.map(|value| value.to_text()),
+				Ok("[1, 2, 3]".into())
+			);
+		}
+		let place = Place {
+			slot: 0,
+			steps: Vec::new(),
+		};
+		let unchanged = Expr::Block(vec![
+			Expr::Let(0, values().boxed()),
+			Expr::Catch {
+				body: Expr::Mutate("Array#deleteWhere", place.clone(), vec![callback(23)]).boxed(),
+				slot: None,
+				handler: Expr::none().boxed(),
+			},
+			Expr::Read(place.clone()),
+		]);
+		assert_eq!(
+			run(&mut host, &unchanged, 1).map(|value| value.to_text()),
+			Ok("[1, 2, 3, 4]".into())
+		);
+		let changed = Expr::Block(vec![
+			Expr::Let(0, values().boxed()),
+			Expr::Mutate("Array#deleteWhere", place.clone(), vec![callback(20)]),
+			Expr::Mutate("Array#sortInPlace", place.clone(), vec![callback(22)]),
+			Expr::Read(place),
+		]);
+		assert_eq!(
+			run(&mut host, &changed, 1).map(|value| value.to_text()),
+			Ok("[1, 3]".into())
+		);
 	}
 
 	#[test]
@@ -479,15 +794,11 @@ mod tests {
 		let call = Expr::CallFunction(FnKey(0, 3), vec![Arg::Value(int(1))]);
 		let result = Interpreter::new(&mut host, limits).evaluate(&call, 0);
 		assert_eq!(result, Err(Error::Depth(50)));
-		// the default depth fits in the stack of the evaluation thread (debug)
+		// The configured call limit does not depend on the evaluation
+		// thread's native stack or the process's address-space limit.
 		let result =
 			on_large_stack(|| Interpreter::new(&mut host, Limits::default()).evaluate(&call, 0));
-		// under a limit of the address space (`ulimit -v`), the stacks shrink
-		// and so does the depth: it never goes beyond the default
-		match result {
-			Err(Error::Depth(depth)) => assert!(depth <= Limits::default().depth),
-			other => panic!("expected a depth error, got {other:?}"),
-		}
+		assert_eq!(result, Err(Error::Depth(Limits::default().depth)));
 	}
 
 	#[test]

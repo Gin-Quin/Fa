@@ -1,0 +1,2 @@
+function direct = (depth: Integer): Integer => if depth == 0 { 0 } else { 1 + direct(depth - 1) }
+static tooDeep = @direct(10_000) -- error META003

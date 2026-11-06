@@ -161,7 +161,7 @@ An exported value is deeply immutable, like a value declared with `let`.
 `export mutable` exports a value that other files can modify:
 
 ```fa
-export mutable: Pool(Person) = []
+export mutable: Pool<Person> = []
 ```
 
 ```fa
@@ -229,15 +229,15 @@ The generic parameters of an exported type or function come right after `type` o
 
 ```fa
 -- in "Pair.fa"
-export type(First, Second) = { first: First, second: Second }
+export type<First, Second> = { first: First, second: Second }
 ```
 
 ```fa
 -- in "first.fa"
-export function(Item) = (items: Array(Item)): Item? => items.get(0)
+export function = <Item>(items: Array<Item>): Item? => items.get(0)
 ```
 
-They are used like any generic: `Pair(String, Integer)`, `first([1, 2, 3])`. See [generics](/types/generics).
+They are used like any generic: `Pair<String, Integer>`, `first([1, 2, 3])`. See [generics](/types/generics).
 
 ### Exporting a namespace
 
@@ -316,7 +316,7 @@ Inside a file, the name of the file designates its export. This is how a type re
 
 ```fa
 -- in "people.fa"
-export mutable: Pool(Person) = []
+export mutable: Pool<Person> = []
 
 function clearPeople = () mutates people => {
 	people.clear() -- `people` is the export of this file
@@ -328,7 +328,7 @@ function clearPeople = () mutates people => {
 export type = {
 	name: String
 	bestFriend: (Person in people)? -- `Person` is the export of this file
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }
 ```
 
@@ -342,9 +342,9 @@ These are all the forms of `export`:
 | --- | --- |
 | `export = value`, `export: Type = value` | a deeply immutable value |
 | `export mutable = value`, `export mutable: Type = value` | a value that every file can modify |
-| `export function = ...`, `export function(Item) = ...` | a function, generic or not |
+| `export function = ...`, `export function = <Item>(...) => ...` | a function, generic or not |
 | `export async function = ...` | an asynchronous function |
-| `export type = ...`, `export type(First, Second) = ...` | a type, generic or not |
+| `export type = ...`, `export type<First, Second> = ...` | a type, generic or not |
 | `export namespace = { ... }` | a namespace |
 
 `reactive`, `derived` and `static` values can't be exported in this version: declare them as members of an exported namespace, or as module-level values of the file that uses them.
@@ -440,6 +440,8 @@ use { Channel, Mutex } = std.concurrency
 
 Some parts of `std` exist only on some targets: using one on a target that lacks it is a compile error.
 
+`std.fs` is unavailable on `web`, and `std.net` on `web` and `wasm`. Without a C library, `native-freestanding` has no `std.fs`, `std.net` or `std.json`; its `target` value remains `"native"`.
+
 ## Building a library
 
 When building a library, all files and folders of the `library/` directory are available to the outside world.
@@ -529,11 +531,11 @@ export function = () => {
 }
 ```
 
-The entry function may take the command-line arguments as `arguments: Array(String)`, and may return an exit code as an `Integer`. The errors it can fail with are declared with `throws`, like for any other function:
+The entry function may take the command-line arguments as `arguments: Array<String>`, and may return an exit code as an `Integer`. The errors it can fail with are declared with `throws`, like for any other function:
 
 ```fa
 -- application/main.fa
-export function = (arguments: Array(String)): Integer throws ConfigError => {
+export function = (arguments: Array<String>): Integer throws ConfigError => {
 	let configuration = try library.loadConfiguration(arguments)
 	library.runServer(configuration)
 	0
@@ -596,6 +598,8 @@ To work on several packages at once, group them in a [workspace](/architecture/w
 
 - A module-level value is a global with a stable address. A value computed at compile time is emitted as constant data. The others are initialized by one generated function, called before the entry function, in the order defined above; another generated function destroys them in reverse order at normal exit.
 - `export mutable` is replaced in place: an assignment destroys the old value and writes the new one at the same address.
+
+- `Json.parse` checks a parsed tree against the expected type's schema, using the same messages as JavaScript, then a generated reader builds the value. Native integers accept all `Int64` values; JavaScript JSON integers stop at ±(2^53 − 1). On `wasm`, the generated JavaScript loader supplies file and clock operations (`node:fs` for files).
 
 ### JavaScript
 

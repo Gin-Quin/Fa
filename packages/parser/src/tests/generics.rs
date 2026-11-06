@@ -1,6 +1,6 @@
 //! Generic lists written with `<` and `>`: applications of generic types and functions, and the
-//! generic parameters of declarations. The parenthesized spelling of the transition is tested
-//! next to the other calls and declarations.
+//! generic parameters of declarations. Old declaration lists are rejected; applications are
+//! distinguished from ordinary calls by the analyzer.
 
 use super::helpers::{assert_error_message, assert_has_error, assert_module, assert_statement};
 use crate::nodes::Node;
@@ -214,15 +214,15 @@ fn generic_methods_and_exports() {
 }
 
 #[test]
-fn transition_parenthesized_generics_still_parse() {
+fn old_generic_declarations_are_reported() {
 	assert_statement("Array(Integer)", "Array(Integer)");
-	assert_statement(
+	assert_error_message(
 		"type Pair(Left, Right) = { left: Left }",
-		"type Pair(Left, Right) = {\n\tleft: Left\n}",
+		"Generic parameters use angle brackets",
 	);
-	assert_statement(
+	assert_error_message(
 		"function first(Item) = (items: Array(Item)): Item? => items.get(0)",
-		"function first(Item) = (items: Array(Item)): Item? => items.get(0)",
+		"write `function first = <Item>",
 	);
 	assert_eq!(root_kind("Array(Integer)"), "FunctionCall");
 	assert!(matches!(
@@ -232,7 +232,7 @@ fn transition_parenthesized_generics_still_parse() {
 			..
 		}
 	));
-	// both spellings in one type
+	// Parsing an ordinary call in an argument is still valid; type calls are an analyzer error.
 	assert_statement("Map<String, Array(Integer)>", "Map<String, Array(Integer)>");
 }
 
@@ -389,10 +389,9 @@ fn generic_parameters_after_a_function_name_are_reported() {
 		"export function<Item> = (items: Array<Item>) => items",
 		"write `export function = <Item>(items: Array<Item>) => …`",
 	);
-	// the parenthesized spelling of the transition stays accepted
-	assert_eq!(
-		error_count("function first(Item) = (items: Array(Item)) => items"),
-		0
+	assert_error_message(
+		"function first(Item) = (items: Array(Item)) => items",
+		"write `function first = <Item>",
 	);
 }
 

@@ -10,4 +10,4 @@ let swapped = pair.swap() -- type swapped: Pair<String, Integer>
 let same = pair.same() -- type same: Pair<Integer, String>
 function first = <Left, Right>(pair: Pair<Left, Right>): Pair<Left, Left> => Pair<Left, Left> { left = pair.left, right = pair.left }
 let firsts = first(pair) -- type firsts: Pair<Integer, Integer>
-console.log(@typeToString(Type(swapped)), @typeToString(Type(firsts))) -- prints: Pair<String, Integer> Pair<Integer, Integer>
+console.log(@typeToString(Type<swapped>), @typeToString(Type<firsts>)) -- prints: Pair<String, Integer> Pair<Integer, Integer>

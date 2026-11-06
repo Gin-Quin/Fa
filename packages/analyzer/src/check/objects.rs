@@ -1027,6 +1027,7 @@ impl Walker<'_> {
 			self.report(diagnostic);
 			return TypeId::UNKNOWN;
 		};
+		self.set_type(first, current);
 		for member in members.iter().skip(skipped + 1) {
 			match self.member_of(member, current) {
 				Some((ty, _)) => current = ty,

@@ -283,6 +283,7 @@ fn compile_files(
 		options.pipeline()
 	};
 	module.run_passes(pipeline, &machine, PassBuilderOptions::create())?;
+	crate::optimize::expose_tail_recursion(&module, &machine, options)?;
 	timings.optimize = start.elapsed();
 
 	if target == Target::NativeFreestanding {

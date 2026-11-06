@@ -189,3 +189,7 @@ Add: "**Compressed links.** On 64-bit Linux, the recursive edges of a type whose
 ## `documentation/` page of `when`, `:::implementation` section (native)
 
 Add: "A `when` choosing among string literals of one length by the integers `0` to `n - 1` and `else` reads the chosen one from a single constant holding them all, at `start + length × index` (any other integer reads the `else` literal): no branch and no table."
+
+## `documentation/functions/defining-functions.md`, `:::implementation` (native and WebAssembly recursion)
+
+Add: "A small base case of a direct recursive call is evaluated at the call site when its guard and result use only scalar parameters and operations; an empty node of an arena, whose optional fields are all `none`, is also such a base case. Arguments are evaluated once, in order. In speed builds, an integer sum through a final optional recursive call (`prefix + (child?.walk() ?? 0)`) exposes both return paths to LLVM's tail-recursion elimination, so that the last recursive edge can become an accumulator loop. Other effects and calls keep their evaluation order."

@@ -30,6 +30,8 @@ mod host;
 mod link;
 #[cfg(fa_llvm)]
 mod lower;
+#[cfg(fa_llvm)]
+mod optimize;
 mod options;
 #[cfg(fa_llvm)]
 pub mod runtime;

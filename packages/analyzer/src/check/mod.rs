@@ -131,6 +131,9 @@ pub struct FnCx {
 	pub returned: TypeId,
 	/// The accumulated `throws` (`NEVER`: none).
 	pub throws: TypeId,
+	/// Errors declared by this definition (`None`: inferred). A function
+	/// type supplied as a value's constraint does not declare its body.
+	pub throws_contract: Option<TypeId>,
 	/// The flow states at `return`.
 	pub return_states: Vec<FlowState>,
 	/// [`Walker::unsupported_seen`] when the body started: diagnostics that
@@ -145,6 +148,9 @@ pub struct FnCx {
 	pub effects: Vec<effects::EffectEntry>,
 	/// The effects written in its signature (`None`: none written).
 	pub declared: Option<crate::ids::EffectSetId>,
+	/// A function declaration also has an explicit function-type annotation;
+	/// its effects must be exact even when the body writes its own clauses.
+	pub extra_effect_contract: Option<crate::ids::EffectSetId>,
 	/// The effects its body must stay within (`EFF001`–`EFF004`): a named
 	/// function with a block body or written effects; `None`: inferred.
 	pub coverage: Option<crate::ids::EffectSetId>,
@@ -181,12 +187,14 @@ impl FnCx {
 			infer_returns: false,
 			returned: TypeId::NEVER,
 			throws: TypeId::NEVER,
+			throws_contract: None,
 			return_states: Vec::new(),
 			unsupported_at_start: 0,
 			scope,
 			test: false,
 			effects: Vec::new(),
 			declared: None,
+			extra_effect_contract: None,
 			coverage: None,
 			signature_node: None,
 			uncovered: false,

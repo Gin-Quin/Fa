@@ -1,5 +1,4 @@
--- pending: M1 (imported from the types brief)
--- warning: WEF001
+-- error: E-ERR-10
 -- brief: ✓ fd-11: WEF001 (declared, never thrown) → 1
 -- context: declarations reused from fd-10
 type ApiError = Errors { Timeout }

@@ -124,6 +124,11 @@ struct FnCx {
 	function: Option<NodeId>,
 	/// How the function runs (async instance, blocking, dynamic: `tasks.rs`).
 	mode: tasks::Mode,
+	/// Catches whose operand is being generated in this function.
+	catch_depth: usize,
+	/// The identity of an exception coming from a non-stored callback:
+	/// catches of this function pass it back to their caller unchanged.
+	callback_error: Option<String>,
 }
 
 /// The generator of one file.

@@ -280,7 +280,7 @@ Reference types of the callee's parameters and return type are substituted the s
   - `EFF001` "`reset` mutates `player`, but its signature doesn't say so: add `mutates player`" (for an assignment through a parameter the documentation's wording is "`player` is not declared as mutated. Add `mutates player` to the signature.");
   - `EFF004` "only `player.score` is declared as mutated" when a declared path exists on the same root but doesn't cover;
   - `EFF002` for an uncovered invalidation.
-- A declared mutation that the body doesn't have: error `EFF011` (historical alias `WEF001`). This applies to block bodies, single-expression bodies and explicitly typed function declarations. Covering paths remain valid; each declared path must cover an actual effect.
+- A declared mutation that the body doesn't have: error `EFF011` (historical alias `WEF001`). This applies to block bodies, single-expression bodies and explicitly typed function declarations. Each declared path must cover an actual effect; covering paths keep their documented granularity (`mutates p` can cover a write of `p.x`). A function type used as a value constraint may allow more effects than the function stored there has.
 - Effects on the function's own locals are never effects of the function.
 
 `covers(D, A)`, with `D` declared and `A` actual:

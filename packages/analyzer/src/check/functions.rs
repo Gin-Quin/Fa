@@ -532,9 +532,13 @@ impl Walker<'_> {
 			.map(|sig| sig.ret)
 			.filter(|&ret| !ret.is_unset() && self.free_params(ret).is_empty());
 		let returns = declared_return.or(expected_return);
-		let throws = signature
+		let annotation_throws = owner.declaration.and(expected).map(|sig| sig.throws);
+		let throws_contract = signature
 			.throws
-			.map_or(TypeId::NEVER, |throws| self.check_type_expr(throws));
+			.map(|throws| self.check_type_expr(throws))
+			.or(annotation_throws)
+			.or_else(|| (block_body && owner.declaration.is_some()).then_some(TypeId::NEVER));
+		let throws = throws_contract.unwrap_or(TypeId::NEVER);
 		// `requires name: Type` (requirements.rs)
 		let requires = self.declare_requirements(signature.requires);
 		let mut declared_requires: Vec<crate::types::Requirement> = requires
@@ -553,8 +557,13 @@ impl Walker<'_> {
 		}
 		// `mutates` and `invalidates` (effects.rs)
 		let written_effects = !signature.mutates.is_empty() || !signature.invalidates.is_empty();
-		let declared_effects =
-			self.declared_effects(lambda, signature.mutates, signature.invalidates);
+		let annotation_effects = owner.declaration.and(expected).map(|sig| sig.effects);
+		let has_effect_contract = written_effects || annotation_effects.is_some();
+		let declared_effects = if written_effects {
+			self.declared_effects(lambda, signature.mutates, signature.invalidates)
+		} else {
+			annotation_effects.unwrap_or(crate::ids::EffectSetId::EMPTY)
+		};
 		let mut param_sigs: Vec<ParamSig> = params.iter().map(|(_, sig)| *sig).collect();
 		// a lambda can declare fewer parameters than its expected type
 		if let Some(expected) = expected {
@@ -620,14 +629,21 @@ impl Walker<'_> {
 				&& (self.s.role(self.file) == crate::modules::FileRole::Program
 					|| self.s.is_entry(self.file))
 		});
-		let coverage = (!entry && (written_effects || (block_body && owner.symbol.is_some())))
+		let coverage = (has_effect_contract || (!entry && block_body && owner.symbol.is_some()))
 			.then_some(declared_effects);
 		self.body.functions.push(FnCx {
 			infer_returns: owner.declaration.is_none() && returns.is_none(),
 			unsupported_at_start: self.unsupported_seen,
-			declared: written_effects.then_some(declared_effects),
+			declared: has_effect_contract.then_some(declared_effects),
+			extra_effect_contract: annotation_effects
+				.filter(|&expected| written_effects && expected != declared_effects),
+			throws_contract,
 			coverage,
-			signature_node: signature.mutates.first().or(signature.invalidates.first()),
+			signature_node: signature
+				.mutates
+				.first()
+				.or(signature.invalidates.first())
+				.or(owner.declaration.filter(|_| annotation_effects.is_some())),
 			requires: requires.clone(),
 			infers_requires: !block_body && owner.symbol.is_some(),
 			is_async: owner.is_async,
@@ -726,17 +742,25 @@ impl Walker<'_> {
 		all_requires.sort_by_key(|requirement| self.s.types.stable_hash(requirement.ty));
 		// a single-expression body without `throws` infers its errors (errors.rs)
 		let thrown = cx.as_ref().map_or(TypeId::NEVER, |cx| cx.throws);
-		let throws = if throws == TypeId::NEVER && !block_body {
-			thrown
-		} else {
-			throws
-		};
+		let throws = throws_contract.unwrap_or(thrown);
 
-		self.memo(lambda, |w| {
-			if block_body {
-				let at = signature.throws.unwrap_or(lambda);
-				w.unused_throws(at, throws, thrown);
+		// Error sets depend on flow (including sibling callbacks' writes),
+		// so the check belongs to the retained flow round, not the type memo.
+		if cx
+			.as_ref()
+			.is_some_and(|cx| cx.unsupported_at_start == self.unsupported_seen)
+		{
+			let at = signature.throws.or(owner.declaration).unwrap_or(lambda);
+			if let Some(declared) = throws_contract {
+				self.check_declared_throws(at, declared, thrown);
 			}
+			if let Some(declared) =
+				annotation_throws.filter(|declared| Some(*declared) != throws_contract)
+			{
+				self.check_declared_throws(owner.declaration.unwrap_or(at), declared, thrown);
+			}
+		}
+		let mut ty = self.memo(lambda, |w| {
 			let ret = match returns {
 				Some(returns) => returns,
 				None if mode == TypeId::VOID => TypeId::VOID,
@@ -751,7 +775,7 @@ impl Walker<'_> {
 				}
 			};
 			w.check_stored_iterator_type(signature.returns.unwrap_or(lambda), ret, "returned");
-			let ty = if incomplete {
+			if incomplete {
 				TypeId::UNKNOWN
 			} else {
 				w.function_type(
@@ -762,21 +786,28 @@ impl Walker<'_> {
 					&all_requires,
 					owner.is_async,
 				)
-			};
-			let sig = w.signature_id(ty);
-			for key in [Some(lambda), owner.declaration].into_iter().flatten() {
-				if let Some(info) = w.a.functions.get_mut(&key) {
-					info.ty = ty;
-					info.sig = sig;
-					// the errors a single-expression body infers
-					info.throws = throws;
-				}
 			}
-			if let Some(symbol) = owner.symbol {
-				w.a.symbols.symbol_mut(symbol).ty = ty;
+		});
+		if let TypeKind::Function(sig) = self.s.types.kind(ty) {
+			let mut sig = self.s.types.sig(sig);
+			if sig.throws != throws {
+				sig.throws = throws;
+				ty = self.s.types.function(sig);
+				self.set_type(lambda, ty);
 			}
-			ty
-		})
+		}
+		let sig = self.signature_id(ty);
+		for key in [Some(lambda), owner.declaration].into_iter().flatten() {
+			if let Some(info) = self.a.functions.get_mut(&key) {
+				info.ty = ty;
+				info.sig = sig;
+				info.throws = throws;
+			}
+		}
+		if let Some(symbol) = owner.symbol {
+			self.a.symbols.symbol_mut(symbol).ty = ty;
+		}
+		ty
 	}
 
 	/// The function type of a signature.

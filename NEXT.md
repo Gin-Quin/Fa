@@ -14,7 +14,7 @@ and empty-arena-leaf optimizations followed in `a39f3c4` (44 merged LLVM IR test
 and merged workspace clippy also pass). Binary-trees uses112.71M instructions vs
 Goose128.15M; its CPU win is still open.
 
-Eleven clean integrated worktrees have been removed, branches preserved. Active,
+Twelve clean integrated worktrees have been removed, branches preserved. Active,
 dirty, locked or unmerged trees are preserved; some locks belong to another live
 session. Records: `/tmp/fa-resume-cleaned-worktrees.json`.
 
@@ -38,17 +38,20 @@ runtime tests and website check/snippets/build pass too.
 
 ## Active ownership
 
-- Lead, `platform-support`, cf2fe33: Linux AArch64 runtime/freestanding, wasm C
-  libraries with importable factory/dispose, wasm tests, timeouts and watch target
-  retention. Complete workspace suite with LLVM, clippy and website pass. Merging
-  into lead now; regenerate all three runtime IR files after performance C changes.
+- Lead platform support is integrated at `4a6ef8e`: Linux AArch64 runtime and
+  freestanding, wasm C libraries with importable factory/dispose, wasm tests,
+  timeouts and watch target retention. Complete suite with LLVM, clippy, website
+  and merge checks pass. The clean worktree was removed. Regenerate all three
+  runtime IR files after performance C changes.
 - Lead, `generic-pointers`: generic Pointer<T> on Bun using published runtime type
   capabilities; direct/higher-order calls, composites, resources and task destruction
-  pass on Bun. The new native corpus has a two-block leak being isolated. No full
-  validation yet. Signature-only generic value ABI patch shared with analyzer-with.
-- Analyzer, `analyzer-callbacks`: native instance per callback error set and exact
-  effects. Frozen full in `/tmp/fa-exact-effects-workspace-full.log`. Its old initial
-  worktree has been removed. `analyzer-with` separately owns with, missing documented
+  pass on Bun. Generic native ownership now uses concrete resource types; all
+  pointer programs pass on all three targets with leak checks. No full validation yet. Signature-only generic value ABI patch shared with analyzer-with.
+- Analyzer, `analyzer-callbacks`, `d22ebd2`: native instance per callback error set
+  and exact effects, including exact variants. Complete LLVM suite passes (exit0)
+  in `/tmp/fa-exact-effects-workspace-fixed.log`, with clippy, formatting, runtime
+  and website checks green. Merge checks pass too: workspace clippy, callback programs on Bun and all three
+  native targets, plus all five C-library tests. Its old initial worktree was removed. `analyzer-with` separately owns with, missing documented
   rules, TypeFromSchema/named Schema, interpreter continuation stack, method origin
   and native method-specific instance keys, key-loop thrown summaries, pass fusion.
 - Proofs, `cross-file-metadata`: imported Pick/Omit derived parameters, EF004,

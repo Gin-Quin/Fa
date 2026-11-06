@@ -1,4 +1,4 @@
--- warning: W-ERR-3
+-- error: E-ERR-10
 -- brief: ⇒ W-ERR-3
 type E = Errors { A }
 function f = (): Integer throws E => {

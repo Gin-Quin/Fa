@@ -53,7 +53,7 @@ codes! {
 	EFF007 = "EFF007", Error, ["E-DECL-5", "EF011"], "calling a function that mutates a parameter (or a requirement) with an immutable argument (a let, an immutable parameter, an exported…";
 	EFF008 = "EFF008", Error, ["EF040", "EF041", "EF042", "EF043"], "the root is not a parameter, self, a module-level value or a requirement name of this function; or a field does not exist in the declared…";
 	EFF009 = "EFF009", Error, ["EF044"], "(decision D40) invalidates p where p is a whole parameter, module-level value or requirement that is not typed T in c: \"invalidates names…";
-	EFF011 = "EFF011", Warning, ["WEF001"], "A declared effect that the body doesn't have: warning EFF011 (callers handle it anyway)";
+	EFF011 = "EFF011", Error, ["WEF001"], "A defined function declares an effect that its body never has";
 	EFF013 = "EFF013", Error, [], "writing a mutable member of a namespace from another file";
 	EFF014 = "EFF014", Error, [], "writing a reverse relation side, length or size outside the collection implementation";
 	EFF020 = "EFF020", Error, ["FN010"], "f is recursive: declare its return type";

@@ -5,12 +5,10 @@ analyzer/tests/cases/advanced/14-concurrency-without-async/adv-14.6-01.fa: line 
 analyzer/tests/cases/advanced/14-concurrency-without-async/adv-14.6-09.fa: line 5: error[CONC001]: `for parallel` is only available on `native`, not on `wasm`: branch with `@if target is "native"`, or write a plain `for`
 analyzer/tests/cases/comptime/directories.fa: main.fa:4:19: this member is not supported by the native backend yet
 analyzer/tests/cases/comptime/for-per-item.fa: main.fa:19:14: a value of type `Void` is not supported by the native backend yet
-analyzer/tests/cases/review/callback-throws.fa: line 16: a callback that throws, given to a function of the program is not supported by the native backend yet
 analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-15.fa: line 5: this member is not supported by the native backend yet
 analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-5.fa: line 4: this member is not supported by the native backend yet
 analyzer/tests/cases/types/3.8-enumerations/en-1.fa: line 5: converting a value from Enum(NominalId(2147483659)) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
 analyzer/tests/cases/types/3.8-enumerations/en-2.fa: line 3: converting a value from Enum(NominalId(2147483659)) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
-analyzer/tests/cases/types/4.5-functions-as-parameters-stored-or-not/fp-4.fa: line 4: a callback that throws, given to a function of the program is not supported by the native backend yet
 analyzer/tests/cases/types/4.8-function-types-and-assignability/ft-9.fa: line 3: this member is not supported by the native backend yet
 analyzer/tests/cases/types/5.4-set-t-and-growingset-t/se-3.fa: line 3: the `key` of `Set.from` is not supported by the native backend yet
 analyzer/tests/cases/values/07-strings-and-characters/T-STR-29.fa: line 3: indexing this value is not supported by the native backend yet

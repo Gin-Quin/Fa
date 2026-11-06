@@ -2,5 +2,6 @@
 -- brief: ✗ ef-6: EF017
 -- context: declarations reused from ef-5
 type ApiError = Errors { Timeout }
-function loadScore = (): Integer throws ApiError => 1
+function loadScore = (text: String = "1"): Integer throws ApiError =>
+	if text == "" { throw ApiError.Timeout } else { 1 }
 let s = try loadScore() catch error => 0

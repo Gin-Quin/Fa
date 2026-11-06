@@ -220,6 +220,8 @@ pub struct InstanceRequest {
 	pub key: fa_analyzer::ids::DeclKey,
 	/// Its type arguments.
 	pub arguments: Vec<fa_analyzer::ids::TypeId>,
+	/// Throwing callback parameters: their positions and widened signatures.
+	pub callbacks: Vec<(usize, fa_analyzer::ids::TypeId)>,
 }
 
 /// How the units of a program are compiled and linked.

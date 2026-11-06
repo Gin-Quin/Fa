@@ -1,7 +1,8 @@
 -- error: E-WHEN-1
 -- brief: ⇒ E-WHEN-1 (`E.B` not handled)
 type E = Errors { A, B }
-function f = (): Integer throws E => throw E.A
+function f = (second: Boolean = false): Integer throws E =>
+	if second { throw E.B } else { throw E.A }
 let v = f() catch error => when error is {
 E.A => 0
 }

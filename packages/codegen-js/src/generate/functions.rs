@@ -12,7 +12,7 @@
 //! default applies when the argument is left out (`arguments.length`) or is
 //! `faOmitted`, which a call passes for it when a later argument is given.
 
-use fa_analyzer::analysis::{Argument, Callee, FnInfo};
+use fa_analyzer::analysis::{Argument, Callee, FnInfo, NodeFlags};
 use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::syntax::{NodeList, View};
@@ -664,7 +664,27 @@ impl Generator<'_> {
 					Callee::Value => self.external_suspending(callee),
 					_ => None,
 				};
-				self.finish_call_of(n, declaration, external, callee_text, values)
+				let protect = self.fcx.catch_depth != 0 && self.has(n, NodeFlags::CALLBACK_CALL);
+				if protect {
+					// Argument evaluation belongs to the callee's own errors;
+					// only an error from invoking the callback bypasses catches.
+					for value in &mut values {
+						let spread = value.starts_with("...");
+						let text = value.strip_prefix("...").unwrap_or(value).to_string();
+						let saved = self.keep_value(Expr::new(text, Prec::Assign));
+						*value = if spread {
+							format!("...{}", saved.text)
+						} else {
+							saved.text
+						};
+					}
+				}
+				let call = self.finish_call_of(n, declaration, external, callee_text, values);
+				if protect {
+					self.passed_callback_call(call)
+				} else {
+					call
+				}
 			}
 		}
 	}

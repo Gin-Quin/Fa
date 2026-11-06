@@ -3,8 +3,9 @@ type Response = { body: String }
 type Profile = { name: String }
 type LoadError = Errors { HttpError = { status: Integer }, BadPayload = { body: String } }
 let defaultProfile = Profile { name = "anonymous" }
-async function fetchData = (url: String): Response throws LoadError => Response { body = url }
-function parseProfile = (body: String): Profile throws LoadError => {
+async function fetchData = (url: String): Response throws LoadError.HttpError =>
+	if url == "" { throw LoadError.HttpError { status = 404 } } else { Response { body = url } }
+function parseProfile = (body: String): Profile throws LoadError.BadPayload => {
 	if body == "" {
 		throw LoadError.BadPayload { body }
 	}

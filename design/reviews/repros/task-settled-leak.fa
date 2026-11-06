@@ -2,7 +2,7 @@ use { sleep } = std.time
 
 type Oops = Errors { Bad = { code: Integer }, Worse }
 
-async function failing = (n: Integer, delay: Integer): String throws Oops => {
+async function failing = (n: Integer, delay: Integer): String throws Oops.Worse => {
 	let held = "a heap string held across the await {n} padding padding"
 	await sleep(delay)
 	if n == 2 {

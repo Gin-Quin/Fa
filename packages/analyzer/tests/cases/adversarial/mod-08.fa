@@ -1,7 +1,7 @@
 -- `try` and `await` in a module-level initializer
 -- file: library/a.fa
 type Failure = Errors { Bad = {} }
-function risky = (): Integer throws Failure => 1
+function risky = (): Integer throws Failure => throw Failure.Bad {}
 async function work = (): Integer => 1
 export = try risky() -- error: MOD008
 -- file: library/b.fa

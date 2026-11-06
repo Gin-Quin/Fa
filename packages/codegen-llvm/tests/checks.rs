@@ -70,6 +70,34 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn callback_instances_keep_the_nonthrowing_calls_plain() {
+		let ir = ir_of(
+			"callback-instances",
+			r#"type E = Errors { Bad }
+type F = Errors { Bad }
+function run = (action: () => Integer): Integer => action()
+function good = (): Integer => 2
+function failE = (): Integer throws E => { throw E.Bad }
+function failF = (): Integer throws F => { throw F.Bad }
+console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error => -2)
+"#,
+		);
+		let plain = ir
+			.lines()
+			.find(|line| line.starts_with("define ") && line.contains("@fa.run("))
+			.expect("the nonthrowing instance");
+		assert!(plain.contains("i64 @fa.run("), "{plain}");
+		let specialized: Vec<_> = ir
+			.lines()
+			.filter(|line| line.starts_with("define ") && line.contains("@fa.run.callback"))
+			.collect();
+		assert_eq!(specialized.len(), 2, "{ir}");
+		for header in specialized {
+			assert!(header.contains("{ i64, ptr }"), "{header}");
+		}
+	}
+
+	#[test]
 	fn an_unproven_sum_is_checked_and_proven_differences_are_nsw() {
 		let ir = ir_of(
 			"fib",

@@ -1429,7 +1429,7 @@ Uncovered: `E-ERR-3` ("`loadScore` can fail with `ApiError`. Use `try` to propag
 | E-ERR-9 | `catch` without a name, or a name reused in its handler scope |
 | W-ERR-1 | `try` on an expression that can't fail [D-23] |
 | W-ERR-2 | `catch` on an expression that can't fail |
-| W-ERR-3 | `throws E` declared but never thrown (CF14) |
+| E-ERR-10 | a defined function declares errors that its body never propagates, including expression bodies and explicitly typed function declarations; the old W-ERR-3 is an alias |
 | W-ERR-4 | `is Error` decided at compile time (always true; never true is E-CMP-7) |
 
 Errors are not falsy (`if result` is E-BOOL-1); `?.`/`??` don't apply to failing calls (E-OPT-6); there is no `!` (E-LEX-4); there is no postfix `?` on calls (parse error: "use `try`").
@@ -1469,7 +1469,7 @@ Errors are not falsy (`if result` is E-BOOL-1); `?.`/`??` don't apply to failing
 - T-ERR-18 `type E = Errors { A } · function f = (): Integer throws E => throw E.A · function g = (): Integer throws E => (try f()) + 1 catch e => 0` ⇒ E-ERR-6
 - T-ERR-19 `type E = Errors { A } · function f = (): Integer | E => 1` ⇒ E-ERR-7
 - T-ERR-20 `function g = (x: Integer): Integer => try x + 1` ⇒ W-ERR-1; `let y = 5 catch e => 0` ⇒ W-ERR-2
-- T-ERR-21 `type E = Errors { A } · function f = (): Integer throws E => { · 1 · }` ⇒ W-ERR-3
+- T-ERR-21 `type E = Errors { A } · function f = (): Integer throws E => { · 1 · }` ⇒ E-ERR-10
 - T-ERR-22 `type E = Errors { A } · function f = (): Integer throws E => throw E.A · let v = f() ?? 0` ⇒ E-OPT-6
 - T-ERR-23 `type E = Errors { A } · function f = (): Integer throws E => throw E.A · if f() { }` ⇒ E-BOOL-1 (and E-ERR-3)
 - T-ERR-24 `type E = Errors { A, B } · function f = (): Integer throws E => throw E.A · let v = f() catch error => when error is { · E.A => 0 · }` ⇒ E-WHEN-1 (`E.B` not handled)

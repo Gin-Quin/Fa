@@ -46,8 +46,13 @@ impl Generator<'_> {
 			dest
 		};
 		self.out.open("try");
+		self.fcx.catch_depth += 1;
 		self.into(expression, dest.clone());
+		self.fcx.catch_depth -= 1;
 		self.out.reopen("catch ($e)");
+		if let Some(error) = &self.fcx.callback_error {
+			self.out.line(format!("if ($e === {error}) throw $e;"));
+		}
 		let caught = self.helper("faCaught");
 		self.push_scope();
 		match self.analysis.symbols.symbol_of_decl(n) {
@@ -63,6 +68,27 @@ impl Generator<'_> {
 		}
 		self.pop_scope();
 		self.out.close("");
+	}
+
+	/// A callback's invocation inside a catch: remember its exception's
+	/// origin without wrapping or changing the error seen by the caller.
+	pub(crate) fn passed_callback_call(&mut self, call: Expr) -> Expr {
+		let error = match self.fcx.callback_error.clone() {
+			Some(error) => error,
+			None => {
+				let error = self.inline_temp();
+				self.fcx.callback_error = Some(error.clone());
+				error
+			}
+		};
+		let result = self.inline_temp();
+		self.out.open("try");
+		self.out.line(format!("{result} = {};", call.text));
+		self.out.reopen("catch ($e)");
+		self.out.line(format!("{error} = $e;"));
+		self.out.line("throw $e;");
+		self.out.close("");
+		Expr::name(result, true)
 	}
 
 	/// Whether a nominal type is an `Errors` type.

@@ -562,6 +562,10 @@ bitflags! {
 		/// JavaScript: the exception goes through. Natively: an instance of
 		/// the callee per error set (not implemented yet: unsupported).
 		const PASSES_ERRORS = 1 << 17;
+		/// A call of a parameter declared without `throws` that its function
+		/// only calls. Additional errors supplied by its caller propagate past
+		/// this function's catches (callbacks.rs).
+		const CALLBACK_CALL = 1 << 18;
 	}
 }
 
@@ -623,6 +627,10 @@ pub struct Analysis {
 	pub functions: FxHashMap<NodeId, FnInfo>,
 	/// Every call node: its callee and its arguments in parameter order.
 	pub calls: FxHashMap<NodeId, CallInfo>,
+	/// Throwing callbacks given to a non-storing user function: each given
+	/// argument node and the function parameter's type widened with its
+	/// callback errors. Native instances use precisely these signatures.
+	pub callback_types: FxHashMap<NodeId, Vec<(NodeId, TypeId)>>,
 	/// Per call of a function with requirements: what provides each one, in
 	/// the order of the callee's `FnSig::requires` (sorted by the stable
 	/// hash of their keys, decision D11): the hidden arguments, after the
@@ -1421,6 +1429,7 @@ impl Analysis {
 			instantiations: FxHashMap::default(),
 			functions: FxHashMap::default(),
 			calls: FxHashMap::default(),
+			callback_types: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),
 			requirement_args: FxHashMap::default(),

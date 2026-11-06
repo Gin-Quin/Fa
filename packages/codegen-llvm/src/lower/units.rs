@@ -88,7 +88,7 @@ pub(crate) struct Split<'ctx> {
 
 /// An instance of another unit's generic function: its key and its type
 /// arguments.
-pub(crate) type Request = (DeclKey, Vec<TypeId>);
+pub(crate) type Request = crate::split::InstanceRequest;
 
 /// The symbol of an instance of a generic function: its declaration's,
 /// and the stable hashes of its type arguments.
@@ -102,6 +102,28 @@ pub(crate) fn instance_symbol(
 		.map(|&argument| format!("{:x}", types.stable_hash(argument)))
 		.collect();
 	format!("{}<{}>", mangle(types, key), hashes.join(","))
+}
+
+/// A generic or ordinary function specialized for callback errors.
+pub(crate) fn callback_instance_symbol(
+	types: &fa_analyzer::types::TypeStore,
+	key: DeclKey,
+	arguments: &[TypeId],
+	callbacks: &[(usize, TypeId)],
+) -> String {
+	if callbacks.is_empty() {
+		return instance_symbol(types, key, arguments);
+	}
+	let name = if arguments.is_empty() {
+		mangle(types, key)
+	} else {
+		instance_symbol(types, key, arguments)
+	};
+	let hashes: Vec<String> = callbacks
+		.iter()
+		.map(|&(index, ty)| format!("{index}:{:x}", types.stable_hash(ty)))
+		.collect();
+	format!("{name}.callbacks<{}>", hashes.join(","))
 }
 
 /// The symbol of a declaration other modules may name.
@@ -597,7 +619,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Err(self.unsupported(node.index(), "calling this function of another module"));
 		};
 		let sig = self.types().sig(sig_id);
-		let params: Vec<fa_analyzer::types::ParamSig> = self.types().params(sig.params).to_vec();
+		let mut params: Vec<fa_analyzer::types::ParamSig> =
+			self.types().params(sig.params).to_vec();
+		let callbacks = self
+			.analysis
+			.call(node)
+			.map(|info| self.call_callback_types(node, info))
+			.unwrap_or_default();
 		// a generic function: the instance for the call's type arguments,
 		// which its own unit makes in an instance wave
 		let mut generics = Vec::new();
@@ -608,8 +636,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		{
 			self.collect_params(ty, &mut generics);
 		}
-		let (name, bindings, arguments) = if generics.is_empty() {
-			(mangle(self.types(), key), FxHashMap::default(), Vec::new())
+		let (bindings, arguments) = if generics.is_empty() {
+			(FxHashMap::default(), Vec::new())
 		} else {
 			let Some(list) = self.analysis.instantiation(node) else {
 				return Err(self.unsupported(node.index(), "this generic call"));
@@ -637,12 +665,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				};
 				bindings.insert(param, self.repr_of(argument, node.index())?);
 			}
-			(
-				instance_symbol(self.types(), key, &arguments),
-				bindings,
-				arguments,
-			)
+			(bindings, arguments)
 		};
+		let name = if arguments.is_empty() && callbacks.is_empty() {
+			mangle(self.types(), key)
+		} else {
+			callback_instance_symbol(self.types(), key, &arguments, &callbacks)
+		};
+		for &(index, ty) in &callbacks {
+			if let Some(param) = params.get_mut(index) {
+				param.ty = ty;
+			}
+		}
 		if let Some(function) = self
 			.split
 			.as_ref()
@@ -650,16 +684,29 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		{
 			return Ok(function.clone());
 		}
-		if arguments.is_empty() {
+		if arguments.is_empty() && callbacks.is_empty() {
 			let module = self.types().module_path(declared.module).to_string();
 			self.split_mut().symbols.needs.push((module, name.clone()));
 		} else {
-			self.split_mut().requests.push((key, arguments));
+			self.split_mut().requests.push(Request {
+				key,
+				arguments,
+				callbacks: callbacks.clone(),
+			});
 		}
 		let mut merged = self.bindings.borrow().clone();
 		merged.extend(bindings.iter().map(|(param, repr)| (*param, *repr)));
 		let saved = self.bindings.replace(merged);
-		let function = self.remote_signature(key, node, name, declared, sig_id, params, bindings);
+		let function = self.remote_signature(
+			key,
+			node,
+			name,
+			declared,
+			sig_id,
+			params,
+			bindings,
+			!callbacks.is_empty(),
+		);
 		self.bindings.replace(saved);
 		let function = function?;
 		let module = self.types().module_path(declared.module).to_string();
@@ -685,6 +732,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		sig_id: fa_analyzer::ids::SigId,
 		params: Vec<fa_analyzer::types::ParamSig>,
 		bindings: FxHashMap<fa_analyzer::ids::ParamId, Repr>,
+		callback_errors: bool,
 	) -> Result<Function<'ctx>, Error> {
 		let _ = key;
 		let sig = self.types().sig(sig_id);
@@ -751,7 +799,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		for _ in self.types().requirements(sig.requires) {
 			types.push(self.pointer_type().into());
 		}
-		let throws = sig.throws != TypeId::NEVER;
+		let throws = sig.throws != TypeId::NEVER || callback_errors;
 		let fn_type = match (ret.has_value(), throws) {
 			(true, false) => self.llvm_type(ret).fn_type(&types, false),
 			(false, false) => self.context.void_type().fn_type(&types, false),
@@ -1005,24 +1053,36 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			message: "an instance of a generic function (split build)".to_string(),
 			location: String::new(),
 		};
-		for (key, arguments) in requests {
+		for Request {
+			key,
+			arguments,
+			callbacks,
+		} in requests
+		{
 			let (module, keyed) = self.session.keyed(*key).ok_or_else(no_location)?;
 			let file = self.session.file_of(module).ok_or_else(no_location)?;
 			self.switch_file(file);
-			if !self.generic_functions.contains_key(&keyed.node) {
+			let instance = if self.generic_functions.contains_key(&keyed.node) {
+				let mut reprs = Vec::new();
+				for &argument in arguments {
+					reprs.push(self.repr_of(argument, keyed.node.index())?);
+				}
+				let generics = self.generic_functions[&keyed.node].generics.clone();
+				self.note_instance_types(&generics, arguments, &reprs);
+				self.instance_of(keyed.node, reprs)?
+			} else if arguments.is_empty() && !callbacks.is_empty() {
+				keyed.node
+			} else {
 				return Err(
-					self.unsupported(keyed.node.index(), "this generic function (split build)")
+					self.unsupported(keyed.node.index(), "this function instance (split build)")
 				);
+			};
+			let mut function = self.functions[&instance].clone();
+			if !callbacks.is_empty() {
+				function = self.callback_instance(function, callbacks.clone())?;
 			}
-			let mut reprs = Vec::new();
-			for &argument in arguments {
-				reprs.push(self.repr_of(argument, keyed.node.index())?);
-			}
-			let generics = self.generic_functions[&keyed.node].generics.clone();
-			self.note_instance_types(&generics, arguments, &reprs);
-			let instance = self.instance_of(keyed.node, reprs)?;
-			let name = instance_symbol(self.types(), *key, arguments);
-			let value = self.functions[&instance].value;
+			let name = callback_instance_symbol(self.types(), *key, arguments, callbacks);
+			let value = function.value;
 			if self.module.get_function(&name).is_some() {
 				// the same representations as another request: one function
 				// can't have both names
@@ -1033,6 +1093,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			value.as_global_value().set_name(&name);
 			self.split_mut().exports.insert(name);
+			// A caller can await or start an async instance from another
+			// unit. Its signature is part of this same instance request.
+			if self.tasks.asynchronous
+				&& function
+					.info
+					.sig
+					.is_some_and(|sig| self.types().sig(sig).is_async)
+			{
+				self.async_instance_of(&function)?;
+			}
 		}
 		// the entries of the tables of generic function values
 		for entry in entries {

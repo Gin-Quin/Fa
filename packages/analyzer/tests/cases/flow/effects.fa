@@ -40,7 +40,7 @@ function partly = (counter: Counter) mutates counter.value => {
 	counter.increment()
 	counter.reset() -- error: EFF004
 }
-function unused = (counter: Counter) mutates counter => { -- warning: EFF011
+function unused = (counter: Counter) mutates counter => { -- error: EFF011
 	console.log(counter.value)
 }
 function wrongField = (counter: Counter) mutates counter.count => {} -- error: EFF008

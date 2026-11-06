@@ -8,7 +8,8 @@ type Response = {
 	function html = (page: String): Response => Response { status = 200, body = page }
 }
 type PageError = Errors { Missing }
-async function loadPage = (name: String): String throws PageError => name
+async function loadPage = (name: String): String throws PageError =>
+	if name == "" { throw PageError.Missing } else { name }
 let request = Request { path = "/" }
 
 type Handler = async (request: Request) => Response

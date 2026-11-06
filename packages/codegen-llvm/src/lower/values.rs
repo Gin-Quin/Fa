@@ -981,9 +981,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let from_fields = self.types().fields_of(from_type).to_vec();
 				let to_fields = self.types().fields_of(to_type).to_vec();
 				for (index, field) in to_fields.iter().enumerate() {
-					let Some(position) =
-						from_fields.iter().position(|from| from.name == field.name)
-					else {
+					let Some(position) = from_fields.iter().position(|from| {
+						self.types().syms.resolve(from.name)
+							== self.types().syms.resolve(field.name)
+					}) else {
 						return Err(self.unsupported(node, "converting this object"));
 					};
 					let from_repr = self.repr_of(from_fields[position].ty, node)?;

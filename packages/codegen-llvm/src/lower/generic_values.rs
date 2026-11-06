@@ -31,6 +31,7 @@
 //! modules define their entries (`fa.gv.entry.…`), and the entry object
 //! defines the tables and the indices (`units.rs`).
 
+use fa_analyzer::analysis::GenericMethod;
 use fa_analyzer::ids::{FileId, NodeId, ParamId, TypeId};
 use fa_analyzer::types::{Bindings, TypeKind, TypeStore};
 use inkwell::module::Linkage;
@@ -45,6 +46,14 @@ use crate::lower::{FAST_CALLING_CONVENTION, Lowering};
 /// polymorphic recursion (its instances keep growing).
 pub(crate) const MOST_INSTANCES: usize = 64;
 
+type GenericInstance = (Vec<Repr>, Vec<TypeId>, Vec<GenericMethod>);
+type ProducerKey = (
+	FileId,
+	NodeId,
+	Vec<(Repr, TypeId)>,
+	Vec<(ParamId, GenericMethod)>,
+);
+
 /// The generic function types equal up to the names of their parameters.
 pub(crate) struct GenericClass {
 	/// The first type of the class met (global ids).
@@ -53,7 +62,7 @@ pub(crate) struct GenericClass {
 	generics: Vec<ParamId>,
 	/// The instances, in table order: the type arguments' representations
 	/// and types.
-	instances: Vec<(Vec<Repr>, Vec<TypeId>)>,
+	instances: Vec<GenericInstance>,
 }
 
 /// What makes values of a class.
@@ -72,6 +81,8 @@ pub(crate) struct Producer<'ctx> {
 	node: NodeId,
 	kind: ProducerKind,
 	bindings: FxHashMap<ParamId, Repr>,
+	types: FxHashMap<ParamId, TypeId>,
+	methods: Vec<(ParamId, GenericMethod)>,
 	/// Stands for the table until it is defined (`finish_generic_tables`).
 	placeholder: GlobalValue<'ctx>,
 	entries: Vec<PointerValue<'ctx>>,
@@ -82,7 +93,7 @@ pub(crate) struct Producer<'ctx> {
 pub(crate) struct GenericValues<'ctx> {
 	classes: Vec<GenericClass>,
 	producers: Vec<Producer<'ctx>>,
-	keys: FxHashMap<(FileId, NodeId, Vec<Repr>), usize>,
+	keys: FxHashMap<ProducerKey, usize>,
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -121,6 +132,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let bindings = Bindings {
 			params: own,
 			types: arguments,
+			..Default::default()
 		};
 		let instance = scratch.substitute(global, &bindings);
 		let mut merger = scratch.merger(Some(module));
@@ -147,6 +159,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			&Bindings {
 				params,
 				types: arguments,
+				..Default::default()
 			},
 		);
 		let mut merger = scratch.merger(Some(module));
@@ -179,6 +192,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				&Bindings {
 					params: own.clone(),
 					types: theirs.clone(),
+					..Default::default()
 				},
 			);
 			let opened = scratch.substitute(
@@ -186,6 +200,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				&Bindings {
 					params: class.generics.clone(),
 					types: theirs,
+					..Default::default()
 				},
 			);
 			if renamed == opened {
@@ -206,11 +221,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		class: usize,
 		reprs: Vec<Repr>,
 		types: Vec<TypeId>,
+		methods: Vec<GenericMethod>,
 		node: NodeId,
 	) -> Result<usize, Error> {
 		let site = self.location(node.index());
 		let data = &self.generic_values.classes[class];
-		if let Some(index) = data.instances.iter().position(|(known, _)| *known == reprs) {
+		if let Some(index) = data
+			.instances
+			.iter()
+			.position(|(known, _, selected)| *known == reprs && *selected == methods)
+		{
 			return Ok(index);
 		}
 		if data.instances.len() >= MOST_INSTANCES {
@@ -222,7 +242,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.instances
 				.iter()
 				.take(3)
-				.map(|(_, arguments)| {
+				.map(|(_, arguments, _)| {
 					arguments
 						.iter()
 						.map(|&ty| types.display(ty))
@@ -237,7 +257,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			)));
 		}
 		let data = &mut self.generic_values.classes[class];
-		data.instances.push((reprs, types));
+		data.instances.push((reprs, types, methods));
 		Ok(data.instances.len() - 1)
 	}
 
@@ -253,10 +273,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.map(|(&param, &repr)| (param, repr))
 			.collect();
 		entries.sort_by_key(|(param, _)| *param);
+		let mut methods = if matches!(kind, ProducerKind::Lambda) {
+			self.method_bindings.borrow().clone()
+		} else {
+			Vec::new()
+		};
+		methods.sort_by_key(|(param, method)| (*param, method.name));
+		let types = if matches!(kind, ProducerKind::Lambda) {
+			self.type_bindings.borrow().clone()
+		} else {
+			FxHashMap::default()
+		};
 		let key = (
 			self.file,
 			node,
-			entries.into_iter().map(|(_, repr)| repr).collect(),
+			entries
+				.into_iter()
+				.map(|(param, repr)| (repr, types.get(&param).copied().unwrap_or(TypeId::UNKNOWN)))
+				.collect(),
+			methods.clone(),
 		);
 		if let Some(&producer) = self.generic_values.keys.get(&key) {
 			return producer;
@@ -273,6 +308,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			node,
 			kind,
 			bindings,
+			types,
+			methods,
 			placeholder,
 			entries: Vec::new(),
 		});
@@ -304,6 +341,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			&Bindings {
 				params: own,
 				types: markers,
+				..Default::default()
 			},
 		);
 		format!("{:x}", scratch.stable_hash(marked))
@@ -316,6 +354,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.map(|&argument| format!("{:x}", self.types().stable_hash(argument)))
 			.collect();
 		hashes.join("_")
+	}
+
+	fn global_methods(&self, methods: &[GenericMethod]) -> Vec<GenericMethod> {
+		let mut merger = self.types().merger(Some(self.session.module_id(self.file)));
+		methods
+			.iter()
+			.map(|method| method.merged(&mut merger))
+			.collect()
 	}
 
 	/// The table of the values a node makes: a placeholder this module
@@ -339,6 +385,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// each parameter in its owner's list (what another session can
 		// find again)
 		let mut bindings = Vec::new();
+		let mut methods = Vec::new();
 		if matches!(kind, ProducerKind::Lambda) {
 			let current: Vec<(ParamId, Repr)> = self
 				.bindings
@@ -357,7 +404,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 							.map(|index| (owner.index() as u32, index as u32))
 					})
 					.min();
-				let bound = self.instance_types.borrow().get(&(param, repr)).copied();
+				let bound = self
+					.type_bindings
+					.borrow()
+					.get(&param)
+					.copied()
+					.or_else(|| self.instance_types.borrow().get(&(param, repr)).copied());
 				let (Some((owner, index)), Some(bound)) = (owner, bound) else {
 					return Err(self.unsupported(
 						node.index(),
@@ -367,6 +419,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				bindings.push((owner, index, self.global_type(bound)));
 			}
 			bindings.sort_by_key(|&(owner, index, _)| (owner, index));
+			let captured = self.method_bindings.borrow().clone();
+			for (param, method) in captured {
+				let owner = self
+					.generic_functions
+					.iter()
+					.filter_map(|(owner, info)| {
+						info.generics
+							.iter()
+							.position(|&generic| generic == param)
+							.map(|index| (owner.index() as u32, index as u32))
+					})
+					.min();
+				if let Some((owner, index)) = owner {
+					methods.push((owner, index, self.global_methods(&[method])[0].clone()));
+				}
+			}
+			methods.sort_by_key(|(owner, index, method)| (*owner, *index, method.name));
 		}
 		let module = self.session.module(self.file).to_string();
 		let mut table = format!("fa.gv.table.{module}.{}", node.index());
@@ -375,6 +444,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			table.push('.');
 			table.push_str(&self.instance_key(&types));
 		}
+		let selected: Vec<_> = methods
+			.iter()
+			.map(|(_, _, method)| method.clone())
+			.collect();
+		table.push_str(&super::units::method_instance_suffix(
+			self.types(),
+			&selected,
+		));
 		let global = match self.module.get_global(&table) {
 			Some(global) => global,
 			None => {
@@ -392,6 +469,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			node: node.index() as u32,
 			lambda: matches!(kind, ProducerKind::Lambda),
 			bindings,
+			methods,
 		};
 		let needs = self.generic_needs_mut();
 		if !needs.producers.contains(&producer) {
@@ -409,11 +487,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		generic: TypeId,
 		reprs: Vec<Repr>,
 		arguments: &[TypeId],
+		methods: &[GenericMethod],
 		node: NodeId,
 	) -> Result<inkwell::values::IntValue<'ctx>, Error> {
 		if !self.is_split() {
 			let class = self.generic_class(generic);
-			let index = self.class_instance(class, reprs, arguments.to_vec(), node)?;
+			let index =
+				self.class_instance(class, reprs, arguments.to_vec(), methods.to_vec(), node)?;
 			return Ok(self.usize.const_int(index as u64, false));
 		}
 		let arguments: Vec<TypeId> = arguments
@@ -422,8 +502,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.collect();
 		let instance = crate::split::GenericInstance {
 			class: self.class_key(generic),
-			key: self.instance_key(&arguments),
+			key: format!(
+				"{}{}",
+				self.instance_key(&arguments),
+				super::units::method_instance_suffix(self.types(), methods)
+			),
 			arguments,
+			methods: self.global_methods(methods),
 		};
 		let symbol = instance.index_symbol();
 		let global = match self.module.get_global(&symbol) {
@@ -482,6 +567,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let node = NodeId::new(producer.node as usize);
 		// the bindings of the instance around a lambda
 		let mut bindings = FxHashMap::default();
+		let mut types = FxHashMap::default();
 		for &(owner, index, bound) in &producer.bindings {
 			let Some(param) = self
 				.generic_functions
@@ -493,6 +579,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let repr = self.repr_of(bound, node.index())?;
 			self.note_instance_types(&[param], &[bound], &[repr]);
 			bindings.insert(param, repr);
+			types.insert(param, bound);
 		}
 		let mut reprs = Vec::new();
 		for &argument in &request.instance.arguments {
@@ -504,8 +591,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			ProducerKind::Declaration
 		};
 		let saved = self.bindings.replace(bindings);
-		let entry = self.generic_entry_in_file(node, kind, &reprs, &request.instance.arguments);
+		let saved_types = self.type_bindings.replace(types);
+		let mut captured_methods = Vec::new();
+		for &(owner, index, ref method) in &producer.methods {
+			let param = self
+				.generic_functions
+				.get(&NodeId(owner))
+				.and_then(|info| info.generics.get(index as usize))
+				.copied()
+				.ok_or_else(|| self.unsupported(node.index(), "this captured generic method"))?;
+			captured_methods.push((param, method.clone()));
+		}
+		let saved_methods = self.method_bindings.replace(captured_methods);
+		let entry = self.generic_entry_in_file(
+			node,
+			kind,
+			&reprs,
+			&request.instance.arguments,
+			&request.instance.methods,
+		);
 		self.bindings.replace(saved);
+		self.type_bindings.replace(saved_types);
+		self.method_bindings.replace(saved_methods);
 		let entry = entry?;
 		let name = producer.entry_symbol(&request.instance);
 		self.export_entry(entry, &name)?;
@@ -627,6 +734,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(list) = self.analysis.instantiation(node) else {
 			return Err(self.unsupported(node.index(), "this instance of a generic function"));
 		};
+		let given = self.types().list_items(list);
+		let mut methods = self.call_methods(node, given);
 		let arguments: Vec<TypeId> = self
 			.types()
 			.list_items(list)
@@ -640,11 +749,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "this instance of a generic function"));
 		}
 		let arguments = arguments[arguments.len() - count..].to_vec();
+		let offset = given.len() - count;
+		methods.retain_mut(|method| {
+			if (method.parameter as usize) < offset {
+				return false;
+			}
+			method.parameter -= offset as u16;
+			true
+		});
 		let mut reprs = Vec::with_capacity(count);
 		for &argument in &arguments {
 			reprs.push(self.repr_of(argument, node.index())?);
 		}
-		let index = self.instance_index(generic, reprs, &arguments, node)?;
+		let index = self.instance_index(generic, reprs, &arguments, &methods, node)?;
 		let instance = self.instantiate_generic(generic, &arguments);
 		let Some(raw) = value.value else {
 			return Ok(value);
@@ -679,14 +796,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let data = &self.generic_values.producers[producer];
 					(data.class, data.entries.len())
 				};
-				let Some((reprs, types)) = self.generic_values.classes[class]
+				let Some((reprs, types, methods)) = self.generic_values.classes[class]
 					.instances
 					.get(done)
 					.cloned()
 				else {
 					break;
 				};
-				let entry = self.generic_entry(producer, &reprs, &types)?;
+				let entry = self.generic_entry(producer, &reprs, &types, &methods)?;
 				self.generic_values.producers[producer].entries.push(entry);
 				made = true;
 			}
@@ -700,21 +817,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		producer: usize,
 		reprs: &[Repr],
 		types: &[TypeId],
+		methods: &[GenericMethod],
 	) -> Result<PointerValue<'ctx>, Error> {
-		let (file, node, kind, bindings) = {
+		let (file, node, kind, bindings, types_bindings, captured_methods) = {
 			let data = &self.generic_values.producers[producer];
 			(
 				data.file,
 				data.node,
 				data.kind.clone(),
 				data.bindings.clone(),
+				data.types.clone(),
+				data.methods.clone(),
 			)
 		};
 		let current = self.file;
 		self.switch_file(file);
 		let saved = self.bindings.replace(bindings);
-		let entry = self.generic_entry_in_file(node, kind, reprs, types);
+		let saved_types = self.type_bindings.replace(types_bindings);
+		let saved_methods = self.method_bindings.replace(captured_methods);
+		let entry = self.generic_entry_in_file(node, kind, reprs, types, methods);
 		self.bindings.replace(saved);
+		self.type_bindings.replace(saved_types);
+		self.method_bindings.replace(saved_methods);
 		self.switch_file(current);
 		entry
 	}
@@ -725,6 +849,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		kind: ProducerKind,
 		reprs: &[Repr],
 		types: &[TypeId],
+		methods: &[GenericMethod],
 	) -> Result<PointerValue<'ctx>, Error> {
 		let generics = match self.generic_functions.get(&node) {
 			Some(info) => info.generics.clone(),
@@ -735,8 +860,39 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		self.note_instance_types(&generics, types, reprs);
 		let key = match kind {
-			ProducerKind::Lambda => self.lambda_instance(node, reprs)?,
-			ProducerKind::Declaration => self.instance_of(node, reprs.to_vec())?,
+			ProducerKind::Lambda => {
+				let mut type_bindings = self.type_bindings.borrow().clone();
+				type_bindings.extend(generics.iter().copied().zip(types.iter().copied()));
+				let saved_types = self.type_bindings.replace(type_bindings);
+				let mut selected = self.method_bindings.borrow().clone();
+				selected.extend(methods.iter().filter_map(|method| {
+					generics
+						.get(method.parameter as usize)
+						.map(|&param| (param, method.clone()))
+				}));
+				let saved = self.method_bindings.replace(selected);
+				let result = self.lambda_instance(node, reprs);
+				self.method_bindings.replace(saved);
+				self.type_bindings.replace(saved_types);
+				result?
+			}
+			ProducerKind::Declaration => {
+				let values = generics
+					.iter()
+					.zip(types)
+					.filter_map(|(&param, &ty)| {
+						self.types().param(param).value.then_some((param, ty))
+					})
+					.collect();
+				self.instance_here(
+					node,
+					&generics,
+					types,
+					reprs.to_vec(),
+					values,
+					methods.to_vec(),
+				)?
+			}
 		};
 		let function = self.functions[&key].clone();
 		Ok(match kind {

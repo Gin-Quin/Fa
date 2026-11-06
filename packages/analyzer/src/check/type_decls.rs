@@ -164,14 +164,27 @@ impl Walker<'_> {
 		};
 		let nominal = kind.map(|kind| {
 			let key = self.type_nominal_key(n, name);
-			let args = self.s.types.list(&[]);
+			let parameters = self.generic_params.get(&n).cloned().unwrap_or_default();
+			let arguments: Vec<_> = parameters
+				.iter()
+				.map(|&parameter| {
+					self.s
+						.types
+						.intern(crate::types::TypeKind::Param(parameter))
+				})
+				.collect();
+			let args = self.s.types.list(&arguments);
 			let members = self.s.types.intern_sym_list(&[]);
-			self.s.types.intern_nominal(NominalInfo {
+			let nominal = self.s.types.intern_nominal(NominalInfo {
 				key,
 				args,
 				kind,
 				members,
-			})
+			});
+			if !parameters.is_empty() {
+				self.s.types.set_generic_nominal(key, nominal, parameters);
+			}
+			nominal
 		});
 		let ty = if parts.incomplete {
 			TypeId::UNKNOWN
@@ -215,6 +228,10 @@ impl Walker<'_> {
 		self.finish_type(n, symbol, ty, parts, Some(scope));
 		for function in functions {
 			self.check_stmt(function);
+			self.a.function_owners.insert(function, n);
+			if let Some(info) = self.a.function(function) {
+				self.a.function_owners.insert(info.lambda, n);
+			}
 		}
 		self.body.scope = parent;
 	}
@@ -381,6 +398,12 @@ impl Walker<'_> {
 				(None, None) => TypeId::UNKNOWN,
 			};
 			self.quiet -= u32::from(field_use.is_some());
+			if let Some(written) = annotation
+				.or(default)
+				.and_then(|source| self.written_origin(source))
+			{
+				self.a.written_types.insert(field, written);
+			}
 			self.check_stored_iterator_type(annotation.unwrap_or(field), ty, "stored in a field");
 			if ty == TypeId::VOID {
 				let diagnostic = self.diagnostic(
@@ -772,6 +795,13 @@ impl Walker<'_> {
 
 	/// The function named `name` declared in a type whose type is `ty`.
 	pub(super) fn type_function(&mut self, ty: TypeId, name: &str) -> Option<SymbolId> {
+		if let Some(origin) = self.receiver_origin.clone()
+			&& self.written_origin_matches(&origin, ty)
+		{
+			let origin = self.resolve_written_type(origin);
+			self.receiver_origin = Some(origin.clone());
+			return self.written_type_function(origin.declaration, name);
+		}
 		let mut decls = self.declarations_of(ty);
 		// the type written for the receiver first (advanced brief §10.1)
 		if let Some(written) = self.receiver_decl
@@ -796,6 +826,65 @@ impl Walker<'_> {
 		}
 		// a type declared in another file (modules.rs)
 		self.external_type_function(ty, name)
+	}
+
+	fn written_origin_matches(
+		&mut self,
+		origin: &crate::analysis::WrittenType,
+		ty: TypeId,
+	) -> bool {
+		let module = self.s.types.decl_key_data(origin.declaration).module;
+		let declared = if module == self.s.module_id(self.file) {
+			self.modules
+				.keyed
+				.get(&origin.declaration)
+				.map(|&symbol| self.a.symbols.symbol(symbol).ty)
+		} else {
+			None
+		};
+		let declared = declared.map(|declared| match self.written_bindings(origin) {
+			Some(bindings) => self.s.types.substitute(declared, &bindings),
+			None => declared,
+		});
+		declared.is_some_and(|declared| self.s.types.unfold(declared) == self.s.types.unfold(ty))
+			|| self
+				.s
+				.type_origins(ty, |_| true)
+				.any(|known| known == origin.declaration)
+	}
+
+	fn written_type_function(
+		&mut self,
+		mut origin: crate::ids::DeclKey,
+		name: &str,
+	) -> Option<SymbolId> {
+		let mut seen = rustc_hash::FxHashSet::default();
+		while seen.insert(origin) {
+			if self.s.types.decl_key_data(origin).module != self.s.module_id(self.file) {
+				return self.external_type_function_at(origin, name);
+			}
+			let symbol = *self.modules.keyed.get(&origin)?;
+			let declaration = self.a.symbols.symbol(symbol).decl_node;
+			let info = self.a.type_decls.get(&declaration)?;
+			if let Some(function) = info.functions.iter().copied().find(|&function| {
+				self.s
+					.types
+					.syms
+					.resolve(self.a.symbols.symbol(function).name)
+					== name
+			}) {
+				return Some(function);
+			}
+			// A named alias inherits the methods of its explicitly named
+			// target, never those of an unrelated equal structure.
+			let (View::TypeDecl { value, .. } | View::ExportType { value, .. }) =
+				self.view(declaration)
+			else {
+				return None;
+			};
+			origin = self.written_origin(value)?.declaration;
+		}
+		None
 	}
 
 	/// The type named `name` declared inside a type whose type is `ty`

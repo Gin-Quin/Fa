@@ -67,6 +67,8 @@ pub struct GenericInstance {
 	pub key: String,
 	/// Its type arguments (global types of the run).
 	pub arguments: Vec<fa_analyzer::ids::TypeId>,
+	/// Semantic methods selected for its generic parameters.
+	pub methods: Vec<fa_analyzer::analysis::GenericMethod>,
 }
 
 impl GenericInstance {
@@ -94,6 +96,8 @@ pub struct GenericProducer {
 	/// owner's node and its position in the owner's generic parameters,
 	/// and the type it stands for (a global type of the run).
 	pub bindings: Vec<(u32, u32, fa_analyzer::ids::TypeId)>,
+	/// Method selections captured from enclosing instances, by parameter owner/index.
+	pub methods: Vec<(u32, u32, fa_analyzer::analysis::GenericMethod)>,
 }
 
 impl GenericProducer {
@@ -222,6 +226,8 @@ pub struct InstanceRequest {
 	pub arguments: Vec<fa_analyzer::ids::TypeId>,
 	/// Throwing callback parameters: their positions and widened signatures.
 	pub callbacks: Vec<(usize, fa_analyzer::ids::TypeId)>,
+	/// Methods selected from the written generic arguments.
+	pub methods: Vec<fa_analyzer::analysis::GenericMethod>,
 }
 
 /// How the units of a program are compiled and linked.

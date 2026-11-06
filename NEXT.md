@@ -1,8 +1,81 @@
+## Written-origin validation completed (2026-11-07)
+
+- analyzer-with is based on ef777e4. Its final frozen full workspace suite,
+  including native/freestanding/wasm, exited 0:
+  /tmp/fa-method-origin-workspace-final.log (session71691).
+- The first full found only the stale offset1 IndexError declaration in
+  disjoint_array_metadata_needs_a_non_wrapping_offset. The exact fixture fix
+  already validated in compiler0290400 is included; targeted and full reruns pass.
+- Workspace clippy and the JS runtime are checked again before this commit.
+- Separate analyzer-rules carries the next uncommitted copy/capture/FN086 lot,
+  plus the same origin base. Do not include it in this integration.
+- Remaining work includes generic destructor dispatch, the user-confirmed
+  union of different written origins at joins, with/remaining documented rules,
+  TypeFromSchema, deferred key-loop signatures and analyzer pass fusion.
+  Interpreter continuations/finding42 is assigned to proofs, not this branch.
+
 # Compiler completion in progress (2026-11-06)
 
 Integration: branch `compiler`, worktree `.claude/worktrees/lead`. The main checkout
 is shared and dirty: preserve it. The user requested completion of all remaining
 compiler work and explicitly authorized parallel agents.
+
+## Written methods (2026-11-06, active in analyzer-with)
+
+- Branch `codex/analyzer-with` is now based on validated `ef777e4`, with
+  uncommitted method-origin work only. Do not use its target from another worktree.
+- `WrittenType` separates the named owner, its type arguments, their nested
+  written origins (shared by Arc), and required methods from structural TypeId.
+  `GenericMethod` carries parameter position/name, function DeclKey, owner args
+  and nested method selections. Bindings keep these until declaration_order.
+- Analyzer publishes sparse origins of values, returns and fields; generic
+  projections preserve Holder<Person> vs Holder<Greeting>. Imported interfaces
+  carry/remap/hash these facts. `function_owners` keeps type owner binders
+  separate from the method's own binders; `method_instantiations` records the
+  written receiver application. Selected methods contribute declaration uses.
+- JS passes selected methods instead of choosing the first equal TypeId.
+  Signature-only forall-value dispatch was shared by the lead in
+  `/tmp/fa-generic-value-signature-abi.patch` and applied. Type-owner hidden
+  parameters, including phantom values, are passed/bound at method calls.
+  copy_function no longer selects an empty alias's field order and drops data.
+- Native instances/requests/function-value tables include method selections;
+  nested selections and exact type bindings survive closures and callbacks.
+  Cache version is split-6 (reconcile with lead/platform/proofs on merge).
+  The identical metadata engineer patch `/tmp/fa-generic-concrete-fields.patch`
+  is applied here; do not duplicate it on integration. Mixed local/global
+  shape copies compare field names textually. Chained `x.value.describe`
+  dispatches from the prefix type, not just the root.
+- Bun and Node E2E and all three LLVM targets pass for explicit aliases,
+  imports, returns, exported values, forall values, Holder/Speaker and phantom
+  owners. The multifile fixture requires per-unit compilation: fallback to a
+  merged module is a failure. Logs: `/tmp/fa-method-origin-container-*`.
+- Built-in containers retain nested written origins (annotations, homogeneous
+  array literals, tuples, indices, loops, values/get/filter/reverse). Distinct
+  origins at a join must form a union with runtime dispatch (user decision);
+  that follow-up remains separate from this unique-origin lot.
+- Nominal objects now retain/substitute/infer phantom arguments, with HAS_PARAM
+  through wrappers. Their phantom values do not confer ownership flags. CStruct
+  substitution preserves field order; private access uses the declaration key
+  across instances. Unit regression for phantom objects and incremental alias
+  edits pass. Incomplete written applications cannot form invalid Bindings.
+- Async selected methods retain their sync/async pair and bind owner capabilities
+  in both ABIs. This new case, the complete analyzer, the historical structural
+  exclusions (removed), and workspace clippy are being retested after the ff to
+  `8c92474` in `/tmp/fa-method-origin-integrated-*`.
+- Metadata ef777e4 is merged and the covered generic-hidden-arguments pending
+  is removed. Full workspace LLVM, clippy and JS runtime validate this lot.
+  Subsequent work continues in analyzer-rules.
+- Generic destroy selection/invocation remains separate: scope drops and storage
+  drops need the same static owner capabilities, including through composites.
+  Preserve the lead's separate storage_drop_function and detached-task behavior.
+  No runtime native dictionary is introduced by this lot.
+- The generic expression-body key-loop inference hole remains assigned here:
+  `/tmp/fa-key-error-expression.fa`, mirrored by proofs' pending
+  generic-key-loop-inferred-errors.fa. Concrete deferred loops currently throw
+  away inferred summaries; exact checks/callers must run after specialization.
+- Afterwards: with/factories/remaining documented rules and TypeFromSchema,
+  analyzer pass fusion with 1000-file measurements, and stackless interpreter
+  continuations for finding 42. Do not document a new metaprogram recursion cap.
 
 ## Integrated
 

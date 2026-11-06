@@ -759,8 +759,13 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 	#[test]
 	fn disjoint_array_metadata_needs_a_non_wrapping_offset() {
 		let source = |offset: &str| {
+			let (throws, attempt) = if offset == "1" {
+				("", "")
+			} else {
+				(" throws IndexError", "try ")
+			};
 			format!(
-				"type Body = {{ value: Integer }}\nfunction interact = (items: Array<Body>): Void throws IndexError mutates items => {{\nfor body, i in items {{\nfor j in i + {offset}..items.length {{\ntry use other = items[j]\nbody.value += other.value\nother.value += body.value\n}}\n}}\n}}\ntry interact([{{ value = 1 }}, {{ value = 2 }}, {{ value = 3 }}])\n"
+				"type Body = {{ value: Integer }}\nfunction interact = (items: Array<Body>): Void{throws} mutates items => {{\nfor body, i in items {{\nfor j in i + {offset}..items.length {{\n{attempt}use other = items[j]\nbody.value += other.value\nother.value += body.value\n}}\n}}\n}}\n{attempt}interact([{{ value = 1 }}, {{ value = 2 }}, {{ value = 3 }}])\n"
 			)
 		};
 		let small = ir_with("disjoint-small-offset", &source("1"), false);

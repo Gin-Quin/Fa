@@ -96,6 +96,8 @@ const RESERVED: &[&str] = &[
 	"Number",
 	"Object",
 	"Promise",
+	"Proxy",
+	"Reflect",
 	"RangeError",
 	"Set",
 	"SharedArrayBuffer",

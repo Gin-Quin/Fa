@@ -98,6 +98,8 @@ fa build  # <-- compile the application
 fa preview  # <-- run the compiled application
 ```
 
+Diagnostics across files end with one total line, such as `3 errors, 1 warning in 2 files`. A dependency-load error specific to another target (`DEP009`) names that target in a note. A standalone file loads only the neighboring files and folders mentioned by its files, transitively.
+
 ## Package configuration
 
 The `package.fa` file contains the configuration of the package, which is a regular [Fa configuration file](/architecture/configuration):

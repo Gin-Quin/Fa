@@ -28,7 +28,7 @@ for fruit in fruits {
 }
 ```
 
-[Ranges](/values/ranges) follow the usual rule: `0..10` runs ten times, with `count` going from 0 to 9. Use `0..=10` for eleven. The loop variable of a range is an immutable copy, known to be in the range: `count` is an `Integer(min = 0, max = 9)`. A range without an end, like `0..`, runs until a `break` or a `return` (the program [stops](/values/errors#stops) if the variable would go past the maximum `Integer`); a range without a start, like `..10`, can't be iterated. An inclusive end at the maximum, like `0..=Int8.maxValue` over an `Int8`, ends normally.
+[Ranges](/values/ranges) follow the usual rule: `0..10` runs ten times, with `count` going from 0 to 9. Use `0..=10` for eleven. The loop variable of a range is an immutable copy, known to be in the range: `count` is an `Integer<min = 0, max = 9>`. A range without an end, like `0..`, runs until a `break` or a `return` (the program [stops](/values/errors#stops) if the variable would go past the maximum `Integer`); a range without a start, like `..10`, can't be iterated. An inclusive end at the maximum, like `0..=Int8.maxValue` over an `Int8`, ends normally.
 
 ### Patterns
 
@@ -58,6 +58,8 @@ for { name, age } in people {
 }
 ```
 
+A `for` pattern can destructure a tuple, but cannot destructure an array (`E-LOOP-2`).
+
 ### Loop variables are references
 
 The values extracted by a `for` loop are **references** to the elements of the collection: elements are never copied.
@@ -77,7 +79,7 @@ The values extracted by a `for` loop are **references** to the elements of the c
 Writing through a loop variable is a mutation of the collection: in a function, iterating a parameter and writing to its elements needs the effect `mutates players` (or a precise path like `mutates players[..].score`, see [mutating parameters](/functions/defining-functions#mutating-parameters)).
 
 ```fa
-mutable players: Array(Player) = [
+mutable players: Array<Player> = [
 	{ name = "John", score = 10 }
 	{ name = "Jane", score = 12 }
 ]
@@ -155,7 +157,7 @@ console.log("Fruit: cherry")
 
 ```fa
 let numbers = [1, 2, 3, 4]
-mutable results: Array(Integer) = [0, 0, 0, 0]
+mutable results: Array<Integer> = [0, 0, 0, 0]
 
 for parallel number, index in numbers {
 	results[index] = expensiveComputation(number)
@@ -199,7 +201,7 @@ while let value = stack.pop() {
 This is Fa's equivalent of Rust's `while let`.
 :::
 
-Since `T??` is `T?` (see [optionals](/values/optionals)), the loop can't tell an absent value from an element that is `none`: on an `Array(Integer?)`, `while let value = stack.pop()` stops at the first `none` element. Test `stack.length` instead when the elements are optional.
+Since `T??` is `T?` (see [optionals](/values/optionals)), the loop can't tell an absent value from an element that is `none`: on an `Array<Integer?>`, `while let value = stack.pop()` stops at the first `none` element. Test `stack.length` instead when the elements are optional.
 
 The condition of a `while` also [narrows](/control-flow/conditionals#narrowing) the values it tests inside the body.
 
@@ -260,10 +262,10 @@ for number in numbers {
 
 `break` and `continue` act on the innermost loop of the current function, including from a [`do` block](/control-flow/do). They don't cross a function boundary: inside a lambda or a function declared in the loop, they are an error.
 
-Fa has no labeled loops: `break` and `continue` always act on the innermost loop. To leave several nested loops at once, put them in a function and use `return`:
+Fa has no labeled loops: `break outer` is an error (`E-LOOP-14`), and `break` and `continue` always act on the innermost loop. To leave several nested loops at once, put them in a function and use `return`:
 
 ```fa
-function findEmptyCell = (rows: Array(Array(Cell?))): Tuple(Integer, Integer)? => {
+function findEmptyCell = (rows: Array<Array<Cell?>>): Tuple<Integer, Integer>? => {
 	for row, rowIndex in rows {
 		for cell, columnIndex in row {
 			if cell is none {

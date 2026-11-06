@@ -50,7 +50,7 @@ Some static values are provided by the compiler, like `target`, the target being
 | `@for item in items { }` | unroll a loop |
 | `@readFile(path)`, `@readDirectory(path)` | read the file system while compiling |
 | `@parseJson(text)` | parse JSON while compiling |
-| `@typeToString(Type)`, `@typeToSchema(Type)` | reflection (use `Type(value)` to get the type of a value) |
+| `@typeToString(Type)`, `@typeToSchema(Type)` | reflection (use `Type<value>` to get the type of a value) |
 | `@import("https://...")` | import a [remote module](/architecture/dependencies) |
 | `@test "name" { }` | a [test](/architecture/testing) run while compiling |
 
@@ -97,7 +97,7 @@ Compile-time evaluation is bounded, so that an endless computation is reported i
 A function or a type can take compile-time values as [generic parameters](/types/generics#type-parameters-and-compile-time-value-parameters). A lowercase generic parameter receives a value known at compile time, and is used like any other value:
 
 ```fa
-function repeatText(count: Integer(min = 0)) = (value: String): String => {
+function repeatText = <count: Integer<min = 0>>(value: String): String => {
 	mutable result = ""
 	@for 0..count {
 		result += value
@@ -105,12 +105,12 @@ function repeatText(count: Integer(min = 0)) = (value: String): String => {
 	result
 }
 
-repeatText(3)("ab") -- the loop is unrolled into `"ab" + "ab" + "ab"`
+repeatText<3>("ab") -- the loop is unrolled into `"ab" + "ab" + "ab"`
 ```
 
 There is no `@` on compile-time parameters: being a generic parameter is what makes them compile-time values.
 
-A compile-time parameter is always given explicitly, never inferred from the arguments of the call: `repeatText(3)` gives `count`, then `("ab")` calls the function. See [generic application or call](/types/generics#generic-application-or-call).
+A compile-time parameter is always given explicitly, never inferred from the arguments of the call: in `repeatText<3>("ab")`, `<3>` gives `count`, then `("ab")` calls the function. See [explicit parameters](/types/generics#explicit-parameters).
 
 The body of an `@for` or an `@if` that depends on a compile-time parameter is checked once the parameter is known, for each value it receives: an error is reported at the call that gave the parameter.
 
@@ -162,7 +162,7 @@ Types can be turned into values:
 
 ```fa
 let x = 12
-console.log(@typeToString(Type(x))) -- "Integer"
+console.log(@typeToString(Type<x>)) -- "Integer"
 
 let name = @typeToString(User) -- "User"
 let schema = @typeToSchema(User)
@@ -182,7 +182,7 @@ static settings = @parseJson(@readFile("settings.json"))
 console.log(settings.port)
 ```
 
-`@readFile` returns the content of a file as a `String`. `@readDirectory` returns the entries of a folder, sorted by name, as an `Array(DirectoryEntry)`, where a `DirectoryEntry` is a `{ name: String, path: String, isDirectory: Boolean }`. Paths are relative to the folder of the file that reads them.
+`@readFile` returns the content of a file as a `String`. `@readDirectory` returns the entries of a folder, sorted by name, as an `Array<DirectoryEntry>`, where a `DirectoryEntry` is a `{ name: String, path: String, isDirectory: Boolean }`. Paths are relative to the folder of the file that reads them.
 
 Every file read this way becomes a **build dependency**: change it, and the code that depends on it is recompiled.
 

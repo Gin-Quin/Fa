@@ -100,15 +100,15 @@ Every integer type is a **range of integers** with a storage width:
 | `UInt32` | `0..=4_294_967_295` | 32 bits |
 | `UInt64` | 0 to 2^64 − 1 | 64 bits |
 | `UInt128` | 0 to 2^128 − 1 | 128 bits |
-| `Integer(min = a, max = b)` | `a..=b` | 64 bits |
-| `Int8(min = a, max = b)`, ... | `a..=b`, within the range of the type | the width of the type |
+| `Integer<min = a, max = b>` | `a..=b` | 64 bits |
+| `Int8<min = a, max = b>`, ... | `a..=b`, within the range of the type | the width of the type |
 
-An `Int8` is an `Integer(min = -128, max = 127)` stored in 8 bits. So integer types compare by range:
+An `Int8` is an `Integer<min = -128, max = 127>` stored in 8 bits. So integer types compare by range:
 
-- An integer value is accepted wherever its range fits the expected range, with no conversion: an `Int8` is accepted as an `Int16`, an `Integer(min = 0, max = 100)` as a `UInt8`.
+- An integer value is accepted wherever its range fits the expected range, with no conversion: an `Int8` is accepted as an `Int16`, an `Integer<min = 0, max = 100>` as a `UInt8`.
 - Going to a smaller range needs a conversion call, like `Int8(value)`. It can't fail when the compiler proves that the value fits, and `throws ArithmeticError` otherwise. A [narrowing](/control-flow/conditionals#narrowing) is also a proof.
 - Conversions between kinds (`Integer`, `Float`, `BigInt`, `Percentage`) are always explicit.
-- `Integer` and `Int64` are two types with the same range: a value of one is accepted as the other. They differ on JavaScript only (see [compatibility with JavaScript](#compatibility-with-javascript)), so collections don't mix them: an `Array(Int64)` is not an `Array(Integer)`, convert it with `map((value) => Integer(value))`.
+- `Integer` and `Int64` are two types with the same range: a value of one is accepted as the other. They differ on JavaScript only (see [compatibility with JavaScript](#compatibility-with-javascript)), so collections don't mix them: an `Array<Int64>` is not an `Array<Integer>`, convert it with `map((value) => Integer(value))`.
 
 ```fa
 let a: Int8 = readInt8()
@@ -128,18 +128,18 @@ if a >= 0 {
 You can statically indicate a minimum and a maximum value. `min` and `max` are compile-time value parameters of the integer types (see [generics](/types/generics)):
 
 ```fa
-let myPositiveInteger: Integer(min = 0) = 12
-let mySmallInteger: Integer(min = 0, max = 200) = 200
+let myPositiveInteger: Integer<min = 0> = 12
+let mySmallInteger: Integer<min = 0, max = 200> = 200
 ```
 
 Indicating a minimum or a maximum value restricts the range of the integer at compile time, which means you won't be able to assign values outside of the specified range.
 
-To declare a non-negative integer, prefer `Integer(min = 0)` over an unsigned type: unsigned types are meant for binary data and fixed-size formats.
+To declare a non-negative integer, prefer `Integer<min = 0>` over an unsigned type: unsigned types are meant for binary data and fixed-size formats.
 
 Some examples:
 
 ```fa
-mutable value: Integer(min = 20) = 20
+mutable value: Integer<min = 20> = 20
 
 -- compiler error: 10 is less than the minimum value of 20
 value = 10
@@ -148,7 +148,7 @@ value = 10
 The compiler propagates the range through your program, which lets it reject impossible code and remove redundant checks:
 
 ```fa
-let value: Integer(min = 20) = get20OrMore()
+let value: Integer<min = 20> = get20OrMore()
 
 -- compiler warning: the condition is always false
 if value < 20 {
@@ -157,7 +157,7 @@ if value < 20 {
 ```
 
 ```fa
-let value: Integer(min = 4) = get4OrMore()
+let value: Integer<min = 4> = get4OrMore()
 
 let array = [1, 2, 3]
 
@@ -168,8 +168,8 @@ let item = array[value]
 Assigning a wider range into a narrower one is rejected until you narrow it:
 
 ```fa
-mutable foo: Integer(max = 100) = getIntegerLowerThan(100)
-mutable bar: Integer(max = 200) = getIntegerLowerThan(200)
+mutable foo: Integer<max = 100> = getIntegerLowerThan(100)
+mutable bar: Integer<max = 200> = getIntegerLowerThan(200)
 
 -- compiler error: bar may exceed the maximum value of 100
 foo = bar
@@ -185,8 +185,8 @@ Ranged integers are the mechanism behind Fa's [smart bound checks](/collections/
 Ranges propagate through arithmetic: the result of an operation has a range computed from the ranges of its operands.
 
 ```fa
-let a: Integer(min = 0, max = 10) = getSmallNumber()
-let b: Integer(min = 1, max = 5) = getTinyNumber()
+let a: Integer<min = 0, max = 10> = getSmallNumber()
+let b: Integer<min = 1, max = 5> = getTinyNumber()
 
 let sum = a + b -- an Integer, known to be between 1 and 15
 let product = a * b -- an Integer, known to be between 0 and 50
@@ -195,7 +195,7 @@ let product = a * b -- an Integer, known to be between 0 and 50
 The range of a result is checked against the type it goes to:
 
 - When the result is assigned to an annotated value, or passed where a type is expected, its range is checked against that type, as described in [overflow](#overflow).
-- An unannotated value gets the **base type** of its operands: `let s = x + y` with two `Int8` operands is an `Int8`, checked at runtime when the result range doesn't fit. The base type of a ranged integer is the type it refines (`Integer` for `Integer(min = 0)`). When the operands have different base types, the result gets the one whose range contains the other (`Int8 + Int32` is an `Int32`, `Int64 + Integer` an `Int64`); when neither does (`Int8 + UInt8`), annotate the result. A comparison or a `/` uses the exact result and needs no annotation.
+- An unannotated value gets the **base type** of its operands: `let s = x + y` with two `Int8` operands is an `Int8`, checked at runtime when the result range doesn't fit. The base type of a ranged integer is the type it refines (`Integer` for `Integer<min = 0>`). When the operands have different base types, the result gets the one whose range contains the other (`Int8 + Int32` is an `Int32`, `Int64 + Integer` an `Int64`); when neither does (`Int8 + UInt8`), annotate the result. A comparison or a `/` uses the exact result and needs no annotation.
 - A literal operand contributes its exact value, even when it doesn't fit the other operand's type: `a + 1000` with `a: Int8` is valid in `let total: Integer = a + 1000`.
 - The value also keeps the computed range as a fact (see [inferred types](/values/declaring-values#inferred-types)), as long as it isn't mutated.
 
@@ -223,7 +223,7 @@ for index in 0..scores.length {
 	console.log(scores[index]) -- proven by the loop
 }
 
-function at = (items: Array(Integer), index: Integer): Integer? => {
+function at = (items: Array<Integer>, index: Integer): Integer? => {
 	if index >= 0 and index < items.length {
 		return items[index] -- proven by the guard
 	}
@@ -270,7 +270,7 @@ The `wrapping` and `saturating` variants on an `Integer` compute with 64 bits on
 `Integer.jsMaxSafeInteger` is 2^53 − 1. If you want the same behavior on every target, use a ranged integer:
 
 ```fa
-type JsInteger = Integer(min = -Integer.jsMaxSafeInteger, max = Integer.jsMaxSafeInteger)
+type JsInteger = Integer<min = -Integer.jsMaxSafeInteger, max = Integer.jsMaxSafeInteger>
 ```
 
 The 64-bit and wider types written explicitly (`Int64`, `UInt64`, `Int128`, `UInt128`) and `BigInt` are exact on JavaScript too, but slower: they compile to JavaScript `BigInt` values.
@@ -459,11 +459,13 @@ See [arithmetic](/operations/arithmetic) for the available operations and [type 
 ### Native
 
 - Each integer type is stored in its width. An arithmetic expression is computed in its compute type (`i64`, or `i128` when an operand is a `UInt64` or an `Int128`): an intermediate node that may exceed it is checked with the overflow intrinsics (`llvm.sadd.with.overflow` and friends), and the root is range-checked against its destination type if needed; a check is one compare and a cold branch to the stop routine. `Integer.minValue // -1` is an overflow, and `%% -1` returns `0` without executing `srem` (undefined in LLVM for the minimum value).
-- A ranged `Integer(min, max)` is stored in 64 bits; a ranged sized type (`Int8(min = 0)`) in the width of its type.
+- A ranged `Integer<min, max>` is stored in 64 bits; a ranged sized type (`Int8<min = 0>`) in the width of its type.
 - `BigInt` is an arbitrary-precision integer: inline (tagged) when it fits in 63 bits, heap-allocated limbs otherwise.
 - A `Percentage` is an `f64` holding the fraction (`0.5` for `50%`).
 - Floats are `f32` and `f64`, with IEEE semantics: no fast-math flags that would change the results.
 - Float-to-integer conversion checks the rounded value with ordered bounds before the LLVM cast. Those bounds also reject NaN and infinities; the cold failure path distinguishes non-finite inputs from finite values outside the integer range to preserve the error message.
+
+- With overflow checks disabled, an operation that can overflow has its type's full interval; no bounds proof assumes a trap. A nonnegative 64-bit counter growing only by `+= 1` keeps its interval because wrap is impractical. Collection lengths, capacities, positions and the results of count/index operations are bounded by 2^48; methods returning arbitrary user data, such as `sum`, `reduce` or `getOrInsert`, have no such bound. A guard `i <= n // i` with `i >= 1` bounds `i` by the square root of `n`, before an expression such as `i * i`. JavaScript numbers outside their safe-integer range lose precision while retaining their sign.
 
 ### JavaScript
 

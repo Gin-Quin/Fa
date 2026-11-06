@@ -44,7 +44,7 @@ Function parameters and iteration already give you references, so this only matt
 A collection that grows past its capacity allocates a larger block and moves its contents. When you know the size, say so with the `capacity` option of `from`:
 
 ```fa
-mutable results = Array(Integer).from([], capacity = items.length)
+mutable results = Array<Integer>.from([], capacity = items.length)
 
 for item in items {
 	results.push(transform(item))
@@ -114,7 +114,7 @@ static configuration = @parseJson(@readFile("config.json"))
 Ranged integers let the compiler prove an index is valid or a divisor is non-zero, removing bounds checks and division-by-zero handling entirely:
 
 ```fa
-function averageOf = (values: Array(Integer), count: Integer(min = 1)): Integer =>
+function averageOf = (values: Array<Integer>, count: Integer<min = 1>): Integer =>
 	values.sum() // count -- cannot throw `DivisionByZero`: `count` is at least 1
 ```
 

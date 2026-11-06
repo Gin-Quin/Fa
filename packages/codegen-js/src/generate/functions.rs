@@ -863,6 +863,7 @@ impl Generator<'_> {
 			return call;
 		}
 		match path {
+			"Pointer.allocate" => self.pointer_allocate(n, arguments),
 			// pointers and C strings (foreign.rs)
 			_ if path.starts_with("Pointer#") || path.starts_with("CString#") => {
 				self.pointer_method(n, callee, path, arguments)

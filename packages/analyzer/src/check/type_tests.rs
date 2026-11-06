@@ -123,7 +123,7 @@ fn literal_errors() {
 		("let p: Point = { y = 1 }", &["E-OBJ-2"]),
 		("let p = Point { x = 1, x = 2 }", &["E-OBJ-3"]),
 		("let p = Point { x = true }", &["E-TYPE-1"]),
-		("let p = Point<1, 2>", &["E-OBJ-6"]),
+		("let p = Point(1, 2)", &["E-OBJ-6"]),
 		("let p: Point = Point { x = 1 }", &["W-OBJ-1"]),
 		("let o = { a = 1, a = 2 }", &["E-OBJ-3"]),
 	];

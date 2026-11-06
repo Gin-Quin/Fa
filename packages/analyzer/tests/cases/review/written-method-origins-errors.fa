@@ -1,0 +1,9 @@
+type Person = {
+	name: String
+	function describe = (self): String => "Hello {self.name}"
+}
+type Plain = { name: String }
+let plain = Plain { name = "Ada" }
+console.log(plain.describe()) -- error E-OBJ-5
+function describe = <Item: { describe: (self) => String }>(item: Item): String => item.describe()
+console.log(describe(plain)) -- error GN013

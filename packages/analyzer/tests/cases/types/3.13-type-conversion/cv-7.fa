@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- error: CV002
 -- brief: ✗ cv-7: CV002
 let t = String(42)

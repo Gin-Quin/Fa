@@ -18,6 +18,7 @@
 
 pub(crate) mod arrays;
 mod c_library;
+mod callbacks;
 mod calls;
 mod collections;
 mod compose;
@@ -67,6 +68,7 @@ mod type_expr;
 mod type_functions;
 mod type_logic;
 mod type_ops;
+mod unused;
 mod value_params;
 
 pub use tests::is_test_module;
@@ -426,6 +428,12 @@ pub struct Walker<'s> {
 	/// The places the lambdas of the call being checked write (with the
 	/// write): their facts aren't valid at the entry of a sibling lambda.
 	pub(crate) lambda_entry_writes: Vec<(PlaceId, bool, NodeId)>,
+	/// The function-typed parameters each function only calls, by
+	/// declaration node (`callbacks.rs`).
+	pub(crate) only_called: FxHashMap<NodeId, u32>,
+	/// Names read or written, recorded before module aliases become external
+	/// resolutions (`unused.rs`). One bit per symbol, filled during the walk.
+	pub(crate) used_symbols: Vec<bool>,
 	/// The parent of each node of the tree, built on first use.
 	pub(crate) parents: std::cell::OnceCell<Vec<Option<NodeId>>>,
 	/// The places the lambda arguments of the call being checked write
@@ -602,6 +610,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		relation_pool_places: rustc_hash::FxHashSet::default(),
 		closure_effects: FxHashMap::default(),
 		lambda_entry_writes: Vec::new(),
+		only_called: FxHashMap::default(),
+		used_symbols: Vec::new(),
 		parents: std::cell::OnceCell::new(),
 		lambda_call_writes: None,
 		callee_name_node: None,
@@ -646,6 +656,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 	walker.finish_moves();
 	// the static sets of reactivity, and its tables (reactivity.rs)
 	walker.finish_reactivity();
+	// the values never used (unused.rs)
+	walker.report_unused();
 
 	let Walker {
 		s, mut a, output, ..
@@ -1377,6 +1389,20 @@ impl Walker<'_> {
 
 	/// Records what a name or member refers to.
 	pub fn set_resolution(&mut self, n: NodeId, resolution: Resolution) {
+		if let Resolution::Local(symbol) = resolution
+			&& !self
+				.used_symbols
+				.get(symbol.index())
+				.copied()
+				.unwrap_or(false)
+			&& matches!(self.view(n), View::Name(_))
+			&& self.span(n) != self.a.symbols.symbol(symbol).name_span
+		{
+			if self.used_symbols.len() <= symbol.index() {
+				self.used_symbols.resize(symbol.index() + 1, false);
+			}
+			self.used_symbols[symbol.index()] = true;
+		}
 		if let Some(slot) = self.a.resolutions.get_mut(n.index()) {
 			*slot = resolution;
 		}

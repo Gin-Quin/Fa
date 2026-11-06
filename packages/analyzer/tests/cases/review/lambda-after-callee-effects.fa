@@ -1,0 +1,25 @@
+-- decision "After the analyzer review": a lambda argument may run inside the callee after the callee's own effects, so its entry facts drop the places they change
+mutable shared: Integer? = 3
+function clear = (f: () => Void) mutates shared => {
+	shared = none
+	f()
+}
+type Box = { value: Integer? }
+function empty = (box: Box, f: () => Void) mutates box.value => {
+	box.value = none
+	f()
+}
+function keep = (box: Box, f: () => Void) => f()
+function main = () mutates shared => {
+	if shared != none {
+		clear(() => console.log(shared + 1)) -- error: E-OPT-1
+	}
+	mutable b = Box { value = 3 }
+	if b.value != none {
+		empty(b, () => console.log(b.value + 1)) -- error: E-OPT-1
+	}
+	mutable c = Box { value = 4 }
+	if c.value != none {
+		keep(c, () => console.log(c.value + 1))
+	}
+}

@@ -931,6 +931,8 @@ mod tests {
 		session
 			.diagnostics(file)
 			.iter()
+			// the unused-value warning is tested by its own cases
+			.filter(|diagnostic| diagnostic.code.id != "W-DECL-2")
 			.map(|diagnostic| diagnostic.code.id)
 			.collect()
 	}

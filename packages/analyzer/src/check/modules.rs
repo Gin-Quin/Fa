@@ -525,7 +525,7 @@ impl Walker<'_> {
 		symbol: SymbolId,
 		count: usize,
 		method: bool,
-	) -> Option<Vec<(Option<(Sym, SymbolId)>, bool)>> {
+	) -> Option<Vec<(Option<(Sym, SymbolId)>, bool, bool)>> {
 		let (module, decl) = self.proxy_decl(symbol)?;
 		let params = self.s.interface(module)?.parameters.get(&decl)?.clone();
 		// a method called on a value: the receiver fills `self`
@@ -548,7 +548,11 @@ impl Walker<'_> {
 					self.declare_proxy(scope, &text, param.kind, proxy, param.ty)
 				}
 			};
-			parameters.push((Some((param.name, proxy)), param.has_default));
+			parameters.push((
+				Some((param.name, proxy)),
+				param.has_default,
+				param.only_called,
+			));
 		}
 		Some(parameters)
 	}

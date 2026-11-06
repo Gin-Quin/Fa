@@ -61,7 +61,7 @@ fn object_patterns_record_their_fields_defaults_and_symbols() {
 
 #[test]
 fn array_patterns_say_when_the_length_is_checked() {
-	let source = "function f = (values: Array<Integer>): Integer throws IndexError => {\n\ttry let [first, ...rest] = values\n\tfirst\n}\nlet [x, y] = [1, 2]\nconsole.log(f([1]) catch e => 0, x, y)\n";
+	let source = "function f = (values: Array<Integer>): Integer throws IndexError => {\n\ttry let [first, ...rest] = values\n\tfirst + rest.length\n}\nlet [x, y] = [1, 2]\nconsole.log(f([1]) catch _e => 0, x, y)\n";
 	let (session, file) = analyze_source(source);
 	assert!(
 		session.diagnostics(file).is_empty(),

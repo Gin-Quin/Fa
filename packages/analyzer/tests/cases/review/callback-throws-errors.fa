@@ -1,0 +1,17 @@
+-- decision "Callbacks that throw, in user functions": the parameters that are not only called keep their type; inside, a catch around such calls only is EF018
+type E = Errors { Bad }
+function fail = (): Integer throws E => {
+	throw E.Bad
+}
+function run = (f: () => Integer): Integer => f()
+let y = run(fail) -- error: E-ERR-3
+-- a parameter that is stored, returned, passed on or read in a closure keeps its type
+type Thunk = () => Integer
+function keep = (f: Thunk): Thunk => f
+function later = (f: Thunk): Thunk => () => f()
+function passOn = (f: () => Integer): Integer => run(f)
+let a = keep(fail) -- error: E-TYPE-1
+let b = later(fail) -- error: E-TYPE-1
+let c = passOn(fail) -- error: E-TYPE-1
+-- inside the function, the callback's errors are the caller's
+function guarded = (f: () => Integer): Integer => f() catch error => 0 -- error: EF018

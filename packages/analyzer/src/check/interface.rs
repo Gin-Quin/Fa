@@ -154,7 +154,10 @@ impl Walker<'_> {
 		called.sort_unstable();
 		called.dedup();
 		for decl in called {
-			let Some(info) = function_of(decl).and_then(|node| self.a.function(node)) else {
+			let Some(node) = function_of(decl) else {
+				continue;
+			};
+			let Some(info) = self.a.function(node) else {
 				continue;
 			};
 			let params: Vec<(SymbolId, bool)> = info
@@ -162,8 +165,9 @@ impl Walker<'_> {
 				.iter()
 				.map(|param| (param.symbol, param.default.is_some()))
 				.collect();
+			let only_called = self.only_called(node);
 			let mut published = Vec::with_capacity(params.len());
-			for (param, has_default) in params {
+			for (index, (param, has_default)) in params.into_iter().enumerate() {
 				let key = self.symbol_key(param);
 				let symbol = self.a.symbols.symbol(param);
 				published.push(Parameter {
@@ -173,6 +177,7 @@ impl Walker<'_> {
 					kind: symbol.kind,
 					ty: symbol.ty,
 					has_default,
+					only_called: index < 32 && only_called & (1 << index) != 0,
 				});
 			}
 			parameters.insert(decl, published);

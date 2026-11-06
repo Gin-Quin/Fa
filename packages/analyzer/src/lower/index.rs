@@ -65,7 +65,11 @@ pub fn interval(
 	while let View::Group(inner) = syntax::view(tree, n) {
 		n = inner;
 	}
-	if let Some(info) = analysis.arith(n) {
+	// an operation that may overflow wraps without overflow checks: its
+	// flow interval is its type's range (check/numbers.rs)
+	if let Some(info) = analysis.arith(n)
+		&& !analysis.has_flags(n, NodeFlags::OVERFLOW_NATIVE)
+	{
 		return Some(info.interval);
 	}
 	if let Some(interval) = analysis.interval(n) {

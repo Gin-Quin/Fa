@@ -556,6 +556,12 @@ bitflags! {
 		/// in `sum<Float>([1, 2])` (D18): an application, not a call. The
 		/// applications of types are `TYPE_EXPR`.
 		const GENERIC_APPLICATION = 1 << 16;
+		/// A call of a function of the program given a callback that throws
+		/// for a parameter the function only calls (decision "Callbacks that
+		/// throw, in user functions"): the call throws the callback's errors.
+		/// JavaScript: the exception goes through. Natively: an instance of
+		/// the callee per error set (not implemented yet: unsupported).
+		const PASSES_ERRORS = 1 << 17;
 	}
 }
 

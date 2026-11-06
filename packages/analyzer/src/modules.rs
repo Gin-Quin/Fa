@@ -533,6 +533,9 @@ pub struct Parameter {
 	pub ty: TypeId,
 	/// Whether it has a default value.
 	pub has_default: bool,
+	/// A function-typed parameter the function only calls: its argument
+	/// may throw (`check/callbacks.rs`).
+	pub only_called: bool,
 }
 
 /// A declaration of a file as the rest of the program sees it: the
@@ -685,7 +688,7 @@ impl Interface {
 				parts.push((
 					2,
 					types.decl_hash(param.key),
-					u128::from(param.has_default),
+					u128::from(param.has_default) | u128::from(param.only_called) << 1,
 					types.stable_hash(param.ty),
 				));
 			}

@@ -260,6 +260,10 @@ mod tests {
 		let mut found = Vec::new();
 		for &file in program.files.iter().chain(&program.tests) {
 			for diagnostic in session.diagnostics(file) {
+				// the unused-value warning is tested by its own cases
+				if diagnostic.code.id == "W-DECL-2" {
+					continue;
+				}
 				found.push(format!(
 					"{}: {} {}",
 					session.display_path(file),

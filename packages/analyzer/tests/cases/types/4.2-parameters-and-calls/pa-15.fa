@@ -1,6 +1,6 @@
--- pending: M1 (imported from the types brief)
 -- error: EF012
 -- brief: ✗ pa-15: EF012 (D24: a temporary given to a mutated parameter)
+type Player = { name: String, score: Integer }
 function addBonus = (player: Player) mutates player => {
 	player.score += 10
 }

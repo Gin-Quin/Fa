@@ -1,0 +1,15 @@
+-- decision "Callbacks that throw, in user functions", across files: a parameter that is not only called keeps its type
+-- file: main.fa
+type E = Errors { Bad }
+function fail = (): Integer throws E => {
+	throw E.Bad
+}
+let kept = tools.keep(fail) -- error: E-TYPE-1
+-- file: tools.fa
+export namespace = {
+	function run = (f: () => Integer): Integer => f() + 0
+	function keep = (f: () => Integer): Integer => {
+		let copy = f
+		copy()
+	}
+}

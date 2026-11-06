@@ -36,6 +36,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// A call whose receiver, if any, is present.
 	pub(crate) fn call_present(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		// a callback that throws given to a function of the program: its
+		// instance for that error set is not implemented yet
+		if self.analysis.has_flags(node, NodeFlags::PASSES_ERRORS) {
+			return Err(self.unsupported(
+				node.index(),
+				"a callback that throws, given to a function of the program",
+			));
+		}
 		// a C function (foreign.rs)
 		if let Some(call) = self.analysis.extern_calls.get(&node).cloned() {
 			return self.foreign_call(node, &call);

@@ -1,0 +1,24 @@
+-- decision "Collection lengths are at most 2^48": a 64-bit value not derived from a length that may overflow wraps without overflow checks, and keeps its index check (no trap assumption)
+-- overflow-checks: false
+let items = [10, 20, 30]
+-- a 64-bit product that overflows wraps: `x * 2^62 // 2^62` is not 1
+function scaled = (x: Integer): Integer => {
+	if x > 0 and x < 4 {
+		let y = x * 4_611_686_018_427_387_904
+		let index = y // 4_611_686_018_427_387_904
+		return items[index] catch error => -1 -- check: INDEX_CHECK
+	}
+	return 0
+}
+function shifted = (x: Integer): Integer => {
+	if x > 0 {
+		mutable index = x
+		index += 9_223_372_036_854_775_000
+		index -= 9_223_372_036_854_775_000
+		if index < 3 {
+			return items[index] catch error => -1 -- check: INDEX_CHECK
+		}
+	}
+	return 0
+}
+console.log(scaled(1), shifted(-1)) -- prints: 20 0

@@ -40,6 +40,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if value.repr == narrowed {
 			return Ok(value);
 		}
+		if let Repr::Rec(target) = value.repr
+			&& self.compressed_union_link(value.repr).is_some()
+		{
+			let decoded = self.unfold_rec(value, target, node.index())?;
+			return self.narrow_to(decoded, narrowed, node);
+		}
 		if matches!(value.repr, Repr::Union | Repr::InlineUnion(_))
 			&& narrowed.has_value()
 			&& narrowed != Repr::Union
@@ -120,6 +126,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.builder
 					.build_load(self.pointer_type(), slot.pointer, "")?
 					.into_pointer_value();
+				if let Repr::Object(data) = narrowed
+					&& (!self.compact_array_data(data).is_empty()
+						|| !self.compact_string_data(data).is_empty())
+				{
+					let value = self.unbox(Val::new(Repr::Union, pointer), narrowed)?;
+					let out = self.alloca(narrowed, "member_view")?;
+					self.builder
+						.build_store(out.pointer, value.value.expect("a payload"))?;
+					return Ok(out);
+				}
 				let ty = self.box_type(Some(narrowed));
 				Ok(Slot {
 					pointer: self.builder.build_struct_gep(ty, pointer, 1, "")?,
@@ -562,6 +578,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		ty: fa_analyzer::ids::TypeId,
 		node: NodeId,
 	) -> Result<IntValue<'ctx>, Error> {
+		let subject = if self.compressed_union_link(subject.repr).is_some()
+			&& ty != fa_analyzer::ids::TypeId::NONE
+		{
+			let repr = if matches!(subject.repr, Repr::Optional(_)) {
+				Repr::Optional(Scalar::Union)
+			} else {
+				Repr::Union
+			};
+			self.convert(subject, repr, node.index())?
+		} else {
+			subject
+		};
 		let ty = &ty;
 		{
 			match subject.repr {

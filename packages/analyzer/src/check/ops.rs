@@ -17,7 +17,7 @@ use crate::diagnostics::codes::values::{
 use crate::flow::{FlowState, IntervalSet};
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::Resolution;
-use crate::syntax::{self, CompareOp, CompareOps, LogicOp, NodeList, View};
+use crate::syntax::{self, ArithOp, CompareOp, CompareOps, LogicOp, NodeList, View};
 use crate::types::int::INFINITY;
 use crate::types::{CollKind, Interval, Mode, TypeFlags, TypeKind};
 
@@ -380,7 +380,16 @@ impl Walker<'_> {
 		{
 			let original = node;
 			let node = self.strip_groups(node);
-			let refined = test.restrict(own, other);
+			let mut refined = test.restrict(own, other);
+			// `i <= n // i` with `i >= 1`: `i * i <= n`, so `i <= √n` (the
+			// guard of a sieve before `i * i`)
+			if let (Some(set), Test::Order(CompareOp::Less | CompareOp::LessOrEqual)) =
+				(refined.as_ref(), test)
+				&& set.hull.lo >= I256::ONE
+				&& let Some(bound) = self.square_root_bound(node, other_node(x, y, original))
+			{
+				refined = set.restrict(Interval::new(set.hull.lo, bound));
+			}
 			if refined.is_none() {
 				possible = false;
 				break;
@@ -417,6 +426,24 @@ impl Walker<'_> {
 			self.body.flow.set_impossible();
 		}
 		*state = std::mem::replace(&mut self.body.flow, saved);
+	}
+
+	/// The bound `i <= n // i` gives a positive `i` (the `node` of the
+	/// test, `other` its other side): `√n`, for the largest `n`.
+	fn square_root_bound(&mut self, node: NodeId, other: NodeId) -> Option<I256> {
+		let symbol = self.read_local(node)?;
+		let View::Arithmetic {
+			op: ArithOp::IntegerDivide,
+			operands,
+		} = syntax::view(&self.tree, self.strip_groups(other))
+		else {
+			return None;
+		};
+		if operands.len() != 2 || self.read_local(operands.get(1)?) != Some(symbol) {
+			return None;
+		}
+		let dividend = self.value_set(operands.first()?)?.hull.hi;
+		(dividend >= I256::ZERO).then(|| square_root(dividend))
 	}
 
 	/// `W-NUM-2` when the operands' types alone decide an integer test
@@ -1146,6 +1173,17 @@ fn describe_range(interval: Interval) -> String {
 }
 
 /// The other operand of a pair, given one of them.
+/// The integer square root of a non-negative value (Newton's method).
+fn square_root(value: I256) -> I256 {
+	let mut root = value;
+	let mut next = (root + I256::ONE) / 2;
+	while next < root {
+		root = next;
+		next = (root + value / root) / 2;
+	}
+	root
+}
+
 fn other_node(x: NodeId, y: NodeId, node: NodeId) -> NodeId {
 	if node == x { y } else { x }
 }

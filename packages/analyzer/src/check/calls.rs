@@ -44,6 +44,9 @@ struct BindParam {
 	builtin_name: Option<Sym>,
 	/// Whether it has a default value.
 	has_default: bool,
+	/// A function-typed parameter the callee only calls: its argument may
+	/// throw, and the call then throws its errors (`callbacks.rs`).
+	passed: bool,
 }
 
 /// The result of binding the arguments of a call to the callee's parameters.
@@ -144,7 +147,22 @@ impl Walker<'_> {
 				// values are always built with braces (E-OBJ-6)
 				return self.braces_needed(n, callee, arguments);
 			}
-			// `String(x)`, type functions: later milestones
+			// there is no `String(x)` (type-conversion.md): `CV002`
+			if ty == TypeId::STRING {
+				for argument in arguments.iter() {
+					self.check(argument, None);
+				}
+				return self.memo(n, |w| {
+					let diagnostic = w.diagnostic(
+						&crate::diagnostics::codes::types::CV002,
+						n,
+						"there is no `String(value)`: write `value.toString()`, or a template like `\"{value}\"`",
+					);
+					w.report(diagnostic);
+					TypeId::STRING
+				});
+			}
+			// type functions: later milestones
 			return self.unsupported(n, "calling a type");
 		}
 		// a local function called by name is not used as a value (moves.rs)
@@ -232,6 +250,13 @@ impl Walker<'_> {
 				matches!(self.view(self.strip_groups(*value)), View::Lambda { .. })
 			})
 			.count() >= 2;
+		// a lambda argument may run inside the callee after the callee's own
+		// effects: its entry facts drop the places they change (found once
+		// the arguments before it are checked), and those its siblings write
+		let callee_effects = matches!(kind, Callee::Function(_) | Callee::Value)
+			&& sig.effects != crate::ids::EffectSetId::EMPTY;
+		let mut sibling_writes: Vec<(crate::ids::PlaceId, bool, NodeId)> = Vec::new();
+		let saved_entry = std::mem::take(&mut self.lambda_entry_writes);
 		let start = siblings.then(|| self.body.flow.clone());
 		let saved_writes = if siblings {
 			self.push_flow_buffer();
@@ -249,7 +274,8 @@ impl Walker<'_> {
 					self.body.flow = start.clone();
 				}
 				callback_errors.clear();
-				self.lambda_entry_writes = self.lambda_call_writes.take().unwrap_or_default();
+				sibling_writes = self.lambda_call_writes.take().unwrap_or_default();
+				self.lambda_entry_writes = sibling_writes.clone();
 			}
 			for &(value, expected) in &binding.expected {
 				let expected = expected.map(|expected| substitute(self, expected));
@@ -262,6 +288,14 @@ impl Walker<'_> {
 					self.check_c_argument(value, expected, mutated);
 					continue;
 				}
+				if callee_effects
+					&& matches!(self.view(self.strip_groups(value)), View::Lambda { .. })
+				{
+					let mut writes =
+						self.callee_effect_places(n, callee, sig.effects, &binding.arguments);
+					writes.extend(sibling_writes.iter().copied());
+					self.lambda_entry_writes = writes;
+				}
 				let actual = if synthesized.contains(&value) {
 					self.type_of(value)
 				} else {
@@ -270,15 +304,26 @@ impl Walker<'_> {
 				if let Some(expected) = expected {
 					// a callback that throws, given to a built-in: the built-in
 					// throws its errors (design/decisions.md)
-					let expected = match kind {
-						Callee::Builtin(_) => match self.callback_throws(expected, actual) {
+					// (decision "Callbacks that throw, in user functions"): a
+					// parameter the callee only calls too
+					let passed = matches!(kind, Callee::Builtin(_))
+						|| binding
+							.arguments
+							.iter()
+							.position(
+								|argument| matches!(argument, Argument::Given(given) if *given == value),
+							)
+							.and_then(|index| params.get(index))
+							.is_some_and(|param| param.passed);
+					let expected = match passed {
+						true => match self.callback_throws(expected, actual) {
 							Some((widened, errors)) => {
 								callback_errors.push(errors);
 								widened
 							}
 							None => expected,
 						},
-						_ => expected,
+						false => expected,
 					};
 					// a parameter is a view of its argument; a built-in method
 					// (`push`, `add`) stores a copy (advanced brief §10.4)
@@ -299,8 +344,8 @@ impl Walker<'_> {
 		}
 		if siblings {
 			self.pop_flow_buffer(true);
-			self.lambda_entry_writes.clear();
 		}
+		self.lambda_entry_writes = saved_entry;
 		self.lambda_call_writes = saved_writes;
 		for &(spread, value, item) in &binding.spreads {
 			let item = substitute(self, item);
@@ -313,6 +358,9 @@ impl Walker<'_> {
 		let throws = substitute(self, sig.throws);
 		// `Integer.round(2.7)`, `a.shiftLeft(2)`: proven, they can't fail (math.rs)
 		let throws = self.number_api_throws(n, callee, kind, &binding.arguments, throws);
+		if !callback_errors.is_empty() && !matches!(kind, Callee::Builtin(_)) {
+			self.set_flag(n, NodeFlags::PASSES_ERRORS);
+		}
 		let throws = if callback_errors.is_empty() {
 			throws
 		} else {
@@ -360,6 +408,27 @@ impl Walker<'_> {
 						w.check_printable(value, ty);
 					}
 				}
+			}
+			// `items.sort()`: the natural order needs ordered items (`CL025`)
+			if let Callee::Builtin(builtin) = kind
+				&& builtins::get(builtin).path.ends_with("#sort")
+					| builtins::get(builtin).path.ends_with("#sortInPlace")
+				&& !binding
+					.arguments
+					.iter()
+					.any(|argument| matches!(argument, Argument::Given(_)))
+				&& let Some(receiver) = w.callee_receiver_type(callee)
+				&& let TypeKind::Collection(_, item, ..) = w.s.types.kind(receiver)
+				&& !w.s.types.is_recovering(item)
+				&& w.members_of(item).iter().any(|&member| {
+					!w.s.types.flags(member).contains(crate::types::TypeFlags::ORDERED)
+				}) {
+				let message = format!(
+					"the natural order needs items that can be compared with `<`, and a `{}` can't: give `sort` a comparator, like `(a, b) => a.key - b.key`",
+					w.display(item)
+				);
+				let diagnostic = w.diagnostic(&crate::diagnostics::codes::types::CL025, n, message);
+				w.report(diagnostic);
 			}
 			for (code, node, message) in binding.errors {
 				let diagnostic = w.diagnostic(code, node, message);
@@ -452,6 +521,7 @@ impl Walker<'_> {
 					named: None,
 					builtin_name: None,
 					has_default: false,
+					passed: false,
 				})
 				.collect();
 			(kind, params)
@@ -504,11 +574,12 @@ impl Walker<'_> {
 					let params = external
 						.into_iter()
 						.zip(sigs)
-						.map(|((named, has_default), &sig)| BindParam {
+						.map(|((named, has_default, passed), &sig)| BindParam {
 							sig,
 							named,
 							builtin_name: None,
 							has_default,
+							passed,
 						})
 						.collect();
 					return (Callee::Value, params);
@@ -529,16 +600,23 @@ impl Walker<'_> {
 				if info.params.len() != sigs.len() + skip {
 					return plain(Callee::Value);
 				}
-				let params = info
+				let params: Vec<(SymbolId, bool)> = info
 					.params
 					.iter()
 					.skip(skip)
+					.map(|param| (param.symbol, param.default.is_some()))
+					.collect();
+				let passed = self.only_called(declaration) >> skip;
+				let params = params
+					.into_iter()
 					.zip(sigs)
-					.map(|(param, &sig)| BindParam {
+					.enumerate()
+					.map(|(index, ((symbol, has_default), &sig))| BindParam {
 						sig,
-						named: Some((self.a.symbols.symbol(param.symbol).name, param.symbol)),
+						named: Some((self.a.symbols.symbol(symbol).name, symbol)),
 						builtin_name: None,
-						has_default: param.default.is_some(),
+						has_default,
+						passed: index < 32 && passed & (1 << index) != 0,
 					})
 					.collect();
 				(Callee::Function(declaration), params)

@@ -1,0 +1,17 @@
+-- decision "Callbacks that throw, in user functions", across files: the interface says which parameters a function only calls
+-- skip-target: native native-freestanding wasm
+-- file: main.fa
+type E = Errors { Bad }
+function fail = (): Integer throws E => {
+	throw E.Bad
+}
+console.log(tools.run(() => 2), tools.run(fail) catch error => -1)
+-- prints: 2 -1
+-- file: tools.fa
+export namespace = {
+	function run = (f: () => Integer): Integer => f() + 0
+	function keep = (f: () => Integer): Integer => {
+		let copy = f
+		copy()
+	}
+}

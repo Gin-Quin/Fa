@@ -14,6 +14,8 @@ fn assert_clean(source: &str) {
 	let found: Vec<String> = session
 		.diagnostics(file)
 		.iter()
+		// the unused-value warning is tested by its own cases
+		.filter(|diagnostic| diagnostic.code.id != "W-DECL-2")
 		.map(|diagnostic| format!("{} {}", diagnostic.code.id, diagnostic.message))
 		.collect();
 	assert!(found.is_empty(), "{source}\n{found:#?}");
@@ -395,10 +397,10 @@ fn lambdas_take_their_types_from_the_expected_function_type() {
 	);
 	assert_eq!(codes("console.log((x) => x)\n"), ["E-STR-12"]);
 	assert!(codes("nope((x) => x)\n") == ["E-DECL-1"]);
-	let (session, file) = analyze_source("nope((x: Integer) => true)\n");
+	let (session, file) = analyze_source("nope((x: Integer) => x > 0)\n");
 	assert_eq!(session.diagnostics(file).len(), 1);
 	assert_eq!(
-		type_of(&session, file, "(x: Integer) => true"),
+		type_of(&session, file, "(x: Integer) => x > 0"),
 		"(Integer) => Boolean"
 	);
 }

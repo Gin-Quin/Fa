@@ -1,0 +1,20 @@
+-- documented rules whose codes had no emitter: CV002 (type-conversion.md "There is no String(value)"), CL025 (arrays.md: the natural order needs ordered items), EF012 (defining-functions.md: the mutation of a temporary value would be lost), E-ERR-8 (errors.md: try is written before await)
+type Player = { name: String, score: Integer }
+function addBonus = (player: Player) mutates player => {
+	player.score += 10
+}
+let text = String(42) -- error: CV002
+mutable players = [Player { name = "a", score = 1 }]
+players.sortInPlace() -- error: CL025
+players.sortInPlace((a, b) => a.score - b.score)
+mutable numbers = [3, 1, 2]
+numbers.sortInPlace()
+addBonus(Player { name = "Cleo", score = 0 }) -- error: EF012
+mutable bob = Player { name = "Bob", score = 0 }
+addBonus(bob)
+async function fetchNumber = (): Integer throws ParseError => try Integer.parse("1")
+async function main = (): Integer throws ParseError => {
+	let a = await try fetchNumber() -- error: E-ERR-8
+	let b = try await fetchNumber()
+	a + b
+}

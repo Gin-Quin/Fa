@@ -151,9 +151,26 @@ mod tests {
 
 	#[test]
 	fn the_registry_covers_every_brief() {
-		assert!(values::ALL.len() > 150);
-		assert!(types::ALL.len() > 150);
-		// `EFF012` is an alias of `E-DECL-4` (a write through a `let` value)
-		assert!(advanced::ALL.len() >= 149);
+		let names: Vec<_> = all()
+			.flat_map(|code| std::iter::once(code.id).chain(code.aliases.iter().copied()))
+			.collect();
+		// A condition can move into another brief's registry when it becomes
+		// an alias. Count its public names, regardless of their canonical owner.
+		let values = names
+			.iter()
+			.filter(|name| name.starts_with("E-") || name.starts_with("W-"))
+			.count();
+		let types = names
+			.iter()
+			.filter(|name| {
+				let name = name.strip_prefix('W').unwrap_or(name);
+				["TY", "GN", "TF", "CV", "FN", "EF", "CL"]
+					.iter()
+					.any(|prefix| name.strip_prefix(prefix).is_some_and(|n| n.len() == 3))
+			})
+			.count();
+		assert!(values > 150, "only {values} values codes and aliases");
+		assert!(types > 150, "only {types} types codes and aliases");
+		assert!(names.len() - values - types >= 149);
 	}
 }

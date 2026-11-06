@@ -41,7 +41,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -218,6 +218,11 @@ fn run(program: &Path, expected: &Expected, scratch: &Path, index: usize) -> Out
 		command.arg("run").args(&expected.options).arg(program);
 		command
 	};
+	#[cfg(unix)]
+	{
+		use std::os::unix::process::CommandExt;
+		command.process_group(0);
+	}
 	let mut child = command
 		.args(&expected.args)
 		.env("XDG_CACHE_HOME", scratch.join("cache"))
@@ -226,23 +231,99 @@ fn run(program: &Path, expected: &Expected, scratch: &Path, index: usize) -> Out
 		.stderr(fs::File::create(&stderr_path).unwrap())
 		.spawn()
 		.expect("`fa` runs");
-	let started = Instant::now();
-	let exit = loop {
-		if let Some(status) = child.try_wait().unwrap() {
-			break status.code().unwrap_or(-1);
-		}
-		if started.elapsed() > TIMEOUT {
-			let _ = child.kill();
-			let _ = child.wait();
-			break -2;
-		}
-		std::thread::sleep(Duration::from_millis(5));
-	};
+	let exit = wait_for_exit(&mut child, TIMEOUT);
 	Outcome {
 		stdout: fs::read_to_string(&stdout_path).unwrap_or_default(),
 		stderr: fs::read_to_string(&stderr_path).unwrap_or_default(),
 		exit,
 	}
+}
+
+#[cfg(unix)]
+unsafe extern "C" {
+	fn kill(pid: std::ffi::c_int, signal: std::ffi::c_int) -> std::ffi::c_int;
+}
+
+/// A timed-out `fa run` owns a Bun (or native) child: terminate its whole
+/// process group before waiting for the facade. Killing only `fa` left Bun
+/// running forever, with inherited files and the full-suite lock still open.
+fn wait_for_exit(child: &mut Child, timeout: Duration) -> i32 {
+	let started = Instant::now();
+	loop {
+		if let Some(status) = child.try_wait().unwrap() {
+			return status.code().unwrap_or(-1);
+		}
+		if started.elapsed() > timeout {
+			#[cfg(unix)]
+			{
+				let group = i32::try_from(child.id()).expect("a POSIX process id fits i32");
+				// SAFETY: this child was spawned in its own process group;
+				// its unreaped PID cannot be reused by an unrelated process.
+				unsafe { kill(-group, 9) };
+			}
+			let _ = child.kill();
+			let _ = child.wait();
+			return -2;
+		}
+		std::thread::sleep(Duration::from_millis(5));
+	}
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_timeout_stops_the_program_below_the_fa_process() {
+	use std::os::unix::process::CommandExt;
+
+	let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fa-timeout");
+	fs::create_dir_all(&directory).unwrap();
+	let pid_file = directory.join(format!("child-{}.pid", std::process::id()));
+	let _ = fs::remove_file(&pid_file);
+	let mut child = Command::new("sh")
+		.args(["-c", "sleep 60 & echo $! > \"$1\"; wait", "sh"])
+		.arg(&pid_file)
+		.process_group(0)
+		.stdin(Stdio::null())
+		.stdout(Stdio::null())
+		.stderr(Stdio::null())
+		.spawn()
+		.unwrap();
+	let started = Instant::now();
+	let pid = loop {
+		if let Some(pid) = fs::read_to_string(&pid_file)
+			.ok()
+			.and_then(|text| text.trim().parse::<i32>().ok())
+		{
+			break pid;
+		}
+		if started.elapsed() > Duration::from_secs(5) {
+			wait_for_exit(&mut child, Duration::ZERO);
+			panic!("the facade didn't start its child");
+		}
+		std::thread::sleep(Duration::from_millis(5));
+	};
+	assert_eq!(wait_for_exit(&mut child, Duration::from_millis(20)), -2);
+	let started = Instant::now();
+	let stopped = loop {
+		let state = fs::read_to_string(format!("/proc/{pid}/stat")).ok();
+		// An orphan may wait briefly for init to reap it; a zombie has no
+		// running code or open files, so cannot hold the suite lock.
+		if state.is_none()
+			|| state
+				.as_deref()
+				.is_some_and(|state| matches!(state.split_whitespace().nth(2), Some("Z" | "X")))
+		{
+			break true;
+		}
+		if started.elapsed() > Duration::from_secs(2) {
+			break false;
+		}
+		std::thread::sleep(Duration::from_millis(5));
+	};
+	if !stopped {
+		// SAFETY: a child left by a broken timeout must not outlive a failed test.
+		unsafe { kill(pid, 9) };
+	}
+	assert!(stopped, "the timed-out program still runs as process {pid}");
 }
 
 /// A program of several files (`-- file: path` sections, like the LLVM

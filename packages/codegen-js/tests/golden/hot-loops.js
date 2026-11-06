@@ -13,10 +13,10 @@ function sieve(size) {
 		if (marks[i] === 1) {
 			count = faCheckInteger(count + 1, "hot-loops.fa:15:4");
 			if (i <= (marks.length - marks.length % i) / i) {
-				let multiple = faCheckInteger(i * i, "hot-loops.fa:17:24");
+				let multiple = i * i;
 				while (multiple < marks.length) {
 					marks[multiple] = false;
-					multiple = faCheckInteger(multiple + i, "hot-loops.fa:20:6");
+					multiple += i;
 				}
 			}
 		}

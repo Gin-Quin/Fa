@@ -81,7 +81,7 @@ fn package(count: usize, errors: &[usize]) -> Vec<(String, String)> {
 	files.push((
 		"application/main.fa".to_string(),
 		format!(
-			"export function = (arguments: Array(String)): Integer => {{\n\tmutable total = 0\n{calls}\tconsole.log(total)\n\t0\n}}\n"
+			"export function = (_arguments: Array<String>): Integer => {{\n\tmutable total = 0\n{calls}\tconsole.log(total)\n\t0\n}}\n"
 		),
 	));
 	files

@@ -10,10 +10,10 @@ function primes(limit) {
 		const prime = isPrime[i] === 1;
 		if (prime) {
 			count$1 = faCheckInteger(count$1 + 1, "performance.fa:14:4");
-			let multiple = faCheckInteger(i + i, "performance.fa:15:23");
+			let multiple = i + i;
 			while (multiple < isPrime.length) {
 				isPrime[multiple] = false;
-				multiple = faCheckInteger(multiple + i, "performance.fa:18:5");
+				multiple += i;
 			}
 		}
 	}

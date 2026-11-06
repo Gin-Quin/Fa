@@ -261,6 +261,20 @@ impl Walker<'_> {
 			self.report(diagnostic);
 		}
 		let operand = self.strip_groups(value);
+		// `await try f()`: the `try` goes first (errors.md, `E-ERR-8`)
+		if let View::Try(inner) = self.view(self.parenthesized(value))
+			&& self
+				.reported_once
+				.insert((n, crate::diagnostics::codes::values::E_ERR_8.id))
+		{
+			let inner = self.tree.text(inner.index()).to_string();
+			let diagnostic = self.diagnostic(
+				&crate::diagnostics::codes::values::E_ERR_8,
+				n,
+				format!("`try` is written before `await`: write `try await {inner}`"),
+			);
+			self.report(diagnostic);
+		}
 		let ty = match self.view(operand) {
 			View::Call { callee, .. } => {
 				self.tasks.modes.insert(operand, Mode::Awaited);

@@ -26,7 +26,7 @@ use crate::flow::IntervalSet;
 use crate::ids::{FactId, NodeId, PlaceId, SymbolId, TypeId};
 use crate::symbols::{Resolution, ScopeKind, SymbolKind};
 use crate::syntax::{self, ArithOp, NodeList, View};
-use crate::types::int::{Fit, js_safe_range};
+use crate::types::int::{Fit, js_safe_range, lengths};
 use crate::types::{ComputeType, ConstValue, FloatBits, IntStorage, Interval, TypeKind};
 
 /// The kind of a number type (values brief §1: integer types of every width
@@ -325,8 +325,60 @@ impl Walker<'_> {
 		}
 		Some(match self.a.interval(n) {
 			Some(interval) => IntervalSet::of(interval),
+			// a length, a size or a count is at most 2^48 (decision
+			// "Collection lengths are at most 2^48")
+			None if self.counts_elements(n) => match range.intersect(lengths()) {
+				Some(inside) => IntervalSet::of(inside),
+				None => IntervalSet::of(range),
+			},
 			None => IntervalSet::of(range),
 		})
+	}
+
+	/// Whether an integer node is a length, a size or a count of a
+	/// collection or a string: `c.length`, `c.size`, `c.capacity`, or a
+	/// built-in search returning a position (`items.indexOf(…)` once narrowed).
+	/// Other integer-returning methods (`sum`, `reduce`, `take`, map reads)
+	/// return user data, which may be negative or exceed any length bound.
+	fn counts_elements(&self, n: NodeId) -> bool {
+		let receiver = match syntax::view(&self.tree, n) {
+			View::Access { target, members } if members.len() == 1 => {
+				let Some(member) = members.first() else {
+					return false;
+				};
+				if !matches!(
+					self.tree.text(member.index()),
+					"length" | "size" | "capacity"
+				) {
+					return false;
+				}
+				target
+			}
+			View::Call { callee, .. } => {
+				let callee = self.strip_groups(callee);
+				let View::Access { target, members } = syntax::view(&self.tree, callee) else {
+					return false;
+				};
+				let Some(member) = members.first().filter(|_| members.len() == 1) else {
+					return false;
+				};
+				let Resolution::Builtin(builtin) = self.a.resolution(member) else {
+					return false;
+				};
+				if !matches!(
+					crate::builtins::get(builtin).path,
+					"Array#indexOf" | "String#indexOf" | "String#lastIndexOf"
+				) {
+					return false;
+				}
+				target
+			}
+			_ => return false,
+		};
+		matches!(
+			self.s.types.kind(self.type_of(self.strip_groups(receiver))),
+			TypeKind::Collection(..) | TypeKind::String | TypeKind::StringLit(_)
+		)
 	}
 
 	/// Records the values of an integer node when narrower than its type (hover, proofs).
@@ -375,14 +427,14 @@ impl Walker<'_> {
 		let set = match self.s.types.as_int(ty) {
 			// a value that may overflow or not fit (`let y: Int8 = x + 126`)
 			// wraps without overflow checks: any value of the type (decision
-			// "Bounds stay memory-safe in release builds"); the intervals
-			// recorded for the nodes stay (the backends wrap by them)
+			// "Bounds stay memory-safe in release builds"), whatever its width:
+			// a length, an index or a count is at most 2^48, so arithmetic on
+			// them doesn't overflow 64 bits
 			Some(_)
 				if self
 					.a
 					.flags_of(self.strip_groups(value))
-					.intersects(NodeFlags::SINK_CHECK | NodeFlags::OVERFLOW_NATIVE)
-					&& self.s.types.interval_of(ty).is_some_and(narrow) =>
+					.intersects(NodeFlags::SINK_CHECK | NodeFlags::OVERFLOW_NATIVE) =>
 			{
 				None
 			}
@@ -476,17 +528,17 @@ impl Walker<'_> {
 		if !self.body.flow.reachable {
 			return;
 		}
-		let Some(mut set) = self.value_set(n) else {
-			return;
-		};
 		// an arithmetic root is checked against its compute type first
-		// (`OVERFLOW_*`): only the values passing that check reach the sink
-		if let Some(info) = self.a.arith(root) {
-			match set.restrict(info.compute.range()) {
-				Some(inside) => set = inside,
-				None => return, // a certain overflow, reported at the node
-			}
-		}
+		// (`OVERFLOW_*`): only the values passing that check reach the sink.
+		// Its flow interval may already describe the result after wrapping;
+		// the sink still needs the interval before that wrap to emit it.
+		let set = match self.a.arith(root) {
+			Some(info) => IntervalSet::of(info.interval).restrict(info.compute.range()),
+			None => self.value_set(n),
+		};
+		let Some(set) = set else {
+			return; // a certain overflow, reported at the node
+		};
 		let target_type = *self.s.types.as_int(target).expect("an integer target");
 		let range = target_type.interval();
 		let source = self.s.types.as_int(actual).map(|int| int.storage);
@@ -1184,8 +1236,16 @@ impl Walker<'_> {
 				root: true,
 			},
 		);
+		// an operation that may overflow wraps in a build without overflow
+		// checks: its values are any of its type's (decision "Bounds stay
+		// memory-safe in release builds"), so no proof leans on a trap; its
+		// `ArithInfo` keeps the exact interval, for the checks of the backends
 		if let Some(range) = self.s.types.interval_of(ty) {
-			self.record_interval(n, interval, range);
+			if steps.flags.contains(NodeFlags::OVERFLOW_NATIVE) {
+				self.record_interval(n, range, range);
+			} else {
+				self.record_interval(n, interval, range);
+			}
 		}
 		if steps.zero_divisor {
 			let diagnostic = self.diagnostic(
@@ -1625,9 +1685,8 @@ impl Walker<'_> {
 			// checks: the place may then hold any value of its type, except a
 			// non-negative 64-bit counter growing by `+= 1` (it can't reach
 			// the limit in practice)
-			let wraps = narrow(range)
-				&& (step_flags.contains(NodeFlags::OVERFLOW_NATIVE)
-					|| !range.contains_interval(checked));
+			let wraps = step_flags.contains(NodeFlags::OVERFLOW_NATIVE)
+				|| !range.contains_interval(checked);
 			let counter = op == ArithOp::Add
 				&& right.as_exact() == Some(I256::ONE)
 				&& current.hull.lo >= I256::ZERO
@@ -1942,12 +2001,4 @@ impl Walker<'_> {
 			TypeId::RANGE
 		})
 	}
-}
-
-/// Whether an integer type is narrower than 64 bits: its values wrap after
-/// a few steps without overflow checks. A 64-bit value derived from lengths
-/// and counters can't reach its limits in practice (the argument of
-/// `proofs::reliable_interval`).
-fn narrow(range: Interval) -> bool {
-	range.hi < I256::from(i64::MAX)
 }

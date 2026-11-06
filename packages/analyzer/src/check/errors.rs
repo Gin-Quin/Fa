@@ -215,7 +215,7 @@ impl Walker<'_> {
 	}
 
 	/// The node inside the parentheses around `n`, if any.
-	fn parenthesized(&self, n: NodeId) -> NodeId {
+	pub(super) fn parenthesized(&self, n: NodeId) -> NodeId {
 		let mut current = n;
 		while let View::Group(inner) = syntax::view(&self.tree, current) {
 			current = inner;
@@ -403,11 +403,21 @@ impl Walker<'_> {
 		self.body.flow = self.join_states(&end_left, &end_handler);
 		if errors == TypeId::NEVER && self.body.flow.reachable && !self.s.types.is_recovering(left)
 		{
-			let diagnostic = self.diagnostic(
-				&W_ERR_2,
-				n,
-				"this expression can't fail: remove the `catch`",
-			);
+			// the errors of a callback the function only calls are the
+			// caller's (defining-functions.md, "Functions as parameters")
+			let diagnostic = if self.calls_passed_callback(expression) {
+				self.diagnostic(
+					&crate::diagnostics::codes::types::EF018,
+					n,
+					"the errors of a callback this function only calls belong to the caller: this `catch` can't catch them (handle them where the function is called)",
+				)
+			} else {
+				self.diagnostic(
+					&W_ERR_2,
+					n,
+					"this expression can't fail: remove the `catch`",
+				)
+			};
 			self.report_flow(diagnostic);
 		}
 		self.memo(n, |w| {

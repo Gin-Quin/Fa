@@ -124,6 +124,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value: Val<'ctx>,
 		source: Option<NodeId>,
 	) -> Result<Val<'ctx>, Error> {
+		if self.frame().arena && self.arena_child_array_type(value.repr) {
+			let Repr::Array(item_type) = value.repr else {
+				unreachable!("a child array")
+			};
+			let item = self.item_repr(item_type, source.unwrap_or(NodeId::new(0)))?;
+			let size = self.item_size(item)?;
+			let array = self.call_value(
+				self.runtime.function("fa_array_into_region")?,
+				&[value.value.expect("an array").into(), size.into()],
+			)?;
+			return Ok(Val::new(value.repr, array));
+		}
 		let (Repr::Array(item_type), Some(source), Some(raw)) = (value.repr, source, value.value)
 		else {
 			return Ok(value);
@@ -203,7 +215,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.context
 			.i64_type()
 			.const_int(values.len() as u64, false);
-		let array = self.new_array(item, count, count)?;
+		let array = if self.region_child_array(node, repr) {
+			let size = self.item_size(item)?;
+			let bytes = 32 + 4 * self.target_data().get_abi_size(&self.llvm_type(item));
+			let packet = self.alloca_type(
+				self.context
+					.i64_type()
+					.array_type((bytes / 8) as u32)
+					.into(),
+				"child_array",
+			)?;
+			self.call_runtime(
+				"fa_array_init_region_local",
+				&[packet.into(), count.into(), count.into(), size.into()],
+			)?;
+			packet
+		} else {
+			self.new_array(item, count, count)?
+		};
 		let (pointer, _) = self.array_parts(array)?;
 		for (index, (value, _)) in values.into_iter().enumerate() {
 			let index = self.context.i64_type().const_int(index as u64, false);

@@ -104,15 +104,41 @@ Root worker/Errors WIP is saved explicitly in stash c9a0034315b5c4bdb7f3da0ecd9e
 
 ## Latest user decisions
 
-All types are copyable, including Task and resources; this supersedes the older
-move-only rule. Copies share the same
-Task/resource and state, with reference counting; destroy/cancellation occurs on
-the last owner release. Analyzer owns acceptance and flow, native performance
-owns Task native retain/release, lead owns resources and JS Task lifetime.
-Do not add generic Copyable constraints or reject copies.
+Task remains move-only. Resources are shared and reference-counted, with destruction
+at the last release. A collection, or an object containing one, moves implicitly
+at its last use; otherwise it requires explicit `copy value`. Lead owns parser,
+formatter and backend consumers, analyzer owns flow and diagnostics. No native Task
+retain/release change is part of this branch.
 `with` uses parameter names from the visible function signature, including a
 function-valued parameter or field. Analyzer owns this implementation.
 
 Joining written types with distinct methods/destructors forms their union, even
 when their fields have the same shape: runtime dispatch uses the actual member.
 Analyzer owns this after the frozen single-origin validation.
+
+## Native frame strings delivery (2026-11-07)
+
+This worktree `/tmp/fa-native-next` is frozen on compiler base `0290400` for the
+frame-string delivery only. Mutable non-escaping strings that may exceed inline
+room use their own 64-byte frame buffer from initialization, including `""`;
+immutable literals and proven small mutables keep the inline representation.
+Copies, reassignment and escaping values detach the frame buffer correctly.
+Short Unicode appends preserve explicit reservations, and counted inline append
+loops cache scalar state for LLVM promotion. No Task ownership change is included.
+
+Validation: complete workspace suite with LLVM exit 0 in
+`/tmp/fa-frame-next-workspace-fixed.log`; final clippy and formatting clean;
+298 JS runtime tests and dedicated C ASan/UBSan pass. Frame fixtures pass on
+native, freestanding and wasm, and representative AArch64 runs pass. The first
+full exposed a deferred `@for`/`@if` Void initializer: the ordinary conversion's
+Unsupported diagnostic is now preserved before String snapshotting; no case was
+skipped to hide that failure.
+
+The independent physical region prototype lives in `/tmp/fa-native-frame`
+(`worktree-native-regions`), with measured snapshots and reports under
+`/tmp/fa-native-perf-next` and its ignored `benchmarks/audit/build/frame-all`. It
+contains the global ROOT_REGIONS protocol, compact immutable Array/String/scalar
+payloads, whole-module compressed array links and chunk-size experiments. It is
+not validated as a complete delivery yet. Keep its changes out of this Frame
+commit. After merging C, regenerate all three runtime IR files on compiler to
+preserve the lead's concurrent resource/runtime changes.

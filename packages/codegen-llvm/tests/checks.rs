@@ -819,6 +819,24 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 		assert!(body.contains("@fa_string_reserve_inline("), "{body}");
 		assert!(body.contains("reserved_inline"), "{body}");
 	}
+	#[test]
+	fn non_escaping_strings_have_independent_frame_buffers() {
+		let ir = ir_of(
+			"frame-strings",
+			"function check = (prefix: String) => {\n mutable text = \"\"\n text += prefix\n let copy = text\n text = \"changed\"\n console.log(copy, text)\n}\ncheck(\"123456789012345678901234567890\")\n",
+		);
+		assert!(ir.contains("alloca [64 x i8]"), "{ir}");
+		assert!(ir.contains("@fa_string_assign_local("), "{ir}");
+	}
+
+	#[test]
+	fn small_literal_mutables_keep_the_inline_representation() {
+		let ir = ir_of(
+			"small-inline-mutables",
+			"function check = () => {\n mutable text = \"first\"\n console.log(text)\n text = \"second\"\n console.log(text)\n}\ncheck()\n",
+		);
+		assert!(!ir.contains("alloca [64 x i8]"), "{ir}");
+	}
 }
 
 /// A resource moved on every path or on none has no drop flag left in the

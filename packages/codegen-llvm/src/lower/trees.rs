@@ -117,6 +117,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.string_kind_mask(),
 				"",
 			)?;
+			let tag = b.build_and(kind, self.usize.const_int(1, false), "")?;
+			let even =
+				b.build_int_compare(inkwell::IntPredicate::EQ, tag, self.usize.const_zero(), "")?;
+			let heap = b.build_and(heap, even, "")?;
 			owning = b.build_or(owning, b.build_and(nonzero, heap, "")?, "")?;
 		}
 		let name = format!("fa.arena.payloads.{id}");

@@ -115,6 +115,8 @@ typedef struct {
 #define SIMPLE ((size_t)1 << (sizeof(size_t) * 8 - 1))
 #define STRING_INLINE ((size_t)1 << (sizeof(size_t) * 8 - 2))
 #define KIND_MASK (~(SIMPLE | STRING_INLINE))
+#define STRING_FRAME ((size_t)1)
+#define FRAME_STRING_BYTES 64
 #define INLINE_STRING_BYTES (sizeof(FaString) - 1)
 #define INLINE_LENGTH_SHIFT ((sizeof(size_t) - 1) * 8)
 
@@ -134,7 +136,16 @@ static void inline_string_tag(FaString *string, size_t length, size_t simple) {
 /// Whether a string with this capacity word owns its heap block.
 static int string_owned(size_t capacity) {
 	size_t kind = capacity & ~SIMPLE;
-	return kind != 0 && kind < KIND_MASK;
+	return kind != 0 && kind < KIND_MASK && !(kind & STRING_FRAME);
+}
+
+static __attribute__((always_inline)) inline int string_frame(size_t capacity) {
+	return !(capacity & STRING_INLINE) && (capacity & KIND_MASK) == (FRAME_STRING_BYTES | STRING_FRAME);
+}
+
+static __attribute__((always_inline)) inline int string_writable(size_t capacity, size_t needed) {
+	size_t room = capacity & ~(SIMPLE | STRING_FRAME);
+	return room < (KIND_MASK & ~STRING_FRAME) && needed <= room;
 }
 
 /// `SIMPLE` when every byte is ASCII other than '\r', else 0.
@@ -423,7 +434,7 @@ static __attribute__((always_inline)) inline size_t string_block(size_t size) {
 		return size <= 8 ? 8 : (size + 7) & ~(size_t)7;
 	}
 	if (size > 8192) {
-		return size;
+		return (size + 1) & ~(size_t)1;
 	}
 	size_t block;
 	size_class(size, &block);
@@ -1578,13 +1589,68 @@ FA_EXPORT uint8_t *fa_string_allocate(size_t length, size_t simple, FaString *ou
 	return bytes;
 }
 
+/// The destination buffer belongs to the function frame, never to this header.
+/// Immutable short values remain inline; potentially growing mutables retain
+/// their frame pointer until they outgrow it.
+FA_EXPORT __attribute__((always_inline)) uint8_t *fa_string_allocate_local(size_t length,
+    size_t simple, uint8_t *buffer, FaString *out, int32_t mutable) {
+	if (length <= FRAME_STRING_BYTES && (mutable || length > INLINE_STRING_BYTES)) {
+		*out = (FaString){buffer, length, FRAME_STRING_BYTES | STRING_FRAME | simple};
+		return buffer;
+	}
+	return fa_string_allocate(length, simple, out);
+}
+
+/// Copy into the destination's own frame buffer. Only a consumed heap value
+/// above the frame budget may transfer its pointer; a frame pointer never does.
+FA_EXPORT __attribute__((always_inline)) void fa_string_assign_local(const FaString *source, uint8_t *buffer,
+    FaString *out, int32_t mutable, int32_t consume) {
+	FaString previous = *source;
+	FaString destination = *out;
+	size_t length = string_length(&previous);
+	int owned = consume && string_owned(previous.capacity);
+	int drop_destination = string_owned(destination.capacity);
+	if (owned && destination.bytes == previous.bytes) { drop_destination = 0; }
+	if (owned && (length > FRAME_STRING_BYTES || (previous.capacity & KIND_MASK) > FRAME_STRING_BYTES)) {
+		*out = previous;
+		if (drop_destination) { fa_free((void *)destination.bytes, destination.capacity & KIND_MASK, 1); }
+		return;
+	}
+	FaString result;
+	uint8_t *target = fa_string_allocate_local(length, previous.capacity & SIMPLE,
+	                                         buffer, &result, mutable);
+	__builtin_memmove(target, string_bytes(&previous), length);
+	if (owned) { fa_free((void *)previous.bytes, previous.capacity & KIND_MASK, 1); }
+	if (drop_destination) { fa_free((void *)destination.bytes, destination.capacity & KIND_MASK, 1); }
+	*out = result;
+}
+
+/// Moving a header outside a frame-backed local must detach its bytes.
+FA_EXPORT __attribute__((always_inline)) void fa_string_escape(const FaString *source, FaString *out) {
+	FaString previous = *source;
+	*out = string_frame(previous.capacity)
+	           ? owned_copy_with(string_bytes(&previous), string_length(&previous), previous.capacity & SIMPLE)
+	           : previous;
+}
+
+/// Generic assignment has already dropped the previous owning value (and
+/// reset any resource flags). A mutator borrowing a frame header keeps its
+/// buffer; every other destination receives an independent normal header.
+FA_EXPORT __attribute__((always_inline)) void fa_string_assign_after_drop(const FaString *source, FaString *out) {
+	if (string_frame(out->capacity)) {
+		fa_string_assign_local(source, (uint8_t *)out->bytes, out, 1, 1);
+	} else {
+		fa_string_escape(source, out);
+	}
+}
+
 /// Replace a string whose new parts are proven disjoint from its buffer.
 /// Empty assignments retain capacity, like clearing a mutable collection.
 FA_EXPORT __attribute__((always_inline)) uint8_t *fa_string_replace_buffer(size_t length, size_t simple, FaString *out) {
 	int owned = string_owned(out->capacity);
 	size_t capacity = out->capacity & KIND_MASK;
 	const uint8_t *previous = out->bytes;
-	if (owned && length <= capacity) {
+	if (string_writable(out->capacity, length)) {
 		out->length = length;
 		out->capacity = capacity | simple;
 		return (uint8_t *)previous;
@@ -1616,7 +1682,8 @@ static __attribute__((always_inline)) void join_strings(const FaString *parts, s
 		if (part_length) { simple &= parts[i].capacity; }
 	}
 	FaString result = {0};
-	uint8_t *target = length <= INLINE_STRING_BYTES ? (uint8_t *)&result : fa_alloc(length, 1);
+	size_t block = string_block(length);
+	uint8_t *target = length <= INLINE_STRING_BYTES ? (uint8_t *)&result : fa_alloc(block, 1);
 	size_t offset = 0;
 	for (size_t i = 0; i < count; i += 1) {
 		if (i) {
@@ -1629,7 +1696,7 @@ static __attribute__((always_inline)) void join_strings(const FaString *parts, s
 	}
 	if (!simple) { simple = simple_flag(target, length); }
 	if (length <= INLINE_STRING_BYTES) { inline_string_tag(&result, length, simple); }
-	else { result.bytes = target; result.length = length; result.capacity = length | simple; }
+	else { result.bytes = target; result.length = length; result.capacity = block | simple; }
 	*out = result;
 }
 
@@ -1692,6 +1759,12 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 	if (old_length != 0) {
 		simple &= capacity;
 	}
+	if (string_writable(capacity, needed)) {
+		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
+		string->length = needed;
+		string->capacity = (capacity & KIND_MASK) | simple;
+		return;
+	}
 	if (needed <= INLINE_STRING_BYTES) {
 		if (capacity & STRING_INLINE) {
 			copy_bytes((uint8_t *)string + old_length, bytes, length);
@@ -1706,12 +1779,6 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 		}
 		return;
 	}
-	if (string_owned(capacity) && needed <= (capacity & KIND_MASK)) {
-		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
-		string->length = needed;
-		string->capacity = (capacity & KIND_MASK) | simple;
-		return;
-	}
 	string_grow(string, bytes, length, simple);
 }
 
@@ -1720,8 +1787,8 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_append(FaString *string,
 	// common path, inlined: a simple suffix into an owned block with room
 	// (the flag of the string stays as it is: simple stays simple)
 	size_t capacity = string->capacity;
-	size_t kind = capacity & ~SIMPLE;
-	if (__builtin_expect((suffix_capacity & SIMPLE) && kind < KIND_MASK && string->length + length <= kind, 1)) {
+	size_t kind = capacity & ~(SIMPLE | STRING_FRAME);
+	if (__builtin_expect((suffix_capacity & SIMPLE) && kind < (KIND_MASK & ~STRING_FRAME) && string->length + length <= kind, 1)) {
 		copy_bytes((uint8_t *)string->bytes + string->length, bytes, length);
 		string->length += length;
 		return;
@@ -1729,6 +1796,12 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_append(FaString *string,
 	if (length == 0) { return; }
 	size_t old_length = string_length(string);
 	size_t needed = old_length + length;
+	// A non-simple short suffix retains a reserved heap block just as it
+	// retains a frame buffer. Only previously inline/shared text becomes inline.
+	if (string_writable(capacity, needed)) {
+		string_append_slow(string, bytes, length, suffix_capacity);
+		return;
+	}
 	if (needed <= INLINE_STRING_BYTES) {
 		size_t simple = suffix_capacity & SIMPLE;
 		if (old_length != 0) { simple &= capacity; }
@@ -1773,8 +1846,8 @@ static __attribute__((noinline)) void string_plus_slow(FaString *string, const u
 FA_EXPORT __attribute__((always_inline)) void fa_string_plus(FaString *string,
                                                              const uint8_t *bytes, size_t length,
                                                              size_t suffix_capacity) {
-	size_t kind = string->capacity & ~SIMPLE;
-	if (__builtin_expect((suffix_capacity & SIMPLE) && kind < KIND_MASK &&
+	size_t kind = string->capacity & ~(SIMPLE | STRING_FRAME);
+	if (__builtin_expect((suffix_capacity & SIMPLE) && kind < (KIND_MASK & ~STRING_FRAME) &&
 	                         string->length + length <= kind,
 	                     1)) {
 		copy_bytes((uint8_t *)string->bytes + string->length, bytes, length);
@@ -1782,6 +1855,10 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_plus(FaString *string,
 		return;
 	}
 	if (length == 0) {
+		return;
+	}
+	if (string_writable(string->capacity, string_length(string) + length)) {
+		fa_string_append(string, bytes, length, suffix_capacity);
 		return;
 	}
 	if ((string->capacity & STRING_INLINE) || string_length(string) + length <= INLINE_STRING_BYTES) {
@@ -1827,12 +1904,12 @@ static __attribute__((noinline)) void string_reserve_slow(FaString *string, size
 /// its parts, `reserve`): an inline string keeps its room when it is enough.
 FA_EXPORT __attribute__((always_inline)) void fa_string_reserve(FaString *string, size_t extra) {
 	size_t capacity = string->capacity;
-	size_t kind = capacity & ~SIMPLE;
+	size_t kind = capacity & ~(SIMPLE | STRING_FRAME);
 	size_t needed = string_length(string) + extra;
 	if (needed < extra) {
 		out_of_memory();
 	}
-	if (__builtin_expect(needed <= INLINE_STRING_BYTES || (kind < KIND_MASK && needed <= kind), 1)) {
+	if (__builtin_expect(needed <= INLINE_STRING_BYTES || (kind < (KIND_MASK & ~STRING_FRAME) && needed <= kind), 1)) {
 		return;
 	}
 	FaString copy = *string;
@@ -1850,8 +1927,7 @@ FA_EXPORT void fa_string_reserve_owned(FaString *string,
                                                                      size_t extra) {
 	size_t capacity = string->capacity;
 	size_t needed = string_length(string) + extra;
-	if (__builtin_expect(extra == 0 || (string_owned(capacity) && needed >= extra &&
-	                                     needed <= (capacity & KIND_MASK)), 1)) {
+	if (__builtin_expect(extra == 0 || (needed >= extra && string_writable(capacity, needed)), 1)) {
 		return;
 	}
 	// a new empty string (`mutable word = ""` before its loop): a block
@@ -1876,9 +1952,12 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_reserve_inline(FaString 
 	if (extra == 0) {
 		return;
 	}
-	if (string_owned(capacity)) {
+	// Both heap blocks and frame buffers retain their existing room. The
+	// common representation test includes both, without a separate tag branch.
+	size_t kind = capacity & ~SIMPLE;
+	if (kind != 0 && kind < KIND_MASK) {
 		size_t needed = string->length + extra;
-		if (needed < extra || needed > (capacity & KIND_MASK)) {
+		if (needed < extra || needed > (kind & ~STRING_FRAME)) {
 			string_reserve_owned_slow(string, extra);
 		}
 		return;
@@ -1903,7 +1982,7 @@ static __attribute__((noinline)) void string_reserve_owned_slow(FaString *string
 	}
 	int owned = string_owned(capacity);
 	size_t kind = capacity & KIND_MASK;
-	if (owned && needed <= kind) {
+	if (string_writable(capacity, needed)) {
 		return;
 	}
 	size_t grown = owned && kind * 2 > needed ? kind * 2 : needed;
@@ -1927,7 +2006,7 @@ FA_EXPORT __attribute__((always_inline)) size_t fa_string_room(size_t length, si
 		return INLINE_STRING_BYTES;
 	}
 	size_t kind = capacity & KIND_MASK;
-	return kind == 0 || kind == KIND_MASK ? length : kind;
+	return kind == 0 || kind == KIND_MASK ? length : kind & ~STRING_FRAME;
 }
 
 /// `String.from(text, capacity = n)`: a copy of the text with room for `n`
@@ -3092,7 +3171,8 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_pad(const uint8_t *bytes
 	size_t total = (size_t)width;
 	size_t missing = total - length;
 	FaString result = {0};
-	uint8_t *target = total <= INLINE_STRING_BYTES ? (uint8_t *)&result : fa_alloc(total, 1);
+	size_t block = string_block(total);
+	uint8_t *target = total <= INLINE_STRING_BYTES ? (uint8_t *)&result : fa_alloc(block, 1);
 	if (at_start) {
 		fill_bytes(target, filler[0], missing);
 		copy_bytes(target + missing, bytes, length);
@@ -3101,7 +3181,7 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_pad(const uint8_t *bytes
 		fill_bytes(target + length, filler[0], missing);
 	}
 	if (total <= INLINE_STRING_BYTES) { inline_string_tag(&result, total, SIMPLE); }
-	else { result.bytes = target; result.length = total; result.capacity = total | SIMPLE; }
+	else { result.bytes = target; result.length = total; result.capacity = block | SIMPLE; }
 	*out = result;
 }
 

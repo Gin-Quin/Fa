@@ -636,3 +636,26 @@ or destructors has type Person | Greeting, even if their fields are structurally
 identical. The actual union member selects its method or destructor. A `with`
 application uses names in the visible function signature, including the signature
 of a function-valued parameter or field.
+
+## Short strings in the function frame (2026-11-06)
+
+The approved 64-byte budget applies from initialization to a non-escaping mutable that may
+outgrow inline storage, including an empty initializer. Immutable runtime values keep the
+ordinary inline form up to 23 bytes on 64-bit targets or 11 on wasm32; immutable literals keep
+permanent storage, and syntax-proven small mutable maxima stay inline. Larger runtime values
+fall back to a heap block. A previously explicit heap reservation above the budget may move
+unchanged. Clearing a mutable keeps its current reservation.
+
+A buffer belongs to one declaration in one function frame. Copying or moving a frame value
+copies bytes into the destination's own buffer, including a declaration reused by a loop.
+Normal ownership transfers detach the bytes before a header can reach another kind of owner.
+Read-only parameters borrow as before; a callee keeping the value copies it. The language
+rejects replacing or declaring a mutating primitive String parameter (EFF005/EFF006).
+
+The three-word String ABI is unchanged. The low capacity bit tags a writable, non-owning
+64-byte buffer, with the inline bit taking precedence. All heap capacities are even (large
+exact byte counts round up by at most one byte); this leaves wasm's high capacity bits and
+size limit available. Capacity checks strip the frame bit, updates retain it, and no drop or
+grow operation frees or reallocates a frame pointer. A buffer live across suspension becomes
+part of its coroutine's frame. This is an implementation choice under the existing
+`Analysis::non_escaping` proof; it does not relax the proof or any language check.

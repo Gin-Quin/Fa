@@ -298,6 +298,34 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn optional_recursive_sums_use_an_accumulator_loop() {
+		let ir = optimized_ir(
+			"recursive-optional-sum",
+			"type Tree = { left: Tree?, right: Tree?, function count = (self): Integer => 1 + (self.left?.count() ?? 0) + (self.right?.count() ?? 0) }\nfunction build = (n: Integer): Tree => if n > 0 { Tree { left = build(n - 1), right = build(n - 1) } } else { Tree {} }\nlet n = try Integer.parse(arguments.get(0) ?? \"5\")\nconsole.log(build(n).count())\n",
+		);
+		let count = function(&ir, "fa.count");
+		assert_eq!(
+			count.matches("call fastcc i64 @fa.count(").count(),
+			1,
+			"{count}"
+		);
+		assert!(count.contains("phi i64"), "{count}");
+	}
+
+	#[test]
+	fn empty_arena_leaves_do_not_call_the_recursive_builder() {
+		let ir = optimized_ir(
+			"recursive-empty-leaves",
+			"type Tree = { left: Tree?, right: Tree? }\nfunction build = (n: Integer): Tree => if n > 0 { Tree { left = build(n - 1), right = build(n - 1) } } else { Tree {} }\nlet n = try Integer.parse(arguments.get(0) ?? \"5\")\nconsole.log(build(n))\n",
+		);
+		let build = function(&ir, "fa.build.arena");
+		assert!(
+			build.contains("icmp sgt i64 %0, 1") || build.contains("icmp eq i64 %0, 1"),
+			"{build}"
+		);
+	}
+
+	#[test]
 	fn byte_arithmetic_is_computed_in_16_bits() {
 		let ir = ir_of(
 			"narrow",

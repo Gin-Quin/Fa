@@ -1,0 +1,60 @@
+-- Integer sums through optional recursive calls retain their evaluation order
+-- and effects when the final call becomes an accumulator loop.
+-- asynchronous: false
+mutable visits = 0
+
+type Tree = {
+	left: Tree?
+	right: Tree?
+
+	function count = (self): Integer mutates visits => {
+		visits += 1
+		1 + (self.left?.count() ?? 0) + (self.right?.count() ?? 0)
+	}
+}
+
+function build = (depth: Integer): Tree => if depth > 0 {
+	Tree { left = build(depth - 1), right = build(depth - 1) }
+} else {
+	Tree {}
+}
+
+for depth in 0..8 {
+	let tree = build(depth)
+	visits = 0
+	let counted = tree.count()
+	assert counted == visits
+	assert counted == 2 ** (depth + 1) - 1
+}
+console.log("full trees") -- prints: full trees
+
+-- One missing edge says nothing about the other edge.
+type Sparse = {
+	left: Sparse?
+	right: Sparse?
+
+	function count = (self): Integer => 1 + (self.left?.count() ?? 0) + (self.right?.count() ?? 0)
+}
+let onlyRight = Sparse { right = Sparse { right = Sparse {} } }
+let onlyLeft = Sparse { left = Sparse { left = Sparse {} } }
+let both = Sparse { left = onlyLeft, right = onlyRight }
+console.log(onlyRight.count(), onlyLeft.count(), both.count()) -- prints: 3 3 7
+
+-- A constructor with a computed default keeps that computation per node.
+mutable created = 0
+function stamp = (): Integer mutates created => {
+	created += 1
+	created
+}
+type Stamped = {
+	left: Stamped?
+	right: Stamped?
+	value: Integer = stamp()
+}
+function stamped = (depth: Integer): Stamped mutates created => if depth > 0 {
+	Stamped { left = stamped(depth - 1), right = stamped(depth - 1) }
+} else {
+	Stamped {}
+}
+let marked = stamped(4)
+console.log(created, marked.value) -- prints: 31 31

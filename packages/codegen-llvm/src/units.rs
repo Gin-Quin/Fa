@@ -155,6 +155,7 @@ fn emit(
 		options.pipeline()
 	};
 	module.run_passes(pipeline, machine, PassBuilderOptions::create())?;
+	crate::optimize::expose_tail_recursion(module, machine, options)?;
 	if split.lto && module.get_name().to_bytes() == b"runtime" {
 		keep_runtime_at_home(module);
 	}

@@ -1,4 +1,4 @@
-//! Inline the small scalar base case of a direct recursive call. The expensive
+//! Inline the small base case of a direct recursive call. The expensive
 //! branch remains a call. This avoids a call frame for leaves without unrolling
 //! the recursive computation or duplicating argument evaluation.
 
@@ -13,6 +13,29 @@ use super::{FAST_CALLING_CONVENTION, Function, Lowering};
 use crate::error::Error;
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// An empty node of the caller's arena. Its absent edges allocate nothing
+	/// and own nothing; defaults that call code or build payloads are excluded.
+	fn empty_arena_base(&self, node: NodeId, function: &Function<'ctx>) -> bool {
+		let Repr::Object(target) = function.ret else {
+			return false;
+		};
+		self.frame().arena
+			&& function.arena_body.is_some()
+			&& self.arena_object(target)
+			&& self.analysis.object(node).is_some_and(|object| {
+				object.ty == target
+					&& object.member.is_none()
+					&& object.fields.iter().all(|(_, field)| match field {
+						fa_analyzer::analysis::FieldValue::None => true,
+						fa_analyzer::analysis::FieldValue::Given(value)
+						| fa_analyzer::analysis::FieldValue::Default(value) => {
+							matches!(self.view(*value), View::None)
+						}
+						_ => false,
+					})
+			})
+	}
+
 	/// A single expression in braces, or the expression returned by it.
 	fn base_expression(&self, mut node: NodeId) -> Option<NodeId> {
 		loop {
@@ -68,7 +91,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			&& !self.tasks.asynchronous
 			&& !function.lambda
 			&& !function.throws
-			&& !self.needs_drop(function.ret)
+			&& (!self.needs_drop(function.ret)
+				|| (self.frame().arena
+					&& function.arena_body.is_some()
+					&& matches!(function.ret, Repr::Object(ty) if self.arena_object(ty))))
 			&& function.ret.has_value()
 			&& function.params.len() == arguments.len()
 			&& function.params.iter().all(|(r, default)| {
@@ -82,13 +108,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			&& let View::If {
 				condition,
 				then_body,
-				else_body: Some(_),
+				else_body: Some(else_body),
 				compile_time: false,
 			} = self.view(body)
-			&& let Some(leaf) = self.base_expression(then_body)
 			&& self.small_base_expression(condition, function)
-			&& self.small_base_expression(leaf, function)
 		{
+			let base = |arm| {
+				self.base_expression(arm).filter(|&leaf| {
+					self.small_base_expression(leaf, function)
+						|| self.empty_arena_base(leaf, function)
+				})
+			};
+			let leaf = base(then_body)
+				.map(|leaf| (leaf, true))
+				.or_else(|| base(else_body).map(|leaf| (leaf, false)));
 			// `range` metadata belongs to the call, not the phi we make below.
 			let ranged_result = matches!(function.ret, Repr::Int(_))
 				&& function.info.sig.is_some_and(|sig| {
@@ -96,11 +129,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						.as_int(self.types().sig(sig).ret)
 						.is_some_and(|range| !range.is_full())
 				});
-			if !ranged_result {
-				shortcut = Some((condition, leaf));
+			if !ranged_result && let Some((leaf, when_true)) = leaf {
+				shortcut = Some((condition, leaf, when_true));
 			}
 		}
-		let Some((condition, leaf)) = shortcut else {
+		let Some((condition, leaf, when_true)) = shortcut else {
 			let call = self.builder.build_call(target, arguments, "")?;
 			call.set_call_convention(FAST_CALLING_CONVENTION);
 			return Ok(call.try_as_basic_value().basic());
@@ -126,12 +159,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.value
 				.expect("a scalar guard")
 				.into_int_value();
+			let test = if when_true {
+				test
+			} else {
+				self.builder.build_not(test, "")?
+			};
 			let base = self.append_block("recursive_base");
 			let recurse = self.append_block("recursive_call");
 			let end = self.append_block("recursive_result");
 			self.builder.build_conditional_branch(test, base, recurse)?;
 			self.builder.position_at_end(base);
 			let leaf = self.expr(leaf)?;
+			// The call owns the merged result. A temporary made only on this
+			// edge must not leave a cleanup referencing it on the other edge.
+			let leaf = self.take(leaf, None)?;
 			let leaf = self
 				.convert(leaf, function.ret, condition.index())?
 				.value

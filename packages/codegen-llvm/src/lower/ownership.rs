@@ -1384,11 +1384,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			},
 			super::View::Access { target, members } => {
 				let (symbol, mut path) = self.field_path(target)?;
-				for member in members.iter() {
-					let Resolution::Field(_, index) = self.analysis.resolution(member) else {
+				let mut repr = match self.slots.get(&symbol) {
+					Some(slot) => slot.repr,
+					None => self
+						.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())
+						.ok()?,
+				};
+				for &index in &path {
+					let Repr::Object(owner) = repr else {
 						return None;
 					};
-					path.push(u32::from(index));
+					repr = self.field_repr(owner, index as usize, node.index()).ok()?;
+				}
+				for member in members.iter() {
+					let Repr::Object(owner) = repr else {
+						return None;
+					};
+					let index = self.concrete_field_index(owner, member).ok()?;
+					path.push(index);
+					repr = self
+						.field_repr(owner, index as usize, member.index())
+						.ok()?;
 				}
 				Some((symbol, path))
 			}

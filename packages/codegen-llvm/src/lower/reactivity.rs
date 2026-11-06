@@ -174,12 +174,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					// a relation side: its offset, as the runtime notifies it
 					// (relations.rs, `relation_notifies`)
 					Resolution::Field(_, index) => match slot.repr {
-						Repr::Object(object) => self
-							.types()
-							.fields_of(object)
-							.get(index as usize)
-							.and_then(|field| self.side_source_key(object, field.name))
-							.unwrap_or(u64::from(index)),
+						Repr::Object(object) => {
+							let index = self.concrete_field_index(object, field)?;
+							self.types()
+								.fields_of(object)
+								.get(index as usize)
+								.and_then(|field| self.side_source_key(object, field.name))
+								.unwrap_or(u64::from(index))
+						}
 						_ => u64::from(index),
 					},
 					_ => 0,

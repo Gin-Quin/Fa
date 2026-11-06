@@ -1191,6 +1191,9 @@ impl Generator<'_> {
 			| TypeKind::CArray(..)
 			| TypeKind::NamedUnion(..)
 			| TypeKind::Member(..)
+			// Erased parameters may own objects or collections. Their copies
+			// use faCopy, which leaves primitive instantiations unchanged.
+			| TypeKind::Param(_)
 			| TypeKind::Range => true,
 			TypeKind::Union(list) => self
 				.types

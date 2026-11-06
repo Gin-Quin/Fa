@@ -1,0 +1,37 @@
+-- skip-target: wasm native-freestanding
+-- Errors with identical displayed names retain their declaring type.
+-- file: left.fa
+export namespace = {
+	type Problem = Errors { Bad = { value: Integer } }
+}
+-- file: right.fa
+export namespace = {
+	type Problem = Errors { Bad = { value: Integer } }
+}
+-- file: Failing.worker.fa
+export type = {
+	function fail = (self, first: Boolean): String throws left.Problem.Bad | right.Problem.Bad => {
+		if first { throw left.Problem.Bad { value = 1 } }
+		throw right.Problem.Bad { value = 2 }
+	}
+}
+-- file: main.fa
+function fail = (first: Boolean): String throws left.Problem.Bad | right.Problem.Bad => {
+	if first { throw left.Problem.Bad { value = 1 } }
+	throw right.Problem.Bad { value = 2 }
+}
+mutable worker = Failing {}
+for first in [true, false] {
+	let direct = fail(first) catch error => when error is {
+		left.Problem.Bad as bad => "left {bad.value}"
+		right.Problem.Bad as bad => "right {bad.value}"
+	}
+	let remote = await worker.fail(first) catch error => when error is {
+		left.Problem.Bad as bad => "left {bad.value}"
+		right.Problem.Bad as bad => "right {bad.value}"
+	}
+	console.log(direct, remote)
+}
+worker.stop()
+-- prints: left 1 left 1
+-- prints: right 2 right 2

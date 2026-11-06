@@ -5,7 +5,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { FaAtomic, FaChannel, FaMutex, faUnlock } from "./concurrency.js";
-import { IndexError } from "./errors.js";
+import { faEquals } from "./equality.js";
+import { FaError, IndexError } from "./errors.js";
 import { FaStop } from "./stops.js";
 import { faCancelSignal } from "./tasks.js";
 import { faRevive, faShare, faWorkerAnswer, faWorkerError } from "./workers.js";
@@ -24,6 +25,55 @@ describe("faWorkerError", () => {
 		const error = faWorkerError({ name: "Parse.Bad", fields: { line: 3 } }, []);
 		expect(error.constructor.faName).toBe("Parse.Bad");
 		expect(error.line).toBe(3);
+	});
+
+	test("same displayed names keep their separate declaring classes", () => {
+		class Left extends FaError {
+			static faName = "Problem.Bad";
+			static faId = this.register("worker-test:left");
+		}
+		class Right extends FaError {
+			static faName = "Problem.Bad";
+			static faId = this.register("worker-test:right");
+			toString() {
+				return `right ${/** @type {any} */ (this).value}`;
+			}
+		}
+		const message = structuredClone({
+			name: "Problem.Bad",
+			id: "worker-test:right",
+			fields: { value: 3 },
+		});
+		const known = faWorkerError(message, [Left, Right]);
+		const erased = faWorkerError(message, []);
+		for (const error of [known, erased]) {
+			expect(error).toBeInstanceOf(Right);
+			expect(error).not.toBeInstanceOf(Left);
+			expect(error.toString()).toBe("right 3");
+			expect(error[Symbol.for("fa.error.type")]).toBe("worker-test:right");
+		}
+		class OtherModule extends FaError {
+			static faId = "worker-test:right";
+		}
+		const sameType = Object.assign(new OtherModule(), { value: 3 });
+		expect(faEquals(known, sameType)).toBe(true);
+		expect(faEquals(known, Object.assign(new Left(), { value: 3 }))).toBe(false);
+	});
+
+	test("an unavailable class retains its type and typed display", () => {
+		const error = faWorkerError(
+			{
+				name: "Problem.Bad",
+				id: "worker-test:unavailable",
+				display: "Problem.Bad { ratio = 1.2 }",
+				fields: { ratio: 1.2000000476837158 },
+			},
+			[],
+		);
+		expect(error).toBeInstanceOf(FaError);
+		expect(error[Symbol.for("fa.error.type")]).toBe("worker-test:unavailable");
+		expect(error.toString()).toBe("Problem.Bad { ratio = 1.2 }");
+		expect(error.ratio).toBe(1.2000000476837158);
 	});
 });
 

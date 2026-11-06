@@ -30,7 +30,7 @@ import { faAlive } from "./tasks.js";
 // @fa-helper NetError deps: FaError
 /** A failure of a socket (`std.net`). */
 export class NetError extends FaError {
-	static faName = "NetError";
+	static faName = this.register("NetError");
 
 	/** @param {string} message the operation, then the system's text */
 	constructor(message) {

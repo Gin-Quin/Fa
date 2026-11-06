@@ -1,0 +1,16 @@
+-- skip-target: native-freestanding
+-- Float formatting uses libc; the freestanding target has no snprintf.
+type Color = Enum { Red, Blue }
+type Failure = Errors {
+	Rich = { ratio: Float32, color: Color, numbers: Array<Float32> }
+	Text = String
+}
+let rich = Failure.Rich { ratio = 1.2, color = Color.Blue, numbers = [Float32(1.2)] }
+console.log(rich.toString()) -- prints: Failure.Rich { ratio = 1.2, color = Blue, numbers = [1.2] }
+console.log(Failure.Text("bad").toString()) -- prints: Failure.Text("bad")
+function display = (error: Error): String => error.toString()
+function displayGeneric = <Item: Error>(error: Item): String => error.toString()
+console.log(display(rich)) -- prints: Failure.Rich { ratio = 1.2, color = Blue, numbers = [1.2] }
+console.log(displayGeneric(rich)) -- prints: Failure.Rich { ratio = 1.2, color = Blue, numbers = [1.2] }
+function method = () => rich.toString()
+console.log(method()) -- prints: Failure.Rich { ratio = 1.2, color = Blue, numbers = [1.2] }

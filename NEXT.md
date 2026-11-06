@@ -1,4 +1,4 @@
-# Compiler completion in progress (2026-11-06)
+# Compiler completion in progress (2026-11-07)
 
 Integration: branch `compiler`, worktree `.claude/worktrees/lead`. The main checkout
 is shared and dirty: preserve it. The user requested completion of all remaining
@@ -14,7 +14,7 @@ and empty-arena-leaf optimizations followed in `a39f3c4` (44 merged LLVM IR test
 and merged workspace clippy also pass). Binary-trees uses112.71M instructions vs
 Goose128.15M; its CPU win is still open.
 
-Sixteen clean integrated worktrees have been removed, branches preserved. Active,
+Seventeen clean integrated worktrees have been removed, branches preserved. Active,
 dirty, locked or unmerged trees are preserved; some locks belong to another live
 session. Records: `/tmp/fa-resume-cleaned-worktrees.json`.
 
@@ -47,13 +47,16 @@ runtime tests and website check/snippets/build pass too.
   capabilities; direct/higher-order calls, composites, resources and task destruction
   pass on Bun. Generic native ownership now uses concrete resource types; all
   pointer programs pass on all three targets with leak checks. The full `/tmp/fa-generic-workspace-full.log` is now running after clean clippy
-  and targeted checks. Signature-only generic ABI patch shared with analyzer-with.
+  and targeted checks. Signature-only generic ABI patch shared with analyzer-with. The full found
+  invalid synthesized descriptor parameter names and owner-capability argument
+  order failures; these must be corrected against metadata/origins, alongside the
+  new universal-copy lifetime rules, before integration.
 - Analyzer, `analyzer-callbacks`, `d22ebd2`: native instance per callback error set
   and exact effects, including exact variants. Complete LLVM suite passes (exit0)
   in `/tmp/fa-exact-effects-workspace-fixed.log`, with clippy, formatting, runtime
   and website checks green. Merge checks pass too: workspace clippy, callback programs on Bun and all three
   native targets, plus all five C-library tests. Its old initial worktree was removed. `analyzer-with` separately owns with, missing documented
-  rules, TypeFromSchema/named Schema, interpreter continuation stack, method origin
+  rules, TypeFromSchema/named Schema, method origin
   and native method-specific instance keys, key-loop thrown summaries, pass fusion.
 - Proofs, `cross-file-metadata`, `0d80b62`: complete LLVM workspace suite passes
   (exit0, `/tmp/fa-metadata-workspace-full.log`), with clippy and JS runtime green.
@@ -100,19 +103,98 @@ features, apply the remaining metaprogramming note, measure the analyzer on the
 1,000-file package and all Goose programs, then run the final combined checks.
 Do not remove unresolved items or mark the overall goal complete early.
 
-Root worker/Errors WIP is saved explicitly in stash c9a0034315b5c4bdb7f3da0ecd9e02516e1f1b05 while metadata merges. Do not lose or reapply it twice. Generic-pointers sources remain frozen in their own worktree for the queued full.
+Root worker/Errors WIP from stash c9a0034315b5c4bdb7f3da0ecd9e02516e1f1b05 is now restored on lead; do not reapply it. Its stable error identities and Error.toString additions await final validation. Generic-pointers full found hidden generic ABI/name failures; fix them against the integrated metadata/origin work before delivery.
 
-## Latest user decisions
+## Latest user decisions (supersede earlier copy notes)
 
-All types are copyable, including Task and resources; this supersedes the older
-move-only rule. Copies share the same
-Task/resource and state, with reference counting; destroy/cancellation occurs on
-the last owner release. Analyzer owns acceptance and flow, native performance
-owns Task native retain/release, lead owns resources and JS Task lifetime.
-Do not add generic Copyable constraints or reject copies.
-`with` uses parameter names from the visible function signature, including a
-function-valued parameter or field. Analyzer owns this implementation.
+- Task is NONCOPYABLE, including composites holding one. The short-lived decision
+  to make Task copyable was revoked; no Task RC implementation is to be delivered.
+- Implicit moves remain allowed when the source (including aliases) is not used
+  afterwards. A structural copy of a collection, or a plain object owning one,
+  requires `copy value`. Syntax is a spaced contextual prefix; names `copy` remain.
+- Resource handles and other shared handles remain copyable with reference counts,
+  sharing the same state. Resource handles are exempt from explicit collection
+  copy requirements even when their shared state contains a collection.
+- `with` uses the names of the visible signature, also on parameters and fields.
+- Joining written Person/Greeting alternatives with distinct methods/destructors
+  gives Person | Greeting, preserving runtime dispatch to the actual member.
+- Escaping captures are copies and immutable by the existing docs; Task captures
+  cannot acquire an invented FnOnce semantics. Analyzer and proofs coordinate
+  callable provenance across annotations, aliases, imports and generic values.
 
-Joining written types with distinct methods/destructors forms their union, even
-when their fields have the same shape: runtime dispatch uses the actual member.
-Analyzer owns this after the frozen single-origin validation.
+JS transport decision RESOLVED: the user requires no JSON transport; use
+structuredClone and/or Codec, and explicitly authorized fetching and modifying
+Codec locally. Implement the inter-realm resource protocol, preserving shared
+mutable fields and global ownership. No blanket JS transfer rejection.
+
+Codec is cloned at /home/claude-dev/projects/codec, branch codex/fa-worker-codecs,
+commits f5d5e48 + 37006b0 (upstream997650b). Shared byte-window encoding, named
+references, named value transforms, arbitrary-key Map, nested host discovery and
+CSP-compatible dynamic codecs are implemented.129 tests/690 assertions, tsc and
+Biome pass, including a real worker, GSAB growth, aliases, -0 and BigInt1000bits.
+The user then required BUILD-TIME generation from static Fa types, including
+copy functions. The old dynamic facade is superseded for Fa: minimal AOT runtime
+now exposes binary primitives + fromFunctions(write,read), with neither runtime
+function compilation nor schema interpretation.129 tests/tsc/Biome pass after
+this change; /tmp/fa-codec-aot-runtime.js is the new artifact. Root must generate
+typed write/read/copy/drop functions in the Rust JS backend and carry them in
+TypeInfo. Generic factories emit precompiled operations parameterized by concrete
+type descriptors. Proofs accepts a compiled codec in its Resource registry.
+
+Generic runtime metadata now uses universal TypeInfo(ParamId), tag4, with at
+least ownsTask and semantic key; Bun layout joins the same descriptor. Do not
+apply the obsolete OwnsTask-only patch. /tmp/fa-type-info-metadata.patch is
+validated; root has applied it to /tmp/fa-shared-values. No content scan for
+Task ownership: empty Array<Task> and Union<Task|Array<Integer>> must transfer
+according to the static type. Origins/method choices are part of semantic keys.
+
+## Live worktrees after these decisions
+
+- Lead0290400 includes c80d6d9 maps/append guards/JSON writer memo, all3 runtime IR
+  regenerated and merged checks/QEMU/ASan/runtime/site green. Worker error identity
+  and Error.toString WIP restored from c9a0034, targeted tests and JS crate green;
+  first full failed only the builtins unit count (a method is not an Error type).
+  Unit fixed; corrected complete LLVM workspace full EXIT0, session49643, in
+  /tmp/fa-worker-display-workspace-fixed-full.log. Analyzer/clippy/style/site and
+  JS runtime300 pass. Ready to commit/integrate the other green lots.
+- /tmp/fa-shared-values, codex/shared-values, base0290400, owns Node::Copy parser,
+  formatter, syntax adapter, JS/LLVM copy, resource cells and generic ownership.
+  Full parser and LSP Copy contextual tests pass. New explicit-copy.fa and
+  shared-resources.foreign.fa pass Bun and LLVM native/free/wasm. Runtime306 pass
+  after unique Task outcome cleanup (NO Task retain/copy). Source remains WIP:
+  generic Task parameter conditional cleanup, default owning parameters, generic
+  destructor origin/capability keys and merges with handles/analyzer remain.
+- analyzer-with single-origin lot ecda9e5 is READY: corrected complete LLVM
+  workspace full/clippy/runtime298/fmt all pass. Root already ported this snapshot
+  in experimental shared-values; integrate compiler independently. analyzer-rules separately
+  owns Copy requirements (MEM003 Task, MEM004 implicit collection), callable
+  provenance, Resource alias effects/facts, with, remaining rules and pass fusion.
+- proofs interpreter-continuations2ec0e57 is READY: complete LLVM workspace full
+  exit0, final fmt/clippy pass; integrate after lead source unfreezes. Log
+  /tmp/fa-continuations-workspace-full.log. Heap continuations preserve depth10000,
+  exact steps/heap accounting and run non-tail/callback chains depth9000 on256KiB.
+- proofs arena-regions1a0d6bf is READY: complete LLVM workspace full/clippy/fmt
+  pass, /tmp/fa-arena-workspace-corrected-full.log. A private Root used only in
+  an imported function passes leak-check. Keep the worktree: agent adds an
+  independent arena-capacity fact on a new branch, no change to delivered HEAD.
+  shared-handles on0290400 owns Guard/Worker/Pool/Socket/Listener/Subscription,
+  closures and Task interthread affinity, coordinating provenance with analyzer.
+- /tmp/fa-native-next, worktree-native-perf-next: Frame strings frozen/full queued.
+  /tmp/fa-native-frame, worktree-native-regions: child arrays/regions/sexp prototype.
+  4K regions are only experimental (small instruction regressions elsewhere),
+  no CPU victory claimed before isolated measurements across original16 programs.
+
+Seventeen clean integrated worktrees removed. Old c80d6d9 worktree was removed only
+with agent consent; Goose home copied to /tmp/fa-native-perf-next/goose-home and39
+text reports archived under /tmp/fa-native-perf-next/archived-c80d6d9. Branches and
+other live-session locked/dirty trees remain. Cleanup JSON is authoritative.
+
+## Inter-worker resource rule (latest answer)
+
+The user requires independent copies, a common Mutex, or an exclusive move
+invalidating the source and aliases. Resource handles still share cells locally;
+at a worker boundary they therefore require a common Mutex or exclusive transfer.
+No automatic synchronization of Resource fields. Analyzer must track the cell
+aliases and Guard loans: neither an old alias outside a Mutex nor a Resource
+handle copied from Guard.value may bypass the protection. Task remains affine
+to its executor and never transferable between workers.

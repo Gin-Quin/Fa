@@ -23,6 +23,16 @@ import { faFormatError } from "./format.js";
 export class FaError {
 	/** @type {string | undefined} */
 	static faName;
+	/** @type {string | undefined} */
+	static faId;
+	/** @type {Map<string, Function>} */
+	static types = new Map();
+
+	/** @param {string} id @returns {string} */
+	static register(id) {
+		FaError.types.set(id, this);
+		return id;
+	}
 
 	/**
 	 * What recognizes a Fa error (`faIsError`): its qualified name.
@@ -30,6 +40,12 @@ export class FaError {
 	 */
 	get [Symbol.for("fa.error")]() {
 		return /** @type {any} */ (this.constructor).faName ?? this.constructor.name;
+	}
+
+	/** @returns {string} */
+	get [Symbol.for("fa.error.type")]() {
+		const type = /** @type {any} */ (this.constructor);
+		return type.faId ?? type.faName ?? type.name;
 	}
 
 	/** @returns {string} */
@@ -55,7 +71,7 @@ export function faCaught(exception) {
 // @fa-helper IndexError deps: FaError
 /** An index or a slice bound outside the collection (or string). */
 export class IndexError extends FaError {
-	static faName = "IndexError";
+	static faName = this.register("IndexError");
 
 	/**
 	 * @param {number} index the index that was out of bounds
@@ -73,7 +89,7 @@ export class IndexError extends FaError {
 // @fa-helper KeyNotFound deps: FaError
 /** A map read with a key that isn't present. */
 export class KeyNotFound extends FaError {
-	static faName = "KeyNotFound";
+	static faName = this.register("KeyNotFound");
 
 	/** @param {string} key the `toString()` of the key */
 	constructor(key) {
@@ -86,7 +102,7 @@ export class KeyNotFound extends FaError {
 // @fa-helper DivisionByZero deps: FaError
 /** An integer `//` or `%%` by zero. */
 export class DivisionByZero extends FaError {
-	static faName = "DivisionByZero";
+	static faName = this.register("DivisionByZero");
 }
 
 // @fa-helper ArithmeticError deps: FaError
@@ -95,7 +111,7 @@ export class DivisionByZero extends FaError {
  * that doesn't fit.
  */
 export class ArithmeticError extends FaError {
-	static faName = "ArithmeticError";
+	static faName = this.register("ArithmeticError");
 
 	/** @param {string} message */
 	constructor(message) {
@@ -108,7 +124,7 @@ export class ArithmeticError extends FaError {
 // @fa-helper ParseError deps: FaError
 /** Text that doesn't parse, like `Integer.parse("4x")`. */
 export class ParseError extends FaError {
-	static faName = "ParseError";
+	static faName = this.register("ParseError");
 
 	/**
 	 * @param {string} input the text that was parsed

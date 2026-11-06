@@ -1,0 +1,7 @@
+-- Impossible byte capacities stop before arithmetic can wrap.
+-- asynchronous: false
+-- exit: 101
+-- stderr: out of memory
+mutable map: GrowingMap<Integer, Integer> = [(1, 2)]
+map.reserve(Int64.maxValue)
+console.log(map.capacity)

@@ -249,6 +249,8 @@ The string API is close to the JavaScript `String` API, with grapheme clusters i
 - `<` compares the UTF-8 bytes, which orders by code point.
 - Equality compares two inline values word by word. Otherwise it checks byte lengths before reading bytes; empty and one-byte strings compare inline, and longer strings use the shared byte comparison. Reading a compact ASCII character array produces an inline one-byte value, without borrowing the source's storage.
 
+- **Counted append loops.** A loop appending characters or digits can keep a dynamic short result inline. It reserves the prefix plus the number of rounds before the loop; a longer suffix uses the ordinary append path and reserves the remaining rounds again. An invariant mode lets LLVM select the inline or buffer loop once. The payload byte and the final length/tag byte are stored separately, preserving the bytes in the last word.
+
 - **Destination passing.** A function that builds a mutable string and returns it, possibly with a final suffix, is expanded into an append destination when its result is appended there. The function has no effects, errors, early returns, captures or calls of program functions, and its arguments cannot read the destination.
 
 ### JavaScript

@@ -1203,6 +1203,185 @@ static void test_tables(void) {
 	CHECK(allocated == before);
 }
 
+// Inline 32-bit keys use every bit pattern, including zero and signed extrema.
+typedef struct {
+	uint32_t key;
+	uint32_t value;
+} TestKey32Entry;
+
+static uint64_t key32_hash(const void *key) {
+	uint32_t bits;
+	__builtin_memcpy(&bits, key, sizeof bits);
+	return inline_key_hash(bits);
+}
+
+static int64_t key32_find(FaTable *table, uint32_t key, int64_t entry_size) {
+	return fa_table_find(table, key32_hash(&key), &key, 0, entry_size, 4);
+}
+
+static void key32_insert(FaTable *table, uint32_t key, int64_t entry_size, int known_probe) {
+	int64_t probe = key32_find(table, key, entry_size);
+	CHECK(probe < 0);
+	TestKey32Entry *entry = fa_table_append(table, key32_hash(&key), entry_size,
+	                                      known_probe ? probe : 0, key32_hash);
+	entry->key = key;
+	entry->value = key ^ 0xa5a5a5a5u;
+}
+
+static void key32_check(FaTable *table, const uint32_t *keys, const uint8_t *present,
+                       int count, int64_t entry_size) {
+	int64_t length = 0;
+	for (int index = 0; index < count; index += 1) {
+		int64_t at = key32_find(table, keys[index], entry_size);
+		CHECK((at >= 0) == (present[index] != 0));
+		if (at >= 0) {
+			TestKey32Entry *entry = (TestKey32Entry *)fa_table_entry(table, at, entry_size);
+			CHECK(entry->key == keys[index] && entry->value == (keys[index] ^ 0xa5a5a5a5u));
+			length += 1;
+		}
+	}
+	CHECK(table->length == length);
+	int64_t live = 0;
+	for (int64_t at = 0; at < table->used; at += 1) {
+		live += fa_table_live(table, at, entry_size);
+	}
+	CHECK(live == length);
+}
+
+static void test_inline_key32(void) {
+	long before = allocated;
+	for (int compact = 0; compact < 2; compact += 1) {
+		int64_t entry_size = sizeof(TestKey32Entry) | TABLE_INLINE |
+		                     (compact ? TABLE_INLINE_KEY32 : 0);
+		CHECK(inline_stride(entry_size) == (compact ? 8 : 12));
+		FaTable *table = fa_table_new(4, entry_size);
+		uint32_t keys[256];
+		uint8_t present[256] = {0};
+		for (int index = 0; index < 256; index += 1) {
+			keys[index] = index == 0 ? 0 : index == 1 ? 0x80000000u :
+			              index == 2 ? 0xffffffffu : (uint32_t)index - 2;
+		}
+		uint32_t random = 12345;
+		for (int round = 0; round < 4000; round += 1) {
+			random ^= random << 13;
+			random ^= random >> 17;
+			random ^= random << 5;
+			int index = (int)(random & 255);
+			uint32_t key = keys[index];
+			if (present[index]) {
+				int64_t at = fa_table_remove(table, key32_hash(&key), &key, 0, entry_size, 4);
+				CHECK(at >= 0);
+				TestKey32Entry *entry = (TestKey32Entry *)fa_table_entry(table, at, entry_size);
+				CHECK(entry->key == key && entry->value == (key ^ 0xa5a5a5a5u));
+				fa_table_release(table, at, entry_size);
+			} else {
+				key32_insert(table, key, entry_size, round % 2);
+			}
+			present[index] = !present[index];
+			if (round % 37 == 0) {
+				key32_check(table, keys, present, 256, entry_size);
+			}
+			if (round == 1000) {
+				fa_table_reserve(table, 1000, entry_size, key32_hash);
+				key32_check(table, keys, present, 256, entry_size);
+			}
+			if (round % 401 == 0) {
+				FaTable *copy = fa_table_copy(table, entry_size);
+				key32_check(copy, keys, present, 256, entry_size);
+				fa_table_clear(copy, entry_size);
+				CHECK(copy->length == 0 && key32_find(copy, 0, entry_size) < 0);
+				key32_insert(copy, 0, entry_size, 1);
+				CHECK(key32_find(copy, 0, entry_size) >= 0);
+				key32_check(table, keys, present, 256, entry_size);
+				fa_table_free(copy, entry_size);
+			}
+			if (round == 2000) {
+				fa_table_clear(table, entry_size);
+				__builtin_memset(present, 0, sizeof present);
+			}
+		}
+		key32_check(table, keys, present, 256, entry_size);
+		fa_table_free(table, entry_size);
+
+		// A run wraps from the final slot to the start. Delete its middle,
+		// then its beginning and end; every surviving key must remain found.
+		table = fa_table_new(32, entry_size);
+		uint32_t collision = 1;
+		uint32_t colliding[24];
+		uint8_t kept[24];
+		for (int index = 0; index < 24; index += 1) {
+			while ((inline_key_hash(collision) & 63) != 63) { collision += 1; }
+			colliding[index] = collision++;
+			kept[index] = 1;
+			key32_insert(table, colliding[index], entry_size, 1);
+		}
+		CHECK(key32_find(table, colliding[0], entry_size) == 63);
+		CHECK(key32_find(table, colliding[1], entry_size) == 0);
+		const int removed[] = {12, 0, 23, 1, 22, 11, 13};
+		for (int index = 0; index < (int)(sizeof removed / sizeof removed[0]); index += 1) {
+			uint32_t key = colliding[removed[index]];
+			int64_t at = key32_find(table, key, entry_size);
+			CHECK(at >= 0);
+			fa_table_kill(table, key32_hash(&key), at, entry_size);
+			kept[removed[index]] = 0;
+			key32_check(table, colliding, kept, 24, entry_size);
+		}
+		fa_table_free(table, entry_size);
+		CHECK(allocated == before);
+	}
+}
+
+static void test_inline_loop_reservations(void) {
+	long before = allocated;
+	for (size_t prefix = 0; prefix <= 5; prefix += 1) {
+		for (size_t rounds = 0; rounds <= 80; rounds += 1) {
+			FaString text = {(const uint8_t *)"start", prefix, SIMPLE};
+			fa_string_reserve_inline(&text, rounds);
+			if (prefix + rounds <= INLINE_STRING_BYTES) {
+				CHECK(allocated == before);
+				CHECK(rounds == 0 || (text.capacity & STRING_INLINE));
+			}
+			for (size_t round = 0; round < rounds; round += 1) {
+				fa_string_append(&text, (const uint8_t *)"x", 1, SIMPLE);
+			}
+			CHECK(string_length(&text) == prefix + rounds);
+			CHECK(__builtin_memcmp(string_bytes(&text), "start", prefix) == 0);
+			for (size_t at = prefix; at < prefix + rounds; at += 1) {
+				CHECK(string_bytes(&text)[at] == 'x');
+			}
+			if (string_owned(text.capacity)) {
+				fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1);
+			}
+			CHECK(allocated == before);
+		}
+	}
+	FaString reserved = {(const uint8_t *)"short", 5, SIMPLE};
+	fa_string_reserve_owned(&reserved, 128);
+	const uint8_t *buffer = reserved.bytes;
+	size_t capacity = reserved.capacity;
+	fa_string_reserve_inline(&reserved, 0);
+	CHECK(reserved.bytes == buffer && reserved.capacity == capacity);
+	fa_string_reserve_inline(&reserved, 5);
+	CHECK(reserved.bytes == buffer && reserved.capacity == capacity);
+	fa_free((void *)reserved.bytes, reserved.capacity & KIND_MASK, 1);
+	CHECK(allocated == before);
+	// A two-byte character exceeds the one-byte reservation. Normal append
+	// grows safely, then the remaining rounds are reserved once more.
+	FaString text = {(const uint8_t *)"", 0, SIMPLE};
+	fa_string_reserve_inline(&text, 20);
+	for (size_t round = 0; round < 20; round += 1) {
+		fa_string_append(&text, (const uint8_t *)"é", 2, 0);
+		fa_string_reserve_inline(&text, 19 - round);
+	}
+	CHECK(string_length(&text) == 40 && !(text.capacity & SIMPLE));
+	for (size_t at = 0; at < 40; at += 2) {
+		CHECK(string_bytes(&text)[at] == 0xc3 && string_bytes(&text)[at + 1] == 0xa9);
+	}
+	CHECK(string_owned(text.capacity));
+	fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1);
+	CHECK(allocated == before);
+}
+
 // ── workers: calls on a worker's thread, blocking, detached, kept and
 // cancelled at random (queued, running or done), freed once
 
@@ -1365,6 +1544,8 @@ static void test_queues(void) {
 
 int main(void) {
 	test_tables();
+	test_inline_key32();
+	test_inline_loop_reservations();
 	test_integer_strings();
 	test_string_padding();
 	test_inline_strings();

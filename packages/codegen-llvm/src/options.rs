@@ -180,10 +180,12 @@ impl Default for Options {
 /// invariant loads (the header of a destination array) then leave it, a
 /// second round takes out the checks they bounded, and the main loop is
 /// vectorized (`blur`). `reassociate` puts the sums back into chains, so
-/// that `instcombine` narrows byte arithmetic to 16 bits.
+/// that `instcombine` narrows byte arithmetic to 16 bits. Nontrivial loop
+/// unswitching separates invariant representation choices (inline strings
+/// or owned buffers) once before their character loops.
 macro_rules! loop_checks {
 	() => {
-		"function(irce,simplifycfg,instcombine<no-verify-fixpoint>,loop-mssa(licm),irce,simplifycfg,reassociate,instcombine<no-verify-fixpoint>,loop-vectorize,instcombine<no-verify-fixpoint>,simplifycfg)"
+		"function(irce,simplifycfg,instcombine<no-verify-fixpoint>,loop-mssa(licm,simple-loop-unswitch<nontrivial>),irce,simplifycfg,reassociate,instcombine<no-verify-fixpoint>,loop-vectorize,instcombine<no-verify-fixpoint>,simplifycfg)"
 	};
 }
 

@@ -592,3 +592,47 @@ The native driver uses the complete published generic order as well: a compile-t
 Native generic field accesses resolve the declared field's name in the concrete owner layout. The ordinal in `Resolution::Field` belongs to the contract shape, which may omit fields before or after the selected one. The same translation handles extracted values, composite places, row fields, ownership paths, frozen reads, reactive field sources and hoisted collection accesses. The regression uses different field types before and after the selected field, a temporary, a nested copy/write and an array push loop; the imported `Type<human>` copying case also keeps all three string fields and changes the requested one.
 
 JavaScript treats an erased type parameter as potentially owning a composite value at copy sites. A mutable destination, a returned borrowed value and a stored element use the existing structural `faCopy` helper, which preserves the concrete object's complete shape and copies nested values; primitive instantiations pass through unchanged. An array of parameterized elements cannot use the primitive-only shallow `slice` path.
+
+## Native reservation bounds (2026-11-06)
+
+A reservation must reject an unrepresentable byte count before narrowing it to a target
+word or entering unchecked append stores. On wasm32, string reservations saturate at the
+layout limit before conversion to usize; a counted item loop checks its byte multiplication
+in i64 first. Array length plus reservation uses a saturating signed sum, so overflow cannot
+turn a request into a no-op.
+
+Map capacity growth checks signed addition, doubling, next-power-of-two construction and
+allocation-size multiplication before performing them. Dense entry widths remain u64 until
+the size check, rather than truncating a wide entry to wasm's size_t. Counts that cannot fit
+stop with the existing out-of-memory exit; ordinary negative/empty cases keep their behavior.
+
+## Compact integer map slots and reserved inline appends (2026-11-06)
+
+A native inline map with a 32-bit integer key and a value of at most 32 bits uses an 8-byte
+key/value slot. Key zero has one extra slot and an explicit presence bit; every other key
+is its own empty-slot marker. Copies, growth and backward-shift deletion preserve that
+representation. Other integer widths retain their existing layouts and hash protocol.
+
+A counted character/digit append loop may keep a dynamically short result inline. Its
+reservation checks the actual prefix plus the rounds; a separate mode bit is invariant on
+the one-byte path and refreshed after a longer suffix. Loop unswitching moves that choice
+out of a character loop when it is invariant. The inline path updates only the final tag
+byte: its capacity word also contains payload, so replacing that word from an earlier
+snapshot would corrupt native bytes 17–23 or wasm bytes 9–11. The slow path re-reserves all
+remaining rounds, including after multibyte suffixes or multi-digit integers.
+
+
+## Universal copyability and written type unions (2026-11-06, user decision)
+
+All types are copyable, including a Task, a foreign resource and composites that
+hold them. This supersedes the earlier move-only policy. Copies of a Task or
+resource share that instance and its state through reference counting. Releasing
+the last owner destroys the resource or cancels the still-running Task. Ordinary
+values retain structural value-copy semantics; generic functions do not need a
+Copyable constraint. Implementation and lifetime regressions are in progress.
+
+A conditional joining written Person and Greeting types with different methods
+or destructors has type Person | Greeting, even if their fields are structurally
+identical. The actual union member selects its method or destructor. A `with`
+application uses names in the visible function signature, including the signature
+of a function-valued parameter or field.

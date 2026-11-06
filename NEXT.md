@@ -14,7 +14,7 @@ and empty-arena-leaf optimizations followed in `a39f3c4` (44 merged LLVM IR test
 and merged workspace clippy also pass). Binary-trees uses112.71M instructions vs
 Goose128.15M; its CPU win is still open.
 
-Fifteen clean integrated worktrees have been removed, branches preserved. Active,
+Sixteen clean integrated worktrees have been removed, branches preserved. Active,
 dirty, locked or unmerged trees are preserved; some locks belong to another live
 session. Records: `/tmp/fa-resume-cleaned-worktrees.json`.
 
@@ -63,8 +63,12 @@ runtime tests and website check/snippets/build pass too.
   complete JS crate, generic programs on all three LLVM targets and all31 package
   tests. Runtime298 and website checks pass too. The new notes are
   applied to the rewritten documentation. Method origins remain analyzer-owned.
-- Native performance, `agent-a375af73b4e738f36`: compact map slots, append reserve
-  paths and newly found wasm size-conversion overflow holes. Next: stack strings
+- Native performance, `c80d6d9`: compact 32-bit map slots, short append loops,
+  reservation overflow guards and memoized recursive JSON writers passed the full
+  LLVM workspace suite before integration. Merged checks pass:47 IR tests,
+  object-cache invalidation, C libraries, ABI tests and reservation/map/append/JSON
+  programs on native, freestanding and wasm, with representative AArch64 QEMU
+  runs. C ASan/UBSan, JS runtime298, clippy and website checks pass. Next: stack strings
  24–64bytes, recursive collections/sexp packing, remaining Goose gaps. No untested
   optimization is treated as integrated; program semantics remain unchanged.
 
@@ -97,3 +101,18 @@ features, apply the remaining metaprogramming note, measure the analyzer on the
 Do not remove unresolved items or mark the overall goal complete early.
 
 Root worker/Errors WIP is saved explicitly in stash c9a0034315b5c4bdb7f3da0ecd9e02516e1f1b05 while metadata merges. Do not lose or reapply it twice. Generic-pointers sources remain frozen in their own worktree for the queued full.
+
+## Latest user decisions
+
+All types are copyable, including Task and resources; this supersedes the older
+move-only rule. Copies share the same
+Task/resource and state, with reference counting; destroy/cancellation occurs on
+the last owner release. Analyzer owns acceptance and flow, native performance
+owns Task native retain/release, lead owns resources and JS Task lifetime.
+Do not add generic Copyable constraints or reject copies.
+`with` uses parameter names from the visible function signature, including a
+function-valued parameter or field. Analyzer owns this implementation.
+
+Joining written types with distinct methods/destructors forms their union, even
+when their fields have the same shape: runtime dispatch uses the actual member.
+Analyzer owns this after the frozen single-origin validation.

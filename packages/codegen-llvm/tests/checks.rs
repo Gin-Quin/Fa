@@ -759,8 +759,13 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 	#[test]
 	fn disjoint_array_metadata_needs_a_non_wrapping_offset() {
 		let source = |offset: &str| {
+			let (throws, attempt) = if offset == "1" {
+				("", "")
+			} else {
+				(" throws IndexError", "try ")
+			};
 			format!(
-				"type Body = {{ value: Integer }}\nfunction interact = (items: Array<Body>): Void throws IndexError mutates items => {{\nfor body, i in items {{\nfor j in i + {offset}..items.length {{\ntry use other = items[j]\nbody.value += other.value\nother.value += body.value\n}}\n}}\n}}\ntry interact([{{ value = 1 }}, {{ value = 2 }}, {{ value = 3 }}])\n"
+				"type Body = {{ value: Integer }}\nfunction interact = (items: Array<Body>): Void{throws} mutates items => {{\nfor body, i in items {{\nfor j in i + {offset}..items.length {{\n{attempt}use other = items[j]\nbody.value += other.value\nother.value += body.value\n}}\n}}\n}}\n{attempt}interact([{{ value = 1 }}, {{ value = 2 }}, {{ value = 3 }}])\n"
 			)
 		};
 		let small = ir_with("disjoint-small-offset", &source("1"), false);
@@ -779,6 +784,40 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 			!large.contains("!alias.scope") && !large.contains("!noalias"),
 			"{large}"
 		);
+	}
+	#[test]
+	fn int32_maps_store_only_key_and_value_in_probe_slots() {
+		let source = |key: &str| {
+			format!(
+				"mutable values: Map<{key}, UInt32> = [(0, 42)]\nvalues[1] = 7\nconsole.log(values.get(1))\n"
+			)
+		};
+		let compact = ir_with("compact-key32", &source("Int32"), false);
+		assert!(
+			compact.contains("i64 6597069766656"),
+			"compact layout flag missing"
+		);
+		let narrow = ir_with("legacy-key16", &source("Int16"), false);
+		assert!(
+			!narrow.contains("i64 6597069766656"),
+			"only a 32-bit key occupies its whole presence word"
+		);
+		assert!(
+			narrow.contains("i64 2199023255552"),
+			"legacy inline layout flag missing"
+		);
+	}
+
+	#[test]
+	fn dynamic_append_loops_reserve_inline_values_too() {
+		let ir = ir_with(
+			"inline-dynamic-loop",
+			"function repeat = (count: Integer): String => {\nmutable text = \"\"\nfor 0..count { text += \"x\" }\ntext\n}\nconsole.log(repeat(7))\n",
+			false,
+		);
+		let body = function(&ir, "fa.repeat");
+		assert!(body.contains("@fa_string_reserve_inline("), "{body}");
+		assert!(body.contains("reserved_inline"), "{body}");
 	}
 }
 

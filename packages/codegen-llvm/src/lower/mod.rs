@@ -224,9 +224,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// Inside a loop over characters lowered twice, for a simple text and
 	/// for another (`for_characters`): a nested one is lowered once.
 	pub(crate) versioned_characters: bool,
-	/// The reserved appends (`appends.rs`) of loops with a constant number of
-	/// rounds that fits an inline string: such a string stays inline.
-	pub(crate) inline_reserved: rustc_hash::FxHashSet<NodeId>,
+	/// The representation bit of a reserved append loop, independent of its
+	/// changing length. The slow suffix path refreshes it (`appends.rs`).
+	pub(crate) inline_reserved: FxHashMap<(FileId, NodeId), PointerValue<'ctx>>,
 	/// The arrays indexed by a counted loop being lowered, read before it
 	/// (`hoisting.rs`): the array value of each local, and the items and
 	/// length of each such value.
@@ -244,7 +244,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The `text += character` of a counted loop with room reserved before
 	/// it (`appends.rs`): the loop's counter slot, its end and whether it is
 	/// inclusive, to keep the room for the rounds left after a longer append.
-	reserved_appends: FxHashMap<NodeId, (PointerValue<'ctx>, IntValue<'ctx>, bool)>,
+	reserved_appends: FxHashMap<(FileId, NodeId), (PointerValue<'ctx>, IntValue<'ctx>, bool)>,
 	frame: Option<Frame<'ctx>>,
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
@@ -477,7 +477,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			reserved_pushes: FxHashMap::default(),
 			iterating_views: false,
 			versioned_characters: false,
-			inline_reserved: rustc_hash::FxHashSet::default(),
+			inline_reserved: FxHashMap::default(),
 			hoisted_arrays: FxHashMap::default(),
 			hoisted_parts: FxHashMap::default(),
 			expanded_functions: Vec::new(),
@@ -3023,7 +3023,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.reserved_pushes.remove(&push);
 		}
 		for append in appends {
-			self.reserved_appends.remove(&append);
+			self.reserved_appends.remove(&(self.file, append));
+			self.inline_reserved.remove(&(self.file, append));
 		}
 		self.unhoist_arrays(hoisted);
 		Ok(Val::void())

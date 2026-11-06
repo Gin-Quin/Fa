@@ -1053,6 +1053,10 @@ impl Generator<'_> {
 					_ => self.unsupported(n, "`toString`"),
 				}
 			}
+			"Error#toString" => {
+				let receiver = self.receiver(callee);
+				Expr::primary(format!("{}.toString()", receiver.primary_text()))
+			}
 			_ if path.starts_with("String#") => {
 				let View::Access { .. } = self.view(callee) else {
 					return self.unsupported(n, &format!("`{path}`"));

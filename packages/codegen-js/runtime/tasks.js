@@ -63,13 +63,13 @@ export const faCancelSignal = Object.freeze({ faCancelled: true });
 // @fa-helper Cancelled deps: FaError
 /** The error of awaiting a cancelled task. */
 export class Cancelled extends FaError {
-	static faName = "Cancelled";
+	static faName = this.register("Cancelled");
 }
 
 // @fa-helper ChannelClosed deps: FaError
 /** The error of `send` on a closed channel. */
 export class ChannelClosed extends FaError {
-	static faName = "ChannelClosed";
+	static faName = this.register("ChannelClosed");
 }
 
 // @fa-helper faLater

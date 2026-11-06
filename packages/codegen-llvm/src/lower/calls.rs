@@ -678,6 +678,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Ok(value),
 				}
 			}
+			"Error#toString" => {
+				let value = self.receiver(node)?;
+				let source = self.method_receiver(node).unwrap_or(node);
+				self.call_runtime("fa_b_reset", &[])?;
+				self.append_value(value, source)?;
+				let text = self.call_with_pair("fa_b_take", &[], Repr::Str)?;
+				Ok(self.fresh(text))
+			}
 			"String.compareLocale" => {
 				let mut values = Vec::new();
 				for argument in &info.arguments {

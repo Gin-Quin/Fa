@@ -96,6 +96,15 @@ impl Generator<'_> {
 		self.types.nominal(nominal).kind == NominalKind::Errors
 	}
 
+	/// The declaration's identity stays distinct from its displayed name,
+	/// including when an error crosses a module or a worker boundary.
+	fn error_identity(&self, nominal: NominalId, index: u16) -> String {
+		format!(
+			"{:032x}:{index}",
+			self.types.decl_hash(self.types.nominal(nominal).key)
+		)
+	}
+
 	/// The class of a member of an `Errors` type: a runtime class for a
 	/// built-in error, a generated one (`ApiError$Timeout`) otherwise.
 	pub(crate) fn error_class(&mut self, nominal: NominalId, index: u16) -> String {
@@ -111,12 +120,13 @@ impl Generator<'_> {
 		let member = self.types.member_name(nominal, index).to_string();
 		let qualified = format!("{type_name}.{member}");
 		let wanted = format!("{type_name}${member}");
-		if let Some(name) = self.classes.get(&qualified) {
+		let identity = self.error_identity(nominal, index);
+		if let Some(name) = self.classes.get(&identity) {
 			return name.clone();
 		}
 		let code = self.error_class_code(nominal, index, &qualified);
 		let name = self.class(&wanted, code);
-		self.classes.insert(qualified, name.clone());
+		self.classes.insert(identity, name.clone());
 		name
 	}
 
@@ -131,6 +141,10 @@ impl Generator<'_> {
 		let mut code = vec![
 			format!("class {{name}} extends {base} {{"),
 			format!("\tstatic faName = {};", js::string_literal(qualified)),
+			format!(
+				"\tstatic faId = this.register({});",
+				js::string_literal(&self.error_identity(nominal, index))
+			),
 		];
 		if !fields.is_empty() {
 			code.push(String::new());
@@ -142,10 +156,37 @@ impl Generator<'_> {
 			code.push("\t}".to_string());
 		}
 		if self.has_composite_fields(nominal, index) {
-			let format = self.helper("faFormatErrorFields");
+			let payload = self.types.payload(nominal, index);
+			let formatted = if matches!(self.types.kind(payload), TypeKind::Object(_)) {
+				let mut formats = Vec::with_capacity(fields.len());
+				for name in &fields {
+					let ty = self
+						.types
+						.fields_of(payload)
+						.iter()
+						.find(|field| Self::property(self.types.syms.resolve(field.name)) == *name)
+						.expect("an error payload field")
+						.ty;
+					let formatter = self.nested_formatter(ty);
+					formats.push(format!("[{}, {formatter}]", js::string_literal(name)));
+				}
+				let object = self.helper("faFormatObject");
+				format!(
+					"{} + \" \" + {object}(this, [{}])",
+					js::string_literal(qualified),
+					formats.join(", ")
+				)
+			} else {
+				let formatter = self.nested_formatter(payload);
+				let member = self.helper("faFormatMember");
+				format!(
+					"{member}({}, {formatter}(this.$v), false)",
+					js::string_literal(qualified)
+				)
+			};
 			code.push(String::new());
 			code.push("\ttoString() {".to_string());
-			code.push(format!("\t\treturn {format}(this);"));
+			code.push(format!("\t\treturn {formatted};"));
 			code.push("\t}".to_string());
 		}
 		code.push("}".to_string());
@@ -166,7 +207,11 @@ impl Generator<'_> {
 				Repr::Number | Repr::BigInt | Repr::String | Repr::Boolean | Repr::None
 			) && !matches!(
 				self.types.kind(self.without_none(ty)),
-				TypeKind::Float(FloatBits::F32) | TypeKind::Percentage
+				TypeKind::Float(FloatBits::F32)
+					| TypeKind::Percentage
+					| TypeKind::Enum(..)
+					| TypeKind::EnumMember(..)
+					| TypeKind::Fields(_)
 			)
 		};
 		match self.types.kind(payload) {
@@ -175,7 +220,7 @@ impl Generator<'_> {
 				.fields_of(payload)
 				.iter()
 				.all(|field| simple(field.ty)),
-			_ => false,
+			_ => true,
 		}
 	}
 
@@ -252,9 +297,9 @@ impl Generator<'_> {
 	}
 
 	/// The test that a value is a member (or any member) of an `Errors` type.
-	/// A generated class is tested by its qualified name, like the members of
-	/// a named union by their tag: each module declares the classes it uses,
-	/// so an error thrown by another module is an instance of another class.
+	/// A generated class is tested by its declaration's stable identity:
+	/// each module may emit its own class, and two declarations can have the
+	/// same displayed name. A worker carries this identity in its messages.
 	/// The built-in errors are the runtime's classes (`instanceof`).
 	pub(crate) fn error_test(&mut self, subject: &Expr, ty: TypeId) -> Option<Expr> {
 		let members: Vec<(NominalId, u16)> = match self.types.kind(ty) {
@@ -279,15 +324,11 @@ impl Generator<'_> {
 				let class = self.error_class(nominal, index);
 				tests.push(format!("{} instanceof {class}", subject.primary_text()));
 			} else {
-				let qualified = format!(
-					"{}.{}",
-					self.types.decl_name(key),
-					self.types.member_name(nominal, index)
-				);
+				let identity = self.error_identity(nominal, index);
 				tests.push(format!(
-					"{}?.[Symbol.for(\"fa.error\")] === {}",
+					"{}?.[Symbol.for(\"fa.error.type\")] === {}",
 					subject.primary_text(),
-					js::string_literal(&qualified)
+					js::string_literal(&identity)
 				));
 			}
 		}

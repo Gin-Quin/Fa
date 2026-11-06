@@ -50,7 +50,7 @@ import {
 // @fa-helper WorkerTimeout deps: FaError
 /** A work of a worker pool that took longer than the pool's `timeout`. */
 export class WorkerTimeout extends FaError {
-	static faName = "WorkerTimeout";
+	static faName = this.register("WorkerTimeout");
 }
 
 // @fa-helper faShare
@@ -223,16 +223,23 @@ export class FaWorker {
  * A Fa error thrown by a worker's call, rebuilt on this thread: an instance
  * of its class among `classes` (the errors the method may throw), or of a
  * class of the same name.
- * @param {{ name: string, fields: Record<string, any> }} error
+ * @param {{ name: string, id?: string, display?: string, fields: Record<string, any> }} error
  * @param {Function[]} classes
  * @returns {any}
  */
 export function faWorkerError(error, classes) {
+	const identity = error.id ?? error.name;
 	/** @type {any} */
-	let found = classes.find((/** @type {any} */ type) => type.faName === error.name);
+	let found =
+		classes.find((/** @type {any} */ type) => (type.faId ?? type.faName) === identity) ??
+		FaError.types.get(identity);
 	if (found === undefined) {
 		found = class extends FaError {
 			static faName = error.name;
+			static faId = identity;
+			toString() {
+				return error.display ?? super.toString();
+			}
 		};
 	}
 	return Object.assign(Object.create(found.prototype), error.fields);
@@ -384,7 +391,17 @@ export function faWorkerServe(init) {
 		} catch (exception) {
 			if (faIsError(exception)) {
 				const error = /** @type {any} */ (exception);
-				port.postMessage({ id, error: { name: error.constructor.faName, fields: { ...error } } });
+				const fields = { ...error };
+				faShare(fields);
+				port.postMessage({
+					id,
+					error: {
+						name: error.constructor.faName,
+						id: error[Symbol.for("fa.error.type")],
+						display: error.toString(),
+						fields,
+					},
+				});
 			} else if (exception instanceof FaStop) {
 				port.postMessage({ id, stop: faStopMessage(exception) });
 			} else if (exception instanceof RangeError) {

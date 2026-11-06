@@ -14,7 +14,7 @@ and empty-arena-leaf optimizations followed in `a39f3c4` (44 merged LLVM IR test
 and merged workspace clippy also pass). Binary-trees uses112.71M instructions vs
 Goose128.15M; its CPU win is still open.
 
-Twelve clean integrated worktrees have been removed, branches preserved. Active,
+Fifteen clean integrated worktrees have been removed, branches preserved. Active,
 dirty, locked or unmerged trees are preserved; some locks belong to another live
 session. Records: `/tmp/fa-resume-cleaned-worktrees.json`.
 
@@ -46,12 +46,15 @@ runtime tests and website check/snippets/build pass too.
 - Lead, `generic-pointers`: generic Pointer<T> on Bun using published runtime type
   capabilities; direct/higher-order calls, composites, resources and task destruction
   pass on Bun. Generic native ownership now uses concrete resource types; all
-  pointer programs pass on all three targets with leak checks. No full validation yet. Signature-only generic value ABI patch shared with analyzer-with.
+  pointer programs pass on all three targets with leak checks. The source is now frozen for `/tmp/fa-generic-workspace-full.log` (queued),
+  after clean workspace clippy and complete analyzer/JS tests. Signature-only
+  generic value ABI patch shared with analyzer-with.
 - Analyzer, `analyzer-callbacks`, `d22ebd2`: native instance per callback error set
   and exact effects, including exact variants. Complete LLVM suite passes (exit0)
   in `/tmp/fa-exact-effects-workspace-fixed.log`, with clippy, formatting, runtime
-  and website checks green. Merge checks pass too: workspace clippy, callback programs on Bun and all three
-  native targets, plus all five C-library tests. Its old initial worktree was removed. `analyzer-with` separately owns with, missing documented
+  and website checks green. Integrated at `8c92474`; merge clippy, Bun callbacks,
+  all three native targets and all five C-library tests pass. Its clean worktree
+  was removed. `analyzer-with` separately owns with, missing documented
   rules, TypeFromSchema/named Schema, interpreter continuation stack, method origin
   and native method-specific instance keys, key-loop thrown summaries, pass fusion.
 - Proofs, `cross-file-metadata`: imported Pick/Omit derived parameters, EF004,
@@ -90,3 +93,13 @@ After integration, audit `design/todo.md` against actual regressions and complet
 features, apply the remaining metaprogramming note, measure the analyzer on the
 1,000-file package and all Goose programs, then run the final combined checks.
 Do not remove unresolved items or mark the overall goal complete early.
+
+## Lead follow-up in progress
+
+Worker error identity: `worker-error-identity.fa` reproduced two distinct
+Problem.Bad declarations collapsing to left, directly and over a worker.
+Stable declaration IDs, a per-realm class registry, typed fallback displays and
+equality across module copies are implemented. Targeted Bun and 300 runtime
+tests pass; JS crate/native checks are running. This WIP is not yet committed.
+Two language questions remain pending: generic copy requirements, and joins of
+distinct method origins without an annotation. Do not infer either answer.

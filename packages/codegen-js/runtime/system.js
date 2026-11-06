@@ -26,7 +26,7 @@ import { faAlive } from "./tasks.js";
 // @fa-helper FileError deps: FaError
 /** A file that can't be read (`std.fs`). */
 export class FileError extends FaError {
-	static faName = "FileError";
+	static faName = this.register("FileError");
 
 	/**
 	 * @param {string} path the file
@@ -44,7 +44,7 @@ export class FileError extends FaError {
 // @fa-helper JsonError deps: FaError
 /** Malformed JSON, or JSON that doesn't fit the expected type (`std.json`). */
 export class JsonError extends FaError {
-	static faName = "JsonError";
+	static faName = this.register("JsonError");
 
 	/** @param {string} message what is wrong, and where */
 	constructor(message) {

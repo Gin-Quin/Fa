@@ -1155,6 +1155,18 @@ impl Walker<'_> {
 			};
 			return Some((bound, MemberKind::Function));
 		}
+		if text == "toString"
+			&& self.s.types.union_members(&receiver).iter().all(|&ty| {
+				ty == TypeId::ERROR
+					|| matches!(self.s.types.kind(ty),
+				TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _)
+				if self.s.types.nominal(nominal).kind == crate::types::NominalKind::Errors)
+			}) {
+			let builtin = builtins::by_path("Error#toString")?;
+			self.set_resolution(member, Resolution::Builtin(builtin));
+			let ty = builtins::value_type(&mut self.s.types, builtin)?;
+			return Some((ty, MemberKind::Builtin));
+		}
 		if let TypeKind::Param(param) = self.s.types.kind(receiver) {
 			let constraint = self.s.types.param(param).constraint;
 			if constraint == TypeId::UNKNOWN || constraint.is_unset() {

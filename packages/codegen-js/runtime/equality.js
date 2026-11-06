@@ -122,7 +122,10 @@ export function faDeepEquals(a, b, sameValueZero) {
 			continue;
 		}
 		if (Object.getPrototypeOf(x) !== Object.getPrototypeOf(y)) {
-			return false;
+			const errorType = x[Symbol.for("fa.error.type")];
+			if (typeof errorType !== "string" || errorType !== y[Symbol.for("fa.error.type")]) {
+				return false;
+			}
 		}
 		// An absent optional field is `none`, like a field set to `undefined`.
 		// Relation sides are not data (D21).

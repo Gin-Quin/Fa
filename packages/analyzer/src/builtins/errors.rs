@@ -88,7 +88,13 @@ macro_rules! error_types {
 		pub static BUILTINS: &[Builtin] = &[$(Builtin {
 			path: $name,
 			kind: BuiltType(|types| error_type(types, $name).expect("a built-in error")),
-		}),*];
+		}),*, Builtin {
+			path: "Error#toString",
+			kind: crate::builtins::BuiltinKind::Function(&crate::builtins::Signature {
+				params: &[], variadic: false,
+				ret: crate::builtins::Ty::Is(TypeId::STRING), throws: None,
+			}),
+		}];
 	};
 }
 

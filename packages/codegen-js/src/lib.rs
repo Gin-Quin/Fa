@@ -108,8 +108,8 @@ pub enum ProgramProofs {
 	/// The module is the whole program: the index proofs and the
 	/// never-negative places, over its own stores.
 	Alone,
-	/// A module of a program: the never-negative places, by the failed
-	/// claims of the whole program ([`program_claims`]).
+	/// A module of a program: private-array index proofs and never-negative
+	/// places, by the failed claims of the whole program ([`program_claims`]).
 	Claims(std::sync::Arc<BTreeSet<String>>),
 }
 
@@ -134,9 +134,9 @@ pub fn program_claims(
 }
 
 /// Whether the JavaScript of a file of a program of several files depends
-/// on the program's claims ([`ProgramProofs::Claims`]): an item index that
-/// may count from the end, and that its proofs say is never negative when
-/// no claim of the program fails. Failed claims only take proofs away, so
+/// on the program's claims ([`ProgramProofs::Claims`]): an item index whose
+/// bounds check or count from the end disappears when no claim fails.
+/// Failed claims only take proofs away, so
 /// a file without one is generated the same way whatever the claims: a
 /// streaming build writes it before every unit's claims are known.
 pub fn reads_program_claims(session: &Session, file: FileId, overflow_checks: bool) -> bool {
@@ -146,18 +146,17 @@ pub fn reads_program_claims(session: &Session, file: FileId, overflow_checks: bo
 	let tree = session.tree(file);
 	let analysis = session.analysis(file);
 	let types = session.types();
-	let from_end: Vec<NodeId> = (0..tree.nodes.len())
+	let indices: Vec<(NodeId, NodeId, IndexAccess)> = (0..tree.nodes.len())
 		.map(NodeId::new)
 		.filter_map(|n| match view(tree, n) {
-			View::Index { index, .. }
-				if index_access(tree, analysis, types, n, index) == IndexAccess::FromEnd =>
-			{
-				Some(index)
-			}
+			View::Index { index, .. } => match index_access(tree, analysis, types, n, index) {
+				IndexAccess::Direct => None,
+				access => Some((n, index, access)),
+			},
 			_ => None,
 		})
 		.collect();
-	if from_end.is_empty() {
+	if indices.is_empty() {
 		return false;
 	}
 	let nothing_failed = |_: &str| false;
@@ -166,9 +165,13 @@ pub fn reads_program_claims(session: &Session, file: FileId, overflow_checks: bo
 		failed: &nothing_failed,
 	};
 	let facts = index_facts(tree, analysis, types, scope, overflow_checks);
-	from_end
+	indices
 		.into_iter()
-		.any(|index| facts.proven_non_negative(index))
+		.any(|(node, index, access)| match access {
+			IndexAccess::Checked => facts.proven_index(node),
+			IndexAccess::FromEnd => facts.proven_non_negative(index),
+			IndexAccess::Direct => false,
+		})
 }
 
 /// Whether a file reads no other file of the session: alone, it is the
@@ -931,6 +934,52 @@ mod tests {
 		)));
 		let program = session.analyze_package(Some("application/main"));
 		(session, program)
+	}
+
+	#[test]
+	fn a_package_proves_private_indices_after_collecting_every_units_claims() {
+		for (other, checked) in [
+			("export function = (): UInt32 => 0\n", false),
+			(
+				"export function = (): UInt32 => {\n\tlet wide = { next = UInt32(1000000), extra = 1 }\n\twide.next\n}\n",
+				true,
+			),
+		] {
+			let files = [
+				("package.fa".to_string(), "export = { name = \"indices\" }\n".to_string()),
+				("library/chain.fa".to_string(), "type Link = { next: UInt32 }\nmutable links: Array<Link> = [{ next = 0 }]\nfunction hop = (items: Array<Link>, from: UInt32): UInt32 throws IndexError => try items[try items[from].next].next\nexport function = (): UInt32 => hop(links, 0) catch error => 99\n".to_string()),
+				("library/other.fa".to_string(), other.to_string()),
+				("application/main.fa".to_string(), "export function = () => console.log(library.chain(), library.other())\n".to_string()),
+			];
+			let mut session = Session::new();
+			session.set_resolver(Box::new(fa_analyzer::CodebaseResolver::from_texts(
+				&files, None,
+			)));
+			let program = session.analyze_package(Some("application/main"));
+			let links = program
+				.files
+				.iter()
+				.copied()
+				.find(|&file| session.module(file) == "library/chain")
+				.expect("links module");
+			// The first streaming pass must defer this module, including
+			// when a foreign wider object eventually prevents the proof.
+			assert!(reads_program_claims(&session, links, true));
+			let output = generate_program(
+				&mut session,
+				&program,
+				&Options::new(Target::Bun, "indices"),
+				&EntryOptions::default(),
+			)
+			.expect("the package generates");
+			let code = &output
+				.modules
+				.iter()
+				.find(|(path, _)| path == "library/chain.js")
+				.expect("links output")
+				.1;
+			assert_eq!(code.contains("faIndex("), checked, "{code}");
+		}
 	}
 
 	/// Modules are read only through their interfaces: with the trees and

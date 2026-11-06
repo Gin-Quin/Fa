@@ -1,0 +1,17 @@
+-- A cycle is compiled in one unit. The two files have the same node
+-- positions, but only a's position is nonnegative: a proof cache must be
+-- scoped by file, including when lowering switches between the files.
+-- file: library/a.fa
+type Cursor = { position: Integer }
+mutable cursor = Cursor { position = 1 - 1 }
+function own = (): Byte => "abc".bytes().get(cursor.position) ?? 0
+export function = (depth: Integer): Byte => if depth == 0 { own() } else { b(depth - 1) }
+-- file: library/b.fa
+type Cursor = { offset: Integer }
+mutable cursor = Cursor { offset = 0 - 1 }
+function own = (): Byte => "abc".bytes().get(cursor.offset) ?? 0
+export function = (depth: Integer): Byte => if depth == 0 { own() } else { a(depth - 1) }
+-- file: application/main.fa
+export function = () => {
+	console.log(library.a(0), library.b(0), library.a(1), library.b(1)) -- prints: 97 99 99 97
+}

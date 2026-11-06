@@ -1,0 +1,32 @@
+-- A key loop reuses node positions under each key's analysis. The proof
+-- for `good` must not remove the bounds check of `bad`.
+type Indices = { good: 0, bad: 1000000 }
+let values: Indices = { good = 0, bad = 1000000 }
+type Link = { next: UInt32 }
+mutable links: Array<Link> = [{ next = 0 }]
+static keys: Keys<Indices> = { good, bad }
+function walk = (items: Array<Link>) => {
+	@for key in keys {
+		let index = values[key]
+		console.log(items[index].next catch error => 99)
+	}
+}
+walk(links)
+-- prints: 0
+-- prints: 99
+
+-- Stores in an earlier key's body also count after the loop. The last
+-- body's safe literal does not describe the values pushed by every key.
+type Destinations = { far: 1000000, near: 0 }
+let destinations: Destinations = { far = 1000000, near = 0 }
+type Jump = { to: UInt32 }
+mutable jumps: Array<Jump> = [{ to = 0 }]
+static copied: Keys<Destinations> = { far, near }
+function fill = (items: Array<Jump>) mutates items => {
+	@for key in copied {
+		items.push({ to = destinations[key] })
+	}
+}
+function hop = (items: Array<Jump>, from: UInt32): UInt32 throws IndexError => try items[try items[from].to].to
+fill(jumps)
+console.log(hop(jumps, 1) catch error => 99) -- prints: 99

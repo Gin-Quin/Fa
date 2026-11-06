@@ -562,12 +562,18 @@ impl Generator<'_> {
 	}
 
 	/// The index proofs of the file (`Options::proofs`): all of them when it
-	/// is the whole program, the never-negative places by the program's
-	/// failed claims in a program of several files. Tasks change nothing:
+	/// is the whole program; private-array indices and never-negative
+	/// places by the merged claims in a program of several files. Tasks change nothing:
 	/// the claims see the stores of their bodies like any other.
 	fn index_facts(&self) -> &fa_analyzer::proofs::IndexFacts {
 		self.index_facts.get_or_init(|| {
 			use fa_analyzer::proofs::{ProofScope, index_facts};
+			// During a key loop `self.analysis` is one key's snapshot. The
+			// program's stores belong to all keys, whose common summary is
+			// not available yet; never cache the first key's proof for all.
+			if !self.session.analysis(self.file).key_loop_bodies.is_empty() {
+				return fa_analyzer::proofs::IndexFacts::default();
+			}
 			let checks = self.options.overflow_checks;
 			match &self.options.proofs {
 				crate::ProgramProofs::None => index_facts(

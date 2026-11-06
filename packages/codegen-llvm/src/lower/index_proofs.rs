@@ -5,9 +5,9 @@
 //! `nodes` never shrinks; `items[position]` doesn't count from the end when
 //! every value of `position` is never negative.
 //!
-//! The index proofs need the whole program in one file (a program lowered
-//! as one module from one file); the never-negative places also work per
-//! unit, from the program's failed claims (`facts::PROOF_CLAIMS`).
+//! Both work per unit, from the program's failed claims
+//! (`facts::PROOF_CLAIMS`). Index proofs require an array private to its
+//! file and places whose values no other file may supply.
 
 use fa_analyzer::ids::NodeId;
 use fa_analyzer::proofs::{IndexFacts, ProofScope, index_facts};
@@ -46,6 +46,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	fn compute_index_facts(&self) -> IndexFacts {
+		// The current analysis may be one key's snapshot. Its stores do
+		// not summarize the other keys, and its node indices are the same.
+		if !self.session.analysis(self.file).key_loop_bodies.is_empty() {
+			return IndexFacts::default();
+		}
 		let checks = self.overflow_checks();
 		// asynchronous code too: the claims are flow-insensitive (every
 		// store of a place, wherever and whenever it runs: a task, a callee
@@ -54,7 +59,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// analysis's intervals are flow facts, and it drops those of the
 		// values others may write at each `await`
 		// a build per unit: the places every unit stores to, resolved by the
-		// driver (`facts::PROOF_CLAIMS`); the index proofs stay whole-program
+		// driver (`facts::PROOF_CLAIMS`)
 		if !self.whole_program {
 			let Some(failed) = self
 				.program_facts
@@ -70,10 +75,38 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			};
 			return index_facts(self.tree, self.analysis, self.types(), scope, checks);
 		}
-		let scope = if self.other_files.is_empty() {
-			ProofScope::WholeFile
-		} else {
-			ProofScope::Nothing
+		if self.other_files.is_empty() {
+			return index_facts(
+				self.tree,
+				self.analysis,
+				self.types(),
+				ProofScope::WholeFile,
+				checks,
+			);
+		}
+		// A multi-file program lowered as one module uses the same claims
+		// as a package built per unit. Resolve them once for the module;
+		// the index facts themselves are cached separately in each FileState.
+		let claims = self.program_proof_claims.get_or_init(|| {
+			let files: Vec<_> = std::iter::once(self.file)
+				.chain(self.other_files.keys().copied())
+				.map(|file| {
+					fa_analyzer::proofs::ProofFile::new(
+						self.session.tree(file),
+						self.session.analysis(file),
+						self.types(),
+					)
+					.with_module(self.session.module(file))
+				})
+				.collect();
+			fa_analyzer::proofs::resolve_claims(&fa_analyzer::proofs::unit_claims_of_goal(
+				&files, checks,
+			))
+		});
+		let failed = |key: &str| claims.contains(key);
+		let scope = ProofScope::Unit {
+			module: self.session.module(self.file),
+			failed: &failed,
 		};
 		index_facts(self.tree, self.analysis, self.types(), scope, checks)
 	}

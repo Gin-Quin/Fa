@@ -310,6 +310,48 @@ fn a_re_analyzed_unit_generates_the_same_javascript() {
 	assert_eq!(outputs[0].len(), outputs[1].len());
 }
 
+/// A private array's index checks depend on stores in every unit. The
+/// streaming builder must defer its module even when the first analysis
+/// still has `INDEX_CHECK`, then use the merged claims during re-analysis.
+#[test]
+fn javascript_package_indices_use_every_units_field_stores() {
+	let cache = scratch("packages-index-proofs-cache");
+	let root = scratch("packages-index-proofs");
+	fs::create_dir_all(root.join("library")).unwrap();
+	fs::create_dir_all(root.join("application")).unwrap();
+	fs::write(root.join("package.fa"), "export = { name = \"indices\" }\n").unwrap();
+	fs::write(root.join("library/chain.fa"), "type Link = { next: UInt32 }\nmutable links: Array<Link> = [{ next = 0 }]\nfunction hop = (items: Array<Link>, from: UInt32): UInt32 throws IndexError => try items[try items[from].next].next\nexport function = (): UInt32 => hop(links, 0) catch error => 99\n").unwrap();
+	fs::write(
+		root.join("application/main.fa"),
+		"export function = () => console.log(library.chain(), library.other())\n",
+	)
+	.unwrap();
+	for (other, checked) in [
+		("export function = (): UInt32 => 0\n", false),
+		(
+			"export function = (): UInt32 => {\n\tlet wide = { next = UInt32(1000000), extra = 1 }\n\twide.next\n}\n",
+			true,
+		),
+	] {
+		fs::write(root.join("library/other.fa"), other).unwrap();
+		let output = root.join("out");
+		let (_, stderr, code) = fa(
+			&[
+				"build",
+				".",
+				"--target=bun",
+				"--minify=false",
+				&format!("--output={}", output.display()),
+			],
+			&root,
+			&cache,
+		);
+		assert_eq!(code, 0, "{stderr}");
+		let code = fs::read_to_string(output.join("bun/library/chain.js")).unwrap();
+		assert_eq!(code.contains("faIndex("), checked, "{code}");
+	}
+}
+
 /// A package compiled per unit (design/parallel-pipeline.md §3.3): the
 /// objects of its units (the cache of `fa run`) and its executable
 /// (`fa build`, ThinLTO) are the same whatever the threads and the order

@@ -21,7 +21,8 @@ use crate::types::{CollKind, PathRoot, TypeFlags, TypeKind, TypeStore};
 
 /// The fact of a unit whose values may come from outside the program
 /// ([`ProofFile::opaque`]: JSON parsing, reading a C pointer, C code
-/// writing through a pointer): the objects, arrays and maps it builds or
+/// writing through a pointer, or bodies checked under several key-loop
+/// analyses): the objects, arrays and maps it builds or
 /// gives away hold any integers, so no claim of a field, items or values
 /// holds (`unit_claims`).
 pub const OPAQUE: &str = "opaque";
@@ -204,6 +205,13 @@ impl<'a> ProofFile<'a> {
 	}
 
 	fn compute_opaque(&self) -> bool {
+		// A key loop has a separate analysis for each key, with different
+		// types and stores at the same node indices. Its main analysis is
+		// not a summary of all those stores. Until it is, a proof may not
+		// choose one key's stores as the invariant of the whole program.
+		if !self.analysis.key_loop_bodies.is_empty() {
+			return true;
+		}
 		let builds = (0..self.tree.nodes.len()).any(|at| {
 			matches!(self.analysis.call(NodeId::new(at)).map(|info| info.callee),
 				Some(Callee::Builtin(id))
@@ -620,6 +628,14 @@ impl<'p> Prover<'p> {
 			if failed(OPAQUE) {
 				return false;
 			}
+			// An index belongs to this file's private array. Its own stores
+			// still need the local fixpoint; another file supplying values
+			// of the same place prevents that proof altogether.
+			if matches!(self.goal, Goal::Index { .. }) {
+				return self.file.key(claim).is_some_and(|key| {
+					!failed(&format!("i{SEPARATOR}{key}")) && !self.failed.contains(&claim)
+				});
+			}
 			let failed_key = |key: &str| failed(&format!("{goal}{SEPARATOR}{key}"));
 			return match self.file.key(claim) {
 				Some(key) => {
@@ -642,7 +658,7 @@ impl<'p> Prover<'p> {
 		!self.failed.contains(&claim)
 	}
 
-	/// The name of the goal in the facts (never-negative only).
+	/// The name of the goal in the facts.
 	fn goal_name(&self) -> &'static str {
 		match self.goal {
 			Goal::NonNegative { checked: true } => "n",
@@ -1776,7 +1792,11 @@ impl Prover<'_> {
 /// the object types whose fields it claims, `fields type names` (the names
 /// of its fields, `,`-separated): the objects of a type with every field of
 /// another may become objects of that one (a wider object, an instance of a
-/// generic type). [`resolve_claims`] merges them.
+/// generic type). `unit place module` names every file that may supply a
+/// place's values (including its reads conservatively), and
+/// `unit array:type module` names the files mentioning an array type of
+/// objects. [`resolve_claims`] merges them: places and arrays mentioned by
+/// several files cannot carry one file's private index invariant.
 pub fn unit_claims(files: &[ProofFile<'_>]) -> BTreeSet<String> {
 	claims_of_goals(files, &[true, false])
 }
@@ -1795,6 +1815,29 @@ fn claims_of_goals(files: &[ProofFile<'_>], goals: &[bool]) -> BTreeSet<String> 
 			out.insert(OPAQUE.to_string());
 		}
 		let types = file.types();
+		// A literal also supplies fields filled from a spread, an omitted
+		// optional or another file's constant default. Those have no local
+		// integer expression from which `candidates` could discover them.
+		for object in file.analysis.objects.values() {
+			let prover = Prover::new(file, Goal::NonNegative { checked: true });
+			for &(name, value) in &object.fields {
+				if let Some(key) = prover.unit_key(Claim::Field(object.ty, name)) {
+					out.insert(format!("unit{SEPARATOR}{key}{SEPARATOR}{}", file.module));
+					// `holds(Field)` cannot prove these values from a local
+					// expression either. Publish its failure even when no
+					// local read made the field a candidate.
+					if !matches!(value, FieldValue::Given(_) | FieldValue::Default(_)) {
+						for &checked in goals {
+							let goal = if checked { "n" } else { "w" };
+							out.insert(format!("{goal}{SEPARATOR}{key}{SEPARATOR}!"));
+						}
+					}
+				}
+			}
+			if let Some(line) = shape_line(types, object.ty) {
+				out.insert(format!("fields{}", &line["shape".len()..]));
+			}
+		}
 		for &checked in goals {
 			let mut prover = Prover::new(file, Goal::NonNegative { checked }).per_unit();
 			let goal = prover.goal_name();
@@ -1807,6 +1850,15 @@ fn claims_of_goals(files: &[ProofFile<'_>], goals: &[bool]) -> BTreeSet<String> 
 				let Some(key) = prover.unit_key(claim) else {
 					continue;
 				};
+				// Include reads too: this conservative set ensures that a
+				// file claiming a place always names itself as one of its
+				// users, even when it stores no value there locally.
+				if matches!(
+					claim,
+					Claim::Field(..) | Claim::Items(_) | Claim::MapValues(_)
+				) {
+					out.insert(format!("unit{SEPARATOR}{key}{SEPARATOR}{}", file.module));
+				}
 				if let Claim::Field(owner, _) = claim
 					&& let Some(owner) = file.object_type(owner)
 					&& let Some(name) = stable_type_name(types, owner)
@@ -1845,6 +1897,26 @@ fn claims_of_goals(files: &[ProofFile<'_>], goals: &[bool]) -> BTreeSet<String> 
 			// writes to a field of an unknown owner
 			for name in prover.unknown_field_writes() {
 				out.insert(format!("{goal}{SEPARATOR}field:*.{name}{SEPARATOR}!"));
+				out.insert(format!(
+					"unit{SEPARATOR}field:*.{name}{SEPARATOR}{}",
+					file.module
+				));
+			}
+		}
+		// An array family is local only if no other file mentions its
+		// type. Its local walk checks every use and every parameter too.
+		let mut seen = FxHashSet::default();
+		for at in 0..file.tree.nodes.len() {
+			let ty = file.analysis.type_of(NodeId::new(at));
+			if let TypeKind::Collection(CollKind::Array, item, _) = types.kind(ty)
+				&& matches!(types.kind(item), TypeKind::Object(_))
+				&& seen.insert(ty)
+				&& let Some(name) = stable_type_name(types, ty)
+			{
+				out.insert(format!(
+					"unit{SEPARATOR}array:{name}{SEPARATOR}{}",
+					file.module
+				));
 			}
 		}
 	}
@@ -1858,7 +1930,8 @@ fn claims_of_goals(files: &[ProofFile<'_>], goals: &[bool]) -> BTreeSet<String> 
 /// fields; a failed `field:*.name` fails that field of every type, a failed
 /// `items:*` (`values:*`) the items (values) of every type. The result
 /// holds `goal key` (separated by [`SEPARATOR`]) for each failed place, and
-/// [`OPAQUE`].
+/// [`OPAQUE`]. It also holds `i key` for a field, collection or array type
+/// used by several files, including wider shapes and generic stores.
 pub fn resolve_claims(edges: &BTreeSet<String>) -> BTreeSet<String> {
 	let mut failed: BTreeSet<String> = BTreeSet::new();
 	// the places depending on each place, by goal
@@ -1866,6 +1939,7 @@ pub fn resolve_claims(edges: &BTreeSet<String>) -> BTreeSet<String> {
 	let mut queue: Vec<String> = Vec::new();
 	let mut shapes: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 	let mut goals: BTreeSet<String> = BTreeSet::new();
+	let mut units: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 	for edge in edges {
 		if edge == OPAQUE {
 			failed.insert(OPAQUE.to_string());
@@ -1880,6 +1954,13 @@ pub fn resolve_claims(edges: &BTreeSet<String>) -> BTreeSet<String> {
 				key.to_string(),
 				rest.split(',').map(str::to_string).collect(),
 			);
+			continue;
+		}
+		if goal == "unit" {
+			units
+				.entry(key.to_string())
+				.or_default()
+				.insert(rest.to_string());
 			continue;
 		}
 		goals.insert(goal.to_string());
@@ -1912,6 +1993,36 @@ pub fn resolve_claims(edges: &BTreeSet<String>) -> BTreeSet<String> {
 						.push(format!("{goal}{SEPARATOR}field:{narrow}.{name}"));
 				}
 			}
+			for name in narrow_names {
+				if let Some(writers) = units.get(&format!("field:{wide}.{name}")).cloned() {
+					units
+						.entry(format!("field:{narrow}.{name}"))
+						.or_default()
+						.extend(writers);
+				}
+			}
+		}
+	}
+	// Generic stores and stores through an unknown owner may reach every
+	// concrete place they stand for, regardless of its type's spelling.
+	let stars: Vec<(String, BTreeSet<String>)> = units
+		.iter()
+		.filter(|(key, _)| key.starts_with("field:*.") || *key == "items:*" || *key == "values:*")
+		.map(|(key, writers)| (key.clone(), writers.clone()))
+		.collect();
+	for (key, writers) in &mut units {
+		for (star, extra) in &stars {
+			let matches = if let Some(name) = star.strip_prefix("field:*.") {
+				key.starts_with("field:") && (name == "*" || key.ends_with(&format!(".{name}")))
+			} else {
+				key.starts_with(star.trim_end_matches('*'))
+			};
+			if matches {
+				writers.extend(extra.iter().cloned());
+			}
+		}
+		if writers.len() > 1 {
+			failed.insert(format!("i{SEPARATOR}{key}"));
 		}
 	}
 	let propagate = |queue: &mut Vec<String>, failed: &mut BTreeSet<String>| {
@@ -1990,16 +2101,16 @@ impl IndexFacts {
 /// Which places the proofs of a file see.
 #[derive(Copy, Clone)]
 pub enum ProofScope<'a> {
-	/// None: no proof (a program of several files lowered as one module, an
-	/// asynchronous program).
+	/// None: no whole-program claims are available.
 	Nothing,
 	/// The file is the whole program: the index proofs and the
 	/// never-negative places, over its own stores.
 	WholeFile,
-	/// A unit of a program built per unit: the never-negative places, by
+	/// A file of a program: private-array indices and never-negative places, by
 	/// the program's failed claims ([`unit_claims`] of every unit, merged
 	/// by [`resolve_claims`]; `failed` says whether a key is among them),
-	/// the file named by its module.
+	/// the file named by its module. A place used by another file cannot
+	/// carry a private array's index invariant.
 	Unit {
 		module: &'a str,
 		failed: &'a dyn Fn(&str) -> bool,
@@ -2054,6 +2165,7 @@ pub fn index_facts(
 		ProofScope::Unit { module, failed } => {
 			let file = ProofFile::new(tree, analysis, types).with_module(module);
 			result.non_negative = non_negative(&file, Some(failed), overflow_checks);
+			result.proven = proven_indices(&file, Some(failed), overflow_checks);
 			result
 		}
 		ProofScope::WholeFile => {
@@ -2064,14 +2176,18 @@ pub fn index_facts(
 				return result;
 			}
 			result.non_negative = non_negative(&file, None, overflow_checks);
-			result.proven = proven_indices(&file, overflow_checks);
+			result.proven = proven_indices(&file, None, overflow_checks);
 			result
 		}
 	}
 }
 
 /// The index nodes proven in bounds (see [`index_facts`]).
-fn proven_indices(file: &ProofFile<'_>, overflow_checks: bool) -> FxHashSet<NodeId> {
+fn proven_indices(
+	file: &ProofFile<'_>,
+	program: Option<&dyn Fn(&str) -> bool>,
+	overflow_checks: bool,
+) -> FxHashSet<NodeId> {
 	let analysis = file.analysis;
 	let types = file.types();
 	let count = file.tree.nodes.len();
@@ -2097,7 +2213,14 @@ fn proven_indices(file: &ProofFile<'_>, overflow_checks: bool) -> FxHashSet<Node
 		let [array] = symbols[..] else {
 			continue;
 		};
-		let Some(arrays) = array_family(file, array, array_type) else {
+		if let Some(failed) = program
+			&& (file.exported_value(array)
+				|| stable_type_name(types, array_type)
+					.is_none_or(|name| failed(&format!("i{SEPARATOR}array:{name}"))))
+		{
+			continue;
+		}
+		let Some(arrays) = array_family(file, array, array_type, program.is_some()) else {
 			continue;
 		};
 		let declaration = analysis.symbols.symbol(array).decl_node;
@@ -2118,6 +2241,9 @@ fn proven_indices(file: &ProofFile<'_>, overflow_checks: bool) -> FxHashSet<Node
 			},
 		)
 		.wrapping(!overflow_checks);
+		if let Some(failed) = program {
+			prover = prover.with_program(failed);
+		}
 		// the indices of the array, then the fixpoint of their claims
 		let indices: Vec<(NodeId, NodeId)> = (0..count)
 			.filter_map(|at| match file.view(NodeId::new(at)) {
@@ -2203,6 +2329,7 @@ fn array_family(
 	file: &ProofFile<'_>,
 	array: SymbolId,
 	array_type: TypeId,
+	per_unit: bool,
 ) -> Option<FxHashSet<SymbolId>> {
 	let analysis = file.analysis;
 	let parents = &file.parents;
@@ -2304,6 +2431,9 @@ fn array_family(
 	// member of the family; and the function is only called directly
 	for &symbol in family.iter().filter(|&&symbol| symbol != array) {
 		let function = file.function_of_param(symbol)?;
+		if per_unit && !file.private_function(function) {
+			return None;
+		}
 		let SymbolKind::Parameter { index } = analysis.symbols.symbol(symbol).kind else {
 			return None;
 		};
@@ -2438,5 +2568,101 @@ mod tests {
 		let failed = resolve_claims(&edges);
 		assert!(has(&failed, "n|local:m:1"), "{failed:?}");
 		assert!(!has(&failed, "n|values:Map<Int64, Int64>"), "{failed:?}");
+	}
+
+	#[test]
+	fn indices_require_places_and_arrays_private_to_one_file() {
+		let edges = set(&[
+			"unit|field:T.next|own",
+			"unit|field:T.next|other",
+			"unit|field:T.back|own",
+			"unit|array:Array<T>|own",
+			"unit|array:Array<T>|other",
+		]);
+		let failed = resolve_claims(&edges);
+		assert!(has(&failed, "i|field:T.next"));
+		assert!(has(&failed, "i|array:Array<T>"));
+		assert!(!has(&failed, "i|field:T.back"));
+	}
+
+	#[test]
+	fn foreign_wider_and_unknown_stores_prevent_private_field_proofs() {
+		let edges = set(&[
+			"fields|T|next",
+			"fields|Wide|extra,next",
+			"unit|field:T.next|own",
+			"unit|field:Wide.next|other",
+			"unit|items:Array<UInt32>|own",
+			"unit|items:*|generic",
+			"unit|values:Map<Int32, UInt32>|own",
+			"unit|field:T.back|own",
+			"unit|field:*.back|unknown",
+		]);
+		let failed = resolve_claims(&edges);
+		assert!(has(&failed, "i|field:T.next"));
+		assert!(has(&failed, "i|field:T.back"));
+		assert!(has(&failed, "i|items:Array<UInt32>"));
+		assert!(!has(&failed, "i|values:Map<Int32, UInt32>"));
+	}
+
+	#[test]
+	fn a_units_local_index_fixpoint_keeps_foreign_field_stores_checked() {
+		use crate::ids::NodeId;
+		use crate::syntax::{self, View};
+
+		use super::{ProofFile, ProofScope, index_facts, unit_claims};
+
+		let source = "type Link = { next: UInt32 }\nmutable links: Array<Link> = [{ next = 0 }]\nfunction hop = (items: Array<Link>, from: UInt32): UInt32 throws IndexError => try items[try items[from].next].next\nconsole.log(hop(links, 0) catch error => 99)\n";
+		let (session, file) = crate::analyze_source(source);
+		let tree = session.tree(file);
+		let analysis = session.analysis(file);
+		let types = session.types();
+		let proof = ProofFile::new(tree, analysis, types).with_module("own");
+		let mut edges = unit_claims(&[proof]);
+		let indices: Vec<_> = (0..tree.nodes.len())
+			.map(NodeId::new)
+			.filter(|&node| matches!(syntax::view(tree, node), View::Index { .. }))
+			.collect();
+		assert_eq!(indices.len(), 2);
+		let prove = |edges: &BTreeSet<String>| {
+			let failed = resolve_claims(edges);
+			let failed = |key: &str| failed.contains(key);
+			index_facts(
+				tree,
+				analysis,
+				types,
+				ProofScope::Unit {
+					module: "own",
+					failed: &failed,
+				},
+				true,
+			)
+		};
+		let facts = prove(&edges);
+		assert!(
+			indices.iter().all(|&node| facts.proven_index(node)),
+			"{facts:?}"
+		);
+
+		let (other, other_file) = crate::analyze_source(
+			"type Wide = { next: UInt32, extra: Integer }\nlet wide = Wide { next = 1000000, extra = 1 }\nconsole.log(wide)\n",
+		);
+		edges.extend(unit_claims(&[ProofFile::new(
+			other.tree(other_file),
+			other.analysis(other_file),
+			other.types(),
+		)
+		.with_module("other")]));
+		let facts = prove(&edges);
+		// The parameter passed zero is still proven locally; the index
+		// read from a field that another file may store is not.
+		assert_eq!(
+			indices
+				.iter()
+				.filter(|&&node| facts.proven_index(node))
+				.count(),
+			1,
+			"{facts:?}"
+		);
 	}
 }

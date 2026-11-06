@@ -242,6 +242,62 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn a_multi_file_program_proves_private_arrays_with_every_files_stores() {
+		for (other, checks) in [
+			("export function = (): UInt32 => 0\n", 0),
+			(
+				"export function = (): UInt32 => {\n\tlet wide = { next = UInt32(1000000), extra = 1 }\n\twide.next\n}\n",
+				1,
+			),
+		] {
+			let files = [
+				("package.fa".to_string(), "export = { name = \"indices\" }\n".to_string()),
+				("library/chain.fa".to_string(), "type Link = { next: UInt32 }\nmutable links: Array<Link> = [{ next = 0 }]\nfunction hop = (items: Array<Link>, from: UInt32): UInt32 throws IndexError => try items[try items[from].next].next\nexport function = (): UInt32 => hop(links, 0) catch error => 99\n".to_string()),
+				("library/other.fa".to_string(), other.to_string()),
+				("application/main.fa".to_string(), "export function = () => console.log(library.chain(), library.other())\n".to_string()),
+			];
+			let mut session = Session::new();
+			session.set_target("native");
+			session.set_resolver(Box::new(fa_analyzer::CodebaseResolver::from_texts(
+				&files, None,
+			)));
+			let program = session.analyze_package(Some("application/main"));
+			let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+				.join("fa-checks")
+				.join(format!("private-indices-{checks}"));
+			let options = Options {
+				opt_level: OptLevel::O0,
+				emit_ir: true,
+				..Options::default()
+			};
+			let artifact = fa_codegen_llvm::compile_program(
+				&session,
+				&program,
+				Target::Native,
+				&options,
+				&output,
+			)
+			.expect("the package compiles");
+			let ir = std::fs::read_to_string(artifact.ir.expect("IR emitted")).expect("IR file");
+			let mut own = String::new();
+			let mut keep = false;
+			for line in ir.lines() {
+				if line.starts_with("define ") {
+					keep = line.contains("@fa.");
+				}
+				if keep {
+					own.push_str(line);
+					own.push('\n');
+				}
+				if line == "}" {
+					keep = false;
+				}
+			}
+			assert_eq!(count(&own, "fa_error_index"), checks, "{own}");
+		}
+	}
+
+	#[test]
 	fn a_field_counted_up_from_zero_is_never_negative() {
 		// `get(self.position)` counts a negative index from the end: a select
 		// on `position < 0`, which the proof that every store of the field

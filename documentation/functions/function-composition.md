@@ -140,21 +140,21 @@ type Auth = { auth: String }
 type Logged = { logged: Boolean }
 
 -- Each middleware returns its input enriched with new properties
-function addTimestamp(Context: Request) = (request: Context): { ...Context, ...Timestamp } => {
+function addTimestamp = <Context: Request>(request: Context): { ...Context, ...Timestamp } => {
 	{
 		...request
 		timestamp = getCurrentTime()
 	}
 }
 
-function addAuthHeader(Context: Request) = (request: Context): { ...Context, ...Auth } => {
+function addAuthHeader = <Context: Request>(request: Context): { ...Context, ...Auth } => {
 	{
 		...request
 		auth = getAuthToken()
 	}
 }
 
-function logRequest(Context: { ...Request, ...Timestamp }) = (request: Context): { ...Context, ...Logged } => {
+function logRequest = <Context: { ...Request, ...Timestamp }>(request: Context): { ...Context, ...Logged } => {
 	console.log("Logging request at {request.timestamp}")
 	{
 		...request
@@ -190,7 +190,7 @@ type Router = { router: AppRouter }
 type Database = { database: DatabaseConnection }
 
 -- Core application setup
-function setupConfig(Application: App) = (app: Application): { ...Application, ...Config } => {
+function setupConfig = <Application: App>(app: Application): { ...Application, ...Config } => {
 	{
 		...app
 		config = loadConfiguration()
@@ -198,7 +198,7 @@ function setupConfig(Application: App) = (app: Application): { ...Application, .
 }
 
 -- Database plugin
-function addDatabase(Application: { ...App, ...Config }) = (app: Application): { ...Application, ...Database } => {
+function addDatabase = <Application: { ...App, ...Config }>(app: Application): { ...Application, ...Database } => {
 	{
 		...app
 		database = connectToDatabase(app.config.databaseUrl)
@@ -206,7 +206,7 @@ function addDatabase(Application: { ...App, ...Config }) = (app: Application): {
 }
 
 -- Router plugin
-function addRouter(Application: { ...App, ...Config }) = (app: Application): { ...Application, ...Router } => {
+function addRouter = <Application: { ...App, ...Config }>(app: Application): { ...Application, ...Router } => {
 	{
 		...app
 		router = createRouter(app.config.routes)
@@ -255,9 +255,9 @@ function migrateFromV1 = migrate[1..] -- (v1: DataV1) => DataV3
 Create data processing pipelines by composing transformation functions:
 
 ```fa
-function filterEven = (numbers: Array(Integer)) => numbers.filter((n) => n %% 2 == 0)
-function multiplyByTwo = (numbers: Array(Integer)) => numbers.map((n) => n * 2)
-function sum = (numbers: Array(Integer)) => numbers.reduce((total, n) => total + n, 0)
+function filterEven = (numbers: Array<Integer>) => numbers.filter((n) => n %% 2 == 0)
+function multiplyByTwo = (numbers: Array<Integer>) => numbers.map((n) => n * 2)
+function sum = (numbers: Array<Integer>) => numbers.reduce((total, n) => total + n, 0)
 
 function processNumbers = filterEven then multiplyByTwo then sum
 

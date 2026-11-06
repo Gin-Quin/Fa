@@ -16,9 +16,9 @@ Fa is designed for AI agents as much as for humans: everything a function does â
 | `$"Hello {name}"` | `"Hello {name}"` |
 | `long`, `double` | `Integer`, `Float` |
 | `(double)count` | `Float(count)` |
-| `List<T>` | `Array(T)` |
-| `Dictionary<K, V>` | `Map(K, V)` |
-| `HashSet<T>` | `Set(T)` |
+| `List<T>` | `Array<T>` |
+| `Dictionary<K, V>` | `Map<K, V>` |
+| `HashSet<T>` | `Set<T>` |
 | `T?` | `T?` |
 | `null` | `none` |
 | `x?.y` | `x?.y` |
@@ -85,14 +85,14 @@ Composition replaces inheritance:
 ```fa
 type Admin = {
 	...User
-	permissions: Array(String)
+	permissions: Array<String>
 }
 ```
 
 And an interface is just a shape:
 
 ```fa
-function process(Item: { id: Integer, name: String }) = (item: Item) => ...
+function process = <Item: { id: Integer, name: String }>(item: Item) => ...
 ```
 
 Any type with those fields satisfies it, with nothing to declare. Fa is [structurally typed](/advanced/structural-typing) â€” this is C#'s implicit interface implementation, generalised to fields and applied everywhere.
@@ -182,18 +182,18 @@ T? First<T>(List<T> items)
 ```
 
 ```fa
-function first(Item) = (items: Array(Item)): Item? => items.get(0)
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
 
 first([1, 2, 3])
-first(Float)([1, 2, 3])
+first<Float>([1, 2, 3])
 ```
 
-Generic parameters come right after the name. They are inferred from the arguments and the expected type; when you need to write them, they are applied first: `first(Float)(...)`.
+Generic parameters use angle brackets, like in C#. A type declares them after its name, and a function at the start of its signature. They are inferred from the arguments and the expected type; when you need to write them, they come before the call: `first<Float>(...)`. A comparison is always written with whitespace after `<` (`a < b`): any other `<` opens a generic list.
 
 Constraints are structural rather than `where T : IComparable`:
 
 ```fa
-function largest(Item: { value: Integer }) = (items: Array(Item)): Item? => ...
+function largest = <Item: { value: Integer }>(items: Array<Item>): Item? => ...
 ```
 
 See [generics](/types/generics).

@@ -549,3 +549,16 @@ Lead's resolutions, to align with the rewritten pages when they land:
 - **An optional recursive sum keeps its tail call visible to LLVM** (`src/optimize.rs`). After the speed pipeline at O2/O3, a return block of at most eight instructions, beginning with phis and ending with integer arithmetic and a return, is duplicated onto its incoming edges when one predecessor calls the function itself. At most four predecessors, no memory operations, calls, floating-point operations or values used outside the block; a conditional predecessor gets a separate return edge. `tailcallelim` then makes an accumulator loop: `1 + (self.left?.count() ?? 0) + (self.right?.count() ?? 0)` recurses down the left edge and loops down the right. Effects and arguments before the suffix still run once, in their original order. The module is verified after the CFG change. Applies to whole-module and per-unit builds; size and development pipelines keep their previous behavior.
 - **An empty arena node is a call-free base case** (`lower/inlining.rs`). The existing recursive scalar base-case shortcut accepts either arm of an `if`, and an arena object's literal whose fields are all absent optionals (including explicit `none`). It is still a direct self-call with scalar parameters, no lambda, error convention, defaults or asynchronous frame; the guard only uses scalar operations and those parameters. Other object payloads and computed defaults keep the call. The leaf's temporary transfers its ownership to the merged result, so its cleanup never escapes the branch where it was created. No node-shape correlation is assumed: a missing left edge never proves the right one absent.
 - **Measurement** (audit size 14, LLVM 18, identical stdout to Rust): `binary-trees` falls from 139,390,371 to 112,713,221 dynamic instructions; Goose uses 128,147,370 (Fa/Goose 0.88). The 15 alternating CPU runs at size 17 on CPU 1 gave medians 121 ms for Fa and 113 ms for Goose while another workspace suite was active: fewer instructions do not yet establish a CPU-time win. The report and IR are retained under ignored `benchmarks/audit/build/before/` (`binary-loops.json`); `/tmp/fa-native-perf-next/binary-trees-actual-cpu.json` records the default-size samples.
+
+## Native reservation bounds (2026-11-06)
+
+A reservation must reject an unrepresentable byte count before narrowing it to a target
+word or entering unchecked append stores. On wasm32, string reservations saturate at the
+layout limit before conversion to usize; a counted item loop checks its byte multiplication
+in i64 first. Array length plus reservation uses a saturating signed sum, so overflow cannot
+turn a request into a no-op.
+
+Map capacity growth checks signed addition, doubling, next-power-of-two construction and
+allocation-size multiplication before performing them. Dense entry widths remain u64 until
+the size check, rather than truncating a wide entry to wasm's size_t. Counts that cannot fit
+stop with the existing out-of-memory exit; ordinary negative/empty cases keep their behavior.

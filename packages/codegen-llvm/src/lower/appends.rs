@@ -135,9 +135,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				continue;
 			}
 			let rounds = self.rounds_left(start, end, inclusive, false)?;
-			let rounds = self
-				.builder
-				.build_int_truncate_or_bit_cast(rounds, self.usize, "")?;
+			let rounds = self.string_byte_count(rounds)?;
 			// a few rounds, known: an inline string with room for them all
 			// stays inline (no heap block for a short result)
 			let room = self.inline_room();
@@ -278,15 +276,57 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let rounds = self.array_length(array)?.int();
 		for (symbol, target, least) in bytes {
 			let slot = self.slot_of(symbol, target)?;
-			let rounds = self
+			let multiply =
+				self.intrinsic("llvm.umul.with.overflow", &[rounds.get_type().into()])?;
+			let product = self
+				.call_value(
+					multiply,
+					&[
+						rounds.into(),
+						rounds.get_type().const_int(least, false).into(),
+					],
+				)?
+				.into_struct_value();
+			let amount = self
 				.builder
-				.build_int_truncate_or_bit_cast(rounds, self.usize, "")?;
-			let extra =
-				self.builder
-					.build_int_nuw_mul(rounds, self.usize.const_int(least, false), "")?;
+				.build_extract_value(product, 0, "")?
+				.into_int_value();
+			let overflow = self
+				.builder
+				.build_extract_value(product, 1, "")?
+				.into_int_value();
+			let limit = self.builder.build_int_z_extend_or_bit_cast(
+				self.string_kind_mask(),
+				rounds.get_type(),
+				"",
+			)?;
+			let amount = self
+				.builder
+				.build_select(overflow, limit, amount, "")?
+				.into_int_value();
+			let extra = self.string_byte_count(amount)?;
 			self.call_runtime("fa_string_reserve", &[slot.pointer.into(), extra.into()])?;
 		}
 		Ok(())
+	}
+
+	/// An unrepresentable reservation must stop before the unchecked stores
+	/// of its loop. In wasm, truncating 2^32 bytes to zero would reserve
+	/// nothing. Saturate at the string-size limit, which the runtime rejects.
+	pub(super) fn string_byte_count(&self, count: IntValue<'ctx>) -> Result<IntValue<'ctx>, Error> {
+		let count = if self.usize.get_bit_width() < count.get_type().get_bit_width() {
+			let limit =
+				self.builder
+					.build_int_z_extend(self.string_kind_mask(), count.get_type(), "")?;
+			let minimum = self.intrinsic("llvm.umin", &[count.get_type().into()])?;
+			self.call_value(minimum, &[count.into(), limit.into()])?
+				.into_int_value()
+		} else {
+			count
+		};
+		Ok(self
+			.builder
+			.build_int_truncate_or_bit_cast(count, self.usize, "")?)
 	}
 
 	/// `end - from` (plus one when inclusive, minus one after the current
@@ -395,9 +435,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.append_integer(target, value)?;
 		let current = self.builder.build_load(i64, counter, "")?.into_int_value();
 		let left = self.rounds_left(current, end, inclusive, true)?;
-		let left = self
-			.builder
-			.build_int_truncate_or_bit_cast(left, self.usize, "")?;
+		let left = self.string_byte_count(left)?;
 		self.call_runtime("fa_string_reserve_owned", &[target.into(), left.into()])?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(join);
@@ -545,9 +583,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_load(self.context.i64_type(), counter, "")?
 			.into_int_value();
 		let left = self.rounds_left(current, end, inclusive, true)?;
-		let left = self
-			.builder
-			.build_int_truncate_or_bit_cast(left, self.usize, "")?;
+		let left = self.string_byte_count(left)?;
 		self.call_runtime("fa_string_reserve_owned", &[target.into(), left.into()])?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(join);

@@ -6372,7 +6372,11 @@ static __attribute__((always_inline)) inline void table_place(FaTable *table, ui
 
 /// A new empty index of `slots` slots (a power of two).
 static void table_new_index(FaTable *table, int64_t slots) {
-	size_t bytes = (size_t)slots * table_slot_size(slots - 1);
+	size_t width = table_slot_size(slots - 1);
+	if ((uint64_t)slots > SIZE_MAX / width) {
+		out_of_memory();
+	}
+	size_t bytes = (size_t)slots * width;
 	table->index = fa_alloc(bytes, 8);
 	__builtin_memset(table->index, 0, bytes);
 	table->mask = slots - 1;
@@ -6417,6 +6421,10 @@ static FA_COLD void table_grow_index(FaTable *table, int64_t slots,
 
 /// The number of index slots for `capacity` entries.
 static int64_t index_slots(int64_t capacity) {
+	// Both the doubled request and the next power of two must fit i64.
+	if (capacity < 0 || capacity > INT64_MAX / 4) {
+		out_of_memory();
+	}
 	int64_t slots = 8;
 	while (slots < capacity * 2) {
 		slots *= 2;
@@ -6456,14 +6464,21 @@ static FA_COLD void table_dense_room(FaTable *table, int64_t entries, int64_t by
 	if (entries <= table->room) {
 		return;
 	}
+	if (table->room > INT64_MAX / 2) {
+		out_of_memory();
+	}
 	int64_t room = table->room == 0 ? TABLE_CHUNK_SLOTS : table->room * 2;
 	if (room < entries) {
 		room = entries;
 	}
-	uint8_t *grown = fa_alloc((size_t)(room * (bytes > 0 ? bytes : 1)), 16);
+	uint64_t width = bytes > 0 ? (uint64_t)bytes : 1;
+	if ((uint64_t)room > SIZE_MAX / width) {
+		out_of_memory();
+	}
+	uint8_t *grown = fa_alloc((size_t)room * width, 16);
 	if (table->entries != 0) {
-		copy_bytes(grown, table->entries, (size_t)(table->capacity * bytes));
-		fa_free(table->entries, (size_t)(table->room * (bytes > 0 ? bytes : 1)), 16);
+		copy_bytes(grown, table->entries, (size_t)table->capacity * (size_t)bytes);
+		fa_free(table->entries, (size_t)table->room * width, 16);
 	}
 	table->entries = grown;
 	table->room = room;
@@ -6476,6 +6491,9 @@ FA_EXPORT void fa_table_reserve(FaTable *table, int64_t additional, int64_t entr
                                 uint64_t (*hash_at)(const void *)) {
 	if (additional <= 0) {
 		return;
+	}
+	if (additional > INT64_MAX - table->length) {
+		out_of_memory();
 	}
 	int64_t wanted = table->length + additional;
 	if (wanted < table->length ||

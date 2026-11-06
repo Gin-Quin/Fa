@@ -108,17 +108,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					// a temporary: nothing keeps the room
 					return Ok(Val::void());
 				};
-				let extra = self.builder.build_int_z_extend_or_bit_cast(
-					additional_value,
-					self.usize,
-					"",
-				)?;
+				let extra = self.string_byte_count(additional_value)?;
 				self.call_runtime("fa_string_reserve", &[place.pointer.into(), extra.into()])?;
 			}
 			Repr::Array(item_type) => {
 				let array = receiver.value.expect("an array").into_pointer_value();
 				let (_, length) = self.array_parts(array)?;
-				let wanted = self.builder.build_int_add(length, additional_value, "")?;
+				let saturating = self.intrinsic("llvm.sadd.sat", &[length.get_type().into()])?;
+				let wanted = self
+					.call_value(saturating, &[length.into(), additional_value.into()])?
+					.into_int_value();
 				let item = self.item_repr(item_type, node)?;
 				let size = self.item_size(item)?;
 				self.call_runtime(
@@ -170,8 +169,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					return Ok(room);
 				}
 				let room = self.convert(room, Repr::Int(IntRepr::I64), capacity.index())?;
-				self.builder
-					.build_int_z_extend_or_bit_cast(room.int(), self.usize, "")?
+				self.string_byte_count(room.int())?
 			}
 			_ => self.usize.const_zero(),
 		};

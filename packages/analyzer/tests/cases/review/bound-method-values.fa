@@ -1,0 +1,8 @@
+type Human = { name: String, function describe = (self): String => self.name }
+let person = Human { name = "Ada" }
+let method = person.describe -- error: FN086
+let builtin = "Ada".toUpperCase -- error: FN086
+let numeric = (1).toString -- error: FN086
+function bad = <Item: { describe: (self) => String }>(item: Item) => item.describe -- error: FN086
+function call = () => person.describe()
+console.log(call(), (person.describe)())

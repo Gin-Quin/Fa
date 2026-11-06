@@ -193,3 +193,63 @@ fn a_remote_escape_invalidates_cached_region_builders() {
 	assert!(!changed.iter().any(|unit| unit == "double"), "{changed:?}");
 	run("8\n4\n0\n");
 }
+
+#[test]
+fn a_remote_capacity_read_invalidates_a_consulted_fact() {
+	use fa_codegen_llvm::facts::{FactLog, ProgramFacts, ROOT_REGIONS};
+
+	let mut files: Vec<(String, String)> = [
+		("package.fa", "export = { name = \"capacityCache\" }"),
+		("library/model.fa", "export namespace = { type Tree = Union { Leaf = { value: Integer }, List = { items: Array<Tree> } } }"),
+		("library/build.fa", "export function = (depth: Integer): model.Tree => { if depth == 0 { return model.Tree.Leaf { value = 1 } }\nmutable items: Array<model.Tree> = []\nitems.push(build(depth - 1))\nmodel.Tree.List { items } }"),
+		("library/read.fa", "export function = (tree: model.Tree): Integer => when tree is { model.Tree.Leaf => 1, model.Tree.List as { items } => items.length }"),
+		("application/main.fa", "export function = () => console.log(library.read(library.build(3)))"),
+	].into_iter().map(|(path, text)| (path.into(), text.into())).collect();
+	let analyze = |files: &[(String, String)]| {
+		let mut session = fa_analyzer::session::Session::new();
+		session.set_resolver(Box::new(CodebaseResolver::from_texts(files, None)));
+		let program = session.analyze_package(Some("application/main"));
+		assert!(program.files.iter().all(|&file| {
+			session
+				.diagnostics(file)
+				.iter()
+				.all(|diagnostic| diagnostic.severity != fa_analyzer::Severity::Error)
+		}));
+		let mut facts = ProgramFacts::of_unit(&session, &program.files);
+		facts.finish();
+		facts
+	};
+	let unobserved = analyze(&files);
+	let key = unobserved
+		.set(ROOT_REGIONS)
+		.unwrap()
+		.iter()
+		.find(|key| key.starts_with("capacity-unobserved\u{1f}"))
+		.unwrap();
+	let log = FactLog::default();
+	assert!(unobserved.consulted(ROOT_REGIONS, Some(&log)).contains(key));
+	let cached = log.to_text();
+	assert!(FactLog::still_holds(&cached, Some(&unobserved)));
+	let (_, reader) = files
+		.iter_mut()
+		.find(|(path, _)| path == "library/read.fa")
+		.unwrap();
+	*reader = reader.replace("items.length", "items.capacity");
+	let observed = analyze(&files);
+	assert!(!FactLog::still_holds(&cached, Some(&observed)));
+	let log = FactLog::default();
+	assert!(!observed.consulted(ROOT_REGIONS, Some(&log)).contains(key));
+	assert!(!FactLog::still_holds(&log.to_text(), Some(&unobserved)));
+	// Other proof answers remain reusable: the capacity observer does not
+	// change the root's ownership and does not invalidate unrelated facts.
+	let log = FactLog::default();
+	for key in unobserved
+		.set(ROOT_REGIONS)
+		.unwrap()
+		.iter()
+		.filter(|key| !key.starts_with("capacity-unobserved\u{1f}"))
+	{
+		assert!(unobserved.consulted(ROOT_REGIONS, Some(&log)).contains(key));
+	}
+	assert!(FactLog::still_holds(&log.to_text(), Some(&observed)));
+}

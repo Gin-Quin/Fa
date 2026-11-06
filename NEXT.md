@@ -11,3 +11,10 @@ The two initial API/backend patches were given to native_perf. The final scanner
 Validation: the final full workspace suite with LLVM finished with exit0 (session88538, /tmp/fa-arena-workspace-corrected-full.log), serialized by flock --close /tmp/fa-compiler-full-suite.lock, two cargo jobs/test threads, ulimit -v 8000000. The first run failed only on the obsolete disjoint-array small-offset throws fixture; the already-integrated0290400 version is copied here and all45 LLVM checks passed serially before the final full. Additional logs: /tmp/fa-arena-semantic-final.log (12/12), /tmp/fa-arena-object-cache-leaks.log, /tmp/fa-arena-foreign-roots-fixed.log (three targets). Final clippy is /tmp/fa-arena-clippy-delivery.log.
 
 No documentation/ edits. The technical decision and a note for the memory page are in design/decisions.md and design/pending-documentation.md.
+
+
+Capacity proof follow-up (proofs/arena-capacity, based on delivered 1a0d6b): adds the positive `regions::capacity_unobserved_key(types, array)` fact inside ROOT_REGIONS using the existing semantic walk and exact manifest. Any capacity read for the root family removes it; incomplete/opaque graphs keep no permission. Native_perf owns physical buffer compaction. Targeted semantic and remote-cache tests precede fmt/clippy/full. No documentation/ edits.
+
+Capacity delta frozen for full validation: regions14/14 and FactLog remote-capacity invalidation pass; workspace clippy has no warnings. Full log /tmp/fa-arena-capacity-workspace-full.log; jobs2, memory8GB and shared lock with --close. No JS runtime change in this delta.
+
+Capacity follow-up validated: full workspace LLVM suite exit0 (session66527, /tmp/fa-arena-capacity-workspace-full.log); no errors or warnings. Semantic14/14, remote FactLog positive/negative reuse and clippy green. Only native_perf should connect the exact-length physical representation, consulting the positive key. Preserve lead NEXT on integration.

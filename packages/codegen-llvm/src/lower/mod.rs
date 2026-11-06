@@ -340,6 +340,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	whole_program: bool,
 	/// The indices proven by the index proofs of fields (`index_proofs.rs`).
 	index_proofs: std::cell::RefCell<Option<fa_analyzer::proofs::IndexFacts>>,
+	/// Merged claims when every file is lowered into this module. Shared
+	/// between its per-file proof caches, which use file-local node ids.
+	program_proof_claims: std::cell::OnceCell<std::collections::BTreeSet<String>>,
 	/// The facts merged from every unit of a build per unit (`facts.rs`).
 	program_facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
 	/// The facts this lowering consulted (the key of a cached unit).
@@ -516,6 +519,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			program_facts: None,
 			fact_log: None,
 			index_proofs: std::cell::RefCell::new(None),
+			program_proof_claims: std::cell::OnceCell::new(),
 			unsafe_maps: program::unsafe_maps(session, files),
 			no_inline_maps: program::no_inline_maps(session, files),
 			packable_items: packed::packable_items(session, files),

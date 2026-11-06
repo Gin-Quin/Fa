@@ -720,6 +720,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.map(|index| index as u32)
 	}
 
+	/// A field's semantic resolution belongs to its declared shape (possibly
+	/// a generic constraint). An instance may have additional fields before
+	/// or after it, so only its name identifies the concrete layout slot.
+	pub(crate) fn concrete_field_index(&self, owner: TypeId, member: NodeId) -> Result<u32, Error> {
+		let Resolution::Field(shape, index) = self.analysis.resolution(member) else {
+			return Err(self.unsupported(member.index(), "this field"));
+		};
+		let name = self.types().shape_fields(shape)[index as usize].name;
+		if self
+			.types()
+			.fields_of(owner)
+			.get(index as usize)
+			.is_some_and(|field| field.name == name)
+		{
+			return Ok(u32::from(index));
+		}
+		self.field_index(owner, name)
+			.ok_or_else(|| self.unsupported(member.index(), "this field of the concrete type"))
+	}
+
 	/// An object literal (`{ x = 1 }`, `Point { x = 1 }`, `Shape.Circle { … }`).
 	pub(crate) fn object_literal(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
 		// a worker of an asynchronous program: its thread (tasks.rs)
@@ -1549,7 +1569,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		member: NodeId,
 	) -> Result<(Val<'ctx>, TypeId), Error> {
 		match self.analysis.resolution(member) {
-			Resolution::Field(_, index) => {
+			Resolution::Field(..) => {
 				if matches!(value.repr, Repr::Union | Repr::InlineUnion(_)) {
 					value = self.box_data(value, current_type, member)?;
 				}
@@ -1559,12 +1579,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let Repr::Object(object) = value.repr else {
 					return Err(self.unsupported(member.index(), "this field access"));
 				};
+				let index = self.concrete_field_index(object, member)?;
 				let field_type = self.types().fields_of(object)[index as usize].ty;
 				let repr = self.field_repr(object, index as usize, member.index())?;
 				let structure = value.value.expect("an object").into_struct_value();
-				let raw = self
-					.builder
-					.build_extract_value(structure, index as u32, "")?;
+				let raw = self.builder.build_extract_value(structure, index, "")?;
 				// a move-only field (a task, a resource) moves out of a
 				// temporary object: its other fields are dropped now, the
 				// field is a temporary itself
@@ -1936,7 +1955,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				current_type = target;
 				continue;
 			}
-			let Resolution::Field(_, index) = self.analysis.resolution(member) else {
+			let Resolution::Field(..) = self.analysis.resolution(member) else {
 				return Err(self.unsupported(member.index(), "this place"));
 			};
 			if matches!(slot.repr, Repr::Union | Repr::InlineUnion(_)) {
@@ -1958,6 +1977,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			// a field of an element of a columnar: in its column
 			if let Repr::Row(element) = slot.repr {
+				let index = self.concrete_field_index(element, member)?;
 				let field_type = self.types().fields_of(element)[index as usize].ty;
 				slot = Slot {
 					pointer: self.row_field(
@@ -1974,11 +1994,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let Repr::Object(object) = slot.repr else {
 				return Err(self.unsupported(member.index(), "this place"));
 			};
+			let index = self.concrete_field_index(object, member)?;
 			let field_type = self.types().fields_of(object)[index as usize].ty;
 			let structure = self.object_type(object);
-			let pointer =
-				self.builder
-					.build_struct_gep(structure, slot.pointer, index as u32, "")?;
+			let pointer = self
+				.builder
+				.build_struct_gep(structure, slot.pointer, index, "")?;
 			slot = Slot {
 				pointer,
 				repr: self.field_repr(object, index as usize, member.index())?,

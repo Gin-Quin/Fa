@@ -51,7 +51,7 @@ unsafe extern "C" {
 
 /// The version of the objects: a cached object of another version of the
 /// compiler is never reused.
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-4-platform-1-effects-1");
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-6-platform-1-effects-1");
 
 /// A file name made of a module path.
 fn file_name(module: &str) -> String {
@@ -391,6 +391,7 @@ fn lower_and_emit(
 					     key,
 					     arguments,
 					     callbacks,
+					     methods,
 					 }| InstanceRequest {
 						key: merger.decl_key(key),
 						arguments: arguments
@@ -400,6 +401,10 @@ fn lower_and_emit(
 						callbacks: callbacks
 							.into_iter()
 							.map(|(index, ty)| (index, merger.ty(ty)))
+							.collect(),
+						methods: methods
+							.into_iter()
+							.map(|method| method.merged(&mut merger))
 							.collect(),
 					},
 				)
@@ -1860,6 +1865,7 @@ fn instance_waves(
 				request.key,
 				&request.arguments,
 				&request.callbacks,
+				&request.methods,
 			);
 			if seen.insert((module.clone(), symbol)) {
 				groups.entry(module).or_default().push(request);

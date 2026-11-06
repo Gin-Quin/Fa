@@ -8,12 +8,12 @@
 
 use std::sync::Arc;
 
-use crate::analysis::NodeFlags;
+use crate::analysis::{Callee, NodeFlags, WrittenReturn, WrittenType};
 use crate::check::Walker;
 use crate::diagnostics::codes::advanced::{STR001, STR003};
 use crate::diagnostics::codes::types::TF020;
 use crate::diagnostics::codes::values::E_TYPE_1;
-use crate::ids::{NodeId, ParamId, Sym, SymbolId, TypeId};
+use crate::ids::{DeclKey, NodeId, ParamId, Sym, SymbolId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::{self, NodeList, View};
 use crate::types::{FieldEntry, NominalKind, ParamInfo, TypeKind};
@@ -25,6 +25,12 @@ impl Walker<'_> {
 	pub(super) fn record_written_type(&mut self, symbol: SymbolId, written: Option<NodeId>) {
 		if let Some(decl) = written.and_then(|node| self.written_decl(node)) {
 			self.written_decls.insert(symbol, decl);
+		}
+		if let Some(origin) = written.and_then(|node| self.written_origin(node)) {
+			self.a
+				.written_types
+				.insert(self.a.symbols.symbol(symbol).decl_node, origin.clone());
+			self.written_type_keys.insert(symbol, origin);
 		}
 	}
 
@@ -342,6 +348,541 @@ impl Walker<'_> {
 			View::Group(inner) => self.written_decl(inner),
 			_ => None,
 		}
+	}
+
+	/// The portable identity of the type written for a value. Only a
+	/// declaration of that type may supply its methods; equal fields do not
+	/// make the methods of another declaration available.
+	pub(super) fn written_origin(&mut self, n: NodeId) -> Option<WrittenType> {
+		if let Some(origin) = self.a.written_types.get(&n).cloned() {
+			return Some(origin);
+		}
+		if !self.written_origin_stack.insert(n) {
+			return None;
+		}
+		let origin = self.written_origin_inner(n);
+		self.written_origin_stack.remove(&n);
+		if let Some(origin) = &origin {
+			self.a.written_types.insert(n, origin.clone());
+		}
+		origin
+	}
+
+	fn written_origin_inner(&mut self, n: NodeId) -> Option<WrittenType> {
+		let tree = Arc::clone(&self.tree);
+		match syntax::view(&tree, n) {
+			View::Name(_) => match self.a.resolution(n) {
+				Resolution::Local(symbol) => {
+					let data = self.a.symbols.symbol(symbol);
+					if data.kind == SymbolKind::Type
+						&& !matches!(self.s.types.kind(data.ty), TypeKind::Param(_))
+					{
+						Some(WrittenType::named(
+							self.external_value_key(symbol)
+								.unwrap_or_else(|| self.symbol_key(symbol)),
+						))
+					} else {
+						match self.external_value_key(symbol) {
+							Some(key) => self.external_written_origin(key),
+							None => self.written_type_keys.get(&symbol).cloned(),
+						}
+					}
+				}
+				Resolution::External(key) => self.external_written_origin(key),
+				_ => None,
+			},
+			View::Access { members, .. } => {
+				let member = members.last()?;
+				match self.a.resolution(member) {
+					Resolution::External(key) => self.external_written_origin(key),
+					Resolution::Local(symbol)
+						if self.a.symbols.symbol(symbol).kind == SymbolKind::Type =>
+					{
+						Some(WrittenType::named(
+							self.external_value_key(symbol)
+								.unwrap_or_else(|| self.symbol_key(symbol)),
+						))
+					}
+					Resolution::Local(symbol) => self
+						.external_value_key(symbol)
+						.and_then(|key| self.external_written_origin(key)),
+					_ => None,
+				}
+			}
+			View::TypedObject { target, .. } => self.written_origin(target),
+			View::Group(inner) | View::Optional(inner) => self.written_origin(inner),
+			View::Call { callee, arguments }
+				if self.a.has_flags(n, NodeFlags::TYPE_EXPR)
+					&& matches!(self.view(callee), View::Name(_))
+					&& matches!(
+						self.a.resolution(callee),
+						Resolution::Unresolved | Resolution::Builtin(_)
+					) =>
+			{
+				let origins = arguments
+					.iter()
+					.map(|argument| self.written_origin(argument))
+					.collect();
+				self.container_origin(self.type_of(n), origins)
+			}
+			View::Array { items } => {
+				let origins: Vec<_> = items.iter().map(|item| self.written_origin(item)).collect();
+				let element =
+					origins.first().cloned().flatten().filter(|origin| {
+						origins.iter().all(|other| other.as_ref() == Some(origin))
+					});
+				self.container_origin(self.type_of(n), vec![element])
+			}
+			View::Tuple { items } => {
+				let origins = items.iter().map(|item| self.written_origin(item)).collect();
+				self.container_origin(self.type_of(n), origins)
+			}
+			View::Index { target, index } => {
+				let owner = self.written_origin(target)?;
+				if matches!(self.view(self.strip_groups(index)), View::Range { .. }) {
+					Some(owner)
+				} else {
+					let slot = match self.s.types.kind(self.s.types.unfold(self.type_of(target))) {
+						TypeKind::Collection(
+							crate::types::CollKind::Map | crate::types::CollKind::GrowingMap,
+							..,
+						) => 1,
+						TypeKind::Collection(..) | TypeKind::CArray(..) => 0,
+						TypeKind::Tuple(list) => {
+							let value = self.constant_integer(index)?.as_i128();
+							let count = self.s.types.list_items(list).len() as i128;
+							usize::try_from(if value < 0 { count + value } else { value }).ok()?
+						}
+						_ => return None,
+					};
+					owner.origins.get(slot).cloned().flatten()
+				}
+			}
+			View::Call { callee, .. }
+				if self.a.instantiation(n).is_some()
+					&& self
+						.a
+						.flags_of(n)
+						.intersects(NodeFlags::GENERIC_APPLICATION | NodeFlags::TYPE_EXPR) =>
+			{
+				self.written_origin(callee).map(|mut origin| {
+					if let Some(arguments) = self.a.instantiation(n) {
+						origin.arguments = arguments;
+						let mut origins = vec![None; self.s.types.list_items(arguments).len()];
+						if let Some(given) = self.a.instantiation_origins.get(&n) {
+							for (index, origin) in given {
+								origins[*index as usize] = Some(origin.clone());
+							}
+						}
+						origin.origins = std::sync::Arc::new(origins);
+						origin.methods = std::sync::Arc::new(
+							self.a
+								.instantiated_methods
+								.get(&n)
+								.cloned()
+								.unwrap_or_default(),
+						);
+					}
+					origin
+				})
+			}
+			View::Call { callee, .. } => self.written_call_return(n, callee),
+			_ => None,
+		}
+	}
+
+	/// Built-in constructors have no user declaration, but their arguments
+	/// still have written types (`Array<Greeting>`, `Pointer<Resource<T>>`).
+	fn container_origin(
+		&mut self,
+		ty: TypeId,
+		mut origins: Vec<Option<WrittenType>>,
+	) -> Option<WrittenType> {
+		let (name, arguments) = match self.s.types.kind(self.s.types.unfold(ty)) {
+			TypeKind::Collection(kind, item, key) => {
+				let arguments = if matches!(
+					kind,
+					crate::types::CollKind::Map | crate::types::CollKind::GrowingMap
+				) {
+					vec![key, item]
+				} else {
+					vec![item]
+				};
+				(kind.name(), arguments)
+			}
+			TypeKind::Pointer(item) => ("Pointer", vec![item]),
+			TypeKind::CArray(item, _) => ("CArray", vec![item]),
+			TypeKind::Iterator(item, _) => ("Iterator", vec![item]),
+			TypeKind::Tuple(list) => ("Tuple", self.s.types.list_items(list).to_vec()),
+			_ => return None,
+		};
+		if !origins.iter().any(Option::is_some) {
+			return None;
+		}
+		origins.resize(arguments.len(), None);
+		let module = self.s.types.module("prelude");
+		let declaration = self.s.types.decl_key(module, &[name], 0);
+		Some(WrittenType {
+			declaration,
+			arguments: self.s.types.list(&arguments),
+			origins: Arc::new(origins),
+			methods: Arc::default(),
+		})
+	}
+
+	pub(super) fn written_element_origin(&mut self, iterable: NodeId) -> Option<WrittenType> {
+		let owner = self.written_origin(iterable)?;
+		let owner = self.resolve_written_type(owner);
+		let ty = self.s.types.unfold(self.type_of(iterable));
+		if let TypeKind::Collection(
+			crate::types::CollKind::Map | crate::types::CollKind::GrowingMap,
+			item,
+			key,
+		) = self.s.types.kind(ty)
+		{
+			let tuple = self.s.types.tuple(&[key, item]);
+			self.container_origin(tuple, owner.origins.as_ref().clone())
+		} else {
+			owner.origins.first().cloned().flatten()
+		}
+	}
+
+	fn written_builtin_return(
+		&mut self,
+		call: NodeId,
+		callee: NodeId,
+		builtin: crate::ids::BuiltinId,
+	) -> Option<WrittenType> {
+		let (View::Access { members, .. } | View::OptionalAccess { members, .. }) =
+			self.view(self.strip_groups(callee))
+		else {
+			return None;
+		};
+		let owner = self.a.method_instantiations.get(&members.last()?)?.clone();
+		let owner = self.resolve_written_type(owner);
+		let path = crate::builtins::get(builtin).path;
+		let (kind, name) = path.split_once('#')?;
+		let item = usize::from(kind == "Map");
+		let origin = |index| owner.origins.get(index).cloned().flatten();
+		match (kind, name) {
+			("Pointer", "read") => origin(0),
+			(
+				"Array" | "Set" | "Map" | "Pool" | "Columnar" | "OrderedColumnar" | "Iterator",
+				"get" | "take" | "pop" | "find" | "getOrInsert",
+			) => origin(item),
+			(
+				"Array" | "Set" | "Map" | "Pool" | "Columnar" | "OrderedColumnar" | "Iterator"
+				| "Pointer",
+				"values" | "keys" | "toArray" | "firstValues",
+			) => self.container_origin(
+				self.type_of(call),
+				vec![origin(if name == "keys" { 0 } else { item })],
+			),
+			("Array" | "Iterator", "reverse" | "sort" | "filter") => {
+				self.container_origin(self.type_of(call), owner.origins.as_ref().clone())
+			}
+			_ => None,
+		}
+	}
+
+	pub(super) fn written_function_return(&mut self, function: NodeId) -> Option<WrittenReturn> {
+		let info = self.a.function(function)?.clone();
+		let ret = self.s.types.sig(info.sig?).ret;
+		if let TypeKind::Param(param) = self.s.types.kind(ret) {
+			return info
+				.generics
+				.iter()
+				.position(|&generic| generic == param)
+				.map(|index| WrittenReturn::Generic(index as u16));
+		}
+		let View::Lambda { signature, body } = self.view(info.lambda) else {
+			return None;
+		};
+		let origin = match signature.returns {
+			Some(annotation) => self.written_origin(annotation),
+			None if !info.block_body => self.written_origin(body),
+			None => None,
+		};
+		origin.map(WrittenReturn::Named)
+	}
+
+	fn written_call_return(&mut self, call: NodeId, callee: NodeId) -> Option<WrittenType> {
+		let named = match self.a.call(call)?.callee {
+			Callee::Builtin(builtin) => return self.written_builtin_return(call, callee, builtin),
+			Callee::Function(function) => self.written_function_return(function),
+			Callee::Value => {
+				let last = match self.view(self.strip_groups(callee)) {
+					View::Access { members, .. } => members.last()?,
+					_ => self.strip_groups(callee),
+				};
+				match self.a.resolution(last) {
+					Resolution::External(key) => {
+						let module = self.s.types.decl_key_data(key).module;
+						let interface = self.s.interface(module)?;
+						let declaration = interface.node_of(key)?;
+						interface.written_returns.get(&declaration).cloned()
+					}
+					Resolution::Local(symbol) => match self.external_value_key(symbol) {
+						Some(key) => {
+							let module = self.s.types.decl_key_data(key).module;
+							let interface = self.s.interface(module)?;
+							let declaration = interface.node_of(key)?;
+							interface.written_returns.get(&declaration).cloned()
+						}
+						None => {
+							self.written_function_return(self.a.symbols.symbol(symbol).decl_node)
+						}
+					},
+					_ => None,
+				}
+			}
+			_ => None,
+		}?;
+		match named {
+			WrittenReturn::Named(origin) => {
+				let generics = self.callee_generics(callee, self.a.call(call)?.callee);
+				let arguments = self
+					.a
+					.instantiation(call)
+					.map(|list| self.s.types.list_items(list).to_vec())
+					.unwrap_or_default();
+				let offset = arguments.len().saturating_sub(generics.len());
+				let mut bindings = crate::types::Bindings {
+					params: generics,
+					types: arguments[offset..].to_vec(),
+					..Default::default()
+				};
+				if let Some(origins) = self.a.instantiation_origins.get(&call) {
+					for (index, origin) in origins {
+						if let Some(&param) = (*index as usize)
+							.checked_sub(offset)
+							.and_then(|index| bindings.params.get(index))
+						{
+							bindings.origins.insert(param, origin.clone());
+						}
+					}
+				}
+				Some(self.substitute_written_type(origin, &bindings))
+			}
+			WrittenReturn::Generic(parameter) => self
+				.a
+				.instantiation_origins
+				.get(&call)?
+				.iter()
+				.find(|(position, _)| *position == parameter)
+				.map(|(_, origin)| origin.clone()),
+		}
+	}
+
+	/// The annotation of a field belongs to its owner, even when another
+	/// equal shape declared a field of the same data type.
+	pub(super) fn written_field_origin(
+		&mut self,
+		owner: WrittenType,
+		name: Sym,
+	) -> Option<WrittenType> {
+		let owner = self.resolve_written_type(owner);
+		let module = self.s.types.decl_key_data(owner.declaration).module;
+		if self.s.types.module_path(module) == "prelude"
+			&& self.s.types.decl_name(owner.declaration) == "Pointer"
+			&& self.s.types.syms.resolve(name) == "value"
+		{
+			return owner.origins.first().cloned().flatten();
+		}
+		let projection = if module == self.s.module_id(self.file) {
+			let symbol = *self.modules.keyed.get(&owner.declaration)?;
+			let info = self
+				.a
+				.type_decls
+				.get(&self.a.symbols.symbol(symbol).decl_node)?;
+			let field = info.fields.iter().find(|field| {
+				self.s.types.syms.resolve(field.name) == self.s.types.syms.resolve(name)
+			})?;
+			self.a
+				.written_types
+				.get(&field.node)
+				.cloned()
+				.map(WrittenReturn::Named)
+				.or_else(|| match self.s.types.kind(field.ty) {
+					TypeKind::Param(param) => info
+						.generics
+						.iter()
+						.position(|&generic| generic == param)
+						.map(|index| WrittenReturn::Generic(index as u16)),
+					_ => None,
+				})
+		} else {
+			let interface = self.s.interface(module)?;
+			let declaration = interface.node_of(owner.declaration)?;
+			interface
+				.written_fields
+				.iter()
+				.find(|((decl, field), _)| {
+					*decl == declaration
+						&& self.s.types.syms.resolve(*field) == self.s.types.syms.resolve(name)
+				})
+				.map(|(_, origin)| origin.clone())
+		}?;
+		match projection {
+			WrittenReturn::Generic(index) => owner.origins.get(index as usize).cloned().flatten(),
+			WrittenReturn::Named(origin) => match self.written_bindings(&owner) {
+				Some(bindings) => Some(self.substitute_written_type(origin, &bindings)),
+				None => Some(origin),
+			},
+		}
+	}
+
+	fn substitute_written_type(
+		&mut self,
+		mut origin: WrittenType,
+		bindings: &crate::types::Bindings,
+	) -> WrittenType {
+		let arguments = self.s.types.list_items(origin.arguments).to_vec();
+		let mut origins = Vec::with_capacity(arguments.len());
+		for (index, &ty) in arguments.iter().enumerate() {
+			let bound = match self.s.types.kind(ty) {
+				TypeKind::Param(param) => bindings.origins.get(&param).cloned(),
+				_ => None,
+			};
+			origins.push(bound.or_else(|| {
+				origin
+					.origins
+					.get(index)
+					.cloned()
+					.flatten()
+					.map(|origin| self.substitute_written_type(origin, bindings))
+			}));
+		}
+		let types: Vec<_> = arguments
+			.iter()
+			.map(|&ty| self.s.types.substitute(ty, bindings))
+			.collect();
+		origin.arguments = self.s.types.list(&types);
+		origin.origins = std::sync::Arc::new(origins);
+		if let Some(mut owner) = self.written_bindings(&origin) {
+			let mut problems = Vec::new();
+			self.check_constraints(&mut owner, &mut problems, false);
+			origin.methods = std::sync::Arc::new(
+				owner
+					.methods
+					.iter()
+					.filter_map(|(param, method)| {
+						owner
+							.params
+							.iter()
+							.position(|candidate| candidate == param)
+							.map(|index| crate::analysis::GenericMethod {
+								parameter: index as u16,
+								..method.clone()
+							})
+					})
+					.collect(),
+			);
+		}
+		origin
+	}
+
+	fn external_written_origin(&mut self, key: DeclKey) -> Option<WrittenType> {
+		let data = self.s.types.decl_key_data(key);
+		let interface = self.s.interface(data.module)?;
+		let node = interface.node_of(key)?;
+		if interface.declared(node)?.kind == SymbolKind::Type {
+			return Some(WrittenType::named(key));
+		}
+		interface.written_types.get(&node).cloned()
+	}
+
+	/// The substitution attached to a written application. Structural type
+	/// ids cannot recover phantom arguments, so it comes from syntax metadata.
+	pub(super) fn written_bindings(&self, origin: &WrittenType) -> Option<crate::types::Bindings> {
+		let data = self.s.types.decl_key_data(origin.declaration);
+		let params = if data.module == self.s.module_id(self.file) {
+			let &symbol = self.modules.keyed.get(&origin.declaration)?;
+			self.generic_params
+				.get(&self.a.symbols.symbol(symbol).decl_node)?
+				.clone()
+		} else {
+			let interface = self.s.interface(data.module)?;
+			let declaration = interface.node_of(origin.declaration)?;
+			let &list = interface.type_parameters.get(&declaration)?;
+			self.s
+				.types
+				.list_items(list)
+				.iter()
+				.filter_map(|&ty| match self.s.types.kind(ty) {
+					TypeKind::Param(param) => Some(param),
+					_ => None,
+				})
+				.collect()
+		};
+		let arguments = self.s.types.list_items(origin.arguments);
+		if arguments.len() != params.len() {
+			return None;
+		}
+		let origins = params
+			.iter()
+			.enumerate()
+			.filter_map(|(index, &param)| {
+				origin
+					.origins
+					.get(index)
+					.cloned()
+					.flatten()
+					.map(|origin| (param, origin))
+			})
+			.collect();
+		Some(crate::types::Bindings {
+			params,
+			types: arguments.to_vec(),
+			origins,
+			..Default::default()
+		})
+	}
+
+	/// A named alias inherits the explicitly named target's methods and
+	/// generic arguments, including parameters absent from the data layout.
+	pub(super) fn resolve_written_type(&mut self, mut origin: WrittenType) -> WrittenType {
+		let mut seen = rustc_hash::FxHashSet::default();
+		while seen.insert(origin.declaration) {
+			let data = self.s.types.decl_key_data(origin.declaration);
+			if data.module != self.s.module_id(self.file) && self.s.interface(data.module).is_some()
+			{
+				self.modules
+					.reads
+					.push(self.s.types.module_path(data.module).to_string());
+			}
+			let target = if data.module == self.s.module_id(self.file) {
+				self.modules
+					.keyed
+					.get(&origin.declaration)
+					.copied()
+					.and_then(|symbol| {
+						let decl = self.a.symbols.symbol(symbol).decl_node;
+						match self.view(decl) {
+							View::TypeDecl { value, .. } | View::ExportType { value, .. } => {
+								Some(value)
+							}
+							_ => None,
+						}
+					})
+					.and_then(|value| self.written_origin(value))
+			} else {
+				self.s.interface(data.module).and_then(|interface| {
+					interface
+						.node_of(origin.declaration)
+						.and_then(|decl| interface.written_types.get(&decl))
+						.cloned()
+				})
+			};
+			let Some(mut target) = target else {
+				break;
+			};
+			if let Some(bindings) = self.written_bindings(&origin) {
+				target = self.substitute_written_type(target, &bindings);
+			}
+			origin = target;
+		}
+		origin
 	}
 
 	/// The object type of a value whose fields can be read: an object, or a

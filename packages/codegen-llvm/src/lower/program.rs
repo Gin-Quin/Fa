@@ -37,7 +37,7 @@ pub(crate) struct FileState<'a, 'ctx> {
 	pub(crate) module_file: bool,
 	functions: FxHashMap<NodeId, Function<'ctx>>,
 	pub(crate) generic_functions: FxHashMap<NodeId, FnInfo>,
-	instances: FxHashMap<(NodeId, Vec<Repr>, Vec<TypeId>), NodeId>,
+	instances: FxHashMap<super::InstanceKey, NodeId>,
 	scope_owners: FxHashMap<ScopeId, Option<NodeId>>,
 	shared: FxHashMap<SymbolId, ()>,
 	global_slots: FxHashMap<SymbolId, Slot<'ctx>>,
@@ -438,7 +438,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				let members: Vec<NodeId> = members.iter().collect();
 				match self.namespace_reach(target, &members) {
 					Some((reached, used)) if used == members.len() => reached,
-					Some(_) => return None,
+					Some(_) => self.external(self.analysis.resolution(*members.last()?))?,
 					// `value.method()`: a function of a type of another file
 					None => self.external(self.analysis.resolution(*members.last()?))?,
 				}

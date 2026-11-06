@@ -95,6 +95,12 @@ use values::{IntRepr, Repr, Val};
 pub(crate) const FAST_CALLING_CONVENTION: u32 = 8;
 
 type CallbackInstanceKey<'ctx> = (FunctionValue<'ctx>, Vec<(usize, TypeId)>);
+type InstanceKey = (
+	NodeId,
+	Vec<Repr>,
+	Vec<TypeId>,
+	Vec<fa_analyzer::analysis::GenericMethod>,
+);
 
 /// A lowered function declaration.
 #[derive(Clone)]
@@ -125,6 +131,12 @@ pub(crate) struct Function<'ctx> {
 	declaration: NodeId,
 	/// The types of the generic parameters of an instance.
 	bindings: FxHashMap<fa_analyzer::ids::ParamId, Repr>,
+	types: FxHashMap<fa_analyzer::ids::ParamId, TypeId>,
+	/// Methods selected independently of structural representation.
+	methods: Vec<(
+		fa_analyzer::ids::ParamId,
+		fa_analyzer::analysis::GenericMethod,
+	)>,
 	/// The literal types of the compile-time value parameters of an
 	/// instance (`repeatText<2>`), by the symbol its body reads.
 	values: FxHashMap<SymbolId, TypeId>,
@@ -257,9 +269,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The generic functions, declared per instance.
 	generic_functions: FxHashMap<NodeId, FnInfo>,
 	/// The instances of generic functions: the key of their `Function`,
-	/// by representations of the type parameters and literal types of the
-	/// value parameters.
-	instances: FxHashMap<(NodeId, Vec<Repr>, Vec<TypeId>), NodeId>,
+	/// by representations, exact arguments and selected methods. Phantom
+	/// arguments still distinguish bodies that have the same data layout.
+	instances: FxHashMap<InstanceKey, NodeId>,
 	/// A function instance for the precise throwing callback signatures.
 	callback_instances: FxHashMap<CallbackInstanceKey<'ctx>, (FileId, NodeId)>,
 	/// The instances still to lower, with their file.
@@ -267,6 +279,13 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The representations of the generic parameters of the function being
 	/// lowered (an instance).
 	bindings: std::cell::RefCell<FxHashMap<fa_analyzer::ids::ParamId, Repr>>,
+	type_bindings: std::cell::RefCell<FxHashMap<fa_analyzer::ids::ParamId, TypeId>>,
+	method_bindings: std::cell::RefCell<
+		Vec<(
+			fa_analyzer::ids::ParamId,
+			fa_analyzer::analysis::GenericMethod,
+		)>,
+	>,
 	/// The literal types of the compile-time value parameters of the
 	/// function being lowered (an instance), by symbol.
 	value_bindings: std::cell::RefCell<FxHashMap<SymbolId, TypeId>>,
@@ -496,6 +515,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			callback_instances: FxHashMap::default(),
 			pending_instances: Vec::new(),
 			bindings: std::cell::RefCell::new(FxHashMap::default()),
+			type_bindings: std::cell::RefCell::new(FxHashMap::default()),
+			method_bindings: std::cell::RefCell::new(Vec::new()),
 			value_bindings: std::cell::RefCell::new(FxHashMap::default()),
 			global_slots: FxHashMap::default(),
 			invariant_globals: rustc_hash::FxHashSet::default(),
@@ -1445,6 +1466,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				captures,
 				declaration: node,
 				bindings: self.bindings.borrow().clone(),
+				types: self.type_bindings.borrow().clone(),
+				methods: self.method_bindings.borrow().clone(),
 				values: self.value_bindings.borrow().clone(),
 			})
 		}
@@ -1605,6 +1628,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let saved_slots = std::mem::take(&mut self.slots);
 		let saved_owned = std::mem::take(&mut self.owned_locals);
 		let saved_bindings = self.bindings.replace(self.functions[&key].bindings.clone());
+		let saved_types = self
+			.type_bindings
+			.replace(self.functions[&key].types.clone());
+		let saved_methods = self
+			.method_bindings
+			.replace(self.functions[&key].methods.clone());
 		let saved_values = self
 			.value_bindings
 			.replace(self.functions[&key].values.clone());
@@ -1612,6 +1641,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.slots = saved_slots;
 		self.owned_locals = saved_owned;
 		self.bindings.replace(saved_bindings);
+		self.type_bindings.replace(saved_types);
+		self.method_bindings.replace(saved_methods);
 		self.value_bindings.replace(saved_values);
 		result
 	}

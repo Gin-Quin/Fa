@@ -35,6 +35,72 @@ impl Walker<'_> {
 			}
 		}
 		let function_of = |decl: NodeId| function_nodes.get(&decl).copied();
+		let owners: Vec<_> = self
+			.a
+			.function_owners
+			.iter()
+			.map(|(&function, &owner)| (function, owner))
+			.collect();
+		let function_owners = owners
+			.into_iter()
+			.filter_map(|(function, owner)| self.node_key(owner).map(|owner| (function, owner)))
+			.collect();
+		let mut written_returns = FxHashMap::default();
+		for &function in function_nodes.keys() {
+			if let Some(origin) = self.written_function_return(function) {
+				written_returns.insert(function, origin);
+			}
+		}
+		let mut type_parameters = FxHashMap::default();
+		for (&decl, params) in &self.generic_params {
+			if self.a.type_decls.contains_key(&decl) {
+				let params: Vec<_> = params
+					.iter()
+					.map(|&param| self.s.types.intern(crate::types::TypeKind::Param(param)))
+					.collect();
+				type_parameters.insert(decl, self.s.types.list(&params));
+			}
+		}
+		let mut written_types = FxHashMap::default();
+		let mut written_fields = FxHashMap::default();
+		for (&decl, info) in &self.a.type_decls {
+			for field in &info.fields {
+				let origin = self
+					.a
+					.written_types
+					.get(&field.node)
+					.cloned()
+					.map(crate::analysis::WrittenReturn::Named)
+					.or_else(|| match self.s.types.kind(field.ty) {
+						crate::types::TypeKind::Param(param) => info
+							.generics
+							.iter()
+							.position(|&generic| generic == param)
+							.map(|index| crate::analysis::WrittenReturn::Generic(index as u16)),
+						_ => None,
+					});
+				if let Some(origin) = origin {
+					written_fields.insert((decl, field.name), origin);
+				}
+			}
+		}
+		for (&symbol, written) in &self.written_type_keys {
+			let data = self.a.symbols.symbol(symbol);
+			if matches!(
+				self.a.symbols.scope(data.scope).kind,
+				ScopeKind::Module | ScopeKind::Namespace
+			) {
+				written_types.insert(data.decl_node, written.clone());
+			}
+		}
+		let aliases: Vec<_> = self.a.type_decls.keys().copied().collect();
+		for decl in aliases {
+			if let View::TypeDecl { value, .. } | View::ExportType { value, .. } = self.view(decl)
+				&& let Some(written) = self.written_origin(value)
+			{
+				written_types.insert(decl, written);
+			}
+		}
 
 		// the functions of the types
 		let mut type_functions: FxHashMap<NodeId, Vec<TypeFunction>> = FxHashMap::default();
@@ -277,7 +343,19 @@ impl Walker<'_> {
 				Some(&Callee::Function(function)) => self.node_key(function),
 				_ => None,
 			};
-			for found in used.into_iter().chain(called) {
+			let mut selected = Vec::new();
+			let mut pending: Vec<_> = self
+				.a
+				.instantiated_methods
+				.get(&node)
+				.into_iter()
+				.flatten()
+				.collect();
+			while let Some(method) = pending.pop() {
+				selected.push(method.function);
+				pending.extend(method.methods.iter());
+			}
+			for found in used.into_iter().chain(called).chain(selected) {
 				uses.push(found);
 				for &(decl, _) in &enclosing {
 					if let Some(entry) = declared.get_mut(&decl) {
@@ -318,6 +396,11 @@ impl Walker<'_> {
 		interface.keys = keys;
 		interface.externs = externs;
 		interface.type_functions = type_functions;
+		interface.type_parameters = type_parameters;
+		interface.written_types = written_types;
+		interface.written_returns = written_returns;
+		interface.written_fields = written_fields;
+		interface.function_owners = function_owners;
 		interface.nested_types = nested_types;
 		interface.parameters = parameters;
 		interface.statics = statics;

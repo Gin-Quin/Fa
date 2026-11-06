@@ -1479,7 +1479,7 @@ impl Generator<'_> {
 					.analysis
 					.type_decls
 					.values()
-					.find(|decl| decl.ty == ty)
+					.find(|decl| decl.ty == ty && (!decl.fields.is_empty() || fields.is_empty()))
 					.map(|decl| {
 						decl.fields
 							.iter()

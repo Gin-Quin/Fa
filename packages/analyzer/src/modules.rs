@@ -585,6 +585,16 @@ pub struct Interface {
 	pub members: FxHashMap<(NodeId, Sym), Exported>,
 	/// The functions of its types, by type declaration.
 	pub type_functions: FxHashMap<NodeId, Vec<TypeFunction>>,
+	/// The complete generic parameter lists of named types, including phantom parameters.
+	pub type_parameters: FxHashMap<NodeId, ListId>,
+	/// Written types of exported values and aliases (methods are not structural).
+	pub written_types: FxHashMap<NodeId, crate::analysis::WrittenType>,
+	/// The written return types of functions, including generic projections.
+	pub written_returns: FxHashMap<NodeId, crate::analysis::WrittenReturn>,
+	/// Written field types, or projections of an owner's generic argument.
+	pub written_fields: FxHashMap<(NodeId, Sym), crate::analysis::WrittenReturn>,
+	/// Types owning method binders; the method's own generic list stays separate.
+	pub function_owners: FxHashMap<NodeId, DeclKey>,
 	/// The types declared inside its types (`Database.OpenError`), by type
 	/// declaration (`method` is always false).
 	pub nested_types: FxHashMap<NodeId, Vec<TypeFunction>>,
@@ -684,6 +694,46 @@ impl Interface {
 			.map(|(&key, keyed)| (keyed.node, key))
 			.collect();
 		let key_hash = |node: NodeId| by_node.get(&node).map_or(0, |&key| types.decl_hash(key));
+		for (&decl, &parameters) in &self.type_parameters {
+			let hash = types
+				.list_items(parameters)
+				.iter()
+				.fold(0u128, |hash, &ty| {
+					let mut hash = hash.rotate_left(7) ^ types.stable_hash(ty);
+					if let crate::types::TypeKind::Param(param) = types.kind(ty) {
+						let info = types.param(param);
+						hash ^= types.stable_hash(info.constraint).rotate_left(11)
+							^ types.stable_hash(info.default).rotate_left(13)
+							^ u128::from(info.value);
+					}
+					hash
+				});
+			parts.push((7, key_hash(decl), 0, hash));
+		}
+		for (&decl, written) in &self.written_types {
+			parts.push((8, key_hash(decl), 0, written.stable_hash(types)));
+		}
+		for (&decl, written) in &self.written_returns {
+			match written {
+				crate::analysis::WrittenReturn::Named(written) => {
+					parts.push((9, key_hash(decl), 0, written.stable_hash(types)))
+				}
+				crate::analysis::WrittenReturn::Generic(parameter) => {
+					parts.push((10, key_hash(decl), u128::from(*parameter), 0))
+				}
+			}
+		}
+		for (&(decl, name), written) in &self.written_fields {
+			let name = rustc_hash::FxBuildHasher.hash_one(types.syms.resolve(name)) as u128;
+			let origin = match written {
+				crate::analysis::WrittenReturn::Named(written) => written.stable_hash(types),
+				crate::analysis::WrittenReturn::Generic(index) => u128::from(*index),
+			};
+			parts.push((11, key_hash(decl), name, origin));
+		}
+		for (&function, &owner) in &self.function_owners {
+			parts.push((12, key_hash(function), types.decl_hash(owner), 0));
+		}
 		for exported in self.members.values().chain(&self.export) {
 			parts.push((
 				1,

@@ -1811,6 +1811,49 @@ fn test_watch_runs_the_tests_again_after_a_change() {
 }
 
 #[test]
+fn test_watch_preserves_the_llvm_target_after_a_change() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	for target in ["native", "wasm"] {
+		let scratch = Scratch::new(&format!("test-watch-{target}"));
+		let source = |expected: &str| {
+			format!(
+				"test \"selected {target}\" {{\n\t@if target == \"{target}\" {{\n\t\tassert value == {expected}\n\t}} @else {{\n\t\tassert false\n\t}}\n}}\n"
+			)
+		};
+		let package = scratch.write(
+			"watched",
+			&[
+				("package.fa", "export = { name = \"watched\" }\n"),
+				("library/value.fa", "export = 1\n"),
+				("library/value.test.fa", &source("1")),
+			],
+		);
+		let (child, output) = spawn(
+			&scratch,
+			&["test", &format!("--target={target}"), "--watch"],
+			&package,
+			2,
+		);
+		assert!(
+			wait_for(&output, "watching for changes", 60),
+			"{}",
+			output.lock().unwrap()
+		);
+		fs::write(package.join("library/value.fa"), "export = 2\n").unwrap();
+		let code = finish(child, 60);
+		let output = output.lock().unwrap().clone();
+		assert_eq!(code, Some(0), "{output}");
+		assert!(output.contains(&format!("✓ selected {target}")), "{output}");
+		assert!(output.contains(&format!("✗ selected {target}")), "{output}");
+		assert!(output.contains("1 passed, 0 failed"), "{output}");
+		assert!(output.contains("0 passed, 1 failed"), "{output}");
+	}
+}
+
+#[test]
 fn new_workspace_scaffolds_a_workspace() {
 	let scratch = Scratch::new("new-workspace");
 	let (_, stderr, code) = scratch.fa(&["new", "workspace", "farmland"], &scratch.directory);

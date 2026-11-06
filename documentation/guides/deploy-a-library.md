@@ -46,7 +46,7 @@ Check that it builds and passes everywhere before tagging:
 fa check
 fa test
 fa test --target=native
-fa test --target=web
+fa test --target=wasm
 ```
 
 ## Version it

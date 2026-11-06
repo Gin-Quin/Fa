@@ -51,7 +51,7 @@ unsafe extern "C" {
 
 /// The version of the objects: a cached object of another version of the
 /// compiler is never reused.
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-3");
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-platform-1");
 
 /// A file name made of a module path.
 fn file_name(module: &str) -> String {
@@ -93,6 +93,7 @@ fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: 
 	// the runtime's IR, so that editing `fa_runtime.c` invalidates the objects
 	crate::runtime::tier1_text(target).hash(hasher);
 	target.name().hash(hasher);
+	target.triple().as_str().to_bytes().hash(hasher);
 	format!("{:?}", options.opt_level).hash(hasher);
 	options.size.hash(hasher);
 	options.overflow_checks.hash(hasher);
@@ -517,6 +518,7 @@ fn runtime_object(
 		"fa_pages",
 		"fa_clock",
 		"fa_nanosleep",
+		"fa_cstring_length",
 	] {
 		if let Some(function) = module.get_function(name)
 			&& function.count_basic_blocks() > 0
@@ -612,6 +614,7 @@ fn entry_object(
 		library_entry(
 			&module,
 			&runtime,
+			target,
 			options,
 			inputs,
 			&defined_inits,
@@ -957,6 +960,7 @@ fn entry_object(
 fn library_entry<'c>(
 	module: &Module<'c>,
 	runtime: &Runtime<'c, '_>,
+	target: Target,
 	options: &Options,
 	inputs: &EntryInputs,
 	defined_inits: &std::collections::HashSet<(&str, u32)>,
@@ -1026,8 +1030,7 @@ fn library_entry<'c>(
 	}
 	builder.build_call(runtime.function("fa_flush")?, &[], "")?;
 	builder.build_return(None)?;
-	crate::lower::c_library::add_structor(module, init, true);
-	crate::lower::c_library::add_structor(module, fini, false);
+	crate::lower::c_library::library_hooks(module, runtime, target, init, fini)?;
 	Ok(())
 }
 
@@ -1174,7 +1177,7 @@ pub fn link_program(
 		// a C library: its shared and static libraries (the header is
 		// written by `link_units`)
 		let folder = output.parent().unwrap_or(Path::new(".")).to_path_buf();
-		let shared = folder.join(library.shared_name());
+		let shared = folder.join(library.output_name(target));
 		let archive = folder.join(library.static_name());
 		let mut exports: Vec<String> = inputs
 			.units
@@ -1183,6 +1186,13 @@ pub fn link_program(
 			.collect();
 		exports.sort();
 		exports.dedup();
+		if target == Target::Wasm {
+			exports.extend(
+				crate::lower::c_library::WASM_EXPORTS
+					.iter()
+					.map(|name| (*name).to_string()),
+			);
+		}
 		link::link_c_library(
 			target,
 			options,
@@ -1194,14 +1204,22 @@ pub fn link_program(
 			libraries,
 		)?;
 		timings.link = start.elapsed();
+		let loader = if target == Target::Wasm {
+			Some(link::write_library_loader(&shared, options.leak_check)?)
+		} else {
+			None
+		};
 		return Ok(Artifact {
 			target,
 			options: *options,
 			output_size: fs::metadata(&shared)?.len(),
 			output: shared,
-			loader: None,
+			loader,
 			ir: None,
-			c_library: Some((archive, PathBuf::new())),
+			c_library: Some(crate::artifact::CLibraryArtifacts {
+				archive: (target == Target::Native).then_some(archive),
+				header: PathBuf::new(),
+			}),
 			timings,
 		});
 	}
@@ -1759,7 +1777,7 @@ fn link_units(
 			}
 			let mut artifact = linked?;
 			// the header of a C library, from its API file's interface
-			if let (Some(library), Some((archive, _))) =
+			if let (Some(library), Some(mut extra)) =
 				(&libraries.c_library, artifact.c_library.clone())
 			{
 				let interface = report
@@ -1780,7 +1798,8 @@ fn link_units(
 					.unwrap_or_default();
 				let header = directory.join(&library.header);
 				fs::write(&header, text).map_err(|error| Some(Error::from(error)))?;
-				artifact.c_library = Some((archive, header));
+				extra.header = header;
+				artifact.c_library = Some(extra);
 			}
 			return Ok(artifact);
 		}

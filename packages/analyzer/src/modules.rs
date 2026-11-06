@@ -628,6 +628,43 @@ pub struct Interface {
 }
 
 impl Interface {
+	/// A method of this file's type. Anonymous exported namespaces may
+	/// qualify the declaration key after the nominal type was created, so
+	/// use its exact self type when the nominal key has no direct entry.
+	pub fn type_method(
+		&self,
+		types: &crate::types::TypeStore,
+		ty: TypeId,
+		name: &str,
+	) -> Option<&TypeFunction> {
+		let crate::types::TypeKind::Object(shape) = types.kind(ty) else {
+			return None;
+		};
+		let key = types.nominal(types.shape(shape).nominal?).key;
+		self.keys
+			.get(&key)
+			.and_then(|declaration| self.type_functions.get(&declaration.node))
+			.and_then(|methods| {
+				methods
+					.iter()
+					.find(|method| method.method && types.syms.resolve(method.name) == name)
+			})
+			.or_else(|| {
+				self.type_functions.values().flatten().find(|method| {
+					if !method.method || types.syms.resolve(method.name) != name {
+						return false;
+					}
+					let crate::types::TypeKind::Function(sig) = types.kind(method.ty) else {
+						return false;
+					};
+					types
+						.params(types.sig(sig).params)
+						.first()
+						.is_some_and(|parameter| parameter.ty == ty)
+				})
+			})
+	}
+
 	/// A hash of what other files read of the interface, for the
 	/// incremental analysis: it changes when a declaration other files can
 	/// see changes its kind or its type, or the value of a `static`. Built

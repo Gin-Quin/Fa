@@ -237,6 +237,45 @@ pub fn link_c_library(
 	archive: &Path,
 	libraries: &Libraries,
 ) -> Result<(), Error> {
+	if target == Target::Wasm {
+		let mut command = Command::new(llvm_prefix().join("bin/wasm-ld"));
+		command.args(objects).arg("-o").arg(shared);
+		command.args(["--no-entry", "--export-memory", "-z", "stack-size=1048576"]);
+		for name in exports {
+			command.arg(format!("--export={name}"));
+		}
+		if options.optimized() {
+			command.args(["--gc-sections", "--strip-all"]);
+		}
+		if split.is_some_and(|split| split.lto) {
+			command.arg(format!(
+				"--lto-O{}",
+				if options.size {
+					2
+				} else {
+					match options.opt_level {
+						crate::OptLevel::O0 => 0,
+						crate::OptLevel::O1 => 1,
+						crate::OptLevel::O2 => 2,
+						crate::OptLevel::O3 => 3,
+					}
+				}
+			));
+		}
+		for path in &libraries.paths {
+			command.arg(format!("-L{}", path.display()));
+		}
+		for library in &libraries.link {
+			if library.contains('/') || [".o", ".a"].iter().any(|suffix| library.ends_with(suffix))
+			{
+				command.arg(library);
+			} else {
+				command.arg(format!("-l{library}"));
+			}
+		}
+		checked(&mut command)?;
+		return Ok(());
+	}
 	if target != Target::Native {
 		return Err(Error::Unsupported {
 			message: format!(
@@ -451,19 +490,20 @@ pub fn wasm_imports(path: &Path) -> Result<Vec<String>, Error> {
 /// when it isn't); the comments, the blank lines and the indentation go.
 pub fn loader_for(imports: &[String]) -> String {
 	let mut loader = String::new();
-	let mut kept = true;
+	let mut kept = vec![true];
 	let mut comment = false;
 	for line in LOADER.lines() {
 		let trimmed = line.trim();
 		if let Some(name) = trimmed.strip_prefix("// @import ") {
-			kept = match name.strip_prefix('!') {
+			let condition = match name.strip_prefix('!') {
 				Some(name) => !imports.iter().any(|import| import == name),
 				None => imports.iter().any(|import| import == name),
 			};
+			kept.push(kept.last().copied().unwrap_or(true) && condition);
 			continue;
 		}
 		if trimmed == "// @end" {
-			kept = true;
+			kept.pop();
 			continue;
 		}
 		// JSDoc blocks
@@ -475,7 +515,8 @@ pub fn loader_for(imports: &[String]) -> String {
 			comment = !trimmed.ends_with("*/");
 			continue;
 		}
-		if kept && !trimmed.is_empty() && !trimmed.starts_with("//") {
+		if kept.last().copied().unwrap_or(true) && !trimmed.is_empty() && !trimmed.starts_with("//")
+		{
 			loader.push_str(trimmed);
 			loader.push('\n');
 		}
@@ -486,7 +527,19 @@ pub fn loader_for(imports: &[String]) -> String {
 /// Writes the JavaScript loader of a `.wasm` module next to it
 /// (`program.wasm` → `program.mjs`), for the functions it imports.
 pub fn write_loader(wasm: &Path, memory_check: bool) -> Result<PathBuf, Error> {
+	write_loader_kind(wasm, memory_check, false)
+}
+
+/// An importable library loader, with one runtime state per instance.
+pub fn write_library_loader(wasm: &Path, memory_check: bool) -> Result<PathBuf, Error> {
+	write_loader_kind(wasm, memory_check, true)
+}
+
+fn write_loader_kind(wasm: &Path, memory_check: bool, library: bool) -> Result<PathBuf, Error> {
 	let mut imports = wasm_imports(wasm)?;
+	if library {
+		imports.push("@library".to_string());
+	}
 	if memory_check {
 		imports.push("@memory".to_string());
 	}

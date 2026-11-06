@@ -859,14 +859,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(self.fresh(Val::new(Repr::Array(target), array)))
 			}
 			("CString#toString", _, _) => {
-				let strlen = match self.module.get_function("strlen") {
-					Some(function) => function,
-					None => self.module.add_function(
-						"strlen",
-						self.usize.fn_type(&[self.pointer_type().into()], false),
-						Some(Linkage::External),
-					),
-				};
+				let strlen = self.runtime.cstring_length()?;
 				let length = self.call_value(strlen, &[pointer.into()])?.into_int_value();
 				let empty = self.pointer_type().const_null();
 				let result = self.call_with_pair(
@@ -948,7 +941,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return None;
 		}
 		let Some(declaration) = self.analysis.type_decls.values().find(|decl| decl.ty == ty) else {
-			// a type of another file of the program
 			return self
 				.destroy_in_other_files(ty)
 				.or_else(|| self.remote_destroy(ty));

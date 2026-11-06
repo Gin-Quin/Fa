@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Compiles the tier 1 runtime (`fa_runtime.c`) to LLVM IR with clang 18, once
-# for the 64-bit native targets and once for wasm32, and writes the IR that
+# for x86-64, AArch64 and wasm32, and writes the IR that
 # `src/runtime.rs` links into every program (checked in, so that building the
 # compiler doesn't need clang).
 #
@@ -40,6 +40,7 @@ compile() {
 }
 
 compile x86_64-unknown-linux-gnu "$DIRECTORY/fa_runtime.64.ll" -fPIC
+compile aarch64-unknown-linux-gnu "$DIRECTORY/fa_runtime.aarch64.ll" -fPIC
 compile wasm32-unknown-unknown "$DIRECTORY/fa_runtime.wasm32.ll" \
 	-mbulk-memory -mmutable-globals -msign-ext -mnontrapping-fptoint
-echo "wrote $DIRECTORY/fa_runtime.64.ll and $DIRECTORY/fa_runtime.wasm32.ll"
+echo "wrote the x86-64, AArch64 and wasm32 runtimes"

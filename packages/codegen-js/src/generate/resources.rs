@@ -48,13 +48,7 @@ impl Generator<'_> {
 		}
 		// another file's: by its interface (the type's functions, their export names)
 		let interface = self.session.interface(module)?;
-		let declaration = interface.keys.get(&key)?.node;
-		let destroy = interface
-			.type_functions
-			.get(&declaration)?
-			.iter()
-			.find(|function| self.types.syms.resolve(function.name) == "destroy")?
-			.decl;
+		let destroy = interface.type_method(self.types, ty, "destroy")?.decl;
 		let export = interface.export_names.get(&destroy)?.clone();
 		let path = crate::generate::modules::js_path(self.types.module_path(module));
 		Some(self.import(&path, &export))

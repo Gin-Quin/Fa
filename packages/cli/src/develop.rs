@@ -980,7 +980,23 @@ fn merge(mut first: Changes, second: Changes) -> Changes {
 }
 
 /// `fa test --watch`: runs the tests, then again after each change.
-pub(crate) fn watch_tests(selection: Selection) -> i32 {
+pub(crate) fn watch_tests(
+	selection: Selection,
+	target: Option<fa_codegen_llvm::Target>,
+	asynchronous: Option<bool>,
+) -> i32 {
+	let target_name = target.map_or("bun", |target| target.analysis_target());
+	let run = |loaded: &mut Loaded| {
+		loaded.configure_asynchronous(asynchronous, true);
+		match target {
+			Some(target) => crate::testing::run_llvm_tests(
+				crate::native::backend().expect("the LLVM test command was delegated"),
+				loaded,
+				target,
+			),
+			None => crate::run_tests(loaded),
+		}
+	};
 	let paths = paths(selection);
 	if paths.is_empty() {
 		eprintln!("fa test: no package of the workspace has test files (`*.test.fa`)");
@@ -990,7 +1006,7 @@ pub(crate) fn watch_tests(selection: Selection) -> i32 {
 	let mut runs = 0;
 	let mut watched: Vec<(Option<PathBuf>, Loaded, Watcher)> = Vec::new();
 	for (_, path) in paths {
-		let (loaded, watcher) = match load_watched(path.as_deref(), "bun") {
+		let (loaded, watcher) = match load_watched(path.as_deref(), target_name) {
 			Ok(loaded) => loaded,
 			Err(message) => {
 				crate::color::eprintln_message(&message);
@@ -1000,7 +1016,7 @@ pub(crate) fn watch_tests(selection: Selection) -> i32 {
 		watched.push((path, loaded, watcher));
 	}
 	for (_, loaded, _) in &mut watched {
-		crate::run_tests(loaded);
+		run(loaded);
 		runs += 1;
 	}
 	eprintln!("fa test: watching for changes");
@@ -1016,12 +1032,12 @@ pub(crate) fn watch_tests(selection: Selection) -> i32 {
 			}
 			std::thread::sleep(Duration::from_millis(30));
 			let changes = merge(changes, watcher.poll());
-			match refresh(loaded, path.as_deref(), &changes, "bun") {
+			match refresh(loaded, path.as_deref(), &changes, target_name) {
 				Ok(reason) => {
 					eprintln!("fa test: {reason}: running the tests again");
 					// the changes made while it loaded are seen by the next poll
 					watcher.watch(watched_roots(loaded));
-					crate::run_tests(loaded);
+					run(loaded);
 					runs += 1;
 				}
 				Err(message) => eprintln!("{message}"),

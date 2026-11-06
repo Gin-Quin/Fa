@@ -17,13 +17,13 @@ pub use crate::options::{OptLevel, Options, Target};
 impl Target {
 	pub fn triple(self) -> TargetTriple {
 		match self {
-			// `FA_NATIVE_TRIPLE`: another architecture's triple, for the tests of
-			// its C ABI (`tests/abi.rs`: the IR only, nothing links)
-			Target::Native => match std::env::var("FA_NATIVE_TRIPLE") {
-				Ok(triple) if !triple.is_empty() => TargetTriple::create(&triple),
-				_ => TargetMachine::get_default_triple(),
-			},
-			Target::NativeFreestanding => TargetTriple::create("x86_64-unknown-linux-gnu"),
+			// Tests can cross-compile with a matching CC and FA_NATIVE_TRIPLE.
+			Target::Native | Target::NativeFreestanding => {
+				match std::env::var("FA_NATIVE_TRIPLE") {
+					Ok(triple) if !triple.is_empty() => TargetTriple::create(&triple),
+					_ => TargetMachine::get_default_triple(),
+				}
+			}
 			Target::Wasm => TargetTriple::create("wasm32-unknown-unknown"),
 		}
 	}
@@ -33,25 +33,25 @@ impl Target {
 	/// only the features every current browser and runtime supports.
 	pub fn machine(self, options: &Options) -> Result<TargetMachine, Error> {
 		initialize_targets();
+		let triple = self.triple();
+		let name = triple.as_str().to_string_lossy();
+		let x86_64 = name.starts_with("x86_64");
 		if self == Target::NativeFreestanding
-			&& !(cfg!(target_arch = "x86_64") && cfg!(target_os = "linux"))
+			&& !(name.contains("linux")
+				&& (x86_64 || name.starts_with("aarch64") || name.starts_with("arm64")))
 		{
 			return Err(Error::Llvm(
-				"the freestanding target is only implemented for Linux x86-64".to_string(),
+				"the freestanding target requires Linux x86-64 or AArch64".to_string(),
 			));
 		}
-		let triple = self.triple();
 		let (cpu, features, reloc_mode) = match self {
-			Target::Native
-				if triple
-					.as_str()
-					.to_str()
-					.is_ok_and(|triple| triple.starts_with("x86_64")) =>
-			{
-				("x86-64", "", RelocMode::PIC)
-			}
+			Target::Native if x86_64 => ("x86-64", "", RelocMode::PIC),
 			Target::Native => ("generic", "", RelocMode::PIC),
-			Target::NativeFreestanding => ("x86-64", "", RelocMode::Static),
+			Target::NativeFreestanding => (
+				if x86_64 { "x86-64" } else { "generic" },
+				"",
+				RelocMode::Static,
+			),
 			Target::Wasm => (
 				"generic",
 				"+bulk-memory,+mutable-globals,+sign-ext,+nontrapping-fptoint",

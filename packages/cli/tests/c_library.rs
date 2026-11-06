@@ -218,6 +218,71 @@ fn a_c_library_built_as_one_module_is_used_from_c() {
 	build_and_check("c-library-module", &[], &[("FA_SPLIT", "0")]);
 }
 
+#[test]
+fn a_wasm_c_library_built_by_fa_is_importable() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let directory = scratch("c-library-wasm");
+	let package = package_in(&directory);
+	let configuration = package.join("package.fa");
+	let source = fs::read_to_string(&configuration).unwrap();
+	fs::write(&configuration, source.replace("[\"native\"]", "[\"wasm\"]")).unwrap();
+	let output = Command::new(env!("CARGO_BIN_EXE_fa"))
+		.args(["build", "farm"])
+		.current_dir(&directory)
+		.env("XDG_CACHE_HOME", directory.join(".cache"))
+		.env("FA_CACHE", directory.join(".cache/fa"))
+		.output()
+		.expect("`fa build` delegates to the LLVM backend");
+	let text = format!(
+		"{}{}",
+		String::from_utf8_lossy(&output.stdout),
+		String::from_utf8_lossy(&output.stderr)
+	);
+	assert!(output.status.success(), "{text}");
+	assert!(
+		["libfarm.wasm", "libfarm.mjs", "farm.h"]
+			.iter()
+			.all(|name| text.contains(name)),
+		"{text}"
+	);
+	let built = package.join("build/wasm");
+	assert!(built.join("farm.h").is_file());
+	assert!(!built.join("libfarm.a").exists());
+	let script = built.join("host.mjs");
+	fs::write(
+		&script,
+		r#"import open from './libfarm.mjs';
+const library = await open();
+try {
+  const text = new TextEncoder().encode('Ada\0');
+  const name = library.allocate(text.length);
+  new Uint8Array(library.memory.buffer, name, text.length).set(text);
+  library.exports.farm_greet(name);
+  library.free(name, text.length);
+  if (library.exports.farm_sum_of_squares() !== 30n) throw Error('initializers');
+  if ('$fa.initialize' in library.exports) throw Error('private lifecycle export');
+} finally {
+  library.dispose();
+  library.dispose();
+}
+"#,
+	)
+	.unwrap();
+	let output = Command::new(fa_codegen_llvm::javascript_runtime().expect("Node or Bun"))
+		.arg(script)
+		.output()
+		.expect("the library host runs");
+	assert!(
+		output.status.success(),
+		"{}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+	assert_eq!(String::from_utf8_lossy(&output.stdout), "Hello, Ada!\n");
+}
+
 /// Writes a package whose API is `api`, and runs `fa check` on it for
 /// `targets`: its output.
 fn check_api(name: &str, targets: &str, api: &str) -> (String, i32) {

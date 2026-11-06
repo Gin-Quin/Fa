@@ -39,7 +39,7 @@ mod target;
 #[cfg(fa_llvm)]
 mod units;
 
-pub use artifact::{Artifact, Timings};
+pub use artifact::{Artifact, CLibraryArtifacts, Timings};
 #[cfg(fa_llvm)]
 pub use compile::{
 	compile, compile_file, compile_file_linking, compile_linking, compile_program,

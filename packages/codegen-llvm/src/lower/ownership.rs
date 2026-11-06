@@ -1321,7 +1321,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if self
 			.types()
 			.contains_resource(self.analysis.symbols.symbol(symbol).ty)
-			&& let Ok(flag) = self.set_flag("owns_resource")
+			&& let Ok(flag) = self.set_owner_flag(symbol, slot, "owns_resource")
 		{
 			self.cleanups
 				.borrow_mut()
@@ -1329,7 +1329,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.resource_flags.borrow_mut().insert(slot.pointer, flag);
 			let mut fields = Vec::new();
 			for path in self.moved_field_paths(symbol, slot.repr) {
-				if let Ok(flag) = self.set_flag("owns_field") {
+				if let Ok(flag) =
+					self.set_owner_flag(symbol, slot, &format!("owns_field.{}", fields.len()))
+				{
 					fields.push(FieldFlag { path, flag });
 				}
 			}
@@ -1349,6 +1351,37 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_store(flag.pointer, self.context.bool_type().const_int(1, false))?;
 		Ok(flag.pointer)
+	}
+
+	/// Module values outlive their initializer, including a C library's
+	/// constructor. Their ownership flags must outlive that frame too.
+	fn set_owner_flag(
+		&self,
+		symbol: SymbolId,
+		slot: Slot<'ctx>,
+		name: &str,
+	) -> Result<PointerValue<'ctx>, Error> {
+		if !self
+			.global_slots
+			.values()
+			.any(|global| global.pointer == slot.pointer)
+		{
+			return self.set_flag(name);
+		}
+		let name = format!("fa.{name}.{}.{}", self.path, symbol.index());
+		let global = self.module.get_global(&name).unwrap_or_else(|| {
+			let global = self
+				.module
+				.add_global(self.context.bool_type(), None, &name);
+			global.set_initializer(&self.context.bool_type().const_zero());
+			global.set_linkage(Linkage::Internal);
+			global
+		});
+		self.builder.build_store(
+			global.as_pointer_value(),
+			self.context.bool_type().const_int(1, false),
+		)?;
+		Ok(global.as_pointer_value())
 	}
 
 	/// The paths of the fields holding a resource that move out of a local

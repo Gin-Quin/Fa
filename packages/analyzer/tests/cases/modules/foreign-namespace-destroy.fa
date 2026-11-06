@@ -1,0 +1,16 @@
+-- file: main.fa
+do {
+	let value = resources.make(0)
+	console.log(value.id)
+}
+-- prints: 0
+-- prints: destroy 0
+
+-- file: resources.foreign.fa
+export namespace = {
+	type Held = {
+		id: Int32
+		function destroy = (self) => { console.log("destroy {self.id}") }
+	}
+	function make = (id: Int32): Held => Held { id }
+}

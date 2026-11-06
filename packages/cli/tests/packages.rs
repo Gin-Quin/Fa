@@ -935,6 +935,28 @@ fn multi_file_cases_print_what_they_say() {
 	multi_file_cases("bun");
 }
 
+#[test]
+fn resources_of_an_imported_foreign_namespace_are_destroyed_on_bun() {
+	if !has_bun() {
+		return;
+	}
+	let case = parse_case(include_str!(
+		"../../analyzer/tests/cases/modules/foreign-namespace-destroy.fa"
+	))
+	.unwrap();
+	let directory = scratch("foreign-namespace-resources");
+	for (file, text) in &case.files {
+		fs::write(directory.join(file), text).unwrap();
+	}
+	let (stdout, stderr, code) = fa(
+		&["run", "--target=bun", "main.fa"],
+		&directory,
+		&directory.join("cache"),
+	);
+	assert_eq!(code, case.exit, "{stdout}{stderr}");
+	assert_eq!(stdout.lines().collect::<Vec<_>>(), case.stdout, "{stderr}");
+}
+
 /// The same cases compiled by the LLVM backend (per unit, as `fa run`
 /// compiles a package).
 #[test]

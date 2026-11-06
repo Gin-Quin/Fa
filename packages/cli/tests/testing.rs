@@ -177,3 +177,93 @@ fn a_test_file_that_never_ends_is_stopped() {
 		}
 	}
 }
+
+#[test]
+fn wasm_tests_select_each_body_and_reinitialize_module_values() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let package = scratch(
+		"wasm-tests",
+		&[
+			(
+				"package.fa",
+				"export = { name = \"tests\", targets = [\"wasm\"] }\n",
+			),
+			(
+				"library/check.test.fa",
+				r#"use { sleep } = std.time
+mutable count = 0
+test "first" {
+	count += 1
+	assert count == 1
+}
+test "second" {
+	count += 1
+	assert count == 1
+}
+test "fails" { assert 1 == 2 }
+test skip "skipped" { assert false }
+test "awaits" {
+	await sleep(1)
+	assert count == 0
+}
+type E = Errors { Bad }
+function fail = (): Never throws E.Bad => { throw E.Bad }
+test "catches" { assert (fail() catch _error => true) }
+"#,
+			),
+		],
+	);
+	let (stdout, stderr, code) = fa(&["test", "--target=wasm"], &package, &[]);
+	assert_eq!(code, 1, "{stdout}{stderr}");
+	assert!(
+		stdout.contains("4 passed, 1 failed, 1 skipped"),
+		"{stdout}{stderr}"
+	);
+	assert!(
+		stdout.contains("✗ fails") && stdout.contains("✓ catches"),
+		"{stdout}{stderr}"
+	);
+}
+
+#[test]
+fn llvm_tests_time_out_and_continue_with_the_other_files() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	for target in ["native", "wasm"] {
+		let package = scratch(
+			&format!("{target}-timeout"),
+			&[
+				("package.fa", "export = { name = \"tests\" }\n"),
+				(
+					"library/slow.test.fa",
+					"test \"waits\" { await std.time.sleep(600000) }\n",
+				),
+				(
+					"library/quick.test.fa",
+					"test \"continues\" { assert 1 == 1 }\n",
+				),
+			],
+		);
+		let start = Instant::now();
+		let (stdout, stderr, code) = fa(
+			&["test", &format!("--target={target}")],
+			&package,
+			&[("FA_TEST_TIMEOUT", "1")],
+		);
+		assert!(
+			start.elapsed() < Duration::from_secs(60),
+			"{stdout}{stderr}"
+		);
+		assert_eq!(code, 1, "{stdout}{stderr}");
+		assert!(
+			stdout.contains("its test didn't finish in 1 s") && stdout.contains("✓ continues"),
+			"{stdout}{stderr}"
+		);
+		assert!(stdout.contains("1 passed, 1 failed"), "{stdout}{stderr}");
+	}
+}

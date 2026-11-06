@@ -339,12 +339,18 @@ pub(crate) fn build_native_target(options: &BuildOptions, target: fa_codegen_llv
 	);
 	match built {
 		Ok(artifact) => {
-			if let Some((archive, header)) = &artifact.c_library {
+			if let Some(extra) = &artifact.c_library {
+				let mut written = vec![dependencies::shown_path(&artifact.output)];
+				if let Some(archive) = &extra.archive {
+					written.push(dependencies::shown_path(archive));
+				}
+				if let Some(loader) = &artifact.loader {
+					written.push(dependencies::shown_path(loader));
+				}
 				eprintln!(
-					"fa build: wrote {}, {} and {}",
-					dependencies::shown_path(&artifact.output),
-					dependencies::shown_path(archive),
-					dependencies::shown_path(header)
+					"fa build: wrote {} and {}",
+					written.join(", "),
+					dependencies::shown_path(&extra.header)
 				);
 				return 0;
 			}

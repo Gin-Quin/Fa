@@ -24,13 +24,6 @@ use crate::target::Target;
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// `main` of the program of the tests.
 	pub(super) fn lower_test_main(&mut self) -> Result<(), Error> {
-		if self.target == Target::Wasm {
-			return Err(Error::Unsupported {
-				message: "the tests on wasm (`fa test` runs them on `bun` and `native`)"
-					.to_string(),
-				location: String::new(),
-			});
-		}
 		let i32 = self.context.i32_type();
 		let index = self.module.add_global(i32, None, "fa.test_index");
 		index.set_initializer(&i32.const_zero());
@@ -57,6 +50,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		index: GlobalValue<'ctx>,
 	) -> Result<(), Error> {
 		let i32 = self.context.i32_type();
+		if self.target == Target::Wasm {
+			let read = self.runtime.import("testIndex", i32.fn_type(&[], false));
+			let value = self.call_value(read, &[])?;
+			self.builder.build_store(index.as_pointer_value(), value)?;
+			return Ok(());
+		}
 		let pointer = self.context.ptr_type(AddressSpace::default());
 		let argc = main.get_nth_param(0).expect("argc").into_int_value();
 		let argv = main.get_nth_param(1).expect("argv").into_pointer_value();

@@ -82,15 +82,16 @@ which mode the program builds in, and why.
 		}
 		"test" => {
 			"\
-Usage: fa test [<package>] [--watch] [--target=bun|native] [--asynchronous=true|false]
+Usage: fa test [<package>] [--watch] [--target=bun|native|wasm] [--asynchronous=true|false]
 
 Runs the tests of the `*.test.fa` files on Bun, each with freshly initialized
 module-level values, each test file in a Bun process of its own (as many at once
 as cores, `FA_TEST_WORKERS`), reported in the order of the files; exits with 1
 when a test fails. `--watch` runs them again
 after each change. In a workspace, without a package, the tests of every package
-with test files run. `--target=native` compiles them with the LLVM backend and runs
-each test in its own run of the executable. `--coverage` is not available yet.
+with test files run. `--target=native|wasm` compiles them with the LLVM backend and
+runs each test in its own process, using the wasm loader on Node or Bun for wasm.
+`--watch` preserves the selected target. `--coverage` is not available yet.
 "
 		}
 		"develop" => {

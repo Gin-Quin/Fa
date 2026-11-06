@@ -255,7 +255,7 @@ export = {
 
 `asynchronous` says whether the program runs with an event loop (see [synchronous programs](/advanced/concurrency#synchronous-programs)). By default, the compiler decides: a program is asynchronous when its entry starts a task or awaits something that may wait. Set it to `false` to build a program as one blocking call (tasks then run to their end as soon as they are started, and the compiler warns that the output order may change), or to `true` to keep the event loop. It can differ per target (`overrides = { web = { build = { asynchronous = true } } }`). `fa build`, `fa run` and `fa test` take the same option as `--asynchronous=true|false`; `fa build -v` says which mode a program builds in, and why. The name is `asynchronous` because `async` is a keyword.
 
-`cLibrary` builds the package as a C library, with a generated header: `header` is the header's file name, `prefix` the prefix of the C names, and `api` the foreign file whose export is the C interface. See [foreign code](/advanced/foreign-code#exposing-a-library-to-c).
+`cLibrary` builds the package as a C library, with a generated header: `header` is the header's file name, `prefix` the prefix of the C names, and `api` the foreign file whose export is the C interface. It supports `native` (static and shared libraries) and `wasm` (a WebAssembly module and an importable loader with `dispose()`). See [foreign code](/advanced/foreign-code#exposing-a-library-to-c).
 
 ### `develop`
 

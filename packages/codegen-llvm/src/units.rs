@@ -51,7 +51,7 @@ unsafe extern "C" {
 
 /// The version of the objects: a cached object of another version of the
 /// compiler is never reused.
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-3");
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-4");
 
 /// A file name made of a module path.
 fn file_name(module: &str) -> String {

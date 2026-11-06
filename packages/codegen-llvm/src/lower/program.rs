@@ -50,6 +50,7 @@ pub(crate) struct FileState<'a, 'ctx> {
 	node_parents: std::cell::RefCell<Vec<usize>>,
 	referenced: std::cell::RefCell<Option<rustc_hash::FxHashSet<SymbolId>>>,
 	loop_bodies: std::cell::OnceCell<Vec<fa_parser::SourceSpan>>,
+	index_proofs: std::cell::RefCell<Option<fa_analyzer::proofs::IndexFacts>>,
 	reactive_sources: FxHashMap<SymbolId, inkwell::values::PointerValue<'ctx>>,
 	derived_nodes: FxHashMap<SymbolId, inkwell::values::PointerValue<'ctx>>,
 }
@@ -88,6 +89,7 @@ impl<'a, 'ctx> FileState<'a, 'ctx> {
 			node_parents: std::cell::RefCell::new(Vec::new()),
 			referenced: std::cell::RefCell::new(None),
 			loop_bodies: std::cell::OnceCell::new(),
+			index_proofs: std::cell::RefCell::new(None),
 			reactive_sources: FxHashMap::default(),
 			derived_nodes: FxHashMap::default(),
 		}
@@ -169,6 +171,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			node_parents,
 			referenced,
 			loop_bodies,
+			index_proofs,
 			reactive_sources,
 			derived_nodes
 		);

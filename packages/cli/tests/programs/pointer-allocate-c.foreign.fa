@@ -1,0 +1,26 @@
+-- C-compatible allocated blocks are visible to C and through pointer.value.
+-- skip-target: native-freestanding wasm
+type Point = CStruct { x: Int32, y: Float64, values: CArray<Int16, 2> }
+mutable point = Pointer.allocate(Point { x = 7, y = 2.5, values = [1, 2] })
+console.log(point.read())
+point.value.x = -5
+point.value.values[1] = 42
+console.log(point.read())
+point.write(Point { x = -3, y = 4.5, values = [3, 4] })
+console.log(point.read())
+point.free()
+-- prints: { x = 7, y = 2.5, values = [1, 2] }
+-- prints: { x = -5, y = 2.5, values = [1, 42] }
+-- prints: { x = -3, y = 4.5, values = [3, 4] }
+
+function clear: (pointer: Pointer<Void>, value: Int32, count: UInt64) => Pointer<Void> = @extern("memset")
+mutable counter = Pointer.allocate(Int32(17))
+clear(counter, 0, UInt64(4))
+console.log(counter.read())
+counter.value = 22
+counter.value += 1
+console.log(counter.read())
+counter.free()
+-- prints: 0
+-- prints: 23
+

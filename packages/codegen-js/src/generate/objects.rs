@@ -1028,6 +1028,11 @@ impl Generator<'_> {
 					Resolution::Builtin(builtin) => {
 						// a range's bounds, the value a guard protects (a setter)
 						let path = builtins::get(builtin).path;
+						if path == "Pointer#value" {
+							let ty = self.type_of(last);
+							let cell = self.pointer_cell(value, ty);
+							return Some(Place::new(format!("{}.value", cell.primary_text()), ty));
+						}
 						let field = match path {
 							"Guard#value" => "value",
 							_ => path.strip_prefix("Range#")?,

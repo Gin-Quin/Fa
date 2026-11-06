@@ -103,7 +103,7 @@ Fa has no garbage collector and no borrow checker, yet it is 100% memory-safe. I
 When you reference an element of a collection, its type says where it is stored. The compiler tracks the operations that can move or remove elements, as precisely as it can: after one of them, the references it may have broken must be declared again before being used.
 
 ```fa
-mutable persons: Array(Person) = [{ name = "Ana" }, { name = "Bao" }, { name = "Cleo" }]
+mutable persons: Array<Person> = [{ name = "Ana" }, { name = "Bao" }, { name = "Cleo" }]
 
 use someone = persons[1] -- type: `Person in persons`
 someone.name = "John" -- fine: modifying an element keeps the references valid
@@ -120,12 +120,12 @@ console.log(someone.name) -- error: `someone` was invalidated by `persons.push`:
 A field that references another object names the collection it lives in, and is one side of a **relation** whose other side is declared too. The compiler keeps both sides in sync, and deleting an object cleans up every relation it was part of, so no reference is ever left dangling.
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 
 type Person = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: Pool(people->bestFriend) -- the people whose `bestFriend` is me
+	bestFriendOf: Pool<people->bestFriend> -- the people whose `bestFriend` is me
 }
 
 use ana = people.add({ name = "Ana" })

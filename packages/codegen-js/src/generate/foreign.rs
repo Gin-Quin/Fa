@@ -30,6 +30,49 @@ struct CDeclarations {
 }
 
 impl Generator<'_> {
+	/// The C memory layout of a pointer's target, or opaque Fa data.
+	fn pointer_spec(&self, target: TypeId) -> Option<String> {
+		match self.types.kind(target) {
+			TypeKind::Function(_) => return None,
+			TypeKind::Int(id)
+				if matches!(
+					self.types.int(id).storage,
+					fa_analyzer::types::IntStorage::I128 | fa_analyzer::types::IntStorage::U128
+				) =>
+			{
+				return None;
+			}
+			_ => {}
+		}
+		self.c_layout(target, &mut CDeclarations::default())
+			.map(|(_, _, _, spec)| spec)
+	}
+
+	/// `Pointer.allocate(value)`: C-compatible data in memory, other Fa
+	/// values rooted behind an opaque C address.
+	pub(crate) fn pointer_allocate(&mut self, n: NodeId, arguments: &[Argument]) -> Expr {
+		let Some(Argument::Given(value)) = arguments.first() else {
+			return self.unsupported(n, "this pointer allocation");
+		};
+		let Some(target) = self.types.pointer_target(self.type_of(n)) else {
+			return self.unsupported(n, "this pointer allocation");
+		};
+		if self
+			.types
+			.flags(target)
+			.contains(fa_analyzer::types::TypeFlags::HAS_PARAM)
+		{
+			return self.unsupported(n, "this pointer allocation with an unresolved target type");
+		}
+		let spec = self
+			.pointer_spec(target)
+			.unwrap_or_else(|| "null".to_string());
+		let expression = self.expr(*value);
+		let expression = self.copy_stored(*value, expression);
+		let helper = self.helper("faPointerAllocate");
+		js::call(helper, &[expression.text, spec])
+	}
+
 	/// The C type name of a Fa type (`bun:ffi`'s names), or `None` for a type
 	/// JavaScript can't give to C.
 	pub(crate) fn c_type_name(&self, ty: TypeId) -> Option<&'static str> {
@@ -483,7 +526,7 @@ impl Generator<'_> {
 		path: &str,
 		arguments: &[Argument],
 	) -> Expr {
-		let receiver = self.receiver(callee);
+		let mut receiver = self.receiver(callee);
 		let receiver_type = self.receiver_type(callee);
 		let argument = arguments.iter().find_map(|argument| match argument {
 			Argument::Given(value) => Some(*value),
@@ -496,43 +539,86 @@ impl Generator<'_> {
 		let Some(target) = self.types.pointer_target(receiver_type) else {
 			return self.unsupported(n, "this pointer method");
 		};
-		let c = self
-			.c_type_name(target)
-			.filter(|c| *c != "void" && *c != "function");
-		let Some(c) = c else {
-			return self.unsupported(n, "this pointer method on JavaScript");
-		};
-		let c = js::string_literal(c);
+		if self
+			.types
+			.flags(target)
+			.contains(fa_analyzer::types::TypeFlags::HAS_PARAM)
+		{
+			return self.unsupported(n, "this pointer method with an unresolved target type");
+		}
+		if argument.is_some() && !receiver.stable {
+			let name = self.temp();
+			self.out.line(format!("const {name} = {};", receiver.text));
+			receiver = Expr::name(name, true);
+		}
+		let spec = self.pointer_spec(target);
+		let opaque = spec.is_none();
+		let spec = spec.unwrap_or_else(|| "null".to_string());
+		let bigint = self.is_bigint(target).to_string();
 		match (path, argument) {
 			("Pointer#read", _) => {
-				let helper = self.helper("faPointerRead");
-				js::call(helper, &[receiver.text, c])
+				let helper = self.helper("faPointerReadValue");
+				let value = js::call(helper, &[receiver.text, spec, bigint]);
+				if opaque && self.is_composite(target) {
+					self.copy_of(value, target)
+				} else {
+					value
+				}
 			}
 			("Pointer#write", Some(value)) => {
-				let value = self.expr(value);
-				let helper = self.helper("faPointerWrite");
-				js::call(helper, &[receiver.text, c, value.text])
+				let expression = self.expr(value);
+				let expression = self.copy_stored(value, expression);
+				let drop = self
+					.drop_function(target)
+					.unwrap_or_else(|| "undefined".to_string());
+				let helper = self.helper("faPointerWriteValue");
+				js::call(helper, &[receiver.text, spec, expression.text, drop])
 			}
-			("Pointer#offset", Some(count)) => {
+			("Pointer#free", _) => {
+				let drop = self
+					.drop_function(target)
+					.unwrap_or_else(|| "undefined".to_string());
+				let helper = self.helper("faPointerFree");
+				js::call(helper, &[receiver.text, drop])
+			}
+			("Pointer#offset", Some(count)) if !opaque => {
 				let count = self.expr(count);
 				let helper = self.helper("faPointerOffset");
-				js::call(helper, &[receiver.text, c, count.text])
+				js::call(helper, &[receiver.text, spec, count.text])
 			}
-			("Pointer#toArray", Some(count)) => {
+			("Pointer#toArray", Some(count)) if !opaque => {
 				let count = self.expr(count);
-				let helper = self.helper("faPointerToArray");
-				js::call(helper, &[receiver.text, c, count.text])
+				let helper = self.helper("faPointerToValues");
+				js::call(helper, &[receiver.text, spec, bigint, count.text])
 			}
 			_ => self.unsupported(n, "this pointer method"),
 		}
 	}
 
-	/// `pointer.value`: the value it designates (a copy), of type `target`.
+	/// `pointer.value`: a view of its Fa value or its C memory.
 	pub(crate) fn pointer_value(&mut self, value: Expr, target: TypeId, member: NodeId) -> Expr {
-		let Some(c) = self.c_type_name(target).filter(|c| *c != "void") else {
-			return self.unsupported(member, "this pointer");
-		};
-		let helper = self.helper("faPointerRead");
-		js::call(helper, &[value.text, js::string_literal(c)])
+		if self
+			.types
+			.flags(target)
+			.contains(fa_analyzer::types::TypeFlags::HAS_PARAM)
+		{
+			return self.unsupported(member, "this pointer view with an unresolved target type");
+		}
+		let spec = self
+			.pointer_spec(target)
+			.unwrap_or_else(|| "null".to_string());
+		let bigint = self.is_bigint(target).to_string();
+		let helper = self.helper("faPointerValue");
+		js::call(helper, &[value.text, spec, bigint])
+	}
+
+	/// A writable accessor for the whole value a pointer designates.
+	pub(crate) fn pointer_cell(&mut self, pointer: Expr, target: TypeId) -> Expr {
+		let spec = self
+			.pointer_spec(target)
+			.unwrap_or_else(|| "null".to_string());
+		let bigint = self.is_bigint(target).to_string();
+		let helper = self.helper("faPointerCell");
+		js::call(helper, &[pointer.text, spec, bigint])
 	}
 }

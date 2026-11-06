@@ -37,7 +37,7 @@ Put the logic in `library/`, so it can be tested and reused. Start with the type
 -- library/Score.fa
 export type = {
 	name: String
-	value: Integer(min = 0, max = 100)
+	value: Integer<min = 0, max = 100>
 }
 ```
 
@@ -58,8 +58,8 @@ export type = Errors {
 
 ```fa
 -- library/parseScores.fa
-export function = (contents: String): Array(Score) throws ScoreError => {
-	mutable scores: Array(Score) = []
+export function = (contents: String): Array<Score> throws ScoreError.MalformedLine | ScoreError.OutOfRange => {
+	mutable scores: Array<Score> = []
 	let lines = contents.split("\n")
 
 	for line, index in lines {
@@ -91,13 +91,13 @@ export function = (contents: String): Array(Score) throws ScoreError => {
 
 A few things worth pointing out.
 
-The signature says everything the function can do: it returns an `Array(Score)`, and it can fail with a `ScoreError`. `throw` exits the function with an error, like `return` exits it with a value.
+The signature says everything the function can do: it returns an `Array<Score>`, and it can fail with a `ScoreError`. `throw` exits the function with an error, like `return` exits it with a value.
 
 After `if parts.length != 2 { throw ... }`, the compiler knows that `parts` has exactly two items, so `parts[0]` and `parts[1]` cannot fail. Without the check, indexing would `throws IndexError`, and you would have to handle it.
 
 `Integer.parse` fails when the text is not a number. `catch` handles that failure by throwing a `ScoreError` instead, so the caller only ever deals with one error type.
 
-After `if value is not 0..=100 { throw ... }`, the compiler has narrowed `value` to `Integer(min = 0, max = 100)`, so it fits the `Score.value` field with no conversion.
+After `if value is not 0..=100 { throw ... }`, the compiler has narrowed `value` to `Integer<min = 0, max = 100>`, so it fits the `Score.value` field with no conversion.
 
 `scores.push(...)` receives an object typed by context: the array holds `Score` values, so there is no need to write the type again.
 
@@ -117,7 +117,7 @@ export type = {
 
 ```fa
 -- library/summarise.fa
-export function = (scores: Array(Score)): Summary? => {
+export function = (scores: Array<Score>): Summary? => {
 	if scores.length == 0 {
 		return none
 	}
@@ -160,7 +160,7 @@ The application sees the library only through the `library` namespace, and the s
 use { parseScores, summarise, ScoreError } = library
 use { File } = std.fs
 
-export function = (arguments: Array(String)): Integer throws ScoreError => {
+export function = (arguments: Array<String>): Integer throws ScoreError => {
 	let path = arguments.get(0) ?? "scores.csv"
 
 	let contents = File.read(path) catch error => throw ScoreError.FileNotFound { path }

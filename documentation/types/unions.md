@@ -102,15 +102,15 @@ let raw: Integer = userId -- error: a `UserId` is not an `Integer`
 
 Member names are only reachable through the union, as `Shape.Point`: inside the declaration, `String` is still the type `String`, even if a member is called `String`.
 
-A named union can be [generic](/types/generics). Its members are written without the parameters, which are inferred like those of a typed literal; the applied form, like `Result(Integer, String).Ok(1)`, is only needed when nothing gives them:
+A named union can be [generic](/types/generics). Its members are written without the parameters, which are inferred like those of a typed literal; the applied form, like `Result<Integer, String>.Ok(1)`, is only needed when nothing gives them:
 
 ```fa
-type Result(Value, Failure) = Union {
+type Result<Value, Failure> = Union {
 	Ok = Value
 	Failed = Failure
 }
 
-let result: Result(Integer, String) = Result.Ok(42)
+let result: Result<Integer, String> = Result.Ok(42)
 ```
 
 ## Matching a union
@@ -243,7 +243,7 @@ type Node = {
 
 type Folder = {
 	name: String
-	folders: Array(Folder)
+	folders: Array<Folder>
 }
 ```
 
@@ -253,7 +253,7 @@ The rules of recursive types:
 
 - A type can only refer to itself through its name: recursion goes through a named `type` declaration, and two declarations can refer to each other.
 - Two recursive types are the same type when unfolding them gives the same fields forever: `Node` and another type `Link = { value: String, child: Link? }` are the same type.
-- A generic type can't refer to itself with other parameters than its own: `type List(Item) = { head: Item, tail: List(Array(Item))? }` is an error, since every use would need a new type.
+- A generic type can't refer to itself with other parameters than its own: `type List<Item> = { head: Item, tail: List<Array<Item>>? }` is an error, since every use would need a new type.
 - [`DeepKeys`](/types/type-functions#deepkeysobjecttype) stops at a recursive field.
 
 For structures that genuinely need to share nodes, use a collection and [relations](/advanced/relations) instead.

@@ -445,6 +445,10 @@ pub(crate) fn parse_generic_parameters(context: &mut Context<'_>) -> GenericPara
 		};
 	}
 
+	context.error_at_token_with_code(
+		"GN031",
+		"Generic parameters use angle brackets: write `<Item>` for a type, or `function first = <Item>(items: Array<Item>) => …` for a function. Run `fa migrate-generics --write <path>` to update existing code",
+	);
 	let (parameters, _) = parse_delimited(context, TokenKind::ParenthesisClose, |context| {
 		parse_generic_parameter(context, &[TokenKind::Comma, TokenKind::ParenthesisClose])
 	});
@@ -521,6 +525,13 @@ pub(crate) fn report_generic_parameters_on_a_function_name(
 		context.error_at_token(format!(
 			"The generic parameters of a function belong to its value: write `{declaration} = <Item>(items: Array<Item>) => …`"
 		));
+	} else if is_parenthesis_open(context.kind()) {
+		context.error_at_token_with_code(
+			"GN031",
+			format!(
+				"The generic parameters of a function belong to its value: write `{declaration} = <Item>(items: Array<Item>) => …`. Run `fa migrate-generics --write <path>` to update existing code"
+			),
+		);
 	}
 }
 

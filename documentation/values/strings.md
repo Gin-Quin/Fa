@@ -182,8 +182,8 @@ Indexing is `O(1)` for ASCII text. For other text, grapheme clusters have differ
 
 A string stores its text as **UTF-8 bytes**, like in Rust and Go. Characters, indexing and `length` are views over these bytes: they never store the text a second time.
 
-- `bytes()` gives the UTF-8 bytes, as an `Array(Byte)`. It is the way to work on raw text, like a parser does: comparing bytes is faster than comparing characters, and every ASCII character is one byte.
-- `characters()` gives the characters, as an `Array(Character)`. It is a view of the string: indexing it, iterating over it or reading its `length` reads the string in place. The characters are copied out only when the array is kept and changed.
+- `bytes()` gives the UTF-8 bytes, as an `Array<Byte>`. It is the way to work on raw text, like a parser does: comparing bytes is faster than comparing characters, and every ASCII character is one byte.
+- `characters()` gives the characters, as an `Array<Character>`. It is a view of the string: indexing it, iterating over it or reading its `length` reads the string in place. The characters are copied out only when the array is kept and changed.
 
 ```fa
 let text = "naïve"
@@ -241,13 +241,15 @@ The string API is close to the JavaScript `String` API, with grapheme clusters i
 - A `String` is UTF-8, 24 bytes: a pointer, a length in bytes and a capacity with flags (static, inline, ASCII). A string of at most 23 bytes is stored inline, without allocation. A literal is stored in read-only data, with its grapheme count computed at compile time, and copied only when a mutable string is created from it.
 - **Small strings never touch the heap.** Besides inline strings, a local string that doesn't escape its function (it is not returned, thrown, stored in a field, a collection or a module-level value, nor captured by an escaping closure or a task; the analyzer lists them, `Analysis::non_escaping`) lives in a stack buffer of the function, up to 64 bytes. A string goes to the heap only when it is longer, or escapes.
 - **Capacity.** `String.from(text, capacity = n)` and `reserve(additional)` allocate the heap block at once (an inline string moves to the heap when it reserves more than fits inline); `capacity` reads the capacity word without its flags (23 for an inline string, 0 for a literal).
-- **Characters are views.** A `Character` is the bytes of one grapheme cluster: inline when they are short, otherwise a pointer and a length into the string's bytes. `characters()` is a view of the string, like `bytes()`: indexing it, reading its `length` or iterating over it reads the string in place. Only an `Array(Character)` that the program keeps and changes is built, of compact characters.
+- **Characters are views.** A `Character` is the bytes of one grapheme cluster: inline when they are short, otherwise a pointer and a length into the string's bytes. `characters()` is a view of the string, like `bytes()`: indexing it, reading its `length` or iterating over it reads the string in place. Only an `Array<Character>` that the program keeps and changes is built, of compact characters.
 - `length`, indexing and slicing scan the grapheme boundaries with the compiler's UAX #29 tables; a string known to be ASCII skips the scan (one byte per character). A heap string caches its grapheme count, and builds breadcrumbs (the byte offset of every 64th grapheme) at the second indexing after a write; a write clears both.
 - A slice (`String in text`) is a pointer and a byte length.
-- **The parts of `split` are views** of the text when the compiler proves that the text outlives them unchanged: the call (maybe followed by `filter`s) is the value of a `let`, the text is a `let` or `mutable` of the file that no reference designates, and nothing writes it in the scope of the parts nor in another function or closure. A view is a pointer and a byte length into the text, never freed; copying a part (pushing it, storing it in a map, assigning it) copies its bytes, and the array holding the views is never moved. Otherwise, and when the text is inline, each part is a copy (inline up to 23 bytes). A one-byte separator counts its occurrences first, so that the array of parts is allocated once.
+- **The parts of `split` are views** of the text when the compiler proves that the text outlives them unchanged: the call, possibly followed by `filter`, initializes a `let`; the source is a local or module-level value that no reference designates, and no code writes it while the parts live. A view is a pointer and a byte length; keeping a part in another value copies its bytes. Parts of an inline string view a copy in the function frame, so a module initializer uses copies instead. A loop over a split by a nonempty literal reads views without testing their representation. A one-byte separator is counted first to allocate the array once.
 - A character read from a literal (`letters[i]`) is a view of the literal's bytes, which live as long as the program.
 - `<` compares the UTF-8 bytes, which orders by code point.
 - Equality compares two inline values word by word. Otherwise it checks byte lengths before reading bytes; empty and one-byte strings compare inline, and longer strings use the shared byte comparison. Reading a compact ASCII character array produces an inline one-byte value, without borrowing the source's storage.
+
+- **Destination passing.** A function that builds a mutable string and returns it, possibly with a final suffix, is expanded into an append destination when its result is appended there. The function has no effects, errors, early returns, captures or calls of program functions, and its arguments cannot read the destination.
 
 ### JavaScript
 

@@ -46,7 +46,7 @@ Writing an element or a value replaces it: the references to it stay valid, and 
 ## Example
 
 ```fa
-mutable humans: GrowingPool(Human) = []
+mutable humans: GrowingPool<Human> = []
 
 use john = humans.add({ name = "John", age = 30 })
 use jane = humans.add({ name = "Jane", age = 28 })
@@ -65,12 +65,12 @@ Note the `use`: `add` returns a reference into the collection, and `let` would c
 ## Comparison with the standard collections
 
 ```fa
-mutable array: Array(Human) = [{ name = "Ana", age = 30 }]
+mutable array: Array<Human> = [{ name = "Ana", age = 30 }]
 use first = array[0]
 array.push({ name = "Bao", age = 25 })
 console.log(first.name) -- error: `first` was invalidated by `array.push`: declare it again with `use first = array[...]`
 
-mutable growing: GrowingArray(Human) = [{ name = "Ana", age = 30 }]
+mutable growing: GrowingArray<Human> = [{ name = "Ana", age = 30 }]
 use firstGrowing = growing[0]
 growing.push({ name = "Bao", age = 25 })
 console.log(firstGrowing.name) -- "Ana", guaranteed valid
@@ -100,7 +100,7 @@ A growing collection is destroyed like any other value: at the end of its scope,
 
 ```fa
 function parse = (source: String): SyntaxTree => {
-	mutable tokens: GrowingArray(Token) = []
+	mutable tokens: GrowingArray<Token> = []
 	-- ... fill `tokens`, hold references into it freely ...
 	return buildTree(tokens)
 } -- every token is released here, in one deallocation

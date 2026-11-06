@@ -99,8 +99,8 @@ fn flat(count: usize) -> String {
 /// A static value building an array of `count` integers.
 fn static_array(count: usize) -> String {
 	format!(
-		"function build = (): Array(Integer) => {{\n\
-		 \tmutable items: Array(Integer) = []\n\
+		"function build = (): Array<Integer> => {{\n\
+		 \tmutable items: Array<Integer> = []\n\
 		 \tfor index in 0..{count} {{\n\
 		 \t\titems.push(index)\n\
 		 \t}}\n\

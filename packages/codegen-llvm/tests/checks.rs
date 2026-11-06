@@ -644,6 +644,30 @@ mod with_llvm {
 		assert!(message.contains("test.fa:6:2: error"), "{message}");
 		assert!(message.contains("`Array<Array<Integer>>`"), "{message}");
 	}
+	#[test]
+	fn disjoint_array_metadata_needs_a_non_wrapping_offset() {
+		let source = |offset: &str| {
+			format!(
+				"type Body = {{ value: Integer }}\nfunction interact = (items: Array<Body>): Void throws IndexError mutates items => {{\nfor body, i in items {{\nfor j in i + {offset}..items.length {{\ntry use other = items[j]\nbody.value += other.value\nother.value += body.value\n}}\n}}\n}}\ntry interact([{{ value = 1 }}, {{ value = 2 }}, {{ value = 3 }}])\n"
+			)
+		};
+		let small = ir_with("disjoint-small-offset", &source("1"), false);
+		let small = function(&small, "fa.interact");
+		assert!(
+			small.contains("!alias.scope") && small.contains("!noalias"),
+			"{small}"
+		);
+		let large = ir_with(
+			"disjoint-wrapping-offset",
+			&source("9223372036854775807"),
+			false,
+		);
+		let large = function(&large, "fa.interact");
+		assert!(
+			!large.contains("!alias.scope") && !large.contains("!noalias"),
+			"{large}"
+		);
+	}
 }
 
 /// A resource moved on every path or on none has no drop flag left in the

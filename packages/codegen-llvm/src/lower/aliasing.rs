@@ -18,6 +18,7 @@
 use fa_analyzer::ids::{NodeId, SymbolId};
 use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::{ArithOp, View};
+use fa_analyzer::types::int::LENGTH_MAX;
 use inkwell::basic_block::BasicBlock;
 use inkwell::values::{
 	AsValueRef, BasicMetadataValueEnum, InstructionOpcode, MetadataValue, PointerValue,
@@ -106,7 +107,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let View::Integer(offset) = self.view(*offset) else {
 			return None;
 		};
-		if offset < ethnum::I256::ONE {
+		// `i` is an array position, at most LENGTH_MAX. In unchecked builds
+		// a larger positive offset could wrap below `i`, including to a
+		// negative index normalizing back to the same element. Metadata
+		// cannot rely on the overflow stopping the program.
+		if offset < ethnum::I256::ONE || offset > ethnum::I256::from(i64::MAX) - LENGTH_MAX {
 			return None;
 		}
 		let variable = self.analysis.symbols.symbol_of_decl(pattern)?;

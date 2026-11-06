@@ -19,6 +19,12 @@ use smallvec::SmallVec;
 /// The bound standing for +∞ (−∞ is its negation): 2^250.
 pub const INFINITY: I256 = I256::from_words(1 << 122, 0);
 
+/// The largest length of a collection or a string, 2^48 (decision
+/// "Collection lengths are at most 2^48"): no machine addresses more, so
+/// every length, index and count starts from `0..=LENGTH_MAX`, and sums and
+/// products of a few of them are exact in 64 bits.
+pub const LENGTH_MAX: I256 = I256::from_words(0, 1 << 48);
+
 /// Clamps a value to `[-INFINITY, INFINITY]`.
 #[inline]
 pub fn saturate(value: I256) -> I256 {

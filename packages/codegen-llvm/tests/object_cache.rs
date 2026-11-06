@@ -36,9 +36,17 @@ fn files(main: &str) -> Vec<(String, String)> {
 /// time of each cached object, by unit.
 fn build(directory: &Path, main: &str) -> BTreeMap<String, SystemTime> {
 	let files = files(main);
+	build_files(directory, &files, &["counts", "double", "main"])
+}
+
+fn build_files(
+	directory: &Path,
+	files: &[(String, String)],
+	names: &[&str],
+) -> BTreeMap<String, SystemTime> {
 	let mut session = fa_analyzer::session::Session::new();
 	session.set_target(Target::Native.analysis_target());
-	session.set_resolver(Box::new(CodebaseResolver::from_texts(&files, None)));
+	session.set_resolver(Box::new(CodebaseResolver::from_texts(files, None)));
 	let run = fa_analyzer::pipeline::Options {
 		entry: Some("application/main".to_string()),
 		..fa_analyzer::pipeline::Options::default()
@@ -54,7 +62,10 @@ fn build(directory: &Path, main: &str) -> BTreeMap<String, SystemTime> {
 		&mut session,
 		&run,
 		Target::Native,
-		&Options::default(),
+		&Options {
+			leak_check: true,
+			..Options::default()
+		},
 		&split,
 		&directory.join("main.objects"),
 		&directory.join("main"),
@@ -75,8 +86,9 @@ fn build(directory: &Path, main: &str) -> BTreeMap<String, SystemTime> {
 		if !name.ends_with(".o") {
 			continue;
 		}
-		let unit = ["counts", "double", "main"]
-			.into_iter()
+		let unit = names
+			.iter()
+			.copied()
 			.find(|unit| name.contains(unit))
 			.unwrap_or("other");
 		let modified = entry.metadata().unwrap().modified().unwrap();
@@ -136,4 +148,151 @@ fn a_changed_fact_rebuilds_only_the_units_that_read_it() {
 	std::thread::sleep(std::time::Duration::from_millis(20));
 	let back = build(&directory, other);
 	assert_eq!(rebuilt(&referenced, &back), ["counts"]);
+}
+
+#[test]
+fn a_remote_escape_invalidates_cached_region_builders() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fa-region-object-cache");
+	let _ = std::fs::remove_dir_all(&directory);
+	std::fs::create_dir_all(&directory).unwrap();
+	let mut files: Vec<(String, String)> = [
+		("package.fa", "export = { name = \"regionCache\" }"),
+		("library/model.fa", "export namespace = { type Tree = Union { Leaf = { text: String }, Branch = { left: Tree, right: Tree } } }"),
+		("library/build.fa", "export function = (depth: Integer): model.Tree => if depth == 0 { model.Tree.Leaf { text = \"leaf\" } } else { model.Tree.Branch { left = build(depth - 1), right = build(depth - 1) } }"),
+		("library/count.fa", "export function = (tree: model.Tree): Integer => when tree is {\nmodel.Tree.Leaf => 1\nmodel.Tree.Branch as { left, right } => count(left) + count(right)\n}"),
+		("library/double.fa", "export function = (value: Integer): Integer => value * 2"),
+		("application/main.fa", "export function = () => {\nconsole.log(library.count(library.build(3)))\nconsole.log(library.double(2))\n}"),
+	].into_iter().map(|(path, text)| (path.into(), text.into())).collect();
+	let names = ["model", "build", "count", "double", "main", "escape"];
+	let first = build_files(&directory, &files, &names);
+	let run = |expected| {
+		let output = std::process::Command::new(directory.join("main"))
+			.output()
+			.unwrap();
+		assert!(output.status.success(), "{output:?}");
+		assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+		assert!(output.stderr.is_empty(), "{output:?}");
+	};
+	run("8\n4\n");
+	std::thread::sleep(std::time::Duration::from_millis(20));
+	let again = build_files(&directory, &files, &names);
+	assert!(rebuilt(&first, &again).is_empty());
+	files.push((
+		"library/escape.fa".into(),
+		"export function = (tree: model.Tree): Integer => {\nlet box = { tree }\nwhen box.tree is {\nmodel.Tree.Leaf => 0\nmodel.Tree.Branch => 1\n}\n}".into(),
+	));
+	files.iter_mut().find(|(path, _)| path == "application/main.fa").unwrap().1 = "export function = () => {\nconsole.log(library.count(library.build(3)))\nconsole.log(library.double(2))\nconsole.log(library.escape(library.build(0)))\n}".into();
+	std::thread::sleep(std::time::Duration::from_millis(20));
+	let escaped = build_files(&directory, &files, &names);
+	let changed = rebuilt(&again, &escaped);
+	assert!(changed.iter().any(|unit| unit == "build"), "{changed:?}");
+	assert!(!changed.iter().any(|unit| unit == "double"), "{changed:?}");
+	run("8\n4\n0\n");
+}
+
+#[test]
+fn a_remote_array_escape_invalidates_cached_child_region_builders() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fa-child-region-object-cache");
+	let _ = std::fs::remove_dir_all(&directory);
+	std::fs::create_dir_all(&directory).unwrap();
+	let mut files: Vec<(String, String)> = [
+		("package.fa", "export = { name = \"childRegionCache\" }"),
+		("library/model.fa", "export namespace = { type Tree = Union { Leaf = { value: Integer }, List = { items: Array<Tree> } } }"),
+		("library/build.fa", "export function = (depth: Integer): model.Tree => if depth == 0 { model.Tree.Leaf { value = 1 } } else {\nmutable items: Array<model.Tree> = []\nitems.push(build(depth - 1))\nitems.push(build(depth - 1))\nmodel.Tree.List { items }\n}"),
+		("library/count.fa", "export function = (tree: model.Tree): Integer => when tree is {\nmodel.Tree.Leaf => 1\nmodel.Tree.List as { items } => {\nmutable total = 0\nfor item in items { total += count(item) }\ntotal\n}\n}"),
+		("library/double.fa", "export function = (value: Integer): Integer => value * 2"),
+		("application/main.fa", "export function = () => {\nlet roots: Array<library.model.Tree> = [library.build(3), library.build(1)]\nmutable total = 0\nfor root in roots { total += library.count(root) }\nconsole.log(total)\nconsole.log(library.double(2))\n}"),
+	].into_iter().map(|(path, text)| (path.into(), text.into())).collect();
+	let names = ["model", "build", "count", "double", "main", "escape"];
+	let first = build_files(&directory, &files, &names);
+	// An exported recursive builder keeps its arena body as a private
+	// symbol in the cached object. This verifies physical activation, not
+	// merely the consultation of a positive frontend claim.
+	let builder_has_arena = |times: &BTreeMap<String, SystemTime>| {
+		std::fs::read_dir(directory.join("objects"))
+			.unwrap()
+			.flatten()
+			.any(|entry| {
+				let name = entry.file_name().to_string_lossy().to_string();
+				name.ends_with(".o")
+					&& name.contains("build")
+					&& entry.metadata().unwrap().modified().unwrap() == times["build"]
+					&& {
+						let object = std::fs::read(entry.path()).unwrap();
+						object
+							.windows(b".arena".len())
+							.any(|window| window == b".arena")
+							&& object
+								.windows(b"fa_array_init_region_local".len())
+								.any(|window| window == b"fa_array_init_region_local")
+					}
+			})
+	};
+	assert!(builder_has_arena(&first));
+	let run = |expected| {
+		let output = std::process::Command::new(directory.join("main"))
+			.output()
+			.unwrap();
+		assert!(output.status.success(), "{output:?}");
+		assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+		assert!(output.stderr.is_empty(), "{output:?}");
+	};
+	run("10\n4\n");
+	std::thread::sleep(std::time::Duration::from_millis(20));
+	let again = build_files(&directory, &files, &names);
+	assert!(rebuilt(&first, &again).is_empty());
+	files.push((
+		"library/escape.fa".into(),
+		"export function = (): Array<model.Tree> => [build(0)]".into(),
+	));
+	let main = &mut files
+		.iter_mut()
+		.find(|(path, _)| path == "application/main.fa")
+		.unwrap()
+		.1;
+	let end = main.rfind("\n}").unwrap();
+	main.insert_str(
+		end,
+		"\nlet escaped = library.escape()\nconsole.log(escaped.length)",
+	);
+	let escaped = build_files(&directory, &files, &names);
+	let changed = rebuilt(&again, &escaped);
+	assert!(changed.iter().any(|unit| unit == "build"), "{changed:?}");
+	assert!(!changed.iter().any(|unit| unit == "double"), "{changed:?}");
+	assert!(!builder_has_arena(&escaped));
+	run("10\n4\n1\n");
+}
+
+#[test]
+fn a_private_region_type_is_known_by_the_global_box_helpers() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fa-private-region-object-cache");
+	let _ = std::fs::remove_dir_all(&directory);
+	std::fs::create_dir_all(&directory).unwrap();
+	let files: Vec<(String, String)> = [
+		("package.fa", "export = { name = \"privateRegion\" }"),
+		("library/work.fa", "type Tree = Union { Leaf = { value: Integer }, List = { items: Array<Tree> } }\nfunction build = (depth: Integer): Tree => if depth == 0 { Tree.Leaf { value = 1 } } else {\nmutable items: Array<Tree> = []\nitems.push(build(depth - 1))\nitems.push(build(depth - 1))\nTree.List { items }\n}\nfunction count = (tree: Tree): Integer => when tree is {\nTree.Leaf => 1\nTree.List as { items } => {\nmutable total = 0\nfor item in items { total += count(item) }\ntotal\n}\n}\nexport function = (depth: Integer): Integer => count(build(depth))\n"),
+		("application/main.fa", "export function = () => console.log(library.work(3))"),
+	].into_iter().map(|(path, text)| (path.into(), text.into())).collect();
+	build_files(&directory, &files, &["work", "main"]);
+	let active = std::fs::read_dir(directory.join("objects")).unwrap().flatten().any(|entry| {
+		let name = entry.file_name().to_string_lossy().to_string();
+		name.ends_with(".o") && name.contains("work") && std::fs::read(entry.path()).unwrap().windows(b".arena".len()).any(|window| window == b".arena")
+	});
+	assert!(active, "the private builder must actually use its region");
+	let output = std::process::Command::new(directory.join("main")).output().unwrap();
+	assert!(output.status.success(), "{output:?}");
+	assert_eq!(String::from_utf8_lossy(&output.stdout), "8\n");
+	assert!(output.stderr.is_empty(), "{output:?}");
 }

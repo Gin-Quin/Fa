@@ -1,0 +1,91 @@
+-- Root arrays own independent regions. Recursive member arrays free their
+-- own buffers while their nodes remain owned by the enclosing root region.
+-- asynchronous: false
+type Tree = Union {
+	Empty
+	Leaf = { text: String }
+	List = { items: Array<Tree> }
+}
+function build = (depth: Integer): Tree => if depth > 0 {
+	mutable items: Array<Tree> = []
+	items.push(build(depth - 1))
+	items.push(build(depth - 1))
+	Tree.List { items }
+} else {
+	Tree.Leaf { text = "leaf".repeat(12) }
+}
+function empty = (): Tree => Tree.List { items = [] }
+function wide = (size: Integer): Tree => {
+	mutable items: Array<Tree> = []
+	for 0..size {
+		items.push(Tree.Leaf { text = "leaf".repeat(12) })
+	}
+	Tree.List { items }
+}
+function discard = (): Tree => {
+	mutable items: Array<Tree> = []
+	items.push(build(2))
+	assert items.length == 1
+	Tree.Leaf { text = "kept" }
+}
+type Failure = Errors { Stop }
+function failing = (fail: Boolean): Tree throws Failure.Stop => {
+	mutable items: Array<Tree> = []
+	items.push(build(2))
+	if fail { throw Failure.Stop }
+	Tree.List { items }
+}
+function count = (tree: Tree): Integer => when tree is {
+	Tree.Empty => 0
+	Tree.Leaf as { text } => text.length
+	Tree.List as { items } => {
+		mutable result = 0
+		for child in items {
+			result += count(child)
+		}
+		result
+	}
+}
+function copiedCount = (tree: Tree): Integer => when tree is {
+	Tree.Empty => 0
+	Tree.Leaf as { text } => text.length
+	Tree.List as { items } => {
+		let duplicate = items
+		mutable total = 0
+		for child in duplicate { total += count(child) }
+		for child in items { total += count(child) }
+		total
+	}
+}
+let roots: Array<Tree> = [build(3), build(2), Tree.Empty]
+let copied = roots
+assert copied == roots
+let separate = build(1)
+let second = separate
+assert count(second) == 96
+assert count(separate) == 96
+mutable total = 0
+for root in copied {
+	total += count(root)
+}
+assert total == 576
+for root in roots {
+	total -= count(root)
+}
+assert total == 0
+let failed = failing(true) catch _error => Tree.Empty
+let kept = failing(false) catch _error => Tree.Empty
+assert count(failed) == 0
+assert count(kept) == 192
+let description = "{build(1)}"
+assert description.startsWith("Tree.List")
+assert description.includes("leafleaf")
+
+assert copiedCount(build(2)) == 384
+assert count(empty()) == 0
+assert count(discard()) == 4
+let broad = wide(10_000)
+let broadCopy = broad
+assert count(broad) == 480_000
+assert count(broadCopy) == 480_000
+console.log("region forests") -- prints: region forests

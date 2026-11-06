@@ -206,7 +206,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// Whether a declaration of the file being lowered is lowered: the
 	/// program reaches it (all of them without a reachability).
-	fn is_reached(&self, node: NodeId) -> bool {
+	pub(super) fn is_reached(&self, node: NodeId) -> bool {
 		let Some(split) = self.split.as_ref() else {
 			return true;
 		};
@@ -971,6 +971,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			self.copy_cleanup_captures();
 		}
+		self.prepare_tree_arenas()?;
 		// the functions the program reaches (all without a reachability)
 		let selective = self
 			.split

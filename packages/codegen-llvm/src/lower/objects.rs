@@ -293,6 +293,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return self.boxed_to_inline(value, nominal);
 		}
 		let value = self.union_view(value)?;
+		if let Repr::Object(data) = repr
+			&& let Some(value) = self.unbox_compact_data(value, data)?
+		{
+			return Ok(value);
+		}
 		let ty = self.box_type(Some(repr));
 		let pointer = value.value.expect("a box").into_pointer_value();
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
@@ -368,6 +373,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let data_type = self.member_data(nominal, index).unwrap_or(TypeId::UNKNOWN);
 		let data_repr = self.repr_of(data_type, node.index())?;
 		let data = self.owned_as(data, data_repr, None)?;
+		if let Some(plan) = self.compact_array_payload(nominal, index) {
+			let array = self
+				.builder
+				.build_extract_value(data.value.expect("a payload").into_struct_value(), 0, "")?
+				.into_pointer_value();
+			let pointer = self.freeze_array_payload(
+				&self.builder,
+				id.get_zero_extended_constant().expect("a member id"),
+				plan,
+				array,
+				false,
+			)?;
+			return Ok(self.fresh(Val::new(Repr::Union, pointer)));
+		}
 		let ty = self.box_type(Some(data_repr));
 		if self.inline_union_words(nominal).is_some() {
 			let repr = Repr::InlineUnion(nominal);
@@ -539,12 +558,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "the data of a member without data"));
 		};
 		let repr = self.repr_of(data, node.index())?;
-		let ty = self.box_type(Some(repr));
 		let pointer = value.value.expect("a box").into_pointer_value();
-		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
-		let loaded = self
-			.builder
-			.build_load(self.llvm_type(repr), data_pointer, "")?;
+		let loaded = self.member_payload_value(&self.builder, pointer, nominal, index, repr)?;
 		Ok(Val::new(repr, loaded))
 	}
 
@@ -562,6 +577,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let data = self.member_data(nominal, index).unwrap_or(TypeId::UNKNOWN);
 		let repr = self.repr_of(data, node.index())?;
+		if let Some(plan) = self.compact_array_payload(nominal, index) {
+			return self.compact_payload_place(pointer, plan);
+		}
 		let ty = self.box_type(Some(repr));
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
 		Ok(Slot {
@@ -806,7 +824,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						_ => None,
 					};
 					let owned = self.owned_as(lowered, repr, source)?;
-					self.compact_moved_array(owned, source)
+					if info
+						.member
+						.and_then(|ty| self.member_of_type(ty))
+						.is_some_and(|(nominal, index)| {
+							self.compact_array_payload(nominal, index).is_some()
+						}) {
+						Ok(owned)
+					} else {
+						self.compact_moved_array(owned, source)
+					}
 				}
 				other => other,
 			};
@@ -2282,10 +2309,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let mut equal = self.context.bool_type().const_int(1, false);
 			for (position, repr) in fields.into_iter().enumerate() {
 				let index = position as u32 + 1;
-				let left = self.builder.build_struct_gep(layout, a, index, "")?;
-				let right = self.builder.build_struct_gep(layout, b, index, "")?;
-				let left = self.builder.build_load(self.llvm_type(repr), left, "")?;
-				let right = self.builder.build_load(self.llvm_type(repr), right, "")?;
+				let (left, right) = if let Some(plan) = self.compact_array_box(id) {
+					(
+						self.compact_payload_value(&self.builder, a, plan)?,
+						self.compact_payload_value(&self.builder, b, plan)?,
+					)
+				} else {
+					let left = self.builder.build_struct_gep(layout, a, index, "")?;
+					let right = self.builder.build_struct_gep(layout, b, index, "")?;
+					(
+						self.builder.build_load(self.llvm_type(repr), left, "")?,
+						self.builder.build_load(self.llvm_type(repr), right, "")?,
+					)
+				};
 				let mark = self.mark();
 				let part =
 					self.values_equal_any(Val::new(repr, left), Val::new(repr, right), node)?;
@@ -2400,12 +2436,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.append_value(suffix, node)?;
 			} else if let Some(data) = self.member_data(nominal, index) {
 				let repr = self.repr_of(data, 0)?;
-				let ty = self.box_type(Some(repr));
 				let box_pointer = value.value.expect("a box").into_pointer_value();
-				let data_pointer = self.builder.build_struct_gep(ty, box_pointer, 1, "")?;
-				let loaded = self
-					.builder
-					.build_load(self.llvm_type(repr), data_pointer, "")?;
+				let loaded =
+					self.member_payload_value(&self.builder, box_pointer, nominal, index, repr)?;
 				let loaded = Val::new(repr, loaded);
 				if let Repr::Object(object) = repr {
 					let space = self.string_constant(" ");

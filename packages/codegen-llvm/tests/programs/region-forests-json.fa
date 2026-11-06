@@ -1,0 +1,21 @@
+-- The memoized named-union writer reads compact child-array payloads.
+-- skip-target: native-freestanding
+-- asynchronous: false
+use { Json } = std.json
+type Tree = Union {
+	Leaf = { text: String }
+	List = { items: Array<Tree> }
+}
+function build = (depth: Integer): Tree => if depth > 0 {
+	mutable items: Array<Tree> = []
+	items.push(build(depth - 1))
+	items.push(build(depth - 1))
+	Tree.List { items }
+} else {
+	Tree.Leaf { text = "leaf".repeat(12) }
+}
+let leaf = "{{\"type\":\"Leaf\",\"text\":\"" + "leaf".repeat(12) + "\"}}"
+let branch = "{{\"type\":\"List\",\"items\":[" + leaf + "," + leaf + "]}}"
+let expected = "{{\"type\":\"List\",\"items\":[" + branch + "," + branch + "]}}"
+assert Json.stringify(build(2)) == expected
+console.log("region JSON") -- prints: region JSON

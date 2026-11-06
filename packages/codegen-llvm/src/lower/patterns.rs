@@ -120,6 +120,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.builder
 					.build_load(self.pointer_type(), slot.pointer, "")?
 					.into_pointer_value();
+				if let Repr::Object(data) = narrowed
+					&& !self.compact_array_data(data).is_empty()
+				{
+					let value = self.unbox(Val::new(Repr::Union, pointer), narrowed)?;
+					let out = self.alloca(narrowed, "member_view")?;
+					self.builder
+						.build_store(out.pointer, value.value.expect("a payload"))?;
+					return Ok(out);
+				}
 				let ty = self.box_type(Some(narrowed));
 				Ok(Slot {
 					pointer: self.builder.build_struct_gep(ty, pointer, 1, "")?,

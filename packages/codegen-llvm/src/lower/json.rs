@@ -1079,12 +1079,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				kind => {
 					let repr = self.repr_of(data_type, call.index())?;
 					let boxed = self.union_view(value)?;
-					let structure = self.box_type(Some(repr));
 					let pointer = boxed.value.expect("a box").into_pointer_value();
-					let data_pointer = self.builder.build_struct_gep(structure, pointer, 1, "")?;
-					let loaded = self
-						.builder
-						.build_load(self.llvm_type(repr), data_pointer, "")?;
+					let loaded =
+						self.member_payload_value(&self.builder, pointer, nominal, index, repr)?;
 					let data = Val::new(repr, loaded);
 					if kind == b'r' {
 						// the fields after `"type"`

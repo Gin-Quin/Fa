@@ -43,7 +43,7 @@ let sum = do {
 A `do` block is part of the function that contains it, so `return`, `break` and `continue` act on that function or loop (outside a function, including at the top level of a standalone file, `return` is an error; the body of a test counts as a function):
 
 ```fa
-function findFirstEven = (numbers: Array(Integer)): Integer? => {
+function findFirstEven = (numbers: Array<Integer>): Integer? => {
 	let result = do {
 		for number in numbers {
 			if number %% 2 == 0 {

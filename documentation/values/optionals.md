@@ -2,11 +2,11 @@
 
 An **optional** value may hold either a value or `none`.
 
-`none` is the single value of the type `None`, and `T?` is shorthand for `Optional(T)`, which is the union `T | None`:
+`none` is the single value of the type `None`, and `T?` is shorthand for `Optional<T>`, which is the union `T | None`:
 
 ```fa
 type MaybeInteger = Integer?
-type SameMaybeInteger = Optional(Integer)
+type SameMaybeInteger = Optional<Integer>
 type AlsoMaybeInteger = Integer | None
 ```
 
@@ -16,7 +16,7 @@ All three declarations are the same type.
 
 `T??` is `T?`: an optional of an optional is the same optional, since `T | None | None` is `T | None`. There is a single `none`, which can't say which level is absent.
 
-So `get` on a collection of optionals returns a single optional: with `let values: Array(Integer?) = [1, none]`, both `values.get(1)` (a stored `none`) and `values.get(5)` (no element) are `none`. When the difference matters, check the index first (`if index < values.length`), or use a union with a named member instead of `none`.
+So `get` on a collection of optionals returns a single optional: with `let values: Array<Integer?> = [1, none]`, both `values.get(1)` (a stored `none`) and `values.get(5)` (no element) are `none`. When the difference matters, check the index first (`if index < values.length`), or use a union with a named member instead of `none`.
 
 ## Declaring optionals
 
@@ -128,7 +128,7 @@ let city = user?.address?.city -- String?: `user` and `address` are both optiona
 `?.` is the only safe access operator: there is no `?[...]` or `?(...)`. To index an optional collection or to call an optional function pointer, narrow it first:
 
 ```fa
-let scores: Array(Integer)? = loadScores()
+let scores: Array<Integer>? = loadScores()
 
 if scores is not none {
 	console.log(scores.get(0))

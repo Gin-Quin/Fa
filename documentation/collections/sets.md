@@ -9,15 +9,15 @@ A set is meant for **primitives and small values** compared by content, like tag
 Like every collection, a set is created from a list literal, typed by the context, or with `Set.from` when there is no context (see [creating collections](/collections/arrays#creating-collections)).
 
 ```fa
-let setOfIntegers: Set(Integer) = [1, 2, 2, 3]
+let setOfIntegers: Set<Integer> = [1, 2, 2, 3]
 
 console.log(setOfIntegers.size) -- 3, because 2 is only stored once
 
-let distinct = Set.from([1, 2, 2, 3]) -- no context: `Set.from` infers a `Set(Integer)`
+let distinct = Set.from([1, 2, 2, 3]) -- no context: `Set.from` infers a `Set<Integer>`
 ```
 
 ```fa
-mutable setOfHumans: Set(Human) = [
+mutable setOfHumans: Set<Human> = [
 	{ name = "John", age = 20 }
 	{ name = "Jane", age = 21 }
 	{ name = "John", age = 22 }
@@ -54,7 +54,7 @@ setOfUsers.add({ id = 1, email = "foo@bar.com", name = "Foo Bar" })
 ## Adding and removing
 
 ```fa
-mutable tags: Set(String) = ["fa", "docs"]
+mutable tags: Set<String> = ["fa", "docs"]
 
 tags.add("parser")
 tags.delete("docs")
@@ -83,7 +83,7 @@ if tags.add("fa") {
 
 Like every collection, a set takes a `capacity` in `from`, has a read-only `capacity` property and a `reserve(additional)` method, which makes room for `additional` more values (see [capacity](/collections/arrays#capacity)): `Set(String).from([], capacity = 100)`.
 
-The values of a set can't be modified in place: their content decides where they are stored. A reference to a value of a set is read-only, even in a `mutable` set, and so is the loop variable. To change a value, delete it and add the new one. For the same reason, the element type of a set is exact: a `Set(Hero)` is not a `Set(Human)`, even where a [structural view](/advanced/structural-typing) would accept a `Hero` for a `Human`.
+The values of a set can't be modified in place: their content decides where they are stored. A reference to a value of a set is read-only, even in a `mutable` set, and so is the loop variable. To change a value, delete it and add the new one. For the same reason, the element type of a set is exact: a `Set<Hero>` is not a `Set<Human>`, even where a [structural view](/advanced/structural-typing) would accept a `Hero` for a `Human`.
 
 ## Iteration
 
@@ -100,8 +100,8 @@ Adding or removing values of a set while iterating over it is a compile error.
 ## Set operations
 
 ```fa
-let a: Set(Integer) = [1, 2, 3]
-let b: Set(Integer) = [2, 3, 4]
+let a: Set<Integer> = [1, 2, 3]
+let b: Set<Integer> = [2, 3, 4]
 
 a.union(b)        -- [1, 2, 3, 4]
 a.intersection(b) -- [2, 3]
@@ -114,7 +114,7 @@ These operations return a new set and leave `a` and `b` unchanged.
 Two sets are equal when they contain the same values, in any order:
 
 ```fa
-let c: Set(Integer) = [3, 2, 1]
+let c: Set<Integer> = [3, 2, 1]
 assert a == c
 ```
 
@@ -123,7 +123,7 @@ assert a == c
 Adding to or removing from a set may rehash it, which moves its values and invalidates every reference into it. This is why `add`, `delete`, `take`, `deleteWhere` and `clear` declare `mutates self`, and the compiler rejects any use of a reference obtained before one of these calls until it is declared again (see [owned references](/advanced/owned-references#after-invalidation)):
 
 ```fa
-mutable people: Set(Person) = [{ name = "Ana" }]
+mutable people: Set<Person> = [{ name = "Ana" }]
 use ana = people.find((person) => person.name == "Ana") -- type: `(Person in people)?`
 
 people.add({ name = "Bao" })
@@ -163,7 +163,7 @@ A set gives up stable references to keep `includes` as fast as possible. When re
 A set can contain a fixed number of values known at compile time:
 
 ```fa
-let myKeySet: Set("hello" | "world" | "!") = ["hello", "!"]
+let myKeySet: Set<"hello" | "world" | "!"> = ["hello", "!"]
 ```
 
 The keys of an object type form a **key set**, written with braces: `{ foo, nested { bar } }`. Besides [blocks](/getting-started/syntax-basics#braces), it is the only use of braces that is not an object. Key sets are what the key-taking [type functions](/types/type-functions) expect:
@@ -178,14 +178,14 @@ type MyType = {
 	}
 }
 
-type Picked = Pick(MyType, { foo, nested { baz } }) -- { foo: String, nested: { baz: Integer } }
-type Omitted = Omit(MyType, { bar })                -- { foo: String, nested: { baz: Integer, qux: Integer } }
+type Picked = Pick<MyType, { foo, nested { baz } }> -- { foo: String, nested: { baz: Integer } }
+type Omitted = Omit<MyType, { bar }>                -- { foo: String, nested: { baz: Integer, qux: Integer } }
 ```
 
 Because a key set is a compile-time value, a function can take one as a compile-time parameter and use it to generate code:
 
 ```fa
-function logProperties(Item, keys: DeepKeys(Item)) = (object: Item) => {
+function logProperties = <Item, keys: DeepKeys<Item>>(object: Item) => {
 	@for key in keys {
 		console.log("{key} = {object[key]}")
 	}
@@ -201,7 +201,7 @@ let myObject = {
 	}
 }
 
-logProperties(Type(myObject), { foo, baz, nested { foo } })(myObject)
+logProperties<Type<myObject>, { foo, baz, nested { foo } }>(myObject)
 ```
 
 The call above compiles to three `console.log` lines with no runtime lookup at all. See [fields](/types/fields#key-sets) and [generics](/types/generics).
@@ -234,6 +234,6 @@ The current LLVM backend stores a set like a [map](/collections/maps) without va
 - A set of primitives (`Integer`, `Float`, `String`, `Boolean`, a union of literals) is a JavaScript `Set`: the engine's `includes` (`has`) is as fast as anything written by hand.
 - A set of objects or tuples can't use a JavaScript `Set` directly, which compares objects by identity. It is a JavaScript `Map` from the structural hash of the value (a 32-bit number, computed by a function generated per element type) to the value, or to an array of values when several values share a hash. `includes` hashes the value, then compares it with the generated `==`. `size` is a counter kept next to the `Map`.
 - With a `key` option, the set is keyed by `key(value)`. When the key is a primitive, the set is a JavaScript `Map` from the key to the value: `Set.from(users, key = (user) => user.id)` is a `Map` from ids to users. Otherwise, the hash and the `==` of the previous point apply to the key.
-- The `key` function is part of the value, not of the type: a `Set(User)` parameter can receive a set built with or without one. So every set that is not a plain JavaScript `Set` of primitives is a `FaSet` object implementing the interface of a JavaScript `Set` (`has`, `add`, `delete`, `size`, iteration), and the code that uses a set is the same for all of them.
+- The `key` function is part of the value, not of the type: a `Set<User>` parameter can receive a set built with or without one. So every set that is not a plain JavaScript `Set` of primitives is a `FaSet` object implementing the interface of a JavaScript `Set` (`has`, `add`, `delete`, `size`, iteration), and the code that uses a set is the same for all of them.
 - A reference to an object value is the object itself.
 :::

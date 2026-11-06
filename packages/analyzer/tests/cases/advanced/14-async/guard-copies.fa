@@ -1,0 +1,38 @@
+use { Mutex } = std.concurrency
+
+async function check = () => {
+	mutable mutex = Mutex<Integer> { value = 3 }
+	do {
+		let first = mutex.tryLock()
+		if first != none {
+			do {
+				let second = first
+				console.log(second.value)
+			}
+			console.log(mutex.tryLock() == none)
+			console.log(first.value)
+		}
+	}
+	do {
+		let after = mutex.tryLock()
+		console.log(after?.value ?? -1)
+	}
+	mutable awaited = await mutex.lock()
+	do {
+		let holder = { guard = awaited }
+		let copied = holder
+		console.log(copied.guard.value)
+	}
+	console.log(mutex.tryLock() == none)
+	awaited.value += 4
+	console.log(awaited.value)
+}
+
+await check()
+-- prints: 3
+-- prints: true
+-- prints: 3
+-- prints: 3
+-- prints: 3
+-- prints: true
+-- prints: 7

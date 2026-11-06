@@ -1,0 +1,19 @@
+use { Mutex } = std.concurrency
+
+async function keep = (mutex: Mutex<Integer>) => {
+	let first = await mutex.lock()
+	mutable guards = [first, first]
+	guards.delete(0)
+	console.log(mutex.tryLock() == none)
+	guards.clear()
+	console.log(mutex.tryLock() == none)
+	console.log(first.value)
+}
+
+mutable mutex = Mutex<Integer> { value = 5 }
+await keep(mutex)
+console.log(mutex.tryLock() != none)
+-- prints: true
+-- prints: true
+-- prints: 5
+-- prints: true

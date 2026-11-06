@@ -1,0 +1,10 @@
+type Permissions = Fields { read, write }
+type Other = Fields { read, admin }
+function stillOptional = (permissions: Permissions?) => {
+	if permissions is Permissions.read {
+		return
+	}
+	permissions.toStringArray() -- error: E-OPT-1
+}
+function wrongType = (permissions: Permissions): Boolean => permissions is Other.read -- error: E-TYPE-1
+function unknownFlag = (permissions: Permissions): Boolean => permissions is { absent } -- error: TY092

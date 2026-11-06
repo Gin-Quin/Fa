@@ -1,0 +1,34 @@
+-- `is` compares Fields values exactly, including wide sets, alternatives and optional narrowing.
+type Permissions = Fields { read, write, nested { admin, audit } }
+function matches = (permissions: Permissions?): Boolean => permissions is { read, write }
+function selected = (permissions: Permissions?): Integer => {
+	if permissions is not Permissions.read {
+		return -1
+	}
+	Integer(permissions)
+}
+function alternative = (permissions: Permissions?): Boolean => permissions is none | Permissions.read | Permissions { nested { admin } }
+console.log(matches({ read, write }), matches({ read }), matches(none))
+-- prints: true false false
+console.log(selected(Permissions.read), selected({ read, write }), selected(none))
+-- prints: 1 -1 -1
+console.log(alternative(none), alternative({ read }), alternative({ nested { admin } }), alternative({ write }))
+-- prints: true true true false
+
+function grouped = (permissions: Permissions): Boolean => permissions is (Permissions { nested })
+console.log(grouped({ nested { admin, audit } }), grouped({ nested { admin } }))
+-- prints: true false
+
+type Wide = Fields { f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27, f28, f29, f30, f31, f32 }
+function wideMatch = (value: Wide?): Boolean => value is Wide { f0, f32 }
+console.log(wideMatch({ f0, f32 }), wideMatch({ f32 }), wideMatch(none))
+-- prints: true false false
+
+static atCompileTime = @matches(Permissions { read, write })
+static notAtCompileTime = @grouped(Permissions { nested { admin } })
+console.log(atCompileTime, notAtCompileTime)
+-- prints: true false
+static alternativeAtCompileTime = @alternative(Permissions { read })
+static alternativeFalseAtCompileTime = @alternative(Permissions { write })
+console.log(alternativeAtCompileTime, alternativeFalseAtCompileTime)
+-- prints: true false

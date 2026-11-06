@@ -1,0 +1,14 @@
+-- Recursive union writers refer to the memoized writer of their root type.
+-- skip-target: native-freestanding
+use { Json } = std.json
+type JsonTree = Union {
+	Leaf = { text: String }
+	Branch = { left: JsonTree, right: JsonTree }
+}
+function build = (depth: Integer): JsonTree => if depth == 0 {
+	JsonTree.Leaf { text = "leaf".repeat(12) }
+} else {
+	JsonTree.Branch { left = build(depth - 1), right = build(depth - 1) }
+}
+console.log(Json.stringify(build(2)))
+-- prints: {"type":"Branch","left":{"type":"Branch","left":{"type":"Leaf","text":"leafleafleafleafleafleafleafleafleafleafleafleaf"},"right":{"type":"Leaf","text":"leafleafleafleafleafleafleafleafleafleafleafleaf"}},"right":{"type":"Branch","left":{"type":"Leaf","text":"leafleafleafleafleafleafleafleafleafleafleafleaf"},"right":{"type":"Leaf","text":"leafleafleafleafleafleafleafleafleafleafleafleaf"}}}

@@ -37,6 +37,7 @@ mod division;
 mod edits;
 mod fields;
 mod foreign;
+mod frame_strings;
 mod frozen;
 pub(crate) mod generic_values;
 mod growing;
@@ -149,6 +150,8 @@ struct LoopFrame<'ctx> {
 /// The function being lowered.
 struct Frame<'ctx> {
 	function: FunctionValue<'ctx>,
+	/// Buffers owned by this frame; their pointers never move between locals.
+	frame_strings: FxHashMap<(FileId, SymbolId), frame_strings::FrameString<'ctx>>,
 	/// Recursive nodes allocated by this function belong to the caller's region.
 	arena: bool,
 	/// Key comparison applies SameValueZero recursively to composite values.
@@ -224,7 +227,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	pub(crate) versioned_characters: bool,
 	/// The representation bit of a reserved append loop, independent of its
 	/// changing length. The slow suffix path refreshes it (`appends.rs`).
-	pub(crate) inline_reserved: FxHashMap<(FileId, NodeId), PointerValue<'ctx>>,
+	pub(crate) inline_reserved: FxHashMap<(FileId, NodeId), appends::ReservedInline<'ctx>>,
 	/// The arrays indexed by a counted loop being lowered, read before it
 	/// (`hoisting.rs`): the array value of each local, and the items and
 	/// length of each such value.
@@ -244,6 +247,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// inclusive, to keep the room for the rounds left after a longer append.
 	reserved_appends: FxHashMap<(FileId, NodeId), (PointerValue<'ctx>, IntValue<'ctx>, bool)>,
 	frame: Option<Frame<'ctx>>,
+	/// Syntax-only upper bounds, shared by instances of a file.
+	small_mutable_strings: FxHashMap<FileId, rustc_hash::FxHashSet<SymbolId>>,
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
 	/// Line starts of the source, for locations.
@@ -479,6 +484,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			written_fields: std::cell::OnceCell::new(),
 			reserved_appends: FxHashMap::default(),
 			frame: None,
+			small_mutable_strings: FxHashMap::default(),
 			constants: FxHashMap::default(),
 			lines: state.lines.clone(),
 			object_types: std::cell::RefCell::new(FxHashMap::default()),
@@ -1539,6 +1545,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.saved_cleanups.push(outer);
 		self.frame = Some(Frame {
 			function,
+			frame_strings: FxHashMap::default(),
 			arena: false,
 			same_value_zero: false,
 			allocas,
@@ -2620,6 +2627,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.slot_of(symbol, node)?;
 			return Ok(Val::void());
 		}
+		if let Some(value) = self.frame_string_declaration(node, symbol, value_node)? {
+			return Ok(value);
+		}
 		let value = self.expr(value_node)?;
 		if value.repr == Repr::Never {
 			return Ok(Val::never());
@@ -2654,13 +2664,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		target: NodeId,
 		value: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		if let Some(result) = self.frame_string_assignment(target, value)? {
+			return Ok(result);
+		}
 		if let Resolution::Local(symbol) = self.analysis.resolution(target)
 			&& self.analysis.symbols.symbol(symbol).kind == SymbolKind::Mutable
 			&& self.node_repr(target)? == Repr::Str
 			&& let View::Template { parts } = self.view(value)
 		{
 			let slot = self.place(target)?;
-			if let Some(result) = self.string_template(parts, Some(slot))? {
+			if let Some(result) = self.string_template(parts, Some(slot), None)? {
 				return Ok(result);
 			}
 		}
@@ -2711,7 +2724,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let value_lowered = self.owned_as(value_lowered, slot.repr, Some(value))?;
 		// the value it replaces is dropped (but what moved out of it)
 		let flags = self.drop_replaced(target, slot)?;
-		self.store(slot, value_lowered, value)?;
+		if slot.repr == Repr::Str {
+			let source = self.string_snapshot(value_lowered)?;
+			self.call_runtime(
+				"fa_string_assign_after_drop",
+				&[source.pointer.into(), slot.pointer.into()],
+			)?;
+		} else {
+			self.store(slot, value_lowered, value)?;
+		}
 		for flag in flags {
 			self.builder
 				.build_store(flag, self.context.bool_type().const_int(1, false))?;

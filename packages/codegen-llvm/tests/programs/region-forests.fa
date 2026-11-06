@@ -1,0 +1,63 @@
+-- Root arrays own independent regions. Recursive member arrays free their
+-- own buffers while their nodes remain owned by the enclosing root region.
+-- asynchronous: false
+type Tree = Union {
+	Empty
+	Leaf = { text: String }
+	List = { items: Array<Tree> }
+}
+function build = (depth: Integer): Tree => if depth > 0 {
+	mutable items: Array<Tree> = []
+	items.push(build(depth - 1))
+	items.push(build(depth - 1))
+	Tree.List { items }
+} else {
+	Tree.Leaf { text = "leaf".repeat(12) }
+}
+function empty = (): Tree => Tree.List { items = [] }
+function wide = (size: Integer): Tree => {
+	mutable items: Array<Tree> = []
+	for 0..size {
+		items.push(Tree.Leaf { text = "leaf".repeat(12) })
+	}
+	Tree.List { items }
+}
+function discard = (): Tree => {
+	mutable items: Array<Tree> = []
+	items.push(build(2))
+	assert items.length == 1
+	Tree.Leaf { text = "kept" }
+}
+function count = (tree: Tree): Integer => when tree is {
+	Tree.Empty => 0
+	Tree.Leaf as { text } => text.length
+	Tree.List as { items } => {
+		mutable result = 0
+		for child in items {
+			result += count(child)
+		}
+		result
+	}
+}
+let roots: Array<Tree> = [build(3), build(2), Tree.Empty]
+let copied = roots
+let separate = build(1)
+let second = separate
+assert count(second) == 96
+assert count(separate) == 96
+mutable total = 0
+for root in copied {
+	total += count(root)
+}
+assert total == 576
+for root in roots {
+	total -= count(root)
+}
+assert total == 0
+assert count(empty()) == 0
+assert count(discard()) == 4
+let broad = wide(10_000)
+let broadCopy = broad
+assert count(broad) == 480_000
+assert count(broadCopy) == 480_000
+console.log("region forests") -- prints: region forests

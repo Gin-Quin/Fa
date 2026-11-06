@@ -53,6 +53,8 @@ pub struct Shared {
 	pub(crate) scans: FxHashMap<String, Arc<FileScan>>,
 	/// The declarations of each global type of a published module.
 	pub(crate) origins: Origins,
+	/// The complete scanned graph, shared by closed whole-program proofs.
+	pub(crate) region_modules: OnceLock<Arc<[String]>>,
 }
 
 /// The number of shards of [`Origins`].

@@ -178,3 +178,24 @@ Add: "A `when` choosing among string literals of one length by the integers `0` 
 ## `documentation/functions/defining-functions.md`, `:::implementation` (native and WebAssembly recursion)
 
 Add: "A small base case of a direct recursive call is evaluated at the call site when its guard and result use only scalar parameters and operations; an empty node of an arena, whose optional fields are all `none`, is also such a base case. Arguments are evaluated once, in order. In speed builds, an integer sum through a final optional recursive call (`prefix + (child?.walk() ?? 0)`) exposes both return paths to LLVM's tail-recursion elimination, so that the last recursive edge can become an accumulator loop. Other effects and calls keep their evaluation order."
+
+## `documentation/values/strings.md`, `:::implementation` (frame buffers)
+
+Clarify the 64-byte frame budget: an immutable runtime value stays inline up to 23 bytes on
+64-bit targets (11 on wasm32), then uses its own frame buffer up to 64 bytes. Literals keep
+permanent storage. A non-escaping mutable that may exceed inline room starts with a 64-byte
+buffer even when initialized by an empty string; a mutable whose writes are all proven small
+keeps inline storage. This avoids adding a hidden buffer argument to mutations.
+
+Every declaration owns a distinct buffer. A copied or moved frame-backed value copies into
+the destination's buffer, including loop declarations; an ordinary ownership boundary
+(containers, a returned concatenation or foreign allocation) first materializes independent
+bytes. Larger strings use the heap. An explicit heap reservation above 64 bytes survives
+moving its value, and clearing a mutable string retains its reserved capacity. A frame buffer
+that survives `await` belongs to the coroutine frame.
+
+The normal String ABI remains three words. Its writable non-owning frame kind uses the low
+capacity bit with room 64; heap capacities are even. Appends normalize this bit only for room
+checks and preserve it in the header. Copies, destruction and growth distinguish the tag
+from inline values, views and owned blocks, so a frame pointer is never freed or moved into
+another variable.

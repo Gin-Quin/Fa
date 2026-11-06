@@ -908,12 +908,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.json_write(value, target, call)
 			}
 			TypeKind::Union(_) => self.json_write_union(value, ty, call),
-			TypeKind::NamedUnion(..) | TypeKind::Member(..) => {
-				self.json_write_named(value, ty, call)
-			}
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) => self.json_write_enum(value, ty),
 			TypeKind::Fields(_) => self.json_write_flags(value, ty),
-			TypeKind::Object(_)
+			TypeKind::NamedUnion(..)
+			| TypeKind::Member(..)
+			| TypeKind::Object(_)
 			| TypeKind::Collection(
 				CollKind::Array | CollKind::GrowingArray | CollKind::Map | CollKind::GrowingMap,
 				..,
@@ -1110,7 +1109,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(())
 	}
 
-	/// The writer of an object or collection type: `fa.json.write(value)`.
+	/// Memoized writers stop recursive objects and named unions from expanding
+	/// their schemas indefinitely while compiling: `fa.json.write(value)`.
 	fn json_writer(
 		&mut self,
 		ty: TypeId,
@@ -1150,6 +1150,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	fn json_write_body(&mut self, value: Val<'ctx>, ty: TypeId, call: NodeId) -> Result<(), Error> {
 		match (self.types().kind(ty), value.repr) {
+			(TypeKind::NamedUnion(..) | TypeKind::Member(..), _) => {
+				self.json_write_named(value, ty, call)
+			}
 			(TypeKind::Object(_), Repr::Object(_)) => self.json_write_object(value, ty, call),
 			(TypeKind::Collection(_, item, _), Repr::Array(_)) => {
 				self.json_write_array(value, item, call)

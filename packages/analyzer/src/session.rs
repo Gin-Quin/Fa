@@ -166,6 +166,30 @@ impl Session {
 		self.shared = shared;
 	}
 
+	/// The whole graph a unit's closed region proof must account for.
+	pub(crate) fn region_modules(&self) -> Arc<[String]> {
+		if let Some(shared) = &self.shared {
+			return Arc::clone(shared.region_modules.get_or_init(|| {
+				let mut modules: Vec<_> = shared.scans.keys().cloned().collect();
+				modules.sort();
+				modules.into()
+			}));
+		}
+		let mut modules: Vec<_> = self
+			.files
+			.iter()
+			.filter(|source| {
+				source.analyzed
+					&& self.loaded_module(&source.module) == Some(source.analysis.file)
+					&& !matches!(source.role, crate::modules::FileRole::Configuration(_))
+			})
+			.map(|source| source.module.to_string())
+			.collect();
+		modules.sort();
+		modules.dedup();
+		modules.into()
+	}
+
 	/// The resolver, shared.
 	pub(crate) fn resolver_arc(&self) -> Option<Arc<dyn ModuleResolver>> {
 		self.resolver.clone()

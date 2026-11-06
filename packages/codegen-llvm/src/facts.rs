@@ -107,8 +107,18 @@ fn relation_sides(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 /// construction, and a method reads it once (`lower/frozen.rs`).
 pub const WRITTEN_FIELDS: &str = "fields.written";
 
+/// Closed root-region claims, resolved only with every module's contribution.
+/// Values include type, builder and child-array facts (`fa_analyzer::regions`).
+pub const ROOT_REGIONS: &str = "regions.roots";
+
 /// Every fact kind, in a fixed order.
 pub const KINDS: &[FactKind] = &[
+	FactKind {
+		name: ROOT_REGIONS,
+		collect: fa_analyzer::regions::unit_claims,
+		merge: union,
+		finish: fa_analyzer::regions::resolve_claims,
+	},
 	FactKind {
 		name: REFERENCED_MAPS,
 		collect: referenced_maps,

@@ -12,6 +12,7 @@ for count in 0..80 {
 	let text = repeat(count, "x", "start")
 	assert text.length == count + 5
 	assert text.startsWith("start")
+	assert text == "start" + "x".repeat(count)
 	let unicode = repeat(count, "é", "")
 	assert unicode.length == count
 	assert unicode.bytes().length == count * 2

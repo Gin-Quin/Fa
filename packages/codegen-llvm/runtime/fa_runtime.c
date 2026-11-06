@@ -115,6 +115,8 @@ typedef struct {
 #define SIMPLE ((size_t)1 << (sizeof(size_t) * 8 - 1))
 #define STRING_INLINE ((size_t)1 << (sizeof(size_t) * 8 - 2))
 #define KIND_MASK (~(SIMPLE | STRING_INLINE))
+#define STRING_FRAME ((size_t)1)
+#define FRAME_STRING_BYTES 64
 #define INLINE_STRING_BYTES (sizeof(FaString) - 1)
 #define INLINE_LENGTH_SHIFT ((sizeof(size_t) - 1) * 8)
 
@@ -134,7 +136,16 @@ static void inline_string_tag(FaString *string, size_t length, size_t simple) {
 /// Whether a string with this capacity word owns its heap block.
 static int string_owned(size_t capacity) {
 	size_t kind = capacity & ~SIMPLE;
-	return kind != 0 && kind < KIND_MASK;
+	return kind != 0 && kind < KIND_MASK && !(kind & STRING_FRAME);
+}
+
+static __attribute__((always_inline)) inline int string_frame(size_t capacity) {
+	return !(capacity & STRING_INLINE) && (capacity & KIND_MASK) == (FRAME_STRING_BYTES | STRING_FRAME);
+}
+
+static __attribute__((always_inline)) inline int string_writable(size_t capacity, size_t needed) {
+	size_t room = capacity & ~(SIMPLE | STRING_FRAME);
+	return room < (KIND_MASK & ~STRING_FRAME) && needed <= room;
 }
 
 /// `SIMPLE` when every byte is ASCII other than '\r', else 0.
@@ -423,7 +434,7 @@ static __attribute__((always_inline)) inline size_t string_block(size_t size) {
 		return size <= 8 ? 8 : (size + 7) & ~(size_t)7;
 	}
 	if (size > 8192) {
-		return size;
+		return (size + 1) & ~(size_t)1;
 	}
 	size_t block;
 	size_class(size, &block);
@@ -1578,13 +1589,68 @@ FA_EXPORT uint8_t *fa_string_allocate(size_t length, size_t simple, FaString *ou
 	return bytes;
 }
 
+/// The destination buffer belongs to the function frame, never to this header.
+/// Immutable short values remain inline; potentially growing mutables retain
+/// their frame pointer until they outgrow it.
+FA_EXPORT __attribute__((always_inline)) uint8_t *fa_string_allocate_local(size_t length,
+    size_t simple, uint8_t *buffer, FaString *out, int32_t mutable) {
+	if (length <= FRAME_STRING_BYTES && (mutable || length > INLINE_STRING_BYTES)) {
+		*out = (FaString){buffer, length, FRAME_STRING_BYTES | STRING_FRAME | simple};
+		return buffer;
+	}
+	return fa_string_allocate(length, simple, out);
+}
+
+/// Copy into the destination's own frame buffer. Only a consumed heap value
+/// above the frame budget may transfer its pointer; a frame pointer never does.
+FA_EXPORT __attribute__((always_inline)) void fa_string_assign_local(const FaString *source, uint8_t *buffer,
+    FaString *out, int32_t mutable, int32_t consume) {
+	FaString previous = *source;
+	FaString destination = *out;
+	size_t length = string_length(&previous);
+	int owned = consume && string_owned(previous.capacity);
+	int drop_destination = string_owned(destination.capacity);
+	if (owned && destination.bytes == previous.bytes) { drop_destination = 0; }
+	if (owned && (length > FRAME_STRING_BYTES || (previous.capacity & KIND_MASK) > FRAME_STRING_BYTES)) {
+		*out = previous;
+		if (drop_destination) { fa_free((void *)destination.bytes, destination.capacity & KIND_MASK, 1); }
+		return;
+	}
+	FaString result;
+	uint8_t *target = fa_string_allocate_local(length, previous.capacity & SIMPLE,
+	                                         buffer, &result, mutable);
+	__builtin_memmove(target, string_bytes(&previous), length);
+	if (owned) { fa_free((void *)previous.bytes, previous.capacity & KIND_MASK, 1); }
+	if (drop_destination) { fa_free((void *)destination.bytes, destination.capacity & KIND_MASK, 1); }
+	*out = result;
+}
+
+/// Moving a header outside a frame-backed local must detach its bytes.
+FA_EXPORT __attribute__((always_inline)) void fa_string_escape(const FaString *source, FaString *out) {
+	FaString previous = *source;
+	*out = string_frame(previous.capacity)
+	           ? owned_copy_with(string_bytes(&previous), string_length(&previous), previous.capacity & SIMPLE)
+	           : previous;
+}
+
+/// Generic assignment has already dropped the previous owning value (and
+/// reset any resource flags). A mutator borrowing a frame header keeps its
+/// buffer; every other destination receives an independent normal header.
+FA_EXPORT __attribute__((always_inline)) void fa_string_assign_after_drop(const FaString *source, FaString *out) {
+	if (string_frame(out->capacity)) {
+		fa_string_assign_local(source, (uint8_t *)out->bytes, out, 1, 1);
+	} else {
+		fa_string_escape(source, out);
+	}
+}
+
 /// Replace a string whose new parts are proven disjoint from its buffer.
 /// Empty assignments retain capacity, like clearing a mutable collection.
 FA_EXPORT __attribute__((always_inline)) uint8_t *fa_string_replace_buffer(size_t length, size_t simple, FaString *out) {
 	int owned = string_owned(out->capacity);
 	size_t capacity = out->capacity & KIND_MASK;
 	const uint8_t *previous = out->bytes;
-	if (owned && length <= capacity) {
+	if (string_writable(out->capacity, length)) {
 		out->length = length;
 		out->capacity = capacity | simple;
 		return (uint8_t *)previous;
@@ -1616,7 +1682,8 @@ static __attribute__((always_inline)) void join_strings(const FaString *parts, s
 		if (part_length) { simple &= parts[i].capacity; }
 	}
 	FaString result = {0};
-	uint8_t *target = length <= INLINE_STRING_BYTES ? (uint8_t *)&result : fa_alloc(length, 1);
+	size_t block = string_block(length);
+	uint8_t *target = length <= INLINE_STRING_BYTES ? (uint8_t *)&result : fa_alloc(block, 1);
 	size_t offset = 0;
 	for (size_t i = 0; i < count; i += 1) {
 		if (i) {
@@ -1629,7 +1696,7 @@ static __attribute__((always_inline)) void join_strings(const FaString *parts, s
 	}
 	if (!simple) { simple = simple_flag(target, length); }
 	if (length <= INLINE_STRING_BYTES) { inline_string_tag(&result, length, simple); }
-	else { result.bytes = target; result.length = length; result.capacity = length | simple; }
+	else { result.bytes = target; result.length = length; result.capacity = block | simple; }
 	*out = result;
 }
 
@@ -1692,6 +1759,12 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 	if (old_length != 0) {
 		simple &= capacity;
 	}
+	if (string_writable(capacity, needed)) {
+		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
+		string->length = needed;
+		string->capacity = (capacity & KIND_MASK) | simple;
+		return;
+	}
 	if (needed <= INLINE_STRING_BYTES) {
 		if (capacity & STRING_INLINE) {
 			copy_bytes((uint8_t *)string + old_length, bytes, length);
@@ -1706,12 +1779,6 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 		}
 		return;
 	}
-	if (string_owned(capacity) && needed <= (capacity & KIND_MASK)) {
-		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
-		string->length = needed;
-		string->capacity = (capacity & KIND_MASK) | simple;
-		return;
-	}
 	string_grow(string, bytes, length, simple);
 }
 
@@ -1720,8 +1787,8 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_append(FaString *string,
 	// common path, inlined: a simple suffix into an owned block with room
 	// (the flag of the string stays as it is: simple stays simple)
 	size_t capacity = string->capacity;
-	size_t kind = capacity & ~SIMPLE;
-	if (__builtin_expect((suffix_capacity & SIMPLE) && kind < KIND_MASK && string->length + length <= kind, 1)) {
+	size_t kind = capacity & ~(SIMPLE | STRING_FRAME);
+	if (__builtin_expect((suffix_capacity & SIMPLE) && kind < (KIND_MASK & ~STRING_FRAME) && string->length + length <= kind, 1)) {
 		copy_bytes((uint8_t *)string->bytes + string->length, bytes, length);
 		string->length += length;
 		return;
@@ -1729,6 +1796,12 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_append(FaString *string,
 	if (length == 0) { return; }
 	size_t old_length = string_length(string);
 	size_t needed = old_length + length;
+	// A non-simple short suffix retains a reserved heap block just as it
+	// retains a frame buffer. Only previously inline/shared text becomes inline.
+	if (string_writable(capacity, needed)) {
+		string_append_slow(string, bytes, length, suffix_capacity);
+		return;
+	}
 	if (needed <= INLINE_STRING_BYTES) {
 		size_t simple = suffix_capacity & SIMPLE;
 		if (old_length != 0) { simple &= capacity; }
@@ -1773,8 +1846,8 @@ static __attribute__((noinline)) void string_plus_slow(FaString *string, const u
 FA_EXPORT __attribute__((always_inline)) void fa_string_plus(FaString *string,
                                                              const uint8_t *bytes, size_t length,
                                                              size_t suffix_capacity) {
-	size_t kind = string->capacity & ~SIMPLE;
-	if (__builtin_expect((suffix_capacity & SIMPLE) && kind < KIND_MASK &&
+	size_t kind = string->capacity & ~(SIMPLE | STRING_FRAME);
+	if (__builtin_expect((suffix_capacity & SIMPLE) && kind < (KIND_MASK & ~STRING_FRAME) &&
 	                         string->length + length <= kind,
 	                     1)) {
 		copy_bytes((uint8_t *)string->bytes + string->length, bytes, length);
@@ -1782,6 +1855,10 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_plus(FaString *string,
 		return;
 	}
 	if (length == 0) {
+		return;
+	}
+	if (string_writable(string->capacity, string_length(string) + length)) {
+		fa_string_append(string, bytes, length, suffix_capacity);
 		return;
 	}
 	if ((string->capacity & STRING_INLINE) || string_length(string) + length <= INLINE_STRING_BYTES) {
@@ -1827,12 +1904,12 @@ static __attribute__((noinline)) void string_reserve_slow(FaString *string, size
 /// its parts, `reserve`): an inline string keeps its room when it is enough.
 FA_EXPORT __attribute__((always_inline)) void fa_string_reserve(FaString *string, size_t extra) {
 	size_t capacity = string->capacity;
-	size_t kind = capacity & ~SIMPLE;
+	size_t kind = capacity & ~(SIMPLE | STRING_FRAME);
 	size_t needed = string_length(string) + extra;
 	if (needed < extra) {
 		out_of_memory();
 	}
-	if (__builtin_expect(needed <= INLINE_STRING_BYTES || (kind < KIND_MASK && needed <= kind), 1)) {
+	if (__builtin_expect(needed <= INLINE_STRING_BYTES || (kind < (KIND_MASK & ~STRING_FRAME) && needed <= kind), 1)) {
 		return;
 	}
 	FaString copy = *string;
@@ -1850,8 +1927,7 @@ FA_EXPORT void fa_string_reserve_owned(FaString *string,
                                                                      size_t extra) {
 	size_t capacity = string->capacity;
 	size_t needed = string_length(string) + extra;
-	if (__builtin_expect(extra == 0 || (string_owned(capacity) && needed >= extra &&
-	                                     needed <= (capacity & KIND_MASK)), 1)) {
+	if (__builtin_expect(extra == 0 || (needed >= extra && string_writable(capacity, needed)), 1)) {
 		return;
 	}
 	// a new empty string (`mutable word = ""` before its loop): a block
@@ -1876,9 +1952,12 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_reserve_inline(FaString 
 	if (extra == 0) {
 		return;
 	}
-	if (string_owned(capacity)) {
+	// Both heap blocks and frame buffers retain their existing room. The
+	// common representation test includes both, without a separate tag branch.
+	size_t kind = capacity & ~SIMPLE;
+	if (kind != 0 && kind < KIND_MASK) {
 		size_t needed = string->length + extra;
-		if (needed < extra || needed > (capacity & KIND_MASK)) {
+		if (needed < extra || needed > (kind & ~STRING_FRAME)) {
 			string_reserve_owned_slow(string, extra);
 		}
 		return;
@@ -1903,7 +1982,7 @@ static __attribute__((noinline)) void string_reserve_owned_slow(FaString *string
 	}
 	int owned = string_owned(capacity);
 	size_t kind = capacity & KIND_MASK;
-	if (owned && needed <= kind) {
+	if (string_writable(capacity, needed)) {
 		return;
 	}
 	size_t grown = owned && kind * 2 > needed ? kind * 2 : needed;
@@ -1927,7 +2006,7 @@ FA_EXPORT __attribute__((always_inline)) size_t fa_string_room(size_t length, si
 		return INLINE_STRING_BYTES;
 	}
 	size_t kind = capacity & KIND_MASK;
-	return kind == 0 || kind == KIND_MASK ? length : kind;
+	return kind == 0 || kind == KIND_MASK ? length : kind & ~STRING_FRAME;
 }
 
 /// `String.from(text, capacity = n)`: a copy of the text with room for `n`
@@ -3092,7 +3171,8 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_pad(const uint8_t *bytes
 	size_t total = (size_t)width;
 	size_t missing = total - length;
 	FaString result = {0};
-	uint8_t *target = total <= INLINE_STRING_BYTES ? (uint8_t *)&result : fa_alloc(total, 1);
+	size_t block = string_block(total);
+	uint8_t *target = total <= INLINE_STRING_BYTES ? (uint8_t *)&result : fa_alloc(block, 1);
 	if (at_start) {
 		fill_bytes(target, filler[0], missing);
 		copy_bytes(target + missing, bytes, length);
@@ -3101,7 +3181,7 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_pad(const uint8_t *bytes
 		fill_bytes(target + length, filler[0], missing);
 	}
 	if (total <= INLINE_STRING_BYTES) { inline_string_tag(&result, total, SIMPLE); }
-	else { result.bytes = target; result.length = total; result.capacity = total | SIMPLE; }
+	else { result.bytes = target; result.length = total; result.capacity = block | SIMPLE; }
 	*out = result;
 }
 
@@ -3161,12 +3241,31 @@ FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
 #define INLINE_ITEMS ((size_t)32)
 #define INLINE_LIMIT ((size_t)96)
 
+#define ARRAY_REGION ((uint64_t)2)
+#define ARRAY_REGION_HEAP ((uint64_t)4)
+#define ARRAY_REGION_CLEANUP ((uint64_t)8)
+#define ARRAY_REGION_LOCAL ((uint64_t)16)
+#define ARRAY_REGION_SIZE_SHIFT 5
+
+static void region_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t item_size);
+void *fa_array_into_region(void *header, int64_t item_size);
+
 /// Whether the items of an array are in the block of its header: the word
 /// after the header says so (headers take 32 bytes, so that it exists).
 static int inline_items(const FaArrayHeader *array) {
 	uint64_t marker;
 	__builtin_memcpy(&marker, (const uint8_t *)array + sizeof(FaArrayHeader), 8);
 	return marker != 0 && array->items == (const uint8_t *)array + INLINE_ITEMS;
+}
+
+static uint64_t array_marker(const FaArrayHeader *array) {
+	uint64_t marker;
+	__builtin_memcpy(&marker, (const uint8_t *)array + sizeof(FaArrayHeader), 8);
+	return marker;
+}
+
+FA_EXPORT __attribute__((always_inline)) int32_t fa_array_is_region(const FaArrayHeader *array) {
+	return array != 0 && (array_marker(array) & ARRAY_REGION) != 0;
 }
 
 static void mark_items(FaArrayHeader *array, uint64_t marker) {
@@ -3177,6 +3276,14 @@ static void mark_items(FaArrayHeader *array, uint64_t marker) {
 /// Called before the items move to another block: the marker is cleared,
 /// since that block may happen to follow the header.
 static void free_array_items(FaArrayHeader *array, int64_t item_size) {
+	uint64_t marker = array_marker(array);
+	if (marker & ARRAY_REGION) {
+		if (marker & ARRAY_REGION_HEAP) {
+			fa_free(array->items, (size_t)(array->capacity * item_size), 16);
+			mark_items(array, marker & ~ARRAY_REGION_HEAP);
+		}
+		return;
+	}
 	if (inline_items(array)) {
 		mark_items(array, 0);
 	} else {
@@ -3243,6 +3350,11 @@ FA_EXPORT __attribute__((always_inline)) int32_t fa_string_array_get(const FaArr
 /// Makes room for one more item and returns its slot (`push`).
 /// `fa_array_push_slot` on a full array: a block twice as large.
 static __attribute__((noinline)) void array_grow(FaArrayHeader *array, int64_t item_size) {
+	if (fa_array_is_region(array)) {
+		if (array->capacity > INT64_MAX / 2) { out_of_memory(); }
+		region_array_reserve(array, array->capacity < 4 ? 4 : array->capacity * 2, item_size);
+		return;
+	}
 	if (array->capacity < 0) {
 		if (array->length > INT64_MAX / 2) { out_of_memory(); }
 		materialize_characters(array, array->length < 4 ? 4 : array->length * 2);
@@ -3283,7 +3395,8 @@ FA_EXPORT void *fa_array_push_slot(void *header, int64_t item_size) {
 /// the address of its header may change.
 FA_EXPORT void *fa_array_compact(void *header, int64_t item_size) {
 	FaArrayHeader *array = header;
-	if (array->capacity < 0 || inline_items(array)) {
+	if (array_marker(array) & ARRAY_REGION_LOCAL) { return fa_array_into_region(header, item_size); }
+	if (array->capacity < 0 || inline_items(array) || fa_array_is_region(array)) {
 		return array;
 	}
 	size_t bytes = (size_t)(array->length * item_size);
@@ -3413,6 +3526,10 @@ FA_EXPORT const void *fa_array_slice(const FaArrayHeader *array, int64_t start, 
 
 /// Makes room for `capacity` items (`Array.from(…, capacity = n)`).
 FA_EXPORT void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t item_size) {
+	if (fa_array_is_region(array)) {
+		region_array_reserve(array, capacity, item_size);
+		return;
+	}
 	if (array->capacity < 0) {
 		if (capacity > array->length) { materialize_characters(array, capacity); }
 		return;
@@ -3569,6 +3686,10 @@ FA_EXPORT FaArrayHeader *fa_arguments(void) {
 
 /// Frees an array whose items were dropped: its block and its header.
 FA_EXPORT void fa_array_free(FaArrayHeader *array, int64_t item_size) {
+	if (fa_array_is_region(array)) {
+		free_array_items(array, item_size);
+		return;
+	}
 	if (!inline_items(array)) {
 		fa_free(array->items, (size_t)(array->capacity < 0 ? array->length : array->capacity * item_size), 16);
 	}
@@ -3997,8 +4118,10 @@ FA_EXPORT void *fa_heap_grow(void *bytes, size_t old, size_t used, size_t size) 
 // ── root-owned recursive regions ──────────────────────────────────────
 
 // Only the compiler's closed immutable-tree proof uses these entry points.
-// Every chunk is page aligned: an edge finds its root's region without a
+// Arena chunks have their own granularity, separate from the 64 KiB heap
+// pages: an edge finds its root region by masking its address, without a
 // per-node header. The first chunk also holds the region control block.
+#define ARENA_CHUNK_SIZE ((size_t)4096)
 typedef struct FaArena {
 	struct FaArena *owner;
 	struct FaArena *next;
@@ -4098,13 +4221,67 @@ static uint8_t *take_arena_page_locked(void) {
 		arena_space_committed += step;
 	}
 	uint8_t *page = arena_space_next;
-	arena_space_next += PAGE_SIZE;
+	arena_space_next += ARENA_CHUNK_SIZE;
 	return page;
+}
+
+// Ordinary arenas subdivide a heap page. Its first chunk holds a bitmap;
+// the other fifteen chunks may belong to unrelated roots and are freed in
+// any order. Only the last release gives the whole heap page back.
+typedef struct FaArenaPage {
+	struct FaArenaPage *next;
+	struct FaArenaPage *previous;
+	uint32_t free;
+} FaArenaPage;
+
+#define ARENA_PAGE_FREE ((uint32_t)((1 << (PAGE_SIZE / ARENA_CHUNK_SIZE)) - 2))
+static FaArenaPage *available_arena_pages;
+static int32_t arena_pages_lock;
+
+static void unlink_arena_page(FaArenaPage *page) {
+	if (page->previous != 0) { page->previous->next = page->next; }
+	else { available_arena_pages = page->next; }
+	if (page->next != 0) { page->next->previous = page->previous; }
+}
+
+static uint8_t *take_small_arena_page(void) {
+	spin_lock(&arena_pages_lock);
+	FaArenaPage *page = available_arena_pages;
+	if (page == 0) {
+		page = (FaArenaPage *)take_pages(1);
+		if (page == 0) { spin_unlock(&arena_pages_lock); return 0; }
+		page->free = ARENA_PAGE_FREE;
+		page->next = 0;
+		page->previous = 0;
+		available_arena_pages = page;
+	}
+	uint32_t slot = (uint32_t)__builtin_ctz(page->free);
+	page->free &= ~((uint32_t)1 << slot);
+	if (page->free == 0) { unlink_arena_page(page); }
+	spin_unlock(&arena_pages_lock);
+	return (uint8_t *)page + slot * ARENA_CHUNK_SIZE;
+}
+
+static void give_small_arena_page(uint8_t *chunk) {
+	FaArenaPage *page = (FaArenaPage *)((uintptr_t)chunk & ~(uintptr_t)(PAGE_SIZE - 1));
+	uint32_t slot = (uint32_t)((chunk - (uint8_t *)page) / ARENA_CHUNK_SIZE);
+	spin_lock(&arena_pages_lock);
+	if (page->free == 0) {
+		page->previous = 0;
+		page->next = available_arena_pages;
+		if (page->next != 0) { page->next->previous = page; }
+		available_arena_pages = page;
+	}
+	page->free |= (uint32_t)1 << slot;
+	int release = page->free == ARENA_PAGE_FREE;
+	if (release) { unlink_arena_page(page); }
+	spin_unlock(&arena_pages_lock);
+	if (release) { give_pages((uint8_t *)page, 1); }
 }
 
 static __attribute__((noinline)) uint8_t *take_arena_page(void) {
 	if (!fa_compressed_links) {
-		return take_pages(1);
+		return take_small_arena_page();
 	}
 	spin_lock(&arena_space_lock);
 	uint8_t *page = take_arena_page_locked();
@@ -4114,7 +4291,7 @@ static __attribute__((noinline)) uint8_t *take_arena_page(void) {
 
 static void give_arena_page(uint8_t *page) {
 	if (!fa_compressed_links) {
-		give_pages(page, 1);
+		give_small_arena_page(page);
 		return;
 	}
 	spin_lock(&arena_space_lock);
@@ -4128,7 +4305,7 @@ FA_EXPORT __attribute__((always_inline)) void fa_arena_enter(void) {
 }
 
 static FaArena *arena_of(const void *node) {
-	return node == 0 ? 0 : ((FaArena *)((uintptr_t)node & ~(uintptr_t)(PAGE_SIZE - 1)))->owner;
+	return node == 0 ? 0 : ((FaArena *)((uintptr_t)node & ~(uintptr_t)(ARENA_CHUNK_SIZE - 1)))->owner;
 }
 
 // Boxing a moved root extends its existing region. A borrowed root is
@@ -4182,7 +4359,7 @@ FA_EXPORT __attribute__((always_inline)) void fa_arena_leave(const void *root) {
 static __attribute__((noinline)) void *arena_refill(size_t size, size_t align) {
 	size_t offset = (ARENA_HEADER + align - 1) & ~(align - 1);
 	FaArena *chunk = (FaArena *)take_arena_page();
-	if (chunk == 0 || offset > PAGE_SIZE || size > PAGE_SIZE - offset) {
+	if (chunk == 0 || offset > ARENA_CHUNK_SIZE || size > ARENA_CHUNK_SIZE - offset) {
 		static const uint8_t message[] = "stop: out of memory\n";
 		fa_write(2, message, sizeof(message) - 1);
 		fa_exit(101);
@@ -4202,7 +4379,7 @@ static __attribute__((noinline)) void *arena_refill(size_t size, size_t align) {
 	chunk->owner = arena;
 	uint8_t *result = (uint8_t *)chunk + offset;
 	tree_bump = result + size;
-	tree_end = (uint8_t *)chunk + PAGE_SIZE;
+	tree_end = (uint8_t *)chunk + ARENA_CHUNK_SIZE;
 	return result;
 }
 
@@ -4231,6 +4408,104 @@ FA_EXPORT FA_COLD void fa_arena_cleanup(void *node, void (*drop)(void *)) {
 	cleanup->drop = drop;
 	cleanup->node = node;
 	tree_arena->cleanup = cleanup;
+}
+
+// Fresh child arrays of a proven builder keep the normal Array ABI, but
+// their header and small buffers belong to the active root region. A buffer
+// larger than one arena page uses the heap and one idempotent region cleanup.
+static void region_array_cleanup(void *pointer) {
+	FaArrayHeader *array = pointer;
+	uint64_t marker = array_marker(array);
+	free_array_items(array, (int64_t)(marker >> ARRAY_REGION_SIZE_SHIFT));
+}
+
+static void region_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t item_size) {
+	if (capacity <= array->capacity) { return; }
+	if (capacity < 0 || item_size <= 0 ||
+	    (uint64_t)capacity > SIZE_MAX / (uint64_t)item_size ||
+	    (uint64_t)capacity > (uint64_t)INT64_MAX / (uint64_t)item_size) { out_of_memory(); }
+	size_t bytes = (size_t)capacity * (size_t)item_size;
+	uint64_t marker = array_marker(array);
+	// Empty literals already have room for their first four items, without
+	// exposing that room as their capacity until the first growth/reserve.
+	if (!(marker & ARRAY_REGION_HEAP) && capacity <= 4 &&
+	    array->items == (uint8_t *)array + INLINE_ITEMS) {
+		array->capacity = capacity;
+		return;
+	}
+	uint8_t *items;
+	int heap = (marker & ARRAY_REGION_LOCAL) || bytes > ARENA_CHUNK_SIZE - ARENA_HEADER;
+	if (!heap) {
+		items = fa_arena_alloc(bytes, 16);
+	} else {
+		items = fa_alloc(bytes, 16);
+		if (!(marker & (ARRAY_REGION_LOCAL | ARRAY_REGION_CLEANUP))) {
+			fa_arena_cleanup(array, region_array_cleanup);
+			marker |= ARRAY_REGION_CLEANUP;
+		}
+	}
+	copy_bytes(items, array->items, (size_t)array->length * (size_t)item_size);
+	free_array_items(array, item_size);
+	marker &= ~ARRAY_REGION_HEAP;
+	if (heap) { marker |= ARRAY_REGION_HEAP; }
+	mark_items(array, marker);
+	array->items = items;
+	array->capacity = capacity;
+}
+
+FA_EXPORT void *fa_array_new_region(int64_t length, int64_t capacity, int64_t item_size) {
+	if (capacity < length) { capacity = length; }
+	if (length < 0 || capacity < 0 || item_size <= 0 ||
+	    (uint64_t)item_size > UINT64_MAX >> ARRAY_REGION_SIZE_SHIFT ||
+	    (uint64_t)capacity > SIZE_MAX / (uint64_t)item_size ||
+	    (uint64_t)capacity > (uint64_t)INT64_MAX / (uint64_t)item_size) { out_of_memory(); }
+	size_t room = (size_t)(capacity < 4 ? 4 : capacity);
+	size_t bytes = room <= SIZE_MAX / (size_t)item_size ? room * (size_t)item_size : SIZE_MAX;
+	int inline_buffer = bytes <= ARENA_CHUNK_SIZE - ARENA_HEADER - INLINE_ITEMS;
+	FaArrayHeader *array = fa_arena_alloc(INLINE_ITEMS + (inline_buffer ? bytes : 0), 16);
+	mark_items(array, ARRAY_REGION | (uint64_t)item_size << ARRAY_REGION_SIZE_SHIFT);
+	array->items = inline_buffer ? (uint8_t *)array + INLINE_ITEMS : 0;
+	array->length = 0;
+	array->capacity = inline_buffer ? capacity : 0;
+	if (!inline_buffer) { region_array_reserve(array, capacity, item_size); }
+	array->length = length;
+	return array;
+}
+
+// A fresh local child array keeps its header and first four slots in the
+// builder frame. Larger temporary buffers use the ordinary heap, then move
+// into the root region when a member takes ownership of the completed array.
+FA_EXPORT void fa_array_init_region_local(FaArrayHeader *array, int64_t length,
+                                          int64_t capacity, int64_t item_size) {
+	if (capacity < length) { capacity = length; }
+	if (length < 0 || capacity < 0 || item_size <= 0 ||
+	    (uint64_t)item_size > UINT64_MAX >> ARRAY_REGION_SIZE_SHIFT ||
+	    (uint64_t)capacity > SIZE_MAX / (uint64_t)item_size ||
+	    (uint64_t)capacity > (uint64_t)INT64_MAX / (uint64_t)item_size) { out_of_memory(); }
+	mark_items(array, ARRAY_REGION | ARRAY_REGION_LOCAL | (uint64_t)item_size << ARRAY_REGION_SIZE_SHIFT);
+	array->items = (uint8_t *)array + INLINE_ITEMS;
+	array->length = 0;
+	array->capacity = capacity <= 4 ? capacity : 0;
+	if (capacity > 4) { region_array_reserve(array, capacity, item_size); }
+	array->length = length;
+}
+
+FA_EXPORT void *fa_array_into_region(void *header, int64_t item_size) {
+	FaArrayHeader *source = header;
+	uint64_t marker = array_marker(source);
+	if ((marker & ARRAY_REGION) && !(marker & ARRAY_REGION_LOCAL)) { return source; }
+	// As with ordinary compaction, an inline buffer preserves its capacity;
+	// a separate growing buffer is reduced to the completed length.
+	int64_t capacity = inline_items(source) ? source->capacity : source->length;
+	FaArrayHeader *array = fa_array_new_region(source->length, capacity, item_size);
+	copy_bytes(array->items, source->items, (size_t)source->length * (size_t)item_size);
+	free_array_items(source, item_size);
+	if (!(marker & ARRAY_REGION_LOCAL)) { fa_free(source, INLINE_ITEMS, sizeof(int64_t)); }
+	else {
+		source->length = source->capacity = 0;
+		source->items = (uint8_t *)source + INLINE_ITEMS;
+	}
+	return array;
 }
 
 // ── leak checks (tests) ─────────────────────────────────────────────────

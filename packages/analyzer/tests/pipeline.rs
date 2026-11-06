@@ -156,7 +156,7 @@ fn package(levels: usize, errors: &[usize]) -> Vec<(String, String)> {
 	files.push((
 		"application/main.fa".to_string(),
 		format!(
-			"export function = (arguments: Array(String)): Integer => {{
+			"export function = (arguments: Array<String>): Integer => {{
 	provide library.greeting.Logger = {{ info = (message) => console.log(message) }}
 	library.greeting.greet(\"Ana\")
 {calls}	start do {{

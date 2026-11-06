@@ -3,13 +3,13 @@
 An **owned reference** is a reference to an element *inside a collection*. The collection owns the element; the reference points at it, and its type names the collection.
 
 ```fa
-let persons: Array(Person) = [Person {}, Person {}, Person {}]
+let persons: Array<Person> = [Person {}, Person {}, Person {}]
 
 let copied = persons[1] -- a copy
 use someone = persons[1] -- a reference
 
-console.log(@typeToString(Type(copied))) -- "Person"
-console.log(@typeToString(Type(someone))) -- "Person in persons"
+console.log(@typeToString(Type<copied>)) -- "Person"
+console.log(@typeToString(Type<someone>)) -- "Person in persons"
 ```
 
 The type of `someone` is not `Person` but `Person in persons`. The `in` part is what makes the reference safe: the type system knows exactly which collection the reference depends on. The type of a `use` is inferred; when you write it yourself, in a parameter or a return type, you write it in full: `Person in persons`.
@@ -21,16 +21,16 @@ This page explains the model with examples. [Reference checking](/advanced/refer
 A reference is either:
 
 - **local**: declared with `use` or `mutable use`, received as a parameter, or returned by a function. The compiler tracks it statically, call after call. This page is about local references.
-- **stored**: a field typed `(Person in people)?` or `Pool(Person in people)`. A stored reference is always one side of a [relation](/advanced/relations), with a declared reverse side: the compiler updates both sides on every write, and when the target is deleted.
+- **stored**: a field typed `(Person in people)?` or `Pool<Person in people>`. A stored reference is always one side of a [relation](/advanced/relations), with a declared reverse side: the compiler updates both sides on every write, and when the target is deleted.
 
-A local reference can't be stored as it is: a field typed `Person` or `Person?` holds a copy. To store a reference, declare a relation. A local collection of references, like `Array(Person in people)`, is not allowed either: keep indices, or declare a relation `Pool`.
+A local reference can't be stored as it is: a field typed `Person` or `Person?` holds a copy. To store a reference, declare a relation. A local collection of references, like `Array<Person in people>`, is not allowed either: keep indices, or declare a relation `Pool`.
 
 ## Invalidation
 
 A reference is **invalidated** when the memory it points to may have been freed, moved, or reused for a value of another type. The compiler knows when this happens:
 
 ```fa
-mutable persons: Array(Person) = [Person {}, Person {}, Person {}]
+mutable persons: Array<Person> = [Person {}, Person {}, Person {}]
 
 use someone = persons[1]
 
@@ -63,10 +63,10 @@ A union that is not a union of literals is never flat, even when its members hol
 type Person = {
 	name: String
 	age: Integer
-	pets: Array(Pet)
+	pets: Array<Pet>
 }
 
-mutable people: Array(Person) = [Person { name = "Ana", age = 31, pets = [Pet { name = "Rex" }] }]
+mutable people: Array<Person> = [Person { name = "Ana", age = 31, pets = [Pet { name = "Rex" }] }]
 
 use person = people[0]
 use age = people[0].age
@@ -137,7 +137,7 @@ Relations add implied effects to these operations: deleting a linked object also
 To invalidate as little as possible, the compiler remembers where each reference comes from, with the **exact** key or index whenever it is known at compile time, not just its type. Like the [range of an integer](/values/numbers#ranges-through-arithmetic), this knowledge propagates through the program: the type of `"ana"` is `String`, but the compiler knows it is exactly `"ana"`.
 
 ```fa
-mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+mutable scores: Map<String, Integer> = [("ana", 10), ("bao", 7)]
 
 use score = scores.get("ana")
 
@@ -150,7 +150,7 @@ scores.delete(name) -- `name` may be "ana": `score` is invalidated
 An invalidation targets every reference that **may** designate the invalidated element, and so does a mutation for the references into the mutated value. Two references are known to be distinct when the compiler can prove it, with a fixed set of facts: their keys or indices are known and different (exact values, integer ranges that don't intersect, or the same immutable value with different offsets, like `index` and `index + 1`), or one of them was returned by a call to `add` made after the other one existed. See [may designate](/advanced/reference-checking#may-designate) for the exact rules.
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 
 use ana = people.add({ name = "Ana" })
 use bao = people.add({ name = "Bao" })
@@ -172,7 +172,7 @@ Stored references don't need any of this: they are [relations](/advanced/relatio
 After a call that invalidates a reference, using it is a compile error until you **declare it again**, whatever the collection:
 
 ```fa
-mutable persons: Array(Person) = [{ name = "Ana" }, { name = "Bao" }, { name = "Cleo" }]
+mutable persons: Array<Person> = [{ name = "Ana" }, { name = "Bao" }, { name = "Cleo" }]
 
 use someone = persons[1] -- Bao
 
@@ -187,7 +187,7 @@ console.log(someone.name) -- "Bao"
 When the element may be gone, declare the reference again with a lookup that returns an [optional](/values/optionals), then check the optional:
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 
 use ana = people.add({ name = "Ana", age = 31 })
 people.add({ name = "Bao", age = 12 })
@@ -206,7 +206,7 @@ if ana is not none {
 The same goes for a map, with `get`:
 
 ```fa
-mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+mutable scores: Map<String, Integer> = [("ana", 10), ("bao", 7)]
 
 use score = scores.get("ana") -- type: `(Integer in scores)?`
 
@@ -221,7 +221,7 @@ use score = scores.get("ana")
 A reference declared with [`mutable use`](/values/declaring-values#changing-what-a-reference-designates) is not declared again: it is moved with `reuse`, which makes it valid again.
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 
 mutable use current = people.add({ name = "Ana" })
 
@@ -235,7 +235,7 @@ After a condition or a loop that may move it, the compiler considers that a `mut
 A reference invalidated in one branch only is invalidated after the branches, and can be declared again there. A declaration again inside a branch or a loop body only lasts until the end of that block: to repair a reference from inside a branch or a loop, declare it with `mutable use` and move it with `reuse`.
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 
 use ana = people.add({ name = "Ana" })
 
@@ -258,7 +258,7 @@ Declaring a name twice in the same scope is normally an error (see [declaring va
 Your own functions declare the same effects, and the compiler checks them at every call site:
 
 ```fa
-function addGuest = (guests: Array(Person), name: String) mutates guests => {
+function addGuest = (guests: Array<Person>, name: String) mutates guests => {
 	guests.push(Person { name = name })
 }
 
@@ -266,7 +266,7 @@ function welcome = (guest: Person) mutates guest.welcomed => {
 	guest.welcomed = true
 }
 
-mutable guests: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
+mutable guests: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }]
 use second = guests[1]
 
 welcome(guests[1]) -- `second` is still valid: `welcomed` is a `Boolean`, a flat value
@@ -301,7 +301,7 @@ function createPerson = (): Person => {
 When the collection comes from the caller, the reference can be returned as it is. Say so in the return type, and make it optional if the collection may be empty. A function returns a reference only when its return type says `in`: with an inferred return type, it returns a copy.
 
 ```fa
-function firstPerson = (persons: Array(Person)): (Person in persons)? => {
+function firstPerson = (persons: Array<Person>): (Person in persons)? => {
 	if persons.length == 0 {
 		return none
 	}

@@ -32,7 +32,7 @@ Three things to notice:
 
 ## Reading an argument
 
-The top level of a standalone file sees an implicit `arguments`, an `Array(String)` holding the command-line arguments given after the file name:
+The top level of a standalone file sees an implicit `arguments`, an `Array<String>` holding the command-line arguments given after the file name:
 
 ```fa
 let name = arguments.get(0) ?? "World"

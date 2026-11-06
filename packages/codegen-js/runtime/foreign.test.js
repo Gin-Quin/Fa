@@ -11,9 +11,15 @@ import {
 	faFfiBind,
 	faFfiLibraries,
 	faPointerOffset,
+	faPointerAllocate,
+	faPointerFree,
+	faPointerMemory,
 	faPointerRead,
+	faPointerReadValue,
 	faPointerToArray,
+	faPointerValue,
 	faPointerWrite,
+	faPointerWriteValue,
 } from "./foreign.js";
 
 describe("conversions", () => {
@@ -46,6 +52,36 @@ describe("conversions", () => {
 });
 
 describe.if(process.platform === "linux")("calls", () => {
+	test("owned pointer allocations use C memory and release opaque values", () => {
+		const scalar = faPointerAllocate(41, "i64");
+		expect(faPointerReadValue(scalar, "i64", false)).toBe(41);
+		expect(faPointerReadValue(scalar, "i64", true)).toBe(41n);
+		faPointerWriteValue(scalar, "i64", 42);
+		expect(faPointerRead(scalar, "i64")).toBe(42n);
+		faPointerFree(scalar);
+		const destroyed = [];
+		const opaque = faPointerAllocate({ name: "farm" }, null);
+		faPointerValue(opaque, null, false).name = "goats";
+		expect(faPointerReadValue(opaque, null, false)).toEqual({ name: "goats" });
+		faPointerWriteValue(opaque, null, { name: "cows" }, (value) => destroyed.push(value.name));
+		faPointerFree(opaque, (value) => destroyed.push(value.name));
+		expect(destroyed).toEqual(["goats", "cows"]);
+		expect(faPointerMemory.values.has(opaque)).toBe(false);
+	});
+
+	test("pointer.value writes through nested C structs and fixed arrays", () => {
+		const inner = { size: 4, fields: [["x", "i32", 0, false]] };
+		const items = { array: "i16", count: 2, stride: 2, bigint: false };
+		const spec = { size: 8, fields: [["point", inner, 0, false], ["items", items, 4, false]] };
+		const pointer = faPointerAllocate({ point: { x: 7 }, items: [1, 2] }, spec);
+		const value = faPointerValue(pointer, spec, false);
+		value.point.x = -3;
+		value.items[1] = 42;
+		expect([...value.items]).toEqual([1, 42]);
+		expect(faPointerReadValue(pointer, spec, false)).toEqual({ point: { x: -3 }, items: [1, 42] });
+		faPointerFree(pointer);
+	});
+
 	test("C functions of the C library", () => {
 		const strlen = faFfiBind([], "strlen", ["ptr"], "u64");
 		expect(strlen(faCString("farm"))).toBe(4n);

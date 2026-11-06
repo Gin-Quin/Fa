@@ -72,7 +72,7 @@ What the compiler can prove is defined by the rules of [range analysis](/values/
 These operations are handled like any call that can fail:
 
 ```fa
-function third = (items: Array(Integer)): Integer throws IndexError => {
+function third = (items: Array<Integer>): Integer throws IndexError => {
 	return try items[2]
 }
 
@@ -118,6 +118,8 @@ function saveScore = (score: Integer) throws StorageError => {
 ```
 
 Errors are never part of the return type: a function does not return `Integer | ApiError`, it returns `Integer` and `throws ApiError`.
+
+A value that throws fewer errors satisfies a type that throws more: `Task<T>` satisfies `Task<T> throws E`, and `(x: Integer) => Integer` satisfies `(x: Integer) => Integer throws E`. This applies to variables, collection items, fields, arguments and return values.
 
 ## Propagating errors with `try`
 
@@ -256,6 +258,8 @@ function loadUser = (id: Integer): User throws ApiError => ... -- may fail, with
 
 - A function that `throws` returns its error through a separate return slot (a tagged result: the error tag and payload next to the return value), never by unwinding. `try` is a branch on the tag; `catch` is a branch to the handler.
 - A stop calls a runtime routine that prints the message and the source location to stderr, then exits with code 101, without unwinding or running destructors.
+
+- Every task promise has an error slot, null for a task that cannot fail, so widening its error type keeps its frame. A function value widened to a throwing type uses an adapter holding a copy of the function.
 
 ### JavaScript
 

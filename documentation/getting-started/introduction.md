@@ -48,7 +48,7 @@ In Fa, you will not ask yourself *"When should I free memory?"* nor *"What alloc
 Two concepts make this possible:
 
 - **Where data is stored is part of the type system.** A reference to an element of a collection has a type like `Person in people`. The compiler tracks the operations that move or remove elements: after one of them, a reference must be declared again before use. See [owned references](/advanced/owned-references).
-- **Safe, explicit relations instead of weak pointers.** A field that references another object names its collection (`bestFriend: (Person in people)?`), and its reverse side is declared too (`bestFriendOf: Pool(people->bestFriend)`). The compiler keeps both sides in sync, and deleting an object cleans up every relation it was part of: a relation never dangles. See [relations](/advanced/relations).
+- **Safe, explicit relations instead of weak pointers.** A field that references another object names its collection (`bestFriend: (Person in people)?`), and its reverse side is declared too (`bestFriendOf: Pool<people->bestFriend>`). The compiler keeps both sides in sync, and deleting an object cleans up every relation it was part of: a relation never dangles. See [relations](/advanced/relations).
 
 Read more in [memory management](/advanced/memory-management).
 
@@ -113,17 +113,17 @@ In Fa, `@` marks a compile-time operation, and any pure function can be called a
 Every declaration in Fa has the same shape:
 
 ```
-<keyword> <name>[(<generic parameters>)][: <type>] = <value>
+<keyword> <name>[: <type>] = <value>
 ```
 
 ```fa
 let answer: Integer = 42
 mutable count = 0
-type Point(NumberType: Integer | Float) = { x: NumberType, y: NumberType }
-function first(Item) = (items: Array(Item)): Item? => items.get(0)
+type Point<NumberType: Integer | Float> = { x: NumberType, y: NumberType }
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
 ```
 
-Functions are declared like values, generic parameters are applied like calls (`Array(Integer)`, `Point(Float)`), and there is one way to write a function. A name without a keyword is never a declaration: `count = 1` assigns an existing mutable value. See [syntax basics](/getting-started/syntax-basics).
+Functions are declared like values, generic parameters are written between angle brackets (`Array<Integer>`, `first<Float>([1, 2])`), and there is one way to write a function. A name without a keyword is never a declaration: `count = 1` assigns an existing mutable value. See [syntax basics](/getting-started/syntax-basics).
 
 ## Start here
 

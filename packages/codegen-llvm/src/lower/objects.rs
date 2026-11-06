@@ -1426,7 +1426,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// `Color.members`: every member of an enumeration, in order
 		if let Resolution::Builtin(id) = self.analysis.resolution(first)
 			&& fa_analyzer::builtins::get(id).path == "Enum.members"
-			&& let Repr::Array(item_type) = self.node_repr(node)?
+			&& let Repr::Array(item_type) = self.node_repr(first)?
 			&& let Repr::Enum(nominal) = self.repr_of(item_type, node.index())?
 		{
 			let count = self
@@ -1434,6 +1434,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.sym_list(self.types().nominal(nominal).members)
 				.len() as u64;
 			let length = self.context.i64_type().const_int(count, false);
+			if members.len() == 2
+				&& let Some(last) = members.last()
+				&& let Resolution::Builtin(property) = self.analysis.resolution(last)
+				&& fa_analyzer::builtins::get(property).path == "Array#length"
+			{
+				return Ok(Val::new(Repr::Int(super::values::IntRepr::I64), length));
+			}
 			let array = self.new_array(Repr::Enum(nominal), length, length)?;
 			let (items, _) = self.array_parts(array)?;
 			for index in 0..count {
@@ -1449,7 +1456,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder
 					.build_store(pointer, self.context.i32_type().const_int(index, false))?;
 			}
-			return Ok(self.fresh(Val::new(Repr::Array(item_type), array)));
+			let value = self.fresh(Val::new(Repr::Array(item_type), array));
+			return self.apply_members(
+				node,
+				value,
+				self.type_of(first),
+				members.skip(1),
+				members.len() - 1,
+			);
 		}
 		// `library.counter.count`: a value of another file or of a namespace
 		let list: Vec<NodeId> = members.iter().collect();
@@ -1899,21 +1913,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				continue;
 			}
-			// `pointer.value` of a Fa value in a block of `Pointer.allocate`:
-			// the block (foreign.rs, `pointer_value`)
+			// `pointer.value`: the target's storage. C scalars and CStructs
+			// use the same layout; a C function pointer differs from a Fa
+			// function pair and cannot be borrowed as one.
 			if let Resolution::Builtin(builtin) = self.analysis.resolution(member)
 				&& fa_analyzer::builtins::get(builtin).path == "Pointer#value"
 				&& slot.repr == Repr::Pointer
 				&& let Some(target) = self.types().pointer_target(current_type)
-				&& self.c_type(target, member).is_err()
 			{
+				let repr = self.repr_of(target, member.index())?;
+				if let Ok(c) = self.c_type(target, member)
+					&& self.c_llvm_type(c) != Some(self.llvm_type(repr))
+				{
+					return Err(self.unsupported(member.index(), "a view of this C value"));
+				}
 				let pointer = self
 					.builder
 					.build_load(self.pointer_type(), slot.pointer, "")?
 					.into_pointer_value();
 				slot = Slot {
 					pointer,
-					repr: self.repr_of(target, member.index())?,
+					repr,
 				};
 				current_type = target;
 				continue;

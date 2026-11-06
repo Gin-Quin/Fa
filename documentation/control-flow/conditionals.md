@@ -104,7 +104,7 @@ A module-level value is narrowed like a local value, but the narrowing is also d
 | `value is Type`, `value is not Type` | the member(s) of the union that match, or the others |
 | `value is none`, `value == none` | `None`, and the base type in the other branch |
 | `value is "ready"`, `value == "ready"` | the literal, and the union without it in the other branch |
-| `value is 0..60` | the range: an `Integer(min = 0, max = 59)` |
+| `value is 0..60` | the range: an `Integer<min = 0, max = 59>` |
 | `value != 0` | an integer that excludes `0` |
 | `value is in ["admin", "owner"]` | the literals of the array (a literal array only) |
 | `value is Shape.Circle` | the member of the named union |
@@ -126,7 +126,7 @@ if divisor != 0 {
 }
 ```
 
-An integer keeps a range and a set of excluded values. When the false branch of a range test is not a single range, the compiler keeps the excluded values: after `if score is 0..60 { return }`, a `score: Integer(min = 0, max = 100)` is an `Integer(min = 60, max = 100)`; after `if divisor == 0 { return }`, `divisor` is an `Integer` that excludes `0`.
+An integer keeps a range and a set of excluded values. When the false branch of a range test is not a single range, the compiler keeps the excluded values: after `if score is 0..60 { return }`, a `score: Integer<min = 0, max = 100>` is an `Integer<min = 60, max = 100>`; after `if divisor == 0 { return }`, `divisor` is an `Integer` that excludes `0`.
 
 `is Type` narrows a union. On a value whose type is not a union, the compiler already knows the answer: a test that is always true is a warning, a test that is never true is an error. Testing the members of an anonymous union at runtime requires that they can be told apart: see [unions](/types/unions).
 
@@ -186,7 +186,7 @@ A narrowing is dropped:
 Changing the narrowed value itself keeps the narrowing: a method that mutates it (`items.push(1)`), a function that mutates a parameter of its narrowed type, or a write of one of its fields can't make it `none` or another member.
 
 ```fa
-type Order = { lines: Array(String)?, note: String? }
+type Order = { lines: Array<String>?, note: String? }
 
 function addLine = (order: Order, line: String) mutates order => {
 	if order.lines is none {
@@ -319,7 +319,7 @@ type Shape = Union {
 	Point
 	Circle = { radius: Float }
 	Rectangle = { width: Float, height: Float }
-	Segment = Tuple(Position, Position)
+	Segment = Tuple<Position, Position>
 }
 
 let area = when shape is {
@@ -430,7 +430,7 @@ Add the missing branch, or an `else`. Without `else`, the branches must cover:
 | an enumeration | every member |
 | an anonymous union, an optional | every member type, `none` included |
 | `Boolean` | `true` and `false` |
-| an integer type | literals and ranges that cover its whole range: `..0` and `0..` cover `Integer`, and `0..=100` covers an `Integer(min = 0, max = 100)` (see [ranged integers](/values/numbers#minimum-and-maximum-values)) |
+| an integer type | literals and ranges that cover its whole range: `..0` and `0..` cover `Integer`, and `0..=100` covers an `Integer<min = 0, max = 100>` (see [ranged integers](/values/numbers#minimum-and-maximum-values)) |
 | a literal union, like `"north" \| "south"` | every literal |
 | `Float`, `String` and the other types | an `else` is always needed |
 
@@ -441,6 +441,8 @@ A branch whose patterns are all matched by earlier branches can never run: it is
 :::tip
 For a named union, prefer listing every member over writing `else`. When a member is added later, the compiler shows you every `when` that needs to change.
 :::
+
+Unreachable-arm warnings consider only earlier arms, not facts known before the `when`. After `if x > 10 { return }`, an arm matching `20` is therefore not warned about. A redundant `else` is warned about when earlier arms cover every member of a named union, enumeration, Boolean or literal union.
 
 ### Chains of conditions
 

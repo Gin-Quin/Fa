@@ -1,0 +1,32 @@
+-- Collection lengths are bounded by 2^48; integer values read or aggregated
+-- from a collection are user data, not lengths. Treating them as nonnegative
+-- removed these checks and let a negative sum read outside the array.
+-- overflow-checks: false
+function summed = (indices: Array<Integer>): Integer => {
+	let items = [1, 2, 3]
+	let index = indices.sum()
+	if index < items.length {
+		return items[index] catch _error => -1 -- check: INDEX_CHECK
+	}
+	0
+}
+function reduced = (indices: Array<Integer>): Integer => {
+	let items = [1, 2, 3]
+	let index = indices.reduce((total, value) => total + value, 0)
+	if index < items.length {
+		return items[index] catch _error => -1 -- check: INDEX_CHECK
+	}
+	0
+}
+function fromMap = (value: Integer): Integer => {
+	let items = [1, 2, 3]
+	mutable positions: Map<String, Integer> = [("key", value)]
+	let index = positions.getOrInsert("key", 0)
+	if index < items.length {
+		return items[index] catch _error => -1 -- check: INDEX_CHECK
+	}
+	0
+}
+console.log(summed([-100]), reduced([-100]), fromMap(-100)) -- prints: -1 -1 -1
+console.log(summed([-1]), reduced([-1]), fromMap(-1)) -- prints: 3 3 3
+console.log(summed([4]), reduced([4]), fromMap(4)) -- prints: 0 0 0

@@ -337,8 +337,9 @@ impl Walker<'_> {
 
 	/// Whether an integer node is a length, a size or a count of a
 	/// collection or a string: `c.length`, `c.size`, `c.capacity`, or a
-	/// built-in method of a collection or a string returning an integer
-	/// (`text.count(…)`, `items.indexOf(…)` once narrowed).
+	/// built-in search returning a position (`items.indexOf(…)` once narrowed).
+	/// Other integer-returning methods (`sum`, `reduce`, `take`, map reads)
+	/// return user data, which may be negative or exceed any length bound.
 	fn counts_elements(&self, n: NodeId) -> bool {
 		let receiver = match syntax::view(&self.tree, n) {
 			View::Access { target, members } if members.len() == 1 => {
@@ -358,14 +359,16 @@ impl Walker<'_> {
 				let View::Access { target, members } = syntax::view(&self.tree, callee) else {
 					return false;
 				};
-				let builtin =
-					members
-						.first()
-						.filter(|_| members.len() == 1)
-						.is_some_and(|member| {
-							matches!(self.a.resolution(member), Resolution::Builtin(_))
-						});
-				if !builtin {
+				let Some(member) = members.first().filter(|_| members.len() == 1) else {
+					return false;
+				};
+				let Resolution::Builtin(builtin) = self.a.resolution(member) else {
+					return false;
+				};
+				if !matches!(
+					crate::builtins::get(builtin).path,
+					"Array#indexOf" | "String#indexOf" | "String#lastIndexOf"
+				) {
 					return false;
 				}
 				target
@@ -525,17 +528,17 @@ impl Walker<'_> {
 		if !self.body.flow.reachable {
 			return;
 		}
-		let Some(mut set) = self.value_set(n) else {
-			return;
-		};
 		// an arithmetic root is checked against its compute type first
-		// (`OVERFLOW_*`): only the values passing that check reach the sink
-		if let Some(info) = self.a.arith(root) {
-			match set.restrict(info.compute.range()) {
-				Some(inside) => set = inside,
-				None => return, // a certain overflow, reported at the node
-			}
-		}
+		// (`OVERFLOW_*`): only the values passing that check reach the sink.
+		// Its flow interval may already describe the result after wrapping;
+		// the sink still needs the interval before that wrap to emit it.
+		let set = match self.a.arith(root) {
+			Some(info) => IntervalSet::of(info.interval).restrict(info.compute.range()),
+			None => self.value_set(n),
+		};
+		let Some(set) = set else {
+			return; // a certain overflow, reported at the node
+		};
 		let target_type = *self.s.types.as_int(target).expect("an integer target");
 		let range = target_type.interval();
 		let source = self.s.types.as_int(actual).map(|int| int.storage);

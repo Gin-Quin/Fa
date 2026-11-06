@@ -1,0 +1,12 @@
+-- Used module aliases become external resolutions at the end of the file;
+-- that canonicalization must not make a used local look unused.
+-- file: main.fa
+function read = (): Integer => {
+	use used = value
+	use unused = value -- warning: W-DECL-2
+	use _ignored = value
+	used
+}
+console.log(read())
+-- file: value.fa
+export = 2

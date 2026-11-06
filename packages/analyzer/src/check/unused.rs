@@ -8,28 +8,14 @@
 
 use crate::check::Walker;
 use crate::diagnostics::codes::values::W_DECL_2;
-use crate::symbols::{Resolution, SymbolKind};
-use crate::syntax::{self, View};
+use crate::symbols::SymbolKind;
 
 impl Walker<'_> {
 	/// `W-DECL-2` for the locals, parameters and catch bindings never used.
 	pub(super) fn report_unused(&mut self) {
-		let count = self.a.symbols.symbols().len();
-		let mut used = vec![false; count];
-		for index in 0..self.tree.nodes.len() {
-			let node = crate::ids::NodeId::new(index);
-			if let Resolution::Local(symbol) = self.a.resolution(node)
-				&& symbol.index() < count
-				&& !used[symbol.index()]
-				&& let View::Name(_) = syntax::view(&self.tree, node)
-				&& self.span(node) != self.a.symbols.symbol(symbol).name_span
-			{
-				used[symbol.index()] = true;
-			}
-		}
 		let mut unused = Vec::new();
 		for (index, symbol) in self.a.symbols.symbols().iter().enumerate() {
-			if used[index] {
+			if self.used_symbols.get(index).copied().unwrap_or(false) {
 				continue;
 			}
 			let kind = match symbol.kind {

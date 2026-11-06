@@ -1,4 +1,5 @@
 -- decision "Callbacks that throw, in user functions", across files: the interface says which parameters a function only calls
+-- skip-target: native native-freestanding wasm
 -- file: main.fa
 type E = Errors { Bad }
 function fail = (): Integer throws E => {

@@ -1,5 +1,72 @@
 # Analyzer engineer 2: state at pause (2026-11-05)
 
+## Resumption (2026-11-06)
+
+- Initial integration is green: strict `cargo test --workspace --no-fail-fast
+  -- --test-threads=2` exited 0, LLVM enabled, in
+  `/tmp/fa-resume-analyzer-workspace-fixed.log`. Final workspace clippy is
+  clean (`/tmp/fa-resume-analyzer-clippy-final.log`), as are Rust formatting,
+  Bun formatting checks and all 296 runtime JS tests. The implementation
+  below is committed as the initial integration; new callback work is in
+  the separate `codex/analyzer-callbacks` branch and worktree, with its own
+  `target/` directory.
+- The analyzer crate passes after fixing the registry coverage test to count
+  canonical codes and aliases by prefix. Workspace clippy and formatting pass;
+  runtime JavaScript: 296 tests pass. Dependent unit tests: CLI 49, JS codegen 27,
+  language server 142 pass without filtering the new warning.
+- First full workspace run: `/tmp/fa-resume-analyzer-workspace.log` (session
+  30442, LLVM enabled, `FA_UPDATE_SKIPS=1`, under
+  `flock /tmp/fa-compiler-full-suite.lock`). Found three failures: CLI native
+  callback case, UInt32 wrapping on JavaScript, and unused `arguments` in the
+  generated JS-pipeline and language-server package fixtures. It ended with
+  exactly these four failed targets; every LLVM program suite passed.
+- Fixes on disk: the callback multi-file case declares its unsupported native
+  targets until native callback specialization lands; the pipeline fixture uses
+  `_arguments`; integer sinks use `ArithInfo.interval` before wrapping when
+  deciding `SINK_CHECK`, rather than the conservative post-wrap flow interval.
+- Also found a soundness hole in `counts_elements`: it bounded every built-in
+  integer result of a collection by `0..=2^48`, including `sum`, `reduce`, and
+  `Map.getOrInsert`. `read([-100])` could reach an unchecked local array access
+  and print `undefined` on Bun. Fixed by whitelisting actual search positions;
+  `review/length-bound-user-data.fa` checks the three operations with negative
+  and positive indices. The analyzer unit tests and cases pass with the fix.
+- Before the initial integration, the targeted CLI/JS/LLVM reruns, the reviewed
+  callback-only expected-skips additions, final clippy and the complete second
+  workspace run all passed.
+- Targeted reruns pass (including the new bounds repro on Bun, native,
+  freestanding and wasm). The second full ran after performance/proofs:
+  session 75639, `/tmp/fa-resume-analyzer-workspace-fixed.log`; it is strict
+  (no `FA_UPDATE_SKIPS`) and uses `flock --close` so descendants inherit no lock.
+- The first suite left the known deep-recursion Bun case running after timeout:
+  the harness killed only `fa`. `cli/tests/programs.rs` now runs each program in
+  its own Unix process group and terminates the group before waiting. A shell
+  regression checks that the grandchild stops too; the actual `adv-6.8-05` case
+  stopped at 20.05 s with no remaining Bun process.
+- A used local module alias also got a false W-DECL-2 after its resolutions
+  became External. Uses are now bits filled in `set_resolution` during the
+  walk, so the warning needs no full tree scan and remembers aliases. The
+  `unused-alias-files.fa` case and all analyzer unit/case tests pass.
+- Baseline (release, 1000 files, 504979 lines, 19.2 MB, `--target-share 0`):
+  diagnostic output identical at 1/2/6 threads and seeds 1/7/19; 13020 intentional
+  unused bindings produce warnings. Wall times 10.62/5.97/4.24 s; peak RSS
+  174/192/222 MiB. A copy changing only `error`/`arguments` to `_error`/`_arguments`
+  has no diagnostic: 3.43 s wall, 9.63 s user, 229 MiB at 6 threads. Generator
+  cleanup is kept for after the initial integration. Logs and fixtures:
+  `/tmp/fa-resume-analyzer-1000*`.
+- Next callback work: have the analyzer mark direct calls of `only_called`
+  parameters. On JS, only such calls inside a `catch` need protection: evaluate
+  the arguments first, then capture the identity of a callback exception in a
+  function-local temporary; that function's catches rethrow that identity.
+  This preserves the original error without runtime wrappers and works with
+  awaited calls. Native specialization needs the widened expected callback
+  types already calculated at each call in an analysis side table, and must
+  bypass the callee's catch when returning a callback error. `start callback()`
+  must not count as `only_called`. The lead asked the user whether a callback's
+  explicitly declared `throws` also bypasses catches; that extension is pending
+  their answer (the existing decision covers parameters without `throws`).
+- `GN030` is obsolete: generic lambdas are valid under the new decision. The
+  lead will update old briefs; retire this code instead of adding an emitter.
+
 ## Done and committed (on top of `compiler` 35433d0)
 
 - 2df2793 Lengths bounded by 2^48 (`types/int.rs` `LENGTH_MAX`/`lengths()`; `check/numbers.rs` `counts_elements`, wrap rule for every width, overflowing nodes record their type range; `check/control.rs` for-positions; `check/ops.rs` `square_root_bound` for `i <= n // i`; `lower/index.rs`). Cases `review/length-bound.fa`, `review/release-wrap-64.fa`. JS golden updated (fewer checks). Bun + LLVM (native, freestanding, wasm) pass for `review/`.

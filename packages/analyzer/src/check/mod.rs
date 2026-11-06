@@ -431,6 +431,9 @@ pub struct Walker<'s> {
 	/// The function-typed parameters each function only calls, by
 	/// declaration node (`callbacks.rs`).
 	pub(crate) only_called: FxHashMap<NodeId, u32>,
+	/// Names read or written, recorded before module aliases become external
+	/// resolutions (`unused.rs`). One bit per symbol, filled during the walk.
+	pub(crate) used_symbols: Vec<bool>,
 	/// The parent of each node of the tree, built on first use.
 	pub(crate) parents: std::cell::OnceCell<Vec<Option<NodeId>>>,
 	/// The places the lambda arguments of the call being checked write
@@ -608,6 +611,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		closure_effects: FxHashMap::default(),
 		lambda_entry_writes: Vec::new(),
 		only_called: FxHashMap::default(),
+		used_symbols: Vec::new(),
 		parents: std::cell::OnceCell::new(),
 		lambda_call_writes: None,
 		callee_name_node: None,
@@ -1385,6 +1389,20 @@ impl Walker<'_> {
 
 	/// Records what a name or member refers to.
 	pub fn set_resolution(&mut self, n: NodeId, resolution: Resolution) {
+		if let Resolution::Local(symbol) = resolution
+			&& !self
+				.used_symbols
+				.get(symbol.index())
+				.copied()
+				.unwrap_or(false)
+			&& matches!(self.view(n), View::Name(_))
+			&& self.span(n) != self.a.symbols.symbol(symbol).name_span
+		{
+			if self.used_symbols.len() <= symbol.index() {
+				self.used_symbols.resize(symbol.index() + 1, false);
+			}
+			self.used_symbols[symbol.index()] = true;
+		}
 		if let Some(slot) = self.a.resolutions.get_mut(n.index()) {
 			*slot = resolution;
 		}

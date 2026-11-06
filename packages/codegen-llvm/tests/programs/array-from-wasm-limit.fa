@@ -1,0 +1,7 @@
+-- Impossible byte capacities stop before arithmetic can wrap.
+-- asynchronous: false
+-- exit: 101
+-- stderr: out of memory
+-- skip-target: native native-freestanding
+let items = Array<UInt8>.from([], capacity = 4294967296)
+console.log(items.capacity)

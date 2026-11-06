@@ -1,0 +1,61 @@
+-- Counted append loops preserve short inline values, and safely grow beyond
+-- their one-byte-per-round reservation for longer suffixes.
+-- asynchronous: false
+function repeat = (count: Integer, suffix: String, prefix: String): String => {
+	mutable result = prefix
+	for 0..count {
+		result += suffix
+	}
+	result
+}
+for count in 0..80 {
+	let text = repeat(count, "x", "start")
+	assert text.length == count + 5
+	assert text.startsWith("start")
+	let unicode = repeat(count, "é", "")
+	assert unicode.length == count
+	assert unicode.bytes().length == count * 2
+	let carriage = repeat(count, "\r", "")
+	assert carriage.length == count
+}
+function digits = (count: Integer): String => {
+	mutable text = ""
+	for index in 0..count {
+		text += "{index}"
+	}
+	text
+}
+assert digits(15) == "01234567891011121314"
+assert repeat(5, "x", "") == "xxxxx"
+assert repeat(0, "long", "prefix") == "prefix"
+assert repeat(-2, "x", "prefix") == "prefix"
+assert repeat(80, "", "") == ""
+function reserved = (count: Integer): String => {
+	mutable text = "prefix"
+	text.reserve(128)
+	let capacity = text.capacity
+	for 0..count {
+		text += "x"
+	}
+	assert text.capacity >= capacity
+	text
+}
+assert reserved(0) == "prefix"
+assert reserved(5) == "prefixxxxxx"
+function mixed = (count: Integer): String => {
+	mutable text = ""
+	for index in 0..count {
+		text += if index == 1 { "abcdefghijklmnopqrstuvwxyz" } else { "x" }
+	}
+	text
+}
+assert mixed(4) == "xabcdefghijklmnopqrstuvwxyzxx"
+function lineBreaks = (count: Integer): String => {
+	mutable text = ""
+	for index in 0..count {
+		text += if index == 0 { "\r" } else { "\n" }
+	}
+	text
+}
+assert lineBreaks(4).length == 3
+console.log("append loops") -- prints: append loops

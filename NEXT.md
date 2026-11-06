@@ -3,6 +3,26 @@
 Worktree: `agent-a375af73b4e738f36`, branch of the same name. Main checkout is shared and dirty;
 do not copy its runtime or documentation edits. Lead integrates validated commits into `compiler`.
 
+## Current uncommitted checkpoint
+
+The next map/inline sources are now applied in this worktree. New count/byte guards also close
+wasm's 64-to-32-bit string reservation truncation, public string capacities, array reserve sum,
+map index sizing/power-of-two arithmetic and reserve sums. Eight new limit programs pass their
+targeted runs; the first loop repro is confirmed red with its guard disabled. Modes are kept in
+separate file-scoped flag slots so LLVM can unswitch the character loop; slow suffixes refresh it.
+Current instruction counts (`inline-modes-guards.json`): records 78.51 M, strlist 90.31 M,
+respond 208.61 M, words 30.81 M, lru 20.08 M; the latter two string regressions remain open.
+45 IR checks, the mixed-width/CRLF/explicit-capacity fixture and real ASan+UBSan pass. Final
+clippy/full queue is `/tmp/fa-perf-map-inline-workspace.log`; no commit until it passes.
+Guard-only sources/IR and a partial patch are prepared under `/tmp/fa-native-perf-next/guard-only/`
+for a separate solidness commit, but refresh its C guard functions after any C change. Its Rust
+patch omits all loop-mode changes and can be staged independently. Preserve the eight new limit
+programs with that commit; the other new fixtures/checks belong to performance.
+Frame strings remain research only (`stack-string-plan.txt`), and String map key research is in
+`string-map-key-plan.txt`. Lead approved map-only String compaction only if keys of 16–23 bytes
+get no new individual allocation. An adaptive dense-only fallback to 24-byte keys was considered;
+whole-entry tuple bindings need conservative fallback or correct proxy handling.
+
 ## Validated work
 
 - The original compressed arena links and packed literal choices passed the complete workspace

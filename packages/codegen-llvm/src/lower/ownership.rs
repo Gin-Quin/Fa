@@ -160,6 +160,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Rec(target),
 			value.value.expect("an edge"),
 		)?;
+		if self.compressed_union_link(Repr::Rec(target)).is_some() {
+			return Ok(Val::new(Repr::Union, pointer));
+		}
 		let loaded = self.builder.build_load(self.llvm_type(repr), pointer, "")?;
 		Ok(Val::new(repr, loaded))
 	}
@@ -167,6 +170,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// A value stored behind a recursive edge (`to`): a temporary moves into
 	/// the new block, a place read is copied.
 	pub(crate) fn box_rec(&self, value: Val<'ctx>, to: Repr) -> Result<Val<'ctx>, Error> {
+		if self.compressed_union_link(to).is_some() {
+			let raw = self.address_edge(
+				&self.builder,
+				to,
+				value.value.expect("a root").into_pointer_value(),
+			)?;
+			let result = Val::new(to, raw);
+			self.transfer(value, result);
+			return Ok(result);
+		}
 		let region = self.arena_repr(value.repr) && !self.frame().arena;
 		let owned = self.is_temporary(value);
 		if region {
@@ -420,6 +433,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		repr: Repr,
 		value: BasicValueEnum<'ctx>,
 	) -> Result<(), Error> {
+		if self.compressed_union_link(repr).is_some() {
+			let pointer = self.edge_address(builder, repr, value)?;
+			self.call_drop(builder, Repr::Union, pointer.into())?;
+			return Ok(());
+		}
 		if self.arena_repr(repr) {
 			let pointer = self.tree_root_pointer(builder, repr, value)?;
 			builder.build_call(
@@ -441,28 +459,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Str => {
 				let pair = value.into_struct_value();
 				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
-				let kind = builder.build_and(capacity, self.string_kind_mask(), "")?;
-				let inline = builder.build_and(capacity, self.string_inline_flag(), "")?;
-				let external = builder.build_int_compare(
-					IntPredicate::EQ,
-					inline,
-					self.usize.const_zero(),
-					"",
-				)?;
+				let kind = builder.build_and(capacity, self.simple_flag().const_not(), "")?;
 				let nonzero = builder.build_int_compare(
 					IntPredicate::NE,
 					kind,
 					self.usize.const_zero(),
 					"",
 				)?;
-				let not_view = builder.build_int_compare(
-					IntPredicate::NE,
+				let heap = builder.build_int_compare(
+					IntPredicate::ULT,
 					kind,
 					self.string_kind_mask(),
 					"",
 				)?;
-				let owned = builder.build_and(nonzero, not_view, "")?;
-				let owned = builder.build_and(owned, external, "")?;
+				let tag = builder.build_and(kind, self.usize.const_int(1, false), "")?;
+				let even = builder.build_int_compare(
+					IntPredicate::EQ,
+					tag,
+					self.usize.const_zero(),
+					"",
+				)?;
+				let owned = builder.build_and(builder.build_and(nonzero, heap, "")?, even, "")?;
 				self.helper_when(builder, function, owned, |builder| {
 					builder.build_return(None)?;
 					Ok(())
@@ -682,6 +699,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		repr: Repr,
 		value: BasicValueEnum<'ctx>,
 	) -> Result<BasicValueEnum<'ctx>, Error> {
+		if self.compressed_union_link(repr).is_some() {
+			let pointer = self.edge_address(builder, repr, value)?;
+			let copied = self
+				.call_copy(builder, Repr::Union, pointer.into())?
+				.into_pointer_value();
+			return self.address_edge(builder, repr, copied);
+		}
 		Ok(match repr {
 			Repr::BigInt => builder
 				.build_call(
@@ -1162,6 +1186,38 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if region {
 					builder.build_call(self.runtime.function("fa_arena_enter")?, &[], "")?;
 				}
+				if let Some(plan) = self.compact_array_box(*id) {
+					let data = self
+						.compact_payload_value(&builder, pointer, plan)?
+						.into_struct_value();
+					let array = builder
+						.build_extract_value(data, 0, "")?
+						.into_pointer_value();
+					let copied = self.freeze_array_payload(&builder, *id, plan, array, true)?;
+					builder.build_call(
+						self.runtime.function("fa_arena_leave")?,
+						&[copied.into()],
+						"",
+					)?;
+					builder.build_return(Some(&copied))?;
+					blocks.push((i64.const_int(*id, false), block));
+					continue;
+				}
+				if let Some(data) = self.compact_string_box(*id) {
+					let data = self
+						.string_payload_value(&builder, pointer, data)?
+						.into_struct_value();
+					let text = builder.build_extract_value(data, 0, "")?;
+					let copied = self.freeze_string_payload(&builder, *id, text, true)?;
+					builder.build_call(
+						self.runtime.function("fa_arena_leave")?,
+						&[copied.into()],
+						"",
+					)?;
+					builder.build_return(Some(&copied))?;
+					blocks.push((i64.const_int(*id, false), block));
+					continue;
+				}
 				let size = layout.size_of().expect("a sized box");
 				let size = builder.build_int_cast(size, self.usize, "")?;
 				let align = self.usize.const_int(16, false);
@@ -1262,7 +1318,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(value);
 		}
 		if self.unregister(value) {
-			return Ok(value);
+			return self.escape_frame_string(value);
 		}
 		if let Some(node) = node
 			&& let Some(slot) = self.movable_local(node, value.repr)
@@ -1274,7 +1330,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder
 					.build_store(flag, self.context.bool_type().const_zero())?;
 			}
-			return Ok(value);
+			return self.escape_frame_string(value);
 		}
 		self.emit_copy(value)
 	}

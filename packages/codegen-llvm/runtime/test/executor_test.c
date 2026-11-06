@@ -793,6 +793,40 @@ static void test_inline_strings(void) {
 	CHECK(allocated == before);
 }
 
+static void test_region_slice_views(void) {
+	long before = allocated;
+	uint8_t input[128];
+	for (size_t index = 0; index < sizeof input; index += 1) { input[index] = (uint8_t)('a' + index % 26); }
+	FaString source = owned_copy_with(input, sizeof input, SIMPLE);
+	for (size_t length = 0; length <= sizeof input - 3; length += 1) {
+		FaString view;
+		CHECK(fa_string_slice_region(source.bytes, source.length, source.capacity, 3, (int64_t)length + 3, 3, &view) == 0);
+		CHECK(string_length(&view) == length && (view.capacity & SIMPLE));
+		CHECK(fa_string_equal(string_bytes(&view), length, input + 3, length));
+		if (length <= INLINE_STRING_BYTES) {
+			CHECK(view.bytes == source.bytes + 3 && (view.capacity & KIND_MASK) == KIND_MASK);
+		} else {
+			CHECK(string_owned(view.capacity));
+			fa_free((void *)view.bytes, view.capacity & KIND_MASK, 1);
+		}
+		FaString copied;
+		CHECK(fa_string_slice(source.bytes, source.length, source.capacity, 3, (int64_t)length + 3, 3, &copied) == 0);
+		CHECK(copied.capacity & SIMPLE);
+		CHECK(fa_string_equal(string_bytes(&copied), length, input + 3, length));
+		if (string_owned(copied.capacity)) { fa_free((void *)copied.bytes, copied.capacity & KIND_MASK, 1); }
+	}
+	fa_free((void *)source.bytes, source.capacity & KIND_MASK, 1);
+	FaString unicode;
+	const uint8_t clusters[] = "e\xcc\x81" "e\xcc\x81" "e\xcc\x81";
+	CHECK(fa_string_slice_region(clusters, 9, 0, 1, 3, 3, &unicode) == 0);
+	CHECK(unicode.bytes == clusters + 3 && unicode.length == 6 && !(unicode.capacity & SIMPLE));
+	CHECK(fa_string_length(unicode.bytes, unicode.length, unicode.capacity) == 2);
+	CHECK(fa_string_slice_region((const uint8_t *)"\r\nx", 3, 0, 0, 1, 3, &unicode) == 0);
+	CHECK(unicode.length == 2 && !(unicode.capacity & SIMPLE));
+	CHECK(fa_string_length(unicode.bytes, unicode.length, unicode.capacity) == 1);
+	CHECK(allocated == before);
+}
+
 static void test_allocator_fast_paths(void) {
 	const size_t sizes[] = {0, 1, 8, 16, 24, 32, 128};
 	for (size_t at = 0; at < sizeof sizes / sizeof sizes[0]; at += 1) {
@@ -892,13 +926,119 @@ static void test_tree_regions(void) {
 		size_t size = i % 37 + 1;
 		uint8_t *node = fa_arena_alloc(size, align);
 		CHECK((uintptr_t)node % align == 0 && arena_of(node) == arena_of(packed));
-		CHECK((uintptr_t)node % PAGE_SIZE + size <= PAGE_SIZE);
+		CHECK((uintptr_t)node % ARENA_CHUNK_SIZE + size <= ARENA_CHUNK_SIZE);
 		__builtin_memset(node, 0xa5, size);
 		for (size_t byte = 0; byte < 24; byte += 1) { CHECK(packed[byte] == 0x5a); }
 	}
 	fa_arena_leave(packed);
 	fa_arena_drop(packed);
 	CHECK(live_tree_arenas == 0 && tree_arena_depth == 0);
+	// Fresh child array buffers share a root region. Their ordinary ABI and
+	// observed capacity stay unchanged; large buffers get one heap cleanup.
+	before = allocated;
+	fa_arena_enter();
+	FaArrayHeader *children = fa_array_new_region(0, 0, sizeof(uint64_t));
+	CHECK(fa_array_is_region(children) && children->capacity == 0 && children->length == 0);
+	for (uint64_t value = 0; value < 100; value += 1) {
+		*(uint64_t *)fa_array_push_slot(children, sizeof(uint64_t)) = value;
+	}
+	CHECK(allocated == before && arena_of(children)->cleanup == 0);
+	for (uint64_t value = 0; value < 100; value += 1) { CHECK(((uint64_t *)children->items)[value] == value); }
+	fa_array_reserve(children, 20000, sizeof(uint64_t));
+	CHECK(children->capacity == 20000 && allocated == before + 1);
+	FaArenaCleanup *registered = arena_of(children)->cleanup;
+	CHECK(registered != 0);
+	fa_array_reserve(children, 40000, sizeof(uint64_t));
+	CHECK(children->capacity == 40000 && allocated == before + 1);
+	CHECK(arena_of(children)->cleanup == registered);
+	for (uint64_t value = 0; value < 100; value += 1) { CHECK(((uint64_t *)children->items)[value] == value); }
+	fa_arena_leave(children);
+	FaArrayHeader *copied = fa_array_copy(children, sizeof(uint64_t));
+	CHECK(!fa_array_is_region(copied));
+	fa_arena_drop(children);
+	CHECK(live_tree_arenas == 0 && copied->length == 100);
+	for (uint64_t value = 0; value < 100; value += 1) { CHECK(((uint64_t *)copied->items)[value] == value); }
+	fa_array_free(copied, sizeof(uint64_t));
+	CHECK(allocated == before);
+	// A local may be discarded before its region, including after a large
+	// reservation. The later callback is idempotent and never frees a page.
+	fa_arena_enter();
+	children = fa_array_new_region(2, 20000, sizeof(uint64_t));
+	CHECK(children->length == 2 && allocated == before + 1);
+	fa_array_free(children, sizeof(uint64_t));
+	fa_array_free(children, sizeof(uint64_t));
+	CHECK(allocated == before);
+	fa_arena_leave(children);
+	fa_arena_drop(children);
+	CHECK(live_tree_arenas == 0 && allocated == before);
+	// A builder's temporary header and four slots live in its frame. Moving
+	// the completed array into a member detaches it before the frame is reused.
+	uint64_t packet[8];
+	FaArrayHeader *local = (FaArrayHeader *)packet;
+	fa_arena_enter();
+	fa_array_init_region_local(local, 0, 0, sizeof(uint64_t));
+	for (uint64_t index = 0; index < 10; index += 1) {
+		*(uint64_t *)fa_array_region_push_slot(local, sizeof(uint64_t)) = index + 123;
+	}
+	CHECK(allocated == before + 1 && tree_arena == 0);
+	children = fa_array_into_region(local, sizeof(uint64_t));
+	CHECK(children != local && allocated == before && children->length == 10);
+	CHECK(local->length == 0 && !(array_marker(children) & ARRAY_REGION_LOCAL));
+	__builtin_memset(packet, 0xcc, sizeof(packet));
+	for (uint64_t index = 0; index < 10; index += 1) { CHECK(((uint64_t *)children->items)[index] == index + 123); }
+	fa_arena_leave(children);
+	fa_arena_drop(children);
+	CHECK(live_tree_arenas == 0 && allocated == before);
+	// Discarding the local frees a large temporary buffer immediately.
+	fa_arena_enter();
+	fa_array_init_region_local(local, 0, 100, sizeof(uint64_t));
+	CHECK(allocated == before + 1 && tree_arena == 0);
+	fa_array_free(local, sizeof(uint64_t));
+	CHECK(allocated == before);
+	fa_arena_leave(0);
+	// Neighboring roots use independent 4 KiB chunks of the same heap page.
+	// Interleaved releases/reuse must not return a page with live neighbors.
+	uint64_t *roots[40];
+	for (uint64_t index = 0; index < 40; index += 1) {
+		fa_arena_enter();
+		roots[index] = fa_arena_alloc(24, 8);
+		roots[index][0] = index;
+		fa_arena_leave(roots[index]);
+	}
+	for (size_t index = 1; index < 40; index += 2) { fa_arena_drop(roots[index]); }
+	for (uint64_t index = 0; index < 40; index += 2) { CHECK(roots[index][0] == index); }
+	for (uint64_t index = 1; index < 40; index += 2) {
+		fa_arena_enter();
+		roots[index] = fa_arena_alloc(24, 8);
+		roots[index][0] = index + 100;
+		fa_arena_leave(roots[index]);
+	}
+	for (uint64_t index = 0; index < 40; index += 1) {
+		CHECK(roots[index][0] == (index % 2 == 0 ? index : index + 100));
+		fa_arena_drop(roots[index]);
+	}
+	CHECK(live_tree_arenas == 0 && available_arena_pages == 0);
+	// Compressed arenas use the same chunk granularity in their common
+	// reserved address range, independent of heap-page subdivision.
+	uint8_t *compressed = aligned_alloc(ARENA_CHUNK_SIZE, ARENA_CHUNK_SIZE * 40);
+	CHECK(compressed != 0 && free_arena_pages == 0);
+	fa_compressed_links = 1;
+	arena_space_next = compressed;
+	arena_space_committed = compressed + ARENA_CHUNK_SIZE * 40;
+	arena_space_end = arena_space_committed;
+	for (uint64_t index = 0; index < 40; index += 1) {
+		fa_arena_enter();
+		roots[index] = fa_arena_alloc(24, 8);
+		roots[index][0] = index;
+		fa_arena_leave(roots[index]);
+		CHECK((uint8_t *)arena_of(roots[index]) == compressed + index * ARENA_CHUNK_SIZE);
+	}
+	for (size_t index = 40; index > 0; index -= 1) { fa_arena_drop(roots[index - 1]); }
+	CHECK(live_tree_arenas == 0);
+	fa_compressed_links = 0;
+	arena_space_next = arena_space_committed = arena_space_end = 0;
+	free_arena_pages = 0;
+	free(compressed);
 	CHECK((uint8_t *)free_spans == memory && free_spans->pages == 6 && free_spans->next == 0);
 	free_spans = 0;
 	free(memory);
@@ -1382,6 +1522,96 @@ static void test_inline_loop_reservations(void) {
 	CHECK(allocated == before);
 }
 
+static void test_frame_strings(void) {
+	long before = allocated;
+	uint8_t first[64];
+	uint8_t second[64];
+	uint8_t original_bytes[100];
+	for (size_t at = 0; at < sizeof original_bytes; at += 1) { original_bytes[at] = (uint8_t)('a' + at % 26); }
+	FaString original = {original_bytes, 40, SIMPLE};
+	FaString text = {0};
+	FaString copy = {0};
+	fa_string_assign_local(&original, first, &text, 1, 0);
+	CHECK(allocated == before && string_frame(text.capacity) && text.bytes == first);
+	CHECK(string_length(&text) == 40 && __builtin_memcmp(first, original_bytes, 40) == 0);
+	CHECK(fa_string_room(text.length, text.capacity) == 64);
+	fa_string_assign_local(&text, second, &copy, 0, 1);
+	CHECK(allocated == before && string_frame(copy.capacity) && copy.bytes == second);
+	__builtin_memset(first, 'x', 40);
+	CHECK(__builtin_memcmp(second, original_bytes, 40) == 0);
+	for (size_t length = 40; length < 80; length += 1) {
+		fa_string_append(&text, (const uint8_t *)"x", 1, SIMPLE);
+		CHECK(string_length(&text) == length + 1);
+		if (length < 64) { CHECK(allocated == before && text.bytes == first); }
+	}
+	CHECK(string_owned(text.capacity) && allocated == before + 1);
+	// A borrowed self-assignment copies before freeing the previous heap block.
+	fa_string_assign_local(&text, first, &text, 1, 0);
+	CHECK(string_length(&text) == 80 && string_owned(text.capacity) && allocated == before + 1);
+	// An owned self-assignment transfers the existing block exactly once.
+	const uint8_t *heap = text.bytes;
+	fa_string_assign_local(&text, first, &text, 1, 1);
+	CHECK(text.bytes == heap && allocated == before + 1);
+	FaString slice = {text.bytes + 1, 60, SIMPLE | KIND_MASK};
+	fa_string_assign_local(&slice, first, &text, 1, 0);
+	CHECK(string_frame(text.capacity) && text.bytes == first && string_length(&text) == 60);
+	CHECK(allocated == before);
+	slice = (FaString){text.bytes + 1, 40, SIMPLE | KIND_MASK};
+	fa_string_assign_local(&slice, first, &text, 1, 0);
+	CHECK(string_length(&text) == 40 && string_frame(text.capacity));
+	FaString consumed = owned_copy_with(original_bytes, 40, SIMPLE);
+	CHECK(allocated == before + 1);
+	fa_string_assign_local(&consumed, first, &text, 1, 1);
+	CHECK(allocated == before && __builtin_memcmp(first, original_bytes, 40) == 0);
+	fa_string_reserve_inline(&text, 1);
+	CHECK(text.bytes == first && string_frame(text.capacity) && allocated == before);
+	fa_string_plus(&text, (const uint8_t *)"é", 2, 0);
+	CHECK(text.bytes == first && string_length(&text) == 42 && !(text.capacity & SIMPLE));
+	CHECK(allocated == before);
+	original.length = 10;
+	fa_string_assign_local(&original, second, &copy, 0, 0);
+	CHECK(copy.capacity & STRING_INLINE);
+	CHECK(string_length(&copy) == 10 && allocated == before);
+	original.length = 80;
+	fa_string_assign_local(&original, second, &copy, 0, 0);
+	CHECK(string_owned(copy.capacity) && string_length(&copy) == 80);
+	fa_free((void *)copy.bytes, copy.capacity & KIND_MASK, 1);
+	CHECK(allocated == before);
+	// Taking a frame value into an unknown owner detaches its bytes.
+	FaString detached;
+	fa_string_escape(&text, &detached);
+	CHECK(string_owned(detached.capacity) && !string_frame(detached.capacity));
+	CHECK(string_length(&detached) == 42 && allocated == before + 1);
+	__builtin_memset(first, '?', 40);
+	CHECK(__builtin_memcmp(string_bytes(&detached), original_bytes, 40) == 0);
+	fa_free((void *)detached.bytes, detached.capacity & KIND_MASK, 1);
+	// Mutating through a borrowed frame header also retains its buffer.
+	FaString incoming = owned_copy_with(original_bytes, 40, SIMPLE);
+	fa_string_assign_after_drop(&incoming, &text);
+	CHECK(string_frame(text.capacity) && text.bytes == first && allocated == before);
+	CHECK(__builtin_memcmp(first, original_bytes, 40) == 0);
+	// Non-simple short appends retain a mutable's frame buffer too.
+	original.length = 0;
+	fa_string_assign_local(&original, first, &text, 1, 0);
+	fa_string_append(&text, (const uint8_t *)"é", 2, 0);
+	CHECK(string_frame(text.capacity) && text.bytes == first && string_length(&text) == 2);
+	CHECK(allocated == before);
+	// An explicit reservation above 64 must survive moving its value.
+	FaString reserved;
+	fa_string_from(original_bytes, 40, SIMPLE, 128, &reserved);
+	const uint8_t *reserved_buffer = reserved.bytes;
+	fa_string_assign_local(&reserved, first, &text, 1, 1);
+	CHECK(text.bytes == reserved_buffer && fa_string_room(text.length, text.capacity) >= 128);
+	CHECK(allocated == before + 1);
+	// A short Unicode append must not throw away an explicit reservation.
+	fa_string_replace_buffer(0, SIMPLE, &text);
+	fa_string_append(&text, (const uint8_t *)"é\r\n", 4, 0);
+	CHECK(text.bytes == reserved_buffer && fa_string_room(text.length, text.capacity) >= 128);
+	CHECK(string_length(&text) == 4 && allocated == before + 1);
+	fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1);
+	CHECK(allocated == before);
+}
+
 // ── workers: calls on a worker's thread, blocking, detached, kept and
 // cancelled at random (queued, running or done), freed once
 
@@ -1546,9 +1776,11 @@ int main(void) {
 	test_tables();
 	test_inline_key32();
 	test_inline_loop_reservations();
+	test_frame_strings();
 	test_integer_strings();
 	test_string_padding();
 	test_inline_strings();
+	test_region_slice_views();
 	test_tree_regions();
 	test_arguments();
 	test_character_views();

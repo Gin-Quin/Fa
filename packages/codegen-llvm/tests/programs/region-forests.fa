@@ -1,0 +1,125 @@
+-- Root arrays own independent regions. Recursive member arrays free their
+-- own buffers while their nodes remain owned by the enclosing root region.
+-- asynchronous: false
+type Tree = Union {
+	Empty
+	Leaf = { text: String }
+	List = { items: Array<Tree> }
+}
+function build = (depth: Integer): Tree => if depth > 0 {
+	mutable items: Array<Tree> = []
+	items.push(build(depth - 1))
+	items.push(build(depth - 1))
+	Tree.List { items }
+} else {
+	Tree.Leaf { text = "leaf".repeat(12) }
+}
+function empty = (): Tree => Tree.List { items = [] }
+function wide = (size: Integer): Tree => {
+	mutable items: Array<Tree> = []
+	for 0..size {
+		items.push(Tree.Leaf { text = "leaf".repeat(12) })
+	}
+	Tree.List { items }
+}
+function discard = (): Tree => {
+	mutable items: Array<Tree> = []
+	items.push(build(2))
+	assert items.length == 1
+	Tree.Leaf { text = "kept" }
+}
+type Failure = Errors { Stop }
+function failing = (fail: Boolean): Tree throws Failure.Stop => {
+	mutable items: Array<Tree> = []
+	items.push(build(2))
+	if fail { throw Failure.Stop }
+	Tree.List { items }
+}
+function count = (tree: Tree): Integer => when tree is {
+	Tree.Empty => 0
+	Tree.Leaf as { text } => text.length
+	Tree.List as { items } => {
+		mutable result = 0
+		for child in items {
+			result += count(child)
+		}
+		result
+	}
+}
+function copiedCount = (tree: Tree): Integer => when tree is {
+	Tree.Empty => 0
+	Tree.Leaf as { text } => text.length
+	Tree.List as { items } => {
+		let duplicate = items
+		mutable total = 0
+		for child in duplicate { total += count(child) }
+		for child in items { total += count(child) }
+		total
+	}
+}
+function textLeaf = (text: String): Tree => Tree.Leaf { text }
+function leafText = (tree: Tree): String => when tree is {
+	Tree.Leaf as { text } => text
+	else => ""
+}
+function slicedLeaf = (text: String, start: Integer, end: Integer): Tree => Tree.Leaf {
+	text = text[start..end] catch error => ""
+}
+function slicedTemporary = (): Tree => Tree.Leaf {
+	text = "temporary text".repeat(4)[2..45] catch error => ""
+}
+let roots: Array<Tree> = [build(3), build(2), Tree.Empty]
+let copied = roots
+assert copied == roots
+assert roots.get(2) is Tree.Empty
+assert roots.get(3) is none
+assert count(roots.get(0) ?? Tree.Empty) == 384
+assert count(roots[1]) == 192
+let separate = build(1)
+let second = separate
+assert count(second) == 96
+assert count(separate) == 96
+mutable total = 0
+for root in copied {
+	total += count(root)
+}
+assert total == 576
+for root in roots {
+	total -= count(root)
+}
+assert total == 0
+let failed = failing(true) catch _error => Tree.Empty
+let kept = failing(false) catch _error => Tree.Empty
+assert count(failed) == 0
+assert count(kept) == 192
+let description = "{build(1)}"
+assert description.startsWith("Tree.List")
+assert description.includes("leafleaf")
+
+assert copiedCount(build(2)) == 384
+assert count(empty()) == 0
+assert count(discard()) == 4
+let broad = wide(10_000)
+let broadCopy = broad
+assert count(broad) == 480_000
+assert count(broadCopy) == 480_000
+let sizes: Array<Integer<min = 0>> = [0, 1, 15, 16, 23, 24, 63, 64, 4031, 4032, 4033, 10_000]
+for size in sizes {
+	let source = "x".repeat(size)
+	let leaf = textLeaf(source)
+	let duplicate = leaf
+	assert leaf == duplicate
+	assert leafText(leaf) == source
+	assert leafText(duplicate) == source
+}
+let unicodeLeaf = textLeaf("é".repeat(5000))
+let unicodeCopy = unicodeLeaf
+assert count(unicodeLeaf) == 5000
+assert count(unicodeCopy) == 5000
+assert leafText(unicodeCopy) == "é".repeat(5000)
+assert leafText(slicedLeaf("0123456789".repeat(8), 3, 13)) == "3456789012"
+assert leafText(slicedLeaf("0123456789".repeat(1000), 3, 9003)).length == 9000
+assert leafText(slicedLeaf("ééé", 1, 3)) == "éé"
+assert leafText(slicedLeaf("short", 20, 30)) == ""
+assert leafText(slicedTemporary()) == "mporary texttemporary texttemporary texttem"
+console.log("region forests") -- prints: region forests

@@ -1,0 +1,30 @@
+-- Frame buffers retained across a suspension belong to the coroutine.
+-- A returned concatenation detaches its bytes before the coroutine dies.
+use { sleep } = std.time
+async function inspect = (prefix: String): String => {
+	mutable text = "{prefix}:123456789012345678901234567890"
+	await sleep(1)
+	let first = text
+	text = "changed"
+	await Task.yield()
+	assert first.startsWith(prefix)
+	assert first.endsWith(":123456789012345678901234567890")
+	first + "!"
+}
+let one = start inspect("é")
+let two = start inspect("xyz")
+let first = await one
+let second = await two
+assert first == "é:123456789012345678901234567890!"
+assert second == "xyz:123456789012345678901234567890!"
+async function captured = (prefix: String): String => {
+	let text = "{prefix}:123456789012345678901234567890"
+	let task = start do {
+		await sleep(1)
+		text + "!"
+	}
+	await Task.yield()
+	await task
+}
+assert (await captured("é")) == "é:123456789012345678901234567890!"
+console.log("async frame strings") -- prints: async frame strings

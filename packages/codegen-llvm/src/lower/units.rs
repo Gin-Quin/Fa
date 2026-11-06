@@ -110,9 +110,15 @@ pub(crate) fn callback_instance_symbol(
 	key: DeclKey,
 	arguments: &[TypeId],
 	callbacks: &[(usize, TypeId)],
+	methods: &[fa_analyzer::analysis::GenericMethod],
 ) -> String {
+	let methods_suffix = method_instance_suffix(types, methods);
 	if callbacks.is_empty() {
-		return instance_symbol(types, key, arguments);
+		return format!(
+			"{}{}",
+			instance_symbol(types, key, arguments),
+			methods_suffix
+		);
 	}
 	let name = if arguments.is_empty() {
 		mangle(types, key)
@@ -123,7 +129,22 @@ pub(crate) fn callback_instance_symbol(
 		.iter()
 		.map(|&(index, ty)| format!("{index}:{:x}", types.stable_hash(ty)))
 		.collect();
-	format!("{name}.callbacks<{}>", hashes.join(","))
+	format!("{name}{methods_suffix}.callbacks<{}>", hashes.join(","))
+}
+
+/// The semantic method selection is part of each native instance key.
+pub(crate) fn method_instance_suffix(
+	types: &fa_analyzer::types::TypeStore,
+	methods: &[fa_analyzer::analysis::GenericMethod],
+) -> String {
+	if methods.is_empty() {
+		return String::new();
+	}
+	let names: Vec<_> = methods
+		.iter()
+		.map(|method| format!("{:x}", method.stable_hash(types)))
+		.collect();
+	format!(".methods<{}>", names.join(";"))
 }
 
 /// The symbol of a declaration other modules may name.
@@ -296,6 +317,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// lowered (a type parameter of the instance: the type it was made for).
 	pub(crate) fn concrete_type(&self, ty: TypeId) -> TypeId {
 		let stands_for = |param: fa_analyzer::ids::ParamId| {
+			if let Some(&ty) = self.type_bindings.borrow().get(&param) {
+				return Some(ty);
+			}
 			self.bindings
 				.borrow()
 				.get(&param)
@@ -326,6 +350,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let bindings = fa_analyzer::types::Bindings {
 			params: params.iter().map(|&param| merger.param(param)).collect(),
 			types: types.iter().map(|&bound| merger.ty(bound)).collect(),
+			..Default::default()
 		};
 		drop(merger);
 		let mut scratch = fa_analyzer::types::TypeStore::view(self.types().global());
@@ -617,6 +642,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		key: DeclKey,
 		node: NodeId,
 	) -> Result<Function<'ctx>, Error> {
+		self.remote_function_with_arguments(key, node, None, None)
+	}
+
+	pub(crate) fn remote_function_with_arguments(
+		&mut self,
+		key: DeclKey,
+		node: NodeId,
+		selected_arguments: Option<fa_analyzer::ids::ListId>,
+		selected_methods: Option<&[fa_analyzer::analysis::GenericMethod]>,
+	) -> Result<Function<'ctx>, Error> {
 		let Some(declared) = self.remote_decl(key) else {
 			return Err(self.unsupported(node.index(), "calling this function of another module"));
 		};
@@ -633,23 +668,82 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.unwrap_or_default();
 		// a generic function: the instance for the call's type arguments,
 		// which its own unit makes in an instance wave
-		let mut generics = Vec::new();
+		let owner_params: Vec<_> = self
+			.session
+			.interface(declared.module)
+			.and_then(|interface| interface.function_owners.get(&declared.decl))
+			.and_then(|&owner| {
+				let module = self.types().decl_key_data(owner).module;
+				let interface = self.session.interface(module)?;
+				interface
+					.type_parameters
+					.get(&interface.node_of(owner)?)
+					.copied()
+			})
+			.map(|list| {
+				self.types()
+					.list_items(list)
+					.iter()
+					.filter_map(|&ty| match self.types().kind(ty) {
+						TypeKind::Param(param) => Some(param),
+						_ => None,
+					})
+					.collect()
+			})
+			.unwrap_or_default();
+		let own_params: Vec<_> = self
+			.types()
+			.list_items(sig.generics)
+			.iter()
+			.filter_map(|&ty| match self.types().kind(ty) {
+				TypeKind::Param(param) => Some(param),
+				_ => None,
+			})
+			.collect();
+		let owner_count = owner_params.len();
+		let mut found = Vec::new();
 		for ty in params
 			.iter()
 			.map(|param| param.ty)
 			.chain([sig.ret, sig.throws])
 		{
-			self.collect_params(ty, &mut generics);
+			self.collect_params(ty, &mut found);
+		}
+		let mut generics = owner_params;
+		generics.extend(
+			found
+				.into_iter()
+				.filter(|param| !generics.contains(param) && !own_params.contains(param))
+				.collect::<Vec<_>>(),
+		);
+		generics.extend(own_params);
+		let owner = self.call_method_owner(node).cloned();
+		let mut given = selected_arguments
+			.or_else(|| self.call_instantiation(node))
+			.map(|list| self.types().list_items(list).to_vec())
+			.unwrap_or_default();
+		let mut methods = selected_methods
+			.map(<[_]>::to_vec)
+			.unwrap_or_else(|| self.call_methods(node, &given));
+		if selected_arguments.is_none() && owner_count > 0 {
+			let Some(owner) = owner else {
+				return Err(self.unsupported(
+					node.index(),
+					"this generic method without its written owner",
+				));
+			};
+			let prefix = self.types().list_items(owner.arguments).to_vec();
+			for method in &mut methods {
+				method.parameter += prefix.len() as u16;
+			}
+			methods.extend(self.forwarded_methods(&prefix));
+			methods.extend(owner.methods.iter().cloned());
+			given.splice(0..0, prefix);
 		}
 		let (bindings, arguments) = if generics.is_empty() {
 			(FxHashMap::default(), Vec::new())
 		} else {
-			let Some(list) = self.analysis.instantiation(node) else {
-				return Err(self.unsupported(node.index(), "this generic call"));
-			};
-			let arguments: Vec<TypeId> = self
-				.types()
-				.list_items(list)
+			let arguments: Vec<TypeId> = given
 				.iter()
 				.map(|&argument| self.concrete_type(argument))
 				.collect();
@@ -663,8 +757,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				));
 			}
 			let mut bindings = FxHashMap::default();
-			for &param in &generics {
-				let index = self.types().param(param).index as usize;
+			for (index, &param) in generics.iter().enumerate() {
 				let Some(&argument) = arguments.get(index) else {
 					return Err(self.unsupported(node.index(), "this generic call"));
 				};
@@ -672,10 +765,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			(bindings, arguments)
 		};
-		let name = if arguments.is_empty() && callbacks.is_empty() {
+		let name = if arguments.is_empty() && callbacks.is_empty() && methods.is_empty() {
 			mangle(self.types(), key)
 		} else {
-			callback_instance_symbol(self.types(), key, &arguments, &callbacks)
+			callback_instance_symbol(self.types(), key, &arguments, &callbacks, &methods)
 		};
 		for &(index, ty) in &callbacks {
 			if let Some(param) = params.get_mut(index) {
@@ -689,7 +782,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		{
 			return Ok(function.clone());
 		}
-		if arguments.is_empty() && callbacks.is_empty() {
+		if arguments.is_empty() && callbacks.is_empty() && methods.is_empty() {
 			let module = self.types().module_path(declared.module).to_string();
 			self.split_mut().symbols.needs.push((module, name.clone()));
 		} else {
@@ -697,6 +790,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				key,
 				arguments,
 				callbacks: callbacks.clone(),
+				methods,
 			});
 		}
 		let mut merged = self.bindings.borrow().clone();
@@ -860,6 +954,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			captures: Vec::new(),
 			declaration: NO_NODE,
 			bindings,
+			types: FxHashMap::default(),
+			methods: Vec::new(),
 			values: FxHashMap::default(),
 		};
 		Ok(function)
@@ -897,7 +993,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					stack.extend(self.types().params(sig.params).iter().map(|param| param.ty));
 					stack.push(sig.ret);
 				}
-				TypeKind::Object(_) => {
+				TypeKind::Object(shape) => {
+					if let Some(nominal) = self.types().shape(shape).nominal {
+						stack.extend(self.types().list_items(self.types().nominal(nominal).args));
+					}
 					for field in self.types().fields_of(ty) {
 						stack.push(field.ty);
 					}
@@ -1062,6 +1161,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			key,
 			arguments,
 			callbacks,
+			methods,
 		} in requests
 		{
 			let (module, keyed) = self.session.keyed(*key).ok_or_else(no_location)?;
@@ -1073,8 +1173,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					reprs.push(self.repr_of(argument, keyed.node.index())?);
 				}
 				let generics = self.generic_functions[&keyed.node].generics.clone();
-				self.note_instance_types(&generics, arguments, &reprs);
-				self.instance_of(keyed.node, reprs)?
+				let values = generics
+					.iter()
+					.zip(arguments)
+					.filter_map(|(&param, &ty)| {
+						self.types().param(param).value.then_some((param, ty))
+					})
+					.collect();
+				self.instance_here(
+					keyed.node,
+					&generics,
+					arguments,
+					reprs,
+					values,
+					methods.clone(),
+				)?
 			} else if arguments.is_empty() && !callbacks.is_empty() {
 				keyed.node
 			} else {
@@ -1086,7 +1199,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			if !callbacks.is_empty() {
 				function = self.callback_instance(function, callbacks.clone())?;
 			}
-			let name = callback_instance_symbol(self.types(), *key, arguments, callbacks);
+			let name = callback_instance_symbol(self.types(), *key, arguments, callbacks, methods);
 			let value = function.value;
 			if self.module.get_function(&name).is_some() {
 				// the same representations as another request: one function

@@ -147,13 +147,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			return None;
 		}
-		let Resolution::Field(_, index) = self.analysis.resolution(member) else {
-			return None;
-		};
 		let (_, slot, owner) = self.object_slot(target)?;
+		let index = self.concrete_field_index(owner, member).ok()?;
 		let function = self.frame().function;
 		let read = self.frozen_reads.iter().find(|read| {
-			read.function == function && read.pointer == slot.pointer && read.index == index as u32
+			read.function == function && read.pointer == slot.pointer && read.index == index
 		})?;
 		Some((read.value, self.types().fields_of(owner)[index as usize].ty))
 	}
@@ -415,11 +413,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						if self.analysis.resolution(target) == Resolution::Local(self_symbol) =>
 					{
 						if let Some(first) = members.first()
-							&& let Resolution::Field(_, index) = self.analysis.resolution(first)
+							&& let Ok(index) = self.concrete_field_index(owner, first)
 						{
-							match reads.iter_mut().find(|(field, _)| *field == index as u32) {
+							match reads.iter_mut().find(|(field, _)| *field == index) {
 								Some((_, count)) => *count += weight,
-								None => reads.push((index as u32, weight)),
+								None => reads.push((index, weight)),
 							}
 						}
 					}

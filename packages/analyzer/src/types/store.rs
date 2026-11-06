@@ -1315,6 +1315,7 @@ impl TypeStore {
 			let bindings = Bindings {
 				params,
 				types: self.list_items(args).to_vec(),
+				..Default::default()
 			};
 			let target = self.substitute(target, &bindings);
 			self.set_rec_target(ty, target);
@@ -1664,6 +1665,13 @@ impl TypeStore {
 				let mut flags = self
 					.aggregate(fields, F::FLAT | F::TRIVIALLY_COPYABLE | F::COMPARABLE)
 					.with_runtime_kind(RuntimeKind::Object);
+				if let Some(nominal) = self.shape(shape).nominal {
+					// Phantom parameters affect substitution, but don't own a value.
+					flags |= self.aggregate(
+						self.list_items(self.nominal(nominal).args).iter().copied(),
+						F::empty(),
+					) & (F::HAS_PARAM | F::HAS_UNKNOWN);
+				}
 				// a pointer in a private field stays inside its foreign file (D29)
 				if flags.contains(F::HAS_FOREIGN)
 					&& !self.shape_fields(shape).iter().any(|field| {
@@ -2121,6 +2129,82 @@ mod tests {
 			.map(|f| store.syms.resolve(f.name).to_string())
 			.collect();
 		assert_eq!(names, ["x", "y"]);
+	}
+
+	#[test]
+	fn nominal_objects_substitute_and_infer_phantom_arguments() {
+		let mut store = TypeStore::new();
+		let module = store.module("main");
+		for kind in [
+			NominalKind::Private,
+			NominalKind::Resource,
+			NominalKind::CStruct,
+		] {
+			let key = store.decl_key(module, &[&format!("{kind:?}")], 0);
+			let name = store.syms.intern("Item");
+			let param = store.add_param(ParamInfo {
+				owner: key,
+				index: 0,
+				name,
+				constraint: TypeId::UNKNOWN,
+				default: TypeId::UNSET,
+				value: false,
+			});
+			let parameter = store.intern(TypeKind::Param(param));
+			let args = store.list(&[parameter]);
+			let members = store.intern_sym_list(&[]);
+			let nominal = store.intern_nominal(NominalInfo {
+				key,
+				args,
+				kind,
+				members,
+			});
+			let z = field(&mut store, "z", TypeId::INT32);
+			let a = field(&mut store, "a", TypeId::INT32);
+			let object = if kind == NominalKind::CStruct {
+				store.object_in_order(&[z, a], nominal)
+			} else {
+				store.object(&[z, a], Some(nominal))
+			};
+			let array = store.array(object);
+			assert!(store.flags(array).contains(TypeFlags::HAS_PARAM));
+			let task = store.intern(TypeKind::Task(TypeId::VOID, TypeId::NEVER));
+			let bindings = crate::types::Bindings {
+				params: vec![param],
+				types: vec![task],
+				..Default::default()
+			};
+			let concrete = store.substitute(object, &bindings);
+			assert_ne!(concrete, object);
+			assert!(!store.flags(concrete).contains(TypeFlags::HAS_PARAM));
+			assert_eq!(
+				store.flags(concrete).contains(TypeFlags::MOVE_ONLY),
+				kind == NominalKind::Resource
+			);
+			let TypeKind::Object(shape) = store.kind(concrete) else {
+				panic!("an object instance");
+			};
+			let nominal = store.shape(shape).nominal.unwrap();
+			assert_eq!(store.list_items(store.nominal(nominal).args), &[task]);
+			if kind == NominalKind::CStruct {
+				assert_eq!(
+					store
+						.shape_fields(shape)
+						.iter()
+						.map(|field| field.name)
+						.collect::<Vec<_>>(),
+					[z.name, a.name]
+				);
+			}
+			let mut candidates = crate::types::Candidates::default();
+			store.unify(
+				object,
+				concrete,
+				&crate::types::Bindings::new(&[param]),
+				&mut candidates,
+			);
+			assert_eq!(candidates.found, [vec![task]]);
+		}
 	}
 
 	#[test]

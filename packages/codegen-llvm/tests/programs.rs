@@ -49,7 +49,7 @@ mod with_llvm {
 		/// `-- signal: 11`: ended by this signal, not by an exit code.
 		signal: Option<i32>,
 		arguments: Vec<String>,
-		/// From `tests/programs`: it must compile.
+		/// From `tests/programs`, or `-- require-split: true`: it must compile.
 		required: bool,
 		/// `-- skip-target: native-freestanding`
 		skip_targets: Vec<String>,
@@ -146,6 +146,9 @@ mod with_llvm {
 			if line.contains("-- opt-level: 0") {
 				program.dev = true;
 			}
+			if line.contains("-- require-split: true") {
+				program.required = true;
+			}
 			if let Some(index) = line.find("-- stderr:") {
 				program
 					.stderr
@@ -205,12 +208,6 @@ mod with_llvm {
 		cases.sort();
 		// the JavaScript-only programs of the `fa` command (±(2^53 − 1), names)
 		cases.retain(|path| !path.to_string_lossy().contains("javascript"));
-		// an analyzer gap: the methods of two structurally equal types resolve
-		// to one declaration
-		cases.retain(|path| {
-			!path.ends_with("3.2-object-types/obj-1.fa")
-				&& !path.ends_with("10-structural-typing/adv-10.8-02.fa")
-		});
 		// run with arguments the annotations don't give
 		cases.retain(|path| {
 			!path.ends_with("15-modules/adv-15.9-18.fa")

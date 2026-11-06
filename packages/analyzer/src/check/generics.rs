@@ -253,11 +253,13 @@ impl Walker<'_> {
 				bindings.types[index] = ty;
 			}
 			let mut problems = Vec::new();
+			w.explicit_written_origins(&mut bindings, arguments);
 			w.check_constraints(&mut bindings, &mut problems, false);
 			for (code, message) in problems {
 				let diagnostic = w.diagnostic(code, n, message);
 				w.report(diagnostic);
 			}
+			w.record_instantiation(n, &bindings);
 			if let Some(logic) = logic {
 				return w.apply_type_logic(n, symbol, logic, &bindings);
 			}
@@ -377,6 +379,11 @@ impl Walker<'_> {
 				}
 			}
 			TypeKind::Object(shape) => {
+				if let Some(nominal) = types.shape(shape).nominal {
+					for &argument in types.list_items(types.nominal(nominal).args) {
+						self.collect_params(argument, out, depth + 1);
+					}
+				}
 				for field in types.shape_fields(shape) {
 					self.collect_params(field.ty, out, depth + 1);
 				}
@@ -515,6 +522,19 @@ impl Walker<'_> {
 			}
 			let constraint = self.s.types.substitute(constraint, bindings);
 			let name = self.param_name(param);
+			let saved_origin = std::mem::replace(
+				&mut self.receiver_origin,
+				bindings.origins.get(&param).cloned(),
+			);
+			let mut methods = Vec::new();
+			let method_problem = self.missing_method(ty, constraint, &name, &mut methods);
+			self.receiver_origin = saved_origin;
+			bindings
+				.methods
+				.retain(|(parameter, _)| *parameter != param);
+			bindings
+				.methods
+				.extend(methods.into_iter().map(|method| (param, method)));
 			// a parameter of the generic code around, whose own constraint is
 			// as narrow (`double(value)` in `<Value: Integer | Float>`): bound
 			// to it, each instance then binds it to one member
@@ -554,7 +574,7 @@ impl Walker<'_> {
 						),
 					)),
 				}
-			} else if let Some(message) = self.missing_method(ty, constraint, &name) {
+			} else if let Some(message) = method_problem {
 				problems.push((&GN013, message));
 			} else if values
 				&& self
@@ -608,12 +628,15 @@ impl Walker<'_> {
 	/// `GN013`: a method the constraint requires (`{ describe: (self) =>
 	/// String }`) that the actual type doesn't declare, or declares with
 	/// another signature. The message, when one is missing.
-	fn missing_method(&mut self, ty: TypeId, constraint: TypeId, name: &str) -> Option<String> {
-		if self
-			.s
-			.types
-			.flags(ty)
-			.intersects(TypeFlags::HAS_PARAM | TypeFlags::HAS_UNKNOWN)
+	fn missing_method(
+		&mut self,
+		ty: TypeId,
+		constraint: TypeId,
+		name: &str,
+		methods: &mut Vec<crate::analysis::GenericMethod>,
+	) -> Option<String> {
+		if self.s.types.flags(ty).contains(TypeFlags::HAS_UNKNOWN)
+			|| matches!(self.s.types.kind(ty), TypeKind::Param(_))
 		{
 			return None;
 		}
@@ -635,6 +658,14 @@ impl Walker<'_> {
 				));
 			};
 			let declared = self.symbol_type(function, crate::ids::NodeId::new(0));
+			let declared = match self
+				.receiver_origin
+				.as_ref()
+				.and_then(|origin| self.written_bindings(origin))
+			{
+				Some(bindings) => self.s.types.substitute(declared, &bindings),
+				None => declared,
+			};
 			let bound = self.bound_method_type(function, declared);
 			if !self.s.types.is_recovering(bound) && !self.s.types.satisfies(bound, method.ty) {
 				return Some(format!(
@@ -644,6 +675,26 @@ impl Walker<'_> {
 					self.display(method.ty)
 				));
 			}
+			let key = self
+				.external_value_key(function)
+				.unwrap_or_else(|| self.symbol_key(function));
+			let arguments = self
+				.receiver_origin
+				.as_ref()
+				.map(|origin| origin.arguments)
+				.unwrap_or(ListId::EMPTY);
+			let dependencies = self
+				.receiver_origin
+				.as_ref()
+				.map(|origin| origin.methods.clone())
+				.unwrap_or_default();
+			methods.push(crate::analysis::GenericMethod {
+				parameter: 0,
+				name: method.name,
+				function: key,
+				arguments,
+				methods: dependencies,
+			});
 		}
 		None
 	}
@@ -754,6 +805,11 @@ impl Walker<'_> {
 			self.resolve_candidates(&mut bindings, &candidates, &mut problems);
 		}
 		self.finish_bindings(&mut bindings, &mut problems);
+		for &(value, declared) in arguments {
+			if let Some(declared) = declared {
+				self.infer_written_origin(declared, value, &mut bindings);
+			}
+		}
 		// the methods a constraint requires are those of the type written for
 		// the argument (`Cat { … }`), not of another type with the same fields
 		let written = arguments
@@ -763,6 +819,81 @@ impl Walker<'_> {
 		self.check_constraints(&mut bindings, &mut problems, true);
 		self.receiver_decl = saved;
 		(bindings, problems, synthesized)
+	}
+
+	/// The declaration identity accompanying an inferred data type. The
+	/// structural unifier intentionally ignores it; method selection cannot.
+	fn infer_written_origin(&mut self, declared: TypeId, value: NodeId, bindings: &mut Bindings) {
+		if let Some(origin) = self.written_origin(value) {
+			self.infer_type_origin(declared, origin, bindings);
+		}
+	}
+
+	fn infer_type_origin(
+		&mut self,
+		declared: TypeId,
+		origin: crate::analysis::WrittenType,
+		bindings: &mut Bindings,
+	) {
+		let origin = self.resolve_written_type(origin);
+		match self.s.types.kind(self.s.types.unfold(declared)) {
+			TypeKind::Param(param) if bindings.params.contains(&param) => {
+				bindings.origins.entry(param).or_insert(origin);
+			}
+			TypeKind::Object(shape) => {
+				let fields = self.s.types.shape_fields(shape).to_vec();
+				for field in fields {
+					if self.has_free(field.ty, &bindings.params)
+						&& let Some(field_origin) =
+							self.written_field_origin(origin.clone(), field.name)
+					{
+						self.infer_type_origin(field.ty, field_origin, bindings);
+					}
+				}
+			}
+			TypeKind::Collection(kind, item, key) => {
+				let arguments = if matches!(
+					kind,
+					crate::types::CollKind::Map | crate::types::CollKind::GrowingMap
+				) {
+					vec![key, item]
+				} else {
+					vec![item]
+				};
+				for (index, argument) in arguments.into_iter().enumerate() {
+					if let Some(Some(origin)) = origin.origins.get(index) {
+						self.infer_type_origin(argument, origin.clone(), bindings);
+					}
+				}
+			}
+			TypeKind::Pointer(item) | TypeKind::CArray(item, _) => {
+				if let Some(Some(origin)) = origin.origins.first() {
+					self.infer_type_origin(item, origin.clone(), bindings);
+				}
+			}
+			TypeKind::Tuple(list) => {
+				let arguments = self.s.types.list_items(list).to_vec();
+				for (argument, origin) in arguments.into_iter().zip(origin.origins.iter()) {
+					if let Some(origin) = origin {
+						self.infer_type_origin(argument, origin.clone(), bindings);
+					}
+				}
+			}
+			_ => {}
+		}
+	}
+
+	fn explicit_written_origins(&mut self, bindings: &mut Bindings, arguments: NodeList<'_>) {
+		for (index, argument) in arguments.iter().enumerate() {
+			let Some(&param) = bindings.params.get(index) else {
+				break;
+			};
+			if !self.s.types.param(param).value
+				&& let Some(origin) = self.written_origin(argument)
+			{
+				bindings.origins.insert(param, origin);
+			}
+		}
 	}
 
 	/// The type declaration written for a value or for the items of an
@@ -866,6 +997,7 @@ impl Walker<'_> {
 			}
 			let mut problems = Vec::new();
 			w.finish_bindings(&mut bindings, &mut problems);
+			w.explicit_written_origins(&mut bindings, arguments);
 			w.check_constraints(&mut bindings, &mut problems, false);
 			for (code, message) in problems {
 				let diagnostic = w.diagnostic(code, n, message);
@@ -1067,6 +1199,7 @@ impl Walker<'_> {
 			}
 			let mut problems = Vec::new();
 			w.finish_bindings(&mut bindings, &mut problems);
+			w.explicit_written_origins(&mut bindings, arguments);
 			w.check_constraints(&mut bindings, &mut problems, false);
 			for (code, message) in problems {
 				let diagnostic = w.diagnostic(code, n, message);
@@ -1200,12 +1333,63 @@ impl Walker<'_> {
 			.iter()
 			.map(|&param| bindings.get(param).unwrap_or(TypeId::UNKNOWN))
 			.collect();
-		Bindings { params, types }
+		Bindings {
+			params,
+			types,
+			origins: bindings.origins.clone(),
+			methods: bindings.methods.clone(),
+		}
 	}
 
 	pub(super) fn record_instantiation(&mut self, n: NodeId, bindings: &Bindings) -> ListId {
 		let list = self.s.types.list(&bindings.types);
 		self.a.instantiations.insert(n, list);
+		let mut methods: Vec<_> = bindings
+			.methods
+			.iter()
+			.filter_map(|(param, method)| {
+				let parameter = bindings
+					.params
+					.iter()
+					.position(|candidate| candidate == param)?;
+				Some(crate::analysis::GenericMethod {
+					parameter: parameter as u16,
+					..method.clone()
+				})
+			})
+			.collect();
+		methods.sort_by(|left, right| {
+			left.parameter.cmp(&right.parameter).then_with(|| {
+				self.s
+					.types
+					.syms
+					.resolve(left.name)
+					.cmp(self.s.types.syms.resolve(right.name))
+			})
+		});
+		methods.dedup();
+		if methods.is_empty() {
+			self.a.instantiated_methods.remove(&n);
+		} else {
+			self.a.instantiated_methods.insert(n, methods);
+		}
+		let origins: Vec<_> = bindings
+			.params
+			.iter()
+			.enumerate()
+			.filter_map(|(index, param)| {
+				bindings
+					.origins
+					.get(param)
+					.cloned()
+					.map(|origin| (index as u16, origin))
+			})
+			.collect();
+		if origins.is_empty() {
+			self.a.instantiation_origins.remove(&n);
+		} else {
+			self.a.instantiation_origins.insert(n, origins);
+		}
 		list
 	}
 }

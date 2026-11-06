@@ -1016,4 +1016,52 @@ mod tests {
 		assert!(!modules.contains(&"library/other"), "{modules:?}");
 		assert_eq!(codes(&session, "application/main"), ["E-TYPE-1"]);
 	}
+
+	#[test]
+	fn changing_a_written_alias_reselects_methods_with_equal_structural_types() {
+		let (mut session, program) = package(&[
+			(
+				"library/model.fa",
+				"export namespace = {\n\
+				type Person = { name: String, function describe = (self): String => \"Hello {self.name}\" }\n\
+				type Greeting = { name: String, function describe = (self): String => \"Hi {self.name}\" }\n\
+				}\n",
+			),
+			("library/Current.fa", "export type = model.Person\n"),
+			(
+				"application/main.fa",
+				"export function = () => {\n\
+				let value = library.Current { name = \"Ada\" }\n\
+				console.log(value.describe())\n\
+				}\n",
+			),
+		]);
+		assert!(
+			!program.has_errors(&session),
+			"{:?}",
+			codes(&session, "application/main")
+		);
+		let main = session.loaded_module("application/main").unwrap();
+		let selected = |session: &Session| {
+			(0..session.tree(main).nodes.len())
+				.map(NodeId::new)
+				.filter(|&node| session.tree(main).text(node.index()) == "describe")
+				.find_map(|node| match session.analysis(main).resolution(node) {
+					crate::symbols::Resolution::External(key) => Some(key),
+					_ => None,
+				})
+				.expect("the selected method has a portable declaration key")
+		};
+		let before = selected(&session);
+		let changed = session.update(
+			"library/Current",
+			Arc::from("export type = model.Greeting\n"),
+		);
+		assert!(
+			changed.contains(&main),
+			"the written alias is part of its interface"
+		);
+		assert!(codes(&session, "application/main").is_empty());
+		assert_ne!(before, selected(&session));
+	}
 }

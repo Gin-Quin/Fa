@@ -1,5 +1,49 @@
 # Analyzer engineer 2: state at pause (2026-11-05)
 
+## Written methods (2026-11-06, active in analyzer-with)
+
+- Branch `codex/analyzer-with` is now based on validated `d22ebd2`, with
+  uncommitted method-origin work only. Do not use its target from another worktree.
+- `WrittenType` separates the named owner, its type arguments, their nested
+  written origins (shared by Arc), and required methods from structural TypeId.
+  `GenericMethod` carries parameter position/name, function DeclKey, owner args
+  and nested method selections. Bindings keep these until declaration_order.
+- Analyzer publishes sparse origins of values, returns and fields; generic
+  projections preserve Holder<Person> vs Holder<Greeting>. Imported interfaces
+  carry/remap/hash these facts. `function_owners` keeps type owner binders
+  separate from the method's own binders; `method_instantiations` records the
+  written receiver application. Selected methods contribute declaration uses.
+- JS passes selected methods instead of choosing the first equal TypeId.
+  Signature-only forall-value dispatch was shared by the lead in
+  `/tmp/fa-generic-value-signature-abi.patch` and applied. Type-owner hidden
+  parameters, including phantom values, are passed/bound at method calls.
+  copy_function no longer selects an empty alias's field order and drops data.
+- Native instances/requests/function-value tables include method selections;
+  nested selections and exact type bindings survive closures and callbacks.
+  Cache version is split-6 (reconcile with lead/platform/proofs on merge).
+  The identical metadata engineer patch `/tmp/fa-generic-concrete-fields.patch`
+  is applied here; do not duplicate it on integration. Mixed local/global
+  shape copies compare field names textually. Chained `x.value.describe`
+  dispatches from the prefix type, not just the root.
+- Bun and Node E2E pass for alias/import/return/export/forall/Holder/Speaker and
+  phantom owners (`/tmp/fa-method-origin-export-js.log`). Three native targets
+  also passed (`/tmp/fa-method-origin-export-native.log`). New strict per-unit
+  and imported generic owner cases are being rerun in
+  `/tmp/fa-method-origin-split-{cases,js,native}.log`; the JS test's expected
+  output reader was just fixed to read inline prints annotations too.
+- Still to complete before a full suite: generic resources' nominal args
+  and their HAS_PARAM flags, exact generic destroy selection/invocation
+  (lead requested it for Pointer/composites); sparse origin hash/incremental
+  regression; remove native structural exclusions after their targeted run;
+  full clippy/tests including JS runtime. No commit of this lot yet.
+- The generic expression-body key-loop inference hole remains assigned here:
+  `/tmp/fa-key-error-expression.fa`, mirrored by proofs' pending
+  generic-key-loop-inferred-errors.fa. Concrete deferred loops currently throw
+  away inferred summaries; exact checks/callers must run after specialization.
+- Afterwards: with/factories/remaining documented rules and TypeFromSchema,
+  analyzer pass fusion with 1000-file measurements, and stackless interpreter
+  continuations for finding 42. Do not document a new metaprogram recursion cap.
+
 ## Callback and exact-effects lot (2026-11-06, validated)
 
 - `codex/analyzer-callbacks`, based on the initial green `0ab9c51`, implements

@@ -322,6 +322,39 @@ impl Walker<'_> {
 			}
 		}
 		let (module, function) = found?;
+		self.type_function_proxy(module, function, name)
+	}
+
+	/// A method of one precise written declaration, without searching other
+	/// declarations that happen to have the same structural data type.
+	pub(super) fn external_type_function_at(
+		&mut self,
+		origin: DeclKey,
+		name: &str,
+	) -> Option<SymbolId> {
+		let module = self.s.types.decl_key_data(origin).module;
+		self.modules
+			.reads
+			.push(self.s.types.module_path(module).to_string());
+		let sym = self.s.types.syms.get(name)?;
+		let interface = self.s.interface(module)?;
+		let function = interface
+			.node_of(origin)
+			.and_then(|decl| interface.type_functions.get(&decl))
+			.and_then(|functions| functions.iter().find(|function| function.name == sym))
+			.copied();
+		if function.is_none() && !interface.complete {
+			self.modules.deferred = true;
+		}
+		self.type_function_proxy(module, function?, name)
+	}
+
+	fn type_function_proxy(
+		&mut self,
+		module: ModuleId,
+		function: crate::modules::TypeFunction,
+		name: &str,
+	) -> Option<SymbolId> {
 		if let Some(&existing) = self.modules.decl_proxies.get(&function.key) {
 			return Some(existing);
 		}
@@ -1328,11 +1361,16 @@ impl Walker<'_> {
 						w.report(diagnostic);
 						return TypeId::UNKNOWN;
 					}
-					w.module_type_members(ty, rest, true)
+					let origin = w.written_origin(last);
+					let saved = std::mem::replace(&mut w.receiver_origin, origin);
+					let result = w.module_type_members(ty, rest, true);
+					w.receiver_origin = saved;
+					result
 				}
 				_ => {
 					let mut current = w.symbol_type(symbol, last);
 					w.set_type(last, current);
+					let mut origin = w.written_origin(last);
 					// `library.settings.port`: a `static` of another file is folded
 					if rest.is_empty()
 						&& let Some(value) = w.external_static(symbol)
@@ -1340,10 +1378,38 @@ impl Walker<'_> {
 						w.a.constants.insert(n, value);
 					}
 					for member in rest.iter() {
-						match w.member_of(member, current) {
-							Some((ty, _)) => current = ty,
+						let owner = origin.clone();
+						let saved = std::mem::replace(&mut w.receiver_origin, origin.take());
+						let found = w.member_of(member, current);
+						let selected_owner = w.receiver_origin.clone();
+						w.receiver_origin = saved;
+						match found {
+							Some((ty, super::objects::MemberKind::Field(_))) => {
+								if let Some(owner) = owner
+									&& let View::Name(name) = w.view(member)
+								{
+									let name = w.s.types.syms.intern(w.tree.name(name));
+									origin = w.written_field_origin(owner, name);
+								}
+								current = ty;
+							}
+							Some((ty, _)) => {
+								if let Some(owner) = selected_owner {
+									w.a.method_instantiations.insert(member, owner);
+								}
+								current = ty;
+							}
 							None => return TypeId::UNKNOWN,
 						}
+						if origin.is_none() {
+							origin = w.written_origin(member);
+						}
+						if let Some(origin) = &origin {
+							w.a.written_types.insert(member, origin.clone());
+						}
+					}
+					if let Some(origin) = origin {
+						w.a.written_types.insert(n, origin);
 					}
 					current
 				}
@@ -1372,6 +1438,9 @@ impl Walker<'_> {
 				&& self.nominal_member(current, text).is_none()
 				&& let Some(function) = self.type_function(current, text)
 			{
+				if let Some(owner) = self.receiver_origin.clone() {
+					self.a.method_instantiations.insert(member, owner);
+				}
 				self.set_resolution(member, Resolution::Local(function));
 				let ty = self.symbol_type(function, member);
 				self.set_type(member, ty);

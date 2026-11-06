@@ -784,6 +784,10 @@ impl Walker<'_> {
 							let symbol =
 								w.declare(pattern, name, SymbolKind::LoopVariable { copy: false });
 							w.a.symbols.symbol_mut(symbol).ty = item;
+							if let Some(origin) = w.written_element_origin(iterable) {
+								w.a.written_types.insert(pattern, origin.clone());
+								w.written_type_keys.insert(symbol, origin);
+							}
 							// the elements of a set are read-only (collections.rs)
 							let iterable_ty = w.type_of(iterable);
 							w.mark_if_readonly_element(symbol, iterable_ty);

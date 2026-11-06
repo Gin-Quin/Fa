@@ -724,7 +724,10 @@ impl Walker<'_> {
 			TypeKind::Object(shape) => w.s.types.shape(shape).nominal,
 			_ => None,
 		};
-		nominal_of(self, own).is_some() && nominal_of(self, own) == nominal_of(self, ty)
+		match (nominal_of(self, own), nominal_of(self, ty)) {
+			(Some(own), Some(other)) => self.s.types.nominal(own).key == self.s.types.nominal(other).key,
+			_ => false,
+		}
 	}
 
 	/// `.red` where an enumeration or a named union is expected: its member
@@ -802,7 +805,13 @@ impl Walker<'_> {
 			if self.is_fields(ty) {
 				return self.memo(n, |w| w.fields_member_value(n, ty, members));
 			}
-			return self.memo(n, |w| w.type_member_chain(target, ty, members));
+			let origin = self.written_origin(target);
+			return self.memo(n, |w| {
+				let saved = std::mem::replace(&mut w.receiver_origin, origin);
+				let result = w.type_member_chain(target, ty, members);
+				w.receiver_origin = saved;
+				result
+			});
 		}
 		self.access_roots.insert(self.strip_groups(target));
 		let receiver = self.check(target, None);
@@ -818,12 +827,26 @@ impl Walker<'_> {
 			let mut place = if chained { None } else { w.place_of(target) };
 			// the methods of the type written for the receiver (structural.rs)
 			let mut written = w.written_decl(target);
+			let mut origin = w.written_origin(target);
 			for member in members.iter() {
 				w.receiver_decl = written.take();
+				let owner_origin = origin.clone();
+				let saved_origin = std::mem::replace(&mut w.receiver_origin, origin.take());
 				let found = w.member_of(member, current);
+				let selected_owner = w.receiver_origin.clone();
 				w.receiver_decl = None;
+				w.receiver_origin = saved_origin;
 				match found {
 					Some((ty, MemberKind::Field(_))) => {
+						if let Some(owner) = owner_origin
+							&& let View::Name(name) = w.view(member)
+						{
+							let name = w.s.types.syms.intern(w.tree.name(name));
+							origin = w.written_field_origin(owner, name);
+							if let Some(origin) = &origin {
+								w.a.written_types.insert(member, origin.clone());
+							}
+						}
 						place = place.and_then(|place| w.member_step(place, member));
 						current = match place {
 							Some(place) => w.narrowed_field(member, place, ty),
@@ -831,11 +854,20 @@ impl Walker<'_> {
 						};
 					}
 					Some((ty, _)) => {
+						if let Some(owner) = selected_owner {
+							w.a.method_instantiations.insert(member, owner);
+						}
 						place = None;
 						current = ty;
 					}
 					None => return TypeId::UNKNOWN,
 				}
+				if origin.is_none() {
+					origin = w.written_origin(member);
+				}
+			}
+			if let Some(origin) = origin {
+				w.a.written_types.insert(n, origin);
 			}
 			if chained {
 				w.s.types.optional(current)
@@ -1148,7 +1180,12 @@ impl Walker<'_> {
 			self.set_resolution(member, Resolution::Local(function));
 			let function_ty = self.symbol_type(function, member);
 			let bound = self.bound_method_type(function, function_ty);
-			let bound = match self.instance_bindings.get(&receiver).cloned() {
+			let bindings = self
+				.receiver_origin
+				.as_ref()
+				.and_then(|origin| self.written_bindings(origin))
+				.or_else(|| self.instance_bindings.get(&receiver).cloned());
+			let bound = match bindings {
 				Some(bindings) => self.s.types.substitute(bound, &bindings),
 				None => bound,
 			};

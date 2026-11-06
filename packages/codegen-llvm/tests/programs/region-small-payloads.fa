@@ -1,0 +1,62 @@
+-- Compact root payloads share the generic union readers with ordinary
+-- named unions, anonymous unions and errors, whose full ids stay unchanged.
+-- asynchronous: false
+type Tree = Union {
+	Empty
+	Number = { value: Int32 }
+	Flag = { value: Boolean }
+	Text = { text: String }
+	List = { items: Array<Tree> }
+}
+function number = (value: Int32): Tree => Tree.Number { value }
+function flag = (value: Boolean): Tree => Tree.Flag { value }
+function list = (): Tree => {
+	mutable items: Array<Tree> = []
+	items.push(number(-2_147_483_648))
+	items.push(number(-32768))
+	items.push(number(0))
+	items.push(number(32768))
+	items.push(number(2_147_483_647))
+	items.push(flag(true))
+	items.push(flag(false))
+	items.push(Tree.Empty)
+	items.push(Tree.Text { text = "packed" })
+	Tree.List { items }
+}
+function sum = (tree: Tree): Integer => when tree is {
+	Tree.Empty => 0
+	Tree.Number as { value } => Integer(value)
+	Tree.Flag as { value } => if value { 1 } else { 0 }
+	Tree.Text as { text } => text.length
+	Tree.List as { items } => {
+		mutable total = 0
+		for item in items { total += sum(item) }
+		total
+	}
+}
+let original = list()
+let duplicate = original
+assert original == duplicate
+assert sum(original) == 6
+assert sum(duplicate) == 6
+let named = "{number(-32768)}"
+assert named.includes("-32768")
+
+type Other = Union { Alpha = { value: Integer }, Beta }
+function ordinary = (value: Integer): Other => Other.Alpha { value }
+let other = ordinary(42)
+let otherCopy = other
+assert other == otherCopy
+assert "{otherCopy}".startsWith("Other.Alpha")
+let anonymous: Array<Integer | String> = [42, "a long ordinary string".repeat(4)]
+let anonymousCopy = anonymous
+assert anonymous == anonymousCopy
+
+type Failure = Errors { Bad }
+function failing = (): Integer throws Failure.Bad => { throw Failure.Bad }
+let caught = failing() catch error => {
+	assert error is Failure.Bad
+	7
+}
+assert caught == 7
+console.log("small region payloads") -- prints: small region payloads

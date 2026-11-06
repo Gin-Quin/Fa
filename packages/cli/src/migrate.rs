@@ -191,6 +191,7 @@ fn keys(session: &Session, file: FileId, migration: Option<&Migration>) -> Vec<K
 		.diagnostics(file)
 		.iter()
 		.filter(|diagnostic| diagnostic.location.file == file)
+		.filter(|diagnostic| diagnostic.code.id != "GN031")
 		.map(|diagnostic| {
 			let start = diagnostic.location.span.start as usize;
 			let start = migration.map_or(start, |migration| migration.original_offset(start));
@@ -436,7 +437,12 @@ fn migrate_rust(text: &str, options: &Options) -> Outcome {
 	let mut edits: Vec<(usize, usize, String)> = Vec::new();
 	for literal in string_literals(text) {
 		let tree = fa_parser::parse(&literal.value);
-		if tree.has_errors() || !literal.value.contains('(') {
+		if tree
+			.diagnostics
+			.iter()
+			.any(|diagnostic| diagnostic.is_error() && diagnostic.code != Some("GN031"))
+			|| !literal.value.contains('(')
+		{
 			continue;
 		}
 		let mut session = Session::new();

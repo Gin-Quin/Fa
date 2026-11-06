@@ -28,7 +28,7 @@ fn rules_of_the_specification_carry_their_code() {
 		[Some("E-WHEN-6")]
 	);
 	assert_eq!(
-		codes("type Grid(size) = { cells: Array(Integer) }"),
+		codes("type Grid<size> = { cells: Array<Integer> }"),
 		[Some("GN001")]
 	);
 	assert_eq!(codes("export static limit = 3"), [Some("META011")]);
@@ -386,9 +386,9 @@ fn namespace_has_no_parameters() {
 
 #[test]
 fn empty_generic_parameters_are_reported() {
-	assert_error_message("type T() = Integer", "Generic parameters can't be empty");
-	assert_error_message("function f() = x", "Generic parameters can't be empty");
-	assert_error_message("function f(x) = x", "needs a type");
+	assert_error_message("type T<> = Integer", "A generic list can't be empty");
+	assert_error_message("function f = <>() => x", "A generic list can't be empty");
+	assert_error_message("function f = <x>() => x", "needs a type");
 }
 
 #[test]

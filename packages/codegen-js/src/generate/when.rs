@@ -285,6 +285,10 @@ impl Generator<'_> {
 		later: Option<&Expr>,
 	) -> Expr {
 		let pattern = self.strip_groups(pattern);
+		if self.analysis.fields_patterns.contains(&pattern) {
+			let expected = self.expr(pattern);
+			return js::binary(subject, "===", &expected, Prec::Equality);
+		}
 		match self.view(pattern) {
 			View::Union { operands } => {
 				let mut tests = Vec::new();

@@ -50,8 +50,8 @@ assert Point { x = 1, y = 2 } == Point { x = 1, y = 2 }
 assert [1, 2, 3] == [1, 2, 3]
 assert [1, 2, 3] != [3, 2, 1]
 
-let a: Set(Integer) = [1, 2, 3]
-let b: Set(Integer) = [3, 2, 1]
+let a: Set<Integer> = [1, 2, 3]
+let b: Set<Integer> = [3, 2, 1]
 assert a == b
 ```
 
@@ -150,6 +150,8 @@ if 0 < x <= 100 {
 ```
 
 A chain is evaluated like a sequence of comparisons joined by `and`, but **each operand is evaluated once**: `a < f() <= c` calls `f` a single time. The chain short-circuits: if a comparison is `false`, the following operands are not evaluated.
+
+`<` must be followed by whitespace (a space, a tab or a line break): any other `<` opens a [generic list](/types/generics#angle-brackets-and-comparisons), so `x<10` is not a comparison. Inside a generic list, write a comparison in parentheses: `Choose<(count > 255), UInt16, UInt8>`.
 
 A chain goes in one direction: `<` and `<=`, or `>` and `>=`. Mixing directions (`a < b > c`) is an error, and so is chaining `==` or `!=` (`a == b == c`).
 

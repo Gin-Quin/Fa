@@ -85,7 +85,7 @@ When the compiler can prove it, from a literal or from a [ranged integer](/value
 ```fa
 let a = 10 // 2 -- Integer
 
-let divisor: Integer(min = 1) = readPositive()
+let divisor: Integer<min = 1> = readPositive()
 let b = 10 // divisor -- Integer
 ```
 
@@ -123,8 +123,8 @@ The compiler tracks the possible range of every arithmetic result: the ranges of
 ```fa
 let a: UInt8 = 200 + 100 -- error: 300 doesn't fit in a UInt8
 
-let small: Integer(min = 0, max = 100) = readPercent()
-let bounded: Integer(min = 0, max = 200) = small * 2 -- no check: the result is between 0 and 200
+let small: Integer<min = 0, max = 100> = readPercent()
+let bounded: Integer<min = 0, max = 200> = small * 2 -- no check: the result is between 0 and 200
 
 let x: UInt8 = readByte()
 let y: UInt8 = readByte()
@@ -267,7 +267,7 @@ a.shiftLeft(2)  -- 0b110000
 a.shiftRight(2) -- 0b0011
 ```
 
-The bitwise methods work on the bits of the receiver's type, and return a value of that type: `bitAnd`, `bitOr` and `bitXor` take an operand of the same type. The result has the full range of the type: ranges don't propagate through bit operations (`bitAnd` on an `Integer(min = 0, max = 10)` returns an `Integer`). Shifts are logical for unsigned integers (the new bits are zeros) and arithmetic for signed integers (`shiftRight` keeps the sign bit). `shiftLeft` drops the bits shifted out, with no overflow check. The shift amount must be between 0 and the width of the type, excluded: an amount proven to be in this range can't fail, an amount proven outside is a compile error, and any other amount `throws ArithmeticError`.
+The bitwise methods work on the bits of the receiver's type, and return a value of that type: `bitAnd`, `bitOr` and `bitXor` take an operand of the same type. The result has the full range of the type: ranges don't propagate through bit operations (`bitAnd` on an `Integer<min = 0, max = 10>` returns an `Integer`). Shifts are logical for unsigned integers (the new bits are zeros) and arithmetic for signed integers (`shiftRight` keeps the sign bit). `shiftLeft` drops the bits shifted out, with no overflow check. The shift amount must be between 0 and the width of the type, excluded: an amount proven to be in this range can't fail, an amount proven outside is a compile error, and any other amount `throws ArithmeticError`.
 
 :::tip
 To store a set of flags, prefer the [`Fields`](/types/fields) type.

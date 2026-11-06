@@ -1,0 +1,19 @@
+-- Generic declarations and applications use angle brackets; calls and conversions keep parentheses.
+type Box<Item> = { item: Item }
+function identity = <Item>(value: Item): Item => value
+type OldArray = Array(Integer) -- error: GN031
+type OldBox = Box(Integer) -- error: GN031
+type OldTask = Task(Integer) throws IndexError -- error: GN031
+let oldIdentity = identity(Integer)(1) -- error: GN031
+function useIdentity = (transform: <Item>(value: Item) => Item) => transform(Integer)(1) -- error: GN031
+function repeat = <count: Integer<min = 0>>(text: String) => text.repeat(count)
+let oldRepeat = repeat(2)("a") -- error: GN031
+type Legacy(Item) = { item: Item } -- error: GN031
+function legacy(Item) = (item: Item) => item -- error: GN031
+
+let literal: "a" = identity<"a">("a")
+let converted = Int8(12)
+let number = identity(1)
+let box: Box<Integer> = { item = number }
+function ordinary = (value: Integer): Integer => value + 1
+static constant = @ordinary(1)

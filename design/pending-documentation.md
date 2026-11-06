@@ -2,6 +2,12 @@
 
 The documentation is being rewritten outside this project (angle-bracket generics, 2026-11-04). Until it lands, engineers don't edit `documentation/`: notes meant for a page go here, with their page and section, and the lead applies them to the rewritten pages.
 
+## `documentation/collections/arrays.md`, `:::implementation` (package index proofs, 2026-11-06)
+
+Index proofs also apply in packages: an array private to one file, never shrunk and only passed to that file's private functions, can use the invariant of an index field or collection when no other file supplies that place's values. Units publish these facts before the dependent modules are generated; a wider object, generic store or imported default is included. Arrays shared between files keep their checks. Both JavaScript and native builds use the same analyzer facts.
+
+The whole-program store proofs conservatively stop at bodies analyzed separately for each key of a key-set `@for`: one key's analysis does not summarize the other keys' stores. The normal local flow proofs still apply.
+
 ## `documentation/values/strings.md`, `:::implementation` section (native strings)
 
 Replace the bullet "The parts of `split` are views…" with these two bullets:

@@ -1,0 +1,51 @@
+-- Private array proofs in a package. Another module may build a wider
+-- object, use a generic constructor, or fill a field from a constant
+-- default: none of those stores may turn into an unchecked bad index.
+-- file: library/chain.fa
+type Link = { next: UInt32 }
+mutable links: Array<Link> = [{ next = 1 }, { next = 0 }]
+function hop = (items: Array<Link>, from: UInt32): UInt32 throws IndexError => try items[try items[from].next].next
+export function = (): UInt32 => hop(links, 0) catch error => 99
+-- file: library/far.fa
+export function = () => ({ next = UInt32(1000000), extra = 1 })
+-- file: library/unsafe.fa
+type Link = { next: UInt32 }
+mutable links: Array<Link> = [{ next = 0 }]
+function hop = (items: Array<Link>, from: UInt32): UInt32 throws IndexError => try items[try items[from].next].next
+export function = (): UInt32 mutates links => {
+	links.push(far())
+	hop(links, 1) catch error => 99
+}
+-- file: library/Default.fa
+export type = { to: UInt32 = 1000000 }
+-- file: library/defaulted.fa
+export function = (): Default => Default {}
+-- file: library/defaultChain.fa
+type Link = { to: UInt32 }
+mutable links: Array<Link> = [{ to = 0 }]
+function hop = (items: Array<Link>, from: UInt32): UInt32 throws IndexError => try items[try items[from].to].to
+export function = (): UInt32 mutates links => {
+	links.push(defaulted())
+	hop(links, 1) catch error => 99
+}
+-- file: library/wrap.fa
+export function = <Value>(value: Value) => ({ destination = value })
+-- file: library/genericChain.fa
+type Link = { destination: UInt32 }
+mutable links: Array<Link> = [{ destination = 0 }]
+function hop = (items: Array<Link>, from: UInt32): UInt32 throws IndexError => try items[try items[from].destination].destination
+export function = (): UInt32 mutates links => {
+	links.push(wrap(UInt32(1000000)))
+	hop(links, 1) catch error => 99
+}
+-- file: library/DefaultCursor.fa
+export type = { offset: Integer = -1 }
+-- file: library/newCursor.fa
+export function = (): DefaultCursor => DefaultCursor {}
+-- file: library/readCursor.fa
+export function = (): Byte => "abc".bytes().get(newCursor().offset) ?? 0
+-- file: application/main.fa
+export function = () => {
+	console.log(library.chain(), library.unsafe(), library.defaultChain(), library.genericChain()) -- prints: 0 99 99 99
+	console.log(library.readCursor()) -- prints: 99
+}

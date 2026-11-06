@@ -696,6 +696,40 @@ mod with_llvm {
 			"{large}"
 		);
 	}
+	#[test]
+	fn int32_maps_store_only_key_and_value_in_probe_slots() {
+		let source = |key: &str| {
+			format!(
+				"mutable values: Map<{key}, UInt32> = [(0, 42)]\nvalues[1] = 7\nconsole.log(values.get(1))\n"
+			)
+		};
+		let compact = ir_with("compact-key32", &source("Int32"), false);
+		assert!(
+			compact.contains("i64 6597069766656"),
+			"compact layout flag missing"
+		);
+		let narrow = ir_with("legacy-key16", &source("Int16"), false);
+		assert!(
+			!narrow.contains("i64 6597069766656"),
+			"only a 32-bit key occupies its whole presence word"
+		);
+		assert!(
+			narrow.contains("i64 2199023255552"),
+			"legacy inline layout flag missing"
+		);
+	}
+
+	#[test]
+	fn dynamic_append_loops_reserve_inline_values_too() {
+		let ir = ir_with(
+			"inline-dynamic-loop",
+			"function repeat = (count: Integer): String => {\nmutable text = \"\"\nfor 0..count { text += \"x\" }\ntext\n}\nconsole.log(repeat(7))\n",
+			false,
+		);
+		let body = function(&ir, "fa.repeat");
+		assert!(body.contains("@fa_string_reserve_inline("), "{body}");
+		assert!(body.contains("reserved_inline"), "{body}");
+	}
 }
 
 /// A resource moved on every path or on none has no drop flag left in the

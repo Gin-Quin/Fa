@@ -48,6 +48,8 @@ pub(crate) struct Table<'ctx> {
 const TABLE_DENSE: u64 = 1 << 40;
 /// `TABLE_INLINE` of the runtime: a flag of `entry_size`.
 const TABLE_INLINE: u64 = 1 << 41;
+/// A 32-bit key occupies its own presence word (`0` in a spare slot).
+const TABLE_INLINE_KEY32: u64 = 1 << 42;
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	// ── layouts ─────────────────────────────────────────────────────────
@@ -154,7 +156,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn entry_size(&self, table: Table<'ctx>) -> IntValue<'ctx> {
 		let size = table.entry.size_of().expect("a sized entry");
 		if table.inline {
-			let flag = size.get_type().const_int(TABLE_INLINE, false);
+			let flags = TABLE_INLINE
+				| if matches!(table.key, Repr::Int(int) if int.bits == 32) {
+					TABLE_INLINE_KEY32
+				} else {
+					0
+				};
+			let flag = size.get_type().const_int(flags, false);
 			// the size is far below the flag: xor sets it
 			return size.const_xor(flag);
 		}
@@ -320,6 +328,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						i64.const_int(0x9E3779B97F4A7C15, false),
 						"",
 					)?;
+					if int.bits == 32 {
+						// Multiplication and rotation are bijective: only key zero
+						// has hash zero. Probe slots use middle product bits so
+						// nearby small keys don't share their low-bit patterns.
+						let rotate = self.intrinsic("llvm.fshr", &[i64.into()])?;
+						return Ok(builder
+							.build_call(
+								rotate,
+								&[
+									product.into(),
+									product.into(),
+									i64.const_int(24, false).into(),
+								],
+								"",
+							)?
+							.try_as_basic_value()
+							.basic()
+							.expect("a hash")
+							.into_int_value());
+					}
 					let shifted =
 						builder.build_right_shift(product, i64.const_int(32, false), false, "")?;
 					return Ok(builder.build_xor(product, shifted, "")?);

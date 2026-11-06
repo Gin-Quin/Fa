@@ -1,0 +1,7 @@
+-- Impossible byte capacities stop before arithmetic can wrap.
+-- asynchronous: false
+-- exit: 101
+-- stderr: out of memory
+-- skip-target: native native-freestanding
+let map = GrowingMap<Integer, Integer>.from([], capacity = 4294967296)
+console.log(map.capacity)

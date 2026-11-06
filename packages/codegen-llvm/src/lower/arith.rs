@@ -861,14 +861,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Str if op == ArithOp::Add => {
 				if let View::Template { parts } = self.view(value) {
-					if let Some(&(counter, end, inclusive)) = self.reserved_appends.get(&node)
+					if let Some(&(counter, end, inclusive)) =
+						self.reserved_appends.get(&(self.file, node))
 						&& let Some(part) = self.integer_part(parts)
 					{
 						let integer = self.expr(part)?;
 						if integer.repr == Repr::Never {
 							return Ok(integer);
 						}
-						let inline_capable = self.inline_reserved.contains(&node);
+						let inline_capable = self.inline_reserved.get(&(self.file, node)).copied();
 						self.reserved_integer_append(
 							slot.pointer,
 							integer,
@@ -897,8 +898,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					}
 					_ => right,
 				};
-				if let Some(&(counter, end, inclusive)) = self.reserved_appends.get(&node) {
-					let inline_capable = self.inline_reserved.contains(&node);
+				if let Some(&(counter, end, inclusive)) =
+					self.reserved_appends.get(&(self.file, node))
+				{
+					let inline_capable = self.inline_reserved.get(&(self.file, node)).copied();
 					self.reserved_append(
 						slot.pointer,
 						right,

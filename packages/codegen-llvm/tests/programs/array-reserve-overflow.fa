@@ -1,0 +1,7 @@
+-- Impossible byte capacities stop before arithmetic can wrap.
+-- asynchronous: false
+-- exit: 101
+-- stderr: out of memory
+mutable items = [1]
+items.reserve(Int64.maxValue)
+console.log(items.capacity)

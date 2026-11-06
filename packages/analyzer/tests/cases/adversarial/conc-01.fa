@@ -1,4 +1,4 @@
--- a worker handle can't be copied, only moved
+-- Worker handles retain the same worker when copied.
 -- analysis-target: native
 -- file: Counter.worker.fa
 export type = {
@@ -9,5 +9,5 @@ export type = {
 async function main = () => {
 	mutable counter = Counter { start = 1 }
 	mutable copy = counter
-	console.log(await counter.next()) -- error: MEM002
+	console.log(await counter.next())
 }

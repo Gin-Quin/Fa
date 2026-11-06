@@ -622,9 +622,28 @@ pub struct Analysis {
 	pub interval_values: Interner<Interval>,
 	/// The type arguments of a generic call, typed literal or generic function value (M2).
 	pub instantiations: FxHashMap<NodeId, ListId>,
+	/// Semantic copy conditions of generic bodies, with no runtime ABI cost.
+	pub copy_requirements: FxHashMap<NodeId, Vec<CopyRequirement>>,
+	/// Value facts independent of the visible structural function signature.
+	pub value_origins: FxHashMap<NodeId, std::sync::Arc<crate::provenance::ValueOrigin>>,
+	pub callable_keys: FxHashMap<NodeId, crate::ids::DeclKey>,
+	pub callables: FxHashMap<crate::ids::DeclKey, crate::provenance::CallableSummary>,
+	/// The methods selected by a generic application: structural type ids
+	/// alone cannot distinguish declarations with equal data fields.
+	pub instantiated_methods: FxHashMap<NodeId, Vec<GenericMethod>>,
+	/// Written type declarations bound to generic parameters, in the same
+	/// positions as `instantiations` (also used for an inferred return type).
+	pub instantiation_origins: FxHashMap<NodeId, Vec<(u16, WrittenType)>>,
+	/// The declaration written for an expression, independent of its
+	/// structural data type (ordinary method dispatch and generic inference).
+	pub written_types: FxHashMap<NodeId, WrittenType>,
 	/// Every function declaration and lambda node (both keys for a
 	/// declaration whose value is a lambda).
 	pub functions: FxHashMap<NodeId, FnInfo>,
+	/// Generic type owning a method/associated function, separate from its own binders.
+	pub function_owners: FxHashMap<NodeId, NodeId>,
+	/// Written owner applications at accesses of methods/associated functions.
+	pub method_instantiations: FxHashMap<NodeId, WrittenType>,
 	/// Every call node: its callee and its arguments in parameter order.
 	pub calls: FxHashMap<NodeId, CallInfo>,
 	/// Throwing callbacks given to a non-storing user function: each given
@@ -641,6 +660,9 @@ pub struct Analysis {
 	/// capture (`FnInfo::captures`) when created; the others see the
 	/// captured variables themselves (advanced brief §5.11, D3).
 	pub escapes: rustc_hash::FxHashSet<NodeId>,
+	/// Captures moved into an escaping environment at this expression site
+	/// (lambda/start-do, or the name read materializing a local function).
+	pub moved_captures: FxHashMap<NodeId, Vec<SymbolId>>,
 	/// The `let` and `mutable` locals of blocks and functions whose value
 	/// never outlives the function's frame ([`Analysis::is_non_escaping`]).
 	pub non_escaping: rustc_hash::FxHashSet<SymbolId>,
@@ -666,6 +688,9 @@ pub struct Analysis {
 	/// parameter, a field of one: `holder.task` returned or passed): the
 	/// place gives the value up (a zero, which its drop skips).
 	pub moved_reads: rustc_hash::FxHashSet<NodeId>,
+	/// Reads transferred only when the instantiated value actually owns a
+	/// Task. Ordinary arrays/resources passed as parameters stay borrowed.
+	pub task_moves: FxHashMap<NodeId, TypeId>,
 	/// Every destructuring pattern node (`ObjectPattern`, `ArrayPattern`,
 	/// `TuplePattern`) of a declaration, a `for` or a parameter: what each
 	/// element reads and binds ([`PatternInfo`]).
@@ -1300,6 +1325,19 @@ pub struct ArithInfo {
 	pub root: bool,
 }
 
+/// A generic body's copy, checked after substituting its type parameters.
+/// A Task parameter may transfer at its last use; a borrowed collection
+/// still requires an explicit structural copy.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CopyRequirement {
+	pub subject: TypeId,
+	pub explicit: bool,
+	pub task_transfer: bool,
+	/// This copy is needed only when a moved field crosses a Resource cell.
+	/// The list contains string-literal types naming its ancestor fields.
+	pub resource_gate: Option<(TypeId, ListId)>,
+}
+
 /// What the backends need of a function or a lambda node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FnInfo {
@@ -1338,6 +1376,127 @@ pub struct FnInfo {
 	/// `TypeKind::Param` its signature uses. A call records the types they
 	/// are bound to in `instantiations`, in this order.
 	pub generics: Vec<ParamId>,
+}
+
+/// A method required by one generic parameter, selected from the written
+/// type of that parameter's argument rather than its structural layout.
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct GenericMethod {
+	/// Position in the called function's generic parameter list.
+	pub parameter: u16,
+	/// The method name as required by its constraint.
+	pub name: crate::ids::Sym,
+	/// The declaration implementing it.
+	pub function: crate::ids::DeclKey,
+	/// Arguments of the method's generic owner, including phantom ones.
+	pub arguments: ListId,
+	/// Methods required by the generic owner, selected from its written arguments.
+	pub methods: std::sync::Arc<Vec<GenericMethod>>,
+}
+
+/// The written type supplying methods, independent of structural identity.
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct WrittenType {
+	/// The named type declaration.
+	pub declaration: crate::ids::DeclKey,
+	/// Its instantiated generic arguments, including arguments absent from its layout.
+	pub arguments: ListId,
+	/// Written origins of the arguments, independent of their structural ids.
+	pub origins: std::sync::Arc<Vec<Option<WrittenType>>>,
+	/// Constraint methods needed by the owner of this application.
+	pub methods: std::sync::Arc<Vec<GenericMethod>>,
+}
+
+/// How a function's written return type is recovered at its call sites.
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub enum WrittenReturn {
+	/// A named return type, possibly applied to generic parameters.
+	Named(WrittenType),
+	/// A generic parameter: use the written origin bound to this position.
+	Generic(u16),
+}
+
+impl WrittenType {
+	/// A name without generic arguments.
+	pub fn named(declaration: crate::ids::DeclKey) -> Self {
+		Self {
+			declaration,
+			arguments: ListId::EMPTY,
+			origins: Default::default(),
+			methods: Default::default(),
+		}
+	}
+
+	/// Copies portable identities into a shared type store.
+	pub fn merged(&self, merger: &mut crate::types::merge::Merger<'_>) -> Self {
+		Self {
+			declaration: merger.decl_key(self.declaration),
+			arguments: merger.list(self.arguments),
+			origins: std::sync::Arc::new(
+				self.origins
+					.iter()
+					.map(|origin| origin.as_ref().map(|origin| origin.merged(merger)))
+					.collect(),
+			),
+			methods: std::sync::Arc::new(
+				self.methods
+					.iter()
+					.map(|method| method.merged(merger))
+					.collect(),
+			),
+		}
+	}
+
+	/// Stable identity for interface and object-cache invalidation.
+	pub fn stable_hash(&self, types: &crate::types::TypeStore) -> u128 {
+		let mut hash = types.decl_hash(self.declaration);
+		for &argument in types.list_items(self.arguments) {
+			hash = hash.rotate_left(7) ^ types.stable_hash(argument);
+		}
+		for origin in self.origins.iter() {
+			hash = hash.rotate_left(11)
+				^ origin
+					.as_ref()
+					.map_or(0, |origin| origin.stable_hash(types));
+		}
+		for method in self.methods.iter() {
+			hash = hash.rotate_left(13) ^ method.stable_hash(types);
+		}
+		hash
+	}
+}
+
+impl GenericMethod {
+	/// Copies a selection and its dependencies into a shared type store.
+	pub fn merged(&self, merger: &mut crate::types::merge::Merger<'_>) -> Self {
+		Self {
+			parameter: self.parameter,
+			name: merger.sym(self.name),
+			function: merger.decl_key(self.function),
+			arguments: merger.list(self.arguments),
+			methods: std::sync::Arc::new(
+				self.methods
+					.iter()
+					.map(|method| method.merged(merger))
+					.collect(),
+			),
+		}
+	}
+
+	/// Stable semantic identity, including phantom arguments and selected methods.
+	pub fn stable_hash(&self, types: &crate::types::TypeStore) -> u128 {
+		let mut hash = types.decl_hash(self.function) ^ u128::from(self.parameter);
+		for byte in types.syms.resolve(self.name).bytes() {
+			hash = hash.wrapping_mul(31).wrapping_add(u128::from(byte));
+		}
+		for &argument in types.list_items(self.arguments) {
+			hash = hash.rotate_left(7) ^ types.stable_hash(argument);
+		}
+		for method in self.methods.iter() {
+			hash = hash.rotate_left(13) ^ method.stable_hash(types);
+		}
+		hash
+	}
 }
 
 /// A parameter of a function or lambda.
@@ -1430,10 +1589,20 @@ impl Analysis {
 			intervals: FxHashMap::default(),
 			interval_values: Interner::new(),
 			instantiations: FxHashMap::default(),
+			copy_requirements: FxHashMap::default(),
+			value_origins: FxHashMap::default(),
+			callable_keys: FxHashMap::default(),
+			callables: FxHashMap::default(),
+			instantiated_methods: FxHashMap::default(),
+			instantiation_origins: FxHashMap::default(),
+			written_types: FxHashMap::default(),
 			functions: FxHashMap::default(),
+			function_owners: FxHashMap::default(),
+			method_instantiations: FxHashMap::default(),
 			calls: FxHashMap::default(),
 			callback_types: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
+			moved_captures: FxHashMap::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),
 			requirement_args: FxHashMap::default(),
 			type_decls: FxHashMap::default(),
@@ -1442,6 +1611,7 @@ impl Analysis {
 			json_defaults: FxHashMap::default(),
 			inline_field_orders: FxHashMap::default(),
 			moved_reads: rustc_hash::FxHashSet::default(),
+			task_moves: FxHashMap::default(),
 			patterns: FxHashMap::default(),
 			relations: Vec::new(),
 			relation_fields: FxHashMap::default(),

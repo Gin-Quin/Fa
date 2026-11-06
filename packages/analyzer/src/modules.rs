@@ -637,6 +637,16 @@ pub struct Interface {
 	pub members: FxHashMap<(NodeId, Sym), Exported>,
 	/// The functions of its types, by type declaration.
 	pub type_functions: FxHashMap<NodeId, Vec<TypeFunction>>,
+	/// The complete generic parameter lists of named types, including phantom parameters.
+	pub type_parameters: FxHashMap<NodeId, ListId>,
+	/// Written types of exported values and aliases (methods are not structural).
+	pub written_types: FxHashMap<NodeId, crate::analysis::WrittenType>,
+	/// The written return types of functions, including generic projections.
+	pub written_returns: FxHashMap<NodeId, crate::analysis::WrittenReturn>,
+	/// Written field types, or projections of an owner's generic argument.
+	pub written_fields: FxHashMap<(NodeId, Sym), crate::analysis::WrittenReturn>,
+	/// Types owning method binders; the method's own generic list stays separate.
+	pub function_owners: FxHashMap<NodeId, DeclKey>,
 	/// The types declared inside its types (`Database.OpenError`), by type
 	/// declaration (`method` is always false).
 	pub nested_types: FxHashMap<NodeId, Vec<TypeFunction>>,
@@ -648,6 +658,11 @@ pub struct Interface {
 	pub implicit_writes: FxHashMap<ParamId, Vec<(Vec<Sym>, TypeId)>>,
 	/// Generic parameter order and capabilities of externally callable functions.
 	pub generic_functions: FxHashMap<NodeId, GenericFunction>,
+	/// Inferred semantic copy conditions, independent of runtime capabilities.
+	pub copy_requirements: FxHashMap<NodeId, Vec<crate::analysis::CopyRequirement>>,
+	/// Callable bodies and value origins survive after the provider AST is dropped.
+	pub callables: FxHashMap<DeclKey, crate::provenance::CallableSummary>,
+	pub value_origins: FxHashMap<DeclKey, std::sync::Arc<crate::provenance::ValueOrigin>>,
 	/// Key sets and derived types reached by the exported signatures.
 	pub key_set_params: FxHashMap<ParamId, GenericKeySet>,
 	pub derived_params: FxHashMap<ParamId, crate::analysis::DerivedParam>,
@@ -810,6 +825,52 @@ impl Interface {
 			.map(|(&key, keyed)| (keyed.node, key))
 			.collect();
 		let key_hash = |node: NodeId| by_node.get(&node).map_or(0, |&key| types.decl_hash(key));
+		for (&decl, &parameters) in &self.type_parameters {
+			let hash = types
+				.list_items(parameters)
+				.iter()
+				.fold(0u128, |hash, &ty| {
+					let mut hash = hash.rotate_left(7) ^ types.stable_hash(ty);
+					if let crate::types::TypeKind::Param(param) = types.kind(ty) {
+						let info = types.param(param);
+						hash ^= types.stable_hash(info.constraint).rotate_left(11)
+							^ types.stable_hash(info.default).rotate_left(13)
+							^ u128::from(info.value);
+					}
+					hash
+				});
+			parts.push((100, key_hash(decl), 0, hash));
+		}
+		for (&decl, written) in &self.written_types {
+			parts.push((101, key_hash(decl), 0, written.stable_hash(types)));
+		}
+		for (&decl, written) in &self.written_returns {
+			match written {
+				crate::analysis::WrittenReturn::Named(written) => {
+					parts.push((102, key_hash(decl), 0, written.stable_hash(types)))
+				}
+				crate::analysis::WrittenReturn::Generic(parameter) => {
+					parts.push((103, key_hash(decl), u128::from(*parameter), 0))
+				}
+			}
+		}
+		for (&(decl, name), written) in &self.written_fields {
+			let name = rustc_hash::FxBuildHasher.hash_one(types.syms.resolve(name)) as u128;
+			let origin = match written {
+				crate::analysis::WrittenReturn::Named(written) => written.stable_hash(types),
+				crate::analysis::WrittenReturn::Generic(index) => u128::from(*index),
+			};
+			parts.push((104, key_hash(decl), name, origin));
+		}
+		for (&function, &owner) in &self.function_owners {
+			parts.push((105, key_hash(function), types.decl_hash(owner), 0));
+		}
+		for (&key, summary) in &self.callables {
+			parts.push((107, types.decl_hash(key), 0, summary.stable_hash(types)));
+		}
+		for (&key, value) in &self.value_origins {
+			parts.push((108, types.decl_hash(key), 0, value.stable_hash(types)));
+		}
 		for exported in self.members.values().chain(&self.export) {
 			parts.push((
 				1,
@@ -891,6 +952,24 @@ impl Interface {
 					),
 				};
 				parts.push((8, key_hash(decl), ((index as u128) << 8) | kind, value));
+			}
+		}
+		for (&decl, requirements) in &self.copy_requirements {
+			for requirement in requirements {
+				let gate = requirement.resource_gate.map_or(0, |(receiver, path)| {
+					types
+						.list_items(path)
+						.iter()
+						.fold(types.stable_hash(receiver), |hash, &name| {
+							hash.rotate_left(7) ^ types.stable_hash(name)
+						})
+				});
+				parts.push((
+					106,
+					key_hash(decl),
+					u128::from(requirement.explicit) | u128::from(requirement.task_transfer) << 1,
+					types.stable_hash(requirement.subject) ^ gate.rotate_left(19),
+				));
 			}
 		}
 		for (&param, info) in &self.key_set_params {

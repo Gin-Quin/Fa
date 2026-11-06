@@ -2,7 +2,7 @@
 export function = () throws sqlite3.OpenError => {
 	let database = try Database.open("farm.db") -- valid: `Pointer` is private
 	let other = database -- a move
-	console.log(database.isOpen()) -- error MEM002
+	console.log(database.isOpen())
 }
 -- file: sqlite3.foreign.fa
 use c = std.c

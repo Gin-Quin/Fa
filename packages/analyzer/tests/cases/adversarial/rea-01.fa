@@ -2,7 +2,7 @@
 -- analysis-target: native
 reactive count = 1
 let numbers = [1, 2, 3]
-mutable results = numbers
+mutable results = copy numbers
 for parallel number, index in numbers {
 	results[index] = number * count -- error: REA007
 }

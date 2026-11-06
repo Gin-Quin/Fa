@@ -46,7 +46,7 @@ function shout = (schema: Schema): Schema => when schema is {
 		}
 		Schema.Union { items = shouted }
 	}
-	else => schema
+	else => copy schema
 }
 type Shouted<Input> = TypeFromSchema<@shout(@typeToSchema(Input))>
 type Loud = Shouted<"yes" | "no">

@@ -650,7 +650,7 @@ impl Walker<'_> {
 
 	/// Whether a symbol is declared at the top level of the file (or in a
 	/// block of it), outside every function.
-	fn declared_outside_functions(&self, symbol: SymbolId) -> bool {
+	pub(crate) fn declared_outside_functions(&self, symbol: SymbolId) -> bool {
 		let mut current = Some(self.a.symbols.symbol(symbol).scope);
 		while let Some(scope) = current {
 			let data = self.a.symbols.scope(scope);

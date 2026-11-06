@@ -8,17 +8,17 @@ function close = (handle: Handle) => console.log(handle.descriptor)
 
 export function = () => {
 	mutable handles: Array<Handle> = [Handle { descriptor = 1 }]
-	let first = handles[0]                          -- error: MEM002
-	close(handles[0])                               -- error: MEM002
+	let first = handles[0]
+	close(handles[0])
 	let taken = handles.take(0)
 	mutable holder = Holder { label = "h", handle = Handle { descriptor = 2 } }
 	let moved = holder.handle
 	console.log(holder.label)
-	console.log(holder)                             -- error: MEM002
+	console.log(holder)
 	holder.handle = Handle { descriptor = 3 }
 	let again = holder
 	let connection = Connection { handle = Handle { descriptor = 4 } }
-	let inside = connection.handle                  -- error: MEM002
+	let inside = connection.handle
 	close(taken)
 	close(moved)
 	console.log(again.label)

@@ -234,6 +234,8 @@ pub struct FlowState {
 	/// task, a resource), with the moving node: the local can't be used as
 	/// a whole, nor the field, until the field is assigned again (`MEM002`).
 	pub moved_fields: SmallVec<[(PlaceId, NodeId); 1]>,
+	/// A generic value transferred when its eventual type owns a Task.
+	pub conditional_consumed: SmallVec<[(PlaceId, TypeId, NodeId); 1]>,
 	/// The kept tasks that may still run (their `start` nodes): they
 	/// borrow what they use until they end (`check/tasks.rs`).
 	pub tasks: SmallVec<[NodeId; 1]>,
@@ -263,6 +265,7 @@ impl FlowState {
 			time: 0,
 			consumed: SmallVec::new(),
 			moved_fields: SmallVec::new(),
+			conditional_consumed: SmallVec::new(),
 			tasks: SmallVec::new(),
 			cancelled: SmallVec::new(),
 		}
@@ -441,6 +444,16 @@ impl FlowState {
 			}
 		}
 		joined.tasks = self.tasks.clone();
+		joined.conditional_consumed = self.conditional_consumed.clone();
+		for &entry in &other.conditional_consumed {
+			if !joined
+				.conditional_consumed
+				.iter()
+				.any(|&(place, ty, _)| place == entry.0 && ty == entry.1)
+			{
+				joined.conditional_consumed.push(entry);
+			}
+		}
 		for &task in &other.tasks {
 			if !joined.tasks.contains(&task) {
 				joined.tasks.push(task);

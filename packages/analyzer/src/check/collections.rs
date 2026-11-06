@@ -47,8 +47,10 @@ impl Walker<'_> {
 						continue;
 					};
 					let actual = self.check(key_node, Some(key));
+					self.note_copy_site(key_node);
 					self.sink(key_node, actual, key);
 					let actual = self.check(value_node, Some(value));
+					self.note_copy_site(value_node);
 					self.sink(value_node, actual, value);
 					self.memo(inner, |_| pair);
 					self.memo(item, |_| pair);
@@ -59,6 +61,7 @@ impl Walker<'_> {
 				}
 				_ => {
 					let actual = self.check(item, Some(pair));
+					self.note_copy_site(item);
 					if matches!(self.s.types.kind(actual), TypeKind::Tuple(list) if self.s.types.list_items(list).len() == 2)
 					{
 						self.sink(item, actual, pair);

@@ -1,4 +1,4 @@
--- pending: M2 (constraint methods need their written origin in each instantiation; analyzer-with)
+-- require-split: true
 -- Imported generic functions receive the same hidden values and methods
 -- as local generic functions, from their interface alone.
 -- file: library/repeat.fa

@@ -1,8 +1,118 @@
+## Copy rules in progress (analyzer-rules, 2026-11-06)
+
+- This separate tree contains the same uncommitted written-origin base as
+  analyzer-with plus FN086/non-escaping/copy-rule work. Do not merge its mixed
+  source until the written-origin base is committed and coalesced.
+- User's FINAL policy: Task and composites owning Task remain noncopyable;
+  Task arguments retain their consuming ABI. Plain foreign resources and handles
+  are shared/countable, copied by retaining their cell. Collections (including
+  plain objects owning one) require `copy value` unless a last use moves them.
+  Resource/Sync is a boundary for the structural collection-copy rule.
+- Root owns Copy parser/formatter + JS/native lowering. Their patches are
+  applied here, including `/tmp/fa-copy-context-fix.patch` and the LSP arm.
+  Node::Copy{right}, View::Copy(NodeId); compiletime lowering uses existing COW.
+- TypeStore MOVE_ONLY now Task-only; HAS_SHARED bit11 is separate, with
+  contains_shared_handle query (including Function for counted environments).
+  owns_unique now means Task/compositeTask, not Resource. Worker consumption and
+  stop-consumption hooks removed. Original Task consumption restored, with a
+  new refusal to extract borrowed/captured/module Task in a callee.
+- CopyRequirement summaries infer semantic copy conditions, normalize them to
+  rigid parameter leaves, propagate local calls, and publish/remap/hash a separate
+  Interface map with no runtime ABI. Imported direct calls pass regression.
+  MEM003 means forbidden Task copy; MEM004 means structural collection copy
+  needs explicit syntax. Twenty historical analyzer sites migrated with copy.
+- Last uses are tracked by lexical function ID, not stack length (BodyCx resets
+  function vectors for lambdas). MOVE includes fields and exclusive branches;
+  Resource ancestors are excluded. lower::copies::is_move skips Try/Group.
+- Capture escape propagation now follows aliases and conditional returns.
+  Captures of escaping closures cannot contain Task, even if a local source is
+  at its last use. Collection captures may move owned locals at creation;
+  otherwise use `let owned = copy borrowed; () => ...owned...`.
+  Analysis.moved_captures is keyed by actual environment EXPRESSION site (name
+  read for named functions, lambda/start/watch for those), not declaration.
+  Proofs consumes this metadata in its counted-environment backend work.
+- Initial copy/capture unit regressions: 8/8 green, logs
+  /tmp/fa-analyzer-copy-builtin-first.log; direct/imported cases green in
+  /tmp/fa-analyzer-copy-imports.log and /tmp/fa-analyzer-copy-values.log.
+  Sources changed since these runs; rerun before freezing.
+- TODO before copy lot full: complete forall/function-valued parameter copy
+  applications (direct/imported aliases work but forall parameter bodies remain
+  latent); preserve all key-loop specialization copy conditions; generic field
+  extraction through actual Resource prefixes; reject Resource->consumed Task
+  structural views at calls; Resource shared-cell facts/effects including aliases
+  and conditional generic effects. None of these holes is declared closed.
+- Builtin element copies and Task callback-argument transfer checks are under
+  development (slice/filter/reverse/sort/from/toArray/Pointer). Borrow-only
+  iterators stay valid; mapped fresh Task results stay valid. Root confirmed
+  Task inputs cannot be moved from an element into a consuming callback.
+- Root assigns Task interthread affinity to proofs; do not duplicate its query
+  through real Sync/Resource/Pointer/Ref payloads or Worker/submit checks.
+- finding42/interpreter continuations now belongs to proofs, NOT this tree.
+  with, factories, TypeFromSchema/named Schema, deferred key-loop signatures,
+  written-origin joins/destructors, remaining rules and pass fusion still open.
+
 # Compiler completion in progress (2026-11-06)
 
 Integration: branch `compiler`, worktree `.claude/worktrees/lead`. The main checkout
 is shared and dirty: preserve it. The user requested completion of all remaining
 compiler work and explicitly authorized parallel agents.
+
+## Written methods (2026-11-06, active in analyzer-with)
+
+- Branch `codex/analyzer-with` is now based on validated `ef777e4`, with
+  uncommitted method-origin work only. Do not use its target from another worktree.
+- `WrittenType` separates the named owner, its type arguments, their nested
+  written origins (shared by Arc), and required methods from structural TypeId.
+  `GenericMethod` carries parameter position/name, function DeclKey, owner args
+  and nested method selections. Bindings keep these until declaration_order.
+- Analyzer publishes sparse origins of values, returns and fields; generic
+  projections preserve Holder<Person> vs Holder<Greeting>. Imported interfaces
+  carry/remap/hash these facts. `function_owners` keeps type owner binders
+  separate from the method's own binders; `method_instantiations` records the
+  written receiver application. Selected methods contribute declaration uses.
+- JS passes selected methods instead of choosing the first equal TypeId.
+  Signature-only forall-value dispatch was shared by the lead in
+  `/tmp/fa-generic-value-signature-abi.patch` and applied. Type-owner hidden
+  parameters, including phantom values, are passed/bound at method calls.
+  copy_function no longer selects an empty alias's field order and drops data.
+- Native instances/requests/function-value tables include method selections;
+  nested selections and exact type bindings survive closures and callbacks.
+  Cache version is split-6 (reconcile with lead/platform/proofs on merge).
+  The identical metadata engineer patch `/tmp/fa-generic-concrete-fields.patch`
+  is applied here; do not duplicate it on integration. Mixed local/global
+  shape copies compare field names textually. Chained `x.value.describe`
+  dispatches from the prefix type, not just the root.
+- Bun and Node E2E and all three LLVM targets pass for explicit aliases,
+  imports, returns, exported values, forall values, Holder/Speaker and phantom
+  owners. The multifile fixture requires per-unit compilation: fallback to a
+  merged module is a failure. Logs: `/tmp/fa-method-origin-container-*`.
+- Built-in containers retain nested written origins (annotations, homogeneous
+  array literals, tuples, indices, loops, values/get/filter/reverse). Distinct
+  origins at a join remain a language question owned by the lead; do not infer
+  an arbitrary branch's methods from equal fields.
+- Nominal objects now retain/substitute/infer phantom arguments, with HAS_PARAM
+  through wrappers. Their phantom values do not confer ownership flags. CStruct
+  substitution preserves field order; private access uses the declaration key
+  across instances. Unit regression for phantom objects and incremental alias
+  edits pass. Incomplete written applications cannot form invalid Bindings.
+- Async selected methods retain their sync/async pair and bind owner capabilities
+  in both ABIs. This new case, the complete analyzer, the historical structural
+  exclusions (removed), and workspace clippy are being retested after the ff to
+  `8c92474` in `/tmp/fa-method-origin-integrated-*`.
+- Before committing: merge the validated metadata branch, remove its now-covered
+  generic-hidden-arguments pending, and run strict full workspace LLVM, clippy,
+  JS runtime. Then freeze this lot and continue in a separate worktree.
+- Generic destroy selection/invocation remains separate: scope drops and storage
+  drops need the same static owner capabilities, including through composites.
+  Preserve the lead's separate storage_drop_function and detached-task behavior.
+  No runtime native dictionary is introduced by this lot.
+- The generic expression-body key-loop inference hole remains assigned here:
+  `/tmp/fa-key-error-expression.fa`, mirrored by proofs' pending
+  generic-key-loop-inferred-errors.fa. Concrete deferred loops currently throw
+  away inferred summaries; exact checks/callers must run after specialization.
+- Afterwards: with/factories/remaining documented rules and TypeFromSchema,
+  analyzer pass fusion with 1000-file measurements, and stackless interpreter
+  continuations for finding 42. Do not document a new metaprogram recursion cap.
 
 ## Integrated
 

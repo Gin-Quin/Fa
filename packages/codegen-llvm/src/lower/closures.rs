@@ -133,8 +133,36 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.collect();
 		entries.sort_by_key(|(param, _)| *param);
 		let reprs: Vec<Repr> = entries.iter().map(|(_, repr)| *repr).collect();
-		let values = self.sorted_value_bindings();
-		if let Some(key) = self.instances.get(&(node, reprs.clone(), values.clone())) {
+		let mut values: Vec<_> = entries
+			.iter()
+			.map(|(param, _)| {
+				self.type_bindings
+					.borrow()
+					.get(param)
+					.copied()
+					.unwrap_or(TypeId::UNKNOWN)
+			})
+			.collect();
+		values.extend(self.sorted_value_bindings());
+		let mut methods: Vec<_> = self
+			.method_bindings
+			.borrow()
+			.iter()
+			.filter_map(|(param, method)| {
+				entries
+					.iter()
+					.position(|(bound, _)| bound == param)
+					.map(|index| fa_analyzer::analysis::GenericMethod {
+						parameter: index as u16,
+						..method.clone()
+					})
+			})
+			.collect();
+		methods.sort_by_key(|method| (method.parameter, method.name));
+		if let Some(key) =
+			self.instances
+				.get(&(node, reprs.clone(), values.clone(), methods.clone()))
+		{
 			return Ok(*key);
 		}
 		let saved = self.bindings.replace(bindings);
@@ -145,7 +173,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// a key that is no node of the tree
 		let key = NodeId::new(self.tree.nodes.len() + self.instances.len() + 1);
 		self.functions.insert(key, function);
-		self.instances.insert((node, reprs, values), key);
+		self.instances.insert((node, reprs, values, methods), key);
 		self.pending_instances.push((self.file, key));
 		Ok(key)
 	}

@@ -5,6 +5,40 @@ use crate::nodes::Node;
 use crate::parsing::parse_single_statement::parse_single_statement;
 
 #[test]
+fn explicit_copy_binds_after_access_and_before_arithmetic() {
+	assert_statement("copy values[0]", "(copy values[0])");
+	assert_statement("copy source.items + other", "((copy source.items) + other)");
+	assert_statement("copy (left ?? right)", "(copy ((left ?? right)))");
+	assert_statement("copy copy value", "(copy (copy value))");
+}
+
+#[test]
+fn copy_is_still_a_name_outside_the_spaced_prefix() {
+	assert_statement("let copy = values", "let copy = values");
+	assert_statement("copy[0]", "copy[0]");
+	assert_statement("copy(value)", "copy(value)");
+	assert_statement("source.copy(value)", "source.copy(value)");
+	assert_statement("copy - 2", "(copy - 2)");
+}
+
+#[test]
+fn copy_remains_a_loop_binding_and_a_condition_name() {
+	for source in [
+		"let copy = [1]\nfor copy in copy { console.log(copy) }",
+		"let copy = true\nif copy { console.log(copy) }",
+		"let copy = false\nwhile copy { console.log(copy) }",
+		"let copy = 1\nwhen copy is { 1 => console.log(copy), else => console.log(0) }",
+	] {
+		let tree = crate::parse(source);
+		assert!(
+			tree.diagnostics.is_empty(),
+			"{source}: {:?}",
+			tree.diagnostics
+		);
+	}
+}
+
+#[test]
 fn not_binds_tighter_than_or() {
 	assert_statement("not a or b", "((not a) or b)");
 }

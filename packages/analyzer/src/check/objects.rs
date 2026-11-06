@@ -10,7 +10,7 @@ use crate::builtins;
 use crate::check::{PlaceInfo, Walker};
 use crate::diagnostics::Code;
 use crate::diagnostics::codes::analyzer::AN001;
-use crate::diagnostics::codes::types::{FN042, TY021, TY053, TY054, TY055, TY056, TY084};
+use crate::diagnostics::codes::types::{FN042, FN086, TY021, TY053, TY054, TY055, TY056, TY084};
 use crate::diagnostics::codes::values::{
 	E_DECL_4, E_OBJ_1, E_OBJ_2, E_OBJ_3, E_OBJ_4, E_OBJ_5, E_OBJ_10, E_OBJ_11, E_OBJ_13, E_OPT_1,
 	E_TYPE_1,
@@ -442,6 +442,7 @@ impl Walker<'_> {
 				.annotation
 				.map(|annotation| self.check_type_expr(annotation));
 			let actual = self.check(field.value, declared);
+			self.note_copy_site(field.value);
 			if let Some(declared) = declared {
 				self.sink(field.value, actual, declared);
 			}
@@ -540,8 +541,9 @@ impl Walker<'_> {
 			if let Some(expected) = expected {
 				self.sink(field.value, actual, expected);
 			}
-			// a task or a worker's handle moves into the field
-			self.move_handles(&[field.value]);
+			// Stored fields are values; a Task moves, and a structural copy
+			// of a collection requires `copy` unless this is its last use.
+			self.note_copy_site(field.value);
 		}
 		let result = member.unwrap_or(object);
 		self.memo(n, |w| {
@@ -724,7 +726,12 @@ impl Walker<'_> {
 			TypeKind::Object(shape) => w.s.types.shape(shape).nominal,
 			_ => None,
 		};
-		nominal_of(self, own).is_some() && nominal_of(self, own) == nominal_of(self, ty)
+		match (nominal_of(self, own), nominal_of(self, ty)) {
+			(Some(own), Some(other)) => {
+				self.s.types.nominal(own).key == self.s.types.nominal(other).key
+			}
+			_ => false,
+		}
 	}
 
 	/// `.red` where an enumeration or a named union is expected: its member
@@ -802,7 +809,13 @@ impl Walker<'_> {
 			if self.is_fields(ty) {
 				return self.memo(n, |w| w.fields_member_value(n, ty, members));
 			}
-			return self.memo(n, |w| w.type_member_chain(target, ty, members));
+			let origin = self.written_origin(target);
+			return self.memo(n, |w| {
+				let saved = std::mem::replace(&mut w.receiver_origin, origin);
+				let result = w.type_member_chain(target, ty, members);
+				w.receiver_origin = saved;
+				result
+			});
 		}
 		self.access_roots.insert(self.strip_groups(target));
 		let receiver = self.check(target, None);
@@ -818,12 +831,26 @@ impl Walker<'_> {
 			let mut place = if chained { None } else { w.place_of(target) };
 			// the methods of the type written for the receiver (structural.rs)
 			let mut written = w.written_decl(target);
+			let mut origin = w.written_origin(target);
 			for member in members.iter() {
 				w.receiver_decl = written.take();
+				let owner_origin = origin.clone();
+				let saved_origin = std::mem::replace(&mut w.receiver_origin, origin.take());
 				let found = w.member_of(member, current);
+				let selected_owner = w.receiver_origin.clone();
 				w.receiver_decl = None;
+				w.receiver_origin = saved_origin;
 				match found {
 					Some((ty, MemberKind::Field(_))) => {
+						if let Some(owner) = owner_origin
+							&& let View::Name(name) = w.view(member)
+						{
+							let name = w.s.types.syms.intern(w.tree.name(name));
+							origin = w.written_field_origin(owner, name);
+							if let Some(origin) = &origin {
+								w.a.written_types.insert(member, origin.clone());
+							}
+						}
 						place = place.and_then(|place| w.member_step(place, member));
 						current = match place {
 							Some(place) => w.narrowed_field(member, place, ty),
@@ -831,11 +858,20 @@ impl Walker<'_> {
 						};
 					}
 					Some((ty, _)) => {
+						if let Some(owner) = selected_owner {
+							w.a.method_instantiations.insert(member, owner);
+						}
 						place = None;
 						current = ty;
 					}
 					None => return TypeId::UNKNOWN,
 				}
+				if origin.is_none() {
+					origin = w.written_origin(member);
+				}
+			}
+			if let Some(origin) = origin {
+				w.a.written_types.insert(n, origin);
 			}
 			if chained {
 				w.s.types.optional(current)
@@ -846,6 +882,7 @@ impl Walker<'_> {
 		self.revalidate_fields(target, members);
 		// a field moved out of its local (foreign.rs)
 		self.check_moved_fields(n, target, false);
+		self.check_conditional_task_read(n);
 		ty
 	}
 
@@ -1074,11 +1111,59 @@ impl Walker<'_> {
 		let text = self.tree.name(name).to_string();
 		// a recursive reference reads like the type it stands for
 		let receiver = self.s.types.unfold(receiver);
-		let found = self.find_member(member, receiver, &text);
+		let mut found = self.find_member(member, receiver, &text);
+		if let Some((ty, kind)) = found {
+			let bound = match self.a.resolution(member) {
+				Resolution::Local(function) if matches!(kind, MemberKind::Function) => {
+					self.is_method(function)
+				}
+				Resolution::Builtin(builtin) if matches!(kind, MemberKind::Builtin) => {
+					builtins::get(builtin).path.contains('#')
+						&& matches!(self.s.types.kind(ty), TypeKind::Function(_))
+				}
+				Resolution::Field(_, _) => {
+					matches!(kind, MemberKind::Field(flags) if flags.contains(FieldFlags::METHOD))
+				}
+				_ => false,
+			};
+			if bound && !self.method_is_used_directly(member) {
+				let diagnostic = self.diagnostic(&FN086, member, "a method through an instance must be called: write a lambda that calls it instead of keeping a bound method");
+				self.report(diagnostic);
+				found = Some((TypeId::UNKNOWN, kind));
+			}
+		}
 		if let Some((ty, _)) = found {
 			self.set_type(member, ty);
 		}
 		found
+	}
+
+	fn method_is_used_directly(&self, member: NodeId) -> bool {
+		let Some(mut access) = self.parent(member) else {
+			return false;
+		};
+		if !matches!(self.view(access), View::Access { members, .. } | View::OptionalAccess { members, .. } if members.last() == Some(member))
+		{
+			return false;
+		}
+		while let Some(parent) = self.parent(access) {
+			match self.view(parent) {
+				View::Group(inner) if inner == access => access = parent,
+				View::Assignment { target, .. } | View::CompoundAssignment { target, .. }
+					if target == access =>
+				{
+					return true;
+				}
+				View::Call { callee, .. } if callee == access => {
+					if !syntax::is_angle_application(&self.tree, parent) {
+						return true;
+					}
+					access = parent;
+				}
+				_ => return false,
+			}
+		}
+		false
 	}
 
 	fn find_member(
@@ -1149,7 +1234,12 @@ impl Walker<'_> {
 			self.set_resolution(member, Resolution::Local(function));
 			let function_ty = self.symbol_type(function, member);
 			let bound = self.bound_method_type(function, function_ty);
-			let bound = match self.instance_bindings.get(&receiver).cloned() {
+			let bindings = self
+				.receiver_origin
+				.as_ref()
+				.and_then(|origin| self.written_bindings(origin))
+				.or_else(|| self.instance_bindings.get(&receiver).cloned());
+			let bound = match bindings {
 				Some(bindings) => self.s.types.substitute(bound, &bindings),
 				None => bound,
 			};

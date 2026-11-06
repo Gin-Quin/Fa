@@ -52,7 +52,22 @@ impl Walker<'_> {
 		self.parent(NodeId::new(0));
 		let parents = self.parents.take().unwrap_or_default();
 		let mut candidates: FxHashSet<SymbolId> = FxHashSet::default();
-		let mut escaped: FxHashSet<SymbolId> = FxHashSet::default();
+		// Captures outlive the local use that appears inside their body. An
+		// operator or call there may only read its operand, while the closure
+		// still keeps that operand beyond the original function's frame.
+		let mut escaped: FxHashSet<SymbolId> = self
+			.a
+			.functions
+			.values()
+			.flat_map(|function| function.captures.iter())
+			.chain(
+				self.a
+					.starts
+					.values()
+					.flat_map(|start| start.captures.iter()),
+			)
+			.copied()
+			.collect();
 		// `into[t]`: the locals whose values went into `t`
 		let mut into: FxHashMap<SymbolId, Vec<SymbolId>> = FxHashMap::default();
 		for index in 0..count {

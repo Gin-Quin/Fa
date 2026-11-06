@@ -185,6 +185,32 @@ impl Generator<'_> {
 			pending.push((declaration, Mode::Blocking));
 			pending.push((declaration, Mode::Async { coop: true }));
 		}
+		// A method dictionary is a function value too, even though no name
+		// node in the source denotes the function selected for its parameter.
+		let mut methods: Vec<_> = self
+			.analysis
+			.instantiated_methods
+			.values()
+			.flatten()
+			.collect();
+		methods.extend(
+			self.analysis
+				.method_instantiations
+				.values()
+				.flat_map(|owner| owner.methods.iter()),
+		);
+		while let Some(method) = methods.pop() {
+			methods.extend(method.methods.iter());
+			if let Some((module, keyed)) = self.session.keyed(method.function)
+				&& module == self.session.module_id(self.file)
+				&& self.suspends(keyed.node)
+			{
+				pending.push((keyed.node, Mode::Async { coop: true }));
+				if self.blocking_possible(keyed.node) {
+					pending.push((keyed.node, Mode::Blocking));
+				}
+			}
+		}
 		loop {
 			while let Some((node, mode)) = walks.pop() {
 				self.plan_walk(node, mode, &mut pending);

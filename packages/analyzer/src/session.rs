@@ -1133,6 +1133,47 @@ fn merge_interface(
 				(decl, functions)
 			})
 			.collect(),
+		type_parameters: interface
+			.type_parameters
+			.iter()
+			.map(|(&decl, &params)| (decl, merger.list(params)))
+			.collect(),
+		written_types: interface
+			.written_types
+			.iter()
+			.map(|(&decl, written)| (decl, written.merged(merger)))
+			.collect(),
+		written_returns: interface
+			.written_returns
+			.iter()
+			.map(|(&decl, origin)| {
+				let origin = match origin {
+					crate::analysis::WrittenReturn::Named(written) => {
+						crate::analysis::WrittenReturn::Named(written.merged(merger))
+					}
+					other => other.clone(),
+				};
+				(decl, origin)
+			})
+			.collect(),
+		written_fields: interface
+			.written_fields
+			.iter()
+			.map(|(&(decl, name), origin)| {
+				let origin = match origin {
+					crate::analysis::WrittenReturn::Named(written) => {
+						crate::analysis::WrittenReturn::Named(written.merged(merger))
+					}
+					other => other.clone(),
+				};
+				((decl, merger.sym(name)), origin)
+			})
+			.collect(),
+		function_owners: interface
+			.function_owners
+			.iter()
+			.map(|(&function, &owner)| (function, merger.decl_key(owner)))
+			.collect(),
 		nested_types: interface
 			.nested_types
 			.iter()
@@ -1208,6 +1249,35 @@ fn merge_interface(
 					},
 				)
 			})
+			.collect(),
+		copy_requirements: interface
+			.copy_requirements
+			.iter()
+			.map(|(&decl, requirements)| {
+				(
+					decl,
+					requirements
+						.iter()
+						.map(|requirement| crate::analysis::CopyRequirement {
+							subject: merger.ty(requirement.subject),
+							resource_gate: requirement
+								.resource_gate
+								.map(|(receiver, path)| (merger.ty(receiver), merger.list(path))),
+							..*requirement
+						})
+						.collect(),
+				)
+			})
+			.collect(),
+		callables: interface
+			.callables
+			.iter()
+			.map(|(&key, summary)| (merger.decl_key(key), summary.merged(merger)))
+			.collect(),
+		value_origins: interface
+			.value_origins
+			.iter()
+			.map(|(&key, value)| (merger.decl_key(key), value.merged(merger)))
 			.collect(),
 		key_set_params: interface
 			.key_set_params

@@ -26,7 +26,8 @@ async function main = () => {
 	-- Submit the tasks to the pool
 	mutable pending: Array<Task<Array<Integer>> throws WorkerTimeout> = []
 	for data in inputs {
-		pending.push(await workers.submit((worker) => await worker.process(data)))
+		let ownedData = copy data
+		pending.push(await workers.submit((worker) => await worker.process(ownedData)))
 	}
 
 	-- Wait for all the tasks to complete

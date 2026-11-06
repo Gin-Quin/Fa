@@ -655,6 +655,9 @@ impl Walker<'_> {
 		self.finish_function_async(&cx, node, None, Mode::Started);
 		if detached {
 			// it outlives the statement: it copies what it captures (A12)
+			for &symbol in &captures {
+				self.note_use(n, symbol);
+			}
 			self.escape_closure(node, n);
 			if throws != TypeId::NEVER {
 				self.report_detached_throws(n, throws);
@@ -701,6 +704,14 @@ impl Walker<'_> {
 			self.note_copy_site(*value);
 		}
 		let mode = self.tasks.modes.get(&n).copied().unwrap_or(Mode::Blocking);
+		if self
+			.builtin_path(n, callee)
+			.is_some_and(|path| path.ends_with("#reduce"))
+			&& let Some(initial) = self.a.calls.get(&n).and_then(|call| call.arguments.get(1))
+			&& let Argument::Given(initial) = *initial
+		{
+			self.note_copy_site(initial);
+		}
 		let target = self.call_target(n, callee);
 		// `task.cancel()` (A11)
 		if let View::Access {
@@ -717,10 +728,32 @@ impl Walker<'_> {
 		// a task or a worker's handle given to a function moves into it
 		// (concurrency.md: they can't be copied; the callee owns them)
 		if let Some(CallInfo {
-			callee: crate::analysis::Callee::Function(_) | crate::analysis::Callee::Value,
+			callee: kind @ (crate::analysis::Callee::Function(_) | crate::analysis::Callee::Value),
 			arguments,
 		}) = self.a.calls.get(&n).cloned()
 		{
+			let borrowed_self = match kind {
+				Callee::Function(function) => self
+					.a
+					.function(function)
+					.and_then(|info| {
+						(info.params.len() == arguments.len()).then(|| {
+							info.params.iter().position(|param| {
+								self.a.symbols.symbol(param.symbol).kind
+									== SymbolKind::SelfParameter
+							})
+						})
+					})
+					.flatten(),
+				_ => None,
+			};
+			for argument in &arguments {
+				if let Argument::Variadic(values) = argument {
+					for &value in values {
+						self.note_copy_site(value);
+					}
+				}
+			}
 			// (the receiver of a method, `worker.squares(…)`, is not given)
 			let receiver = match self.view(self.strip_groups(callee)) {
 				View::Access { target, .. } => Some(self.strip_groups(target)),
@@ -728,8 +761,12 @@ impl Walker<'_> {
 			};
 			let given: Vec<NodeId> = arguments
 				.iter()
-				.filter_map(|argument| match argument {
-					Argument::Given(value) if Some(self.strip_groups(*value)) != receiver => {
+				.enumerate()
+				.filter_map(|(index, argument)| match argument {
+					Argument::Given(value)
+						if borrowed_self != Some(index)
+							&& Some(self.strip_groups(*value)) != receiver =>
+					{
 						Some(*value)
 					}
 					_ => None,

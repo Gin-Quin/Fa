@@ -444,7 +444,8 @@ impl Walker<'_> {
 			}
 		}
 		self.lambda_entry_writes = entry_writes;
-		// a captured task or worker's handle moves into the closure
+		// Captures are borrowed by a temporary callback, copied by an
+		// escaping closure. A Task cannot satisfy that capture-copy.
 		let captured: Vec<SymbolId> = self
 			.a
 			.functions
@@ -452,18 +453,7 @@ impl Walker<'_> {
 			.map(|info| info.captures.clone())
 			.unwrap_or_default();
 		for symbol in captured {
-			let symbol_type = self.a.symbols.symbol(symbol).ty;
-			if self.is_moved_handle(symbol_type)
-				&& self.body.flow.reachable
-				&& !self
-					.body
-					.flow
-					.consumed
-					.iter()
-					.any(|&(other, _)| other == symbol)
-			{
-				self.body.flow.consumed.push((symbol, n));
-			}
+			self.note_use(n, symbol);
 		}
 		ty
 	}
@@ -661,6 +651,7 @@ impl Walker<'_> {
 		for (default, expected, quiet) in defaults {
 			self.quiet += u32::from(quiet);
 			let actual = self.check(default, expected);
+			self.note_copy_site(default);
 			if let Some(expected) = expected {
 				self.sink(default, actual, expected);
 			}
@@ -1001,6 +992,22 @@ impl Walker<'_> {
 			ty
 		});
 		let symbol = self.a.symbols.symbol_of_decl(node)?;
+		if let Some((_, declaration)) = owner
+			&& let Some(origin) = self.node_key(declaration)
+		{
+			let mut written = crate::analysis::WrittenType::named(origin);
+			let params = self
+				.generic_params
+				.get(&declaration)
+				.cloned()
+				.unwrap_or_default();
+			let types: Vec<_> = params
+				.into_iter()
+				.map(|param| self.s.types.intern(TypeKind::Param(param)))
+				.collect();
+			written.arguments = self.s.types.list(&types);
+			self.written_type_keys.insert(symbol, written);
+		}
 		(owner.is_some() && first).then_some((
 			FnParam {
 				node,

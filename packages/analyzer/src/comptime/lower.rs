@@ -631,6 +631,9 @@ impl<'a> Lowerer<'a> {
 				},
 			},
 			View::Group(inner) => self.expr(inner),
+			// Every interpreter value is already independent: reads clone its
+			// Arc, and writes detach the changed object/collection path.
+			View::Copy(inner) => self.expr(inner),
 			View::EmptyGroup => Expr::none(),
 			View::Array { items } => self.array(n, items),
 			View::Tuple { items } => {

@@ -1102,36 +1102,6 @@ impl Walker<'_> {
 		worker
 	}
 
-	/// `let other = worker`: the handle moves, `worker` can't be used
-	/// afterwards (`MEM002`); a socket of `std.net` too.
-	pub(super) fn move_worker_handle(&mut self, value: NodeId, at: NodeId) {
-		if !self.body.flow.reachable {
-			return;
-		}
-		let Some(symbol) = self.read_local(value) else {
-			return;
-		};
-		let ty = self.a.symbols.symbol(symbol).ty;
-		if matches!(
-			self.s.types.kind(ty),
-			TypeKind::Sync(
-				SyncKind::Worker
-					| SyncKind::TcpListener
-					| SyncKind::TcpStream
-					| SyncKind::WorkerPool,
-				_
-			)
-		) && !self
-			.body
-			.flow
-			.consumed
-			.iter()
-			.any(|&(other, _)| other == symbol)
-		{
-			self.body.flow.consumed.push((symbol, at));
-		}
-	}
-
 	/// The work given to `pool.submit(work)` runs on a worker's thread (its
 	/// calls of the worker do, natively the whole function): the rules of
 	/// worker code apply to it (`CONC008`, concurrency.md "Workers"). A
@@ -1144,6 +1114,8 @@ impl Walker<'_> {
 	/// so that the functions it calls are followed into every file, as for
 	/// the methods of `*.worker.fa` files.
 	pub(super) fn check_submitted_work(&mut self, work: NodeId) {
+		self.defer_thread_value(work, work, "the submitted work");
+		self.defer_thread_result(work, work, "the submitted work's result");
 		let work = self.strip_groups(work);
 		let body = match self.view(work) {
 			View::Lambda { .. } => work,

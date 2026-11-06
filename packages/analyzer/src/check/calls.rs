@@ -497,8 +497,6 @@ impl Walker<'_> {
 		};
 		self.apply_call_effects(n, callee, sig.effects);
 		self.call_providers.clear();
-		// `subscription.stop()` consumes it (reactivity.rs)
-		self.note_stop_call(n, callee);
 		ty
 	}
 
@@ -964,6 +962,7 @@ impl Walker<'_> {
 			Some(value) => {
 				let actual = self.check(value, Some(data));
 				self.sink(value, actual, data);
+				self.note_copy_site(value);
 			}
 			None => {
 				for argument in arguments.iter() {

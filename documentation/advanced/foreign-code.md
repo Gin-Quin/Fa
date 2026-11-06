@@ -11,7 +11,7 @@ A foreign file ends with `.foreign.fa`, and is named by the part before it: `Dat
 Only foreign files can:
 
 - declare C functions with [`@extern`](#declaring-c-functions), and call them;
-- use [`Pointer(T)`](#pointers) and [`CString`](#c-types);
+- use [`Pointer<T>`](#pointers) and [`CString`](#c-types);
 - declare a [`destroy`](#releasing-c-resources) function in a type.
 
 Other files can't use a value whose type contains `Pointer` or `CString` in its public fields, so the unchecked part of a program can't leak out of its foreign files. Keep them small: the bindings of the library, and the safe interface built on them.
@@ -29,20 +29,20 @@ export namespace = {
 
 	static ok = 0
 
-	function open: (path: CString, database: Pointer(Pointer(Sqlite3)?)) => c.Int mutates database = @extern("sqlite3_open")
-	function close: (database: Pointer(Sqlite3)) => c.Int = @extern("sqlite3_close")
+	function open: (path: CString, database: Pointer<Pointer<Sqlite3>?>) => c.Int mutates database = @extern("sqlite3_open")
+	function close: (database: Pointer<Sqlite3>) => c.Int = @extern("sqlite3_close")
 }
 ```
 
 ```fa
 -- Database.foreign.fa
 export type = {
-	#handle: Pointer(sqlite3.Sqlite3)
+	#handle: Pointer<sqlite3.Sqlite3>
 
 	type OpenError = Errors { Failed = { code: Integer } }
 
 	function open = (path: String): Self throws Self.OpenError => {
-		mutable handle: Pointer(sqlite3.Sqlite3)? = none
+		mutable handle: Pointer<sqlite3.Sqlite3>? = none
 		let code = sqlite3.open(path, handle) -- `path` is passed as a C string, `handle` by its address
 		if code != sqlite3.ok or handle is none {
 			throw Self.OpenError.Failed { code }
@@ -75,13 +75,13 @@ export function = () throws Database.OpenError => {
 | `float`, `double` | `Float32`, `Float64` |
 | `bool` | `Boolean` |
 | `char`, `int`, `long`, `size_t` and the other types whose size depends on the platform | `c.Char`, `c.Int`, `c.Long`, `c.SizeT`... from `std.c`, sized for the target |
-| `T *` | `Pointer(T)?`, where `none` is `NULL` |
-| `T *` that is never `NULL` (`_Nonnull`) | `Pointer(T)` |
-| `void *` | `Pointer(Void)?` |
+| `T *` | `Pointer<T>?`, where `none` is `NULL` |
+| `T *` that is never `NULL` (`_Nonnull`) | `Pointer<T>` |
+| `void *` | `Pointer<Void>?` |
 | `const char *` (a string) | `CString` |
 | `struct` | `CStruct { ... }` |
 | an opaque `struct`, only used through pointers | `CStruct { }` |
-| `T field[N]` in a `struct` | `CArray(T, N)` |
+| `T field[N]` in a `struct` | `CArray<T, N>` |
 | `enum`, integer `#define` | `static` integer values |
 | function pointer | a function type (see [callbacks](#callbacks)) |
 
@@ -95,11 +95,11 @@ The types of `std.c`, `CStruct` and `CArray` can be used in every file. `Pointer
 
 ```fa
 type Vertex = CStruct {
-	position: CArray(Float32, 3)
-	color: CArray(UInt8, 4)
+	position: CArray<Float32, 3>
+	color: CArray<UInt8, 4>
 }
 
-mutable vertices: Array(Vertex) = []
+mutable vertices: Array<Vertex> = []
 ```
 
 - A `CStruct` type is nominal: two `CStruct` types with the same fields are different types, like two C `struct`s.
@@ -108,7 +108,7 @@ mutable vertices: Array(Vertex) = []
 
 ## Pointers
 
-`Pointer(T)` designates a `T` in memory that Fa doesn't manage. It is never `NULL`; a pointer that can be `NULL` is a `Pointer(T)?`, with the same size.
+`Pointer<T>` designates a `T` in memory that Fa doesn't manage. It is never `NULL`; a pointer that can be `NULL` is a `Pointer<T>?`, with the same size.
 
 | Operation | Meaning |
 | --- | --- |
@@ -116,7 +116,7 @@ mutable vertices: Array(Vertex) = []
 | `pointer.read()` | copies the `T` it designates |
 | `pointer.write(value)` | writes a `T` |
 | `pointer.offset(count)` | the pointer to the `count`-th `T` after it |
-| `pointer.toArray(count)` | copies `count` elements into a new `Array(T)` |
+| `pointer.toArray(count)` | copies `count` elements into a new `Array<T>` |
 | `cString.toString()` | copies a C string into a `String` |
 | `Pointer.allocate(value)` | moves `value` into a new block of memory, and returns a pointer to it |
 | `pointer.free()` | destroys the value of a block made by `Pointer.allocate`, and frees it |
@@ -129,10 +129,10 @@ When a C function expects a pointer, Fa values are passed without conversion, fo
 
 | The parameter expects | The argument | What C receives |
 | --- | --- | --- |
-| `Pointer(T)` | an `Array(T)` | a pointer to its first element (pass the length separately, as C expects) |
-| `Pointer(T)` | a `mutable` value of type `T` | its address; the parameter must be declared with `mutates` |
-| `Pointer(T)` | any value of type `T`, for a parameter without `mutates` | its address, read-only |
-| `Pointer(Void)` | any argument that a `Pointer(T)` parameter accepts | its address, as C converts any pointer to `void *` |
+| `Pointer<T>` | an `Array<T>` | a pointer to its first element (pass the length separately, as C expects) |
+| `Pointer<T>` | a `mutable` value of type `T` | its address; the parameter must be declared with `mutates` |
+| `Pointer<T>` | any value of type `T`, for a parameter without `mutates` | its address, read-only |
+| `Pointer<Void>` | any argument that a `Pointer<T>` parameter accepts | its address, as C converts any pointer to `void *` |
 | `CString` | a `String` | a copy that ends with a zero byte; a string literal is passed as is, since literals are stored with that byte |
 
 A pointer made from a Fa value is valid until the call returns: C must not keep it. Memory that C keeps after a call must be allocated by C, or with `Pointer.allocate`.
@@ -142,7 +142,7 @@ A pointer made from a Fa value is valid until the call returns: C must not keep 
 A C function is declared with its function type and `@extern`, which names the C symbol:
 
 ```fa
-function close: (database: Pointer(Sqlite3)) => c.Int = @extern("sqlite3_close")
+function close: (database: Pointer<Sqlite3>) => c.Int = @extern("sqlite3_close")
 ```
 
 - A parameter that C writes through is declared with `mutates`, like in any [function type](/functions/defining-functions#function-types). The compiler trusts these declarations.
@@ -151,10 +151,10 @@ function close: (database: Pointer(Sqlite3)) => c.Int = @extern("sqlite3_close")
 
 ### Callbacks
 
-A function-typed parameter of a C function is a C function pointer. The argument must be a function known at compile time, that captures nothing, with C types. It can't throw: C can't propagate an error. Pass the data the callback needs through a `Pointer(Void)?` parameter, as C libraries do with their `userData` parameter.
+A function-typed parameter of a C function is a C function pointer. The argument must be a function known at compile time, that captures nothing, with C types. It can't throw: C can't propagate an error. Pass the data the callback needs through a `Pointer<Void>?` parameter, as C libraries do with their `userData` parameter.
 
 ```fa
-function sort: (base: Pointer(Void), count: c.SizeT, size: c.SizeT, compare: (a: Pointer(Void), b: Pointer(Void)) => c.Int) => Void mutates base = @extern("qsort")
+function sort: (base: Pointer<Void>, count: c.SizeT, size: c.SizeT, compare: (a: Pointer<Void>, b: Pointer<Void>) => c.Int) => Void mutates base = @extern("qsort")
 ```
 
 ## Releasing C resources
@@ -252,10 +252,20 @@ export = {
 -- library/capi.foreign.fa
 use c = std.c
 
+type Farm = {
+	type Error = Errors { Empty }
+	name: String
+	animals: Int64 = 0
+	function countAnimals = (self): Int64 throws Self.Error => {
+		if self.animals == 0 { throw Self.Error.Empty }
+		self.animals
+	}
+}
+
 export namespace = {
-	function createFarm = (name: CString): Pointer(Farm) => Pointer.allocate(Farm { name = name.toString() })
-	function destroyFarm = (farm: Pointer(Farm)) => farm.free()
-	function animalCount = (farm: Pointer(Farm)): Int64 throws Farm.Error => try farm.value.countAnimals()
+	function createFarm = (name: CString): Pointer<Farm> => Pointer.allocate(Farm { name = name.toString() })
+	function destroyFarm = (farm: Pointer<Farm>) => farm.free()
+	function animalCount = (farm: Pointer<Farm>): Int64 throws Farm.Error => try farm.value.countAnimals()
 }
 ```
 
@@ -267,16 +277,22 @@ Every function of the exported namespace becomes a C function, named with the pr
 - C can call the library from any thread, so its functions can't use a module-level `mutable` value unless its type is [thread-safe](/advanced/concurrency).
 - The module-level values are initialized when the library is loaded.
 
+`fa build --target=native` writes the static library, shared library and header (for example `libfarm.a`, `libfarm.so`, `farm.h`) into `build/native/`. A C program links the static library with `-lm -pthread` and the libraries in `build.link`. Only API functions are visible; the library can be loaded with `dlopen`, and owned module values are destroyed on unload. Console output is flushed at the end of each API call.
+
+The header uses `int8_t` through `uint64_t`, `bool`, `float`, `double`, `const char *` for `CString`, and `T *` for `Pointer<T>` (`NULL` for an optional pointer). C structs keep their field order; Fa types behind a pointer are opaque. `Integer`, callbacks and generic functions cannot be exported (`FFI014`). An error type becomes an enum named from its nested path, such as `farm_FarmError`; a throwing function's last result pointer may be `NULL`. `farm_last_error_message()` initially returns `""`, retains the last error after a success, and truncates messages after 1023 bytes.
+
 ## Targets
 
 | Target | Calling C | Exposing a C library |
 | --- | --- | --- |
 | `native` | yes | yes |
 | `wasm` | yes: a C function is an import of the module, provided by C compiled to WebAssembly and linked with it, or by the host | yes: the functions are exports of the module |
-| `bun` | yes, through `bun:ffi` (a `CStruct` can't be passed by value) | no |
+| `bun` | yes, through `bun:ffi` | no |
 | `web`, `node` | no: a compile error | no |
 
 To support several targets, branch with [`@if target`](/advanced/metaprogramming) around the code that uses the binding.
+
+A `CArray<T, n>` is initialized with an array literal of exactly `n` items. It has `length`, supports indexing (negative indices count from the end), writes and iteration. Copying its `CStruct` copies the array.
 
 :::implementation
 ## Implementation details
@@ -291,6 +307,10 @@ To support several targets, branch with [`@if target`](/advanced/metaprogramming
 - A C library includes `fa-runtime`. Its exported functions are thunks: they convert the error union into a status and an out-parameter, store the error message in a thread-local buffer, and start the thread's executor on the first call from a new thread. Module-level values are initialized from `.init_array` (ELF), `__mod_init_func` (Mach-O) or `DllMain` (Windows).
 - When a C library is built with clang's ThinLTO and given as bitcode, `lld` optimizes across the two languages, and can inline C functions into Fa code.
 
+- AAPCS64 puts homogeneous aggregates of one to four floats or doubles in floating registers, other structs of at most 16 bytes in integer registers, and larger structs behind a pointer to a copy or `sret`. Under wasm32, a single scalar struct uses that scalar; other structs use `byval`/`sret`.
+- C libraries use general-dynamic thread-local storage so `dlopen` works. A version script limits shared exports; static output is one relocatable object (`ld.lld -r`, then `llvm-objcopy --keep-global-symbol`). Error messages use a thread-local 1024-byte buffer. Load/unload functions use `.init_array`/`.fini_array` on ELF.
+- `Pointer.allocate(value)`, `read`, `write`, `value` and `free` work natively, on wasm and on Bun. Reads copy Fa values; replacing a value destroys the old one.
+
 ### WebAssembly
 
 - `@extern` functions are imports (module `env` by default). `wasm-ld` resolves them against C compiled to WebAssembly; the unresolved ones are left to the host.
@@ -299,11 +319,12 @@ To support several targets, branch with [`@if target`](/advanced/metaprogramming
 
 - On `bun`, the libraries of `build.link` are opened with `dlopen` from `bun:ffi`, with one symbol table generated from the `@extern` declarations. A `Pointer` is a number; `read` and `write` go through a `DataView` over `toArrayBuffer`. Callbacks are `JSCallback`s.
 - A `CString` argument is encoded with a `TextEncoder`, plus the final zero byte.
+- `Pointer.allocate` uses C `malloc`, and `free` uses C `free`. C-compatible values use their C layout in the block. Other Fa values are rooted in a map keyed by the C address until freed; `read` copies them, `write` destroys the previous value, and `value` borrows it. A view of a C struct or fixed array uses getters and setters over its memory, including nested fields. A target that still contains an unresolved generic parameter is not compiled yet.
 
 ### State of the implementation
 
-- Analyzer: everything above except `Pointer.allocate`, `pointer.free()`, `pointer.value` as a reference (it is a copy), unions, bit fields and variadic functions (`FFI007`), and `build.cLibrary`.
-- Native: `@extern` calls, `CStruct` by value on x86-64 System V only, `CString`, arrays and addresses (copied into a C temporary, written back for `mutates`), callbacks (a `ccc` wrapper of the `function`), `destroy` on drop, `build.link`. Programs of several files don't compile natively yet, so a binding and its use share one file there. A temporary C string is always on the heap.
-- JavaScript: `bun`. A `CStruct` can't be passed by value, and an array of `CStruct`s can't be given to C. `destroy` is called for a local at the end of its block when nothing moves it out; not yet for a resource inside another value or a collection, nor for the old value of a replaced local.
-- WebAssembly: not yet.
+- Analyzer: C declarations, pointers, fixed arrays, resources and C-library APIs are checked. C unions, bit fields and variadic functions are rejected (`FFI007`).
+- Native: `@extern` calls, `CStruct` by value under x86-64 System V, AAPCS64 and wasm32 ABIs, `CString`, arrays and addresses, callbacks, resource destruction, `build.link`, and C libraries on Linux and macOS. Windows x64 struct classification and `DllMain` remain unimplemented. Multi-file programs are supported. A temporary C string is currently heap allocated.
+- JavaScript: Bun supports C structs passed by value through a shim compiled on first use by `bun:ffi`'s `cc`; generated code lays out the arguments in C memory and the shim applies the platform ABI. Resource destruction runs at scope exit for owning locals and parameters, inside composites and collections, when a value is replaced, and for discarded new values. A resource's destructor is imported when its type is declared in another file. A drop flag tracks moves, including a resource whose bytes are all zero.
+- WebAssembly: `@extern` calls are `env` imports unless C objects in `build.link` define them. The loader gets host functions from `env.mjs` next to it, copied from the program or package root; that module can export `attach(exports)` to reach memory. Missing functions are reported by name. C-library exports remain to be implemented.
 :::

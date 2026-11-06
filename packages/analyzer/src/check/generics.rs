@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::check::Walker;
 use crate::diagnostics::codes::types::{
-	GN003, GN004, GN005, GN007, GN010, GN011, GN013, GN014, GN015, GN020, TY003,
+	GN003, GN004, GN005, GN007, GN010, GN011, GN013, GN014, GN015, GN020, GN031, TY003,
 };
 use crate::ids::{ListId, NodeId, ParamId, SymbolId, TypeId};
 use crate::symbols::{DeclState, ScopeKind, SymbolKind};
@@ -20,6 +20,31 @@ use crate::syntax::{self, NodeList, View};
 use crate::types::{Bindings, Candidates, ParamInfo, TypeFlags, TypeKind};
 
 impl Walker<'_> {
+	/// An old application is still analyzed for error recovery and the
+	/// migration command, but never accepted as valid Fa.
+	pub(super) fn check_generic_brackets(&mut self, n: NodeId) {
+		if syntax::is_angle_application(&self.tree, n) || !self.a.type_of(n).is_unset() {
+			return;
+		}
+		let View::Call { callee, arguments } = self.view(n) else {
+			return;
+		};
+		let callee = self.tree.text(callee.index());
+		let arguments = arguments
+			.iter()
+			.map(|argument| self.tree.text(argument.index()))
+			.collect::<Vec<_>>()
+			.join(", ");
+		let diagnostic = self.diagnostic(
+			&GN031,
+			n,
+			format!(
+				"Generic arguments use angle brackets: write `{callee}<{arguments}>`. Run `fa migrate-generics --write <path>` to update existing code"
+			),
+		);
+		self.report(diagnostic);
+	}
+
 	/// Declares the generic parameters of a declaration (`(Item, Value: C = D)`)
 	/// in a new scope opened by `owner`, which becomes the current scope (the
 	/// caller restores it). Returns the parameters, in order.
@@ -782,8 +807,8 @@ impl Walker<'_> {
 		found.iter().any(|param| free.contains(param))
 	}
 
-	/// `sum(Float)`: the generic arguments of a generic function, when every
-	/// argument is a type (types brief §3.11.2, D18). The instantiated
+	/// `sum<Float>`: the explicit generic arguments of a function. Legacy
+	/// parenthesized arguments are diagnosed, then checked for recovery. The instantiated
 	/// function type; the call node records the arguments.
 	pub(super) fn generic_function_application(
 		&mut self,
@@ -823,10 +848,11 @@ impl Walker<'_> {
 		};
 		// a value parameter makes the first list the generic one (types brief §3.11.2)
 		if arguments.is_empty()
-			|| !(self.has_value_params(callee)
-				|| arguments
-					.iter()
-					.all(|argument| self.is_type_argument(argument)))
+			|| (!syntax::is_angle_application(&tree, n)
+				&& !(self.has_value_params(callee)
+					|| arguments
+						.iter()
+						.all(|argument| self.is_type_argument(argument))))
 		{
 			return None;
 		}
@@ -851,6 +877,7 @@ impl Walker<'_> {
 		params: &[ParamId],
 		arguments: NodeList<'_>,
 	) -> TypeId {
+		self.check_generic_brackets(n);
 		let args = self.generic_arguments(params, arguments);
 		self.set_flag(n, crate::analysis::NodeFlags::GENERIC_APPLICATION);
 		self.memo(n, |w| {
@@ -1052,6 +1079,7 @@ impl Walker<'_> {
 		if params.is_empty() {
 			return None;
 		}
+		self.check_generic_brackets(n);
 		let args = self.generic_arguments(&params, arguments);
 		self.set_flag(n, crate::analysis::NodeFlags::GENERIC_APPLICATION);
 		Some(self.memo(n, |w| {

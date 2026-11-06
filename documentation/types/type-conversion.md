@@ -112,13 +112,13 @@ let small: Int8 = 100
 
 ### Integers compare by range
 
-Every integer type is a range of integers with a storage width: an `Int8` is an `Integer(min = -128, max = 127)` stored in 8 bits. So an integer is accepted, with no conversion, wherever its range fits the expected range:
+Every integer type is a range of integers with a storage width: an `Int8` is an `Integer<min = -128, max = 127>` stored in 8 bits. So an integer is accepted, with no conversion, wherever its range fits the expected range:
 
 ```fa
 let small: Int8 = 100
 let big: Int64 = small -- valid: every Int8 fits in an Int64
 
-let bounded: Integer(min = 0, max = 100) = 100
+let bounded: Integer<min = 0, max = 100> = 100
 let byte: Byte = bounded -- valid: 0 to 100 fits in a Byte
 let total: Integer = bounded -- valid: a ranged integer is an Integer
 ```
@@ -130,7 +130,7 @@ function toByte = (value: Integer): Byte? => {
 	if value < 0 or value > 255 {
 		return none
 	}
-	value -- valid: `value` is narrowed to Integer(min = 0, max = 255)
+	value -- valid: `value` is narrowed to Integer<min = 0, max = 255>
 }
 
 let small = try Int8(readNumber()) -- throws ArithmeticError if the Integer doesn't fit in an Int8
@@ -142,10 +142,10 @@ A `BigInt` converts the same way: `Integer(big)` and `Int8(big)` throw `Arithmet
 `Integer` has the range and the storage of `Int64`, and the two convert implicitly as values. They are still two types: on JavaScript, an `Integer` is a number and an `Int64` a `BigInt`, so a collection of one is not a collection of the other. Convert the elements explicitly:
 
 ```fa
-function total = (values: Array(Integer)): Integer => values.sum()
+function total = (values: Array<Integer>): Integer => values.sum()
 
-let counters: Array(Int64) = [1, 2, 3]
-total(counters) -- error: an `Array(Int64)` is not an `Array(Integer)`
+let counters: Array<Int64> = [1, 2, 3]
+total(counters) -- error: an `Array<Int64>` is not an `Array<Integer>`
 total(counters.map((value) => Integer(value))) -- valid
 ```
 
@@ -204,14 +204,14 @@ type PortError = Errors {
 	OutOfRange = { port: Integer }
 }
 
-function readPort = (text: String): Integer(min = 1, max = 65535) throws ParseError | PortError => {
+function readPort = (text: String): Integer<min = 1, max = 65535> throws ParseError | PortError => {
 	let port = try Integer.parse(text)
 
 	if port < 1 or port > 65535 {
 		throw PortError.OutOfRange { port = port }
 	}
 
-	port -- narrowed to Integer(min = 1, max = 65535)
+	port -- narrowed to Integer<min = 1, max = 65535>
 }
 
 let port = readPort(text) catch error => 8080

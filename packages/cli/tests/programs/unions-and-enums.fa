@@ -35,6 +35,14 @@ for color in Color.members {
 -- prints: red
 -- prints: green
 -- prints: blue
+console.log(Color.members.length, Color.members[1] catch error => Color.red)
+-- prints: 3 green
+
+type Palette = {
+	type Shade = Enum { light, dark }
+}
+console.log(Palette.Shade.members.length, Palette.Shade.members[1] catch error => Palette.Shade.light)
+-- prints: 2 dark
 
 type Status = Enum {
 	pending = 0

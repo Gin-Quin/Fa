@@ -15,8 +15,8 @@ Fa is designed for AI agents as much as for humans: like Rust, if the code compi
 | `\|x\| x + 1` | `(x) => x + 1` |
 | `i64`, `f64`, `u8` | `Integer`, `Float`, `Byte` |
 | `x as f64` | `Float(x)` |
-| `Vec<T>` | `Array(T)` |
-| `HashMap<K, V>` | `Map(K, V)` |
+| `Vec<T>` | `Array<T>` |
+| `HashMap<K, V>` | `Map<K, V>` |
 | `Option<T>` / `None` | `T?` / `none` |
 | `fn load() -> Result<T, E>` | `function load = (): T throws E => ...` |
 | `return Err(e)` | `throw e` |
@@ -69,7 +69,7 @@ The same error, for the same reason — but the type is `Integer in v`, not `&'a
 Parameters are immutable references by default. A function that modifies one declares it in its signature with `mutates`, and the call site needs a `mutable` value — but no `&mut` marker:
 
 ```fa
-function addBonus = (scores: Array(Integer), bonus: Integer) mutates scores => {
+function addBonus = (scores: Array<Integer>, bonus: Integer) mutates scores => {
 	for score in scores {
 		score += bonus -- writes into the array
 	}
@@ -114,7 +114,7 @@ Direct recursion (`next: ListNode`) is an error: the type would have an infinite
 **A collection plus references**, when nodes are shared:
 
 ```fa
-mutable nodes: Pool(Node) = []
+mutable nodes: Pool<Node> = []
 
 type Node = {
 	next: (Node in nodes)?
@@ -129,12 +129,12 @@ type Node = {
 A back-reference in Rust means `Weak<RefCell<T>>` and manual upgrade calls. In Fa you declare both sides of the relation, and the compiler maintains them:
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 
 type Person = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }
 
 ana.bestFriend = bao
@@ -202,7 +202,7 @@ let human: Human = Animal { name = "Zeus" } -- valid
 There are no traits and no `impl` blocks. Generic constraints are shapes:
 
 ```fa
-function readId(Item: { id: Integer }) = (item: Item): Integer => item.id
+function readId = <Item: { id: Integer }>(item: Item): Integer => item.id
 ```
 
 Anything with an `id: Integer` satisfies it, with nothing to implement. When you need two distinct types with the same shape, give them different fields, or a `#private` field, which makes a type nominal — see [structural typing](/advanced/structural-typing#when-you-want-types-to-be-distinct).
@@ -210,20 +210,20 @@ Anything with an `id: Integer` satisfies it, with nothing to implement. When you
 ## Generics without turbofish
 
 ```fa
-function first(Item) = (items: Array(Item)): Item? => items.get(0)
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
 
 first([1, 2, 3])
-first(Float)([1, 2, 3])
+first<Float>([1, 2, 3])
 ```
 
-Generic parameters are declared right after the name, and inferred from the arguments and the expected type. When they must be written, they are applied before the arguments, so `::<>` is unnecessary.
+Generic parameters use angle brackets: a type declares them after its name, and a function at the start of its signature. They are inferred from the arguments and the expected type. When they must be written, they come before the call without `::`: the tokenizer knows that `<` followed by whitespace is a comparison and that any other `<` opens a generic list, so `a<b` is never a comparison (write `a < b`). See [angle brackets and comparisons](/types/generics#angle-brackets-and-comparisons).
 
 A capitalized parameter is a type parameter; a lowercase one is a compile-time value, which replaces const generics:
 
 ```fa
-type Matrix(Element, rows: Integer, columns: Integer) = ...
+type Matrix<Element, rows: Integer, columns: Integer> = ...
 
-let transform: Matrix(Float, 4, 4) = ...
+let transform: Matrix<Float, 4, 4> = ...
 ```
 
 There is no specialization and no overloading. See [generics](/types/generics).
@@ -282,6 +282,6 @@ Fa doesn't compile to Rust. To use a Rust crate, expose `#[unsafe(no_mangle)] pu
 | `clone()` | assignment already copies |
 | `impl Trait` | a structural constraint: `Item: { field: Type }` |
 | `Box<T>` | not needed: recursion through a union or an optional is automatic |
-| `Vec::with_capacity(n)` | `Array(Integer).from([], capacity = n)` |
+| `Vec::with_capacity(n)` | `Array<Integer>.from([], capacity = n)` |
 | `'outer: loop` | there are no labeled loops |
 | `#[derive(PartialEq)]` | `==` is always a deep structural comparison |

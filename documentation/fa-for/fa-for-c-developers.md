@@ -17,8 +17,8 @@ Fa is designed for AI agents as much as for humans: everything a function does â
 | `Point p = { 1, 2 };` | `let p: Point = { x = 1, y = 2 }` |
 | `enum Color { RED };` | `type Color = Enum { red }` |
 | `union` | `type S = Union { ... }` (tagged) |
-| `std::vector<T>` | `Array(T)` |
-| `std::unordered_map<K, V>` | `Map(K, V)` |
+| `std::vector<T>` | `Array<T>` |
+| `std::unordered_map<K, V>` | `Map<K, V>` |
 | `T*` (may be absent) | `T?` |
 | `const T&` | a parameter, or `use` |
 | `T&` (mutated) | a parameter declared with `mutates` |
@@ -50,7 +50,7 @@ The model is close to how you already think, with the rules enforced:
 
 ```fa
 function process = () => {
-	mutable buffer = Array(Byte).from([], capacity = 4096)
+	mutable buffer = Array<Byte>.from([], capacity = 4096)
 	-- fill it, pass references around, take slices
 } -- one deallocation, here
 ```
@@ -67,7 +67,7 @@ void add_bonus(int *scores, size_t length, int bonus);
 ```
 
 ```fa
-function addBonus = (scores: Array(Integer), bonus: Integer) mutates scores => {
+function addBonus = (scores: Array<Integer>, bonus: Integer) mutates scores => {
 	for score in scores {
 		score += bonus -- writes into the array
 	}
@@ -111,14 +111,14 @@ let b = array[3]          -- compile error
 let c = try array[i]      -- throws IndexError: propagate it, or `catch` it
 let d = array.get(i)      -- Integer?: `none` when out of bounds
 
-let index: Integer(min = 0, max = 2) = readIndex()
+let index: Integer<min = 0, max = 2> = readIndex()
 let e = array[index]      -- Integer: the range proves it, no check emitted
 ```
 
 Ranged integers are the mechanism. They also cover division:
 
 ```fa
-function averageOf = (total: Integer, count: Integer(min = 1)): Integer =>
+function averageOf = (total: Integer, count: Integer<min = 1>): Integer =>
 	total // count -- no zero check: the type rules it out
 ```
 
@@ -129,7 +129,7 @@ When the divisor is not provably non-zero, the integer division `throws Division
 `Columnar` is a struct-of-arrays with the interface of an array-of-structs:
 
 ```fa
-mutable people: Columnar(Person) = []
+mutable people: Columnar<Person> = []
 mutable total = 0
 
 for { age } in people {

@@ -160,6 +160,7 @@ impl Walker<'_> {
 		if let Some(target_ty) = expected_target {
 			self.sink(value, actual, target_ty);
 		}
+		self.note_copy_site(value);
 		let pointed = expected_target.unwrap_or_else(|| self.s.types.widen(actual));
 		self.memo(member, |w| {
 			w.set_resolution(member, Resolution::Builtin(allocate));

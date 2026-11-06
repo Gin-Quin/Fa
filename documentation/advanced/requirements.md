@@ -94,7 +94,7 @@ The key is the **exact shape** of the type, since Fa's typing is [structural](/a
 - An alias is the same key: after `type AppLogger = Logger`, `provide AppLogger` satisfies `requires logger: Logger`.
 - Two named types with the same shape are the same key: providing one provides the other.
 - There is no lookup by subtype: `requires logger: Logger` is only satisfied by a provided `Logger` (or a type of exactly the same shape), never by a provided type with more fields. Provide the value as a `Logger` instead: `provide Logger = verboseLogger`.
-- A generic type is keyed with its arguments: `Cache(User)` and `Cache(Post)` are two keys.
+- A generic type is keyed with its arguments: `Cache<User>` and `Cache<Post>` are two keys.
 
 To keep two requirements of the same shape apart, give them different shapes, or use single-member unions, which are distinct by name:
 
@@ -172,7 +172,7 @@ To modify a requirement, a function declares the effect `mutates` on it, like it
 
 ```fa
 type Trace = {
-	breadcrumbs: Array(String)
+	breadcrumbs: Array<String>
 }
 
 function addBreadcrumb = (label: String) requires trace: Trace mutates trace => {
@@ -206,7 +206,7 @@ Requirements are resolved **where a function is called**, and never captured by 
 ```fa
 type Loader = (id: String) => User throws LoadError requires database: Database
 
-function loadAll = (ids: Array(String), load: Loader): Array(User) throws LoadError requires database: Database => {
+function loadAll = (ids: Array<String>, load: Loader): Array<User> throws LoadError requires database: Database => {
 	try ids.map((id) => try load(id)) -- each call of `load` receives the `Database` that `loadAll` receives
 }
 ```

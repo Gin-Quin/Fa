@@ -798,6 +798,14 @@ impl Walker<'_> {
 	) -> (FlowState, FlowState) {
 		let tree = Arc::clone(&self.tree);
 		let inner = self.strip_groups(pattern);
+		let subject = self.type_of(self.strip_groups(value));
+		if let Some(fields) = self.fields_when_pattern(inner, subject) {
+			// Equality with one set excludes none in the matching branch,
+			// but another set can still occur in the other branch.
+			let others = self.body.flow.fork();
+			let (matching, _) = self.type_test(n, value, fields, None);
+			return (matching, others);
+		}
 		match syntax::view(&tree, inner) {
 			View::None => {
 				self.check(pattern, None);

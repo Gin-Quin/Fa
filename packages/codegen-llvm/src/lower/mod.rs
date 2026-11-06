@@ -2530,6 +2530,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		ty: NodeId,
 		node: NodeId,
 	) -> Result<IntValue<'ctx>, Error> {
+		if self.analysis.fields_patterns.contains(&ty) {
+			let (present, inner) = self.optional_split(subject)?;
+			let Some(inner) = inner else {
+				return Ok(self.context.bool_type().const_zero());
+			};
+			let expected = self.expr(ty)?;
+			let equal = self.values_equal(inner, expected, node)?;
+			return Ok(self.builder.build_and(present, equal, "")?);
+		}
 		match self.view(ty) {
 			View::Range {
 				start,

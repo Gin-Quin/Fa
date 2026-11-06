@@ -80,7 +80,7 @@ export function faCString(text) {
 // @fa-helper faCArrayOf
 /**
  * A typed array holding `count` values of a C type.
- * @param {string} type
+ * @param {any} type
  * @param {number} count
  * @returns {any}
  */
@@ -189,10 +189,13 @@ export function faCCallback(callback, args, returns) {
 // @fa-helper faCSize
 /**
  * The size of a C type, in bytes.
- * @param {string} type
+ * @param {any} type
  * @returns {number}
  */
 export function faCSize(type) {
+	if (typeof type === "object") {
+		return type.array === undefined ? type.size : type.count * type.stride;
+	}
 	switch (type) {
 		case "i8":
 		case "u8":
@@ -341,6 +344,180 @@ export function faPointerToArray(pointer, type, count) {
 export function faCStringRead(pointer) {
 	const ffi = faFfiRuntime();
 	return new ffi.CString(pointer).toString();
+}
+
+// @fa-helper faPointerMemory
+/**
+ * Opaque Fa values live behind real C addresses; their JavaScript values
+ * stay rooted until free. C-compatible values live in the C block itself.
+ * @type {{ values: Map<number, { value: any }>, malloc: ((...values: any[]) => any) | null, free: ((...values: any[]) => any) | null }}
+ */
+export const faPointerMemory = { values: new Map(), malloc: null, free: null };
+
+// @fa-helper faPointerFree deps: faPointerMemory faFfiBind
+/**
+ * Destroys an owned Fa value, then releases its C allocation.
+ * @param {number} pointer
+ * @param {((value: any) => void) | undefined} [drop]
+ */
+export function faPointerFree(pointer, drop) {
+	const block = faPointerMemory.values.get(pointer);
+	faPointerMemory.values.delete(pointer);
+	try {
+		if (block !== undefined && drop !== undefined) drop(block.value);
+	} finally {
+		faPointerMemory.free ??= faFfiBind([], "free", ["ptr"], "void");
+		faPointerMemory.free(pointer);
+	}
+}
+
+// @fa-helper faPointerAllocate deps: faPointerMemory faFfiBind faCSize faPointerView faCWrite faPointerFree
+/**
+ * Moves a value into a C allocation. A null spec denotes opaque Fa data.
+ * @param {any} value
+ * @param {any} spec
+ * @returns {number}
+ */
+export function faPointerAllocate(value, spec) {
+	faPointerMemory.malloc ??= faFfiBind([], "malloc", ["u64"], "ptr");
+	const size = Math.max(1, spec === null ? 8 : faCSize(spec));
+	const pointer = faPointerMemory.malloc(BigInt(size));
+	if (pointer === undefined) throw new Error("out of memory");
+	try {
+		if (spec === null) faPointerMemory.values.set(pointer, { value });
+		else faCWrite(faPointerView(pointer, size), 0, spec, value);
+	} catch (error) {
+		faPointerFree(pointer);
+		throw error;
+	}
+	return pointer;
+}
+
+// @fa-helper faPointerReadValue deps: faPointerMemory faCRead faPointerView faCSize
+/**
+ * Reads the underlying value; the compiler copies opaque data for read().
+ * @param {number} pointer
+ * @param {any} spec
+ * @param {boolean} bigint
+ * @returns {any}
+ */
+export function faPointerReadValue(pointer, spec, bigint) {
+	if (spec !== null) return faCRead(faPointerView(pointer, faCSize(spec)), 0, spec, bigint);
+	const block = faPointerMemory.values.get(pointer);
+	if (block === undefined) throw new Error("unknown Fa allocation");
+	return block.value;
+}
+
+// @fa-helper faPointerWriteValue deps: faPointerMemory faCWrite faPointerView faCSize
+/**
+ * Replaces a value, destroying the previous value after the new one was evaluated.
+ * @param {number} pointer
+ * @param {any} spec
+ * @param {any} value
+ * @param {((value: any) => void) | undefined} [drop]
+ */
+export function faPointerWriteValue(pointer, spec, value, drop) {
+	if (spec !== null) {
+		faCWrite(faPointerView(pointer, faCSize(spec)), 0, spec, value);
+		return;
+	}
+	const block = faPointerMemory.values.get(pointer);
+	if (block === undefined) throw new Error("unknown Fa allocation");
+	if (drop !== undefined) drop(block.value);
+	faPointerMemory.values.set(pointer, { value });
+}
+
+// @fa-helper faCReference deps: faCRead faCWrite
+/**
+ * A view of a C struct or fixed array, including writes through nested fields.
+ * @param {DataView} view
+ * @param {number} offset
+ * @param {any} spec
+ * @param {boolean} bigint
+ * @returns {any}
+ */
+export function faCReference(view, offset, spec, bigint) {
+	if (typeof spec === "string") return faCRead(view, offset, spec, bigint);
+	const array = spec.array !== undefined;
+	const target = array
+		? new Array(spec.count).fill(undefined)
+		: Object.fromEntries(spec.fields.map(([name]) => [name, undefined]));
+	const field = (key) => {
+		if (typeof key !== "string") return undefined;
+		if (!array) return spec.fields.find(([name]) => name === key);
+		const index = Number(key);
+		return Number.isInteger(index) && index >= 0 && index < spec.count && String(index) === key
+			? [key, spec.array, index * spec.stride, spec.bigint]
+			: undefined;
+	};
+	return new Proxy(target, {
+		get(target, key, receiver) {
+			const part = field(key);
+			return part === undefined
+				? Reflect.get(target, key, receiver)
+				: faCReference(view, offset + part[2], part[1], part[3]);
+		},
+		set(target, key, value) {
+			const part = field(key);
+			if (part === undefined) return Reflect.set(target, key, value);
+			faCWrite(view, offset + part[2], part[1], value);
+			return true;
+		},
+	});
+}
+
+// @fa-helper faPointerValue deps: faPointerReadValue faCReference faPointerView faCSize
+/**
+ * pointer.value borrows the stored value rather than copying it.
+ * @param {number} pointer
+ * @param {any} spec
+ * @param {boolean} bigint
+ * @returns {any}
+ */
+export function faPointerValue(pointer, spec, bigint) {
+	return spec === null
+		? faPointerReadValue(pointer, spec, bigint)
+		: faCReference(faPointerView(pointer, faCSize(spec)), 0, spec, bigint);
+}
+
+// @fa-helper faPointerCell deps: faPointerValue faPointerWriteValue
+/**
+ * An accessor place for assignments and references to pointer.value.
+ * Assignment lowering destroys replaced resources before invoking the setter.
+ * @param {number} pointer
+ * @param {any} spec
+ * @param {boolean} bigint
+ * @returns {{ value: any }}
+ */
+export function faPointerCell(pointer, spec, bigint) {
+	return {
+		get value() {
+			return faPointerValue(pointer, spec, bigint);
+		},
+		set value(value) {
+			faPointerWriteValue(pointer, spec, value);
+		},
+	};
+}
+
+// @fa-helper faPointerToValues deps: faCRead faPointerView faCSize
+/**
+ * Copies C values, keeping the Fa representation of 64-bit integers.
+ * @param {number} pointer
+ * @param {any} spec
+ * @param {boolean} bigint
+ * @param {number} count
+ * @returns {any[]}
+ */
+export function faPointerToValues(pointer, spec, bigint, count) {
+	if (count === 0) return [];
+	const size = faCSize(spec);
+	const view = faPointerView(pointer, size * count);
+	const result = [];
+	for (let index = 0; index < count; index += 1) {
+		result.push(faCRead(view, index * size, spec, bigint));
+	}
+	return result;
 }
 
 // @fa-helper faCWrite

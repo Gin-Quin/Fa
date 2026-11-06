@@ -680,6 +680,12 @@ impl Walker<'_> {
 	/// around it, and `CONC010` for a blocking call of a primitive or of
 	/// another file's function that can't block on the target.
 	pub(super) fn after_call(&mut self, n: NodeId, callee: NodeId) {
+		if self.builtin_path(n, callee) == Some("Pointer#write")
+			&& let Some(crate::analysis::Argument::Given(value)) =
+				self.a.calls.get(&n).and_then(|call| call.arguments.first())
+		{
+			self.note_copy_site(*value);
+		}
 		let mode = self.tasks.modes.get(&n).copied().unwrap_or(Mode::Blocking);
 		let target = self.call_target(n, callee);
 		// `task.cancel()` (A11)

@@ -1,26 +1,38 @@
-# Next actions (lead, paused 2026-11-05)
+# Compiler work in progress (2026-11-06)
 
-The compiler work lives on branch `compiler` (lead worktree `.claude/worktrees/lead`; never work in the main checkout, which is shared). Every arbitration is in `design/decisions.md`, open items in `design/todo.md`, documentation notes waiting for the external rewrite in `design/pending-documentation.md`, review reports in `design/reviews/`.
+Work only in `.claude/worktrees/lead`, branch `compiler`; the main checkout is shared and contains uncommitted work. The user requested completion of the whole remaining compiler list and explicitly authorized parallel agents.
 
-## State at the pause
+## Integrated and validated branches
 
-- `compiler` passes the full suite with LLVM (`cargo test --workspace --no-fail-fast`, under `ulimit -v 8000000`) and the JavaScript runtime tests, at the last merge before this file.
-- Three engineers were stopped mid-shift. Each wrote a `NEXT.md` at the root of its worktree, committed on its branch:
-  - `worktree-agent-aca08cbb0b8394a82` (head `a3d64ac`) — proofs: JavaScript package builds collect claims and rebuild dependent modules from a re-analysis (`c5b9c8a`); proofs enabled in async natively, with async/parallel/worker soundness tests (`a1b2996`). Its full suite was cut short (wasm programs and later crates not run): rerun before merging. Not done: index proofs for packages (units must publish which file stores to each field or collection; plan in its `NEXT.md`). Package build on 1,000 files: user time 22 s → 25 s, 140–165 MB.
-  - `worktree-agent-a375af73b4e738f36` (head `feb1e12`) — native performance: compressed 32-bit arena links done (one shared range for all arenas, nodes in the 2–32 GiB band, link = address / 8, roots hold 32-bit links too so methods need no second instance — accepted by the lead, it amends "one range per arena"); binary-trees L1 misses halved, peak memory 11.1 → 9.2 MB, but instructions 136.8 M → 139.4 M (Goose 128.1 M): close its walk and leaf-call gap first. `calc` packed literal choice done (130.9 M → 130.0 M, Goose 109.6 M). `benchmarks/audit/compare.py` now sets the ports' size constant (Fa ran at its default size before). Full suite stopped after 33 passing suites: rerun before merging. Not started: `sexp` packing, `lru` slots.
-  - `worktree-agent-a2f066f35c6147839` (head `4a14b42`) — analyzer: 2^48 length bound done (sieve still proven); callbacks that throw in user functions done on JavaScript (refused natively as unsupported: the native instance per error set is still to do; on JavaScript a `catch` inside the callee can still catch the callback's errors, which the docs forbid); W-DECL-2, CV002, CL025, EF012, E-ERR-8 implemented. The last commit (42 codes made aliases) is untested; the full suite, workspace clippy, the LLVM expected skips and the 1,000-file measurement were not run: W-DECL-2 may break other crates' tests. Do all of that before merging. Left: documented codes not implemented, FN100–104 (needs `with`).
-- To resume: read each branch's `NEXT.md`, merge the branches whose work is green (`git merge <branch>` in the lead worktree, then the full suite), and start fresh engineers from those notes.
+- `f2f43d6`: initial proofs branch `a3d64ac` (async native proofs, deferred/reanalyzed JavaScript units). Its complete workspace suite, LLVM included, clippy and 296 JS runtime tests passed; the merge also passed clippy and reanalysis/JS regressions.
+- `ca9f85a`: initial native-performance branch `04bb84b` (compressed arena links, packed literal choices), including a repaired C sanitizer test. Its complete workspace suite, clippy, 296 JS runtime tests and a real ASan/UBSan run passed; the merge passed clippy and compressed-link regressions on all native targets.
+- Nine clean, unlocked, already-integrated worktrees were removed. Locked trees still belong to a live process; a dirty integrated tree and unmerged branches were preserved.
 
-## Next, in order
+## Current work and ownership
 
-1. Merge the three paused branches (each after its suite passes; conflicts in the runtime IR: regenerate with `packages/codegen-llvm/runtime/generate.sh`; expected LLVM skips: `FA_UPDATE_SKIPS=1`, review the diff).
-2. Generics flag day, step 2, once the rewritten documentation lands (`design/decisions.md`, "Flag day of the generics migration"): the old parenthesized spelling becomes an error, the transition code goes; then apply `design/pending-documentation.md` to the rewritten pages.
-3. Goal of the user: Fa faster than Goose on every Goose benchmark (sync, release). Latest Fa/Goose instructions: records 1.14, strlist 1.17, respond 1.09, interp 0.99, words 1.36, lru 1.29, calc 1.19, sexp 1.21, binary-trees 1.07, scene 1.19 (CPU noisy: sexp and lru furthest).
-4. Fuse the analyzer's passes (about nine per file, against the single-walk design), measured on the 1,000-file package.
-5. Remaining items of `design/todo.md`: Pick/Omit and `EF004` from another file, `is` with sets, `@for` over key sets of another file, WebAssembly C libraries, `Pointer.allocate`/`free` on Bun, native AArch64 runtime, `Color.members.length` natively.
+- Lead: the user confirmed that the uncommitted documentation in the main checkout is the angle-bracket rewrite. Its documentation/README changes were copied with a three-way merge, preserving newer compiler notes. Most pending documentation notes are applied. Stage 2 emits GN031 for old declarations/applications, preserves recovery for `fa migrate-generics`, and ignores only GN031 in migration verification. Parser/analyzer tests, cases, documentation parsing, pipeline determinism, website check/snippets/build passed before subsequent changes.
+- Lead: Color.members.length and nested enumeration members fixed and tested on native/wasm; Fields is/is not implemented for exact sets, alternatives, optional narrowing and compile-time evaluation, tested on Bun/native/freestanding/wasm.
+- Lead: Bun Pointer.allocate/read/write/free/value implemented for known types, C-compatible blocks and opaque Fa values, copy/drop semantics, C struct/fixed-array views; C-backed scalar places and references are in their final targeted run. Unresolved generic pointer layouts are still unsupported and need a follow-up. Native C-compatible pointer.value places were enabled only when C and Fa layouts agree. Common pointer fixture moved from LLVM into CLI for both harnesses.
+- Agent `/root/analyzer`: initial branch worktree `agent-a2f066f35c6147839`. The first complete run found real UInt32 JS-wrap and index-proof bugs plus W-DECL-2 fallout. Fixes and targeted tests pass. Its stable corrected source is in a second strict full run, `/tmp/fa-resume-analyzer-workspace-fixed.log`, not integrated yet. It prepares callbacks, with, remaining documented rules and pass fusion separately, possibly in a second worktree. It also owns benchmark generator cleanup (`_arguments`, `_error`, Array<String>).
+- Agent `/root/proofs`: initial worktree `agent-aca08cbb0b8394a82`. Index proofs across units and per-file native caches are implemented with soundness tests. A further key-loop snapshot hole was found and corrected conservatively; final full validation is queued in `/tmp/fa-unit-index-final-workspace.log`. After that it owns Pick/Omit derived parameters, EF004 and @for key sets across files, in a separate worktree if needed.
+- Agent `/root/native_perf`: initial worktree `agent-a375af73b4e738f36`. The initial HEAD is integrated. It now ports a binary-trees optimization (prototype 111M instructions vs Goose128M) and prepares eight-byte map slots, then all remaining Goose gaps. No prototype is considered complete before tests and measurement.
 
-## Rules that held
+## Still required
 
-- Engineers in their own worktrees, briefed with the files to read, told not to edit `documentation/` (external rewrite) and to commit often.
-- Before assigning an item, check that no other engineer holds it (two duplicates happened).
-- Delete the `target/` of finished worktrees after merging: the disk filled up once.
+1. Integrate corrected analyzer initial HEAD after its complete suite passes, then the new proofs and performance HEADs after their validations.
+2. Complete and commit the lead's current generics/docs/Fields/pointer changes after full workspace, clippy, JS runtime and website validation. Pending notes file is not cleared yet: reconcile newly merged notes, including compressed arenas and packed literal choices.
+3. Bun pointer generic-layout support; C libraries in wasm; native AArch64 runtime. Cross-file type/key work is owned by proofs, callbacks/with/pass fusion by analyzer.
+4. Reach the user's goal of beating Goose everywhere, using the compiler rather than changing benchmark semantics. Stack string buffers of24–64bytes remain open;23-byte inline strings, capacity/reserve/from, nbody noalias, module constants, borrowed aggregates and nullable pointers are already implemented.
+5. Audit and clean the stale entries in design/todo.md without hiding unfinished features.
+
+## Accepted effect rule (user, 2026-11-06)
+
+An explicit `() => T throws E` callback parameter follows ordinary try/catch rules: the receiving function can intercept E, and declares it only if it escapes (including a manual rethrow). Extra errors passed through a non-stored callback parameter without throws remain transparent to the receiving function. Overdeclared throws and mutates are errors everywhere, including expression bodies and annotated declarations. Existing mutation-path coverage and fewer-effects assignability for function values remain valid. Analyzer implements this in its callbacks worktree; lead updates the specification.
+
+## Validation and workspace notes
+
+LLVM_SYS_181_PREFIX=/home/claude-dev/.local/llvm18/usr/lib/llvm-18; add its bin and /home/claude-dev/.bun/bin to PATH. Cargo jobs1–2, tests2 threads, ulimit-v8000000 for full suites. ASan must also run outside the virtual-memory limit.
+
+Use `flock --close /tmp/fa-compiler-full-suite.lock <command>`: an orphan Bun inherited an FD9 lock and blocked the queue. Analyzer repaired its timeout runner to kill the whole child process group and added a grandchild regression. Never share target/ between validation and preparation worktrees.
+
+Lead WIP backups are stashes `0bfc84d85797eeeca8e069c87bd9509677bbaf00` and `03cbc3f567fe3d1f1361f7569b33c5c6a3f3476c`, already applied; do not reapply them. The main documentation snapshot patch is /tmp/fa-resume-rewritten-documentation.patch. Git automatic gc cannot update the shared perf/native-goose ref; use `git -c gc.auto=0 commit` and preserve that ref's permissions.

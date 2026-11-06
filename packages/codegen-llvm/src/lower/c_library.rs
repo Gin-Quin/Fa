@@ -27,13 +27,104 @@
 use fa_analyzer::c_library::{self, ApiFunction};
 use fa_analyzer::ids::{NodeId, TypeId};
 use inkwell::AddressSpace;
+use inkwell::builder::Builder;
 use inkwell::module::{Linkage, Module};
-use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, GlobalValue};
+use inkwell::values::{
+	BasicMetadataValueEnum, BasicValueEnum, FunctionValue, GlobalValue, PointerValue,
+};
 
 use crate::error::Error;
 use crate::lower::foreign::{CType, Passing};
 use crate::lower::values::{Repr, Val};
 use crate::lower::{FAST_CALLING_CONVENTION, Lowering};
+use crate::runtime::Runtime;
+use crate::target::Target;
+
+/// Names containing `$` cannot collide with a C API identifier.
+pub(crate) const WASM_EXPORTS: &[&str] =
+	&["$fa.initialize", "$fa.finalize", "$fa.allocate", "$fa.free"];
+
+/// Native libraries have load/unload hooks. Wasm hosts call explicit hooks;
+/// the generated loader does that automatically and exposes dispose().
+pub(crate) fn library_hooks<'ctx>(
+	module: &Module<'ctx>,
+	runtime: &Runtime<'ctx, '_>,
+	target: Target,
+	init: FunctionValue<'ctx>,
+	fini: FunctionValue<'ctx>,
+) -> Result<Vec<String>, Error> {
+	if target != Target::Wasm {
+		add_structor(module, init, true);
+		add_structor(module, fini, false);
+		return Ok(Vec::new());
+	}
+	let context = module.get_context();
+	let i8 = context.i8_type();
+	let state = module.add_global(i8, None, "fa.library.state");
+	state.set_initializer(&i8.const_zero());
+	state.set_linkage(Linkage::Internal);
+	let builder = context.create_builder();
+	for (name, body, before, after) in
+		[(WASM_EXPORTS[0], init, 0, 1), (WASM_EXPORTS[1], fini, 1, 2)]
+	{
+		let wrapper = module.add_function(
+			name,
+			context.void_type().fn_type(&[], false),
+			Some(Linkage::External),
+		);
+		runtime.add_attributes(wrapper, &["nounwind"]);
+		let entry = context.append_basic_block(wrapper, "entry");
+		let run = context.append_basic_block(wrapper, "run");
+		let end = context.append_basic_block(wrapper, "end");
+		builder.position_at_end(entry);
+		let current = builder
+			.build_load(i8, state.as_pointer_value(), "")?
+			.into_int_value();
+		let needed = builder.build_int_compare(
+			inkwell::IntPredicate::EQ,
+			current,
+			i8.const_int(before, false),
+			"",
+		)?;
+		builder.build_conditional_branch(needed, run, end)?;
+		builder.position_at_end(run);
+		builder.build_store(state.as_pointer_value(), i8.const_int(after, false))?;
+		builder.build_call(body, &[], "")?;
+		builder.build_unconditional_branch(end)?;
+		builder.position_at_end(end);
+		builder.build_return(None)?;
+	}
+	let usize = context.i32_type();
+	let pointer = context.ptr_type(AddressSpace::default());
+	let alloc = module.add_function(
+		WASM_EXPORTS[2],
+		pointer.fn_type(&[usize.into(), usize.into()], false),
+		Some(Linkage::External),
+	);
+	let free = module.add_function(
+		WASM_EXPORTS[3],
+		context
+			.void_type()
+			.fn_type(&[pointer.into(), usize.into(), usize.into()], false),
+		Some(Linkage::External),
+	);
+	for (wrapper, callee) in [(alloc, "fa_alloc"), (free, "fa_free")] {
+		runtime.add_attributes(wrapper, &["nounwind"]);
+		builder.position_at_end(context.append_basic_block(wrapper, "entry"));
+		let arguments: Vec<BasicMetadataValueEnum<'ctx>> =
+			wrapper.get_params().into_iter().map(Into::into).collect();
+		let result = builder.build_call(runtime.function(callee)?, &arguments, "")?;
+		if let Some(value) = result.try_as_basic_value().basic() {
+			builder.build_return(Some(&value))?;
+		} else {
+			builder.build_return(None)?;
+		}
+	}
+	Ok(WASM_EXPORTS
+		.iter()
+		.map(|name| (*name).to_string())
+		.collect())
+}
 
 /// The thread-local message of the last error, zero-terminated.
 const ERROR_MESSAGE: &str = "fa.c_library.error";
@@ -96,7 +187,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let ty = self.context.i8_type().array_type(MESSAGE_SIZE);
 		let global = self.module.add_global(ty, None, ERROR_MESSAGE);
 		global.set_initializer(&ty.const_zero());
-		global.set_thread_local(true);
+		global.set_thread_local(self.target != Target::Wasm);
 		global.set_linkage(Linkage::Internal);
 		global
 	}
@@ -110,6 +201,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.module
 				.add_function(name, pointer.fn_type(&[pointer.into()], false), None)
 		})
+	}
+
+	fn error_message_address(&self, builder: &Builder<'ctx>) -> Result<PointerValue<'ctx>, Error> {
+		let pointer = self.error_message_global().as_pointer_value();
+		if self.target == Target::Wasm {
+			return Ok(pointer);
+		}
+		Ok(builder
+			.build_call(self.thread_local_address(), &[pointer.into()], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("an address")
+			.into_pointer_value())
 	}
 
 	/// The wrappers of the API file's functions (the file being lowered),
@@ -152,17 +256,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.runtime.add_attributes(function, &["nounwind"]);
 		let builder = self.context.create_builder();
 		builder.position_at_end(self.context.append_basic_block(function, "entry"));
-		let global = self.error_message_global();
 		// the address of the calling thread's buffer
-		let message = builder
-			.build_call(
-				self.thread_local_address(),
-				&[global.as_pointer_value().into()],
-				"",
-			)?
-			.try_as_basic_value()
-			.basic()
-			.expect("an address");
+		let message = self.error_message_address(&builder)?;
 		builder.build_return(Some(&message))?;
 		self.c_exports.push(name);
 		Ok(())
@@ -461,14 +556,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let size = self.builder.build_phi(self.usize, "size")?;
 		size.add_incoming(&[(&length, before), (&position, cut)]);
 		let size = size.as_basic_value().into_int_value();
-		let global = self.error_message_global().as_pointer_value();
-		let buffer = self
-			.builder
-			.build_call(self.thread_local_address(), &[global.into()], "")?
-			.try_as_basic_value()
-			.basic()
-			.expect("an address")
-			.into_pointer_value();
+		let buffer = self.error_message_address(&self.builder)?;
 		self.builder.build_memcpy(buffer, 1, bytes, 1, size)?;
 		// SAFETY: `size` is below the buffer's size
 		let end = unsafe {
@@ -536,8 +624,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder.build_return(None)?;
 		}
 		self.end_function()?;
-		add_structor(self.module, init, true);
-		add_structor(self.module, fini, false);
+		let exports = library_hooks(self.module, &self.runtime, self.target, init, fini)?;
+		self.c_exports.extend(exports);
 		Ok(())
 	}
 

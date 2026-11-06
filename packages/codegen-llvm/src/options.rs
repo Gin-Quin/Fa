@@ -10,7 +10,7 @@ pub enum Target {
 	/// the module imports what it needs from the `fa` module of the
 	/// JavaScript loader written next to it.
 	Wasm,
-	/// Linux x86-64 without libc (an option of `native`, for the smallest
+	/// Linux x86-64 or AArch64 without libc (an option of `native`, for the smallest
 	/// programs): the runtime makes the system calls itself, and `ld.lld`
 	/// links a static executable. Printing floats needs [`Target::Native`].
 	NativeFreestanding,
@@ -128,6 +128,15 @@ pub struct CLibrary {
 }
 
 impl CLibrary {
+	/// The loadable library's name for the target.
+	pub fn output_name(&self, target: Target) -> String {
+		if target == Target::Wasm {
+			format!("lib{}.wasm", self.prefix)
+		} else {
+			self.shared_name()
+		}
+	}
+
 	/// The module of the API file (`library/capi.foreign`).
 	pub fn api_module(&self) -> String {
 		let path = self.api.replace('\\', "/");

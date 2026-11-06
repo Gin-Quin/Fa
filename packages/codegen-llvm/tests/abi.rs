@@ -1,10 +1,9 @@
 //! `CStruct`s by value under the C ABIs other than x86-64 System V: the
 //! declarations of `@extern` functions must be the ones clang writes for the
 //! same C prototypes (`clang --target=… -S -emit-llvm`, recorded below), for
-//! AArch64 (AAPCS64) and wasm32. Only the IR is compared: an AArch64
-//! program isn't linked on this host (`FA_NATIVE_TRIPLE` gives the native
-//! target another triple), so it is compiled by a child process, which
-//! writes the IR and may then stop at code generation.
+//! AArch64 (AAPCS64) and wasm32. AArch64 runs in a child process so that
+//! FA_NATIVE_TRIPLE does not affect parallel tests. Instruction selection
+//! must succeed; unresolved C symbols are the only expected link failure.
 
 #[cfg(not(fa_llvm))]
 #[test]
@@ -164,7 +163,12 @@ console.log(p.x, t.a, q.a, c.weight, b.a, s, w, g)
 			..Options::default()
 		};
 		let output = directory.join("abi");
-		let _ = compile(&session, file, "abi.foreign.fa", target, &options, &output);
+		if let Err(error) = compile(&session, file, "abi.foreign.fa", target, &options, &output) {
+			assert!(
+				matches!(error, fa_codegen_llvm::Error::Tool { .. }),
+				"{error}"
+			);
+		}
 		let suffix = if target == Target::Wasm {
 			"abi.wasm.ll"
 		} else {
@@ -203,8 +207,7 @@ console.log(p.x, t.a, q.a, c.weight, b.a, s, w, g)
 		check_declarations(&ir, WASM32);
 	}
 
-	/// The AArch64 IR, from a child process (`FA_ABI_CHILD`): the runtime's
-	/// IR is x86-64's, which LLVM can't select instructions for there.
+	/// The AArch64 runtime must reach the linker, without x86 intrinsics.
 	#[test]
 	fn structs_by_value_follow_aapcs64() {
 		let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fa-abi-aarch64");
@@ -214,7 +217,7 @@ console.log(p.x, t.a, q.a, c.weight, b.a, s, w, g)
 		}
 		let _ = std::fs::remove_dir_all(&directory);
 		std::fs::create_dir_all(&directory).expect("a scratch directory");
-		let _ = Command::new(std::env::current_exe().expect("the test binary"))
+		let child = Command::new(std::env::current_exe().expect("the test binary"))
 			.args([
 				"--exact",
 				"with_llvm::structs_by_value_follow_aapcs64",
@@ -224,8 +227,56 @@ console.log(p.x, t.a, q.a, c.weight, b.a, s, w, g)
 			.env("FA_NATIVE_TRIPLE", "aarch64-unknown-linux-gnu")
 			.output()
 			.expect("the child test");
+		assert!(
+			child.status.success(),
+			"{}\n{}",
+			String::from_utf8_lossy(&child.stdout),
+			String::from_utf8_lossy(&child.stderr)
+		);
 		let ir = std::fs::read_to_string(directory.join("abi.ll")).expect("the AArch64 IR");
 		assert!(ir.contains("target triple = \"aarch64"), "not AArch64 IR");
 		check_declarations(&ir, AARCH64);
+	}
+
+	#[test]
+	fn aarch64_freestanding_links_its_startup_and_recursive_runtime() {
+		let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fa-aarch64-freestanding");
+		if std::env::var_os("FA_ABI_CHILD").is_some() {
+			let source =
+				Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/compressed-links.fa");
+			let artifact = fa_codegen_llvm::compile_file(
+				&source,
+				Target::NativeFreestanding,
+				&Options::default(),
+				&directory.join("tree"),
+			)
+			.expect("AArch64 object emission and linking");
+			let bytes = std::fs::read(artifact.output).expect("the ELF executable");
+			assert_eq!(&bytes[..4], b"\x7fELF");
+			assert_eq!(
+				u16::from_le_bytes([bytes[18], bytes[19]]),
+				183,
+				"EM_AARCH64"
+			);
+			return;
+		}
+		let _ = std::fs::remove_dir_all(&directory);
+		std::fs::create_dir_all(&directory).expect("a scratch directory");
+		let child = Command::new(std::env::current_exe().expect("the test binary"))
+			.args([
+				"--exact",
+				"with_llvm::aarch64_freestanding_links_its_startup_and_recursive_runtime",
+				"--nocapture",
+			])
+			.env("FA_ABI_CHILD", "1")
+			.env("FA_NATIVE_TRIPLE", "aarch64-unknown-linux-gnu")
+			.output()
+			.expect("the child test");
+		assert!(
+			child.status.success(),
+			"{}\n{}",
+			String::from_utf8_lossy(&child.stdout),
+			String::from_utf8_lossy(&child.stderr)
+		);
 	}
 }

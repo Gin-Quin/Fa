@@ -339,7 +339,7 @@ fn compile_files(
 	if let Some(library) = &libraries.c_library {
 		// a C library: its shared and static libraries, and its header
 		let directory = output.parent().unwrap_or(Path::new(".")).to_path_buf();
-		let shared = directory.join(library.shared_name());
+		let shared = directory.join(library.output_name(target));
 		let archive = directory.join(library.static_name());
 		let linked = link::link_c_library(
 			target,
@@ -355,14 +355,22 @@ fn compile_files(
 		linked?;
 		timings.link = start.elapsed();
 		let header = write_header(session, entry, library, &directory)?;
+		let loader = if target == Target::Wasm {
+			Some(link::write_library_loader(&shared, options.leak_check)?)
+		} else {
+			None
+		};
 		return Ok(Artifact {
 			target,
 			options: *options,
 			output_size: fs::metadata(&shared)?.len(),
 			output: shared,
-			loader: None,
+			loader,
 			ir,
-			c_library: Some((archive, header)),
+			c_library: Some(crate::artifact::CLibraryArtifacts {
+				archive: (target == Target::Native).then_some(archive),
+				header,
+			}),
 			timings,
 		});
 	}

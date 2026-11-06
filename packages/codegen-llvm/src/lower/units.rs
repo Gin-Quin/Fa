@@ -496,12 +496,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let key = self.types().nominal(self.types().shape(shape).nominal?).key;
 		let module = self.types().decl_key_data(key).module;
 		let interface = self.session.interface(module)?;
-		let declaration = interface.keys.get(&key)?.node;
-		let destroy = interface
-			.type_functions
-			.get(&declaration)?
-			.iter()
-			.find(|function| self.types().syms.resolve(function.name) == "destroy")?;
+		let destroy = interface.type_method(self.types(), ty, "destroy")?;
 		let name = mangle(self.types(), destroy.key);
 		if let Some(value) = self.module.get_function(&name) {
 			return Some(value);

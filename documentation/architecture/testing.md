@@ -231,8 +231,11 @@ Tests run on the `bun` target by default, which is the fastest to start, even wh
 
 ```bash
 fa test --target=native
-fa test --target=web
+fa test --target=wasm
+fa test --target=wasm --watch
 ```
+
+The watch mode keeps the selected target. WebAssembly tests run through their generated loader on Node.js or Bun.
 
 ## Configuration
 
@@ -241,6 +244,6 @@ The files to include and the timeout of each test are set in the `test` field of
 :::implementation
 ## Implementation details
 
-- Fresh module-level values: before each test, the initializers of the module-level values reachable from the test run again, in the same process (on JavaScript, the module bindings are reassigned; on native, generated initialization and teardown functions run around each test).
-- Each test file runs in its own worker (JavaScript) or process (native), so that a stop only ends that file.
+- Each test file is compiled once. Bun runs a process per file and resets the module bindings before each test. Native and WebAssembly run a fresh process for each test body, selected by its index (an argument on native, the `fa.testIndex` import on WebAssembly).
+- A failed check or timeout marks the remaining tests of that file as not run; other files continue. The native and WebAssembly runner kills a process that exceeds the configured timeout.
 :::

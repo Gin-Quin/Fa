@@ -18,7 +18,7 @@ Eleven clean integrated worktrees have been removed, branches preserved. Active,
 dirty, locked or unmerged trees are preserved; some locks belong to another live
 session. Records: `/tmp/fa-resume-cleaned-worktrees.json`.
 
-## Lead changes being validated
+## Lead changes validated
 
 The delivered documentation rewrite is merged with the later compiler notes.
 Stage2 rejects old generics (GN031), keeping recovery only for the migration tool.
@@ -38,14 +38,14 @@ runtime tests and website check/snippets/build pass too.
 
 ## Active ownership
 
-- Lead, `platform-support`: Linux AArch64 runtime/freestanding, wasm C libraries
-  with importable factory/dispose, wasm tests, timeouts and watch target retention.
-  Focused C libraries, async exports, resources, CLI builds/watch and representative
-  AArch64 QEMU runs pass; clippy and website pass. Full suite queued in
-  `/tmp/fa-platform-workspace-full.log`. Source frozen. Keep the rewritten docs on
-  merge; regenerate all three IR files after performance C changes.
-- Lead, next separate lot: generic Pointer<T> support on Bun using published runtime
-  layout capabilities, including composed targets, copies and destruction.
+- Lead, `platform-support`, cf2fe33: Linux AArch64 runtime/freestanding, wasm C
+  libraries with importable factory/dispose, wasm tests, timeouts and watch target
+  retention. Complete workspace suite with LLVM, clippy and website pass. Merging
+  into lead now; regenerate all three runtime IR files after performance C changes.
+- Lead, `generic-pointers`: generic Pointer<T> on Bun using published runtime type
+  capabilities; direct/higher-order calls, composites, resources and task destruction
+  pass on Bun. The new native corpus has a two-block leak being isolated. No full
+  validation yet. Signature-only generic value ABI patch shared with analyzer-with.
 - Analyzer, `analyzer-callbacks`: native instance per callback error set and exact
   effects. Frozen full in `/tmp/fa-exact-effects-workspace-full.log`. Its old initial
   worktree has been removed. `analyzer-with` separately owns with, missing documented

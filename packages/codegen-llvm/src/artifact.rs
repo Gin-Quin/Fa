@@ -5,6 +5,14 @@ use std::time::Duration;
 
 use crate::options::{Options, Target};
 
+/// The additional outputs of `build.cLibrary`.
+#[derive(Clone, Debug)]
+pub struct CLibraryArtifacts {
+	/// A native static library; wasm exports a module instead.
+	pub archive: Option<PathBuf>,
+	pub header: PathBuf,
+}
+
 /// The time of each phase of [`compile`].
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Timings {
@@ -38,9 +46,8 @@ pub struct Artifact {
 	pub loader: Option<PathBuf>,
 	/// The optimized IR, with [`Options::emit_ir`].
 	pub ir: Option<PathBuf>,
-	/// A C library (`output` is its shared library): its static library
-	/// and its header.
-	pub c_library: Option<(PathBuf, PathBuf)>,
+	/// A C library (`output` is its shared library or wasm module).
+	pub c_library: Option<CLibraryArtifacts>,
 	pub output_size: u64,
 	pub timings: Timings,
 }

@@ -5,7 +5,7 @@
 //! - **Tier 0, the platform layer**, built here as LLVM IR per target, on
 //!   first use only, with `internal` linkage:
 //!
-//! | Runtime function | Native (libc) | Freestanding (Linux x86-64) | Wasm (imports of the `fa` module) |
+//! | Runtime function | Native (libc) | Freestanding (Linux x86-64 or AArch64) | Wasm (imports of the `fa` module) |
 //! | --- | --- | --- | --- |
 //! | `fa_write(fd, bytes, length)` | `write` | the `write` system call | `fa.write(fd, bytes, length)` |
 //! | `fa_exit(code)` | `exit` | `exit_group` | `fa.exit(code)` |
@@ -21,8 +21,8 @@
 //!   uses and removes the rest.
 //!
 //! The freestanding target has no libc at all: [`FREESTANDING_ASSEMBLY`]
-//! provides `_start` and the system calls, each in its own section so that
-//! the linker drops the unused ones.
+//! and [`FREESTANDING_AARCH64_ASSEMBLY`] provide `_start` and the system
+//! calls, each in its own section so the linker drops the unused ones.
 
 use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::builder::Builder;
@@ -39,8 +39,11 @@ use crate::target::Target;
 /// The exit status of a stopped program (values brief 2.7).
 pub const STOP_EXIT_CODE: i32 = 101;
 
-/// The tier 1 runtime for 64-bit targets.
+/// The tier 1 runtime for x86-64.
 const TIER1_64: &str = include_str!("../runtime/fa_runtime.64.ll");
+
+/// The AArch64 runtime, compiled with that target's C ABI and intrinsics.
+const TIER1_AARCH64: &str = include_str!("../runtime/fa_runtime.aarch64.ll");
 
 /// The tier 1 runtime for wasm32.
 const TIER1_WASM32: &str = include_str!("../runtime/fa_runtime.wasm32.ll");
@@ -152,6 +155,95 @@ memset:
 	ret
 "#;
 
+/// Linux AArch64 startup, system calls and freestanding memory routines.
+/// Syscall numbers follow Linux's asm-generic/unistd.h; x0–x5 already hold
+/// the arguments in the order used by the kernel, with x8 naming the call.
+pub const FREESTANDING_AARCH64_ASSEMBLY: &str = r#"
+	.section .text._start,"ax",@progbits
+	.globl _start
+_start:
+	mov x29, xzr
+	mov x30, xzr
+	ldr x0, [sp]
+	add x1, sp, #8
+	bl main
+	mov x8, #94
+	svc #0
+	.section .text.fa_sys_write,"ax",@progbits
+	.globl fa_sys_write
+fa_sys_write:
+	mov x8, #64
+	svc #0
+	ret
+	.section .text.fa_sys_exit,"ax",@progbits
+	.globl fa_sys_exit
+fa_sys_exit:
+	mov x8, #94
+	svc #0
+	.section .text.fa_sys_clock_gettime,"ax",@progbits
+	.globl fa_sys_clock_gettime
+fa_sys_clock_gettime:
+	mov x8, #113
+	svc #0
+	ret
+	.section .text.fa_sys_nanosleep,"ax",@progbits
+	.globl fa_sys_nanosleep
+fa_sys_nanosleep:
+	mov x8, #101
+	svc #0
+	ret
+	.section .text.fa_sys_mmap,"ax",@progbits
+	.globl fa_sys_mmap
+fa_sys_mmap:
+	mov x8, #222
+	svc #0
+	ret
+	.section .text.fa_sys_mprotect,"ax",@progbits
+	.globl fa_sys_mprotect
+fa_sys_mprotect:
+	mov x8, #226
+	svc #0
+	ret
+	.section .text.memcpy,"ax",@progbits
+	.globl memcpy
+memcpy:
+	mov x3, x0
+	cbz x2, 2f
+1:
+	ldrb w4, [x1], #1
+	strb w4, [x3], #1
+	subs x2, x2, #1
+	b.ne 1b
+2:
+	ret
+	.section .text.memmove,"ax",@progbits
+	.globl memmove
+memmove:
+	cmp x0, x1
+	b.ls memcpy
+	cbz x2, 2f
+	add x3, x0, x2
+	add x1, x1, x2
+1:
+	ldrb w4, [x1, #-1]!
+	strb w4, [x3, #-1]!
+	subs x2, x2, #1
+	b.ne 1b
+2:
+	ret
+	.section .text.memset,"ax",@progbits
+	.globl memset
+memset:
+	mov x3, x0
+	cbz x2, 2f
+1:
+	strb w1, [x3], #1
+	subs x2, x2, #1
+	b.ne 1b
+2:
+	ret
+"#;
+
 /// Emits the runtime functions into a module, on demand.
 pub struct Runtime<'ctx, 'module> {
 	context: &'ctx Context,
@@ -174,7 +266,15 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		usize: IntType<'ctx>,
 	) -> Self {
 		if target == Target::NativeFreestanding {
-			module.set_inline_assembly(FREESTANDING_ASSEMBLY);
+			let triple = module.get_triple();
+			let assembly = if triple.as_str().to_bytes().starts_with(b"aarch64")
+				|| triple.as_str().to_bytes().starts_with(b"arm64")
+			{
+				FREESTANDING_AARCH64_ASSEMBLY
+			} else {
+				FREESTANDING_ASSEMBLY
+			};
+			module.set_inline_assembly(assembly);
 		}
 		Runtime {
 			context,
@@ -208,10 +308,7 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 	/// Parses the tier 1 runtime of the target and links it into the module.
 	/// Its functions keep their external linkage until [`Runtime::internalize`].
 	pub fn link_tier1(&self) -> Result<(), Error> {
-		let text = match self.target {
-			Target::Wasm => TIER1_WASM32,
-			Target::Native | Target::NativeFreestanding => TIER1_64,
-		};
+		let text = tier1_for_triple(self.target, self.module.get_triple().as_str().to_bytes());
 		let buffer = MemoryBuffer::create_from_memory_range_copy(text.as_bytes(), "fa_runtime");
 		let runtime = self.context.create_module_from_ir(buffer)?;
 		runtime.set_triple(&self.module.get_triple());
@@ -265,6 +362,9 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 	/// with the C library, leaves the 128-bit builtins to the compiler's
 	/// support library).
 	pub fn define_platform(&self) -> Result<(), Error> {
+		if self.target != Target::Native {
+			self.cstring_length()?;
+		}
 		self.write()?;
 		self.free()?;
 		self.exit()?;
@@ -297,6 +397,56 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 			}
 		}
 		Ok(())
+	}
+
+	/// C strings on targets without libc, also callable by separate units.
+	pub fn cstring_length(&self) -> Result<FunctionValue<'ctx>, Error> {
+		let pointer = self.context.ptr_type(AddressSpace::default());
+		let ty = self.usize.fn_type(&[pointer.into()], false);
+		if self.target == Target::Native {
+			return Ok(self.declare("strlen", ty));
+		}
+		let function = self.define("fa_cstring_length", ty, &[], |builder, function| {
+			let entry = builder.get_insert_block().expect("an entry block");
+			let scan = self.context.append_basic_block(function, "scan");
+			let advance = self.context.append_basic_block(function, "advance");
+			let end = self.context.append_basic_block(function, "end");
+			builder.build_unconditional_branch(scan)?;
+			builder.position_at_end(scan);
+			let index = builder.build_phi(self.usize, "length")?;
+			index.add_incoming(&[(&self.usize.const_zero(), entry)]);
+			let offset = index.as_basic_value().into_int_value();
+			let address = unsafe {
+				builder.build_gep(
+					self.context.i8_type(),
+					function.get_nth_param(0).unwrap().into_pointer_value(),
+					&[offset],
+					"",
+				)?
+			};
+			let byte = builder
+				.build_load(self.context.i8_type(), address, "")?
+				.into_int_value();
+			let zero = builder.build_int_compare(
+				IntPredicate::EQ,
+				byte,
+				self.context.i8_type().const_zero(),
+				"",
+			)?;
+			builder.build_conditional_branch(zero, end, advance)?;
+			builder.position_at_end(advance);
+			let next = builder.build_int_add(offset, self.usize.const_int(1, false), "")?;
+			index.add_incoming(&[(&next, advance)]);
+			builder.build_unconditional_branch(scan)?;
+			builder.position_at_end(end);
+			builder.build_return(Some(&offset))?;
+			Ok(())
+		})?;
+		function.add_attribute(
+			AttributeLoc::Function,
+			self.context.create_string_attribute("no-builtins", ""),
+		);
+		Ok(function)
 	}
 
 	/// An enum attribute, by its LLVM name.
@@ -1062,7 +1212,7 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 	}
 
 	/// Declares a function imported from the `fa` module of the wasm host.
-	fn import(&self, name: &str, r#type: FunctionType<'ctx>) -> FunctionValue<'ctx> {
+	pub(crate) fn import(&self, name: &str, r#type: FunctionType<'ctx>) -> FunctionValue<'ctx> {
 		let symbol = format!("fa_host_{name}");
 		self.module.get_function(&symbol).unwrap_or_else(|| {
 			let function = self
@@ -1147,8 +1297,17 @@ pub fn declarations_module<'ctx>(
 
 /// The IR text of the tier 1 runtime of a target.
 pub fn tier1_text(target: Target) -> &'static str {
+	tier1_for_triple(target, target.triple().as_str().to_bytes())
+}
+
+fn tier1_for_triple(target: Target, triple: &[u8]) -> &'static str {
 	match target {
 		Target::Wasm => TIER1_WASM32,
+		Target::Native | Target::NativeFreestanding
+			if triple.starts_with(b"aarch64") || triple.starts_with(b"arm64") =>
+		{
+			TIER1_AARCH64
+		}
 		Target::Native | Target::NativeFreestanding => TIER1_64,
 	}
 }
@@ -1158,9 +1317,16 @@ pub fn tier1_text(target: Target) -> &'static str {
 fn declarations_bitcode(target: Target) -> Result<&'static [u8], Error> {
 	use std::sync::OnceLock;
 	static BITS_64: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
+	static BITS_AARCH64: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
 	static BITS_WASM32: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
 	let (cell, text) = match target {
 		Target::Wasm => (&BITS_WASM32, TIER1_WASM32),
+		Target::Native | Target::NativeFreestanding
+			if target.triple().as_str().to_bytes().starts_with(b"aarch64")
+				|| target.triple().as_str().to_bytes().starts_with(b"arm64") =>
+		{
+			(&BITS_AARCH64, TIER1_AARCH64)
+		}
 		Target::Native | Target::NativeFreestanding => (&BITS_64, TIER1_64),
 	};
 	let bits = cell.get_or_init(|| declarations_of(text).map_err(|error| error.to_string()));

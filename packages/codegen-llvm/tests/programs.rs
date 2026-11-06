@@ -14,6 +14,8 @@
 //! ```
 //!
 //! `FA_PROGRAMS=filter` runs the programs whose path contains `filter`.
+//! `FA_NATIVE_TRIPLE`, a matching `CC`, and `FA_NATIVE_RUNNER` (an executable,
+//! e.g. qemu-aarch64 with QEMU_LD_PREFIX) also exercise the suite on AArch64.
 //!
 //! The programs are `tests/programs/*.fa`, the programs of the `fa` command
 //! (`packages/cli/tests/programs`), and the cases of the analyzer
@@ -415,7 +417,14 @@ mod with_llvm {
 				command.arg(loader);
 				command
 			}
-			_ => Command::new(&artifact.output),
+			_ => match std::env::var_os("FA_NATIVE_RUNNER") {
+				Some(runner) => {
+					let mut command = Command::new(runner);
+					command.arg(&artifact.output);
+					command
+				}
+				None => Command::new(&artifact.output),
+			},
 		};
 		let mut child = command
 			.args(arguments)

@@ -13,7 +13,7 @@ pub(crate) fn test(arguments: &[OsString]) -> i32 {
 	let mut paths = Vec::new();
 	let mut watch = false;
 	let mut asynchronous = None;
-	let mut native = false;
+	let mut llvm_target = None;
 	for argument in arguments {
 		let text = argument.to_string_lossy();
 		if let Some(mode) = asynchronous_option(&text) {
@@ -26,10 +26,11 @@ pub(crate) fn test(arguments: &[OsString]) -> i32 {
 			asynchronous = Some(mode);
 		} else if let Some(value) = text.strip_prefix("--target=") {
 			match value {
-				"bun" => native = false,
-				"native" => native = true,
+				"bun" => llvm_target = None,
+				"native" => llvm_target = Some(fa_codegen_llvm::Target::Native),
+				"wasm" => llvm_target = Some(fa_codegen_llvm::Target::Wasm),
 				_ => {
-					eprintln!("fa test: the tests run on `bun` or `native`");
+					eprintln!("fa test: the tests run on `bun`, `native` or `wasm`");
 					return USAGE;
 				}
 			}
@@ -49,22 +50,27 @@ pub(crate) fn test(arguments: &[OsString]) -> i32 {
 		Ok(path) => path,
 		Err(code) => return code,
 	};
+	if let Some(target) = llvm_target
+		&& crate::native::backend().is_none()
+	{
+		return crate::native::delegate("test", arguments, target.name());
+	}
 	if watch {
 		return match workspace::select(path.as_deref(), Implements::Tests) {
-			Ok(selection) => develop::watch_tests(selection),
+			Ok(selection) => develop::watch_tests(selection, llvm_target, asynchronous),
 			Err(message) => {
 				crate::color::eprintln_message(&message);
 				1
 			}
 		};
 	}
-	if native {
+	if let Some(target) = llvm_target {
 		// the LLVM backend is in `fa-native` (`native.rs`)
 		let Some(backend) = crate::native::backend() else {
-			return crate::native::delegate("test", arguments, "native");
+			return crate::native::delegate("test", arguments, target.name());
 		};
 		return on_selection(path.as_deref(), Implements::Tests, "test", |path| {
-			run_native_tests(backend, path, asynchronous)
+			run_native_tests(backend, path, asynchronous, target)
 		});
 	}
 	on_selection(path.as_deref(), Implements::Tests, "test", |path| {
@@ -504,15 +510,15 @@ pub(crate) fn run_native_tests(
 	backend: &dyn crate::native::Backend,
 	path: Option<&Path>,
 	asynchronous: Option<bool>,
+	target: fa_codegen_llvm::Target,
 ) -> i32 {
-	use fa_analyzer::syntax::{TestModifier, View};
 	if !fa_codegen_llvm::llvm_available() {
 		eprintln!(
 			"fa: the `native` target needs the LLVM backend, and this `fa` was built without LLVM: run scripts/setup-llvm.sh, export LLVM_SYS_181_PREFIX and rebuild"
 		);
 		return 1;
 	}
-	let mut loaded = match Loaded::load(path, "native") {
+	let mut loaded = match Loaded::load(path, target.analysis_target()) {
 		Ok(loaded) => loaded,
 		Err(message) => {
 			crate::color::eprintln_message(&message);
@@ -520,6 +526,16 @@ pub(crate) fn run_native_tests(
 		}
 	};
 	loaded.configure_asynchronous(asynchronous, true);
+	run_llvm_tests(backend, &loaded, target)
+}
+
+/// Runs an already loaded test package, including a watch session.
+pub(crate) fn run_llvm_tests(
+	backend: &dyn crate::native::Backend,
+	loaded: &Loaded,
+	target: fa_codegen_llvm::Target,
+) -> i32 {
+	use fa_analyzer::syntax::{TestModifier, View};
 	crate::color::eprint_diagnostics(&loaded.rendered());
 	if loaded.has_errors() {
 		return 1;
@@ -558,8 +574,8 @@ pub(crate) fn run_native_tests(
 		);
 		return 1;
 	}
-	let directory =
-		run_directory(&loaded.inner.project.base.join("package.fa")).with_file_name("native-tests");
+	let directory = run_directory(&loaded.inner.project.base.join("package.fa"))
+		.with_file_name(format!("{}-tests", target.name()));
 	if let Err(error) = fs::create_dir_all(&directory) {
 		eprintln!(
 			"fa test: can't write into `{}`: {error}",
@@ -574,7 +590,7 @@ pub(crate) fn run_native_tests(
 	let artifact = match backend.compile(
 		session,
 		crate::native::Input::Tests(program),
-		fa_codegen_llvm::Target::Native,
+		target,
 		&options,
 		&directory.join("tests"),
 		&fa_codegen_llvm::Libraries::default(),
@@ -604,14 +620,38 @@ pub(crate) fn run_native_tests(
 			continue;
 		}
 		let _ = std::io::Write::flush(&mut std::io::stdout());
-		let output = Command::new(&artifact.output)
+		let mut command = if let Some(loader) = &artifact.loader {
+			let runtime = match fa_codegen_llvm::javascript_runtime() {
+				Ok(runtime) => runtime,
+				Err(error) => {
+					eprintln!("fa test: {error}");
+					return 1;
+				}
+			};
+			let mut command = Command::new(runtime);
+			command.arg(loader);
+			command
+		} else {
+			Command::new(&artifact.output)
+		};
+		command
 			.arg(index.to_string())
 			.stdin(std::process::Stdio::null())
 			.stdout(std::process::Stdio::inherit())
-			.stderr(std::process::Stdio::piped())
-			.output();
+			.stderr(std::process::Stdio::piped());
+		let timeout = test_timeout();
+		let output = llvm_test_output(&mut command, timeout);
 		let output = match output {
-			Ok(output) => output,
+			Ok(Some(output)) => output,
+			Ok(None) => {
+				failed += 1;
+				stopped = Some(file.as_str());
+				println!(
+					"✗ {name} ({place})\nits test didn't finish in {} s, so it was stopped (set `FA_TEST_TIMEOUT` to give it more seconds)",
+					timeout.as_secs()
+				);
+				continue;
+			}
 			Err(error) => {
 				eprintln!(
 					"fa test: can't run `{}`: {error}",
@@ -642,6 +682,32 @@ pub(crate) fn run_native_tests(
 	}
 	println!("\n{}", parts.join(", "));
 	i32::from(failed > 0)
+}
+
+/// Reads stderr while the test runs, with the same timeout backstop as Bun.
+fn llvm_test_output(
+	command: &mut Command,
+	timeout: Duration,
+) -> std::io::Result<Option<std::process::Output>> {
+	use std::io::Read;
+	let mut child = command.spawn()?;
+	let mut stderr = child.stderr.take().expect("the stderr pipe");
+	let reader = std::thread::spawn(move || {
+		let mut bytes = Vec::new();
+		let _ = stderr.read_to_end(&mut bytes);
+		bytes
+	});
+	let status = wait_with_timeout(&mut child, timeout);
+	if status.is_err() {
+		let _ = child.kill();
+		let _ = child.wait();
+	}
+	let stderr = reader.join().expect("the stderr reader");
+	Ok(status?.map(|status| std::process::Output {
+		status,
+		stdout: Vec::new(),
+		stderr,
+	}))
 }
 
 /// What a failed run of a native test printed on stderr, as the Bun runner

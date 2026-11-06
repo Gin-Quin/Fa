@@ -27,8 +27,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::analysis::KeyLoopInstance;
 use crate::check::{BodyCx, Walker};
 use crate::diagnostics::codes::types::{TF010, TF011};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::ids::{NodeId, ParamId, Sym, SymbolId, TypeId};
+use crate::diagnostics::{Diagnostic, Location, Severity, SourceSpan};
+use crate::ids::{ModuleId, NodeId, ParamId, Sym, SymbolId, TypeId};
 use crate::symbols::{DeclState, Resolution, SymbolKind};
 use crate::syntax::{self, Name, View};
 use crate::types::{FieldEntry, FieldFlags, TypeKind};
@@ -36,6 +36,8 @@ use crate::types::{FieldEntry, FieldFlags, TypeKind};
 /// The key sets of a walk.
 #[derive(Default)]
 pub(crate) struct KeySetState {
+	/// Local and imported key-set signatures, independent of local symbols.
+	pub(super) metadata: FxHashMap<ParamId, crate::modules::GenericKeySet>,
 	/// The compile-time value parameters holding a key set, by symbol.
 	params: FxHashMap<SymbolId, KeySetParam>,
 	/// The variables of the key loops (by pattern node): what they go through.
@@ -56,6 +58,8 @@ pub(crate) struct KeySetState {
 	/// The loops over a key-set parameter, checked per key once the module
 	/// is walked.
 	deferred: Vec<DeferredLoop>,
+	/// Local key-set parameters iterated by a loop, even without a local call.
+	pub(super) loop_params: FxHashSet<ParamId>,
 	/// Checking the loops per key: the applications met are not recorded.
 	unrolling: bool,
 }
@@ -81,7 +85,8 @@ struct KeySetInstance {
 	/// The keys bound, as dotted paths.
 	keys: Vec<String>,
 	/// The application node (for the notes of its errors).
-	call: NodeId,
+	caller: ModuleId,
+	span: SourceSpan,
 }
 
 /// What the variable of a key loop goes through.
@@ -185,6 +190,9 @@ impl Walker<'_> {
 			},
 		);
 		self.a.key_set_params.insert(param, subject);
+		self.key_sets
+			.metadata
+			.insert(param, crate::modules::GenericKeySet { subject, deep });
 		true
 	}
 
@@ -206,11 +214,11 @@ impl Walker<'_> {
 
 	/// The key-set parameter declared by `param`, if it is one.
 	fn key_set_param(&self, param: ParamId) -> Option<KeySetParam> {
-		self.key_sets
-			.params
-			.values()
-			.copied()
-			.find(|entry| entry.param == param)
+		self.key_sets.metadata.get(&param).map(|info| KeySetParam {
+			param,
+			subject: info.subject,
+			deep: info.deep,
+		})
 	}
 
 	/// The argument of a key-set parameter at an application: its key set
@@ -277,11 +285,47 @@ impl Walker<'_> {
 					subject,
 					key_set,
 					keys,
-					call: argument,
+					caller: self.s.module_id(self.file),
+					span: SourceSpan::new(
+						self.tree.spans[argument.index()].start as u32,
+						self.tree.spans[argument.index()].end as u32,
+					),
 				});
 			}
 		}
 		Some(key_set)
+	}
+
+	/// What foreign declaring units need after this caller's tree is dropped.
+	pub(super) fn foreign_key_set_applications(&self) -> Vec<crate::modules::KeySetApplication> {
+		let own = self.s.module(self.file);
+		self.key_sets
+			.instances
+			.iter()
+			.filter(|(param, _)| {
+				let module = self
+					.s
+					.types
+					.decl_key_data(self.s.types.param(**param).owner)
+					.module;
+				self.s.types.module_path(module) != own
+					&& self
+						.s
+						.interface(module)
+						.is_some_and(|interface| interface.key_loop_params.contains(param))
+			})
+			.flat_map(|(&param, instances)| {
+				instances
+					.iter()
+					.map(move |instance| crate::modules::KeySetApplication {
+						param,
+						subject: instance.subject,
+						key_set: instance.key_set,
+						caller: instance.caller,
+						span: instance.span,
+					})
+			})
+			.collect()
 	}
 
 	/// A read of a name: a key-set parameter is only the iterable of an
@@ -365,6 +409,7 @@ impl Walker<'_> {
 		self.a.key_loops.insert(n);
 		match parameter {
 			Some(entry) => {
+				self.key_sets.loop_params.insert(entry.param);
 				let saved = self.key_sets.iterable.replace(iterable);
 				self.check(iterable, None);
 				self.key_sets.iterable = saved;
@@ -441,7 +486,7 @@ impl Walker<'_> {
 		index: Option<Name>,
 		(iterable, body): (NodeId, NodeId),
 		keys: &[String],
-		subject: Option<(TypeId, NodeId)>,
+		subject: Option<(TypeId, ModuleId, SourceSpan)>,
 	) -> Vec<Arc<crate::analysis::Analysis>> {
 		if keys.is_empty() {
 			self.quiet += 1;
@@ -463,13 +508,28 @@ impl Walker<'_> {
 			if let Some(pattern) = pattern {
 				self.key_sets
 					.current
-					.insert(pattern, (key.clone(), subject.map(|(ty, _)| ty)));
+					.insert(pattern, (key.clone(), subject.map(|(ty, _, _)| ty)));
 			}
 			let output = self.output.len();
 			let buffered = self.body.flow_buffers.last().map_or(0, Vec::len);
 			self.check_for_items(n, pattern, index, (iterable, TypeId::STRING), body);
 			// the errors of this key name it (and the application)
-			let note = subject.map(|(_, call)| self.diagnostic(&TF011, call, "").location);
+			let note = subject.and_then(|(_, module, span)| {
+				let path = self.s.types.module_path(module).to_string();
+				self.s
+					.loaded_module(&path)
+					.map(|file| Location { file, span })
+			});
+			let foreign_call = subject.and_then(|(_, module, span)| {
+				let path = self.s.types.module_path(module);
+				if path == self.s.module(self.file) {
+					return None;
+				}
+				let text = self.s.resolver()?.source(path)?;
+				let (line, column) =
+					crate::diagnostics::LineIndex::new(&text).line_column(span.start);
+				Some(format!("{path}.fa:{line}:{column}"))
+			});
 			let mut produced: Vec<Diagnostic> = self.output.split_off(output);
 			if let Some(buffer) = self.body.flow_buffers.last_mut()
 				&& buffer.len() > buffered
@@ -493,6 +553,11 @@ impl Walker<'_> {
 						diagnostic.code.id, diagnostic.message
 					);
 					diagnostic.code = &TF011;
+				}
+				if let Some(call) = &foreign_call {
+					diagnostic
+						.message
+						.push_str(&format!(" (key set applied at {call})"));
 				}
 				if let Some(location) = note {
 					diagnostic
@@ -546,8 +611,76 @@ impl Walker<'_> {
 	/// application of the file (once the module is walked), in the context
 	/// saved at each loop.
 	pub(super) fn check_deferred_key_loops(&mut self) {
-		// every application, also of a parameter no loop goes through
-		// (`pick(entity, keys)`: the JavaScript index of its paths)
+		// The same declaration gets fresh local parameter ids when a unit
+		// is analyzed again. Match published requests by owner and position.
+		let mut applications = if self.key_sets.params.is_empty() {
+			Vec::new()
+		} else {
+			self.s.key_set_applications()
+		};
+		// Equal instances from several callers share one diagnostic. Its
+		// application note must not depend on interface publication order.
+		applications.sort_by(|left, right| {
+			self.s
+				.types
+				.module_path(left.caller)
+				.cmp(self.s.types.module_path(right.caller))
+				.then(left.span.cmp(&right.span))
+		});
+		let params: Vec<_> = self
+			.key_sets
+			.params
+			.values()
+			.map(|entry| entry.param)
+			.collect();
+		for param in params {
+			let info = self.s.types.param(param);
+			for application in &applications {
+				let requested = self.s.types.param(application.param);
+				if info.owner != requested.owner || info.index != requested.index {
+					continue;
+				}
+				self.a.foreign_key_sets = true;
+				let instances = self.key_sets.instances.entry(param).or_default();
+				if !instances.iter().any(|instance| {
+					instance.subject == application.subject
+						&& instance.key_set == application.key_set
+				}) {
+					let TypeKind::Tuple(list) = self.s.types.kind(application.key_set) else {
+						continue;
+					};
+					let [fields, bits] = *self.s.types.list_items(list) else {
+						continue;
+					};
+					let Some(bits) = self.s.types.as_int(bits).and_then(|int| int.literal()) else {
+						continue;
+					};
+					let keys = self.key_paths(fields, bits);
+					self.key_sets
+						.instances
+						.entry(param)
+						.or_default()
+						.push(KeySetInstance {
+							subject: application.subject,
+							key_set: application.key_set,
+							keys,
+							caller: application.caller,
+							span: application.span,
+						});
+				}
+			}
+		}
+		// Publication order and worker scheduling must not order generated
+		// specializations. Concrete type hashes ignore local/global ids.
+		for instances in self.key_sets.instances.values_mut() {
+			instances.sort_by_cached_key(|instance| {
+				(
+					self.s.types.stable_hash(instance.subject),
+					self.s.types.stable_hash(instance.key_set),
+				)
+			});
+		}
+		// Every application, also of a parameter no loop goes through.
 		for (&param, instances) in &self.key_sets.instances {
 			self.a.key_set_instances.insert(
 				param,
@@ -583,7 +716,7 @@ impl Walker<'_> {
 					entry.index,
 					(entry.iterable, entry.body),
 					&instance.keys,
-					Some((instance.subject, instance.call)),
+					Some((instance.subject, instance.caller, instance.span)),
 				);
 				bodies.push(KeyLoopInstance {
 					param: Some(subject),

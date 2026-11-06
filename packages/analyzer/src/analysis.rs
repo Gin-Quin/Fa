@@ -749,6 +749,9 @@ pub struct Analysis {
 	/// argument of its subject and its binding (`Tuple(Fields type, bits)`).
 	/// On JavaScript the hidden parameter is the index of the application.
 	pub key_set_instances: FxHashMap<ParamId, Vec<(TypeId, TypeId)>>,
+	/// This analysis includes key-loop applications from another file.
+	/// An incremental edit can remove the last one, requiring a fresh body.
+	pub(crate) foreign_key_sets: bool,
 	/// The patterns of `when` arms that are values of a `Fields` subject
 	/// (`Permissions { read }`, `Permissions.read`, `{}`): the arm matches
 	/// a set equal to the pattern's bits (`Analysis::constants`).
@@ -1452,6 +1455,7 @@ impl Analysis {
 			key_reads: rustc_hash::FxHashSet::default(),
 			key_loop_bodies: FxHashMap::default(),
 			key_set_instances: FxHashMap::default(),
+			foreign_key_sets: false,
 			fields_patterns: rustc_hash::FxHashSet::default(),
 			derived_params: FxHashMap::default(),
 			reactive_reads: FxHashMap::default(),

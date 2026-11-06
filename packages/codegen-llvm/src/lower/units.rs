@@ -605,18 +605,34 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let params: Vec<fa_analyzer::types::ParamSig> = self.types().params(sig.params).to_vec();
 		// a generic function: the instance for the call's type arguments,
 		// which its own unit makes in an instance wave
-		let mut generics = Vec::new();
-		for ty in params
-			.iter()
-			.map(|param| param.ty)
-			.chain([sig.ret, sig.throws])
-		{
-			self.collect_params(ty, &mut generics);
+		let mut generics = self
+			.session
+			.interface(declared.module)
+			.and_then(|interface| interface.generic_functions.get(&declared.decl))
+			.map(|function| {
+				self.types()
+					.list_items(function.generics)
+					.iter()
+					.filter_map(|&ty| match self.types().kind(ty) {
+						TypeKind::Param(param) => Some(param),
+						_ => None,
+					})
+					.collect::<Vec<_>>()
+			})
+			.unwrap_or_default();
+		if generics.is_empty() {
+			for ty in params
+				.iter()
+				.map(|param| param.ty)
+				.chain([sig.ret, sig.throws])
+			{
+				self.collect_params(ty, &mut generics);
+			}
 		}
 		let (name, bindings, arguments) = if generics.is_empty() {
 			(mangle(self.types(), key), FxHashMap::default(), Vec::new())
 		} else {
-			let Some(list) = self.analysis.instantiation(node) else {
+			let Some(list) = self.call_instantiation(node) else {
 				return Err(self.unsupported(node.index(), "this generic call"));
 			};
 			let arguments: Vec<TypeId> = self
@@ -635,8 +651,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				));
 			}
 			let mut bindings = FxHashMap::default();
-			for &param in &generics {
-				let index = self.types().param(param).index as usize;
+			for (index, &param) in generics.iter().enumerate() {
 				let Some(&argument) = arguments.get(index) else {
 					return Err(self.unsupported(node.index(), "this generic call"));
 				};

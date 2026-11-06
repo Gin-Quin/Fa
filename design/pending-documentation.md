@@ -189,3 +189,18 @@ Add: "**Compressed links.** On 64-bit Linux, the recursive edges of a type whose
 ## `documentation/` page of `when`, `:::implementation` section (native)
 
 Add: "A `when` choosing among string literals of one length by the integers `0` to `n - 1` and `else` reads the chosen one from a single constant holding them all, at `start + length × index` (any other integer reads the `else` literal): no branch and no table."
+
+
+## `documentation/types/fields.md`, key-set parameters and implementation
+
+Clarify that key-set parameters can be applied to imported functions, by qualified name or an import alias. Their `@for` bodies are checked once per selected key of every application, including applications in other files; an error names the key and the application. In the JavaScript implementation section, note that an erased generic function receives the selected paths and a stable instance tag as a hidden value, so `Pick`/`Omit` and unrolled bodies agree across modules without file-local instance numbers. Only the units declaring such bodies need another analysis after their callers are known; the checked analysis also generates their JavaScript before it is released.
+
+## `documentation/types/generics.md` and the page of `Pick`/`Omit`
+
+The examples `select = <Entity, keys: Keys<Entity>>(entity: Entity): Pick<Entity, keys> => pick(entity, keys)` and its `Omit` counterpart work when imported, preserving the exact selected result fields. The derived result is a compiler-owned binder and cannot be overridden with an extra type argument (`GN007`). Imported generic functions receive compile-time values and constraint methods through their semantic interface just like local functions; applying one as a value binds these hidden arguments.
+
+## `documentation/advanced/structural-typing.md`, copies of `Type<parameter>`
+
+Extend the `EF004` paragraph to calls from another file and wrappers: if a function returns `Type<human>` after writing `name: String` into its copy, the actual argument's `name` must be exactly `String`. A narrower literal union is rejected through an imported function, an alias or a wrapper too. Interfaces retain the copy-write paths and written types; callers do not need the callee's source tree.
+
+In the JavaScript implementation paragraph, an erased generic value is structurally copied at the ordinary copy sites (mutable destinations, returned borrowed values and stored elements); the existing helper copies the complete concrete shape and leaves primitives unchanged. Arrays of generic elements need element copies, even though the element's concrete type is unknown in the function body.

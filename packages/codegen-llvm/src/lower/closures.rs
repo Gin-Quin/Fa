@@ -475,6 +475,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.convert(closure, Repr::Function(self.type_of(node)), node.index())
 	}
 
+	/// An explicitly applied function from another unit, with a concrete
+	/// function type at this node and no captured environment.
+	pub(crate) fn applied_external_function_value(
+		&mut self,
+		function: &super::Function<'ctx>,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let thunk = self.thunk_of(function)?;
+		let entry =
+			self.async_value_entry(function, thunk.as_global_value().as_pointer_value(), true)?;
+		self.make_closure_of(entry, self.pointer_type().const_null(), self.type_of(node))
+	}
+
 	/// The thunk of a function declaration used as a value: the indirect
 	/// call convention, whose environment it ignores.
 	pub(crate) fn thunk_of(

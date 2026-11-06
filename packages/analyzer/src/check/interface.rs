@@ -151,6 +151,7 @@ impl Walker<'_> {
 				.map(|exported| exported.decl),
 		);
 		let mut parameters: FxHashMap<NodeId, Vec<Parameter>> = FxHashMap::default();
+		let mut generic_functions = FxHashMap::default();
 		called.sort_unstable();
 		called.dedup();
 		for decl in called {
@@ -165,6 +166,7 @@ impl Walker<'_> {
 				.iter()
 				.map(|param| (param.symbol, param.default.is_some()))
 				.collect();
+			let generics = info.generics.clone();
 			let only_called = self.only_called(node);
 			let mut published = Vec::with_capacity(params.len());
 			for (index, (param, has_default)) in params.into_iter().enumerate() {
@@ -181,6 +183,21 @@ impl Walker<'_> {
 				});
 			}
 			parameters.insert(decl, published);
+			if generics.is_empty() {
+				continue;
+			}
+			let generic_types: Vec<_> = generics
+				.iter()
+				.map(|&param| self.s.types.intern(crate::types::TypeKind::Param(param)))
+				.collect();
+			let generic_list = self.s.types.list(&generic_types);
+			generic_functions.insert(
+				decl,
+				crate::modules::GenericFunction {
+					generics: generic_list,
+					requirements: crate::modules::generic_requirements(&self.s.types, &generics),
+				},
+			);
 		}
 
 		// the module-level declarations, the statics, what each declaration
@@ -314,12 +331,64 @@ impl Walker<'_> {
 				(key, keyed)
 			})
 			.collect();
+		let reachable = if self.implicit_writes.is_empty()
+			&& self.key_sets.metadata.is_empty()
+			&& self.a.derived_params.is_empty()
+		{
+			Default::default()
+		} else {
+			let interface = &self.s.source_file(self.file).interface;
+			let roots = interface
+				.members
+				.values()
+				.chain(&interface.export)
+				.map(|export| export.ty)
+				.chain(
+					type_functions
+						.values()
+						.flatten()
+						.map(|function| function.ty),
+				)
+				.chain(nested_types.values().flatten().map(|nested| nested.ty))
+				.chain(generic_functions.values().flat_map(|function| {
+					self.s.types.list_items(function.generics).iter().copied()
+				}));
+			crate::modules::reachable_params(&self.s.types, roots)
+		};
+		let implicit_writes = self
+			.implicit_writes
+			.iter()
+			.filter(|(param, _)| reachable.contains(param))
+			.map(|(&param, writes)| (param, writes.clone()))
+			.collect();
+		let key_set_params = self
+			.key_sets
+			.metadata
+			.iter()
+			.filter(|(param, _)| reachable.contains(param))
+			.map(|(&param, &info)| (param, info))
+			.collect();
+		let derived_params = self
+			.a
+			.derived_params
+			.iter()
+			.filter(|(param, _)| reachable.contains(param))
+			.map(|(&param, &info)| (param, info))
+			.collect();
+		let key_set_applications = self.foreign_key_set_applications();
+		let key_loop_params = self.key_sets.loop_params.iter().copied().collect();
 		let interface = &mut self.s.source_file_mut(self.file).interface;
 		interface.keys = keys;
 		interface.externs = externs;
 		interface.type_functions = type_functions;
 		interface.nested_types = nested_types;
 		interface.parameters = parameters;
+		interface.implicit_writes = implicit_writes;
+		interface.generic_functions = generic_functions;
+		interface.key_set_params = key_set_params;
+		interface.derived_params = derived_params;
+		interface.key_set_applications = key_set_applications;
+		interface.key_loop_params = key_loop_params;
 		interface.statics = statics;
 		interface.field_defaults = field_defaults;
 		interface.export_names = export_names;

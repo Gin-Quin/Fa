@@ -1,7 +1,8 @@
--- pending: M2 (key-set parameters applied from another file: GN008; the derived parameter and the writes of `Type<human>` aren't in the interface)
 -- brief: gn-23 and gn-24 with the functions in another file
 -- file: library/select.fa
 export function = <Entity, keys: Keys<Entity>>(entity: Entity): Pick<Entity, keys> => pick(entity, keys)
+-- file: library/remove.fa
+export function = <Entity, keys: Keys<Entity>>(entity: Entity): Omit<Entity, keys> => omit(entity, keys)
 -- file: library/renamed.fa
 export function = (human: { name: String }, name: String): Type<human> => {
 	mutable copy = human
@@ -14,6 +15,8 @@ export function = () => {
 	let user = User { name = "Ada", email = "a@b", password = "s" }
 	console.log(library.select<User, { name, email }>(user))
 	console.log(library.renamed(user, "Bea").name)
+	console.log(library.remove<User, { password }>(user))
 }
 -- prints: { name = "Ada", email = "a@b" }
 -- prints: Bea
+-- prints: { name = "Ada", email = "a@b" }

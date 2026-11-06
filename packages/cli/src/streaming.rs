@@ -240,6 +240,9 @@ struct BuildSink<'a> {
 	/// `FA_DEFER_UNITS=1` (tests): every unit is generated in the second
 	/// pass, which must write the same modules as the first.
 	defer_all: bool,
+	/// Resolved once after all units, shared by key-loop specializations
+	/// and the remaining modules deferred for their proofs.
+	resolved_options: std::sync::OnceLock<Options>,
 }
 
 /// A unit generated after the last one ([`BuildSink::deferred`]).
@@ -251,6 +254,44 @@ struct Deferred {
 }
 
 impl UnitSink for BuildSink<'_> {
+	fn specialized(&self, session: &Session, files: &[FileId]) {
+		if files.iter().any(|&file| {
+			session
+				.diagnostics(file)
+				.iter()
+				.any(|diagnostic| diagnostic.severity == Severity::Error)
+		}) {
+			self.failed.store(true, Ordering::Relaxed);
+			return;
+		}
+		if self.failed.load(Ordering::Relaxed) {
+			return;
+		}
+		let generated = {
+			let mut deferred = lock(&self.deferred);
+			let generated: Vec<_> = files
+				.iter()
+				.copied()
+				.filter(|&file| {
+					deferred.iter().any(|unit| {
+						unit.generated
+							.iter()
+							.any(|module| module == session.module(file))
+					})
+				})
+				.collect();
+			for unit in &mut *deferred {
+				unit.generated
+					.retain(|module| !generated.iter().any(|&file| module == session.module(file)));
+			}
+			deferred.retain(|unit| !unit.generated.is_empty());
+			generated
+		};
+		for file in generated {
+			self.generate(session, file, self.resolved_options());
+		}
+	}
+
 	fn unit(&self, session: &mut Session, files: &[FileId]) {
 		let erroneous = files.iter().any(|&file| {
 			session
@@ -302,8 +343,15 @@ impl UnitSink for BuildSink<'_> {
 		let mut generated = Vec::new();
 		for &file in files {
 			if self.defer_all
-				|| fa_codegen_js::reads_program_claims(session, file, self.options.overflow_checks)
-			{
+				|| !session
+					.source_file(file)
+					.interface
+					.key_loop_params
+					.is_empty() || fa_codegen_js::reads_program_claims(
+				session,
+				file,
+				self.options.overflow_checks,
+			) {
 				generated.push(session.module(file).to_string());
 			} else {
 				self.generate(session, file, &self.options);
@@ -329,6 +377,16 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl BuildSink<'_> {
+	fn resolved_options(&self) -> &Options {
+		self.resolved_options.get_or_init(|| {
+			let claims = std::mem::take(&mut *lock(&self.claims));
+			let failed = fa_analyzer::proofs::resolve_claims_owned(claims);
+			Options {
+				proofs: ProgramProofs::Claims(std::sync::Arc::new(failed)),
+				..self.options.clone()
+			}
+		})
+	}
 	/// Generates and writes the module of a file.
 	fn generate(&self, session: &Session, file: FileId, options: &Options) {
 		let module = session.module(file).to_string();
@@ -361,12 +419,7 @@ impl BuildSink<'_> {
 		if deferred.is_empty() || self.failed.load(Ordering::Relaxed) || report.has_errors() {
 			return;
 		}
-		let claims = std::mem::take(&mut *lock(&self.claims));
-		let failed = fa_analyzer::proofs::resolve_claims_owned(claims);
-		let options = Options {
-			proofs: ProgramProofs::Claims(std::sync::Arc::new(failed)),
-			..self.options.clone()
-		};
+		let options = self.resolved_options();
 		let reanalyzer = report.reanalyzer(root);
 		let generate = |unit: &Deferred| {
 			if self.failed.load(Ordering::Relaxed) {
@@ -380,7 +433,7 @@ impl BuildSink<'_> {
 					.iter()
 					.any(|module| module == session.module(file))
 				{
-					self.generate(&session, file, &options);
+					self.generate(&session, file, options);
 				}
 			}
 		};
@@ -535,6 +588,7 @@ impl<'a> BuildSink<'a> {
 			claims: Mutex::new(BTreeSet::new()),
 			deferred: Mutex::new(Vec::new()),
 			defer_all: std::env::var_os("FA_DEFER_UNITS").is_some_and(|value| value == "1"),
+			resolved_options: std::sync::OnceLock::new(),
 		}
 	}
 

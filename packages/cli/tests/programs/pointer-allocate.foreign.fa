@@ -1,0 +1,34 @@
+-- `Pointer.allocate(value)` moves a value into a new block, which
+-- `pointer.free()` destroys and frees (foreign-code.md, "Pointers"); a Fa
+-- value there is read (a copy) and written (the old value destroyed).
+type Farm = { name: String, animals: Int32 }
+let farm = Pointer.allocate(Farm { name = "Green Acres", animals = 3 })
+console.log(farm.read().name)
+mutable copy = farm.read()
+copy.animals = 99
+console.log(farm.read().animals)
+farm.write(Farm { name = "Blue Hills", animals = 5 })
+console.log(farm.read().animals)
+farm.free()
+let number = Pointer.allocate(41)
+number.write(number.read() + 1)
+console.log(number.read())
+number.free()
+-- prints: Green Acres
+-- prints: 3
+-- prints: 5
+-- prints: 42
+
+type Resource = {
+	descriptor: Int32
+	function destroy = (self) => console.log("closed {self.descriptor}")
+}
+function release = () => {
+	let resource = Resource { descriptor = 0 }
+	let pointer = Pointer.allocate(resource)
+	pointer.write(Resource { descriptor = 1 })
+	pointer.free()
+}
+release()
+-- prints: closed 0
+-- prints: closed 1

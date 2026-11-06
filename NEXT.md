@@ -3,6 +3,26 @@
 Worktree: `agent-a375af73b4e738f36`, branch of the same name. Main checkout is shared and dirty;
 do not copy its runtime or documentation edits. Lead integrates validated commits into `compiler`.
 
+## Current uncommitted checkpoint
+
+The next map/inline sources are now applied in this worktree. New count/byte guards also close
+wasm's 64-to-32-bit string reservation truncation, public string capacities, array reserve sum,
+map index sizing/power-of-two arithmetic and reserve sums. Eight new limit programs pass their
+targeted runs; the first loop repro is confirmed red with its guard disabled. Modes are kept in
+separate file-scoped flag slots so LLVM can unswitch the character loop; slow suffixes refresh it.
+Current instruction counts (`inline-modes-guards.json`): records 78.51 M, strlist 90.31 M,
+respond 208.61 M, words 30.81 M, lru 20.08 M; the latter two string regressions remain open.
+45 IR checks, the mixed-width/CRLF/explicit-capacity fixture and real ASan+UBSan pass. Final
+clippy/full queue is `/tmp/fa-perf-map-inline-workspace.log`; no commit until it passes.
+Guard-only sources/IR and a partial patch are prepared under `/tmp/fa-native-perf-next/guard-only/`
+for a separate solidness commit, but refresh its C guard functions after any C change. Its Rust
+patch omits all loop-mode changes and can be staged independently. Preserve the eight new limit
+programs with that commit; the other new fixtures/checks belong to performance.
+Frame strings remain research only (`stack-string-plan.txt`), and String map key research is in
+`string-map-key-plan.txt`. Lead approved map-only String compaction only if keys of 16–23 bytes
+get no new individual allocation. An adaptive dense-only fallback to 24-byte keys was considered;
+whole-entry tuple bindings need conservative fallback or correct proxy handling.
+
 ## Validated work
 
 - The original compressed arena links and packed literal choices passed the complete workspace
@@ -96,3 +116,58 @@ function values/defaults; module constants; nullable recursive pointers; root ar
 as UTF-8 views and compact character arrays; nbody's scoped noalias (now with a wrapping guard).
 The stack buffer part is genuinely missing; root collections/inter-unit arena proof and automatic
 relational narrowing of lru's integer links are also still open. Lead is cleaning the shared todo.
+
+## Latest validation checkpoint (2026-11-06, 20:40 UTC)
+
+The first full of the maps/inline-loop/reservation guards finished with only the LLVM program
+suite failing: `inline-strings.fa`, `integer-appends.fa`, `reserved-appends.fa`. The reserved
+inline byte path stored a payload byte and then overwrote the whole capacity word from its old
+snapshot (payload bytes 17–23 native, 9–11 wasm). It now updates only the final tag byte. All
+three repros pass on native/freestanding/wasm. `inline-append-loops.fa` now checks the complete
+ASCII result for every count, so the inline payload transition cannot hide behind length checks.
+The fixed full is queued under `flock --close` in `/tmp/fa-perf-map-inline-workspace-fixed.log`;
+clippy passed again (`/tmp/fa-perf-map-inline-clippy-fixed.log`). Runtime JS remains296/296 green.
+
+A separate compiler-stack-overflow fix is also pending: NamedUnion/Member JSON writers now go
+through the existing `json_writer` memo instead of recursively expanding their schemas during
+lowering. `json-recursive-union.fa` passes native/wasm with the full JSON output and leak check;
+freestanding is skipped like the existing JSON program. Keep this as its own commit.
+
+The next feature is prototyped in a detached temporary worktree `/tmp/fa-native-frame` (not a
+published commit): String frame buffers, 47 IR checks, C ASan/UBSan, and sync/async programs on
+native/free/wasm, also O0. Every buffer is local; stores/copies detach frame pointers correctly.
+The shared reserved-byte fix was copied there too. Its standalone example driver is used by
+`/tmp/fa-native-perf-next/frame-compiler` for target-O3 profiles; the actual native code is
+optimized even though the Rust driver is debug. The full25 audit runs in
+`/tmp/fa-frame-all-profiles.log`, report `benchmarks/audit/build/frame-all/frame-all.json` in
+that worktree. Earlier 10-program profiles predate the final tag-byte fix and must be rebuilt.
+Do not delete that worktree until its tracked and new files have been recovered.
+
+Proofs now owns global `ROOT_REGIONS` classification and `prepare_tree_arenas`; it is preparing
+`/tmp/fa-root-regions-interface.patch` and the backend facts wiring. Native perf keeps payload
+layouts/copies and child-array cleanup helpers. Runtime nested arena enters already share the
+active region: copied child roots stay there; ordinary root arrays copy each independent root.
+The essential change is a buffer-only drop for child arrays in region payloads, avoiding a
+reentrant drop of the parent region from its own cleanup. Missing claims remain a fallback.
+
+Lead's pending concrete generic ownership fix is `/tmp/fa-generic-native-ownership.patch`
+(4 `concrete_type` substitutions in ownership.rs). Preserve it when merging the frame changes.
+Lead has added AArch64 IR and a generator for3 targets: regenerate all3 after merging C;
+do not overwrite the generator or resource-destructor/global-flag fixes from lead.
+
+## Green delivery (2026-11-06)
+
+The corrected complete pending batch passes the full workspace with LLVM (exit 0 in
+`/tmp/fa-perf-map-inline-workspace-fixed.log`), fmt, clippy and JS runtime 296/296. The guard
+subset is committed as `79f97a5`; the remaining map/inline and recursive-JSON changes are
+being committed independently from the same tested source. The old failed full is retained
+as evidence for the corrected inline tag bug; do not confuse it with the green fixed log.
+
+The Frame snapshot before global-regions work is Git object
+`49314f83d741924f25cee4bdfada0688fd1489fe` (temporary stash-create snapshot, not a published
+change). It contains the Frame buffers, UTF-8 reservation preservation, and the experimental
+separate inline length/flags state. The latter keeps instruction counts essentially stable
+and saves roughly 1.8% on respond in the ten-program audit; use the report
+`benchmarks/audit/build/frame-all/inline-state.json` in /tmp/fa-native-frame. That temporary
+worktree now also has proofs' ROOT_REGIONS patches; keep those frontend/scanner changes
+separate when extracting the Frame work.

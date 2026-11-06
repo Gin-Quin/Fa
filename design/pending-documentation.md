@@ -178,3 +178,16 @@ Add: "A `when` choosing among string literals of one length by the integers `0` 
 ## `documentation/functions/defining-functions.md`, `:::implementation` (native and WebAssembly recursion)
 
 Add: "A small base case of a direct recursive call is evaluated at the call site when its guard and result use only scalar parameters and operations; an empty node of an arena, whose optional fields are all `none`, is also such a base case. Arguments are evaluated once, in order. In speed builds, an integer sum through a final optional recursive call (`prefix + (child?.walk() ?? 0)`) exposes both return paths to LLVM's tail-recursion elimination, so that the last recursive edge can become an accumulator loop. Other effects and calls keep their evaluation order."
+
+## Native maps and counted string append loops (`:::implementation`)
+
+For maps: an inline map with 32-bit integer keys and values of at most 32 bits stores 8 bytes
+per slot. Zero uses one extra slot with a separate presence bit, so all key/value bit patterns
+are available. Other widths keep the existing layout; resizing, copies, reserve and shifting
+deletion preserve the zero entry.
+
+For strings: a counted loop appending characters or digits can keep a dynamic short result
+inline. The prefix plus the number of rounds is reserved before the loop; longer suffixes
+append normally and reserve the remaining rounds again. A mode slot lets LLVM select the
+inline or buffer loop once when the representation stays invariant. The inline byte store
+and the final length/tag byte store are separate, preserving the payload in the last word.

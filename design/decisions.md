@@ -562,3 +562,18 @@ Map capacity growth checks signed addition, doubling, next-power-of-two construc
 allocation-size multiplication before performing them. Dense entry widths remain u64 until
 the size check, rather than truncating a wide entry to wasm's size_t. Counts that cannot fit
 stop with the existing out-of-memory exit; ordinary negative/empty cases keep their behavior.
+
+## Compact integer map slots and reserved inline appends (2026-11-06)
+
+A native inline map with a 32-bit integer key and a value of at most 32 bits uses an 8-byte
+key/value slot. Key zero has one extra slot and an explicit presence bit; every other key
+is its own empty-slot marker. Copies, growth and backward-shift deletion preserve that
+representation. Other integer widths retain their existing layouts and hash protocol.
+
+A counted character/digit append loop may keep a dynamically short result inline. Its
+reservation checks the actual prefix plus the rounds; a separate mode bit is invariant on
+the one-byte path and refreshed after a longer suffix. Loop unswitching moves that choice
+out of a character loop when it is invariant. The inline path updates only the final tag
+byte: its capacity word also contains payload, so replacing that word from an earlier
+snapshot would corrupt native bytes 17–23 or wasm bytes 9–11. The slow path re-reserves all
+remaining rounds, including after multibyte suffixes or multi-digit integers.

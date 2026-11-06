@@ -1,0 +1,47 @@
+-- Compact integer maps keep all key/value patterns, including zero, through
+-- growth, shifting deletion, reserve and independent copies.
+-- asynchronous: false
+let keys: Array<Int32> = [0, 1, -1, Int32.minValue, Int32.maxValue, 64, -64, 128, -128]
+mutable map: Map<Int32, UInt32> = []
+for key, index in keys {
+	let value = try UInt32(index)
+	map[key] = value
+}
+for key, index in keys {
+	assert (map.get(key) ?? 999) == index
+}
+let original = map
+map.delete(0)
+map.delete(Int32.minValue)
+assert (original.get(0) ?? 999) == 0
+assert (original.get(Int32.minValue) ?? 999) == 3
+assert map.get(0) is none
+for index in 0..600 {
+	let key: Int32 = index * 4096
+	let value: UInt32 = index + 1000
+	map[key] = value
+}
+map.reserve(1000)
+for index in 0..600 {
+	let key: Int32 = index * 4096
+	assert (map.get(key) ?? 999) == index + 1000
+}
+for index in 0..600 {
+	if index %% 3 == 0 {
+		let key: Int32 = index * 4096
+		assert map.delete(key)
+	}
+}
+for index in 0..600 {
+	let key: Int32 = index * 4096
+	assert map.includes(key) == (index %% 3 != 0)
+}
+let copied = map
+map.clear()
+assert map.size == 0
+assert copied.size > 0
+map[0] = UInt32.maxValue
+assert (map.get(0) ?? 0) == UInt32.maxValue
+assert (map.take(0) ?? 0) == UInt32.maxValue
+assert map.size == 0
+console.log("compact maps") -- prints: compact maps

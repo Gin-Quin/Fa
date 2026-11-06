@@ -60,7 +60,7 @@ let age = 30
 let person = Person { name, age } -- Person { name = name, age = age }
 ```
 
-Shorthand and regular fields can be mixed: `Person { name, age = 31 }`. Where a [key set](/types/fields#key-sets) is expected, as in `Pick(User, { name, email })`, the same braces are a key set instead. See [braces](/getting-started/syntax-basics#braces) for where `{` opens an object and where it opens a block.
+Shorthand and regular fields can be mixed: `Person { name, age = 31 }`. Where a [key set](/types/fields#key-sets) is expected, as in `Pick<User, { name, email }>`, the same braces are a key set instead. See [braces](/getting-started/syntax-basics#braces) for where `{` opens an object and where it opens a block.
 
 ### Spreading a value
 
@@ -170,7 +170,7 @@ let myObject = MyObject {
 }
 ```
 
-For a generic type, the type arguments are written before the literal: `Point(Float) { x = 1, y = 2 }`. See [generics](/types/generics).
+For a generic type, the type arguments are written before the literal: `Point<Float> { x = 1, y = 2 }`. See [generics](/types/generics).
 
 There is no constructor call: `Point(3, 4)` and `Point(x = 3, y = 4)` do not create objects. Always write `Point { x = 3, y = 4 }`. A type that needs to compute its fields provides an [associated function](/functions/defining-functions), a function of the type without `self`, called as `Point.fromPolar(radius, angle)`.
 
@@ -231,7 +231,7 @@ A `readonly` field cannot be modified from outside the type, even on a mutable i
 type Account = {
 	readonly balance: Integer = 0
 
-	function deposit = (self, amount: Integer(min = 0)) mutates self.balance => {
+	function deposit = (self, amount: Integer<min = 0>) mutates self.balance => {
 		self.balance += amount
 	}
 }

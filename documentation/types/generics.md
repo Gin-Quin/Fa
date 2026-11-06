@@ -3,12 +3,12 @@
 Generics let types and functions work with any type that satisfies a constraint, instead of a single concrete type.
 
 ```fa
-Array(Integer)
-Map(String, User)
-Integer(min = 0, max = 200)
+Array<Integer>
+Map<String, User>
+Integer<min = 0, max = 200>
 ```
 
-Fa uses parentheses, not angle brackets: giving parameters to a generic type or function looks like a call, because it is one, evaluated at compile time.
+Generic parameters are written between angle brackets, `<` and `>`. Parentheses are only used for calls, so `first<Float>([1, 2])` reads at a glance: the generic parameters, then the call. How `<` and `>` are told apart from the comparison operators is explained in [angle brackets and comparisons](#angle-brackets-and-comparisons).
 
 ## A type is a constraint
 
@@ -27,26 +27,28 @@ Generic parameters follow the same rule: their annotation is the constraint that
 
 ## Generic parameters
 
-Generic parameters are written in parentheses **right after the declared name**, for types and for functions alike:
+A type declares its generic parameters between angle brackets **right after its name**. A function declares them **at the start of its signature**, before its parameters:
 
 ```fa
-type Point(NumberType) = {
+type Point<NumberType> = {
 	x: NumberType
 	y: NumberType
 }
 
-function first(Item) = (items: Array(Item)): Item? => items.get(0)
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
 ```
+
+The generic parameters of a function are part of its signature, not of its name: this is why a lambda and a function type can have them too (see [generic lambdas and function types](#generic-lambdas-and-function-types)).
 
 Several parameters are separated by commas:
 
 ```fa
-type Pair(Left, Right) = {
+type Pair<Left, Right> = {
 	left: Left
 	right: Right
 }
 
-function swap(Left, Right) = (pair: Pair(Left, Right)) => Pair(Right, Left) {
+function swap = <Left, Right>(pair: Pair<Left, Right>) => Pair<Right, Left> {
 	left = pair.right
 	right = pair.left
 }
@@ -60,24 +62,24 @@ The capitalization of a generic parameter tells what it receives:
 - a **lowercase** parameter is a **compile-time value parameter**: it receives a value known at compile time, and its annotation is the type of that value.
 
 ```fa
-type Matrix(Element, rows: Integer, columns: Integer) = {
-	values: Array(Element)
+type Matrix<Element, rows: Integer, columns: Integer> = {
+	values: Array<Element>
 
 	function get = (
 		self
-		row: Integer(min = 0, max = rows - 1)
-		column: Integer(min = 0, max = columns - 1)
+		row: Integer<min = 0, max = rows - 1>
+		column: Integer<min = 0, max = columns - 1>
 	) => self.values[row * columns + column]
 }
 
-type Transform = Matrix(Float, 4, 4)
+type Transform = Matrix<Float, 4, 4>
 ```
 
 Inside the declaration, a compile-time value parameter is used like any other value. Here, `rows` and `columns` bound the indices accepted by `get`, so `transform.get(4, 0)` is a compile error.
 
-A compile-time value parameter receives a value whose equality is exact: a boolean, an integer, a string, a character, an enumeration or `Fields` value (such as a [key set](/types/fields#key-sets)), or an array, a tuple or an object made of them. Floats and functions can't be compile-time parameters. Two applications with equal values give the same type: `Matrix(Float, 4, 4)` and `Matrix(Float, 2 + 2, 4)` are one type. A range whose minimum is greater than its maximum, like `Integer(min = 0, max = rows - 1)` when `rows` is 0, is the type `Never`, which no value satisfies.
+A compile-time value parameter receives a value whose equality is exact: a boolean, an integer, a string, a character, an enumeration or `Fields` value (such as a [key set](/types/fields#key-sets)), or an array, a tuple or an object made of them. Floats and functions can't be compile-time parameters. Two applications with equal values give the same type: `Matrix<Float, 4, 4>` and `Matrix<Float, 2 + 2, 4>` are one type. A range whose minimum is greater than its maximum, like `Integer<min = 0, max = rows - 1>` when `rows` is 0, is the type `Never`, which no value satisfies.
 
-Ranged integers are a built-in example of compile-time value parameters: in `Integer(min = 0, max = 200)`, `min` and `max` are lowercase because they are values, not types.
+Ranged integers are a built-in example of compile-time value parameters: in `Integer<min = 0, max = 200>`, `min` and `max` are lowercase because they are values, not types.
 
 Generic parameter lists are the only place where capitalization carries a meaning. Everywhere else, `PascalCase` for types and `camelCase` for values is a convention. See [naming](/types/declaring-types#naming).
 
@@ -85,15 +87,15 @@ Generic parameter lists are the only place where capitalization carries a meanin
 
 A generic parameter can be constrained with `:`, followed by the constraint the argument must satisfy. Without a constraint, any type is accepted.
 
-A **union** means "one of these types": the parameter is bound to exactly one member. An argument whose type satisfies exactly one member binds that member, so an `Array(Integer(min = 0))` gives `Value = Integer`, and is passed as a read-only `Array(Integer)`.
+A **union** means "one of these types": the parameter is bound to exactly one member. An argument whose type satisfies exactly one member binds that member, so an `Array<Integer<min = 0>>` gives `Value = Integer`, and is passed as a read-only `Array<Integer>`.
 
 ```fa
-type Point(NumberType: Integer | Float) = {
+type Point<NumberType: Integer | Float> = {
 	x: NumberType
 	y: NumberType
 }
 
-function sum(Value: Integer | Float) = (values: Array(Value)): Value => {
+function sum = <Value: Integer | Float>(values: Array<Value>): Value => {
 	mutable total: Value = 0
 	for value in values {
 		total += value
@@ -105,7 +107,7 @@ function sum(Value: Integer | Float) = (values: Array(Value)): Value => {
 An **object type** means "has at least these fields", following [structural typing](/advanced/structural-typing):
 
 ```fa
-function findById(Entity: { id: Integer }) = (entities: Array(Entity), id: Integer): Entity? => {
+function findById = <Entity: { id: Integer }>(entities: Array<Entity>, id: Integer): Entity? => {
 	for entity in entities {
 		if entity.id == id {
 			return entity
@@ -120,7 +122,7 @@ Any type with an `id: Integer` field is accepted, with no declaration of intent.
 A constraint can also require a method, written like a function field whose first parameter is `self`:
 
 ```fa
-function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)) => {
+function describeAll = <Item: { describe: (self) => String }>(items: Array<Item>) => {
 	for item in items {
 		console.log(item.describe())
 	}
@@ -134,8 +136,8 @@ Any type with a `describe` method returning a `String` is accepted, and `item.de
 A generic type or function is checked **once**, against the constraints of its parameters, not once per use. Inside it, only the operations allowed by the constraints can be used:
 
 ```fa
-function double(Value) = (value: Value) => value * 2 -- error: `Value` has no constraint allowing `*`
-function double(Value: Integer | Float) = (value: Value) => value * 2 -- valid
+function double = <Value>(value: Value) => value * 2 -- error: `Value` has no constraint allowing `*`
+function double = <Value: Integer | Float>(value: Value) => value * 2 -- valid
 ```
 
 Under a union constraint, each operation is checked once per member, and must give the same kind of result for every member: in `double` above, `value * 2` is an `Integer` for `Integer` and a `Float` for `Float`, so it is a `Value`, while `value / 2` is a `Float` for both. An operation valid for one member only, like `value.shiftLeft(1)`, is an error.
@@ -149,27 +151,27 @@ Each use of a generic function is compiled for its actual parameters, so a metho
 A constraint can reference the parameters declared before it:
 
 ```fa
-function select(Entity, keys: Keys(Entity)) = (entity: Entity): Pick(Entity, keys) => pick(entity, keys)
+function select = <Entity, keys: Keys<Entity>>(entity: Entity): Pick<Entity, keys> => pick(entity, keys)
 
 type User = { name: String, email: String, password: String }
 
 let user = User { name = "Ada", email = "ada@example.com", password = "secret" }
-let publicUser = select(User, { name, email })(user) -- { name: String, email: String }
+let publicUser = select<User, { name, email }>(user) -- { name: String, email: String }
 ```
 
-Here, `keys` must be a [key set](/types/fields#key-sets) of `Entity`: `select(User, { age })` is a compile error. See [type functions](/types/type-functions) for `Keys`, `Pick` and `pick`.
+Here, `keys` must be a [key set](/types/fields#key-sets) of `Entity`: `select<User, { age }>` is a compile error. See [type functions](/types/type-functions) for `Keys`, `Pick` and `pick`.
 
 ## Default parameters
 
 Generic parameters can have defaults, written with `=`:
 
 ```fa
-type Collection(Item, Index = Integer) = {
+type Collection<Item, Index = Integer> = {
 	get: (index: Index) => Item?
 }
 
-type Names = Collection(String) -- Index is Integer
-type NamesByKey = Collection(String, String) -- Index is String
+type Names = Collection<String> -- Index is Integer
+type NamesByKey = Collection<String, String> -- Index is String
 ```
 
 ## Using generics
@@ -179,7 +181,7 @@ type NamesByKey = Collection(String, String) -- Index is String
 Generic parameters are inferred from the arguments, and from the expected type:
 
 ```fa
-let point = Point { x = 12, y = 13 } -- Point(Integer)
+let point = Point { x = 12, y = 13 } -- Point<Integer>
 let firstName = first(["Ada", "Alan"]) -- Item is String
 let total = sum([1, 2, 3]) -- Value is Integer
 
@@ -190,15 +192,15 @@ A parameter is found from, in this order:
 
 1. the parameters given explicitly,
 2. the expected type, to which literals adapt (`ratio` above),
-3. the types of the arguments, where a literal has its [base type](/types/declaring-types#inferred-types-and-known-values): `["Ada", "Alan"]` is an `Array(String)`, and `[1, 2, 3]` an `Array(Integer)`,
+3. the types of the arguments, where a literal has its [base type](/types/declaring-types#inferred-types-and-known-values): `["Ada", "Alan"]` is an `Array<String>`, and `[1, 2, 3]` an `Array<Integer>`,
 4. the default of the parameter.
 
-A parameter can also be found from another one: in `select(Entity, keys: Keys(Entity))` below, `Entity` gives the type of `keys`. A generic function passed as a value is given its parameters by the expected function type, as in `["Ada", "Alan"].map(identity)`.
+A parameter can also be found from another one: in `select = <Entity, keys: Keys<Entity>>` above, `Entity` gives the type of `keys`. A generic function passed as a value is given its parameters by the expected function type, as in `["Ada", "Alan"].map(identity)`.
 
 Inference never guesses between two valid answers: when a parameter is ambiguous, or when nothing allows inferring it, it is a compile error, and you have to write it explicitly.
 
 ```fa
-function parse(Output: Integer | Float) = (input: String): Output throws ParseError => ...
+function parse = <Output: Integer | Float>(input: String): Output throws ParseError => ...
 
 let count: Integer = try parse("42") -- inferred from the expected type
 let count = try parse("42") -- error: `Output` is ambiguous
@@ -206,52 +208,84 @@ let count = try parse("42") -- error: `Output` is ambiguous
 
 ### Explicit parameters
 
-To give the parameters explicitly, write them right after the name, the same way they are declared:
+To give the parameters explicitly, write them between angle brackets right after the name of the type or of the function:
 
 ```fa
-let point = Point(Float) { x = 12, y = 13 }
-let total = sum(Float)([1, 2, 3])
-let count = try parse(Integer)("42")
-let numbers = Set(Float).from([1, 2, 3])
+let point = Point<Float> { x = 12, y = 13 }
+let total = sum<Float>([1, 2, 3])
+let count = try parse<Integer>("42")
+let numbers = Set<Float>.from([1, 2, 3])
 ```
 
-`sum(Float)` is itself a function, which is then called with `([1, 2, 3])`.
+`sum<Float>` is itself a function, which is then called with `([1, 2, 3])`. Since generic parameters have their own brackets, a chain of calls is never ambiguous, even when a generic function returns a function:
 
-### Generic application or call
+```fa
+function makeAdder = <Value: Integer | Float>(base: Value) => (value: Value) => base + value
 
-Both look like a call, so the compiler tells them apart with one rule. The first list of arguments given to a generic function or type is its **generic parameters** when:
+makeAdder<Float>(5)(3) -- 8.0: the generic parameters, then two calls
+makeAdder(5)(3) -- 8: `Value` is inferred, then two calls
+```
 
-- the declaration has a compile-time value parameter (a lowercase one): `repeatText(3)("ab")`, `select(User, { name, email })(user)`,
-- or the list has at least one argument, and every argument is a type: `sum(Float)([1, 2, 3])`, `Point(Float) { x = 1, y = 2 }`. Literals, object literals (with `=`), `{}`, lambdas and names of values count as values here, and object types (with `:`) as types: `first("a")` is a call, even though `"a"` is also a literal type.
+Compile-time value parameters are never inferred from the arguments of the call: they are always given, like in `repeatText<3>("ab")` or `select<User, { name, email }>(user)`.
 
-Otherwise, it is the call itself, and the generic parameters are inferred: `first([1, 2, 3])`, `empty()`. Compile-time value parameters are never inferred from the arguments of the call: they are always given.
-
-On a built-in scalar type, positional values are a [conversion](/types/type-conversion) and named values are a refinement:
+On a built-in scalar type, parentheses are a [conversion](/types/type-conversion) and angle brackets a refinement:
 
 ```fa
 let small = Int8(reading) catch error => 0 -- a conversion, which throws when `reading` may not fit
-type Small = Integer(min = 0, max = 100) -- a ranged type
+type Small = Integer<min = 0, max = 100> -- a ranged type
 ```
 
 Giving an argument that doesn't satisfy the constraint is a compile error:
 
 ```fa
-let total = sum(String)(["a", "b"]) -- error: `String` doesn't satisfy the constraint `Integer | Float` of `Value`
+let total = sum<String>(["a", "b"]) -- error: `String` doesn't satisfy the constraint `Integer | Float` of `Value`
 ```
+
+### Angle brackets and comparisons
+
+`<` and `>` are also the comparison operators. The tokenizer tells them apart without lookahead, with four rules that a reader can apply as easily:
+
+1. `<` followed by whitespace (a space, a tab or a line break) is the comparison operator. Any other `<` opens a generic list, whatever comes before it.
+2. Inside an open generic list, `>` always closes it. Outside one, `>` is the comparison operator.
+3. A comparison inside a generic list goes in parentheses: `Choose<(count > 255), UInt16, UInt8>`. Parentheses, brackets and braces opened inside a generic list suspend it until they close, so `>` is the comparison operator again inside them.
+4. `<=`, `>=`, `=>` and `->` are tokens of their own, so they are never generic brackets: in `Pool<people->bestFriend>`, `->` doesn't close the list.
+
+```fa
+type Choose<condition: Boolean, Then, Else> = if condition { Then } else { Else }
+static count = 300
+
+if count < limit { ... } -- `<` followed by a space: a comparison
+let pairs: Array<Tuple<Integer, String>> = [] -- `>>` closes two generic lists
+let handlers: Array<(event: Event) => Void> = [] -- `=>` is its own token
+type Index = Choose<(count > 255), UInt16, UInt8> -- a comparison in a generic list, in parentheses: `UInt16`
+
+if count<limit { ... } -- error: `<limit` opens a generic list; write `count < limit`
+```
+
+So a comparison is always written with whitespace after `<`, which the formatter does anyway, and a generic list starts on the line of its `<`: a `<` at the end of a line is a comparison. Its closing `>` can be on its own line:
+
+```fa
+type Lookup = Map<String, {
+	id: Integer
+	name: String
+}>
+```
+
+Rust has the same ambiguity and solves it with the turbofish (`sum::<f64>(...)`) in expressions; TypeScript and C# guess by looking ahead. Fa decides from the character that follows `<`, and then from the open generic lists, with no lookahead.
 
 ### Empty values
 
 An empty literal gives nothing to infer from. It needs a context, or explicit parameters:
 
 ```fa
-function empty(Item) = (): Array(Item) => []
+function empty = <Item>(): Array<Item> => []
 
-let numbers: Array(Integer) = empty() -- inferred from the expected type
-let numbers = empty(Integer)() -- explicit
+let numbers: Array<Integer> = empty() -- inferred from the expected type
+let numbers = empty<Integer>() -- explicit
 let numbers = empty() -- error: `Item` cannot be inferred
 
-mutable names: Array(String) = []
-let scores = Array(Integer).from([])
+mutable names: Array<String> = []
+let scores = Array<Integer>.from([])
 ```
 
 ## Types versus values
@@ -259,14 +293,14 @@ let scores = Array(Integer).from([])
 Giving parameters to a generic type produces a **type**. Writing an object literal after a type produces a **value**:
 
 ```fa
-type Pair(Left, Right) = {
+type Pair<Left, Right> = {
 	left: Left
 	right: Right
 }
 
-type Entry = Pair(String, Integer) -- a type
+type Entry = Pair<String, Integer> -- a type
 
-let entry = Pair(String, Integer) { left = "age", right = 42 } -- a value of that type
+let entry = Pair<String, Integer> { left = "age", right = 42 } -- a value of that type
 ```
 
 A generic type is a [type function](/types/type-functions): a function, evaluated at compile time, from its parameters to a type. Values are always created with braces: there is no positional constructor like `Pair("age", 42)`. See [creating values of a type](/types/declaring-types#creating-values-of-a-type).
@@ -276,8 +310,8 @@ A generic type is a [type function](/types/type-functions): a function, evaluate
 Methods declared in a generic type can use the parameters of the type:
 
 ```fa
-type Stack(Item) = {
-	#items: Array(Item)
+type Stack<Item> = {
+	#items: Array<Item>
 
 	function push = (self, item: Item) mutates self => {
 		self.#items.push(item)
@@ -287,13 +321,13 @@ type Stack(Item) = {
 }
 ```
 
-A method can also declare its own generic parameters, after its name:
+A method can also declare its own generic parameters, at the start of its signature:
 
 ```fa
-type Stack(Item) = {
-	#items: Array(Item)
+type Stack<Item> = {
+	#items: Array<Item>
 
-	function map(Result) = (self, transform: (item: Item) => Result) => Stack(Result) {
+	function map = <Result>(self, transform: (item: Item) => Result) => Stack<Result> {
 		#items = self.#items.map(transform)
 	}
 }
@@ -304,21 +338,32 @@ type Stack(Item) = {
 A generic function can be generic over the errors of the functions it receives. See [errors](/values/errors).
 
 ```fa
-function retry(Result, Failure) = (
-	attempts: Integer(min = 1)
+function retry = <Result, Failure>(
+	attempts: Integer<min = 1>
 	action: () => Result throws Failure
 ): Result throws Failure => ...
 ```
 
-## Lambdas are not generic
+## Generic lambdas and function types
 
-A lambda cannot declare generic parameters: generic parameters are written after a name, and a lambda has none. Declare a generic `function` instead, and pass it where a function is expected:
+The generic parameters of a function are part of its signature. So a lambda can declare them too, and a function type can have them: `<Value>(value: Value) => Value` is the type of a function that works for any `Value`, given at each call.
 
 ```fa
-function identity(Value) = (value: Value): Value => value
+function identity = <Value>(value: Value): Value => value
 
-let names = ["Ada", "Alan"].map(identity) -- Value is String
+function applyToBoth = (transform: <Value>(value: Value) => Value, number: Integer, text: String) => {
+	(transform(number), transform(text)) -- `Value` is `Integer`, then `String`
+}
+
+applyToBoth(identity, 1, "one") -- (1, "one")
+applyToBoth(<Value>(value: Value) => value, 1, "one") -- a generic lambda
+applyToBoth((value) => value, 1, "one") -- valid: the lambda is generic, from its expected type
+applyToBoth((value: Integer) => value, 1, "one") -- error: the lambda isn't generic
 ```
+
+- **A value of a generic function type is known at compile time.** It is a named function or a lambda, given directly. It can't be a `mutable` value, an element of a collection, or a field of an object built at runtime. A function that receives one is compiled for each function it receives, like a generic function for each of its parameters, so `transform(number)` and `transform(text)` call two compiled versions of `identity`, without boxing.
+- **Generic function types are never inferred**: they come from an annotation, like `transform` above. A lambda without generic parameters is generic only when its expected type is.
+- A generic function passed where a function type that isn't generic is expected is given its parameters by that type: in `["Ada", "Alan"].map(identity)`, `Value` is `String`.
 
 A lambda written inside a generic function or type can use the generic parameters of its enclosing declaration.
 
@@ -342,8 +387,11 @@ Generic types, generic functions, structural constraints, compile-time value par
 - Generic functions are erased: one JavaScript function serves every use, without boxing.
 - A parameter bound to a union whose members behave differently at runtime (`Integer | Float` when the operations differ, an explicit `Int64` represented as a `BigInt`, overflow checks) gets one JavaScript instance per member actually used.
 - Operations that depend on the actual type of another parameter (static methods, copies, `==`, hashing, formatting) receive hidden dictionaries of functions.
+- A parameter of a generic function type receives the JavaScript function itself: the function that receives it is erased too, and needs one instance per argument only when the argument needs one of the instances or dictionaries above.
 
 ### Native
 
 - Every use is monomorphized for its actual parameters.
+- A function with a parameter of a generic function type is monomorphized for each function it receives (the argument is known at compile time). Inside it, each call of the parameter instantiates that function for the types of the call.
+- Tokenizer: a stack of the open brackets. `<` followed by a non-whitespace character pushes a generic list; `>` pops it when the top of the stack is a generic list, and is a comparison otherwise; `(`, `[` and `{` push, and their closing tokens pop. `<=`, `>=`, `=>` and `->` are matched first, as longer tokens.
 :::

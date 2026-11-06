@@ -15,6 +15,11 @@ pub struct Bindings {
 	pub params: Vec<ParamId>,
 	/// What each one is bound to (`UNSET`: not bound yet).
 	pub types: Vec<TypeId>,
+	/// Written declarations that supplied these types. They stay separate
+	/// from structural identity, which does not include methods.
+	pub origins: FxHashMap<ParamId, crate::analysis::WrittenType>,
+	/// Methods chosen for constraints, by parameter and requested name.
+	pub methods: Vec<(ParamId, crate::analysis::GenericMethod)>,
 }
 
 impl Bindings {
@@ -23,13 +28,14 @@ impl Bindings {
 		Self {
 			params: params.to_vec(),
 			types: vec![TypeId::UNSET; params.len()],
+			..Default::default()
 		}
 	}
 
 	/// The binding of a parameter, when it is one of these and bound.
 	pub fn get(&self, param: ParamId) -> Option<TypeId> {
 		let index = self.params.iter().position(|&p| p == param)?;
-		let ty = self.types[index];
+		let &ty = self.types.get(index)?;
 		(!ty.is_unset()).then_some(ty)
 	}
 
@@ -99,7 +105,10 @@ impl TypeStore {
 				self.tuple(&items)
 			}
 			TypeKind::Object(shape) => {
-				let nominal = self.shape(shape).nominal;
+				let nominal = self
+					.shape(shape)
+					.nominal
+					.map(|nominal| self.substitute_nominal(nominal, bindings, cache));
 				let fields = self.shape_fields(shape).to_vec();
 				let fields: Vec<FieldEntry> = fields
 					.into_iter()
@@ -108,7 +117,14 @@ impl TypeStore {
 						..field
 					})
 					.collect();
-				let result = self.object(&fields, nominal);
+				let result = match nominal {
+					Some(nominal)
+						if self.nominal(nominal).kind == crate::types::NominalKind::CStruct =>
+					{
+						self.object_in_order(&fields, nominal)
+					}
+					_ => self.object(&fields, nominal),
+				};
 				// an instance of a named generic type (`Pair<Right, Left>`):
 				// the result is named after its arguments substituted
 				if result != ty
@@ -245,6 +261,7 @@ impl TypeStore {
 		let bindings = Bindings {
 			params,
 			types: self.list_items(args).to_vec(),
+			..Default::default()
 		};
 		// the payloads may name the instance itself (recursive unions)
 		self.set_payloads(instance, vec![TypeId::UNSET; count as usize]);
@@ -314,6 +331,18 @@ impl TypeStore {
 				}
 			}
 			(TypeKind::Object(a), TypeKind::Object(b)) => {
+				if let (Some(a), Some(b)) = (self.shape(a).nominal, self.shape(b).nominal) {
+					let (a, b) = (self.nominal(a), self.nominal(b));
+					if a.key == b.key {
+						let (a, b) = (
+							self.list_items(a.args).to_vec(),
+							self.list_items(b.args).to_vec(),
+						);
+						for (declared, actual) in a.into_iter().zip(b) {
+							self.unify_in(declared, actual, bindings, out, depth + 1);
+						}
+					}
+				}
 				let declared_fields = self.shape_fields(a).to_vec();
 				let actual_fields = self.shape_fields(b).to_vec();
 				for field in declared_fields {

@@ -1001,6 +1001,22 @@ impl Walker<'_> {
 			ty
 		});
 		let symbol = self.a.symbols.symbol_of_decl(node)?;
+		if let Some((_, declaration)) = owner
+			&& let Some(origin) = self.node_key(declaration)
+		{
+			let mut written = crate::analysis::WrittenType::named(origin);
+			let params = self
+				.generic_params
+				.get(&declaration)
+				.cloned()
+				.unwrap_or_default();
+			let types: Vec<_> = params
+				.into_iter()
+				.map(|param| self.s.types.intern(TypeKind::Param(param)))
+				.collect();
+			written.arguments = self.s.types.list(&types);
+			self.written_type_keys.insert(symbol, written);
+		}
 		(owner.is_some() && first).then_some((
 			FnParam {
 				node,

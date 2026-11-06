@@ -404,8 +404,12 @@ pub struct Walker<'s> {
 	/// The `type` declaration written for each binding and parameter, whose
 	/// functions its methods are (structural.rs).
 	pub(crate) written_decls: FxHashMap<SymbolId, NodeId>,
+	/// The same identity across files (a structural TypeId has no owner).
+	pub(crate) written_type_keys: FxHashMap<SymbolId, crate::analysis::WrittenType>,
+	pub(crate) written_origin_stack: rustc_hash::FxHashSet<NodeId>,
 	/// The declaration written for the receiver of the member being resolved.
 	pub(crate) receiver_decl: Option<NodeId>,
+	pub(crate) receiver_origin: Option<crate::analysis::WrittenType>,
 	/// The requirements each lambda (or `watch`) resolved in the code around
 	/// it, with a call needing each and the scope of the `provide` (`None`:
 	/// the enclosing function's own): a stored lambda can't (`REQ007`), a
@@ -588,7 +592,10 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		rec_references: FxHashMap::default(),
 		view_sink: false,
 		written_decls: FxHashMap::default(),
+		written_type_keys: FxHashMap::default(),
+		written_origin_stack: rustc_hash::FxHashSet::default(),
 		receiver_decl: None,
+		receiver_origin: None,
 		lambda_requirements: FxHashMap::default(),
 		pending_implicit: Vec::new(),
 		pending_derived: Vec::new(),

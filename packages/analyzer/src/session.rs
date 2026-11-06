@@ -1133,6 +1133,47 @@ fn merge_interface(
 				(decl, functions)
 			})
 			.collect(),
+		type_parameters: interface
+			.type_parameters
+			.iter()
+			.map(|(&decl, &params)| (decl, merger.list(params)))
+			.collect(),
+		written_types: interface
+			.written_types
+			.iter()
+			.map(|(&decl, written)| (decl, written.merged(merger)))
+			.collect(),
+		written_returns: interface
+			.written_returns
+			.iter()
+			.map(|(&decl, origin)| {
+				let origin = match origin {
+					crate::analysis::WrittenReturn::Named(written) => {
+						crate::analysis::WrittenReturn::Named(written.merged(merger))
+					}
+					other => other.clone(),
+				};
+				(decl, origin)
+			})
+			.collect(),
+		written_fields: interface
+			.written_fields
+			.iter()
+			.map(|(&(decl, name), origin)| {
+				let origin = match origin {
+					crate::analysis::WrittenReturn::Named(written) => {
+						crate::analysis::WrittenReturn::Named(written.merged(merger))
+					}
+					other => other.clone(),
+				};
+				((decl, merger.sym(name)), origin)
+			})
+			.collect(),
+		function_owners: interface
+			.function_owners
+			.iter()
+			.map(|(&function, &owner)| (function, merger.decl_key(owner)))
+			.collect(),
 		nested_types: interface
 			.nested_types
 			.iter()

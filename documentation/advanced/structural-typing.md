@@ -155,17 +155,17 @@ Where the expected type is a union, a literal must have exactly the fields of on
 A collection stores its elements with the layout of its element type, so a value added to it is narrowed, like any copy:
 
 ```fa
-mutable humans: Array(Human) = []
+mutable humans: Array<Human> = []
 
 humans.push(superHuman) -- a copy: the stored Human has no `powers`
 
-let copiedHumans: Array(Human) = superHumans -- copies every element, without `powers`
+let copiedHumans: Array<Human> = superHumans -- copies every element, without `powers`
 ```
 
 A collection of supersets can be passed to a function that only reads it:
 
 ```fa
-function logNames = (humans: Array(Human)) => {
+function logNames = (humans: Array<Human>) => {
 	for human in humans {
 		console.log(human.name)
 	}
@@ -174,20 +174,20 @@ function logNames = (humans: Array(Human)) => {
 logNames(superHumans) -- valid: no copy, no truncation
 ```
 
-The elements of a `Set` and the keys of a `Map` are the exception: they are placed by their hash and compared with `==`, which depend on all of their fields. A `Set(Hero)` is never a `Set(Human)`, and a `Map(Hero, Integer)` is never a `Map(Human, Integer)`, even when they are only read. For the same reason, a reference to a `Set` element or a `Map` key is read-only (see [reference checking](/advanced/reference-checking#use-and-mutable-use)). The values of a `Map` follow the general rule.
+The elements of a `Set` and the keys of a `Map` are the exception: they are placed by their hash and compared with `==`, which depend on all of their fields. A `Set<Hero>` is never a `Set<Human>`, and a `Map<Hero, Integer>` is never a `Map<Human, Integer>`, even when they are only read. For the same reason, a reference to a `Set` element or a `Map` key is read-only (see [reference checking](/advanced/reference-checking#use-and-mutable-use)). The values of a `Map` follow the general rule.
 
 Comparing two values with `==` compares the fields of their declared type: two `Human` parameters are equal when their `name` is, whatever the arguments hold beyond it.
 
-A function that mutates the collection can't receive a collection of supersets: it could add a `Human`, which has no `powers`, to an `Array(SuperHuman)`. Make the function generic instead. Its element type is then the full type of the argument, and only values of that type can be added:
+A function that mutates the collection can't receive a collection of supersets: it could add a `Human`, which has no `powers`, to an `Array<SuperHuman>`. Make the function generic instead. Its element type is then the full type of the argument, and only values of that type can be added:
 
 ```fa
-function addJohn = (humans: Array(Human)) mutates humans => {
+function addJohn = (humans: Array<Human>) mutates humans => {
 	humans.push({ name = "John" })
 }
 
-addJohn(superHumans) -- error: `addJohn` mutates `humans`, so it needs an `Array(Human)`: make it generic
+addJohn(superHumans) -- error: `addJohn` mutates `humans`, so it needs an `Array<Human>`: make it generic
 
-function keepNamed(Item: Human) = (items: Array(Item)) mutates items => {
+function keepNamed = <Item: Human>(items: Array<Item>) mutates items => {
 	items.deleteWhere((item) => item.name == "")
 }
 
@@ -196,18 +196,18 @@ keepNamed(superHumans) -- valid: `Item` is SuperHuman
 
 ## Mutating through a narrower type
 
-A value whose fields are more precise satisfies a type when it is read: an `Integer(min = 0, max = 10)` is an `Integer`. Writing goes the other way, so a function that mutates a parameter can only receive a value whose written fields have **exactly** the type it writes:
+A value whose fields are more precise satisfies a type when it is read: an `Integer<min = 0, max = 10>` is an `Integer`. Writing goes the other way, so a function that mutates a parameter can only receive a value whose written fields have **exactly** the type it writes:
 
 ```fa
 type Scored = { score: Integer }
-type Player = { name: String, score: Integer(min = 0, max = 10) }
+type Player = { name: String, score: Integer<min = 0, max = 10> }
 
 function penalize = (scored: Scored) mutates scored => {
 	scored.score = -5 -- valid for a Scored
 }
 
 mutable player = Player { name = "Ana", score = 3 }
-penalize(player) -- error: `penalize` writes `score: Integer` into `player.score`, an `Integer(min = 0, max = 10)`
+penalize(player) -- error: `penalize` writes `score: Integer` into `player.score`, an `Integer<min = 0, max = 10>`
 ```
 
 Otherwise, `player.score` would hold `-5`, outside of its range. The same applies to a field that is a union (writing a `String` into a `"ready" | "done"` field) or an object (writing a `Human` into a `SuperHuman` field, which has more fields).
@@ -221,22 +221,22 @@ A `readonly` field can't be written from outside its type, so it is never accept
 Because types are structural, a [generic constraint](/types/generics#constraints) is just a shape. Any type with the required fields satisfies it, with no declaration of intent (no `implements`, no trait):
 
 ```fa
-function readId(Item: { id: Integer }) = (item: Item): Integer => item.id
+function readId = <Item: { id: Integer }>(item: Item): Integer => item.id
 
 readId(User { id = 1, name = "Ana" }) -- fine
 readId(Product { id = 7, price = 12 }) -- also fine
 readId(Comment { text = "Hello" }) -- error: `Comment` has no field `id: Integer`
 ```
 
-The generic parameter `Item` is inferred from the argument, and names its full type: a function returning `Item` returns a `User` when given a `User`. A plain parameter gives the same result with `Type(parameter)`, see [keeping the type of the argument](#keeping-the-type-of-the-argument).
+The generic parameter `Item` is inferred from the argument, and names its full type: a function returning `Item` returns a `User` when given a `User`. A plain parameter gives the same result with `Type<parameter>`, see [keeping the type of the argument](#keeping-the-type-of-the-argument).
 
 ## Keeping the type of the argument
 
-A parameter is a reference to the argument, which can have more fields than the declared type. Inside the function, only the fields of the declared type can be used, but the value keeps its own type, [`Type(parameter)`](/types/type-functions#typevalue). A copy without annotation keeps it too, with every field of the argument:
+A parameter is a reference to the argument, which can have more fields than the declared type. Inside the function, only the fields of the declared type can be used, but the value keeps its own type, [`Type<parameter>`](/types/type-functions#typevalue). A copy without annotation keeps it too, with every field of the argument:
 
 ```fa
-function renamed = (human: Human, name: String): Type(human) => {
-	mutable copy = human -- a copy of the argument, of type Type(human)
+function renamed = (human: Human, name: String): Type<human> => {
+	mutable copy = human -- a copy of the argument, of type Type<human>
 	copy.name = name
 	copy
 }
@@ -249,7 +249,7 @@ A `use` alias and the loop variable of a `for` keep the type of the value they d
 
 `copy.name = name` writes a `String` into a value whose actual `name` field may be narrower, so each call is checked as in [mutating through a narrower type](#mutating-through-a-narrower-type): `renamed` can't be given a value whose `name` is `"Ana" | "Bao"`.
 
-A function whose single-expression body returns a parameter returns its full type: `function same = (human: Human) => human` returns `Type(human)`.
+A function whose single-expression body returns a parameter returns its full type: `function same = (human: Human) => human` returns `Type<human>`.
 
 Only an annotation narrows the copy, as everywhere else:
 
@@ -260,7 +260,7 @@ function nameOnly = (human: Human): Human => {
 }
 ```
 
-`Type(human)` is a shorthand for a generic parameter: `renamed` above is the same as `function renamed(Item: Human) = (human: Item, name: String): Item`. Use a generic parameter when the type must appear inside another type, as in `Array(Item)`.
+`Type<human>` is a shorthand for a generic parameter: `renamed` above is the same as `function renamed = <Item: Human>(human: Item, name: String): Item`. Use a generic parameter when the type must appear inside another type, as in `Array<Item>`.
 
 ## When you want types to be distinct
 
@@ -321,8 +321,8 @@ The strategy is detailed in `design/compilation-with-llvm.md`.
 - **Identity and layout.** Types are interned by shape, the public data fields with their types (and `readonly`): `Human` and `Animal` are one type, with one layout. Methods and defaults are attached to the name written at the use site, and resolved statically. A type with `#private` fields, a named union, an `Errors` type and an enumeration are interned by declaration. Recursive types are compared coinductively (two shapes are equal if no difference is found while unfolding them), and interned as a cycle of nodes. The declared name is kept beside it for diagnostics and `@typeToString`. Fields are sorted by alignment, then by name, so two equal shapes always have the same layout; a narrower type is in general **not** a prefix of a wider one.
 - **Views.** A function taking a `Human` only touches the fields of `Human`, so its machine code depends on one thing about the argument: where each of these fields sits in it. This is the *view* of `Human` inside the argument: an offset per field, recursively for nested objects stored inline, or the column of each field for a row of a `Columnar`.
 - **Specialization.** A direct call whose argument has a different view gets an instance of the callee compiled for that view, with constant offsets: an implicit generic over the layout, invisible to the type checker. The instance key is the function plus the view of each structural parameter, so two argument types with the same view share an instance, and identical generated code is merged by hashing. An argument whose fields sit at the same offsets reuses the instance of the declared type.
-- **`Type(parameter)`.** A function that uses the type of an argument (to copy it without annotation, return it or reflect on it) is specialized on the argument's full type, exactly like an explicit generic, since it needs its size and its copy and drop functions.
-- **Collections of supersets.** A read-only `Array(SuperHuman)` passed as an `Array(Human)` specializes the callee on the element stride and the view. A `Columnar` view ignores the extra columns.
+- **`Type<parameter>`.** A function that uses the type of an argument (to copy it without annotation, return it or reflect on it) is specialized on the argument's full type, exactly like an explicit generic, since it needs its size and its copy and drop functions.
+- **Collections of supersets.** A read-only `Array<SuperHuman>` passed as an `Array<Human>` specializes the callee on the element stride and the view. A `Columnar` view ignores the extra columns.
 - **Copies.** Narrowing a copy calls the copy function generated for the pair (source, destination), which copies the destination's fields only. It is never a `memcpy` of the start of the source.
 - **Function values.** A function stored in a value is compiled once, for no particular argument. It gets a second entry point that takes, with the pointer, a static table describing the actual argument: the offset of each field of the declared type, the stride for a collection, and the size, alignment, copy and drop functions of the actual type. The table is generated once per pair (actual type, declared type); a caller passing the exact type passes the identity table. This costs one argument and one load per field, on indirect calls only, and keeps `mutates` and returned references exact.
 
@@ -330,5 +330,5 @@ The strategy is detailed in `design/compilation-with-llvm.md`.
 
 - Objects are dynamic: a view is a plain property read, and nothing is specialized.
 - A narrowing copy calls the copy function generated for the destination type, which reads only its fields; a spread (`{ ...value }`) would keep the extra ones.
-- `Type(parameter)` is erased, except where the function needs it: an unannotated copy of a parameter must copy every field of the actual argument, and a reflection (`@typeToString(Type(human))`) must name it. Such a function is emitted once per argument type, as in native code. A function value receives the copy function of the actual argument as a hidden argument, like the native table.
+- `Type<parameter>` is erased, except where the function needs it: an unannotated copy of a parameter must copy every field of the actual argument, and a reflection (`@typeToString(Type<human>)`) must name it. Such a function is emitted once per argument type, as in native code. A function value receives the copy function of the actual argument as a hidden argument, like the native table.
 :::

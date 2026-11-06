@@ -11,7 +11,7 @@ Here is the whole model:
 5. **Function parameters are immutable references**, so arguments are never copied when passed. A function that modifies a parameter declares it with the `mutates` effect.
 6. **Iterating over a collection yields references**, so iteration never copies.
 7. **Every value is destroyed at the end of its scope.**
-8. **A field holds a copy**, unless it is one side of a **relation**: a reference that names the collection its target lives in (`bestFriend: (Person in people)?`), mirrored by a declared reverse side (`bestFriendOf: Pool(people->bestFriend)`), and kept consistent by the compiler.
+8. **A field holds a copy**, unless it is one side of a **relation**: a reference that names the collection its target lives in (`bestFriend: (Person in people)?`), mirrored by a declared reverse side (`bestFriendOf: Pool<people->bestFriend>`), and kept consistent by the compiler.
 
 You never ask *"when should I free this?"* or *"which allocator should I use?"*. The question in Fa is *"where should this object live?"*. And the answer is part of the type: a `Person` stored in the collection `persons` has the type `Person in persons` (see [owned references](/advanced/owned-references)).
 
@@ -121,7 +121,7 @@ console.log(array) -- [2, 3, 4]
 Reading an element out of a collection copies it. To work on the stored value itself, create an alias with `use`:
 
 ```fa
-mutable people: Array(Human) = [
+mutable people: Array<Human> = [
 	{ name = "John", age = 20 }
 	{ name = "Jane", age = 21 }
 	{ name = "Joe", age = 22 }
@@ -145,7 +145,7 @@ An alias to an element of a collection is called an [owned reference](/advanced/
 Collections that return a reference when an element is added, like [`Pool`](/collections/pools), are used with `use` too:
 
 ```fa
-mutable pool: Pool(Human) = []
+mutable pool: Pool<Human> = []
 
 use john = pool.add({ name = "John", age = 20 }) -- a reference to the stored human
 john.age += 1 -- modifies the human stored in the pool
@@ -162,7 +162,7 @@ let john = pool.add({ name = "John", age = 20 }) -- bad practice: `john` is a co
 Adding or removing elements of a collection while iterating over it would invalidate the references the iteration hands out, or change what it visits, so the compiler rejects it:
 
 ```fa
-mutable pool: Pool(Human) = []
+mutable pool: Pool<Human> = []
 
 for human in pool {
 	if human.name == "John" {
@@ -200,8 +200,8 @@ Every value is destroyed at the end of the scope that declared it, in reverse or
 
 ```fa
 function example = () => {
-	mutable a: Array(Integer) = []
-	mutable b: Array(Integer) = []
+	mutable a: Array<Integer> = []
+	mutable b: Array<Integer> = []
 } -- `b` is released, then `a`
 ```
 
@@ -265,11 +265,16 @@ There are no weak pointers and no generation counters: neither kind can dangle, 
 
 The allocator reuses 64 KiB pages and returns unused pages to its free spans.
 It requests at least 2 MiB at a time on 64-bit targets, and 1 MiB on wasm32.
-On native Linux, complete 2 MiB spans can use transparent huge pages through
-an alignment choice and an advisory `madvise` call. Allocation retries with
-ordinary alignment if necessary; refusing the advice does not affect correctness.
-This improves address translation for large heaps, at the cost of potentially
-committing more resident memory for small heaps. It imposes no size limit on values.
+The native runtime gives no huge-page advice by default: measurements found
+unpredictable synchronous memory compaction with that advice. Large blocks on
+Linux use their own mappings, which grow by moving pages. Ordinary allocations
+impose no additional size limit on values.
+
+On 64-bit Linux, arena-allocated recursive edges use 32-bit links: the node's
+address divided by eight. Arena pages share the address range from 2 GiB to
+32 GiB, so a tree of two optional children takes eight bytes. Exhausting this
+range stops with `stop: out of memory (the range of the arenas of recursive values is full)`
+and exit code 101. wasm retains its ordinary 32-bit pointers.
 
 ### JavaScript
 

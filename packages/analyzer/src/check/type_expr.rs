@@ -39,6 +39,7 @@ impl Walker<'_> {
 				let View::Call { callee, arguments } = syntax::view(&tree, signature) else {
 					return TypeId::UNKNOWN;
 				};
+				self.check_generic_brackets(signature);
 				let ty = self.task_type_expr(signature, callee, arguments, errors);
 				self.set_flag(signature, NodeFlags::TYPE_EXPR);
 				self.memo(n, |_| ty)
@@ -291,6 +292,7 @@ impl Walker<'_> {
 	/// `Integer(min = 0, max = 10)`, `Int8(min = 0)` (values brief §6.2). Generic
 	/// applications (`Array(Integer)`) come with collections and generics.
 	fn type_application(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> TypeId {
+		self.check_generic_brackets(n);
 		let tree = Arc::clone(&self.tree);
 		// `std.concurrency.Mutex(T)` (std_library.rs)
 		if let Some(builtin) = self.std_qualified(callee)

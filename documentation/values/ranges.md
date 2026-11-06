@@ -146,7 +146,7 @@ let label = when score is {
 }
 ```
 
-Like every `is` check, matching a range narrows the type of the value: inside the `0..60` branch, `score` is an `Integer(min = 0, max = 59)`. See [numbers](/values/numbers#minimum-and-maximum-values) and [conditionals](/control-flow/conditionals).
+Like every `is` check, matching a range narrows the type of the value: inside the `0..60` branch, `score` is an `Integer<min = 0, max = 59>`. See [numbers](/values/numbers#minimum-and-maximum-values) and [conditionals](/control-flow/conditionals).
 
 A range pattern is written with `..` or `..=`, and only matches integers: compare floats with `<` and `>=`. Its bounds can be any integer expressions; the narrowing uses what the compiler knows about them. A `Range` stored in a name is a value, not a pattern: test it with `is in`. A range written in place is tested with `is`: `score is in 0..60` is a warning, which the formatter rewrites into `score is 0..60`.
 

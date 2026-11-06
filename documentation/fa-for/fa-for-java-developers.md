@@ -15,9 +15,9 @@ Fa is designed for AI agents as much as for humans: everything a function does â
 | `(x) -> x + 1` | `(x) => x + 1` |
 | `long`, `double` | `Integer`, `Float` |
 | `(double) count` | `Float(count)` |
-| `List<T>` | `Array(T)` |
-| `Map<K, V>` | `Map(K, V)` |
-| `Set<T>` | `Set(T)` |
+| `List<T>` | `Array<T>` |
+| `Map<K, V>` | `Map<K, V>` |
+| `Set<T>` | `Set<T>` |
 | `Optional<T>` | `T?` |
 | `null` | `none` |
 | `int load() throws IOException` | `function load = (): Integer throws IoError => ...` |
@@ -30,7 +30,7 @@ Fa is designed for AI agents as much as for humans: everything a function does â
 | `record Point(int x, int y)` | `type Point = { x: Integer, y: Integer }` |
 | `new Point(1, 2)` | `Point { x = 1, y = 2 }` |
 | `sealed interface` + `record` | `type S = Union { ... }` |
-| `interface Reader { ... }` | a structural constraint: `{ read: () => Array(Byte) }` |
+| `interface Reader { ... }` | a structural constraint: `{ read: () => Array<Byte> }` |
 | `assert x == y;` | `assert x == y` |
 | `import java.util.List;` | nothing â€” files see their siblings |
 
@@ -66,7 +66,7 @@ A method that changes its object says so with `mutates self`, and can only be ca
 type Account = {
 	balance: Integer = 0
 
-	function deposit = (self, amount: Integer(min = 0)) mutates self => {
+	function deposit = (self, amount: Integer<min = 0>) mutates self => {
 		self.balance += amount
 	}
 }
@@ -77,7 +77,7 @@ Reuse is composition, not extension:
 ```fa
 type Admin = {
 	...User
-	permissions: Array(String)
+	permissions: Array<String>
 }
 ```
 
@@ -88,7 +88,7 @@ An `Admin` is usable anywhere a `User` is expected, because Fa is [structurally 
 An interface in Fa is a shape:
 
 ```fa
-function process(Item: { id: Integer, name: String }) = (item: Item) => ...
+function process = <Item: { id: Integer, name: String }>(item: Item) => ...
 ```
 
 Every type with an `id` and a `name` satisfies it, without declaring anything. This removes the adapter classes that exist only to bridge two libraries' interfaces.
@@ -183,13 +183,13 @@ let area = when shape is {
 ```
 
 ```fa
-function first(Item) = (items: Array(Item)): Item? => items.get(0)
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
 
 first([1, 2, 3])
-first(Float)([1, 2, 3])
+first<Float>([1, 2, 3])
 ```
 
-Generic parameters come right after the name, and are inferred from the arguments and the expected type. There is **no erasure**: the type argument is available at compile time and drives specialisation. There is also no boxing â€” `Array(Integer)` holds 64-bit integers directly, not objects. See [generics](/types/generics).
+Generic parameters use angle brackets: a type declares them after its name, and a function at the start of its signature. They are inferred from the arguments and the expected type, and written before the call when needed (`first<Float>(...)`, where Java writes `Util.<Float>first(...)`). There is **no erasure**: the type argument is available at compile time and drives specialisation. There is also no boxing â€” `Array<Integer>` holds 64-bit integers directly, not objects. See [generics](/types/generics).
 
 ## Dependency injection becomes requirements
 

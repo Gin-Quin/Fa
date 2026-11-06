@@ -15,7 +15,7 @@ Fa is designed for AI agents as much as for humans: types are 100% safe — if t
 | `` `Hello ${name}` `` | `"Hello {name}"` |
 | `number` | `Integer` or `Float` |
 | `Number(count)` | `Float(count)` |
-| `Array<string>` | `Array(String)` |
+| `Array<string>` | `Array<String>` |
 | `new Set([1, 2])` | `Set.from([1, 2])` |
 | `x?.y` | `x?.y` |
 | `x ?? y` | `x ?? y` (optionals only) |
@@ -32,7 +32,7 @@ Fa is designed for AI agents as much as for humans: types are 100% safe — if t
 | `Promise.all([a, b])` | `Task.all([a, b])` |
 | `import { a } from "./b"` | nothing — or `use { a } = b` |
 | `export const a = 1` | `export = 1` |
-| `export const items: Item[] = []`, then `items.push(item)` | `export mutable: Array(Item) = []`, then `items.push(item)` |
+| `export const items: Item[] = []`, then `items.push(item)` | `export mutable: Array<Item> = []`, then `items.push(item)` |
 
 ## Generics use parentheses
 
@@ -42,20 +42,20 @@ function first<T>(items: T[]): T | undefined { ... }
 ```
 
 ```fa
-function first(Item) = (items: Array(Item)): Item? => items.get(0)
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
 ```
 
-Generic parameters come right after the name. They are inferred from the arguments and the expected type; when you need to write them, they are applied first:
+Generic parameters use angle brackets, like in TypeScript, and start the signature, like in a generic arrow function (`<T>(items: T[]) => ...`). They are inferred from the arguments and the expected type; when you need to write them, they come before the call, like in TypeScript. One difference: `<` followed by whitespace is always a comparison, and any other `<` opens a generic list, so a comparison is written `a < b`, never `a<b` (see [angle brackets and comparisons](/types/generics#angle-brackets-and-comparisons)):
 
 ```fa
 first([1, 2, 3])
-first(Float)([1, 2, 3])
+first<Float>([1, 2, 3])
 ```
 
 A constraint is a shape, like `T extends { id: number }`:
 
 ```fa
-function readId(Item: { id: Integer }) = (item: Item): Integer => item.id
+function readId = <Item: { id: Integer }>(item: Item): Integer => item.id
 ```
 
 See [generics](/types/generics).
@@ -77,7 +77,7 @@ type ApiError = Errors {
 	Timeout
 }
 
-function loadScore = (): Integer throws ApiError => {
+function loadScore = (): Integer throws ApiError.Network => {
 	throw ApiError.Network { message = "boom" }
 }
 
@@ -167,7 +167,7 @@ let user = User { name = "Ada", age = 30 }
 let grace: User = { name = "Grace" } -- typed by context
 ```
 
-Types compose with the spread: `type Admin = { ...User, permissions: Array(String) }`.
+Types compose with the spread: `type Admin = { ...User, permissions: Array<String> }`.
 
 ## Numbers are concrete
 
@@ -176,7 +176,7 @@ There is no single `number`. `Integer` and `Float` are different types, with no 
 ```fa
 let count: Integer = 42
 let ratio: Float = 0.5
-let percent: Integer(min = 0, max = 100) = 50
+let percent: Integer<min = 0, max = 100> = 50
 
 let scaled = Float(count) * ratio
 ```
@@ -206,7 +206,7 @@ Each file exports exactly one thing, named after the file. See [modules](/archit
 - **Native and WebAssembly output** — optimized binaries, no runtime, no garbage collector
 - **Colourless async** — an `async` function can also be called synchronously
 - **Function composition** — `a then b then c`, and slicing a composition (`migrate[1..]`), for plugins, middleware and migrations
-- **Fields** — `Pick(User, { name, address { city } })` for GraphQL-like selection
+- **Fields** — `Pick<User, { name, address { city } }>` for GraphQL-like selection
 - **Typed errors and requirements** — `throws` and `requires` in the signature, checked at compile time
 
 Other things you will enjoy:
@@ -231,7 +231,7 @@ Other things you will enjoy:
 | `map[key]` returns `undefined` | `throws KeyNotFound` unless the key is proven; `.get(key)` returns `V?` |
 | Truthiness everywhere | conditions only accept a `Boolean`; use `is none` / `is not none` |
 | `a === b` on objects (identity) | `==` compares structure; identity is not observable |
-| Passing a `SuperHuman[]` to a function that pushes a `Human` | accepted only if the function doesn't mutate the array; otherwise make it generic (`function f(Item: Human) = (items: Array(Item)) mutates items => …`) |
+| Passing a `SuperHuman[]` to a function that pushes a `Human` | accepted only if the function doesn't mutate the array; otherwise make it generic (`function f = <Item: Human>(items: Array<Item>) mutates items => …`) |
 | `arr.values().filter(f).take(3)` | `arr.values().filter(f).firstValues(3)`: `take` removes an element from a collection in Fa |
 | `const p = loadScores(scores)` then `scores.push(4)` | with `let task = start loadScores(scores)`, `scores` can't be modified until the task is awaited |
 | `try` around a block | `try` or `catch` on each call that can fail |

@@ -32,7 +32,7 @@ range  = [ index ] ( ".." | "..=" ) [ index ]
 ```fa
 type Player = { name: String, score: Integer }
 
-function resetScores = (players: Array(Player)) mutates players[..].score => {
+function resetScores = (players: Array<Player>) mutates players[..].score => {
 	for player in players {
 		player.score = 0
 	}
@@ -62,9 +62,9 @@ A type is **flat** when no path below it goes through an owning edge: a primitiv
 `mutates P` gives a new value to `P`, which stays a valid place. It invalidates a reference `R` if and only if `R` is strictly below `P` and the path from `P` to `R` goes through at least one owning edge.
 
 ```fa
-type Person = { name: String, age: Integer, pets: Array(Pet) }
+type Person = { name: String, age: Integer, pets: Array<Pet> }
 
-mutable people: Array(Person) = [Person { name = "Ana", age = 31, pets = [Pet { name = "Rex" }] }]
+mutable people: Array<Person> = [Person { name = "Ana", age = 31, pets = [Pet { name = "Rex" }] }]
 
 use person = people[0]         -- the place `people[0]`
 use age = people[0].age        -- `.age`: no owning edge below `people[0]`
@@ -89,6 +89,8 @@ The type that decides the owning edges is the type of the path as the callee dec
 ### What a body may do
 
 With a block body, the declared effects must cover every effect of the body; with a single-expression body, they are inferred. A declared path covers the paths below it; `[..]` covers every index and key; a declared effect covers its implied effects (see [relations](#relations)). Effects on the function's own local values are not effects of the function.
+
+Every declared `mutates` path must also cover an effect that the body actually performs. Declaring an unused mutation is an error, including on a single-expression body or a function with an explicit function type. The covering rules still allow `mutates player` for a body that writes `player.score`.
 
 ## May designate
 
@@ -116,8 +118,8 @@ Nothing else is proven: no relation between two different symbols is kept (a gua
 Other identity facts don't cross a user function: a reference returned by `pick(people, 2)` has an unknown index. Built-in operations keep them: `getOrInsert(key)` returns a reference whose key is the identity of `key`.
 
 ```fa
-function example = (index: Integer(min = 0, max = 2)) => {
-	mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }, Person { name = "Dan" }]
+function example = (index: Integer<min = 0, max = 2>) => {
+	mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }, Person { name = "Dan" }]
 
 	use current = people[index]
 	use last = people[3]
@@ -159,10 +161,10 @@ The type of a reference is `T in path`: `T` is the type of the designated value,
 | `use address = user.address` (not inside a collection) | `Address`: an alias, tracked like any reference, that can't be returned |
 
 - The type of a `use` is inferred, and may be written: `use someone: Person in persons = persons[1]`. It is written in full in parameters, return types and relation fields.
-- The path after `in` follows the grammar of [paths](#places-and-paths). At a call, the parameter names in the callee's reference types are replaced by the argument paths: `firstPerson(persons: Array(Person)): (Person in persons)?` called as `firstPerson(town.people)` returns a `(Person in town.people)?`. When that argument isn't a place (a temporary), the result can only be copied with `let`.
+- The path after `in` follows the grammar of [paths](#places-and-paths). At a call, the parameter names in the callee's reference types are replaced by the argument paths: `firstPerson(persons: Array<Person>): (Person in persons)?` called as `firstPerson(town.people)` returns a `(Person in town.people)?`. When that argument isn't a place (a temporary), the result can only be copied with `let`.
 - A parameter can be typed by another parameter: in `(self, node: Node in self.#nodes)`, the argument of `node` must be a reference into the argument of `self`. Private paths like `self.#nodes` may appear in a public signature: the caller holds a `Node in list.#nodes`, but can't read `list.#nodes`.
 - Owners are identified by their path, with the identities of [may designate](#may-designate): `town1.people` and `town2.people` are two owners; `towns[i].people` and `towns[j].people` may be the same one.
-- Inside a type, a field type names a collection of the enclosing value: in `type Town = { people: Pool(Person) = [] ... }`, the field `bestFriend: (Person in people)?` of an element reached as `Person in town.people` has the type `(Person in town.people)?`.
+- Inside a type, a field type names a collection of the enclosing value: in `type Town = { people: Pool<Person> = [] ... }`, the field `bestFriend: (Person in people)?` of an element reached as `Person in town.people` has the type `(Person in town.people)?`.
 - A function returns a reference only when its declared return type says `in`, and the path after `in` starts at a parameter or a module-level value. With an inferred return type, it returns a copy. A returned reference is valid after the effects of the call.
 
 ## `use` and `mutable use`
@@ -174,8 +176,8 @@ The type of a reference is `T in path`: `T` is the type of the designated value,
 - `use { name, age } = person` declares one alias per field.
 - A `mutable use` can be declared on an immutable collection: it designates read-only places, and can be moved with `reuse`. `reuse x = ...` takes the same forms as `use`, and must give the declared type, with the same owner: `none` if the type is optional.
 - `use y = x`, where `x` is a `mutable use`, designates the place `x` designates at that moment: a later `reuse x` doesn't move `y`.
-- References to the elements of a `Set` or `GrowingSet` and to the keys of a `Map` or `GrowingMap` are read-only, including loop variables over a `mutable` collection: changing them would change their place in the table. These element types are invariant under [structural views](/advanced/structural-typing): a `Set(Hero)` is not a `Set(Human)`.
-- A local collection of references (`Array(Person in people)`) is not allowed in this version: keep indices, or declare a relation `Pool`. Besides `use` aliases, parameters and loop variables, an iterator (`values()`) is the only local value that holds references.
+- References to the elements of a `Set` or `GrowingSet` and to the keys of a `Map` or `GrowingMap` are read-only, including loop variables over a `mutable` collection: changing them would change their place in the table. These element types are invariant under [structural views](/advanced/structural-typing): a `Set<Hero>` is not a `Set<Human>`.
+- A local collection of references (`Array<Person in people>`) is not allowed in this version: keep indices, or declare a relation `Pool`. Besides `use` aliases, parameters and loop variables, an iterator (`values()`) is the only local value that holds references.
 
 ## Iteration
 
@@ -195,10 +197,10 @@ In the table, a relation has a direct side `f` on the elements of a holder colle
 
 | Operation | Declared effect | Implied effects |
 | --- | --- | --- |
-| `x.f = t`, one-to-many (`r: Pool(C->f)`) | `mutates x.f` | `mutates C[..].r`: the old and the new target |
+| `x.f = t`, one-to-many (`r: Pool<C->f>`) | `mutates x.f` | `mutates C[..].r`: the old and the new target |
 | `x.f = t`, one-to-one (`r: (C->f)?`) | `mutates x.f` | `mutates C[..].r`, `mutates H[..].f`: the previous holder of `t` becomes `none` |
 | `x.f = t`, symmetric | `mutates x.f` | `mutates C[..].f`: `t`, and the previous partners of `x` and `t` |
-| `x.f.add(t)`, `x.f.delete(t)`, `x.f.clear()`, many-to-many (`r: Pool(in C->f)`) | `mutates x.f` | `mutates C[..].r` |
+| `x.f.add(t)`, `x.f.delete(t)`, `x.f.clear()`, many-to-many (`r: Pool<in C->f>`) | `mutates x.f` | `mutates C[..].r` |
 | `o.g = t`, owner field | `mutates o.g` | none |
 | `c.add(value)` | `mutates c.size` | when the value sets direct sides: the implied effects of writing them |
 | `c.delete(e)`, `c.take(e)` | `invalidates e` | `mutates c.size`; for each relation whose target collection is `c`: `mutates H[..].f` (the direct sides that pointed at `e` become `none`, or lose `e`); for each relation held by the elements of `c`: `mutates C[..].r` (`e` leaves the reverse sides of its targets); `mutates o.g` for each owner field into `c` |
@@ -211,7 +213,7 @@ for friend in ana.friends {
 }
 ```
 
-Deleting a user of `blog.users` writes `blog.posts[..].author`: `blog` must be `mutable`, which it is to delete from `blog.users`. With module-level collections, `posts` must be declared `mutable` too. A function that receives the collection alone (`users: Pool(Blog.User)`) and deletes from it declares its effect on `users` only: the implied effect on the posts of the same owner is added at each call, where the owner of the argument is known.
+Deleting a user of `blog.users` writes `blog.posts[..].author`: `blog` must be `mutable`, which it is to delete from `blog.users`. With module-level collections, `posts` must be declared `mutable` too. A function that receives the collection alone (`users: Pool<Blog.User>`) and deletes from it declares its effect on `users` only: the implied effect on the posts of the same owner is added at each call, where the owner of the argument is known.
 
 ### Writing relation fields
 
@@ -250,7 +252,7 @@ The declared effects are still checked: `befriend` declares `mutates person.best
 ### A reference kept across a loop that pushes
 
 ```fa
-mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
+mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }]
 
 use first = people[0]
 
@@ -280,8 +282,8 @@ for index in 0..10 {
 ### Two indices, then `delete`
 
 ```fa
-function example = (i: Integer(min = 1, max = 2), j: Integer(min = 0, max = 3)) => {
-	mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }, Person { name = "Dan" }]
+function example = (i: Integer<min = 1, max = 2>, j: Integer<min = 0, max = 3>) => {
+	mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }, Person { name = "Dan" }]
 
 	use a = people[0]
 	use b = people[i]
@@ -299,7 +301,7 @@ function example = (i: Integer(min = 1, max = 2), j: Integer(min = 0, max = 3)) 
 ### A reference found before an `add`
 
 ```fa
-mutable pool: Pool(Person) = []
+mutable pool: Pool<Person> = []
 pool.add(Person { name = "Ana" })
 
 use found = pool.find((person) => person.name == "Ana") -- `(Person in pool)?`
@@ -316,10 +318,10 @@ A reference found after the `add` may designate the added element: deleting it i
 ### A function that returns a reference into its parameter
 
 ```fa
-function pick = (persons: Array(Person), index: Integer): Person in persons => persons[index]
-function pickCopy = (persons: Array(Person), index: Integer) => persons[index] -- inferred return type: a copy
+function pick = (persons: Array<Person>, index: Integer): Person in persons => persons[index]
+function pickCopy = (persons: Array<Person>, index: Integer) => persons[index] -- inferred return type: a copy
 
-mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }]
+mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }]
 
 use chosen = try pick(people, 2) -- `Person in people`, at an unknown index
 people.delete(1) -- `invalidates people[1..]`
@@ -329,7 +331,7 @@ console.log(chosen.name) -- error: the index of `chosen` is unknown: identities 
 ### A callback that reads a reference into the mutated collection
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 use ana = people.add(Person { name = "Ana", age = 31 })
 
 people.deleteWhere((person) => person.age < ana.age) -- error: the callback captures `ana`, a reference into `people`, which `deleteWhere` mutates
@@ -357,7 +359,7 @@ In `LinkedList.remove` (see [relations](/advanced/relations#example-a-linked-lis
 ### Invalidated in one branch only
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 use ana = people.add(Person { name = "Ana" })
 
 if leaving {

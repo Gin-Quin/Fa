@@ -507,12 +507,18 @@ fn generic_lists_have_no_inner_padding() {
 }
 
 #[test]
-fn transition_both_spellings_of_generics_are_kept() {
-	// the parenthesized spelling of the transition (until step 2 of the flag day)
+fn generic_declarations_use_angle_brackets() {
 	assert_formats(
-		"type Pair(Left, Right) = { left: Left }\nfunction first(Item) = (items: Array(Item)) => items\nlet a: Array(Integer) = []\nlet b: Array<Integer> = []\n",
-		"type Pair(Left, Right) = { left: Left }\nfunction first(Item) = (items: Array(Item)) => items\nlet a: Array(Integer) = []\nlet b: Array<Integer> = []\n",
+		"type Pair<Left, Right> = { left: Left }\nfunction first = <Item>(items: Array<Item>) => items\nlet a: Array<Integer> = []\n",
+		"type Pair<Left, Right> = { left: Left }\nfunction first = <Item>(items: Array<Item>) => items\nlet a: Array<Integer> = []\n",
 	);
+	for source in [
+		"type Pair(Left, Right) = { left: Left }",
+		"function first(Item) = (items: Array<Item>) => items",
+	] {
+		let errors = format(source).expect_err("the transition syntax has ended");
+		assert!(errors.iter().any(|error| error.code == Some("GN031")));
+	}
 }
 
 #[test]

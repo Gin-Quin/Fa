@@ -54,7 +54,7 @@ use { Json } = std.json
 type CreateUser = {
 	name: String
 	email: String
-	age: Integer(min = 0, max = 150)?
+	age: Integer<min = 0, max = 150>?
 }
 
 export function = (request: Request): Response => {
@@ -74,6 +74,10 @@ The range on `age` is enforced by the parser: a payload with `"age": 200` is rej
 
 `catch` handles a failure where it happens. Here, each `catch` turns the error into a response and returns it from the handler: `createUser` throws an `ApiError`, which `toResponse` (below) turns into a response.
 
+A missing field takes its default value, freshly built for each object, even when the field is optional. Without a default, a missing optional field is `none`; another missing field is a `JsonError`.
+
+Named union members carry a `"type"` property with their member name: `{ "type": "Circle", "radius": 1 }`. A member without data is `{ "type": "Point" }`. Non-object data, or an object with its own `type` field, goes under `"value"`; a literal member stays the literal. An unknown tag is a `JsonError` listing the accepted members.
+
 ## Errors are part of the signature
 
 A handler returns a `Response`, so every failure has to be turned into one. This is the point where Fa's error model pays off: the compiler will not let you forget a case.
@@ -91,7 +95,7 @@ function toResponse = (error: ApiError): Response => when error is {
 	ApiError.Conflict as { message } => Response.json({ error = message }, status = 409)
 }
 
-function loadUser = (id: Integer): User throws ApiError => {
+function loadUser = (id: Integer): User throws ApiError.NotFound => {
 	let user = users.get(id)
 
 	if user is none {

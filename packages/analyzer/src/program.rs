@@ -32,6 +32,7 @@ impl Session {
 	pub fn analyze_program(&mut self, module: &str) -> Option<Program> {
 		let entry = self.file_of_module(module)?;
 		self.settle(&[entry]);
+		self.finish_foreign_key_loops();
 		let files = self.analyzed_files();
 		self.add_scan_diagnostics(&files, false);
 		let mut program = self.assemble(files, Some(entry), Vec::new());
@@ -62,6 +63,7 @@ impl Session {
 			.filter(|&file| !matches!(self.role(file), FileRole::Configuration(_)))
 			.collect();
 		self.settle_units(&roots);
+		self.finish_foreign_key_loops();
 		let files = self.analyzed_files();
 		self.add_scan_diagnostics(&files, true);
 		let (tests, files): (Vec<FileId>, Vec<FileId>) = files
@@ -135,6 +137,36 @@ impl Session {
 					self.analyze_file(file);
 				}
 			}
+		}
+	}
+
+	/// Key-loop bodies need the concrete applications recorded by callers
+	/// checked later than their declaring file. Revisit only those files;
+	/// their signatures are unchanged and no dependency walk is repeated.
+	fn finish_foreign_key_loops(&mut self) {
+		let providers: FxHashSet<_> = self
+			.key_set_applications()
+			.iter()
+			.map(|application| {
+				let module = self
+					.types
+					.decl_key_data(self.types.param(application.param).owner)
+					.module;
+				self.types.module_path(module).to_string()
+			})
+			.collect();
+		let files: Vec<_> = self
+			.analyzed_files()
+			.into_iter()
+			.filter(|&file| {
+				!self.source_file(file).interface.key_loop_params.is_empty()
+					&& (providers.contains(self.module(file))
+						|| self.analysis(file).foreign_key_sets)
+			})
+			.collect();
+		for file in files {
+			self.reset_analysis(file);
+			self.analyze_file(file);
 		}
 	}
 
@@ -870,6 +902,12 @@ impl Session {
 				}
 			}
 		}
+		self.finish_foreign_key_loops();
+		changed.extend(
+			self.analyzed_files()
+				.into_iter()
+				.filter(|&file| !self.source_file(file).interface.key_loop_params.is_empty()),
+		);
 		changed.sort();
 		changed.dedup();
 		changed

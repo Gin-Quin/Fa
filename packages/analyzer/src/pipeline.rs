@@ -53,6 +53,9 @@ pub struct Shared {
 	pub(crate) scans: FxHashMap<String, Arc<FileScan>>,
 	/// The declarations of each global type of a published module.
 	pub(crate) origins: Origins,
+	/// Filled after all units publish their callers' requests. Re-analyses
+	/// of declaring units then check each applied key-loop body.
+	pub(crate) key_set_applications: OnceLock<Vec<crate::modules::KeySetApplication>>,
 }
 
 /// The number of shards of [`Origins`].
@@ -517,7 +520,14 @@ pub fn analyze_package(
 	let init_order = program.analyze(root, &mut modules);
 	stats.global_types = global.types.len();
 	root.set_shared(None);
-	Report {
+	let applications = shared
+		.interfaces
+		.values()
+		.filter_map(OnceLock::get)
+		.flat_map(|interface| interface.key_set_applications.iter().copied())
+		.collect();
+	let _ = shared.key_set_applications.set(applications);
+	let mut report = Report {
 		modules,
 		init_order,
 		entry,
@@ -525,7 +535,40 @@ pub fn analyze_package(
 		shared,
 		cancelled,
 		stats,
+	};
+	// A provider's initial unit precedes its callers. Only files with
+	// deferred key loops need their concrete applications now; all other
+	// interfaces and code stay available without retaining any source tree.
+	if !report.cancelled {
+		for unit in &units {
+			let needs_keys = unit.modules.iter().any(|&module| {
+				report
+					.shared
+					.interface(module_ids[module])
+					.is_some_and(|interface| !interface.key_loop_params.is_empty())
+			});
+			if !needs_keys {
+				continue;
+			}
+			let paths: Vec<_> = unit
+				.modules
+				.iter()
+				.map(|&module| paths[module].as_str())
+				.collect();
+			let (session, files) = report.reanalyze(root, &paths);
+			for &file in &files {
+				if let Ok(at) = report
+					.modules
+					.binary_search_by(|module| module.module.as_str().cmp(session.module(file)))
+				{
+					report.modules[at].diagnostics = session.diagnostics(file).to_vec();
+					report.modules[at].analyzed = true;
+				}
+			}
+			sink.keep(session, &files);
+		}
 	}
+	report
 }
 
 /// Reads, parses and scans the modules of the package, in parallel: the

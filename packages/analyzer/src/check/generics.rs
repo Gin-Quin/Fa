@@ -143,6 +143,13 @@ impl Walker<'_> {
 	/// file (what its export publishes), by its symbol.
 	pub(super) fn declared_generics(&mut self, symbol: SymbolId) -> Vec<ParamId> {
 		let decl = self.a.symbols.symbol(symbol).decl_node;
+		// A function's complete list also holds the implicit and derived
+		// parameters discovered while checking its signature and body.
+		if let Some(function) = self.direct_function(symbol)
+			&& let Some(info) = self.a.function(function)
+		{
+			return info.generics.clone();
+		}
 		if let Some(params) = self.generic_params.get(&decl) {
 			return params.clone();
 		}
@@ -823,7 +830,8 @@ impl Walker<'_> {
 		};
 		// a value parameter makes the first list the generic one (types brief §3.11.2)
 		if arguments.is_empty()
-			|| !(self.has_value_params(callee)
+			|| !(syntax::is_angle_application(&tree, n)
+				|| self.has_value_params(callee)
 				|| arguments
 					.iter()
 					.all(|argument| self.is_type_argument(argument)))
@@ -834,8 +842,10 @@ impl Walker<'_> {
 		let crate::symbols::Resolution::Local(symbol) = self.a.resolution(callee) else {
 			return None;
 		};
-		let decl = self.direct_function(symbol)?;
-		let params = self.a.function(decl)?.generics.clone();
+		let params = match self.direct_function(symbol) {
+			Some(decl) => self.a.function(decl)?.generics.clone(),
+			None => self.exported_generics(symbol),
+		};
 		if params.is_empty() {
 			return None;
 		}
@@ -851,11 +861,21 @@ impl Walker<'_> {
 		params: &[ParamId],
 		arguments: NodeList<'_>,
 	) -> TypeId {
-		let args = self.generic_arguments(params, arguments);
+		// Derived results and `Type<parameter>` binders are compiler-owned.
+		// An explicit type argument must never override the result that the
+		// body actually builds, even though its instantiation records it.
+		let explicit: Vec<_> = params
+			.iter()
+			.copied()
+			.filter(|param| {
+				!self.a.derived_params.contains_key(param) && !self.is_implicit_param(*param)
+			})
+			.collect();
+		let args = self.generic_arguments(&explicit, arguments);
 		self.set_flag(n, crate::analysis::NodeFlags::GENERIC_APPLICATION);
 		self.memo(n, |w| {
-			if args.len() > params.len() {
-				let message = format!("this function takes {} type arguments", params.len());
+			if args.len() > explicit.len() {
+				let message = format!("this function takes {} type arguments", explicit.len());
 				let diagnostic = w.diagnostic(&GN007, n, message);
 				w.report(diagnostic);
 				return TypeId::UNKNOWN;

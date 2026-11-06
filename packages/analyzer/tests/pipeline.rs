@@ -350,3 +350,43 @@ fn a_second_target_analyzes_nothing_when_no_file_reads_it() {
 	assert!(!first.contains("reads_target=true"), "{first}");
 	assert!(!again.contains("analyzed=true"), "{first}\n{again}");
 }
+
+#[test]
+fn imported_key_loop_applications_are_checked_deterministically() {
+	let files: Vec<_> = [
+		("library/bump.fa", "export function = <Value, keys: Keys<Value>>(value: Value) => {\n\t@for key in keys {\n\t\tconsole.log(value[key] + 1)\n\t}\n}\n"),
+		("application/main.fa", "type Mixed = { count: Integer, label: String }\nexport function = () => {\n\tlet value: Mixed = { count = 1, label = \"fruit\" }\n\tlibrary.bump<Mixed, { count, label }>(value)\n}\n"),
+	].into_iter().map(|(path, source)| (path.to_string(), source.to_string())).collect();
+	let (first, _) = assert_deterministic(&files);
+	assert!(first.contains("TF011"), "{first}");
+	assert!(first.contains("key `label`"), "{first}");
+	assert!(first.contains("application/main.fa:4:"), "{first}");
+}
+
+#[test]
+fn changing_a_callers_key_set_rechecks_the_unchanged_provider() {
+	let mut files: Vec<_> = [
+		("library/bump.fa", "export function = <Value, keys: Keys<Value>>(value: Value) => {\n\t@for key in keys {\n\t\tconsole.log(value[key] + 1)\n\t}\n}\n"),
+		("application/main.fa", "type Mixed = { count: Integer, label: String }\nexport function = () => {\n\tlet value: Mixed = { count = 1, label = \"fruit\" }\n\tlibrary.bump<Mixed, { count, label }>(value)\n}\n"),
+	].into_iter().map(|(path, source)| (path.to_string(), source.to_string())).collect();
+	let mut session = Session::new();
+	session.set_resolver(Box::new(CodebaseResolver::from_texts(&files, None)));
+	let options = pipeline::Options {
+		entry: Some("application/main".to_string()),
+		threads: Some(2),
+		..Default::default()
+	};
+	let first = pipeline::analyze_package(&mut session, &options, None, &NoSink);
+	assert!(first.has_errors());
+	files[1].1 = files[1]
+		.1
+		.replace("{ count, label }>(value)", "{ count }>(value)");
+	session.set_resolver(Box::new(CodebaseResolver::from_texts(&files, None)));
+	let dirty = std::iter::once("application/main".to_string()).collect();
+	let options = pipeline::Options {
+		dirty: Some(dirty),
+		..options
+	};
+	let again = pipeline::analyze_package(&mut session, &options, Some(&first), &NoSink);
+	assert!(!again.has_errors(), "{}", outputs(&session, &again));
+}

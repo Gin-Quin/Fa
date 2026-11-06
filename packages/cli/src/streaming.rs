@@ -302,8 +302,15 @@ impl UnitSink for BuildSink<'_> {
 		let mut generated = Vec::new();
 		for &file in files {
 			if self.defer_all
-				|| fa_codegen_js::reads_program_claims(session, file, self.options.overflow_checks)
-			{
+				|| !session
+					.source_file(file)
+					.interface
+					.key_loop_params
+					.is_empty() || fa_codegen_js::reads_program_claims(
+				session,
+				file,
+				self.options.overflow_checks,
+			) {
 				generated.push(session.module(file).to_string());
 			} else {
 				self.generate(session, file, &self.options);

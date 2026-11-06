@@ -443,9 +443,8 @@ impl Generator<'_> {
 				&& let Some(keys) = arguments.get(1)
 			{
 				let values = self.in_order(&[value, keys], |g, node| g.expr(node));
-				let table = self.key_set_path_table(derived.keys);
 				let helper = self.helper(if derived.pick { "faPick" } else { "faOmit" });
-				let paths = format!("{table}[{}]", values[1].text);
+				let paths = format!("{}.paths", values[1].primary_text());
 				return js::call(helper, &[values[0].text.clone(), paths]);
 			}
 			let value = self.expr(value);
@@ -576,8 +575,7 @@ impl Generator<'_> {
 				};
 				// `repeatText(2)("ab")`: the application's instance, one call
 				let stripped = self.strip_groups(callee);
-				let application = matches!(info.callee, Callee::Function(_))
-					&& matches!(self.view(stripped), View::Call { .. })
+				let application = matches!(self.view(stripped), View::Call { .. })
 					&& self.analysis.call(stripped).is_none()
 					&& self.analysis.instantiation(stripped).is_some();
 				let function = match (application, info.callee) {
@@ -587,6 +585,10 @@ impl Generator<'_> {
 							None => self.expr(callee),
 						}
 					}
+					(true, Callee::Value) => match self.view(stripped) {
+						View::Call { callee: inner, .. } => self.expr(inner),
+						_ => unreachable!("a generic application is a call"),
+					},
 					_ => self.expr(callee),
 				};
 				// a reactive place given: the reactive instance (reactivity.rs)
@@ -648,6 +650,10 @@ impl Generator<'_> {
 				if let Callee::Function(declaration) = info.callee {
 					let site = if application { stripped } else { n };
 					let hidden = self.hidden_arguments(declaration, site);
+					values.splice(0..0, hidden);
+				} else if info.callee == Callee::Value {
+					let site = if application { stripped } else { n };
+					let hidden = self.external_hidden_arguments(callee, site);
 					values.splice(0..0, hidden);
 				}
 				let callee_text = if matches!(self.view(self.strip_groups(callee)), View::Name(_)) {

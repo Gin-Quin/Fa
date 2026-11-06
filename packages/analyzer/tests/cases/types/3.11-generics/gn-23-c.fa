@@ -1,4 +1,3 @@
--- pending: M2 (key-set parameters applied from another file: GN008; the derived parameter and the writes of `Type<human>` aren't in the interface)
 -- brief: gn-23 and gn-24 with the functions in another file
 -- file: library/select.fa
 export function = <Entity, keys: Keys<Entity>>(entity: Entity): Pick<Entity, keys> => pick(entity, keys)

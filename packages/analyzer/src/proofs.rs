@@ -21,7 +21,8 @@ use crate::types::{CollKind, PathRoot, TypeFlags, TypeKind, TypeStore};
 
 /// The fact of a unit whose values may come from outside the program
 /// ([`ProofFile::opaque`]: JSON parsing, reading a C pointer, C code
-/// writing through a pointer): the objects, arrays and maps it builds or
+/// writing through a pointer, or bodies checked under several key-loop
+/// analyses): the objects, arrays and maps it builds or
 /// gives away hold any integers, so no claim of a field, items or values
 /// holds (`unit_claims`).
 pub const OPAQUE: &str = "opaque";
@@ -204,6 +205,13 @@ impl<'a> ProofFile<'a> {
 	}
 
 	fn compute_opaque(&self) -> bool {
+		// A key loop has a separate analysis for each key, with different
+		// types and stores at the same node indices. Its main analysis is
+		// not a summary of all those stores. Until it is, a proof may not
+		// choose one key's stores as the invariant of the whole program.
+		if !self.analysis.key_loop_bodies.is_empty() {
+			return true;
+		}
 		let builds = (0..self.tree.nodes.len()).any(|at| {
 			matches!(self.analysis.call(NodeId::new(at)).map(|info| info.callee),
 				Some(Callee::Builtin(id))

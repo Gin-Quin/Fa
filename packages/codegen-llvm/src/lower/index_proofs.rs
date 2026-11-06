@@ -46,6 +46,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	fn compute_index_facts(&self) -> IndexFacts {
+		// The current analysis may be one key's snapshot. Its stores do
+		// not summarize the other keys, and its node indices are the same.
+		if !self.session.analysis(self.file).key_loop_bodies.is_empty() {
+			return IndexFacts::default();
+		}
 		let checks = self.overflow_checks();
 		// asynchronous code too: the claims are flow-insensitive (every
 		// store of a place, wherever and whenever it runs: a task, a callee

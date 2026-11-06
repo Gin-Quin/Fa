@@ -1,0 +1,17 @@
+-- Derived results keep their exact selected fields across an interface.
+-- file: library/select.fa
+export function = <Entity, keys: Keys<Entity>>(entity: Entity): Pick<Entity, keys> => pick(entity, keys)
+-- file: library/remove.fa
+export function = <Entity, keys: Keys<Entity>>(entity: Entity): Omit<Entity, keys> => omit(entity, keys)
+-- file: application/main.fa
+type User = { name: String, email: String, password: String }
+export function = () => {
+	let user: User = { name = "Ada", email = "a@b", password = "s" }
+	let selected = library.select<User, { name, email }>(user)
+	let invalid: Integer = selected.name -- error: E-TYPE-1
+	let absent = selected.password -- error: E-OBJ-5
+	let forged = library.select<User, { name }, User>(user) -- error: GN007
+	let removed = library.remove<User, { password }>(user)
+	let invalidAgain: Integer = removed.email -- error: E-TYPE-1
+	let absentAgain = removed.password -- error: E-OBJ-5
+}

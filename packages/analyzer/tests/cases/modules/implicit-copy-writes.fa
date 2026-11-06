@@ -1,0 +1,21 @@
+-- Copy-write constraints travel in interfaces, including through a
+-- wrapper and a local import alias.
+-- file: library/renamed.fa
+export function = (human: { name: String }, name: String): Type<human> => {
+	mutable copy = human
+	copy.name = name
+	copy
+}
+-- file: library/rename.fa
+export function = (human: { name: String }, name: String): Type<human> => renamed(human, name)
+-- file: application/main.fa
+use change = library.renamed
+type Tight = { name: "a" | "b" }
+type Human = { name: String, age: Integer }
+export function = () => {
+	let wrong = library.renamed(Tight { name = "a" }, "zzz") -- error: EF004
+	let wrongAgain = library.rename(Tight { name = "b" }, "zzz") -- error: EF004
+	let wrongAlias = change(Tight { name = "a" }, "zzz") -- error: EF004
+	let right = library.renamed(Human { name = "Ada", age = 20 }, "Bea")
+	console.log(right.name, right.age)
+}

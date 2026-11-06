@@ -380,6 +380,11 @@ impl Walker<'_> {
 
 		let ty = self.memo(n, |w| {
 			let mut binding = binding;
+			if kind == Callee::Value {
+				let parameters: Vec<TypeId> = params.iter().map(|param| param.sig.ty).collect();
+				let text = w.tree.text(callee.index()).to_string();
+				w.check_implicit_write_arguments(&text, &parameters, &binding.arguments);
+			}
 			// a method of a type of another file: the receiver fills `self` (modules.rs)
 			if kind == Callee::Value
 				&& let View::Access { members, .. } | View::OptionalAccess { members, .. } =

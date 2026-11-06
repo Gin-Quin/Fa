@@ -1,0 +1,39 @@
+-- A generic contract's field index is not the index in the wider concrete
+-- object. Both sides of the selected field contain different field types.
+-- file: library/fields.fa
+export namespace = {
+	function read = <Record: { value: Integer }>(record: Record): Integer => record.value
+	function keep = <Record>(record: Record): Record => record
+	function readTemporary = <Record: { value: Integer }>(record: Record): Integer => keep(record).value
+	function change = <Record: { value: Integer }>(record: Record, value: Integer): Record => {
+		mutable copy = record
+		copy.value = value
+		copy
+	}
+	function readNested = <Record: { child: { value: Integer } }>(record: Record): Integer => record.child.value
+	function changeNested = <Record: { child: { value: Integer } }>(record: Record, value: Integer): Record => {
+		mutable copy = record
+		copy.child.value = value
+		copy
+	}
+	function append = <Record: { items: Array<Integer> }>(record: Record) mutates record => {
+		for value in 0..3 { record.items.push(value) }
+	}
+}
+-- file: application/main.fa
+type Item = { before: String, value: Integer, zAfter: String }
+type Holder = { before: String, child: Item, zAfter: String }
+type Bag = { before: String, items: Array<Integer>, zAfter: String }
+export function = () => {
+	let item: Item = { before = "left", value = 7, zAfter = "right" }
+	console.log(library.fields.read(item), library.fields.readTemporary(item)) -- prints: 7 7
+	let changed = library.fields.change(item, 9)
+	console.log(changed.before, changed.value, changed.zAfter, item.value) -- prints: left 9 right 7
+	let holder: Holder = { before = "outer-left", child = item, zAfter = "outer-right" }
+	console.log(library.fields.readNested(holder)) -- prints: 7
+	let nested = library.fields.changeNested(holder, 11)
+	console.log(nested.before, nested.child.before, nested.child.value, nested.child.zAfter, nested.zAfter, holder.child.value) -- prints: outer-left left 11 right outer-right 7
+	mutable bag: Bag = { before = "left", items = [], zAfter = "right" }
+	library.fields.append(bag)
+	console.log(bag.before, bag.items, bag.zAfter) -- prints: left [0, 1, 2] right
+}

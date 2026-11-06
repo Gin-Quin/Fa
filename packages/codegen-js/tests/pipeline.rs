@@ -156,6 +156,38 @@ struct Generate {
 
 impl UnitSink for Generate {
 	fn unit(&self, session: &mut Session, files: &[FileId]) {
+		let ready: Vec<_> = files
+			.iter()
+			.copied()
+			.filter(|&file| {
+				session
+					.source_file(file)
+					.interface
+					.key_loop_params
+					.is_empty()
+			})
+			.collect();
+		self.generate(session, &ready);
+	}
+
+	fn specialized(&self, session: &Session, files: &[FileId]) {
+		let ready: Vec<_> = files
+			.iter()
+			.copied()
+			.filter(|&file| {
+				!session
+					.source_file(file)
+					.interface
+					.key_loop_params
+					.is_empty()
+			})
+			.collect();
+		self.generate(session, &ready);
+	}
+}
+
+impl Generate {
+	fn generate(&self, session: &Session, files: &[FileId]) {
 		let errors = files.iter().any(|&file| {
 			session
 				.diagnostics(file)
@@ -176,6 +208,29 @@ impl UnitSink for Generate {
 				)),
 				_ => *self.failed.lock().unwrap() = true,
 			}
+		}
+	}
+}
+
+#[test]
+fn imported_key_loops_generate_the_same_code_after_callers_are_dropped() {
+	let files: Vec<_> = [
+		("library/unused.fa", "export function = <Value, keys: Keys<Value>>(value: Value) => {\n\t@for key in keys { console.log(value[key]) }\n}\n"),
+		("library/log.fa", "export function = <Value, keys: Keys<Value>>(value: Value) => {\n\t@for key in keys { console.log(key, value[key]) }\n}\n"),
+		("library/left.fa", "export function = () => log<{ count: Integer, label: String }, { count, label }>({ count = 1, label = \"a\" })\n"),
+		("library/right.fa", "export function = () => log<{ count: String, label: Integer }, { label, count }>({ count = \"b\", label = 2 })\n"),
+		("application/main.fa", "export function = () => {\n\tlibrary.left()\n\tlibrary.right()\n}\n"),
+	].into_iter().map(|(path, source)| (path.to_string(), source.to_string())).collect();
+	let expected = sequential(&files);
+	assert!(expected.0.is_empty(), "{}", expected.0);
+	assert!(expected.1.is_some(), "sequential generation failed");
+	for threads in [1, 2, 8] {
+		for seed in [0, 5] {
+			assert_same(
+				&expected,
+				&parallel(&files, threads, seed),
+				&format!("{threads} threads, seed {seed}"),
+			);
 		}
 	}
 }

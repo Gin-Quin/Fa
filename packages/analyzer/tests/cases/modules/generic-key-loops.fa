@@ -1,0 +1,41 @@
+-- Imported key-loop bodies are checked and generated for every caller's
+-- subject and key set, independent of the caller's local instance order.
+-- file: library/bump.fa
+export function = <Value, keys: DeepKeys<Value>>(value: Value) => {
+	@for key in keys {
+		console.log("{key}: {value[key] + 1}")
+	}
+}
+-- file: library/describe.fa
+export function = <Value, keys: Keys<Value>>(value: Value) => {
+	@for key in keys {
+		let field = value[key]
+		console.log(key, field)
+	}
+}
+-- file: library/left.fa
+type Counts = { apples: Integer, label: String, nested: { plums: Integer } }
+export function = () => {
+	let value: Counts = { apples = 1, label = "fruit", nested = { plums = 3 } }
+	bump<Counts, { apples, nested { plums } }>(value)
+	describe<Counts, { label, apples }>(value)
+}
+-- file: library/right.fa
+type Flags = Fields { ready, done }
+type Other = { pears: Integer, label: String, flags: Flags }
+export function = () => {
+	let value: Other = { pears = 4, label = "pear", flags = Flags { ready } }
+	describe<Other, { label }>(value)
+	bump<Other, { pears }>(value)
+}
+-- file: application/main.fa
+export function = () => {
+	library.left()
+	library.right()
+}
+-- prints: apples: 2
+-- prints: nested.plums: 4
+-- prints: apples 1
+-- prints: label fruit
+-- prints: label pear
+-- prints: pears: 5

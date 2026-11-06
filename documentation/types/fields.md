@@ -181,7 +181,7 @@ static loggedKeys: DeepKeys<Settings> = { foo, nested { bar } }
 }
 ```
 
-The subject type parameter comes before its keys (`<Value, keys: DeepKeys<Value>>`). The body currently uses the key parameter only as the iterable of `@for`, and applications must be in the declaring file. An invalid unrolled body is `TF011`, naming the key and noting the application; a repeated error is reported once.
+The subject type parameter comes before its keys (`<Value, keys: DeepKeys<Value>>`). The body uses the key parameter as the iterable of `@for`, or with `pick` and `omit`. Applications also work through an imported function or an import alias. An invalid unrolled body is `TF011`, naming the key and noting the application; a repeated error is reported once.
 
 :::implementation
 ## Implementation details
@@ -189,6 +189,7 @@ The subject type parameter comes before its keys (`<Value, keys: DeepKeys<Value>
 ### JavaScript
 
 - A field set is a JavaScript number up to 32 flags, and a `BigInt` above, so that the bit operations stay exact.
+- An erased generic function receives its selected paths and a stable instance tag as a hidden value. `Pick`/`Omit` and unrolled bodies use that same value across files. Once callers are known, only units declaring key-loop bodies need another analysis; that checked analysis also generates their JavaScript before it is released.
 
 ### Native
 

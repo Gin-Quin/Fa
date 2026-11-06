@@ -1,0 +1,13 @@
+-- Explicit applications from another module also work as function values.
+-- file: library/repeat.fa
+export function = <times: Integer>(text: String): String => {
+	mutable result = ""
+	for 0..times { result += text }
+	result
+}
+-- file: application/main.fa
+export function = () => {
+	console.log(library.repeat<3>("x")) -- prints: xxx
+	let twice = library.repeat<2>
+	console.log(twice("z")) -- prints: zz
+}

@@ -2303,16 +2303,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			for member in members.iter().take(members.len() - 1) {
 				// Only ordinary object fields: finding the array before the loop
 				// must not evaluate a getter, an index or an optional access.
-				let (Repr::Object(object), Resolution::Field(_, index)) =
+				let (Repr::Object(object), Resolution::Field(..)) =
 					(slot.repr, self.analysis.resolution(member))
 				else {
 					continue 'push;
 				};
+				let index = self.concrete_field_index(object, member)?;
 				slot = Slot {
 					pointer: self.builder.build_struct_gep(
 						self.object_type(object),
 						slot.pointer,
-						index as u32,
+						index,
 						"",
 					)?,
 					repr: self.field_repr(object, index as usize, member.index())?,

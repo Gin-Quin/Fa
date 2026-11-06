@@ -161,6 +161,8 @@ let publicUser = select<User, { name, email }>(user) -- { name: String, email: S
 
 Here, `keys` must be a [key set](/types/fields#key-sets) of `Entity`: `select<User, { age }>` is a compile error. See [type functions](/types/type-functions) for `Keys`, `Pick` and `pick`.
 
+The same call works when `select` is imported, preserving the exact selected fields. Its derived result is computed by the compiler; an extra type argument cannot replace it (`GN007`).
+
 ## Default parameters
 
 Generic parameters can have defaults, written with `=`:
@@ -389,6 +391,7 @@ Generic types, generic functions, structural constraints, compile-time value par
 - Generic functions are erased: one JavaScript function serves every use, without boxing.
 - A parameter bound to a union whose members behave differently at runtime (`Integer | Float` when the operations differ, an explicit `Int64` represented as a `BigInt`, overflow checks) gets one JavaScript instance per member actually used.
 - Operations that depend on the actual type of another parameter (static methods, copies, `==`, hashing, formatting) receive hidden dictionaries of functions.
+- Imported calls use the same published generic order and runtime requirements as local calls. Applying a generic function as a value binds those hidden arguments.
 - A parameter of a generic function type receives the JavaScript function itself: the function that receives it is erased too, and needs one instance per argument only when the argument needs one of the instances or dictionaries above.
 
 ### Native

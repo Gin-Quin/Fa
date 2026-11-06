@@ -1002,6 +1002,38 @@ impl Walker<'_> {
 			return Some(ty);
 		}
 		let proxy = self.modules.proxies.get(&symbol).cloned()?;
+		let module = match &proxy {
+			Proxy::Export { module }
+			| Proxy::Member { module, .. }
+			| Proxy::Decl { module, .. } => Some(*module),
+			Proxy::Folder { .. } => None,
+		};
+		if let Some(module) = module {
+			self.ensure_analyzed(module);
+			if let Some(interface) = self.s.interface(module) {
+				for (&param, writes) in &interface.implicit_writes {
+					self.implicit_writes
+						.entry(param)
+						.or_insert_with(|| writes.clone());
+				}
+				for (&param, &info) in &interface.key_set_params {
+					self.key_sets.metadata.insert(param, info);
+					self.a.key_set_params.insert(param, info.subject);
+				}
+				for (&param, &info) in &interface.derived_params {
+					self.a.derived_params.insert(
+						param,
+						crate::analysis::DerivedParam {
+							node: use_node,
+							..info
+						},
+					);
+				}
+				if !interface.complete {
+					self.modules.deferred = true;
+				}
+			}
+		}
 		let current = self.a.symbols.symbol(symbol).ty;
 		if !current.is_unset() {
 			return Some(current);

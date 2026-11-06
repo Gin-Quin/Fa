@@ -128,7 +128,7 @@ impl Walker<'_> {
 	}
 
 	/// Whether a type parameter is the hidden one of `Type(parameter)`.
-	fn is_implicit_param(&self, param: ParamId) -> bool {
+	pub(super) fn is_implicit_param(&self, param: ParamId) -> bool {
 		self.s
 			.types
 			.syms
@@ -150,7 +150,7 @@ impl Walker<'_> {
 			info.params.iter().any(|param| {
 				matches!(
 					self.s.types.kind(self.a.symbols.symbol(param.symbol).ty),
-					TypeKind::Param(param) if self.is_implicit_param(param)
+					TypeKind::Param(_)
 				)
 			})
 		});
@@ -168,68 +168,130 @@ impl Walker<'_> {
 	/// the argument's type.
 	pub(super) fn finish_implicit_writes(&mut self) {
 		let calls = std::mem::take(&mut self.implicit_write_calls);
+		// A wrapper may pass its own rigid argument to a copying function.
+		// Propagate those writes before validating any call of the wrapper,
+		// including calls seen before its body or through a recursive cycle.
+		loop {
+			let mut changed = false;
+			for (_, declaration, arguments) in &calls {
+				let Some(info) = self.a.function(*declaration) else {
+					continue;
+				};
+				let parameters: Vec<_> = info
+					.params
+					.iter()
+					.map(|param| self.a.symbols.symbol(param.symbol).ty)
+					.collect();
+				changed |= self.propagate_implicit_write_arguments(&parameters, arguments);
+			}
+			if !changed {
+				break;
+			}
+		}
 		for (callee, declaration, arguments) in calls {
-			let Some(info) = self.a.function(declaration).cloned() else {
+			let Some(info) = self.a.function(declaration) else {
 				continue;
 			};
-			for (index, param) in info.params.iter().enumerate() {
-				let TypeKind::Param(implicit) =
-					self.s.types.kind(self.a.symbols.symbol(param.symbol).ty)
-				else {
-					continue;
-				};
-				let Some(writes) = self.implicit_writes.get(&implicit).cloned() else {
-					continue;
-				};
-				let Some(&crate::analysis::Argument::Given(argument)) = arguments.get(index) else {
-					continue;
-				};
-				for (path, written) in writes {
-					let mut actual = self.type_of(argument);
-					for &name in &path {
-						let object = self.s.types.unfold(actual);
-						let Some(field) = self
-							.s
-							.types
-							.fields_of(object)
-							.iter()
-							.find(|field| field.name == name)
-							.copied()
-						else {
-							actual = TypeId::UNKNOWN;
-							break;
-						};
-						actual = field.ty;
-					}
-					let unsettled = |w: &Self, ty: TypeId| {
-						w.s.types.is_recovering(ty)
-							|| w.s.types.flags(ty).intersects(
-								crate::types::TypeFlags::HAS_PARAM
-									| crate::types::TypeFlags::HAS_UNKNOWN,
-							)
-					};
-					if actual == written || unsettled(self, actual) || unsettled(self, written) {
-						continue;
-					}
-					let field: Vec<&str> = path
-						.iter()
-						.map(|&name| self.s.types.syms.resolve(name))
-						.collect();
-					let field = field.join(".");
-					let message = format!(
-						"`{callee}` writes `{field}: {}` into a copy of `{}` that it returns as its type, whose `{field}` is a `{}`: a written field has exactly the type the function writes",
-						self.display(written),
-						self.tree.text(argument.index()),
-						self.display(actual)
-					);
-					let diagnostic = self.diagnostic(
-						&crate::diagnostics::codes::types::EF004,
-						argument,
-						message,
-					);
-					self.report(diagnostic);
-					break;
+			let parameters: Vec<TypeId> = info
+				.params
+				.iter()
+				.map(|param| self.a.symbols.symbol(param.symbol).ty)
+				.collect();
+			self.check_implicit_write_arguments(&callee, &parameters, &arguments);
+		}
+	}
+
+	/// Writes inherited by a wrapper passing its own type parameter onward.
+	fn propagate_implicit_write_arguments(
+		&mut self,
+		parameters: &[TypeId],
+		arguments: &[crate::analysis::Argument],
+	) -> bool {
+		let mut changed = false;
+		for (index, &ty) in parameters.iter().enumerate() {
+			let TypeKind::Param(source) = self.s.types.kind(ty) else {
+				continue;
+			};
+			let Some(writes) = self.implicit_writes.get(&source).cloned() else {
+				continue;
+			};
+			let Some(&crate::analysis::Argument::Given(argument)) = arguments.get(index) else {
+				continue;
+			};
+			let TypeKind::Param(target) = self.s.types.kind(self.type_of(argument)) else {
+				continue;
+			};
+			let inherited = self.implicit_writes.entry(target).or_default();
+			for write in writes {
+				if !inherited.contains(&write) {
+					inherited.push(write);
+					changed = true;
 				}
+			}
+		}
+		changed
+	}
+
+	/// The same copy-write rule for local and imported function types.
+	pub(super) fn check_implicit_write_arguments(
+		&mut self,
+		callee: &str,
+		parameters: &[TypeId],
+		arguments: &[crate::analysis::Argument],
+	) {
+		self.propagate_implicit_write_arguments(parameters, arguments);
+		for (index, &ty) in parameters.iter().enumerate() {
+			let TypeKind::Param(implicit) = self.s.types.kind(ty) else {
+				continue;
+			};
+			let Some(writes) = self.implicit_writes.get(&implicit).cloned() else {
+				continue;
+			};
+			let Some(&crate::analysis::Argument::Given(argument)) = arguments.get(index) else {
+				continue;
+			};
+			for (path, written) in writes {
+				let mut actual = self.type_of(argument);
+				for &name in &path {
+					let object = self.s.types.unfold(actual);
+					let Some(field) = self
+						.s
+						.types
+						.fields_of(object)
+						.iter()
+						.find(|field| field.name == name)
+						.copied()
+					else {
+						actual = TypeId::UNKNOWN;
+						break;
+					};
+					actual = field.ty;
+				}
+				let unsettled = |w: &Self, ty: TypeId| {
+					w.s.types.is_recovering(ty)
+						|| w.s.types.flags(ty).intersects(
+							crate::types::TypeFlags::HAS_PARAM
+								| crate::types::TypeFlags::HAS_UNKNOWN,
+						)
+				};
+				if actual == written || unsettled(self, actual) || unsettled(self, written) {
+					continue;
+				}
+				let field: Vec<&str> = path
+					.iter()
+					.map(|&name| self.s.types.syms.resolve(name))
+					.collect();
+				let field = field.join(".");
+				let message = format!(
+					"`{callee}` writes `{field}: {}` into a copy of `{}` that it returns as its type, whose `{field}` is a `{}`: a written field has exactly the type the function writes",
+					self.display(written),
+					self.tree.text(argument.index()),
+					self.display(actual)
+				);
+				let diagnostic =
+					self.diagnostic(&crate::diagnostics::codes::types::EF004, argument, message);
+				self.report(diagnostic);
+				break;
 			}
 		}
 	}

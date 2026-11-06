@@ -287,3 +287,5 @@ let omitted = omit(myObject, { foo })
 ```
 
 They are the value-level counterparts of `Pick` and `Omit`. The key set is a compile-time value; the object can be a runtime value, or a `static` one, in which case the result is computed at compile time.
+
+A function can use a key-set parameter in both its result type and its body, as in `select` in [generics](/types/generics#type-parameters-and-compile-time-value-parameters). This also works when the function is imported, for both `Pick`/`pick` and `Omit`/`omit`.

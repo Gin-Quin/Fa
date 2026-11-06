@@ -1,0 +1,14 @@
+-- The declaring file reports each invalid field, also for applications
+-- seen only by another unit after its original analysis was dropped.
+-- file: library/bump.fa
+export function = <Value, keys: Keys<Value>>(value: Value) => {
+	@for key in keys {
+		console.log(value[key] + 1) -- error: TF011
+	}
+}
+-- file: application/main.fa
+type Mixed = { count: Integer, label: String }
+export function = () => {
+	let value: Mixed = { count = 1, label = "fruit" }
+	library.bump<Mixed, { count, label }>(value)
+}

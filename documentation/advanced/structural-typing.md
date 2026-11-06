@@ -249,6 +249,8 @@ A `use` alias and the loop variable of a `for` keep the type of the value they d
 
 `copy.name = name` writes a `String` into a value whose actual `name` field may be narrower, so each call is checked as in [mutating through a narrower type](#mutating-through-a-narrower-type): `renamed` can't be given a value whose `name` is `"Ana" | "Bao"`.
 
+This check also applies when `renamed` is imported, called through an import alias, or called by a wrapper (`EF004`). Its interface records the written paths and types, so the caller can check them without the function's source tree.
+
 A function whose single-expression body returns a parameter returns its full type: `function same = (human: Human) => human` returns `Type<human>`.
 
 Only an annotation narrows the copy, as everywhere else:
@@ -330,5 +332,5 @@ The strategy is detailed in `design/compilation-with-llvm.md`.
 
 - Objects are dynamic: a view is a plain property read, and nothing is specialized.
 - A narrowing copy calls the copy function generated for the destination type, which reads only its fields; a spread (`{ ...value }`) would keep the extra ones.
-- `Type<parameter>` is erased, except where the function needs it: an unannotated copy of a parameter must copy every field of the actual argument, and a reflection (`@typeToString(Type<human>)`) must name it. Such a function is emitted once per argument type, as in native code. A function value receives the copy function of the actual argument as a hidden argument, like the native table.
+- An unannotated copy of an erased parameter copies the complete concrete shape with the structural copy helper. Mutable destinations, returned borrowed values and stored elements use the ordinary copy rules; primitive values pass through unchanged. An array of generic elements needs element copies too. Type-dependent reflection (`@typeToString(Type<human>)`) still needs the actual argument type.
 :::

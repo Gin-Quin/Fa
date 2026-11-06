@@ -14,7 +14,7 @@ and empty-arena-leaf optimizations followed in `a39f3c4` (44 merged LLVM IR test
 and merged workspace clippy also pass). Binary-trees uses112.71M instructions vs
 Goose128.15M; its CPU win is still open.
 
-Twelve clean integrated worktrees have been removed, branches preserved. Active,
+Fifteen clean integrated worktrees have been removed, branches preserved. Active,
 dirty, locked or unmerged trees are preserved; some locks belong to another live
 session. Records: `/tmp/fa-resume-cleaned-worktrees.json`.
 
@@ -46,7 +46,8 @@ runtime tests and website check/snippets/build pass too.
 - Lead, `generic-pointers`: generic Pointer<T> on Bun using published runtime type
   capabilities; direct/higher-order calls, composites, resources and task destruction
   pass on Bun. Generic native ownership now uses concrete resource types; all
-  pointer programs pass on all three targets with leak checks. No full validation yet. Signature-only generic value ABI patch shared with analyzer-with.
+  pointer programs pass on all three targets with leak checks. The full `/tmp/fa-generic-workspace-full.log` is now running after clean clippy
+  and targeted checks. Signature-only generic ABI patch shared with analyzer-with.
 - Analyzer, `analyzer-callbacks`, `d22ebd2`: native instance per callback error set
   and exact effects, including exact variants. Complete LLVM suite passes (exit0)
   in `/tmp/fa-exact-effects-workspace-fixed.log`, with clippy, formatting, runtime
@@ -54,10 +55,14 @@ runtime tests and website check/snippets/build pass too.
   native targets, plus all five C-library tests. Its old initial worktree was removed. `analyzer-with` separately owns with, missing documented
   rules, TypeFromSchema/named Schema, interpreter continuation stack, method origin
   and native method-specific instance keys, key-loop thrown summaries, pass fusion.
-- Proofs, `cross-file-metadata`: imported Pick/Omit derived parameters, EF004,
-  cross-file @for, generic hidden ABI and cache hashes. Fixing contract-field indices
-  against concrete wider layouts before its final full. Its old integrated tree
-  has been removed. Method-origin semantics remain assigned to analyzer-with.
+- Proofs, `cross-file-metadata`, `0d80b62`: complete LLVM workspace suite passes
+  (exit0, `/tmp/fa-metadata-workspace-full.log`), with clippy and JS runtime green.
+  Imported Pick/Omit, EF004, cross-file key loops, hidden generic ABI, concrete
+  native field indices and JS generic copies are integrated. Merge checks pass:
+  analyzer units/cases, pipeline (after migrating its new Integer<> source string),
+  complete JS crate, generic programs on all three LLVM targets and all31 package
+  tests. Runtime298 and website checks pass too. The new notes are
+  applied to the rewritten documentation. Method origins remain analyzer-owned.
 - Native performance, `agent-a375af73b4e738f36`: compact map slots, append reserve
   paths and newly found wasm size-conversion overflow holes. Next: stack strings
  24–64bytes, recursive collections/sexp packing, remaining Goose gaps. No untested
@@ -90,3 +95,5 @@ After integration, audit `design/todo.md` against actual regressions and complet
 features, apply the remaining metaprogramming note, measure the analyzer on the
 1,000-file package and all Goose programs, then run the final combined checks.
 Do not remove unresolved items or mark the overall goal complete early.
+
+Root worker/Errors WIP is saved explicitly in stash c9a0034315b5c4bdb7f3da0ecd9e02516e1f1b05 while metadata merges. Do not lose or reapply it twice. Generic-pointers sources remain frozen in their own worktree for the queued full.

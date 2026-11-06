@@ -166,6 +166,23 @@ impl Session {
 		self.shared = shared;
 	}
 
+	/// Applications retained by interfaces, also after the caller's unit
+	/// has been dropped. A re-analysis reads the completed program's list.
+	pub(crate) fn key_set_applications(&self) -> Vec<crate::modules::KeySetApplication> {
+		if let Some(applications) = self
+			.shared
+			.as_ref()
+			.and_then(|shared| shared.key_set_applications.get())
+		{
+			return applications.clone();
+		}
+		self.files
+			.iter()
+			.filter(|source| self.loaded_module(&source.module) == Some(source.analysis.file))
+			.flat_map(|source| source.interface.key_set_applications.iter().copied())
+			.collect()
+	}
+
 	/// The resolver, shared.
 	pub(crate) fn resolver_arc(&self) -> Option<Arc<dyn ModuleResolver>> {
 		self.resolver.clone()
@@ -1147,6 +1164,93 @@ fn merge_interface(
 					.collect();
 				(decl, params)
 			})
+			.collect(),
+		implicit_writes: interface
+			.implicit_writes
+			.iter()
+			.map(|(&param, writes)| {
+				let writes = writes
+					.iter()
+					.map(|(path, ty)| {
+						(
+							path.iter().map(|&name| merger.sym(name)).collect(),
+							merger.ty(*ty),
+						)
+					})
+					.collect();
+				(merger.param(param), writes)
+			})
+			.collect(),
+		generic_functions: interface
+			.generic_functions
+			.iter()
+			.map(|(&decl, function)| {
+				let requirements = function
+					.requirements
+					.iter()
+					.map(|requirement| match *requirement {
+						crate::modules::GenericRequirement::Value(param) => {
+							crate::modules::GenericRequirement::Value(merger.param(param))
+						}
+						crate::modules::GenericRequirement::Method(param, name) => {
+							crate::modules::GenericRequirement::Method(
+								merger.param(param),
+								merger.sym(name),
+							)
+						}
+					})
+					.collect();
+				(
+					decl,
+					crate::modules::GenericFunction {
+						generics: merger.list(function.generics),
+						requirements,
+					},
+				)
+			})
+			.collect(),
+		key_set_params: interface
+			.key_set_params
+			.iter()
+			.map(|(&param, info)| {
+				(
+					merger.param(param),
+					crate::modules::GenericKeySet {
+						subject: merger.param(info.subject),
+						deep: info.deep,
+					},
+				)
+			})
+			.collect(),
+		derived_params: interface
+			.derived_params
+			.iter()
+			.map(|(&param, info)| {
+				(
+					merger.param(param),
+					crate::analysis::DerivedParam {
+						subject: merger.param(info.subject),
+						keys: merger.param(info.keys),
+						..*info
+					},
+				)
+			})
+			.collect(),
+		key_set_applications: interface
+			.key_set_applications
+			.iter()
+			.map(|application| crate::modules::KeySetApplication {
+				param: merger.param(application.param),
+				subject: merger.ty(application.subject),
+				key_set: merger.ty(application.key_set),
+				caller: merger.module(application.caller),
+				span: application.span,
+			})
+			.collect(),
+		key_loop_params: interface
+			.key_loop_params
+			.iter()
+			.map(|&param| merger.param(param))
 			.collect(),
 		externs: interface.externs.clone(),
 		statics: interface.statics.clone(),

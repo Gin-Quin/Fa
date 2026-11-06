@@ -1,0 +1,22 @@
+-- Generic return values and stored elements are independent of borrowed input.
+-- file: library/copies.fa
+export namespace = {
+	function value = <Value>(value: Value): Value => value
+	function array = <Item>(items: Array<Item>): Array<Item> => items
+	function stored = <Item>(item: Item): Array<Item> => [item]
+}
+-- file: application/main.fa
+type Item = { label: String, value: Integer }
+export function = () => {
+	let item: Item = { label = "original", value = 7 }
+	mutable returned = library.copies.value(item)
+	returned.value = 8
+	console.log(returned.value, item.value) -- prints: 8 7
+	let items: Array<Item> = [item]
+	mutable returnedItems = library.copies.array(items)
+	for copy in returnedItems { copy.value = 9 }
+	console.log(returnedItems, items) -- prints: [{ label = "original", value = 9 }] [{ label = "original", value = 7 }]
+	mutable storedItems = library.copies.stored(item)
+	for copy in storedItems { copy.value = 10 }
+	console.log(storedItems, item.value) -- prints: [{ label = "original", value = 10 }] 7
+}

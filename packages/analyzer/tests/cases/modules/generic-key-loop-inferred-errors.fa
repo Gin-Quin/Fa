@@ -1,0 +1,14 @@
+-- pending: M2 (a key loop in an expression body must refresh inferred signatures and callers)
+-- file: library/invoke.fa
+export function = <Value, keys: Keys<Value>>(value: Value) => @for key in keys {
+	try value[key]()
+}
+-- file: library/run.fa
+type Failure = Errors { Bad, Other }
+type Work = { go: () => Void throws Failure.Bad }
+function fail = (): Void throws Failure.Bad => throw Failure.Bad
+export function = (): Void => {
+	invoke<Work, { go }>(Work { go = fail }) -- error: E-ERR-3
+}
+-- file: application/main.fa
+export function = () => library.run()

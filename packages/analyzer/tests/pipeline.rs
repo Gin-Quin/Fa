@@ -354,3 +354,92 @@ fn a_second_target_analyzes_nothing_when_no_file_reads_it() {
 	assert!(!first.contains("reads_target=true"), "{first}");
 	assert!(!again.contains("analyzed=true"), "{first}\n{again}");
 }
+
+#[test]
+fn imported_key_loop_applications_are_checked_deterministically() {
+	let files: Vec<_> = [
+		("library/bump.fa", "export function = <Value, keys: Keys<Value>>(value: Value) => {\n\t@for key in keys {\n\t\tconsole.log(value[key] + 1)\n\t}\n}\n"),
+		("library/other.fa", "type Mixed = { count: Integer, label: String }\nexport function = () => {\n\tlet value: Mixed = { count = 2, label = \"other\" }\n\tbump<Mixed, { count, label }>(value)\n}\n"),
+		("application/main.fa", "type Mixed = { count: Integer, label: String }\nexport function = () => {\n\tlet value: Mixed = { count = 1, label = \"fruit\" }\n\tlibrary.bump<Mixed, { count, label }>(value)\n}\n"),
+	].into_iter().map(|(path, source)| (path.to_string(), source.to_string())).collect();
+	let (first, _) = assert_deterministic(&files);
+	assert!(first.contains("TF011"), "{first}");
+	assert!(first.contains("key `label`"), "{first}");
+	assert!(first.contains("application/main.fa:4:"), "{first}");
+}
+
+#[test]
+fn changing_a_callers_key_set_rechecks_the_unchanged_provider() {
+	let mut files: Vec<_> = [
+		("library/bump.fa", "export function = <Value, keys: Keys<Value>>(value: Value) => {\n\t@for key in keys {\n\t\tconsole.log(value[key] + 1)\n\t}\n}\n"),
+		("application/main.fa", "type Mixed = { count: Integer, label: String }\nexport function = () => {\n\tlet value: Mixed = { count = 1, label = \"fruit\" }\n\tlibrary.bump<Mixed, { count, label }>(value)\n}\n"),
+	].into_iter().map(|(path, source)| (path.to_string(), source.to_string())).collect();
+	let mut session = Session::new();
+	session.set_resolver(Box::new(CodebaseResolver::from_texts(&files, None)));
+	let options = pipeline::Options {
+		entry: Some("application/main".to_string()),
+		threads: Some(2),
+		..Default::default()
+	};
+	let first = pipeline::analyze_package(&mut session, &options, None, &NoSink);
+	assert!(first.has_errors());
+	files[1].1 = files[1]
+		.1
+		.replace("{ count, label }>(value)", "{ count }>(value)");
+	session.set_resolver(Box::new(CodebaseResolver::from_texts(&files, None)));
+	let dirty = std::iter::once("application/main".to_string()).collect();
+	let options = pipeline::Options {
+		dirty: Some(dirty),
+		..options
+	};
+	let again = pipeline::analyze_package(&mut session, &options, Some(&first), &NoSink);
+	assert!(!again.has_errors(), "{}", outputs(&session, &again));
+}
+
+#[test]
+fn changing_an_imported_value_parameter_bound_rechecks_its_callers() {
+	let mut files: Vec<_> = [
+		(
+			"library/repeat.fa",
+			"export function = <times: Integer<min = 0, max = 10>>(text: String): String => text\n",
+		),
+		(
+			"application/main.fa",
+			"export function = () => console.log(library.repeat<8>(\"x\"))\n",
+		),
+	]
+	.into_iter()
+	.map(|(path, source)| (path.to_string(), source.to_string()))
+	.collect();
+	let mut session = Session::new();
+	session.set_resolver(Box::new(CodebaseResolver::from_texts(&files, None)));
+	let options = pipeline::Options {
+		entry: Some("application/main".to_string()),
+		threads: Some(2),
+		..Default::default()
+	};
+	let first = pipeline::analyze_package(&mut session, &options, None, &NoSink);
+	assert!(!first.has_errors(), "{}", outputs(&session, &first));
+	files[0].1 = files[0].1.replace("max = 10", "max = 5");
+	session.set_resolver(Box::new(CodebaseResolver::from_texts(&files, None)));
+	let dirty = std::iter::once("library/repeat".to_string()).collect();
+	let options = pipeline::Options {
+		dirty: Some(dirty),
+		..options
+	};
+	let again = pipeline::analyze_package(&mut session, &options, Some(&first), &NoSink);
+	assert!(again.has_errors(), "{}", outputs(&session, &again));
+	assert!(
+		again
+			.module("application/main")
+			.is_some_and(|module| module.analyzed)
+	);
+	assert!(
+		again
+			.module("application/main")
+			.unwrap()
+			.diagnostics
+			.iter()
+			.any(|diagnostic| diagnostic.code.is_named("GN010"))
+	);
+}

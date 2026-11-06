@@ -18,12 +18,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fa_codebase_parser::{Codebase, Configuration, Entry, FileKind, Layout};
 
-use crate::ids::{DeclKey, FileId, ListId, NodeId, Sym, TypeId};
+use crate::ids::{DeclKey, FileId, ListId, ModuleId, NodeId, ParamId, Sym, TypeId};
 use crate::symbols::SymbolKind;
+use crate::types::{FieldFlags, TypeKind, TypeStore};
 
 /// What a file is to the analyzer.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -573,6 +574,57 @@ pub struct KeyedDecl {
 	pub name_span: crate::diagnostics::SourceSpan,
 }
 
+/// What an erased generic function needs from an application at runtime.
+/// These are semantic capabilities; backends choose their representations.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum GenericRequirement {
+	Value(ParamId),
+	Method(ParamId, Sym),
+}
+
+/// The complete generic parameter order and runtime needs of a function.
+#[derive(Clone, Debug)]
+pub struct GenericFunction {
+	pub generics: ListId,
+	pub requirements: Vec<GenericRequirement>,
+}
+
+/// A compile-time key-set parameter, with the type parameter it selects.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct GenericKeySet {
+	pub subject: ParamId,
+	pub deep: bool,
+}
+
+/// An application whose declaring file must check its `@for` bodies.
+/// Locations name modules, since a unit's file ids die with its session.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct KeySetApplication {
+	pub param: ParamId,
+	pub subject: TypeId,
+	pub key_set: TypeId,
+	pub caller: ModuleId,
+	pub span: crate::diagnostics::SourceSpan,
+}
+
+/// The signature-derived capabilities shared by local and imported calls.
+pub fn generic_requirements(types: &TypeStore, generics: &[ParamId]) -> Vec<GenericRequirement> {
+	let mut requirements = Vec::new();
+	for &param in generics {
+		let info = types.param(param);
+		if info.value {
+			requirements.push(GenericRequirement::Value(param));
+			continue;
+		}
+		for field in types.fields_of(info.constraint) {
+			if field.flags.contains(FieldFlags::METHOD) {
+				requirements.push(GenericRequirement::Method(param, field.name));
+			}
+		}
+	}
+	requirements
+}
+
 /// What other files see of a file: everything another file, the program
 /// analysis and the backends read of it, so that its tree and its analysis
 /// can be dropped once it is analyzed and generated
@@ -590,6 +642,18 @@ pub struct Interface {
 	pub nested_types: FxHashMap<NodeId, Vec<TypeFunction>>,
 	/// The parameters of its functions other files may call, by declaration.
 	pub parameters: FxHashMap<NodeId, Vec<Parameter>>,
+	/// The fields written into copies of an implicit `Type<parameter>`,
+	/// keyed by that hidden generic parameter. Callers must reject narrower
+	/// field types even when the callee's tree has been dropped (`EF004`).
+	pub implicit_writes: FxHashMap<ParamId, Vec<(Vec<Sym>, TypeId)>>,
+	/// Generic parameter order and capabilities of externally callable functions.
+	pub generic_functions: FxHashMap<NodeId, GenericFunction>,
+	/// Key sets and derived types reached by the exported signatures.
+	pub key_set_params: FxHashMap<ParamId, GenericKeySet>,
+	pub derived_params: FxHashMap<ParamId, crate::analysis::DerivedParam>,
+	/// Foreign key-set applications, and local parameters iterated by `@for`.
+	pub key_set_applications: Vec<KeySetApplication>,
+	pub key_loop_params: Vec<ParamId>,
 	/// The C symbols of its `@extern` functions, by declaration.
 	pub externs: FxHashMap<NodeId, String>,
 	/// The values of its module-level `static`s, by declaration.
@@ -625,6 +689,68 @@ pub struct Interface {
 	/// `ExternalField`), so that every file whose values may be of their
 	/// types writes and deletes them with both sides.
 	pub relations: Vec<crate::analysis::Relation>,
+}
+
+/// The generic parameters reached by exported types, including binders
+/// inside returned function values. Interface-only summaries keep these
+/// parameters' metadata and discard the metadata of private local types.
+pub(crate) fn reachable_params(
+	types: &TypeStore,
+	roots: impl IntoIterator<Item = TypeId>,
+) -> FxHashSet<ParamId> {
+	let mut seen = FxHashSet::default();
+	let mut params = FxHashSet::default();
+	let mut pending: Vec<TypeId> = roots.into_iter().collect();
+	while let Some(ty) = pending.pop() {
+		if !seen.insert(ty) {
+			continue;
+		}
+		match types.kind(ty) {
+			TypeKind::Param(param) => {
+				params.insert(param);
+				let info = types.param(param);
+				pending.extend([info.constraint, info.default]);
+			}
+			TypeKind::Rec(_) => pending.extend(types.rec_target(ty)),
+			TypeKind::Object(shape) => {
+				pending.extend(types.shape_fields(shape).iter().map(|field| field.ty))
+			}
+			TypeKind::Tuple(list) | TypeKind::Union(list) | TypeKind::Fields(list) => {
+				pending.extend(types.list_items(list))
+			}
+			TypeKind::Function(sig) => {
+				let sig = types.sig(sig);
+				pending.extend(types.params(sig.params).iter().map(|param| param.ty));
+				pending.extend([sig.ret, sig.throws]);
+				pending.extend(types.list_items(sig.generics));
+				pending.extend(
+					types
+						.requirements(sig.requires)
+						.iter()
+						.map(|requirement| requirement.ty),
+				);
+			}
+			TypeKind::Collection(_, item, key) | TypeKind::Task(item, key) => {
+				pending.extend([item, key])
+			}
+			TypeKind::Pointer(item)
+			| TypeKind::CArray(item, _)
+			| TypeKind::Sync(_, item)
+			| TypeKind::Iterator(item, _)
+			| TypeKind::Ref(item, _) => pending.push(item),
+			TypeKind::NamedUnion(nominal, _)
+			| TypeKind::Member(nominal, _)
+			| TypeKind::CStruct(nominal) => {
+				let info = types.nominal(nominal);
+				pending.extend(types.list_items(info.args));
+				for index in 0..types.sym_list(info.members).len() {
+					pending.push(types.payload(nominal, index as u16));
+				}
+			}
+			_ => {}
+		}
+	}
+	params
 }
 
 impl Interface {
@@ -729,6 +855,103 @@ impl Interface {
 					types.stable_hash(param.ty),
 				));
 			}
+		}
+		for (&param, writes) in &self.implicit_writes {
+			let info = types.param(param);
+			let owner = types.decl_hash(info.owner) ^ u128::from(info.index);
+			for (path, written) in writes {
+				let names: Vec<&str> = path.iter().map(|&name| types.syms.resolve(name)).collect();
+				parts.push((
+					7,
+					owner,
+					rustc_hash::FxBuildHasher.hash_one(names) as u128,
+					types.stable_hash(*written),
+				));
+			}
+		}
+		let param_hash = |param| {
+			let info = types.param(param);
+			types.decl_hash(info.owner).rotate_left(16) ^ u128::from(info.index)
+		};
+		for (&decl, function) in &self.generic_functions {
+			let generics = types
+				.list_items(function.generics)
+				.iter()
+				.fold(0u128, |hash, &ty| {
+					hash.wrapping_mul(31).wrapping_add(types.stable_hash(ty))
+				});
+			parts.push((8, key_hash(decl), 0, generics));
+			for (index, requirement) in function.requirements.iter().enumerate() {
+				let (kind, value) = match *requirement {
+					GenericRequirement::Value(param) => (1, param_hash(param)),
+					GenericRequirement::Method(param, name) => (
+						2,
+						param_hash(param)
+							^ rustc_hash::FxBuildHasher.hash_one(types.syms.resolve(name)) as u128,
+					),
+				};
+				parts.push((8, key_hash(decl), ((index as u128) << 8) | kind, value));
+			}
+		}
+		for (&param, info) in &self.key_set_params {
+			parts.push((
+				9,
+				param_hash(param),
+				u128::from(info.deep),
+				param_hash(info.subject),
+			));
+		}
+		for (&param, info) in &self.derived_params {
+			parts.push((
+				10,
+				param_hash(param),
+				u128::from(info.pick),
+				param_hash(info.subject) ^ param_hash(info.keys).rotate_left(7),
+			));
+		}
+		for application in &self.key_set_applications {
+			parts.push((
+				11,
+				param_hash(application.param),
+				types.stable_hash(application.subject),
+				types.stable_hash(application.key_set),
+			));
+		}
+		for &param in &self.key_loop_params {
+			parts.push((12, param_hash(param), 0, 0));
+		}
+		// A Param type's stable hash deliberately excludes its late-bound
+		// constraint and default. They are nevertheless facts every caller
+		// reads, including binders of a returned generic function value.
+		let roots = self
+			.members
+			.values()
+			.chain(&self.export)
+			.flat_map(|exported| {
+				std::iter::once(exported.ty)
+					.chain(types.list_items(exported.generics).iter().copied())
+			})
+			.chain(
+				self.type_functions
+					.values()
+					.flatten()
+					.map(|function| function.ty),
+			)
+			.chain(self.nested_types.values().flatten().map(|nested| nested.ty))
+			.chain(
+				self.generic_functions
+					.values()
+					.flat_map(|function| types.list_items(function.generics).iter().copied()),
+			)
+			.filter(|&ty| types.flags(ty).contains(crate::types::TypeFlags::HAS_PARAM));
+		for param in reachable_params(types, roots) {
+			let info = types.param(param);
+			parts.push((
+				13,
+				param_hash(param),
+				types.stable_hash(info.constraint),
+				types.stable_hash(info.default).rotate_left(1) ^ u128::from(info.value),
+			));
 		}
 		for (&decl, value) in &self.statics {
 			let text = format!("{value:?}");

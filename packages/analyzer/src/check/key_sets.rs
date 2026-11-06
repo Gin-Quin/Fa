@@ -598,6 +598,7 @@ impl Walker<'_> {
 			self.a.patterns.remove(&node);
 			self.a.key_reads.remove(&node);
 			self.a.moved_reads.remove(&node);
+			self.a.moved_captures.remove(&node);
 			self.a.constants.remove(&node);
 			self.a.comptime_branches.remove(&node);
 			self.a.unrolled.remove(&node);

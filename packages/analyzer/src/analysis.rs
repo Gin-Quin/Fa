@@ -666,6 +666,9 @@ pub struct Analysis {
 	/// parameter, a field of one: `holder.task` returned or passed): the
 	/// place gives the value up (a zero, which its drop skips).
 	pub moved_reads: rustc_hash::FxHashSet<NodeId>,
+	/// The owned locals transferred into the environment materialized by an
+	/// expression (lambda, function read, watch or start-do).
+	pub moved_captures: FxHashMap<NodeId, Vec<SymbolId>>,
 	/// Every destructuring pattern node (`ObjectPattern`, `ArrayPattern`,
 	/// `TuplePattern`) of a declaration, a `for` or a parameter: what each
 	/// element reads and binds ([`PatternInfo`]).
@@ -1442,6 +1445,7 @@ impl Analysis {
 			json_defaults: FxHashMap::default(),
 			inline_field_orders: FxHashMap::default(),
 			moved_reads: rustc_hash::FxHashSet::default(),
+			moved_captures: FxHashMap::default(),
 			patterns: FxHashMap::default(),
 			relations: Vec::new(),
 			relation_fields: FxHashMap::default(),

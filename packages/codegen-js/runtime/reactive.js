@@ -24,6 +24,7 @@
 // Values that are not reactive never touch this file: the compiler only
 // instruments the places the analyzer says are reactive.
 
+import { faDropOwned, faOwnShared } from "./ownership.js";
 import { faStop } from "./stops.js";
 
 // @fa-helper faReactive
@@ -31,9 +32,15 @@ import { faStop } from "./stops.js";
  * The reactive state of the thread: the observer being computed, the
  * pending watch blocks, whether they are running, the sequence of the
  * watch blocks (their declaration order).
- * @type {{ observer: FaObserver | null, pending: FaWatchNode[], flushing: boolean, sequence: number }}
+ * @type {{ observer: FaObserver | null, pending: FaWatchNode[], flushing: boolean, sequence: number, owned: Set<FaObserver> }}
  */
-export const faReactive = { observer: null, pending: [], flushing: false, sequence: 0 };
+export const faReactive = {
+	observer: null,
+	pending: [],
+	flushing: false,
+	sequence: 0,
+	owned: new Set(),
+};
 
 /**
  * @typedef {FaDerivedNode | FaWatchNode} FaObserver
@@ -339,17 +346,19 @@ export class FaDerivedNode {
 	}
 }
 
-// @fa-helper faDerived deps: FaDerivedNode
+// @fa-helper faDerived deps: FaDerivedNode faReactive faOwnShared faDispose
 /**
  * A `derived` value: computed when it is read.
  * @param {() => unknown} compute
  * @returns {FaDerivedNode}
  */
 export function faDerived(compute) {
-	return new FaDerivedNode(compute);
+	const node = new FaDerivedNode(compute);
+	faReactive.owned.add(node);
+	return faOwnShared(node, faDispose);
 }
 
-// @fa-helper faRefresh deps: faReactive faUnsubscribe faOutdated faStop
+// @fa-helper faRefresh deps: faReactive faUnsubscribe faOutdated faStop faDropOwned
 /**
  * Brings a derived value up to date: computes it again when it was never
  * computed, or when what it read changed. Its version changes only when its
@@ -382,6 +391,7 @@ export function faRefresh(node) {
 	node.dirty = false;
 	const changed = !node.computed || !Object.is(value, node.value) || typeof value === "object";
 	node.computed = true;
+	faDropOwned(node.value);
 	node.value = value;
 	if (changed) {
 		node.version += 1;
@@ -429,7 +439,7 @@ export class FaWatchNode {
 	}
 }
 
-// @fa-helper faRunWatch deps: faReactive faUnsubscribe
+// @fa-helper faRunWatch deps: faReactive faUnsubscribe faDropOwned
 /**
  * Runs a watch block: its previous cleanup (untracked), then its body under
  * tracking; a function returned by the body is the next cleanup.
@@ -444,7 +454,11 @@ export function faRunWatch(node) {
 	faReactive.observer = null;
 	try {
 		if (cleanup !== undefined) {
-			cleanup();
+			try {
+				cleanup();
+			} finally {
+				faDropOwned(cleanup);
+			}
 		}
 		faReactive.observer = node;
 		const result = node.run();
@@ -456,7 +470,7 @@ export function faRunWatch(node) {
 	}
 }
 
-// @fa-helper faWatch deps: faReactive FaWatchNode faRunWatch
+// @fa-helper faWatch deps: faReactive FaWatchNode faRunWatch faOwnShared faDispose
 /**
  * A `watch` block: runs at once, and again after a value it read changed.
  * @param {() => unknown} run the body; it may return its cleanup
@@ -466,10 +480,11 @@ export function faWatch(run) {
 	faReactive.sequence += 1;
 	const node = new FaWatchNode(run, faReactive.sequence);
 	faRunWatch(node);
-	return node;
+	faReactive.owned.add(node);
+	return faOwnShared(node, faDispose);
 }
 
-// @fa-helper faDispose deps: faReactive faUnsubscribe
+// @fa-helper faDispose deps: faReactive faUnsubscribe faDropOwned
 /**
  * Destroys a watch block (`subscription.stop()`, the end of its scope) or a
  * derived value: runs the cleanup, and leaves the observers of what it read.
@@ -481,6 +496,7 @@ export function faDispose(node) {
 		return;
 	}
 	node.disposed = true;
+	faReactive.owned.delete(node);
 	faUnsubscribe(node);
 	const cleanup = node.cleanup;
 	node.cleanup = undefined;
@@ -491,8 +507,27 @@ export function faDispose(node) {
 			cleanup();
 		} finally {
 			faReactive.observer = saved;
+			faDropOwned(cleanup);
 		}
 	}
+	if (node.watch) {
+		faDropOwned(node.run);
+		node.run = () => {};
+	} else {
+		faDropOwned(node.compute);
+		faDropOwned(node.value);
+		node.compute = () => undefined;
+		node.value = undefined;
+	}
+}
+
+// @fa-helper faReactiveRelease deps: faReactive faDispose
+/** Releases the graph after the main code and detached tasks have ended. */
+export function faReactiveRelease() {
+	while (faReactive.owned.size > 0) {
+		for (const node of faReactive.owned) faDispose(node);
+	}
+	faReactive.pending = [];
 }
 
 // @fa-helper faFlush deps: faReactive faOutdated faRunWatch faStop

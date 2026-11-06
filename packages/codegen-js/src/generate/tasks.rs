@@ -21,7 +21,7 @@
 use std::collections::{HashMap, HashSet};
 
 use fa_analyzer::analysis::{Argument, AsyncSummary, AwaitKind, Callee, TargetSet};
-use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::View;
 use fa_analyzer::types::{TypeFlags, TypeKind};
@@ -386,7 +386,7 @@ impl Generator<'_> {
 	}
 
 	/// Whether a name is the callee of a call.
-	fn is_callee(&mut self, node: NodeId) -> bool {
+	pub(crate) fn is_callee(&mut self, node: NodeId) -> bool {
 		let parents = self.parents();
 		let mut current = node;
 		while let Some(parent) = parents[current.index()] {
@@ -985,12 +985,20 @@ impl Generator<'_> {
 			Some(block) => {
 				// the module-level values (the top level's too) are read, not
 				// copied: they are not captured (`concurrency.md`, tasks)
-				let symbols: Vec<fa_analyzer::ids::SymbolId> = copied
+				let mut symbols: Vec<SymbolId> = copied
 					.iter()
 					.filter_map(|&node| self.analysis.symbols.symbol_of_decl(node))
 					.collect();
-				let saved = self.copy_values(&symbols, true);
-				let task = self.start_block(n, block);
+				if let Some(info) = info.as_ref().filter(|info| info.detached) {
+					for &symbol in &info.captures {
+						if !symbols.contains(&symbol) {
+							symbols.push(symbol);
+						}
+					}
+				}
+				let saved = self.copy_values_at(&symbols, true, Some(n));
+				let release = self.captured_release(&saved);
+				let task = self.start_block(n, block, release);
 				self.restore_captures(saved);
 				task
 			}
@@ -1047,21 +1055,33 @@ impl Generator<'_> {
 	}
 
 	/// `start do { … }`.
-	fn start_block(&mut self, n: NodeId, block: NodeId) -> Expr {
+	fn start_block(&mut self, n: NodeId, block: NodeId, release: Option<String>) -> Expr {
 		match self.mode() {
 			Mode::Async { .. } => {
 				let body = self.task_body(n, block, Mode::Async { coop: true });
+				if let Some(release) = release {
+					let helper = self.helper("faStartOwned");
+					return js::call(helper, &["$task".to_string(), body, release]);
+				}
 				let helper = self.helper("faStart");
 				js::call(helper, &["$task".to_string(), body])
 			}
 			Mode::Blocking => {
 				let body = self.task_body(n, block, Mode::Blocking);
+				if let Some(release) = release {
+					let helper = self.helper("faFinishedOwned");
+					return js::call(helper, &[body, release]);
+				}
 				let helper = self.helper("faFinished");
 				js::call(helper, &[body])
 			}
 			Mode::Dynamic => {
 				let asynchronous = self.task_body(n, block, Mode::Async { coop: true });
 				let blocking = self.task_body(n, block, Mode::Blocking);
+				if let Some(release) = release {
+					let helper = self.helper("faStartOwnedDynamic");
+					return js::call(helper, &[asynchronous, blocking, release]);
+				}
 				let helper = self.helper("faStartDynamic");
 				js::call(helper, &[asynchronous, blocking])
 			}
@@ -1229,7 +1249,7 @@ impl Generator<'_> {
 			return false;
 		};
 		let ty = self.analysis.symbols.symbol(symbol).ty;
-		if !self.contains_task(ty) {
+		if !self.contains_task(ty) || self.types.contains_shared_handle(ty) {
 			return false;
 		}
 		// a task given to a call is moved (`kept.push(task)`), even in one

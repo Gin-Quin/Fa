@@ -542,7 +542,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				continue;
 			}
 			if !global {
-				let copy = matches!(kind, SymbolKind::Mutable | SymbolKind::MutableUse)
+				let copy = !matches!(kind, SymbolKind::Reactive | SymbolKind::Use)
+					&& !self.param_sources.contains_key(&symbol)
 					&& !referred.contains(&symbol);
 				captures.push(if copy {
 					Capture::Copy(symbol, repr)
@@ -597,7 +598,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Capture::Copy(symbol, _) => {
 					let slot = self.slot_of(symbol, node)?;
 					let value = self.load(slot)?;
-					self.emit_copy(value)?.value.expect("a value")
+					let moved = self
+						.analysis
+						.moved_captures
+						.get(&node)
+						.is_some_and(|moved| moved.contains(&symbol));
+					let value = if moved {
+						self.give_up_place(node, slot)?;
+						value
+					} else {
+						self.emit_copy(value)?
+					};
+					value.value.expect("a value")
 				}
 				Capture::Source(symbol) => self.reactive_sources[&symbol].into(),
 				Capture::Derived(symbol) => self.derived_nodes[&symbol].into(),
@@ -965,12 +977,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				environment.into(),
 			],
 		)?;
-		if !self.is_module_statement(node) {
+		Ok(self.fresh(Val::new(Repr::Watch, observer)))
+	}
+
+	/// A bare watch statement belongs to its declaring block. A watch used
+	/// as a value transfers its one owner through the ordinary value path.
+	pub(crate) fn keep_watch_statement(&self, mut node: NodeId, value: Val<'ctx>) {
+		while let View::Group(inner) = self.view(node) {
+			node = inner;
+		}
+		if matches!(self.view(node), View::Watch(_))
+			&& self.unregister(value)
+			&& !self.is_module_statement(node)
+			&& let Some(observer) = value.value
+		{
 			self.cleanups
 				.borrow_mut()
-				.push(super::ownership::Cleanup::Dispose(observer));
+				.push(super::ownership::Cleanup::Dispose(
+					observer.into_pointer_value(),
+				));
 		}
-		Ok(Val::new(Repr::Watch, observer))
 	}
 
 	/// Whether a `watch` (or the declaration holding it) is a statement of

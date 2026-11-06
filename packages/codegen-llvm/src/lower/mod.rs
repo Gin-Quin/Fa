@@ -2184,7 +2184,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// Lowers a statement, dropping its value.
 	fn statement(&mut self, node: NodeId) -> Result<(), Error> {
-		self.expr(node)?;
+		let value = self.expr(node)?;
+		self.keep_watch_statement(node, value);
 		Ok(())
 	}
 
@@ -2195,6 +2196,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Block { statements } => statements,
 			_ => {
 				let value = self.expr(node)?;
+				if !want {
+					self.keep_watch_statement(node, value);
+				}
 				return Ok(if want { value } else { Val::void() });
 			}
 		};
@@ -2214,6 +2218,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				last = self.own(value, Some(statement))?;
 				self.end_statement(mark, Some(last))?;
 			} else {
+				self.keep_watch_statement(statement, value);
 				self.end_statement(mark, None)?;
 			}
 			self.flush_after(statement)?;

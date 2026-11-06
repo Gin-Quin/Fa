@@ -21,6 +21,7 @@
 // Each helper starts at a `// @fa-helper <name> deps: <names>` line and ends at
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
 
+import { faDropOwned, faOwnShared, faReleaseShared, faRetainShared } from "./ownership.js";
 import { faStop } from "./stops.js";
 
 // @fa-helper faNeedSharedMemory deps: faStop
@@ -38,7 +39,7 @@ export function faNeedSharedMemory(what) {
 	}
 }
 
-// @fa-helper FaAtomic deps: faNeedSharedMemory
+// @fa-helper FaAtomic deps: faNeedSharedMemory faOwnShared
 /**
  * An `AtomicInteger` (a number) or an `AtomicBoolean`. The orderings make no
  * difference on one thread.
@@ -54,6 +55,7 @@ export class FaAtomic {
 		 * @type {BigInt64Array | Int32Array | null}
 		 */
 		this.cell = null;
+		faOwnShared(this, () => {});
 	}
 
 	/** Moves the value into shared memory, before it is sent to a worker. */
@@ -160,7 +162,7 @@ export class FaAtomic {
 	}
 }
 
-// @fa-helper FaGuard
+// @fa-helper FaGuard deps: faOwnShared faRetainShared faReleaseGuard
 /**
  * The guard of a locked mutex: `value` reads and writes the protected value.
  */
@@ -169,6 +171,8 @@ export class FaGuard {
 	constructor(mutex) {
 		/** @type {{ value: any, locked: boolean } | null} */
 		this.mutex = mutex;
+		faRetainShared(mutex);
+		faOwnShared(this, faReleaseGuard);
 	}
 
 	/** @returns {any} */
@@ -184,7 +188,19 @@ export class FaGuard {
 	}
 }
 
-// @fa-helper FaMutex deps: FaGuard faNeedSharedMemory
+// @fa-helper faOwnMutex deps: faOwnShared faDropOwned
+/** @template {{cell: Int32Array | null, value: any}} T @param {T} mutex @returns {T} */
+export function faOwnMutex(mutex) {
+	return faOwnShared(mutex, (value) => {
+		if (value.cell === null) {
+			const held = value.value;
+			value.value = undefined;
+			faDropOwned(held);
+		}
+	});
+}
+
+// @fa-helper FaMutex deps: FaGuard faNeedSharedMemory faOwnMutex
 /**
  * A `Mutex(T)`: the value, and whether a guard holds it.
  */
@@ -205,6 +221,7 @@ export class FaMutex {
 		this.cell = null;
 		/** @type {Uint8Array | null} */
 		this.bytes = null;
+		faOwnMutex(this);
 	}
 
 	/**
@@ -296,31 +313,53 @@ export class FaMutex {
 	}
 }
 
-// @fa-helper faUnlock deps: FaGuard
+// @fa-helper faReleaseGuard deps: FaGuard faReleaseShared
 /**
  * Releases the lock of a guard at the end of its scope (`none`: nothing).
  * @param {{ mutex: { locked: boolean } | null } | undefined | null} guard
  */
-export function faUnlock(guard) {
+export function faReleaseGuard(guard) {
 	if (guard != null && guard.mutex !== null) {
 		const mutex = /** @type {any} */ (guard.mutex);
 		guard.mutex = null;
 		// shared with a worker: the shared lock
 		if (mutex.cell != null) {
 			mutex.release();
-			return;
-		}
-		const waiter = mutex.waiters?.shift();
-		if (waiter === undefined) {
-			mutex.locked = false;
 		} else {
-			// handed over: the mutex stays locked
-			waiter.resolve(new FaGuard(mutex));
+			const waiter = mutex.waiters?.shift();
+			if (waiter === undefined) {
+				mutex.locked = false;
+			} else {
+				// handed over: the mutex stays locked
+				waiter.resolve(new FaGuard(mutex));
+			}
 		}
+		faReleaseShared(mutex);
 	}
 }
 
-// @fa-helper FaChannel deps: faNeedSharedMemory
+// @fa-helper faUnlock deps: faReleaseShared
+/** @param {object | undefined | null} guard */
+export function faUnlock(guard) {
+	faReleaseShared(guard);
+}
+
+// @fa-helper faOwnChannel deps: faOwnShared faDropOwned
+/** @template {{cell: Int32Array | null, items: any[], head: number}} T @param {T} channel @returns {T} */
+export function faOwnChannel(channel) {
+	return faOwnShared(channel, (value) => {
+		// A SAB may still have live handles in other realms. Its data is
+		// released by the host when those wrappers disappear, never closed here.
+		if (value.cell === null) {
+			const held = value.items.slice(value.head);
+			value.items = [];
+			value.head = 0;
+			faDropOwned(held);
+		}
+	});
+}
+
+// @fa-helper FaChannel deps: faNeedSharedMemory faOwnChannel faDropOwned
 /**
  * A `Channel(T)`: a queue, bounded by its capacity (`Infinity` without one).
  * Given to a worker (`share`), its queue moves into shared memory: the
@@ -352,6 +391,7 @@ export class FaChannel {
 		this.cell = null;
 		/** @type {Uint8Array | null} */
 		this.bytes = null;
+		faOwnChannel(this);
 	}
 
 	/**
@@ -359,6 +399,15 @@ export class FaChannel {
 	 * @returns {boolean} whether it was sent (`false` when full or closed)
 	 */
 	trySend(value) {
+		const sent = this.offer(value);
+		if (!sent) faDropOwned(value);
+		return sent;
+	}
+
+	/** An attempt of a waiting send retains its value when full.
+	 * @param {any} value @returns {boolean}
+	 */
+	offer(value) {
 		if (this.cell !== null) {
 			return this.pollSend(value) === 1;
 		}

@@ -53,6 +53,7 @@ impl Walker<'_> {
 	pub(crate) fn note_copy_site(&mut self, value: NodeId) {
 		let value = self.strip_groups(value);
 		// a resource (a type with `destroy`) is moved (foreign.rs)
+		self.escape(value, value);
 		self.note_resource_move(value);
 		self.copy_sites.insert(value);
 	}

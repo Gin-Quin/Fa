@@ -88,6 +88,7 @@ impl Walker<'_> {
 		self.after_call(n, callee);
 		// `pool.submit(…)` of a pool without `timeout` (concurrency.rs)
 		let ty = self.submit_without_timeout(n, callee, ty);
+		self.check_worker_call_transfers(n, callee, ty);
 		// `@add(2, 4)`: evaluated while compiling (comptime.rs)
 		if comptime {
 			self.evaluate_call(n);
@@ -497,8 +498,6 @@ impl Walker<'_> {
 		};
 		self.apply_call_effects(n, callee, sig.effects);
 		self.call_providers.clear();
-		// `subscription.stop()` consumes it (reactivity.rs)
-		self.note_stop_call(n, callee);
 		ty
 	}
 

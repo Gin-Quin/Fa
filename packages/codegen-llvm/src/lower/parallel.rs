@@ -96,18 +96,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// The drop of a handle: its release, or the unlock of a guard.
+	/// The drop of a handle. A guard's last owner releases its acquisition.
 	pub(crate) fn build_sync_drop(
 		&self,
 		builder: &inkwell::builder::Builder<'ctx>,
-		ty: TypeId,
+		_ty: TypeId,
 		value: BasicValueEnum<'ctx>,
 	) -> Result<(), Error> {
-		let name = match self.sync_kind(ty) {
-			Some((SyncKind::Guard, _)) => "fa_mutex_unlock",
-			_ => "fa_shared_release",
-		};
-		builder.build_call(self.runtime.function(name)?, &[value.into()], "")?;
+		builder.build_call(
+			self.runtime.function("fa_shared_release")?,
+			&[value.into()],
+			"",
+		)?;
 		Ok(())
 	}
 
@@ -296,7 +296,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "this place"));
 		};
 		let repr = self.item_repr(item, node)?;
-		let pointer = self.byte_offset(guard, MUTEX_VALUE)?;
+		let owner = self.byte_offset(guard, 32)?;
+		let mutex = self
+			.builder
+			.build_load(self.pointer_type(), owner, "guard.mutex")?
+			.into_pointer_value();
+		let pointer = self.byte_offset(mutex, MUTEX_VALUE)?;
 		Ok(Slot { pointer, repr })
 	}
 
@@ -454,6 +459,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						let guard = self
 							.call_value(self.runtime.function("fa_mutex_lock")?, &[block.into()])?
 							.into_pointer_value();
+						let guard = self
+							.call_value(self.runtime.function("fa_guard_new")?, &[guard.into()])?;
 						Ok(self.fresh(Val::new(Repr::Sync(guard_type), guard)))
 					}
 					"tryLock" => {
@@ -462,6 +469,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 								self.runtime.function("fa_mutex_try_lock")?,
 								&[block.into()],
 							)?
+							.into_pointer_value();
+						let guard = self
+							.call_value(self.runtime.function("fa_guard_new")?, &[guard.into()])?
 							.into_pointer_value();
 						let repr = self.node_repr(node)?;
 						let Repr::Optional(scalar) = repr else {

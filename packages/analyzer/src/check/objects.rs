@@ -442,6 +442,7 @@ impl Walker<'_> {
 				.annotation
 				.map(|annotation| self.check_type_expr(annotation));
 			let actual = self.check(field.value, declared);
+			self.escape(field.value, field.value);
 			if let Some(declared) = declared {
 				self.sink(field.value, actual, declared);
 			}
@@ -537,6 +538,7 @@ impl Walker<'_> {
 				.find(|declared| self.s.types.syms.resolve(declared.name) == text)
 				.map(|declared| declared.ty);
 			let actual = self.check(field.value, expected);
+			self.escape(field.value, field.value);
 			if let Some(expected) = expected {
 				self.sink(field.value, actual, expected);
 			}

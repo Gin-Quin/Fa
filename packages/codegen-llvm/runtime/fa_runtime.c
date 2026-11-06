@@ -5064,6 +5064,8 @@ struct FaObserver {
 	/// The cleanup of a watch block: a function value `{ function,
 	/// environment }`.
 	void *cleanup_closure[2];
+	/// Owning Subscription values. Sources stay allocated until graph release.
+	int64_t owners;
 };
 
 static FaObserver *reactive_observer = 0;
@@ -5400,6 +5402,7 @@ FA_EXPORT FaObserver *fa_watch_new(void (*run)(FaObserver *), void (*cleanup)(Fa
 	FaObserver *node = observer_new(run, cleanup, release, env, 0);
 	node->source.kind = 2;
 	node->watch = 1;
+	node->owners = 1;
 	reactive_sequence += 1;
 	node->sequence = reactive_sequence;
 	run_watch(node);
@@ -5418,6 +5421,28 @@ FA_EXPORT void fa_dispose(FaObserver *node) {
 	reactive_observer = 0;
 	node->cleanup(node);
 	reactive_observer = saved;
+	// A stopped watch never runs again. Release its captured values now;
+	// the graph retains only the inert node until its own final teardown.
+	if (node->release != 0) {
+		void (*release)(FaObserver *) = node->release;
+		node->release = 0;
+		release(node);
+		node->env = 0;
+	}
+}
+
+/// A copied Subscription observes the same watch block.
+FA_EXPORT FaObserver *fa_subscription_retain(FaObserver *node) {
+	if (node != 0) {
+		__atomic_fetch_add(&node->owners, 1, __ATOMIC_RELAXED);
+	}
+	return node;
+}
+
+FA_EXPORT void fa_subscription_release(FaObserver *node) {
+	if (node != 0 && __atomic_fetch_sub(&node->owners, 1, __ATOMIC_ACQ_REL) == 1) {
+		fa_dispose(node);
+	}
 }
 
 /// Runs the pending watch blocks in declaration order, each once, then the
@@ -5488,8 +5513,11 @@ FA_EXPORT void fa_observer_changed(FaObserver *node, int32_t changed) {
 /// Frees every source and observer, at the end of the program: the
 /// generated `release` of an observer drops its environment and its value.
 FA_EXPORT void fa_reactive_release(void) {
-	for (int64_t index = reactive_made_count - 1; index >= 0; index -= 1) {
-		FaSource *source = reactive_made[index];
+	while (reactive_made_count > 0) {
+		FaSource *source = reactive_made[--reactive_made_count];
+		if (source->kind == 2) {
+			fa_dispose((FaObserver *)source);
+		}
 		free_items(source->observers, source->observer_capacity, sizeof(FaObserver *));
 		free_items(source->children, source->child_capacity, sizeof(FaChild));
 		if (source->kind == 0) {
@@ -5497,7 +5525,9 @@ FA_EXPORT void fa_reactive_release(void) {
 			continue;
 		}
 		FaObserver *node = (FaObserver *)source;
-		node->release(node);
+		if (node->release != 0) {
+			node->release(node);
+		}
 		free_items(node->reads, node->read_capacity, sizeof(FaSource *));
 		free_items(node->versions, node->read_capacity, sizeof(int64_t));
 		if (node->value_size > 0) {
@@ -7020,6 +7050,13 @@ static void *shared_new(size_t size, void (*drop)(void *)) {
 	return shared;
 }
 
+/// Shared Fa resources use the same counted header as synchronization handles.
+_Static_assert(sizeof(FaShared) == 32, "resource payload offset");
+FA_EXPORT void *fa_resource_new(size_t payload, void (*drop)(void *)) {
+	if (payload > SIZE_MAX - sizeof(FaShared)) { out_of_memory(); }
+	return shared_new(sizeof(FaShared) + payload, drop);
+}
+
 /// A copy of a handle: the same block.
 FA_EXPORT void *fa_shared_retain(void *block) {
 	if (block != 0) {
@@ -7041,6 +7078,27 @@ FA_EXPORT void fa_shared_release(void *block) {
 		shared->drop(block);
 	}
 	fa_free(block, (size_t)shared->size, 16);
+}
+
+/// The immutable captures of a heap closure are shared by its function
+/// values. Stack environments use their own no-op drop/copy entry points.
+typedef struct {
+	void (*drop)(void *);
+	void *(*copy)(void *);
+	int64_t count;
+} FaEnvironment;
+
+FA_EXPORT void *fa_environment_retain(void *block) {
+	if (block != 0) {
+		__atomic_fetch_add(&((FaEnvironment *)block)->count, 1, __ATOMIC_RELAXED);
+	}
+	return block;
+}
+
+/// The generated destructor drops captures and frees the block only at 1.
+FA_EXPORT int32_t fa_environment_release(void *block) {
+	return block != 0 && __atomic_fetch_sub(&((FaEnvironment *)block)->count, 1,
+	                                      __ATOMIC_ACQ_REL) == 1;
 }
 
 // ── atomics: the generated code reads and writes `value` with atomic
@@ -11566,6 +11624,31 @@ FA_EXPORT void fa_mutex_unlock(void *block) {
 	}
 	system_unlock(&mutex->lock);
 	fa_shared_release(block);
+}
+
+/// Copies of a guard share one acquisition, not just the mutex. Its final
+/// owner releases that acquisition and the mutex reference it already owns.
+typedef struct {
+	FaShared shared;
+	FaMutex *mutex;
+} FaGuard;
+
+_Static_assert(__builtin_offsetof(FaGuard, mutex) == 32, "the mutex of a guard");
+
+static void guard_drop(void *block) {
+	FaGuard *guard = block;
+	fa_mutex_unlock(guard->mutex);
+}
+
+/// Adopts the reference returned by lock/tryLock, or handed to an async
+/// waiter. A cancelled wait still calls fa_mutex_cancel before this point.
+FA_EXPORT void *fa_guard_new(void *mutex) {
+	if (mutex == 0) {
+		return 0;
+	}
+	FaGuard *guard = shared_new(sizeof(FaGuard), guard_drop);
+	guard->mutex = mutex;
+	return guard;
 }
 
 /// The destroy edge of `await mutex.lock()`: leaves the line, or releases

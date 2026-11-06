@@ -759,19 +759,63 @@ impl TypeStore {
 		}
 	}
 
-	/// Whether values of a type can't be copied, only moved (`design/decisions.md`,
-	/// "A type holding a task is move-only"): a `Task`, a worker's handle, a
-	/// resource (a type with `destroy`), and every object, tuple, union or
-	/// collection that contains one.
+	/// Whether a value owns a Task, directly or through a composite.
+	/// Resources without tasks are copyable shared handles.
 	pub fn is_move_only(&self, ty: TypeId) -> bool {
 		self.holds_move_only(ty, Holds::MoveOnly, &mut Vec::new())
 	}
 
-	/// [`TypeStore::is_move_only`] without the worker handles, which a
-	/// backend may share (counted): the values whose copy would be dropped
-	/// twice (a task, a resource, a type holding one).
+	/// Whether a value contains a state shared by copying a handle. The
+	/// recursive walk covers named-union payloads published after interning.
+	pub fn contains_shared_handle(&self, ty: TypeId) -> bool {
+		self.holds_move_only(ty, Holds::Shared, &mut Vec::new())
+	}
+
+	/// A task belongs to its creating executor. A shared cell, resource,
+	/// pointer or reference does not make that task transferable to a thread.
+	/// Function signatures describe calls, not the actual captured values;
+	/// the checker follows their value provenance separately.
+	pub fn contains_executor_task(&self, ty: TypeId) -> bool {
+		let mut pending = vec![ty];
+		let mut seen = FxHashSet::default();
+		while let Some(ty) = pending.pop() {
+			if ty.is_unset() || !seen.insert(ty) {
+				continue;
+			}
+			match self.kind(ty) {
+				TypeKind::Task(..) => return true,
+				TypeKind::Rec(_) => pending.extend(self.rec_target(ty)),
+				TypeKind::Object(shape) => {
+					pending.extend(self.shape_fields(shape).iter().map(|field| field.ty));
+				}
+				TypeKind::Sync(_, item)
+				| TypeKind::Pointer(item)
+				| TypeKind::Ref(item, _)
+				| TypeKind::CArray(item, _)
+				| TypeKind::Iterator(item, _) => pending.push(item),
+				TypeKind::Collection(_, item, key) => pending.extend([item, key]),
+				TypeKind::Tuple(list) | TypeKind::Union(list) => {
+					pending.extend(self.list_items(list));
+				}
+				TypeKind::Member(nominal, index) => pending.push(self.payload(nominal, index)),
+				TypeKind::NamedUnion(nominal, mask) => {
+					let count = self.sym_list(self.nominal(nominal).members).len() as u16;
+					pending.extend(
+						(0..count)
+							.filter(|&index| self.mask_has(mask, index))
+							.map(|index| self.payload(nominal, index)),
+					);
+				}
+				_ => {}
+			}
+		}
+		false
+	}
+
+	/// Values transferred into an owning backend slot: tasks and composites
+	/// containing tasks. Resource parameters are borrowed shared handles.
 	pub fn owns_unique(&self, ty: TypeId) -> bool {
-		self.holds_move_only(ty, Holds::Unique, &mut Vec::new())
+		self.is_move_only(ty)
 	}
 
 	/// Whether a value of a type holds a resource (a type with `destroy`):
@@ -779,6 +823,12 @@ impl TypeStore {
 	/// flags, never by a zero left in the place.
 	pub fn contains_resource(&self, ty: TypeId) -> bool {
 		self.holds_move_only(ty, Holds::Resource, &mut Vec::new())
+	}
+
+	/// Whether a structural copy duplicates a collection. Shared handles
+	/// are boundaries: copying one retains the same cell and its contents.
+	pub fn requires_explicit_copy(&self, ty: TypeId) -> bool {
+		self.holds_move_only(ty, Holds::Collection, &mut Vec::new())
 	}
 
 	/// Visits each type reachable from `ty` once (`seen`): linear in the
@@ -792,15 +842,32 @@ impl TypeStore {
 			TypeKind::Rec(_) => self
 				.rec_target(ty)
 				.is_some_and(|target| self.holds_move_only(target, holds, seen)),
-			TypeKind::Task(..) => holds != Holds::Resource,
-			TypeKind::Sync(crate::types::SyncKind::Worker, _) => holds == Holds::MoveOnly,
+			TypeKind::Task(..) => holds == Holds::MoveOnly,
+			TypeKind::Collection(..) if holds == Holds::Collection => true,
+			TypeKind::Subscription | TypeKind::Function(_) => holds == Holds::Shared,
+			TypeKind::Sync(kind, _) if holds == Holds::Shared => {
+				kind.is_handle()
+					|| matches!(
+						kind,
+						crate::types::SyncKind::Guard
+							| crate::types::SyncKind::Worker
+							| crate::types::SyncKind::WorkerPool
+							| crate::types::SyncKind::TcpListener
+							| crate::types::SyncKind::TcpStream
+					)
+			}
+			TypeKind::Sync(crate::types::SyncKind::Worker, _) => false,
 			TypeKind::Object(shape) => {
-				self.is_resource(ty)
+				if holds == Holds::Collection && self.is_resource(ty) {
+					return false;
+				}
+				(self.is_resource(ty) && holds != Holds::MoveOnly)
 					|| self
 						.shape_fields(shape)
 						.iter()
 						.any(|field| self.holds_move_only(field.ty, holds, seen))
 			}
+			TypeKind::CArray(item, _) => self.holds_move_only(item, holds, seen),
 			TypeKind::Collection(_, item, key) => {
 				self.holds_move_only(item, holds, seen) || self.holds_move_only(key, holds, seen)
 			}
@@ -1613,7 +1680,7 @@ impl TypeStore {
 				(F::FLAT | F::COMPARABLE | F::ORDERED).with_runtime_kind(RuntimeKind::String)
 			}
 			TypeKind::Range => scalar.with_runtime_kind(RuntimeKind::Range),
-			TypeKind::Subscription => F::MOVE_ONLY.with_runtime_kind(RuntimeKind::Object),
+			TypeKind::Subscription => F::HAS_SHARED.with_runtime_kind(RuntimeKind::Object),
 			TypeKind::Sync(kind, item) => {
 				let inherited = self.flags(item) & (F::HAS_PARAM | F::HAS_UNKNOWN);
 				match kind {
@@ -1625,9 +1692,9 @@ impl TypeStore {
 					| crate::types::SyncKind::TcpListener
 					| crate::types::SyncKind::TcpStream
 					| crate::types::SyncKind::WorkerPool => {
-						(inherited | F::MOVE_ONLY).with_runtime_kind(RuntimeKind::Object)
+						(inherited | F::HAS_SHARED).with_runtime_kind(RuntimeKind::Object)
 					}
-					_ => inherited.with_runtime_kind(RuntimeKind::Object),
+					_ => (inherited | F::HAS_SHARED).with_runtime_kind(RuntimeKind::Object),
 				}
 			}
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) => {
@@ -1673,7 +1740,7 @@ impl TypeStore {
 					flags -= F::HAS_FOREIGN;
 				}
 				if resource {
-					(flags | F::MOVE_ONLY) - F::TRIVIALLY_COPYABLE - F::COMPARABLE
+					(flags | F::HAS_SHARED) - F::TRIVIALLY_COPYABLE - F::COMPARABLE
 				} else {
 					flags
 				}
@@ -1710,7 +1777,7 @@ impl TypeStore {
 			}
 			TypeKind::Function(sig) => {
 				let sig = self.sig(sig);
-				let mut flags = F::FLAT.with_runtime_kind(RuntimeKind::Function);
+				let mut flags = (F::FLAT | F::HAS_SHARED).with_runtime_kind(RuntimeKind::Function);
 				let types = self
 					.params(sig.params)
 					.iter()
@@ -1758,8 +1825,9 @@ impl TypeStore {
 			flags |= child_flags
 				& (F::HAS_PARAM
 					| F::HAS_UNKNOWN
-					| F::MOVE_ONLY | F::HAS_VOID
-					| F::RECURSIVE | F::HAS_FOREIGN);
+					| F::MOVE_ONLY | F::HAS_SHARED
+					| F::HAS_VOID | F::RECURSIVE
+					| F::HAS_FOREIGN);
 			if child == TypeId::VOID {
 				flags |= F::HAS_VOID;
 			}
@@ -2303,10 +2371,12 @@ mod tests {
 /// What [`TypeStore::is_move_only`] and its variants look for.
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Holds {
-	/// Tasks, worker handles and resources.
+	/// Collections duplicated by a structural copy.
+	Collection,
+	/// Every shared handle, including guards and stopped subscriptions.
+	Shared,
+	/// Tasks and composites containing tasks.
 	MoveOnly,
-	/// Tasks and resources.
-	Unique,
 	/// Resources.
 	Resource,
 }

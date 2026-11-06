@@ -427,10 +427,6 @@ impl Walker<'_> {
 			(Some((value, actual)), None) => self.sink_unannotated(value, actual),
 			_ => {}
 		}
-		// `let other = worker`: a worker's handle moves (concurrency.rs)
-		if let Some(value) = value {
-			self.move_worker_handle(value, n);
-		}
 		let ty = self.memo(n, |w| {
 			let text = w.decl_text(n, name);
 			// written twice: the same type, spelled the same (not `Round` for `Shape.Circle`)

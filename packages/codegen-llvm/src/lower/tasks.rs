@@ -1967,10 +1967,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let captures = this.start_captures(block, node)?;
 			let function = this.start_do_function(node, block, &captures, ret, throws, detached)?;
 			let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
-			for (_, slot) in &captures {
+			for (symbol, slot) in &captures {
 				if detached {
 					let value = this.load(*slot)?;
-					let value = this.emit_copy(value)?;
+					let moved = this
+						.analysis
+						.moved_captures
+						.get(&node)
+						.is_some_and(|moved| moved.contains(symbol));
+					let value = if moved {
+						this.give_up_place(node, *slot)?;
+						value
+					} else {
+						this.emit_copy(value)?
+					};
 					arguments.push(value.value.expect("a value").into());
 				} else {
 					arguments.push(slot.pointer.into());
@@ -2335,7 +2345,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_unreachable()?;
 		self.builder.position_at_end(done);
 		let guard_type = self.type_of(call);
-		Ok(self.fresh(Val::new(Repr::Sync(guard_type), block)))
+		let guard = self.runtime_value("fa_guard_new", &[block.into()])?;
+		Ok(self.fresh(Val::new(Repr::Sync(guard_type), guard)))
 	}
 
 	/// `await channel.send(value)`: sent at once, or handed over in line;

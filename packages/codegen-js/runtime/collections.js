@@ -13,6 +13,8 @@ import { faCompare, faEquals, faHash, faKeyEquals } from "./equality.js";
 import { IndexError, KeyNotFound } from "./errors.js";
 import { faFormat } from "./format.js";
 import { faCheckInteger, faRangeOverflow } from "./integers.js";
+import { faManagedMutate, faManagedStorage } from "./managed.js";
+import { faDropOwned } from "./ownership.js";
 import { faStop } from "./stops.js";
 import { faCharacters, faStringCompare } from "./strings.js";
 
@@ -142,7 +144,7 @@ export function faArrayInsert(array, index, item) {
 	array.splice(index, 0, item);
 }
 
-// @fa-helper faArrayDelete deps: faNormalizeIndex
+// @fa-helper faArrayDelete deps: faNormalizeIndex faDropOwned
 /**
  * `array.delete(index)`; throws `IndexError` like indexing.
  * @template T
@@ -151,7 +153,14 @@ export function faArrayInsert(array, index, item) {
  * @returns {void}
  */
 export function faArrayDelete(array, index) {
-	array.splice(faNormalizeIndex(array.length, index), 1);
+	faDropOwned(array.splice(faNormalizeIndex(array.length, index), 1));
+}
+
+// @fa-helper faArrayClear deps: faManagedStorage faManagedMutate faDropOwned
+/** @param {any[]} array */
+export function faArrayClear(array) {
+	if (faManagedStorage(array)) { faManagedMutate(array, "clear", []); return; }
+	faDropOwned(array.splice(0, array.length));
 }
 
 // @fa-helper faArrayTake deps: faNormalizeIndex
@@ -167,7 +176,7 @@ export function faArrayTake(array, index) {
 	return array.splice(faNormalizeIndex(array.length, index), 1)[0];
 }
 
-// @fa-helper faArrayDeleteWhere
+// @fa-helper faArrayDeleteWhere deps: faDropOwned faManagedStorage faManagedMutate
 /**
  * `array.deleteWhere(predicate)`: removes the matching items in place, in one
  * pass (no new array).
@@ -177,6 +186,7 @@ export function faArrayTake(array, index) {
  * @returns {void}
  */
 export function faArrayDeleteWhere(array, predicate) {
+	if (faManagedStorage(array)) { faManagedMutate(array, "deleteWhere", [predicate]); return; }
 	let kept = 0;
 	let index = 0;
 	try {
@@ -185,6 +195,8 @@ export function faArrayDeleteWhere(array, predicate) {
 			if (!predicate(item)) {
 				array[kept] = item;
 				kept += 1;
+			} else {
+				faDropOwned(item);
 			}
 		}
 	} finally {

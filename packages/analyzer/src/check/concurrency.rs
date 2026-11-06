@@ -189,6 +189,7 @@ impl Walker<'_> {
 		self.memo(n, |w| {
 			// a pool's workers run on threads, like workers (`worker_created`)
 			if kind == SyncKind::WorkerPool {
+				w.check_thread_transfer(n, item, "the worker pool's state");
 				w.a.reads_target = true;
 				let target_name = w.s.target().to_string();
 				if !builtins::concurrency::has_workers(&target_name) && w.reported_once.insert((n, CONC010.id)) {
@@ -1076,6 +1077,7 @@ impl Walker<'_> {
 		if self.s.types.is_recovering(state) {
 			return state;
 		}
+		self.check_thread_transfer(n, state, "the worker's state");
 		self.a.reads_target = true;
 		let target_name = self.s.target().to_string();
 		if !builtins::concurrency::has_workers(&target_name)
@@ -1102,36 +1104,6 @@ impl Walker<'_> {
 		worker
 	}
 
-	/// `let other = worker`: the handle moves, `worker` can't be used
-	/// afterwards (`MEM002`); a socket of `std.net` too.
-	pub(super) fn move_worker_handle(&mut self, value: NodeId, at: NodeId) {
-		if !self.body.flow.reachable {
-			return;
-		}
-		let Some(symbol) = self.read_local(value) else {
-			return;
-		};
-		let ty = self.a.symbols.symbol(symbol).ty;
-		if matches!(
-			self.s.types.kind(ty),
-			TypeKind::Sync(
-				SyncKind::Worker
-					| SyncKind::TcpListener
-					| SyncKind::TcpStream
-					| SyncKind::WorkerPool,
-				_
-			)
-		) && !self
-			.body
-			.flow
-			.consumed
-			.iter()
-			.any(|&(other, _)| other == symbol)
-		{
-			self.body.flow.consumed.push((symbol, at));
-		}
-	}
-
 	/// The work given to `pool.submit(work)` runs on a worker's thread (its
 	/// calls of the worker do, natively the whole function): the rules of
 	/// worker code apply to it (`CONC008`, concurrency.md "Workers"). A
@@ -1145,6 +1117,11 @@ impl Walker<'_> {
 	/// the methods of `*.worker.fa` files.
 	pub(super) fn check_submitted_work(&mut self, work: NodeId) {
 		let work = self.strip_groups(work);
+		if let TypeKind::Function(sig) = self.s.types.kind(self.type_of(work)) {
+			let sig = self.s.types.sig(sig);
+			self.check_thread_transfer(work, sig.ret, "the submitted work's result");
+			self.check_thread_transfer(work, sig.throws, "the submitted work's error");
+		}
 		let body = match self.view(work) {
 			View::Lambda { .. } => work,
 			View::Name(_) => {
@@ -1161,6 +1138,20 @@ impl Walker<'_> {
 		};
 		if !self.a.submitted_works.contains(&work) {
 			self.a.submitted_works.push(work);
+		}
+		if let Some(captures) = self
+			.a
+			.functions
+			.get(&body)
+			.map(|info| info.captures.clone())
+		{
+			for symbol in captures {
+				self.check_thread_transfer(
+					work,
+					self.a.symbols.symbol(symbol).ty,
+					"a captured value of the submitted work",
+				);
+			}
 		}
 		let mut nodes = Vec::new();
 		let mut stack = vec![body];
@@ -1221,6 +1212,84 @@ impl Walker<'_> {
 			self.report(diagnostic);
 		}
 		None
+	}
+
+	/// Checks actual storage crossing a worker boundary. Shared handles are
+	/// copied locally, but their contents still belong to an executor.
+	pub(super) fn check_thread_transfer(&mut self, at: NodeId, ty: TypeId, what: &str) {
+		if self.s.types.contains_executor_task(ty)
+			&& self.reported_once.insert((at, "executor-task-transfer"))
+		{
+			let message = format!(
+				"{what} (`{}`) contains a `Task`: a task belongs to the executor that created it and can't cross threads, including through a `Mutex`, `Channel`, resource or pointer; await it on its own executor and transfer its result",
+				self.display(ty)
+			);
+			let diagnostic = self.diagnostic(&CONC008, at, message);
+			self.report(diagnostic);
+		}
+	}
+
+	pub(super) fn check_worker_signature(&mut self, at: NodeId, ty: TypeId) {
+		let TypeKind::Function(sig) = self.s.types.kind(ty) else {
+			return;
+		};
+		let sig = self.s.types.sig(sig);
+		let parameters = self.s.types.params(sig.params).to_vec();
+		for parameter in parameters.into_iter().skip(1) {
+			self.check_thread_transfer(at, parameter.ty, "a worker method's argument");
+		}
+		self.check_thread_transfer(at, sig.ret, "a worker method's result");
+		self.check_thread_transfer(at, sig.throws, "a worker method's error");
+	}
+
+	pub(super) fn check_worker_call_transfers(
+		&mut self,
+		at: NodeId,
+		callee: NodeId,
+		result: TypeId,
+	) {
+		let View::Access { target, .. } = self.view(self.strip_groups(callee)) else {
+			return;
+		};
+		if !matches!(
+			self.s.types.kind(self.type_of(target)),
+			TypeKind::Sync(SyncKind::Worker, _)
+		) {
+			return;
+		}
+		let arguments = self
+			.a
+			.calls
+			.get(&at)
+			.map(|call| call.arguments.clone())
+			.unwrap_or_default();
+		for argument in arguments {
+			match argument {
+				crate::analysis::Argument::Given(value)
+					if self.strip_groups(value) != self.strip_groups(target) =>
+				{
+					self.check_thread_transfer(
+						value,
+						self.type_of(value),
+						"a worker method's argument",
+					);
+				}
+				crate::analysis::Argument::Variadic(items) => {
+					for value in items {
+						self.check_thread_transfer(
+							value,
+							self.type_of(value),
+							"a worker method's variadic argument",
+						);
+					}
+				}
+				_ => {}
+			}
+		}
+		self.check_thread_transfer(at, result, "a worker method's result");
+		if let TypeKind::Function(sig) = self.s.types.kind(self.type_of(callee)) {
+			self.check_thread_transfer(at, self.s.types.sig(sig).throws, "a worker method's error");
+		}
 	}
 }
 

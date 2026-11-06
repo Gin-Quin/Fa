@@ -2309,7 +2309,19 @@ impl Walker<'_> {
 	/// captures, so it can't write any of it (`REF021`). `value` is a lambda,
 	/// or the name of a local function; `at` where it escapes.
 	pub(crate) fn escape(&mut self, value: NodeId, at: NodeId) {
+		self.escape_value(value, at, &mut rustc_hash::FxHashSet::default());
+	}
+
+	fn escape_value(
+		&mut self,
+		value: NodeId,
+		at: NodeId,
+		seen: &mut rustc_hash::FxHashSet<NodeId>,
+	) {
 		let value = self.strip_groups(value);
+		if !seen.insert(value) {
+			return;
+		}
 		let lambda = match self.view(value) {
 			View::Lambda { .. } => value,
 			View::Name(_) => {
@@ -2317,12 +2329,68 @@ impl Walker<'_> {
 					return;
 				};
 				let Some(declaration) = self.direct_function(symbol) else {
+					let node = self.a.symbols.symbol(symbol).decl_node;
+					if let View::Declaration {
+						value: Some(initializer),
+						..
+					} = self.view(node)
+					{
+						self.escape_value(initializer, at, seen);
+					}
 					return;
 				};
 				match self.a.functions.get(&declaration) {
 					Some(info) => info.lambda,
 					None => return,
 				}
+			}
+			View::Do(inner) => {
+				self.escape_value(inner, at, seen);
+				return;
+			}
+			View::Return(Some(inner)) => {
+				self.escape_value(inner, at, seen);
+				return;
+			}
+			View::If {
+				then_body,
+				else_body,
+				..
+			} => {
+				self.escape_value(then_body, at, seen);
+				if let Some(other) = else_body {
+					self.escape_value(other, at, seen);
+				}
+				return;
+			}
+			View::When { arms, .. } => {
+				let values: Vec<_> = arms.iter().map(|arm| arm.value).collect();
+				for value in values {
+					self.escape_value(value, at, seen);
+				}
+				return;
+			}
+			View::Catch {
+				expression,
+				handler,
+				..
+			} => {
+				self.escape_value(expression, at, seen);
+				self.escape_value(handler, at, seen);
+				return;
+			}
+			View::Fallback { operands } => {
+				let values: Vec<_> = operands.iter().collect();
+				for value in values {
+					self.escape_value(value, at, seen);
+				}
+				return;
+			}
+			View::Block { statements } => {
+				if let Some(last) = statements.last() {
+					self.escape_value(last, at, seen);
+				}
+				return;
 			}
 			_ => return,
 		};

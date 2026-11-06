@@ -249,6 +249,9 @@ impl Generator<'_> {
 				}
 				// an `async` function as a value: both instances (tasks.rs)
 				let declaration = self.analysis.symbols.symbol(symbol).decl_node;
+				if let Some(value) = self.captured_function_value(n, declaration) {
+					return value;
+				}
 				if self.tasks.instances.contains_key(&declaration)
 					&& let Some(value) = self.async_function_value(n, declaration)
 				{

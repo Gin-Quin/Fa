@@ -88,6 +88,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Link(_)
 			| Repr::Links(_)
 			| Repr::Columnar(_)
+			| Repr::Watch
 			| Repr::Task(_) => true,
 			Repr::InlineUnion(nominal) => self.inline_union_needs_drop(nominal),
 			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
@@ -557,6 +558,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.effectful_drops.set(true);
 				self.build_sync_drop(builder, ty, value)?
 			}
+			Repr::Watch => {
+				self.effectful_drops.set(true);
+				builder.build_call(
+					self.runtime.function("fa_subscription_release")?,
+					&[value.into()],
+					"",
+				)?;
+			}
 			// a task: cancelled when not done (tasks.rs)
 			Repr::Task(_) => {
 				self.effectful_drops.set(true);
@@ -797,6 +806,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.into(),
 			// a copy of a handle designates the same value (parallel.rs)
 			Repr::Sync(_) => self.build_sync_copy(builder, value)?,
+			Repr::Watch => builder
+				.build_call(
+					self.runtime.function("fa_subscription_retain")?,
+					&[value.into()],
+					"",
+				)?
+				.try_as_basic_value()
+				.basic()
+				.expect("a subscription"),
 			// a task is moved, never copied (the analyzer's `MOVE_ONLY`)
 			Repr::Task(_) => value,
 			// a copy has no links (D18)
@@ -1657,7 +1675,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Cleanup::Dispose(observer) => {
 				self.effectful_drops.set(true);
 				self.builder.build_call(
-					self.runtime.function("fa_dispose")?,
+					self.runtime.function("fa_subscription_release")?,
 					&[observer.into()],
 					"",
 				)?;

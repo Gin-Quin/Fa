@@ -797,6 +797,9 @@ impl Walker<'_> {
 			}
 		}
 		let sig = self.signature_id(ty);
+		if self.is_worker_method(signature.parameters) {
+			self.check_worker_signature(lambda, ty);
+		}
 		for key in [Some(lambda), owner.declaration].into_iter().flatten() {
 			if let Some(info) = self.a.functions.get_mut(&key) {
 				info.ty = ty;

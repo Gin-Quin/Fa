@@ -56,8 +56,6 @@ impl Generator<'_> {
 		match (self.view(value), info) {
 			(View::Lambda { .. }, Some(info)) => {
 				let indent = self.out.indentation();
-				// an escaping local function copies its captures (references.rs)
-				let saved = self.copy_captures(&info);
 				// the instances of a function that may suspend (tasks.rs)
 				for (mode, instance) in self.instance_modes(n) {
 					self.tasks.next_mode = Some(mode);
@@ -111,7 +109,6 @@ impl Generator<'_> {
 					self.out.append(parts.body);
 					self.out.line("}");
 				}
-				self.restore_captures(saved);
 			}
 			(View::Name(_), _) => {
 				let alias = self.expr(value);
@@ -126,6 +123,47 @@ impl Generator<'_> {
 				self.unsupported(n, "this function declaration");
 			}
 		}
+	}
+
+	/// A named local function materializes its immutable snapshots at each
+	/// value read. Its direct calls keep using the surrounding places.
+	pub(crate) fn captured_function_value(
+		&mut self,
+		site: NodeId,
+		declaration: NodeId,
+	) -> Option<Expr> {
+		let info = self.analysis.function(declaration)?.clone();
+		if self.is_callee(site)
+			|| info.captures.is_empty()
+			|| !self.analysis.escapes.contains(&info.lambda)
+		{
+			return None;
+		}
+		let symbol = info.symbol?;
+		if self.materializing_functions.contains(&declaration) {
+			let name = self.name_of(symbol);
+			let retain = self.helper("faRetainShared");
+			return Some(js::call(retain, &[name]));
+		}
+		let saved = self.copy_captures(&info, site);
+		let indent = self.out.indentation();
+		self.materializing_functions.insert(declaration);
+		let (lines, value) = self.capture_at(indent + 1, |g| {
+			g.function_declaration(declaration);
+			g.async_function_value(site, declaration)
+				.unwrap_or_else(|| Expr::name(g.name_of(symbol), true))
+		});
+		self.materializing_functions.remove(&declaration);
+		let closing = "\t".repeat(indent);
+		let value = Expr::primary(format!(
+			"(() => {{\n{}{}return {};\n{closing}}})()",
+			lines.finish(),
+			"\t".repeat(indent + 1),
+			value.text
+		));
+		let value = self.own_captured_closure(site, value, &saved);
+		self.restore_captures(saved);
+		Some(value)
 	}
 
 	/// A composition of steps: `(...a) => h(g(f(...a)))`. Each step is
@@ -184,7 +222,7 @@ impl Generator<'_> {
 			return self.unsupported(n, "this function");
 		};
 		let indent = self.out.indentation();
-		let saved = self.copy_captures(&info);
+		let saved = self.copy_captures(&info, n);
 		let parts = self.function_parts(&info, indent, true);
 		// an async lambda that may suspend: its async instance too (tasks.rs)
 		let asynchronous = self.lambda_suspends(n).then(|| {
@@ -192,9 +230,8 @@ impl Generator<'_> {
 			let parts = self.function_parts(&info, indent, true);
 			Self::arrow(parts, indent)
 		});
-		self.restore_captures(saved);
 		let blocking = Self::arrow(parts, indent);
-		match asynchronous {
+		let value = match asynchronous {
 			Some(asynchronous) => {
 				let helper = self.helper("faAsyncValue");
 				js::call(
@@ -203,7 +240,10 @@ impl Generator<'_> {
 				)
 			}
 			None => blocking,
-		}
+		};
+		let value = self.own_captured_closure(n, value, &saved);
+		self.restore_captures(saved);
+		value
 	}
 
 	/// An arrow function of generated parts.
@@ -354,19 +394,27 @@ impl Generator<'_> {
 			let mut expression = None;
 			let mut body = prologue;
 			if arrow && !info.block_body && body.is_empty() {
+				g.guard_frames.push(Vec::new());
 				let (lines, value) = g.capture_at(indent + 1, |g| g.expr(info.body));
-				if lines.is_empty() {
-					let value = if dest == Dest::Return {
-						g.copy_returned(info.body, value)
-					} else {
-						value
-					};
+				let value = if dest == Dest::Return {
+					g.copy_returned(info.body, value)
+				} else {
+					value
+				};
+				let mut release = g.guard_frames.pop().unwrap_or_default();
+				release.reverse();
+				if lines.is_empty() && release.is_empty() {
 					expression = Some(value);
 				} else {
+					if !release.is_empty() {
+						body.open("try");
+					}
 					body.append(lines);
-					g.out = std::mem::replace(&mut body, Writer::new());
-					g.finish(info.body, value, &dest);
-					body = std::mem::take(&mut g.out);
+					let prefix = if dest == Dest::Return { "return " } else { "" };
+					body.line(format!("{prefix}{};", value.text));
+					if !release.is_empty() {
+						body.close(&format!("finally {{ {} }}", release.join(" ")));
+					}
 				}
 			} else {
 				let saved = std::mem::replace(&mut g.out, body);
@@ -376,7 +424,7 @@ impl Generator<'_> {
 						g.statements(&statements, dest.clone());
 					}
 				} else {
-					g.into(info.body, dest.clone());
+					g.guarded(info.body, &dest, |g| g.into(info.body, dest.clone()));
 				}
 				body = std::mem::replace(&mut g.out, saved);
 			}
@@ -1209,7 +1257,20 @@ impl Generator<'_> {
 			"Array#get" => helper(self, "faArrayGet", texts),
 			"Array#isEmpty" => Expr::new(format!("{target}.length === 0"), Prec::Equality),
 			"Array#pop" => method("pop", &[]),
-			"Array#clear" => Expr::new(format!("{target}.length = 0"), Prec::Assign),
+			"Array#clear" => {
+				let receiver_type = self.receiver_type(callee);
+				if self.types.contains_shared_handle(receiver_type)
+					|| self.contains_task(receiver_type)
+					|| self
+						.types
+						.flags(receiver_type)
+						.contains(fa_analyzer::types::TypeFlags::HAS_PARAM)
+				{
+					helper(self, "faArrayClear", Vec::new())
+				} else {
+					Expr::new(format!("{target}.length = 0"), Prec::Assign)
+				}
+			}
 			"Array#reverse" => Expr::primary(format!("{target}.slice().reverse()")),
 			"Array#reverseInPlace" => method("reverse", &[]),
 			"Array#insert" => helper(self, "faArrayInsert", texts),

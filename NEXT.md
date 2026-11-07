@@ -1,3 +1,50 @@
+# Private compact-map checkpoint (2026-11-07, validated)
+
+Based on validated `0c4c115`, independent of delivered split-stream `f2f8db2`.
+This candidate combines the sentinel/raw-key optimization from `cfa73b8` with
+one private function-local negative map probe. It does not include the other
+String16, immediate-append or unrestricted split prototypes.
+
+The failed lookup is reused only after validity, table and key identity checks.
+The shared validity slot exists before every possible invalidation, including
+mutations preceding the first producer in lowering order; runtime backedges
+therefore cannot reuse stale positions. Named calls consume analyzer effects
+after arguments and source metadata are evaluated. A deletion adjusts the old
+empty position to the final backward-shift hole when that hole comes first in
+cyclic order from the key's home; the all-ones key retains its separate slot.
+Other index changes, reserve, clear, map-owning drops and unknown calls invalidate
+the hint. Generic code/types, foreign declarations/calls, callbacks, references,
+captures, sharing, reactivity, async, C libraries and multiple units retain the
+normal path. The cache version includes `map-probes-2-key32-sentinel-2`.
+
+Existing `fa_table_append` gains the raw key argument, as in `cfa73b8`; its cache
+ABI bump must be preserved when merging. The new `fa_table_release_probe`
+adjusts a negative hint; existing release functions retain their ABI. All three
+runtime IR files are regenerated. Ownership changes in the parent branch need
+only coalescence of the `emit_drop` invalidation hook; preserve all parent
+unique-resource/explicit-copy rules.
+
+At original lru size 2,000,000 and Clang 18 on both languages: 190,062,696
+instructions vs corrected baseline 205,007,080 (−7.29%) and Goose 185,648,894
+(ratio 1.024). Other fifteen original benchmark ELFs match the baseline exactly.
+A quiet 53.9 s run of sixty balanced rotations gives paired CPU ratio 0.957
+[95% bootstrap 0.922–0.993] versus baseline and 1.110 [1.075–1.148] versus Goose.
+Means are 252.51 / 264.27 / 226.70 ms (candidate / baseline / Goose); GNU time RSS
+10,752 / 10,752 / 9,856–9,984 KiB. Host variation is visible; the Goose objective
+remains open. Probe-only stage24 CPU includes parity and is not retained alone.
+Raw samples: `/tmp/fa-native-perf-next/map-combined-{cpu,statistics}.json`.
+
+C ASan/UBSan, 63 LLVM IR checks, clippy/fmt, native/free/wasm targeted programs and
+QEMU AArch64 pass. The final admission also rejects declared generic types and
+functions and @extern declarations; an IR regression covers generic fallback.
+The final compiler reproduces all sixteen measured ELFs exactly, recorded in
+`/tmp/fa-native-perf-next/map-combined-verified.json`. The serialized complete
+workspace with LLVM finished EXIT0, consumed; log
+`/tmp/fa-map-combined-workspace-full.log`. JS runtime300 also passes. Final source
+and compiler snapshots are under `compilers/map-probes-guarded-stage26/` in the
+report directory. Later prototypes, including frame headers, are separate and
+unretained. The other active branches belong to Root/analyzer/proofs.
+
 # Native String length soundness checkpoint (2026-11-07)
 
 Based on validated `6401446`; independent of KEY32/String16 prototypes. The

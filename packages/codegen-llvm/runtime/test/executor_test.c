@@ -1245,7 +1245,7 @@ static TestTableEntry *table_test_insert(FaTable *table, int64_t key) {
 	int64_t probe = table_test_find(table, key);
 	CHECK(probe < 0);
 	TestTableEntry *entry = fa_table_append(table, table_test_hash(&key), sizeof(TestTableEntry),
-	                                        probe, table_test_hash);
+	                                        probe, 0, table_test_hash);
 	entry->key = key;
 	entry->value = key * 3;
 	return entry;
@@ -1363,7 +1363,7 @@ static void test_tables(void) {
 	for (int64_t key = 0; key < 50; key += 1) {
 		int64_t probe = fa_table_find(bitwise, 7, &key, 0, sizeof(TestTableEntry), 8);
 		CHECK(probe < 0);
-		TestTableEntry *entry = fa_table_append(bitwise, 7, sizeof(TestTableEntry), probe, 0);
+		TestTableEntry *entry = fa_table_append(bitwise, 7, sizeof(TestTableEntry), probe, 0, 0);
 		entry->key = key;
 	}
 	for (int64_t key = 0; key < 60; key += 1) {
@@ -1434,7 +1434,7 @@ static void key32_insert(FaTable *table, uint32_t key, int64_t entry_size, int k
 	int64_t probe = key32_find(table, key, entry_size);
 	CHECK(probe < 0);
 	TestKey32Entry *entry = fa_table_append(table, key32_hash(&key), entry_size,
-	                                      known_probe ? probe : 0, key32_hash);
+	                                      known_probe ? probe : 0, key, key32_hash);
 	entry->key = key;
 	entry->value = key ^ 0xa5a5a5a5u;
 }
@@ -1466,11 +1466,32 @@ static void test_inline_key32(void) {
 		                     (compact ? TABLE_INLINE_KEY32 : 0);
 		CHECK(inline_stride(entry_size) == (compact ? 8 : 12));
 		FaTable *table = fa_table_new(4, entry_size);
+		// Both ordinary zero and the reserved sentinel remain valid keys.
+		// Grow with the sentinel present, then clear and insert both again.
+		for (int round = 0; round < 2; round += 1) {
+			key32_insert(table, 0, entry_size, round);
+			key32_insert(table, UINT32_MAX, entry_size, !round);
+			if (compact) {
+				CHECK(key32_find(table, 0, entry_size) < table->mask + 1);
+				CHECK(key32_find(table, UINT32_MAX, entry_size) == table->mask + 1);
+			}
+			fa_table_reserve(table, 128, entry_size, key32_hash);
+			const uint32_t sentinel_keys[] = {0, UINT32_MAX};
+			const uint8_t both_present[] = {1, 1};
+			key32_check(table, sentinel_keys, both_present, 2, entry_size);
+			FaTable *copy = fa_table_copy(table, entry_size);
+			key32_check(copy, sentinel_keys, both_present, 2, entry_size);
+			fa_table_free(copy, entry_size);
+			fa_table_clear(table, entry_size);
+			CHECK(key32_find(table, 0, entry_size) < 0);
+			CHECK(key32_find(table, UINT32_MAX, entry_size) < 0);
+		}
 		uint32_t keys[256];
 		uint8_t present[256] = {0};
 		for (int index = 0; index < 256; index += 1) {
 			keys[index] = index == 0 ? 0 : index == 1 ? 0x80000000u :
-			              index == 2 ? 0xffffffffu : (uint32_t)index - 2;
+			              index == 2 ? 0xffffffffu : index == 3 ? 0x7fffffffu :
+			              (uint32_t)index - 3;
 		}
 		uint32_t random = 12345;
 		for (int round = 0; round < 4000; round += 1) {
@@ -1540,6 +1561,51 @@ static void test_inline_key32(void) {
 		fa_table_free(table, entry_size);
 		CHECK(allocated == before);
 	}
+}
+
+static void test_negative_probe_deletions(void) {
+	long before = allocated;
+	for (int compact = 0; compact < 2; compact += 1) {
+		int64_t entry_size = sizeof(TestKey32Entry) | TABLE_INLINE |
+		                     (compact ? TABLE_INLINE_KEY32 : 0);
+		for (int with_zero = 0; with_zero < 2; with_zero += 1) {
+			FaTable *base = fa_table_new(32, entry_size);
+			uint32_t keys[24];
+			uint32_t next = 1;
+			for (int index = 0; index < 24; index += 1) {
+				while ((inline_key_hash(next) & 63) != 63) { next += 1; }
+				keys[index] = next++;
+				key32_insert(base, keys[index], entry_size, 1);
+			}
+			if (with_zero) {
+				key32_insert(base, 0, entry_size, 1);
+				key32_insert(base, UINT32_MAX, entry_size, 1);
+			}
+			for (uint32_t query = 0; query < 258; query += 1) {
+				uint32_t missing = query == 256 ? 0xffffffffu :
+				                   query == 257 ? 0x80000000u : query;
+				if (key32_find(base, missing, entry_size) >= 0) { continue; }
+				FaTable *copy = fa_table_copy(base, entry_size);
+				int64_t hint = key32_find(copy, missing, entry_size);
+				for (int index = 0; index < 24 + 2 * with_zero; index += 1) {
+					uint32_t removed = index == 24 ? 0 : index == 25 ? UINT32_MAX : keys[(index * 7) % 24];
+					int64_t position = key32_find(copy, removed, entry_size);
+					CHECK(position >= 0);
+					hint = fa_table_release_probe(copy, position, entry_size,
+					                              hint, key32_hash(&missing));
+					CHECK(hint == key32_find(copy, missing, entry_size));
+				}
+				TestKey32Entry *entry = fa_table_append(copy, key32_hash(&missing),
+				                                      entry_size, hint, missing, key32_hash);
+				entry->key = missing;
+				entry->value = 42;
+				CHECK(key32_find(copy, missing, entry_size) >= 0);
+				fa_table_free(copy, entry_size);
+			}
+			fa_table_free(base, entry_size);
+		}
+	}
+	CHECK(allocated == before);
 }
 
 static void test_inline_loop_reservations(void) {
@@ -1846,6 +1912,7 @@ static void test_queues(void) {
 int main(void) {
 	test_tables();
 	test_inline_key32();
+	test_negative_probe_deletions();
 	test_inline_loop_reservations();
 	test_frame_strings();
 	test_integer_strings();

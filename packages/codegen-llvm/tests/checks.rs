@@ -809,6 +809,32 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 	}
 
 	#[test]
+	fn private_inline_maps_reuse_negative_probes_but_references_and_callbacks_do_not() {
+		let source = |extra: &str| {
+			format!(
+				"function append = (items: Array<UInt32>, value: UInt32) mutates items => {{ items.push(value) }}\nmutable values: Map<UInt32, UInt32> = []\nmutable items: Array<UInt32> = []\nlet key: UInt32 = 3\n{extra}\nif values.get(key) is none {{\nappend(items, key)\nvalues[key] = 7\n}}\nconsole.log(values.get(key))\n"
+			)
+		};
+		let reused = ir_of("map-probe-reuse", &source(""));
+		assert!(reused.contains("probe_cached"), "{reused}");
+		let reference = ir_of(
+			"map-probe-borrow",
+			&source("use present = values.get(key)\nconsole.log(present)"),
+		);
+		assert!(!reference.contains("probe_cached"), "{reference}");
+		let callback = ir_of(
+			"map-probe-callback",
+			&source("let kept = [1].map((item) => item + 1)\nconsole.log(kept)"),
+		);
+		assert!(!callback.contains("probe_cached"), "{callback}");
+		let generic = ir_of(
+			"map-probe-generic",
+			&source("function identity = <T>(value: T): T => value\nconsole.log(identity(1))"),
+		);
+		assert!(!generic.contains("probe_cached"), "{generic}");
+	}
+
+	#[test]
 	fn inline_utf8_bytes_are_not_assumed_to_be_a_positive_raw_length() {
 		let ir = ir_of(
 			"inline-utf8-length",

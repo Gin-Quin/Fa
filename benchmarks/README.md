@@ -478,6 +478,41 @@ What remains, measured: `sexp`'s nodes are 32-byte inline unions (an 8-byte tag 
 
 Goose's page finds Goose faster than the best safe Rust by 1.2x (geometric mean, Goose / Rust 0.84x); here it is 1.8x faster (0.57x), mostly because several Rust rows here are the owning-pointer ones (`Box`, `HashMap` with its default hasher, `Vec<String>`) rather than index arenas and open addressing, and because the default sizes are the page's small or medium ones. The exceptions point the other way: `graph` (Goose 3x slower than nested `Vec`s here, 1.3x faster than the best Rust row there at 2 M vertices) and `blur` (2x slower here: Rust and Fa vectorize the kernel, Goose's C doesn't).
 
+
+## Private compact-map probes (2026-11-07)
+
+The compiler combines a negative inline-map lookup hint with the all-ones key
+sentinel, passing raw key bits to append. An insertion can reuse its earlier miss;
+a deletion adjusts that hint to the final backward-shift hole. Unsupported
+aliases, effects or opaque code retain ordinary lookups. The source algorithms
+and the original benchmark parameters are unchanged.
+
+Original lru size 2,000,000, LLVM/Clang 18.1.3 on both languages; Fa O3 synchronous
+unchecked and Goose O2 standalone. Sixty balanced rotations on CPU 1, every output
+checked against Rust, give:
+
+| Metric | Corrected Fa baseline | Combined map candidate | Goose |
+| --- | ---: | ---: | ---: |
+| Instructions | 205,007,080 | 190,062,696 | 185,648,894 |
+| Mean CPU, ms | 264.27 | 252.51 | 226.70 |
+| Median CPU, ms | 257.60 | 240.40 | 224.88 |
+| GNU time peak RSS, KiB | 10,752 | 10,752 | 9,856–9,984 |
+
+The paired geometric CPU ratio is 0.957 versus corrected Fa (95% paired bootstrap
+interval 0.922–0.993), and 1.110 versus Goose (1.075–1.148). This is one quiet 53.9 s
+run with visible host variation. The instruction ratio remains 1.024 and the CPU
+ratio remains above parity against Goose; the goal remains open. Probe reuse
+without the sentinel change saved 2.75% instructions, but its CPU interval included
+parity and that variant is not a separate retained optimization.
+
+All sixteen original benchmark executables have matching manifests; the other
+fifteen ELF files are identical to the corrected baseline. Raw samples and
+statistics are `/tmp/fa-native-perf-next/map-combined-{cpu,statistics}.json`;
+source/compiler hashes, flags, sizes, outputs and instruction provenance are in
+`map-probes-sentinel-clang18/` alongside them. These timings apply to the measured
+ELFs and are kept separate from older full-suite CPU samples.
+
+
 ## Compiler
 
 How fast the compiler itself is, and how much memory it takes, on big projects (design/parallel-pipeline.md, step 0). `compiler/generate.ts` writes a Fa package of N files of about L lines, and `compiler/run.ts` measures `fa check`, `fa build --target=bun` and `fa build --target=native` on packages of 100, 1,000 and 2,000 files of 500 lines.

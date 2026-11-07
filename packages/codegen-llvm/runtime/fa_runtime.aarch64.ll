@@ -16530,7 +16530,7 @@ define ptr @fa_table_entry(ptr nocapture noundef readonly %0, i64 noundef %1, i6
 define i32 @fa_table_live(ptr nocapture noundef readonly %0, i64 noundef %1, i64 noundef %2) local_unnamed_addr #38 {
   %4 = and i64 %2, 2199023255552
   %5 = icmp eq i64 %4, 0
-  br i1 %5, label %32, label %6
+  br i1 %5, label %35, label %6
 
 6:                                                ; preds = %3
   %7 = and i64 %2, 4398046511104
@@ -16549,7 +16549,7 @@ define i32 @fa_table_live(ptr nocapture noundef readonly %0, i64 noundef %1, i64
   %16 = load i64, ptr %15, align 8, !tbaa !324
   %17 = icmp ne i64 %16, 0
   %18 = zext i1 %17 to i32
-  br label %41
+  br label %44
 
 19:                                               ; preds = %9, %6
   %20 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
@@ -16562,24 +16562,27 @@ define i32 @fa_table_live(ptr nocapture noundef readonly %0, i64 noundef %1, i64
   %27 = mul nsw i64 %26, %1
   %28 = getelementptr inbounds i8, ptr %21, i64 %27
   %29 = load i32, ptr %28, align 1
-  %30 = icmp ne i32 %29, 0
-  %31 = zext i1 %30 to i32
-  br label %41
+  %30 = shl i64 %2, 21
+  %31 = ashr i64 %30, 63
+  %32 = trunc i64 %31 to i32
+  %33 = icmp ne i32 %29, %32
+  %34 = zext i1 %33 to i32
+  br label %44
 
-32:                                               ; preds = %3
-  %33 = load ptr, ptr %0, align 8, !tbaa !320
-  %34 = ashr i64 %1, 5
-  %35 = getelementptr inbounds %struct.TableChunk, ptr %33, i64 %34, i32 1
-  %36 = load i32, ptr %35, align 8, !tbaa !325
-  %37 = trunc i64 %1 to i32
-  %38 = and i32 %37, 31
-  %39 = lshr i32 %36, %38
-  %40 = and i32 %39, 1
-  br label %41
+35:                                               ; preds = %3
+  %36 = load ptr, ptr %0, align 8, !tbaa !320
+  %37 = ashr i64 %1, 5
+  %38 = getelementptr inbounds %struct.TableChunk, ptr %36, i64 %37, i32 1
+  %39 = load i32, ptr %38, align 8, !tbaa !325
+  %40 = trunc i64 %1 to i32
+  %41 = and i32 %40, 31
+  %42 = lshr i32 %39, %41
+  %43 = and i32 %42, 1
+  br label %44
 
-41:                                               ; preds = %32, %19, %14
-  %42 = phi i32 [ %18, %14 ], [ %31, %19 ], [ %40, %32 ]
-  ret i32 %42
+44:                                               ; preds = %35, %19, %14
+  %45 = phi i32 [ %18, %14 ], [ %34, %19 ], [ %43, %35 ]
+  ret i32 %45
 }
 
 ; Function Attrs: alwaysinline nounwind optsize
@@ -16598,7 +16601,7 @@ define i64 @fa_table_find(ptr nocapture noundef readonly %0, i64 noundef %1, ptr
 
 15:                                               ; preds = %12
   %16 = load i32, ptr %2, align 1
-  %17 = icmp eq i32 %16, 0
+  %17 = icmp eq i32 %16, -1
   br i1 %17, label %26, label %18
 
 18:                                               ; preds = %15
@@ -16623,7 +16626,7 @@ define i64 @fa_table_find(ptr nocapture noundef readonly %0, i64 noundef %1, ptr
 33:                                               ; preds = %18, %39
   %34 = phi i32 [ %44, %39 ], [ %24, %18 ]
   %35 = phi i64 [ %41, %39 ], [ %11, %18 ]
-  %36 = icmp eq i32 %34, 0
+  %36 = icmp eq i32 %34, -1
   br i1 %36, label %37, label %39
 
 37:                                               ; preds = %33
@@ -17448,7 +17451,7 @@ define i64 @fa_table_remove(ptr nocapture noundef readonly %0, i64 noundef %1, p
 
 15:                                               ; preds = %12
   %16 = load i32, ptr %2, align 1
-  %17 = icmp eq i32 %16, 0
+  %17 = icmp eq i32 %16, -1
   br i1 %17, label %26, label %18
 
 18:                                               ; preds = %15
@@ -17473,7 +17476,7 @@ define i64 @fa_table_remove(ptr nocapture noundef readonly %0, i64 noundef %1, p
 33:                                               ; preds = %18, %39
   %34 = phi i32 [ %44, %39 ], [ %24, %18 ]
   %35 = phi i64 [ %41, %39 ], [ %11, %18 ]
-  %36 = icmp eq i32 %34, 0
+  %36 = icmp eq i32 %34, -1
   br i1 %36, label %37, label %39
 
 37:                                               ; preds = %33
@@ -18481,11 +18484,14 @@ define internal fastcc void @inline_new_slots(ptr nocapture noundef writeonly %0
   %21 = tail call ptr @fa_alloc(i64 noundef %20, i64 noundef 8) #52
   %22 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
   store ptr %21, ptr %22, align 8, !tbaa !317
-  tail call void @llvm.memset.p0.i64(ptr align 1 %21, i8 0, i64 %20, i1 false)
-  %23 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 5
-  store i64 %19, ptr %23, align 8, !tbaa !323
-  %24 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 2
-  store i64 %9, ptr %24, align 8, !tbaa !329
+  %23 = shl i64 %2, 21
+  %24 = ashr i64 %23, 63
+  %25 = trunc i64 %24 to i8
+  tail call void @llvm.memset.p0.i64(ptr align 1 %21, i8 %25, i64 %20, i1 false)
+  %26 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 5
+  store i64 %19, ptr %26, align 8, !tbaa !323
+  %27 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 2
+  store i64 %9, ptr %27, align 8, !tbaa !329
   ret void
 }
 
@@ -18621,70 +18627,78 @@ define internal fastcc void @inline_grow(ptr nocapture noundef %0, i64 noundef %
   tail call fastcc void @inline_new_slots(ptr noundef %0, i64 noundef %1, i64 noundef %2) #51
   %13 = load i64, ptr %6, align 8, !tbaa !323
   %14 = icmp slt i64 %7, 0
-  %15 = and i64 %2, 4398046511104
-  br i1 %14, label %18, label %16
+  br i1 %14, label %15, label %17
 
-16:                                               ; preds = %3
-  %17 = icmp eq i64 %15, 0
-  br label %20
+15:                                               ; preds = %3
+  %16 = and i64 %2, 4398046511104
+  br label %23
 
-18:                                               ; preds = %42, %3
-  %19 = icmp eq i64 %15, 0
-  br i1 %19, label %52, label %45
+17:                                               ; preds = %3
+  %18 = shl i64 %2, 21
+  %19 = ashr i64 %18, 63
+  %20 = trunc i64 %19 to i32
+  %21 = and i64 %2, 4398046511104
+  %22 = icmp eq i64 %21, 0
+  br label %26
 
-20:                                               ; preds = %16, %42
-  %21 = phi i64 [ 0, %16 ], [ %43, %42 ]
-  %22 = mul nuw nsw i64 %21, %12
-  %23 = getelementptr inbounds i8, ptr %5, i64 %22
-  %24 = load i32, ptr %23, align 1
-  %25 = icmp eq i32 %24, 0
-  br i1 %25, label %42, label %26
+23:                                               ; preds = %48, %15
+  %24 = phi i64 [ %16, %15 ], [ %21, %48 ]
+  %25 = icmp eq i64 %24, 0
+  br i1 %25, label %58, label %51
 
-26:                                               ; preds = %20
-  %27 = zext i32 %24 to i64
-  %28 = mul i64 %27, -7046029254386353131
-  %29 = tail call i64 @llvm.fshl.i64(i64 %28, i64 %28, i64 40)
-  %30 = select i1 %17, i64 %27, i64 %29
-  %31 = load ptr, ptr %4, align 8, !tbaa !317
-  br label %32
+26:                                               ; preds = %17, %48
+  %27 = phi i64 [ 0, %17 ], [ %49, %48 ]
+  %28 = mul nuw nsw i64 %27, %12
+  %29 = getelementptr inbounds i8, ptr %5, i64 %28
+  %30 = load i32, ptr %29, align 1
+  %31 = icmp eq i32 %30, %20
+  br i1 %31, label %48, label %32
 
-32:                                               ; preds = %32, %26
-  %33 = phi i64 [ %30, %26 ], [ %39, %32 ]
-  %34 = and i64 %33, %13
-  %35 = mul nsw i64 %34, %12
-  %36 = getelementptr inbounds i8, ptr %31, i64 %35
-  %37 = load i32, ptr %36, align 1
-  %38 = icmp eq i32 %37, 0
-  %39 = add i64 %34, 1
-  br i1 %38, label %40, label %32, !llvm.loop !331
+32:                                               ; preds = %26
+  %33 = zext i32 %30 to i64
+  %34 = mul i64 %33, -7046029254386353131
+  %35 = tail call i64 @llvm.fshl.i64(i64 %34, i64 %34, i64 40)
+  %36 = select i1 %22, i64 %33, i64 %35
+  %37 = load ptr, ptr %4, align 8, !tbaa !317
+  br label %38
 
-40:                                               ; preds = %32
-  %41 = getelementptr inbounds i8, ptr %31, i64 %35
-  tail call fastcc void @copy_bytes(ptr noundef nonnull %41, ptr noundef nonnull %23, i64 noundef %12) #51
-  br label %42
+38:                                               ; preds = %38, %32
+  %39 = phi i64 [ %36, %32 ], [ %45, %38 ]
+  %40 = and i64 %39, %13
+  %41 = mul nsw i64 %40, %12
+  %42 = getelementptr inbounds i8, ptr %37, i64 %41
+  %43 = load i32, ptr %42, align 1
+  %44 = icmp eq i32 %43, %20
+  %45 = add i64 %40, 1
+  br i1 %44, label %46, label %38, !llvm.loop !331
 
-42:                                               ; preds = %40, %20
-  %43 = add nuw i64 %21, 1
-  %44 = icmp eq i64 %21, %7
-  br i1 %44, label %18, label %20, !llvm.loop !332
+46:                                               ; preds = %38
+  %47 = getelementptr inbounds i8, ptr %37, i64 %41
+  tail call fastcc void @copy_bytes(ptr noundef nonnull %47, ptr noundef nonnull %29, i64 noundef %12) #51
+  br label %48
 
-45:                                               ; preds = %18
-  %46 = load ptr, ptr %4, align 8, !tbaa !317
-  %47 = mul nsw i64 %12, %1
-  %48 = getelementptr inbounds i8, ptr %46, i64 %47
-  %49 = add nsw i64 %7, 1
-  %50 = mul nsw i64 %49, %12
-  %51 = getelementptr inbounds i8, ptr %5, i64 %50
-  tail call fastcc void @copy_bytes(ptr noundef %48, ptr noundef %51, i64 noundef %12) #51
-  br label %52
+48:                                               ; preds = %46, %26
+  %49 = add nuw i64 %27, 1
+  %50 = icmp eq i64 %27, %7
+  br i1 %50, label %23, label %26, !llvm.loop !332
 
-52:                                               ; preds = %45, %18
-  %53 = lshr i64 %2, 42
-  %54 = and i64 %53, 1
-  %55 = add nuw nsw i64 %54, 1
-  %56 = add i64 %55, %7
-  %57 = mul nsw i64 %56, %12
-  tail call void @fa_free(ptr noundef %5, i64 noundef %57, i64 noundef 8) #52
+51:                                               ; preds = %23
+  %52 = load ptr, ptr %4, align 8, !tbaa !317
+  %53 = mul nsw i64 %12, %1
+  %54 = getelementptr inbounds i8, ptr %52, i64 %53
+  %55 = add nsw i64 %7, 1
+  %56 = mul nsw i64 %55, %12
+  %57 = getelementptr inbounds i8, ptr %5, i64 %56
+  tail call fastcc void @copy_bytes(ptr noundef %54, ptr noundef %57, i64 noundef %12) #51
+  br label %58
+
+58:                                               ; preds = %51, %23
+  %59 = lshr i64 %2, 42
+  %60 = and i64 %59, 1
+  %61 = add nuw nsw i64 %60, 1
+  %62 = add i64 %61, %7
+  %63 = mul nsw i64 %62, %12
+  tail call void @fa_free(ptr noundef %5, i64 noundef %63, i64 noundef 8) #52
   ret void
 }
 
@@ -18700,18 +18714,18 @@ define internal fastcc void @table_grow_index(ptr nocapture noundef %0, i64 noun
 
 10:                                               ; preds = %4
   %11 = icmp slt i64 %8, 0
-  br i1 %11, label %212, label %165
+  br i1 %11, label %215, label %168
 
 12:                                               ; preds = %4
   %13 = add i64 %1, -2147483649
   %14 = icmp ult i64 %13, -2147483648
-  br i1 %14, label %15, label %121
+  br i1 %14, label %15, label %124
 
 15:                                               ; preds = %12
   %16 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 2
   %17 = load i64, ptr %16, align 8, !tbaa !329
   %18 = icmp sgt i64 %17, 0
-  br i1 %18, label %19, label %212
+  br i1 %18, label %19, label %215
 
 19:                                               ; preds = %15
   %20 = and i64 %3, 2199023255552
@@ -18724,276 +18738,279 @@ define internal fastcc void @table_grow_index(ptr nocapture noundef %0, i64 noun
   %27 = xor i64 %26, 4
   %28 = and i64 %3, 1099511627775
   %29 = add nuw nsw i64 %27, %28
-  %30 = and i64 %3, 1099511627776
-  %31 = icmp eq i64 %30, 0
-  %32 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 8
-  br label %33
+  %30 = shl i64 %3, 21
+  %31 = ashr i64 %30, 63
+  %32 = trunc i64 %31 to i32
+  %33 = and i64 %3, 1099511627776
+  %34 = icmp eq i64 %33, 0
+  %35 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 8
+  br label %36
 
-33:                                               ; preds = %19, %117
-  %34 = phi i64 [ 0, %19 ], [ %118, %117 ]
-  br i1 %21, label %51, label %35
+36:                                               ; preds = %19, %120
+  %37 = phi i64 [ 0, %19 ], [ %121, %120 ]
+  br i1 %21, label %54, label %38
 
-35:                                               ; preds = %33
-  br i1 %23, label %44, label %36
+38:                                               ; preds = %36
+  br i1 %23, label %47, label %39
 
-36:                                               ; preds = %35
-  %37 = load i64, ptr %7, align 8, !tbaa !323
-  %38 = add nsw i64 %37, 1
-  %39 = icmp eq i64 %38, %34
-  br i1 %39, label %40, label %44
+39:                                               ; preds = %38
+  %40 = load i64, ptr %7, align 8, !tbaa !323
+  %41 = add nsw i64 %40, 1
+  %42 = icmp eq i64 %41, %37
+  br i1 %42, label %43, label %47
 
-40:                                               ; preds = %36
-  %41 = load i64, ptr %24, align 8, !tbaa !324
-  %42 = icmp ne i64 %41, 0
-  %43 = zext i1 %42 to i32
-  br label %60
+43:                                               ; preds = %39
+  %44 = load i64, ptr %24, align 8, !tbaa !324
+  %45 = icmp ne i64 %44, 0
+  %46 = zext i1 %45 to i32
+  br label %63
 
-44:                                               ; preds = %36, %35
-  %45 = load ptr, ptr %5, align 8, !tbaa !317
-  %46 = mul nsw i64 %34, %29
-  %47 = getelementptr inbounds i8, ptr %45, i64 %46
-  %48 = load i32, ptr %47, align 1
-  %49 = icmp ne i32 %48, 0
-  %50 = zext i1 %49 to i32
-  br label %60
+47:                                               ; preds = %39, %38
+  %48 = load ptr, ptr %5, align 8, !tbaa !317
+  %49 = mul nsw i64 %37, %29
+  %50 = getelementptr inbounds i8, ptr %48, i64 %49
+  %51 = load i32, ptr %50, align 1
+  %52 = icmp ne i32 %51, %32
+  %53 = zext i1 %52 to i32
+  br label %63
 
-51:                                               ; preds = %33
-  %52 = load ptr, ptr %0, align 8, !tbaa !320
-  %53 = lshr i64 %34, 5
-  %54 = getelementptr inbounds %struct.TableChunk, ptr %52, i64 %53, i32 1
-  %55 = load i32, ptr %54, align 8, !tbaa !325
-  %56 = trunc i64 %34 to i32
-  %57 = and i32 %56, 31
-  %58 = lshr i32 %55, %57
-  %59 = and i32 %58, 1
-  br label %60
+54:                                               ; preds = %36
+  %55 = load ptr, ptr %0, align 8, !tbaa !320
+  %56 = lshr i64 %37, 5
+  %57 = getelementptr inbounds %struct.TableChunk, ptr %55, i64 %56, i32 1
+  %58 = load i32, ptr %57, align 8, !tbaa !325
+  %59 = trunc i64 %37 to i32
+  %60 = and i32 %59, 31
+  %61 = lshr i32 %58, %60
+  %62 = and i32 %61, 1
+  br label %63
 
-60:                                               ; preds = %40, %44, %51
-  %61 = phi i32 [ %43, %40 ], [ %50, %44 ], [ %59, %51 ]
-  %62 = icmp eq i32 %61, 0
-  br i1 %62, label %117, label %63
+63:                                               ; preds = %43, %47, %54
+  %64 = phi i32 [ %46, %43 ], [ %53, %47 ], [ %62, %54 ]
+  %65 = icmp eq i32 %64, 0
+  br i1 %65, label %120, label %66
 
-63:                                               ; preds = %60
-  br i1 %31, label %68, label %64
+66:                                               ; preds = %63
+  br i1 %34, label %71, label %67
 
-64:                                               ; preds = %63
-  %65 = load ptr, ptr %32, align 8, !tbaa !319
-  %66 = mul nsw i64 %34, %28
-  %67 = getelementptr inbounds i8, ptr %65, i64 %66
-  br label %76
+67:                                               ; preds = %66
+  %68 = load ptr, ptr %35, align 8, !tbaa !319
+  %69 = mul nsw i64 %37, %28
+  %70 = getelementptr inbounds i8, ptr %68, i64 %69
+  br label %79
 
-68:                                               ; preds = %63
-  %69 = load ptr, ptr %0, align 8, !tbaa !320
-  %70 = lshr i64 %34, 5
-  %71 = getelementptr inbounds %struct.TableChunk, ptr %69, i64 %70
-  %72 = load ptr, ptr %71, align 8, !tbaa !321
-  %73 = and i64 %34, 31
-  %74 = mul nsw i64 %73, %3
-  %75 = getelementptr inbounds i8, ptr %72, i64 %74
-  br label %76
+71:                                               ; preds = %66
+  %72 = load ptr, ptr %0, align 8, !tbaa !320
+  %73 = lshr i64 %37, 5
+  %74 = getelementptr inbounds %struct.TableChunk, ptr %72, i64 %73
+  %75 = load ptr, ptr %74, align 8, !tbaa !321
+  %76 = and i64 %37, 31
+  %77 = mul nsw i64 %76, %3
+  %78 = getelementptr inbounds i8, ptr %75, i64 %77
+  br label %79
 
-76:                                               ; preds = %64, %68
-  %77 = phi ptr [ %67, %64 ], [ %75, %68 ]
-  %78 = tail call i64 %2(ptr noundef %77) #52
-  %79 = load i64, ptr %7, align 8, !tbaa !323
-  %80 = icmp ugt i64 %79, 2147483647
-  %81 = load ptr, ptr %5, align 8, !tbaa !317
-  %82 = and i64 %79, %78
-  br i1 %80, label %101, label %83
+79:                                               ; preds = %67, %71
+  %80 = phi ptr [ %70, %67 ], [ %78, %71 ]
+  %81 = tail call i64 %2(ptr noundef %80) #52
+  %82 = load i64, ptr %7, align 8, !tbaa !323
+  %83 = icmp ugt i64 %82, 2147483647
+  %84 = load ptr, ptr %5, align 8, !tbaa !317
+  %85 = and i64 %82, %81
+  br i1 %83, label %104, label %86
 
-83:                                               ; preds = %76
-  %84 = getelementptr inbounds i64, ptr %81, i64 %82
-  %85 = load i64, ptr %84, align 8, !tbaa !8
-  %86 = icmp eq i64 %85, 0
-  br i1 %86, label %94, label %87
+86:                                               ; preds = %79
+  %87 = getelementptr inbounds i64, ptr %84, i64 %85
+  %88 = load i64, ptr %87, align 8, !tbaa !8
+  %89 = icmp eq i64 %88, 0
+  br i1 %89, label %97, label %90
 
-87:                                               ; preds = %83, %87
-  %88 = phi i64 [ %90, %87 ], [ %82, %83 ]
-  %89 = add nsw i64 %88, 1
-  %90 = and i64 %89, %79
-  %91 = getelementptr inbounds i64, ptr %81, i64 %90
-  %92 = load i64, ptr %91, align 8, !tbaa !8
-  %93 = icmp eq i64 %92, 0
-  br i1 %93, label %94, label %87, !llvm.loop !333
+90:                                               ; preds = %86, %90
+  %91 = phi i64 [ %93, %90 ], [ %85, %86 ]
+  %92 = add nsw i64 %91, 1
+  %93 = and i64 %92, %82
+  %94 = getelementptr inbounds i64, ptr %84, i64 %93
+  %95 = load i64, ptr %94, align 8, !tbaa !8
+  %96 = icmp eq i64 %95, 0
+  br i1 %96, label %97, label %90, !llvm.loop !333
 
-94:                                               ; preds = %87, %83
-  %95 = phi i64 [ %82, %83 ], [ %90, %87 ]
-  %96 = getelementptr inbounds i64, ptr %81, i64 %95
-  %97 = and i64 %78, 4294967295
-  %98 = shl i64 %34, 32
-  %99 = add i64 %98, 4294967296
-  %100 = or disjoint i64 %97, %99
-  store i64 %100, ptr %96, align 8, !tbaa !8
-  br label %117
+97:                                               ; preds = %90, %86
+  %98 = phi i64 [ %85, %86 ], [ %93, %90 ]
+  %99 = getelementptr inbounds i64, ptr %84, i64 %98
+  %100 = and i64 %81, 4294967295
+  %101 = shl i64 %37, 32
+  %102 = add i64 %101, 4294967296
+  %103 = or disjoint i64 %100, %102
+  store i64 %103, ptr %99, align 8, !tbaa !8
+  br label %120
 
-101:                                              ; preds = %76
-  %102 = getelementptr inbounds %struct.WideSlot, ptr %81, i64 %82, i32 1
-  %103 = load i64, ptr %102, align 8, !tbaa !334
-  %104 = icmp eq i64 %103, 0
-  br i1 %104, label %112, label %105
+104:                                              ; preds = %79
+  %105 = getelementptr inbounds %struct.WideSlot, ptr %84, i64 %85, i32 1
+  %106 = load i64, ptr %105, align 8, !tbaa !334
+  %107 = icmp eq i64 %106, 0
+  br i1 %107, label %115, label %108
 
-105:                                              ; preds = %101, %105
-  %106 = phi i64 [ %108, %105 ], [ %82, %101 ]
-  %107 = add i64 %106, 1
-  %108 = and i64 %107, %79
-  %109 = getelementptr inbounds %struct.WideSlot, ptr %81, i64 %108, i32 1
-  %110 = load i64, ptr %109, align 8, !tbaa !334
-  %111 = icmp eq i64 %110, 0
-  br i1 %111, label %112, label %105, !llvm.loop !335
+108:                                              ; preds = %104, %108
+  %109 = phi i64 [ %111, %108 ], [ %85, %104 ]
+  %110 = add i64 %109, 1
+  %111 = and i64 %110, %82
+  %112 = getelementptr inbounds %struct.WideSlot, ptr %84, i64 %111, i32 1
+  %113 = load i64, ptr %112, align 8, !tbaa !334
+  %114 = icmp eq i64 %113, 0
+  br i1 %114, label %115, label %108, !llvm.loop !335
 
-112:                                              ; preds = %105, %101
-  %113 = phi i64 [ %82, %101 ], [ %108, %105 ]
-  %114 = phi ptr [ %102, %101 ], [ %109, %105 ]
-  %115 = getelementptr inbounds %struct.WideSlot, ptr %81, i64 %113
-  store i64 %78, ptr %115, align 8, !tbaa !304
-  %116 = add nuw nsw i64 %34, 1
-  store i64 %116, ptr %114, align 8, !tbaa !334
-  br label %117
+115:                                              ; preds = %108, %104
+  %116 = phi i64 [ %85, %104 ], [ %111, %108 ]
+  %117 = phi ptr [ %105, %104 ], [ %112, %108 ]
+  %118 = getelementptr inbounds %struct.WideSlot, ptr %84, i64 %116
+  store i64 %81, ptr %118, align 8, !tbaa !304
+  %119 = add nuw nsw i64 %37, 1
+  store i64 %119, ptr %117, align 8, !tbaa !334
+  br label %120
 
-117:                                              ; preds = %112, %94, %60
-  %118 = add nuw nsw i64 %34, 1
-  %119 = load i64, ptr %16, align 8, !tbaa !329
-  %120 = icmp slt i64 %118, %119
-  br i1 %120, label %33, label %212, !llvm.loop !336
+120:                                              ; preds = %115, %97, %63
+  %121 = add nuw nsw i64 %37, 1
+  %122 = load i64, ptr %16, align 8, !tbaa !329
+  %123 = icmp slt i64 %121, %122
+  br i1 %123, label %36, label %215, !llvm.loop !336
 
-121:                                              ; preds = %12, %162
-  %122 = phi i64 [ %163, %162 ], [ 0, %12 ]
-  %123 = getelementptr inbounds i64, ptr %6, i64 %122
-  %124 = load i64, ptr %123, align 8, !tbaa !8
-  %125 = icmp eq i64 %124, 0
-  br i1 %125, label %162, label %126
+124:                                              ; preds = %12, %165
+  %125 = phi i64 [ %166, %165 ], [ 0, %12 ]
+  %126 = getelementptr inbounds i64, ptr %6, i64 %125
+  %127 = load i64, ptr %126, align 8, !tbaa !8
+  %128 = icmp eq i64 %127, 0
+  br i1 %128, label %165, label %129
 
-126:                                              ; preds = %121
-  %127 = and i64 %124, 4294967295
-  %128 = lshr i64 %124, 32
-  %129 = load i64, ptr %7, align 8, !tbaa !323
-  %130 = icmp ugt i64 %129, 2147483647
-  %131 = load ptr, ptr %5, align 8, !tbaa !317
-  %132 = and i64 %129, %127
-  br i1 %130, label %147, label %133
+129:                                              ; preds = %124
+  %130 = and i64 %127, 4294967295
+  %131 = lshr i64 %127, 32
+  %132 = load i64, ptr %7, align 8, !tbaa !323
+  %133 = icmp ugt i64 %132, 2147483647
+  %134 = load ptr, ptr %5, align 8, !tbaa !317
+  %135 = and i64 %132, %130
+  br i1 %133, label %150, label %136
 
-133:                                              ; preds = %126
-  %134 = getelementptr inbounds i64, ptr %131, i64 %132
-  %135 = load i64, ptr %134, align 8, !tbaa !8
-  %136 = icmp eq i64 %135, 0
-  br i1 %136, label %144, label %137
+136:                                              ; preds = %129
+  %137 = getelementptr inbounds i64, ptr %134, i64 %135
+  %138 = load i64, ptr %137, align 8, !tbaa !8
+  %139 = icmp eq i64 %138, 0
+  br i1 %139, label %147, label %140
 
-137:                                              ; preds = %133, %137
-  %138 = phi i64 [ %140, %137 ], [ %132, %133 ]
-  %139 = add nsw i64 %138, 1
-  %140 = and i64 %139, %129
-  %141 = getelementptr inbounds i64, ptr %131, i64 %140
-  %142 = load i64, ptr %141, align 8, !tbaa !8
-  %143 = icmp eq i64 %142, 0
-  br i1 %143, label %144, label %137, !llvm.loop !333
+140:                                              ; preds = %136, %140
+  %141 = phi i64 [ %143, %140 ], [ %135, %136 ]
+  %142 = add nsw i64 %141, 1
+  %143 = and i64 %142, %132
+  %144 = getelementptr inbounds i64, ptr %134, i64 %143
+  %145 = load i64, ptr %144, align 8, !tbaa !8
+  %146 = icmp eq i64 %145, 0
+  br i1 %146, label %147, label %140, !llvm.loop !333
 
-144:                                              ; preds = %137, %133
-  %145 = phi i64 [ %132, %133 ], [ %140, %137 ]
-  %146 = getelementptr inbounds i64, ptr %131, i64 %145
-  store i64 %124, ptr %146, align 8, !tbaa !8
-  br label %162
+147:                                              ; preds = %140, %136
+  %148 = phi i64 [ %135, %136 ], [ %143, %140 ]
+  %149 = getelementptr inbounds i64, ptr %134, i64 %148
+  store i64 %127, ptr %149, align 8, !tbaa !8
+  br label %165
 
-147:                                              ; preds = %126
-  %148 = getelementptr inbounds %struct.WideSlot, ptr %131, i64 %132, i32 1
-  %149 = load i64, ptr %148, align 8, !tbaa !334
-  %150 = icmp eq i64 %149, 0
-  br i1 %150, label %158, label %151
+150:                                              ; preds = %129
+  %151 = getelementptr inbounds %struct.WideSlot, ptr %134, i64 %135, i32 1
+  %152 = load i64, ptr %151, align 8, !tbaa !334
+  %153 = icmp eq i64 %152, 0
+  br i1 %153, label %161, label %154
 
-151:                                              ; preds = %147, %151
-  %152 = phi i64 [ %154, %151 ], [ %132, %147 ]
-  %153 = add i64 %152, 1
-  %154 = and i64 %153, %129
-  %155 = getelementptr inbounds %struct.WideSlot, ptr %131, i64 %154, i32 1
-  %156 = load i64, ptr %155, align 8, !tbaa !334
-  %157 = icmp eq i64 %156, 0
-  br i1 %157, label %158, label %151, !llvm.loop !335
+154:                                              ; preds = %150, %154
+  %155 = phi i64 [ %157, %154 ], [ %135, %150 ]
+  %156 = add i64 %155, 1
+  %157 = and i64 %156, %132
+  %158 = getelementptr inbounds %struct.WideSlot, ptr %134, i64 %157, i32 1
+  %159 = load i64, ptr %158, align 8, !tbaa !334
+  %160 = icmp eq i64 %159, 0
+  br i1 %160, label %161, label %154, !llvm.loop !335
 
-158:                                              ; preds = %151, %147
-  %159 = phi i64 [ %132, %147 ], [ %154, %151 ]
-  %160 = phi ptr [ %148, %147 ], [ %155, %151 ]
-  %161 = getelementptr inbounds %struct.WideSlot, ptr %131, i64 %159
-  store i64 %127, ptr %161, align 8, !tbaa !304
-  store i64 %128, ptr %160, align 8, !tbaa !334
-  br label %162
+161:                                              ; preds = %154, %150
+  %162 = phi i64 [ %135, %150 ], [ %157, %154 ]
+  %163 = phi ptr [ %151, %150 ], [ %158, %154 ]
+  %164 = getelementptr inbounds %struct.WideSlot, ptr %134, i64 %162
+  store i64 %130, ptr %164, align 8, !tbaa !304
+  store i64 %131, ptr %163, align 8, !tbaa !334
+  br label %165
 
-162:                                              ; preds = %158, %144, %121
-  %163 = add nuw i64 %122, 1
-  %164 = icmp eq i64 %122, %8
-  br i1 %164, label %212, label %121, !llvm.loop !337
+165:                                              ; preds = %161, %147, %124
+  %166 = add nuw i64 %125, 1
+  %167 = icmp eq i64 %125, %8
+  br i1 %167, label %215, label %124, !llvm.loop !337
 
-165:                                              ; preds = %10, %209
-  %166 = phi i64 [ %210, %209 ], [ 0, %10 ]
-  %167 = getelementptr inbounds %struct.WideSlot, ptr %6, i64 %166, i32 1
-  %168 = load i64, ptr %167, align 8, !tbaa !334
-  %169 = icmp eq i64 %168, 0
-  br i1 %169, label %209, label %170
+168:                                              ; preds = %10, %212
+  %169 = phi i64 [ %213, %212 ], [ 0, %10 ]
+  %170 = getelementptr inbounds %struct.WideSlot, ptr %6, i64 %169, i32 1
+  %171 = load i64, ptr %170, align 8, !tbaa !334
+  %172 = icmp eq i64 %171, 0
+  br i1 %172, label %212, label %173
 
-170:                                              ; preds = %165
-  %171 = getelementptr inbounds %struct.WideSlot, ptr %6, i64 %166
-  %172 = load i64, ptr %171, align 8, !tbaa !304
-  %173 = load i64, ptr %7, align 8, !tbaa !323
-  %174 = icmp ugt i64 %173, 2147483647
-  %175 = load ptr, ptr %5, align 8, !tbaa !317
-  %176 = and i64 %173, %172
-  br i1 %174, label %194, label %177
+173:                                              ; preds = %168
+  %174 = getelementptr inbounds %struct.WideSlot, ptr %6, i64 %169
+  %175 = load i64, ptr %174, align 8, !tbaa !304
+  %176 = load i64, ptr %7, align 8, !tbaa !323
+  %177 = icmp ugt i64 %176, 2147483647
+  %178 = load ptr, ptr %5, align 8, !tbaa !317
+  %179 = and i64 %176, %175
+  br i1 %177, label %197, label %180
 
-177:                                              ; preds = %170
-  %178 = getelementptr inbounds i64, ptr %175, i64 %176
-  %179 = load i64, ptr %178, align 8, !tbaa !8
-  %180 = icmp eq i64 %179, 0
-  br i1 %180, label %188, label %181
+180:                                              ; preds = %173
+  %181 = getelementptr inbounds i64, ptr %178, i64 %179
+  %182 = load i64, ptr %181, align 8, !tbaa !8
+  %183 = icmp eq i64 %182, 0
+  br i1 %183, label %191, label %184
 
-181:                                              ; preds = %177, %181
-  %182 = phi i64 [ %184, %181 ], [ %176, %177 ]
-  %183 = add nsw i64 %182, 1
-  %184 = and i64 %183, %173
-  %185 = getelementptr inbounds i64, ptr %175, i64 %184
-  %186 = load i64, ptr %185, align 8, !tbaa !8
-  %187 = icmp eq i64 %186, 0
-  br i1 %187, label %188, label %181, !llvm.loop !333
+184:                                              ; preds = %180, %184
+  %185 = phi i64 [ %187, %184 ], [ %179, %180 ]
+  %186 = add nsw i64 %185, 1
+  %187 = and i64 %186, %176
+  %188 = getelementptr inbounds i64, ptr %178, i64 %187
+  %189 = load i64, ptr %188, align 8, !tbaa !8
+  %190 = icmp eq i64 %189, 0
+  br i1 %190, label %191, label %184, !llvm.loop !333
 
-188:                                              ; preds = %181, %177
-  %189 = phi i64 [ %176, %177 ], [ %184, %181 ]
-  %190 = getelementptr inbounds i64, ptr %175, i64 %189
-  %191 = and i64 %172, 4294967295
-  %192 = shl i64 %168, 32
-  %193 = or disjoint i64 %191, %192
-  store i64 %193, ptr %190, align 8, !tbaa !8
-  br label %209
+191:                                              ; preds = %184, %180
+  %192 = phi i64 [ %179, %180 ], [ %187, %184 ]
+  %193 = getelementptr inbounds i64, ptr %178, i64 %192
+  %194 = and i64 %175, 4294967295
+  %195 = shl i64 %171, 32
+  %196 = or disjoint i64 %194, %195
+  store i64 %196, ptr %193, align 8, !tbaa !8
+  br label %212
 
-194:                                              ; preds = %170
-  %195 = getelementptr inbounds %struct.WideSlot, ptr %175, i64 %176, i32 1
-  %196 = load i64, ptr %195, align 8, !tbaa !334
-  %197 = icmp eq i64 %196, 0
-  br i1 %197, label %205, label %198
+197:                                              ; preds = %173
+  %198 = getelementptr inbounds %struct.WideSlot, ptr %178, i64 %179, i32 1
+  %199 = load i64, ptr %198, align 8, !tbaa !334
+  %200 = icmp eq i64 %199, 0
+  br i1 %200, label %208, label %201
 
-198:                                              ; preds = %194, %198
-  %199 = phi i64 [ %201, %198 ], [ %176, %194 ]
-  %200 = add i64 %199, 1
-  %201 = and i64 %200, %173
-  %202 = getelementptr inbounds %struct.WideSlot, ptr %175, i64 %201, i32 1
-  %203 = load i64, ptr %202, align 8, !tbaa !334
-  %204 = icmp eq i64 %203, 0
-  br i1 %204, label %205, label %198, !llvm.loop !335
+201:                                              ; preds = %197, %201
+  %202 = phi i64 [ %204, %201 ], [ %179, %197 ]
+  %203 = add i64 %202, 1
+  %204 = and i64 %203, %176
+  %205 = getelementptr inbounds %struct.WideSlot, ptr %178, i64 %204, i32 1
+  %206 = load i64, ptr %205, align 8, !tbaa !334
+  %207 = icmp eq i64 %206, 0
+  br i1 %207, label %208, label %201, !llvm.loop !335
 
-205:                                              ; preds = %198, %194
-  %206 = phi i64 [ %176, %194 ], [ %201, %198 ]
-  %207 = phi ptr [ %195, %194 ], [ %202, %198 ]
-  %208 = getelementptr inbounds %struct.WideSlot, ptr %175, i64 %206
-  store i64 %172, ptr %208, align 8, !tbaa !304
-  store i64 %168, ptr %207, align 8, !tbaa !334
-  br label %209
+208:                                              ; preds = %201, %197
+  %209 = phi i64 [ %179, %197 ], [ %204, %201 ]
+  %210 = phi ptr [ %198, %197 ], [ %205, %201 ]
+  %211 = getelementptr inbounds %struct.WideSlot, ptr %178, i64 %209
+  store i64 %175, ptr %211, align 8, !tbaa !304
+  store i64 %171, ptr %210, align 8, !tbaa !334
+  br label %212
 
-209:                                              ; preds = %205, %188, %165
-  %210 = add nuw i64 %166, 1
-  %211 = icmp eq i64 %166, %8
-  br i1 %211, label %212, label %165, !llvm.loop !338
+212:                                              ; preds = %208, %191, %168
+  %213 = add nuw i64 %169, 1
+  %214 = icmp eq i64 %169, %8
+  br i1 %214, label %215, label %168, !llvm.loop !338
 
-212:                                              ; preds = %162, %117, %209, %15, %10
-  %213 = phi i64 [ 3, %15 ], [ 4, %10 ], [ 4, %209 ], [ 3, %117 ], [ 3, %162 ]
-  %214 = add nsw i64 %8, 1
-  %215 = shl i64 %214, %213
-  tail call void @fa_free(ptr noundef %6, i64 noundef %215, i64 noundef 8) #52
+215:                                              ; preds = %165, %120, %212, %15, %10
+  %216 = phi i64 [ 3, %15 ], [ 4, %10 ], [ 4, %212 ], [ 3, %120 ], [ 3, %165 ]
+  %217 = add nsw i64 %8, 1
+  %218 = shl i64 %217, %216
+  tail call void @fa_free(ptr noundef %6, i64 noundef %218, i64 noundef 8) #52
   ret void
 }
 
@@ -19055,276 +19072,279 @@ define internal fastcc void @table_dense_room(ptr nocapture noundef %0, i64 noun
 }
 
 ; Function Attrs: alwaysinline nounwind optsize
-define ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3, ptr nocapture noundef readonly %4) local_unnamed_addr #17 {
-  %6 = and i64 %2, 2199023255552
-  %7 = icmp eq i64 %6, 0
-  %8 = tail call i64 @llvm.smin.i64(i64 %3, i64 0)
-  %9 = xor i64 %8, -1
-  %10 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
-  %11 = load i64, ptr %10, align 8, !tbaa !330
-  %12 = shl i64 %11, 1
-  %13 = add i64 %12, 2
-  %14 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 5
-  %15 = load i64, ptr %14, align 8, !tbaa !323
-  %16 = add nsw i64 %15, 1
-  %17 = icmp sgt i64 %13, %16
-  br i1 %7, label %100, label %18
+define ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3, i32 noundef %4, ptr nocapture noundef readonly %5) local_unnamed_addr #17 {
+  %7 = and i64 %2, 2199023255552
+  %8 = icmp eq i64 %7, 0
+  %9 = tail call i64 @llvm.smin.i64(i64 %3, i64 0)
+  %10 = xor i64 %9, -1
+  %11 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
+  %12 = load i64, ptr %11, align 8, !tbaa !330
+  %13 = shl i64 %12, 1
+  %14 = add i64 %13, 2
+  %15 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 5
+  %16 = load i64, ptr %15, align 8, !tbaa !323
+  %17 = add nsw i64 %16, 1
+  %18 = icmp sgt i64 %14, %17
+  br i1 %8, label %104, label %19
 
-18:                                               ; preds = %5
-  br i1 %17, label %24, label %19, !prof !87
+19:                                               ; preds = %6
+  br i1 %18, label %25, label %20, !prof !87
 
-19:                                               ; preds = %18
-  %20 = and i64 %2, 4398046511104
-  %21 = icmp ne i64 %20, 0
-  %22 = icmp eq i64 %1, 0
-  %23 = and i1 %22, %21
-  br i1 %23, label %36, label %50
+20:                                               ; preds = %19
+  %21 = and i64 %2, 4398046511104
+  %22 = icmp ne i64 %21, 0
+  %23 = icmp eq i32 %4, -1
+  %24 = and i1 %22, %23
+  br i1 %24, label %37, label %51
 
-24:                                               ; preds = %18
-  %25 = shl nsw i64 %16, 1
-  tail call fastcc void @inline_grow(ptr noundef nonnull %0, i64 noundef %25, i64 noundef %2) #56
-  %26 = and i64 %2, 4398046511104
-  %27 = icmp ne i64 %26, 0
-  %28 = icmp eq i64 %1, 0
-  %29 = and i1 %28, %27
-  br i1 %29, label %30, label %34
+25:                                               ; preds = %19
+  %26 = shl nsw i64 %17, 1
+  tail call fastcc void @inline_grow(ptr noundef nonnull %0, i64 noundef %26, i64 noundef %2) #56
+  %27 = and i64 %2, 4398046511104
+  %28 = icmp ne i64 %27, 0
+  %29 = icmp eq i32 %4, -1
+  %30 = and i1 %28, %29
+  br i1 %30, label %31, label %35
 
-30:                                               ; preds = %24
-  %31 = load i64, ptr %10, align 8, !tbaa !330
-  %32 = load i64, ptr %14, align 8, !tbaa !323
-  %33 = add nsw i64 %32, 1
-  br label %36
+31:                                               ; preds = %25
+  %32 = load i64, ptr %11, align 8, !tbaa !330
+  %33 = load i64, ptr %15, align 8, !tbaa !323
+  %34 = add nsw i64 %33, 1
+  br label %37
 
-34:                                               ; preds = %24
-  %35 = load i64, ptr %14, align 8, !tbaa !323
-  br label %62
+35:                                               ; preds = %25
+  %36 = load i64, ptr %15, align 8, !tbaa !323
+  br label %63
 
-36:                                               ; preds = %30, %19
-  %37 = phi i64 [ %33, %30 ], [ %16, %19 ]
-  %38 = phi i64 [ %31, %30 ], [ %11, %19 ]
-  %39 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 3
-  store i64 1, ptr %39, align 8, !tbaa !324
-  %40 = add nsw i64 %38, 1
-  store i64 %40, ptr %10, align 8, !tbaa !330
-  %41 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
-  %42 = load ptr, ptr %41, align 8, !tbaa !317
-  %43 = lshr i64 %2, 40
-  %44 = and i64 %43, 4
-  %45 = xor i64 %44, 4
-  %46 = and i64 %2, 1099511627775
-  %47 = add nuw nsw i64 %45, %46
-  %48 = mul nsw i64 %37, %47
-  %49 = getelementptr inbounds i8, ptr %42, i64 %48
-  br label %194
+37:                                               ; preds = %31, %20
+  %38 = phi i64 [ %34, %31 ], [ %17, %20 ]
+  %39 = phi i64 [ %32, %31 ], [ %12, %20 ]
+  %40 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 3
+  store i64 1, ptr %40, align 8, !tbaa !324
+  %41 = add nsw i64 %39, 1
+  store i64 %41, ptr %11, align 8, !tbaa !330
+  %42 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
+  %43 = load ptr, ptr %42, align 8, !tbaa !317
+  %44 = lshr i64 %2, 40
+  %45 = and i64 %44, 4
+  %46 = xor i64 %45, 4
+  %47 = and i64 %2, 1099511627775
+  %48 = add nuw nsw i64 %46, %47
+  %49 = mul nsw i64 %38, %48
+  %50 = getelementptr inbounds i8, ptr %43, i64 %49
+  br label %198
 
-50:                                               ; preds = %19
-  %51 = icmp sgt i64 %3, -1
-  br i1 %51, label %62, label %52
+51:                                               ; preds = %20
+  %52 = icmp sgt i64 %3, -1
+  br i1 %52, label %63, label %53
 
-52:                                               ; preds = %50
-  %53 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
-  %54 = load ptr, ptr %53, align 8, !tbaa !317
-  %55 = lshr i64 %2, 40
-  %56 = and i64 %55, 4
-  %57 = xor i64 %56, 4
-  %58 = and i64 %2, 1099511627775
-  %59 = add nuw nsw i64 %57, %58
-  %60 = mul nsw i64 %59, %9
-  %61 = getelementptr inbounds i8, ptr %54, i64 %60
-  br i1 %21, label %94, label %88
+53:                                               ; preds = %51
+  %54 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
+  %55 = load ptr, ptr %54, align 8, !tbaa !317
+  %56 = lshr i64 %2, 40
+  %57 = and i64 %56, 4
+  %58 = xor i64 %57, 4
+  %59 = and i64 %2, 1099511627775
+  %60 = add nuw nsw i64 %58, %59
+  %61 = mul nsw i64 %60, %10
+  %62 = getelementptr inbounds i8, ptr %55, i64 %61
+  br i1 %22, label %98, label %92
 
-62:                                               ; preds = %34, %50
-  %63 = phi i64 [ %15, %50 ], [ %35, %34 ]
-  %64 = phi i1 [ %21, %50 ], [ %27, %34 ]
-  %65 = and i64 %63, %1
-  %66 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
-  %67 = load ptr, ptr %66, align 8, !tbaa !317
-  %68 = lshr i64 %2, 40
-  %69 = and i64 %68, 4
-  %70 = xor i64 %69, 4
-  %71 = and i64 %2, 1099511627775
-  %72 = add nuw nsw i64 %70, %71
-  %73 = mul nsw i64 %65, %72
-  %74 = getelementptr inbounds i8, ptr %67, i64 %73
-  %75 = load i32, ptr %74, align 1
-  %76 = icmp eq i32 %75, 0
-  br i1 %76, label %85, label %77
+63:                                               ; preds = %35, %51
+  %64 = phi i64 [ %16, %51 ], [ %36, %35 ]
+  %65 = phi i1 [ %22, %51 ], [ %28, %35 ]
+  %66 = and i64 %64, %1
+  %67 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
+  %68 = load ptr, ptr %67, align 8, !tbaa !317
+  %69 = lshr i64 %2, 40
+  %70 = and i64 %69, 4
+  %71 = xor i64 %70, 4
+  %72 = and i64 %2, 1099511627775
+  %73 = add nuw nsw i64 %71, %72
+  %74 = shl i64 %2, 21
+  %75 = ashr i64 %74, 63
+  %76 = trunc i64 %75 to i32
+  %77 = mul nsw i64 %66, %73
+  %78 = getelementptr inbounds i8, ptr %68, i64 %77
+  %79 = load i32, ptr %78, align 1
+  %80 = icmp eq i32 %79, %76
+  br i1 %80, label %89, label %81
 
-77:                                               ; preds = %62, %77
-  %78 = phi i64 [ %80, %77 ], [ %65, %62 ]
-  %79 = add i64 %78, 1
-  %80 = and i64 %79, %63
-  %81 = mul nsw i64 %80, %72
-  %82 = getelementptr inbounds i8, ptr %67, i64 %81
-  %83 = load i32, ptr %82, align 1
-  %84 = icmp eq i32 %83, 0
-  br i1 %84, label %85, label %77, !llvm.loop !339
+81:                                               ; preds = %63, %81
+  %82 = phi i64 [ %84, %81 ], [ %66, %63 ]
+  %83 = add i64 %82, 1
+  %84 = and i64 %83, %64
+  %85 = mul nsw i64 %84, %73
+  %86 = getelementptr inbounds i8, ptr %68, i64 %85
+  %87 = load i32, ptr %86, align 1
+  %88 = icmp eq i32 %87, %76
+  br i1 %88, label %89, label %81, !llvm.loop !339
 
-85:                                               ; preds = %77, %62
-  %86 = phi i64 [ %73, %62 ], [ %81, %77 ]
-  %87 = getelementptr inbounds i8, ptr %67, i64 %86
-  br i1 %64, label %94, label %88
+89:                                               ; preds = %81, %63
+  %90 = phi i64 [ %77, %63 ], [ %85, %81 ]
+  %91 = getelementptr inbounds i8, ptr %68, i64 %90
+  br i1 %65, label %98, label %92
 
-88:                                               ; preds = %52, %85
-  %89 = phi ptr [ %61, %52 ], [ %87, %85 ]
-  %90 = phi i64 [ %57, %52 ], [ %70, %85 ]
-  %91 = trunc i64 %1 to i32
-  %92 = icmp eq i32 %91, 0
-  %93 = select i1 %92, i32 -2147483648, i32 %91
-  store i32 %93, ptr %89, align 1
-  br label %94
+92:                                               ; preds = %53, %89
+  %93 = phi ptr [ %62, %53 ], [ %91, %89 ]
+  %94 = phi i64 [ %58, %53 ], [ %71, %89 ]
+  %95 = trunc i64 %1 to i32
+  %96 = icmp eq i32 %95, 0
+  %97 = select i1 %96, i32 -2147483648, i32 %95
+  store i32 %97, ptr %93, align 1
+  br label %98
 
-94:                                               ; preds = %52, %88, %85
-  %95 = phi ptr [ %61, %52 ], [ %89, %88 ], [ %87, %85 ]
-  %96 = phi i64 [ %57, %52 ], [ %90, %88 ], [ %70, %85 ]
-  %97 = load i64, ptr %10, align 8, !tbaa !330
-  %98 = add nsw i64 %97, 1
-  store i64 %98, ptr %10, align 8, !tbaa !330
-  %99 = getelementptr inbounds i8, ptr %95, i64 %96
-  br label %194
+98:                                               ; preds = %53, %92, %89
+  %99 = phi ptr [ %62, %53 ], [ %93, %92 ], [ %91, %89 ]
+  %100 = phi i64 [ %58, %53 ], [ %94, %92 ], [ %71, %89 ]
+  %101 = load i64, ptr %11, align 8, !tbaa !330
+  %102 = add nsw i64 %101, 1
+  store i64 %102, ptr %11, align 8, !tbaa !330
+  %103 = getelementptr inbounds i8, ptr %99, i64 %100
+  br label %198
 
-100:                                              ; preds = %5
-  br i1 %17, label %101, label %103, !prof !87
+104:                                              ; preds = %6
+  br i1 %18, label %105, label %107, !prof !87
 
-101:                                              ; preds = %100
-  %102 = shl nsw i64 %16, 1
-  tail call fastcc void @table_grow_index(ptr noundef nonnull %0, i64 noundef %102, ptr noundef %4, i64 noundef %2) #56
-  br label %103
+105:                                              ; preds = %104
+  %106 = shl nsw i64 %17, 1
+  tail call fastcc void @table_grow_index(ptr noundef nonnull %0, i64 noundef %106, ptr noundef %5, i64 noundef %2) #56
+  br label %107
 
-103:                                              ; preds = %101, %100
-  %104 = phi i64 [ -1, %101 ], [ %9, %100 ]
-  %105 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 7
-  %106 = load i64, ptr %105, align 8, !tbaa !340
-  %107 = icmp eq i64 %106, 0
-  br i1 %107, label %108, label %110, !prof !87
+107:                                              ; preds = %105, %104
+  %108 = phi i64 [ -1, %105 ], [ %10, %104 ]
+  %109 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 7
+  %110 = load i64, ptr %109, align 8, !tbaa !340
+  %111 = icmp eq i64 %110, 0
+  br i1 %111, label %112, label %114, !prof !87
 
-108:                                              ; preds = %103
+112:                                              ; preds = %107
   tail call fastcc void @table_new_chunk(ptr noundef nonnull %0, i64 noundef %2) #56
-  %109 = load i64, ptr %105, align 8, !tbaa !340
-  br label %110
+  %113 = load i64, ptr %109, align 8, !tbaa !340
+  br label %114
 
-110:                                              ; preds = %108, %103
-  %111 = phi i64 [ %109, %108 ], [ %106, %103 ]
-  %112 = add nsw i64 %111, -1
-  %113 = load ptr, ptr %0, align 8, !tbaa !320
-  %114 = getelementptr inbounds %struct.TableChunk, ptr %113, i64 %112, i32 1
-  %115 = load i32, ptr %114, align 8, !tbaa !325
-  %116 = xor i32 %115, -1
-  %117 = tail call i32 @llvm.cttz.i32(i32 %116, i1 false), !range !46
-  %118 = shl nuw i32 1, %117
-  %119 = or i32 %118, %115
-  store i32 %119, ptr %114, align 8, !tbaa !325
-  %120 = icmp eq i32 %119, -1
-  br i1 %120, label %121, label %125
+114:                                              ; preds = %112, %107
+  %115 = phi i64 [ %113, %112 ], [ %110, %107 ]
+  %116 = add nsw i64 %115, -1
+  %117 = load ptr, ptr %0, align 8, !tbaa !320
+  %118 = getelementptr inbounds %struct.TableChunk, ptr %117, i64 %116, i32 1
+  %119 = load i32, ptr %118, align 8, !tbaa !325
+  %120 = xor i32 %119, -1
+  %121 = tail call i32 @llvm.cttz.i32(i32 %120, i1 false), !range !46
+  %122 = shl nuw i32 1, %121
+  %123 = or i32 %122, %119
+  store i32 %123, ptr %118, align 8, !tbaa !325
+  %124 = icmp eq i32 %123, -1
+  br i1 %124, label %125, label %129
 
-121:                                              ; preds = %110
-  %122 = getelementptr inbounds %struct.TableChunk, ptr %113, i64 %112, i32 2
-  %123 = load i32, ptr %122, align 4, !tbaa !341
-  %124 = zext i32 %123 to i64
-  store i64 %124, ptr %105, align 8, !tbaa !340
-  br label %125
+125:                                              ; preds = %114
+  %126 = getelementptr inbounds %struct.TableChunk, ptr %117, i64 %116, i32 2
+  %127 = load i32, ptr %126, align 4, !tbaa !341
+  %128 = zext i32 %127 to i64
+  store i64 %128, ptr %109, align 8, !tbaa !340
+  br label %129
 
-125:                                              ; preds = %121, %110
-  %126 = shl i64 %112, 5
-  %127 = zext nneg i32 %117 to i64
-  %128 = or i64 %126, %127
-  %129 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 2
-  %130 = load i64, ptr %129, align 8, !tbaa !329
-  %131 = icmp slt i64 %128, %130
-  br i1 %131, label %134, label %132
+129:                                              ; preds = %125, %114
+  %130 = shl i64 %116, 5
+  %131 = zext nneg i32 %121 to i64
+  %132 = or i64 %130, %131
+  %133 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 2
+  %134 = load i64, ptr %133, align 8, !tbaa !329
+  %135 = icmp slt i64 %132, %134
+  br i1 %135, label %138, label %136
 
-132:                                              ; preds = %125
-  %133 = add nsw i64 %128, 1
-  store i64 %133, ptr %129, align 8, !tbaa !329
-  br label %134
+136:                                              ; preds = %129
+  %137 = add nsw i64 %132, 1
+  store i64 %137, ptr %133, align 8, !tbaa !329
+  br label %138
 
-134:                                              ; preds = %132, %125
-  %135 = load i64, ptr %14, align 8, !tbaa !323
-  %136 = icmp ugt i64 %135, 2147483647
-  %137 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
-  %138 = load ptr, ptr %137, align 8, !tbaa !317
-  %139 = and i64 %135, %1
-  %140 = icmp slt i64 %104, 0
-  %141 = select i1 %140, i64 %139, i64 %104
-  br i1 %136, label %160, label %142
+138:                                              ; preds = %136, %129
+  %139 = load i64, ptr %15, align 8, !tbaa !323
+  %140 = icmp ugt i64 %139, 2147483647
+  %141 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
+  %142 = load ptr, ptr %141, align 8, !tbaa !317
+  %143 = and i64 %139, %1
+  %144 = icmp slt i64 %108, 0
+  %145 = select i1 %144, i64 %143, i64 %108
+  br i1 %140, label %164, label %146
 
-142:                                              ; preds = %134
-  %143 = getelementptr inbounds i64, ptr %138, i64 %141
-  %144 = load i64, ptr %143, align 8, !tbaa !8
-  %145 = icmp eq i64 %144, 0
-  br i1 %145, label %153, label %146
+146:                                              ; preds = %138
+  %147 = getelementptr inbounds i64, ptr %142, i64 %145
+  %148 = load i64, ptr %147, align 8, !tbaa !8
+  %149 = icmp eq i64 %148, 0
+  br i1 %149, label %157, label %150
 
-146:                                              ; preds = %142, %146
-  %147 = phi i64 [ %149, %146 ], [ %141, %142 ]
-  %148 = add i64 %147, 1
-  %149 = and i64 %148, %135
-  %150 = getelementptr inbounds i64, ptr %138, i64 %149
-  %151 = load i64, ptr %150, align 8, !tbaa !8
-  %152 = icmp eq i64 %151, 0
-  br i1 %152, label %153, label %146, !llvm.loop !333
+150:                                              ; preds = %146, %150
+  %151 = phi i64 [ %153, %150 ], [ %145, %146 ]
+  %152 = add i64 %151, 1
+  %153 = and i64 %152, %139
+  %154 = getelementptr inbounds i64, ptr %142, i64 %153
+  %155 = load i64, ptr %154, align 8, !tbaa !8
+  %156 = icmp eq i64 %155, 0
+  br i1 %156, label %157, label %150, !llvm.loop !333
 
-153:                                              ; preds = %146, %142
-  %154 = phi i64 [ %141, %142 ], [ %149, %146 ]
-  %155 = getelementptr inbounds i64, ptr %138, i64 %154
-  %156 = and i64 %1, 4294967295
-  %157 = shl i64 %128, 32
-  %158 = add i64 %157, 4294967296
-  %159 = or disjoint i64 %158, %156
-  store i64 %159, ptr %155, align 8, !tbaa !8
-  br label %176
+157:                                              ; preds = %150, %146
+  %158 = phi i64 [ %145, %146 ], [ %153, %150 ]
+  %159 = getelementptr inbounds i64, ptr %142, i64 %158
+  %160 = and i64 %1, 4294967295
+  %161 = shl i64 %132, 32
+  %162 = add i64 %161, 4294967296
+  %163 = or disjoint i64 %162, %160
+  store i64 %163, ptr %159, align 8, !tbaa !8
+  br label %180
 
-160:                                              ; preds = %134
-  %161 = getelementptr inbounds %struct.WideSlot, ptr %138, i64 %141, i32 1
-  %162 = load i64, ptr %161, align 8, !tbaa !334
-  %163 = icmp eq i64 %162, 0
-  br i1 %163, label %171, label %164
+164:                                              ; preds = %138
+  %165 = getelementptr inbounds %struct.WideSlot, ptr %142, i64 %145, i32 1
+  %166 = load i64, ptr %165, align 8, !tbaa !334
+  %167 = icmp eq i64 %166, 0
+  br i1 %167, label %175, label %168
 
-164:                                              ; preds = %160, %164
-  %165 = phi i64 [ %167, %164 ], [ %141, %160 ]
-  %166 = add i64 %165, 1
-  %167 = and i64 %166, %135
-  %168 = getelementptr inbounds %struct.WideSlot, ptr %138, i64 %167, i32 1
-  %169 = load i64, ptr %168, align 8, !tbaa !334
-  %170 = icmp eq i64 %169, 0
-  br i1 %170, label %171, label %164, !llvm.loop !335
+168:                                              ; preds = %164, %168
+  %169 = phi i64 [ %171, %168 ], [ %145, %164 ]
+  %170 = add i64 %169, 1
+  %171 = and i64 %170, %139
+  %172 = getelementptr inbounds %struct.WideSlot, ptr %142, i64 %171, i32 1
+  %173 = load i64, ptr %172, align 8, !tbaa !334
+  %174 = icmp eq i64 %173, 0
+  br i1 %174, label %175, label %168, !llvm.loop !335
 
-171:                                              ; preds = %164, %160
-  %172 = phi i64 [ %141, %160 ], [ %167, %164 ]
-  %173 = phi ptr [ %161, %160 ], [ %168, %164 ]
-  %174 = getelementptr inbounds %struct.WideSlot, ptr %138, i64 %172
-  store i64 %1, ptr %174, align 8, !tbaa !304
-  %175 = add nsw i64 %128, 1
-  store i64 %175, ptr %173, align 8, !tbaa !334
-  br label %176
+175:                                              ; preds = %168, %164
+  %176 = phi i64 [ %145, %164 ], [ %171, %168 ]
+  %177 = phi ptr [ %165, %164 ], [ %172, %168 ]
+  %178 = getelementptr inbounds %struct.WideSlot, ptr %142, i64 %176
+  store i64 %1, ptr %178, align 8, !tbaa !304
+  %179 = add nsw i64 %132, 1
+  store i64 %179, ptr %177, align 8, !tbaa !334
+  br label %180
 
-176:                                              ; preds = %153, %171
-  %177 = load i64, ptr %10, align 8, !tbaa !330
-  %178 = add nsw i64 %177, 1
-  store i64 %178, ptr %10, align 8, !tbaa !330
-  %179 = and i64 %2, 1099511627776
-  %180 = icmp eq i64 %179, 0
-  br i1 %180, label %187, label %181
+180:                                              ; preds = %157, %175
+  %181 = load i64, ptr %11, align 8, !tbaa !330
+  %182 = add nsw i64 %181, 1
+  store i64 %182, ptr %11, align 8, !tbaa !330
+  %183 = and i64 %2, 1099511627776
+  %184 = icmp eq i64 %183, 0
+  br i1 %184, label %191, label %185
 
-181:                                              ; preds = %176
-  %182 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 8
-  %183 = load ptr, ptr %182, align 8, !tbaa !319
-  %184 = and i64 %2, 1099511627775
-  %185 = mul nsw i64 %128, %184
-  %186 = getelementptr inbounds i8, ptr %183, i64 %185
-  br label %194
+185:                                              ; preds = %180
+  %186 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 8
+  %187 = load ptr, ptr %186, align 8, !tbaa !319
+  %188 = and i64 %2, 1099511627775
+  %189 = mul nsw i64 %132, %188
+  %190 = getelementptr inbounds i8, ptr %187, i64 %189
+  br label %198
 
-187:                                              ; preds = %176
-  %188 = ashr i64 %128, 5
-  %189 = getelementptr inbounds %struct.TableChunk, ptr %113, i64 %188
-  %190 = load ptr, ptr %189, align 8, !tbaa !321
-  %191 = and i64 %127, 31
-  %192 = mul nsw i64 %191, %2
-  %193 = getelementptr inbounds i8, ptr %190, i64 %192
-  br label %194
+191:                                              ; preds = %180
+  %192 = ashr i64 %132, 5
+  %193 = getelementptr inbounds %struct.TableChunk, ptr %117, i64 %192
+  %194 = load ptr, ptr %193, align 8, !tbaa !321
+  %195 = and i64 %131, 31
+  %196 = mul nsw i64 %195, %2
+  %197 = getelementptr inbounds i8, ptr %194, i64 %196
+  br label %198
 
-194:                                              ; preds = %187, %181, %36, %94
-  %195 = phi ptr [ %49, %36 ], [ %99, %94 ], [ %186, %181 ], [ %193, %187 ]
-  ret ptr %195
+198:                                              ; preds = %191, %185, %37, %98
+  %199 = phi ptr [ %50, %37 ], [ %103, %98 ], [ %190, %185 ], [ %197, %191 ]
+  ret ptr %199
 }
 
 ; Function Attrs: cold noinline nounwind optsize
@@ -19408,7 +19428,7 @@ declare i32 @llvm.cttz.i32(i32, i1 immarg) #7
 define void @fa_table_release(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2) local_unnamed_addr #39 {
   %4 = and i64 %2, 2199023255552
   %5 = icmp eq i64 %4, 0
-  br i1 %5, label %62, label %6
+  br i1 %5, label %65, label %6
 
 6:                                                ; preds = %3
   %7 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 5
@@ -19423,7 +19443,7 @@ define void @fa_table_release(ptr nocapture noundef %0, i64 noundef %1, i64 noun
 14:                                               ; preds = %6
   %15 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 3
   store i64 0, ptr %15, align 8, !tbaa !324
-  br label %80
+  br label %83
 
 16:                                               ; preds = %6
   %17 = lshr i64 %2, 40
@@ -19433,91 +19453,245 @@ define void @fa_table_release(ptr nocapture noundef %0, i64 noundef %1, i64 noun
   %21 = add nuw nsw i64 %19, %20
   %22 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
   %23 = load ptr, ptr %22, align 8, !tbaa !317
-  %24 = add i64 %1, 1
-  %25 = and i64 %24, %8
-  %26 = mul nsw i64 %25, %21
-  %27 = getelementptr inbounds i8, ptr %23, i64 %26
-  %28 = load i32, ptr %27, align 1
-  %29 = icmp eq i32 %28, 0
-  br i1 %29, label %58, label %30
+  %24 = shl i64 %2, 21
+  %25 = ashr i64 %24, 63
+  %26 = trunc i64 %25 to i32
+  %27 = add i64 %1, 1
+  %28 = and i64 %27, %8
+  %29 = mul nsw i64 %28, %21
+  %30 = getelementptr inbounds i8, ptr %23, i64 %29
+  %31 = load i32, ptr %30, align 1
+  %32 = icmp eq i32 %31, %26
+  br i1 %32, label %61, label %33
 
-30:                                               ; preds = %16
-  %31 = icmp eq i64 %9, 0
-  br label %32
+33:                                               ; preds = %16
+  %34 = icmp eq i64 %9, 0
+  br label %35
 
-32:                                               ; preds = %30, %50
-  %33 = phi i32 [ %28, %30 ], [ %56, %50 ]
-  %34 = phi ptr [ %27, %30 ], [ %55, %50 ]
-  %35 = phi i64 [ %25, %30 ], [ %53, %50 ]
-  %36 = phi i64 [ %1, %30 ], [ %51, %50 ]
-  %37 = zext i32 %33 to i64
-  %38 = mul i64 %37, -7046029254386353131
-  %39 = tail call i64 @llvm.fshl.i64(i64 %38, i64 %38, i64 40)
-  %40 = select i1 %31, i64 %37, i64 %39
-  %41 = and i64 %40, %8
-  %42 = sub i64 %35, %41
-  %43 = and i64 %42, %8
-  %44 = sub i64 %35, %36
-  %45 = and i64 %44, %8
-  %46 = icmp ult i64 %43, %45
-  br i1 %46, label %50, label %47
+35:                                               ; preds = %33, %53
+  %36 = phi i32 [ %31, %33 ], [ %59, %53 ]
+  %37 = phi ptr [ %30, %33 ], [ %58, %53 ]
+  %38 = phi i64 [ %28, %33 ], [ %56, %53 ]
+  %39 = phi i64 [ %1, %33 ], [ %54, %53 ]
+  %40 = zext i32 %36 to i64
+  %41 = mul i64 %40, -7046029254386353131
+  %42 = tail call i64 @llvm.fshl.i64(i64 %41, i64 %41, i64 40)
+  %43 = select i1 %34, i64 %40, i64 %42
+  %44 = and i64 %43, %8
+  %45 = sub i64 %38, %44
+  %46 = and i64 %45, %8
+  %47 = sub i64 %38, %39
+  %48 = and i64 %47, %8
+  %49 = icmp ult i64 %46, %48
+  br i1 %49, label %53, label %50
 
-47:                                               ; preds = %32
-  %48 = mul nsw i64 %36, %21
-  %49 = getelementptr inbounds i8, ptr %23, i64 %48
-  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %49, ptr nonnull align 1 %34, i64 %21, i1 false)
-  br label %50
+50:                                               ; preds = %35
+  %51 = mul nsw i64 %39, %21
+  %52 = getelementptr inbounds i8, ptr %23, i64 %51
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %52, ptr nonnull align 1 %37, i64 %21, i1 false)
+  br label %53
 
-50:                                               ; preds = %47, %32
-  %51 = phi i64 [ %35, %47 ], [ %36, %32 ]
-  %52 = add i64 %35, 1
-  %53 = and i64 %52, %8
-  %54 = mul nsw i64 %53, %21
-  %55 = getelementptr inbounds i8, ptr %23, i64 %54
-  %56 = load i32, ptr %55, align 1
-  %57 = icmp eq i32 %56, 0
-  br i1 %57, label %58, label %32
+53:                                               ; preds = %50, %35
+  %54 = phi i64 [ %38, %50 ], [ %39, %35 ]
+  %55 = add i64 %38, 1
+  %56 = and i64 %55, %8
+  %57 = mul nsw i64 %56, %21
+  %58 = getelementptr inbounds i8, ptr %23, i64 %57
+  %59 = load i32, ptr %58, align 1
+  %60 = icmp eq i32 %59, %26
+  br i1 %60, label %61, label %35
 
-58:                                               ; preds = %50, %16
-  %59 = phi i64 [ %1, %16 ], [ %51, %50 ]
-  %60 = mul nsw i64 %59, %21
-  %61 = getelementptr inbounds i8, ptr %23, i64 %60
-  store i32 0, ptr %61, align 1
-  br label %80
+61:                                               ; preds = %53, %16
+  %62 = phi i64 [ %1, %16 ], [ %54, %53 ]
+  %63 = mul nsw i64 %62, %21
+  %64 = getelementptr inbounds i8, ptr %23, i64 %63
+  store i32 %26, ptr %64, align 1
+  br label %83
 
-62:                                               ; preds = %3
-  %63 = load ptr, ptr %0, align 8, !tbaa !320
-  %64 = ashr i64 %1, 5
-  %65 = getelementptr inbounds %struct.TableChunk, ptr %63, i64 %64, i32 1
-  %66 = load i32, ptr %65, align 8, !tbaa !325
-  %67 = icmp eq i32 %66, -1
-  br i1 %67, label %68, label %74
+65:                                               ; preds = %3
+  %66 = load ptr, ptr %0, align 8, !tbaa !320
+  %67 = ashr i64 %1, 5
+  %68 = getelementptr inbounds %struct.TableChunk, ptr %66, i64 %67, i32 1
+  %69 = load i32, ptr %68, align 8, !tbaa !325
+  %70 = icmp eq i32 %69, -1
+  br i1 %70, label %71, label %77
 
-68:                                               ; preds = %62
-  %69 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 7
-  %70 = load i64, ptr %69, align 8, !tbaa !340
-  %71 = trunc i64 %70 to i32
-  %72 = getelementptr inbounds %struct.TableChunk, ptr %63, i64 %64, i32 2
-  store i32 %71, ptr %72, align 4, !tbaa !341
-  %73 = add nsw i64 %64, 1
-  store i64 %73, ptr %69, align 8, !tbaa !340
-  br label %74
+71:                                               ; preds = %65
+  %72 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 7
+  %73 = load i64, ptr %72, align 8, !tbaa !340
+  %74 = trunc i64 %73 to i32
+  %75 = getelementptr inbounds %struct.TableChunk, ptr %66, i64 %67, i32 2
+  store i32 %74, ptr %75, align 4, !tbaa !341
+  %76 = add nsw i64 %67, 1
+  store i64 %76, ptr %72, align 8, !tbaa !340
+  br label %77
 
-74:                                               ; preds = %68, %62
-  %75 = trunc i64 %1 to i32
-  %76 = and i32 %75, 31
-  %77 = shl nuw i32 1, %76
-  %78 = xor i32 %77, -1
-  %79 = and i32 %66, %78
-  store i32 %79, ptr %65, align 8, !tbaa !325
-  br label %80
+77:                                               ; preds = %71, %65
+  %78 = trunc i64 %1 to i32
+  %79 = and i32 %78, 31
+  %80 = shl nuw i32 1, %79
+  %81 = xor i32 %80, -1
+  %82 = and i32 %69, %81
+  store i32 %82, ptr %68, align 8, !tbaa !325
+  br label %83
 
-80:                                               ; preds = %58, %14, %74
-  %81 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
-  %82 = load i64, ptr %81, align 8, !tbaa !330
-  %83 = add nsw i64 %82, -1
-  store i64 %83, ptr %81, align 8, !tbaa !330
+83:                                               ; preds = %61, %14, %77
+  %84 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
+  %85 = load i64, ptr %84, align 8, !tbaa !330
+  %86 = add nsw i64 %85, -1
+  store i64 %86, ptr %84, align 8, !tbaa !330
   ret void
+}
+
+; Function Attrs: alwaysinline nofree norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none)
+define i64 @fa_table_release_probe(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3, i64 noundef %4) local_unnamed_addr #39 {
+  %6 = and i64 %2, 2199023255552
+  %7 = icmp eq i64 %6, 0
+  br i1 %7, label %8, label %29
+
+8:                                                ; preds = %5
+  %9 = load ptr, ptr %0, align 8, !tbaa !320
+  %10 = ashr i64 %1, 5
+  %11 = getelementptr inbounds %struct.TableChunk, ptr %9, i64 %10, i32 1
+  %12 = load i32, ptr %11, align 8, !tbaa !325
+  %13 = icmp eq i32 %12, -1
+  br i1 %13, label %14, label %20
+
+14:                                               ; preds = %8
+  %15 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 7
+  %16 = load i64, ptr %15, align 8, !tbaa !340
+  %17 = trunc i64 %16 to i32
+  %18 = getelementptr inbounds %struct.TableChunk, ptr %9, i64 %10, i32 2
+  store i32 %17, ptr %18, align 4, !tbaa !341
+  %19 = add nsw i64 %10, 1
+  store i64 %19, ptr %15, align 8, !tbaa !340
+  br label %20
+
+20:                                               ; preds = %14, %8
+  %21 = trunc i64 %1 to i32
+  %22 = and i32 %21, 31
+  %23 = shl nuw i32 1, %22
+  %24 = xor i32 %23, -1
+  %25 = and i32 %12, %24
+  store i32 %25, ptr %11, align 8, !tbaa !325
+  %26 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
+  %27 = load i64, ptr %26, align 8, !tbaa !330
+  %28 = add nsw i64 %27, -1
+  store i64 %28, ptr %26, align 8, !tbaa !330
+  br label %113
+
+29:                                               ; preds = %5
+  %30 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 5
+  %31 = load i64, ptr %30, align 8, !tbaa !323
+  %32 = and i64 %2, 4398046511104
+  %33 = icmp ne i64 %32, 0
+  %34 = add i64 %31, 1
+  %35 = icmp eq i64 %34, %1
+  %36 = select i1 %33, i1 %35, i1 false
+  br i1 %36, label %37, label %42
+
+37:                                               ; preds = %29
+  %38 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 3
+  store i64 0, ptr %38, align 8, !tbaa !324
+  %39 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
+  %40 = load i64, ptr %39, align 8, !tbaa !330
+  %41 = add nsw i64 %40, -1
+  store i64 %41, ptr %39, align 8, !tbaa !330
+  br label %95
+
+42:                                               ; preds = %29
+  %43 = lshr i64 %2, 40
+  %44 = and i64 %43, 4
+  %45 = xor i64 %44, 4
+  %46 = and i64 %2, 1099511627775
+  %47 = add nuw nsw i64 %45, %46
+  %48 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
+  %49 = load ptr, ptr %48, align 8, !tbaa !317
+  %50 = shl i64 %2, 21
+  %51 = ashr i64 %50, 63
+  %52 = trunc i64 %51 to i32
+  %53 = add i64 %1, 1
+  %54 = and i64 %53, %31
+  %55 = mul nsw i64 %54, %47
+  %56 = getelementptr inbounds i8, ptr %49, i64 %55
+  %57 = load i32, ptr %56, align 1
+  %58 = icmp eq i32 %57, %52
+  br i1 %58, label %87, label %59
+
+59:                                               ; preds = %42
+  %60 = icmp eq i64 %32, 0
+  br label %61
+
+61:                                               ; preds = %59, %79
+  %62 = phi i32 [ %57, %59 ], [ %85, %79 ]
+  %63 = phi ptr [ %56, %59 ], [ %84, %79 ]
+  %64 = phi i64 [ %54, %59 ], [ %82, %79 ]
+  %65 = phi i64 [ %1, %59 ], [ %80, %79 ]
+  %66 = zext i32 %62 to i64
+  %67 = mul i64 %66, -7046029254386353131
+  %68 = tail call i64 @llvm.fshl.i64(i64 %67, i64 %67, i64 40)
+  %69 = select i1 %60, i64 %66, i64 %68
+  %70 = and i64 %69, %31
+  %71 = sub i64 %64, %70
+  %72 = and i64 %71, %31
+  %73 = sub i64 %64, %65
+  %74 = and i64 %73, %31
+  %75 = icmp ult i64 %72, %74
+  br i1 %75, label %79, label %76
+
+76:                                               ; preds = %61
+  %77 = mul nsw i64 %65, %47
+  %78 = getelementptr inbounds i8, ptr %49, i64 %77
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %78, ptr nonnull align 1 %63, i64 %47, i1 false)
+  br label %79
+
+79:                                               ; preds = %76, %61
+  %80 = phi i64 [ %64, %76 ], [ %65, %61 ]
+  %81 = add i64 %64, 1
+  %82 = and i64 %81, %31
+  %83 = mul nsw i64 %82, %47
+  %84 = getelementptr inbounds i8, ptr %49, i64 %83
+  %85 = load i32, ptr %84, align 1
+  %86 = icmp eq i32 %85, %52
+  br i1 %86, label %87, label %61
+
+87:                                               ; preds = %79, %42
+  %88 = phi i64 [ %1, %42 ], [ %80, %79 ]
+  %89 = mul nsw i64 %88, %47
+  %90 = getelementptr inbounds i8, ptr %49, i64 %89
+  store i32 %52, ptr %90, align 1
+  %91 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
+  %92 = load i64, ptr %91, align 8, !tbaa !330
+  %93 = add nsw i64 %92, -1
+  store i64 %93, ptr %91, align 8, !tbaa !330
+  %94 = load i64, ptr %30, align 8, !tbaa !323
+  br label %95
+
+95:                                               ; preds = %37, %87
+  %96 = phi i64 [ %31, %37 ], [ %94, %87 ]
+  %97 = phi i64 [ %1, %37 ], [ %88, %87 ]
+  %98 = xor i64 %3, -1
+  %99 = icmp sgt i64 %3, -1
+  %100 = icmp ugt i64 %97, %96
+  %101 = select i1 %99, i1 true, i1 %100
+  %102 = icmp ult i64 %96, %98
+  %103 = select i1 %101, i1 true, i1 %102
+  br i1 %103, label %113, label %104
+
+104:                                              ; preds = %95
+  %105 = and i64 %96, %4
+  %106 = sub i64 %97, %105
+  %107 = and i64 %106, %96
+  %108 = sub i64 %98, %105
+  %109 = and i64 %108, %96
+  %110 = icmp ult i64 %107, %109
+  %111 = xor i64 %97, -1
+  %112 = select i1 %110, i64 %111, i64 %3
+  br label %113
+
+113:                                              ; preds = %20, %104, %95
+  %114 = phi i64 [ %3, %95 ], [ %112, %104 ], [ 0, %20 ]
+  ret i64 %114
 }
 
 ; Function Attrs: alwaysinline nofree norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none)
@@ -19526,7 +19700,7 @@ define void @fa_table_kill(ptr nocapture noundef %0, i64 noundef %1, i64 noundef
   %6 = icmp eq i64 %5, 0
   %7 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 5
   %8 = load i64, ptr %7, align 8, !tbaa !323
-  br i1 %6, label %63, label %9
+  br i1 %6, label %66, label %9
 
 9:                                                ; preds = %4
   %10 = and i64 %3, 4398046511104
@@ -19539,7 +19713,7 @@ define void @fa_table_kill(ptr nocapture noundef %0, i64 noundef %1, i64 noundef
 15:                                               ; preds = %9
   %16 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 3
   store i64 0, ptr %16, align 8, !tbaa !324
-  br label %180
+  br label %183
 
 17:                                               ; preds = %9
   %18 = lshr i64 %3, 40
@@ -19549,226 +19723,229 @@ define void @fa_table_kill(ptr nocapture noundef %0, i64 noundef %1, i64 noundef
   %22 = add nuw nsw i64 %20, %21
   %23 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
   %24 = load ptr, ptr %23, align 8, !tbaa !317
-  %25 = add i64 %2, 1
-  %26 = and i64 %25, %8
-  %27 = mul nsw i64 %26, %22
-  %28 = getelementptr inbounds i8, ptr %24, i64 %27
-  %29 = load i32, ptr %28, align 1
-  %30 = icmp eq i32 %29, 0
-  br i1 %30, label %59, label %31
+  %25 = shl i64 %3, 21
+  %26 = ashr i64 %25, 63
+  %27 = trunc i64 %26 to i32
+  %28 = add i64 %2, 1
+  %29 = and i64 %28, %8
+  %30 = mul nsw i64 %29, %22
+  %31 = getelementptr inbounds i8, ptr %24, i64 %30
+  %32 = load i32, ptr %31, align 1
+  %33 = icmp eq i32 %32, %27
+  br i1 %33, label %62, label %34
 
-31:                                               ; preds = %17
-  %32 = icmp eq i64 %10, 0
-  br label %33
+34:                                               ; preds = %17
+  %35 = icmp eq i64 %10, 0
+  br label %36
 
-33:                                               ; preds = %31, %51
-  %34 = phi i32 [ %29, %31 ], [ %57, %51 ]
-  %35 = phi ptr [ %28, %31 ], [ %56, %51 ]
-  %36 = phi i64 [ %26, %31 ], [ %54, %51 ]
-  %37 = phi i64 [ %2, %31 ], [ %52, %51 ]
-  %38 = zext i32 %34 to i64
-  %39 = mul i64 %38, -7046029254386353131
-  %40 = tail call i64 @llvm.fshl.i64(i64 %39, i64 %39, i64 40)
-  %41 = select i1 %32, i64 %38, i64 %40
-  %42 = and i64 %41, %8
-  %43 = sub i64 %36, %42
-  %44 = and i64 %43, %8
-  %45 = sub i64 %36, %37
-  %46 = and i64 %45, %8
-  %47 = icmp ult i64 %44, %46
-  br i1 %47, label %51, label %48
+36:                                               ; preds = %34, %54
+  %37 = phi i32 [ %32, %34 ], [ %60, %54 ]
+  %38 = phi ptr [ %31, %34 ], [ %59, %54 ]
+  %39 = phi i64 [ %29, %34 ], [ %57, %54 ]
+  %40 = phi i64 [ %2, %34 ], [ %55, %54 ]
+  %41 = zext i32 %37 to i64
+  %42 = mul i64 %41, -7046029254386353131
+  %43 = tail call i64 @llvm.fshl.i64(i64 %42, i64 %42, i64 40)
+  %44 = select i1 %35, i64 %41, i64 %43
+  %45 = and i64 %44, %8
+  %46 = sub i64 %39, %45
+  %47 = and i64 %46, %8
+  %48 = sub i64 %39, %40
+  %49 = and i64 %48, %8
+  %50 = icmp ult i64 %47, %49
+  br i1 %50, label %54, label %51
 
-48:                                               ; preds = %33
-  %49 = mul nsw i64 %37, %22
-  %50 = getelementptr inbounds i8, ptr %24, i64 %49
-  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %50, ptr nonnull align 1 %35, i64 %22, i1 false)
-  br label %51
+51:                                               ; preds = %36
+  %52 = mul nsw i64 %40, %22
+  %53 = getelementptr inbounds i8, ptr %24, i64 %52
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %53, ptr nonnull align 1 %38, i64 %22, i1 false)
+  br label %54
 
-51:                                               ; preds = %48, %33
-  %52 = phi i64 [ %36, %48 ], [ %37, %33 ]
-  %53 = add i64 %36, 1
-  %54 = and i64 %53, %8
-  %55 = mul nsw i64 %54, %22
-  %56 = getelementptr inbounds i8, ptr %24, i64 %55
-  %57 = load i32, ptr %56, align 1
-  %58 = icmp eq i32 %57, 0
-  br i1 %58, label %59, label %33
+54:                                               ; preds = %51, %36
+  %55 = phi i64 [ %39, %51 ], [ %40, %36 ]
+  %56 = add i64 %39, 1
+  %57 = and i64 %56, %8
+  %58 = mul nsw i64 %57, %22
+  %59 = getelementptr inbounds i8, ptr %24, i64 %58
+  %60 = load i32, ptr %59, align 1
+  %61 = icmp eq i32 %60, %27
+  br i1 %61, label %62, label %36
 
-59:                                               ; preds = %51, %17
-  %60 = phi i64 [ %2, %17 ], [ %52, %51 ]
-  %61 = mul nsw i64 %60, %22
-  %62 = getelementptr inbounds i8, ptr %24, i64 %61
-  store i32 0, ptr %62, align 1
-  br label %180
+62:                                               ; preds = %54, %17
+  %63 = phi i64 [ %2, %17 ], [ %55, %54 ]
+  %64 = mul nsw i64 %63, %22
+  %65 = getelementptr inbounds i8, ptr %24, i64 %64
+  store i32 %27, ptr %65, align 1
+  br label %183
 
-63:                                               ; preds = %4
-  %64 = and i64 %8, %1
-  %65 = icmp ugt i64 %8, 2147483647
-  %66 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
-  %67 = load ptr, ptr %66, align 8, !tbaa !317
-  br i1 %65, label %83, label %68, !prof !87
+66:                                               ; preds = %4
+  %67 = and i64 %8, %1
+  %68 = icmp ugt i64 %8, 2147483647
+  %69 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
+  %70 = load ptr, ptr %69, align 8, !tbaa !317
+  br i1 %68, label %86, label %71, !prof !87
 
-68:                                               ; preds = %63
-  %69 = shl i64 %2, 32
-  %70 = add i64 %69, 4294967296
-  %71 = getelementptr inbounds i64, ptr %67, i64 %64
-  %72 = load i64, ptr %71, align 8, !tbaa !8
-  %73 = and i64 %72, -4294967296
-  %74 = icmp eq i64 %73, %70
-  br i1 %74, label %97, label %75
+71:                                               ; preds = %66
+  %72 = shl i64 %2, 32
+  %73 = add i64 %72, 4294967296
+  %74 = getelementptr inbounds i64, ptr %70, i64 %67
+  %75 = load i64, ptr %74, align 8, !tbaa !8
+  %76 = and i64 %75, -4294967296
+  %77 = icmp eq i64 %76, %73
+  br i1 %77, label %100, label %78
 
-75:                                               ; preds = %68, %75
-  %76 = phi i64 [ %78, %75 ], [ %64, %68 ]
-  %77 = add nsw i64 %76, 1
-  %78 = and i64 %77, %8
-  %79 = getelementptr inbounds i64, ptr %67, i64 %78
-  %80 = load i64, ptr %79, align 8, !tbaa !8
-  %81 = and i64 %80, -4294967296
-  %82 = icmp eq i64 %81, %70
-  br i1 %82, label %95, label %75, !llvm.loop !343
+78:                                               ; preds = %71, %78
+  %79 = phi i64 [ %81, %78 ], [ %67, %71 ]
+  %80 = add nsw i64 %79, 1
+  %81 = and i64 %80, %8
+  %82 = getelementptr inbounds i64, ptr %70, i64 %81
+  %83 = load i64, ptr %82, align 8, !tbaa !8
+  %84 = and i64 %83, -4294967296
+  %85 = icmp eq i64 %84, %73
+  br i1 %85, label %98, label %78, !llvm.loop !343
 
-83:                                               ; preds = %63
-  %84 = add nsw i64 %2, 1
-  %85 = getelementptr inbounds %struct.WideSlot, ptr %67, i64 %64, i32 1
-  %86 = load i64, ptr %85, align 8, !tbaa !334
-  %87 = icmp eq i64 %86, %84
-  br i1 %87, label %126, label %88
+86:                                               ; preds = %66
+  %87 = add nsw i64 %2, 1
+  %88 = getelementptr inbounds %struct.WideSlot, ptr %70, i64 %67, i32 1
+  %89 = load i64, ptr %88, align 8, !tbaa !334
+  %90 = icmp eq i64 %89, %87
+  br i1 %90, label %129, label %91
 
-88:                                               ; preds = %83, %88
-  %89 = phi i64 [ %91, %88 ], [ %64, %83 ]
-  %90 = add i64 %89, 1
-  %91 = and i64 %90, %8
-  %92 = getelementptr inbounds %struct.WideSlot, ptr %67, i64 %91, i32 1
-  %93 = load i64, ptr %92, align 8, !tbaa !334
-  %94 = icmp eq i64 %93, %84
-  br i1 %94, label %95, label %88, !llvm.loop !344
+91:                                               ; preds = %86, %91
+  %92 = phi i64 [ %94, %91 ], [ %67, %86 ]
+  %93 = add i64 %92, 1
+  %94 = and i64 %93, %8
+  %95 = getelementptr inbounds %struct.WideSlot, ptr %70, i64 %94, i32 1
+  %96 = load i64, ptr %95, align 8, !tbaa !334
+  %97 = icmp eq i64 %96, %87
+  br i1 %97, label %98, label %91, !llvm.loop !344
 
-95:                                               ; preds = %75, %88
-  %96 = phi i64 [ %91, %88 ], [ %78, %75 ]
-  br i1 %65, label %126, label %97, !prof !345
+98:                                               ; preds = %78, %91
+  %99 = phi i64 [ %94, %91 ], [ %81, %78 ]
+  br i1 %68, label %129, label %100, !prof !345
 
-97:                                               ; preds = %68, %95
-  %98 = phi i64 [ %96, %95 ], [ %64, %68 ]
-  %99 = add i64 %98, 1
-  %100 = and i64 %99, %8
-  %101 = getelementptr inbounds i64, ptr %67, i64 %100
-  %102 = load i64, ptr %101, align 8, !tbaa !8
-  %103 = icmp eq i64 %102, 0
-  br i1 %103, label %123, label %104
+100:                                              ; preds = %71, %98
+  %101 = phi i64 [ %99, %98 ], [ %67, %71 ]
+  %102 = add i64 %101, 1
+  %103 = and i64 %102, %8
+  %104 = getelementptr inbounds i64, ptr %70, i64 %103
+  %105 = load i64, ptr %104, align 8, !tbaa !8
+  %106 = icmp eq i64 %105, 0
+  br i1 %106, label %126, label %107
 
-104:                                              ; preds = %97, %116
-  %105 = phi i64 [ %121, %116 ], [ %102, %97 ]
-  %106 = phi i64 [ %119, %116 ], [ %100, %97 ]
-  %107 = phi i64 [ %117, %116 ], [ %98, %97 ]
-  %108 = and i64 %105, %8
-  %109 = sub nsw i64 %106, %108
-  %110 = and i64 %109, %8
-  %111 = sub i64 %106, %107
-  %112 = and i64 %111, %8
-  %113 = icmp ult i64 %110, %112
-  br i1 %113, label %116, label %114
+107:                                              ; preds = %100, %119
+  %108 = phi i64 [ %124, %119 ], [ %105, %100 ]
+  %109 = phi i64 [ %122, %119 ], [ %103, %100 ]
+  %110 = phi i64 [ %120, %119 ], [ %101, %100 ]
+  %111 = and i64 %108, %8
+  %112 = sub nsw i64 %109, %111
+  %113 = and i64 %112, %8
+  %114 = sub i64 %109, %110
+  %115 = and i64 %114, %8
+  %116 = icmp ult i64 %113, %115
+  br i1 %116, label %119, label %117
 
-114:                                              ; preds = %104
-  %115 = getelementptr inbounds i64, ptr %67, i64 %107
-  store i64 %105, ptr %115, align 8, !tbaa !8
-  br label %116
+117:                                              ; preds = %107
+  %118 = getelementptr inbounds i64, ptr %70, i64 %110
+  store i64 %108, ptr %118, align 8, !tbaa !8
+  br label %119
 
-116:                                              ; preds = %114, %104
-  %117 = phi i64 [ %106, %114 ], [ %107, %104 ]
-  %118 = add nsw i64 %106, 1
-  %119 = and i64 %118, %8
-  %120 = getelementptr inbounds i64, ptr %67, i64 %119
-  %121 = load i64, ptr %120, align 8, !tbaa !8
-  %122 = icmp eq i64 %121, 0
-  br i1 %122, label %123, label %104
+119:                                              ; preds = %117, %107
+  %120 = phi i64 [ %109, %117 ], [ %110, %107 ]
+  %121 = add nsw i64 %109, 1
+  %122 = and i64 %121, %8
+  %123 = getelementptr inbounds i64, ptr %70, i64 %122
+  %124 = load i64, ptr %123, align 8, !tbaa !8
+  %125 = icmp eq i64 %124, 0
+  br i1 %125, label %126, label %107
 
-123:                                              ; preds = %116, %97
-  %124 = phi i64 [ %98, %97 ], [ %117, %116 ]
-  %125 = getelementptr inbounds i64, ptr %67, i64 %124
-  br label %161
+126:                                              ; preds = %119, %100
+  %127 = phi i64 [ %101, %100 ], [ %120, %119 ]
+  %128 = getelementptr inbounds i64, ptr %70, i64 %127
+  br label %164
 
-126:                                              ; preds = %83, %95
-  %127 = phi i64 [ %96, %95 ], [ %64, %83 ]
-  %128 = add i64 %127, 1
-  %129 = and i64 %128, %8
-  %130 = getelementptr inbounds %struct.WideSlot, ptr %67, i64 %129
-  %131 = getelementptr inbounds i8, ptr %130, i64 8
-  %132 = load i64, ptr %131, align 8, !tbaa.struct !23
-  %133 = icmp eq i64 %132, 0
-  br i1 %133, label %157, label %134
+129:                                              ; preds = %86, %98
+  %130 = phi i64 [ %99, %98 ], [ %67, %86 ]
+  %131 = add i64 %130, 1
+  %132 = and i64 %131, %8
+  %133 = getelementptr inbounds %struct.WideSlot, ptr %70, i64 %132
+  %134 = getelementptr inbounds i8, ptr %133, i64 8
+  %135 = load i64, ptr %134, align 8, !tbaa.struct !23
+  %136 = icmp eq i64 %135, 0
+  br i1 %136, label %160, label %137
 
-134:                                              ; preds = %126, %149
-  %135 = phi i64 [ %155, %149 ], [ %132, %126 ]
-  %136 = phi ptr [ %153, %149 ], [ %130, %126 ]
-  %137 = phi i64 [ %152, %149 ], [ %129, %126 ]
-  %138 = phi i64 [ %150, %149 ], [ %127, %126 ]
-  %139 = load i64, ptr %136, align 8
-  %140 = and i64 %139, %8
-  %141 = sub i64 %137, %140
-  %142 = and i64 %141, %8
-  %143 = sub i64 %137, %138
-  %144 = and i64 %143, %8
-  %145 = icmp ult i64 %142, %144
-  br i1 %145, label %149, label %146
+137:                                              ; preds = %129, %152
+  %138 = phi i64 [ %158, %152 ], [ %135, %129 ]
+  %139 = phi ptr [ %156, %152 ], [ %133, %129 ]
+  %140 = phi i64 [ %155, %152 ], [ %132, %129 ]
+  %141 = phi i64 [ %153, %152 ], [ %130, %129 ]
+  %142 = load i64, ptr %139, align 8
+  %143 = and i64 %142, %8
+  %144 = sub i64 %140, %143
+  %145 = and i64 %144, %8
+  %146 = sub i64 %140, %141
+  %147 = and i64 %146, %8
+  %148 = icmp ult i64 %145, %147
+  br i1 %148, label %152, label %149
 
-146:                                              ; preds = %134
-  %147 = getelementptr inbounds %struct.WideSlot, ptr %67, i64 %138
-  store i64 %139, ptr %147, align 8, !tbaa.struct !22
-  %148 = getelementptr inbounds i8, ptr %147, i64 8
-  store i64 %135, ptr %148, align 8, !tbaa.struct !23
-  br label %149
+149:                                              ; preds = %137
+  %150 = getelementptr inbounds %struct.WideSlot, ptr %70, i64 %141
+  store i64 %142, ptr %150, align 8, !tbaa.struct !22
+  %151 = getelementptr inbounds i8, ptr %150, i64 8
+  store i64 %138, ptr %151, align 8, !tbaa.struct !23
+  br label %152
 
-149:                                              ; preds = %146, %134
-  %150 = phi i64 [ %137, %146 ], [ %138, %134 ]
-  %151 = add i64 %137, 1
-  %152 = and i64 %151, %8
-  %153 = getelementptr inbounds %struct.WideSlot, ptr %67, i64 %152
-  %154 = getelementptr inbounds i8, ptr %153, i64 8
-  %155 = load i64, ptr %154, align 8, !tbaa.struct !23
-  %156 = icmp eq i64 %155, 0
-  br i1 %156, label %157, label %134
+152:                                              ; preds = %149, %137
+  %153 = phi i64 [ %140, %149 ], [ %141, %137 ]
+  %154 = add i64 %140, 1
+  %155 = and i64 %154, %8
+  %156 = getelementptr inbounds %struct.WideSlot, ptr %70, i64 %155
+  %157 = getelementptr inbounds i8, ptr %156, i64 8
+  %158 = load i64, ptr %157, align 8, !tbaa.struct !23
+  %159 = icmp eq i64 %158, 0
+  br i1 %159, label %160, label %137
 
-157:                                              ; preds = %149, %126
-  %158 = phi i64 [ %127, %126 ], [ %150, %149 ]
-  %159 = getelementptr inbounds %struct.WideSlot, ptr %67, i64 %158
-  store i64 0, ptr %159, align 8, !tbaa !304
-  %160 = getelementptr inbounds %struct.WideSlot, ptr %67, i64 %158, i32 1
-  br label %161
+160:                                              ; preds = %152, %129
+  %161 = phi i64 [ %130, %129 ], [ %153, %152 ]
+  %162 = getelementptr inbounds %struct.WideSlot, ptr %70, i64 %161
+  store i64 0, ptr %162, align 8, !tbaa !304
+  %163 = getelementptr inbounds %struct.WideSlot, ptr %70, i64 %161, i32 1
+  br label %164
 
-161:                                              ; preds = %157, %123
-  %162 = phi ptr [ %160, %157 ], [ %125, %123 ]
-  store i64 0, ptr %162, align 8, !tbaa !8
-  %163 = load ptr, ptr %0, align 8, !tbaa !320
-  %164 = ashr i64 %2, 5
-  %165 = getelementptr inbounds %struct.TableChunk, ptr %163, i64 %164, i32 1
-  %166 = load i32, ptr %165, align 8, !tbaa !325
-  %167 = icmp eq i32 %166, -1
-  br i1 %167, label %168, label %174
+164:                                              ; preds = %160, %126
+  %165 = phi ptr [ %163, %160 ], [ %128, %126 ]
+  store i64 0, ptr %165, align 8, !tbaa !8
+  %166 = load ptr, ptr %0, align 8, !tbaa !320
+  %167 = ashr i64 %2, 5
+  %168 = getelementptr inbounds %struct.TableChunk, ptr %166, i64 %167, i32 1
+  %169 = load i32, ptr %168, align 8, !tbaa !325
+  %170 = icmp eq i32 %169, -1
+  br i1 %170, label %171, label %177
 
-168:                                              ; preds = %161
-  %169 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 7
-  %170 = load i64, ptr %169, align 8, !tbaa !340
-  %171 = trunc i64 %170 to i32
-  %172 = getelementptr inbounds %struct.TableChunk, ptr %163, i64 %164, i32 2
-  store i32 %171, ptr %172, align 4, !tbaa !341
-  %173 = add nsw i64 %164, 1
-  store i64 %173, ptr %169, align 8, !tbaa !340
-  br label %174
+171:                                              ; preds = %164
+  %172 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 7
+  %173 = load i64, ptr %172, align 8, !tbaa !340
+  %174 = trunc i64 %173 to i32
+  %175 = getelementptr inbounds %struct.TableChunk, ptr %166, i64 %167, i32 2
+  store i32 %174, ptr %175, align 4, !tbaa !341
+  %176 = add nsw i64 %167, 1
+  store i64 %176, ptr %172, align 8, !tbaa !340
+  br label %177
 
-174:                                              ; preds = %168, %161
-  %175 = trunc i64 %2 to i32
-  %176 = and i32 %175, 31
-  %177 = shl nuw i32 1, %176
-  %178 = xor i32 %177, -1
-  %179 = and i32 %166, %178
-  store i32 %179, ptr %165, align 8, !tbaa !325
-  br label %180
+177:                                              ; preds = %171, %164
+  %178 = trunc i64 %2 to i32
+  %179 = and i32 %178, 31
+  %180 = shl nuw i32 1, %179
+  %181 = xor i32 %180, -1
+  %182 = and i32 %169, %181
+  store i32 %182, ptr %168, align 8, !tbaa !325
+  br label %183
 
-180:                                              ; preds = %174, %59, %15
-  %181 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
-  %182 = load i64, ptr %181, align 8, !tbaa !330
-  %183 = add nsw i64 %182, -1
-  store i64 %183, ptr %181, align 8, !tbaa !330
+183:                                              ; preds = %177, %62, %15
+  %184 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
+  %185 = load i64, ptr %184, align 8, !tbaa !330
+  %186 = add nsw i64 %185, -1
+  store i64 %186, ptr %184, align 8, !tbaa !330
   ret void
 }
 
@@ -19776,73 +19953,76 @@ define void @fa_table_kill(ptr nocapture noundef %0, i64 noundef %1, i64 noundef
 define void @fa_table_clear(ptr nocapture noundef %0, i64 noundef %1) local_unnamed_addr #40 {
   %3 = and i64 %1, 2199023255552
   %4 = icmp eq i64 %3, 0
-  br i1 %4, label %22, label %5
+  br i1 %4, label %25, label %5
 
 5:                                                ; preds = %2
   %6 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
   %7 = load ptr, ptr %6, align 8, !tbaa !317
-  %8 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 5
-  %9 = load i64, ptr %8, align 8, !tbaa !323
-  %10 = lshr i64 %1, 42
-  %11 = and i64 %10, 1
-  %12 = add nuw nsw i64 %11, 1
-  %13 = add i64 %12, %9
-  %14 = lshr i64 %1, 40
-  %15 = and i64 %14, 4
-  %16 = xor i64 %15, 4
-  %17 = and i64 %1, 1099511627775
-  %18 = add nuw nsw i64 %16, %17
-  %19 = mul nsw i64 %13, %18
-  tail call void @llvm.memset.p0.i64(ptr align 1 %7, i8 0, i64 %19, i1 false)
-  %20 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
-  store i64 0, ptr %20, align 8, !tbaa !330
-  %21 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 3
-  store i64 0, ptr %21, align 8, !tbaa !324
-  br label %51
+  %8 = shl i64 %1, 21
+  %9 = ashr i64 %8, 63
+  %10 = trunc i64 %9 to i8
+  %11 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 5
+  %12 = load i64, ptr %11, align 8, !tbaa !323
+  %13 = lshr i64 %1, 42
+  %14 = and i64 %13, 1
+  %15 = add nuw nsw i64 %14, 1
+  %16 = add i64 %15, %12
+  %17 = lshr i64 %1, 40
+  %18 = and i64 %17, 4
+  %19 = xor i64 %18, 4
+  %20 = and i64 %1, 1099511627775
+  %21 = add nuw nsw i64 %19, %20
+  %22 = mul nsw i64 %16, %21
+  tail call void @llvm.memset.p0.i64(ptr align 1 %7, i8 %10, i64 %22, i1 false)
+  %23 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
+  store i64 0, ptr %23, align 8, !tbaa !330
+  %24 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 3
+  store i64 0, ptr %24, align 8, !tbaa !324
+  br label %54
 
-22:                                               ; preds = %2
-  %23 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 3
-  %24 = load i64, ptr %23, align 8, !tbaa !324
-  %25 = ashr i64 %24, 5
-  %26 = icmp sgt i64 %25, 0
-  br i1 %26, label %27, label %29
+25:                                               ; preds = %2
+  %26 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 3
+  %27 = load i64, ptr %26, align 8, !tbaa !324
+  %28 = ashr i64 %27, 5
+  %29 = icmp sgt i64 %28, 0
+  br i1 %29, label %30, label %32
 
-27:                                               ; preds = %22
-  %28 = load ptr, ptr %0, align 8, !tbaa !320
-  br label %41
+30:                                               ; preds = %25
+  %31 = load ptr, ptr %0, align 8, !tbaa !320
+  br label %44
 
-29:                                               ; preds = %41, %22
-  %30 = zext i1 %26 to i64
-  %31 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 7
-  store i64 %30, ptr %31, align 8, !tbaa !340
-  %32 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
-  store <2 x i64> zeroinitializer, ptr %32, align 8, !tbaa !8
-  %33 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
-  %34 = load ptr, ptr %33, align 8, !tbaa !317
-  %35 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 5
-  %36 = load i64, ptr %35, align 8, !tbaa !323
-  %37 = add nsw i64 %36, 1
-  %38 = icmp ugt i64 %36, 2147483647
-  %39 = select i1 %38, i64 4, i64 3
-  %40 = shl i64 %37, %39
-  tail call void @llvm.memset.p0.i64(ptr align 1 %34, i8 0, i64 %40, i1 false)
-  br label %51
+32:                                               ; preds = %44, %25
+  %33 = zext i1 %29 to i64
+  %34 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 7
+  store i64 %33, ptr %34, align 8, !tbaa !340
+  %35 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 1
+  store <2 x i64> zeroinitializer, ptr %35, align 8, !tbaa !8
+  %36 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 4
+  %37 = load ptr, ptr %36, align 8, !tbaa !317
+  %38 = getelementptr inbounds %struct.FaTable, ptr %0, i64 0, i32 5
+  %39 = load i64, ptr %38, align 8, !tbaa !323
+  %40 = add nsw i64 %39, 1
+  %41 = icmp ugt i64 %39, 2147483647
+  %42 = select i1 %41, i64 4, i64 3
+  %43 = shl i64 %40, %42
+  tail call void @llvm.memset.p0.i64(ptr align 1 %37, i8 0, i64 %43, i1 false)
+  br label %54
 
-41:                                               ; preds = %27, %41
-  %42 = phi i64 [ 0, %27 ], [ %44, %41 ]
-  %43 = getelementptr inbounds %struct.TableChunk, ptr %28, i64 %42, i32 1
-  store i32 0, ptr %43, align 8, !tbaa !325
-  %44 = add nuw nsw i64 %42, 1
-  %45 = icmp slt i64 %44, %25
-  %46 = trunc i64 %42 to i32
-  %47 = add i32 %46, 2
-  %48 = select i1 %45, i32 %47, i32 0
-  %49 = getelementptr inbounds %struct.TableChunk, ptr %28, i64 %42, i32 2
-  store i32 %48, ptr %49, align 4, !tbaa !341
-  %50 = icmp eq i64 %44, %25
-  br i1 %50, label %29, label %41, !llvm.loop !346
+44:                                               ; preds = %30, %44
+  %45 = phi i64 [ 0, %30 ], [ %47, %44 ]
+  %46 = getelementptr inbounds %struct.TableChunk, ptr %31, i64 %45, i32 1
+  store i32 0, ptr %46, align 8, !tbaa !325
+  %47 = add nuw nsw i64 %45, 1
+  %48 = icmp slt i64 %47, %28
+  %49 = trunc i64 %45 to i32
+  %50 = add i32 %49, 2
+  %51 = select i1 %48, i32 %50, i32 0
+  %52 = getelementptr inbounds %struct.TableChunk, ptr %31, i64 %45, i32 2
+  store i32 %51, ptr %52, align 4, !tbaa !341
+  %53 = icmp eq i64 %47, %28
+  br i1 %53, label %32, label %44, !llvm.loop !346
 
-51:                                               ; preds = %29, %5
+54:                                               ; preds = %32, %5
   ret void
 }
 

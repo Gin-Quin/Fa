@@ -610,9 +610,13 @@ stop with the existing out-of-memory exit; ordinary negative/empty cases keep th
 ## Compact integer map slots and reserved inline appends (2026-11-06)
 
 A native inline map with a 32-bit integer key and a value of at most 32 bits uses an 8-byte
-key/value slot. Key zero has one extra slot and an explicit presence bit; every other key
-is its own empty-slot marker. Copies, growth and backward-shift deletion preserve that
-representation. Other integer widths retain their existing layouts and hash protocol.
+key/value slot. The all-ones key has one extra slot and an explicit presence bit;
+all-ones marks an empty probe slot, while ordinary zero lives in the probe array.
+Copies, growth and backward-shift deletion preserve every key bit pattern.
+The append helper receives raw key bits alongside the hash, keeping its sentinel
+check visible to range analysis. This replaces the original zero sentinel:
+nonnegative signed keys can include zero without taking an extra-entry branch.
+Other integer widths retain their existing layouts and hash protocol.
 
 A counted character/digit append loop may keep a dynamically short result inline. Its
 reservation checks the actual prefix plus the rounds; a separate mode bit is invariant on
@@ -745,3 +749,32 @@ Only String/Character arrays can have the negative-capacity compact representati
 When a statically different element width is passed to ordinary array assignment or copy,
 the runtime does not inspect or materialize that form. Equal-sized non-String layouts
 conservatively retain the check.
+
+
+## Private negative map probes (2026-11-07)
+
+A whole-program synchronous function may retain one negative inline-map probe
+for a private 32-bit integer map and local key. Its function slots carry validity,
+table identity, key bits, hash and negative position. The validity slot exists
+before every possible invalidation, including mutations emitted before the first
+producer: lowering order does not establish dominance across a runtime backedge.
+A producer always searches afresh; subsequent observations test validity and both
+identities before using the hint. Other map index writes, growth, reserve, clear,
+map-owning drops and unknown calls invalidate it. Named program calls consume the
+analyzer's mutation/invalidation roots after evaluating all arguments; mutation
+of an independent array of scalars does not invalidate a map hint.
+
+Deleting an inline entry introduces exactly one new empty position, the final
+hole of backward shifting; every old empty slot remains empty. A negative hint
+therefore becomes the earlier of its old empty position and that hole in cyclic
+order from its key's home. The reserved sentinel slot is outside that order.
+The new release helper returns this adjusted hint without changing existing
+release APIs. The append helper's raw-key argument and the sentinel change share
+a composite object-cache contract with the probe lowering.
+
+The initial admission rejects multiple files, compilation per unit, C-library
+entries, foreign declarations/calls, generic functions/types, opaque key loops,
+reactivity, concurrency, function-value calls and callbacks. A referenced,
+captured or shared map is not a candidate. Missing facts retain normal lookups.
+This is a compiler representation, with no change to source value semantics or
+to user-visible map operations.

@@ -49,6 +49,7 @@ mod inlining;
 mod io;
 mod iterators;
 mod json;
+mod map_probes;
 mod numbers;
 mod objects;
 mod ownership;
@@ -371,6 +372,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// and measured, by symbol: the call, evaluated again (on an immutable
 	/// text) where they are read, so that the array is never built.
 	virtual_code_points: FxHashMap<SymbolId, NodeId>,
+	map_probes: map_probes::Probes<'ctx>,
 	/// The whole program is lowered in this module (`compile.rs`, not the
 	/// units of `units.rs`): whole-program layouts may apply (dense maps).
 	whole_program: bool,
@@ -555,6 +557,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
 			field_flags: std::cell::RefCell::new(FxHashMap::default()),
 			virtual_code_points: FxHashMap::default(),
+			map_probes: map_probes::Probes::default(),
 			whole_program: false,
 			program_facts: None,
 			fact_log: None,
@@ -1070,6 +1073,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		function: FunctionValue<'ctx>,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<inkwell::values::BasicValueEnum<'ctx>, Error> {
+		self.invalidate_runtime_map_probes(function.get_name().to_str().unwrap_or(""))?;
 		let call = self.builder.build_call(function, arguments, "")?;
 		Ok(call
 			.try_as_basic_value()
@@ -1083,6 +1087,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		name: &str,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<(), Error> {
+		self.invalidate_runtime_map_probes(name)?;
 		let function = self.runtime.function(name)?;
 		self.builder.build_call(function, arguments, "")?;
 		Ok(())

@@ -50,6 +50,8 @@ const TABLE_DENSE: u64 = 1 << 40;
 const TABLE_INLINE: u64 = 1 << 41;
 /// A 32-bit key occupies its own presence word (`0` in a spare slot).
 const TABLE_INLINE_KEY32: u64 = 1 << 42;
+/// Eight-byte header padding keeps String entries aligned in inline slots.
+const TABLE_INLINE_ALIGN8: u64 = 1 << 43;
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	// ── layouts ─────────────────────────────────────────────────────────
@@ -137,10 +139,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Bool | Repr::F32 => true,
 			_ => false,
 		};
-		let inline = dense
-			&& matches!(key, Repr::Int(int) if matches!(int.bits, 8 | 16 | 32))
-			&& value.is_some_and(small)
-			&& !self.deleted_while_iterated(ty);
+		let integer_inline = matches!(key, Repr::Int(int) if matches!(int.bits, 8 | 16 | 32))
+			&& value.is_some_and(small);
+		let string_inline = key == Repr::Str
+			&& value.is_some_and(|value| {
+				matches!(value,
+			Repr::Int(int) if int.bits <= 64)
+					|| matches!(value, Repr::Bool | Repr::F32 | Repr::F64)
+			});
+		let inline = dense && (integer_inline || string_inline) && !self.deleted_while_iterated(ty);
 		Ok(Table {
 			key,
 			value,
@@ -157,11 +164,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let size = table.entry.size_of().expect("a sized entry");
 		if table.inline {
 			let flags = TABLE_INLINE
-				| if matches!(table.key, Repr::Int(int) if int.bits == 32) {
-					TABLE_INLINE_KEY32
+				| if table.key == Repr::Str {
+					TABLE_INLINE_ALIGN8
 				} else {
 					0
-				};
+				} | if matches!(table.key, Repr::Int(int) if int.bits == 32) {
+				TABLE_INLINE_KEY32
+			} else {
+				0
+			};
 			let flag = size.get_type().const_int(flags, false);
 			// the size is far below the flag: xor sets it
 			return size.const_xor(flag);
@@ -457,7 +468,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Union => {
 				// the member: values of different members are different
 				let pointer = value.into_pointer_value();
-				let id = builder.build_load(i64, pointer, "")?.into_int_value();
+				let id = self.union_id(builder, pointer)?;
 				self.mix(builder, id)?
 			}
 			Repr::InlineUnion(_) => {

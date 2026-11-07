@@ -50,6 +50,83 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
+	/// `split(...).filter((part) => not part.isEmpty())`: the callback has
+	/// no effects and only asks whether this part has bytes. Filtering while
+	/// producing the parts preserves their order and the original capacity.
+	pub(super) fn nonempty_split_filter(&self, call: NodeId) -> Option<NodeId> {
+		let ungroup = |mut node| {
+			while let View::Group(inner) = self.view(node) {
+				node = inner;
+			}
+			node
+		};
+		if self.builtin_path(call) != Some("Array#filter") {
+			return None;
+		}
+		let View::Call { callee, .. } = self.view(call) else {
+			return None;
+		};
+		let View::Access { target, members } = self.view(callee) else {
+			return None;
+		};
+		let split = ungroup(target);
+		if members.len() != 1 || self.builtin_path(split) != Some("String#split") {
+			return None;
+		}
+		let callbacks: Vec<_> = self
+			.analysis
+			.call(call)?
+			.arguments
+			.iter()
+			.filter_map(|argument| {
+				if let Argument::Given(value) = argument {
+					Some(*value)
+				} else {
+					None
+				}
+			})
+			.collect();
+		let [callback] = callbacks.as_slice() else {
+			return None;
+		};
+		let View::Lambda { signature, body } = self.view(ungroup(*callback)) else {
+			return None;
+		};
+		if signature.is_async
+			|| !signature.generics.is_empty()
+			|| signature.parameters.len() != 1
+			|| signature.throws.is_some()
+			|| !signature.requires.is_empty()
+			|| !signature.mutates.is_empty()
+			|| !signature.invalidates.is_empty()
+		{
+			return None;
+		}
+		let parameter = signature.parameters.first()?;
+		if !matches!(self.view(parameter), View::Name(_)) {
+			return None;
+		}
+		let symbol = self.analysis.symbols.symbol_of_decl(parameter)?;
+		let View::Not(empty) = self.view(ungroup(body)) else {
+			return None;
+		};
+		let empty = ungroup(empty);
+		if self.builtin_path(empty) != Some("String#isEmpty") {
+			return None;
+		}
+		let View::Call { callee, arguments } = self.view(empty) else {
+			return None;
+		};
+		let View::Access { target, members } = self.view(callee) else {
+			return None;
+		};
+		(arguments.is_empty()
+			&& members.len() == 1
+			&& matches!(self.view(ungroup(target)), View::Name(_))
+			&& self.analysis.resolution(ungroup(target)) == Resolution::Local(symbol))
+		.then_some(split)
+	}
+
 	/// The split calls of the file being lowered whose parts are views.
 	fn split_views(&self) -> std::cell::Ref<'_, SplitViews> {
 		if !self.split_views.borrow().contains_key(&self.file) {

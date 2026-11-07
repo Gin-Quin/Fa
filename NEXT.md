@@ -291,3 +291,24 @@ root remains WIP, with no Task RC or automatic Resource sharing.
 Three more clean integrated worktrees were removed with agent confirmation:
 fa-native-region-validation, interpreter-continuations and arena-regions. Their
 branches and logs remain; /tmp/fa-resume-cleaned-worktrees.json is updated.
+
+## Reproducible Goose metrology (merged validation complete)
+
+The audit runner defaults to the exact16 original programs, keeping9 secondary
+ports separate. Every executable has a checked manifest (sources, size, flags,
+modes, exact output, compiler paths/versions/hashes and binary hash); stale,
+tampered or unmanifested reuse is refused. The causal detached-task handshake
+is ec5c93b. The remaining benchmark-only delta448e7b8 is coalesced here without
+replacing NEXT. Python16/16, workspace clippy and COMPLETE LLVM workspace full
+all exit0: /tmp/fa-metrology-lead-{python,clippy,workspace-full}.log, session54936
+consumed. The previous full's temporary30s suspension produced no failure.
+
+Baseline dbcee1d and exact Clang18 executables are archived in
+/tmp/fa-native-perf-next/compilers; reports are default-clang18-original16,
+initial-arrays-cpu.json and initial-arrays-memory.json. The latter uses GNU time,
+not inherited wait4 RSS. Baseline interp10496/Goose5504KiB, sexp57856/27136,
+scene7552/6656. CPU gaps remain largest on interp2.08x, scene1.50x, sexp1.39x,
+respond1.17x, records1.14x and lru1.12x. A general empty-array private-buffer
+prototype was rejected for regressions elsewhere. No overall win is claimed.
+Direct Root-to-Root compact fields remain a separate prototype; its interp
+instruction count regresses5.2 percent, so CPU/memory still require measurement.

@@ -930,6 +930,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		right: Val<'ctx>,
 		node: NodeId,
 	) -> Result<(Val<'ctx>, Val<'ctx>), Error> {
+		let expand = |value: Val<'ctx>| {
+			if let Repr::Rec(target) = value.repr
+				&& self.compressed_union_link(value.repr).is_some()
+			{
+				self.unfold_rec(value, target, node.index())
+			} else {
+				Ok(value)
+			}
+		};
+		let (left, right) = (expand(left)?, expand(right)?);
 		let float = |repr: Repr| matches!(repr, Repr::F64 | Repr::F32 | Repr::Percentage);
 		Ok(match (left.repr, right.repr) {
 			(Repr::Int(a), Repr::Int(b)) => {

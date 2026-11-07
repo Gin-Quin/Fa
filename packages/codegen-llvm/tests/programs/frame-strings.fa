@@ -1,0 +1,108 @@
+-- Frame buffers never move between locals, aliases or loop iterations.
+-- Every ordinary String boundary still owns an independent value.
+-- asynchronous: false
+function keep = (text: String): Array<String> => [text]
+function inspect = (count: Integer) => {
+	mutable text = ""
+	for 0..count {
+		text += "x"
+	}
+	let first = text
+	let second = first
+	text = "replacement"
+	assert first.length == count
+	assert second == first
+	for 0..3 {
+		let snapshot = first
+		let duplicate = snapshot
+		assert duplicate.length == count
+	}
+	text = first
+	text += "!"
+	let saved = keep(text)
+	text = "changed again"
+	assert saved.get(0) == first + "!"
+	text = first + "!"
+	assert text.length == count + 1
+	assert text.endsWith("!")
+	assert first.length == count
+}
+for count in 0..90 {
+	inspect(count)
+}
+function literalCopies = () => {
+	mutable text = "1234567890123456789012345678901234567890"
+	let original = text
+	text = "other"
+	assert original == "1234567890123456789012345678901234567890"
+	assert text == "other"
+}
+literalCopies()
+function templateCopies = (prefix: String) => {
+	let text = "{prefix}:123456789012345678901234567890"
+	let copy = text
+	assert copy.startsWith(prefix)
+	assert copy.endsWith(":123456789012345678901234567890")
+	assert text == copy
+}
+templateCopies("short")
+templateCopies("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz")
+function preserveReservation = () => {
+	mutable text = String.from("123456789012345678901234567890", capacity = 128)
+	let previous = text.capacity
+	text = "x"
+	assert text == "x"
+	text.reserve(128)
+	let reserved = text.capacity
+	text = ""
+	assert text.capacity >= reserved
+	assert reserved >= previous
+	text += "é\r\n"
+	assert text.capacity >= reserved
+	assert text.length == 2
+}
+preserveReservation()
+function returning = (count: Integer): String => {
+	mutable text = ""
+	for 0..count {
+		text += "x"
+	}
+	text + "!"
+}
+function bytes = (prefix: String): Array<Byte> => {
+	let text = "{prefix}:123456789012345678901234567890"
+	text.bytes()
+}
+function characters = (prefix: String): Array<Character> => {
+	let text = "{prefix}:123456789012345678901234567890"
+	text.characters()
+}
+function parts = (prefix: String): Array<String> => {
+	let text = "{prefix} 123456789012345678901234567890"
+	let split = text.split(" ")
+	split
+}
+let savedBytes = bytes("é")
+let savedCharacters = characters("é")
+let savedParts = parts("é")
+for count in 0..90 {
+	let text = returning(count)
+	inspect(50)
+	assert text.length == count + 1
+	assert text.endsWith("!")
+}
+assert savedBytes.length == 33
+assert savedBytes.get(0) == 195
+assert savedCharacters.length == 32
+assert savedCharacters.get(0) == "é"
+assert savedParts.get(0) == "é"
+assert savedParts.get(1) == "123456789012345678901234567890"
+type Reader = () => String
+function makeReader = (prefix: String): Reader => {
+	let text = "{prefix}:123456789012345678901234567890"
+	() => text + "!"
+}
+let reader = makeReader("é")
+inspect(50)
+assert reader() == "é:123456789012345678901234567890!"
+console.log("frame strings") -- prints: frame strings

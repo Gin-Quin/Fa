@@ -27,8 +27,18 @@ use inkwell::IntPredicate;
 use inkwell::values::{IntValue, PointerValue};
 
 use crate::error::Error;
-use crate::lower::values::{Repr, Val};
+use crate::lower::values::{IntRepr, Repr, Val};
 use crate::lower::{Lowering, Slot};
+
+/// Bookkeeping stays separate from the header, whose last word also holds
+/// inline payload bytes. These scalar slots promote to loop phis, avoiding a
+/// reload of that word after every character's potentially aliasing byte store.
+#[derive(Copy, Clone)]
+pub(crate) struct ReservedInline<'ctx> {
+	mode: PointerValue<'ctx>,
+	length: PointerValue<'ctx>,
+	flags: PointerValue<'ctx>,
+}
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// Reserves the room of the appends of a counted loop (see the module).
@@ -110,6 +120,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.analysis.symbols.symbol(symbol).kind,
 				SymbolKind::Let | SymbolKind::Mutable
 			) || self.references.contains_key(&symbol)
+				|| self.referenced_locals().contains(&symbol)
 				|| self.shared.contains_key(&symbol)
 				|| self.reactive_sources.contains_key(&symbol)
 				|| self.node_repr(target)? != Repr::Str
@@ -141,9 +152,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				"fa_string_reserve_inline",
 				&[slot.pointer.into(), rounds.into()],
 			)?;
-			let mode = self.alloca(Repr::Bool, "append_inline")?.pointer;
-			self.set_append_mode(slot.pointer, mode)?;
-			self.inline_reserved.insert((self.file, statement), mode);
+			let state = ReservedInline {
+				mode: self.alloca(Repr::Bool, "append_inline")?.pointer,
+				length: self
+					.alloca(
+						Repr::Int(IntRepr {
+							bits: self.usize.get_bit_width(),
+							signed: false,
+						}),
+						"append_length",
+					)?
+					.pointer,
+				flags: self.alloca_type(self.context.i8_type().into(), "append_flags")?,
+			};
+			self.set_append_mode(slot.pointer, state)?;
+			self.inline_reserved.insert((self.file, statement), state);
 			self.reserved_appends
 				.insert((self.file, statement), (counter, end, inclusive));
 			reserved.push(statement);
@@ -333,7 +356,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		counter: PointerValue<'ctx>,
 		end: IntValue<'ctx>,
 		inclusive: bool,
-		inline_mode: Option<PointerValue<'ctx>>,
+		inline_mode: Option<ReservedInline<'ctx>>,
 	) -> Result<(), Error> {
 		let Repr::Int(int) = value.repr else {
 			return Err(Error::Llvm("an integer is appended".into()));
@@ -359,6 +382,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.likely(branch)?;
 		self.builder.position_at_end(store);
 		let i8 = self.context.i8_type();
+		let byte = self.builder.build_int_truncate(wide, i8, "")?;
+		let byte = self
+			.builder
+			.build_or(byte, i8.const_int(b'0' as u64, false), "")?;
+		if let Some(mode) = inline_mode {
+			let inline = self
+				.builder
+				.build_load(self.context.bool_type(), mode.mode, "")?
+				.into_int_value();
+			self.reserved_inline_byte(target, byte, join, inline, mode)?;
+		}
 		let header = self
 			.load(Slot {
 				pointer: target,
@@ -375,17 +409,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_extract_value(header, 1, "")?
 			.into_int_value();
-		let byte = self.builder.build_int_truncate(wide, i8, "")?;
-		let byte = self
-			.builder
-			.build_or(byte, i8.const_int(b'0' as u64, false), "")?;
-		if let Some(mode) = inline_mode {
-			let inline = self
-				.builder
-				.build_load(self.context.bool_type(), mode, "")?
-				.into_int_value();
-			self.reserved_inline_byte(target, header, byte, join, inline)?;
-		}
 		let destination = unsafe { self.builder.build_in_bounds_gep(i8, bytes, &[length], "")? };
 		self.builder.build_store(destination, byte)?;
 		let longer = self
@@ -445,38 +468,36 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	fn reserved_inline_byte(
 		&mut self,
 		target: PointerValue<'ctx>,
-		header: inkwell::values::StructValue<'ctx>,
 		byte: IntValue<'ctx>,
 		join: inkwell::basic_block::BasicBlock<'ctx>,
 		inline: IntValue<'ctx>,
+		state: ReservedInline<'ctx>,
 	) -> Result<(), Error> {
-		let capacity = self
-			.builder
-			.build_extract_value(header, 2, "")?
-			.into_int_value();
 		let in_place = self.append_block("reserved_inline");
 		let heap = self.append_block("reserved_heap");
 		self.builder
 			.build_conditional_branch(inline, in_place, heap)?;
 		self.builder.position_at_end(in_place);
-		let (_, length) = self.inline_tag(capacity)?;
+		let length = self
+			.builder
+			.build_load(self.usize, state.length, "")?
+			.into_int_value();
 		let i8 = self.context.i8_type();
 		let destination = unsafe {
 			self.builder
 				.build_in_bounds_gep(i8, target, &[length], "")?
 		};
 		self.builder.build_store(destination, byte)?;
-		// The last word also contains inline payload bytes. Replacing that
-		// word from the old header would overwrite a byte just appended at
-		// offset16 (offset8 on wasm). Only the final tag byte changes.
-		let shift = self
-			.usize
-			.const_int(u64::from(self.usize.get_bit_width()) - 8, false);
-		let tag = self.builder.build_right_shift(capacity, shift, false, "")?;
-		let tag = self.builder.build_int_truncate(tag, i8, "")?;
 		let longer = self
 			.builder
-			.build_int_nuw_add(tag, i8.const_int(1, false), "")?;
+			.build_int_nuw_add(length, self.usize.const_int(1, false), "")?;
+		self.builder.build_store(state.length, longer)?;
+		let flags = self
+			.builder
+			.build_load(i8, state.flags, "")?
+			.into_int_value();
+		let tag_length = self.builder.build_int_truncate(longer, i8, "")?;
+		let tag = self.builder.build_or(flags, tag_length, "")?;
 		let last = u64::from(self.usize.get_bit_width() / 8) * 3 - 1;
 		let tag_pointer = unsafe {
 			self.builder.build_in_bounds_gep(
@@ -486,7 +507,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				"",
 			)?
 		};
-		self.builder.build_store(tag_pointer, longer)?;
+		// Only the last byte changes; a word store would overwrite payload.
+		self.builder.build_store(tag_pointer, tag)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(heap);
 		Ok(())
@@ -498,7 +520,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	fn set_append_mode(
 		&self,
 		target: PointerValue<'ctx>,
-		mode: PointerValue<'ctx>,
+		state: ReservedInline<'ctx>,
 	) -> Result<(), Error> {
 		let header = self
 			.load(Slot {
@@ -512,8 +534,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_extract_value(header, 2, "")?
 			.into_int_value();
-		let (inline, _) = self.inline_tag(capacity)?;
-		self.builder.build_store(mode, inline)?;
+		let (inline, length) = self.inline_tag(capacity)?;
+		self.builder.build_store(state.mode, inline)?;
+		self.builder.build_store(state.length, length)?;
+		let shift = self
+			.usize
+			.const_int(u64::from(self.usize.get_bit_width()) - 8, false);
+		let tag = self.builder.build_right_shift(capacity, shift, false, "")?;
+		let tag = self
+			.builder
+			.build_int_truncate(tag, self.context.i8_type(), "")?;
+		let flags =
+			self.builder
+				.build_and(tag, self.context.i8_type().const_int(0xe0, false), "")?;
+		self.builder.build_store(state.flags, flags)?;
 		Ok(())
 	}
 
@@ -527,7 +561,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		counter: PointerValue<'ctx>,
 		end: IntValue<'ctx>,
 		inclusive: bool,
-		inline_mode: Option<PointerValue<'ctx>>,
+		inline_mode: Option<ReservedInline<'ctx>>,
 	) -> Result<(), Error> {
 		let (suffix_bytes, suffix_length) = self.string_parts(suffix)?;
 		let suffix_capacity = self.string_capacity(suffix)?;
@@ -551,6 +585,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.likely(branch)?;
 		self.builder.position_at_end(store);
 		let i8 = self.context.i8_type();
+		let byte = self
+			.builder
+			.build_load(i8, suffix_bytes, "")?
+			.into_int_value();
+		if let Some(mode) = inline_mode {
+			let inline = self
+				.builder
+				.build_load(self.context.bool_type(), mode.mode, "")?
+				.into_int_value();
+			self.reserved_inline_byte(target, byte, join, inline, mode)?;
+		}
 		let slot = Slot {
 			pointer: target,
 			repr: Repr::Str,
@@ -568,17 +613,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_extract_value(header, 1, "")?
 			.into_int_value();
-		let byte = self
-			.builder
-			.build_load(i8, suffix_bytes, "")?
-			.into_int_value();
-		if let Some(mode) = inline_mode {
-			let inline = self
-				.builder
-				.build_load(self.context.bool_type(), mode, "")?
-				.into_int_value();
-			self.reserved_inline_byte(target, header, byte, join, inline)?;
-		}
 		let destination = unsafe { self.builder.build_in_bounds_gep(i8, bytes, &[length], "")? };
 		self.builder.build_store(destination, byte)?;
 		let longer = self

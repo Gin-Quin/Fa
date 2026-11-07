@@ -98,16 +98,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Common textual/scalar templates need no shared builder. Evaluate all
 	/// expressions first, then borrow their values for one exact-sized join.
-	pub(crate) fn string_template(
+	pub(super) fn string_template(
 		&mut self,
 		parts: TemplateParts<'_>,
 		destination: Option<Slot<'ctx>>,
+		local: Option<super::frame_strings::FrameString<'ctx>>,
 	) -> Result<Option<Val<'ctx>>, Error> {
 		for part in parts.iter() {
 			if let TemplatePart::Expression(node) = part {
 				match self.node_repr(node)? {
 					Repr::Str => {
-						if let Some(destination) = destination {
+						if let Some(destination) = destination
+							&& local.is_none()
+						{
 							// Only independent owning locals can be read while the
 							// destination's buffer is reused. References and calls
 							// keep the ordinary allocating path.
@@ -174,17 +177,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some(slot) => slot,
 			None => self.alloca(Repr::Str, "template")?,
 		};
-		let allocate = if destination.is_some() {
-			"fa_string_replace_buffer"
+		let bytes = if let Some(local) = local {
+			self.call_value(
+				self.runtime.function("fa_string_allocate_local")?,
+				&[
+					total.into(),
+					simple.into(),
+					local.buffer.into(),
+					result.pointer.into(),
+					self.context
+						.i32_type()
+						.const_int(local.mutable as u64, false)
+						.into(),
+				],
+			)?
 		} else {
-			"fa_string_allocate"
-		};
-		let bytes = self
-			.call_value(
+			let allocate = if destination.is_some() {
+				"fa_string_replace_buffer"
+			} else {
+				"fa_string_allocate"
+			};
+			self.call_value(
 				self.runtime.function(allocate)?,
 				&[total.into(), simple.into(), result.pointer.into()],
 			)?
-			.into_pointer_value();
+		}
+		.into_pointer_value();
 		let mut offset = self.usize.const_zero();
 		for (part, length) in values {
 			let target = unsafe {
@@ -559,37 +577,42 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
-	/// Whether a string with this capacity word owns a heap block of at
-	/// least `needed` bytes: `needed <= kind < KIND_MASK`, where `kind` is
-	/// the capacity without its `SIMPLE` flag (an inline string has its
-	/// `INLINE` bit, a view `KIND_MASK`, a static string 0). The length word
-	/// of an inline string holds its bytes: `needed` may be anything there,
-	/// and only `kind` decides. (A shifted form without 64-bit constants was
-	/// measured: one more instruction per check in `strlist`'s loops, and no
-	/// fewer saved registers in `calc`'s generator.)
+	/// Whether a string has writable room for `needed` bytes. Removing its
+	/// SIMPLE and frame bits leaves a heap capacity or the frame's 64 bytes;
+	/// inline values retain their INLINE bit, and views normalize to the
+	/// excluded limit. Only the length changes on the fast append path;
+	/// the original capacity word retains the frame tag.
 	pub(crate) fn owned_room(
 		&self,
 		capacity: IntValue<'ctx>,
 		needed: IntValue<'ctx>,
 	) -> Result<IntValue<'ctx>, Error> {
-		let kind = self
-			.builder
-			.build_and(capacity, self.simple_flag().const_not(), "")?;
+		let kind = self.builder.build_and(
+			capacity,
+			self.simple_flag()
+				.const_add(self.usize.const_int(1, false))
+				.const_not(),
+			"",
+		)?;
 		let room = self
 			.builder
 			.build_int_compare(IntPredicate::ULE, needed, kind, "")?;
-		let owned =
-			self.builder
-				.build_int_compare(IntPredicate::ULT, kind, self.string_kind_mask(), "")?;
+		let owned = self.builder.build_int_compare(
+			IntPredicate::ULT,
+			kind,
+			self.string_kind_mask()
+				.const_sub(self.usize.const_int(1, false)),
+			"",
+		)?;
 		Ok(self.builder.build_and(room, owned, "")?)
 	}
 
 	/// The most digits of an integer that [`Lowering::append_integer`]
 	/// writes in place.
-	const IN_PLACE_DIGITS: u32 = 4;
+	const IN_PLACE_DIGITS: u32 = 5;
 
 	/// `text += "{value}"` for an integer of at most 64 bits: a value below
-	/// 10^4 is written in place, one case per number of digits, after one
+	/// 10^5 is written in place, one case per number of digits, after one
 	/// room check, without a scratch buffer, a copy or a call (a value whose
 	/// range LLVM knows keeps only its cases); a larger or negative value,
 	/// or a string without room, takes the decimal text and `append_string`.
@@ -666,39 +689,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			} else {
 				None
 			};
-			for position in 0..count {
-				let power = 10u64.pow(count - 1 - position);
-				let mut digit = wide;
-				if power > 1 {
-					digit = self.builder.build_int_unsigned_div(
-						digit,
-						i64.const_int(power, false),
-						"",
-					)?;
-				}
-				if position > 0 {
-					digit =
-						self.builder
-							.build_int_unsigned_rem(digit, i64.const_int(10, false), "")?;
-				}
-				let character =
-					self.builder
-						.build_int_truncate(digit, self.context.i8_type(), "")?;
-				let character = self.builder.build_or(
-					character,
-					self.context.i8_type().const_int(b'0' as u64, false),
-					"",
-				)?;
-				let address = unsafe {
-					self.builder.build_in_bounds_gep(
-						self.context.i8_type(),
-						destination,
-						&[usize.const_int(position as u64, false)],
-						"",
-					)?
-				};
-				self.builder.build_store(address, character)?;
-			}
+			self.write_small_decimal(destination, wide, count)?;
 			let longer =
 				self.builder
 					.build_int_nuw_add(length, usize.const_int(count as u64, false), "")?;
@@ -1130,7 +1121,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(value) = self.single_integer_template(parts)? {
 			return Ok(value);
 		}
-		if let Some(value) = self.string_template(parts, None)? {
+		if let Some(value) = self.string_template(parts, None, None)? {
 			return Ok(value);
 		}
 		if !self.build_template(parts)? {

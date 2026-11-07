@@ -217,6 +217,7 @@ Compile-time work happens on every build. Keep it proportionate: a type function
 ## Implementation details
 
 - An evaluation step is one evaluated node of the checked tree; the limit of 100 million steps is counted per `@` call.
+- Fa function calls have a default depth limit of 10 000 (`META003`), including calls from defaults and callbacks. Type-function applications have their own limit of 256 (`META004`). Heap continuations make these limits independent of the native stack size, thread count and address-space limits. Frames and continuations count toward the 256 MB evaluation heap budget; preparation and resumption do not add evaluation steps.
 - The memory of an `@` call is checked before building a large value at once (a text, the items of a range), and every 1 024 steps against the heap of the compiler, which counts its allocations: the compiler stays below 512 MB. A value is copied on write: changing a collection that nothing else shares doesn't copy it.
 - The branch of `@if` that is not taken is parsed but not analyzed, like Rust's `cfg`. The analysis is parameterized by the target: `fa check` analyzes each configured target, sharing the analysis of every declaration that doesn't read `target` or `configuration`.
 - A named declaration inside a module-level `@for` is the error `MOD018`.

@@ -1,0 +1,47 @@
+-- asynchronous: false
+-- Each root in the forest owns an independent region. Returning a child
+-- of a temporary tree copies it before its parent's region is released.
+-- file: library/model.fa
+export namespace = {
+	type Tree = Union {
+		Empty
+		Leaf = { text: String }
+		Branch = { left: Tree, right: Tree }
+	}
+}
+-- file: library/build.fa
+export function = (depth: Integer, text: String): model.Tree => if depth == 0 {
+	model.Tree.Leaf { text }
+} else {
+	model.Tree.Branch { left = build(depth - 1, text), right = build(depth - 1, text) }
+}
+-- file: library/subtree.fa
+export function = (tree: model.Tree): model.Tree => when tree is {
+	model.Tree.Empty => tree
+	model.Tree.Leaf => tree
+	model.Tree.Branch as { left } => left
+}
+-- file: library/count.fa
+export function = (tree: model.Tree): Integer => when tree is {
+	model.Tree.Empty => 0
+	model.Tree.Leaf as { text } => {
+		assert text.length > 23
+		1
+	}
+	model.Tree.Branch as { left, right } => count(left) + count(right)
+}
+-- file: application/main.fa
+export function = () => {
+	let text = "a long owned leaf payload".repeat(2)
+	mutable roots: Array<library.model.Tree> = []
+	for depth in 0..4 { roots.push(library.build(depth, text)) }
+	let detached = library.subtree(library.build(3, text))
+	console.log(roots.length) -- prints: 4
+	for root in roots { console.log(library.count(root)) }
+	console.log(library.count(detached))
+}
+-- prints: 1
+-- prints: 2
+-- prints: 4
+-- prints: 8
+-- prints: 4

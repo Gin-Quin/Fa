@@ -198,3 +198,38 @@ No automatic synchronization of Resource fields. Analyzer must track the cell
 aliases and Guard loans: neither an old alias outside a Mutex nor a Resource
 handle copied from Guard.value may bypass the protection. Task remains affine
 to its executor and never transferable between workers.
+
+## Validated combined delivery (2026-11-07)
+
+The root worker/Error lot is committed as126f483 after complete LLVM full0,
+style/clippy/runtime/site checks. The following three delivered lots are now
+combined on lead, preserving its NEXT and current runtime/performance work:
+
+- ecda9e5: written method origins, owner/forall ABI and method-specific native keys;
+-1a0d6bf: closed ROOT_REGIONS proof/manifest, common whole-unit facts and cache reads;
+-2ec0e57: heap continuations, exact evaluation budgets and stable call depth10000.
+
+Combined workspace clippy, analyzer/interpreter/JS crates,47 LLVM IR checks and
+COMPLETE workspace LLVM full all exit0. Logs /tmp/fa-three-deliveries-{clippy,
+frontends,llvm-checks,workspace-full}.log. Cache version combines origins,
+platform/effects/errors/regions as split7. Metaprogramming implementation note
+finding42 is applied and removed from pending-documentation.
+
+Further delivered, not yet merged: daa8ebc Frame64byte strings (native_perf),
+a9b1375 capacity-unobserved ROOT_REGIONS fact (proofs). Both passed full/clippy.
+Keep their worktrees while agents reuse them or until subsequent deltas are safe.
+Physical region layouts are separately frozen748d3a4 in
+/tmp/fa-native-region-validation, full /tmp/fa-region-frozen-workspace-full.log.
+
+Root shared-values has experimental origins+Copy+callable checkpoints plus
+TypeInfo tag4, Task/default guards and native entry ownership. Its new
+owned-task-parameters program passes Bun and3LLVM/leak-check, including failed
+earlier default releasing a later provided Task. Shared/default resources pass
+Bun and3LLVM. JS runtime308 and entire JS crate pass after reviewed goldens.
+Those changes are NOT a frozen/complete compiler integration candidate yet.
+
+Latest open semantic clarification: user asks what “shared resource” means in the
+generic exact-mutation question. Root explained a type with destroy and copies
+sharing one counted instance/state, as previously selected. No choice of generic
+instantiation restrictions vs conditional effects has been made; do not assume
+an elapsed-time answer. Agents continue concrete cell/loan proofs independently.

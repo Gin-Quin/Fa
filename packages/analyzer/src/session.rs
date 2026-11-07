@@ -183,6 +183,30 @@ impl Session {
 			.collect()
 	}
 
+	/// The whole graph a unit's closed region proof must account for.
+	pub(crate) fn region_modules(&self) -> Arc<[String]> {
+		if let Some(shared) = &self.shared {
+			return Arc::clone(shared.region_modules.get_or_init(|| {
+				let mut modules: Vec<_> = shared.scans.keys().cloned().collect();
+				modules.sort();
+				modules.into()
+			}));
+		}
+		let mut modules: Vec<_> = self
+			.files
+			.iter()
+			.filter(|source| {
+				source.analyzed
+					&& self.loaded_module(&source.module) == Some(source.analysis.file)
+					&& !matches!(source.role, crate::modules::FileRole::Configuration(_))
+			})
+			.map(|source| source.module.to_string())
+			.collect();
+		modules.sort();
+		modules.dedup();
+		modules.into()
+	}
+
 	/// The resolver, shared.
 	pub(crate) fn resolver_arc(&self) -> Option<Arc<dyn ModuleResolver>> {
 		self.resolver.clone()
@@ -1132,6 +1156,47 @@ fn merge_interface(
 					.collect();
 				(decl, functions)
 			})
+			.collect(),
+		type_parameters: interface
+			.type_parameters
+			.iter()
+			.map(|(&decl, &params)| (decl, merger.list(params)))
+			.collect(),
+		written_types: interface
+			.written_types
+			.iter()
+			.map(|(&decl, written)| (decl, written.merged(merger)))
+			.collect(),
+		written_returns: interface
+			.written_returns
+			.iter()
+			.map(|(&decl, origin)| {
+				let origin = match origin {
+					crate::analysis::WrittenReturn::Named(written) => {
+						crate::analysis::WrittenReturn::Named(written.merged(merger))
+					}
+					other => other.clone(),
+				};
+				(decl, origin)
+			})
+			.collect(),
+		written_fields: interface
+			.written_fields
+			.iter()
+			.map(|(&(decl, name), origin)| {
+				let origin = match origin {
+					crate::analysis::WrittenReturn::Named(written) => {
+						crate::analysis::WrittenReturn::Named(written.merged(merger))
+					}
+					other => other.clone(),
+				};
+				((decl, merger.sym(name)), origin)
+			})
+			.collect(),
+		function_owners: interface
+			.function_owners
+			.iter()
+			.map(|(&function, &owner)| (function, merger.decl_key(owner)))
 			.collect(),
 		nested_types: interface
 			.nested_types

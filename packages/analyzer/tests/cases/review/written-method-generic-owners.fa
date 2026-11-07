@@ -1,0 +1,47 @@
+-- Generic arguments of a method's owner remain part of its identity even
+-- when the owner's fields do not mention those arguments.
+type Marker<Payload> = {
+	name: String
+	function transform = (self, value: Payload): Payload => {
+		console.log(self.name)
+		return value
+	}
+}
+function transform = <Payload, Item: { transform: (self, value: Payload) => Payload }>(item: Item, value: Payload): Payload => item.transform(value)
+let text = Marker<String> { name = "text" }
+let number = Marker<Integer> { name = "number" }
+console.log(transform(text, "hello"))
+-- prints: text
+-- prints: hello
+console.log(transform(number, 42))
+-- prints: number
+-- prints: 42
+type Labeled<label: String> = {
+	name: String
+	function describe = (self): String => "{label}: {self.name}"
+	function indirect = (self): String => describeValue(self)
+}
+function describeValue = <Item: { describe: (self) => String }>(item: Item): String => item.describe()
+console.log(describeValue(Labeled<"A"> { name = "one" }), describeValue(Labeled<"B"> { name = "two" }))
+-- prints: A: one B: two
+let labeled = Labeled<"D"> { name = "direct" }
+console.log(labeled.describe()) -- prints: D: direct
+
+function relay = <Payload>(marker: Marker<Payload>, value: Payload): Payload => transform(marker, value)
+console.log(relay(text, "forwarded"))
+-- prints: text
+-- prints: forwarded
+
+console.log(labeled.indirect()) -- prints: D: direct
+
+type Box<Item> = {
+	#item: Item? = none
+	function set = (self, item: Item) mutates self.#item => { self.#item = item }
+	function read = (self): Item? => self.#item
+}
+mutable box = Box<String> {}
+box.set("source")
+let copy = box
+box.set("changed")
+console.log(copy.read(), box.read())
+-- prints: source changed

@@ -54,12 +54,6 @@ fn integer(value: &Value) -> Result<I256, Error> {
 		.ok_or_else(|| stop(format!("`{}` is not an integer", value.to_text())))
 }
 
-fn boolean(value: Value) -> Result<bool, Error> {
-	value
-		.as_bool()
-		.ok_or_else(|| stop(format!("`{}` is not a `Boolean`", value.to_text())))
-}
-
 fn usize_of(value: I256) -> Option<usize> {
 	usize::try_from(value.as_i128())
 		.ok()
@@ -327,14 +321,6 @@ pub fn index_mut(value: &mut Value, key: Value) -> Result<&mut Value, Flow> {
 	}
 }
 
-fn callback(
-	interpreter: &mut Interpreter<'_>,
-	function: &Value,
-	arguments: Vec<Value>,
-) -> Result<Value, Error> {
-	interpreter.call_value(function, arguments)
-}
-
 /// The paths of the flags of a `Fields` value (`names`: the path of each bit).
 fn fields_flags(bits: I256, names: &Value) -> Vec<Value> {
 	names
@@ -378,43 +364,6 @@ fn format_fields(paths: &[&str]) -> String {
 
 fn list(items: Vec<Value>) -> Value {
 	Value::Array(Arc::new(items))
-}
-
-fn sorted(
-	interpreter: &mut Interpreter<'_>,
-	mut items: Vec<Value>,
-	compare: Option<&Value>,
-) -> Result<Vec<Value>, Error> {
-	// insertion sort: stable, and every comparison may call Fa code
-	for next in 1..items.len() {
-		let mut position = next;
-		while position > 0 {
-			let order = match compare {
-				Some(function) => integer(&callback(
-					interpreter,
-					function,
-					vec![items[position - 1].clone(), items[position].clone()],
-				)?)?,
-				None => {
-					if crate::eval::compare(
-						crate::ir::CompareOp::Greater,
-						&items[position - 1],
-						&items[position],
-					)? {
-						I256::ONE
-					} else {
-						I256::ZERO
-					}
-				}
-			};
-			if order <= I256::ZERO {
-				break;
-			}
-			items.swap(position - 1, position);
-			position -= 1;
-		}
-	}
-	Ok(items)
 }
 
 fn sum(items: &[Value]) -> Result<Value, Error> {
@@ -476,6 +425,10 @@ pub fn call(
 	path: &str,
 	arguments: Vec<Value>,
 ) -> Result<Value, Error> {
+	if crate::callbacks::Callback::handles(path) {
+		return interpreter.callback_builtin(path, arguments);
+	}
+
 	let receiver = arguments.first().cloned().unwrap_or(Value::None);
 	let arg = |index: usize| argument(&arguments, index);
 	Ok(match path {
@@ -717,85 +670,11 @@ pub fn call(
 				None => Value::None,
 			}
 		}
-		"Array#find" | "Set#find" | "Map#find" => {
-			let function = arg(1)?.clone();
-			for item in iterate(&receiver)? {
-				if boolean(callback(interpreter, &function, vec![item.clone()])?)? {
-					return Ok(item);
-				}
-			}
-			Value::None
-		}
-		"Array#filter" | "Set#filter" | "Map#filter" => {
-			let function = arg(1)?.clone();
-			let mut kept = Vec::new();
-			for (position, item) in iterate(&receiver)?.into_iter().enumerate() {
-				let arguments = vec![item.clone(), Value::int(position as i64)];
-				if boolean(callback(interpreter, &function, arguments)?)? {
-					kept.push(item);
-				}
-			}
-			match receiver {
-				Value::Set(_) => Value::Set(Arc::new(kept)),
-				Value::Map(_) => {
-					let mut entries = Vec::new();
-					for item in kept {
-						let (key, value) = pair(item)?;
-						entries.push((key, value));
-					}
-					Value::Map(Arc::new(entries))
-				}
-				_ => list(kept),
-			}
-		}
-		"Array#map" | "Set#map" | "Map#map" => {
-			let function = arg(1)?.clone();
-			let mut mapped = Vec::new();
-			for (position, item) in iterate(&receiver)?.into_iter().enumerate() {
-				let arguments = vec![item, Value::int(position as i64)];
-				mapped.push(callback(interpreter, &function, arguments)?);
-			}
-			match receiver {
-				Value::Set(_) => {
-					let mut set = Vec::new();
-					for item in mapped {
-						if !contains(&set, &item) {
-							set.push(item);
-						}
-					}
-					Value::Set(Arc::new(set))
-				}
-				_ => list(mapped),
-			}
-		}
-		"Array#every" | "Set#every" | "Map#every" | "Array#some" | "Set#some" | "Map#some" => {
-			let every = path.ends_with("every");
-			let function = arg(1)?.clone();
-			for item in iterate(&receiver)? {
-				if boolean(callback(interpreter, &function, vec![item])?)? != every {
-					return Ok(Value::Boolean(!every));
-				}
-			}
-			Value::Boolean(every)
-		}
-		"Array#reduce" | "Set#reduce" | "Map#reduce" => {
-			let function = arg(1)?.clone();
-			let mut total = arg(2)?.clone();
-			for (position, item) in iterate(&receiver)?.into_iter().enumerate() {
-				let arguments = vec![total, item, Value::int(position as i64)];
-				total = callback(interpreter, &function, arguments)?;
-			}
-			total
-		}
 		"Array#sum" | "Set#sum" => sum(receiver.items().unwrap_or(&[]))?,
 		"Array#reverse" => {
 			let mut items = receiver.items().unwrap_or(&[]).to_vec();
 			items.reverse();
 			list(items)
-		}
-		"Array#sort" => {
-			let items = receiver.items().unwrap_or(&[]).to_vec();
-			list(sorted(interpreter, items, arguments.get(1))?)
 		}
 		"Set#union" | "Set#intersection" | "Set#difference" | "Set#isSubsetOf" => {
 			let mine = receiver.items().unwrap_or(&[]).to_vec();
@@ -872,6 +751,15 @@ pub fn mutate(
 	receiver: &mut Value,
 	arguments: Vec<Value>,
 ) -> Result<Value, Error> {
+	if crate::callbacks::Callback::mutating(path) && matches!(receiver, Value::Array(_)) {
+		let mut inputs = Vec::with_capacity(arguments.len() + 1);
+		inputs.push(receiver.clone());
+		inputs.extend(arguments);
+		let changed = interpreter.callback_builtin(path, inputs)?;
+		*receiver = changed;
+		return Ok(Value::None);
+	}
+
 	let arg = |index: usize| argument(&arguments, index).cloned();
 	match receiver {
 		Value::Array(items) => {
@@ -908,25 +796,6 @@ pub fn mutate(
 				}
 				"Array#reverseInPlace" => {
 					list.reverse();
-					Value::None
-				}
-				"Array#sortInPlace" => {
-					let sorted_items = sorted(interpreter, list.clone(), arguments.first())?;
-					*list = sorted_items;
-					Value::None
-				}
-				"Array#deleteWhere" => {
-					let function = arg(0)?;
-					let mut deleted = Vec::with_capacity(list.len());
-					for item in list.iter() {
-						deleted.push(boolean(callback(
-							interpreter,
-							&function,
-							vec![item.clone()],
-						)?)?);
-					}
-					let mut deleted = deleted.into_iter();
-					list.retain(|_| !deleted.next().unwrap_or(false));
 					Value::None
 				}
 				_ => return Err(Error::Unsupported(format!("`{path}`"))),

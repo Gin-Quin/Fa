@@ -258,11 +258,7 @@ impl Generator<'_> {
 		let (parts, temps) = self.in_function(info.lambda, |g| {
 			g.fcx.mode = mode;
 			// a generic function's hidden parameters first (generics.rs)
-			let mut parameters = if info.generics.is_empty() {
-				Vec::new()
-			} else {
-				g.declare_hidden(info.lambda)
-			};
+			let mut parameters = g.declare_hidden(info.lambda);
 			let mut prologue = Writer::at(indent + 1);
 			// the requirements: hidden parameters after the regular ones (references.rs)
 			let requirements = g.declare_requirements(info);
@@ -521,6 +517,8 @@ impl Generator<'_> {
 				let (receiver, mut values) =
 					self.arguments(n, receiver, &rest, arguments, &omitted);
 				values.insert(0, receiver.text.clone());
+				let hidden = self.hidden_arguments(declaration, n);
+				values.splice(0..0, hidden);
 				let result = self.finish_call(n, Some(declaration), function, values);
 				if !optional {
 					return self.after_call_drop(result, drop);
@@ -556,17 +554,19 @@ impl Generator<'_> {
 					.collect();
 				let (receiver, mut values) = self.arguments(n, receiver, &rest, arguments, &[]);
 				values.insert(0, receiver.text.clone());
+				let hidden = self.signature_hidden_arguments(callee, n);
+				values.splice(0..0, hidden);
 				let result = self.finish_call(n, None, function.text, values);
 				self.after_call_drop(result, drop)
 			}
 			Callee::Value if self.constraint_method_call(callee).is_some() => {
 				// `item.describe()` on a type parameter: the hidden function
-				let (function, target) = self.constraint_method_call(callee).expect("a method");
-				let receiver = self.expr(target);
+				let function = self.constraint_method_call(callee).expect("a method");
+				let receiver = self.receiver(callee);
 				let (receiver, mut values) =
 					self.arguments(n, receiver, &info.arguments, arguments, &[]);
 				values.insert(0, receiver.text);
-				js::call(&function, &values)
+				self.finish_call(n, None, function, values)
 			}
 			Callee::Function(_) | Callee::Value => {
 				let omitted = match info.callee {
@@ -653,7 +653,7 @@ impl Generator<'_> {
 					values.splice(0..0, hidden);
 				} else if info.callee == Callee::Value {
 					let site = if application { stripped } else { n };
-					let hidden = self.external_hidden_arguments(callee, site);
+					let hidden = self.signature_hidden_arguments(callee, site);
 					values.splice(0..0, hidden);
 				}
 				let callee_text = if matches!(self.view(self.strip_groups(callee)), View::Name(_)) {

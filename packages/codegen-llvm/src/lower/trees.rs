@@ -1,5 +1,5 @@
 //! Regions for recursively built objects and named unions. The proof is
-//! closed: one file, no generic or asynchronous code, finite passive payloads
+//! closed over every unit (`fa_analyzer::regions`): no generic or asynchronous code, finite passive payloads
 //! and edges to the same root type. Every constructor belongs to a root builder;
 //! roots cannot escape through captures, fields, containers or global writes.
 //! Node fields stay immutable, while builders may replace their own root locals.
@@ -9,11 +9,8 @@
 //! cleanup record to the region. Copies outside a builder get their own region.
 //! Other recursive shapes retain the general ownership implementation.
 
-use fa_analyzer::analysis::{Argument, Callee};
 use fa_analyzer::ids::{NodeId, NominalId, TypeId};
-use fa_analyzer::symbols::{Resolution, SymbolKind};
-use fa_analyzer::syntax::View;
-use fa_analyzer::types::{CollKind, PathRoot, TypeKind};
+use fa_analyzer::types::{CollKind, TypeKind};
 use inkwell::builder::Builder;
 use inkwell::types::BasicType;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, PointerValue};
@@ -25,6 +22,9 @@ use crate::error::Error;
 
 #[derive(Default)]
 pub(super) struct TreeArenas<'ctx> {
+	/// Resolved claims for a whole-module build. Split builds consult their
+	/// shared ProgramFacts directly, recording the answer in the object cache.
+	facts: std::collections::BTreeSet<String>,
 	/// The links of the nodes allocated through them (`through_links`), by
 	/// address. A link dominates every use of its address: both are made
 	/// where the node is allocated.
@@ -381,106 +381,73 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		true
 	}
 
-	/// Follow reference bindings as well as field/index syntax: a helper
-	/// mutating `use label = leaf.text` still mutates the tree's payload.
-	fn tree_place_contains(&self, node: NodeId, root: TypeId, shapes: &FxHashSet<TypeId>) -> bool {
-		let mut seen = FxHashSet::default();
-		let mut stack = vec![node.index()];
-		while let Some(at) = stack.pop() {
-			if !seen.insert(at) {
-				continue;
-			}
-			let node = NodeId::new(at);
-			let ty = self.type_of(node);
-			if shapes.contains(&ty) || self.tree_value_type(ty, root) {
-				return true;
-			}
-			if let Resolution::Local(symbol) = self.analysis.resolution(node) {
-				let symbol = self.analysis.symbols.symbol(symbol);
-				if matches!(symbol.kind, SymbolKind::Use | SymbolKind::MutableUse) {
-					stack.push(symbol.decl_node.index());
-				}
-			}
-			self.tree.nodes[at].for_each_child(|child| stack.push(child));
-		}
-		false
-	}
-
-	fn call_writes_tree(&self, node: NodeId, root: TypeId, shapes: &FxHashSet<TypeId>) -> bool {
-		let Some(call) = self.analysis.call(node) else {
-			return false;
-		};
-		let sig = match call.callee {
-			Callee::Function(decl) => self.analysis.functions.get(&decl).and_then(|f| f.sig),
-			_ => match self.view(node) {
-				View::Call { callee, .. } => match self.types().kind(self.type_of(callee)) {
-					TypeKind::Function(sig) => Some(sig),
-					_ => None,
-				},
-				_ => None,
-			},
-		};
-		let Some(sig) = sig else { return false };
-		let (mutates, invalidates) = self.types().effects(self.types().sig(sig).effects);
-		mutates.iter().chain(invalidates).any(|path| {
-			let (path, _) = self.types().path_data(*path);
-			let index = match path.root {
-				PathRoot::Param(i) => i as usize,
-				PathRoot::SelfParam => 0,
-				_ => return false,
-			};
-			match call.arguments.get(index) {
-				Some(Argument::Given(value) | Argument::Receiver(value)) => {
-					self.tree_place_contains(*value, root, shapes)
-				}
-				_ => false,
-			}
-		})
-	}
-
 	/// Chooses the recursive types built in regions, and wraps their builders.
 	pub(super) fn prepare_tree_arenas(&mut self) -> Result<(), Error> {
-		if !self.other_files.is_empty()
-			|| !self.analysis.extern_calls.is_empty()
-			|| self.tasks.asynchronous
-			|| self
-				.analysis
-				.functions
-				.values()
-				.any(|f| !f.generics.is_empty())
-		{
+		if self.tasks.asynchronous || self.c_library.is_some() {
 			return Ok(());
 		}
-		let mut candidates: Vec<TypeId> = self.analysis.type_decls.values().map(|d| d.ty).collect();
-		candidates.sort();
-		candidates.dedup();
-		let mut wraps = Vec::new();
-		for ty in candidates {
-			let Some((nominal, shapes)) = self.tree_shapes(ty) else {
-				continue;
-			};
-			if self.tree_escapes(ty, nominal, &shapes) {
-				continue;
-			}
-			let builders = self.tree_builders(ty)?;
-			if self.tree_written(ty, &shapes, &builders)
-				|| !self.tree_constructed_by(ty, nominal, &builders)
-			{
-				continue;
-			}
-			if let Some(nominal) = nominal {
-				self.tree_arenas.unions.insert(nominal);
-			} else {
-				self.tree_arenas.objects.insert(ty);
-			}
-			wraps.extend(builders.into_iter().map(|key| (key, nominal)));
+		let mut files: Vec<_> = self.other_files.keys().copied().collect();
+		files.push(self.file);
+		files.sort_by_key(|&file| self.session.module(file));
+		files.dedup();
+		if self.program_facts.is_none() {
+			self.tree_arenas.facts = fa_analyzer::regions::resolve_claims(
+				fa_analyzer::regions::unit_claims(self.session, &files),
+			);
 		}
+		let mut wraps = Vec::new();
+		for &file in &files {
+			self.switch_file(file);
+			for ty in fa_analyzer::regions::candidate_types(self.session, file) {
+				let Some(type_key) = fa_analyzer::regions::type_key(self.types(), ty) else {
+					continue;
+				};
+				if !self.region_fact(&type_key) {
+					continue;
+				}
+				let Some((nominal, _)) = self.tree_shapes(ty) else {
+					continue;
+				};
+				if let Some(nominal) = nominal {
+					self.tree_arenas.unions.insert(nominal);
+				} else {
+					self.tree_arenas.objects.insert(ty);
+				}
+				let root = crate::facts::stable_type_name(self.types(), ty).expect("a proven type");
+				for &function in self.functions.keys() {
+					if !self.is_reached(function) {
+						continue;
+					}
+					let Some(name) =
+						fa_analyzer::regions::function_key(self.session, file, function)
+					else {
+						continue;
+					};
+					if self.region_fact(&fa_analyzer::regions::builder_key(&name, &root)) {
+						wraps.push((file, function, nominal));
+					}
+				}
+			}
+		}
+		self.switch_file(self.entry);
 		self.compress_tree_links()?;
-		wraps.sort_by_key(|(key, _)| *key);
-		for (key, nominal) in wraps {
+		wraps.sort_by_key(|&(file, function, _)| (file, function));
+		wraps.dedup_by_key(|item| (item.0, item.1));
+		for (file, key, nominal) in wraps {
+			self.switch_file(file);
 			self.wrap_tree_builder(key, nominal)?;
 		}
+		self.switch_file(self.entry);
 		Ok(())
+	}
+
+	pub(super) fn region_fact(&self, key: &str) -> bool {
+		match &self.program_facts {
+			Some(facts) => facts
+				.consulted(crate::facts::ROOT_REGIONS, self.fact_log.as_deref())
+				.contains(key),
+			None => self.tree_arenas.facts.contains(key),
+		}
 	}
 
 	/// Compressed links (`design/decisions.md`, "Compressed links for
@@ -510,18 +477,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(());
 		}
 		self.object_types.borrow_mut().clear();
-		let mut keys: Vec<NodeId> = self.functions.keys().copied().collect();
-		keys.sort();
-		for key in keys {
-			let old = self.functions[&key].clone();
-			let name = old.value.get_name().to_string_lossy().into_owned();
-			old.value.as_global_value().set_name("");
-			let mut function = self.declare_function(key, old.info.clone(), "")?;
-			function.value.as_global_value().set_name(&name);
-			function.captures = old.captures;
-			unsafe { old.value.delete() };
-			self.functions.insert(key, function);
+		let mut files: Vec<_> = self.other_files.keys().copied().collect();
+		files.push(self.file);
+		files.sort();
+		files.dedup();
+		for file in files {
+			self.switch_file(file);
+			let mut keys: Vec<NodeId> = self.functions.keys().copied().collect();
+			keys.sort();
+			for key in keys {
+				let old = self.functions[&key].clone();
+				let name = old.value.get_name().to_string_lossy().into_owned();
+				old.value.as_global_value().set_name("");
+				let mut function = self.declare_function(key, old.info.clone(), "")?;
+				function.value.as_global_value().set_name(&name);
+				function.captures = old.captures;
+				unsafe { old.value.delete() };
+				self.functions.insert(key, function);
+			}
 		}
+		self.switch_file(self.entry);
 		Ok(())
 	}
 
@@ -577,167 +552,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ => return None,
 		};
 		(valid && recursive).then_some((nominal, shapes))
-	}
-
-	/// Whether a root can be kept by another value: a field of another
-	/// object, an item of a collection or tuple, a payload of another union,
-	/// a pointer, a task, or a capture. Optional roots and function
-	/// signatures are ordinary uses.
-	fn tree_escapes(
-		&self,
-		ty: TypeId,
-		nominal: Option<NominalId>,
-		shapes: &FxHashSet<TypeId>,
-	) -> bool {
-		let contains = |at: TypeId| self.tree_value_type(at, ty);
-		let embedded = self
-			.analysis
-			.types
-			.iter()
-			.copied()
-			.chain(self.analysis.coercions.values().copied())
-			.chain(self.analysis.symbols.symbols().iter().map(|s| s.ty))
-			.any(|at| match self.types().kind(at) {
-				TypeKind::Object(_) if !shapes.contains(&at) => {
-					self.types().fields_of(at).iter().any(|f| contains(f.ty))
-				}
-				TypeKind::Collection(_, item, key) => contains(item) || contains(key),
-				TypeKind::Tuple(list) => self.types().list_items(list).iter().any(|t| contains(*t)),
-				TypeKind::Pointer(item) | TypeKind::Sync(_, item) | TypeKind::Task(item, _) => {
-					contains(item)
-				}
-				TypeKind::Member(n, index) if Some(n) != nominal => {
-					contains(self.types().payload(n, index))
-				}
-				TypeKind::NamedUnion(n, _) if Some(n) != nominal => {
-					(0..self.types().sym_list(self.types().nominal(n).members).len())
-						.any(|i| contains(self.types().payload(n, i as u16)))
-				}
-				_ => false,
-			});
-		embedded
-			|| self.analysis.functions.values().any(|f| {
-				f.captures
-					.iter()
-					.any(|s| contains(self.analysis.symbols.symbol(*s).ty))
-			})
-	}
-
-	/// The functions that return a root: direct functions without defaults,
-	/// lambdas or nested functions, taking no root they could keep.
-	fn tree_builders(&self, ty: TypeId) -> Result<Vec<NodeId>, Error> {
-		let root_repr = self.repr_of(ty, 0)?;
-		Ok(self
-			.functions
-			.iter()
-			.filter_map(|(key, f)| {
-				if f.ret != root_repr
-					|| !f
-						.info
-						.sig
-						.is_some_and(|sig| self.tree_value_type(self.types().sig(sig).ret, ty))
-					|| (f.throws && root_repr != Repr::Union)
-					|| f.lambda || f.params.iter().any(|(_, default)| *default)
-					|| f.info.params.iter().enumerate().any(|(i, p)| {
-						f.by_pointer[i]
-							&& !f.borrowed[i] && self
-							.tree_value_type(self.analysis.symbols.symbol(p.symbol).ty, ty)
-					}) {
-					return None;
-				}
-				let mut stack = vec![f.info.body.index()];
-				while let Some(at) = stack.pop() {
-					if matches!(
-						self.view(NodeId::new(at)),
-						View::Function { .. } | View::Lambda { .. }
-					) {
-						return None;
-					}
-					self.tree.nodes[at].for_each_child(|child| stack.push(child));
-				}
-				Some(*key)
-			})
-			.collect())
-	}
-
-	/// Whether the program writes a place holding a root or a node, outside
-	/// the mutable locals of the builders (which may replace their roots).
-	fn tree_written(
-		&mut self,
-		ty: TypeId,
-		shapes: &FxHashSet<TypeId>,
-		builders: &[NodeId],
-	) -> bool {
-		(0..self.tree.nodes.len()).any(|at| {
-			let node = NodeId::new(at);
-			if self.call_writes_tree(node, ty, shapes) {
-				return true;
-			}
-			// Parameter/field syntax and binding initializers have a value
-			// type; only evaluated assignments have the statement type.
-			if self.type_of(node) != TypeId::VOID {
-				return false;
-			}
-			let target = match self.view(node) {
-				View::Assignment { target, .. }
-				| View::CompoundAssignment { target, .. }
-				| View::UpdateFields { target, .. } => target,
-				_ => return false,
-			};
-			// Fields, function signatures and named arguments also use
-			// assignment syntax; only actual program places are writes.
-			if !self.is_place(target) {
-				return false;
-			}
-			if matches!(self.view(target), View::Name(_))
-				&& let Resolution::Local(symbol) = self.analysis.resolution(target)
-				&& self.analysis.symbols.symbol(symbol).kind == SymbolKind::Mutable
-				&& self
-					.owner_of_scope(self.analysis.symbols.symbol(symbol).scope)
-					.is_some_and(|owner| builders.contains(&owner))
-			{
-				return false;
-			}
-			self.tree_place_contains(target, ty, shapes)
-		})
-	}
-
-	/// Whether every node of the type is constructed in a builder's own body
-	/// (not a nested lambda or a default), and at least one is.
-	fn tree_constructed_by(
-		&self,
-		ty: TypeId,
-		nominal: Option<NominalId>,
-		builders: &[NodeId],
-	) -> bool {
-		let mut found = false;
-		let closed = self
-			.analysis
-			.objects
-			.iter()
-			.filter(|(_, o)| match (nominal, o.member) {
-				(Some(n), Some(member)) => {
-					matches!(self.types().kind(member), TypeKind::Member(m, _) if m == n)
-				}
-				(None, _) => o.ty == ty,
-				_ => false,
-			})
-			.all(|(node, _)| {
-				found = true;
-				let span = self.tree.spans[node.index()];
-				self.functions
-					.iter()
-					.filter(|(_, f)| {
-						let body = self.tree.spans[f.info.body.index()];
-						body.start <= span.start && body.end >= span.end
-					})
-					.min_by_key(|(_, f)| {
-						let body = self.tree.spans[f.info.body.index()];
-						body.end - body.start
-					})
-					.is_some_and(|(key, _)| builders.contains(key))
-			});
-		found && closed
 	}
 
 	/// Moves a builder's body into `<name>.arena`, which its recursive calls

@@ -3,7 +3,7 @@
 //! conversions with their `CONVERSION_CHECK`.
 
 use ethnum::I256;
-use fa_analyzer::analysis::{Argument, CallInfo, Callee, NodeFlags};
+use fa_analyzer::analysis::{Argument, CallInfo, Callee, GenericMethod, NodeFlags};
 use fa_analyzer::ids::{FileId, NodeId, SymbolId, TypeId};
 use fa_analyzer::symbols::SymbolKind;
 use fa_analyzer::syntax::View;
@@ -118,12 +118,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				// `item.describe()` in an instance, the method required by the
 				// constraint of `item`'s type parameter: the method of the type
 				// the instance is made for
-				if let Some(declaration) = self.constraint_method(callee) {
-					let function = self.function_in(self.file, declaration, node)?;
+				if let Some(method) = self.constraint_method(callee) {
+					let function = self.selected_method(method, node)?;
 					let mut arguments = vec![Argument::Receiver(callee)];
 					arguments.extend(info.arguments.iter().cloned());
 					let info = CallInfo {
-						callee: Callee::Function(declaration),
+						callee: Callee::Value,
 						arguments,
 					};
 					return self.call_function(node, function, &info);
@@ -497,14 +497,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// constraint requires the method `describe`: the declaration of that
 	/// method in the type the instance being lowered is made for (of this
 	/// file).
-	fn constraint_method(&self, callee: NodeId) -> Option<NodeId> {
+	fn constraint_method(&self, callee: NodeId) -> Option<GenericMethod> {
 		use fa_analyzer::types::{FieldFlags, TypeKind};
 		let View::Access { target, members } = self.view(callee) else {
 			return None;
 		};
-		let [member] = members.iter().collect::<Vec<_>>()[..] else {
-			return None;
-		};
+		let member = members.last()?;
 		let fa_analyzer::symbols::Resolution::Field(shape, index) =
 			self.analysis.resolution(member)
 		else {
@@ -514,23 +512,81 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !field.flags.contains(FieldFlags::METHOD) {
 			return None;
 		}
-		let TypeKind::Param(_) = self.types().kind(self.type_of(target)) else {
+		let receiver = members
+			.len()
+			.checked_sub(2)
+			.and_then(|index| members.get(index))
+			.unwrap_or(target);
+		let TypeKind::Param(param) = self.types().kind(self.type_of(receiver)) else {
 			return None;
 		};
-		let Ok(Repr::Object(concrete)) = self.repr_of(self.type_of(target), target.index()) else {
-			return None;
-		};
-		let decl = self
-			.analysis
-			.type_decls
-			.values()
-			.find(|decl| decl.ty == concrete)?;
-		let function = decl
-			.functions
+		self.method_bindings
+			.borrow()
 			.iter()
-			.copied()
-			.find(|&function| self.analysis.symbols.symbol(function).name == field.name)?;
-		Some(self.analysis.symbols.symbol(function).decl_node)
+			.find(|(bound, method)| {
+				*bound == param
+					&& self.types().syms.resolve(method.name)
+						== self.types().syms.resolve(field.name)
+			})
+			.map(|(_, method)| method.clone())
+	}
+
+	fn selected_method(
+		&mut self,
+		method: GenericMethod,
+		call: NodeId,
+	) -> Result<super::Function<'ctx>, Error> {
+		let method = self.concrete_method(method);
+		if !self.is_local_key(method.function) {
+			return self.remote_function_with_arguments(
+				method.function,
+				call,
+				Some(method.arguments),
+				Some(&method.methods),
+			);
+		}
+		let (module, keyed) = self
+			.session
+			.keyed(method.function)
+			.ok_or_else(|| self.unsupported(call.index(), "this selected method"))?;
+		let file = self
+			.session
+			.file_of(module)
+			.ok_or_else(|| self.unsupported(call.index(), "this selected method"))?;
+		let arguments = self.types().list_items(method.arguments).to_vec();
+		if arguments.is_empty() {
+			return self.function_in(file, keyed.node, call);
+		}
+		let current = self.file;
+		self.switch_file(file);
+		let result = (|| {
+			let generics = self
+				.generic_functions
+				.get(&keyed.node)
+				.ok_or_else(|| self.unsupported(call.index(), "this selected generic method"))?
+				.generics
+				.clone();
+			let reprs = arguments
+				.iter()
+				.map(|&ty| self.repr_of(ty, call.index()))
+				.collect::<Result<Vec<_>, _>>()?;
+			let values = generics
+				.iter()
+				.zip(&arguments)
+				.filter_map(|(&param, &ty)| self.types().param(param).value.then_some((param, ty)))
+				.collect();
+			let instance = self.instance_here(
+				keyed.node,
+				&generics,
+				&arguments,
+				reprs,
+				values,
+				method.methods.as_ref().clone(),
+			)?;
+			Ok(self.functions[&instance].clone())
+		})();
+		self.switch_file(current);
+		result
 	}
 
 	/// The representation of a parameter of an instance typed with its type
@@ -858,9 +914,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(generics) = generics else {
 			return Err(self.unsupported(call.index(), "calling this function"));
 		};
-		// a function of a generic type: the type's arguments, from the receiver
+		let owner = self.call_method_owner(call).cloned();
+		// a function of a generic type: preserve its written arguments,
+		// including parameters not present in the receiver's data layout.
 		let type_arguments = match self.generic_type_methods.get(&(file, declaration)).cloned() {
-			Some((params, declared)) => match self.receiver_type_arguments(call, &params, declared)
+			Some((params, declared)) => match owner
+				.as_ref()
+				.map(|owner| self.types().list_items(owner.arguments).to_vec())
+				.filter(|arguments| arguments.len() == params.len())
+				.or_else(|| self.receiver_type_arguments(call, &params, declared))
 			{
 				Some(arguments) => arguments,
 				None => {
@@ -873,15 +935,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			None => Vec::new(),
 		};
 		let own = generics.len() - type_arguments.len();
+		let owner_count = type_arguments.len();
 		let list = match self.call_instantiation(call) {
 			Some(list) => self.types().list_items(list).to_vec(),
 			None if own == 0 => Vec::new(),
 			None => return Err(self.unsupported(call.index(), "this generic call")),
 		};
-		let given: Vec<TypeId> = type_arguments
+		let own_arguments: Vec<_> = list.iter().rev().take(own).rev().copied().collect();
+		let mut methods = self.call_methods(call, &own_arguments);
+		for method in &mut methods {
+			method.parameter += owner_count as u16;
+		}
+		methods.extend(self.forwarded_methods(&type_arguments));
+		if let Some(owner) = owner {
+			methods.extend(owner.methods.iter().cloned());
+		}
+		let methods = methods
 			.into_iter()
-			.chain(list.iter().rev().take(own).rev().copied())
+			.map(|method| self.concrete_method(method))
 			.collect();
+		let given: Vec<TypeId> = type_arguments.into_iter().chain(own_arguments).collect();
 		// the compile-time value parameters (`repeatText<2>`): bound to the
 		// literal types, an instance per value
 		let mut values = Vec::new();
@@ -906,24 +979,42 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let current = self.file;
 		self.switch_file(file);
-		let instance = self.instance_here(declaration, &generics, &arguments, reprs, values);
+		let instance =
+			self.instance_here(declaration, &generics, &arguments, reprs, values, methods);
 		self.switch_file(current);
 		instance
 	}
 
 	/// The instance of a generic function of the current file, its type
 	/// arguments and the literals of its value parameters known.
-	fn instance_here(
+	pub(crate) fn instance_here(
 		&mut self,
 		declaration: NodeId,
 		generics: &[fa_analyzer::ids::ParamId],
 		arguments: &[TypeId],
 		reprs: Vec<Repr>,
 		values: Vec<(fa_analyzer::ids::ParamId, TypeId)>,
+		methods: Vec<GenericMethod>,
 	) -> Result<NodeId, Error> {
 		self.note_instance_types(generics, arguments, &reprs);
+		let mut types = self.type_bindings.borrow().clone();
+		types.extend(generics.iter().copied().zip(arguments.iter().copied()));
+		let saved_types = self.type_bindings.replace(types);
+		let saved_methods = self.method_bindings.replace(
+			methods
+				.iter()
+				.filter_map(|method| {
+					generics
+						.get(method.parameter as usize)
+						.map(|&param| (param, method.clone()))
+				})
+				.collect(),
+		);
 		if values.is_empty() {
-			return self.instance_of(declaration, reprs);
+			let result = self.instance_with_values(declaration, reprs, arguments.to_vec(), methods);
+			self.method_bindings.replace(saved_methods);
+			self.type_bindings.replace(saved_types);
+			return result;
 		}
 		let mut value_bindings = rustc_hash::FxHashMap::default();
 		for &(param, literal) in &values {
@@ -934,17 +1025,137 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			};
 			value_bindings.insert(symbol, literal);
 		}
-		let values = values.into_iter().map(|(_, literal)| literal).collect();
 		let saved = self.value_bindings.replace(value_bindings);
-		let instance = self.instance_with_values(declaration, reprs, values);
+		let instance = self.instance_with_values(declaration, reprs, arguments.to_vec(), methods);
 		self.value_bindings.replace(saved);
+		self.method_bindings.replace(saved_methods);
+		self.type_bindings.replace(saved_types);
 		instance
+	}
+
+	/// Methods are selected by the analyzer; a call forwarding an outer
+	/// parameter forwards the selection made for that parameter's instance.
+	pub(crate) fn call_methods(&self, call: NodeId, arguments: &[TypeId]) -> Vec<GenericMethod> {
+		let node = if self.analysis.instantiated_methods.contains_key(&call) {
+			call
+		} else if let View::Call { callee, .. } = self.view(call) {
+			callee
+		} else {
+			call
+		};
+		let mut methods = self
+			.analysis
+			.instantiated_methods
+			.get(&node)
+			.cloned()
+			.unwrap_or_default();
+		methods.extend(self.forwarded_methods(arguments));
+		methods.sort_by(|left, right| {
+			left.parameter.cmp(&right.parameter).then_with(|| {
+				self.types()
+					.syms
+					.resolve(left.name)
+					.cmp(self.types().syms.resolve(right.name))
+			})
+		});
+		methods.dedup();
+		methods
+			.into_iter()
+			.map(|method| self.concrete_method(method))
+			.collect()
+	}
+
+	/// A selection made while checking a generic body may still refer to
+	/// that body's parameters. Preserve its exact owner arguments and method
+	/// dependencies before switching to the file declaring the selected method.
+	fn concrete_method(&self, method: GenericMethod) -> GenericMethod {
+		let arguments = self.types().list_items(method.arguments).to_vec();
+		let mut dependencies = method.methods.as_ref().clone();
+		dependencies.extend(self.forwarded_methods(&arguments));
+		let dependencies: Vec<_> = dependencies
+			.into_iter()
+			.map(|method| self.concrete_method(method))
+			.collect();
+		let arguments: Vec<_> = arguments
+			.into_iter()
+			.map(|argument| self.concrete_type(argument))
+			.collect();
+		let module = self.session.module_id(self.file);
+		let mut merger = self.types().merger(Some(module));
+		let arguments: Vec<_> = arguments
+			.iter()
+			.map(|&argument| merger.ty(argument))
+			.collect();
+		drop(merger);
+		let mut scratch = fa_analyzer::types::TypeStore::view(self.types().global());
+		let list = scratch.list(&arguments);
+		let mut method = method;
+		method.arguments = scratch.merger(Some(module)).list(list);
+		method.methods = std::sync::Arc::new(dependencies);
+		method
+	}
+
+	pub(crate) fn forwarded_methods(&self, arguments: &[TypeId]) -> Vec<GenericMethod> {
+		let mut methods = Vec::new();
+		for (index, &ty) in arguments.iter().enumerate() {
+			let fa_analyzer::types::TypeKind::Param(param) = self.types().kind(ty) else {
+				continue;
+			};
+			methods.extend(
+				self.method_bindings
+					.borrow()
+					.iter()
+					.filter(|(bound, _)| *bound == param)
+					.map(|(_, method)| GenericMethod {
+						parameter: index as u16,
+						..method.clone()
+					}),
+			);
+		}
+		methods.sort_by(|left, right| {
+			left.parameter.cmp(&right.parameter).then_with(|| {
+				self.types()
+					.syms
+					.resolve(left.name)
+					.cmp(self.types().syms.resolve(right.name))
+			})
+		});
+		methods.dedup();
+		methods
+	}
+
+	pub(crate) fn call_method_owner(
+		&self,
+		call: NodeId,
+	) -> Option<&fa_analyzer::analysis::WrittenType> {
+		let View::Call { mut callee, .. } = self.view(call) else {
+			return None;
+		};
+		loop {
+			while let View::Group(inner) = self.view(callee) {
+				callee = inner;
+			}
+			match self.view(callee) {
+				View::Call { callee: inner, .. }
+					if self
+						.analysis
+						.has_flags(callee, NodeFlags::GENERIC_APPLICATION) =>
+				{
+					callee = inner
+				}
+				View::Access { members, .. } | View::OptionalAccess { members, .. } => {
+					return self.analysis.method_instantiations.get(&members.last()?);
+				}
+				_ => return None,
+			}
+		}
 	}
 
 	/// The literal type a compile-time value argument stands for: itself, or
 	/// the binding of the enclosing instance's own value parameter.
 	fn value_argument(&self, argument: TypeId) -> Option<TypeId> {
 		use fa_analyzer::types::TypeKind;
+		let argument = self.concrete_type(argument);
 		let types = self.types();
 		match types.kind(argument) {
 			TypeKind::Param(param) => {
@@ -974,7 +1185,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		param: fa_analyzer::ids::ParamId,
 	) -> Option<SymbolId> {
 		let name = self.types().param(param).name;
-		let span = self.tree.spans[declaration.index()];
+		let owner = self
+			.analysis
+			.function_owners
+			.get(&declaration)
+			.copied()
+			.filter(|owner| {
+				self.analysis
+					.type_decls
+					.get(owner)
+					.is_some_and(|info| info.generics.contains(&param))
+			})
+			.unwrap_or(declaration);
+		let span = self.tree.spans[owner.index()];
 		self.analysis
 			.symbols
 			.symbols()
@@ -1058,16 +1281,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The instance of a generic function of the file for these
-	/// representations of its type arguments.
-	pub(crate) fn instance_of(
-		&mut self,
-		declaration: NodeId,
-		reprs: Vec<Repr>,
-	) -> Result<NodeId, Error> {
-		self.instance_with_values(declaration, reprs, Vec::new())
-	}
-
-	/// The instance of a generic function of the file for these
 	/// representations of its type arguments and literal types of its value
 	/// arguments (bound in `value_bindings` by the caller).
 	fn instance_with_values(
@@ -1075,9 +1288,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		reprs: Vec<Repr>,
 		values: Vec<TypeId>,
+		methods: Vec<GenericMethod>,
 	) -> Result<NodeId, Error> {
 		let info = self.generic_functions[&declaration].clone();
-		let key = (declaration, reprs, values);
+		let key = (declaration, reprs, values, methods);
 		if let Some(instance) = self.instances.get(&key) {
 			return Ok(*instance);
 		}
@@ -1149,12 +1363,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let current = self.file;
 		self.switch_file(file);
 		let saved_bindings = self.bindings.replace(base.bindings.clone());
+		let saved_types = self.type_bindings.replace(base.types.clone());
 		let saved_values = self.value_bindings.replace(base.values.clone());
+		let saved_methods = self.method_bindings.replace(base.methods.clone());
 		let suffix = format!(".callback{}", self.callback_instances.len());
 		let result =
 			self.declare_function_with_callbacks(base.declaration, base.info, &suffix, &key.1);
 		self.bindings.replace(saved_bindings);
+		self.type_bindings.replace(saved_types);
 		self.value_bindings.replace(saved_values);
+		self.method_bindings.replace(saved_methods);
 		let result = result.inspect(|function| {
 			let instance = NodeId::new(
 				self.tree.nodes.len() + self.instances.len() + self.callback_instances.len() + 1,

@@ -795,9 +795,11 @@ impl<'s> Generator<'s> {
 				..FnCx::default()
 			},
 		);
+		let hidden = self.hidden_names.clone();
 		self.scopes.push();
 		let result = f(self);
 		self.scopes.pop();
+		self.hidden_names = hidden;
 		let fcx = std::mem::replace(&mut self.fcx, saved);
 		(result, fcx.inline_temps)
 	}

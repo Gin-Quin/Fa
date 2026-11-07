@@ -228,7 +228,8 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 
 - **The crate**: `fa-interpreter` (`packages/interpreter`) knows nothing of the analyzer: it evaluates *lowered* code (`ir::Expr`, functions named by opaque keys) through a `Host` trait. The analyzer lowers its checked tree (`comptime/lower.rs`: slots, globals, calls in parameter order, arithmetic carrying the range of its result under the target) and is the host, so `fa-analyzer` depends on the interpreter and every analysis can evaluate (no host to install). Values are copy-on-write (`Arc` + `make_mut`), `Send`, plain data the backends embed.
 - **Evaluation happens in the walk**, once per construct: a `static` when its declaration is analyzed (on demand when hoisted), an `@` call after its call is checked, an `@if` condition, an `@for` iterable, an `@test` body after it is checked; the functions they call are analyzed by then (on demand) and lowered lazily (memoized per session). A function whose analysis is still in progress (a cycle through compile-time code) can't run: `AN001`.
-- **Bounds** (D26): one step per evaluated lowered expression, 100 million per evaluation; nested calls are bounded at 10 000 (`META003`, like the steps), evaluated on a thread with a 1 GiB reserved stack so that the depth, not the compiler's stack, is the limit; 256 nested type-function applications (`META004`).
+- **Bounds** (D26): one step per evaluated lowered expression, 100 million per evaluation; nested calls are bounded at 10 000 (`META003`, like the steps); 256 nested type-function applications (`META004`). Fa calls use explicit heap frames, so the configured call-depth limit is independent of the native stack and address-space limit. The 256 MB heap budget also counts execution nodes, continuations and call frames.
+- **Explicit interpreter continuations** (2026-11-06, review finding 42): checked IR is indexed once per reached function, retaining evaluation order and expression identities. Calls, defaults, closures, control flow and built-ins with callbacks suspend into an explicit continuation stack; a callback recursively using `map`, a predicate or a comparator never grows the Rust call stack. Preparation and resumption consume no evaluation steps. Only a loop, function or thrown-error handler intercepts its corresponding control flow, and a failed callback leaves a mutated collection unchanged. The reusable evaluation pool keeps a 64 MiB stack for host/lowering operations, with allocation fallback, but never lowers the Fa depth limit. Tests reach 9 000 non-tail calls on a 256 KiB thread stack and retain the exact depth, step, heap and diagnostic limits.
 - **Purity** (`META002`) is checked statically before running: the lowered code and every function it may reach (transitively, memoized) must not contain an impure primitive: `console`, a module-level `mutable` (read or written), a requirement, `arguments`, `provide`. Throwing is allowed: an uncaught error is `META005` with the error's `toString()`; a stop (a failed `assert`) is `META005` too; an integer overflow is `META013` (D49: on a JavaScript target an `Integer` is bounded by ±(2^53 − 1), `Int64` and wider by their width).
 - **What is known at compile time** (`META001`): in a `static` value, the arguments of an `@` call, an `@if` condition or an `@for` iterable: literals, statics, `target`, `configuration`, `@` operations, and the locals declared inside the expression itself (a `do` block, a lambda's parameters). Module-level `let` values are not (the brief's `let count = readInput(); @add(count, 4)` is `META001`), but a function called at compile time may read immutable module-level values (evaluated once, their initializer pure). A call without `@` inside a `static` value is evaluated too (the `@` marks where evaluation starts, and the whole value is compile-time already). In a `static` value an error is a compile error, so no `try` is needed there.
 - **The type of a static** is its annotation, else the exact type of its value (`comptime::exact_type`: literal scalars, objects of exact fields, arrays of the union of their items, widened beyond 8 distinct items), except a value of a named type (an object type with a name, a union, an enumeration), which keeps it so its functions apply. A static holding a function is `AN001` for now.
@@ -622,17 +623,42 @@ snapshot would corrupt native bytes 17–23 or wasm bytes 9–11. The slow path 
 remaining rounds, including after multibyte suffixes or multi-digit integers.
 
 
-## Universal copyability and written type unions (2026-11-06, user decision)
+## Explicit copies, shared resources and written type unions (user decisions, 2026-11-07)
 
-All types are copyable, including a Task, a foreign resource and composites that
-hold them. This supersedes the earlier move-only policy. Copies of a Task or
-resource share that instance and its state through reference counting. Releasing
-the last owner destroys the resource or cancels the still-running Task. Ordinary
-values retain structural value-copy semantics; generic functions do not need a
-Copyable constraint. Implementation and lifetime regressions are in progress.
+Task and composites owning a Task are noncopyable and transfer ownership. This
+revokes the intermediate universal-copyability decision; no Task reference count
+is introduced. Collections and ordinary objects owning collections require
+`copy value` to keep both values usable. An implicit last-use move invalidates
+the source, including its aliases. Other ordinary objects retain value semantics.
+
+Foreign resources and synchronization handles share their instance and state
+through counted local handles. The last owner finalizes a resource. A resource
+containing a collection is a sharing boundary: copying its handle does not copy
+that collection. A resource containing a Task remains noncopyable.
+
+Across workers, ordinary values require an independent copy or an exclusive move
+that invalidates the source and aliases. Mutable shared state requires a common
+Mutex. A Resource handle retains shared state, so it crosses this boundary only
+under that Mutex or by exclusive transfer. Old unprotected aliases and handles
+copied from Guard.value must not escape the protection; Task stays with its own
+executor. This extends the existing thread-safety rule, without hidden automatic
+field locking. Frontend cell/loan proofs and backend ownership support are in progress.
+
+The JavaScript backend will generate copy/read/write/drop operations during
+`fa build` from analyzed types. Erased generics receive concrete TypeInfo
+operations, including Task ownership. The Fa Codec runtime supplies binary
+primitives and fromFunctions(write,read); it neither compiles functions nor
+interprets schemas while the program runs.
 
 A conditional joining written Person and Greeting types with different methods
 or destructors has type Person | Greeting, even if their fields are structurally
 identical. The actual union member selects its method or destructor. A `with`
 application uses names in the visible function signature, including the signature
 of a function-valued parameter or field.
+
+## Closed root-region proofs across units (2026-11-06)
+
+- **The analyzer owns the semantic proof** (`fa_analyzer::regions`). Each checked unit publishes stable type and builder identities, constructors, forbidden uses and array ownership roles. The first module publishes the sorted manifest of the scanned graph once; every unit names that manifest and contributes its modules. Resolution requires the complete, exact graph. Missing facts, a deferred body or an analysis error disable every region. Whole-module and per-unit lowering consume the same resolved facts (`regions.roots`), and every consulted answer enters the object-cache dependency log. Objects predating this contract are invalidated by `split-regions-1`.
+- **The initial proof is conservative.** Recursive objects retain optional self edges and finite fields without ownership. Named unions admit direct self edges, child `Array<Root>` edges and finite passive owned payloads. Arrays outside a builder own independent roots; the proof identifies child arrays by their stable builder and array type. Every constructor belongs to a named, synchronous builder returning that root family. Captures, outgoing references, mutations of the recursive graph, arbitrary containers, returned child arrays and data records escaping outside their union member reject the root. A pattern may borrow a child array only from its actual parameter place; an unrelated root parameter does not justify matching a temporary.
+- **Unknown ownership is never passive.** A generic or unknown field, a resource, task, function or unsupported recursive container fails the shape check; this does not depend solely on cached type flags. Until concrete generic instances and all their uses can contribute a complete proof, generic function bodies and key-loop snapshots make the graph opaque. Foreign declarations/calls and C-library entries disable regions too. Native lowering keeps its target-dependent layout and page-size guards; a positive semantic fact alone does not select a physical representation.
+- **Ownership remains per root.** Nested builders join the current region; a copied root leaving that region acquires an independent owner. Child-array cleanup releases its buffer without recursively releasing nodes owned by the parent region. A copy into an ordinary root array must preserve independent element ownership. The backend must implement these roles before admitting array-bearing layouts; it may conservatively reject a shape. The accepted single-address-band invariant of compressed links remains unchanged, and compressed recursive-object links remain disabled in per-unit builds until their ABI is shared by every unit.

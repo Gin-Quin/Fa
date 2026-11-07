@@ -1,0 +1,32 @@
+-- Function recursion has the same limit on every evaluation thread.
+function direct = (depth: Integer): Integer => if depth == 0 { 0 } else { 1 + direct(depth - 1) }
+function viaValue = (depth: Integer): Integer => {
+	let next = viaValue
+	if depth == 0 { 0 } else { 1 + next(depth - 1) }
+}
+function viaCallback = (depth: Integer): Integer => if depth == 0 {
+	0
+} else {
+	1 + ([depth - 1].map(viaCallback).get(0) ?? 0)
+}
+function defaults = (
+	depth: Integer
+	subtotal: Integer = if depth == 0 { 0 } else { 1 + defaults(depth - 1) }
+): Integer => subtotal
+function first = (depth: Integer): Integer => if depth == 0 { 0 } else { 1 + second(depth - 1) }
+function second = (depth: Integer): Integer => if depth == 0 { 0 } else { 1 + first(depth - 1) }
+
+type Failure = Errors { Deep }
+function fail = (depth: Integer): Integer throws Failure.Deep => {
+	if depth == 0 { throw Failure.Deep }
+	try fail(depth - 1)
+}
+function recover = (depth: Integer): Integer => fail(depth) catch _error => 123
+
+static ordinary = @direct(9_000)
+static value = @viaValue(9_000)
+static callback = @viaCallback(9_000)
+static defaulted = @defaults(9_000)
+static mutual = @first(9_000)
+static caught = @recover(9_000)
+console.log(ordinary, value, callback, defaulted, mutual, caught) -- prints: 9000 9000 9000 9000 9000 123

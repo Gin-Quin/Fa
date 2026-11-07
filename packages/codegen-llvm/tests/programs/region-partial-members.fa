@@ -1,0 +1,23 @@
+-- Arrays of a subset of the recursive union have no closed region fact.
+-- The conservative general/packed-array path keeps its original ABI.
+-- asynchronous: false
+type Tree = Union {
+	Number = { value: Int32 }
+	Text = { text: String }
+	List = { items: Array<Tree> }
+}
+function number = (value: Int32): Tree.Number => Tree.Number { value }
+function text = (value: String): Tree.Text => Tree.Text { text = value }
+type Leaf = Tree.Number | Tree.Text
+mutable leaves: Array<Leaf> = []
+leaves.push(number(9))
+leaves.push(text("eleven"))
+mutable total = 0
+for leaf in leaves {
+	total += when leaf is {
+		Tree.Number as { value } => Integer(value)
+		Tree.Text as { text } => text.length
+	}
+}
+assert total == 15
+console.log("partial region members") -- prints: partial region members

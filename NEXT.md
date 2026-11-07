@@ -104,15 +104,41 @@ Root worker/Errors WIP is saved explicitly in stash c9a0034315b5c4bdb7f3da0ecd9e
 
 ## Latest user decisions
 
-All types are copyable, including Task and resources; this supersedes the older
-move-only rule. Copies share the same
-Task/resource and state, with reference counting; destroy/cancellation occurs on
-the last owner release. Analyzer owns acceptance and flow, native performance
-owns Task native retain/release, lead owns resources and JS Task lifetime.
-Do not add generic Copyable constraints or reject copies.
+Task and composites holding a Task remain noncopyable. Collections and ordinary objects
+containing them require an explicit copy when both sources remain usable; an implicit
+last-use move remains allowed. Lead/analyzer own that parser and semantic migration.
+Resource copying and finalization are being clarified by lead; this physical lot makes
+no change to Resource or Task ownership.
 `with` uses parameter names from the visible function signature, including a
 function-valued parameter or field. Analyzer owns this implementation.
 
 Joining written types with distinct methods/destructors forms their union, even
 when their fields have the same shape: runtime dispatch uses the actual member.
 Analyzer owns this after the frozen single-origin validation.
+
+## Native physical regions: validated delivery, 2026-11-07
+
+This worktree is the frozen delivery of the physical root-region implementation, based
+on 0290400. It includes the already delivered Frame changes (daa8ebc) and the frontend
+ROOT_REGIONS/capacity APIs from proofs 1a0d6b/a9b1375. Lead merges these existing changes
+once and preserves newer Resource/MOVE code. Task remains move-only; there are no Task
+reference-count changes.
+
+Implemented: child-array frame packets and buffers owned by a root region; compact String
+and Array payloads; whole-module marked 16-bit ids and 32-bit union-array links; conservative
+ABI/split/layout fallbacks; separately logged capacity-unobserved consumption; small decimal
+pairs. A separate prototype remains at /tmp/fa-native-frame for the next measured changes.
+
+The 1 KiB chunk is retained after 21 alternating pinned-CPU samples at default sizes. On
+sexp N=20000, medians are 250.1 ms CPU / 57600 KiB RSS for 1 KiB, 306.7 ms / 101376 KiB for
+4 KiB, and 175.0 ms / 26752 KiB for Goose. On binary-trees 17, 1 KiB costs 124.2 ms versus
+120.3 ms for 4 KiB; Goose is 99.2 ms. Preparation overlapped part of the sampling window;
+retain CPU/instructions separately and repeat the final compiler comparison when quiet.
+The original 16 Goose benchmarks remain the priority; no overall win is claimed.
+
+Validation is complete: full workspace with LLVM exit 0
+(/tmp/fa-region-frozen-workspace-full.log), fmt/clippy clean, JS runtime 298/0. All 54 IR
+checks, 6 cache tests (including physical capacity invalidation), programs on native,
+freestanding and wasm, C ASan/UBSan and representative AArch64 QEMU runs pass. The next lot
+also tests pure split/nonempty-filter fusion and ids disjoint from compact markers after
+late type interning. Neither later change is silently included in this tested snapshot.

@@ -238,6 +238,13 @@ pub(crate) struct PackedLayout {
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// The layout of the items of arrays of `item` when they are packed.
 	pub(crate) fn packed_layout(&self, item: TypeId) -> Option<PackedLayout> {
+		// A subset of a recursive union may itself have only scalar/string
+		// members. Its values still use that root's region layouts; decoding
+		// them through an ordinary packed array would read a different ABI.
+		if matches!(self.types().kind(item), TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _) if self.arena_member(nominal))
+		{
+			return None;
+		}
 		if !self.whole_program || !self.packable_items.contains(&item) {
 			return None;
 		}
@@ -435,7 +442,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let i64 = self.context.i64_type();
 		let i8 = self.context.i8_type();
 		let boxed = value.value.expect("a union").into_pointer_value();
-		let id = self.builder.build_load(i64, boxed, "")?.into_int_value();
+		let id = self.union_id(&self.builder, boxed)?;
 		let end = self.append_block("packed_pushed");
 		let otherwise = self.append_block("packed_member");
 		let mut cases = Vec::new();

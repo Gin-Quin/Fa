@@ -887,6 +887,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Appends the JSON text of a value of type `ty` to the text builder.
 	fn json_write(&mut self, value: Val<'ctx>, ty: TypeId, call: NodeId) -> Result<(), Error> {
+		let value = if let Repr::Rec(target) = value.repr
+			&& self.compressed_union_link(value.repr).is_some()
+		{
+			self.unfold_rec(value, target, call.index())?
+		} else {
+			value
+		};
 		match self.types().kind(ty) {
 			TypeKind::Boolean
 			| TypeKind::BoolLit(_)
@@ -1079,12 +1086,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				kind => {
 					let repr = self.repr_of(data_type, call.index())?;
 					let boxed = self.union_view(value)?;
-					let structure = self.box_type(Some(repr));
 					let pointer = boxed.value.expect("a box").into_pointer_value();
-					let data_pointer = self.builder.build_struct_gep(structure, pointer, 1, "")?;
-					let loaded = self
-						.builder
-						.build_load(self.llvm_type(repr), data_pointer, "")?;
+					let loaded =
+						self.member_payload_value(&self.builder, pointer, nominal, index, repr)?;
 					let data = Val::new(repr, loaded);
 					if kind == b'r' {
 						// the fields after `"type"`

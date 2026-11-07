@@ -40,6 +40,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if value.repr == narrowed {
 			return Ok(value);
 		}
+		if let Repr::Rec(target) = value.repr
+			&& self.compressed_union_link(value.repr).is_some()
+		{
+			let decoded = self.unfold_rec(value, target, node.index())?;
+			return self.narrow_to(decoded, narrowed, node);
+		}
 		if matches!(value.repr, Repr::Union | Repr::InlineUnion(_))
 			&& narrowed.has_value()
 			&& narrowed != Repr::Union
@@ -120,6 +126,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.builder
 					.build_load(self.pointer_type(), slot.pointer, "")?
 					.into_pointer_value();
+				if let Repr::Object(data) = narrowed
+					&& (!self.compact_array_data(data).is_empty()
+						|| !self.compact_string_data(data).is_empty()
+						|| !self.compact_scalar_data(data).is_empty())
+				{
+					let value = self.unbox(Val::new(Repr::Union, pointer), narrowed)?;
+					let out = self.alloca(narrowed, "member_view")?;
+					self.builder
+						.build_store(out.pointer, value.value.expect("a payload"))?;
+					return Ok(out);
+				}
 				let ty = self.box_type(Some(narrowed));
 				Ok(Slot {
 					pointer: self.builder.build_struct_gep(ty, pointer, 1, "")?,
@@ -562,10 +579,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		ty: fa_analyzer::ids::TypeId,
 		node: NodeId,
 	) -> Result<IntValue<'ctx>, Error> {
+		let subject_node = match self.view(node) {
+			View::When { subject, .. } => subject,
+			View::Is { value, .. } => value,
+			_ => node,
+		};
+		let subject_type = Some(self.type_of(subject_node));
+		let subject = if self.compressed_union_link(subject.repr).is_some()
+			&& ty != fa_analyzer::ids::TypeId::NONE
+		{
+			let repr = if matches!(subject.repr, Repr::Optional(_)) {
+				Repr::Optional(Scalar::Union)
+			} else {
+				Repr::Union
+			};
+			self.convert(subject, repr, node.index())?
+		} else {
+			subject
+		};
 		let ty = &ty;
 		{
 			match subject.repr {
-				Repr::Union | Repr::InlineUnion(_) => self.box_is(subject, *ty),
+				Repr::Union | Repr::InlineUnion(_) => self.box_is_typed(subject, *ty, subject_type),
 				Repr::Enum(_) => match self.types().kind(*ty) {
 					fa_analyzer::types::TypeKind::EnumMember(_, index) => {
 						Ok(self.builder.build_int_compare(
@@ -584,7 +619,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					} else if self.repr_of(*ty, node.index())? == scalar.repr() {
 						Ok(present)
 					} else if matches!(scalar, Scalar::InlineUnion(_)) {
-						let member = self.box_is(inner.expect("a union"), *ty)?;
+						let member =
+							self.box_is_typed(inner.expect("a union"), *ty, subject_type)?;
 						Ok(self.builder.build_and(present, member, "")?)
 					} else if scalar == Scalar::Union {
 						// a member of the union inside the optional
@@ -602,7 +638,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						self.builder.build_store(result.pointer, is_box)?;
 						self.builder.build_conditional_branch(is_box, check, join)?;
 						self.builder.position_at_end(check);
-						let member = self.box_is(Val::new(Repr::Union, safe), *ty)?;
+						let member =
+							self.box_is_typed(Val::new(Repr::Union, safe), *ty, subject_type)?;
 						self.builder.build_store(result.pointer, member)?;
 						self.builder.build_unconditional_branch(join)?;
 						self.builder.position_at_end(join);

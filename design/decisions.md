@@ -636,3 +636,56 @@ or destructors has type Person | Greeting, even if their fields are structurally
 identical. The actual union member selects its method or destructor. A `with`
 application uses names in the visible function signature, including the signature
 of a function-valued parameter or field.
+
+## Short strings in the function frame (2026-11-06)
+
+The approved 64-byte budget applies from initialization to a non-escaping mutable that may
+outgrow inline storage, including an empty initializer. Immutable runtime values keep the
+ordinary inline form up to 23 bytes on 64-bit targets or 11 on wasm32; immutable literals keep
+permanent storage, and syntax-proven small mutable maxima stay inline. Larger runtime values
+fall back to a heap block. A previously explicit heap reservation above the budget may move
+unchanged. Clearing a mutable keeps its current reservation.
+
+A buffer belongs to one declaration in one function frame. Copying or moving a frame value
+copies bytes into the destination's own buffer, including a declaration reused by a loop.
+Normal ownership transfers detach the bytes before a header can reach another kind of owner.
+Read-only parameters borrow as before; a callee keeping the value copies it. The language
+rejects replacing or declaring a mutating primitive String parameter (EFF005/EFF006).
+
+The three-word String ABI is unchanged. The low capacity bit tags a writable, non-owning
+64-byte buffer, with the inline bit taking precedence. All heap capacities are even (large
+exact byte counts round up by at most one byte); this leaves wasm's high capacity bits and
+size limit available. Capacity checks strip the frame bit, updates retain it, and no drop or
+grow operation frees or reallocates a frame pointer. A buffer live across suspension becomes
+part of its coroutine's frame. This is an implementation choice under the existing
+`Analysis::non_escaping` proof; it does not relax the proof or any language check.
+
+## Compact payloads in proven root regions (2026-11-07)
+
+The analyzer's portable, closed root-region proof is shared by all compilation units.
+It admits immutable recursive unions with fresh local child arrays, rejects escaping
+views, references, captures and node mutations, and requires the contribution of every
+module. Missing information keeps the ordinary owning representation. Root arrays own
+independent regions; child arrays inside a builder borrow its region and release only
+their separately allocated buffers. Moving a frame-local child-array header into a node
+detaches the header before the builder returns.
+
+A one-field String or Array payload can share the node's allocation. Reading it reconstructs
+the normal borrowed String or Array ABI; keeping the value copies its contents. Long
+payloads retain an ordinary external owner with an idempotent region cleanup record.
+Copies or returned subtrees get an independent root region. A positive, separately logged
+`capacity-unobserved` fact allows a frozen child array to use its exact length as capacity;
+any capacity read in any unit removes that fact without removing the region proof.
+
+In a whole Linux 64-bit module with a reserved arena address range, recursive union arrays
+can store 32-bit links. Selected member payloads use a marked 16-bit header when the type
+store's complete nominal-member count bounds all ids below the marker. Other members,
+anonymous unions, errors, C boundaries, split modules and unsupported targets retain their
+ordinary ABI. Larger layouts and incomplete proofs fall back conservatively. Region
+chunks are suballocated from heap pages, with a shared page bitmap preventing a neighboring
+root's release from returning a page still in use.
+
+Bounded nonnegative integer appends with at most five digits write pairs from a static
+decimal table. The branch proving the digit count also proves the narrowing to 32 bits;
+the two-byte stores explicitly have alignment one. Larger and negative values keep the
+general conversion.

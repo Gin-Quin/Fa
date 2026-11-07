@@ -819,6 +819,154 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 		assert!(body.contains("@fa_string_reserve_inline("), "{body}");
 		assert!(body.contains("reserved_inline"), "{body}");
 	}
+	#[test]
+	fn non_escaping_strings_have_independent_frame_buffers() {
+		let ir = ir_of(
+			"frame-strings",
+			"function check = (prefix: String) => {\n mutable text = \"\"\n text += prefix\n let copy = text\n text = \"changed\"\n console.log(copy, text)\n}\ncheck(\"123456789012345678901234567890\")\n",
+		);
+		assert!(ir.contains("alloca [64 x i8]"), "{ir}");
+		assert!(ir.contains("@fa_string_assign_local("), "{ir}");
+	}
+
+	#[test]
+	fn small_literal_mutables_keep_the_inline_representation() {
+		let ir = ir_of(
+			"small-inline-mutables",
+			"function check = () => {\n mutable text = \"first\"\n console.log(text)\n text = \"second\"\n console.log(text)\n}\ncheck()\n",
+		);
+		assert!(!ir.contains("alloca [64 x i8]"), "{ir}");
+	}
+	#[test]
+	fn recursive_union_with_a_payload_larger_than_an_arena_chunk_stays_general() {
+		let mut source = String::from("type Pad0 = Integer\n");
+		for level in 1..=13 {
+			source.push_str(&format!(
+				"type Pad{level} = (Pad{}, Pad{})\n",
+				level - 1,
+				level - 1
+			));
+		}
+		source.push_str("type Tree = Union { Leaf = { pad: Pad13 }, Branch = { left: Tree, right: Tree } }\nfunction build = (depth: Integer): Tree => {\nif depth > 0 { return Tree.Branch { left = build(depth - 1), right = build(depth - 1) } }\nlet pad0 = depth\n");
+		for level in 1..=13 {
+			source.push_str(&format!(
+				"let pad{level} = (pad{}, pad{})\n",
+				level - 1,
+				level - 1
+			));
+		}
+		source.push_str("Tree.Leaf { pad = pad13 }\n}\nfunction count = (tree: Tree): Integer => when tree is {\nTree.Leaf => 1\nTree.Branch as { left, right } => count(left) + count(right)\n}\nconsole.log(count(build(1)))\n");
+		let ir = ir_of("region-large-payload", &source);
+		assert!(!ir.contains("@fa_arena_enter("), "{ir}");
+	}
+
+	#[test]
+	fn recursive_union_arrays_use_region_buffer_cleanups() {
+		let ir = ir_of(
+			"region-child-arrays",
+			"type Tree = Union { Leaf = { value: Integer }, List = { items: Array<Tree> } }\nfunction build = (depth: Integer): Tree => if depth > 0 {\n mutable items: Array<Tree> = []\n items.push(build(depth - 1))\n Tree.List { items }\n} else { Tree.Leaf { value = 7 } }\nfunction count = (tree: Tree): Integer => when tree is {\nTree.Leaf as { value } => value\nTree.List as { items } => {\n mutable total = 0\n for child in items { total += count(child) }\n total\n}\n}\nlet roots: Array<Tree> = [build(1), build(2)]\nfor root in roots { console.log(count(root)) }\n",
+		);
+		assert!(ir.contains("@fa_arena_enter("), "{ir}");
+		assert!(ir.contains("@fa_array_init_region_local("), "{ir}");
+		assert!(ir.contains("@fa_array_into_region("), "{ir}");
+		assert!(
+			ir.contains("freeze_children") && ir.contains("children_view"),
+			"{ir}"
+		);
+		assert!(
+			ir.contains("getelementptr inbounds i32, ptr %items"),
+			"{ir}"
+		);
+	}
+
+	#[test]
+	fn region_string_slices_only_borrow_stable_immediate_sources() {
+		let prefix =
+			"type Tree = Union { Leaf = { text: String }, Branch = { left: Tree, right: Tree } }\n";
+		let suffix = "\nfunction count = (tree: Tree): Integer => when tree is {\nTree.Leaf as { text } => text.length\nTree.Branch as { left, right } => count(left) + count(right)\n}\nconsole.log(count(build(\"hello\".repeat(10))))\n";
+		for (name, expression, extra, borrowed) in [
+			("stable", "text[0..4]", "", true),
+			("temporary", "\"hello\".repeat(10)[0..4]", "", false),
+			("temporary-slice", "text[0..30][0..4]", "", false),
+			(
+				"called-bound",
+				"text[start()..4]",
+				"function start = (): Integer => 0\n",
+				false,
+			),
+		] {
+			let source = format!(
+				"{prefix}{extra}function build = (text: String): Tree => Tree.Leaf {{ text = {expression} catch error => \"\" }}{suffix}"
+			);
+			let ir = ir_of(&format!("region-string-slice-{name}"), &source);
+			assert!(
+				ir.contains("freeze_text") && ir.contains("text_view"),
+				"{ir}"
+			);
+			assert_eq!(ir.contains("@fa_string_slice_region("), borrowed, "{ir}");
+		}
+	}
+
+	#[test]
+	fn compact_region_tags_fall_back_when_the_program_has_too_many_members() {
+		let source = "type Tree = Union { Leaf = { value: Int32 }, Branch = { left: Tree, right: Tree } }\nfunction build = (value: Int32): Tree => Tree.Leaf { value }\nfunction read = (tree: Tree): Int32 => when tree is {\nTree.Leaf as { value } => value\nTree.Branch as { left, right } => read(left) + read(right)\n}\nconsole.log(read(build(7)))\n";
+		let compact = ir_of("compact-region-tags-small", source);
+		assert!(
+			compact.contains("store i16") && compact.contains("@fa_arena_enter("),
+			"{compact}"
+		);
+		let mut large = String::from("type Noise = Enum {\n");
+		for index in 0..32752 {
+			large.push_str(&format!(" M{index}\n"));
+		}
+		large.push_str("}\n");
+		large.push_str(source);
+		let general = ir_of("compact-region-tags-large", &large);
+		assert!(!general.contains("store i16"), "{general}");
+		assert!(general.contains("@fa_arena_enter("), "{general}");
+	}
+
+	#[test]
+	fn region_payloads_and_rejected_member_subsets_keep_separate_array_layouts() {
+		let active = ir_of(
+			"region-small-payloads-active",
+			include_str!("programs/region-small-payloads.fa"),
+		);
+		assert!(
+			active.contains("@fa_arena_enter(") && active.contains("store i16"),
+			"{active}"
+		);
+		let ir = ir_of(
+			"region-partial-members",
+			"type Tree = Union { Number = { value: Int32 }, Text = { text: String }, List = { items: Array<Tree> } }\nfunction number = (value: Int32): Tree.Number => Tree.Number { value }\nfunction text = (value: String): Tree.Text => Tree.Text { text = value }\ntype Leaf = Tree.Number | Tree.Text\nmutable leaves: Array<Leaf> = []\nleaves.push(number(9))\nleaves.push(text(\"eleven\"))\nfor leaf in leaves { console.log(\"{leaf}\") }\n",
+		);
+		assert!(!ir.contains("@fa_arena_enter("), "{ir}");
+		assert!(ir.contains("@fa_packed_new("), "{ir}");
+	}
+
+	#[test]
+	fn pure_nonempty_split_filters_are_fused_and_other_callbacks_are_not() {
+		let ir = ir_of(
+			"split-nonempty",
+			"function run = (text: String): Integer => {\nmutable source = text\nlet parts = source.split(\" \").filter((part) => not part.isEmpty())\nparts.length\n}\nconsole.log(run(\"a b\"))\n",
+		);
+		assert!(ir.contains("@fa_string_split_nonempty_views("), "{ir}");
+		assert!(!ir.contains("filter_keep"), "{ir}");
+		for (name, callback) in [
+			("index", "(part, index) => index == 1"),
+			("body", "(part) => { not part.isEmpty() }"),
+			("capture", "(part) => not text.isEmpty()"),
+		] {
+			let ir = ir_of(
+				&format!("split-filter-{name}"),
+				&format!(
+					"function run = (text: String): Integer => {{\nlet parts = text.split(\" \").filter({callback})\nparts.length\n}}\nconsole.log(run(\"a b\"))\n"
+				),
+			);
+			assert!(!ir.contains("@fa_string_split_nonempty"), "{ir}");
+			assert!(ir.contains("filter_keep"), "{ir}");
+		}
+	}
 }
 
 /// A resource moved on every path or on none has no drop flag left in the

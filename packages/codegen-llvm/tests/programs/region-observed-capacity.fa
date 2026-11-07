@@ -1,0 +1,26 @@
+-- Observing capacity disables exact-length freezing of member buffers.
+-- Preserve both a small inline buffer and a large external buffer.
+-- asynchronous: false
+type Tree = Union { Leaf = { value: Int32 }, List = { items: Array<Tree> } }
+mutable observed = 0
+function build = (length: Integer<min = 0>): Tree mutates observed => {
+	mutable items: Array<Tree> = []
+	for 0..length { items.push(Tree.Leaf { value = 7 }) }
+	observed = items.capacity
+	Tree.List { items }
+}
+function capacity = (tree: Tree): Integer => when tree is {
+	Tree.Leaf => 0
+	Tree.List as { items } => items.capacity
+}
+function length = (tree: Tree): Integer => when tree is {
+	Tree.Leaf => 0
+	Tree.List as { items } => items.length
+}
+for size in [0, 3, 1000] {
+	if size < 0 { continue }
+	let root = build(size)
+	assert length(root) == size
+	assert capacity(root) == observed
+}
+console.log("observed capacity") -- prints: observed capacity

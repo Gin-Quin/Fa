@@ -1608,6 +1608,30 @@ static void test_negative_probe_deletions(void) {
 	CHECK(allocated == before);
 }
 
+static void test_local_map_headers(void) {
+	long before = allocated;
+	int64_t entry_size = sizeof(TestKey32Entry) | TABLE_INLINE | TABLE_INLINE_KEY32;
+	FaTable local;
+	for (int round = 0; round < 64; round += 1) {
+		FaTable *table = fa_table_new_local(&local, 4, entry_size);
+		CHECK(table == &local && table->directory == -1);
+		key32_insert(table, 0, entry_size, 1);
+		key32_insert(table, UINT32_MAX, entry_size, 1);
+		for (uint32_t key = 1; key < 128; key += 1) { key32_insert(table, key, entry_size, 1); }
+		fa_table_reserve(table, 1000, entry_size, key32_hash);
+		CHECK(table->directory == -1 && key32_find(table, UINT32_MAX, entry_size) >= 0);
+		FaTable *copy = fa_table_copy(table, entry_size);
+		CHECK(copy->directory == 0 && key32_find(copy, 0, entry_size) >= 0);
+		fa_table_free(copy, entry_size);
+		fa_table_clear(table, entry_size);
+		CHECK(table->directory == -1 && table->length == 0);
+		key32_insert(table, 42, entry_size, 1);
+		CHECK(key32_find(table, 42, entry_size) >= 0);
+		fa_table_free(table, entry_size);
+		CHECK(allocated == before);
+	}
+}
+
 static void test_inline_loop_reservations(void) {
 	long before = allocated;
 	for (size_t prefix = 0; prefix <= 5; prefix += 1) {
@@ -1913,6 +1937,7 @@ int main(void) {
 	test_tables();
 	test_inline_key32();
 	test_negative_probe_deletions();
+	test_local_map_headers();
 	test_inline_loop_reservations();
 	test_frame_strings();
 	test_integer_strings();

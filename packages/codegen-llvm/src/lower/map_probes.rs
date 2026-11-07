@@ -40,7 +40,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			&& self.map_probe_program_is_closed()
 	}
 
-	fn map_probe_program_is_closed(&self) -> bool {
+	pub(super) fn map_probe_program_is_closed(&self) -> bool {
 		*self.map_probes.closed.get_or_init(|| {
 			if !self.whole_program
 				|| self.tasks.asynchronous
@@ -234,6 +234,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if matches!(
 			name,
 			"fa_table_append"
+				| "fa_table_new_local"
 				| "fa_table_remove"
 				| "fa_table_release"
 				| "fa_table_kill"

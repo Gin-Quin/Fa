@@ -513,6 +513,40 @@ source/compiler hashes, flags, sizes, outputs and instruction provenance are in
 ELFs and are kept separate from older full-suite CPU samples.
 
 
+
+## Private map headers (2026-11-07)
+
+A private inline32 map can keep its header in its function frame, while the
+entries retain the normal allocation and destruction. Escapes, aliases, copies,
+captures, references, callbacks, foreign/generic code and separate units keep the
+owning header. The source programs and original Goose defaults are unchanged.
+
+At original `lru` size 2,000,000 with Clang 18 on both languages:
+
+| Metric | Previous negative probe | Frame header | Goose |
+| --- | ---: | ---: | ---: |
+| Instructions | 190,062,696 | 187,658,140 | 185,648,894 |
+| Mean CPU (ms) | 255.02 | 246.16 | 231.94 |
+| GNU time RSS (KiB) | 10,752 | 10,624 | 9,856–9,984 |
+
+Sixty balanced rotations of the four archived binaries ran in a quiet 72.8 s
+window. Paired header/previous CPU ratio is 0.9668 (95% bootstrap 0.9408–0.9938),
+header/Goose 1.0639 (1.0289–1.0974). These intervals describe sampling variation
+within this run; host variation across runs remains. The instruction reduction
+is 1.26% versus the previous checkpoint; beating Goose remains open.
+
+The retained header candidate passes the full workspace LLVM suite, Clippy,
+65 IR checks, native/freestanding/wasm fixtures, C ASan/UBSan, 300 JS runtime
+tests and QEMU AArch64. The final lru ELF matches the measured prototype exactly;
+the other fifteen original ELFs match the previous checkpoint.
+
+The fourth binary was a rejected dominating-SSA `get`→`delete` prototype:
+192,746,875 instructions, CPU/previous 1.0026 (0.9700–1.0369), CPU/header 1.0370
+(1.0057–1.0703). A broader positive cache was rejected too. Neither is retained.
+Compiler/source/manifests, raw CPU and statistics are under
+`/tmp/fa-native-perf-next/compilers/map-{frame-header-stage27,dominating-probes-stage29}`
+and `/tmp/fa-native-perf-next/map-headers-{cpu,statistics}.json`.
+
 ## Compiler
 
 How fast the compiler itself is, and how much memory it takes, on big projects (design/parallel-pipeline.md, step 0). `compiler/generate.ts` writes a Fa package of N files of about L lines, and `compiler/run.ts` measures `fa check`, `fa build --target=bun` and `fa build --target=native` on packages of 100, 1,000 and 2,000 files of 500 lines.

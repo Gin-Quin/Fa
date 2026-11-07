@@ -1064,7 +1064,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let table = self.table_of(repr)?;
 		let capacity = self.context.i64_type().const_int(items.len() as u64, false);
-		let pointer = self.table_new(table, capacity)?;
+		let pointer = self.table_new_at(node, table, capacity)?;
 		let result = self.fresh(Val::new(repr, pointer));
 		for item in items.iter() {
 			let mark = self.mark();
@@ -2008,7 +2008,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => self.context.i64_type().const_zero(),
 		};
-		let result = self.table_new(table, capacity)?;
+		let result = self.table_new_at(node, table, capacity)?;
 		match source.repr {
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, node)?;

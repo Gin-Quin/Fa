@@ -778,3 +778,27 @@ reactivity, concurrency, function-value calls and callbacks. A referenced,
 captured or shared map is not a candidate. Missing facts retain normal lookups.
 This is a compiler representation, with no change to source value semantics or
 to user-visible map operations.
+
+
+## Private map headers in the function frame (2026-11-07)
+
+A private local inline32 Map can keep the runtime header in a stack slot while
+its entry buffer retains the ordinary allocator and layout. The initial rule
+shares the closed-program restrictions of private negative probes. Every use
+must be indexing, a scalar size/capacity read, an immediate supported builtin
+method, iteration, or assignment of a new map to the binding. Aliases, references,
+copies, returns and captures fall back to an owning header. The constructor itself
+must be a fresh literal or `Map.from` of a literal, and its substitution is keyed
+by file, source node and the actual LLVM function. A generated helper never uses
+a caller's frame slot. Reinitialization invalidates the saved negative probe.
+
+The directory capacity is unused by inline tables: −1 marks a frame header.
+Normal drops free its entry buffer and leave the frame; runtime copies reset the
+marker and own their separate header. Stable/chunked maps retain their current
+representation. The cache contract adds `map-header-1`; no existing runtime
+function changes its ABI. Every target's checked-in runtime IR is regenerated.
+
+The measured candidate reduces lru instructions 1.26% and paired CPU 3.32% versus
+the negative-probe checkpoint in one quiet balanced run. Goose remains ahead;
+measurements and their limits are recorded in `benchmarks/README.md`. Broader
+positive-probe and SSA-reuse prototypes were tested but not retained.

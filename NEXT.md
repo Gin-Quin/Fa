@@ -1,3 +1,41 @@
+# Private inline-map headers (2026-11-07, validated)
+
+Based on validated map checkpoint `1e3a91d`; independent of split-stream
+`f2f8db2` and template-bound safety `aa534b7`. A private inline32 Map may keep
+its header in its function frame. Every use is checked: no aliases, copies,
+returns, captures, shared handles, callbacks, generic code, foreign code or
+multiple-unit lowering. The constructor is keyed by file/node/actual LLVM
+function, preventing a generated helper from borrowing a caller's frame.
+Entry storage and its release remain ordinary. An unused inline-directory field
+marks the frame header; copying the runtime table makes an independently owned
+heap header. Constructor reinitialization invalidates negative probes.
+
+At original lru size 2,000,000, matched Clang 18 and unchanged source: prototype 27
+uses 187,658,140 instructions vs 190,062,696 in `1e3a91d` (−1.26%), Goose 185,648,894
+(ratio 1.0108). A quiet 72.8 s run of 60 balanced four-way rotations gives paired CPU
+header/1e3 = 0.9668 [95% 0.9408–0.9938], header/Goose = 1.0639 [1.0289–1.0974].
+Means 246.16 / 255.02 / 231.94 ms, GNU time RSS 10,624 / 10,752 / 9,856–9,984 KiB
+(header/1e3/Goose). One run's sampling interval does not cover all host variation;
+the goal against Goose remains open. Raw/manifests/statistics:
+`/tmp/fa-native-perf-next/map-headers-{cpu,statistics}.json`.
+
+Positive-probe caching 28 and the more selective dominating-SSA shortcut 29 are
+rejected: both use 192.747 M instructions; SSA CPU/1e3 = 1.0026 [0.9700–1.0369],
+SSA/header = 1.0370 [1.0057–1.0703]. All compiler/source snapshots remain archived;
+none of their lowering is in this candidate.
+
+C ASan/UBSan, 65 IR and native/freestanding/wasm header/negative-probe fixtures pass.
+Final 16-ELF equivalence is verified: lru matches the measured header 27 exactly;
+other 15 match the validated Map 1e3 checkpoint. Record:
+`/tmp/fa-native-perf-next/map-frame-headers-final-verified.json`. Final compiler
+is archived as `compilers/map-frame-headers-final-stage30`; all 16 instruction
+counts and ELF provenance are in `map-frame-headers-final-clang18/instructions-original16.json`.
+Workspace clippy/fmt, 300 JS runtime tests and QEMU AArch64 pass. The added
+chunked-initializer IR regression confirms that maps shared between generated
+functions retain an owner. Full workspace LLVM completed EXIT0 under flock; the frozen source manifest
+was unchanged. Log `/tmp/fa-map-header-workspace-full.log`. The new copy-fallback
+IR fixture uses the pre-CopyCore implicit-copy syntax; when coalescing CopyCore, replace its `let other = map` with `let other = copy map`.
+
 # Private compact-map checkpoint (2026-11-07, validated)
 
 Based on validated `0c4c115`, independent of delivered split-stream `f2f8db2`.

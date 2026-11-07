@@ -6934,6 +6934,16 @@ FA_EXPORT FaTable *fa_table_new(int64_t capacity, int64_t entry_size) {
 	return table;
 }
 
+/// An inline map header whose lifetime was proved local to its function.
+/// Its otherwise unused directory field distinguishes it from owning headers.
+FA_EXPORT __attribute__((always_inline)) FaTable *fa_table_new_local(
+    FaTable *table, int64_t capacity, int64_t entry_size) {
+	*table = (FaTable){0};
+	table->directory = -1;
+	inline_new_slots(table, index_slots(capacity), entry_size);
+	return table;
+}
+
 /// `map.capacity`, `set.capacity`: the entries it holds without a rehash
 /// (the index is at most half full; the entries never move).
 FA_EXPORT int64_t fa_table_capacity(const FaTable *table) {
@@ -7171,7 +7181,9 @@ FA_EXPORT void fa_table_clear(FaTable *table, int64_t entry_size) {
 FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
 	if (entry_size & TABLE_INLINE) {
 		inline_free_slots(table->index, table->mask, entry_size);
-		fa_free(table, sizeof(FaTable), sizeof(int64_t));
+		if (table->directory != -1) {
+			fa_free(table, sizeof(FaTable), sizeof(int64_t));
+		}
 		return;
 	}
 	int64_t chunks = table->capacity >> TABLE_CHUNK_BITS;
@@ -7198,6 +7210,7 @@ FA_EXPORT FaTable *fa_table_copy(const FaTable *table, int64_t entry_size) {
 	FaTable *copy = fa_alloc(sizeof(FaTable), sizeof(int64_t));
 	*copy = *table;
 	if (entry_size & TABLE_INLINE) {
+		copy->directory = 0;
 		size_t bytes = (size_t)(inline_slots(table->mask, entry_size) * inline_stride(entry_size));
 		copy->index = fa_alloc(bytes, 8);
 		copy_bytes((uint8_t *)copy->index, (const uint8_t *)table->index, bytes);

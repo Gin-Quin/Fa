@@ -835,6 +835,41 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 	}
 
 	#[test]
+	fn private_inline_map_headers_stay_in_the_frame_and_escaping_maps_keep_owners() {
+		let private = ir_of(
+			"local-map-header",
+			"mutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 128)\nmap[2] = 3\nconsole.log(map.get(2), map.size)\n",
+		);
+		assert!(private.contains("@fa_table_new_local("), "{private}");
+		let escaping = ir_of(
+			"escaping-map-header",
+			"function make = (): Map<UInt32, UInt32> => {\nmutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 128)\nmap[2] = 3\nmap\n}\nconsole.log(make().size)\n",
+		);
+		assert!(!escaping.contains("@fa_table_new_local("), "{escaping}");
+		let copied = ir_of(
+			"copied-map-header",
+			"mutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 128)\nlet other = map\nmap[2] = 3\nconsole.log(other.size, map.size)\n",
+		);
+		assert!(!copied.contains("@fa_table_new_local("), "{copied}");
+	}
+
+	#[test]
+	fn map_headers_shared_between_top_level_parts_keep_an_owner() {
+		// One large statement forces the initializer into several real LLVM
+		// functions without changing process-wide environment variables.
+		let padding = "x".repeat(70_000);
+		let source = format!(
+			"mutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 128)\nassert \"{padding}\".length == 70000\nmap[2] = 3\nconsole.log(map.get(2), map.size)\n"
+		);
+		let ir = ir_of("map-header-top-level-parts", &source);
+		assert!(
+			count(&ir, "define internal void @fa.top_level_part") >= 2,
+			"{ir}"
+		);
+		assert!(!ir.contains("@fa_table_new_local("), "{ir}");
+	}
+
+	#[test]
 	fn inline_utf8_bytes_are_not_assumed_to_be_a_positive_raw_length() {
 		let ir = ir_of(
 			"inline-utf8-length",

@@ -107,8 +107,9 @@ Root worker/Errors WIP is saved explicitly in stash c9a0034315b5c4bdb7f3da0ecd9e
 Task and composites holding a Task remain noncopyable. Collections and ordinary objects
 containing them require an explicit copy when both sources remain usable; an implicit
 last-use move remains allowed. Lead/analyzer own that parser and semantic migration.
-Resource copying and finalization are being clarified by lead; this physical lot makes
-no change to Resource or Task ownership.
+The final Resource rule is uniqueness: a type with destroy is noncopyable; create/open
+creates another independent resource. Builtin Sync and closure environments remain counted.
+This physical lot makes no change to Resource or Task ownership.
 `with` uses parameter names from the visible function signature, including a
 function-valued parameter or field. Analyzer owns this implementation.
 
@@ -180,3 +181,36 @@ and all heap blocks freed. The complete LLVM workspace passes (exit 0,
 /tmp/fa-region-small-frozen-workspace-full.log), fmt/clippy pass and JS runtime is 298/0.
 Parent has a separate unapplied NodeCopy buffer-reuse hunk at
 /tmp/fa-copy-array-reuse.patch; it is not included here because this base predates Copy.
+
+## Benchmark provenance and the exact original suite
+
+The audit runner now defaults to the exact 16 original Goose benchmarks. The 9 other ports
+have a separate selection. Every Rust/Fa/Goose executable has a manifest with effective
+source hashes, compiler paths/versions/hashes (Fa-native, C linker/compiler, Goose stdlib),
+flags, size, modes, binary hash and exact output. Reuse rejects a mismatch or a legacy build;
+rebuild-fa still validates the saved Goose/Rust artifacts before rebuilding Fa. Release
+programs explicitly use O3, sync mode and no overflow checks. Tests cover the old constant-N
+reuse bug, source/shared-module/compiler/flags/mode changes and tampered files.
+
+Validation: Python16/16, fmt/clippy clean, corrected full LLVM workspace exit0
+(/tmp/fa-metrology-corrected-workspace-full.log). The first run found one unrelated timing
+flake in async-tasks.fa: two detached tasks could print in the opposite order when their
+timers were already due. A Channel handshake preserves both detached-task forms and gives
+a causal order. CLI native, native/freestanding/wasm, Bun and 20 native repetitions pass.
+
+The exact default-size Clang18 corpus is /tmp/fa-native-perf-next/default-clang18-original16:
+all outputs match Rust, all manifests/reuse checks pass, instructions.json records the full
+suite. A quiet window used21 rotating baseline/prototype/Goose samples pinned to CPU1; its
+CPU medians are in /tmp/fa-native-perf-next/initial-arrays-cpu.json. Baseline compiler is
+small dbcee1d, not later CopyCore. A rejected prototype gave empty arrays four private slots
+while preserving capacity0: graph CPU improved3.6%, but words regressed10.6%, strlist6.1%,
+binary-trees4.9%; no such runtime change is included here. Both exact compiler executables
+and its patch are archived in /tmp/fa-native-perf-next.
+
+Do not use RSS from that CPU report: wait4(Popen) inherits a Python-image floor. Separate
+GNU time RSS/minor-fault measurements are in initial-arrays-memory.json. For the baseline,
+interp uses10496KiB versus Goose5504, sexp57856 versus27136, scene7552 versus6656. Default
+CPU gaps remain largest on interp(2.08x), scene(1.50x), sexp(1.39x), respond(1.17x),
+records(1.14x) and lru(1.12x). Graph/tree are ahead; small gaps around parity need later
+confirmation. No overall CPU victory is claimed. The next physical prototype compresses
+direct immutable Root-to-Root union fields under the existing proof, outside this delivery.

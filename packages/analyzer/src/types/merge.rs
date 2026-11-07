@@ -226,11 +226,27 @@ impl Merger<'_> {
 			K::Iterator(item, path) => K::Iterator(self.ty(item), self.path(path)),
 			K::Ref(target, path) => K::Ref(self.ty(target), self.path(path)),
 			K::Task(result, throws) => K::Task(self.ty(result), self.ty(throws)),
+			K::Sync(kind, item) => K::Sync(kind, self.ty(item)),
 			K::Param(param) => K::Param(self.param(param)),
 			K::ImplicitParam(owner, index) => K::ImplicitParam(self.decl_key(owner), index),
 			K::Const(value) => K::Const(self.constant(value)),
 			K::Rec(_) => unreachable!("merged by `ty`"),
-			other => other,
+			K::Never
+			| K::Void
+			| K::None
+			| K::ErrorTop
+			| K::Unknown
+			| K::Boolean
+			| K::BoolLit(_)
+			| K::SymInt(_)
+			| K::Float(_)
+			| K::BigInt
+			| K::Percentage
+			| K::String
+			| K::Character
+			| K::CString
+			| K::Range
+			| K::Subscription => kind,
 		}
 	}
 
@@ -715,6 +731,58 @@ mod tests {
 		let target = fresh.rec_target(merged.node).expect("its target is set");
 		assert!(!is_local(target.0));
 		assert!(matches!(fresh.kind(target), TypeKind::Object(_)));
+	}
+
+	#[test]
+	fn shared_handles_remap_generic_payloads_before_publishing() {
+		use crate::types::{Bindings, ParamInfo, SyncKind};
+
+		let global = GlobalStore::new();
+		let mut view = TypeStore::view(&global);
+		let module = view.module("library/holder");
+		let owner = view.decl_key(module, &["holder"], 0);
+		let name = view.syms.intern("Item");
+		let parameter = view.add_param(ParamInfo {
+			owner,
+			index: 0,
+			name,
+			constraint: TypeId::UNKNOWN,
+			default: TypeId::UNSET,
+			value: false,
+		});
+		let item = view.intern(TypeKind::Param(parameter));
+		let optional = view.optional(item);
+		let array = view.array(optional);
+		for kind in [
+			SyncKind::Mutex,
+			SyncKind::Guard,
+			SyncKind::Channel,
+			SyncKind::Worker,
+			SyncKind::WorkerPool,
+		] {
+			let handle = view.intern(TypeKind::Sync(kind, array));
+			let (handle, parameter) = {
+				let mut merger = view.merger(None);
+				(merger.ty(handle), merger.param(parameter))
+			};
+			let mut consumer = TypeStore::view(&global);
+			let TypeKind::Sync(actual, payload) = consumer.kind(handle) else {
+				panic!("a handle")
+			};
+			assert_eq!(actual, kind);
+			assert!(!is_local(payload.0), "a published payload must be global");
+			let bound = consumer.substitute(
+				handle,
+				&Bindings {
+					params: vec![parameter],
+					types: vec![TypeId::STRING],
+					..Default::default()
+				},
+			);
+			let expected_item = consumer.optional(TypeId::STRING);
+			let expected_array = consumer.array(expected_item);
+			assert_eq!(consumer.kind(bound), TypeKind::Sync(kind, expected_array));
+		}
 	}
 
 	#[test]

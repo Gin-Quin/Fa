@@ -267,3 +267,27 @@ generated per checked type with worklists, including erased generics. External
 by analyzer and CLI24k now passes too. No runtime eval/schema interpretation.
 Generated codecs and closure/Sync ownership checkpoints are being coalesced.
 Do not claim the root copy/transport lot fully validated or ready to integrate.
+
+## Sync payload merge correction (validated on lead)
+
+The parallel TypeStore merger now remaps the payload of every Sync kind. A
+generic Mutex<Array<T>?> previously kept a local type id after publication,
+misreading it as Integer in the merged store. Exhaustive leaf matching prevents
+new composite kinds from silently taking that fallback. The regression covers
+the actual pipeline at1/2 threads and multiple seeds, plus the direct merger.
+Cache suffix sync-payload-1 invalidates objects whose earlier stable hash was
+already correct despite the malformed merged payload. Workspace clippy and
+COMPLETE LLVM workspace full pass, exit0:
+/tmp/fa-sync-payload-lead-{clippy,workspace-full}.log (session80560 consumed).
+
+Resource-unique frontend393 units and all cases pass independently. Root has
+unique C/JS resource owners, updated docs and passing Bun/3LLVM basic lifetime
+programs; mixed borrowed/fresh native control results still need conditional
+cleanup (proofs owns that repair). Generic Bun pointers now pass5 programs using
+TypeInfo plus generated copy/drop and C-layout metadata. NeedsCodec tag5/hash110
+is coalesced in root; binary worker transport remains unconnected. Shared-value
+root remains WIP, with no Task RC or automatic Resource sharing.
+
+Three more clean integrated worktrees were removed with agent confirmation:
+fa-native-region-validation, interpreter-continuations and arena-regions. Their
+branches and logs remain; /tmp/fa-resume-cleaned-worktrees.json is updated.

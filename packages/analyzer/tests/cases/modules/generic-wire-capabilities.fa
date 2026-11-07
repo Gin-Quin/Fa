@@ -1,0 +1,13 @@
+-- file: library/holder.fa
+use { Mutex } = std.concurrency
+export function = <Item>(_value: Item): Mutex<Item | none> => Mutex<Item | none> { value = none }
+-- file: library/forward.fa
+use { Mutex } = std.concurrency
+export function = <Element>(value: Element): Mutex<Element | none> => holder(value)
+-- file: application/main.fa
+export function = () => {
+	let cell = library.forward([1, 2, 3])
+	let guard = cell.tryLock()
+	console.log(guard?.value?.length ?? 0)
+}
+-- prints: 0

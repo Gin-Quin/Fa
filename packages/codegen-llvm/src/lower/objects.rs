@@ -424,6 +424,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			)?;
 			return Ok(self.fresh(Val::new(Repr::Union, pointer)));
 		}
+		if let Some(plan) = self.compact_edge_payload(nominal, index) {
+			let pointer = self.freeze_edge_payload(
+				&self.builder,
+				id.get_zero_extended_constant().expect("a member id"),
+				plan,
+				data.value.expect("a payload"),
+				false,
+			)?;
+			return Ok(self.fresh(Val::new(Repr::Union, pointer)));
+		}
 		let ty = self.box_type(Some(data_repr));
 		if self.inline_union_words(nominal).is_some() {
 			let repr = Repr::InlineUnion(nominal);
@@ -581,20 +591,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// A statically named subject cannot contain an anonymous type id.
 		// Compare its exact stored tag, including the compact marker, instead
 		// of decoding a general union's full-width discriminant.
+		let subject_nominal = subject.and_then(|ty| {
+			let ty = self.without_none(ty);
+			let ty = self.types().rec_target(ty).unwrap_or(ty);
+			match self.types().kind(ty) {
+				TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _) => Some(nominal),
+				_ => None,
+			}
+		});
 		let narrow = self.packed_headers()
 			&& value.repr == Repr::Union
-			&& subject.is_some_and(|ty| {
-				let ty = self.without_none(ty);
-				let ty = self.types().rec_target(ty).unwrap_or(ty);
-				matches!(
-					self.types().kind(ty),
-					TypeKind::NamedUnion(..) | TypeKind::Member(..)
-				)
+			&& subject_nominal.is_some_and(|nominal| self.arena_member(nominal));
+		let byte_tag = narrow
+			&& subject_nominal.is_some_and(|nominal| {
+				members.iter().all(|(owner, _)| *owner == nominal) && self.byte_root_tags(nominal)
 			});
-		let id = if narrow {
+		let mut id = if narrow {
 			self.builder
 				.build_load(
-					self.context.i16_type(),
+					if byte_tag {
+						self.context.i8_type()
+					} else {
+						self.context.i16_type()
+					},
 					value.value.expect("a box").into_pointer_value(),
 					"member_tag",
 				)?
@@ -602,6 +621,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			self.box_id(value)?
 		};
+		if narrow && !byte_tag && self.tree_arenas.near_links {
+			id = self
+				.builder
+				.build_and(id, id.get_type().const_int(0xbfff, false), "")?;
+		}
 		let mut result = self.context.bool_type().const_zero();
 		for (nominal, index) in members {
 			let mut member = self.member_id(nominal, index);
@@ -668,6 +692,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				pointer: self.payload_offset(&self.builder, pointer, 4)?,
 				repr,
 			});
+		}
+		if let Some(plan) = self.compact_edge_payload(nominal, index) {
+			let value = self.edge_payload_value(&self.builder, pointer, plan)?;
+			let out = self.alloca(repr, "member_view")?;
+			self.builder.build_store(out.pointer, value)?;
+			return Ok(out);
 		}
 		let ty = self.box_type(Some(repr));
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
@@ -2412,6 +2442,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					(
 						self.scalar_payload_value(&self.builder, a, data)?,
 						self.scalar_payload_value(&self.builder, b, data)?,
+					)
+				} else if let Some(plan) = self.compact_edge_box(id) {
+					(
+						self.edge_payload_value(&self.builder, a, plan)?,
+						self.edge_payload_value(&self.builder, b, plan)?,
 					)
 				} else {
 					let left = self.builder.build_struct_gep(layout, a, index, "")?;

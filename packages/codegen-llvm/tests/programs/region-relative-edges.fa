@@ -1,0 +1,43 @@
+-- Small payloads use relative links; distant children retain full links.
+-- asynchronous: false
+type Tree = Union {
+	Empty
+	Leaf = { value: Int32 }
+	Branch = { left: Tree, right: Tree }
+	Mixed = { left: Tree, stamp: Byte, right: Tree }
+}
+function build = (depth: Integer): Tree => if depth == 0 {
+	Tree.Leaf { value = 7 }
+} else {
+	Tree.Branch { left = build(depth - 1), right = build(depth - 1) }
+}
+function surround = (child: Tree): Tree => Tree.Branch { left = child, right = Tree.Empty }
+function sum = (node: Tree): Integer => when node is {
+	Tree.Empty => 0
+	Tree.Leaf as { value } => value
+	Tree.Branch as { left, right } => sum(left) + sum(right)
+	Tree.Mixed as { left, stamp, right } => {
+		assert stamp == 231
+		sum(left) + sum(right)
+	}
+}
+function same = (left: Tree, right: Tree): Boolean => left == right
+let kept = do {
+	let abandoned = build(12)
+	let high = build(12)
+	assert sum(abandoned) == 28672
+	high
+}
+-- A refill may reuse lower pages released by the abandoned root. Nodes
+-- in this tree span more than the signed 16-bit link window in either case.
+let original = build(16)
+let duplicate = original
+let wrapped = surround(duplicate)
+let mixed = Tree.Mixed { left = duplicate, stamp = 231, right = Tree.Empty }
+assert sum(kept) == 28672
+assert sum(original) == 458752
+assert sum(duplicate) == 458752
+assert sum(wrapped) == 458752
+assert sum(mixed) == 458752
+assert same(original, duplicate)
+console.log("relative edges") -- prints: relative edges

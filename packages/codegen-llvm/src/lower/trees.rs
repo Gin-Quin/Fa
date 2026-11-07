@@ -25,6 +25,9 @@ pub(super) const ARENA_CHUNK_BYTES: u64 = 1024;
 #[derive(Default)]
 pub(super) struct TreeArenas<'ctx> {
 	pub(super) packed_headers: bool,
+	/// Bit 14 can distinguish a local wide fallback when all prepared
+	/// root member ids fit below it. Other programs keep the i32 layouts.
+	pub(super) near_links: bool,
 	/// Resolved claims for a whole-module build. Split builds consult their
 	/// shared ProgramFacts directly, recording the answer in the object cache.
 	facts: std::collections::BTreeSet<String>,
@@ -605,10 +608,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.compact_array_payload(nominal, index).is_some()
 						|| self.compact_string_payload(nominal, index).is_some()
 						|| self.compact_scalar_payload(nominal, index).is_some()
+						|| self.edge_payload_shape(nominal, index).is_some()
 				})
 			});
 		}
 		if self.tree_arenas.packed_headers {
+			self.tree_arenas.near_links =
+				self.types().nominal_member_count() < 16384 - 16 && self.types().len() < 16384;
 			let mut nominals: Vec<_> = self.tree_arenas.unions.iter().copied().collect();
 			nominals.sort();
 			for nominal in nominals {
@@ -617,7 +623,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.sym_list(self.types().nominal(nominal).members)
 					.len();
 				for index in 0..count as u16 {
-					assert!(self.member_id(nominal, index) < 32768);
+					assert!(
+						self.member_id(nominal, index)
+							< if self.tree_arenas.near_links {
+								16384
+							} else {
+								32768
+							}
+					);
 				}
 			}
 		}
@@ -626,7 +639,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.types()
 				.sym_list(self.types().nominal(nominal).members)
 				.len();
-			if (0..count as u16).any(|index| self.compact_array_payload(nominal, index).is_some()) {
+			if (0..count as u16).any(|index| {
+				self.compact_array_payload(nominal, index).is_some()
+					|| (self.packed_headers() && self.edge_payload_shape(nominal, index).is_some())
+			}) {
 				self.tree_arenas.compressed.insert(root);
 				self.tree_arenas.compressed_unions.insert(nominal, root);
 			}

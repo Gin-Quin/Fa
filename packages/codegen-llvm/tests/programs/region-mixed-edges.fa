@@ -1,0 +1,46 @@
+-- Root links and scalar fields keep their own alignment in a compact node.
+-- asynchronous: false
+type Kind = Enum { First, Second }
+let expectedWide: UInt128 = 123456789012345678901234567890
+function validWeight = (weight: Float): Boolean => weight == 1.5
+function validWide = (wide: UInt128): Boolean => wide == expectedWide
+type Tree = Union {
+	Leaf = { value: Int32 }
+	Branch = {
+		left: Tree
+		marker: Byte
+		kind: Kind
+		right: Tree
+		weight: Float
+		wide: UInt128
+	}
+}
+function build = (depth: Integer): Tree => if depth == 0 {
+	Tree.Leaf { value = 7 }
+} else {
+	Tree.Branch {
+		left = build(depth - 1)
+		marker = 231
+		kind = Kind.Second
+		right = build(0)
+		weight = 1.5
+		wide = expectedWide
+	}
+}
+function sum = (node: Tree): Integer => when node is {
+	Tree.Leaf as { value } => value
+	Tree.Branch as { left, right, marker, kind, weight, wide } => {
+		assert marker == 231
+		assert kind == Kind.Second
+		assert validWeight(weight)
+		assert validWide(wide)
+		sum(left) + sum(right)
+	}
+}
+let original = build(4)
+let duplicate = original
+function same = (left: Tree, right: Tree): Boolean => left == right
+assert same(original, duplicate)
+assert sum(original) == 35
+assert sum(duplicate) == 35
+console.log("mixed edges") -- prints: mixed edges

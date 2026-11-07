@@ -1,0 +1,39 @@
+-- A pure scalar leaf keeps the same ABI as the error-bearing recursive path.
+-- asynchronous: false
+type E = Errors { Bad }
+type Tree = Union {
+	Leaf = { value: Int32 }
+	One = { child: Tree }
+}
+function build = (depth: Integer): Tree => if depth == 0 {
+	Tree.Leaf { value = -7 }
+} else { Tree.One { child = build(depth - 1) } }
+mutable calls = 0
+function tick = (value: Integer): Integer mutates calls => {
+	calls += 1
+	value
+}
+function read = (node: Tree, fail: Boolean, pass: Integer): Integer throws E mutates calls => when node is {
+	Tree.Leaf as { value as number } => number
+	Tree.One as { child } => {
+		if fail { throw E.Bad }
+		try read(child, fail, tick(pass + 1))
+	}
+}
+function wholeRead = (node: Tree, fail: Boolean): Integer throws E => when node is {
+	Tree.Leaf as leaf => leaf.value
+	Tree.One as { child } => {
+		if fail { throw E.Bad }
+		try wholeRead(child, false)
+	}
+}
+let root = build(3)
+assert (try read(root, false, tick(1))) == -7
+assert calls == 4
+assert (read(root, true, tick(2)) catch _error => 91) == 91
+assert calls == 5
+assert (try read(Tree.Leaf { value = 19 }, true, tick(3))) == 19
+assert calls == 6
+assert (try wholeRead(root, false)) == -7
+assert (wholeRead(root, true) catch _error => 92) == 92
+console.log("throwing leaves") -- prints: throwing leaves

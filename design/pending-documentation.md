@@ -51,3 +51,28 @@ Add to the String/Array implementation notes: a split immediately followed by th
 nonempty-part lambda can filter during production while keeping raw split capacity and
 evaluation order. Unicode/empty separators and other callbacks retain their semantics.
 Array copy/assignment only consider compact characters at the String element width.
+
+## Direct recursive fields in native root payloads
+
+The recursive-union implementation notes should also cover direct fields of the same
+root. Closed immutable members may store those fields as 32-bit links beside a compact
+header; supported scalar fields retain their natural ABI alignment. Ordinary payload
+objects are reconstructed on access, including patterns, comparisons, formatting and
+JSON. Copying a root or an escaping subtree recreates its children under the destination
+owner. No region lifetime is transferred by moving a projection alone.
+
+For payloads containing only root links, a smaller 16-bit layout is selected locally when
+signed offsets from the actual node address fit after scaling by eight. Distant links and
+constant-member code collisions use the 32-bit layout; both may coexist under one owner.
+A reserved header bit records the layout. The reservation requires the complete prepared
+tag bound to fit, and typed byte-tag tests require distinct low bytes for every member of
+that root. Payloads with scalar fields retain the 32-bit layout, even if 16-bit links would
+save bytes, because measured scalar traversal slows down. Split units, unsupported targets,
+foreign boundaries, errors and missing root proofs retain their previous representations.
+
+The near allocator reserves the wide size to learn the real address after any refill,
+then returns the unused tail to that same active bump before any other allocation or user
+code. It preserves root owners and the shared address domain. Relative arithmetic uses
+integer addresses, not an inbounds GEP between separate nodes. The String reconstructed
+from a frozen payload is a borrowed view, never an immortal literal; retaining it copies
+the bytes before the parent region dies.

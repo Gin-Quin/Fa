@@ -1,0 +1,15 @@
+-- Default arguments must produce ordinary owned roots before their caller starts.
+-- asynchronous: false
+type Tree = Union { Leaf = { value: Int32 }, Pair = { left: Tree, right: Tree } }
+function leaf = (): Tree => Tree.Leaf { value = 7 }
+function pair = (left: Tree = leaf()): Tree => Tree.Pair { left, right = leaf() }
+function sum = (node: Tree): Integer => when node is {
+	Tree.Leaf as { value } => value
+	Tree.Pair as { left, right } => sum(left) + sum(right)
+}
+let root = pair()
+let duplicate = root
+assert sum(root) == 14
+assert sum(duplicate) == 14
+assert root == duplicate
+console.log("direct defaults") -- prints: direct defaults

@@ -679,7 +679,7 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 			"{ir}"
 		);
 		assert!(
-			function(&ir, "fa.grow.arena").contains("@fa_arena_alloc("),
+			function(&ir, "fa.grow.arena").contains("@fa_arena_alloc"),
 			"{ir}"
 		);
 	}
@@ -858,6 +858,182 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 		source.push_str("Tree.Leaf { pad = pad13 }\n}\nfunction count = (tree: Tree): Integer => when tree is {\nTree.Leaf => 1\nTree.Branch as { left, right } => count(left) + count(right)\n}\nconsole.log(count(build(1)))\n");
 		let ir = ir_of("region-large-payload", &source);
 		assert!(!ir.contains("@fa_arena_enter("), "{ir}");
+	}
+
+	#[test]
+	fn immutable_direct_union_edges_use_the_same_link_domain_as_arrays() {
+		let ir = ir_with(
+			"direct-union-edges",
+			include_str!("programs/region-direct-edges.fa"),
+			false,
+		);
+		assert!(
+			ir.contains("@fa_arena_alloc_near(i64 6, i64 12")
+				&& ir.contains("getelementptr inbounds [3 x i16]")
+				&& ir.contains("getelementptr inbounds [3 x i32]"),
+			"a pair selects between two i16 and two i32 links: {ir}"
+		);
+		assert!(
+			ir.contains("getelementptr ([2 x i32], ptr null, i32 1)"),
+			"a unary node stores one link: {ir}"
+		);
+		assert!(
+			ir.contains("link") && ir.contains("i32"),
+			"link encode/decode stays typed: {ir}"
+		);
+		assert!(
+			ir.lines()
+				.any(|line| line.contains("member_tag") && line.contains("load i8")),
+			"a small, statically known root needs only its distinct low tag byte: {ir}"
+		);
+	}
+
+	#[test]
+	fn roots_with_colliding_low_tag_bytes_keep_full_discriminants() {
+		let mut source = String::from(
+			"type T = Union {\nLeaf = { value: Int32 }\nPair = { left: T, right: T }\n",
+		);
+		for index in 0..256 {
+			source.push_str(&format!("M{index}\n"));
+		}
+		source.push_str(
+			"}\nfunction build = (depth: Integer): T => if depth > 0 { T.Pair { left = build(depth - 1), right = build(0) } } else { T.Leaf { value = 7 } }\nfunction isPair = (node: T): Boolean => node is T.Pair\nassert not isPair(T.M255)\nconsole.log(isPair(build(1)))\n",
+		);
+		let ir = ir_with("wide-root-tags", &source, false);
+		assert!(
+			ir.lines()
+				.any(|line| line.contains("member_tag") && line.contains("load i16")),
+			"more than 256 members must not compare only their low byte: {ir}"
+		);
+		assert!(
+			ir.contains("and i16") && ir.contains("-16385"),
+			"the width flag is not part of the member id: {ir}"
+		);
+		let binary = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+			.join("fa-checks")
+			.join("wide-root-tags");
+		let output = std::process::Command::new(binary)
+			.output()
+			.expect("the regression program runs");
+		assert!(
+			output.status.success(),
+			"{}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+		assert_eq!(output.stdout, b"true\n");
+	}
+
+	#[test]
+	fn far_relative_edges_keep_full_tags_in_large_member_families() {
+		let mut source = String::from(
+			"type T = Union {\nLeaf = { value: Int32 }\nPair = { left: T, right: T }\n",
+		);
+		for index in 0..256 {
+			source.push_str(&format!("M{index} = {{ value{index}: Int32 }}\n"));
+		}
+		source.push_str("}\nfunction build = (depth: Integer): T => if depth == 0 { T.Leaf { value = 7 } } else { T.Pair { left = build(depth - 1), right = build(depth - 1) } }\nfunction isPair = (node: T): Boolean => node is T.Pair\nfunction sum = (node: T): Integer => when node is {\nT.Leaf as { value } => value\nT.Pair as { left, right } => sum(left) + sum(right)\nelse => 0\n}\nlet tree = build(16)\nassert isPair(tree)\nassert sum(tree) == 458752\nconsole.log(\"wide tags\")\n");
+		let ir = ir_with("wide-relative-tags", &source, false);
+		assert!(ir.contains("@fa_arena_alloc_near"), "{ir}");
+		assert!(ir.contains("and i16") && ir.contains("-16385"), "{ir}");
+		let binary = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+			.join("fa-checks")
+			.join("wide-relative-tags");
+		let output = std::process::Command::new(binary)
+			.output()
+			.expect("the wide regression runs");
+		assert!(
+			output.status.success(),
+			"{}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+		assert_eq!(output.stdout, b"wide tags\n");
+	}
+
+	#[test]
+	fn mixed_root_edges_keep_scalar_alignment_and_copy_the_links() {
+		let ir = ir_with(
+			"mixed-root-edges",
+			include_str!("programs/region-mixed-edges.fa"),
+			false,
+		);
+		assert!(
+			ir.contains("{ i32, i32, i32, i8, i32, double, i128 }"),
+			"{ir}"
+		);
+		assert!(ir.contains("load i128") && ir.contains("align 16"), "{ir}");
+		assert!(
+			ir.contains("getelementptr") && ir.contains("fa.copy"),
+			"{ir}"
+		);
+		let small = ir_with(
+			"small-mixed-root-edges",
+			r#"type T = Union { Leaf = { value: Int32 }, Pair = { left: T, marker: Byte, right: T } }
+function build = (depth: Integer): T => if depth == 0 {
+ T.Leaf { value = 7 }
+} else {
+ T.Pair { left = build(depth - 1), marker = 231, right = build(depth - 1) }
+}
+console.log(build(3))
+"#,
+			false,
+		);
+		assert!(small.contains("{ i32, i32, i8, i32 }"), "{small}");
+		assert!(!small.contains("@fa_arena_alloc_near"), "{small}");
+	}
+
+	#[test]
+	fn a_scalar_union_leaf_preserves_the_throwing_result_abi() {
+		let ir = ir_with(
+			"throwing-union-leaves",
+			include_str!("programs/throwing-union-leaves.fa"),
+			false,
+		);
+		assert!(ir.contains("union_leaf"), "{ir}");
+		assert!(ir.contains("union_base_or_call = phi { i64, ptr }"), "{ir}");
+		assert!(
+			ir.contains("insertvalue { i64, ptr } zeroinitializer"),
+			"{ir}"
+		);
+	}
+
+	#[test]
+	fn throwing_union_leaves_keep_effects_and_checked_return_ranges_in_calls() {
+		let effectful = ir_with(
+			"effectful-union-leaf",
+			r#"type E = Errors { Bad }
+type T = Union { Leaf = { value: Int32 }, One = { child: T } }
+mutable count = 0
+function effect = (value: Integer): Integer mutates count => {
+ count += 1
+ value
+}
+function read = (node: T): Integer throws E mutates count => when node is {
+ T.Leaf as { value } => effect(value)
+ T.One as { child } => {
+  if count < 0 { throw E.Bad }
+  try read(child)
+ }
+}
+console.log(try read(T.One { child = T.Leaf { value = 7 } }), count)
+"#,
+			false,
+		);
+		assert!(!effectful.contains("union_leaf"), "{effectful}");
+		let ranged = ir_of(
+			"ranged-union-leaf",
+			r#"type E = Errors { Bad }
+type T = Union { Leaf = { value: Int32 }, One = { child: T } }
+function read = (node: T, fail: Boolean): Integer<min = -10, max = 10> throws E => when node is {
+ T.Leaf => 0
+ T.One as { child } => {
+  if fail { throw E.Bad }
+  try read(child, false)
+ }
+}
+console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
+"#,
+		);
+		assert!(!ranged.contains("union_leaf"), "{ranged}");
 	}
 
 	#[test]

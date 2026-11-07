@@ -1,0 +1,20 @@
+-- JSON reaches compact direct children and their passive owning payloads.
+-- skip-target: native-freestanding
+-- asynchronous: false
+use { Json } = std.json
+type Tree = Union {
+	Empty
+	Leaf = { text: String }
+	Pair = { left: Tree, right: Tree }
+}
+function leaf = (text: String): Tree => Tree.Leaf { text }
+function pair = (text: String): Tree => Tree.Pair { left = leaf(text), right = Tree.Empty }
+let text = "é".repeat(4000)
+let original = pair(text)
+let duplicate = original
+let expectedLeaf = "{{\"type\":\"Leaf\",\"text\":\"" + text + "\"}}"
+let expected = "{{\"type\":\"Pair\",\"left\":" + expectedLeaf + ",\"right\":{{\"type\":\"Empty\"}}}}"
+assert Json.stringify(original) == expected
+assert Json.stringify(duplicate) == expected
+assert original == duplicate
+console.log("direct edges JSON") -- prints: direct edges JSON

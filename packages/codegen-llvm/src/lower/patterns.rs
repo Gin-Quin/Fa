@@ -129,7 +129,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if let Repr::Object(data) = narrowed
 					&& (!self.compact_array_data(data).is_empty()
 						|| !self.compact_string_data(data).is_empty()
-						|| !self.compact_scalar_data(data).is_empty())
+						|| !self.compact_scalar_data(data).is_empty()
+						|| !self.compact_edge_data(data).is_empty())
 				{
 					let value = self.unbox(Val::new(Repr::Union, pointer), narrowed)?;
 					let out = self.alloca(narrowed, "member_view")?;
@@ -418,7 +419,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `pattern as name`: the subject, its data, or its value (an optional).
-	fn bind_arm(
+	pub(super) fn bind_arm(
 		&mut self,
 		subject: Val<'ctx>,
 		binding: NodeId,

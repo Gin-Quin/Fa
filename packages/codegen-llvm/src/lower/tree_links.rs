@@ -38,7 +38,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	fn union_constants(&self, nominal: NominalId) -> Vec<u16> {
+	pub(super) fn union_constants(&self, nominal: NominalId) -> Vec<u16> {
 		let count = self
 			.types()
 			.sym_list(self.types().nominal(nominal).members)

@@ -1,0 +1,15 @@
+-- A constructor in a parameter default is evaluated before the builder's body.
+-- asynchronous: false
+type Tree = Union { Leaf = { value: Int32 }, Pair = { left: Tree, right: Tree } }
+function leaf = (): Tree => Tree.Leaf { value = 9 }
+function pair = (left: Tree = Tree.Leaf { value = 7 }): Tree => Tree.Pair { left, right = leaf() }
+function sum = (node: Tree): Integer => when node is {
+	Tree.Leaf as { value } => value
+	Tree.Pair as { left, right } => sum(left) + sum(right)
+}
+let original = pair()
+let duplicate = original
+assert sum(original) == 16
+assert sum(duplicate) == 16
+assert original == duplicate
+console.log("literal default") -- prints: literal default

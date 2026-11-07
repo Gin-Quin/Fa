@@ -37,7 +37,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A single expression in braces, or the expression returned by it.
-	fn base_expression(&self, mut node: NodeId) -> Option<NodeId> {
+	pub(super) fn base_expression(&self, mut node: NodeId) -> Option<NodeId> {
 		loop {
 			match self.view(node) {
 				View::Block { statements } if statements.len() == 1 => node = statements.first()?,
@@ -85,6 +85,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		target: inkwell::values::FunctionValue<'ctx>,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<Option<BasicValueEnum<'ctx>>, Error> {
+		if let Some(value) = self.recursive_union_base(function, target, arguments)? {
+			return Ok(Some(value));
+		}
 		let mut shortcut = None;
 		if self.frame().owner == Some(function.declaration)
 			&& self.functions.values().any(|f| f.value == function.value)

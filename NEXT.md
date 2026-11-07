@@ -331,3 +331,46 @@ workspace-full,js-runtime}.log. This fix is independent of the direct/relative
 root-edge prototypes. The explicit `copy parent.text` regression is staged for
 Root's new Copy frontend in /tmp/fa-native-perf-next/region-string-explicit-copy.fa;
 the ancestor-arena MOVE materialization must also be preserved at that merge.
+
+## Direct root edges and relative links (validated delivery)
+
+The candidate based on 874cf12 consumes the existing closed ROOT_REGIONS proof without
+widening it. Direct same-root fields use 32-bit links; supported scalar fields retain
+natural alignment. Pure-link payloads may locally shrink to signed 16-bit offsets in
+eight-byte units, with a 32-bit fallback after the actual allocation address is known.
+Both layouts keep one independent owner per root. Constructors, deep copies, patterns,
+comparisons, formatting and JSON reconstruct the ordinary payload ABI. Split/foreign/
+opaque/unsupported cases retain the prior layout. Header bounds, constant codes, large
+member families and relative-distance boundaries are checked; cache adds region-edges-1.
+Only a simple scalar first arm of a throwing direct recursion is expanded, preserving
+the result/error struct and evaluating arguments once. General arithmetic leaf inlining
+and switch-table experiments are excluded from the delivered candidate.
+
+The all-payload relative16 experiment is preserved in
+/tmp/fa-native-perf-next/compilers/relative-edges-stage8 with strict manifests and reports
+relative16-{selected-instructions,memory,selected-cpu}.json. At original default sizes,
+18 quiet rotations using the same Clang 18 toolchain gave interp 66.89→54.31 ms versus
+Goose 39.45 ms; child RSS 7808→5888 KiB and faults 1635→1162. Instructions increased
+151.39→164.03 M. Calc regressed 220.67→240.05 ms without a memory saving, so the final
+candidate keeps all mixed/scalar payloads in the fixed 32-bit layout. These CPU numbers are
+the experiment's measurements, not final candidate measurements or an overall victory.
+The baseline, direct32 checkpoint and all reports/executables remain archived under
+/tmp/fa-native-perf-next. The final original 16 source/output/manifests are verified in
+direct-relative-final-clang18/preparation.json. Thirteen executable hashes are unchanged;
+their checked instruction counts are explicitly reused in instructions.json. The changed
+programs were profiled again: calc 1251.812 M (3.08 percent below baseline), interp 164.029 M
+(11.76 percent above baseline) and sexp 789.235 M (611 instructions above baseline). Final
+CPU samples await the next naturally quiet window after Root's combined full; no overall
+Goose victory is claimed.
+
+Exact-source validation is complete: fmt, workspace clippy, all 61 LLVM IR checks, all
+targeted region programs, C ASan/UBSan, COMPLETE LLVM workspace full and JS runtime
+300/300 pass. Logs: /tmp/fa-direct-final-{clippy,targeted,runtime-sanitizers,
+workspace-full,js-runtime}.log; full session21647 returned0. The independent next
+experiments (arithmetic leaf expansion and shared range differences) live only in the
+older prototype tree and archived compilers, not in this delivery.
+The exact candidate also passes the region corpus under QEMU AArch64: native12/12,
+freestanding10/10 plus the2 documented JSON/libc skips, in
+/tmp/fa-direct-final-aarch64{,-free}.log. A separate O0 probe with an external18KiB
+Unicode payload fails on the old compiler and survives parent destruction/churn with
+the String fix: /tmp/fa-region-external-string-check/main.fa.

@@ -1230,6 +1230,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					blocks.push((i64.const_int(*id, false), block));
 					continue;
 				}
+				if let Some(plan) = self.compact_edge_box(*id) {
+					let value = self.edge_payload_value(&builder, pointer, plan)?;
+					let copied = self.freeze_edge_payload(&builder, *id, plan, value, true)?;
+					builder.build_call(
+						self.runtime.function("fa_arena_leave")?,
+						&[copied.into()],
+						"",
+					)?;
+					builder.build_return(Some(&copied))?;
+					blocks.push((i64.const_int(*id, false), block));
+					continue;
+				}
 				let size = layout.size_of().expect("a sized box");
 				let size = builder.build_int_cast(size, self.usize, "")?;
 				let align = self.usize.const_int(16, false);

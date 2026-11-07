@@ -4,6 +4,7 @@
 //! Ordinary ids skip that bit, even for types interned during lowering.
 
 use fa_analyzer::ids::{NominalId, TypeId};
+use fa_analyzer::types::NominalKind;
 use inkwell::IntPredicate;
 use inkwell::builder::Builder;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
@@ -13,6 +14,27 @@ use super::values::Repr;
 use crate::error::Error;
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// A typed test may ignore the high tag byte only when every member of
+	/// that exact root has a different low byte. Early assigned ids need not
+	/// be contiguous, so check the actual ids rather than just their count.
+	pub(super) fn byte_root_tags(&self, nominal: NominalId) -> bool {
+		if !self.packed_headers()
+			|| !self.arena_member(nominal)
+			|| self.types().nominal(nominal).kind != NominalKind::Union
+		{
+			return false;
+		}
+		let count = self
+			.types()
+			.sym_list(self.types().nominal(nominal).members)
+			.len();
+		if count > 256 {
+			return false;
+		}
+		let mut seen = rustc_hash::FxHashSet::default();
+		(0..count as u16).all(|index| seen.insert(self.member_id(nominal, index) as u8))
+	}
+
 	pub(super) fn packed_headers(&self) -> bool {
 		self.tree_arenas.packed_headers
 	}
@@ -45,7 +67,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let marker = b.build_and(word, i64.const_int(0x8000, false), "")?;
 		let compact = b.build_int_compare(IntPredicate::NE, marker, i64.const_zero(), "")?;
-		let id = b.build_and(word, i64.const_int(0x7fff, false), "")?;
+		let mask = if self.tree_arenas.near_links {
+			0x3fff
+		} else {
+			0x7fff
+		};
+		let id = b.build_and(word, i64.const_int(mask, false), "")?;
 		Ok(b.build_select(compact, id, word, "id")?.into_int_value())
 	}
 
@@ -56,6 +83,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		id: u64,
 	) -> Result<(), Error> {
 		assert!(id < 32768, "compact member id exceeds its prepared bound");
+		assert!(
+			!self.tree_arenas.near_links || id < 16384,
+			"compact member id uses the wide-link marker"
+		);
 		b.build_store(
 			pointer,
 			self.context.i16_type().const_int(id | 0x8000, false),

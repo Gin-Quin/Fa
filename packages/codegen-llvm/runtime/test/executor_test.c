@@ -981,6 +981,27 @@ static void test_tree_regions(void) {
 	fa_arena_leave(packed);
 	fa_arena_drop(packed);
 	CHECK(live_tree_arenas == 0 && tree_arena_depth == 0);
+	// A compact reservation returns its unused wide tail to this bump.
+	fa_arena_enter();
+	uint8_t *near_child = fa_arena_alloc(8, 8);
+	uint8_t *near_node = fa_arena_alloc_near(8, 16, 8,
+	    (uintptr_t)near_child, (uintptr_t)near_child, 0);
+	CHECK(*(uint16_t *)near_node == 0);
+	CHECK((uint8_t *)fa_arena_alloc(8, 8) == near_node + 8);
+	__builtin_memset(near_node, 0x6b, 8);
+	// Far links keep their full reservation, rather than wrapping.
+	uint8_t *wide_node = fa_arena_alloc_near(8, 16, 8, 1, 1, 0);
+	CHECK(*(uint16_t *)wide_node == 0x4000);
+	CHECK((uint8_t *)fa_arena_alloc(8, 8) == wide_node + 16);
+	CHECK(near_node[0] == 0x6b && near_node[7] == 0x6b);
+	CHECK(arena_links_near(400000, 400000 - 32768 * 8, 400000 + 32767 * 8, 0));
+	CHECK(!arena_links_near(400000, 400000 - 32768 * 8 - 8, 400000, 0));
+	CHECK(!arena_links_near(400000, 400000, 400000 + 32767 * 8 + 8, 0));
+	CHECK(!arena_links_near(400000, 400008, 400008, 1));
+	CHECK(arena_links_near(400000, UINTPTR_MAX, 0, 1));
+	fa_arena_leave(near_child);
+	fa_arena_drop(near_child);
+	CHECK(live_tree_arenas == 0 && tree_arena_depth == 0);
 	// Fresh child array buffers share a root region. Their ordinary ABI and
 	// observed capacity stay unchanged; large buffers get one heap cleanup.
 	before = allocated;

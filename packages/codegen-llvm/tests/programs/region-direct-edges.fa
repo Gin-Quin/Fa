@@ -1,0 +1,50 @@
+-- Direct union edges, constant leaves, copies and a subtree escaping its parent.
+-- asynchronous: false
+type Tree = Union {
+	Empty
+	Leaf = { value: Int32 }
+	One = { child: Tree }
+	Branch = { left: Tree, right: Tree }
+}
+function build = (depth: Integer): Tree => {
+	if depth == 0 { return Tree.Empty }
+	if depth == 1 { return Tree.Leaf { value = 7 } }
+	if depth == 2 { return Tree.One { child = build(1) } }
+	Tree.Branch { left = build(depth - 1), right = build(0) }
+}
+function sum = (node: Tree): Integer => when node is {
+	Tree.Empty => 0
+	Tree.Leaf as { value } => value
+	Tree.One as { child } => sum(child)
+	Tree.Branch as { left, right } => sum(left) + sum(right)
+}
+function extract = (): Tree => {
+	let root: Tree.Branch = Tree.Branch { left = build(2), right = build(1) }
+	root.left
+}
+function branch = (): Tree.Branch => Tree.Branch { left = build(2), right = build(1) }
+-- This function returns a scalar, so no builder arena may keep the inner
+-- parent's owner alive while the returned child is read in the outer scope.
+function readChild = (): Integer => {
+	let child = do {
+		let parent: Tree.Branch = branch()
+		parent.left
+	}
+	sum(child)
+}
+let original = build(3)
+let duplicate = original
+assert original == duplicate
+assert sum(original) == 7
+assert sum(duplicate) == 7
+let extracted = extract()
+let extractedCopy = extracted
+assert sum(extracted) == 7
+assert sum(extractedCopy) == 7
+assert extracted == extractedCopy
+assert readChild() == 7
+let formatted = "{original}"
+assert formatted.includes("Tree.Branch")
+assert formatted.includes("Tree.Empty")
+assert formatted.includes("value = 7")
+console.log("direct edges") -- prints: direct edges

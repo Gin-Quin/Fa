@@ -4472,6 +4472,39 @@ FA_EXPORT __attribute__((always_inline)) void *fa_arena_alloc(size_t size, size_
 	return arena_refill(size, align);
 }
 
+// A private node can use signed 16-bit links, scaled by eight, when all
+// nonconstant children are near its actual address. Positive codes at the
+// start of the range are reserved for the root's constant members. The
+// bounding interval may reject an extra node, but never accepts a collision.
+static __attribute__((always_inline)) int arena_links_near(uintptr_t node,
+                                                         uintptr_t first, uintptr_t last,
+                                                         size_t constants) {
+	if (first == UINTPTR_MAX) { return 1; }
+	uintptr_t backwards = (uintptr_t)32768 * 8;
+	uintptr_t forwards = (uintptr_t)32767 * 8;
+	if ((first < node ? node - first > backwards : first - node > forwards)
+	    || (last < node ? node - last > backwards : last - node > forwards)) { return 0; }
+	return constants == 0 || last <= node || first > node + constants * 8;
+}
+
+// Reserve the wide layout first, so even a refill's real address is known.
+// No allocation or user code runs before the unused tail is returned to the
+// same active bump. The first word records the wide-layout flag until the
+// constructor writes its full header. Owners and the compressed address domain
+// do not change; layouts of the same size skip this API.
+FA_EXPORT __attribute__((always_inline, assume_aligned(8))) void *fa_arena_alloc_near(size_t compact_size, size_t wide_size,
+                                                                 size_t align, uintptr_t first,
+                                                                 uintptr_t last, size_t constants) {
+	uint8_t *node = fa_arena_alloc(wide_size, align);
+	int near = arena_links_near((uintptr_t)node, first, last, constants);
+	if (near) {
+		size_t size = compact_size == 0 ? 8 : (compact_size + 7) & ~(size_t)7;
+		tree_bump = node + size;
+	}
+	*(uint16_t *)node = near ? 0 : 0x4000;
+	return node;
+}
+
 // Only nodes with an owning passive payload need a callback. Ordinary
 // scalar/static/inline payloads have no per-node cleanup record at all.
 FA_EXPORT FA_COLD void fa_arena_cleanup(void *node, void (*drop)(void *)) {

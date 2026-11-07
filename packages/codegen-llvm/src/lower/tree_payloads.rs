@@ -11,6 +11,7 @@ use inkwell::builder::Builder;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 
+use super::tree_edges::EdgePayload;
 use super::values::{Repr, Val};
 use super::{Lowering, Slot};
 use crate::error::Error;
@@ -19,6 +20,13 @@ use crate::error::Error;
 pub(super) struct ArrayPayload {
 	pub(super) data: TypeId,
 	pub(super) item: TypeId,
+}
+
+enum CompactData {
+	Array(ArrayPayload),
+	String,
+	Scalar,
+	Edges(EdgePayload),
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -284,6 +292,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(data) = self.compact_scalar_payload(nominal, index) {
 			return self.scalar_payload_value(b, pointer, data);
 		}
+		if let Some(plan) = self.compact_edge_payload(nominal, index) {
+			return self.edge_payload_value(b, pointer, plan);
+		}
 		let field = b.build_struct_gep(self.box_type(Some(repr)), pointer, 1, "")?;
 		Ok(b.build_load(self.llvm_type(repr), field, "")?)
 	}
@@ -462,17 +473,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut plans: Vec<_> = self
 			.compact_array_data(data)
 			.into_iter()
-			.map(|(id, plan)| (id, Some(plan), false))
+			.map(|(id, plan)| (id, CompactData::Array(plan)))
 			.collect();
 		plans.extend(
 			self.compact_string_data(data)
 				.into_iter()
-				.map(|id| (id, None, false)),
+				.map(|id| (id, CompactData::String)),
 		);
 		plans.extend(
 			self.compact_scalar_data(data)
 				.into_iter()
-				.map(|id| (id, None, true)),
+				.map(|id| (id, CompactData::Scalar)),
+		);
+		plans.extend(
+			self.compact_edge_data(data)
+				.into_iter()
+				.map(|(id, plan)| (id, CompactData::Edges(plan))),
 		);
 		if plans.is_empty() {
 			return Ok(None);
@@ -495,13 +511,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		b.build_unconditional_branch(end)?;
 		let mut incoming = vec![(ordinary, normal)];
 		let mut cases = Vec::new();
-		for (id, plan, scalar) in plans {
+		for (id, plan) in plans {
 			let block = self.context.append_basic_block(function, "compact_member");
 			b.position_at_end(block);
 			let data = match plan {
-				Some(plan) => self.compact_payload_value(b, pointer, plan)?,
-				None if scalar => self.scalar_payload_value(b, pointer, data)?,
-				None => self.string_payload_value(b, pointer, data)?,
+				CompactData::Array(plan) => self.compact_payload_value(b, pointer, plan)?,
+				CompactData::Scalar => self.scalar_payload_value(b, pointer, data)?,
+				CompactData::String => self.string_payload_value(b, pointer, data)?,
+				CompactData::Edges(plan) => self.edge_payload_value(b, pointer, plan)?,
 			};
 			let before = b.get_insert_block().expect("a block");
 			b.build_unconditional_branch(end)?;

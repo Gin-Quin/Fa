@@ -56,6 +56,8 @@ pub struct Shared {
 	/// Filled after all units publish their callers' requests. Re-analyses
 	/// of declaring units then check each applied key-loop body.
 	pub(crate) key_set_applications: OnceLock<Vec<crate::modules::KeySetApplication>>,
+	/// The complete scanned graph, shared by closed whole-program proofs.
+	pub(crate) region_modules: OnceLock<Arc<[String]>>,
 }
 
 /// The number of shards of [`Origins`].

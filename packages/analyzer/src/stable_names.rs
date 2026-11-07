@@ -23,7 +23,7 @@ pub fn stable_type_name(types: &TypeStore, ty: TypeId) -> Option<String> {
 }
 
 /// A declaration's identity: `fa.<module path>.<names>[#<n>]`.
-fn decl_spelling(types: &TypeStore, key: crate::ids::DeclKey) -> String {
+pub fn stable_decl_name(types: &TypeStore, key: crate::ids::DeclKey) -> String {
 	let data = types.decl_key_data(key);
 	let mut name = format!("fa.{}", types.module_path(data.module));
 	for &sym in types.sym_list(data.names) {
@@ -45,7 +45,7 @@ fn write_nominal(
 	out: &mut String,
 ) -> bool {
 	let info = types.nominal(nominal);
-	out.push_str(&decl_spelling(types, info.key));
+	out.push_str(&stable_decl_name(types, info.key));
 	let args = types.list_items(info.args).to_vec();
 	if !args.is_empty() {
 		out.push('<');
@@ -63,6 +63,22 @@ fn write_nominal(
 }
 
 fn write_stable(types: &TypeStore, ty: TypeId, stack: &mut Vec<TypeId>, out: &mut String) -> bool {
+	// Recursive references are transparent graph edges. Unfold before the
+	// ancestor lookup, so an object's self edge gets the same back-reference
+	// in a source session and after merging its type into another unit.
+	let mut ty = ty;
+	if matches!(types.kind(ty), TypeKind::Rec(_)) {
+		let mut aliases = rustc_hash::FxHashSet::default();
+		while matches!(types.kind(ty), TypeKind::Rec(_)) {
+			if !aliases.insert(ty) {
+				return false;
+			}
+			let Some(target) = types.rec_target(ty) else {
+				return false;
+			};
+			ty = target;
+		}
+	}
 	if let Some(depth) = stack.iter().rev().position(|&outer| outer == ty) {
 		out.push_str(&format!("^{depth}"));
 		return true;

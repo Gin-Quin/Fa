@@ -116,3 +116,24 @@ function-valued parameter or field. Analyzer owns this implementation.
 Joining written types with distinct methods/destructors forms their union, even
 when their fields have the same shape: runtime dispatch uses the actual member.
 Analyzer owns this after the frozen single-origin validation.
+
+## Native physical regions: frozen validation, 2026-11-07
+
+The active physical prototype is /tmp/fa-native-frame, based0290400, including Frame
+daa8ebc and the exact frontend ROOT_REGIONS/capacity APIs from proofs1a0d6b/a9b1375.
+A separate frozen validation worktree avoids changing the source of the complete suite.
+Task remains move-only; there are no Task reference-count changes. Resource sharing and
+explicit collection copies are owned by lead/analyzer and will be preserved at integration.
+
+Implemented: child-array frame packets and buffers owned by a root region; compact String
+and Array payloads; whole-module marked16-bit ids and32-bit union-array links; conservative
+ABI/split/layout fallbacks; separately logged capacity-unobserved consumption; small decimal
+pairs. Current chunk prototype1KiB competes with the preserved4KiB snapshot: compare CPU
+and memory at identical default sizes before choosing. Instructions sexp ~81.45M vs Goose
+77.54M atN2000 (previous93.18M), before the final capacity proof change. No CPU win is
+claimed while other full suites are active. Preserve d674349 and252df37 snapshots for
+83.02M/83.06M comparisons. The original16 Goose benchmarks remain the priority.
+
+Targeted validation:54IR tests,6cache tests including physical capacity invalidation,
+5region fixtures on native/freestanding/wasm and C ASan/UBSan pass. Full/finalclippy and
+representative current AArch64/memcheck validation still need completion before commit.

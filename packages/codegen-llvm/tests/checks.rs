@@ -1149,12 +1149,45 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 	}
 
 	#[test]
+	fn readonly_nonempty_splits_stream_but_observed_arrays_stay_materialized() {
+		let source = |extra: &str| {
+			format!(
+				"function run = (input: String): Integer => {{\nlet text = input\nlet parts = text.split(\" \").filter((part) => not part.isEmpty())\nmutable count = 0\nfor part, index in parts {{ count += part.length + index }}\n{extra}\ncount + parts.length\n}}\nconsole.log(run(\"a b\"))\n"
+			)
+		};
+		let ir = ir_of("streaming-split", &source(""));
+		assert!(ir.contains("@fa_string_split_next("), "{ir}");
+		assert!(!ir.contains("@fa_string_split_nonempty_views("), "{ir}");
+		assert!(!ir.contains("@fa_array_new("), "{ir}");
+		for (name, extra) in [
+			("repeated", "for part in parts { count += part.length }"),
+			("capacity", "console.log(parts.capacity)"),
+			("get", "console.log(parts.get(0))"),
+			(
+				"capture",
+				"function size = (): Integer => parts.length\nconsole.log(size())",
+			),
+		] {
+			let ir = ir_of(&format!("split-observer-{name}"), &source(extra));
+			assert!(!ir.contains("@fa_string_split_next("), "{ir}");
+			assert!(ir.contains("@fa_string_split_nonempty_views("), "{ir}");
+		}
+		let nested = source("").replace(
+			"for part, index in parts { count += part.length + index }",
+			"for 0..4 { for part, index in parts { count += part.length + index } }",
+		);
+		let ir = ir_of("split-repeated-dynamically", &nested);
+		assert!(!ir.contains("@fa_string_split_next("), "{ir}");
+		assert!(ir.contains("@fa_string_split_nonempty_views("), "{ir}");
+	}
+
+	#[test]
 	fn pure_nonempty_split_filters_are_fused_and_other_callbacks_are_not() {
 		let ir = ir_of(
 			"split-nonempty",
 			"function run = (text: String): Integer => {\nmutable source = text\nlet parts = source.split(\" \").filter((part) => not part.isEmpty())\nparts.length\n}\nconsole.log(run(\"a b\"))\n",
 		);
-		assert!(ir.contains("@fa_string_split_nonempty_views("), "{ir}");
+		assert!(ir.contains("@fa_string_split_count("), "{ir}");
 		assert!(!ir.contains("filter_keep"), "{ir}");
 		for (name, callback) in [
 			("index", "(part, index) => index == 1"),

@@ -623,3 +623,40 @@ Measured on 2026-11-04 (load average 9 to 13), `fa build --target=native` choosi
 
 Full LTO gives the smallest executables (29 to 67% smaller) and less CPU, and its link is one thread: the 1,000-file build takes 2.4 times the wall time of ThinLTO's, within the memory budget. The executables print the same; they are byte-identical with 1 and 6 threads.
 
+
+## Private nonempty split cursors (2026-11-07)
+
+The compiler keeps a private nonempty split/filter as a cursor when only length
+and one readonly traversal observe it. The source must satisfy the existing stable
+view proof, and that traversal cannot repeat between the declaration and scope end.
+The original Fa, Rust and Goose programs are unchanged.
+
+For `words` at the original 500,000 size, both languages use LLVM/Clang 18.1.3:
+Fa `-O3 --asynchronous=false --overflow-checks=false`, Goose `-O2 --standalone`.
+100 balanced rotations on CPU 1, checked against Rust output, give:
+
+| Metric | Corrected Fa baseline | Split cursor | Goose |
+| --- | ---: | ---: | ---: |
+| Instructions | 138,352,726 | 137,956,908 | 110,887,211 |
+| Mean CPU, ms | 69.92 | 64.44 | 71.75 |
+| Median CPU, ms | 67.08 | 60.16 | 68.83 |
+| GNU time peak RSS, KiB | 22,400–22,528 | 10,624 | 18,688 |
+| Minor faults per timed process | 5,266–5,269 | 2,336–2,339 | 4,292–4,295 |
+
+The paired geometric CPU ratio is 0.906 versus corrected Fa (95% bootstrap interval
+0.864–0.950), and 0.886 versus Goose (0.840–0.935). This is one quiet 40.3 s run;
+absolute times vary across runs. Instructions remain about 1.24 times Goose, so the
+instruction objective and the complete-suite objective remain open.
+
+All original 16 programs are rebuilt with manifests for the final admission rule:
+the other 15 ELF files are identical to the corrected baseline, including strlist.
+The words ELF is identical to the timed generic cursor (SHA256
+`4975d280b4fa1961ef8d7baeb701857aca864478f307bd661773c35812186a25`).
+A prototype allowing repeated traversals regressed strlist instruction counts;
+retaining its array removes that recomputation. A separate ASCII/Unicode loop
+clone lowered instructions but did not establish a CPU improvement and is excluded.
+
+Artifacts, exact source/compiler hashes, flags and checked outputs are preserved
+under `/tmp/fa-native-perf-next/split-streams-once-clang18/`. Raw CPU/RSS samples,
+statistics and binary-identity transfer are `split-streams-cpu.json`,
+`split-streams-statistics.json` and `split-streams-once-verified.json` alongside it.

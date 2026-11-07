@@ -1,3 +1,38 @@
+# Native split-stream checkpoint (2026-11-07, validated)
+
+Base: validated String soundness `0c4c115`. This branch contains no KEY32 sentinel,
+String16 key or immediate-append prototype. It retains the measured generic split
+cursor, with a conservative single-traversal rule. The source program and original
+Goose benchmark parameters are unchanged.
+
+Only private stable split views with the existing pure nonempty filter qualify;
+only length and one readonly for may observe them, and that for cannot repeat
+between the declaration and its scope end. Unsupported observations, aliases,
+exports, opaque key loops, generic instances, async and per-unit lowering fall back
+to the ordinary array. Complete traversals cache a length; partial traversals do
+not. Stored/returned String tokens retain independent value semantics.
+
+Words, original 500,000 size, Clang 18 on both languages: generic cursor 137,956,908
+instructions vs corrected compiler 138,352,726 (−0.286%); Goose 110,887,211, so the
+instruction objective remains open. 100 balanced CPU rotations in a quiet 40.3 s run
+report generic/corrected 0.906 [95% 0.864–0.950], generic/Goose 0.886 [0.840–0.935].
+Mean CPU: 64.44 ms vs 69.92 ms corrected / 71.75 ms Goose; medians: 60.16 / 67.08 / 68.83 ms.
+GNU time RSS: 10,624 KiB vs 22,400–22,528 KiB corrected. Raw/manifests/statistics:
+`/tmp/fa-native-perf-next/split-streams-{cpu,statistics}.json`.
+The rejected ASCII/Unicode clone saved instructions but had no established CPU gain.
+The unrestricted prototype regressed repeated strlist instruction counts; final
+single-traversal admission restores its normal array. Final 16-ELF verification is recorded in
+`/tmp/fa-native-perf-next/split-streams-once-verified.json`: the other 15 match the
+corrected baseline exactly; words matches the measured generic ELF exactly.
+
+C ASan/UBSan, 63 LLVM IR checks, workspace clippy/fmt, 300 JS runtime tests and
+native/freestanding/wasm exits/copy fixtures and QEMU AArch64 pass. The frozen full
+workspace with LLVM finished EXIT0 under flock; log
+`/tmp/fa-split-stream-workspace-full.log`.
+A direct throw inside do/catch is a separate unresolved language question saved at
+`/tmp/fa-split-do-catch-repro/main.fa`; the positive fixture uses declared function
+errors caught at their call, preserving current documented behavior.
+
 # Native String length soundness checkpoint (2026-11-07)
 
 Based on validated `6401446`; independent of KEY32/String16 prototypes. The

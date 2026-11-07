@@ -745,3 +745,24 @@ Only String/Character arrays can have the negative-capacity compact representati
 When a statically different element width is passed to ordinary array assignment or copy,
 the runtime does not inspect or materialize that form. Equal-sized non-String layouts
 conservatively retain the check.
+
+## Private streaming split views (2026-11-07)
+
+A split with a nonempty literal separator, followed by the existing pure nonempty
+filter, may remain virtual when a private immutable binding is read only by length
+and one readonly traversal. The existing stable-source view proof remains a
+prerequisite. The traversal must run at most once per definition of that binding:
+rescan costs made the four-pass strlist prototype regress, so repeated loops keep
+the array. Unsupported observations and incomplete scope information also keep it.
+
+A cursor keeps its next byte position and the two monotonic grapheme-boundary
+positions. Each loop has independent state. A full traversal records the length;
+break, return or an error never records a partial count. A later length read can
+count the stable source and cache the result. Tokens keep ordinary borrowed String
+headers and materialize their own bytes when retained or returned. No cursor or
+changed layout crosses a function/FFI/unit boundary. The initial implementation
+excludes asynchronous builds, opaque key loops and generic instances.
+
+A separate ASCII/Unicode duplication lowered instructions but did not establish a
+CPU improvement, so the measured generic cursor is retained. Measurements and their
+limits are recorded in `benchmarks/README.md`; the full Goose objective remains open.

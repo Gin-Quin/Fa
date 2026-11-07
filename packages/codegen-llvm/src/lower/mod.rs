@@ -60,6 +60,7 @@ pub(crate) mod program;
 mod reactivity;
 mod references;
 mod relations;
+mod split_streams;
 mod tables;
 mod tasks;
 mod testing;
@@ -371,6 +372,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// and measured, by symbol: the call, evaluated again (on an immutable
 	/// text) where they are read, so that the array is never built.
 	virtual_code_points: FxHashMap<SymbolId, NodeId>,
+	split_streams: split_streams::Streams<'ctx>,
 	/// The whole program is lowered in this module (`compile.rs`, not the
 	/// units of `units.rs`): whole-program layouts may apply (dense maps).
 	whole_program: bool,
@@ -555,6 +557,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
 			field_flags: std::cell::RefCell::new(FxHashMap::default()),
 			virtual_code_points: FxHashMap::default(),
+			split_streams: FxHashMap::default(),
 			whole_program: false,
 			program_facts: None,
 			fact_log: None,
@@ -2686,6 +2689,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let Some(value_node) = value else {
 			return Err(self.unsupported(node.index(), "a declaration without a value"));
 		};
+		if self.declare_split_stream(node, symbol, value_node)? {
+			return Ok(Val::void());
+		}
 		// an iterator is no value: its chain runs where it is consumed
 		if self.is_iterator(value_node) {
 			return Ok(Val::void());
@@ -2962,6 +2968,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			inclusive,
 		} = self.view(iterable)
 		else {
+			if let Some(value) = self.for_split_stream(node, pattern, has_index, iterable, body)? {
+				return Ok(value);
+			}
 			if self.is_iterator(iterable) {
 				return self.for_iterator(node, pattern, iterable, body);
 			}

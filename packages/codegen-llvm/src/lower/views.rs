@@ -168,7 +168,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The `let` holding the parts of this call, when they can be views.
-	fn split_view_holder(&self, call: NodeId) -> Option<SymbolId> {
+	pub(super) fn split_view_holder(&self, call: NodeId) -> Option<SymbolId> {
 		if self.builtin_path(call) != Some("String#split") {
 			return None;
 		}
@@ -288,7 +288,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The closest function, lambda, task, test or watcher around a node
 	/// (`usize::MAX` for the top level of the file).
-	fn body_of(&self, node: usize, parents: &[usize]) -> usize {
+	pub(super) fn body_of(&self, node: usize, parents: &[usize]) -> usize {
 		let mut at = node;
 		while let Some(&parent) = parents.get(at) {
 			if parent == usize::MAX {
@@ -314,7 +314,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// target, a mutated argument), the receiver of a method with an effect
 	/// or of a method that isn't a string's, or an argument of a function
 	/// that isn't a built-in.
-	fn writes_local(&self, read: NodeId, parents: &[usize]) -> bool {
+	pub(super) fn writes_local(&self, read: NodeId, parents: &[usize]) -> bool {
 		let mut current = read.index();
 		loop {
 			if self

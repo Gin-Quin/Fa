@@ -841,6 +841,44 @@ static void test_nonempty_splits(void) {
 	CHECK(allocated == before);
 }
 
+static void test_streamed_splits(void) {
+	long before = allocated;
+	const char *texts[] = {"", " ", "       ", "a b c", "  a  b c  ", "x::y::::z::", "::::",
+	                       "e\xcc\x81 e\xcc\x81\r\n", "a long fragment beyond twenty three bytes :: second::",
+	                       "\xf0\x9f\x87\xab\xf0\x9f\x87\xb7 \xf0\x9f\x87\xab\xf0\x9f\x87\xb7"};
+	const char *separators[] = {" ", "::", "e", "\r", "\n", "\r\n", "\xcc\x81", "z", "abcdef"};
+	for (size_t text = 0; text < sizeof texts / sizeof texts[0]; text += 1) {
+		for (size_t separator = 0; separator < sizeof separators / sizeof separators[0]; separator += 1) {
+			const uint8_t *bytes = (const uint8_t *)texts[text];
+			const uint8_t *sep = (const uint8_t *)separators[separator];
+			size_t length = __builtin_strlen(texts[text]);
+			size_t sep_length = __builtin_strlen(separators[separator]);
+			for (int known_simple = 0; known_simple <= 1; known_simple += 1) {
+				size_t capacity = known_simple ? simple_flag(bytes, length) : 0;
+				FaArrayHeader *expected = fa_string_split_nonempty_views(bytes, length, capacity, sep, sep_length);
+				FaString *items = (FaString *)expected->items;
+				long no_allocations = allocated;
+				CHECK(fa_string_split_count(bytes, length, capacity, sep, sep_length) == (size_t)expected->length);
+				size_t cursor[3] = {0};
+				FaString part;
+				int64_t count = 0;
+				while (fa_string_split_next(bytes, length, capacity, sep, sep_length, cursor, &part)) {
+					CHECK(count < expected->length);
+					CHECK((part.capacity & KIND_MASK) == KIND_MASK);
+					CHECK(fa_string_equal(string_bytes(&part), string_length(&part),
+					                      string_bytes(&items[count]), string_length(&items[count])));
+					count += 1;
+				}
+				CHECK(count == expected->length);
+				CHECK(!fa_string_split_next(bytes, length, capacity, sep, sep_length, cursor, &part));
+				CHECK(allocated == no_allocations);
+				fa_array_free(expected, sizeof(FaString));
+			}
+		}
+	}
+	CHECK(allocated == before);
+}
+
 static void test_region_slice_views(void) {
 	long before = allocated;
 	uint8_t input[128];
@@ -1852,6 +1890,7 @@ int main(void) {
 	test_string_padding();
 	test_inline_strings();
 	test_nonempty_splits();
+	test_streamed_splits();
 	test_region_slice_views();
 	test_tree_regions();
 	test_arguments();

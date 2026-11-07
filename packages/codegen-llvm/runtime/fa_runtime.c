@@ -2767,6 +2767,65 @@ FA_EXPORT void *fa_string_split_nonempty_views(const uint8_t *text, size_t lengt
 	return split_text(text, length, capacity, separator, separator_length, 1, 1);
 }
 
+/// The next nonempty part of a split over stable bytes, without an array.
+/// The private cursor stores the next start and the two monotonic grapheme
+/// boundary positions; independent loops start with independent zero cursors.
+/// The caller proves a nonempty separator and that no part or source is changed.
+FA_EXPORT __attribute__((always_inline)) int32_t
+fa_string_split_next(const uint8_t *text, size_t length, size_t capacity,
+                     const uint8_t *separator, size_t separator_length,
+                     size_t cursor[3], FaString *out) {
+	if (separator_length == 0) { return 0; }
+	size_t simple = capacity & SIMPLE;
+	Boundaries starts = {text, length, cursor[1], simple};
+	Boundaries ends = {text, length, cursor[2], simple};
+	while (cursor[0] <= length) {
+		size_t start = cursor[0];
+		size_t end = length;
+		if (simple) {
+			size_t offset = next_byte(text, length, start, separator[0]);
+			while (separator_length <= length - offset) {
+				if (bytes_at(text, length, offset, separator, separator_length)) {
+					end = offset;
+					break;
+				}
+				offset = next_byte(text, length, offset + 1, separator[0]);
+			}
+		} else {
+			for (size_t offset = start; separator_length <= length - offset; offset += 1) {
+				if (bytes_at(text, length, offset, separator, separator_length) &&
+				    at_boundary(&starts, offset) && at_boundary(&ends, offset + separator_length)) {
+					end = offset;
+					break;
+				}
+			}
+		}
+		cursor[0] = end == length ? length + 1 : end + separator_length;
+		cursor[1] = starts.index;
+		cursor[2] = ends.index;
+		if (end != start) {
+			out->bytes = text + start;
+			out->length = end - start;
+			out->capacity = KIND_MASK | simple;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/// A length read before a complete streaming traversal, or after a break.
+/// Every retained part has at least one byte, so the count is at most length.
+FA_EXPORT size_t fa_string_split_count(const uint8_t *text, size_t length, size_t capacity,
+                                       const uint8_t *separator, size_t separator_length) {
+	size_t cursor[3] = {0};
+	FaString part;
+	size_t count = 0;
+	while (fa_string_split_next(text, length, capacity, separator, separator_length, cursor, &part)) {
+		count += 1;
+	}
+	return count;
+}
+
 /// `text.codePoints()`: an `Array(UInt32)`.
 FA_EXPORT void *fa_string_code_points(const uint8_t *text, size_t length, size_t capacity) {
 	size_t count = 0;

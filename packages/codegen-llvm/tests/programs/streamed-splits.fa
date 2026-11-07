@@ -1,0 +1,99 @@
+-- Streamed nonempty splits retain iteration, length and value-copy semantics.
+-- asynchronous: false
+function collect = (input: String): Array<String> => {
+	let text = input
+	let parts = text.split(" ").filter((part) => not part.isEmpty())
+	mutable result: Array<String> = []
+	for part in parts {
+		result.push(part)
+	}
+	assert result.length == parts.length
+	result
+}
+function measure = (input: String): Integer => {
+	let text = input
+	let parts = text.split(" ").filter((part) => not part.isEmpty())
+	let before = parts.length
+	mutable seen = 0
+	for part, index in parts {
+		assert not part.isEmpty()
+		assert seen == index
+		seen += 1
+	}
+	assert seen == before
+	assert parts.length == before
+	mutable pairs = 0
+	for first in parts {
+		for second in parts {
+			assert not first.isEmpty() and not second.isEmpty()
+			pairs += 1
+		}
+	}
+	assert pairs == before * before
+	before
+}
+function afterBreak = (input: String): Integer => {
+	let text = input
+	let parts = text.split(" ").filter((part) => not part.isEmpty())
+	for part in parts {
+		if not part.isEmpty() { break }
+	}
+	parts.length
+}
+type Stop = Errors { Done }
+-- A declared function error exits the traversal and releases its source.
+function raisesOnFirst = (input: String): Integer throws Stop.Done => {
+	let text = String.from(input, capacity = 128)
+	let parts = text.split(" ").filter((part) => not part.isEmpty())
+	for part in parts {
+		if not part.isEmpty() { throw Stop.Done }
+	}
+	parts.length
+}
+function afterContinue = (input: String): Integer => {
+	let text = input
+	let parts = text.split(" ").filter((part) => not part.isEmpty())
+	mutable kept = 0
+	for part in parts {
+		if part == "b" { continue }
+		kept += 1
+	}
+	assert kept <= parts.length
+	parts.length
+}
+function firstWord = (input: String): String => {
+	let text = String.from(input, capacity = 128)
+	let parts = text.split(" ").filter((part) => not part.isEmpty())
+	for part in parts { return part }
+	""
+}
+for input in ["", " ", "      ", "a b c", "  é 🇫🇷 a longwordbeyondtwentythreecharacters  ", "a\r\nb"] {
+	let saved = collect(input)
+	let expected = input.split(" ").filter((part) => not part.isEmpty())
+	assert saved == expected
+	assert measure(input) == expected.length
+	assert afterBreak(input) == expected.length
+	let outcome = raisesOnFirst(input) catch _error => -1
+	assert outcome == (if expected.isEmpty() { 0 } else { -1 })
+	assert afterContinue(input) == expected.length
+}
+-- Capacity and indexing keep their ordinary Array representation.
+mutable source = "a  b "
+let observed = source.split(" ").filter((part) => not part.isEmpty())
+assert observed.length == 2
+assert observed.capacity >= observed.length
+assert observed.get(0) == "a"
+source += "changed"
+assert observed.get(1) == "b"
+-- Returning or storing one token keeps an independent value after its source drops.
+let escaped = firstWord("abc".repeat(20) + " suffix")
+let unicode = firstWord("é".repeat(20) + " suffix")
+mutable churn = String.from("", capacity = 128)
+for 0..100 {
+	churn = String.from("x".repeat(100), capacity = 128)
+}
+assert escaped == "abc".repeat(20)
+assert unicode == "é".repeat(20)
+assert churn.length == 100
+console.log("streamed splits ok")
+-- prints: streamed splits ok

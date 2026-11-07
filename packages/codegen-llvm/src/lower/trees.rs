@@ -590,9 +590,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			return Ok(());
 		}
-		// Whole-module ids are dense. The marked 15-bit id space must stay
-		// disjoint from every ordinary named id and anonymous type counter,
-		// including members/types not yet seen while lowering a body.
+		// Reserve the compact members before lowering can intern additional
+		// types. Ordinary ids always skip their marker bit (objects.rs).
 		self.tree_arenas.packed_headers = !self.tree_arenas.unions.is_empty()
 			&& self.types().nominal_member_count() < 32768 - 16
 			&& self.types().len() < 32768;
@@ -608,6 +607,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						|| self.compact_scalar_payload(nominal, index).is_some()
 				})
 			});
+		}
+		if self.tree_arenas.packed_headers {
+			let mut nominals: Vec<_> = self.tree_arenas.unions.iter().copied().collect();
+			nominals.sort();
+			for nominal in nominals {
+				let count = self
+					.types()
+					.sym_list(self.types().nominal(nominal).members)
+					.len();
+				for index in 0..count as u16 {
+					assert!(self.member_id(nominal, index) < 32768);
+				}
+			}
 		}
 		for (&nominal, &root) in &self.tree_arenas.union_roots {
 			let count = self

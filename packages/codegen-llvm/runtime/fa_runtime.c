@@ -2609,6 +2609,7 @@ void *fa_array_new(int64_t length, int64_t capacity, int64_t item_size);
 void fa_array_materialize(FaArrayHeader *array);
 
 void *fa_array_push_slot(void *array, int64_t item_size);
+void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t item_size);
 
 typedef struct {
 	const uint8_t *text;
@@ -2617,6 +2618,9 @@ typedef struct {
 	void *parts;
 	size_t simple;
 	int views;
+	int nonempty;
+	uint64_t raw_parts;
+	uint64_t raw_capacity;
 } Splitting;
 
 /// A part of a split text: a copy, or a view of the text's bytes (the
@@ -2632,8 +2636,14 @@ static FaString split_part(const Splitting *splitting, size_t start, size_t end)
 
 static void split_one(void *context, size_t offset) {
 	Splitting *splitting = context;
-	FaString *part = fa_array_push_slot(splitting->parts, sizeof(FaString));
-	*part = split_part(splitting, splitting->previous, offset);
+	if (splitting->raw_capacity && ++splitting->raw_parts > splitting->raw_capacity) {
+		if (splitting->raw_capacity > INT64_MAX / 2) { out_of_memory(); }
+		splitting->raw_capacity *= 2;
+	}
+	if (!splitting->nonempty || splitting->previous != offset) {
+		FaString *part = fa_array_push_slot(splitting->parts, sizeof(FaString));
+		*part = split_part(splitting, splitting->previous, offset);
+	}
 	splitting->previous = offset + splitting->separator_length;
 }
 
@@ -2698,32 +2708,42 @@ static size_t count_byte(const uint8_t *text, size_t length, uint8_t byte) {
 #endif
 
 static void *split_text(const uint8_t *text, size_t length, size_t capacity,
-                        const uint8_t *separator, size_t separator_length, int views) {
+                        const uint8_t *separator, size_t separator_length, int views, int nonempty) {
 	if (separator_length == 0) {
 		return characters_of(text, length, capacity);
 	}
 	size_t room = 4;
+	uint64_t raw_capacity = nonempty ? room : 0;
 #if !defined(__wasm__)
 	// a one-byte separator: room for every occurrence (each match is one, so
 	// the array never grows), counted 16 bytes at a time
 	if (separator_length == 1) {
 		room = 1 + count_byte(text, length, separator[0]);
+		raw_capacity = 0;
 	}
 #endif
 	Splitting splitting = {text, 0, separator_length,
 	                       fa_array_new(0, (int64_t)room, sizeof(FaString)), capacity & SIMPLE,
-	                       views};
+	                       views, nonempty, 1, raw_capacity};
 	each_match(text, length, capacity & SIMPLE, separator, separator_length, split_one,
 	           &splitting);
-	FaString *last = fa_array_push_slot(splitting.parts, sizeof(FaString));
-	*last = split_part(&splitting, splitting.previous, length);
+	if (!nonempty || splitting.previous != length) {
+		FaString *last = fa_array_push_slot(splitting.parts, sizeof(FaString));
+		*last = split_part(&splitting, splitting.previous, length);
+	}
+	// The original temporary filter preserves the split buffer's capacity.
+	// Native one-byte splits already reserve the full raw count above; on
+	// other paths reproduce its geometric growth even for discarded parts.
+	if (splitting.raw_capacity) {
+		fa_array_reserve(splitting.parts, (int64_t)splitting.raw_capacity, sizeof(FaString));
+	}
 	return splitting.parts;
 }
 
 /// `text.split(separator)`; an empty separator splits into characters.
 FA_EXPORT void *fa_string_split(const uint8_t *text, size_t length, size_t capacity,
                                 const uint8_t *separator, size_t separator_length) {
-	return split_text(text, length, capacity, separator, separator_length, 0);
+	return split_text(text, length, capacity, separator, separator_length, 0, 0);
 }
 
 /// `text.split(separator)` whose parts are views of the text's bytes
@@ -2732,7 +2752,19 @@ FA_EXPORT void *fa_string_split(const uint8_t *text, size_t length, size_t capac
 /// empty separator still gives characters.
 FA_EXPORT void *fa_string_split_views(const uint8_t *text, size_t length, size_t capacity,
                                       const uint8_t *separator, size_t separator_length) {
-	return split_text(text, length, capacity, separator, separator_length, 1);
+	return split_text(text, length, capacity, separator, separator_length, 1, 0);
+}
+
+/// A split followed by a pure, index-independent nonempty-part filter.
+/// Keep the capacity of the unfiltered split, just as in-place filter does.
+FA_EXPORT void *fa_string_split_nonempty(const uint8_t *text, size_t length, size_t capacity,
+                                         const uint8_t *separator, size_t separator_length) {
+	return split_text(text, length, capacity, separator, separator_length, 0, 1);
+}
+
+FA_EXPORT void *fa_string_split_nonempty_views(const uint8_t *text, size_t length, size_t capacity,
+                                               const uint8_t *separator, size_t separator_length) {
+	return split_text(text, length, capacity, separator, separator_length, 1, 1);
 }
 
 /// `text.codePoints()`: an `Array(UInt32)`.
@@ -3587,8 +3619,12 @@ FA_EXPORT void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t 
 /// target's block, grown when needed (an array is a value).
 FA_EXPORT void fa_array_assign(FaArrayHeader *target, const FaArrayHeader *source,
                                int64_t item_size) {
-	fa_array_materialize(target);
-	fa_array_materialize((FaArrayHeader *)source);
+	// Only String/Character arrays have a compact negative-capacity form.
+	// A different static element width lets LLVM remove both cold paths.
+	if (item_size == sizeof(FaString)) {
+		fa_array_materialize(target);
+		fa_array_materialize((FaArrayHeader *)source);
+	}
 	if (target == source) {
 		return;
 	}
@@ -3604,7 +3640,7 @@ FA_EXPORT void fa_array_assign(FaArrayHeader *target, const FaArrayHeader *sourc
 
 /// A copy of an array (its items copied bytewise).
 FA_EXPORT FaArrayHeader *fa_array_copy(const FaArrayHeader *array, int64_t item_size) {
-	if (array->capacity < 0) {
+	if (item_size == sizeof(FaString) && array->capacity < 0) {
 		FaArrayHeader *copy = fa_array_new(array->length, array->length, 1);
 		copy_bytes(copy->items, array->items, (size_t)array->length);
 		copy->capacity = -1;

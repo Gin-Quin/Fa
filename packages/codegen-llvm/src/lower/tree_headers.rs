@@ -1,7 +1,7 @@
 //! Marked compact headers of proven root payloads in a whole module.
 //! Normal unions, errors and ABI boundaries keep their full u64 ids.
-//! The preparation guard bounds all named ids and anonymous counters, so
-//! their low 16 bits never contain the compact marker (bit 15).
+//! Preparation reserves the compact named ids below the marker (bit 15).
+//! Ordinary ids skip that bit, even for types interned during lowering.
 
 use fa_analyzer::ids::{NominalId, TypeId};
 use inkwell::IntPredicate;

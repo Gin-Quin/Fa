@@ -696,3 +696,23 @@ are disabled and drawn from the existing common reserved range otherwise. Compar
 about 3.3% CPU in the same sampling run. This tradeoff remains visible; instruction counts
 alone do not establish a CPU win over Goose. The heap page size and compressed address
 range are unchanged.
+
+## Fused nonempty splits and late ids (2026-11-07)
+
+A temporary split immediately filtered by a one-parameter lambda whose body is exactly
+`not part.isEmpty()` can omit empty parts while constructing the array. The callback
+contains no other read, call, effect, index dependency or capture. The source and separator
+are evaluated once in their original order. The array retains the raw split's capacity,
+including geometric growth on wasm and multi-byte separators; all other filters keep
+their ordinary behavior. An empty separator still produces characters. The existing
+split-view ownership proof remains responsible for detaching bytes at an escape.
+
+Compact ids are reserved below bit 15 during preparation. Ordinary named and anonymous ids
+use monotonic checked counters that skip that bit, so late interning cannot make an
+ordinary box resemble a compact member. Anonymous ids retain their separate high domain;
+errors and stable split-unit ids keep their existing protocol.
+
+Only String/Character arrays can have the negative-capacity compact representation.
+When a statically different element width is passed to ordinary array assignment or copy,
+the runtime does not inspect or materialize that form. Equal-sized non-String layouts
+conservatively retain the check.

@@ -793,6 +793,54 @@ static void test_inline_strings(void) {
 	CHECK(allocated == before);
 }
 
+static void test_nonempty_splits(void) {
+	long before = allocated;
+	const char *texts[] = {"", " ", "       ", "a b c", "  a  b c  ", "x::y::::z::",
+	                       "e\xcc\x81 e\xcc\x81\r\n", "a long fragment beyond twenty three bytes :: second::"};
+	const char *separators[] = {" ", "::", "e", "\r", ""};
+	for (size_t text = 0; text < sizeof texts / sizeof texts[0]; text += 1) {
+		for (size_t separator = 0; separator < sizeof separators / sizeof separators[0]; separator += 1) {
+			const uint8_t *bytes = (const uint8_t *)texts[text];
+			const uint8_t *sep = (const uint8_t *)separators[separator];
+			size_t length = __builtin_strlen(texts[text]);
+			size_t sep_length = __builtin_strlen(separators[separator]);
+			for (int views = 0; views <= 1; views += 1) {
+				FaArrayHeader *plain = split_text(bytes, length, 0, sep, sep_length, views, 0);
+				FaArrayHeader *fused = views
+					? fa_string_split_nonempty_views(bytes, length, 0, sep, sep_length)
+					: fa_string_split_nonempty(bytes, length, 0, sep, sep_length);
+				fa_array_materialize(plain);
+				fa_array_materialize(fused);
+				CHECK(fused->capacity == plain->capacity);
+				FaString *source = (FaString *)plain->items;
+				FaString *result = (FaString *)fused->items;
+				int64_t kept = 0;
+				for (int64_t index = 0; index < plain->length; index += 1) {
+					size_t bytes = string_length(&source[index]);
+					if (bytes) {
+						CHECK(kept < fused->length);
+						CHECK(fa_string_equal(string_bytes(&source[index]), bytes,
+						                      string_bytes(&result[kept]), string_length(&result[kept])));
+						kept += 1;
+					}
+					if (string_owned(source[index].capacity)) {
+						fa_free((void *)source[index].bytes, source[index].capacity & KIND_MASK, 1);
+					}
+				}
+				CHECK(kept == fused->length);
+				for (int64_t index = 0; index < fused->length; index += 1) {
+					if (string_owned(result[index].capacity)) {
+						fa_free((void *)result[index].bytes, result[index].capacity & KIND_MASK, 1);
+					}
+				}
+				fa_array_free(plain, sizeof(FaString));
+				fa_array_free(fused, sizeof(FaString));
+			}
+		}
+	}
+	CHECK(allocated == before);
+}
+
 static void test_region_slice_views(void) {
 	long before = allocated;
 	uint8_t input[128];
@@ -1782,6 +1830,7 @@ int main(void) {
 	test_integer_strings();
 	test_string_padding();
 	test_inline_strings();
+	test_nonempty_splits();
 	test_region_slice_views();
 	test_tree_regions();
 	test_arguments();

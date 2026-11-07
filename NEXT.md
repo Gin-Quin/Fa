@@ -131,8 +131,10 @@ pairs. A separate prototype remains at /tmp/fa-native-frame for the next measure
 
 The 1 KiB chunk is retained after 21 alternating pinned-CPU samples at default sizes. On
 sexp N=20000, medians are 250.1 ms CPU / 57600 KiB RSS for 1 KiB, 306.7 ms / 101376 KiB for
-4 KiB, and 175.0 ms / 26752 KiB for Goose. On binary-trees 17, 1 KiB costs 124.2 ms versus
-120.3 ms for 4 KiB; Goose is 99.2 ms. Preparation overlapped part of the sampling window;
+4 KiB, and 175.0 ms / 26752 KiB for Goose built with GCC 13 (`/usr/bin/cc`, -O2),
+not the LLVM/Clang 18 used for the historical instruction ratios. On binary-trees 17,
+1 KiB costs 124.2 ms versus 120.3 ms for 4 KiB; that GCC-built Goose is 99.2 ms.
+Preparation overlapped part of the sampling window;
 retain CPU/instructions separately and repeat the final compiler comparison when quiet.
 The original 16 Goose benchmarks remain the priority; no overall win is claimed.
 
@@ -142,3 +144,39 @@ checks, 6 cache tests (including physical capacity invalidation), programs on na
 freestanding and wasm, C ASan/UBSan and representative AArch64 QEMU runs pass. The next lot
 also tests pure split/nonempty-filter fusion and ids disjoint from compact markers after
 late type interning. Neither later change is silently included in this tested snapshot.
+
+## Follow-up: fused split filters and disjoint compact ids
+
+Frozen on top of physical regions 100f4b9. The user has removed Set key callbacks:
+Set uses standard value hashing/equality, and Map serves separate keys. No Set callback
+prototype is included. Pure immediate callbacks of the
+form `part => not part.isEmpty()` can run while split produces its parts; other callbacks
+keep ordinary filtering. Raw split capacity and argument evaluation order are preserved,
+including wasm, multi-byte separators, Unicode and returned borrowed views.
+
+Ordinary union/type ids always skip the compact marker bit, with checked u64 arithmetic,
+and Root member ids are reserved during preparation. This keeps late type interning
+disjoint from the packed representation without changing errors or split-module ids.
+
+Array assignment/copy check the compact Character form only at the String element width.
+The other widths retain ordinary buffers, letting LLVM remove representation branches.
+No String key-map layout or malloc-annotation experiment is retained: neither improved
+the measured corpus.
+
+Measurements at audit sizes: words 30.44M→28.53M, strlist 89.51M→86.70M instructions,
+fannkuch 137.76M→136.67M. sexp 81.40M / Goose 77.53M, still 1.050x. These are historical
+Clang 18 instruction measurements. The report previously labeled original16 had only
+11 of the original Goose programs plus 5 secondary ports: blur, graph, push, sum and tree
+were missing. It does not establish coverage of the original suite. A new comparison
+must use exactly binary-trees/blur/calc/graph/interp/lru/particles/push/records/respond/
+scene/sexp/strlist/sum/tree/words, Clang 18 on both sides and the default sizes, with the
+9 secondary ports separate. A different fresh mixed corpus used GCC 13 and must stay
+labeled as such. The legacy --reuse size/manifest bug is being corrected before any new
+comparison. CPU medians remain a separate final validation task.
+
+Targeted 55 IR checks + id-boundary unit, split/region/Character programs across three
+targets, QEMU and C ASan/UBSan pass. Valgrind region/split examples report zero errors
+and all heap blocks freed. The complete LLVM workspace passes (exit 0,
+/tmp/fa-region-small-frozen-workspace-full.log), fmt/clippy pass and JS runtime is 298/0.
+Parent has a separate unapplied NodeCopy buffer-reuse hunk at
+/tmp/fa-copy-array-reuse.patch; it is not included here because this base predates Copy.

@@ -44,3 +44,10 @@ node mutations always keep the general representation.
 
 Bounded decimal append fast paths handle up to five digits through an unaligned two-byte
 lookup-table store; general values retain normal conversion.
+
+## Split filter fusion and array representation checks
+
+Add to the String/Array implementation notes: a split immediately followed by the pure
+nonempty-part lambda can filter during production while keeping raw split capacity and
+evaluation order. Unicode/empty separators and other callbacks retain their semantics.
+Array copy/assignment only consider compact characters at the String element width.

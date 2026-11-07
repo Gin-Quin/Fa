@@ -943,6 +943,30 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 		assert!(!ir.contains("@fa_arena_enter("), "{ir}");
 		assert!(ir.contains("@fa_packed_new("), "{ir}");
 	}
+
+	#[test]
+	fn pure_nonempty_split_filters_are_fused_and_other_callbacks_are_not() {
+		let ir = ir_of(
+			"split-nonempty",
+			"function run = (text: String): Integer => {\nmutable source = text\nlet parts = source.split(\" \").filter((part) => not part.isEmpty())\nparts.length\n}\nconsole.log(run(\"a b\"))\n",
+		);
+		assert!(ir.contains("@fa_string_split_nonempty_views("), "{ir}");
+		assert!(!ir.contains("filter_keep"), "{ir}");
+		for (name, callback) in [
+			("index", "(part, index) => index == 1"),
+			("body", "(part) => { not part.isEmpty() }"),
+			("capture", "(part) => not text.isEmpty()"),
+		] {
+			let ir = ir_of(
+				&format!("split-filter-{name}"),
+				&format!(
+					"function run = (text: String): Integer => {{\nlet parts = text.split(\" \").filter({callback})\nparts.length\n}}\nconsole.log(run(\"a b\"))\n"
+				),
+			);
+			assert!(!ir.contains("@fa_string_split_nonempty"), "{ir}");
+			assert!(ir.contains("filter_keep"), "{ir}");
+		}
+	}
 }
 
 /// A resource moved on every path or on none has no drop flag left in the

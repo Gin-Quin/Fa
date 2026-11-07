@@ -32,6 +32,15 @@ const FIRST_MEMBER_ID: u64 = 16;
 /// The first id of the member types of anonymous unions.
 const FIRST_TYPE_ID: u64 = 1 << 32;
 
+/// Ordinary ids never resemble a marked region header, including ids
+/// allocated after lowering has interned additional concrete types.
+fn unmarked_id(counter: u64) -> u64 {
+	let high = (counter & !0x7fff)
+		.checked_mul(2)
+		.expect("too many union ids");
+	high | (counter & 0x7fff)
+}
+
 impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn pointer_type(&self) -> inkwell::types::PointerType<'ctx> {
 		self.context.ptr_type(AddressSpace::default())
@@ -61,7 +70,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let next = match self.is_split() {
 			// the same in every unit (`units.rs`)
 			true => self.stable_member_id(nominal, index),
-			false => FIRST_MEMBER_ID + ids.len() as u64,
+			false => unmarked_id(
+				FIRST_MEMBER_ID
+					.checked_add(ids.len() as u64)
+					.expect("too many named union ids"),
+			),
 		};
 		*ids.entry((nominal, index)).or_insert(next)
 	}
@@ -72,7 +85,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut ids = self.type_ids.borrow_mut();
 		let next = match self.is_split() {
 			true => self.stable_type_id(ty),
-			false => FIRST_TYPE_ID + ids.len() as u64,
+			false => FIRST_TYPE_ID
+				.checked_add(unmarked_id(ids.len() as u64))
+				.expect("too many anonymous union ids"),
 		};
 		*ids.entry(ty).or_insert(next)
 	}
@@ -2585,5 +2600,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(end);
 		self.builder.build_return(None)?;
 		self.end_function()
+	}
+}
+
+#[cfg(test)]
+mod id_tests {
+	use super::{FIRST_MEMBER_ID, FIRST_TYPE_ID, unmarked_id};
+
+	#[test]
+	fn ordinary_union_ids_stay_disjoint_from_compact_tags() {
+		let counters = [
+			0,
+			FIRST_MEMBER_ID,
+			32766,
+			32767,
+			32768,
+			32769,
+			65535,
+			65536,
+			1 << 32,
+		];
+		let mut previous = None;
+		for counter in counters {
+			let id = unmarked_id(counter);
+			assert_eq!(id & 0x8000, 0);
+			assert_eq!((FIRST_TYPE_ID + id) & 0x8000, 0);
+			if let Some(previous) = previous {
+				assert!(id > previous);
+			}
+			previous = Some(id);
+		}
 	}
 }

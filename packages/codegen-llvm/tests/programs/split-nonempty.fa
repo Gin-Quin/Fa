@@ -1,0 +1,60 @@
+-- A pure nonempty filter may run while the split produces its parts.
+-- Capacity, evaluation order, Unicode boundaries and owned copies agree
+-- with an ordinary filter whose block body stays on the general path.
+
+function compare = (text: String, separator: String): Void => {
+	let expected = text.split(separator).filter((word) => { not word.isEmpty() })
+	let actual = text.split(separator).filter((word) => not word.isEmpty())
+	assert actual == expected
+	assert actual.capacity == expected.capacity
+	for word in actual { assert not word.isEmpty() }
+}
+
+for text in ["", " ", "      ", "a b c", "  a  b c  ", "héllo é 👩‍👩‍👧‍👦", "x::y::::z::", "a\r\nb\rc\r\n"] {
+	for separator in [" ", "::", "e", "\r", ""] { compare(text, separator) }
+}
+compare("::::".repeat(100), "::")
+compare(" x  y   ".repeat(100), " ")
+compare("héllo é\r\n".repeat(40), "e")
+
+mutable sourceCalls = 0
+mutable separatorCalls = 0
+function source = (): String mutates sourceCalls => {
+	sourceCalls += 1
+	"a b  c "
+}
+function separator = (): String mutates separatorCalls => {
+	separatorCalls += 1
+	" "
+}
+let pieces = source().split(separator()).filter((word) => not word.isEmpty())
+assert sourceCalls == 1
+assert separatorCalls == 1
+assert pieces == ["a", "b", "c"]
+
+-- An observable callback, an index-dependent one and a stored source keep
+-- their general filtering semantics.
+mutable callbackCalls = 0
+let observed = " a  b ".split(" ").filter((word) => {
+	callbackCalls += 1
+	not word.isEmpty()
+})
+assert callbackCalls == 5
+assert observed == ["a", "b"]
+let indexed = "a b c".split(" ").filter((_word, index) => index == 1)
+assert indexed == ["b"]
+mutable original = "a b c".split(" ")
+let copied = original.filter((word) => not word.isEmpty())
+original.push("d")
+assert copied == ["a", "b", "c"]
+
+-- Borrowed split views must materialize when kept past the source's scope.
+mutable kept: Array<String> = []
+function keep = (): Void mutates kept => {
+	mutable text = "a-long-part-over-twenty-three-bytes short  tail"
+	let parts = text.split(" ").filter((part) => not part.isEmpty())
+	for part in parts { kept.push(part) }
+}
+keep()
+assert kept == ["a-long-part-over-twenty-three-bytes", "short", "tail"]
+console.log("split ok") -- prints: split ok

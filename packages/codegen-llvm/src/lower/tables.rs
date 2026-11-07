@@ -457,7 +457,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Union => {
 				// the member: values of different members are different
 				let pointer = value.into_pointer_value();
-				let id = builder.build_load(i64, pointer, "")?.into_int_value();
+				let id = self.union_id(builder, pointer)?;
 				self.mix(builder, id)?
 			}
 			Repr::InlineUnion(_) => {

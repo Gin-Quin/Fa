@@ -227,10 +227,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_store(out.pointer, self.inline_union_type(nominal).const_zero())?;
 		let i64 = self.context.i64_type();
-		let tag = self
-			.builder
-			.build_load(i64, source, "tag")?
-			.into_int_value();
+		let tag = self.union_id(&self.builder, source)?;
 		let tag_ptr =
 			self.builder
 				.build_struct_gep(self.inline_union_type(nominal), out.pointer, 0, "")?;

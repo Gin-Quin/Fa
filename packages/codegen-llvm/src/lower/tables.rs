@@ -35,6 +35,8 @@ pub(crate) struct Table<'ctx> {
 	/// A `GrowingMap` or a `GrowingSet` (the same storage: the entries of
 	/// every table live in chunks that never move, `fa_table_entry`).
 	pub growing: bool,
+	/// A set can own an opaque key-function context, independently of T.
+	pub set: bool,
 	/// A map whose entries are dense (one contiguous array that moves):
 	/// no reference into its values outlives an insertion ([`Lowering::dense_map`]).
 	pub dense: bool,
@@ -50,6 +52,8 @@ const TABLE_DENSE: u64 = 1 << 40;
 const TABLE_INLINE: u64 = 1 << 41;
 /// A 32-bit key occupies its own presence word (`0` in a spare slot).
 const TABLE_INLINE_KEY32: u64 = 1 << 42;
+/// A Set/GrowingSet: its otherwise-unused dense-entries pointer is a context.
+const TABLE_SET: u64 = 1 << 43;
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	// ── layouts ─────────────────────────────────────────────────────────
@@ -146,6 +150,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			value,
 			entry: self.context.struct_type(&fields, false),
 			growing: matches!(kind, CollKind::GrowingMap | CollKind::GrowingSet),
+			set: matches!(repr, Repr::Set(_)),
 			dense,
 			inline,
 		})
@@ -155,6 +160,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// dense entries: the runtime then finds them in one array).
 	pub(crate) fn entry_size(&self, table: Table<'ctx>) -> IntValue<'ctx> {
 		let size = table.entry.size_of().expect("a sized entry");
+		let size = if table.set {
+			size.const_xor(size.get_type().const_int(TABLE_SET, false))
+		} else {
+			size
+		};
 		if table.inline {
 			let flags = TABLE_INLINE
 				| if matches!(table.key, Repr::Int(int) if int.bits == 32) {
@@ -457,7 +467,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Union => {
 				// the member: values of different members are different
 				let pointer = value.into_pointer_value();
-				let id = builder.build_load(i64, pointer, "")?.into_int_value();
+				let id = self.union_id(builder, pointer)?;
 				self.mix(builder, id)?
 			}
 			Repr::InlineUnion(_) => {

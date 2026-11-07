@@ -32,6 +32,15 @@ const FIRST_MEMBER_ID: u64 = 16;
 /// The first id of the member types of anonymous unions.
 const FIRST_TYPE_ID: u64 = 1 << 32;
 
+/// Ordinary ids never resemble a marked region header, including ids
+/// allocated after lowering has interned additional concrete types.
+fn unmarked_id(counter: u64) -> u64 {
+	let high = (counter & !0x7fff)
+		.checked_mul(2)
+		.expect("too many union ids");
+	high | (counter & 0x7fff)
+}
+
 impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn pointer_type(&self) -> inkwell::types::PointerType<'ctx> {
 		self.context.ptr_type(AddressSpace::default())
@@ -61,7 +70,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let next = match self.is_split() {
 			// the same in every unit (`units.rs`)
 			true => self.stable_member_id(nominal, index),
-			false => FIRST_MEMBER_ID + ids.len() as u64,
+			false => unmarked_id(
+				FIRST_MEMBER_ID
+					.checked_add(ids.len() as u64)
+					.expect("too many named union ids"),
+			),
 		};
 		*ids.entry((nominal, index)).or_insert(next)
 	}
@@ -72,7 +85,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut ids = self.type_ids.borrow_mut();
 		let next = match self.is_split() {
 			true => self.stable_type_id(ty),
-			false => FIRST_TYPE_ID + ids.len() as u64,
+			false => FIRST_TYPE_ID
+				.checked_add(unmarked_id(ids.len() as u64))
+				.expect("too many anonymous union ids"),
 		};
 		*ids.entry(ty).or_insert(next)
 	}
@@ -293,6 +308,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return self.boxed_to_inline(value, nominal);
 		}
 		let value = self.union_view(value)?;
+		if let Repr::Object(data) = repr
+			&& let Some(value) = self.unbox_compact_data(value, data)?
+		{
+			return Ok(value);
+		}
 		let ty = self.box_type(Some(repr));
 		let pointer = value.value.expect("a box").into_pointer_value();
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
@@ -368,6 +388,42 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let data_type = self.member_data(nominal, index).unwrap_or(TypeId::UNKNOWN);
 		let data_repr = self.repr_of(data_type, node.index())?;
 		let data = self.owned_as(data, data_repr, None)?;
+		if let Some(plan) = self.compact_array_payload(nominal, index) {
+			let array = self
+				.builder
+				.build_extract_value(data.value.expect("a payload").into_struct_value(), 0, "")?
+				.into_pointer_value();
+			let pointer = self.freeze_array_payload(
+				&self.builder,
+				id.get_zero_extended_constant().expect("a member id"),
+				plan,
+				array,
+				false,
+			)?;
+			return Ok(self.fresh(Val::new(Repr::Union, pointer)));
+		}
+		if self.compact_string_payload(nominal, index).is_some() {
+			let text = self.builder.build_extract_value(
+				data.value.expect("a payload").into_struct_value(),
+				0,
+				"",
+			)?;
+			let pointer = self.freeze_string_payload(
+				&self.builder,
+				id.get_zero_extended_constant().expect("a member id"),
+				text,
+				false,
+			)?;
+			return Ok(self.fresh(Val::new(Repr::Union, pointer)));
+		}
+		if self.compact_scalar_payload(nominal, index).is_some() {
+			let pointer = self.freeze_scalar_payload(
+				&self.builder,
+				id.get_zero_extended_constant().expect("a member id"),
+				data.value.expect("a payload"),
+			)?;
+			return Ok(self.fresh(Val::new(Repr::Union, pointer)));
+		}
 		let ty = self.box_type(Some(data_repr));
 		if self.inline_union_words(nominal).is_some() {
 			let repr = Repr::InlineUnion(nominal);
@@ -403,7 +459,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.allocate_for(ty.into())?
 		};
 		let id_pointer = self.builder.build_struct_gep(ty, pointer, 0, "")?;
-		self.builder.build_store(id_pointer, id)?;
+		let stored_id = if self.packed_headers() && self.arena_member(nominal) {
+			self.context.i64_type().const_int(
+				id.get_zero_extended_constant().expect("a member id") | 0x8000,
+				false,
+			)
+		} else {
+			id
+		};
+		self.builder.build_store(id_pointer, stored_id)?;
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
 		self.builder
 			.build_store(data_pointer, data.value.expect("data"))?;
@@ -468,15 +532,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.into_int_value());
 		}
 		let pointer = value.value.expect("a box").into_pointer_value();
-		Ok(self
-			.builder
-			.build_load(self.context.i64_type(), pointer, "")?
-			.into_int_value())
+		self.union_id(&self.builder, pointer)
 	}
 
 	/// Whether a box holds one of the members of `ty` (a member, a named
 	/// union, `Error`).
 	pub(crate) fn box_is(&mut self, value: Val<'ctx>, ty: TypeId) -> Result<IntValue<'ctx>, Error> {
+		self.box_is_typed(value, ty, None)
+	}
+
+	pub(super) fn box_is_typed(
+		&mut self,
+		value: Val<'ctx>,
+		ty: TypeId,
+		subject: Option<TypeId>,
+	) -> Result<IntValue<'ctx>, Error> {
 		let types = self.types();
 		let members: Vec<(NominalId, u16)> = match types.kind(ty) {
 			TypeKind::Member(nominal, index) => vec![(nominal, index)],
@@ -508,14 +578,40 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return Ok(result);
 			}
 		};
-		let id = self.box_id(value)?;
+		// A statically named subject cannot contain an anonymous type id.
+		// Compare its exact stored tag, including the compact marker, instead
+		// of decoding a general union's full-width discriminant.
+		let narrow = self.packed_headers()
+			&& value.repr == Repr::Union
+			&& subject.is_some_and(|ty| {
+				let ty = self.without_none(ty);
+				let ty = self.types().rec_target(ty).unwrap_or(ty);
+				matches!(
+					self.types().kind(ty),
+					TypeKind::NamedUnion(..) | TypeKind::Member(..)
+				)
+			});
+		let id = if narrow {
+			self.builder
+				.build_load(
+					self.context.i16_type(),
+					value.value.expect("a box").into_pointer_value(),
+					"member_tag",
+				)?
+				.into_int_value()
+		} else {
+			self.box_id(value)?
+		};
 		let mut result = self.context.bool_type().const_zero();
 		for (nominal, index) in members {
-			let member = self.member_id(nominal, index);
+			let mut member = self.member_id(nominal, index);
+			if narrow && self.arena_member(nominal) && self.member_data(nominal, index).is_some() {
+				member |= 0x8000;
+			}
 			let equal = self.builder.build_int_compare(
 				IntPredicate::EQ,
 				id,
-				self.context.i64_type().const_int(member, false),
+				id.get_type().const_int(member, false),
 				"",
 			)?;
 			result = self.builder.build_or(result, equal, "")?;
@@ -539,12 +635,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "the data of a member without data"));
 		};
 		let repr = self.repr_of(data, node.index())?;
-		let ty = self.box_type(Some(repr));
 		let pointer = value.value.expect("a box").into_pointer_value();
-		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
-		let loaded = self
-			.builder
-			.build_load(self.llvm_type(repr), data_pointer, "")?;
+		let loaded = self.member_payload_value(&self.builder, pointer, nominal, index, repr)?;
 		Ok(Val::new(repr, loaded))
 	}
 
@@ -562,6 +654,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let data = self.member_data(nominal, index).unwrap_or(TypeId::UNKNOWN);
 		let repr = self.repr_of(data, node.index())?;
+		if let Some(plan) = self.compact_array_payload(nominal, index) {
+			return self.compact_payload_place(pointer, plan);
+		}
+		if self.compact_string_payload(nominal, index).is_some() {
+			let value = self.string_payload_value(&self.builder, pointer, data)?;
+			let out = self.alloca(repr, "member_view")?;
+			self.builder.build_store(out.pointer, value)?;
+			return Ok(out);
+		}
+		if self.compact_scalar_payload(nominal, index).is_some() {
+			return Ok(Slot {
+				pointer: self.payload_offset(&self.builder, pointer, 4)?,
+				repr,
+			});
+		}
 		let ty = self.box_type(Some(repr));
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
 		Ok(Slot {
@@ -806,7 +913,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						_ => None,
 					};
 					let owned = self.owned_as(lowered, repr, source)?;
-					self.compact_moved_array(owned, source)
+					if info
+						.member
+						.and_then(|ty| self.member_of_type(ty))
+						.is_some_and(|(nominal, index)| {
+							self.compact_array_payload(nominal, index).is_some()
+						}) {
+						Ok(owned)
+					} else {
+						self.compact_moved_array(owned, source)
+					}
 				}
 				other => other,
 			};
@@ -2223,8 +2339,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let next = self.append_block("present_boxes");
 		self.builder.build_conditional_branch(null, no, next)?;
 		self.builder.position_at_end(next);
-		let a_id = self.builder.build_load(i64, a, "")?.into_int_value();
-		let b_id = self.builder.build_load(i64, b, "")?.into_int_value();
+		let a_id = self.union_id(&self.builder, a)?;
+		let b_id = self.union_id(&self.builder, b)?;
 		let same_id = self
 			.builder
 			.build_int_compare(IntPredicate::EQ, a_id, b_id, "")?;
@@ -2282,10 +2398,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let mut equal = self.context.bool_type().const_int(1, false);
 			for (position, repr) in fields.into_iter().enumerate() {
 				let index = position as u32 + 1;
-				let left = self.builder.build_struct_gep(layout, a, index, "")?;
-				let right = self.builder.build_struct_gep(layout, b, index, "")?;
-				let left = self.builder.build_load(self.llvm_type(repr), left, "")?;
-				let right = self.builder.build_load(self.llvm_type(repr), right, "")?;
+				let (left, right) = if let Some(plan) = self.compact_array_box(id) {
+					(
+						self.compact_payload_value(&self.builder, a, plan)?,
+						self.compact_payload_value(&self.builder, b, plan)?,
+					)
+				} else if let Some(data) = self.compact_string_box(id) {
+					(
+						self.string_payload_value(&self.builder, a, data)?,
+						self.string_payload_value(&self.builder, b, data)?,
+					)
+				} else if let Some(data) = self.compact_scalar_box(id) {
+					(
+						self.scalar_payload_value(&self.builder, a, data)?,
+						self.scalar_payload_value(&self.builder, b, data)?,
+					)
+				} else {
+					let left = self.builder.build_struct_gep(layout, a, index, "")?;
+					let right = self.builder.build_struct_gep(layout, b, index, "")?;
+					(
+						self.builder.build_load(self.llvm_type(repr), left, "")?,
+						self.builder.build_load(self.llvm_type(repr), right, "")?,
+					)
+				};
 				let mark = self.mark();
 				let part =
 					self.values_equal_any(Val::new(repr, left), Val::new(repr, right), node)?;
@@ -2400,12 +2535,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.append_value(suffix, node)?;
 			} else if let Some(data) = self.member_data(nominal, index) {
 				let repr = self.repr_of(data, 0)?;
-				let ty = self.box_type(Some(repr));
 				let box_pointer = value.value.expect("a box").into_pointer_value();
-				let data_pointer = self.builder.build_struct_gep(ty, box_pointer, 1, "")?;
-				let loaded = self
-					.builder
-					.build_load(self.llvm_type(repr), data_pointer, "")?;
+				let loaded =
+					self.member_payload_value(&self.builder, box_pointer, nominal, index, repr)?;
 				let loaded = Val::new(repr, loaded);
 				if let Repr::Object(object) = repr {
 					let space = self.string_constant(" ");
@@ -2468,5 +2600,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(end);
 		self.builder.build_return(None)?;
 		self.end_function()
+	}
+}
+
+#[cfg(test)]
+mod id_tests {
+	use super::{FIRST_MEMBER_ID, FIRST_TYPE_ID, unmarked_id};
+
+	#[test]
+	fn ordinary_union_ids_stay_disjoint_from_compact_tags() {
+		let counters = [
+			0,
+			FIRST_MEMBER_ID,
+			32766,
+			32767,
+			32768,
+			32769,
+			65535,
+			65536,
+			1 << 32,
+		];
+		let mut previous = None;
+		for counter in counters {
+			let id = unmarked_id(counter);
+			assert_eq!(id & 0x8000, 0);
+			assert_eq!((FIRST_TYPE_ID + id) & 0x8000, 0);
+			if let Some(previous) = previous {
+				assert!(id > previous);
+			}
+			previous = Some(id);
+		}
 	}
 }

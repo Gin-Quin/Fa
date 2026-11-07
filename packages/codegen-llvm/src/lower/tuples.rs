@@ -312,7 +312,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let capacity = self.string_capacity(text)?;
 				let (start, end, flags) = self.range_parts(range)?;
 				let out = self.alloca(Repr::Str, "slice")?;
-				let slice = self.runtime.function("fa_string_slice")?;
+				let slice = if self.slice_into_region(node, target, index) {
+					"fa_string_slice_region"
+				} else {
+					"fa_string_slice"
+				};
+				let slice = self.runtime.function(slice)?;
 				let error = self
 					.call_value(
 						slice,

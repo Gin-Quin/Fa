@@ -1,3 +1,24 @@
+# Native String length soundness checkpoint (2026-11-07)
+
+Based on validated `6401446`; independent of KEY32/String16 prototypes. The
+nonnegative-length LLVM assumption now follows inline decoding. In the inline
+representation the raw second word contains UTF-8 bytes, which can set its sign
+bit; only `select(inline, tagLength, rawLength)` is a valid nonnegative length.
+The object cache contract advances with `string-length-1` so old assumptions are
+not retained in cached objects. The three-word String ABI is unchanged.
+
+The IR regression checks that the assumed operand is decoded first. The new
+`inline-utf8-length.fa` fixture covers both 11-byte and 23-byte inline layouts,
+concatenation, equality, grapheme length, case conversion and split/join. Its
+baseline640 execution succeeds; this fixes an invalid IR contract, without a
+claim of an observed baseline output mismatch.
+
+Validated: full workspace with LLVM EXIT0 (`/tmp/fa-inline-utf8-length-workspace-full.log`),
+workspace clippy/fmt, 300 JS runtime tests, targeted native/freestanding/wasm and
+AArch64 QEMU execution. No runtime C changes or representation changes. The
+performance prototypes remain separate, unretained; their CPU confidence intervals
+include parity and they are not part of this checkpoint.
+
 # Compiler completion in progress (2026-11-07)
 
 Integration: branch `compiler`, worktree `.claude/worktrees/lead`. The main checkout

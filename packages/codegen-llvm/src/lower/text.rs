@@ -802,8 +802,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"",
 		)?;
 		let inline_length = builder.build_and(shifted, self.usize.const_int(31, false), "")?;
-		// a length is below `KIND_MASK` (2^62 natively): never negative, so
-		// that `codes[codes.length - 1]` after `codes[0]` needs no wrap
+		let length = builder
+			.build_select(inline, inline_length, length, "")?
+			.into_int_value();
+		// Only the decoded length is nonnegative: in an inline string the
+		// raw length word contains UTF-8 bytes, which can set its sign bit.
+		// The bound lets `codes[codes.length - 1]` after `codes[0]` avoid wrap.
 		if length.get_zero_extended_constant().is_none() {
 			let positive = builder.build_int_compare(
 				IntPredicate::SGE,
@@ -816,9 +820,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.expect("llvm.assume");
 			builder.build_call(assume, &[positive.into()], "")?;
 		}
-		let length = builder
-			.build_select(inline, inline_length, length, "")?
-			.into_int_value();
 		Ok((bytes, length))
 	}
 

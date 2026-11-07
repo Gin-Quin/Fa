@@ -809,6 +809,34 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 	}
 
 	#[test]
+	fn inline_utf8_bytes_are_not_assumed_to_be_a_positive_raw_length() {
+		let ir = ir_of(
+			"inline-utf8-length",
+			"function suffix = (text: String): String => text + \"!\"\nconsole.log(suffix(\"éééééééé\"))\n",
+		);
+		let mut checked = 0;
+		for line in ir.lines() {
+			let Some((_, comparison)) = line.split_once(" = icmp sge i64 ") else {
+				continue;
+			};
+			let Some(length) = comparison.strip_suffix(", 0") else {
+				continue;
+			};
+			assert!(
+				ir.lines().any(|definition| definition
+					.trim_start()
+					.starts_with(&format!("{length} = select i1 "))),
+				"the nonnegative length must select the inline length first: {line}\n{ir}"
+			);
+			checked += 1;
+		}
+		assert!(
+			checked > 0,
+			"the regression must exercise the length assumption: {ir}"
+		);
+	}
+
+	#[test]
 	fn dynamic_append_loops_reserve_inline_values_too() {
 		let ir = ir_with(
 			"inline-dynamic-loop",

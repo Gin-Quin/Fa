@@ -262,7 +262,7 @@ between two folds (bijective) and compared bitwise in the probe loop; the other
 keys use their generated `==`. Iteration currently tests the occupancy bit of
 each slot rather than using `tzcnt`; the randomized hash seed remains planned.
 
-- **Compact integer slots.** An inline map with 32-bit integer keys and values of at most 32 bits stores 8 bytes per slot. Zero has one extra slot and a separate presence bit, so every key and value bit pattern remains available. Copies, growth, reserve and shifting deletion preserve the zero entry. Other integer widths retain their existing layouts.
+- **Compact integer slots.** An inline map with 32-bit integer keys and values of at most 32 bits stores 8 bytes per slot. The all-ones key (`UInt32.maxValue`, or `-1` for `Int32`) has one extra slot and a separate presence bit; all-ones marks an empty probe slot. Every key and value bit pattern remains available. Copies, growth, reserve and shifting deletion preserve the extra entry. The append helper also receives raw key bits, keeping its sentinel check visible to range analysis. Other integer widths retain their existing layouts.
 
 - **Dense entries.** When the program keeps no reference into the values of maps of a type, entries live in one array that can move on growth: a lookup needs no chunk-directory read. A short reference ending before any map write or program call does not prevent this layout. Each compilation unit publishes its reference uses so every unit agrees. `GrowingMap` retains stable chunks.
 

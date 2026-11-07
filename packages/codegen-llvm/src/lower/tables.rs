@@ -48,7 +48,7 @@ pub(crate) struct Table<'ctx> {
 const TABLE_DENSE: u64 = 1 << 40;
 /// `TABLE_INLINE` of the runtime: a flag of `entry_size`.
 const TABLE_INLINE: u64 = 1 << 41;
-/// A 32-bit key occupies its own presence word (`0` in a spare slot).
+/// A 32-bit key occupies its own presence word (the all-ones key has a spare slot).
 const TABLE_INLINE_KEY32: u64 = 1 << 42;
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -799,6 +799,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<PointerValue<'ctx>, Error> {
 		let append = self.runtime.function("fa_table_append")?;
 		let i64 = self.context.i64_type();
+		let key_bits = if table.inline && matches!(table.key, Repr::Int(int) if int.bits == 32) {
+			key.int()
+		} else {
+			self.context.i32_type().const_zero()
+		};
 		let hash_at = self.hash_at_function(table.key)?;
 		let entry = self
 			.call_value(
@@ -808,6 +813,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					hash.into(),
 					self.entry_size(table).into(),
 					probe.unwrap_or_else(|| i64.const_zero()).into(),
+					key_bits.into(),
 					hash_at.as_global_value().as_pointer_value().into(),
 				],
 			)?

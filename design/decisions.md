@@ -610,9 +610,13 @@ stop with the existing out-of-memory exit; ordinary negative/empty cases keep th
 ## Compact integer map slots and reserved inline appends (2026-11-06)
 
 A native inline map with a 32-bit integer key and a value of at most 32 bits uses an 8-byte
-key/value slot. Key zero has one extra slot and an explicit presence bit; every other key
-is its own empty-slot marker. Copies, growth and backward-shift deletion preserve that
-representation. Other integer widths retain their existing layouts and hash protocol.
+key/value slot. The all-ones key has one extra slot and an explicit presence bit;
+all-ones marks an empty probe slot, while ordinary zero lives in the probe array.
+Copies, growth and backward-shift deletion preserve every key bit pattern.
+The append helper receives raw key bits alongside the hash, keeping its sentinel
+check visible to range analysis. This replaces the original zero sentinel:
+nonnegative signed keys can include zero without taking an extra-entry branch.
+Other integer widths retain their existing layouts and hash protocol.
 
 A counted character/digit append loop may keep a dynamically short result inline. Its
 reservation checks the actual prefix plus the rounds; a separate mode bit is invariant on

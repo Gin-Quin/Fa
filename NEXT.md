@@ -374,3 +374,39 @@ freestanding10/10 plus the2 documented JSON/libc skips, in
 /tmp/fa-direct-final-aarch64{,-free}.log. A separate O0 probe with an external18KiB
 Unicode payload fails on the old compiler and survives parent destruction/churn with
 the String fix: /tmp/fa-region-external-string-check/main.fa.
+
+
+## KEY32 candidate (based on 6401446, CPU not yet conclusive)
+
+The candidate uses UINT32_MAX as the empty marker for 8-byte map slots,
+keeping that actual key in the existing extra slot. Zero and all other
+key/value bit patterns remain available. fa_table_append also receives raw
+key bits alongside the hash; the six-argument private ABI and the object
+cache bump change together, with all three runtime IRs regenerated.
+
+C ASan/UBSan, 61 IR checks, compact-int-maps/dense-maps on native/free/wasm,
+QEMU AArch64 and JS runtime 300/300 pass. Workspace clippy passes. lru at
+original N=2,000,000 uses 191.314M instructions (640: 205.007M, Goose:
+185.649M). The separate sentinel-only variant uses 199.056M. The other
+15 original-suite executables are byte-identical to 640. All source,
+compiler and binary hashes, outputs and flags are checked in the manifests
+under /tmp/fa-native-perf-next/key32-direct-key-clang18. Both variants and
+source deltas remain archived in compilers/key32-* beside that directory.
+
+CPU remains unresolved despite quiet process guards. First 15 rotations:
+medians 640 250.70 ms, sentinel 242.56 ms, raw-key 254.59 ms. The second
+50 balanced rotations gave medians 250.80 / 247.19 / 244.36 ms respectively,
+Goose 226.82 ms. Means were 254.21 / 255.55 / 253.45 ms; standard deviations
+28–40 ms. Paired median ratios: sentinel 1.003 [0.966,1.038], raw-key
+0.973 [0.946,1.039] (95% bootstrap intervals). User CPU dominates, no major
+page fault occurred. Neither a CPU gain nor a regression is established.
+The candidate is NOT yet chosen or integrated; instruction savings alone
+are not reported as a CPU win. Reports: key32-{scene-diagnostic,extended}-cpu.json,
+key32-extended-statistics.json.
+
+Complete workspace validation with LLVM has now finished exit 0, as have
+workspace clippy/fmt, the 300 JS runtime tests, C ASan/UBSan and the QEMU
+AArch64 compact-map fixture. Logs: /tmp/fa-key32-{frozen-clippy,
+frozen-workspace-full,raw-key-js-runtime,raw-key-aarch64}.log and
+/tmp/fa-key32-raw-key-sanitizers.log. Session 82361 consumed exit 0.
+This validates the candidate's correctness; CPU retention remains open.

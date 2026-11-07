@@ -1,6 +1,7 @@
 -- Tasks natively (design/async.md §3): `start`, `await`, `cancel`, the
 -- drop of a task's scope, `start do`, detached tasks, `sleep`, `Task.yield`.
 use { sleep } = std.time
+use { Channel } = std.concurrency
 
 async function greet = (name: String, delay: Integer): String => {
 	await sleep(delay)
@@ -73,10 +74,20 @@ async function quick = (value: Integer): Integer => value + 1
 console.log(await quick(41)) -- prints: 42
 
 -- detached tasks: the program waits for them
-start greet("detached", 5)
+-- The channel orders their output even when both timers would already be due.
+async function detachedGreeting = (ready: Channel<Boolean>): String => {
+	let received = await ready.receive()
+	if received is true {
+		return await greet("detached", 5)
+	}
+	""
+}
+mutable detachedReady = Channel<Boolean> { capacity = 1 }
+start detachedGreeting(detachedReady)
 start do {
 	await sleep(2)
 	console.log("detached block")
+	await detachedReady.send(true) catch _error => return
 }
 console.log("end of the top level") -- prints: end of the top level
 -- prints: detached block

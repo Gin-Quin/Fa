@@ -676,6 +676,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(operation) = self.analysis.parallel_operations.get(&node).copied() {
 			return self.parallel_operation(node, operation, info);
 		}
+		if path == "Array#filter"
+			&& let Some(split) = self.nonempty_split_filter(node)
+		{
+			let info = self.analysis.call(split).expect("a split call").clone();
+			return self.string_method(split, "String#split", &info, true);
+		}
 		match path {
 			// `collection.parallel()`: the collection, which the operation reads
 			"Collection#parallel" => self.receiver(node),
@@ -712,7 +718,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				self.print(if path == "console.log" { 1 } else { 2 }, &values)
 			}
-			_ if path.starts_with("String#") => self.string_method(node, path, info),
+			_ if path.starts_with("String#") => self.string_method(node, path, info, false),
 			"Pointer.allocate" => self.pointer_allocate(node, info),
 			_ if path.starts_with("Pointer#") || path.starts_with("CString#") => {
 				self.pointer_method(node, path, info)
@@ -1479,6 +1485,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 		path: &str,
 		info: &CallInfo,
+		split_nonempty: bool,
 	) -> Result<Val<'ctx>, Error> {
 		let receiver = self.receiver(node)?;
 		if receiver.repr == Repr::Never {
@@ -1630,10 +1637,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let name = match path {
 					"String#split" => {
 						string_argument(self, 0, &mut call)?;
-						if self.splits_into_views(node) {
-							"fa_string_split_views"
-						} else {
-							"fa_string_split"
+						match (self.splits_into_views(node), split_nonempty) {
+							(true, true) => "fa_string_split_nonempty_views",
+							(false, true) => "fa_string_split_nonempty",
+							(true, false) => "fa_string_split_views",
+							(false, false) => "fa_string_split",
 						}
 					}
 					"String#characters" => "fa_string_characters",

@@ -20,8 +20,11 @@ use super::values::{Repr, Scalar};
 use super::{FAST_CALLING_CONVENTION, Lowering};
 use crate::error::Error;
 
+pub(super) const ARENA_CHUNK_BYTES: u64 = 1024;
+
 #[derive(Default)]
 pub(super) struct TreeArenas<'ctx> {
+	pub(super) packed_headers: bool,
 	/// Resolved claims for a whole-module build. Split builds consult their
 	/// shared ProgramFacts directly, recording the answer in the object cache.
 	facts: std::collections::BTreeSet<String>,
@@ -32,12 +35,14 @@ pub(super) struct TreeArenas<'ctx> {
 		rustc_hash::FxHashMap<PointerValue<'ctx>, inkwell::values::IntValue<'ctx>>,
 	>,
 	objects: FxHashSet<TypeId>,
-	unions: FxHashSet<NominalId>,
+	pub(super) unions: FxHashSet<NominalId>,
 	/// The arena object types whose recursive edges are compressed: 32-bit
 	/// offsets, in units of 8 bytes, from the runtime's `fa_arena_base`, 0
 	/// for an absent edge, in memory and as values (`design/decisions.md`,
 	/// "Compressed links for arena-allocated recursive values").
 	compressed: FxHashSet<TypeId>,
+	pub(super) compressed_unions: rustc_hash::FxHashMap<NominalId, TypeId>,
+	union_roots: rustc_hash::FxHashMap<NominalId, TypeId>,
 }
 
 impl TreeArenas<'_> {
@@ -57,7 +62,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let align = u64::from(data.get_abi_alignment(&ty));
 		let offset = header.next_multiple_of(align);
 		let size = data.get_abi_size(&ty);
-		const PAGE_SIZE: u64 = 65536;
+		const PAGE_SIZE: u64 = ARENA_CHUNK_BYTES;
 		offset <= PAGE_SIZE && size <= PAGE_SIZE && size.next_multiple_of(8) <= PAGE_SIZE - offset
 	}
 
@@ -69,7 +74,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: PointerValue<'ctx>,
 		layout: inkwell::types::StructType<'ctx>,
 		fields: &[Repr],
-	) -> Result<Vec<(PointerValue<'ctx>, Repr)>, Error> {
+		owner: NominalId,
+	) -> Result<Vec<(PointerValue<'ctx>, Repr, bool)>, Error> {
 		let mut slots = Vec::new();
 		for (index, repr) in fields.iter().enumerate() {
 			let Repr::Object(ty) = repr else {
@@ -81,6 +87,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					slots.push((
 						b.build_struct_gep(self.object_type(*ty), data, index as u32, "")?,
 						*field,
+						self.arena_array_nominal(*field) == Some(owner),
 					));
 				}
 			}
@@ -96,12 +103,39 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		layout: inkwell::types::StructType<'ctx>,
 		fields: &[Repr],
 	) -> Result<(), Error> {
-		let slots = self.arena_payload_slots(b, node, layout, fields)?;
+		let owner = self
+			.union_ids
+			.borrow()
+			.iter()
+			.find_map(|((nominal, _), member)| (*member == id).then_some(*nominal))
+			.expect("an arena member id");
+		let slots = self.arena_payload_slots(b, node, layout, fields, owner)?;
 		if slots.is_empty() {
 			return Ok(());
 		}
 		let mut owning = self.context.bool_type().const_zero();
-		for (slot, repr) in slots {
+		for (slot, repr, child) in slots {
+			if child {
+				let array = b.build_load(self.pointer_type(), slot, "")?;
+				let region = b
+					.build_call(
+						self.runtime.function("fa_array_is_region")?,
+						&[array.into()],
+						"",
+					)?
+					.try_as_basic_value()
+					.basic()
+					.expect("a region marker")
+					.into_int_value();
+				let external = b.build_int_compare(
+					inkwell::IntPredicate::EQ,
+					region,
+					region.get_type().const_zero(),
+					"",
+				)?;
+				owning = b.build_or(owning, external, "")?;
+				continue;
+			}
 			if repr != Repr::Str {
 				owning = self.context.bool_type().const_int(1, false);
 				break;
@@ -133,9 +167,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.fn_type(&[self.pointer_type().into()], false);
 				let (drop, cleanup) = self.helper_function(&name, ty);
 				let node = drop.get_nth_param(0).expect("a node").into_pointer_value();
-				for (slot, repr) in self.arena_payload_slots(&cleanup, node, layout, fields)? {
+				for (slot, repr, child) in
+					self.arena_payload_slots(&cleanup, node, layout, fields, owner)?
+				{
 					let value = cleanup.build_load(self.llvm_type(repr), slot, "")?;
-					self.call_drop(&cleanup, repr, value)?;
+					if child {
+						let drop = self.child_array_drop_function(repr)?;
+						cleanup.build_call(drop, &[value.into()], "")?;
+					} else {
+						self.call_drop(&cleanup, repr, value)?;
+					}
 				}
 				cleanup.build_return(None)?;
 				drop
@@ -165,6 +206,82 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(())
 	}
 
+	pub(super) fn arena_child_array_type(&self, repr: Repr) -> bool {
+		self.arena_array_nominal(repr).is_some()
+	}
+
+	/// Only fresh arrays of the proven builder may share its active region.
+	/// The same Array<Root> outside that builder remains an ordinary owner.
+	pub(super) fn region_child_array(&self, node: NodeId, repr: Repr) -> bool {
+		if !self.frame().arena || self.arena_array_nominal(repr).is_none() {
+			return false;
+		}
+		let Some(function) = self.functions.iter().find_map(|(&node, function)| {
+			(function.arena_body == Some(self.frame().function)).then_some(node)
+		}) else {
+			return false;
+		};
+		let Some(function) = fa_analyzer::regions::function_key(self.session, self.file, function)
+		else {
+			return false;
+		};
+		let Some(array) = crate::facts::stable_type_name(self.types(), self.analysis.type_of(node))
+		else {
+			return false;
+		};
+		self.region_fact(&fa_analyzer::regions::child_array_key(&function, &array))
+	}
+
+	/// Root arrays outside builders own one independent region per element.
+	/// A field array of the same proven root instead contains edges into its
+	/// owner's region: its cleanup frees only the array storage.
+	pub(super) fn arena_array_nominal(&self, repr: Repr) -> Option<NominalId> {
+		let Repr::Array(item) = repr else { return None };
+		let item = self.types().rec_target(item).unwrap_or(item);
+		match self.types().kind(item) {
+			TypeKind::NamedUnion(nominal, _) if self.arena_member(nominal) => Some(nominal),
+			_ => None,
+		}
+	}
+
+	fn child_array_drop_function(
+		&self,
+		repr: Repr,
+	) -> Result<inkwell::values::FunctionValue<'ctx>, Error> {
+		let Repr::Array(item) = repr else {
+			unreachable!("an array of child roots")
+		};
+		let key = format!("child-array {}", self.shape_key(repr));
+		if let Some(function) = self.drop_functions.borrow().get(&key).copied() {
+			return Ok(function);
+		}
+		let signature = self
+			.context
+			.void_type()
+			.fn_type(&[self.pointer_type().into()], false);
+		let (function, builder) = self.helper_function("fa.drop.child_array", signature);
+		self.drop_functions.borrow_mut().insert(key, function);
+		let array = function
+			.get_nth_param(0)
+			.expect("an array")
+			.into_pointer_value();
+		let present = builder.build_is_not_null(array, "")?;
+		let nonempty = self.context.append_basic_block(function, "present");
+		let absent = self.context.append_basic_block(function, "absent");
+		builder.build_conditional_branch(present, nonempty, absent)?;
+		builder.position_at_end(absent);
+		builder.build_return(None)?;
+		builder.position_at_end(nonempty);
+		let item = self.item_repr(item, NodeId::new(0))?;
+		builder.build_call(
+			self.runtime.function("fa_array_free")?,
+			&[array.into(), self.item_size_const(item).into()],
+			"",
+		)?;
+		builder.build_return(None)?;
+		Ok(function)
+	}
+
 	/// Whether the recursive edges to this type are compressed links.
 	pub(crate) fn compressed(&self, target: TypeId) -> bool {
 		self.tree_arenas.compressed.contains(&target)
@@ -189,6 +306,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !self.compressed_edge(repr) {
 			return Ok(raw.into_pointer_value());
 		}
+		if let Some(nominal) = self.compressed_union_link(repr) {
+			return self.decode_union_link(b, nominal, raw.into_int_value());
+		}
 		let i64 = self.context.i64_type();
 		let link = b.build_int_z_extend(raw.into_int_value(), i64, "")?;
 		let address = b.build_int_nuw_mul(link, i64.const_int(8, false), "")?;
@@ -205,6 +325,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<BasicValueEnum<'ctx>, Error> {
 		if !self.compressed_edge(repr) {
 			return Ok(address.into());
+		}
+		if let Some(nominal) = self.compressed_union_link(repr) {
+			return self.encode_union_link(b, nominal, address);
 		}
 		if let Some(link) = self.tree_arenas.links.borrow().get(&address) {
 			return Ok((*link).into());
@@ -414,6 +537,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				if let Some(nominal) = nominal {
 					self.tree_arenas.unions.insert(nominal);
+					self.tree_arenas.union_roots.insert(nominal, ty);
 				} else {
 					self.tree_arenas.objects.insert(ty);
 				}
@@ -465,6 +589,47 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			|| std::env::var_os("FA_COMPRESSED_LINKS").is_some_and(|value| value == "0")
 		{
 			return Ok(());
+		}
+		// Reserve the compact members before lowering can intern additional
+		// types. Ordinary ids always skip their marker bit (objects.rs).
+		self.tree_arenas.packed_headers = !self.tree_arenas.unions.is_empty()
+			&& self.types().nominal_member_count() < 32768 - 16
+			&& self.types().len() < 32768;
+		if self.tree_arenas.packed_headers {
+			self.tree_arenas.packed_headers = self.tree_arenas.unions.iter().any(|&nominal| {
+				let count = self
+					.types()
+					.sym_list(self.types().nominal(nominal).members)
+					.len();
+				(0..count as u16).any(|index| {
+					self.compact_array_payload(nominal, index).is_some()
+						|| self.compact_string_payload(nominal, index).is_some()
+						|| self.compact_scalar_payload(nominal, index).is_some()
+				})
+			});
+		}
+		if self.tree_arenas.packed_headers {
+			let mut nominals: Vec<_> = self.tree_arenas.unions.iter().copied().collect();
+			nominals.sort();
+			for nominal in nominals {
+				let count = self
+					.types()
+					.sym_list(self.types().nominal(nominal).members)
+					.len();
+				for index in 0..count as u16 {
+					assert!(self.member_id(nominal, index) < 32768);
+				}
+			}
+		}
+		for (&nominal, &root) in &self.tree_arenas.union_roots {
+			let count = self
+				.types()
+				.sym_list(self.types().nominal(nominal).members)
+				.len();
+			if (0..count as u16).any(|index| self.compact_array_payload(nominal, index).is_some()) {
+				self.tree_arenas.compressed.insert(root);
+				self.tree_arenas.compressed_unions.insert(nominal, root);
+			}
 		}
 		let mut objects: Vec<TypeId> = self.tree_arenas.objects.iter().copied().collect();
 		objects.sort();
@@ -541,8 +706,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.types().fields_of(data).iter().all(|f| {
 						let union = self.repr_of(f.ty, 0).is_ok_and(|r| r == Repr::Union);
 						if self.tree_value_type(f.ty, ty) {
-							recursive |= union;
-							union
+							let children = matches!(self.types().kind(f.ty), TypeKind::Collection(CollKind::Array, item, _) if item == ty || self.types().rec_target(item) == Some(ty));
+							recursive |= union || children;
+							union || children
 						} else {
 							// Direct Union fields are reserved for recursive root
 							// edges by arena_payload_slots; unrelated boxes need
@@ -651,7 +817,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		b.build_conditional_branch(b.build_is_null(pointer, "")?, done, present)?;
 		b.position_at_end(present);
 		let i64 = self.context.i64_type();
-		let id = b.build_load(i64, pointer, "id")?.into_int_value();
+		let id = self.union_id(b, pointer)?;
 		let mut constant = self.context.bool_type().const_zero();
 		for member in constants {
 			let equal = b.build_int_compare(

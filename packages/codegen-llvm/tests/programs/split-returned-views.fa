@@ -1,0 +1,19 @@
+-- A logical last-use move of the split array must detach its borrowed
+-- strings before their source's frame or heap owner ends.
+-- asynchronous: false
+function escaped = (): Array<String> => {
+	mutable source = "a-long-word-over-twenty-three-bytes short " + "tail".repeat(30)
+	let parts = source.split(" ").filter((part) => not part.isEmpty())
+	parts
+}
+function throughAlias = (): Array<String> => {
+	mutable source = "another-long-word-over-twenty-three-bytes tiny " + "end".repeat(30)
+	let parts = source.split(" ").filter((part) => not part.isEmpty())
+	let alias = parts
+	alias
+}
+let first = escaped()
+let second = throughAlias()
+assert first == ["a-long-word-over-twenty-three-bytes", "short", "tail".repeat(30)]
+assert second == ["another-long-word-over-twenty-three-bytes", "tiny", "end".repeat(30)]
+console.log("escaped split views") -- prints: escaped split views

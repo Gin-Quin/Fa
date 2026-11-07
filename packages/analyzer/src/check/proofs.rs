@@ -395,9 +395,10 @@ impl Walker<'_> {
 		let length = self.expression_length(target);
 		let (lo, hi) = (values.hull.lo, values.hull.hi);
 		if let Some(length) = length {
-			// within [0, length) or [-length, 0) for every possible length
+			// Every index in [-length, length) is valid, including an
+			// interval spanning the negative and non-negative representations.
 			let shortest = length.lo;
-			if (lo >= I256::ZERO && hi < shortest) || (lo >= -shortest && hi < I256::ZERO) {
+			if lo >= -shortest && hi < shortest {
 				return true;
 			}
 			// certainly out: beyond the longest possible length

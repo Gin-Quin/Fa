@@ -1154,6 +1154,17 @@ impl TypeStore {
 		*self.nominals.resolve(nominal.0)
 	}
 
+	/// An upper bound on the distinct named members visible to this view,
+	/// including members that no expression has used yet.
+	pub fn nominal_member_count(&self) -> usize {
+		let global = self.nominals.global.len();
+		(0..global)
+			.map(|index| index as u32)
+			.chain((0..self.nominals.local_len()).map(|index| index as u32 | super::global::LOCAL))
+			.map(|id| self.sym_list(self.nominal(NominalId(id)).members).len())
+			.sum()
+	}
+
 	/// Sets the data of the members of a named union or `Errors` type, in
 	/// member order (`UNSET` for a member without data). Set once, after the
 	/// nominal is interned, so that a member may refer to its union. The

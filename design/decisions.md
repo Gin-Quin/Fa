@@ -689,3 +689,59 @@ part of its coroutine's frame. This is an implementation choice under the existi
 ## Unobserved capacities of region arrays (2026-11-07)
 
 The closed ROOT_REGIONS proof also publishes `capacity-unobserved` for an admitted `Array<Root>` when no module observes that family's array capacity. A capacity read on either an ordinary root array or a child array removes this permission for both; reads through aliases, a function value and chained or pattern-bound fields count too. This is an additional positive fact, never an assumption from a missing negative claim: incomplete manifests, foreign code, deferred bodies and unsupported member-only arrays keep their conservative rejection. It reuses the existing semantic walk and fact dependency log. Native lowering may freeze a child array at its exact length only after consulting this fact; an absent fact preserves its original capacity.
+## Compact payloads in proven root regions (2026-11-07)
+
+The analyzer's portable, closed root-region proof is shared by all compilation units.
+It admits immutable recursive unions with fresh local child arrays, rejects escaping
+views, references, captures and node mutations, and requires the contribution of every
+module. Missing information keeps the ordinary owning representation. Root arrays own
+independent regions; child arrays inside a builder borrow its region and release only
+their separately allocated buffers. Moving a frame-local child-array header into a node
+detaches the header before the builder returns.
+
+A one-field String or Array payload can share the node's allocation. Reading it reconstructs
+the normal borrowed String or Array ABI; keeping the value copies its contents. Long
+payloads retain an ordinary external owner with an idempotent region cleanup record.
+Copies or returned subtrees get an independent root region. A positive, separately logged
+`capacity-unobserved` fact allows a frozen child array to use its exact length as capacity;
+any capacity read in any unit removes that fact without removing the region proof.
+
+In a whole Linux 64-bit module with a reserved arena address range, recursive union arrays
+can store 32-bit links. Selected member payloads use a marked 16-bit header when the type
+store's complete nominal-member count bounds all ids below the marker. Other members,
+anonymous unions, errors, C boundaries, split modules and unsupported targets retain their
+ordinary ABI. Larger layouts and incomplete proofs fall back conservatively. Region
+chunks are suballocated from heap pages, with a shared page bitmap preventing a neighboring
+root's release from returning a page still in use.
+
+Bounded nonnegative integer appends with at most five digits write pairs from a static
+decimal table. The branch proving the digit count also proves the narrowing to 32 bits;
+the two-byte stores explicitly have alignment one. Larger and negative values keep the
+general conversion.
+
+The selected region chunk is 1 KiB, suballocated from heap pages when compressed links
+are disabled and drawn from the existing common reserved range otherwise. Compared with
+4 KiB, default-size sexp reduces CPU and peak RSS substantially, while binary-trees pays
+about 3.3% CPU in the same sampling run. This tradeoff remains visible; instruction counts
+alone do not establish a CPU win over Goose. The heap page size and compressed address
+range are unchanged.
+
+## Fused nonempty splits and late ids (2026-11-07)
+
+A temporary split immediately filtered by a one-parameter lambda whose body is exactly
+`not part.isEmpty()` can omit empty parts while constructing the array. The callback
+contains no other read, call, effect, index dependency or capture. The source and separator
+are evaluated once in their original order. The array retains the raw split's capacity,
+including geometric growth on wasm and multi-byte separators; all other filters keep
+their ordinary behavior. An empty separator still produces characters. The existing
+split-view ownership proof remains responsible for detaching bytes at an escape.
+
+Compact ids are reserved below bit 15 during preparation. Ordinary named and anonymous ids
+use monotonic checked counters that skip that bit, so late interning cannot make an
+ordinary box resemble a compact member. Anonymous ids retain their separate high domain;
+errors and stable split-unit ids keep their existing protocol.
+
+Only String/Character arrays can have the negative-capacity compact representation.
+When a statically different element width is passed to ordinary array assignment or copy,
+the runtime does not inspect or materialize that form. Equal-sized non-String layouts
+conservatively retain the check.

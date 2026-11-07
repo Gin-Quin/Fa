@@ -112,9 +112,12 @@ Root worker/Errors WIP from stash c9a0034315b5c4bdb7f3da0ecd9e02516e1f1b05 is no
 - Implicit moves remain allowed when the source (including aliases) is not used
   afterwards. A structural copy of a collection, or a plain object owning one,
   requires `copy value`. Syntax is a spaced contextual prefix; names `copy` remain.
-- Resource handles and other shared handles remain copyable with reference counts,
-  sharing the same state. Resource handles are exempt from explicit collection
-  copy requirements even when their shared state contains a collection.
+- Every type declaring `destroy` is NONCOPYABLE. Resource parameters are borrowed,
+  including resources containing a Task. A second resource requires a new instance
+  (`open`, `create`, constructor). General Resource reference counting is revoked.
+  Explicit Mutex/Channel/atomic handles retain their sharing semantics.
+- Set uses standard value hashing and equality, without a key callback. Use Map
+  for a separate key. The root frontend, backends and codecs implement this rule.
 - `with` uses the names of the visible signature, also on parameters and fields.
 - Joining written Person/Greeting alternatives with distinct methods/destructors
   gives Person | Greeting, preserving runtime dispatch to the actual member.
@@ -192,12 +195,10 @@ other live-session locked/dirty trees remain. Cleanup JSON is authoritative.
 ## Inter-worker resource rule (latest answer)
 
 The user requires independent copies, a common Mutex, or an exclusive move
-invalidating the source and aliases. Resource handles still share cells locally;
-at a worker boundary they therefore require a common Mutex or exclusive transfer.
-No automatic synchronization of Resource fields. Analyzer must track the cell
-aliases and Guard loans: neither an old alias outside a Mutex nor a Resource
-handle copied from Guard.value may bypass the protection. Task remains affine
-to its executor and never transferable between workers.
+invalidating the source and aliases. Ordinary Resource values are now unique,
+not automatically shared. A handle borrowed from Guard.value cannot escape the
+protection by copying it. Task remains affine to its executor and never
+transferable between workers. Codec transport is still being implemented.
 
 ## Validated combined delivery (2026-11-07)
 
@@ -223,10 +224,26 @@ exit0, /tmp/fa-frame-capacity-merged-{clippy,regions,checks,workspace-full}.log
 key, so changed Frame IR invalidates older objects. Keep worktrees while agents
 reuse them or until subsequent deltas are safe.
 
-Physical region layouts are separately delivered100f4b9, clean in
-/tmp/fa-native-region-validation, complete full/clippy/runtime green. Integration
-still pending. Smaller strings/arrays follow-up is frozen separately on100f4b9
-in /tmp/fa-native-small-validation; full queued after this one. Preserve both.
+Physical region layouts100f4b9 and the small string/array follow-up dbcee1d are
+now combined on lead, including mixed-sign interval index proofs. All three
+runtime IR files were regenerated. Workspace clippy,55 LLVM IR checks,6 cache
+tests and COMPLETE LLVM workspace full exit0:
+/tmp/fa-physical-small-merged-{clippy,checks,workspace-full}.log. The full session
+56850 is consumed. No source changes followed that passing full run.
+
+Physical layouts include root-owned child buffers, compact String/Array payloads,
+16-bit marked ids and32-bit child links with conservative ABI fallbacks. The
+follow-up fuses pure split/nonempty filters and keeps late type ids disjoint from
+compact markers. Cache suffix combines split7/platform/effects/errors/regions/
+packed-capacity/frame. Runtime contents also enter every object-cache key.
+
+Metrology correction: earlier original16 reports mixed11 original and5 secondary
+programs. The authoritative set is binary-trees/blur/calc/graph/interp/lru/particles/
+push/records/respond/scene/sexp/strlist/sum/tree/words. The new default-size matched
+Clang18 baseline is under /tmp/fa-native-perf-next/default-clang18-original16.
+Historical GCC13 CPU runs stay separately labeled. wait4 RSS inherited the Python
+fork image floor; use the separate GNU time measurements instead. No overall
+performance win is claimed. The frozen metrology lot is independently validating.
 
 Root shared-values has experimental origins+Copy+callable checkpoints plus
 TypeInfo tag4, Task/default guards and native entry ownership. Its new
@@ -235,14 +252,13 @@ earlier default releasing a later provided Task. Shared/default resources pass
 Bun and3LLVM. JS runtime308 and entire JS crate pass after reviewed goldens.
 Those changes are NOT a frozen/complete compiler integration candidate yet.
 
-Latest semantic clarification REOPENS generalized Resource sharing: user says
-"Soit le type est complètement copiable, soit il n'est pas du tout copiable"
-and asks which shared resources. Root identified Database/sqlite3.close and
-acknowledged that destroy specifies release, not copying. General destroy→RC
-state sharing, cell effects and Resource worker transport are unintegrated
-prototypes and now held pending a replacement rule. Mutex/Channel/atomics are
-explicit synchronization handles. Generic exact mutation choice remains open.
-Set.key snapshot vs recalculation is separately pending a user answer.
+Latest semantic clarification RESOLVES Resource sharing: types declaring destroy
+are noncopyable, and documentation must direct users to create new instances.
+Root is replacing its unintegrated generalized RC prototype with unique owners.
+Analyzer delta /tmp/fa-resource-unique-frontend.patch is validated independently;
+TypeInfo.isUnique is separate from ownsTask (Task ABI stops at Resource/Sync).
+Generic copies reject unique types. Set.key is removed by the separate standard
+hash/equality decision. These rules supersede the older experimental notes above.
 
 Root's latest AOT work: Codec clean577e1e0, facade binary primitives/fromFunctions
 only; reproducible pinned runtime in shared-values. Copy/drop/is functions are

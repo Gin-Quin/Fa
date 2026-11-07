@@ -805,6 +805,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			});
 		}
 		if to == Repr::Union && value.repr != Repr::Union {
+			if let Repr::Rec(target) = value.repr
+				&& self.compressed_union_link(value.repr).is_some()
+			{
+				let decoded = self.unfold_rec(value, target, node)?;
+				self.transfer(value, decoded);
+				return Ok(decoded);
+			}
 			return self.box_value(value, node);
 		}
 		// a relation side starts empty

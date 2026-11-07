@@ -1,6 +1,6 @@
 -- decision "Collection lengths are at most 2^48": a 64-bit value not derived from a length that may overflow wraps without overflow checks, and keeps its index check (no trap assumption)
 -- overflow-checks: false
-let items = [10, 20, 30]
+let items = [10]
 -- a 64-bit product that overflows wraps: `x * 2^62 // 2^62` is not 1
 function scaled = (x: Integer): Integer => {
 	if x > 0 and x < 4 {
@@ -21,4 +21,5 @@ function shifted = (x: Integer): Integer => {
 	}
 	return 0
 }
-console.log(scaled(1), shifted(-1)) -- prints: 20 0
+-- x=2 wraps the product to -2^63, yielding index -2, outside [-1, 1).
+console.log(scaled(2), shifted(-1)) -- prints: -1 0

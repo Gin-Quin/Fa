@@ -1,0 +1,27 @@
+-- Pair writes must preserve leading zeroes within each two-digit group,
+-- unaligned destinations, inline/frame/heap boundaries and the slow range.
+-- asynchronous: false
+let values: Array<Integer> = [
+	-9_223_372_036_854_775_808, -100001, -10000, -9999, -1,
+	0, 1, 9, 10, 11, 99, 100, 101, 999, 1000, 1001,
+	9999, 10000, 10001, 99999, 100000, 100001, 9_223_372_036_854_775_807,
+]
+for size in 0..68 {
+	let prefix = "x".repeat(size)
+	for value in values {
+		let expected = prefix + "{value}"
+		mutable actual = prefix
+		actual += "{value}"
+		assert actual == expected
+	}
+}
+mutable unsigned = "a long heap prefix kept across every appended value: "
+let largest: UInt64 = 18_446_744_073_709_551_615
+unsigned += "{largest}"
+assert unsigned.endsWith("18446744073709551615")
+mutable groups = "prefix abcdefghijklmnopqrstuvwxyz"
+for value in [10, 100, 1000, 10000, 10001, 10101, 99999] {
+	groups += "{value}"
+}
+assert groups.endsWith("10100100010000100011010199999")
+console.log("decimal appends") -- prints: decimal appends

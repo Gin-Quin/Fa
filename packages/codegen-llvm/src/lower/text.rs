@@ -609,10 +609,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The most digits of an integer that [`Lowering::append_integer`]
 	/// writes in place.
-	const IN_PLACE_DIGITS: u32 = 4;
+	const IN_PLACE_DIGITS: u32 = 5;
 
 	/// `text += "{value}"` for an integer of at most 64 bits: a value below
-	/// 10^4 is written in place, one case per number of digits, after one
+	/// 10^5 is written in place, one case per number of digits, after one
 	/// room check, without a scratch buffer, a copy or a call (a value whose
 	/// range LLVM knows keeps only its cases); a larger or negative value,
 	/// or a string without room, takes the decimal text and `append_string`.
@@ -689,39 +689,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			} else {
 				None
 			};
-			for position in 0..count {
-				let power = 10u64.pow(count - 1 - position);
-				let mut digit = wide;
-				if power > 1 {
-					digit = self.builder.build_int_unsigned_div(
-						digit,
-						i64.const_int(power, false),
-						"",
-					)?;
-				}
-				if position > 0 {
-					digit =
-						self.builder
-							.build_int_unsigned_rem(digit, i64.const_int(10, false), "")?;
-				}
-				let character =
-					self.builder
-						.build_int_truncate(digit, self.context.i8_type(), "")?;
-				let character = self.builder.build_or(
-					character,
-					self.context.i8_type().const_int(b'0' as u64, false),
-					"",
-				)?;
-				let address = unsafe {
-					self.builder.build_in_bounds_gep(
-						self.context.i8_type(),
-						destination,
-						&[usize.const_int(position as u64, false)],
-						"",
-					)?
-				};
-				self.builder.build_store(address, character)?;
-			}
+			self.write_small_decimal(destination, wide, count)?;
 			let longer =
 				self.builder
 					.build_int_nuw_add(length, usize.const_int(count as u64, false), "")?;

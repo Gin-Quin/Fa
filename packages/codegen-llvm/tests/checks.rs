@@ -32,6 +32,16 @@ mod with_llvm {
 	}
 
 	fn ir_at(name: &str, source: &str, overflow_checks: bool, opt_level: OptLevel) -> String {
+		ir_at_target(name, source, overflow_checks, opt_level, Target::Native)
+	}
+
+	fn ir_at_target(
+		name: &str,
+		source: &str,
+		overflow_checks: bool,
+		opt_level: OptLevel,
+		target: Target,
+	) -> String {
 		let mut session = Session::new();
 		let file = session.set_source("main", Arc::from(source));
 		session.analyze_file(file);
@@ -44,7 +54,7 @@ mod with_llvm {
 		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
 			.join("fa-checks")
 			.join(name);
-		let artifact = compile(&session, file, "test.fa", Target::Native, &options, &output)
+		let artifact = compile(&session, file, "test.fa", target, &options, &output)
 			.unwrap_or_else(|error| panic!("{name}: {error}"));
 		let ir = std::fs::read_to_string(artifact.ir.expect("the IR")).expect("the IR file");
 		// keep the program's own functions
@@ -806,6 +816,42 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 			narrow.contains("i64 2199023255552"),
 			"legacy inline layout flag missing"
 		);
+	}
+
+	#[test]
+	fn appended_templates_check_the_total_before_reserving_on_both_pointer_widths() {
+		let source = "function append = (piece: String): String => {\nmutable out = \"\"\nout += \"{piece}{piece}{piece}\"\nout\n}\nconsole.log(append(\"abc\"))\n";
+		for (name, target, integer) in [
+			("append-size-native", Target::Native, "i64"),
+			("append-size-wasm", Target::Wasm, "i32"),
+		] {
+			let ir = ir_at_target(name, source, false, OptLevel::O0, target);
+			let body = function(&ir, "fa.append");
+			let checked: Vec<_> = body
+				.lines()
+				.filter(|line| line.contains(&format!("call {integer} @fa_string_size(")))
+				.collect();
+			assert_eq!(
+				checked.len(),
+				3,
+				"each piece must enter the checked size chain: {body}"
+			);
+			let last = checked
+				.last()
+				.expect("the last checked sum")
+				.trim()
+				.split_once(" = ")
+				.expect("a result")
+				.0;
+			let reserve = body
+				.lines()
+				.find(|line| line.contains("call void @fa_string_reserve("))
+				.expect("the reservation");
+			assert!(
+				reserve.contains(&format!("{integer} {last})")),
+				"reserve must use the checked total: {reserve}\n{body}"
+			);
+		}
 	}
 
 	#[test]

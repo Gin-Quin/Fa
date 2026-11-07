@@ -1211,7 +1211,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let mut extra = self.usize.const_zero();
 			for value in &values {
 				let (_, length) = self.string_parts(*value)?;
-				extra = self.builder.build_int_nuw_add(extra, length, "")?;
+				extra = self
+					.call_value(
+						self.runtime.function("fa_string_size")?,
+						&[extra.into(), length.into()],
+					)?
+					.into_int_value();
 			}
 			self.call_runtime("fa_string_reserve", &[target.into(), extra.into()])?;
 			for value in values {

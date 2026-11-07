@@ -238,6 +238,11 @@ The string API is close to the JavaScript `String` API, with grapheme clusters i
 
 ### Native
 
+Interpolation constructors and appended interpolations check each addition of
+byte lengths against the String representation limit before allocating or
+reserving. The check applies at both native and wasm pointer widths; an LLVM
+no-wrap annotation alone does not establish the bound.
+
 - A `String` is UTF-8, 24 bytes: a pointer, a length in bytes and a capacity with flags (static, inline, ASCII). A string of at most 23 bytes is stored inline, without allocation. A literal is stored in read-only data, with its grapheme count computed at compile time, and copied only when a mutable string is created from it.
 - **Small strings never touch the heap.** Besides inline strings, a local string that doesn't escape its function (it is not returned, thrown, stored in a field, a collection or a module-level value, nor captured by an escaping closure or a task; the analyzer lists them, `Analysis::non_escaping`) lives in a stack buffer of the function, up to 64 bytes. A string goes to the heap only when it is longer, or escapes.
 - **Capacity.** `String.from(text, capacity = n)` and `reserve(additional)` allocate the heap block at once (an inline string moves to the heap when it reserves more than fits inline); `capacity` reads the capacity word without its flags (23 for an inline string, 0 for a literal).

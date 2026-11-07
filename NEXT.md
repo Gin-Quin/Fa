@@ -1,3 +1,23 @@
+# Appended template size soundness (2026-11-07, validated)
+
+Base: validated split cursor `f2f8db2`. The independent interpolation-append path
+used an unchecked `add nuw` chain for its reservation size. Repeated references
+to a large input can overflow `usize` on wasm32; no preceding guard justifies
+the LLVM no-wrap promise. The normal template constructor already checks each
+addition with `fa_string_size`; appended templates now use that same helper and
+its representation limit before reserving.
+
+The IR regression compiles both pointer widths and requires the checked chain
+to feed reserve. It fails on the baseline (zero checked sums, expected three).
+This is a corrected IR contract; no observed baseline output divergence is
+claimed. The cache version adds `string-template-size-1`; String ABI and C
+runtime are unchanged. All 64 LLVM IR checks (including both pointer widths),
+workspace clippy and formatting pass. The full workspace with LLVM completed:
+all 65 result summaries are green through the final parser doc-tests, with no
+failure marker (`/tmp/fa-template-bounds-workspace-full.log`). The 300 JS runtime
+tests pass too. This safety delta is independent of the validated Map candidate
+`1e3a91d` in `/tmp/fa-native-map-combined`.
+
 # Native split-stream checkpoint (2026-11-07, validated)
 
 Base: validated String soundness `0c4c115`. This branch contains no KEY32 sentinel,

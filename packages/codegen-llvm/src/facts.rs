@@ -108,7 +108,8 @@ fn relation_sides(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 pub const WRITTEN_FIELDS: &str = "fields.written";
 
 /// Closed root-region claims, resolved only with every module's contribution.
-/// Values include type, builder and child-array facts (`fa_analyzer::regions`).
+/// Values include type, builder, child-array and unobserved-capacity facts
+/// (`fa_analyzer::regions`).
 pub const ROOT_REGIONS: &str = "regions.roots";
 
 /// Every fact kind, in a fixed order.

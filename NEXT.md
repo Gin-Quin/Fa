@@ -215,11 +215,18 @@ frontends,llvm-checks,workspace-full}.log. Cache version combines origins,
 platform/effects/errors/regions as split7. Metaprogramming implementation note
 finding42 is applied and removed from pending-documentation.
 
-Further delivered, not yet merged: daa8ebc Frame64byte strings (native_perf),
-a9b1375 capacity-unobserved ROOT_REGIONS fact (proofs). Both passed full/clippy.
-Keep their worktrees while agents reuse them or until subsequent deltas are safe.
-Physical region layouts are separately frozen748d3a4 in
-/tmp/fa-native-region-validation, full /tmp/fa-region-frozen-workspace-full.log.
+Frame64byte strings daa8ebc and capacity-unobserved ROOT_REGIONS fact a9b1375
+are now combined here. Regenerated all3 runtime IR from merged C. Workspace
+clippy,14 region tests,49 LLVM IR checks and COMPLETE LLVM workspace full all
+exit0, /tmp/fa-frame-capacity-merged-{clippy,regions,checks,workspace-full}.log
+(full session43720 consumed). Runtime text enters every object-cache options
+key, so changed Frame IR invalidates older objects. Keep worktrees while agents
+reuse them or until subsequent deltas are safe.
+
+Physical region layouts are separately delivered100f4b9, clean in
+/tmp/fa-native-region-validation, complete full/clippy/runtime green. Integration
+still pending. Smaller strings/arrays follow-up is frozen separately on100f4b9
+in /tmp/fa-native-small-validation; full queued after this one. Preserve both.
 
 Root shared-values has experimental origins+Copy+callable checkpoints plus
 TypeInfo tag4, Task/default guards and native entry ownership. Its new
@@ -228,8 +235,19 @@ earlier default releasing a later provided Task. Shared/default resources pass
 Bun and3LLVM. JS runtime308 and entire JS crate pass after reviewed goldens.
 Those changes are NOT a frozen/complete compiler integration candidate yet.
 
-Latest open semantic clarification: user asks what “shared resource” means in the
-generic exact-mutation question. Root explained a type with destroy and copies
-sharing one counted instance/state, as previously selected. No choice of generic
-instantiation restrictions vs conditional effects has been made; do not assume
-an elapsed-time answer. Agents continue concrete cell/loan proofs independently.
+Latest semantic clarification REOPENS generalized Resource sharing: user says
+"Soit le type est complètement copiable, soit il n'est pas du tout copiable"
+and asks which shared resources. Root identified Database/sqlite3.close and
+acknowledged that destroy specifies release, not copying. General destroy→RC
+state sharing, cell effects and Resource worker transport are unintegrated
+prototypes and now held pending a replacement rule. Mutex/Channel/atomics are
+explicit synchronization handles. Generic exact mutation choice remains open.
+Set.key snapshot vs recalculation is separately pending a user answer.
+
+Root's latest AOT work: Codec clean577e1e0, facade binary primitives/fromFunctions
+only; reproducible pinned runtime in shared-values. Copy/drop/is functions are
+generated per checked type with worklists, including erased generics. External
+24000node chain passes Bun/Node without stack recursion; loop builder MOVE fixed
+by analyzer and CLI24k now passes too. No runtime eval/schema interpretation.
+Generated codecs and closure/Sync ownership checkpoints are being coalesced.
+Do not claim the root copy/transport lot fully validated or ready to integrate.

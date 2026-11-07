@@ -1382,6 +1382,96 @@ static void test_inline_loop_reservations(void) {
 	CHECK(allocated == before);
 }
 
+static void test_frame_strings(void) {
+	long before = allocated;
+	uint8_t first[64];
+	uint8_t second[64];
+	uint8_t original_bytes[100];
+	for (size_t at = 0; at < sizeof original_bytes; at += 1) { original_bytes[at] = (uint8_t)('a' + at % 26); }
+	FaString original = {original_bytes, 40, SIMPLE};
+	FaString text = {0};
+	FaString copy = {0};
+	fa_string_assign_local(&original, first, &text, 1, 0);
+	CHECK(allocated == before && string_frame(text.capacity) && text.bytes == first);
+	CHECK(string_length(&text) == 40 && __builtin_memcmp(first, original_bytes, 40) == 0);
+	CHECK(fa_string_room(text.length, text.capacity) == 64);
+	fa_string_assign_local(&text, second, &copy, 0, 1);
+	CHECK(allocated == before && string_frame(copy.capacity) && copy.bytes == second);
+	__builtin_memset(first, 'x', 40);
+	CHECK(__builtin_memcmp(second, original_bytes, 40) == 0);
+	for (size_t length = 40; length < 80; length += 1) {
+		fa_string_append(&text, (const uint8_t *)"x", 1, SIMPLE);
+		CHECK(string_length(&text) == length + 1);
+		if (length < 64) { CHECK(allocated == before && text.bytes == first); }
+	}
+	CHECK(string_owned(text.capacity) && allocated == before + 1);
+	// A borrowed self-assignment copies before freeing the previous heap block.
+	fa_string_assign_local(&text, first, &text, 1, 0);
+	CHECK(string_length(&text) == 80 && string_owned(text.capacity) && allocated == before + 1);
+	// An owned self-assignment transfers the existing block exactly once.
+	const uint8_t *heap = text.bytes;
+	fa_string_assign_local(&text, first, &text, 1, 1);
+	CHECK(text.bytes == heap && allocated == before + 1);
+	FaString slice = {text.bytes + 1, 60, SIMPLE | KIND_MASK};
+	fa_string_assign_local(&slice, first, &text, 1, 0);
+	CHECK(string_frame(text.capacity) && text.bytes == first && string_length(&text) == 60);
+	CHECK(allocated == before);
+	slice = (FaString){text.bytes + 1, 40, SIMPLE | KIND_MASK};
+	fa_string_assign_local(&slice, first, &text, 1, 0);
+	CHECK(string_length(&text) == 40 && string_frame(text.capacity));
+	FaString consumed = owned_copy_with(original_bytes, 40, SIMPLE);
+	CHECK(allocated == before + 1);
+	fa_string_assign_local(&consumed, first, &text, 1, 1);
+	CHECK(allocated == before && __builtin_memcmp(first, original_bytes, 40) == 0);
+	fa_string_reserve_inline(&text, 1);
+	CHECK(text.bytes == first && string_frame(text.capacity) && allocated == before);
+	fa_string_plus(&text, (const uint8_t *)"é", 2, 0);
+	CHECK(text.bytes == first && string_length(&text) == 42 && !(text.capacity & SIMPLE));
+	CHECK(allocated == before);
+	original.length = 10;
+	fa_string_assign_local(&original, second, &copy, 0, 0);
+	CHECK(copy.capacity & STRING_INLINE);
+	CHECK(string_length(&copy) == 10 && allocated == before);
+	original.length = 80;
+	fa_string_assign_local(&original, second, &copy, 0, 0);
+	CHECK(string_owned(copy.capacity) && string_length(&copy) == 80);
+	fa_free((void *)copy.bytes, copy.capacity & KIND_MASK, 1);
+	CHECK(allocated == before);
+	// Taking a frame value into an unknown owner detaches its bytes.
+	FaString detached;
+	fa_string_escape(&text, &detached);
+	CHECK(string_owned(detached.capacity) && !string_frame(detached.capacity));
+	CHECK(string_length(&detached) == 42 && allocated == before + 1);
+	__builtin_memset(first, '?', 40);
+	CHECK(__builtin_memcmp(string_bytes(&detached), original_bytes, 40) == 0);
+	fa_free((void *)detached.bytes, detached.capacity & KIND_MASK, 1);
+	// Mutating through a borrowed frame header also retains its buffer.
+	FaString incoming = owned_copy_with(original_bytes, 40, SIMPLE);
+	fa_string_assign_after_drop(&incoming, &text);
+	CHECK(string_frame(text.capacity) && text.bytes == first && allocated == before);
+	CHECK(__builtin_memcmp(first, original_bytes, 40) == 0);
+	// Non-simple short appends retain a mutable's frame buffer too.
+	original.length = 0;
+	fa_string_assign_local(&original, first, &text, 1, 0);
+	fa_string_append(&text, (const uint8_t *)"é", 2, 0);
+	CHECK(string_frame(text.capacity) && text.bytes == first && string_length(&text) == 2);
+	CHECK(allocated == before);
+	// An explicit reservation above 64 must survive moving its value.
+	FaString reserved;
+	fa_string_from(original_bytes, 40, SIMPLE, 128, &reserved);
+	const uint8_t *reserved_buffer = reserved.bytes;
+	fa_string_assign_local(&reserved, first, &text, 1, 1);
+	CHECK(text.bytes == reserved_buffer && fa_string_room(text.length, text.capacity) >= 128);
+	CHECK(allocated == before + 1);
+	// A short Unicode append must not throw away an explicit reservation.
+	fa_string_replace_buffer(0, SIMPLE, &text);
+	fa_string_append(&text, (const uint8_t *)"é\r\n", 4, 0);
+	CHECK(text.bytes == reserved_buffer && fa_string_room(text.length, text.capacity) >= 128);
+	CHECK(string_length(&text) == 4 && allocated == before + 1);
+	fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1);
+	CHECK(allocated == before);
+}
+
 // ── workers: calls on a worker's thread, blocking, detached, kept and
 // cancelled at random (queued, running or done), freed once
 
@@ -1546,6 +1636,7 @@ int main(void) {
 	test_tables();
 	test_inline_key32();
 	test_inline_loop_reservations();
+	test_frame_strings();
 	test_integer_strings();
 	test_string_padding();
 	test_inline_strings();

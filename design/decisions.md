@@ -662,3 +662,30 @@ of a function-valued parameter or field.
 - **The initial proof is conservative.** Recursive objects retain optional self edges and finite fields without ownership. Named unions admit direct self edges, child `Array<Root>` edges and finite passive owned payloads. Arrays outside a builder own independent roots; the proof identifies child arrays by their stable builder and array type. Every constructor belongs to a named, synchronous builder returning that root family. Captures, outgoing references, mutations of the recursive graph, arbitrary containers, returned child arrays and data records escaping outside their union member reject the root. A pattern may borrow a child array only from its actual parameter place; an unrelated root parameter does not justify matching a temporary.
 - **Unknown ownership is never passive.** A generic or unknown field, a resource, task, function or unsupported recursive container fails the shape check; this does not depend solely on cached type flags. Until concrete generic instances and all their uses can contribute a complete proof, generic function bodies and key-loop snapshots make the graph opaque. Foreign declarations/calls and C-library entries disable regions too. Native lowering keeps its target-dependent layout and page-size guards; a positive semantic fact alone does not select a physical representation.
 - **Ownership remains per root.** Nested builders join the current region; a copied root leaving that region acquires an independent owner. Child-array cleanup releases its buffer without recursively releasing nodes owned by the parent region. A copy into an ordinary root array must preserve independent element ownership. The backend must implement these roles before admitting array-bearing layouts; it may conservatively reject a shape. The accepted single-address-band invariant of compressed links remains unchanged, and compressed recursive-object links remain disabled in per-unit builds until their ABI is shared by every unit.
+
+## Short strings in the function frame (2026-11-06)
+
+The approved 64-byte budget applies from initialization to a non-escaping mutable that may
+outgrow inline storage, including an empty initializer. Immutable runtime values keep the
+ordinary inline form up to 23 bytes on 64-bit targets or 11 on wasm32; immutable literals keep
+permanent storage, and syntax-proven small mutable maxima stay inline. Larger runtime values
+fall back to a heap block. A previously explicit heap reservation above the budget may move
+unchanged. Clearing a mutable keeps its current reservation.
+
+A buffer belongs to one declaration in one function frame. Copying or moving a frame value
+copies bytes into the destination's own buffer, including a declaration reused by a loop.
+Normal ownership transfers detach the bytes before a header can reach another kind of owner.
+Read-only parameters borrow as before; a callee keeping the value copies it. The language
+rejects replacing or declaring a mutating primitive String parameter (EFF005/EFF006).
+
+The three-word String ABI is unchanged. The low capacity bit tags a writable, non-owning
+64-byte buffer, with the inline bit taking precedence. All heap capacities are even (large
+exact byte counts round up by at most one byte); this leaves wasm's high capacity bits and
+size limit available. Capacity checks strip the frame bit, updates retain it, and no drop or
+grow operation frees or reallocates a frame pointer. A buffer live across suspension becomes
+part of its coroutine's frame. This is an implementation choice under the existing
+`Analysis::non_escaping` proof; it does not relax the proof or any language check.
+
+## Unobserved capacities of region arrays (2026-11-07)
+
+The closed ROOT_REGIONS proof also publishes `capacity-unobserved` for an admitted `Array<Root>` when no module observes that family's array capacity. A capacity read on either an ordinary root array or a child array removes this permission for both; reads through aliases, a function value and chained or pattern-bound fields count too. This is an additional positive fact, never an assumption from a missing negative claim: incomplete manifests, foreign code, deferred bodies and unsupported member-only arrays keep their conservative rejection. It reuses the existing semantic walk and fact dependency log. Native lowering may freeze a child array at its exact length only after consulting this fact; an absent fact preserves its original capacity.

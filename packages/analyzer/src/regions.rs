@@ -59,6 +59,15 @@ pub fn child_array_key(function: &str, array: &str) -> String {
 	format!("child-array{SEPARATOR}{function}{SEPARATOR}{array}")
 }
 
+/// A proven root array whose capacity is never observed anywhere in the
+/// complete program. Missing facts always preserve the original capacity.
+pub fn capacity_unobserved_key(types: &TypeStore, array: TypeId) -> Option<String> {
+	matches!(types.kind(array), TypeKind::Collection(CollKind::Array, ..))
+		.then(|| stable_type_name(types, array))
+		.flatten()
+		.map(|array| format!("capacity-unobserved{SEPARATOR}{array}"))
+}
+
 /// Recursive root shapes mentioned by this file, including imported types.
 /// These are only candidates: lowering must require the resolved type fact.
 pub fn candidate_types(session: &Session, file: FileId) -> Vec<TypeId> {
@@ -121,6 +130,7 @@ pub fn resolve_claims(claims: BTreeSet<String>) -> BTreeSet<String> {
 	let mut modules = BTreeSet::new();
 	let mut candidates = BTreeSet::new();
 	let mut rejected = BTreeSet::new();
+	let mut capacity_observed = BTreeSet::new();
 	let mut constructed = BTreeSet::new();
 	let mut builders = BTreeMap::<String, BTreeSet<String>>::new();
 	let mut arrays = BTreeMap::<String, BTreeSet<String>>::new();
@@ -142,6 +152,9 @@ pub fn resolve_claims(claims: BTreeSet<String>) -> BTreeSet<String> {
 			}
 			["reject", root] => {
 				rejected.insert((*root).to_string());
+			}
+			["capacity-observed", root] => {
+				capacity_observed.insert((*root).to_string());
 			}
 			["constructed", root] => {
 				constructed.insert((*root).to_string());
@@ -190,6 +203,13 @@ pub fn resolve_claims(claims: BTreeSet<String>) -> BTreeSet<String> {
 		}
 		if let Some(types) = arrays.get(root) {
 			resolved.extend(types.iter().map(|array| format!("array{SEPARATOR}{array}")));
+			if !capacity_observed.contains(root) {
+				resolved.extend(
+					types
+						.iter()
+						.map(|array| format!("capacity-unobserved{SEPARATOR}{array}")),
+				);
+			}
 		}
 		for (owner, function, array) in &children {
 			if owner == root && builders.get(root).is_some_and(|all| all.contains(function)) {
@@ -869,6 +889,19 @@ impl<'a> RegionFile<'a> {
 			let node = NodeId::new(index);
 			let ty = self.analysis.type_of(node);
 			let owner = self.owners[index].filter(|owner| builders.contains(owner));
+			if let View::Access { target, members } | View::OptionalAccess { target, members } =
+				self.view(node)
+			{
+				let mut receiver = self.analysis.type_of(target);
+				for member in members.iter() {
+					if matches!(self.analysis.resolution(member), Resolution::Builtin(id) if crate::builtins::get(id).path == "Array#capacity")
+						&& self.contains(receiver, root.ty)
+					{
+						claims.insert(format!("capacity-observed{SEPARATOR}{}", root.name));
+					}
+					receiver = self.analysis.type_of(member);
+				}
+			}
 			let constant_roots = self.analysis.constant(node).is_some_and(|value| {
 				!matches!(value, fa_interpreter::Value::None)
 					&& !matches!(value, fa_interpreter::Value::Member(member) if member.data.is_none())
@@ -1117,6 +1150,137 @@ for root in roots { console.log(count(root)) }
 			resolved.iter().any(|fact| fact.starts_with("array\u{1f}")),
 			"{claims:#?}"
 		);
+	}
+
+	#[test]
+	fn capacity_observers_disable_compaction_without_disabling_regions() {
+		let tree = r#"
+type Tree = Union {
+	Leaf = { value: Integer }
+	List = { items: Array<Tree> }
+}
+function build = (depth: Integer): Tree => {
+	if depth == 0 { return Tree.Leaf { value = 7 } }
+	mutable items: Array<Tree> = []
+	items.push(build(depth - 1))
+	Tree.List { items }
+}
+mutable roots: Array<Tree> = []
+roots.push(build(2))
+"#;
+		for (suffix, unobserved) in [
+			("console.log(roots.length)", true),
+			("console.log([1, 2].capacity)", true),
+			("console.log(roots.capacity)", false),
+			("let alias = roots\nconsole.log(alias.capacity)", false),
+			(
+				"function read = (items: Array<Tree>): Integer => items.capacity\nlet getter = read\nconsole.log(getter(roots))",
+				false,
+			),
+			(
+				"function read = (tree: Tree): Integer => when tree is { Tree.Leaf => 0, Tree.List as { items } => items.capacity }\nconsole.log(read(build(2)))",
+				false,
+			),
+			(
+				"function read = (tree: Tree): Integer => if tree is Tree.List { tree.items.capacity } else { 0 }\nconsole.log(read(build(2)))",
+				false,
+			),
+		] {
+			let (claims, resolved) = facts(&format!("{tree}\n{suffix}\n"));
+			assert!(
+				resolved.iter().any(|fact| fact.starts_with("type\u{1f}")),
+				"{suffix}: {claims:#?}"
+			);
+			assert_eq!(
+				resolved
+					.iter()
+					.any(|fact| fact.starts_with("capacity-unobserved\u{1f}")),
+				unobserved,
+				"{suffix}: {claims:#?}"
+			);
+		}
+		// A member-only array is an unsupported container: it must not
+		// silently acquire the full union array's compaction permission.
+		let (claims, resolved) = facts(&format!(
+			"{tree}\nfunction read = (items: Array<Tree.Leaf>): Integer => items.capacity\nconsole.log(read([Tree.Leaf {{ value = 1 }}]))\n"
+		));
+		assert!(resolved.is_empty(), "{claims:#?}");
+	}
+
+	#[test]
+	fn a_remote_capacity_read_invalidates_the_positive_fact_in_every_mode() {
+		use crate::pipeline::{self, UnitSink};
+		use std::sync::Mutex;
+
+		struct Claims(Mutex<Vec<BTreeSet<String>>>);
+		impl UnitSink for Claims {
+			fn unit(&self, session: &mut Session, files: &[FileId]) {
+				self.0.lock().unwrap().push(unit_claims(session, files));
+			}
+		}
+		for reads_capacity in [false, true] {
+			let getter = if reads_capacity {
+				"items.capacity"
+			} else {
+				"items.length"
+			};
+			let files: Vec<(String, String)> = [
+				("package.fa".into(), "export = { name = \"capacityProof\" }".into()),
+				("library/model.fa".into(), "export namespace = { type Tree = Union { Leaf = { value: Integer }, List = { items: Array<Tree> } } }".into()),
+				("library/build.fa".into(), "export function = (depth: Integer): model.Tree => { if depth == 0 { return model.Tree.Leaf { value = 1 } }\nmutable items: Array<model.Tree> = []\nitems.push(build(depth - 1))\nmodel.Tree.List { items } }".into()),
+				("library/read.fa".into(), format!("export function = (tree: model.Tree): Integer => when tree is {{ model.Tree.Leaf => 1, model.Tree.List as {{ items }} => {getter} }}")),
+				("application/main.fa".into(), "export function = () => console.log(library.read(library.build(2)))".into()),
+			].into();
+			let mut session = Session::new();
+			session.set_resolver(Box::new(crate::CodebaseResolver::from_texts(&files, None)));
+			let program = session.analyze_package(Some("application/main"));
+			assert!(
+				program.files.iter().all(|&file| session
+					.diagnostics(file)
+					.iter()
+					.all(|diagnostic| diagnostic.severity != crate::Severity::Error)),
+				"{:?}",
+				program
+					.files
+					.iter()
+					.map(|&file| session.diagnostics(file))
+					.collect::<Vec<_>>()
+			);
+			let expected = resolve_claims(unit_claims(&session, &program.files));
+			assert!(expected.iter().any(|fact| fact.starts_with("type\u{1f}")));
+			assert_eq!(
+				expected
+					.iter()
+					.any(|fact| fact.starts_with("capacity-unobserved\u{1f}")),
+				!reads_capacity
+			);
+			let mut parallel = Session::new();
+			parallel.set_resolver(Box::new(crate::CodebaseResolver::from_texts(&files, None)));
+			let sink = Claims(Mutex::new(Vec::new()));
+			let report = pipeline::analyze_package(
+				&mut parallel,
+				&pipeline::Options {
+					entry: Some("application/main".into()),
+					threads: Some(4),
+					..Default::default()
+				},
+				None,
+				&sink,
+			);
+			assert!(!report.has_errors(), "{:?}", report.modules);
+			let contributions = sink.0.into_inner().unwrap();
+			let claims = contributions.iter().flatten().cloned().collect();
+			assert_eq!(resolve_claims(claims), expected);
+			for missing in 0..contributions.len() {
+				let incomplete = contributions
+					.iter()
+					.enumerate()
+					.filter(|(index, _)| *index != missing)
+					.flat_map(|(_, claims)| claims.iter().cloned())
+					.collect();
+				assert!(resolve_claims(incomplete).is_empty());
+			}
+		}
 	}
 
 	#[test]

@@ -246,6 +246,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)?;
 		let simple = b.build_int_compare(IntPredicate::NE, simple, i64.const_zero(), "")?;
 		let simple = b.build_select(simple, self.simple_flag(), self.usize.const_zero(), "")?;
+		// These bytes belong to a root, including an external string retained
+		// by its cleanup. A stored copy must materialize before that root dies.
+		// Kind zero denotes an immortal literal and would leak this borrow.
+		let capacity = b.build_or(simple.into_int_value(), self.string_kind_mask(), "")?;
 		let value = b.build_insert_value(
 			self.string_type.get_undef(),
 			bytes_view.as_basic_value(),
@@ -253,7 +257,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"",
 		)?;
 		let value = b.build_insert_value(value, length, 1, "")?;
-		let value = b.build_insert_value(value, simple, 2, "")?;
+		let value = b.build_insert_value(value, capacity, 2, "")?;
 		Ok(b.build_insert_value(
 			self.object_type(data).get_undef(),
 			value.into_struct_value(),

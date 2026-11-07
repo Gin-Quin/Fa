@@ -1,0 +1,29 @@
+-- A copied text outlives the root whose bytes it originally viewed.
+-- opt-level: 0
+-- asynchronous: false
+type Tree = Union {
+	Leaf = { text: String }
+	Pair = { left: Tree, right: Tree }
+}
+function leaf = (): Tree.Leaf => Tree.Leaf {
+	text = "a long frozen string whose owner must survive copies"
+}
+function churn = (): Tree.Leaf => Tree.Leaf {
+	text = "XXXXXXXXXX completely different data that overwrites the same freed node XXXXXXXXXX"
+}
+function extract = (): String => {
+	let text = do {
+		let parent = leaf()
+		parent.text
+	}
+	text
+}
+let text = extract()
+let other = churn()
+assert text == "a long frozen string whose owner must survive copies"
+assert "{other}".includes("XXXXXXXXXX")
+mutable extended = text
+extended += "!"
+assert text == "a long frozen string whose owner must survive copies"
+assert extended == "a long frozen string whose owner must survive copies!"
+console.log("escaped region string") -- prints: escaped region string

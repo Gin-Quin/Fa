@@ -312,3 +312,22 @@ respond1.17x, records1.14x and lru1.12x. A general empty-array private-buffer
 prototype was rejected for regressions elsewhere. No overall win is claimed.
 Direct Root-to-Root compact fields remain a separate prototype; its interp
 instruction count regresses5.2 percent, so CPU/memory still require measurement.
+
+## Region String views (isolated soundness repair)
+
+Frozen String payloads now retain the borrowed-view kind when reconstructed as
+ordinary Strings. Previously their capacity word looked like an immortal literal,
+so storing a copy could keep a pointer into an already freed root. The O0 regression
+extracts a String from an inner scope, frees that owner, churns the same arena with
+different bytes, then checks the escaped text and an independently extended copy.
+Native, freestanding and wasm all pass. The external-payload path receives the same
+view kind. No String ABI or C runtime change is needed; the object-cache suffix
+region-string-view-1 prevents reusing units that constructed the old literal kind.
+
+Validation is complete on the exact compiler3235494 base: workspace clippy,
+targeted native/free/wasm, complete LLVM workspace suite and JS runtime300/300 all
+exit0. Logs: /tmp/fa-region-string-fix-{base323-clippy,base323-targeted,
+workspace-full,js-runtime}.log. This fix is independent of the direct/relative
+root-edge prototypes. The explicit `copy parent.text` regression is staged for
+Root's new Copy frontend in /tmp/fa-native-perf-next/region-string-explicit-copy.fa;
+the ancestor-arena MOVE materialization must also be preserved at that merge.

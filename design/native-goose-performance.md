@@ -2,7 +2,8 @@
 
 Analyse du 3 novembre 2026, branche `perf/native-goose`, départ
 `9c3032aa3eb4d8dced7cb94f7aeb99d0624e6a9c`.
-Dernier code mesuré : `6067418dbe9db284956377b75d2d653b41d9712f`.
+Dernier code mesuré : `6067418dbe9db284956377b75d2d653b41d9712f` ; pour
+`string-building`, `86b3c1ca75988387b8ba710a4c40a1fe05730ae8` (voir sa section).
 Correctifs de durée de vie validés : `266aa15faac0d820558b6ecdadf2c97f21033e24`.
 Les 25 exécutables reconstruits à cette révision sont identiques octet par octet
 aux exécutables mesurés ; leurs sorties ont été vérifiées à nouveau.
@@ -822,3 +823,147 @@ un objectif ouvert, notamment pour les unions et les tables.
 
 Les [données complètes](native-goose-round4-results.json) contiennent les
 échantillons, commandes, tailles, RSS, empreintes et contrôles de mesure.
+
+## String-building : construction des chaînes
+
+Travail du 4 au 14 novembre 2026, commits `8c376ef` et `86b3c1c`. Comme
+précédemment, aucun changement ne reconnaît un benchmark, une taille ou un
+résultat attendu, et les sources des benchmarks sont inchangées.
+
+### Changements implémentés
+
+- **Entiers en texte.** `toString` et les parties entières d'un template écrivent
+  leurs chiffres dans un tampon de 24 octets sur la pile (`fa_decimal_i64`,
+  `fa_decimal_u64`). La chaîne obtenue est une vue non possédante (genre
+  `KIND_MASK`, comme les vues de caractères) : un consommateur immédiat (padding,
+  interpolation, comparaison) la lit sans copie, et tout propriétaire (`let`,
+  champ, élément, retour de fonction, valeur d'un `if`) la copie par `take`.
+  Dans une coroutine, la suite de l'instruction peut suspendre (`await`) : la vue
+  désignerait alors une pile abandonnée, et le texte reste une chaîne possédée
+  temporaire. La conversion divise sur 32 bits dès que la valeur y tient.
+- **Templates.** Les templates de chaînes et d'entiers évaluent toutes leurs
+  parties, calculent la taille exacte avec contrôle de débordement
+  (`fa_string_size`), allouent une fois (`fa_string_allocate`) et copient chaque
+  partie. Le drapeau SIMPLE est le ET des drapeaux des parties ; seul un résultat
+  non SIMPLE est rebalayé (`fa_string_finish`).
+- **Réutilisation du buffer.** `s = "…{x}…"` sur un local `mutable` de type
+  `String` écrit dans le buffer possédé existant lorsqu'il suffit
+  (`fa_string_replace_buffer`), et `s = ""` conserve sa capacité. Ce chemin
+  n'accepte comme parties textuelles que des locaux `let`/`mutable` distincts de
+  la destination ; références `use`, champs, appels et lecture de la destination
+  gardent le chemin qui alloue. Le slot de la destination est relu après
+  l'évaluation des parties.
+- **`parts.join(separator).length`** devient `fa_array_join_length` : si le
+  séparateur et chaque partie non vide sont SIMPLE, la longueur en graphèmes est
+  la somme des octets ; sinon la jointure est construite puis mesurée, car un
+  graphème peut traverser la frontière de deux parties (`\r` + `\n`, marques
+  combinantes, ZWJ). Le receveur puis le séparateur sont évalués dans l'ordre.
+- **Runtime.** Copies courtes jusqu'à 32 octets sans appel, remplissage borné
+  du padding, recherche de séparateur par blocs de 16 octets. La croissance du
+  builder de texte copie par `memcpy` : avec les branches courtes de 32 octets,
+  `reserve` n'était plus inlinée et `respond` l'appelait hors ligne à chaque
+  ajout (+3,5 % d'instructions avant ce correctif).
+
+### Corrections issues de la revue
+
+- Une partie textuelle empruntée pouvait être modifiée par une partie suivante :
+  dans `"{other}:{rewrite()}"`, si `rewrite` réécrivait `other` en place, le
+  résultat contenait le nouveau texte. Le défaut existait déjà à `f75ce8a`
+  (`fa_strings_join`). Une partie empruntée est désormais copiée lorsqu'une
+  partie ultérieure n'est pas inerte (appel, `await`, affectation) ; noms,
+  littéraux, accès, index et opérateurs ne déclenchent pas de copie, si bien que
+  les templates de `string-building` n'en font aucune.
+- Les chiffres d'une vue décimale lue avant un `await` de la même instruction
+  étaient perdus à `-O0` après la reprise (`"{n}:{await f()}"` donnait `\0`
+  au lieu de `5`) : d'où le chemin possédé dans les coroutines.
+- Le chemin fusionné de `join(…).length` exige un appel de type `String` (pas un
+  chaînage optionnel), et la réutilisation du buffer exige un slot `String`.
+
+Restent hors de ce travail, constatés à `f75ce8a` : `maybe?.join("-").length`
+fait paniquer le compilateur, et l'ordre d'évaluation de `a + f()` lorsque `f`
+modifie `a` n'a pas été audité.
+
+### Validation
+
+- `cargo fmt --all`, `cargo clippy --workspace --all-targets` sans
+  avertissement, et `cargo test --workspace` avec LLVM 18 : tout passe sauf
+  `doc_snippets` (fa-parser), en échec à cause de la conversion en cours, non
+  commitée, de la documentation vers `Array<…>`, que le parseur n'accepte pas
+  encore ; la même suite passe sur la documentation de `f75ce8a`. Une exécution
+  a vu échouer l'assertion temporelle native d'`async-starvation` sous charge ;
+  elle passe dans l'autre exécution complète et dix fois sur dix isolée.
+- Programmes du backend sur native, native sans libc et wasm, avec détection
+  des fuites ; nouveaux programmes `join-length.fa` et `async-templates.fa`
+  (`-O0`), `textual-templates.fa` étendu (instantanés, alias `use`, fonctions
+  lisant la destination). Ces trois fichiers et `inline-strings.fa` passent aussi
+  à `-O0` sur les trois cibles. Le cas d'instantané échoue à `f75ce8a`.
+- Le runtime C passe ASan/UBSan, exécuté aussi directement ; l'IR versionné
+  est identique à celui que régénère `generate.sh`.
+- Les 25 programmes compilés avec le compilateur final donnent la sortie de
+  Rust octet par octet (`blur` contrôlé à part, Goose refusant son `N`
+  dynamique sous `checkfree`).
+
+### Mesures
+
+Médianes CPU (utilisateur + système) en secondes, passages alternés sur le
+CPU 1, tailles par défaut, Goose avec `N` à l'exécution. « Avant » est
+`f75ce8a`, « après » le code final. La VM était partagée avec d'autres
+compilations (charge moyenne de 3 à 4) ; deux étiquettes du même binaire
+`respond` ont différé de 7 % dans ces conditions. Les instructions Callgrind
+(tailles réduites au dixième) sont déterministes.
+
+| Cas | Passages | Fa avant | Fa après | Goose | Après / Goose | Instructions |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| string-building | 21 | 0,5290 | 0,1812 | 0,1669 | 1,09× | −41,2 % |
+| respond | 15 | 0,6300 | 0,6571 | 0,2829 | 2,32× | +1,0 % |
+| strlist | 15 | 0,3113 | 0,3186 | 0,1633 | 1,95× | −0,8 % |
+| words | 15 | 0,0943 | 0,1019 | 0,0739 | 1,38× | +1,6 % |
+| word-count | 15 | 0,5765 | 0,5986 | 0,4128 | 1,45× | +1,1 % |
+| records | 15 | 0,3878 | 0,3817 | 0,2201 | 1,73× | +0,1 % |
+
+`string-building` est accéléré de 2,9× ; l'écart restant avec Goose est
+d'environ 9 % dans cette série (14 % dans la série du 4 novembre, 0,1632 contre
+0,1438 s). Son IR optimisé est identique à celui de cette série : les
+corrections de la revue ne coûtent rien à ce programme. Les petites hausses
+d'instructions des autres cas viennent surtout de la branche de copie 16–32
+octets de `copy_bytes` (deux instructions par appel hors ligne) ; leurs écarts
+CPU restent dans la variabilité observée et ne sont pas présentés comme des
+régressions ou des gains établis. Les [données](native-goose-string-building-results.json)
+conservent les échantillons, empreintes des binaires et de la sortie.
+
+### Proposition non implémentée : comptages après split
+
+**Proposition non implémentée, à conserver pour une prochaine étape.**
+À la demande de l’utilisateur, cette note ne déclenche pas son implémentation.
+
+Une partie du coût restant vient de `split`, qui alloue et libère une copie
+possédée de chaque fragment, alors que le programme ne demande que leur nombre
+et la longueur de leur jointure.
+
+La proposition consiste à éviter ce tableau intermédiaire lorsque le compilateur
+prouve que le résultat de `split` ne s’échappe pas et sert uniquement à `.length`
+ou à `.join(separator).length`. Ces opérations pourraient calculer les résultats
+sans construire les fragments. La transformation serait générique : elle ne
+dépendrait ni du nom du benchmark, ni de sa taille, ni des réponses attendues.
+
+Cette optimisation est recommandée sous les conditions suivantes :
+
+- Prouver tous les usages admissibles du résultat. Toute utilisation non prouvée,
+  notamment une capture, un alias ou une mutation, conserve le chemin ordinaire.
+- Évaluer les entrées exactement une fois et dans leur ordre initial. Conserver
+  leurs valeurs par des snapshots possédés, avec les mécanismes habituels de
+  nettoyage, pour que les mutations ultérieures ne changent pas le résultat.
+- Respecter les règles Unicode de découpage et de comptage des graphèmes. Une
+  jointure peut modifier les frontières entre fragments : conserver le chemin
+  ordinaire lorsque le calcul direct ne peut pas être prouvé équivalent.
+- Tester les mutations des sources et séparateurs, les captures et autres cas
+  exclus, l’ordre d’évaluation, les chaînes et séparateurs vides, les frontières
+  Unicode, ainsi que la durée de vie et la libération des snapshots.
+
+Éviter une collection intermédiaire pour une requête agrégée est une optimisation
+de compilateur pertinente. Elle est toutefois plus complexe que les corrections
+du runtime : la sûreté dépend de la preuve des usages et du nettoyage. Elle ne
+doit donc pas être présentée comme validée avant son implémentation et ses tests,
+ni comme suffisante pour atteindre Goose avant de nouvelles mesures. Elle ne
+nécessite pas de changer la représentation publique des tableaux ou d’introduire
+des fragments empruntés dans les tableaux ordinaires.

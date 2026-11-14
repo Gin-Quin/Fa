@@ -31,7 +31,8 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Tooling decisions waiting for an engineer
 
-- **JIT for native tests and `fa run --target=native` (decided 2026-11-14, see `design/decisions.md`; in progress on `tooling/native-jit`)**: the module compiled in memory with ORC instead of a linked executable, one forked child per test, the `dev` profile. Measure the wall time of the native test fixtures before and after.
+- **JIT follow-ups** (the JIT of `fa run` and `fa test` on `native` is implemented, see "Interpreter scope and JIT for native tests" in `design/decisions.md`): (1) the default profile of `fa run --target=native` is still `-O3`: the dev profile is decided for the tests only, to ask the user; (2) C libraries (`build.link`) keep the linked executable: shared libraries could be loaded with `dlopen` (`LLVMOrcCreateDynamicLibrarySearchGeneratorForPath`); (3) `fa develop --target=native` still links and restarts an executable.
+- **Fixed cost of every native compilation (found while measuring the JIT)**: a hello world at `-O0` spends 75 to 100 ms in the lowering phase and 15 ms in the verification, against 1 ms for the JIT's link, out of 0.24 s for `fa run --target=native -O0 hello.fa`. Not profiled: the likely cause is the tier 1 runtime, parsed from 16 800 lines of textual IR (`link_tier1`) and verified again in every compilation; if so, shipping it as bitcode and skipping its verification would remove most of it. To profile and assign.
 
 ## Latest language decisions being implemented
 

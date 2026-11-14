@@ -110,6 +110,28 @@ fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: 
 		"dynamic-tls".hash(hasher);
 	}
 	split.facts.is_some().hash(hasher);
+	// emulated thread-local variables (`jit.rs`)
+	split.in_memory.hash(hasher);
+}
+
+/// The target machine of an object of the program: with emulated
+/// thread-local variables when the JIT loads it.
+fn unit_machine(
+	target: Target,
+	options: &Options,
+	split: &SplitOptions,
+) -> Result<TargetMachine, Error> {
+	let machine = target.machine(options)?;
+	if split.in_memory {
+		crate::target::use_emulated_tls(&machine);
+	}
+	Ok(machine)
+}
+
+/// A program compiled per unit: linked, or loaded in this process.
+enum Linked {
+	Executable(Artifact),
+	Loaded(Box<dyn crate::LoadedProgram>),
 }
 
 /// The target machine and the pointer-sized integer of a module.
@@ -345,7 +367,7 @@ fn lower_and_emit(
 	object: &Path,
 	lower: impl FnOnce(Lowering<'_, '_>) -> Result<Lowered, Error>,
 ) -> Result<Lowered, Error> {
-	let machine = target.machine(options)?;
+	let machine = unit_machine(target, options, split)?;
 	let context = Context::create();
 	let module = crate::runtime::declarations_module(&context, target, name)?;
 	prepare_module(&context, &machine, &module, target);
@@ -499,7 +521,7 @@ fn runtime_object(
 	if path.is_file() {
 		return Ok(path);
 	}
-	let machine = target.machine(options)?;
+	let machine = unit_machine(target, options, split)?;
 	let context = Context::create();
 	let module = context.create_module("runtime");
 	prepare_module(&context, &machine, &module, target);
@@ -565,7 +587,7 @@ fn entry_object(
 	path: &Path,
 	library: bool,
 ) -> Result<(), Error> {
-	let machine = target.machine(options)?;
+	let machine = unit_machine(target, options, split)?;
 	let context = Context::create();
 	let module = crate::runtime::declarations_module(&context, target, "entry")?;
 	prepare_module(&context, &machine, &module, target);
@@ -1127,6 +1149,57 @@ fn llvm_budget() -> u64 {
 		.unwrap_or(512)
 }
 
+/// The objects of a program: its units, its entry and the runtime.
+fn program_objects(
+	target: Target,
+	options: &Options,
+	split: &SplitOptions,
+	inputs: &EntryInputs,
+	directory: &Path,
+	library: bool,
+) -> Result<Vec<PathBuf>, Error> {
+	fs::create_dir_all(directory)?;
+	let entry = directory.join(format!("$entry.{}", object_extension(split)));
+	entry_object(target, options, split, inputs, &entry, library)?;
+	let runtime = runtime_object(target, options, split, directory)?;
+	let mut objects: Vec<PathBuf> = inputs
+		.units
+		.iter()
+		.map(|unit| unit.object.clone())
+		.collect();
+	objects.push(entry);
+	objects.push(runtime);
+	Ok(objects)
+}
+
+/// Loads the units of a program in this process ([`SplitOptions::in_memory`]).
+#[cfg(unix)]
+fn load_program(
+	target: Target,
+	options: &Options,
+	split: &SplitOptions,
+	inputs: &EntryInputs,
+	directory: &Path,
+) -> Result<Box<dyn crate::LoadedProgram>, Error> {
+	let mut timings = Timings::default();
+	let start = Instant::now();
+	let objects = program_objects(target, options, split, inputs, directory, false)?;
+	timings.emit = start.elapsed();
+	crate::jit::load_objects(&objects, timings)
+}
+
+/// Without `fork`, no program is loaded in memory.
+#[cfg(not(unix))]
+fn load_program(
+	_target: Target,
+	_options: &Options,
+	_split: &SplitOptions,
+	_inputs: &EntryInputs,
+	_directory: &Path,
+) -> Result<Box<dyn crate::LoadedProgram>, Error> {
+	Err(Error::Jit("no JIT on this system".to_string()))
+}
+
 /// Links the units of a program into an executable (native) or a `.wasm`
 /// module and its JavaScript loader (wasm), written at `output`.
 pub fn link_program(
@@ -1152,7 +1225,6 @@ pub fn link_program(
 	{
 		fs::create_dir_all(parent)?;
 	}
-	fs::create_dir_all(directory)?;
 	let start = Instant::now();
 	// release: full LTO when its memory fits the budget, else ThinLTO
 	let chosen;
@@ -1162,24 +1234,15 @@ pub fn link_program(
 	} else {
 		split
 	};
-	let entry = directory.join(format!("$entry.{}", object_extension(split)));
-	entry_object(
+	let objects = program_objects(
 		target,
 		options,
 		split,
 		inputs,
-		&entry,
+		directory,
 		libraries.c_library.is_some(),
 	)?;
-	let runtime = runtime_object(target, options, split, directory)?;
 	timings.emit = start.elapsed();
-	let mut objects: Vec<PathBuf> = inputs
-		.units
-		.iter()
-		.map(|unit| unit.object.clone())
-		.collect();
-	objects.push(entry);
-	objects.push(runtime);
 	let start = Instant::now();
 	if let Some(library) = &libraries.c_library {
 		// a C library: its shared and static libraries (the header is
@@ -1609,7 +1672,8 @@ pub fn compile_package(
 		directory: objects,
 	};
 	let outcome = match link_units(root, &report, units, &settings, output, libraries) {
-		Ok(artifact) => PackageOutcome::Built(artifact),
+		Ok(Linked::Executable(artifact)) => PackageOutcome::Built(artifact),
+		Ok(Linked::Loaded(program)) => PackageOutcome::Loaded(program),
 		Err(None) => PackageOutcome::Errors,
 		Err(Some(error @ Error::Unsupported { .. })) => {
 			PackageOutcome::Unsupported(error.to_string())
@@ -1633,7 +1697,7 @@ fn link_units(
 	settings: &Settings<'_>,
 	output: &Path,
 	libraries: &Libraries,
-) -> Result<Artifact, Option<Error>> {
+) -> Result<Linked, Option<Error>> {
 	if report.has_errors() {
 		return Err(None);
 	}
@@ -1767,6 +1831,30 @@ fn link_units(
 				units,
 				generic_tables,
 			};
+			// loaded by the JIT; an object it can't load is linked (the
+			// emulated thread-local variables link too)
+			if settings.split.in_memory {
+				match load_program(
+					settings.target,
+					&settings.options,
+					settings.split,
+					&inputs,
+					settings.directory,
+				) {
+					Ok(program) => {
+						if trace {
+							eprintln!(
+								"split: entry and load in {} ms",
+								started.elapsed().as_millis()
+							);
+						}
+						return Ok(Linked::Loaded(program));
+					}
+					// linked below (`FA_JIT_TRACE=1` says why)
+					Err(Error::Jit(_)) => {}
+					Err(error) => return Err(Some(error)),
+				}
+			}
 			let linked = link_program(
 				settings.target,
 				&settings.options,
@@ -1809,7 +1897,7 @@ fn link_units(
 				extra.header = header;
 				artifact.c_library = Some(extra);
 			}
-			return Ok(artifact);
+			return Ok(Linked::Executable(artifact));
 		}
 		if std::env::var_os("FA_SPLIT_TRACE").is_some() {
 			eprintln!("split: missing {missing:?}");

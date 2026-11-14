@@ -623,6 +623,9 @@ mod with_llvm {
 					.collect::<Vec<_>>()
 			))),
 			fa_codegen_llvm::PackageOutcome::Failed(error) => Err(error),
+			fa_codegen_llvm::PackageOutcome::Loaded(_) => {
+				unreachable!("the units are linked: `in_memory` is not set")
+			}
 		}
 	}
 

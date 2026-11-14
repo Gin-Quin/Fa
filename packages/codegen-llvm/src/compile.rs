@@ -16,6 +16,7 @@ use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::FileType;
 use inkwell::values::BasicValue;
 
+use crate::Source;
 pub use crate::artifact::{Artifact, Timings};
 use crate::error::Error;
 use crate::link;
@@ -90,17 +91,8 @@ pub fn compile_linking(
 	output: &Path,
 	libraries: &Libraries,
 ) -> Result<Artifact, Error> {
-	compile_files(
-		session,
-		&[(file, path.to_string())],
-		file,
-		Vec::new(),
-		Vec::new(),
-		target,
-		options,
-		output,
-		libraries,
-	)
+	let source = Source::File { file, path };
+	compile_source(session, &source, target, options, output, libraries)
 }
 
 /// Compiles an analyzed program of several files (advanced brief §15.7)
@@ -134,32 +126,8 @@ pub fn compile_program_linking(
 	output: &Path,
 	libraries: &Libraries,
 ) -> Result<Artifact, Error> {
-	let Some(entry) = program.entry else {
-		return Err(Error::Unsupported {
-			message: "a program without an entry".to_string(),
-			location: String::new(),
-		});
-	};
-	let options = &Options {
-		asynchronous: options.asynchronous.or(Some(program.asynchronous)),
-		..*options
-	};
-	let files: Vec<(FileId, String)> = program
-		.files
-		.iter()
-		.map(|&file| (file, session.display_path(file)))
-		.collect();
-	compile_files(
-		session,
-		&files,
-		entry,
-		program.init_order.clone(),
-		Vec::new(),
-		target,
-		options,
-		output,
-		libraries,
-	)
+	let source = Source::Program(program);
+	compile_source(session, &source, target, options, output, libraries)
 }
 
 /// The executable of the tests of a program (`fa test --target=native`):
@@ -173,48 +141,140 @@ pub fn compile_tests_linking(
 	output: &Path,
 	libraries: &Libraries,
 ) -> Result<Artifact, Error> {
-	let tests = crate::program_tests(session, program);
-	let Some(&(first, _)) = tests.first() else {
-		return Err(Error::Unsupported {
-			message: "a program without tests".to_string(),
-			location: String::new(),
-		});
+	let source = Source::Tests(program);
+	compile_source(session, &source, target, options, output, libraries)
+}
+
+/// What [`prepare`] reads from a [`Source`].
+pub(crate) struct Prepared {
+	pub files: Vec<(FileId, String)>,
+	pub entry: FileId,
+	pub init_order: Vec<(FileId, fa_analyzer::ids::NodeId)>,
+	pub tests: Vec<(FileId, fa_analyzer::ids::NodeId)>,
+	/// The options, with the asynchronous mode of a program.
+	pub options: Options,
+}
+
+/// The files of a source, its entry, its initialization order and its tests.
+pub(crate) fn prepare(
+	session: &Session,
+	source: &Source<'_>,
+	options: &Options,
+) -> Result<Prepared, Error> {
+	let missing = |what: &str| Error::Unsupported {
+		message: what.to_string(),
+		location: String::new(),
 	};
-	let options = &Options {
+	let of_program = |program: &Program| Options {
 		asynchronous: options.asynchronous.or(Some(program.asynchronous)),
 		..*options
 	};
-	let files: Vec<(FileId, String)> = program
-		.files
-		.iter()
-		.chain(&program.tests)
-		.map(|&file| (file, session.display_path(file)))
-		.collect();
-	compile_files(
-		session,
-		&files,
-		program.entry.unwrap_or(first),
-		program.init_order.clone(),
-		tests,
-		target,
-		options,
-		output,
-		libraries,
-	)
+	let shown = |&file: &FileId| (file, session.display_path(file));
+	match *source {
+		Source::File { file, path } => Ok(Prepared {
+			files: vec![(file, path.to_string())],
+			entry: file,
+			init_order: Vec::new(),
+			tests: Vec::new(),
+			options: *options,
+		}),
+		Source::Program(program) => Ok(Prepared {
+			files: program.files.iter().map(shown).collect(),
+			entry: program
+				.entry
+				.ok_or_else(|| missing("a program without an entry"))?,
+			init_order: program.init_order.clone(),
+			tests: Vec::new(),
+			options: of_program(program),
+		}),
+		Source::Tests(program) => {
+			let tests = crate::program_tests(session, program);
+			let &(first, _) = tests
+				.first()
+				.ok_or_else(|| missing("a program without tests"))?;
+			Ok(Prepared {
+				files: program
+					.files
+					.iter()
+					.chain(&program.tests)
+					.map(shown)
+					.collect(),
+				entry: program.entry.unwrap_or(first),
+				init_order: program.init_order.clone(),
+				tests,
+				options: of_program(program),
+			})
+		}
+	}
 }
 
-#[allow(clippy::too_many_arguments)]
-fn compile_files(
+fn compile_source(
 	session: &Session,
-	files: &[(FileId, String)],
-	entry: FileId,
-	init_order: Vec<(FileId, fa_analyzer::ids::NodeId)>,
-	tests: Vec<(FileId, fa_analyzer::ids::NodeId)>,
+	source: &Source<'_>,
 	target: Target,
 	options: &Options,
 	output: &Path,
 	libraries: &Libraries,
 ) -> Result<Artifact, Error> {
+	let prepared = prepare(session, source, options)?;
+	let entry = prepared.entry;
+	let options = &prepared.options;
+	let inputs = Inputs {
+		session,
+		files: &prepared.files,
+		entry,
+		init_order: prepared.init_order,
+		tests: prepared.tests,
+		target,
+		options,
+		libraries,
+		emulated_tls: false,
+	};
+	with_module(inputs, |built| {
+		emit_and_link(session, entry, target, options, output, libraries, built)
+	})
+}
+
+/// The files of a program and how they are compiled into one module.
+pub(crate) struct Inputs<'a> {
+	pub session: &'a Session,
+	pub files: &'a [(FileId, String)],
+	pub entry: FileId,
+	pub init_order: Vec<(FileId, fa_analyzer::ids::NodeId)>,
+	pub tests: Vec<(FileId, fa_analyzer::ids::NodeId)>,
+	pub target: Target,
+	pub options: &'a Options,
+	pub libraries: &'a Libraries,
+	/// Thread-local variables as emulated ones (`jit.rs`).
+	pub emulated_tls: bool,
+}
+
+/// A lowered, verified and optimized module, ready for code generation.
+pub(crate) struct Built<'a, 'ctx> {
+	pub module: &'a Module<'ctx>,
+	pub machine: &'a inkwell::targets::TargetMachine,
+	pub timings: Timings,
+	/// The functions a C library exports.
+	pub c_exports: Vec<String>,
+}
+
+/// Lowers the files of a program into one module, verifies and optimizes
+/// it, and gives it to `then` (the object and the link, or the JIT).
+pub(crate) fn with_module<R>(
+	inputs: Inputs<'_>,
+	then: impl FnOnce(Built<'_, '_>) -> Result<R, Error>,
+) -> Result<R, Error> {
+	let Inputs {
+		session,
+		files,
+		entry,
+		init_order,
+		tests,
+		target,
+		options,
+		libraries,
+		emulated_tls,
+	} = inputs;
 	let mut rendered = String::new();
 	for (file, path) in files {
 		if session
@@ -230,6 +290,9 @@ fn compile_files(
 	}
 	let mut timings = Timings::default();
 	let machine = target.machine(options)?;
+	if emulated_tls {
+		crate::target::use_emulated_tls(&machine);
+	}
 	let context = Context::create();
 	let usize = context.ptr_sized_int_type(&machine.get_target_data(), None);
 
@@ -309,6 +372,31 @@ fn compile_files(
 		}
 	}
 
+	then(Built {
+		module: &module,
+		machine: &machine,
+		timings,
+		c_exports,
+	})
+}
+
+/// The object of a module, and its link into an executable, a `.wasm`
+/// module or a C library.
+fn emit_and_link(
+	session: &Session,
+	entry: FileId,
+	target: Target,
+	options: &Options,
+	output: &Path,
+	libraries: &Libraries,
+	built: Built<'_, '_>,
+) -> Result<Artifact, Error> {
+	let Built {
+		module,
+		machine,
+		mut timings,
+		c_exports,
+	} = built;
 	let mut output = output.to_path_buf();
 	if target == Target::Wasm
 		&& output
@@ -332,7 +420,7 @@ fn compile_files(
 
 	let object = with_suffix(&output, ".o");
 	let start = Instant::now();
-	machine.write_to_file(&module, FileType::Object, &object)?;
+	machine.write_to_file(module, FileType::Object, &object)?;
 	timings.emit = start.elapsed();
 
 	let start = Instant::now();

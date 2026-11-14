@@ -745,3 +745,9 @@ Only String/Character arrays can have the negative-capacity compact representati
 When a statically different element width is passed to ordinary array assignment or copy,
 the runtime does not inspect or materialize that form. Equal-sized non-String layouts
 conservatively retain the check.
+
+## Interpreter scope and JIT for native tests (user decisions, 2026-11-14)
+
+- **The interpreter stays a compile-time tool**: a `fa run` without Bun and a REPL are not goals. `fa-interpreter` keeps evaluating `static`, `@` calls and configuration files, and gets no runtime of its own (I/O, tasks, workers, foreign code). This confirms the `fa run` entry at the top of this file; a full runtime would be a third implementation of the semantics after JavaScript and LLVM.
+- **`fa test --target=native` runs through LLVM's JIT by default**: the test module is compiled in memory by ORC in `fa-native`, instead of being written as an object and linked into an executable (`compile_tests_linking`). It is the same lowering and the same code as a native build, without the object emission and the link. Decided, not implemented: see `design/todo.md` for the open implementation choices. The runner's guarantees stay: fresh module-level values per test, a stop ends only its test, the timeout, the leak check.
+- **Not chosen**: a tiered, profiling JIT (Fa is statically typed and monomorphized, so there is nothing to speculate on; profile-guided optimization covers the rest), and Cranelift or copy-and-patch (a second lowering, as for the `dev` profile in `design/compilation-with-llvm.md`).

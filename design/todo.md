@@ -29,6 +29,10 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 - Reviews to schedule: a second analyzer review (M2/M3 features), a review of the tooling (CLI, formatter, workspaces), a final review of both backends.
 
 
+## Tooling decisions waiting for an engineer
+
+- **JIT for native tests (decided 2026-11-14, not assigned)**: `fa test --target=native` compiles the test module in memory with ORC instead of linking an executable. Open choices, with the lead's recommendation: (1) isolation: compile once, then `fork` one child per test, which keeps fresh module-level values, stops that end only their test, the timeout and the leak check (recommended; the linked executable stays the path where `fork` is missing, and behind a flag for debugging); (2) the profile: `dev` (`-O0`, FastISel), with the overflow checks of development; (3) `fa run --target=native` through the same JIT: recommended, not decided by the user yet. Measure the wall time of the native test fixtures before and after.
+
 ## Latest language decisions being implemented
 
 - Task and every type declaring `destroy` are noncopyable, including composites that own one. Resource parameters are borrowed; a second resource requires a new instance (`open`, `create` or constructor). Ordinary collections and their owners require `copy value` when both values remain usable; implicit moves at the last use are allowed. Explicit synchronization handles such as Mutex and Channel retain their sharing semantics. Update both backends, generic capabilities, pointer reads, tests and documentation; the root lot remains unintegrated.

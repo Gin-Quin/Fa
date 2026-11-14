@@ -39,7 +39,7 @@ let parsed = try Float.parse("1.5") -- type parsed: Float
 let imprecise: Float32 = 16_777_217 -- error: E-NUM-8
 let percent: Percentage = 50 -- error: E-NUM-9
 
--- `Array(T).from(source, capacity = n)`
+-- `Array<T>.from(source, capacity = n)`
 mutable flags = Array<Boolean>.from([], capacity = size + 1) -- type flags: Array<Boolean>
 flags.push(true)
 let copied = Array.from([1, 2, 3]) -- type copied: Array<Integer>

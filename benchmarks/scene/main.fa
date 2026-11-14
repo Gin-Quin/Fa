@@ -1,4 +1,4 @@
--- Scene graph: a tree of objects that own their children in an `Array(SceneNode)` (a recursive type),
+-- Scene graph: a tree of objects that own their children in an `Array<SceneNode>` (a recursive type),
 -- with a local transform each. For 16 frames, some nodes move, then the world transforms are recomputed
 -- top-down by recursive functions that mutate their parameter (3x3 `Float32` matrix products).
 -- Every transform is an axis-aligned rotation with an integer translation: the float math is exact.

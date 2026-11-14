@@ -1,4 +1,4 @@
--- Image blur: 16 passes of a 3x3 Gaussian blur over a width x width image of bytes (`Array(UInt8)`),
+-- Image blur: 16 passes of a 3x3 Gaussian blur over a width x width image of bytes (`Array<UInt8>`),
 -- ping-ponged between two arrays. Nine loads per pixel at computed indices (`y * width + x`), which
 -- the range analysis can't prove: the kernel indexes with `try`.
 

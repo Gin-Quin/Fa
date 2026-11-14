@@ -1,4 +1,4 @@
--- LRU cache: a `Map(Integer, Integer)` from key to node, a doubly-linked recency list stored in
+-- LRU cache: a `Map<Integer, Integer>` from key to node, a doubly-linked recency list stored in
 -- an array of objects linked by indices, with a free list, under skewed lookups that hit,
 -- miss, evict and invalidate: map lookups, inserts and deletes, and scattered object writes.
 

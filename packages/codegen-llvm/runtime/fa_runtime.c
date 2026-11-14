@@ -314,7 +314,10 @@ static void reserve(size_t extra) {
 		capacity *= 2;
 	}
 	uint8_t *bytes = fa_alloc(capacity, 1);
-	copy_bytes(bytes, builder, builder_length);
+	// A plain block copy: the builder holds at least as many bytes as it
+	// needs to grow, and the short-copy branches would make every inlined
+	// `reserve` larger.
+	if (builder_length) { __builtin_memcpy(bytes, builder, builder_length); }
 	if (builder != 0) {
 		fa_free(builder, builder_capacity, 1);
 	}

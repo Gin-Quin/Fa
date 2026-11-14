@@ -321,7 +321,7 @@ define internal fastcc void @reserve(i32 noundef %0) unnamed_addr #3 {
   %3 = add i32 %2, %0
   %4 = load i32, ptr @builder_capacity, align 4
   %5 = icmp ugt i32 %3, %4
-  br i1 %5, label %6, label %22
+  br i1 %5, label %6, label %25
 
 6:                                                ; preds = %1
   %7 = icmp ult i32 %4, 256
@@ -337,23 +337,30 @@ define internal fastcc void @reserve(i32 noundef %0) unnamed_addr #3 {
 
 14:                                               ; preds = %10
   %15 = tail call ptr @fa_alloc(i32 noundef %11, i32 noundef 1) #52
-  %16 = load ptr, ptr @builder, align 4, !tbaa !6
-  %17 = load i32, ptr @builder_length, align 4, !tbaa !4
-  tail call fastcc void @copy_bytes(ptr noundef %15, ptr noundef %16, i32 noundef %17) #51
-  %18 = icmp eq ptr %16, null
-  br i1 %18, label %21, label %19
+  %16 = load i32, ptr @builder_length, align 4, !tbaa !4
+  %17 = icmp eq i32 %16, 0
+  %18 = load ptr, ptr @builder, align 4, !tbaa !6
+  br i1 %17, label %20, label %19
 
 19:                                               ; preds = %14
-  %20 = load i32, ptr @builder_capacity, align 4, !tbaa !4
-  tail call void @fa_free(ptr noundef nonnull %16, i32 noundef %20, i32 noundef 1) #52
-  br label %21
+  tail call void @llvm.memcpy.p0.p0.i32(ptr align 1 %15, ptr align 1 %18, i32 %16, i1 false)
+  br label %20
 
-21:                                               ; preds = %19, %14
+20:                                               ; preds = %14, %19
+  %21 = icmp eq ptr %18, null
+  br i1 %21, label %24, label %22
+
+22:                                               ; preds = %20
+  %23 = load i32, ptr @builder_capacity, align 4, !tbaa !4
+  tail call void @fa_free(ptr noundef nonnull %18, i32 noundef %23, i32 noundef 1) #52
+  br label %24
+
+24:                                               ; preds = %22, %20
   store ptr %15, ptr @builder, align 4, !tbaa !6
   store i32 %11, ptr @builder_capacity, align 4, !tbaa !4
-  br label %22
+  br label %25
 
-22:                                               ; preds = %1, %21
+25:                                               ; preds = %1, %24
   ret void
 }
 

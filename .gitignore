@@ -6,6 +6,7 @@ pnpm-lock.yaml
 # Caches
 .eslintcache
 nimcache
+__pycache__/
 
 # Others
 .env

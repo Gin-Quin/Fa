@@ -393,7 +393,7 @@ define internal fastcc void @reserve(i64 noundef %0) unnamed_addr #2 {
   %5 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder_capacity)
   %6 = load i64, ptr %5, align 8, !tbaa !8
   %7 = icmp ugt i64 %4, %6
-  br i1 %7, label %8, label %26
+  br i1 %7, label %8, label %29
 
 8:                                                ; preds = %1
   %9 = icmp ult i64 %6, 256
@@ -409,25 +409,32 @@ define internal fastcc void @reserve(i64 noundef %0) unnamed_addr #2 {
 
 16:                                               ; preds = %12
   %17 = tail call ptr @fa_alloc(i64 noundef %13, i64 noundef 1) #46
-  %18 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder)
-  %19 = load ptr, ptr %18, align 8, !tbaa !10
-  %20 = load i64, ptr %2, align 8, !tbaa !8
-  tail call fastcc void @copy_bytes(ptr noundef %17, ptr noundef %19, i64 noundef %20) #45
-  %21 = load ptr, ptr %18, align 8, !tbaa !10
-  %22 = icmp eq ptr %21, null
-  br i1 %22, label %25, label %23
+  %18 = load i64, ptr %2, align 8, !tbaa !8
+  %19 = icmp eq i64 %18, 0
+  %20 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder)
+  br i1 %19, label %23, label %21
 
-23:                                               ; preds = %16
-  %24 = load i64, ptr %5, align 8, !tbaa !8
-  tail call void @fa_free(ptr noundef nonnull %21, i64 noundef %24, i64 noundef 1) #46
-  br label %25
+21:                                               ; preds = %16
+  %22 = load ptr, ptr %20, align 8, !tbaa !10
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %17, ptr align 1 %22, i64 %18, i1 false)
+  br label %23
 
-25:                                               ; preds = %23, %16
-  store ptr %17, ptr %18, align 8, !tbaa !10
+23:                                               ; preds = %16, %21
+  %24 = load ptr, ptr %20, align 8, !tbaa !10
+  %25 = icmp eq ptr %24, null
+  br i1 %25, label %28, label %26
+
+26:                                               ; preds = %23
+  %27 = load i64, ptr %5, align 8, !tbaa !8
+  tail call void @fa_free(ptr noundef nonnull %24, i64 noundef %27, i64 noundef 1) #46
+  br label %28
+
+28:                                               ; preds = %26, %23
+  store ptr %17, ptr %20, align 8, !tbaa !10
   store i64 %13, ptr %5, align 8, !tbaa !8
-  br label %26
+  br label %29
 
-26:                                               ; preds = %1, %25
+29:                                               ; preds = %1, %28
   ret void
 }
 

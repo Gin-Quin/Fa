@@ -72,7 +72,7 @@ What the compiler can prove is defined by the rules of [range analysis](/values/
 These operations are handled like any call that can fail:
 
 ```fa
-function third = (items: Array(Integer)): Integer throws IndexError => {
+function third = (items: Array<Integer>): Integer throws IndexError => {
 	return try items[2]
 }
 

@@ -344,7 +344,7 @@ fn percentage_literals() {
 #[test]
 fn optional_suffix() {
 	assert_statement("value?", "value?");
-	assert_statement("Array(Integer)?", "Array(Integer)?");
+	assert_statement("Array<Integer>?", "Array<Integer>?");
 }
 
 #[test]
@@ -536,8 +536,8 @@ fn digit_separators() {
 
 #[test]
 fn relations() {
-	assert_statement("Bag(Self->bestFriend)", "Bag((Self -> bestFriend))");
-	assert_statement("Bag(in Self->bestFriends)", "Bag(in (Self -> bestFriends))");
+	assert_statement("Bag<Self->bestFriend>", "Bag<(Self -> bestFriend)>");
+	assert_statement("Bag<in Self->bestFriends>", "Bag<in (Self -> bestFriends)>");
 	assert_statement("(Self->bestFriend)?", "((Self -> bestFriend))?");
 }
 
@@ -586,15 +586,15 @@ fn partial_update_expects_an_object() {
 #[test]
 fn type_functions_with_logic() {
 	assert_statement(
-		"type Optionalize(Value) = when Value is {\nNone => None\nelse => Value?\n}",
-		"type Optionalize(Value) = when Value is {\n\tNone => None\n\telse => Value?\n}",
+		"type Optionalize<Value> = when Value is {\nNone => None\nelse => Value?\n}",
+		"type Optionalize<Value> = when Value is {\n\tNone => None\n\telse => Value?\n}",
 	);
 	assert_statement(
-		"type Storage(size: Integer) = if size <= 255 { UInt8 } else { UInt64 }",
-		"type Storage(size: Integer) = if (size <= 255) {\n\tUInt8\n} else {\n\tUInt64\n}",
+		"type Storage<size: Integer> = if size <= 255 { UInt8 } else { UInt64 }",
+		"type Storage<size: Integer> = if (size <= 255) {\n\tUInt8\n} else {\n\tUInt64\n}",
 	);
 	assert_statement(
-		"type Capitalized(Input) = do {\nlet schema = @typeToSchema(Input)\nTypeFromSchema(schema)\n}",
-		"type Capitalized(Input) = do {\n\tlet schema = @typeToSchema(Input)\n\tTypeFromSchema(schema)\n}",
+		"type Capitalized<Input> = do {\nlet schema = @typeToSchema(Input)\nTypeFromSchema<schema>\n}",
+		"type Capitalized<Input> = do {\n\tlet schema = @typeToSchema(Input)\n\tTypeFromSchema<schema>\n}",
 	);
 }

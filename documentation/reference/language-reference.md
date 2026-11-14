@@ -23,7 +23,7 @@ See [syntax basics](/getting-started/syntax-basics).
 
 ## Declarations
 
-Every declaration is `<keyword> <name>[(<generic parameters>)][: <type>] = <value>`. `reuse` and the `export` forms are statements outside this shape.
+Every declaration is `<keyword> <name>[: <type>] = <value>`. A type declares its generic parameters after its name (`type Pair<Left, Right> = ...`), a function at the start of its signature (`function first = <Item>(items: Array<Item>) => ...`). `reuse` and the `export` forms are statements outside this shape.
 
 ```fa
 let total = 1                              -- deeply immutable
@@ -71,20 +71,20 @@ Boolean  String  Character
 Integer  Float  BigInt  Percentage  Byte
 Int8  Int16  Int32  Int64  Int128  UInt8  UInt16  UInt32  UInt64  UInt128  Float32  Float64
 None  Never  Void
-Array(T)  Set(T)  Map(K, V)  Pool(T)  Columnar(T)  OrderedColumnar(T)
-GrowingArray(T)  GrowingSet(T)  GrowingMap(K, V)  GrowingPool(T)  GrowingColumnar(T)
-Tuple(A, B)  Range  Task(T)  Optional(T)  T?
+Array<T>  Set<T>  Map<K, V>  Pool<T>  Columnar<T>  OrderedColumnar<T>
+GrowingArray<T>  GrowingSet<T>  GrowingMap<K, V>  GrowingPool<T>  GrowingColumnar<T>
+Tuple<A, B>  Range  Task<T>  Optional<T>  T?
 (name: String) => Boolean  (message: String) => Void
 ```
 
-- `Integer` has the range and native storage of `Int64` (two types, not interchangeable inside collections), and `Float` is `Float64`; `Byte` is `UInt8`. A `Float32` is accepted where a `Float` is expected, but arithmetic, comparisons and equality never mix the two. `T?` is `Optional(T)`, which is `T | None`, and `T??` is `T?`.
-- Every integer type is a range of `Integer` values with a storage width: `Int8` is `Integer(min = -128, max = 127)` stored in 8 bits.
+- `Integer` has the range and native storage of `Int64` (two types, not interchangeable inside collections), and `Float` is `Float64`; `Byte` is `UInt8`. A `Float32` is accepted where a `Float` is expected, but arithmetic, comparisons and equality never mix the two. `T?` is `Optional<T>`, which is `T | None`, and `T??` is `T?`.
+- Every integer type is a range of `Integer` values with a storage width: `Int8` is `Integer<min = -128, max = 127>` stored in 8 bits.
 - `Character` is one grapheme cluster, and the `length` of a string counts graphemes (unlike JavaScript, which counts UTF-16 units). A `Character` is accepted where a `String` is expected.
 - `let middle = text[1..3]` copies the characters; `use middle = text[1..3]` is a slice of type `String in text`, a reference into the string, invalidated by any mutation of the string.
-- `Void` is the type of "no value": the return type of a function that returns nothing, also usable as a type argument (`Task(Void)`). It can't be bound with `let`, and it is not `None`.
+- `Void` is the type of "no value": the return type of a function that returns nothing, also usable as a type argument (`Task<Void>`). It can't be bound with `let`, and it is not `None`.
 - `Never` is the bottom type: the type of `throw`, `return`, `break`, `continue`, of a `loop` without `break` and of a call to a function returning `Never`.
 - There is no `Any` type: use generics or unions.
-- `Type(value)` is the inferred type of a value, without what the compiler knows about its value; `value` is not evaluated. For a parameter (and a `use` alias or a loop variable), it is the type of what it designates: `(human: Human): Type(human)` returns the caller's full type.
+- `Type<value>` is the inferred type of a value, without what the compiler knows about its value; `value` is not evaluated. For a parameter (and a `use` alias or a loop variable), it is the type of what it designates: `(human: Human): Type<human>` returns the caller's full type.
 
 Declaring types:
 
@@ -102,8 +102,8 @@ A type annotation is a **constraint**: `value: Type` means that `value` satisfie
 
 - A value with more fields is accepted where fewer are expected. A parameter or a `use` alias sees it through the declared type, without copying; a copy annotated with the narrower type (`let human: Human = hero`) drops the extra fields.
 - An object literal can't have fields that the expected type lacks.
-- A parameter keeps the type of its argument, `Type(parameter)`: an unannotated copy of it keeps every field, and `(human: Human): Type(human)` returns the caller's full type.
-- A function that mutates a parameter only receives a value whose written fields have exactly the declared types. A collection of supersets (`Array(Hero)` for `Array(Human)`) is accepted only by a parameter that is not mutated; otherwise the function must be generic. `Set` elements and `Map` keys never accept supersets.
+- A parameter keeps the type of its argument, `Type<parameter>`: an unannotated copy of it keeps every field, and `(human: Human): Type<human>` returns the caller's full type.
+- A function that mutates a parameter only receives a value whose written fields have exactly the declared types. A collection of supersets (`Array<Hero>` for `Array<Human>`) is accepted only by a parameter that is not mutated; otherwise the function must be generic. `Set` elements and `Map` keys never accept supersets.
 - Compatibility and identity compare the public data fields only. Methods and defaults resolve statically, from the type written at the use site. A type with `#private` fields is nominal.
 - An anonymous union must be discriminable at runtime: its members are different kinds of values (number, string, boolean, `none`, collection, object), or objects that differ by a required field or a literal field. Otherwise, use a named `Union`, whose members carry a tag.
 
@@ -115,11 +115,11 @@ Type operations:
 | `T?` | optional (`T \| None`) |
 | `{ ...User, permissions: Permissions }` | composition by spread (order matters, conflicting field types are an error) |
 | `Shape - Shape.Point` | removes members from a union |
-| `Pick(User, { name, address { city } })` | keeps the keys of a key set (nested keys allowed) |
-| `Omit(User, { password })` | removes the keys of a key set |
-| `Keys(User)`, `DeepKeys(User)`, `KeyType(Map(String, User))` | the key set of an object type, and the key type of a map |
+| `Pick<User, { name, address { city } }>` | keeps the keys of a key set (nested keys allowed) |
+| `Omit<User, { password }>` | removes the keys of a key set |
+| `Keys<User>`, `DeepKeys<User>`, `KeyType<Map<String, User>>` | the key set of an object type, and the key type of a map |
 
-A type cannot contain itself directly (its size would be infinite). Recursion through a named declaration and a union, an optional (`T?`) or a collection is allowed: the recursive values are stored on the heap automatically, and each value owns its children. Polymorphic recursion (`List(T) = { tail: List(Array(T))? }`) is an error.
+A type cannot contain itself directly (its size would be infinite). Recursion through a named declaration and a union, an optional (`T?`) or a collection is allowed: the recursive values are stored on the heap automatically, and each value owns its children. Polymorphic recursion (`List<T> = { tail: List<Array<T>>? }`) is an error.
 
 See [declaring types](/types/declaring-types), [enumerations](/types/enumerations), [unions](/types/unions), [fields](/types/fields), [type operations](/types/operations).
 
@@ -130,13 +130,13 @@ let count = 42                                -- Integer
 let ratio = 12.5                              -- Float
 let big = 12n                                 -- BigInt
 let half = 50%                                -- Percentage
-let score: Integer(min = 0, max = 100) = 87   -- ranged integer
+let score: Integer<min = 0, max = 100> = 87   -- ranged integer
 let precise: Float = 3                        -- literals adapt to the expected type
 let scaled = Float(count) * ratio             -- conversions are explicit calls
 ```
 
 - Integers are compared by range: an integer value is accepted wherever its range fits the expected one (`let c: Int16 = a + b` with `Int8` operands), with no conversion. A narrower range needs a conversion call (`Int8(x)`). Conversions between `Integer`, `Float`, `BigInt` and `Percentage` are always explicit. `as` never converts. An arithmetic expression is exact: only its result is checked, where it goes; any other value must be proven to fit, or converted. Integer equality compares exact values across widths.
-- Prefer `Integer(min = 0)` to an unsigned type for a non-negative value.
+- Prefer `Integer<min = 0>` to an unsigned type for a non-negative value.
 - Overflow: a certain overflow (like a divisor proven zero or an index proven out of bounds) is a compile error, an impossible one generates no check, a possible one is checked at runtime and stops the program in development builds (`fa run`, `fa test`, `fa develop`), and wraps around in release builds (`fa build`), like Rust; `overflowChecks` in the build options changes the default. Explicit variants: `wrappingAdd`, `saturatingAdd`, `checkedAdd` (and `Sub`, `Mul`, `Pow`); `checked*` methods `throws ArithmeticError`.
 - An integer divisor must be provably non-zero (a literal, a ranged type, or narrowed with `if divisor != 0`); otherwise `//` and `%%` `throws DivisionByZero`. Floats follow IEEE 754: `/` never throws, `NaN == NaN` is false.
 - Index and divisor proofs follow fixed rules (ranges of types and narrowing, loop bounds, `index < collection.length` guards): what they don't prove needs `try`. See [ranges and proofs](/values/numbers).
@@ -150,14 +150,14 @@ See [numbers](/values/numbers).
 ```fa
 let point: Point = { x = 1, y = 2 }          -- typed by context
 let other = Point { x = 1, y = 2 }           -- no context
-let precise = Point(Float) { x = 1, y = 2 }  -- generic type
+let precise = Point<Float> { x = 1, y = 2 }  -- generic type
 
-let numbers: Set(Integer) = [1, 2, 3]
-let ages: Map(String, Integer) = [("Ana", 30), ("Bao", 25)]
-mutable humans: Pool(Human) = []
+let numbers: Set<Integer> = [1, 2, 3]
+let ages: Map<String, Integer> = [("Ana", 30), ("Bao", 25)]
+mutable humans: Pool<Human> = []
 let unique = Set.from([1, 2, 2])
 let users = Set.from(userList, key = (user) => user.id)
-mutable buffer = Array(Integer).from([], capacity = 1000)
+mutable buffer = Array<Integer>.from([], capacity = 1000)
 
 let last = items[-1]       -- negative index
 let middle = items[1..4]   -- slice (a copy)
@@ -165,7 +165,7 @@ let maybe = items.get(10)  -- optional
 ```
 
 - There are no positional constructors: always `Point { x = 1, y = 2 }`. Writing the type twice is a warning. `{ id }` is short for `{ id = id }`.
-- In expression position, braces are an object, except after `=>`, `if`, `else`, `do`, `loop`, `for`, `while`, `watch`, `test` and `namespace`, where they open a block. A lambda body `=> { ... }` is a block: return an object with its type name, `=> Point { x = 1, y = 2 }`. Where a key set is expected (`Pick(User, { name })`), braces are a key set. Anonymous objects contain only data and function pointers.
+- In expression position, braces are an object, except after `=>`, `if`, `else`, `do`, `loop`, `for`, `while`, `watch`, `test` and `namespace`, where they open a block. A lambda body `=> { ... }` is a block: return an object with its type name, `=> Point { x = 1, y = 2 }`. Where a key set is expected (`Pick<User, { name }>`), braces are a key set. Anonymous objects contain only data and function pointers.
 - Indexing that the compiler cannot prove `throws IndexError`; an unproven map key `throws KeyNotFound`. `.get(index)` and `.get(key)` return an optional.
 - Methods: `length` (a property: `size` for the collections without positions, `Set`, `Map`, `Pool` and `Columnar`), `includes`, `delete`, `take` (returns the removed element; an optional on `Set` and `Map`), `deleteWhere`, `sort()` (a copy, stable) and `sortInPlace()`, `reverse()` and `reverseInPlace()`, `pop()` (an optional), `getOrInsert`, `sum()`. `Set.delete` and `Map.delete` return whether something was removed. `find` returns an optional reference, which `let` copies.
 - A comparator returns a number whose sign gives the order: `sort((a, b) => b - a)`. Callbacks receive `(item, index)` on the collections with positions, `(item)` on the others, `(key, value)` on maps. `filter` keeps the kind of collection; `map` returns an `Array` (a `Map` on maps).
@@ -179,34 +179,36 @@ See [objects](/values/objects), [arrays](/collections/arrays).
 Generic parameters come right after the declared name, for types and for functions:
 
 ```fa
-type Pair(First, Second) = { first: First, second: Second }
-type Point(NumberType: Integer | Float) = { x: NumberType, y: NumberType }
-type Matrix(Element, rows: Integer, columns: Integer) = { ... }
-type Collection(Item, Index = Integer) = { ... }
+type Pair<First, Second> = { first: First, second: Second }
+type Point<NumberType: Integer | Float> = { x: NumberType, y: NumberType }
+type Matrix<Element, rows: Integer, columns: Integer> = { ... }
+type Collection<Item, Index = Integer> = { ... }
 
-function first(Item) = (items: Array(Item)): Item? => items.get(0)
-function sum(Value: Integer | Float) = (values: Array(Value)): Value => ...
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
+function sum = <Value: Integer | Float>(values: Array<Value>): Value => ...
 ```
 
-Applying a generic is a call:
+Generic parameters and arguments are written between angle brackets; parentheses are only calls and conversions:
 
 ```fa
-Array(Integer)
-Map(String, User)
-Integer(min = 0, max = 200)
-Matrix(Float, 4, 4)
+Array<Integer>
+Map<String, User>
+Integer<min = 0, max = 200>
+Matrix<Float, 4, 4>
 
 first([1, 2, 3])                -- `Item` is inferred as `Integer`
-sum(Float)([1, 2, 3])           -- explicit
-Point(Float) { x = 1, y = 2 }
-Set(Float).from([1, 2])
+sum<Float>([1, 2, 3])           -- explicit
+Point<Float> { x = 1, y = 2 }
+Set<Float>.from([1, 2])
 ```
 
 - A **capitalized** parameter is a type parameter; a **lowercase** parameter is a compile-time value parameter. No `@` on compile-time parameters.
 - Constraints use `:`. A union means "one of these types"; an object type means "has at least these fields".
 - Parameters can have defaults: `Index = Integer`.
 - Generic arguments are inferred from the arguments and from the expected type. An ambiguity is an error. Compile-time value parameters are never inferred.
-- The first argument list is the generic one when the callee has generic parameters and either a compile-time value parameter or only types as arguments (`repeatText(3)("ab")`, `sum(Float)([1, 2])`). On a built-in scalar type, a positional value is a conversion (`Int8(x)`) and named arguments refine it (`Integer(min = 0)`).
+- Explicit generic arguments come before the call: `repeatText<3>("ab")`, `sum<Float>([1, 2])`, `makeAdder<Float>(5)(3)`. On a built-in scalar type, parentheses convert (`Int8(x)`) and angle brackets refine (`Integer<min = 0>`).
+- `<` followed by whitespace (space, tab, line break) is the comparison operator; any other `<` opens a generic list. Inside an open generic list, `>` closes it; outside, `>` is the comparison operator. A comparison inside a generic list goes in parentheses (`Choose<(count > 255), UInt16, UInt8>`), which suspend the list until they close. `<=`, `>=`, `=>` and `->` are separate tokens, never generic brackets (`Pool<people->bestFriend>`). So `count<limit` is not a comparison: write `count < limit`.
+- Generic parameters are part of a function's signature: a lambda can declare them (`<Value>(value: Value) => value`), and a function type can have them (`(transform: <Value>(value: Value) => Value) => ...`). A value of a generic function type must be known at compile time (a named function or a lambda), and the function receiving it is compiled for each one. Generic function types are never inferred.
 - A generic body is checked once, against the constraints; a union constraint binds the parameter to exactly one member. Only `@for`, `@if` and type functions are checked after substitution. A method called on a type parameter resolves on the actual type, and a constraint can require a method.
 - Deliberately left out: specialisation and overloading, higher-kinded types, variance annotations, implicit conversions to satisfy a constraint, overload resolution on the return type.
 
@@ -232,7 +234,7 @@ Compound assignment: `+=` `-=` `*=` `**=` `/=` `//=` `%%=`, and `.=` to assign s
 | `==` `!=` | deep structural equality of the data fields (sets, pools and maps compare without order; relation and private fields are not compared; values containing functions can't be compared) |
 | `is` `is not` | pattern, type or literal match, with narrowing: `value is Animal`, `status is "ready"`, `score is 0..60`, `answer is "y" \| "yes"` |
 | `is in` `is not in` | membership |
-| `<` `<=` `>` `>=` | ordering, chainable: `0 < x <= 100` evaluates each operand once |
+| `<` `<=` `>` `>=` | ordering, chainable: `0 < x <= 100` evaluates each operand once; `<` is followed by whitespace (otherwise it opens a [generic list](#generics)) |
 | `and` `or` | short-circuiting; `and` binds tighter than `or` |
 | `not` | negation, binds tighter than `and`: `not a and b` is `(not a) and b` |
 
@@ -250,7 +252,7 @@ There is no truthiness: `if`, `while`, `and`, `or` and `not` only accept a `Bool
 | `with` | partial application: `xyz with (y = 0)` |
 | `..` `..=` | range, exclusive / inclusive: `a..b`, `a..=b`, `a..`, `..b`, `..=b`, `..` |
 | `...` | spread, variadic parameter |
-| `->` | reverse side of a relation: `collection->field`, as in `Pool(people->bestFriend)` |
+| `->` | reverse side of a relation: `collection->field`, as in `Pool<people->bestFriend>` |
 | `as` | gives a name (destructuring, `when` bindings); never converts |
 | `try` `catch` | propagate or handle an error |
 | `await` `start` | wait for or start an asynchronous call |
@@ -344,7 +346,7 @@ See [conditionals](/control-flow/conditionals), [loops](/control-flow/loops), [d
 There is one form:
 
 ```
-[async] function name(GenericParameters) = (parameters): ReturnType throws Errors requires name: Type mutates path invalidates path => body
+[async] function name = [<GenericParameters>](parameters): ReturnType throws Errors requires name: Type mutates path invalidates path => body
 ```
 
 ```fa
@@ -477,7 +479,7 @@ See [requirements](/advanced/requirements).
 There is no garbage collector and no borrow checker.
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 
 use ada = people.add(Person { name = "Ada" })  -- a reference: `Person in people`
 let copy = ada                                 -- a copy
@@ -511,29 +513,29 @@ A mutation gives a new value to a place, which stays valid; it invalidates the l
 
 `Pool.add`, `GrowingPool.add` and `Columnar.add` return a reference. Outside the implementation of a collection, its `length` or `size` is read-only. Mutating a collection or its length or size while iterating over it is a compile error. `invalidates element` on an element of `collection` implies `mutates collection.size`.
 
-After branches, a reference invalidated in any branch is invalidated; loops are checked until nothing changes. To repair a reference inside a branch or a loop, use a `mutable use` and `reuse`. A reference type names a path (`Person in town.people`): at a call, the parameter names of the callee's reference types are replaced by the arguments. A function returns a reference only when its return type says `in`. Local collections of references (`Array(Person in people)`) are not allowed: use indices or a relation. The exact rules are on the [reference checking](/advanced/reference-checking) page.
+After branches, a reference invalidated in any branch is invalidated; loops are checked until nothing changes. To repair a reference inside a branch or a loop, use a `mutable use` and `reuse`. A reference type names a path (`Person in town.people`): at a call, the parameter names of the callee's reference types are replaced by the arguments. A function returns a reference only when its return type says `in`. Local collections of references (`Array<Person in people>`) are not allowed: use indices or a relation. The exact rules are on the [reference checking](/advanced/reference-checking) page.
 
 A stored reference is always one side of a relation, and the other side is always declared: a direct side (a reference field) and a reverse side `collection->field`, read as "the elements of `collection` whose `field` points at me". The collection is a field of the containing type or a module-level value. Both sides are elements of stable-address collections (`Pool`, `Columnar`, `GrowingPool`, `GrowingColumnar`; never `Array`, `Set`, `Map`). A direct side is optional or a `Pool`.
 
 ```fa
 type Town = {
-	people: Pool(Person) = []
+	people: Pool<Person> = []
 
 	type Person = {
 		name: String
 		bestFriend: (Person in people)?
-		bestFriendOf: Pool(people->bestFriend)
+		bestFriendOf: Pool<people->bestFriend>
 	}
 }
 ```
 
 | Relation | Direct side | Reverse side |
 | --- | --- | --- |
-| one-to-many | `bestFriend: (Person in people)?` | `bestFriendOf: Pool(people->bestFriend)` |
+| one-to-many | `bestFriend: (Person in people)?` | `bestFriendOf: Pool<people->bestFriend>` |
 | one-to-one | `bestFriend: (Person in people)?` | `bestFriendOf: (people->bestFriend)?` |
-| many-to-many | `friends: Pool(Person in people)` | `friendOf: Pool(in people->friends)` |
+| many-to-many | `friends: Pool<Person in people>` | `friendOf: Pool<in people->friends>` |
 | symmetric | `spouse: (people->spouse)?` | itself |
-| two types | `author: (User in users)?` (in `Post`) | `articles: Pool(posts->author)` (in `User`) |
+| two types | `author: (User in users)?` (in `Post`) | `articles: Pool<posts->author>` (in `User`) |
 
 - The reverse side is read-only. A write to the direct side detaches from the previous target, writes, and attaches to the new target, in O(1). One-to-one: the previous holder of the new target becomes `none`. Symmetric: `ana.spouse = bao` also sets `bao.spouse`, and detaches previous spouses.
 - `mutates a.bestFriend` implies the related reverse sides, and the direct side of the previous holder for one-to-one and symmetric relations.
@@ -575,7 +577,7 @@ async function fetchUser = (id: String): User throws HttpError => {
 
 let user = try fetchUser(id)          -- blocking
 let user = try await fetchUser(id)    -- awaited, inside an async function
-let task = start fetchUser(id)        -- started: a `Task(User)`
+let task = start fetchUser(id)        -- started: a `Task<User>`
 let user = try await task
 task.cancel()
 
@@ -591,11 +593,11 @@ for parallel item, index in items {
 - Async is colorless: an `async function` can be called blocking, awaited or started. On JavaScript targets, it is compiled lazily into `name___sync` and `name___async` versions. Calling an async-only primitive synchronously on a target is a compile error, and so is a blocking call that reaches a channel, a lock or a started task on JavaScript. Whether a function can be called blocking on a target is part of its interface.
 - `async` is part of a function type; a lambda is async when its expected type is, and a non-async function can be stored in an async function type. `await` is only allowed in an `async function`, an async lambda, a `start do` block, a test and the top level of a standalone file. `await` takes an async call or a `Task`.
 - A started task begins at the starter's next `await` (or when it returns to the event loop). Inside a blocking call, on every target, `await` blocks and `start` runs eagerly to a finished task.
-- A `Task(T) throws E` declares its errors like a function. Tasks are combined with `Task.all`, `Task.any` and `Task.settled`, plain functions that return a `Task`.
+- A `Task<T> throws E` declares its errors like a function. Tasks are combined with `Task.all`, `Task.any` and `Task.settled`, plain functions that return a `Task`.
 - Tasks are structured: a `Task` can't be copied, and leaving its scope cancels it and waits for it. Cancellation happens at the next suspension point, `cancel()` waits for the task to stop, and awaiting a task that may have been cancelled can throw `Cancelled`. A `start` whose task is not kept is **detached**: it copies its arguments and what it captures, can't have `throws`, and the program waits for it before exiting.
 - A started function receives references: until its task is awaited or cancelled, the values it reads can't be modified, and the values it modifies can't be used. This covers its arguments, the values a `start do` captures, the module-level values of its effects and its requirements. A task can't outlive the values it uses. At each `await`, what is known about module-level mutable values is forgotten.
 - Tasks run on one thread, as in JavaScript; threads come from workers and `for parallel`.
-- Mutexes, atomics and channels are declared `mutable`. They are thread-safe handles: their methods don't declare `mutates self`, so several tasks and threads can use them at once, and a copy shares the same value. The thread-safe types are `Mutex(T)`, `AtomicInteger`, `AtomicBoolean`, `Channel(T)` (from `std.concurrency`), and objects or tuples whose fields are all thread-safe. Only thread-safe types can be shared mutably between threads.
+- Mutexes, atomics and channels are declared `mutable`. They are thread-safe handles: their methods don't declare `mutates self`, so several tasks and threads can use them at once, and a copy shares the same value. The thread-safe types are `Mutex<T>`, `AtomicInteger`, `AtomicBoolean`, `Channel<T>` (from `std.concurrency`), and objects or tuples whose fields are all thread-safe. Only thread-safe types can be shared mutably between threads.
 - Workers copy arguments and results across threads: references and relations cannot cross worker boundaries, thread-safe handles can. A worker runs one call at a time, and its handle can't be copied. `for parallel` and `parallel()` are native only.
 
 See [concurrency](/advanced/concurrency).
@@ -620,7 +622,7 @@ static six = @add(2, 4)              -- a pure function called at compile time
 	...
 }
 
-Type(value)                          -- the type of a value
+Type<value>                          -- the type of a value
 @typeToString(User)
 @typeToSchema(User)
 
@@ -642,14 +644,14 @@ use c = std.c
 
 export namespace = {
 	type Sqlite3 = CStruct { }
-	function open: (path: CString, database: Pointer(Pointer(Sqlite3)?)) => c.Int mutates database = @extern("sqlite3_open")
-	function close: (database: Pointer(Sqlite3)) => c.Int = @extern("sqlite3_close")
+	function open: (path: CString, database: Pointer<Pointer<Sqlite3>?>) => c.Int mutates database = @extern("sqlite3_open")
+	function close: (database: Pointer<Sqlite3>) => c.Int = @extern("sqlite3_close")
 }
 ```
 
-- Only `*.foreign.fa` files can declare C functions (`@extern("symbol")`), call them, use `Pointer(T)` and `CString`, and declare `destroy` in a type. A value whose type contains `Pointer` or `CString` can't be used outside foreign files. They are the only code the compiler trusts instead of proving.
-- C types: the numbers, `Boolean`, `c.Int`, `c.Long`, `c.SizeT`... (`std.c`), `Pointer(T)` (never `NULL`) and `Pointer(T)?` (`none` is `NULL`), `CString`, `CStruct { ... }` (nominal, C layout; usable in every file), `CArray(T, n)`.
-- For the duration of a call, an `Array(T)` is passed as a `Pointer(T)`, a `mutable` value as its address (declared with `mutates`), a `String` as a `CString`. C must not keep these pointers.
+- Only `*.foreign.fa` files can declare C functions (`@extern("symbol")`), call them, use `Pointer<T>` and `CString`, and declare `destroy` in a type. A value whose type contains `Pointer` or `CString` can't be used outside foreign files. They are the only code the compiler trusts instead of proving.
+- C types: the numbers, `Boolean`, `c.Int`, `c.Long`, `c.SizeT`... (`std.c`), `Pointer<T>` (never `NULL`) and `Pointer<T>?` (`none` is `NULL`), `CString`, `CStruct { ... }` (nominal, C layout; usable in every file), `CArray<T, n>`.
+- For the duration of a call, an `Array<T>` is passed as a `Pointer<T>`, a `mutable` value as its address (declared with `mutates`), a `String` as a `CString`. C must not keep these pointers.
 - A type with `destroy` (and every type containing one) is move-only; `destroy` runs when the value is destroyed.
 - A C function pointer parameter accepts a function known at compile time that captures nothing and can't throw.
 - `fa bind header.h` generates a foreign file once; builds never read C headers. Libraries are linked with `build.link`.
@@ -693,7 +695,7 @@ See [testing](/architecture/testing).
 
 ```fa
 export = 42
-export mutable: Pool(Person) = []  -- other files can modify it
+export mutable: Pool<Person> = []  -- other files can modify it
 export type = { ... }
 export function = (x: Integer): Integer => x
 export namespace = { ... }
@@ -711,8 +713,8 @@ library.greet("Ada")  -- from a file of `application/`
 - Module-level values are initialized in dependency order, and destroyed in reverse order at exit; a cycle between their initializers is an error. Statements other than declarations are only allowed at the top of standalone files and scripts.
 - `#name` members are private.
 - `*.test.fa`, `*.worker.fa` and `*.foreign.fa` files are named by the part before their suffix; test files are never names.
-- `application/main.fa` exports the entry function. It may be `async`, take `arguments: Array(String)` (empty on `web`; `arguments.get(0)` is the first argument) and return an exit code (`Integer`, ignored on `web`); its errors are declared with `throws`, its other effects are inferred. The top level of a standalone file or a script sees the same implicit `arguments`.
-- A `mutable` member of an exported namespace can be read by every file but written only by its own file. `reactive`, `derived` and `static` values can't be exported. A generic export is written `export type(First, Second) = ...` or `export function(Item) = ...`.
+- `application/main.fa` exports the entry function. It may be `async`, take `arguments: Array<String>` (empty on `web`; `arguments.get(0)` is the first argument) and return an exit code (`Integer`, ignored on `web`); its errors are declared with `throws`, its other effects are inferred. The top level of a standalone file or a script sees the same implicit `arguments`.
+- A `mutable` member of an exported namespace can be read by every file but written only by its own file. `reactive`, `derived` and `static` values can't be exported. A generic export is written `export type<First, Second> = ...` or `export function = <Item>(...) => ...`.
 - `(group)` folders can appear at any level: their contents merge into the parent folder. See [name lookup](/architecture/modules#name-lookup) and the [prelude](/architecture/modules#prelude).
 
 See [modules](/architecture/modules).

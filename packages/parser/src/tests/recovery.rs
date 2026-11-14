@@ -28,7 +28,7 @@ fn rules_of_the_specification_carry_their_code() {
 		[Some("E-WHEN-6")]
 	);
 	assert_eq!(
-		codes("type Grid(size) = { cells: Array(Integer) }"),
+		codes("type Grid<size> = { cells: Array<Integer> }"),
 		[Some("GN001")]
 	);
 	assert_eq!(codes("export static limit = 3"), [Some("META011")]);
@@ -385,9 +385,10 @@ fn namespace_has_no_parameters() {
 
 #[test]
 fn empty_generic_parameters_are_reported() {
-	assert_error_message("type T() = Integer", "Generic parameters can't be empty");
-	assert_error_message("function f() = x", "Generic parameters can't be empty");
-	assert_error_message("function f(x) = x", "needs a type");
+	assert_error_message("type T<> = Integer", "Generic parameters can't be empty");
+	assert_error_message("let a: Array<> = []", "Generic parameters can't be empty");
+	assert_error_message("function f = <>() => x", "Generic parameters can't be empty");
+	assert_error_message("function f = <x>() => x", "needs a type");
 }
 
 #[test]
@@ -561,4 +562,34 @@ fn spans_of_invalid_nodes_are_in_the_source() {
 	for span in &tree.spans {
 		assert!(span.start <= span.end && span.end <= source.len());
 	}
+}
+
+#[test]
+fn generic_lists_are_reported() {
+	// a comparison without a space after `<`
+	assert_error_message("if count<limit { }", "write `count < limit`");
+	assert_error_message("let a = x<1", "write `x < 1`");
+	// the old forms between parentheses
+	assert_error_message(
+		"type Pair(Left, Right) = Left",
+		"Generic parameters are written between angle brackets: write `<Left, Right>`",
+	);
+	assert_error_message(
+		"function first(Item) = (items: Array<Item>) => items",
+		"write `function first = <Item>(…) => …`",
+	);
+	assert_error_message(
+		"function first<Item> = (items: Array<Item>) => items",
+		"write `function first = <Item>(…) => …`",
+	);
+	assert_error_message(
+		"export function<Item> = (items: Array<Item>) => items",
+		"write `export function = <Item>(…) => …`",
+	);
+	assert_error_message("let f = <Item> 12", "Expected the parameters of a function");
+	// the misplaced parameters still go to the lambda
+	assert_eq!(
+		parse("function first<Item> = (items: Array<Item>) => items").to_string(),
+		"function first = <Item>(items: Array<Item>) => items;"
+	);
 }

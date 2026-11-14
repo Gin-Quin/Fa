@@ -187,7 +187,7 @@ Ce traitement est local aux valeurs contenant une union inline. Voir la
 et sur [les valeurs indéfinies](https://llvm.org/docs/UndefinedBehavior.html).
 
 **L'inlining systématique des plus grosses unions a été écarté.** L'essai à
-40 octets par élément de `Array(Event)` réduisait les instructions de `records`
+40 octets par élément de `Array<Event>` réduisait les instructions de `records`
 mais élargissait le tableau. Une comparaison directe, neuf échantillons alternés
 sur le CPU 1, a mesuré 0,433 s pour le code précédent et 0,605 s pour cet essai,
 contre 0,196 s pour Goose. Le binaire précédent a été reconstruit depuis
@@ -249,7 +249,7 @@ pas couverte par une preuve suffisante.
 - Les templates de chaînes et d'entiers évaluent les expressions dans l'ordre,
   calculent la taille totale, puis écrivent directement dans le résultat. Un
   entier seul utilise directement une petite chaîne, sans builder partagé.
-  `Array(String).join` calcule également la taille finale avant la copie.
+  `Array<String>.join` calcule également la taille finale avant la copie.
 - Le padding d'un texte SIMPLE par un caractère ASCII sans `\r` utilise la
   longueur en octets, puis un remplissage direct. Les autres cas continuent à
   compter les graphèmes et à cycler les caractères du filler.
@@ -513,7 +513,7 @@ python3 benchmarks/audit/compare.py --directory benchmarks/audit/build/runtime-n
 | Priorité | Optimisation générique | Condition de sécurité / validation |
 | --- | --- | --- |
 | Haute | Payloads d'unions de taille variable dans un buffer de collection, avec index d'offsets | Conserver l'accès aléatoire ; aligner les payloads ; promouvoir les offsets ou matérialiser avant débordement ; traiter mutations, copies et références invalidées. Mesurer `records` à grande taille, pas seulement les allocations. |
-| Haute | Arènes traversant `Array(Root)` et collections de racines | Identifier le propriétaire de chaque région ; libérer les buffers sans détruire deux fois les enfants ; couvrir copies de sous-arbres, extractions, erreurs et mutations. Débloque notamment `sexp`. |
+| Haute | Arènes traversant `Array<Root>` et collections de racines | Identifier le propriétaire de chaque région ; libérer les buffers sans détruire deux fois les enfants ; couvrir copies de sous-arbres, extractions, erreurs et mutations. Débloque notamment `sexp`. |
 | Haute | Nœuds à petits tableaux intégrés | Prouver une borne de longueur sur tous les chemins de construction et d'écriture, puis conserver un repli pour les autres usages. Le nom `maxChildren` ou une taille observée ne constitue pas une preuve. Cible : `scene`. |
 | Haute | Groupes de contrôle et empreintes de hash pour l'index | Filtrer les collisions avant de charger les entrées ; garder leurs adresses stables ; gérer les groupes à la frontière sans lecture hors allocation. Mesurer les chaînes et les entiers séparément. |
 | Haute | Réutiliser `includes/get` puis `[]`, `delete` ou `getOrInsert` | Attacher le sondage à une version de la collection et une identité de clé ; invalider la preuve sur mutation, effet inconnu et alias. Le présent changement couvre seulement le sondage interne à une insertion/suppression. |
@@ -695,7 +695,7 @@ emploient le layout réellement stocké. Les résultats optionnels de `get`, `fi
 possédé. Les références des `Map` continuent à désigner leurs emplacements stables
 pendant les insertions.
 
-L'audit ne conclut pas à l'absence de toute allocation évitable. `Array(Node?)`
+L'audit ne conclut pas à l'absence de toute allocation évitable. `Array<Node?>`
 et les `Rec` imbriqués dans certains tuples ou agrégats conservent leur
 représentation actuelle. Une union contenant une collection peut encore être
 exclue du critère d'inlining, même si son layout serait fini. Un callback sur une

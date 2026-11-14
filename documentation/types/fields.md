@@ -92,8 +92,8 @@ Braces are read as a key set only where a `Fields` type is expected. Everywhere 
 ```fa
 type MyType = { foo: String, bar: Integer }
 
-type Picked = Pick(MyType, { foo }) -- { foo: String }
-type Omitted = Omit(MyType, { foo }) -- { bar: Integer }
+type Picked = Pick<MyType, { foo }> -- { foo: String }
+type Omitted = Omit<MyType, { foo }> -- { bar: Integer }
 ```
 
 Key sets can reach into nested objects:
@@ -106,17 +106,17 @@ type MyType = {
 	}
 }
 
-type Trimmed = Omit(MyType, { foo { baz } }) -- { foo: { bar: Integer } }
+type Trimmed = Omit<MyType, { foo { baz } }> -- { foo: { bar: Integer } }
 ```
 
-Naming every member of a group is the same as naming the group: `Omit(MyType, { foo { bar, baz } })` removes the field `foo`, and `Pick(MyType, { foo { bar, baz } })` keeps the whole field.
+Naming every member of a group is the same as naming the group: `Omit<MyType, { foo { bar, baz } }>` removes the field `foo`, and `Pick<MyType, { foo { bar, baz } }>` keeps the whole field.
 
 `Keys` produces the key set of a type, as a `Fields` type, and `DeepKeys` produces it recursively:
 
 ```fa
 type MyType = { foo: String, bar: Integer }
 
-type MyKeys = Keys(MyType) -- Fields { foo, bar }
+type MyKeys = Keys<MyType> -- Fields { foo, bar }
 ```
 
 Only public data fields are keys: methods and `#private` fields are not. `DeepKeys` stops at a [recursive](/types/unions#unions-and-recursion) field: the field is a key, its own fields are not.
@@ -126,7 +126,7 @@ Only public data fields are keys: methods and `#private` fields are not. `DeepKe
 Because a key set is a compile-time value, a function can take one as a [compile-time value parameter](/types/generics#type-parameters-and-compile-time-value-parameters), and use it to generate code with `@for`:
 
 ```fa
-function logProperties(Value, keys: DeepKeys(Value)) = (value: Value) => {
+function logProperties = <Value, keys: DeepKeys<Value>>(value: Value) => {
 	@for key in keys {
 		console.log("{key} = {value[key]}")
 	}
@@ -152,19 +152,19 @@ let settings: Settings = {
 	}
 }
 
-logProperties(Settings, { foo, baz, nested { foo } })(settings)
+logProperties<Settings, { foo, baz, nested { foo } }>(settings)
 ```
 
 `@for` unrolls the loop at compile time: the call above compiles to three `console.log` lines, with no runtime lookup at all.
 
 `@for` over a key set goes through its leaves, in declaration order: a group stands for all of its members. Each `key` is a compile-time path, printed with dots (`"nested.foo"`), and `value[key]` reads the field at that path, with its own type. The body is checked once per key, after the loop is unrolled: an error names the key and the call that caused it.
 
-The key set is a compile-time value parameter, so it is never inferred: `logProperties` always receives its parameters explicitly, before the runtime call. See [generic application](/types/generics#generic-application-or-call).
+The key set is a compile-time value parameter, so it is never inferred: `logProperties` always receives its parameters explicitly, before the runtime call. See [explicit parameters](/types/generics#explicit-parameters).
 
 A key set declared with `static` works the same way:
 
 ```fa
-static loggedKeys: DeepKeys(Settings) = { foo, nested { bar } }
+static loggedKeys: DeepKeys<Settings> = { foo, nested { bar } }
 
 @for key in loggedKeys {
 	console.log("{key} = {settings[key]}")

@@ -5,6 +5,7 @@ use crate::parsing::parse_arrow_function::parse_arrow_function;
 use crate::parsing::parse_block_body::parse_block;
 use crate::parsing::parse_expression::{ExpressionContext, parse_expression, parse_range_end};
 use crate::parsing::parse_function_call_parameters::parse_function_call_parameters;
+use crate::parsing::parse_generic_arguments::parse_generic_application;
 use crate::parsing::parse_index_expression::parse_index_expression;
 use crate::parsing::parse_members::parse_member_items;
 use crate::priority::Priority;
@@ -411,7 +412,7 @@ pub(crate) fn parse_expression_right(
 		}
 
 		// a call (the parenthesis can be marked as a function declaration when the call is
-		// followed by `=>`, like in the return type `(): Array(Integer) => ...`)
+		// followed by `=>`, like in `(): Array<Integer> => compute()`)
 		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration => {
 			let parameters = parse_function_call_parameters(context);
 			let start = context.span(left).start;
@@ -425,6 +426,8 @@ pub(crate) fn parse_expression_right(
 				end,
 			)
 		}
+		// explicit generic parameters, like `Array<Integer>` or `first<Float>`
+		TokenKind::GenericOpen => parse_generic_application(context, left),
 		// an object of a named type, like `Point { x = 1 }`
 		TokenKind::BracesOpen => {
 			let (members, end) = parse_member_items(context);

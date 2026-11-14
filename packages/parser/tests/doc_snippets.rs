@@ -17,8 +17,10 @@ use std::time::Duration;
 use fa_parser::{TypedSyntaxTree, parse};
 
 /// The examples of syntax errors of the documentation: a file, and a line of the block.
-const EXPECTED_ERRORS: [(&str, &str); 3] = [
+const EXPECTED_ERRORS: [(&str, &str); 5] = [
 	("types/declaring-types.md", "mutable type MyType"),
+	("getting-started/syntax-basics.md", "if count<limit"),
+	("types/generics.md", "if count<limit"),
 	("values/numbers.md", "let a = fifty%"),
 	("values/tuples.md", "let dotted = pair.0"),
 ];

@@ -6,24 +6,24 @@ A list literal `[...]` is an array, unless the context expects another collectio
 
 ```fa
 let myArray = [1, 2, 3] -- immutable array: you cannot modify, add or remove elements
-let myTypedArray: Array(Integer) = [1, 2, 3]
+let myTypedArray: Array<Integer> = [1, 2, 3]
 
 mutable myMutableArray = [1, 2, 3] -- mutable array: you can modify, add and remove elements
-mutable myTypedMutableArray: Array(Integer) = [1, 2, 3]
+mutable myTypedMutableArray: Array<Integer> = [1, 2, 3]
 ```
 
-Without an expected type, the elements of a literal get their base types, joined like the branches of an `if`: `[1, "a"]` is an `Array(Integer | String)`, and mixing integer and float literals, like `[1, 2.5]`, is an error (write `2.0`, or annotate).
+Without an expected type, the elements of a literal get their base types, joined like the branches of an `if`: `[1, "a"]` is an `Array<Integer | String>`, and mixing integer and float literals, like `[1, 2.5]`, is an error (write `2.0`, or annotate).
 
 An empty array needs its type, because there is nothing to infer from:
 
 ```fa
-mutable empty: Array(Integer) = []
+mutable empty: Array<Integer> = []
 ```
 
 Reserve capacity up front when you know the size, with the `capacity` option of `from`:
 
 ```fa
-mutable buffer = Array(Integer).from([], capacity = 1000)
+mutable buffer = Array<Integer>.from([], capacity = 1000)
 ```
 
 Arrays own their storage on the heap. See [memory management](/advanced/memory-management).
@@ -35,26 +35,26 @@ All collections (`Array`, `Set`, `Map`, `Pool`, `Columnar`, ...) are created fro
 When the type of the collection is known from the context (a declaration, a parameter, a return type, a field), the literal takes this type:
 
 ```fa
-let numbers: Set(Integer) = [1, 2, 3]
-let scores: Map(String, Integer) = [("ana", 12), ("bao", 17)]
-mutable humans: Pool(Human) = []
+let numbers: Set<Integer> = [1, 2, 3]
+let scores: Map<String, Integer> = [("ana", 12), ("bao", 17)]
+mutable humans: Pool<Human> = []
 
-function total = (values: Set(Integer)): Integer => values.sum()
-total([1, 2, 3]) -- the literal is a `Set(Integer)`
+function total = (values: Set<Integer>): Integer => values.sum()
+total([1, 2, 3]) -- the literal is a `Set<Integer>`
 ```
 
 When there is no context, use the `from` function of the collection type. The type of the elements is inferred from the list, or can be given explicitly:
 
 ```fa
 let distinctCount = Set.from([1, 2, 2, 3]).size -- 3
-let floats = Set(Float).from([1, 2, 3])
+let floats = Set<Float>.from([1, 2, 3])
 ```
 
 `from` also accepts the options of the collection:
 
 ```fa
 let users = Set.from(userList, key = (user) => user.id)
-mutable buffer = Array(Integer).from([], capacity = 1000)
+mutable buffer = Array<Integer>.from([], capacity = 1000)
 ```
 
 The options are `capacity`, a hint for `Array`, `GrowingArray`, `Set`, `Map`, `Pool` and `Columnar`, and `key`, for `Set` and `GrowingSet` (see [custom key](/collections/sets#custom-key)). Any other option is an error.
@@ -177,8 +177,8 @@ numbers.isEmpty()                        -- false
 numbers.includes(2)                      -- true
 numbers.indexOf(2)                       -- Integer?
 numbers.find((n) => n > 2)               -- (Integer in numbers)?: `let` copies it into an `Integer?`
-numbers.filter((n) => n > 1)             -- Array(Integer)
-numbers.map((n) => n * 2)                -- Array(Integer)
+numbers.filter((n) => n > 1)             -- Array<Integer>
+numbers.map((n) => n * 2)                -- Array<Integer>
 numbers.reduce((total, n) => total + n, 0)
 numbers.sum()                            -- 6
 numbers.every((n) => n > 0)
@@ -275,7 +275,7 @@ mutable array = [1, 2, 3]
 
 -- no bounds check: the compiler knows the array has three items
 let first = array[0]
-console.log(@typeToString(Type(first))) -- "Integer"
+console.log(@typeToString(Type<first>)) -- "Integer"
 
 -- rejected at compile time
 let fourth = array[3]
@@ -284,14 +284,14 @@ let fourth = array[3]
 When the index comes from a [ranged integer](/values/numbers#minimum-and-maximum-values), the same reasoning applies:
 
 ```fa
-let index: Integer(min = 0, max = 2) = readIndex()
+let index: Integer<min = 0, max = 2> = readIndex()
 let value = array[index] -- no bounds check
 ```
 
 When the compiler cannot prove the index is valid, indexing `throws IndexError`. Propagate the error with `try`, handle it with `catch`, or use `get` to receive an optional:
 
 ```fa
-function readValue = (array: Array(Integer), index: Integer): Integer throws IndexError => {
+function readValue = (array: Array<Integer>, index: Integer): Integer throws IndexError => {
 	let value = try array[index] -- propagates `IndexError` to the caller
 	value
 }
@@ -303,7 +303,7 @@ let fallback = array.get(index) ?? 0
 Destructuring an array whose length is not proven can fail the same way, so it is preceded by `try`:
 
 ```fa
-function firstTwo = (values: Array(Integer)): Integer throws IndexError => {
+function firstTwo = (values: Array<Integer>): Integer throws IndexError => {
 	try let [first, second] = values -- `IndexError` if `values` has fewer than two items
 	first + second
 }

@@ -7,7 +7,7 @@ A `Pool` stores unordered values with no uniqueness constraint. It is the collec
 Insertion is fast, and stored objects keep a **stable address** even as the pool grows (see [how it works](#how-it-works)).
 
 ```fa
-mutable pool: Pool(Human) = []
+mutable pool: Pool<Human> = []
 
 use john = pool.add({ name = "John", age = 20 })
 use jane = pool.add({ name = "Jane", age = 21 })
@@ -29,7 +29,7 @@ An object literal given to `add` is built **directly in the pool**: no temporary
 ```fa
 type Point = { x: Integer, y: Integer }
 
-mutable points: Pool(Point) = []
+mutable points: Pool<Point> = []
 
 use point = points.add({ x = 3, y = 4 }) -- good: a reference to the point stored in the pool
 point.x += 1 -- modifies the stored point
@@ -84,7 +84,7 @@ pool.deleteWhere((human) => human.name == "John")
 This is what distinguishes a pool from a set or an array:
 
 ```fa
-mutable pool: Pool(Human) = []
+mutable pool: Pool<Human> = []
 
 use john = pool.add({ name = "John", age = 20 })
 
@@ -161,7 +161,7 @@ Pools are the natural home for the objects of a graph, a scene, or an entity sys
 
 The pool is a **slab** (also called a hive or a colony): `plf::colony`, C++26 `std::hive` and the Rust `slab` crate are the references.
 
-- **Chunks.** A `Pool(T)` allocates chunks of one compile-time size, aligned to that size: 64 KiB, or more for a large `T` so that a chunk holds at least 64 slots. Large chunks are allocated with an aligned `mmap`. The header at the start of a chunk holds the occupancy bitmap (one `u64` word per 64 slots), the number of live slots, the head of the chunk's free list, and the links to the previous and next chunks.
+- **Chunks.** A `Pool<T>` allocates chunks of one compile-time size, aligned to that size: 64 KiB, or more for a large `T` so that a chunk holds at least 64 slots. Large chunks are allocated with an aligned `mmap`. The header at the start of a chunk holds the occupancy bitmap (one `u64` word per 64 slots), the number of live slots, the head of the chunk's free list, and the links to the previous and next chunks.
 - **Finding the chunk of a slot** is `pointer & ~(chunkSize - 1)`: no search, no stored chunk index.
 - **Free slots.** Each chunk has its own intrusive free list: the index of the next free slot is stored in the dead slot, so a slot is at least 4 bytes. The pool keeps a bitset of the chunks that have a free slot; `add` takes the lowest set bit (`tzcnt`), pops that chunk's free list, sets the occupancy bit and returns the slot pointer. When no chunk has a free slot, `add` bumps the last chunk, or allocates a new one (cold path).
 - **Deletion.** `delete(ref)` runs `drop<T>` on the slot, clears its occupancy bit, pushes it on its chunk's free list, and sets the chunk's bit in the bitset. A chunk whose count drops to zero is unlinked and freed, except one spare chunk, kept to avoid allocating and freeing in a loop that adds and deletes one element.
@@ -170,11 +170,11 @@ The pool is a **slab** (also called a hive or a colony): `plf::colony`, C++26 `s
 - **Destruction.** A pool of flat elements is destroyed by freeing its chunks, without visiting the slots. Otherwise the occupancy bitmaps drive the `drop<T>` calls.
 - **Construction in place.** `add({ … })` never builds a temporary element to copy into the slot. The field expressions that may throw or call a function are evaluated first, so that an error leaves the pool untouched and a nested `add` can't take the same slot; then `add` takes the slot and stores every field straight into it (nested literals included), sets the occupancy bit and returns the slot pointer. An existing value is moved with a `memcpy` when it has exactly the element's shape, and otherwise copied field by field into the slot, without its extra fields.
 - **References.** A reference into a pool is a pointer to the slot. `size` is a field of the pool header, updated by `add` and `delete`.
-- A reverse side of a relation, like `bestFriendOf: Pool(people->bestFriend)`, is not stored as a pool: it is an intrusive list through the elements. See `design/compilation-with-llvm.md`.
+- A reverse side of a relation, like `bestFriendOf: Pool<people->bestFriend>`, is not stored as a pool: it is an intrusive list through the elements. See `design/compilation-with-llvm.md`.
 
 ### JavaScript
 
 - A `Pool` of objects is a JavaScript `Set` of these objects. `add` adds an object to the set and returns it: the reference **is** the object. A literal is created once, as `set.add({ x: 3, y: 4 })`, and never copied. An existing value is moved (the same object is added) only when it is not used afterwards and has exactly the element's fields; otherwise it is copied by the generated copy function of the element type, which reads only the element's fields, never by a spread (`{ ...value }`) that would keep the extra ones. `delete(ref)` is `set.delete(ref)`, `size` is `set.size`, and iteration is `for (const element of set)`. A `Set` compares objects by identity, which is right here: two equal humans added to a pool are two distinct elements.
-- A `Pool` of primitives (`Pool(Integer)`, `Pool(String)`, …) can't use a `Set`, which would merge the duplicates. It is a slot array `Array<T>`, an occupancy array and a free list of slot indices (a plain `number[]` used as a stack). A reference is the slot index; the type of the reference names the pool, so it does not need to carry it.
+- A `Pool` of primitives (`Pool<Integer>`, `Pool<String>`, …) can't use a `Set`, which would merge the duplicates. It is a slot array `Array<T>`, an occupancy array and a free list of slot indices (a plain `number[]` used as a stack). A reference is the slot index; the type of the reference names the pool, so it does not need to carry it.
 - Relations are plain object fields in JavaScript: the direct side holds the target object, and the reverse side holds a `Set` of the objects that point at it.
 :::

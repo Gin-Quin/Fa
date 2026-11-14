@@ -11,7 +11,7 @@ A foreign file ends with `.foreign.fa`, and is named by the part before it: `Dat
 Only foreign files can:
 
 - declare C functions with [`@extern`](#declaring-c-functions), and call them;
-- use [`Pointer(T)`](#pointers) and [`CString`](#c-types);
+- use [`Pointer<T>`](#pointers) and [`CString`](#c-types);
 - declare a [`destroy`](#releasing-c-resources) function in a type.
 
 Other files can't use a value whose type contains `Pointer` or `CString` in its public fields, so the unchecked part of a program can't leak out of its foreign files. Keep them small: the bindings of the library, and the safe interface built on them.
@@ -29,20 +29,20 @@ export namespace = {
 
 	static ok = 0
 
-	function open: (path: CString, database: Pointer(Pointer(Sqlite3)?)) => c.Int mutates database = @extern("sqlite3_open")
-	function close: (database: Pointer(Sqlite3)) => c.Int = @extern("sqlite3_close")
+	function open: (path: CString, database: Pointer<Pointer<Sqlite3>?>) => c.Int mutates database = @extern("sqlite3_open")
+	function close: (database: Pointer<Sqlite3>) => c.Int = @extern("sqlite3_close")
 }
 ```
 
 ```fa
 -- Database.foreign.fa
 export type = {
-	#handle: Pointer(sqlite3.Sqlite3)
+	#handle: Pointer<sqlite3.Sqlite3>
 
 	type OpenError = Errors { Failed = { code: Integer } }
 
 	function open = (path: String): Self throws Self.OpenError => {
-		mutable handle: Pointer(sqlite3.Sqlite3)? = none
+		mutable handle: Pointer<sqlite3.Sqlite3>? = none
 		let code = sqlite3.open(path, handle) -- `path` is passed as a C string, `handle` by its address
 		if code != sqlite3.ok or handle is none {
 			throw Self.OpenError.Failed { code }
@@ -75,13 +75,13 @@ export function = () throws Database.OpenError => {
 | `float`, `double` | `Float32`, `Float64` |
 | `bool` | `Boolean` |
 | `char`, `int`, `long`, `size_t` and the other types whose size depends on the platform | `c.Char`, `c.Int`, `c.Long`, `c.SizeT`... from `std.c`, sized for the target |
-| `T *` | `Pointer(T)?`, where `none` is `NULL` |
-| `T *` that is never `NULL` (`_Nonnull`) | `Pointer(T)` |
-| `void *` | `Pointer(Void)?` |
+| `T *` | `Pointer<T>?`, where `none` is `NULL` |
+| `T *` that is never `NULL` (`_Nonnull`) | `Pointer<T>` |
+| `void *` | `Pointer<Void>?` |
 | `const char *` (a string) | `CString` |
 | `struct` | `CStruct { ... }` |
 | an opaque `struct`, only used through pointers | `CStruct { }` |
-| `T field[N]` in a `struct` | `CArray(T, N)` |
+| `T field[N]` in a `struct` | `CArray<T, N>` |
 | `enum`, integer `#define` | `static` integer values |
 | function pointer | a function type (see [callbacks](#callbacks)) |
 
@@ -95,11 +95,11 @@ The types of `std.c`, `CStruct` and `CArray` can be used in every file. `Pointer
 
 ```fa
 type Vertex = CStruct {
-	position: CArray(Float32, 3)
-	color: CArray(UInt8, 4)
+	position: CArray<Float32, 3>
+	color: CArray<UInt8, 4>
 }
 
-mutable vertices: Array(Vertex) = []
+mutable vertices: Array<Vertex> = []
 ```
 
 - A `CStruct` type is nominal: two `CStruct` types with the same fields are different types, like two C `struct`s.
@@ -108,7 +108,7 @@ mutable vertices: Array(Vertex) = []
 
 ## Pointers
 
-`Pointer(T)` designates a `T` in memory that Fa doesn't manage. It is never `NULL`; a pointer that can be `NULL` is a `Pointer(T)?`, with the same size.
+`Pointer<T>` designates a `T` in memory that Fa doesn't manage. It is never `NULL`; a pointer that can be `NULL` is a `Pointer<T>?`, with the same size.
 
 | Operation | Meaning |
 | --- | --- |
@@ -116,7 +116,7 @@ mutable vertices: Array(Vertex) = []
 | `pointer.read()` | copies the `T` it designates |
 | `pointer.write(value)` | writes a `T` |
 | `pointer.offset(count)` | the pointer to the `count`-th `T` after it |
-| `pointer.toArray(count)` | copies `count` elements into a new `Array(T)` |
+| `pointer.toArray(count)` | copies `count` elements into a new `Array<T>` |
 | `cString.toString()` | copies a C string into a `String` |
 | `Pointer.allocate(value)` | moves `value` into a new block of memory, and returns a pointer to it |
 | `pointer.free()` | destroys the value of a block made by `Pointer.allocate`, and frees it |
@@ -129,10 +129,10 @@ When a C function expects a pointer, Fa values are passed without conversion, fo
 
 | The parameter expects | The argument | What C receives |
 | --- | --- | --- |
-| `Pointer(T)` | an `Array(T)` | a pointer to its first element (pass the length separately, as C expects) |
-| `Pointer(T)` | a `mutable` value of type `T` | its address; the parameter must be declared with `mutates` |
-| `Pointer(T)` | any value of type `T`, for a parameter without `mutates` | its address, read-only |
-| `Pointer(Void)` | any argument that a `Pointer(T)` parameter accepts | its address, as C converts any pointer to `void *` |
+| `Pointer<T>` | an `Array<T>` | a pointer to its first element (pass the length separately, as C expects) |
+| `Pointer<T>` | a `mutable` value of type `T` | its address; the parameter must be declared with `mutates` |
+| `Pointer<T>` | any value of type `T`, for a parameter without `mutates` | its address, read-only |
+| `Pointer<Void>` | any argument that a `Pointer<T>` parameter accepts | its address, as C converts any pointer to `void *` |
 | `CString` | a `String` | a copy that ends with a zero byte; a string literal is passed as is, since literals are stored with that byte |
 
 A pointer made from a Fa value is valid until the call returns: C must not keep it. Memory that C keeps after a call must be allocated by C, or with `Pointer.allocate`.
@@ -142,7 +142,7 @@ A pointer made from a Fa value is valid until the call returns: C must not keep 
 A C function is declared with its function type and `@extern`, which names the C symbol:
 
 ```fa
-function close: (database: Pointer(Sqlite3)) => c.Int = @extern("sqlite3_close")
+function close: (database: Pointer<Sqlite3>) => c.Int = @extern("sqlite3_close")
 ```
 
 - A parameter that C writes through is declared with `mutates`, like in any [function type](/functions/defining-functions#function-types). The compiler trusts these declarations.
@@ -151,10 +151,10 @@ function close: (database: Pointer(Sqlite3)) => c.Int = @extern("sqlite3_close")
 
 ### Callbacks
 
-A function-typed parameter of a C function is a C function pointer. The argument must be a function known at compile time, that captures nothing, with C types. It can't throw: C can't propagate an error. Pass the data the callback needs through a `Pointer(Void)?` parameter, as C libraries do with their `userData` parameter.
+A function-typed parameter of a C function is a C function pointer. The argument must be a function known at compile time, that captures nothing, with C types. It can't throw: C can't propagate an error. Pass the data the callback needs through a `Pointer<Void>?` parameter, as C libraries do with their `userData` parameter.
 
 ```fa
-function sort: (base: Pointer(Void), count: c.SizeT, size: c.SizeT, compare: (a: Pointer(Void), b: Pointer(Void)) => c.Int) => Void mutates base = @extern("qsort")
+function sort: (base: Pointer<Void>, count: c.SizeT, size: c.SizeT, compare: (a: Pointer<Void>, b: Pointer<Void>) => c.Int) => Void mutates base = @extern("qsort")
 ```
 
 ## Releasing C resources
@@ -253,9 +253,9 @@ export = {
 use c = std.c
 
 export namespace = {
-	function createFarm = (name: CString): Pointer(Farm) => Pointer.allocate(Farm { name = name.toString() })
-	function destroyFarm = (farm: Pointer(Farm)) => farm.free()
-	function animalCount = (farm: Pointer(Farm)): Int64 throws Farm.Error => try farm.value.countAnimals()
+	function createFarm = (name: CString): Pointer<Farm> => Pointer.allocate(Farm { name = name.toString() })
+	function destroyFarm = (farm: Pointer<Farm>) => farm.free()
+	function animalCount = (farm: Pointer<Farm>): Int64 throws Farm.Error => try farm.value.countAnimals()
 }
 ```
 

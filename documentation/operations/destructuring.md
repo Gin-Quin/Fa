@@ -94,7 +94,7 @@ let (number, name) = tuple
 The extra items of an array are ignored: `[first, second]` takes the first two items of `[1, 2, 3]`. An array pattern reads items by index, so it follows the rules of [indexing](/collections/arrays#smart-bound-checks): when the compiler can't prove that the array has enough items, the destructuring `throws IndexError`. Like an assignment whose target can fail, the declaration is then prefixed with `try`; to handle the error instead, check the length first:
 
 ```fa
-function firstTwo = (values: Array(Integer)): Tuple(Integer, Integer) throws IndexError => {
+function firstTwo = (values: Array<Integer>): Tuple<Integer, Integer> throws IndexError => {
 	try let [first, second] = values
 	(first, second)
 }
@@ -205,6 +205,6 @@ See [defining functions](/functions/defining-functions#destructuring-parameters)
 Destructuring extracts values. To build a type from some fields of another type, use the `Pick` and `Omit` [type functions](/types/type-functions):
 
 ```fa
-type Contact = Pick(User, { name, email })
-type PublicUser = Omit(User, { password })
+type Contact = Pick<User, { name, email }>
+type PublicUser = Omit<User, { password }>
 ```

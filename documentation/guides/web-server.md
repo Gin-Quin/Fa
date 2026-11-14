@@ -54,7 +54,7 @@ use { Json } = std.json
 type CreateUser = {
 	name: String
 	email: String
-	age: Integer(min = 0, max = 150)?
+	age: Integer<min = 0, max = 150>?
 }
 
 export function = (request: Request): Response => {

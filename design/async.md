@@ -18,7 +18,7 @@ Checked on the installed LLVM 18 with IR piped through `opt` and `llc`, no files
 - **Colorless.** An `async function` may suspend, and the caller chooses how to call it:
   - **blocking**: the synchronous instance runs;
   - **awaited**: `await f()` suspends the caller;
-  - **started**: `start f()` gives a `Task(T) throws E`.
+  - **started**: `start f()` gives a `Task<T> throws E`.
 - A non-`async` function is always synchronous. When it calls an `async` function, it blocks. `async` is never inferred, and `async` is part of the function type. A non-async function type cannot hold an async function. An async function type can hold a non-async one.
 - **Async contexts**: async function bodies, async lambdas, `start do`, tests, and the top level of a standalone file. `await` takes an async call or a `Task`. `start` takes any call or a `do` block.
 - **A started task does not run right away.** It begins when the starter suspends or returns to the event loop. Tasks of one thread run one at a time and take turns at `await`. Threads only come from workers and `for parallel`.
@@ -268,7 +268,7 @@ The executor is the same C code, with TLS as globals and no epoll. The host's ev
 | `std.time.monotonic(): Integer` (nanoseconds, for benchmarks) | yes | yes | yes |
 | `std.fs.File.read(path)`, `readBytes`, `write(path, text)` | sync and async (pool) | — | sync and async (server runtimes) |
 | `std.net.TcpListener { host, port }`: `accept(): TcpStream throws NetError` | sync and async | — | async (server runtimes) |
-| `TcpStream.connect(host, port)`, `read(buffer: Array(Byte)): Integer` (`mutates buffer`, 0 means closed), `write(bytes)`, `close()` | sync and async | — | async |
+| `TcpStream.connect(host, port)`, `read(buffer: Array<Byte>): Integer` (`mutates buffer`, 0 means closed), `write(bytes)`, `close()` | sync and async | — | async |
 | `Channel.send/receive`, `Mutex.lock` (async variants), worker calls, `WorkerPool` | yes | single thread | yes |
 | `std.http` minimal (HTTP/1.1 `Server.listen`, `get`), written in Fa on `std.net` | after B2 | — | async (`fetch`, `Bun.serve`) |
 
@@ -321,7 +321,7 @@ Tokio: `cargo build --release --manifest-path benchmarks/async/rust/Cargo.toml`.
 
 | Step | Area | Content | Acceptance |
 | --- | --- | --- | --- |
-| **A1** | analyzer | Remove CONC011. Type `await`, `start` and `start do`, `Task(T) throws E` (resource kind), `cancel`, the combinators, `Cancelled` (A11), async lambdas, async contexts. Add `CONC014`, `CONC015` and `CONC016`. Compute the `AsyncSummary` bits and generalize `CONC010` with chains. Add the side tables of §2.2. | Every `fa` block of `concurrency.md` checks. Diagnostic corpus for each code. The interface hash changes when `suspends`/`blocking` change. |
+| **A1** | analyzer | Remove CONC011. Type `await`, `start` and `start do`, `Task<T> throws E` (resource kind), `cancel`, the combinators, `Cancelled` (A11), async lambdas, async contexts. Add `CONC014`, `CONC015` and `CONC016`. Compute the `AsyncSummary` bits and generalize `CONC010` with chains. Add the side tables of §2.2. | Every `fa` block of `concurrency.md` checks. Diagnostic corpus for each code. The interface hash changes when `suspends`/`blocking` change. |
 | **A2** | analyzer | Tasks as borrows (REF notes), detached copies and moves (A12), `CONC017`, `CONC018` and `CONC019`, forgetting module-level facts at `await`, requirements across `start`. | The reference-checking and requirements examples. Negative tests from the docs ("`scores` is read by `task`"). |
 | **A3** | analyzer, CLI, configuration | `build.asynchronous`, `--asynchronous`, detection (A6), `WCONC001`, `Program::asynchronous`. `fa build -v` prints the reason ("on: main awaits TcpListener.accept"). | Detection table tests (none, `start` only, an awaited non-suspending function, a suspending await, a forced off). |
 | **N1** | codegen-llvm (spike) | Async instances with `llvm.coro.*`. Destroy edges reuse the cleanup stack. `fa_resume`/`fa_destroy` IR shims. Coroutine passes in the dev profile. A minimal executor (ready queue, timer heap, `sleep`, `Task.yield`), Task drop and cancel, the trampoline, finished blocks for synchronous instances. | `start`, `await`, `cancel` and scope-drop programs run on native, freestanding and wasm with leak checks. Golden IR of one await. `spawn` and `ping-pong` (single thread) measured against Tokio. |

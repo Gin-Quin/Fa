@@ -16,7 +16,7 @@ A columnar pays off when you repeatedly read a *few* fields across *many* object
 - any operation applied to a subset of a very large number of objects.
 
 ```fa
-mutable columnar: Columnar(Human) = []
+mutable columnar: Columnar<Human> = []
 
 columnar.add({ name = "John", age = 20 })
 columnar.add({ name = "Jane", age = 21 })
@@ -83,7 +83,7 @@ Because its elements never move, a `Columnar` is one of the collections that can
 `OrderedColumnar` stores each column in an `Array` rather than an arena, and keeps its elements in insertion order. Use it when iteration order matters. Its elements have positions, so its interface is the one of an [`Array`](/collections/arrays), with `add` to append: a `length`, indices, `delete(index)` and `take(index)` instead of a reference, `pop`, and the index in loops (`for human, index in orderedColumnar`) and callbacks.
 
 ```fa
-mutable orderedColumnar: OrderedColumnar(Human) = []
+mutable orderedColumnar: OrderedColumnar<Human> = []
 
 orderedColumnar.add({ name = "John", age = 20 })
 orderedColumnar.add({ name = "Jane", age = 21 })
@@ -119,7 +119,7 @@ A [`GrowingColumnar`](/collections/growing-collections) has no free slots and no
 
 ## Choosing between an array and a columnar
 
-| | `Array(Human)` | `Columnar(Human)` |
+| | `Array<Human>` | `Columnar<Human>` |
 | --- | --- | --- |
 | Read whole objects | fast | slower |
 | Read one field over many objects | slower | fast |
@@ -138,7 +138,7 @@ Start with an array. Move to a columnar when you have measured a loop that touch
 
 ### Native
 
-- **Columns.** There is one column per field of the element type, with the field's own layout: a `Columnar(Human)` with `name: String` and `age: Integer` has a column of string headers and a column of `i64`. Nested objects are not split further in the first version: a field holding an object is one column of that object type.
+- **Columns.** There is one column per field of the element type, with the field's own layout: a `Columnar<Human>` with `name: String` and `age: Integer` has a column of string headers and a column of `i64`. Nested objects are not split further in the first version: a field holding an object is one column of that object type.
 - **Chunks.** All columns share the same chunk capacity `2^k` slots, chosen per type so that the widest column fills about 64 KiB. Slot `i` is in chunk `i >> k` at offset `i & (2^k - 1)` in every column. A chunk is one allocation holding the runs of every column one after the other, each run aligned to 64 bytes, preceded by a header with the occupancy bitmap, the live count, and the head of the chunk's free list. The columnar keeps an array of chunk pointers: a slot index is a shift, a mask and one load away from its fields.
 - **Free slots, deletion and iteration** follow the pool: a bitset of the chunks with a free slot, lowest chunk first; a per-chunk free list stored in the dead slot of the first column (so the first column is at least 4 bytes wide, padded if needed); `tzcnt` iteration over the occupancy words; empty chunks freed except one spare; no compaction.
 - **References.** A reference is the slot index (`u32`), not a pointer: the type of the reference names the columnar, so the base is known. Reading `john.age` is `chunks[i >> k].age[i & mask]`.

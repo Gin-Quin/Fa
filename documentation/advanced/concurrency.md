@@ -60,7 +60,7 @@ async function main = () throws HttpError => {
 	console.log("This is printed once the data is fetched, without blocking the thread")
 
 	-- 3. Started
-	let task = start fetchData("https://api.example.com/data") -- type: Task(Response) throws HttpError
+	let task = start fetchData("https://api.example.com/data") -- type: Task<Response> throws HttpError
 	console.log("This is printed immediately, before the data is fetched")
 
 	let data3 = try await task
@@ -132,11 +132,11 @@ Whether a function can be called blocking on a target is part of its **interface
 
 ## Tasks
 
-A `Task` is the handle of a computation started with `start`. Its type declares its result and its errors, like a function type: starting `fetchData` gives a `Task(Response) throws HttpError`.
+A `Task` is the handle of a computation started with `start`. Its type declares its result and its errors, like a function type: starting `fetchData` gives a `Task<Response> throws HttpError`.
 
 ```fa
-async function loadAll = (urls: Array(String)): Array(Response) throws HttpError => {
-	mutable tasks: Array(Task(Response) throws HttpError) = []
+async function loadAll = (urls: Array<String>): Array<Response> throws HttpError => {
+	mutable tasks: Array<Task<Response> throws HttpError> = []
 	for url in urls {
 		tasks.push(start fetchData(url))
 	}
@@ -173,7 +173,7 @@ Parameters are references, also for a started function: while a task runs, it us
 
 ```fa
 async function main = () => {
-	mutable scores: Array(Integer) = [1, 2, 3]
+	mutable scores: Array<Integer> = [1, 2, 3]
 
 	let task = start uploadScores(scores) -- `uploadScores` reads `scores` in the background
 	scores.push(4) -- error: `scores` is read by `task`: await it first
@@ -195,12 +195,12 @@ A task uses:
 A task can't outlive the values it uses. Its data must belong to the caller, or to the task itself:
 
 ```fa
-async function startUpload = (): Task(Void) => {
+async function startUpload = (): Task<Void> => {
 	let scores = [1, 2, 3]
 	start uploadScores(scores) -- error: the task uses `scores`, which is destroyed when `startUpload` returns
 }
 
-async function startUploadOwned = (): Task(Void) => start do {
+async function startUploadOwned = (): Task<Void> => start do {
 	let scores = [1, 2, 3] -- owned by the task
 	await uploadScores(scores)
 }
@@ -215,7 +215,7 @@ At each `await`, other tasks may run and modify the module-level values. So afte
 Tasks take turns: a task keeps the thread until it waits. So that one long task can't stop the others (a request computing for a long time must not block the other requests of a server), a loop of an `async` function or of a `start do` block lets the other tasks of its thread run when its turn has lasted more than a few milliseconds: an iteration of the loop then waits for them, like `await Task.yield()`.
 
 ```fa
-async function handleReport = (rows: Array(Row)): Report => {
+async function handleReport = (rows: Array<Row>): Report => {
 	mutable report = Report { total = 0 }
 	for row in rows {
 		report.total += compute(row) -- other requests are served between iterations, when this one takes long
@@ -242,16 +242,16 @@ let fastest = try await Task.any(tasks)     -- the outcome of the first task to 
 let outcomes = await Task.settled(tasks)    -- the outcome of every task, errors included
 ```
 
-| Combinator | From an `Array(Task(T) throws E)` | Notes |
+| Combinator | From an `Array<Task<T> throws E>` | Notes |
 | --- | --- | --- |
-| `Task.all` | `Task(Array(T)) throws E` | results in the order of the tasks; on the first error, the other tasks are cancelled |
-| `Task.any` | `Task(T) throws E` | the result or the error of the first task to finish; the other tasks are cancelled |
-| `Task.settled` | `Task(Array(T \| E))` | never fails: each outcome is a result or an error, checked with `is` |
+| `Task.all` | `Task<Array<T>> throws E` | results in the order of the tasks; on the first error, the other tasks are cancelled |
+| `Task.any` | `Task<T> throws E` | the result or the error of the first task to finish; the other tasks are cancelled |
+| `Task.settled` | `Task<Array<T \| E>>` | never fails: each outcome is a result or an error, checked with `is` |
 
 The tasks are moved into the combinator. For example, to fetch two resources at the same time:
 
 ```fa
-async function loadPage = (): Array(Response) throws HttpError => {
+async function loadPage = (): Array<Response> throws HttpError => {
 	try await Task.all([
 		start fetchData("https://api.example.com/header")
 		start fetchData("https://api.example.com/content")
@@ -313,7 +313,7 @@ Use the `parallel` keyword in `for` loops to spread the iterations across the CP
 let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 -- Sequential processing
-mutable sequentialResults: Array(Integer) = []
+mutable sequentialResults: Array<Integer> = []
 for number in numbers {
 	sequentialResults.push(expensiveComputation(number))
 }
@@ -360,7 +360,7 @@ Workers are instantiable threads with their own state, defined in files with the
 ```fa
 -- MathWorker.worker.fa
 export type = {
-	numbers: Array(Integer)
+	numbers: Array<Integer>
 
 	function sum = (self): Integer => self.numbers.reduce((total, number) => total + number, 0)
 
@@ -369,7 +369,7 @@ export type = {
 		if count != 0 { self.sum() / count } else { 0 }
 	}
 
-	function processLarge = (self, data: Array(Integer)): Array(Integer) => data.map((x) => x * x)
+	function processLarge = (self, data: Array<Integer>): Array<Integer> => data.map((x) => x * x)
 }
 ```
 
@@ -428,7 +428,7 @@ use { WorkerPool } = std.concurrency
 
 async function main = () => {
 	-- Create a pool of 4 workers
-	mutable workers = WorkerPool(DataProcessor) { count = 4 }
+	mutable workers = WorkerPool<DataProcessor> { count = 4 }
 
 	let inputs = [
 		[1, 2, 3]
@@ -438,7 +438,7 @@ async function main = () => {
 	]
 
 	-- Submit the tasks to the pool
-	mutable pending: Array(Task(Array(Integer)) throws WorkerTimeout) = []
+	mutable pending: Array<Task<Array<Integer>> throws WorkerTimeout> = []
 	for data in inputs {
 		pending.push(workers.submit((worker) => await worker.process(data)))
 	}
@@ -457,7 +457,7 @@ async function main = () => {
 A pool accepts more options:
 
 ```fa
-mutable pool = WorkerPool(DataProcessor) {
+mutable pool = WorkerPool<DataProcessor> {
 	count = 8
 	maxQueueSize = 1000 -- `submit` waits while 1000 calls are queued
 	timeout = 30000 -- milliseconds
@@ -476,7 +476,7 @@ A channel moves values between tasks or threads. It is the preferred way for con
 use { Channel } = std.concurrency
 use { sleep } = std.time
 
-async function producer = (channel: Channel(String)) => {
+async function producer = (channel: Channel<String>) => {
 	for index in 1..=100 {
 		await channel.send("Item {index}") catch error => return -- the channel was closed
 		await sleep(100) -- simulate work
@@ -484,7 +484,7 @@ async function producer = (channel: Channel(String)) => {
 	channel.close()
 }
 
-async function consumer = (channel: Channel(String), id: String) => {
+async function consumer = (channel: Channel<String>, id: String) => {
 	while let item = await channel.receive() {
 		console.log("Consumer {id} received: {item}")
 		await sleep(50) -- simulate processing
@@ -492,7 +492,7 @@ async function consumer = (channel: Channel(String), id: String) => {
 }
 
 async function main = () => {
-	mutable channel = Channel(String) { capacity = 10 }
+	mutable channel = Channel<String> { capacity = 10 }
 
 	-- Start the producer and the consumers, then wait for all of them
 	await Task.all([
@@ -512,15 +512,15 @@ Giving channels a capacity applies back-pressure: when a channel is full, `send`
 Several consumers can receive from the same channel: each value is received by exactly one of them (**fan-out**). Several producers can send into the same channel (**fan-in**).
 
 ```fa
-async function processJobs = (jobs: Channel(Job), reports: Channel(Report)) => {
+async function processJobs = (jobs: Channel<Job>, reports: Channel<Report>) => {
 	while let job = await jobs.receive() {
 		await reports.send(process(job)) catch error => return
 	}
 }
 
 async function main = () => {
-	mutable jobs = Channel(Job) { capacity = 16 }
-	mutable reports = Channel(Report) { capacity = 16 }
+	mutable jobs = Channel<Job> { capacity = 16 }
+	mutable reports = Channel<Report> { capacity = 16 }
 
 	-- Fan-out: three tasks take jobs from the same channel,
 	-- fan-in: and send their reports into the same channel.
@@ -551,7 +551,7 @@ async function main = () => {
 
 | Member | |
 | --- | --- |
-| `Channel(T) { capacity = 16 }` | creates a channel; without `capacity`, it is unbounded |
+| `Channel<T> { capacity = 16 }` | creates a channel; without `capacity`, it is unbounded |
 | `send(value)` | async: waits while the channel is full; `throws ChannelClosed` when the channel is closed |
 | `receive()` | async: the next value, or `none` once the channel is closed and empty |
 | `trySend(value)` | sends without waiting; returns `false` when the channel is full or closed |
@@ -564,7 +564,7 @@ A value sent through a channel is copied (moved when it isn't used afterwards). 
 
 The **thread-safe types** are:
 
-- `Mutex(T)`, `AtomicInteger`, `AtomicBoolean` and `Channel(T)`, from `std.concurrency`,
+- `Mutex<T>`, `AtomicInteger`, `AtomicBoolean` and `Channel<T>`, from `std.concurrency`,
 - objects and tuples whose fields are all thread-safe.
 
 They are the only values that can be shared mutably between tasks or threads; sharing any other mutable value is a compile error. They work differently from other values:
@@ -572,7 +572,7 @@ They are the only values that can be shared mutably between tasks or threads; sh
 - **They are handles.** A copy of a thread-safe value designates the same mutex, atomic or channel, which lives as long as one of its handles does. This is how a worker and its caller share a channel.
 - **Their methods don't declare `mutates self`.** Like Rust's `&self` methods on a `Mutex`, they modify the shared state from an immutable reference. So several tasks and threads can use the same one at once, and a function receiving one doesn't declare `mutates`.
 - **They are declared `mutable`** where they are created, like every value that changes: declaring one with `let` is an error.
-- **They hold owned data.** The `T` of a `Mutex(T)` or a `Channel(T)` can't contain references or relations.
+- **They hold owned data.** The `T` of a `Mutex<T>` or a `Channel<T>` can't contain references or relations.
 
 Immutable values need none of this: a value that no thread modifies can be read by every thread.
 
@@ -588,7 +588,7 @@ type Stats = {
 	errors: Integer
 }
 
-async function recordVisit = (stats: Mutex(Stats)) => {
+async function recordVisit = (stats: Mutex<Stats>) => {
 	do {
 		mutable guard = await stats.lock()
 		guard.value.visits += 1
@@ -596,7 +596,7 @@ async function recordVisit = (stats: Mutex(Stats)) => {
 }
 
 async function main = () => {
-	mutable stats = Mutex(Stats) { value = { visits = 0, errors = 0 } }
+	mutable stats = Mutex<Stats> { value = { visits = 0, errors = 0 } }
 
 	-- both tasks share `stats`, which is allowed because `Mutex` is thread-safe
 	await Task.all([

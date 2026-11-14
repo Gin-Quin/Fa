@@ -52,12 +52,12 @@ The collection must be visible where the type is declared. It is either a field 
 
 ```fa
 type Town = {
-	people: Pool(Person) = []
+	people: Pool<Person> = []
 
 	type Person = {
 		name: String
 		bestFriend: (Person in people)?
-		bestFriendOf: Pool(people->bestFriend)
+		bestFriendOf: Pool<people->bestFriend>
 	}
 }
 ```
@@ -66,7 +66,7 @@ or a [module-level value](/values/declaring-values#module-level-values), here ex
 
 ```fa
 -- in "people.fa"
-export mutable: Pool(Person) = []
+export mutable: Pool<Person> = []
 ```
 
 ```fa
@@ -74,7 +74,7 @@ export mutable: Pool(Person) = []
 export type = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }
 ```
 
@@ -85,14 +85,14 @@ In the first form, each town has its own people, and a person's best friend is a
 A relation has two sides:
 
 - the **direct side** is a reference field: `bestFriend: (Person in people)?`;
-- the **reverse side** names the collection, then the field it mirrors: `bestFriendOf: Pool(people->bestFriend)`. It reads as *the elements of `people` whose `bestFriend` points at me*.
+- the **reverse side** names the collection, then the field it mirrors: `bestFriendOf: Pool<people->bestFriend>`. It reads as *the elements of `people` whose `bestFriend` points at me*.
 
 The reverse side is always declared. There is no one-way reference: a reference field without a reverse side is a compile error (the only exception is an [owner field](#example-a-linked-list), stored on the object that owns the collection).
 
 ```fa
 type Person = {
 	name: String
-	bestFriend: (Person in people)? -- error: `bestFriend` has no reverse side: declare one, for example `bestFriendOf: Pool(people->bestFriend)`
+	bestFriend: (Person in people)? -- error: `bestFriend` has no reverse side: declare one, for example `bestFriendOf: Pool<people->bestFriend>`
 }
 ```
 
@@ -104,22 +104,22 @@ A direct side is always optional or a `Pool`, so that it has something to become
 
 ```fa
 type Town = {
-	people: Pool(Person) = []
+	people: Pool<Person> = []
 
 	type Person = {
 		name: String
 
 		-- one-to-many: many people can have the same best friend
 		bestFriend: (Person in people)?
-		bestFriendOf: Pool(people->bestFriend)
+		bestFriendOf: Pool<people->bestFriend>
 
 		-- one-to-one: a person has at most one mentor, and mentors at most one person
 		mentor: (Person in people)?
 		mentee: (people->mentor)?
 
 		-- many-to-many: a person has many friends, and is the friend of many people
-		friends: Pool(Person in people)
-		friendOf: Pool(in people->friends)
+		friends: Pool<Person in people>
+		friendOf: Pool<in people->friends>
 
 		-- symmetric: if Ana is Bao's spouse, Bao is Ana's spouse
 		spouse: (people->spouse)?
@@ -129,14 +129,14 @@ type Town = {
 
 | Kind | Direct side | Reverse side |
 | --- | --- | --- |
-| one-to-many | `bestFriend: (Person in people)?` | `bestFriendOf: Pool(people->bestFriend)` |
+| one-to-many | `bestFriend: (Person in people)?` | `bestFriendOf: Pool<people->bestFriend>` |
 | one-to-one | `mentor: (Person in people)?` | `mentee: (people->mentor)?` |
-| many-to-many | `friends: Pool(Person in people)` | `friendOf: Pool(in people->friends)` |
+| many-to-many | `friends: Pool<Person in people>` | `friendOf: Pool<in people->friends>` |
 | symmetric | `spouse: (people->spouse)?` | itself |
 
 In a many-to-many relation, the direct side is a pool of references, and the reverse side points *into* those pools with `in`: *the elements of `people` whose `friends` contain me*. A symmetric relation is a field that is its own reverse side.
 
-These are the only shapes: a direct side is `(T in c)?` or `Pool(T in c)`, and it has exactly one reverse side, of the shape given by the table (a second reverse side for the same direct side is an error). Ordered relations, like a list of children in a given order, are built with a linked list (see [the example below](#example-a-linked-list)).
+These are the only shapes: a direct side is `(T in c)?` or `Pool<T in c>`, and it has exactly one reverse side, of the shape given by the table (a second reverse side for the same direct side is an error). Ordered relations, like a list of children in a given order, are built with a linked list (see [the example below](#example-a-linked-list)).
 
 Neither side is initialized: an optional side starts as `none`, a pool side starts empty, and the reverse side only changes through its direct side. An object can be linked to itself: after `ana.bestFriend = ana`, Ana is in her own `bestFriendOf`.
 
@@ -146,12 +146,12 @@ The two sides can belong to different types, each living in its own collection:
 
 ```fa
 type Blog = {
-	users: Pool(User) = []
-	posts: Pool(Post) = []
+	users: Pool<User> = []
+	posts: Pool<Post> = []
 
 	type User = {
 		name: String
-		articles: Pool(posts->author) -- the posts whose `author` is this user
+		articles: Pool<posts->author> -- the posts whose `author` is this user
 	}
 
 	type Post = {
@@ -257,12 +257,12 @@ Only the elements of the collections named by a relation are linked:
 A function that writes a direct side declares it with `mutates`, like any other field. The reverse sides it changes are implied: they can only change through the direct side. The compiler counts these implied effects like declared ones, and so do deletions, which write every direct side that pointed at the deleted object: [reference checking](/advanced/reference-checking#relations) lists them.
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 
 type Person = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }
 
 function befriend = (person: Person in people, friend: Person in people) mutates person.bestFriend => {
@@ -338,12 +338,12 @@ A [`Map`](/collections/maps) doesn't move its values, but a relation links eleme
 A [local reference](/advanced/owned-references) into these collections is fine: the compiler sees the call that invalidates it, and makes you declare it again. A stored reference lives in data, and can be read anywhere, long after the collection changed: there is no place where it could be declared again. So its target must never move.
 
 ```fa
-mutable people: Array(Person) = []
+mutable people: Array<Person> = []
 
 type Person = {
 	name: String
 	bestFriend: (Person in people)? -- error: `people` is an `Array`, whose elements move: a relation needs a `Pool`, a `Columnar`, a `GrowingPool` or a `GrowingColumnar`
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }
 ```
 
@@ -374,9 +374,9 @@ Owned children make trees: a node can't have two parents, and a child can't poin
 A doubly linked list is exactly the structure that goes wrong with raw pointers: nothing guarantees that `previous` and `next` stay consistent. In Fa, `previous` is the reverse side of `next`, and every node lives in a `Pool` owned by the list:
 
 ```fa
-type LinkedList(Data) = {
+type LinkedList<Data> = {
 	-- every node lives here (private field)
-	#nodes: Pool(Node) = []
+	#nodes: Pool<Node> = []
 
 	type Node = {
 		data: Data
@@ -438,7 +438,7 @@ The effects in the signatures tell the caller exactly what happens to its refere
 - `remove` declares `invalidates node`, like `Pool.delete`: the references that may designate the removed node must be declared again, and the others stay valid. It also declares the fields it writes.
 
 ```fa
-mutable list: LinkedList(String) = {}
+mutable list: LinkedList<String> = {}
 
 use first = list.add("first")
 use second = list.add("second")

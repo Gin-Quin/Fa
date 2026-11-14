@@ -83,7 +83,7 @@ No method changes the string it is called on: a `mutable` string is only changed
 
 | Method | Returns |
 | --- | --- |
-| `length` (a property) | `Integer(min = 0)`, the number of grapheme clusters |
+| `length` (a property) | `Integer<min = 0>`, the number of grapheme clusters |
 | `isEmpty()` | `Boolean` |
 | `get(index: Integer)` | `Character?` |
 | `includes(search: String)`, `startsWith(search: String)`, `endsWith(search: String)` | `Boolean` |
@@ -91,13 +91,13 @@ No method changes the string it is called on: a `mutable` string is only changed
 | `toUpperCase()`, `toLowerCase()` | `String`, with the Unicode rules, independent of the locale (`"ß".toUpperCase()` is `"SS"`) |
 | `trim()`, `trimStart()`, `trimEnd()` | `String`, without the leading or trailing Unicode white space |
 | `padStart(length: Integer, filler: String = " ")`, `padEnd(...)` | `String` |
-| `repeat(count: Integer(min = 0))` | `String` |
+| `repeat(count: Integer<min = 0>)` | `String` |
 | `replace(search: String, replacement: String)` | `String`, with the first match replaced |
 | `replaceAll(search: String, replacement: String)` | `String`, with every match replaced |
-| `split(separator: String)` | `Array(String)`; an empty separator splits into characters |
-| `characters()` | `Array(Character)` |
-| `codePoints()` | `Array(UInt32)` |
-| `bytes()` | `Array(Byte)`, the UTF-8 bytes; reading it without keeping it (`text.bytes()[i]`, `for byte in text.bytes()`) doesn't build the array |
+| `split(separator: String)` | `Array<String>`; an empty separator splits into characters |
+| `characters()` | `Array<Character>` |
+| `codePoints()` | `Array<UInt32>` |
+| `bytes()` | `Array<Byte>`, the UTF-8 bytes; reading it without keeping it (`text.bytes()[i]`, `for byte in text.bytes()`) doesn't build the array |
 | `toString()` | the string itself |
 | `String.compareLocale(a: String, b: String, locale: String? = none)` | `Integer`: negative, zero or positive |
 

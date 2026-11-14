@@ -42,7 +42,7 @@ The documentation stays the source of truth. Where it is silent or contradictory
 | `apply_type(DeclId, args: ListId)` | `TypeId` | Memoized on `(DeclId, args)`. Carries a nesting counter: more than 256 nested applications is `TF001`. |
 | `resolve_type_expr(NodeId, env)` | `SpelledType { id: TypeId, spelling: SpellingId }` | Interprets an expression node in **type mode** (§3.1.1). |
 | `signature(FnId)` | `FnSig` + `FnDeclInfo` (names, defaults, generic parameters, chain) | For a single-expression body, depends on `infer_body`. |
-| `infer_body(FnId)` | `BodySummary` | Return type, `throws`, `requires`, `mutates`, `invalidates`, purity, escape bit of each function-typed parameter, freshness of a returned reference, write-set per parameter (§3.2.4), "needs full type" per parameter (`Type(parameter)`), JavaScript dictionary needs per type parameter (§3.11.8). |
+| `infer_body(FnId)` | `BodySummary` | Return type, `throws`, `requires`, `mutates`, `invalidates`, purity, escape bit of each function-typed parameter, freshness of a returned reference, write-set per parameter (§3.2.4), "needs full type" per parameter (`Type<parameter>`), JavaScript dictionary needs per type parameter (§3.11.8). |
 | `check_body(FnId)` | diagnostics + typed tree | Block bodies: compares the summary with the declared signature. |
 | `assignable(S, T, mode)` | `bool` + reason | Cached on `(S, T, mode)`, coinductive for recursive types. |
 
@@ -113,14 +113,14 @@ pub enum TypeKind {
 Notes:
 
 - **Predefined ids.** `NEVER`, `VOID`, `NONE`, `ERROR`, `UNKNOWN`, `BOOLEAN`, `TRUE`, `FALSE`, `INTEGER`, every sized integer, `FLOAT`, `FLOAT32`, `BIG_INT`, `PERCENTAGE`, `STRING`, `CHARACTER`, `RANGE` are interned first, at fixed indices: hot checks are integer compares.
-- **Integers** (`D2`). `IntStorage = Default | I8 | I16 | I32 | I64 | I128 | U8 | U16 | U32 | U64 | U128`. `Integer` is `Int { min = -2^63, max = 2^63-1, storage = Default }`; `Int64` is the same range with `storage = I64`; `Integer(min = 0)` is `Default` storage with `min = 0`; `Byte` is the `U8` type itself (an alias). Bounds are 256-bit (`I256`, two `i128`), so interval arithmetic on 128-bit types never overflows. An integer literal type is `min == max`. The storage decides the native width and the JavaScript class (`number` for `Default`, `I8`–`I32`, `U8`–`U32`; `bigint` for `I64`, `U64`, `I128`, `U128`).
+- **Integers** (`D2`). `IntStorage = Default | I8 | I16 | I32 | I64 | I128 | U8 | U16 | U32 | U64 | U128`. `Integer` is `Int { min = -2^63, max = 2^63-1, storage = Default }`; `Int64` is the same range with `storage = I64`; `Integer<min = 0>` is `Default` storage with `min = 0`; `Byte` is the `U8` type itself (an alias). Bounds are 256-bit (`I256`, two `i128`), so interval arithmetic on 128-bit types never overflows. An integer literal type is `min == max`. The storage decides the native width and the JavaScript class (`number` for `Default`, `I8`–`I32`, `U8`–`U32`; `bigint` for `I64`, `U64`, `I128`, `U128`).
 - **Shapes.** `FieldEntry { name: Sym, ty: TypeId, flags: u8 }` with `READONLY`, `REACTIVE`, `RELATION` (a direct or reverse relation side). Only **public data fields** enter a shape (function-pointer fields are data fields). Methods, associated functions, defaults and nested type declarations live in `TypeDeclInfo`, keyed by the **declaration used at the use site** (`SpellingId`), never by the shape (`advanced/structural-typing.md#what-is-compared`). A type with `#private` fields has `nominal = Some(decl)`; its private fields are kept in the shape too (layout) but are not part of structural comparison against other types.
-- **Spelling.** Identity ignores names. Every type expression node stores `SpelledType { id, spelling }`, where `SpellingId` points at the name and arguments as written (`UserId`, `Point(Integer)`). Diagnostics, `@typeToString`, `@typeToSchema`, method resolution and field declaration order use the spelling. A value's `Type(value)` carries the spelling it was declared or created with.
+- **Spelling.** Identity ignores names. Every type expression node stores `SpelledType { id, spelling }`, where `SpellingId` points at the name and arguments as written (`UserId`, `Point<Integer>`). Diagnostics, `@typeToString`, `@typeToSchema`, method resolution and field declaration order use the spelling. A value's `Type<value>` carries the spelling it was declared or created with.
 - **Named unions and enumerations** are nominal: `NominalInfo { decl: DeclId, args: ListId, kind: Union | Errors | Enum | CStruct | Private }`. `NamedUnion(n, ALL)` is the declared type; `NamedUnion(n, mask)` is `Shape - Shape.Point` or a narrowed subset (`D10`); a mask of one member normalizes to `Member(n, i)`. An anonymous union whose members are all members of the same named union normalizes into the masked form. `MaskId` interns bitsets (a `u64` inline for up to 64 members, else a side table).
 - **Function signatures.** `FnSig { params: &[ParamSig], ret: TypeId, throws: TypeId, requires: &[(Sym, TypeId)], effects: EffectSetId, is_async: bool, passthrough: u32 }`, `ParamSig { ty: TypeId, variadic: bool, stored: bool }`. Parameter **names are not part of the identity** (they are kept in the spelling, for `Parameters` and messages); effect paths refer to parameters by index. `throws` is `NEVER` for no errors. `requires` is sorted by the stable hash of the requirement type (`advanced/requirements.md` keys requirements by shape). `passthrough` is the bitmask of function-typed parameters that are **not stored** (their effects become effects of the call, §4.5). Named arguments, defaults, generic parameters and composition chains are not types: they live in `FnDeclInfo`.
 - **Collections.** `CollKind = Array | GrowingArray | Set | GrowingSet | Map | GrowingMap | Pool | GrowingPool | Columnar | GrowingColumnar | OrderedColumnar | RelationPool(RelationId)`. `key` is `NONE` except for maps.
 - **Reference types** `Ref(T, owner)` appear in parameter types, return types, relation fields and inferred `use` types. Locals never hold `Ref` inside another type except `Optional` (`(T in c)?`) and `Iterator` (`D23`).
-- **Compile-time values.** `ConstValue = Bool | Int(I256) | String(Sym) | Character(Sym) | EnumMember(NominalId, u16) | FieldsValue(FieldsShapeId, Bitset) | KeySet(FieldsShapeId, Bitset) | Array(ListOfConst) | Tuple(..) | Object(ShapeId, ..)`, hash-consed: equal values have equal `ConstId`, so `Matrix(Float, 2 + 2, 4) ≡ Matrix(Float, 4, 4)` falls out of interning the argument list.
+- **Compile-time values.** `ConstValue = Bool | Int(I256) | String(Sym) | Character(Sym) | EnumMember(NominalId, u16) | FieldsValue(FieldsShapeId, Bitset) | KeySet(FieldsShapeId, Bitset) | Array<ListOfConst> | Tuple<..> | Object(ShapeId, ..)`, hash-consed: equal values have equal `ConstId`, so `Matrix<Float, 2 + 2, 4> ≡ Matrix<Float, 4, 4>` falls out of interning the argument list.
 
 ### 2.3 Cached per-type flags
 
@@ -180,15 +180,15 @@ The flow walk keeps `FxHashMap<PlaceId, Fact>` per program point (persistent map
 
 #### 3.1.1 Syntax as parsed
 
-- `type Name(Params) = Expr` → `Node::Type { name, parameters, expression }`. `mutable type` is a parse error today; the checker still owns `TY001` for tools that build trees.
+- `type Name<Params> = Expr` → `Node::Type { name, parameters, expression }`. `mutable type` is a parse error today; the checker still owns `TY001` for tools that build trees.
 - There is **no separate type grammar**: a type is an ordinary expression node, interpreted in *type mode* by `resolve_type_expr`. The checker decides the mode from the position (annotation after `:`, right side of `type`, generic argument of a type, `is`/`when` pattern, `throws`, `requires`, `in`).
 
 | Node (type mode) | Meaning |
 | --- | --- |
 | `Identifier` | a type name, a type parameter, a built-in type, a `static` value (its literal type), a lowercase compile-time parameter (only inside bounds) |
 | `Access [A, B]` | `Shape.Circle`, `Color.red`, a type in a namespace |
-| `FunctionCall { function, parameters }` | generic application `Array(Integer)`, `Pair(String, Float)`, `Integer(min = 0, max = 10)` (named arguments: refinement), `Type(value)`, built-in type functions |
-| `MemberIndex { target, members }` | `Enum { … }`, `Fields { … }`, `Union { … }`, `Errors { … }`, `CStruct { … }`; in expression mode, a typed literal `Point(Float) { x = 1 }` |
+| `FunctionCall { function, parameters }` | generic application `Array<Integer>`, `Pair<String, Float>`, `Integer<min = 0, max = 10>` (named arguments: refinement), `Type<value>`, built-in type functions |
+| `MemberIndex { target, members }` | `Enum { … }`, `Fields { … }`, `Union { … }`, `Errors { … }`, `CStruct { … }`; in expression mode, a typed literal `Point<Float> { x = 1 }` |
 | `Members { items }` | object type; items: `Assignment { name, type_expression, expression }` (`x: T = d`), `Readonly`, `Spread`, `Function` (method / associated function), nested `Type`; in a key-set position, a key set |
 | `Union { operands }`, `Subtract`, `Optional`, `Group` | `|`, difference, `?`, parentheses |
 | `ArrowFunction` (no body other than a type) | function type; `Throws`, `Requires`, `Effect` wrap the signature |
@@ -213,7 +213,7 @@ Parser gaps relevant here (found while writing this brief): `Integer??` tokenize
 | `Color.red` | `Color` | member `red` |
 | `Shape.Circle { … }`, `UserId.User(12)` | the whole named union (`D53`) | member `Circle` |
 | object literal without type | anonymous object of the widened field types | per-field facts |
-| list literal without context | `Array(J)`, `J` the join of the widened element types (`D52`) | length |
+| list literal without context | `Array<J>`, `J` the join of the widened element types (`D52`) | length |
 | tuple literal | `Tuple` of the widened element types | |
 | lambda | its function type | |
 | `if`/`when`/`loop` without expected type | the join of the widened branch types | |
@@ -221,7 +221,7 @@ Parser gaps relevant here (found while writing this brief): `Integer??` tokenize
 - **Join** (no expected type): normalize the union of the widened types (§3.4.1). Integer and float *literals* mixed in one join: `TY006` "write `1.0`, or annotate". The join must be distinguishable (`TY040`).
 - **Annotated binding**: the annotated type; the value is checked against it (literals adapt).
 - **Creating values.** Object values only with braces: `T { … }` without context, `{ … }` with context. `Point(12, 13)` or `Point(x = 12, y = 13)` on an object type: `TY005` "values are always created with braces: `Point { x = 12, y = 13 }`". The one exception: a named-union member with a non-object payload, `OrderId.Order(12)` (§3.5).
-- Writing the type twice (`let p: Point = Point { … }`, `let s: Set(Integer) = Set.from(…)` without options): `WTY001`, formatter rewrites.
+- Writing the type twice (`let p: Point = Point { … }`, `let s: Set<Integer> = Set.from(…)` without options): `WTY001`, formatter rewrites.
 - A generic type in an annotation without its non-defaulted parameters: `TY003` "`Point` needs its parameter `NumberType`".
 - Capitalization has meaning only in generic parameter lists (§3.11.1). `type main = { … }` is valid.
 
@@ -261,13 +261,13 @@ let greeting: Greeting = "goodbye"
 
 -- ✓ ty-decl-3: facts make an assignment valid → 5
 let five = 5
-let small: Integer(min = 0, max = 10) = five
+let small: Integer<min = 0, max = 10> = five
 console.log(small)
 
 -- ✗ ty-decl-4: TY002, the fact is dropped by the mutation
 mutable count = 5
 count += readNumber()
-let other: Integer(min = 0, max = 10) = count
+let other: Integer<min = 0, max = 10> = count
 
 -- ✓ ty-decl-5: join of branches → "yes"
 let ready = true
@@ -282,7 +282,7 @@ let ratio: Float = if true { 1 } else { 0.5 }
 console.log(ratio)
 
 -- ✗ ty-decl-8: TY003
-type Point(NumberType) = { x: NumberType, y: NumberType }
+type Point<NumberType> = { x: NumberType, y: NumberType }
 let other: Point = { x = 12, y = 13 }
 
 -- ✗ ty-decl-9: TY005 (both lines)
@@ -322,7 +322,7 @@ let x: Strnig = "a"
 
 #### 3.2.1 Syntax as parsed
 
-`type T = { … }` → `Members { items }` with items: `Assignment { name, type_expression: Some(T), expression: Option(default) }` for a field, `Assignment { type_expression: None, expression: Some(d) }` for a field typed by its default, `Readonly { right }`, `Spread { right }`, `Function { … }` (method if the first parameter is `self`, associated function otherwise), nested `Type` declarations (relations page: `type Town = { people: Pool(Person) = [], type Person = { … } }`). Private names are identifiers starting with `#`. A typed object literal is `MemberIndex { target: type expression, members }`; an untyped one is `Members`.
+`type T = { … }` → `Members { items }` with items: `Assignment { name, type_expression: Some(T), expression: Option(default) }` for a field, `Assignment { type_expression: None, expression: Some(d) }` for a field typed by its default, `Readonly { right }`, `Spread { right }`, `Function { … }` (method if the first parameter is `self`, associated function otherwise), nested `Type` declarations (relations page: `type Town = { people: Pool<Person> = [], type Person = { … } }`). Private names are identifiers starting with `#`. A typed object literal is `MemberIndex { target: type expression, members }`; an untyped one is `Members`.
 
 #### 3.2.2 Static semantics
 
@@ -366,11 +366,11 @@ let x: Strnig = "a"
 - `T` structural object: `S` is an object (structural or nominal), a member with an object payload (`D4`) or a type parameter whose constraint is such, and for every field `f` of `T`: `S` has a public field `f` with `S.f ≤ T.f`. Missing field, even optional: no (`TY026` "a `Human` has no `email` field").
 - `T` nominal (`#private`): `S ≡ T`.
 - Copy (`let h: Human = hero`, `push`, field assignment, return): requires `S ≤ T`; copies `T`'s fields only. A move happens only when `S ≡ T`.
-- View (parameter, `use`, loop variable): requires `S ≤ T`; nothing copied; the static type of the view is `T`, `Type(view)` is `S`.
+- View (parameter, `use`, loop variable): requires `S ≤ T`; nothing copied; the static type of the view is `T`, `Type<view>` is `S`.
 
 #### 3.2.4 Writing through a narrower type (`⊑w`)
 
-A function that writes the leaf paths `P` of a parameter typed `T` (its **write-set**, the leaves actually written in its body, computed in `infer_body` and part of its interface; for a function value, every leaf below each declared `mutates` path) accepts an argument of type `S` only if, for every `p ∈ P`, `S.p ≡ T.p` and `S.p` is not `readonly` outside its type: `EF004` "`penalize` writes `score: Integer` into `player.score`, an `Integer(min = 0, max = 10)`". The same check runs for a mutated collection of supersets (`EF005` "`addJohn` mutates `humans`, so it needs an `Array(Human)`: make it generic"). Inside generic code, writes through a value of a type parameter (or of `Type(parameter)`) are recorded in the write-set in terms of the constraint's fields and checked at each call, with the actual type (`D5`).
+A function that writes the leaf paths `P` of a parameter typed `T` (its **write-set**, the leaves actually written in its body, computed in `infer_body` and part of its interface; for a function value, every leaf below each declared `mutates` path) accepts an argument of type `S` only if, for every `p ∈ P`, `S.p ≡ T.p` and `S.p` is not `readonly` outside its type: `EF004` "`penalize` writes `score: Integer` into `player.score`, an `Integer<min = 0, max = 10>`". The same check runs for a mutated collection of supersets (`EF005` "`addJohn` mutates `humans`, so it needs an `Array<Human>`: make it generic"). Inside generic code, writes through a value of a type parameter (or of `Type<parameter>`) are recorded in the write-set in terms of the constraint's fields and checked at each call, with the actual type (`D5`).
 
 #### 3.2.5 Diagnostics
 
@@ -471,7 +471,7 @@ type Bad = { a: Integer = 1, b: Integer = a }
 -- ✓ obj-10: readonly written by its own method → 100
 type Account = {
 	readonly balance: Integer = 0
-	function deposit = (self, amount: Integer(min = 0)) mutates self.balance => {
+	function deposit = (self, amount: Integer<min = 0>) mutates self.balance => {
 		self.balance += amount
 	}
 }
@@ -553,7 +553,7 @@ console.log(same(SuperHuman { name = "A", powers = "x" }, SuperHuman { name = "A
 
 -- ✗ obj-25: EF004 (writing through a narrower type)
 type Scored = { score: Integer }
-type Player = { name: String, score: Integer(min = 0, max = 10) }
+type Player = { name: String, score: Integer<min = 0, max = 10> }
 function penalize = (scored: Scored) mutates scored => {
 	scored.score = -5
 }
@@ -586,7 +586,7 @@ console.log(Counter2.create(12).value)
 
 The numeric rules themselves (literal adaptation, range arithmetic, overflow, result types) are in `values/numbers.md`; the type relation needs:
 
-- `Int(a..b, s) ≤ Int(c..d, s')` iff `c ≤ a` and `b ≤ d`, for **reading and copying**. For a **view inside an aggregate** (an element of a collection, a field reached through a parameter or `use`), additionally `JS_BIGINT(s) == JS_BIGINT(s')` (`D2`, `CV005` "an `Array(Int64)` is not an `Array(Integer)` on every target: convert it with `map((x) => Integer(x))`"). Native views with a different width are handled by specialization (element conversion on load, `D54`).
+- `Int(a..b, s) ≤ Int(c..d, s')` iff `c ≤ a` and `b ≤ d`, for **reading and copying**. For a **view inside an aggregate** (an element of a collection, a field reached through a parameter or `use`), additionally `JS_BIGINT(s) == JS_BIGINT(s')` (`D2`, `CV005` "an `Array<Int64>` is not an `Array<Integer>` on every target: convert it with `map((x) => Integer(x))`"). Native views with a different width are handled by specialization (element conversion on load, `D54`).
 - `Float(F32) ≤ Float(F64)` (`D11`); no other implicit conversion between kinds: `Integer`, `Float`, `BigInt`, `Percentage` are unrelated (`CV001`).
 - Integer literal types adapt to any integer type containing them, to a float type and to `BigInt`; float literals to `Float32`/`Float64`; never to `Percentage` without `%`.
 - `Character ≤ String` (a value conversion natively, `D12`).
@@ -599,7 +599,7 @@ The numeric rules themselves (literal adaptation, range arithmetic, overflow, re
 1. Flatten nested unions (anonymous and `T?`); a named union is **not** flattened (it is one member).
 2. Drop `Never`.
 3. **Absorption, non-object members only** (`D1`): drop a member `m` when another member `n ≠ m` satisfies `m ≤ n` and `m` is a literal, an integer range, `None`, an enum member, a named-union member, a `Fields` type or a collection. Object, tuple and function members are never absorbed: two object members where one satisfies the other are a distinguishability error, not a silent merge (`unions.md`: `{ name: String } | { name: String, age: Integer }` is an error).
-4. Integer ranges of the **same storage** that touch or overlap merge into their hull (`Integer(min = 0, max = 5) | Integer(min = 6, max = 9)` → `Integer(min = 0, max = 9)`), so a literal union `0 | 1 | 2` is one range type; ranges with gaps stay separate members.
+4. Integer ranges of the **same storage** that touch or overlap merge into their hull (`Integer<min = 0, max = 5> | Integer<min = 6, max = 9>` → `Integer<min = 0, max = 9>`), so a literal union `0 | 1 | 2` is one range type; ranges with gaps stay separate members.
 5. Members of a single named union (or enumeration) merge into the masked form (`NamedUnion(n, mask)`, `Enum(n, mask)`); a full mask is the declared type.
 6. Sort by `TypeId`, dedupe. Zero members → `Never`; one → that member.
 
@@ -617,7 +617,7 @@ Run on every union written by the user (annotation, `type`, generic argument, co
 | one kind per other collection constructor | `Set`, `Map`, `Pool`… (each a distinct JavaScript class or class-tagged object) |
 | `object` | object types, named unions (their members carry a global tag), `CStruct` |
 
-Two members are distinguishable iff: different kinds; or same kind and (literal values differ, or integer ranges don't overlap, or they are members/subsets of named unions — different named unions included, since their tags are global, `D8`); or both `object` and (each has a field the other lacks, or both have a field whose types are disjoint literal types). Two members of kind `number` that are not literals or disjoint ranges (`Integer | Float`, `Color | Integer`, `Color | Light`): `TY040` with the fix "use a named union". Two non-literal members of `array` kind (`Array(Integer) | Array(String)`, `Tuple(Integer) | Array(Integer)`): `TY040`.
+Two members are distinguishable iff: different kinds; or same kind and (literal values differ, or integer ranges don't overlap, or they are members/subsets of named unions — different named unions included, since their tags are global, `D8`); or both `object` and (each has a field the other lacks, or both have a field whose types are disjoint literal types). Two members of kind `number` that are not literals or disjoint ranges (`Integer | Float`, `Color | Integer`, `Color | Light`): `TY040` with the fix "use a named union". Two non-literal members of `array` kind (`Array<Integer> | Array<String>`, `Tuple<Integer> | Array<Integer>`): `TY040`.
 
 **Storing a value into a union** (copy or view): the value's static type must satisfy **exactly one** member (`TY041` "a value that satisfies several members can't be stored in the union: copy it into the member type first"). A literal must match one member exactly (TY33).
 
@@ -627,7 +627,7 @@ Two members are distinguishable iff: different kinds; or same kind and (literal 
 
 #### 3.4.4 Optionals
 
-`T?` is `Optional(T)` is `T | None`; `T??` is `T?`; `Optional(Void)` is `TY071`. A value of `T` satisfies `T?`. `?.` short-circuits the chain to its right; `??` takes the non-`None` part. Both apply only to optionals (`TY044` "`??` only applies to optionals; this is an error, use `catch`" when the left side is a failing call).
+`T?` is `Optional<T>` is `T | None`; `T??` is `T?`; `Optional<Void>` is `TY071`. A value of `T` satisfies `T?`. `?.` short-circuits the chain to its right; `??` takes the non-`None` part. Both apply only to optionals (`TY044` "`??` only applies to optionals; this is an error, use `catch`" when the left side is a failing call).
 
 #### 3.4.5 Diagnostics
 
@@ -643,7 +643,7 @@ Two members are distinguishable iff: different kinds; or same kind and (literal 
 
 - Runtime: a union value holds exactly one member; `is` and `when` decide it without reflection.
 - JavaScript: untagged. `is` compiles to: `typeof v === "number"` / `"bigint"` / `"string"` / `"boolean"` / `"function"`, `v === null` (none), `Array.isArray(v)`, `v instanceof FaSet` (and the other collection classes, `D33`), `v instanceof FaRange`, then a literal compare (`===`), a range compare, a field presence test (`"age" in v`), a discriminant compare (`v.kind === "circle"`) or a named-union tag compare (`v.$t === 17`). The checker records, per test site, the minimal decision sequence (it proved it decides the member). Optional: `none` is `null`.
-- Native: a union whose members are all literals or ranges of one scalar storage (`"north" | "south"`, `Integer(min = 0, max = 9) | Integer(min = 20, max = 29)`) is that scalar, with no tag (string literals: the index of the literal); any other union is `{ tag, payload }`, tag = index in the canonical member order (sorted by stable hash); niches for optionals (`compilation-with-llvm.md#unions-and-optionals`). Widening a union value to a bigger union re-tags by a constant table; a union passed by reference to a callee expecting a wider union specializes the callee; a mutated union parameter must be exact (`EF004`).
+- Native: a union whose members are all literals or ranges of one scalar storage (`"north" | "south"`, `Integer<min = 0, max = 9> | Integer<min = 20, max = 29>`) is that scalar, with no tag (string literals: the index of the literal); any other union is `{ tag, payload }`, tag = index in the canonical member order (sorted by stable hash); niches for optionals (`compilation-with-llvm.md#unions-and-optionals`). Widening a union value to a bigger union re-tags by a constant table; a union passed by reference to a callee expecting a wider union specializes the callee; a mutated union parameter must be exact (`EF004`).
 
 #### 3.4.7 Tests
 
@@ -708,7 +708,7 @@ if n is Integer { console.log("always") }
 console.log(@typeToString(Integer | Never))
 
 -- ✓ un-13: optional of optional → "Integer?"
-type MaybeInteger = Optional(Integer?)
+type MaybeInteger = Optional<Integer?>
 console.log(@typeToString(MaybeInteger))
 
 -- ✗ un-14: TY044
@@ -722,10 +722,10 @@ let s: Circle | Square = { kind = "square", size = 1.0, side = 1.0 }
 console.log(s.size)
 
 -- ✗ un-16: TY040 (array kind twice)
-type T = Array(Integer) | Array(String)
+type T = Array<Integer> | Array<String>
 
 -- ✓ un-17: ranges that don't overlap → "low"
-type Level = Integer(min = 0, max = 9) | Integer(min = 20, max = 29)
+type Level = Integer<min = 0, max = 9> | Integer<min = 20, max = 29>
 function level = (l: Level) => if l is 0..10 { "low" } else { "high" }
 console.log(level(3))
 
@@ -748,7 +748,7 @@ console.log(show(none))
 - Member names unique (`TY050`). Inside the declaration, names refer to the enclosing scope (a member called `String` doesn't shadow the type `String`).
 - Member forms: **literal** definition (`Hello = "hello"`): the literal is accepted directly where the union (or the member) is expected; two members can't accept the same literal (`TY051`). **Object** definition: built with `U.M { … }` (object literal rules of §3.2 against the payload). **Other type** (including a type name that denotes an object type: `Car = CarData`, `D4`): built with `U.M(value)`. **Bare**: `U.M`, no data.
 - Wrong construction form: object member with parentheses `TY052`; non-object member with braces `TY053`; bare member called or given braces `TY054`; a plain object literal where the union is expected without the member name `TY055` "name the member: `Shape.Circle { … }`"; an unqualified member name in an expression or a pattern `TY057` (members are always qualified).
-- Identity: nominal per declaration (and per generic application: `type Result(Value, Failure) = Union { Ok = Value, Failed = Failure }` is allowed; `Result(Integer, String)` is one type). Members of a generic named union are written `Result.Ok`, the arguments being inferred like those of a typed literal (expected type, then payload); `Result(Integer, String).Ok(3)` is the explicit form for when nothing gives them (`D62`).
+- Identity: nominal per declaration (and per generic application: `type Result<Value, Failure> = Union { Ok = Value, Failed = Failure }` is allowed; `Result<Integer, String>` is one type). Members of a generic named union are written `Result.Ok`, the arguments being inferred like those of a typed literal (expected type, then payload); `Result<Integer, String>.Ok(3)` is the explicit form for when nothing gives them (`D62`).
 - Members are types: `Member(n, i) ≤ NamedUnion(n, mask)` when `i ∈ mask`. A member with an object payload satisfies its payload object type (field reads, passing to a structural parameter); a member with a non-object payload does **not** satisfy its payload type — bind it with `as` (`D4`). A plain value of the payload type is never a member (`TY056`).
 - Narrowing yields masked subsets; `when` exhaustiveness is a mask test.
 - `Errors`: like `Union`, and every member satisfies `Error`. Only these may appear after `throws`: an `Errors` type, a member of one, a union of those, `Error`, the built-in errors (`IndexError`, `KeyNotFound`, `DivisionByZero`, `ArithmeticError`, `ParseError`, `Cancelled`, which are prelude `Errors` types), a type parameter (`Failure`). Anything else: `EF020`. `throw e` requires `e`'s type to satisfy `Error` (`EF021`).
@@ -837,8 +837,8 @@ console.log(e.toString())
 function f = (): Integer throws String => 1
 
 -- ✓ nu-14: generic named union, members written without arguments (D62) → "ok 3"
-type Result(Value, Failure) = Union { Ok = Value, Failed = Failure }
-let r: Result(Integer, String) = Result.Ok(3)
+type Result<Value, Failure> = Union { Ok = Value, Failed = Failure }
+let r: Result<Integer, String> = Result.Ok(3)
 console.log(when r is {
 	Result.Ok as v => "ok {v}"
 	Result.Failed => "failed"
@@ -859,7 +859,7 @@ console.log(when w is { Weird.String as s => s })
 
 - Recursion only through named `type` declarations (several may refer to each other).
 - Every cycle of the type graph must pass through at least one **indirection edge**: the payload of a union member (named or anonymous, including `T?`) or the element of a collection. A cycle made only of inline object fields or tuple elements: `TY060` "`Node` contains itself".
-- A generic declaration may refer to itself only with its own parameters, in order: `type List(Item) = { head: Item, tail: List(Array(Item))? }` is `GN020` (polymorphic recursion).
+- A generic declaration may refer to itself only with its own parameters, in order: `type List<Item> = { head: Item, tail: List<Array<Item>>? }` is `GN020` (polymorphic recursion).
 - Equality is coinductive (`Node` ≡ `Link = { value: String, child: Link? }`).
 
 #### Canonicalization algorithm (makes coinductive equality an id compare)
@@ -896,12 +896,12 @@ function sum = (tree: Tree): Integer => when tree is {
 console.log(sum(Tree.Branch { left = Tree.Leaf { value = 1 }, right = Tree.Leaf { value = 2 } }))
 
 -- ✓ rec-4: through a collection → 2
-type Folder = { name: String, folders: Array(Folder) }
+type Folder = { name: String, folders: Array<Folder> }
 let root = Folder { name = "/", folders = [{ name = "a", folders = [] }, { name = "b", folders = [] }] }
 console.log(root.folders.length)
 
 -- ✗ rec-5: GN020
-type List(Item) = { head: Item, tail: List(Array(Item))? }
+type List<Item> = { head: Item, tail: List<Array<Item>>? }
 
 -- ✓ rec-6: mutual recursion between declarations → "ok"
 type A = { b: B? }
@@ -915,9 +915,9 @@ console.log("ok")
 
 ### 3.7 Special types: `Never`, `None`, `Void`, `Error`
 
-- `Never`: no value; `Never ≤ T` for every `T`; type of `throw`, `return`, `break`, `continue`, a `loop` without `break`, a call returning `Never`. A function declared `: Never` whose body can complete normally: `FN012`. `Integer(min = 1, max = 0)` is `Never`.
+- `Never`: no value; `Never ≤ T` for every `T`; type of `throw`, `return`, `break`, `continue`, a `loop` without `break`, a call returning `Never`. A function declared `: Never` whose body can complete normally: `FN012`. `Integer<min = 1, max = 0>` is `Never`.
 - `None`: one value, `none`.
-- `Void`: a unit type, the return type of a function returning nothing. Allowed only as a return type, as `Task(Void)`, as a type argument that ends in a return position. `let x = log("done")` (or `mutable`, `use`, a field, a collection element, `Optional(Void)`, a union member): `TY070` "a `Void` result can't be stored". A generic instantiation that would store `Void` (`items.map((x) => console.log(x))` gives `Array(Void)`): `TY071` "the callback returns nothing: use `for`" (`D41`).
+- `Void`: a unit type, the return type of a function returning nothing. Allowed only as a return type, as `Task<Void>`, as a type argument that ends in a return position. `let x = log("done")` (or `mutable`, `use`, a field, a collection element, `Optional<Void>`, a union member): `TY070` "a `Void` result can't be stored". A generic instantiation that would store `Void` (`items.map((x) => console.log(x))` gives `Array<Void>`): `TY071` "the callback returns nothing: use `for`" (`D41`).
 - `Error`: any error; only `toString()` is available (`TY019` for anything else; narrow first).
 - There is no `Any` (`TY007` on `Any`, with "use a generic parameter or a union").
 
@@ -944,7 +944,7 @@ let x: Any = 3
 
 -- ✓ sp-6: Void as a type argument → "done"
 async function work = () => console.log("done")
-let task: Task(Void) = start work()
+let task: Task<Void> = start work()
 await task
 ```
 
@@ -959,7 +959,7 @@ await task
 - Members unique (`TY080`). Pinned values: all members or none (`TY081`), distinct (`TY082`), non-negative integer literals (`TY083`). Unpinned: `0, 1, 2…` in declaration order.
 - Nominal per declaration. `Enum(n, ALL)` is the type; `EnumMember(n, i)` is the type of `Color.red` (a literal-like type). Narrowing yields masks.
 - `.red` resolves against the expected type (an enumeration, an optional of one, a union containing exactly one enumeration with that member); otherwise `TY084` "write `Color.red`: the type of `.red` is not known here".
-- Operations: `==`, `!=`, `is`, `when` (exhaustive over members), `Integer(c)` (exact, never fails), `c.toString()` (the member name), `Color.members: Array(Color)` (declaration order, a static constant), `Color.parse(text: String): Color throws ParseError` (exact, case-sensitive name match, `D13`). No ordering (`<` is `TY085`, `D13`), no arithmetic.
+- Operations: `==`, `!=`, `is`, `when` (exhaustive over members), `Integer(c)` (exact, never fails), `c.toString()` (the member name), `Color.members: Array<Color>` (declaration order, a static constant), `Color.parse(text: String): Color throws ParseError` (exact, case-sensitive name match, `D13`). No ordering (`<` is `TY085`, `D13`), no arithmetic.
 - Storage: the smallest unsigned integer holding the largest value.
 - Runtime kind `number` (§3.4.2).
 
@@ -1020,16 +1020,16 @@ let c = .red
 
 #### Syntax as parsed
 
-`Fields { read, write, nested { a, b } }` → `MemberIndex { target: Identifier("Fields"), members: [Identifier, …, MemberIndex { target: Identifier("nested"), members }] }`. A field-set value `Permissions { read }` is a `MemberIndex` on the type; a key set `{ foo, nested { bar } }` is a `Members` node, read as a key set only where a `Fields` type is expected (expected type, argument of a key-taking type function, a lowercase parameter typed `Keys(…)`/`DeepKeys(…)`), as an object literal everywhere else.
+`Fields { read, write, nested { a, b } }` → `MemberIndex { target: Identifier("Fields"), members: [Identifier, …, MemberIndex { target: Identifier("nested"), members }] }`. A field-set value `Permissions { read }` is a `MemberIndex` on the type; a key set `{ foo, nested { bar } }` is a `Members` node, read as a key set only where a `Fields` type is expected (expected type, argument of a key-taking type function, a lowercase parameter typed `Keys<…>`/`DeepKeys<…>`), as an object literal everywhere else.
 
 #### Static semantics
 
 - Flags unique per level (`TY090`). Structural identity: the **ordered** flag tree (`D14`): `Fields { a, b }` and `Fields { b, a }` are different types (their bits differ). At most 128 leaves (`TY091`).
 - Leaves get bits in declaration order, a group's members replacing the group (`Fields { foo, bar, nested { baz1, baz2 } }`: `foo = 1, bar = 2, nested.baz1 = 4, nested.baz2 = 8`). Storage: the smallest unsigned integer with that many bits (12 flags → 16 bits).
 - Values: `T { … }` or a key set where `T` is expected; `{}` is the empty set; naming a group names all its leaves; a group may list a subset (`nested { baz1 }`). Unknown flag: `TY092`.
-- `T.flag` (and `T.nested.baz1`, `T.nested`) is a value of `T`. Operators: `a + b` (union), `a - b` (difference, a missing flag is not an error at value level), `==`, `x is in s` (all leaves of `x` in `s`, `D16`), `Integer(s)`, `s.toStringArray(): Array(String)` (dotted leaf paths in bit order). Mixing two different `Fields` types: `TY002`.
-- Key sets are compile-time values (`ConstValue::KeySet`) when written literally or declared `static`; a key set of a `Keys(T)`/`DeepKeys(T)` type must name only keys of `T` (`TF010` "`age` is not a key of `User`").
-- **Normalization** (`D15`): a group whose every leaf is present is the group; two key sets with the same leaves are the same value. So `Omit(T, { foo { bar, baz } })` equals `Omit(T, { foo })` when `foo` has exactly `bar` and `baz`.
+- `T.flag` (and `T.nested.baz1`, `T.nested`) is a value of `T`. Operators: `a + b` (union), `a - b` (difference, a missing flag is not an error at value level), `==`, `x is in s` (all leaves of `x` in `s`, `D16`), `Integer(s)`, `s.toStringArray(): Array<String>` (dotted leaf paths in bit order). Mixing two different `Fields` types: `TY002`.
+- Key sets are compile-time values (`ConstValue::KeySet`) when written literally or declared `static`; a key set of a `Keys<T>`/`DeepKeys<T>` type must name only keys of `T` (`TF010` "`age` is not a key of `User`").
+- **Normalization** (`D15`): a group whose every leaf is present is the group; two key sets with the same leaves are the same value. So `Omit<T, { foo { bar, baz } }>` equals `Omit<T, { foo }>` when `foo` has exactly `bar` and `baz`.
 
 #### `@for` over a key set
 
@@ -1069,17 +1069,17 @@ type Swapped = Fields { write, read, admin }
 let s: Swapped = Permissions { read }
 
 -- ✓ fi-6: @for over a key set compiles to three logs → "foo = 12" / "baz = 14" / "nested.foo = 15"
-function logProperties(Value, keys: DeepKeys(Value)) = (value: Value) => {
+function logProperties = <Value, keys: DeepKeys<Value>>(value: Value) => {
 	@for key in keys {
 		console.log("{key} = {value[key]}")
 	}
 }
 type Settings = { foo: Integer, bar: Integer, baz: Integer, nested: { foo: Integer, bar: Integer } }
 let settings: Settings = { foo = 12, bar = 13, baz = 14, nested = { foo = 15, bar = 16 } }
-logProperties(Settings, { foo, baz, nested { foo } })(settings)
+logProperties<Settings, { foo, baz, nested { foo } }>(settings)
 
 -- ✗ fi-7: TF010
-logProperties(Settings, { qux })(settings)
+logProperties<Settings, { qux }>(settings)
 
 -- ✓ fi-8: empty set → 0
 let nothing: Permissions = {}
@@ -1105,7 +1105,7 @@ console.log(Integer(nothing))
 
 - Left side: an anonymous union, a named union (or masked subset), an enumeration, an optional, a literal union, or an integer range type (`TY110` "`String` can't be split: no type means every string but one" for anything else, e.g. `String - "hello"`, an object type).
 - Each member of the left side that satisfies the right side (or one of its members, when it is a union) is removed. A right-side member that removes nothing: `TY111` "`X` is not a member of `A`".
-- Integer ranges: removing values or ranges keeps the remaining ranges (`Integer(min = 0, max = 10) - 0` is `Integer(min = 1, max = 10)`; `Integer(min = 0, max = 10) - 5` is `Integer(min = 0, max = 4) | Integer(min = 6, max = 10)`).
+- Integer ranges: removing values or ranges keeps the remaining ranges (`Integer<min = 0, max = 10> - 0` is `Integer<min = 1, max = 10>`; `Integer<min = 0, max = 10> - 5` is `Integer<min = 0, max = 4> | Integer<min = 6, max = 10>`).
 - A named union keeps its identity (masked form). Removing everything gives `Never`.
 - `A - B` where `A` is a type parameter: evaluated at application (type functions) or rejected in a generic body signature (`GN012`).
 
@@ -1145,8 +1145,8 @@ type T = ("a" | "b") - "c"
 -- ✗ op-6: TY110
 type T = String - "hello"
 
--- ✓ op-7: ranges → "Integer(min = 1, max = 10)"
-console.log(@typeToString(Integer(min = 0, max = 10) - 0))
+-- ✓ op-7: ranges → "Integer<min = 1, max = 10>"
+console.log(@typeToString(Integer<min = 0, max = 10> - 0))
 
 -- ✓ op-8: named union difference keeps identity
 type Shape = Union { Circle = { radius: Float }, Point }
@@ -1174,24 +1174,28 @@ console.log(Child { fieldA = 1, fieldC = "c" }.fieldB)
 
 #### 3.11.1 Parameters
 
-- Declared right after the name: `type Name(P1, P2: C = D, n: T)`, `function name(P) = …`, methods `function map(Result) = (self, …)`.
+- Written between angle brackets (decision "Generic angle brackets"): a type declares them right after its name, `type Name<P1, P2: C = D, n: T>`; a function at the start of its signature, `function name = <P>(…) => …`, methods `function map = <Result>(self, …)`, lambdas `<P>(…) => …` and function types `<P>(value: P) => P`.
 - **Capitalized** name: type parameter; optional constraint `: C` (any type; a union means "one of these types", an object type means "has at least these fields", method requirements written as function fields with `self`: `{ describe: (self) => String }`); optional default `= D`.
 - **Lowercase** name: compile-time value parameter; its annotation is the type of the value (required: `GN001`). Allowed value types: `Boolean`, integer types, `String`, `Character`, enumerations, `Fields` (key sets), and arrays, tuples, objects of them (`GN006` for `Float`, functions, collections other than arrays…).
-- A constraint or default may reference earlier parameters (`select(Entity, keys: Keys(Entity))`); referencing a later one is `GN002`. Defaults must satisfy constraints (`GN003`). Duplicate names `GN004`. A parameter after one with a default must have a default (`GN005`).
-- A lambda can't declare generic parameters (parse-level; `GN030` if a tree has them); a lambda inside a generic declaration uses the enclosing parameters.
+- A constraint or default may reference earlier parameters (`select = <Entity, keys: Keys<Entity>>(…)`); referencing a later one is `GN002`. Defaults must satisfy constraints (`GN003`). Duplicate names `GN004`. A parameter after one with a default must have a default (`GN005`).
+- A lambda can declare generic parameters, and a function type can have them (a generic function type). A lambda without generic parameters is generic when its expected type is a generic function type; a generic function type is never inferred. A value of a generic function type must be known at compile time (a named function or a lambda, given directly): a `mutable`, a collection element or a runtime-built field of that type is `GN030`. A function with a parameter of a generic function type is instantiated per function argument. A lambda inside a generic declaration uses the enclosing parameters.
 
-#### 3.11.2 Generic application or call (T4, `D18`)
+#### 3.11.2 Explicit generic arguments (supersedes T4 and `D18`)
 
-For a callee `C` with generic parameters, the first argument list `L` written after it is the **generic argument list** when:
+Explicit generic arguments are the `<…>` list written right after a type or a function: `Array<Integer>`, `sum<Float>([1, 2])`, `makeAdder<Float>(5)(3)`, `Point<Float> { x = 1 }`, `Set<Float>.from(…)`. Parentheses are always a call (or a conversion), so there is no rule telling them apart: the list is generic because of its brackets. Lowercase parameters are never inferred, so a callee with one requires the `<…>` list (`GN015` otherwise). On a built-in scalar type (`Integer`, `Int8`, `Float`, `BigInt`, `Percentage`…), parentheses are a **conversion** (§3.13) and `<min = …, max = …>` a **refinement** (a type): `Integer(5)` converts, `Integer<min = 5>` is a type, `Integer<max = 100>(bar)` converts to a ranged type.
 
-1. `C` has at least one lowercase parameter (value parameters are never inferred); or
-2. `L` is non-empty and **every** argument is a type expression: a name that resolves to a type or type parameter, a type application, an object *type* (`{ x: Integer }`, with `:`), a union, a function type, `Type(…)`. Literals (`"a"`, `3`), object literals (`{ x = 1 }`, `{}`), lambdas and value names are values (`D18`).
+Tokenization (no lookahead; a stack of open brackets):
 
-Otherwise `L` is the call, and the generic parameters are inferred. On a built-in scalar type (`Integer`, `Int8`, `Float`, `BigInt`, `Percentage`…): positional arguments are a **conversion** (§3.13), named arguments `min`/`max` a **refinement** (a type). `Integer(5)` is a conversion (of the literal), `Integer(min = 5)` a type.
+1. `<` followed by whitespace (space, tab, line break) is the comparison operator; any other `<` opens a generic list, whatever precedes it (`count<limit` opens one, and is a syntax error).
+2. Inside an open generic list (top of the stack), `>` closes it; otherwise `>` is the comparison operator. `>>` closes two lists (Fa has no shift operator).
+3. `(`, `[` and `{` push, their closing tokens pop: inside them, a generic list is suspended, so a comparison inside a generic list is written in parentheses (`Choose<(count > 255), UInt16, UInt8>`).
+4. `<=`, `>=`, `=>` and `->` are matched first, as longer tokens: never generic brackets (`Pool<people->bestFriend>`, `Array<(event: Event) => Void>`).
+
+Consequence: a generic list starts on the line of its `<` (a `<` at the end of a line is a comparison); its `>` may be on its own line.
 
 #### 3.11.3 Constraints and binding
 
-- `X: C` where `C` is a union: the argument binds **exactly one** member (T3): the unique member `m` with `Arg ≤ m`; zero → `GN010` "`String` doesn't satisfy the constraint `Integer | Float` of `Value`"; several → `GN011` (ambiguous). Inside generic signatures, the argument value is then viewed as the bound member: `Array(Integer(min = 0))` passed for `Array(Value)` with `Value = Integer` is a read-only view.
+- `X: C` where `C` is a union: the argument binds **exactly one** member (T3): the unique member `m` with `Arg ≤ m`; zero → `GN010` "`String` doesn't satisfy the constraint `Integer | Float` of `Value`"; several → `GN011` (ambiguous). Inside generic signatures, the argument value is then viewed as the bound member: `Array<Integer<min = 0>>` passed for `Array<Value>` with `Value = Integer` is a read-only view.
 - `X: C` where `C` is an object type: binds the argument's **full** type (`Arg ≤ C`, else `GN010`). Method requirements: the actual type's declaration (the spelling of the argument) must have a method of that name whose signature fits (§4.8 rules, with `self` the receiver); missing → `GN013`.
 - No constraint: any type except `Void` in a data position (`TY071` at use), and `Never` is allowed.
 
@@ -1201,8 +1205,8 @@ Inputs: explicit arguments, expected type, argument types, defaults — in this 
 
 1. Bind explicit generic arguments (and check constraints, `GN010`).
 2. If there is an expected type, unify the declared return type (or, for a typed literal `Point { … }`, the type itself) with it; bindings found here are **fixed** (`let ratio: Float = sum([1, 2, 3])` fixes `Value = Float`).
-3. Check each argument with the substituted parameter type as its expected type where that type is fully known (literals adapt: `[1, 2, 3]` becomes `Array(Float)`), otherwise infer the argument's type in *synthesis mode* (literals have their base type) and unify. Lambdas are checked last, once their parameter types are known (left to right among lambdas), so `map((x) => …)` infers `Result` from the body.
-4. Unify collects, per unbound parameter, the set of candidate types. All candidates must be **equal** (after widening literals to their base type); two different candidates is `GN014` ("`NumberType` is `Integer` for `x` and `Float` for `y`"). Never a join: `Point { x = 12, y = 1.5 }` is an error, not `Point(Integer | Float)`.
+3. Check each argument with the substituted parameter type as its expected type where that type is fully known (literals adapt: `[1, 2, 3]` becomes `Array<Float>`), otherwise infer the argument's type in *synthesis mode* (literals have their base type) and unify. Lambdas are checked last, once their parameter types are known (left to right among lambdas), so `map((x) => …)` infers `Result` from the body.
+4. Unify collects, per unbound parameter, the set of candidate types. All candidates must be **equal** (after widening literals to their base type); two different candidates is `GN014` ("`NumberType` is `Integer` for `x` and `Float` for `y`"). Never a join: `Point { x = 12, y = 1.5 }` is an error, not `Point<Integer | Float>`.
 5. Remaining parameters take their default; still unbound: `GN015` "`Item` cannot be inferred" (with the explicit form as a fix).
 6. Check every constraint with the final bindings (`GN010`/`GN011`/`GN013`), then re-check the arguments against the substituted parameter types (literal adaptation, views, write-sets).
 
@@ -1212,10 +1216,10 @@ A generic function used as a value (`["Ada"].map(identity)`) is instantiated fro
 
 A generic declaration is checked **once**, against its constraints:
 
-- A value of type `X` with an object constraint has the constraint's fields and methods; with no constraint, only what every type has (copy, pass, store in a collection of `X`, `Type(…)`; not `==`, not `toString` interpolation — `GN016` "`Value` has no constraint allowing `*`" or "allowing `==`").
+- A value of type `X` with an object constraint has the constraint's fields and methods; with no constraint, only what every type has (copy, pass, store in a collection of `X`, `Type<…>`; not `==`, not `toString` interpolation — `GN016` "`Value` has no constraint allowing `*`" or "allowing `==`").
 - With a **union** constraint (`D19`), an operation is checked once per member with `X := member`; it is valid iff it is valid for every member and the result type is either the same for every member or is that member itself (then the result is `X`). Effects are the union over members. Example: `value * 2` → `Integer` / `Float` → `X`; `value / 2` → `Float` / `Float` → `Float`; `value // divisor` → `throws DivisionByZero` (from the `Integer` member). A literal adapts to `X` when it adapts to every member (`mutable total: Value = 0`).
 - `@for`, `@if` and type-function right sides are checked **after** substitution (per application); errors are reported at the application with a note at the declaration (`GN017`).
-- Range proofs that depend on value parameters (`Integer(min = 0, max = rows - 1)`) use `SymInt` bounds: in the generic body they are treated as their storage type's full range (so an index proof can't use them); after monomorphization, native range analysis reruns and may remove checks, but **the `throws` set is fixed by the generic check** (target-independent).
+- Range proofs that depend on value parameters (`Integer<min = 0, max = rows - 1>`) use `SymInt` bounds: in the generic body they are treated as their storage type's full range (so an index proof can't use them); after monomorphization, native range analysis reruns and may remove checks, but **the `throws` set is fixed by the generic check** (target-independent).
 - A value of type `X` is never `FLAT` in the reference checker (MR26).
 - Writes through `X` values feed the write-set (`D5`).
 
@@ -1223,9 +1227,9 @@ A generic declaration is checked **once**, against its constraints:
 
 `item.describe()` with `item: X` resolves on the **actual** type at each instantiation (the spelling of the argument at the call site that bound `X`). The generic check only verifies the constraint declares it.
 
-#### 3.11.7 `Type(parameter)` is an implicit generic
+#### 3.11.7 `Type<parameter>` is an implicit generic
 
-For a structural parameter `p: T`, `Type(p)` is `ImplicitParam(f, i)`, constrained by `T`. It appears when the body copies `p` without annotation, returns `p` from a single-expression body, writes `Type(p)`, or reflects on it. Such a function is checked like `function f(P: T) = (p: P, …)` and the parameter is marked **needs full type** in its summary (native: specialized on the full type; JavaScript: per-type emission or a hidden copy function, `compilation-with-llvm.md#javascript`). A `use` alias and a `for` variable keep the type of what they designate in the same way.
+For a structural parameter `p: T`, `Type<p>` is `ImplicitParam(f, i)`, constrained by `T`. It appears when the body copies `p` without annotation, returns `p` from a single-expression body, writes `Type<p>`, or reflects on it. Such a function is checked like `function f = <P: T>(p: P, …)` and the parameter is marked **needs full type** in its summary (native: specialized on the full type; JavaScript: per-type emission or a hidden copy function, `compilation-with-llvm.md#javascript`). A `use` alias and a `for` variable keep the type of what they designate in the same way.
 
 #### 3.11.8 Monomorphization versus erasure
 
@@ -1254,14 +1258,14 @@ For a structural parameter `p: T`, `Type(p)` is `ImplicitParam(f, i)`, constrain
 | `GN016` | operation not allowed by the constraint |
 | `GN017` | error in code checked after substitution (with the application site) |
 | `GN020` | polymorphic recursion |
-| `GN030` | generic parameters on a lambda |
+| `GN030` | a value of a generic function type that isn't known at compile time (a `mutable`, a collection element, a field built at runtime) |
 
 #### 3.11.10 Tests
 
 ```fa
 -- ✓ gn-1: inference from arguments and expected type → "Ada" / 6 / 6.0
-function first(Item) = (items: Array(Item)): Item? => items.get(0)
-function sum(Value: Integer | Float) = (values: Array(Value)): Value => {
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
+function sum = <Value: Integer | Float>(values: Array<Value>): Value => {
 	mutable total: Value = 0
 	for value in values {
 		total += value
@@ -1274,34 +1278,34 @@ let ratio: Float = sum([1, 2, 3])
 console.log(ratio)
 
 -- ✓ gn-2: explicit parameters → 6.0
-console.log(sum(Float)([1, 2, 3]))
+console.log(sum<Float>([1, 2, 3]))
 
 -- ✗ gn-3: GN010
-let total = sum(String)(["a", "b"])
+let total = sum<String>(["a", "b"])
 
 -- ✗ gn-4: GN015 then valid forms
-function parse(Output: Integer | Float) = (input: String): Output throws ParseError => ...
+function parse = <Output: Integer | Float>(input: String): Output throws ParseError => ...
 let count = try parse("42")
 
 -- ✗ gn-5: GN014
-type Point(NumberType) = { x: NumberType, y: NumberType }
+type Point<NumberType> = { x: NumberType, y: NumberType }
 let mixed = Point { x = 12, y = 1.5 }
 
--- ✓ gn-6: Point(Float) adapts literals → "12.0"
-let p = Point(Float) { x = 12, y = 13 }
+-- ✓ gn-6: Point<Float> adapts literals → "12.0"
+let p = Point<Float> { x = 12, y = 13 }
 console.log("{p.x}")
 
 -- ✗ gn-7: GN016
-function double(Value) = (value: Value) => value * 2
+function double = <Value>(value: Value) => value * 2
 
 -- ✓ gn-8: union constraint checked per member (D19) → 4 / 3.0
-function double(Value: Integer | Float) = (value: Value) => value * 2
+function double = <Value: Integer | Float>(value: Value) => value * 2
 console.log(double(2))
 console.log(double(1.5))
 
 -- ✓ gn-9: structural constraint binds the full type → "Ana"
 type User = { id: Integer, name: String }
-function findById(Entity: { id: Integer }) = (entities: Array(Entity), id: Integer): Entity? => {
+function findById = <Entity: { id: Integer }>(entities: Array<Entity>, id: Integer): Entity? => {
 	for entity in entities {
 		if entity.id == id {
 			return entity
@@ -1313,7 +1317,7 @@ console.log(findById([User { id = 1, name = "Ana" }], 1)?.name)
 
 -- ✓ gn-10: method constraint, resolved on the actual type → "I am a dog"
 type Dog = { name: String, function describe = (self): String => "I am a dog" }
-function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)) => {
+function describeAll = <Item: { describe: (self) => String }>(items: Array<Item>) => {
 	for item in items {
 		console.log(item.describe())
 	}
@@ -1325,81 +1329,81 @@ type Cat = { name: String }
 describeAll([Cat { name = "Tom" }])
 
 -- ✓ gn-12: compile-time value parameters; equal values give one type
-type Matrix(Element, rows: Integer, columns: Integer) = { values: Array(Element) }
-type A = Matrix(Float, 4, 4)
-type B = Matrix(Float, 2 + 2, 4)
+type Matrix<Element, rows: Integer, columns: Integer> = { values: Array<Element> }
+type A = Matrix<Float, 4, 4>
+type B = Matrix<Float, 2 + 2, 4>
 let a: A = { values = [] }
 let b: B = a -- valid: A ≡ B
 
--- ✗ gn-13: compile error on the out-of-range index (Matrix.get takes Integer(min = 0, max = rows - 1))
--- transform.get(4, 0) with transform: Matrix(Float, 4, 4) → TY002 at the call (4 doesn't satisfy Integer(min = 0, max = 3))
+-- ✗ gn-13: compile error on the out-of-range index (Matrix.get takes Integer<min = 0, max = rows - 1>)
+-- transform.get(4, 0) with transform: Matrix<Float, 4, 4> → TY002 at the call (4 doesn't satisfy Integer<min = 0, max = 3>)
 
 -- ✗ gn-14: GN006
-type Bad(scale: Float) = { x: Float }
+type Bad<scale: Float> = { x: Float }
 
 -- ✓ gn-15: generic application vs call → "abab"
-function repeatText(times: Integer(min = 0)) = (text: String): String => {
+function repeatText = <times: Integer<min = 0>>(text: String): String => {
 	mutable result = ""
 	for 0..times {
 		result += text
 	}
 	result
 }
-console.log(repeatText(2)("ab"))
+console.log(repeatText<2>("ab"))
 
 -- ✓ gn-16: empty() is a call, inferred from the expected type → 0
-function empty(Item) = (): Array(Item) => []
-let numbers: Array(Integer) = empty()
+function empty = <Item>(): Array<Item> => []
+let numbers: Array<Integer> = empty()
 console.log(numbers.length)
 
 -- ✗ gn-17: GN015
 let nothing = empty()
 
 -- ✓ gn-18: defaults → "{ index: Integer }"
-type Collection(Item, Index = Integer) = { get: (index: Index) => Item? }
-let names: Collection(String) = { get = (index) => none }
-console.log(@typeToString(Parameters(Type(names.get))))
+type Collection<Item, Index = Integer> = { get: (index: Index) => Item? }
+let names: Collection<String> = { get = (index) => none }
+console.log(@typeToString(Parameters<Type<names.get>>))
 
 -- ✓ gn-19: generic function as a value, instantiated by the expected type → ["Ada", "Alan"]
-function identity(Value) = (value: Value): Value => value
+function identity = <Value>(value: Value): Value => value
 console.log(["Ada", "Alan"].map(identity))
 
 -- ✗ gn-20: GN015 (no expected function type)
 let f = identity
 
 -- ✓ gn-21: generic methods → [2, 4]
-type Stack(Item) = {
-	#items: Array(Item) = []
+type Stack<Item> = {
+	#items: Array<Item> = []
 	function push = (self, item: Item) mutates self => {
 		self.#items.push(item)
 	}
-	function map(Result) = (self, transform: (item: Item) => Result) => Stack(Result) { #items = self.#items.map(transform) }
+	function map = <Result>(self, transform: (item: Item) => Result) => Stack<Result> { #items = self.#items.map(transform) }
 	function toArray = (self) => self.#items[..]
 }
-mutable stack = Stack(Integer) {}
+mutable stack = Stack<Integer> {}
 stack.push(1)
 stack.push(2)
 console.log(stack.map((x) => x * 2).toArray())
 
 -- ✗ gn-22: constraints using earlier parameters: TF010
 type User2 = { name: String, email: String, password: String }
-function select(Entity, keys: Keys(Entity)) = (entity: Entity): Pick(Entity, keys) => pick(entity, keys)
+function select = <Entity, keys: Keys<Entity>>(entity: Entity): Pick<Entity, keys> => pick(entity, keys)
 let u = User2 { name = "Ada", email = "a@b", password = "s" }
-let bad = select(User2, { age })(u)
+let bad = select<User2, { age }>(u)
 
 -- ✓ gn-23: … and the valid call → { name = "Ada", email = "a@b" }
-console.log(select(User2, { name, email })(u))
+console.log(select<User2, { name, email }>(u))
 
 -- ✗ gn-24: D5 write-set through a type parameter: EF004 at the call
 type Tight = { name: "a" | "b" }
-function renamed = (human: { name: String }, name: String): Type(human) => {
+function renamed = (human: { name: String }, name: String): Type<human> => {
 	mutable copy = human
 	copy.name = name
 	copy
 }
 let t = renamed(Tight { name = "a" }, "zzz")
 
--- ✓ gn-25: Type(parameter) keeps the full type → "unlimited"
+-- ✓ gn-25: Type<parameter> keeps the full type → "unlimited"
 type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }
 let clark = renamed(SuperHuman { name = "John", powers = "unlimited" }, "Clark")
@@ -1422,121 +1426,121 @@ console.log(clark.powers)
 
 #### 3.12.3 `when` on types (TY12)
 
-`when V is { P1 => A, P2 => B, else => C }`: the first branch with `V ≤ Pi` (the **whole** type, not member by member) is taken. In the branch, `V` is known to satisfy `Pi` (its fields are usable). Without `else`, no matching branch is `TF007`. Example: `Optionalize(Integer?)` takes `else` and gives `Integer?`.
+`when V is { P1 => A, P2 => B, else => C }`: the first branch with `V ≤ Pi` (the **whole** type, not member by member) is taken. In the branch, `V` is known to satisfy `Pi` (its fields are usable). Without `else`, no matching branch is `TF007`. Example: `Optionalize<Integer?>` takes `else` and gives `Integer?`.
 
 #### 3.12.4 Built-in type functions
 
 | Function | Accepts | Result | Errors |
 | --- | --- | --- | --- |
-| `Type(value)` | any expression (not evaluated) | its inferred type without facts; a parameter / `use` / loop variable: the type of what it designates; spelling = declared or created spelling, else base type of the literal | `TF020` on a type (`Type(Integer)`) |
-| `Keys(T)` | object type (or member with object payload) | `Fields` of its public data fields, declaration order | `TF021` not an object type (maps: use `KeyType`) |
-| `DeepKeys(T)` | object type | recursive `Fields`; a recursive field is a leaf | `TF021` |
-| `KeyType(M)` | `Map`, `GrowingMap` | key type | `TF022` |
-| `Values(C)` | any collection | element type (map: value type) | `TF023` |
-| `Partial(T)` | object type | each field `F` → `F?`, flags and defaults kept, **shallow** (`D21`) | `TF021` |
-| `Required(T)` | object type | each field `F` → `F - None` (unchanged if no `None`); a field of type exactly `None` → `TF024` | `TF021`, `TF024` |
-| `Record(keys, Item)` | key set (compile-time), any type | object with one field per key, nested groups → nested objects | `TF025` keys not a key set |
-| `Pick(T, keys: DeepKeys(T))` | object type, key set of `T` | only those leaves, nested objects keep only picked children | `TF010` unknown key |
-| `Omit(T, keys: DeepKeys(T))` | same | removes those leaves; a group (after normalization, `D15`) removes the field | `TF010` |
-| `Parameters(F)` | function type | object `{ name: Type }` per parameter, in order; a variadic `...v: T` gives `v: Array(T)` | `TF026` unnamed or destructured parameter (`D22`), `TF027` not a function type |
-| `Return(F)` | function type | return type (`Void` when none) | `TF027` |
+| `Type<value>` | any expression (not evaluated) | its inferred type without facts; a parameter / `use` / loop variable: the type of what it designates; spelling = declared or created spelling, else base type of the literal | `TF020` on a type (`Type<Integer>`) |
+| `Keys<T>` | object type (or member with object payload) | `Fields` of its public data fields, declaration order | `TF021` not an object type (maps: use `KeyType`) |
+| `DeepKeys<T>` | object type | recursive `Fields`; a recursive field is a leaf | `TF021` |
+| `KeyType<M>` | `Map`, `GrowingMap` | key type | `TF022` |
+| `Values<C>` | any collection | element type (map: value type) | `TF023` |
+| `Partial<T>` | object type | each field `F` → `F?`, flags and defaults kept, **shallow** (`D21`) | `TF021` |
+| `Required<T>` | object type | each field `F` → `F - None` (unchanged if no `None`); a field of type exactly `None` → `TF024` | `TF021`, `TF024` |
+| `Record<keys, Item>` | key set (compile-time), any type | object with one field per key, nested groups → nested objects | `TF025` keys not a key set |
+| `Pick<T, keys: DeepKeys<T>>` | object type, key set of `T` | only those leaves, nested objects keep only picked children | `TF010` unknown key |
+| `Omit<T, keys: DeepKeys<T>>` | same | removes those leaves; a group (after normalization, `D15`) removes the field | `TF010` |
+| `Parameters<F>` | function type | object `{ name: Type }` per parameter, in order; a variadic `...v: T` gives `v: Array<T>` | `TF026` unnamed or destructured parameter (`D22`), `TF027` not a function type |
+| `Return<F>` | function type | return type (`Void` when none) | `TF027` |
 | `Uppercase`, `Lowercase`, `Capitalize` | string literal, union of them, `String` | per literal; `String` → `String` (Unicode case mapping, locale-independent) | `TF028` other types |
-| `TypeFromSchema(schema)` | compile-time `Schema` value | the described type (§3.14) | `TF040`–`TF043` |
+| `TypeFromSchema<schema>` | compile-time `Schema` value | the described type (§3.14) | `TF040`–`TF043` |
 
 Key-set arguments are compile-time values: written literally, `static`, or a lowercase parameter.
 
-Value-level `pick(value, keys)` and `omit(value, keys)`: `keys` compile-time; result type `Pick(Type(value), keys)` / `Omit(…)`; builds a copy with those fields. If `value` is `static`, computed at compile time.
+Value-level `pick(value, keys)` and `omit(value, keys)`: `keys` compile-time; result type `Pick<Type<value>, keys>` / `Omit<…>`; builds a copy with those fields. If `value` is `static`, computed at compile time.
 
 #### 3.12.5 Tests
 
 ```fa
 -- ✓ tf-1: WithTimestamps → "{ id: Integer, title: String, createdAt: Integer, updatedAt: Integer }"
-type WithTimestamps(Entity: { id: Integer }) = { ...Entity, createdAt: Integer, updatedAt: Integer }
-type Article = WithTimestamps({ id: Integer, title: String })
+type WithTimestamps<Entity: { id: Integer }> = { ...Entity, createdAt: Integer, updatedAt: Integer }
+type Article = WithTimestamps<{ id: Integer, title: String }>
 console.log(@typeToString(Article))
 
 -- ✗ tf-2: GN010 at the application (constraint)
-type Bad = WithTimestamps({ title: String })
+type Bad = WithTimestamps<{ title: String }>
 
 -- ✓ tf-3: when on types is not distributive → "Integer?" / "None" / "Integer?"
-type Optionalize(Value) = when Value is {
+type Optionalize<Value> = when Value is {
 	None => None
 	else => Value?
 }
-console.log(@typeToString(Optionalize(Integer)))
-console.log(@typeToString(Optionalize(None)))
-console.log(@typeToString(Optionalize(Integer?)))
+console.log(@typeToString(Optionalize<Integer>))
+console.log(@typeToString(Optionalize<None>))
+console.log(@typeToString(Optionalize<Integer?>))
 
 -- ✓ tf-4: if on a value parameter → "UInt8"
-type Storage(size: Integer(min = 0)) = if size <= 255 { UInt8 } else { UInt64 }
-console.log(@typeToString(Storage(100)))
+type Storage<size: Integer<min = 0>> = if size <= 255 { UInt8 } else { UInt64 }
+console.log(@typeToString(Storage<100>))
 
 -- ✗ tf-5: TF001
-type Loop(N) = Loop(Array(N))
+type Loop<N> = Loop(Array<N>)
 type X = Loop(Integer)
 
 -- ✓ tf-6: Keys, DeepKeys, KeyType, Values
 type MyType = { foo: String, nested: { bar: Integer } }
-console.log(@typeToString(Keys(MyType)))       -- "Fields { foo, nested }"
-console.log(@typeToString(DeepKeys(MyType)))   -- "Fields { foo, nested { bar } }"
-console.log(@typeToString(KeyType(Map(String, Integer))))  -- "String"
-console.log(@typeToString(Values(Map(String, Integer))))   -- "Integer"
+console.log(@typeToString(Keys<MyType>))       -- "Fields { foo, nested }"
+console.log(@typeToString(DeepKeys<MyType>))   -- "Fields { foo, nested { bar } }"
+console.log(@typeToString(KeyType<Map<String, Integer>>))  -- "String"
+console.log(@typeToString(Values<Map<String, Integer>>))   -- "Integer"
 
 -- ✗ tf-7: TF021
-type K = Keys(Map(String, Integer))
+type K = Keys<Map<String, Integer>>
 
 -- ✓ tf-8: Partial / Required → "{ foo: String?, bar: Integer? }" / "{ foo: String, bar: Integer }"
 type P = { foo: String, bar: Integer }
-console.log(@typeToString(Partial(P)))
-console.log(@typeToString(Required(Partial(P))))
-let patch: Partial(P) = { bar = 12 }
+console.log(@typeToString(Partial<P>))
+console.log(@typeToString(Required<Partial<P>>))
+let patch: Partial<P> = { bar = 12 }
 console.log(patch.foo) -- none
 
 -- ✓ tf-9: Record with nested keys → "{ foo: String, bar: String, nested: { baz: String } }"
-console.log(@typeToString(Record({ foo, bar, nested { baz } }, String)))
+console.log(@typeToString(Record<{ foo, bar, nested { baz } }, String>))
 
 -- ✓ tf-10: Pick / Omit nested → "{ foo: { bar: Integer } }" twice (D15 for the second)
 type M = { foo: { bar: Integer, baz: Integer }, qux: String }
-console.log(@typeToString(Omit(Pick(M, { foo }), { foo { baz } })))
-console.log(@typeToString(Pick(M, { foo { bar } })))
+console.log(@typeToString(Omit<Pick<M, { foo }>, { foo { baz } }>))
+console.log(@typeToString(Pick<M, { foo { bar } }>))
 
 -- ✓ tf-11: Omit of a whole group removes the field (D15) → "{ qux: String }"
-console.log(@typeToString(Omit(M, { foo { bar, baz } })))
+console.log(@typeToString(Omit<M, { foo { bar, baz } }>))
 
 -- ✗ tf-12: TF010
-type Q = Pick(M, { missing })
+type Q = Pick<M, { missing }>
 
 -- ✓ tf-13: Parameters / Return → "{ foo: String, bar: Integer }" / "String"
 function someFunction = (foo: String, bar: Integer): String => foo
-console.log(@typeToString(Parameters(Type(someFunction))))
-console.log(@typeToString(Return(Type(someFunction))))
+console.log(@typeToString(Parameters<Type<someFunction>>))
+console.log(@typeToString(Return<Type<someFunction>>))
 
 -- ✗ tf-14: TF026
-type Bad = Parameters((Integer, Integer) => Integer)
+type Bad = Parameters<(Integer, Integer) => Integer>
 
 -- ✓ tf-15: string type functions → "\"NORTH\" | \"SOUTH\"" / "String"
-console.log(@typeToString(Uppercase("north" | "south")))
-console.log(@typeToString(Uppercase(String)))
+console.log(@typeToString(Uppercase<"north" | "south">))
+console.log(@typeToString(Uppercase<String>))
 
 -- ✗ tf-16: TF028
-type U = Uppercase(Integer)
+type U = Uppercase<Integer>
 
 -- ✓ tf-17: pick / omit on values → { foo = "foo" } / { bar = 12 }
 let myObject = { foo = "foo", bar = 12 }
 console.log(pick(myObject, { foo }))
 console.log(omit(myObject, { foo }))
 
--- ✓ tf-18: Type(value) has no facts and doesn't evaluate → "Integer" / "String | Integer"
+-- ✓ tf-18: Type<value> has no facts and doesn't evaluate → "Integer" / "String | Integer"
 let five = 5
-console.log(@typeToString(Type(five)))
-function f = (value: String | Integer) => if value is String { @typeToString(Type(value)) } else { "" }
+console.log(@typeToString(Type<five>))
+function f = (value: String | Integer) => if value is String { @typeToString(Type<value>) } else { "" }
 console.log(f("x"))
 
 -- ✗ tf-19: TF004 (the compile-time function throws) "Only string literals are supported"
--- (types-at-runtime.md: `type Invalid = CapitalizeSecondLetter(Integer)`)
+-- (types-at-runtime.md: `type Invalid = CapitalizeSecondLetter<Integer>`)
 
 -- ✗ tf-20: TF007
-type NoMatch(V) = when V is { String => Integer }
+type NoMatch<V> = when V is { String => Integer }
 type X = NoMatch(Boolean)
 ```
 
@@ -1548,7 +1552,7 @@ type X = NoMatch(Boolean)
 | --- | --- | --- |
 | Same shape, other name | nothing | `S ≡ T` |
 | Superset to subset, copied | implicit | `Copy` mode: generated narrowing copy |
-| Superset to subset, referenced | implicit view | `Read` mode, `Type(view)` keeps `S` |
+| Superset to subset, referenced | implicit view | `Read` mode, `Type<view>` keeps `S` |
 | Object literal with extra field | — | `TY014` |
 | Collection of supersets to a parameter | implicit if the parameter is not mutated; never for `Set` elements and `Map` keys | `CL010` / `EF005` |
 | `T` to `T?` | implicit | union membership |
@@ -1600,7 +1604,7 @@ let scaled = count * ratio
 -- ✓ cv-3: integers compare by range
 let small: Int8 = 100
 let big: Int64 = small
-let bounded: Integer(min = 0, max = 100) = 100
+let bounded: Integer<min = 0, max = 100> = 100
 let byte: Byte = bounded
 console.log(byte)  -- 100
 
@@ -1638,8 +1642,8 @@ let set = Set.from([1, 2, 2, 3])
 console.log(Array.from(set).length)
 
 -- ✗ cv-11: CV005 (D2: views between number and bigint integer storage)
-function total = (values: Array(Integer)) => values.length
-let longs: Array(Int64) = [1, 2]
+function total = (values: Array<Integer>) => values.length
+let longs: Array<Int64> = [1, 2]
 total(longs)
 ```
 
@@ -1647,13 +1651,13 @@ total(longs)
 
 #### `@typeToString(T): String`
 
-Compile-time. Prints the **spelling** at the use site: a name as written with its arguments (`UserId`, `Point(Integer)`); anonymous types canonically (`D49`): objects `{ x: Integer, y: Integer }` in declaration order of the spelling (spread order for spread-built types), unions in the order written (normalized members removed), literals in Fa syntax (`"north"`, `42`), ranged integers `Integer(min = 0, max = 10)` (only the bounds that differ from the storage), optionals `T?`, function types `(n: Integer) => Integer throws E requires r: R mutates p` (names kept, `async` prefix), collections `Array(Integer)`, `Fields { a, nested { b } }`, `Enum { … }` only for anonymous ones. `Type(value)` prints the declared or creating spelling, the base type for a literal. A composition prints its function type (`"(n: Integer) => Integer"`).
+Compile-time. Prints the **spelling** at the use site: a name as written with its arguments (`UserId`, `Point<Integer>`); anonymous types canonically (`D49`): objects `{ x: Integer, y: Integer }` in declaration order of the spelling (spread order for spread-built types), unions in the order written (normalized members removed), literals in Fa syntax (`"north"`, `42`), ranged integers `Integer<min = 0, max = 10>` (only the bounds that differ from the storage), optionals `T?`, function types `(n: Integer) => Integer throws E requires r: R mutates p` (names kept, `async` prefix), collections `Array<Integer>`, `Fields { a, nested { b } }`, `Enum { … }` only for anonymous ones. `Type<value>` prints the declared or creating spelling, the base type for a literal. A composition prints its function type (`"(n: Integer) => Integer"`).
 
 #### `@typeToSchema(T): Schema`
 
 Builds a `Schema` value (prelude named union, exactly the table of `types-at-runtime.md`). Rules: a named type is wrapped in `Schema.Named { name, definition }`; a recursive use inside its own definition is `Schema.Reference { name }`; `Integer` is `Schema.Integer { bits = 64 }` (signed default true, `min`/`max` only when narrower than the storage); `Byte` is `Schema.Integer { bits = 8, signed = false }`; properties in declaration order with `isReadonly` and `default` (the literal type of a literal default, else `none`); anonymous unions in written order; named unions `Schema.NamedUnion { errors, members }`; functions `Schema.Function { parameters, returns, throws, async }` (requires and mutates are not described: `D49`).
 
-#### `TypeFromSchema(schema)` (`D48`)
+#### `TypeFromSchema<schema>` (`D48`)
 
 Inverse, at compile time. `Schema.Named` gives an alias name used for printing; `Schema.Reference` must refer to an enclosing `Named` (`TF040`); `Schema.Object` properties must have unique names (`TF041`); `Schema.Union` members must be distinguishable (`TY040`); `Schema.NamedUnion` and `Schema.Enum` create a nominal type whose identity is `(the applying type-function declaration, the schema ConstId)` — equal schemas give the same type; invalid values (`bits = 7`, `min > max` gives `Never`, not an error) `TF042`; `Schema.Function` builds a function type without effects other than `throws`; `Schema.Collection` with an unknown `kind` `TF043`.
 
@@ -1664,14 +1668,14 @@ Inverse, at compile time. `Schema.Named` gives an alias name used for printing; 
 #### Tests
 
 ```fa
--- ✓ rt-1 → "String" / "Integer" / "UserId" / "Point(Integer)" / "{ x: Integer, y: Integer }"
+-- ✓ rt-1 → "String" / "Integer" / "UserId" / "Point<Integer>" / "{ x: Integer, y: Integer }"
 type UserId = Integer
-type Point(N) = { x: N, y: N }
+type Point<N> = { x: N, y: N }
 console.log(@typeToString(String))
 let numbers = [1, 2, 3]
-console.log(@typeToString(Type(numbers[0])))
+console.log(@typeToString(Type<numbers[0]>))
 console.log(@typeToString(UserId))
-console.log(@typeToString(Point(Integer)))
+console.log(@typeToString(Point<Integer>))
 console.log(@typeToString({ x: Integer, y: Integer }))
 
 -- ✓ rt-2: schema of a type with a default and an optional → assertion holds
@@ -1723,7 +1727,7 @@ FunctionExpression = (params)[: Return] [throws E] [requires r: R, …] [mutates
 - **Single-expression body** (anything after `=>` that doesn't start with `{`, including `if`/`when`/`do` with blocks inside): return type and effects (`throws`, `requires`, `mutates`, `invalidates`) are **inferred**; any written ones are checked as for a block (allowed, a declared extra is `WEF001`).
 - **Block body**: return type and every effect must be declared. Missing effect: `EF001` (mutates), `EF002` (invalidates), `EF003` (requires), `EF010` (throws: "`saveScore` does not declare `ApiError`"). No return type: returns `Void`; the last expression's value is dropped, `WFN001` when computing it has no effect (a pure expression, not a call). A declared effect the body doesn't have: `WEF001`; callers still see it.
 - **Return**: the value of the last expression of a block, or `return e`. With a declared return type `R`: every `return e` and the final expression must be `≤ R` (`TY002`); a path reaching the end without a value: `FN011` "missing value at the end of `f`"; `return` without value in a function returning `R ≠ Void`: `FN011`; `return e` in a function without return type: `FN013`. `: Never` with a reachable end: `FN012`. `return` outside a function (module-level `do`): `FN014`.
-- **Single-expression return type**: the expression's type; when it is a parameter (or a path into one, D5 aside), `Type(parameter)` (structural-typing: "returns its full type").
+- **Single-expression return type**: the expression's type; when it is a parameter (or a path into one, D5 aside), `Type<parameter>` (structural-typing: "returns its full type").
 - **Recursion**: §1; `FN010`.
 - **Hoisting**: at the top level and inside types, order doesn't matter. Inside a block, a function is visible after its declaration, can call itself, can use values declared before it; two local functions calling each other: `FN015` "declare them at the top level".
 - **Names**: no overloading; a second function with the same name in a scope is `TY009`. A local function can shadow an outer name.
@@ -1763,13 +1767,13 @@ function reset = (player: Player) => {
 }
 
 -- ✓ fd-5: single expression infers `mutates names` → ["guest"]
-function addGuest = (names: Array(String)) => names.push("guest")
-mutable names: Array(String) = []
+function addGuest = (names: Array<String>) => names.push("guest")
+mutable names: Array<String> = []
 addGuest(names)
 console.log(names)
 
 -- ✗ fd-6: EF011 (inferred mutation needs a mutable argument)
-let fixed: Array(String) = []
+let fixed: Array<String> = []
 addGuest(fixed)
 
 -- ✗ fd-7: FN001
@@ -1779,7 +1783,7 @@ let addOne = (x: Integer) => x + 1
 function countdown = (n: Integer) => if n == 0 { 0 } else { countdown(n - 1) }
 
 -- ✓ fd-9: recursion with a declared return type → "ababab"
-function repeatText = (text: String, times: Integer(min = 0)): String =>
+function repeatText = (text: String, times: Integer<min = 0>): String =>
 	if times == 0 { "" } else { text + repeatText(text, times - 1) }
 console.log(repeatText("ab", 3))
 
@@ -1839,14 +1843,14 @@ console.log(size(11))
 - A parameter is an **immutable reference** to the argument: never copied (native: aggregates by pointer, scalars by value since they can't be mutated; JavaScript: the value, objects and collections being references).
 - `mutates p` (or a path below `p`): the function writes through the reference; the caller's argument must be a **mutable place** (`EF011` "`addBonus` mutates its argument, but `alice` is immutable"); a temporary (a call result, a literal) is `EF012` (`D24`).
 - A parameter can't be replaced (`p = …`: `EF013` "a parameter can't be replaced: return the new value"); a primitive parameter can't be mutated at all (`mutates value` on a primitive: `EF014`). Primitive = numbers, `Boolean`, `String`, `Character`, enums, `Fields`, literal unions, `None`, ranges, function values.
-- The argument keeps its type: `Type(p)` (§3.11.7).
+- The argument keeps its type: `Type<p>` (§3.11.7).
 - Aliasing: a place passed to a mutated/invalidated parameter must not overlap other arguments, used requirements, used module-level values or references captured by callback arguments (`advanced/reference-checking#arguments-that-alias`; `EF030`).
 
 #### 4.2.2 Defaults, named arguments, variadic, destructuring
 
 - **Defaults** are evaluated at each call that omits the argument, in the callee, after the previous parameters are bound; they can reference earlier parameters (`end: Integer = text.length`), not later ones (`FN020`). Their effects are effects of the function (`D25`). A default must satisfy the parameter type (`TY002`).
 - **Named arguments**: positional first, then named (`FN021` "a positional argument can't follow a named argument"); a parameter given twice (`FN022` "`x` is already given"); unknown name (`FN023`); missing required argument (`FN024`); too many positional arguments (`FN025`). A variadic parameter is never named (`FN026`). Named arguments and defaults only exist for direct calls of a declaration (and of `with` results); through a function value: `FN027` "named arguments don't go through function values".
-- **Variadic** `...values: T`: at most one, last (`FN028`); inside it is `Array(T)` (immutable). At the call, the remaining positional arguments fill it; `...collection` spreads any collection whose elements satisfy `T` (copied), only into the variadic part (`FN029` elsewhere).
+- **Variadic** `...values: T`: at most one, last (`FN028`); inside it is `Array<T>` (immutable). At the call, the remaining positional arguments fill it; `...collection` spreads any collection whose elements satisfy `T` (copied), only into the variadic part (`FN029` elsewhere).
 - **Destructured parameter** `({ x, y }: Point)`: one local per field, each a reference into the argument (like `use { x, y } = p`); renaming with `as`; defaults with `=`. The whole value has no name. With an inline anonymous type (`({ a, b }: { a: String, b: String })`): `WFN002`, formatter rewrites to the anonymous structure parameter.
 - **Anonymous structure parameter** `({ name: String, greeting: String = "Hello" })`: the parameter type is the object type `{ name: String, greeting: String = "Hello" }`; each field is a local reference. An object literal argument may omit defaulted fields; an existing value must have them (`TY026`).
 - **Scope**: parameters and the top-level declarations of the body share one scope; redeclaring a parameter name in the body's top level is `TY009`.
@@ -1866,12 +1870,12 @@ console.log(size(11))
 - `function name(a, b = default, ...rest) { … }` (JavaScript defaults have the same per-call, left-to-right semantics; `none` is `null`, never `undefined`, so a passed `none` doesn't trigger the default).
 - Named arguments are resolved at compile time into positional order; an omitted middle argument passes `undefined` to trigger its default.
 - Destructured parameters: a plain parameter plus property reads at each use (no JavaScript destructuring, which would copy primitives and break `mutates` of fields).
-- Hidden trailing arguments, in this order: requirements (canonical order), generic dictionaries (§3.11.8), the copy function of a `Type(parameter)` argument for function values.
+- Hidden trailing arguments, in this order: requirements (canonical order), generic dictionaries (§3.11.8), the copy function of a `Type<parameter>` argument for function values.
 - Spread arguments: `...array` when the source is a JavaScript array; other Fa collections are iterables (`[Symbol.iterator]`), so `...set` works.
 
 #### 4.2.5 Native lowering
 
-Aggregates by pointer with the attributes of `compilation-with-llvm.md#how-a-proven-fact-reaches-llvm` (`readonly` unless mutated, `noalias` thanks to the aliasing rule), scalars by value, results in registers or `sret`; `throws` as a tagged result; requirements as hidden pointer parameters; variadic as an `Array(T)` header built by the caller (on the stack when it doesn't escape); defaults evaluated in a callee prologue, with a "given" bitmask argument when the default depends on earlier parameters (otherwise the caller evaluates it).
+Aggregates by pointer with the attributes of `compilation-with-llvm.md#how-a-proven-fact-reaches-llvm` (`readonly` unless mutated, `noalias` thanks to the aliasing rule), scalars by value, results in registers or `sret`; `throws` as a tagged result; requirements as hidden pointer parameters; variadic as an `Array<T>` header built by the caller (on the stack when it doesn't escape); defaults evaluated in a callee prologue, with a "given" bitmask argument when the default depends on earlier parameters (otherwise the caller evaluates it).
 
 #### 4.2.6 Tests
 
@@ -1920,7 +1924,7 @@ function bad = (...a: Integer, b: Integer) => b
 sum(values = [1])
 
 -- ✓ pa-10: a Set spreads into a variadic → 6
-let set: Set(Integer) = [1, 2, 3]
+let set: Set<Integer> = [1, 2, 3]
 console.log(sum(...set))
 
 -- ✓ pa-11: destructured and anonymous structure parameters → "Values: Hello 42" / "Hello, John!" / "Hi, Jane!"
@@ -2031,7 +2035,7 @@ Grammar (normative, `reference-checking#places-and-paths`): `root { .field | .#f
 | unsatisfied requirement | `EF016` |
 | calling a mutating method on an immutable receiver | `EF011` |
 | use of an invalidated (or maybe invalidated) reference | `EF032` (reference checker; message names the invalidating operation and proposes `use x = …` again or `reuse`) |
-| an index proven out of bounds (`array[3]` on a 3-item array, `Integer(min = 4)` index) | `CL060` (range analysis) |
+| an index proven out of bounds (`array[3]` on a 3-item array, `Integer<min = 4>` index) | `CL060` (range analysis) |
 
 #### 4.3.5 Lowering of effects
 
@@ -2057,7 +2061,7 @@ function resetScore2 = (player: Player) mutates player.score => {
 }
 
 -- ✓ ef-3: [..] paths
-function resetAll = (players: Array(Player)) mutates players[..].score => {
+function resetAll = (players: Array<Player>) mutates players[..].score => {
 	for player in players {
 		player.score = 0
 	}
@@ -2067,7 +2071,7 @@ resetAll(team)
 console.log(team[0].score) -- 0
 
 -- ✓ ef-4: a failing assignment target with try
-function resetAt = (scores: Array(Integer), index: Integer) throws IndexError mutates scores[index] => {
+function resetAt = (scores: Array<Integer>, index: Integer) throws IndexError mutates scores[index] => {
 	try scores[index] = 0
 }
 mutable scores = [1, 2]
@@ -2106,7 +2110,7 @@ do {
 greet("Bao")
 
 -- ✓ ef-10: module-level value mutation declared with its path
--- (file people.fa: `export mutable: Pool(Person) = []`)
+-- (file people.fa: `export mutable: Pool<Person> = []`)
 -- function register = (name: String) mutates people.size => { people.add({ name = name }) }
 
 -- ✗ ef-11: EF001 (people = [] needs `mutates people`)
@@ -2120,7 +2124,7 @@ function g = (player: Player) invalidates player.name => { }
 
 -- ✓ ef-14: invalidates implies mutates size
 type Inventory = {
-	items: Pool(String)
+	items: Pool<String>
 	function remove = (self, item: String in self.items) invalidates item => {
 		self.items.delete(item)
 	}
@@ -2165,7 +2169,7 @@ let other = ["x"].map((text) => try Integer.parse(text)) catch error => {
 }
 
 -- ✗ fp-2: EF015 (map throws what its callback throws)
-function parseAll = (texts: Array(String)) => {
+function parseAll = (texts: Array<String>) => {
 	let n = texts.map((text) => try Integer.parse(text))
 }
 
@@ -2196,7 +2200,7 @@ function guarded = (action: () => Integer): Integer => action() catch error => 0
 - A lambda may declare **fewer** parameters than the expected type (trailing ones ignored); more: `FN062`.
 - A lambda's effects must fit the expected type if the target is stored (§4.5); if the target parameter is not stored, they flow to the call.
 - `async` lambdas: a lambda is async when its expected type is (`async` written on a lambda without an async expected type: `FN063`).
-- Not generic (`GN030`). To return an object literal from a lambda: `=> Point { … }`; `=> { … }` is a block.
+- A lambda can be generic: `<Value>(value: Value) => value`, or generic from a generic function type expected (§3.11.1). To return an object literal from a lambda: `=> Point { … }`; `=> { … }` is a block.
 
 ```fa
 -- ✓ la-1 → [2, 4, 6] / [4, 3]
@@ -2262,7 +2266,7 @@ function main = () => {
 main()
 
 -- ✓ cl-2: non-escaping closure modifies a captured local → 6
-function sumOf = (numbers: Array(Integer)): Integer => {
+function sumOf = (numbers: Array<Integer>): Integer => {
 	mutable total = 0
 	function addToTotal = (value: Integer) => {
 		total += value
@@ -2284,7 +2288,7 @@ for g in greetings {
 -- ✓ cl-4: an escaping closure keeps the value at creation → 1
 function main2 = () => {
 	mutable n = 1
-	mutable callbacks: Array(() => Void) = []
+	mutable callbacks: Array<() => Void> = []
 	callbacks.push(() => console.log(n))
 	n = 2
 	for callback in callbacks {
@@ -2296,7 +2300,7 @@ main2()
 -- ✗ cl-5: FN070
 function main3 = () => {
 	mutable count = 0
-	mutable callbacks: Array(() => Void) = []
+	mutable callbacks: Array<() => Void> = []
 	callbacks.push(() => {
 		count += 1
 	})
@@ -2546,13 +2550,13 @@ console.log(pipeline(1))
 
 -- ✓ co-14: generic middleware chain → prints the timestamp field
 type Request = { path: String }
-function addTimestamp(Context: Request) = (request: Context): { ...Context, timestamp: Integer } => { ...request, timestamp = 1 }
-function addAuth(Context: Request) = (request: Context): { ...Context, auth: String } => { ...request, auth = "t" }
+function addTimestamp = <Context: Request>(request: Context): { ...Context, timestamp: Integer } => { ...request, timestamp = 1 }
+function addAuth = <Context: Request>(request: Context): { ...Context, auth: String } => { ...request, auth = "t" }
 function chain = addTimestamp then addAuth
 console.log(chain(Request { path = "/" }).timestamp) -- 1
 
 -- ✗ co-15: GN010 at the call (wrong order: logRequest needs `timestamp`)
-function logRequest(Context: { path: String, timestamp: Integer }) = (request: Context): Context => request
+function logRequest = <Context: { path: String, timestamp: Integer }>(request: Context): Context => request
 function wrong = addAuth then logRequest then addTimestamp
 let x = wrong(Request { path = "/" })
 ```
@@ -2573,28 +2577,28 @@ The collections are written in Fa, in the standard library, on the internal `int
 
 | Type | Positions (`length`, indices) | Elements move on growth | Removal | Element constraint | Holds relation targets | Reference representation (native / JS) |
 | --- | --- | --- | --- | --- | --- | --- |
-| `Array(T)` | yes | yes | yes | — | no | pointer / object or index |
-| `GrowingArray(T)` | yes | no | no | — | no | pointer / object or index |
-| `OrderedColumnar(T)` | yes | yes | yes | object `T` | no | index / index |
-| `Set(T)` | no (`size`) | yes | yes | `COMPARABLE`, exact element type | no | pointer / object or value |
-| `GrowingSet(T)` | no | no | no | same | no | pointer / object or value |
-| `Map(K, V)` | no | no (stable slots) | yes | `K` `COMPARABLE`, exact | no | pointer to value / object or key |
-| `GrowingMap(K, V)` | no | no | no | same | no | same |
-| `Pool(T)` | no | no | yes | — | yes | pointer / object or slot index |
-| `GrowingPool(T)` | no | no | no | — | yes | pointer / object or index |
-| `Columnar(T)` | no | no | yes | object `T` | yes | slot index / slot index |
-| `GrowingColumnar(T)` | no | no | no | object `T` | yes | slot index / slot index |
+| `Array<T>` | yes | yes | yes | — | no | pointer / object or index |
+| `GrowingArray<T>` | yes | no | no | — | no | pointer / object or index |
+| `OrderedColumnar<T>` | yes | yes | yes | object `T` | no | index / index |
+| `Set<T>` | no (`size`) | yes | yes | `COMPARABLE`, exact element type | no | pointer / object or value |
+| `GrowingSet<T>` | no | no | no | same | no | pointer / object or value |
+| `Map<K, V>` | no | no (stable slots) | yes | `K` `COMPARABLE`, exact | no | pointer to value / object or key |
+| `GrowingMap<K, V>` | no | no | no | same | no | same |
+| `Pool<T>` | no | no | yes | — | yes | pointer / object or slot index |
+| `GrowingPool<T>` | no | no | no | — | yes | pointer / object or index |
+| `Columnar<T>` | no | no | yes | object `T` | yes | slot index / slot index |
+| `GrowingColumnar<T>` | no | no | no | object `T` | yes | slot index / slot index |
 
 - `Set`/`Map` key element types must be `COMPARABLE` (`CL020` "a `Set` element needs `==`: `Handler` contains a function"). `Columnar`/`OrderedColumnar` element types must be object types (`CL021`).
-- Element types can't be reference types: `Array(Person in people)` is `CL022` "local collections of references are not allowed: keep indices, or declare a relation `Pool`" (R9). Relation pools (`Pool(Person in people)` as a field, `Pool(people->f)`) are relation sides, checked by the relations brief.
+- Element types can't be reference types: `Array<Person in people>` is `CL022` "local collections of references are not allowed: keep indices, or declare a relation `Pool`" (R9). Relation pools (`Pool<Person in people>` as a field, `Pool<people->f>`) are relation sides, checked by the relations brief.
 - `Void` elements: `TY071`.
 
 #### 5.0.2 Creating collections
 
-- A list literal `[…]` takes the collection type expected by the context (declaration annotation, parameter, return type, field type, element of another literal): `let numbers: Set(Integer) = [1, 2, 3]`. Elements are checked against the element type (literals adapt). A map literal's elements are 2-tuples `(key, value)` (`CL005`); duplicate **literal** keys in a map literal: `CL006` (`D61`); duplicates in a set literal are merged (`Set` semantics).
+- A list literal `[…]` takes the collection type expected by the context (declaration annotation, parameter, return type, field type, element of another literal): `let numbers: Set<Integer> = [1, 2, 3]`. Elements are checked against the element type (literals adapt). A map literal's elements are 2-tuples `(key, value)` (`CL005`); duplicate **literal** keys in a map literal: `CL006` (`D61`); duplicates in a set literal are merged (`Set` semantics).
 - Without context: `Array` with the joined element type (§3.1.2). An empty literal without context: `CL001` "an empty array needs its type".
-- `C.from(source, options…)`: `source` is any collection (or list literal) whose elements satisfy the element type; the element type is inferred from the source or given (`Set(Float).from([1, 2, 3])`); always a copy. Options (named only): `capacity: Integer(min = 0)` for `Array`, `GrowingArray`, `Set`, `Map`, `Pool`, `Columnar`; `key: (value: T) => K` for `Set` and `GrowingSet` (`K` `COMPARABLE`, the function must be pure: `CL023`). Unknown option: `FN023`. `from` where the context already gives the type and no option is passed: `WCL001` (formatter rewrites into a literal).
-- `Map.from([("foo", 12)])` infers `Map(String, Integer)` from tuples.
+- `C.from(source, options…)`: `source` is any collection (or list literal) whose elements satisfy the element type; the element type is inferred from the source or given (`Set<Float>.from([1, 2, 3])`); always a copy. Options (named only): `capacity: Integer<min = 0>` for `Array`, `GrowingArray`, `Set`, `Map`, `Pool`, `Columnar`; `key: (value: T) => K` for `Set` and `GrowingSet` (`K` `COMPARABLE`, the function must be pure: `CL023`). Unknown option: `FN023`. `from` where the context already gives the type and no option is passed: `WCL001` (formatter rewrites into a literal).
+- `Map.from([("foo", 12)])` infers `Map<String, Integer>` from tuples.
 
 #### 5.0.3 `length` and `size`
 
@@ -2627,7 +2631,7 @@ Every collection has these (callbacks receive `(item, index)` on positional coll
 | `includes(value)` | `Boolean` | `==` on elements (`COMPARABLE`, `CL020`); on maps, the keys |
 | `find(predicate)` | `(T in self)?` | maps: `((K, V))?` copy (`D36`) |
 | `filter(predicate)` | same collection kind (growing → standard counterpart), elements copied (`D34`) |
-| `map(transform)` | `Array(R)`; on maps `Map(K, R)` (`D34`) |
+| `map(transform)` | `Array<R>`; on maps `Map<K, R>` (`D34`) |
 | `reduce(combine, initial)` | `A` (generic accumulator, `combine` first, like JavaScript) |
 | `every(p)`, `some(p)` | `Boolean` |
 | `isEmpty()` | `Boolean` |
@@ -2635,7 +2639,7 @@ Every collection has these (callbacks receive `(item, index)` on positional coll
 | `values()` | `Iterator(T in self)` (maps: values; `keys()` for keys) |
 
 - **Step by step** semantics (each method runs over the whole collection before the next, as JavaScript arrays). **Fusion**: a chain of these calls written as one expression is compiled into a single loop when **every callback is pure** (§4.4); otherwise it keeps intermediate collections. Fusion never changes results; it's decided on the typed tree (shared by both backends).
-- **Iterators** (`values()`): lazy, element by element; methods `filter`, `map`, `find`, `reduce`, `every`, `some`, `firstValues(count: Integer(min = 0) = 1)` (an iterator), `toArray()`, and `for`. An iterator is a local reference into its collection (invalidated like a `use`); it can't be stored in a field, a collection, returned or captured by an escaping closure (`CL030`). A chain consumed where written is one loop on both targets.
+- **Iterators** (`values()`): lazy, element by element; methods `filter`, `map`, `find`, `reduce`, `every`, `some`, `firstValues(count: Integer<min = 0> = 1)` (an iterator), `toArray()`, and `for`. An iterator is a local reference into its collection (invalidated like a `use`); it can't be stored in a field, a collection, returned or captured by an escaping closure (`CL030`). A chain consumed where written is one loop on both targets.
 
 #### 5.0.7 Structural variance
 
@@ -2643,9 +2647,9 @@ Every collection has these (callbacks receive `(item, index)` on positional coll
 | --- | --- | --- |
 | Read-only parameter / `use` / loop, collection of supersets | `C(S)` viewed as `C(T)` when `S ≤ T` (element views; native specializes on stride and offsets, `D54` for scalar width/representation differences) | — |
 | Mutated parameter (`mutates c`, `invalidates c[…]`) | exact element type on the written paths | `EF005` |
-| `Set` elements, `Map` keys | exact (`S ≡ T`) even read-only | `CL010` "a `Set(Hero)` is never a `Set(Human)`" |
+| `Set` elements, `Map` keys | exact (`S ≡ T`) even read-only | `CL010` "a `Set<Hero>` is never a `Set<Human>`" |
 | `Map` values | general rule | — |
-| Copy (`let a: Array(Human) = heroes`, `from`) | element-wise narrowing copy | — |
+| Copy (`let a: Array<Human> = heroes`, `from`) | element-wise narrowing copy | — |
 | Element added (`push`, `add`, `[i] = v`) | the value is copied with the element type's layout (literal: exact fields, `TY014`) | — |
 
 #### 5.0.8 Equality
@@ -2685,16 +2689,16 @@ Implied relation effects of `add`, `delete`, `take`, `deleteWhere`, `clear` are 
 
 A reference to an object or collection element is the JavaScript object itself; a later `place = newValue` (array element, map value, field, `use` alias) must therefore **write into the existing object** (`assign$T(target, source)`, field by field; for a collection, replace its contents) whenever a reference to that place may be live, so that references stay valid and see the new value as Fa specifies (`mutates self[index]` keeps references to the written item valid). When the reference checker proves no reference may designate the place, the backend replaces the object (cheaper). Places of union or optional type are replaced (references into their payload are invalidated anyway: owning edge).
 
-### 5.1 `Array(T)`
+### 5.1 `Array<T>`
 
 #### API
 
 | Member | Signature | Effect | Fails |
 | --- | --- | --- | --- |
-| `length` | `Integer(min = 0)` property | — | — |
+| `length` | `Integer<min = 0>` property | — | — |
 | `a[i]` | `T in self` | — | `IndexError` unless `i` proven in `-length..length` (negative counts from the end) |
 | `a[i] = v` | | `mutates self[i]` | same |
-| `a[r]` (range) | `Array(T)` copy | — | `IndexError` unless both bounds are proven in `-length..=length` (`D40`); start after end: empty |
+| `a[r]` (range) | `Array<T>` copy | — | `IndexError` unless both bounds are proven in `-length..=length` (`D40`); start after end: empty |
 | `get(index: Integer)` | `(T in self)?` | — | never |
 | `push(item: T)` | | `mutates self` | |
 | `insert(index: Integer, item: T)` | | `mutates self` | `IndexError` unless `0 ≤ index ≤ length` proven (`D31`) |
@@ -2705,10 +2709,10 @@ A reference to an object or collection element is the JavaScript object itself; 
 | `sortInPlace(compare = natural)` | `compare: (a: T, b: T) => Order`, `Order: Integer \| Float` (generic) | `mutates self` | natural order needs `ORDERED` (`CL025`) |
 | `reverseInPlace()` | | `mutates self` | |
 | `deleteWhere(predicate: (item: T) => Boolean)` | | `mutates self` | |
-| `indexOf(value: T)` | `Integer(min = 0)?` | | |
-| `sort(compare = natural)`, `reverse()` | `Array(T)` copy | | |
+| `indexOf(value: T)` | `Integer<min = 0>?` | | |
+| `sort(compare = natural)`, `reverse()` | `Array<T>` copy | | |
 | sequence methods | §5.0.6 | | |
-| `Array.from(source, capacity = 0)` | `Array(T)` | | |
+| `Array.from(source, capacity = 0)` | `Array<T>` | | |
 
 Sorting is **stable** on every target, with the comparator's sign deciding (NaN counts as 0) (`D35`). `users.push(users[0])` is `EF030` (aliasing).
 
@@ -2753,7 +2757,7 @@ mutable array = [1, 2, 3]
 let fourth = array[3]
 
 -- ✗ ar-4: EF015 (unproven index needs try)
-function readValue = (array: Array(Integer), index: Integer): Integer => array[index]
+function readValue = (array: Array<Integer>, index: Integer): Integer => array[index]
 
 -- ✓ ar-5: get, ?? and catch → 0 / 0
 let a = [1, 2]
@@ -2814,7 +2818,7 @@ console.log(n.every((x) => x > 0))
 console.log(n.some((x) => x > 2))
 
 -- ✓ ar-14: try let destructuring → 3
-function firstTwo = (values: Array(Integer)): Integer throws IndexError => {
+function firstTwo = (values: Array<Integer>): Integer throws IndexError => {
 	try let [first, second] = values
 	first + second
 }
@@ -2849,12 +2853,12 @@ console.log([1, 2, 3, 4, 5, 6].values().filter((x) => x %% 2 == 0).firstValues(2
 let empty = []
 
 -- ✓ ar-20: WCL001 (warning)
-let xs: Array(Integer) = Array.from([1, 2])
+let xs: Array<Integer> = Array.from([1, 2])
 
 -- ✓ ar-21: superset collection to a read-only parameter → "John"
 type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }
-function logNames = (humans: Array(Human)) => {
+function logNames = (humans: Array<Human>) => {
 	for human in humans {
 		console.log(human.name)
 	}
@@ -2862,14 +2866,14 @@ function logNames = (humans: Array(Human)) => {
 logNames([SuperHuman { name = "John", powers = "x" }])
 
 -- ✗ ar-22: EF005
-function addJohn = (humans: Array(Human)) mutates humans => {
+function addJohn = (humans: Array<Human>) mutates humans => {
 	humans.push({ name = "John" })
 }
 mutable supers = [SuperHuman { name = "A", powers = "x" }]
 addJohn(supers)
 
 -- ✓ ar-23: the generic form → 0
-function keepNamed(Item: Human) = (items: Array(Item)) mutates items => {
+function keepNamed = <Item: Human>(items: Array<Item>) mutates items => {
 	items.deleteWhere((item) => item.name == "")
 }
 mutable s2 = [SuperHuman { name = "", powers = "x" }]
@@ -2887,7 +2891,7 @@ console.log(first.name)
 let voids = [1].map((x) => console.log(x))
 ```
 
-### 5.2 `GrowingArray(T)` (and the growing family)
+### 5.2 `GrowingArray<T>` (and the growing family)
 
 Same API as `Array` **minus** `delete`, `take`, `deleteWhere`, `pop`, `clear`, `insert`, `sortInPlace`, `reverseInPlace` (calling one: `CL040` "a `GrowingArray` never removes or moves its items"). `push` declares `mutates self.length` (invalidates nothing); `[i] = v` `mutates self[i]`. References are valid for the collection's whole life.
 
@@ -2897,7 +2901,7 @@ Same API as `Array` **minus** `delete`, `take`, `deleteWhere`, `pop`, `clear`, `
 ```fa
 -- ✓ ga-1: references survive push → "Ana"
 type Human = { name: String, age: Integer }
-mutable growing: GrowingArray(Human) = [{ name = "Ana", age = 30 }]
+mutable growing: GrowingArray<Human> = [{ name = "Ana", age = 30 }]
 use firstGrowing = growing[0]
 growing.push({ name = "Bao", age = 25 })
 console.log(firstGrowing.name)
@@ -2906,19 +2910,19 @@ console.log(firstGrowing.name)
 growing.pop()
 
 -- ✗ ga-3: EF032 (Array.push invalidates, unlike GrowingArray.push)
-mutable array: Array(Human) = [{ name = "Ana", age = 30 }]
+mutable array: Array<Human> = [{ name = "Ana", age = 30 }]
 use first = array[0]
 array.push({ name = "Bao", age = 25 })
 console.log(first.name)
 ```
 
-### 5.3 `Map(K, V)` and `GrowingMap(K, V)`
+### 5.3 `Map<K, V>` and `GrowingMap<K, V>`
 
 #### API
 
 | Member | Signature | Effect | Fails |
 | --- | --- | --- | --- |
-| `size` | `Integer(min = 0)` | | |
+| `size` | `Integer<min = 0>` | | |
 | `m[key]` | `V in self` | | `KeyNotFound` unless presence proven (`D32`) |
 | `m[key] = value` | | `mutates self[key], self.size` | never (adds or replaces) |
 | `m[key] op= value` | | `mutates self[key]` | `KeyNotFound` unless proven (`try counts[key] += 1`) |
@@ -2940,7 +2944,7 @@ console.log(first.name)
 
 #### JavaScript
 
-Primitive keys (numbers, bigints, strings, booleans, enums, fields, literal unions): a JavaScript `Map` (insertion order, allowed). Object or tuple keys: `FaHashMap`, a JavaScript `Map` from the generated 32-bit structural hash to an entry `{ key, value }` or an array of entries, `==` by the generated `eq`. Both expose one internal interface (`get`, `set`, `has`, `delete`, `size`, iteration), so a function taking a `Map(K, V)` doesn't depend on which one it got (the kind is fixed by `K`). References: object value → the object; primitive value → the key (`use count = counts.getOrInsert(word, 0); count += 1` → `counts.set(word, counts.get(word) + 1)`, after the `getOrInsert`).
+Primitive keys (numbers, bigints, strings, booleans, enums, fields, literal unions): a JavaScript `Map` (insertion order, allowed). Object or tuple keys: `FaHashMap`, a JavaScript `Map` from the generated 32-bit structural hash to an entry `{ key, value }` or an array of entries, `==` by the generated `eq`. Both expose one internal interface (`get`, `set`, `has`, `delete`, `size`, iteration), so a function taking a `Map<K, V>` doesn't depend on which one it got (the kind is fixed by `K`). References: object value → the object; primitive value → the key (`use count = counts.getOrInsert(word, 0); count += 1` → `counts.set(word, counts.get(word) + 1)`, after the `getOrInsert`).
 
 #### Native
 
@@ -2950,16 +2954,16 @@ Compact dict: entries `{ hash: u32, key, value }` in a segmented, never-moving a
 
 ```fa
 -- ✓ ma-1 → 0 / 12 / 0
-let scores: Map(String, Integer) = [("ana", 12), ("bao", 17)]
+let scores: Map<String, Integer> = [("ana", 12), ("bao", 17)]
 console.log(scores["cleo"] catch error => 0)
 console.log(scores["ana"])       -- proven: literal map, literal key (D32)
 console.log(scores.get("cleo") ?? 0)
 
 -- ✗ ma-2: EF015 (KeyNotFound)
-function scoreOf = (scores: Map(String, Integer), name: String): Integer => scores[name]
+function scoreOf = (scores: Map<String, Integer>, name: String): Integer => scores[name]
 
 -- ✓ ma-3: presence proven by a guard (D32) → 12
-function scoreIf = (scores: Map(String, Integer), name: String): Integer => {
+function scoreIf = (scores: Map<String, Integer>, name: String): Integer => {
 	if scores.includes(name) {
 		return scores[name]
 	}
@@ -2968,7 +2972,7 @@ function scoreIf = (scores: Map(String, Integer), name: String): Integer => {
 console.log(scoreIf(scores, "ana"))
 
 -- ✓ ma-4: add, delete, size → true / 1 / false / 0
-mutable inventory: Map(String, Integer) = []
+mutable inventory: Map<String, Integer> = []
 inventory["apples"] = 3
 inventory["oranges"] = 2
 inventory.delete("apples")
@@ -2979,7 +2983,7 @@ inventory.clear()
 console.log(inventory.size)
 
 -- ✓ ma-5: getOrInsert with use → 2
-mutable counts: Map(String, Integer) = []
+mutable counts: Map<String, Integer> = []
 for word in ["a", "b", "a"] {
 	use count = counts.getOrInsert(word, 0)
 	count += 1
@@ -2987,7 +2991,7 @@ for word in ["a", "b", "a"] {
 console.log(counts["a"] catch error => 0)
 
 -- ✓ ma-6: stable references across insertions and other deletions → 10 / 10
-mutable sc: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+mutable sc: Map<String, Integer> = [("ana", 10), ("bao", 7)]
 use score = sc.get("ana")
 sc["cleo"] = 7
 sc.delete("bao")
@@ -3018,21 +3022,21 @@ for (name, value) in sc {
 }
 
 -- ✓ ma-11: tuple keys → "origin"
-let byPoint: Map(Tuple(Integer, Integer), String) = [((0, 0), "origin")]
+let byPoint: Map<Tuple<Integer, Integer>, String> = [((0, 0), "origin")]
 console.log(byPoint.get((0, 0)) ?? "")
 
 -- ✗ ma-12: CL010 (Map keys are exact)
 type Human = { name: String }
 type Hero = { name: String, power: String }
-function f = (m: Map(Human, Integer)) => m.size
-let heroes: Map(Hero, Integer) = []
+function f = (m: Map<Human, Integer>) => m.size
+let heroes: Map<Hero, Integer> = []
 f(heroes)
 
 -- ✗ ma-13: CL006
-let dup: Map(String, Integer) = [("a", 1), ("a", 2)]
+let dup: Map<String, Integer> = [("a", 1), ("a", 2)]
 
 -- ✗ ma-14: CL040
-mutable g: GrowingMap(String, Integer) = []
+mutable g: GrowingMap<String, Integer> = []
 g.delete("a")
 
 -- ✓ ma-15: map over values keeps keys (D34) → 2
@@ -3040,7 +3044,7 @@ let doubled = scores.map((key, value) => value * 2)
 console.log(doubled.size)
 ```
 
-### 5.4 `Set(T)` and `GrowingSet(T)`
+### 5.4 `Set<T>` and `GrowingSet<T>`
 
 #### API
 
@@ -3052,15 +3056,15 @@ console.log(doubled.size)
 | `take(value: T)` | `T?` | `mutates self` |
 | `deleteWhere(predicate)`, `clear()` | | `mutates self` |
 | `find(predicate)` | `(T in self)?` read-only | |
-| `union(other: Set(T))`, `intersection`, `difference` | `Set(T)` | |
-| `isSubsetOf(other: Set(T))` | `Boolean` | |
+| `union(other: Set<T>)`, `intersection`, `difference` | `Set<T>` | |
+| `isSubsetOf(other: Set<T>)` | `Boolean` | |
 | `Set.from(source, key = …, capacity = …)` | | |
 
 `GrowingSet` lacks `delete`, `take`, `deleteWhere`, `clear` (`CL040`). Elements are read-only (`CL031`); element types exact (`CL010`). With `key`, two values are the same when their keys are `==`; only the key is hashed. The `key` function is part of the set **value**, not its type (`D33`): set operations between sets with different key functions use the receiver's.
 
 #### JavaScript
 
-Primitive elements without `key`: a JavaScript `Set`. Otherwise `FaSet` (hash-bucketed by the generated hash, or a JavaScript `Map` from a primitive key to the value), which **implements the JavaScript `Set` interface** (`has`, `add`, `delete`, `size`, iteration) so that code taking a `Set(T)` is the same whatever the instance (`D33`). `add` returning a `Boolean` compiles to `(s.size !== (s.add(v), s.size))`. Set operations are generated loops. References: the element (objects) or the value (primitives, read-only anyway).
+Primitive elements without `key`: a JavaScript `Set`. Otherwise `FaSet` (hash-bucketed by the generated hash, or a JavaScript `Map` from a primitive key to the value), which **implements the JavaScript `Set` interface** (`has`, `add`, `delete`, `size`, iteration) so that code taking a `Set<T>` is the same whatever the instance (`D33`). `add` returning a `Boolean` compiles to `(s.size !== (s.add(v), s.size))`. Set operations are generated loops. References: the element (objects) or the value (primitives, read-only anyway).
 
 #### Native
 
@@ -3070,13 +3074,13 @@ Swiss table with inline values (control bytes + values in one allocation, mirror
 
 ```fa
 -- ✓ se-1 → 3 / 3
-let setOfIntegers: Set(Integer) = [1, 2, 2, 3]
+let setOfIntegers: Set<Integer> = [1, 2, 2, 3]
 console.log(setOfIntegers.size)
 console.log(Set.from([1, 2, 2, 3]).size)
 
 -- ✓ se-2: deep equality decides uniqueness → 3 / false
 type Human = { name: String, age: Integer }
-mutable humans: Set(Human) = [{ name = "John", age = 20 }, { name = "Jane", age = 21 }, { name = "John", age = 22 }]
+mutable humans: Set<Human> = [{ name = "John", age = 20 }, { name = "Jane", age = 21 }, { name = "John", age = 22 }]
 console.log(humans.size)
 console.log(humans.add(Human { name = "John", age = 20 }))
 
@@ -3087,47 +3091,47 @@ users.add({ id = 1, email = "c" })
 console.log(users.size)
 
 -- ✓ se-4: set operations → [1, 2, 3, 4] / [2, 3] / [1] / false / true
-let a: Set(Integer) = [1, 2, 3]
-let b: Set(Integer) = [2, 3, 4]
+let a: Set<Integer> = [1, 2, 3]
+let b: Set<Integer> = [2, 3, 4]
 console.log(a.union(b))
 console.log(a.intersection(b))
 console.log(a.difference(b))
 console.log(a.isSubsetOf(b))
-let c: Set(Integer) = [3, 2, 1]
+let c: Set<Integer> = [3, 2, 1]
 console.log(a == c)
 
 -- ✗ se-5: EF032 (add invalidates every reference into the set)
 type Person = { name: String }
-mutable people: Set(Person) = [{ name = "Ana" }]
+mutable people: Set<Person> = [{ name = "Ana" }]
 use ana = people.find((person) => person.name == "Ana")
 people.add({ name = "Bao" })
 console.log(ana?.name)
 
 -- ✗ se-6: CL031
-mutable tags: Set(String) = ["fa"]
+mutable tags: Set<String> = ["fa"]
 for tag in tags {
 	tag = "x"
 }
 
 -- ✗ se-7: CL020
 type Handler = { run: () => Void }
-let hs: Set(Handler) = []
+let hs: Set<Handler> = []
 
 -- ✓ se-8: key set as a set of literals → 2
-let myKeySet: Set("hello" | "world" | "!") = ["hello", "!"]
+let myKeySet: Set<"hello" | "world" | "!"> = ["hello", "!"]
 console.log(myKeySet.size)
 
 -- ✓ se-9: NaN and -0 under SameValueZero → 2
-let fs: Set(Float) = [0.0, -0.0, 0.0 / 0.0, 0.0 / 0.0]
+let fs: Set<Float> = [0.0, -0.0, 0.0 / 0.0, 0.0 / 0.0]
 console.log(fs.size)
 
 -- ✓ se-10: take → "fa" / none
-mutable t: Set(String) = ["fa"]
+mutable t: Set<String> = ["fa"]
 console.log(t.take("fa"))
 console.log(t.take("fa"))
 ```
 
-### 5.5 `Pool(T)` and `GrowingPool(T)`
+### 5.5 `Pool<T>` and `GrowingPool<T>`
 
 #### API
 
@@ -3140,7 +3144,7 @@ console.log(t.take("fa"))
 | `deleteWhere(predicate)`, `clear()` | | `mutates self` |
 | `find(predicate)` | `(T in self)?` | |
 | `includes(value: T)` | `Boolean` (`==`) | |
-| sequence methods | §5.0.6 (`filter` → `Pool(T)`, `map` → `Array(R)`) | |
+| sequence methods | §5.0.6 (`filter` → `Pool<T>`, `map` → `Array<R>`) | |
 | `Pool.from(source)` | | |
 
 - `delete`/`take` require an argument typed `T in p` with `p` the **same** pool place (`CL050` "`ana` is not an element of `pool`": a reference into another pool, or a copy); deleting during iteration over the pool: `EF031` (use `deleteWhere`).
@@ -3160,7 +3164,7 @@ Slab: size-aligned chunks (64 KiB or ≥ 64 slots), chunk found by masking the p
 ```fa
 -- ✓ po-1: stable references → 21
 type Human = { name: String, age: Integer }
-mutable pool: Pool(Human) = []
+mutable pool: Pool<Human> = []
 use john = pool.add({ name = "John", age = 20 })
 pool.add({ name = "Alice", age = 25 })
 pool.add({ name = "Bob", age = 32 })
@@ -3183,7 +3187,7 @@ if someone is not none {
 }
 
 -- ✓ po-5: a reference found before an add stays distinct from it (fresh) → "Bao"
-mutable p2: Pool(Human) = []
+mutable p2: Pool<Human> = []
 p2.add(Human { name = "Ana", age = 1 })
 use found = p2.find((person) => person.name == "Ana")
 use added = p2.add(Human { name = "Bao", age = 2 })
@@ -3202,13 +3206,13 @@ pool.deleteWhere((human) => human.name == "Jane")
 console.log(pool.size)
 
 -- ✗ po-8: CL050
-mutable other: Pool(Human) = []
+mutable other: Pool<Human> = []
 use x = other.add({ name = "X", age = 0 })
 pool.delete(x)
 
 -- ✗ po-9: TY014 (literal with an extra field)
 type Point = { x: Integer, y: Integer }
-mutable points: Pool(Point) = []
+mutable points: Pool<Point> = []
 points.add({ x = 1, y = 2, z = 3 })
 
 -- ✓ po-10: WCL002 (let copies) → 3 / 4
@@ -3219,24 +3223,24 @@ console.log(copy.x)
 console.log(point.x)
 
 -- ✓ po-11: two equal values are two elements → 2
-mutable twins: Pool(Human) = []
+mutable twins: Pool<Human> = []
 twins.add({ name = "A", age = 1 })
 twins.add({ name = "A", age = 1 })
 console.log(twins.size)
 
 -- ✗ po-12: EF030 (the callback captures a reference into the mutated pool)
-mutable ps: Pool(Human) = []
+mutable ps: Pool<Human> = []
 use ana = ps.add(Human { name = "Ana", age = 31 })
 ps.deleteWhere((person) => person.age < ana.age)
 ```
 
-### 5.6 `Columnar(T)`, `OrderedColumnar(T)`, `GrowingColumnar(T)`
+### 5.6 `Columnar<T>`, `OrderedColumnar<T>`, `GrowingColumnar<T>`
 
 #### API
 
-- `Columnar(T)`: the `Pool` API (§5.5): `add` (fresh, `mutates self.size`), `delete(element)`/`take(element)` (`invalidates element`), `deleteWhere`, `clear` (`mutates self`), `size`, `find`, `includes`, iteration. A reference is a slot index; copying an element out is a gather.
-- `OrderedColumnar(T)`: the positional `Array` API (MR6): `add(value)` appends and returns `T in self` (`mutates self`), `length`, `c[i]`, `c[i] = v` (`mutates self[i]`), `get(i)`, `delete(i)`/`take(i)` (`invalidates self[index..]`), `pop()` (`invalidates self[self.length - 1]`), `deleteWhere`, `clear`, `item, index` iteration. No growing counterpart; can't hold relation targets (`CL051`).
-- `GrowingColumnar(T)`: `add` only (`mutates self.size`, fresh).
+- `Columnar<T>`: the `Pool` API (§5.5): `add` (fresh, `mutates self.size`), `delete(element)`/`take(element)` (`invalidates element`), `deleteWhere`, `clear` (`mutates self`), `size`, `find`, `includes`, iteration. A reference is a slot index; copying an element out is a gather.
+- `OrderedColumnar<T>`: the positional `Array` API (MR6): `add(value)` appends and returns `T in self` (`mutates self`), `length`, `c[i]`, `c[i] = v` (`mutates self[i]`), `get(i)`, `delete(i)`/`take(i)` (`invalidates self[index..]`), `pop()` (`invalidates self[self.length - 1]`), `deleteWhere`, `clear`, `item, index` iteration. No growing counterpart; can't hold relation targets (`CL051`).
+- `GrowingColumnar<T>`: `add` only (`mutates self.size`, fresh).
 - `for { a, b } in columnar` reads only the named columns; `for item in columnar` gathers each element.
 
 #### JavaScript
@@ -3252,7 +3256,7 @@ One column per field with the field's layout; chunk capacity `2^k` slots so the 
 ```fa
 -- ✓ cm-1 → "John is 20" "Jane is 21" (slot order) / 41
 type Human = { name: String, age: Integer }
-mutable columnar: Columnar(Human) = []
+mutable columnar: Columnar<Human> = []
 columnar.add({ name = "John", age = 20 })
 columnar.add({ name = "Jane", age = 21 })
 for { name, age } in columnar {
@@ -3276,7 +3280,7 @@ console.log(jane.name)
 console.log(john.name)
 
 -- ✓ cm-4: ordered columnar is positional → ["John", "John"]
-mutable ordered: OrderedColumnar(Human) = []
+mutable ordered: OrderedColumnar<Human> = []
 ordered.add({ name = "John", age = 20 })
 ordered.add({ name = "Jane", age = 21 })
 ordered.add({ name = "John", age = 22 })
@@ -3289,7 +3293,7 @@ ordered.add({ name = "X", age = 1 })
 console.log(first.name)
 
 -- ✗ cm-6: CL021
-let c: Columnar(Integer) = []
+let c: Columnar<Integer> = []
 
 -- ✗ cm-7: CL032 (Columnar has no positions)
 for human, index in columnar { }
@@ -3341,7 +3345,7 @@ Each item: what is ambiguous or contradictory (with the pages), then the decisio
 
 **D4. Named-union members and their payload type.** "A `Shape.Circle` … its fields can be read like those of `{ radius: Float }`", but can it be *passed* as one, and what about `UserId.User` and `Integer`? **Decision:** a member with an **object** payload satisfies its payload object type (reads, views, structural parameters); a member with a non-object payload does not (bind it with `as`), which keeps the single-member-union idiom for distinct ids sound. A payload given as a *named* object type (`Car = CarData`) counts as an object payload, but is built with parentheses (`U.Car(value)`), like any non-literal type definition.
 
-**D5. Writes through a type parameter or `Type(parameter)`.** `structural-typing.md#keeping-the-type-of-the-argument` copies `human` (`Type(human)`) and writes `copy.name = name`; with an argument whose `name` is `"a" | "b"`, this writes any `String` into a narrower field. **Decision:** writes to fields reached through a value of a type parameter (explicit or implicit) are recorded in the function's write-set in terms of the constraint's fields, and every call checks the actual type for exactness on those leaves (`EF004`), exactly like "mutating through a narrower type". The documented examples stay valid.
+**D5. Writes through a type parameter or `Type<parameter>`.** `structural-typing.md#keeping-the-type-of-the-argument` copies `human` (`Type<human>`) and writes `copy.name = name`; with an argument whose `name` is `"a" | "b"`, this writes any `String` into a narrower field. **Decision:** writes to fields reached through a value of a type parameter (explicit or implicit) are recorded in the function's write-set in terms of the constraint's fields, and every call checks the actual type for exactness on those leaves (`EF004`), exactly like "mutating through a narrower type". The documented examples stay valid.
 
 **D6. Field access on anonymous unions.** Not specified. **Decision:** reading a field common to every object member is allowed (type: union of the member field types), TypeScript-style; writing it is allowed only if the field type is identical in every member. Needed to read a discriminant (`shape.kind`).
 
@@ -3357,17 +3361,17 @@ Each item: what is ambiguous or contradictory (with the pages), then the decisio
 
 **D12. `Character ≤ String`.** Natively a `Character` is not laid out like a `String`. **Decision:** keep the rule; a copy converts; a view of a collection of `Character` as a collection of `String` is an element-conversion view (`D54`).
 
-**D13. Enumerations: ordering, `parse`, `members`.** **Decision:** not ordered (`TY085`; compare `Integer(a) < Integer(b)`), no arithmetic; `parse` is an exact, case-sensitive match of the member name; `members` is a static `Array(Color)` in declaration order.
+**D13. Enumerations: ordering, `parse`, `members`.** **Decision:** not ordered (`TY085`; compare `Integer(a) < Integer(b)`), no arithmetic; `parse` is an exact, case-sensitive match of the member name; `members` is a static `Array<Color>` in declaration order.
 
 **D14. `Fields` identity and limits.** "Same flags, nested the same way" doesn't say whether order matters, but bits follow declaration order and `Integer(fields)` is observable. **Decision:** the ordered tree is the identity; at most 128 leaves; JavaScript uses a `number` up to 32 flags, a `bigint` above.
 
-**D15. Key-set normalization.** "Naming a group is the same as naming all of its members" implies `Omit(T, { foo { a, b } })` = `Omit(T, { foo })` when `foo` has exactly `a` and `b`. **Decision:** key sets are normalized (a complete group is the group); `Omit` of a group removes the field, `Pick` of a group keeps the whole field.
+**D15. Key-set normalization.** "Naming a group is the same as naming all of its members" implies `Omit<T, { foo { a, b } }>` = `Omit<T, { foo }>` when `foo` has exactly `a` and `b`. **Decision:** key sets are normalized (a complete group is the group); `Omit` of a group removes the field, `Pick` of a group keeps the whole field.
 
 **D16. `is in` with a group.** **Decision:** `x is in s` is true iff every leaf of `x` is in `s`.
 
 **D17. What is comparable.** **Decision:** `==` is defined unless the type contains a function value, a `Task`, an iterator, a reference type or a thread-safe handle (`Mutex`, atomics, `Channel`: identity-like values whose content can change under a reader).
 
-**D18. "Every argument is a type" in the application rule.** Literals are both values and literal types. **Decision:** in this test, literals, object literals (`=`), `{}`, lambdas and value names are values; object *types* (with `:`) are types. `first("a")` is a call.
+**D18 (superseded by the generic angle brackets, §3.11.2). "Every argument is a type" in the application rule.** Literals are both values and literal types. **Decision:** in this test, literals, object literals (`=`), `{}`, lambdas and value names are values; object *types* (with `:`) are types. `first("a")` is a call.
 
 **D19. Checking generic bodies under a union constraint.** "Checked once against the constraints" with `Value: Integer | Float` doesn't say how `value * 2` or `value / 2` is typed. **Decision:** check each operation once per member and require a uniform result (a fixed type or the member itself, giving `Value`); effects are the union over members.
 
@@ -3375,7 +3379,7 @@ Each item: what is ambiguous or contradictory (with the pages), then the decisio
 
 **D21. `Partial` and `Required`.** **Decision:** shallow; flags and defaults kept; `Required` of a field typed exactly `None` is `TF024`.
 
-**D22. `Parameters` of a function with variadic, destructured or unnamed parameters.** **Decision:** variadic `...v: T` gives `v: Array(T)`; destructured, anonymous-structure and unnamed parameters are `TF026`.
+**D22. `Parameters` of a function with variadic, destructured or unnamed parameters.** **Decision:** variadic `...v: T` gives `v: Array<T>`; destructured, anonymous-structure and unnamed parameters are `TF026`.
 
 **D23. Where reference types may appear.** **Decision:** in parameter and return types, relation fields, inferred `use` types, `T in c` inside `Optional` and `Iterator`; nowhere else (`CL022` for collections, `TY073` for an object field that is not a relation side — owned by the relations brief).
 
@@ -3399,7 +3403,7 @@ Each item: what is ambiguous or contradictory (with the pages), then the decisio
 
 **D33. The `key` option of `Set.from`.** Is it part of the type (native wants it inlined; JavaScript needs to know the representation)? **Decision:** part of the value, not the type: native inlines it when the construction is visible and calls it through the header otherwise; JavaScript sets that aren't plain primitive `Set`s are `FaSet` instances implementing the JavaScript `Set` interface, so callers are uniform.
 
-**D34. Result kinds of `filter` and `map`.** Unspecified beyond `Array`. **Decision:** `filter` keeps the collection kind (growing → standard counterpart); `map` returns an `Array(R)`, except on maps, where it maps the values and returns `Map(K, R)`. Set-to-set mapping is `Set.from(set.map(f))`, explicit because it may merge.
+**D34. Result kinds of `filter` and `map`.** Unspecified beyond `Array`. **Decision:** `filter` keeps the collection kind (growing → standard counterpart); `map` returns an `Array<R>`, except on maps, where it maps the values and returns `Map<K, R>`. Set-to-set mapping is `Set.from(set.map(f))`, explicit because it may merge.
 
 **D35. Comparators.** `sort((a, b) => b - a)` must work for floats too, but `Integer | Float` is not a valid type. **Decision:** `sort(Order: Integer | Float)(compare: (a: T, b: T) => Order)`; the sign decides, NaN counts as 0; sorting is stable on every target (JavaScript's is). Natural order (`sort()`) needs `ORDERED` elements and never sorts numbers as strings.
 
@@ -3413,7 +3417,7 @@ Each item: what is ambiguous or contradictory (with the pages), then the decisio
 
 **D40. Slice bounds out of range.** `data[2..]` on a short array: clamp (JavaScript) or error? **Decision:** like indexing: bounds must be in `-length..=length`, else `IndexError` unless proven; a start after the end gives an empty array (documented). JavaScript developers get an error instead of a silent clamp, consistent with indexing.
 
-**D41. `Void` in data positions.** "`Void` can be a type argument" vs "can't be stored". **Decision:** allowed as a return type and in `Task(Void)` (and function types); an instantiation that would store `Void` (`Array(Void)` from `map`) is `TY071` with the `for` fix.
+**D41. `Void` in data positions.** "`Void` can be a type argument" vs "can't be stored". **Decision:** allowed as a return type and in `Task<Void>` (and function types); an instantiation that would store `Void` (`Array<Void>` from `map`) is `TY071` with the `for` fix.
 
 **D42. Methods on union receivers.** **Decision:** only universal built-ins (`toString`) without narrowing; user methods require narrowing to a member (no implicit dispatch).
 
@@ -3435,11 +3439,11 @@ Each item: what is ambiguous or contradictory (with the pages), then the decisio
 
 **D51. Lambdas without an expected type.** `defining-functions.md`: a block-bodied lambda "returns nothing when there is none". **Decision:** read "when the expected function type has no return type"; a lambda with no expected type at all (a field of an untyped object literal) annotates its parameters and infers its return type and effects from its body, whatever its form.
 
-**D52. List literals without context mixing types.** **Decision:** same join as `if`/`when` (union of widened types, `TY006` for mixed numeric literals, `TY040` if indistinguishable): `[1, "a"]` is `Array(Integer | String)`.
+**D52. List literals without context mixing types.** **Decision:** same join as `if`/`when` (union of widened types, `TY006` for mixed numeric literals, `TY040` if indistinguishable): `[1, "a"]` is `Array<Integer | String>`.
 
 **D53. Unannotated named-union member values.** `let myCar = MyUnion.Car { … }`: is it a `MyUnion.Car` or a `MyUnion`? **Decision:** the widened type is the union, the member is a fact (T1), so `myCar` can later be reassigned another member if `mutable`, and fields are readable while the fact holds.
 
-**D54. Collection views whose element representation differs** (`Array(Int8)` or `Array("north" | "south")` read as `Array(Integer)` / `Array(String)`). The LLVM views only describe offsets and strides. **Decision:** allowed (they satisfy the rules); native specialization adds an element conversion on load (sign extension, literal table lookup); function-value view tables get a per-leaf load function. JavaScript needs nothing (same representation), except the `bigint`/`number` case of `D2`, which is an error.
+**D54. Collection views whose element representation differs** (`Array<Int8>` or `Array<"north" | "south">` read as `Array<Integer>` / `Array<String>`). The LLVM views only describe offsets and strides. **Decision:** allowed (they satisfy the rules); native specialization adds an element conversion on load (sign extension, literal table lookup); function-value view tables get a per-leaf load function. JavaScript needs nothing (same representation), except the `bigint`/`number` case of `D2`, which is an error.
 
 **D55. `find` results.** `arrays.md` shows `numbers.find(…) -- Integer?` while sets and pools return `(T in c)?`. **Decision:** `find` returns an optional reference everywhere; `let` copies it into `T?`.
 
@@ -3455,7 +3459,7 @@ Each item: what is ambiguous or contradictory (with the pages), then the decisio
 
 **D61. Duplicate keys in a map literal.** **Decision:** `CL006` when both keys are compile-time literals (a literal has one meaning); a set literal merges duplicates as documented.
 
-**D62. Members of generic named unions.** Members are "always qualified", but `Result(Integer, String).Ok` is heavy. **Decision:** written `Result.Ok`, arguments inferred like a typed literal; the applied form only when nothing gives the arguments; patterns always use `Result.Ok`.
+**D62. Members of generic named unions.** Members are "always qualified", but `Result<Integer, String>.Ok` is heavy. **Decision:** written `Result.Ok`, arguments inferred like a typed literal; the applied form only when nothing gives the arguments; patterns always use `Result.Ok`.
 
 **D63. Equality of pools and columnars.** "Pools and maps compare without order." **Decision:** multiset equality, relation fields excluded.
 
@@ -3473,7 +3477,7 @@ Each step lists what it needs; steps on the same line can run in parallel. Miles
 3. **Assignability** (`Read`, `Copy`), object literals, field access, `TypeDeclInfo` with methods/defaults; declarations and inferred types; joins; **anonymous unions** (normalization, distinguishability). Needs 2. In parallel: **numbers in types** (ranges, storage, literal adaptation; with the sibling brief's numeric rules).
 4. **Functions I**: signatures, parameters, calls (positional, named, defaults, variadic, destructuring), return checking, single-expression inference of the return type, recursion rule, lambdas with contextual typing, methods and associated functions, static dispatch. Needs 3.
 5. **Named unions, `Errors`, enumerations, `Fields`**; `when`/`is` on them (with the control-flow brief); **`throws`/`try`/`catch`** and the `throws` part of effect inference. Needs 3–4.
-6. **Generics**: parameters, application vs call, inference, union-constraint binding and per-member checking, object constraints, method constraints, `Type(parameter)` as an implicit generic, generic methods. Needs 4. Then **`Array`** as a prelude generic with literal typing, `from`, index proofs (needs the range analysis of the sibling brief), sequence methods. → end of M0.
+6. **Generics**: parameters, application vs call, inference, union-constraint binding and per-member checking, object constraints, method constraints, `Type<parameter>` as an implicit generic, generic methods. Needs 4. Then **`Array`** as a prelude generic with literal typing, `from`, index proofs (needs the range analysis of the sibling brief), sequence methods. → end of M0.
 7. **Effects II**: paths (§2.4), `mutates`/`invalidates` inference and checking, write-sets, call-site checks (`EF011`, `EF012`, `EF004`, `EF005`), `requires`, purity, stored bits, closures and captures. Needs 6. Then the **reference checker** (sibling brief / `advanced/reference-checking.md`), which consumes these summaries.
 8. **Other collections** as prelude declarations with their effects: `Map`, `Set`, `Pool`, `Columnar`, `OrderedColumnar`, growing variants; key proofs (`D32`); structural variance rules; fusion decision on the typed tree. Needs 6–7.
 9. **Type operations and recursion**: spread, difference, recursive canonicalization (§3.6). Needs 3 (spread) and 5 (difference on named unions).

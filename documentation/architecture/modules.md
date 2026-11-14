@@ -161,7 +161,7 @@ An exported value is deeply immutable, like a value declared with `let`.
 `export mutable` exports a value that other files can modify:
 
 ```fa
-export mutable: Pool(Person) = []
+export mutable: Pool<Person> = []
 ```
 
 ```fa
@@ -229,15 +229,15 @@ The generic parameters of an exported type or function come right after `type` o
 
 ```fa
 -- in "Pair.fa"
-export type(First, Second) = { first: First, second: Second }
+export type<First, Second> = { first: First, second: Second }
 ```
 
 ```fa
 -- in "first.fa"
-export function(Item) = (items: Array(Item)): Item? => items.get(0)
+export function = <Item>(items: Array<Item>): Item? => items.get(0)
 ```
 
-They are used like any generic: `Pair(String, Integer)`, `first([1, 2, 3])`. See [generics](/types/generics).
+They are used like any generic: `Pair<String, Integer>`, `first([1, 2, 3])`. See [generics](/types/generics).
 
 ### Exporting a namespace
 
@@ -316,7 +316,7 @@ Inside a file, the name of the file designates its export. This is how a type re
 
 ```fa
 -- in "people.fa"
-export mutable: Pool(Person) = []
+export mutable: Pool<Person> = []
 
 function clearPeople = () mutates people => {
 	people.clear() -- `people` is the export of this file
@@ -328,7 +328,7 @@ function clearPeople = () mutates people => {
 export type = {
 	name: String
 	bestFriend: (Person in people)? -- `Person` is the export of this file
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }
 ```
 
@@ -342,9 +342,9 @@ These are all the forms of `export`:
 | --- | --- |
 | `export = value`, `export: Type = value` | a deeply immutable value |
 | `export mutable = value`, `export mutable: Type = value` | a value that every file can modify |
-| `export function = ...`, `export function(Item) = ...` | a function, generic or not |
+| `export function = ...`, `export function = <Item>(...) => ...` | a function, generic or not |
 | `export async function = ...` | an asynchronous function |
-| `export type = ...`, `export type(First, Second) = ...` | a type, generic or not |
+| `export type = ...`, `export type<First, Second> = ...` | a type, generic or not |
 | `export namespace = { ... }` | a namespace |
 
 `reactive`, `derived` and `static` values can't be exported in this version: declare them as members of an exported namespace, or as module-level values of the file that uses them.
@@ -529,11 +529,11 @@ export function = () => {
 }
 ```
 
-The entry function may take the command-line arguments as `arguments: Array(String)`, and may return an exit code as an `Integer`. The errors it can fail with are declared with `throws`, like for any other function:
+The entry function may take the command-line arguments as `arguments: Array<String>`, and may return an exit code as an `Integer`. The errors it can fail with are declared with `throws`, like for any other function:
 
 ```fa
 -- application/main.fa
-export function = (arguments: Array(String)): Integer throws ConfigError => {
+export function = (arguments: Array<String>): Integer throws ConfigError => {
 	let configuration = try library.loadConfiguration(arguments)
 	library.runServer(configuration)
 	0

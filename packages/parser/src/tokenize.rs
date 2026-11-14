@@ -43,6 +43,8 @@ pub(crate) fn tokenize_range(
 	let mut pending_stop: Option<Token> = None;
 	// `Empty` at the start: new lines before the first token are ignored
 	let mut previous_kind = TokenKind::Empty;
+	// the open brackets, to tell the `>` that closes a generic list from a comparison
+	let mut brackets: Vec<Bracket> = Vec::new();
 
 	loop {
 		lexer.skip_spaces();
@@ -64,7 +66,8 @@ pub(crate) fn tokenize_range(
 			continue;
 		}
 
-		let kind = lexer.next_kind(previous_kind);
+		let in_generic_list = brackets.last() == Some(&Bracket::Generic);
+		let kind = lexer.next_kind(previous_kind, in_generic_list);
 		let token = Token::new(kind, token_start, lexer.offset);
 
 		if matches!(kind, TokenKind::InlineComment | TokenKind::BlockComment) {
@@ -80,8 +83,14 @@ pub(crate) fn tokenize_range(
 			&& !kind.skips_newlines_before()
 		{
 			tokens.push(stop);
+			// a generic list never contains the end of a statement: the list was a mistake
+			// (like `a<b`, reported by the parser), so `>` is a comparison again
+			while brackets.last() == Some(&Bracket::Generic) {
+				brackets.pop();
+			}
 		}
 
+		track_brackets(&mut brackets, kind);
 		tokens.push(token);
 		previous_kind = kind;
 	}
@@ -91,6 +100,49 @@ pub(crate) fn tokenize_range(
 	resolve_start_keywords(&mut tokens);
 	mark_function_declaration_parentheses(&mut tokens);
 	tokens
+}
+
+/// A bracket opened before the current token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bracket {
+	Parenthesis,
+	Brace,
+	Square,
+	Generic,
+}
+
+/// Update the open brackets after a token: a generic list is suspended by the brackets opened
+/// inside it, and a closing bracket also closes the generic lists left open inside it.
+fn track_brackets(brackets: &mut Vec<Bracket>, kind: TokenKind) {
+	let closed = match kind {
+		TokenKind::ParenthesisOpen => {
+			brackets.push(Bracket::Parenthesis);
+			return;
+		}
+		TokenKind::BracesOpen => {
+			brackets.push(Bracket::Brace);
+			return;
+		}
+		TokenKind::BracketsOpen => {
+			brackets.push(Bracket::Square);
+			return;
+		}
+		TokenKind::GenericOpen => {
+			brackets.push(Bracket::Generic);
+			return;
+		}
+		TokenKind::GenericClose => {
+			brackets.pop();
+			return;
+		}
+		TokenKind::ParenthesisClose => Bracket::Parenthesis,
+		TokenKind::BracesClose => Bracket::Brace,
+		TokenKind::BracketsClose => Bracket::Square,
+		_ => return,
+	};
+	if let Some(position) = brackets.iter().rposition(|bracket| *bracket == closed) {
+		brackets.truncate(position);
+	}
 }
 
 enum StringFrame {
@@ -143,8 +195,9 @@ impl Lexer<'_> {
 	}
 
 	/// Read the token at the current offset (never a space or a new line), move after it and
-	/// return its kind.
-	fn next_kind(&mut self, previous_kind: TokenKind) -> TokenKind {
+	/// return its kind. `in_generic_list` is true when the innermost open bracket is a generic
+	/// list, where `>` closes the list.
+	fn next_kind(&mut self, previous_kind: TokenKind, in_generic_list: bool) -> TokenKind {
 		let start = self.offset;
 		let byte = self.bytes[start];
 
@@ -229,12 +282,17 @@ impl Lexer<'_> {
 				Some(b'?') => token!(TokenKind::DoubleQuestionMark, 2),
 				_ => token!(TokenKind::QuestionMark, 1),
 			},
+			// `<` followed by whitespace is the comparison, any other `<` opens a generic list,
+			// like `Array<Integer>` (no lookahead: see `documentation/types/generics.md`)
 			b'<' => match self.peek(1) {
 				Some(b'=') => token!(TokenKind::LessThanOrEqual, 2),
-				_ => token!(TokenKind::LessThan, 1),
+				None | Some(b' ' | b'\t' | b'\r' | b'\n') => token!(TokenKind::LessThan, 1),
+				_ => token!(TokenKind::GenericOpen, 1),
 			},
+			// inside a generic list, `>` closes it (`>>` closes two lists)
 			b'>' => match self.peek(1) {
 				Some(b'=') => token!(TokenKind::GreaterThanOrEqual, 2),
+				_ if in_generic_list => token!(TokenKind::GenericClose, 1),
 				_ => token!(TokenKind::GreaterThan, 1),
 			},
 			b'.' => match self.peek(1) {

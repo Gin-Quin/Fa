@@ -5,12 +5,12 @@ A map associates keys with values. Maps can be mutable or immutable.
 A map is written as a list of `(key, value)` [tuples](/values/tuples). Like every collection, it is typed by the context, or created with `Map.from` when there is no context (see [creating collections](/collections/arrays#creating-collections)).
 
 ```fa
-let myMap: Map(String, Integer) = [
+let myMap: Map<String, Integer> = [
 	("foo", 12)
 	("bar", 13)
 ]
 
-let sameMap = Map.from([("foo", 12), ("bar", 13)]) -- no context: a `Map(String, Integer)`
+let sameMap = Map.from([("foo", 12), ("bar", 13)]) -- no context: a `Map<String, Integer>`
 ```
 
 A key written twice in a literal is an error when both are literals, like `[("foo", 1), ("foo", 2)]`: a literal has one meaning.
@@ -18,7 +18,7 @@ A key written twice in a literal is an error when both are literals, like `[("fo
 An empty map needs its type:
 
 ```fa
-mutable inventory: Map(String, Integer) = []
+mutable inventory: Map<String, Integer> = []
 ```
 
 ## Access and update
@@ -26,12 +26,12 @@ mutable inventory: Map(String, Integer) = []
 Reading a key with `map[key]` is checked at compile time when the compiler can prove the key is present. Otherwise, it `throws KeyNotFound`, so a missing key can never be mistaken for a value. Propagate the error with `try`, or handle it with `catch` (see [errors](/values/errors)):
 
 ```fa
-let scores: Map(String, Integer) = [
+let scores: Map<String, Integer> = [
 	("ana", 12)
 	("bao", 17)
 ]
 
-function scoreOf = (scores: Map(String, Integer), name: String): Integer throws KeyNotFound => {
+function scoreOf = (scores: Map<String, Integer>, name: String): Integer throws KeyNotFound => {
 	let score = try scores[name] -- propagates `KeyNotFound` to the caller
 	score
 }
@@ -59,7 +59,7 @@ if maybeScore is not none {
 Writing a key replaces its value, or adds the key when it is absent:
 
 ```fa
-mutable counters: Map(String, Integer) = [
+mutable counters: Map<String, Integer> = [
 	("visits", 1)
 ]
 
@@ -69,7 +69,7 @@ counters["visits"] = 2
 ## Adding and removing
 
 ```fa
-mutable inventory: Map(String, Integer) = []
+mutable inventory: Map<String, Integer> = []
 
 inventory["apples"] = 3
 inventory["oranges"] = 2
@@ -89,7 +89,7 @@ inventory.clear()
 Iterating a map yields `(key, value)` tuples, which the loop destructures:
 
 ```fa
-let usersById: Map(Integer, String) = [
+let usersById: Map<Integer, String> = [
 	(1, "Ana")
 	(2, "Bao")
 ]
@@ -116,8 +116,8 @@ Adding or removing keys of a map while iterating over it is a compile error.
 The callbacks of the methods of a map, like `find`, `filter` or `every`, receive the key and the value, `(key, value)`. `find` returns a copy of the `(key, value)` tuple it finds, or `none`; `map` keeps the keys and maps the values into a new `Map`:
 
 ```fa
-let labels = usersById.map((id, name) => "{id}: {name}") -- Map(Integer, String)
-let second = usersById.find((id) => id == 2)              -- Tuple(Integer, String)?: `(2, "Bao")`
+let labels = usersById.map((id, name) => "{id}: {name}") -- Map<Integer, String>
+let second = usersById.find((id) => id == 2)              -- Tuple<Integer, String>?: `(2, "Bao")`
 ```
 
 ## Default values
@@ -125,7 +125,7 @@ let second = usersById.find((id) => id == 2)              -- Tuple(Integer, Stri
 `getOrInsert` returns a reference to the value of a key, inserting a default value first when the key is absent:
 
 ```fa
-mutable counts: Map(String, Integer) = []
+mutable counts: Map<String, Integer> = []
 
 for word in words {
 	use count = counts.getOrInsert(word, 0)
@@ -139,10 +139,10 @@ Since `getOrInsert` returns a reference, it is bound with `use`: `let` would cop
 
 Any type with a well-defined equality can be a key: numbers, strings, booleans, enumerations, tuples and objects. Keys are compared with `==`, which is a deep structural equality. A type that contains a function, a task, an iterator, a reference or a [thread-safe](/advanced/concurrency#thread-safety-and-synchronization) handle has no `==`, so it can't be a key, nor a value of a [set](/collections/sets).
 
-A key can't be modified while it is in the map: a reference to a key is read-only, even in a `mutable` map. For the same reason, the key type of a map is exact: a `Map(Hero, Integer)` is not a `Map(Human, Integer)`, even where a [structural view](/advanced/structural-typing) would accept a `Hero` for a `Human`.
+A key can't be modified while it is in the map: a reference to a key is read-only, even in a `mutable` map. For the same reason, the key type of a map is exact: a `Map<Hero, Integer>` is not a `Map<Human, Integer>`, even where a [structural view](/advanced/structural-typing) would accept a `Hero` for a `Human`.
 
 ```fa
-let byPoint: Map(Tuple(Integer, Integer), String) = [
+let byPoint: Map<Tuple<Integer, Integer>, String> = [
 	((0, 0), "origin")
 ]
 ```
@@ -152,7 +152,7 @@ let byPoint: Map(Tuple(Integer, Integer), String) = [
 A map stores its values in stable slots, like a [`Pool`](/collections/pools): adding a key never moves the other values. Writing a key (`map[key] = value`) declares `mutates self[key], self.size`, since it may add the key: it only invalidates the references into the memory the previous value of that key owned, and none when the values are flat, like integers. Because it may change the size, writing a key is not allowed while iterating over the map: write through the value the loop gives instead (`for (name, score) in scores { score += 1 }`). `getOrInsert` only adds a key, and declares `mutates self.size`: it invalidates nothing.
 
 ```fa
-mutable scores: Map(String, Integer) = [("ana", 10)]
+mutable scores: Map<String, Integer> = [("ana", 10)]
 
 use score = scores.get("ana") -- type: `(Integer in scores)?`
 
@@ -166,7 +166,7 @@ if score is not none {
 Removing a key invalidates the references to its value only: `delete(key)` and `take(key)` declare `invalidates self[key]`. The compiler keeps the exact key of each reference when it is known, so deleting another key leaves it valid. When it can't prove that the keys are different, the reference is invalidated, and must be declared again before it is used (see [owned references](/advanced/owned-references#after-invalidation)):
 
 ```fa
-mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+mutable scores: Map<String, Integer> = [("ana", 10), ("bao", 7)]
 
 use score = scores.get("ana")
 
@@ -221,10 +221,10 @@ An object has a fixed set of fields known at compile time; a map has keys discov
 
 ```fa
 type Settings = { host: String, port: Integer } -- known fields
-let headers: Map(String, String) = []           -- arbitrary keys
+let headers: Map<String, String> = []           -- arbitrary keys
 ```
 
-If you find yourself writing `Map(String, Item)` with a fixed set of keys, use an object or a [`Record`](/types/type-functions#recordkeys-item) instead: it is faster and type-checked.
+If you find yourself writing `Map<String, Item>` with a fixed set of keys, use an object or a [`Record`](/types/type-functions#recordkeys-item) instead: it is faster and type-checked.
 
 :::implementation
 ## Implementation details

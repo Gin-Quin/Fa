@@ -309,8 +309,8 @@ fn comments_are_ignored() {
 #[test]
 fn generic_return_types() {
 	assert_statement(
-		"function f = (self, data: Array(Integer)): Array(Integer) => data",
-		"function f = (self, data: Array(Integer)): Array(Integer) => data",
+		"function f = (self, data: Array<Integer>): Array<Integer> => data",
+		"function f = (self, data: Array<Integer>): Array<Integer> => data",
 	);
 }
 

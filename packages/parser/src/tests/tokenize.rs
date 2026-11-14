@@ -271,7 +271,10 @@ fn operators_with_common_characters() {
 
 	// Removed operators
 	assert_tokens(">>", vec![TokenKind::GreaterThan, TokenKind::GreaterThan]);
-	assert_tokens("<<", vec![TokenKind::LessThan, TokenKind::LessThan]);
+	// `<` followed by anything but whitespace opens a generic list
+	assert_tokens("<<", vec![TokenKind::GenericOpen, TokenKind::LessThan]);
+	assert_tokens("< <", vec![TokenKind::LessThan, TokenKind::LessThan]);
+
 }
 
 #[test]
@@ -614,6 +617,87 @@ fn start_keyword() {
 			TokenKind::Identifier,
 			TokenKind::Stop,
 			TokenKind::Identifier,
+		],
+	);
+}
+
+#[test]
+fn generic_brackets() {
+	use TokenKind::*;
+	assert_tokens("Array<Integer>", vec![Identifier, GenericOpen, Identifier, GenericClose]);
+	assert_tokens("a < b", vec![Identifier, LessThan, Identifier]);
+	assert_tokens("a <\nb", vec![Identifier, LessThan, Identifier]);
+	assert_tokens("a<b", vec![Identifier, GenericOpen, Identifier]);
+	assert_tokens("a > b", vec![Identifier, GreaterThan, Identifier]);
+	// `>>` closes two lists
+	assert_tokens(
+		"A<B<C>>",
+		vec![Identifier, GenericOpen, Identifier, GenericOpen, Identifier, GenericClose, GenericClose],
+	);
+	// brackets suspend a generic list
+	assert_tokens(
+		"C<(a > b)>",
+		vec![
+			Identifier,
+			GenericOpen,
+			ParenthesisOpen,
+			Identifier,
+			GreaterThan,
+			Identifier,
+			ParenthesisClose,
+			GenericClose,
+		],
+	);
+	// `=>`, `->`, `>=` and `<=` are never brackets
+	assert_tokens(
+		"A<(x) => B>",
+		vec![
+			Identifier,
+			GenericOpen,
+			ParenthesisOpenFunctionDeclaration,
+			Identifier,
+			ParenthesisClose,
+			FatArrow,
+			Identifier,
+			GenericClose,
+		],
+	);
+	assert_tokens(
+		"Pool<a->b>",
+		vec![Identifier, GenericOpen, Identifier, Arrow, Identifier, GenericClose],
+	);
+	// a new line ends a generic list left open by mistake: `>` is a comparison again
+	assert_tokens(
+		"a<b\nc > d",
+		vec![Identifier, GenericOpen, Identifier, Stop, Identifier, GreaterThan, Identifier],
+	);
+	// a closing bracket closes the generic lists left open inside it
+	assert_tokens(
+		"(a<b) > c",
+		vec![
+			ParenthesisOpen,
+			Identifier,
+			GenericOpen,
+			Identifier,
+			ParenthesisClose,
+			GreaterThan,
+			Identifier,
+		],
+	);
+	// a generic list can span lines, and its `>` can start a line
+	assert_tokens(
+		"Map<String, {\n\tid: Integer\n}>",
+		vec![
+			Identifier,
+			GenericOpen,
+			Identifier,
+			Comma,
+			BracesOpen,
+			Identifier,
+			Colon,
+			Identifier,
+			BracesClose,
+			GenericClose,
 		],
 	);
 }

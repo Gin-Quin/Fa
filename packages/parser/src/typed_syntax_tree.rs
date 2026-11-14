@@ -290,7 +290,7 @@ impl TypedSyntaxTree {
 					let expression_str = self.node_to_string(*expression);
 					let parameters_str = self.items_to_string(parameters, ", ");
 					format!(
-						"type {}({parameters_str}) = {expression_str}",
+						"type {}<{parameters_str}> = {expression_str}",
 						self.name(*name)
 					)
 				}
@@ -342,7 +342,6 @@ impl TypedSyntaxTree {
 			}
 			Node::ExportFunction {
 				is_async,
-				parameters,
 				type_expression,
 				expression,
 			} => {
@@ -351,9 +350,6 @@ impl TypedSyntaxTree {
 				} else {
 					"export function"
 				});
-				if !parameters.is_empty() {
-					string += &format!("({})", self.items_to_string(parameters, ", "));
-				}
 				if let Some(type_expression) = type_expression {
 					string += ": ";
 					string += &self.node_to_string(*type_expression);
@@ -371,7 +367,7 @@ impl TypedSyntaxTree {
 					format!("export type = {expression_str}")
 				} else {
 					let parameters_str = self.items_to_string(parameters, ", ");
-					format!("export type({parameters_str}) = {expression_str}")
+					format!("export type<{parameters_str}> = {expression_str}")
 				}
 			}
 			Node::ExportNamespace { expression, .. } => {
@@ -644,6 +640,10 @@ impl TypedSyntaxTree {
 					.join(", ");
 				format!("{function_str}({parameters_str})")
 			}
+			Node::GenericApplication { target, arguments } => {
+				let target_str = self.node_to_string(*target);
+				format!("{target_str}<{}>", self.items_to_string(arguments, ", "))
+			}
 			Node::MemberIndex {
 				target, members, ..
 			} => {
@@ -689,7 +689,6 @@ impl TypedSyntaxTree {
 			Node::Function {
 				name,
 				is_async,
-				parameters,
 				type_expression,
 				expression,
 				..
@@ -700,9 +699,6 @@ impl TypedSyntaxTree {
 					"function"
 				};
 				let mut string = format!("{keyword} {}", self.name(*name));
-				if !parameters.is_empty() {
-					string += &format!("({})", self.items_to_string(parameters, ", "));
-				}
 				if let Some(type_expression) = type_expression {
 					string += ": ";
 					string += &self.node_to_string(*type_expression);
@@ -715,6 +711,7 @@ impl TypedSyntaxTree {
 			Node::ArrowFunction { signature, body } => {
 				let crate::nodes::FunctionSignature {
 					is_async,
+					generic_parameters,
 					parameters,
 					return_type_expression,
 					errors,
@@ -722,8 +719,13 @@ impl TypedSyntaxTree {
 					mutations,
 					invalidations,
 				} = &**signature;
+				let generics_str = if generic_parameters.is_empty() {
+					String::new()
+				} else {
+					format!("<{}>", self.items_to_string(generic_parameters, ", "))
+				};
 				let mut signature_str = format!(
-					"{}({})",
+					"{}{generics_str}({})",
 					if *is_async { "async " } else { "" },
 					self.items_to_string(parameters, ", ")
 				);

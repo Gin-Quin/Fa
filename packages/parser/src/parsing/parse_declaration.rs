@@ -289,7 +289,7 @@ fn parse_destructuring_declaration(
 	)
 }
 
-/// Parse `type Name(Parameters) = expression` or `namespace name = expression`.
+/// Parse `type Name<Parameters> = expression` or `namespace name = expression`.
 pub(crate) fn parse_type_declaration(
 	context: &mut Context<'_>,
 	kind: TypeDeclarationKind,
@@ -307,7 +307,9 @@ pub(crate) fn parse_type_declaration(
 	let name = context.name();
 	context.go_to_next_token();
 
-	if kind == TypeDeclarationKind::Namespace && is_parenthesis_open(context.kind()) {
+	if kind == TypeDeclarationKind::Namespace
+		&& (is_parenthesis_open(context.kind()) || context.kind() == TokenKind::GenericOpen)
+	{
 		context.error_at_token(
 			"A namespace has no parameters: only types and functions can be generic",
 		);
@@ -359,12 +361,27 @@ pub(crate) fn parse_declaration_value(
 	)
 }
 
-/// Parse the generic parameters written after a declared name, like
-/// `(Item)`, `(Value: Integer | Float)`, `(Index = Integer)` or `(rows: Integer)`.
-/// A capitalized parameter is a type parameter, a lowercase one is a compile-time value.
+/// Parse generic parameters between angle brackets, starting at `<`, like `<Item>`,
+/// `<Value: Integer | Float>`, `<Index = Integer>` or `<rows: Integer>`. A capitalized parameter
+/// is a type parameter, a lowercase one is a compile-time value. The old form between
+/// parentheses, `(Item)`, is reported and parsed anyway.
 pub(crate) fn parse_generic_parameters(context: &mut Context<'_>) -> Vec<usize> {
+	parse_generic_parameter_list(context, true)
+}
+
+/// `parse_generic_parameters`, reporting the old form between parentheses only with
+/// `report_parentheses`.
+pub(crate) fn parse_generic_parameter_list(
+	context: &mut Context<'_>,
+	report_parentheses: bool,
+) -> Vec<usize> {
 	let open = context.token();
-	let (parameters, _) = parse_delimited(context, TokenKind::ParenthesisClose, |context| {
+	let closing = if open.kind == TokenKind::GenericOpen {
+		TokenKind::GenericClose
+	} else {
+		TokenKind::ParenthesisClose
+	};
+	let (parameters, _) = parse_delimited(context, closing, |context| {
 		if context.kind() != TokenKind::Identifier {
 			let found = context.describe_token();
 			context.error_at_token(format!(
@@ -375,7 +392,7 @@ pub(crate) fn parse_generic_parameters(context: &mut Context<'_>) -> Vec<usize> 
 			context,
 			Priority::Comma,
 			ExpressionContext::expression(),
-			&[TokenKind::Comma, TokenKind::ParenthesisClose],
+			&[TokenKind::Comma, closing],
 		);
 		let name_and_type = match context.at(parameter) {
 			Node::Identifier { name } => Some((*name, false)),
@@ -415,9 +432,23 @@ pub(crate) fn parse_generic_parameters(context: &mut Context<'_>) -> Vec<usize> 
 		parameter
 	});
 
-	if parameters.is_empty() {
+	if closing == TokenKind::ParenthesisClose {
+		if !report_parentheses {
+			return parameters;
+		}
+		let text = context.text(open.start, context.last_end()).to_string();
+		let inner = text
+			.strip_prefix('(')
+			.and_then(|text| text.strip_suffix(')'))
+			.unwrap_or("Item");
 		context.error(
-			"Generic parameters can't be empty: remove the `()`",
+			format!("Generic parameters are written between angle brackets: write `<{inner}>`"),
+			open.start,
+			context.last_end(),
+		);
+	} else if parameters.is_empty() {
+		context.error(
+			"Generic parameters can't be empty: remove the `<>`",
 			open.start,
 			context.last_end(),
 		);
@@ -426,9 +457,10 @@ pub(crate) fn parse_generic_parameters(context: &mut Context<'_>) -> Vec<usize> 
 	parameters
 }
 
-/// Parse the generic parameters if the current token is `(`.
+/// Parse the generic parameters written after a declared name if the current token is `<`
+/// (or `(`, the old form, which is reported).
 pub(crate) fn parse_optional_generic_parameters(context: &mut Context<'_>) -> Vec<usize> {
-	if is_parenthesis_open(context.kind()) {
+	if context.kind() == TokenKind::GenericOpen || is_parenthesis_open(context.kind()) {
 		parse_generic_parameters(context)
 	} else {
 		Vec::new()

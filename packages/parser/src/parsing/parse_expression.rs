@@ -1,10 +1,10 @@
 use crate::context::{Context, MAX_DEPTH};
 use crate::nodes::Node;
-use crate::parsing::is_stop_token::{can_start_expression, is_stop_token};
+use crate::parsing::is_stop_token::{can_start_expression, is_parenthesis_open, is_stop_token};
 use crate::parsing::parse_block_body::parse_keyword_block;
 use crate::parsing::parse_declaration::{
-	TypeDeclarationKind, VariableDeclarationKind, parse_reuse, parse_type_declaration,
-	parse_variable_declaration,
+	TypeDeclarationKind, VariableDeclarationKind, parse_generic_parameters, parse_reuse,
+	parse_type_declaration, parse_variable_declaration,
 };
 use crate::parsing::parse_export::parse_export;
 use crate::parsing::parse_expression_right::{
@@ -237,7 +237,7 @@ fn parse_left_expression<'source>(
 				})
 			}
 		}
-		// many-to-many relation target, ex: `Bag(in Self->bestFriends)`
+		// many-to-many relation target, ex: `Bag<in Self->bestFriends>`
 		TokenKind::In => parse_prefix(context, Priority::Exponentiation, stop_at, |right| {
 			Node::InRelation { right }
 		}),
@@ -342,6 +342,8 @@ fn parse_left_expression<'source>(
 		TokenKind::ParenthesisOpen => parse_group(context),
 		TokenKind::Function => parse_function_declaration(context, false, start),
 		TokenKind::Async => parse_async(context, stop_at),
+		// a generic lambda or function type, like `<Item>(items: Array<Item>) => items.get(0)`
+		TokenKind::GenericOpen => parse_generic_function(context, stop_at),
 		_ => return None,
 	};
 
@@ -481,6 +483,39 @@ fn parse_provide(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
 		start,
 		end,
 	)
+}
+
+/// A lambda or a function type with generic parameters, from its `<`:
+/// `<Item>(items: Array<Item>): Item? => items.get(0)`, `<Value>(value: Value) => Value`.
+fn parse_generic_function(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
+	let start = context.token().start;
+	let generic_parameters = parse_generic_parameters(context);
+	if !is_parenthesis_open(context.kind()) {
+		let found = context.describe_token();
+		context.error_at_token(format!(
+			"Expected the parameters of a function after its generic parameters, like `<Item>(items: Array<Item>) => …`, found {found}"
+		));
+		let end = context.last_end();
+		return context.insert(Node::Invalid, start, end);
+	}
+	let expression = parse_expression(
+		context,
+		Priority::Assignment,
+		ExpressionContext::expression(),
+		stop_at,
+	);
+	if let Node::ArrowFunction { signature, .. } = context.tree.at_mutable(expression) {
+		signature.generic_parameters = generic_parameters;
+		context.tree.spans[expression].start = start;
+	} else {
+		let span = context.span(expression);
+		context.error(
+			"Generic parameters must be followed by a function, like `<Item>(items: Array<Item>) => items.get(0)`",
+			start,
+			span.end,
+		);
+	}
+	expression
 }
 
 /// `async function name = ...`, or an asynchronous lambda or function type, like

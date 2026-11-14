@@ -31,7 +31,7 @@ The cross-cutting decisions, applied to every page. Each one names its canonical
 | C1 | A lambda takes its types and effects from the expected function type; "a block body declares its return type and effects" only applies to `function` declarations | `functions/defining-functions` |
 | C2 | `==` and `!=` against a literal or `none` narrow, like `is` | `control-flow/conditionals#narrowing` |
 | C3 | Union members are always qualified in `when` (`ApiError.NotFound`) | `control-flow/conditionals` |
-| C4 | Integer types are ranges with a storage width (`Int8` is `Integer(min = -128, max = 127)`); a value fits wherever its range fits; narrowing is `Int8(x)`; conversions between kinds stay explicit | `values/numbers#integer-types-are-ranges` |
+| C4 | Integer types are ranges with a storage width (`Int8` is `Integer<min = -128, max = 127>`); a value fits wherever its range fits; narrowing is `Int8(x)`; conversions between kinds stay explicit | `values/numbers#integer-types-are-ranges` |
 | C5 | On JavaScript, `Integer` overflow is checked at ±(2^53 − 1) and stops the program; `Int64`, `UInt64`, 128-bit types and `BigInt` are JavaScript `BigInt`s; `Integer.jsMaxSafeInteger` | `values/numbers` |
 | C6 | `use` on a place holding a reference binds its target; `LinkedList` rewritten with exact effects | `advanced/reference-checking`, `advanced/relations` |
 | C7 | `map[key] = value` declares `mutates self[key], self.size` | `collections/maps` |
@@ -39,7 +39,7 @@ The cross-cutting decisions, applied to every page. Each one names its canonical
 | C9 | Thread-safe types (`Mutex`, atomics, `Channel`) don't declare `mutates self`, so several tasks can use them | `advanced/concurrency` |
 | C10 | Reactivity is push-pull: `derived` is lazy and always fresh, only `watch` blocks are deferred, runtime tracking | `advanced/reactivity` |
 | C11 | `Any` is removed | `types/operations` |
-| C12 | `.=` listed with the assignments; `Void` is a unit type usable as a type argument; capitalized generic parameters are always types (`Pick(ObjectType, keys: …)`) | reference, `types/type-functions` |
+| C12 | `.=` listed with the assignments; `Void` is a unit type usable as a type argument; capitalized generic parameters are always types (`Pick<ObjectType, keys: …>`) | reference, `types/type-functions` |
 
 ### Types
 
@@ -48,7 +48,7 @@ The cross-cutting decisions, applied to every page. Each one names its canonical
 | T1 | An unannotated binding has the widened type (`let x = 42` is an `Integer`); the exact literal, range and narrowed member are flow facts kept until the place is mutated | `values/declaring-values#inferred-types`, `types/declaring-types` |
 | T2 | Generic bodies are checked once against their constraints; `@for`, `@if` and type functions after substitution; methods on a type parameter resolve on the actual type | `types/generics` |
 | T3 | A union constraint binds the parameter to exactly one member | `types/generics` |
-| T4 | Rule telling generic application, call and conversion apart (`repeatText(3)("ab")`, `Int8(x)`, `Integer(min = 0)`) | `types/generics` |
+| T4 | Rule telling generic application, call and conversion apart (`repeatText<3>("ab")`, `Int8(x)`, `Integer<min = 0>`) | `types/generics` |
 | T5 | Compatibility compares public data fields; methods and defaults resolve statically; a type with `#private` fields is nominal | `advanced/structural-typing#what-is-compared` |
 | T6 | Anonymous unions must be distinguishable at runtime; `is Type` narrows unions only, and is decided at compile time otherwise | `types/unions` |
 | T7 | Recursion through named declarations only; coinductive equality; polymorphic recursion is an error | `types/unions` |
@@ -84,7 +84,7 @@ M1 lookup order and collisions, M2 initialization in dependency order and declar
 
 ### Async and requirements
 
-A1 `async` in function types, A2 colorless async on JavaScript (`___sync` rules, per-target primitives, part of the interface), A3 `Task(T) throws E`, A4 structured, move-only tasks, A5 tasks on one thread, A6 requirements keyed by exact shape, `provide` semantics, resolved at the call site. Canonical pages: `advanced/concurrency`, `advanced/requirements`. One correction during the work: A6 said a `derived` keeps what was provided, but a `derived` that uses requirements is not pure (E4), so a `derived` can't use requirements.
+A1 `async` in function types, A2 colorless async on JavaScript (`___sync` rules, per-target primitives, part of the interface), A3 `Task<T> throws E`, A4 structured, move-only tasks, A5 tasks on one thread, A6 requirements keyed by exact shape, `provide` semantics, resolved at the call site. Canonical pages: `advanced/concurrency`, `advanced/requirements`. One correction during the work: A6 said a `derived` keeps what was provided, but a `derived` that uses requirements is not pure (E4), so a `derived` can't use requirements.
 
 ### Other cross-cutting decisions
 
@@ -109,7 +109,7 @@ The reviewers decided these points where the approved recommendations were silen
 - `@` is written on every compile-time call, including inside type functions; compile-time calls may throw; evaluation limits (100 million steps, 256 nested type functions) (TY11).
 - A non-object union payload is built with parentheses, `UserId.User(12)`, the one exception to braces (TY10).
 - `when Value is` on types is a non-distributive subtype test (TY12).
-- The whole layout of `Schema` (TY27); `Keys` only on object types, new `KeyType(Map)` (TY29).
+- The whole layout of `Schema` (TY27); `Keys` only on object types, new `KeyType<Map>` (TY29).
 - Enumerations: pinned values all or none (TY30).
 
 **Memory and relations**
@@ -146,7 +146,7 @@ Syntax decided in the documentation that the parser doesn't support yet:
 
 | Construct | Example | Blocks |
 | --- | --- | --- |
-| `export mutable` | `export mutable: Pool(Person) = []` | relations, modules (×3), declaring-values, reference |
+| `export mutable` | `export mutable: Pool<Person> = []` | relations, modules (×3), declaring-values, reference |
 | Other export forms | `export async function = …`, `export type(First, Second) = …`, `export function(Item) = …` | modules (×4), web-server |
 | `mutable` member of a namespace | `namespace counters = { mutable count = 0 }` | modules |
 | `[..]` in effect paths | `mutates players[..].score` | defining-functions, reference-checking, relations |
@@ -274,23 +274,23 @@ Files edited: the nine pages of `types/`, `advanced/structural-typing.md`, `adva
 - **TY10** (blocking) building `Union { User = Integer }`, bare members. **Resolution:** *decided by the reviewer:* a bare member carries no data; a non-object payload is built with parentheses, `UserId.User(12)` (the one exception to braces); named unions and their members are nominal; a `Shape.Circle` is a `Shape`, a plain object isn't a `Shape.Circle`; members are only reachable qualified; two members can't accept the same literal. **Status:** fixed in unions.md, declaring-types.md.
 - **TY11** (blocking) `@` inside type functions, purity, termination. **Resolution:** *decided by the reviewer:* `@` is written on every compile-time call, including inside type functions and `static` values (consistent with `static six = @add(2, 4)`); compile-time calls follow E4 except that they may throw (the error becomes a compile error); bounds of 100 million steps per `@` call and 256 nested type-function applications; results memoized. **Status:** fixed in type-functions.md, metaprogramming.md.
 - **TY12** (blocking) `when Value is` on types. **Resolution:** *decided by the reviewer:* a subtype test on the whole type, not distributive (unlike TypeScript). **Status:** fixed.
-- **TY13** (important) capitalized parameters receiving values. **Resolution:** C12. *Decided by the reviewer:* `Pick` and `Omit` take `DeepKeys(ObjectType)` (nested picks). **Status:** fixed.
+- **TY13** (important) capitalized parameters receiving values. **Resolution:** C12. *Decided by the reviewer:* `Pick` and `Omit` take `DeepKeys<ObjectType>` (nested picks). **Status:** fixed.
 - **TY14** (important) `{ foo }` as key set or object shorthand; `Fields` identity. **Resolution:** F3; `Fields` structural, `Enum` nominal. **Status:** fixed.
-- **TY15** (important) a `Set(Hero)` seen as `Set(Human)`. **Resolution:** R8; `==` compares the fields of the declared type. **Status:** fixed.
+- **TY15** (important) a `Set<Hero>` seen as `Set<Human>`. **Resolution:** R8; `==` compares the fields of the declared type. **Status:** fixed.
 - **TY16** (important) function-type assignability. **Resolution:** E3. **Status:** fixed by the control-flow reviewer.
-- **TY17** (important) `Void` only in function types vs `Task(Void)`. **Resolution:** C12. **Status:** fixed.
+- **TY17** (important) `Void` only in function types vs `Task<Void>`. **Resolution:** C12. **Status:** fixed.
 - **TY18** (important) `Any`. **Resolution:** C11, removed. **Status:** fixed.
 - **TY19** (important) `Never`. **Resolution:** E5. **Status:** fixed.
 - **TY20** (important) optional fields, `Partial`, `Required`, `T??`. **Resolution:** *decided by the reviewer:* a literal may omit a field with a default or accepting `none`; an existing value missing a field is never assignable; `Required` removes `None`; `T??` is `T?`. **Status:** fixed.
 - **TY21** (important) spread semantics. **Resolution:** *decided by the reviewer:* only object types spread; data fields with defaults and `readonly` are copied, methods and `#private` fields are not; a duplicate of the same type is kept once, a different type is an error (no override); order only affects printing and schemas. **Status:** fixed.
 - **TY22** (important) `-` on types. **Resolution:** *decided by the reviewer:* removes the members that satisfy the right side; removing nothing is an error; ranges keep their remaining parts; `String - "x"` is an error; a named union keeps its identity; an empty result is `Never`. **Status:** fixed.
-- **TY23** (important) what `Type(e)` is. **Resolution:** *decided by the reviewer:* the inferred type without facts, `e` not evaluated; parameters, `use` aliases and loop variables keep the type of what they designate; a single-expression body returning a parameter returns `Type(param)`. **Status:** fixed.
+- **TY23** (important) what `Type<e>` is. **Resolution:** *decided by the reviewer:* the inferred type without facts, `e` not evaluated; parameters, `use` aliases and loop variables keep the type of what they designate; a single-expression body returning a parameter returns `Type<param>`. **Status:** fixed.
 - **TY24** (important) "never guesses" vs `sum([1, 2, 3])`. **Resolution:** *decided by the reviewer:* inference order: explicit parameters, expected type, argument types (base types of literals), defaults. **Status:** fixed.
 - **TY25** (important) compile-time value parameters. **Resolution:** *decided by the reviewer:* values with exact equality (booleans, integers, strings, characters, enum and `Fields` values, and arrays, tuples, objects of them; no floats or functions); equal values give equal types; an empty range is `Never`. **Status:** fixed.
 - **TY26** (important) ranged integer details. **Resolution:** C4 and the table in values/numbers.md. **Status:** fixed.
 - **TY27** (important) `Schema` undefined. **Resolution:** *decided by the reviewer:* a built-in named union with one member per kind of type, plus `SchemaProperty`, `SchemaMember`, `SchemaFlag` (whole layout to review; the field `isReadonly`, since `readonly` is a keyword). **Status:** fixed in types-at-runtime.md.
 - **TY28** (important) `@for` over key sets. **Resolution:** *decided by the reviewer:* leaves in declaration order; `key` is a compile-time path printed with dots; body checked per key after unrolling; key sets never inferred. **Status:** fixed.
-- **TY29** (important) `Keys(Map)` returning a type. **Resolution:** *decided by the reviewer:* `Keys`/`DeepKeys` only on object types, excluding methods and `#private` fields; new `KeyType(Map)`; `Values` only on collections. **Status:** fixed.
+- **TY29** (important) `Keys<Map>` returning a type. **Resolution:** *decided by the reviewer:* `Keys`/`DeepKeys` only on object types, excluding methods and `#private` fields; new `KeyType<Map>`; `Values` only on collections. **Status:** fixed.
 - **TY30** (minor) enumerations. **Resolution:** *decided by the reviewer:* nominal; pinned values are distinct non-negative integers, all pinned or none; `members` in declaration order. **Status:** fixed.
 - **TY31** (minor) `@typeToString`. **Resolution:** *decided by the reviewer:* the name written at the use site. **Status:** fixed.
 - **TY32** (minor) two members accepting the same literal. **Resolution:** an error. **Status:** fixed.
@@ -362,15 +362,15 @@ Files edited: `advanced/concurrency.md`, `advanced/reactivity.md`, `advanced/req
 - **AC5** (blocking) batched recomputation vs a fresh read. **Resolution:** C10. *Decided by the reviewer:* watches flush after the current statement of the outermost running code (entry function, task, test, watch, platform callback, standalone top-level statement) and before each `await`; a `do` block counts as one statement. **Status:** fixed.
 - **AC6** (blocking) static or dynamic dependency tracking. **Resolution:** C10: runtime tracking, reads inside called functions count. **Status:** fixed.
 - **AC7** (important) channels and mutexes can't reach a worker if arguments are copied. **Resolution:** *decided by the reviewer:* thread-safe values are reference-counted handles (a copy designates the same mutex, atomic or channel) and cross worker boundaries; on JavaScript and wasm, a mutex or atomic shared with a worker only holds flat values; a JavaScript channel is a `MessagePort`. **Status:** fixed.
-- **AC8** (minor) `Task(Void)`. **Resolution:** C12. **Status:** fixed by the control-flow and types reviewers.
+- **AC8** (minor) `Task<Void>`. **Resolution:** C12. **Status:** fixed by the control-flow and types reviewers.
 - **AC9** (minor) `mutable subscription` vs `let`; `cancel()` on a `let task`. **Resolution:** *decided by the reviewer:* `let subscription = watch`; `stop()` consumes the subscription (and a worker handle); `cancel()` doesn't mutate the handle. **Status:** fixed.
 - **AC10** (minor) parallel iteration on wasm. **Resolution:** `for parallel` and `parallel()` are native only. **Status:** fixed.
 - **AC11** (blocking) what `___sync` contains, how primitives declare their versions. **Resolution:** A2. *Decided by the reviewer:* blocking calls behave the same on every target (inside one, `await` blocks and `start` runs eagerly to a finished task; blocking mode is dynamic); awaiting, inside a blocking call, a task started outside it is an error everywhere; native blocking calls may wait on a channel, mutex or worker, JavaScript and wasm may not; a per-target primitive table; primitives declare their versions through a standard-library intrinsic. **Status:** fixed.
 - **AC12** (blocking) function types without `async`. **Resolution:** A1. *Decided by the reviewer:* a non-async function can be stored in an async type; a lambda is async when its expected type is; `items.map(fetchData)` with an async callback is an error. **Status:** fixed.
-- **AC13** (blocking) `Task(T)` without errors. **Resolution:** A3 and a table of the combinators' types. *Decided by the reviewer:* `Task.settled` gives `Array(T | E)`. **Status:** fixed.
+- **AC13** (blocking) `Task<T>` without errors. **Resolution:** A3 and a table of the combinators' types. *Decided by the reviewer:* `Task.settled` gives `Array<T | E>`. **Status:** fixed.
 - **AC14** (blocking) task lifetime and cancellation. **Resolution:** A4. *Decided by the reviewer:* a `start` statement whose task isn't kept is **detached**: it copies its arguments and captures, uses no locals or requirements, can't throw, and the program waits for it before exiting; `cancel()` is synchronous; `await` adds `Cancelled` only when `cancel()` may have been called. **Status:** fixed.
 - **AC15** (blocking) what a task borrows; `await` and module-level references. **Resolution:** A5. **Status:** fixed.
-- **AC16** (blocking) thread-safe types undefined. **Resolution:** *decided by the reviewer:* `Mutex(T)`, `AtomicInteger`, `AtomicBoolean`, `Channel(T)`, and objects or tuples whose fields are all thread-safe; handles whose methods don't declare `mutates self`. **Status:** fixed.
+- **AC16** (blocking) thread-safe types undefined. **Resolution:** *decided by the reviewer:* `Mutex<T>`, `AtomicInteger`, `AtomicBoolean`, `Channel<T>`, and objects or tuples whose fields are all thread-safe; handles whose methods don't declare `mutates self`. **Status:** fixed.
 - **AC17** (blocking) requirement keys under structural typing. **Resolution:** A6. *Decided by the reviewer:* generic types are keyed with their arguments. **Status:** fixed.
 - **AC18** (blocking) "pure" undefined. **Resolution:** E4, linked. **Status:** fixed.
 - **AC19** (important) reactivity "part of the type system". **Resolution:** *decided by the reviewer:* reactiveness is a property of places (a copy is plain; references and parameters stay tracked; `mutates` writes notify); `reactive` is part of a field like `readonly`; functions are instantiated per reactiveness. **Status:** fixed.

@@ -198,10 +198,12 @@ pub struct WhenBranch {
 }
 
 /// The signature of a lambda or of a function type:
-/// `async (a: Integer): Integer throws E requires r: R mutates a invalidates b`
+/// `async <Item>(a: Integer): Integer throws E requires r: R mutates a invalidates b`
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FunctionSignature {
 	pub is_async: bool,
+	// the generic parameters, ex: `<Item>` in `<Item>(items: Array<Item>) => items.get(0)`
+	pub generic_parameters: Vec<usize>,
 	pub parameters: Vec<usize>,
 	pub return_type_expression: Option<usize>,
 	pub errors: Option<usize>,
@@ -423,7 +425,7 @@ pub enum Node {
 		right: usize,
 	},
 	InRelation {
-		// many-to-many relation, ex: `in Self->bestFriends` in `Bag(in Self->bestFriends)`
+		// many-to-many relation, ex: `in Self->bestFriends` in `Bag<in Self->bestFriends>`
 		right: usize,
 	},
 	Range {
@@ -545,7 +547,7 @@ pub enum Node {
 		is_compile_time: bool,
 	},
 	Type {
-		// ex: `type Point(NumberType) = { x: NumberType }`
+		// ex: `type Point<NumberType> = { x: NumberType }`
 		name: Name,
 		parameters: Vec<usize>,
 		expression: usize,
@@ -567,11 +569,10 @@ pub enum Node {
 	Function {
 		// ex: `async function name = (a: Integer): Integer => a + 1`,
 		// `function ascending: Comparator = (a, b) => a - b`
-		// the expression is any function: a lambda, an alias, a composition, ...
+		// the expression is any function: a lambda, an alias, a composition, ... The generic
+		// parameters start the signature of the lambda, ex: `function first = <Item>(…) => …`
 		name: Name,
 		is_async: bool,
-		// generic parameters, ex: `(Item)` in `function first(Item) = ...`
-		parameters: Vec<usize>,
 		// the function type, ex: `Comparator` in `function ascending: Comparator = ...`
 		type_expression: Option<usize>,
 		expression: usize,
@@ -625,20 +626,19 @@ pub enum Node {
 		expression: Option<usize>,
 	},
 	ExportValue {
-		// ex: `export = 42`, `export mutable: Pool(Person) = []`
+		// ex: `export = 42`, `export mutable: Pool<Person> = []`
 		is_mutable: bool,
 		type_expression: Option<usize>,
 		expression: usize,
 	},
 	ExportFunction {
-		// ex: `export function = ...`, `export async function(Item) = ...`
+		// ex: `export function = ...`, `export async function = <Item>(…) => …`
 		is_async: bool,
-		parameters: Vec<usize>,
 		type_expression: Option<usize>,
 		expression: usize,
 	},
 	ExportType {
-		// ex: `export type = ...`, `export type(First, Second) = ...`
+		// ex: `export type = ...`, `export type<First, Second> = ...`
 		parameters: Vec<usize>,
 		expression: usize,
 	},
@@ -650,6 +650,11 @@ pub enum Node {
 	FunctionCall {
 		function: usize,
 		parameters: Vec<usize>,
+	},
+	GenericApplication {
+		// explicit generic parameters, ex: `Array<Integer>`, `Integer<min = 0>`, `first<Float>`
+		target: usize,
+		arguments: Vec<usize>,
 	},
 }
 
@@ -918,18 +923,15 @@ impl Node {
 				visit(*expression);
 			}
 			Node::Function {
-				parameters,
 				type_expression,
 				expression,
 				..
 			}
 			| Node::ExportFunction {
-				parameters,
 				type_expression,
 				expression,
 				..
 			} => {
-				all(parameters, visit);
 				optional(type_expression, visit);
 				visit(*expression);
 			}
@@ -941,6 +943,7 @@ impl Node {
 				visit(*type_expression);
 			}
 			Node::ArrowFunction { signature, body } => {
+				all(&signature.generic_parameters, visit);
 				all(&signature.parameters, visit);
 				optional(&signature.return_type_expression, visit);
 				optional(&signature.errors, visit);
@@ -978,6 +981,10 @@ impl Node {
 			} => {
 				visit(*function);
 				all(parameters, visit);
+			}
+			Node::GenericApplication { target, arguments } => {
+				visit(*target);
+				all(arguments, visit);
 			}
 		}
 	}
@@ -1082,6 +1089,7 @@ impl Node {
 			Node::ExportType { .. } => "ExportType",
 			Node::ExportNamespace { .. } => "ExportNamespace",
 			Node::FunctionCall { .. } => "FunctionCall",
+			Node::GenericApplication { .. } => "GenericApplication",
 		}
 	}
 }

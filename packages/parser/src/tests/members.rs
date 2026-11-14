@@ -45,8 +45,8 @@ fn mixed_separator_members() {
 #[test]
 fn private_members() {
 	assert_statement(
-		"{ #bag: Bag(Node), #secret = \"private\" }",
-		"{\n\t#bag: Bag(Node)\n\t#secret = \"private\"\n}",
+		"{ #bag: Bag<Node>, #secret = \"private\" }",
+		"{\n\t#bag: Bag<Node>\n\t#secret = \"private\"\n}",
 	);
 }
 
@@ -128,32 +128,32 @@ fn member_disallows_suffix_expression() {
 #[test]
 fn generic_types() {
 	assert_statement(
-		"type Point(NumberType) = { x: NumberType, y: NumberType }",
-		"type Point(NumberType) = {\n\tx: NumberType\n\ty: NumberType\n}",
+		"type Point<NumberType> = { x: NumberType, y: NumberType }",
+		"type Point<NumberType> = {\n\tx: NumberType\n\ty: NumberType\n}",
 	);
 	assert_statement(
-		"type Pair(Left, Right) = { left: Left, right: Right }",
-		"type Pair(Left, Right) = {\n\tleft: Left\n\tright: Right\n}",
+		"type Pair<Left, Right> = { left: Left, right: Right }",
+		"type Pair<Left, Right> = {\n\tleft: Left\n\tright: Right\n}",
 	);
 }
 
 #[test]
 fn typed_object_construction() {
 	assert_statement(
-		"let point = Point(Integer) { x = 12, y = 13 }",
-		"let point = Point(Integer) {\n\tx = 12\n\ty = 13\n}",
+		"let point = Point<Integer> { x = 12, y = 13 }",
+		"let point = Point<Integer> {\n\tx = 12\n\ty = 13\n}",
 	);
 	assert_statement(
-		"let point: Point(Integer) = { x = 12, y = 13 }",
-		"let point: Point(Integer) = {\n\tx = 12\n\ty = 13\n}",
+		"let point: Point<Integer> = { x = 12, y = 13 }",
+		"let point: Point<Integer> = {\n\tx = 12\n\ty = 13\n}",
 	);
 }
 
 #[test]
 fn collection_creation() {
 	assert_statement(
-		"let numbers: Set(Integer) = [1, 2, 3]",
-		"let numbers: Set(Integer) = [1, 2, 3]",
+		"let numbers: Set<Integer> = [1, 2, 3]",
+		"let numbers: Set<Integer> = [1, 2, 3]",
 	);
 	assert_statement(
 		"let count = Set.from([1, 2, 2]).size()",
@@ -163,19 +163,19 @@ fn collection_creation() {
 
 #[test]
 fn collection_elements_are_not_members() {
-	assert_has_error("let numbers = Set(Integer) { 1, 2, 3 }");
+	assert_has_error("let numbers = Set<Integer> { 1, 2, 3 }");
 }
 
 #[test]
 fn type_parameters_are_capitalized() {
-	assert_has_error("type Box(value) = { content: value }");
+	assert_has_error("type Box<value> = { content: value }");
 }
 
 #[test]
 fn nested_declarations() {
 	assert_statement(
-		"type LinkedList(Data) = {\ntype Node = { data: Data }\n#bag: Bag(Node)\n}",
-		"type LinkedList(Data) = {\n\ttype Node = {\n\t\tdata: Data\n\t}\n\t#bag: Bag(Node)\n}",
+		"type LinkedList<Data> = {\ntype Node = { data: Data }\n#bag: Bag<Node>\n}",
+		"type LinkedList<Data> = {\n\ttype Node = {\n\t\tdata: Data\n\t}\n\t#bag: Bag<Node>\n}",
 	);
 	assert_statement(
 		"namespace Math = {\nnamespace constants = { pi = 3.14 }\n}",
@@ -186,38 +186,99 @@ fn nested_declarations() {
 #[test]
 fn generic_parameters() {
 	assert_statement(
-		"type Point(NumberType: Integer | Float) = { x: NumberType }",
-		"type Point(NumberType: (Integer | Float)) = {\n\tx: NumberType\n}",
+		"type Point<NumberType: Integer | Float> = { x: NumberType }",
+		"type Point<NumberType: (Integer | Float)> = {\n\tx: NumberType\n}",
 	);
 	assert_statement(
-		"type Matrix(Element, rows: Integer, columns: Integer) = { cells: Array(Element) }",
-		"type Matrix(Element, rows: Integer, columns: Integer) = {\n\tcells: Array(Element)\n}",
+		"type Matrix<Element, rows: Integer, columns: Integer> = { cells: Array<Element> }",
+		"type Matrix<Element, rows: Integer, columns: Integer> = {\n\tcells: Array<Element>\n}",
 	);
 	assert_statement(
-		"type Collection(Item, Index = Integer) = { items: Array(Item) }",
-		"type Collection(Item, Index = Integer) = {\n\titems: Array(Item)\n}",
+		"type Collection<Item, Index = Integer> = { items: Array<Item> }",
+		"type Collection<Item, Index = Integer> = {\n\titems: Array<Item>\n}",
 	);
 	assert_statement(
-		"function first(Item) = (items: Array(Item)): Item? => items[0]",
-		"function first(Item) = (items: Array(Item)): Item? => items[0]",
+		"function first = <Item>(items: Array<Item>): Item? => items[0]",
+		"function first = <Item>(items: Array<Item>): Item? => items[0]",
 	);
 	assert_statement(
-		"function sum(Value: Integer | Float) = (values: Array(Value)): Value => values.length",
-		"function sum(Value: (Integer | Float)) = (values: Array(Value)): Value => values.length",
+		"function sum = <Value: Integer | Float>(values: Array<Value>): Value => values.length",
+		"function sum = <Value: (Integer | Float)>(values: Array<Value>): Value => values.length",
 	);
 	assert_statement(
-		"function get(Object, Key: Keys(Object)) = (object: Object, key: Key) => object[key]",
-		"function get(Object, Key: Keys(Object)) = (object: Object, key: Key) => object[key]",
+		"function get = <Object, Key: Keys<Object>>(object: Object, key: Key) => object[key]",
+		"function get = <Object, Key: Keys<Object>>(object: Object, key: Key) => object[key]",
 	);
 	assert_statement(
-		"let total = sum(Float)([1, 2, 3])",
-		"let total = sum(Float)([1, 2, 3])",
+		"let total = sum<Float>([1, 2, 3])",
+		"let total = sum<Float>([1, 2, 3])",
+	);
+}
+
+#[test]
+fn generic_applications() {
+	// a call after explicit generic parameters is always a call
+	assert_statement("makeAdder<Float>(5)(3)", "makeAdder<Float>(5)(3)");
+	assert_statement("f(a)(b)", "f(a)(b)");
+	assert_statement(
+		"let ranged: Integer<min = 0, max = rows - 1> = 0",
+		"let ranged: Integer<min = 0, max = (rows - 1)> = 0",
+	);
+	assert_statement(
+		"let pairs: Array<Tuple<Integer, String>> = []",
+		"let pairs: Array<Tuple<Integer, String>> = []",
+	);
+	assert_statement(
+		"let handlers: Array<(event: Event) => Void> = []",
+		"let handlers: Array<(event: Event) => Void> = []",
+	);
+	assert_statement(
+		"type Index = Choose<(count > 255), UInt16, UInt8>",
+		"type Index = Choose<((count > 255)), UInt16, UInt8>",
+	);
+	assert_statement(
+		"let numbers = Set<Float>.from([1, 2, 3])",
+		"let numbers = Set<Float>.from([1, 2, 3])",
+	);
+	assert_statement("let friends: Pool<people->bestFriend> = []", "let friends: Pool<(people -> bestFriend)> = []");
+	assert_statement(
+		"type Lookup = Map<String, {\n\tid: Integer\n}>",
+		"type Lookup = Map<String, {\n\tid: Integer\n}>",
+	);
+	assert_statement(
+		"type Score<maximum: Integer<min = 1>> = Integer<min = 0, max = maximum>",
+		"type Score<maximum: Integer<min = 1>> = Integer<min = 0, max = maximum>",
+	);
+	assert_statement("if count < limit { }", "if (count < limit) {\n\t\n}");
+}
+
+#[test]
+fn generic_lambdas_and_function_types() {
+	assert_statement(
+		"let identity = <Value>(value: Value): Value => value",
+		"let identity = <Value>(value: Value): Value => value",
+	);
+	assert_statement(
+		"function applyToBoth = (transform: <Value>(value: Value) => Value, number: Integer) => transform(number)",
+		"function applyToBoth = (transform: <Value>(value: Value) => Value, number: Integer) => transform(number)",
+	);
+	assert_statement(
+		"applyToBoth(<Value>(value: Value) => value, 1)",
+		"applyToBoth(<Value>(value: Value) => value, 1)",
+	);
+	assert_statement(
+		"export function = async <Item>(items: Array<Item>) => items",
+		"export function = async <Item>(items: Array<Item>) => items",
+	);
+	assert_statement(
+		"function map = <Result>(self, transform: (item: Item) => Result) => Stack<Result> { #items = [] }",
+		"function map = <Result>(self, transform: (item: Item) => Result) => Stack<Result> {\n\t#items = []\n}",
 	);
 }
 
 #[test]
 fn value_parameters_need_a_type() {
-	assert_has_error("type Matrix(Element, rows) = { cells: Array(Element) }");
+	assert_has_error("type Matrix<Element, rows> = { cells: Array<Element> }");
 }
 
 #[test]

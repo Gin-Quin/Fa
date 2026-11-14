@@ -3,12 +3,15 @@ use crate::nodes::Node;
 use crate::parsing::parse_declaration::{
 	parse_declaration_value, parse_optional_generic_parameters, parse_optional_type_annotation,
 };
+use crate::parsing::parse_function_declaration::{
+	attach_generic_parameters, parse_misplaced_generic_parameters,
+};
 use crate::parsing::parse_expression::ExpressionContext;
 use crate::tokens::TokenKind;
 
 /// Parse an export, starting at `export`:
 /// `export = value`, `export: Type = value`, `export mutable: Type = value`,
-/// `export function(Item) = ...`, `export async function = ...`, `export type(T) = ...`,
+/// `export function = <Item>(…) => …`, `export async function = ...`, `export type<T> = ...`,
 /// `export namespace = { ... }`.
 pub(crate) fn parse_export(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
 	let start = context.token().start;
@@ -29,12 +32,17 @@ pub(crate) fn parse_export(context: &mut Context<'_>, stop_at: &[TokenKind]) -> 
 			} else {
 				context.go_to_next_token();
 			}
-			let parameters = parse_optional_generic_parameters(context);
+			let declaration = if is_async {
+				"export async function"
+			} else {
+				"export function"
+			};
+			let misplaced = parse_misplaced_generic_parameters(context, declaration);
 			let type_expression = parse_optional_type_annotation(context);
 			let expression = parse_export_value(context, stop_at);
+			attach_generic_parameters(context, expression, misplaced);
 			let node = Node::ExportFunction {
 				is_async,
-				parameters,
 				type_expression,
 				expression,
 			};

@@ -24,7 +24,7 @@ assert describe(original) == "abc".repeat(40) + "changed"
 original = Choice.Empty
 assert describe(original) == "empty"
 
-mutable choices: Array(Choice) = []
+mutable choices: Array<Choice> = []
 for i in 0..30 {
 	choices.push(Choice.Number { value = Int32(i) })
 	choices.push(Choice.Text { text = "x".repeat(i) })

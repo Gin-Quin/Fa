@@ -5,8 +5,8 @@ function factorial = (n: Integer): Integer => if n <= 1 { 1 } else { n * factori
 function fib = (n: Integer): Integer => if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
 console.log("fib(25) = {fib(25)}")
 -- prints: fib(25) = 75025
-function isEven = (n: Integer(min = 0)): Boolean => if n == 0 { true } else { isOdd(n - 1) }
-function isOdd = (n: Integer(min = 0)): Boolean => if n == 0 { false } else { isEven(n - 1) }
+function isEven = (n: Integer<min = 0>): Boolean => if n == 0 { true } else { isOdd(n - 1) }
+function isOdd = (n: Integer<min = 0>): Boolean => if n == 0 { false } else { isEven(n - 1) }
 console.log(isEven(10), isOdd(7), isEven(3))
 -- prints: true true false
 function gcd = (a: Integer, b: Integer): Integer => {

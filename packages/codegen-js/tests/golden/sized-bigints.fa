@@ -8,7 +8,7 @@ function xorshift = (x: UInt64): UInt64 => {
 	v.bitXor(v.shiftLeft(17))
 }
 
-function below = (random: UInt64, bound: Integer(min = 1)): Integer => Integer(random %% UInt64(bound))
+function below = (random: UInt64, bound: Integer<min = 1>): Integer => Integer(random %% UInt64(bound))
 
 let signed: Int64 = -40
 let r = xorshift(12345)

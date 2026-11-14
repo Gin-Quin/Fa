@@ -4,7 +4,7 @@
 
 -- A byte array (`Uint8Array`): filled right after its declaration, then only indexed.
 function primes = (limit: Integer): Integer => {
-	mutable isPrime = Array(Boolean).from([], capacity = 10)
+	mutable isPrime = Array<Boolean>.from([], capacity = 10)
 	for 0..=limit {
 		isPrime.push(true)
 	}
@@ -25,7 +25,7 @@ console.log(primes(30), primes(2), primes(1), primes(-5))
 -- prints: 10 1 0 0
 
 function flagsOf = (size: Integer, at: Integer): String throws IndexError => {
-	mutable flags: Array(Boolean) = []
+	mutable flags: Array<Boolean> = []
 	for 0..size {
 		flags.push(false)
 	}
@@ -60,7 +60,7 @@ type Entry = {
 	key: Integer
 	name: String
 }
-mutable entries: Array(Entry) = []
+mutable entries: Array<Entry> = []
 for i in 0..40 {
 	entries.push({ key = i * 7 %% 5, name = "n{i}" })
 }

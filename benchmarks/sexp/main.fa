@@ -17,7 +17,7 @@ function xorshift = (seed: UInt64): UInt64 => {
 }
 
 -- A number in `0..bound`: the remainder of the unsigned random number.
-function below = (random: UInt64, bound: Integer(min = 1)): Integer => random %% bound
+function below = (random: UInt64, bound: Integer<min = 1>): Integer => random %% bound
 
 -- The value of a decimal digit, `none` for any other character.
 function digitValue = (character: Character): Integer? => digits.indexOf(character)
@@ -57,13 +57,13 @@ type Generator = {
 type Sexp = Union {
 	Symbol = { name: String }
 	Number = { value: Integer }
-	List = { items: Array(Sexp) }
+	List = { items: Array<Sexp> }
 }
 
 -- Reads the characters of the text from an array: indexing an array is constant-time, where
 -- indexing a string counts grapheme clusters.
 type Parser = {
-	characters: Array(Character)
+	characters: Array<Character>
 	position: Integer
 	count: Integer
 
@@ -81,7 +81,7 @@ type Parser = {
 		self.count += 1
 		if self.current() == "(" {
 			self.position += 1
-			mutable items: Array(Sexp) = []
+			mutable items: Array<Sexp> = []
 			loop {
 				self.skipSpaces()
 				if self.current() == ")" {
@@ -139,7 +139,7 @@ for 0..n {
 }
 
 mutable parser = Parser { characters = generator.text.characters(), position = 0, count = 0 }
-mutable roots: Array(Sexp) = []
+mutable roots: Array<Sexp> = []
 loop {
 	parser.skipSpaces()
 	if parser.position >= parser.characters.length {

@@ -3,7 +3,7 @@
 -- the iterations send, the main thread receives once the loop is done.
 use { Channel, AtomicBoolean } = std.concurrency
 
-mutable results = Channel(Integer) { capacity = 1000 }
+mutable results = Channel<Integer> { capacity = 1000 }
 for parallel n in 1..=100 {
 	results.send(n * 2) catch error => console.error("closed")
 }
@@ -19,7 +19,7 @@ console.log("{received} values, total {total}") -- prints: 100 values, total 101
 console.log(results.tryReceive() == none) -- prints: true
 
 -- a bounded channel: `trySend` fails when it is full
-mutable small = Channel(String) { capacity = 2 }
+mutable small = Channel<String> { capacity = 2 }
 console.log(small.trySend("a"), small.trySend("b"), small.trySend("c")) -- prints: true true false
 console.log(small.tryReceive() ?? "none") -- prints: a
 small.close()

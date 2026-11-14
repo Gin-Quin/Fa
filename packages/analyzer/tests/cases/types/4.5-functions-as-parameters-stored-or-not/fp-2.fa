@@ -3,6 +3,6 @@
 -- brief: ✗ fp-2: EF015 (map throws what its callback throws)
 -- context: declarations reused from fp-1
 let texts = ["1", "2"]
-function parseAll = (texts: Array(String)) => {
+function parseAll = (texts: Array<String>) => {
 	let n = texts.map((text) => try Integer.parse(text))
 }

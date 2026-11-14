@@ -12,14 +12,14 @@ function xorshift = (x: UInt64): UInt64 => {
 }
 
 -- A number between 0 and `bound` (excluded), as the Goose suite reduces its random numbers.
-function randomBelow = (x: UInt64, bound: Integer(min = 1)): Integer => Integer(x %% UInt64(bound))
+function randomBelow = (x: UInt64, bound: Integer<min = 1>): Integer => Integer(x %% UInt64(bound))
 
 let n = Math.max(try Integer.parse(arguments.get(0) ?? "500000"), 0)
 let vocabularySize = n // 10 + 16
 
 mutable r: UInt64 = 12345
 -- A vocabulary of words, indexed randomly to build the text.
-mutable vocabulary = Array(String).from([], capacity = vocabularySize)
+mutable vocabulary = Array<String>.from([], capacity = vocabularySize)
 for 0..vocabularySize {
 	mutable word = ""
 	r = xorshift(r)
@@ -42,7 +42,7 @@ for 0..n {
 -- The trailing space gives an empty part, which is not a word.
 let words = text.split(" ").filter((word) => not word.isEmpty())
 
-mutable counts: Map(String, Integer) = []
+mutable counts: Map<String, Integer> = []
 for word in words {
 	use count = counts.getOrInsert(word, 0)
 	count += 1

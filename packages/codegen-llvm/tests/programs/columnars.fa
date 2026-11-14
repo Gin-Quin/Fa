@@ -1,8 +1,8 @@
 -- Columnars natively, by columns: one run per field in every chunk
 type Point = { x: Float, y: Float }
-type Human = { name: String, age: Integer, tags: Array(String), home: Point }
+type Human = { name: String, age: Integer, tags: Array<String>, home: Point }
 
-mutable people: Columnar(Human) = []
+mutable people: Columnar<Human> = []
 use john = people.add({ name = "John", age = 20, tags = ["a"], home = { x = 1.5, y = 2 } })
 use jane = people.add({ name = "Jane", age = 21, tags = [], home = { x = 0, y = 0 } })
 for i in 0..5000 {
@@ -71,7 +71,7 @@ if first is not none {
 	console.log(first?.age ?? 0) -- prints: 5
 }
 
-mutable growing: GrowingColumnar(Point) = []
+mutable growing: GrowingColumnar<Point> = []
 use origin = growing.add({ x = 0, y = 0 })
 growing.add({ x = 3, y = 4 })
 origin.x = 10

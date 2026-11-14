@@ -1,5 +1,5 @@
 type Bag = {
-	#items: Pool(Item) = []
+	#items: Pool<Item> = []
 	first: (Item in #items)?
 	type Item = { label: String }
 	function clearAll = (self) mutates self.#items => {

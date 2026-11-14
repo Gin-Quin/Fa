@@ -5,12 +5,12 @@ export type = {
 	friend: Person?
 }
 -- file: library/people.fa
-export function = (): Array(Person) => [Person { name = "Ana" }, Person { name = describe(Person { name = "Bo" }) }]
+export function = (): Array<Person> => [Person { name = "Ana" }, Person { name = describe(Person { name = "Bo" }) }]
 -- file: library/describe.fa
 export function = (person: Person): String => "{person.name} ({people().length} people)"
 -- file: application/main.fa
 export function = () => {
-	let all = library.people() -- type all: Array(Person)
+	let all = library.people() -- type all: Array<Person>
 	for person in all {
 		console.log(library.describe(person))
 	}

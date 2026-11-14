@@ -1,7 +1,7 @@
 -- pending: M2 (imported from the types brief)
 -- brief: ✓ ef-14: invalidates implies mutates size
 type Inventory = {
-	items: Pool(String)
+	items: Pool<String>
 	function remove = (self, item: String in self.items) invalidates item => {
 		self.items.delete(item)
 	}

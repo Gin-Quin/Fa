@@ -1,3 +1,3 @@
 -- error: GN006
 -- brief: ✗ gn-14: GN006
-type Bad(scale: Float) = { x: Float }
+type Bad<scale: Float> = { x: Float }

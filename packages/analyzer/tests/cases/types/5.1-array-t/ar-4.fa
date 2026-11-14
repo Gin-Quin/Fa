@@ -2,4 +2,4 @@
 -- brief: ✗ ar-4: EF015 (unproven index needs try)
 -- context: declarations reused from ar-3
 mutable array = [1, 2, 3]
-function readValue = (array: Array(Integer), index: Integer): Integer => array[index]
+function readValue = (array: Array<Integer>, index: Integer): Integer => array[index]

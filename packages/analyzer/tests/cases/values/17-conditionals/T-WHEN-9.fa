@@ -1,5 +1,5 @@
 -- brief: → `high`
-function pct = (p: Integer(min = 0, max = 100)): String => when p is {
+function pct = (p: Integer<min = 0, max = 100>): String => when p is {
 0..=49 => "low"
 50..=100 => "high"
 }

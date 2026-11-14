@@ -1,6 +1,6 @@
 -- writing elements (and indexed elements) while iterating is allowed
 type Player = { name: String, score: Integer }
-mutable players: Array(Player) = [Player { name = "Ana", score = 1 }, Player { name = "Bao", score = 2 }]
+mutable players: Array<Player> = [Player { name = "Ana", score = 1 }, Player { name = "Bao", score = 2 }]
 for player in players {
 	player.score += 1
 	players[0].score = 0

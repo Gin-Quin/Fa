@@ -9,7 +9,7 @@ t[0] = 5
 console.log(t, u, t == (5, 2), u != (1, 2))
 -- prints: (5, 2) (1, 2) true false
 
-function minMax = (values: Array(Integer)): Tuple(Integer, Integer) => {
+function minMax = (values: Array<Integer>): Tuple<Integer, Integer> => {
 	mutable low = values[0] catch error => 0
 	mutable high = low
 	for value in values {

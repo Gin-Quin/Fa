@@ -1,6 +1,6 @@
 -- native
 let numbers = [1, 2, 3]
-mutable results: Array(Integer) = []
+mutable results: Array<Integer> = []
 for parallel number in numbers {
 	results.push(number) -- error CONC002
 }

@@ -1,10 +1,10 @@
 -- linking the people of two different towns
 type Town = {
-	people: Pool(Person) = []
+	people: Pool<Person> = []
 	type Person = {
 		name: String
 		bestFriend: (Person in people)?
-		bestFriendOf: Pool(people->bestFriend)
+		bestFriendOf: Pool<people->bestFriend>
 	}
 }
 mutable north: Town = {}

@@ -1,6 +1,6 @@
 -- symmetric writes while iterating the people: writing elements is fine; growing is not
 type Town = {
-	people: Pool(Person) = []
+	people: Pool<Person> = []
 	type Person = {
 		name: String
 		spouse: (people->spouse)?

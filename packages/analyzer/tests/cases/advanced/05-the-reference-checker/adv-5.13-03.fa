@@ -1,7 +1,7 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
-mutable persons: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }]
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
+mutable persons: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }]
 use someone = persons[1]
 persons.delete(0)
 console.log(someone.name) -- error REF001

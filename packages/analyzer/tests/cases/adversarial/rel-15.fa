@@ -1,6 +1,6 @@
 -- iteration rule over a collection that is a field of a local value
 type Item = { label: String }
-type Holder = { numbers: Array(Integer), items: Pool(Item) }
+type Holder = { numbers: Array<Integer>, items: Pool<Item> }
 mutable holder = Holder { numbers = [1, 2], items = [] }
 for number in holder.numbers {
 	holder.numbers.push(3) -- error: REF012

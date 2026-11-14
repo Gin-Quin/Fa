@@ -1,5 +1,5 @@
 -- brief: ✓ ma-5: getOrInsert with use → 2
-mutable counts: Map(String, Integer) = []
+mutable counts: Map<String, Integer> = []
 for word in ["a", "b", "a"] {
 	use count = counts.getOrInsert(word, 0)
 	count += 1

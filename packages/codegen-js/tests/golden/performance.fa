@@ -3,7 +3,7 @@
 
 -- A byte array: filled right after its declaration, then only indexed.
 function primes = (limit: Integer): Integer => {
-	mutable isPrime = Array(Boolean).from([], capacity = limit + 1)
+	mutable isPrime = Array<Boolean>.from([], capacity = limit + 1)
 	for 0..=limit {
 		isPrime.push(true)
 	}
@@ -23,8 +23,8 @@ function primes = (limit: Integer): Integer => {
 }
 
 -- Not a byte array: the array is printed, then given to a function.
-function shown = (size: Integer(min = 0, max = 100)): Integer => {
-	mutable flags: Array(Boolean) = []
+function shown = (size: Integer<min = 0, max = 100>): Integer => {
+	mutable flags: Array<Boolean> = []
 	for 0..size {
 		flags.push(false)
 	}
@@ -32,7 +32,7 @@ function shown = (size: Integer(min = 0, max = 100)): Integer => {
 	count(flags)
 }
 
-function count = (flags: Array(Boolean)): Integer => {
+function count = (flags: Array<Boolean>): Integer => {
 	mutable total = 0
 	for flag in flags {
 		if flag {
@@ -43,7 +43,7 @@ function count = (flags: Array(Boolean)): Integer => {
 }
 
 -- Natural sorts without comparator calls.
-function sorted = (numbers: Array(Integer), floats: Array(Float), words: Array(String)) mutates numbers => {
+function sorted = (numbers: Array<Integer>, floats: Array<Float>, words: Array<String>) mutates numbers => {
 	numbers.sortInPlace()
 	let ordered = floats.sort()
 	let names = words.sort()

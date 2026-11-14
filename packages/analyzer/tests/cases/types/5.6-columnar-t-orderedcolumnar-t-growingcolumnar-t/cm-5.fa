@@ -1,7 +1,7 @@
 -- brief: ✗ cm-5: EF032 (OrderedColumnar.add declares `mutates self`)
 -- context: declarations reused from cm-1, cm-4 (repeated)
 type Human = { name: String, age: Integer }
-mutable ordered: OrderedColumnar(Human) = []
+mutable ordered: OrderedColumnar<Human> = []
 ordered.add({ name = "John", age = 20 })
 ordered.add({ name = "Jane", age = 21 })
 use first = ordered[0]

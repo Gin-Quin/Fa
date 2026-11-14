@@ -1,10 +1,10 @@
 type Failure = Errors { Stop }
 type Tree = Union {
-	Leaf = { text: String, data: { names: Array(String), extra: String? } }
+	Leaf = { text: String, data: { names: Array<String>, extra: String? } }
 	Branch = { left: Tree, right: Tree }
 }
 
-function build = (depth: Integer, text: String, names: Array(String), fail: Boolean): Tree throws Failure => {
+function build = (depth: Integer, text: String, names: Array<String>, fail: Boolean): Tree throws Failure => {
 	if depth == 0 {
 		if fail { throw Failure.Stop }
 		return Tree.Leaf { text, data = { names, extra = text } }

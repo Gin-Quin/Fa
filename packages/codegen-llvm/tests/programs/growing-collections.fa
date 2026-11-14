@@ -2,7 +2,7 @@
 -- survive insertions (collections/growing-collections.md).
 type Human = { name: String, age: Integer }
 
-mutable people: GrowingArray(Human) = [{ name = "Ana", age = 30 }]
+mutable people: GrowingArray<Human> = [{ name = "Ana", age = 30 }]
 use first = people[0]
 for index in 0..100 {
 	people.push({ name = "P{index}", age = index })
@@ -33,7 +33,7 @@ let copied = people
 people[0].name = "Changed"
 console.log(try copied[0].name, people[0].name) -- prints: Ana Changed
 
-mutable numbers: GrowingArray(Integer) = []
+mutable numbers: GrowingArray<Integer> = []
 for value in 1..=20 {
 	numbers.push(value * value)
 }
@@ -41,7 +41,7 @@ console.log(numbers) -- prints: [1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144,
 console.log(numbers.get(3), numbers.get(30)) -- prints: 16 none
 console.log(numbers.isEmpty()) -- prints: false
 
-mutable counts: GrowingMap(String, Integer) = []
+mutable counts: GrowingMap<String, Integer> = []
 use ana = counts.getOrInsert("ana", 0)
 for index in 0..50 {
 	counts["key{index}"] = index
@@ -50,7 +50,7 @@ ana += 5
 console.log(try counts["ana"], counts.size) -- prints: 5 51
 console.log(try counts["key42"]) -- prints: 42
 
-mutable seen: GrowingSet(String) = []
+mutable seen: GrowingSet<String> = []
 for index in 0..40 {
 	seen.add("v{index %% 7}")
 }

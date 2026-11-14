@@ -1,4 +1,4 @@
-export function = (arguments: Array(String)) => {
+export function = (arguments: Array<String>) => {
 	let user: shared.models = { name = arguments.get(0) ?? "Ada", cows = 1 }
 	console.log(shared.greet(user))
 	console.log(library.welcome("Bo"))

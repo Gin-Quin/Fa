@@ -18,7 +18,7 @@ for length in 0..65 {
 }
 
 -- Copying inline values into collections preserves independent value storage.
-mutable words: Array(String) = []
+mutable words: Array<String> = []
 for length in 0..30 {
 	words.push("a".repeat(length))
 }
@@ -28,7 +28,7 @@ for word, i in copy {
 	assert word == "a".repeat(i)
 }
 
-mutable counts: Map(String, Integer) = []
+mutable counts: Map<String, Integer> = []
 for word, i in copy {
 	counts[word] = i
 }

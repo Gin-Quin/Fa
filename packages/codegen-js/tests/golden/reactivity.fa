@@ -1,7 +1,7 @@
 -- Reactivity: only the reactive places are instrumented (reactivity.rs)
 type Counter = { label: String, reactive count: Integer }
 
-function addAll = (numbers: Array(Integer), extra: Array(Integer)) mutates numbers => {
+function addAll = (numbers: Array<Integer>, extra: Array<Integer>) mutates numbers => {
 	for value in extra {
 		numbers.push(value)
 	}

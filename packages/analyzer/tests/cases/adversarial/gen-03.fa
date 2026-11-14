@@ -1,7 +1,7 @@
 -- method constraints: wrong return type, missing method, on a primitive
 type Cat = { name: String, function describe = (self): Integer => 1 }
 type Dog = { name: String, function describe = (self): String => "dog" }
-function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)) => {
+function describeAll = <Item: { describe: (self) => String }>(items: Array<Item>) => {
 	for item in items {
 		console.log(item.describe())
 	}

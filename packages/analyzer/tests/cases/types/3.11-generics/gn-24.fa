@@ -2,13 +2,13 @@
 -- error: EF004
 -- brief: ✗ gn-24: D5 write-set through a type parameter: EF004 at the call
 -- context: declarations reused from gn-12
-type Matrix(Element, rows: Integer, columns: Integer) = { values: Array(Element) }
-type A = Matrix(Float, 4, 4)
-type B = Matrix(Float, 2 + 2, 4)
+type Matrix<Element, rows: Integer, columns: Integer> = { values: Array<Element> }
+type A = Matrix<Float, 4, 4>
+type B = Matrix<Float, 2 + 2, 4>
 let a: A = { values = [] }
 let b: B = a
 type Tight = { name: "a" | "b" }
-function renamed = (human: { name: String }, name: String): Type(human) => {
+function renamed = (human: { name: String }, name: String): Type<human> => {
 	mutable copy = human
 	copy.name = name
 	copy

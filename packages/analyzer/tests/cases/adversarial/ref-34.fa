@@ -1,4 +1,4 @@
 -- pending: M2 (user functions returning references; see adv-4.5-10)
 -- a returned reference whose owner differs from the declared one
 type Person = { name: String }
-function pickOther = (a: Array(Person), b: Array(Person)): (Person in a)? => b.get(0) -- error: REF009
+function pickOther = (a: Array<Person>, b: Array<Person>): (Person in a)? => b.get(0) -- error: REF009

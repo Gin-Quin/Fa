@@ -22,7 +22,7 @@ function capitalizeSecondLetter = (text: String): String throws IndexError => tr
 function capitalizeLiterals = (schema: Schema): Schema throws IndexError => when schema is {
 	Schema.StringLiteral as { value } => Schema.StringLiteral { value = try capitalizeSecondLetter(value) }
 	Schema.Union as { items } => {
-		mutable capitalized: Array(Schema) = []
+		mutable capitalized: Array<Schema> = []
 		for item in items {
 			capitalized.push(try capitalizeLiterals(item))
 		}
@@ -30,11 +30,11 @@ function capitalizeLiterals = (schema: Schema): Schema throws IndexError => when
 	}
 	else => schema
 }
-type Shouted = TypeFromSchema(@capitalizeLiterals(@typeToSchema("hello" | "world")))
+type Shouted = TypeFromSchema<@capitalizeLiterals(@typeToSchema("hello" | "world"))>
 let shout: Shouted = "hEllo"
-type Point = TypeFromSchema(@typeToSchema({ x: Float, y: Float }))
+type Point = TypeFromSchema<@typeToSchema({ x: Float, y: Float })>
 let point: Point = { x = 1.0, y = 2.0 }
 console.log(@typeToString(Shouted)) -- prints: "hEllo" | "wOrld"
-type Small = TypeFromSchema(Schema.Integer { bits = 8, signed = false })
+type Small = TypeFromSchema<Schema.Integer { bits = 8, signed = false }>
 let small: Small = 255
 console.log(small) -- prints: 255

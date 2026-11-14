@@ -1,6 +1,6 @@
 -- pending: M1 (imported from the values brief)
 -- brief: → `out / [1, 0]`
-function set = (s: Array(Integer), i: Integer) mutates s throws IndexError => {
+function set = (s: Array<Integer>, i: Integer) mutates s throws IndexError => {
 try s[i] = 0
 }
 mutable xs = [1, 2]

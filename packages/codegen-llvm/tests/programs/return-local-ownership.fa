@@ -1,4 +1,4 @@
-function build = (early: Boolean): Array(Integer) => {
+function build = (early: Boolean): Array<Integer> => {
 	mutable items = [1, 2]
 	if early {
 		return (items)
@@ -23,7 +23,7 @@ assert fromLoop(true) == "a long owning string which cannot fit inline"
 assert fromLoop(false) == "a long owning string which cannot fit inline!!!"
 
 -- References and closures keep the conservative copy path on early exits.
-function referenced = (early: Boolean): Array(Integer) => {
+function referenced = (early: Boolean): Array<Integer> => {
 	mutable items = [1, 2]
 	use first = items[0]
 	if early {
@@ -35,7 +35,7 @@ function referenced = (early: Boolean): Array(Integer) => {
 assert referenced(true) == [1, 2]
 assert referenced(false) == [3, 2]
 
-function captured = (early: Boolean): Array(Integer) => {
+function captured = (early: Boolean): Array<Integer> => {
 	mutable items = [1, 2]
 	function append = () => { items.push(3) }
 	if early {

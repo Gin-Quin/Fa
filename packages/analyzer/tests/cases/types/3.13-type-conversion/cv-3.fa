@@ -1,6 +1,6 @@
 -- brief: ✓ cv-3: integers compare by range
 let small: Int8 = 100
 let big: Int64 = small
-let bounded: Integer(min = 0, max = 100) = 100
+let bounded: Integer<min = 0, max = 100> = 100
 let byte: Byte = bounded
 console.log(byte)  -- 100

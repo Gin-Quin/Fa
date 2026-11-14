@@ -15,7 +15,7 @@ function xorshift = (seed: UInt64): UInt64 => {
 }
 
 -- A number in `0..bound`: the remainder of the unsigned random number.
-function below = (random: UInt64, bound: Integer(min = 1)): Integer => random %% bound
+function below = (random: UInt64, bound: Integer<min = 1>): Integer => random %% bound
 
 type Item = {
 	sku: String
@@ -26,7 +26,7 @@ type Item = {
 type Response = {
 	id: Integer
 	user: String
-	items: Array(Item)
+	items: Array<Item>
 }
 
 -- A user name of 3 to 10 letters; one in eight carries a quote or a backslash, so that the
@@ -58,8 +58,8 @@ function sku = (seed: UInt64): String => {
 	text
 }
 
-function makeItems = (seed: UInt64, count: Integer): Array(Item) => {
-	mutable items: Array(Item) = []
+function makeItems = (seed: UInt64, count: Integer): Array<Item> => {
+	mutable items: Array<Item> = []
 	mutable random = seed
 	for 0..count {
 		random = xorshift(random)
@@ -108,7 +108,7 @@ function fnv1a = (text: String): UInt64 => {
 }
 
 -- One request: the response object and its rendering are both local values.
-function handle = (seed: UInt64): Tuple(UInt64, Integer) => {
+function handle = (seed: UInt64): Tuple<UInt64, Integer> => {
 	let random = xorshift(seed)
 	let response = Response {
 		id = below(random.shiftRight(4), 1000000)

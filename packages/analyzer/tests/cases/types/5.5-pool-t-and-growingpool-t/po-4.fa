@@ -1,7 +1,7 @@
 -- brief: ✗ po-4: EF032 (`someone` may be `jane`)
 -- context: declarations reused from po-1 and po-2 (repeated)
 type Human = { name: String, age: Integer }
-mutable pool: Pool(Human) = []
+mutable pool: Pool<Human> = []
 use jane = pool.add({ name = "Jane", age = 21 })
 use someone = pool.find((human) => human.age > 30)
 if someone is not none {

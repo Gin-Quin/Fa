@@ -17,8 +17,8 @@ function xorshift = (x: UInt64): UInt64 => {
 
 let n = Math.max(try Integer.parse(arguments.get(0) ?? "32000000"), 0)
 
-mutable items = Array(Item).from([], capacity = n)
-mutable marks: Array(Integer) = []
+mutable items = Array<Item>.from([], capacity = n)
+mutable marks: Array<Integer> = []
 mutable r: UInt64 = 12345
 for i in 0..n {
 	r = xorshift(r)

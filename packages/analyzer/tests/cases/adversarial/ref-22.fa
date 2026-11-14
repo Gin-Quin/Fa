@@ -1,6 +1,6 @@
 -- length symbol plus offset: pop invalidates self[self.length - 1] only
 type Person = { name: String }
-function example = (people: Array(Person)) throws IndexError mutates people => {
+function example = (people: Array<Person>) throws IndexError mutates people => {
 	use last = try people[people.length - 1]
 	use beforeLast = try people[people.length - 2]
 	people.pop()

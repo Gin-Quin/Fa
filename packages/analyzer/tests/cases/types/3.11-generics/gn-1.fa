@@ -1,7 +1,7 @@
 -- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-1: inference from arguments and expected type → "Ada" / 6 / 6.0
-function first(Item) = (items: Array(Item)): Item? => items.get(0)
-function sum(Value: Integer | Float) = (values: Array(Value)): Value => {
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
+function sum = <Value: Integer | Float>(values: Array<Value>): Value => {
 	mutable total: Value = 0
 	for value in values {
 		total += value

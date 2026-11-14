@@ -1,11 +1,11 @@
 -- the right side of `??` is a branch
 type Person = { name: String }
-function grow = (list: Array(Person)): Integer mutates list => {
+function grow = (list: Array<Person>): Integer mutates list => {
 	list.push(Person { name = "Bao" })
 	1
 }
-mutable people: Array(Person) = [Person { name = "Ana" }]
-mutable scores: Map(String, Integer) = [("ana", 10)]
+mutable people: Array<Person> = [Person { name = "Ana" }]
+mutable scores: Map<String, Integer> = [("ana", 10)]
 use first = people[0]
 let score = scores.get("bao") ?? grow(people)
 console.log(first.name) -- error: REF002

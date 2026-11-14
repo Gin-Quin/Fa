@@ -34,7 +34,7 @@ function word = (seed: UInt64): String => {
 
 let n = try Integer.parse(arguments.get(0) ?? "4000000")
 
-mutable log: Array(Event) = []
+mutable log: Array<Event> = []
 mutable r: UInt64 = 12345
 for 0..n {
 	r = xorshift(r)

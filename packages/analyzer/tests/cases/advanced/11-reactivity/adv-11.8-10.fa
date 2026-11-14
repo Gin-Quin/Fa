@@ -1,4 +1,4 @@
-function bump = (numbers: Array(Integer)) mutates numbers => numbers.push(0)
+function bump = (numbers: Array<Integer>) mutates numbers => numbers.push(0)
 reactive values = [1]
 watch {
 	console.log(values.length)

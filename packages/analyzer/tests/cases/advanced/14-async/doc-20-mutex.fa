@@ -6,7 +6,7 @@ type Stats = {
 	errors: Integer
 }
 
-async function recordVisit = (stats: Mutex(Stats)) => {
+async function recordVisit = (stats: Mutex<Stats>) => {
 	do {
 		mutable guard = await stats.lock()
 		guard.value.visits += 1
@@ -14,7 +14,7 @@ async function recordVisit = (stats: Mutex(Stats)) => {
 }
 
 async function main = () => {
-	mutable stats = Mutex(Stats) { value = { visits = 0, errors = 0 } }
+	mutable stats = Mutex<Stats> { value = { visits = 0, errors = 0 } }
 
 	-- both tasks share `stats`, which is allowed because `Mutex` is thread-safe
 	await Task.all([

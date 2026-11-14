@@ -1,6 +1,6 @@
 function main = () => {
 	mutable count = 0
-	mutable callbacks: Array(() => Void) = []
+	mutable callbacks: Array<() => Void> = []
 	callbacks.push(() => {
 		count += 1 -- error REF021
 	})

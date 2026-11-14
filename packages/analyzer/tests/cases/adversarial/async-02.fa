@@ -1,7 +1,7 @@
 -- a task bound inside the loop body ends with the body: the next iteration may write again
-async function upload = (scores: Array(Integer)) => console.log("{scores.length}")
+async function upload = (scores: Array<Integer>) => console.log("{scores.length}")
 async function main = () => {
-	mutable scores: Array(Integer) = [1, 2, 3]
+	mutable scores: Array<Integer> = [1, 2, 3]
 	for index in 0..3 {
 		scores.push(index)
 		let task = start upload(scores)

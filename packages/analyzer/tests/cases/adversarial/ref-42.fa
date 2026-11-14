@@ -1,7 +1,7 @@
 -- an early return inside a loop: the invalidating path never reaches the code after
 type Person = { name: String }
 function find = (leaving: Boolean): Integer => {
-	mutable people: Array(Person) = [Person { name = "Ana" }]
+	mutable people: Array<Person> = [Person { name = "Ana" }]
 	use first = people[0]
 	for index in 0..3 {
 		if leaving and index == 2 {

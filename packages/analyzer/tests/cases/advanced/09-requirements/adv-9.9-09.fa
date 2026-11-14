@@ -1,5 +1,5 @@
 -- context: declarations of the brief's previous tests (§9.9)
-type Trace = { breadcrumbs: Array(String) }
+type Trace = { breadcrumbs: Array<String> }
 function addBreadcrumb = (label: String) requires trace: Trace mutates trace => {
 	trace.breadcrumbs.push(label)
 }

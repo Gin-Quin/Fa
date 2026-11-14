@@ -34,14 +34,14 @@ let filtered = "abac".characters().filter((c) => c != "a")
 assert filtered.join("-") == "b-c"
 assert "é🇫🇷\r\n".characters().join("") == "é🇫🇷\r\n"
 
-mutable byCharacters: Map(Array(Character), Integer) = []
+mutable byCharacters: Map<Array<Character>, Integer> = []
 byCharacters["abc".characters()] = 7
 assert byCharacters.get("abc".characters()) == 7
 assert byCharacters.get("abd".characters()) == none
 
 -- Comparisons after an optional read retain negative-index and end behavior,
 -- whether characters are compact, materialized, or multi-byte graphemes.
-function spaceAt = (items: Array(Character), index: Integer): Boolean => (items.get(index) ?? "\0") == " "
+function spaceAt = (items: Array<Character>, index: Integer): Boolean => (items.get(index) ?? "\0") == " "
 assert spaceAt(" x".characters(), 0)
 assert spaceAt("x ".characters(), -1)
 assert not spaceAt(" ".characters(), -2)

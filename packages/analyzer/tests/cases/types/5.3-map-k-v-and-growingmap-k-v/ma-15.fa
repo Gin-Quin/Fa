@@ -1,6 +1,6 @@
 -- brief: ✓ ma-15: map over values keeps keys (D34) → 2
 -- context: declarations reused from ma-1
-let scores: Map(String, Integer) = [("ana", 12), ("bao", 17)]
+let scores: Map<String, Integer> = [("ana", 12), ("bao", 17)]
 let doubled = scores.map((key, value) => value * 2)
 console.log(doubled.size)
 -- prints: 2

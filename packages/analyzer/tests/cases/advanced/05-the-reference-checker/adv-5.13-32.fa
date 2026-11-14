@@ -1,6 +1,6 @@
 -- pending: M2 (imported from the advanced brief)
 type Inventory = {
-	items: Pool(String)
+	items: Pool<String>
 	function remove = (self, item: String in self.items) invalidates item => {
 		self.items.delete(item)
 	}

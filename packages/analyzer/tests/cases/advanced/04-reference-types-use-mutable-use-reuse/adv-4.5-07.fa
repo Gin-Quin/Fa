@@ -1,6 +1,6 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
-mutable people: Array(Person) = [Person { name = "Ana" }]
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
+mutable people: Array<Person> = [Person { name = "Ana" }]
 use a = people[0]
 use a = people[0] -- error REF003

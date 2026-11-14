@@ -1,7 +1,7 @@
 -- cancelled in one branch only: the task may still run after the `if`
-async function upload = (scores: Array(Integer)) => console.log("{scores.length}")
+async function upload = (scores: Array<Integer>) => console.log("{scores.length}")
 async function main = () => {
-	mutable scores: Array(Integer) = [1, 2, 3]
+	mutable scores: Array<Integer> = [1, 2, 3]
 	let task = start upload(scores)
 	if arguments.length > 1 {
 		task.cancel()

@@ -2,11 +2,11 @@
 -- error: TF010
 -- brief: ✗ fi-7: TF010
 -- context: declarations reused from fi-6
-function logProperties(Value, keys: DeepKeys(Value)) = (value: Value) => {
+function logProperties = <Value, keys: DeepKeys<Value>>(value: Value) => {
 	@for key in keys {
 		console.log("{key} = {value[key]}")
 	}
 }
 type Settings = { foo: Integer, bar: Integer, baz: Integer, nested: { foo: Integer, bar: Integer } }
 let settings: Settings = { foo = 12, bar = 13, baz = 14, nested = { foo = 15, bar = 16 } }
-logProperties(Settings, { qux })(settings)
+logProperties<Settings, { qux }>(settings)

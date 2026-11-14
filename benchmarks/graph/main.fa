@@ -15,12 +15,12 @@ function xorshift = (x: UInt64): UInt64 => {
 }
 
 -- A number between 0 and `bound` (excluded), as the Goose suite reduces its random numbers.
-function randomBelow = (x: UInt64, bound: Integer(min = 1)): Integer => Integer(x %% UInt64(bound))
+function randomBelow = (x: UInt64, bound: Integer<min = 1>): Integer => Integer(x %% UInt64(bound))
 
 let vertexCount = Math.max(try Integer.parse(arguments.get(0) ?? "100000"), 1)
 let edgeCount = vertexCount * degree
 
-mutable adjacency = Array(Array(Integer)).from([], capacity = vertexCount)
+mutable adjacency = Array<Array<Integer>>.from([], capacity = vertexCount)
 for 0..vertexCount {
 	adjacency.push([])
 }
@@ -33,11 +33,11 @@ for 0..edgeCount {
 
 -- Breadth-first search: the distances are shortest paths, so the checksum doesn't depend on the order
 -- of the neighbours.
-mutable distances = Array(Integer).from([], capacity = vertexCount)
+mutable distances = Array<Integer>.from([], capacity = vertexCount)
 for 0..vertexCount {
 	distances.push(-1)
 }
-mutable queue = Array(Integer).from([], capacity = vertexCount)
+mutable queue = Array<Integer>.from([], capacity = vertexCount)
 mutable total = 0
 mutable seed: UInt64 = 999
 for 0..sources {

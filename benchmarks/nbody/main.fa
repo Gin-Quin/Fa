@@ -15,7 +15,7 @@ type Body = {
 }
 
 -- The total momentum of the bodies, to give the sun the opposite one.
-function momentum = (bodies: Array(Body)): Tuple(Float, Float, Float) => {
+function momentum = (bodies: Array<Body>): Tuple<Float, Float, Float> => {
 	mutable px = 0.0
 	mutable py = 0.0
 	mutable pz = 0.0
@@ -27,7 +27,7 @@ function momentum = (bodies: Array(Body)): Tuple(Float, Float, Float) => {
 	(px, py, pz)
 }
 
-function energy = (bodies: Array(Body)): Float => {
+function energy = (bodies: Array<Body>): Float => {
 	mutable total = 0.0
 	for body, i in bodies {
 		total += 0.5 * body.mass * (body.vx * body.vx + body.vy * body.vy + body.vz * body.vz)
@@ -42,7 +42,7 @@ function energy = (bodies: Array(Body)): Float => {
 	total
 }
 
-function advance = (bodies: Array(Body), step: Float) mutates bodies => {
+function advance = (bodies: Array<Body>, step: Float) mutates bodies => {
 	for body, i in bodies {
 		for j in i + 1..bodies.length {
 			use other = bodies[j]
@@ -71,7 +71,7 @@ function rounded = (value: Float) => try Integer.round(value * 1e9)
 
 let steps = try Integer.parse(arguments.get(0) ?? "15000000")
 
-mutable bodies: Array(Body) = [
+mutable bodies: Array<Body> = [
 	-- Sun
 	{ x = 0.0, y = 0.0, z = 0.0, vx = 0.0, vy = 0.0, vz = 0.0, mass = solarMass }
 	-- Jupiter

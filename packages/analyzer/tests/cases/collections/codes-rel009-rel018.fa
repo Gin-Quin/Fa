@@ -1,14 +1,14 @@
 -- REL009: a reverse side on a type that isn't the target's; REL018: an owner field into a collection of other elements
-mutable users: Pool(User) = []
-mutable posts: Pool(Post) = []
+mutable users: Pool<User> = []
+mutable posts: Pool<Post> = []
 type User = { name: String }
 type Post = {
 	title: String
 	author: (User in users)?
-	echoes: Pool(posts->author) -- error: REL009
+	echoes: Pool<posts->author> -- error: REL009
 }
 type Bag = {
-	#items: Pool(Item) = []
+	#items: Pool<Item> = []
 	first: (Other in #items)? -- error: REL018
 	type Item = { label: String }
 	type Other = { label: Integer }

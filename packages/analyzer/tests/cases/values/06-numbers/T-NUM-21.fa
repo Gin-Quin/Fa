@@ -1,4 +1,4 @@
 -- brief: → `2`
-let divisor: Integer(min = 1) = 5
+let divisor: Integer<min = 1> = 5
 console.log(10 // divisor)
 -- prints: 2

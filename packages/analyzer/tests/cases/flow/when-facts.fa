@@ -35,12 +35,12 @@ function missing = (c: Color): Integer => {
 		Color.Green => 1
 	}
 }
-function ranged = (x: Integer(min = 0, max = 3)?): Integer => when x is {
+function ranged = (x: Integer<min = 0, max = 3>?): Integer => when x is {
 	none => -1
 	0..=1 => 0
 	2..=3 => 1
 }
-function noNone = (x: Integer(min = 0, max = 3)?): Integer => when x is { -- error: E-WHEN-1
+function noNone = (x: Integer<min = 0, max = 3>?): Integer => when x is { -- error: E-WHEN-1
 	0..=1 => 0
 	2..=3 => 1
 }

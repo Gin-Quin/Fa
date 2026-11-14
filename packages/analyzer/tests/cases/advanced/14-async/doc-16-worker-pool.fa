@@ -5,14 +5,14 @@
 export type = {
 	factor: Integer
 
-	function process = (self, data: Array(Integer)): Array(Integer) => data.map((x) => x * self.factor)
+	function process = (self, data: Array<Integer>): Array<Integer> => data.map((x) => x * self.factor)
 }
 -- file: main.fa
 use { WorkerPool } = std.concurrency
 
 async function main = () => {
 	-- Create a pool of 4 workers
-	mutable workers = WorkerPool(DataProcessor) { count = 4 }
+	mutable workers = WorkerPool<DataProcessor> { count = 4 }
 
 	let inputs = [
 		[1, 2, 3]
@@ -22,7 +22,7 @@ async function main = () => {
 	]
 
 	-- Submit the tasks to the pool
-	mutable pending: Array(Task(Array(Integer)) throws WorkerTimeout) = []
+	mutable pending: Array<Task<Array<Integer>> throws WorkerTimeout> = []
 	for data in inputs {
 		pending.push(workers.submit((worker) => await worker.process(data)))
 	}

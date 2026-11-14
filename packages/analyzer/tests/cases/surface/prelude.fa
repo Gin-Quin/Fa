@@ -2,7 +2,7 @@
 console.log("to the standard output", 1, true, none)
 console.error("to the standard error")
 console.log()
-let given = arguments -- type given: Array(String)
+let given = arguments -- type given: Array<String>
 let parse = Integer.parse -- type parse: (String) => Integer throws ParseError
 let compare = String.compareLocale -- type compare: (String, String, String?) => Integer
 let ready = true

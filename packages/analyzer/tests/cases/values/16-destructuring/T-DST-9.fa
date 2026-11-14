@@ -1,5 +1,5 @@
 -- brief: → `3`
-function f = (values: Array(Integer)) => {
+function f = (values: Array<Integer>) => {
 if values.length >= 2 {
 let [a, b] = values
 console.log(a + b)

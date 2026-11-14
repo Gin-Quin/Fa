@@ -3,7 +3,7 @@
 -- the last ball. `benchmarks/async/run.sh` times it.
 use { Channel } = std.concurrency
 
-async function pong = (pings: Channel(Integer), pongs: Channel(Integer)) => {
+async function pong = (pings: Channel<Integer>, pongs: Channel<Integer>) => {
 	while let ball = await pings.receive() {
 		await pongs.send(ball + 1) catch error => return
 	}
@@ -11,8 +11,8 @@ async function pong = (pings: Channel(Integer), pongs: Channel(Integer)) => {
 }
 
 let messages = if arguments.length > 0 { Integer.parse(arguments[0]) catch error => 10000000 } else { 10000000 }
-mutable pings = Channel(Integer) { capacity = 1 }
-mutable pongs = Channel(Integer) { capacity = 1 }
+mutable pings = Channel<Integer> { capacity = 1 }
+mutable pongs = Channel<Integer> { capacity = 1 }
 let player = start pong(pings, pongs)
 mutable ball = 0
 for round in 0..messages // 2 {

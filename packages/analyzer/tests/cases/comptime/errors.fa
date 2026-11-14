@@ -10,7 +10,7 @@ let items = [1, 2]
 @for item in items { -- error META007
 	console.log(item)
 }
-function pick = (values: Array(Integer), index: Integer): Integer throws IndexError => try values[index]
+function pick = (values: Array<Integer>, index: Integer): Integer throws IndexError => try values[index]
 static missing = @pick([1, 2], 5) -- error META005
 mutable counter = 0
 function next = (): Integer => counter + 1

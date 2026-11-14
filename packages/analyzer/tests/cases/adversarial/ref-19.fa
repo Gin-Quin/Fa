@@ -1,6 +1,6 @@
 -- symbol plus offset: people[i] is below people[i + 1..]; people[i + 2] is not
 type Person = { name: String }
-function example = (people: Array(Person), i: Integer) throws IndexError mutates people => {
+function example = (people: Array<Person>, i: Integer) throws IndexError mutates people => {
 	use a = try people[i]
 	use b = try people[i + 2]
 	people.delete(i + 1)

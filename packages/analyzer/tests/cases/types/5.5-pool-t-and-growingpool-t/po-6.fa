@@ -2,7 +2,7 @@
 -- brief: ✗ po-6: EF031
 -- context: declarations reused from po-1
 type Human = { name: String, age: Integer }
-mutable pool: Pool(Human) = []
+mutable pool: Pool<Human> = []
 for human in pool {
 	pool.delete(human)
 }

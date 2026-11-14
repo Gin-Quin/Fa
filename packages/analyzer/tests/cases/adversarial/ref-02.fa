@@ -1,7 +1,7 @@
 -- a branch that invalidates then returns doesn't reach the code after it
 type Person = { name: String }
 function show = (leaving: Boolean) => {
-	mutable people: Array(Person) = [Person { name = "Ana" }]
+	mutable people: Array<Person> = [Person { name = "Ana" }]
 	use first = people[0]
 	if leaving {
 		people.push(Person { name = "Bao" })

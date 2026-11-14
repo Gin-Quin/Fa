@@ -1,6 +1,6 @@
 -- pending: M2 (imported from the types brief)
 -- brief: ✓ fi-6: @for over a key set compiles to three logs → "foo = 12" / "baz = 14" / "nested.foo = 15"
-function logProperties(Value, keys: DeepKeys(Value)) = (value: Value) => {
+function logProperties = <Value, keys: DeepKeys<Value>>(value: Value) => {
 	@for key in keys {
 		console.log("{key} = {value[key]}")
 	}

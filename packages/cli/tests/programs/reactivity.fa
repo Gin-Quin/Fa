@@ -27,7 +27,7 @@ subscription.stop()
 total = 2
 
 -- a function receiving a reactive place notifies through it
-function addAll = (numbers: Array(Integer), extra: Array(Integer)) mutates numbers => {
+function addAll = (numbers: Array<Integer>, extra: Array<Integer>) mutates numbers => {
 	for value in extra {
 		numbers.push(value)
 	}
@@ -84,14 +84,14 @@ watch {
 }
 names.push("c")
 
-reactive scores: Map(String, Integer) = []
+reactive scores: Map<String, Integer> = []
 watch {
 	console.log("size {scores.size}")
 }
 scores["x"] = 1
 scores["x"] = 2 -- the size doesn't change
 
-reactive tags: Set(String) = []
+reactive tags: Set<String> = []
 watch {
 	console.log("has red {tags.includes("red")}")
 }
@@ -111,7 +111,7 @@ watch {
 a = 2
 
 -- a function generated twice (plain and reactive instances) with a reactive local
-function grow = (numbers: Array(Integer)) mutates numbers => {
+function grow = (numbers: Array<Integer>) mutates numbers => {
 	reactive extra = 1
 	derived next = numbers.length + extra
 	numbers.push(next)

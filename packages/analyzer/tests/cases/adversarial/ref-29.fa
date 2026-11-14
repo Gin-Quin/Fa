@@ -1,7 +1,7 @@
 -- a closure captures a mutable use (a non-escaping lambda, and a local function)
 type Person = { name: String }
 function main = () => {
-	mutable people: Array(Person) = [Person { name = "Ana" }]
+	mutable people: Array<Person> = [Person { name = "Ana" }]
 	mutable use current = people[0]
 	let names = [1, 2].map((n) => current.name) -- error: REF011
 	console.log(names)

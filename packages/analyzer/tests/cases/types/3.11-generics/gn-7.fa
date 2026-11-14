@@ -1,4 +1,4 @@
 -- pending: M2 (imported from the types brief)
 -- error: GN016
 -- brief: ✗ gn-7: GN016
-function double(Value) = (value: Value) => value * 2
+function double = <Value>(value: Value) => value * 2

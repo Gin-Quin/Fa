@@ -3,10 +3,10 @@ function wide = (a: Int8, b: Int8): Int16 => a + b
 function average = (a: Int8, b: Int8): Int8 => (a + b) // 2
 function narrow = (a: Int8, b: Int8): Int8 => a + b
 function grow = (x: Integer): Integer => x * 2 + 1
-function small = (i: Integer(min = 0, max = 100)): Integer => i * i + i
+function small = (i: Integer<min = 0, max = 100>): Integer => i * i + i
 function big = (x: Int64, y: Int64): Int64 => x * y
 function mixed = (x: Int64, n: Integer): Int64 => x + n
 function toNumber = (x: Int64): Integer => x
-function divide = (a: Integer, b: Integer(min = 1)): Integer => a // b
+function divide = (a: Integer, b: Integer<min = 1>): Integer => a // b
 console.log(wide(1, 2), average(3, 4), narrow(5, 6), grow(7), small(8))
 console.log(big(9, 10), mixed(11, 12), toNumber(13), divide(14, 3))

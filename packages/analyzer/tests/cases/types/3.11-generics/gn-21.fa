@@ -1,13 +1,13 @@
 -- brief: ✓ gn-21: generic methods → [2, 4]
-type Stack(Item) = {
-	#items: Array(Item) = []
+type Stack<Item> = {
+	#items: Array<Item> = []
 	function push = (self, item: Item) mutates self => {
 		self.#items.push(item)
 	}
-	function map(Result) = (self, transform: (item: Item) => Result) => Stack(Result) { #items = self.#items.map(transform) }
+	function map = <Result>(self, transform: (item: Item) => Result) => Stack<Result> { #items = self.#items.map(transform) }
 	function toArray = (self) => self.#items[..]
 }
-mutable stack = Stack(Integer) {}
+mutable stack = Stack<Integer> {}
 stack.push(1)
 stack.push(2)
 console.log(stack.map((x) => x * 2).toArray())

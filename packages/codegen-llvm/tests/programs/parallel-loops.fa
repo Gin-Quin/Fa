@@ -30,7 +30,7 @@ for parallel(threads = 2) value in values {
 console.log(values) -- prints: [10, 20, 30, 40]
 
 -- a mutex protecting an accumulation
-mutable stats = Mutex(Stats) { value = { count = 0, total = 0 } }
+mutable stats = Mutex<Stats> { value = { count = 0, total = 0 } }
 for parallel n in 0..10000 {
 	mutable guard = stats.lock()
 	guard.value.count += 1

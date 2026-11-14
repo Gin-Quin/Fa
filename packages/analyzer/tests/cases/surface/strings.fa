@@ -12,9 +12,9 @@ let count = "héllo".length -- type count: Integer
 let size = greeting.length
 let shout = greeting.toUpperCase() -- type shout: String
 let found = greeting.indexOf("l") -- type found: Integer?
-let parts = "a,b".split(",") -- type parts: Array(String)
-let letters = snow.characters() -- type letters: Array(Character)
-let points = greeting.codePoints() -- type points: Array(UInt32)
+let parts = "a,b".split(",") -- type parts: Array<String>
+let letters = snow.characters() -- type letters: Array<Character>
+let points = greeting.codePoints() -- type points: Array<UInt32>
 let padded = "7".padStart(3, "0")
 let ends = greeting.endsWith("o") -- type ends: Boolean
 console.log(welcome, braces, multiline, count, size, shout, found, parts, letters, points)

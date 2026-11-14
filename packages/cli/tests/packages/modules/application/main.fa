@@ -1,5 +1,5 @@
 use { format as rootFormat, reports { summary } } = library
-export function = (arguments: Array(String)): Integer => {
+export function = (arguments: Array<String>): Integer => {
 	library.myFolder.myFile()
 	console.log(summary(), rootFormat("y"), library.reports.bar, library.bracket("a"))
 	library.counter.increment()

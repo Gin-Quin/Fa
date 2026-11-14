@@ -1,5 +1,5 @@
 -- brief: → `1` (stops at the stored `none`)
-mutable stack: Array(Integer?) = [1, none, 3]
+mutable stack: Array<Integer?> = [1, none, 3]
 mutable n = 0
 while let v = stack.pop() { n += 1 }
 console.log(n)

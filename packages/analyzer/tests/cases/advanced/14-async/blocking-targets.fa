@@ -3,18 +3,18 @@
 use { Mutex, Channel } = std.concurrency
 use { sleep } = std.time
 
-async function record = (stats: Mutex(Integer)) => {
+async function record = (stats: Mutex<Integer>) => {
 	mutable guard = await stats.lock()
 	guard.value += 1
 }
-async function recordTwice = (stats: Mutex(Integer)) => {
+async function recordTwice = (stats: Mutex<Integer>) => {
 	await record(stats)
 	await record(stats)
 }
 -- `sleep` can block on `bun`: called blocking, it blocks the thread
 async function pause = () => await sleep(10)
 
-mutable stats = Mutex(Integer) { value = 0 }
+mutable stats = Mutex<Integer> { value = 0 }
 recordTwice(stats) -- error CONC010
 await recordTwice(stats)
 let task = start recordTwice(stats)
@@ -23,21 +23,21 @@ pause()
 
 -- a blocking wait on a primitive
 let guard = stats.lock() -- error CONC010
-mutable channel = Channel(Integer) { capacity = 1 }
+mutable channel = Channel<Integer> { capacity = 1 }
 channel.send(1) catch error => console.log("closed") -- error CONC010
 await channel.send(1) catch error => console.log("closed")
 
 -- a function that isn't `async` calls blocking: its callers can't block either
-function flush = (stats: Mutex(Integer)) => record(stats) -- error CONC010
+function flush = (stats: Mutex<Integer>) => record(stats) -- error CONC010
 
 -- recursive functions: the summaries are settled at the end of the file
-async function ping = (count: Integer, stats: Mutex(Integer)): Integer => {
+async function ping = (count: Integer, stats: Mutex<Integer>): Integer => {
 	if count == 0 {
 		return 0
 	}
 	await pong(count - 1, stats)
 }
-async function pong = (count: Integer, stats: Mutex(Integer)): Integer => {
+async function pong = (count: Integer, stats: Mutex<Integer>): Integer => {
 	if count == 0 {
 		await record(stats)
 		return 0

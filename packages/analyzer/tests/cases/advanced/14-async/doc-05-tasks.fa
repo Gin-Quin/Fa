@@ -3,8 +3,8 @@ type Response = { body: String }
 type HttpError = Errors { HttpError = { status: Integer } }
 async function fetchData = (url: String): Response throws HttpError => Response { body = url }
 
-async function loadAll = (urls: Array(String)): Array(Response) throws HttpError => {
-	mutable tasks: Array(Task(Response) throws HttpError) = []
+async function loadAll = (urls: Array<String>): Array<Response> throws HttpError => {
+	mutable tasks: Array<Task<Response> throws HttpError> = []
 	for url in urls {
 		tasks.push(start fetchData(url))
 	}
@@ -25,10 +25,10 @@ let other = start slowOperation()
 let value = await other -- type value: Integer
 
 -- combinators
-async function combine = (urls: Array(String)) throws HttpError => {
-	mutable first: Array(Task(Response) throws HttpError) = []
-	mutable second: Array(Task(Response) throws HttpError) = []
-	mutable third: Array(Task(Response) throws HttpError) = []
+async function combine = (urls: Array<String>) throws HttpError => {
+	mutable first: Array<Task<Response> throws HttpError> = []
+	mutable second: Array<Task<Response> throws HttpError> = []
+	mutable third: Array<Task<Response> throws HttpError> = []
 	for url in urls {
 		first.push(start fetchData(url))
 		second.push(start fetchData(url))
@@ -38,10 +38,10 @@ async function combine = (urls: Array(String)) throws HttpError => {
 	let fastest = try await Task.any(second)    -- the outcome of the first task to finish
 	let outcomes = await Task.settled(third)    -- the outcome of every task, errors included
 	console.log("{responses.length} {fastest.body} {outcomes.length}")
-	let all = Task.all([]) -- type all: Task(Array(Never))
+	let all = Task.all([]) -- type all: Task<Array<Never>>
 }
 
-async function loadPage = (): Array(Response) throws HttpError => {
+async function loadPage = (): Array<Response> throws HttpError => {
 	try await Task.all([
 		start fetchData("https://api.example.com/header")
 		start fetchData("https://api.example.com/content")

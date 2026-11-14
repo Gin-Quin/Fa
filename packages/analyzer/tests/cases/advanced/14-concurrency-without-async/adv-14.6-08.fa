@@ -1,6 +1,6 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
 use { Mutex } = std.concurrency
-mutable people: Pool(Person) = []
-mutable shared = Mutex(Person in people) { value = ... } -- error CONC006
+mutable people: Pool<Person> = []
+mutable shared = Mutex<Person in people> { value = ... } -- error CONC006

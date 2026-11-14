@@ -1,6 +1,6 @@
 -- `reuse` in one branch only: the other branch keeps it invalidated
 type Person = { name: String }
-mutable people: Array(Person) = [Person { name = "Ana" }]
+mutable people: Array<Person> = [Person { name = "Ana" }]
 mutable use first = people[0]
 people.push(Person { name = "Bao" })
 if arguments.length > 1 {

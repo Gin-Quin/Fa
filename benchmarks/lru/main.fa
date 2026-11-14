@@ -12,7 +12,7 @@ function xorshift = (seed: UInt64): UInt64 => {
 }
 
 -- A number in `0..bound`: the remainder of the unsigned random number.
-function below = (random: UInt64, bound: Integer(min = 1)): Integer => random %% bound
+function below = (random: UInt64, bound: Integer<min = 1>): Integer => random %% bound
 
 type Node = {
 	key: Integer
@@ -25,14 +25,14 @@ type Node = {
 let head = 0
 let tail = 1
 
-function unlink = (nodes: Array(Node), index: Integer) throws IndexError mutates nodes => {
+function unlink = (nodes: Array<Node>, index: Integer) throws IndexError mutates nodes => {
 	let previous = try nodes[index].previous
 	let next = try nodes[index].next
 	try nodes[previous].next = next
 	try nodes[next].previous = previous
 }
 
-function linkFront = (nodes: Array(Node), index: Integer) throws IndexError mutates nodes => {
+function linkFront = (nodes: Array<Node>, index: Integer) throws IndexError mutates nodes => {
 	let next = try nodes[head].next
 	try nodes[index].previous = head
 	try nodes[index].next = next
@@ -42,7 +42,7 @@ function linkFront = (nodes: Array(Node), index: Integer) throws IndexError muta
 
 -- Stores a node in a freed slot if there is one, so that the array never exceeds the capacity
 -- plus the sentinels.
-function allocate = (nodes: Array(Node), free: Array(Integer), node: Node): Integer throws IndexError mutates nodes, free => {
+function allocate = (nodes: Array<Node>, free: Array<Integer>, node: Node): Integer throws IndexError mutates nodes, free => {
 	let index = free.pop()
 	if index is none {
 		nodes.push(node)
@@ -57,12 +57,12 @@ let capacity = n // 8
 let keyCount = capacity * 2
 assert keyCount > 0
 
-mutable nodes: Array(Node) = [
+mutable nodes: Array<Node> = [
 	{ key = -1, value = 0, previous = head, next = tail },
 	{ key = -1, value = 0, previous = head, next = tail },
 ]
-mutable free: Array(Integer) = []
-mutable positions: Map(Integer, Integer) = []
+mutable free: Array<Integer> = []
+mutable positions: Map<Integer, Integer> = []
 mutable count = 0
 mutable hits = 0
 mutable misses = 0

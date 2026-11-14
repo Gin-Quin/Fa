@@ -1,11 +1,11 @@
 -- context: the brief's shared declarations (§1)
 type Player = { name: String, score: Integer }
-function resetAll = (players: Array(Player)) mutates players[..].score => {
+function resetAll = (players: Array<Player>) mutates players[..].score => {
 	for player in players {
 		player.score = 0
 	}
 }
-function rename = (players: Array(Player)) mutates players[..].score => {
+function rename = (players: Array<Player>) mutates players[..].score => {
 	for player in players {
 		player.name = "x" -- error EFF004
 	}

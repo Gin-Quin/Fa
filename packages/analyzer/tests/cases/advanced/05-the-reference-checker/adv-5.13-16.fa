@@ -1,9 +1,9 @@
 -- pending: M2 (imported from the advanced brief)
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
-function pick = (persons: Array(Person), index: Integer): Person in persons => persons[index] -- throws IndexError, inferred
-mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }]
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
+function pick = (persons: Array<Person>, index: Integer): Person in persons => persons[index] -- throws IndexError, inferred
+mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }]
 use chosen = try pick(people, 2)
 people.delete(1)
 console.log(chosen.name) -- error REF001 (identities don't cross a user function)

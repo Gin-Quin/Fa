@@ -1,0 +1,18 @@
+-- Generic lambdas and generic function types: a function argument used at several types.
+-- skip-target: native wasm native-freestanding (a parameter of a generic function type isn't instantiated per function argument natively yet)
+function identity = <Value>(value: Value): Value => value
+
+function applyToBoth = (transform: <Value>(value: Value) => Value, number: Integer, text: String) =>
+	(transform(number), transform(text))
+
+console.log(applyToBoth(identity, 1, "one"))
+-- prints: (1, "one")
+console.log(applyToBoth(<Value>(value: Value) => value, 2, "two"))
+-- prints: (2, "two")
+console.log(applyToBoth((value) => value, 3, "three"))
+-- prints: (3, "three")
+
+-- the generic parameters, then two calls
+function pairWith = <Item>(first: Item) => (second: Item) => (first, second)
+console.log(pairWith<String>("a")("b"), pairWith(1)(2))
+-- prints: ("a", "b") (1, 2)

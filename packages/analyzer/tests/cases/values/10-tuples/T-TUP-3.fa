@@ -1,5 +1,5 @@
 -- brief: → `3 2`
-function divide = (a: Integer, b: Integer(min = 1)): Tuple(Integer, Integer) => (a // b, a %% b)
+function divide = (a: Integer, b: Integer<min = 1>): Tuple<Integer, Integer> => (a // b, a %% b)
 let (q, r) = divide(17, 5)
 console.log(q, r)
 -- prints: 3 2

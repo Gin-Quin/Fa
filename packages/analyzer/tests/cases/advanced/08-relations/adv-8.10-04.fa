@@ -1,6 +1,6 @@
-mutable people: Array(Person) = []
+mutable people: Array<Person> = []
 type Person = {
 	name: String
 	bestFriend: (Person in people)? -- error REL003
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }

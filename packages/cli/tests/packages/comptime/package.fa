@@ -1,6 +1,6 @@
 let version = "1.2.0"
 
-function withServerTargets = (targets: Array(Target)): Array(Target) => [...targets, "native"]
+function withServerTargets = (targets: Array<Target>): Array<Target> => [...targets, "native"]
 
 export = {
 	name = "comptime"

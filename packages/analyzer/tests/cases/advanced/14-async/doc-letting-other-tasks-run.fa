@@ -3,7 +3,7 @@ type Row = { amount: Integer }
 type Report = { total: Integer }
 function compute = (row: Row): Integer => row.amount
 
-async function handleReport = (rows: Array(Row)): Report => {
+async function handleReport = (rows: Array<Row>): Report => {
 	mutable report = Report { total = 0 }
 	for row in rows {
 		report.total += compute(row) -- other requests are served between iterations, when this one takes long
@@ -11,7 +11,7 @@ async function handleReport = (rows: Array(Row)): Report => {
 	report
 }
 
-async function cooperative = (rows: Array(Row)): Integer => {
+async function cooperative = (rows: Array<Row>): Integer => {
 	mutable total = 0
 	for row in rows {
 		total += compute(row)

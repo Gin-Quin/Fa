@@ -1,7 +1,7 @@
 -- pending: M3 (imported from the types brief)
 -- brief: ✓ tf-13: Parameters / Return → "{ foo: String, bar: Integer }" / "String"
 function someFunction = (foo: String, bar: Integer): String => foo
-console.log(@typeToString(Parameters(Type(someFunction))))
-console.log(@typeToString(Return(Type(someFunction))))
+console.log(@typeToString(Parameters<Type<someFunction>>))
+console.log(@typeToString(Return<Type<someFunction>>))
 -- prints: "{ foo: String, bar: Integer }"
 -- prints: "String"

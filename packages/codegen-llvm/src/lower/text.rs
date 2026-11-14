@@ -3,7 +3,7 @@
 
 use fa_analyzer::ids::NodeId;
 use fa_analyzer::symbols::Resolution;
-use fa_analyzer::syntax::{TemplatePart, TemplateParts};
+use fa_analyzer::syntax::{TemplatePart, TemplateParts, View};
 use inkwell::IntPredicate;
 use inkwell::values::{IntValue, PointerValue};
 
@@ -12,8 +12,12 @@ use crate::lower::values::{IntRepr, Repr, Val};
 use crate::lower::{Lowering, Slot};
 
 impl<'ctx> Lowering<'_, 'ctx> {
-	/// Decimal integers through 64 bits fit directly in the native small
-	/// string. No shared text builder, scratch collection, or heap copy.
+	/// Decimal text borrows a private scratch buffer until the statement
+	/// ends. `take` copies the view when a string must escape into an owner;
+	/// immediate consumers (padding, parsing, interpolation) need no copy.
+	/// In a coroutine, the rest of the statement may suspend (`await`): the
+	/// view would then point into a stack that the resumption doesn't keep,
+	/// so the text is an owned temporary instead.
 	pub(crate) fn integer_string(&mut self, value: Val<'ctx>) -> Result<Option<Val<'ctx>>, Error> {
 		let Repr::Int(int) = value.repr else {
 			return Ok(None);
@@ -28,13 +32,42 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder
 				.build_int_z_extend_or_bit_cast(value.int(), self.context.i64_type(), "")?
 		};
+		if self.in_coroutine() {
+			let name = if int.signed {
+				"fa_string_i64"
+			} else {
+				"fa_string_u64"
+			};
+			let text = self.call_with_pair(name, &[raw.into()], Repr::Str)?;
+			return Ok(Some(self.fresh(text)));
+		}
+		let scratch = self.alloca_type(self.context.i8_type().array_type(24).into(), "digits")?;
 		let name = if int.signed {
-			"fa_string_i64"
+			"fa_decimal_i64"
 		} else {
-			"fa_string_u64"
+			"fa_decimal_u64"
 		};
-		let text = self.call_with_pair(name, &[raw.into()], Repr::Str)?;
-		Ok(Some(self.fresh(text)))
+		let function = self.runtime.function(name)?;
+		let offset = self
+			.call_value(function, &[raw.into(), scratch.into()])?
+			.into_int_value();
+		let bytes = unsafe {
+			self.builder
+				.build_in_bounds_gep(self.context.i8_type(), scratch, &[offset], "")?
+		};
+		let length = self
+			.builder
+			.build_int_sub(self.usize.const_int(24, false), offset, "")?;
+		let pair = self
+			.builder
+			.build_insert_value(self.string_type.get_undef(), bytes, 0, "")?;
+		let pair = self.builder.build_insert_value(pair, length, 1, "")?;
+		let capacity = self
+			.builder
+			.build_or(self.simple_flag(), self.string_kind_mask(), "")?;
+		let pair = self.builder.build_insert_value(pair, capacity, 2, "")?;
+		// Not a fresh owning temporary: an escaping value must be copied.
+		Ok(Some(Val::new(Repr::Str, pair.into_struct_value())))
 	}
 
 	fn single_integer_template(
@@ -57,55 +90,149 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(None)
 	}
 
+	/// Whether evaluating an expression runs no code that could change a
+	/// place: no call, no assignment, only reads and operators.
+	fn is_inert(&self, node: NodeId) -> bool {
+		matches!(
+			self.view(node),
+			View::Integer(_)
+				| View::Float(_)
+				| View::String(_)
+				| View::Boolean(_)
+				| View::None | View::Name(_)
+				| View::Group(_)
+				| View::Access { .. }
+				| View::Index { .. }
+				| View::Arithmetic { .. }
+				| View::Negate(_)
+				| View::Equality { .. }
+				| View::Comparison { .. }
+				| View::Logic { .. }
+				| View::Not(_)
+		) && fa_analyzer::syntax::children(self.tree, node).all(|child| self.is_inert(child))
+	}
+
 	/// Common textual/scalar templates need no shared builder. Evaluate all
 	/// expressions first, then borrow their values for one exact-sized join.
-	fn string_template(&mut self, parts: TemplateParts<'_>) -> Result<Option<Val<'ctx>>, Error> {
+	pub(crate) fn string_template(
+		&mut self,
+		parts: TemplateParts<'_>,
+		destination: Option<Slot<'ctx>>,
+	) -> Result<Option<Val<'ctx>>, Error> {
 		for part in parts.iter() {
 			if let TemplatePart::Expression(node) = part {
 				match self.node_repr(node)? {
-					Repr::Str => {}
+					Repr::Str => {
+						if let Some(destination) = destination {
+							// Only independent owning locals can be read while the
+							// destination's buffer is reused. References and calls
+							// keep the ordinary allocating path.
+							let Resolution::Local(symbol) = self.analysis.resolution(node) else {
+								return Ok(None);
+							};
+							if !matches!(
+								self.analysis.symbols.symbol(symbol).kind,
+								fa_analyzer::symbols::SymbolKind::Let
+									| fa_analyzer::symbols::SymbolKind::Mutable
+							) || self.slot_of(symbol, node)?.pointer == destination.pointer
+							{
+								return Ok(None);
+							}
+						}
+					}
 					Repr::Int(int) if int.bits <= 64 => {}
 					_ => return Ok(None),
 				}
 			}
 		}
+		// A borrowed string must outlive the evaluation of the later parts:
+		// copy it when one of them may run code that changes its place.
+		let last_effect = parts
+			.iter()
+			.enumerate()
+			.filter(
+				|(_, part)| matches!(part, TemplatePart::Expression(node) if !self.is_inert(*node)),
+			)
+			.map(|(index, _)| index)
+			.last();
 		let mut values = Vec::new();
-		for part in parts.iter() {
+		let mut simple = self.simple_flag();
+		for (index, part) in parts.iter().enumerate() {
 			let value = match part {
 				TemplatePart::Text("") => continue,
 				TemplatePart::Text(text) => self.string_constant(text),
-				TemplatePart::Expression(node) => {
-					let value = self.expr(node)?;
-					if value.repr == Repr::Never {
-						return Ok(Some(value));
-					}
-					if value.repr == Repr::Str {
-						value
-					} else {
-						self.integer_string(value)?.expect("a checked integer")
-					}
-				}
+				TemplatePart::Expression(node) => self.expr(node)?,
 			};
-			values.push(value);
+			if value.repr == Repr::Never {
+				return Ok(Some(value));
+			}
+			let value = if value.repr != Repr::Str {
+				self.integer_string(value)?.expect("a checked integer")
+			} else if last_effect.is_some_and(|last| index < last)
+				&& matches!(part, TemplatePart::Expression(_))
+				&& !self.is_temporary(value)
+			{
+				self.own(value, None)?
+			} else {
+				value
+			};
+			let (bytes, length) = self.string_parts(value)?;
+			let empty = self.builder.build_int_compare(
+				IntPredicate::EQ,
+				length,
+				self.usize.const_zero(),
+				"",
+			)?;
+			let flag = self
+				.builder
+				.build_select(empty, self.simple_flag(), self.string_capacity(value)?, "")?
+				.into_int_value();
+			simple = self.builder.build_and(simple, flag, "")?;
+			values.push((bytes, length));
 		}
-		let ty = self.string_type.array_type(values.len() as u32);
-		let storage = self.alloca_type(ty.into(), "template_parts")?;
-		let zero = self.context.i32_type().const_zero();
-		for (index, value) in values.iter().enumerate() {
-			let index = self.context.i32_type().const_int(index as u64, false);
-			let slot = unsafe {
+		let mut total = self.usize.const_zero();
+		for &(_, length) in &values {
+			total = self
+				.call_value(
+					self.runtime.function("fa_string_size")?,
+					&[total.into(), length.into()],
+				)?
+				.into_int_value();
+		}
+		// Keep each byte range in SSA rather than in an addressable array.
+		// Writes to the result cannot obscure literal lengths or flags.
+		let result = match destination {
+			Some(slot) => slot,
+			None => self.alloca(Repr::Str, "template")?,
+		};
+		let allocate = if destination.is_some() {
+			"fa_string_replace_buffer"
+		} else {
+			"fa_string_allocate"
+		};
+		let bytes = self
+			.call_value(
+				self.runtime.function(allocate)?,
+				&[total.into(), simple.into(), result.pointer.into()],
+			)?
+			.into_pointer_value();
+		let mut offset = self.usize.const_zero();
+		for (part, length) in values {
+			let target = unsafe {
 				self.builder
-					.build_in_bounds_gep(ty, storage, &[zero, index], "")?
+					.build_in_bounds_gep(self.context.i8_type(), bytes, &[offset], "")?
 			};
-			self.builder
-				.build_store(slot, value.value.expect("a string"))?;
+			self.call_runtime(
+				"fa_copy_bytes",
+				&[target.into(), part.into(), length.into()],
+			)?;
+			offset = self.builder.build_int_add(offset, length, "")?;
 		}
-		let count = self.usize.const_int(values.len() as u64, false);
-		let result = self.call_with_pair(
-			"fa_strings_join",
-			&[storage.into(), count.into()],
-			Repr::Str,
-		)?;
+		self.call_runtime("fa_string_finish", &[result.pointer.into()])?;
+		if destination.is_some() {
+			return Ok(Some(Val::void()));
+		}
+		let result = self.load(result)?;
 		Ok(Some(self.fresh(result)))
 	}
 
@@ -598,7 +725,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(value) = self.single_integer_template(parts)? {
 			return Ok(value);
 		}
-		if let Some(value) = self.string_template(parts)? {
+		if let Some(value) = self.string_template(parts, None)? {
 			return Ok(value);
 		}
 		if !self.build_template(parts)? {

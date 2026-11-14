@@ -1,0 +1,29 @@
+-- opt-level: 0
+-- Decimal text read before an `await` of the same statement stays valid
+-- after the task resumes (its digits must not live on the abandoned stack).
+use { sleep } = std.time
+
+async function later = (n: Integer): Integer => {
+	await sleep(1)
+	n
+}
+
+function joinTwo = (left: String, right: Integer): String => "{left}/{right}"
+
+async function describe = (n: Integer): String => {
+	let text = "{n}:{await later(n + 1)}:{n * 2}"
+	let called = joinTwo(n.toString(), await later(n))
+	"{text} {called}"
+}
+
+let first = start describe(5)
+let second = start describe(-1234567)
+let firstText = await first
+let secondText = await second
+assert firstText == "5:6:10 5/5"
+assert secondText == "-1234567:-1234566:-2469134 -1234567/-1234567"
+mutable buffer = "a buffer long enough to be reused by the next template"
+buffer = "{firstText.length}:{await later(42)}"
+assert buffer == "10:42"
+console.log("async templates ok")
+-- prints: async templates ok

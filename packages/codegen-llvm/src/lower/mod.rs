@@ -2143,6 +2143,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// `target = value`: a local, a field.
 	fn assignment(&mut self, target: NodeId, value: NodeId) -> Result<Val<'ctx>, Error> {
+		if let Resolution::Local(symbol) = self.analysis.resolution(target)
+			&& self.analysis.symbols.symbol(symbol).kind == SymbolKind::Mutable
+			&& self.node_repr(target)? == Repr::Str
+			&& let View::Template { parts } = self.view(value)
+		{
+			let slot = self.place(target)?;
+			if slot.repr == Repr::Str
+				&& let Some(result) = self.string_template(parts, Some(slot))?
+			{
+				return Ok(result);
+			}
+		}
 		let value_lowered = self.expr(value)?;
 		if value_lowered.repr == Repr::Never {
 			return Ok(Val::never());
@@ -2172,6 +2184,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(Val::void());
 		}
 		let slot = self.place(target)?;
+		if slot.repr == Repr::Str
+			&& self
+				.constant_text(value)
+				.is_some_and(|text| text.is_empty())
+		{
+			self.call_runtime(
+				"fa_string_replace_buffer",
+				&[
+					self.usize.const_zero().into(),
+					self.simple_flag().into(),
+					slot.pointer.into(),
+				],
+			)?;
+			return Ok(Val::void());
+		}
 		let value_lowered = self.owned_as(value_lowered, slot.repr, Some(value))?;
 		// the value it replaces is dropped
 		let old = self.load(slot)?;

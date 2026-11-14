@@ -169,10 +169,17 @@ static FA_NORETURN void out_of_memory(void) {
 }
 
 static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length) {
-	// up to 16 bytes (words, characters): two overlapping loads and stores
-	// in place, without a call
-	if (length <= 16) {
-		if (length >= 8) {
+	// Up to 32 bytes: two bounded overlapping loads and stores, without
+	// a library call. Load both ends before writing either of them.
+	if (length <= 32) {
+		if (length >= 16) {
+			uint8_t first[16];
+			uint8_t last[16];
+			__builtin_memcpy(first, from, 16);
+			__builtin_memcpy(last, from + length - 16, 16);
+			__builtin_memcpy(to, first, 16);
+			__builtin_memcpy(to + length - 16, last, 16);
+		} else if (length >= 8) {
 			uint64_t first;
 			uint64_t last;
 			__builtin_memcpy(&first, from, 8);
@@ -206,6 +213,25 @@ static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length) {
 FA_EXPORT __attribute__((always_inline)) void fa_copy_bytes(uint8_t *to, const uint8_t *from,
                                                           size_t length) {
 	copy_bytes(to, from, length);
+}
+
+/// Small padding runs need only bounded stores, rather than a libc call.
+static void fill_bytes(uint8_t *to, uint8_t byte, size_t length) {
+	if (length <= 16) {
+		uint64_t word = UINT64_C(0x0101010101010101) * byte;
+		if (length >= 8) {
+			__builtin_memcpy(to, &word, 8);
+			__builtin_memcpy(to + length - 8, &word, 8);
+		} else if (length >= 4) {
+			uint32_t half = (uint32_t)word;
+			__builtin_memcpy(to, &half, 4);
+			__builtin_memcpy(to + length - 4, &half, 4);
+		} else if (length) {
+			to[0] = byte;
+			to[length / 2] = byte;
+			to[length - 1] = byte;
+		}
+	} else { __builtin_memset(to, byte, length); }
 }
 
 static size_t c_length(const char *text) {
@@ -381,21 +407,47 @@ static __attribute__((always_inline)) size_t decimal_u64(uint64_t value, int neg
 	    "6061626364656667686970717273747576777879"
 	    "8081828384858687888990919293949596979899";
 	size_t position = 24;
-	while (value >= 100) {
+	while (value > UINT32_MAX) {
 		uint64_t pair = value % 100;
 		value /= 100;
 		position -= 2;
 		__builtin_memcpy(digits + position, pairs + pair * 2, 2);
 	}
-	if (value >= 10) {
+	// Once the remainder fits, narrower division avoids a 128-bit multiply
+	// on 64-bit targets (and an i64 division on wasm).
+	uint32_t remaining = (uint32_t)value;
+	while (remaining >= 10000) {
+		uint32_t group = remaining % 10000;
+		remaining /= 10000;
+		position -= 4;
+		__builtin_memcpy(digits + position, pairs + (group / 100) * 2, 2);
+		__builtin_memcpy(digits + position + 2, pairs + (group % 100) * 2, 2);
+	}
+	if (remaining >= 100) {
+		uint32_t pair = remaining % 100;
+		remaining /= 100;
 		position -= 2;
-		__builtin_memcpy(digits + position, pairs + value * 2, 2);
-	} else { digits[--position] = (uint8_t)('0' + value); }
+		__builtin_memcpy(digits + position, pairs + pair * 2, 2);
+	}
+	if (remaining >= 10) {
+		position -= 2;
+		__builtin_memcpy(digits + position, pairs + remaining * 2, 2);
+	} else { digits[--position] = (uint8_t)('0' + remaining); }
 	if (negative) {
 		position -= 1;
 		digits[position] = '-';
 	}
 	return position;
+}
+
+/// Decimal parts of an interpolation live in the caller's 24-byte scratch
+/// buffer. Return the offset of the first digit, without packing a String.
+FA_EXPORT size_t fa_decimal_i64(int64_t value, uint8_t *digits) {
+	return decimal_u64(value < 0 ? 0 - (uint64_t)value : (uint64_t)value, value < 0, digits);
+}
+
+FA_EXPORT size_t fa_decimal_u64(uint64_t value, uint8_t *digits) {
+	return decimal_u64(value, 0, digits);
 }
 
 static void append_u64(uint64_t value, int negative) {
@@ -780,6 +832,49 @@ FA_EXPORT void fa_concat(const uint8_t *left, size_t left_length, const uint8_t 
 	out->bytes = bytes;
 	out->length = length;
 	out->capacity = length | simple_flag(bytes, length);
+}
+
+/// A checked byte count for concatenation, bounded by the string layout.
+FA_EXPORT size_t fa_string_size(size_t left, size_t right) {
+	if (right >= KIND_MASK - left) { out_of_memory(); }
+	return left + right;
+}
+
+/// Allocate a template once all its expressions have been evaluated. Its
+/// caller fills exactly `length` bytes before exposing the owning string.
+FA_EXPORT uint8_t *fa_string_allocate(size_t length, size_t simple, FaString *out) {
+	*out = (FaString){0};
+	if (length <= INLINE_STRING_BYTES) {
+		inline_string_tag(out, length, simple);
+		return (uint8_t *)out;
+	}
+	uint8_t *bytes = fa_alloc(length, 1);
+	out->bytes = bytes;
+	out->length = length;
+	out->capacity = length | simple;
+	return bytes;
+}
+
+/// Replace a string whose new parts are proven disjoint from its buffer.
+/// Empty assignments retain capacity, like clearing a mutable collection.
+FA_EXPORT __attribute__((always_inline)) uint8_t *fa_string_replace_buffer(size_t length, size_t simple, FaString *out) {
+	int owned = string_owned(out->capacity);
+	size_t capacity = out->capacity & KIND_MASK;
+	const uint8_t *previous = out->bytes;
+	if (owned && length <= capacity) {
+		out->length = length;
+		out->capacity = capacity | simple;
+		return (uint8_t *)previous;
+	}
+	uint8_t *bytes = fa_string_allocate(length, simple, out);
+	if (owned) { fa_free((void *)previous, capacity, 1); }
+	return bytes;
+}
+
+FA_EXPORT void fa_string_finish(FaString *string) {
+	if (!(string->capacity & SIMPLE)) {
+		string->capacity |= simple_flag(string_bytes(string), string_length(string));
+	}
 }
 
 /// A template whose expressions have already been evaluated. The parts are
@@ -1262,11 +1357,26 @@ static int at_boundary(Boundaries *boundaries, size_t offset) {
 }
 
 /// The offset of the first `byte` at or after `offset`, or `length`:
-/// eight bytes at a time (the lowest byte that "has a zero byte" flags is
-/// exact).
+/// sixteen bytes at a time, with bounded word and byte tails.
 static size_t next_byte(const uint8_t *text, size_t length, size_t offset, uint8_t byte) {
 	const uint64_t ones = 0x0101010101010101u;
 	uint64_t pattern = ones * byte;
+	// A bounded vector comparison skips twice as many bytes per iteration.
+	// Inspect the comparison mask to locate the first matching byte.
+	typedef uint8_t ByteVector __attribute__((vector_size(16)));
+	ByteVector wanted = {byte, byte, byte, byte, byte, byte, byte, byte,
+	                     byte, byte, byte, byte, byte, byte, byte, byte};
+	for (; offset + 16 <= length; offset += 16) {
+		ByteVector word;
+		__builtin_memcpy(&word, text + offset, 16);
+		ByteVector matches = word == wanted;
+		uint64_t halves[2];
+		__builtin_memcpy(halves, &matches, 16);
+		uint64_t found = halves[0] ? halves[0] : halves[1];
+		if (found) {
+			return offset + (halves[0] ? 0 : 8) + (size_t)(__builtin_ctzll(found) >> 3);
+		}
+	}
 	for (; offset + 8 <= length; offset += 8) {
 		uint64_t word;
 		__builtin_memcpy(&word, text + offset, 8);
@@ -1823,6 +1933,30 @@ FA_EXPORT void fa_array_join(const void *header, const uint8_t *separator,
 	join_strings(items, (size_t)array->length, separator, separator_length, out);
 }
 
+/// The length of a join needs no output buffer when every byte is simple.
+/// Otherwise join normally: graphemes may span the boundaries of parts.
+FA_EXPORT size_t fa_array_join_length(void *header, const uint8_t *separator, size_t separator_length) {
+	FaArrayHeader *array = header;
+	fa_array_materialize(array);
+	size_t count = (size_t)array->length;
+	if (count > 1 && !simple_flag(separator, separator_length)) { goto materialize; }
+	if (separator_length && count > 1 && count - 1 >= KIND_MASK / separator_length) { out_of_memory(); }
+	size_t length = count > 1 ? (count - 1) * separator_length : 0;
+	const FaString *parts = (const FaString *)array->items;
+	for (size_t i = 0; i < count; i += 1) {
+		size_t size = string_length(parts + i);
+		if (size && !(parts[i].capacity & SIMPLE)) { goto materialize; }
+		length = fa_string_size(length, size);
+	}
+	return length;
+materialize:;
+	FaString joined;
+	fa_array_join(header, separator, separator_length, &joined);
+	size_t result = fa_string_length(string_bytes(&joined), string_length(&joined), joined.capacity);
+	if (string_owned(joined.capacity)) { fa_free((void *)joined.bytes, joined.capacity & KIND_MASK, 1); }
+	return result;
+}
+
 /// `padStart` (`at_start` 1) and `padEnd` (0), in grapheme clusters.
 static __attribute__((noinline)) void string_pad_slow(const uint8_t *bytes, size_t length, int64_t width,
                              const uint8_t *filler, size_t filler_length, int32_t at_start,
@@ -1859,11 +1993,11 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_pad(const uint8_t *bytes
 	FaString result = {0};
 	uint8_t *target = total <= INLINE_STRING_BYTES ? (uint8_t *)&result : fa_alloc(total, 1);
 	if (at_start) {
-		__builtin_memset(target, filler[0], missing);
+		fill_bytes(target, filler[0], missing);
 		copy_bytes(target + missing, bytes, length);
 	} else {
 		copy_bytes(target, bytes, length);
-		__builtin_memset(target + length, filler[0], missing);
+		fill_bytes(target + length, filler[0], missing);
 	}
 	if (total <= INLINE_STRING_BYTES) { inline_string_tag(&result, total, SIMPLE); }
 	else { result.bytes = target; result.length = total; result.capacity = total | SIMPLE; }

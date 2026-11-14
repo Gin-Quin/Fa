@@ -504,7 +504,7 @@ impl Session {
 		}
 	}
 
-	/// `MOD015`: the entry function takes `(arguments: Array(String))` or
+	/// `MOD015`: the entry function takes `(arguments: Array<String>)` or
 	/// nothing and returns an `Integer` or nothing. In an application, the
 	/// entry file must export one.
 	fn check_entry_function(&mut self, entry: FileId, required: bool) {
@@ -575,7 +575,7 @@ impl Session {
 		Some(Diagnostic::new(
 			&MOD015,
 			location(span),
-			"the entry function takes `(arguments: Array(String))` or nothing, and returns an `Integer` exit code or nothing",
+			"the entry function takes `(arguments: Array<String>)` or nothing, and returns an `Integer` exit code or nothing",
 		))
 	}
 

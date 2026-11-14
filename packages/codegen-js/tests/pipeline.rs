@@ -37,7 +37,7 @@ fn package(count: usize, errors: &[usize]) -> Vec<(String, String)> {
 			"\tfunction make = (seed: Integer): Item => Item {{ id = seed, weight = seed %% {} }}\n",
 			index % 11 + 3
 		));
-		text.push_str("\tfunction firstOr(Value) = (values: Array(Value), fallback: Value): Value => values.get(0) ?? fallback\n");
+		text.push_str("\tfunction firstOr = <Value>(values: Array<Value>, fallback: Value): Value => values.get(0) ?? fallback\n");
 		text.push_str("\tfunction area = (shape: Shape): Integer => when shape is {\n\t\tShape.Circle as { radius } => radius * radius\n\t\tShape.Empty => 0\n\t}\n");
 		text.push_str("\tfunction compute = (x: Integer): Integer => {\n\t\tmutable result = make(x).score() + table + firstOr([x], 0)\n");
 		for used in [index / 2, index / 3]
@@ -81,7 +81,7 @@ fn package(count: usize, errors: &[usize]) -> Vec<(String, String)> {
 	files.push((
 		"application/main.fa".to_string(),
 		format!(
-			"export function = (arguments: Array(String)): Integer => {{\n\tmutable total = 0\n{calls}\tconsole.log(total)\n\t0\n}}\n"
+			"export function = (arguments: Array<String>): Integer => {{\n\tmutable total = 0\n{calls}\tconsole.log(total)\n\t0\n}}\n"
 		),
 	));
 	files

@@ -60,7 +60,7 @@ codes! {
 	EFF015 = "EFF015", Error, [], "a case of";
 	EFF020 = "EFF020", Error, ["FN010"], "f is recursive: declare its return type";
 	FFI001 = "FFI001", Error, [], "declare and call @extern functions";
-	FFI002 = "FFI002", Error, [], "use Pointer(T) and CString";
+	FFI002 = "FFI002", Error, [], "use Pointer<T> and CString";
 	FFI003 = "FFI003", Error, [], "declare destroy in a type";
 	FFI005 = "FFI005", Error, [], "FFI005: an @extern function declares throws or requires. It is never pure";
 	FFI006 = "FFI006", Error, [], "Callbacks";

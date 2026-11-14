@@ -83,7 +83,7 @@ codes! {
 	E_NUM_10 = "E-NUM-10", Error, [], "certain overflow: an arithmetic result or a constant whose interval is disjoint from its sink type, or from the compute type at an…";
 	E_NUM_11 = "E-NUM-11", Error, ["CV001"], "mixing kinds (Integer * Float, Float32 + Float64, Integer + BigInt, Integer * Percentage, Percentage + Float): \"cannot multiply Integer by…";
 	E_NUM_12 = "E-NUM-12", Error, [], "integer or BigInt ///%% by a divisor proven to be zero (5 // 0) [D-91]";
-	E_NUM_13 = "E-NUM-13", Error, [], "invalid ranged type (Integer(min = 5, max = 1), Int8(max = 300))";
+	E_NUM_13 = "E-NUM-13", Error, [], "invalid ranged type (Integer<min = 5, max = 1>, Int8<max = 300>)";
 	E_NUM_14 = "E-NUM-14", Error, [], "a non-arithmetic integer value not proven to fit its sink";
 	E_NUM_15 = "E-NUM-15", Error, [], "unannotated mix of integer base types where neither contains the other";
 	E_NUM_16 = "E-NUM-16", Error, [], "conversion that doesn't exist (BigInt(1.5), Percentage(\"a\"), Integer(50%))";
@@ -112,7 +112,7 @@ codes! {
 	E_OPT_4 = "E-OPT-4", Error, [], "value of a ?. call returning Void used";
 	E_OPT_5 = "E-OPT-5", Error, [], "?[ or ?(";
 	E_OPT_6 = "E-OPT-6", Error, [], "?? on a non-optional left side (or on a failing call: \"use catch\")";
-	E_OPT_9 = "E-OPT-9", Error, [], "T? = T | None = Optional(T), T?? = T?, Never? = None, Void? →";
+	E_OPT_9 = "E-OPT-9", Error, [], "T? = T | None = Optional<T>, T?? = T?, Never? = None, Void? →";
 	E_RNG_2 = "E-RNG-2", Error, [], "non-integer range bounds (floats, BigInt, strings, characters)";
 	E_RNG_3 = "E-RNG-3", Error, [], "iterating a range without start";
 	E_RNG_4 = "E-RNG-4", Error, [], "range pattern on a non-integer subject";
@@ -129,7 +129,7 @@ codes! {
 	E_STR_11 = "E-STR-11", Error, [], "interpolating a Void expression";
 	E_STR_12 = "E-STR-12", Error, [], "interpolating a function value [D-39]";
 	E_STR_13 = "E-STR-13", Error, [], "single-quoted or backtick string ('a'): \"strings use double quotes\"";
-	E_TUP_1 = "E-TUP-1", Error, [], "() as a value, Tuple(), Tuple(A)";
+	E_TUP_1 = "E-TUP-1", Error, [], "() as a value, Tuple<>, Tuple<A>";
 	E_TUP_2 = "E-TUP-2", Error, [], "non-literal tuple index";
 	E_TUP_3 = "E-TUP-3", Error, [], "tuple index out of range or negative";
 	E_TUP_4 = "E-TUP-4", Error, [], "t.0 access";

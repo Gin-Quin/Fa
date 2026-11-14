@@ -79,7 +79,7 @@ fn generate(root: &Path, count: usize, blocks: usize) {
 	std::fs::write(
 		root.join("application/main.fa"),
 		format!(
-			"export function = (arguments: Array(String)): Integer => {{\n\tconsole.log(library.m{:04}.compute0(1))\n\t0\n}}\n",
+			"export function = (arguments: Array<String>): Integer => {{\n\tconsole.log(library.m{:04}.compute0(1))\n\t0\n}}\n",
 			count - 1
 		),
 	)

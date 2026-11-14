@@ -12,7 +12,7 @@ use crate::types::store::TypeStore;
 use crate::types::{CollKind, ConstValue, FieldFlags, FloatBits, IntType, TypeKind};
 
 impl TypeStore {
-	/// The type as written in Fa: `Integer(min = 0)`, `String?`, `"a" | "b"`,
+	/// The type as written in Fa: `Integer<min = 0>`, `String?`, `"a" | "b"`,
 	/// `{ name: String, age: Integer }`, `(Integer) => String`.
 	pub fn display(&self, ty: TypeId) -> String {
 		let mut out = String::new();
@@ -35,7 +35,7 @@ impl TypeStore {
 			TypeKind::Boolean => out.push_str("Boolean"),
 			TypeKind::BoolLit(value) => out.push_str(if value { "true" } else { "false" }),
 			TypeKind::Int(id) => write_int(out, self.int(id)),
-			TypeKind::SymInt(_) => out.push_str("Integer(…)"),
+			TypeKind::SymInt(_) => out.push_str("Integer<…>"),
 			TypeKind::Float(FloatBits::F64) => out.push_str("Float"),
 			TypeKind::Float(FloatBits::F32) => out.push_str("Float32"),
 			TypeKind::FloatLit(_, value) | TypeKind::BigIntLit(value) | TypeKind::Const(value) => {
@@ -78,9 +78,9 @@ impl TypeStore {
 				out.push_str(" }");
 			}
 			TypeKind::Tuple(list) => {
-				out.push_str("Tuple(");
+				out.push_str("Tuple<");
 				self.write_list(out, self.list_items(list));
-				out.push(')');
+				out.push('>');
 			}
 			TypeKind::Union(list) => {
 				let members = self.list_items(list);
@@ -143,7 +143,7 @@ impl TypeStore {
 					.map_or("?", |&sym| self.syms.resolve(sym));
 				let _ = write!(out, "{}.{member}", self.decl_name(info.key));
 			}
-			TypeKind::Fields(_) => out.push_str("Fields(…)"),
+			TypeKind::Fields(_) => out.push_str("Fields<…>"),
 			TypeKind::CStruct(nominal) => out.push_str(self.decl_name(self.nominal(nominal).key)),
 			TypeKind::Function(sig) => {
 				let sig = self.sig(sig);
@@ -158,7 +158,7 @@ impl TypeStore {
 					if index > 0 {
 						out.push_str(", ");
 					}
-					// a variadic parameter's type is `Array(T)`, written `...T`
+					// a variadic parameter's type is `Array<T>`, written `...T`
 					let ty = match (param.variadic, self.kind(param.ty)) {
 						(true, TypeKind::Collection(CollKind::Array, item, _)) => {
 							out.push_str("...");
@@ -180,18 +180,18 @@ impl TypeStore {
 			}
 			TypeKind::Collection(kind, item, key) => {
 				out.push_str(kind.name());
-				out.push('(');
+				out.push('<');
 				if key != TypeId::NONE {
 					self.write_type(out, key, false);
 					out.push_str(", ");
 				}
 				self.write_type(out, item, false);
-				out.push(')');
+				out.push('>');
 			}
 			TypeKind::Iterator(item, _) => {
-				out.push_str("Iterator(");
+				out.push_str("Iterator<");
 				self.write_type(out, item, false);
-				out.push(')');
+				out.push('>');
 			}
 			TypeKind::Ref(target, _) => {
 				self.write_type(out, target, true);
@@ -200,15 +200,15 @@ impl TypeStore {
 			TypeKind::Range => out.push_str("Range"),
 			TypeKind::Subscription => out.push_str("Subscription"),
 			TypeKind::Pointer(target) => {
-				out.push_str("Pointer(");
+				out.push_str("Pointer<");
 				self.write_type(out, target, false);
-				out.push(')');
+				out.push('>');
 			}
 			TypeKind::CString => out.push_str("CString"),
 			TypeKind::CArray(item, count) => {
-				out.push_str("CArray(");
+				out.push_str("CArray<");
 				self.write_type(out, item, false);
-				out.push_str(&format!(", {count})"));
+				out.push_str(&format!(", {count}>"));
 			}
 			// a worker is shown as its type
 			TypeKind::Sync(crate::types::SyncKind::Worker, item) => {
@@ -217,30 +217,30 @@ impl TypeStore {
 			TypeKind::Sync(kind, item) => {
 				out.push_str(kind.name());
 				if kind.is_generic() {
-					out.push('(');
+					out.push('<');
 					self.write_type(out, item, false);
-					out.push(')');
+					out.push('>');
 				}
 			}
 			TypeKind::Task(result, throws) => {
-				out.push_str("Task(");
+				out.push_str("Task<");
 				self.write_type(out, result, false);
-				out.push(')');
+				out.push('>');
 				if throws != TypeId::NEVER {
 					out.push_str(" throws ");
 					self.write_type(out, throws, true);
 				}
 			}
 			TypeKind::Param(param) => out.push_str(self.syms.resolve(self.param(param).name)),
-			TypeKind::ImplicitParam(..) => out.push_str("Type(…)"),
+			TypeKind::ImplicitParam(..) => out.push_str("Type<…>"),
 			TypeKind::Rec(rec) => {
 				let info = self.rec_info(rec);
 				out.push_str(self.syms.resolve(info.name));
 				let args = self.list_items(info.args);
 				if !args.is_empty() {
-					out.push('(');
+					out.push('<');
 					self.write_list(out, args);
-					out.push(')');
+					out.push('>');
 				}
 			}
 		}
@@ -258,9 +258,9 @@ impl TypeStore {
 	fn write_args(&self, out: &mut String, args: crate::ids::ListId) {
 		let args = self.list_items(args);
 		if !args.is_empty() {
-			out.push('(');
+			out.push('<');
 			self.write_list(out, args);
-			out.push(')');
+			out.push('>');
 		}
 	}
 
@@ -307,13 +307,13 @@ fn write_int(out: &mut String, int: &IntType) {
 	let mut first = true;
 	for (shown, name, value) in bounds {
 		if shown {
-			out.push_str(if first { "(" } else { ", " });
+			out.push_str(if first { "<" } else { ", " });
 			first = false;
 			let _ = write!(out, "{name} = {value}");
 		}
 	}
 	if !first {
-		out.push(')');
+		out.push('>');
 	}
 }
 
@@ -353,11 +353,11 @@ mod tests {
 		assert_eq!(store.display(TypeId::TRUE), "true");
 		assert_eq!(store.display(TypeId::UNSET), "<unset>");
 		let natural = store.int_range(n(0), IntStorage::Default.range().hi, IntStorage::Default);
-		assert_eq!(store.display(natural), "Integer(min = 0)");
+		assert_eq!(store.display(natural), "Integer<min = 0>");
 		let score = store.int_range(n(0), n(10), IntStorage::Default);
-		assert_eq!(store.display(score), "Integer(min = 0, max = 10)");
+		assert_eq!(store.display(score), "Integer<min = 0, max = 10>");
 		let small = store.int_range(n(-128), n(5), IntStorage::I8);
-		assert_eq!(store.display(small), "Int8(max = 5)");
+		assert_eq!(store.display(small), "Int8<max = 5>");
 		let answer = store.int_literal(n(-42));
 		assert_eq!(store.display(answer), "-42");
 		let hello = store.string_literal("say \"hi\" {x}");
@@ -378,7 +378,7 @@ mod tests {
 		let maybe_ab = store.optional(ab);
 		assert_eq!(store.display(maybe_ab), r#"("a" | "b")?"#);
 		let array = store.array(ab);
-		assert_eq!(store.display(array), r#"Array("a" | "b")"#);
+		assert_eq!(store.display(array), r#"Array<"a" | "b">"#);
 	}
 
 	#[test]
@@ -402,9 +402,9 @@ mod tests {
 		let empty = store.object(&[], None);
 		assert_eq!(store.display(empty), "{}");
 		let tuple = store.tuple(&[TypeId::INTEGER, TypeId::STRING]);
-		assert_eq!(store.display(tuple), "Tuple(Integer, String)");
+		assert_eq!(store.display(tuple), "Tuple<Integer, String>");
 		let map = store.collection(CollKind::Map, TypeId::INTEGER, TypeId::STRING);
-		assert_eq!(store.display(map), "Map(String, Integer)");
+		assert_eq!(store.display(map), "Map<String, Integer>");
 		let sig = store.simple_sig(
 			&[TypeId::INTEGER, TypeId::STRING],
 			TypeId::BOOLEAN,

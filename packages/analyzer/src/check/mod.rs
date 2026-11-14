@@ -335,6 +335,13 @@ pub struct Walker<'s> {
 	pub(crate) generic_params: FxHashMap<NodeId, Vec<crate::ids::ParamId>>,
 	/// The parameters of the generic declarations being walked: rigid, not inferred.
 	pub(crate) rigid_params: Vec<crate::ids::ParamId>,
+	/// The parameters of the generic function types (`<Value>(value: Value) =>
+	/// Value`): bound by their function type, so not free in a type that
+	/// contains it (generics.rs).
+	pub(crate) quantified_params: Vec<crate::ids::ParamId>,
+	/// Whether the type expression being checked is the type of a parameter,
+	/// where a generic function type is allowed (`GN030` elsewhere).
+	pub(crate) parameter_type: bool,
 	/// The bindings of each instance of a generic type (its functions are substituted).
 	pub(crate) instance_bindings: FxHashMap<TypeId, crate::types::Bindings>,
 	/// The type parameters of the generic built-in methods (`Array.map`), per owner.
@@ -503,6 +510,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		hoisted_blocks: rustc_hash::FxHashSet::default(),
 		generic_params: FxHashMap::default(),
 		rigid_params: Vec::new(),
+		quantified_params: Vec::new(),
+		parameter_type: false,
 		constraint_depth: 0,
 		builtin_params: FxHashMap::default(),
 		instance_bindings: FxHashMap::default(),
@@ -910,7 +919,12 @@ impl Walker<'_> {
 			return self.sink_integer(n, actual, target);
 		}
 		// a generic function given where a function type is expected (generics.rs)
-		let actual = match self.instantiate_function_value(n, actual, target) {
+		let rigid = self.rigid_params.len();
+		let quantified = self.quantified_of(target);
+		self.rigid_params.extend(quantified);
+		let instance = self.instantiate_function_value(n, actual, target);
+		self.rigid_params.truncate(rigid);
+		let actual = match instance {
 			Some(instance) if self.s.types.is_recovering(instance) => return,
 			Some(instance) => instance,
 			None => actual,

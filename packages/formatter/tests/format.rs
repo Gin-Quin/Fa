@@ -169,16 +169,16 @@ fn hugs_a_list_or_an_object_written_over_several_lines() {
 #[test]
 fn breaks_the_parameters_before_the_return_type() {
 	assert_formats(
-		"function logRequest(Context: { ...Request, ...Timestamp }) = (request: Context): { ...Context, ...Logged } => {\n\trequest\n}\n",
-		"function logRequest(Context: { ...Request, ...Timestamp }) = (\n\trequest: Context\n): { ...Context, ...Logged } => {\n\trequest\n}\n",
+		"function logRequest = <Context: { ...Request, ...Timestamp }>(request: Context): { ...Context, ...Logged } => {\n\trequest\n}\n",
+		"function logRequest = <Context: { ...Request, ...Timestamp }>(\n\trequest: Context\n): { ...Context, ...Logged } => {\n\trequest\n}\n",
 	);
 }
 
 #[test]
 fn keeps_a_when_of_one_branch_on_one_line() {
 	assert_formats(
-		"type NoMatch(V) = when V is { String => Integer }\n",
-		"type NoMatch(V) = when V is { String => Integer }\n",
+		"type NoMatch<V> = when V is { String => Integer }\n",
+		"type NoMatch<V> = when V is { String => Integer }\n",
 	);
 	assert_formats(
 		"let a = when r is { Shape.Circle => 1, else => 2 }\n",
@@ -189,8 +189,8 @@ fn keeps_a_when_of_one_branch_on_one_line() {
 #[test]
 fn moves_a_long_lambda_body_to_the_next_line() {
 	assert_formats(
-		"function createFarm = (name: CString): Pointer(Farm) => Pointer.allocate(Farm { name = name.toString() })\n",
-		"function createFarm = (name: CString): Pointer(Farm) =>\n\tPointer.allocate(Farm { name = name.toString() })\n",
+		"function createFarm = (name: CString): Pointer<Farm> => Pointer.allocate(Farm { name = name.toString() })\n",
+		"function createFarm = (name: CString): Pointer<Farm> =>\n\tPointer.allocate(Farm { name = name.toString() })\n",
 	);
 }
 
@@ -203,8 +203,8 @@ fn breaks_a_long_object_or_list_body_at_its_brackets() {
 		"function make = (seed: Integer): Item => Item {\n\tid = seed\n\tweight = seed %% 20\n\tlabel = \"m0100-{seed}\"\n\tsource99 = 99\n}\n",
 	);
 	assert_formats(
-		"function make = (seed: Integer): List(Integer) => [seed, seed + 1, seed + 2, seed + 3, seed + 4, seed + 5, seed + 6]\n",
-		"function make = (seed: Integer): List(Integer) => [\n\tseed\n\tseed + 1\n\tseed + 2\n\tseed + 3\n\tseed + 4\n\tseed + 5\n\tseed + 6\n]\n",
+		"function make = (seed: Integer): List<Integer> => [seed, seed + 1, seed + 2, seed + 3, seed + 4, seed + 5, seed + 6]\n",
+		"function make = (seed: Integer): List<Integer> => [\n\tseed\n\tseed + 1\n\tseed + 2\n\tseed + 3\n\tseed + 4\n\tseed + 5\n\tseed + 6\n]\n",
 	);
 	assert_formats(
 		"let items = values.map((value) => Item { id = value, weight = value %% 20, label = \"m0100-{value}\", source = 9, extra = 1 })\n",
@@ -239,8 +239,8 @@ fn writes_when_branches_on_their_own_lines() {
 fn separates_implicit_members_with_commas_on_several_lines() {
 	// a line starting with `.` continues the previous one
 	assert_formats(
-		"let colors: Array(Color) = [\n\t.red\n\t, .green\n]\nlet name = when color is { .red => \"red\", .green => \"green\" }\n",
-		"let colors: Array(Color) = [\n\t.red,\n\t.green\n]\nlet name = when color is {\n\t.red => \"red\",\n\t.green => \"green\"\n}\n",
+		"let colors: Array<Color> = [\n\t.red\n\t, .green\n]\nlet name = when color is { .red => \"red\", .green => \"green\" }\n",
+		"let colors: Array<Color> = [\n\t.red,\n\t.green\n]\nlet name = when color is {\n\t.red => \"red\",\n\t.green => \"green\"\n}\n",
 	);
 }
 
@@ -319,8 +319,8 @@ fn writes_the_field_shorthand() {
 #[test]
 fn removes_the_type_repeated_before_an_object_literal() {
 	assert_formats(
-		"let point: Point(Integer) = Point(Integer) { x = 1, y = 2 }\nlet other: Point = Origin { x = 1 }\n",
-		"let point: Point(Integer) = { x = 1, y = 2 }\nlet other: Point = Origin { x = 1 }\n",
+		"let point: Point<Integer> = Point<Integer> { x = 1, y = 2 }\nlet other: Point = Origin { x = 1 }\n",
+		"let point: Point<Integer> = { x = 1, y = 2 }\nlet other: Point = Origin { x = 1 }\n",
 	);
 }
 
@@ -464,4 +464,29 @@ fn keeps_the_comments_of_an_empty_block() {
 	assert_keeps_comments("let f = when a is {\n\t-- nothing yet\n}\n");
 	assert_keeps_comments("-- only a comment\n");
 	assert_keeps_comments("--- only a block comment ---");
+}
+
+#[test]
+fn writes_generic_lists_on_the_line_of_their_angle_bracket() {
+	assert_formats(
+		"type Pair<Left,Right> = { left: Left, right: Right }\nfunction first = <Item>(items: Array<Item>): Item? => items.get(0)\nlet total = sum<Float>([1, 2])\n",
+		"type Pair<Left, Right> = { left: Left, right: Right }\nfunction first = <Item>(items: Array<Item>): Item? => items.get(0)\nlet total = sum<Float>([1, 2])\n",
+	);
+	// the items of a generic list break, never the list after its `<`
+	assert_formats(
+		"type Lookup = Map<String, {\n\tid: Integer\n\tname: String\n}>\n",
+		"type Lookup = Map<String, {\n\tid: Integer\n\tname: String\n}>\n",
+	);
+	assert_formats(
+		"let ranged: Integer<min = 0,max = 10> = 0\nlet pairs: Array<Tuple<Integer, String>> = []\n",
+		"let ranged: Integer<min = 0, max = 10> = 0\nlet pairs: Array<Tuple<Integer, String>> = []\n",
+	);
+	assert_formats(
+		"function apply = (transform: <Value>(value: Value) => Value) => transform(1)\nexport function = async <Item>(items: Array<Item>) => items\n",
+		"function apply = (transform: <Value>(value: Value) => Value) => transform(1)\nexport function = async <Item>(items: Array<Item>) => items\n",
+	);
+	assert_formats(
+		"if count < limit {\n\tx\n}\n",
+		"if count < limit {\n\tx\n}\n",
+	);
 }

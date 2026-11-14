@@ -1,11 +1,11 @@
 use crate::context::Context;
 use crate::nodes::Node;
+use crate::parsing::is_stop_token::is_parenthesis_open;
 use crate::parsing::parse_declaration::{
 	parse_declaration_value, parse_generic_parameter_list, parse_optional_type_annotation,
 };
-use crate::parsing::is_stop_token::is_parenthesis_open;
-use crate::tokens::Token;
 use crate::parsing::parse_expression::ExpressionContext;
+use crate::tokens::Token;
 use crate::tokens::TokenKind;
 
 /// Parse a function declaration, starting at the `function` keyword:

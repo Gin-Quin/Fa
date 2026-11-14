@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::check::Walker;
 use crate::diagnostics::codes::types::{
-	GN003, GN004, GN005, GN007, GN010, GN011, GN013, GN014, GN015, GN020, TY003,
+	GN003, GN004, GN005, GN007, GN009, GN010, GN011, GN013, GN014, GN015, GN020, TY003,
 };
 use crate::ids::{ListId, NodeId, ParamId, SymbolId, TypeId};
 use crate::symbols::{DeclState, ScopeKind, SymbolKind};
@@ -219,7 +219,7 @@ impl Walker<'_> {
 				let args: Vec<String> = bindings.types.iter().map(|&ty| self.display(ty)).collect();
 				self.s
 					.types
-					.name_type(instance, &format!("{name}({})", args.join(", ")));
+					.name_type(instance, &format!("{name}<{}>", args.join(", ")));
 			}
 			let decls = self.declarations_of(generic);
 			let entry = self.decls_by_type.entry(instance).or_default();
@@ -275,6 +275,21 @@ impl Walker<'_> {
 		true
 	}
 
+	/// The parameters bound by a generic function type, `Value` in
+	/// `<Value>(value: Value) => Value` (none for another type): given a
+	/// lambda or a generic function, they are rigid while it is checked.
+	pub(super) fn quantified_of(&self, ty: TypeId) -> Vec<ParamId> {
+		if self.quantified_params.is_empty()
+			|| !matches!(self.s.types.kind(ty), TypeKind::Function(_))
+		{
+			return Vec::new();
+		}
+		let mut found = Vec::new();
+		self.collect_params(ty, &mut found, 0);
+		found.retain(|param| self.quantified_params.contains(param));
+		found
+	}
+
 	/// The parameters of a type that are free here: not the rigid parameters
 	/// of the generic declarations being walked.
 	pub(super) fn free_params(&self, ty: TypeId) -> Vec<ParamId> {
@@ -313,11 +328,23 @@ impl Walker<'_> {
 			}
 			TypeKind::Function(sig) => {
 				let sig = types.sig(sig);
+				// a generic function type inside the type binds its own parameters
+				let start = out.len();
 				for param in types.params(sig.params) {
 					self.collect_params(param.ty, out, depth + 1);
 				}
 				self.collect_params(sig.ret, out, depth + 1);
 				self.collect_params(sig.throws, out, depth + 1);
+				if depth > 0 && !self.quantified_params.is_empty() {
+					let mut index = start;
+					while index < out.len() {
+						if self.quantified_params.contains(&out[index]) {
+							out.remove(index);
+						} else {
+							index += 1;
+						}
+					}
+				}
 			}
 			TypeKind::Collection(_, item, key) => {
 				self.collect_params(item, out, depth + 1);
@@ -676,9 +703,14 @@ impl Walker<'_> {
 		found.iter().any(|param| free.contains(param))
 	}
 
-	/// `sum(Float)`: the generic arguments of a generic function, when every
-	/// argument is a type (types brief §3.11.2, D18). The instantiated
-	/// function type; the call node records the arguments.
+	/// `sum<Float>`: the explicit generic arguments of a generic function
+	/// (types brief §3.11.2). The instantiated function type; the application
+	/// node records the arguments. `None` when `n` isn't a generic application
+	/// of a generic function of this file.
+	///
+	/// A call written with parentheses, `sum(Float)`, is a call: when every
+	/// argument is a type and the callee a generic function, it is reported
+	/// (`GN009`) and taken as the generic application it was meant to be.
 	pub(super) fn generic_function_application(
 		&mut self,
 		n: NodeId,
@@ -688,9 +720,9 @@ impl Walker<'_> {
 		let View::Name(_) = self.view(callee) else {
 			return None;
 		};
-		// a value parameter makes the first list the generic one (types brief §3.11.2)
+		let generic = syntax::is_generic_application(&self.tree, n);
 		if arguments.is_empty()
-			|| !(self.has_value_params(callee)
+			|| !(generic
 				|| arguments
 					.iter()
 					.all(|argument| self.is_type_argument(argument)))
@@ -705,6 +737,9 @@ impl Walker<'_> {
 		let params = self.a.function(decl)?.generics.clone();
 		if params.is_empty() {
 			return None;
+		}
+		if !generic {
+			self.parenthesized_generics(n, callee, arguments);
 		}
 		let args = self.generic_arguments(&params, arguments);
 		Some(self.memo(n, |w| {
@@ -728,6 +763,43 @@ impl Walker<'_> {
 			w.record_instantiation(n, &bindings);
 			w.s.types.substitute(ty, &bindings)
 		}))
+	}
+
+	/// `GN009`: explicit generic parameters written between parentheses,
+	/// `Array(Integer)` or `sum(Float)`, which are calls: the fix writes them
+	/// between angle brackets.
+	pub(super) fn parenthesized_generics(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		arguments: NodeList<'_>,
+	) {
+		let tree = Arc::clone(&self.tree);
+		let callee_text = tree.text(callee.index());
+		let arguments_text = arguments
+			.iter()
+			.map(|argument| tree.text(argument.index()))
+			.collect::<Vec<_>>()
+			.join(", ");
+		let message = format!(
+			"parentheses are a call: explicit generic parameters are written between angle brackets, `{callee_text}<{arguments_text}>`"
+		);
+		let diagnostic = self.diagnostic(&GN009, n, message);
+		self.report(diagnostic);
+	}
+
+	/// `f<T>` where `f` isn't a generic function of this file: `GN007`.
+	pub(super) fn not_generic_function(&mut self, n: NodeId, callee: NodeId) -> TypeId {
+		let ty = self.check(callee, None);
+		self.memo(n, |w| {
+			if !w.s.types.is_recovering(ty) {
+				let text = w.tree.text(callee.index()).to_string();
+				let message = format!("`{text}` has no generic parameters: call it without `<…>`");
+				let diagnostic = w.diagnostic(&GN007, n, message);
+				w.report(diagnostic);
+			}
+			TypeId::UNKNOWN
+		})
 	}
 
 	/// Whether an argument is written as a type (D18): a type name, a type

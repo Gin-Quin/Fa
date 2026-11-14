@@ -140,7 +140,7 @@ impl Walker<'_> {
 					let diagnostic = w.diagnostic(
 						&FN024,
 						n,
-						"`from` takes the collection to copy, ex: `Array(Integer).from([])`",
+						"`from` takes the collection to copy, ex: `Array<Integer>.from([])`",
 					);
 					w.report(diagnostic);
 					given_item.unwrap_or(TypeId::UNKNOWN)

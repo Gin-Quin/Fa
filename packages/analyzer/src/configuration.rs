@@ -641,7 +641,7 @@ impl Evaluator<'_> {
 			| (Schema::Boolean, ConfigValue::Boolean(_)) => {}
 			(Schema::Integer(min, max), ConfigValue::Integer(number)) => {
 				if *number < min || *number > max {
-					self.mismatch(node, &format!("Integer(min = {min}, max = {max})"));
+					self.mismatch(node, &format!("Integer<min = {min}, max = {max}>"));
 				}
 			}
 			(Schema::Target, ConfigValue::String(target)) => {

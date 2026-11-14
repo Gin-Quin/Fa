@@ -39,8 +39,8 @@ fn typical_code(lines: usize) -> String {
 		}
 	}
 	let mut text = String::from(
-		"function table = (size: Integer): Array(Integer) => {\n\
-		 \tmutable items: Array(Integer) = []\n\
+		"function table = (size: Integer): Array<Integer> => {\n\
+		 \tmutable items: Array<Integer> = []\n\
 		 \tfor index in 0..size {\n\
 		 \t\titems.push(index * 2)\n\
 		 \t}\n\

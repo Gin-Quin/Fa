@@ -9,27 +9,27 @@ use crate::types::{CollKind, PathRoot, PathStep, TypeKind};
 #[test]
 fn list_literals_take_the_expected_collection() {
 	let (session, file) = analyzed(
-		"let s: Set(Integer) = [1, 2, 2]\nlet m: Map(String, Integer) = [(\"a\", 1), (\"b\", 2)]\nlet e: Map(String, Integer) = []\nlet t: Map(Tuple(Integer, Integer), String) = [((0, 0), \"origin\")]\n",
+		"let s: Set<Integer> = [1, 2, 2]\nlet m: Map<String, Integer> = [(\"a\", 1), (\"b\", 2)]\nlet e: Map<String, Integer> = []\nlet t: Map<Tuple<Integer, Integer>, String> = [((0, 0), \"origin\")]\n",
 	);
-	assert_eq!(symbol_type(&session, file, "s"), "Set(Integer)");
-	assert_eq!(symbol_type(&session, file, "m"), "Map(String, Integer)");
-	assert_eq!(symbol_type(&session, file, "e"), "Map(String, Integer)");
+	assert_eq!(symbol_type(&session, file, "s"), "Set<Integer>");
+	assert_eq!(symbol_type(&session, file, "m"), "Map<String, Integer>");
+	assert_eq!(symbol_type(&session, file, "e"), "Map<String, Integer>");
 	let pair = node(&session, file, "(\"a\", 1)");
 	assert_eq!(
 		session.display_type(session.analysis(file).type_of(pair)),
-		"Tuple(String, Integer)"
+		"Tuple<String, Integer>"
 	);
 	assert_eq!(
-		codes("let m: Map(String, Integer) = [1]\n"),
+		codes("let m: Map<String, Integer> = [1]\n"),
 		["CL005"],
 		"a map item is a pair"
 	);
 	assert_eq!(
-		codes("let m: Map(String, Integer) = [(\"a\", 1), (\"a\", 2)]\n"),
+		codes("let m: Map<String, Integer> = [(\"a\", 1), (\"a\", 2)]\n"),
 		["CL006"]
 	);
 	assert_eq!(
-		codes("let m: Map(String, Integer) = [(\"a\", \"b\")]\n"),
+		codes("let m: Map<String, Integer> = [(\"a\", \"b\")]\n"),
 		["E-TYPE-1"]
 	);
 }
@@ -37,48 +37,48 @@ fn list_literals_take_the_expected_collection() {
 #[test]
 fn set_elements_and_map_keys_need_equality_and_are_exact() {
 	assert_eq!(
-		codes("type Handler = { run: () => Void }\nlet hs: Set(Handler) = []\n"),
+		codes("type Handler = { run: () => Void }\nlet hs: Set<Handler> = []\n"),
 		["CL020"]
 	);
-	assert_eq!(codes("let m: Map(() => Void, Integer) = []\n"), ["CL020"]);
+	assert_eq!(codes("let m: Map<() => Void, Integer> = []\n"), ["CL020"]);
 	// map values may be anything
-	assert!(codes("let m: Map(String, () => Void) = []\n").is_empty());
+	assert!(codes("let m: Map<String, () => Void> = []\n").is_empty());
 	let types = "type Human = { name: String }\ntype Hero = { name: String, power: String }\n";
 	assert_eq!(
 		codes(&format!(
-			"{types}function f = (s: Set(Human)) => s.size\nlet heroes: Set(Hero) = []\nf(heroes)\n"
+			"{types}function f = (s: Set<Human>) => s.size\nlet heroes: Set<Hero> = []\nf(heroes)\n"
 		)),
 		["CL010"]
 	);
 	// map values follow the general rule: a read-only view of supersets
 	assert!(
 		codes(&format!(
-			"{types}function f = (m: Map(String, Human)) => m.size\nlet heroes: Map(String, Hero) = []\nf(heroes)\n"
+			"{types}function f = (m: Map<String, Human>) => m.size\nlet heroes: Map<String, Hero> = []\nf(heroes)\n"
 		))
 		.is_empty()
 	);
 	assert_eq!(codes("let s: Set = []\n"), ["TY003"]);
-	assert_eq!(codes("let m: Map(String) = []\n"), ["TY003"]);
+	assert_eq!(codes("let m: Map<String> = []\n"), ["TY003"]);
 }
 
 #[test]
 fn members_of_sets_and_maps() {
 	let (session, file) = analyzed(
-		"mutable s: Set(Integer) = [1]\nlet added = s.add(2)\nlet taken = s.take(1)\nlet u = s.union([3])\nlet doubled = s.map((x) => x * 2)\nlet total = s.sum()\nmutable m: Map(String, Integer) = []\nm[\"a\"] = 1\nlet v = m[\"a\"] catch error => 0\nlet g = m.get(\"a\")\nlet o = m.getOrInsert(\"b\", 2)\nlet d = m.delete(\"a\")\nlet mapped = m.map((key, value) => value > 1)\nlet found = m.find((key, value) => value > 1)\nlet n = m.size\n",
+		"mutable s: Set<Integer> = [1]\nlet added = s.add(2)\nlet taken = s.take(1)\nlet u = s.union([3])\nlet doubled = s.map((x) => x * 2)\nlet total = s.sum()\nmutable m: Map<String, Integer> = []\nm[\"a\"] = 1\nlet v = m[\"a\"] catch error => 0\nlet g = m.get(\"a\")\nlet o = m.getOrInsert(\"b\", 2)\nlet d = m.delete(\"a\")\nlet mapped = m.map((key, value) => value > 1)\nlet found = m.find((key, value) => value > 1)\nlet n = m.size\n",
 	);
 	for (name, ty) in [
 		("added", "Boolean"),
 		("taken", "Integer?"),
-		("u", "Set(Integer)"),
-		("doubled", "Array(Integer)"),
+		("u", "Set<Integer>"),
+		("doubled", "Array<Integer>"),
 		("total", "Integer"),
 		("v", "Integer"),
 		("g", "Integer?"),
 		("o", "Integer"),
 		("d", "Boolean"),
-		("mapped", "Map(String, Boolean)"),
-		("found", "Tuple(String, Integer)?"),
-		("n", "Integer(min = 0)"),
+		("mapped", "Map<String, Boolean>"),
+		("found", "Tuple<String, Integer>?"),
+		("n", "Integer<min = 0>"),
 	] {
 		assert_eq!(symbol_type(&session, file, name), ty, "{name}");
 	}
@@ -92,21 +92,21 @@ fn members_of_sets_and_maps() {
 	let read = node(&session, file, "m[\"a\"]");
 	assert!(analysis.flags_of(read).contains(NodeFlags::INDEX_CHECK));
 	assert_eq!(
-		codes("let s: Set(Integer) = []\nlet n = s.length\n"),
+		codes("let s: Set<Integer> = []\nlet n = s.length\n"),
 		["CL007"]
 	);
 	assert_eq!(codes("let a = [1]\nlet n = a.size\n"), ["CL007"]);
-	assert_eq!(codes("let s: Set(Integer) = []\ns.add(1)\n"), ["EFF007"]);
+	assert_eq!(codes("let s: Set<Integer> = []\ns.add(1)\n"), ["EFF007"]);
 	assert_eq!(
-		codes("mutable g: GrowingMap(String, Integer) = []\ng.delete(\"a\")\n"),
+		codes("mutable g: GrowingMap<String, Integer> = []\ng.delete(\"a\")\n"),
 		["CL040"]
 	);
 	assert_eq!(
-		codes("let s: Set(Integer) = []\nlet x = s[0]\n"),
+		codes("let s: Set<Integer> = []\nlet x = s[0]\n"),
 		["E-TYPE-1"]
 	);
 	assert_eq!(
-		codes("let m: Map(String, Integer) = []\nlet x = m[0]\n"),
+		codes("let m: Map<String, Integer> = []\nlet x = m[0]\n"),
 		["E-TYPE-1"]
 	);
 }
@@ -114,7 +114,7 @@ fn members_of_sets_and_maps() {
 #[test]
 fn method_types_carry_the_effects_of_the_reference_table() {
 	let (session, file) = analyzed(
-		"mutable m: Map(String, Integer) = []\nm.delete(\"a\")\nm.clear()\nmutable a = [1]\na.pop()\n",
+		"mutable m: Map<String, Integer> = []\nm.delete(\"a\")\nm.clear()\nmutable a = [1]\na.pop()\n",
 	);
 	let analysis = session.analysis(file);
 	let effects_of = |text: &str| {
@@ -161,13 +161,13 @@ fn method_types_carry_the_effects_of_the_reference_table() {
 #[test]
 fn from_copies_collections_with_options() {
 	let (session, file) = analyzed(
-		"type User = { id: Integer, email: String }\nlet s = Set.from([1, 2, 2])\nlet f = Set(Float).from([1, 2])\nlet m = Map.from([(\"a\", 1)])\nlet a = Array.from(s)\nlet users = Set.from([User { id = 1, email = \"a\" }], key = (user) => user.id)\n",
+		"type User = { id: Integer, email: String }\nlet s = Set.from([1, 2, 2])\nlet f = Set<Float>.from([1, 2])\nlet m = Map.from([(\"a\", 1)])\nlet a = Array.from(s)\nlet users = Set.from([User { id = 1, email = \"a\" }], key = (user) => user.id)\n",
 	);
-	assert_eq!(symbol_type(&session, file, "s"), "Set(Integer)");
-	assert_eq!(symbol_type(&session, file, "f"), "Set(Float)");
-	assert_eq!(symbol_type(&session, file, "m"), "Map(String, Integer)");
-	assert_eq!(symbol_type(&session, file, "a"), "Array(Integer)");
-	assert_eq!(symbol_type(&session, file, "users"), "Set(User)");
+	assert_eq!(symbol_type(&session, file, "s"), "Set<Integer>");
+	assert_eq!(symbol_type(&session, file, "f"), "Set<Float>");
+	assert_eq!(symbol_type(&session, file, "m"), "Map<String, Integer>");
+	assert_eq!(symbol_type(&session, file, "a"), "Array<Integer>");
+	assert_eq!(symbol_type(&session, file, "users"), "Set<User>");
 	let analysis = session.analysis(file);
 	let call = node(
 		&session,
@@ -185,7 +185,7 @@ fn from_copies_collections_with_options() {
 	));
 	assert_eq!(codes("let s = Set.from([1], size = 3)\n"), ["FN023"]);
 	assert_eq!(codes("let m = Map.from([1, 2])\n"), ["CL005"]);
-	assert_eq!(codes("let s: Set(Integer) = Set.from([1])\n"), ["WCL001"]);
+	assert_eq!(codes("let s: Set<Integer> = Set.from([1])\n"), ["WCL001"]);
 	assert_eq!(
 		codes("type H = { run: () => Void }\nlet s = Set.from([H { run = () => {} }])\n"),
 		["CL020"]
@@ -195,17 +195,17 @@ fn from_copies_collections_with_options() {
 #[test]
 fn loops_over_sets_and_maps() {
 	let (session, file) = analyzed(
-		"let m: Map(String, Integer) = [(\"a\", 1)]\nfor (key, value) in m {\n\tconsole.log(key, value)\n}\nlet s: Set(String) = [\"a\"]\nfor tag in s {\n\tconsole.log(tag)\n}\n",
+		"let m: Map<String, Integer> = [(\"a\", 1)]\nfor (key, value) in m {\n\tconsole.log(key, value)\n}\nlet s: Set<String> = [\"a\"]\nfor tag in s {\n\tconsole.log(tag)\n}\n",
 	);
 	assert_eq!(symbol_type(&session, file, "key"), "String");
 	assert_eq!(symbol_type(&session, file, "value"), "Integer");
 	assert_eq!(symbol_type(&session, file, "tag"), "String");
 	assert_eq!(
-		codes("mutable s: Set(String) = []\nfor tag in s {\n\ttag = \"x\"\n}\n"),
+		codes("mutable s: Set<String> = []\nfor tag in s {\n\ttag = \"x\"\n}\n"),
 		["CL031"]
 	);
 	assert_eq!(
-		codes("mutable m: Map(String, Integer) = []\nfor (key, value) in m {\n\tkey = \"x\"\n}\n"),
+		codes("mutable m: Map<String, Integer> = []\nfor (key, value) in m {\n\tkey = \"x\"\n}\n"),
 		["CL031"]
 	);
 }
@@ -213,11 +213,11 @@ fn loops_over_sets_and_maps() {
 #[test]
 fn iterators_are_typed_and_tracked() {
 	let (session, file) = analyzed(
-		"let numbers = [1, 2, 3]\nlet evens = numbers.values().filter((n) => n %% 2 == 0)\nlet first = evens.firstValues(1).toArray()\nlet names: Map(String, Integer) = [(\"a\", 1)]\nlet keys = names.keys().toArray()\n",
+		"let numbers = [1, 2, 3]\nlet evens = numbers.values().filter((n) => n %% 2 == 0)\nlet first = evens.firstValues(1).toArray()\nlet names: Map<String, Integer> = [(\"a\", 1)]\nlet keys = names.keys().toArray()\n",
 	);
-	assert_eq!(symbol_type(&session, file, "evens"), "Iterator(Integer)");
-	assert_eq!(symbol_type(&session, file, "first"), "Array(Integer)");
-	assert_eq!(symbol_type(&session, file, "keys"), "Array(String)");
+	assert_eq!(symbol_type(&session, file, "evens"), "Iterator<Integer>");
+	assert_eq!(symbol_type(&session, file, "first"), "Array<Integer>");
+	assert_eq!(symbol_type(&session, file, "keys"), "Array<String>");
 	assert_eq!(
 		codes(
 			"mutable items = [1]\nlet it = items.values()\nitems.push(2)\nlet all = it.toArray()\n"
@@ -225,11 +225,11 @@ fn iterators_are_typed_and_tracked() {
 		["REF001"]
 	);
 	assert_eq!(
-		codes("function f = (items: Array(Integer)) => items.values()\n"),
+		codes("function f = (items: Array<Integer>) => items.values()\n"),
 		["CL030"]
 	);
 	assert_eq!(
-		codes("let s: Set(Integer) = [1]\nfor x, i in s {\n\tconsole.log(x)\n}\n"),
+		codes("let s: Set<Integer> = [1]\nfor x, i in s {\n\tconsole.log(x)\n}\n"),
 		["CL032"]
 	);
 }
@@ -237,26 +237,26 @@ fn iterators_are_typed_and_tracked() {
 #[test]
 fn pools_give_fresh_references() {
 	let (session, file) = analyzed(
-		"type H = { name: String }\nmutable pool: Pool(H) = []\nuse a = pool.add({ name = \"a\" })\nuse b = pool.add({ name = \"b\" })\npool.delete(a)\nconsole.log(b.name)\nlet n = pool.size\n",
+		"type H = { name: String }\nmutable pool: Pool<H> = []\nuse a = pool.add({ name = \"a\" })\nuse b = pool.add({ name = \"b\" })\npool.delete(a)\nconsole.log(b.name)\nlet n = pool.size\n",
 	);
-	assert_eq!(symbol_type(&session, file, "n"), "Integer(min = 0)");
+	assert_eq!(symbol_type(&session, file, "n"), "Integer<min = 0>");
 	// `delete` invalidates the deleted element only
 	assert_eq!(
 		codes(
-			"type H = { name: String }\nmutable pool: Pool(H) = []\nuse a = pool.add({ name = \"a\" })\npool.delete(a)\nconsole.log(a.name)\n"
+			"type H = { name: String }\nmutable pool: Pool<H> = []\nuse a = pool.add({ name = \"a\" })\npool.delete(a)\nconsole.log(a.name)\n"
 		),
 		["REF001"]
 	);
 	// an element of another pool (REF020, alias CL050)
 	assert_eq!(
 		codes(
-			"type H = { name: String }\nmutable p: Pool(H) = []\nmutable q: Pool(H) = []\nuse a = p.add({ name = \"a\" })\nq.delete(a)\n"
+			"type H = { name: String }\nmutable p: Pool<H> = []\nmutable q: Pool<H> = []\nuse a = p.add({ name = \"a\" })\nq.delete(a)\n"
 		),
 		["REF020"]
 	);
-	assert_eq!(codes("let c: Columnar(Integer) = []\n"), ["CL021"]);
+	assert_eq!(codes("let c: Columnar<Integer> = []\n"), ["CL021"]);
 	assert_eq!(
-		codes("type H = { name: String }\nmutable g: GrowingPool(H) = []\ng.clear()\n"),
+		codes("type H = { name: String }\nmutable g: GrowingPool<H> = []\ng.clear()\n"),
 		["CL040"]
 	);
 	assert_eq!(
@@ -273,7 +273,7 @@ fn pools_give_fresh_references() {
 fn relations_are_recorded_for_the_backends() {
 	use crate::analysis::{CollectionRef, RelationKind, RelationSide};
 	let (session, file) = analyzed(
-		"type Town = {\n\tpeople: Pool(Person) = []\n\ttype Person = {\n\t\tname: String\n\t\tbestFriend: (Person in people)?\n\t\tbestFriendOf: Pool(people->bestFriend)\n\t\tmentor: (Person in people)?\n\t\tmentee: (people->mentor)?\n\t\tfriends: Pool(Person in people)\n\t\tfriendOf: Pool(in people->friends)\n\t\tspouse: (people->spouse)?\n\t}\n}\nmutable town: Town = {}\nuse ana = town.people.add({ name = \"Ana\" })\nuse bao = town.people.add({ name = \"Bao\" })\nana.bestFriend = bao\nana.friends.add(bao)\ntown.people.delete(bao)\n",
+		"type Town = {\n\tpeople: Pool<Person> = []\n\ttype Person = {\n\t\tname: String\n\t\tbestFriend: (Person in people)?\n\t\tbestFriendOf: Pool<people->bestFriend>\n\t\tmentor: (Person in people)?\n\t\tmentee: (people->mentor)?\n\t\tfriends: Pool<Person in people>\n\t\tfriendOf: Pool<in people->friends>\n\t\tspouse: (people->spouse)?\n\t}\n}\nmutable town: Town = {}\nuse ana = town.people.add({ name = \"Ana\" })\nuse bao = town.people.add({ name = \"Bao\" })\nana.bestFriend = bao\nana.friends.add(bao)\ntown.people.delete(bao)\n",
 	);
 	let analysis = session.analysis(file);
 	let kinds: Vec<RelationKind> = analysis

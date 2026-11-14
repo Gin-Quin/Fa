@@ -3,10 +3,10 @@ use crate::nodes::Node;
 use crate::parsing::parse_declaration::{
 	parse_declaration_value, parse_optional_generic_parameters, parse_optional_type_annotation,
 };
+use crate::parsing::parse_expression::ExpressionContext;
 use crate::parsing::parse_function_declaration::{
 	attach_generic_parameters, parse_misplaced_generic_parameters,
 };
-use crate::parsing::parse_expression::ExpressionContext;
 use crate::tokens::TokenKind;
 
 /// Parse an export, starting at `export`:

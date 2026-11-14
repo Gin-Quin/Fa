@@ -240,7 +240,10 @@ fn generic_applications() {
 		"let numbers = Set<Float>.from([1, 2, 3])",
 		"let numbers = Set<Float>.from([1, 2, 3])",
 	);
-	assert_statement("let friends: Pool<people->bestFriend> = []", "let friends: Pool<(people -> bestFriend)> = []");
+	assert_statement(
+		"let friends: Pool<people->bestFriend> = []",
+		"let friends: Pool<(people -> bestFriend)> = []",
+	);
 	assert_statement(
 		"type Lookup = Map<String, {\n\tid: Integer\n}>",
 		"type Lookup = Map<String, {\n\tid: Integer\n}>",

@@ -387,7 +387,10 @@ fn namespace_has_no_parameters() {
 fn empty_generic_parameters_are_reported() {
 	assert_error_message("type T<> = Integer", "Generic parameters can't be empty");
 	assert_error_message("let a: Array<> = []", "Generic parameters can't be empty");
-	assert_error_message("function f = <>() => x", "Generic parameters can't be empty");
+	assert_error_message(
+		"function f = <>() => x",
+		"Generic parameters can't be empty",
+	);
 	assert_error_message("function f = <x>() => x", "needs a type");
 }
 

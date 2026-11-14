@@ -61,7 +61,7 @@ fn object_patterns_record_their_fields_defaults_and_symbols() {
 
 #[test]
 fn array_patterns_say_when_the_length_is_checked() {
-	let source = "function f = (values: Array(Integer)): Integer throws IndexError => {\n\ttry let [first, ...rest] = values\n\tfirst\n}\nlet [x, y] = [1, 2]\nconsole.log(f([1]) catch e => 0, x, y)\n";
+	let source = "function f = (values: Array<Integer>): Integer throws IndexError => {\n\ttry let [first, ...rest] = values\n\tfirst\n}\nlet [x, y] = [1, 2]\nconsole.log(f([1]) catch e => 0, x, y)\n";
 	let (session, file) = analyze_source(source);
 	assert!(
 		session.diagnostics(file).is_empty(),
@@ -81,7 +81,7 @@ fn array_patterns_say_when_the_length_is_checked() {
 			.resolve(analysis.symbols.symbol(rest).name),
 		"rest"
 	);
-	assert_eq!(session.display_type(ty), "Array(Integer)");
+	assert_eq!(session.display_type(ty), "Array<Integer>");
 	let proven = find(&session, file, "[x, y]", |view| {
 		matches!(view, View::ArrayPattern { .. })
 	});
@@ -90,7 +90,7 @@ fn array_patterns_say_when_the_length_is_checked() {
 
 #[test]
 fn math_and_from_calls_are_recorded() {
-	let source = "let n = 4\nlet m = Math.max(n, 1)\nmutable a = Array(Integer).from([], capacity = n)\nlet b = Array.from([1.5])\nconsole.log(m, a, b)\n";
+	let source = "let n = 4\nlet m = Math.max(n, 1)\nmutable a = Array<Integer>.from([], capacity = n)\nlet b = Array.from([1.5])\nconsole.log(m, a, b)\n";
 	let (session, file) = analyze_source(source);
 	assert!(
 		session.diagnostics(file).is_empty(),
@@ -108,7 +108,7 @@ fn math_and_from_calls_are_recorded() {
 	let from = find(
 		&session,
 		file,
-		"Array(Integer).from([], capacity = n)",
+		"Array<Integer>.from([], capacity = n)",
 		|view| matches!(view, View::Call { .. }),
 	);
 	let call = analysis.call(from).unwrap();
@@ -116,13 +116,13 @@ fn math_and_from_calls_are_recorded() {
 	assert!(matches!(call.arguments[1], Argument::Given(_)));
 	assert_eq!(
 		session.display_type(analysis.type_of(from)),
-		"Array(Integer)"
+		"Array<Integer>"
 	);
 	let copy = find(&session, file, "Array.from([1.5])", |view| {
 		matches!(view, View::Call { .. })
 	});
 	assert_eq!(analysis.call(copy).unwrap().arguments[1], Argument::Default);
-	assert_eq!(session.display_type(analysis.type_of(copy)), "Array(Float)");
+	assert_eq!(session.display_type(analysis.type_of(copy)), "Array<Float>");
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn number_members_and_range_fields_resolve_to_builtins() {
 	assert!(!analysis.has_flags(slice, NodeFlags::INDEX_CHECK));
 	assert_eq!(
 		session.display_type(analysis.type_of(slice)),
-		"Array(Integer)"
+		"Array<Integer>"
 	);
 }
 
@@ -173,6 +173,6 @@ fn tuples_index_with_literals() {
 	});
 	assert_eq!(
 		session.display_type(analysis.type_of(pair)),
-		"Tuple(Integer, String)"
+		"Tuple<Integer, String>"
 	);
 }

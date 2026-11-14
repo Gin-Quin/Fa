@@ -139,31 +139,6 @@ impl Walker<'_> {
 		}
 	}
 
-	/// Whether a callee names a function declared with a value parameter
-	/// (its first argument list is then always the generic one).
-	pub(super) fn has_value_params(&mut self, callee: NodeId) -> bool {
-		let tree = Arc::clone(&self.tree);
-		let View::Name(name) = syntax::view(&tree, callee) else {
-			return false;
-		};
-		let sym = self.s.types.syms.intern(tree.name(name));
-		let Some(symbol) = self.a.symbols.lookup(self.body.scope, sym) else {
-			return false;
-		};
-		let decl = self.a.symbols.symbol(symbol).decl_node;
-		let View::Function { generics, .. } = syntax::view(&tree, decl) else {
-			return false;
-		};
-		generics.iter().any(|generic| {
-			let target = match syntax::view(&tree, generic) {
-				View::Assignment { target, .. } => target,
-				_ => generic,
-			};
-			matches!(syntax::view(&tree, target), View::Name(name)
-				if tree.name(name).chars().next().is_some_and(char::is_lowercase))
-		})
-	}
-
 	/// The generic arguments of an application: a constant for a value
 	/// parameter (`GN008` for a type), a type otherwise.
 	pub(super) fn generic_arguments(

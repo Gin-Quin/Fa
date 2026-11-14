@@ -11,7 +11,7 @@ use crate::analysis::NodeFlags;
 use crate::builtins;
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
-use crate::diagnostics::codes::types::{CL020, FN028, TY003, TY007, TY008, TY040};
+use crate::diagnostics::codes::types::{CL020, FN028, GN030, TY003, TY007, TY008, TY040};
 use crate::diagnostics::codes::values::{E_DECL_9, E_NUM_13};
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
@@ -22,6 +22,9 @@ impl Walker<'_> {
 	/// The type a type expression denotes.
 	pub fn check_type_expr(&mut self, n: NodeId) -> TypeId {
 		let tree = Arc::clone(&self.tree);
+		// only the type written right after a parameter's name can be a generic
+		// function type: not its parts (`GN030`)
+		let parameter_type = std::mem::replace(&mut self.parameter_type, false);
 		let ty = match syntax::view(&tree, n) {
 			View::Name(name) => self.memo(n, |w| w.type_name(n, name)),
 			View::Group(inner) => {
@@ -33,16 +36,21 @@ impl Walker<'_> {
 				self.memo(n, |w| w.optional_type(inner, inner_ty))
 			}
 			View::Call { callee, arguments } => self.type_application(n, callee, arguments),
-			// `Task(T) throws E` (tasks.rs)
+			// `Task<T> throws E` (tasks.rs)
 			View::Throws { signature, errors } if self.is_task_application(signature) => {
 				let errors = self.check_type_expr(errors);
 				let View::Call { callee, arguments } = syntax::view(&tree, signature) else {
 					return TypeId::UNKNOWN;
 				};
+				if !syntax::is_generic_application(&tree, signature) {
+					self.parenthesized_generics(signature, callee, arguments);
+				}
 				let ty = self.task_type_expr(signature, callee, arguments, errors);
 				self.memo(n, |_| ty)
 			}
-			View::Lambda { signature, body } => self.function_type_expr(n, signature, body),
+			View::Lambda { signature, body } => {
+				self.function_type_expr(n, signature, body, parameter_type)
+			}
 			// literal types (types brief §3.1.2)
 			View::Integer(value) => self.memo(n, |w| w.s.types.int_literal(value)),
 			View::String(text) => self.memo(n, |w| w.s.types.string_literal(text)),
@@ -120,7 +128,7 @@ impl Walker<'_> {
 			let diagnostic = self.diagnostic(
 				&TY008,
 				n,
-				format!("`{text}` is a value, not a type: write its type, or `Type({text})`"),
+				format!("`{text}` is a value, not a type: write its type, or `Type<{text}>`"),
 			);
 			self.report(diagnostic);
 			return TypeId::UNKNOWN;
@@ -278,11 +286,15 @@ impl Walker<'_> {
 		self.s.types.optional(inner_ty)
 	}
 
-	/// `Name(arguments)` in a type: a ranged integer type,
-	/// `Integer(min = 0, max = 10)`, `Int8(min = 0)` (values brief §6.2). Generic
-	/// applications (`Array(Integer)`) come with collections and generics.
+	/// `Name<arguments>` in a type: a ranged integer type,
+	/// `Integer<min = 0, max = 10>`, `Int8<min = 0>` (values brief §6.2), a
+	/// collection, a generic type, a type function. Parentheses are a call,
+	/// never a type: `GN009` (the type is computed anyway).
 	fn type_application(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> TypeId {
 		let tree = Arc::clone(&self.tree);
+		if !syntax::is_generic_application(&tree, n) {
+			self.parenthesized_generics(n, callee, arguments);
+		}
 		// `std.concurrency.Mutex(T)` (std_library.rs)
 		if let Some(builtin) = self.std_qualified(callee)
 			&& let Some(kind) = crate::types::SyncKind::from_name(builtins::get(builtin).path)
@@ -405,7 +417,7 @@ impl Walker<'_> {
 							let diagnostic = self.diagnostic(
 								&E_NUM_13,
 								value,
-								"a bound of an integer type is a constant integer, ex: `Integer(min = 0, max = 10)`",
+								"a bound of an integer type is a constant integer, ex: `Integer<min = 0, max = 10>`",
 							);
 							self.report(diagnostic);
 						}
@@ -478,6 +490,42 @@ impl Walker<'_> {
 		n: NodeId,
 		signature: SignatureView<'_>,
 		body: NodeId,
+		parameter_type: bool,
+	) -> TypeId {
+		if signature.generics.is_empty() {
+			return self.function_type_expr_inner(n, signature, body);
+		}
+		// `<Value>(value: Value) => Value`: a generic function type, whose
+		// parameters are bound by the type itself (generics.rs)
+		if !parameter_type {
+			self.memo(n, |w| {
+				let diagnostic = w.diagnostic(
+					&GN030,
+					n,
+					"a value of a generic function type must be known at compile time: only a parameter can have this type, and it is given a named function or a lambda",
+				);
+				w.report(diagnostic);
+				TypeId::UNKNOWN
+			});
+			return TypeId::UNKNOWN;
+		}
+		let saved = self.body.scope;
+		let params = self.declare_generics(n, "function type", signature.generics);
+		for &param in &params {
+			if !self.quantified_params.contains(&param) {
+				self.quantified_params.push(param);
+			}
+		}
+		let ty = self.function_type_expr_inner(n, signature, body);
+		self.body.scope = saved;
+		ty
+	}
+
+	fn function_type_expr_inner(
+		&mut self,
+		n: NodeId,
+		signature: SignatureView<'_>,
+		body: NodeId,
 	) -> TypeId {
 		let tree = Arc::clone(&self.tree);
 		// `(…) => R throws E mutates p`: the clauses wrap the return type
@@ -515,6 +563,7 @@ impl Walker<'_> {
 		let mut params = Vec::with_capacity(signature.parameters.len());
 		for (index, parameter) in signature.parameters.iter().enumerate() {
 			self.set_flag(parameter, NodeFlags::TYPE_EXPR);
+			let saved_parameter_type = std::mem::replace(&mut self.parameter_type, true);
 			// `(self) => String`: a method required by a structural type; the
 			// type is the method without its receiver (FieldFlags::METHOD)
 			if index == 0 && is_self_parameter(&tree, parameter) {
@@ -539,6 +588,7 @@ impl Walker<'_> {
 				// `(Integer) => Integer`: an unnamed parameter is its type
 				_ => (false, self.check_type_expr(parameter)),
 			};
+			self.parameter_type = saved_parameter_type;
 			if variadic && index + 1 != signature.parameters.len() {
 				self.memo(parameter, |w| {
 					let diagnostic =

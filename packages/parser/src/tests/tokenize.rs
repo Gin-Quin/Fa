@@ -274,7 +274,6 @@ fn operators_with_common_characters() {
 	// `<` followed by anything but whitespace opens a generic list
 	assert_tokens("<<", vec![TokenKind::GenericOpen, TokenKind::LessThan]);
 	assert_tokens("< <", vec![TokenKind::LessThan, TokenKind::LessThan]);
-
 }
 
 #[test]
@@ -624,7 +623,10 @@ fn start_keyword() {
 #[test]
 fn generic_brackets() {
 	use TokenKind::*;
-	assert_tokens("Array<Integer>", vec![Identifier, GenericOpen, Identifier, GenericClose]);
+	assert_tokens(
+		"Array<Integer>",
+		vec![Identifier, GenericOpen, Identifier, GenericClose],
+	);
 	assert_tokens("a < b", vec![Identifier, LessThan, Identifier]);
 	assert_tokens("a <\nb", vec![Identifier, LessThan, Identifier]);
 	assert_tokens("a<b", vec![Identifier, GenericOpen, Identifier]);
@@ -632,7 +634,15 @@ fn generic_brackets() {
 	// `>>` closes two lists
 	assert_tokens(
 		"A<B<C>>",
-		vec![Identifier, GenericOpen, Identifier, GenericOpen, Identifier, GenericClose, GenericClose],
+		vec![
+			Identifier,
+			GenericOpen,
+			Identifier,
+			GenericOpen,
+			Identifier,
+			GenericClose,
+			GenericClose,
+		],
 	);
 	// brackets suspend a generic list
 	assert_tokens(
@@ -664,12 +674,27 @@ fn generic_brackets() {
 	);
 	assert_tokens(
 		"Pool<a->b>",
-		vec![Identifier, GenericOpen, Identifier, Arrow, Identifier, GenericClose],
+		vec![
+			Identifier,
+			GenericOpen,
+			Identifier,
+			Arrow,
+			Identifier,
+			GenericClose,
+		],
 	);
 	// a new line ends a generic list left open by mistake: `>` is a comparison again
 	assert_tokens(
 		"a<b\nc > d",
-		vec![Identifier, GenericOpen, Identifier, Stop, Identifier, GreaterThan, Identifier],
+		vec![
+			Identifier,
+			GenericOpen,
+			Identifier,
+			Stop,
+			Identifier,
+			GreaterThan,
+			Identifier,
+		],
 	);
 	// a closing bracket closes the generic lists left open inside it
 	assert_tokens(

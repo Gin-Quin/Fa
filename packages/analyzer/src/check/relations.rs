@@ -599,7 +599,7 @@ impl Walker<'_> {
 			let Some(direct) = direct else {
 				if holder.element_decl.is_some() {
 					let message = format!(
-						"the elements of `{holder_text}` have no direct side `{field_text}`: a reverse side names a field `(T in c)?` or `Pool(T in c)` of the elements of its collection"
+						"the elements of `{holder_text}` have no direct side `{field_text}`: a reverse side names a field `(T in c)?` or `Pool<T in c>` of the elements of its collection"
 					);
 					let diagnostic = self.diagnostic(&REL008, side.node, message);
 					self.report(diagnostic);
@@ -634,7 +634,7 @@ impl Walker<'_> {
 					format!("`Pool(in {holder_text}->{field_text})`")
 				} else {
 					format!(
-						"`Pool({holder_text}->{field_text})` or `({holder_text}->{field_text})?`"
+						"`Pool<{holder_text}->{field_text}>` or `({holder_text}->{field_text})?`"
 					)
 				};
 				let message = format!(
@@ -682,7 +682,7 @@ impl Walker<'_> {
 					let example = if many {
 						format!("`{field}Of: Pool(in {collection}->{field})`")
 					} else {
-						format!("`{field}Of: Pool({collection}->{field})`")
+						format!("`{field}Of: Pool<{collection}->{field}>`")
 					};
 					let message = format!(
 						"`{field}` has no reverse side: declare one on the elements of `{collection}`, for example {example}"

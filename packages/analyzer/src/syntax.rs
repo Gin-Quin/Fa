@@ -315,6 +315,10 @@ impl<'t> PatternFields<'t> {
 pub struct SignatureView<'t> {
 	/// `async`
 	pub is_async: bool,
+	/// The generic parameters, `<Item>` in `<Item>(items: Array<Item>) => …`.
+	/// For the lambda of a `function` declaration, they are the declaration's
+	/// ([`View::Function`]).
+	pub generics: NodeList<'t>,
 	/// The parameters (identifiers, `name: Type` assignments, destructured parameters).
 	pub parameters: NodeList<'t>,
 	/// The declared return type.
@@ -333,6 +337,7 @@ impl<'t> SignatureView<'t> {
 	fn new(signature: &'t FunctionSignature) -> Self {
 		SignatureView {
 			is_async: signature.is_async,
+			generics: NodeList(&signature.generic_parameters),
 			parameters: NodeList(&signature.parameters),
 			returns: optional(signature.return_type_expression),
 			throws: optional(signature.errors),
@@ -415,7 +420,10 @@ pub enum View<'t> {
 	},
 	/// `items[index]`
 	Index { target: NodeId, index: NodeId },
-	/// `f(a, b = 1)`: named arguments are `Assignment` nodes.
+	/// `f(a, b = 1)`: named arguments are `Assignment` nodes. Also explicit
+	/// generic parameters, `Array<Integer>`, `first<Float>`, `Integer<min = 0>`:
+	/// [`is_generic_application`] tells them apart (the brackets, never the
+	/// arguments).
 	Call {
 		callee: NodeId,
 		arguments: NodeList<'t>,
@@ -504,7 +512,8 @@ pub enum View<'t> {
 	},
 	/// `namespace Name = { … }`
 	Namespace { name: Name, value: NodeId },
-	/// `function name(Generics): Type = expression`
+	/// `function name: Type = expression`; `generics` are those of its lambda,
+	/// `function first = <Item>(items: Array<Item>) => …`.
 	Function {
 		name: Name,
 		is_async: bool,
@@ -518,14 +527,14 @@ pub enum View<'t> {
 		annotation: Option<NodeId>,
 		value: NodeId,
 	},
-	/// `export function(Generics) = …`
+	/// `export function = <Generics>(…) => …`
 	ExportFunction {
 		is_async: bool,
 		generics: NodeList<'t>,
 		annotation: Option<NodeId>,
 		value: NodeId,
 	},
-	/// `export type(Parameters) = …`
+	/// `export type<Parameters> = …`
 	ExportType {
 		parameters: NodeList<'t>,
 		value: NodeId,
@@ -701,6 +710,24 @@ pub fn is_reactive(tree: &TypedSyntaxTree, n: NodeId) -> bool {
 	)
 }
 
+/// Whether node `n` gives explicit generic parameters between angle brackets,
+/// `Array<Integer>` or `first<Float>` (a [`View::Call`] too): parentheses are
+/// always a call or a conversion.
+pub fn is_generic_application(tree: &TypedSyntaxTree, n: NodeId) -> bool {
+	matches!(
+		tree.nodes.get(n.index()),
+		Some(Node::GenericApplication { .. })
+	)
+}
+
+/// The generic parameters of the lambda of a `function` declaration.
+fn lambda_generics(tree: &TypedSyntaxTree, expression: usize) -> NodeList<'_> {
+	match tree.nodes.get(expression) {
+		Some(Node::ArrowFunction { signature, .. }) => NodeList(&signature.generic_parameters),
+		_ => NodeList(&[]),
+	}
+}
+
 /// The view of node `n`. A node index out of range is [`View::Error`].
 pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 	let Some(node) = tree.nodes.get(n.index()) else {
@@ -781,6 +808,10 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 		} => View::Call {
 			callee: id(*function),
 			arguments: list(parameters),
+		},
+		Node::GenericApplication { target, arguments } => View::Call {
+			callee: id(*target),
+			arguments: list(arguments),
 		},
 		Node::Group { expression } => View::Group(id(*expression)),
 		Node::EmptyGroup => View::EmptyGroup,
@@ -949,13 +980,12 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 		Node::Function {
 			name,
 			is_async,
-			parameters,
 			type_expression,
 			expression,
 		} => View::Function {
 			name: *name,
 			is_async: *is_async,
-			generics: list(parameters),
+			generics: lambda_generics(tree, *expression),
 			annotation: optional(*type_expression),
 			value: id(*expression),
 		},
@@ -970,12 +1000,11 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 		},
 		Node::ExportFunction {
 			is_async,
-			parameters,
 			type_expression,
 			expression,
 		} => View::ExportFunction {
 			is_async: *is_async,
-			generics: list(parameters),
+			generics: lambda_generics(tree, *expression),
 			annotation: optional(*type_expression),
 			value: id(*expression),
 		},

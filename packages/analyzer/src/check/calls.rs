@@ -96,7 +96,15 @@ impl Walker<'_> {
 		expected: Option<TypeId>,
 		comptime: bool,
 	) -> TypeId {
-		if let Some((builtin, target)) = self.conversion_target(callee) {
+		// `first<Float>`, `Array<Integer>` (generics.rs): never a call
+		if syntax::is_generic_application(&self.tree, n) {
+			if let Some(ty) = self.generic_function_application(n, callee, arguments) {
+				return ty;
+			}
+			if !self.is_type_name(callee) {
+				return self.not_generic_function(n, callee);
+			}
+		} else if let Some((builtin, target)) = self.conversion_target(callee) {
 			return self.check_conversion_call(n, callee, builtin, target, arguments);
 		}
 		// number methods (`x.abs()`): numbers.rs

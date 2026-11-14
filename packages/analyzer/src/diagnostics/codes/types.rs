@@ -86,6 +86,7 @@ codes! {
 	GN006 = "GN006", Error, [], "compile-time parameter of a type without exact equality (Float, functions…)";
 	GN007 = "GN007", Error, [], "wrong number of generic arguments";
 	GN008 = "GN008", Error, [], "a type given to a lowercase parameter, or a value to a capitalized one";
+	GN009 = "GN009", Error, [], "explicit generic parameters between parentheses (a call): `Array(Integer)` is `Array<Integer>`";
 	GN010 = "GN010", Error, [], "argument doesn't satisfy the constraint";
 	GN011 = "GN011", Error, [], "argument satisfies several members of a union constraint";
 	GN012 = "GN012", Error, [], "difference of a type parameter in a generic signature";
@@ -95,7 +96,7 @@ codes! {
 	GN016 = "GN016", Error, [], "operation not allowed by the constraint";
 	GN017 = "GN017", Error, [], "error in code checked after substitution (with the application site)";
 	GN020 = "GN020", Error, [], "polymorphic recursion";
-	GN030 = "GN030", Error, [], "generic parameters on a lambda";
+	GN030 = "GN030", Error, [], "a value of a generic function type that isn't known at compile time";
 	TF001 = "TF001", Error, [], "type function applications nest too deeply (256)";
 	TF002 = "TF002", Error, [], "error inside an applied type function";
 	TF003 = "TF003", Error, [], "compile-time step limit";

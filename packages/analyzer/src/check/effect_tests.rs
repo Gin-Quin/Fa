@@ -62,7 +62,7 @@ fn effects_of(source: &str, name: &str) -> Vec<String> {
 fn single_expressions_infer_their_effects() {
 	assert_eq!(
 		effects_of(
-			"function add = (names: Array(String)) => names.push(\"x\")\n",
+			"function add = (names: Array<String>) => names.push(\"x\")\n",
 			"add"
 		),
 		["mutates names"]
@@ -77,7 +77,7 @@ fn single_expressions_infer_their_effects() {
 	);
 	assert_eq!(
 		effects_of(
-			"function last = (items: Array(Integer)) => items.pop()\n",
+			"function last = (items: Array<Integer>) => items.pop()\n",
 			"last"
 		),
 		["mutates items.length", "invalidates items[..]"]
@@ -85,7 +85,7 @@ fn single_expressions_infer_their_effects() {
 	// a call substitutes the callee's paths
 	assert_eq!(
 		effects_of(
-			"function add = (names: Array(String)) => names.push(\"x\")\nfunction twice = (all: Array(Array(String))) => add(all[0])\n",
+			"function add = (names: Array<String>) => names.push(\"x\")\nfunction twice = (all: Array<Array<String>>) => add(all[0])\n",
 			"twice"
 		),
 		["mutates all[0]"]
@@ -105,7 +105,7 @@ fn declared_effects_are_normalized() {
 
 #[test]
 fn block_bodies_declare_their_effects() {
-	let source = "type P = { a: Integer, b: Integer }\nfunction f = (p: P) mutates p.a => {\n\tp.a = 1\n\tp.b = 2\n}\nfunction g = (p: P) => {\n\tp.b = 2\n}\nfunction h = (items: Array(Integer)) => {\n\titems.push(1)\n}\n";
+	let source = "type P = { a: Integer, b: Integer }\nfunction f = (p: P) mutates p.a => {\n\tp.a = 1\n\tp.b = 2\n}\nfunction g = (p: P) => {\n\tp.b = 2\n}\nfunction h = (items: Array<Integer>) => {\n\titems.push(1)\n}\n";
 	assert_eq!(codes(source), ["EFF004", "EFF003", "EFF001"]);
 	let found = messages(source);
 	assert!(found[0].contains("only `p.a` is declared"), "{found:?}");
@@ -115,7 +115,7 @@ fn block_bodies_declare_their_effects() {
 
 #[test]
 fn mutated_arguments_must_be_mutable() {
-	let source = "function add = (names: Array(String)) => names.push(\"x\")\nlet fixed = [\"a\"]\nadd(fixed)\nmutable open = [\"a\"]\nadd(open)\nfor name in [\"b\"] {\n\tadd([name])\n}\n";
+	let source = "function add = (names: Array<String>) => names.push(\"x\")\nlet fixed = [\"a\"]\nadd(fixed)\nmutable open = [\"a\"]\nadd(open)\nfor name in [\"b\"] {\n\tadd([name])\n}\n";
 	assert_eq!(codes(source), ["EFF007"]);
 }
 
@@ -178,7 +178,7 @@ fn references_follow_the_flow() {
 
 #[test]
 fn closures_record_captures_and_escapes() {
-	let source = "function main = () => {\n\tmutable count = 0\n\tlet step = 2\n\tfunction bump = () => {\n\t\tcount += step\n\t}\n\tbump()\n\tmutable callbacks: Array(() => Void) = []\n\tcallbacks.push(() => console.log(step))\n}\n";
+	let source = "function main = () => {\n\tmutable count = 0\n\tlet step = 2\n\tfunction bump = () => {\n\t\tcount += step\n\t}\n\tbump()\n\tmutable callbacks: Array<() => Void> = []\n\tcallbacks.push(() => console.log(step))\n}\n";
 	let (session, file) = analyze_source(source);
 	assert!(
 		session.diagnostics(file).is_empty(),
@@ -204,7 +204,7 @@ fn closures_record_captures_and_escapes() {
 	// an escaping closure can't write what it captures
 	assert_eq!(
 		codes(
-			"function main = () => {\n\tmutable n = 0\n\tmutable fs: Array(() => Void) = []\n\tfs.push(() => {\n\t\tn += 1\n\t})\n}\n"
+			"function main = () => {\n\tmutable n = 0\n\tmutable fs: Array<() => Void> = []\n\tfs.push(() => {\n\t\tn += 1\n\t})\n}\n"
 		),
 		["REF021"]
 	);
@@ -248,11 +248,11 @@ fn last_uses_that_copy_are_moves() {
 	let source = "let a = [1, 2]\nfor i in 0..3 {\n\tlet b = a\n}\n";
 	assert!(!moved(source, 3, "a"));
 	// a primitive is never moved, a returned local is
-	let source = "function f = (): Array(Integer) => {\n\tmutable items = [1]\n\titems.push(2)\n\titems\n}\nlet n = 1\nlet m = n\n";
+	let source = "function f = (): Array<Integer> => {\n\tmutable items = [1]\n\titems.push(2)\n\titems\n}\nlet n = 1\nlet m = n\n";
 	assert!(moved(source, 4, "items"));
 	assert!(!moved(source, 7, "n"));
 	// pushed into a collection: moved; a local function reading it later keeps it
-	let source = "function main = () => {\n\tlet item = [1]\n\tmutable all: Array(Array(Integer)) = []\n\tall.push(item)\n}\n";
+	let source = "function main = () => {\n\tlet item = [1]\n\tmutable all: Array<Array<Integer>> = []\n\tall.push(item)\n}\n";
 	assert!(moved(source, 4, "item"));
 	let source = "function main = () => {\n\tlet item = [1]\n\tfunction show = () => console.log(item)\n\tlet copy = item\n\tshow()\n}\n";
 	assert!(!moved(source, 4, "item"));

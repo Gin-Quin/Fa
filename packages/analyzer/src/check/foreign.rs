@@ -96,9 +96,9 @@ impl Walker<'_> {
 			}
 			"Pointer" | "CArray" => {
 				let example = if text == "Pointer" {
-					"Pointer(Int32)"
+					"Pointer<Int32>"
 				} else {
-					"CArray(Float32, 3)"
+					"CArray<Float32, 3>"
 				};
 				let message = format!("`{text}` needs its arguments, ex: `{example}`");
 				let diagnostic = self.diagnostic(&TY003, n, message);
@@ -136,7 +136,7 @@ impl Walker<'_> {
 					let diagnostic = w.diagnostic(
 						&TY003,
 						n,
-						"`Pointer` takes the type it points to, ex: `Pointer(Int32)`",
+						"`Pointer` takes the type it points to, ex: `Pointer<Int32>`",
 					);
 					w.report(diagnostic);
 					TypeId::UNKNOWN
@@ -151,7 +151,7 @@ impl Walker<'_> {
 				let diagnostic = w.diagnostic(
 					&TY003,
 					n,
-					"`CArray` takes the type of its items and their count, ex: `CArray(Float32, 3)`",
+					"`CArray` takes the type of its items and their count, ex: `CArray<Float32, 3>`",
 				);
 				w.report(diagnostic);
 				return TypeId::UNKNOWN;
@@ -700,7 +700,7 @@ impl Walker<'_> {
 					Some("a C callback can't throw: C can't propagate a Fa error")
 				} else if captures {
 					Some(
-						"a C callback can't capture local values: pass its data through a `Pointer(Void)?` parameter",
+						"a C callback can't capture local values: pass its data through a `Pointer<Void>?` parameter",
 					)
 				} else {
 					None

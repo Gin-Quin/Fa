@@ -192,6 +192,43 @@ impl Walker<'_> {
 		expected: Option<TypeId>,
 	) -> TypeId {
 		let lenient = expected.is_some_and(|expected| self.s.types.is_recovering(expected));
+		// `<Value>(value: Value) => value`: a generic lambda, whose parameters are
+		// rigid in its body; a lambda given for a generic function type is generic
+		// too: the parameters of that type are rigid in its body (generics.rs)
+		let saved_scope = self.body.scope;
+		let generics = if signature.generics.is_empty() {
+			Vec::new()
+		} else {
+			self.declare_generics(n, "lambda", signature.generics)
+		};
+		let quantified = expected
+			.map(|expected| self.quantified_of(expected))
+			.unwrap_or_default();
+		let rigid = self.rigid_params.len();
+		self.rigid_params.extend(generics.iter().copied());
+		self.rigid_params.extend(quantified);
+		// a generic lambda has its own type: it is instantiated for the expected
+		// type like a named generic function (`check_assignable`)
+		let own_expected = if generics.is_empty() { expected } else { None };
+		let ty = self.check_lambda_inner(n, signature, body, own_expected, lenient);
+		self.rigid_params.truncate(rigid);
+		self.body.scope = saved_scope;
+		if !generics.is_empty()
+			&& let Some(info) = self.a.functions.get_mut(&n)
+		{
+			info.generics = generics;
+		}
+		ty
+	}
+
+	fn check_lambda_inner(
+		&mut self,
+		n: NodeId,
+		signature: SignatureView<'_>,
+		body: NodeId,
+		expected: Option<TypeId>,
+		lenient: bool,
+	) -> TypeId {
 		let expected = expected.and_then(|expected| self.signature_of(expected));
 		// it sees the facts of its creation (values brief D-102); `break`,
 		// `continue` and `return` don't cross it
@@ -559,7 +596,13 @@ impl Walker<'_> {
 		for (index, param) in syntaxes.iter().enumerate() {
 			let expected = expected_params.get(index).copied();
 			let declared = match (param.annotation, expected) {
-				(Some(annotation), _) => self.check_type_expr(annotation),
+				(Some(annotation), _) => {
+					// a generic function type is allowed here (GN030 elsewhere)
+					let saved = std::mem::replace(&mut self.parameter_type, true);
+					let ty = self.check_type_expr(annotation);
+					self.parameter_type = saved;
+					ty
+				}
 				(None, Some(expected)) if expected.variadic => self.array_item(expected.ty),
 				(None, Some(expected)) => expected.ty,
 				(None, None) if lenient => TypeId::UNKNOWN,

@@ -358,6 +358,8 @@ fn token_type_of(kind: TokenKind) -> Option<TokenType> {
 		| K::ParenthesisOpenFunctionDeclaration
 		| K::BracesOpen
 		| K::BracketsOpen
+		| K::GenericOpen
+		| K::GenericClose
 		| K::Dot => return None,
 	})
 }
@@ -461,16 +463,7 @@ fn declarations(tree: &TypedSyntaxTree) -> HashMap<usize, (TokenType, u32)> {
 
 	for node in &tree.nodes {
 		match node {
-			Node::Function {
-				name, parameters, ..
-			} => {
-				declare(*name, TokenType::Function, 0);
-				for parameter in parameters {
-					if let Some(name) = identifier(*parameter) {
-						declare(name, TokenType::TypeParameter, 0);
-					}
-				}
-			}
+			Node::Function { name, .. } => declare(*name, TokenType::Function, 0),
 			Node::Type {
 				name,
 				parameters,
@@ -510,6 +503,11 @@ fn declarations(tree: &TypedSyntaxTree) -> HashMap<usize, (TokenType, u32)> {
 			| Node::Use { name, .. }
 			| Node::Reuse { name, .. } => declare(*name, TokenType::Variable, 0),
 			Node::ArrowFunction { signature, .. } => {
+				for parameter in &signature.generic_parameters {
+					if let Some(name) = identifier(*parameter) {
+						declare(name, TokenType::TypeParameter, 0);
+					}
+				}
 				for parameter in &signature.parameters {
 					if let Some(name) = identifier(*parameter) {
 						declare(name, TokenType::Parameter, 0);
@@ -657,7 +655,7 @@ mod tests {
 	#[test]
 	fn pascal_case_names_are_types() {
 		assert_eq!(
-			classes("let a: Array(String) = Shape.Circle"),
+			classes("let a: Array<String> = Shape.Circle"),
 			[
 				"let:Keyword",
 				"a:Variable+d+r",

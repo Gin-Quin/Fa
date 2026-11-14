@@ -189,6 +189,7 @@ impl<'a> Printer<'a> {
 			}
 			Node::Tuple { items } if !items.is_empty() => self.leftmost(items[0]),
 			Node::FunctionCall { function, .. } => self.leftmost(*function),
+			Node::GenericApplication { target, .. } => self.leftmost(*target),
 			Node::Index { target, .. } | Node::MemberIndex { target, .. } => self.leftmost(*target),
 			Node::Is { left, .. }
 			| Node::IsIn { left, .. }
@@ -778,6 +779,11 @@ impl<'a> Printer<'a> {
 				Some(document) => document,
 				None => self.chain(index),
 			},
+			Node::GenericApplication { target, arguments } => {
+				let target_document = self.node(*target);
+				let arguments_document = self.generic_list(arguments);
+				concat![target_document, arguments_document]
+			}
 			Node::Access { .. } | Node::OptionalAccess { .. } | Node::Index { .. } => {
 				self.chain(index)
 			}
@@ -918,7 +924,6 @@ impl<'a> Printer<'a> {
 			Node::Function {
 				name,
 				is_async,
-				parameters,
 				type_expression,
 				expression,
 			} => {
@@ -929,7 +934,6 @@ impl<'a> Printer<'a> {
 					"function "
 				});
 				parts.text(self.name(*name));
-				parts.push(self.generic_parameters(name.end as usize, parameters));
 				if let Some(type_expression) = type_expression {
 					parts.text(": ");
 					parts.push(self.type_node(*type_expression));
@@ -959,7 +963,6 @@ impl<'a> Printer<'a> {
 			}
 			Node::ExportFunction {
 				is_async,
-				parameters,
 				type_expression,
 				expression,
 			} => {
@@ -969,12 +972,6 @@ impl<'a> Printer<'a> {
 				} else {
 					"export function"
 				});
-				let keyword_end = self.start(index)
-					+ self
-						.text(index)
-						.find("function")
-						.map_or(0, |offset| offset + 8);
-				parts.push(self.generic_parameters(keyword_end, parameters));
 				if let Some(type_expression) = type_expression {
 					parts.text(": ");
 					parts.push(self.type_node(*type_expression));
@@ -1138,25 +1135,37 @@ impl<'a> Printer<'a> {
 		document
 	}
 
-	/// The generic parameters of a declaration, ex: `(Item)`, written after `after`.
-	fn generic_parameters(&mut self, after: usize, parameters: &[usize]) -> Document<'a> {
+	/// The generic parameters of a declaration, ex: `<Item>`, written after `after`.
+	fn generic_parameters(&mut self, _after: usize, parameters: &[usize]) -> Document<'a> {
 		if parameters.is_empty() {
 			return Document::empty();
 		}
-		let open = self.find(after, b'(');
-		let close = self.find(self.end(*parameters.last().unwrap_or(&0)), b')');
-		self.with_in_type(true, |printer| {
-			printer.bracketed(
-				"(",
-				")",
-				open + 1,
-				close,
-				parameters,
-				false,
-				false,
-				|printer, item| printer.node(item),
-			)
-		})
+		self.generic_list(parameters)
+	}
+
+	/// A generic list, ex: `<Item, Value: Integer | Float>` or `<String, Integer>`. It stays on
+	/// the line of its `<` (a `<` followed by a line break is a comparison): only its items
+	/// break, like the object type of `Map<String, {\n\tid: Integer\n}>`.
+	fn generic_list(&mut self, items: &[usize]) -> Document<'a> {
+		let mut parts = Parts::new();
+		parts.text("<");
+		for (position, item) in items.iter().enumerate() {
+			if position > 0 {
+				parts.text(", ");
+			}
+			let document = match self.tree.at(*item) {
+				// `min = 0` in `Integer<min = 0>`: a value
+				Node::Assignment {
+					type_expression: None,
+					expression: Some(_),
+					..
+				} => self.value_node(*item),
+				_ => self.type_node(*item),
+			};
+			parts.push(document);
+		}
+		parts.text(">");
+		parts.build()
 	}
 
 	/// A block: `{` statements `}`. A block of a single statement written on one line stays on
@@ -1366,10 +1375,15 @@ impl<'a> Printer<'a> {
 		if signature.is_async {
 			parts.text("async ");
 		}
-		let open = self.find(
-			self.start(index) + if signature.is_async { 5 } else { 0 },
-			b'(',
-		);
+		// `<Item>(…)`: the parentheses come after the generic list
+		let parameters_from = match signature.generic_parameters.last() {
+			Some(last) => {
+				parts.push(self.generic_list(&signature.generic_parameters));
+				self.find(self.end(*last), b'>') + 1
+			}
+			None => self.start(index) + if signature.is_async { 5 } else { 0 },
+		};
+		let open = self.find(parameters_from, b'(');
 		let after_parameters = signature
 			.parameters
 			.last()

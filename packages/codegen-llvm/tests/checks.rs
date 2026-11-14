@@ -218,7 +218,7 @@ mod with_llvm {
 		// (`irce`), and the sums of bytes are computed on 16-bit lanes
 		let ir = optimized_ir(
 			"blur",
-			"function blur = (source: Array(UInt8), destination: Array(UInt8), width: Integer) throws IndexError mutates destination => {\n\tfor y in 1..width - 1 {\n\t\tfor x in 1..width - 1 {\n\t\t\tlet i = y * width + x\n\t\t\tlet sum: Integer = try source[i - width] + source[i - 1] * 2 + source[i] * 4 + source[i + 1] * 2 + source[i + width]\n\t\t\ttry destination[i] = sum // 16\n\t\t}\n\t}\n}\nlet width = arguments.length + 40\nmutable a = Array(UInt8).from([], capacity = width * width)\nmutable b = Array(UInt8).from([], capacity = width * width)\nfor index in 0..width * width {\n\ta.push(index %% 256)\n\tb.push(0)\n}\nfor 0..4 {\n\ttry blur(a, b, width)\n\ttry blur(b, a, width)\n}\nconsole.log(a.get(width + 1) ?? 0)\n",
+			"function blur = (source: Array<UInt8>, destination: Array<UInt8>, width: Integer) throws IndexError mutates destination => {\n\tfor y in 1..width - 1 {\n\t\tfor x in 1..width - 1 {\n\t\t\tlet i = y * width + x\n\t\t\tlet sum: Integer = try source[i - width] + source[i - 1] * 2 + source[i] * 4 + source[i + 1] * 2 + source[i + width]\n\t\t\ttry destination[i] = sum // 16\n\t\t}\n\t}\n}\nlet width = arguments.length + 40\nmutable a = Array<UInt8>.from([], capacity = width * width)\nmutable b = Array<UInt8>.from([], capacity = width * width)\nfor index in 0..width * width {\n\ta.push(index %% 256)\n\tb.push(0)\n}\nfor 0..4 {\n\ttry blur(a, b, width)\n\ttry blur(b, a, width)\n}\nconsole.log(a.get(width + 1) ?? 0)\n",
 		);
 		let blur = function(&ir, "fa.blur");
 		assert!(blur.contains("load <16 x i8>"), "{blur}");
@@ -265,7 +265,7 @@ mod with_llvm {
 	fn recursive_collection_items_need_no_extra_box() {
 		let ir = ir_of(
 			"inline-recursive-items",
-			"type Node = { value: Integer, children: Array(Node) }\nfunction build = (depth: Integer): Node => { mutable node = Node { value = depth, children = [] }\nif depth > 0 { node.children.push(build(depth - 1)) }\nnode }\nconsole.log(build(3))\n",
+			"type Node = { value: Integer, children: Array<Node> }\nfunction build = (depth: Integer): Node => { mutable node = Node { value = depth, children = [] }\nif depth > 0 { node.children.push(build(depth - 1)) }\nnode }\nconsole.log(build(3))\n",
 		);
 		let build = function(&ir, "fa.build");
 		assert!(build.contains("store { ptr, i64 }"), "{build}");
@@ -277,7 +277,7 @@ mod with_llvm {
 	fn collection_slots_inline_objects_with_other_direct_recursive_edges() {
 		let ir = ir_of(
 			"mixed-recursive-items",
-			"type Node = { value: Integer, next: Node?, children: Array(Node) }\nfunction append = (node: Node, child: Node): Void mutates node => { node.children.push(child) }\nmutable root = Node { value = 0, children = [] }\nappend(root, Node { value = 1, children = [] })\nconsole.log(root.children.length)\n",
+			"type Node = { value: Integer, next: Node?, children: Array<Node> }\nfunction append = (node: Node, child: Node): Void mutates node => { node.children.push(child) }\nmutable root = Node { value = 0, children = [] }\nappend(root, Node { value = 1, children = [] })\nconsole.log(root.children.length)\n",
 		);
 		let append = function(&ir, "fa.append");
 		assert!(append.contains("store { ptr, ptr, i64 }"), "{append}");
@@ -288,7 +288,7 @@ mod with_llvm {
 	fn collection_callbacks_borrow_recursive_items_without_boxes() {
 		let ir = ir_of(
 			"borrow-recursive-callback-items",
-			"type Node = { value: Integer, next: Node?, children: Array(Node) }\nfunction arrayHas = (items: Array(Node)): Boolean => items.some((item) => item.value == 1)\nfunction mapHas = (items: Map(Integer, Node)): Boolean => items.some((key, value) => value.value == 1)\nfunction setHas = (items: Set(Node)): Boolean => items.some((item) => item.value == 1)\nfunction poolHas = (items: Pool(Node)): Boolean => items.find((item) => item.value == 1) is not none\nlet nodes: Array(Node) = []\nlet mapped: Map(Integer, Node) = []\nlet keys: Set(Node) = []\nlet pooled: Pool(Node) = []\nconsole.log(arrayHas(nodes), mapHas(mapped), setHas(keys), poolHas(pooled))\n",
+			"type Node = { value: Integer, next: Node?, children: Array<Node> }\nfunction arrayHas = (items: Array<Node>): Boolean => items.some((item) => item.value == 1)\nfunction mapHas = (items: Map<Integer, Node>): Boolean => items.some((key, value) => value.value == 1)\nfunction setHas = (items: Set<Node>): Boolean => items.some((item) => item.value == 1)\nfunction poolHas = (items: Pool<Node>): Boolean => items.find((item) => item.value == 1) is not none\nlet nodes: Array<Node> = []\nlet mapped: Map<Integer, Node> = []\nlet keys: Set<Node> = []\nlet pooled: Pool<Node> = []\nconsole.log(arrayHas(nodes), mapHas(mapped), setHas(keys), poolHas(pooled))\n",
 		);
 		for name in ["fa.arrayHas", "fa.mapHas", "fa.setHas", "fa.poolHas"] {
 			let body = function(&ir, name);
@@ -302,7 +302,7 @@ mod with_llvm {
 	fn recursive_collection_aliases_reuse_the_existing_container() {
 		let ir = ir_of(
 			"recursive-container-aliases",
-			"type NestedMap = Map(Integer, NestedMap)\nmutable maps: NestedMap = []\nlet emptyMap: NestedMap = []\nmaps[0] = emptyMap\ntype NestedGrowing = GrowingArray(NestedGrowing)\nmutable growing: NestedGrowing = []\nlet emptyGrowing: NestedGrowing = []\ngrowing.push(emptyGrowing)\nconsole.log(maps, growing)\n",
+			"type NestedMap = Map<Integer, NestedMap>\nmutable maps: NestedMap = []\nlet emptyMap: NestedMap = []\nmaps[0] = emptyMap\ntype NestedGrowing = GrowingArray<NestedGrowing>\nmutable growing: NestedGrowing = []\nlet emptyGrowing: NestedGrowing = []\ngrowing.push(emptyGrowing)\nconsole.log(maps, growing)\n",
 		);
 		let main = function(&ir, "main");
 		assert!(!main.contains("@fa_alloc("), "{main}");
@@ -313,7 +313,7 @@ mod with_llvm {
 	fn optional_owning_payloads_are_compared_only_when_present() {
 		let ir = ir_of(
 			"optional-owning-equality",
-			"type Payload = { values: Array(Integer) }\nfunction equal = (a: Payload?, b: Payload?): Boolean => a == b\nconsole.log(equal(none, none), equal(none, Payload { values = [] }))\n",
+			"type Payload = { values: Array<Integer> }\nfunction equal = (a: Payload?, b: Payload?): Boolean => a == b\nconsole.log(equal(none, none), equal(none, Payload { values = [] }))\n",
 		);
 		let equal = function(&ir, "fa.equal");
 		let (presence, payload) = equal
@@ -328,7 +328,7 @@ mod with_llvm {
 	fn array_iteration_reads_its_storage_before_the_loop() {
 		let ir = ir_of(
 			"iteration-storage",
-			"type Item = { value: Integer }\nfunction change = (item: Item) mutates item => { item.value += 1 }\nfunction all = (items: Array(Item)) mutates items => { for item in items { change(item) } }\nmutable items = [Item { value = 1 }, Item { value = 2 }]\nall(items)\nconsole.log(items)\n",
+			"type Item = { value: Integer }\nfunction change = (item: Item) mutates item => { item.value += 1 }\nfunction all = (items: Array<Item>) mutates items => { for item in items { change(item) } }\nmutable items = [Item { value = 1 }, Item { value = 2 }]\nall(items)\nconsole.log(items)\n",
 		);
 		let all = function(&ir, "fa.all");
 		let (setup, body) = all.split_once("for_item:").expect("an iteration");
@@ -341,7 +341,7 @@ mod with_llvm {
 	fn empty_array_fields_reserve_before_the_loop_without_omitting_push_checks() {
 		let ir = ir_of(
 			"reserve-array-fields",
-			"type Bucket = { items: Array(Integer) }\nfunction fill = (count: Integer): Bucket => { mutable bucket = Bucket { items = [] }\nfor index in 0..count { bucket.items.push(index) }\nbucket }\nconsole.log(fill(9))\n",
+			"type Bucket = { items: Array<Integer> }\nfunction fill = (count: Integer): Bucket => { mutable bucket = Bucket { items = [] }\nfor index in 0..count { bucket.items.push(index) }\nbucket }\nconsole.log(fill(9))\n",
 		);
 		let fill = function(&ir, "fa.fill");
 		let reserve = fill.find("@fa_array_reserve(").expect("a reservation");
@@ -367,7 +367,7 @@ mod with_llvm {
 	fn directly_returned_passive_locals_move_on_each_exit() {
 		let ir = ir_of(
 			"return-local",
-			"function build = (early: Boolean): Array(Integer) => { mutable items = [1, 2]\nif early { return (items) }\nitems.push(3)\nitems }\nconsole.log(build(true), build(false))\n",
+			"function build = (early: Boolean): Array<Integer> => { mutable items = [1, 2]\nif early { return (items) }\nitems.push(3)\nitems }\nconsole.log(build(true), build(false))\n",
 		);
 		let build = function(&ir, "fa.build");
 		assert!(!build.contains("@fa.copy"), "{build}");
@@ -455,7 +455,7 @@ mod with_llvm {
 	fn injective_integer_hashes_need_no_key_comparator() {
 		let ir = ir_of(
 			"injective-integer-hash",
-			"mutable items: Map(Integer, Integer) = [(1, 2)]\nitems[3] = 4\nconsole.log(items.get(1), items.get(3), items.get(5))\n",
+			"mutable items: Map<Integer, Integer> = [(1, 2)]\nitems[3] = 4\nconsole.log(items.get(1), items.get(3), items.get(5))\n",
 		);
 		assert!(!ir.contains("@fa.key_equals("), "{ir}");
 		assert!(ir.contains("@fa_table_find_growing("), "{ir}");

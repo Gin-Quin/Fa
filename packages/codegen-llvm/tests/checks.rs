@@ -996,6 +996,9 @@ console.log(items.length)
 			assert_eq!(count(lookup, "@llvm.ctlz.i64("), 1, "{lookup}");
 			assert!(lookup.contains("segment_code = or i64"), "{lookup}");
 			assert!(!lookup.contains("select i1"), "{lookup}");
+			assert!(lookup.contains("item_address = add"), "{lookup}");
+			assert!(lookup.contains("item_pointer = inttoptr"), "{lookup}");
+			assert!(!lookup.contains("segment_start"), "{lookup}");
 		}
 	}
 

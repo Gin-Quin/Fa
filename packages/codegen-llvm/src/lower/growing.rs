@@ -38,7 +38,7 @@ use crate::lower::{Lowering, Slot};
 const SEGMENTS: u32 = 3;
 
 impl<'ctx> Lowering<'_, 'ctx> {
-	/// `{ i64 length, i32 segments, i32 k, ptr cursor, ptr end, ptr directory, [3 x ptr] }`.
+	/// `{ i64 length, { i16 count, i16 storage }, i32 k, ptr cursor, ptr end, ptr directory, [3 x usize] }`.
 	pub(crate) fn segmented_type(&self) -> StructType<'ctx> {
 		let i64 = self.context.i64_type();
 		self.context.struct_type(
@@ -49,7 +49,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.pointer_type().into(),
 				self.pointer_type().into(),
 				self.pointer_type().into(),
-				self.pointer_type().array_type(SEGMENTS).into(),
+				self.usize.array_type(SEGMENTS).into(),
 			],
 			false,
 		)
@@ -142,6 +142,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)?)
 	}
 
+	/// Segment zero has no bias, including in static and frame headers.
+	pub(super) fn growing_first_items(
+		&self,
+		builder: &Builder<'ctx>,
+		array: PointerValue<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let field = builder.build_struct_gep(self.segmented_type(), array, 6, "")?;
+		let address = builder.build_load(self.usize, field, "first_address")?;
+		self.tag(
+			inkwell::values::BasicValue::as_instruction_value(&address).expect("a load"),
+			true,
+		)?;
+		Ok(builder.build_int_to_ptr(
+			address.into_int_value(),
+			self.pointer_type(),
+			"first_items",
+		)?)
+	}
+
 	/// The length of a `GrowingArray`.
 	pub(crate) fn growing_length(
 		&self,
@@ -214,11 +233,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.expect("a count")
 			.into_int_value();
 		let segment = builder.build_int_sub(i64.const_int(63, false), zeros, "segment")?;
-		let capacity = builder.build_left_shift(i64.const_int(1, false), k, "first_capacity")?;
-		let end = builder.build_left_shift(capacity, segment, "")?;
-		let half = builder.build_right_shift(end, i64.const_int(1, false), false, "")?;
-		let mask = builder.build_int_neg(capacity, "")?;
-		let start = builder.build_and(half, mask, "segment_start")?;
 		let field = builder.build_struct_gep(self.segmented_type(), array, 5, "")?;
 		let directory = builder.build_load(self.pointer_type(), field, "segments")?;
 		self.tag(
@@ -227,26 +241,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)?;
 		let slot = unsafe {
 			builder.build_in_bounds_gep(
-				self.pointer_type(),
+				self.usize,
 				directory.into_pointer_value(),
 				&[segment],
 				"",
 			)?
 		};
-		let items = builder.build_load(self.pointer_type(), slot, "segment_items")?;
+		let items = builder.build_load(self.usize, slot, "segment_address")?;
 		self.tag(
 			inkwell::values::BasicValue::as_instruction_value(&items).expect("a load"),
 			true,
 		)?;
-		let offset = builder.build_int_sub(index, start, "")?;
-		Ok(unsafe {
-			builder.build_in_bounds_gep(
-				self.llvm_type(item),
-				items.into_pointer_value(),
-				&[offset],
-				"",
-			)?
-		})
+		// The biased address is an integer, possibly outside its allocation.
+		// Wrap at pointer width and only form the final, in-bounds pointer.
+		let index = builder.build_int_cast(index, self.usize, "")?;
+		let size = builder.build_int_cast(self.item_size_const(item), self.usize, "")?;
+		let offset = builder.build_int_mul(index, size, "item_offset")?;
+		let address = builder.build_int_add(items.into_int_value(), offset, "item_address")?;
+		Ok(builder.build_int_to_ptr(address, self.pointer_type(), "item_pointer")?)
 	}
 
 	/// A `GrowingArray` taking the items of an owned array (not registered).
@@ -416,16 +428,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			self.growing_single_segment(array)?
 		};
-		let first_slot = self
-			.builder
-			.build_struct_gep(self.segmented_type(), array, 6, "")?;
-		let first_items =
-			self.builder
-				.build_load(self.pointer_type(), first_slot, "first_items")?;
-		self.tag(
-			inkwell::values::BasicValue::as_instruction_value(&first_items).expect("a load"),
-			true,
-		)?;
+		let first_items = self.growing_first_items(&self.builder, array)?;
 		let position = if checked && may_be_negative {
 			// `0 <= index < length` on the common path, as for arrays
 			// (`checked_item`): a negative index is counted from the end in
@@ -485,12 +488,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_conditional_branch(contiguous, first, segmented)?;
 		self.builder.position_at_end(first);
 		let direct = unsafe {
-			self.builder.build_in_bounds_gep(
-				self.llvm_type(item),
-				first_items.into_pointer_value(),
-				&[position],
-				"",
-			)?
+			self.builder
+				.build_in_bounds_gep(self.llvm_type(item), first_items, &[position], "")?
 		};
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(segmented);

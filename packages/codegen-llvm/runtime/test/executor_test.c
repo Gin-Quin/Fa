@@ -1211,7 +1211,7 @@ static void test_storage_hints(void) {
     long bytes_before = allocated_bytes;
     FaSegmented *directory = fa_segmented_new();
     int64_t *kept = 0;
-    uint8_t **small = 0;
+    uintptr_t *small = 0;
     for (int64_t i = 0; i <= 8192; i += 1) {
         int64_t *slot = fa_segmented_push_slot(directory, sizeof(int64_t), 3);
         *slot = i;

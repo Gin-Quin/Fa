@@ -2228,17 +2228,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// only the bytes remain live across executions of the loop body.
 		let growing_flat = if growing && matched.is_some() {
 			let contiguous = self.growing_single_segment(array)?;
-			let field = self
-				.builder
-				.build_struct_gep(self.segmented_type(), array, 6, "")?;
-			let first = self
-				.builder
-				.build_load(self.pointer_type(), field, "first_items")?;
-			self.tag(
-				inkwell::values::BasicValue::as_instruction_value(&first).expect("a load"),
-				true,
-			)?;
-			Some((first.into_pointer_value(), contiguous))
+			let first = self.growing_first_items(&self.builder, array)?;
+			Some((first, contiguous))
 		} else {
 			None
 		};

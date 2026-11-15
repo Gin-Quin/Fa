@@ -1605,3 +1605,98 @@ clang, sorties et attribution assembleur](native-goose-growing-array-results.jso
 Restent le premier segment réservé conditionnel et `x = []` réutilisant le
 stockage des quatre autres collections croissantes ; les vues plates hors de
 ces benchmarks restent suivies séparément.
+
+## GrowingArray : lookup sans branche sur l’indice (2026-11-15)
+
+L’amendement de Fable remplace la conclusion précédente sur le petit tableau :
+**aucun segment réservé**, ni taille initiale accrue, ni capacité inférée d’une
+boucle. À 16 items, Callgrind `--branch-sim=yes` confirme le diagnostic :
+4 006 041 mauvaises prédictions conditionnelles pour GrowingArray, contre
+4 139 pour Array et 5 013 pour Goose. La formule sans branche ramène ce nombre
+à 4 150 ; le répertoire biaisé final à **4 152** (Array 4 138, Goose 5 008).
+Le contrôle d’IR vérifie les trois cibles : seules les bornes et la preuve
+invariante `segments <= 1` branchent, jamais le choix du segment selon l’indice.
+
+Le répertoire pointe toujours sur les trois entrées inline, puis sur leur
+copie dans le répertoire heap. Celui-ci garde huit entrées supplémentaires
+(11 au total), puis passe à 64/32 au douzième segment. La première étape passe
+les trois lignes d’indexation, mais manque les seuils des chaînes :
+190,320 M instructions et 1,124× Array en CPU. La seconde étape autorisée
+stocke donc `adresse - début * taille` en entier non signé ; le lookup ajoute
+`indice * taille`, et les parcours/libérations restaurent l’adresse réelle.
+Les références restent stables, y compris à travers la réallocation.
+
+Protocole final : **21 tours alternés**, CPU 1, médiane de CPU utilisateur +
+système, Goose clang 18 `-O2`, sortie identique à Rust. Pour les chaînes,
+CPU à 3 000 000 entrées et instructions à 300 000. Pour l’indexation,
+4 millions de lectures puis 4 millions d’écritures, sans capacité annoncée.
+Le cas ajouté à 1 000 items reste en cache et traverse huit segments.
+
+| string-building | Instructions (M) | CPU (ms) |
+|---|---:|---:|
+| `String` | 167,615 | 189,921 |
+| `Array<Byte>` | 175,421 | 172,655 |
+| `GrowingArray<Byte>` | 187,626 | 193,700 |
+| Goose | 148,697 | 172,750 |
+
+| growing-index | Items | Instructions (M) | CPU (ms) |
+|---|---:|---:|---:|
+| Array | 16 | 300,180 | 66,085 |
+| GrowingArray | 16 | 368,180 | 68,259 |
+| Goose | 16 | 300,287 | 70,758 |
+| Array | 1 000 | 300,194 | 68,357 |
+| GrowingArray | 1 000 | 368,209 | 69,959 |
+| Goose | 1 000 | 300,303 | 69,546 |
+| Array | 1 000 000 | 314,166 | 219,480 |
+| GrowingArray | 1 000 000 | 395,171 | 206,439 |
+| Goose | 1 000 000 | 316,770 | 226,224 |
+
+| CPU GrowingArray / contrôle | Médianes | Médiane des rapports appariés |
+|---|---:|---:|
+| 16 / Array | 1,033× | 1,030× |
+| 16 / Goose | 0,965× | 0,965× |
+| 1 000 / Array | 1,023× | 1,009× |
+| 1 000 / Goose | 1,006× | 1,076× |
+| 1 000 000 / Array | 0,941× | 1,047× |
+| 1 000 000 / Goose | 0,913× | 0,926× |
+| chaînes / Array | **1,122×** | 1,090× |
+
+**Indexation : tous les seuils CPU passent**, pour les deux rapports.
+Le grand cas ne demande donc pas la répétition à 41 tours et ne déclenche
+aucune réservation. Le bruit de cet hôte partagé reste visible dans les deux
+statistiques ; les échantillons sont tous conservés.
+**La décision reste ouverte sur le CPU des chaînes** : le rapport des médianes
+excède 1,10. Les instructions passent le plafond de 188,3 M × 1,01 = 190,183 M.
+Le profil final situe le surplus d’instructions dans `appendInteger`
+(+7,028 M face à Array) et `main` (+5,103 M) ; `add` est au même niveau.
+Ces chemins sont déjà contigus ; ces comptes n’attribuent pas le temps CPU.
+Aucune optimisation supplémentaire après le répertoire biaisé, conformément
+à la limite de la décision.
+
+Données brutes des deux étapes, 546 échantillons CPU, simulations de branches,
+profils détaillés, empreintes et validation :
+[native-goose-growing-array-branchless-results.json](native-goose-growing-array-branchless-results.json).
+
+Contrôle des 29 programmes/variantes : sorties Rust inchangées aux tailles
+d’audit et par défaut, aucun dépassement de +1 % en instructions face à
+`2e43d820` ni à `8daac2bc` (maximum +0,00021 % face à `2e43d820`).
+Le grand GrowingArray descend de 471,169 à 395,170 M, soit **−16,13 %**.
+Les 68 journaux Goose retenus montrent tous clang `-O2`.
+
+Les programmes du backend forcés à O0 passent sur native (78) et freestanding
+(68, 10 exclus). Sur wasm : 73 passent, 3 exclus, **2 échecs préexistants**,
+reproduits avec `8daac2bc` : import `pow` manquant de `floats_and_strings`,
+et 8 196 paramètres de `tree-arena-large-payload` dépassant la limite Node
+(1 000). À O3, native/freestanding/wasm passent : 77/67/74, avec 0/10/3
+exclusions et aucun échec. `async-long-turn`, fixture explicitement O0,
+est exclu du forçage O3 et passe à O0. Les fuites sont vérifiées à chaque
+exécution ; toutes les fixtures GrowingArray passent à O0/O3 sur les trois
+cibles, dont références au-delà de la réallocation, frame/statique et indices
+négatifs. ASan/UBSan passent avec `cc`, et les deux IR runtime sont régénérés.
+
+Validation finale : `cargo fmt --all`, `cargo clippy --workspace --all-targets`
+sans avertissement, `cargo test --workspace --no-fail-fast` avec LLVM, les
+58 contrôles d’IR, les snippets du parser et du site et `bun run build` passent.
+Les deux échecs du complément wasm O0 restent explicitement ouverts ; aucun
+échec nouveau. Restent le seuil CPU des chaînes et, séparément, les vues plates
+et la réutilisation du stockage des autres collections croissantes.

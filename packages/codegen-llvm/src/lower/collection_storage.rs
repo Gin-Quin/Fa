@@ -608,13 +608,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let k = capacity.trailing_zeros();
 			let i16 = self.context.i16_type();
 			let pointer = self.pointer_type();
-			let mut segments = [pointer.const_null(); 3];
+			let mut segments = [self.usize.const_zero(); 3];
 			if count != 0 {
 				values.resize(capacity, self.llvm_type(item).const_zero());
-				segments[0] = self.readonly_global(
-					self.context.const_struct(&values, false).into(),
-					"fa.collection.segment",
-				);
+				segments[0] = self
+					.readonly_global(
+						self.context.const_struct(&values, false).into(),
+						"fa.collection.segment",
+					)
+					.const_to_int(self.usize);
 			}
 			let ty = self.segmented_type();
 			let global = self.module.add_global(ty, None, "fa.collection.static");
@@ -644,7 +646,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				pointer.const_null().into(),
 				pointer.const_null().into(),
 				directory.into(),
-				pointer.const_array(&segments).into(),
+				self.usize.const_array(&segments).into(),
 			]);
 			global.set_initializer(&header);
 			return Ok(Some(Val::new(repr, global.as_pointer_value())));

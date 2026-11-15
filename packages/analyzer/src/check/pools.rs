@@ -127,7 +127,8 @@ impl Walker<'_> {
 		let ignorable = u8::from(positional);
 		let predicate = self.callback_with(callback_params, TypeId::BOOLEAN, ignorable);
 		Some(match name {
-			_ if name == count => return Some(natural),
+			_ if name == count || name == "capacity" => return Some(natural),
+			"reserve" => self.method(&[natural], TypeId::VOID),
 			"isEmpty" => self.method(&[], TypeId::BOOLEAN),
 			"add" => self.method(&[item], item),
 			"delete" if positional => self.method(&[TypeId::INTEGER], TypeId::VOID),

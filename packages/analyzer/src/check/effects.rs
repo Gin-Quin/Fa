@@ -141,7 +141,10 @@ impl Walker<'_> {
 					Step::Length
 				} else if path.ends_with("#size") {
 					Step::Size
-				} else if path.starts_with("Range#") || path == "Guard#value" {
+				} else if path.starts_with("Range#")
+					|| path == "Guard#value"
+					|| path.ends_with("#capacity")
+				{
 					Step::Field(self.s.types.syms.intern(&text))
 				} else {
 					return None;
@@ -395,6 +398,17 @@ impl Walker<'_> {
 		if !deferred {
 			self.check_iteration(place, invalidates, n, call);
 			self.invalidate_references(place, invalidates, n);
+			// Storage observations depend on the collection's size: insertion
+			// and deletion can allocate or release storage, even when item
+			// references remain valid. This is implied by a size effect.
+			if matches!(self.places.get(place).step, Some(Step::Size | Step::Length))
+				&& let Some(parent) = self.places.parent(place)
+			{
+				let name = self.s.types.syms.intern("capacity");
+				let capacity = self.places.child(parent, Step::Field(name));
+				self.body.flow.mutate(&self.places, capacity);
+				self.invalidate_references(capacity, false, n);
+			}
 		}
 		if matches!(owner, Owner::Local | Owner::Outside) {
 			return;
@@ -959,6 +973,10 @@ impl Walker<'_> {
 							(PathStep::Length, TypeId::INTEGER)
 						}
 						("size", TypeKind::Collection(..)) => (PathStep::Size, TypeId::INTEGER),
+						("capacity", TypeKind::Collection(..) | TypeKind::String) => (
+							PathStep::Field(self.s.types.syms.intern("capacity")),
+							TypeId::INTEGER,
+						),
 						// a type not known here (already reported): the step as written
 						("length", _) if self.s.types.is_recovering(ty) => {
 							(PathStep::Length, TypeId::INTEGER)
@@ -1698,6 +1716,11 @@ impl Walker<'_> {
 		};
 		match effect {
 			BuiltinEffect::MutatesSelf => self.record_effect(base, false, n, true),
+			BuiltinEffect::MutatesCapacity => {
+				let name = self.s.types.syms.intern("capacity");
+				let capacity = self.places.child(base, Step::Field(name));
+				self.record_effect(capacity, false, n, true);
+			}
 			BuiltinEffect::MutatesSize => {
 				let size = self.places.child(base, Step::Size);
 				self.record_effect(size, false, n, true);
@@ -1979,6 +2002,15 @@ impl Walker<'_> {
 		};
 		for step in steps {
 			ty = match *step {
+				PathStep::Field(name)
+					if self.s.types.syms.resolve(name) == "capacity"
+						&& matches!(
+							self.s.types.kind(ty),
+							TypeKind::Collection(..) | TypeKind::String
+						) =>
+				{
+					TypeId::INTEGER
+				}
 				PathStep::Field(name) | PathStep::Private(name) => self
 					.s
 					.types

@@ -3,9 +3,10 @@
 //! it stays valid while it grows (`use first = growing[0]` then `push`).
 //!
 //! A `GrowingArray` is a pointer to a `FaSegmented` of the runtime
-//! (`fa_runtime.c`, "segmented storage"): `{ i64 length, i64 segments,
-//! ptr cursor, ptr end, ptr segment[48] }`. The first segment holds `2^k`
-//! items (about 64 bytes, [`Lowering::segment_bits`]), each next one doubles
+//! (`fa_runtime.c`, "segmented storage"): a 64-byte header with a length,
+//! segment count, per-array `k`, cursor, end, and a directory (three pointers
+//! inline, allocated after that). The first segment holds `2^k` items
+//! (about 64 bytes by default, [`Lowering::segment_bits`]), each next one doubles
 //! the capacity; item `i` is found with one `clz` ([`Lowering::growing_at`]).
 //!
 //! - `push` writes at the cursor until it reaches the end of its segment:
@@ -15,7 +16,7 @@
 //!   per segment); the loops of `copies.rs` copy, fill and search segment
 //!   by segment.
 //! - `growing = []` drops the items and keeps the segments (`fa_segmented_reset`).
-//! - Indexing, `length`, `isEmpty`, `get`, drops and copies work on the
+//! - Indexing, `length`, `capacity`, `reserve`, `isEmpty`, `get`, drops and copies work on the
 //!   segments. The other (read-only) methods run on a *view*: the items
 //!   copied bytewise into a temporary array that doesn't own them, freed at
 //!   the end of the statement (`Cleanup::Shallow`).
@@ -31,24 +32,30 @@ use crate::error::Error;
 use crate::lower::values::{IntRepr, Repr, Val};
 use crate::lower::{Lowering, Slot};
 
-/// The number of segment pointers of a `FaSegmented` (`FA_SEGMENTS`).
-const SEGMENTS: u32 = 48;
+/// The inline segment pointers of a `FaSegmented` (`FA_INLINE_SEGMENTS`).
+const SEGMENTS: u32 = 3;
 
 impl<'ctx> Lowering<'_, 'ctx> {
-	/// `{ i64 length, i64 segments, ptr cursor, ptr end, [48 x ptr] }`.
+	/// `{ i64 length, i32 segments, i32 k, ptr cursor, ptr end, ptr directory, [3 x ptr] }`.
 	pub(crate) fn segmented_type(&self) -> StructType<'ctx> {
 		let i64 = self.context.i64_type();
 		self.context.struct_type(
 			&[
 				i64.into(),
-				i64.into(),
+				self.segment_metadata_type().into(),
+				self.context.i32_type().into(),
+				self.pointer_type().into(),
 				self.pointer_type().into(),
 				self.pointer_type().into(),
 				self.pointer_type().array_type(SEGMENTS).into(),
-				i64.into(),
 			],
 			false,
 		)
+	}
+
+	pub(crate) fn segment_metadata_type(&self) -> StructType<'ctx> {
+		let i16 = self.context.i16_type();
+		self.context.struct_type(&[i16.into(), i16.into()], false)
 	}
 
 	/// The `k` of an item, as the runtime takes it.
@@ -56,7 +63,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.segment_arguments(item).1
 	}
 
-	/// A header field of a `GrowingArray` (0 length, 2 cursor, 3 end), loaded
+	/// A header field of a `GrowingArray` (0 length, 3 cursor, 4 end), loaded
 	/// with the header tag.
 	fn growing_field(
 		&self,
@@ -130,41 +137,74 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<PointerValue<'ctx>, Error> {
 		// `fa_segmented_at`, written here with the header tag: a store into an
 		// item doesn't make LLVM read the segment pointers again
-		let k = u64::from(self.segment_bits(item));
+		let k = self.growing_k(builder, array)?;
+		self.growing_at_with_k(builder, array, item, index, k)
+	}
+
+	fn growing_k(
+		&self,
+		builder: &Builder<'ctx>,
+		array: PointerValue<'ctx>,
+	) -> Result<IntValue<'ctx>, Error> {
+		let k_pointer = builder.build_struct_gep(self.segmented_type(), array, 2, "")?;
+		let k = builder
+			.build_load(self.context.i32_type(), k_pointer, "segment_k")?
+			.into_int_value();
+		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&k) {
+			self.tag(instruction, true)?;
+		}
+		Ok(builder.build_int_z_extend(k, self.context.i64_type(), "")?)
+	}
+
+	fn growing_at_with_k(
+		&self,
+		builder: &Builder<'ctx>,
+		array: PointerValue<'ctx>,
+		item: Repr,
+		index: IntValue<'ctx>,
+		k: IntValue<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
 		let i64 = self.context.i64_type();
 		let function = builder
 			.get_insert_block()
 			.and_then(|block| block.get_parent())
 			.expect("a function");
 		let segment_items = |builder: &Builder<'ctx>, segment: IntValue<'ctx>| {
-			let slots = builder.build_struct_gep(self.segmented_type(), array, 4, "")?;
-			let slot = unsafe {
-				builder.build_in_bounds_gep(
-					self.pointer_type().array_type(SEGMENTS),
-					slots,
-					&[i64.const_zero(), segment],
-					"",
-				)?
-			};
+			let directory = builder.build_struct_gep(self.segmented_type(), array, 5, "")?;
+			let slots = builder.build_load(self.pointer_type(), directory, "segments")?;
+			if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&slots) {
+				self.tag(instruction, true)?;
+			}
+			let slots = slots.into_pointer_value();
+			let slot =
+				unsafe { builder.build_in_bounds_gep(self.pointer_type(), slots, &[segment], "")? };
+
 			let items = builder.build_load(self.pointer_type(), slot, "segment_items")?;
 			if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&items) {
 				self.tag(instruction, true)?;
 			}
 			Ok::<_, Error>(items.into_pointer_value())
 		};
-		let high = builder.build_right_shift(index, i64.const_int(k, false), false, "")?;
+		let first_capacity =
+			builder.build_left_shift(i64.const_int(1, false), k, "first_capacity")?;
 		let in_first =
-			builder.build_int_compare(IntPredicate::EQ, high, i64.const_zero(), "first_segment")?;
+			builder.build_int_compare(IntPredicate::ULT, index, first_capacity, "first_segment")?;
 		let first_block = self.context.append_basic_block(function, "first_segment");
 		let later_block = self.context.append_basic_block(function, "later_segment");
 		let join = self.context.append_basic_block(function, "segment_item");
 		builder.build_conditional_branch(in_first, first_block, later_block)?;
 		builder.position_at_end(first_block);
-		let items = segment_items(builder, i64.const_zero())?;
+		let first_slot = builder.build_struct_gep(self.segmented_type(), array, 6, "")?;
+		let items = builder.build_load(self.pointer_type(), first_slot, "first_items")?;
+		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&items) {
+			self.tag(instruction, true)?;
+		}
+		let items = items.into_pointer_value();
 		let in_first_segment =
 			unsafe { builder.build_in_bounds_gep(self.llvm_type(item), items, &[index], "")? };
 		builder.build_unconditional_branch(join)?;
 		builder.position_at_end(later_block);
+		let high = builder.build_right_shift(index, k, false, "")?;
 		// segment `s = 64 - clz(index >> k)`, whose first index is `2^(k + s - 1)`
 		let ctlz = self.intrinsic("llvm.ctlz", &[i64.into()])?;
 		let zeros = builder
@@ -181,7 +221,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.expect("a count")
 			.into_int_value();
 		let segment = builder.build_int_sub(i64.const_int(64, false), zeros, "segment")?;
-		let shift = builder.build_int_add(segment, i64.const_int(k.wrapping_sub(1), false), "")?;
+		let shift = builder.build_int_add(segment, k, "")?;
+		let shift = builder.build_int_sub(shift, i64.const_int(1, false), "")?;
 		let first = builder.build_left_shift(i64.const_int(1, false), shift, "")?;
 		let items = segment_items(builder, segment)?;
 		let offset = builder.build_int_sub(index, first, "")?;
@@ -296,6 +337,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.convert(index, Repr::Int(IntRepr::I64), node.index())?
 			.int();
 		let length = self.growing_length(&self.builder, array)?;
+		// The header exists even when this index fails. Read k before the
+		// conditional bounds checks, so LICM can keep it outside a loop.
+		let k = self.growing_k(&self.builder, array)?;
 		let may_be_negative = index_node.is_none_or(|index_node| self.may_be_negative(index_node));
 		let checked = self.flags(node).contains(NodeFlags::INDEX_CHECK);
 		let position = if checked && may_be_negative {
@@ -350,7 +394,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			position
 		};
-		let pointer = self.growing_at(&self.builder, array, item, position)?;
+		let pointer = self.growing_at_with_k(&self.builder, array, item, position, k)?;
 		Ok(Slot {
 			pointer,
 			repr: item,
@@ -377,8 +421,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// `fa_segmented_push_slot` with the header tags: until a segment is
 		// full, a push is one comparison, one store and one increment, and
 		// consecutive pushes keep the cursor in a register (see `push_onto`)
-		let (_, cursor) = self.growing_field(array, 2, "cursor")?;
-		let (_, end) = self.growing_field(array, 3, "end")?;
+		let (_, cursor) = self.growing_field(array, 3, "cursor")?;
+		let (_, end) = self.growing_field(array, 4, "end")?;
 		let room = self.builder.build_int_compare(
 			IntPredicate::NE,
 			cursor.into_pointer_value(),
@@ -409,7 +453,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			None => array,
 		};
-		let (_, next_cursor) = self.growing_field(header, 2, "cursor")?;
+		let (_, next_cursor) = self.growing_field(header, 3, "cursor")?;
 		let next_end = self.builder.get_insert_block().expect("a block");
 		self.builder.build_unconditional_branch(store)?;
 		self.builder.position_at_end(store);
@@ -433,7 +477,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let cursor_pointer = self
 			.builder
-			.build_struct_gep(self.segmented_type(), array, 2, "")?;
+			.build_struct_gep(self.segmented_type(), array, 3, "")?;
 		let stored = self.builder.build_store(cursor_pointer, advanced)?;
 		self.tag(stored, true)?;
 		let (length_pointer, length) = self.growing_field(array, 0, "length")?;
@@ -559,9 +603,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		array: PointerValue<'ctx>,
 	) -> Result<(), Error> {
 		let item = self.item_repr(item_type, NodeId::new(0))?;
-		let field = builder.build_struct_gep(self.segmented_type(), array, 5, "")?;
+		let metadata = builder.build_struct_gep(self.segmented_type(), array, 1, "")?;
+		let field = builder.build_struct_gep(self.segment_metadata_type(), metadata, 1, "")?;
 		let storage = builder
-			.build_load(self.context.i64_type(), field, "")?
+			.build_load(self.context.i16_type(), field, "")?
 			.into_int_value();
 		let owned = builder.build_int_compare(
 			IntPredicate::NE,
@@ -608,6 +653,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.expect("a growing array")
 			.into_pointer_value();
 		let length = self.growing_length(builder, array)?;
+		builder.build_call(
+			self.runtime.function("fa_segmented_reserve")?,
+			&[copy.into(), length.into(), size.into(), bits.into()],
+			"",
+		)?;
 		let item_llvm = self.llvm_type(item);
 		self.helper_loop(builder, function, length, |builder, index| {
 			let pointer = self.growing_at(builder, array, item, index)?;

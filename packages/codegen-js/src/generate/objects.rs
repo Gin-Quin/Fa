@@ -411,11 +411,14 @@ impl Generator<'_> {
 					let helper = self.helper("faStringLength");
 					js::call(helper, &[value.text])
 				}
-				"Array#length" | "OrderedColumnar#length" => {
-					Expr::primary(format!("{}{dot}length", value.primary_text()))
-						.with_purity(value.pure, false)
-				}
-				"Set#size" | "Map#size" | "Pool#size" | "Columnar#size" | "RelationPool#size" => {
+				"String#capacity"
+				| "Array#capacity"
+				| "OrderedColumnar#capacity"
+				| "Array#length"
+				| "OrderedColumnar#length" => Expr::primary(format!("{}{dot}length", value.primary_text()))
+					.with_purity(value.pure, false),
+				"Set#capacity" | "Map#capacity" | "Pool#capacity" | "Columnar#capacity"
+				| "Set#size" | "Map#size" | "Pool#size" | "Columnar#size" | "RelationPool#size" => {
 					Expr::primary(format!("{}{dot}size", value.primary_text()))
 						.with_purity(value.pure, false)
 				}

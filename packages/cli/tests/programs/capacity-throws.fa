@@ -1,0 +1,18 @@
+-- A constructor owns its source until all hint expressions have succeeded.
+-- The native harness also checks that the exceptional path frees every block.
+type HintError = Errors { Failed }
+function fail = (): Integer<min = 0> throws HintError => throw HintError.Failed
+
+let text = String.from("x".repeat(200), capacity = fail()) catch _ => "fallback"
+console.log(text) -- prints: fallback
+let items = Array.from(["x".repeat(200)], capacity = fail()) catch _ => ["fallback"]
+console.log(items) -- prints: ["fallback"]
+let growing = GrowingArray<String>.from(["x".repeat(200)], capacity = fail()) catch _ => []
+console.log(growing.length) -- prints: 0
+type Item = { name: String }
+let pool = Pool<Item>.from([{ name = "x".repeat(200) }], capacity = fail()) catch _ => []
+console.log(pool.size) -- prints: 0
+let values = Set.from(["x".repeat(200)], capacity = fail()) catch _ => []
+console.log(values.size) -- prints: 0
+let mapping = Map.from([("x".repeat(200), "value")], capacity = fail()) catch _ => []
+console.log(mapping.size) -- prints: 0

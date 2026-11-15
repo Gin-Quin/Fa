@@ -148,16 +148,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.const_int(values.len() as u64, false);
 		if matches!(repr, Repr::Growing(_)) {
 			let size = self.collection_data_size(self.llvm_type(item));
-			let mut capacity = 0;
-			let mut segment_size = 1u64 << self.segment_bits(item);
-			let mut segments = 0;
-			while capacity < values.len() as u64 {
-				capacity += segment_size;
-				if segments != 0 {
-					segment_size *= 2;
-				}
-				segments += 1;
-			}
+			let capacity = (values.len() as u64)
+				.next_power_of_two()
+				.max(1u64 << self.segment_bits(item));
 			let header = self.collection_data_size(self.segmented_type().into());
 			let bytes = ((header + 15) & !15) + capacity * size;
 			if let Some(buffer) = self.collection_stack(node, bytes)? {
@@ -248,6 +241,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "`Array.from`"));
 		};
 		let item = self.item_repr(item_type, node)?;
+		let source = if matches!(source.repr, Repr::Pool(_) | Repr::Columnar(_)) {
+			let source = self.fresh(source);
+			let view = self.pool_view(source, node)?;
+			self.emit_copy(view)?
+		} else {
+			source
+		};
 		let source = if let Repr::Growing(_) = source.repr {
 			// taken: its items move into an array
 			let source = self.fresh(source);

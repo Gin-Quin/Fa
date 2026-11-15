@@ -35,7 +35,7 @@ console.log(ordered.size) -- error: CL007
 -- `from` copies any collection
 let numbers = Pool.from([1, 2, 3]) -- type numbers: Pool<Integer>
 let people = Columnar.from([Human { name = "Gus", age = 7 }]) -- type people: Columnar<Human>
-let more = GrowingPool.from([1], capacity = 4) -- error: FN023
+let more = GrowingPool.from([1], capacity = 4) -- type more: GrowingPool<Integer>
 mutable integers: Pool<Integer> = []
 use one = integers.add(1)
 one += 1

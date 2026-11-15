@@ -1,6 +1,7 @@
-// helpers: FaStop, faStop, faOverflow, faCheckInteger, faIsSimpleText, faSegmenter, faCharacters, faStringLength, faPadding, faStringPadStart, faSortIntegers, faSortFloats, faStringCompare, faCompare, faArraySortInPlace, faSortStrings, faQuote, faFormatArray, faFormatObject, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat
+// helpers: FaStop, faStop, faOverflow, faCheckInteger, faCheckRange, faIsSimpleText, faSegmenter, faCharacters, faStringLength, faPadding, faStringPadStart, faSortIntegers, faSortFloats, faStringCompare, faCompare, faArraySortInPlace, faSortStrings, faQuote, faFormatArray, faFormatObject, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat
 
 function primes(limit) {
+	void (faCheckRange(faCheckInteger(limit + 1, "performance.fa:6:55"), 0, 9223372036854775807, "Integer<min = 0>", "performance.fa:6:55"));
 	let isPrime = new Uint8Array(Math.max(limit + 1, 0)).fill(1);
 	let count$1 = 0;
 	for (let i = 2, $t0 = isPrime.length; i < $t0; i++) {

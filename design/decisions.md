@@ -543,3 +543,36 @@ Implementation choices:
 The implementation report and tests specify the currently covered constructors
 and element shapes; this decision is the intended rule for every collection,
 not a claim that all construction paths have been converted at once.
+
+
+## Capacity and reserve on every collection (2026-11-15)
+
+- `reserve(additional)` follows Rust's `Vec::reserve`: reserve for current length/size plus the argument; `from(source, capacity = n)` requests total capacity. Arguments are nonnegative integers; the operations never truncate or shrink. Allocation failure (including size overflow) follows the runtime's ordinary allocation failure path.
+- The API covers `String`, `Array`, `Map`, `Set`, `Pool`, `Columnar`, `OrderedColumnar` and every growing variant. `String.from` copies an existing string, with a byte capacity hint natively. `Bytes` stays fixed-length and has no capacity API: no operation could consume spare storage, and `filled` already asks for its exact length.
+- `capacity` is an O(1) storage observation: items for collections, bytes for native strings. On JavaScript and in the compile-time interpreter it equals length/size and reservation is a no-op, matching the existing JavaScript decision without inventing a second counter. String capacity is therefore intentionally target-dependent, as is spare collection capacity; it must not govern program logic.
+- `reserve` needs a mutable receiver on every target. Arrays, sets and ordered columnars use `mutates self` (their items may move); strings use the same effect as appends. All other collections use `mutates self.capacity`: reservation preserves existing item addresses and length/size references, but may change capacity. Maps and sets reserve both entry storage and the index (accounting for tombstones and load limits).
+- Copies preserve contents, not spare capacity. A copied `GrowingArray` starts with one segment large enough for its length. Its header keeps a small inline segment directory and allocates further directory entries only when needed. `k` is fixed while items exist. On an empty array, reservation may replace retained segments with one larger first block, preserving at least the old total capacity; the assignment that emptied it already invalidated references into the former items.
+
+- **Directory detail**: the growing-array header is 64 bytes on 64-bit native targets and 40 on wasm32: three segment pointers inline, then a directory of 64 pointers allocated on the fourth segment. A 64-bit length bounds the number of segments; allocating the directory once keeps growth simple on every target, without moving an item. Explicit reservations choose the smallest power-of-two first block that fits; unreserved arrays keep the approximately 64-byte default.
+- **Argument ownership**: a constructor keeps its copied or moved source registered for cleanup until all capacity expressions succeed. This preserves normal left-to-right argument evaluation and frees the source if a later hint throws. Storage hints still evaluate their expressions on JavaScript, despite not allocating storage; the Boolean-array-to-`Uint8Array` optimization evaluates the hint before the fill-loop bound too.
+
+### Storage and capacity integration (2026-11-15)
+
+- Keep the GrowingArray header at 64 bytes natively and 40 bytes on wasm32.
+  Its segment-count word is represented as two 16-bit fields: count (at most
+  64) and storage kind, followed by the existing 32-bit `k`. LLVM uses a nested
+  struct for these fields so the layout does not depend on byte order.
+- A static or frame literal reserves one first segment large enough for its
+  known item count, with `k` at least the type's ordinary default. This avoids
+  a second directory in the bounded buffer. Read-only globals point their
+  directory at their own three inline slots; frame headers do likewise.
+- Reserve on a live growing frame collection keeps its first segment and puts
+  later segments/directory on the heap. Destruction frees those later blocks
+  but neither the frame header nor its first block. Reset already invalidates
+  old references; replacing an empty first segment switches to a frame-header
+  marker whose new segments are all owned. Ordinary Fa `reserve` requires a
+  mutable owner: the immutable-frame proof rejects owning/unknown uses and
+  mutable owners use heap storage from creation. Static values are copied
+  before mutation. Thus array/set relocation never applies to frame/static
+  originals, and stable map/pool/columnar reservations retain ordinary heap
+  layouts and their existing address guarantees.

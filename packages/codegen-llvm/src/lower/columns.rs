@@ -180,6 +180,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				i32.into(),
 				i32.into(),
 				i32.into(),
+				i32.into(),
 				i64.into(),
 			],
 			false,

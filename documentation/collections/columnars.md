@@ -6,6 +6,8 @@ In other languages this is called a **struct of arrays**, or a `MultiArrayList` 
 
 Internally, a columnar keeps one column per field of the object type, split into pages like a [`Pool`](/collections/pools) (see [how it works](#how-it-works)).
 
+Storage can be planned with `from(source, capacity = n)`, the read-only `capacity` property and `reserve(additional)`. See [capacity and reservation](/collections/arrays#capacity-and-reservation) for the shared rules and effects.
+
 ## When to use one
 
 A columnar pays off when you repeatedly read a *few* fields across *many* objects, because those fields are contiguous in memory and nothing else is loaded alongside them. Typical uses:

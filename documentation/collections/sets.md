@@ -29,6 +29,8 @@ setOfHumans.add(anotherJohn) -- not added: an equal Human is already present
 
 Note that the third human *is* stored: `{ name = "John", age = 22 }` is not equal to `{ name = "John", age = 20 }`.
 
+Storage can be planned with `from(source, capacity = n)`, the read-only `capacity` property and `reserve(additional)`. See [capacity and reservation](/collections/arrays#capacity-and-reservation) for the shared rules and effects.
+
 ## Custom key
 
 Pass a `key` function to `Set.from` when the identity of a value is carried by one of its parts, such as an id. Two values are then the same when their keys are equal, and only the key is hashed. The key can be of any type that a [map key](/collections/maps#keys) accepts:

@@ -1283,6 +1283,10 @@ impl Pass {
 						ReactiveStep::Index(index),
 					)
 				}),
+				EffectStep::Capacity => {
+					let name = w.s.types.syms.intern("capacity");
+					Some((SStep::Field(name, false), ReactiveStep::Field(name)))
+				}
 				EffectStep::Size => Some((SStep::Size, ReactiveStep::Size)),
 				EffectStep::Length => Some((SStep::Length, ReactiveStep::Length)),
 			};

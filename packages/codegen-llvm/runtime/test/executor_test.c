@@ -1136,7 +1136,17 @@ static void test_collection_destinations(void) {
 		*(int64_t *)fa_segmented_at(growing, i, sizeof(int64_t), 3) = i;
 	}
 	CHECK(*(int64_t *)fa_segmented_at(growing, 19, sizeof(int64_t), 3) == 19);
+	void *frame_first = fa_segmented_at(growing, 0, sizeof(int64_t), 3);
+	fa_segmented_reserve(growing, 200, sizeof(int64_t), 3);
+	CHECK(frame_first == fa_segmented_at(growing, 0, sizeof(int64_t), 3));
+	CHECK(*(int64_t *)fa_segmented_at(growing, 19, sizeof(int64_t), 3) == 19);
+	fa_segmented_reset(growing, sizeof(int64_t), 3);
+	fa_segmented_reserve(growing, 512, sizeof(int64_t), 3);
 	fa_segmented_free(growing, sizeof(int64_t), 3);
+	growing = fa_segmented_local(storage, 0, sizeof(int64_t), 3);
+	fa_segmented_reserve(growing, 100, sizeof(int64_t), 3);
+	fa_segmented_free(growing, sizeof(int64_t), 3);
+	CHECK(allocated == before);
 	FaPool *pool = fa_pool_local(storage, 2, sizeof(int64_t));
 	*(int64_t *)fa_pool_at(pool, 0) = 42;
 	CHECK(fa_pool_seek(pool, 0) == 0 && *(int64_t *)fa_pool_at(pool, 0) == 42);
@@ -1147,7 +1157,68 @@ static void test_collection_destinations(void) {
 	CHECK(allocated == before);
 }
 
+// Storage hints must allocate ahead, preserve addresses, and free every block.
+static void test_storage_hints(void) {
+    long before = allocated;
+    CHECK(sizeof(FaSegmented) <= 64);
+    FaSegmented *a = fa_segmented_new();
+    FaSegmented *b = fa_segmented_new();
+    fa_segmented_reserve(a, 1000, 1, 6);
+    fa_segmented_reserve(b, 17, 8, 3);
+    CHECK(a->k == 10 && b->k == 5);
+    CHECK(fa_segmented_capacity(a) == 1024 && fa_segmented_capacity(b) == 32);
+    long reserved = allocated;
+    for (int64_t i = 0; i < 1000; i += 1) { *(uint8_t *)fa_segmented_push_slot(a, 1, 6) = (uint8_t)i; }
+    for (int64_t i = 0; i < 17; i += 1) { *(int64_t *)fa_segmented_push_slot(b, 8, 3) = i; }
+    CHECK(allocated == reserved);
+    uint8_t *first = fa_segmented_at(a, 0, 1, 6);
+    fa_segmented_reserve(a, 10000, 1, 6);
+    reserved = allocated;
+    for (int64_t i = 1000; i < 11000; i += 1) { *(uint8_t *)fa_segmented_push_slot(a, 1, 6) = (uint8_t)i; }
+    CHECK(allocated == reserved && first == fa_segmented_at(a, 0, 1, 6));
+    for (int64_t i = 0; i < 11000; i += 1) { CHECK(*(uint8_t *)fa_segmented_at(a, i, 1, 6) == (uint8_t)i); }
+    CHECK(*(int64_t *)fa_segmented_at(b, 16, 8, 3) == 16);
+    fa_segmented_reset(a, 1, 6);
+    CHECK(fa_segmented_capacity(a) >= 11000);
+    fa_segmented_free(a, 1, 6);
+    fa_segmented_free(b, 8, 3);
+    for (int mode = 0; mode < 3; mode += 1) {
+        FaTable *table = mode == 0 ? fa_table_new(4, sizeof(TestTableEntry))
+                         : mode == 1 ? fa_table_new_growing(4, sizeof(TestTableEntry))
+                                     : fa_table_new_map(4, sizeof(TestTableEntry));
+        fa_table_reserve_additional(table, 100, sizeof(TestTableEntry));
+        CHECK(fa_table_capacity(table) >= 100);
+        reserved = allocated;
+        for (int64_t i = 0; i < 100; i += 1) {
+            TestTableEntry *entry = fa_table_append(table, (uint64_t)i, sizeof(*entry), 0);
+            entry->key = i;
+        }
+        CHECK(allocated == reserved);
+        if (mode != 1) {
+            for (int64_t i = 0; i < 50; i += 1) { fa_table_kill(table, i, sizeof(TestTableEntry)); }
+            fa_table_reserve_additional(table, 100, sizeof(TestTableEntry));
+            CHECK(fa_table_capacity(table) >= 150);
+            reserved = allocated;
+            for (int64_t i = 100; i < 200; i += 1) { fa_table_append(table, (uint64_t)i, sizeof(TestTableEntry), 0); }
+            CHECK(allocated == reserved);
+        }
+        fa_table_free(table, sizeof(TestTableEntry));
+    }
+    FaString string = owned_copy_with((const uint8_t *)"hello", 5, SIMPLE);
+    fa_string_reserve(&string, 100);
+    CHECK(fa_string_storage_capacity(&string) >= 105);
+    reserved = allocated;
+    fa_string_append(&string, (const uint8_t *)"!", 1, SIMPLE);
+    CHECK(allocated == reserved && string_length(&string) == 6);
+    size_t string_capacity = fa_string_storage_capacity(&string);
+    fa_string_append(&string, (const uint8_t *)"é", 2, 0);
+    CHECK(allocated == reserved && fa_string_storage_capacity(&string) == string_capacity);
+    fa_free((void *)string.bytes, string.capacity & KIND_MASK, 1);
+    CHECK(allocated == before);
+}
+
 int main(void) {
+	test_storage_hints();
 	test_collection_destinations();
 	test_tables();
 	test_integer_strings();

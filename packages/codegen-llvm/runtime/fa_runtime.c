@@ -859,6 +859,28 @@ FA_EXPORT uint8_t *fa_string_allocate(size_t length, size_t simple, FaString *ou
 }
 
 /// Replace a string whose new parts are proven disjoint from its buffer.
+/// Storage hints count bytes and never change the text.
+FA_EXPORT size_t fa_string_storage_capacity(const FaString *string) {
+    if (string->capacity & STRING_INLINE) { return INLINE_STRING_BYTES; }
+    return string_owned(string->capacity) ? string->capacity & KIND_MASK : string_length(string);
+}
+
+FA_EXPORT void fa_string_reserve(FaString *string, int64_t additional) {
+    size_t length = string_length(string);
+    if (additional < 0 || (uint64_t)additional > KIND_MASK - length) { out_of_memory(); }
+    size_t needed = length + (size_t)additional;
+    if (needed <= fa_string_storage_capacity(string)) { return; }
+    uint8_t *bytes = fa_alloc(needed, 1);
+    copy_bytes(bytes, string_bytes(string), length);
+    size_t simple = string->capacity & SIMPLE;
+    if (string_owned(string->capacity)) {
+        fa_free((void *)string->bytes, string->capacity & KIND_MASK, 1);
+    }
+    string->bytes = bytes;
+    string->length = length;
+    string->capacity = needed | simple;
+}
+
 /// Empty assignments retain capacity, like clearing a mutable collection.
 FA_EXPORT __attribute__((always_inline)) uint8_t *fa_string_replace_buffer(size_t length, size_t simple, FaString *out) {
 	int owned = string_owned(out->capacity);
@@ -962,6 +984,12 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 	if (old_length != 0) {
 		simple &= capacity;
 	}
+	if (string_owned(capacity) && needed <= (capacity & KIND_MASK)) {
+		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
+		string->length = needed;
+		string->capacity = (capacity & KIND_MASK) | simple;
+		return;
+	}
 	if (needed <= INLINE_STRING_BYTES) {
 		if (capacity & STRING_INLINE) {
 			copy_bytes((uint8_t *)string + old_length, bytes, length);
@@ -974,12 +1002,6 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 			if (string_owned(capacity)) { fa_free((void *)string->bytes, capacity & KIND_MASK, 1); }
 			*string = small;
 		}
-		return;
-	}
-	if (string_owned(capacity) && needed <= (capacity & KIND_MASK)) {
-		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
-		string->length = needed;
-		string->capacity = (capacity & KIND_MASK) | simple;
 		return;
 	}
 	string_grow(string, bytes, length, simple);
@@ -999,7 +1021,7 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_append(FaString *string,
 	if (length == 0) { return; }
 	size_t old_length = string_length(string);
 	size_t needed = old_length + length;
-	if (needed <= INLINE_STRING_BYTES) {
+	if (needed <= INLINE_STRING_BYTES && !string_owned(capacity)) {
 		size_t simple = suffix_capacity & SIMPLE;
 		if (old_length != 0) { simple &= capacity; }
 		if (capacity & STRING_INLINE) {
@@ -2307,6 +2329,20 @@ FA_EXPORT const void *fa_array_slice(const FaArrayHeader *array, int64_t start, 
 	return 0;
 }
 
+static int64_t storage_total(int64_t length, int64_t additional, int64_t item_size) {
+    if (additional < 0 || length > INT64_MAX - additional || item_size < 0 ||
+        (item_size > 0 && (uint64_t)(length + additional) > SIZE_MAX / (uint64_t)item_size)) { out_of_memory(); }
+    return length + additional;
+}
+
+FA_EXPORT int64_t fa_array_capacity(const FaArrayHeader *array) {
+    return array->capacity < 0 ? array->length : array->capacity;
+}
+
+FA_EXPORT void fa_array_reserve_additional(FaArrayHeader *array, int64_t additional, int64_t item_size) {
+    fa_array_reserve(array, storage_total(array->length, additional, item_size), item_size);
+}
+
 /// Makes room for `capacity` items (`Array.from(…, capacity = n)`).
 FA_EXPORT void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t item_size) {
 	if (array->capacity < 0) {
@@ -2532,7 +2568,8 @@ FA_EXPORT void *fa_string_split_into(const uint8_t *text, size_t length, size_t 
 // items starting at index `2^(k+s-1)`, so item `i` is in segment
 // `s = floor(log2(i >> k)) + 1` (0 when `i < 2^k`): one `clz`.
 
-#define FA_SEGMENTS 48
+#define FA_SEGMENTS 64
+#define FA_INLINE_SEGMENTS 3
 
 /// A `GrowingArray` (`src/lower/growing.rs`). `cursor` is the address of
 /// item `length` and `end` the end of its segment when that segment is
@@ -2540,21 +2577,25 @@ FA_EXPORT void *fa_string_split_into(const uint8_t *text, size_t length, size_t 
 /// one comparison, one store and one increment until a segment is full.
 typedef struct {
 	int64_t length;
-	int64_t segments;
+	int16_t segments;
+	uint16_t storage;
+	int32_t k;
 	uint8_t *cursor;
 	uint8_t *end;
-	uint8_t *segment[FA_SEGMENTS];
-	int64_t storage;
+	uint8_t **segment;
+	uint8_t *inline_segment[FA_INLINE_SEGMENTS];
 } FaSegmented;
+
+_Static_assert(sizeof(FaSegmented) == (sizeof(void *) == 8 ? 64 : 40), "compact growing header");
 
 /// The segment of item `index`, and the index of its first item.
 static __attribute__((always_inline)) inline int64_t segment_of(int64_t index, int32_t k,
                                                                 int64_t *first) {
-	uint64_t high = (uint64_t)index >> k;
-	if (high == 0) {
+	if ((uint64_t)index < ((uint64_t)1 << k)) {
 		*first = 0;
 		return 0;
 	}
+	uint64_t high = (uint64_t)index >> k;
 	int64_t segment = 64 - __builtin_clzll(high);
 	*first = (int64_t)1 << (k + segment - 1);
 	return segment;
@@ -2569,6 +2610,7 @@ static int64_t segment_size(int64_t segment, int32_t k) {
 FA_EXPORT __attribute__((always_inline)) void *fa_segmented_at(const FaSegmented *array,
                                                                int64_t index,
                                                                int64_t item_size, int32_t k) {
+	k = array->k < 0 ? k : array->k;
 	int64_t first;
 	int64_t segment = segment_of(index, k, &first);
 	return array->segment[segment] + (index - first) * item_size;
@@ -2578,6 +2620,8 @@ FA_EXPORT __attribute__((always_inline)) void *fa_segmented_at(const FaSegmented
 FA_EXPORT FaSegmented *fa_segmented_new(void) {
 	FaSegmented *array = fa_alloc(sizeof(FaSegmented), sizeof(int64_t));
 	__builtin_memset(array, 0, sizeof(FaSegmented));
+	array->k = -1;
+	array->segment = array->inline_segment;
 	return array;
 }
 
@@ -2585,17 +2629,65 @@ FA_EXPORT FaSegmented *fa_segmented_local(void *buffer, int64_t length,
                                          int64_t item_size, int32_t k) {
 	FaSegmented *array = buffer;
 	__builtin_memset(array, 0, sizeof(FaSegmented));
+	while (((uint64_t)1 << k) < (uint64_t)length) { k += 1; }
 	array->storage = 3;
 	array->length = length;
-	uint8_t *next = (uint8_t *)(((uintptr_t)buffer + sizeof(FaSegmented) + 15) & ~(uintptr_t)15);
-	int64_t capacity = 0;
-	while (capacity < length) {
-		int64_t size = segment_size(array->segments, k);
-		array->segment[array->segments++] = next;
-		next += size * item_size;
-		capacity += size;
+	array->k = k;
+	array->segment = array->inline_segment;
+	if (length) {
+		uint8_t *items = (uint8_t *)(((uintptr_t)buffer + sizeof(FaSegmented) + 15) & ~(uintptr_t)15);
+		array->segments = 1;
+		array->segment[0] = items;
+		array->cursor = items + length * item_size;
+		array->end = items + segment_size(0, k) * item_size;
 	}
 	return array;
+}
+
+/// Allocates a segment; only its pointer directory can ever move.
+static void segmented_allocate(FaSegmented *array, int64_t item_size) {
+    int32_t segment = array->segments;
+    if (segment == 0 && array->storage == 3 && array->inline_segment[0] == 0) { array->storage = 4; }
+    int32_t shift = segment == 0 ? array->k : array->k + segment - 1;
+    if (segment >= FA_SEGMENTS || shift >= (segment == 0 ? 63 : 62) ||
+        (item_size > 0 && (uint64_t)segment_size(segment, array->k) > SIZE_MAX / (uint64_t)item_size)) { out_of_memory(); }
+    if (segment == FA_INLINE_SEGMENTS && array->segment == array->inline_segment) {
+        uint8_t **directory = fa_alloc(FA_SEGMENTS * sizeof(uint8_t *), sizeof(void *));
+        copy_bytes((uint8_t *)directory, (const uint8_t *)array->segment, sizeof(array->inline_segment));
+        array->segment = directory;
+    }
+    array->segment[segment] = fa_alloc((size_t)segment_size(segment, array->k) * (size_t)item_size, 16);
+    if (segment < FA_INLINE_SEGMENTS) { array->inline_segment[segment] = array->segment[segment]; }
+    array->segments += 1;
+}
+
+FA_EXPORT int64_t fa_segmented_capacity(const FaSegmented *array) {
+    return array->segments == 0 ? 0 : segment_size(array->segments - 1, array->k) * (array->segments == 1 ? 1 : 2);
+}
+
+FA_EXPORT void fa_segmented_reserve(FaSegmented *array, int64_t additional, int64_t item_size, int32_t k) {
+    int64_t needed = storage_total(array->length, additional, item_size);
+    int64_t capacity = fa_segmented_capacity(array);
+    if (array->length == 0 && array->segments > 0 && needed > segment_size(0, array->k)) {
+        // Reset already invalidated references to the old items. Rebuild an
+        // empty reservation as one block, without reducing total capacity.
+        for (int32_t segment = array->storage == 3 ? 1 : 0; segment < array->segments; segment += 1) {
+            fa_free(array->segment[segment], (size_t)segment_size(segment, array->k) * (size_t)item_size, 16);
+        }
+        array->segments = 0;
+        if (array->storage == 3) { array->storage = 4; }
+        if (needed < capacity) { needed = capacity; }
+    } else if (needed <= capacity) { return; }
+    if (array->segments == 0) {
+        k = 0;
+        while (k < 62 && ((uint64_t)1 << k) < (uint64_t)needed) { k += 1; }
+        array->k = k;
+    }
+    while (fa_segmented_capacity(array) < needed) { segmented_allocate(array, item_size); }
+    if (array->length == 0) {
+        array->cursor = array->segment[0];
+        array->end = array->cursor + segment_size(0, array->k) * item_size;
+    }
 }
 
 /// Points the cursor at item `length`, in its segment, allocated when it
@@ -2603,12 +2695,13 @@ FA_EXPORT FaSegmented *fa_segmented_local(void *buffer, int64_t length,
 /// reset, so the next one may exist already).
 FA_EXPORT __attribute__((noinline)) void fa_segmented_next(FaSegmented *array, int64_t item_size,
                                                           int32_t k) {
+	k = array->k < 0 ? k : array->k;
+	if (array->k < 0) { array->k = k; }
 	int64_t index = array->length;
 	int64_t first;
 	int64_t segment = segment_of(index, k, &first);
 	if (segment >= array->segments) {
-		array->segment[segment] = fa_alloc((size_t)(segment_size(segment, k) * item_size), 16);
-		array->segments = segment + 1;
+		segmented_allocate(array, item_size);
 	}
 	array->cursor = array->segment[segment] + (index - first) * item_size;
 	array->end = array->segment[segment] + segment_size(segment, k) * item_size;
@@ -2632,6 +2725,7 @@ FA_EXPORT __attribute__((always_inline)) void *fa_segmented_push_slot(FaSegmente
 static __attribute__((noinline)) void segmented_append_runs(FaSegmented *array,
                                                            const uint8_t *items, int64_t count,
                                                            int64_t item_size, int32_t k) {
+	k = array->k < 0 ? k : array->k;
 	while (count > 0) {
 		if (array->cursor == array->end) {
 			fa_segmented_next(array, item_size, k);
@@ -2653,6 +2747,13 @@ FA_EXPORT __attribute__((always_inline)) void fa_segmented_append(FaSegmented *a
                                                                 const uint8_t *items,
                                                                 int64_t count, int64_t item_size,
                                                                 int32_t k) {
+    if (item_size == 0) {
+        fa_segmented_reserve(array, count, item_size, k);
+        array->length += count;
+        return;
+    }
+
+	k = array->k < 0 ? k : array->k;
 	if (count > 0 && count * item_size <= array->end - array->cursor) {
 		copy_bytes(array->cursor, items, (size_t)(count * item_size));
 		array->cursor += count * item_size;
@@ -2665,6 +2766,7 @@ FA_EXPORT __attribute__((always_inline)) void fa_segmented_append(FaSegmented *a
 /// `fa_segmented_fill` across segments.
 static __attribute__((noinline)) void segmented_fill_runs(FaSegmented *array, int64_t count,
                                                          int32_t byte, int32_t k) {
+	k = array->k < 0 ? k : array->k;
 	while (count > 0) {
 		if (array->cursor == array->end) {
 			fa_segmented_next(array, 1, k);
@@ -2683,6 +2785,7 @@ static __attribute__((noinline)) void segmented_fill_runs(FaSegmented *array, in
 /// fills fit in the current segment.
 FA_EXPORT __attribute__((always_inline)) void fa_segmented_fill(FaSegmented *array, int64_t count,
                                                               int32_t byte, int32_t k) {
+	k = array->k < 0 ? k : array->k;
 	if (count > 0 && count <= array->end - array->cursor) {
 		fill_bytes(array->cursor, (uint8_t)byte, (size_t)count);
 		array->cursor += count;
@@ -2701,6 +2804,7 @@ static __attribute__((noinline)) void segmented_extend_runs(void *target, int32_
                                                            const FaSegmented *source,
                                                            int64_t start, int64_t count,
                                                            int64_t item_size, int32_t k) {
+	k = source->k < 0 ? k : source->k;
 	if (target_k < 0) {
 		fa_array_room((FaArrayHeader *)target, count, item_size);
 	}
@@ -2725,6 +2829,7 @@ static __attribute__((noinline)) void segmented_extend_runs(void *target, int32_
 FA_EXPORT __attribute__((always_inline)) void fa_segmented_extend_to(
 	void *target, int32_t target_k, const FaSegmented *source, int64_t start, int64_t count,
 	int64_t item_size, int32_t k) {
+	k = source->k < 0 ? k : source->k;
 	if (count <= 0) {
 		return;
 	}
@@ -2752,6 +2857,7 @@ FA_EXPORT __attribute__((always_inline)) void fa_segmented_extend_to(
 FA_EXPORT __attribute__((noinline)) uint8_t *fa_segmented_run(const FaSegmented *array,
                                                               int64_t index, int64_t item_size,
                                                               int32_t k, uint8_t **end) {
+	k = array->k < 0 ? k : array->k;
 	int64_t first;
 	int64_t segment = segment_of(index, k, &first);
 	*end = array->segment[segment] + segment_size(segment, k) * item_size;
@@ -2766,6 +2872,7 @@ FA_EXPORT __attribute__((noinline)) uint8_t *fa_segmented_run(const FaSegmented 
 FA_EXPORT int64_t fa_segmented_next_byte(const FaSegmented *array, int64_t offset, int64_t length,
                                          int32_t byte, int32_t k, uint8_t **cursor,
                                          uint8_t **end) {
+	k = array->k < 0 ? k : array->k;
 	while (offset < length) {
 		if (*cursor == *end) {
 			*cursor = fa_segmented_run(array, offset, 1, k, end);
@@ -2786,6 +2893,7 @@ FA_EXPORT int64_t fa_segmented_next_byte(const FaSegmented *array, int64_t offse
 /// `growing = []`: no item left (the caller dropped those owning memory),
 /// the segments kept for the next pushes.
 FA_EXPORT void fa_segmented_reset(FaSegmented *array, int64_t item_size, int32_t k) {
+	k = array->k < 0 ? k : array->k;
 	array->length = 0;
 	if (array->segments > 0) {
 		array->cursor = array->segment[0];
@@ -2798,11 +2906,15 @@ FA_EXPORT void fa_segmented_reset(FaSegmented *array, int64_t item_size, int32_t
 
 /// Frees a `GrowingArray` whose items were dropped.
 FA_EXPORT void fa_segmented_free(FaSegmented *array, int64_t item_size, int32_t k) {
-	if (array->storage) { return; }
-	for (int64_t segment = 0; segment < array->segments; segment += 1) {
+	if (array->storage == 2) { return; }
+	k = array->k < 0 ? k : array->k;
+	for (int64_t segment = array->storage == 3 ? 1 : 0; segment < array->segments; segment += 1) {
 		fa_free(array->segment[segment], (size_t)(segment_size(segment, k) * item_size), 16);
 	}
-	fa_free(array, sizeof(FaSegmented), sizeof(int64_t));
+	if (array->segment != array->inline_segment) {
+        fa_free(array->segment, FA_SEGMENTS * sizeof(uint8_t *), sizeof(void *));
+    }
+	if (!array->storage) { fa_free(array, sizeof(FaSegmented), sizeof(int64_t)); }
 }
 
 /// The items of a `GrowingArray` copied bytewise into a new array: a view
@@ -2810,6 +2922,7 @@ FA_EXPORT void fa_segmented_free(FaSegmented *array, int64_t item_size, int32_t 
 /// dropped), or a move when the `GrowingArray` is freed after.
 FA_EXPORT FaArrayHeader *fa_segmented_flatten(const FaSegmented *array, int64_t item_size,
                                               int32_t k) {
+	k = array->k < 0 ? k : array->k;
 	FaArrayHeader *flat = fa_array_new(array->length, array->length, item_size);
 	int64_t done = 0;
 	for (int64_t segment = 0; done < array->length; segment += 1) {
@@ -2833,6 +2946,16 @@ FA_EXPORT FaSegmented *fa_segmented_from_array(FaArrayHeader *flat, int64_t item
 	fa_segmented_append(array, flat->items, flat->length, item_size, k);
 	fa_array_free(flat, item_size);
 	return array;
+}
+
+FA_EXPORT FaSegmented *fa_segmented_from_array_capacity(FaArrayHeader *flat, int64_t item_size, int32_t k, int64_t capacity) {
+    fa_array_materialize(flat);
+    FaSegmented *array = fa_segmented_new();
+    if (capacity < flat->length) { capacity = flat->length; }
+    fa_segmented_reserve(array, capacity, item_size, k);
+    fa_segmented_append(array, flat->items, flat->length, item_size, k);
+    fa_array_free(flat, item_size);
+    return array;
 }
 
 // ── the allocator of wasm and of the freestanding target ───────────────
@@ -3266,6 +3389,7 @@ typedef struct {
 	uint32_t capacity;
 	uint32_t pages;
 	uint32_t slots_offset;
+	uint32_t allocated;
 	int64_t storage;
 } FaPool;
 
@@ -3275,6 +3399,7 @@ FA_EXPORT FaPool *fa_pool_local(void *buffer, int64_t length, int64_t item_size)
 	FaPool *pool = buffer;
 	__builtin_memset(pool, 0, sizeof(FaPool));
 	pool->storage = 3;
+	pool->allocated = length ? 1 : 0;
 	pool->size = length;
 	pool->slot_size = item_size < 4 ? 4 : (uint32_t)item_size;
 	pool->capacity = (uint32_t)length;
@@ -3409,8 +3534,18 @@ static __attribute__((noinline, cold)) PoolChunk *pool_new_chunk(FaPool *pool) {
 	}
 	chunk->index = index;
 	pool->chunks[index] = chunk;
+	pool->allocated += 1;
 	pool->available[index / 64] |= (uint64_t)1 << (index % 64);
 	return chunk;
+}
+
+FA_EXPORT int64_t fa_pool_capacity(const FaPool *pool) {
+    return ((int64_t)pool->allocated + (pool->spare != 0)) * pool->capacity;
+}
+
+FA_EXPORT void fa_pool_reserve(FaPool *pool, int64_t additional) {
+    int64_t needed = storage_total(pool->size, additional, pool->slot_size);
+    while (fa_pool_capacity(pool) < needed) { pool_new_chunk(pool); }
 }
 
 /// The slot of a new element (`add`): a free slot of the first chunk with
@@ -3460,6 +3595,7 @@ FA_EXPORT void fa_pool_remove(FaPool *pool, void *element) {
 	uint32_t index = chunk->index;
 	if (chunk->live == 0) {
 		pool->chunks[index] = 0;
+		pool->allocated -= 1;
 		pool->available[index / 64] &= ~((uint64_t)1 << (index % 64));
 		while (pool->count > 0 && pool->chunks[pool->count - 1] == 0) {
 			pool->count -= 1;
@@ -3521,6 +3657,7 @@ static void pool_release_chunks(FaPool *pool) {
 		__builtin_memset(pool->available, 0, (pool->table_capacity + 63) / 64 * 8);
 	}
 	pool->count = 0;
+	pool->allocated = 0;
 	pool->size = 0;
 }
 
@@ -4935,6 +5072,7 @@ static void table_index(FaTable *table, int64_t slots, int64_t entry_size) {
 
 /// The number of index slots for `capacity` entries.
 static int64_t index_slots(int64_t capacity) {
+	if (capacity < 0 || (uint64_t)capacity > SIZE_MAX / 32 || capacity > INT64_MAX / 4) { out_of_memory(); }
 	int64_t slots = 8;
 	while (slots < capacity * 2) {
 		slots *= 2;
@@ -4944,6 +5082,7 @@ static int64_t index_slots(int64_t capacity) {
 
 /// A new empty table with room for `capacity` entries.
 FA_EXPORT FaTable *fa_table_new(int64_t capacity, int64_t entry_size) {
+	storage_total(0, capacity, entry_size);
 	FaTable *table = fa_alloc(sizeof(FaTable), sizeof(int64_t));
 	table->storage = 0;
 	if (capacity < 4) {
@@ -4963,6 +5102,7 @@ FA_EXPORT FaTable *fa_table_new(int64_t capacity, int64_t entry_size) {
 /// A new empty growing table (`GrowingMap`, `GrowingSet`), its index sized
 /// for `capacity` entries.
 FA_EXPORT FaTable *fa_table_new_growing(int64_t capacity, int64_t entry_size) {
+	storage_total(0, capacity, entry_size);
 	FaTable *table = fa_alloc(sizeof(FaTable), sizeof(int64_t));
 	table->storage = 0;
 	if (capacity < 4) {
@@ -5133,6 +5273,41 @@ static int table_reserve(FaTable *table, int64_t entry_size) {
 	}
 	table_index(table, slots, entry_size);
 	return 1;
+}
+
+FA_EXPORT int64_t fa_table_capacity(const FaTable *table) {
+    int64_t room = table->capacity - (table->growing ? table->length : table->used);
+    if (table->growing) {
+        const FaTableEntries *entries = (const FaTableEntries *)table->entries;
+        int64_t allocated = entries->count * TABLE_CHUNK_SLOTS - table->length;
+        if (room > allocated) { room = allocated; }
+    }
+    int64_t index_room = (table->mask + 1) / 4 * 3 - table->occupied;
+    if (room > index_room) { room = index_room; }
+    return table->length + room;
+}
+
+FA_EXPORT void fa_table_reserve_additional(FaTable *table, int64_t additional, int64_t entry_size) {
+    int64_t needed = storage_total(table->growing ? table->length : table->used, additional, entry_size);
+    if (fa_table_capacity(table) - table->length >= additional) { return; }
+    if (table->growing) {
+        FaTableEntries *entries = (FaTableEntries *)table->entries;
+        int64_t slots = needed > table->used ? needed : table->used;
+        while (entries->count < (slots + TABLE_CHUNK_SLOTS - 1) / TABLE_CHUNK_SLOTS) {
+            table_stable_slot(table, entries->count * TABLE_CHUNK_SLOTS, entry_size);
+        }
+    } else if (needed > table->capacity) {
+        uint8_t *entries = fa_alloc((size_t)needed * (size_t)entry_size, 16);
+        copy_bytes(entries, table->entries, (size_t)table->used * (size_t)entry_size);
+        fa_free(table->entries, (size_t)table->capacity * (size_t)entry_size, 16);
+        table->entries = entries;
+    }
+    if (needed > table->capacity) { table->capacity = needed; }
+    if (table->capacity > INT64_MAX / 4) { out_of_memory(); }
+    int64_t slots = index_slots(table->capacity);
+    if (slots > table->mask + 1 || additional > (table->mask + 1) / 4 * 3 - table->occupied) {
+        table_index(table, slots, entry_size);
+    }
 }
 
 /// A new live entry for a key that is absent, at the end of the order: its

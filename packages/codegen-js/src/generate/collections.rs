@@ -95,8 +95,33 @@ impl Generator<'_> {
 			("Set.from", Some(Argument::Given(key))) => Some(*key),
 			_ => None,
 		};
-		let nodes: Vec<NodeId> = std::iter::once(source).chain(key).collect();
-		let values = self.in_order(&nodes, |g, node| g.expr(node));
+		let hint_index = if path == "Set.from" { 2 } else { 1 };
+		let values = if matches!(arguments.get(hint_index), Some(Argument::Given(_))) {
+			let mut nodes: Vec<_> = arguments
+				.iter()
+				.enumerate()
+				.filter_map(|(index, argument)| match argument {
+					Argument::Given(node) => Some((index, *node)),
+					_ => None,
+				})
+				.collect();
+			nodes.sort_by_key(|(_, node)| self.tree.span(node.index()).start);
+			let mut values = std::collections::BTreeMap::new();
+			for (index, node) in nodes {
+				let value = self.expr(node);
+				let temp = self.temp();
+				self.out.line(format!("const {temp} = {};", value.text));
+				values.insert(index, Expr::name(temp, true));
+			}
+			let mut result = vec![values.remove(&0).expect("a source")];
+			if key.is_some() {
+				result.push(values.remove(&1).expect("a key"));
+			}
+			result
+		} else {
+			let nodes: Vec<NodeId> = std::iter::once(source).chain(key).collect();
+			self.in_order(&nodes, |g, node| g.expr(node))
+		};
 		let source_ty = self.type_of(source);
 		let ty = self.type_of(n);
 		let item = match self.types.kind(ty) {

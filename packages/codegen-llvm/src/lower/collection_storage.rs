@@ -333,38 +333,52 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		if matches!(repr, Repr::Growing(_)) {
 			let count = values.len();
-			let mut segments = Vec::new();
-			let mut offset = 0;
-			let mut capacity = 1usize << self.segment_bits(item);
-			while offset < count {
-				let taken = capacity.min(count - offset);
-				let mut segment = values[offset..offset + taken].to_vec();
-				segment.resize(capacity, self.llvm_type(item).const_zero());
-				segments.push(self.readonly_global(
-					self.context.const_struct(&segment, false).into(),
-					"fa.collection.segment",
-				));
-				offset += taken;
-				if segments.len() != 1 {
-					capacity *= 2;
-				}
-			}
-			let i64 = self.context.i64_type();
+			let capacity = count
+				.next_power_of_two()
+				.max(1usize << self.segment_bits(item));
+			let k = capacity.trailing_zeros();
+			let i16 = self.context.i16_type();
 			let pointer = self.pointer_type();
-			let segment_count = segments.len();
-			segments.resize(48, pointer.const_null());
-			let header = self.segmented_type().const_named_struct(&[
-				i64.const_int(count as u64, false).into(),
-				i64.const_int(segment_count as u64, false).into(),
-				pointer.const_null().into(),
-				pointer.const_null().into(),
-				pointer.const_array(&segments).into(),
-				i64.const_int(2, false).into(),
+			let mut segments = [pointer.const_null(); 3];
+			if count != 0 {
+				values.resize(capacity, self.llvm_type(item).const_zero());
+				segments[0] = self.readonly_global(
+					self.context.const_struct(&values, false).into(),
+					"fa.collection.segment",
+				);
+			}
+			let ty = self.segmented_type();
+			let global = self.module.add_global(ty, None, "fa.collection.static");
+			global.set_linkage(Linkage::Internal);
+			global.set_constant(true);
+			global.set_alignment(16);
+			let directory = unsafe {
+				global.as_pointer_value().const_gep(
+					ty,
+					&[
+						self.context.i32_type().const_zero(),
+						self.context.i32_type().const_int(6, false),
+					],
+				)
+			};
+			let metadata = self.segment_metadata_type().const_named_struct(&[
+				i16.const_int(u64::from(count != 0), false).into(),
+				i16.const_int(2, false).into(),
 			]);
-			return Ok(Some(Val::new(
-				repr,
-				self.readonly_global(header.into(), "fa.collection.static"),
-			)));
+			let header = ty.const_named_struct(&[
+				self.context
+					.i64_type()
+					.const_int(count as u64, false)
+					.into(),
+				metadata.into(),
+				self.context.i32_type().const_int(k as u64, false).into(),
+				pointer.const_null().into(),
+				pointer.const_null().into(),
+				directory.into(),
+				pointer.const_array(&segments).into(),
+			]);
+			global.set_initializer(&header);
+			return Ok(Some(Val::new(repr, global.as_pointer_value())));
 		}
 		let items = self.context.const_struct(&values, false);
 		let items = self.readonly_global(items.into(), "fa.collection.items");
@@ -559,6 +573,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			i32.const_int(capacity, false).into(),
 			i32.const_int(pages, false).into(),
 			i32.const_int(slots_offset, false).into(),
+			i32.const_int(u64::from(count != 0), false).into(),
 			i64.const_int(2, false).into(),
 		]);
 		Ok(Some(Val::new(

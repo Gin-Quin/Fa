@@ -34,6 +34,8 @@ use crate::js::{self, Expr, Prec};
 /// A declaration and its fill loop, turned into a byte array.
 pub(crate) struct ByteFill {
 	symbol: SymbolId,
+	/// A storage hint still evaluates before the fill-loop bound.
+	capacity: Option<NodeId>,
 	/// The end of the loop's range.
 	end: NodeId,
 	inclusive: bool,
@@ -103,6 +105,13 @@ impl Generator<'_> {
 		}
 		Some(ByteFill {
 			symbol,
+			capacity: self
+				.analysis
+				.call(self.strip_groups(value))
+				.and_then(|call| match call.arguments.get(1) {
+					Some(Argument::Given(capacity)) => Some(*capacity),
+					_ => None,
+				}),
 			end,
 			inclusive,
 			value: pushed,
@@ -110,9 +119,15 @@ impl Generator<'_> {
 	}
 
 	/// Writes the declaration of a byte array (its fill loop included).
-	/// The declared value is never evaluated: `[]`, or `Array.from([], …)`,
-	/// whose capacity JavaScript doesn't take (`collection_from`).
+	/// The empty source needs no evaluation; the capacity expression keeps
+	/// its effects, even though JavaScript ignores the storage hint.
 	pub(crate) fn byte_array_declaration(&mut self, fill: ByteFill) {
+		if let Some(capacity) = fill.capacity {
+			let hint = self.expr(capacity);
+			if !hint.pure {
+				self.out.line(format!("void ({});", hint.text));
+			}
+		}
 		let end = self.expr(fill.end);
 		let count = if fill.inclusive {
 			let one = Expr::constant("1", Prec::Primary);

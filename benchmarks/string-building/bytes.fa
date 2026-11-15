@@ -109,7 +109,7 @@ type Totals = {
 
 	function add = (self, text: Array<Byte>) throws IndexError mutates self => {
 		-- split(text, ';'): the parts as ranges into `text`, like Goose's slices
-		mutable parts: Array<(Integer, Integer)> = []
+		mutable parts = Array<(Integer, Integer)>.from([], capacity = blockSize + 1)
 		mutable start = 0
 		for byte, position in text {
 			if byte == 59 {
@@ -119,7 +119,7 @@ type Totals = {
 		}
 		parts.push((start, text.length))
 		-- join(parts, "\n") into a new buffer
-		mutable joined: Array<Byte> = []
+		mutable joined = Array<Byte>.from([], capacity = text.length)
 		mutable first = true
 		for (partStart, partEnd) in parts {
 			if not first {
@@ -139,8 +139,8 @@ type Totals = {
 let n = try Integer.parse(arguments.get(0) ?? "3000000")
 
 mutable totals = Totals {}
-mutable output: Array<Byte> = []
-mutable lastEntry: Array<Byte> = []
+mutable output = Array<Byte>.from([], capacity = blockSize * 64)
+mutable lastEntry = Array<Byte>.from([], capacity = 64)
 for i in 0..n {
 	lastEntry.clear()
 	try appendInteger(lastEntry, i, 8)

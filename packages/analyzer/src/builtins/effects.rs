@@ -11,6 +11,8 @@ pub enum BuiltinEffect {
 	MutatesSelf,
 	/// `mutates self.size` (or `.length`): adds an element, moves none.
 	MutatesSize,
+	/// Storage reservation preserves items and length.
+	MutatesCapacity,
 	/// `invalidates self[self.length - 1]`: `pop`.
 	InvalidatesLast,
 	/// `invalidates self[index..]` with `index` the argument at this position
@@ -60,6 +62,9 @@ pub fn effects_of(path: &str) -> Vec<BuiltinEffect> {
 	let Some((owner, method)) = path.split_once('#') else {
 		return Vec::new();
 	};
+	if owner == "String" && method == "reserve" {
+		return vec![MutatesSelf];
+	}
 	match kind_of_owner(owner) {
 		Some(kind) => effects_of_kind(kind, method),
 		None => Vec::new(),
@@ -73,6 +78,7 @@ pub fn effects_of_kind(kind: crate::types::CollKind, method: &str) -> Vec<Builti
 		.iter()
 		.map(|effect| match (effect.step, effect.invalidates) {
 			(EffectStep::Whole, _) => MutatesSelf,
+			(EffectStep::Capacity, _) => MutatesCapacity,
 			(EffectStep::Size | EffectStep::Length, _) => MutatesSize,
 			(EffectStep::Element, false) => MutatesKey(0),
 			(EffectStep::Element, true) => InvalidatesKey(0),

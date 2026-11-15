@@ -71,9 +71,9 @@ pub(crate) struct TasksCx {
 	pub(crate) pending_start: Option<NodeId>,
 	/// The mode of the next function generated (`function_parts`).
 	pub(crate) next_mode: Option<Mode>,
-	/// The arguments of the detached `start` being generated that its task
-	/// copies (`StartInfo::copies`, not moved).
-	pub(crate) detached_copies: HashSet<NodeId>,
+	/// The detached call whose arguments are being evaluated. Nested calls
+	/// evaluating those arguments retain their ordinary borrowing semantics.
+	pub(crate) detached_call: Option<NodeId>,
 }
 
 impl Generator<'_> {
@@ -994,43 +994,31 @@ impl Generator<'_> {
 	pub(crate) fn start_expr(&mut self, n: NodeId, operand: NodeId) -> Expr {
 		let info = self.analysis.starts.get(&n).cloned();
 		let detached = info.as_ref().is_some_and(|info| info.detached);
-		// a detached task copies the values it uses that the starter may
-		// still change (A12): the argument values, the captured locals
-		let copied: Vec<NodeId> = info
-			.as_ref()
-			.filter(|info| info.detached)
-			.map(|info| {
-				info.copies
-					.iter()
-					.filter(|(_, moved)| !moved)
-					.map(|(node, _)| *node)
-					.collect()
-			})
-			.unwrap_or_default();
 		let task = match info.as_ref().and_then(|info| info.block) {
 			Some(block) => {
 				// the module-level values (the top level's too) are read, not
 				// copied: they are not captured (`concurrency.md`, tasks)
-				let symbols: Vec<fa_analyzer::ids::SymbolId> = copied
-					.iter()
-					.filter_map(|&node| self.analysis.symbols.symbol_of_decl(node))
+				let symbols: Vec<fa_analyzer::ids::SymbolId> = info
+					.as_ref()
+					.filter(|info| info.detached)
+					.into_iter()
+					.flat_map(|info| &info.copies)
+					.filter(|(_, moved)| !moved)
+					.filter_map(|&(node, _)| self.analysis.symbols.symbol_of_decl(node))
 					.collect();
 				let saved = self.copy_values(&symbols, true);
 				let task = self.start_block(n, block);
 				self.restore_captures(saved);
 				task
 			}
-			None if !copied.is_empty() => {
-				let saved = std::mem::replace(
-					&mut self.tasks.detached_copies,
-					copied.iter().copied().collect(),
-				);
-				self.tasks.detached_copies.extend(saved.iter().copied());
+			None => {
+				let call = self.strip_groups(operand);
+				let saved =
+					std::mem::replace(&mut self.tasks.detached_call, detached.then_some(call));
 				let task = self.start_call(operand);
-				self.tasks.detached_copies = saved;
+				self.tasks.detached_call = saved;
 				task
 			}
-			None => self.start_call(operand),
 		};
 		if detached && matches!(self.mode(), Mode::Async { .. } | Mode::Dynamic) {
 			let helper = self.helper("faDetach");

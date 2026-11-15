@@ -69,10 +69,9 @@ const HASH_MULTIPLIER: u64 = 0x9E37_79B9_7F4A_7C15;
 /// `fa_hash_bytes` of the runtime.
 fn hash_bytes(bytes: &[u8]) -> u64 {
 	let mut hash = 0xcbf2_9ce4_8422_2325 ^ (bytes.len() as u64).wrapping_mul(HASH_MULTIPLIER);
-	let words = bytes.chunks_exact(8);
-	let rest = words.remainder();
+	let (words, rest) = bytes.as_chunks::<8>();
 	for word in words {
-		let word = u64::from_le_bytes(word.try_into().expect("eight bytes"));
+		let word = u64::from_le_bytes(*word);
 		hash = (hash ^ word).wrapping_mul(HASH_MULTIPLIER);
 		hash ^= hash >> 29;
 	}
@@ -509,7 +508,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					},
 				)
 			};
-			let free = if count % TABLE_CHUNK_SLOTS == 0 {
+			let free = if count.is_multiple_of(TABLE_CHUNK_SLOTS) {
 				0
 			} else {
 				chunks

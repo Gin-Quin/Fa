@@ -24,7 +24,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULTS = {
     "binary-trees": 17, "blur": 3000, "calc": 400000, "fannkuch-redux": 10,
-    "fib": 42, "graph": 100000, "interp": 21, "lru": 2000000,
+    "fib": 42, "graph": 100000, "growing-index": 1000000, "interp": 21, "lru": 2000000,
     "mandelbrot": 4000, "nbody": 15000000, "particles": 300000,
     "push": 32000000, "records": 4000000, "respond": 400000, "scene": 12,
     "sexp": 20000, "sieve": 100000000, "sort-objects": 1000000,
@@ -36,12 +36,14 @@ DEFAULTS = {
 # `Array<Byte>`, like the Goose port; `string-building-growing` in `GrowingArray<Byte>`, whose
 # items never move, like Goose's `u8[>..]` arrays.
 VARIANTS = {"string-building-bytes": ("string-building", "bytes.fa"),
-            "string-building-growing": ("string-building", "growing.fa")}
+            "string-building-growing": ("string-building", "growing.fa"),
+            "growing-index-array": ("growing-index", "array.fa")}
 DEFAULTS.update({name: DEFAULTS[directory] for name, (directory, _) in VARIANTS.items()})
 AUDIT = {name: max(1, size // 10) for name, size in DEFAULTS.items()}
 AUDIT.update({"binary-trees": 14, "fib": 35, "interp": 17, "scene": 9,
               "tree": 17, "fannkuch-redux": 9, "words": 100000,
-              "blur": 1000, "mandelbrot": 1000, "spectral-norm": 1000})
+              "blur": 1000, "mandelbrot": 1000, "spectral-norm": 1000,
+              "growing-index": 1000000, "growing-index-array": 1000000})
 
 
 def execute(command, log=None, **kwargs):
@@ -181,6 +183,7 @@ def main():
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--default-sizes", action="store_true")
+    parser.add_argument("--size", type=int, help="Override the selected sizes (growing-index: 16 or 1000000)")
     parser.add_argument("--profile", action="store_true")
     parser.add_argument("--goose-runtime-size", action="store_true",
                         help="Read BENCH_N from argv in generated Goose copies, keeping checkfree")
@@ -189,6 +192,8 @@ def main():
     parser.add_argument("--rebuild-fa", action="store_true", help="With --reuse, rebuild only Fa")
     parser.add_argument("--report", default="results.json", help="JSON filename inside --directory")
     args = parser.parse_args()
+    if args.size is not None and args.size < 1:
+        parser.error("--size must be positive")
     if args.runs < 1:
         parser.error("--runs must be positive")
     if args.rebuild_fa and not args.reuse:
@@ -208,7 +213,7 @@ def main():
                "revision": execute(["git", "-c", f"safe.directory={ROOT}", "rev-parse", "HEAD"])
                .decode().strip(), "runs": args.runs, "benchmarks": {}}
     for name in args.names or sorted(DEFAULTS):
-        size = (DEFAULTS if args.default_sizes else AUDIT)[name]
+        size = args.size if args.size is not None else (DEFAULTS if args.default_sizes else AUDIT)[name]
         directory = args.directory / name
         try:
             if args.reuse:

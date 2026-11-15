@@ -7,8 +7,10 @@ Usage: variants.py --expected expected.txt --size N --profile-size M --runs R --
                    --report results.json name=executable [name=executable ...]
 
 The executables are those built by compare.py (`<directory>/<benchmark>/fa/native/main`,
-`.../goose/main`), which takes the size as its first argument. The expected output at
---profile-size is the output of the first executable, compared with the others.
+`.../goose/main`), which takes the size as its first argument. Use --profile-expected for a Rust oracle at --profile-size; otherwise the first executable
+is compared with the others. For growing-index, run once with --size 16 --profile-size 16,
+then with --size 1000000 --profile-size 1000000, using the Array, GrowingArray and Goose
+executables built by compare.py growing-index growing-index-array. All sizes are runtime inputs.
 """
 
 import argparse
@@ -37,6 +39,7 @@ def main():
     parser.add_argument("programs", nargs="+", help="name=executable")
     parser.add_argument("--expected", type=Path, required=True)
     parser.add_argument("--size", type=int, required=True)
+    parser.add_argument("--profile-expected", type=Path, help="Rust output at --profile-size")
     parser.add_argument("--profile-size", type=int, required=True)
     parser.add_argument("--runs", type=int, default=21)
     parser.add_argument("--cpu", type=int, default=1)
@@ -44,7 +47,7 @@ def main():
     args = parser.parse_args()
     programs = dict(program.split("=", 1) for program in args.programs)
     expected = args.expected.read_bytes()
-    reference = None
+    reference = args.profile_expected.read_bytes() if args.profile_expected else None
     for name, executable in programs.items():
         output = subprocess.run([executable, str(args.size)], capture_output=True, check=True).stdout
         if output != expected:

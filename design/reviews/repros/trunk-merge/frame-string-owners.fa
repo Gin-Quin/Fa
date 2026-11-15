@@ -1,0 +1,57 @@
+-- A local string that may live in the frame (A) built by the text builder,
+-- templates and reservations (B), then stored in longer-lived owners: an
+-- object returned through a result slot, a map, a growing array, a closure.
+type Record = { name: String, tags: Array<String>, note: String, count: Integer, extra: Integer }
+mutable kept: GrowingArray<String> = []
+mutable index: Map<String, String> = []
+function build = (prefix: String, count: Integer): Record => {
+	mutable name = ""
+	for i in 0..count { name += prefix }
+	mutable note = String.from(prefix, capacity = 40)
+	note += "{name}{count}"
+	let tags = [name, note]
+	Record { name, tags, note, count, extra = count * 2 }
+}
+function stash = (prefix: String, count: Integer) mutates kept, index => {
+	mutable text = ""
+	for i in 0..count { text += "{prefix}{i}" }
+	text.reserve(10)
+	kept.push(text)
+	mutable key = "k"
+	key += prefix
+	index[key] = text
+}
+function overwrite = () => {
+	mutable noise = ""
+	for i in 0..200 { noise += "Z" }
+	assert noise.length == 200
+}
+mutable records: Array<Record> = []
+for count in [0, 1, 5, 11, 12, 23, 24, 40, 64, 65, 100] {
+	records.push(build("é", count))
+	stash("ab", count)
+	overwrite()
+}
+mutable total = 0
+for record in records {
+	assert record.name.length == record.count
+	assert record.note == "é{record.name}{record.count}"
+	assert record.tags.get(0) == record.name
+	assert record.tags.get(1) == record.note
+	total += record.note.length + record.extra
+}
+console.log(total, kept.length, index.size) -- prints: 1066 11 1
+mutable lengths = 0
+for text in kept { lengths += text.length }
+console.log(lengths, (index.get("kab") ?? "").length) -- prints: 1294 390
+type Reader = () => String
+function closure = (count: Integer): Reader => {
+	mutable text = ""
+	for i in 0..count { text += "x" }
+	text += "!"
+	() => text
+}
+let short = closure(3)
+let long = closure(70)
+overwrite()
+console.log(short(), long().length) -- prints: xxx! 71

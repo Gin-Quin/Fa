@@ -1,3 +1,4 @@
+-- skip-target: web
 -- The implicit `arguments` of a standalone file hold the user arguments only.
 -- args: 7 seven
 let first = try Integer.parse(arguments.get(0) ?? "0")

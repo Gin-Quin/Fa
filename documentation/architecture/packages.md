@@ -126,6 +126,8 @@ An application can be compiled for several targets at once:
 | `native` | a native binary |
 | `wasm` | WebAssembly |
 
+On `web`, `arguments` is empty: a browser page has no command-line arguments. A page also cannot report a deadlock when its event loop becomes idle, because it has no process-exit hook. Tests that require command-line arguments or a deadlock report do not apply to this target.
+
 When the configuration doesn't list any target, the application is compiled for `web`, `bun` and `native`.
 
 :::tip

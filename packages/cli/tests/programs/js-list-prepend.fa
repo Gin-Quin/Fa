@@ -1,0 +1,22 @@
+-- Prepending moves the previous root; copying stays linear in the list size.
+type List = { head: Integer, tail: List? }
+mutable list: List? = none
+for index in 0..20000 {
+	list = List { head = index, tail = list }
+}
+mutable length = 0
+mutable cursor = list
+while cursor is not none {
+	length += 1
+	cursor = cursor.tail
+}
+console.log(length) -- prints: 20000
+
+-- Multiple reads into separate children still need independent copies.
+type Fork = { value: Integer, left: Fork?, right: Fork? }
+mutable fork: Fork? = Fork { value = 1, left = none, right = none }
+fork = Fork { value = 2, left = fork, right = fork }
+if fork is not none {
+	if fork.left is not none { fork.left.value = 3 }
+	console.log(fork.right?.value) -- prints: 1
+}

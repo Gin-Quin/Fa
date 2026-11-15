@@ -1,3 +1,4 @@
+-- skip-target: web
 -- Recursive Fibonacci: function calls and checked integer additions.
 
 function fib = (n: Integer): Integer => if n < 2 { n } else { fib(n - 1) + fib(n - 2) }

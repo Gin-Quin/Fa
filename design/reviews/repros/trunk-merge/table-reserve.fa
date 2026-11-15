@@ -1,0 +1,54 @@
+-- `reserve` and `from(capacity)` allocate entry chunks eagerly (trunk
+-- decision 3) on A's three entry layouts: inline (small integer keys), dense
+-- and chunked (string keys and values that own memory), with deletions,
+-- re-insertions, copies and iteration order.
+function inline = (count: Integer<min = 0, max = 1000>): String => {
+	mutable map = Map<Int32, Int32>.from([(0, 1), (5, 2)], capacity = 3)
+	map.reserve(count)
+	for i in 0..count { map[Int32(i)] = Int32(i %% 7) }
+	for i in 0..count { if i %% 2 == 0 { map.delete(Int32(i)) } }
+	map.reserve(0)
+	map[0] = 99
+	mutable sum = 0
+	for (key, value) in map { sum += key * 3 + value }
+	"{map.size} {sum} {map.get(0) ?? -1} {map.capacity >= map.size}"
+}
+function chunked = (count: Integer<min = 0, max = 1000>): String => {
+	mutable map: Map<String, String> = []
+	map.reserve(count)
+	for i in 0..count { map["key {i} long enough for the heap"] = "value {i}" }
+	for i in 0..count { if i %% 3 == 0 { map.delete("key {i} long enough for the heap") } }
+	mutable copy = map
+	copy.reserve(100)
+	for i in 0..40 { copy["new {i}"] = "n" }
+	mutable first = ""
+	for (key, value) in map {
+		first = key
+		break
+	}
+	"{map.size} {copy.size} {first} {copy.capacity >= copy.size}"
+}
+function sets = (count: Integer<min = 0, max = 1000>): String => {
+	mutable set = Set.from(["a", "b"], capacity = count)
+	for i in 0..count { set.add("item {i}") }
+	set.delete("a")
+	set.reserve(count)
+	mutable growing = GrowingSet<Integer>.from([], capacity = count)
+	for i in 0..count { growing.add(i * 3) }
+	growing.reserve(5)
+	mutable sum = 0
+	for value in growing { sum += value }
+	"{set.size} {growing.size} {sum}"
+}
+for count in [0, 1, 31, 32, 33, 64, 100, 333] {
+	if count < 0 or count > 1000 { continue }
+	console.log(inline(count), "|", chunked(count), "|", sets(count))
+}
+-- prints: 2 116 99 true | 0 40  true | 1 0 0
+-- prints: 2 116 99 true | 0 40  true | 2 1 0
+-- prints: 16 817 99 true | 20 60 key 1 long enough for the heap true | 32 31 1395
+-- prints: 17 913 99 true | 21 61 key 1 long enough for the heap true | 33 32 1488
+-- prints: 17 913 99 true | 22 62 key 1 long enough for the heap true | 34 33 1584
+-- prints: 33 3264 99 true | 42 82 key 1 long enough for the heap true | 65 64 6048
+-- prints: 51 7747 99 true | 66 106 key 1 long enough for the heap true | 101 100 14850
+-- prints: 167 83261 99 true | 222 262 key 1 long enough for the heap true | 334 333 165834

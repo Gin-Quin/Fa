@@ -12,6 +12,17 @@ unsafe extern "C" {
 	fn fa_use_init_array(machine: llvm_sys::target_machine::LLVMTargetMachineRef);
 }
 
+/// Makes a machine compile thread-local variables as emulated ones (calls
+/// of `__emutls_get_address`), for an object the JIT loads (`jit.rs`).
+pub(crate) fn use_emulated_tls(machine: &TargetMachine) {
+	unsafe extern "C" {
+		/// `shim/thin_bitcode.cpp`.
+		fn fa_use_emulated_tls(machine: llvm_sys::target_machine::LLVMTargetMachineRef);
+	}
+	// SAFETY: the machine is alive
+	unsafe { fa_use_emulated_tls(machine.as_mut_ptr()) };
+}
+
 pub use crate::options::{OptLevel, Options, Target};
 
 impl Target {

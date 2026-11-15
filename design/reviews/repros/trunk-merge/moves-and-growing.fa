@@ -1,0 +1,75 @@
+-- A's last-use moves zero a local; B hoists the loads of growing collections
+-- and marks them `dereferenceable`. Locals moved at their last use inside
+-- loops and branches, then their scope ends; GrowingArray segments in a
+-- region tree.
+type Holder = { values: GrowingArray<Integer>, name: String }
+type Tree = Union {
+	Leaf = { values: GrowingArray<Integer> }
+	List = { items: Array<Tree> }
+}
+function fill = (count: Integer): GrowingArray<Integer> => {
+	mutable values: GrowingArray<Integer> = []
+	for i in 0..count { values.push(i) }
+	values
+}
+function total = (values: GrowingArray<Integer>): Integer => {
+	mutable sum = 0
+	for value in values { sum += value }
+	sum
+}
+mutable holders: Array<Holder> = []
+for round in 0..6 {
+	mutable values = fill(round * 50)
+	mutable sum = 0
+	for i in 0..values.length { sum += values.get(i) ?? 0 }
+	if round %% 2 == 0 {
+		holders.push(Holder { values, name = "even {round}" })
+	} else {
+		values.push(sum)
+		holders.push(Holder { values, name = "odd {round}" })
+	}
+}
+for holder in holders { console.log(holder.name, holder.values.length, total(holder.values)) }
+function tree = (depth: Integer<min = 0, max = 8>): Tree => if depth == 0 {
+	Tree.Leaf { values = fill(100) }
+} else {
+	mutable items: Array<Tree> = []
+	for 0..2 { items.push(tree(depth - 1)) }
+	let extra = fill(depth * 70)
+	items.push(Tree.Leaf { values = extra })
+	Tree.List { items }
+}
+function sum = (tree: Tree): Integer => when tree is {
+	Tree.Leaf as { values } => total(values)
+	Tree.List as { items } => {
+		mutable result = 0
+		for item in items { result += sum(item) }
+		result
+	}
+}
+console.log(sum(tree(4)))
+mutable maps: Array<GrowingMap<Integer, String>> = []
+for round in 0..4 {
+	mutable map: GrowingMap<Integer, String> = []
+	for i in 0..(round * 20) { map[i] = "value {i}" }
+	map.reserve(10)
+	let size = map.size
+	maps.push(map)
+	console.log(size)
+}
+for map in maps { console.log(map.size, map.get(19) ?? "none") }
+-- prints: even 0 0 0
+-- prints: odd 1 51 2450
+-- prints: even 2 100 4950
+-- prints: odd 3 151 22350
+-- prints: even 4 200 19900
+-- prints: odd 5 251 62250
+-- prints: 220390
+-- prints: 0
+-- prints: 20
+-- prints: 40
+-- prints: 60
+-- prints: 0 none
+-- prints: 20 value 19
+-- prints: 40 value 19
+-- prints: 60 value 19

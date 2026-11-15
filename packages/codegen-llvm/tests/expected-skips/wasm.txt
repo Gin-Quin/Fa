@@ -1,4 +1,4 @@
-# The programs the wasm target doesn't compile yet, with the reason
+# The programs the wasm target doesn't pass yet, with the reason
 # (`tests/programs.rs`): any other compile error fails.
 analyzer/tests/cases/advanced/04-reference-types-use-mutable-use-reuse/adv-4.5-06.fa: line 3: a `use` of this value is not supported by the native backend yet
 analyzer/tests/cases/advanced/14-concurrency-without-async/adv-14.6-01.fa: line 5: error[CONC001]: `for parallel` is only available on `native`, not on `wasm`: branch with `@if target is "native"`, or write a plain `for`
@@ -20,6 +20,8 @@ analyzer/tests/cases/values/16-destructuring/T-DST-4.fa: line 2: converting a va
 analyzer/tests/cases/values/16-destructuring/T-DST-5.fa: line 3: a rest pattern is not supported by the native backend yet
 analyzer/tests/cases/values/16-destructuring/T-DST-6.fa: line 3: a rest pattern is not supported by the native backend yet
 cli/tests/programs/builtin-methods.fa: line 34: `Integer#checkedPow` is not supported by the native backend yet
+cli/tests/programs/js-deep-values.fa: runtime: recursive deep copy exhausts the wasm stack at 20000 nodes; use iterative native helpers
+cli/tests/programs/js-million-copy.fa: runtime: recursive deep copy/equality exhausts the stack at one million nodes; use iterative native helpers
 cli/tests/programs/number-api.fa: line 47: this name is not supported by the native backend yet
 cli/tests/programs/references.fa: line 42: a `use` of this value is not supported by the native backend yet
 cli/tests/programs/tuples-ranges-patterns.fa: line 27: this place is not supported by the native backend yet

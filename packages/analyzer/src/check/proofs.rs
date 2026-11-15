@@ -1,7 +1,7 @@
 //! Length facts and index proofs (values brief §6.5 rule 3, decisions.md
 //! "Index proofs").
 //!
-//! - The length of a collection literal, or the grapheme count of a string
+//! - The length of a collection literal, or the UTF-16 code unit count of a string
 //!   literal, is a fact of the place it is bound to (`Fact::length`), kept
 //!   while the place can't change: immutable collections only (`let`,
 //!   parameters), strings until they are assigned.
@@ -17,7 +17,7 @@ use std::sync::Arc;
 use ethnum::I256;
 
 use crate::analysis::NodeFlags;
-use crate::builtins::strings::grapheme_count;
+use crate::builtins::strings::utf16_length;
 use crate::check::Walker;
 use crate::diagnostics::codes::values::E_NUM_17;
 use crate::ids::{IntervalId, NodeId, PlaceId, SymbolId, TypeId};
@@ -27,7 +27,7 @@ use crate::types::{CollKind, Interval, TypeKind};
 
 impl Walker<'_> {
 	/// The length a value has when it is bound: the number of items of an
-	/// array literal without spreads, the grapheme count of a string literal.
+	/// array literal without spreads, the UTF-16 code unit count of a string literal.
 	pub(crate) fn literal_length(&self, value: NodeId) -> Option<Interval> {
 		let value = self.strip_groups(value);
 		match syntax::view(&self.tree, value) {
@@ -39,7 +39,7 @@ impl Walker<'_> {
 			}
 			_ => match self.s.types.kind(self.type_of(value)) {
 				TypeKind::StringLit(text) => {
-					let count = grapheme_count(self.s.types.syms.resolve(text));
+					let count = utf16_length(self.s.types.syms.resolve(text));
 					Some(Interval::exact(I256::from(count as u64)))
 				}
 				_ => None,
@@ -85,7 +85,7 @@ impl Walker<'_> {
 			.read_local(value)
 			.filter(|&source| source != symbol)
 			.and_then(|source| self.length_of(source));
-		match copied.or_else(|| self.literal_length(value)) {
+		match copied.or_else(|| self.expression_length(value)) {
 			Some(length) => self.facts.interval(length),
 			None => IntervalId::NONE,
 		}
@@ -99,6 +99,33 @@ impl Walker<'_> {
 		if let Some(symbol) = self.read_local(n) {
 			return self.length_of(symbol);
 		}
+		if let Some(call) = self.a.calls.get(&n).cloned()
+			&& let crate::analysis::Callee::Builtin(builtin) = call.callee
+		{
+			let given = call.arguments.iter().find_map(|arg| match arg {
+				crate::analysis::Argument::Given(value) => Some(*value),
+				_ => None,
+			});
+			match (crate::builtins::get(builtin).path, given) {
+				("Bytes.from", Some(items)) => return self.expression_length(items),
+				("Bytes.filled", Some(length)) => {
+					return self.value_set(length).map(|set| set.hull);
+				}
+				_ => {}
+			}
+			if crate::builtins::get(builtin).path == "String#toUtf8"
+				&& let View::Call { callee, .. } = self.view(n)
+				&& let View::Access { target, .. } = self.view(callee)
+				&& let TypeKind::StringLit(text) = self.s.types.kind(self.type_of(target))
+			{
+				return Some(Interval::exact(I256::from(
+					self.s.types.syms.resolve(text).len() as u64,
+				)));
+			}
+		}
+		if self.a.flags[n.index()].contains(NodeFlags::STRING_CODE_UNIT) {
+			return Some(Interval::exact(I256::ONE));
+		}
 		if let View::Call { callee, .. } = syntax::view(&self.tree, n) {
 			let callee = self.strip_groups(callee);
 			if let View::Access { target, members } = syntax::view(&self.tree, callee)
@@ -111,6 +138,7 @@ impl Walker<'_> {
 			}
 			return None;
 		}
+
 		self.literal_length(n)
 	}
 
@@ -340,7 +368,8 @@ impl Walker<'_> {
 				..,
 			)
 			| TypeKind::String
-			| TypeKind::StringLit(_) => "IndexError",
+			| TypeKind::StringLit(_)
+			| TypeKind::Bytes => "IndexError",
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..) => "KeyNotFound",
 			// a `CArray`: an index within its count is proven (from the end too)
 			TypeKind::CArray(_, count) => {

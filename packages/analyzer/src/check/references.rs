@@ -848,6 +848,7 @@ impl Walker<'_> {
 					match self.s.types.kind(ty) {
 						TypeKind::Collection(CollKind::Map, value, _) => value,
 						TypeKind::Collection(_, item, _) => item,
+						TypeKind::Bytes => TypeId::BYTE,
 						TypeKind::String => TypeId::STRING,
 						_ => return None,
 					}
@@ -866,7 +867,6 @@ impl Walker<'_> {
 			| TypeKind::FloatLit(..)
 			| TypeKind::Boolean
 			| TypeKind::BoolLit(_)
-			| TypeKind::Character
 			| TypeKind::Percentage
 			| TypeKind::Enum(..)
 			| TypeKind::EnumMember(..)

@@ -1,6 +1,6 @@
 -- String building on bytes: the variant of main.fa written like the Goose port (main.goose),
 -- with growable byte buffers instead of strings. Bytes of unknown length are built in an
--- `Array<Byte>` until the `Bytes` type exists (documentation/values/bytes.md). `split` gives
+-- `Array<Byte>` because `Bytes` has a fixed length (documentation/values/bytes.md). `split` gives
 -- (start, end) ranges into the text, like Goose's slices (no copy), and `join` builds a new
 -- buffer, as Goose does. Integers are formatted by hand: the digits are counted with
 -- comparisons, and written from the last ones, two at a time. Same output as main.rs.

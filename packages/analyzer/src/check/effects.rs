@@ -1061,7 +1061,9 @@ impl Walker<'_> {
 					};
 					let text = tree.name(name).to_string();
 					let (step, next) = match (text.as_str(), self.s.types.kind(ty)) {
-						("length", TypeKind::String) => (PathStep::Length, TypeId::INTEGER),
+						("length", TypeKind::String | TypeKind::Bytes) => {
+							(PathStep::Length, TypeId::INTEGER)
+						}
 						("length" | "size", TypeKind::Collection(kind, ..)) => {
 							// `length` on the collections with positions, `size`
 							// on the others (a set, a map, a pool, a columnar);
@@ -1163,7 +1165,8 @@ impl Walker<'_> {
 						}
 						item
 					}
-					TypeKind::String => TypeId::CHARACTER,
+					TypeKind::String => TypeId::STRING,
+					TypeKind::Bytes => TypeId::BYTE,
 					_ => {
 						if !self.s.types.is_recovering(ty) {
 							let diagnostic = self.diagnostic(
@@ -1232,7 +1235,6 @@ impl Walker<'_> {
 			| TypeKind::BoolLit(_)
 			| TypeKind::String
 			| TypeKind::StringLit(_)
-			| TypeKind::Character
 			| TypeKind::Enum(..)
 			| TypeKind::EnumMember(..)
 			| TypeKind::None => true,
@@ -2464,6 +2466,7 @@ impl Walker<'_> {
 				| PathStep::Last => match self.s.types.kind(ty) {
 					TypeKind::Collection(_, item, _) => item,
 					TypeKind::String => TypeId::STRING,
+					TypeKind::Bytes => TypeId::BYTE,
 					_ => return None,
 				},
 			};

@@ -495,7 +495,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				continue;
 			}
 			match self.types().kind(at) {
-				TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => {}
+				TypeKind::String | TypeKind::StringLit(_) => {}
 				TypeKind::Object(_) if self.destroy_function(at).is_none() => {
 					stack.extend(self.types().fields_of(at).iter().map(|f| f.ty));
 				}

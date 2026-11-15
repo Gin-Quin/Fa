@@ -1,5 +1,4 @@
--- brief: → `Letter: F F`
-let first: Character = "F"
-let text: String = first
-console.log("Letter: " + first, text)
--- prints: Letter: F F
+let name = "Fa"
+let first: String = name[0]
+console.log("Letter: " + first, name.codeUnitAt(0))
+-- prints: Letter: F 70

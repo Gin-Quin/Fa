@@ -151,7 +151,7 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 		}
 		TypeKind::Boolean => member("Boolean", Vec::new()),
 		TypeKind::String => member("String", Vec::new()),
-		TypeKind::Character => member("Character", Vec::new()),
+		TypeKind::Bytes => member("Bytes", Vec::new()),
 		TypeKind::Percentage => member("Percentage", Vec::new()),
 		TypeKind::BigInt => member("BigInt", Vec::new()),
 		TypeKind::None => member("None", Vec::new()),

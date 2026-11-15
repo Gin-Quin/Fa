@@ -99,7 +99,7 @@ pub enum Value {
 	Float(f64),
 	/// `Percentage`: the stored fraction (`50%` is `0.5`).
 	Percentage(f64),
-	/// `String`, `Character` (one grapheme cluster).
+	/// `String` (one grapheme cluster).
 	String(Arc<str>),
 	/// `Array`, `GrowingArray`.
 	Array(Arc<Vec<Value>>),

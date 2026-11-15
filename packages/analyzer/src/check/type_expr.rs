@@ -190,7 +190,7 @@ impl Walker<'_> {
 		if self.report_std_name(n, text) {
 			return TypeId::UNKNOWN;
 		}
-		let diagnostic = self.diagnostic(&TY007, n, format!("`{text}` is not a type"));
+		let diagnostic = self.diagnostic(&TY007, n, if text == "Character" { "`Character` is no longer a type: use `String` for text, including a single code unit or code point".to_string() } else { format!("`{text}` is not a type") });
 		self.report(diagnostic);
 		TypeId::UNKNOWN
 	}

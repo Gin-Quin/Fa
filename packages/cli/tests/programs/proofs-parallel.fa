@@ -28,5 +28,5 @@ for parallel cursor, index in cursors {
 		cursor.position = 0 - 1
 	}
 }
-function current = (cursor: Cursor, text: String): Byte => text.bytes().get(cursor.position) ?? 0
+function current = (cursor: Cursor, text: String): Byte => text.toUtf8().get(cursor.position) ?? 0
 console.log(current(cursors[0], "xyz"), current(cursors[1], "xyz")) -- prints: 120 122

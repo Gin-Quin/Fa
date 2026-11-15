@@ -822,7 +822,7 @@ impl Walker<'_> {
 			let default = self.strip_groups(default);
 			let tree = Arc::clone(&self.tree);
 			let literal = match syntax::view(&tree, default) {
-				View::String(text) => self.string_literal_type(default, text, None),
+				View::String(text) => self.s.types.string_literal(text),
 				View::Integer(_) | View::Boolean(_) | View::Float(_) | View::Negate(_) => {
 					self.type_of(default)
 				}

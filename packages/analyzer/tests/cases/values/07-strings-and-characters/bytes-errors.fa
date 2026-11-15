@@ -1,0 +1,18 @@
+mutable bytes = Bytes.filled(2)
+bytes[2] = 0 -- error: E-NUM-17
+bytes[0] = 256 -- error: E-NUM-6
+bytes.push(0) -- error: E-OBJ-5
+bytes.insert(0, 1) -- error: E-OBJ-5
+bytes.delete(0) -- error: E-OBJ-5
+bytes.reserve(2) -- error: E-OBJ-5
+let capacity = bytes.capacity -- error: E-OBJ-5
+let extra = Bytes.filled(2, capacity = 4) -- error: FN023
+let extraFrom = Bytes.from([1], capacity = 4) -- error: FN023
+let wrong: Bytes = [1, 2] -- error: E-TYPE-1
+let array: Array<Byte> = bytes -- error: E-TYPE-1
+let text: String = bytes -- error: E-TYPE-1
+let negative = Bytes.filled(-1) -- error: E-NUM-6
+let tooLarge = Bytes.filled(1, value = 256) -- error: E-NUM-6
+let immutable = Bytes.from([1])
+immutable[0] = 2 -- error: E-DECL-7
+function unchecked = (data: Bytes, index: Integer) => data[index] -- error: E-ERR-3

@@ -7,12 +7,12 @@ let passes = 4
 let letters = "abcdefghijklmnopqrstuvwxyz"
 
 -- The bytes the parser looks for (ASCII).
-let end: Byte = 0
-let space: Byte = 32
-let open: Byte = 40
-let close: Byte = 41
-let digitZero: Byte = 48
-let digitNine: Byte = 57
+let end: UInt16 = 0
+let space: UInt16 = 32
+let open: UInt16 = 40
+let close: UInt16 = 41
+let digitZero: UInt16 = 48
+let digitNine: UInt16 = 57
 
 -- xorshift64, the generator of the Goose suite: `UInt64` arithmetic that drops the bits
 -- shifted out.
@@ -27,7 +27,7 @@ function xorshift = (seed: UInt64): UInt64 => {
 function below = (random: UInt64, bound: Integer<min = 1>): Integer => random %% bound
 
 -- The value of a decimal digit, `none` for any other byte.
-function digitValue = (byte: Byte): Integer? => if byte >= digitZero and byte <= digitNine {
+function digitValue = (byte: UInt16): Integer? => if byte >= digitZero and byte <= digitNine {
 	byte - digitZero
 } else {
 	none
@@ -79,7 +79,7 @@ type Parser = {
 	count: Integer
 
 	-- The byte at the position, or a null byte at the end of the text.
-	function current = (self): Byte => self.text.bytes().get(self.position) ?? end
+	function current = (self): UInt16 => self.text.codeUnitAt(self.position) catch _error => end
 
 	function skipSpaces = (self) mutates self => {
 		while self.current() == space {
@@ -130,7 +130,7 @@ type Parser = {
 
 -- The pass index rides along so that the four walks are four different computations.
 function walk = (node: Sexp, pass: Integer): Integer => when node is {
-	Sexp.Symbol as { name } => name.length + (name.bytes().get(0) ?? 0) + pass
+	Sexp.Symbol as { name } => name.length + (name.codeUnitAt(0) catch _error => 0) + pass
 	Sexp.Number as { value } => Integer(value).bitXor(pass)
 	Sexp.List as { items } => {
 		mutable total = 1
@@ -153,7 +153,7 @@ mutable parser = Parser { text = generator.text, position = 0, count = 0 }
 mutable roots: Array<Sexp> = []
 loop {
 	parser.skipSpaces()
-	if parser.position >= parser.text.bytes().length {
+	if parser.position >= parser.text.length {
 		break
 	}
 	roots.push(parser.node())

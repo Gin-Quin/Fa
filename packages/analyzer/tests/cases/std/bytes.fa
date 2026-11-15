@@ -1,0 +1,8 @@
+use { File } = std.fs
+use { Json } = std.json
+let raw = File.read("data.json") catch _error => Bytes.filled(0) -- type raw: Bytes
+let text = File.readText("data.json") catch _error => "" -- type text: String
+File.write("copy.json", raw) catch _error => console.log("failed")
+File.writeText("copy.json", text) catch _error => console.log("failed")
+let value: { name: String } = Json.parse(raw) catch _error => { name = "" }
+console.log(value)

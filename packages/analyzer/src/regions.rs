@@ -375,7 +375,7 @@ impl<'a> RegionFile<'a> {
 				| TypeKind::Range
 				| TypeKind::Pointer(_)
 				| TypeKind::CString => {}
-				TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character if owning => {}
+				TypeKind::String | TypeKind::StringLit(_) if owning => {}
 				TypeKind::Object(_) if !self.types.is_resource(ty) => {
 					if self.types.fields_of(ty).iter().any(|field| {
 						field

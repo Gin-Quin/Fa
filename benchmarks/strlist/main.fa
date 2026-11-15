@@ -33,7 +33,7 @@ mutable total = 0
 for 0..passes {
 	for word in words {
 		-- The first and last bytes (ASCII: the codes of the first and last letters).
-		let codes = word.bytes()
+		let codes = word.toUtf8()
 		total += word.length + (try codes[0]) + (try codes[codes.length - 1])
 	}
 }

@@ -15,7 +15,7 @@ for count in 0..80 {
 	assert text == "start" + "x".repeat(count)
 	let unicode = repeat(count, "é", "")
 	assert unicode.length == count
-	assert unicode.bytes().length == count * 2
+	assert unicode.toUtf8().length == count * 2
 	let carriage = repeat(count, "\r", "")
 	assert carriage.length == count
 }

@@ -1296,7 +1296,7 @@ console.log(items.length)
 	fn immutable_global_literals_are_folded_in_functions() {
 		let ir = optimized_ir(
 			"constant-global",
-			"let letters = \"abc\"\nfunction letter = (i: Integer): Character throws IndexError => try letters[i]\nconsole.log(try letter(arguments.length))\n",
+			"let letters = \"abc\"\nfunction letter = (i: Integer): String throws IndexError => try letters[i]\nconsole.log(try letter(arguments.length))\n",
 		);
 		assert!(!ir.contains("@fa.global"), "{ir}");
 		assert!(ir.contains("i64 3"), "{ir}");

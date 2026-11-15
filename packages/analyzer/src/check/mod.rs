@@ -1108,12 +1108,6 @@ impl Walker<'_> {
 		};
 		match self.s.types.assignable(actual, target, Mode::Copy) {
 			Ok(()) => {
-				// a `Character` stored as a `String` is converted
-				if self.s.types.kind(actual) == TypeKind::Character
-					&& self.s.types.kind(target) == TypeKind::String
-				{
-					self.a.coercions.insert(n, target);
-				}
 				self.sink_union_member(n, actual, target);
 				// a copy into a narrower object type (structural.rs)
 				self.record_narrowing_copy(n, actual, target);
@@ -1130,7 +1124,6 @@ impl Walker<'_> {
 				let diagnostic = self.diagnostic(&codes::types::CV005, n, message);
 				self.report_flow(diagnostic);
 			}
-			Err(_) if self.string_sink_mismatch(n, actual, target) => {}
 			Err(_) if self.inexact_collection(n, actual, target) => {}
 			Err(_) if self.nominal_mismatch(n, actual, target) => {}
 			// an `async` function where the type isn't `async` (tasks.rs)

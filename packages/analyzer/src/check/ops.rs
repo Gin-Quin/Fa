@@ -636,7 +636,7 @@ impl Walker<'_> {
 	}
 
 	/// An optional value compared with a value its non-optional type
-	/// compares with (`c == " "` with `c: Character?`).
+	/// compares with (`c == " "` with `c: String?`).
 	fn optional_values_compatible(&mut self, a: TypeId, b: TypeId) -> bool {
 		if !self.has_none(a) && !self.has_none(b) {
 			return false;
@@ -892,13 +892,13 @@ impl Walker<'_> {
 				let hint =
 					(!self.s.types.is_recovering(actual)).then(|| self.s.types.widen(actual));
 				let mut literal = self.check(pattern, hint);
-				// `c is ")"` on a `Character`: the pattern keeps its literal
+				// `c is ")"` on a `String`: the pattern keeps its literal
 				// type, so that the backends compare the character
 				if let View::String(text) = syntax::view(&tree, inner)
 					&& !self.s.types.is_literal(literal)
 					&& !self.s.types.is_recovering(literal)
 				{
-					let exact = self.string_literal_type(inner, text, None);
+					let exact = self.s.types.string_literal(text);
 					if self.s.types.is_literal(exact) {
 						self.set_type(inner, exact);
 						literal = exact;
@@ -946,7 +946,7 @@ impl Walker<'_> {
 		}
 	}
 
-	/// `c is "+"` on a local text (`String`, `Character`, a union of string
+	/// `c is "+"` on a local text (`String`, a union of string
 	/// literals): the local is that literal when the test holds, and loses
 	/// it from its literals when it doesn't (`is not "+" | "-"` leaves
 	/// `"+" | "-"` after an early exit).
@@ -964,10 +964,7 @@ impl Walker<'_> {
 			return;
 		};
 		let current = self.current_type(symbol);
-		if matches!(
-			self.s.types.kind(current),
-			TypeKind::String | TypeKind::Character
-		) {
+		if matches!(self.s.types.kind(current), TypeKind::String) {
 			self.narrow_in(when_true, symbol, literal, value);
 			return;
 		}

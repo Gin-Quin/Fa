@@ -54,13 +54,13 @@ console.log(ascii.codePoints().get(-11) ?? 0, try ascii.codePoints()[4], ascii.c
 
 -- bytes read without building the array
 let sample = "né😀"
-let raw = sample.bytes()
-console.log(raw.length, try raw[0], raw.get(-1) ?? 0, raw.get(7) ?? 9, sample.bytes().length) -- prints: 7 110 128 9 7
-console.log(raw[7] catch error => 42, try sample.bytes()[-7], "".bytes().get(0) ?? 5) -- prints: 42 110 5
+let raw = sample.toUtf8()
+console.log(raw.length, try raw[0], raw.get(-1) ?? 0, raw.get(7) ?? 9, sample.toUtf8().length) -- prints: 7 110 128 9 7
+console.log(raw[7] catch error => 42, try sample.toUtf8()[-7], "".toUtf8().get(0) ?? 5) -- prints: 42 110 5
 mutable odd = 0
-for byte, index in sample.bytes() {
+for byte, index in sample.toUtf8() {
 	if byte >= 128 {
 		odd += index
 	}
 }
-console.log(odd, sample.bytes()) -- prints: 21 [110, 195, 169, 240, 159, 152, 128]
+console.log(odd, sample.toUtf8()) -- prints: 21 [110, 195, 169, 240, 159, 152, 128]

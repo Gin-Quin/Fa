@@ -43,7 +43,7 @@ export type = { offset: Integer = -1 }
 -- file: library/newCursor.fa
 export function = (): DefaultCursor => DefaultCursor {}
 -- file: library/readCursor.fa
-export function = (): Byte => "abc".bytes().get(newCursor().offset) ?? 0
+export function = (): Byte => "abc".toUtf8().get(newCursor().offset) ?? 0
 -- file: application/main.fa
 export function = () => {
 	console.log(library.chain(), library.unsafe(), library.defaultChain(), library.genericChain()) -- prints: 0 99 99 99

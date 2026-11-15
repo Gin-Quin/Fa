@@ -118,8 +118,6 @@ codes! {
 	E_STR_5 = "E-STR-5", Error, [], "empty interpolation {} or { }";
 	E_STR_6 = "E-STR-6", Error, [], "unterminated interpolation";
 	E_STR_7 = "E-STR-7", Error, [], "+ with a non-string operand: \"expected a String, found an Integer: use \"Score: {score}\" or score.toString()\"";
-	E_STR_8 = "E-STR-8", Error, [], "String where a Character is expected (non-literal)";
-	E_STR_9 = "E-STR-9", Error, [], "literal with zero or several grapheme clusters where a Character is expected (let c: Character = \"ab\", = \"\")";
 	E_STR_11 = "E-STR-11", Error, [], "interpolating a Void expression";
 	E_STR_12 = "E-STR-12", Error, [], "interpolating a function value [D-39]";
 	E_STR_13 = "E-STR-13", Error, [], "single-quoted or backtick string ('a'): \"strings use double quotes\"";

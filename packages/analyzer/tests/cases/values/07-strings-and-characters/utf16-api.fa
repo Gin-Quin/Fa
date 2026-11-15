@@ -1,0 +1,25 @@
+let text = "a😀b"
+let half: String = text[2] -- no-check
+-- check: STRING_CODE_UNIT
+let last: String = text[-1] -- no-check
+let maybe = text.get(1) -- type maybe: String?
+let unit = text.codeUnitAt(2) -- type unit: UInt16
+let wellFormed = half.isWellFormed() -- type wellFormed: Boolean
+let byteCount = text.utf8Length() -- type byteCount: Integer<min = 0>
+let bytes = text.toUtf8() -- type bytes: Bytes
+let strict = String.fromUtf8(bytes) catch error => {
+	let position: Integer = error.position
+	console.log(position)
+	""
+}
+let lossy: String = String.fromUtf8Lossy(bytes)
+let parts = text.characters() -- type parts: Array<String>
+let points = text.codePoints() -- type points: Array<UInt32>
+let count = text.codePoints().length -- check: CODE_POINT_COUNT
+for byte in text.toUtf8() { console.log(byte) } -- check: UTF8_ITERATION
+for point, index in text {
+	let character: String = point
+	console.log(character, text[index])
+}
+function unitAt = (text: String, index: Integer): UInt16 throws IndexError => try text.codeUnitAt(index)
+console.log(half, last, maybe, unit, wellFormed, byteCount, strict, lossy, parts, points, count)

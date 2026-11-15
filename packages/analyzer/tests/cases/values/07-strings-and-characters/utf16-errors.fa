@@ -1,0 +1,8 @@
+let text = "😀"
+let outside = text[2] -- error: E-NUM-17
+let outsideUnit = text.codeUnitAt(2) -- error: E-NUM-17
+let obsolete = text.bytes() -- error: E-OBJ-5
+let wrong = text.codeUnitAt(true) -- error: E-TYPE-1
+let strict = String.fromUtf8(Bytes.from([255])) -- error: E-ERR-3
+let wrongInput = String.fromUtf8([104]) catch _error => "" -- error: E-TYPE-1
+function unitAt = (text: String, index: Integer) => text.codeUnitAt(index) -- error: E-ERR-3

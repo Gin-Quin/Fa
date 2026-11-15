@@ -299,7 +299,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::Float(FloatBits::F64) | TypeKind::FloatLit(FloatBits::F64, _) => Repr::F64,
 			TypeKind::Float(FloatBits::F32) | TypeKind::FloatLit(FloatBits::F32, _) => Repr::F32,
 			TypeKind::Percentage => Repr::Percentage,
-			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => Repr::Str,
+			TypeKind::String | TypeKind::StringLit(_) => Repr::Str,
 			TypeKind::BigInt | TypeKind::BigIntLit(_) => Repr::BigInt,
 			TypeKind::None => Repr::None,
 			TypeKind::Enum(nominal, _) | TypeKind::EnumMember(nominal, _) => Repr::Enum(nominal),
@@ -362,6 +362,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Repr::Rec(target),
 				}
 			}
+			TypeKind::Bytes => Repr::Array(TypeId::BYTE),
 			TypeKind::Collection(CollKind::Array, item, _) => Repr::Array(item),
 			TypeKind::Collection(CollKind::GrowingArray, item, _) => Repr::Growing(item),
 			// a columnar is stored like a pool for now, by rows (the column

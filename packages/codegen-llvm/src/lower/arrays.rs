@@ -1300,7 +1300,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			fa_analyzer::analysis::Callee::Builtin(id)
 				if matches!(
 					fa_analyzer::builtins::get(id).path,
-					"String#codePoints" | "String#bytes"
+					"String#codePoints" | "String#toUtf8"
 				) =>
 			{
 				Some(inner)
@@ -1310,12 +1310,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Whether a call that [`Lowering::code_points_call`] found is
-	/// `text.bytes()` rather than `text.codePoints()`.
+	/// `text.toUtf8()` rather than `text.codePoints()`.
 	pub(crate) fn is_bytes_call(&self, call: NodeId) -> bool {
 		matches!(
 			self.analysis.call(call).map(|info| info.callee),
 			Some(fa_analyzer::analysis::Callee::Builtin(id))
-				if fa_analyzer::builtins::get(id).path == "String#bytes"
+				if fa_analyzer::builtins::get(id).path == "String#toUtf8"
 		)
 	}
 
@@ -1341,7 +1341,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)
 	}
 
-	/// The number of items of `text.codePoints()` or `text.bytes()` (`call`),
+	/// The number of items of `text.codePoints()` or `text.toUtf8()` (`call`),
 	/// without the array: an `i64`.
 	pub(crate) fn text_view_length(
 		&mut self,

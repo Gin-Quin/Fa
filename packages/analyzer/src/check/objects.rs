@@ -1155,8 +1155,8 @@ impl Walker<'_> {
 			types.kind(receiver),
 			TypeKind::Sync(..) | TypeKind::Task(..)
 		);
-		if range
-			|| subscription
+		if receiver == TypeId::BYTES
+			|| range || subscription
 			|| foreign
 			|| sync || builtins::numbers::number_owner(types, receiver).is_some()
 		{
@@ -1350,6 +1350,10 @@ impl Walker<'_> {
 		let message = if crate::builtins::strings::is_string_like(&self.s.types, receiver) {
 			format!(
 				"a `{shown}` has no field or method `{text}`: see the string methods (`length`, `includes`, `split`…); no method changes a string"
+			)
+		} else if receiver == TypeId::BYTES {
+			format!(
+				"a `Bytes` has no field or method `{text}`: its length is fixed; build an `Array<Byte>` and convert it with `Bytes.from(items)` to grow binary data"
 			)
 		} else {
 			format!("a `{shown}` has no field or method `{text}`")
@@ -1595,7 +1599,7 @@ impl Walker<'_> {
 	}
 
 	/// The type of `target[index]` (type part): the item of an array, the
-	/// value of a map (whose key the caller sinks), a `Character` of a string.
+	/// value of a map (whose key the caller sinks), a one-unit `String` from a string.
 	pub(super) fn index_type(
 		&mut self,
 		n: NodeId,
@@ -1619,7 +1623,7 @@ impl Walker<'_> {
 		// `items[1..3]`, `text[..5]`: a slice (values brief §12)
 		if index_ty == TypeId::RANGE {
 			return match self.s.types.kind(target_ty) {
-				TypeKind::Collection(CollKind::Array, ..) => target_ty,
+				TypeKind::Collection(CollKind::Array, ..) | TypeKind::Bytes => target_ty,
 				TypeKind::String | TypeKind::StringLit(_) => TypeId::STRING,
 				_ => {
 					let message = format!("a `{}` can't be sliced", self.display(target_ty));
@@ -1636,6 +1640,7 @@ impl Walker<'_> {
 		}
 		match self.s.types.kind(target_ty) {
 			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => item,
+			TypeKind::Bytes => TypeId::BYTE,
 			TypeKind::CArray(item, _) => item,
 			TypeKind::Collection(kind @ (CollKind::Set | CollKind::GrowingSet), ..) => {
 				let message = format!(
@@ -1646,7 +1651,7 @@ impl Walker<'_> {
 				self.report(diagnostic);
 				TypeId::UNKNOWN
 			}
-			TypeKind::String | TypeKind::StringLit(_) => TypeId::CHARACTER,
+			TypeKind::String | TypeKind::StringLit(_) => TypeId::STRING,
 			TypeKind::Collection(kind, item, _) if super::pools::pool_owner(kind).is_some() => {
 				self.pool_index_type(n, kind, item)
 			}

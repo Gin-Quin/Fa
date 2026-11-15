@@ -108,7 +108,6 @@ pub enum TypeTest {
 	/// A string.
 	String,
 	/// A character.
-	Character,
 	/// An array.
 	Array,
 	/// A map.

@@ -4,12 +4,12 @@
 -- file: library/a.fa
 type Cursor = { position: Integer }
 mutable cursor = Cursor { position = 1 - 1 }
-function own = (): Byte => "abc".bytes().get(cursor.position) ?? 0
+function own = (): Byte => "abc".toUtf8().get(cursor.position) ?? 0
 export function = (depth: Integer): Byte => if depth == 0 { own() } else { b(depth - 1) }
 -- file: library/b.fa
 type Cursor = { offset: Integer }
 mutable cursor = Cursor { offset = 0 - 1 }
-function own = (): Byte => "abc".bytes().get(cursor.offset) ?? 0
+function own = (): Byte => "abc".toUtf8().get(cursor.offset) ?? 0
 export function = (depth: Integer): Byte => if depth == 0 { own() } else { a(depth - 1) }
 -- file: application/main.fa
 export function = () => {

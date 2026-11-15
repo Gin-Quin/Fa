@@ -363,7 +363,7 @@ impl<'a> Lowerer<'a> {
 			TypeKind::Float(_) | TypeKind::FloatLit(..) => TypeTest::Float,
 			TypeKind::String => TypeTest::String,
 			TypeKind::StringLit(text) => TypeTest::Literal(Value::string(types.syms.resolve(text))),
-			TypeKind::Character => TypeTest::Character,
+			TypeKind::Bytes => TypeTest::Array,
 			TypeKind::Object(_) => TypeTest::Object,
 			TypeKind::Tuple(list) => TypeTest::Tuple(types.list_items(list).len()),
 			TypeKind::Union(list) => TypeTest::Union(

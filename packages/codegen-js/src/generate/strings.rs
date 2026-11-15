@@ -1,7 +1,7 @@
 //! Strings and printing (values brief §2.8, §7; advanced brief D39):
 //! interpolation, the members of strings, `console.log` and `console.error`.
 //!
-//! Interpolation is a template literal. A `String`, a `Character`, an integer,
+//! Interpolation is a template literal. A `String`, an integer,
 //! a `Float` or a `Boolean` goes in directly (JavaScript's `ToString` is Fa's
 //! `toString` for them, D-5); a `Float32`, a `Percentage`, an optional or a
 //! composite value goes through a formatter of the runtime.
@@ -235,7 +235,7 @@ impl Generator<'_> {
 			| TypeKind::BigIntLit(_)
 			| TypeKind::Float(FloatBits::F64)
 			| TypeKind::FloatLit(FloatBits::F64, _) => return Some(Ok("String".to_string())),
-			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => {
+			TypeKind::String | TypeKind::StringLit(_) => {
 				return Some(Ok(self.helper("faQuote").to_string()));
 			}
 			TypeKind::None => "() => \"none\"".to_string(),
@@ -487,7 +487,7 @@ impl Generator<'_> {
 			}
 			"String#toString" => receiver,
 			// read in place: the bytes of the last text are kept
-			"String#bytes" if self.bytes_only_read(n) => {
+			"String#toUtf8" if self.bytes_only_read(n) => {
 				let helper = self.helper("faStringBytesView");
 				js::call(helper, &with_receiver(receiver, given))
 			}
@@ -511,7 +511,7 @@ impl Generator<'_> {
 					"String#split" => "faStringSplit",
 					"String#characters" => "faCharacters",
 					"String#codePoints" => "faStringCodePoints",
-					"String#bytes" => "faStringBytes",
+					"String#toUtf8" => "faStringBytes",
 					_ => return self.unsupported(n, &format!("`{path}`")),
 				};
 				let helper = self.helper(helper);
@@ -544,7 +544,7 @@ impl Generator<'_> {
 		self.is_simple_text(target) && filler.is_none_or(|filler| self.is_simple_text(filler))
 	}
 
-	/// Whether the array of `text.bytes()` (the call `n`) is only read where
+	/// Whether the array of `text.toUtf8()` (the call `n`) is only read where
 	/// it is computed: indexed, read with `get`, measured, or iterated.
 	fn bytes_only_read(&mut self, n: NodeId) -> bool {
 		let parents = self.parents();

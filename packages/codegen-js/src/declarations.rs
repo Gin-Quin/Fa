@@ -140,7 +140,8 @@ pub(crate) fn typescript(types: &TypeStore, ty: TypeId) -> String {
 		}
 		TypeKind::Float(_) | TypeKind::FloatLit(..) | TypeKind::Percentage => "number".to_string(),
 		TypeKind::BigInt | TypeKind::BigIntLit(_) => "bigint".to_string(),
-		TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => "string".to_string(),
+		TypeKind::String | TypeKind::StringLit(_) => "string".to_string(),
+		TypeKind::Bytes => "Uint8Array".to_string(),
 		TypeKind::Union(list) => types
 			.list_items(list)
 			.iter()

@@ -708,9 +708,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| "std.time.sleep" => self.task_builtin(node, path, info),
 			"Subscription#stop" => self.stop_subscription(node),
 			// std.time, std.fs, std.net (io.rs)
-			"std.time.monotonic" | "std.time.now" | "File.read" | "File.readBytes"
-			| "File.write" | "TcpListener#accept" | "TcpListener#close" | "TcpStream.connect"
-			| "TcpStream#read" | "TcpStream#write" | "TcpStream#close" => self.io_builtin(node, path, info),
+			"std.time.monotonic" | "std.time.now" | "File.readText" | "File.read"
+			| "File.writeText" | "TcpListener#accept" | "TcpListener#close"
+			| "TcpStream.connect" | "TcpStream#read" | "TcpStream#write" | "TcpStream#close" => {
+				self.io_builtin(node, path, info)
+			}
 			// std.json (json.rs)
 			"Json.parse" | "Json.stringify" => self.json_builtin(node, path, info),
 			// capacity (capacity.rs)
@@ -1740,7 +1742,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.expect("an array result");
 				Ok(self.fresh(Val::new(self.node_repr(node)?, array)))
 			}
-			"String#bytes" => {
+			"String#toUtf8" => {
 				// a copy of the UTF-8 bytes
 				let byte = Repr::Int(IntRepr {
 					bits: 8,
@@ -1800,7 +1802,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		else {
 			return Ok(None);
 		};
-		if self.type_of(*argument) != TypeId::CHARACTER {
+		if !matches!(self.types().kind(self.type_of(*argument)), fa_analyzer::types::TypeKind::StringLit(text) if self.types().syms.resolve(text).encode_utf16().count() == 1)
+		{
 			return Ok(None);
 		}
 		let View::Call { callee, .. } = self.view(node) else {

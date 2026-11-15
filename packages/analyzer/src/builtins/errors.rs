@@ -80,6 +80,10 @@ pub static ERRORS: &[BuiltinError] = &[
 		name: "NetError",
 		fields: &[("message", TypeId::STRING)],
 	},
+	BuiltinError {
+		name: "Utf8Error",
+		fields: &[("position", TypeId::INTEGER)],
+	},
 ];
 
 macro_rules! error_types {
@@ -109,7 +113,8 @@ error_types!(
 	"WorkerTimeout",
 	"FileError",
 	"JsonError",
-	"NetError"
+	"NetError",
+	"Utf8Error"
 );
 
 /// The built-in error named `name`, with its `Errors` type and member.

@@ -114,7 +114,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		match types.kind(ty) {
 			TypeKind::Boolean => out.push(b'b'),
 			TypeKind::BoolLit(value) => out.push(if value { b'T' } else { b'F' }),
-			TypeKind::String | TypeKind::Character => out.push(b's'),
+			TypeKind::String => out.push(b's'),
 			TypeKind::StringLit(sym) => {
 				let text = types.syms.resolve(sym);
 				out.extend_from_slice(format!("S{};", text.len()).as_bytes());
@@ -571,7 +571,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Val::new(Repr::F64, value),
 				})
 			}
-			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => {
+			TypeKind::String | TypeKind::StringLit(_) => {
 				let out = self.alloca(Repr::Str, "json_string")?;
 				self.call_runtime("fa_json_string", &[tree.into(), out.pointer.into()])?;
 				self.load(out)
@@ -895,8 +895,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| TypeKind::Float(_)
 			| TypeKind::FloatLit(..)
 			| TypeKind::String
-			| TypeKind::StringLit(_)
-			| TypeKind::Character => self.json_write_scalar(value, call),
+			| TypeKind::StringLit(_) => self.json_write_scalar(value, call),
 			TypeKind::None => self.json_text("null"),
 			TypeKind::Rec(_) => {
 				let Some(target) = self.types().rec_target(ty) else {

@@ -471,8 +471,8 @@ impl Walker<'_> {
 			return false;
 		}
 		parts.into_iter().all(|part| {
-			// a literal matches one value (a pattern on a `Character` is typed
-			// `Character`: it matches one character, not every one)
+			// a literal matches one value (a pattern on a `String` is typed
+			// `String`: it matches one character, not every one)
 			if matches!(
 				self.s.types.kind(part),
 				TypeKind::StringLit(_) | TypeKind::BoolLit(_) | TypeKind::None
@@ -480,7 +480,7 @@ impl Walker<'_> {
 				return coverage.exact.contains(&part);
 			}
 			// a pattern's type may be wider than what it matches (a
-			// character literal is a `Character`): only exact types and
+			// character literal is a `String`): only exact types and
 			// members count
 			match self.s.types.nominal_mask(part) {
 				Some((nominal, mask, _)) => coverage.masks.iter().any(|&(other, union)| {

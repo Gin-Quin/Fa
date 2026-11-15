@@ -41,15 +41,14 @@ impl Walker<'_> {
 		self.memo(n, |_| TypeId::NONE)
 	}
 
-	/// A string literal: its literal type, or a `Character` where one is
-	/// expected (strings.rs).
+	/// A string literal keeps its literal type; bindings widen it to `String`.
 	pub(super) fn check_string(
 		&mut self,
 		n: NodeId,
 		text: &str,
-		expected: Option<TypeId>,
+		_expected: Option<TypeId>,
 	) -> TypeId {
-		self.memo(n, |w| w.string_literal_type(n, text, expected))
+		self.memo(n, |w| w.s.types.string_literal(text))
 	}
 
 	/// A string template `"Hello {name}"`: a `String` (strings.rs).
@@ -113,7 +112,7 @@ impl Walker<'_> {
 			let diagnostic = w.diagnostic(
 				&E_DECL_1,
 				n,
-				format!("`{text}` is not declared: declare it with `let` or `mutable` first"),
+				if text == "Character" { "`Character` is no longer a type: use `String` for text, including a single code unit or code point".to_string() } else { format!("`{text}` is not declared: declare it with `let` or `mutable` first") },
 			);
 			w.report(diagnostic);
 			TypeId::UNKNOWN
@@ -248,6 +247,7 @@ impl Walker<'_> {
 			Some(namespace) => self.memo(n, |w| w.check_builtin_members(namespace, members)),
 			None => self.check_member_access(n, target, members),
 		};
+		self.note_code_point_count(n, target, members);
 		// `settings.port` of a static value: its value (comptime.rs)
 		self.fold_static_fields(n, target, members);
 		ty
@@ -324,6 +324,11 @@ impl Walker<'_> {
 		let index_ty = self.check(index, Some(TypeId::INTEGER));
 		let ty = self.memo(n, |w| w.index_type(n, target, target_ty, index, index_ty));
 		self.check_index_bounds(n, target, index);
+		if crate::builtins::strings::is_string_like(&self.s.types, target_ty)
+			&& self.type_of(index) != TypeId::RANGE
+		{
+			self.set_flag(n, crate::analysis::NodeFlags::STRING_CODE_UNIT);
+		}
 		ty
 	}
 }

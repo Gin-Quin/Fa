@@ -540,7 +540,7 @@ pub fn call(
 				.map(|c| Value::int(i64::from(u32::from(c))))
 				.collect(),
 		),
-		"String#bytes" => list(
+		"String#toUtf8" => list(
 			text(&receiver)?
 				.bytes()
 				.map(|byte| Value::int(i64::from(byte)))

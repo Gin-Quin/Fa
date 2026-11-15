@@ -32,6 +32,6 @@ types! {
 	"BigInt" => BIG_INT,
 	"Percentage" => PERCENTAGE,
 	"String" => STRING,
-	"Character" => CHARACTER,
+	"Bytes" => BYTES,
 	"Range" => RANGE,
 }

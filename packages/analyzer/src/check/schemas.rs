@@ -239,7 +239,7 @@ impl Walker<'_> {
 		match kind {
 			"Boolean" => TypeId::BOOLEAN,
 			"String" => TypeId::STRING,
-			"Character" => TypeId::CHARACTER,
+			"Bytes" => TypeId::BYTES,
 			"Percentage" => TypeId::PERCENTAGE,
 			"BigInt" => TypeId::BIG_INT,
 			"None" => TypeId::NONE,

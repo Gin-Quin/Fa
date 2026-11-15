@@ -1,89 +1,24 @@
-//! Strings and characters (values brief §7, `values/strings.md`,
-//! `operations/string.md`): literal typing and the adaptation to `Character`,
-//! templates, printable values, the members of string values, concatenation.
-//!
-//! The handlers `check_string` and `check_template` of `expr.rs` call these.
-//! Hooks for the other areas:
-//!
-//! - `+` (`numbers.rs`): when an operand is a string, call
-//!   [`Walker::string_concatenation`] from the type part instead of the
-//!   arithmetic rule; `+=` on a `String` target checks its value the same way.
-//! - sinks (`mod.rs`): before reporting `E-TYPE-1`, ask
-//!   [`Walker::string_sink_mismatch`], which reports `E-STR-8` for a `String`
-//!   where a `Character` is expected.
-//! - calls (`calls.rs`): the arguments of `console.log` / `console.error`
-//!   (`builtins::console::prints`) go through [`Walker::check_printable`].
-//! - member access (`expr.rs`): [`Walker::string_member`] resolves a member
-//!   of a string value.
+//! String literals, templates, printable values, members and concatenation.
+//! Positions and literal length facts count UTF-16 code units.
+//! `codeUnitAt` shares the indexing proofs; flags record allocation-free
+//! code point counts, string indexing and UTF-8 iteration for the backends.
 
 use std::sync::Arc;
 
 use crate::builtins::{
 	self,
-	strings::{grapheme_count, is_string_like},
+	strings::{is_string_like, utf16_length},
 };
 use crate::check::Walker;
-use crate::diagnostics::codes::values::{E_STR_7, E_STR_8, E_STR_9, E_STR_11, E_STR_12};
+use crate::diagnostics::codes::values::{E_STR_7, E_STR_11, E_STR_12};
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::Resolution;
 use crate::syntax::{TemplatePart, TemplateParts};
-use crate::types::{Mode, TypeKind, TypeStore};
-
-/// Whether an expected type takes a `Character`: `Character`, or a union
-/// with a `Character` member (`Character?`).
-fn takes_character(types: &TypeStore, expected: TypeId) -> bool {
-	match types.kind(expected) {
-		TypeKind::Character => true,
-		TypeKind::Union(list) => types.list_items(list).contains(&TypeId::CHARACTER),
-		_ => false,
-	}
-}
+use crate::types::TypeKind;
 
 impl Walker<'_> {
-	/// The type of a string literal (type part): its literal type, or
-	/// `Character` where one is expected and the text is one grapheme
-	/// cluster (`E-STR-9` when it isn't).
-	pub(super) fn string_literal_type(
-		&mut self,
-		n: NodeId,
-		text: &str,
-		expected: Option<TypeId>,
-	) -> TypeId {
-		let literal = self.s.types.string_literal(text);
-		let Some(expected) = expected else {
-			return literal;
-		};
-		if self.s.types.is_recovering(expected)
-			|| self
-				.s
-				.types
-				.assignable(literal, expected, Mode::Copy)
-				.is_ok() || !takes_character(&self.s.types, expected)
-		{
-			return literal;
-		}
-		let count = grapheme_count(text);
-		if count == 1 {
-			return TypeId::CHARACTER;
-		}
-		let found = if count == 0 {
-			"an empty string".to_string()
-		} else {
-			format!("{count} characters")
-		};
-		let diagnostic = self.diagnostic(
-			&E_STR_9,
-			n,
-			format!(
-				"a `Character` holds exactly one grapheme cluster, this literal has {found}: use a `String`"
-			),
-		);
-		self.report(diagnostic);
-		TypeId::UNKNOWN
-	}
-
 	/// A template `"Hello {name}"`: every interpolated value must have a
-	/// `toString`. Always a `String`, even where a `Character` is expected.
+	/// `toString`. Always a `String`.
 	pub(super) fn template_type(&mut self, n: NodeId, parts: TemplateParts<'_>) -> TypeId {
 		let mut values = smallvec::SmallVec::<[(NodeId, TypeId); 4]>::new();
 		for part in parts.iter() {
@@ -135,8 +70,7 @@ impl Walker<'_> {
 	}
 
 	/// The type of `a + b + …` when an operand is a string (type part): a
-	/// `String`, with `E-STR-7` for every operand that isn't a string or a
-	/// `Character` (Fa never converts to a string implicitly).
+	/// `String`, with `E-STR-7` for every operand that isn't a string (Fa never converts to a string implicitly).
 	pub fn string_concatenation(&mut self, operands: &[(NodeId, TypeId)]) -> TypeId {
 		for &(operand, ty) in operands {
 			if ty.is_unset() || self.s.types.is_recovering(ty) || is_string_like(&self.s.types, ty)
@@ -163,33 +97,53 @@ impl Walker<'_> {
 		TypeId::STRING
 	}
 
-	/// Reports `E-STR-8` when a `String` lands where a `Character` is
-	/// expected (a flow-part check, like `sink`); returns whether it did.
-	/// A literal never gets here: it adapts, or reports `E-STR-9`.
-	pub fn string_sink_mismatch(&mut self, n: NodeId, actual: TypeId, target: TypeId) -> bool {
-		let types = &self.s.types;
-		let is_string = matches!(
-			types.kind(actual),
-			TypeKind::String | TypeKind::StringLit(_)
-		);
-		if !is_string || !takes_character(types, target) {
-			return false;
+	/// Keep allocation-free string operations explicit in the public contract.
+	pub(super) fn note_code_point_count(
+		&mut self,
+		n: NodeId,
+		target: NodeId,
+		members: crate::syntax::NodeList<'_>,
+	) {
+		if members.len() == 1
+			&& members
+				.first()
+				.is_some_and(|member| self.tree.text(member.index()) == "length")
+			&& self.direct_string_call(target, "String#codePoints")
+		{
+			self.set_flag(n, crate::analysis::NodeFlags::CODE_POINT_COUNT);
 		}
-		let diagnostic = self.diagnostic(
-			&E_STR_8,
-			n,
-			format!(
-				"a `String` may hold several characters, a `{}` is expected: take one with `text[index]` or `text.get(index)`",
-				self.display(target)
-			),
-		);
-		self.report_flow(diagnostic);
-		true
+	}
+
+	pub(super) fn direct_string_call(&self, n: NodeId, path: &str) -> bool {
+		self.a.calls.get(&self.strip_groups(n)).is_some_and(|call|
+			matches!(call.callee, crate::analysis::Callee::Builtin(id) if builtins::get(id).path == path))
+	}
+
+	/// `codeUnitAt` uses exactly the bounds proof and error path of indexing.
+	pub(super) fn string_api_throws(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		kind: crate::analysis::Callee,
+		arguments: &[crate::analysis::Argument],
+		throws: TypeId,
+		comptime: bool,
+	) -> TypeId {
+		if matches!(kind, crate::analysis::Callee::Builtin(id) if builtins::get(id).path == "String#codeUnitAt")
+			&& let crate::syntax::View::Access { target, .. } = self.view(self.strip_groups(callee))
+			&& let Some(crate::analysis::Argument::Given(index)) = arguments.first()
+		{
+			if !comptime {
+				self.check_index_bounds(n, target, *index);
+			}
+			return TypeId::NEVER;
+		}
+		throws
 	}
 
 	/// The member `name` of a string value (type part): `length`, a method.
 	/// Sets the member's resolution; `None` when strings have no such member.
-	/// The `length` of a literal is its literal grapheme count.
+	/// The `length` of a literal is its literal UTF-16 code unit count.
 	pub fn string_member(
 		&mut self,
 		member: NodeId,
@@ -199,7 +153,7 @@ impl Walker<'_> {
 		let id = builtins::instance_member(&self.s.types, receiver, name)?;
 		self.set_resolution(member, Resolution::Builtin(id));
 		if let (TypeKind::StringLit(text), "length") = (self.s.types.kind(receiver), name) {
-			let count = grapheme_count(self.s.types.syms.resolve(text));
+			let count = utf16_length(self.s.types.syms.resolve(text));
 			return Some(self.s.types.int_literal((count as i128).into()));
 		}
 		builtins::value_type(&mut self.s.types, id)
@@ -261,38 +215,11 @@ mod tests {
 	}
 
 	#[test]
-	fn literals_adapt_to_character() {
-		for source in [
-			"let snow: Character = \"☃\"\n",
-			"let flag: Character = \"🇫🇷\"\n",
-			"let accent: Character = \"e\\u{301}\"\n",
-		] {
-			assert!(codes(source).is_empty(), "{source}");
-		}
-		assert_eq!(
-			type_of("let flag: Character = \"🇫🇷\"\n", "\"🇫🇷\""),
-			"Character"
-		);
-		assert_eq!(codes("let letters: Character = \"ab\"\n"), ["E-STR-9"]);
-		assert_eq!(codes("let e: Character = \"\"\n"), ["E-STR-9"]);
-	}
-
-	#[test]
-	fn optional_characters_take_a_character() {
-		let mut types = crate::types::TypeStore::new();
-		let optional = types.optional(TypeId::CHARACTER);
-		assert!(super::takes_character(&types, optional));
-		assert!(super::takes_character(&types, TypeId::CHARACTER));
-		assert!(!super::takes_character(&types, TypeId::STRING));
-		let optional_string = types.optional(TypeId::STRING);
-		assert!(!super::takes_character(&types, optional_string));
-	}
-
-	#[test]
-	fn characters_are_strings_not_the_reverse() {
-		assert!(codes("let first: Character = \"F\"\nlet text: String = first\n").is_empty());
-		let found = codes("let text = \"F\"\nlet c: Character = text\n");
-		assert_eq!(found, ["E-STR-8"]);
+	fn removed_character_type_names_the_replacement() {
+		let (session, file) = analyze_source("let c: Character = \"F\"\n");
+		let diagnostics = session.diagnostics(file);
+		let diagnostic = diagnostics.iter().find(|d| d.code.id == "TY007").unwrap();
+		assert!(diagnostic.message.contains("use `String`"));
 	}
 
 	#[test]
@@ -345,7 +272,7 @@ mod tests {
 		);
 		assert_eq!(
 			type_of(
-				"let c: Character = \"a\"\nlet u = c.toUpperCase()\n",
+				"let c: String = \"a\"\nlet u = c.toUpperCase()\n",
 				"c.toUpperCase()"
 			),
 			"String"

@@ -120,7 +120,7 @@ The defaults run in about 0.25 to 2 seconds in Rust (see the [baseline](#rust-ba
 - **`bintrees` is `binary-trees`**: the same Benchmarks Game program. `binary-trees/main.goose` is Goose's `bintrees.goose` with the output of `main.rs`. `words` stays separate from `word-count`: same idea, but a different generator, text and output.
 - The other ten benchmarks got a Goose version written for them (`main.goose`, a direct port of `main.rs` reading its size from its arguments): inline `u8[..8]` strings where the words fit (`word-count`, `sort-objects`), `dictionary` for the maps, `sort` with a block for the comparator.
 
-The ports use the integer widths of their sources (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys, values and `UInt32` links in `lru`, `Int32` vertex ids and distances in `graph`, `Int32` numbers in `interp` and `sexp`, `Int32` ids in `scene`; `calc` reuses one generator text and damages it in place with string slices (`text = text[..index] + "#" + text[index + 1..]`, edited in place natively), as its sources do. Deviations: `sexp` keeps the children of a list in an `Array` (Rust: `Vec<Node>`) instead of Goose's first-child and next-sibling links; `scene` writes the 3x3 matrix as nine `Float32` fields (Fa has no fixed-size arrays); `respond`, `strlist`, `records`, `words`, `sexp` and `calc` read the bytes of a string with `text.bytes()` (sixth native shift), as Goose reads its `u8` buffers: the parsers of `calc` and `sexp` index `self.text.bytes()` (read in place, no array) instead of an `Array(Character)`, and `sexp` slices its symbols out of the text.
+The ports use the integer widths of their sources (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys, values and `UInt32` links in `lru`, `Int32` vertex ids and distances in `graph`, `Int32` numbers in `interp` and `sexp`, `Int32` ids in `scene`; `calc` reuses one generator text and damages it in place with string slices (`text = text[..index] + "#" + text[index + 1..]`, edited in place natively), as its sources do. Deviations: `sexp` keeps the children of a list in an `Array` (Rust: `Vec<Node>`) instead of Goose's first-child and next-sibling links; `scene` writes the 3x3 matrix as nine `Float32` fields (Fa has no fixed-size arrays); `respond`, `strlist`, `records`, `words`, `sexp` and `calc` use explicit UTF-8 encoding where they need binary bytes, as Goose reads its `u8` buffers: the parsers of `calc` and `sexp` read numeric UTF-16 units with `self.text.codeUnitAt(position)` instead of an `Array<String>`, and `sexp` slices its symbols out of the text.
 
 #### What the ports found missing or wrong in Fa
 
@@ -128,7 +128,7 @@ Found with `target/release/fa` at the commit of the [three-way comparison](#fa-r
 
 Wrong results:
 
-- **`c is ")"` on a `Character` (or `Character?`) is true for any character**, natively and on Bun: it compiles to a type test (`typeof x === "string"` in JavaScript) instead of comparing the value. `calc` and `sexp` use `==`.
+- **`c is ")"` on a `String` (or `String?`) is true for any character**, natively and on Bun: it compiles to a type test (`typeof x === "string"` in JavaScript) instead of comparing the value. `calc` and `sexp` use `==`.
 
 Not implemented:
 
@@ -140,15 +140,15 @@ Rejected although the documentation allows it:
 
 - **A `while` guard is forgotten when the array grows in the loop**: `while head < queue.length { let v = queue[head]; head += 1; queue.push(x) }` gives ``E-ERR-3: `queue[head]` can fail with `IndexError` `` (without the `push`, it is accepted). `graph` writes `try queue[head]`.
 - **`throws IndexError | DivisionByZero`**: a `try` of either error gives `E-ERR-4` ("doesn't declare … `IndexError.IndexError | DivisionByZero.DivisionByZero`"). `calc` catches the division error where it happens.
-- **Narrowing**: `c == " "` with `c: Character?` gives `E-CMP-1` even after `if c is none { return }`; a field is not narrowed by `if node.key < 0 { break }` (then `walk.wrappingAdd(node.key)` gives `E-NUM-14`; copied to a local first); `is not "+" | "-"` doesn't narrow a `Character` to the remaining literals.
-- **`if p { aString } else { aCharacter }`** gives `E-IF-2` (a `String` and a `Character` "don't make a valid union").
+- **Narrowing**: `c == " "` with `c: String?` gives `E-CMP-1` even after `if c is none { return }`; a field is not narrowed by `if node.key < 0 { break }` (then `walk.wrappingAdd(node.key)` gives `E-NUM-14`; copied to a local first); `is not "+" | "-"` doesn't narrow a `String` to the remaining literals.
+- **`if p { aString } else { aString }`** gives `E-IF-2` (a `String` and a `String` "don't make a valid union").
 
 Misleading diagnostics:
 
 - `W-NUM-1` on `Integer(value).bitXor(pass)` (`value: Int32`) says the conversion "does nothing", but without it `value.bitXor(pass)` fails with `E-NUM-14` (`pass` doesn't fit in an `Int32`).
 - `W-ERR-1` says a string slice "can't fail", while the documentation says it throws `IndexError`.
 
-~~Missing in the library: **a cheap way to read a character's code or a string's bytes**~~: `text.bytes()` (`design/decisions.md`, "Strings: byte access"), read in place when only indexed, measured or iterated.
+~~Missing in the library: **a cheap way to read a character's code or a string's bytes**~~: `text.toUtf8()` (`design/decisions.md`, "Strings: byte access"), read in place when only indexed, measured or iterated.
 
 Slow (the [comparison](#fa-rust-and-goose) has the numbers), and what the fifth native shift did about it (`design/decisions.md`, "Simple strings" and the entries after it):
 
@@ -163,7 +163,7 @@ Slow (the [comparison](#fa-rust-and-goose) has the numbers), and what the fifth 
 [`audit/`](audit/README.md) holds the tools that compare Fa's native executables with Goose's (CPU time against the same binaries, Goose given its size at run time, callgrind profiles, hot instruction runs). What the native backend changed for the Goose suite, under which conditions, what it gained and what remains is in `design/llvm-backend-plan.md` ("Native representations of the Goose work").
 
 `string-building/bytes.fa` is a second Fa version of `string-building`, written like
-the Goose port: growable byte buffers (`Array<Byte>`, until the `Bytes` type exists),
+the Goose port: growable byte buffers (`Array<Byte>`, with `Bytes` for fixed-length binary data),
 `split` as ranges into the text and `join` into a new buffer, integers formatted by
 hand. It prints the same output. `string-building/growing.fa` is the same program with
 `GrowingArray<Byte>` buffers, whose items never move, like Goose's `u8[>..]` arrays. The
@@ -275,7 +275,7 @@ What it says:
 
 ### After the native costs of the minimalism audit
 
-Measured on 2026-11-04 with the same command (`--runs 3`, `ulimit -v 8000000`), `fa` at `102d4ee` (before the `bytes()` ports): the native-goose work (inline strings and unions, arenas, borrowed parameters) and the follow-ups of [the minimalism audit](../design/minimalism-audit.md) (size-class string blocks, templates appended in place, in-place `+`, one-byte appends in registers, parameters never copied, module constants, `capacity`/`reserve`, presized maps in `lru` and `words`). The machine was busy again (load average 5 to 7): `respond` took 818 ms without overflow checks and 440 ms with them, so read the times as ±30%.
+Measured on 2026-11-04 with the same command (`--runs 3`, `ulimit -v 8000000`), `fa` at `102d4ee` (before the `toUtf8()` ports): the native-goose work (inline strings and unions, arenas, borrowed parameters) and the follow-ups of [the minimalism audit](../design/minimalism-audit.md) (size-class string blocks, templates appended in place, in-place `+`, one-byte appends in registers, parameters never copied, module constants, `capacity`/`reserve`, presized maps in `lru` and `words`). The machine was busy again (load average 5 to 7): `respond` took 818 ms without overflow checks and 440 ms with them, so read the times as ±30%.
 
 | Benchmark | Fa native | Goose | Fa / Goose | | Benchmark | Fa native | Goose | Fa / Goose |
 | --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: |
@@ -298,14 +298,14 @@ Fa / Goose is 1.26x in geometric mean (1.65x on 2026-11-02). The instructions ex
 | | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | audit (2026-11-02) | 2.22 | 1.83 | 2.73 | 1.15 | 2.14 | 2.08 | 4.19 | 3.09 | 2.39 | 1.63 |
-| `compiler` with `bytes()` (`da95d6f`) | 1.80 | 1.88 | 1.84 | 0.98 | 2.03 | 2.38 | 2.23 | 1.48 | 1.22 | 1.17 |
+| `compiler` with `toUtf8()` (`da95d6f`) | 1.80 | 1.88 | 1.84 | 0.98 | 2.03 | 2.38 | 2.23 | 1.48 | 1.22 | 1.17 |
 | and the follow-ups above | 1.70 | 1.89 | 1.69 | 0.98 | 1.92 | 2.22 | 2.24 | 1.49 | 1.22 | 1.17 |
 
-The times above predate the ports reading `bytes()` (`calc` and `sexp` still parsed an `Array(Character)` then); the instructions are on top of them. `lru` pays three map probes per miss and unproven index checks; `strlist` and `words` copy every word out of `split`.
+The times above predate the ports reading `toUtf8()` (`calc` and `sexp` still parsed an `Array<String>` then); the instructions are on top of them. `lru` pays three map probes per miss and unproven index checks; `strlist` and `words` copy every word out of `split`.
 
 ### Against Goose on its own suite
 
-The goal set for the native backend is to be faster than Goose on Goose's own benchmarks (release builds: `fa build`, overflow checks off). CPU time (user + system, median of 7, Fa and Goose executables run one after the other at their default sizes) on 2026-11-04, `compiler` with the merged `perf/native-goose` work and `bytes()` (the sixth native shift), on the same busy machine (load average 6 to 8; two passes differ by up to 40% on the shortest programs). The fifth shift's column is the previous version of this table.
+The goal set for the native backend is to be faster than Goose on Goose's own benchmarks (release builds: `fa build`, overflow checks off). CPU time (user + system, median of 7, Fa and Goose executables run one after the other at their default sizes) on 2026-11-04, `compiler` with the merged `perf/native-goose` work and `toUtf8()` (the sixth native shift), on the same busy machine (load average 6 to 8; two passes differ by up to 40% on the shortest programs). The fifth shift's column is the previous version of this table.
 
 | Benchmark | Fa | Goose | Fa / Goose | Fifth shift | What Goose still does that Fa doesn't |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -318,10 +318,10 @@ The goal set for the native backend is to be faster than Goose on Goose's own be
 | `graph` | 0.16 s | 0.38 s | 0.43x | 0.59x | nothing (Fa faster) |
 | `words` | 0.11 s | 0.06 s | 1.83x | 2.71x | slices as map keys (the split copies each word); the map itself is now a small share |
 | `particles` | 0.12 s | 0.14 s | 0.89x | 1.00x | nothing (Fa level) |
-| `sexp` | 0.24 s | 0.19 s | 1.26x | 3.61x | first-child/next-sibling links, inline symbols; the port now parses `text.bytes()` |
+| `sexp` | 0.24 s | 0.19 s | 1.26x | 3.61x | first-child/next-sibling links, inline symbols; the port now parses `text.toUtf8()` |
 | `lru` | 0.65 s | 0.24 s | 2.70x | 2.91x | 16-byte nodes (`i32` fields): its 8 MB fit the 8 MB L3, Fa's 32-byte nodes plus the stable map entries (16 MB) don't; `unlink` inlined |
 | `scene` | 0.02 s | 0.02 s | 1.07x | 5.47x | nothing (children inline in their arrays now) |
-| `calc` | 0.45 s | 0.22 s | 1.99x | 3.33x | text edited in place, number templates appended without growth; the port now parses `text.bytes()` |
+| `calc` | 0.45 s | 0.22 s | 1.99x | 3.33x | text edited in place, number templates appended without growth; the port now parses `text.toUtf8()` |
 | `respond` | 0.62 s | 0.27 s | 2.29x | 2.44x | one byte buffer per response (Fa grows strings and builds templates) |
 | `blur` | 0.09 s | 0.10 s | 0.96x | 1.12x | nothing (Fa vectorizes, Goose doesn't) |
 | `binary-trees` | 0.15 s | 0.12 s | 1.24x | 3.83x | 32-bit relative links (Fa's arenas hold 16-byte nodes of two pointers) |
@@ -329,7 +329,7 @@ The goal set for the native backend is to be faster than Goose on Goose's own be
 
 The `lru` and `words` rows were measured again after the map work, on the ports presized since (`Map.from([], capacity = …)`; median of 21, Fa and Goose alternated, load average 6 to 7): each index slot holds a 32-bit hash tag and the entry's position (a mismatch never reads an entry), the entries are `{ key, value }` with the occupancy bits in the chunk directory (16 bytes per `Map(Integer, Integer)` entry instead of 32), deletion shifts the probe run back instead of leaving tombstones, integer keys are hashed with one multiplication and compared bitwise, and `delete` takes the key out in the walk that finds it (`documentation/collections/maps.md`, implementation section). Against the previous compiler on the same machine and program: `lru` 1.12x faster (38.7 M instructions instead of 42.1 M at the audit size; 4.2 M last-level misses instead of 5.9 M in cachegrind with an 8 MB L3); `words` unchanged (its map is about 15% of its instructions and its probe got about 8% cheaper, within the noise of the rest). `lru` now asks for `capacity` entries, the most it holds, instead of twice as many: a `Map` keeps twice as many index slots by itself, as Goose's table. What remains of `lru` is outside the map: Goose's working set fits the cache (0.13 M misses), `unlink` is a call with four bounds checks, and the values of a Fa `Map` stay in stable slots (a reference into a map survives insertions), one more cache line per hit than Goose's slot.
 
-Fa is ahead of or level with Goose on `tree`, `interp`, `graph`, `particles`, `blur`, `push`, `sum` and `scene`, and behind on string building (`strlist`, `respond`, `calc`, `records`) and maps (`lru`, `words`). What changed since the fifth shift: inline strings, nullable recursive edges, root arenas, inline recursive collection items, borrowed parameters and module constants (`perf/native-goose`, `design/llvm-backend-plan.md`), and `text.bytes()` read in place, which `calc` and `sexp` parse instead of an `Array(Character)` and the other ports read where Goose reads bytes.
+Fa is ahead of or level with Goose on `tree`, `interp`, `graph`, `particles`, `blur`, `push`, `sum` and `scene`, and behind on string building (`strlist`, `respond`, `calc`, `records`) and maps (`lru`, `words`). What changed since the fifth shift: inline strings, nullable recursive edges, root arenas, inline recursive collection items, borrowed parameters and module constants (`perf/native-goose`, `design/llvm-backend-plan.md`), and `text.toUtf8()` read in place, which `calc` and `sexp` parse instead of an `Array<String>` and the other ports read where Goose reads bytes.
 
 The full three-way table below (`run.ts`, wall times) was not run again; a run on 2026-11-04 (wall times, three runs, busier machine) gave Fa / Goose 1.21x on `binary-trees`, 1.48x on `calc`, 1.58x on `sexp`, 1.89x on `strlist`, 1.83x on `records`, 1.82x on `respond`, 3.95x on `lru`, 1.12x on `scene`, 0.43x on `words`, and Fa native at 0.16x (`binary-trees`) to 1.62x (`lru`) Rust on the Goose suite.
 

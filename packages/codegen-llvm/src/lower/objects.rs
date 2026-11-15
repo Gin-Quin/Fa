@@ -1576,7 +1576,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 		}
 		// `codes.length` of a local standing for `text.codePoints()`, and
-		// `text.bytes().length`
+		// `text.toUtf8().length`
 		if members.len() == 1
 			&& self.tree.text(first.index()) == "length"
 			&& let Some(call) = self.virtual_code_points_call(target).or_else(|| {
@@ -1967,7 +1967,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			return self.load(slot);
 		}
-		// `self.text.bytes()`: the field read once by the method (`frozen.rs`)
+		// `self.text.toUtf8()`: the field read once by the method (`frozen.rs`)
 		if count >= 1
 			&& let Some(first) = members.first()
 			&& let Some((mut value, mut current_type)) = self.frozen_value(target, first)

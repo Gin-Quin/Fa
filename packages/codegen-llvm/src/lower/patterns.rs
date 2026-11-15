@@ -941,7 +941,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// `for code in text.codePoints()`: the code points decoded in place,
 	/// without the array (`text` the receiver of `codePoints`); with
-	/// `bytes_only`, `for byte in text.bytes()`.
+	/// `bytes_only`, `for byte in text.toUtf8()`.
 	pub(crate) fn for_code_points(
 		&mut self,
 		node: NodeId,

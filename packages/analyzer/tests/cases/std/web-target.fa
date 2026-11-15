@@ -3,5 +3,5 @@ use { File } = std.fs
 use { now } = std.time
 
 -- `File.read` doesn't exist on `web`
-let text = File.read("settings.json") catch error => "" -- error AN004
+let text = File.readText("settings.json") catch error => "" -- error AN004
 let start = now()

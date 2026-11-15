@@ -1,0 +1,11 @@
+# Known failures on web; every entry is executed.
+# An unlisted failure, listed success or stale entry fails tests/programs.rs.
+analyzer/tests/cases/advanced/06-memory-management-copies-moves-destruction-closures/adv-6.8-05.fa: Copying a million-deep recursive value exceeds the 20s run limit (existing Bun BACKEND_GAPS case).
+analyzer/tests/cases/advanced/15-modules/adv-15.9-18.fa: Web arguments are empty: prints Hello, World! instead of Hello, Ada!.
+analyzer/tests/cases/review/written-method-origins-async.fa: Blocking generic async method calls on web pass the receiver string as task (faSleep writes task.wake).
+cli/tests/programs/arguments.fa: Web arguments are empty: prints 0 instead of the command-line argument result 42.
+cli/tests/programs/benchmark-fib.fa: Web arguments are empty: uses default n=42 instead of annotated argument n=27.
+cli/tests/programs/benchmark-mandelbrot.fa: Web arguments are empty: uses default size=4000 instead of annotated argument size=200.
+cli/tests/programs/json.fa: JSON.parse error messages are V8-specific; annotations expect Bun JavaScriptCore wording.
+cli/tests/programs/pointer-allocate.foreign.fa: Pointer.allocate compiles but enters the Bun-only FFI runtime; missing target rejection.
+codegen-llvm/tests/programs/async-deadlock.fa: Web has no process.beforeExit deadlock report: pending main ends without status 101 or the expected diagnostic.

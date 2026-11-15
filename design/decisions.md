@@ -754,3 +754,11 @@ conservatively retain the check.
 - **Profile**: `dev` (`-O0`, FastISel), with the overflow checks of development.
 - **`fa run --target=native`** goes through the same JIT.
 - **Not chosen**: a tiered, profiling JIT (Fa is statically typed and monomorphized, so there is nothing to speculate on; profile-guided optimization covers the rest), and Cranelift or copy-and-patch (a second lowering, as for the `dev` profile in `design/compilation-with-llvm.md`).
+
+## Node and web program harness (2026-11-15)
+
+Keep Node and web in `cargo test -p fa --test programs`: the existing Bun harness owns the annotations, comparisons, filters, timeouts and worker limit. Node/web run the same corpus plus existing async fixtures, building with explicit overflow checks to match `fa run`. No second generator or browser dependency is introduced.
+
+Web output runs as ES modules in a Node VM with web globals, including Web Workers implemented by fresh VM contexts on Node worker threads. Server imports are rejected by the linker. The runner observes `faExit(code)` through a private synthetic import because web deliberately ignores process exit; it neither provides `process` nor infers status from stderr. Worker messages use receiving-realm prototypes, timer IDs are numbers and Node port/thread methods remain private. This is an accidental-API-use test, not a hostile-code security sandbox.
+
+Maintain exact per-target failure ratchets for build and execution failures. Documented target restrictions are successful negative tests only when every build error is a corresponding target diagnostic. Pending annotations do not excuse Node/web failures. Bound the whole test binary to three programs at once and monitor child RSS on Linux rather than limiting virtual memory, which JavaScript engines reserve sparsely. Serialize concurrent executions of the same source path across targets because the async file fixture writes a fixed external path; distinct programs still run in parallel.

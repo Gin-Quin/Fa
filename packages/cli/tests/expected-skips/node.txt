@@ -1,0 +1,6 @@
+# Known failures on node; every entry is executed.
+# An unlisted failure, listed success or stale entry fails tests/programs.rs.
+analyzer/tests/cases/advanced/06-memory-management-copies-moves-destruction-closures/adv-6.8-05.fa: Copying a million-deep recursive value exceeds the 20s run limit (existing Bun BACKEND_GAPS case).
+cli/tests/programs/json.fa: JSON.parse error messages are V8-specific; annotations expect Bun JavaScriptCore wording.
+cli/tests/programs/pointer-allocate.foreign.fa: Pointer.allocate compiles but enters the Bun-only FFI runtime; missing target rejection.
+codegen-llvm/tests/programs/async-net.fa: Node listen binds asynchronously: listener.port is 0 immediately after construction; clients fail and accept waits forever.

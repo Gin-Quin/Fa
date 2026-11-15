@@ -779,7 +779,11 @@ impl Walker<'_> {
 						current = ty;
 					}
 					None => {
-						let message = format!("`{}` has no member `{text}`", w.display(current));
+						let message = format!(
+							"`{}` has no member `{text}`{}",
+							w.display(current),
+							w.removed_type_member_hint(current, &text)
+						);
 						let diagnostic = w.diagnostic(&TY007, member, message);
 						w.report(diagnostic);
 						return TypeId::UNKNOWN;

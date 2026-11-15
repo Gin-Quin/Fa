@@ -1,0 +1,20 @@
+let text = " é中😀 "
+let start: String = text.trimStart()
+let end: String = text.trimEnd()
+let padded: String = text.padEnd(10)
+let explicitPadding: String = text.padStart(10, "😀")
+let last: Integer? = text.lastIndexOf("😀")
+let copied: String = String.from(text)
+let order: Integer = String.compareLocale("é", "中")
+let localeOrder: Integer = String.compareLocale("é", "中", "fr")
+let same: String = text.toString()
+let naturalCount: Integer<min = 0> = text.utf8Length()
+console.log(start, end, padded, explicitPadding, last, copied, order, localeOrder, same, naturalCount)
+let wrongCopy = String.from(1) -- error: E-TYPE-1
+let negativeRepeat = text.repeat(-1) -- error: E-NUM-6
+let implicitPadding = text.padEnd(10, 1) -- error: E-TYPE-1
+let implicitSearch = text.lastIndexOf(1) -- error: E-TYPE-1
+let implicitReplacement = text.replace(" ", 1) -- error: E-TYPE-1
+let implicitSeparator = text.split(1) -- error: E-TYPE-1
+let implicitJoin = [1, 2].join(",") -- error: E-OBJ-5
+text[0] = "a" -- error: E-DECL-4

@@ -1154,9 +1154,10 @@ impl Walker<'_> {
 			Err(_) if self.number_literal_sink(n, actual, target) => {}
 			Err(_) => {
 				let message = format!(
-					"a `{}` is not accepted where a `{}` is expected",
+					"a `{}` is not accepted where a `{}` is expected{}",
 					self.display(actual),
-					self.display(target)
+					self.display(target),
+					self.text_bytes_hint(n, actual, target)
 				);
 				let diagnostic = self.diagnostic(&codes::values::E_TYPE_1, n, message);
 				self.report_flow(diagnostic);

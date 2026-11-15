@@ -1056,7 +1056,11 @@ impl Walker<'_> {
 			self.set_type(first, function_ty);
 			function_ty
 		} else {
-			let message = format!("`{}` has no member or function `{text}`", self.display(ty));
+			let message = format!(
+				"`{}` has no member or function `{text}`{}",
+				self.display(ty),
+				self.removed_type_member_hint(ty, &text)
+			);
 			let diagnostic = self.diagnostic(&E_OBJ_5, first, message);
 			self.report(diagnostic);
 			return TypeId::UNKNOWN;
@@ -1353,7 +1357,7 @@ impl Walker<'_> {
 			"`bytes()` was replaced by `toUtf8()`, which returns `Bytes`: use `text.toUtf8()` to encode UTF-8".to_string()
 		} else if crate::builtins::strings::is_string_like(&self.s.types, receiver) {
 			format!(
-				"a `{shown}` has no field or method `{text}`: see the string methods (`length`, `includes`, `split`…); no method changes a string"
+				"a `{shown}` has no field or method `{text}`: see the string methods (`length`, `includes`, `split`…); use assignment or `+=` to change the text (`reserve` only changes storage)"
 			)
 		} else if receiver == TypeId::BYTES {
 			format!(

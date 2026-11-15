@@ -293,6 +293,15 @@ impl Walker<'_> {
 			};
 			let text = tree.name(name);
 			let Some(found) = builtins::member(current, text) else {
+				if builtins::get(current).path == "File" && text == "readBytes" {
+					let diagnostic = self.diagnostic(
+						&crate::diagnostics::codes::analyzer::AN001,
+						member,
+						"`File.readBytes` was replaced by `File.read(path)`, which returns `Bytes`; use `File.readText(path)` to read UTF-8 text",
+					);
+					self.report(diagnostic);
+					return TypeId::UNKNOWN;
+				}
 				let message = format!("`{}.{text}`", builtins::get(current).path);
 				return self.unsupported_message(member, &message);
 			};

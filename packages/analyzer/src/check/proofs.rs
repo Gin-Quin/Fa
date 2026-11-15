@@ -125,8 +125,9 @@ impl Walker<'_> {
 			}
 			if crate::builtins::get(builtin).path == "String#toUtf8"
 				&& let View::Call { callee, .. } = self.view(n)
-				&& let View::Access { target, .. } = self.view(callee)
-				&& let TypeKind::StringLit(text) = self.s.types.kind(self.type_of(target))
+				&& let Some(receiver) = self.callee_receiver_node(callee)
+				&& let TypeKind::StringLit(text) =
+					self.s.types.kind(self.type_of(self.strip_groups(receiver)))
 			{
 				return Some(Interval::exact(I256::from(
 					self.s.types.syms.resolve(text).len() as u64,
@@ -445,7 +446,7 @@ impl Walker<'_> {
 			if lo >= longest || hi < -longest {
 				let tree = Arc::clone(&self.tree);
 				let message = format!(
-					"`{}` is out of bounds: the index is {}, and the length {}",
+					"`{}` is out of bounds: the index is {}, and the length {}; use an index from `-length` to `length - 1`, or `get(index)` for an optional result",
 					tree.text(n.index()),
 					values
 						.hull

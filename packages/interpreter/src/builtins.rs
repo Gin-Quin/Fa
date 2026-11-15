@@ -438,8 +438,6 @@ pub fn call(
 		// a value of the interpreter has no spare room
 		"String#capacity" => Value::int(text(&receiver)?.encode_utf16().count() as i64),
 		"String.from" => Value::String(Arc::from(text(&receiver)?)),
-		// a value of the interpreter grows on demand: `reserve` is a hint
-		_ if path.ends_with("#reserve") => Value::None,
 		"String#isEmpty" => Value::Boolean(text(&receiver)?.is_empty()),
 		"String#get" => {
 			let index = integer(arg(1)?)?;
@@ -772,6 +770,10 @@ pub fn mutate(
 		return Ok(Value::None);
 	}
 
+	// a value of the interpreter grows on demand: `reserve` is a hint
+	if path.ends_with("#reserve") {
+		return Ok(Value::None);
+	}
 	let arg = |index: usize| argument(&arguments, index).cloned();
 	match receiver {
 		Value::Array(items) => {

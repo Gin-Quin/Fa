@@ -6,7 +6,7 @@ use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
 use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;
-use inkwell::values::{BasicValue, BasicValueEnum, PointerValue};
+use inkwell::values::{BasicValue, BasicValueEnum, IntValue, PointerValue};
 
 use crate::error::Error;
 use crate::lower::Lowering;
@@ -15,11 +15,17 @@ use crate::lower::values::{Repr, Val};
 const COLLECTION_BUDGET: u64 = 2048;
 const FRAME_BUDGET: u64 = 4096;
 
+#[derive(Clone, Copy)]
+pub(super) struct CollectionBuffer<'ctx> {
+	pub pointer: PointerValue<'ctx>,
+	pub bytes: IntValue<'ctx>,
+}
+
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// A closed proof: every read borrows the collection as an indexed
 	/// receiver or iterable. Owning stores, returns and unknown uses choose
 	/// heap storage before construction, without introducing a copy-out.
-	fn collection_borrowed_only(&self, symbol: SymbolId) -> bool {
+	fn collection_borrowed_only(&self, symbol: SymbolId, returning: bool) -> bool {
 		let parents = self.parents();
 		self.analysis
 			.resolutions
@@ -30,6 +36,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					return true;
 				}
 				let mut at = NodeId::new(index);
+				if returning && self.collection_value_returned(at) {
+					return true;
+				}
 				loop {
 					let Some(&parent) = parents.get(at.index()) else {
 						return false;
@@ -121,7 +130,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.and_then(|function| function.info.sig)
 				.is_some_and(|sig| self.types().sig(sig).is_async)
 			|| !self.analysis.foreign_args.is_empty()
-			|| !self.collection_borrowed_only(symbol)
+			|| !self.collection_borrowed_only(symbol, false)
 			|| self
 				.analysis
 				.functions
@@ -145,6 +154,175 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let key = (self.file, symbol);
 		self.frame_mut().collection_locals.insert(key);
 		Ok(Some(storage))
+	}
+
+	pub(super) fn uses_collection_return(&self, repr: Repr) -> bool {
+		!self.tasks.asynchronous
+			&& matches!(
+				repr,
+				Repr::Array(_)
+					| Repr::Growing(_)
+					| Repr::Map(_) | Repr::Set(_)
+					| Repr::Pool(_) | Repr::Columnar(_)
+			)
+	}
+
+	/// Only value-preserving tails reach the return offer. Arguments, fields,
+	/// nested collections and closures cannot accidentally consume it.
+	fn collection_value_returned(&self, mut node: NodeId) -> bool {
+		let Some(root) = self.frame().collection_result_root else {
+			return false;
+		};
+		let parents = self.parents();
+		let mut explicit = false;
+		loop {
+			if node == root {
+				return true;
+			}
+			let Some(&parent) = parents.get(node.index()) else {
+				return false;
+			};
+			if parent == usize::MAX {
+				return false;
+			}
+			let parent = NodeId::new(parent);
+			match self.view(parent) {
+				View::Lambda { .. } | View::Function { .. } => return false,
+				View::Return(Some(value)) if value == node => explicit = true,
+				_ if explicit => {}
+				View::Group(_) | View::Try(_) | View::Do(_) => {}
+				View::Block { statements } if statements.iter().last() == Some(node) => {}
+				View::If {
+					then_body,
+					else_body,
+					..
+				} if then_body == node || else_body == Some(node) => {}
+				View::When { arms, .. } if arms.iter().any(|arm| arm.value == node) => {}
+				_ => return false,
+			}
+			node = parent;
+		}
+	}
+
+	pub(super) fn collection_returned_binding(&mut self, symbol: SymbolId) -> bool {
+		let data = self.analysis.symbols.symbol(symbol);
+		if data.kind != SymbolKind::Let
+			|| !self.analysis.foreign_args.is_empty()
+			|| self.owner_of_scope(data.scope) != self.frame().owner
+			|| self
+				.analysis
+				.functions
+				.values()
+				.any(|f| f.captures.contains(&symbol))
+			|| !self
+				.repr_of(data.ty, 0)
+				.is_ok_and(|repr| repr == self.frame().ret)
+		{
+			return false;
+		}
+		self.analysis.resolutions.iter().enumerate().any(|(i, r)| {
+			*r == Resolution::Local(symbol) && self.collection_value_returned(NodeId::new(i))
+		}) && self.collection_borrowed_only(symbol, true)
+			&& self.analysis.resolutions.iter().enumerate().all(|(i, r)| {
+				let node = NodeId::new(i);
+				*r != Resolution::Local(symbol)
+					|| !self.collection_value_returned(node)
+					|| self
+						.analysis
+						.flags_of(node)
+						.contains(fa_analyzer::analysis::NodeFlags::MOVE)
+					|| self.is_returned_local(symbol, node, self.frame().ret)
+					|| self.is_last_use(
+						symbol,
+						node,
+						self.analysis.symbols.symbol(symbol).decl_node,
+					)
+			})
+	}
+
+	pub(super) fn forwarded_collection_buffer(
+		&mut self,
+		node: NodeId,
+	) -> Option<CollectionBuffer<'ctx>> {
+		let offer = self.frame().return_buffer?;
+		if !self
+			.node_repr(node)
+			.is_ok_and(|repr| repr == self.frame().ret)
+		{
+			return None;
+		}
+		if self.collection_value_returned(node)
+			|| self
+				.collection_binding(node)
+				.is_some_and(|symbol| self.collection_returned_binding(symbol))
+		{
+			Some(offer)
+		} else {
+			None
+		}
+	}
+
+	pub(super) fn collection_call_buffer(
+		&mut self,
+		node: NodeId,
+	) -> Result<Option<CollectionBuffer<'ctx>>, Error> {
+		if let Some(offer) = self.forwarded_collection_buffer(node) {
+			return Ok(Some(offer));
+		}
+		// The existing object-columnar chunk is at least 64 KiB. Reserving
+		// a 2 KiB caller offer cannot help this representation.
+		if matches!(self.node_repr(node)?, Repr::Columnar(_)) {
+			return Ok(None);
+		}
+		Ok(self
+			.collection_stack(node, COLLECTION_BUDGET)?
+			.map(|pointer| CollectionBuffer {
+				pointer,
+				bytes: self.usize.const_int(COLLECTION_BUDGET, false),
+			}))
+	}
+
+	/// Both branches select final storage before initializing a payload.
+	pub(super) fn select_collection_buffer(
+		&mut self,
+		offer: CollectionBuffer<'ctx>,
+		required: u64,
+		local: impl FnOnce(&mut Self, PointerValue<'ctx>) -> Result<PointerValue<'ctx>, Error>,
+		heap: impl FnOnce(&mut Self) -> Result<PointerValue<'ctx>, Error>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let fits = self.builder.build_int_compare(
+			inkwell::IntPredicate::UGE,
+			self.builder.build_int_z_extend_or_bit_cast(
+				offer.bytes,
+				self.context.i64_type(),
+				"",
+			)?,
+			self.context.i64_type().const_int(required, false),
+			"destination.fits",
+		)?;
+		let present = self
+			.builder
+			.build_is_not_null(offer.pointer, "destination.present")?;
+		let fits = self.builder.build_and(fits, present, "")?;
+		let frame = self.append_block("caller_storage");
+		let allocated = self.append_block("heap_storage");
+		let end = self.append_block("collection_storage");
+		self.builder
+			.build_conditional_branch(fits, frame, allocated)?;
+		self.builder.position_at_end(frame);
+		let frame_value = local(self, offer.pointer)?;
+		let frame_end = self.builder.get_insert_block().expect("a block");
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(allocated);
+		let heap_value = heap(self)?;
+		let heap_end = self.builder.get_insert_block().expect("a block");
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(end);
+		let result = self
+			.builder
+			.build_phi(self.pointer_type(), "collection.result")?;
+		result.add_incoming(&[(&frame_value, frame_end), (&heap_value, heap_end)]);
+		Ok(result.as_basic_value().into_pointer_value())
 	}
 
 	pub(crate) fn readonly_global(

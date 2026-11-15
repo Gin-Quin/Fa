@@ -2708,6 +2708,29 @@ FA_EXPORT void fa_segmented_reserve(FaSegmented *array, int64_t additional, int6
     }
 }
 
+/// A literal uses one final segment, in the caller's buffer or on the heap.
+FA_EXPORT void *fa_segmented_new_into(int64_t length, int64_t item_size, int32_t k,
+                                     void *destination, size_t bytes) {
+	if (length < 0 || item_size < 0 || k < 0 || k > 62) { out_of_memory(); }
+	while (((uint64_t)1 << k) < (uint64_t)length) {
+		if (k == 62) { out_of_memory(); }
+		k += 1;
+	}
+	uint64_t capacity = (uint64_t)1 << k;
+	size_t header = (sizeof(FaSegmented) + 15) & ~(size_t)15;
+	if (destination && bytes >= header &&
+	    (item_size == 0 || capacity <= (bytes - header) / (uint64_t)item_size)) {
+		return fa_segmented_local(destination, length, item_size, k);
+	}
+	FaSegmented *array = fa_segmented_new();
+	if (length) {
+		fa_segmented_reserve(array, (int64_t)capacity, item_size, k);
+		array->length = length;
+		array->cursor += length * item_size;
+	}
+	return array;
+}
+
 /// Points the cursor at item `length`, in its segment, allocated when it
 /// doesn't exist yet (`push` on a full segment; segments are kept by a
 /// reset, so the next one may exist already).
@@ -3598,6 +3621,15 @@ FA_EXPORT void *fa_pool_add_slot(FaPool *pool) {
 		pool->available[chunk->index / 64] &= ~((uint64_t)1 << (chunk->index % 64));
 	}
 	return chunk->slots + (size_t)slot * pool->slot_size;
+}
+
+/// Literal slots are initialized directly in their final pool storage.
+FA_EXPORT FaPool *fa_pool_new_into(int64_t length, int64_t item_size,
+                                  void *destination, size_t bytes, uint64_t required) {
+	if (destination && required <= bytes) { return fa_pool_local(destination, length, item_size); }
+	FaPool *pool = fa_pool_new(item_size);
+	for (int64_t index = 0; index < length; index += 1) { fa_pool_add_slot(pool); }
+	return pool;
 }
 
 /// Frees the slot of an element already dropped or moved out (`delete`,

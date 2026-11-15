@@ -140,6 +140,8 @@ Start with an array. Move to a columnar when you have measured a loop that touch
 
 ### Native
 
+- **Returned collections.** In synchronous compilation mode, collection functions receive an optional bounded caller buffer and return the final header pointer. Fresh literals, supported transforms and proven moved immutable locals forward it through calls and return branches. A mutable or escaping owner supplies no frame buffer, so construction starts on the heap. Constant returned locals can share read-only storage with a proven immutable caller. Arrays and growing arrays construct aggregate-returning literal items directly in their final slots; completed items still drop on an error. Object-columnar chunks retain their larger heap layout.
+
 - **Immutable literals (current LLVM backend).** Supported constant `let` literals use read-only globals containing the normal columns, slots, occupancy words and chunk directory. Column chunks keep their size alignment, so references use the ordinary field-address calculation. Runtime object columnars currently keep the heap path: their minimum aligned chunk exceeds the 2 KiB collection budget. Primitive columnars use the compact immutable pool path. The frame budget is 4 KiB. Static destruction does nothing; storing a value into a mutable or escaping owner copies into the ordinary owned layout.
 
 - **Columns.** There is one column per field of the element type, with the field's own layout: a `Columnar<Human>` with `name: String` and `age: Integer` has a column of string headers and a column of `i64`. Nested objects are not split further in the first version: a field holding an object is one column of that object type.

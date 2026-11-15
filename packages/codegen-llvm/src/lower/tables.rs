@@ -829,22 +829,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			bytes += count * entry_size;
 		}
 		bytes = ((bytes + 7) & !7) + (count * 2).next_power_of_two().max(8) * 4;
-		let pointer = if let Some(buffer) = self.collection_stack(node, bytes)? {
-			let kind = if table.value.is_some() && !table.growing {
-				2
-			} else {
-				u64::from(table.growing)
+		let local =
+			|this: &mut Self, buffer: PointerValue<'ctx>| -> Result<PointerValue<'ctx>, Error> {
+				let kind = if table.value.is_some() && !table.growing {
+					2
+				} else {
+					u64::from(table.growing)
+				};
+				Ok(this
+					.call_value(
+						this.runtime.function("fa_table_local")?,
+						&[
+							buffer.into(),
+							capacity.into(),
+							this.entry_size(table).into(),
+							this.context.i32_type().const_int(kind, false).into(),
+						],
+					)?
+					.into_pointer_value())
 			};
-			self.call_value(
-				self.runtime.function("fa_table_local")?,
-				&[
-					buffer.into(),
-					capacity.into(),
-					self.entry_size(table).into(),
-					self.context.i32_type().const_int(kind, false).into(),
-				],
-			)?
-			.into_pointer_value()
+		let pointer = if let Some(offer) = self.forwarded_collection_buffer(node) {
+			self.select_collection_buffer(offer, bytes, local, |this| {
+				this.table_new(table, capacity)
+			})?
+		} else if let Some(buffer) = self.collection_stack(node, bytes)? {
+			local(self, buffer)?
 		} else {
 			self.table_new(table, capacity)?
 		};

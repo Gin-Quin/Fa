@@ -175,7 +175,8 @@ mod with_llvm {
 		let source = "function returned = (n: Integer): Array<Integer> => {\nlet items = [n, n + 1]\nitems\n}\nconsole.log(returned(2))\n";
 		let ir = ir_of("returned-collection-heap", source);
 		assert!(!ir.contains("collection.storage = alloca"), "{ir}");
-		assert!(ir.contains("@fa_array_new("), "{ir}");
+		assert!(ir.contains("@fa_array_new_into("), "{ir}");
+		assert!(ir.contains("ptr null, i64 0, i64 2"), "{ir}");
 		assert!(!ir.contains("call fastcc ptr @fa.copy"), "{ir}");
 		let source = "function parts = (text: String): Integer => {\nlet words = text.split(\" \" )\nwords.length\n}\nconsole.log(parts(\"one two\"))\n";
 		let ir = ir_of("split-caller-destination", source);
@@ -252,6 +253,64 @@ console.log(value.number)
 		);
 		assert!(!body.contains("sret("), "{body}");
 		assert!(!body.contains("ret {"), "{body}");
+	}
+
+	#[test]
+	fn collection_functions_forward_bounded_buffers_for_every_literal_layout() {
+		for (kind, literal, measure) in [
+			("Array<Integer>", "[n, n + 1]", "length"),
+			("GrowingArray<Integer>", "[n, n + 1]", "length"),
+			("Map<Integer, Integer>", "[(n, n + 1)]", "size"),
+			("GrowingMap<Integer, Integer>", "[(n, n + 1)]", "size"),
+			("Set<Integer>", "[n, n + 1]", "size"),
+			("GrowingSet<Integer>", "[n, n + 1]", "size"),
+			("Pool<Integer>", "[n, n + 1]", "size"),
+			("GrowingPool<Integer>", "[n, n + 1]", "size"),
+		] {
+			let source = format!(
+				"function make = (n: Integer): {kind} => {literal}\nfunction read = (n: Integer): Integer => {{ let local = make(n)\nlocal.{measure} }}\nconsole.log(read(2))\n"
+			);
+			let ir = ir_of(
+				&format!("return-{}", kind.split('<').next().unwrap()),
+				&source,
+			);
+			let make = function(&ir, "fa.make");
+			assert!(
+				make.lines()
+					.next()
+					.unwrap()
+					.contains("(ptr noundef %0, i64 noundef %1, i64 noundef %2)"),
+				"{kind}: {make}"
+			);
+			assert!(
+				!make.contains("collection.storage = alloca"),
+				"{kind}: {make}"
+			);
+			let read = function(&ir, "fa.read");
+			assert!(
+				read.contains("collection.storage = alloca [2048 x i8]"),
+				"{kind}: {read}"
+			);
+			assert!(read.contains("i64 2048"), "{kind}: {read}");
+			assert!(!make.contains("call fastcc ptr @fa.copy"), "{kind}: {make}");
+		}
+	}
+
+	#[test]
+	fn literal_elements_use_their_final_aggregate_return_slot() {
+		let ir = ir_of(
+			"literal-item-destinations",
+			r#"
+type Data = { number: Integer, text: String }
+function make = (n: Integer): Data => Data { number = n, text = "value {n}" }
+function list = (n: Integer): Array<Data> => [make(n), make(n + 1)]
+console.log(list(2).length)
+"#,
+		);
+		let list = function(&ir, "fa.list");
+		assert!(list.contains("call fastcc void @fa.make(ptr"), "{list}");
+		assert!(!list.contains("return.result = alloca"), "{list}");
+		assert!(!list.contains("store {"), "{list}");
 	}
 
 	#[test]

@@ -362,6 +362,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let target = function.value;
 		let return_slot = function.return_slot;
+		let return_parameters =
+			usize::from(return_slot) + 2 * usize::from(function.return_collection);
 		let ret = function.ret;
 		let throws = function.throws;
 		let borrowed = function.borrowed.clone();
@@ -374,7 +376,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let mut parameters: Vec<BasicMetadataTypeEnum<'ctx>> =
 					vec![self.pointer_type().into()];
 				let mut target_parameters = target_type.get_param_types();
-				let mut at = usize::from(return_slot);
+				let mut at = return_parameters;
 				for (index, (repr, default)) in params.iter().enumerate() {
 					if borrowed[index] {
 						target_parameters[at] = self.llvm_type(*repr).into();
@@ -398,7 +400,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				builder.position_at_end(self.context.append_basic_block(thunk, "entry"));
 				let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> =
 					thunk.get_param_iter().skip(1).map(Into::into).collect();
-				let mut at = usize::from(return_slot);
+				let mut at = return_parameters;
 				for (index, (repr, default)) in params.iter().enumerate() {
 					if borrowed[index] {
 						let slot = builder.build_alloca(self.llvm_type(*repr), "borrowed")?;
@@ -448,6 +450,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.iter()
 				.map(|repr| BasicMetadataTypeEnum::from(self.llvm_type(*repr))),
 		);
+		if self.uses_collection_return(ret) {
+			types.insert(1, self.pointer_type().into());
+			types.insert(2, self.usize.into());
+		}
 		let return_slot = self.uses_return_slot(ret);
 		if return_slot {
 			types.insert(1, self.pointer_type().into());
@@ -538,6 +544,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			None
 		};
+		if self.uses_collection_return(ret) {
+			let offer = self.collection_call_buffer(node)?;
+			let (pointer, bytes) = offer
+				.map(|o| (o.pointer, o.bytes))
+				.unwrap_or((self.pointer_type().const_null(), self.usize.const_zero()));
+			lowered.insert(1, pointer.into());
+			lowered.insert(2, bytes.into());
+		}
 		let fn_type = self.indirect_type(&params, ret, throws);
 		let call = self
 			.builder

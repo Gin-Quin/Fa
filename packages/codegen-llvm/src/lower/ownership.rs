@@ -1515,7 +1515,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// A direct return ends this local's lifetime even when another branch
 	/// reads it later in the source. Keep the proof closed to passive values
 	/// with no references, captures, foreign exposure or observer cleanups.
-	fn is_returned_local(&self, symbol: SymbolId, node: NodeId, repr: Repr) -> bool {
+	pub(super) fn is_returned_local(&self, symbol: SymbolId, node: NodeId, repr: Repr) -> bool {
 		let Some(owner) = self.frame().owner else {
 			return false;
 		};
@@ -1591,7 +1591,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		true
 	}
 
-	fn is_last_use(&self, symbol: SymbolId, node: NodeId, declaration: NodeId) -> bool {
+	pub(super) fn is_last_use(&self, symbol: SymbolId, node: NodeId, declaration: NodeId) -> bool {
 		// a reference into the local (`use ana = town.people.add(…)`) may
 		// still read it after its last textual read
 		if self.referenced_locals().contains(&symbol) {

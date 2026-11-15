@@ -1139,6 +1139,18 @@ static void test_collection_destinations(void) {
 	fa_array_free(parts, sizeof(FaString));
 	CHECK(allocated == before);
 	_Alignas(16) uint8_t storage[2048];
+	FaSegmented *returned = fa_segmented_new_into(3, sizeof(int64_t), 3, storage, sizeof(storage));
+	CHECK(returned == (FaSegmented *)storage && returned->length == 3);
+	CHECK(returned->storage == 3 && allocated == before);
+	fa_segmented_free(returned, sizeof(int64_t), 3);
+	returned = fa_segmented_new_into(20, sizeof(int64_t), 3, small, sizeof(small));
+	CHECK(returned != (FaSegmented *)small && returned->length == 20);
+	CHECK(returned->storage == 0 && returned->segments == 1);
+	fa_segmented_free(returned, sizeof(int64_t), 3);
+	FaPool *returned_pool = fa_pool_new_into(3, sizeof(int64_t), storage, sizeof(storage), sizeof(storage));
+	CHECK(returned_pool == (FaPool *)storage && returned_pool->size == 3);
+	fa_pool_free(returned_pool);
+	CHECK(allocated == before);
 	FaSegmented *growing = fa_segmented_local(storage, 20, sizeof(int64_t), 3);
 	for (int64_t i = 0; i < 20; i += 1) {
 		*(int64_t *)fa_segmented_at(growing, i, sizeof(int64_t), 3) = i;

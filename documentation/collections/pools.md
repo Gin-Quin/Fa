@@ -161,6 +161,8 @@ Pools are the natural home for the objects of a graph, a scene, or an entity sys
 
 ### Native
 
+- **Returned collections.** In synchronous compilation mode, collection functions receive an optional bounded caller buffer and return the final header pointer. Fresh literals, supported transforms and proven moved immutable locals forward it through calls and return branches. A mutable or escaping owner supplies no frame buffer, so construction starts on the heap. Constant returned locals can share read-only storage with a proven immutable caller. Arrays and growing arrays construct aggregate-returning literal items directly in their final slots; completed items still drop on an error. Object-columnar chunks retain their larger heap layout.
+
 - **Immutable literals (current LLVM backend).** Constant `let` literals without relation sides use read-only headers, chunks, occupancy words and slots. Runtime local literals can use a compact read-only chunk in a fixed frame buffer (2 KiB per collection, 4 KiB per function); a read never needs to recover its chunk by masking its address. A mutable owner of static data requires an independent heap copy with the ordinary slab layout; runtime literals with owning or unknown uses choose the heap from creation. Captured or asynchronous values, relation-bearing elements and constructions above the budgets retain the heap path. Static drops do nothing; frame drops still destroy owned elements. References and iteration borrow the original slots.
 
 The pool is a **slab** (also called a hive or a colony): `plf::colony`, C++26 `std::hive` and the Rust `slab` crate are the references.

@@ -97,6 +97,7 @@ pub(crate) struct Function<'ctx> {
 	/// A synchronous object/tuple result slot precedes ordinary parameters
 	/// (after the environment, when present).
 	return_slot: bool,
+	return_collection: bool,
 	/// Whether it throws: it returns `{ result, ptr error }` (or the error alone).
 	throws: bool,
 	/// A lambda, or a local function using locals of the function around it:
@@ -133,6 +134,8 @@ struct LoopFrame<'ctx> {
 /// The function being lowered.
 struct Frame<'ctx> {
 	return_slot: Option<Slot<'ctx>>,
+	return_buffer: Option<collection_storage::CollectionBuffer<'ctx>>,
+	collection_result_root: Option<NodeId>,
 	destination: Option<(NodeId, Slot<'ctx>)>,
 	/// Fixed collection storage reserved in this function's entry block.
 	collection_bytes: u64,
@@ -1031,6 +1034,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			let throws = info.throws != TypeId::NEVER;
 			let return_slot = self.uses_return_slot(ret);
+			let return_collection = self.uses_collection_return(ret);
+			if return_collection {
+				types.insert(usize::from(lambda), self.pointer_type().into());
+				types.insert(usize::from(lambda) + 1, self.usize.into());
+			}
 			if return_slot {
 				types.insert(usize::from(lambda), self.pointer_type().into());
 			}
@@ -1110,6 +1118,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				borrowed,
 				ret,
 				return_slot,
+				return_collection,
 				throws,
 				lambda,
 				by_reference,
@@ -1178,6 +1187,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.saved_cleanups.push(outer);
 		self.frame = Some(Frame {
 			return_slot: None,
+			return_buffer: None,
+			collection_result_root: None,
 			destination: None,
 			collection_bytes: 0,
 			collection_locals: rustc_hash::FxHashSet::default(),
@@ -1257,6 +1268,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.frame_mut().return_slot = Some(Slot { pointer, repr: ret });
 			self.frame_mut().destination = Some((info.body, Slot { pointer, repr: ret }));
 		}
+		if function.return_collection {
+			let at = u32::from(lambda);
+			self.frame_mut().return_buffer = Some(collection_storage::CollectionBuffer {
+				pointer: value
+					.get_nth_param(at)
+					.expect("caller buffer")
+					.into_pointer_value(),
+				bytes: value
+					.get_nth_param(at + 1)
+					.expect("buffer size")
+					.into_int_value(),
+			});
+			self.frame_mut().collection_result_root = Some(info.body);
+		}
 		let mut saved = Vec::new();
 		if lambda && !captures.is_empty() {
 			let environment = value
@@ -1266,7 +1291,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			saved = self.bind_captures(environment, &captures, by_reference)?;
 		}
 		// the parameters, then their defaults in order
-		let mut index = u32::from(lambda) + u32::from(function.return_slot);
+		let mut index = u32::from(lambda)
+			+ u32::from(function.return_slot)
+			+ 2 * u32::from(function.return_collection);
 		let by_pointer = function.by_pointer.clone();
 		for (position, (param, (repr, has_default))) in info.params.iter().zip(params).enumerate() {
 			if by_pointer[position] {
@@ -2187,9 +2214,29 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			None
 		};
 		let value = if let Some(value) = readonly {
-			let key = (self.file, symbol);
-			self.frame_mut().collection_locals.insert(key);
-			self.fresh(value)
+			if let Some(offer) = self.frame().return_buffer
+				&& self.collection_returned_binding(symbol)
+			{
+				// A non-null offer proves the eventual owner immutable. Share
+				// static data then; unknown/mutable owners get one owning copy.
+				let pointer = self.select_collection_buffer(
+					offer,
+					0,
+					|_, _| Ok(value.value.expect("static collection").into_pointer_value()),
+					|this| {
+						Ok(this
+							.emit_copy(value)?
+							.value
+							.expect("owned copy")
+							.into_pointer_value())
+					},
+				)?;
+				self.fresh(Val::new(value.repr, pointer))
+			} else {
+				let key = (self.file, symbol);
+				self.frame_mut().collection_locals.insert(key);
+				self.fresh(value)
+			}
 		} else {
 			let repr = self.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())?;
 			let destination = if self.uses_return_slot(repr) {

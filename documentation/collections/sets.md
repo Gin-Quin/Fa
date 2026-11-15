@@ -216,6 +216,8 @@ The call above compiles to three `console.log` lines with no runtime lookup at a
 
 ### Native
 
+- **Returned collections.** In synchronous compilation mode, collection functions receive an optional bounded caller buffer and return the final header pointer. Fresh literals, supported transforms and proven moved immutable locals forward it through calls and return branches. A mutable or escaping owner supplies no frame buffer, so construction starts on the heap. Constant returned locals can share read-only storage with a proven immutable caller. Arrays and growing arrays construct aggregate-returning literal items directly in their final slots; completed items still drop on an error. Object-columnar chunks retain their larger heap layout.
+
 - **Immutable literals (current LLVM backend).** Constant `let` literals with supported scalar keys use read-only entries and index. Runtime local literals use a fixed frame buffer when the header, entries, index and any stable chunk directory fit the 2 KiB collection and 4 KiB frame budgets. Captured or asynchronous values and larger constructions keep heap storage. Static drops do nothing; frame drops destroy owned elements without freeing their storage. Static values copy for a mutable owner. Runtime owning or uncertain uses choose the heap before construction, without frame-to-heap copy-out. Duplicate constant elements retain set semantics.
 
 The set is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's maps since 1.24), with the values stored inline:

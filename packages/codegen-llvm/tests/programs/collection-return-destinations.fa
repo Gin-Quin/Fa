@@ -1,0 +1,121 @@
+-- asynchronous: false
+function makeArray = (n: Integer): Array<Integer> => [n, n + 1]
+function readArray = (n: Integer): Integer => {
+	let items = makeArray(n)
+	return items.length
+}
+function makeGrowingArray = (n: Integer): GrowingArray<Integer> => [n, n + 1]
+function readGrowingArray = (n: Integer): Integer => {
+	let items = makeGrowingArray(n)
+	return items.length
+}
+function makeMap = (n: Integer): Map<Integer, Integer> => [(n, n + 1)]
+function readMap = (n: Integer): Integer => {
+	let items = makeMap(n)
+	return items.size
+}
+function makeGrowingMap = (n: Integer): GrowingMap<Integer, Integer> => [(n, n + 1)]
+function readGrowingMap = (n: Integer): Integer => {
+	let items = makeGrowingMap(n)
+	return items.size
+}
+function makeSet = (n: Integer): Set<Integer> => [n, n + 1]
+function readSet = (n: Integer): Integer => {
+	let items = makeSet(n)
+	return items.size
+}
+function makeGrowingSet = (n: Integer): GrowingSet<Integer> => [n, n + 1]
+function readGrowingSet = (n: Integer): Integer => {
+	let items = makeGrowingSet(n)
+	return items.size
+}
+function makePool = (n: Integer): Pool<Integer> => [n, n + 1]
+function readPool = (n: Integer): Integer => {
+	let items = makePool(n)
+	return items.size
+}
+function makeGrowingPool = (n: Integer): GrowingPool<Integer> => [n, n + 1]
+function readGrowingPool = (n: Integer): Integer => {
+	let items = makeGrowingPool(n)
+	return items.size
+}
+console.log(readArray(4), readGrowingArray(4), readMap(4), readGrowingMap(4), readSet(4), readGrowingSet(4), readPool(4), readGrowingPool(4))
+-- prints: 2 2 1 1 2 2 2 2
+let heapPool = makePool(5)
+assert heapPool.size == 2
+
+function relay = (n: Integer): Array<Integer> => if n > 0 { relay(n - 1) } else { makeArray(n) }
+function words = (text: String): Array<String> => {
+	let local = text.split(" ")
+	return local
+}
+function mapped = (source: Array<Integer>): Array<Integer> => source.map((n) => n + 1)
+function filtered = (source: Array<Integer>): Array<Integer> => source.filter((n) => n > 0)
+function copied = (source: Array<Integer>): Array<Integer> => Array.from(source)
+function readCalls = (source: Array<Integer>): Integer => {
+	let a = mapped(source)
+	let b = filtered(source)
+	return a.length + b.length
+}
+function readCopy = (source: Array<Integer>): Integer => {
+	let copy = copied(source)
+	return copy.length
+}
+function readWords = (text: String): Integer => {
+	let parts = words(text)
+	return parts.length
+}
+function readRelay = (depth: Integer): Integer => {
+	let local = relay(depth)
+	return local.length
+}
+console.log(readCalls([1, 2, 3]), readCopy([1, 2, 3]), readWords("one two three"), readRelay(20))
+-- prints: 6 3 3 2
+
+function constant = (): Array<String> => {
+	let local = ["static", "constant"]
+	return local
+}
+function readConstant = (): Integer => {
+	let local = constant()
+	return local.length
+}
+mutable changed = constant()
+changed.push("third")
+console.log(readConstant(), changed.length)
+-- prints: 2 3
+
+mutable large: Array<Integer> = []
+for n in 0..1000 { large.push(n) }
+console.log(readCalls(large), readCopy(large))
+-- prints: 1999 1000
+
+type Data = { value: Integer, text: String }
+function data = (n: Integer): Data => Data { value = n, text = "owned text {n} longer than inline" }
+function fail = (text: String): Data throws ParseError => data(try Integer.parse(text))
+function arrayError = (text: String): Array<Data> throws ParseError => [data(1), try fail(text)]
+function growingError = (text: String): GrowingArray<Data> throws ParseError => [data(1), try fail(text)]
+for 0..100 {
+	let first = arrayError("bad") catch error => []
+	let second = growingError("bad") catch error => []
+	assert first.length == 0 and second.length == 0
+}
+let task = start makeGrowingArray(9)
+let taskValue = await task
+console.log(taskValue.length)
+-- prints: 2
+
+function factory = (offset: Integer) => (n: Integer): Array<Integer> => [n, n + offset]
+function readIndirect = (make: (Integer) => Array<Integer>): Integer => {
+	let local = make(2)
+	return local.length
+}
+console.log(readIndirect(makeArray), readIndirect(factory(3)))
+-- prints: 2 2
+
+function columns = (n: Integer): Columnar<{ value: Integer }> => [{ value = n }]
+function growingColumns = (n: Integer): GrowingColumnar<{ value: Integer }> => [{ value = n }]
+let cols = columns(5)
+let growingCols = growingColumns(6)
+console.log(cols.size, growingCols.size)
+-- prints: 1 1

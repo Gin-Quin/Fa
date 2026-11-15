@@ -9,7 +9,8 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 - **Parallel and streaming pipeline** (`design/parallel-pipeline.md`): steps 1–5 *assigned*; step 6 (LLVM per module, ThinLTO) and step 7 (language server) to schedule after.
 
 - **Caller destinations for native returns (user decision, 2026-11-15):**
-  finish collection buffer forwarding through user functions and constructors.
+  extend the implemented synchronous collection buffer forwarding to remaining
+  constructors and coroutine instances.
   Synchronous object/tuple calls now use output slots (direct calls, supported
   generic instances, function values/lambdas, blocks, `if`/`when`, nested fields
   and mapped array elements). Still needed: coalesce returned named locals
@@ -18,7 +19,11 @@ Open items that are not yet assigned to a running engineer, or that need a follo
   conversions, optional/union/fallback/catch/loop results and coroutine promises.
   Preserve analyzer moves and existing foreign `sret`, early recursive boxes and
   in-place pushed object construction. Never use stack-to-heap copy-out.
-  Bounded caller buffers currently cover local nonempty-separator `String.split`,
+  Collection-returning user functions now forward bounded buffers through direct
+  calls, function values/lambdas, branches and proven moved immutable locals.
+  Literal arrays, growing arrays, tables and pools build directly in final storage;
+  object columnars retain their larger heap chunks. Bounded buffers also cover
+  nonempty-separator `String.split`,
   array `map`/`filter` and required copies of live borrowed `Array.from` without
   explicit hints. Extend to other collection transforms, `from` with capacity
   hints or conversions, empty-separator splits and other fresh constructors,

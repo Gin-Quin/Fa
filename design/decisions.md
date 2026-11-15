@@ -631,3 +631,33 @@ not a claim that all construction paths have been converted at once.
   (NRVO) to remove its aggregate load/store; this change covers fresh expression
   construction and forwarding, not all return forms. Those precise gaps remain
   listed in `design/todo.md`.
+
+### Collection return buffers (implementation, 2026-11-15)
+
+- Synchronous collection functions receive `(buffer, byte_count)` before their
+  ordinary parameters, after a closure environment if present. They still return
+  their final header pointer (plus an error when throwing). Direct calls,
+  monomorphized calls and function values/lambdas share this ABI. A null/zero offer
+  requests ordinary heap construction. An offer is either the proven immutable
+  caller's fixed frame buffer or its own forwarded return offer; it is never a
+  callee-frame pointer. Coroutine compilation keeps its existing ABI.
+- Fresh return expressions, value-preserving block/if/when tails and explicit
+  returns forward the offer. A returned immutable local can do so only when
+  every other use borrows, no capture/foreign exposure exists, and the ownership
+  lowering proves a move on every return. Otherwise it starts on the heap.
+  No new frame-to-heap copy-out is introduced.
+- Array, map/set (including growing), pool and growing-array literals choose
+  frame or heap before initializing any payload; tables include their indices
+  and stable entry chunks. Existing object-columnar chunks exceed the budget
+  and use the heap from creation. `split`, array `map`/`filter` and supported
+  borrowed `from` copies forward the same offer through user functions.
+- A returned constant local shares its static data when the ultimate caller
+  supplies a non-null offer, which proves that owner immutable and non-escaping.
+  An unknown/mutable ultimate owner instead receives one independent owning copy.
+  That conditional storage choice does not modify read-only headers or payloads.
+- Array and growing-array literals allocate their final slots before evaluating
+  items. Aggregate-returning items construct in those slots. Register a zero
+  length first, then commit each item: errors drop the completed prefix. Growing
+  literals use one first segment sized at least to the type default, including
+  on the heap, avoiding an intermediate flat array and its relocation. Later
+  segments keep their ordinary stable-address rules.

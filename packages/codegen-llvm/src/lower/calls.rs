@@ -239,6 +239,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			None
 		};
+		if function.return_collection {
+			let offer = self.collection_call_buffer(node)?;
+			let (pointer, bytes) = offer
+				.map(|o| (o.pointer, o.bytes))
+				.unwrap_or((self.pointer_type().const_null(), self.usize.const_zero()));
+			arguments.insert(usize::from(function.lambda), pointer.into());
+			arguments.insert(usize::from(function.lambda) + 1, bytes.into());
+		}
 		// the sources of the reactive places given (D24), right before the call
 		self.pass_argument_sources(node, function.declaration, function.info.params.len())?;
 		// an awaited or started call: its async instance (tasks.rs)
@@ -825,9 +833,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let name = match path {
 					"String#split" => {
 						string_argument(self, 0, &mut call)?;
-						if let Some(destination) = self.collection_stack(node, 2048)? {
-							call.push(destination.into());
-							call.push(self.usize.const_int(2048, false).into());
+						if let Some(destination) = self.collection_call_buffer(node)? {
+							call.push(destination.pointer.into());
+							call.push(destination.bytes.into());
 							"fa_string_split_into"
 						} else {
 							"fa_string_split"

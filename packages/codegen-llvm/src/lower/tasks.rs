@@ -1494,8 +1494,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				// a detached task owns copies of its arguments
 				let mut owned = arguments.to_vec();
 				if detached {
-					let mut position =
-						usize::from(function.lambda) + usize::from(function.return_slot);
+					let mut position = usize::from(function.lambda)
+						+ usize::from(function.return_slot)
+						+ 2 * usize::from(function.return_collection);
 					for (index, (repr, has_default)) in function.params.iter().enumerate() {
 						let by_pointer = function.by_pointer.get(index).copied().unwrap_or(false);
 						if !by_pointer && !has_default && self.needs_drop(*repr) {

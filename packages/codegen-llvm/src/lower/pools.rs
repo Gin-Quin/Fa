@@ -304,12 +304,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let item_size = self.collection_data_size(self.llvm_type(element));
 		let bytes =
 			((chunk_start + 24 + count.div_ceil(64) * 8 + 15) & !15) + count * item_size.max(4);
-		let buffer = if rows {
+		let forwarded = if rows {
+			self.forwarded_collection_buffer(node)
+		} else {
+			None
+		};
+		let buffer = if rows && forwarded.is_none() {
 			self.collection_stack(node, bytes)?
 		} else {
 			None
 		};
-		let pool = if let Some(buffer) = buffer {
+		let pool = if let Some(offer) = forwarded {
+			self.call_value(
+				self.runtime.function("fa_pool_new_into")?,
+				&[
+					self.context.i64_type().const_int(count, false).into(),
+					self.item_size_const(element).into(),
+					offer.pointer.into(),
+					offer.bytes.into(),
+					self.context.i64_type().const_int(bytes, false).into(),
+				],
+			)?
+			.into_pointer_value()
+		} else if let Some(buffer) = buffer {
 			self.call_value(
 				self.runtime.function("fa_pool_local")?,
 				&[
@@ -323,7 +340,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.collection_new(&self.builder, repr, element)?
 		};
 		for (index, (value, _)) in values.into_iter().enumerate() {
-			let slot = if buffer.is_some() {
+			let slot = if buffer.is_some() || forwarded.is_some() {
 				self.pool_at(
 					&self.builder,
 					pool,

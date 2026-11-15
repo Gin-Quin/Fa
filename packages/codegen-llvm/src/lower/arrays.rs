@@ -83,7 +83,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		length: IntValue<'ctx>,
 		capacity: IntValue<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
-		let Some(buffer) = self.collection_stack(node, 2048)? else {
+		let Some(buffer) = self.collection_call_buffer(node)? else {
 			return self.new_array(item, length, capacity);
 		};
 		let size = self.item_size(item)?;
@@ -94,8 +94,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					length.into(),
 					capacity.into(),
 					size.into(),
-					buffer.into(),
-					self.usize.const_int(2048, false).into(),
+					buffer.pointer.into(),
+					buffer.bytes.into(),
 				],
 			)?
 			.into_pointer_value())
@@ -154,6 +154,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "this array"));
 		};
 		let item = self.item_repr(item_type, node)?;
+		if matches!(repr, Repr::Array(_) | Repr::Growing(_)) {
+			return self.linear_literal(node, items, repr, item);
+		}
 		let mut values = Vec::new();
 		for value in items.iter() {
 			if matches!(self.view(value), View::Spread(_)) {
@@ -163,96 +166,155 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);
 			}
-			values.push((self.owned_as(lowered, item, Some(value))?, value));
+			let owned = self.owned_as(lowered, item, Some(value))?;
+			values.push((self.fresh(owned), value));
 		}
-		if let Repr::Pool(_) | Repr::Columnar(_) = repr {
-			return self.pool_literal(values, repr, node);
+		for (value, _) in &values {
+			self.take(*value, None)?;
 		}
-		let count = self
-			.context
-			.i64_type()
-			.const_int(values.len() as u64, false);
-		if matches!(repr, Repr::Growing(_)) {
+		self.pool_literal(values, repr, node)
+	}
+
+	fn literal_array_storage(
+		&self,
+		buffer: PointerValue<'ctx>,
+		capacity: IntValue<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let zero = self.context.i64_type().const_zero();
+		let items = unsafe {
+			self.builder.build_gep(
+				self.context.i8_type(),
+				buffer,
+				&[self.context.i64_type().const_int(32, false)],
+				"collection.items",
+			)?
+		};
+		let fields: [inkwell::values::BasicValueEnum; 3] =
+			[items.into(), zero.into(), capacity.into()];
+		for (index, value) in fields.into_iter().enumerate() {
+			let field =
+				self.builder
+					.build_struct_gep(self.header_type(), buffer, index as u32, "")?;
+			self.builder.build_store(field, value)?;
+		}
+		let marker = unsafe {
+			self.builder.build_gep(
+				self.context.i8_type(),
+				buffer,
+				&[self.context.i64_type().const_int(24, false)],
+				"collection.marker",
+			)?
+		};
+		self.builder
+			.build_store(marker, self.context.i64_type().const_int(3, false))?;
+		Ok(buffer)
+	}
+
+	/// Register the completed prefix before evaluating another item. A fresh
+	/// aggregate-producing call can use its actual element address.
+	fn linear_literal(
+		&mut self,
+		node: NodeId,
+		items: NodeList<'_>,
+		repr: Repr,
+		item: Repr,
+	) -> Result<Val<'ctx>, Error> {
+		let count = self.context.i64_type().const_int(items.len() as u64, false);
+		let zero = self.context.i64_type().const_zero();
+		let growing = matches!(repr, Repr::Growing(_));
+		let array = if growing {
 			let size = self.collection_data_size(self.llvm_type(item));
-			let capacity = (values.len() as u64)
+			let capacity = (items.len() as u64)
 				.next_power_of_two()
 				.max(1u64 << self.segment_bits(item));
 			let header = self.collection_data_size(self.segmented_type().into());
 			let bytes = ((header + 15) & !15) + capacity * size;
-			if let Some(buffer) = self.collection_stack(node, bytes)? {
-				let array = self
-					.call_value(
-						self.runtime.function("fa_segmented_local")?,
-						&[
-							buffer.into(),
-							count.into(),
-							self.item_size_const(item).into(),
-							self.segment_k(item).into(),
-						],
-					)?
-					.into_pointer_value();
-				for (index, (value, _)) in values.into_iter().enumerate() {
-					let slot = self.growing_at(
-						&self.builder,
-						array,
-						item,
-						self.context.i64_type().const_int(index as u64, false),
-					)?;
-					self.builder
-						.build_store(slot, value.value.expect("an item"))?;
-				}
-				return Ok(self.fresh(Val::new(repr, array)));
-			}
-		}
-		let bytes = 32 + self.collection_data_size(self.llvm_type(item)) * values.len() as u64;
-		let stack = if matches!(repr, Repr::Array(_)) {
-			self.collection_stack(node, bytes)?
-		} else {
-			None
-		};
-		let array = if let Some(array) = stack {
-			let pointer = unsafe {
-				self.builder.build_gep(
-					self.context.i8_type(),
-					array,
-					&[self.context.i64_type().const_int(32, false)],
-					"collection.items",
-				)?
+			let buffer = if let Some(offer) = self.forwarded_collection_buffer(node) {
+				Some(offer)
+			} else {
+				self.collection_stack(node, bytes)?.map(|pointer| {
+					super::collection_storage::CollectionBuffer {
+						pointer,
+						bytes: self.usize.const_int(bytes, false),
+					}
+				})
 			};
-			let fields: [inkwell::values::BasicValueEnum; 3] =
-				[pointer.into(), count.into(), count.into()];
-			for (index, value) in fields.into_iter().enumerate() {
-				let field =
-					self.builder
-						.build_struct_gep(self.header_type(), array, index as u32, "")?;
-				self.builder.build_store(field, value)?;
-			}
-			let marker = unsafe {
-				self.builder.build_gep(
-					self.context.i8_type(),
-					array,
-					&[self.context.i64_type().const_int(24, false)],
-					"collection.marker",
+			let (pointer, available) = buffer
+				.map(|o| (o.pointer, o.bytes))
+				.unwrap_or((self.pointer_type().const_null(), self.usize.const_zero()));
+			let array = self
+				.call_value(
+					self.runtime.function("fa_segmented_new_into")?,
+					&[
+						count.into(),
+						self.item_size_const(item).into(),
+						self.segment_k(item).into(),
+						pointer.into(),
+						available.into(),
+					],
 				)?
-			};
-			self.builder
-				.build_store(marker, self.context.i64_type().const_int(3, false))?;
+				.into_pointer_value();
+			let length = self
+				.builder
+				.build_struct_gep(self.segmented_type(), array, 0, "")?;
+			self.builder.build_store(length, zero)?;
 			array
+		} else if let Some(offer) = self.forwarded_collection_buffer(node) {
+			let size = self.item_size(item)?;
+			self.call_value(
+				self.runtime.function("fa_array_new_into")?,
+				&[
+					zero.into(),
+					count.into(),
+					size.into(),
+					offer.pointer.into(),
+					offer.bytes.into(),
+				],
+			)?
+			.into_pointer_value()
+		} else if let Some(buffer) = self.collection_stack(
+			node,
+			32 + self.collection_data_size(self.llvm_type(item)) * items.len() as u64,
+		)? {
+			self.literal_array_storage(buffer, count)?
 		} else {
-			self.new_array(item, count, count)?
+			self.new_array(item, zero, count)?
 		};
-		let (pointer, _) = self.array_parts(array)?;
-		for (index, (value, _)) in values.into_iter().enumerate() {
-			let index = self.context.i64_type().const_int(index as u64, false);
-			let slot = self.item_pointer(pointer, item, index)?;
-			self.builder
-				.build_store(slot, value.value.expect("an item"))?;
+		let result = self.fresh(Val::new(repr, array));
+		for (index, value) in items.iter().enumerate() {
+			if matches!(self.view(value), View::Spread(_)) {
+				return Err(self.unsupported(value.index(), "spreading into an array"));
+			}
+			let position = self.context.i64_type().const_int(index as u64, false);
+			let pointer = if growing {
+				self.growing_at(&self.builder, array, item, position)?
+			} else {
+				let (items, _) = self.array_parts(array)?;
+				self.item_pointer(items, item, position)?
+			};
+			let slot = Slot {
+				pointer,
+				repr: item,
+			};
+			let lowered = self.expr_with_destination(value, Some(slot))?;
+			if lowered.repr == Repr::Never {
+				return Ok(lowered);
+			}
+			let owned = self.owned_as(lowered, item, Some(value))?;
+			self.store(slot, owned, value)?;
+			let length = if growing {
+				self.builder
+					.build_struct_gep(self.segmented_type(), array, 0, "")?
+			} else {
+				self.builder
+					.build_struct_gep(self.header_type(), array, 1, "")?
+			};
+			self.builder.build_store(
+				length,
+				self.context.i64_type().const_int(index as u64 + 1, false),
+			)?;
 		}
-		if let Repr::Growing(_) = repr {
-			let growing = self.growing_from_array(array, item)?;
-			return Ok(self.fresh(Val::new(repr, growing)));
-		}
-		Ok(self.fresh(Val::new(Repr::Array(item_type), array)))
+		Ok(result)
 	}
 
 	/// `Array.from(source, capacity = n)`: a copy of the source (already
@@ -285,7 +347,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if self.node_repr(*source)? != repr || self.movable_local(*source, repr).is_some() {
 			return Ok(None);
 		}
-		let Some(buffer) = self.collection_stack(node, 2048)? else {
+		let Some(buffer) = self.collection_call_buffer(node)? else {
 			return Ok(None);
 		};
 		let source_value = self.expr(*source)?;
@@ -304,8 +366,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.context.i64_type().const_zero().into(),
 					length.into(),
 					size.into(),
-					buffer.into(),
-					self.usize.const_int(2048, false).into(),
+					buffer.pointer.into(),
+					buffer.bytes.into(),
 				],
 			)?
 			.into_pointer_value();

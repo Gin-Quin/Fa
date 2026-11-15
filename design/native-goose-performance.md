@@ -1511,3 +1511,97 @@ Validation : workspace complet avec LLVM 18, clippy sans avertissement,
 snippets et site. Données, tous les échantillons CPU, sources et recherches de
 profondeur, oracles, empreintes et profils annotés :
 `native-goose-stack-review-results.json`.
+
+
+## GrowingArray : indexation et petit répertoire (15 novembre 2026)
+
+Code : `06214bc6`, `875f937d`, `47d82409`, base `8daac2bc`.
+Les chemins d’un seul segment utilisent son pointeur intégré et la preuve
+`segments <= 1` ; les boucles stables sortent leurs lectures d’en-tête.
+La recherche d’octets parcourt directement le premier bloc quand il contient
+le préfixe vivant. Un propriétaire vide dont tous les usages sont fermés peut
+conserver son `k` par défaut ; les réservations, remplacements et usages inconnus
+rejettent cette preuve. Aucun contrôle de bornes non prouvé n’est retiré.
+Le répertoire garde trois pointeurs intégrés, puis huit pointeurs de débordement
+au quatrième segment, puis 64/32 au douzième. Aucun élément ne bouge.
+
+**La régression du `k` est récupérée** : 224,199 → 188,226 M instructions
+(−16,0 %), sous 206,5 M et à **1,073×** les 175,418 M du nouvel `Array<Byte>`.
+Le profil initial localisait les surcoûts dans les écritures de chiffres,
+la recherche des séparateurs, le reset et les départs de copies ; les boucles
+de chiffres seules avaient déjà le même coût que celles d’`Array` après unswitch.
+Les optimisations suivantes portent donc sur ces autres chemins génériques.
+
+Protocole : **21 passages alternés par ligne, CPU 1, médiane utilisateur +
+système**, sans compilation ni autre mesure de cette tâche pendant les passages.
+Les instructions sont celles du processus entier sous Callgrind. Pour les chaînes,
+CPU à 3 000 000 entrées, instructions à 300 000 ; pour l’indexation, quatre millions
+de lectures puis quatre millions d’écritures aléatoires, initialisation et somme
+finale comprises. Park-Miller, seed 7, aucune capacité annoncée. Les quatre ports
+coïncident avec Rust, octet pour octet.
+
+| string-building | Instructions (M) | CPU (ms) |
+|---|---:|---:|
+| `String` | 167,612 | 179,710 |
+| `Array<Byte>` | 175,418 | 180,154 |
+| `GrowingArray<Byte>` | 188,226 | 195,536 |
+| `Goose` | 148,694 | 162,924 |
+
+| growing-index | Items | Instructions (M) | CPU (ms) |
+|---|---:|---:|---:|
+| `Array` | 16 | 300,177 | 63,269 |
+| `GrowingArray` | 16 | 386,176 | 103,774 |
+| `Goose` | 16 | 300,284 | 62,338 |
+| `Array` | 1 000 000 | 314,163 | 203,192 |
+| `GrowingArray` | 1 000 000 | 471,167 | 237,804 |
+| `Goose` | 1 000 000 | 316,767 | 224,656 |
+
+**La décision n’est pas close.** En CPU, Growing/Array vaut **1,085×** sur les
+chaînes, **1,640×** à 16 items et **1,170×** à un million. Growing/Goose vaut
+respectivement **1,200×**, **1,665×** et **1,059×**. Les médianes des rapports
+appariés sont aussi conservées : face à Goose, 1,166×, 1,656× et 1,008×.
+Le grand cas reste donc sensible au bruit temporel de cet hôte partagé ; le
+petit perd les 21 paires face à Array comme à Goose.
+
+**Le seuil du premier segment réservé est déclenché par le cas à 16 items,
+mais il n’est pas implémenté ici, comme demandé.** Le lookup seul, sans les
+bornes, le premier test de segment, le générateur ni la somme, coûte
+**51,998 M instructions**, soit **60,5 %** des 85,892 M d’écart à Goose.
+À un million, il coûte 115,999 M, **75,1 %** des 154,400 M d’écart.
+Le contrôle Array est à 1,015× Goose en CPU sur le petit cas : l’attribution du
+gros surcoût au lookup s’appuie sur ce contrôle et le profil d’instructions.
+Les pushes d’initialisation, l’itération finale et les copies ne dominent pas
+cet écart ; aucune vue aplatie n’intervient. Les chaînes sont déjà contiguës,
+sans `clz` sur leur chemin courant : une réservation d’espace virtuel ne
+résoudrait pas leur coût partagé avec Array/String face à Goose.
+
+**Contrôle final :** les 29 programmes/variantes ont la sortie de Rust aux
+tailles d’audit et par défaut. Aucun des 27 anciens, ni des nouvelles lignes
+d’indexation recompilées avec la base, ne régresse de plus de 1 % en instructions.
+Le petit GrowingArray passe de 410,179 à 386,176 M ; le grand reste à 471,17 M.
+Tous les journaux Goose utilisent clang 18 `-O2` (105 journaux vérifiés).
+
+Validation : `cargo fmt`, clippy workspace sans avertissement, workspace LLVM
+complet, 57 contrôles d’IR, ASan/UBSan du runtime avec le compilateur système,
+programmes avec fuites vérifiées native/freestanding/wasm à O0/O3, snippets et
+construction du site. Clang 18 ne dispose pas de ses bibliothèques ASan sur cet
+hôte ; les sanitizers passent réellement avec `cc`, sans saut du test.
+Les références traversent la réallocation du répertoire ; les réservations,
+remplacements, indices négatifs et stockages frame/statique sont couverts.
+
+Le complément force les 78 programmes propres au backend à O0 : native
+78 passent, freestanding 68 passent/10 exclus, wasm 73 passent/3 exclus/**2 échecs**.
+Ces deux échecs wasm se reproduisent avec `8daac2bc` : `floats_and_strings`
+manque l’import `pow`, et `tree-arena-large-payload` produit 8 196 paramètres,
+au-delà des 1 000 admis par Node. Ils restent non corrigés, hors de GrowingArray.
+À O3, 77/67/74 passent (native/freestanding/wasm), avec 0/10/3 exclusions et
+sans échec. `async-long-turn`, explicitement O0 et attendant une trace de
+scheduler dev, est vérifié à O0 et exclu du forçage O3. Le test de starvation,
+fluctuant sous charge, passe à nouveau puis seul en O3 natif. Les journaux
+complets et la confirmation avec la base sont dans le JSON.
+
+Données brutes : [210 échantillons CPU, instructions, empreintes, commandes
+clang, sorties et attribution assembleur](native-goose-growing-array-results.json).
+Restent le premier segment réservé conditionnel et `x = []` réutilisant le
+stockage des quatre autres collections croissantes ; les vues plates hors de
+ces benchmarks restent suivies séparément.

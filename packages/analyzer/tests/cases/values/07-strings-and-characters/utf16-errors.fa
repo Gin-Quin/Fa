@@ -10,3 +10,8 @@ type Holder = { text: String }
 function field = (holder: Holder, index: Integer) => holder.text.codeUnitAt(index) -- error: E-ERR-3
 let at = text.codeUnitAt
 let viaValue = at(0) -- error: E-ERR-3
+let beforeStart = text.codeUnitAt(-3) -- error: E-NUM-17
+let badLossyInput = String.fromUtf8Lossy("hello") -- error: E-TYPE-1
+let extraFormedArgument = text.isWellFormed(1) -- error: FN025
+let extraLengthArgument = text.utf8Length(1) -- error: FN025
+let extraEncodingArgument = text.toUtf8(1) -- error: FN025

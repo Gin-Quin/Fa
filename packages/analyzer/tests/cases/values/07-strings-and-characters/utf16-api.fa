@@ -26,3 +26,6 @@ console.log(half, last, maybe, unit, wellFormed, byteCount, strict, lossy, parts
 let arrayOfStrings = ["many"]
 let whole = arrayOfStrings[0] -- no-check: STRING_CODE_UNIT
 let one = ("😀")[1] -- check: STRING_CODE_UNIT
+let trailing = text.codeUnitAt(-1) -- no-check
+let savedCount = points.length -- no-check: CODE_POINT_COUNT
+for byte in bytes { console.log(byte) } -- no-check: UTF8_ITERATION

@@ -17,3 +17,9 @@ let immutable = Bytes.from([1])
 immutable[0] = 2 -- error: E-DECL-4
 function unchecked = (data: Bytes, index: Integer) => data[index] -- error: E-ERR-3
 bytes.length = 4 -- error: E-OBJ-11
+let wrongSource = Bytes.from("abc") -- error: E-TYPE-1
+let missingSource = Bytes.from() -- error: FN024
+let badIndex = bytes.get("0") -- error: E-TYPE-1
+let extraArrayArgument = bytes.toArray(1) -- error: FN025
+let extraEmptyArgument = bytes.isEmpty(1) -- error: FN025
+let extraStringArgument = bytes.toString(1) -- error: FN025

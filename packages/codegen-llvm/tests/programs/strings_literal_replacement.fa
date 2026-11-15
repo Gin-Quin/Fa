@@ -1,0 +1,3 @@
+-- Replacement strings are literal text, including JavaScript replacement patterns.
+console.log("a-b".replace("-", "$&")) -- prints: a$&b
+console.log("a-b-c".replaceAll("-", "$$ $& $` $'")) -- prints: a$$ $& $` $'b$$ $& $` $'c

@@ -17,6 +17,7 @@ use crate::error::Error;
 
 const EXTERNAL: u64 = 1 << 62;
 const SIMPLE: u64 = 1 << 63;
+const SURROGATES: u64 = 1 << 61;
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	fn stable_string_storage(&self, node: NodeId) -> bool {
@@ -215,7 +216,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let bytes = self.payload_offset(b, pointer, if packed { 4 } else { 16 })?;
 		let inline_length = b.build_and(
 			flags,
-			i64.const_int(if packed { 0x3fff } else { EXTERNAL - 1 }, false),
+			i64.const_int(if packed { 0x1fff } else { SURROGATES - 1 }, false),
 			"",
 		)?;
 		b.build_conditional_branch(external, outside, end)?;
@@ -249,7 +250,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// These bytes belong to a root, including an external string retained
 		// by its cleanup. A stored copy must materialize before that root dies.
 		// Kind zero denotes an immortal literal and would leak this borrow.
-		let capacity = b.build_or(simple.into_int_value(), self.string_kind_mask(), "")?;
+		let surrogates = b.build_and(
+			flags,
+			i64.const_int(if packed { 0x2000 } else { SURROGATES }, false),
+			"",
+		)?;
+		let surrogates = b.build_int_compare(IntPredicate::NE, surrogates, i64.const_zero(), "")?;
+		let surrogates = b
+			.build_select(
+				surrogates,
+				self.string_surrogates_flag(),
+				self.usize.const_zero(),
+				"",
+			)?
+			.into_int_value();
+		let encoding = b.build_or(simple.into_int_value(), surrogates, "")?;
+		let capacity = b.build_or(encoding, self.string_kind_mask(), "")?;
 		let value = b.build_insert_value(
 			self.string_type.get_undef(),
 			bytes_view.as_basic_value(),
@@ -333,11 +349,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				"",
 			)?
 			.into_int_value();
+		let surrogates = b.build_and(capacity, self.string_surrogates_flag(), "")?;
+		let surrogates =
+			b.build_int_compare(IntPredicate::NE, surrogates, self.usize.const_zero(), "")?;
+		let surrogates = b
+			.build_select(
+				surrogates,
+				i64.const_int(if packed { 0x2000 } else { SURROGATES }, false),
+				i64.const_zero(),
+				"",
+			)?
+			.into_int_value();
+		let encoding = b.build_or(simple, surrogates, "")?;
 		let long_length = b.build_int_cast(length, i64, "")?;
-		let flags = b.build_or(long_length, simple, "")?;
+		let flags = b.build_or(long_length, encoding, "")?;
 		let header = (5 * u64::from(self.usize.get_bit_width() / 8)).next_multiple_of(16);
 		let maximum = super::trees::ARENA_CHUNK_BYTES - header - prefix_bytes;
-		let maximum = if packed { maximum.min(0x3fff) } else { maximum };
+		let maximum = if packed { maximum.min(0x1fff) } else { maximum };
 		let fits = b.build_int_compare(
 			IntPredicate::ULE,
 			length,
@@ -398,7 +426,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if packed {
 			b.build_store(outside, i64.const_zero())?;
 			self.store_compact_id(b, outside, id)?;
-			let flags = b.build_or(simple, i64.const_int(0x8000, false), "")?;
+			let flags = b.build_or(encoding, i64.const_int(0x8000, false), "")?;
 			let flags = b.build_int_truncate(flags, self.context.i16_type(), "")?;
 			b.build_store(self.payload_offset(b, outside, 2)?, flags)?;
 		} else {

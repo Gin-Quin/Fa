@@ -1287,6 +1287,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		right: NodeId,
 		negated: bool,
 	) -> Result<Val<'ctx>, Error> {
+		for (indexed, literal) in [(left, right), (right, left)] {
+			if let Some(indexed) = self.string_unit_node(indexed)
+				&& let Some(text) = self.constant_text(literal)
+				&& text.encode_utf16().count() == 1
+			{
+				let expected = text.encode_utf16().next().expect("one code unit");
+				let unit = self.string_unit_index(indexed)?;
+				if unit.repr == Repr::Never {
+					return Ok(unit);
+				}
+				let predicate = if negated {
+					IntPredicate::NE
+				} else {
+					IntPredicate::EQ
+				};
+				return Ok(Val::new(
+					Repr::Bool,
+					self.builder.build_int_compare(
+						predicate,
+						unit.int(),
+						self.context
+							.i16_type()
+							.const_int(u64::from(expected), false),
+						"",
+					)?,
+				));
+			}
+		}
 		let a = self.expr(left)?;
 		let b = self.expr(right)?;
 		if a.repr == Repr::Never || b.repr == Repr::Never {

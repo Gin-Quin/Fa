@@ -268,7 +268,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(None);
 		};
 		let length = texts[0].len();
-		let simple = |text: &str| text.bytes().all(|byte| byte < 0x80 && byte != b'\r');
+		let simple = |text: &str| text.is_ascii();
 		if texts.len() != count + 1
 			|| texts
 				.iter()
@@ -345,11 +345,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			None
 		};
-		let subject = self.expr(list.subject)?;
+		let unit_node = self.string_unit_node(list.subject);
+		let scalar_unit = unit_node.is_some()
+			&& list.decisions.iter().all(|decision| {
+				decision.binding.is_none()
+					&& decision
+						.tests
+						.iter()
+						.all(|test| matches!(test, Test::Equals(Literal::String(_))))
+			});
+		let subject = if scalar_unit {
+			self.string_unit_index(unit_node.expect("a code unit"))?
+		} else {
+			self.expr(list.subject)?
+		};
 		if subject.repr == Repr::Never {
 			return Ok(subject);
 		}
 		if repr == Repr::Str
+			&& subject.repr == Repr::Str
 			&& let Some(value) = self.packed_literal_choice(&list, subject)?
 		{
 			return Ok(value);
@@ -504,6 +518,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Test::Equals(Literal::None) => {
 				let (present, _) = self.optional_split(subject)?;
 				Ok(self.builder.build_not(present, "")?)
+			}
+			Test::Equals(Literal::String(text))
+				if matches!(
+					subject.repr,
+					Repr::Int(IntRepr {
+						bits: 16,
+						signed: false
+					})
+				) =>
+			{
+				let mut units = text.encode_utf16();
+				let Some(unit) = units.next().filter(|_| units.next().is_none()) else {
+					return Ok(self.context.bool_type().const_zero());
+				};
+				Ok(self.builder.build_int_compare(
+					IntPredicate::EQ,
+					subject.int(),
+					self.context.i16_type().const_int(u64::from(unit), false),
+					"",
+				)?)
 			}
 			Test::Equals(literal) => {
 				let (present, inner) = self.optional_split(subject)?;
@@ -872,7 +906,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.build_int_nuw_add(start, self.usize.const_int(1, false), "")?;
 		self.builder.build_unconditional_branch(found)?;
 		self.builder.position_at_end(cluster);
-		let next_boundary = self.runtime.function("fa_next_grapheme")?;
+		let next_boundary = self.runtime.function("fa_next_string_point")?;
 		let after_cluster = self
 			.call_value(next_boundary, &[bytes.into(), length.into(), start.into()])?
 			.into_int_value();
@@ -900,8 +934,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// simple when the text is
 		let flag = match simple_path {
 			Some(true) => self.simple_flag(),
-			Some(false) => self.usize.const_zero(),
-			None => self.builder.build_and(capacity, self.simple_flag(), "")?,
+			Some(false) => self
+				.builder
+				.build_and(capacity, self.string_surrogates_flag(), "")?,
+			None => self.builder.build_and(capacity, self.string_flags(), "")?,
 		};
 		let view = self.builder.build_or(flag, self.string_kind_mask(), "")?;
 		let pair = self.builder.build_insert_value(pair, view, 2, "")?;
@@ -916,11 +952,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(index_slot) = index_slot {
 			self.store(index_slot, Val::new(Repr::Int(IntRepr::I64), current), node)?;
 		}
-		let following = self.builder.build_int_nsw_add(
-			current,
-			self.context.i64_type().const_int(1, false),
+		let astral = self.builder.build_int_compare(
+			IntPredicate::EQ,
+			character_length,
+			self.usize.const_int(4, false),
 			"",
 		)?;
+		let step = self
+			.builder
+			.build_select(
+				astral,
+				self.context.i64_type().const_int(2, false),
+				self.context.i64_type().const_int(1, false),
+				"",
+			)?
+			.into_int_value();
+		let following = self.builder.build_int_nsw_add(current, step, "")?;
 		self.builder.build_store(position.pointer, following)?;
 		let wide_stop = self.int_to(stop, usize_repr, IntRepr::I64)?;
 		self.builder.build_store(offset.pointer, wide_stop)?;

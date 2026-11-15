@@ -272,6 +272,88 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(Some(self.fresh(result)))
 	}
 
+	pub(crate) fn string_unit_node(&self, mut node: NodeId) -> Option<NodeId> {
+		while let View::Group(inner) | View::Try(inner) = self.view(node) {
+			node = inner;
+		}
+		(self
+			.flags(node)
+			.contains(fa_analyzer::analysis::NodeFlags::STRING_CODE_UNIT)
+			&& matches!(self.view(node), View::Index { .. }))
+		.then_some(node)
+	}
+
+	pub(crate) fn string_unit_index(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		let View::Index { target, index } = self.view(node) else {
+			return Err(self.unsupported(node.index(), "this code unit index"));
+		};
+		let text = self.expr(target)?;
+		let position = self.expr(index)?;
+		if text.repr == Repr::Never || position.repr == Repr::Never {
+			return Ok(Val::never());
+		}
+		self.string_unit_at(node, text, position)
+	}
+
+	pub(crate) fn string_unit_at(
+		&mut self,
+		node: NodeId,
+		text: Val<'ctx>,
+		position: Val<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
+		let position = self
+			.convert(position, Repr::Int(IntRepr::I64), node.index())?
+			.int();
+		let (bytes, length) = self.string_parts(text)?;
+		let capacity = self.string_capacity(text)?;
+		let unit = self
+			.call_value(
+				self.runtime.function("fa_string_code_unit_at")?,
+				&[
+					bytes.into(),
+					length.into(),
+					capacity.into(),
+					position.into(),
+				],
+			)?
+			.into_int_value();
+		if self
+			.flags(node)
+			.contains(fa_analyzer::analysis::NodeFlags::INDEX_CHECK)
+		{
+			let missing = self.builder.build_int_compare(
+				IntPredicate::SLT,
+				unit,
+				unit.get_type().const_zero(),
+				"",
+			)?;
+			self.guard(missing, |this| {
+				let count = this
+					.call_value(
+						this.runtime.function("fa_string_length")?,
+						&[bytes.into(), length.into(), capacity.into()],
+					)?
+					.into_int_value();
+				let count = this.builder.build_int_z_extend_or_bit_cast(
+					count,
+					this.context.i64_type(),
+					"",
+				)?;
+				this.raise_runtime("fa_error_index", &[position.into(), count.into()])
+			})?;
+		}
+		let unit = self
+			.builder
+			.build_int_truncate(unit, self.context.i16_type(), "")?;
+		Ok(Val::new(
+			Repr::Int(IntRepr {
+				bits: 16,
+				signed: false,
+			}),
+			unit,
+		))
+	}
+
 	/// Inline strings have zero padding after their bytes. Two such values
 	/// compare in three words; the optional SIMPLE optimization flag is ignored.
 	pub(crate) fn strings_equal(
@@ -308,7 +390,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						.build_ptr_to_int(bv.into_pointer_value(), self.usize, "")?,
 				)
 			} else if index == 2 {
-				let mask = self.simple_flag().const_not();
+				let mask = self.string_flags().const_not();
 				(
 					self.builder.build_and(av.into_int_value(), mask, "")?,
 					self.builder.build_and(bv.into_int_value(), mask, "")?,
@@ -563,12 +645,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// branches, so the appended value's length and capacity are constants.
 	pub(crate) fn literal_shape(&self, node: NodeId) -> Option<(u64, bool)> {
 		use fa_analyzer::syntax::View;
-		let shape = |text: &str| {
-			(
-				text.len() as u64,
-				text.bytes().all(|byte| byte < 0x80 && byte != b'\r'),
-			)
-		};
+		let shape = |text: &str| (text.len() as u64, text.is_ascii());
 		match self.view(node) {
 			View::String(text) => Some(shape(text)),
 			View::Group(inner) => self.literal_shape(inner),
@@ -611,7 +688,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let capacity = if simple {
 			self.simple_flag()
 		} else {
-			self.usize.const_zero()
+			self.string_capacity(value)?
 		};
 		let updated =
 			self.builder
@@ -638,7 +715,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<IntValue<'ctx>, Error> {
 		let kind = self.builder.build_and(
 			capacity,
-			self.simple_flag()
+			self.string_flags()
 				.const_add(self.usize.const_int(1, false))
 				.const_not(),
 			"",

@@ -902,7 +902,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	/// The `SIMPLE` flag of a string's capacity word: the top bit, set when
-	/// every byte is ASCII other than '\r' (one byte per character).
+	/// every byte is ASCII (one byte per code unit).
 	pub(crate) fn simple_flag(&self) -> IntValue<'ctx> {
 		let bits = self.usize.get_bit_width();
 		self.usize.const_int(1 << (bits - 1), false)
@@ -915,16 +915,29 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	pub(crate) fn string_kind_mask(&self) -> IntValue<'ctx> {
 		self.usize
-			.const_int((1 << (self.usize.get_bit_width() - 2)) - 1, false)
+			.const_int((1 << (self.usize.get_bit_width() - 4)) - 1, false)
 	}
 
 	/// The capacity word of a static string (kind 0, with its `SIMPLE` flag).
 	pub(crate) fn static_capacity(&self, text: &str) -> IntValue<'ctx> {
-		if text.bytes().all(|byte| byte < 0x80 && byte != b'\r') {
+		if text.is_ascii() {
 			self.simple_flag()
 		} else {
-			self.usize.const_zero()
+			self.usize.const_int(
+				(1 << (self.usize.get_bit_width() - 4)) | text.encode_utf16().count() as u64,
+				false,
+			)
 		}
+	}
+
+	pub(crate) fn string_surrogates_flag(&self) -> IntValue<'ctx> {
+		self.usize
+			.const_int(1 << (self.usize.get_bit_width() - 3), false)
+	}
+
+	pub(crate) fn string_flags(&self) -> IntValue<'ctx> {
+		self.usize
+			.const_int(5 << (self.usize.get_bit_width() - 3), false)
 	}
 
 	/// The site of a runtime check: two NUL-terminated strings, the subject

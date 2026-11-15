@@ -439,6 +439,48 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		while let View::Group(group) | View::Try(group) = self.view(inner) {
 			inner = group;
 		}
+		if let View::Index { target, index } = self.view(inner)
+			&& self.node_repr(target)? == Repr::Str
+			&& self.node_repr(index)? == Repr::Range
+		{
+			let text = self.expr(target)?;
+			let range = self.expr(index)?;
+			let (bytes, length) = self.string_parts(text)?;
+			let capacity = self.string_capacity(text)?;
+			let (start, end, flags) = self.range_parts(range)?;
+			let slot = if self.frame().owner.is_none() {
+				let global = self
+					.module
+					.add_global(self.string_type, None, "fa.string_slice");
+				global.set_initializer(&self.string_type.const_zero());
+				global.set_linkage(inkwell::module::Linkage::Internal);
+				Slot {
+					pointer: global.as_pointer_value(),
+					repr: Repr::Str,
+				}
+			} else {
+				self.alloca(Repr::Str, "string_slice")?
+			};
+			let error = self
+				.call_value(
+					self.runtime.function("fa_string_slice_view")?,
+					&[
+						bytes.into(),
+						length.into(),
+						capacity.into(),
+						start.into(),
+						end.into(),
+						flags.into(),
+						slot.pointer.into(),
+					],
+				)?
+				.into_pointer_value();
+			self.raise_if_error(error)?;
+			self.cleanups
+				.borrow_mut()
+				.push(super::ownership::Cleanup::Local(slot));
+			return Ok(slot);
+		}
 		if self.is_place(inner) {
 			return self.place(inner);
 		}

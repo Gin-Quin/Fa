@@ -495,11 +495,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let length64 = self
 						.builder
 						.build_int_z_extend_or_bit_cast(length, i64, "")?;
-					// one byte of length below 127, else a 0xFF and a word
+					// one byte of length below 63, else a 0xFF and a word
 					let short = self.builder.build_int_compare(
 						IntPredicate::ULT,
 						length64,
-						i64.const_int(127, false),
+						i64.const_int(63, false),
 						"",
 					)?;
 					let header = self.builder.build_select(
@@ -577,7 +577,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
-	/// Writes a string's length (with its `SIMPLE` flag in the low bit) and
+	/// Writes a string's length (with ASCII/surrogate flags in the low two bits) and
 	/// bytes at `cursor`; the address after them.
 	fn packed_store_string(
 		&self,
@@ -594,10 +594,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder
 				.build_int_compare(IntPredicate::NE, simple, usize.const_zero(), "")?;
 		let simple = self.builder.build_int_z_extend(simple, usize, "")?;
+		let surrogates = self
+			.builder
+			.build_and(capacity, self.string_surrogates_flag(), "")?;
+		let surrogates = self.builder.build_right_shift(
+			surrogates,
+			usize.const_int(u64::from(usize.get_bit_width() - 4), false),
+			false,
+			"",
+		)?;
+		let flags = self.builder.build_or(simple, surrogates, "")?;
 		let word = self
 			.builder
-			.build_left_shift(length, usize.const_int(1, false), "")?;
-		let word = self.builder.build_or(word, simple, "")?;
+			.build_left_shift(length, usize.const_int(2, false), "")?;
+		let word = self.builder.build_or(word, flags, "")?;
 		let short_block = self.append_block("packed_short");
 		let long_block = self.append_block("packed_long");
 		let join = self.append_block("packed_string");
@@ -679,7 +689,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let bytes = bytes.as_basic_value().into_pointer_value();
 		let length = self
 			.builder
-			.build_right_shift(word, usize.const_int(1, false), false, "")?;
+			.build_right_shift(word, usize.const_int(2, false), false, "")?;
 		// a view (`KIND_MASK`), with the `SIMPLE` flag of the low bit
 		let simple = self
 			.builder
@@ -689,7 +699,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			usize.const_int(u64::from(usize.get_bit_width() - 1), false),
 			"",
 		)?;
-		let capacity = self.builder.build_or(simple, self.string_kind_mask(), "")?;
+		let surrogates = self
+			.builder
+			.build_and(word, usize.const_int(2, false), "")?;
+		let surrogates = self.builder.build_left_shift(
+			surrogates,
+			usize.const_int(u64::from(usize.get_bit_width() - 4), false),
+			"",
+		)?;
+		let flags = self.builder.build_or(simple, surrogates, "")?;
+		let capacity = self.builder.build_or(flags, self.string_kind_mask(), "")?;
 		let mut value = self.string_type.get_undef();
 		for (index, part) in [BasicValueEnum::from(bytes), length.into(), capacity.into()]
 			.into_iter()

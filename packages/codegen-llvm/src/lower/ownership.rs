@@ -461,7 +461,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Str => {
 				let pair = value.into_struct_value();
 				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
-				let kind = builder.build_and(capacity, self.simple_flag().const_not(), "")?;
+				let kind = builder.build_and(capacity, self.string_flags().const_not(), "")?;
 				let nonzero = builder.build_int_compare(
 					IntPredicate::NE,
 					kind,
@@ -487,10 +487,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Ok(())
 				})?;
 				let bytes = builder.build_extract_value(pair, 0, "")?;
-				let one = self.usize.const_int(1, false);
 				builder.build_call(
-					self.runtime.free()?,
-					&[bytes.into(), capacity.into(), one.into()],
+					self.runtime.function("fa_string_free")?,
+					&[bytes.into(), capacity.into()],
 					"",
 				)?;
 			}
@@ -753,11 +752,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Ok(())
 				})?;
 				let length = builder.build_extract_value(pair, 1, "")?.into_int_value();
-				let flag = builder.build_and(capacity, self.simple_flag(), "")?;
 				// a literal (kind 0, whatever its `SIMPLE` flag) is shared, and
 				// so is an empty string
-				let kind =
-					builder.build_left_shift(capacity, self.usize.const_int(1, false), "")?;
+				let kind = builder.build_and(capacity, self.string_flags().const_not(), "")?;
 				let literal = builder.build_int_compare(
 					IntPredicate::EQ,
 					kind,
@@ -770,11 +767,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.usize.const_zero(),
 					"",
 				)?;
-				let shared = builder.build_or(literal, empty, "")?;
+				let static_tag = builder.build_and(
+					capacity,
+					self.usize
+						.const_int(1 << (self.usize.get_bit_width() - 4), false),
+					"",
+				)?;
+				let static_text = builder.build_int_compare(
+					IntPredicate::NE,
+					static_tag,
+					self.usize.const_zero(),
+					"",
+				)?;
+				let shared =
+					builder.build_or(builder.build_or(literal, static_text, "")?, empty, "")?;
 				let not_shared = builder.build_not(shared, "")?;
 				self.helper_when(builder, function, not_shared, |builder| {
-					let zeroed = builder.build_insert_value(pair, flag, 2, "")?;
-					builder.build_return(Some(&zeroed))?;
+					builder.build_return(Some(&pair))?;
 					Ok(())
 				})?;
 				let slow = self.copy_string_slow()?;

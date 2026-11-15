@@ -1627,6 +1627,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(Val::new(Repr::Bool, empty))
 			}
 			"String#toString" => Ok(receiver),
+			"String#codeUnitAt" => self.string_unit_at(node, receiver, arguments[0]),
+			"String#utf8Length" => {
+				let count = self.builder.build_int_z_extend_or_bit_cast(
+					length,
+					self.context.i64_type(),
+					"",
+				)?;
+				Ok(Val::new(Repr::Int(IntRepr::I64), count))
+			}
+			"String#isWellFormed" => {
+				call.push(self.string_capacity(receiver)?.into());
+				boolean(self, "fa_string_is_well_formed", &call)
+			}
 			"String#includes" | "String#startsWith" | "String#endsWith" => {
 				string_argument(self, 0, &mut call)?;
 				let name = match path {

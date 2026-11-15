@@ -560,7 +560,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						self.builder
 							.build_int_add(length, self.usize.const_int(1, false), "")?;
 					let block = self.allocate(size)?;
-					self.builder.build_memcpy(block, 1, bytes, 1, length)?;
+					self.call_runtime(
+						"fa_string_write_utf8",
+						&[
+							block.into(),
+							bytes.into(),
+							length.into(),
+							self.string_capacity(text)?.into(),
+						],
+					)?;
 					let end = unsafe {
 						self.builder.build_in_bounds_gep(
 							self.context.i8_type(),

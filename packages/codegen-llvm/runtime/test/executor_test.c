@@ -737,16 +737,16 @@ static void test_string_padding(void) {
 			fa_string_pad(text, 6, SIMPLE, width, (const uint8_t *)"_", 1, start, &actual);
 			CHECK(string_length(&actual) == length);
 			CHECK(fa_string_equal(string_bytes(&actual), length, expected, length));
-			if (string_owned(actual.capacity)) { fa_free((void *)actual.bytes, actual.capacity & KIND_MASK, 1); }
+			if (string_owned(actual.capacity)) { fa_string_free(actual.bytes, actual.capacity); }
 		}
 	}
 	FaString actual;
 	fa_string_pad(text, 6, SIMPLE, INT64_MIN, (const uint8_t *)"_", 1, 1, &actual);
 	CHECK(fa_string_equal(string_bytes(&actual), string_length(&actual), text, 6));
-	// The general path still counts graphemes and cycles a multi-character filler.
+	// The general path counts code units and cycles a multi-character filler.
 	fa_string_pad((const uint8_t *)"\xc3\xa9", 2, 0, 4, (const uint8_t *)"ab", 2, 1, &actual);
 	CHECK(fa_string_equal(string_bytes(&actual), string_length(&actual), (const uint8_t *)"aba\xc3\xa9", 5));
-	if (string_owned(actual.capacity)) { fa_free((void *)actual.bytes, actual.capacity & KIND_MASK, 1); }
+	if (string_owned(actual.capacity)) { fa_string_free(actual.bytes, actual.capacity); }
 	fa_release_builder();
 	CHECK(allocated == before);
 }
@@ -770,7 +770,7 @@ static void test_inline_strings(void) {
 		CHECK(string_length(&original) == length);
 		CHECK(fa_string_equal(string_bytes(&original), length, input, length));
 		if (length < INLINE_STRING_BYTES) { CHECK(allocated == before); }
-		if (string_owned(copy.capacity)) { fa_free((void *)copy.bytes, copy.capacity & KIND_MASK, 1); }
+		if (string_owned(copy.capacity)) { fa_string_free(copy.bytes, copy.capacity); }
 		CHECK(allocated == before);
 	}
 	FaString text = owned_copy(input, 0);
@@ -784,14 +784,14 @@ static void test_inline_strings(void) {
 	fa_string_append(&text, input + INLINE_STRING_BYTES, 1, SIMPLE);
 	CHECK(allocated == before + 1);
 	CHECK(fa_string_equal(string_bytes(&text), INLINE_STRING_BYTES + 1, input, INLINE_STRING_BYTES + 1));
-	fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1);
+	fa_string_free(text.bytes, text.capacity);
 	CHECK(allocated == before);
 	for (size_t length = 1; length < sizeof input; length += 1) {
 		FaString text;
 		fa_string_own(input, length, KIND_MASK, &text);
 		CHECK(fa_hash_string_bits((uintptr_t)text.bytes, text.length, text.capacity) == fa_hash_bytes(input, length));
 		if (length <= INLINE_STRING_BYTES) { CHECK(!string_owned(text.capacity)); }
-		if (string_owned(text.capacity)) { fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1); }
+		if (string_owned(text.capacity)) { fa_string_free(text.bytes, text.capacity); }
 	}
 	CHECK(allocated == before);
 }
@@ -827,13 +827,13 @@ static void test_nonempty_splits(void) {
 						kept += 1;
 					}
 					if (string_owned(source[index].capacity)) {
-						fa_free((void *)source[index].bytes, source[index].capacity & KIND_MASK, 1);
+						fa_string_free(source[index].bytes, source[index].capacity);
 					}
 				}
 				CHECK(kept == fused->length);
 				for (int64_t index = 0; index < fused->length; index += 1) {
 					if (string_owned(result[index].capacity)) {
-						fa_free((void *)result[index].bytes, result[index].capacity & KIND_MASK, 1);
+						fa_string_free(result[index].bytes, result[index].capacity);
 					}
 				}
 				fa_array_free(plain, sizeof(FaString));
@@ -858,23 +858,87 @@ static void test_region_slice_views(void) {
 			CHECK(view.bytes == source.bytes + 3 && (view.capacity & KIND_MASK) == KIND_MASK);
 		} else {
 			CHECK(string_owned(view.capacity));
-			fa_free((void *)view.bytes, view.capacity & KIND_MASK, 1);
+			fa_string_free(view.bytes, view.capacity);
 		}
 		FaString copied;
 		CHECK(fa_string_slice(source.bytes, source.length, source.capacity, 3, (int64_t)length + 3, 3, &copied) == 0);
 		CHECK(copied.capacity & SIMPLE);
 		CHECK(fa_string_equal(string_bytes(&copied), length, input + 3, length));
-		if (string_owned(copied.capacity)) { fa_free((void *)copied.bytes, copied.capacity & KIND_MASK, 1); }
+		if (string_owned(copied.capacity)) { fa_string_free(copied.bytes, copied.capacity); }
 	}
-	fa_free((void *)source.bytes, source.capacity & KIND_MASK, 1);
+	fa_string_free(source.bytes, source.capacity);
 	FaString unicode;
 	const uint8_t clusters[] = "e\xcc\x81" "e\xcc\x81" "e\xcc\x81";
 	CHECK(fa_string_slice_region(clusters, 9, 0, 1, 3, 3, &unicode) == 0);
-	CHECK(unicode.bytes == clusters + 3 && unicode.length == 6 && !(unicode.capacity & SIMPLE));
+	CHECK(unicode.bytes == clusters + 1 && unicode.length == 3 && !(unicode.capacity & SIMPLE));
 	CHECK(fa_string_length(unicode.bytes, unicode.length, unicode.capacity) == 2);
 	CHECK(fa_string_slice_region((const uint8_t *)"\r\nx", 3, 0, 0, 1, 3, &unicode) == 0);
-	CHECK(unicode.length == 2 && !(unicode.capacity & SIMPLE));
+	CHECK(unicode.length == 1 && !(unicode.capacity & SIMPLE));
 	CHECK(fa_string_length(unicode.bytes, unicode.length, unicode.capacity) == 1);
+	CHECK(allocated == before);
+}
+
+static void test_utf16_strings(void) {
+	long before = allocated;
+	const uint8_t text[] = "a\xc3\xa9\xe6\x97\xa5\xf0\x9f\x98\x80z";
+	const uint16_t units[] = {97, 233, 0x65E5, 0xD83D, 0xDE00, 122};
+	CHECK(fa_string_length(text, sizeof(text) - 1, 0) == 6);
+	CHECK(simple_flag((const uint8_t *)"\r\nx", 3) == SIMPLE);
+	for (int64_t i = 0; i < 6; i += 1) {
+		CHECK(fa_string_code_unit_at(text, sizeof(text) - 1, 0, i) == units[i]);
+		CHECK(fa_string_code_unit_at(text, sizeof(text) - 1, 0, i - 6) == units[i]);
+		FaString unit;
+		CHECK(fa_string_get(text, sizeof(text) - 1, 0, i, &unit));
+		CHECK(!string_owned(unit.capacity));
+		CHECK(fa_string_length(string_bytes(&unit), string_length(&unit), unit.capacity) == 1);
+		CHECK(fa_string_is_well_formed(string_bytes(&unit), string_length(&unit), unit.capacity) == (i != 3 && i != 4));
+	}
+	for (size_t from = 0; from <= 6; from += 1) {
+		for (size_t to = from; to <= 6; to += 1) {
+			FaString part;
+			CHECK(!fa_string_slice(text, sizeof(text) - 1, 0, (int64_t)from, (int64_t)to, 3, &part));
+			CHECK(fa_string_length(string_bytes(&part), string_length(&part), part.capacity) == to - from);
+			for (size_t i = from; i < to; i += 1) {
+				CHECK(fa_string_code_unit_at(string_bytes(&part), string_length(&part), part.capacity, (int64_t)(i - from)) == units[i]);
+			}
+			if (string_owned(part.capacity)) { fa_string_free(part.bytes, part.capacity); }
+		}
+	}
+	FaString high, low, joined;
+	CHECK(fa_string_get(text, sizeof(text) - 1, 0, 3, &high));
+	CHECK(fa_string_get(text, sizeof(text) - 1, 0, 4, &low));
+	fa_concat(string_bytes(&high), 3, string_bytes(&low), 3, &joined);
+	CHECK(string_length(&joined) == 4);
+	CHECK(fa_string_equal(string_bytes(&joined), 4, text + 6, 4));
+	fa_string_append(&high, string_bytes(&low), 3, low.capacity);
+	CHECK(string_length(&high) == 4 && !(high.capacity & STRING_SURROGATES));
+	uint8_t encoded[3];
+	fa_string_write_utf8(encoded, string_bytes(&low), 3, low.capacity);
+	CHECK(__builtin_memcmp(encoded, "\xef\xbf\xbd", 3) == 0);
+	CHECK(fa_string_compare((const uint8_t *)"\xf0\x90\x80\x80", 4, (const uint8_t *)"\xee\x80\x80", 3) < 0);
+	CHECK(fa_string_compare(string_bytes(&low), 3, (const uint8_t *)"\xee\x80\x80", 3) < 0);
+	// A pair crosses every second breadcrumb; query both halves in reverse order.
+	uint8_t long_text[640];
+	size_t bytes = 0;
+	uint16_t expected[260];
+	size_t count = 0;
+	for (size_t i = 0; i < 4; i += 1) {
+		for (size_t j = 0; j < 63; j += 1) { long_text[bytes++] = 'x'; expected[count++] = 'x'; }
+		copy_bytes(long_text + bytes, text + 6, 4); bytes += 4;
+		expected[count++] = 0xD83D; expected[count++] = 0xDE00;
+	}
+	FaString heap = owned_copy(long_text, bytes);
+	CHECK(string_owned(heap.capacity));
+	CHECK(fa_string_length(heap.bytes, bytes, heap.capacity) == count);
+	CHECK(string_header(heap.bytes)->breadcrumbs == 0);
+	CHECK(fa_string_code_unit_at(heap.bytes, bytes, heap.capacity, 0) == 'x');
+	CHECK(string_header(heap.bytes)->breadcrumbs == 0);
+	for (size_t i = count; i > 0; i -= 1) { CHECK(fa_string_code_unit_at(heap.bytes, bytes, heap.capacity, (int64_t)i - 1) == expected[i - 1]); }
+	CHECK(string_header(heap.bytes)->breadcrumbs != 0);
+	fa_string_append(&heap, (const uint8_t *)"!", 1, SIMPLE);
+	CHECK(fa_string_length(heap.bytes, heap.length, heap.capacity) == count + 1);
+	CHECK(string_header(heap.bytes)->breadcrumbs == 0);
+	fa_string_free(heap.bytes, heap.capacity);
 	CHECK(allocated == before);
 }
 
@@ -1568,7 +1632,7 @@ static void test_inline_loop_reservations(void) {
 				CHECK(string_bytes(&text)[at] == 'x');
 			}
 			if (string_owned(text.capacity)) {
-				fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1);
+				fa_string_free(text.bytes, text.capacity);
 			}
 			CHECK(allocated == before);
 		}
@@ -1581,7 +1645,7 @@ static void test_inline_loop_reservations(void) {
 	CHECK(reserved.bytes == buffer && reserved.capacity == capacity);
 	fa_string_reserve_inline(&reserved, 5);
 	CHECK(reserved.bytes == buffer && reserved.capacity == capacity);
-	fa_free((void *)reserved.bytes, reserved.capacity & KIND_MASK, 1);
+	fa_string_free(reserved.bytes, reserved.capacity);
 	CHECK(allocated == before);
 	// A two-byte character exceeds the one-byte reservation. Normal append
 	// grows safely, then the remaining rounds are reserved once more.
@@ -1596,7 +1660,7 @@ static void test_inline_loop_reservations(void) {
 		CHECK(string_bytes(&text)[at] == 0xc3 && string_bytes(&text)[at + 1] == 0xa9);
 	}
 	CHECK(string_owned(text.capacity));
-	fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1);
+	fa_string_free(text.bytes, text.capacity);
 	CHECK(allocated == before);
 }
 
@@ -1653,7 +1717,7 @@ static void test_frame_strings(void) {
 	original.length = 80;
 	fa_string_assign_local(&original, second, &copy, 0, 0);
 	CHECK(string_owned(copy.capacity) && string_length(&copy) == 80);
-	fa_free((void *)copy.bytes, copy.capacity & KIND_MASK, 1);
+	fa_string_free(copy.bytes, copy.capacity);
 	CHECK(allocated == before);
 	// Taking a frame value into an unknown owner detaches its bytes.
 	FaString detached;
@@ -1662,7 +1726,7 @@ static void test_frame_strings(void) {
 	CHECK(string_length(&detached) == 42 && allocated == before + 1);
 	__builtin_memset(first, '?', 40);
 	CHECK(__builtin_memcmp(string_bytes(&detached), original_bytes, 40) == 0);
-	fa_free((void *)detached.bytes, detached.capacity & KIND_MASK, 1);
+	fa_string_free(detached.bytes, detached.capacity);
 	// Mutating through a borrowed frame header also retains its buffer.
 	FaString incoming = owned_copy_with(original_bytes, 40, SIMPLE);
 	fa_string_assign_after_drop(&incoming, &text);
@@ -1686,7 +1750,7 @@ static void test_frame_strings(void) {
 	fa_string_append(&text, (const uint8_t *)"é\r\n", 4, 0);
 	CHECK(text.bytes == reserved_buffer && fa_string_room(text.length, text.capacity) >= 128);
 	CHECK(string_length(&text) == 4 && allocated == before + 1);
-	fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1);
+	fa_string_free(text.bytes, text.capacity);
 	CHECK(allocated == before);
 }
 
@@ -2063,7 +2127,7 @@ static void test_storage_hints(void) {
     size_t string_capacity = fa_string_room(string.length, string.capacity);
     fa_string_append(&string, (const uint8_t *)"é", 2, 0);
     CHECK(allocated == reserved && fa_string_room(string.length, string.capacity) == string_capacity);
-    fa_free((void *)string.bytes, string.capacity & KIND_MASK, 1);
+    fa_string_free(string.bytes, string.capacity);
     CHECK(allocated == before);
 }
 
@@ -2076,6 +2140,7 @@ int main(void) {
 	test_frame_strings();
 	test_integer_strings();
 	test_string_padding();
+	test_utf16_strings();
 	test_inline_strings();
 	test_nonempty_splits();
 	test_region_slice_views();

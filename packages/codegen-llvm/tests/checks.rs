@@ -1001,7 +1001,38 @@ console.log(items.length)
 			"let ascii = \"abc\"\nlet other = \"héllo\"\nconsole.log(ascii.length, other.length)\n",
 		);
 		assert!(ir.contains("i64 3, i64 -9223372036854775808 }"), "{ir}");
-		assert!(ir.contains("i64 6, i64 0 }"), "{ir}");
+		assert!(ir.contains("i64 6, i64 1152921504606846981 }"), "{ir}");
+	}
+
+	#[test]
+	fn indexed_string_literal_comparisons_read_code_units() {
+		let ir = ir_of(
+			"unit-comparisons",
+			r#"
+function equal = (text: String, index: Integer): Boolean throws IndexError => try text[index] == "é"
+function choose = (text: String, index: Integer): Integer throws IndexError => when try text[index] is { "a" => 1, "é" => 2, else => 3 }
+console.log(try equal("é", 0), try choose("a", 0))
+"#,
+		);
+		for name in ["fa.equal", "fa.choose"] {
+			let body = function(&ir, name);
+			assert!(body.contains("@fa_string_code_unit_at("), "{body}");
+			assert!(!body.contains("@fa_string_get("), "{body}");
+		}
+	}
+
+	#[test]
+	fn ordinary_string_operations_do_not_link_grapheme_tables() {
+		let ir = ir_of(
+			"units-no-graphemes",
+			r#"
+function length = (text: String): Integer => text.length
+function read = (text: String, index: Integer): UInt16 throws IndexError => try text.codeUnitAt(index)
+console.log(length("é😀"), try read("日", 0))
+"#,
+		);
+		assert!(!ir.contains("@fa_graphemes("), "{ir}");
+		assert!(!ir.contains("@fa_next_grapheme("), "{ir}");
 	}
 
 	#[test]

@@ -371,6 +371,12 @@ impl Generator<'_> {
 	/// `console.log(values…)` and `console.error(values…)`: one line, the
 	/// values separated by a space.
 	pub(crate) fn console(&mut self, method: &str, values: &[NodeId]) -> Expr {
+		if values
+			.iter()
+			.any(|&node| matches!(self.view(self.strip_groups(node)), View::Spread(_)))
+		{
+			return self.console_spread(method, values);
+		}
 		// the text of literal and template arguments is inlined
 		let mut nodes = Vec::new();
 		for &value in values {
@@ -409,11 +415,6 @@ impl Generator<'_> {
 						}
 					}
 				}
-				View::Spread(_) => {
-					pieces.push(Piece::Value(
-						self.unsupported(value, "spreading into `console.log`"),
-					));
-				}
 				_ => {
 					let value_expr = computed.next().expect("a value");
 					let ty = self.printed_type(value);
@@ -439,6 +440,34 @@ impl Generator<'_> {
 			"console.{method}({})",
 			argument.unwrap_or_default()
 		))
+	}
+
+	/// A spread can contain any number of arguments, so append its formatted
+	/// items without spreading them onto the JavaScript call stack.
+	fn console_spread(&mut self, method: &str, values: &[NodeId]) -> Expr {
+		let parts = self.temp();
+		self.out.line(format!("const {parts} = [];"));
+		for &node in values {
+			if let View::Spread(collection) = self.view(self.strip_groups(node)) {
+				let value = self.expr(collection);
+				let ty = match self.types.kind(self.type_of(collection)) {
+					TypeKind::Collection(_, item, _) => item,
+					_ => TypeId::UNKNOWN,
+				};
+				let item = self.temp();
+				let formatted = self.format_top(Expr::name(item.clone(), true), ty);
+				self.out
+					.open(format!("for (const {item} of {})", value.text));
+				self.out.line(format!("{parts}.push({});", formatted.text));
+				self.out.close("");
+			} else {
+				let value = self.expr(node);
+				let ty = self.printed_type(node);
+				let formatted = self.format_top(value, ty);
+				self.out.line(format!("{parts}.push({});", formatted.text));
+			}
+		}
+		Expr::primary(format!("console.{method}({parts}.join(\" \"))"))
 	}
 
 	/// A method of a string: `text.includes("a")` (arguments in parameter

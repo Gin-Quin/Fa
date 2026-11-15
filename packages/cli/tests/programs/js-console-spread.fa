@@ -1,0 +1,7 @@
+let values = [1, 2, 3]
+console.log(...values) -- prints: 1 2 3
+console.log("a", ...[true, false], "z") -- prints: a true false z
+console.log(...Array<Integer>.from([])) -- prints:
+type Color = Enum { red, blue }
+console.log(...Array<Color>.from([.red, .blue])) -- prints: red blue
+console.log(...["a", "b"]) -- prints: a b

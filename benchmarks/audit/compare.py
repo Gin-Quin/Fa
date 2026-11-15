@@ -33,8 +33,10 @@ DEFAULTS = {
 }
 # Other Fa versions of a benchmark, measured against the same Goose and Rust programs:
 # name -> (benchmark directory, Fa source). `string-building-bytes` builds bytes in an
-# `Array<Byte>`, like the Goose port.
-VARIANTS = {"string-building-bytes": ("string-building", "bytes.fa")}
+# `Array<Byte>`, like the Goose port; `string-building-growing` in `GrowingArray<Byte>`, whose
+# items never move, like Goose's `u8[>..]` arrays.
+VARIANTS = {"string-building-bytes": ("string-building", "bytes.fa"),
+            "string-building-growing": ("string-building", "growing.fa")}
 DEFAULTS.update({name: DEFAULTS[directory] for name, (directory, _) in VARIANTS.items()})
 AUDIT = {name: max(1, size // 10) for name, size in DEFAULTS.items()}
 AUDIT.update({"binary-trees": 14, "fib": 35, "interp": 17, "scene": 9,

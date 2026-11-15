@@ -1,0 +1,179 @@
+-- String building on bytes, in buffers that never move: bytes.fa with `GrowingArray<Byte>`
+-- buffers, whose items keep their address as they grow, like the `u8[>..]` arrays of the Goose
+-- port (main.goose), which live in a reserved region. A `GrowingArray` has no `clear()`:
+-- assigning `[]` drops every item. `split` gives
+-- (start, end) ranges into the text, like Goose's slices (no copy), and `join` builds a new
+-- buffer, as Goose does. Integers are formatted by hand: the digits are counted with
+-- comparisons, and written from the last ones, two at a time. Same output as main.rs.
+
+let blockSize = 1000
+let labels: Array<Array<Byte>> = [
+	[97, 108, 112, 104, 97], -- alpha
+	[98, 101, 116, 97], -- beta
+	[103, 97, 109, 109, 97], -- gamma
+	[100, 101, 108, 116, 97], -- delta
+	[101, 112, 115, 105, 108, 111, 110], -- epsilon
+]
+
+-- The two digits of every number below 100: "00", "01", …, "99".
+let digitPairs: Array<Byte> = [
+	48, 48, 48, 49, 48, 50, 48, 51, 48, 52, 48, 53, 48, 54, 48, 55, 48, 56, 48, 57,
+	49, 48, 49, 49, 49, 50, 49, 51, 49, 52, 49, 53, 49, 54, 49, 55, 49, 56, 49, 57,
+	50, 48, 50, 49, 50, 50, 50, 51, 50, 52, 50, 53, 50, 54, 50, 55, 50, 56, 50, 57,
+	51, 48, 51, 49, 51, 50, 51, 51, 51, 52, 51, 53, 51, 54, 51, 55, 51, 56, 51, 57,
+	52, 48, 52, 49, 52, 50, 52, 51, 52, 52, 52, 53, 52, 54, 52, 55, 52, 56, 52, 57,
+	53, 48, 53, 49, 53, 50, 53, 51, 53, 52, 53, 53, 53, 54, 53, 55, 53, 56, 53, 57,
+	54, 48, 54, 49, 54, 50, 54, 51, 54, 52, 54, 53, 54, 54, 54, 55, 54, 56, 54, 57,
+	55, 48, 55, 49, 55, 50, 55, 51, 55, 52, 55, 53, 55, 54, 55, 55, 55, 56, 55, 57,
+	56, 48, 56, 49, 56, 50, 56, 51, 56, 52, 56, 53, 56, 54, 56, 55, 56, 56, 56, 57,
+	57, 48, 57, 49, 57, 50, 57, 51, 57, 52, 57, 53, 57, 54, 57, 55, 57, 56, 57, 57
+]
+
+-- The number of decimal digits of a non-negative integer.
+function digitCount = (value: Integer): Integer => {
+	if value < 10 {
+		1
+	} else if value < 100 {
+		2
+	} else if value < 1000 {
+		3
+	} else if value < 10000 {
+		4
+	} else if value < 100000 {
+		5
+	} else if value < 1000000 {
+		6
+	} else if value < 10000000 {
+		7
+	} else if value < 100000000 {
+		8
+	} else if value < 1000000000 {
+		9
+	} else if value < 10000000000 {
+		10
+	} else if value < 100000000000 {
+		11
+	} else if value < 1000000000000 {
+		12
+	} else if value < 10000000000000 {
+		13
+	} else if value < 100000000000000 {
+		14
+	} else if value < 1000000000000000 {
+		15
+	} else if value < 10000000000000000 {
+		16
+	} else if value < 100000000000000000 {
+		17
+	} else if value < 1000000000000000000 {
+		18
+	} else {
+		19
+	}
+}
+
+-- Appends the decimal digits of a non-negative integer, left-padded with zeros to `width`.
+function appendInteger = (buffer: GrowingArray<Byte>, value: Integer, width: Integer) throws IndexError mutates buffer => {
+	let digits = digitCount(value)
+	-- zeros for the padding and the digits, then the digits from the last ones
+	let size = if width > digits { width } else { digits }
+	for _ in 0..size {
+		buffer.push(48)
+	}
+	mutable position = buffer.length - 1
+	mutable rest = value
+	while rest >= 100 {
+		let pair = rest %% 100 * 2
+		try buffer[position] = digitPairs[pair + 1]
+		try buffer[position - 1] = digitPairs[pair]
+		rest = rest // 100
+		position -= 2
+	}
+	if rest >= 10 {
+		try buffer[position] = digitPairs[rest * 2 + 1]
+		try buffer[position - 1] = digitPairs[rest * 2]
+	} else if rest > 0 {
+		try buffer[position] = Byte(48 + rest)
+	}
+}
+
+function appendBytes = (buffer: GrowingArray<Byte>, bytes: Array<Byte>) mutates buffer => {
+	for byte in bytes {
+		buffer.push(byte)
+	}
+}
+
+type Totals = {
+	lines = 0
+	characters = 0
+	joinedCharacters = 0
+
+	function add = (self, text: GrowingArray<Byte>) throws IndexError mutates self => {
+		-- split(text, ';'): the parts as ranges into `text`, like Goose's slices
+		mutable parts: Array<(Integer, Integer)> = []
+		mutable start = 0
+		for byte, position in text {
+			if byte == 59 {
+				parts.push((start, position))
+				start = position + 1
+			}
+		}
+		parts.push((start, text.length))
+		-- join(parts, "\n") into a new buffer
+		mutable joined: GrowingArray<Byte> = []
+		mutable first = true
+		for (partStart, partEnd) in parts {
+			if not first {
+				joined.push(10)
+			}
+			first = false
+			for position in partStart..partEnd {
+				joined.push(try text[position])
+			}
+		}
+		self.lines += parts.length
+		self.characters += text.length
+		self.joinedCharacters += joined.length
+	}
+}
+
+let n = try Integer.parse(arguments.get(0) ?? "3000000")
+
+mutable totals = Totals {}
+mutable output: GrowingArray<Byte> = []
+mutable lastEntry: GrowingArray<Byte> = []
+for i in 0..n {
+	lastEntry = []
+	try appendInteger(lastEntry, i, 8)
+	lastEntry.push(32)
+	appendBytes(lastEntry, labels[i %% labels.length])
+	lastEntry.push(32)
+	lastEntry.push(120)
+	try appendInteger(lastEntry, i %% 97, 0)
+	lastEntry.push(32)
+	lastEntry.push(61)
+	lastEntry.push(32)
+	try appendInteger(lastEntry, i * 3 + 1, 0)
+	for byte in lastEntry {
+		output.push(byte)
+	}
+	output.push(59)
+	if i %% blockSize == blockSize - 1 {
+		try totals.add(output)
+		output = []
+	}
+}
+if not output.isEmpty() {
+	try totals.add(output)
+}
+
+-- The text of the last entry, checked against the bytes built in the loop.
+let lastIndex = n - 1
+let last = "{lastIndex.toString().padStart(8, "0")} {["alpha", "beta", "gamma", "delta", "epsilon"][lastIndex %% 5]} x{lastIndex %% 97} = {lastIndex * 3 + 1}"
+let codes = last.codePoints()
+assert codes.length == lastEntry.length
+for index in 0..codes.length {
+	assert codes[index] == try lastEntry[index]
+}
+console.log("last entry: {last}")
+console.log("lines: {totals.lines}, characters: {totals.characters}, joined characters: {totals.joinedCharacters}")

@@ -130,7 +130,7 @@ impl Walker<'_> {
 		comptime: bool,
 	) -> TypeId {
 		if matches!(kind, crate::analysis::Callee::Builtin(id) if builtins::get(id).path == "String#codeUnitAt")
-			&& let crate::syntax::View::Access { target, .. } = self.view(self.strip_groups(callee))
+			&& let Some(target) = self.callee_receiver_node(callee)
 			&& let Some(crate::analysis::Argument::Given(index)) = arguments.first()
 		{
 			if !comptime {
@@ -220,6 +220,18 @@ mod tests {
 		let diagnostics = session.diagnostics(file);
 		let diagnostic = diagnostics.iter().find(|d| d.code.id == "TY007").unwrap();
 		assert!(diagnostic.message.contains("use `String`"));
+	}
+
+	#[test]
+	fn removed_byte_view_names_the_explicit_encoding() {
+		let (session, file) = analyze_source("let bytes = \"abc\".bytes()\n");
+		assert!(
+			session
+				.diagnostics(file)
+				.iter()
+				.any(|diagnostic| diagnostic.code.id == "E-OBJ-5"
+					&& diagnostic.message.contains("text.toUtf8()"))
+		);
 	}
 
 	#[test]

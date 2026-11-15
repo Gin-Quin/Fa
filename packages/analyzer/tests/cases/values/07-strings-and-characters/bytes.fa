@@ -12,7 +12,7 @@ use header = bytes[0..2]
 console.log(header, first, middle, maybe, array, empty, filled, zero)
 for byte, index in bytes {
 	let value: Byte = byte
-	console.log(value, try bytes[index])
+	console.log(value, bytes[index]) -- no-check
 }
 function at = (bytes: Bytes, index: Integer): Byte throws IndexError => try bytes[index]
 function slice = (bytes: Bytes, end: Integer): Bytes throws IndexError => try bytes[..end]

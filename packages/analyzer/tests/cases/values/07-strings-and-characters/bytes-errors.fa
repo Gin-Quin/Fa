@@ -14,5 +14,6 @@ let text: String = bytes -- error: E-TYPE-1
 let negative = Bytes.filled(-1) -- error: E-NUM-6
 let tooLarge = Bytes.filled(1, value = 256) -- error: E-NUM-6
 let immutable = Bytes.from([1])
-immutable[0] = 2 -- error: E-DECL-7
+immutable[0] = 2 -- error: E-DECL-4
 function unchecked = (data: Bytes, index: Integer) => data[index] -- error: E-ERR-3
+bytes.length = 4 -- error: E-OBJ-11

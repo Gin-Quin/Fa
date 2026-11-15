@@ -6,7 +6,7 @@ let depth = 4
 let passes = 4
 let letters = "abcdefghijklmnopqrstuvwxyz"
 
--- The bytes the parser looks for (ASCII).
+-- The code units the parser looks for (ASCII).
 let end: UInt16 = 0
 let space: UInt16 = 32
 let open: UInt16 = 40
@@ -71,14 +71,14 @@ type Sexp = Union {
 	List = { items: Array<Sexp> }
 }
 
--- Reads the UTF-8 bytes of the text, as Goose's parser does (the syntax is ASCII), and slices
+-- Reads numeric UTF-16 code units (the syntax is ASCII), and slices
 -- the symbols out of it.
 type Parser = {
 	text: String
 	position: Integer
 	count: Integer
 
-	-- The byte at the position, or a null byte at the end of the text.
+	-- The code unit at the position, or zero at the end of the text.
 	function current = (self): UInt16 => self.text.codeUnitAt(self.position) catch _error => end
 
 	function skipSpaces = (self) mutates self => {

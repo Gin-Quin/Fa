@@ -65,34 +65,30 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Strings: UTF-16 semantics over UTF-8 storage (user decision, 2026-11-15)
 
-See `design/decisions.md` ("Strings: UTF-16 semantics, UTF-8 storage") and the pages `values/strings`, `operations/string`, `values/bytes` (with their `:::implementation` sections). The documentation is done; nothing is implemented. Suggested order: analyzer, then the two backends and the interpreter together (the T-STR cases must agree on every target), then the fixtures.
+See `design/decisions.md` ("Strings: UTF-16 semantics, UTF-8 storage") and the pages `values/strings`, `operations/string`, `values/bytes` (with their `:::implementation` sections). The specification and analyzer contract are implemented. Finish the two backends and interpreter together (the T-STR cases must agree on every target), then reconcile the remaining runtime fixtures.
 
-- **Analyzer** (`packages/analyzer`, 38 files name `Character` or graphemes: `builtins/strings.rs`, `check/strings.rs`, `types/{mod,store,merge,relate,layer}.rs`, `flow/facts.rs`, `check/proofs.rs`, `diagnostics/codes/values.rs`…):
-  - remove the `Character` type, its literal adaptation, `Character ≤ String`, `ConstValue::Character`, `Schema.Character`; retire `E-STR-8` and `E-STR-9`; an unknown `Character` gets a fix that names `String`;
-  - `text[i]` and `get` give `String`/`String?`; the loop variable over a string is a `String` (one code point), its index a code unit position; `characters()` returns `Array<String>`;
-  - length facts of literals in UTF-16 code units (D-97); index proofs unchanged otherwise;
-  - new builtins: `codeUnitAt`, `isWellFormed`, `utf8Length`, `toUtf8`, `String.fromUtf8` (`throws Utf8Error`), `String.fromUtf8Lossy`; remove `bytes()`; recognize `codePoints().length` and an iteration of `toUtf8()` (no array built);
-  - the prelude: the `Bytes` type (array rules for indexing, slices, `use` slices and item assignment; no structural mutation), `Bytes.from`, `Bytes.filled`, `toArray`, `Schema.Bytes`, `Utf8Error { position }`;
-  - `std`: `File.read`/`File.write` on `Bytes`, `File.readText`/`File.writeText`, HTTP `body: Bytes` and `text()`, `Json.parse` accepting `Bytes`.
+The analyzer, prelude and tooling contract is implemented on `feature/strings` (see "String redesign: analyzer contract" in `design/decisions.md`). Backends must consume `TypeKind::Bytes` / `TypeId::BYTES` (not an alias of `Array<Byte>`), `RuntimeKind::Bytes`, and the new builtin paths. The new `Utf8Error` has runtime id 12; existing ids are unchanged.
+
 - **Native runtime and codegen** (`packages/codegen-llvm`, `runtime/fa_runtime.c` then `runtime/generate.sh`):
   - replace the grapheme scans (`length`, indexing, `faSliceBounds`, searches) by code unit arithmetic: cached UTF-16 length, breadcrumbs every 64th code unit, positions inside a four-byte sequence;
   - the ASCII flag (`SIMPLE`) no longer excludes `'\r'`; **slices carry the ASCII flag** of their string (`{ ptr, byte length }` has no flag today: take a bit of the length, or keep the flag statically);
   - WTF-8: the surrogates flag, cutting a pair (index, slice), joining a pair in concatenation and `+=`, `U+FFFD` in `toUtf8()` and in every output (`console.log`, files, `CString`);
   - `<` in code unit order (correction at the first differing byte; code unit comparison with the surrogates flag);
   - **searches report UTF-16 positions**: `indexOf`, `lastIndexOf`, `split`, `replace` search the bytes and count the code units of the prefix (identity with the ASCII flag); a needle with a lone surrogate at an end is searched by code unit; the same conversion for a future regular expression engine;
+  - consume `STRING_CODE_UNIT` on indexed strings, `CODE_POINT_COUNT` on direct `codePoints().length`, and `UTF8_ITERATION` on direct `for … in text.toUtf8()` calls; `INDEX_CHECK` / `CAN_FAIL` retain their existing meaning on `codeUnitAt` and slices;
   - iteration by code point with a code unit index; `codeUnitAt`; a one-unit string compared with a literal without being built (replaces the planned `Character` scalar: `calc`, `sexp`, `strlist`, `words`, `records`, `respond`);
   - `Bytes` (layout of `Array<Byte>`), `toUtf8`/`fromUtf8` moving the block of a dead source, vectorized UTF-8 validation that computes the ASCII flag, `fromUtf8Lossy`;
+  - implement the new `Bytes.*` / `Bytes#*` builtin paths and `File.read` / `File.write` on bytes (`File.readText` / `File.writeText` keep text), plus `Json.parse` on bytes;
   - UAX #29 tables only for `characters()`, linked only when it is called (check the binary sizes with the `report` example);
   - **wasm boundary**: strings cross to the JavaScript host as UTF-8 (`TextDecoder`/`TextEncoder` on the memory), lone surrogates as `U+FFFD`; the JS String Builtins were measured slower (2.4 ms per MB on Node, 10.5 ms on Bun), don't use them.
 - **JavaScript codegen and runtime** (`packages/codegen-js`, `runtime/*.js`, then `bun test packages/codegen-js/runtime` and the golden files):
   - delete the grapheme helpers, the ASCII regular expression fast path and the code point comparison helper: `length`, indexing, slices (`slice`), searches and `<` are the plain JavaScript operations; keep the bound checks and `-1` → `undefined`;
   - iteration: `for…of`, or a `codePointAt` loop when the index is used; `characters()` through the shared `Intl.Segmenter`;
   - `utf8Length` (`Buffer.byteLength` on `bun`/`node`, a `charCodeAt` loop on `web`), shared `TextEncoder`, `TextDecoder("utf-8", { fatal: true, ignoreBOM: true })` and its lossy twin, `Utf8Error` with the position of the first invalid byte (found by a scan after the failure);
+  - consume the same analyzer flags, implement `Bytes.from` / `Bytes.filled` / `Bytes#get` / `Bytes#toArray` and bytes/text `File` paths, and route `Json.parse` bytes without decoding first;
   - `Bytes` as `Uint8Array`: `slice()` for copies, `subarray()` for `use` slices, helpers for `==` and `toString`.
 - **Compile-time interpreter** (`packages/interpreter`): the same rules on its own strings, so that constants agree with every target: UTF-16 length and positions, lone surrogates from a cut pair, code unit order of `<`, code point iteration, `Bytes` values and the conversions, `utf8Length`. A `static` string with a lone surrogate must be emitted as such by both backends.
-- **Language server and CLI** (`packages/language-server`, `packages/cli`: one file each names `Character`): hovers and completions of the removed type; LSP positions are already UTF-16.
-- **Formatter and parser**: not affected (no syntax change; `Character` was only a type name).
-- **Tests and fixtures**: the T-STR cases of `design/implementation/values-and-control-flow.md` (T-STR-12 to 14, 20, 21, 26, 27, 31, 32, 46, 47 changed or new); the 11 `.fa` fixtures of `packages/` that use `Character`; `benchmarks/calc`, `benchmarks/sexp`, `benchmarks/string-building` and `benchmarks/README.md`; add cases with non-ASCII text on every target (breadcrumbs, cut pairs, order, search positions), since the benchmarks are all ASCII.
+- **Tests and fixtures**: the changed T-STR-12–14, 20, 21, 26, 27, 31, 32, 46, 47 analyzer cases and the new `bytes*` / `utf16*` cases are in place, including schema round trips and byte/text file signatures. Existing `.fa` fixtures and benchmarks use `String`, explicit encoding, or numeric `codeUnitAt`; their unaffected output expectations are preserved. Finish non-ASCII runtime coverage on every target (breadcrumbs, cut pairs, order, search positions). Run the shared cases on Bun, native, freestanding and wasm; update the remaining historical grapheme expectations to the specification, never to backend behavior.
 - **Other design records** still describe graphemes as history: `design/spec-review.md` (V21, V22, AR31), `design/minimalism-audit.md`, `design/analyzer-design.md`, `design/llvm-backend-plan.md`, `design/native-goose-performance.md`. Update them when their subject is touched.
 
 ## Performance (Goose suite, native, vs Rust)

@@ -158,7 +158,7 @@ pub enum TypeKind {                       // ≤ 16 bytes; variable data lives i
 	SymInt(SymIntId),                      // bounds affine in value params, generic bodies only (M2)
 	Float(FloatBits), FloatLit(FloatBits, ConstId),
 	BigInt, BigIntLit(ConstId), Percentage,
-	String, StringLit(Sym), Character,
+	String, StringLit(Sym), Bytes,
 	Object(ShapeId),                       // Shape { fields: [FieldEntry] sorted by name, nominal: Option<NominalId> }
 	Tuple(ListId),
 	Union(ListId),                         // anonymous, normalized, ≥ 2 members, sorted by TypeId; `T?` = Union[T, NONE]
@@ -287,7 +287,7 @@ pub struct Analysis {
 	pub symbols: SymbolTable, pub scopes: Vec<Scope>,
 	pub arith: FxHashMap<NodeId, ArithInfo>,        // every integer arithmetic node and every checked sink
 	pub intervals: FxHashMap<NodeId, IntervalId>,   // integer nodes whose fact is narrower than their type (hover, proofs)
-	pub coercions: FxHashMap<NodeId, TypeId>,       // implicit conversion at a sink: union injection, Integer↔Int64, Float32→Float, Character→String
+	pub coercions: FxHashMap<NodeId, TypeId>,       // implicit conversion at a sink: union injection, Integer↔Int64, Float32→Float
 	pub instantiations: FxHashMap<NodeId, ListId>,  // generic args per call / typed literal / generic function value
 	pub functions: FxHashMap<NodeId, FnInfo>,       // per function or lambda node: summary, captures, escapes (M2)
 	pub spellings: FxHashMap<NodeId, SpellingId>,
@@ -578,7 +578,7 @@ Rules that avoid conflicts:
   - `TypeStore`: structurally equal ⇒ same id; flags.
   - `union.rs`: every rule of §3.4.1, `TY040` matrix.
   - `int.rs`: the §6.5 table, compute types, exclusions.
-  - `relate.rs`: assignability matrix, `Integer`/`Int64`, `Float32`/`Float`, `Character`/`String`.
+  - `relate.rs`: assignability matrix, `Integer`/`Int64`, `Float32`/`Float`, `Bytes` distinct from strings and arrays.
   - `flow/`: join, widen, `drop_below`.
   - `codes`: uniqueness.
   - `syntax.rs`: views over parser outputs, `children()` completeness.

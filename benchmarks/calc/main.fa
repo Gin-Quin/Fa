@@ -2,7 +2,7 @@
 -- descent into a short-lived tree of recursive union values and evaluated, with errors thrown
 -- from deep inside the recursion (`throws` and `try`) and handled per input (`catch`).
 
--- The bytes the parser looks for (ASCII).
+-- The code units the parser looks for (ASCII).
 let end: UInt16 = 0
 let space: UInt16 = 32
 let open: UInt16 = 40
@@ -104,14 +104,13 @@ type Expression = Union {
 	Binary = { operator: UInt16, left: Expression, right: Expression }
 }
 
--- Reads the UTF-8 bytes of the text in place, as Goose's parser does: indexing them is constant-time,
--- and the syntax is ASCII.
+-- Reads numeric UTF-16 code units directly; the grammar is ASCII.
 type Parser = {
 	text: String
 	position: Integer
 	nodes: Integer -- every node built, bad inputs included
 
-	-- The byte at the position, or a null byte at the end of the text.
+	-- The code unit at the position, or zero at the end of the text.
 	function current = (self): UInt16 => self.text.codeUnitAt(self.position) catch _error => end
 
 	function skipSpaces = (self) mutates self => {

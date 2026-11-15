@@ -1036,7 +1036,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Keep allocation and memcpy off the literal-copy path. Otherwise
 	/// inlining the allocator makes the copy helper too large to inline,
-	/// and even a static ASCII Character pays a call and several spills.
+	/// and even a static ASCII string pays a call and several spills.
 	fn copy_string_slow(&self) -> Result<FunctionValue<'ctx>, Error> {
 		if let Some(function) = self.module.get_function("fa.copy_string_slow") {
 			return Ok(function);

@@ -581,6 +581,7 @@ impl Walker<'_> {
 						let path = builtins::get(builtin).path;
 						if (path.contains('#') && matches!(written.ty, builtins::Ty::Ordering))
 							|| (path == "String.from" && written.name == "capacity")
+							|| matches!(path, "Bytes.from" | "Bytes.filled")
 						{
 							param.builtin_name = Some(self.s.types.syms.intern(written.name));
 						}

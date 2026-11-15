@@ -1815,7 +1815,7 @@ impl TypeStore {
 			TypeKind::Percentage => hasher.tag(13),
 			TypeKind::String => hasher.tag(14),
 			TypeKind::StringLit(sym) => hasher.tag(15).str(self.syms.resolve(sym)),
-			TypeKind::Bytes => hasher.tag(16),
+			TypeKind::Bytes => hasher.tag(39),
 			TypeKind::Object(shape) => {
 				let data = self.shape(shape);
 				hasher.tag(17);

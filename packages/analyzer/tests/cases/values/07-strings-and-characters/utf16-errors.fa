@@ -6,3 +6,7 @@ let wrong = text.codeUnitAt(true) -- error: E-TYPE-1
 let strict = String.fromUtf8(Bytes.from([255])) -- error: E-ERR-3
 let wrongInput = String.fromUtf8([104]) catch _error => "" -- error: E-TYPE-1
 function unitAt = (text: String, index: Integer) => text.codeUnitAt(index) -- error: E-ERR-3
+type Holder = { text: String }
+function field = (holder: Holder, index: Integer) => holder.text.codeUnitAt(index) -- error: E-ERR-3
+let at = text.codeUnitAt
+let viaValue = at(0) -- error: E-ERR-3

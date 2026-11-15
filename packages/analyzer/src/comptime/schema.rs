@@ -132,7 +132,11 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 		&& let Some(name) = types.type_name(ty).or(nominal_name)
 		&& !matches!(
 			types.kind(ty),
-			TypeKind::Int(_) | TypeKind::Float(_) | TypeKind::String | TypeKind::Boolean
+			TypeKind::Int(_)
+				| TypeKind::Float(_)
+				| TypeKind::String
+				| TypeKind::Bytes
+				| TypeKind::Boolean
 		) {
 		return member(
 			"Named",

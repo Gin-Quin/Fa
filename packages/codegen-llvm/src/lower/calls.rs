@@ -1787,7 +1787,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// Searching a constant consecutive ASCII alphabet for one Character is
+	/// Searching a constant consecutive ASCII alphabet for a one-unit string literal is
 	/// a subtraction and a range test, rather than a loop over the alphabet.
 	fn alphabet_index(
 		&mut self,
@@ -1826,7 +1826,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(None);
 		}
 		let (bytes, length) = self.string_parts(search)?;
-		// A Character has at least one byte, including for a long grapheme.
+		// The nonempty one-unit literal has at least one byte.
 		let byte = self
 			.builder
 			.build_load(self.context.i8_type(), bytes, "")?

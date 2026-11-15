@@ -136,6 +136,10 @@ pub fn error_type(types: &mut TypeStore, name: &str) -> Option<TypeId> {
 		kind: NominalKind::Errors,
 		members,
 	});
+	if !types.has_payloads(nominal) {
+		let data = payload(types, name).unwrap_or(TypeId::UNSET);
+		types.set_payloads(nominal, vec![data]);
+	}
 	Some(types.nominal_type(nominal))
 }
 
@@ -172,6 +176,7 @@ mod tests {
 		assert_eq!(id("WorkerTimeout"), 8);
 		assert_eq!(id("FileError"), 9);
 		assert_eq!(id("NetError"), 11);
+		assert_eq!(id("Utf8Error"), 12);
 	}
 	use crate::types::Mode;
 

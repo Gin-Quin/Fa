@@ -85,7 +85,17 @@ impl Walker<'_> {
 			.read_local(value)
 			.filter(|&source| source != symbol)
 			.and_then(|source| self.length_of(source));
-		match copied.or_else(|| self.expression_length(value)) {
+		let length = copied.or_else(|| {
+			if self.type_of(self.strip_groups(value)) == TypeId::BYTES
+				|| self.a.flags[self.strip_groups(value).index()]
+					.contains(NodeFlags::STRING_CODE_UNIT)
+			{
+				self.expression_length(value)
+			} else {
+				self.literal_length(value)
+			}
+		});
+		match length {
 			Some(length) => self.facts.interval(length),
 			None => IntervalId::NONE,
 		}

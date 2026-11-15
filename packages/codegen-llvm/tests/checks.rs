@@ -904,7 +904,7 @@ console.log(items.length)
 		// on `position < 0`, which the proof that every store of the field
 		// is non-negative (`index_proofs.rs`) takes out, with or without
 		// overflow checks (a step of one), unless a store may be negative
-		let program = "type Cursor = {\n\ttext: String\n\tposition: Integer\n\tfunction current = (self): Byte => self.text.bytes().get(self.position) ?? 0\n\tfunction advance = (self) mutates self => {\n\t\tself.position += 1\n\t}\n}\nmutable cursor = Cursor { text = \"ab\", position = 0 }\nwhile cursor.current() != 0 {\n\tcursor.advance()\n}\nconsole.log(cursor.position)\n";
+		let program = "type Cursor = {\n\ttext: String\n\tposition: Integer\n\tfunction current = (self): Byte => self.text.toUtf8().get(self.position) ?? 0\n\tfunction advance = (self) mutates self => {\n\t\tself.position += 1\n\t}\n}\nmutable cursor = Cursor { text = \"ab\", position = 0 }\nwhile cursor.current() != 0 {\n\tcursor.advance()\n}\nconsole.log(cursor.position)\n";
 		for checked in [true, false] {
 			let ir = ir_with("cursor", program, checked);
 			let current = function(&ir, "fa.current");
@@ -931,7 +931,7 @@ console.log(items.length)
 		// and the small methods it calls on `self` are expanded into it
 		// (`frozen.rs`); a store anywhere, or a whole value of the type
 		// assigned, makes it read at each use again
-		let program = "type Scanner = {\n\ttext: String\n\tposition: Integer\n\tcount: Integer\n\tfunction current = (self): Byte => self.text.bytes().get(self.position) ?? 0\n\tfunction skipSpaces = (self) mutates self => {\n\t\twhile self.current() == 32 {\n\t\t\tself.position += 1\n\t\t}\n\t}\n\tfunction words = (self): Integer mutates self => {\n\t\tloop {\n\t\t\tself.skipSpaces()\n\t\t\tif self.current() == 0 {\n\t\t\t\tbreak\n\t\t\t}\n\t\t\twhile self.current() != 32 and self.current() != 0 {\n\t\t\t\tself.position += 1\n\t\t\t}\n\t\t\tself.count += 1\n\t\t}\n\t\tself.count\n\t}\n}\nmutable scanner = Scanner { text = \"one two\", position = 0, count = 0 }\nconsole.log(scanner.words())\n";
+		let program = "type Scanner = {\n\ttext: String\n\tposition: Integer\n\tcount: Integer\n\tfunction current = (self): Byte => self.text.toUtf8().get(self.position) ?? 0\n\tfunction skipSpaces = (self) mutates self => {\n\t\twhile self.current() == 32 {\n\t\t\tself.position += 1\n\t\t}\n\t}\n\tfunction words = (self): Integer mutates self => {\n\t\tloop {\n\t\t\tself.skipSpaces()\n\t\t\tif self.current() == 0 {\n\t\t\t\tbreak\n\t\t\t}\n\t\t\twhile self.current() != 32 and self.current() != 0 {\n\t\t\t\tself.position += 1\n\t\t\t}\n\t\t\tself.count += 1\n\t\t}\n\t\tself.count\n\t}\n}\nmutable scanner = Scanner { text = \"one two\", position = 0, count = 0 }\nconsole.log(scanner.words())\n";
 		let inline_test = "4611686018427387904";
 		let ir = ir_of("frozen", program);
 		let words = function(&ir, "fa.words");

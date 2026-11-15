@@ -1,6 +1,6 @@
 let text = "a😀b"
 let half: String = text[2] -- no-check
--- check: STRING_CODE_UNIT
+-- ^ check: STRING_CODE_UNIT
 let last: String = text[-1] -- no-check
 let maybe = text.get(1) -- type maybe: String?
 let unit = text.codeUnitAt(2) -- type unit: UInt16
@@ -23,3 +23,6 @@ for point, index in text {
 }
 function unitAt = (text: String, index: Integer): UInt16 throws IndexError => try text.codeUnitAt(index)
 console.log(half, last, maybe, unit, wellFormed, byteCount, strict, lossy, parts, points, count)
+let arrayOfStrings = ["many"]
+let whole = arrayOfStrings[0] -- no-check: STRING_CODE_UNIT
+let one = ("😀")[1] -- check: STRING_CODE_UNIT

@@ -1347,7 +1347,11 @@ impl Walker<'_> {
 	/// `E-OBJ-5`: no such field or method.
 	pub(super) fn no_member(&mut self, member: NodeId, receiver: TypeId, text: &str) {
 		let shown = self.display(self.s.types.widen(receiver));
-		let message = if crate::builtins::strings::is_string_like(&self.s.types, receiver) {
+		let message = if crate::builtins::strings::is_string_like(&self.s.types, receiver)
+			&& text == "bytes"
+		{
+			"`bytes()` was replaced by `toUtf8()`, which returns `Bytes`: use `text.toUtf8()` to encode UTF-8".to_string()
+		} else if crate::builtins::strings::is_string_like(&self.s.types, receiver) {
 			format!(
 				"a `{shown}` has no field or method `{text}`: see the string methods (`length`, `includes`, `split`…); no method changes a string"
 			)

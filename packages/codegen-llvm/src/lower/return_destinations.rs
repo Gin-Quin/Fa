@@ -5,13 +5,29 @@ use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::View;
 use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::builder::Builder;
-use inkwell::types::AnyType;
+use inkwell::types::{AnyType, BasicTypeEnum};
 use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue};
 
 use crate::error::Error;
 use crate::lower::ownership::Cleanup;
 use crate::lower::values::{Repr, Val};
 use crate::lower::{Lowering, Slot};
+use crate::target::Target;
+
+/// Count scalar leaves, saturating above the largest by-value limit.
+fn scalar_leaves(ty: BasicTypeEnum<'_>) -> u32 {
+	match ty {
+		BasicTypeEnum::StructType(ty) => ty
+			.get_field_types()
+			.into_iter()
+			.map(scalar_leaves)
+			.fold(0, |sum, count| (sum + count).min(3)),
+		BasicTypeEnum::ArrayType(ty) => scalar_leaves(ty.get_element_type())
+			.saturating_mul(ty.len())
+			.min(3),
+		_ => 1,
+	}
+}
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	fn return_value_leaves(&self, root: NodeId, leaves: &mut Vec<NodeId>) {
@@ -96,7 +112,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	pub(super) fn uses_return_slot(&self, repr: Repr) -> bool {
-		!self.tasks.asynchronous && matches!(repr, Repr::Object(_) | Repr::Tuple(_))
+		if self.tasks.asynchronous || !matches!(repr, Repr::Object(_) | Repr::Tuple(_)) {
+			return false;
+		}
+		let ty = self.llvm_type(repr);
+		let leaves = scalar_leaves(ty);
+		let by_value = if self.target == Target::Wasm {
+			leaves == 1
+		} else {
+			leaves <= 2 && self.collection_data_size(ty) <= 16
+		};
+		!by_value
 	}
 
 	pub(super) fn add_return_slot_attribute(

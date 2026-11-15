@@ -141,6 +141,7 @@ struct Frame<'ctx> {
 	early_destination: Option<(PointerValue<'ctx>, Repr)>,
 	/// Fixed collection storage reserved in this function's entry block.
 	collection_bytes: u64,
+	collection_budget: u64,
 	collection_locals: rustc_hash::FxHashSet<(FileId, SymbolId)>,
 	function: FunctionValue<'ctx>,
 	/// Recursive nodes allocated by this function belong to the caller's region.
@@ -214,6 +215,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
 	readonly_collections: FxHashMap<(FileId, NodeId, Repr), Val<'ctx>>,
+	/// Source functions in a resolved direct-call cycle, shared by instances.
+	recursive_functions: rustc_hash::FxHashSet<(FileId, NodeId)>,
 	/// Line starts of the source, for locations.
 	lines: Vec<usize>,
 	/// The structs of object types.
@@ -390,6 +393,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
 			virtual_code_points: FxHashMap::default(),
 			readonly_collections: FxHashMap::default(),
+			recursive_functions: rustc_hash::FxHashSet::default(),
 			relation_sides: relations::relation_sides(
 				files.iter().map(|(file, _)| session.analysis(*file)),
 			),
@@ -474,6 +478,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			self.copy_cleanup_captures();
 		}
+		self.index_recursive_functions(&files);
 		self.prepare_tree_arenas()?;
 		for &file in &files {
 			self.switch_file(file);
@@ -508,6 +513,22 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			flag.set_initializer(&self.context.bool_type().const_int(needed as u64, false));
 		}
 		self.runtime.internalize()?;
+		// Probe each crossed page, including helpers and coroutine instances.
+		// LLVM 18 supports inline probes on x86-64 and aarch64 Linux.
+		if self.target != Target::Wasm
+			&& (cfg!(target_arch = "x86_64") || cfg!(target_arch = "aarch64"))
+		{
+			let probe = self
+				.context
+				.create_string_attribute("probe-stack", "inline-asm");
+			for function in self
+				.module
+				.get_functions()
+				.filter(|f| f.count_basic_blocks() != 0)
+			{
+				function.add_attribute(AttributeLoc::Function, probe);
+			}
+		}
 		Ok(())
 	}
 
@@ -1187,6 +1208,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.builder.position_at_end(start);
 		let outer = self.cleanups.take();
 		self.saved_cleanups.push(outer);
+		let collection_budget = self.collection_budget_for(owner);
 		self.frame = Some(Frame {
 			return_slot: None,
 			nrvo_local: None,
@@ -1195,6 +1217,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			destination: None,
 			early_destination: None,
 			collection_bytes: 0,
+			collection_budget,
 			collection_locals: rustc_hash::FxHashSet::default(),
 			function,
 			arena: false,

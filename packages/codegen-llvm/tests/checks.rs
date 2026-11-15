@@ -32,6 +32,16 @@ mod with_llvm {
 	}
 
 	fn ir_at(name: &str, source: &str, overflow_checks: bool, opt_level: OptLevel) -> String {
+		ir_at_target(name, source, overflow_checks, opt_level, Target::Native)
+	}
+
+	fn ir_at_target(
+		name: &str,
+		source: &str,
+		overflow_checks: bool,
+		opt_level: OptLevel,
+		target: Target,
+	) -> String {
 		let mut session = Session::new();
 		let file = session.set_source("main", Arc::from(source));
 		session.analyze_file(file);
@@ -44,7 +54,7 @@ mod with_llvm {
 		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
 			.join("fa-checks")
 			.join(name);
-		let artifact = compile(&session, file, "test.fa", Target::Native, &options, &output)
+		let artifact = compile(&session, file, "test.fa", target, &options, &output)
 			.unwrap_or_else(|error| panic!("{name}: {error}"));
 		let ir = std::fs::read_to_string(artifact.ir.expect("the IR")).expect("the IR file");
 		// keep the program's own functions
@@ -208,14 +218,14 @@ mod with_llvm {
 	}
 
 	#[test]
-	fn aggregate_results_use_and_forward_the_callers_return_slot() {
+	fn large_aggregate_results_use_and_forward_the_callers_return_slot() {
 		let ir = ir_of(
 			"aggregate-return-slots",
 			r#"
-type Data = { a: Integer, b: Integer }
-function make = (n: Integer): Data => Data { a = n, b = n + 1 }
+type Data = { a: Integer, b: Integer, c: Integer }
+function make = (n: Integer): Data => Data { a = n, b = n + 1, c = n + 2 }
 function relay = (n: Integer): Data => if n > 0 { relay(n - 1) } else { make(n) }
-function pair = (n: Integer): Tuple<Integer, Integer> => (n, n + 1)
+function pair = (n: Integer): Tuple<Integer, Integer, Integer> => (n, n + 1, n + 2)
 type Wrapped = { data: Data }
 function wrapped = (n: Integer): Wrapped => Wrapped { data = make(n) }
 let data = wrapped(2)
@@ -236,13 +246,117 @@ console.log(data.data.a, tuple[0], relay(2).a)
 	}
 
 	#[test]
+	fn small_aggregate_results_stay_in_ssa() {
+		let ir = ir_of(
+			"small-aggregate-registers",
+			r#"
+type Data = { a: Integer, b: Integer }
+function make = (n: Integer): Data => Data { a = n, b = n + 1 }
+function relay = (n: Integer): Data => if n > 0 { relay(n - 1) } else { make(n) }
+function pair = (n: Integer): Tuple<Integer, Integer> => (n, n + 1)
+function parse = (text: String): Data throws ParseError => Data { a = try Integer.parse(text), b = 0 }
+let data = parse("2") catch error => Data { a = -1, b = -1 }
+console.log(relay(2).a, pair(3)[0], data.a)
+"#,
+		);
+		for name in ["fa.make", "fa.relay", "fa.pair", "fa.parse"] {
+			let body = function(&ir, name);
+			assert!(!body.lines().next().unwrap().contains("void"), "{body}");
+			assert!(!body.contains("sret("), "{body}");
+			assert!(body.contains("ret {"), "{body}");
+			assert!(!body.contains("return.result"), "{body}");
+		}
+	}
+
+	#[test]
+	fn aggregate_return_choice_counts_scalar_leaves_on_each_target() {
+		let source = r#"
+type One = { a: Integer }
+type Two = { a: One, b: Integer }
+type Three = { a: Boolean, b: Boolean, c: Boolean }
+function one = (n: Integer): One => One { a = n }
+function two = (n: Integer): Two => Two { a = one(n), b = n }
+function three = (n: Integer): Three => Three { a = n > 0, b = n > 1, c = n > 2 }
+console.log(one(1).a, two(2).b, three(3).a)
+"#;
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("aggregate-leaves-{}", target.name()),
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			assert!(!function(&ir, "fa.one").contains("sret("), "{ir}");
+			assert_eq!(
+				function(&ir, "fa.two").contains("sret("),
+				target == Target::Wasm,
+				"{ir}"
+			);
+			assert!(function(&ir, "fa.three").contains("sret("), "{ir}");
+		}
+	}
+
+	#[test]
+	fn direct_call_cycles_limit_collection_frames_including_methods_and_generics() {
+		let ir = ir_of(
+			"recursive-collection-budgets",
+			r#"
+function first = (n: Integer, text: String): Integer => {
+ let words = text.split(" ")
+ if n > 0 { second(n - 1, text) + words.length } else { words.length }
+}
+function second = (n: Integer, text: String): Integer => {
+ let words = text.split(" ")
+ if n > 0 { generic(n - 1, 7, text) + words.length } else { words.length }
+}
+type Walker = {
+ function walk = (n: Integer, text: String): Integer => {
+  let words = text.split(" ")
+  if n > 0 { Walker.walk(n - 1, text) + words.length } else { words.length }
+ }
+}
+function generic = <T>(n: Integer, value: T, text: String): Integer => {
+ let words = text.split(" ")
+ if n > 0 { first(n - 1, text) + words.length } else { words.length }
+}
+console.log(first(1, "a b"), Walker.walk(1, "a b"), generic(1, 7, "a b"))
+"#,
+		);
+		for name in ["fa.first", "fa.second", "fa.walk", "fa.generic.0"] {
+			let body = function(&ir, name);
+			assert!(body.contains("alloca [512 x i8]"), "{body}");
+			assert!(!body.contains("alloca [2048 x i8]"), "{body}");
+		}
+	}
+
+	#[test]
+	fn call_offers_use_only_the_remaining_recursive_frame_budget() {
+		let literal = std::iter::repeat_n("n", 54).collect::<Vec<_>>().join(", ");
+		let source = format!(
+			"function count = (n: Integer, text: String): Integer => {{\nlet exact = [{literal}]\nlet words = text.split(\" \")\nif n > 0 {{ count(n - 1, text) + exact.length + words.length }} else {{ exact.length + words.length }}\n}}\nconsole.log(count(1, \"a b\"))\n"
+		);
+		let ir = ir_of("remaining-recursive-budget", &source);
+		let body = function(&ir, "fa.count");
+		assert!(body.contains("alloca [464 x i8]"), "{body}");
+		assert!(!body.contains("alloca [48 x i8]"), "{body}");
+		assert!(!body.contains("@fa_string_split_into("), "{body}");
+		let source = source.replace(&literal, "n");
+		let ir = ir_of("remaining-recursive-offer", &source);
+		let body = function(&ir, "fa.count");
+		assert!(body.contains("alloca [48 x i8]"), "{body}");
+		assert!(body.contains("alloca [464 x i8]"), "{body}");
+		assert!(body.contains("@fa_string_split_into("), "{body}");
+	}
+
+	#[test]
 	fn throwing_aggregate_returns_keep_errors_outside_the_result_slot() {
 		let ir = ir_of(
 			"aggregate-return-errors",
 			r#"
-type Data = { number: Integer }
-function parse = (text: String): Data throws ParseError => Data { number = try Integer.parse(text) }
-let value = parse("2") catch error => Data { number = -1 }
+type Data = { number: Integer, padding: Integer, more: Integer }
+function parse = (text: String): Data throws ParseError => Data { number = try Integer.parse(text), padding = 0, more = 0 }
+let value = parse("2") catch error => Data { number = -1, padding = 0, more = 0 }
 console.log(value.number)
 "#,
 		);
@@ -948,9 +1062,7 @@ console.log(items.length)
 			.expect("a body")
 			.1;
 		let allocation = build.find("@fa_arena_alloc(").expect("an arena allocation");
-		let recursion = build
-			.find("@fa.build.arena(ptr %")
-			.expect("a recursive call");
+		let recursion = build.find("@fa.build.arena(").expect("a recursive call");
 		assert!(allocation < recursion, "{build}");
 		assert!(!build.contains("return.result"), "{build}");
 		assert!(!build.contains("@fa_alloc("), "{build}");

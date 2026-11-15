@@ -4,8 +4,6 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Performance
 
-- **Coût des destinations de retour récursives (native, 2026-11-15)** : après construction directe dans les boîtes, `binary-trees` garde +6,13 % d’instructions et une hausse CPU dans l’audit des destinations de retour. Étudier la durée de vie du pointeur de sortie et la convention interne, tout en conservant la construction dans la destination et les règles d’alias ; aucune reconnaissance de benchmark ni suppression de contrôle.
-
 - **nbody aliasing (native)**: LLVM can't tell that `body` and `other` never designate the same element, so their fields stay in memory (Rust works around it with `split_at_mut`). Use the analyzer's facts (distinct indices, the alias rule) to emit `noalias`/scoped alias metadata, or keep fields in registers when no write can reach them. *Assigned to the LLVM backend's fourth shift.*
 - **Benchmarks against Goose**: add the benchmarks of https://aardappel.github.io/goose/bench/results.html and a Goose column next to Rust. *Assigned.*
 - **Parallel and streaming pipeline** (`design/parallel-pipeline.md`): steps 1–5 *assigned*; step 6 (LLVM per module, ThinLTO) and step 7 (language server) to schedule after.
@@ -41,6 +39,17 @@ Open items that are not yet assigned to a running engineer, or that need a follo
   values, and 128-bit or composite table keys. Unsupported read-only shapes keep
   the ordinary frame/heap construction path;
   `Bytes` is not implemented in this branch and must adopt the same storage rules.
+
+- **Reviewed stack-storage follow-ups (Fable, 2026-11-15):** verify whether
+  `wasm-ld --stack-first` is in effect and test that a deep shadow-stack overflow
+  traps instead of overwriting data. Apply the async gate per function rather
+  than per program (`collection_stack`, `uses_return_slot`,
+  `uses_collection_return`); later allow coroutine collection ranges spanning
+  no suspension. Measure indirect recursion before extending cycle detection.
+  Frame grants currently follow lowering order; prefer loops if measurements
+  justify it. The `nbody` delta after the
+  reviewed by-value rule (861.2 M → 867.2 M) is attributed to a loop-alignment
+  NOP executed six million times; retain the profile for future code-layout work.
 
 ## Bugs
 

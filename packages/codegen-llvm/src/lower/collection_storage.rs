@@ -1,7 +1,8 @@
 //! Immutable collection storage. Stack allocations have compile-time sizes
 //! and live in the entry block, including constructions inside loops.
 
-use fa_analyzer::ids::{NodeId, SymbolId};
+use fa_analyzer::analysis::Callee;
+use fa_analyzer::ids::{FileId, NodeId, SymbolId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
 use inkwell::module::Linkage;
@@ -14,6 +15,7 @@ use crate::lower::values::{Repr, Val};
 
 const COLLECTION_BUDGET: u64 = 2048;
 const FRAME_BUDGET: u64 = 4096;
+const RECURSIVE_FRAME_BUDGET: u64 = 512;
 
 #[derive(Clone, Copy)]
 pub(super) struct CollectionBuffer<'ctx> {
@@ -22,6 +24,73 @@ pub(super) struct CollectionBuffer<'ctx> {
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// The resolved graph includes methods and source generic declarations.
+	/// Instances inherit their declaration's cycle; indirect recursion is not
+	/// inferred from function values. Nested function bodies have their own node.
+	pub(super) fn index_recursive_functions(&mut self, files: &[FileId]) {
+		let mut graph = rustc_hash::FxHashMap::default();
+		for &file in files {
+			self.switch_file(file);
+			for info in self.analysis.functions.values() {
+				let key = (file, info.declaration.unwrap_or(info.lambda));
+				let mut edges = Vec::new();
+				let mut pending = vec![info.body];
+				pending.extend(info.params.iter().filter_map(|p| p.default));
+				while let Some(node) = pending.pop() {
+					if matches!(self.view(node), View::Lambda { .. } | View::Function { .. }) {
+						continue;
+					}
+					if let Some(call) = self.analysis.call(node) {
+						let target = match call.callee {
+							Callee::Function(target) => Some((file, target)),
+							Callee::Value => match self.view(node) {
+								View::Call { callee, .. } => self.callee_function(callee),
+								_ => None,
+							},
+							_ => None,
+						};
+						if let Some(target) = target {
+							edges.push(target);
+						}
+					}
+					self.tree.nodes[node.index()]
+						.for_each_child(|child| pending.push(NodeId::new(child)));
+				}
+				graph.insert(key, edges);
+			}
+		}
+		let mut keys: Vec<_> = graph.keys().copied().collect();
+		keys.sort_unstable();
+		let indices: rustc_hash::FxHashMap<_, _> =
+			keys.iter().enumerate().map(|(i, key)| (*key, i)).collect();
+		let edges: Vec<Vec<usize>> = keys
+			.iter()
+			.map(|key| {
+				graph[key]
+					.iter()
+					.filter_map(|key| indices.get(key).copied())
+					.collect()
+			})
+			.collect();
+		for component in fa_analyzer::graph::components(&edges) {
+			if component.len() > 1 || edges[component[0]].contains(&component[0]) {
+				self.recursive_functions
+					.extend(component.into_iter().map(|i| keys[i]));
+			}
+		}
+	}
+
+	pub(super) fn collection_budget_for(&self, owner: Option<NodeId>) -> u64 {
+		// Frame owners are source declarations even for generic instances.
+		let recursive =
+			owner.is_some_and(|owner| self.recursive_functions.contains(&(self.file, owner)));
+		if recursive {
+			RECURSIVE_FRAME_BUDGET
+		} else {
+			FRAME_BUDGET
+		}
+	}
+
 	/// A closed proof: every read borrows the collection as an indexed
 	/// receiver or iterable. Owning stores, returns and unknown uses choose
 	/// heap storage before construction, without introducing a copy-out.
@@ -137,7 +206,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.values()
 				.any(|f| f.captures.contains(&symbol))
 			|| bytes > COLLECTION_BUDGET
-			|| self.frame().collection_bytes + bytes > FRAME_BUDGET
+			|| self.frame().collection_bytes + bytes > self.frame().collection_budget
 		{
 			return Ok(None);
 		}
@@ -274,11 +343,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if matches!(self.node_repr(node)?, Repr::Columnar(_)) {
 			return Ok(None);
 		}
+		let bytes = COLLECTION_BUDGET.min(
+			self.frame()
+				.collection_budget
+				.saturating_sub(self.frame().collection_bytes),
+		);
+		if bytes < 64 {
+			return Ok(None);
+		}
 		Ok(self
-			.collection_stack(node, COLLECTION_BUDGET)?
+			.collection_stack(node, bytes)?
 			.map(|pointer| CollectionBuffer {
 				pointer,
-				bytes: self.usize.const_int(COLLECTION_BUDGET, false),
+				bytes: self.usize.const_int(bytes, false),
 			}))
 	}
 

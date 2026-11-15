@@ -1396,3 +1396,88 @@ pas cette archive. La provenance explicite du JSON fait foi.
 Le dernier correctif distingue les symboles locaux par fichier, y compris
 lors de la résolution des globaux importés. Les 27 exécutables sont reconstruits
 après ce correctif et restent identiques aux exécutables mesurés.
+
+
+## Revue Fable : petits retours et budget récursif (15 novembre 2026, point bloquant)
+
+Les petits objets/tuples retournent de nouveau en SSA suivant la règle de
+layout relue : au plus deux feuilles scalaires et 16 octets en 64 bits,
+exactement une feuille sur wasm32. Les autres gardent leur destination.
+Le graphe des appels directs, méthodes et déclarations génériques compris,
+limite les cadres récursifs à 512 octets ; l’offre d’un appel prend le budget
+restant (minimum utile de 64 octets). Les fonctions natives et leurs helpers
+sondent les pages de pile sur x86-64/aarch64. Un test O0 de récursion avec
+un tuple vivant de 8 KiB atteint le garde et produit le stop attendu.
+
+`hot.py` et le désassemblage isolent le coût : le constructeur récursif
+passait de **93 006 950 à 102 673 520** instructions propres. Le pointeur de
+sortie ajoutait un registre sauvegardé, un emplacement d’alignement, des
+mouvements d’arguments et des écritures jusque dans les feuilles. Avec le
+retour en registres, le constructeur revient exactement à **93 006 950** ;
+le parcours reste à **59 577 752**. Le programme complet passe de
+156 028 780 à 156 029 449 (+0,0004 %, démarrage inclus).
+
+L’audit est relancé sur les 27 variantes, avec Goose reconstruit par clang 18
+`-O2`, sorties vérifiées contre Rust. Toutes respectent le seuil +1 % :
+
+| Programme | Instructions avant → après | Écart |
+|---|---:|---:|
+| binary-trees | 156,028,780 → 156,029,449 | +0.0004 % |
+| blur | 96,721,766 → 96,722,457 | +0.0007 % |
+| calc | 329,037,800 → 329,238,477 | +0.0610 % |
+| fannkuch-redux | 137,603,626 → 137,604,300 | +0.0005 % |
+| fib | 236,886,701 → 236,887,378 | +0.0003 % |
+| graph | 10,342,195 → 10,342,900 | +0.0068 % |
+| interp | 17,180,456 → 17,181,147 | +0.0040 % |
+| lru | 42,253,247 → 42,253,925 | +0.0016 % |
+| mandelbrot | 440,663,042 → 440,663,747 | +0.0002 % |
+| nbody | 861,181,756 → 867,182,318 | +0.6968 % |
+| particles | 105,138,835 → 105,139,540 | +0.0007 % |
+| push | 135,092,768 → 135,093,459 | +0.0005 % |
+| records | 134,552,123 → 134,552,800 | +0.0005 % |
+| respond | 344,627,722 → 346,045,541 | +0.4114 % |
+| scene | 9,356,864 → 9,194,827 | -1.7317 % |
+| sexp | 184,602,668 → 184,603,359 | +0.0004 % |
+| sieve | 203,734,935 → 203,735,612 | +0.0003 % |
+| sort-objects | 161,223,444 → 137,908,958 | -14.4610 % |
+| spectral-norm | 530,737,431 → 530,738,072 | +0.0001 % |
+| string-building | 174,411,052 → 167,615,382 | -3.8964 % |
+| string-building-bytes | 177,364,862 → 175,421,192 | -1.0959 % |
+| string-building-growing | 224,642,352 → 224,199,873 | -0.1970 % |
+| strlist | 154,731,837 → 154,732,517 | +0.0004 % |
+| sum | 158,580,461 → 158,581,166 | +0.0004 % |
+| tree | 72,668,727 → 72,407,284 | -0.3598 % |
+| word-count | 247,576,942 → 211,120,481 | -14.7253 % |
+| words | 46,367,819 → 46,368,515 | +0.0015 % |
+
+`nbody` garde +0,70 % : le profil attribue les six millions d’instructions
+supplémentaires à un NOP d’alignement sur le chemin chaud, exécuté six millions
+de fois. Les opérations de la boucle sont les mêmes ; ce n’est pas une copie
+répétée du tuple retourné. Les mesures CPU à 21 passages restent à relancer
+après décision du point suivant.
+
+**Point bloquant : règles d’offre et porte de récursion incompatibles.** Le même
+programme garde `let words = text.split(" ")` vivant après l’appel récursif.
+À O3, pile native bornée à 256 KiB, pile wasm par défaut de 1 MiB :
+
+| Cible | Profondeur à 591e050d | Offre 512 octets prescrite | Expérience : offre 128 octets |
+|---|---:|---:|---:|
+| native | 1 226 | 359 | 791 |
+| wasm | 7 308 | 1 839 | 5 462 |
+
+L’offre 512 réduit la profondeur de plus d’un facteur deux sur les deux cibles.
+L’expérience 128 respecte cette porte. Elle n’est pas retenue dans le code :
+Fable doit choisir entre plafonner les offres récursives à 128 octets en gardant
+512 octets au total (recommandé), ou abaisser tout le budget récursif à 128.
+Aucune règle ne dépend du benchmark ni du type des éléments.
+
+Données, profils chauds annotés et désassemblés, journaux clang et essais de
+profondeur : `native-goose-stack-review-results.json`.
+
+Le contrôle CPU de `binary-trees` est déjà relancé : **21 passages alternés
+sur CPU 1**, 157.848 → 159.347 ms (+0.95 %). Dans ce même
+contrôle, Callgrind donne 156 026 397 → 156 026 408 instructions (+11).
+Le workspace complet, clippy sans avertissement, 54 contrôles LLVM, le test
+de garde de pile, 42 exécutions avec détection des fuites native/freestanding/wasm
+à O0/O3, les snippets et le site passent. Les 26 autres mesures CPU attendent
+la décision sur l’offre récursive.

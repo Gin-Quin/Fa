@@ -482,7 +482,8 @@ applies to arrays, maps, sets, pools, columnars, their growing variants, and
 Implementation choices:
 
 - **Budgets:** at most 2 KiB per collection and 4 KiB of collection storage per
-  function invocation, including headers, alignment, indices and directories.
+  non-recursive function invocation (512 bytes in a resolved direct-call cycle;
+  see the reviewed rule below), including headers, alignment, indices and directories.
   Two KiB accommodates an ordinary stable-table chunk and its index, or small
   pool/segment bookkeeping; the frame cap bounds the sum of many such literals.
   The limits are shared by every target rather than tuned to a benchmark.
@@ -506,7 +507,7 @@ Implementation choices:
   builtin or user function must be built directly in caller-provided storage
   (a local, field, collection slot or forwarded return destination). Returning
   is therefore not an escape. This rule also applies to objects and tuples:
-  returned aggregates must not be copied. Existing SSA moves, early recursive
+  returned aggregates must not be copied through memory. Existing SSA moves, early recursive
   boxes, direct construction of pushed object literals and foreign `sret` are
   useful foundations, but do not implement a universal destination-passing ABI.
   Until that ABI reaches a construction path, use the existing heap return and
@@ -528,7 +529,8 @@ Implementation choices:
   retain its segment addresses and any later segments must remain independently allocated.
 - **Construction scope:** literals directly initializing a `let`, and nonempty
   separator `String.split` directly initializing a proven non-escaping local.
-  `split` receives a fixed 2 KiB caller buffer. A byte-length upper bound can
+  `split` receives a fixed caller buffer up to 2 KiB, bounded by the remaining
+  frame budget (see the reviewed offer rule below). A byte-length upper bound can
   prove it fits without counting; otherwise counting stops as soon as the slot
   budget is exceeded. It chooses the frame or ordinary heap path before building
   any items. The bounded scan trades some CPU work for avoiding allocation and
@@ -544,6 +546,52 @@ Implementation choices:
 The implementation report and tests specify the currently covered constructors
 and element shapes; this decision is the intended rule for every collection,
 not a claim that all construction paths have been converted at once.
+
+
+### Reviewed by Fable for the user (2026-11-15)
+
+These verdicts supersede the initial implementation choices above:
+
+- **Confirmed:** fixed byte budgets shared by targets, conservative escape
+  proofs, runtime object-columnar heap chunks, completed-prefix cleanup,
+  static no-op drops, frame item destruction without freeing the frame, and
+  no stack-to-heap copy-out. Larger aggregates and collections retain caller
+  destinations, forwarding through calls, function values, branches, named
+  locals and nested construction.
+- **Small aggregates return by value:** on 64-bit targets, an object/tuple
+  whose layout flattens to at most two scalar leaves and at most 16 bytes
+  retains the baseline SSA return. On wasm32, exactly one scalar leaf returns
+  by value. Other aggregates use output slots. Throwing small-value functions
+  keep `{ value, error }`. The return layout, per generic instance, is the only
+  selection input, shared by direct calls, thunks, function values and lambdas.
+  “Never copied” forbids a copy through memory: register results store directly
+  into their final early box, field or element. Parent-before-child allocation
+  remains; returned-local coalescing applies only to output-slot types.
+- **Recursive budget:** 4 KiB per non-recursive frame, reduced to 512 bytes for
+  functions in a resolved direct-call cycle, including methods and generic
+  instances. The source declaration's cycle applies to each instance. Literal
+  blocks retain their exact aligned size, within both byte budgets. Recursion
+  through function values is not detected in this revision, as accepted by
+  the review.
+- **Call-result offers:** reserve `min(2 KiB, remaining frame budget)`, and
+  offer nothing below 64 bytes. Select final frame or heap storage before
+  constructing items; do not copy out later.
+- **Output alias invariant:** an output destination is never reachable from
+  an argument, capture or global during the call. This justifies `noalias`.
+  Future forwarding into existing fields or ordinary push/insert slots must
+  prove this invariant, or use a variant without `noalias`.
+- **Stack probes:** native functions, generated helpers and linked runtime
+  definitions use `"probe-stack"="inline-asm"` on x86-64 and aarch64. LLVM 18
+  was checked with a 16 KiB aarch64 frame: it touches each crossed 4 KiB page.
+  A large frame must not jump over a worker's guard page. This does not add
+  freestanding signal recovery or per-worker alternate signal stacks.
+
+Validation found a conflict between the prescribed 512-byte recursive call offer
+and the factor-two recursion-depth gate: a live split local reaches only
+359/1,226 native and 1,839/7,308 wasm levels relative to the baseline. A
+128-byte recursive offer reaches 791 and 5,462 respectively. This experiment
+is not retained; the offer policy awaits Fable. Full data is in
+`native-goose-stack-review-results.json`.
 
 
 ## Capacity and reserve on every collection (2026-11-15)

@@ -1,0 +1,4 @@
+-- Specification example: strings 02
+let message = "First line
+Second line"
+

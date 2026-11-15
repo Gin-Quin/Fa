@@ -1,0 +1,3 @@
+-- Specification example: strings 06
+let literal = "Braces: {{ and }}" -- "Braces: { and }"
+

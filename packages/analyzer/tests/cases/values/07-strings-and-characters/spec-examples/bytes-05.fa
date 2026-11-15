@@ -1,0 +1,5 @@
+-- Specification example: bytes 05
+let name = "Zoé"
+
+assert name.length == 3
+assert name.utf8Length() == 4

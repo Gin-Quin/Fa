@@ -1,0 +1,4 @@
+-- Specification example: strings 03
+let immutableValue = "You can't change me"
+mutable mutableValue = "But you can change me"
+

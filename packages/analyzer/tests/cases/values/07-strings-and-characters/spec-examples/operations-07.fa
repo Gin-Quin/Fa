@@ -1,0 +1,5 @@
+-- Specification example: operations 7
+let clean = "hello-world".replace("-", " ")
+let all = "a-b-c".replaceAll("-", " ")
+let parts = "a,b,c".split(",")        -- ["a", "b", "c"]
+let joined = parts.join(", ")         -- "a, b, c"

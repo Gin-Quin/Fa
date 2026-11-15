@@ -77,6 +77,12 @@ let parts = "a,b,c".split(",")        -- ["a", "b", "c"]
 let joined = parts.join(", ")         -- "a, b, c"
 ```
 
+`replace` replaces the first match and `replaceAll` replaces every match. The replacement is inserted as written: `$` has no special meaning, including `$$`, `$&`, `` $` `` and `$'`.
+
+```fa
+assert "a-b".replace("-", "$&") == "a$&b"
+```
+
 ## Methods
 
 No method changes the string it is called on, except `reserve`: a `mutable` string is only changed by assignment and `+=`.
@@ -151,3 +157,9 @@ assert "Abc".toLowerCase() == "abc"
 ```
 
 Comparison is by UTF-16 code unit, as in JavaScript, not by locale. It is the order of the code points, except that the characters outside the Basic Multilingual Plane (most emoji) come before the characters from `U+E000` to `U+FFFF`. For locale-aware ordering, use `String.compareLocale(a, b)`, which returns a negative integer when `a` comes first, zero when they are equivalent, and a positive integer otherwise.
+
+:::implementation
+## Implementation details
+
+`replace` and `replaceAll` insert the replacement literally on every target, including compile-time evaluation. On JavaScript, emit a replacement literal without `$` as it is; double each `$` in a replacement literal that contains it. For a dynamic replacement, evaluate it once and pass a replacement function returning that value, so JavaScript never interprets replacement patterns. Preserve the evaluation order of the receiver, search and replacement.
+:::

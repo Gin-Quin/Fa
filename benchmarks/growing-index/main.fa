@@ -1,5 +1,5 @@
 -- Random indexed reads and writes, with no capacity hint or reservation.
--- The size is 16 or 1,000,000; the operation count is independent of it.
+-- The size is 16, 1,000 or 1,000,000; the operation count is independent of it.
 let modulus = 1_000_000_007
 let operations = 4_000_000
 

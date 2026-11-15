@@ -2587,7 +2587,7 @@ FA_EXPORT void *fa_string_split_into(const uint8_t *text, size_t length, size_t 
 // `s = floor(log2(i >> k)) + 1` (0 when `i < 2^k`): one `clz`.
 
 #define FA_SEGMENTS ((int32_t)(sizeof(void *) * 8))
-#define FA_DIRECTORY_INITIAL 8
+#define FA_DIRECTORY_INITIAL (FA_INLINE_SEGMENTS + 8)
 #define FA_INLINE_SEGMENTS 3
 
 /// A `GrowingArray` (`src/lower/growing.rs`). `cursor` is the address of
@@ -2607,15 +2607,14 @@ typedef struct {
 
 _Static_assert(sizeof(FaSegmented) == (sizeof(void *) == 8 ? 64 : 40), "compact growing header");
 
-/// Only the overflow pointers live in the directory; the first three always
-/// live in the header, even after the directory is allocated or moved.
+/// The directory always contains every pointer: the header's inline slots
+/// until segment four, then a heap table with copies of those three slots.
 static uint8_t *segmented_items(const FaSegmented *array, int64_t segment) {
-	return segment < FA_INLINE_SEGMENTS ? array->inline_segment[segment]
-	                                    : array->segment[segment - FA_INLINE_SEGMENTS];
+	return array->segment[segment];
 }
 
 static size_t segmented_directory_entries(const FaSegmented *array) {
-	return array->segments <= FA_INLINE_SEGMENTS + FA_DIRECTORY_INITIAL
+	return array->segments <= FA_DIRECTORY_INITIAL
 	           ? FA_DIRECTORY_INITIAL : FA_SEGMENTS;
 }
 
@@ -2629,13 +2628,10 @@ static void segmented_free_directory(FaSegmented *array) {
 /// The segment of item `index`, and the index of its first item.
 static __attribute__((always_inline)) inline int64_t segment_of(int64_t index, int32_t k,
                                                                 int64_t *first) {
-	if ((uint64_t)index < ((uint64_t)1 << k)) {
-		*first = 0;
-		return 0;
-	}
+	uint64_t capacity = (uint64_t)1 << k;
 	uint64_t high = (uint64_t)index >> k;
-	int64_t segment = 64 - __builtin_clzll(high);
-	*first = (int64_t)1 << (k + segment - 1);
+	int64_t segment = 63 - __builtin_clzll((high << 1) | 1);
+	*first = (int64_t)(((capacity << segment) >> 1) & -capacity);
 	return segment;
 }
 
@@ -2689,18 +2685,18 @@ static void segmented_allocate(FaSegmented *array, int64_t item_size) {
     int32_t shift = segment == 0 ? array->k : array->k + segment - 1;
     if (segment >= FA_SEGMENTS || shift >= (segment == 0 ? 63 : 62) ||
         (item_size > 0 && (uint64_t)segment_size(segment, array->k) > SIZE_MAX / (uint64_t)item_size)) { out_of_memory(); }
-    if (segment == FA_INLINE_SEGMENTS || segment == FA_INLINE_SEGMENTS + FA_DIRECTORY_INITIAL) {
+    if (segment == FA_INLINE_SEGMENTS || segment == FA_DIRECTORY_INITIAL) {
         size_t entries = segment == FA_INLINE_SEGMENTS ? FA_DIRECTORY_INITIAL : FA_SEGMENTS;
         uint8_t **directory = fa_alloc(entries * sizeof(uint8_t *), sizeof(void *));
+        size_t previous = segment == FA_INLINE_SEGMENTS ? FA_INLINE_SEGMENTS : FA_DIRECTORY_INITIAL;
+        copy_bytes((uint8_t *)directory, (const uint8_t *)array->segment, previous * sizeof(uint8_t *));
         if (segment > FA_INLINE_SEGMENTS) {
-            copy_bytes((uint8_t *)directory, (const uint8_t *)array->segment, FA_DIRECTORY_INITIAL * sizeof(uint8_t *));
             fa_free(array->segment, FA_DIRECTORY_INITIAL * sizeof(uint8_t *), sizeof(void *));
         }
         array->segment = directory;
     }
     uint8_t *items = fa_alloc((size_t)segment_size(segment, array->k) * (size_t)item_size, 16);
-    if (segment < FA_INLINE_SEGMENTS) { array->inline_segment[segment] = items; }
-    else { array->segment[segment - FA_INLINE_SEGMENTS] = items; }
+    array->segment[segment] = items;
     array->segments += 1;
 }
 

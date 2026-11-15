@@ -1206,8 +1206,8 @@ static void test_storage_hints(void) {
     fa_segmented_free(a, 1, 6);
     fa_segmented_free(b, 8, 3);
 
-    // The first three pointers remain inline. Eight overflow pointers cover
-    // segments 3..10; adding segment 11 moves only the directory.
+    // The first three pointers remain inline and are mirrored in the heap
+    // directory. Eleven slots cover segments 0..10 before its one reallocation.
     long bytes_before = allocated_bytes;
     FaSegmented *directory = fa_segmented_new();
     int64_t *kept = 0;
@@ -1220,7 +1220,10 @@ static void test_storage_hints(void) {
             CHECK(directory->segments == 4);
             small = directory->segment;
             CHECK(small != directory->inline_segment);
-            CHECK(allocated_bytes - bytes_before == (long)(sizeof(FaSegmented) + 64 * sizeof(int64_t) + 8 * sizeof(void *)));
+            for (int slot = 0; slot < FA_INLINE_SEGMENTS; slot += 1) {
+                CHECK(directory->segment[slot] == directory->inline_segment[slot]);
+            }
+            CHECK(allocated_bytes - bytes_before == (long)(sizeof(FaSegmented) + 64 * sizeof(int64_t) + FA_DIRECTORY_INITIAL * sizeof(void *)));
         }
         if (i == 8191) { CHECK(directory->segments == 11 && directory->segment == small); }
     }
@@ -1240,7 +1243,19 @@ static void test_storage_hints(void) {
     directory = fa_segmented_new();
     for (int64_t i = 0; i < 40; i += 1) { *(int64_t *)fa_segmented_push_slot(directory, sizeof(int64_t), 3) = i; }
     fa_segmented_free(directory, sizeof(int64_t), 3);
-    CHECK(allocated_bytes == bytes_before); // free the eight-entry directory too
+    CHECK(allocated_bytes == bytes_before); // free the eleven-entry directory too
+    for (int k = 0; k <= 6; k += 1) {
+        FaSegmented *formula = fa_segmented_new();
+        fa_segmented_reserve(formula, (int64_t)1 << k, sizeof(int64_t), 3);
+        for (int64_t i = 0; i < 5000; i += 1) {
+            *(int64_t *)fa_segmented_push_slot(formula, sizeof(int64_t), 3) = i;
+        }
+        for (int64_t i = 0; i < 5000; i += 1) {
+            CHECK(*(int64_t *)fa_segmented_at(formula, i, sizeof(int64_t), 3) == i);
+        }
+        fa_segmented_free(formula, sizeof(int64_t), 3);
+    }
+    CHECK(allocated_bytes == bytes_before);
     for (int mode = 0; mode < 3; mode += 1) {
         FaTable *table = mode == 0 ? fa_table_new(4, sizeof(TestTableEntry))
                          : mode == 1 ? fa_table_new_growing(4, sizeof(TestTableEntry))

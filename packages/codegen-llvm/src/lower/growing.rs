@@ -194,83 +194,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		k: IntValue<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
 		let i64 = self.context.i64_type();
-		let function = builder
-			.get_insert_block()
-			.and_then(|block| block.get_parent())
-			.expect("a function");
-		let segment_items = |builder: &Builder<'ctx>, segment: IntValue<'ctx>| {
-			let field = builder.build_struct_gep(self.segmented_type(), array, 5, "")?;
-			let directory = builder.build_load(self.pointer_type(), field, "segments")?;
-			self.tag(
-				inkwell::values::BasicValue::as_instruction_value(&directory).expect("a load"),
-				true,
-			)?;
-			let inline = builder.build_struct_gep(self.segmented_type(), array, 6, "")?;
-			// One past the inline array is a valid base for negative offsets
-			// back into it. The overflow directory uses nonnegative offsets.
-			// Both choices therefore share segment - SEGMENTS, without forming
-			// a pointer before either allocation.
-			let inline_end = unsafe {
-				builder.build_in_bounds_gep(
-					self.pointer_type(),
-					inline,
-					&[i64.const_int(u64::from(SEGMENTS), false)],
-					"",
-				)?
-			};
-			let in_header = builder.build_int_compare(
-				IntPredicate::ULT,
-				segment,
-				i64.const_int(u64::from(SEGMENTS), false),
-				"inline_segment",
-			)?;
-			let base = builder
-				.build_select(
-					in_header,
-					inline_end,
-					directory.into_pointer_value(),
-					"segment_base",
-				)?
-				.into_pointer_value();
-			let offset =
-				builder.build_int_sub(segment, i64.const_int(u64::from(SEGMENTS), false), "")?;
-			let slot =
-				unsafe { builder.build_in_bounds_gep(self.pointer_type(), base, &[offset], "")? };
-			let items = builder.build_load(self.pointer_type(), slot, "segment_items")?;
-			self.tag(
-				inkwell::values::BasicValue::as_instruction_value(&items).expect("a load"),
-				true,
-			)?;
-			Ok::<_, Error>(items.into_pointer_value())
-		};
-		let first_capacity =
-			builder.build_left_shift(i64.const_int(1, false), k, "first_capacity")?;
-		let in_first =
-			builder.build_int_compare(IntPredicate::ULT, index, first_capacity, "first_segment")?;
-		let first_block = self.context.append_basic_block(function, "first_segment");
-		let later_block = self.context.append_basic_block(function, "later_segment");
-		let join = self.context.append_basic_block(function, "segment_item");
-		builder.build_conditional_branch(in_first, first_block, later_block)?;
-		builder.position_at_end(first_block);
-		let first_slot = builder.build_struct_gep(self.segmented_type(), array, 6, "")?;
-		let items = builder.build_load(self.pointer_type(), first_slot, "first_items")?;
-		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&items) {
-			self.tag(instruction, true)?;
-		}
-		let items = items.into_pointer_value();
-		let in_first_segment =
-			unsafe { builder.build_in_bounds_gep(self.llvm_type(item), items, &[index], "")? };
-		builder.build_unconditional_branch(join)?;
-		builder.position_at_end(later_block);
-		// Here index >= 2^k, hence it is nonzero. Its highest set bit
-		// gives both the segment and its start without shifting the index
-		// before ctlz: floor(log2(index)) - k + 1.
+		// The in-bounds index is nonnegative. Even for k = 0, 2t + 1
+		// fits in u64 and is never zero, so ctlz lowers to a bare bsr.
+		let t = builder.build_right_shift(index, k, false, "segment_high")?;
+		let twice = builder.build_left_shift(t, i64.const_int(1, false), "")?;
+		let encoded = builder.build_or(twice, i64.const_int(1, false), "segment_code")?;
 		let ctlz = self.intrinsic("llvm.ctlz", &[i64.into()])?;
 		let zeros = builder
 			.build_call(
 				ctlz,
 				&[
-					index.into(),
+					encoded.into(),
 					self.context.bool_type().const_all_ones().into(),
 				],
 				"",
@@ -279,23 +213,40 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.basic()
 			.expect("a count")
 			.into_int_value();
-		let bit = builder.build_int_sub(i64.const_int(63, false), zeros, "index_bit")?;
-		let segment = builder.build_int_sub(bit, k, "")?;
-		let segment = builder.build_int_add(segment, i64.const_int(1, false), "segment")?;
-		let first = builder.build_left_shift(i64.const_int(1, false), bit, "")?;
-		let items = segment_items(builder, segment)?;
-		let later_end = builder.get_insert_block().expect("a block");
-		let offset = builder.build_int_sub(index, first, "")?;
-		let in_later_segment =
-			unsafe { builder.build_in_bounds_gep(self.llvm_type(item), items, &[offset], "")? };
-		builder.build_unconditional_branch(join)?;
-		builder.position_at_end(join);
-		let pointer = builder.build_phi(self.pointer_type(), "item")?;
-		pointer.add_incoming(&[
-			(&in_first_segment, first_block),
-			(&in_later_segment, later_end),
-		]);
-		Ok(pointer.as_basic_value().into_pointer_value())
+		let segment = builder.build_int_sub(i64.const_int(63, false), zeros, "segment")?;
+		let capacity = builder.build_left_shift(i64.const_int(1, false), k, "first_capacity")?;
+		let end = builder.build_left_shift(capacity, segment, "")?;
+		let half = builder.build_right_shift(end, i64.const_int(1, false), false, "")?;
+		let mask = builder.build_int_neg(capacity, "")?;
+		let start = builder.build_and(half, mask, "segment_start")?;
+		let field = builder.build_struct_gep(self.segmented_type(), array, 5, "")?;
+		let directory = builder.build_load(self.pointer_type(), field, "segments")?;
+		self.tag(
+			inkwell::values::BasicValue::as_instruction_value(&directory).expect("a load"),
+			true,
+		)?;
+		let slot = unsafe {
+			builder.build_in_bounds_gep(
+				self.pointer_type(),
+				directory.into_pointer_value(),
+				&[segment],
+				"",
+			)?
+		};
+		let items = builder.build_load(self.pointer_type(), slot, "segment_items")?;
+		self.tag(
+			inkwell::values::BasicValue::as_instruction_value(&items).expect("a load"),
+			true,
+		)?;
+		let offset = builder.build_int_sub(index, start, "")?;
+		Ok(unsafe {
+			builder.build_in_bounds_gep(
+				self.llvm_type(item),
+				items.into_pointer_value(),
+				&[offset],
+				"",
+			)?
+		})
 	}
 
 	/// A `GrowingArray` taking the items of an owned array (not registered).

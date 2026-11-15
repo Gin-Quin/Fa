@@ -430,7 +430,7 @@ The language server keeps the trees of the 5 open documents' units only: the oth
 
 `growing-index/main.fa` uses an unreserved `GrowingArray<Integer>`;
 `array.fa` uses an unreserved `Array<Integer>`, Goose uses `i64[>..]`,
-and `main.rs` is the safe `Vec` reference. Each fills 16 or 1,000,000 items,
+and `main.rs` is the safe `Vec` reference. Each fills 16, 1,000 or 1,000,000 items,
 then performs four million random reads and four million random writes using
 Park-Miller (seed 7), and prints the read checksum and final item checksum
 modulo 1,000,000,007. Initialization and the final sequential checksum are
@@ -439,10 +439,11 @@ at these sizes.
 
 ```bash
 python3 benchmarks/audit/compare.py growing-index growing-index-array --size 16 --directory benchmarks/audit/build/index-small --profile
+python3 benchmarks/audit/compare.py growing-index growing-index-array --size 1000 --directory benchmarks/audit/build/index-cache --profile
 python3 benchmarks/audit/compare.py growing-index growing-index-array --size 1000000 --directory benchmarks/audit/build/index-large --profile
 ```
 
 Use `benchmarks/audit/variants.py` for 21 alternating runs of all three
 executables together, pinned to CPU 1, with user plus system CPU time. Pass
 Rust's output through `--expected` and `--profile-expected`; both `--size`
-and `--profile-size` are 16 for the small row and 1,000,000 for the large row.
+and `--profile-size` are 16, 1,000 or 1,000,000 for the three rows.

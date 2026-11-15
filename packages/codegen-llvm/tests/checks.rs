@@ -978,6 +978,28 @@ console.log(items.length)
 	}
 
 	#[test]
+	fn growing_lookup_has_no_index_dependent_branch_beyond_bounds() {
+		let source = "function lookup = (items: GrowingArray<Integer>, index: Integer<min = 0>): Integer throws IndexError => try items[index]\nmutable items: GrowingArray<Integer> = []\nfor value in 0..1000 { items.push(value) }\nconsole.log(try lookup(items, 7), try lookup(items, 900))\n";
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("growing-branchless-{}", target.name()),
+				source,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let lookup = function(&ir, "fa.lookup");
+			// Exactly the bounds guard and the index-independent segment-count
+			// guard. The lookup itself contains no branch and no select.
+			assert_eq!(count(lookup, "br i1"), 2, "{lookup}");
+			assert_eq!(count(lookup, "icmp "), 2, "{lookup}");
+			assert_eq!(count(lookup, "@llvm.ctlz.i64("), 1, "{lookup}");
+			assert!(lookup.contains("segment_code = or i64"), "{lookup}");
+			assert!(!lookup.contains("select i1"), "{lookup}");
+		}
+	}
+
+	#[test]
 	fn growing_default_k_requires_a_closed_empty_origin() {
 		let prefix = "mutable items: GrowingArray<Integer> = []\nfor value in 0..40 { items.push(value) }\nlet index = try Integer.parse(arguments.get(0) ?? \"9\")\n";
 		let plain = ir_of(

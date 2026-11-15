@@ -183,7 +183,7 @@ def main():
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--default-sizes", action="store_true")
-    parser.add_argument("--size", type=int, help="Override the selected sizes (growing-index: 16 or 1000000)")
+    parser.add_argument("--size", type=int, help="Override the selected sizes (growing-index: 16, 1000 or 1000000)")
     parser.add_argument("--profile", action="store_true")
     parser.add_argument("--goose-runtime-size", action="store_true",
                         help="Read BENCH_N from argv in generated Goose copies, keeping checkfree")

@@ -6351,45 +6351,27 @@ define hidden ptr @fa_segmented_at(ptr nocapture noundef readonly %0, i64 nounde
   %6 = load i32, ptr %5, align 4, !tbaa !113
   %7 = icmp slt i32 %6, 0
   %8 = select i1 %7, i32 %3, i32 %6
-  %9 = zext nneg i32 %8 to i64
-  %10 = lshr i64 %1, %9
-  %11 = icmp eq i64 %10, 0
-  br i1 %11, label %20, label %12
-
-12:                                               ; preds = %4
-  %13 = tail call i64 @llvm.ctlz.i64(i64 %10, i1 true), !range !41
-  %14 = sub nuw nsw i64 64, %13
-  %15 = sext i32 %8 to i64
-  %16 = sub nsw i64 %15, %13
-  %17 = add nsw i64 %16, 63
-  %18 = shl nuw i64 1, %17
-  %19 = icmp ult i64 %10, 4
-  br i1 %19, label %20, label %25
-
-20:                                               ; preds = %4, %12
-  %21 = phi i64 [ %14, %12 ], [ 0, %4 ]
-  %22 = phi i64 [ %18, %12 ], [ 0, %4 ]
-  %23 = trunc i64 %21 to i32
-  %24 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %23
-  br label %31
-
-25:                                               ; preds = %12
-  %26 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %27 = load ptr, ptr %26, align 8, !tbaa !116
-  %28 = trunc i64 %14 to i32
-  %29 = getelementptr ptr, ptr %27, i32 %28
-  %30 = getelementptr ptr, ptr %29, i32 -3
-  br label %31
-
-31:                                               ; preds = %20, %25
-  %32 = phi i64 [ %22, %20 ], [ %18, %25 ]
-  %33 = phi ptr [ %24, %20 ], [ %30, %25 ]
-  %34 = load ptr, ptr %33, align 4, !tbaa !6
-  %35 = sub nsw i64 %1, %32
-  %36 = mul nsw i64 %35, %2
-  %37 = trunc i64 %36 to i32
-  %38 = getelementptr inbounds i8, ptr %34, i32 %37
-  ret ptr %38
+  %9 = zext i32 %8 to i64
+  %10 = shl nuw i64 1, %9
+  %11 = lshr i64 %1, %9
+  %12 = shl i64 %11, 1
+  %13 = or disjoint i64 %12, 1
+  %14 = tail call i64 @llvm.ctlz.i64(i64 %13, i1 true), !range !116
+  %15 = xor i64 %14, 63
+  %16 = shl i64 %10, %15
+  %17 = lshr i64 %16, 1
+  %18 = sub i64 0, %10
+  %19 = and i64 %17, %18
+  %20 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %21 = load ptr, ptr %20, align 8, !tbaa !117
+  %22 = trunc i64 %15 to i32
+  %23 = getelementptr inbounds ptr, ptr %21, i32 %22
+  %24 = load ptr, ptr %23, align 4, !tbaa !6
+  %25 = sub nsw i64 %1, %19
+  %26 = mul nsw i64 %25, %2
+  %27 = trunc i64 %26 to i32
+  %28 = getelementptr inbounds i8, ptr %24, i32 %27
+  ret ptr %28
 }
 
 ; Function Attrs: nounwind optsize
@@ -6400,7 +6382,7 @@ define hidden noundef ptr @fa_segmented_new() local_unnamed_addr #3 {
   store i32 -1, ptr %2, align 4, !tbaa !113
   %3 = getelementptr inbounds %struct.FaSegmented, ptr %1, i32 0, i32 7
   %4 = getelementptr inbounds %struct.FaSegmented, ptr %1, i32 0, i32 6
-  store ptr %3, ptr %4, align 8, !tbaa !116
+  store ptr %3, ptr %4, align 8, !tbaa !117
   ret ptr %1
 }
 
@@ -6416,17 +6398,17 @@ define hidden noundef ptr @fa_segmented_local(ptr noundef returned %0, i64 nound
   %9 = shl nuw i64 1, %8
   %10 = icmp ult i64 %9, %1
   %11 = add nsw i32 %7, 1
-  br i1 %10, label %6, label %12, !llvm.loop !117
+  br i1 %10, label %6, label %12, !llvm.loop !118
 
 12:                                               ; preds = %6
   %13 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 2
-  store i16 3, ptr %13, align 2, !tbaa !118
-  store i64 %1, ptr %0, align 8, !tbaa !119
+  store i16 3, ptr %13, align 2, !tbaa !119
+  store i64 %1, ptr %0, align 8, !tbaa !120
   %14 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
   store i32 %7, ptr %14, align 4, !tbaa !113
   %15 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
   %16 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  store ptr %15, ptr %16, align 8, !tbaa !116
+  store ptr %15, ptr %16, align 8, !tbaa !117
   %17 = icmp eq i64 %1, 0
   br i1 %17, label %32, label %18
 
@@ -6436,18 +6418,18 @@ define hidden noundef ptr @fa_segmented_local(ptr noundef returned %0, i64 nound
   %21 = and i32 %20, -16
   %22 = inttoptr i32 %21 to ptr
   %23 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 1
-  store i16 1, ptr %23, align 8, !tbaa !120
+  store i16 1, ptr %23, align 8, !tbaa !121
   store ptr %22, ptr %15, align 4, !tbaa !6
   %24 = mul nsw i64 %2, %1
   %25 = trunc i64 %24 to i32
   %26 = getelementptr inbounds i8, ptr %22, i32 %25
   %27 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  store ptr %26, ptr %27, align 8, !tbaa !121
+  store ptr %26, ptr %27, align 8, !tbaa !122
   %28 = shl i64 %2, %8
   %29 = trunc i64 %28 to i32
   %30 = getelementptr inbounds i8, ptr %22, i32 %29
   %31 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  store ptr %30, ptr %31, align 4, !tbaa !122
+  store ptr %30, ptr %31, align 4, !tbaa !123
   br label %32
 
 32:                                               ; preds = %18, %12
@@ -6457,7 +6439,7 @@ define hidden noundef ptr @fa_segmented_local(ptr noundef returned %0, i64 nound
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(argmem: read)
 define hidden i64 @fa_segmented_capacity(ptr nocapture noundef readonly %0) local_unnamed_addr #13 {
   %2 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 1
-  %3 = load i16, ptr %2, align 8, !tbaa !120
+  %3 = load i16, ptr %2, align 8, !tbaa !121
   %4 = icmp eq i16 %3, 0
   br i1 %4, label %17, label %5
 
@@ -6482,12 +6464,12 @@ define hidden i64 @fa_segmented_capacity(ptr nocapture noundef readonly %0) loca
 
 ; Function Attrs: nounwind optsize
 define hidden void @fa_segmented_reserve(ptr noundef %0, i64 noundef %1, i64 noundef %2, i32 %3) local_unnamed_addr #3 {
-  %5 = load i64, ptr %0, align 8, !tbaa !119
+  %5 = load i64, ptr %0, align 8, !tbaa !120
   %6 = tail call fastcc i64 @storage_total(i64 noundef %5, i64 noundef %1, i64 noundef %2) #52
   %7 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 1
-  %8 = load i16, ptr %7, align 8, !tbaa !120
+  %8 = load i16, ptr %7, align 8, !tbaa !121
   %9 = icmp eq i16 %8, 0
-  br i1 %9, label %80, label %10
+  br i1 %9, label %72, label %10
 
 10:                                               ; preds = %4
   %11 = sext i16 %8 to i64
@@ -6501,7 +6483,7 @@ define hidden void @fa_segmented_reserve(ptr noundef %0, i64 noundef %1, i64 nou
   %19 = icmp ne i16 %8, 1
   %20 = zext i1 %19 to i64
   %21 = shl i64 %18, %20
-  %22 = load i64, ptr %0, align 8, !tbaa !119
+  %22 = load i64, ptr %0, align 8, !tbaa !120
   %23 = icmp eq i64 %22, 0
   %24 = icmp sgt i16 %8, 0
   %25 = and i1 %24, %23
@@ -6509,11 +6491,11 @@ define hidden void @fa_segmented_reserve(ptr noundef %0, i64 noundef %1, i64 nou
   %27 = shl nuw i64 1, %26
   %28 = icmp sgt i64 %6, %27
   %29 = select i1 %25, i1 %28, i1 false
-  br i1 %29, label %30, label %80
+  br i1 %29, label %30, label %72
 
 30:                                               ; preds = %10
   %31 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 2
-  %32 = load i16, ptr %31, align 2, !tbaa !118
+  %32 = load i16, ptr %31, align 2, !tbaa !119
   %33 = icmp eq i16 %32, 3
   %34 = zext i1 %33 to i16
   %35 = icmp ugt i16 %8, %34
@@ -6525,283 +6507,249 @@ define hidden void @fa_segmented_reserve(ptr noundef %0, i64 noundef %1, i64 nou
   %39 = zext i1 %33 to i64
   br label %52
 
-40:                                               ; preds = %63, %30
-  %41 = phi i16 [ %8, %30 ], [ %74, %63 ]
+40:                                               ; preds = %52, %30
+  %41 = phi i16 [ %8, %30 ], [ %66, %52 ]
   %42 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %43 = load ptr, ptr %42, align 8, !tbaa !116
+  %43 = load ptr, ptr %42, align 8, !tbaa !117
   %44 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
   %45 = icmp eq ptr %43, %44
   br i1 %45, label %49, label %46
 
 46:                                               ; preds = %40
   %47 = icmp slt i16 %41, 12
-  %48 = select i1 %47, i32 32, i32 128
+  %48 = select i1 %47, i32 44, i32 128
   tail call void @fa_free(ptr noundef %43, i32 noundef %48, i32 noundef 4) #53
-  store ptr %44, ptr %42, align 8, !tbaa !116
+  store ptr %44, ptr %42, align 8, !tbaa !117
   br label %49
 
 49:                                               ; preds = %40, %46
-  store i16 0, ptr %7, align 8, !tbaa !120
-  %50 = load i16, ptr %31, align 2, !tbaa !118
+  store i16 0, ptr %7, align 8, !tbaa !121
+  %50 = load i16, ptr %31, align 2, !tbaa !119
   %51 = icmp eq i16 %50, 3
-  br i1 %51, label %77, label %78
+  br i1 %51, label %69, label %70
 
-52:                                               ; preds = %36, %63
-  %53 = phi i64 [ %39, %36 ], [ %73, %63 ]
-  %54 = icmp ult i64 %53, 3
-  br i1 %54, label %55, label %58
+52:                                               ; preds = %36, %52
+  %53 = phi i64 [ %39, %36 ], [ %65, %52 ]
+  %54 = load ptr, ptr %37, align 8, !tbaa !117
+  %55 = trunc i64 %53 to i32
+  %56 = getelementptr inbounds ptr, ptr %54, i32 %55
+  %57 = load ptr, ptr %56, align 4, !tbaa !6
+  %58 = load i32, ptr %13, align 4, !tbaa !113
+  %59 = sext i32 %58 to i64
+  %60 = tail call i64 @llvm.usub.sat.i64(i64 %53, i64 1)
+  %61 = add nsw i64 %60, %59
+  %62 = shl nuw i64 1, %61
+  %63 = trunc i64 %62 to i32
+  %64 = mul i32 %63, %38
+  tail call void @fa_free(ptr noundef %57, i32 noundef %64, i32 noundef 16) #53
+  %65 = add nuw nsw i64 %53, 1
+  %66 = load i16, ptr %7, align 8, !tbaa !121
+  %67 = sext i16 %66 to i64
+  %68 = icmp slt i64 %65, %67
+  br i1 %68, label %52, label %40, !llvm.loop !124
 
-55:                                               ; preds = %52
-  %56 = trunc i64 %53 to i32
-  %57 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %56
-  br label %63
+69:                                               ; preds = %49
+  store i16 4, ptr %31, align 2, !tbaa !119
+  br label %70
 
-58:                                               ; preds = %52
-  %59 = load ptr, ptr %37, align 8, !tbaa !116
-  %60 = trunc i64 %53 to i32
-  %61 = getelementptr ptr, ptr %59, i32 %60
-  %62 = getelementptr ptr, ptr %61, i32 -3
-  br label %63
+70:                                               ; preds = %49, %69
+  %71 = tail call i64 @llvm.smax.i64(i64 %6, i64 %21)
+  br label %77
 
-63:                                               ; preds = %55, %58
-  %64 = phi ptr [ %57, %55 ], [ %62, %58 ]
-  %65 = load ptr, ptr %64, align 4, !tbaa !6
-  %66 = load i32, ptr %13, align 4, !tbaa !113
-  %67 = sext i32 %66 to i64
-  %68 = tail call i64 @llvm.usub.sat.i64(i64 %53, i64 1)
-  %69 = add nsw i64 %68, %67
-  %70 = shl nuw i64 1, %69
-  %71 = trunc i64 %70 to i32
-  %72 = mul i32 %71, %38
-  tail call void @fa_free(ptr noundef %65, i32 noundef %72, i32 noundef 16) #53
-  %73 = add nuw nsw i64 %53, 1
-  %74 = load i16, ptr %7, align 8, !tbaa !120
-  %75 = sext i16 %74 to i64
-  %76 = icmp slt i64 %73, %75
-  br i1 %76, label %52, label %40, !llvm.loop !123
+72:                                               ; preds = %4, %10
+  %73 = phi i64 [ %21, %10 ], [ 0, %4 ]
+  %74 = icmp sgt i64 %6, %73
+  br i1 %74, label %75, label %125
 
-77:                                               ; preds = %49
-  store i16 4, ptr %31, align 2, !tbaa !118
-  br label %78
+75:                                               ; preds = %72
+  %76 = icmp eq i16 %8, 0
+  br i1 %76, label %77, label %89
 
-78:                                               ; preds = %49, %77
-  %79 = tail call i64 @llvm.smax.i64(i64 %6, i64 %21)
-  br label %85
+77:                                               ; preds = %70, %75
+  %78 = phi i64 [ %71, %70 ], [ %6, %75 ]
+  br label %79
 
-80:                                               ; preds = %4, %10
-  %81 = phi i64 [ %21, %10 ], [ 0, %4 ]
-  %82 = icmp sgt i64 %6, %81
-  br i1 %82, label %83, label %133
+79:                                               ; preds = %77, %79
+  %80 = phi i64 [ 0, %77 ], [ %85, %79 ]
+  %81 = icmp ult i64 %80, 62
+  %82 = shl nuw nsw i64 1, %80
+  %83 = icmp ult i64 %82, %78
+  %84 = select i1 %81, i1 %83, i1 false
+  %85 = add nuw nsw i64 %80, 1
+  br i1 %84, label %79, label %86, !llvm.loop !125
 
-83:                                               ; preds = %80
-  %84 = icmp eq i16 %8, 0
-  br i1 %84, label %85, label %97
+86:                                               ; preds = %79
+  %87 = trunc i64 %80 to i32
+  %88 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
+  store i32 %87, ptr %88, align 4, !tbaa !113
+  br label %89
 
-85:                                               ; preds = %78, %83
-  %86 = phi i64 [ %79, %78 ], [ %6, %83 ]
-  br label %87
+89:                                               ; preds = %86, %75
+  %90 = phi i64 [ %78, %86 ], [ %6, %75 ]
+  %91 = phi i16 [ 0, %86 ], [ %8, %75 ]
+  %92 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
+  br label %93
 
-87:                                               ; preds = %85, %87
-  %88 = phi i64 [ 0, %85 ], [ %93, %87 ]
-  %89 = icmp ult i64 %88, 62
-  %90 = shl nuw nsw i64 1, %88
-  %91 = icmp ult i64 %90, %86
-  %92 = select i1 %89, i1 %91, i1 false
-  %93 = add nuw nsw i64 %88, 1
-  br i1 %92, label %87, label %94, !llvm.loop !124
+93:                                               ; preds = %110, %89
+  %94 = phi i16 [ %111, %110 ], [ %91, %89 ]
+  %95 = icmp eq i16 %94, 0
+  br i1 %95, label %107, label %96
 
-94:                                               ; preds = %87
-  %95 = trunc i64 %88 to i32
-  %96 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  store i32 %95, ptr %96, align 4, !tbaa !113
-  br label %97
+96:                                               ; preds = %93
+  %97 = sext i16 %94 to i64
+  %98 = add nsw i64 %97, -1
+  %99 = load i32, ptr %92, align 4, !tbaa !113
+  %100 = sext i32 %99 to i64
+  %101 = tail call i64 @llvm.usub.sat.i64(i64 %98, i64 1)
+  %102 = add i64 %101, %100
+  %103 = shl nuw i64 1, %102
+  %104 = icmp ne i16 %94, 1
+  %105 = zext i1 %104 to i64
+  %106 = shl i64 %103, %105
+  br label %107
 
-97:                                               ; preds = %94, %83
-  %98 = phi i64 [ %86, %94 ], [ %6, %83 ]
-  %99 = phi i16 [ 0, %94 ], [ %8, %83 ]
-  %100 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  br label %101
+107:                                              ; preds = %93, %96
+  %108 = phi i64 [ %106, %96 ], [ 0, %93 ]
+  %109 = icmp slt i64 %108, %90
+  br i1 %109, label %110, label %112
 
-101:                                              ; preds = %118, %97
-  %102 = phi i16 [ %119, %118 ], [ %99, %97 ]
-  %103 = icmp eq i16 %102, 0
-  br i1 %103, label %115, label %104
-
-104:                                              ; preds = %101
-  %105 = sext i16 %102 to i64
-  %106 = add nsw i64 %105, -1
-  %107 = load i32, ptr %100, align 4, !tbaa !113
-  %108 = sext i32 %107 to i64
-  %109 = tail call i64 @llvm.usub.sat.i64(i64 %106, i64 1)
-  %110 = add i64 %109, %108
-  %111 = shl nuw i64 1, %110
-  %112 = icmp ne i16 %102, 1
-  %113 = zext i1 %112 to i64
-  %114 = shl i64 %111, %113
-  br label %115
-
-115:                                              ; preds = %101, %104
-  %116 = phi i64 [ %114, %104 ], [ 0, %101 ]
-  %117 = icmp slt i64 %116, %98
-  br i1 %117, label %118, label %120
-
-118:                                              ; preds = %115
+110:                                              ; preds = %107
   tail call fastcc void @segmented_allocate(ptr noundef nonnull %0, i64 noundef %2) #52
-  %119 = load i16, ptr %7, align 8, !tbaa !120
-  br label %101, !llvm.loop !125
+  %111 = load i16, ptr %7, align 8, !tbaa !121
+  br label %93, !llvm.loop !126
 
-120:                                              ; preds = %115
-  %121 = load i64, ptr %0, align 8, !tbaa !119
-  %122 = icmp eq i64 %121, 0
-  br i1 %122, label %123, label %133
+112:                                              ; preds = %107
+  %113 = load i64, ptr %0, align 8, !tbaa !120
+  %114 = icmp eq i64 %113, 0
+  br i1 %114, label %115, label %125
 
-123:                                              ; preds = %120
-  %124 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
-  %125 = load ptr, ptr %124, align 4, !tbaa !6
-  %126 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  store ptr %125, ptr %126, align 8, !tbaa !121
-  %127 = load i32, ptr %100, align 4, !tbaa !113
-  %128 = zext nneg i32 %127 to i64
-  %129 = shl i64 %2, %128
-  %130 = trunc i64 %129 to i32
-  %131 = getelementptr inbounds i8, ptr %125, i32 %130
-  %132 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  store ptr %131, ptr %132, align 4, !tbaa !122
-  br label %133
+115:                                              ; preds = %112
+  %116 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
+  %117 = load ptr, ptr %116, align 4, !tbaa !6
+  %118 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
+  store ptr %117, ptr %118, align 8, !tbaa !122
+  %119 = load i32, ptr %92, align 4, !tbaa !113
+  %120 = zext nneg i32 %119 to i64
+  %121 = shl i64 %2, %120
+  %122 = trunc i64 %121 to i32
+  %123 = getelementptr inbounds i8, ptr %117, i32 %122
+  %124 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
+  store ptr %123, ptr %124, align 4, !tbaa !123
+  br label %125
 
-133:                                              ; preds = %120, %123, %80
+125:                                              ; preds = %112, %115, %72
   ret void
 }
 
 ; Function Attrs: nounwind optsize
 define internal fastcc void @segmented_allocate(ptr nocapture noundef %0, i64 noundef %1) unnamed_addr #3 {
-  %3 = alloca [16 x i8], align 16
-  %4 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 1
-  %5 = load i16, ptr %4, align 8, !tbaa !120
-  %6 = sext i16 %5 to i32
-  %7 = icmp eq i16 %5, 0
-  br i1 %7, label %8, label %20
+  %3 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 1
+  %4 = load i16, ptr %3, align 8, !tbaa !121
+  %5 = sext i16 %4 to i32
+  %6 = icmp eq i16 %4, 0
+  br i1 %6, label %7, label %19
 
-8:                                                ; preds = %2
-  %9 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 2
-  %10 = load i16, ptr %9, align 2, !tbaa !118
-  %11 = icmp eq i16 %10, 3
-  br i1 %11, label %12, label %17
+7:                                                ; preds = %2
+  %8 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 2
+  %9 = load i16, ptr %8, align 2, !tbaa !119
+  %10 = icmp eq i16 %9, 3
+  br i1 %10, label %11, label %16
 
-12:                                               ; preds = %8
-  %13 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
-  %14 = load ptr, ptr %13, align 4, !tbaa !6
-  %15 = icmp eq ptr %14, null
-  br i1 %15, label %16, label %17
+11:                                               ; preds = %7
+  %12 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
+  %13 = load ptr, ptr %12, align 4, !tbaa !6
+  %14 = icmp eq ptr %13, null
+  br i1 %14, label %15, label %16
 
-16:                                               ; preds = %12
-  store i16 4, ptr %9, align 2, !tbaa !118
-  br label %17
+15:                                               ; preds = %11
+  store i16 4, ptr %8, align 2, !tbaa !119
+  br label %16
 
-17:                                               ; preds = %8, %12, %16
-  %18 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  %19 = load i32, ptr %18, align 4, !tbaa !113
-  br label %25
+16:                                               ; preds = %7, %11, %15
+  %17 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
+  %18 = load i32, ptr %17, align 4, !tbaa !113
+  br label %24
 
-20:                                               ; preds = %2
-  %21 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  %22 = load i32, ptr %21, align 4, !tbaa !113
-  %23 = add nsw i32 %6, -1
-  %24 = add i32 %23, %22
-  br label %25
+19:                                               ; preds = %2
+  %20 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
+  %21 = load i32, ptr %20, align 4, !tbaa !113
+  %22 = add nsw i32 %5, -1
+  %23 = add i32 %22, %21
+  br label %24
 
-25:                                               ; preds = %20, %17
-  %26 = phi i32 [ %19, %17 ], [ %22, %20 ]
-  %27 = phi i32 [ 63, %17 ], [ 62, %20 ]
-  %28 = phi i32 [ %19, %17 ], [ %24, %20 ]
-  %29 = icmp slt i16 %5, 32
-  %30 = icmp slt i32 %28, %27
-  %31 = select i1 %29, i1 %30, i1 false
-  br i1 %31, label %32, label %42
+24:                                               ; preds = %19, %16
+  %25 = phi i32 [ %18, %16 ], [ %21, %19 ]
+  %26 = phi i32 [ 63, %16 ], [ 62, %19 ]
+  %27 = phi i32 [ %18, %16 ], [ %23, %19 ]
+  %28 = icmp slt i16 %4, 32
+  %29 = icmp slt i32 %27, %26
+  %30 = select i1 %28, i1 %29, i1 false
+  br i1 %30, label %31, label %41
 
-32:                                               ; preds = %25
-  %33 = icmp sgt i64 %1, 0
-  br i1 %33, label %34, label %43
+31:                                               ; preds = %24
+  %32 = icmp sgt i64 %1, 0
+  br i1 %32, label %33, label %42
 
-34:                                               ; preds = %32
-  %35 = sext i16 %5 to i64
-  %36 = sext i32 %26 to i64
-  %37 = tail call i64 @llvm.usub.sat.i64(i64 %35, i64 1)
-  %38 = add i64 %37, %36
-  %39 = udiv i64 4294967295, %1
-  %40 = lshr i64 %39, %38
-  %41 = icmp eq i64 %40, 0
-  br i1 %41, label %42, label %43
+33:                                               ; preds = %31
+  %34 = sext i16 %4 to i64
+  %35 = sext i32 %25 to i64
+  %36 = tail call i64 @llvm.usub.sat.i64(i64 %34, i64 1)
+  %37 = add i64 %36, %35
+  %38 = udiv i64 4294967295, %1
+  %39 = lshr i64 %38, %37
+  %40 = icmp eq i64 %39, 0
+  br i1 %40, label %41, label %42
 
-42:                                               ; preds = %34, %25
+41:                                               ; preds = %33, %24
   tail call fastcc void @out_of_memory() #56
   unreachable
 
-43:                                               ; preds = %34, %32
-  switch i16 %5, label %59 [
-    i16 11, label %44
-    i16 3, label %44
+42:                                               ; preds = %33, %31
+  switch i16 %4, label %56 [
+    i16 11, label %43
+    i16 3, label %43
   ]
 
-44:                                               ; preds = %43, %43
-  %45 = icmp eq i16 %5, 3
-  %46 = select i1 %45, i32 32, i32 128
-  %47 = tail call ptr @fa_alloc(i32 noundef %46, i32 noundef 4) #53
-  %48 = icmp ugt i16 %5, 3
-  br i1 %48, label %49, label %55
+43:                                               ; preds = %42, %42
+  %44 = icmp eq i16 %4, 3
+  %45 = select i1 %44, i32 44, i32 128
+  %46 = tail call ptr @fa_alloc(i32 noundef %45, i32 noundef 4) #53
+  %47 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %48 = load ptr, ptr %47, align 8, !tbaa !117
+  %49 = select i1 %44, i32 12, i32 44
+  tail call fastcc void @copy_bytes(ptr noundef %46, ptr noundef %48, i32 noundef %49) #52
+  %50 = icmp ugt i16 %4, 3
+  br i1 %50, label %51, label %53
 
-49:                                               ; preds = %44
-  %50 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %51 = load ptr, ptr %50, align 8, !tbaa !116
-  call void @llvm.lifetime.start.p0(i64 16, ptr nonnull %3)
-  %52 = getelementptr inbounds i8, ptr %51, i32 16
-  call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 16 dereferenceable(16) %3, ptr noundef nonnull align 1 dereferenceable(16) %52, i32 16, i1 false)
-  tail call void @llvm.memmove.p0.p0.i32(ptr noundef nonnull align 1 dereferenceable(16) %47, ptr noundef nonnull align 1 dereferenceable(16) %51, i32 16, i1 false)
-  %53 = getelementptr inbounds i8, ptr %47, i32 16
-  call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 1 dereferenceable(16) %53, ptr noundef nonnull align 16 dereferenceable(16) %3, i32 16, i1 false)
-  call void @llvm.lifetime.end.p0(i64 16, ptr nonnull %3)
-  %54 = load ptr, ptr %50, align 8, !tbaa !116
-  tail call void @fa_free(ptr noundef %54, i32 noundef 32, i32 noundef 4) #53
-  br label %55
+51:                                               ; preds = %43
+  %52 = load ptr, ptr %47, align 8, !tbaa !117
+  tail call void @fa_free(ptr noundef %52, i32 noundef 44, i32 noundef 4) #53
+  br label %53
 
-55:                                               ; preds = %49, %44
-  %56 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  store ptr %47, ptr %56, align 8, !tbaa !116
-  %57 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  %58 = load i32, ptr %57, align 4, !tbaa !113
-  br label %59
+53:                                               ; preds = %51, %43
+  store ptr %46, ptr %47, align 8, !tbaa !117
+  %54 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
+  %55 = load i32, ptr %54, align 4, !tbaa !113
+  br label %56
 
-59:                                               ; preds = %43, %55
-  %60 = phi i32 [ %26, %43 ], [ %58, %55 ]
-  %61 = sext i16 %5 to i64
-  %62 = sext i32 %60 to i64
-  %63 = tail call i64 @llvm.usub.sat.i64(i64 %61, i64 1)
-  %64 = add i64 %63, %62
-  %65 = shl nuw i64 1, %64
-  %66 = trunc i64 %65 to i32
-  %67 = trunc i64 %1 to i32
-  %68 = mul i32 %66, %67
-  %69 = tail call ptr @fa_alloc(i32 noundef %68, i32 noundef 16) #53
-  %70 = icmp slt i16 %5, 3
-  br i1 %70, label %71, label %73
-
-71:                                               ; preds = %59
-  %72 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %6
-  br label %78
-
-73:                                               ; preds = %59
-  %74 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %75 = load ptr, ptr %74, align 8, !tbaa !116
-  %76 = getelementptr ptr, ptr %75, i32 %6
-  %77 = getelementptr ptr, ptr %76, i32 -3
-  br label %78
-
-78:                                               ; preds = %73, %71
-  %79 = phi ptr [ %77, %73 ], [ %72, %71 ]
-  store ptr %69, ptr %79, align 4, !tbaa !6
-  %80 = load i16, ptr %4, align 8, !tbaa !120
-  %81 = add i16 %80, 1
-  store i16 %81, ptr %4, align 8, !tbaa !120
+56:                                               ; preds = %42, %53
+  %57 = phi i32 [ %25, %42 ], [ %55, %53 ]
+  %58 = sext i16 %4 to i64
+  %59 = sext i32 %57 to i64
+  %60 = tail call i64 @llvm.usub.sat.i64(i64 %58, i64 1)
+  %61 = add i64 %60, %59
+  %62 = shl nuw i64 1, %61
+  %63 = trunc i64 %62 to i32
+  %64 = trunc i64 %1 to i32
+  %65 = mul i32 %63, %64
+  %66 = tail call ptr @fa_alloc(i32 noundef %65, i32 noundef 16) #53
+  %67 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %68 = load ptr, ptr %67, align 8, !tbaa !117
+  %69 = getelementptr inbounds ptr, ptr %68, i32 %5
+  store ptr %66, ptr %69, align 4, !tbaa !6
+  %70 = load i16, ptr %3, align 8, !tbaa !121
+  %71 = add i16 %70, 1
+  store i16 %71, ptr %3, align 8, !tbaa !121
   ret void
 }
 
@@ -6837,7 +6785,7 @@ define hidden noundef ptr @fa_segmented_new_into(i64 noundef %0, i64 noundef %1,
   %21 = zext nneg i32 %20 to i64
   %22 = shl nuw i64 1, %21
   %23 = icmp ult i64 %22, %0
-  br i1 %23, label %15, label %24, !llvm.loop !126
+  br i1 %23, label %15, label %24, !llvm.loop !127
 
 24:                                               ; preds = %19, %10
   %25 = phi i32 [ %2, %10 ], [ %20, %19 ]
@@ -6869,19 +6817,19 @@ define hidden noundef ptr @fa_segmented_new_into(i64 noundef %0, i64 noundef %1,
   store i32 -1, ptr %41, align 4, !tbaa !113
   %42 = getelementptr inbounds %struct.FaSegmented, ptr %40, i32 0, i32 7
   %43 = getelementptr inbounds %struct.FaSegmented, ptr %40, i32 0, i32 6
-  store ptr %42, ptr %43, align 8, !tbaa !116
+  store ptr %42, ptr %43, align 8, !tbaa !117
   %44 = icmp eq i64 %0, 0
   br i1 %44, label %51, label %45
 
 45:                                               ; preds = %39
   tail call void @fa_segmented_reserve(ptr noundef nonnull %40, i64 noundef %26, i64 noundef %1, i32 poison) #52
-  store i64 %0, ptr %40, align 8, !tbaa !119
+  store i64 %0, ptr %40, align 8, !tbaa !120
   %46 = mul nsw i64 %1, %0
   %47 = getelementptr inbounds %struct.FaSegmented, ptr %40, i32 0, i32 4
-  %48 = load ptr, ptr %47, align 8, !tbaa !121
+  %48 = load ptr, ptr %47, align 8, !tbaa !122
   %49 = trunc i64 %46 to i32
   %50 = getelementptr inbounds i8, ptr %48, i32 %49
-  store ptr %50, ptr %47, align 8, !tbaa !121
+  store ptr %50, ptr %47, align 8, !tbaa !122
   br label %51
 
 51:                                               ; preds = %39, %45, %37
@@ -6902,94 +6850,74 @@ define hidden void @fa_segmented_next(ptr nocapture noundef %0, i64 noundef %1, 
   br label %9
 
 9:                                                ; preds = %8, %3
-  %10 = load i64, ptr %0, align 8, !tbaa !119
-  %11 = zext nneg i32 %7 to i64
+  %10 = load i64, ptr %0, align 8, !tbaa !120
+  %11 = zext i32 %7 to i64
   %12 = lshr i64 %10, %11
-  %13 = icmp eq i64 %12, 0
-  br i1 %13, label %21, label %14
+  %13 = shl i64 %12, 1
+  %14 = or disjoint i64 %13, 1
+  %15 = tail call i64 @llvm.ctlz.i64(i64 %14, i1 true), !range !116
+  %16 = xor i64 %15, 63
+  %17 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 1
+  %18 = load i16, ptr %17, align 8, !tbaa !121
+  %19 = sext i16 %18 to i64
+  %20 = icmp slt i64 %16, %19
+  br i1 %20, label %22, label %21
 
-14:                                               ; preds = %9
-  %15 = tail call i64 @llvm.ctlz.i64(i64 %12, i1 true), !range !41
-  %16 = sub nuw nsw i64 64, %15
-  %17 = sext i32 %7 to i64
-  %18 = sub nsw i64 %17, %15
-  %19 = add nsw i64 %18, 63
-  %20 = shl nsw i64 -1, %19
-  br label %21
-
-21:                                               ; preds = %9, %14
-  %22 = phi i64 [ %20, %14 ], [ 0, %9 ]
-  %23 = phi i64 [ %16, %14 ], [ 0, %9 ]
-  %24 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 1
-  %25 = load i16, ptr %24, align 8, !tbaa !120
-  %26 = sext i16 %25 to i64
-  %27 = icmp slt i64 %23, %26
-  br i1 %27, label %29, label %28
-
-28:                                               ; preds = %21
+21:                                               ; preds = %9
   tail call fastcc void @segmented_allocate(ptr noundef nonnull %0, i64 noundef %1) #52
-  br label %29
+  br label %22
 
-29:                                               ; preds = %28, %21
-  %30 = icmp ult i64 %23, 3
-  br i1 %30, label %31, label %34
-
-31:                                               ; preds = %29
-  %32 = trunc i64 %23 to i32
-  %33 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %32
-  br label %40
-
-34:                                               ; preds = %29
-  %35 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %36 = load ptr, ptr %35, align 8, !tbaa !116
-  %37 = trunc i64 %23 to i32
-  %38 = getelementptr ptr, ptr %36, i32 %37
-  %39 = getelementptr ptr, ptr %38, i32 -3
-  br label %40
-
-40:                                               ; preds = %31, %34
-  %41 = phi ptr [ %33, %31 ], [ %39, %34 ]
-  %42 = load ptr, ptr %41, align 4, !tbaa !6
-  %43 = add i64 %22, %10
-  %44 = mul nsw i64 %43, %1
-  %45 = trunc i64 %44 to i32
-  %46 = getelementptr inbounds i8, ptr %42, i32 %45
-  %47 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  store ptr %46, ptr %47, align 8
-  %48 = load ptr, ptr %41, align 4, !tbaa !6
-  %49 = sext i32 %7 to i64
-  %50 = tail call i64 @llvm.usub.sat.i64(i64 %23, i64 1)
-  %51 = add nsw i64 %50, %49
-  %52 = shl i64 %1, %51
-  %53 = trunc i64 %52 to i32
-  %54 = getelementptr inbounds i8, ptr %48, i32 %53
-  %55 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  store ptr %54, ptr %55, align 4, !tbaa !122
+22:                                               ; preds = %21, %9
+  %23 = shl nuw i64 1, %11
+  %24 = shl i64 %23, %16
+  %25 = lshr i64 %24, 1
+  %26 = sub i64 0, %23
+  %27 = and i64 %25, %26
+  %28 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %29 = load ptr, ptr %28, align 8, !tbaa !117
+  %30 = trunc i64 %16 to i32
+  %31 = getelementptr inbounds ptr, ptr %29, i32 %30
+  %32 = load ptr, ptr %31, align 4, !tbaa !6
+  %33 = sub nsw i64 %10, %27
+  %34 = mul nsw i64 %33, %1
+  %35 = trunc i64 %34 to i32
+  %36 = getelementptr inbounds i8, ptr %32, i32 %35
+  %37 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
+  store ptr %36, ptr %37, align 8, !tbaa !122
+  %38 = load ptr, ptr %31, align 4, !tbaa !6
+  %39 = sext i32 %7 to i64
+  %40 = tail call i64 @llvm.usub.sat.i64(i64 %16, i64 1)
+  %41 = add nsw i64 %40, %39
+  %42 = shl i64 %1, %41
+  %43 = trunc i64 %42 to i32
+  %44 = getelementptr inbounds i8, ptr %38, i32 %43
+  %45 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
+  store ptr %44, ptr %45, align 4, !tbaa !123
   ret void
 }
 
 ; Function Attrs: alwaysinline nounwind optsize
 define hidden ptr @fa_segmented_push_slot(ptr nocapture noundef %0, i64 noundef %1, i32 noundef %2) local_unnamed_addr #14 {
   %4 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  %5 = load ptr, ptr %4, align 8, !tbaa !121
+  %5 = load ptr, ptr %4, align 8, !tbaa !122
   %6 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  %7 = load ptr, ptr %6, align 4, !tbaa !122
+  %7 = load ptr, ptr %6, align 4, !tbaa !123
   %8 = icmp eq ptr %5, %7
   br i1 %8, label %9, label %11, !prof !35
 
 9:                                                ; preds = %3
   tail call void @fa_segmented_next(ptr noundef nonnull %0, i64 noundef %1, i32 noundef %2) #52
-  %10 = load ptr, ptr %4, align 8, !tbaa !121
+  %10 = load ptr, ptr %4, align 8, !tbaa !122
   br label %11
 
 11:                                               ; preds = %9, %3
   %12 = phi ptr [ %10, %9 ], [ %5, %3 ]
   %13 = trunc i64 %1 to i32
   %14 = getelementptr inbounds i8, ptr %12, i32 %13
-  store ptr %14, ptr %4, align 8, !tbaa !121
-  %15 = load i64, ptr %0, align 8, !tbaa !119
+  store ptr %14, ptr %4, align 8, !tbaa !122
+  %15 = load i64, ptr %0, align 8, !tbaa !120
   %16 = add nsw i64 %15, 1
-  store i64 %16, ptr %0, align 8, !tbaa !119
+  store i64 %16, ptr %0, align 8, !tbaa !120
   ret ptr %12
 }
 
@@ -7000,9 +6928,9 @@ define hidden void @fa_segmented_append(ptr noundef %0, ptr nocapture noundef re
 
 7:                                                ; preds = %5
   tail call void @fa_segmented_reserve(ptr noundef %0, i64 noundef %2, i64 noundef 0, i32 poison) #52
-  %8 = load i64, ptr %0, align 8, !tbaa !119
+  %8 = load i64, ptr %0, align 8, !tbaa !120
   %9 = add nsw i64 %8, %2
-  store i64 %9, ptr %0, align 8, !tbaa !119
+  store i64 %9, ptr %0, align 8, !tbaa !120
   br label %30
 
 10:                                               ; preds = %5
@@ -7012,9 +6940,9 @@ define hidden void @fa_segmented_append(ptr noundef %0, ptr nocapture noundef re
 12:                                               ; preds = %10
   %13 = mul nsw i64 %3, %2
   %14 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  %15 = load ptr, ptr %14, align 4, !tbaa !122
+  %15 = load ptr, ptr %14, align 4, !tbaa !123
   %16 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  %17 = load ptr, ptr %16, align 8, !tbaa !121
+  %17 = load ptr, ptr %16, align 8, !tbaa !122
   %18 = ptrtoint ptr %15 to i32
   %19 = ptrtoint ptr %17 to i32
   %20 = sub i32 %18, %19
@@ -7025,12 +6953,12 @@ define hidden void @fa_segmented_append(ptr noundef %0, ptr nocapture noundef re
 23:                                               ; preds = %12
   %24 = trunc i64 %13 to i32
   tail call fastcc void @copy_bytes(ptr noundef %17, ptr noundef %1, i32 noundef %24) #52
-  %25 = load ptr, ptr %16, align 8, !tbaa !121
+  %25 = load ptr, ptr %16, align 8, !tbaa !122
   %26 = getelementptr inbounds i8, ptr %25, i32 %24
-  store ptr %26, ptr %16, align 8, !tbaa !121
-  %27 = load i64, ptr %0, align 8, !tbaa !119
+  store ptr %26, ptr %16, align 8, !tbaa !122
+  %27 = load i64, ptr %0, align 8, !tbaa !120
   %28 = add nsw i64 %27, %2
-  store i64 %28, ptr %0, align 8, !tbaa !119
+  store i64 %28, ptr %0, align 8, !tbaa !120
   br label %30
 
 29:                                               ; preds = %12, %10
@@ -7053,21 +6981,21 @@ define internal fastcc void @segmented_append_runs(ptr nocapture noundef %0, ptr
 11:                                               ; preds = %5
   %12 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
   %13 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  %14 = load ptr, ptr %12, align 8, !tbaa !121
+  %14 = load ptr, ptr %12, align 8, !tbaa !122
   br label %15
 
 15:                                               ; preds = %11, %24
   %16 = phi ptr [ %14, %11 ], [ %36, %24 ]
   %17 = phi ptr [ %1, %11 ], [ %39, %24 ]
   %18 = phi i64 [ %2, %11 ], [ %40, %24 ]
-  %19 = load ptr, ptr %13, align 4, !tbaa !122
+  %19 = load ptr, ptr %13, align 4, !tbaa !123
   %20 = icmp eq ptr %16, %19
   br i1 %20, label %21, label %24
 
 21:                                               ; preds = %15
   tail call void @fa_segmented_next(ptr noundef nonnull %0, i64 noundef %3, i32 noundef %9) #52
-  %22 = load ptr, ptr %13, align 4, !tbaa !122
-  %23 = load ptr, ptr %12, align 8, !tbaa !121
+  %22 = load ptr, ptr %13, align 4, !tbaa !123
+  %23 = load ptr, ptr %12, align 8, !tbaa !122
   br label %24
 
 24:                                               ; preds = %21, %15
@@ -7082,16 +7010,16 @@ define internal fastcc void @segmented_append_runs(ptr nocapture noundef %0, ptr
   %33 = mul nsw i64 %32, %3
   %34 = trunc i64 %33 to i32
   tail call fastcc void @copy_bytes(ptr noundef %25, ptr noundef %17, i32 noundef %34) #52
-  %35 = load ptr, ptr %12, align 8, !tbaa !121
+  %35 = load ptr, ptr %12, align 8, !tbaa !122
   %36 = getelementptr inbounds i8, ptr %35, i32 %34
-  store ptr %36, ptr %12, align 8, !tbaa !121
-  %37 = load i64, ptr %0, align 8, !tbaa !119
+  store ptr %36, ptr %12, align 8, !tbaa !122
+  %37 = load i64, ptr %0, align 8, !tbaa !120
   %38 = add nsw i64 %37, %32
-  store i64 %38, ptr %0, align 8, !tbaa !119
+  store i64 %38, ptr %0, align 8, !tbaa !120
   %39 = getelementptr inbounds i8, ptr %17, i32 %34
   %40 = sub nsw i64 %18, %32
   %41 = icmp sgt i64 %40, 0
-  br i1 %41, label %15, label %42, !llvm.loop !127
+  br i1 %41, label %15, label %42, !llvm.loop !128
 
 42:                                               ; preds = %24, %5
   ret void
@@ -7104,9 +7032,9 @@ define hidden void @fa_segmented_fill(ptr nocapture noundef %0, i64 noundef %1, 
 
 6:                                                ; preds = %4
   %7 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  %8 = load ptr, ptr %7, align 4, !tbaa !122
+  %8 = load ptr, ptr %7, align 4, !tbaa !123
   %9 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  %10 = load ptr, ptr %9, align 8, !tbaa !121
+  %10 = load ptr, ptr %9, align 8, !tbaa !122
   %11 = ptrtoint ptr %8 to i32
   %12 = ptrtoint ptr %10 to i32
   %13 = sub i32 %11, %12
@@ -7118,12 +7046,12 @@ define hidden void @fa_segmented_fill(ptr nocapture noundef %0, i64 noundef %1, 
   %17 = trunc i32 %2 to i8
   %18 = trunc i64 %1 to i32
   tail call fastcc void @fill_bytes(ptr noundef %10, i8 noundef zeroext %17, i32 noundef %18) #52
-  %19 = load ptr, ptr %9, align 8, !tbaa !121
+  %19 = load ptr, ptr %9, align 8, !tbaa !122
   %20 = getelementptr inbounds i8, ptr %19, i32 %18
-  store ptr %20, ptr %9, align 8, !tbaa !121
-  %21 = load i64, ptr %0, align 8, !tbaa !119
+  store ptr %20, ptr %9, align 8, !tbaa !122
+  %21 = load i64, ptr %0, align 8, !tbaa !120
   %22 = add nsw i64 %21, %1
-  store i64 %22, ptr %0, align 8, !tbaa !119
+  store i64 %22, ptr %0, align 8, !tbaa !120
   br label %24
 
 23:                                               ; preds = %6, %4
@@ -7147,20 +7075,20 @@ define internal fastcc void @segmented_fill_runs(ptr nocapture noundef %0, i64 n
   %11 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
   %12 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
   %13 = trunc i32 %2 to i8
-  %14 = load ptr, ptr %11, align 8, !tbaa !121
+  %14 = load ptr, ptr %11, align 8, !tbaa !122
   br label %15
 
 15:                                               ; preds = %10, %23
   %16 = phi ptr [ %14, %10 ], [ %33, %23 ]
   %17 = phi i64 [ %1, %10 ], [ %36, %23 ]
-  %18 = load ptr, ptr %12, align 4, !tbaa !122
+  %18 = load ptr, ptr %12, align 4, !tbaa !123
   %19 = icmp eq ptr %16, %18
   br i1 %19, label %20, label %23
 
 20:                                               ; preds = %15
   tail call void @fa_segmented_next(ptr noundef nonnull %0, i64 noundef 1, i32 noundef %8) #52
-  %21 = load ptr, ptr %12, align 4, !tbaa !122
-  %22 = load ptr, ptr %11, align 8, !tbaa !121
+  %21 = load ptr, ptr %12, align 4, !tbaa !123
+  %22 = load ptr, ptr %11, align 8, !tbaa !122
   br label %23
 
 23:                                               ; preds = %20, %15
@@ -7173,15 +7101,15 @@ define internal fastcc void @segmented_fill_runs(ptr nocapture noundef %0, i64 n
   %30 = tail call i64 @llvm.smin.i64(i64 %17, i64 %29)
   %31 = trunc i64 %30 to i32
   tail call fastcc void @fill_bytes(ptr noundef %24, i8 noundef zeroext %13, i32 noundef %31) #52
-  %32 = load ptr, ptr %11, align 8, !tbaa !121
+  %32 = load ptr, ptr %11, align 8, !tbaa !122
   %33 = getelementptr inbounds i8, ptr %32, i32 %31
-  store ptr %33, ptr %11, align 8, !tbaa !121
-  %34 = load i64, ptr %0, align 8, !tbaa !119
+  store ptr %33, ptr %11, align 8, !tbaa !122
+  %34 = load i64, ptr %0, align 8, !tbaa !120
   %35 = add nsw i64 %34, %30
-  store i64 %35, ptr %0, align 8, !tbaa !119
+  store i64 %35, ptr %0, align 8, !tbaa !120
   %36 = sub nsw i64 %17, %30
   %37 = icmp sgt i64 %36, 0
-  br i1 %37, label %15, label %38, !llvm.loop !128
+  br i1 %37, label %15, label %38, !llvm.loop !129
 
 38:                                               ; preds = %23, %4
   ret void
@@ -7190,18 +7118,18 @@ define internal fastcc void @segmented_fill_runs(ptr nocapture noundef %0, i64 n
 ; Function Attrs: alwaysinline nounwind optsize
 define hidden void @fa_segmented_extend_to(ptr noundef %0, i32 noundef %1, ptr nocapture noundef readonly %2, i64 noundef %3, i64 noundef %4, i64 noundef %5, i32 noundef %6) local_unnamed_addr #14 {
   %8 = icmp slt i64 %4, 1
-  br i1 %8, label %112, label %9
+  br i1 %8, label %99, label %9
 
 9:                                                ; preds = %7
   %10 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 1
-  %11 = load i16, ptr %10, align 8, !tbaa !120
+  %11 = load i16, ptr %10, align 8, !tbaa !121
   %12 = icmp slt i16 %11, 2
   br i1 %12, label %13, label %16
 
 13:                                               ; preds = %9
   %14 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 7
   %15 = mul nsw i64 %5, %3
-  br label %63
+  br label %50
 
 16:                                               ; preds = %9
   %17 = add i64 %4, %3
@@ -7215,141 +7143,116 @@ define hidden void @fa_segmented_extend_to(ptr noundef %0, i32 noundef %1, ptr n
 23:                                               ; preds = %16
   %24 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 7
   %25 = mul nsw i64 %5, %3
-  br label %63
+  br label %50
 
 26:                                               ; preds = %16
   %27 = lshr i64 %3, %20
-  %28 = icmp eq i64 %27, 0
-  br i1 %28, label %29, label %31
+  %28 = shl i64 %27, 1
+  %29 = or disjoint i64 %28, 1
+  %30 = tail call i64 @llvm.ctlz.i64(i64 %29, i1 true), !range !116
+  %31 = xor i64 %30, 63
+  %32 = shl i64 %21, %31
+  %33 = lshr i64 %32, 1
+  %34 = sub i64 0, %21
+  %35 = and i64 %33, %34
+  %36 = sub nsw i64 %3, %35
+  %37 = add nsw i64 %36, %4
+  %38 = sext i32 %19 to i64
+  %39 = tail call i64 @llvm.usub.sat.i64(i64 %31, i64 1)
+  %40 = add nsw i64 %39, %38
+  %41 = shl nuw i64 1, %40
+  %42 = icmp sgt i64 %37, %41
+  br i1 %42, label %43, label %44
 
-29:                                               ; preds = %26
-  %30 = sext i32 %19 to i64
-  br label %38
-
-31:                                               ; preds = %26
-  %32 = tail call i64 @llvm.ctlz.i64(i64 %27, i1 true), !range !41
-  %33 = sub nuw nsw i64 64, %32
-  %34 = sext i32 %19 to i64
-  %35 = sub nsw i64 %34, %32
-  %36 = add nsw i64 %35, 63
-  %37 = shl nsw i64 -1, %36
-  br label %38
-
-38:                                               ; preds = %29, %31
-  %39 = phi i64 [ %30, %29 ], [ %34, %31 ]
-  %40 = phi i64 [ 0, %29 ], [ %37, %31 ]
-  %41 = phi i64 [ 0, %29 ], [ %33, %31 ]
-  %42 = add i64 %40, %3
-  %43 = add nsw i64 %42, %4
-  %44 = tail call i64 @llvm.usub.sat.i64(i64 %41, i64 1)
-  %45 = add nsw i64 %44, %39
-  %46 = shl nuw i64 1, %45
-  %47 = icmp sgt i64 %43, %46
-  br i1 %47, label %48, label %49
-
-48:                                               ; preds = %38
+43:                                               ; preds = %26
   tail call fastcc void @segmented_extend_runs(ptr noundef %0, i32 noundef %1, ptr noundef nonnull %2, i64 noundef %3, i64 noundef %4, i64 noundef %5, i32 noundef %19) #52
-  br label %112
+  br label %99
 
-49:                                               ; preds = %38
-  %50 = icmp ult i64 %41, 3
-  br i1 %50, label %51, label %54
+44:                                               ; preds = %26
+  %45 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 6
+  %46 = load ptr, ptr %45, align 8, !tbaa !117
+  %47 = trunc i64 %31 to i32
+  %48 = getelementptr inbounds ptr, ptr %46, i32 %47
+  %49 = mul nsw i64 %36, %5
+  br label %50
 
-51:                                               ; preds = %49
-  %52 = trunc i64 %41 to i32
-  %53 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 7, i32 %52
-  br label %60
+50:                                               ; preds = %44, %23, %13
+  %51 = phi i64 [ %49, %44 ], [ %25, %23 ], [ %15, %13 ]
+  %52 = phi ptr [ %48, %44 ], [ %24, %23 ], [ %14, %13 ]
+  %53 = load ptr, ptr %52, align 4, !tbaa !6
+  %54 = trunc i64 %51 to i32
+  %55 = getelementptr inbounds i8, ptr %53, i32 %54
+  %56 = icmp slt i32 %1, 0
+  br i1 %56, label %57, label %76
 
-54:                                               ; preds = %49
-  %55 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 6
-  %56 = load ptr, ptr %55, align 8, !tbaa !116
-  %57 = trunc i64 %41 to i32
-  %58 = getelementptr ptr, ptr %56, i32 %57
-  %59 = getelementptr ptr, ptr %58, i32 -3
-  br label %60
+57:                                               ; preds = %50
+  %58 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 2
+  %59 = load i64, ptr %58, align 8, !tbaa !73
+  %60 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
+  %61 = load i64, ptr %60, align 8, !tbaa !79
+  %62 = sub nsw i64 %59, %61
+  %63 = icmp slt i64 %62, %4
+  br i1 %63, label %64, label %66, !prof !35
 
-60:                                               ; preds = %54, %51
-  %61 = phi ptr [ %53, %51 ], [ %59, %54 ]
-  %62 = mul nsw i64 %42, %5
-  br label %63
-
-63:                                               ; preds = %60, %23, %13
-  %64 = phi i64 [ %62, %60 ], [ %25, %23 ], [ %15, %13 ]
-  %65 = phi ptr [ %61, %60 ], [ %24, %23 ], [ %14, %13 ]
-  %66 = load ptr, ptr %65, align 4, !tbaa !6
-  %67 = trunc i64 %64 to i32
-  %68 = getelementptr inbounds i8, ptr %66, i32 %67
-  %69 = icmp slt i32 %1, 0
-  br i1 %69, label %70, label %89
-
-70:                                               ; preds = %63
-  %71 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 2
-  %72 = load i64, ptr %71, align 8, !tbaa !73
-  %73 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
-  %74 = load i64, ptr %73, align 8, !tbaa !79
-  %75 = sub nsw i64 %72, %74
-  %76 = icmp slt i64 %75, %4
-  br i1 %76, label %77, label %79, !prof !35
-
-77:                                               ; preds = %70
+64:                                               ; preds = %57
   tail call fastcc void @array_extend_room(ptr noundef nonnull %0, i64 noundef %4, i64 noundef %5) #52
-  %78 = load i64, ptr %73, align 8, !tbaa !79
-  br label %79
+  %65 = load i64, ptr %60, align 8, !tbaa !79
+  br label %66
 
-79:                                               ; preds = %70, %77
-  %80 = phi i64 [ %74, %70 ], [ %78, %77 ]
-  %81 = load ptr, ptr %0, align 8, !tbaa !69
-  %82 = mul nsw i64 %80, %5
-  %83 = trunc i64 %82 to i32
-  %84 = getelementptr inbounds i8, ptr %81, i32 %83
-  %85 = mul nsw i64 %5, %4
-  %86 = trunc i64 %85 to i32
-  tail call fastcc void @copy_bytes(ptr noundef %84, ptr noundef %68, i32 noundef %86) #52
-  %87 = load i64, ptr %73, align 8, !tbaa !79
-  %88 = add nsw i64 %87, %4
-  store i64 %88, ptr %73, align 8, !tbaa !79
-  br label %112
+66:                                               ; preds = %57, %64
+  %67 = phi i64 [ %61, %57 ], [ %65, %64 ]
+  %68 = load ptr, ptr %0, align 8, !tbaa !69
+  %69 = mul nsw i64 %67, %5
+  %70 = trunc i64 %69 to i32
+  %71 = getelementptr inbounds i8, ptr %68, i32 %70
+  %72 = mul nsw i64 %5, %4
+  %73 = trunc i64 %72 to i32
+  tail call fastcc void @copy_bytes(ptr noundef %71, ptr noundef %55, i32 noundef %73) #52
+  %74 = load i64, ptr %60, align 8, !tbaa !79
+  %75 = add nsw i64 %74, %4
+  store i64 %75, ptr %60, align 8, !tbaa !79
+  br label %99
 
-89:                                               ; preds = %63
-  %90 = icmp eq i64 %5, 0
-  br i1 %90, label %91, label %94
+76:                                               ; preds = %50
+  %77 = icmp eq i64 %5, 0
+  br i1 %77, label %78, label %81
 
-91:                                               ; preds = %89
+78:                                               ; preds = %76
   tail call void @fa_segmented_reserve(ptr noundef %0, i64 noundef %4, i64 noundef 0, i32 poison) #52
-  %92 = load i64, ptr %0, align 8, !tbaa !119
-  %93 = add nsw i64 %92, %4
-  store i64 %93, ptr %0, align 8, !tbaa !119
-  br label %112
+  %79 = load i64, ptr %0, align 8, !tbaa !120
+  %80 = add nsw i64 %79, %4
+  store i64 %80, ptr %0, align 8, !tbaa !120
+  br label %99
 
-94:                                               ; preds = %89
-  %95 = mul nsw i64 %5, %4
-  %96 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  %97 = load ptr, ptr %96, align 4, !tbaa !122
-  %98 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  %99 = load ptr, ptr %98, align 8, !tbaa !121
-  %100 = ptrtoint ptr %97 to i32
-  %101 = ptrtoint ptr %99 to i32
-  %102 = sub i32 %100, %101
-  %103 = sext i32 %102 to i64
-  %104 = icmp sgt i64 %95, %103
-  br i1 %104, label %111, label %105
+81:                                               ; preds = %76
+  %82 = mul nsw i64 %5, %4
+  %83 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
+  %84 = load ptr, ptr %83, align 4, !tbaa !123
+  %85 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
+  %86 = load ptr, ptr %85, align 8, !tbaa !122
+  %87 = ptrtoint ptr %84 to i32
+  %88 = ptrtoint ptr %86 to i32
+  %89 = sub i32 %87, %88
+  %90 = sext i32 %89 to i64
+  %91 = icmp sgt i64 %82, %90
+  br i1 %91, label %98, label %92
 
-105:                                              ; preds = %94
-  %106 = trunc i64 %95 to i32
-  tail call fastcc void @copy_bytes(ptr noundef %99, ptr noundef %68, i32 noundef %106) #52
-  %107 = load ptr, ptr %98, align 8, !tbaa !121
-  %108 = getelementptr inbounds i8, ptr %107, i32 %106
-  store ptr %108, ptr %98, align 8, !tbaa !121
-  %109 = load i64, ptr %0, align 8, !tbaa !119
-  %110 = add nsw i64 %109, %4
-  store i64 %110, ptr %0, align 8, !tbaa !119
-  br label %112
+92:                                               ; preds = %81
+  %93 = trunc i64 %82 to i32
+  tail call fastcc void @copy_bytes(ptr noundef %86, ptr noundef %55, i32 noundef %93) #52
+  %94 = load ptr, ptr %85, align 8, !tbaa !122
+  %95 = getelementptr inbounds i8, ptr %94, i32 %93
+  store ptr %95, ptr %85, align 8, !tbaa !122
+  %96 = load i64, ptr %0, align 8, !tbaa !120
+  %97 = add nsw i64 %96, %4
+  store i64 %97, ptr %0, align 8, !tbaa !120
+  br label %99
 
-111:                                              ; preds = %94
-  tail call fastcc void @segmented_append_runs(ptr noundef nonnull %0, ptr noundef %68, i64 noundef %4, i64 noundef %5, i32 noundef %1) #52
-  br label %112
+98:                                               ; preds = %81
+  tail call fastcc void @segmented_append_runs(ptr noundef nonnull %0, ptr noundef %55, i64 noundef %4, i64 noundef %5, i32 noundef %1) #52
+  br label %99
 
-112:                                              ; preds = %111, %105, %91, %48, %79, %7
+99:                                               ; preds = %98, %92, %78, %43, %66, %7
   ret void
 }
 
@@ -7377,121 +7280,108 @@ define internal fastcc void @segmented_extend_runs(ptr noundef %0, i32 noundef %
 
 21:                                               ; preds = %20, %13, %7
   %22 = icmp sgt i64 %4, 0
-  br i1 %22, label %23, label %101
+  br i1 %22, label %23, label %94
 
 23:                                               ; preds = %21
-  %24 = zext nneg i32 %11 to i64
-  %25 = sext i32 %11 to i64
-  %26 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 6
-  %27 = icmp eq i64 %5, 0
-  %28 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  %29 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  %30 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
-  br label %31
+  %24 = zext i32 %11 to i64
+  %25 = shl nuw i64 1, %24
+  %26 = sub i64 0, %25
+  %27 = sext i32 %11 to i64
+  %28 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 6
+  %29 = icmp eq i64 %5, 0
+  %30 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
+  %31 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
+  %32 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
+  br label %33
 
-31:                                               ; preds = %23, %97
-  %32 = phi i64 [ %3, %23 ], [ %98, %97 ]
-  %33 = phi i64 [ %4, %23 ], [ %99, %97 ]
-  %34 = lshr i64 %32, %24
-  %35 = icmp eq i64 %34, 0
-  %36 = tail call i64 @llvm.ctlz.i64(i64 %34, i1 true), !range !41
-  %37 = sub nuw nsw i64 64, %36
-  %38 = sub nsw i64 %25, %36
-  %39 = add nsw i64 %38, 63
-  %40 = shl nuw i64 1, %39
-  %41 = select i1 %35, i64 0, i64 %40
-  %42 = select i1 %35, i64 0, i64 %37
-  %43 = tail call i64 @llvm.usub.sat.i64(i64 %42, i64 1)
-  %44 = add nsw i64 %43, %25
-  %45 = shl nuw i64 1, %44
-  %46 = sub i64 %41, %32
-  %47 = add i64 %45, %46
-  %48 = tail call i64 @llvm.smin.i64(i64 %33, i64 %47)
-  %49 = icmp ult i64 %42, 3
-  br i1 %49, label %50, label %53
+33:                                               ; preds = %23, %90
+  %34 = phi i64 [ %3, %23 ], [ %91, %90 ]
+  %35 = phi i64 [ %4, %23 ], [ %92, %90 ]
+  %36 = lshr i64 %34, %24
+  %37 = shl i64 %36, 1
+  %38 = or disjoint i64 %37, 1
+  %39 = tail call i64 @llvm.ctlz.i64(i64 %38, i1 true), !range !116
+  %40 = xor i64 %39, 63
+  %41 = shl i64 %25, %40
+  %42 = lshr i64 %41, 1
+  %43 = and i64 %42, %26
+  %44 = tail call i64 @llvm.usub.sat.i64(i64 %40, i64 1)
+  %45 = add nsw i64 %44, %27
+  %46 = shl nuw i64 1, %45
+  %47 = sub i64 %43, %34
+  %48 = add i64 %47, %46
+  %49 = tail call i64 @llvm.smin.i64(i64 %35, i64 %48)
+  %50 = load ptr, ptr %28, align 8, !tbaa !117
+  %51 = trunc i64 %40 to i32
+  %52 = getelementptr inbounds ptr, ptr %50, i32 %51
+  %53 = load ptr, ptr %52, align 4, !tbaa !6
+  %54 = sub nsw i64 %34, %43
+  %55 = mul nsw i64 %54, %5
+  %56 = trunc i64 %55 to i32
+  %57 = getelementptr inbounds i8, ptr %53, i32 %56
+  br i1 %12, label %58, label %68
 
-50:                                               ; preds = %31
-  %51 = trunc i64 %42 to i32
-  %52 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 7, i32 %51
-  br label %58
+58:                                               ; preds = %33
+  %59 = load ptr, ptr %0, align 8, !tbaa !69
+  %60 = load i64, ptr %32, align 8, !tbaa !79
+  %61 = mul nsw i64 %60, %5
+  %62 = trunc i64 %61 to i32
+  %63 = getelementptr inbounds i8, ptr %59, i32 %62
+  %64 = mul nsw i64 %49, %5
+  %65 = trunc i64 %64 to i32
+  tail call fastcc void @copy_bytes(ptr noundef %63, ptr noundef %57, i32 noundef %65) #52
+  %66 = load i64, ptr %32, align 8, !tbaa !79
+  %67 = add nsw i64 %66, %49
+  store i64 %67, ptr %32, align 8, !tbaa !79
+  br label %90
 
-53:                                               ; preds = %31
-  %54 = load ptr, ptr %26, align 8, !tbaa !116
-  %55 = trunc i64 %42 to i32
-  %56 = getelementptr ptr, ptr %54, i32 %55
-  %57 = getelementptr ptr, ptr %56, i32 -3
-  br label %58
+68:                                               ; preds = %33
+  br i1 %29, label %69, label %72
 
-58:                                               ; preds = %50, %53
-  %59 = phi ptr [ %52, %50 ], [ %57, %53 ]
-  %60 = load ptr, ptr %59, align 4, !tbaa !6
-  %61 = sub nsw i64 %32, %41
-  %62 = mul nsw i64 %61, %5
-  %63 = trunc i64 %62 to i32
-  %64 = getelementptr inbounds i8, ptr %60, i32 %63
-  br i1 %12, label %65, label %75
+69:                                               ; preds = %68
+  tail call void @fa_segmented_reserve(ptr noundef %0, i64 noundef %49, i64 noundef 0, i32 poison) #52
+  %70 = load i64, ptr %0, align 8, !tbaa !120
+  %71 = add nsw i64 %70, %49
+  store i64 %71, ptr %0, align 8, !tbaa !120
+  br label %90
 
-65:                                               ; preds = %58
-  %66 = load ptr, ptr %0, align 8, !tbaa !69
-  %67 = load i64, ptr %30, align 8, !tbaa !79
-  %68 = mul nsw i64 %67, %5
-  %69 = trunc i64 %68 to i32
-  %70 = getelementptr inbounds i8, ptr %66, i32 %69
-  %71 = mul nsw i64 %48, %5
-  %72 = trunc i64 %71 to i32
-  tail call fastcc void @copy_bytes(ptr noundef %70, ptr noundef %64, i32 noundef %72) #52
-  %73 = load i64, ptr %30, align 8, !tbaa !79
-  %74 = add nsw i64 %73, %48
-  store i64 %74, ptr %30, align 8, !tbaa !79
-  br label %97
+72:                                               ; preds = %68
+  %73 = icmp sgt i64 %48, 0
+  br i1 %73, label %74, label %89
 
-75:                                               ; preds = %58
-  br i1 %27, label %76, label %79
+74:                                               ; preds = %72
+  %75 = mul nsw i64 %49, %5
+  %76 = load ptr, ptr %30, align 4, !tbaa !123
+  %77 = load ptr, ptr %31, align 8, !tbaa !122
+  %78 = ptrtoint ptr %76 to i32
+  %79 = ptrtoint ptr %77 to i32
+  %80 = sub i32 %78, %79
+  %81 = sext i32 %80 to i64
+  %82 = icmp sgt i64 %75, %81
+  br i1 %82, label %89, label %83
 
-76:                                               ; preds = %75
-  tail call void @fa_segmented_reserve(ptr noundef %0, i64 noundef %48, i64 noundef 0, i32 poison) #52
-  %77 = load i64, ptr %0, align 8, !tbaa !119
-  %78 = add nsw i64 %77, %48
-  store i64 %78, ptr %0, align 8, !tbaa !119
-  br label %97
+83:                                               ; preds = %74
+  %84 = trunc i64 %75 to i32
+  tail call fastcc void @copy_bytes(ptr noundef %77, ptr noundef %57, i32 noundef %84) #52
+  %85 = load ptr, ptr %31, align 8, !tbaa !122
+  %86 = getelementptr inbounds i8, ptr %85, i32 %84
+  store ptr %86, ptr %31, align 8, !tbaa !122
+  %87 = load i64, ptr %0, align 8, !tbaa !120
+  %88 = add nsw i64 %87, %49
+  store i64 %88, ptr %0, align 8, !tbaa !120
+  br label %90
 
-79:                                               ; preds = %75
-  %80 = icmp sgt i64 %47, 0
-  br i1 %80, label %81, label %96
+89:                                               ; preds = %74, %72
+  tail call fastcc void @segmented_append_runs(ptr noundef %0, ptr noundef %57, i64 noundef %49, i64 noundef %5, i32 noundef %1) #52
+  br label %90
 
-81:                                               ; preds = %79
-  %82 = mul nsw i64 %48, %5
-  %83 = load ptr, ptr %28, align 4, !tbaa !122
-  %84 = load ptr, ptr %29, align 8, !tbaa !121
-  %85 = ptrtoint ptr %83 to i32
-  %86 = ptrtoint ptr %84 to i32
-  %87 = sub i32 %85, %86
-  %88 = sext i32 %87 to i64
-  %89 = icmp sgt i64 %82, %88
-  br i1 %89, label %96, label %90
+90:                                               ; preds = %89, %83, %69, %58
+  %91 = add nsw i64 %49, %34
+  %92 = sub nsw i64 %35, %49
+  %93 = icmp sgt i64 %92, 0
+  br i1 %93, label %33, label %94, !llvm.loop !130
 
-90:                                               ; preds = %81
-  %91 = trunc i64 %82 to i32
-  tail call fastcc void @copy_bytes(ptr noundef %84, ptr noundef %64, i32 noundef %91) #52
-  %92 = load ptr, ptr %29, align 8, !tbaa !121
-  %93 = getelementptr inbounds i8, ptr %92, i32 %91
-  store ptr %93, ptr %29, align 8, !tbaa !121
-  %94 = load i64, ptr %0, align 8, !tbaa !119
-  %95 = add nsw i64 %94, %48
-  store i64 %95, ptr %0, align 8, !tbaa !119
-  br label %97
-
-96:                                               ; preds = %81, %79
-  tail call fastcc void @segmented_append_runs(ptr noundef %0, ptr noundef %64, i64 noundef %48, i64 noundef %5, i32 noundef %1) #52
-  br label %97
-
-97:                                               ; preds = %96, %90, %76, %65
-  %98 = add nsw i64 %48, %32
-  %99 = sub nsw i64 %33, %48
-  %100 = icmp sgt i64 %99, 0
-  br i1 %100, label %31, label %101, !llvm.loop !129
-
-101:                                              ; preds = %97, %21
+94:                                               ; preds = %90, %21
   ret void
 }
 
@@ -7501,77 +7391,37 @@ define hidden ptr @fa_segmented_run(ptr nocapture noundef readonly %0, i64 nound
   %7 = load i32, ptr %6, align 4, !tbaa !113
   %8 = icmp slt i32 %7, 0
   %9 = select i1 %8, i32 %3, i32 %7
-  %10 = zext nneg i32 %9 to i64
-  %11 = lshr i64 %1, %10
-  %12 = icmp eq i64 %11, 0
-  br i1 %12, label %13, label %15
-
-13:                                               ; preds = %5
-  %14 = sext i32 %9 to i64
-  br label %23
-
-15:                                               ; preds = %5
-  %16 = tail call i64 @llvm.ctlz.i64(i64 %11, i1 true), !range !41
-  %17 = sub nuw nsw i64 64, %16
-  %18 = sext i32 %9 to i64
-  %19 = sub nsw i64 %18, %16
-  %20 = add nsw i64 %19, 63
-  %21 = shl nuw i64 1, %20
-  %22 = icmp ult i64 %11, 4
-  br i1 %22, label %23, label %29
-
-23:                                               ; preds = %13, %15
-  %24 = phi i64 [ %14, %13 ], [ %18, %15 ]
-  %25 = phi i64 [ 0, %13 ], [ %17, %15 ]
-  %26 = phi i64 [ 0, %13 ], [ %21, %15 ]
-  %27 = trunc i64 %25 to i32
-  %28 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %27
-  br label %35
-
-29:                                               ; preds = %15
-  %30 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %31 = load ptr, ptr %30, align 8, !tbaa !116
-  %32 = trunc i64 %17 to i32
-  %33 = getelementptr ptr, ptr %31, i32 %32
-  %34 = getelementptr ptr, ptr %33, i32 -3
-  br label %35
-
-35:                                               ; preds = %23, %29
-  %36 = phi i64 [ %24, %23 ], [ %18, %29 ]
-  %37 = phi i1 [ true, %23 ], [ false, %29 ]
-  %38 = phi i64 [ %25, %23 ], [ %17, %29 ]
-  %39 = phi i64 [ %26, %23 ], [ %21, %29 ]
-  %40 = phi ptr [ %28, %23 ], [ %34, %29 ]
-  %41 = load ptr, ptr %40, align 4, !tbaa !6
-  %42 = tail call i64 @llvm.usub.sat.i64(i64 %38, i64 1)
-  %43 = add nsw i64 %42, %36
-  %44 = shl i64 %2, %43
-  %45 = trunc i64 %44 to i32
-  %46 = getelementptr inbounds i8, ptr %41, i32 %45
-  store ptr %46, ptr %4, align 4, !tbaa !6
-  br i1 %37, label %47, label %50
-
-47:                                               ; preds = %35
-  %48 = trunc i64 %38 to i32
-  %49 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %48
-  br label %56
-
-50:                                               ; preds = %35
-  %51 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %52 = load ptr, ptr %51, align 8, !tbaa !116
-  %53 = trunc i64 %38 to i32
-  %54 = getelementptr ptr, ptr %52, i32 %53
-  %55 = getelementptr ptr, ptr %54, i32 -3
-  br label %56
-
-56:                                               ; preds = %47, %50
-  %57 = phi ptr [ %49, %47 ], [ %55, %50 ]
-  %58 = load ptr, ptr %57, align 4, !tbaa !6
-  %59 = sub nsw i64 %1, %39
-  %60 = mul nsw i64 %59, %2
-  %61 = trunc i64 %60 to i32
-  %62 = getelementptr inbounds i8, ptr %58, i32 %61
-  ret ptr %62
+  %10 = zext i32 %9 to i64
+  %11 = shl nuw i64 1, %10
+  %12 = lshr i64 %1, %10
+  %13 = shl i64 %12, 1
+  %14 = or disjoint i64 %13, 1
+  %15 = tail call i64 @llvm.ctlz.i64(i64 %14, i1 true), !range !116
+  %16 = xor i64 %15, 63
+  %17 = shl i64 %11, %16
+  %18 = lshr i64 %17, 1
+  %19 = sub i64 0, %11
+  %20 = and i64 %18, %19
+  %21 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %22 = load ptr, ptr %21, align 8, !tbaa !117
+  %23 = trunc i64 %16 to i32
+  %24 = getelementptr inbounds ptr, ptr %22, i32 %23
+  %25 = load ptr, ptr %24, align 4, !tbaa !6
+  %26 = sext i32 %9 to i64
+  %27 = tail call i64 @llvm.usub.sat.i64(i64 %16, i64 1)
+  %28 = add nsw i64 %27, %26
+  %29 = shl i64 %2, %28
+  %30 = trunc i64 %29 to i32
+  %31 = getelementptr inbounds i8, ptr %25, i32 %30
+  store ptr %31, ptr %4, align 4, !tbaa !6
+  %32 = load ptr, ptr %21, align 8, !tbaa !117
+  %33 = getelementptr inbounds ptr, ptr %32, i32 %23
+  %34 = load ptr, ptr %33, align 4, !tbaa !6
+  %35 = sub nsw i64 %1, %20
+  %36 = mul nsw i64 %35, %2
+  %37 = trunc i64 %36 to i32
+  %38 = getelementptr inbounds i8, ptr %34, i32 %37
+  ret ptr %38
 }
 
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(read, argmem: readwrite, inaccessiblemem: none)
@@ -7632,9 +7482,9 @@ define hidden i64 @fa_segmented_next_byte(ptr nocapture noundef readonly %0, i64
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(argmem: readwrite)
 define hidden void @fa_segmented_reset(ptr nocapture noundef %0, i64 noundef %1, i32 noundef %2) local_unnamed_addr #1 {
-  store i64 0, ptr %0, align 8, !tbaa !119
+  store i64 0, ptr %0, align 8, !tbaa !120
   %4 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 1
-  %5 = load i16, ptr %4, align 8, !tbaa !120
+  %5 = load i16, ptr %4, align 8, !tbaa !121
   %6 = icmp sgt i16 %5, 0
   br i1 %6, label %7, label %16
 
@@ -7662,15 +7512,15 @@ define hidden void @fa_segmented_reset(ptr nocapture noundef %0, i64 noundef %1,
 ; Function Attrs: nounwind optsize
 define hidden void @fa_segmented_free(ptr noundef %0, i64 noundef %1, i32 noundef %2) local_unnamed_addr #3 {
   %4 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 2
-  %5 = load i16, ptr %4, align 2, !tbaa !118
+  %5 = load i16, ptr %4, align 2, !tbaa !119
   %6 = icmp eq i16 %5, 2
-  br i1 %6, label %56, label %7
+  br i1 %6, label %48, label %7
 
 7:                                                ; preds = %3
   %8 = icmp eq i16 %5, 3
   %9 = zext i1 %8 to i64
   %10 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 1
-  %11 = load i16, ptr %10, align 8, !tbaa !120
+  %11 = load i16, ptr %10, align 8, !tbaa !121
   %12 = sext i16 %11 to i64
   %13 = icmp slt i64 %9, %12
   br i1 %13, label %14, label %21
@@ -7684,62 +7534,48 @@ define hidden void @fa_segmented_free(ptr noundef %0, i64 noundef %1, i32 nounde
   %20 = sext i32 %18 to i64
   br label %33
 
-21:                                               ; preds = %44, %7
-  %22 = phi i16 [ %11, %7 ], [ %52, %44 ]
+21:                                               ; preds = %33, %7
+  %22 = phi i16 [ %11, %7 ], [ %44, %33 ]
   %23 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %24 = load ptr, ptr %23, align 8, !tbaa !116
+  %24 = load ptr, ptr %23, align 8, !tbaa !117
   %25 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
   %26 = icmp eq ptr %24, %25
   br i1 %26, label %30, label %27
 
 27:                                               ; preds = %21
   %28 = icmp slt i16 %22, 12
-  %29 = select i1 %28, i32 32, i32 128
+  %29 = select i1 %28, i32 44, i32 128
   tail call void @fa_free(ptr noundef %24, i32 noundef %29, i32 noundef 4) #53
-  store ptr %25, ptr %23, align 8, !tbaa !116
+  store ptr %25, ptr %23, align 8, !tbaa !117
   br label %30
 
 30:                                               ; preds = %21, %27
-  %31 = load i16, ptr %4, align 2, !tbaa !118
+  %31 = load i16, ptr %4, align 2, !tbaa !119
   %32 = icmp eq i16 %31, 0
-  br i1 %32, label %55, label %56
+  br i1 %32, label %47, label %48
 
-33:                                               ; preds = %14, %44
-  %34 = phi i64 [ %9, %14 ], [ %51, %44 ]
-  %35 = icmp ult i64 %34, 3
-  br i1 %35, label %36, label %39
+33:                                               ; preds = %14, %33
+  %34 = phi i64 [ %9, %14 ], [ %43, %33 ]
+  %35 = load ptr, ptr %19, align 8, !tbaa !117
+  %36 = trunc i64 %34 to i32
+  %37 = getelementptr inbounds ptr, ptr %35, i32 %36
+  %38 = load ptr, ptr %37, align 4, !tbaa !6
+  %39 = tail call i64 @llvm.usub.sat.i64(i64 %34, i64 1)
+  %40 = add i64 %39, %20
+  %41 = shl i64 %1, %40
+  %42 = trunc i64 %41 to i32
+  tail call void @fa_free(ptr noundef %38, i32 noundef %42, i32 noundef 16) #53
+  %43 = add nuw nsw i64 %34, 1
+  %44 = load i16, ptr %10, align 8, !tbaa !121
+  %45 = sext i16 %44 to i64
+  %46 = icmp slt i64 %43, %45
+  br i1 %46, label %33, label %21, !llvm.loop !131
 
-36:                                               ; preds = %33
-  %37 = trunc i64 %34 to i32
-  %38 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %37
-  br label %44
-
-39:                                               ; preds = %33
-  %40 = load ptr, ptr %19, align 8, !tbaa !116
-  %41 = trunc i64 %34 to i32
-  %42 = getelementptr ptr, ptr %40, i32 %41
-  %43 = getelementptr ptr, ptr %42, i32 -3
-  br label %44
-
-44:                                               ; preds = %36, %39
-  %45 = phi ptr [ %38, %36 ], [ %43, %39 ]
-  %46 = load ptr, ptr %45, align 4, !tbaa !6
-  %47 = tail call i64 @llvm.usub.sat.i64(i64 %34, i64 1)
-  %48 = add i64 %47, %20
-  %49 = shl i64 %1, %48
-  %50 = trunc i64 %49 to i32
-  tail call void @fa_free(ptr noundef %46, i32 noundef %50, i32 noundef 16) #53
-  %51 = add nuw nsw i64 %34, 1
-  %52 = load i16, ptr %10, align 8, !tbaa !120
-  %53 = sext i16 %52 to i64
-  %54 = icmp slt i64 %51, %53
-  br i1 %54, label %33, label %21, !llvm.loop !130
-
-55:                                               ; preds = %30
+47:                                               ; preds = %30
   tail call void @fa_free(ptr noundef nonnull %0, i32 noundef 40, i32 noundef 8) #53
-  br label %56
+  br label %48
 
-56:                                               ; preds = %3, %55, %30
+48:                                               ; preds = %3, %47, %30
   ret void
 }
 
@@ -7747,9 +7583,9 @@ define hidden void @fa_segmented_free(ptr noundef %0, i64 noundef %1, i32 nounde
 define hidden ptr @fa_segmented_flatten(ptr nocapture noundef readonly %0, i64 noundef %1, i32 noundef %2) local_unnamed_addr #3 {
   %4 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
   %5 = load i32, ptr %4, align 4, !tbaa !113
-  %6 = load i64, ptr %0, align 8, !tbaa !119
+  %6 = load i64, ptr %0, align 8, !tbaa !120
   %7 = tail call ptr @fa_array_new(i64 noundef %6, i64 noundef %6, i64 noundef %1) #52
-  %8 = load i64, ptr %0, align 8, !tbaa !119
+  %8 = load i64, ptr %0, align 8, !tbaa !120
   %9 = icmp sgt i64 %8, 0
   br i1 %9, label %10, label %15
 
@@ -7760,13 +7596,13 @@ define hidden ptr @fa_segmented_flatten(ptr nocapture noundef readonly %0, i64 n
   %14 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
   br label %16
 
-15:                                               ; preds = %38, %3
+15:                                               ; preds = %16, %3
   ret ptr %7
 
-16:                                               ; preds = %10, %38
-  %17 = phi i64 [ %8, %10 ], [ %45, %38 ]
-  %18 = phi i64 [ 0, %10 ], [ %44, %38 ]
-  %19 = phi i64 [ 0, %10 ], [ %43, %38 ]
+16:                                               ; preds = %10, %16
+  %17 = phi i64 [ %8, %10 ], [ %37, %16 ]
+  %18 = phi i64 [ 0, %10 ], [ %36, %16 ]
+  %19 = phi i64 [ 0, %10 ], [ %35, %16 ]
   %20 = tail call i64 @llvm.usub.sat.i64(i64 %18, i64 1)
   %21 = add i64 %20, %13
   %22 = shl nuw i64 1, %21
@@ -7776,32 +7612,18 @@ define hidden ptr @fa_segmented_flatten(ptr nocapture noundef readonly %0, i64 n
   %26 = mul nsw i64 %19, %1
   %27 = trunc i64 %26 to i32
   %28 = getelementptr inbounds i8, ptr %25, i32 %27
-  %29 = icmp ult i64 %18, 3
-  br i1 %29, label %30, label %33
-
-30:                                               ; preds = %16
-  %31 = trunc i64 %18 to i32
-  %32 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %31
-  br label %38
-
-33:                                               ; preds = %16
-  %34 = load ptr, ptr %14, align 8, !tbaa !116
-  %35 = trunc i64 %18 to i32
-  %36 = getelementptr ptr, ptr %34, i32 %35
-  %37 = getelementptr ptr, ptr %36, i32 -3
-  br label %38
-
-38:                                               ; preds = %30, %33
-  %39 = phi ptr [ %32, %30 ], [ %37, %33 ]
-  %40 = load ptr, ptr %39, align 4, !tbaa !6
-  %41 = mul nsw i64 %24, %1
-  %42 = trunc i64 %41 to i32
-  tail call fastcc void @copy_bytes(ptr noundef %28, ptr noundef %40, i32 noundef %42) #52
-  %43 = add nsw i64 %24, %19
-  %44 = add nuw nsw i64 %18, 1
-  %45 = load i64, ptr %0, align 8, !tbaa !119
-  %46 = icmp slt i64 %43, %45
-  br i1 %46, label %16, label %15, !llvm.loop !131
+  %29 = load ptr, ptr %14, align 8, !tbaa !117
+  %30 = trunc i64 %18 to i32
+  %31 = getelementptr inbounds ptr, ptr %29, i32 %30
+  %32 = load ptr, ptr %31, align 4, !tbaa !6
+  %33 = mul nsw i64 %24, %1
+  %34 = trunc i64 %33 to i32
+  tail call fastcc void @copy_bytes(ptr noundef %28, ptr noundef %32, i32 noundef %34) #52
+  %35 = add nsw i64 %24, %19
+  %36 = add nuw nsw i64 %18, 1
+  %37 = load i64, ptr %0, align 8, !tbaa !120
+  %38 = icmp slt i64 %35, %37
+  br i1 %38, label %16, label %15, !llvm.loop !132
 }
 
 ; Function Attrs: nounwind optsize
@@ -7824,7 +7646,7 @@ define hidden noundef ptr @fa_segmented_from_array(ptr noundef %0, i64 noundef %
   store i32 -1, ptr %12, align 4, !tbaa !113
   %13 = getelementptr inbounds %struct.FaSegmented, ptr %11, i32 0, i32 7
   %14 = getelementptr inbounds %struct.FaSegmented, ptr %11, i32 0, i32 6
-  store ptr %13, ptr %14, align 8, !tbaa !116
+  store ptr %13, ptr %14, align 8, !tbaa !117
   %15 = load ptr, ptr %0, align 8, !tbaa !69
   %16 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
   %17 = load i64, ptr %16, align 8, !tbaa !79
@@ -7833,9 +7655,9 @@ define hidden noundef ptr @fa_segmented_from_array(ptr noundef %0, i64 noundef %
 
 19:                                               ; preds = %10
   tail call void @fa_segmented_reserve(ptr noundef nonnull %11, i64 noundef %17, i64 noundef 0, i32 poison) #52
-  %20 = load i64, ptr %11, align 8, !tbaa !119
+  %20 = load i64, ptr %11, align 8, !tbaa !120
   %21 = add nsw i64 %20, %17
-  store i64 %21, ptr %11, align 8, !tbaa !119
+  store i64 %21, ptr %11, align 8, !tbaa !120
   br label %32
 
 22:                                               ; preds = %10
@@ -7852,8 +7674,8 @@ define hidden noundef ptr @fa_segmented_from_array(ptr noundef %0, i64 noundef %
   %29 = trunc i64 %25 to i32
   tail call fastcc void @copy_bytes(ptr noundef null, ptr noundef %15, i32 noundef %29) #52
   %30 = getelementptr inbounds i8, ptr null, i32 %29
-  store ptr %30, ptr %28, align 8, !tbaa !121
-  store i64 %17, ptr %11, align 8, !tbaa !119
+  store ptr %30, ptr %28, align 8, !tbaa !122
+  store i64 %17, ptr %11, align 8, !tbaa !120
   br label %32
 
 31:                                               ; preds = %24, %22
@@ -7885,7 +7707,7 @@ define hidden noundef ptr @fa_segmented_from_array_capacity(ptr noundef %0, i64 
   store i32 -1, ptr %13, align 4, !tbaa !113
   %14 = getelementptr inbounds %struct.FaSegmented, ptr %12, i32 0, i32 7
   %15 = getelementptr inbounds %struct.FaSegmented, ptr %12, i32 0, i32 6
-  store ptr %14, ptr %15, align 8, !tbaa !116
+  store ptr %14, ptr %15, align 8, !tbaa !117
   %16 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
   %17 = load i64, ptr %16, align 8, !tbaa !79
   %18 = tail call i64 @llvm.smax.i64(i64 %17, i64 %3)
@@ -7897,9 +7719,9 @@ define hidden noundef ptr @fa_segmented_from_array_capacity(ptr noundef %0, i64 
 
 22:                                               ; preds = %11
   tail call void @fa_segmented_reserve(ptr noundef nonnull %12, i64 noundef %20, i64 noundef 0, i32 poison) #52
-  %23 = load i64, ptr %12, align 8, !tbaa !119
+  %23 = load i64, ptr %12, align 8, !tbaa !120
   %24 = add nsw i64 %23, %20
-  store i64 %24, ptr %12, align 8, !tbaa !119
+  store i64 %24, ptr %12, align 8, !tbaa !120
   br label %45
 
 25:                                               ; preds = %11
@@ -7909,9 +7731,9 @@ define hidden noundef ptr @fa_segmented_from_array_capacity(ptr noundef %0, i64 
 27:                                               ; preds = %25
   %28 = mul nsw i64 %20, %1
   %29 = getelementptr inbounds %struct.FaSegmented, ptr %12, i32 0, i32 5
-  %30 = load ptr, ptr %29, align 4, !tbaa !122
+  %30 = load ptr, ptr %29, align 4, !tbaa !123
   %31 = getelementptr inbounds %struct.FaSegmented, ptr %12, i32 0, i32 4
-  %32 = load ptr, ptr %31, align 8, !tbaa !121
+  %32 = load ptr, ptr %31, align 8, !tbaa !122
   %33 = ptrtoint ptr %30 to i32
   %34 = ptrtoint ptr %32 to i32
   %35 = sub i32 %33, %34
@@ -7922,12 +7744,12 @@ define hidden noundef ptr @fa_segmented_from_array_capacity(ptr noundef %0, i64 
 38:                                               ; preds = %27
   %39 = trunc i64 %28 to i32
   tail call fastcc void @copy_bytes(ptr noundef %32, ptr noundef %19, i32 noundef %39) #52
-  %40 = load ptr, ptr %31, align 8, !tbaa !121
+  %40 = load ptr, ptr %31, align 8, !tbaa !122
   %41 = getelementptr inbounds i8, ptr %40, i32 %39
-  store ptr %41, ptr %31, align 8, !tbaa !121
-  %42 = load i64, ptr %12, align 8, !tbaa !119
+  store ptr %41, ptr %31, align 8, !tbaa !122
+  %42 = load i64, ptr %12, align 8, !tbaa !120
   %43 = add nsw i64 %42, %20
-  store i64 %43, ptr %12, align 8, !tbaa !119
+  store i64 %43, ptr %12, align 8, !tbaa !120
   br label %45
 
 44:                                               ; preds = %27, %25
@@ -7962,7 +7784,7 @@ define hidden ptr @fa_heap_alloc(i32 noundef %0, i32 noundef %1) local_unnamed_a
   br i1 %18, label %21, label %19, !prof !35
 
 19:                                               ; preds = %10
-  %20 = load ptr, ptr %17, align 4, !tbaa !132
+  %20 = load ptr, ptr %17, align 4, !tbaa !133
   store ptr %20, ptr %16, align 4, !tbaa !6
   br label %38
 
@@ -8014,9 +7836,9 @@ define internal fastcc ptr @heap_alloc_slow(i32 noundef %0) unnamed_addr #16 {
   br i1 %9, label %69, label %10
 
 10:                                               ; preds = %7
-  store i32 65535, ptr %8, align 4, !tbaa !134
+  store i32 65535, ptr %8, align 4, !tbaa !135
   %11 = getelementptr inbounds %struct.PageHeader, ptr %8, i32 0, i32 1
-  store i32 %5, ptr %11, align 4, !tbaa !136
+  store i32 %5, ptr %11, align 4, !tbaa !137
   %12 = getelementptr inbounds i8, ptr %8, i32 16
   br label %69
 
@@ -8052,7 +7874,7 @@ define internal fastcc ptr @heap_alloc_slow(i32 noundef %0) unnamed_addr #16 {
   %34 = add i32 %29, 1
   %35 = add nuw nsw i32 %28, 1
   %36 = icmp eq i32 %35, 5
-  br i1 %36, label %37, label %27, !llvm.loop !137
+  br i1 %36, label %37, label %27, !llvm.loop !138
 
 37:                                               ; preds = %33
   %38 = shl i32 %24, 1
@@ -8067,7 +7889,7 @@ define internal fastcc ptr @heap_alloc_slow(i32 noundef %0) unnamed_addr #16 {
   br i1 %44, label %47, label %45
 
 45:                                               ; preds = %39
-  %46 = load ptr, ptr %43, align 4, !tbaa !132
+  %46 = load ptr, ptr %43, align 4, !tbaa !133
   store ptr %46, ptr %42, align 4, !tbaa !6
   br label %69
 
@@ -8092,9 +7914,9 @@ define internal fastcc ptr @heap_alloc_slow(i32 noundef %0) unnamed_addr #16 {
   br i1 %60, label %69, label %61
 
 61:                                               ; preds = %58
-  store i32 %41, ptr %59, align 4, !tbaa !134
+  store i32 %41, ptr %59, align 4, !tbaa !135
   %62 = getelementptr inbounds %struct.PageHeader, ptr %59, i32 0, i32 1
-  store i32 1, ptr %62, align 4, !tbaa !136
+  store i32 1, ptr %62, align 4, !tbaa !137
   %63 = getelementptr inbounds i8, ptr %59, i32 16
   %64 = getelementptr inbounds i8, ptr %59, i32 65536
   %65 = getelementptr inbounds [40 x ptr], ptr @class_end, i32 0, i32 %41
@@ -8117,20 +7939,20 @@ define hidden void @fa_heap_free(ptr noundef %0) local_unnamed_addr #20 {
   %2 = ptrtoint ptr %0 to i32
   %3 = and i32 %2, -65536
   %4 = inttoptr i32 %3 to ptr
-  %5 = load i32, ptr %4, align 65536, !tbaa !134
+  %5 = load i32, ptr %4, align 65536, !tbaa !135
   %6 = icmp eq i32 %5, 65535
   br i1 %6, label %7, label %10
 
 7:                                                ; preds = %1
   %8 = getelementptr inbounds %struct.PageHeader, ptr %4, i32 0, i32 1
-  %9 = load i32, ptr %8, align 4, !tbaa !136
+  %9 = load i32, ptr %8, align 4, !tbaa !137
   tail call fastcc void @give_pages(ptr noundef nonnull %4, i32 noundef %9) #52
   br label %13
 
 10:                                               ; preds = %1
   %11 = getelementptr inbounds [40 x ptr], ptr @free_blocks, i32 0, i32 %5
   %12 = load ptr, ptr %11, align 4, !tbaa !6
-  store ptr %12, ptr %0, align 4, !tbaa !132
+  store ptr %12, ptr %0, align 4, !tbaa !133
   store ptr %0, ptr %11, align 4, !tbaa !6
   br label %13
 
@@ -8141,7 +7963,7 @@ define hidden void @fa_heap_free(ptr noundef %0) local_unnamed_addr #20 {
 ; Function Attrs: nofree noinline norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none)
 define internal fastcc void @give_pages(ptr noundef %0, i32 noundef %1) unnamed_addr #21 {
   %3 = getelementptr inbounds %struct.FreeSpan, ptr %0, i32 0, i32 1
-  store i32 %1, ptr %3, align 4, !tbaa !138
+  store i32 %1, ptr %3, align 4, !tbaa !139
   br label %4
 
 4:                                                ; preds = %4, %2
@@ -8151,10 +7973,10 @@ define internal fastcc void @give_pages(ptr noundef %0, i32 noundef %1) unnamed_
   %8 = icmp ne ptr %7, null
   %9 = icmp ult ptr %7, %0
   %10 = and i1 %8, %9
-  br i1 %10, label %4, label %11, !llvm.loop !140
+  br i1 %10, label %4, label %11, !llvm.loop !141
 
 11:                                               ; preds = %4
-  store ptr %7, ptr %0, align 4, !tbaa !141
+  store ptr %7, ptr %0, align 4, !tbaa !142
   br i1 %8, label %12, label %21
 
 12:                                               ; preds = %11
@@ -8165,11 +7987,11 @@ define internal fastcc void @give_pages(ptr noundef %0, i32 noundef %1) unnamed_
 
 16:                                               ; preds = %12
   %17 = getelementptr inbounds %struct.FreeSpan, ptr %7, i32 0, i32 1
-  %18 = load i32, ptr %17, align 4, !tbaa !138
+  %18 = load i32, ptr %17, align 4, !tbaa !139
   %19 = add i32 %18, %1
-  store i32 %19, ptr %3, align 4, !tbaa !138
-  %20 = load ptr, ptr %7, align 4, !tbaa !141
-  store ptr %20, ptr %0, align 4, !tbaa !141
+  store i32 %19, ptr %3, align 4, !tbaa !139
+  %20 = load ptr, ptr %7, align 4, !tbaa !142
+  store ptr %20, ptr %0, align 4, !tbaa !142
   br label %21
 
 21:                                               ; preds = %16, %12, %11
@@ -8180,7 +8002,7 @@ define internal fastcc void @give_pages(ptr noundef %0, i32 noundef %1) unnamed_
 
 25:                                               ; preds = %21
   %26 = getelementptr inbounds %struct.FreeSpan, ptr %5, i32 0, i32 1
-  %27 = load i32, ptr %26, align 4, !tbaa !138
+  %27 = load i32, ptr %26, align 4, !tbaa !139
   %28 = shl i32 %27, 16
   %29 = getelementptr inbounds i8, ptr %5, i32 %28
   %30 = icmp eq ptr %29, %0
@@ -8188,12 +8010,12 @@ define internal fastcc void @give_pages(ptr noundef %0, i32 noundef %1) unnamed_
 
 31:                                               ; preds = %25
   %32 = add i32 %27, %23
-  store i32 %32, ptr %26, align 4, !tbaa !138
-  store ptr %22, ptr %5, align 4, !tbaa !141
+  store i32 %32, ptr %26, align 4, !tbaa !139
+  store ptr %22, ptr %5, align 4, !tbaa !142
   br label %35
 
 33:                                               ; preds = %25
-  store ptr %0, ptr %5, align 4, !tbaa !141
+  store ptr %0, ptr %5, align 4, !tbaa !142
   br label %35
 
 34:                                               ; preds = %21
@@ -8226,7 +8048,7 @@ define hidden void @fa_arena_enter_owned(ptr noundef %0) local_unnamed_addr #33 
   %7 = ptrtoint ptr %0 to i32
   %8 = and i32 %7, -65536
   %9 = inttoptr i32 %8 to ptr
-  %10 = load ptr, ptr %9, align 65536, !tbaa !142
+  %10 = load ptr, ptr %9, align 65536, !tbaa !143
   br label %11
 
 11:                                               ; preds = %4, %6
@@ -8249,7 +8071,7 @@ define hidden void @fa_arena_drop(ptr noundef %0) local_unnamed_addr #3 {
   %4 = ptrtoint ptr %0 to i32
   %5 = and i32 %4, -65536
   %6 = inttoptr i32 %5 to ptr
-  %7 = load ptr, ptr %6, align 65536, !tbaa !142
+  %7 = load ptr, ptr %6, align 65536, !tbaa !143
   %8 = icmp eq ptr %7, null
   %9 = load ptr, ptr @tree_arena, align 4
   %10 = icmp eq ptr %7, %9
@@ -8282,21 +8104,21 @@ define internal fastcc void @release_arena(ptr noundef %0) unnamed_addr #3 {
 9:                                                ; preds = %1, %9
   %10 = phi ptr [ %15, %9 ], [ %4, %1 ]
   %11 = getelementptr inbounds %struct.FaArenaCleanup, ptr %10, i32 0, i32 1
-  %12 = load ptr, ptr %11, align 4, !tbaa !144
+  %12 = load ptr, ptr %11, align 4, !tbaa !145
   %13 = getelementptr inbounds %struct.FaArenaCleanup, ptr %10, i32 0, i32 2
-  %14 = load ptr, ptr %13, align 4, !tbaa !146
+  %14 = load ptr, ptr %13, align 4, !tbaa !147
   tail call void %12(ptr noundef %14) #53
   %15 = load ptr, ptr %10, align 4, !tbaa !6
   %16 = icmp eq ptr %15, null
-  br i1 %16, label %6, label %9, !llvm.loop !147
+  br i1 %16, label %6, label %9, !llvm.loop !148
 
 17:                                               ; preds = %8, %17
   %18 = phi ptr [ %20, %17 ], [ %0, %8 ]
   %19 = getelementptr inbounds %struct.FaArena, ptr %18, i32 0, i32 1
-  %20 = load ptr, ptr %19, align 4, !tbaa !148
+  %20 = load ptr, ptr %19, align 4, !tbaa !149
   tail call fastcc void @give_pages(ptr noundef nonnull %18, i32 noundef 1) #52
   %21 = icmp eq ptr %20, null
-  br i1 %21, label %22, label %17, !llvm.loop !149
+  br i1 %21, label %22, label %17, !llvm.loop !150
 
 22:                                               ; preds = %17, %6
   ret void
@@ -8324,7 +8146,7 @@ define hidden void @fa_arena_leave(ptr noundef %0) local_unnamed_addr #14 {
   %11 = ptrtoint ptr %0 to i32
   %12 = and i32 %11, -65536
   %13 = inttoptr i32 %12 to ptr
-  %14 = load ptr, ptr %13, align 65536, !tbaa !142
+  %14 = load ptr, ptr %13, align 65536, !tbaa !143
   br label %15
 
 15:                                               ; preds = %8, %10
@@ -8351,14 +8173,14 @@ define hidden ptr @fa_arena_alloc(i32 noundef %0, i32 noundef %1) local_unnamed_
 7:                                                ; preds = %2
   %8 = icmp ult i32 %1, 9
   %9 = getelementptr inbounds %struct.FaArena, ptr %5, i32 0, i32 2
-  %10 = load ptr, ptr %9, align 4, !tbaa !150
+  %10 = load ptr, ptr %9, align 4, !tbaa !151
   %11 = ptrtoint ptr %10 to i32
   %12 = sub i32 0, %11
   %13 = add i32 %1, -1
   %14 = and i32 %13, %12
   %15 = select i1 %8, i32 0, i32 %14
   %16 = getelementptr inbounds %struct.FaArena, ptr %5, i32 0, i32 3
-  %17 = load ptr, ptr %16, align 4, !tbaa !151
+  %17 = load ptr, ptr %16, align 4, !tbaa !152
   %18 = ptrtoint ptr %17 to i32
   %19 = sub i32 %18, %11
   %20 = icmp ule i32 %15, %19
@@ -8371,7 +8193,7 @@ define hidden ptr @fa_arena_alloc(i32 noundef %0, i32 noundef %1) local_unnamed_
   %25 = getelementptr inbounds %struct.FaArena, ptr %5, i32 0, i32 2
   %26 = getelementptr inbounds i8, ptr %10, i32 %15
   %27 = getelementptr inbounds i8, ptr %26, i32 %4
-  store ptr %27, ptr %25, align 4, !tbaa !150
+  store ptr %27, ptr %25, align 4, !tbaa !151
   br label %30
 
 28:                                               ; preds = %7, %2
@@ -8409,31 +8231,31 @@ define internal fastcc ptr @arena_refill(i32 noundef %0, i32 noundef %1) unnamed
 
 17:                                               ; preds = %14
   %18 = getelementptr inbounds %struct.FaArena, ptr %6, i32 0, i32 1
-  store ptr null, ptr %18, align 4, !tbaa !148
+  store ptr null, ptr %18, align 4, !tbaa !149
   %19 = getelementptr inbounds %struct.FaArena, ptr %6, i32 0, i32 4
-  store ptr null, ptr %19, align 4, !tbaa !152
+  store ptr null, ptr %19, align 4, !tbaa !153
   store ptr %6, ptr @tree_arena, align 4, !tbaa !6
   %20 = atomicrmw add ptr @live_tree_arenas, i32 1 monotonic, align 4
   br label %25
 
 21:                                               ; preds = %14
   %22 = getelementptr inbounds %struct.FaArena, ptr %15, i32 0, i32 1
-  %23 = load ptr, ptr %22, align 4, !tbaa !148
+  %23 = load ptr, ptr %22, align 4, !tbaa !149
   %24 = getelementptr inbounds %struct.FaArena, ptr %6, i32 0, i32 1
-  store ptr %23, ptr %24, align 4, !tbaa !148
-  store ptr %6, ptr %22, align 4, !tbaa !148
+  store ptr %23, ptr %24, align 4, !tbaa !149
+  store ptr %6, ptr %22, align 4, !tbaa !149
   br label %25
 
 25:                                               ; preds = %21, %17
   %26 = phi ptr [ %6, %17 ], [ %15, %21 ]
-  store ptr %26, ptr %6, align 4, !tbaa !142
+  store ptr %26, ptr %6, align 4, !tbaa !143
   %27 = getelementptr inbounds i8, ptr %6, i32 %5
   %28 = getelementptr inbounds i8, ptr %27, i32 %0
   %29 = getelementptr inbounds %struct.FaArena, ptr %26, i32 0, i32 2
-  store ptr %28, ptr %29, align 4, !tbaa !150
+  store ptr %28, ptr %29, align 4, !tbaa !151
   %30 = getelementptr inbounds i8, ptr %6, i32 65536
   %31 = getelementptr inbounds %struct.FaArena, ptr %26, i32 0, i32 3
-  store ptr %30, ptr %31, align 4, !tbaa !151
+  store ptr %30, ptr %31, align 4, !tbaa !152
   ret ptr %27
 }
 
@@ -8445,9 +8267,9 @@ define hidden void @fa_arena_cleanup(ptr noundef %0, ptr noundef %1) local_unnam
 
 5:                                                ; preds = %2
   %6 = getelementptr inbounds %struct.FaArena, ptr %3, i32 0, i32 3
-  %7 = load ptr, ptr %6, align 4, !tbaa !151
+  %7 = load ptr, ptr %6, align 4, !tbaa !152
   %8 = getelementptr inbounds %struct.FaArena, ptr %3, i32 0, i32 2
-  %9 = load ptr, ptr %8, align 4, !tbaa !150
+  %9 = load ptr, ptr %8, align 4, !tbaa !151
   %10 = ptrtoint ptr %7 to i32
   %11 = ptrtoint ptr %9 to i32
   %12 = sub i32 %10, %11
@@ -8456,7 +8278,7 @@ define hidden void @fa_arena_cleanup(ptr noundef %0, ptr noundef %1) local_unnam
 
 14:                                               ; preds = %5
   %15 = getelementptr inbounds i8, ptr %9, i32 16
-  store ptr %15, ptr %8, align 4, !tbaa !150
+  store ptr %15, ptr %8, align 4, !tbaa !151
   br label %19
 
 16:                                               ; preds = %5, %2
@@ -8468,13 +8290,13 @@ define hidden void @fa_arena_cleanup(ptr noundef %0, ptr noundef %1) local_unnam
   %20 = phi ptr [ %18, %16 ], [ %3, %14 ]
   %21 = phi ptr [ %17, %16 ], [ %9, %14 ]
   %22 = getelementptr inbounds %struct.FaArena, ptr %20, i32 0, i32 4
-  %23 = load ptr, ptr %22, align 4, !tbaa !152
-  store ptr %23, ptr %21, align 4, !tbaa !153
+  %23 = load ptr, ptr %22, align 4, !tbaa !153
+  store ptr %23, ptr %21, align 4, !tbaa !154
   %24 = getelementptr inbounds %struct.FaArenaCleanup, ptr %21, i32 0, i32 1
-  store ptr %1, ptr %24, align 4, !tbaa !144
+  store ptr %1, ptr %24, align 4, !tbaa !145
   %25 = getelementptr inbounds %struct.FaArenaCleanup, ptr %21, i32 0, i32 2
-  store ptr %0, ptr %25, align 4, !tbaa !146
-  store ptr %21, ptr %22, align 4, !tbaa !152
+  store ptr %0, ptr %25, align 4, !tbaa !147
+  store ptr %21, ptr %22, align 4, !tbaa !153
   ret void
 }
 
@@ -8572,33 +8394,33 @@ define hidden noundef ptr @fa_pool_local(ptr noundef returned %0, i64 noundef %1
   %4 = getelementptr inbounds i8, ptr %0, i32 16
   tail call void @llvm.memset.p0.i32(ptr noundef nonnull align 8 dereferenceable(56) %4, i8 0, i32 32, i1 false)
   %5 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 11
-  store i64 3, ptr %5, align 8, !tbaa !154
+  store i64 3, ptr %5, align 8, !tbaa !155
   %6 = icmp ne i64 %1, 0
   %7 = zext i1 %6 to i32
   %8 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 10
-  store i32 %7, ptr %8, align 4, !tbaa !156
-  store i64 %1, ptr %0, align 8, !tbaa !157
+  store i32 %7, ptr %8, align 4, !tbaa !157
+  store i64 %1, ptr %0, align 8, !tbaa !158
   %9 = tail call i64 @llvm.smax.i64(i64 %2, i64 4)
   %10 = trunc i64 %9 to i32
   %11 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 6
-  store i32 %10, ptr %11, align 4, !tbaa !158
+  store i32 %10, ptr %11, align 4, !tbaa !159
   %12 = trunc i64 %1 to i32
   %13 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 7
-  store i32 %12, ptr %13, align 8, !tbaa !159
+  store i32 %12, ptr %13, align 8, !tbaa !160
   %14 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 4
-  store i32 %7, ptr %14, align 4, !tbaa !160
+  store i32 %7, ptr %14, align 4, !tbaa !161
   %15 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 5
-  store i32 1, ptr %15, align 8, !tbaa !161
+  store i32 1, ptr %15, align 8, !tbaa !162
   %16 = getelementptr inbounds i8, ptr %0, i32 56
   %17 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 1
-  store ptr %16, ptr %17, align 8, !tbaa !162
+  store ptr %16, ptr %17, align 8, !tbaa !163
   %18 = getelementptr inbounds i8, ptr %0, i32 60
   %19 = ptrtoint ptr %18 to i32
   %20 = add i32 %19, 7
   %21 = and i32 %20, -8
   %22 = inttoptr i32 %21 to ptr
   %23 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 2
-  store ptr %22, ptr %23, align 4, !tbaa !163
+  store ptr %22, ptr %23, align 4, !tbaa !164
   store i64 0, ptr %22, align 8, !tbaa !89
   %24 = getelementptr inbounds i8, ptr %22, i32 8
   store ptr %24, ptr %16, align 4, !tbaa !6
@@ -8639,7 +8461,7 @@ define hidden noundef ptr @fa_pool_local(ptr noundef returned %0, i64 noundef %1
   store i64 %48, ptr %46, align 8, !tbaa !89
   %49 = add nuw nsw i64 %41, 1
   %50 = icmp eq i64 %49, %1
-  br i1 %50, label %39, label %40, !llvm.loop !164
+  br i1 %50, label %39, label %40, !llvm.loop !165
 }
 
 ; Function Attrs: nounwind optsize
@@ -8649,7 +8471,7 @@ define hidden noundef ptr @fa_pool_new(i64 noundef %0) local_unnamed_addr #3 {
   %3 = tail call i64 @llvm.smax.i64(i64 %0, i64 4)
   %4 = trunc i64 %3 to i32
   %5 = getelementptr inbounds %struct.FaPool, ptr %2, i32 0, i32 6
-  store i32 %4, ptr %5, align 4, !tbaa !158
+  store i32 %4, ptr %5, align 4, !tbaa !159
   %6 = shl i32 %4, 6
   %7 = add i32 %6, 104
   br label %8
@@ -8659,7 +8481,7 @@ define hidden noundef ptr @fa_pool_new(i64 noundef %0) local_unnamed_addr #3 {
   %10 = shl i32 %9, 16
   %11 = icmp ult i32 %10, %7
   %12 = shl i32 %9, 1
-  br i1 %11, label %8, label %13, !llvm.loop !165
+  br i1 %11, label %8, label %13, !llvm.loop !166
 
 13:                                               ; preds = %8
   %14 = shl i32 %9, 19
@@ -8684,11 +8506,11 @@ define hidden noundef ptr @fa_pool_new(i64 noundef %0) local_unnamed_addr #3 {
 
 30:                                               ; preds = %19
   %31 = getelementptr inbounds %struct.FaPool, ptr %2, i32 0, i32 7
-  store i32 %20, ptr %31, align 8, !tbaa !159
+  store i32 %20, ptr %31, align 8, !tbaa !160
   %32 = getelementptr inbounds %struct.FaPool, ptr %2, i32 0, i32 8
-  store i32 %9, ptr %32, align 4, !tbaa !166
+  store i32 %9, ptr %32, align 4, !tbaa !167
   %33 = getelementptr inbounds %struct.FaPool, ptr %2, i32 0, i32 9
-  store i32 %25, ptr %33, align 8, !tbaa !167
+  store i32 %25, ptr %33, align 8, !tbaa !168
   ret ptr %2
 }
 
@@ -8697,31 +8519,31 @@ define hidden noundef ptr @fa_columnar_new(i64 noundef %0, i64 noundef %1, i64 n
   %4 = tail call ptr @fa_alloc(i32 noundef 56, i32 noundef 8) #53
   tail call void @llvm.memset.p0.i32(ptr noundef nonnull align 8 dereferenceable(56) %4, i8 0, i32 56, i1 false)
   %5 = getelementptr inbounds %struct.FaPool, ptr %4, i32 0, i32 6
-  store i32 4, ptr %5, align 4, !tbaa !158
+  store i32 4, ptr %5, align 4, !tbaa !159
   %6 = trunc i64 %0 to i32
   %7 = getelementptr inbounds %struct.FaPool, ptr %4, i32 0, i32 7
-  store i32 %6, ptr %7, align 8, !tbaa !159
+  store i32 %6, ptr %7, align 8, !tbaa !160
   %8 = trunc i64 %1 to i32
   %9 = getelementptr inbounds %struct.FaPool, ptr %4, i32 0, i32 8
-  store i32 %8, ptr %9, align 4, !tbaa !166
+  store i32 %8, ptr %9, align 4, !tbaa !167
   %10 = trunc i64 %2 to i32
   %11 = getelementptr inbounds %struct.FaPool, ptr %4, i32 0, i32 9
-  store i32 %10, ptr %11, align 8, !tbaa !167
+  store i32 %10, ptr %11, align 8, !tbaa !168
   ret ptr %4
 }
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(argmem: read)
 define hidden i64 @fa_pool_capacity(ptr nocapture noundef readonly %0) local_unnamed_addr #13 {
   %2 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 10
-  %3 = load i32, ptr %2, align 4, !tbaa !156
+  %3 = load i32, ptr %2, align 4, !tbaa !157
   %4 = zext i32 %3 to i64
   %5 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 3
-  %6 = load ptr, ptr %5, align 8, !tbaa !168
+  %6 = load ptr, ptr %5, align 8, !tbaa !169
   %7 = icmp ne ptr %6, null
   %8 = zext i1 %7 to i64
   %9 = add nuw nsw i64 %8, %4
   %10 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 7
-  %11 = load i32, ptr %10, align 8, !tbaa !159
+  %11 = load i32, ptr %10, align 8, !tbaa !160
   %12 = zext i32 %11 to i64
   %13 = mul nuw nsw i64 %9, %12
   ret i64 %13
@@ -8729,21 +8551,21 @@ define hidden i64 @fa_pool_capacity(ptr nocapture noundef readonly %0) local_unn
 
 ; Function Attrs: nounwind optsize
 define hidden void @fa_pool_reserve(ptr nocapture noundef %0, i64 noundef %1) local_unnamed_addr #3 {
-  %3 = load i64, ptr %0, align 8, !tbaa !157
+  %3 = load i64, ptr %0, align 8, !tbaa !158
   %4 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 6
-  %5 = load i32, ptr %4, align 4, !tbaa !158
+  %5 = load i32, ptr %4, align 4, !tbaa !159
   %6 = zext i32 %5 to i64
   %7 = tail call fastcc i64 @storage_total(i64 noundef %3, i64 noundef %1, i64 noundef %6) #52
   %8 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 10
   %9 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 3
   %10 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 7
-  %11 = load i32, ptr %8, align 4, !tbaa !156
+  %11 = load i32, ptr %8, align 4, !tbaa !157
   %12 = zext i32 %11 to i64
-  %13 = load ptr, ptr %9, align 8, !tbaa !168
+  %13 = load ptr, ptr %9, align 8, !tbaa !169
   %14 = icmp ne ptr %13, null
   %15 = zext i1 %14 to i64
   %16 = add nuw nsw i64 %15, %12
-  %17 = load i32, ptr %10, align 8, !tbaa !159
+  %17 = load i32, ptr %10, align 8, !tbaa !160
   %18 = zext i32 %17 to i64
   %19 = mul nuw nsw i64 %16, %18
   %20 = icmp slt i64 %19, %7
@@ -8751,17 +8573,17 @@ define hidden void @fa_pool_reserve(ptr nocapture noundef %0, i64 noundef %1) lo
 
 21:                                               ; preds = %2, %21
   %22 = tail call fastcc ptr @pool_new_chunk(ptr noundef nonnull %0) #57
-  %23 = load i32, ptr %8, align 4, !tbaa !156
+  %23 = load i32, ptr %8, align 4, !tbaa !157
   %24 = zext i32 %23 to i64
-  %25 = load ptr, ptr %9, align 8, !tbaa !168
+  %25 = load ptr, ptr %9, align 8, !tbaa !169
   %26 = icmp ne ptr %25, null
   %27 = zext i1 %26 to i64
   %28 = add nuw nsw i64 %27, %24
-  %29 = load i32, ptr %10, align 8, !tbaa !159
+  %29 = load i32, ptr %10, align 8, !tbaa !160
   %30 = zext i32 %29 to i64
   %31 = mul nuw nsw i64 %28, %30
   %32 = icmp slt i64 %31, %7
-  br i1 %32, label %21, label %33, !llvm.loop !169
+  br i1 %32, label %21, label %33, !llvm.loop !170
 
 33:                                               ; preds = %21, %2
   ret void
@@ -8770,14 +8592,14 @@ define hidden void @fa_pool_reserve(ptr nocapture noundef %0, i64 noundef %1) lo
 ; Function Attrs: cold noinline nounwind optsize
 define internal fastcc noundef ptr @pool_new_chunk(ptr nocapture noundef %0) unnamed_addr #22 {
   %2 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 3
-  %3 = load ptr, ptr %2, align 8, !tbaa !168
-  store ptr null, ptr %2, align 8, !tbaa !168
+  %3 = load ptr, ptr %2, align 8, !tbaa !169
+  store ptr null, ptr %2, align 8, !tbaa !169
   %4 = icmp eq ptr %3, null
   br i1 %4, label %5, label %40
 
 5:                                                ; preds = %1
   %6 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 8
-  %7 = load i32, ptr %6, align 4, !tbaa !166
+  %7 = load i32, ptr %6, align 4, !tbaa !167
   %8 = icmp eq i32 %7, 1
   br i1 %8, label %9, label %11
 
@@ -8836,24 +8658,24 @@ define internal fastcc noundef ptr @pool_new_chunk(ptr nocapture noundef %0) unn
 40:                                               ; preds = %38, %1
   %41 = phi ptr [ %35, %38 ], [ %3, %1 ]
   %42 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 7
-  %43 = load i32, ptr %42, align 8, !tbaa !159
+  %43 = load i32, ptr %42, align 8, !tbaa !160
   %44 = add i32 %43, 63
   %45 = lshr i32 %44, 3
   %46 = and i32 %45, 536870904
   %47 = add nuw nsw i32 %46, 24
   tail call void @llvm.memset.p0.i32(ptr noundef nonnull align 8 dereferenceable(1) %41, i8 0, i32 %47, i1 false)
   %48 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 9
-  %49 = load i32, ptr %48, align 8, !tbaa !167
+  %49 = load i32, ptr %48, align 8, !tbaa !168
   %50 = getelementptr inbounds i8, ptr %41, i32 %49
   store ptr %50, ptr %41, align 8, !tbaa !6
   %51 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 4
-  %52 = load i32, ptr %51, align 4, !tbaa !160
+  %52 = load i32, ptr %51, align 4, !tbaa !161
   %53 = icmp eq i32 %52, 0
   br i1 %53, label %65, label %54
 
 54:                                               ; preds = %40
   %55 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 1
-  %56 = load ptr, ptr %55, align 8, !tbaa !162
+  %56 = load ptr, ptr %55, align 8, !tbaa !163
   br label %57
 
 57:                                               ; preds = %54, %62
@@ -8866,7 +8688,7 @@ define internal fastcc noundef ptr @pool_new_chunk(ptr nocapture noundef %0) unn
 62:                                               ; preds = %57
   %63 = add nuw i32 %58, 1
   %64 = icmp eq i32 %63, %52
-  br i1 %64, label %68, label %57, !llvm.loop !170
+  br i1 %64, label %68, label %57, !llvm.loop !171
 
 65:                                               ; preds = %57, %40
   %66 = phi i32 [ 0, %40 ], [ %58, %57 ]
@@ -8876,7 +8698,7 @@ define internal fastcc noundef ptr @pool_new_chunk(ptr nocapture noundef %0) unn
 68:                                               ; preds = %62, %65
   %69 = phi i32 [ %66, %65 ], [ %52, %62 ]
   %70 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 5
-  %71 = load i32, ptr %70, align 8, !tbaa !161
+  %71 = load i32, ptr %70, align 8, !tbaa !162
   %72 = icmp eq i32 %52, %71
   br i1 %72, label %73, label %107
 
@@ -8891,29 +8713,29 @@ define internal fastcc noundef ptr @pool_new_chunk(ptr nocapture noundef %0) unn
   %81 = tail call ptr @fa_alloc(i32 noundef %80, i32 noundef 8) #53
   tail call void @llvm.memset.p0.i32(ptr align 4 %77, i8 0, i32 %76, i1 false)
   tail call void @llvm.memset.p0.i32(ptr align 8 %81, i8 0, i32 %80, i1 false)
-  %82 = load i32, ptr %70, align 8, !tbaa !161
+  %82 = load i32, ptr %70, align 8, !tbaa !162
   %83 = icmp eq i32 %82, 0
   br i1 %83, label %103, label %84
 
 84:                                               ; preds = %73
   %85 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 1
-  %86 = load ptr, ptr %85, align 8, !tbaa !162
-  %87 = load i32, ptr %51, align 4, !tbaa !160
+  %86 = load ptr, ptr %85, align 8, !tbaa !163
+  %87 = load i32, ptr %51, align 4, !tbaa !161
   %88 = shl i32 %87, 2
   tail call fastcc void @copy_bytes(ptr noundef %77, ptr noundef %86, i32 noundef %88) #52
   %89 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 2
-  %90 = load ptr, ptr %89, align 4, !tbaa !163
-  %91 = load i32, ptr %70, align 8, !tbaa !161
+  %90 = load ptr, ptr %89, align 4, !tbaa !164
+  %91 = load i32, ptr %70, align 8, !tbaa !162
   %92 = add i32 %91, 63
   %93 = lshr i32 %92, 3
   %94 = and i32 %93, 536870904
   tail call fastcc void @copy_bytes(ptr noundef %81, ptr noundef %90, i32 noundef %94) #52
-  %95 = load ptr, ptr %85, align 8, !tbaa !162
-  %96 = load i32, ptr %70, align 8, !tbaa !161
+  %95 = load ptr, ptr %85, align 8, !tbaa !163
+  %96 = load i32, ptr %70, align 8, !tbaa !162
   %97 = shl i32 %96, 2
   tail call void @fa_free(ptr noundef %95, i32 noundef %97, i32 noundef 4) #53
-  %98 = load ptr, ptr %89, align 4, !tbaa !163
-  %99 = load i32, ptr %70, align 8, !tbaa !161
+  %98 = load ptr, ptr %89, align 4, !tbaa !164
+  %99 = load i32, ptr %70, align 8, !tbaa !162
   %100 = add i32 %99, 63
   %101 = lshr i32 %100, 3
   %102 = and i32 %101, 536870904
@@ -8922,17 +8744,17 @@ define internal fastcc noundef ptr @pool_new_chunk(ptr nocapture noundef %0) unn
 
 103:                                              ; preds = %84, %73
   %104 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 1
-  store ptr %77, ptr %104, align 8, !tbaa !162
+  store ptr %77, ptr %104, align 8, !tbaa !163
   %105 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 2
-  store ptr %81, ptr %105, align 4, !tbaa !163
-  store i32 %75, ptr %70, align 8, !tbaa !161
-  %106 = load i32, ptr %51, align 4, !tbaa !160
+  store ptr %81, ptr %105, align 4, !tbaa !164
+  store i32 %75, ptr %70, align 8, !tbaa !162
+  %106 = load i32, ptr %51, align 4, !tbaa !161
   br label %107
 
 107:                                              ; preds = %103, %68
   %108 = phi i32 [ %106, %103 ], [ %52, %68 ]
   %109 = add i32 %108, 1
-  store i32 %109, ptr %51, align 4, !tbaa !160
+  store i32 %109, ptr %51, align 4, !tbaa !161
   br label %110
 
 110:                                              ; preds = %107, %65
@@ -8940,18 +8762,18 @@ define internal fastcc noundef ptr @pool_new_chunk(ptr nocapture noundef %0) unn
   %112 = getelementptr inbounds %struct.PoolChunk, ptr %41, i32 0, i32 1
   store i32 %111, ptr %112, align 4, !tbaa !23
   %113 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 1
-  %114 = load ptr, ptr %113, align 8, !tbaa !162
+  %114 = load ptr, ptr %113, align 8, !tbaa !163
   %115 = getelementptr inbounds ptr, ptr %114, i32 %111
   store ptr %41, ptr %115, align 4, !tbaa !6
   %116 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 10
-  %117 = load i32, ptr %116, align 4, !tbaa !156
+  %117 = load i32, ptr %116, align 4, !tbaa !157
   %118 = add i32 %117, 1
-  store i32 %118, ptr %116, align 4, !tbaa !156
+  store i32 %118, ptr %116, align 4, !tbaa !157
   %119 = and i32 %111, 63
   %120 = zext nneg i32 %119 to i64
   %121 = shl nuw i64 1, %120
   %122 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 2
-  %123 = load ptr, ptr %122, align 4, !tbaa !163
+  %123 = load ptr, ptr %122, align 4, !tbaa !164
   %124 = lshr i32 %111, 6
   %125 = getelementptr inbounds i64, ptr %123, i32 %124
   %126 = load i64, ptr %125, align 8, !tbaa !89
@@ -8963,7 +8785,7 @@ define internal fastcc noundef ptr @pool_new_chunk(ptr nocapture noundef %0) unn
 ; Function Attrs: nounwind optsize
 define hidden ptr @fa_pool_add_slot(ptr nocapture noundef %0) local_unnamed_addr #3 {
   %2 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 4
-  %3 = load i32, ptr %2, align 4, !tbaa !160
+  %3 = load i32, ptr %2, align 4, !tbaa !161
   %4 = add i32 %3, 63
   %5 = lshr i32 %4, 6
   %6 = icmp ult i32 %4, 64
@@ -8971,7 +8793,7 @@ define hidden ptr @fa_pool_add_slot(ptr nocapture noundef %0) local_unnamed_addr
 
 7:                                                ; preds = %1
   %8 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 2
-  %9 = load ptr, ptr %8, align 4, !tbaa !163
+  %9 = load ptr, ptr %8, align 4, !tbaa !164
   br label %10
 
 10:                                               ; preds = %7, %15
@@ -8984,11 +8806,11 @@ define hidden ptr @fa_pool_add_slot(ptr nocapture noundef %0) local_unnamed_addr
 15:                                               ; preds = %10
   %16 = add nuw nsw i32 %11, 1
   %17 = icmp eq i32 %16, %5
-  br i1 %17, label %28, label %10, !llvm.loop !171
+  br i1 %17, label %28, label %10, !llvm.loop !172
 
 18:                                               ; preds = %10
   %19 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 1
-  %20 = load ptr, ptr %19, align 8, !tbaa !162
+  %20 = load ptr, ptr %19, align 8, !tbaa !163
   %21 = shl nuw i32 %11, 6
   %22 = tail call i64 @llvm.cttz.i64(i64 %13, i1 true), !range !41
   %23 = trunc i64 %22 to i32
@@ -9013,7 +8835,7 @@ define hidden ptr @fa_pool_add_slot(ptr nocapture noundef %0) local_unnamed_addr
   %36 = add i32 %33, -1
   %37 = load ptr, ptr %31, align 8, !tbaa !6
   %38 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 6
-  %39 = load i32, ptr %38, align 4, !tbaa !158
+  %39 = load i32, ptr %38, align 4, !tbaa !159
   %40 = mul i32 %39, %36
   %41 = getelementptr inbounds i8, ptr %37, i32 %40
   %42 = load i32, ptr %41, align 1
@@ -9043,16 +8865,16 @@ define hidden ptr @fa_pool_add_slot(ptr nocapture noundef %0) local_unnamed_addr
   %59 = load i32, ptr %58, align 8, !tbaa !23
   %60 = add i32 %59, 1
   store i32 %60, ptr %58, align 8, !tbaa !23
-  %61 = load i64, ptr %0, align 8, !tbaa !157
+  %61 = load i64, ptr %0, align 8, !tbaa !158
   %62 = add nsw i64 %61, 1
-  store i64 %62, ptr %0, align 8, !tbaa !157
+  store i64 %62, ptr %0, align 8, !tbaa !158
   br i1 %49, label %63, label %82
 
 63:                                               ; preds = %48
   %64 = getelementptr inbounds %struct.PoolChunk, ptr %31, i32 0, i32 3
   %65 = load i32, ptr %64, align 4, !tbaa !23
   %66 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 7
-  %67 = load i32, ptr %66, align 8, !tbaa !159
+  %67 = load i32, ptr %66, align 8, !tbaa !160
   %68 = icmp eq i32 %65, %67
   br i1 %68, label %69, label %82
 
@@ -9064,7 +8886,7 @@ define hidden ptr @fa_pool_add_slot(ptr nocapture noundef %0) local_unnamed_addr
   %74 = shl nuw i64 1, %73
   %75 = xor i64 %74, -1
   %76 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 2
-  %77 = load ptr, ptr %76, align 4, !tbaa !163
+  %77 = load ptr, ptr %76, align 4, !tbaa !164
   %78 = lshr i32 %71, 6
   %79 = getelementptr inbounds i64, ptr %77, i32 %78
   %80 = load i64, ptr %79, align 8, !tbaa !89
@@ -9075,7 +8897,7 @@ define hidden ptr @fa_pool_add_slot(ptr nocapture noundef %0) local_unnamed_addr
 82:                                               ; preds = %69, %63, %48
   %83 = load ptr, ptr %31, align 8, !tbaa !6
   %84 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 6
-  %85 = load i32, ptr %84, align 4, !tbaa !158
+  %85 = load i32, ptr %84, align 4, !tbaa !159
   %86 = mul i32 %85, %50
   %87 = getelementptr inbounds i8, ptr %83, i32 %86
   ret ptr %87
@@ -9106,7 +8928,7 @@ define hidden noundef ptr @fa_pool_new_into(i64 noundef %0, i64 noundef %1, ptr 
   %17 = tail call ptr @fa_pool_add_slot(ptr noundef %13) #52
   %18 = add nuw nsw i64 %16, 1
   %19 = icmp eq i64 %18, %0
-  br i1 %19, label %20, label %15, !llvm.loop !172
+  br i1 %19, label %20, label %15, !llvm.loop !173
 
 20:                                               ; preds = %15, %12, %10
   %21 = phi ptr [ %2, %10 ], [ %13, %12 ], [ %13, %15 ]
@@ -9117,7 +8939,7 @@ define hidden noundef ptr @fa_pool_new_into(i64 noundef %0, i64 noundef %1, ptr 
 define hidden void @fa_pool_remove(ptr nocapture noundef %0, ptr noundef %1) local_unnamed_addr #35 {
   %3 = ptrtoint ptr %1 to i32
   %4 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 8
-  %5 = load i32, ptr %4, align 4, !tbaa !166
+  %5 = load i32, ptr %4, align 4, !tbaa !167
   %6 = mul i32 %5, -65536
   %7 = and i32 %6, %3
   %8 = inttoptr i32 %7 to ptr
@@ -9125,7 +8947,7 @@ define hidden void @fa_pool_remove(ptr nocapture noundef %0, ptr noundef %1) loc
   %10 = ptrtoint ptr %9 to i32
   %11 = sub i32 %3, %10
   %12 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 6
-  %13 = load i32, ptr %12, align 4, !tbaa !158
+  %13 = load i32, ptr %12, align 4, !tbaa !159
   %14 = udiv i32 %11, %13
   %15 = and i32 %14, 63
   %16 = zext nneg i32 %15 to i64
@@ -9145,9 +8967,9 @@ define hidden void @fa_pool_remove(ptr nocapture noundef %0, ptr noundef %1) loc
   %27 = load i32, ptr %26, align 8, !tbaa !23
   %28 = add i32 %27, -1
   store i32 %28, ptr %26, align 8, !tbaa !23
-  %29 = load i64, ptr %0, align 8, !tbaa !157
+  %29 = load i64, ptr %0, align 8, !tbaa !158
   %30 = add nsw i64 %29, -1
-  store i64 %30, ptr %0, align 8, !tbaa !157
+  store i64 %30, ptr %0, align 8, !tbaa !158
   %31 = getelementptr inbounds %struct.PoolChunk, ptr %8, i32 0, i32 1
   %32 = load i32, ptr %31, align 4, !tbaa !23
   %33 = icmp eq i32 %28, 0
@@ -9155,31 +8977,31 @@ define hidden void @fa_pool_remove(ptr nocapture noundef %0, ptr noundef %1) loc
 
 34:                                               ; preds = %2
   %35 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 1
-  %36 = load ptr, ptr %35, align 8, !tbaa !162
+  %36 = load ptr, ptr %35, align 8, !tbaa !163
   %37 = getelementptr inbounds ptr, ptr %36, i32 %32
   store ptr null, ptr %37, align 4, !tbaa !6
   %38 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 10
-  %39 = load i32, ptr %38, align 4, !tbaa !156
+  %39 = load i32, ptr %38, align 4, !tbaa !157
   %40 = add i32 %39, -1
-  store i32 %40, ptr %38, align 4, !tbaa !156
+  store i32 %40, ptr %38, align 4, !tbaa !157
   %41 = and i32 %32, 63
   %42 = zext nneg i32 %41 to i64
   %43 = shl nuw i64 1, %42
   %44 = xor i64 %43, -1
   %45 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 2
-  %46 = load ptr, ptr %45, align 4, !tbaa !163
+  %46 = load ptr, ptr %45, align 4, !tbaa !164
   %47 = lshr i32 %32, 6
   %48 = getelementptr inbounds i64, ptr %46, i32 %47
   %49 = load i64, ptr %48, align 8, !tbaa !89
   %50 = and i64 %49, %44
   store i64 %50, ptr %48, align 8, !tbaa !89
   %51 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 4
-  %52 = load i32, ptr %51, align 4, !tbaa !160
+  %52 = load i32, ptr %51, align 4, !tbaa !161
   %53 = icmp eq i32 %52, 0
   br i1 %53, label %64, label %54
 
 54:                                               ; preds = %34
-  %55 = load ptr, ptr %35, align 8, !tbaa !162
+  %55 = load ptr, ptr %35, align 8, !tbaa !163
   br label %56
 
 56:                                               ; preds = %54, %62
@@ -9191,22 +9013,22 @@ define hidden void @fa_pool_remove(ptr nocapture noundef %0, ptr noundef %1) loc
   br i1 %61, label %62, label %64
 
 62:                                               ; preds = %56
-  store i32 %58, ptr %51, align 4, !tbaa !160
+  store i32 %58, ptr %51, align 4, !tbaa !161
   %63 = icmp eq i32 %58, 0
-  br i1 %63, label %64, label %56, !llvm.loop !173
+  br i1 %63, label %64, label %56, !llvm.loop !174
 
 64:                                               ; preds = %56, %62, %34
   %65 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 3
-  %66 = load ptr, ptr %65, align 8, !tbaa !168
+  %66 = load ptr, ptr %65, align 8, !tbaa !169
   %67 = icmp eq ptr %66, null
   br i1 %67, label %68, label %69
 
 68:                                               ; preds = %64
-  store ptr %8, ptr %65, align 8, !tbaa !168
+  store ptr %8, ptr %65, align 8, !tbaa !169
   br label %82
 
 69:                                               ; preds = %64
-  %70 = load i32, ptr %4, align 4, !tbaa !166
+  %70 = load i32, ptr %4, align 4, !tbaa !167
   tail call fastcc void @give_pages(ptr noundef nonnull %8, i32 noundef %70) #52
   %71 = atomicrmw sub ptr @fa_live_blocks, i32 1 monotonic, align 4
   br label %82
@@ -9216,7 +9038,7 @@ define hidden void @fa_pool_remove(ptr nocapture noundef %0, ptr noundef %1) loc
   %74 = zext nneg i32 %73 to i64
   %75 = shl nuw i64 1, %74
   %76 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 2
-  %77 = load ptr, ptr %76, align 4, !tbaa !163
+  %77 = load ptr, ptr %76, align 4, !tbaa !164
   %78 = lshr i32 %32, 6
   %79 = getelementptr inbounds i64, ptr %77, i32 %78
   %80 = load i64, ptr %79, align 8, !tbaa !89
@@ -9233,14 +9055,14 @@ define hidden i64 @fa_pool_seek(ptr nocapture noundef readonly %0, i64 noundef %
   %3 = lshr i64 %1, 32
   %4 = trunc i64 %3 to i32
   %5 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 4
-  %6 = load i32, ptr %5, align 4, !tbaa !160
+  %6 = load i32, ptr %5, align 4, !tbaa !161
   %7 = icmp ugt i32 %6, %4
   br i1 %7, label %8, label %48
 
 8:                                                ; preds = %2
   %9 = trunc i64 %1 to i32
   %10 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 1
-  %11 = load ptr, ptr %10, align 8, !tbaa !162
+  %11 = load ptr, ptr %10, align 8, !tbaa !163
   br label %12
 
 12:                                               ; preds = %8, %45
@@ -9291,7 +9113,7 @@ define hidden i64 @fa_pool_seek(ptr nocapture noundef readonly %0, i64 noundef %
 45:                                               ; preds = %36, %18, %31, %12
   %46 = add nuw i32 %13, 1
   %47 = icmp eq i32 %46, %6
-  br i1 %47, label %48, label %12, !llvm.loop !174
+  br i1 %47, label %48, label %12, !llvm.loop !175
 
 48:                                               ; preds = %45, %2, %40
   %49 = phi i64 [ %44, %40 ], [ -1, %2 ], [ -1, %45 ]
@@ -9301,7 +9123,7 @@ define hidden i64 @fa_pool_seek(ptr nocapture noundef readonly %0, i64 noundef %
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(read, inaccessiblemem: none)
 define hidden ptr @fa_pool_at(ptr nocapture noundef readonly %0, i64 noundef %1) local_unnamed_addr #37 {
   %3 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 1
-  %4 = load ptr, ptr %3, align 8, !tbaa !162
+  %4 = load ptr, ptr %3, align 8, !tbaa !163
   %5 = lshr i64 %1, 32
   %6 = trunc i64 %5 to i32
   %7 = getelementptr inbounds ptr, ptr %4, i32 %6
@@ -9309,7 +9131,7 @@ define hidden ptr @fa_pool_at(ptr nocapture noundef readonly %0, i64 noundef %1)
   %9 = load ptr, ptr %8, align 8, !tbaa !6
   %10 = trunc i64 %1 to i32
   %11 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 6
-  %12 = load i32, ptr %11, align 4, !tbaa !158
+  %12 = load i32, ptr %11, align 4, !tbaa !159
   %13 = mul i32 %12, %10
   %14 = getelementptr inbounds i8, ptr %9, i32 %13
   ret ptr %14
@@ -9324,7 +9146,7 @@ define hidden void @fa_pool_clear(ptr nocapture noundef %0) local_unnamed_addr #
 ; Function Attrs: nofree norecurse nounwind optsize memory(readwrite, inaccessiblemem: none)
 define internal fastcc void @pool_release_chunks(ptr nocapture noundef %0) unnamed_addr #35 {
   %2 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 4
-  %3 = load i32, ptr %2, align 4, !tbaa !160
+  %3 = load i32, ptr %2, align 4, !tbaa !161
   %4 = icmp eq i32 %3, 0
   br i1 %4, label %8, label %5
 
@@ -9335,40 +9157,40 @@ define internal fastcc void @pool_release_chunks(ptr nocapture noundef %0) unnam
 
 8:                                                ; preds = %23, %1
   %9 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 5
-  %10 = load i32, ptr %9, align 8, !tbaa !161
+  %10 = load i32, ptr %9, align 8, !tbaa !162
   %11 = icmp eq i32 %10, 0
   br i1 %11, label %37, label %27
 
 12:                                               ; preds = %5, %23
   %13 = phi i32 [ %3, %5 ], [ %24, %23 ]
   %14 = phi i32 [ 0, %5 ], [ %25, %23 ]
-  %15 = load ptr, ptr %6, align 8, !tbaa !162
+  %15 = load ptr, ptr %6, align 8, !tbaa !163
   %16 = getelementptr inbounds ptr, ptr %15, i32 %14
   %17 = load ptr, ptr %16, align 4, !tbaa !6
   %18 = icmp eq ptr %17, null
   br i1 %18, label %23, label %19
 
 19:                                               ; preds = %12
-  %20 = load i32, ptr %7, align 4, !tbaa !166
+  %20 = load i32, ptr %7, align 4, !tbaa !167
   tail call fastcc void @give_pages(ptr noundef nonnull %17, i32 noundef %20) #52
   %21 = atomicrmw sub ptr @fa_live_blocks, i32 1 monotonic, align 4
-  %22 = load i32, ptr %2, align 4, !tbaa !160
+  %22 = load i32, ptr %2, align 4, !tbaa !161
   br label %23
 
 23:                                               ; preds = %12, %19
   %24 = phi i32 [ %13, %12 ], [ %22, %19 ]
   %25 = add nuw i32 %14, 1
   %26 = icmp ult i32 %25, %24
-  br i1 %26, label %12, label %8, !llvm.loop !175
+  br i1 %26, label %12, label %8, !llvm.loop !176
 
 27:                                               ; preds = %8
   %28 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 1
-  %29 = load ptr, ptr %28, align 8, !tbaa !162
+  %29 = load ptr, ptr %28, align 8, !tbaa !163
   %30 = shl i32 %10, 2
   tail call void @llvm.memset.p0.i32(ptr align 4 %29, i8 0, i32 %30, i1 false)
   %31 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 2
-  %32 = load ptr, ptr %31, align 4, !tbaa !163
-  %33 = load i32, ptr %9, align 8, !tbaa !161
+  %32 = load ptr, ptr %31, align 4, !tbaa !164
+  %33 = load i32, ptr %9, align 8, !tbaa !162
   %34 = add i32 %33, 63
   %35 = lshr i32 %34, 3
   %36 = and i32 %35, 536870904
@@ -9376,48 +9198,48 @@ define internal fastcc void @pool_release_chunks(ptr nocapture noundef %0) unnam
   br label %37
 
 37:                                               ; preds = %27, %8
-  store i32 0, ptr %2, align 4, !tbaa !160
+  store i32 0, ptr %2, align 4, !tbaa !161
   %38 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 10
-  store i32 0, ptr %38, align 4, !tbaa !156
-  store i64 0, ptr %0, align 8, !tbaa !157
+  store i32 0, ptr %38, align 4, !tbaa !157
+  store i64 0, ptr %0, align 8, !tbaa !158
   ret void
 }
 
 ; Function Attrs: nounwind optsize
 define hidden void @fa_pool_free(ptr noundef %0) local_unnamed_addr #3 {
   %2 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 11
-  %3 = load i64, ptr %2, align 8, !tbaa !154
+  %3 = load i64, ptr %2, align 8, !tbaa !155
   %4 = icmp eq i64 %3, 0
   br i1 %4, label %5, label %28
 
 5:                                                ; preds = %1
   tail call fastcc void @pool_release_chunks(ptr noundef nonnull %0) #52
   %6 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 3
-  %7 = load ptr, ptr %6, align 8, !tbaa !168
+  %7 = load ptr, ptr %6, align 8, !tbaa !169
   %8 = icmp eq ptr %7, null
   br i1 %8, label %13, label %9
 
 9:                                                ; preds = %5
   %10 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 8
-  %11 = load i32, ptr %10, align 4, !tbaa !166
+  %11 = load i32, ptr %10, align 4, !tbaa !167
   tail call fastcc void @give_pages(ptr noundef nonnull %7, i32 noundef %11) #52
   %12 = atomicrmw sub ptr @fa_live_blocks, i32 1 monotonic, align 4
   br label %13
 
 13:                                               ; preds = %9, %5
   %14 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 5
-  %15 = load i32, ptr %14, align 8, !tbaa !161
+  %15 = load i32, ptr %14, align 8, !tbaa !162
   %16 = icmp eq i32 %15, 0
   br i1 %16, label %27, label %17
 
 17:                                               ; preds = %13
   %18 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 1
-  %19 = load ptr, ptr %18, align 8, !tbaa !162
+  %19 = load ptr, ptr %18, align 8, !tbaa !163
   %20 = shl i32 %15, 2
   tail call void @fa_free(ptr noundef %19, i32 noundef %20, i32 noundef 4) #53
   %21 = getelementptr inbounds %struct.FaPool, ptr %0, i32 0, i32 2
-  %22 = load ptr, ptr %21, align 4, !tbaa !163
-  %23 = load i32, ptr %14, align 8, !tbaa !161
+  %22 = load ptr, ptr %21, align 4, !tbaa !164
+  %23 = load i32, ptr %14, align 8, !tbaa !162
   %24 = add i32 %23, 63
   %25 = lshr i32 %24, 3
   %26 = and i32 %25, 536870904
@@ -9447,19 +9269,19 @@ define internal fastcc i64 @links_find(ptr noundef readonly %0, ptr noundef %1) 
 
 4:                                                ; preds = %2
   %5 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 4
-  %6 = load ptr, ptr %5, align 8, !tbaa !176
+  %6 = load ptr, ptr %5, align 8, !tbaa !177
   %7 = icmp eq ptr %6, null
   br i1 %7, label %8, label %24
 
 8:                                                ; preds = %4
   %9 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 2
-  %10 = load i64, ptr %9, align 8, !tbaa !178
+  %10 = load i64, ptr %9, align 8, !tbaa !179
   %11 = icmp sgt i64 %10, 0
   br i1 %11, label %12, label %57
 
 12:                                               ; preds = %8
   %13 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 1
-  %14 = load ptr, ptr %13, align 8, !tbaa !179
+  %14 = load ptr, ptr %13, align 8, !tbaa !180
   br label %15
 
 15:                                               ; preds = %12, %21
@@ -9473,11 +9295,11 @@ define internal fastcc i64 @links_find(ptr noundef readonly %0, ptr noundef %1) 
 21:                                               ; preds = %15
   %22 = add nuw nsw i64 %16, 1
   %23 = icmp eq i64 %22, %10
-  br i1 %23, label %57, label %15, !llvm.loop !180
+  br i1 %23, label %57, label %15, !llvm.loop !181
 
 24:                                               ; preds = %4
   %25 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 5
-  %26 = load i64, ptr %25, align 8, !tbaa !181
+  %26 = load i64, ptr %25, align 8, !tbaa !182
   %27 = ptrtoint ptr %1 to i32
   %28 = zext i32 %27 to i64
   %29 = mul i64 %28, -49064778989728563
@@ -9492,7 +9314,7 @@ define internal fastcc i64 @links_find(ptr noundef readonly %0, ptr noundef %1) 
 
 37:                                               ; preds = %24
   %38 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 1
-  %39 = load ptr, ptr %38, align 8, !tbaa !179
+  %39 = load ptr, ptr %38, align 8, !tbaa !180
   %40 = getelementptr ptr, ptr %39, i32 -1
   br label %48
 
@@ -9543,9 +9365,9 @@ define hidden noundef i32 @fa_links_add(ptr nocapture noundef %0, ptr noundef %1
 10:                                               ; preds = %7, %5
   %11 = phi ptr [ %6, %5 ], [ %3, %7 ]
   %12 = getelementptr inbounds %struct.FaLinks, ptr %11, i32 0, i32 2
-  %13 = load i64, ptr %12, align 8, !tbaa !178
+  %13 = load i64, ptr %12, align 8, !tbaa !179
   %14 = getelementptr inbounds %struct.FaLinks, ptr %11, i32 0, i32 3
-  %15 = load i64, ptr %14, align 8, !tbaa !182
+  %15 = load i64, ptr %14, align 8, !tbaa !183
   %16 = icmp eq i64 %13, %15
   br i1 %16, label %17, label %124
 
@@ -9554,7 +9376,7 @@ define hidden noundef i32 @fa_links_add(ptr nocapture noundef %0, ptr noundef %1
   br i1 %18, label %19, label %42
 
 19:                                               ; preds = %17
-  %20 = load i64, ptr %11, align 8, !tbaa !183
+  %20 = load i64, ptr %11, align 8, !tbaa !184
   %21 = shl nsw i64 %20, 1
   %22 = icmp sgt i64 %21, %13
   br i1 %22, label %42, label %23
@@ -9564,13 +9386,13 @@ define hidden noundef i32 @fa_links_add(ptr nocapture noundef %0, ptr noundef %1
   br label %26
 
 25:                                               ; preds = %38
-  store i64 %39, ptr %12, align 8, !tbaa !178
+  store i64 %39, ptr %12, align 8, !tbaa !179
   br label %63
 
 26:                                               ; preds = %23, %38
   %27 = phi i64 [ 0, %23 ], [ %40, %38 ]
   %28 = phi i64 [ 0, %23 ], [ %39, %38 ]
-  %29 = load ptr, ptr %24, align 8, !tbaa !179
+  %29 = load ptr, ptr %24, align 8, !tbaa !180
   %30 = trunc i64 %27 to i32
   %31 = getelementptr inbounds ptr, ptr %29, i32 %30
   %32 = load ptr, ptr %31, align 4, !tbaa !6
@@ -9588,7 +9410,7 @@ define hidden noundef i32 @fa_links_add(ptr nocapture noundef %0, ptr noundef %1
   %39 = phi i64 [ %37, %34 ], [ %28, %26 ]
   %40 = add nuw nsw i64 %27, 1
   %41 = icmp eq i64 %40, %13
-  br i1 %41, label %25, label %26, !llvm.loop !184
+  br i1 %41, label %25, label %26, !llvm.loop !185
 
 42:                                               ; preds = %19, %17
   %43 = icmp eq i64 %13, 0
@@ -9597,19 +9419,19 @@ define hidden noundef i32 @fa_links_add(ptr nocapture noundef %0, ptr noundef %1
   %46 = trunc i64 %45 to i32
   %47 = shl i32 %46, 2
   %48 = tail call ptr @fa_alloc(i32 noundef %47, i32 noundef 4) #53
-  %49 = load i64, ptr %14, align 8, !tbaa !182
+  %49 = load i64, ptr %14, align 8, !tbaa !183
   %50 = icmp sgt i64 %49, 0
   br i1 %50, label %51, label %61
 
 51:                                               ; preds = %42
   %52 = getelementptr inbounds %struct.FaLinks, ptr %11, i32 0, i32 1
-  %53 = load ptr, ptr %52, align 8, !tbaa !179
-  %54 = load i64, ptr %12, align 8, !tbaa !178
+  %53 = load ptr, ptr %52, align 8, !tbaa !180
+  %54 = load i64, ptr %12, align 8, !tbaa !179
   %55 = trunc i64 %54 to i32
   %56 = shl i32 %55, 2
   tail call fastcc void @copy_bytes(ptr noundef %48, ptr noundef %53, i32 noundef %56) #52
-  %57 = load ptr, ptr %52, align 8, !tbaa !179
-  %58 = load i64, ptr %14, align 8, !tbaa !182
+  %57 = load ptr, ptr %52, align 8, !tbaa !180
+  %58 = load i64, ptr %14, align 8, !tbaa !183
   %59 = trunc i64 %58 to i32
   %60 = shl i32 %59, 2
   tail call void @fa_free(ptr noundef %57, i32 noundef %60, i32 noundef 4) #53
@@ -9617,26 +9439,26 @@ define hidden noundef i32 @fa_links_add(ptr nocapture noundef %0, ptr noundef %1
 
 61:                                               ; preds = %51, %42
   %62 = getelementptr inbounds %struct.FaLinks, ptr %11, i32 0, i32 1
-  store ptr %48, ptr %62, align 8, !tbaa !179
-  store i64 %45, ptr %14, align 8, !tbaa !182
+  store ptr %48, ptr %62, align 8, !tbaa !180
+  store i64 %45, ptr %14, align 8, !tbaa !183
   br label %63
 
 63:                                               ; preds = %61, %25
   %64 = phi i64 [ %45, %61 ], [ %13, %25 ]
   %65 = getelementptr inbounds %struct.FaLinks, ptr %11, i32 0, i32 4
-  %66 = load ptr, ptr %65, align 8, !tbaa !176
+  %66 = load ptr, ptr %65, align 8, !tbaa !177
   %67 = icmp eq ptr %66, null
   br i1 %67, label %75, label %68
 
 68:                                               ; preds = %63
   %69 = getelementptr inbounds %struct.FaLinks, ptr %11, i32 0, i32 5
-  %70 = load i64, ptr %69, align 8, !tbaa !181
+  %70 = load i64, ptr %69, align 8, !tbaa !182
   %71 = trunc i64 %70 to i32
   %72 = shl i32 %71, 2
   %73 = add i32 %72, 4
   tail call void @fa_free(ptr noundef nonnull %66, i32 noundef %73, i32 noundef 4) #53
-  store ptr null, ptr %65, align 8, !tbaa !176
-  %74 = load i64, ptr %14, align 8, !tbaa !182
+  store ptr null, ptr %65, align 8, !tbaa !177
+  %74 = load i64, ptr %14, align 8, !tbaa !183
   br label %75
 
 75:                                               ; preds = %68, %63
@@ -9645,7 +9467,7 @@ define hidden noundef i32 @fa_links_add(ptr nocapture noundef %0, ptr noundef %1
   br i1 %77, label %78, label %80
 
 78:                                               ; preds = %75
-  %79 = load i64, ptr %12, align 8, !tbaa !178
+  %79 = load i64, ptr %12, align 8, !tbaa !179
   br label %124
 
 80:                                               ; preds = %75
@@ -9656,24 +9478,24 @@ define hidden noundef i32 @fa_links_add(ptr nocapture noundef %0, ptr noundef %1
   %83 = phi i64 [ %85, %82 ], [ 16, %80 ]
   %84 = icmp slt i64 %83, %81
   %85 = shl nsw i64 %83, 1
-  br i1 %84, label %82, label %86, !llvm.loop !185
+  br i1 %84, label %82, label %86, !llvm.loop !186
 
 86:                                               ; preds = %82
   %87 = add nsw i64 %83, -1
   %88 = getelementptr inbounds %struct.FaLinks, ptr %11, i32 0, i32 5
-  store i64 %87, ptr %88, align 8, !tbaa !181
+  store i64 %87, ptr %88, align 8, !tbaa !182
   %89 = trunc i64 %83 to i32
   %90 = shl i32 %89, 2
   %91 = tail call ptr @fa_alloc(i32 noundef %90, i32 noundef 4) #53
-  store ptr %91, ptr %65, align 8, !tbaa !176
+  store ptr %91, ptr %65, align 8, !tbaa !177
   tail call void @llvm.memset.p0.i32(ptr align 4 %91, i8 0, i32 %90, i1 false)
-  %92 = load i64, ptr %12, align 8, !tbaa !178
+  %92 = load i64, ptr %12, align 8, !tbaa !179
   %93 = icmp sgt i64 %92, 0
   br i1 %93, label %94, label %124
 
 94:                                               ; preds = %86
   %95 = getelementptr inbounds %struct.FaLinks, ptr %11, i32 0, i32 1
-  %96 = load ptr, ptr %95, align 8, !tbaa !179
+  %96 = load ptr, ptr %95, align 8, !tbaa !180
   br label %97
 
 97:                                               ; preds = %121, %94
@@ -9685,13 +9507,13 @@ define hidden noundef i32 @fa_links_add(ptr nocapture noundef %0, ptr noundef %1
   br i1 %102, label %121, label %103
 
 103:                                              ; preds = %97
-  %104 = load i64, ptr %88, align 8, !tbaa !181
+  %104 = load i64, ptr %88, align 8, !tbaa !182
   %105 = ptrtoint ptr %101 to i32
   %106 = zext i32 %105 to i64
   %107 = mul i64 %106, -49064778989728563
   %108 = lshr i64 %107, 33
   %109 = xor i64 %108, %107
-  %110 = load ptr, ptr %65, align 8, !tbaa !176
+  %110 = load ptr, ptr %65, align 8, !tbaa !177
   br label %111
 
 111:                                              ; preds = %111, %103
@@ -9702,7 +9524,7 @@ define hidden noundef i32 @fa_links_add(ptr nocapture noundef %0, ptr noundef %1
   %116 = load i32, ptr %115, align 4, !tbaa !23
   %117 = icmp eq i32 %116, 0
   %118 = add i64 %113, 1
-  br i1 %117, label %119, label %111, !llvm.loop !186
+  br i1 %117, label %119, label %111, !llvm.loop !187
 
 119:                                              ; preds = %111
   %120 = add i32 %99, 1
@@ -9712,29 +9534,29 @@ define hidden noundef i32 @fa_links_add(ptr nocapture noundef %0, ptr noundef %1
 121:                                              ; preds = %119, %97
   %122 = add nuw nsw i64 %98, 1
   %123 = icmp eq i64 %122, %92
-  br i1 %123, label %124, label %97, !llvm.loop !187
+  br i1 %123, label %124, label %97, !llvm.loop !188
 
 124:                                              ; preds = %121, %78, %86, %10
   %125 = phi i64 [ %79, %78 ], [ %92, %86 ], [ %13, %10 ], [ %92, %121 ]
   %126 = getelementptr inbounds %struct.FaLinks, ptr %11, i32 0, i32 1
-  %127 = load ptr, ptr %126, align 8, !tbaa !179
+  %127 = load ptr, ptr %126, align 8, !tbaa !180
   %128 = trunc i64 %125 to i32
   %129 = getelementptr inbounds ptr, ptr %127, i32 %128
   store ptr %1, ptr %129, align 4, !tbaa !6
   %130 = add nsw i64 %125, 1
-  store i64 %130, ptr %12, align 8, !tbaa !178
-  %131 = load i64, ptr %11, align 8, !tbaa !183
+  store i64 %130, ptr %12, align 8, !tbaa !179
+  %131 = load i64, ptr %11, align 8, !tbaa !184
   %132 = add nsw i64 %131, 1
-  store i64 %132, ptr %11, align 8, !tbaa !183
+  store i64 %132, ptr %11, align 8, !tbaa !184
   %133 = getelementptr inbounds %struct.FaLinks, ptr %11, i32 0, i32 4
-  %134 = load ptr, ptr %133, align 8, !tbaa !176
+  %134 = load ptr, ptr %133, align 8, !tbaa !177
   %135 = icmp eq ptr %134, null
   br i1 %135, label %157, label %136
 
 136:                                              ; preds = %124
   %137 = getelementptr inbounds %struct.FaLinks, ptr %11, i32 0, i32 5
-  %138 = load i64, ptr %137, align 8, !tbaa !181
-  %139 = load ptr, ptr %126, align 8, !tbaa !179
+  %138 = load i64, ptr %137, align 8, !tbaa !182
+  %139 = load ptr, ptr %126, align 8, !tbaa !180
   %140 = getelementptr inbounds ptr, ptr %139, i32 %128
   %141 = load ptr, ptr %140, align 4, !tbaa !6
   %142 = ptrtoint ptr %141 to i32
@@ -9752,7 +9574,7 @@ define hidden noundef i32 @fa_links_add(ptr nocapture noundef %0, ptr noundef %1
   %152 = load i32, ptr %151, align 4, !tbaa !23
   %153 = icmp eq i32 %152, 0
   %154 = add i64 %149, 1
-  br i1 %153, label %155, label %147, !llvm.loop !186
+  br i1 %153, label %155, label %147, !llvm.loop !187
 
 155:                                              ; preds = %147
   %156 = add i32 %128, 1
@@ -9772,21 +9594,21 @@ define hidden noundef i32 @fa_links_delete(ptr noundef %0, ptr noundef %1) local
 
 5:                                                ; preds = %2
   %6 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 1
-  %7 = load ptr, ptr %6, align 8, !tbaa !179
+  %7 = load ptr, ptr %6, align 8, !tbaa !180
   %8 = trunc i64 %3 to i32
   %9 = getelementptr inbounds ptr, ptr %7, i32 %8
   store ptr null, ptr %9, align 4, !tbaa !6
-  %10 = load i64, ptr %0, align 8, !tbaa !183
+  %10 = load i64, ptr %0, align 8, !tbaa !184
   %11 = add nsw i64 %10, -1
-  store i64 %11, ptr %0, align 8, !tbaa !183
+  store i64 %11, ptr %0, align 8, !tbaa !184
   %12 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 4
-  %13 = load ptr, ptr %12, align 8, !tbaa !176
+  %13 = load ptr, ptr %12, align 8, !tbaa !177
   %14 = icmp eq ptr %13, null
   br i1 %14, label %74, label %15
 
 15:                                               ; preds = %5
   %16 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 5
-  %17 = load i64, ptr %16, align 8, !tbaa !181
+  %17 = load i64, ptr %16, align 8, !tbaa !182
   %18 = ptrtoint ptr %1 to i32
   %19 = zext i32 %18 to i64
   %20 = mul i64 %19, -49064778989728563
@@ -9803,7 +9625,7 @@ define hidden noundef i32 @fa_links_delete(ptr noundef %0, ptr noundef %1) local
   %29 = load i32, ptr %28, align 4, !tbaa !23
   %30 = icmp eq i32 %29, %23
   %31 = add i64 %26, 1
-  br i1 %30, label %32, label %24, !llvm.loop !188
+  br i1 %30, label %32, label %24, !llvm.loop !189
 
 32:                                               ; preds = %24
   %33 = and i64 %31, %17
@@ -9814,7 +9636,7 @@ define hidden noundef i32 @fa_links_delete(ptr noundef %0, ptr noundef %1) local
   br i1 %37, label %71, label %38
 
 38:                                               ; preds = %32
-  %39 = load ptr, ptr %6, align 8, !tbaa !179
+  %39 = load ptr, ptr %6, align 8, !tbaa !180
   %40 = getelementptr ptr, ptr %39, i32 -1
   br label %41
 
@@ -9869,7 +9691,7 @@ define hidden noundef i32 @fa_links_delete(ptr noundef %0, ptr noundef %1) local
 
 76:                                               ; preds = %74
   %77 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 2
-  store i64 0, ptr %77, align 8, !tbaa !178
+  store i64 0, ptr %77, align 8, !tbaa !179
   br label %78
 
 78:                                               ; preds = %74, %76, %2
@@ -9884,13 +9706,13 @@ define hidden void @fa_links_free(ptr noundef %0) local_unnamed_addr #3 {
 
 3:                                                ; preds = %1
   %4 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 4
-  %5 = load ptr, ptr %4, align 8, !tbaa !176
+  %5 = load ptr, ptr %4, align 8, !tbaa !177
   %6 = icmp eq ptr %5, null
   br i1 %6, label %13, label %7
 
 7:                                                ; preds = %3
   %8 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 5
-  %9 = load i64, ptr %8, align 8, !tbaa !181
+  %9 = load i64, ptr %8, align 8, !tbaa !182
   %10 = trunc i64 %9 to i32
   %11 = shl i32 %10, 2
   %12 = add i32 %11, 4
@@ -9899,13 +9721,13 @@ define hidden void @fa_links_free(ptr noundef %0) local_unnamed_addr #3 {
 
 13:                                               ; preds = %7, %3
   %14 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 3
-  %15 = load i64, ptr %14, align 8, !tbaa !182
+  %15 = load i64, ptr %14, align 8, !tbaa !183
   %16 = icmp sgt i64 %15, 0
   br i1 %16, label %17, label %22
 
 17:                                               ; preds = %13
   %18 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 1
-  %19 = load ptr, ptr %18, align 8, !tbaa !179
+  %19 = load ptr, ptr %18, align 8, !tbaa !180
   %20 = trunc i64 %15 to i32
   %21 = shl i32 %20, 2
   tail call void @fa_free(ptr noundef %19, i32 noundef %21, i32 noundef 4) #53
@@ -9926,13 +9748,13 @@ define hidden i64 @fa_links_seek(ptr noundef readonly %0, i64 noundef %1) local_
 
 4:                                                ; preds = %2
   %5 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 2
-  %6 = load i64, ptr %5, align 8, !tbaa !178
+  %6 = load i64, ptr %5, align 8, !tbaa !179
   %7 = icmp ugt i64 %6, %1
   br i1 %7, label %8, label %20
 
 8:                                                ; preds = %4
   %9 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 1
-  %10 = load ptr, ptr %9, align 8, !tbaa !179
+  %10 = load ptr, ptr %9, align 8, !tbaa !180
   br label %11
 
 11:                                               ; preds = %8, %17
@@ -9946,7 +9768,7 @@ define hidden i64 @fa_links_seek(ptr noundef readonly %0, i64 noundef %1) local_
 17:                                               ; preds = %11
   %18 = add i64 %12, 1
   %19 = icmp eq i64 %18, %6
-  br i1 %19, label %20, label %11, !llvm.loop !189
+  br i1 %19, label %20, label %11, !llvm.loop !190
 
 20:                                               ; preds = %11, %17, %4, %2
   %21 = phi i64 [ -1, %2 ], [ -1, %4 ], [ %12, %11 ], [ -1, %17 ]
@@ -9956,7 +9778,7 @@ define hidden i64 @fa_links_seek(ptr noundef readonly %0, i64 noundef %1) local_
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(read, inaccessiblemem: none)
 define hidden ptr @fa_links_at(ptr nocapture noundef readonly %0, i64 noundef %1) local_unnamed_addr #37 {
   %3 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 1
-  %4 = load ptr, ptr %3, align 8, !tbaa !179
+  %4 = load ptr, ptr %3, align 8, !tbaa !180
   %5 = trunc i64 %1 to i32
   %6 = getelementptr inbounds ptr, ptr %4, i32 %5
   %7 = load ptr, ptr %6, align 4, !tbaa !6
@@ -10084,7 +9906,7 @@ define hidden void @fa_relate_clear(ptr noundef %0, i64 noundef %1, i64 noundef 
 
 8:                                                ; preds = %3
   %9 = getelementptr inbounds %struct.FaLinks, ptr %6, i32 0, i32 2
-  %10 = load i64, ptr %9, align 8, !tbaa !178
+  %10 = load i64, ptr %9, align 8, !tbaa !179
   %11 = icmp sgt i64 %10, 0
   br i1 %11, label %12, label %15
 
@@ -10101,7 +9923,7 @@ define hidden void @fa_relate_clear(ptr noundef %0, i64 noundef %1, i64 noundef 
 16:                                               ; preds = %12, %29
   %17 = phi i64 [ %10, %12 ], [ %30, %29 ]
   %18 = phi i64 [ 0, %12 ], [ %31, %29 ]
-  %19 = load ptr, ptr %13, align 8, !tbaa !179
+  %19 = load ptr, ptr %13, align 8, !tbaa !180
   %20 = trunc i64 %18 to i32
   %21 = getelementptr inbounds ptr, ptr %19, i32 %20
   %22 = load ptr, ptr %21, align 4, !tbaa !6
@@ -10112,14 +9934,14 @@ define hidden void @fa_relate_clear(ptr noundef %0, i64 noundef %1, i64 noundef 
   %25 = getelementptr inbounds i8, ptr %22, i32 %14
   %26 = load ptr, ptr %25, align 4, !tbaa !6
   %27 = tail call i32 @fa_links_delete(ptr noundef %26, ptr noundef %0) #52, !range !53
-  %28 = load i64, ptr %9, align 8, !tbaa !178
+  %28 = load i64, ptr %9, align 8, !tbaa !179
   br label %29
 
 29:                                               ; preds = %24, %16
   %30 = phi i64 [ %28, %24 ], [ %17, %16 ]
   %31 = add nuw nsw i64 %18, 1
   %32 = icmp slt i64 %31, %30
-  br i1 %32, label %16, label %15, !llvm.loop !190
+  br i1 %32, label %16, label %15, !llvm.loop !191
 
 33:                                               ; preds = %3, %15
   ret void
@@ -10145,13 +9967,13 @@ define hidden void @fa_unlink(ptr noundef %0, i32 noundef %1, i32 noundef %2, i6
 16:                                               ; preds = %13
   %17 = getelementptr inbounds %struct.FaLinks, ptr %11, i32 0, i32 1
   %18 = trunc i64 %4 to i32
-  %19 = load i64, ptr %14, align 8, !tbaa !178
+  %19 = load i64, ptr %14, align 8, !tbaa !179
   %20 = icmp sgt i64 %19, 0
   br i1 %20, label %21, label %99
 
 21:                                               ; preds = %16, %32
   %22 = phi i64 [ %33, %32 ], [ 0, %16 ]
-  %23 = load ptr, ptr %17, align 8, !tbaa !179
+  %23 = load ptr, ptr %17, align 8, !tbaa !180
   %24 = trunc i64 %22 to i32
   %25 = getelementptr inbounds ptr, ptr %23, i32 %24
   %26 = load ptr, ptr %25, align 4, !tbaa !6
@@ -10166,7 +9988,7 @@ define hidden void @fa_unlink(ptr noundef %0, i32 noundef %1, i32 noundef %2, i6
 
 32:                                               ; preds = %28, %21
   %33 = add nuw nsw i64 %22, 1
-  %34 = load i64, ptr %14, align 8, !tbaa !178
+  %34 = load i64, ptr %14, align 8, !tbaa !179
   %35 = icmp slt i64 %33, %34
   br i1 %35, label %21, label %99
 
@@ -10209,13 +10031,13 @@ define hidden void @fa_unlink(ptr noundef %0, i32 noundef %1, i32 noundef %2, i6
   %54 = getelementptr inbounds %struct.FaLinks, ptr %50, i32 0, i32 1
   %55 = icmp eq i32 %1, 0
   %56 = trunc i64 %3 to i32
-  %57 = load i64, ptr %51, align 8, !tbaa !178
+  %57 = load i64, ptr %51, align 8, !tbaa !179
   %58 = icmp sgt i64 %57, 0
   br i1 %58, label %59, label %99
 
 59:                                               ; preds = %53, %72
   %60 = phi i64 [ %73, %72 ], [ 0, %53 ]
-  %61 = load ptr, ptr %54, align 8, !tbaa !179
+  %61 = load ptr, ptr %54, align 8, !tbaa !180
   %62 = trunc i64 %60 to i32
   %63 = getelementptr inbounds ptr, ptr %61, i32 %62
   %64 = load ptr, ptr %63, align 4, !tbaa !6
@@ -10237,7 +10059,7 @@ define hidden void @fa_unlink(ptr noundef %0, i32 noundef %1, i32 noundef %2, i6
 
 72:                                               ; preds = %68, %69, %59
   %73 = add nuw nsw i64 %60, 1
-  %74 = load i64, ptr %51, align 8, !tbaa !178
+  %74 = load i64, ptr %51, align 8, !tbaa !179
   %75 = icmp slt i64 %73, %74
   br i1 %75, label %59, label %99
 
@@ -10295,20 +10117,20 @@ define hidden ptr @fa_address_map_new(i64 noundef %0) local_unnamed_addr #3 {
   %5 = phi i64 [ 16, %1 ], [ %7, %4 ]
   %6 = icmp slt i64 %5, %3
   %7 = shl nsw i64 %5, 1
-  br i1 %6, label %4, label %8, !llvm.loop !191
+  br i1 %6, label %4, label %8, !llvm.loop !192
 
 8:                                                ; preds = %4
   %9 = add nsw i64 %5, -1
   %10 = getelementptr inbounds %struct.FaAddressMap, ptr %2, i32 0, i32 2
-  store i64 %9, ptr %10, align 8, !tbaa !192
+  store i64 %9, ptr %10, align 8, !tbaa !193
   %11 = trunc i64 %5 to i32
   %12 = shl i32 %11, 2
   %13 = tail call ptr @fa_alloc(i32 noundef %12, i32 noundef 4) #53
-  store ptr %13, ptr %2, align 8, !tbaa !194
+  store ptr %13, ptr %2, align 8, !tbaa !195
   %14 = tail call ptr @fa_alloc(i32 noundef %12, i32 noundef 4) #53
   %15 = getelementptr inbounds %struct.FaAddressMap, ptr %2, i32 0, i32 1
-  store ptr %14, ptr %15, align 4, !tbaa !195
-  %16 = load ptr, ptr %2, align 8, !tbaa !194
+  store ptr %14, ptr %15, align 4, !tbaa !196
+  %16 = load ptr, ptr %2, align 8, !tbaa !195
   tail call void @llvm.memset.p0.i32(ptr align 4 %16, i8 0, i32 %12, i1 false)
   ret ptr %2
 }
@@ -10316,13 +10138,13 @@ define hidden ptr @fa_address_map_new(i64 noundef %0) local_unnamed_addr #3 {
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none)
 define hidden void @fa_address_map_put(ptr nocapture noundef readonly %0, ptr noundef %1, ptr noundef %2) local_unnamed_addr #20 {
   %4 = getelementptr inbounds %struct.FaAddressMap, ptr %0, i32 0, i32 2
-  %5 = load i64, ptr %4, align 8, !tbaa !192
+  %5 = load i64, ptr %4, align 8, !tbaa !193
   %6 = ptrtoint ptr %1 to i32
   %7 = zext i32 %6 to i64
   %8 = mul i64 %7, -49064778989728563
   %9 = lshr i64 %8, 33
   %10 = xor i64 %9, %8
-  %11 = load ptr, ptr %0, align 8, !tbaa !194
+  %11 = load ptr, ptr %0, align 8, !tbaa !195
   br label %12
 
 12:                                               ; preds = %12, %3
@@ -10335,12 +10157,12 @@ define hidden void @fa_address_map_put(ptr nocapture noundef readonly %0, ptr no
   %19 = icmp eq ptr %17, %1
   %20 = or i1 %18, %19
   %21 = add i64 %14, 1
-  br i1 %20, label %22, label %12, !llvm.loop !196
+  br i1 %20, label %22, label %12, !llvm.loop !197
 
 22:                                               ; preds = %12
   store ptr %1, ptr %16, align 4, !tbaa !6
   %23 = getelementptr inbounds %struct.FaAddressMap, ptr %0, i32 0, i32 1
-  %24 = load ptr, ptr %23, align 4, !tbaa !195
+  %24 = load ptr, ptr %23, align 4, !tbaa !196
   %25 = getelementptr inbounds ptr, ptr %24, i32 %15
   store ptr %2, ptr %25, align 4, !tbaa !6
   ret void
@@ -10353,13 +10175,13 @@ define hidden ptr @fa_address_map_get(ptr nocapture noundef readonly %0, ptr nou
 
 4:                                                ; preds = %2
   %5 = getelementptr inbounds %struct.FaAddressMap, ptr %0, i32 0, i32 2
-  %6 = load i64, ptr %5, align 8, !tbaa !192
+  %6 = load i64, ptr %5, align 8, !tbaa !193
   %7 = ptrtoint ptr %1 to i32
   %8 = zext i32 %7 to i64
   %9 = mul i64 %8, -49064778989728563
   %10 = lshr i64 %9, 33
   %11 = xor i64 %10, %9
-  %12 = load ptr, ptr %0, align 8, !tbaa !194
+  %12 = load ptr, ptr %0, align 8, !tbaa !195
   %13 = and i64 %11, %6
   %14 = trunc i64 %13 to i32
   %15 = getelementptr inbounds ptr, ptr %12, i32 %14
@@ -10379,16 +10201,16 @@ define hidden ptr @fa_address_map_get(ptr nocapture noundef readonly %0, ptr nou
   %25 = getelementptr inbounds ptr, ptr %12, i32 %24
   %26 = load ptr, ptr %25, align 4, !tbaa !6
   %27 = icmp eq ptr %26, null
-  br i1 %27, label %36, label %28, !llvm.loop !197
+  br i1 %27, label %36, label %28, !llvm.loop !198
 
 28:                                               ; preds = %20
   %29 = icmp eq ptr %26, %1
-  br i1 %29, label %30, label %20, !llvm.loop !197
+  br i1 %29, label %30, label %20, !llvm.loop !198
 
 30:                                               ; preds = %28, %18
   %31 = phi i32 [ %14, %18 ], [ %24, %28 ]
   %32 = getelementptr inbounds %struct.FaAddressMap, ptr %0, i32 0, i32 1
-  %33 = load ptr, ptr %32, align 4, !tbaa !195
+  %33 = load ptr, ptr %32, align 4, !tbaa !196
   %34 = getelementptr inbounds ptr, ptr %33, i32 %31
   %35 = load ptr, ptr %34, align 4, !tbaa !6
   br label %36
@@ -10409,7 +10231,7 @@ define hidden ptr @fa_links_relink(ptr noundef readonly %0, ptr nocapture nounde
 
 6:                                                ; preds = %2
   %7 = getelementptr inbounds %struct.FaLinks, ptr %0, i32 0, i32 1
-  %8 = load i64, ptr %4, align 8, !tbaa !178
+  %8 = load i64, ptr %4, align 8, !tbaa !179
   %9 = icmp sgt i64 %8, 0
   br i1 %9, label %14, label %10
 
@@ -10424,7 +10246,7 @@ define hidden ptr @fa_links_relink(ptr noundef readonly %0, ptr nocapture nounde
 
 14:                                               ; preds = %6, %24
   %15 = phi i64 [ %25, %24 ], [ 0, %6 ]
-  %16 = load ptr, ptr %7, align 8, !tbaa !179
+  %16 = load ptr, ptr %7, align 8, !tbaa !180
   %17 = trunc i64 %15 to i32
   %18 = getelementptr inbounds ptr, ptr %16, i32 %17
   %19 = load ptr, ptr %18, align 4, !tbaa !6
@@ -10438,23 +10260,23 @@ define hidden ptr @fa_links_relink(ptr noundef readonly %0, ptr nocapture nounde
 
 24:                                               ; preds = %22, %14
   %25 = add nuw nsw i64 %15, 1
-  %26 = load i64, ptr %4, align 8, !tbaa !178
+  %26 = load i64, ptr %4, align 8, !tbaa !179
   %27 = icmp slt i64 %25, %26
   br i1 %27, label %14, label %10
 }
 
 ; Function Attrs: nounwind optsize
 define hidden void @fa_address_map_free(ptr noundef %0) local_unnamed_addr #3 {
-  %2 = load ptr, ptr %0, align 8, !tbaa !194
+  %2 = load ptr, ptr %0, align 8, !tbaa !195
   %3 = getelementptr inbounds %struct.FaAddressMap, ptr %0, i32 0, i32 2
-  %4 = load i64, ptr %3, align 8, !tbaa !192
+  %4 = load i64, ptr %3, align 8, !tbaa !193
   %5 = trunc i64 %4 to i32
   %6 = shl i32 %5, 2
   %7 = add i32 %6, 4
   tail call void @fa_free(ptr noundef %2, i32 noundef %7, i32 noundef 4) #53
   %8 = getelementptr inbounds %struct.FaAddressMap, ptr %0, i32 0, i32 1
-  %9 = load ptr, ptr %8, align 4, !tbaa !195
-  %10 = load i64, ptr %3, align 8, !tbaa !192
+  %9 = load ptr, ptr %8, align 4, !tbaa !196
+  %10 = load i64, ptr %3, align 8, !tbaa !193
   %11 = trunc i64 %10 to i32
   %12 = shl i32 %11, 2
   %13 = add i32 %12, 4
@@ -10503,44 +10325,44 @@ define hidden ptr @fa_source_child(ptr noundef %0, i64 noundef %1, i64 noundef %
 
 5:                                                ; preds = %3
   %6 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 7
-  %7 = load i64, ptr %6, align 8, !tbaa !198
+  %7 = load i64, ptr %6, align 8, !tbaa !199
   %8 = icmp sgt i64 %7, 0
   br i1 %8, label %9, label %28
 
 9:                                                ; preds = %5
   %10 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 6
-  %11 = load ptr, ptr %10, align 4, !tbaa !200
+  %11 = load ptr, ptr %10, align 4, !tbaa !201
   br label %12
 
 12:                                               ; preds = %9, %22
   %13 = phi i64 [ 0, %9 ], [ %23, %22 ]
   %14 = trunc i64 %13 to i32
   %15 = getelementptr inbounds %struct.FaChild, ptr %11, i32 %14
-  %16 = load i64, ptr %15, align 8, !tbaa !201
+  %16 = load i64, ptr %15, align 8, !tbaa !202
   %17 = icmp eq i64 %16, %1
   br i1 %17, label %18, label %22
 
 18:                                               ; preds = %12
   %19 = getelementptr inbounds %struct.FaChild, ptr %11, i32 %14, i32 1
-  %20 = load i64, ptr %19, align 8, !tbaa !203
+  %20 = load i64, ptr %19, align 8, !tbaa !204
   %21 = icmp eq i64 %20, %2
   br i1 %21, label %25, label %22
 
 22:                                               ; preds = %18, %12
   %23 = add nuw nsw i64 %13, 1
   %24 = icmp eq i64 %23, %7
-  br i1 %24, label %28, label %12, !llvm.loop !204
+  br i1 %24, label %28, label %12, !llvm.loop !205
 
 25:                                               ; preds = %18
   %26 = getelementptr inbounds %struct.FaChild, ptr %11, i32 %14, i32 2
-  %27 = load ptr, ptr %26, align 8, !tbaa !205
+  %27 = load ptr, ptr %26, align 8, !tbaa !206
   br label %50
 
 28:                                               ; preds = %22, %5
   %29 = tail call ptr @fa_alloc(i32 noundef 64, i32 noundef 8) #53
   tail call void @llvm.memset.p0.i32(ptr noundef nonnull align 8 dereferenceable(64) %29, i8 0, i32 64, i1 false)
   %30 = getelementptr inbounds %struct.FaSource, ptr %29, i32 0, i32 5
-  store ptr %0, ptr %30, align 8, !tbaa !206
+  store ptr %0, ptr %30, align 8, !tbaa !207
   %31 = load ptr, ptr @reactive_made, align 4, !tbaa !6
   %32 = load i64, ptr @reactive_made_count, align 8, !tbaa !89
   %33 = tail call fastcc ptr @grow_items(ptr noundef %31, i64 noundef %32, ptr noundef nonnull @reactive_made_capacity, i32 noundef 4) #52
@@ -10552,22 +10374,22 @@ define hidden ptr @fa_source_child(ptr noundef %0, i64 noundef %1, i64 noundef %
   %37 = add nsw i64 %34, 1
   store i64 %37, ptr @reactive_made_count, align 8, !tbaa !89
   %38 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 6
-  %39 = load ptr, ptr %38, align 4, !tbaa !200
-  %40 = load i64, ptr %6, align 8, !tbaa !198
+  %39 = load ptr, ptr %38, align 4, !tbaa !201
+  %40 = load i64, ptr %6, align 8, !tbaa !199
   %41 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 8
   %42 = tail call fastcc ptr @grow_items(ptr noundef %39, i64 noundef %40, ptr noundef nonnull %41, i32 noundef 24) #52
-  store ptr %42, ptr %38, align 4, !tbaa !200
-  %43 = load i64, ptr %6, align 8, !tbaa !198
+  store ptr %42, ptr %38, align 4, !tbaa !201
+  %43 = load i64, ptr %6, align 8, !tbaa !199
   %44 = trunc i64 %43 to i32
   %45 = getelementptr inbounds %struct.FaChild, ptr %42, i32 %44
-  store i64 %1, ptr %45, align 8, !tbaa.struct !207
+  store i64 %1, ptr %45, align 8, !tbaa.struct !208
   %46 = getelementptr inbounds i8, ptr %45, i32 8
-  store i64 %2, ptr %46, align 8, !tbaa.struct !208
+  store i64 %2, ptr %46, align 8, !tbaa.struct !209
   %47 = getelementptr inbounds i8, ptr %45, i32 16
-  store ptr %29, ptr %47, align 8, !tbaa.struct !209
-  %48 = load i64, ptr %6, align 8, !tbaa !198
+  store ptr %29, ptr %47, align 8, !tbaa.struct !210
+  %48 = load i64, ptr %6, align 8, !tbaa !199
   %49 = add nsw i64 %48, 1
-  store i64 %49, ptr %6, align 8, !tbaa !198
+  store i64 %49, ptr %6, align 8, !tbaa !199
   br label %50
 
 50:                                               ; preds = %25, %3, %28
@@ -10627,25 +10449,25 @@ define hidden ptr @fa_field_source(ptr noundef %0, i64 noundef %1) local_unnamed
   %10 = phi i64 [ 0, %7 ], [ %23, %22 ]
   %11 = trunc i64 %10 to i32
   %12 = getelementptr inbounds %struct.FaChild, ptr %8, i32 %11
-  %13 = load i64, ptr %12, align 8, !tbaa !201
+  %13 = load i64, ptr %12, align 8, !tbaa !202
   %14 = icmp eq i64 %13, %4
   br i1 %14, label %15, label %22
 
 15:                                               ; preds = %9
   %16 = getelementptr inbounds %struct.FaChild, ptr %8, i32 %11, i32 1
-  %17 = load i64, ptr %16, align 8, !tbaa !203
+  %17 = load i64, ptr %16, align 8, !tbaa !204
   %18 = icmp eq i64 %17, %1
   br i1 %18, label %19, label %22
 
 19:                                               ; preds = %15
   %20 = getelementptr inbounds %struct.FaChild, ptr %8, i32 %11, i32 2
-  %21 = load ptr, ptr %20, align 8, !tbaa !205
+  %21 = load ptr, ptr %20, align 8, !tbaa !206
   br label %36
 
 22:                                               ; preds = %15, %9
   %23 = add nuw nsw i64 %10, 1
   %24 = icmp eq i64 %23, %5
-  br i1 %24, label %25, label %9, !llvm.loop !210
+  br i1 %24, label %25, label %9, !llvm.loop !211
 
 25:                                               ; preds = %22, %2
   %26 = tail call ptr @fa_source_new() #52
@@ -10656,11 +10478,11 @@ define hidden ptr @fa_field_source(ptr noundef %0, i64 noundef %1) local_unnamed
   %30 = load i64, ptr @field_source_count, align 8, !tbaa !89
   %31 = trunc i64 %30 to i32
   %32 = getelementptr inbounds %struct.FaChild, ptr %29, i32 %31
-  store i64 %4, ptr %32, align 8, !tbaa.struct !207
+  store i64 %4, ptr %32, align 8, !tbaa.struct !208
   %33 = getelementptr inbounds i8, ptr %32, i32 8
-  store i64 %1, ptr %33, align 8, !tbaa.struct !208
+  store i64 %1, ptr %33, align 8, !tbaa.struct !209
   %34 = getelementptr inbounds i8, ptr %32, i32 16
-  store ptr %26, ptr %34, align 8, !tbaa.struct !209
+  store ptr %26, ptr %34, align 8, !tbaa.struct !210
   %35 = add nsw i64 %30, 1
   store i64 %35, ptr @field_source_count, align 8, !tbaa !89
   br label %36
@@ -10681,16 +10503,16 @@ define hidden void @fa_track(ptr noundef %0) local_unnamed_addr #3 {
 
 7:                                                ; preds = %1
   %8 = getelementptr inbounds %struct.FaObserver, ptr %3, i32 0, i32 8
-  %9 = load i64, ptr %8, align 8, !tbaa !211
+  %9 = load i64, ptr %8, align 8, !tbaa !212
   %10 = icmp sgt i64 %9, 0
   %11 = getelementptr inbounds %struct.FaObserver, ptr %3, i32 0, i32 6
-  %12 = load ptr, ptr %11, align 4, !tbaa !213
+  %12 = load ptr, ptr %11, align 4, !tbaa !214
   br i1 %10, label %16, label %22
 
 13:                                               ; preds = %16
   %14 = add nuw nsw i64 %17, 1
   %15 = icmp eq i64 %14, %9
-  br i1 %15, label %22, label %16, !llvm.loop !214
+  br i1 %15, label %22, label %16, !llvm.loop !215
 
 16:                                               ; preds = %7, %13
   %17 = phi i64 [ %14, %13 ], [ 0, %7 ]
@@ -10703,44 +10525,44 @@ define hidden void @fa_track(ptr noundef %0) local_unnamed_addr #3 {
 22:                                               ; preds = %13, %7
   call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %2) #55
   %23 = getelementptr inbounds %struct.FaObserver, ptr %3, i32 0, i32 9
-  %24 = load i64, ptr %23, align 8, !tbaa !215
+  %24 = load i64, ptr %23, align 8, !tbaa !216
   store i64 %24, ptr %2, align 8, !tbaa !89
   %25 = getelementptr inbounds %struct.FaObserver, ptr %3, i32 0, i32 6
   %26 = call fastcc ptr @grow_items(ptr noundef %12, i64 noundef %9, ptr noundef nonnull %2, i32 noundef 4) #52
-  store ptr %26, ptr %25, align 4, !tbaa !213
-  %27 = load i64, ptr %23, align 8, !tbaa !215
+  store ptr %26, ptr %25, align 4, !tbaa !214
+  %27 = load i64, ptr %23, align 8, !tbaa !216
   store i64 %27, ptr %2, align 8, !tbaa !89
   %28 = getelementptr inbounds %struct.FaObserver, ptr %3, i32 0, i32 7
-  %29 = load ptr, ptr %28, align 8, !tbaa !216
-  %30 = load i64, ptr %8, align 8, !tbaa !211
+  %29 = load ptr, ptr %28, align 8, !tbaa !217
+  %30 = load i64, ptr %8, align 8, !tbaa !212
   %31 = call fastcc ptr @grow_items(ptr noundef %29, i64 noundef %30, ptr noundef nonnull %2, i32 noundef 8) #52
-  store ptr %31, ptr %28, align 8, !tbaa !216
+  store ptr %31, ptr %28, align 8, !tbaa !217
   %32 = load i64, ptr %2, align 8, !tbaa !89
-  store i64 %32, ptr %23, align 8, !tbaa !215
-  %33 = load ptr, ptr %25, align 4, !tbaa !213
-  %34 = load i64, ptr %8, align 8, !tbaa !211
+  store i64 %32, ptr %23, align 8, !tbaa !216
+  %33 = load ptr, ptr %25, align 4, !tbaa !214
+  %34 = load i64, ptr %8, align 8, !tbaa !212
   %35 = trunc i64 %34 to i32
   %36 = getelementptr inbounds ptr, ptr %33, i32 %35
   store ptr %0, ptr %36, align 4, !tbaa !6
   %37 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 1
-  %38 = load i64, ptr %37, align 8, !tbaa !217
-  %39 = load ptr, ptr %28, align 8, !tbaa !216
+  %38 = load i64, ptr %37, align 8, !tbaa !218
+  %39 = load ptr, ptr %28, align 8, !tbaa !217
   %40 = getelementptr inbounds i64, ptr %39, i32 %35
   store i64 %38, ptr %40, align 8, !tbaa !89
-  %41 = load i64, ptr %8, align 8, !tbaa !211
+  %41 = load i64, ptr %8, align 8, !tbaa !212
   %42 = add nsw i64 %41, 1
-  store i64 %42, ptr %8, align 8, !tbaa !211
+  store i64 %42, ptr %8, align 8, !tbaa !212
   %43 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 3
-  %44 = load i64, ptr %43, align 8, !tbaa !218
+  %44 = load i64, ptr %43, align 8, !tbaa !219
   %45 = icmp sgt i64 %44, 0
   %46 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 2
-  %47 = load ptr, ptr %46, align 8, !tbaa !219
+  %47 = load ptr, ptr %46, align 8, !tbaa !220
   br i1 %45, label %51, label %57
 
 48:                                               ; preds = %51
   %49 = add nuw nsw i64 %52, 1
   %50 = icmp eq i64 %49, %44
-  br i1 %50, label %57, label %51, !llvm.loop !220
+  br i1 %50, label %57, label %51, !llvm.loop !221
 
 51:                                               ; preds = %22, %48
   %52 = phi i64 [ %49, %48 ], [ 0, %22 ]
@@ -10754,13 +10576,13 @@ define hidden void @fa_track(ptr noundef %0) local_unnamed_addr #3 {
   %58 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 2
   %59 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 4
   %60 = tail call fastcc ptr @grow_items(ptr noundef %47, i64 noundef %44, ptr noundef nonnull %59, i32 noundef 4) #52
-  store ptr %60, ptr %58, align 8, !tbaa !219
-  %61 = load i64, ptr %43, align 8, !tbaa !218
+  store ptr %60, ptr %58, align 8, !tbaa !220
+  %61 = load i64, ptr %43, align 8, !tbaa !219
   %62 = trunc i64 %61 to i32
   %63 = getelementptr inbounds ptr, ptr %60, i32 %62
   store ptr %3, ptr %63, align 4, !tbaa !6
   %64 = add nsw i64 %61, 1
-  store i64 %64, ptr %43, align 8, !tbaa !218
+  store i64 %64, ptr %43, align 8, !tbaa !219
   br label %65
 
 65:                                               ; preds = %51, %57
@@ -10779,21 +10601,21 @@ define hidden void @fa_notify(ptr noundef %0) local_unnamed_addr #3 {
 3:                                                ; preds = %1
   tail call fastcc void @bump(ptr noundef nonnull %0) #52
   %4 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 5
-  %5 = load ptr, ptr %4, align 8, !tbaa !206
+  %5 = load ptr, ptr %4, align 8, !tbaa !207
   %6 = icmp eq ptr %5, null
   br i1 %6, label %15, label %7
 
 7:                                                ; preds = %3, %7
   %8 = phi ptr [ %13, %7 ], [ %5, %3 ]
   %9 = getelementptr inbounds %struct.FaSource, ptr %8, i32 0, i32 1
-  %10 = load i64, ptr %9, align 8, !tbaa !217
+  %10 = load i64, ptr %9, align 8, !tbaa !218
   %11 = add nsw i64 %10, 1
-  store i64 %11, ptr %9, align 8, !tbaa !217
+  store i64 %11, ptr %9, align 8, !tbaa !218
   tail call fastcc void @mark_observers(ptr noundef nonnull %8) #52
   %12 = getelementptr inbounds %struct.FaSource, ptr %8, i32 0, i32 5
-  %13 = load ptr, ptr %12, align 8, !tbaa !206
+  %13 = load ptr, ptr %12, align 8, !tbaa !207
   %14 = icmp eq ptr %13, null
-  br i1 %14, label %15, label %7, !llvm.loop !221
+  br i1 %14, label %15, label %7, !llvm.loop !222
 
 15:                                               ; preds = %7, %3, %1
   ret void
@@ -10802,12 +10624,12 @@ define hidden void @fa_notify(ptr noundef %0) local_unnamed_addr #3 {
 ; Function Attrs: nounwind optsize
 define internal fastcc void @bump(ptr nocapture noundef %0) unnamed_addr #3 {
   %2 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 1
-  %3 = load i64, ptr %2, align 8, !tbaa !217
+  %3 = load i64, ptr %2, align 8, !tbaa !218
   %4 = add nsw i64 %3, 1
-  store i64 %4, ptr %2, align 8, !tbaa !217
+  store i64 %4, ptr %2, align 8, !tbaa !218
   tail call fastcc void @mark_observers(ptr noundef %0) #52
   %5 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 7
-  %6 = load i64, ptr %5, align 8, !tbaa !198
+  %6 = load i64, ptr %5, align 8, !tbaa !199
   %7 = icmp sgt i64 %6, 0
   br i1 %7, label %8, label %10
 
@@ -10820,21 +10642,21 @@ define internal fastcc void @bump(ptr nocapture noundef %0) unnamed_addr #3 {
 
 11:                                               ; preds = %8, %11
   %12 = phi i64 [ 0, %8 ], [ %17, %11 ]
-  %13 = load ptr, ptr %9, align 4, !tbaa !200
+  %13 = load ptr, ptr %9, align 4, !tbaa !201
   %14 = trunc i64 %12 to i32
   %15 = getelementptr inbounds %struct.FaChild, ptr %13, i32 %14, i32 2
-  %16 = load ptr, ptr %15, align 8, !tbaa !205
+  %16 = load ptr, ptr %15, align 8, !tbaa !206
   tail call fastcc void @bump(ptr noundef %16) #52
   %17 = add nuw nsw i64 %12, 1
-  %18 = load i64, ptr %5, align 8, !tbaa !198
+  %18 = load i64, ptr %5, align 8, !tbaa !199
   %19 = icmp slt i64 %17, %18
-  br i1 %19, label %11, label %10, !llvm.loop !222
+  br i1 %19, label %11, label %10, !llvm.loop !223
 }
 
 ; Function Attrs: nounwind optsize
 define internal fastcc void @mark_observers(ptr nocapture noundef readonly %0) unnamed_addr #3 {
   %2 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 3
-  %3 = load i64, ptr %2, align 8, !tbaa !218
+  %3 = load i64, ptr %2, align 8, !tbaa !219
   %4 = icmp sgt i64 %3, 0
   br i1 %4, label %5, label %7
 
@@ -10847,23 +10669,23 @@ define internal fastcc void @mark_observers(ptr nocapture noundef readonly %0) u
 
 8:                                                ; preds = %5, %8
   %9 = phi i64 [ 0, %5 ], [ %14, %8 ]
-  %10 = load ptr, ptr %6, align 8, !tbaa !219
+  %10 = load ptr, ptr %6, align 8, !tbaa !220
   %11 = trunc i64 %9 to i32
   %12 = getelementptr inbounds ptr, ptr %10, i32 %11
   %13 = load ptr, ptr %12, align 4, !tbaa !6
   tail call fastcc void @mark(ptr noundef %13) #52
   %14 = add nuw nsw i64 %9, 1
-  %15 = load i64, ptr %2, align 8, !tbaa !218
+  %15 = load i64, ptr %2, align 8, !tbaa !219
   %16 = icmp slt i64 %14, %15
-  br i1 %16, label %8, label %7, !llvm.loop !223
+  br i1 %16, label %8, label %7, !llvm.loop !224
 }
 
 ; Function Attrs: nounwind optsize
 define hidden noundef ptr @fa_derived_new(ptr noundef %0, ptr noundef %1, ptr noundef %2, i64 noundef %3) local_unnamed_addr #3 {
   %5 = tail call fastcc ptr @observer_new(ptr noundef %0, ptr noundef null, ptr noundef %1, ptr noundef %2, i64 noundef %3) #52
-  store i64 1, ptr %5, align 8, !tbaa !224
+  store i64 1, ptr %5, align 8, !tbaa !225
   %6 = getelementptr inbounds %struct.FaObserver, ptr %5, i32 0, i32 11
-  store i32 1, ptr %6, align 8, !tbaa !225
+  store i32 1, ptr %6, align 8, !tbaa !226
   ret ptr %5
 }
 
@@ -10872,13 +10694,13 @@ define internal fastcc noundef ptr @observer_new(ptr noundef %0, ptr noundef %1,
   %6 = tail call ptr @fa_alloc(i32 noundef 168, i32 noundef 8) #53
   tail call void @llvm.memset.p0.i32(ptr noundef nonnull align 8 dereferenceable(168) %6, i8 0, i32 168, i1 false)
   %7 = getelementptr inbounds %struct.FaObserver, ptr %6, i32 0, i32 3
-  store ptr %0, ptr %7, align 8, !tbaa !226
+  store ptr %0, ptr %7, align 8, !tbaa !227
   %8 = getelementptr inbounds %struct.FaObserver, ptr %6, i32 0, i32 4
-  store ptr %1, ptr %8, align 4, !tbaa !227
+  store ptr %1, ptr %8, align 4, !tbaa !228
   %9 = getelementptr inbounds %struct.FaObserver, ptr %6, i32 0, i32 5
-  store ptr %2, ptr %9, align 8, !tbaa !228
+  store ptr %2, ptr %9, align 8, !tbaa !229
   %10 = getelementptr inbounds %struct.FaObserver, ptr %6, i32 0, i32 2
-  store ptr %3, ptr %10, align 4, !tbaa !229
+  store ptr %3, ptr %10, align 4, !tbaa !230
   %11 = icmp sgt i64 %4, 0
   br i1 %11, label %12, label %17
 
@@ -10886,10 +10708,10 @@ define internal fastcc noundef ptr @observer_new(ptr noundef %0, ptr noundef %1,
   %13 = trunc i64 %4 to i32
   %14 = tail call ptr @fa_alloc(i32 noundef %13, i32 noundef 16) #53
   %15 = getelementptr inbounds %struct.FaObserver, ptr %6, i32 0, i32 1
-  store ptr %14, ptr %15, align 8, !tbaa !230
+  store ptr %14, ptr %15, align 8, !tbaa !231
   tail call void @llvm.memset.p0.i32(ptr align 1 %14, i8 0, i32 %13, i1 false)
   %16 = getelementptr inbounds %struct.FaObserver, ptr %6, i32 0, i32 19
-  store i64 %4, ptr %16, align 8, !tbaa !231
+  store i64 %4, ptr %16, align 8, !tbaa !232
   br label %17
 
 17:                                               ; preds = %12, %5
@@ -10911,20 +10733,20 @@ define hidden ptr @fa_derived_read(ptr noundef %0) local_unnamed_addr #3 {
   tail call fastcc void @refresh(ptr noundef %0) #52
   tail call void @fa_track(ptr noundef %0) #52
   %2 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 1
-  %3 = load ptr, ptr %2, align 8, !tbaa !230
+  %3 = load ptr, ptr %2, align 8, !tbaa !231
   ret ptr %3
 }
 
 ; Function Attrs: nounwind optsize
 define internal fastcc void @refresh(ptr noundef %0) unnamed_addr #3 {
   %2 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 11
-  %3 = load i32, ptr %2, align 8, !tbaa !225
+  %3 = load i32, ptr %2, align 8, !tbaa !226
   %4 = icmp eq i32 %3, 0
   br i1 %4, label %29, label %5
 
 5:                                                ; preds = %1
   %6 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 12
-  %7 = load i32, ptr %6, align 4, !tbaa !232
+  %7 = load i32, ptr %6, align 4, !tbaa !233
   %8 = icmp eq i32 %7, 0
   br i1 %8, label %13, label %9
 
@@ -10934,12 +10756,12 @@ define internal fastcc void @refresh(ptr noundef %0) unnamed_addr #3 {
   br i1 %11, label %12, label %13
 
 12:                                               ; preds = %9
-  store i32 0, ptr %2, align 8, !tbaa !225
+  store i32 0, ptr %2, align 8, !tbaa !226
   br label %29
 
 13:                                               ; preds = %9, %5
   %14 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 13
-  %15 = load i32, ptr %14, align 8, !tbaa !233
+  %15 = load i32, ptr %14, align 8, !tbaa !234
   %16 = icmp eq i32 %15, 0
   br i1 %16, label %18, label %17
 
@@ -10951,25 +10773,25 @@ define internal fastcc void @refresh(ptr noundef %0) unnamed_addr #3 {
   tail call fastcc void @unsubscribe(ptr noundef nonnull %0) #52
   %19 = load ptr, ptr @reactive_observer, align 4, !tbaa !6
   store ptr %0, ptr @reactive_observer, align 4, !tbaa !6
-  store i32 1, ptr %14, align 8, !tbaa !233
+  store i32 1, ptr %14, align 8, !tbaa !234
   %20 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 16
-  store i32 1, ptr %20, align 4, !tbaa !234
+  store i32 1, ptr %20, align 4, !tbaa !235
   %21 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 3
-  %22 = load ptr, ptr %21, align 8, !tbaa !226
+  %22 = load ptr, ptr %21, align 8, !tbaa !227
   tail call void %22(ptr noundef nonnull %0) #53
-  store i32 0, ptr %14, align 8, !tbaa !233
+  store i32 0, ptr %14, align 8, !tbaa !234
   store ptr %19, ptr @reactive_observer, align 4, !tbaa !6
-  store i32 0, ptr %2, align 8, !tbaa !225
-  store i32 1, ptr %6, align 4, !tbaa !232
-  %23 = load i32, ptr %20, align 4, !tbaa !234
+  store i32 0, ptr %2, align 8, !tbaa !226
+  store i32 1, ptr %6, align 4, !tbaa !233
+  %23 = load i32, ptr %20, align 4, !tbaa !235
   %24 = icmp eq i32 %23, 0
   br i1 %24, label %29, label %25
 
 25:                                               ; preds = %18
   %26 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 1
-  %27 = load i64, ptr %26, align 8, !tbaa !235
+  %27 = load i64, ptr %26, align 8, !tbaa !236
   %28 = add nsw i64 %27, 1
-  store i64 %28, ptr %26, align 8, !tbaa !235
+  store i64 %28, ptr %26, align 8, !tbaa !236
   br label %29
 
 29:                                               ; preds = %18, %25, %1, %12
@@ -10979,23 +10801,23 @@ define internal fastcc void @refresh(ptr noundef %0) unnamed_addr #3 {
 ; Function Attrs: nounwind optsize
 define hidden noundef ptr @fa_watch_new(ptr noundef %0, ptr noundef %1, ptr noundef %2, ptr noundef %3) local_unnamed_addr #3 {
   %5 = tail call fastcc ptr @observer_new(ptr noundef %0, ptr noundef %1, ptr noundef %2, ptr noundef %3, i64 noundef 0) #52
-  store i64 2, ptr %5, align 8, !tbaa !224
+  store i64 2, ptr %5, align 8, !tbaa !225
   %6 = getelementptr inbounds %struct.FaObserver, ptr %5, i32 0, i32 17
-  store i32 1, ptr %6, align 8, !tbaa !236
+  store i32 1, ptr %6, align 8, !tbaa !237
   %7 = load i64, ptr @reactive_sequence, align 8, !tbaa !89
   %8 = add nsw i64 %7, 1
   store i64 %8, ptr @reactive_sequence, align 8, !tbaa !89
   %9 = getelementptr inbounds %struct.FaObserver, ptr %5, i32 0, i32 10
-  store i64 %8, ptr %9, align 8, !tbaa !237
+  store i64 %8, ptr %9, align 8, !tbaa !238
   tail call fastcc void @unsubscribe(ptr noundef nonnull %5) #52
   %10 = load ptr, ptr @reactive_observer, align 4, !tbaa !6
   store ptr null, ptr @reactive_observer, align 4, !tbaa !6
   %11 = getelementptr inbounds %struct.FaObserver, ptr %5, i32 0, i32 4
-  %12 = load ptr, ptr %11, align 4, !tbaa !227
+  %12 = load ptr, ptr %11, align 4, !tbaa !228
   tail call void %12(ptr noundef nonnull %5) #53
   store ptr %5, ptr @reactive_observer, align 4, !tbaa !6
   %13 = getelementptr inbounds %struct.FaObserver, ptr %5, i32 0, i32 3
-  %14 = load ptr, ptr %13, align 8, !tbaa !226
+  %14 = load ptr, ptr %13, align 8, !tbaa !227
   tail call void %14(ptr noundef nonnull %5) #53
   store ptr %10, ptr @reactive_observer, align 4, !tbaa !6
   ret ptr %5
@@ -11008,17 +10830,17 @@ define hidden void @fa_dispose(ptr noundef %0) local_unnamed_addr #3 {
 
 3:                                                ; preds = %1
   %4 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 15
-  %5 = load i32, ptr %4, align 8, !tbaa !238
+  %5 = load i32, ptr %4, align 8, !tbaa !239
   %6 = icmp eq i32 %5, 0
   br i1 %6, label %7, label %11
 
 7:                                                ; preds = %3
-  store i32 1, ptr %4, align 8, !tbaa !238
+  store i32 1, ptr %4, align 8, !tbaa !239
   tail call fastcc void @unsubscribe(ptr noundef nonnull %0) #52
   %8 = load ptr, ptr @reactive_observer, align 4, !tbaa !6
   store ptr null, ptr @reactive_observer, align 4, !tbaa !6
   %9 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 4
-  %10 = load ptr, ptr %9, align 4, !tbaa !227
+  %10 = load ptr, ptr %9, align 4, !tbaa !228
   tail call void %10(ptr noundef nonnull %0) #53
   store ptr %8, ptr @reactive_observer, align 4, !tbaa !6
   br label %11
@@ -11030,7 +10852,7 @@ define hidden void @fa_dispose(ptr noundef %0) local_unnamed_addr #3 {
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none)
 define internal fastcc void @unsubscribe(ptr noundef %0) unnamed_addr #20 {
   %2 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 8
-  %3 = load i64, ptr %2, align 8, !tbaa !211
+  %3 = load i64, ptr %2, align 8, !tbaa !212
   %4 = icmp sgt i64 %3, 0
   br i1 %4, label %5, label %7
 
@@ -11039,29 +10861,29 @@ define internal fastcc void @unsubscribe(ptr noundef %0) unnamed_addr #20 {
   br label %8
 
 7:                                                ; preds = %35, %1
-  store i64 0, ptr %2, align 8, !tbaa !211
+  store i64 0, ptr %2, align 8, !tbaa !212
   ret void
 
 8:                                                ; preds = %5, %35
   %9 = phi i64 [ 0, %5 ], [ %36, %35 ]
-  %10 = load ptr, ptr %6, align 4, !tbaa !213
+  %10 = load ptr, ptr %6, align 4, !tbaa !214
   %11 = trunc i64 %9 to i32
   %12 = getelementptr inbounds ptr, ptr %10, i32 %11
   %13 = load ptr, ptr %12, align 4, !tbaa !6
   %14 = getelementptr inbounds %struct.FaSource, ptr %13, i32 0, i32 3
-  %15 = load i64, ptr %14, align 8, !tbaa !218
+  %15 = load i64, ptr %14, align 8, !tbaa !219
   %16 = icmp sgt i64 %15, 0
   br i1 %16, label %17, label %35
 
 17:                                               ; preds = %8
   %18 = getelementptr inbounds %struct.FaSource, ptr %13, i32 0, i32 2
-  %19 = load ptr, ptr %18, align 8, !tbaa !219
+  %19 = load ptr, ptr %18, align 8, !tbaa !220
   br label %23
 
 20:                                               ; preds = %23
   %21 = add nuw nsw i64 %24, 1
   %22 = icmp eq i64 %21, %15
-  br i1 %22, label %35, label %23, !llvm.loop !239
+  br i1 %22, label %35, label %23, !llvm.loop !240
 
 23:                                               ; preds = %17, %20
   %24 = phi i64 [ 0, %17 ], [ %21, %20 ]
@@ -11078,13 +10900,13 @@ define internal fastcc void @unsubscribe(ptr noundef %0) unnamed_addr #20 {
   %33 = load ptr, ptr %32, align 4, !tbaa !6
   store ptr %33, ptr %26, align 4, !tbaa !6
   %34 = add nsw i64 %15, -1
-  store i64 %34, ptr %14, align 8, !tbaa !218
+  store i64 %34, ptr %14, align 8, !tbaa !219
   br label %35
 
 35:                                               ; preds = %20, %8, %29
   %36 = add nuw nsw i64 %9, 1
   %37 = icmp eq i64 %36, %3
-  br i1 %37, label %7, label %8, !llvm.loop !240
+  br i1 %37, label %7, label %8, !llvm.loop !241
 }
 
 ; Function Attrs: nounwind optsize
@@ -11130,7 +10952,7 @@ define hidden void @fa_reactive_flush() local_unnamed_addr #3 {
   %23 = getelementptr inbounds ptr, ptr %16, i32 %22
   %24 = load ptr, ptr %23, align 4, !tbaa !6
   %25 = getelementptr inbounds %struct.FaObserver, ptr %24, i32 0, i32 10
-  %26 = load i64, ptr %25, align 8, !tbaa !237
+  %26 = load i64, ptr %25, align 8, !tbaa !238
   br label %27
 
 27:                                               ; preds = %20, %36
@@ -11140,7 +10962,7 @@ define hidden void @fa_reactive_flush() local_unnamed_addr #3 {
   %31 = getelementptr inbounds ptr, ptr %16, i32 %30
   %32 = load ptr, ptr %31, align 4, !tbaa !6
   %33 = getelementptr inbounds %struct.FaObserver, ptr %32, i32 0, i32 10
-  %34 = load i64, ptr %33, align 8, !tbaa !237
+  %34 = load i64, ptr %33, align 8, !tbaa !238
   %35 = icmp sgt i64 %34, %26
   br i1 %35, label %36, label %40
 
@@ -11149,7 +10971,7 @@ define hidden void @fa_reactive_flush() local_unnamed_addr #3 {
   %38 = getelementptr inbounds ptr, ptr %16, i32 %37
   store ptr %32, ptr %38, align 4, !tbaa !6
   %39 = icmp sgt i64 %28, 1
-  br i1 %39, label %27, label %40, !llvm.loop !241
+  br i1 %39, label %27, label %40, !llvm.loop !242
 
 40:                                               ; preds = %36, %27
   %41 = phi i64 [ 0, %36 ], [ %28, %27 ]
@@ -11158,13 +10980,13 @@ define hidden void @fa_reactive_flush() local_unnamed_addr #3 {
   store ptr %24, ptr %43, align 4, !tbaa !6
   %44 = add nuw nsw i64 %21, 1
   %45 = icmp eq i64 %44, %9
-  br i1 %45, label %19, label %20, !llvm.loop !242
+  br i1 %45, label %19, label %20, !llvm.loop !243
 
 46:                                               ; preds = %67
   tail call void @fa_free(ptr noundef nonnull %16, i32 noundef %15, i32 noundef 4) #53
   %47 = load i64, ptr @reactive_pending_count, align 8, !tbaa !89
   %48 = icmp sgt i64 %47, 0
-  br i1 %48, label %7, label %70, !llvm.loop !243
+  br i1 %48, label %7, label %70, !llvm.loop !244
 
 49:                                               ; preds = %19, %67
   %50 = phi i64 [ %68, %67 ], [ 0, %19 ]
@@ -11172,9 +10994,9 @@ define hidden void @fa_reactive_flush() local_unnamed_addr #3 {
   %52 = getelementptr inbounds ptr, ptr %16, i32 %51
   %53 = load ptr, ptr %52, align 4, !tbaa !6
   %54 = getelementptr inbounds %struct.FaObserver, ptr %53, i32 0, i32 14
-  store i32 0, ptr %54, align 4, !tbaa !244
+  store i32 0, ptr %54, align 4, !tbaa !245
   %55 = getelementptr inbounds %struct.FaObserver, ptr %53, i32 0, i32 15
-  %56 = load i32, ptr %55, align 8, !tbaa !238
+  %56 = load i32, ptr %55, align 8, !tbaa !239
   %57 = icmp eq i32 %56, 0
   br i1 %57, label %58, label %67
 
@@ -11188,11 +11010,11 @@ define hidden void @fa_reactive_flush() local_unnamed_addr #3 {
   %62 = load ptr, ptr @reactive_observer, align 4, !tbaa !6
   store ptr null, ptr @reactive_observer, align 4, !tbaa !6
   %63 = getelementptr inbounds %struct.FaObserver, ptr %53, i32 0, i32 4
-  %64 = load ptr, ptr %63, align 4, !tbaa !227
+  %64 = load ptr, ptr %63, align 4, !tbaa !228
   tail call void %64(ptr noundef nonnull %53) #53
   store ptr %53, ptr @reactive_observer, align 4, !tbaa !6
   %65 = getelementptr inbounds %struct.FaObserver, ptr %53, i32 0, i32 3
-  %66 = load ptr, ptr %65, align 8, !tbaa !226
+  %66 = load ptr, ptr %65, align 8, !tbaa !227
   tail call void %66(ptr noundef nonnull %53) #53
   store ptr %62, ptr @reactive_observer, align 4, !tbaa !6
   br label %67
@@ -11200,7 +11022,7 @@ define hidden void @fa_reactive_flush() local_unnamed_addr #3 {
 67:                                               ; preds = %61, %58, %49
   %68 = add nuw i64 %50, 1
   %69 = icmp eq i64 %68, %9
-  br i1 %69, label %46, label %49, !llvm.loop !245
+  br i1 %69, label %46, label %49, !llvm.loop !246
 
 70:                                               ; preds = %46, %5
   store i1 false, ptr @reactive_flushing, align 4
@@ -11234,7 +11056,7 @@ define internal fastcc void @reactive_stop(ptr noundef %0) unnamed_addr #5 {
 ; Function Attrs: nounwind optsize
 define internal fastcc noundef i32 @outdated(ptr nocapture noundef readonly %0) unnamed_addr #3 {
   %2 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 8
-  %3 = load i64, ptr %2, align 8, !tbaa !211
+  %3 = load i64, ptr %2, align 8, !tbaa !212
   %4 = icmp sgt i64 %3, 0
   br i1 %4, label %5, label %30
 
@@ -11245,17 +11067,17 @@ define internal fastcc noundef i32 @outdated(ptr nocapture noundef readonly %0) 
 
 8:                                                ; preds = %21
   %9 = add nuw nsw i64 %13, 1
-  %10 = load i64, ptr %2, align 8, !tbaa !211
+  %10 = load i64, ptr %2, align 8, !tbaa !212
   %11 = icmp slt i64 %9, %10
-  br i1 %11, label %12, label %28, !llvm.loop !246
+  br i1 %11, label %12, label %28, !llvm.loop !247
 
 12:                                               ; preds = %5, %8
   %13 = phi i64 [ 0, %5 ], [ %9, %8 ]
-  %14 = load ptr, ptr %6, align 4, !tbaa !213
+  %14 = load ptr, ptr %6, align 4, !tbaa !214
   %15 = trunc i64 %13 to i32
   %16 = getelementptr inbounds ptr, ptr %14, i32 %15
   %17 = load ptr, ptr %16, align 4, !tbaa !6
-  %18 = load i64, ptr %17, align 8, !tbaa !247
+  %18 = load i64, ptr %17, align 8, !tbaa !248
   %19 = icmp eq i64 %18, 1
   br i1 %19, label %20, label %21
 
@@ -11265,8 +11087,8 @@ define internal fastcc noundef i32 @outdated(ptr nocapture noundef readonly %0) 
 
 21:                                               ; preds = %20, %12
   %22 = getelementptr inbounds %struct.FaSource, ptr %17, i32 0, i32 1
-  %23 = load i64, ptr %22, align 8, !tbaa !217
-  %24 = load ptr, ptr %7, align 8, !tbaa !216
+  %23 = load i64, ptr %22, align 8, !tbaa !218
+  %24 = load ptr, ptr %7, align 8, !tbaa !217
   %25 = getelementptr inbounds i64, ptr %24, i32 %15
   %26 = load i64, ptr %25, align 8, !tbaa !89
   %27 = icmp ne i64 %23, %26
@@ -11284,14 +11106,14 @@ define internal fastcc noundef i32 @outdated(ptr nocapture noundef readonly %0) 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(argmem: read)
 define hidden ptr @fa_observer_value(ptr nocapture noundef readonly %0) local_unnamed_addr #13 {
   %2 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 1
-  %3 = load ptr, ptr %2, align 8, !tbaa !230
+  %3 = load ptr, ptr %2, align 8, !tbaa !231
   ret ptr %3
 }
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(argmem: read)
 define hidden ptr @fa_observer_env(ptr nocapture noundef readonly %0) local_unnamed_addr #13 {
   %2 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 2
-  %3 = load ptr, ptr %2, align 4, !tbaa !229
+  %3 = load ptr, ptr %2, align 4, !tbaa !230
   ret ptr %3
 }
 
@@ -11304,14 +11126,14 @@ define hidden nonnull ptr @fa_observer_cleanup(ptr noundef readnone %0) local_un
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(argmem: read)
 define hidden i32 @fa_observer_computed(ptr nocapture noundef readonly %0) local_unnamed_addr #13 {
   %2 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 12
-  %3 = load i32, ptr %2, align 4, !tbaa !232
+  %3 = load i32, ptr %2, align 4, !tbaa !233
   ret i32 %3
 }
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(argmem: write)
 define hidden void @fa_observer_changed(ptr nocapture noundef writeonly %0, i32 noundef %1) local_unnamed_addr #24 {
   %3 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 16
-  store i32 %1, ptr %3, align 4, !tbaa !234
+  store i32 %1, ptr %3, align 4, !tbaa !235
   ret void
 }
 
@@ -11369,13 +11191,13 @@ define hidden void @fa_reactive_release() local_unnamed_addr #3 {
   %30 = getelementptr inbounds ptr, ptr %28, i32 %29
   %31 = load ptr, ptr %30, align 4, !tbaa !6
   %32 = getelementptr inbounds %struct.FaSource, ptr %31, i32 0, i32 4
-  %33 = load i64, ptr %32, align 8, !tbaa !248
+  %33 = load i64, ptr %32, align 8, !tbaa !249
   %34 = icmp sgt i64 %33, 0
   br i1 %34, label %35, label %40
 
 35:                                               ; preds = %25
   %36 = getelementptr inbounds %struct.FaSource, ptr %31, i32 0, i32 2
-  %37 = load ptr, ptr %36, align 8, !tbaa !219
+  %37 = load ptr, ptr %36, align 8, !tbaa !220
   %38 = trunc i64 %33 to i32
   %39 = shl i32 %38, 2
   tail call void @fa_free(ptr noundef %37, i32 noundef %39, i32 noundef 4) #53
@@ -11383,45 +11205,45 @@ define hidden void @fa_reactive_release() local_unnamed_addr #3 {
 
 40:                                               ; preds = %25, %35
   %41 = getelementptr inbounds %struct.FaSource, ptr %31, i32 0, i32 8
-  %42 = load i64, ptr %41, align 8, !tbaa !249
+  %42 = load i64, ptr %41, align 8, !tbaa !250
   %43 = icmp sgt i64 %42, 0
   br i1 %43, label %44, label %49
 
 44:                                               ; preds = %40
   %45 = getelementptr inbounds %struct.FaSource, ptr %31, i32 0, i32 6
-  %46 = load ptr, ptr %45, align 4, !tbaa !200
+  %46 = load ptr, ptr %45, align 4, !tbaa !201
   %47 = trunc i64 %42 to i32
   %48 = mul i32 %47, 24
   tail call void @fa_free(ptr noundef %46, i32 noundef %48, i32 noundef 4) #53
   br label %49
 
 49:                                               ; preds = %40, %44
-  %50 = load i64, ptr %31, align 8, !tbaa !247
+  %50 = load i64, ptr %31, align 8, !tbaa !248
   %51 = icmp eq i64 %50, 0
   br i1 %51, label %78, label %52
 
 52:                                               ; preds = %49
   %53 = getelementptr inbounds %struct.FaObserver, ptr %31, i32 0, i32 5
-  %54 = load ptr, ptr %53, align 8, !tbaa !228
+  %54 = load ptr, ptr %53, align 8, !tbaa !229
   tail call void %54(ptr noundef nonnull %31) #53
   %55 = getelementptr inbounds %struct.FaObserver, ptr %31, i32 0, i32 9
-  %56 = load i64, ptr %55, align 8, !tbaa !215
+  %56 = load i64, ptr %55, align 8, !tbaa !216
   %57 = icmp sgt i64 %56, 0
   br i1 %57, label %58, label %70
 
 58:                                               ; preds = %52
   %59 = getelementptr inbounds %struct.FaObserver, ptr %31, i32 0, i32 6
-  %60 = load ptr, ptr %59, align 4, !tbaa !213
+  %60 = load ptr, ptr %59, align 4, !tbaa !214
   %61 = trunc i64 %56 to i32
   %62 = shl i32 %61, 2
   tail call void @fa_free(ptr noundef %60, i32 noundef %62, i32 noundef 4) #53
-  %63 = load i64, ptr %55, align 8, !tbaa !215
+  %63 = load i64, ptr %55, align 8, !tbaa !216
   %64 = icmp sgt i64 %63, 0
   br i1 %64, label %65, label %70
 
 65:                                               ; preds = %58
   %66 = getelementptr inbounds %struct.FaObserver, ptr %31, i32 0, i32 7
-  %67 = load ptr, ptr %66, align 8, !tbaa !216
+  %67 = load ptr, ptr %66, align 8, !tbaa !217
   %68 = trunc i64 %63 to i32
   %69 = shl i32 %68, 3
   tail call void @fa_free(ptr noundef %67, i32 noundef %69, i32 noundef 4) #53
@@ -11429,13 +11251,13 @@ define hidden void @fa_reactive_release() local_unnamed_addr #3 {
 
 70:                                               ; preds = %52, %58, %65
   %71 = getelementptr inbounds %struct.FaObserver, ptr %31, i32 0, i32 19
-  %72 = load i64, ptr %71, align 8, !tbaa !231
+  %72 = load i64, ptr %71, align 8, !tbaa !232
   %73 = icmp sgt i64 %72, 0
   br i1 %73, label %74, label %78
 
 74:                                               ; preds = %70
   %75 = getelementptr inbounds %struct.FaObserver, ptr %31, i32 0, i32 1
-  %76 = load ptr, ptr %75, align 8, !tbaa !230
+  %76 = load ptr, ptr %75, align 8, !tbaa !231
   %77 = trunc i64 %72 to i32
   tail call void @fa_free(ptr noundef %76, i32 noundef %77, i32 noundef 16) #53
   br label %78
@@ -11444,7 +11266,7 @@ define hidden void @fa_reactive_release() local_unnamed_addr #3 {
   %79 = phi i32 [ 64, %49 ], [ 168, %74 ], [ 168, %70 ]
   tail call void @fa_free(ptr noundef nonnull %31, i32 noundef %79, i32 noundef 8) #53
   %80 = icmp ugt i64 %26, 1
-  br i1 %80, label %25, label %3, !llvm.loop !250
+  br i1 %80, label %25, label %3, !llvm.loop !251
 }
 
 ; Function Attrs: cold noinline noreturn nounwind optsize
@@ -11672,7 +11494,7 @@ define hidden noundef ptr @fa_error_conversion(i64 noundef %0, i64 noundef %1, i
 define internal fastcc noundef ptr @arithmetic_error_from_builder() unnamed_addr #3 {
   %1 = alloca %struct.FaString, align 4
   %2 = tail call ptr @fa_alloc(i32 noundef 24, i32 noundef 8) #53
-  store i64 4, ptr %2, align 8, !tbaa !251
+  store i64 4, ptr %2, align 8, !tbaa !252
   %3 = getelementptr inbounds %struct.MessageError, ptr %2, i32 0, i32 1
   call void @llvm.lifetime.start.p0(i64 12, ptr nonnull %1) #55
   %4 = load ptr, ptr @builder, align 4, !tbaa !6
@@ -11797,7 +11619,7 @@ define hidden noundef ptr @fa_parse_integer(ptr nocapture noundef readonly %0, i
   %29 = select i1 %28, i32 %24, i32 0
   %30 = add nuw i32 %23, 1
   %31 = icmp eq i32 %30, %1
-  br i1 %31, label %14, label %22, !llvm.loop !253
+  br i1 %31, label %14, label %22, !llvm.loop !254
 
 32:                                               ; preds = %9
   store i32 0, ptr @builder_length, align 4, !tbaa !4
@@ -11842,7 +11664,7 @@ define hidden noundef ptr @fa_parse_integer(ptr nocapture noundef readonly %0, i
   store i32 %51, ptr @builder_length, align 4, !tbaa !4
   %52 = add nuw i32 %39, 1
   %53 = icmp eq i32 %52, %1
-  br i1 %53, label %54, label %38, !llvm.loop !254
+  br i1 %53, label %54, label %38, !llvm.loop !255
 
 54:                                               ; preds = %47, %32, %13
   %55 = phi ptr [ @.str.28, %13 ], [ @.str.28, %32 ], [ @.str.29, %47 ]
@@ -11857,7 +11679,7 @@ define hidden noundef ptr @fa_parse_integer(ptr nocapture noundef readonly %0, i
   %61 = sub nsw i64 47, %60
   %62 = udiv i64 %61, 10
   %63 = icmp ugt i64 %70, %62
-  br i1 %63, label %73, label %64, !llvm.loop !255
+  br i1 %63, label %73, label %64, !llvm.loop !256
 
 64:                                               ; preds = %18, %57
   %65 = phi i64 [ %21, %18 ], [ %60, %57 ]
@@ -11868,7 +11690,7 @@ define hidden noundef ptr @fa_parse_integer(ptr nocapture noundef readonly %0, i
   %70 = add i64 %69, %65
   %71 = add nuw i32 %67, 1
   %72 = icmp eq i32 %71, %1
-  br i1 %72, label %73, label %57, !llvm.loop !255
+  br i1 %72, label %73, label %57, !llvm.loop !256
 
 73:                                               ; preds = %57, %64
   %74 = icmp ult i32 %71, %1
@@ -11911,7 +11733,7 @@ define internal fastcc noundef ptr @parse_error(ptr nocapture noundef readonly %
   %3 = alloca %struct.FaString, align 4
   %4 = alloca %struct.FaString, align 4
   %5 = tail call ptr @fa_alloc(i32 noundef 32, i32 noundef 8) #53
-  store i64 5, ptr %5, align 8, !tbaa !256
+  store i64 5, ptr %5, align 8, !tbaa !257
   %6 = getelementptr inbounds %struct.ParseError, ptr %5, i32 0, i32 1
   call void @llvm.lifetime.start.p0(i64 12, ptr nonnull %4) #55
   call fastcc void @owned_copy_with(ptr dead_on_unwind nonnull writable sret(%struct.FaString) align 4 %4, ptr noundef %0, i32 noundef %1, i32 noundef 0) #52
@@ -12014,7 +11836,7 @@ declare double @llvm.trunc.f64(double) #34
 
 ; Function Attrs: alwaysinline mustprogress nofree norecurse nosync nounwind optsize willreturn memory(read, inaccessiblemem: none)
 define hidden ptr @fa_table_entry(ptr nocapture noundef readonly %0, i64 noundef %1, i64 noundef %2) local_unnamed_addr #30 {
-  %4 = load ptr, ptr %0, align 8, !tbaa !258
+  %4 = load ptr, ptr %0, align 8, !tbaa !259
   %5 = load ptr, ptr %4, align 8, !tbaa !69
   %6 = lshr i64 %1, 5
   %7 = trunc i64 %6 to i32
@@ -12049,24 +11871,24 @@ define hidden ptr @fa_table_new(i64 noundef %0, i64 noundef %1) local_unnamed_ad
 11:                                               ; preds = %5, %7
   %12 = tail call ptr @fa_alloc(i32 noundef 80, i32 noundef 8) #53
   %13 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 9
-  store i64 0, ptr %13, align 8, !tbaa !260
+  store i64 0, ptr %13, align 8, !tbaa !261
   %14 = tail call i64 @llvm.smax.i64(i64 %0, i64 4)
   %15 = mul nsw i64 %14, %1
   %16 = trunc i64 %15 to i32
   %17 = tail call ptr @fa_alloc(i32 noundef %16, i32 noundef 16) #53
-  store ptr %17, ptr %12, align 8, !tbaa !258
+  store ptr %17, ptr %12, align 8, !tbaa !259
   %18 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 1
-  store i64 0, ptr %18, align 8, !tbaa !261
+  store i64 0, ptr %18, align 8, !tbaa !262
   %19 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 2
-  store i64 0, ptr %19, align 8, !tbaa !262
+  store i64 0, ptr %19, align 8, !tbaa !263
   %20 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 3
-  store i64 %14, ptr %20, align 8, !tbaa !263
+  store i64 %14, ptr %20, align 8, !tbaa !264
   %21 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 4
-  store ptr null, ptr %21, align 8, !tbaa !264
+  store ptr null, ptr %21, align 8, !tbaa !265
   %22 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 6
-  store i64 0, ptr %22, align 8, !tbaa !265
+  store i64 0, ptr %22, align 8, !tbaa !266
   %23 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 7
-  store i64 0, ptr %23, align 8, !tbaa !266
+  store i64 0, ptr %23, align 8, !tbaa !267
   %24 = icmp sgt i64 %0, 134217727
   br i1 %24, label %27, label %25
 
@@ -12082,7 +11904,7 @@ define hidden ptr @fa_table_new(i64 noundef %0, i64 noundef %1) local_unnamed_ad
   %29 = phi i64 [ %31, %28 ], [ 8, %25 ]
   %30 = icmp ult i64 %29, %26
   %31 = shl nsw i64 %29, 1
-  br i1 %30, label %28, label %32, !llvm.loop !267
+  br i1 %30, label %28, label %32, !llvm.loop !268
 
 32:                                               ; preds = %28
   tail call fastcc void @table_index(ptr noundef nonnull %12, i64 noundef %29, i64 noundef %1) #52
@@ -12092,13 +11914,13 @@ define hidden ptr @fa_table_new(i64 noundef %0, i64 noundef %1) local_unnamed_ad
 ; Function Attrs: nounwind optsize
 define internal fastcc void @table_index(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2) unnamed_addr #3 {
   %4 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  %5 = load ptr, ptr %4, align 8, !tbaa !264
+  %5 = load ptr, ptr %4, align 8, !tbaa !265
   %6 = icmp eq ptr %5, null
   br i1 %6, label %15, label %7
 
 7:                                                ; preds = %3
   %8 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %9 = load i64, ptr %8, align 8, !tbaa !268
+  %9 = load i64, ptr %8, align 8, !tbaa !269
   %10 = trunc i64 %9 to i32
   %11 = add i32 %10, 1
   %12 = icmp ult i64 %9, 2147483648
@@ -12114,22 +11936,22 @@ define internal fastcc void @table_index(ptr nocapture noundef %0, i64 noundef %
   %19 = select i1 %18, i32 2, i32 3
   %20 = shl i32 %16, %19
   %21 = tail call ptr @fa_alloc(i32 noundef %20, i32 noundef 8) #53
-  store ptr %21, ptr %4, align 8, !tbaa !264
+  store ptr %21, ptr %4, align 8, !tbaa !265
   tail call void @llvm.memset.p0.i32(ptr align 1 %21, i8 0, i32 %20, i1 false)
   %22 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  store i64 %17, ptr %22, align 8, !tbaa !268
+  store i64 %17, ptr %22, align 8, !tbaa !269
   %23 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 1
-  %24 = load i64, ptr %23, align 8, !tbaa !261
+  %24 = load i64, ptr %23, align 8, !tbaa !262
   %25 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 8
-  store i64 %24, ptr %25, align 8, !tbaa !269
+  store i64 %24, ptr %25, align 8, !tbaa !270
   %26 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 2
-  %27 = load i64, ptr %26, align 8, !tbaa !262
+  %27 = load i64, ptr %26, align 8, !tbaa !263
   %28 = icmp sgt i64 %27, 0
   br i1 %28, label %29, label %32
 
 29:                                               ; preds = %15
   %30 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 6
-  %31 = load ptr, ptr %0, align 8, !tbaa !258
+  %31 = load ptr, ptr %0, align 8, !tbaa !259
   br label %33
 
 32:                                               ; preds = %81, %15
@@ -12138,7 +11960,7 @@ define internal fastcc void @table_index(ptr nocapture noundef %0, i64 noundef %
 33:                                               ; preds = %29, %81
   %34 = phi i64 [ %27, %29 ], [ %82, %81 ]
   %35 = phi i64 [ 0, %29 ], [ %83, %81 ]
-  %36 = load i64, ptr %30, align 8, !tbaa !265
+  %36 = load i64, ptr %30, align 8, !tbaa !266
   %37 = icmp eq i64 %36, 0
   br i1 %37, label %45, label %38
 
@@ -12164,9 +11986,9 @@ define internal fastcc void @table_index(ptr nocapture noundef %0, i64 noundef %
 
 54:                                               ; preds = %45
   %55 = load i64, ptr %50, align 8, !tbaa !89
-  %56 = load i64, ptr %22, align 8, !tbaa !268
+  %56 = load i64, ptr %22, align 8, !tbaa !269
   %57 = icmp ult i64 %56, 2147483648
-  %58 = load ptr, ptr %4, align 8, !tbaa !264
+  %58 = load ptr, ptr %4, align 8, !tbaa !265
   br label %59
 
 59:                                               ; preds = %71, %54
@@ -12189,7 +12011,7 @@ define internal fastcc void @table_index(ptr nocapture noundef %0, i64 noundef %
 
 71:                                               ; preds = %67, %63
   %72 = add nsw i64 %61, 1
-  br label %59, !llvm.loop !270
+  br label %59, !llvm.loop !271
 
 73:                                               ; preds = %63
   %74 = trunc i64 %35 to i32
@@ -12205,14 +12027,14 @@ define internal fastcc void @table_index(ptr nocapture noundef %0, i64 noundef %
 78:                                               ; preds = %73, %76
   %79 = add nsw i64 %61, 1
   store i64 %79, ptr %51, align 8, !tbaa !89
-  %80 = load i64, ptr %26, align 8, !tbaa !262
+  %80 = load i64, ptr %26, align 8, !tbaa !263
   br label %81
 
 81:                                               ; preds = %78, %45
   %82 = phi i64 [ %80, %78 ], [ %34, %45 ]
   %83 = add nuw nsw i64 %35, 1
   %84 = icmp slt i64 %83, %82
-  br i1 %84, label %33, label %32, !llvm.loop !271
+  br i1 %84, label %33, label %32, !llvm.loop !272
 }
 
 ; Function Attrs: nounwind optsize
@@ -12237,7 +12059,7 @@ define hidden ptr @fa_table_new_growing(i64 noundef %0, i64 noundef %1) local_un
 11:                                               ; preds = %5, %7
   %12 = tail call ptr @fa_alloc(i32 noundef 80, i32 noundef 8) #53
   %13 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 9
-  store i64 0, ptr %13, align 8, !tbaa !260
+  store i64 0, ptr %13, align 8, !tbaa !261
   %14 = tail call i64 @llvm.smax.i64(i64 %0, i64 4)
   %15 = tail call ptr @fa_alloc(i32 noundef 24, i32 noundef 4) #53
   store ptr null, ptr %15, align 8, !tbaa !69
@@ -12245,19 +12067,19 @@ define hidden ptr @fa_table_new_growing(i64 noundef %0, i64 noundef %1) local_un
   store i64 0, ptr %16, align 8, !tbaa !79
   %17 = getelementptr inbounds %struct.FaTableEntries, ptr %15, i32 0, i32 2
   store i64 0, ptr %17, align 8, !tbaa !73
-  store ptr %15, ptr %12, align 8, !tbaa !258
+  store ptr %15, ptr %12, align 8, !tbaa !259
   %18 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 1
-  store i64 0, ptr %18, align 8, !tbaa !261
+  store i64 0, ptr %18, align 8, !tbaa !262
   %19 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 2
-  store i64 0, ptr %19, align 8, !tbaa !262
+  store i64 0, ptr %19, align 8, !tbaa !263
   %20 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 3
-  store i64 %14, ptr %20, align 8, !tbaa !263
+  store i64 %14, ptr %20, align 8, !tbaa !264
   %21 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 4
-  store ptr null, ptr %21, align 8, !tbaa !264
+  store ptr null, ptr %21, align 8, !tbaa !265
   %22 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 6
-  store i64 1, ptr %22, align 8, !tbaa !265
+  store i64 1, ptr %22, align 8, !tbaa !266
   %23 = getelementptr inbounds %struct.FaTable, ptr %12, i32 0, i32 7
-  store i64 0, ptr %23, align 8, !tbaa !266
+  store i64 0, ptr %23, align 8, !tbaa !267
   %24 = icmp sgt i64 %0, 134217727
   br i1 %24, label %27, label %25
 
@@ -12273,7 +12095,7 @@ define hidden ptr @fa_table_new_growing(i64 noundef %0, i64 noundef %1) local_un
   %29 = phi i64 [ %31, %28 ], [ 8, %25 ]
   %30 = icmp ult i64 %29, %26
   %31 = shl nsw i64 %29, 1
-  br i1 %30, label %28, label %32, !llvm.loop !267
+  br i1 %30, label %28, label %32, !llvm.loop !268
 
 32:                                               ; preds = %28
   tail call fastcc void @table_index(ptr noundef nonnull %12, i64 noundef %29, i64 noundef %1) #52
@@ -12284,7 +12106,7 @@ define hidden ptr @fa_table_new_growing(i64 noundef %0, i64 noundef %1) local_un
 define hidden ptr @fa_table_new_map(i64 noundef %0, i64 noundef %1) local_unnamed_addr #3 {
   %3 = tail call ptr @fa_table_new_growing(i64 noundef %0, i64 noundef %1) #52
   %4 = getelementptr inbounds %struct.FaTable, ptr %3, i32 0, i32 6
-  store i64 2, ptr %4, align 8, !tbaa !265
+  store i64 2, ptr %4, align 8, !tbaa !266
   ret ptr %3
 }
 
@@ -12293,12 +12115,12 @@ define hidden noundef ptr @fa_table_local(ptr noundef returned %0, i64 noundef %
   tail call void @llvm.memset.p0.i32(ptr noundef nonnull align 8 dereferenceable(80) %0, i8 0, i32 72, i1 false)
   %5 = tail call i64 @llvm.smax.i64(i64 %1, i64 4)
   %6 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 3
-  store i64 %5, ptr %6, align 8, !tbaa !263
+  store i64 %5, ptr %6, align 8, !tbaa !264
   %7 = sext i32 %3 to i64
   %8 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 6
-  store i64 %7, ptr %8, align 8, !tbaa !265
+  store i64 %7, ptr %8, align 8, !tbaa !266
   %9 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 9
-  store i64 3, ptr %9, align 8, !tbaa !260
+  store i64 3, ptr %9, align 8, !tbaa !261
   %10 = getelementptr inbounds i8, ptr %0, i32 80
   %11 = icmp eq i32 %3, 0
   br i1 %11, label %37, label %12
@@ -12324,7 +12146,7 @@ define hidden noundef ptr @fa_table_local(ptr noundef returned %0, i64 noundef %
   br label %28
 
 27:                                               ; preds = %28
-  store ptr %10, ptr %0, align 8, !tbaa !258
+  store ptr %10, ptr %0, align 8, !tbaa !259
   br label %45
 
 28:                                               ; preds = %12, %28
@@ -12337,14 +12159,14 @@ define hidden noundef ptr @fa_table_local(ptr noundef returned %0, i64 noundef %
   %34 = getelementptr inbounds i8, ptr %30, i32 %26
   %35 = add nuw nsw i64 %29, 1
   %36 = icmp eq i64 %35, %15
-  br i1 %36, label %27, label %28, !llvm.loop !272
+  br i1 %36, label %27, label %28, !llvm.loop !273
 
 37:                                               ; preds = %4
   %38 = ptrtoint ptr %10 to i32
   %39 = add i32 %38, 15
   %40 = and i32 %39, -16
   %41 = inttoptr i32 %40 to ptr
-  store ptr %41, ptr %0, align 8, !tbaa !258
+  store ptr %41, ptr %0, align 8, !tbaa !259
   %42 = mul nsw i64 %5, %2
   %43 = trunc i64 %42 to i32
   %44 = getelementptr inbounds i8, ptr %41, i32 %43
@@ -12357,7 +12179,7 @@ define hidden noundef ptr @fa_table_local(ptr noundef returned %0, i64 noundef %
   %49 = and i32 %48, -8
   %50 = inttoptr i32 %49 to ptr
   %51 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  store ptr %50, ptr %51, align 8, !tbaa !264
+  store ptr %50, ptr %51, align 8, !tbaa !265
   %52 = icmp sgt i64 %1, 134217727
   br i1 %52, label %55, label %53
 
@@ -12373,12 +12195,12 @@ define hidden noundef ptr @fa_table_local(ptr noundef returned %0, i64 noundef %
   %57 = phi i64 [ %59, %56 ], [ 8, %53 ]
   %58 = icmp ult i64 %57, %54
   %59 = shl nsw i64 %57, 1
-  br i1 %58, label %56, label %60, !llvm.loop !267
+  br i1 %58, label %56, label %60, !llvm.loop !268
 
 60:                                               ; preds = %56
   %61 = add nsw i64 %57, -1
   %62 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  store i64 %61, ptr %62, align 8, !tbaa !268
+  store i64 %61, ptr %62, align 8, !tbaa !269
   %63 = trunc i64 %57 to i32
   %64 = icmp ult i64 %57, 2147483649
   %65 = select i1 %64, i32 2, i32 3
@@ -12390,11 +12212,11 @@ define hidden noundef ptr @fa_table_local(ptr noundef returned %0, i64 noundef %
 ; Function Attrs: alwaysinline nounwind optsize
 define hidden i64 @fa_table_find(ptr nocapture noundef readonly %0, i64 noundef %1, ptr noundef %2, ptr noundef readonly %3, i64 noundef %4) local_unnamed_addr #14 {
   %6 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %7 = load i64, ptr %6, align 8, !tbaa !268
+  %7 = load i64, ptr %6, align 8, !tbaa !269
   %8 = icmp ult i64 %7, 2147483648
   %9 = and i64 %7, %1
   %10 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  %11 = load ptr, ptr %10, align 8, !tbaa !264
+  %11 = load ptr, ptr %10, align 8, !tbaa !265
   %12 = trunc i64 %9 to i32
   br i1 %8, label %13, label %50
 
@@ -12419,7 +12241,7 @@ define hidden i64 @fa_table_find(ptr nocapture noundef readonly %0, i64 noundef 
 
 26:                                               ; preds = %20
   %27 = add nsw i32 %23, -1
-  %28 = load ptr, ptr %0, align 8, !tbaa !258
+  %28 = load ptr, ptr %0, align 8, !tbaa !259
   %29 = mul i32 %27, %18
   %30 = getelementptr inbounds i8, ptr %28, i32 %29
   %31 = load i64, ptr %30, align 8, !tbaa !89
@@ -12436,8 +12258,8 @@ define hidden i64 @fa_table_find(ptr nocapture noundef readonly %0, i64 noundef 
   br i1 %37, label %38, label %87
 
 38:                                               ; preds = %34
-  %39 = load i64, ptr %6, align 8, !tbaa !268
-  %40 = load ptr, ptr %10, align 8, !tbaa !264
+  %39 = load i64, ptr %6, align 8, !tbaa !269
+  %40 = load ptr, ptr %10, align 8, !tbaa !265
   br label %41
 
 41:                                               ; preds = %38, %26, %20
@@ -12471,7 +12293,7 @@ define hidden i64 @fa_table_find(ptr nocapture noundef readonly %0, i64 noundef 
 
 62:                                               ; preds = %56
   %63 = add nsw i64 %59, -1
-  %64 = load ptr, ptr %0, align 8, !tbaa !258
+  %64 = load ptr, ptr %0, align 8, !tbaa !259
   %65 = mul nsw i64 %63, %4
   %66 = trunc i64 %65 to i32
   %67 = getelementptr inbounds i8, ptr %64, i32 %66
@@ -12489,8 +12311,8 @@ define hidden i64 @fa_table_find(ptr nocapture noundef readonly %0, i64 noundef 
   br i1 %74, label %75, label %91
 
 75:                                               ; preds = %71
-  %76 = load i64, ptr %6, align 8, !tbaa !268
-  %77 = load ptr, ptr %10, align 8, !tbaa !264
+  %76 = load i64, ptr %6, align 8, !tbaa !269
+  %77 = load ptr, ptr %10, align 8, !tbaa !265
   br label %78
 
 78:                                               ; preds = %75, %62, %56
@@ -12520,11 +12342,11 @@ define hidden i64 @fa_table_find(ptr nocapture noundef readonly %0, i64 noundef 
 ; Function Attrs: alwaysinline nounwind optsize
 define hidden i64 @fa_table_find_growing(ptr nocapture noundef readonly %0, i64 noundef %1, ptr noundef %2, ptr noundef readonly %3, i64 noundef %4) local_unnamed_addr #14 {
   %6 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %7 = load i64, ptr %6, align 8, !tbaa !268
+  %7 = load i64, ptr %6, align 8, !tbaa !269
   %8 = icmp ult i64 %7, 2147483648
   %9 = and i64 %7, %1
   %10 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  %11 = load ptr, ptr %10, align 8, !tbaa !264
+  %11 = load ptr, ptr %10, align 8, !tbaa !265
   %12 = trunc i64 %9 to i32
   br i1 %8, label %13, label %56
 
@@ -12549,7 +12371,7 @@ define hidden i64 @fa_table_find_growing(ptr nocapture noundef readonly %0, i64 
 25:                                               ; preds = %19
   %26 = add nsw i32 %22, -1
   %27 = zext nneg i32 %26 to i64
-  %28 = load ptr, ptr %0, align 8, !tbaa !258
+  %28 = load ptr, ptr %0, align 8, !tbaa !259
   %29 = load ptr, ptr %28, align 8, !tbaa !69
   %30 = lshr i32 %26, 5
   %31 = getelementptr inbounds ptr, ptr %29, i32 %30
@@ -12572,8 +12394,8 @@ define hidden i64 @fa_table_find_growing(ptr nocapture noundef readonly %0, i64 
   br i1 %43, label %44, label %99
 
 44:                                               ; preds = %40
-  %45 = load i64, ptr %6, align 8, !tbaa !268
-  %46 = load ptr, ptr %10, align 8, !tbaa !264
+  %45 = load i64, ptr %6, align 8, !tbaa !269
+  %46 = load ptr, ptr %10, align 8, !tbaa !265
   br label %47
 
 47:                                               ; preds = %44, %25, %19
@@ -12607,7 +12429,7 @@ define hidden i64 @fa_table_find_growing(ptr nocapture noundef readonly %0, i64 
 
 68:                                               ; preds = %62
   %69 = add nsw i64 %65, -1
-  %70 = load ptr, ptr %0, align 8, !tbaa !258
+  %70 = load ptr, ptr %0, align 8, !tbaa !259
   %71 = load ptr, ptr %70, align 8, !tbaa !69
   %72 = lshr i64 %69, 5
   %73 = trunc i64 %72 to i32
@@ -12631,8 +12453,8 @@ define hidden i64 @fa_table_find_growing(ptr nocapture noundef readonly %0, i64 
   br i1 %86, label %87, label %99
 
 87:                                               ; preds = %83
-  %88 = load i64, ptr %6, align 8, !tbaa !268
-  %89 = load ptr, ptr %10, align 8, !tbaa !264
+  %88 = load i64, ptr %6, align 8, !tbaa !269
+  %89 = load ptr, ptr %10, align 8, !tbaa !265
   br label %90
 
 90:                                               ; preds = %87, %68, %62
@@ -12654,11 +12476,11 @@ define hidden i64 @fa_table_find_growing(ptr nocapture noundef readonly %0, i64 
 ; Function Attrs: alwaysinline nounwind optsize
 define hidden i64 @fa_table_probe(ptr nocapture noundef readonly %0, i64 noundef %1, ptr noundef %2, ptr noundef readonly %3, i64 noundef %4) local_unnamed_addr #14 {
   %6 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %7 = load i64, ptr %6, align 8, !tbaa !268
+  %7 = load i64, ptr %6, align 8, !tbaa !269
   %8 = icmp ult i64 %7, 2147483648
   %9 = and i64 %7, %1
   %10 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  %11 = load ptr, ptr %10, align 8, !tbaa !264
+  %11 = load ptr, ptr %10, align 8, !tbaa !265
   %12 = trunc i64 %9 to i32
   br i1 %8, label %13, label %62
 
@@ -12694,7 +12516,7 @@ define hidden i64 @fa_table_probe(ptr nocapture noundef readonly %0, i64 noundef
 
 33:                                               ; preds = %26
   %34 = add nsw i32 %29, -1
-  %35 = load ptr, ptr %0, align 8, !tbaa !258
+  %35 = load ptr, ptr %0, align 8, !tbaa !259
   %36 = mul i32 %34, %18
   %37 = getelementptr inbounds i8, ptr %35, i32 %36
   %38 = load i64, ptr %37, align 8, !tbaa !89
@@ -12711,8 +12533,8 @@ define hidden i64 @fa_table_probe(ptr nocapture noundef readonly %0, i64 noundef
   br i1 %44, label %45, label %111
 
 45:                                               ; preds = %41
-  %46 = load i64, ptr %6, align 8, !tbaa !268
-  %47 = load ptr, ptr %10, align 8, !tbaa !264
+  %46 = load i64, ptr %6, align 8, !tbaa !269
+  %47 = load ptr, ptr %10, align 8, !tbaa !265
   br label %51
 
 48:                                               ; preds = %26
@@ -12764,7 +12586,7 @@ define hidden i64 @fa_table_probe(ptr nocapture noundef readonly %0, i64 noundef
 
 81:                                               ; preds = %74
   %82 = add nsw i64 %77, -1
-  %83 = load ptr, ptr %0, align 8, !tbaa !258
+  %83 = load ptr, ptr %0, align 8, !tbaa !259
   %84 = mul nsw i64 %82, %4
   %85 = trunc i64 %84 to i32
   %86 = getelementptr inbounds i8, ptr %83, i32 %85
@@ -12782,8 +12604,8 @@ define hidden i64 @fa_table_probe(ptr nocapture noundef readonly %0, i64 noundef
   br i1 %93, label %94, label %113
 
 94:                                               ; preds = %90
-  %95 = load i64, ptr %6, align 8, !tbaa !268
-  %96 = load ptr, ptr %10, align 8, !tbaa !264
+  %95 = load i64, ptr %6, align 8, !tbaa !269
+  %96 = load ptr, ptr %10, align 8, !tbaa !265
   br label %100
 
 97:                                               ; preds = %74
@@ -12816,11 +12638,11 @@ define hidden i64 @fa_table_probe(ptr nocapture noundef readonly %0, i64 noundef
 ; Function Attrs: alwaysinline nounwind optsize
 define hidden i64 @fa_table_probe_growing(ptr nocapture noundef readonly %0, i64 noundef %1, ptr noundef %2, ptr noundef readonly %3, i64 noundef %4) local_unnamed_addr #14 {
   %6 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %7 = load i64, ptr %6, align 8, !tbaa !268
+  %7 = load i64, ptr %6, align 8, !tbaa !269
   %8 = icmp ult i64 %7, 2147483648
   %9 = and i64 %7, %1
   %10 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  %11 = load ptr, ptr %10, align 8, !tbaa !264
+  %11 = load ptr, ptr %10, align 8, !tbaa !265
   %12 = trunc i64 %9 to i32
   br i1 %8, label %13, label %68
 
@@ -12856,7 +12678,7 @@ define hidden i64 @fa_table_probe_growing(ptr nocapture noundef readonly %0, i64
 32:                                               ; preds = %25
   %33 = add nsw i32 %28, -1
   %34 = zext nneg i32 %33 to i64
-  %35 = load ptr, ptr %0, align 8, !tbaa !258
+  %35 = load ptr, ptr %0, align 8, !tbaa !259
   %36 = load ptr, ptr %35, align 8, !tbaa !69
   %37 = lshr i32 %33, 5
   %38 = getelementptr inbounds ptr, ptr %36, i32 %37
@@ -12879,8 +12701,8 @@ define hidden i64 @fa_table_probe_growing(ptr nocapture noundef readonly %0, i64
   br i1 %50, label %51, label %123
 
 51:                                               ; preds = %47
-  %52 = load i64, ptr %6, align 8, !tbaa !268
-  %53 = load ptr, ptr %10, align 8, !tbaa !264
+  %52 = load i64, ptr %6, align 8, !tbaa !269
+  %53 = load ptr, ptr %10, align 8, !tbaa !265
   br label %57
 
 54:                                               ; preds = %25
@@ -12932,7 +12754,7 @@ define hidden i64 @fa_table_probe_growing(ptr nocapture noundef readonly %0, i64
 
 87:                                               ; preds = %80
   %88 = add nsw i64 %83, -1
-  %89 = load ptr, ptr %0, align 8, !tbaa !258
+  %89 = load ptr, ptr %0, align 8, !tbaa !259
   %90 = load ptr, ptr %89, align 8, !tbaa !69
   %91 = lshr i64 %88, 5
   %92 = trunc i64 %91 to i32
@@ -12956,8 +12778,8 @@ define hidden i64 @fa_table_probe_growing(ptr nocapture noundef readonly %0, i64
   br i1 %105, label %106, label %123
 
 106:                                              ; preds = %102
-  %107 = load i64, ptr %6, align 8, !tbaa !268
-  %108 = load ptr, ptr %10, align 8, !tbaa !264
+  %107 = load i64, ptr %6, align 8, !tbaa !269
+  %108 = load ptr, ptr %10, align 8, !tbaa !265
   br label %112
 
 109:                                              ; preds = %80
@@ -12986,20 +12808,20 @@ define hidden i64 @fa_table_probe_growing(ptr nocapture noundef readonly %0, i64
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(read, inaccessiblemem: none)
 define hidden i64 @fa_table_capacity(ptr nocapture noundef readonly %0) local_unnamed_addr #37 {
   %2 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 3
-  %3 = load i64, ptr %2, align 8, !tbaa !263
+  %3 = load i64, ptr %2, align 8, !tbaa !264
   %4 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 6
-  %5 = load i64, ptr %4, align 8, !tbaa !265
+  %5 = load i64, ptr %4, align 8, !tbaa !266
   %6 = icmp eq i64 %5, 0
   %7 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 1
   %8 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 2
   %9 = select i1 %6, ptr %8, ptr %7
   %10 = load i64, ptr %9, align 8, !tbaa !89
   %11 = sub nsw i64 %3, %10
-  %12 = load i64, ptr %7, align 8, !tbaa !261
+  %12 = load i64, ptr %7, align 8, !tbaa !262
   br i1 %6, label %20, label %13
 
 13:                                               ; preds = %1
-  %14 = load ptr, ptr %0, align 8, !tbaa !258
+  %14 = load ptr, ptr %0, align 8, !tbaa !259
   %15 = getelementptr inbounds %struct.FaTableEntries, ptr %14, i32 0, i32 1
   %16 = load i64, ptr %15, align 8, !tbaa !79
   %17 = shl nsw i64 %16, 5
@@ -13010,12 +12832,12 @@ define hidden i64 @fa_table_capacity(ptr nocapture noundef readonly %0) local_un
 20:                                               ; preds = %13, %1
   %21 = phi i64 [ %19, %13 ], [ %11, %1 ]
   %22 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %23 = load i64, ptr %22, align 8, !tbaa !268
+  %23 = load i64, ptr %22, align 8, !tbaa !269
   %24 = add nsw i64 %23, 1
   %25 = sdiv i64 %24, 4
   %26 = mul nsw i64 %25, 3
   %27 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 8
-  %28 = load i64, ptr %27, align 8, !tbaa !269
+  %28 = load i64, ptr %27, align 8, !tbaa !270
   %29 = sub nsw i64 %26, %28
   %30 = tail call i64 @llvm.smin.i64(i64 %21, i64 %29)
   %31 = add nsw i64 %30, %12
@@ -13025,7 +12847,7 @@ define hidden i64 @fa_table_capacity(ptr nocapture noundef readonly %0) local_un
 ; Function Attrs: nounwind optsize
 define hidden void @fa_table_reserve_additional(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2) local_unnamed_addr #3 {
   %4 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 6
-  %5 = load i64, ptr %4, align 8, !tbaa !265
+  %5 = load i64, ptr %4, align 8, !tbaa !266
   %6 = icmp eq i64 %5, 0
   %7 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 1
   %8 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 2
@@ -13033,19 +12855,19 @@ define hidden void @fa_table_reserve_additional(ptr nocapture noundef %0, i64 no
   %10 = load i64, ptr %9, align 8, !tbaa !89
   %11 = tail call fastcc i64 @storage_total(i64 noundef %10, i64 noundef %1, i64 noundef %2) #52
   %12 = tail call i64 @fa_table_capacity(ptr noundef %0) #52
-  %13 = load i64, ptr %7, align 8, !tbaa !261
+  %13 = load i64, ptr %7, align 8, !tbaa !262
   %14 = sub nsw i64 %12, %13
   %15 = icmp slt i64 %14, %1
   br i1 %15, label %16, label %82
 
 16:                                               ; preds = %3
-  %17 = load i64, ptr %4, align 8, !tbaa !265
+  %17 = load i64, ptr %4, align 8, !tbaa !266
   %18 = icmp eq i64 %17, 0
   br i1 %18, label %34, label %19
 
 19:                                               ; preds = %16
-  %20 = load ptr, ptr %0, align 8, !tbaa !258
-  %21 = load i64, ptr %8, align 8, !tbaa !262
+  %20 = load ptr, ptr %0, align 8, !tbaa !259
+  %21 = load i64, ptr %8, align 8, !tbaa !263
   %22 = tail call i64 @llvm.smax.i64(i64 %11, i64 %21)
   %23 = getelementptr inbounds %struct.FaTableEntries, ptr %20, i32 0, i32 1
   %24 = add nsw i64 %22, 31
@@ -13060,11 +12882,11 @@ define hidden void @fa_table_reserve_additional(ptr nocapture noundef %0, i64 no
   %31 = tail call fastcc ptr @table_stable_slot(ptr noundef nonnull %0, i64 noundef %30, i64 noundef %2) #52
   %32 = load i64, ptr %23, align 8, !tbaa !79
   %33 = icmp slt i64 %32, %25
-  br i1 %33, label %28, label %51, !llvm.loop !273
+  br i1 %33, label %28, label %51, !llvm.loop !274
 
 34:                                               ; preds = %16
   %35 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 3
-  %36 = load i64, ptr %35, align 8, !tbaa !263
+  %36 = load i64, ptr %35, align 8, !tbaa !264
   %37 = icmp sgt i64 %11, %36
   br i1 %37, label %38, label %51
 
@@ -13073,27 +12895,27 @@ define hidden void @fa_table_reserve_additional(ptr nocapture noundef %0, i64 no
   %40 = trunc i64 %2 to i32
   %41 = mul i32 %39, %40
   %42 = tail call ptr @fa_alloc(i32 noundef %41, i32 noundef 16) #53
-  %43 = load ptr, ptr %0, align 8, !tbaa !258
-  %44 = load i64, ptr %8, align 8, !tbaa !262
+  %43 = load ptr, ptr %0, align 8, !tbaa !259
+  %44 = load i64, ptr %8, align 8, !tbaa !263
   %45 = trunc i64 %44 to i32
   %46 = mul i32 %45, %40
   tail call fastcc void @copy_bytes(ptr noundef %42, ptr noundef %43, i32 noundef %46) #52
-  %47 = load ptr, ptr %0, align 8, !tbaa !258
-  %48 = load i64, ptr %35, align 8, !tbaa !263
+  %47 = load ptr, ptr %0, align 8, !tbaa !259
+  %48 = load i64, ptr %35, align 8, !tbaa !264
   %49 = trunc i64 %48 to i32
   %50 = mul i32 %49, %40
   tail call void @fa_free(ptr noundef %47, i32 noundef %50, i32 noundef 16) #53
-  store ptr %42, ptr %0, align 8, !tbaa !258
+  store ptr %42, ptr %0, align 8, !tbaa !259
   br label %51
 
 51:                                               ; preds = %28, %19, %34, %38
   %52 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 3
-  %53 = load i64, ptr %52, align 8, !tbaa !263
+  %53 = load i64, ptr %52, align 8, !tbaa !264
   %54 = icmp sgt i64 %11, %53
   br i1 %54, label %55, label %56
 
 55:                                               ; preds = %51
-  store i64 %11, ptr %52, align 8, !tbaa !263
+  store i64 %11, ptr %52, align 8, !tbaa !264
   br label %56
 
 56:                                               ; preds = %55, %51
@@ -13121,11 +12943,11 @@ define hidden void @fa_table_reserve_additional(ptr nocapture noundef %0, i64 no
   %66 = phi i64 [ %68, %65 ], [ 8, %62 ]
   %67 = icmp ult i64 %66, %63
   %68 = shl nsw i64 %66, 1
-  br i1 %67, label %65, label %69, !llvm.loop !267
+  br i1 %67, label %65, label %69, !llvm.loop !268
 
 69:                                               ; preds = %65
   %70 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %71 = load i64, ptr %70, align 8, !tbaa !268
+  %71 = load i64, ptr %70, align 8, !tbaa !269
   %72 = add nsw i64 %71, 1
   %73 = icmp sgt i64 %66, %72
   br i1 %73, label %81, label %74
@@ -13134,7 +12956,7 @@ define hidden void @fa_table_reserve_additional(ptr nocapture noundef %0, i64 no
   %75 = lshr i64 %72, 2
   %76 = mul nuw nsw i64 %75, 3
   %77 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 8
-  %78 = load i64, ptr %77, align 8, !tbaa !269
+  %78 = load i64, ptr %77, align 8, !tbaa !270
   %79 = sub nsw i64 %76, %78
   %80 = icmp slt i64 %79, %1
   br i1 %80, label %81, label %82
@@ -13149,7 +12971,7 @@ define hidden void @fa_table_reserve_additional(ptr nocapture noundef %0, i64 no
 
 ; Function Attrs: nounwind optsize
 define internal fastcc ptr @table_stable_slot(ptr nocapture noundef readonly %0, i64 noundef %1, i64 noundef %2) unnamed_addr #3 {
-  %4 = load ptr, ptr %0, align 8, !tbaa !258
+  %4 = load ptr, ptr %0, align 8, !tbaa !259
   %5 = ashr i64 %1, 5
   %6 = getelementptr inbounds %struct.FaTableEntries, ptr %4, i32 0, i32 1
   %7 = load i64, ptr %6, align 8, !tbaa !79
@@ -13222,23 +13044,23 @@ define internal fastcc ptr @table_stable_slot(ptr nocapture noundef readonly %0,
 ; Function Attrs: nounwind optsize
 define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3) local_unnamed_addr #3 {
   %5 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 2
-  %6 = load i64, ptr %5, align 8, !tbaa !262
+  %6 = load i64, ptr %5, align 8, !tbaa !263
   %7 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 3
-  %8 = load i64, ptr %7, align 8, !tbaa !263
+  %8 = load i64, ptr %7, align 8, !tbaa !264
   %9 = icmp slt i64 %6, %8
   br i1 %9, label %14, label %10
 
 10:                                               ; preds = %4
   %11 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 7
-  %12 = load i64, ptr %11, align 8, !tbaa !266
+  %12 = load i64, ptr %11, align 8, !tbaa !267
   %13 = icmp eq i64 %12, 0
   br i1 %13, label %24, label %14
 
 14:                                               ; preds = %10, %4
   %15 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 8
-  %16 = load i64, ptr %15, align 8, !tbaa !269
+  %16 = load i64, ptr %15, align 8, !tbaa !270
   %17 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %18 = load i64, ptr %17, align 8, !tbaa !268
+  %18 = load i64, ptr %17, align 8, !tbaa !269
   %19 = add nsw i64 %18, 1
   %20 = sdiv i64 %19, 4
   %21 = mul nsw i64 %20, 3
@@ -13251,13 +13073,13 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
 
 24:                                               ; preds = %10
   %25 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 6
-  %26 = load i64, ptr %25, align 8, !tbaa !265
+  %26 = load i64, ptr %25, align 8, !tbaa !266
   %27 = icmp eq i64 %26, 0
   br i1 %27, label %39, label %28
 
 28:                                               ; preds = %24
   %29 = shl nsw i64 %8, 1
-  store i64 %29, ptr %7, align 8, !tbaa !263
+  store i64 %29, ptr %7, align 8, !tbaa !264
   %30 = icmp ugt i64 %29, 134217727
   br i1 %30, label %33, label %31
 
@@ -13273,7 +13095,7 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
   %35 = phi i64 [ %37, %34 ], [ 8, %31 ]
   %36 = icmp ult i64 %35, %32
   %37 = shl nsw i64 %35, 1
-  br i1 %36, label %34, label %38, !llvm.loop !267
+  br i1 %36, label %34, label %38, !llvm.loop !268
 
 38:                                               ; preds = %34
   tail call fastcc void @table_index(ptr noundef %0, i64 noundef %35, i64 noundef %2) #52
@@ -13281,7 +13103,7 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
 
 39:                                               ; preds = %24
   %40 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 1
-  %41 = load i64, ptr %40, align 8, !tbaa !261
+  %41 = load i64, ptr %40, align 8, !tbaa !262
   %42 = shl nsw i64 %41, 1
   %43 = icmp sgt i64 %42, %6
   %44 = zext i1 %43 to i64
@@ -13289,7 +13111,7 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
   %46 = mul nsw i64 %45, %2
   %47 = trunc i64 %46 to i32
   %48 = tail call ptr @fa_alloc(i32 noundef %47, i32 noundef 16) #53
-  %49 = load i64, ptr %5, align 8, !tbaa !262
+  %49 = load i64, ptr %5, align 8, !tbaa !263
   %50 = icmp sgt i64 %49, 0
   br i1 %50, label %51, label %53
 
@@ -13299,16 +13121,16 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
 
 53:                                               ; preds = %80, %39
   %54 = phi i64 [ 0, %39 ], [ %82, %80 ]
-  %55 = load ptr, ptr %0, align 8, !tbaa !258
-  %56 = load i64, ptr %7, align 8, !tbaa !263
+  %55 = load ptr, ptr %0, align 8, !tbaa !259
+  %56 = load i64, ptr %7, align 8, !tbaa !264
   %57 = mul nsw i64 %56, %2
   %58 = trunc i64 %57 to i32
   tail call void @fa_free(ptr noundef %55, i32 noundef %58, i32 noundef 16) #53
-  store ptr %48, ptr %0, align 8, !tbaa !258
-  store i64 %54, ptr %5, align 8, !tbaa !262
-  store i64 %45, ptr %7, align 8, !tbaa !263
+  store ptr %48, ptr %0, align 8, !tbaa !259
+  store i64 %54, ptr %5, align 8, !tbaa !263
+  store i64 %45, ptr %7, align 8, !tbaa !264
   %59 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %60 = load i64, ptr %59, align 8, !tbaa !268
+  %60 = load i64, ptr %59, align 8, !tbaa !269
   %61 = add nsw i64 %60, 1
   %62 = shl nsw i64 %45, 1
   br label %85
@@ -13317,7 +13139,7 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
   %64 = phi i64 [ %49, %51 ], [ %81, %80 ]
   %65 = phi i64 [ 0, %51 ], [ %83, %80 ]
   %66 = phi i64 [ 0, %51 ], [ %82, %80 ]
-  %67 = load ptr, ptr %0, align 8, !tbaa !258
+  %67 = load ptr, ptr %0, align 8, !tbaa !259
   %68 = mul nsw i64 %65, %2
   %69 = trunc i64 %68 to i32
   %70 = getelementptr inbounds i8, ptr %67, i32 %69
@@ -13332,7 +13154,7 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
   %77 = getelementptr inbounds i8, ptr %48, i32 %76
   tail call fastcc void @copy_bytes(ptr noundef %77, ptr noundef nonnull %70, i32 noundef %52) #52
   %78 = add nsw i64 %66, 1
-  %79 = load i64, ptr %5, align 8, !tbaa !262
+  %79 = load i64, ptr %5, align 8, !tbaa !263
   br label %80
 
 80:                                               ; preds = %74, %63
@@ -13340,13 +13162,13 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
   %82 = phi i64 [ %78, %74 ], [ %66, %63 ]
   %83 = add nuw nsw i64 %65, 1
   %84 = icmp slt i64 %83, %81
-  br i1 %84, label %63, label %53, !llvm.loop !274
+  br i1 %84, label %63, label %53, !llvm.loop !275
 
 85:                                               ; preds = %85, %53
   %86 = phi i64 [ %61, %53 ], [ %88, %85 ]
   %87 = icmp slt i64 %86, %62
   %88 = shl nsw i64 %86, 1
-  br i1 %87, label %85, label %89, !llvm.loop !275
+  br i1 %87, label %85, label %89, !llvm.loop !276
 
 89:                                               ; preds = %85
   tail call fastcc void @table_index(ptr noundef nonnull %0, i64 noundef %86, i64 noundef %2) #52
@@ -13362,11 +13184,11 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
 
 94:                                               ; preds = %89, %38, %23, %90
   %95 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %96 = load i64, ptr %95, align 8, !tbaa !268
+  %96 = load i64, ptr %95, align 8, !tbaa !269
   %97 = and i64 %96, %1
   %98 = icmp ult i64 %96, 2147483648
   %99 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  %100 = load ptr, ptr %99, align 8, !tbaa !264
+  %100 = load ptr, ptr %99, align 8, !tbaa !265
   br label %101
 
 101:                                              ; preds = %114, %94
@@ -13393,23 +13215,23 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
 114:                                              ; preds = %111
   %115 = add nsw i64 %102, 1
   %116 = and i64 %115, %96
-  br label %101, !llvm.loop !276
+  br label %101, !llvm.loop !277
 
 117:                                              ; preds = %111
-  %118 = load i64, ptr %5, align 8, !tbaa !262
+  %118 = load i64, ptr %5, align 8, !tbaa !263
   br label %119
 
 119:                                              ; preds = %117, %92
   %120 = phi i64 [ %6, %92 ], [ %118, %117 ]
   %121 = phi i64 [ %93, %92 ], [ %102, %117 ]
   %122 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 7
-  %123 = load i64, ptr %122, align 8, !tbaa !266
+  %123 = load i64, ptr %122, align 8, !tbaa !267
   %124 = icmp eq i64 %123, 0
   br i1 %124, label %138, label %125
 
 125:                                              ; preds = %119
   %126 = add nsw i64 %123, -1
-  %127 = load ptr, ptr %0, align 8, !tbaa !258
+  %127 = load ptr, ptr %0, align 8, !tbaa !259
   %128 = load ptr, ptr %127, align 8, !tbaa !69
   %129 = lshr i64 %126, 5
   %130 = trunc i64 %129 to i32
@@ -13420,29 +13242,29 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
   %135 = trunc i64 %134 to i32
   %136 = getelementptr inbounds i8, ptr %132, i32 %135
   %137 = load i64, ptr %136, align 8, !tbaa !89
-  store i64 %137, ptr %122, align 8, !tbaa !266
+  store i64 %137, ptr %122, align 8, !tbaa !267
   br label %152
 
 138:                                              ; preds = %119
   %139 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 6
-  %140 = load i64, ptr %139, align 8, !tbaa !265
+  %140 = load i64, ptr %139, align 8, !tbaa !266
   %141 = icmp eq i64 %140, 0
   br i1 %141, label %146, label %142
 
 142:                                              ; preds = %138
   %143 = tail call fastcc ptr @table_stable_slot(ptr noundef nonnull %0, i64 noundef %120, i64 noundef %2) #52
-  %144 = load i64, ptr %5, align 8, !tbaa !262
+  %144 = load i64, ptr %5, align 8, !tbaa !263
   %145 = add nsw i64 %144, 1
-  store i64 %145, ptr %5, align 8, !tbaa !262
+  store i64 %145, ptr %5, align 8, !tbaa !263
   br label %152
 
 146:                                              ; preds = %138
-  %147 = load ptr, ptr %0, align 8, !tbaa !258
+  %147 = load ptr, ptr %0, align 8, !tbaa !259
   %148 = mul nsw i64 %120, %2
   %149 = trunc i64 %148 to i32
   %150 = getelementptr inbounds i8, ptr %147, i32 %149
   %151 = add nsw i64 %120, 1
-  store i64 %151, ptr %5, align 8, !tbaa !262
+  store i64 %151, ptr %5, align 8, !tbaa !263
   br label %152
 
 152:                                              ; preds = %142, %146, %125
@@ -13453,10 +13275,10 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
   %156 = getelementptr inbounds i8, ptr %154, i32 8
   store i64 %155, ptr %156, align 8, !tbaa !89
   %157 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %158 = load i64, ptr %157, align 8, !tbaa !268
+  %158 = load i64, ptr %157, align 8, !tbaa !269
   %159 = icmp ult i64 %158, 2147483648
   %160 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  %161 = load ptr, ptr %160, align 8, !tbaa !264
+  %161 = load ptr, ptr %160, align 8, !tbaa !265
   %162 = trunc i64 %121 to i32
   br i1 %159, label %163, label %167
 
@@ -13478,9 +13300,9 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
 
 173:                                              ; preds = %170
   %174 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 8
-  %175 = load i64, ptr %174, align 8, !tbaa !269
+  %175 = load i64, ptr %174, align 8, !tbaa !270
   %176 = add nsw i64 %175, 1
-  store i64 %176, ptr %174, align 8, !tbaa !269
+  store i64 %176, ptr %174, align 8, !tbaa !270
   br label %177
 
 177:                                              ; preds = %173, %170
@@ -13502,18 +13324,18 @@ define hidden noundef ptr @fa_table_append(ptr nocapture noundef %0, i64 noundef
 
 186:                                              ; preds = %179, %183
   %187 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 1
-  %188 = load i64, ptr %187, align 8, !tbaa !261
+  %188 = load i64, ptr %187, align 8, !tbaa !262
   %189 = add nsw i64 %188, 1
-  store i64 %189, ptr %187, align 8, !tbaa !261
+  store i64 %189, ptr %187, align 8, !tbaa !262
   ret ptr %154
 }
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(readwrite, inaccessiblemem: none)
 define hidden void @fa_table_kill(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2) local_unnamed_addr #42 {
   %4 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 6
-  %5 = load i64, ptr %4, align 8, !tbaa !265
+  %5 = load i64, ptr %4, align 8, !tbaa !266
   %6 = icmp eq i64 %5, 0
-  %7 = load ptr, ptr %0, align 8, !tbaa !258
+  %7 = load ptr, ptr %0, align 8, !tbaa !259
   br i1 %6, label %16, label %8
 
 8:                                                ; preds = %3
@@ -13538,10 +13360,10 @@ define hidden void @fa_table_kill(ptr nocapture noundef %0, i64 noundef %1, i64 
   %23 = getelementptr inbounds i8, ptr %22, i32 8
   %24 = load i64, ptr %23, align 8, !tbaa !89
   %25 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %26 = load i64, ptr %25, align 8, !tbaa !268
+  %26 = load i64, ptr %25, align 8, !tbaa !269
   %27 = icmp ult i64 %26, 2147483648
   %28 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  %29 = load ptr, ptr %28, align 8, !tbaa !264
+  %29 = load ptr, ptr %28, align 8, !tbaa !265
   %30 = trunc i64 %24 to i32
   %31 = add i32 %30, -1
   br i1 %27, label %32, label %34
@@ -13558,40 +13380,40 @@ define hidden void @fa_table_kill(ptr nocapture noundef %0, i64 noundef %1, i64 
 
 36:                                               ; preds = %32, %34
   store i64 0, ptr %23, align 8, !tbaa !89
-  %37 = load i64, ptr %4, align 8, !tbaa !265
+  %37 = load i64, ptr %4, align 8, !tbaa !266
   %38 = icmp eq i64 %37, 2
   br i1 %38, label %39, label %43
 
 39:                                               ; preds = %36
   %40 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 7
-  %41 = load i64, ptr %40, align 8, !tbaa !266
+  %41 = load i64, ptr %40, align 8, !tbaa !267
   store i64 %41, ptr %22, align 8, !tbaa !89
   %42 = add nsw i64 %1, 1
-  store i64 %42, ptr %40, align 8, !tbaa !266
+  store i64 %42, ptr %40, align 8, !tbaa !267
   br label %43
 
 43:                                               ; preds = %39, %36
   %44 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 1
-  %45 = load i64, ptr %44, align 8, !tbaa !261
+  %45 = load i64, ptr %44, align 8, !tbaa !262
   %46 = add nsw i64 %45, -1
-  store i64 %46, ptr %44, align 8, !tbaa !261
+  store i64 %46, ptr %44, align 8, !tbaa !262
   ret void
 }
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(write, argmem: readwrite, inaccessiblemem: none)
 define hidden void @fa_table_clear(ptr nocapture noundef %0) local_unnamed_addr #43 {
   %2 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 1
-  store i64 0, ptr %2, align 8, !tbaa !261
+  store i64 0, ptr %2, align 8, !tbaa !262
   %3 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 2
-  store i64 0, ptr %3, align 8, !tbaa !262
+  store i64 0, ptr %3, align 8, !tbaa !263
   %4 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 7
-  store i64 0, ptr %4, align 8, !tbaa !266
+  store i64 0, ptr %4, align 8, !tbaa !267
   %5 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 8
-  store i64 0, ptr %5, align 8, !tbaa !269
+  store i64 0, ptr %5, align 8, !tbaa !270
   %6 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  %7 = load ptr, ptr %6, align 8, !tbaa !264
+  %7 = load ptr, ptr %6, align 8, !tbaa !265
   %8 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %9 = load i64, ptr %8, align 8, !tbaa !268
+  %9 = load i64, ptr %8, align 8, !tbaa !269
   %10 = trunc i64 %9 to i32
   %11 = add i32 %10, 1
   %12 = icmp ult i64 %9, 2147483648
@@ -13604,15 +13426,15 @@ define hidden void @fa_table_clear(ptr nocapture noundef %0) local_unnamed_addr 
 ; Function Attrs: nounwind optsize
 define hidden void @fa_table_free(ptr noundef %0, i64 noundef %1) local_unnamed_addr #3 {
   %3 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 9
-  %4 = load i64, ptr %3, align 8, !tbaa !260
+  %4 = load i64, ptr %3, align 8, !tbaa !261
   %5 = icmp eq i64 %4, 0
   br i1 %5, label %6, label %51
 
 6:                                                ; preds = %2
   %7 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 6
-  %8 = load i64, ptr %7, align 8, !tbaa !265
+  %8 = load i64, ptr %7, align 8, !tbaa !266
   %9 = icmp eq i64 %8, 0
-  %10 = load ptr, ptr %0, align 8, !tbaa !258
+  %10 = load ptr, ptr %0, align 8, !tbaa !259
   br i1 %9, label %36, label %11
 
 11:                                               ; preds = %6
@@ -13641,7 +13463,7 @@ define hidden void @fa_table_free(ptr noundef %0, i64 noundef %1) local_unnamed_
   %27 = add nuw nsw i64 %22, 1
   %28 = load i64, ptr %12, align 8, !tbaa !79
   %29 = icmp slt i64 %27, %28
-  br i1 %29, label %21, label %18, !llvm.loop !277
+  br i1 %29, label %21, label %18, !llvm.loop !278
 
 30:                                               ; preds = %18
   %31 = getelementptr inbounds %struct.FaTableEntries, ptr %10, i32 0, i32 2
@@ -13657,7 +13479,7 @@ define hidden void @fa_table_free(ptr noundef %0, i64 noundef %1) local_unnamed_
 
 36:                                               ; preds = %6
   %37 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 3
-  %38 = load i64, ptr %37, align 8, !tbaa !263
+  %38 = load i64, ptr %37, align 8, !tbaa !264
   %39 = mul nsw i64 %38, %1
   %40 = trunc i64 %39 to i32
   tail call void @fa_free(ptr noundef %10, i32 noundef %40, i32 noundef 16) #53
@@ -13665,9 +13487,9 @@ define hidden void @fa_table_free(ptr noundef %0, i64 noundef %1) local_unnamed_
 
 41:                                               ; preds = %36, %35
   %42 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  %43 = load ptr, ptr %42, align 8, !tbaa !264
+  %43 = load ptr, ptr %42, align 8, !tbaa !265
   %44 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %45 = load i64, ptr %44, align 8, !tbaa !268
+  %45 = load i64, ptr %44, align 8, !tbaa !269
   %46 = trunc i64 %45 to i32
   %47 = add i32 %46, 1
   %48 = icmp ult i64 %45, 2147483648
@@ -13684,10 +13506,10 @@ define hidden void @fa_table_free(ptr noundef %0, i64 noundef %1) local_unnamed_
 ; Function Attrs: nounwind optsize
 define hidden ptr @fa_table_copy(ptr nocapture noundef readonly %0, i64 noundef %1) local_unnamed_addr #3 {
   %3 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 6
-  %4 = load i64, ptr %3, align 8, !tbaa !265
+  %4 = load i64, ptr %3, align 8, !tbaa !266
   %5 = icmp eq i64 %4, 0
   %6 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 1
-  %7 = load i64, ptr %6, align 8, !tbaa !261
+  %7 = load i64, ptr %6, align 8, !tbaa !262
   %8 = tail call i64 @llvm.smax.i64(i64 %7, i64 4)
   %9 = icmp eq i64 %4, 2
   br i1 %9, label %10, label %13
@@ -13695,7 +13517,7 @@ define hidden ptr @fa_table_copy(ptr nocapture noundef readonly %0, i64 noundef 
 10:                                               ; preds = %2
   %11 = tail call ptr @fa_table_new_growing(i64 noundef %8, i64 noundef %1) #52
   %12 = getelementptr inbounds %struct.FaTable, ptr %11, i32 0, i32 6
-  store i64 2, ptr %12, align 8, !tbaa !265
+  store i64 2, ptr %12, align 8, !tbaa !266
   br label %18
 
 13:                                               ; preds = %2
@@ -13712,7 +13534,7 @@ define hidden ptr @fa_table_copy(ptr nocapture noundef readonly %0, i64 noundef 
 18:                                               ; preds = %14, %16, %10
   %19 = phi ptr [ %11, %10 ], [ %15, %14 ], [ %17, %16 ]
   %20 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 2
-  %21 = load i64, ptr %20, align 8, !tbaa !262
+  %21 = load i64, ptr %20, align 8, !tbaa !263
   %22 = icmp sgt i64 %21, 0
   br i1 %22, label %23, label %25
 
@@ -13723,11 +13545,11 @@ define hidden ptr @fa_table_copy(ptr nocapture noundef readonly %0, i64 noundef 
 25:                                               ; preds = %69, %18
   %26 = phi i64 [ 0, %18 ], [ %71, %69 ]
   %27 = getelementptr inbounds %struct.FaTable, ptr %19, i32 0, i32 2
-  store i64 %26, ptr %27, align 8, !tbaa !262
+  store i64 %26, ptr %27, align 8, !tbaa !263
   %28 = getelementptr inbounds %struct.FaTable, ptr %19, i32 0, i32 1
-  store i64 %26, ptr %28, align 8, !tbaa !261
+  store i64 %26, ptr %28, align 8, !tbaa !262
   %29 = getelementptr inbounds %struct.FaTable, ptr %19, i32 0, i32 5
-  %30 = load i64, ptr %29, align 8, !tbaa !268
+  %30 = load i64, ptr %29, align 8, !tbaa !269
   %31 = add nsw i64 %30, 1
   tail call fastcc void @table_index(ptr noundef %19, i64 noundef %31, i64 noundef %1) #52
   ret ptr %19
@@ -13736,7 +13558,7 @@ define hidden ptr @fa_table_copy(ptr nocapture noundef readonly %0, i64 noundef 
   %33 = phi i64 [ %21, %23 ], [ %70, %69 ]
   %34 = phi i64 [ 0, %23 ], [ %71, %69 ]
   %35 = phi i64 [ 0, %23 ], [ %72, %69 ]
-  %36 = load ptr, ptr %0, align 8, !tbaa !258
+  %36 = load ptr, ptr %0, align 8, !tbaa !259
   br i1 %5, label %37, label %44
 
 37:                                               ; preds = %32
@@ -13768,7 +13590,7 @@ define hidden ptr @fa_table_copy(ptr nocapture noundef readonly %0, i64 noundef 
   br label %64
 
 59:                                               ; preds = %37
-  %60 = load ptr, ptr %19, align 8, !tbaa !258
+  %60 = load ptr, ptr %19, align 8, !tbaa !259
   %61 = mul nsw i64 %34, %1
   %62 = trunc i64 %61 to i32
   %63 = getelementptr inbounds i8, ptr %60, i32 %62
@@ -13779,7 +13601,7 @@ define hidden ptr @fa_table_copy(ptr nocapture noundef readonly %0, i64 noundef 
   %66 = phi ptr [ %58, %57 ], [ %63, %59 ]
   tail call fastcc void @copy_bytes(ptr noundef %66, ptr noundef nonnull %65, i32 noundef %24) #52
   %67 = add nsw i64 %34, 1
-  %68 = load i64, ptr %20, align 8, !tbaa !262
+  %68 = load i64, ptr %20, align 8, !tbaa !263
   br label %69
 
 69:                                               ; preds = %44, %64, %37
@@ -13787,7 +13609,7 @@ define hidden ptr @fa_table_copy(ptr nocapture noundef readonly %0, i64 noundef 
   %71 = phi i64 [ %67, %64 ], [ %34, %37 ], [ %34, %44 ]
   %72 = add nuw nsw i64 %35, 1
   %73 = icmp slt i64 %72, %70
-  br i1 %73, label %32, label %25, !llvm.loop !278
+  br i1 %73, label %32, label %25, !llvm.loop !279
 }
 
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(argmem: read)
@@ -13810,7 +13632,7 @@ define hidden i64 @fa_hash_bytes(ptr nocapture noundef readonly %0, i32 noundef 
   %16 = xor i64 %15, %14
   %17 = add nuw i32 %8, 8
   %18 = icmp ugt i32 %17, %1
-  br i1 %18, label %19, label %7, !llvm.loop !279
+  br i1 %18, label %19, label %7, !llvm.loop !280
 
 19:                                               ; preds = %7, %2
   %20 = phi i32 [ 0, %2 ], [ %8, %7 ]
@@ -13965,7 +13787,7 @@ define hidden i64 @fa_hash_string_bits(i32 noundef %0, i32 noundef %1, i32 nound
 define hidden noundef ptr @fa_error_key_not_found() local_unnamed_addr #22 {
   %1 = alloca %struct.FaString, align 4
   %2 = tail call ptr @fa_alloc(i32 noundef 24, i32 noundef 8) #53
-  store i64 2, ptr %2, align 8, !tbaa !251
+  store i64 2, ptr %2, align 8, !tbaa !252
   %3 = getelementptr inbounds %struct.MessageError, ptr %2, i32 0, i32 1
   call void @llvm.lifetime.start.p0(i64 12, ptr nonnull %1) #55
   %4 = load ptr, ptr @builder, align 4, !tbaa !6
@@ -14002,7 +13824,7 @@ define hidden void @fa_shared_release(ptr noundef %0) local_unnamed_addr #3 {
 
 6:                                                ; preds = %3
   %7 = getelementptr inbounds %struct.FaShared, ptr %0, i32 0, i32 2
-  %8 = load ptr, ptr %7, align 8, !tbaa !280
+  %8 = load ptr, ptr %7, align 8, !tbaa !281
   %9 = icmp eq ptr %8, null
   br i1 %9, label %11, label %10
 
@@ -14012,7 +13834,7 @@ define hidden void @fa_shared_release(ptr noundef %0) local_unnamed_addr #3 {
 
 11:                                               ; preds = %10, %6
   %12 = getelementptr inbounds %struct.FaShared, ptr %0, i32 0, i32 1
-  %13 = load i64, ptr %12, align 8, !tbaa !282
+  %13 = load i64, ptr %12, align 8, !tbaa !283
   %14 = trunc i64 %13 to i32
   tail call void @fa_free(ptr noundef nonnull %0, i32 noundef %14, i32 noundef 16) #53
   br label %15
@@ -14025,7 +13847,7 @@ define hidden void @fa_shared_release(ptr noundef %0) local_unnamed_addr #3 {
 define hidden ptr @fa_atomic_new(i64 noundef %0) local_unnamed_addr #3 {
   %2 = tail call fastcc ptr @shared_new(i32 noundef 40, ptr noundef null) #52
   %3 = getelementptr inbounds %struct.FaAtomicBlock, ptr %2, i32 0, i32 1
-  store i64 %0, ptr %3, align 8, !tbaa !283
+  store i64 %0, ptr %3, align 8, !tbaa !284
   ret ptr %2
 }
 
@@ -14041,12 +13863,12 @@ define internal fastcc ptr @shared_new(i32 noundef %0, ptr noundef %1) unnamed_a
 
 6:                                                ; preds = %2
   tail call void @llvm.memset.p0.i32(ptr nonnull align 8 %3, i8 0, i32 %0, i1 false)
-  store i64 1, ptr %3, align 8, !tbaa !285
+  store i64 1, ptr %3, align 8, !tbaa !286
   %7 = zext i32 %0 to i64
   %8 = getelementptr inbounds %struct.FaShared, ptr %3, i32 0, i32 1
-  store i64 %7, ptr %8, align 8, !tbaa !282
+  store i64 %7, ptr %8, align 8, !tbaa !283
   %9 = getelementptr inbounds %struct.FaShared, ptr %3, i32 0, i32 2
-  store ptr %1, ptr %9, align 8, !tbaa !280
+  store ptr %1, ptr %9, align 8, !tbaa !281
   ret ptr %3
 }
 
@@ -14073,40 +13895,40 @@ define hidden void @fa_task_spawn(ptr noundef %0, i32 noundef %1) local_unnamed_
 
 6:                                                ; preds = %2
   %7 = getelementptr inbounds i8, ptr %0, i32 32
-  %8 = load i32, ptr %7, align 4, !tbaa !286
+  %8 = load i32, ptr %7, align 4, !tbaa !287
   %9 = or i32 %8, 1
-  store i32 %9, ptr %7, align 4, !tbaa !286
+  store i32 %9, ptr %7, align 4, !tbaa !287
   %10 = getelementptr inbounds %struct.FaExecutor, ptr %3, i32 0, i32 8
-  %11 = load i64, ptr %10, align 8, !tbaa !288
+  %11 = load i64, ptr %10, align 8, !tbaa !289
   %12 = add nsw i64 %11, 1
-  store i64 %12, ptr %10, align 8, !tbaa !288
+  store i64 %12, ptr %10, align 8, !tbaa !289
   br label %13
 
 13:                                               ; preds = %6, %2
   %14 = getelementptr inbounds i8, ptr %0, i32 20
-  store ptr null, ptr %14, align 4, !tbaa !290
+  store ptr null, ptr %14, align 4, !tbaa !291
   %15 = getelementptr inbounds %struct.FaExecutor, ptr %3, i32 0, i32 1
-  %16 = load ptr, ptr %15, align 4, !tbaa !291
+  %16 = load ptr, ptr %15, align 4, !tbaa !292
   %17 = getelementptr inbounds i8, ptr %0, i32 24
-  store ptr %16, ptr %17, align 4, !tbaa !292
+  store ptr %16, ptr %17, align 4, !tbaa !293
   %18 = icmp eq ptr %16, null
   br i1 %18, label %21, label %19
 
 19:                                               ; preds = %13
   %20 = getelementptr inbounds %struct.FaTask, ptr %16, i32 0, i32 1
-  store ptr %4, ptr %20, align 4, !tbaa !290
+  store ptr %4, ptr %20, align 4, !tbaa !291
   br label %22
 
 21:                                               ; preds = %13
-  store ptr %4, ptr %3, align 8, !tbaa !293
+  store ptr %4, ptr %3, align 8, !tbaa !294
   br label %22
 
 22:                                               ; preds = %19, %21
-  store ptr %4, ptr %15, align 4, !tbaa !291
+  store ptr %4, ptr %15, align 4, !tbaa !292
   %23 = getelementptr inbounds %struct.FaExecutor, ptr %3, i32 0, i32 2
-  %24 = load i64, ptr %23, align 8, !tbaa !294
+  %24 = load i64, ptr %23, align 8, !tbaa !295
   %25 = add nsw i64 %24, 1
-  store i64 %25, ptr %23, align 8, !tbaa !294
+  store i64 %25, ptr %23, align 8, !tbaa !295
   %26 = getelementptr inbounds i8, ptr %0, i32 28
   store atomic i32 1, ptr %26 release, align 4
   ret void
@@ -14123,13 +13945,13 @@ define internal fastcc ptr @executor() unnamed_addr #3 {
   tail call void @llvm.memset.p0.i32(ptr noundef nonnull align 8 dereferenceable(288) %4, i8 0, i32 288, i1 false)
   %5 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 13
   %6 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 11
-  store ptr %5, ptr %6, align 8, !tbaa !295
+  store ptr %5, ptr %6, align 8, !tbaa !296
   %7 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 12
-  store ptr %5, ptr %7, align 4, !tbaa !296
+  store ptr %5, ptr %7, align 4, !tbaa !297
   %8 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 15
-  store i32 -1, ptr %8, align 8, !tbaa !297
+  store i32 -1, ptr %8, align 8, !tbaa !298
   %9 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 16
-  store i32 -1, ptr %9, align 4, !tbaa !298
+  store i32 -1, ptr %9, align 4, !tbaa !299
   store i32 128, ptr @fa_coop_budget, align 4, !tbaa !23
   store ptr %4, ptr @current_executor, align 4, !tbaa !6
   br label %10
@@ -14142,7 +13964,7 @@ define internal fastcc ptr @executor() unnamed_addr #3 {
 ; Function Attrs: mustprogress nofree norecurse nounwind optsize willreturn memory(readwrite, inaccessiblemem: none)
 define hidden void @fa_task_await(ptr nocapture noundef writeonly %0, ptr noundef %1) local_unnamed_addr #46 {
   %3 = getelementptr inbounds i8, ptr %0, i32 16
-  store ptr %1, ptr %3, align 4, !tbaa !299
+  store ptr %1, ptr %3, align 4, !tbaa !300
   %4 = getelementptr inbounds i8, ptr %1, i32 28
   store atomic i32 2, ptr %4 release, align 4
   %5 = load ptr, ptr @current_executor, align 4, !tbaa !6
@@ -14151,7 +13973,7 @@ define hidden void @fa_task_await(ptr nocapture noundef writeonly %0, ptr nounde
 
 7:                                                ; preds = %2
   %8 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 7
-  %9 = load ptr, ptr %8, align 8, !tbaa !300
+  %9 = load ptr, ptr %8, align 8, !tbaa !301
   %10 = icmp eq ptr %9, %1
   %11 = icmp eq ptr %9, null
   %12 = or i1 %10, %11
@@ -14159,7 +13981,7 @@ define hidden void @fa_task_await(ptr nocapture noundef writeonly %0, ptr nounde
 
 13:                                               ; preds = %7
   %14 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 20
-  store ptr null, ptr %14, align 8, !tbaa !301
+  store ptr null, ptr %14, align 8, !tbaa !302
   br label %15
 
 15:                                               ; preds = %7, %13, %2
@@ -14170,9 +13992,9 @@ define hidden void @fa_task_await(ptr nocapture noundef writeonly %0, ptr nounde
 define hidden void @fa_task_finish(ptr noundef %0) local_unnamed_addr #46 {
   %2 = getelementptr inbounds i8, ptr %0, i32 16
   %3 = getelementptr inbounds i8, ptr %0, i32 32
-  %4 = load i32, ptr %3, align 4, !tbaa !286
+  %4 = load i32, ptr %3, align 4, !tbaa !287
   %5 = or i32 %4, 2
-  store i32 %5, ptr %3, align 4, !tbaa !286
+  store i32 %5, ptr %3, align 4, !tbaa !287
   %6 = getelementptr inbounds i8, ptr %0, i32 28
   store atomic i32 3, ptr %6 release, align 4
   %7 = and i32 %4, 1
@@ -14182,19 +14004,19 @@ define hidden void @fa_task_finish(ptr noundef %0) local_unnamed_addr #46 {
 9:                                                ; preds = %1
   %10 = load ptr, ptr @current_executor, align 4, !tbaa !6
   %11 = getelementptr inbounds %struct.FaExecutor, ptr %10, i32 0, i32 8
-  %12 = load i64, ptr %11, align 8, !tbaa !288
+  %12 = load i64, ptr %11, align 8, !tbaa !289
   %13 = add nsw i64 %12, -1
-  store i64 %13, ptr %11, align 8, !tbaa !288
+  store i64 %13, ptr %11, align 8, !tbaa !289
   store ptr %0, ptr @frame_to_free, align 4, !tbaa !6
   br label %40
 
 14:                                               ; preds = %1
-  %15 = load ptr, ptr %2, align 4, !tbaa !299
+  %15 = load ptr, ptr %2, align 4, !tbaa !300
   %16 = icmp eq ptr %15, null
   br i1 %16, label %40, label %17
 
 17:                                               ; preds = %14
-  store ptr null, ptr %2, align 4, !tbaa !299
+  store ptr null, ptr %2, align 4, !tbaa !300
   %18 = ptrtoint ptr %15 to i32
   %19 = and i32 %18, 1
   %20 = icmp eq i32 %19, 0
@@ -14204,35 +14026,35 @@ define hidden void @fa_task_finish(ptr noundef %0) local_unnamed_addr #46 {
   %22 = and i32 %18, -2
   %23 = inttoptr i32 %22 to ptr
   %24 = getelementptr inbounds i8, ptr %0, i32 20
-  store ptr null, ptr %24, align 4, !tbaa !290
+  store ptr null, ptr %24, align 4, !tbaa !291
   %25 = getelementptr inbounds %struct.FaJoin, ptr %23, i32 0, i32 3
-  %26 = load ptr, ptr %25, align 4, !tbaa !302
+  %26 = load ptr, ptr %25, align 4, !tbaa !303
   %27 = icmp eq ptr %26, null
   br i1 %27, label %30, label %28
 
 28:                                               ; preds = %21
   %29 = getelementptr inbounds %struct.FaTask, ptr %26, i32 0, i32 1
-  store ptr %2, ptr %29, align 4, !tbaa !290
+  store ptr %2, ptr %29, align 4, !tbaa !291
   br label %32
 
 30:                                               ; preds = %21
   %31 = getelementptr inbounds %struct.FaJoin, ptr %23, i32 0, i32 2
-  store ptr %2, ptr %31, align 8, !tbaa !304
+  store ptr %2, ptr %31, align 8, !tbaa !305
   br label %32
 
 32:                                               ; preds = %30, %28
-  store ptr %2, ptr %25, align 4, !tbaa !302
+  store ptr %2, ptr %25, align 4, !tbaa !303
   %33 = getelementptr inbounds %struct.FaJoin, ptr %23, i32 0, i32 1
-  %34 = load i64, ptr %33, align 8, !tbaa !305
+  %34 = load i64, ptr %33, align 8, !tbaa !306
   %35 = add nsw i64 %34, -1
-  store i64 %35, ptr %33, align 8, !tbaa !305
-  %36 = load ptr, ptr %23, align 8, !tbaa !306
+  store i64 %35, ptr %33, align 8, !tbaa !306
+  %36 = load ptr, ptr %23, align 8, !tbaa !307
   %37 = icmp eq ptr %36, null
   br i1 %37, label %40, label %38
 
 38:                                               ; preds = %32
   store ptr %36, ptr @next_frame, align 4, !tbaa !6
-  store ptr null, ptr %23, align 8, !tbaa !306
+  store ptr null, ptr %23, align 8, !tbaa !307
   br label %40
 
 39:                                               ; preds = %17
@@ -14270,19 +14092,19 @@ define hidden void @fa_task_drop(ptr noundef %0) local_unnamed_addr #3 {
 
 14:                                               ; preds = %11
   %15 = getelementptr inbounds i8, ptr %0, i32 24
-  %16 = load ptr, ptr %15, align 4, !tbaa !292
+  %16 = load ptr, ptr %15, align 4, !tbaa !293
   %17 = icmp eq ptr %16, null
   %18 = getelementptr inbounds i8, ptr %0, i32 20
-  %19 = load ptr, ptr %18, align 4, !tbaa !290
+  %19 = load ptr, ptr %18, align 4, !tbaa !291
   br i1 %17, label %22, label %20
 
 20:                                               ; preds = %14
   %21 = getelementptr inbounds %struct.FaTask, ptr %16, i32 0, i32 1
-  store ptr %19, ptr %21, align 4, !tbaa !290
+  store ptr %19, ptr %21, align 4, !tbaa !291
   br label %23
 
 22:                                               ; preds = %14
-  store ptr %19, ptr %4, align 8, !tbaa !293
+  store ptr %19, ptr %4, align 8, !tbaa !294
   br label %23
 
 23:                                               ; preds = %20, %22
@@ -14291,12 +14113,12 @@ define hidden void @fa_task_drop(ptr noundef %0) local_unnamed_addr #3 {
   %26 = getelementptr inbounds %struct.FaTask, ptr %19, i32 0, i32 2
   %27 = select i1 %24, ptr %25, ptr %26
   store ptr %16, ptr %27, align 4, !tbaa !6
-  store ptr null, ptr %18, align 4, !tbaa !290
-  store ptr null, ptr %15, align 4, !tbaa !292
+  store ptr null, ptr %18, align 4, !tbaa !291
+  store ptr null, ptr %15, align 4, !tbaa !293
   %28 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 2
-  %29 = load i64, ptr %28, align 8, !tbaa !294
+  %29 = load i64, ptr %28, align 8, !tbaa !295
   %30 = add nsw i64 %29, -1
-  store i64 %30, ptr %28, align 8, !tbaa !294
+  store i64 %30, ptr %28, align 8, !tbaa !295
   br label %31
 
 31:                                               ; preds = %11, %23, %3
@@ -14319,7 +14141,7 @@ define internal fastcc void @drain_remote(ptr noundef %0) unnamed_addr #35 {
   br label %9
 
 9:                                                ; preds = %47, %1
-  %10 = load ptr, ptr %4, align 8, !tbaa !295
+  %10 = load ptr, ptr %4, align 8, !tbaa !296
   %11 = getelementptr inbounds %struct.FaTask, ptr %10, i32 0, i32 1
   %12 = load atomic i32, ptr %11 acquire, align 4
   %13 = inttoptr i32 %12 to ptr
@@ -14331,7 +14153,7 @@ define internal fastcc void @drain_remote(ptr noundef %0) unnamed_addr #35 {
   br i1 %16, label %51, label %17
 
 17:                                               ; preds = %15
-  store ptr %13, ptr %4, align 8, !tbaa !295
+  store ptr %13, ptr %4, align 8, !tbaa !296
   %18 = getelementptr inbounds %struct.FaTask, ptr %13, i32 0, i32 1
   %19 = load atomic i32, ptr %18 acquire, align 4
   %20 = inttoptr i32 %19 to ptr
@@ -14366,32 +14188,32 @@ define internal fastcc void @drain_remote(ptr noundef %0) unnamed_addr #35 {
 
 38:                                               ; preds = %36, %21
   %39 = phi ptr [ %37, %36 ], [ %22, %21 ]
-  store ptr %39, ptr %4, align 8, !tbaa !295
+  store ptr %39, ptr %4, align 8, !tbaa !296
   %40 = getelementptr inbounds %struct.FaTask, ptr %23, i32 0, i32 1
-  store ptr null, ptr %40, align 4, !tbaa !290
-  %41 = load ptr, ptr %7, align 4, !tbaa !291
+  store ptr null, ptr %40, align 4, !tbaa !291
+  %41 = load ptr, ptr %7, align 4, !tbaa !292
   %42 = getelementptr inbounds %struct.FaTask, ptr %23, i32 0, i32 2
-  store ptr %41, ptr %42, align 4, !tbaa !292
+  store ptr %41, ptr %42, align 4, !tbaa !293
   %43 = icmp eq ptr %41, null
   br i1 %43, label %46, label %44
 
 44:                                               ; preds = %38
   %45 = getelementptr inbounds %struct.FaTask, ptr %41, i32 0, i32 1
-  store ptr %23, ptr %45, align 4, !tbaa !290
+  store ptr %23, ptr %45, align 4, !tbaa !291
   br label %47
 
 46:                                               ; preds = %38
-  store ptr %23, ptr %0, align 8, !tbaa !293
+  store ptr %23, ptr %0, align 8, !tbaa !294
   br label %47
 
 47:                                               ; preds = %44, %46
-  store ptr %23, ptr %7, align 4, !tbaa !291
-  %48 = load i64, ptr %8, align 8, !tbaa !294
+  store ptr %23, ptr %7, align 4, !tbaa !292
+  %48 = load i64, ptr %8, align 8, !tbaa !295
   %49 = add nsw i64 %48, 1
-  store i64 %49, ptr %8, align 8, !tbaa !294
+  store i64 %49, ptr %8, align 8, !tbaa !295
   %50 = getelementptr inbounds %struct.FaTask, ptr %23, i32 0, i32 3
   store atomic i32 1, ptr %50 release, align 4
-  br label %9, !llvm.loop !307
+  br label %9, !llvm.loop !308
 
 51:                                               ; preds = %15, %25, %29
   ret void
@@ -14405,29 +14227,29 @@ define hidden void @fa_task_yield(ptr noundef %0) local_unnamed_addr #3 {
   %2 = tail call fastcc ptr @executor() #52
   %3 = getelementptr inbounds i8, ptr %0, i32 16
   %4 = getelementptr inbounds i8, ptr %0, i32 20
-  store ptr null, ptr %4, align 4, !tbaa !290
+  store ptr null, ptr %4, align 4, !tbaa !291
   %5 = getelementptr inbounds %struct.FaExecutor, ptr %2, i32 0, i32 1
-  %6 = load ptr, ptr %5, align 4, !tbaa !291
+  %6 = load ptr, ptr %5, align 4, !tbaa !292
   %7 = getelementptr inbounds i8, ptr %0, i32 24
-  store ptr %6, ptr %7, align 4, !tbaa !292
+  store ptr %6, ptr %7, align 4, !tbaa !293
   %8 = icmp eq ptr %6, null
   br i1 %8, label %11, label %9
 
 9:                                                ; preds = %1
   %10 = getelementptr inbounds %struct.FaTask, ptr %6, i32 0, i32 1
-  store ptr %3, ptr %10, align 4, !tbaa !290
+  store ptr %3, ptr %10, align 4, !tbaa !291
   br label %12
 
 11:                                               ; preds = %1
-  store ptr %3, ptr %2, align 8, !tbaa !293
+  store ptr %3, ptr %2, align 8, !tbaa !294
   br label %12
 
 12:                                               ; preds = %9, %11
-  store ptr %3, ptr %5, align 4, !tbaa !291
+  store ptr %3, ptr %5, align 4, !tbaa !292
   %13 = getelementptr inbounds %struct.FaExecutor, ptr %2, i32 0, i32 2
-  %14 = load i64, ptr %13, align 8, !tbaa !294
+  %14 = load i64, ptr %13, align 8, !tbaa !295
   %15 = add nsw i64 %14, 1
-  store i64 %15, ptr %13, align 8, !tbaa !294
+  store i64 %15, ptr %13, align 8, !tbaa !295
   %16 = getelementptr inbounds i8, ptr %0, i32 28
   store atomic i32 1, ptr %16 release, align 4
   ret void
@@ -14443,12 +14265,12 @@ define hidden i32 @fa_coop_back_edge() local_unnamed_addr #3 {
 3:                                                ; preds = %0
   %4 = tail call i64 @fa_clock() #53
   %5 = getelementptr inbounds %struct.FaExecutor, ptr %1, i32 0, i32 19
-  %6 = load i64, ptr %5, align 8, !tbaa !308
+  %6 = load i64, ptr %5, align 8, !tbaa !309
   %7 = icmp eq i64 %6, 0
   br i1 %7, label %8, label %9
 
 8:                                                ; preds = %3
-  store i64 %4, ptr %5, align 8, !tbaa !308
+  store i64 %4, ptr %5, align 8, !tbaa !309
   br label %13
 
 9:                                                ; preds = %3
@@ -14468,49 +14290,49 @@ declare i64 @fa_clock() local_unnamed_addr #4
 ; Function Attrs: nounwind optsize
 define hidden void @fa_sleep_async(ptr noundef %0, ptr noundef %1, i64 noundef %2) local_unnamed_addr #3 {
   %4 = tail call fastcc ptr @executor() #52
-  store ptr %1, ptr %0, align 8, !tbaa !309
+  store ptr %1, ptr %0, align 8, !tbaa !310
   %5 = getelementptr inbounds %struct.FaWait, ptr %0, i32 0, i32 1
-  store ptr %4, ptr %5, align 4, !tbaa !311
+  store ptr %4, ptr %5, align 4, !tbaa !312
   %6 = getelementptr inbounds %struct.FaWait, ptr %0, i32 0, i32 8
-  store i64 -1, ptr %6, align 8, !tbaa !312
+  store i64 -1, ptr %6, align 8, !tbaa !313
   %7 = icmp slt i64 %2, 1
   br i1 %7, label %8, label %23
 
 8:                                                ; preds = %3
   %9 = getelementptr inbounds i8, ptr %1, i32 16
   %10 = getelementptr inbounds i8, ptr %1, i32 20
-  store ptr null, ptr %10, align 4, !tbaa !290
+  store ptr null, ptr %10, align 4, !tbaa !291
   %11 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 1
-  %12 = load ptr, ptr %11, align 4, !tbaa !291
+  %12 = load ptr, ptr %11, align 4, !tbaa !292
   %13 = getelementptr inbounds i8, ptr %1, i32 24
-  store ptr %12, ptr %13, align 4, !tbaa !292
+  store ptr %12, ptr %13, align 4, !tbaa !293
   %14 = icmp eq ptr %12, null
   br i1 %14, label %17, label %15
 
 15:                                               ; preds = %8
   %16 = getelementptr inbounds %struct.FaTask, ptr %12, i32 0, i32 1
-  store ptr %9, ptr %16, align 4, !tbaa !290
+  store ptr %9, ptr %16, align 4, !tbaa !291
   br label %18
 
 17:                                               ; preds = %8
-  store ptr %9, ptr %4, align 8, !tbaa !293
+  store ptr %9, ptr %4, align 8, !tbaa !294
   br label %18
 
 18:                                               ; preds = %15, %17
-  store ptr %9, ptr %11, align 4, !tbaa !291
+  store ptr %9, ptr %11, align 4, !tbaa !292
   %19 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 2
-  %20 = load i64, ptr %19, align 8, !tbaa !294
+  %20 = load i64, ptr %19, align 8, !tbaa !295
   %21 = add nsw i64 %20, 1
-  store i64 %21, ptr %19, align 8, !tbaa !294
+  store i64 %21, ptr %19, align 8, !tbaa !295
   %22 = getelementptr inbounds i8, ptr %1, i32 28
   store atomic i32 1, ptr %22 release, align 4
   br label %82
 
 23:                                               ; preds = %3
   %24 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 4
-  %25 = load i64, ptr %24, align 8, !tbaa !313
+  %25 = load i64, ptr %24, align 8, !tbaa !314
   %26 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 5
-  %27 = load i64, ptr %26, align 8, !tbaa !314
+  %27 = load i64, ptr %26, align 8, !tbaa !315
   %28 = icmp eq i64 %25, %27
   br i1 %28, label %29, label %59
 
@@ -14521,7 +14343,7 @@ define hidden void @fa_sleep_async(ptr noundef %0, ptr noundef %1, i64 noundef %
   %33 = trunc i64 %32 to i32
   %34 = shl i32 %33, 2
   %35 = tail call ptr @fa_alloc(i32 noundef %34, i32 noundef 4) #53
-  %36 = load i64, ptr %24, align 8, !tbaa !313
+  %36 = load i64, ptr %24, align 8, !tbaa !314
   %37 = icmp sgt i64 %36, 0
   br i1 %37, label %38, label %40
 
@@ -14530,13 +14352,13 @@ define hidden void @fa_sleep_async(ptr noundef %0, ptr noundef %1, i64 noundef %
   br label %43
 
 40:                                               ; preds = %43, %29
-  %41 = load i64, ptr %26, align 8, !tbaa !314
+  %41 = load i64, ptr %26, align 8, !tbaa !315
   %42 = icmp sgt i64 %41, 0
   br i1 %42, label %52, label %57
 
 43:                                               ; preds = %38, %43
   %44 = phi i64 [ 0, %38 ], [ %50, %43 ]
-  %45 = load ptr, ptr %39, align 8, !tbaa !315
+  %45 = load ptr, ptr %39, align 8, !tbaa !316
   %46 = trunc i64 %44 to i32
   %47 = getelementptr inbounds ptr, ptr %45, i32 %46
   %48 = load ptr, ptr %47, align 4, !tbaa !6
@@ -14544,11 +14366,11 @@ define hidden void @fa_sleep_async(ptr noundef %0, ptr noundef %1, i64 noundef %
   store ptr %48, ptr %49, align 4, !tbaa !6
   %50 = add nuw nsw i64 %44, 1
   %51 = icmp eq i64 %50, %36
-  br i1 %51, label %40, label %43, !llvm.loop !316
+  br i1 %51, label %40, label %43, !llvm.loop !317
 
 52:                                               ; preds = %40
   %53 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 3
-  %54 = load ptr, ptr %53, align 8, !tbaa !315
+  %54 = load ptr, ptr %53, align 8, !tbaa !316
   %55 = trunc i64 %41 to i32
   %56 = shl i32 %55, 2
   tail call void @fa_free(ptr noundef %54, i32 noundef %56, i32 noundef 4) #53
@@ -14556,8 +14378,8 @@ define hidden void @fa_sleep_async(ptr noundef %0, ptr noundef %1, i64 noundef %
 
 57:                                               ; preds = %52, %40
   %58 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 3
-  store ptr %35, ptr %58, align 8, !tbaa !315
-  store i64 %32, ptr %26, align 8, !tbaa !314
+  store ptr %35, ptr %58, align 8, !tbaa !316
+  store i64 %32, ptr %26, align 8, !tbaa !315
   br label %59
 
 59:                                               ; preds = %57, %23
@@ -14565,27 +14387,27 @@ define hidden void @fa_sleep_async(ptr noundef %0, ptr noundef %1, i64 noundef %
   %61 = mul nsw i64 %2, 1000000
   %62 = add nsw i64 %60, %61
   %63 = getelementptr inbounds %struct.FaWait, ptr %0, i32 0, i32 6
-  store i64 %62, ptr %63, align 8, !tbaa !317
+  store i64 %62, ptr %63, align 8, !tbaa !318
   %64 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 6
-  %65 = load i64, ptr %64, align 8, !tbaa !318
+  %65 = load i64, ptr %64, align 8, !tbaa !319
   %66 = getelementptr inbounds %struct.FaWait, ptr %0, i32 0, i32 7
-  store i64 %65, ptr %66, align 8, !tbaa !319
+  store i64 %65, ptr %66, align 8, !tbaa !320
   %67 = add nsw i64 %65, 1
-  store i64 %67, ptr %64, align 8, !tbaa !318
-  %68 = load i64, ptr %24, align 8, !tbaa !313
+  store i64 %67, ptr %64, align 8, !tbaa !319
+  %68 = load i64, ptr %24, align 8, !tbaa !314
   %69 = add nsw i64 %68, 1
-  store i64 %69, ptr %24, align 8, !tbaa !313
+  store i64 %69, ptr %24, align 8, !tbaa !314
   %70 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 3
-  %71 = load ptr, ptr %70, align 8, !tbaa !315
+  %71 = load ptr, ptr %70, align 8, !tbaa !316
   %72 = trunc i64 %68 to i32
   %73 = getelementptr inbounds ptr, ptr %71, i32 %72
   store ptr %0, ptr %73, align 4, !tbaa !6
-  store i64 %68, ptr %6, align 8, !tbaa !312
+  store i64 %68, ptr %6, align 8, !tbaa !313
   tail call fastcc void @timer_up(ptr noundef nonnull %4, i64 noundef %68) #52
   %74 = getelementptr inbounds i8, ptr %1, i32 28
   store atomic i32 2, ptr %74 release, align 4
   %75 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 7
-  %76 = load ptr, ptr %75, align 8, !tbaa !300
+  %76 = load ptr, ptr %75, align 8, !tbaa !301
   %77 = icmp eq ptr %76, %1
   %78 = icmp eq ptr %76, null
   %79 = or i1 %77, %78
@@ -14593,7 +14415,7 @@ define hidden void @fa_sleep_async(ptr noundef %0, ptr noundef %1, i64 noundef %
 
 80:                                               ; preds = %59
   %81 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 20
-  store ptr null, ptr %81, align 8, !tbaa !301
+  store ptr null, ptr %81, align 8, !tbaa !302
   br label %82
 
 82:                                               ; preds = %80, %59, %18
@@ -14603,7 +14425,7 @@ define hidden void @fa_sleep_async(ptr noundef %0, ptr noundef %1, i64 noundef %
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none)
 define internal fastcc void @timer_up(ptr nocapture noundef readonly %0, i64 noundef %1) unnamed_addr #20 {
   %3 = getelementptr inbounds %struct.FaExecutor, ptr %0, i32 0, i32 3
-  %4 = load ptr, ptr %3, align 8, !tbaa !315
+  %4 = load ptr, ptr %3, align 8, !tbaa !316
   %5 = trunc i64 %1 to i32
   %6 = getelementptr inbounds ptr, ptr %4, i32 %5
   %7 = load ptr, ptr %6, align 4, !tbaa !6
@@ -14613,19 +14435,19 @@ define internal fastcc void @timer_up(ptr nocapture noundef readonly %0, i64 nou
 
 10:                                               ; preds = %2
   %11 = getelementptr inbounds %struct.FaWait, ptr %7, i32 0, i32 6
-  %12 = load i64, ptr %11, align 8, !tbaa !317
+  %12 = load i64, ptr %11, align 8, !tbaa !318
   br label %13
 
 13:                                               ; preds = %10, %31
   %14 = phi i64 [ %1, %10 ], [ %16, %31 ]
   %15 = add nsw i64 %14, -1
   %16 = lshr i64 %15, 2
-  %17 = load ptr, ptr %3, align 8, !tbaa !315
+  %17 = load ptr, ptr %3, align 8, !tbaa !316
   %18 = trunc i64 %16 to i32
   %19 = getelementptr inbounds ptr, ptr %17, i32 %18
   %20 = load ptr, ptr %19, align 4, !tbaa !6
   %21 = getelementptr inbounds %struct.FaWait, ptr %20, i32 0, i32 6
-  %22 = load i64, ptr %21, align 8, !tbaa !317
+  %22 = load i64, ptr %21, align 8, !tbaa !318
   %23 = icmp slt i64 %12, %22
   br i1 %23, label %31, label %24
 
@@ -14634,9 +14456,9 @@ define internal fastcc void @timer_up(ptr nocapture noundef readonly %0, i64 nou
   br i1 %25, label %26, label %38
 
 26:                                               ; preds = %24
-  %27 = load i64, ptr %8, align 8, !tbaa !319
+  %27 = load i64, ptr %8, align 8, !tbaa !320
   %28 = getelementptr inbounds %struct.FaWait, ptr %20, i32 0, i32 7
-  %29 = load i64, ptr %28, align 8, !tbaa !319
+  %29 = load i64, ptr %28, align 8, !tbaa !320
   %30 = icmp slt i64 %27, %29
   br i1 %30, label %31, label %38
 
@@ -14645,12 +14467,12 @@ define internal fastcc void @timer_up(ptr nocapture noundef readonly %0, i64 nou
   %33 = getelementptr inbounds ptr, ptr %17, i32 %32
   store ptr %20, ptr %33, align 4, !tbaa !6
   %34 = getelementptr inbounds %struct.FaWait, ptr %20, i32 0, i32 8
-  store i64 %14, ptr %34, align 8, !tbaa !312
+  store i64 %14, ptr %34, align 8, !tbaa !313
   %35 = icmp ult i64 %15, 4
   br i1 %35, label %36, label %13
 
 36:                                               ; preds = %31
-  %37 = load ptr, ptr %3, align 8, !tbaa !315
+  %37 = load ptr, ptr %3, align 8, !tbaa !316
   br label %40
 
 38:                                               ; preds = %26, %24
@@ -14664,20 +14486,20 @@ define internal fastcc void @timer_up(ptr nocapture noundef readonly %0, i64 nou
   %44 = getelementptr inbounds ptr, ptr %42, i32 %41
   store ptr %7, ptr %44, align 4, !tbaa !6
   %45 = getelementptr inbounds %struct.FaWait, ptr %7, i32 0, i32 8
-  store i64 %43, ptr %45, align 8, !tbaa !312
+  store i64 %43, ptr %45, align 8, !tbaa !313
   ret void
 }
 
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none)
 define hidden void @fa_timer_cancel(ptr nocapture noundef readonly %0) local_unnamed_addr #20 {
   %2 = getelementptr inbounds %struct.FaWait, ptr %0, i32 0, i32 8
-  %3 = load i64, ptr %2, align 8, !tbaa !312
+  %3 = load i64, ptr %2, align 8, !tbaa !313
   %4 = icmp sgt i64 %3, -1
   br i1 %4, label %5, label %8
 
 5:                                                ; preds = %1
   %6 = getelementptr inbounds %struct.FaWait, ptr %0, i32 0, i32 1
-  %7 = load ptr, ptr %6, align 4, !tbaa !311
+  %7 = load ptr, ptr %6, align 4, !tbaa !312
   tail call fastcc void @timer_remove(ptr noundef %7, i64 noundef %3) #52
   br label %8
 
@@ -14688,14 +14510,14 @@ define hidden void @fa_timer_cancel(ptr nocapture noundef readonly %0) local_unn
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none)
 define internal fastcc void @timer_remove(ptr nocapture noundef %0, i64 noundef %1) unnamed_addr #20 {
   %3 = getelementptr inbounds %struct.FaExecutor, ptr %0, i32 0, i32 3
-  %4 = load ptr, ptr %3, align 8, !tbaa !315
+  %4 = load ptr, ptr %3, align 8, !tbaa !316
   %5 = trunc i64 %1 to i32
   %6 = getelementptr inbounds ptr, ptr %4, i32 %5
   %7 = load ptr, ptr %6, align 4, !tbaa !6
   %8 = getelementptr inbounds %struct.FaExecutor, ptr %0, i32 0, i32 4
-  %9 = load i64, ptr %8, align 8, !tbaa !313
+  %9 = load i64, ptr %8, align 8, !tbaa !314
   %10 = add nsw i64 %9, -1
-  store i64 %10, ptr %8, align 8, !tbaa !313
+  store i64 %10, ptr %8, align 8, !tbaa !314
   %11 = icmp sgt i64 %10, %1
   br i1 %11, label %12, label %118
 
@@ -14705,9 +14527,9 @@ define internal fastcc void @timer_remove(ptr nocapture noundef %0, i64 noundef 
   %15 = load ptr, ptr %14, align 4, !tbaa !6
   store ptr %15, ptr %6, align 4, !tbaa !6
   %16 = getelementptr inbounds %struct.FaWait, ptr %15, i32 0, i32 8
-  store i64 %1, ptr %16, align 8, !tbaa !312
+  store i64 %1, ptr %16, align 8, !tbaa !313
   %17 = icmp sgt i64 %1, 0
-  %18 = load ptr, ptr %3, align 8, !tbaa !315
+  %18 = load ptr, ptr %3, align 8, !tbaa !316
   br i1 %17, label %19, label %39
 
 19:                                               ; preds = %12
@@ -14717,9 +14539,9 @@ define internal fastcc void @timer_remove(ptr nocapture noundef %0, i64 noundef 
   %23 = getelementptr inbounds ptr, ptr %18, i32 %22
   %24 = load ptr, ptr %23, align 4, !tbaa !6
   %25 = getelementptr inbounds %struct.FaWait, ptr %15, i32 0, i32 6
-  %26 = load i64, ptr %25, align 8, !tbaa !317
+  %26 = load i64, ptr %25, align 8, !tbaa !318
   %27 = getelementptr inbounds %struct.FaWait, ptr %24, i32 0, i32 6
-  %28 = load i64, ptr %27, align 8, !tbaa !317
+  %28 = load i64, ptr %27, align 8, !tbaa !318
   %29 = icmp slt i64 %26, %28
   br i1 %29, label %38, label %30
 
@@ -14729,9 +14551,9 @@ define internal fastcc void @timer_remove(ptr nocapture noundef %0, i64 noundef 
 
 32:                                               ; preds = %30
   %33 = getelementptr inbounds %struct.FaWait, ptr %15, i32 0, i32 7
-  %34 = load i64, ptr %33, align 8, !tbaa !319
+  %34 = load i64, ptr %33, align 8, !tbaa !320
   %35 = getelementptr inbounds %struct.FaWait, ptr %24, i32 0, i32 7
-  %36 = load i64, ptr %35, align 8, !tbaa !319
+  %36 = load i64, ptr %35, align 8, !tbaa !320
   %37 = icmp slt i64 %34, %36
   br i1 %37, label %38, label %39
 
@@ -14749,7 +14571,7 @@ define internal fastcc void @timer_remove(ptr nocapture noundef %0, i64 noundef 
 
 45:                                               ; preds = %39
   %46 = getelementptr inbounds %struct.FaWait, ptr %41, i32 0, i32 6
-  %47 = load i64, ptr %46, align 8, !tbaa !317
+  %47 = load i64, ptr %46, align 8, !tbaa !318
   %48 = getelementptr inbounds %struct.FaWait, ptr %41, i32 0, i32 7
   br label %49
 
@@ -14761,7 +14583,7 @@ define internal fastcc void @timer_remove(ptr nocapture noundef %0, i64 noundef 
   %54 = tail call i64 @llvm.smin.i64(i64 %53, i64 %10)
   %55 = or disjoint i64 %51, 2
   %56 = icmp slt i64 %55, %54
-  %57 = load ptr, ptr %3, align 8, !tbaa !315
+  %57 = load ptr, ptr %3, align 8, !tbaa !316
   br i1 %56, label %73, label %58
 
 58:                                               ; preds = %97, %49
@@ -14770,7 +14592,7 @@ define internal fastcc void @timer_remove(ptr nocapture noundef %0, i64 noundef 
   %61 = getelementptr inbounds ptr, ptr %57, i32 %60
   %62 = load ptr, ptr %61, align 4, !tbaa !6
   %63 = getelementptr inbounds %struct.FaWait, ptr %62, i32 0, i32 6
-  %64 = load i64, ptr %63, align 8, !tbaa !317
+  %64 = load i64, ptr %63, align 8, !tbaa !318
   %65 = icmp slt i64 %64, %47
   br i1 %65, label %101, label %66
 
@@ -14780,8 +14602,8 @@ define internal fastcc void @timer_remove(ptr nocapture noundef %0, i64 noundef 
 
 68:                                               ; preds = %66
   %69 = getelementptr inbounds %struct.FaWait, ptr %62, i32 0, i32 7
-  %70 = load i64, ptr %69, align 8, !tbaa !319
-  %71 = load i64, ptr %48, align 8, !tbaa !319
+  %70 = load i64, ptr %69, align 8, !tbaa !320
+  %71 = load i64, ptr %48, align 8, !tbaa !320
   %72 = icmp slt i64 %70, %71
   br i1 %72, label %101, label %110
 
@@ -14795,9 +14617,9 @@ define internal fastcc void @timer_remove(ptr nocapture noundef %0, i64 noundef 
   %80 = getelementptr inbounds ptr, ptr %57, i32 %79
   %81 = load ptr, ptr %80, align 4, !tbaa !6
   %82 = getelementptr inbounds %struct.FaWait, ptr %78, i32 0, i32 6
-  %83 = load i64, ptr %82, align 8, !tbaa !317
+  %83 = load i64, ptr %82, align 8, !tbaa !318
   %84 = getelementptr inbounds %struct.FaWait, ptr %81, i32 0, i32 6
-  %85 = load i64, ptr %84, align 8, !tbaa !317
+  %85 = load i64, ptr %84, align 8, !tbaa !318
   %86 = icmp slt i64 %83, %85
   br i1 %86, label %97, label %87
 
@@ -14807,9 +14629,9 @@ define internal fastcc void @timer_remove(ptr nocapture noundef %0, i64 noundef 
 
 89:                                               ; preds = %87
   %90 = getelementptr inbounds %struct.FaWait, ptr %78, i32 0, i32 7
-  %91 = load i64, ptr %90, align 8, !tbaa !319
+  %91 = load i64, ptr %90, align 8, !tbaa !320
   %92 = getelementptr inbounds %struct.FaWait, ptr %81, i32 0, i32 7
-  %93 = load i64, ptr %92, align 8, !tbaa !319
+  %93 = load i64, ptr %92, align 8, !tbaa !320
   %94 = icmp sge i64 %91, %93
   %95 = freeze i1 %94
   br i1 %95, label %96, label %97
@@ -14821,21 +14643,21 @@ define internal fastcc void @timer_remove(ptr nocapture noundef %0, i64 noundef 
   %98 = phi i64 [ %75, %96 ], [ %74, %89 ], [ %74, %73 ]
   %99 = add nsw i64 %74, 1
   %100 = icmp eq i64 %99, %54
-  br i1 %100, label %58, label %73, !llvm.loop !320
+  br i1 %100, label %58, label %73, !llvm.loop !321
 
 101:                                              ; preds = %68, %58
   %102 = trunc i64 %52 to i32
   %103 = getelementptr inbounds ptr, ptr %57, i32 %102
   store ptr %62, ptr %103, align 4, !tbaa !6
   %104 = getelementptr inbounds %struct.FaWait, ptr %62, i32 0, i32 8
-  store i64 %52, ptr %104, align 8, !tbaa !312
+  store i64 %52, ptr %104, align 8, !tbaa !313
   %105 = shl nsw i64 %59, 2
   %106 = or disjoint i64 %105, 1
   %107 = icmp slt i64 %106, %10
   br i1 %107, label %49, label %108
 
 108:                                              ; preds = %101
-  %109 = load ptr, ptr %3, align 8, !tbaa !315
+  %109 = load ptr, ptr %3, align 8, !tbaa !316
   br label %112
 
 110:                                              ; preds = %68, %66
@@ -14849,12 +14671,12 @@ define internal fastcc void @timer_remove(ptr nocapture noundef %0, i64 noundef 
   %116 = getelementptr inbounds ptr, ptr %114, i32 %113
   store ptr %41, ptr %116, align 4, !tbaa !6
   %117 = getelementptr inbounds %struct.FaWait, ptr %41, i32 0, i32 8
-  store i64 %115, ptr %117, align 8, !tbaa !312
+  store i64 %115, ptr %117, align 8, !tbaa !313
   br label %118
 
 118:                                              ; preds = %38, %112, %2
   %119 = getelementptr inbounds %struct.FaWait, ptr %7, i32 0, i32 8
-  store i64 -1, ptr %119, align 8, !tbaa !312
+  store i64 -1, ptr %119, align 8, !tbaa !313
   ret void
 }
 
@@ -14894,35 +14716,35 @@ define hidden void @fa_join_add(ptr noundef %0, ptr noundef %1) local_unnamed_ad
 
 8:                                                ; preds = %4
   %9 = getelementptr inbounds i8, ptr %1, i32 20
-  store ptr null, ptr %9, align 4, !tbaa !290
+  store ptr null, ptr %9, align 4, !tbaa !291
   %10 = getelementptr inbounds %struct.FaJoin, ptr %0, i32 0, i32 3
-  %11 = load ptr, ptr %10, align 4, !tbaa !302
+  %11 = load ptr, ptr %10, align 4, !tbaa !303
   %12 = icmp eq ptr %11, null
   br i1 %12, label %15, label %13
 
 13:                                               ; preds = %8
   %14 = getelementptr inbounds %struct.FaTask, ptr %11, i32 0, i32 1
-  store ptr %5, ptr %14, align 4, !tbaa !290
+  store ptr %5, ptr %14, align 4, !tbaa !291
   br label %17
 
 15:                                               ; preds = %8
   %16 = getelementptr inbounds %struct.FaJoin, ptr %0, i32 0, i32 2
-  store ptr %5, ptr %16, align 8, !tbaa !304
+  store ptr %5, ptr %16, align 8, !tbaa !305
   br label %17
 
 17:                                               ; preds = %13, %15
-  store ptr %5, ptr %10, align 4, !tbaa !302
+  store ptr %5, ptr %10, align 4, !tbaa !303
   br label %25
 
 18:                                               ; preds = %4
   %19 = ptrtoint ptr %0 to i32
   %20 = or i32 %19, 1
   %21 = inttoptr i32 %20 to ptr
-  store ptr %21, ptr %5, align 4, !tbaa !299
+  store ptr %21, ptr %5, align 4, !tbaa !300
   %22 = getelementptr inbounds %struct.FaJoin, ptr %0, i32 0, i32 1
-  %23 = load i64, ptr %22, align 8, !tbaa !305
+  %23 = load i64, ptr %22, align 8, !tbaa !306
   %24 = add nsw i64 %23, 1
-  store i64 %24, ptr %22, align 8, !tbaa !305
+  store i64 %24, ptr %22, align 8, !tbaa !306
   br label %25
 
 25:                                               ; preds = %17, %18, %2
@@ -14932,30 +14754,30 @@ define hidden void @fa_join_add(ptr noundef %0, ptr noundef %1) local_unnamed_ad
 ; Function Attrs: mustprogress nofree norecurse nounwind optsize willreturn memory(readwrite, inaccessiblemem: none)
 define hidden ptr @fa_join_next(ptr nocapture noundef %0, ptr noundef %1) local_unnamed_addr #46 {
   %3 = getelementptr inbounds %struct.FaJoin, ptr %0, i32 0, i32 2
-  %4 = load ptr, ptr %3, align 8, !tbaa !304
+  %4 = load ptr, ptr %3, align 8, !tbaa !305
   %5 = icmp eq ptr %4, null
   br i1 %5, label %14, label %6
 
 6:                                                ; preds = %2
   %7 = getelementptr inbounds %struct.FaTask, ptr %4, i32 0, i32 1
-  %8 = load ptr, ptr %7, align 4, !tbaa !290
-  store ptr %8, ptr %3, align 8, !tbaa !304
+  %8 = load ptr, ptr %7, align 4, !tbaa !291
+  store ptr %8, ptr %3, align 8, !tbaa !305
   %9 = icmp eq ptr %8, null
   br i1 %9, label %10, label %12
 
 10:                                               ; preds = %6
   %11 = getelementptr inbounds %struct.FaJoin, ptr %0, i32 0, i32 3
-  store ptr null, ptr %11, align 4, !tbaa !302
+  store ptr null, ptr %11, align 4, !tbaa !303
   br label %12
 
 12:                                               ; preds = %10, %6
-  store ptr null, ptr %7, align 4, !tbaa !290
+  store ptr null, ptr %7, align 4, !tbaa !291
   %13 = getelementptr inbounds i8, ptr %4, i32 -16
   br label %22
 
 14:                                               ; preds = %2
   %15 = getelementptr inbounds %struct.FaJoin, ptr %0, i32 0, i32 1
-  %16 = load i64, ptr %15, align 8, !tbaa !305
+  %16 = load i64, ptr %15, align 8, !tbaa !306
   %17 = icmp eq i64 %16, 0
   br i1 %17, label %22, label %18
 
@@ -14964,7 +14786,7 @@ define hidden ptr @fa_join_next(ptr nocapture noundef %0, ptr noundef %1) local_
   br i1 %19, label %22, label %20
 
 20:                                               ; preds = %18
-  store ptr %1, ptr %0, align 8, !tbaa !306
+  store ptr %1, ptr %0, align 8, !tbaa !307
   %21 = getelementptr inbounds i8, ptr %1, i32 28
   store atomic i32 2, ptr %21 release, align 4
   br label %22
@@ -15011,7 +14833,7 @@ define hidden noundef i32 @fa_io_wait(ptr nocapture noundef %0, i32 noundef %1, 
   %5 = icmp eq i32 %1, 0
   %6 = select i1 %5, i32 1, i32 4
   %7 = getelementptr inbounds %struct.FaIo, ptr %0, i32 0, i32 1
-  %8 = load i32, ptr %7, align 4, !tbaa !321
+  %8 = load i32, ptr %7, align 4, !tbaa !322
   %9 = and i32 %8, %6
   %10 = icmp eq i32 %9, 0
   br i1 %10, label %14, label %11
@@ -15019,29 +14841,29 @@ define hidden noundef i32 @fa_io_wait(ptr nocapture noundef %0, i32 noundef %1, 
 11:                                               ; preds = %4
   %12 = xor i32 %6, -1
   %13 = and i32 %8, %12
-  store i32 %13, ptr %7, align 4, !tbaa !321
+  store i32 %13, ptr %7, align 4, !tbaa !322
   br label %14
 
 14:                                               ; preds = %11, %4
-  store ptr %3, ptr %2, align 8, !tbaa !309
+  store ptr %3, ptr %2, align 8, !tbaa !310
   %15 = getelementptr inbounds %struct.FaIo, ptr %0, i32 0, i32 4
-  %16 = load ptr, ptr %15, align 4, !tbaa !323
+  %16 = load ptr, ptr %15, align 4, !tbaa !324
   %17 = getelementptr inbounds %struct.FaWait, ptr %2, i32 0, i32 1
-  store ptr %16, ptr %17, align 4, !tbaa !311
+  store ptr %16, ptr %17, align 4, !tbaa !312
   %18 = getelementptr inbounds %struct.FaWait, ptr %2, i32 0, i32 9
-  store i32 0, ptr %18, align 8, !tbaa !324
+  store i32 0, ptr %18, align 8, !tbaa !325
   %19 = getelementptr inbounds %struct.FaWait, ptr %2, i32 0, i32 10
-  store i32 0, ptr %19, align 4, !tbaa !325
+  store i32 0, ptr %19, align 4, !tbaa !326
   %20 = getelementptr inbounds %struct.FaWait, ptr %2, i32 0, i32 8
-  store i64 -1, ptr %20, align 8, !tbaa !312
+  store i64 -1, ptr %20, align 8, !tbaa !313
   %21 = getelementptr inbounds %struct.FaIo, ptr %0, i32 0, i32 3
   %22 = getelementptr inbounds %struct.FaIo, ptr %0, i32 0, i32 2
   %23 = select i1 %5, ptr %22, ptr %21
   store ptr %2, ptr %23, align 4, !tbaa !6
   %24 = getelementptr inbounds %struct.FaExecutor, ptr %16, i32 0, i32 10
-  %25 = load i64, ptr %24, align 8, !tbaa !326
+  %25 = load i64, ptr %24, align 8, !tbaa !327
   %26 = add nsw i64 %25, 1
-  store i64 %26, ptr %24, align 8, !tbaa !326
+  store i64 %26, ptr %24, align 8, !tbaa !327
   %27 = getelementptr inbounds i8, ptr %3, i32 28
   store atomic i32 2, ptr %27 release, align 4
   ret i32 1
@@ -15050,34 +14872,34 @@ define hidden noundef i32 @fa_io_wait(ptr nocapture noundef %0, i32 noundef %1, 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(readwrite, inaccessiblemem: none)
 define hidden void @fa_io_cancel(ptr nocapture noundef %0, ptr noundef readnone %1) local_unnamed_addr #42 {
   %3 = getelementptr inbounds %struct.FaIo, ptr %0, i32 0, i32 2
-  %4 = load ptr, ptr %3, align 4, !tbaa !327
+  %4 = load ptr, ptr %3, align 4, !tbaa !328
   %5 = icmp eq ptr %4, %1
   br i1 %5, label %6, label %12
 
 6:                                                ; preds = %2
-  store ptr null, ptr %3, align 4, !tbaa !327
+  store ptr null, ptr %3, align 4, !tbaa !328
   %7 = getelementptr inbounds %struct.FaIo, ptr %0, i32 0, i32 4
-  %8 = load ptr, ptr %7, align 4, !tbaa !323
+  %8 = load ptr, ptr %7, align 4, !tbaa !324
   %9 = getelementptr inbounds %struct.FaExecutor, ptr %8, i32 0, i32 10
-  %10 = load i64, ptr %9, align 8, !tbaa !326
+  %10 = load i64, ptr %9, align 8, !tbaa !327
   %11 = add nsw i64 %10, -1
-  store i64 %11, ptr %9, align 8, !tbaa !326
+  store i64 %11, ptr %9, align 8, !tbaa !327
   br label %12
 
 12:                                               ; preds = %6, %2
   %13 = getelementptr inbounds %struct.FaIo, ptr %0, i32 0, i32 3
-  %14 = load ptr, ptr %13, align 4, !tbaa !328
+  %14 = load ptr, ptr %13, align 4, !tbaa !329
   %15 = icmp eq ptr %14, %1
   br i1 %15, label %16, label %22
 
 16:                                               ; preds = %12
-  store ptr null, ptr %13, align 4, !tbaa !328
+  store ptr null, ptr %13, align 4, !tbaa !329
   %17 = getelementptr inbounds %struct.FaIo, ptr %0, i32 0, i32 4
-  %18 = load ptr, ptr %17, align 4, !tbaa !323
+  %18 = load ptr, ptr %17, align 4, !tbaa !324
   %19 = getelementptr inbounds %struct.FaExecutor, ptr %18, i32 0, i32 10
-  %20 = load i64, ptr %19, align 8, !tbaa !326
+  %20 = load i64, ptr %19, align 8, !tbaa !327
   %21 = add nsw i64 %20, -1
-  store i64 %21, ptr %19, align 8, !tbaa !326
+  store i64 %21, ptr %19, align 8, !tbaa !327
   br label %22
 
 22:                                               ; preds = %16, %12
@@ -15101,9 +14923,9 @@ define hidden void @fa_io_close(ptr noundef %0) local_unnamed_addr #3 {
 define hidden void @fa_run_main(ptr noundef %0, i32 noundef %1) local_unnamed_addr #3 {
   %3 = tail call fastcc ptr @executor() #52
   %4 = getelementptr inbounds %struct.FaExecutor, ptr %3, i32 0, i32 7
-  store ptr %0, ptr %4, align 8, !tbaa !300
+  store ptr %0, ptr %4, align 8, !tbaa !301
   %5 = getelementptr inbounds %struct.FaExecutor, ptr %3, i32 0, i32 17
-  store i32 %1, ptr %5, align 8, !tbaa !329
+  store i32 %1, ptr %5, align 8, !tbaa !330
   %6 = getelementptr inbounds %struct.FaExecutor, ptr %3, i32 0, i32 8
   %7 = getelementptr inbounds %struct.FaExecutor, ptr %3, i32 0, i32 9
   %8 = getelementptr inbounds %struct.FaExecutor, ptr %3, i32 0, i32 2
@@ -15121,7 +14943,7 @@ define hidden void @fa_run_main(ptr noundef %0, i32 noundef %1) local_unnamed_ad
   br i1 %17, label %18, label %24
 
 18:                                               ; preds = %15
-  %19 = load i64, ptr %6, align 8, !tbaa !288
+  %19 = load i64, ptr %6, align 8, !tbaa !289
   %20 = icmp sgt i64 %19, 0
   br i1 %20, label %24, label %21
 
@@ -15131,7 +14953,7 @@ define hidden void @fa_run_main(ptr noundef %0, i32 noundef %1) local_unnamed_ad
   br i1 %23, label %24, label %95
 
 24:                                               ; preds = %18, %15, %21
-  %25 = load i64, ptr %8, align 8, !tbaa !294
+  %25 = load i64, ptr %8, align 8, !tbaa !295
   %26 = icmp sgt i64 %25, 0
   br i1 %26, label %27, label %47
 
@@ -15141,41 +14963,41 @@ define hidden void @fa_run_main(ptr noundef %0, i32 noundef %1) local_unnamed_ad
 
 29:                                               ; preds = %33, %27
   %30 = phi i64 [ %28, %27 ], [ %45, %33 ]
-  %31 = load ptr, ptr %3, align 8, !tbaa !293
+  %31 = load ptr, ptr %3, align 8, !tbaa !294
   %32 = icmp eq ptr %31, null
   br i1 %32, label %47, label %33
 
 33:                                               ; preds = %29
   %34 = getelementptr inbounds %struct.FaTask, ptr %31, i32 0, i32 1
-  %35 = load ptr, ptr %34, align 4, !tbaa !290
-  store ptr %35, ptr %3, align 8, !tbaa !293
+  %35 = load ptr, ptr %34, align 4, !tbaa !291
+  store ptr %35, ptr %3, align 8, !tbaa !294
   %36 = icmp eq ptr %35, null
   %37 = getelementptr inbounds %struct.FaTask, ptr %35, i32 0, i32 2
   %38 = select i1 %36, ptr %9, ptr %37
   store ptr null, ptr %38, align 4, !tbaa !6
-  %39 = load i64, ptr %8, align 8, !tbaa !294
+  %39 = load i64, ptr %8, align 8, !tbaa !295
   %40 = add nsw i64 %39, -1
-  store i64 %40, ptr %8, align 8, !tbaa !294
-  store ptr null, ptr %34, align 4, !tbaa !290
+  store i64 %40, ptr %8, align 8, !tbaa !295
+  store ptr null, ptr %34, align 4, !tbaa !291
   %41 = getelementptr inbounds %struct.FaTask, ptr %31, i32 0, i32 2
-  store ptr null, ptr %41, align 4, !tbaa !292
+  store ptr null, ptr %41, align 4, !tbaa !293
   %42 = getelementptr inbounds i8, ptr %31, i32 -16
   tail call fastcc void @turn(ptr noundef nonnull %3, ptr noundef nonnull %42) #52
-  %43 = load i64, ptr %10, align 8, !tbaa !330
+  %43 = load i64, ptr %10, align 8, !tbaa !331
   %44 = add nsw i64 %43, 1
-  store i64 %44, ptr %10, align 8, !tbaa !330
+  store i64 %44, ptr %10, align 8, !tbaa !331
   %45 = add nsw i64 %30, -1
   %46 = icmp sgt i64 %30, 1
-  br i1 %46, label %29, label %47, !llvm.loop !331
+  br i1 %46, label %29, label %47, !llvm.loop !332
 
 47:                                               ; preds = %33, %29, %24
-  %48 = load i64, ptr %11, align 8, !tbaa !313
+  %48 = load i64, ptr %11, align 8, !tbaa !314
   %49 = icmp sgt i64 %48, 0
   br i1 %49, label %50, label %55
 
 50:                                               ; preds = %47
   %51 = tail call i64 @fa_clock() #53
-  %52 = load i64, ptr %11, align 8, !tbaa !313
+  %52 = load i64, ptr %11, align 8, !tbaa !314
   %53 = icmp sgt i64 %52, 0
   br i1 %53, label %54, label %55
 
@@ -15186,36 +15008,36 @@ define hidden void @fa_run_main(ptr noundef %0, i32 noundef %1) local_unnamed_ad
 55:                                               ; preds = %54, %50, %47
   %56 = phi i64 [ %51, %54 ], [ %51, %50 ], [ 0, %47 ]
   tail call fastcc void @drain_remote(ptr noundef nonnull %3) #52
-  %57 = load i64, ptr %8, align 8, !tbaa !294
+  %57 = load i64, ptr %8, align 8, !tbaa !295
   %58 = icmp sgt i64 %57, 0
   br i1 %58, label %59, label %67
 
 59:                                               ; preds = %55
-  %60 = load i32, ptr %14, align 8, !tbaa !297
+  %60 = load i32, ptr %14, align 8, !tbaa !298
   %61 = icmp sgt i32 %60, -1
   br i1 %61, label %63, label %62
 
 62:                                               ; preds = %59, %63, %66, %74, %80, %87, %88, %91
-  br label %15, !llvm.loop !332
+  br label %15, !llvm.loop !333
 
 63:                                               ; preds = %59
-  %64 = load i64, ptr %10, align 8, !tbaa !330
+  %64 = load i64, ptr %10, align 8, !tbaa !331
   %65 = icmp sgt i64 %64, 60
   br i1 %65, label %66, label %62
 
 66:                                               ; preds = %63
-  store i64 0, ptr %10, align 8, !tbaa !330
+  store i64 0, ptr %10, align 8, !tbaa !331
   br label %62
 
 67:                                               ; preds = %55
-  store i64 0, ptr %10, align 8, !tbaa !330
-  %68 = load ptr, ptr %4, align 8, !tbaa !300
+  store i64 0, ptr %10, align 8, !tbaa !331
+  %68 = load ptr, ptr %4, align 8, !tbaa !301
   %69 = load ptr, ptr %68, align 4, !tbaa !6
   %70 = icmp eq ptr %69, null
   br i1 %70, label %71, label %77
 
 71:                                               ; preds = %67
-  %72 = load i64, ptr %6, align 8, !tbaa !288
+  %72 = load i64, ptr %6, align 8, !tbaa !289
   %73 = icmp eq i64 %72, 0
   br i1 %73, label %74, label %77
 
@@ -15225,15 +15047,15 @@ define hidden void @fa_run_main(ptr noundef %0, i32 noundef %1) local_unnamed_ad
   br i1 %76, label %62, label %77
 
 77:                                               ; preds = %74, %71, %67
-  %78 = load i64, ptr %11, align 8, !tbaa !313
+  %78 = load i64, ptr %11, align 8, !tbaa !314
   %79 = icmp sgt i64 %78, 0
   br i1 %79, label %80, label %88
 
 80:                                               ; preds = %77
-  %81 = load ptr, ptr %13, align 8, !tbaa !315
+  %81 = load ptr, ptr %13, align 8, !tbaa !316
   %82 = load ptr, ptr %81, align 4, !tbaa !6
   %83 = getelementptr inbounds %struct.FaWait, ptr %82, i32 0, i32 6
-  %84 = load i64, ptr %83, align 8, !tbaa !317
+  %84 = load i64, ptr %83, align 8, !tbaa !318
   %85 = sub nsw i64 %84, %56
   %86 = icmp slt i64 %85, 1
   br i1 %86, label %62, label %87
@@ -15248,7 +15070,7 @@ define hidden void @fa_run_main(ptr noundef %0, i32 noundef %1) local_unnamed_ad
   br i1 %90, label %62, label %91
 
 91:                                               ; preds = %88
-  %92 = load i64, ptr %12, align 8, !tbaa !326
+  %92 = load i64, ptr %12, align 8, !tbaa !327
   %93 = icmp sgt i64 %92, 0
   br i1 %93, label %62, label %94
 
@@ -15259,12 +15081,12 @@ define hidden void @fa_run_main(ptr noundef %0, i32 noundef %1) local_unnamed_ad
 95:                                               ; preds = %21
   tail call void @fa_destroy(ptr noundef nonnull %0) #53
   %96 = getelementptr inbounds %struct.FaExecutor, ptr %3, i32 0, i32 5
-  %97 = load i64, ptr %96, align 8, !tbaa !314
+  %97 = load i64, ptr %96, align 8, !tbaa !315
   %98 = icmp sgt i64 %97, 0
   br i1 %98, label %99, label %103
 
 99:                                               ; preds = %95
-  %100 = load ptr, ptr %13, align 8, !tbaa !315
+  %100 = load ptr, ptr %13, align 8, !tbaa !316
   %101 = trunc i64 %97 to i32
   %102 = shl i32 %101, 2
   tail call void @fa_free(ptr noundef %100, i32 noundef %102, i32 noundef 4) #53
@@ -15280,9 +15102,9 @@ define hidden void @fa_run_main(ptr noundef %0, i32 noundef %1) local_unnamed_ad
 define hidden void @fa_wasm_start(ptr noundef %0, i32 noundef %1, ptr noundef %2) local_unnamed_addr #3 {
   %4 = tail call fastcc ptr @executor() #52
   %5 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 7
-  store ptr %0, ptr %5, align 8, !tbaa !300
+  store ptr %0, ptr %5, align 8, !tbaa !301
   %6 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 17
-  store i32 %1, ptr %6, align 8, !tbaa !329
+  store i32 %1, ptr %6, align 8, !tbaa !330
   store ptr %2, ptr @wasm_finish, align 4, !tbaa !6
   ret void
 }
@@ -15295,7 +15117,7 @@ define hidden noundef i32 @fa_wasm_run() local_unnamed_addr #3 {
 
 3:                                                ; preds = %0
   %4 = getelementptr inbounds %struct.FaExecutor, ptr %1, i32 0, i32 4
-  %5 = load i64, ptr %4, align 8, !tbaa !313
+  %5 = load i64, ptr %4, align 8, !tbaa !314
   %6 = icmp sgt i64 %5, 0
   br i1 %6, label %7, label %9
 
@@ -15306,7 +15128,7 @@ define hidden noundef i32 @fa_wasm_run() local_unnamed_addr #3 {
 
 9:                                                ; preds = %7, %3
   %10 = getelementptr inbounds %struct.FaExecutor, ptr %1, i32 0, i32 2
-  %11 = load i64, ptr %10, align 8, !tbaa !294
+  %11 = load i64, ptr %10, align 8, !tbaa !295
   %12 = icmp sgt i64 %11, 0
   br i1 %12, label %13, label %32
 
@@ -15317,38 +15139,38 @@ define hidden noundef i32 @fa_wasm_run() local_unnamed_addr #3 {
 
 16:                                               ; preds = %13, %20
   %17 = phi i64 [ %14, %13 ], [ %30, %20 ]
-  %18 = load ptr, ptr %1, align 8, !tbaa !293
+  %18 = load ptr, ptr %1, align 8, !tbaa !294
   %19 = icmp eq ptr %18, null
   br i1 %19, label %32, label %20
 
 20:                                               ; preds = %16
   %21 = getelementptr inbounds %struct.FaTask, ptr %18, i32 0, i32 1
-  %22 = load ptr, ptr %21, align 4, !tbaa !290
-  store ptr %22, ptr %1, align 8, !tbaa !293
+  %22 = load ptr, ptr %21, align 4, !tbaa !291
+  store ptr %22, ptr %1, align 8, !tbaa !294
   %23 = icmp eq ptr %22, null
   %24 = getelementptr inbounds %struct.FaTask, ptr %22, i32 0, i32 2
   %25 = select i1 %23, ptr %15, ptr %24
   store ptr null, ptr %25, align 4, !tbaa !6
-  %26 = load i64, ptr %10, align 8, !tbaa !294
+  %26 = load i64, ptr %10, align 8, !tbaa !295
   %27 = add nsw i64 %26, -1
-  store i64 %27, ptr %10, align 8, !tbaa !294
-  store ptr null, ptr %21, align 4, !tbaa !290
+  store i64 %27, ptr %10, align 8, !tbaa !295
+  store ptr null, ptr %21, align 4, !tbaa !291
   %28 = getelementptr inbounds %struct.FaTask, ptr %18, i32 0, i32 2
-  store ptr null, ptr %28, align 4, !tbaa !292
+  store ptr null, ptr %28, align 4, !tbaa !293
   %29 = getelementptr inbounds i8, ptr %18, i32 -16
   tail call fastcc void @turn(ptr noundef nonnull %1, ptr noundef nonnull %29) #52
   %30 = add nsw i64 %17, -1
   %31 = icmp sgt i64 %17, 1
-  br i1 %31, label %16, label %32, !llvm.loop !333
+  br i1 %31, label %16, label %32, !llvm.loop !334
 
 32:                                               ; preds = %20, %16, %9
-  %33 = load i64, ptr %4, align 8, !tbaa !313
+  %33 = load i64, ptr %4, align 8, !tbaa !314
   %34 = icmp sgt i64 %33, 0
   br i1 %34, label %35, label %40
 
 35:                                               ; preds = %32
   %36 = tail call i64 @fa_clock() #53
-  %37 = load i64, ptr %4, align 8, !tbaa !313
+  %37 = load i64, ptr %4, align 8, !tbaa !314
   %38 = icmp sgt i64 %37, 0
   br i1 %38, label %39, label %40
 
@@ -15358,33 +15180,33 @@ define hidden noundef i32 @fa_wasm_run() local_unnamed_addr #3 {
 
 40:                                               ; preds = %32, %39, %35
   %41 = phi i64 [ %36, %39 ], [ %36, %35 ], [ 0, %32 ]
-  %42 = load i64, ptr %10, align 8, !tbaa !294
+  %42 = load i64, ptr %10, align 8, !tbaa !295
   %43 = icmp sgt i64 %42, 0
   br i1 %43, label %83, label %44
 
 44:                                               ; preds = %40
   %45 = getelementptr inbounds %struct.FaExecutor, ptr %1, i32 0, i32 7
-  %46 = load ptr, ptr %45, align 8, !tbaa !300
+  %46 = load ptr, ptr %45, align 8, !tbaa !301
   %47 = load ptr, ptr %46, align 4, !tbaa !6
   %48 = icmp eq ptr %47, null
   br i1 %48, label %49, label %64
 
 49:                                               ; preds = %44
   %50 = getelementptr inbounds %struct.FaExecutor, ptr %1, i32 0, i32 8
-  %51 = load i64, ptr %50, align 8, !tbaa !288
+  %51 = load i64, ptr %50, align 8, !tbaa !289
   %52 = icmp eq i64 %51, 0
   br i1 %52, label %53, label %64
 
 53:                                               ; preds = %49
   tail call void @fa_destroy(ptr noundef nonnull %46) #53
   %54 = getelementptr inbounds %struct.FaExecutor, ptr %1, i32 0, i32 5
-  %55 = load i64, ptr %54, align 8, !tbaa !314
+  %55 = load i64, ptr %54, align 8, !tbaa !315
   %56 = icmp sgt i64 %55, 0
   br i1 %56, label %57, label %62
 
 57:                                               ; preds = %53
   %58 = getelementptr inbounds %struct.FaExecutor, ptr %1, i32 0, i32 3
-  %59 = load ptr, ptr %58, align 8, !tbaa !315
+  %59 = load ptr, ptr %58, align 8, !tbaa !316
   %60 = trunc i64 %55 to i32
   %61 = shl i32 %60, 2
   tail call void @fa_free(ptr noundef %59, i32 noundef %61, i32 noundef 4) #53
@@ -15398,16 +15220,16 @@ define hidden noundef i32 @fa_wasm_run() local_unnamed_addr #3 {
   br label %83
 
 64:                                               ; preds = %49, %44
-  %65 = load i64, ptr %4, align 8, !tbaa !313
+  %65 = load i64, ptr %4, align 8, !tbaa !314
   %66 = icmp sgt i64 %65, 0
   br i1 %66, label %67, label %82
 
 67:                                               ; preds = %64
   %68 = getelementptr inbounds %struct.FaExecutor, ptr %1, i32 0, i32 3
-  %69 = load ptr, ptr %68, align 8, !tbaa !315
+  %69 = load ptr, ptr %68, align 8, !tbaa !316
   %70 = load ptr, ptr %69, align 4, !tbaa !6
   %71 = getelementptr inbounds %struct.FaWait, ptr %70, i32 0, i32 6
-  %72 = load i64, ptr %71, align 8, !tbaa !317
+  %72 = load i64, ptr %71, align 8, !tbaa !318
   %73 = sub nsw i64 %72, %41
   %74 = load i32, ptr @wasm_timer_token, align 4, !tbaa !23
   %75 = add nsw i32 %74, 1
@@ -15438,7 +15260,7 @@ define hidden noundef i32 @fa_wasm_run() local_unnamed_addr #3 {
 define internal fastcc void @fire_timers(ptr nocapture noundef %0, i64 noundef %1) unnamed_addr #35 {
   %3 = getelementptr inbounds %struct.FaExecutor, ptr %0, i32 0, i32 3
   %4 = getelementptr inbounds %struct.FaExecutor, ptr %0, i32 0, i32 4
-  %5 = load i64, ptr %4, align 8, !tbaa !313
+  %5 = load i64, ptr %4, align 8, !tbaa !314
   %6 = icmp sgt i64 %5, 0
   br i1 %6, label %7, label %32
 
@@ -15448,44 +15270,44 @@ define internal fastcc void @fire_timers(ptr nocapture noundef %0, i64 noundef %
   br label %10
 
 10:                                               ; preds = %7, %26
-  %11 = load ptr, ptr %3, align 8, !tbaa !315
+  %11 = load ptr, ptr %3, align 8, !tbaa !316
   %12 = load ptr, ptr %11, align 4, !tbaa !6
   %13 = getelementptr inbounds %struct.FaWait, ptr %12, i32 0, i32 6
-  %14 = load i64, ptr %13, align 8, !tbaa !317
+  %14 = load i64, ptr %13, align 8, !tbaa !318
   %15 = icmp sgt i64 %14, %1
   br i1 %15, label %32, label %16
 
 16:                                               ; preds = %10
   tail call fastcc void @timer_remove(ptr noundef nonnull %0, i64 noundef 0) #52
-  %17 = load ptr, ptr %12, align 8, !tbaa !309
+  %17 = load ptr, ptr %12, align 8, !tbaa !310
   %18 = getelementptr inbounds i8, ptr %17, i32 16
   %19 = getelementptr inbounds i8, ptr %17, i32 20
-  store ptr null, ptr %19, align 4, !tbaa !290
-  %20 = load ptr, ptr %8, align 4, !tbaa !291
+  store ptr null, ptr %19, align 4, !tbaa !291
+  %20 = load ptr, ptr %8, align 4, !tbaa !292
   %21 = getelementptr inbounds i8, ptr %17, i32 24
-  store ptr %20, ptr %21, align 4, !tbaa !292
+  store ptr %20, ptr %21, align 4, !tbaa !293
   %22 = icmp eq ptr %20, null
   br i1 %22, label %25, label %23
 
 23:                                               ; preds = %16
   %24 = getelementptr inbounds %struct.FaTask, ptr %20, i32 0, i32 1
-  store ptr %18, ptr %24, align 4, !tbaa !290
+  store ptr %18, ptr %24, align 4, !tbaa !291
   br label %26
 
 25:                                               ; preds = %16
-  store ptr %18, ptr %0, align 8, !tbaa !293
+  store ptr %18, ptr %0, align 8, !tbaa !294
   br label %26
 
 26:                                               ; preds = %23, %25
-  store ptr %18, ptr %8, align 4, !tbaa !291
-  %27 = load i64, ptr %9, align 8, !tbaa !294
+  store ptr %18, ptr %8, align 4, !tbaa !292
+  %27 = load i64, ptr %9, align 8, !tbaa !295
   %28 = add nsw i64 %27, 1
-  store i64 %28, ptr %9, align 8, !tbaa !294
+  store i64 %28, ptr %9, align 8, !tbaa !295
   %29 = getelementptr inbounds i8, ptr %17, i32 28
   store atomic i32 1, ptr %29 release, align 4
-  %30 = load i64, ptr %4, align 8, !tbaa !313
+  %30 = load i64, ptr %4, align 8, !tbaa !314
   %31 = icmp sgt i64 %30, 0
-  br i1 %31, label %10, label %32, !llvm.loop !334
+  br i1 %31, label %10, label %32, !llvm.loop !335
 
 32:                                               ; preds = %10, %26, %2
   ret void
@@ -15495,9 +15317,9 @@ define internal fastcc void @fire_timers(ptr nocapture noundef %0, i64 noundef %
 define internal fastcc void @turn(ptr nocapture noundef %0, ptr noundef %1) unnamed_addr #3 {
   store i32 128, ptr @fa_coop_budget, align 4, !tbaa !23
   %3 = getelementptr inbounds %struct.FaExecutor, ptr %0, i32 0, i32 19
-  store i64 0, ptr %3, align 8, !tbaa !308
+  store i64 0, ptr %3, align 8, !tbaa !309
   %4 = getelementptr inbounds %struct.FaExecutor, ptr %0, i32 0, i32 17
-  %5 = load i32, ptr %4, align 8, !tbaa !329
+  %5 = load i32, ptr %4, align 8, !tbaa !330
   %6 = icmp eq i32 %5, 0
   br i1 %6, label %9, label %7
 
@@ -15528,10 +15350,10 @@ define internal fastcc void @turn(ptr nocapture noundef %0, ptr noundef %1) unna
   %19 = load ptr, ptr @next_frame, align 4, !tbaa !6
   store ptr null, ptr @next_frame, align 4, !tbaa !6
   %20 = icmp eq ptr %19, null
-  br i1 %20, label %21, label %12, !llvm.loop !335
+  br i1 %20, label %21, label %12, !llvm.loop !336
 
 21:                                               ; preds = %18, %9
-  %22 = load i32, ptr %4, align 8, !tbaa !329
+  %22 = load i32, ptr %4, align 8, !tbaa !330
   %23 = icmp eq i32 %22, 0
   br i1 %23, label %54, label %24
 
@@ -15544,14 +15366,14 @@ define internal fastcc void @turn(ptr nocapture noundef %0, ptr noundef %1) unna
 28:                                               ; preds = %24
   %29 = load ptr, ptr @fa_turn_site, align 4, !tbaa !6
   %30 = getelementptr inbounds %struct.FaExecutor, ptr %0, i32 0, i32 23
-  %31 = load i32, ptr %30, align 8, !tbaa !336
+  %31 = load i32, ptr %30, align 8, !tbaa !337
   %32 = icmp sgt i32 %31, 0
   br i1 %32, label %36, label %43
 
 33:                                               ; preds = %36
   %34 = add nuw nsw i32 %37, 1
   %35 = icmp eq i32 %34, %31
-  br i1 %35, label %41, label %36, !llvm.loop !337
+  br i1 %35, label %41, label %36, !llvm.loop !338
 
 36:                                               ; preds = %28, %33
   %37 = phi i32 [ %34, %33 ], [ 0, %28 ]
@@ -15568,7 +15390,7 @@ define internal fastcc void @turn(ptr nocapture noundef %0, ptr noundef %1) unna
   %44 = getelementptr inbounds %struct.FaExecutor, ptr %0, i32 0, i32 22, i32 %31
   store ptr %29, ptr %44, align 4, !tbaa !6
   %45 = add nsw i32 %31, 1
-  store i32 %45, ptr %30, align 8, !tbaa !336
+  store i32 %45, ptr %30, align 8, !tbaa !337
   br label %46
 
 46:                                               ; preds = %43, %41
@@ -15616,13 +15438,13 @@ define internal fastcc void @deadlock_stop(ptr nocapture noundef readonly %0) un
   store i32 0, ptr @builder_length, align 4, !tbaa !4
   tail call fastcc void @append_c(ptr noundef nonnull @.str.43) #52
   %6 = getelementptr inbounds %struct.FaExecutor, ptr %0, i32 0, i32 20
-  %7 = load ptr, ptr %6, align 8, !tbaa !301
+  %7 = load ptr, ptr %6, align 8, !tbaa !302
   %8 = icmp eq ptr %7, null
   br i1 %8, label %9, label %13
 
 9:                                                ; preds = %5
   %10 = getelementptr inbounds %struct.FaExecutor, ptr %0, i32 0, i32 21
-  %11 = load ptr, ptr %10, align 4, !tbaa !338
+  %11 = load ptr, ptr %10, align 4, !tbaa !339
   %12 = icmp eq ptr %11, null
   br i1 %12, label %17, label %13
 
@@ -15644,34 +15466,34 @@ define internal fastcc void @deadlock_stop(ptr nocapture noundef readonly %0) un
 ; Function Attrs: mustprogress nofree norecurse nounwind optsize willreturn memory(readwrite, inaccessiblemem: none)
 define hidden void @fa_wasm_wake(ptr nocapture noundef %0) local_unnamed_addr #46 {
   %2 = getelementptr inbounds %struct.FaWait, ptr %0, i32 0, i32 9
-  store i32 1, ptr %2, align 8, !tbaa !324
+  store i32 1, ptr %2, align 8, !tbaa !325
   %3 = load ptr, ptr @current_executor, align 4, !tbaa !6
-  %4 = load ptr, ptr %0, align 8, !tbaa !309
+  %4 = load ptr, ptr %0, align 8, !tbaa !310
   %5 = getelementptr inbounds i8, ptr %4, i32 16
   %6 = getelementptr inbounds i8, ptr %4, i32 20
-  store ptr null, ptr %6, align 4, !tbaa !290
+  store ptr null, ptr %6, align 4, !tbaa !291
   %7 = getelementptr inbounds %struct.FaExecutor, ptr %3, i32 0, i32 1
-  %8 = load ptr, ptr %7, align 4, !tbaa !291
+  %8 = load ptr, ptr %7, align 4, !tbaa !292
   %9 = getelementptr inbounds i8, ptr %4, i32 24
-  store ptr %8, ptr %9, align 4, !tbaa !292
+  store ptr %8, ptr %9, align 4, !tbaa !293
   %10 = icmp eq ptr %8, null
   br i1 %10, label %13, label %11
 
 11:                                               ; preds = %1
   %12 = getelementptr inbounds %struct.FaTask, ptr %8, i32 0, i32 1
-  store ptr %5, ptr %12, align 4, !tbaa !290
+  store ptr %5, ptr %12, align 4, !tbaa !291
   br label %14
 
 13:                                               ; preds = %1
-  store ptr %5, ptr %3, align 8, !tbaa !293
+  store ptr %5, ptr %3, align 8, !tbaa !294
   br label %14
 
 14:                                               ; preds = %11, %13
-  store ptr %5, ptr %7, align 4, !tbaa !291
+  store ptr %5, ptr %7, align 4, !tbaa !292
   %15 = getelementptr inbounds %struct.FaExecutor, ptr %3, i32 0, i32 2
-  %16 = load i64, ptr %15, align 8, !tbaa !294
+  %16 = load i64, ptr %15, align 8, !tbaa !295
   %17 = add nsw i64 %16, 1
-  store i64 %17, ptr %15, align 8, !tbaa !294
+  store i64 %17, ptr %15, align 8, !tbaa !295
   %18 = getelementptr inbounds i8, ptr %4, i32 28
   store atomic i32 1, ptr %18 release, align 4
   ret void
@@ -15679,19 +15501,19 @@ define hidden void @fa_wasm_wake(ptr nocapture noundef %0) local_unnamed_addr #4
 
 ; Function Attrs: nounwind optsize
 define hidden noundef i32 @fa_blocking_submit(ptr noundef %0, ptr nocapture noundef writeonly %1, ptr nocapture noundef readnone %2) local_unnamed_addr #3 {
-  %4 = load ptr, ptr %0, align 4, !tbaa !339
+  %4 = load ptr, ptr %0, align 4, !tbaa !340
   tail call void %4(ptr noundef nonnull %0) #53
   %5 = getelementptr inbounds %struct.FaJob, ptr %0, i32 0, i32 5
-  store i32 2, ptr %5, align 4, !tbaa !341
+  store i32 2, ptr %5, align 4, !tbaa !342
   %6 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 9
-  store i32 1, ptr %6, align 8, !tbaa !324
+  store i32 1, ptr %6, align 8, !tbaa !325
   ret i32 0
 }
 
 ; Function Attrs: nounwind optsize
 define hidden void @fa_blocking_cancel(ptr noundef %0) local_unnamed_addr #3 {
   %2 = getelementptr inbounds %struct.FaJob, ptr %0, i32 0, i32 1
-  %3 = load ptr, ptr %2, align 4, !tbaa !342
+  %3 = load ptr, ptr %2, align 4, !tbaa !343
   tail call void %3(ptr noundef %0) #53
   ret void
 }
@@ -15750,9 +15572,9 @@ define hidden noundef i32 @fa_mutex_lock_async(ptr noundef %0, ptr noundef %1, p
 
 16:                                               ; preds = %12
   %17 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 9
-  store i32 1, ptr %17, align 8, !tbaa !324
+  store i32 1, ptr %17, align 8, !tbaa !325
   %18 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 10
-  store i32 0, ptr %18, align 4, !tbaa !325
+  store i32 0, ptr %18, align 4, !tbaa !326
   %19 = load i32, ptr @fa_coop_budget, align 4, !tbaa !23
   %20 = add nsw i32 %19, -1
   store i32 %20, ptr @fa_coop_budget, align 4, !tbaa !23
@@ -15775,36 +15597,36 @@ define hidden noundef i32 @fa_mutex_lock_async(ptr noundef %0, ptr noundef %1, p
 ; Function Attrs: nounwind optsize
 define internal fastcc void @line_push(ptr nocapture noundef %0, ptr noundef %1, ptr noundef %2, ptr noundef %3) unnamed_addr #3 {
   %5 = tail call fastcc ptr @executor() #52
-  store ptr %2, ptr %1, align 8, !tbaa !309
+  store ptr %2, ptr %1, align 8, !tbaa !310
   %6 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 1
-  store ptr %5, ptr %6, align 4, !tbaa !311
+  store ptr %5, ptr %6, align 4, !tbaa !312
   %7 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 5
-  store ptr %3, ptr %7, align 4, !tbaa !343
+  store ptr %3, ptr %7, align 4, !tbaa !344
   %8 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 9
-  store i32 0, ptr %8, align 8, !tbaa !324
+  store i32 0, ptr %8, align 8, !tbaa !325
   %9 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 10
-  store i32 0, ptr %9, align 4, !tbaa !325
+  store i32 0, ptr %9, align 4, !tbaa !326
   %10 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 8
-  store i64 -1, ptr %10, align 8, !tbaa !312
+  store i64 -1, ptr %10, align 8, !tbaa !313
   %11 = load ptr, ptr %0, align 4, !tbaa !6
   %12 = icmp eq ptr %11, null
   %13 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 2
   br i1 %12, label %14, label %16
 
 14:                                               ; preds = %4
-  store ptr %1, ptr %13, align 8, !tbaa !344
+  store ptr %1, ptr %13, align 8, !tbaa !345
   %15 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 3
-  store ptr %1, ptr %15, align 4, !tbaa !345
+  store ptr %1, ptr %15, align 4, !tbaa !346
   br label %21
 
 16:                                               ; preds = %4
-  store ptr %11, ptr %13, align 8, !tbaa !344
+  store ptr %11, ptr %13, align 8, !tbaa !345
   %17 = getelementptr inbounds %struct.FaWait, ptr %11, i32 0, i32 3
-  %18 = load ptr, ptr %17, align 4, !tbaa !345
+  %18 = load ptr, ptr %17, align 4, !tbaa !346
   %19 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 3
-  store ptr %18, ptr %19, align 4, !tbaa !345
+  store ptr %18, ptr %19, align 4, !tbaa !346
   %20 = getelementptr inbounds %struct.FaWait, ptr %18, i32 0, i32 2
-  store ptr %1, ptr %20, align 8, !tbaa !344
+  store ptr %1, ptr %20, align 8, !tbaa !345
   br label %21
 
 21:                                               ; preds = %16, %14
@@ -15813,9 +15635,9 @@ define internal fastcc void @line_push(ptr nocapture noundef %0, ptr noundef %1,
   %23 = getelementptr inbounds i8, ptr %2, i32 28
   store atomic i32 2, ptr %23 release, align 4
   %24 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 21
-  store ptr %3, ptr %24, align 4, !tbaa !338
+  store ptr %3, ptr %24, align 4, !tbaa !339
   %25 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 7
-  %26 = load ptr, ptr %25, align 8, !tbaa !300
+  %26 = load ptr, ptr %25, align 8, !tbaa !301
   %27 = icmp eq ptr %26, %2
   %28 = icmp eq ptr %26, null
   %29 = or i1 %27, %28
@@ -15823,7 +15645,7 @@ define internal fastcc void @line_push(ptr nocapture noundef %0, ptr noundef %1,
 
 30:                                               ; preds = %21
   %31 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 20
-  store ptr %3, ptr %31, align 8, !tbaa !301
+  store ptr %3, ptr %31, align 8, !tbaa !302
   br label %32
 
 32:                                               ; preds = %21, %30
@@ -15861,18 +15683,18 @@ define hidden void @fa_mutex_unlock(ptr noundef %0) local_unnamed_addr #3 {
 
 7:                                                ; preds = %3
   %8 = getelementptr inbounds %struct.FaWait, ptr %5, i32 0, i32 2
-  %9 = load ptr, ptr %8, align 8, !tbaa !344
+  %9 = load ptr, ptr %8, align 8, !tbaa !345
   %10 = icmp eq ptr %9, %5
   br i1 %10, label %19, label %11
 
 11:                                               ; preds = %7
   %12 = getelementptr inbounds %struct.FaWait, ptr %5, i32 0, i32 3
-  %13 = load ptr, ptr %12, align 4, !tbaa !345
+  %13 = load ptr, ptr %12, align 4, !tbaa !346
   %14 = getelementptr inbounds %struct.FaWait, ptr %13, i32 0, i32 2
-  store ptr %9, ptr %14, align 8, !tbaa !344
-  %15 = load ptr, ptr %8, align 8, !tbaa !344
+  store ptr %9, ptr %14, align 8, !tbaa !345
+  %15 = load ptr, ptr %8, align 8, !tbaa !345
   %16 = getelementptr inbounds %struct.FaWait, ptr %15, i32 0, i32 3
-  store ptr %13, ptr %16, align 4, !tbaa !345
+  store ptr %13, ptr %16, align 4, !tbaa !346
   %17 = load ptr, ptr %4, align 4, !tbaa !6
   %18 = icmp eq ptr %17, %5
   br i1 %18, label %19, label %21
@@ -15883,11 +15705,11 @@ define hidden void @fa_mutex_unlock(ptr noundef %0) local_unnamed_addr #3 {
   br label %21
 
 21:                                               ; preds = %19, %11
-  store ptr null, ptr %8, align 8, !tbaa !344
+  store ptr null, ptr %8, align 8, !tbaa !345
   %22 = getelementptr inbounds %struct.FaWait, ptr %5, i32 0, i32 3
-  store ptr null, ptr %22, align 4, !tbaa !345
+  store ptr null, ptr %22, align 4, !tbaa !346
   %23 = getelementptr inbounds %struct.FaWait, ptr %5, i32 0, i32 9
-  store i32 1, ptr %23, align 8, !tbaa !324
+  store i32 1, ptr %23, align 8, !tbaa !325
   tail call fastcc void @wake(ptr noundef nonnull %5) #52
   br label %26
 
@@ -15906,46 +15728,46 @@ define hidden void @fa_mutex_unlock(ptr noundef %0) local_unnamed_addr #3 {
 
 ; Function Attrs: mustprogress nofree norecurse nounwind optsize willreturn memory(readwrite, inaccessiblemem: none)
 define internal fastcc void @wake(ptr nocapture noundef %0) unnamed_addr #46 {
-  %2 = load ptr, ptr %0, align 8, !tbaa !309
+  %2 = load ptr, ptr %0, align 8, !tbaa !310
   %3 = getelementptr inbounds i8, ptr %2, i32 16
   %4 = getelementptr inbounds %struct.FaWait, ptr %0, i32 0, i32 1
-  %5 = load ptr, ptr %4, align 4, !tbaa !311
+  %5 = load ptr, ptr %4, align 4, !tbaa !312
   %6 = load ptr, ptr @current_executor, align 4, !tbaa !6
   %7 = icmp eq ptr %5, %6
   br i1 %7, label %8, label %22
 
 8:                                                ; preds = %1
   %9 = getelementptr inbounds i8, ptr %2, i32 20
-  store ptr null, ptr %9, align 4, !tbaa !290
+  store ptr null, ptr %9, align 4, !tbaa !291
   %10 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 1
-  %11 = load ptr, ptr %10, align 4, !tbaa !291
+  %11 = load ptr, ptr %10, align 4, !tbaa !292
   %12 = getelementptr inbounds i8, ptr %2, i32 24
-  store ptr %11, ptr %12, align 4, !tbaa !292
+  store ptr %11, ptr %12, align 4, !tbaa !293
   %13 = icmp eq ptr %11, null
   br i1 %13, label %16, label %14
 
 14:                                               ; preds = %8
   %15 = getelementptr inbounds %struct.FaTask, ptr %11, i32 0, i32 1
-  store ptr %3, ptr %15, align 4, !tbaa !290
+  store ptr %3, ptr %15, align 4, !tbaa !291
   br label %17
 
 16:                                               ; preds = %8
-  store ptr %3, ptr %5, align 8, !tbaa !293
+  store ptr %3, ptr %5, align 8, !tbaa !294
   br label %17
 
 17:                                               ; preds = %14, %16
-  store ptr %3, ptr %10, align 4, !tbaa !291
+  store ptr %3, ptr %10, align 4, !tbaa !292
   %18 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 2
-  %19 = load i64, ptr %18, align 8, !tbaa !294
+  %19 = load i64, ptr %18, align 8, !tbaa !295
   %20 = add nsw i64 %19, 1
-  store i64 %20, ptr %18, align 8, !tbaa !294
+  store i64 %20, ptr %18, align 8, !tbaa !295
   %21 = getelementptr inbounds i8, ptr %2, i32 28
   store atomic i32 1, ptr %21 release, align 4
   br label %31
 
 22:                                               ; preds = %1
   %23 = getelementptr inbounds %struct.FaWait, ptr %0, i32 0, i32 10
-  store i32 1, ptr %23, align 4, !tbaa !325
+  store i32 1, ptr %23, align 4, !tbaa !326
   %24 = getelementptr inbounds i8, ptr %2, i32 28
   store atomic i32 5, ptr %24 release, align 4
   %25 = getelementptr inbounds i8, ptr %2, i32 20
@@ -15965,25 +15787,25 @@ define internal fastcc void @wake(ptr nocapture noundef %0) unnamed_addr #46 {
 ; Function Attrs: nounwind optsize
 define hidden void @fa_mutex_cancel(ptr noundef %0, ptr noundef %1) local_unnamed_addr #3 {
   %3 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 9
-  %4 = load i32, ptr %3, align 8, !tbaa !324
+  %4 = load i32, ptr %3, align 8, !tbaa !325
   %5 = icmp eq i32 %4, 0
   br i1 %5, label %6, label %23
 
 6:                                                ; preds = %2
   %7 = getelementptr inbounds %struct.FaMutex, ptr %0, i32 0, i32 3
   %8 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 2
-  %9 = load ptr, ptr %8, align 8, !tbaa !344
+  %9 = load ptr, ptr %8, align 8, !tbaa !345
   %10 = icmp eq ptr %9, %1
   br i1 %10, label %19, label %11
 
 11:                                               ; preds = %6
   %12 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 3
-  %13 = load ptr, ptr %12, align 4, !tbaa !345
+  %13 = load ptr, ptr %12, align 4, !tbaa !346
   %14 = getelementptr inbounds %struct.FaWait, ptr %13, i32 0, i32 2
-  store ptr %9, ptr %14, align 8, !tbaa !344
-  %15 = load ptr, ptr %8, align 8, !tbaa !344
+  store ptr %9, ptr %14, align 8, !tbaa !345
+  %15 = load ptr, ptr %8, align 8, !tbaa !345
   %16 = getelementptr inbounds %struct.FaWait, ptr %15, i32 0, i32 3
-  store ptr %13, ptr %16, align 4, !tbaa !345
+  store ptr %13, ptr %16, align 4, !tbaa !346
   %17 = load ptr, ptr %7, align 4, !tbaa !6
   %18 = icmp eq ptr %17, %1
   br i1 %18, label %19, label %21
@@ -15994,9 +15816,9 @@ define hidden void @fa_mutex_cancel(ptr noundef %0, ptr noundef %1) local_unname
   br label %21
 
 21:                                               ; preds = %11, %19
-  store ptr null, ptr %8, align 8, !tbaa !344
+  store ptr null, ptr %8, align 8, !tbaa !345
   %22 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 3
-  store ptr null, ptr %22, align 4, !tbaa !345
+  store ptr null, ptr %22, align 4, !tbaa !346
   tail call void @fa_shared_release(ptr noundef nonnull %0) #52
   br label %24
 
@@ -16012,14 +15834,14 @@ define hidden void @fa_mutex_cancel(ptr noundef %0, ptr noundef %1) local_unname
 ; Function Attrs: nofree norecurse nounwind optsize memory(readwrite, inaccessiblemem: none)
 define internal fastcc void @forget_remote_wake(ptr nocapture noundef readonly %0) unnamed_addr #35 {
   %2 = getelementptr inbounds %struct.FaWait, ptr %0, i32 0, i32 10
-  %3 = load i32, ptr %2, align 4, !tbaa !325
+  %3 = load i32, ptr %2, align 4, !tbaa !326
   %4 = icmp eq i32 %3, 0
   br i1 %4, label %28, label %5
 
 5:                                                ; preds = %1
   %6 = load ptr, ptr @current_executor, align 4, !tbaa !6
   tail call fastcc void @drain_remote(ptr noundef %6) #52
-  %7 = load ptr, ptr %0, align 8, !tbaa !309
+  %7 = load ptr, ptr %0, align 8, !tbaa !310
   %8 = getelementptr inbounds i8, ptr %7, i32 28
   %9 = load atomic i32, ptr %8 acquire, align 4
   %10 = icmp eq i32 %9, 1
@@ -16027,19 +15849,19 @@ define internal fastcc void @forget_remote_wake(ptr nocapture noundef readonly %
 
 11:                                               ; preds = %5
   %12 = getelementptr inbounds i8, ptr %7, i32 24
-  %13 = load ptr, ptr %12, align 4, !tbaa !292
+  %13 = load ptr, ptr %12, align 4, !tbaa !293
   %14 = icmp eq ptr %13, null
   %15 = getelementptr inbounds i8, ptr %7, i32 20
-  %16 = load ptr, ptr %15, align 4, !tbaa !290
+  %16 = load ptr, ptr %15, align 4, !tbaa !291
   br i1 %14, label %19, label %17
 
 17:                                               ; preds = %11
   %18 = getelementptr inbounds %struct.FaTask, ptr %13, i32 0, i32 1
-  store ptr %16, ptr %18, align 4, !tbaa !290
+  store ptr %16, ptr %18, align 4, !tbaa !291
   br label %20
 
 19:                                               ; preds = %11
-  store ptr %16, ptr %6, align 8, !tbaa !293
+  store ptr %16, ptr %6, align 8, !tbaa !294
   br label %20
 
 20:                                               ; preds = %17, %19
@@ -16048,12 +15870,12 @@ define internal fastcc void @forget_remote_wake(ptr nocapture noundef readonly %
   %23 = getelementptr inbounds %struct.FaTask, ptr %16, i32 0, i32 2
   %24 = select i1 %21, ptr %22, ptr %23
   store ptr %13, ptr %24, align 4, !tbaa !6
-  store ptr null, ptr %15, align 4, !tbaa !290
-  store ptr null, ptr %12, align 4, !tbaa !292
+  store ptr null, ptr %15, align 4, !tbaa !291
+  store ptr null, ptr %12, align 4, !tbaa !293
   %25 = getelementptr inbounds %struct.FaExecutor, ptr %6, i32 0, i32 2
-  %26 = load i64, ptr %25, align 8, !tbaa !294
+  %26 = load i64, ptr %25, align 8, !tbaa !295
   %27 = add nsw i64 %26, -1
-  store i64 %27, ptr %25, align 8, !tbaa !294
+  store i64 %27, ptr %25, align 8, !tbaa !295
   br label %28
 
 28:                                               ; preds = %5, %20, %1
@@ -16065,19 +15887,19 @@ define hidden ptr @fa_channel_new(i64 noundef %0, i64 noundef %1, ptr noundef %2
   %4 = tail call fastcc ptr @shared_new(i32 noundef 240, ptr noundef nonnull @channel_drop) #52
   %5 = tail call i64 @llvm.umin.i64(i64 %0, i64 9223372036854775807)
   %6 = getelementptr inbounds %struct.FaChannel, ptr %4, i32 0, i32 3
-  store i64 %5, ptr %6, align 16, !tbaa !346
+  store i64 %5, ptr %6, align 16, !tbaa !347
   %7 = tail call i64 @llvm.smax.i64(i64 %1, i64 1)
   %8 = getelementptr inbounds %struct.FaChannel, ptr %4, i32 0, i32 4
-  store i64 %7, ptr %8, align 8, !tbaa !349
+  store i64 %7, ptr %8, align 8, !tbaa !350
   %9 = getelementptr inbounds %struct.FaChannel, ptr %4, i32 0, i32 11
-  store ptr %2, ptr %9, align 8, !tbaa !350
+  store ptr %2, ptr %9, align 8, !tbaa !351
   ret ptr %4
 }
 
 ; Function Attrs: nounwind optsize
 define internal void @channel_drop(ptr nocapture noundef readonly %0) #3 {
   %2 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 7
-  %3 = load i64, ptr %2, align 16, !tbaa !351
+  %3 = load i64, ptr %2, align 16, !tbaa !352
   %4 = icmp sgt i64 %3, 0
   br i1 %4, label %5, label %11
 
@@ -16091,42 +15913,42 @@ define internal void @channel_drop(ptr nocapture noundef readonly %0) #3 {
 
 11:                                               ; preds = %31, %1
   %12 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 8
-  %13 = load i64, ptr %12, align 8, !tbaa !352
+  %13 = load i64, ptr %12, align 8, !tbaa !353
   %14 = icmp sgt i64 %13, 0
   br i1 %14, label %35, label %42
 
 15:                                               ; preds = %5, %31
   %16 = phi i64 [ %3, %5 ], [ %32, %31 ]
   %17 = phi i64 [ 0, %5 ], [ %33, %31 ]
-  %18 = load ptr, ptr %6, align 8, !tbaa !350
+  %18 = load ptr, ptr %6, align 8, !tbaa !351
   %19 = icmp eq ptr %18, null
   br i1 %19, label %31, label %20
 
 20:                                               ; preds = %15
-  %21 = load i64, ptr %7, align 8, !tbaa !353
+  %21 = load i64, ptr %7, align 8, !tbaa !354
   %22 = add nsw i64 %21, %17
-  %23 = load i64, ptr %8, align 8, !tbaa !352
+  %23 = load i64, ptr %8, align 8, !tbaa !353
   %24 = srem i64 %22, %23
-  %25 = load ptr, ptr %9, align 16, !tbaa !354
-  %26 = load i64, ptr %10, align 8, !tbaa !349
+  %25 = load ptr, ptr %9, align 16, !tbaa !355
+  %26 = load i64, ptr %10, align 8, !tbaa !350
   %27 = mul nsw i64 %26, %24
   %28 = trunc i64 %27 to i32
   %29 = getelementptr inbounds i8, ptr %25, i32 %28
   tail call void %18(ptr noundef %29) #53
-  %30 = load i64, ptr %2, align 16, !tbaa !351
+  %30 = load i64, ptr %2, align 16, !tbaa !352
   br label %31
 
 31:                                               ; preds = %20, %15
   %32 = phi i64 [ %30, %20 ], [ %16, %15 ]
   %33 = add nuw nsw i64 %17, 1
   %34 = icmp slt i64 %33, %32
-  br i1 %34, label %15, label %11, !llvm.loop !355
+  br i1 %34, label %15, label %11, !llvm.loop !356
 
 35:                                               ; preds = %11
   %36 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 5
-  %37 = load ptr, ptr %36, align 16, !tbaa !354
+  %37 = load ptr, ptr %36, align 16, !tbaa !355
   %38 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 4
-  %39 = load i64, ptr %38, align 8, !tbaa !349
+  %39 = load i64, ptr %38, align 8, !tbaa !350
   %40 = mul nsw i64 %39, %13
   %41 = trunc i64 %40 to i32
   tail call void @fa_free(ptr noundef %37, i32 noundef %41, i32 noundef 16) #53
@@ -16139,7 +15961,7 @@ define internal void @channel_drop(ptr nocapture noundef readonly %0) #3 {
 ; Function Attrs: nounwind optsize
 define hidden noundef i32 @fa_channel_send(ptr nocapture noundef %0, ptr nocapture noundef readonly %1, i32 noundef %2) local_unnamed_addr #3 {
   %4 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 9
-  %5 = load i32, ptr %4, align 16, !tbaa !356
+  %5 = load i32, ptr %4, align 16, !tbaa !357
   %6 = icmp eq i32 %5, 0
   br i1 %6, label %7, label %13
 
@@ -16170,18 +15992,18 @@ define internal fastcc noundef i32 @channel_send_now(ptr nocapture noundef %0, p
 
 6:                                                ; preds = %2
   %7 = getelementptr inbounds %struct.FaWait, ptr %4, i32 0, i32 2
-  %8 = load ptr, ptr %7, align 8, !tbaa !344
+  %8 = load ptr, ptr %7, align 8, !tbaa !345
   %9 = icmp eq ptr %8, %4
   br i1 %9, label %18, label %10
 
 10:                                               ; preds = %6
   %11 = getelementptr inbounds %struct.FaWait, ptr %4, i32 0, i32 3
-  %12 = load ptr, ptr %11, align 4, !tbaa !345
+  %12 = load ptr, ptr %11, align 4, !tbaa !346
   %13 = getelementptr inbounds %struct.FaWait, ptr %12, i32 0, i32 2
-  store ptr %8, ptr %13, align 8, !tbaa !344
-  %14 = load ptr, ptr %7, align 8, !tbaa !344
+  store ptr %8, ptr %13, align 8, !tbaa !345
+  %14 = load ptr, ptr %7, align 8, !tbaa !345
   %15 = getelementptr inbounds %struct.FaWait, ptr %14, i32 0, i32 3
-  store ptr %12, ptr %15, align 4, !tbaa !345
+  store ptr %12, ptr %15, align 4, !tbaa !346
   %16 = load ptr, ptr %3, align 4, !tbaa !6
   %17 = icmp eq ptr %16, %4
   br i1 %17, label %18, label %20
@@ -16192,25 +16014,25 @@ define internal fastcc noundef i32 @channel_send_now(ptr nocapture noundef %0, p
   br label %20
 
 20:                                               ; preds = %18, %10
-  store ptr null, ptr %7, align 8, !tbaa !344
+  store ptr null, ptr %7, align 8, !tbaa !345
   %21 = getelementptr inbounds %struct.FaWait, ptr %4, i32 0, i32 3
-  store ptr null, ptr %21, align 4, !tbaa !345
+  store ptr null, ptr %21, align 4, !tbaa !346
   %22 = getelementptr inbounds %struct.FaWait, ptr %4, i32 0, i32 4
-  %23 = load ptr, ptr %22, align 8, !tbaa !357
+  %23 = load ptr, ptr %22, align 8, !tbaa !358
   %24 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 4
-  %25 = load i64, ptr %24, align 8, !tbaa !349
+  %25 = load i64, ptr %24, align 8, !tbaa !350
   %26 = trunc i64 %25 to i32
   tail call fastcc void @copy_bytes(ptr noundef %23, ptr noundef %1, i32 noundef %26) #52
   %27 = getelementptr inbounds %struct.FaWait, ptr %4, i32 0, i32 9
-  store i32 1, ptr %27, align 8, !tbaa !324
+  store i32 1, ptr %27, align 8, !tbaa !325
   tail call fastcc void @wake(ptr noundef nonnull %4) #52
   br label %35
 
 28:                                               ; preds = %2
   %29 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 7
-  %30 = load i64, ptr %29, align 16, !tbaa !351
+  %30 = load i64, ptr %29, align 16, !tbaa !352
   %31 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 3
-  %32 = load i64, ptr %31, align 16, !tbaa !346
+  %32 = load i64, ptr %31, align 16, !tbaa !347
   %33 = icmp slt i64 %30, %32
   br i1 %33, label %34, label %35
 
@@ -16226,7 +16048,7 @@ define internal fastcc noundef i32 @channel_send_now(ptr nocapture noundef %0, p
 ; Function Attrs: nounwind optsize
 define hidden noundef i32 @fa_channel_send_async(ptr nocapture noundef %0, ptr noundef %1, ptr noundef %2, ptr noundef %3, ptr noundef %4) local_unnamed_addr #3 {
   %6 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 9
-  %7 = load i32, ptr %6, align 16, !tbaa !356
+  %7 = load i32, ptr %6, align 16, !tbaa !357
   %8 = icmp eq i32 %7, 0
   br i1 %8, label %9, label %22
 
@@ -16237,9 +16059,9 @@ define hidden noundef i32 @fa_channel_send_async(ptr nocapture noundef %0, ptr n
 
 12:                                               ; preds = %9
   %13 = getelementptr inbounds %struct.FaWait, ptr %2, i32 0, i32 9
-  store i32 1, ptr %13, align 8, !tbaa !324
+  store i32 1, ptr %13, align 8, !tbaa !325
   %14 = getelementptr inbounds %struct.FaWait, ptr %2, i32 0, i32 10
-  store i32 0, ptr %14, align 4, !tbaa !325
+  store i32 0, ptr %14, align 4, !tbaa !326
   %15 = load i32, ptr @fa_coop_budget, align 4, !tbaa !23
   %16 = add nsw i32 %15, -1
   store i32 %16, ptr @fa_coop_budget, align 4, !tbaa !23
@@ -16252,7 +16074,7 @@ define hidden noundef i32 @fa_channel_send_async(ptr nocapture noundef %0, ptr n
 
 19:                                               ; preds = %9
   %20 = getelementptr inbounds %struct.FaWait, ptr %2, i32 0, i32 4
-  store ptr %1, ptr %20, align 8, !tbaa !357
+  store ptr %1, ptr %20, align 8, !tbaa !358
   %21 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 12
   tail call fastcc void @line_push(ptr noundef nonnull %21, ptr noundef %2, ptr noundef %3, ptr noundef %4) #52
   br label %22
@@ -16274,7 +16096,7 @@ define hidden noundef i32 @fa_channel_receive(ptr nocapture noundef %0, ptr noca
 
 8:                                                ; preds = %6
   %9 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 9
-  %10 = load i32, ptr %9, align 16, !tbaa !356
+  %10 = load i32, ptr %9, align 16, !tbaa !357
   %11 = icmp eq i32 %10, 0
   br i1 %11, label %12, label %13
 
@@ -16290,31 +16112,31 @@ define hidden noundef i32 @fa_channel_receive(ptr nocapture noundef %0, ptr noca
 ; Function Attrs: nounwind optsize
 define internal fastcc noundef i32 @channel_receive_now(ptr nocapture noundef %0, ptr nocapture noundef writeonly %1) unnamed_addr #3 {
   %3 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 7
-  %4 = load i64, ptr %3, align 16, !tbaa !351
+  %4 = load i64, ptr %3, align 16, !tbaa !352
   %5 = icmp sgt i64 %4, 0
   br i1 %5, label %6, label %45
 
 6:                                                ; preds = %2
   %7 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 5
-  %8 = load ptr, ptr %7, align 16, !tbaa !354
+  %8 = load ptr, ptr %7, align 16, !tbaa !355
   %9 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 6
-  %10 = load i64, ptr %9, align 8, !tbaa !353
+  %10 = load i64, ptr %9, align 8, !tbaa !354
   %11 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 4
-  %12 = load i64, ptr %11, align 8, !tbaa !349
+  %12 = load i64, ptr %11, align 8, !tbaa !350
   %13 = mul nsw i64 %12, %10
   %14 = trunc i64 %13 to i32
   %15 = getelementptr inbounds i8, ptr %8, i32 %14
   %16 = trunc i64 %12 to i32
   tail call fastcc void @copy_bytes(ptr noundef %1, ptr noundef %15, i32 noundef %16) #52
-  %17 = load i64, ptr %9, align 8, !tbaa !353
+  %17 = load i64, ptr %9, align 8, !tbaa !354
   %18 = add nsw i64 %17, 1
   %19 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 8
-  %20 = load i64, ptr %19, align 8, !tbaa !352
+  %20 = load i64, ptr %19, align 8, !tbaa !353
   %21 = srem i64 %18, %20
-  store i64 %21, ptr %9, align 8, !tbaa !353
-  %22 = load i64, ptr %3, align 16, !tbaa !351
+  store i64 %21, ptr %9, align 8, !tbaa !354
+  %22 = load i64, ptr %3, align 16, !tbaa !352
   %23 = add nsw i64 %22, -1
-  store i64 %23, ptr %3, align 16, !tbaa !351
+  store i64 %23, ptr %3, align 16, !tbaa !352
   %24 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 12
   %25 = load ptr, ptr %24, align 4, !tbaa !6
   %26 = icmp eq ptr %25, null
@@ -16322,18 +16144,18 @@ define internal fastcc noundef i32 @channel_receive_now(ptr nocapture noundef %0
 
 27:                                               ; preds = %6
   %28 = getelementptr inbounds %struct.FaWait, ptr %25, i32 0, i32 2
-  %29 = load ptr, ptr %28, align 8, !tbaa !344
+  %29 = load ptr, ptr %28, align 8, !tbaa !345
   %30 = icmp eq ptr %29, %25
   br i1 %30, label %39, label %31
 
 31:                                               ; preds = %27
   %32 = getelementptr inbounds %struct.FaWait, ptr %25, i32 0, i32 3
-  %33 = load ptr, ptr %32, align 4, !tbaa !345
+  %33 = load ptr, ptr %32, align 4, !tbaa !346
   %34 = getelementptr inbounds %struct.FaWait, ptr %33, i32 0, i32 2
-  store ptr %29, ptr %34, align 8, !tbaa !344
-  %35 = load ptr, ptr %28, align 8, !tbaa !344
+  store ptr %29, ptr %34, align 8, !tbaa !345
+  %35 = load ptr, ptr %28, align 8, !tbaa !345
   %36 = getelementptr inbounds %struct.FaWait, ptr %35, i32 0, i32 3
-  store ptr %33, ptr %36, align 4, !tbaa !345
+  store ptr %33, ptr %36, align 4, !tbaa !346
   %37 = load ptr, ptr %24, align 4, !tbaa !6
   %38 = icmp eq ptr %37, %25
   br i1 %38, label %39, label %41
@@ -16344,11 +16166,11 @@ define internal fastcc noundef i32 @channel_receive_now(ptr nocapture noundef %0
   br label %41
 
 41:                                               ; preds = %39, %31
-  store ptr null, ptr %28, align 8, !tbaa !344
+  store ptr null, ptr %28, align 8, !tbaa !345
   %42 = getelementptr inbounds %struct.FaWait, ptr %25, i32 0, i32 3
-  store ptr null, ptr %42, align 4, !tbaa !345
+  store ptr null, ptr %42, align 4, !tbaa !346
   %43 = getelementptr inbounds %struct.FaWait, ptr %25, i32 0, i32 4
-  %44 = load ptr, ptr %43, align 8, !tbaa !357
+  %44 = load ptr, ptr %43, align 8, !tbaa !358
   tail call fastcc void @channel_push(ptr noundef nonnull %0, ptr noundef %44) #52
   br label %70
 
@@ -16360,18 +16182,18 @@ define internal fastcc noundef i32 @channel_receive_now(ptr nocapture noundef %0
 
 49:                                               ; preds = %45
   %50 = getelementptr inbounds %struct.FaWait, ptr %47, i32 0, i32 2
-  %51 = load ptr, ptr %50, align 8, !tbaa !344
+  %51 = load ptr, ptr %50, align 8, !tbaa !345
   %52 = icmp eq ptr %51, %47
   br i1 %52, label %61, label %53
 
 53:                                               ; preds = %49
   %54 = getelementptr inbounds %struct.FaWait, ptr %47, i32 0, i32 3
-  %55 = load ptr, ptr %54, align 4, !tbaa !345
+  %55 = load ptr, ptr %54, align 4, !tbaa !346
   %56 = getelementptr inbounds %struct.FaWait, ptr %55, i32 0, i32 2
-  store ptr %51, ptr %56, align 8, !tbaa !344
-  %57 = load ptr, ptr %50, align 8, !tbaa !344
+  store ptr %51, ptr %56, align 8, !tbaa !345
+  %57 = load ptr, ptr %50, align 8, !tbaa !345
   %58 = getelementptr inbounds %struct.FaWait, ptr %57, i32 0, i32 3
-  store ptr %55, ptr %58, align 4, !tbaa !345
+  store ptr %55, ptr %58, align 4, !tbaa !346
   %59 = load ptr, ptr %46, align 4, !tbaa !6
   %60 = icmp eq ptr %59, %47
   br i1 %60, label %61, label %63
@@ -16382,13 +16204,13 @@ define internal fastcc noundef i32 @channel_receive_now(ptr nocapture noundef %0
   br label %63
 
 63:                                               ; preds = %61, %53
-  store ptr null, ptr %50, align 8, !tbaa !344
+  store ptr null, ptr %50, align 8, !tbaa !345
   %64 = getelementptr inbounds %struct.FaWait, ptr %47, i32 0, i32 3
-  store ptr null, ptr %64, align 4, !tbaa !345
+  store ptr null, ptr %64, align 4, !tbaa !346
   %65 = getelementptr inbounds %struct.FaWait, ptr %47, i32 0, i32 4
-  %66 = load ptr, ptr %65, align 8, !tbaa !357
+  %66 = load ptr, ptr %65, align 8, !tbaa !358
   %67 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 4
-  %68 = load i64, ptr %67, align 8, !tbaa !349
+  %68 = load i64, ptr %67, align 8, !tbaa !350
   %69 = trunc i64 %68 to i32
   tail call fastcc void @copy_bytes(ptr noundef %1, ptr noundef %66, i32 noundef %69) #52
   br label %70
@@ -16396,7 +16218,7 @@ define internal fastcc noundef i32 @channel_receive_now(ptr nocapture noundef %0
 70:                                               ; preds = %63, %41
   %71 = phi ptr [ %25, %41 ], [ %47, %63 ]
   %72 = getelementptr inbounds %struct.FaWait, ptr %71, i32 0, i32 9
-  store i32 1, ptr %72, align 8, !tbaa !324
+  store i32 1, ptr %72, align 8, !tbaa !325
   tail call fastcc void @wake(ptr noundef nonnull %71) #52
   br label %73
 
@@ -16413,9 +16235,9 @@ define hidden noundef i32 @fa_channel_receive_async(ptr nocapture noundef %0, pt
 
 8:                                                ; preds = %5
   %9 = getelementptr inbounds %struct.FaWait, ptr %2, i32 0, i32 9
-  store i32 1, ptr %9, align 8, !tbaa !324
+  store i32 1, ptr %9, align 8, !tbaa !325
   %10 = getelementptr inbounds %struct.FaWait, ptr %2, i32 0, i32 10
-  store i32 0, ptr %10, align 4, !tbaa !325
+  store i32 0, ptr %10, align 4, !tbaa !326
   %11 = load i32, ptr @fa_coop_budget, align 4, !tbaa !23
   %12 = add nsw i32 %11, -1
   store i32 %12, ptr @fa_coop_budget, align 4, !tbaa !23
@@ -16428,13 +16250,13 @@ define hidden noundef i32 @fa_channel_receive_async(ptr nocapture noundef %0, pt
 
 15:                                               ; preds = %5
   %16 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 9
-  %17 = load i32, ptr %16, align 16, !tbaa !356
+  %17 = load i32, ptr %16, align 16, !tbaa !357
   %18 = icmp eq i32 %17, 0
   br i1 %18, label %19, label %22
 
 19:                                               ; preds = %15
   %20 = getelementptr inbounds %struct.FaWait, ptr %2, i32 0, i32 4
-  store ptr %1, ptr %20, align 8, !tbaa !357
+  store ptr %1, ptr %20, align 8, !tbaa !358
   %21 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 13
   tail call fastcc void @line_push(ptr noundef nonnull %21, ptr noundef %2, ptr noundef %3, ptr noundef %4) #52
   br label %22
@@ -16447,14 +16269,14 @@ define hidden noundef i32 @fa_channel_receive_async(ptr nocapture noundef %0, pt
 ; Function Attrs: nofree norecurse nounwind optsize memory(readwrite, inaccessiblemem: none)
 define hidden i32 @fa_channel_cancel(ptr nocapture noundef %0, ptr noundef %1) local_unnamed_addr #35 {
   %3 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 9
-  %4 = load i32, ptr %3, align 8, !tbaa !324
+  %4 = load i32, ptr %3, align 8, !tbaa !325
   %5 = icmp eq i32 %4, 0
   br i1 %5, label %6, label %36
 
 6:                                                ; preds = %2
   %7 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 12
   %8 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 13
-  %9 = load ptr, ptr %8, align 16, !tbaa !358
+  %9 = load ptr, ptr %8, align 16, !tbaa !359
   br label %10
 
 10:                                               ; preds = %15, %6
@@ -16468,25 +16290,25 @@ define hidden i32 @fa_channel_cancel(ptr nocapture noundef %0, ptr noundef %1) l
 
 15:                                               ; preds = %13
   %16 = getelementptr inbounds %struct.FaWait, ptr %11, i32 0, i32 2
-  %17 = load ptr, ptr %16, align 8, !tbaa !344
+  %17 = load ptr, ptr %16, align 8, !tbaa !345
   %18 = icmp eq ptr %17, %9
-  br i1 %18, label %19, label %10, !llvm.loop !359
+  br i1 %18, label %19, label %10, !llvm.loop !360
 
 19:                                               ; preds = %15, %13, %10
   %20 = phi ptr [ %7, %10 ], [ %8, %13 ], [ %7, %15 ]
   %21 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 2
-  %22 = load ptr, ptr %21, align 8, !tbaa !344
+  %22 = load ptr, ptr %21, align 8, !tbaa !345
   %23 = icmp eq ptr %22, %1
   br i1 %23, label %32, label %24
 
 24:                                               ; preds = %19
   %25 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 3
-  %26 = load ptr, ptr %25, align 4, !tbaa !345
+  %26 = load ptr, ptr %25, align 4, !tbaa !346
   %27 = getelementptr inbounds %struct.FaWait, ptr %26, i32 0, i32 2
-  store ptr %22, ptr %27, align 8, !tbaa !344
-  %28 = load ptr, ptr %21, align 8, !tbaa !344
+  store ptr %22, ptr %27, align 8, !tbaa !345
+  %28 = load ptr, ptr %21, align 8, !tbaa !345
   %29 = getelementptr inbounds %struct.FaWait, ptr %28, i32 0, i32 3
-  store ptr %26, ptr %29, align 4, !tbaa !345
+  store ptr %26, ptr %29, align 4, !tbaa !346
   %30 = load ptr, ptr %20, align 4, !tbaa !6
   %31 = icmp eq ptr %30, %1
   br i1 %31, label %32, label %34
@@ -16497,9 +16319,9 @@ define hidden i32 @fa_channel_cancel(ptr nocapture noundef %0, ptr noundef %1) l
   br label %34
 
 34:                                               ; preds = %32, %24
-  store ptr null, ptr %21, align 8, !tbaa !344
+  store ptr null, ptr %21, align 8, !tbaa !345
   %35 = getelementptr inbounds %struct.FaWait, ptr %1, i32 0, i32 3
-  store ptr null, ptr %35, align 4, !tbaa !345
+  store ptr null, ptr %35, align 4, !tbaa !346
   br label %37
 
 36:                                               ; preds = %2
@@ -16520,7 +16342,7 @@ define hidden i32 @fa_wait_status(ptr nocapture noundef readonly %0) local_unnam
 ; Function Attrs: nofree norecurse nounwind optsize memory(readwrite, inaccessiblemem: none)
 define hidden void @fa_channel_close(ptr nocapture noundef %0) local_unnamed_addr #35 {
   %2 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 9
-  store i32 1, ptr %2, align 16, !tbaa !356
+  store i32 1, ptr %2, align 16, !tbaa !357
   %3 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 13
   %4 = load ptr, ptr %3, align 4, !tbaa !6
   %5 = icmp eq ptr %4, null
@@ -16535,18 +16357,18 @@ define hidden void @fa_channel_close(ptr nocapture noundef %0) local_unnamed_add
 10:                                               ; preds = %1, %25
   %11 = phi ptr [ %28, %25 ], [ %4, %1 ]
   %12 = getelementptr inbounds %struct.FaWait, ptr %11, i32 0, i32 2
-  %13 = load ptr, ptr %12, align 8, !tbaa !344
+  %13 = load ptr, ptr %12, align 8, !tbaa !345
   %14 = icmp eq ptr %13, %11
   br i1 %14, label %23, label %15
 
 15:                                               ; preds = %10
   %16 = getelementptr inbounds %struct.FaWait, ptr %11, i32 0, i32 3
-  %17 = load ptr, ptr %16, align 4, !tbaa !345
+  %17 = load ptr, ptr %16, align 4, !tbaa !346
   %18 = getelementptr inbounds %struct.FaWait, ptr %17, i32 0, i32 2
-  store ptr %13, ptr %18, align 8, !tbaa !344
-  %19 = load ptr, ptr %12, align 8, !tbaa !344
+  store ptr %13, ptr %18, align 8, !tbaa !345
+  %19 = load ptr, ptr %12, align 8, !tbaa !345
   %20 = getelementptr inbounds %struct.FaWait, ptr %19, i32 0, i32 3
-  store ptr %17, ptr %20, align 4, !tbaa !345
+  store ptr %17, ptr %20, align 4, !tbaa !346
   %21 = load ptr, ptr %3, align 4, !tbaa !6
   %22 = icmp eq ptr %21, %11
   br i1 %22, label %23, label %25
@@ -16557,31 +16379,31 @@ define hidden void @fa_channel_close(ptr nocapture noundef %0) local_unnamed_add
   br label %25
 
 25:                                               ; preds = %15, %23
-  store ptr null, ptr %12, align 8, !tbaa !344
+  store ptr null, ptr %12, align 8, !tbaa !345
   %26 = getelementptr inbounds %struct.FaWait, ptr %11, i32 0, i32 3
-  store ptr null, ptr %26, align 4, !tbaa !345
+  store ptr null, ptr %26, align 4, !tbaa !346
   %27 = getelementptr inbounds %struct.FaWait, ptr %11, i32 0, i32 9
-  store i32 2, ptr %27, align 8, !tbaa !324
+  store i32 2, ptr %27, align 8, !tbaa !325
   tail call fastcc void @wake(ptr noundef nonnull %11) #52
   %28 = load ptr, ptr %3, align 4, !tbaa !6
   %29 = icmp eq ptr %28, null
-  br i1 %29, label %6, label %10, !llvm.loop !360
+  br i1 %29, label %6, label %10, !llvm.loop !361
 
 30:                                               ; preds = %6, %45
   %31 = phi ptr [ %48, %45 ], [ %8, %6 ]
   %32 = getelementptr inbounds %struct.FaWait, ptr %31, i32 0, i32 2
-  %33 = load ptr, ptr %32, align 8, !tbaa !344
+  %33 = load ptr, ptr %32, align 8, !tbaa !345
   %34 = icmp eq ptr %33, %31
   br i1 %34, label %43, label %35
 
 35:                                               ; preds = %30
   %36 = getelementptr inbounds %struct.FaWait, ptr %31, i32 0, i32 3
-  %37 = load ptr, ptr %36, align 4, !tbaa !345
+  %37 = load ptr, ptr %36, align 4, !tbaa !346
   %38 = getelementptr inbounds %struct.FaWait, ptr %37, i32 0, i32 2
-  store ptr %33, ptr %38, align 8, !tbaa !344
-  %39 = load ptr, ptr %32, align 8, !tbaa !344
+  store ptr %33, ptr %38, align 8, !tbaa !345
+  %39 = load ptr, ptr %32, align 8, !tbaa !345
   %40 = getelementptr inbounds %struct.FaWait, ptr %39, i32 0, i32 3
-  store ptr %37, ptr %40, align 4, !tbaa !345
+  store ptr %37, ptr %40, align 4, !tbaa !346
   %41 = load ptr, ptr %7, align 4, !tbaa !6
   %42 = icmp eq ptr %41, %31
   br i1 %42, label %43, label %45
@@ -16592,15 +16414,15 @@ define hidden void @fa_channel_close(ptr nocapture noundef %0) local_unnamed_add
   br label %45
 
 45:                                               ; preds = %43, %35
-  store ptr null, ptr %32, align 8, !tbaa !344
+  store ptr null, ptr %32, align 8, !tbaa !345
   %46 = getelementptr inbounds %struct.FaWait, ptr %31, i32 0, i32 3
-  store ptr null, ptr %46, align 4, !tbaa !345
+  store ptr null, ptr %46, align 4, !tbaa !346
   %47 = getelementptr inbounds %struct.FaWait, ptr %31, i32 0, i32 9
-  store i32 2, ptr %47, align 8, !tbaa !324
+  store i32 2, ptr %47, align 8, !tbaa !325
   tail call fastcc void @wake(ptr noundef nonnull %31) #52
   %48 = load ptr, ptr %7, align 4, !tbaa !6
   %49 = icmp eq ptr %48, null
-  br i1 %49, label %50, label %30, !llvm.loop !361
+  br i1 %49, label %50, label %30, !llvm.loop !362
 
 50:                                               ; preds = %45, %6
   ret void
@@ -16671,7 +16493,7 @@ define internal fastcc i128 @divide_u128(i128 noundef %0, i128 noundef %1, ptr n
   %12 = shl nuw i128 %11, 64
   %13 = zext i64 %54 to i128
   %14 = or disjoint i128 %12, %13
-  store i128 %14, ptr %2, align 16, !tbaa !362
+  store i128 %14, ptr %2, align 16, !tbaa !363
   %15 = zext i64 %55 to i128
   %16 = shl nuw i128 %15, 64
   %17 = zext i64 %56 to i128
@@ -16728,7 +16550,7 @@ define internal fastcc i128 @divide_u128(i128 noundef %0, i128 noundef %1, ptr n
   %56 = phi i64 [ %21, %35 ], [ %51, %49 ], [ %21, %45 ]
   %57 = add nsw i64 %20, -1
   %58 = icmp eq i64 %20, 0
-  br i1 %58, label %10, label %19, !llvm.loop !364
+  br i1 %58, label %10, label %19, !llvm.loop !365
 }
 
 ; Function Attrs: nounwind optsize
@@ -16736,7 +16558,7 @@ define weak hidden i128 @__umodti3(i128 noundef %0, i128 noundef %1) local_unnam
   %3 = alloca i128, align 16
   call void @llvm.lifetime.start.p0(i64 16, ptr nonnull %3) #55
   %4 = call fastcc i128 @divide_u128(i128 noundef %0, i128 noundef %1, ptr noundef nonnull %3) #52
-  %5 = load i128, ptr %3, align 16, !tbaa !362
+  %5 = load i128, ptr %3, align 16, !tbaa !363
   call void @llvm.lifetime.end.p0(i64 16, ptr nonnull %3) #55
   ret i128 %5
 }
@@ -16767,7 +16589,7 @@ define weak hidden i128 @__modti3(i128 noundef %0, i128 noundef %1) local_unname
   %5 = tail call noundef i128 @llvm.abs.i128(i128 %1, i1 false)
   %6 = call fastcc i128 @divide_u128(i128 noundef %4, i128 noundef %5, ptr noundef nonnull %3) #52
   %7 = icmp slt i128 %0, 0
-  %8 = load i128, ptr %3, align 16, !tbaa !362
+  %8 = load i128, ptr %3, align 16, !tbaa !363
   %9 = sub i128 0, %8
   %10 = select i1 %7, i128 %9, i128 %8
   call void @llvm.lifetime.end.p0(i64 16, ptr nonnull %3) #55
@@ -16947,16 +16769,16 @@ define internal fastcc i32 @break_kind(i32 noundef %0) unnamed_addr #49 {
   %56 = add i32 %53, %50
   %57 = lshr i32 %56, 1
   %58 = getelementptr inbounds %struct.Range, ptr @EXTEND, i32 %57
-  %59 = load i32, ptr %58, align 8, !tbaa !134
+  %59 = load i32, ptr %58, align 8, !tbaa !135
   %60 = icmp ugt i32 %59, %0
-  br i1 %60, label %52, label %61, !llvm.loop !365
+  br i1 %60, label %52, label %61, !llvm.loop !366
 
 61:                                               ; preds = %55
   %62 = getelementptr inbounds %struct.Range, ptr @EXTEND, i32 %57, i32 1
-  %63 = load i32, ptr %62, align 4, !tbaa !136
+  %63 = load i32, ptr %62, align 4, !tbaa !137
   %64 = icmp ult i32 %63, %0
   %65 = add nuw i32 %57, 1
-  br i1 %64, label %49, label %83, !llvm.loop !365
+  br i1 %64, label %49, label %83, !llvm.loop !366
 
 66:                                               ; preds = %52, %78
   %67 = phi i32 [ %82, %78 ], [ 0, %52 ]
@@ -16972,16 +16794,16 @@ define internal fastcc i32 @break_kind(i32 noundef %0) unnamed_addr #49 {
   %73 = add i32 %70, %67
   %74 = lshr i32 %73, 1
   %75 = getelementptr inbounds %struct.Range, ptr @PICTOGRAPHIC, i32 %74
-  %76 = load i32, ptr %75, align 8, !tbaa !134
+  %76 = load i32, ptr %75, align 8, !tbaa !135
   %77 = icmp ugt i32 %76, %0
-  br i1 %77, label %69, label %78, !llvm.loop !365
+  br i1 %77, label %69, label %78, !llvm.loop !366
 
 78:                                               ; preds = %72
   %79 = getelementptr inbounds %struct.Range, ptr @PICTOGRAPHIC, i32 %74, i32 1
-  %80 = load i32, ptr %79, align 4, !tbaa !136
+  %80 = load i32, ptr %79, align 4, !tbaa !137
   %81 = icmp ult i32 %80, %0
   %82 = add nuw i32 %74, 1
-  br i1 %81, label %66, label %83, !llvm.loop !365
+  br i1 %81, label %66, label %83, !llvm.loop !366
 
 83:                                               ; preds = %61, %78, %69, %35, %29, %23, %20, %18, %3, %5, %1, %44, %13, %2
   %84 = phi i32 [ 2, %2 ], [ %17, %13 ], [ %48, %44 ], [ 1, %1 ], [ 3, %5 ], [ 3, %3 ], [ 5, %18 ], [ 6, %20 ], [ 8, %23 ], [ 9, %29 ], [ 10, %35 ], [ 0, %69 ], [ 7, %78 ], [ 4, %61 ]
@@ -17033,7 +16855,7 @@ define internal fastcc i32 @at_boundary(ptr nocapture noundef %0, i32 noundef %1
   %31 = tail call fastcc i32 @next_boundary(ptr noundef %3, i32 noundef %11, i32 noundef %30) #52
   store i32 %31, ptr %26, align 4, !tbaa !51
   %32 = icmp ult i32 %31, %1
-  br i1 %32, label %29, label %33, !llvm.loop !366
+  br i1 %32, label %29, label %33, !llvm.loop !367
 
 33:                                               ; preds = %29, %25
   %34 = phi i32 [ %27, %25 ], [ %31, %29 ]
@@ -17061,7 +16883,7 @@ define internal fastcc ptr @take_pages(i32 noundef %0) unnamed_addr #16 {
 
 6:                                                ; preds = %2
   %7 = getelementptr inbounds %struct.FreeSpan, ptr %4, i32 0, i32 1
-  %8 = load i32, ptr %7, align 4, !tbaa !138
+  %8 = load i32, ptr %7, align 4, !tbaa !139
   %9 = icmp ult i32 %8, %0
   br i1 %9, label %2, label %10
 
@@ -17070,17 +16892,17 @@ define internal fastcc ptr @take_pages(i32 noundef %0) unnamed_addr #16 {
   br i1 %11, label %12, label %14
 
 12:                                               ; preds = %10
-  %13 = load ptr, ptr %4, align 4, !tbaa !141
+  %13 = load ptr, ptr %4, align 4, !tbaa !142
   br label %20
 
 14:                                               ; preds = %10
   %15 = shl i32 %0, 16
   %16 = getelementptr inbounds i8, ptr %4, i32 %15
-  %17 = load ptr, ptr %4, align 4, !tbaa !141
-  store ptr %17, ptr %16, align 4, !tbaa !141
+  %17 = load ptr, ptr %4, align 4, !tbaa !142
+  store ptr %17, ptr %16, align 4, !tbaa !142
   %18 = sub i32 %8, %0
   %19 = getelementptr inbounds %struct.FreeSpan, ptr %16, i32 0, i32 1
-  store i32 %18, ptr %19, align 4, !tbaa !138
+  store i32 %18, ptr %19, align 4, !tbaa !139
   br label %20
 
 20:                                               ; preds = %14, %12
@@ -17103,8 +16925,8 @@ define internal fastcc ptr @take_pages(i32 noundef %0) unnamed_addr #16 {
   %30 = getelementptr inbounds i8, ptr %24, i32 %29
   %31 = sub nuw nsw i32 %23, %0
   %32 = getelementptr inbounds %struct.FreeSpan, ptr %30, i32 0, i32 1
-  store i32 %31, ptr %32, align 4, !tbaa !138
-  store ptr null, ptr %30, align 4, !tbaa !141
+  store i32 %31, ptr %32, align 4, !tbaa !139
+  store ptr null, ptr %30, align 4, !tbaa !142
   br label %33
 
 33:                                               ; preds = %33, %28
@@ -17113,10 +16935,10 @@ define internal fastcc ptr @take_pages(i32 noundef %0) unnamed_addr #16 {
   %36 = icmp ne ptr %35, null
   %37 = icmp ult ptr %35, %30
   %38 = and i1 %36, %37
-  br i1 %38, label %33, label %39, !llvm.loop !367
+  br i1 %38, label %33, label %39, !llvm.loop !368
 
 39:                                               ; preds = %33
-  store ptr %35, ptr %30, align 4, !tbaa !141
+  store ptr %35, ptr %30, align 4, !tbaa !142
   store ptr %30, ptr %34, align 4, !tbaa !6
   br label %40
 
@@ -17131,24 +16953,24 @@ declare ptr @fa_pages(i32 noundef) local_unnamed_addr #4
 ; Function Attrs: nounwind optsize
 define internal fastcc void @mark(ptr noundef %0) unnamed_addr #3 {
   %2 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 17
-  %3 = load i32, ptr %2, align 8, !tbaa !236
+  %3 = load i32, ptr %2, align 8, !tbaa !237
   %4 = icmp eq i32 %3, 0
   br i1 %4, label %21, label %5
 
 5:                                                ; preds = %1
   %6 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 14
-  %7 = load i32, ptr %6, align 4, !tbaa !244
+  %7 = load i32, ptr %6, align 4, !tbaa !245
   %8 = icmp eq i32 %7, 0
   br i1 %8, label %9, label %40
 
 9:                                                ; preds = %5
   %10 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 15
-  %11 = load i32, ptr %10, align 8, !tbaa !238
+  %11 = load i32, ptr %10, align 8, !tbaa !239
   %12 = icmp eq i32 %11, 0
   br i1 %12, label %13, label %40
 
 13:                                               ; preds = %9
-  store i32 1, ptr %6, align 4, !tbaa !244
+  store i32 1, ptr %6, align 4, !tbaa !245
   %14 = load ptr, ptr @reactive_pending, align 4, !tbaa !6
   %15 = load i64, ptr @reactive_pending_count, align 8, !tbaa !89
   %16 = tail call fastcc ptr @grow_items(ptr noundef %14, i64 noundef %15, ptr noundef nonnull @reactive_pending_capacity, i32 noundef 4) #52
@@ -17163,14 +16985,14 @@ define internal fastcc void @mark(ptr noundef %0) unnamed_addr #3 {
 
 21:                                               ; preds = %1
   %22 = getelementptr inbounds %struct.FaObserver, ptr %0, i32 0, i32 11
-  %23 = load i32, ptr %22, align 8, !tbaa !225
+  %23 = load i32, ptr %22, align 8, !tbaa !226
   %24 = icmp eq i32 %23, 0
   br i1 %24, label %25, label %40
 
 25:                                               ; preds = %21
-  store i32 1, ptr %22, align 8, !tbaa !225
+  store i32 1, ptr %22, align 8, !tbaa !226
   %26 = getelementptr inbounds %struct.FaSource, ptr %0, i32 0, i32 3
-  %27 = load i64, ptr %26, align 8, !tbaa !368
+  %27 = load i64, ptr %26, align 8, !tbaa !369
   %28 = icmp sgt i64 %27, 0
   br i1 %28, label %29, label %40
 
@@ -17180,15 +17002,15 @@ define internal fastcc void @mark(ptr noundef %0) unnamed_addr #3 {
 
 31:                                               ; preds = %29, %31
   %32 = phi i64 [ 0, %29 ], [ %37, %31 ]
-  %33 = load ptr, ptr %30, align 8, !tbaa !369
+  %33 = load ptr, ptr %30, align 8, !tbaa !370
   %34 = trunc i64 %32 to i32
   %35 = getelementptr inbounds ptr, ptr %33, i32 %34
   %36 = load ptr, ptr %35, align 4, !tbaa !6
   tail call fastcc void @mark(ptr noundef %36) #52
   %37 = add nuw nsw i64 %32, 1
-  %38 = load i64, ptr %26, align 8, !tbaa !368
+  %38 = load i64, ptr %26, align 8, !tbaa !369
   %39 = icmp slt i64 %37, %38
-  br i1 %39, label %31, label %40, !llvm.loop !370
+  br i1 %39, label %31, label %40, !llvm.loop !371
 
 40:                                               ; preds = %31, %25, %21, %5, %9, %13
   ret void
@@ -17200,17 +17022,17 @@ declare void @fa_resume(ptr noundef) local_unnamed_addr #4
 ; Function Attrs: nounwind optsize
 define internal fastcc void @channel_push(ptr nocapture noundef %0, ptr nocapture noundef readonly %1) unnamed_addr #3 {
   %3 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 7
-  %4 = load i64, ptr %3, align 16, !tbaa !351
+  %4 = load i64, ptr %3, align 16, !tbaa !352
   %5 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 8
-  %6 = load i64, ptr %5, align 8, !tbaa !352
+  %6 = load i64, ptr %5, align 8, !tbaa !353
   %7 = icmp eq i64 %4, %6
   br i1 %7, label %13, label %8
 
 8:                                                ; preds = %2
   %9 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 6
-  %10 = load i64, ptr %9, align 8, !tbaa !353
+  %10 = load i64, ptr %9, align 8, !tbaa !354
   %11 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 5
-  %12 = load ptr, ptr %11, align 16, !tbaa !354
+  %12 = load ptr, ptr %11, align 16, !tbaa !355
   br label %63
 
 13:                                               ; preds = %2
@@ -17218,7 +17040,7 @@ define internal fastcc void @channel_push(ptr nocapture noundef %0, ptr nocaptur
   %15 = shl nuw nsw i64 %4, 1
   %16 = select i1 %14, i64 4, i64 %15
   %17 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 4
-  %18 = load i64, ptr %17, align 8, !tbaa !349
+  %18 = load i64, ptr %17, align 8, !tbaa !350
   %19 = mul nsw i64 %18, %16
   %20 = trunc i64 %19 to i32
   %21 = tail call ptr @fa_alloc(i32 noundef %20, i32 noundef 16) #53
@@ -17226,7 +17048,7 @@ define internal fastcc void @channel_push(ptr nocapture noundef %0, ptr nocaptur
   br i1 %22, label %29, label %23
 
 23:                                               ; preds = %13
-  %24 = load i64, ptr %3, align 16, !tbaa !351
+  %24 = load i64, ptr %3, align 16, !tbaa !352
   %25 = icmp sgt i64 %24, 0
   br i1 %25, label %26, label %30
 
@@ -17241,48 +17063,48 @@ define internal fastcc void @channel_push(ptr nocapture noundef %0, ptr nocaptur
 
 30:                                               ; preds = %34, %23
   %31 = phi i64 [ %24, %23 ], [ %50, %34 ]
-  %32 = load i64, ptr %5, align 8, !tbaa !352
+  %32 = load i64, ptr %5, align 8, !tbaa !353
   %33 = icmp sgt i64 %32, 0
   br i1 %33, label %52, label %59
 
 34:                                               ; preds = %26, %34
   %35 = phi i64 [ 0, %26 ], [ %49, %34 ]
-  %36 = load i64, ptr %27, align 8, !tbaa !353
+  %36 = load i64, ptr %27, align 8, !tbaa !354
   %37 = add nsw i64 %36, %35
-  %38 = load i64, ptr %5, align 8, !tbaa !352
+  %38 = load i64, ptr %5, align 8, !tbaa !353
   %39 = srem i64 %37, %38
-  %40 = load i64, ptr %17, align 8, !tbaa !349
+  %40 = load i64, ptr %17, align 8, !tbaa !350
   %41 = mul nsw i64 %40, %35
   %42 = trunc i64 %41 to i32
   %43 = getelementptr inbounds i8, ptr %21, i32 %42
-  %44 = load ptr, ptr %28, align 16, !tbaa !354
+  %44 = load ptr, ptr %28, align 16, !tbaa !355
   %45 = mul nsw i64 %40, %39
   %46 = trunc i64 %45 to i32
   %47 = getelementptr inbounds i8, ptr %44, i32 %46
   %48 = trunc i64 %40 to i32
   tail call fastcc void @copy_bytes(ptr noundef nonnull %43, ptr noundef %47, i32 noundef %48) #52
   %49 = add nuw nsw i64 %35, 1
-  %50 = load i64, ptr %3, align 16, !tbaa !351
+  %50 = load i64, ptr %3, align 16, !tbaa !352
   %51 = icmp slt i64 %49, %50
-  br i1 %51, label %34, label %30, !llvm.loop !371
+  br i1 %51, label %34, label %30, !llvm.loop !372
 
 52:                                               ; preds = %30
   %53 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 5
-  %54 = load ptr, ptr %53, align 16, !tbaa !354
-  %55 = load i64, ptr %17, align 8, !tbaa !349
+  %54 = load ptr, ptr %53, align 16, !tbaa !355
+  %55 = load i64, ptr %17, align 8, !tbaa !350
   %56 = mul nsw i64 %55, %32
   %57 = trunc i64 %56 to i32
   tail call void @fa_free(ptr noundef %54, i32 noundef %57, i32 noundef 16) #53
-  %58 = load i64, ptr %3, align 16, !tbaa !351
+  %58 = load i64, ptr %3, align 16, !tbaa !352
   br label %59
 
 59:                                               ; preds = %52, %30
   %60 = phi i64 [ %58, %52 ], [ %31, %30 ]
   %61 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 5
-  store ptr %21, ptr %61, align 16, !tbaa !354
+  store ptr %21, ptr %61, align 16, !tbaa !355
   %62 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 6
-  store i64 0, ptr %62, align 8, !tbaa !353
-  store i64 %16, ptr %5, align 8, !tbaa !352
+  store i64 0, ptr %62, align 8, !tbaa !354
+  store i64 %16, ptr %5, align 8, !tbaa !353
   br label %63
 
 63:                                               ; preds = %8, %59
@@ -17293,15 +17115,15 @@ define internal fastcc void @channel_push(ptr nocapture noundef %0, ptr nocaptur
   %68 = add nsw i64 %66, %67
   %69 = srem i64 %68, %65
   %70 = getelementptr inbounds %struct.FaChannel, ptr %0, i32 0, i32 4
-  %71 = load i64, ptr %70, align 8, !tbaa !349
+  %71 = load i64, ptr %70, align 8, !tbaa !350
   %72 = mul nsw i64 %71, %69
   %73 = trunc i64 %72 to i32
   %74 = getelementptr inbounds i8, ptr %64, i32 %73
   %75 = trunc i64 %71 to i32
   tail call fastcc void @copy_bytes(ptr noundef %74, ptr noundef %1, i32 noundef %75) #52
-  %76 = load i64, ptr %3, align 16, !tbaa !351
+  %76 = load i64, ptr %3, align 16, !tbaa !352
   %77 = add nsw i64 %76, 1
-  store i64 %77, ptr %3, align 16, !tbaa !351
+  store i64 %77, ptr %3, align 16, !tbaa !352
   ret void
 }
 
@@ -17513,14 +17335,14 @@ attributes #58 = { cold noreturn optsize }
 !113 = !{!114, !24, i64 12}
 !114 = !{!"", !71, i64 0, !115, i64 8, !115, i64 10, !24, i64 12, !7, i64 16, !7, i64 20, !7, i64 24, !2, i64 28}
 !115 = !{!"short", !2, i64 0}
-!116 = !{!114, !7, i64 24}
-!117 = distinct !{!117, !9}
-!118 = !{!114, !115, i64 10}
-!119 = !{!114, !71, i64 0}
-!120 = !{!114, !115, i64 8}
-!121 = !{!114, !7, i64 16}
-!122 = !{!114, !7, i64 20}
-!123 = distinct !{!123, !9}
+!116 = !{i64 0, i64 64}
+!117 = !{!114, !7, i64 24}
+!118 = distinct !{!118, !9}
+!119 = !{!114, !115, i64 10}
+!120 = !{!114, !71, i64 0}
+!121 = !{!114, !115, i64 8}
+!122 = !{!114, !7, i64 16}
+!123 = !{!114, !7, i64 20}
 !124 = distinct !{!124, !9}
 !125 = distinct !{!125, !9}
 !126 = distinct !{!126, !9}
@@ -17529,59 +17351,59 @@ attributes #58 = { cold noreturn optsize }
 !129 = distinct !{!129, !9}
 !130 = distinct !{!130, !9}
 !131 = distinct !{!131, !9}
-!132 = !{!133, !7, i64 0}
-!133 = !{!"FreeBlock", !7, i64 0}
-!134 = !{!135, !24, i64 0}
-!135 = !{!"", !24, i64 0, !24, i64 4}
-!136 = !{!135, !24, i64 4}
-!137 = distinct !{!137, !9}
-!138 = !{!139, !5, i64 4}
-!139 = !{!"FreeSpan", !7, i64 0, !5, i64 4}
-!140 = distinct !{!140, !9}
-!141 = !{!139, !7, i64 0}
-!142 = !{!143, !7, i64 0}
-!143 = !{!"FaArena", !7, i64 0, !7, i64 4, !7, i64 8, !7, i64 12, !7, i64 16}
-!144 = !{!145, !7, i64 4}
-!145 = !{!"FaArenaCleanup", !7, i64 0, !7, i64 4, !7, i64 8}
-!146 = !{!145, !7, i64 8}
-!147 = distinct !{!147, !9}
-!148 = !{!143, !7, i64 4}
-!149 = distinct !{!149, !9}
-!150 = !{!143, !7, i64 8}
-!151 = !{!143, !7, i64 12}
-!152 = !{!143, !7, i64 16}
-!153 = !{!145, !7, i64 0}
-!154 = !{!155, !71, i64 48}
-!155 = !{!"", !71, i64 0, !7, i64 8, !7, i64 12, !7, i64 16, !24, i64 20, !24, i64 24, !24, i64 28, !24, i64 32, !24, i64 36, !24, i64 40, !24, i64 44, !71, i64 48}
-!156 = !{!155, !24, i64 44}
-!157 = !{!155, !71, i64 0}
-!158 = !{!155, !24, i64 28}
-!159 = !{!155, !24, i64 32}
-!160 = !{!155, !24, i64 20}
-!161 = !{!155, !24, i64 24}
-!162 = !{!155, !7, i64 8}
-!163 = !{!155, !7, i64 12}
-!164 = distinct !{!164, !9}
+!132 = distinct !{!132, !9}
+!133 = !{!134, !7, i64 0}
+!134 = !{!"FreeBlock", !7, i64 0}
+!135 = !{!136, !24, i64 0}
+!136 = !{!"", !24, i64 0, !24, i64 4}
+!137 = !{!136, !24, i64 4}
+!138 = distinct !{!138, !9}
+!139 = !{!140, !5, i64 4}
+!140 = !{!"FreeSpan", !7, i64 0, !5, i64 4}
+!141 = distinct !{!141, !9}
+!142 = !{!140, !7, i64 0}
+!143 = !{!144, !7, i64 0}
+!144 = !{!"FaArena", !7, i64 0, !7, i64 4, !7, i64 8, !7, i64 12, !7, i64 16}
+!145 = !{!146, !7, i64 4}
+!146 = !{!"FaArenaCleanup", !7, i64 0, !7, i64 4, !7, i64 8}
+!147 = !{!146, !7, i64 8}
+!148 = distinct !{!148, !9}
+!149 = !{!144, !7, i64 4}
+!150 = distinct !{!150, !9}
+!151 = !{!144, !7, i64 8}
+!152 = !{!144, !7, i64 12}
+!153 = !{!144, !7, i64 16}
+!154 = !{!146, !7, i64 0}
+!155 = !{!156, !71, i64 48}
+!156 = !{!"", !71, i64 0, !7, i64 8, !7, i64 12, !7, i64 16, !24, i64 20, !24, i64 24, !24, i64 28, !24, i64 32, !24, i64 36, !24, i64 40, !24, i64 44, !71, i64 48}
+!157 = !{!156, !24, i64 44}
+!158 = !{!156, !71, i64 0}
+!159 = !{!156, !24, i64 28}
+!160 = !{!156, !24, i64 32}
+!161 = !{!156, !24, i64 20}
+!162 = !{!156, !24, i64 24}
+!163 = !{!156, !7, i64 8}
+!164 = !{!156, !7, i64 12}
 !165 = distinct !{!165, !9}
-!166 = !{!155, !24, i64 36}
-!167 = !{!155, !24, i64 40}
-!168 = !{!155, !7, i64 16}
-!169 = distinct !{!169, !9}
+!166 = distinct !{!166, !9}
+!167 = !{!156, !24, i64 36}
+!168 = !{!156, !24, i64 40}
+!169 = !{!156, !7, i64 16}
 !170 = distinct !{!170, !9}
 !171 = distinct !{!171, !9}
 !172 = distinct !{!172, !9}
 !173 = distinct !{!173, !9}
 !174 = distinct !{!174, !9}
 !175 = distinct !{!175, !9}
-!176 = !{!177, !7, i64 32}
-!177 = !{!"", !71, i64 0, !7, i64 8, !71, i64 16, !71, i64 24, !7, i64 32, !71, i64 40}
-!178 = !{!177, !71, i64 16}
-!179 = !{!177, !7, i64 8}
-!180 = distinct !{!180, !9}
-!181 = !{!177, !71, i64 40}
-!182 = !{!177, !71, i64 24}
-!183 = !{!177, !71, i64 0}
-!184 = distinct !{!184, !9}
+!176 = distinct !{!176, !9}
+!177 = !{!178, !7, i64 32}
+!178 = !{!"", !71, i64 0, !7, i64 8, !71, i64 16, !71, i64 24, !7, i64 32, !71, i64 40}
+!179 = !{!178, !71, i64 16}
+!180 = !{!178, !7, i64 8}
+!181 = distinct !{!181, !9}
+!182 = !{!178, !71, i64 40}
+!183 = !{!178, !71, i64 24}
+!184 = !{!178, !71, i64 0}
 !185 = distinct !{!185, !9}
 !186 = distinct !{!186, !9}
 !187 = distinct !{!187, !9}
@@ -17589,85 +17411,85 @@ attributes #58 = { cold noreturn optsize }
 !189 = distinct !{!189, !9}
 !190 = distinct !{!190, !9}
 !191 = distinct !{!191, !9}
-!192 = !{!193, !71, i64 8}
-!193 = !{!"", !7, i64 0, !7, i64 4, !71, i64 8}
-!194 = !{!193, !7, i64 0}
-!195 = !{!193, !7, i64 4}
-!196 = distinct !{!196, !9}
+!192 = distinct !{!192, !9}
+!193 = !{!194, !71, i64 8}
+!194 = !{!"", !7, i64 0, !7, i64 4, !71, i64 8}
+!195 = !{!194, !7, i64 0}
+!196 = !{!194, !7, i64 4}
 !197 = distinct !{!197, !9}
-!198 = !{!199, !71, i64 48}
-!199 = !{!"FaSource", !71, i64 0, !71, i64 8, !7, i64 16, !71, i64 24, !71, i64 32, !7, i64 40, !7, i64 44, !71, i64 48, !71, i64 56}
-!200 = !{!199, !7, i64 44}
-!201 = !{!202, !71, i64 0}
-!202 = !{!"", !71, i64 0, !71, i64 8, !7, i64 16}
-!203 = !{!202, !71, i64 8}
-!204 = distinct !{!204, !9}
-!205 = !{!202, !7, i64 16}
-!206 = !{!199, !7, i64 40}
-!207 = !{i64 0, i64 8, !89, i64 8, i64 8, !89, i64 16, i64 4, !6}
-!208 = !{i64 0, i64 8, !89, i64 8, i64 4, !6}
-!209 = !{i64 0, i64 4, !6}
-!210 = distinct !{!210, !9}
-!211 = !{!212, !71, i64 96}
-!212 = !{!"FaObserver", !199, i64 0, !7, i64 64, !7, i64 68, !7, i64 72, !7, i64 76, !7, i64 80, !7, i64 84, !7, i64 88, !71, i64 96, !71, i64 104, !71, i64 112, !24, i64 120, !24, i64 124, !24, i64 128, !24, i64 132, !24, i64 136, !24, i64 140, !24, i64 144, !24, i64 148, !71, i64 152, !2, i64 160}
-!213 = !{!212, !7, i64 84}
-!214 = distinct !{!214, !9}
-!215 = !{!212, !71, i64 104}
-!216 = !{!212, !7, i64 88}
-!217 = !{!199, !71, i64 8}
-!218 = !{!199, !71, i64 24}
-!219 = !{!199, !7, i64 16}
-!220 = distinct !{!220, !9}
+!198 = distinct !{!198, !9}
+!199 = !{!200, !71, i64 48}
+!200 = !{!"FaSource", !71, i64 0, !71, i64 8, !7, i64 16, !71, i64 24, !71, i64 32, !7, i64 40, !7, i64 44, !71, i64 48, !71, i64 56}
+!201 = !{!200, !7, i64 44}
+!202 = !{!203, !71, i64 0}
+!203 = !{!"", !71, i64 0, !71, i64 8, !7, i64 16}
+!204 = !{!203, !71, i64 8}
+!205 = distinct !{!205, !9}
+!206 = !{!203, !7, i64 16}
+!207 = !{!200, !7, i64 40}
+!208 = !{i64 0, i64 8, !89, i64 8, i64 8, !89, i64 16, i64 4, !6}
+!209 = !{i64 0, i64 8, !89, i64 8, i64 4, !6}
+!210 = !{i64 0, i64 4, !6}
+!211 = distinct !{!211, !9}
+!212 = !{!213, !71, i64 96}
+!213 = !{!"FaObserver", !200, i64 0, !7, i64 64, !7, i64 68, !7, i64 72, !7, i64 76, !7, i64 80, !7, i64 84, !7, i64 88, !71, i64 96, !71, i64 104, !71, i64 112, !24, i64 120, !24, i64 124, !24, i64 128, !24, i64 132, !24, i64 136, !24, i64 140, !24, i64 144, !24, i64 148, !71, i64 152, !2, i64 160}
+!214 = !{!213, !7, i64 84}
+!215 = distinct !{!215, !9}
+!216 = !{!213, !71, i64 104}
+!217 = !{!213, !7, i64 88}
+!218 = !{!200, !71, i64 8}
+!219 = !{!200, !71, i64 24}
+!220 = !{!200, !7, i64 16}
 !221 = distinct !{!221, !9}
 !222 = distinct !{!222, !9}
 !223 = distinct !{!223, !9}
-!224 = !{!212, !71, i64 0}
-!225 = !{!212, !24, i64 120}
-!226 = !{!212, !7, i64 72}
-!227 = !{!212, !7, i64 76}
-!228 = !{!212, !7, i64 80}
-!229 = !{!212, !7, i64 68}
-!230 = !{!212, !7, i64 64}
-!231 = !{!212, !71, i64 152}
-!232 = !{!212, !24, i64 124}
-!233 = !{!212, !24, i64 128}
-!234 = !{!212, !24, i64 140}
-!235 = !{!212, !71, i64 8}
-!236 = !{!212, !24, i64 144}
-!237 = !{!212, !71, i64 112}
-!238 = !{!212, !24, i64 136}
-!239 = distinct !{!239, !9}
+!224 = distinct !{!224, !9}
+!225 = !{!213, !71, i64 0}
+!226 = !{!213, !24, i64 120}
+!227 = !{!213, !7, i64 72}
+!228 = !{!213, !7, i64 76}
+!229 = !{!213, !7, i64 80}
+!230 = !{!213, !7, i64 68}
+!231 = !{!213, !7, i64 64}
+!232 = !{!213, !71, i64 152}
+!233 = !{!213, !24, i64 124}
+!234 = !{!213, !24, i64 128}
+!235 = !{!213, !24, i64 140}
+!236 = !{!213, !71, i64 8}
+!237 = !{!213, !24, i64 144}
+!238 = !{!213, !71, i64 112}
+!239 = !{!213, !24, i64 136}
 !240 = distinct !{!240, !9}
 !241 = distinct !{!241, !9}
 !242 = distinct !{!242, !9}
 !243 = distinct !{!243, !9}
-!244 = !{!212, !24, i64 132}
-!245 = distinct !{!245, !9}
+!244 = distinct !{!244, !9}
+!245 = !{!213, !24, i64 132}
 !246 = distinct !{!246, !9}
-!247 = !{!199, !71, i64 0}
-!248 = !{!199, !71, i64 32}
-!249 = !{!199, !71, i64 56}
-!250 = distinct !{!250, !9}
-!251 = !{!252, !71, i64 0}
-!252 = !{!"", !71, i64 0, !14, i64 8}
-!253 = distinct !{!253, !9}
+!247 = distinct !{!247, !9}
+!248 = !{!200, !71, i64 0}
+!249 = !{!200, !71, i64 32}
+!250 = !{!200, !71, i64 56}
+!251 = distinct !{!251, !9}
+!252 = !{!253, !71, i64 0}
+!253 = !{!"", !71, i64 0, !14, i64 8}
 !254 = distinct !{!254, !9}
 !255 = distinct !{!255, !9}
-!256 = !{!257, !71, i64 0}
-!257 = !{!"", !71, i64 0, !14, i64 8, !14, i64 20}
-!258 = !{!259, !7, i64 0}
-!259 = !{!"", !7, i64 0, !71, i64 8, !71, i64 16, !71, i64 24, !7, i64 32, !71, i64 40, !71, i64 48, !71, i64 56, !71, i64 64, !71, i64 72}
-!260 = !{!259, !71, i64 72}
-!261 = !{!259, !71, i64 8}
-!262 = !{!259, !71, i64 16}
-!263 = !{!259, !71, i64 24}
-!264 = !{!259, !7, i64 32}
-!265 = !{!259, !71, i64 48}
-!266 = !{!259, !71, i64 56}
-!267 = distinct !{!267, !9}
-!268 = !{!259, !71, i64 40}
-!269 = !{!259, !71, i64 64}
-!270 = distinct !{!270, !9}
+!256 = distinct !{!256, !9}
+!257 = !{!258, !71, i64 0}
+!258 = !{!"", !71, i64 0, !14, i64 8, !14, i64 20}
+!259 = !{!260, !7, i64 0}
+!260 = !{!"", !7, i64 0, !71, i64 8, !71, i64 16, !71, i64 24, !7, i64 32, !71, i64 40, !71, i64 48, !71, i64 56, !71, i64 64, !71, i64 72}
+!261 = !{!260, !71, i64 72}
+!262 = !{!260, !71, i64 8}
+!263 = !{!260, !71, i64 16}
+!264 = !{!260, !71, i64 24}
+!265 = !{!260, !7, i64 32}
+!266 = !{!260, !71, i64 48}
+!267 = !{!260, !71, i64 56}
+!268 = distinct !{!268, !9}
+!269 = !{!260, !71, i64 40}
+!270 = !{!260, !71, i64 64}
 !271 = distinct !{!271, !9}
 !272 = distinct !{!272, !9}
 !273 = distinct !{!273, !9}
@@ -17677,95 +17499,96 @@ attributes #58 = { cold noreturn optsize }
 !277 = distinct !{!277, !9}
 !278 = distinct !{!278, !9}
 !279 = distinct !{!279, !9}
-!280 = !{!281, !7, i64 16}
-!281 = !{!"", !71, i64 0, !71, i64 8, !7, i64 16, !71, i64 24}
-!282 = !{!281, !71, i64 8}
-!283 = !{!284, !71, i64 32}
-!284 = !{!"", !281, i64 0, !71, i64 32}
-!285 = !{!281, !71, i64 0}
-!286 = !{!287, !24, i64 16}
-!287 = !{!"FaTask", !7, i64 0, !7, i64 4, !7, i64 8, !24, i64 12, !24, i64 16}
-!288 = !{!289, !71, i64 56}
-!289 = !{!"FaExecutor", !7, i64 0, !7, i64 4, !71, i64 8, !7, i64 16, !71, i64 24, !71, i64 32, !71, i64 40, !7, i64 48, !71, i64 56, !71, i64 64, !71, i64 72, !7, i64 80, !7, i64 84, !287, i64 88, !24, i64 108, !24, i64 112, !24, i64 116, !24, i64 120, !71, i64 128, !71, i64 136, !7, i64 144, !7, i64 148, !2, i64 152, !24, i64 280}
-!290 = !{!287, !7, i64 4}
-!291 = !{!289, !7, i64 4}
-!292 = !{!287, !7, i64 8}
-!293 = !{!289, !7, i64 0}
-!294 = !{!289, !71, i64 8}
-!295 = !{!289, !7, i64 80}
-!296 = !{!289, !7, i64 84}
-!297 = !{!289, !24, i64 112}
-!298 = !{!289, !24, i64 116}
-!299 = !{!287, !7, i64 0}
-!300 = !{!289, !7, i64 48}
-!301 = !{!289, !7, i64 144}
-!302 = !{!303, !7, i64 20}
-!303 = !{!"", !7, i64 0, !71, i64 8, !7, i64 16, !7, i64 20}
-!304 = !{!303, !7, i64 16}
-!305 = !{!303, !71, i64 8}
-!306 = !{!303, !7, i64 0}
-!307 = distinct !{!307, !9}
-!308 = !{!289, !71, i64 136}
-!309 = !{!310, !7, i64 0}
-!310 = !{!"FaWait", !7, i64 0, !7, i64 4, !7, i64 8, !7, i64 12, !7, i64 16, !7, i64 20, !71, i64 24, !71, i64 32, !71, i64 40, !24, i64 48, !24, i64 52}
-!311 = !{!310, !7, i64 4}
-!312 = !{!310, !71, i64 40}
-!313 = !{!289, !71, i64 24}
-!314 = !{!289, !71, i64 32}
-!315 = !{!289, !7, i64 16}
-!316 = distinct !{!316, !9}
-!317 = !{!310, !71, i64 24}
-!318 = !{!289, !71, i64 40}
-!319 = !{!310, !71, i64 32}
-!320 = distinct !{!320, !9}
-!321 = !{!322, !24, i64 4}
-!322 = !{!"FaIo", !24, i64 0, !24, i64 4, !7, i64 8, !7, i64 12, !7, i64 16}
-!323 = !{!322, !7, i64 16}
-!324 = !{!310, !24, i64 48}
-!325 = !{!310, !24, i64 52}
-!326 = !{!289, !71, i64 72}
-!327 = !{!322, !7, i64 8}
-!328 = !{!322, !7, i64 12}
-!329 = !{!289, !24, i64 120}
-!330 = !{!289, !71, i64 128}
-!331 = distinct !{!331, !9}
+!280 = distinct !{!280, !9}
+!281 = !{!282, !7, i64 16}
+!282 = !{!"", !71, i64 0, !71, i64 8, !7, i64 16, !71, i64 24}
+!283 = !{!282, !71, i64 8}
+!284 = !{!285, !71, i64 32}
+!285 = !{!"", !282, i64 0, !71, i64 32}
+!286 = !{!282, !71, i64 0}
+!287 = !{!288, !24, i64 16}
+!288 = !{!"FaTask", !7, i64 0, !7, i64 4, !7, i64 8, !24, i64 12, !24, i64 16}
+!289 = !{!290, !71, i64 56}
+!290 = !{!"FaExecutor", !7, i64 0, !7, i64 4, !71, i64 8, !7, i64 16, !71, i64 24, !71, i64 32, !71, i64 40, !7, i64 48, !71, i64 56, !71, i64 64, !71, i64 72, !7, i64 80, !7, i64 84, !288, i64 88, !24, i64 108, !24, i64 112, !24, i64 116, !24, i64 120, !71, i64 128, !71, i64 136, !7, i64 144, !7, i64 148, !2, i64 152, !24, i64 280}
+!291 = !{!288, !7, i64 4}
+!292 = !{!290, !7, i64 4}
+!293 = !{!288, !7, i64 8}
+!294 = !{!290, !7, i64 0}
+!295 = !{!290, !71, i64 8}
+!296 = !{!290, !7, i64 80}
+!297 = !{!290, !7, i64 84}
+!298 = !{!290, !24, i64 112}
+!299 = !{!290, !24, i64 116}
+!300 = !{!288, !7, i64 0}
+!301 = !{!290, !7, i64 48}
+!302 = !{!290, !7, i64 144}
+!303 = !{!304, !7, i64 20}
+!304 = !{!"", !7, i64 0, !71, i64 8, !7, i64 16, !7, i64 20}
+!305 = !{!304, !7, i64 16}
+!306 = !{!304, !71, i64 8}
+!307 = !{!304, !7, i64 0}
+!308 = distinct !{!308, !9}
+!309 = !{!290, !71, i64 136}
+!310 = !{!311, !7, i64 0}
+!311 = !{!"FaWait", !7, i64 0, !7, i64 4, !7, i64 8, !7, i64 12, !7, i64 16, !7, i64 20, !71, i64 24, !71, i64 32, !71, i64 40, !24, i64 48, !24, i64 52}
+!312 = !{!311, !7, i64 4}
+!313 = !{!311, !71, i64 40}
+!314 = !{!290, !71, i64 24}
+!315 = !{!290, !71, i64 32}
+!316 = !{!290, !7, i64 16}
+!317 = distinct !{!317, !9}
+!318 = !{!311, !71, i64 24}
+!319 = !{!290, !71, i64 40}
+!320 = !{!311, !71, i64 32}
+!321 = distinct !{!321, !9}
+!322 = !{!323, !24, i64 4}
+!323 = !{!"FaIo", !24, i64 0, !24, i64 4, !7, i64 8, !7, i64 12, !7, i64 16}
+!324 = !{!323, !7, i64 16}
+!325 = !{!311, !24, i64 48}
+!326 = !{!311, !24, i64 52}
+!327 = !{!290, !71, i64 72}
+!328 = !{!323, !7, i64 8}
+!329 = !{!323, !7, i64 12}
+!330 = !{!290, !24, i64 120}
+!331 = !{!290, !71, i64 128}
 !332 = distinct !{!332, !9}
 !333 = distinct !{!333, !9}
 !334 = distinct !{!334, !9}
 !335 = distinct !{!335, !9}
-!336 = !{!289, !24, i64 280}
-!337 = distinct !{!337, !9}
-!338 = !{!289, !7, i64 148}
-!339 = !{!340, !7, i64 0}
-!340 = !{!"FaJob", !7, i64 0, !7, i64 4, !7, i64 8, !7, i64 12, !7, i64 16, !24, i64 20}
-!341 = !{!340, !24, i64 20}
-!342 = !{!340, !7, i64 4}
-!343 = !{!310, !7, i64 20}
-!344 = !{!310, !7, i64 8}
-!345 = !{!310, !7, i64 12}
-!346 = !{!347, !71, i64 160}
-!347 = !{!"", !281, i64 0, !348, i64 32, !348, i64 96, !71, i64 160, !71, i64 168, !7, i64 176, !71, i64 184, !71, i64 192, !71, i64 200, !24, i64 208, !24, i64 212, !7, i64 216, !7, i64 220, !7, i64 224}
-!348 = !{!"", !2, i64 0}
-!349 = !{!347, !71, i64 168}
-!350 = !{!347, !7, i64 216}
-!351 = !{!347, !71, i64 192}
-!352 = !{!347, !71, i64 200}
-!353 = !{!347, !71, i64 184}
-!354 = !{!347, !7, i64 176}
-!355 = distinct !{!355, !9}
-!356 = !{!347, !24, i64 208}
-!357 = !{!310, !7, i64 16}
-!358 = !{!347, !7, i64 224}
-!359 = distinct !{!359, !9}
+!336 = distinct !{!336, !9}
+!337 = !{!290, !24, i64 280}
+!338 = distinct !{!338, !9}
+!339 = !{!290, !7, i64 148}
+!340 = !{!341, !7, i64 0}
+!341 = !{!"FaJob", !7, i64 0, !7, i64 4, !7, i64 8, !7, i64 12, !7, i64 16, !24, i64 20}
+!342 = !{!341, !24, i64 20}
+!343 = !{!341, !7, i64 4}
+!344 = !{!311, !7, i64 20}
+!345 = !{!311, !7, i64 8}
+!346 = !{!311, !7, i64 12}
+!347 = !{!348, !71, i64 160}
+!348 = !{!"", !282, i64 0, !349, i64 32, !349, i64 96, !71, i64 160, !71, i64 168, !7, i64 176, !71, i64 184, !71, i64 192, !71, i64 200, !24, i64 208, !24, i64 212, !7, i64 216, !7, i64 220, !7, i64 224}
+!349 = !{!"", !2, i64 0}
+!350 = !{!348, !71, i64 168}
+!351 = !{!348, !7, i64 216}
+!352 = !{!348, !71, i64 192}
+!353 = !{!348, !71, i64 200}
+!354 = !{!348, !71, i64 184}
+!355 = !{!348, !7, i64 176}
+!356 = distinct !{!356, !9}
+!357 = !{!348, !24, i64 208}
+!358 = !{!311, !7, i64 16}
+!359 = !{!348, !7, i64 224}
 !360 = distinct !{!360, !9}
 !361 = distinct !{!361, !9}
-!362 = !{!363, !363, i64 0}
-!363 = !{!"__int128", !2, i64 0}
-!364 = distinct !{!364, !9}
+!362 = distinct !{!362, !9}
+!363 = !{!364, !364, i64 0}
+!364 = !{!"__int128", !2, i64 0}
 !365 = distinct !{!365, !9}
 !366 = distinct !{!366, !9}
 !367 = distinct !{!367, !9}
-!368 = !{!212, !71, i64 24}
-!369 = !{!212, !7, i64 16}
-!370 = distinct !{!370, !9}
+!368 = distinct !{!368, !9}
+!369 = !{!213, !71, i64 24}
+!370 = !{!213, !7, i64 16}
 !371 = distinct !{!371, !9}
+!372 = distinct !{!372, !9}

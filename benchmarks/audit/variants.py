@@ -9,7 +9,7 @@ Usage: variants.py --expected expected.txt --size N --profile-size M --runs R --
 The executables are those built by compare.py (`<directory>/<benchmark>/fa/native/main`,
 `.../goose/main`), which takes the size as its first argument. Use --profile-expected for a Rust oracle at --profile-size; otherwise the first executable
 is compared with the others. For growing-index, run once with --size 16 --profile-size 16,
-then with --size 1000000 --profile-size 1000000, using the Array, GrowingArray and Goose
+then with --size 1000 --profile-size 1000 and --size 1000000 --profile-size 1000000, using the Array, GrowingArray and Goose
 executables built by compare.py growing-index growing-index-array. All sizes are runtime inputs.
 """
 

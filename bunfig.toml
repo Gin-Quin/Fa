@@ -12,6 +12,8 @@ ignorePatterns = [
 	"*.md",
 	"*.toml",
 	"/documentation/",
+	# the records of the measurements, as their scripts wrote them
+	"/design/*.json",
 	"/idea/",
 	"/sandbox/",
 	"/packages/benchmark-typescript/fixtures/",

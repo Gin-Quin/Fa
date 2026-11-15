@@ -5,6 +5,10 @@ mutable mutex = Mutex<Integer> { value = 0 }
 (await mutex.lock()).value += 2
 console.log((await mutex.lock()).value) -- prints: 3
 
+mutex.tryLock()
+await mutex.lock()
+console.log((await mutex.lock()).value) -- prints: 3
+
 function read = <Value>(_guard: Value): Integer => 3
 console.log(read(await mutex.lock())) -- prints: 3
 console.log(read(_guard = await mutex.lock())) -- prints: 3

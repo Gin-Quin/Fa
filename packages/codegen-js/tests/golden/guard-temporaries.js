@@ -5,7 +5,7 @@ function read(_guard) {
 }
 
 async function main($task) {
-	let $t1, $t2, $t5, $t6, $t8, $t9;
+	let $t1, $t2, $t5, $t6, $t8, $t9, $t11;
 	let mutex = new FaMutex(0);
 	try {
 		const $t0 = mutex;
@@ -21,6 +21,9 @@ async function main($task) {
 		const $t7 = mutex;
 		console.log(`${value} ${($t9 = ($t8 = faLockNow($t7)) !== faWaiting ? $t8 : await faLock($task, $t7, "guard-temporaries.fa:6:21")).value}`);
 	} finally { faUnlock($t9); }
+	faUnlock(mutex.tryLock());
+	const $t10 = mutex;
+	faUnlock(($t11 = faLockNow($t10)) !== faWaiting ? $t11 : await faLock($task, $t10, "guard-temporaries.fa:8:1"));
 }
 
 faRunAsync(main);

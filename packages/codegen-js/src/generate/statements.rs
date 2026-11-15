@@ -234,12 +234,21 @@ impl Generator<'_> {
 		let ty = self.type_of(n);
 		match dest {
 			Dest::Discard => {
-				// a new value holding a resource, discarded: dropped (resources.rs)
-				if !matches!(
+				let fresh = !matches!(
 					self.view(self.strip_groups(n)),
 					View::Name(_) | View::Access { .. } | View::Index { .. }
-				) && let Some(drop) = self.drop_function(ty)
-				{
+				);
+				if fresh
+					&& matches!(
+						self.types.kind(self.without_none(ty)),
+						fa_analyzer::types::TypeKind::Sync(fa_analyzer::types::SyncKind::Guard, _)
+					) {
+					let unlock = self.helper("faUnlock");
+					self.out.line(format!("{unlock}({});", value.text));
+					return;
+				}
+				// a new value holding a resource, discarded: dropped (resources.rs)
+				if fresh && let Some(drop) = self.drop_function(ty) {
 					self.out.line(format!("{drop}({});", value.text));
 					return;
 				}

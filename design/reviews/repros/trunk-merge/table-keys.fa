@@ -1,0 +1,41 @@
+-- Read-only tables (hashes computed by the compiler, `constant_key`) looked up
+-- with keys built at run time: boundary integers, every string length around
+-- the 8-byte words and the inline limits (11 on wasm32, 23 natively), floats.
+function text = (count: Integer, piece: String): String => {
+	mutable result = ""
+	for 0..count { result += piece }
+	result
+}
+let letters = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"]
+function number = (value: Integer): Integer => value
+let strings: Map<String, Integer> = [("", 0), ("a", 1), ("ab", 2), ("abc", 3), ("abcd", 4), ("abcdefg", 7), ("abcdefgh", 8), ("abcdefghijk", 11), ("abcdefghijkl", 12), ("abcdefghijklmno", 15), ("abcdefghijklmnop", 16), ("abcdefghijklmnopqrstuvw", 23), ("abcdefghijklmnopqrstuvwx", 24), ("éééééééééééé", 99)]
+mutable found = 0
+for (key, value) in strings {
+	mutable built = ""
+	for index in 0..key.length { built += letters.get(index) ?? "?" }
+	if key.startsWith("a") {
+		assert strings.get(built) == value
+	}
+	found += 1
+}
+console.log(found, strings.get(text(12, "é")), strings.get(text(0, "x")), strings.get("abcdefghijklmnopqrstuvwxy")) -- prints: 14 99 0 none
+let wide: Map<Integer, String> = [(-9223372036854775807 - 1, "min"), (9223372036854775807, "max"), (-1, "minus one"), (4294967296, "2^32"), (4294967295, "2^32-1"), (-4294967296, "-2^32")]
+console.log(wide.get(number(-9223372036854775807) - 1), wide.get(number(9223372036854775807)), wide.get(number(-1)), wide.get(number(4294967296)), wide.get(number(4294967295)), wide.get(number(-4294967296)), wide.get(number(0))) -- prints: min max minus one 2^32 2^32-1 -2^32 none
+let signed8: Map<Integer<min = -128, max = 127>, Integer> = [(-128, 1), (127, 2), (-1, 3), (0, 4)]
+function small = (value: Integer<min = -128, max = 127>): Integer<min = -128, max = 127> => value
+console.log(signed8.get(small(-128)), signed8.get(small(127)), signed8.get(small(-1)), signed8.get(small(0)), signed8.get(small(5))) -- prints: 1 2 3 4 none
+let signed32: Map<Int32, Int32> = [(-2147483648, 1), (2147483647, 2), (-1, 3), (0, 4)]
+function small32 = (value: Int32): Int32 => value
+console.log(signed32.get(small32(-2147483648)), signed32.get(small32(2147483647)), signed32.get(small32(-1)), signed32.get(small32(0)), signed32.get(small32(5))) -- prints: 1 2 3 4 none
+let unsigned64: Set<UInt64> = [0, 18446744073709551615, 9223372036854775808]
+function big = (value: UInt64): UInt64 => value
+console.log(unsigned64.includes(big(18446744073709551615)), unsigned64.includes(big(9223372036854775808)), unsigned64.includes(big(0)), unsigned64.includes(big(1))) -- prints: true true true false
+let floats: Map<Float, String> = [(0.0 / 0.0, "nan"), (1.0 / 0.0, "inf"), (-1.0 / 0.0, "-inf"), (-0.0, "zero"), (0.1, "tenth")]
+function float = (value: Float): Float => value
+console.log(floats.get(float(0.0) / 0.0), floats.get(float(1.0) / 0.0), floats.get(float(-1.0) / 0.0), floats.get(float(0.0)), floats.get(float(1.0) / 10.0), floats.size) -- prints: nan inf -inf zero tenth 5
+let singles: Set<Float32> = [0.5, -2.25, 16777216]
+function single = (value: Float32): Float32 => value
+console.log(singles.includes(single(0.5)), singles.includes(single(-2.25)), singles.includes(single(16777216)), singles.includes(single(1))) -- prints: true true true false
+let booleans: Map<Boolean, Integer> = [(false, 0), (true, 1)]
+function boolean = (value: Integer): Boolean => value > 0
+console.log(booleans.get(boolean(1)), booleans.get(boolean(0))) -- prints: 1 0

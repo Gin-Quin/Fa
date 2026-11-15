@@ -96,4 +96,5 @@ type Direction = "north" | "south" | "east" | "west"
 ### JavaScript
 
 - A member is a JavaScript number, its underlying value. `toString` and `parse` use a table of the member names generated per enumeration, and `members` is a constant array of the values in declaration order.
+- Equality compares these primitives directly with `===` (or `!==`), including optional enumerations, where `none` is `undefined`; no structural equality helper is needed.
 :::

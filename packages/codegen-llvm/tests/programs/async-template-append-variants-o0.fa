@@ -1,0 +1,43 @@
+-- opt-level: 0
+-- Branch-local decimal cleanup in started coroutine append paths.
+use { sleep } = std.time
+async function delayed = (value: Integer): Integer => {
+	await sleep(1)
+	value
+}
+async function build = (n: Integer, flag: Boolean): String => {
+	mutable text = "t"
+	text += "{n}"
+	for index in 0..3 { text += "{index * n}" }
+	await sleep(1)
+	text += "{n}!"
+	text += "x{n}y{await delayed(n + 1)}"
+	text += n.toString()
+	let part = "k{n}"
+	text += part
+	text += "{flag}"
+	text
+}
+async function narrow = (n: Int32): String => {
+	mutable text = "i"
+	for _ in 0..2 {
+		text += "{n}"
+		await sleep(1)
+	}
+	text += "{n}{n}"
+	text
+}
+type Shade = Enum { red, blue }
+async function scalars = (flag: Boolean, byte: UInt8, shade: Shade): String => {
+	mutable text = ""
+	text += "{flag}"
+	text += "{byte}"
+	text += "{shade}"
+	text
+}
+let first = start build(12, true)
+console.log(await first) -- prints: t120122412!x12y1312k12true
+let second = start narrow(-42)
+console.log(await second) -- prints: i-42-42-42-42
+let third = start scalars(true, 255, .blue)
+console.log(await third) -- prints: true255blue

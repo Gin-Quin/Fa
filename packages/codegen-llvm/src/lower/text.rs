@@ -779,10 +779,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.append_string(target, Val::new(Repr::Str, one.into_struct_value()))?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(decimal);
+		// A coroutine decimal owns a temporary that exists only in this
+		// branch. Drop it here, before the other append paths join.
+		let mark = self.mark();
 		let text = self
 			.integer_string(value)?
 			.expect("an integer of at most 64 bits");
 		self.append_string(target, text)?;
+		self.end_statement(mark, None)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(join);
 		Ok(())

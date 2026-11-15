@@ -1,0 +1,63 @@
+-- Region arrays keep their item size above bit 5 of the marker word, where
+-- B's storage kinds (32: read-only, 64: frame) live: items of 1, 2 and 3
+-- bytes set exactly those bits. Member arrays built from literals, grown,
+-- reserved and copied out of the region.
+type Tree = Union {
+	Leaf = { bytes: Array<Byte>, shorts: Array<Int16>, text: String }
+	List = { items: Array<Tree>, tags: Array<Byte> }
+}
+function leaf = (n: Integer<min = 0, max = 1000>): Tree => {
+	mutable bytes: Array<Byte> = [1, 2, 3]
+	for i in 0..n { bytes.push(Byte(i %% 256)) }
+	mutable shorts = Array<Int16>.from([7, 8], capacity = 3)
+	shorts.reserve(n)
+	for i in 0..n { shorts.push(Int16(i %% 1000)) }
+	Tree.Leaf { bytes, shorts, text = "leaf {n} with a text longer than inline" }
+}
+function constant = (): Tree => Tree.Leaf { bytes = [9, 9], shorts = [1], text = "c" }
+function build = (depth: Integer<min = 0, max = 10>): Tree => if depth == 0 { leaf(depth * 7 + 5) } else {
+	mutable items: Array<Tree> = []
+	items.push(build(depth - 1))
+	items.push(constant())
+	items.push(leaf(depth * 40))
+	mutable tags: Array<Byte> = []
+	tags.reserve(3)
+	for i in 0..depth { tags.push(Byte(i %% 256)) }
+	Tree.List { items, tags }
+}
+function sum = (tree: Tree): Integer => when tree is {
+	Tree.Leaf as { bytes, shorts, text } => {
+		mutable total = text.length
+		for byte in bytes { total += byte }
+		for short in shorts { total += short }
+		total
+	}
+	Tree.List as { items, tags } => {
+		mutable total = tags.length
+		for item in items { total += sum(item) }
+		total
+	}
+}
+function firstBytes = (tree: Tree): Array<Byte> => when tree is {
+	Tree.Leaf as { bytes } => bytes
+	Tree.List as { items } => firstBytes(items.get(0) ?? constant())
+}
+mutable kept: Array<Array<Byte>> = []
+for depth in 0..5 {
+	let tree = build(depth)
+	console.log(sum(tree))
+	mutable copy = firstBytes(tree)
+	copy.push(200)
+	kept.push(copy)
+}
+for bytes in kept { console.log(bytes.length, bytes.get(bytes.length - 1) ?? 0) }
+-- prints: 78
+-- prints: 1718
+-- prints: 8119
+-- prints: 22482
+-- prints: 48006
+-- prints: 9 200
+-- prints: 9 200
+-- prints: 9 200
+-- prints: 9 200
+-- prints: 9 200

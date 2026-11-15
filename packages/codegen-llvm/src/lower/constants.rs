@@ -55,7 +55,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn constant_text(&self, mut node: NodeId) -> Option<String> {
 		for _ in 0..32 {
 			if let Some(Value::String(text)) = self.comptime_value(node) {
-				return Some(text.to_string());
+				return text.as_str().map(str::to_string);
 			}
 			match self.view(node) {
 				fa_analyzer::syntax::View::String(text) => return Some(text.to_string()),
@@ -118,7 +118,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				repr,
 				self.context.bool_type().const_int(*value as u64, false),
 			),
-			(Value::String(text), Repr::Str) => self.string_constant(text),
+			(Value::String(text), Repr::Str) => {
+				self.string_constant(text.as_str().ok_or_else(|| {
+					self.unsupported(node.index(), "a string constant with lone surrogates")
+				})?)
+			}
 			(Value::None, Repr::None) => Val::none(),
 			(Value::None, Repr::Optional(_)) => {
 				Val::new(repr, super::zero_of(self.llvm_type(repr)))
@@ -361,7 +365,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			(Value::Integer(integer), TypeKind::Int(_)) => types
 				.as_int(ty)
 				.is_some_and(|int| int.min <= *integer && *integer <= int.max),
-			(Value::String(text), TypeKind::StringLit(sym)) => types.syms.resolve(sym) == &**text,
+			(Value::String(text), TypeKind::StringLit(sym)) => {
+				text.as_str() == Some(types.syms.resolve(sym))
+			}
 			(Value::Boolean(value), TypeKind::BoolLit(literal)) => *value == literal,
 			(Value::None, kind) => kind == TypeKind::None,
 			(Value::Object(object), TypeKind::Object(_)) => {

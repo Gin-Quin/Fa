@@ -17,6 +17,8 @@ use std::sync::Arc;
 
 use ethnum::I256;
 
+use crate::text::Text;
+
 /// What a member value belongs to.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum MemberKind {
@@ -100,7 +102,9 @@ pub enum Value {
 	/// `Percentage`: the stored fraction (`50%` is `0.5`).
 	Percentage(f64),
 	/// Text.
-	String(Arc<str>),
+	String(Text),
+	/// A fixed-length binary sequence, distinct from an array.
+	Bytes(Arc<Vec<u8>>),
 	/// `Array`, `GrowingArray`.
 	Array(Arc<Vec<Value>>),
 	/// A tuple.
@@ -140,6 +144,7 @@ pub fn equals(a: &Value, b: &Value) -> bool {
 		(Float(a), Float(b)) | (Percentage(a), Percentage(b)) => a == b,
 		(Integer(a), Float(b)) | (Float(b), Integer(a)) => a.as_f64() == *b,
 		(String(a), String(b)) => a == b,
+		(Bytes(a), Bytes(b)) => a == b,
 		(Array(a), Array(b)) | (Tuple(a), Tuple(b)) => {
 			a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| equals(a, b))
 		}
@@ -196,7 +201,7 @@ pub fn map_get<'v>(entries: &'v [(Value, Value)], key: &Value) -> Option<&'v Val
 impl Value {
 	/// A string value.
 	pub fn string(text: &str) -> Value {
-		Value::String(Arc::from(text))
+		Value::String(Text::from(text))
 	}
 
 	/// An integer value.
@@ -254,10 +259,10 @@ impl Value {
 		}
 	}
 
-	/// The text of a string or a character.
+	/// The well-formed text of a string, without copying.
 	pub fn as_str(&self) -> Option<&str> {
 		match self {
-			Value::String(text) => Some(text),
+			Value::String(text) => text.as_str(),
 			_ => None,
 		}
 	}
@@ -396,7 +401,17 @@ fn format_nested(value: &Value, out: &mut String) {
 			out.push_str(&format_float(value * 100.0));
 			out.push('%');
 		}
-		Value::String(text) => out.push_str(&quote(text)),
+		Value::String(text) => out.push_str(&quote(&text.to_utf8_lossy())),
+		Value::Bytes(bytes) => {
+			out.push('[');
+			for (index, byte) in bytes.iter().enumerate() {
+				if index > 0 {
+					out.push_str(", ");
+				}
+				let _ = write!(out, "{byte}");
+			}
+			out.push(']');
+		}
 		Value::Array(items) | Value::Set(items) => format_list(items, out),
 		Value::Tuple(items) => {
 			out.push('(');

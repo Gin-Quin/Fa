@@ -107,7 +107,8 @@ pub enum TypeTest {
 	Float,
 	/// A string.
 	String,
-	/// A character.
+	/// Binary data, distinct from an array.
+	Bytes,
 	/// An array.
 	Array,
 	/// A map.

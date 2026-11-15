@@ -363,7 +363,7 @@ impl<'a> Lowerer<'a> {
 			TypeKind::Float(_) | TypeKind::FloatLit(..) => TypeTest::Float,
 			TypeKind::String => TypeTest::String,
 			TypeKind::StringLit(text) => TypeTest::Literal(Value::string(types.syms.resolve(text))),
-			TypeKind::Bytes => TypeTest::Array,
+			TypeKind::Bytes => TypeTest::Bytes,
 			TypeKind::Object(_) => TypeTest::Object,
 			TypeKind::Tuple(list) => TypeTest::Tuple(types.list_items(list).len()),
 			TypeKind::Union(list) => TypeTest::Union(
@@ -1484,6 +1484,15 @@ impl<'a> Lowerer<'a> {
 					&& !matches!(path, "Map#getOrInsert")
 				{
 					values.pop();
+				}
+				if path == "Json.parse" {
+					values.push(Expr::Const(crate::comptime::schema::schema(
+						self.types(),
+						self.a.type_of(n),
+					)));
+					values.push(Expr::Const(Value::Boolean(crate::comptime::is_js_target(
+						&self.session.comptime.target,
+					))));
 				}
 				// the paths of the flags, by bit
 				if path == "Fields#toStringArray"

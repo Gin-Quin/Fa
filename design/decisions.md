@@ -1240,3 +1240,29 @@ The regression fixture deliberately overlaps these numbers across two modules.
 - `NodeFlags::STRING_CODE_UNIT` marks a string index (not an `Array<String>` index). Backends can compare it with a literal, including a `when` pattern, without constructing a string. `CODE_POINT_COUNT` marks the access in a direct `text.codePoints().length`; `UTF8_ITERATION` marks the direct `text.toUtf8()` call used as a `for` iterable. These facts never change the expression's public type or evaluation order; a saved array or `Bytes` must still be built.
 - `Bytes.from` inherits the source array's known length, `Bytes.filled` its length argument's interval, and encoding a string literal its UTF-8 byte length. These constructor facts use the existing index proof engine. `Utf8Error` is appended to the built-in error table (id 12), preserving all existing runtime error ids. Built-in error payloads are installed in the type store; a catch with a single-variant `Errors` type knows that variant, so `error.position` is directly accessible.
 - The file API has four paths: `File.read` / `File.write` for bytes and `File.readText` / `File.writeText` for text; the old `File.readBytes` is replaced by `File.read`. All remain impure, throwing `FileError`, and may be awaited. `Json.parse` takes `String | Bytes`. There are no HTTP declarations in this prelude to migrate.
+
+## String redesign: compile-time interpreter (2026-11-16)
+
+The interpreter's `Text` (also the string constant stored in `Analysis`) has two
+canonical representations: well-formed UTF-8 in `Arc<str>` with a cached UTF-16
+length, and `Arc<[u16]>` only for strings holding lone surrogates. Correctness
+comes first: indexing/slicing can preserve either half of a pair, and joining
+halves canonicalizes to well-formed UTF-8 again. `as_str()` returns `Option<&str>`;
+it never silently substitutes U+FFFD. Emitters must consume `units()` when it is
+`None`. Until the backend branches are integrated, such constants are explicitly
+refused at emission rather than changed.
+
+ASCII keeps one byte per unit, the existing shared text allocation, byte-based
+search/split/replace and concatenation, constant-time length, and direct indexing.
+Non-ASCII operations may walk code units or build bounded temporary unit buffers;
+the interpreter need not reproduce the native WTF-8 layout or breadcrumbs. Storing
+a UTF-16 copy of every ordinary string was rejected: it doubles the common ASCII
+payload and would duplicate ordinary text for the checker and emitters. Only a
+malformed value needs the raw-unit allocation. Strings remain copied on write by
+sharing immutable buffers. `Bytes` has its own value and runtime type test and
+stores `u8`, rather than the much larger per-item `Value` used by arrays. Preflight
+allocation checks include temporary conversions and collection outputs; the
+existing per-evaluation heap, step and depth budgets still apply.
+
+The lead confirmed that replacements are literal strings: `$` patterns have no
+special meaning. This applies to compile-time evaluation as on every target.

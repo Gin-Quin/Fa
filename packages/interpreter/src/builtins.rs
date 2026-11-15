@@ -9,24 +9,15 @@
 use std::sync::Arc;
 
 use ethnum::I256;
-use unicode_segmentation::UnicodeSegmentation;
 
 use crate::eval::{Error, Flow, Interpreter};
 use crate::value::{Object, Value, contains, equals, map_get};
-
-/// The number of grapheme clusters of a text: the `length` of a string.
-pub fn grapheme_count(text: &str) -> usize {
-	if text.is_ascii() {
-		return text.len() - text.matches("\r\n").count();
-	}
-	text.graphemes(true).count()
-}
 
 fn stop(message: impl Into<String>) -> Error {
 	Error::Stop(message.into())
 }
 
-fn index_error(index: I256, length: usize) -> Error {
+pub(crate) fn index_error(index: I256, length: usize) -> Error {
 	Error::Thrown(Value::error(
 		"IndexError",
 		vec![
@@ -55,9 +46,7 @@ fn integer(value: &Value) -> Result<I256, Error> {
 }
 
 fn usize_of(value: I256) -> Option<usize> {
-	usize::try_from(value.as_i128())
-		.ok()
-		.filter(|_| value >= I256::ZERO)
+	usize::try_from(value).ok().filter(|_| value >= I256::ZERO)
 }
 
 /// A tuple of two values (a map entry).
@@ -82,6 +71,7 @@ pub fn count(value: &Value) -> Option<usize> {
 		Value::Array(items) | Value::Set(items) | Value::Tuple(items) => Some(items.len()),
 		Value::Map(entries) => Some(entries.len()),
 		Value::String(text) => Some(text.len()),
+		Value::Bytes(bytes) => Some(bytes.len()),
 		Value::Range {
 			start: Some(start),
 			end: Some(end),
@@ -103,10 +93,15 @@ pub fn iterate(value: &Value) -> Result<Vec<Value>, Error> {
 			.iter()
 			.map(|(key, value)| Value::Tuple(Arc::new(vec![key.clone(), value.clone()])))
 			.collect()),
-		Value::String(text) => Ok(text
-			.graphemes(true)
-			.map(|grapheme| Value::String(Arc::from(grapheme)))
-			.collect()),
+		Value::String(text) => {
+			let mut offset = 0;
+			let mut items = Vec::new();
+			while let Some((point, _)) = text.next_point(&mut offset) {
+				items.push(Value::String(point));
+			}
+			Ok(items)
+		}
+		Value::Bytes(bytes) => Ok(bytes.iter().map(|b| Value::int(i64::from(*b))).collect()),
 		Value::Range {
 			start,
 			end: Some(end),
@@ -140,7 +135,10 @@ pub fn includes(collection: &Value, value: &Value) -> Result<bool, Error> {
 	match collection {
 		Value::Array(items) | Value::Set(items) | Value::Tuple(items) => Ok(contains(items, value)),
 		Value::Map(entries) => Ok(map_get(entries, value).is_some()),
-		Value::String(haystack) => Ok(haystack.contains(text(value)?)),
+		Value::String(haystack) => match value {
+			Value::String(needle) => Ok(haystack.find(needle, false).is_some()),
+			_ => Ok(false),
+		},
 		Value::Range {
 			start,
 			end,
@@ -174,7 +172,8 @@ pub fn field(value: &Value, name: &str) -> Result<Value, Error> {
 			Some(data) => field(data, name),
 			None => Err(stop(format!("`{}` has no field `{name}`", value.to_text()))),
 		},
-		Value::String(text) if name == "length" => Ok(Value::int(grapheme_count(text) as i64)),
+		Value::String(text) if name == "length" => Ok(Value::int(text.len() as i64)),
+		Value::Bytes(bytes) if name == "length" => Ok(Value::int(bytes.len() as i64)),
 		Value::Array(items) if name == "length" => Ok(Value::int(items.len() as i64)),
 		Value::Set(items) if name == "size" => Ok(Value::int(items.len() as i64)),
 		Value::Map(entries) if name == "size" => Ok(Value::int(entries.len() as i64)),
@@ -214,8 +213,13 @@ pub fn field_mut<'v>(value: &'v mut Value, name: &str) -> Result<&'v mut Value, 
 	}
 }
 
-fn position(index: I256, length: usize) -> Result<usize, Error> {
-	usize_of(index)
+pub(crate) fn position(index: I256, length: usize) -> Result<usize, Error> {
+	let resolved = if index < I256::ZERO {
+		index + I256::from(length as u64)
+	} else {
+		index
+	};
+	usize_of(resolved)
 		.filter(|&position| position < length)
 		.ok_or_else(|| index_error(index, length))
 }
@@ -243,8 +247,15 @@ fn slice_bounds(
 	let from = start.map_or(Ok(0), resolve)?;
 	let to = match end {
 		Some(end) => {
-			let end = if inclusive { end + I256::ONE } else { end };
-			resolve(end)?
+			let bound = resolve(end)?;
+			if inclusive {
+				bound
+					.checked_add(1)
+					.filter(|end| *end <= length)
+					.ok_or_else(|| index_error(end, length))?
+			} else {
+				bound
+			}
 		}
 		None => length,
 	};
@@ -265,30 +276,33 @@ pub fn index(value: &Value, index: &Value) -> Result<Value, Error> {
 				Ok(Value::Array(Arc::new(items[from..to].to_vec())))
 			}
 			Value::String(text) => {
-				let graphemes: Vec<&str> = text.graphemes(true).collect();
-				let (from, to) = slice_bounds(*start, *end, *inclusive, graphemes.len())?;
-				Ok(Value::String(Arc::from(graphemes[from..to].concat())))
+				let (from, to) = slice_bounds(*start, *end, *inclusive, text.len())?;
+				Ok(Value::String(text.slice(from, to)))
+			}
+			Value::Bytes(bytes) => {
+				let (from, to) = slice_bounds(*start, *end, *inclusive, bytes.len())?;
+				Ok(Value::Bytes(Arc::new(bytes[from..to].to_vec())))
 			}
 			other => Err(stop(format!("`{}` can't be sliced", other.to_text()))),
 		};
 	}
 	match value {
 		Value::Array(items) | Value::Tuple(items) => {
-			let index = integer(index)?;
-			Ok(items[position(index, items.len())?].clone())
+			Ok(items[position(integer(index)?, items.len())?].clone())
 		}
 		Value::Map(entries) => map_get(entries, index).cloned().ok_or_else(|| {
 			Error::Thrown(Value::error(
 				"KeyNotFound",
-				vec![("key", Value::String(Arc::from(index.to_text())))],
+				vec![("key", Value::string(&index.to_text()))],
 			))
 		}),
 		Value::String(text) => {
-			let index = integer(index)?;
-			let graphemes: Vec<&str> = text.graphemes(true).collect();
-			let position = position(index, graphemes.len())?;
-			Ok(Value::String(Arc::from(graphemes[position])))
+			let index = position(integer(index)?, text.len())?;
+			Ok(Value::String(text.slice(index, index + 1)))
 		}
+		Value::Bytes(bytes) => Ok(Value::int(i64::from(
+			bytes[position(integer(index)?, bytes.len())?],
+		))),
 		other => Err(stop(format!("`{}` can't be indexed", other.to_text()))),
 	}
 }
@@ -319,6 +333,50 @@ pub fn index_mut(value: &mut Value, key: Value) -> Result<&mut Value, Flow> {
 			other.to_text()
 		)))),
 	}
+}
+
+/// Writes a selected item or a borrowed slice back into its owner. Binary
+/// storage stays compact instead of allocating a `Value` for every byte.
+pub fn set_index(value: &mut Value, key: &Value, selected: Value) -> Result<(), Error> {
+	match (value, key, selected) {
+		(
+			Value::Bytes(bytes),
+			Value::Range {
+				start,
+				end,
+				inclusive,
+			},
+			Value::Bytes(source),
+		) => {
+			let (from, to) = slice_bounds(*start, *end, *inclusive, bytes.len())?;
+			if to - from != source.len() {
+				return Err(stop("a byte slice keeps its length"));
+			}
+			Arc::make_mut(bytes)[from..to].copy_from_slice(&source);
+		}
+		(
+			Value::Array(items),
+			Value::Range {
+				start,
+				end,
+				inclusive,
+			},
+			Value::Array(source),
+		) => {
+			let (from, to) = slice_bounds(*start, *end, *inclusive, items.len())?;
+			if to - from != source.len() {
+				return Err(stop("a borrowed slice keeps its length"));
+			}
+			Arc::make_mut(items)[from..to].clone_from_slice(&source);
+		}
+		(Value::Bytes(bytes), key, Value::Integer(byte)) => {
+			let index = position(integer(key)?, bytes.len())?;
+			let byte = u8::try_from(byte).map_err(|_| stop("expected a Byte"))?;
+			Arc::make_mut(bytes)[index] = byte;
+		}
+		_ => return Err(stop("this item cannot be assigned")),
+	}
+	Ok(())
 }
 
 /// The paths of the flags of a `Fields` value (`names`: the path of each bit).
@@ -392,7 +450,7 @@ fn parse_integer(text: &str) -> Result<Value, Error> {
 			"ParseError",
 			vec![(
 				"message",
-				Value::String(Arc::from(format!("`{text}` is not an integer"))),
+				Value::string(&format!("`{text}` is not an integer")),
 			)],
 		))
 	};
@@ -413,7 +471,7 @@ fn parse_float(text: &str) -> Result<Value, Error> {
 			"ParseError",
 			vec![(
 				"message",
-				Value::String(Arc::from(format!("`{text}` is not a number"))),
+				Value::string(&format!("`{text}` is not a number")),
 			)],
 		))
 	})
@@ -432,126 +490,28 @@ pub fn call(
 	let receiver = arguments.first().cloned().unwrap_or(Value::None);
 	let arg = |index: usize| argument(&arguments, index);
 	Ok(match path {
-		// ── strings ──
-		"String#length" => Value::int(grapheme_count(text(&receiver)?) as i64),
-		// the room of a string is its JavaScript length at compile time, as on JavaScript:
-		// a value of the interpreter has no spare room
-		"String#capacity" => Value::int(text(&receiver)?.encode_utf16().count() as i64),
-		"String.from" => Value::String(Arc::from(text(&receiver)?)),
-		"String#isEmpty" => Value::Boolean(text(&receiver)?.is_empty()),
-		"String#get" => {
-			let index = integer(arg(1)?)?;
-			let graphemes: Vec<&str> = text(&receiver)?.graphemes(true).collect();
-			match usize_of(index).and_then(|position| graphemes.get(position)) {
-				Some(grapheme) => Value::string(grapheme),
-				None => Value::None,
-			}
-		}
-		"String#includes" => Value::Boolean(text(&receiver)?.contains(text(arg(1)?)?)),
-		"String#startsWith" => Value::Boolean(text(&receiver)?.starts_with(text(arg(1)?)?)),
-		"String#endsWith" => Value::Boolean(text(&receiver)?.ends_with(text(arg(1)?)?)),
-		"String#indexOf" | "String#lastIndexOf" => {
-			let haystack = text(&receiver)?;
-			let needle = text(arg(1)?)?;
-			let found = if path == "String#indexOf" {
-				haystack.find(needle)
-			} else {
-				haystack.rfind(needle)
+		"Json.parse" => {
+			let input_size = match &receiver {
+				Value::Bytes(b) => b.len(),
+				Value::String(t) => t.utf8_len(),
+				_ => 0,
 			};
-			match found {
-				Some(byte) => Value::int(grapheme_count(&haystack[..byte]) as i64),
-				None => Value::None,
-			}
+			interpreter.reserve(input_size.saturating_mul(64))?;
+			crate::json::read(
+				&receiver,
+				arg(1)?,
+				arguments.get(2).and_then(Value::as_bool).unwrap_or(false),
+			)?
 		}
-		"String#toUpperCase" => Value::String(Arc::from(text(&receiver)?.to_uppercase())),
-		"String#toLowerCase" => Value::String(Arc::from(text(&receiver)?.to_lowercase())),
-		"String#trim" => Value::string(text(&receiver)?.trim()),
-		"String#trimStart" => Value::string(text(&receiver)?.trim_start()),
-		"String#trimEnd" => Value::string(text(&receiver)?.trim_end()),
-		"String#padStart" | "String#padEnd" => {
-			let value = text(&receiver)?;
-			let length = usize_of(integer(arg(1)?)?).unwrap_or(0);
-			let fill = match arguments.get(2) {
-				Some(Value::String(fill)) => fill.to_string(),
-				_ => " ".to_string(),
-			};
-			let current = grapheme_count(value);
-			if current >= length || fill.is_empty() {
-				Value::string(value)
-			} else {
-				interpreter.reserve_text(
-					value
-						.len()
-						.saturating_add(length.saturating_mul(fill.len())),
-				)?;
-				let padding: String = fill.chars().cycle().take(length - current).collect();
-				let padded = if path == "String#padStart" {
-					format!("{padding}{value}")
-				} else {
-					format!("{value}{padding}")
-				};
-				Value::String(Arc::from(padded))
-			}
+		// String operations preserve raw code units, including lone surrogates.
+		_ if path.starts_with("String") || path.starts_with("Bytes") => {
+			return crate::strings::call(interpreter, path, &arguments);
 		}
-		"String#repeat" => {
-			let count = usize_of(integer(arg(1)?)?).unwrap_or(0);
-			let value = text(&receiver)?;
-			interpreter.reserve_text(value.len().saturating_mul(count))?;
-			Value::String(Arc::from(value.repeat(count)))
-		}
-		"String#replace" => Value::String(Arc::from(text(&receiver)?.replacen(
-			text(arg(1)?)?,
-			text(arg(2)?)?,
-			1,
-		))),
-		"String#replaceAll" => {
-			let (value, pattern, replacement) = (text(&receiver)?, text(arg(1)?)?, text(arg(2)?)?);
-			let count = if pattern.is_empty() {
-				value.chars().count() + 1
-			} else {
-				value.matches(pattern).count()
-			};
-			interpreter.reserve_text(
-				value
-					.len()
-					.saturating_add(count.saturating_mul(replacement.len())),
-			)?;
-			Value::String(Arc::from(value.replace(pattern, replacement)))
-		}
-		"String#split" => {
-			let separator = text(arg(1)?)?;
-			let value = text(&receiver)?;
-			let parts: Vec<Value> = if separator.is_empty() {
-				value.graphemes(true).map(Value::string).collect()
-			} else {
-				value.split(separator).map(Value::string).collect()
-			};
-			list(parts)
-		}
-		"String#characters" => list(
-			text(&receiver)?
-				.graphemes(true)
-				.map(Value::string)
-				.collect(),
-		),
-		"String#codePoints" => list(
-			text(&receiver)?
-				.chars()
-				.map(|c| Value::int(i64::from(u32::from(c))))
-				.collect(),
-		),
-		"String#toUtf8" => list(
-			text(&receiver)?
-				.bytes()
-				.map(|byte| Value::int(i64::from(byte)))
-				.collect(),
-		),
-		"String#toString"
-		| "Integer#toString"
+		"Integer#toString"
 		| "Float#toString"
 		| "BigInt#toString"
 		| "Percentage#toString"
-		| "Enum#toString" => Value::String(Arc::from(receiver.to_text())),
+		| "Enum#toString" => Value::string(&receiver.to_text()),
 
 		// ── `Fields` values: their bits (the lowering's own paths) ──
 		"Fields#union" => Value::Integer(integer(&receiver)? | integer(arg(1)?)?),
@@ -628,6 +588,44 @@ pub fn call(
 		}
 
 		// ── arrays, sets, maps (reading) ──
+		"Array#join" => {
+			let items = receiver.items().unwrap_or(&[]);
+			let separator = match arguments.get(1) {
+				Some(Value::String(text)) => text.clone(),
+				_ => crate::text::Text::from(","),
+			};
+			let size = items
+				.iter()
+				.fold(0usize, |n, v| {
+					n.saturating_add(match v {
+						Value::String(text) => text.utf8_len(),
+						_ => 0,
+					})
+				})
+				.saturating_add(
+					separator
+						.utf8_len()
+						.saturating_mul(items.len().saturating_sub(1)),
+				);
+			interpreter.reserve_text(size.saturating_mul(3))?;
+			interpreter.reserve(
+				items
+					.len()
+					.saturating_mul(std::mem::size_of::<crate::text::Text>())
+					.saturating_mul(2),
+			)?;
+			let mut pieces = Vec::new();
+			for (i, item) in items.iter().enumerate() {
+				if i > 0 {
+					pieces.push(separator.clone());
+				}
+				match item {
+					Value::String(text) => pieces.push(text.clone()),
+					_ => return Err(stop("expected a string")),
+				}
+			}
+			Value::String(crate::text::Text::concat(&pieces))
+		}
 		"Array#length"
 		| "Array#capacity"
 		| "Pool#size"
@@ -650,7 +648,8 @@ pub fn call(
 		"Array#get" => {
 			let index = integer(arg(1)?)?;
 			let items = receiver.items().unwrap_or(&[]);
-			usize_of(index)
+			position(index, items.len())
+				.ok()
 				.and_then(|position| items.get(position))
 				.cloned()
 				.unwrap_or(Value::None)

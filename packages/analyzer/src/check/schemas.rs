@@ -251,7 +251,10 @@ impl Walker<'_> {
 				None => self.invalid_schema(n, &TF042, "a `BooleanLiteral` has a `Boolean` value"),
 			},
 			"StringLiteral" => match field("value") {
-				Some(Value::String(text)) => self.s.types.string_literal(&text),
+				Some(Value::String(text)) if text.as_str().is_some() => self
+					.s
+					.types
+					.string_literal(text.as_str().expect("well-formed")),
 				_ => self.invalid_schema(n, &TF042, "a `StringLiteral` has a `String` value"),
 			},
 			"IntegerLiteral" => match field("value").and_then(|value| value.as_int()) {

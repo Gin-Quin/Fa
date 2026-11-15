@@ -96,7 +96,11 @@ fn exact(types: &mut TypeStore, value: &Value, depth: u32) -> TypeId {
 		Value::Percentage(_) => TypeId::PERCENTAGE,
 		// a long text is not interned twice (its literal type would copy it)
 		Value::String(text) if text.len() > MAX_LITERAL_TEXT => TypeId::STRING,
-		Value::String(text) => types.string_literal(text),
+		Value::String(text) => match text.as_str() {
+			Some(text) => types.string_literal(text),
+			None => TypeId::STRING,
+		},
+		Value::Bytes(_) => TypeId::BYTES,
 		Value::Array(items) => {
 			let item = join(types, items, depth);
 			types.array(item)

@@ -101,7 +101,10 @@ impl Generator<'_> {
 				}
 			}
 			Value::Float(value) | Value::Percentage(value) => js::float_literal(*value),
-			Value::String(text) => Expr::constant(js::string_literal(text), Prec::Primary),
+			Value::Bytes(_) => return None, // The Bytes emitter is updated on strings/js.
+			Value::String(text) => {
+				Expr::constant(js::string_literal(text.as_str()?), Prec::Primary)
+			}
 			// an empty pool, set or map (a field default of a type of another
 			// file): an empty collection of its class
 			Value::Array(items)

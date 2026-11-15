@@ -1,0 +1,34 @@
+-- asynchronous: false
+function read = (source: Array<String>): Integer => {
+	let mapped = source.map((text) => "mapped {text} with an owned payload longer than inline")
+	let filtered = source.filter((text) => text != "drop")
+	return mapped.length + filtered.length
+}
+
+function copied = (source: Array<String>): Integer => {
+	let copy = Array.from(source)
+	return copy.length + source.length
+}
+
+console.log(read(["keep", "drop", "another"]), copied(["first", "second"]))
+-- prints: 5 4
+
+mutable large: Array<String> = []
+for index in 0..1000 {
+	large.push("large owned item {index} exceeds the inline string length")
+}
+console.log(read(large), copied(large))
+-- prints: 2000 2000
+
+function leaveWithError = (source: Array<String>, text: String): Integer throws ParseError => {
+	let mapped = source.map((item) => "mapped {item} with an owned string payload")
+	let filtered = source.filter((item) => item != "drop")
+	let parsed = try Integer.parse(text)
+	return mapped.length + filtered.length + parsed
+}
+
+for 0..100 {
+	assert (leaveWithError(["1", "2", "drop"], "bad") catch error => -1) == -1
+}
+console.log("owned results dropped on error")
+-- prints: owned results dropped on error

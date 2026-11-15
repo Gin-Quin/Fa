@@ -75,6 +75,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.into_pointer_value())
 	}
 
+	/// A fresh result constructed in a bounded caller destination, if offered.
+	fn new_array_into(
+		&mut self,
+		node: NodeId,
+		item: Repr,
+		length: IntValue<'ctx>,
+		capacity: IntValue<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let Some(buffer) = self.collection_stack(node, 2048)? else {
+			return self.new_array(item, length, capacity);
+		};
+		let size = self.item_size(item)?;
+		Ok(self
+			.call_value(
+				self.runtime.function("fa_array_new_into")?,
+				&[
+					length.into(),
+					capacity.into(),
+					size.into(),
+					buffer.into(),
+					self.usize.const_int(2048, false).into(),
+				],
+			)?
+			.into_pointer_value())
+	}
+
 	/// The items pointer and the length of an array.
 	pub(crate) fn array_parts(
 		&self,
@@ -231,6 +257,81 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// `Array.from(source, capacity = n)`: a copy of the source (already
 	/// copied), with room for `capacity` items.
+	pub(crate) fn array_from_copy_into(
+		&mut self,
+		node: NodeId,
+		info: &fa_analyzer::analysis::CallInfo,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		use fa_analyzer::analysis::Argument;
+		let Some(Argument::Given(source)) = info.arguments.first() else {
+			return Ok(None);
+		};
+		// A live borrowed source needs a value copy anyway. Construct that
+		// copy directly; never relocate an already owned/movable heap result.
+		// Capacity hints retain their snapshot-before-hint evaluation path.
+		if info
+			.arguments
+			.iter()
+			.skip(1)
+			.any(|a| !matches!(a, Argument::Default))
+			|| !self.is_place(*source)
+		{
+			return Ok(None);
+		}
+		let repr = self.node_repr(node)?;
+		let Repr::Array(item_type) = repr else {
+			return Ok(None);
+		};
+		if self.node_repr(*source)? != repr || self.movable_local(*source, repr).is_some() {
+			return Ok(None);
+		}
+		let Some(buffer) = self.collection_stack(node, 2048)? else {
+			return Ok(None);
+		};
+		let source_value = self.expr(*source)?;
+		if source_value.repr == Repr::Never {
+			return Ok(Some(source_value));
+		}
+		let item = self.item_repr(item_type, node)?;
+		let (array, _) = self.array_of(source_value, node)?;
+		self.materialize_array(array, item)?;
+		let (_, length) = self.array_parts(array)?;
+		let size = self.item_size(item)?;
+		let result = self
+			.call_value(
+				self.runtime.function("fa_array_new_into")?,
+				&[
+					self.context.i64_type().const_zero().into(),
+					length.into(),
+					size.into(),
+					buffer.into(),
+					self.usize.const_int(2048, false).into(),
+				],
+			)?
+			.into_pointer_value();
+		let result_value = self.fresh(Val::new(repr, result));
+		self.for_each_index(length, |this, index| {
+			let source = this.array_item_slot(array, item, index)?;
+			let value = this.load(source)?;
+			let copied = this.emit_copy(value)?;
+			let (items, _) = this.array_parts(result)?;
+			let target = this.item_pointer(items, item, index)?;
+			this.builder
+				.build_store(target, copied.value.expect("an item"))?;
+			let completed = this.builder.build_int_add(
+				index,
+				this.context.i64_type().const_int(1, false),
+				"",
+			)?;
+			let length_slot = this
+				.builder
+				.build_struct_gep(this.header_type(), result, 1, "")?;
+			this.builder.build_store(length_slot, completed)?;
+			Ok(())
+		})?;
+		Ok(Some(result_value))
+	}
+
 	pub(crate) fn array_from(
 		&mut self,
 		node: NodeId,
@@ -1150,16 +1251,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		true
 	}
 
-	/// A new empty array of items of this representation, with room for `capacity`.
-	fn empty_array(
-		&mut self,
-		item: Repr,
-		capacity: IntValue<'ctx>,
-	) -> Result<PointerValue<'ctx>, Error> {
-		let zero = self.context.i64_type().const_zero();
-		self.new_array(item, zero, capacity)
-	}
-
 	/// The methods of arrays that take a callback or compare items.
 	pub(crate) fn array_method_more(
 		&mut self,
@@ -1178,7 +1269,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				let result_item = self.item_repr(result_type, node)?;
 				let (_, length) = self.array_parts(array)?;
-				let result = self.new_array(result_item, length, length)?;
+				let result = self.new_array_into(node, result_item, i64.const_zero(), length)?;
+				// A throwing callback drops precisely the completed prefix.
+				let result_value = self.fresh(Val::new(Repr::Array(result_type), result));
 				let callback_node = arguments[0];
 				self.for_each_index(length, |this, index| {
 					let slot = this.array_item_slot(array, item, index)?;
@@ -1196,15 +1289,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					if let Some(raw) = mapped.value {
 						this.builder.build_store(pointer, raw)?;
 					}
+					let completed =
+						this.builder
+							.build_int_add(index, i64.const_int(1, false), "")?;
+					let length_slot =
+						this.builder
+							.build_struct_gep(this.header_type(), result, 1, "")?;
+					this.builder.build_store(length_slot, completed)?;
 					Ok(())
 				})?;
-				Ok(self.fresh(Val::new(Repr::Array(result_type), result)))
+				Ok(result_value)
 			}
 			("Array#filter", [callback]) => {
 				let (_, length) = self.array_parts(array)?;
-				let result = self.empty_array(item, length)?;
+				let result = self.new_array_into(node, item, i64.const_zero(), length)?;
 				let callback_node = arguments[0];
-				let result_value = Val::new(array_value.repr, result);
+				let result_value = self.fresh(Val::new(array_value.repr, result));
 				// a temporary array (`text.split(" ").filter(…)`) gives its
 				// items up: the kept ones move, the others are dropped, and
 				// its block is freed without its items
@@ -1260,7 +1360,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let size = self.item_size(item)?;
 					self.call_runtime("fa_array_free", &[array.into(), size.into()])?;
 				}
-				Ok(self.fresh(result_value))
+				Ok(result_value)
 			}
 			("Array#deleteWhere", [callback]) => {
 				let (_, length) = self.array_parts(array)?;

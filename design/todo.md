@@ -17,7 +17,8 @@ Open items that are not yet assigned to a running engineer, or that need a follo
   substitute. Current support passes a bounded caller buffer to nonempty-separator
   `String.split` used by a proven non-escaping immutable local; larger results
   choose the heap before constructing any items. Extend this protocol to
-  `map`, `filter`, `from`, empty-separator splits, and the other fresh collection
+  other collection `map`/`filter` methods, `from` with capacity hints or collection
+  conversions, empty-separator splits, and the other fresh collection
   constructors, including table indices and stable segments.
 - **Immutable storage coverage (native, 2026-11-15):** add compact immutable
   object-columnar chunks that preserve the reference ABI, broader escape proofs

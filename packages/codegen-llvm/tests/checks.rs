@@ -188,6 +188,25 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn fresh_array_methods_receive_bounded_caller_destinations() {
+		for (name, expression) in [
+			("map", "source.map((n) => n + 1)"),
+			("filter", "source.filter((n) => n > 0)"),
+			("from", "Array.from(source)"),
+		] {
+			let source = format!(
+				"function read = (source: Array<Integer>): Integer => {{\nlet result = {expression}\nresult.length\n}}\nconsole.log(read([1, 2, 3]))\n"
+			);
+			let ir = ir_of(&format!("caller-{name}"), &source);
+			assert!(
+				ir.contains("collection.storage = alloca [2048 x i8]"),
+				"{name}: {ir}"
+			);
+			assert!(ir.contains("@fa_array_new_into("), "{name}: {ir}");
+		}
+	}
+
+	#[test]
 	fn reservation_precedes_a_push_loop_without_growth_calls_in_the_loop() {
 		let ir = ir_of(
 			"reserve-loop",

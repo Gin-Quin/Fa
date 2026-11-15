@@ -1280,3 +1280,27 @@ Validation finale : 1 090 tests Rust dans 53 suites, zéro échec, huit ignorés
 Clippy sans avertissement ; 514 tests du runtime JavaScript ; documentation,
 construction du site et tests C avec ASan/UBSan. Les programmes s'exécutent sur
 native, freestanding et wasm avec détection des fuites, y compris à `-O0`.
+
+## Vérification de la régression CPU de word-count (15 novembre 2026)
+
+Après fusion des capacités et de leur revue (`591e050d`, fusion `f2caf4d9`),
+21 passages alternés sur CPU 1 donnent **630,6 → 621,7 ms** ; une répétition
+à quatre exécutables donne **651,2 → 614,8 ms**. Les sorties sont vérifiées
+contre l’oracle Rust aux deux tailles. À la taille d’audit (500 000),
+Callgrind compte **247 573 935 → 211 116 816** instructions (−14,7 %).
+Les Goose reconstruits emploient bien clang 18 avec `-O2`.
+
+La paire ancienne conserve une médiane moins bonne (602,3 → 632,1 ms dans
+la comparaison à quatre), mais ses distributions varient fortement entre
+les répétitions. L’hypothèse d’un gros tampon de pile est exclue : aucun
+`collection.storage` dans ce programme, et la réservation de `main` passe
+de 712 à 696 octets. Le seul changement de stockage concerne le tableau
+constant des syllabes. Cachegrind (`--cache-sim=yes --branch-sim=yes`,
+500 000) donne 2 609 608 → 2 602 257 défauts L1 de données,
+75 105 → 75 094 défauts de dernier niveau et 736 513 → 736 537 mauvaises
+prédictions. Ces simulations n’expliquent pas la régression ancienne ; les
+compteurs matériels sont interdits sur cet hôte (`perf_event_paranoid=4`).
+On ne peut pas attribuer précisément l’écart ancien à un effet matériel.
+Il n’est pas reproduit contre la base actuelle ; aucun ajustement spéculatif
+du compilateur n’est introduit. Données et échantillons :
+`native-goose-word-count-investigation.json`.

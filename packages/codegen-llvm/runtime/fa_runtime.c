@@ -2148,6 +2148,24 @@ FA_EXPORT void *fa_array_new(int64_t length, int64_t capacity, int64_t item_size
 	return array;
 }
 
+/// Select the final storage before constructing any items. The caller offers
+/// a fixed, aligned buffer; no input-dependent stack allocation or copy-out.
+FA_EXPORT __attribute__((always_inline)) void *fa_array_new_into(
+    int64_t length, int64_t capacity, int64_t item_size,
+    void *destination, size_t bytes) {
+	if (capacity < length) { capacity = length; }
+	if (destination != 0 && bytes >= INLINE_ITEMS && capacity >= 0 && item_size > 0 &&
+	    (uint64_t)capacity <= (bytes - INLINE_ITEMS) / (uint64_t)item_size) {
+		FaArrayHeader *array = destination;
+		array->items = (uint8_t *)destination + INLINE_ITEMS;
+		array->length = length;
+		array->capacity = capacity;
+		mark_items(array, 3);
+		return array;
+	}
+	return fa_array_new(length, capacity, item_size);
+}
+
 /// Makes room for one more item and returns its slot (`push`).
 static __attribute__((noinline)) void materialize_characters(FaArrayHeader *array, int64_t capacity) {
 	if (capacity == 0) { array->capacity = 0; return; }

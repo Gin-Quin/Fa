@@ -456,6 +456,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.array_from(node, (result, capacity))
 			}
 			"Array.from" => {
+				if let Some(result) = self.array_from_copy_into(node, info)? {
+					return Ok(result);
+				}
 				let Some(values) = self.array_from_arguments(info)? else {
 					return Ok(Val::never());
 				};

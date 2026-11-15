@@ -591,3 +591,18 @@ not a claim that all construction paths have been converted at once.
 	- most of the gap to Goose is not the segments: `Array<Byte>` is itself 1.26 times Goose and `String` 1.16 times. In time, 41 ms of the 58 ms belong to code the three versions share; that part is followed under the Goose goal, not under this decision;
 	- the benchmark reserves its buffers, so every array is already one contiguous first segment. A reserved region of address space would run the same path (one compare against the first segment, one addition): **it cannot gain anything here**, and the conditional "reserved first segment" stays as written, to be judged only on `benchmarks/growing-index` with arrays whose size is not announced.
 - **Next step: fix the segmented code, as the decision says ("otherwise, profile first").** The +8.8% of instructions is a regression of the per-array `k`, which the decision asked to check ("`push` and indexing of default arrays don't get slower"), and nothing structural explains 47 M instructions more than `Array` on arrays of one segment. In order: (1) in a loop that neither grows nor assigns the array, load `k`, the first segment's pointer and its size once, and index with one compare and one addition before any `clz` (the stores of `appendInteger` and `add`); merge that compare with the bound check when the capacity covers the length; (2) acceptance: at most the 206.5 M instructions of `c74a2278`, then at most 1.10 times `Array<Byte>` in instructions as well (195 M); (3) write `benchmarks/growing-index` and apply the thresholds on both benchmarks, with paired runs.
+
+### Caller buffers for array transforms (implementation, 2026-11-15)
+
+- `Array.map` and `Array.filter` directly initialize a proven immutable local
+  in its bounded caller buffer when the input-length capacity fits. The ordinary
+  heap path is selected before callbacks run otherwise. Filter uses the input
+  length as an upper bound: it never evaluates a callback twice to size storage.
+- Register the result before invoking callbacks, with length zero, and advance
+  its length only after each completed item. A callback error therefore drops
+  exactly the constructed prefix, including owning string/object payloads.
+- A borrowed live `Array.from(source)` without an explicit capacity hint builds
+  the required value copy directly in that destination. Already owned/movable
+  arrays retain their existing storage: moving a heap owner beats copying it
+  into a frame. Explicit hints retain the existing source-snapshot-before-hint
+  semantics until that case can choose final storage before the snapshot.

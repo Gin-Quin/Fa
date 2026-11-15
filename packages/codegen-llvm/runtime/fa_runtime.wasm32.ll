@@ -5147,6 +5147,45 @@ define hidden i32 @fa_array_storage(ptr nocapture noundef readonly %0) local_unn
   ret i32 %6
 }
 
+; Function Attrs: alwaysinline nounwind optsize
+define hidden ptr @fa_array_new_into(i64 noundef %0, i64 noundef %1, i64 noundef %2, ptr noundef %3, i32 noundef %4) local_unnamed_addr #14 {
+  %6 = tail call i64 @llvm.smax.i64(i64 %1, i64 %0)
+  %7 = icmp ne ptr %3, null
+  %8 = icmp ugt i32 %4, 31
+  %9 = and i1 %7, %8
+  %10 = icmp sgt i64 %6, -1
+  %11 = and i1 %10, %9
+  %12 = icmp sgt i64 %2, 0
+  %13 = and i1 %12, %11
+  br i1 %13, label %14, label %24
+
+14:                                               ; preds = %5
+  %15 = add i32 %4, -32
+  %16 = zext i32 %15 to i64
+  %17 = udiv i64 %16, %2
+  %18 = icmp ugt i64 %6, %17
+  br i1 %18, label %24, label %19
+
+19:                                               ; preds = %14
+  %20 = getelementptr inbounds i8, ptr %3, i32 32
+  store ptr %20, ptr %3, align 8, !tbaa !69
+  %21 = getelementptr inbounds %struct.FaArrayHeader, ptr %3, i32 0, i32 1
+  store i64 %0, ptr %21, align 8, !tbaa !79
+  %22 = getelementptr inbounds %struct.FaArrayHeader, ptr %3, i32 0, i32 2
+  store i64 %6, ptr %22, align 8, !tbaa !73
+  %23 = getelementptr inbounds i8, ptr %3, i32 24
+  store i64 3, ptr %23, align 1
+  br label %26
+
+24:                                               ; preds = %14, %5
+  %25 = tail call ptr @fa_array_new(i64 noundef %0, i64 noundef %6, i64 noundef %2) #53
+  br label %26
+
+26:                                               ; preds = %24, %19
+  %27 = phi ptr [ %3, %19 ], [ %25, %24 ]
+  ret ptr %27
+}
+
 ; Function Attrs: noinline nounwind optsize
 define internal fastcc void @materialize_characters(ptr noundef %0, i64 noundef %1) unnamed_addr #16 {
   %3 = icmp eq i64 %1, 0

@@ -1117,6 +1117,14 @@ static void test_tables(void) {
 static void test_collection_destinations(void) {
 	long before = allocated;
 	_Alignas(16) uint8_t small[128];
+	FaArrayHeader *fresh = fa_array_new_into(0, 12, sizeof(int64_t), small, sizeof(small));
+	CHECK(fresh == (FaArrayHeader *)small && fa_array_storage(fresh) == 3);
+	CHECK(fresh->capacity == 12 && allocated == before);
+	fa_array_free(fresh, sizeof(int64_t));
+	fresh = fa_array_new_into(0, 13, sizeof(int64_t), small, sizeof(small));
+	CHECK(fresh != (FaArrayHeader *)small && fa_array_storage(fresh) == 0);
+	fa_array_free(fresh, sizeof(int64_t));
+	CHECK(allocated == before);
 	FaArrayHeader *parts = fa_string_split_into((const uint8_t *)"a bb", 4, SIMPLE,
 	                                          (const uint8_t *)" ", 1, small, sizeof(small));
 	CHECK(parts == (FaArrayHeader *)small && parts->length == 2);

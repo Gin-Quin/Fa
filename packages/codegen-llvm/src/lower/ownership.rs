@@ -1466,7 +1466,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// local analysis: the last reference in the source, not in a loop or a
 	/// lambda that its declaration is outside of, not in an assignment whose
 	/// target reads it).
-	fn movable_local(&self, node: NodeId, repr: Repr) -> Option<Slot<'ctx>> {
+	pub(crate) fn movable_local(&self, node: NodeId, repr: Repr) -> Option<Slot<'ctx>> {
 		let mut inner = node;
 		while let View::Group(group) = self.view(inner) {
 			inner = group;

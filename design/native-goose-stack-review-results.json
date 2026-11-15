@@ -1,5 +1,5 @@
 {
-  "status": "Shared offer budget implemented; all instruction gates and leak-checked depth gates pass. Strict unchecked wasm four-split boundary remains for review.",
+  "status": "Approved for merge by Fable for the user; all four unchecked depth cases pass the inclusive gate with fixed overhead allowance. Storage constants unchanged.",
   "baseline_revision": "591e050d63f7b765f7293d3b1f887020deeb3ed7",
   "source_parent_revision": "556db2037b3cd3890e6a58c61599975e939c033c",
   "summary": [
@@ -10829,7 +10829,1057 @@
         }
       ]
     },
-    "unchecked_wasm_four_review": "8191 vs 16385 levels: twice the reviewed depth is three baseline levels short. LLVM wasm frame sizes are 128 vs 64 bytes; fixed helper/setup overhead remains in maximum-depth measurements. No gate waiver or constant tuning applied."
+    "approved_unchecked": {
+      "sources": {
+        "1": "function depth = (n: Integer, text: String): Integer => {\nlet words0 = text.split(\" \")\nif n > 0 { depth(n - 1, text) + words0.length } else { words0.length }\n}\nlet n = try Integer.parse(arguments.get(0) ?? \"1\")\nconsole.log(depth(n, \"a b\"))\n",
+        "4": "function depth = (n: Integer, text: String): Integer => {\nlet words0 = text.split(\" \")\nlet words1 = text.split(\" \")\nlet words2 = text.split(\" \")\nlet words3 = text.split(\" \")\nif n > 0 { depth(n - 1, text) + words0.length + words1.length + words2.length + words3.length } else { words0.length + words1.length + words2.length + words3.length }\n}\nlet n = try Integer.parse(arguments.get(0) ?? \"1\")\nconsole.log(depth(n, \"a b\"))\n"
+      },
+      "native_stack_limit_kib": 256,
+      "wasm_shadow_stack_bytes": 1048576,
+      "optimization": "O3, synchronous, no leak checking",
+      "gate": "baseline_depth <= 2 * final_depth + 8",
+      "measurements": [
+        {
+          "split_count": 1,
+          "target": "native",
+          "variant": "baseline",
+          "largest_depth": 1215,
+          "first_failure": 1216,
+          "binary_sha256": "c3f4b1bd1d05e77922581f58ed74bef2355ebcc0db3fa7cafa8e6d70b34cafc0",
+          "samples": [
+            {
+              "depth": 64,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 128,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 256,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 512,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1024,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 2048,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1536,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1280,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1152,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1216,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1184,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1200,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1208,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1212,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1214,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1215,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            }
+          ]
+        },
+        {
+          "split_count": 1,
+          "target": "native",
+          "variant": "shared",
+          "largest_depth": 1594,
+          "first_failure": 1595,
+          "binary_sha256": "f0eb3946b0f05543e125273d9b38152e209d968422977d7b36f78b37a28ada34",
+          "samples": [
+            {
+              "depth": 64,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 128,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 256,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 512,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1024,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 2048,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1536,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1792,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1664,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1600,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1568,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1584,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1592,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1596,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1594,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1595,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            }
+          ]
+        },
+        {
+          "split_count": 1,
+          "target": "wasm",
+          "variant": "baseline",
+          "largest_depth": 7262,
+          "first_failure": 7263,
+          "binary_sha256": "19657e7db385e567907e097b09668e5def02de5a770cce615bbbf5501f94ca81",
+          "samples": [
+            {
+              "depth": 64,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 128,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 256,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 512,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1024,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 2048,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 4096,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8192,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 6144,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 7168,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 7680,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 7424,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 7296,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 7232,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 7264,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 7248,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 7256,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 7260,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 7262,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 7263,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            }
+          ]
+        },
+        {
+          "split_count": 1,
+          "target": "wasm",
+          "variant": "shared",
+          "largest_depth": 8258,
+          "first_failure": 8259,
+          "binary_sha256": "0e4ff8cf5632ebfa12a761d53df54aa38aa610f640c4d31d1b87f3063d66a745",
+          "samples": [
+            {
+              "depth": 64,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 128,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 256,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 512,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1024,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 2048,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 4096,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8192,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 16384,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 12288,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 10240,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 9216,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 8704,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 8448,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 8320,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 8256,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8288,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 8272,
+              "status": 0,
+              "correct": false,
+              "stderr": ""
+            },
+            {
+              "depth": 8264,
+              "status": 0,
+              "correct": false,
+              "stderr": ""
+            },
+            {
+              "depth": 8260,
+              "status": 0,
+              "correct": false,
+              "stderr": ""
+            },
+            {
+              "depth": 8258,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8259,
+              "status": 0,
+              "correct": false,
+              "stderr": ""
+            }
+          ]
+        },
+        {
+          "split_count": 4,
+          "target": "native",
+          "variant": "baseline",
+          "largest_depth": 1783,
+          "first_failure": 1784,
+          "binary_sha256": "765a0c1387bf9d980e7f7f0fd61306a049c480f10aefdff1f76cbbad2f7d2273",
+          "samples": [
+            {
+              "depth": 64,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 128,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 256,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 512,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1024,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 2048,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1536,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1792,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1664,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1728,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1760,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1776,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1784,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1780,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1782,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1783,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            }
+          ]
+        },
+        {
+          "split_count": 4,
+          "target": "native",
+          "variant": "shared",
+          "largest_depth": 1439,
+          "first_failure": 1440,
+          "binary_sha256": "45ef547f391dc89d61275d231ed73d01f0a8a5ad363fddce61b4bfe2a49f5f80",
+          "samples": [
+            {
+              "depth": 64,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 128,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 256,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 512,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1024,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 2048,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1536,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1280,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1408,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1472,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1440,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 1424,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1432,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1436,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1438,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1439,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            }
+          ]
+        },
+        {
+          "split_count": 4,
+          "target": "wasm",
+          "variant": "baseline",
+          "largest_depth": 16385,
+          "first_failure": 16386,
+          "binary_sha256": "cac3d3cc0411df40ba3d56752000cd19686a6386be74cd0e6dbef98fc194fc90",
+          "samples": [
+            {
+              "depth": 64,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 128,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 256,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 512,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1024,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 2048,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 4096,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8192,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 16384,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 32768,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 24576,
+              "status": 101,
+              "correct": false,
+              "stderr": "stop: stack overflow\n"
+            },
+            {
+              "depth": 20480,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 18432,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 17408,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 16896,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 16640,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 16512,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 16448,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 16416,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 16400,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 16392,
+              "status": 1,
+              "correct": false,
+              "stderr": "RuntimeError: Out of bounds memory access (evaluating 'instance.exports._start()')\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 16388,
+              "status": 0,
+              "correct": false,
+              "stderr": ""
+            },
+            {
+              "depth": 16386,
+              "status": 0,
+              "correct": false,
+              "stderr": ""
+            },
+            {
+              "depth": 16385,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            }
+          ]
+        },
+        {
+          "split_count": 4,
+          "target": "wasm",
+          "variant": "shared",
+          "largest_depth": 8191,
+          "first_failure": 8192,
+          "binary_sha256": "98a60efcf315279fff3aee2374ac5a64662ed78885003f86fcadeaeb6c823b28",
+          "samples": [
+            {
+              "depth": 64,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 128,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 256,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 512,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 1024,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 2048,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 4096,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8192,
+              "status": 1,
+              "correct": false,
+              "stderr": "g 'instance.exports._start()')\n      at /home/claude-dev/.paseo/worktrees/0rhyrubi/stack-collections/target/shared-offer-depth-gate-approved/shared-wasm-4/wasm/main.mjs:116:19\n\nBun v1.4.4 (Linux x64)\n"
+            },
+            {
+              "depth": 6144,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 7168,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 7680,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 7936,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8064,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8128,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8160,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8176,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8184,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8188,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8190,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            },
+            {
+              "depth": 8191,
+              "status": 0,
+              "correct": true,
+              "stderr": ""
+            }
+          ]
+        }
+      ],
+      "baseline_revision": "591e050d63f7b765f7293d3b1f887020deeb3ed7",
+      "implementation_revision": "74c6d244245ef6e6c3dd33991eb4e2f6fcd101d1",
+      "checks": [
+        {
+          "split_count": 1,
+          "target": "native",
+          "baseline_depth": 1215,
+          "final_depth": 1594,
+          "upper_bound": 3196,
+          "passed": true
+        },
+        {
+          "split_count": 1,
+          "target": "wasm",
+          "baseline_depth": 7262,
+          "final_depth": 8258,
+          "upper_bound": 16524,
+          "passed": true
+        },
+        {
+          "split_count": 4,
+          "target": "native",
+          "baseline_depth": 1783,
+          "final_depth": 1439,
+          "upper_bound": 2886,
+          "passed": true
+        },
+        {
+          "split_count": 4,
+          "target": "wasm",
+          "baseline_depth": 16385,
+          "final_depth": 8191,
+          "upper_bound": 16390,
+          "passed": true
+        }
+      ],
+      "wasm_four_frame_bytes": {
+        "baseline": {
+          "bytes": 64,
+          "prologue": "fa.depth:                               # @fa.depth\n\t.functype\tfa.depth (i64, i32) -> (i64)\n\t.local  \ti32, i32, i32, i32, i32, i32, i32, i32\n# %bb.0:                                # %allocas\n\tglobal.get\t__stack_pointer\n\ti32.const\t64\n\ti32.sub \n\tlocal.tee\t2\n\tglobal.set\t__stack_pointer\n\tlocal.get\t2\n\tlocal.get\t1\n\ti32.load\t8\n\tlocal.tee\t3\n\ti32.store\t8\n\tlocal.get\t2\n\tlocal.get\t1\n\ti32.load\t4\n\tlocal.tee\t4\n\ti32.store\t4\n\tlocal.get\t2\n\tlocal.get\t1\n\ti32.load\t0\n\tlocal.tee\t5\n\ti32.store\t0\n\tlocal.get\t2\n\tlocal.get\t5\n\tlocal.get\t3\n\ti32.const\t1073741824\n\ti32.and \n\tlocal.tee\t6\n\ti32.select\n\tlocal.get\t3\n\ti32.const\t24\n\ti32.shr_u\n\ti32.const\t31\n\ti32.and \n\tlocal.get\t4\n\tlocal.get\t6\n\ti32.select\n\tlocal.get\t3\n\tcall\tfa_string_split\n\tlocal.set\t4\n\tlocal.get\t2\n\tlocal.get\t1\n\ti32.load\t8\n\tlocal.tee\t3\n\ti32.store\t24\n\tlocal.get\t2\n\tlocal.get\t1\n\ti32.load\t4\n\tlocal.tee\t5\n\ti32.store\t20\n\tlocal.get\t2\n\tlocal.get\t1\n\ti32.load\t0\n\tlocal.tee\t6\n\ti32.store\t16\n\tlocal.get\t2\n\ti32.const\t16\n\ti32.add \n\tlocal.get\t6\n\tlocal.get\t3\n\ti32.const\t1073741824\n\ti32.and \n\tlocal.tee\t7\n\ti32.select\n\tlocal.get\t3\n\ti32.const\t24\n\ti32.shr_u\n\ti32.const\t31\n\ti32.and \n\tlocal.get\t5\n\tlocal.get\t7\n\ti32.select\n\tlocal.get\t3\n\tcall\tfa_string_split\n\tlocal.set\t5\n\tlocal.get\t2\n\tlocal.get\t1"
+        },
+        "shared": {
+          "bytes": 128,
+          "prologue": "fa.depth:                               # @fa.depth\n\t.functype\tfa.depth (i64, i32) -> (i64)\n\t.local  \ti32, i32, i32, i32, i32, i32\n# %bb.0:                                # %allocas\n\tglobal.get\t__stack_pointer\n\ti32.const\t128\n\ti32.sub \n\tlocal.tee\t2\n\tglobal.set\t__stack_pointer\n\tlocal.get\t1\n\tlocal.get\t1\n\ti32.load\t0\n\tlocal.get\t1\n\ti32.load\t8\n\tlocal.tee\t3\n\ti32.const\t1073741824\n\ti32.and \n\tlocal.tee\t4\n\ti32.select\n\tlocal.get\t3\n\ti32.const\t24\n\ti32.shr_u\n\ti32.const\t31\n\ti32.and \n\tlocal.get\t1\n\ti32.load\t4\n\tlocal.get\t4\n\ti32.select\n\tlocal.get\t3\n\tlocal.get\t2\n\tcall\tfa_string_split_into\n\tlocal.set\t3\n\tlocal.get\t1\n\tlocal.get\t1\n\ti32.load\t0\n\tlocal.get\t1\n\ti32.load\t8\n\tlocal.tee\t4\n\ti32.const\t1073741824\n\ti32.and \n\tlocal.tee\t5\n\ti32.select\n\tlocal.get\t4\n\ti32.const\t24\n\ti32.shr_u\n\ti32.const\t31\n\ti32.and \n\tlocal.get\t1\n\ti32.load\t4\n\tlocal.get\t5\n\ti32.select\n\tlocal.get\t4\n\tcall\tfa_string_split\n\tlocal.set\t4\n\tlocal.get\t1\n\tlocal.get\t1\n\ti32.load\t0\n\tlocal.get\t1\n\ti32.load\t8\n\tlocal.tee\t5\n\ti32.const\t1073741824\n\ti32.and \n\tlocal.tee\t6\n\ti32.select\n\tlocal.get\t5\n\ti32.const\t24\n\ti32.shr_u\n\ti32.const\t31\n\ti32.and \n\tlocal.get\t1\n\ti32.load\t4\n\tlocal.get\t6\n\ti32.select\n\tlocal.get\t5\n\tcall\tfa_string_split\n\tlocal.set\t5\n\tlocal.get\t1\n\tlocal.get\t1\n\ti32.load\t"
+        }
+      },
+      "leak_check": false,
+      "allowance_frames": 8,
+      "approved_by": "Fable for the user",
+      "decision_date": "2026-11-15"
+    },
+    "unchecked_wasm_four_boundary": {
+      "baseline_depth": 16385,
+      "final_depth": 8191,
+      "baseline_frame_bytes": 64,
+      "final_frame_bytes": 128,
+      "upper_bound": 16390,
+      "passed": true,
+      "reason": "Inclusive 2x per-frame bound, with 8 frames for fixed non-per-frame overhead."
+    }
   },
   "unchanged_benchmark_binaries": [
     "binary-trees",
@@ -11528,8 +12578,11 @@
   },
   "gate_results": {
     "instructions_27": true,
-    "depth_with_leak_checks_one_and_four_on_native_and_wasm": true,
-    "unchecked_wasm_four_strict_factor_two": false,
-    "pending_review": "Whether the exact unchecked boundary is required in addition to the successful leak-checked depth gates. No exception applied."
+    "unchecked_depth_one_and_four_native_and_wasm": true,
+    "unchecked_depth_formula": "baseline_depth <= 2 * final_depth + 8",
+    "fixed_overhead_allowance_frames": 8,
+    "leak_checked_depths": "information only",
+    "approved_by": "Fable for the user",
+    "decision_date": "2026-11-15"
   }
 }

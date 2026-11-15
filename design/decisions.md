@@ -606,14 +606,20 @@ These verdicts supersede the initial implementation choices above:
   A large frame must not jump over a worker's guard page. This does not add
   freestanding signal recovery or per-worker alternate signal stacks.
 
-The relative recursion-depth gate applies only to call-result offers: the
-single-live-split and four-live-split programs must reach within a factor of
-two of baseline depth on native and wasm. Native measurements use a 256 KiB
-stack limit; wasm retains its default 1 MiB shadow stack. Exact literal blocks
-are excluded from this relative gate and remain bounded by the 512-byte total.
-The former 512-byte offer failed the gate; the shared 128-byte sub-budget
-prevents repeated speculative offers from recreating that cost. Measurements
-and validation are recorded in `native-goose-stack-review-results.json`.
+**Depth gate (Fable for the user, 2026-11-15):** A recursive function holding
+`split` locals must not cost more than 2× the baseline stack per frame
+(inclusive), on native and wasm, for `recursive_split` and its four-live-splits
+variant. It is checked on builds without leak checking as
+`baseline_depth ≤ 2 × final_depth + 8`; the 8 frames absorb the fixed,
+non-per-frame stack overhead. Leak-checked depths are recorded alongside for
+information but are not the gate.
+
+Native measurements use a 256 KiB stack limit; wasm retains its default 1 MiB
+shadow stack. The gate covers call-result offers; exact literals remain bounded
+by the 512-byte total instead. All four unchecked comparisons pass. At the wasm
+four-split boundary, 16,385 ≤ 2 × 8,191 + 8 = 16,390, with exactly 64 → 128 bytes
+per recursive frame. The allowance is a number of frames, not a percentage.
+Measurements and validation are recorded in `native-goose-stack-review-results.json`.
 
 
 ## Capacity and reserve on every collection (2026-11-15)

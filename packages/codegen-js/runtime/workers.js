@@ -130,6 +130,12 @@ export class FaWorker {
 		this.calls = new Map();
 		/** @type {number} */
 		this.next = 0;
+		/** @type {number[]} Calls prepared on the worker, awaiting their turn. */
+		this.waiting = [];
+		this.waitingHead = 0;
+		/** @type {number | null} */
+		this.active = null;
+		this.scheduled = false;
 		/** @type {boolean} */
 		this.stopping = false;
 		/** @type {boolean} */
@@ -147,10 +153,12 @@ export class FaWorker {
 				return;
 			}
 			const resolve = this.calls.get(answer.id);
+			if (this.active === answer.id) this.active = null;
 			if (resolve !== undefined) {
 				this.calls.delete(answer.id);
 				resolve(faRevive(answer));
 			}
+			this.dispatch();
 			this.settled();
 		};
 		if (threads !== undefined) {
@@ -187,13 +195,45 @@ export class FaWorker {
 		}
 		this.calls.set(id, answer);
 		faShare(args);
+		// Snapshot the arguments at the call, but commit execution only at
+		// the starter's next microtask and when the previous call has ended.
 		this.thread.postMessage({ kind: 1, id, method, args });
+		this.waiting.push(id);
+		this.dispatch();
 		return id;
+	}
+
+	/** Starts the next live call; synchronous cancellation can remove it first. */
+	dispatch() {
+		if (this.scheduled || this.active !== null || this.dead) return;
+		this.scheduled = true;
+		queueMicrotask(() => {
+			this.scheduled = false;
+			if (this.active !== null || this.dead) return;
+			while (this.waitingHead < this.waiting.length) {
+				const id = this.waiting[this.waitingHead++];
+				if (!this.calls.has(id)) continue;
+				this.active = id;
+				this.thread.postMessage({ kind: 3, id });
+				break;
+			}
+			if (this.waitingHead === this.waiting.length) {
+				this.waiting.length = 0;
+				this.waitingHead = 0;
+			}
+		});
+	}
+
+	/** @param {number} id The cancelled call, prepared or already running. */
+	cancel(id) {
+		this.calls.delete(id);
+		this.thread.postMessage({ kind: 2, id });
+		this.settled();
 	}
 
 	/** A call answered: an idle worker lets the process end, a stopped one ends. */
 	settled() {
-		if (this.calls.size > 0) {
+		if (this.calls.size > 0 || this.active !== null) {
 			return;
 		}
 		if (this.stopping) {
@@ -209,6 +249,7 @@ export class FaWorker {
 			return;
 		}
 		this.dead = true;
+		this.waiting.length = 0;
 		this.thread.terminate();
 		const calls = [...this.calls.values()];
 		this.calls.clear();
@@ -282,9 +323,7 @@ export async function faWorkerCall(task, worker, method, args, classes) {
 			resolve(undefined);
 		});
 		task.wake = () => {
-			worker.calls.delete(id);
-			worker.thread.postMessage({ kind: 2, id });
-			worker.settled();
+			worker.cancel(id);
 			resolve(undefined);
 		};
 		task.where = "a worker";
@@ -319,9 +358,7 @@ export function faWorkerStart(parent, worker, method, args, classes) {
 	});
 	// cancelled before it ran: the worker skips it
 	task.wake = () => {
-		worker.calls.delete(id);
-		worker.thread.postMessage({ kind: 2, id });
-		worker.settled();
+		worker.cancel(id);
 	};
 	return task;
 }
@@ -355,6 +392,10 @@ export function faWorkerServe(init) {
 	let state;
 	/** @type {Set<number>} */
 	const cancelled = new Set();
+	/** @type {Map<number, any>} Argument snapshots awaiting a commit from the caller. */
+	const prepared = new Map();
+	/** @type {number | null} */
+	let executing = null;
 	/** @type {Promise<void>} */
 	let line = Promise.resolve();
 	/** @param {any} message */
@@ -377,6 +418,10 @@ export function faWorkerServe(init) {
 		if (module === undefined) {
 			module = await import(url);
 			modules.set(url, module);
+		}
+		if (cancelled.delete(id)) {
+			port.postMessage({ id, cancelled: true });
+			return;
 		}
 		const method = module[`${name}$sync`] ?? module[name];
 		try {
@@ -413,8 +458,28 @@ export function faWorkerServe(init) {
 	};
 	/** @param {any} message */
 	const receive = (message) => {
+		if (message.kind === 1) {
+			prepared.set(message.id, message);
+			return;
+		}
 		if (message.kind === 2) {
-			cancelled.add(message.id);
+			if (!prepared.delete(message.id) && executing === message.id) cancelled.add(message.id);
+			return;
+		}
+		if (message.kind === 3) {
+			const call = prepared.get(message.id);
+			prepared.delete(message.id);
+			if (call !== undefined) {
+				executing = message.id;
+				line = line.then(async () => {
+					try {
+						await run(call);
+					} finally {
+						executing = null;
+						cancelled.delete(message.id);
+					}
+				});
+			}
 			return;
 		}
 		line = line.then(() => run(message));

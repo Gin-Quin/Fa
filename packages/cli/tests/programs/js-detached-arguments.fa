@@ -1,0 +1,10 @@
+-- Detached calls snapshot mutable arguments before the caller changes them.
+async function report = (values: Array<Integer>) => {
+	console.log(values)
+}
+mutable values = [1, 2]
+start report(values)
+values[0] = 9
+console.log(values) -- prints: [9, 2]
+await Task.yield()
+-- prints: [1, 2]

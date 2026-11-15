@@ -1375,7 +1375,7 @@ enum Slot {
 }
 
 /// The lines of a writer, one level deeper.
-fn indent_by_one(lines: Writer) -> Writer {
+pub(super) fn indent_by_one(lines: Writer) -> Writer {
 	let text = lines.finish();
 	let mut out = Writer::at(0);
 	for line in text.lines() {

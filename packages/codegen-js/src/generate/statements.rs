@@ -50,7 +50,7 @@ impl Generator<'_> {
 				self.scoped_watch_statements(statement, &statements[index + 1..], dest);
 				return;
 			}
-			self.guarded(statement, &Dest::Discard, |g| g.statement(statement));
+			self.guarded(|g| g.statement(statement));
 			if self.flushes_after(statement) {
 				self.flush();
 			}
@@ -60,8 +60,7 @@ impl Generator<'_> {
 			return;
 		}
 		if !self.flushes_after(last) {
-			let leaving = dest.clone();
-			self.guarded(last, &leaving, |g| g.into(last, dest));
+			self.guarded(|g| g.into(last, dest));
 			return;
 		}
 		// the pending `watch` blocks run after the last statement too
@@ -856,7 +855,7 @@ impl Generator<'_> {
 			self.module_constant(name, value.text);
 			return;
 		}
-		if module_value {
+		if module_value || self.guard_binding(&name) {
 			self.out.line(format!("{name} = {};", value.text));
 		} else {
 			let keyword = if kind == BindingKind::Let {

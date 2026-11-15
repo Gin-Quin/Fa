@@ -1,0 +1,67 @@
+-- Generic pointer operations keep the representation of their actual type,
+-- including calls through generic function values and captured readers.
+function store = <Item>(value: Item): Pointer<Item> => Pointer.allocate(value)
+function load = <Item>(pointer: Pointer<Item>): Item => pointer.read()
+function replace = <Item>(pointer: Pointer<Item>, value: Item) => pointer.write(value)
+function release = <Item>(pointer: Pointer<Item>) => pointer.free()
+function reader = <Item>(pointer: Pointer<Item>) => () => pointer.read()
+function roundTrip = <Item>(value: Item): Item => {
+	let pointer = store(value)
+	let result = load(pointer)
+	release(pointer)
+	result
+}
+function apply = (transform: <Item>(value: Item) => Item): String => "{transform(17)} {transform("hello")}"
+console.log(apply(roundTrip)) -- prints: 17 hello
+
+let small: Int32 = -7
+let wide: Int64 = 9007199254740993
+console.log(roundTrip(small), roundTrip(wide)) -- prints: -7 9007199254740993
+
+type Point = CStruct { x: Int32, y: Float32 }
+let point = roundTrip(Point { x = 8, y = 2.5 })
+console.log(point.x, point.y == 2.5) -- prints: 8 true
+
+let pointer = store<Int32>(5)
+let read = reader(pointer)
+replace<Int32>(pointer, 9)
+console.log(read()) -- prints: 9
+release(pointer)
+
+function identity = <Item>(value: Item): Item => value
+console.log([1, 2, 3].map(identity)) -- prints: [1, 2, 3]
+let concrete: (value: Int32) => Int32 = roundTrip
+console.log(concrete(42)) -- prints: 42
+
+type Held = {
+	id: Int32
+	function destroy = (self) => { console.log("released {self.id}") }
+}
+let resource = store(Held { id = 0 })
+release(resource) -- prints: released 0
+
+function storeMany = <Item>(items: Array<Item>): Pointer<Array<Item>> => Pointer.allocate(items)
+function readMany = <Item>(pointer: Pointer<Array<Item>>): Array<Item> => pointer.read()
+mutable source = [1, 2]
+let many = storeMany(source)
+source[0] = 9
+mutable taken = readMany(many)
+if taken.length > 1 { taken[1] = 8 }
+console.log(source, load(many), taken) -- prints: [9, 2] [1, 2] [1, 8]
+release(many)
+
+type Wrapper<Item> = { value: Item }
+function boxed = <Item>(value: Item): Pointer<Wrapper<Item>> => Pointer.allocate(Wrapper<Item> { value })
+let wrapped = boxed("wrapped")
+console.log(load(wrapped).value) -- prints: wrapped
+release(wrapped)
+
+let resources = storeMany([Held { id = 3 }, Held { id = 4 }])
+release(resources)
+-- prints: released 3
+-- prints: released 4
+
+function optionalBox = <Item>(value: Item?): Pointer<Item?> => Pointer.allocate(value)
+let optional = optionalBox<Int32>(none)
+console.log(load(optional)) -- prints: none
+release(optional)

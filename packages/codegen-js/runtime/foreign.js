@@ -9,6 +9,8 @@
 // Each helper starts at a `// @fa-helper <name> deps: <names>` line and ends at
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
 
+import { faCopyShell } from "./copy.js";
+
 // @fa-helper faFfiRuntime
 /**
  * The FFI of the running JavaScript runtime: `bun:ffi`.
@@ -406,6 +408,187 @@ export function faPointerReadValue(pointer, spec, bigint) {
 	const block = faPointerMemory.values.get(pointer);
 	if (block === undefined) throw new Error("unknown Fa allocation");
 	return block.value;
+}
+
+// @fa-helper faLayoutCache
+/** @type {Map<any, any>} */
+export const faLayoutCache = new Map();
+
+// @fa-helper faLayoutSlot deps: faLayoutCache
+/**
+ * @param {any} key
+ * @param {object[]} parameters
+ * @returns {{ children: WeakMap<object, any>, value?: any }}
+ */
+export function faLayoutSlot(key, parameters) {
+	let slot = faLayoutCache.get(key);
+	if (slot === undefined) {
+		slot = { children: new WeakMap() };
+		faLayoutCache.set(key, slot);
+	}
+	for (const parameter of parameters) {
+		let next = slot.children.get(parameter);
+		if (next === undefined) {
+			next = { children: new WeakMap() };
+			slot.children.set(parameter, next);
+		}
+		slot = next;
+	}
+	return slot;
+}
+
+// @fa-helper faCollectionLayout deps: faLayoutSlot faLayoutCopy faCopyShell
+/**
+ * @param {string} kind
+ * @param {any} item
+ * @param {any} key
+ * @returns {any}
+ */
+export function faCollectionLayout(kind, item, key) {
+	const slot = faLayoutSlot(`collection:${kind}`, [item, key]);
+	return (slot.value ??= {
+		spec: null,
+		alignment: 1,
+		bigint: false,
+		copy(value) {
+			const result = faCopyShell(value);
+			if (kind === "array") {
+				for (const entry of value) result.push(faLayoutCopy(item, entry));
+			} else if (kind === "map") {
+				for (const [name, entry] of value)
+					result.set(faLayoutCopy(key, name), faLayoutCopy(item, entry));
+			} else {
+				for (const entry of value) result.add(faLayoutCopy(item, entry));
+			}
+			return result;
+		},
+		drop(value) {
+			if (kind === "map") {
+				for (const [name, entry] of value) {
+					key.drop?.(name);
+					item.drop?.(entry);
+				}
+			} else if (item.drop !== undefined) {
+				for (const entry of value) item.drop(entry);
+			}
+		},
+	});
+}
+
+// @fa-helper faObjectLayout deps: faLayoutSlot faLayoutCopy faCSize
+/**
+ * @param {string} key
+ * @param {string[]} names
+ * @param {any[]} fields
+ * @param {boolean} c
+ * @returns {any}
+ */
+export function faObjectLayout(key, names, fields, c) {
+	const slot = faLayoutSlot(key, fields);
+	if (slot.value !== undefined) return slot.value;
+	let size = 0;
+	let alignment = 1;
+	const specs = [];
+	if (c) {
+		for (let index = 0; index < fields.length; index += 1) {
+			const field = fields[index];
+			size = Math.ceil(size / field.alignment) * field.alignment;
+			specs.push([names[index], field.spec, size, field.bigint]);
+			size += faCSize(field.spec);
+			alignment = Math.max(alignment, field.alignment);
+		}
+		size = Math.max(1, Math.ceil(size / alignment)) * alignment;
+	}
+	return (slot.value = {
+		spec: c ? { size, fields: specs } : null,
+		alignment,
+		bigint: false,
+		copy(value) {
+			const result = {};
+			for (let index = 0; index < fields.length; index += 1) {
+				result[names[index]] = faLayoutCopy(fields[index], value[names[index]]);
+			}
+			return result;
+		},
+		drop(value) {
+			for (let index = fields.length - 1; index >= 0; index -= 1) {
+				fields[index].drop?.(value[names[index]]);
+			}
+		},
+	});
+}
+
+// @fa-helper faTupleLayout deps: faLayoutSlot faLayoutCopy
+/** @param {any[]} items @returns {any} */
+export function faTupleLayout(items) {
+	const slot = faLayoutSlot("tuple", items);
+	return (slot.value ??= {
+		spec: null,
+		alignment: 1,
+		bigint: false,
+		copy(value) {
+			return items.map((item, index) => faLayoutCopy(item, value[index]));
+		},
+		drop(value) {
+			for (let index = items.length - 1; index >= 0; index -= 1) items[index].drop?.(value[index]);
+		},
+	});
+}
+
+// @fa-helper faFixedArrayLayout deps: faLayoutSlot faLayoutCopy faCSize
+/** @param {any} item @param {number} count @returns {any} */
+export function faFixedArrayLayout(item, count) {
+	const slot = faLayoutSlot(`fixed-array:${count}`, [item]);
+	return (slot.value ??= {
+		spec: { array: item.spec, count, stride: faCSize(item.spec), bigint: item.bigint },
+		alignment: item.alignment,
+		bigint: false,
+		copy(value) {
+			return value.map((entry) => faLayoutCopy(item, entry));
+		},
+		drop(value) {
+			if (item.drop !== undefined) for (const entry of value) item.drop(entry);
+		},
+	});
+}
+
+// @fa-helper faOptionalLayout deps: faLayoutSlot faLayoutCopy
+/** @param {any} item @returns {any} */
+export function faOptionalLayout(item) {
+	const slot = faLayoutSlot("optional", [item]);
+	return (slot.value ??= {
+		spec: item.spec === "ptr" ? "ptr" : null,
+		alignment: item.alignment,
+		bigint: false,
+		copy(value) {
+			return value === undefined ? value : faLayoutCopy(item, value);
+		},
+		drop(value) {
+			if (value !== undefined) item.drop?.(value);
+		},
+	});
+}
+
+// @fa-helper faLayoutCopy
+/**
+ * @param {{ copy?: ((value: any) => any) }} layout
+ * @param {any} value
+ * @returns {any}
+ */
+export function faLayoutCopy(layout, value) {
+	return layout.copy === undefined ? value : layout.copy(value);
+}
+
+// @fa-helper faLayoutPointerRead deps: faPointerReadValue faLayoutCopy
+/**
+ * A generic read has the concrete type's copy semantics.
+ * @param {number} pointer
+ * @param {{ spec: any, bigint: boolean, copy?: ((value: any) => any) }} layout
+ * @returns {any}
+ */
+export function faLayoutPointerRead(pointer, layout) {
+	const value = faPointerReadValue(pointer, layout.spec, layout.bigint);
+	return layout.spec === null ? faLayoutCopy(layout, value) : value;
 }
 
 // @fa-helper faPointerWriteValue deps: faPointerMemory faCWrite faPointerView faCSize

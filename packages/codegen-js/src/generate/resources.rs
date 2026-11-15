@@ -64,8 +64,18 @@ impl Generator<'_> {
 	/// (`drop$Holder`), `None` for a type holding none. Its name is declared
 	/// before its body, which a recursive type calls.
 	pub(crate) fn drop_function(&mut self, ty: TypeId) -> Option<String> {
-		let ty = self.types.unfold(ty);
 		if !self.types.contains_resource(ty) {
+			return None;
+		}
+		self.storage_drop_function(ty)
+	}
+
+	/// Destruction of explicitly owned storage, including tasks moved into
+	/// a foreign allocation. Ordinary task lifetimes use their task guards;
+	/// discarding a detached task must not cancel it again.
+	pub(crate) fn storage_drop_function(&mut self, ty: TypeId) -> Option<String> {
+		let ty = self.types.unfold(ty);
+		if !self.types.contains_resource(ty) && !self.contains_task(ty) {
 			return None;
 		}
 		if let Some(name) = self.drops.get(&ty) {
@@ -92,6 +102,10 @@ impl Generator<'_> {
 	/// The statements of the drop function of a type.
 	fn drop_body(&mut self, ty: TypeId) -> Option<Vec<String>> {
 		match self.types.kind(ty) {
+			TypeKind::Task(..) => {
+				let drop = self.helper("faDrop");
+				Some(vec![format!("{drop}(value);")])
+			}
 			TypeKind::Object(_) => {
 				let mut lines = Vec::new();
 				if self.types.is_resource(ty) {
@@ -110,7 +124,7 @@ impl Generator<'_> {
 					})
 					.collect();
 				for (name, field_type) in fields.into_iter().rev() {
-					if let Some(drop) = self.drop_function(field_type) {
+					if let Some(drop) = self.storage_drop_function(field_type) {
 						lines.push(format!("{drop}(value.{name});"));
 					}
 				}
@@ -120,18 +134,18 @@ impl Generator<'_> {
 				let items = self.types.list_items(list).to_vec();
 				let mut lines = Vec::new();
 				for (index, item) in items.into_iter().enumerate().rev() {
-					if let Some(drop) = self.drop_function(item) {
+					if let Some(drop) = self.storage_drop_function(item) {
 						lines.push(format!("{drop}(value[{index}]);"));
 					}
 				}
 				Some(lines)
 			}
 			TypeKind::Collection(kind, item, key) => {
-				let item_drop = self.drop_function(item);
+				let item_drop = self.storage_drop_function(item);
 				let line = match kind {
 					CollKind::Map | CollKind::GrowingMap => {
 						let mut each = Vec::new();
-						if let Some(drop) = self.drop_function(key) {
+						if let Some(drop) = self.storage_drop_function(key) {
 							each.push(format!("{drop}(key);"));
 						}
 						if let Some(drop) = item_drop {
@@ -169,7 +183,7 @@ impl Generator<'_> {
 					if payload.is_unset() {
 						continue;
 					}
-					let Some(drop) = self.drop_function(payload) else {
+					let Some(drop) = self.storage_drop_function(payload) else {
 						continue;
 					};
 					let tag =
@@ -197,7 +211,7 @@ impl Generator<'_> {
 					.collect();
 				let mut lines = Vec::new();
 				for &member in &members {
-					let Some(drop) = self.drop_function(member) else {
+					let Some(drop) = self.storage_drop_function(member) else {
 						continue;
 					};
 					let others: Vec<TypeId> = members

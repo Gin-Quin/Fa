@@ -835,6 +835,12 @@ impl Walker<'_> {
 		let mut ty = self.a.symbols.symbol(symbol).ty;
 		for step in self.place_steps(place) {
 			ty = match step {
+				Step::Field(name)
+					if self.s.types.syms.resolve(name) == "value"
+						&& matches!(self.s.types.kind(ty), TypeKind::Pointer(_)) =>
+				{
+					self.s.types.pointer_target(ty)?
+				}
 				Step::Field(name) => self
 					.s
 					.types

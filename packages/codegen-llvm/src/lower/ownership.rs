@@ -1320,7 +1320,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// zero, so a moved one is known by its flag, never by its bytes
 		if self
 			.types()
-			.contains_resource(self.analysis.symbols.symbol(symbol).ty)
+			.contains_resource(self.concrete_type(self.analysis.symbols.symbol(symbol).ty))
 			&& let Ok(flag) = self.set_flag("owns_resource")
 		{
 			self.cleanups
@@ -1358,7 +1358,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		nodes.sort_unstable_by_key(|node| node.index());
 		let mut paths: Vec<Vec<u32>> = Vec::new();
 		for node in nodes {
-			if !self.types().contains_resource(self.type_of(node)) {
+			if !self
+				.types()
+				.contains_resource(self.concrete_type(self.type_of(node)))
+			{
 				continue;
 			}
 			if let Some((root, path)) = self.field_path(node)
@@ -1423,7 +1426,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.build_store(flag, self.context.bool_type().const_zero())?;
 			return Ok(());
 		}
-		if !self.types().contains_resource(self.type_of(node)) {
+		if !self
+			.types()
+			.contains_resource(self.concrete_type(self.type_of(node)))
+		{
 			return Ok(());
 		}
 		let flag = self.field_path(node).and_then(|(symbol, path)| {
@@ -1566,7 +1572,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// type (`TypeStore::owns_unique`).
 	pub(crate) fn is_moved_parameter(&self, symbol: SymbolId) -> bool {
 		let data = self.analysis.symbols.symbol(symbol);
-		matches!(data.kind, SymbolKind::Parameter { .. }) && self.types().owns_unique(data.ty)
+		matches!(data.kind, SymbolKind::Parameter { .. })
+			&& self.types().owns_unique(self.concrete_type(data.ty))
 	}
 
 	/// Stops dropping a slot registered with `Cleanup::Local` (a value built

@@ -26,7 +26,8 @@ impl Generator<'_> {
 		}
 		let value = self.expr_value(n);
 		// reads and writes of reactive places (reactivity.rs)
-		self.reactive_expr(n, value)
+		let value = self.reactive_expr(n, value);
+		self.bind_generic_value(n, value)
 	}
 
 	/// The JavaScript of an expression, before its reactive instrumentation.

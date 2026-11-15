@@ -1633,8 +1633,13 @@ impl TypeStore {
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) => {
 				scalar.with_runtime_kind(RuntimeKind::Number)
 			}
-			TypeKind::NamedUnion(..) | TypeKind::Member(..) => {
-				F::COMPARABLE.with_runtime_kind(RuntimeKind::Object)
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _) => {
+				let inherited = self
+					.list_items(self.nominal(nominal).args)
+					.iter()
+					.fold(F::empty(), |flags, &arg| flags | self.flags(arg))
+					& (F::HAS_PARAM | F::HAS_UNKNOWN);
+				(F::COMPARABLE | inherited).with_runtime_kind(RuntimeKind::Object)
 			}
 			// a JavaScript number up to 32 flags, a `bigint` above (D14)
 			TypeKind::Fields(_) if self.fields_width_of_kind(kind) > 32 => {
@@ -2214,6 +2219,52 @@ mod tests {
 		let task = store.intern(TypeKind::Task(TypeId::INTEGER, TypeId::NEVER));
 		let holder = store.array(task);
 		assert!(store.flags(holder).contains(TypeFlags::MOVE_ONLY));
+	}
+
+	#[test]
+	fn substitutes_a_generic_union_nested_inside_an_object() {
+		let mut store = TypeStore::new();
+		let module = store.module("example");
+		let owner = store.decl_key(module, &["Choice"], 0);
+		let name = store.syms.intern("Item");
+		let param = store.add_param(ParamInfo {
+			owner,
+			index: 0,
+			name,
+			constraint: TypeId::UNKNOWN,
+			default: TypeId::UNSET,
+			value: false,
+		});
+		let item = store.intern(TypeKind::Param(param));
+		let args = store.list(&[item]);
+		let some = store.syms.intern("Some");
+		let empty = store.syms.intern("Empty");
+		let members = store.intern_sym_list(&[some, empty]);
+		let nominal = store.intern_nominal(NominalInfo {
+			key: owner,
+			args,
+			kind: NominalKind::Union,
+			members,
+		});
+		store.set_payloads(nominal, vec![item, TypeId::UNSET]);
+		store.set_generic_nominal(owner, nominal, vec![param]);
+		let union = store.nominal_type(nominal);
+		let value = field(&mut store, "value", union);
+		let wrapper = store.object(&[value], None);
+		let concrete = store.substitute(
+			wrapper,
+			&crate::types::Bindings {
+				params: vec![param],
+				types: vec![TypeId::STRING],
+			},
+		);
+		let member = store.fields_of(concrete)[0].ty;
+		let TypeKind::NamedUnion(actual, _) = store.kind(member) else {
+			panic!("a union");
+		};
+		assert_eq!(store.payload(actual, 0), TypeId::STRING);
+		assert!(!store.flags(concrete).contains(TypeFlags::HAS_PARAM));
+		assert_ne!(concrete, wrapper);
 	}
 
 	#[test]

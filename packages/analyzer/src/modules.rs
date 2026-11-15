@@ -22,8 +22,9 @@ use rustc_hash::FxHashMap;
 
 use fa_codebase_parser::{Codebase, Configuration, Entry, FileKind, Layout};
 
-use crate::ids::{DeclKey, FileId, ListId, NodeId, Sym, TypeId};
+use crate::ids::{DeclKey, FileId, ListId, NodeId, ParamId, Sym, TypeId};
 use crate::symbols::SymbolKind;
+use crate::types::{FieldFlags, TypeStore};
 
 /// What a file is to the analyzer.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -573,6 +574,42 @@ pub struct KeyedDecl {
 	pub name_span: crate::diagnostics::SourceSpan,
 }
 
+/// What an erased generic function needs from an application at runtime.
+/// These are semantic capabilities; backends choose their representations.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum GenericRequirement {
+	Value(ParamId),
+	Method(ParamId, Sym),
+	/// A type's memory representation, copy and destruction operations.
+	Layout(ParamId),
+}
+
+/// The complete generic parameter order and runtime needs of a function.
+#[derive(Clone, Debug)]
+pub struct GenericFunction {
+	pub generics: ListId,
+	pub requirements: Vec<GenericRequirement>,
+}
+
+/// The signature-derived capabilities shared by local and imported calls.
+pub fn generic_requirements(types: &TypeStore, generics: &[ParamId]) -> Vec<GenericRequirement> {
+	let mut requirements = Vec::new();
+	for &param in generics {
+		let info = types.param(param);
+		if info.value {
+			requirements.push(GenericRequirement::Value(param));
+			continue;
+		}
+		requirements.push(GenericRequirement::Layout(param));
+		for field in types.fields_of(info.constraint) {
+			if field.flags.contains(FieldFlags::METHOD) {
+				requirements.push(GenericRequirement::Method(param, field.name));
+			}
+		}
+	}
+	requirements
+}
+
 /// What other files see of a file: everything another file, the program
 /// analysis and the backends read of it, so that its tree and its analysis
 /// can be dropped once it is analyzed and generated
@@ -590,6 +627,8 @@ pub struct Interface {
 	pub nested_types: FxHashMap<NodeId, Vec<TypeFunction>>,
 	/// The parameters of its functions other files may call, by declaration.
 	pub parameters: FxHashMap<NodeId, Vec<Parameter>>,
+	/// Generic parameter order and capabilities of externally callable functions.
+	pub generic_functions: FxHashMap<NodeId, GenericFunction>,
 	/// The C symbols of its `@extern` functions, by declaration.
 	pub externs: FxHashMap<NodeId, String>,
 	/// The values of its module-level `static`s, by declaration.
@@ -691,6 +730,31 @@ impl Interface {
 					u128::from(param.has_default) | u128::from(param.only_called) << 1,
 					types.stable_hash(param.ty),
 				));
+			}
+		}
+		let param_hash = |param| {
+			let info = types.param(param);
+			types.decl_hash(info.owner).rotate_left(16) ^ u128::from(info.index)
+		};
+		for (&decl, function) in &self.generic_functions {
+			let generics = types
+				.list_items(function.generics)
+				.iter()
+				.fold(0u128, |hash, &ty| {
+					hash.wrapping_mul(31).wrapping_add(types.stable_hash(ty))
+				});
+			parts.push((8, key_hash(decl), 0, generics));
+			for (index, requirement) in function.requirements.iter().enumerate() {
+				let (kind, value) = match *requirement {
+					GenericRequirement::Value(param) => (1, param_hash(param)),
+					GenericRequirement::Layout(param) => (3, param_hash(param)),
+					GenericRequirement::Method(param, name) => (
+						2,
+						param_hash(param)
+							^ rustc_hash::FxBuildHasher.hash_one(types.syms.resolve(name)) as u128,
+					),
+				};
+				parts.push((8, key_hash(decl), ((index as u128) << 8) | kind, value));
 			}
 		}
 		for (&decl, value) in &self.statics {

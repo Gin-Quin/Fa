@@ -1,0 +1,14 @@
+-- A pointer's raw lifetime is trusted, but read/toArray still promise copies.
+-- file: pointer.foreign.fa
+type Held = {
+	id: Int32
+	function destroy = (self) => { console.log(self.id) }
+}
+let pointer = Pointer.allocate(Held { id = 7 })
+let _copied = pointer.read() -- error MEM002: move-only
+let _many = pointer.toArray(1) -- error MEM002: move-only
+pointer.free()
+
+let task = Pointer.allocate(start do { })
+let _taskCopy = task.read() -- error MEM002: move-only
+task.free()

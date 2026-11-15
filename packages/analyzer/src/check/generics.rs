@@ -391,6 +391,11 @@ impl Walker<'_> {
 			return;
 		}
 		match types.kind(ty) {
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _) => {
+				for &arg in types.list_items(types.nominal(nominal).args) {
+					self.collect_params(arg, out, depth + 1);
+				}
+			}
 			TypeKind::Param(param) => {
 				if !out.contains(&param) {
 					out.push(param);
@@ -428,6 +433,9 @@ impl Walker<'_> {
 			TypeKind::Collection(_, item, key) => {
 				self.collect_params(item, out, depth + 1);
 				self.collect_params(key, out, depth + 1);
+			}
+			TypeKind::Pointer(item) | TypeKind::CArray(item, _) => {
+				self.collect_params(item, out, depth + 1);
 			}
 			_ => {}
 		}
@@ -1234,6 +1242,9 @@ impl Walker<'_> {
 	pub(super) fn record_instantiation(&mut self, n: NodeId, bindings: &Bindings) -> ListId {
 		let list = self.s.types.list(&bindings.types);
 		self.a.instantiations.insert(n, list);
+		self.a
+			.instantiation_parameters
+			.insert(n, bindings.params.clone());
 		list
 	}
 }

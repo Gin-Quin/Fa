@@ -528,6 +528,7 @@ impl Walker<'_> {
 			self.a.arith.remove(&node);
 			self.a.intervals.remove(&node);
 			self.a.instantiations.remove(&node);
+			self.a.instantiation_parameters.remove(&node);
 			self.a.calls.remove(&node);
 			self.a.objects.remove(&node);
 			self.a.patterns.remove(&node);

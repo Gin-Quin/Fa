@@ -162,7 +162,9 @@ impl Walker<'_> {
 					Step::Size
 				} else if path.ends_with("#capacity") {
 					Step::Capacity
-				} else if path.starts_with("Range#") || path == "Guard#value" {
+				} else if path.starts_with("Range#")
+					|| matches!(path, "Guard#value" | "Pointer#value")
+				{
 					Step::Field(self.s.types.syms.intern(&text))
 				} else {
 					return None;
@@ -302,6 +304,12 @@ impl Walker<'_> {
 		if self.s.types.is_recovering(entry.ty) {
 			return Writable::Yes;
 		}
+		// A pointer's address may be immutable while the foreign storage it
+		// designates remains writable. Fields of the pointer's containing Fa
+		// value still obey that value's ordinary mutability.
+		if self.foreign_storage(place) {
+			return Writable::Yes;
+		}
 		match entry.kind {
 			SymbolKind::Mutable
 			| SymbolKind::Reactive
@@ -313,6 +321,34 @@ impl Walker<'_> {
 			| SymbolKind::LoopVariable { copy: false } => Writable::Yes,
 			_ => Writable::No(symbol),
 		}
+	}
+
+	/// A place below a foreign pointer dereference, rather than its address.
+	fn foreign_storage(&self, place: PlaceId) -> bool {
+		let Some(symbol) = self.place_symbol(place) else {
+			return false;
+		};
+		if !self
+			.s
+			.types
+			.flags(self.a.symbols.symbol(symbol).ty)
+			.contains(crate::types::TypeFlags::HAS_FOREIGN)
+		{
+			return false;
+		}
+		let mut current = place;
+		while let Some(parent) = self.places.parent(current) {
+			if let Some(Step::Field(name)) = self.places.get(current).step
+				&& self.s.types.syms.resolve(name) == "value"
+				&& self
+					.place_type(parent)
+					.is_some_and(|ty| matches!(self.s.types.kind(ty), TypeKind::Pointer(_)))
+			{
+				return true;
+			}
+			current = parent;
+		}
+		false
 	}
 
 	// ── owners ────────────────────────────────────────────────────────────
@@ -1061,6 +1097,9 @@ impl Walker<'_> {
 					};
 					let text = tree.name(name).to_string();
 					let (step, next) = match (text.as_str(), self.s.types.kind(ty)) {
+						("value", TypeKind::Pointer(target)) => {
+							(PathStep::Field(self.s.types.syms.intern(&text)), target)
+						}
 						("length", TypeKind::Collection(..) | TypeKind::String) => {
 							(PathStep::Length, TypeId::INTEGER)
 						}
@@ -1472,16 +1511,21 @@ impl Walker<'_> {
 					if refused.contains(&base) {
 						continue;
 					}
-					if !checked.contains(&base) {
-						checked.push(base);
+					let writable = if self.foreign_storage(place) {
+						place
+					} else {
+						base
+					};
+					if !checked.contains(&writable) {
+						checked.push(writable);
 						let method = receiver.is_some_and(|receiver| {
 							self.strip_groups(receiver) == self.strip_groups(argument)
 						});
 						// a C function's immutable argument is `FFI010` (foreign.rs)
 						let foreign = self.a.extern_calls.contains_key(&n);
-						if foreign && self.place_writable(base) != Writable::Yes
+						if foreign && self.place_writable(writable) != Writable::Yes
 							|| !foreign
-								&& !self.check_mutable_argument(base, argument, &name, method)
+								&& !self.check_mutable_argument(writable, argument, &name, method)
 						{
 							refused.push(base);
 							continue;
@@ -2414,6 +2458,12 @@ impl Walker<'_> {
 		};
 		for step in steps {
 			ty = match *step {
+				PathStep::Field(name)
+					if self.s.types.syms.resolve(name) == "value"
+						&& matches!(self.s.types.kind(ty), TypeKind::Pointer(_)) =>
+				{
+					self.s.types.pointer_target(ty)?
+				}
 				PathStep::Field(name) | PathStep::Private(name) => self
 					.s
 					.types

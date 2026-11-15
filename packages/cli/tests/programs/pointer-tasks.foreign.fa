@@ -1,0 +1,16 @@
+-- Freeing a pointer destroys its stored value, including tasks and the
+-- resources of a cancelled task. A handshake keeps this independent of timers.
+use { sleep } = std.time
+mutable phase = 0
+type Held = {
+	function destroy = (self) mutates phase => { phase = 2 }
+}
+let pointer = Pointer.allocate(start do {
+	let _held = Held { }
+	phase = 1
+	await sleep(100000)
+})
+while phase == 0 { await Task.yield() }
+pointer.free()
+while phase == 1 { await Task.yield() }
+console.log(phase) -- prints: 2

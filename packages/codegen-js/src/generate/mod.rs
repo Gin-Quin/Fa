@@ -193,6 +193,8 @@ pub(crate) struct Generator<'s> {
 	pub(crate) item_results: Vec<fa_analyzer::analysis::ItemResults>,
 	/// The hidden parameters of the generic functions (`generics.rs`).
 	hidden_names: generics::HiddenNames,
+	/// Immutable concrete type capabilities, shared by generic applications.
+	layouts: HashMap<TypeId, String>,
 	/// The array locals that `faCopyInto` may reuse (`objects.rs`).
 	reusable_arrays: HashMap<SymbolId, bool>,
 	/// The generated `==` of each object type (empty while generated).
@@ -318,6 +320,7 @@ pub(crate) fn generate_module(
 		equalities: HashMap::new(),
 		reusable_arrays: HashMap::new(),
 		hidden_names: HashMap::new(),
+		layouts: HashMap::new(),
 		classes: HashMap::new(),
 		declarations: Vec::new(),
 		formatting: HashSet::new(),

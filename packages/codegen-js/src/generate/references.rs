@@ -403,10 +403,16 @@ impl Generator<'_> {
 						let field = self.types.shape_fields(shape)[index as usize];
 						Self::property(self.types.syms.resolve(field.name))
 					}
-					Resolution::Builtin(builtin) => builtins::get(builtin)
-						.path
-						.strip_prefix("Range#")?
-						.to_string(),
+					Resolution::Builtin(builtin) => {
+						let path = builtins::get(builtin).path;
+						if path == "Pointer#value" {
+							let pointer = self.access_chain(node, target, prefix);
+							let cell = self.pointer_cell(pointer, self.type_of(last));
+							let cell = self.keep_value_part(cell);
+							return Some(simple(Some(cell), Key::Field("value".to_string())));
+						}
+						path.strip_prefix("Range#")?.to_string()
+					}
 					_ => {
 						self.unsupported(node, "a reference to this member");
 						return None;

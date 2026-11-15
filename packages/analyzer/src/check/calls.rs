@@ -371,6 +371,19 @@ impl Walker<'_> {
 
 		let ty = self.memo(n, |w| {
 			let mut binding = binding;
+			if let Callee::Builtin(builtin) = kind
+				&& matches!(builtins::get(builtin).path, "Pointer#read" | "Pointer#toArray")
+				&& let Some(receiver) = w.callee_receiver_type(callee)
+				&& let Some(target) = w.s.types.pointer_target(receiver)
+				&& w.s.types.is_move_only(target)
+			{
+				let diagnostic = w.diagnostic(
+					&crate::diagnostics::codes::advanced::MEM002,
+					n,
+					format!("a `{}` is move-only and can't be copied from a pointer: borrow its value with `pointer.value`", w.display(target)),
+				);
+				w.report(diagnostic);
+			}
 			// a method of a type of another file: the receiver fills `self` (modules.rs)
 			if kind == Callee::Value
 				&& let View::Access { members, .. } | View::OptionalAccess { members, .. } =

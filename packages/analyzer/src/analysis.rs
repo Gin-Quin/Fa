@@ -618,6 +618,9 @@ pub struct Analysis {
 	pub interval_values: Interner<Interval>,
 	/// The type arguments of a generic call, typed literal or generic function value (M2).
 	pub instantiations: FxHashMap<NodeId, ListId>,
+	/// The parameter identities in each instantiation's order. Local and
+	/// imported declarations can publish fresh ids with the same owner/index.
+	pub instantiation_parameters: FxHashMap<NodeId, Vec<crate::ids::ParamId>>,
 	/// Every function declaration and lambda node (both keys for a
 	/// declaration whose value is a lambda).
 	pub functions: FxHashMap<NodeId, FnInfo>,
@@ -1419,6 +1422,7 @@ impl Analysis {
 			intervals: FxHashMap::default(),
 			interval_values: Interner::new(),
 			instantiations: FxHashMap::default(),
+			instantiation_parameters: FxHashMap::default(),
 			functions: FxHashMap::default(),
 			calls: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),

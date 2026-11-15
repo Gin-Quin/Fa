@@ -15,7 +15,7 @@
 use fa_analyzer::analysis::{Argument, ForeignArg};
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::syntax::View;
-use fa_analyzer::types::{CollKind, FloatBits, TypeKind};
+use fa_analyzer::types::{CollKind, FloatBits, TypeFlags, TypeKind};
 
 use crate::generate::Generator;
 use crate::js::{self, Expr, Prec};
@@ -30,6 +30,133 @@ struct CDeclarations {
 }
 
 impl Generator<'_> {
+	/// Capabilities follow a generic value's actual type, including C layout.
+	/// A concrete descriptor is emitted once; an enclosing generic forwards it.
+	pub(crate) fn layout_descriptor(&mut self, target: TypeId) -> Option<String> {
+		if let TypeKind::Param(param) = self.types.kind(target) {
+			return self
+				.hidden_names
+				.iter()
+				.find_map(|(entry, name)| match *entry {
+					super::generics::Hidden::Layout(other)
+						if other == param || {
+							let left = self.types.param(other);
+							let right = self.types.param(param);
+							left.owner == right.owner && left.index == right.index
+						} =>
+					{
+						Some(name.clone())
+					}
+					_ => None,
+				});
+		}
+		if let Some(name) = self.layouts.get(&target) {
+			return Some(name.clone());
+		}
+		if self.types.flags(target).contains(TypeFlags::HAS_PARAM) {
+			return self.composed_layout(target);
+		}
+		let name = self.scopes.declare_global("layout$value");
+		self.layouts.insert(target, name.clone());
+		let spec = self
+			.pointer_spec(target)
+			.unwrap_or_else(|| "null".to_string());
+		let alignment = self
+			.c_layout(target, &mut CDeclarations::default())
+			.map_or(1, |(_, alignment, ..)| alignment);
+		let copy = if self.is_composite(target) && !self.types.is_move_only(target) {
+			let copied = self.copy_of(Expr::name("value".to_string(), true), target);
+			format!("(value) => {}", copied.text)
+		} else {
+			"undefined".to_string()
+		};
+		let drop = self
+			.storage_drop_function(target)
+			.unwrap_or_else(|| "undefined".to_string());
+		self.constants.push((
+			name.clone(),
+			format!(
+				"{{ spec: {spec}, alignment: {alignment}, bigint: {}, copy: {copy}, drop: {drop} }}",
+				self.is_bigint(target)
+			),
+		));
+		Some(name)
+	}
+
+	fn composed_layout(&mut self, target: TypeId) -> Option<String> {
+		let (helper, arguments) = match self.types.kind(target) {
+			TypeKind::Collection(kind, item, key) => {
+				let kind = match kind {
+					CollKind::Map | CollKind::GrowingMap => "map",
+					CollKind::Array | CollKind::GrowingArray => "array",
+					_ => "set",
+				};
+				let item = self.layout_descriptor(item)?;
+				let key = self.layout_descriptor(key)?;
+				(
+					"faCollectionLayout",
+					vec![js::string_literal(kind), item, key],
+				)
+			}
+			TypeKind::CArray(item, count) => {
+				let item = self.layout_descriptor(item)?;
+				("faFixedArrayLayout", vec![item, count.to_string()])
+			}
+			TypeKind::Object(_) if !self.types.is_resource(target) => {
+				let fields: Vec<_> = self
+					.types
+					.fields_of(target)
+					.iter()
+					.filter(|field| !field.flags.contains(fa_analyzer::types::FieldFlags::METHOD))
+					.map(|field| (field.name, field.ty))
+					.collect();
+				let mut names = Vec::with_capacity(fields.len());
+				let mut layouts = Vec::with_capacity(fields.len());
+				for (name, ty) in fields {
+					names.push(js::string_literal(&Self::property(
+						self.types.syms.resolve(name),
+					)));
+					layouts.push(self.layout_descriptor(ty)?);
+				}
+				(
+					"faObjectLayout",
+					vec![
+						format!("\"object:{:032x}\"", self.types.stable_hash(target)),
+						format!("[{}]", names.join(", ")),
+						format!("[{}]", layouts.join(", ")),
+						self.is_c_struct(target).to_string(),
+					],
+				)
+			}
+			TypeKind::Tuple(items) => {
+				let items = self.types.list_items(items).to_vec();
+				let layouts: Vec<_> = items
+					.into_iter()
+					.map(|item| self.layout_descriptor(item))
+					.collect::<Option<_>>()?;
+				("faTupleLayout", vec![format!("[{}]", layouts.join(", "))])
+			}
+			TypeKind::Union(items) => {
+				let items = self.types.list_items(items);
+				if items.len() != 2 || !items.contains(&TypeId::NONE) {
+					return None;
+				}
+				let item = *items.iter().find(|&&item| item != TypeId::NONE)?;
+				let layout = self.layout_descriptor(item)?;
+				("faOptionalLayout", vec![layout])
+			}
+			TypeKind::Pointer(_) | TypeKind::Function(_) => {
+				let spec = self
+					.pointer_spec(target)
+					.unwrap_or_else(|| "null".to_string());
+				return Some(format!("{{ spec: {spec}, alignment: 8, bigint: false }}"));
+			}
+			_ => return None,
+		};
+		let helper = self.helper(helper);
+		Some(js::call(helper, &arguments).text)
+	}
+
 	/// The C memory layout of a pointer's target, or opaque Fa data.
 	fn pointer_spec(&self, target: TypeId) -> Option<String> {
 		match self.types.kind(target) {
@@ -57,12 +184,14 @@ impl Generator<'_> {
 		let Some(target) = self.types.pointer_target(self.type_of(n)) else {
 			return self.unsupported(n, "this pointer allocation");
 		};
-		if self
-			.types
-			.flags(target)
-			.contains(fa_analyzer::types::TypeFlags::HAS_PARAM)
-		{
-			return self.unsupported(n, "this pointer allocation with an unresolved target type");
+		if self.types.flags(target).contains(TypeFlags::HAS_PARAM) {
+			let Some(layout) = self.layout_descriptor(target) else {
+				return self.unsupported(n, "the memory layout of this generic pointer target");
+			};
+			let expression = self.expr(*value);
+			let expression = self.copy_pointer_source(*value, expression, &layout);
+			let helper = self.helper("faPointerAllocate");
+			return js::call(helper, &[expression.text, format!("{layout}.spec")]);
 		}
 		let spec = self
 			.pointer_spec(target)
@@ -544,7 +673,7 @@ impl Generator<'_> {
 			.flags(target)
 			.contains(fa_analyzer::types::TypeFlags::HAS_PARAM)
 		{
-			return self.unsupported(n, "this pointer method with an unresolved target type");
+			return self.generic_pointer_method(n, receiver, target, path, argument);
 		}
 		if argument.is_some() && !receiver.stable {
 			let name = self.temp();
@@ -569,14 +698,14 @@ impl Generator<'_> {
 				let expression = self.expr(value);
 				let expression = self.copy_stored(value, expression);
 				let drop = self
-					.drop_function(target)
+					.storage_drop_function(target)
 					.unwrap_or_else(|| "undefined".to_string());
 				let helper = self.helper("faPointerWriteValue");
 				js::call(helper, &[receiver.text, spec, expression.text, drop])
 			}
 			("Pointer#free", _) => {
 				let drop = self
-					.drop_function(target)
+					.storage_drop_function(target)
 					.unwrap_or_else(|| "undefined".to_string());
 				let helper = self.helper("faPointerFree");
 				js::call(helper, &[receiver.text, drop])
@@ -602,7 +731,19 @@ impl Generator<'_> {
 			.flags(target)
 			.contains(fa_analyzer::types::TypeFlags::HAS_PARAM)
 		{
-			return self.unsupported(member, "this pointer view with an unresolved target type");
+			let Some(layout) = self.layout_descriptor(target) else {
+				return self
+					.unsupported(member, "the memory layout of this generic pointer target");
+			};
+			let helper = self.helper("faPointerValue");
+			return js::call(
+				helper,
+				&[
+					value.text,
+					format!("{layout}.spec"),
+					format!("{layout}.bigint"),
+				],
+			);
 		}
 		let spec = self
 			.pointer_spec(target)
@@ -614,11 +755,90 @@ impl Generator<'_> {
 
 	/// A writable accessor for the whole value a pointer designates.
 	pub(crate) fn pointer_cell(&mut self, pointer: Expr, target: TypeId) -> Expr {
+		if self.types.flags(target).contains(TypeFlags::HAS_PARAM)
+			&& let Some(layout) = self.layout_descriptor(target)
+		{
+			let helper = self.helper("faPointerCell");
+			return js::call(
+				helper,
+				&[
+					pointer.text,
+					format!("{layout}.spec"),
+					format!("{layout}.bigint"),
+				],
+			);
+		}
 		let spec = self
 			.pointer_spec(target)
 			.unwrap_or_else(|| "null".to_string());
 		let bigint = self.is_bigint(target).to_string();
 		let helper = self.helper("faPointerCell");
 		js::call(helper, &[pointer.text, spec, bigint])
+	}
+
+	fn generic_pointer_method(
+		&mut self,
+		n: NodeId,
+		mut receiver: Expr,
+		target: TypeId,
+		path: &str,
+		argument: Option<NodeId>,
+	) -> Expr {
+		let Some(layout) = self.layout_descriptor(target) else {
+			return self.unsupported(n, "the memory layout of this generic pointer target");
+		};
+		if argument.is_some() && !receiver.stable {
+			let name = self.temp();
+			self.out.line(format!("const {name} = {};", receiver.text));
+			receiver = Expr::name(name, true);
+		}
+		match (path, argument) {
+			("Pointer#read", _) => {
+				let helper = self.helper("faLayoutPointerRead");
+				js::call(helper, &[receiver.text, layout])
+			}
+			("Pointer#write", Some(value)) => {
+				let expression = self.expr(value);
+				let expression = self.copy_pointer_source(value, expression, &layout);
+				let helper = self.helper("faPointerWriteValue");
+				js::call(
+					helper,
+					&[
+						receiver.text,
+						format!("{layout}.spec"),
+						expression.text,
+						format!("{layout}.drop"),
+					],
+				)
+			}
+			("Pointer#free", _) => {
+				let helper = self.helper("faPointerFree");
+				js::call(helper, &[receiver.text, format!("{layout}.drop")])
+			}
+			("Pointer#offset", Some(count)) | ("Pointer#toArray", Some(count)) => {
+				let count = self.expr(count);
+				let helper = self.helper(if path == "Pointer#offset" {
+					"faPointerOffset"
+				} else {
+					"faPointerToValues"
+				});
+				let mut args = vec![receiver.text, format!("{layout}.spec")];
+				if path == "Pointer#toArray" {
+					args.push(format!("{layout}.bigint"));
+				}
+				args.push(count.text);
+				js::call(helper, &args)
+			}
+			_ => self.unsupported(n, "this generic pointer operation"),
+		}
+	}
+
+	fn copy_pointer_source(&mut self, node: NodeId, value: Expr, layout: &str) -> Expr {
+		if fa_analyzer::lower::copies::copies(self.tree, self.analysis, node, true, true) {
+			let helper = self.helper("faLayoutCopy");
+			js::call(helper, &[layout.to_string(), value.text])
+		} else {
+			value
+		}
 	}
 }

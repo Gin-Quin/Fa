@@ -151,6 +151,7 @@ impl Walker<'_> {
 				.map(|exported| exported.decl),
 		);
 		let mut parameters: FxHashMap<NodeId, Vec<Parameter>> = FxHashMap::default();
+		let mut generic_functions = FxHashMap::default();
 		called.sort_unstable();
 		called.dedup();
 		for decl in called {
@@ -165,6 +166,7 @@ impl Walker<'_> {
 				.iter()
 				.map(|param| (param.symbol, param.default.is_some()))
 				.collect();
+			let generics = info.generics.clone();
 			let only_called = self.only_called(node);
 			let mut published = Vec::with_capacity(params.len());
 			for (index, (param, has_default)) in params.into_iter().enumerate() {
@@ -181,6 +183,18 @@ impl Walker<'_> {
 				});
 			}
 			parameters.insert(decl, published);
+			let generic_types: Vec<_> = generics
+				.iter()
+				.map(|&param| self.s.types.intern(crate::types::TypeKind::Param(param)))
+				.collect();
+			let generic_list = self.s.types.list(&generic_types);
+			generic_functions.insert(
+				decl,
+				crate::modules::GenericFunction {
+					generics: generic_list,
+					requirements: crate::modules::generic_requirements(&self.s.types, &generics),
+				},
+			);
 		}
 
 		// the module-level declarations, the statics, what each declaration
@@ -320,6 +334,7 @@ impl Walker<'_> {
 		interface.type_functions = type_functions;
 		interface.nested_types = nested_types;
 		interface.parameters = parameters;
+		interface.generic_functions = generic_functions;
 		interface.statics = statics;
 		interface.field_defaults = field_defaults;
 		interface.export_names = export_names;

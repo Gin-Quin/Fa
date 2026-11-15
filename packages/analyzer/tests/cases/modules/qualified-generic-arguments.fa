@@ -1,0 +1,8 @@
+-- An explicit generic argument can name a type through its module path.
+-- file: library/Greeting.fa
+export type = { text: String }
+-- file: application/main.fa
+function identity = <Item>(item: Item): Item => item
+export function = () => {
+	console.log(identity<library.Greeting>(library.Greeting { text = "ok" }).text) -- prints: ok
+}

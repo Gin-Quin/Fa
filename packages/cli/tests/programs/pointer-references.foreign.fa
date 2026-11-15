@@ -1,0 +1,29 @@
+-- A borrow designates foreign storage, including scalar places and reseating.
+let first = Pointer.allocate(Int32(4))
+let second = Pointer.allocate(Int32(8))
+use number = first.value
+number += 3
+console.log(first.read(), number) -- prints: 7 7
+mutable use selected = first.value
+selected += 2
+reuse selected = second.value
+selected += 1
+console.log(first.read(), second.read()) -- prints: 9 9
+
+type Point = CStruct { x: Int32, y: Int32 }
+let point = Pointer.allocate(Point { x = 1, y = 2 })
+use position = point.value
+position.x = 3
+use y = point.value.y
+y += 2
+console.log(point.read().x, point.read().y) -- prints: 3 4
+
+function assign = <Item>(pointer: Pointer<Item>, replacement: Item) mutates pointer.value => {
+	use value = pointer.value
+	value = replacement
+}
+assign<Int32>(first, 10)
+console.log(first.read()) -- prints: 10
+point.free()
+second.free()
+first.free()

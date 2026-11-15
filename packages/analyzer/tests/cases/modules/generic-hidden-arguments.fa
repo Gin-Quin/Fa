@@ -1,0 +1,20 @@
+-- Imported generic functions receive the same hidden values and methods
+-- as local generic functions, from their interface alone.
+-- file: library/repeat.fa
+export function = <times: Integer>(text: String): String => {
+	mutable result = ""
+	for 0..times {
+		result += text
+	}
+	result
+}
+-- file: library/describe.fa
+export function = <Item: { describe: (self) => String }>(item: Item): String => item.describe()
+-- file: application/main.fa
+type Person = {
+	name: String
+	function describe = (self): String => "Hello {self.name}"
+}
+export function = () => {
+	console.log(library.repeat<3>("x"), library.describe(Person { name = "Ada" })) -- prints: xxx Hello Ada
+}

@@ -1148,6 +1148,37 @@ fn merge_interface(
 				(decl, params)
 			})
 			.collect(),
+		generic_functions: interface
+			.generic_functions
+			.iter()
+			.map(|(&decl, function)| {
+				let requirements = function
+					.requirements
+					.iter()
+					.map(|requirement| match *requirement {
+						crate::modules::GenericRequirement::Layout(param) => {
+							crate::modules::GenericRequirement::Layout(merger.param(param))
+						}
+						crate::modules::GenericRequirement::Value(param) => {
+							crate::modules::GenericRequirement::Value(merger.param(param))
+						}
+						crate::modules::GenericRequirement::Method(param, name) => {
+							crate::modules::GenericRequirement::Method(
+								merger.param(param),
+								merger.sym(name),
+							)
+						}
+					})
+					.collect();
+				(
+					decl,
+					crate::modules::GenericFunction {
+						generics: merger.list(function.generics),
+						requirements,
+					},
+				)
+			})
+			.collect(),
 		externs: interface.externs.clone(),
 		statics: interface.statics.clone(),
 		field_defaults: interface

@@ -300,6 +300,14 @@ impl TypeStore {
 					out.found[index].push(actual);
 				}
 			}
+			(TypeKind::Pointer(declared), TypeKind::Pointer(actual)) => {
+				self.unify_in(declared, actual, bindings, out, depth + 1);
+			}
+			(TypeKind::CArray(declared, count), TypeKind::CArray(actual, actual_count))
+				if count == actual_count =>
+			{
+				self.unify_in(declared, actual, bindings, out, depth + 1);
+			}
 			(
 				TypeKind::Collection(kind, item, key),
 				TypeKind::Collection(actual_kind, actual_item, actual_key),

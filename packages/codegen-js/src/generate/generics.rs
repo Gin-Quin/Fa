@@ -16,42 +16,111 @@
 use std::collections::HashMap;
 
 use fa_analyzer::ids::{NodeId, ParamId, Sym, SymbolId, TypeId};
+pub(crate) use fa_analyzer::modules::GenericRequirement as Hidden;
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
 use fa_analyzer::types::{FieldFlags, TypeKind};
 
+use crate::Target;
 use crate::generate::Generator;
 use crate::js::{self, Expr, Prec};
 
-/// A hidden parameter of a generic function.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Hidden {
-	/// The value of a compile-time value parameter.
-	Value(ParamId),
-	/// The function of the actual type for a method its constraint requires.
-	Method(ParamId, Sym),
-}
-
 impl Generator<'_> {
+	/// The original binders survive an expression's implicit instantiation.
+	fn value_generics(&self, node: NodeId) -> Vec<ParamId> {
+		let node = self.strip_groups(node);
+		if let Some(info) = self.analysis.function(node) {
+			return info.generics.clone();
+		}
+		let named = match self.view(node) {
+			View::Access { members, .. } | View::OptionalAccess { members, .. } => {
+				members.last().unwrap_or(node)
+			}
+			_ => node,
+		};
+		let original = match self.analysis.resolution(named) {
+			Resolution::Local(symbol) => {
+				let symbol = self.analysis.symbols.symbol(symbol);
+				if let Some(info) = self.analysis.function(symbol.decl_node)
+					&& !info.generics.is_empty()
+				{
+					return info.generics.clone();
+				}
+				symbol.ty
+			}
+			Resolution::Field(shape, index) => self.types.shape_fields(shape)[index as usize].ty,
+			_ => self.type_of(node),
+		};
+		let original = match self.view(node) {
+			View::Index { target, .. } => match self.types.kind(self.type_of(target)) {
+				TypeKind::Collection(_, item, _) => item,
+				_ => original,
+			},
+			_ => original,
+		};
+		let TypeKind::Function(sig) = self.types.kind(original) else {
+			return Vec::new();
+		};
+		self.types
+			.list_items(self.types.sig(sig).generics)
+			.iter()
+			.filter_map(|&ty| match self.types.kind(ty) {
+				TypeKind::Param(param) => Some(param),
+				_ => None,
+			})
+			.collect()
+	}
+
+	/// A generic value used at a concrete function type (a callback, field,
+	/// return or alias) binds its capabilities at the same conversion point.
+	pub(crate) fn bind_generic_value(&mut self, node: NodeId, value: Expr) -> Expr {
+		if self.analysis.instantiation(node).is_none()
+			|| !matches!(self.types.kind(self.type_of(node)), TypeKind::Function(_))
+		{
+			return value;
+		}
+		match self.view(node) {
+			View::Call { .. } => return value,
+			View::Group(inner) if self.analysis.instantiation(inner).is_some() => return value,
+			_ => {}
+		}
+		let hidden = self.external_hidden_arguments(node, node);
+		if hidden.is_empty() {
+			return value;
+		}
+		Expr::primary(format!(
+			"{}.bind(undefined, {})",
+			value.primary_text(),
+			hidden.join(", ")
+		))
+	}
+
 	/// The hidden parameters of a generic function declaration, in order.
 	pub(crate) fn hidden_parameters(&self, function: NodeId) -> Vec<Hidden> {
 		let Some(info) = self.analysis.function(function) else {
 			return Vec::new();
 		};
-		let mut hidden = Vec::new();
-		for &param in &info.generics {
-			let param_info = self.types.param(param);
-			if param_info.value {
-				hidden.push(Hidden::Value(param));
-				continue;
-			}
-			for field in self.types.fields_of(param_info.constraint) {
-				if field.flags.contains(FieldFlags::METHOD) {
-					hidden.push(Hidden::Method(param, field.name));
-				}
-			}
+		let decl = info.declaration.unwrap_or(function);
+		if let Some(summary) = self
+			.session
+			.source_file(self.file)
+			.interface
+			.generic_functions
+			.get(&decl)
+		{
+			return self.runtime_requirements(summary.requirements.clone());
 		}
-		hidden
+		self.runtime_requirements(fa_analyzer::modules::generic_requirements(
+			self.types,
+			&info.generics,
+		))
+	}
+
+	fn runtime_requirements(&self, mut requirements: Vec<Hidden>) -> Vec<Hidden> {
+		if self.options.target != Target::Bun {
+			requirements.retain(|entry| !matches!(entry, Hidden::Layout(_)));
+		}
+		requirements
 	}
 
 	/// Declares the hidden parameters of a generic function being generated
@@ -62,6 +131,14 @@ impl Generator<'_> {
 		let mut names = Vec::with_capacity(hidden.len());
 		for entry in hidden {
 			match entry {
+				Hidden::Layout(param) => {
+					let name = self.declare_hidden_name(&format!(
+						"{}$layout",
+						self.types.syms.resolve(self.types.param(param).name)
+					));
+					self.hidden_names.insert(entry, name.clone());
+					names.push(name);
+				}
 				Hidden::Value(param) => {
 					let info = self.types.param(param);
 					let name = match self.value_parameter_symbol(function, info.name) {
@@ -123,20 +200,99 @@ impl Generator<'_> {
 			.function(function)
 			.map(|info| info.generics.clone())
 			.unwrap_or_default();
+		self.hidden_arguments_for(call, &generics, hidden)
+	}
+
+	/// The same ABI for an imported function: only its interface is needed.
+	pub(crate) fn external_hidden_arguments(
+		&mut self,
+		callee: NodeId,
+		call: NodeId,
+	) -> Vec<String> {
+		let callee = self.strip_groups(callee);
+		let named = match self.view(callee) {
+			View::Name(_) => callee,
+			View::Access { members, .. } | View::OptionalAccess { members, .. } => {
+				match members.last() {
+					Some(member) => member,
+					None => return Vec::new(),
+				}
+			}
+			View::Call { callee: inner, .. }
+				if self.analysis.has_flags(
+					callee,
+					fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION,
+				) =>
+			{
+				return self.external_hidden_arguments(inner, call);
+			}
+			_ => callee,
+		};
+		let summary = self
+			.session
+			.external_node(self.analysis.resolution(named))
+			.and_then(|(module, decl)| self.session.interface(module)?.generic_functions.get(&decl))
+			.cloned();
+		let Some(summary) = summary else {
+			let generics = self.value_generics(callee);
+			let requirements = self.runtime_requirements(
+				fa_analyzer::modules::generic_requirements(self.types, &generics),
+			);
+			return self.hidden_arguments_for(call, &generics, requirements);
+		};
+		let generics: Vec<_> = self
+			.types
+			.list_items(summary.generics)
+			.iter()
+			.filter_map(|&ty| match self.types.kind(ty) {
+				TypeKind::Param(param) => Some(param),
+				_ => None,
+			})
+			.collect();
+		let requirements = self.runtime_requirements(summary.requirements);
+		self.hidden_arguments_for(call, &generics, requirements)
+	}
+
+	fn hidden_arguments_for(
+		&mut self,
+		call: NodeId,
+		generics: &[ParamId],
+		hidden: Vec<Hidden>,
+	) -> Vec<String> {
 		let bindings: Vec<TypeId> = self
 			.analysis
 			.instantiation(call)
 			.map(|list| self.types.list_items(list).to_vec())
 			.unwrap_or_default();
+		let parameters = self
+			.analysis
+			.instantiation_parameters
+			.get(&call)
+			.map_or(generics, |params| params.as_slice());
+		let types = self.types;
 		let binding = |param: ParamId| {
-			generics
+			parameters
 				.iter()
-				.position(|&generic| generic == param)
+				.position(|&generic| {
+					generic == param || {
+						let a = types.param(generic);
+						let b = types.param(param);
+						a.owner == b.owner && a.index == b.index
+					}
+				})
+				// A declaration annotated by an independently bound generic
+				// function type has alpha-renamed parameters in that signature.
+				.or_else(|| {
+					(parameters.len() == generics.len())
+						.then(|| generics.iter().position(|&generic| generic == param))
+						.flatten()
+				})
 				.and_then(|index| bindings.get(index).copied())
 		};
 		let mut values = Vec::with_capacity(hidden.len());
 		for entry in hidden {
 			let value = match entry {
+				Hidden::Layout(param) => binding(param).and_then(|ty| self.layout_descriptor(ty)),
 				Hidden::Value(param) => match binding(param) {
 					// a key set: the index of its application (fields.rs)
 					Some(ty) if self.analysis.key_set_params.contains_key(&param) => {
@@ -225,20 +381,39 @@ impl Generator<'_> {
 	/// A generic application used as a value (`repeatText(2)`): the
 	/// function, with its hidden arguments bound when it has some.
 	pub(crate) fn generic_application(&mut self, n: NodeId, callee: NodeId) -> Option<Expr> {
-		let Resolution::Local(symbol) = self.analysis.resolution(self.strip_groups(callee)) else {
-			return None;
+		self.analysis.instantiation(n)?;
+		let (function, hidden, arity) = match self.analysis.resolution(self.strip_groups(callee)) {
+			Resolution::Local(symbol)
+				if self
+					.analysis
+					.function(self.analysis.symbols.symbol(symbol).decl_node)
+					.is_some() =>
+			{
+				let declaration = self.analysis.symbols.symbol(symbol).decl_node;
+				let info = self.analysis.function(declaration)?.clone();
+				if info.generics.is_empty() {
+					return None;
+				}
+				(
+					self.name_of(symbol),
+					self.hidden_arguments(declaration, n),
+					info.params.len(),
+				)
+			}
+			_ => {
+				let TypeKind::Function(sig) = self.types.kind(self.type_of(n)) else {
+					return None;
+				};
+				let arity = self.types.params(self.types.sig(sig).params).len();
+				let hidden = self.external_hidden_arguments(callee, n);
+				let function = self.expr(callee).primary_text();
+				(function, hidden, arity)
+			}
 		};
-		let declaration = self.analysis.symbols.symbol(symbol).decl_node;
-		let info = self.analysis.function(declaration)?.clone();
-		if info.generics.is_empty() || self.analysis.instantiation(n).is_none() {
-			return None;
-		}
-		let function = self.name_of(symbol);
-		let hidden = self.hidden_arguments(declaration, n);
 		if hidden.is_empty() {
 			return Some(Expr::name(function, true));
 		}
-		let parameters: Vec<String> = (0..info.params.len()).map(|i| format!("$p{i}")).collect();
+		let parameters: Vec<String> = (0..arity).map(|i| format!("$p{i}")).collect();
 		let mut arguments = hidden;
 		arguments.extend(parameters.iter().cloned());
 		let call = js::call(&function, &arguments);
@@ -251,7 +426,7 @@ impl Generator<'_> {
 	/// The name of a hidden parameter (`$Item$describe`: Fa names never
 	/// contain `$`).
 	fn declare_hidden_name(&mut self, wanted: &str) -> String {
-		format!("${wanted}")
+		self.scopes.declare_global(&format!("${wanted}"))
 	}
 }
 

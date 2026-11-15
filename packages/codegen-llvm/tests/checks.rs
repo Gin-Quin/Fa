@@ -408,6 +408,29 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn growing_pushes_advance_a_cursor_in_registers() {
+		// a push onto a `GrowingArray` compares its cursor with the end of the
+		// segment, stores and advances; only the cold path finds a segment
+		let pushes: String = (0..12)
+			.map(|index| format!("\ttarget.push({index})\n"))
+			.collect();
+		let source = format!(
+			"function many = (target: GrowingArray<Byte>) mutates target => {{\n{pushes}}}\nmutable a: GrowingArray<Byte> = []\nmutable b: GrowingArray<Byte> = []\nmany(a)\nmany(b)\nmany(a)\nconsole.log(a, b)\n"
+		);
+		let ir = optimized_ir("growing-pushes", &source);
+		let many = function(&ir, "fa.many");
+		assert_eq!(count(many, "@fa_segmented_next("), 12, "{many}");
+		assert!(!many.contains("@llvm.ctlz"), "{many}");
+		let hot: usize = many
+			.split("\n\n")
+			.filter(|block| !block.starts_with("push_next_segment"))
+			.map(|block| count(block, " = load "))
+			.sum();
+		// the slot, the cursor, the end and the length, once
+		assert_eq!(hot, 4, "{many}");
+	}
+
+	#[test]
 	fn float_to_integer_classifies_errors_only_on_the_cold_path() {
 		let ir = ir_of(
 			"float-conversion-guard",

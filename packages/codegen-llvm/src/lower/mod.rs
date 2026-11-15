@@ -2156,6 +2156,24 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				return Ok(result);
 			}
 		}
+		// `growing = []`: the items dropped, the segments kept for reuse
+		if let View::Array { items } = self.view(self.ungrouped(value))
+			&& items.is_empty()
+			&& matches!(self.node_repr(target)?, Repr::Growing(_))
+			&& self.is_place(target)
+		{
+			let slot = self.place(target)?;
+			if let Repr::Growing(item_type) = slot.repr {
+				let array = self
+					.load(slot)?
+					.value
+					.expect("a growing array")
+					.into_pointer_value();
+				let item = self.item_repr(item_type, target)?;
+				self.growing_reset(array, item)?;
+				return Ok(Val::void());
+			}
+		}
 		let value_lowered = self.expr(value)?;
 		if value_lowered.repr == Repr::Never {
 			return Ok(Val::never());

@@ -39,7 +39,7 @@ use inkwell::values::IntValue;
 
 use crate::error::Error;
 use crate::lower::Lowering;
-use crate::lower::values::Repr;
+use crate::lower::values::{Repr, Val};
 
 /// A loop recognized by [`Lowering::copy_loop`].
 #[derive(Copy, Clone)]
@@ -101,7 +101,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(None);
 		};
 		let members: Vec<NodeId> = members.iter().collect();
-		let Some(Repr::Array(item_type)) =
+		let Some(Repr::Array(item_type) | Repr::Growing(item_type)) =
 			self.invariant_place(target, &members[..members.len() - 1])?
 		else {
 			return Ok(None);
@@ -127,7 +127,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return Ok(None);
 			}
 			let source = self.ungrouped(target);
-			let Some(Repr::Array(source_type)) = self.invariant_place(source, &[])? else {
+			let Some(Repr::Array(source_type) | Repr::Growing(source_type)) =
+				self.invariant_place(source, &[])?
+			else {
 				return Ok(None);
 			};
 			if self.item_repr(source_type, value)? != item {
@@ -138,7 +140,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if self.analysis.resolution(value) != Resolution::Local(variable) {
 				return Ok(None);
 			}
-			let Repr::Array(source_type) = self.node_repr(iterable)? else {
+			let (Repr::Array(source_type) | Repr::Growing(source_type)) =
+				self.node_repr(iterable)?
+			else {
 				return Ok(None);
 			};
 			if self.item_repr(source_type, iterable)? != item {
@@ -205,7 +209,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn copy_all_items(
 		&mut self,
 		copy: CopyLoop,
-		source: inkwell::values::PointerValue<'ctx>,
+		source: Val<'ctx>,
 		length: IntValue<'ctx>,
 	) -> Result<(), Error> {
 		let start = self.context.i64_type().const_zero();
@@ -224,12 +228,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		inclusive: bool,
 	) -> Result<(BasicBlock<'ctx>, BasicBlock<'ctx>), Error> {
 		let source_node = copy.source.expect("a range copy reads an array");
-		let source = self
-			.expr(source_node)?
-			.value
-			.expect("an array")
-			.into_pointer_value();
-		let (_, length) = self.array_parts(source)?;
+		let source = self.expr(source_node)?;
+		let pointer = source.value.expect("an array").into_pointer_value();
+		let length = match source.repr {
+			Repr::Growing(_) => self.growing_length(&self.builder, pointer)?,
+			_ => self.array_parts(pointer)?.1,
+		};
 		let i64 = self.context.i64_type();
 		let zero = i64.const_zero();
 		let from_start = self
@@ -271,33 +275,77 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok((rounds, done))
 	}
 
-	/// `fa_array_extend(target, source, start, count, size)`.
+	/// Appends `count` items of `source` from `start` to the target of the
+	/// `push`: `fa_array_extend` between arrays; one copy per segment with a
+	/// `GrowingArray` (whose items never move).
 	fn extend(
 		&mut self,
 		copy: CopyLoop,
-		source: inkwell::values::PointerValue<'ctx>,
+		source: Val<'ctx>,
 		start: IntValue<'ctx>,
 		count: IntValue<'ctx>,
 	) -> Result<(), Error> {
 		let target = self.receiver(copy.push)?;
-		let Repr::Array(item_type) = target.repr else {
+		let (Repr::Array(item_type) | Repr::Growing(item_type)) = target.repr else {
 			return Err(self.unsupported(copy.push.index(), "this copy"));
 		};
 		let item = self.item_repr(item_type, copy.push)?;
-		let size = inkwell::types::BasicType::size_of(&self.llvm_type(item)).expect("a sized item");
-		let size = self
-			.builder
-			.build_int_cast(size, self.context.i64_type(), "")?;
-		self.call_runtime(
-			"fa_array_extend",
-			&[
-				target.value.expect("an array").into(),
-				source.into(),
-				start.into(),
-				count.into(),
-				size.into(),
-			],
-		)
+		let size = self.item_size_const(item);
+		let i32 = self.context.i32_type();
+		let pointer = source.value.expect("an array").into_pointer_value();
+		let target_pointer = target.value.expect("an array");
+		match (target.repr, source.repr) {
+			(Repr::Array(_), Repr::Array(_)) => self.call_runtime(
+				"fa_array_extend",
+				&[
+					target_pointer.into(),
+					pointer.into(),
+					start.into(),
+					count.into(),
+					size.into(),
+				],
+			),
+			(_, Repr::Growing(_)) => {
+				let target_k = match target.repr {
+					Repr::Growing(_) => self.segment_k(item),
+					_ => i32.const_all_ones(),
+				};
+				self.call_runtime(
+					"fa_segmented_extend_to",
+					&[
+						target_pointer.into(),
+						target_k.into(),
+						pointer.into(),
+						start.into(),
+						count.into(),
+						size.into(),
+						self.segment_k(item).into(),
+					],
+				)
+			}
+			_ => {
+				// an array into a `GrowingArray`: distinct values
+				let (items, _) = self.array_parts(pointer)?;
+				let first = unsafe {
+					self.builder.build_in_bounds_gep(
+						self.context.i8_type(),
+						items,
+						&[self.builder.build_int_mul(start, size, "")?],
+						"",
+					)?
+				};
+				self.call_runtime(
+					"fa_segmented_append",
+					&[
+						target_pointer.into(),
+						first.into(),
+						count.into(),
+						size.into(),
+						self.segment_k(item).into(),
+					],
+				)
+			}
+		}
 	}
 }
 
@@ -420,7 +468,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(None);
 		};
 		let members: Vec<NodeId> = members.iter().collect();
-		let Some(Repr::Array(item_type)) =
+		let Some(Repr::Array(item_type) | Repr::Growing(item_type)) =
 			self.invariant_place(target, &members[..members.len() - 1])?
 		else {
 			return Ok(None);
@@ -483,13 +531,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			rounds = saturating(self, "llvm.sadd.sat", rounds, i64.const_int(1, false))?;
 		}
 		let target = self.receiver(push)?;
-		self.call_runtime(
-			"fa_array_fill",
-			&[
-				target.value.expect("an array").into(),
-				rounds.into(),
-				self.context.i32_type().const_int(byte, false).into(),
-			],
-		)
+		let byte = self.context.i32_type().const_int(byte, false);
+		match target.repr {
+			Repr::Growing(item_type) => {
+				let k = self.segment_k(self.item_repr(item_type, push)?);
+				self.call_runtime(
+					"fa_segmented_fill",
+					&[
+						target.value.expect("an array").into(),
+						rounds.into(),
+						byte.into(),
+						k.into(),
+					],
+				)
+			}
+			_ => self.call_runtime(
+				"fa_array_fill",
+				&[
+					target.value.expect("an array").into(),
+					rounds.into(),
+					byte.into(),
+				],
+			),
+		}
 	}
 }

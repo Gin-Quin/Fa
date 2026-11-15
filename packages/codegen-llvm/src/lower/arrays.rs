@@ -366,7 +366,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let members: Vec<NodeId> = members.iter().collect();
 		if !matches!(
 			self.invariant_place(target, &members[..members.len() - 1])?,
-			Some(Repr::Array(_))
+			Some(Repr::Array(_) | Repr::Growing(_))
 		) {
 			return Ok(None);
 		}
@@ -381,7 +381,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.tree.nodes[node].for_each_child(|child| stack.push(child));
 		}
 		Ok(match self.receiver_place(call)? {
-			Some(slot) if matches!(slot.repr, Repr::Array(_)) => Some(slot.pointer),
+			Some(slot) if matches!(slot.repr, Repr::Array(_) | Repr::Growing(_)) => {
+				Some(slot.pointer)
+			}
 			_ => None,
 		})
 	}
@@ -601,7 +603,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Repr::Growing(item_type) = array.repr {
 			match (path, values.as_slice()) {
 				("Array#push", [value]) => {
-					self.growing_push(array, *value, node, Some(arguments[0]))?;
+					let slot = self.push_receiver_slot(node, arguments[0])?;
+					self.growing_push(array, *value, node, Some(arguments[0]), slot)?;
 					return Ok(Val::void());
 				}
 				("Array#get", [index]) => {
@@ -1930,10 +1933,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some(symbol) => Some(self.slot_of(symbol, node)?),
 			None => None,
 		};
-		if !growing && let Some(copy) = self.copy_loop(pattern, has_index, iterable, body, false)? {
+		if let Some(copy) = self.copy_loop(pattern, has_index, iterable, body, false)? {
 			// a loop only pushing the items onto another array (`copies.rs`)
-			let (_, length) = self.array_parts(array)?;
-			self.copy_all_items(copy, array, length)?;
+			let (repr, length) = if growing {
+				(
+					Repr::Growing(item_type),
+					self.growing_length(&self.builder, array)?,
+				)
+			} else {
+				(Repr::Array(item_type), self.array_parts(array)?.1)
+			};
+			self.copy_all_items(copy, Val::new(repr, array), length)?;
 			return Ok(Val::void());
 		}
 		let counter = self.alloca(Repr::Int(IntRepr::I64), "position")?;
@@ -1948,12 +1958,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			Some(self.array_parts(array)?)
 		};
+		// a `GrowingArray` is walked segment by segment, with a pointer
+		let (growing_length, run) = if growing {
+			let cursor = self.pointer_alloca("segment_cursor")?;
+			let end = self.pointer_alloca("segment_end")?;
+			let null = self.pointer_type().const_null();
+			self.builder.build_store(cursor, null)?;
+			self.builder.build_store(end, null)?;
+			(
+				Some(self.growing_length(&self.builder, array)?),
+				Some((cursor, end)),
+			)
+		} else {
+			(None, None)
+		};
 		// a body acting only on the items equal to a constant byte: the loop
 		// goes from one such item to the next (`copies.rs`)
-		let matched = match parts {
-			Some(_) => self.matched_byte(pattern, item, body)?,
-			None => None,
-		};
+		let matched = self.matched_byte(pattern, item, body)?;
 		let test = self.append_block("for_item");
 		let body_block = self.append_block("for_item_body");
 		let step = self.append_block("for_item_step");
@@ -1976,9 +1997,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.into_int_value();
 			self.builder.build_store(counter.pointer, position)?;
 		}
-		let length = match parts {
-			Some((_, length)) => length,
-			None => self.growing_length(&self.builder, array)?,
+		if let (Some(byte), Some(length), Some((cursor, end))) = (matched, growing_length, run) {
+			let next = self.runtime.function("fa_segmented_next_byte")?;
+			position = self
+				.call_value(
+					next,
+					&[
+						array.into(),
+						position.into(),
+						length.into(),
+						self.context.i32_type().const_int(byte, false).into(),
+						self.segment_k(item).into(),
+						cursor.into(),
+						end.into(),
+					],
+				)?
+				.into_int_value();
+			// the segment cursor now designates the item found
+			self.builder.build_store(counter.pointer, position)?;
+		}
+		let length = match (parts, growing_length) {
+			(Some((_, length)), _) => length,
+			(None, Some(length)) => length,
+			(None, None) => self.growing_length(&self.builder, array)?,
 		};
 		let more = self
 			.builder
@@ -1986,9 +2027,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(more, body_block, exit)?;
 		self.builder.position_at_end(body_block);
-		let pointer = match parts {
-			Some((items, _)) => self.item_pointer(items, item, position)?,
-			None => self.growing_at(&self.builder, array, item, position)?,
+		let pointer = match (parts, run) {
+			(Some((items, _)), _) => self.item_pointer(items, item, position)?,
+			(None, Some(run)) => self.growing_next_item(array, item, position, run)?,
+			(None, None) => self.growing_at(&self.builder, array, item, position)?,
 		};
 
 		// a reference to a later item in a nested loop never overlaps this one

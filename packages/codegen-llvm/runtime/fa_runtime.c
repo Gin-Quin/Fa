@@ -2475,10 +2475,15 @@ FA_EXPORT void fa_array_free(FaArrayHeader *array, int64_t item_size) {
 
 #define FA_SEGMENTS 48
 
-/// A `GrowingArray` (`src/lower/growing.rs`).
+/// A `GrowingArray` (`src/lower/growing.rs`). `cursor` is the address of
+/// item `length` and `end` the end of its segment when that segment is
+/// allocated; else both are equal (null in a new array), so that `push` is
+/// one comparison, one store and one increment until a segment is full.
 typedef struct {
 	int64_t length;
 	int64_t segments;
+	uint8_t *cursor;
+	uint8_t *end;
 	uint8_t *segment[FA_SEGMENTS];
 } FaSegmented;
 
@@ -2516,9 +2521,11 @@ FA_EXPORT FaSegmented *fa_segmented_new(void) {
 	return array;
 }
 
-/// The slot of a new last item (`push`): a full segment is kept, and a new
-/// one is added.
-FA_EXPORT void *fa_segmented_push_slot(FaSegmented *array, int64_t item_size, int32_t k) {
+/// Points the cursor at item `length`, in its segment, allocated when it
+/// doesn't exist yet (`push` on a full segment; segments are kept by a
+/// reset, so the next one may exist already).
+FA_EXPORT __attribute__((noinline)) void fa_segmented_next(FaSegmented *array, int64_t item_size,
+                                                          int32_t k) {
 	int64_t index = array->length;
 	int64_t first;
 	int64_t segment = segment_of(index, k, &first);
@@ -2526,8 +2533,190 @@ FA_EXPORT void *fa_segmented_push_slot(FaSegmented *array, int64_t item_size, in
 		array->segment[segment] = fa_alloc((size_t)(segment_size(segment, k) * item_size), 16);
 		array->segments = segment + 1;
 	}
-	array->length = index + 1;
+	array->cursor = array->segment[segment] + (index - first) * item_size;
+	array->end = array->segment[segment] + segment_size(segment, k) * item_size;
+}
+
+/// The slot of a new last item (`push`): a full segment is kept, and a new
+/// one is added.
+FA_EXPORT __attribute__((always_inline)) void *fa_segmented_push_slot(FaSegmented *array,
+                                                                    int64_t item_size,
+                                                                    int32_t k) {
+	if (__builtin_expect(array->cursor == array->end, 0)) {
+		fa_segmented_next(array, item_size, k);
+	}
+	uint8_t *slot = array->cursor;
+	array->cursor = slot + item_size;
+	array->length += 1;
+	return slot;
+}
+
+/// `fa_segmented_append` across segments.
+static __attribute__((noinline)) void segmented_append_runs(FaSegmented *array,
+                                                           const uint8_t *items, int64_t count,
+                                                           int64_t item_size, int32_t k) {
+	while (count > 0) {
+		if (array->cursor == array->end) {
+			fa_segmented_next(array, item_size, k);
+		}
+		int64_t room = (array->end - array->cursor) / item_size;
+		int64_t run = count < room ? count : room;
+		copy_bytes(array->cursor, items, (size_t)(run * item_size));
+		array->cursor += run * item_size;
+		array->length += run;
+		items += run * item_size;
+		count -= run;
+	}
+}
+
+/// Appends `count` items stored contiguously at `items`: one copy per
+/// segment they fill. `items` may be in this array: its items never move.
+/// Inline: most copies fit in the current segment.
+FA_EXPORT __attribute__((always_inline)) void fa_segmented_append(FaSegmented *array,
+                                                                const uint8_t *items,
+                                                                int64_t count, int64_t item_size,
+                                                                int32_t k) {
+	if (count > 0 && count * item_size <= array->end - array->cursor) {
+		copy_bytes(array->cursor, items, (size_t)(count * item_size));
+		array->cursor += count * item_size;
+		array->length += count;
+		return;
+	}
+	segmented_append_runs(array, items, count, item_size, k);
+}
+
+/// `fa_segmented_fill` across segments.
+static __attribute__((noinline)) void segmented_fill_runs(FaSegmented *array, int64_t count,
+                                                         int32_t byte, int32_t k) {
+	while (count > 0) {
+		if (array->cursor == array->end) {
+			fa_segmented_next(array, 1, k);
+		}
+		int64_t room = array->end - array->cursor;
+		int64_t run = count < room ? count : room;
+		fill_bytes(array->cursor, (uint8_t)byte, (size_t)run);
+		array->cursor += run;
+		array->length += run;
+		count -= run;
+	}
+}
+
+/// Appends `count` copies of a byte to a `GrowingArray` of bytes (a loop
+/// pushing the same byte, `src/lower/copies.rs`). Inline: most
+/// fills fit in the current segment.
+FA_EXPORT __attribute__((always_inline)) void fa_segmented_fill(FaSegmented *array, int64_t count,
+                                                              int32_t byte, int32_t k) {
+	if (count > 0 && count <= array->end - array->cursor) {
+		fill_bytes(array->cursor, (uint8_t)byte, (size_t)count);
+		array->cursor += count;
+		array->length += count;
+		return;
+	}
+	segmented_fill_runs(array, count, byte, k);
+}
+
+/// Appends `count` items of a `GrowingArray` from item `start` (bytewise),
+/// to an array (`target_k < 0`) or to a `GrowingArray`: one copy per run of
+/// the source in a segment. The caller checked `0 <= start` and `start +
+/// count <= source->length`; the source's items never move, even when the
+/// target is the source itself.
+static __attribute__((noinline)) void segmented_extend_runs(void *target, int32_t target_k,
+                                                           const FaSegmented *source,
+                                                           int64_t start, int64_t count,
+                                                           int64_t item_size, int32_t k) {
+	if (target_k < 0) {
+		fa_array_room((FaArrayHeader *)target, count, item_size);
+	}
+	while (count > 0) {
+		int64_t first;
+		int64_t segment = segment_of(start, k, &first);
+		int64_t room = segment_size(segment, k) - (start - first);
+		int64_t run = count < room ? count : room;
+		const uint8_t *items = source->segment[segment] + (start - first) * item_size;
+		if (target_k < 0) {
+			FaArrayHeader *array = target;
+			copy_bytes(array->items + array->length * item_size, items, (size_t)(run * item_size));
+			array->length += run;
+		} else {
+			fa_segmented_append(target, items, run, item_size, target_k);
+		}
+		start += run;
+		count -= run;
+	}
+}
+
+FA_EXPORT __attribute__((always_inline)) void fa_segmented_extend_to(
+	void *target, int32_t target_k, const FaSegmented *source, int64_t start, int64_t count,
+	int64_t item_size, int32_t k) {
+	if (count <= 0) {
+		return;
+	}
+	// inline: the items in one segment of the source
+	int64_t first;
+	int64_t segment = segment_of(start, k, &first);
+	if (start - first + count <= segment_size(segment, k)) {
+		const uint8_t *items = source->segment[segment] + (start - first) * item_size;
+		if (target_k < 0) {
+			FaArrayHeader *array = target;
+			fa_array_room(array, count, item_size);
+			copy_bytes(array->items + array->length * item_size, items, (size_t)(count * item_size));
+			array->length += count;
+		} else {
+			fa_segmented_append(target, items, count, item_size, target_k);
+		}
+		return;
+	}
+	segmented_extend_runs(target, target_k, source, start, count, item_size, k);
+}
+
+/// The first item of the segment holding item `index`, and in `*end` the
+/// end of that segment: a loop over the items walks a segment with a
+/// pointer, and calls this only when it reaches the end of one.
+FA_EXPORT __attribute__((noinline)) uint8_t *fa_segmented_run(const FaSegmented *array,
+                                                              int64_t index, int64_t item_size,
+                                                              int32_t k, uint8_t **end) {
+	int64_t first;
+	int64_t segment = segment_of(index, k, &first);
+	*end = array->segment[segment] + segment_size(segment, k) * item_size;
 	return array->segment[segment] + (index - first) * item_size;
+}
+
+/// The index of the first byte equal to `byte` at or after `offset` in a
+/// `GrowingArray` of bytes, or `length` (a loop acting on those items
+/// only). `*cursor` is the address of item `offset` and `*end` the end of
+/// its segment, or both are equal when that segment must be found: the
+/// loop walks the segments with them, and finds them at the match.
+FA_EXPORT int64_t fa_segmented_next_byte(const FaSegmented *array, int64_t offset, int64_t length,
+                                         int32_t byte, int32_t k, uint8_t **cursor,
+                                         uint8_t **end) {
+	while (offset < length) {
+		if (*cursor == *end) {
+			*cursor = fa_segmented_run(array, offset, 1, k, end);
+		}
+		int64_t room = *end - *cursor;
+		int64_t count = length - offset < room ? length - offset : room;
+		size_t found = next_byte(*cursor, (size_t)count, 0, (uint8_t)byte);
+		if ((int64_t)found < count) {
+			*cursor += found;
+			return offset + (int64_t)found;
+		}
+		*cursor += count;
+		offset += count;
+	}
+	return length;
+}
+
+/// `growing = []`: no item left (the caller dropped those owning memory),
+/// the segments kept for the next pushes.
+FA_EXPORT void fa_segmented_reset(FaSegmented *array, int64_t item_size, int32_t k) {
+	array->length = 0;
+	if (array->segments > 0) {
+		array->cursor = array->segment[0];
+		array->end = array->segment[0] + segment_size(0, k) * item_size;
+	} else {
+		array->cursor = 0;
+		array->end = 0;
+	}
 }
 
 /// Frees a `GrowingArray` whose items were dropped.
@@ -2563,10 +2752,7 @@ FA_EXPORT FaSegmented *fa_segmented_from_array(FaArrayHeader *flat, int64_t item
                                                int32_t k) {
 	fa_array_materialize(flat);
 	FaSegmented *array = fa_segmented_new();
-	for (int64_t index = 0; index < flat->length; index += 1) {
-		copy_bytes(fa_segmented_push_slot(array, item_size, k), flat->items + index * item_size,
-		           (size_t)item_size);
-	}
+	fa_segmented_append(array, flat->items, flat->length, item_size, k);
 	fa_array_free(flat, item_size);
 	return array;
 }

@@ -134,7 +134,7 @@ struct LoopFrame<'ctx> {
 /// The function being lowered.
 struct Frame<'ctx> {
 	return_slot: Option<Slot<'ctx>>,
-	nrvo_local: Option<SymbolId>,
+	nrvo_local: Option<(FileId, SymbolId)>,
 	return_buffer: Option<collection_storage::CollectionBuffer<'ctx>>,
 	collection_result_root: Option<NodeId>,
 	destination: Option<(NodeId, Slot<'ctx>)>,
@@ -1272,7 +1272,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.frame_mut().return_slot = Some(Slot { pointer, repr: ret });
 			self.frame_mut().destination = Some((info.body, Slot { pointer, repr: ret }));
 			self.frame_mut().collection_result_root = Some(info.body);
-			self.frame_mut().nrvo_local = self.returned_local_candidate(info.body);
+			self.frame_mut().nrvo_local = self
+				.returned_local_candidate(info.body)
+				.map(|symbol| (self.file, symbol));
 		}
 		if function.return_collection {
 			let at = u32::from(lambda);
@@ -1632,7 +1634,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// The slot of a local, created on first use: an alloca of the function
 	/// owning it, or a global for a top-level local that functions read.
 	fn slot_of(&mut self, symbol: SymbolId, node: NodeId) -> Result<Slot<'ctx>, Error> {
-		if self.frame().nrvo_local == Some(symbol) {
+		if self.frame().nrvo_local == Some((self.file, symbol)) {
 			let slot = self.frame().return_slot.expect("coalesced return slot");
 			self.slots.insert(symbol, slot);
 			return Ok(slot);
@@ -2183,7 +2185,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				{
 					return self.optional_element(slot.pointer, slot.repr, node);
 				}
-				let value = if self.frame().nrvo_local == Some(symbol) {
+				let value = if self.frame().nrvo_local == Some((self.file, symbol)) {
 					self.load_destination(slot)?
 				} else {
 					self.load(slot)?

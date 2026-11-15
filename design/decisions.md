@@ -695,3 +695,8 @@ The aggregate output parameter is `noalias`: callers use fresh local/element/fie
 storage or an unconsumed early box; existing-place assignments keep staging.
 This communicates the construction rule to LLVM instead of treating output
 writes as possible mutations of borrowed inputs.
+
+The coalesced local is keyed by `(FileId, SymbolId)`, as symbol numbers are local
+to a file. Imported-global lookup switches the file being lowered while keeping
+the caller's frame; a bare symbol number must never select its return slot.
+The regression fixture deliberately overlaps these numbers across two modules.

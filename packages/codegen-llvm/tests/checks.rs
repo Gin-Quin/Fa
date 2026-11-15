@@ -342,6 +342,80 @@ console.log(returned(2).number)
 	}
 
 	#[test]
+	fn coalesced_local_ids_do_not_alias_imported_globals() {
+		use fa_analyzer::modules::CodebaseResolver;
+		let fields = (0..64)
+			.map(|i| format!("mutable v{i} = {i}\n"))
+			.collect::<String>();
+		let sum = (0..64)
+			.map(|i| format!("remote.v{i}"))
+			.collect::<Vec<_>>()
+			.join(" + ");
+		let padding = (0..64)
+			.map(|i| format!("p{i}: Integer"))
+			.collect::<Vec<_>>()
+			.join(", ");
+		let library = format!(
+			"function padding = ({padding}): Integer => p0\nexport namespace = {{\n{fields}}}\n"
+		);
+		let main = format!(
+			"use remote = library.values\ntype Data = {{ number: Integer, text: String }}\nfunction build = (n: Integer): Data => {{\nlet result = Data {{ number = n + {sum}, text = \"owned payload {{n}} beyond the inline limit\" }}\nreturn result\n}}\nexport function = () => {{ let item = build(7)\nconsole.log(item.number) }}\n"
+		);
+		let files = vec![
+			("library/values.fa".to_string(), library),
+			("application/main.fa".to_string(), main),
+		];
+		let mut session = Session::new();
+		session.set_resolver(Box::new(CodebaseResolver::from_texts(
+			&files,
+			Some("application/main.fa"),
+		)));
+		let program = session.analyze_package(Some("application/main"));
+		let main = session.file_of_module("application/main").unwrap();
+		let library = session.file_of_module("library/values").unwrap();
+		let index = session
+			.analysis(main)
+			.symbols
+			.symbols()
+			.iter()
+			.position(|symbol| session.types().syms.resolve(symbol.name) == "result")
+			.unwrap();
+		assert!(
+			session
+				.types()
+				.syms
+				.resolve(session.analysis(library).symbols.symbols()[index].name)
+				.starts_with('v'),
+			"fixture must collide file-local IDs"
+		);
+		let options = Options {
+			opt_level: OptLevel::O0,
+			emit_ir: true,
+			leak_check: true,
+			..Options::default()
+		};
+		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+			.join("fa-checks")
+			.join("return-global-ids");
+		let artifact =
+			fa_codegen_llvm::compile_program(&session, &program, Target::Native, &options, &output)
+				.unwrap();
+		let ir = std::fs::read_to_string(artifact.ir.as_ref().unwrap()).unwrap();
+		let build = function(&ir, "fa.build");
+		assert!(
+			!build.contains("local = alloca"),
+			"the returned local must be coalesced: {build}"
+		);
+		let result = fa_codegen_llvm::run(&artifact, &[]).unwrap();
+		assert!(
+			result.status.success(),
+			"{}",
+			String::from_utf8_lossy(&result.stderr)
+		);
+		assert_eq!(String::from_utf8_lossy(&result.stdout), "2023\n");
+	}
+
+	#[test]
 	fn reservation_precedes_a_push_loop_without_growth_calls_in_the_loop() {
 		let ir = ir_of(
 			"reserve-loop",

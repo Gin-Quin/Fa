@@ -71,10 +71,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	pub(super) fn is_coalesced_return_read(&self, node: NodeId, repr: Repr) -> bool {
-		let Some(symbol) = self.frame().nrvo_local else {
+		let Some((file, symbol)) = self.frame().nrvo_local else {
 			return false;
 		};
-		repr == self.frame().ret
+		file == self.file
+			&& repr == self.frame().ret
 			&& self.analysis.resolution(self.ungrouped(node)) == Resolution::Local(symbol)
 	}
 

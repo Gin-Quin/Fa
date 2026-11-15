@@ -65,7 +65,11 @@ fn programs(target: &'static str) -> Vec<(PathBuf, Expected)> {
 			if analyzer && !super::runnable_case(&text) {
 				continue;
 			}
-			let mut expected = if asynchronous { super::async_expectations(&path, &text) } else { super::expectations(&text) };
+			let mut expected = if asynchronous {
+				super::async_expectations(&path, &text)
+			} else {
+				super::expectations(&text)
+			};
 			assert!(
 				expected.annotated,
 				"{} has no output annotation",
@@ -124,7 +128,7 @@ fn expected_skips(target: &str) -> BTreeMap<String, String> {
 /// These are successful negative tests, not backend gaps. Require every error
 /// to name a documented target restriction, so an unrelated error can't hide.
 fn documented_refusal(outcome: &Outcome, target: &str) -> bool {
-	if !outcome.build_failed {
+	if !outcome.build_failed || outcome.exit != 1 {
 		return false;
 	}
 	let errors: Vec<_> = outcome
@@ -272,6 +276,7 @@ for (const name of ['console','TextEncoder','TextDecoder','URL','fetch','crypto'
  'WebAssembly','Worker','MessageChannel','SharedArrayBuffer','Atomics','queueMicrotask','structuredClone']) {
   if (typeof globalThis[name] === 'undefined') throw Error(name + ' missing');
 }
+if (typeof WorkerGlobalScope !== 'undefined') throw Error('main is a worker');
 if ('nodeTiming' in performance) throw Error('Node performance leaked');
 const timer = setTimeout(() => { throw Error('cancelled timer ran'); }, 100);
 if (typeof timer !== 'number') throw Error('Node timer leaked');
@@ -319,7 +324,7 @@ worker.postMessage({ items: ['worker globals'] });
 			"worker globals\n",
 		),
 	];
-	fs::write(scratch.join("worker.js"), "if (typeof process !== 'undefined' || typeof Buffer !== 'undefined' || typeof Bun !== 'undefined' || typeof require !== 'undefined') throw Error('worker Node leak'); onmessage = ({data}) => { if (Object.getPrototypeOf(data) !== Object.prototype || !(data.items instanceof Array)) throw Error('wrong input realm'); postMessage(data); };").unwrap();
+	fs::write(scratch.join("worker.js"), "if (typeof process !== 'undefined' || typeof Buffer !== 'undefined' || typeof Bun !== 'undefined' || typeof require !== 'undefined') throw Error('worker Node leak'); if (!(self instanceof WorkerGlobalScope) || !(self instanceof DedicatedWorkerGlobalScope)) throw Error('missing worker scope'); onmessage = ({data}) => { if (Object.getPrototypeOf(data) !== Object.prototype || !(data.items instanceof Array)) throw Error('wrong input realm'); postMessage(data); };").unwrap();
 	for (name, source, code, stdout) in cases {
 		fs::write(&entry, source).unwrap();
 		let outcome =
@@ -341,11 +346,14 @@ fn only_documented_target_diagnostics_count_as_refusals() {
 	let mut outcome = Outcome {
 		build_failed: true,
 		stdout: String::new(),
-		exit: -3,
+		exit: 1,
 		stderr: "error[AN004]: `File.read` doesn't exist on target `web`".into(),
 	};
 	assert!(documented_refusal(&outcome, "web"));
 	assert!(!documented_refusal(&outcome, "node"));
+	outcome.exit = 101;
+	assert!(!documented_refusal(&outcome, "web"));
+	outcome.exit = 1;
 	outcome
 		.stderr
 		.push_str("\nerror[E-TYPE-1]: unrelated failure");

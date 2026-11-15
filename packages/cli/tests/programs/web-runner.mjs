@@ -20,7 +20,6 @@ let ended = false;
 // The generator directly invokes a synchronous main that cannot fail and
 // returns void; those modules have no faExit and finish naturally with 0.
 
-
 function finish(code) {
 	if (parentPort) throw new Error("a worker unexpectedly ran a program entry");
 	if (ended) throw new Error("the web program reported its status twice");
@@ -136,6 +135,7 @@ const globals = {
 	MessagePort,
 	Worker,
 	crypto: globalThis.crypto,
+	crossOriginIsolated: true,
 	performance: { now: () => performance.now(), timeOrigin: performance.timeOrigin },
 	structuredClone: (value, options) => cloneIntoContext(structuredClone(value, options)),
 	queueMicrotask,
@@ -175,6 +175,17 @@ const context = vm.createContext(globals);
 // Built-ins (including WebAssembly, SharedArrayBuffer and Atomics) come from
 // the context's own realm, preserving instanceof checks in generated code.
 vm.runInContext("globalThis.self = globalThis", context);
+if (parentPort) {
+	vm.runInContext(
+		`
+		globalThis.WorkerGlobalScope = class WorkerGlobalScope extends EventTarget {};
+		globalThis.DedicatedWorkerGlobalScope = class DedicatedWorkerGlobalScope extends WorkerGlobalScope {};
+		Object.setPrototypeOf(globalThis, DedicatedWorkerGlobalScope.prototype);
+	`,
+		context,
+	);
+}
+
 // Structured-clone results belong to the receiving realm in a browser.
 // Node delivers host-realm objects: restore their standard prototypes so that
 // generated instanceof / Object.getPrototypeOf checks see browser semantics.

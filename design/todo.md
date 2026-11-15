@@ -9,6 +9,8 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Bugs
 
+- **JavaScript target coverage**: `cli/tests/expected-skips/{node,web}.txt` now execute the remaining gaps. Follow up on V8 vs JavaScriptCore JSON error wording, `Pointer.allocate` reaching Bun-only FFI instead of a target diagnostic, Node's immediate ephemeral listener port, web blocking generic async method dispatch, web deadlock reporting, and the million-deep recursive copy (also an existing Bun backend gap). Four web fixtures assume command-line arguments, which web deliberately leaves empty; give those fixtures explicit target expectations without concealing the difference. Minimal reproductions and target counts: `fa-lead/reports/node-web-harness.md`.
+
 - `W-ERR-1` on a string slice (Goose ports): not reproduced (unproven slices are `E-ERR-3`, proven ones `W-ERR-1` by design); needs the snippet.
 
 ## Performance (Goose suite, native, vs Rust)

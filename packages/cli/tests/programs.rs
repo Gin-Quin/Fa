@@ -77,7 +77,10 @@ fn limited<R>(f: impl FnOnce() -> R) -> R {
 	struct Permit;
 	impl Drop for Permit {
 		fn drop(&mut self) {
-			*RUNNING.0.lock().unwrap_or_else(|poison| poison.into_inner()) -= 1;
+			*RUNNING
+				.0
+				.lock()
+				.unwrap_or_else(|poison| poison.into_inner()) -= 1;
 			RUNNING.1.notify_one();
 		}
 	}
@@ -85,27 +88,41 @@ fn limited<R>(f: impl FnOnce() -> R) -> R {
 	f()
 }
 
-/// The same fixture may write a fixed external path (async-files.fa). Keep
-/// its executions on different targets apart while other programs run freely.
-static ACTIVE_PATHS: (Mutex<std::collections::BTreeSet<PathBuf>>, Condvar) =
-	(Mutex::new(std::collections::BTreeSet::new()), Condvar::new());
+/// A filesystem fixture may write a fixed external path (async-files.fa).
+/// Keep its executions on different targets apart; pure fixtures run freely.
+static ACTIVE_PATHS: (Mutex<std::collections::BTreeSet<PathBuf>>, Condvar) = (
+	Mutex::new(std::collections::BTreeSet::new()),
+	Condvar::new(),
+);
 
 struct ProgramPermit(PathBuf);
 impl ProgramPermit {
-	fn acquire(path: &Path) -> Self {
+	fn acquire(path: &Path) -> Option<Self> {
+		if !fs::read_to_string(path)
+			.expect("a readable program")
+			.contains("std.fs")
+		{
+			return None;
+		}
 		let path = path.canonicalize().expect("a program exists");
 		let (active, changed) = &ACTIVE_PATHS;
 		let mut paths = active.lock().unwrap_or_else(|poison| poison.into_inner());
 		while paths.contains(&path) {
-			paths = changed.wait(paths).unwrap_or_else(|poison| poison.into_inner());
+			paths = changed
+				.wait(paths)
+				.unwrap_or_else(|poison| poison.into_inner());
 		}
 		paths.insert(path.clone());
-		Self(path)
+		Some(Self(path))
 	}
 }
 impl Drop for ProgramPermit {
 	fn drop(&mut self) {
-		ACTIVE_PATHS.0.lock().unwrap_or_else(|poison| poison.into_inner()).remove(&self.0);
+		ACTIVE_PATHS
+			.0
+			.lock()
+			.unwrap_or_else(|poison| poison.into_inner())
+			.remove(&self.0);
 		ACTIVE_PATHS.1.notify_all();
 	}
 }
@@ -499,7 +516,10 @@ fn run_all(
 						break;
 					};
 					let mut outcome = limited(|| run(&path, &expected, scratch, index));
-					if JAVASCRIPT_ORDER.iter().any(|(file, _)| path.file_name().is_some_and(|name| name == *file)) {
+					if JAVASCRIPT_ORDER
+						.iter()
+						.any(|(file, _)| path.file_name().is_some_and(|name| name == *file))
+					{
 						expected.stdout.sort();
 						let mut lines: Vec<&str> = outcome.stdout.lines().collect();
 						lines.sort_unstable();
@@ -632,7 +652,10 @@ const NATIVE_STDERR: &[(&str, &str)] = &[(
 
 fn async_expectations(path: &Path, text: &str) -> Expected {
 	let mut expected = expectations(text);
-	if NATIVE_STDERR.iter().any(|(file, _)| path.file_name().is_some_and(|name| name == *file)) {
+	if NATIVE_STDERR
+		.iter()
+		.any(|(file, _)| path.file_name().is_some_and(|name| name == *file))
+	{
 		expected.stderr.clear();
 	}
 	expected

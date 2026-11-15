@@ -435,6 +435,7 @@ impl Walker<'_> {
 		);
 		if data.kind != SymbolKind::Let
 			|| !module_level
+			|| self.s.types.contains_shared_handle(data.ty)
 			|| self.s.types.is_recovering(data.ty)
 			|| !self.is_constant_expression(value, 0)
 		{

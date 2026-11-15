@@ -1,3 +1,103 @@
+## Checkpoints delivered (2026-11-07)
+
+- Compiler base remains ecda9e5 here. Root has applied separate tested patches
+  into its coalescing WIP, not a compiler integration of this whole tree.
+- /tmp/fa-callable-value-state.patch (577 lines): mutable callable slots/field
+  writes, flow joins, read/capture snapshots, transitive named-function captures.
+  Full analyzer 385 + corpus/cases/pipeline/docs green; clippy no warnings.
+- /tmp/fa-replacement-moves.patch (179 lines): plain concrete owned `head` can
+  move into a data constructor that replaces head in the same lexical function,
+  even in a loop. Later RHS reads and potentially failing/calling RHS keep copy.
+  No shared handles/Task/generic types. Targeted tests/clippy green, root tests
+  24k recursive chain with its AOT implementation.
+- /tmp/fa-mixed-sign-index-complete.patch (68 lines): valid [-length,length)
+  signed interval; wrap-64 fixture now [10] and scaled(2), a real OOB case.
+  Native/freestanding/wasm targeted suite 4/4 green.
+- FINAL Set choice: standard hash/equality, separate key uses Map. Root owns
+  docs + JS; native_perf LLVM. /tmp/fa-set-standard-frontend.patch (347 lines)
+  removes key option/slot, stored-key provenance and artificial HAS_SHARED;
+  [source, capacity] is now the CallInfo ABI for Set/GrowingSet.from. FN023 for
+  key=. se-3 migrated to Map, new set standard equality and capacity evaluation
+  once tests. Full analyzer 387 + corpus/cases/pipeline/docs green; clippy clean;
+  last capacity-side-effects case rerun green. Patch apply-check in root WIP green.
+- FINAL Resource choice: every type with destroy is NONCOPYABLE, move/borrow.
+  A second resource is a newly constructed instance. The unpublished shared-cell
+  analyzer prototype is removed completely (archive /tmp/fa-abandoned-resource-cells).
+  Explicit Sync handles and Function environments keep their counted identity.
+  /tmp/fa-resource-unique-analyzer-final.log is green:391 units + all cases,
+  corpus, pipeline and docs. Final clippy/imported fresh-local case in progress.
+  takes_task_parameter is the consuming ABI query: it stops at Resource/Sync,
+  even if the resource owns a Task. is_move_only/MOVE_ONLY cover Resource+Task.
+  owns_unique is a temporary alias of takes_task_parameter, not copyability.
+  TypeInfo.isUnique is separate from ownsTask; conditional collection_moves of
+  generic owned locals use hasCollection || isUnique, captures hasCollection only.
+- Resource followups validated and delivered: /tmp/fa-resource-borrow-defaults.patch
+  (157 lines, aliases invalidated by owner move + default label false positives),
+  and /tmp/fa-unique-borrowed-places.patch (134 lines, exported/temporary Resource
+  fields not silently exempted from NoUnique). Both full393 + all cases/corpus/
+  pipeline/docs and clippy workspace all-targets exit0. Root applied first;
+  second apply-check root green. Fresh ordinary-temporary child transfers remain
+  valid (resource-holders and task-moves positive fixtures).
+- with moved to separate analyzer-partial worktree, branch codex/analyzer-partial
+  on compiler aa3e050, no AOT/copy-core/Resource WIP. See its NEXT for progress.
+- Remaining provenance holes: builtin .push/.set storage, loop variables and
+  builtin-producing calls; capture replacement by equal opaque origin can
+  conflate distinct captures. Worker/Susbcription/Guard transport protocol needs
+  conservatism; do not equate local shared copying with Send.
+
+## Copy rules in progress (analyzer-rules, 2026-11-06)
+
+- This tree is based on validated origin commit ecda9e5 and contains only
+  subsequent FN086/non-escaping/copy-rule work plus the root Copy syntax adapters.
+- User's FINAL policy: Task and composites owning Task remain noncopyable;
+  Task arguments retain their consuming ABI. Foreign resources with destroy
+  are also noncopyable; their parameters borrow, even when they contain Task.
+  Explicit Sync handles share counted identity. Collections (including
+  plain objects owning one) require `copy value` unless a last use moves them.
+  Resource/Sync is a boundary for the structural collection-copy rule.
+- Root owns Copy parser/formatter + JS/native lowering. Their patches are
+  applied here, including `/tmp/fa-copy-context-fix.patch` and the LSP arm.
+  Node::Copy{right}, View::Copy(NodeId); compiletime lowering uses existing COW.
+- TypeStore MOVE_ONLY covers Resource/Task; HAS_SHARED bit11 is separate, with
+  contains_shared_handle query (including Function for counted environments).
+  takes_task_parameter/owns_unique is Task-parameter ABI only. Worker consumption and
+  stop-consumption hooks removed. Original Task consumption restored, with a
+  new refusal to extract borrowed/captured/module Task in a callee.
+- CopyRequirement summaries infer semantic copy conditions, normalize them to
+  rigid parameter leaves, propagate local calls, and publish/remap/hash a separate
+  Interface map with no runtime ABI. Imported direct calls pass regression.
+  MEM003 means forbidden Resource/Task copy; MEM004 means structural collection copy
+  needs explicit syntax. Twenty historical analyzer sites migrated with copy.
+- Last uses are tracked by lexical function ID, not stack length (BodyCx resets
+  function vectors for lambdas). MOVE includes fields and exclusive branches;
+  Resource ancestors are excluded. lower::copies::is_move skips Try/Group.
+- Capture escape propagation now follows aliases and conditional returns.
+  Captures of escaping closures cannot own Resource/Task, even if a local source is
+  at its last use. Collection captures may move owned locals at creation;
+  otherwise use `let owned = copy borrowed; () => ...owned...`.
+  Analysis.moved_captures is keyed by actual environment EXPRESSION site (name
+  read for named functions, lambda/start/watch for those), not declaration.
+  Proofs consumes this metadata in its counted-environment backend work.
+- Initial copy/capture unit regressions: 8/8 green, logs
+  /tmp/fa-analyzer-copy-builtin-first.log; direct/imported cases green in
+  /tmp/fa-analyzer-copy-imports.log and /tmp/fa-analyzer-copy-values.log.
+  Sources changed since these runs; rerun before freezing.
+- Portable callable applications now preserve forall/factory/field copy conditions;
+  mutable read/capture snapshots are in the delivered value-state patch. Generic
+  field extraction through Resource and Resource->Task-consuming structural views
+  are rejected. task_only copy conditions separate use-after-Task from a repeated
+  borrowed Resource call. Remaining: all key-loop specialization copy conditions,
+  stored values in .push/.set, loop producers and source-origin conflation.
+- Builtin element copies and Task callback-argument transfer checks are under
+  development (slice/filter/reverse/sort/from/toArray/Pointer). Borrow-only
+  iterators stay valid; mapped fresh Task results stay valid. Root confirmed
+  Task inputs cannot be moved from an element into a consuming callback.
+- Root assigns Task interthread affinity to proofs; do not duplicate its query
+  through real Sync/Resource/Pointer/Ref payloads or Worker/submit checks.
+- finding42/interpreter continuations now belongs to proofs, NOT this tree.
+  with, factories, TypeFromSchema/named Schema, deferred key-loop signatures,
+  written-origin joins/destructors, remaining rules and pass fusion still open.
+
 ## Written-origin validation completed (2026-11-07)
 
 - analyzer-with is based on ef777e4. Its final frozen full workspace suite,

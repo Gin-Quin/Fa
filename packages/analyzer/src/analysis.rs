@@ -622,6 +622,12 @@ pub struct Analysis {
 	pub interval_values: Interner<Interval>,
 	/// The type arguments of a generic call, typed literal or generic function value (M2).
 	pub instantiations: FxHashMap<NodeId, ListId>,
+	/// Semantic copy conditions of generic bodies, with no runtime ABI cost.
+	pub copy_requirements: FxHashMap<NodeId, Vec<CopyRequirement>>,
+	/// Value facts independent of the visible structural function signature.
+	pub value_origins: FxHashMap<NodeId, std::sync::Arc<crate::provenance::ValueOrigin>>,
+	pub callable_keys: FxHashMap<NodeId, crate::ids::DeclKey>,
+	pub callables: FxHashMap<crate::ids::DeclKey, crate::provenance::CallableSummary>,
 	/// The methods selected by a generic application: structural type ids
 	/// alone cannot distinguish declarations with equal data fields.
 	pub instantiated_methods: FxHashMap<NodeId, Vec<GenericMethod>>,
@@ -654,6 +660,10 @@ pub struct Analysis {
 	/// capture (`FnInfo::captures`) when created; the others see the
 	/// captured variables themselves (advanced brief §5.11, D3).
 	pub escapes: rustc_hash::FxHashSet<NodeId>,
+	/// Captures moved into an escaping environment at this expression site
+	/// (lambda/start-do, or the name read materializing a local function).
+	pub moved_captures: FxHashMap<NodeId, Vec<SymbolId>>,
+	pub collection_moved_captures: FxHashMap<NodeId, Vec<(SymbolId, TypeId)>>,
 	/// The `let` and `mutable` locals of blocks and functions whose value
 	/// never outlives the function's frame ([`Analysis::is_non_escaping`]).
 	pub non_escaping: rustc_hash::FxHashSet<SymbolId>,
@@ -679,6 +689,30 @@ pub struct Analysis {
 	/// parameter, a field of one: `holder.task` returned or passed): the
 	/// place gives the value up (a zero, which its drop skips).
 	pub moved_reads: rustc_hash::FxHashSet<NodeId>,
+	/// Reads transferred only when the instantiated value actually owns a
+	/// Task. Ordinary arrays/resources passed as parameters stay borrowed.
+	pub task_moves: FxHashMap<NodeId, TypeId>,
+	/// Explicit argument values transferred by each call's Task-parameter
+	/// ABI, including fresh temporaries. Evaluate and own them in source
+	/// order, then give them up only when every argument is ready to invoke.
+	/// The type is the substituted parameter type; generic types use the
+	/// same `takes_task_parameter` witness as conditional local moves.
+	pub task_arguments: FxHashMap<NodeId, Vec<(NodeId, TypeId)>>,
+	/// Worker transport takes the complete source only when this type is unique.
+	/// Ordinary function parameters keep their usual borrow semantics.
+	pub thread_moves: FxHashMap<NodeId, TypeId>,
+	/// The selected formal DATA view at an actual worker argument.
+	pub thread_views: FxHashMap<NodeId, TypeId>,
+	/// Actual alternatives before narrowing, by transported argument/result site.
+	pub thread_origins: FxHashMap<NodeId, Vec<std::sync::Arc<crate::provenance::ValueOrigin>>>,
+	/// Structural sinks that transfer an owned source into a narrower type
+	/// containing Task fields. Preserve the kept fields and destroy extras.
+	/// For generic types, apply this operation only when both the actual
+	/// source and target follow `takes_task_parameter` after substitution.
+	pub owned_projections: rustc_hash::FxHashSet<NodeId>,
+	/// A last-use transfer of an owned generic local, conditional on owning
+	/// a collection or unique value. Pure shared handles keep their lexical owner.
+	pub collection_moves: FxHashMap<NodeId, TypeId>,
 	/// Every destructuring pattern node (`ObjectPattern`, `ArrayPattern`,
 	/// `TuplePattern`) of a declaration, a `for` or a parameter: what each
 	/// element reads and binds ([`PatternInfo`]).
@@ -1313,6 +1347,22 @@ pub struct ArithInfo {
 	pub root: bool,
 }
 
+/// A generic body's copy, checked after substituting its type parameters.
+/// A Task parameter may transfer at its last use; a borrowed collection
+/// still requires an explicit structural copy.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CopyRequirement {
+	pub subject: TypeId,
+	pub explicit: bool,
+	pub task_transfer: bool,
+	/// Only the consuming Task ABI forbids this read. Resources remain
+	/// borrowed at calls, so a previous generic call never consumes them.
+	pub task_only: bool,
+	/// This copy is needed only when a moved field crosses a Resource owner.
+	/// The list contains string-literal types naming its ancestor fields.
+	pub resource_gate: Option<(TypeId, ListId)>,
+}
+
 /// What the backends need of a function or a lambda node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FnInfo {
@@ -1564,6 +1614,10 @@ impl Analysis {
 			intervals: FxHashMap::default(),
 			interval_values: Interner::new(),
 			instantiations: FxHashMap::default(),
+			copy_requirements: FxHashMap::default(),
+			value_origins: FxHashMap::default(),
+			callable_keys: FxHashMap::default(),
+			callables: FxHashMap::default(),
 			instantiated_methods: FxHashMap::default(),
 			instantiation_origins: FxHashMap::default(),
 			written_types: FxHashMap::default(),
@@ -1573,6 +1627,8 @@ impl Analysis {
 			calls: FxHashMap::default(),
 			callback_types: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
+			moved_captures: FxHashMap::default(),
+			collection_moved_captures: FxHashMap::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),
 			requirement_args: FxHashMap::default(),
 			type_decls: FxHashMap::default(),
@@ -1581,6 +1637,13 @@ impl Analysis {
 			json_defaults: FxHashMap::default(),
 			inline_field_orders: FxHashMap::default(),
 			moved_reads: rustc_hash::FxHashSet::default(),
+			task_moves: FxHashMap::default(),
+			task_arguments: FxHashMap::default(),
+			thread_moves: FxHashMap::default(),
+			thread_views: FxHashMap::default(),
+			thread_origins: FxHashMap::default(),
+			owned_projections: rustc_hash::FxHashSet::default(),
+			collection_moves: FxHashMap::default(),
 			patterns: FxHashMap::default(),
 			relations: Vec::new(),
 			relation_fields: FxHashMap::default(),

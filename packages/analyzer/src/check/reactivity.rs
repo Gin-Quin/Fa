@@ -224,46 +224,11 @@ impl Walker<'_> {
 
 	// ── subscriptions ─────────────────────────────────────────────────────
 
-	/// `subscription.stop()` consumes the local (flow part of a call).
-	pub(crate) fn note_stop_call(&mut self, n: NodeId, callee: NodeId) {
-		if !self.body.flow.reachable {
-			return;
-		}
-		let View::Access { target, members } = self.view(callee) else {
-			return;
-		};
-		let Some(member) = members.last() else {
-			return;
-		};
-		let Resolution::Builtin(builtin) = self.a.resolution(member) else {
-			return;
-		};
-		// `subscription.stop()`, `worker.stop()` (concurrency.rs)
-		if !matches!(
-			builtins::get(builtin).path,
-			"Subscription#stop"
-				| "Worker#stop"
-				| "TcpListener#close"
-				| "TcpStream#close"
-				| "WorkerPool#shutdown"
-		) {
-			return;
-		}
-		let target = self.strip_groups(target);
-		if let Resolution::Local(symbol) = self.a.resolution(target)
-			&& !self
-				.body
-				.flow
-				.consumed
-				.iter()
-				.any(|&(other, _)| other == symbol)
-		{
-			self.body.flow.consumed.push((symbol, n));
-		}
-	}
-
 	/// A declaration gives its symbol a new value: it is not consumed.
 	pub(crate) fn reset_consumed(&mut self, symbol: SymbolId) {
+		self.body.flow.conditional_consumed.retain(|entry| {
+			self.places.get(entry.0).root != crate::flow::PlaceRoot::Symbol(symbol)
+		});
 		self.body
 			.flow
 			.consumed
@@ -272,12 +237,18 @@ impl Walker<'_> {
 
 	/// `MEM002`: the read of a consumed local (flow part of a name).
 	pub(crate) fn check_consumed(&mut self, n: NodeId) {
+		if self.is_direct_replacement(n) {
+			return;
+		}
 		if !self.body.flow.reachable {
 			return;
 		}
 		let Resolution::Local(symbol) = self.a.resolution(n) else {
 			return;
 		};
+		if self.check_moved_borrow(n, symbol) {
+			return;
+		}
 		// a local a field was moved out of, used as a whole (foreign.rs)
 		if !self.access_roots.contains(&n)
 			&& let Some(at) = self.moved_field_of(symbol)
@@ -341,6 +312,54 @@ impl Walker<'_> {
 		};
 		let diagnostic = self.diagnostic(&MEM002, n, message);
 		self.report_flow(diagnostic);
+	}
+
+	/// A borrowed name still designates its original owner. Moving that
+	/// owner invalidates the read even though the alias wasn't consumed.
+	pub(super) fn check_moved_borrow(&mut self, node: NodeId, symbol: SymbolId) -> bool {
+		if self.body.flow.consumed.is_empty() && self.body.flow.moved_fields.is_empty() {
+			return false;
+		}
+		if !matches!(
+			self.a.symbols.symbol(symbol).kind,
+			SymbolKind::Use | SymbolKind::MutableUse | SymbolKind::LoopVariable { copy: false }
+		) {
+			return false;
+		}
+		let places = match self.body.flow.ref_state(symbol) {
+			Some(state) => self.facts.refs.get(state).places.to_vec(),
+			None => self.aliases.get(&symbol).copied().into_iter().collect(),
+		};
+		for place in places {
+			let owner = match self.places.get(place).root {
+				PlaceRoot::Symbol(symbol) => symbol,
+				_ => continue,
+			};
+			let at = self
+				.body
+				.flow
+				.consumed
+				.iter()
+				.find_map(|&(symbol, at)| (symbol == owner).then_some(at))
+				.or_else(|| {
+					self.body.flow.moved_fields.iter().find_map(|&(moved, at)| {
+						(self.places.is_at_or_below(place, moved)
+							|| (!self.access_roots.contains(&node)
+								&& self.places.is_at_or_below(moved, place)))
+						.then_some(at)
+					})
+				});
+			let Some(at) = at else { continue };
+			let owner = self.s.types.syms.resolve(self.a.symbols.symbol(owner).name);
+			let read = self.tree.text(node.index());
+			let line = self.line_of(at);
+			let diagnostic = self.diagnostic(&MEM002, node, format!(
+				"`{read}` still borrows `{owner}`, which was moved on line {line}; declare a new reference to its current owner"
+			));
+			self.report_flow(diagnostic);
+			return true;
+		}
+		false
 	}
 
 	// ── after the walk ────────────────────────────────────────────────────

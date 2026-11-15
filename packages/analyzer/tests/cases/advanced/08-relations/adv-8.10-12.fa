@@ -16,7 +16,7 @@ mutable town: Town = {}
 use ana = town.people.add({ name = "Ana" })
 use bao = town.people.add({ name = "Bao", bestFriend = ana })
 console.log(ana.bestFriendOf.size) -- prints: 1
-mutable copiedTown = town
+mutable copiedTown = copy town
 use copyOfBao = copiedTown.people.find((person) => person.name == "Bao")
 console.log(copyOfBao?.bestFriend?.name ?? "none") -- prints: Ana
 copiedTown.people.clear()

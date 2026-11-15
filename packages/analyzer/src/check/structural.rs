@@ -407,7 +407,7 @@ impl Walker<'_> {
 				_ => None,
 			},
 			View::TypedObject { target, .. } => self.written_decl(target),
-			View::Group(inner) => self.written_decl(inner),
+			View::Group(inner) | View::Copy(inner) => self.written_decl(inner),
 			_ => None,
 		}
 	}
@@ -472,7 +472,9 @@ impl Walker<'_> {
 				}
 			}
 			View::TypedObject { target, .. } => self.written_origin(target),
-			View::Group(inner) | View::Optional(inner) => self.written_origin(inner),
+			View::Group(inner) | View::Copy(inner) | View::Optional(inner) => {
+				self.written_origin(inner)
+			}
 			View::Call { callee, arguments }
 				if self.a.has_flags(n, NodeFlags::TYPE_EXPR)
 					&& matches!(self.view(callee), View::Name(_))

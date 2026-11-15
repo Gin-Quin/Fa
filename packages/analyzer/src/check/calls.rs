@@ -88,6 +88,7 @@ impl Walker<'_> {
 		self.after_call(n, callee);
 		// `pool.submit(…)` of a pool without `timeout` (concurrency.rs)
 		let ty = self.submit_without_timeout(n, callee, ty);
+		self.check_worker_call_transfers(n, callee, ty);
 		// `@add(2, 4)`: evaluated while compiling (comptime.rs)
 		if comptime {
 			self.evaluate_call(n);
@@ -336,6 +337,28 @@ impl Walker<'_> {
 					self.view_sink = !matches!(kind, Callee::Builtin(_));
 					self.sink(value, actual, expected);
 					self.view_sink = false;
+					// A structural view can't transfer Tasks out of a resource
+					// whose destructor still owns the complete argument.
+					if matches!(kind, Callee::Function(_) | Callee::Value)
+						&& self.s.types.takes_task_parameter(expected)
+						&& (self.s.types.is_resource(actual)
+							|| self
+								.s
+								.types
+								.flags(actual)
+								.contains(crate::types::TypeFlags::HAS_PARAM))
+					{
+						self.defer_copy_condition(
+							value,
+							crate::analysis::CopyRequirement {
+								subject: expected,
+								explicit: true,
+								task_transfer: false,
+								task_only: false,
+								resource_gate: Some((actual, crate::ids::ListId::EMPTY)),
+							},
+						);
+					}
 				}
 			}
 			if round == 0
@@ -392,6 +415,11 @@ impl Walker<'_> {
 				&& let Some(Resolution::Local(method)) =
 					members.last().map(|member| w.a.resolution(member))
 				&& w.modules.methods.get(&method) == Some(&true)
+				&& w.proxy_decl(method)
+					.and_then(|(module, declaration)| {
+						w.s.interface(module)?.parameters.get(&declaration)
+					})
+					.is_some_and(|params| params.len() == binding.arguments.len() + 1)
 			{
 				binding.arguments.insert(0, Argument::Receiver(callee));
 			}
@@ -497,8 +525,6 @@ impl Walker<'_> {
 		};
 		self.apply_call_effects(n, callee, sig.effects);
 		self.call_providers.clear();
-		// `subscription.stop()` consumes it (reactivity.rs)
-		self.note_stop_call(n, callee);
 		ty
 	}
 
@@ -964,6 +990,7 @@ impl Walker<'_> {
 			Some(value) => {
 				let actual = self.check(value, Some(data));
 				self.sink(value, actual, data);
+				self.note_copy_site(value);
 			}
 			None => {
 				for argument in arguments.iter() {

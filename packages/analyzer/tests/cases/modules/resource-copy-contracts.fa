@@ -1,0 +1,48 @@
+-- Resource copy contracts survive generic calls, function values and imports.
+-- Resource parameters borrow even when a nested Task belongs to their owner.
+-- file: library/Held.foreign.fa
+export type = {
+	value: Integer
+	function destroy = (self) => {}
+}
+-- file: library/Running.foreign.fa
+export type = {
+	task: Task<Integer>
+	function destroy = (self) => {}
+}
+-- file: library/sink.fa
+export function = <Item>(_value: Item): Void => {}
+-- file: library/twice.fa
+export function = <Item>(value: Item): Void => {
+	sink(value)
+	sink(value)
+}
+-- file: library/identity.fa
+export function = <Item>(value: Item): Item => value
+-- file: library/clone.fa
+export function = <Item>(value: Item): Item => copy value
+-- file: library/capture.fa
+type Reader<Item> = () => Item
+export function = <Item>(value: Item): Reader<Item> => () => value
+-- file: library/build.fa
+type Maker<Item> = () => Item
+export function = <Item>(make: Maker<Item>): Item => {
+	let local = make()
+	local
+}
+-- file: application/main.fa
+type Reader = () => library.Held
+function create = (): library.Held => library.Held { value = 1 }
+function valid = (): library.Held => library.build(create)
+function borrows = (held: library.Held, running: library.Running): Integer => {
+	library.twice(held)
+	library.twice(running)
+	library.twice(held)
+	library.twice(running)
+	held.value
+}
+function identity = (held: library.Held): library.Held => library.identity(held) -- error: MEM003
+function clone = (held: library.Held): library.Held => library.clone(held) -- error: MEM003
+function capture = (held: library.Held): Reader => library.capture(held) -- error: MEM003
+let invalid = library.clone<library.Held> -- error: MEM003
+export function = () => {}

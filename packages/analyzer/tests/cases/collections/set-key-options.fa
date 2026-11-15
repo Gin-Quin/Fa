@@ -1,0 +1,5 @@
+-- A separate key is a Map entry, never a Set constructor callback.
+let plain = Set.from([1, 2], key = (value: Integer) => value) -- error FN023
+let growing = GrowingSet.from([1, 2], key = (value: Integer) => value) -- error FN023
+function identity = (value: Integer): Integer => value
+let named = Set.from([1, 2], key = identity) -- error FN023

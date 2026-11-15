@@ -444,7 +444,8 @@ impl Walker<'_> {
 			}
 		}
 		self.lambda_entry_writes = entry_writes;
-		// a captured task or worker's handle moves into the closure
+		// Captures are borrowed by a temporary callback, copied by an
+		// escaping closure. A Task cannot satisfy that capture-copy.
 		let captured: Vec<SymbolId> = self
 			.a
 			.functions
@@ -452,18 +453,7 @@ impl Walker<'_> {
 			.map(|info| info.captures.clone())
 			.unwrap_or_default();
 		for symbol in captured {
-			let symbol_type = self.a.symbols.symbol(symbol).ty;
-			if self.is_moved_handle(symbol_type)
-				&& self.body.flow.reachable
-				&& !self
-					.body
-					.flow
-					.consumed
-					.iter()
-					.any(|&(other, _)| other == symbol)
-			{
-				self.body.flow.consumed.push((symbol, n));
-			}
+			self.note_use(n, symbol);
 		}
 		ty
 	}
@@ -661,6 +651,7 @@ impl Walker<'_> {
 		for (default, expected, quiet) in defaults {
 			self.quiet += u32::from(quiet);
 			let actual = self.check(default, expected);
+			self.note_copy_site(default);
 			if let Some(expected) = expected {
 				self.sink(default, actual, expected);
 			}
@@ -797,6 +788,9 @@ impl Walker<'_> {
 			}
 		}
 		let sig = self.signature_id(ty);
+		if self.is_worker_method(signature.parameters) {
+			self.check_worker_signature(lambda, ty);
+		}
 		for key in [Some(lambda), owner.declaration].into_iter().flatten() {
 			if let Some(info) = self.a.functions.get_mut(&key) {
 				info.ty = ty;
@@ -1154,6 +1148,29 @@ impl Walker<'_> {
 	/// doesn't resolve in the current scope.
 	pub(super) fn find_name_use(&mut self, n: NodeId, names: &[&str]) -> Option<(NodeId, String)> {
 		if let View::Name(name) = self.view(n) {
+			let label = self
+				.parent(n)
+				.is_some_and(|parent| match self.view(parent) {
+					View::Access { target, .. } | View::OptionalAccess { target, .. } => {
+						target != n
+					}
+					View::Assignment {
+						target,
+						value: Some(_),
+						..
+					} if target == n => self.parent(parent).is_some_and(|outer| {
+						matches!(
+							self.view(outer),
+							View::Object { .. }
+								| View::TypedObject { .. }
+								| View::Call { .. } | View::PartialApplication { .. }
+						)
+					}),
+					_ => false,
+				});
+			if label {
+				return None;
+			}
 			let text = self.tree.name(name);
 			if names.contains(&text) {
 				let sym = self.s.types.syms.intern(text);

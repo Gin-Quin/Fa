@@ -1250,6 +1250,35 @@ fn merge_interface(
 				)
 			})
 			.collect(),
+		copy_requirements: interface
+			.copy_requirements
+			.iter()
+			.map(|(&decl, requirements)| {
+				(
+					decl,
+					requirements
+						.iter()
+						.map(|requirement| crate::analysis::CopyRequirement {
+							subject: merger.ty(requirement.subject),
+							resource_gate: requirement
+								.resource_gate
+								.map(|(receiver, path)| (merger.ty(receiver), merger.list(path))),
+							..*requirement
+						})
+						.collect(),
+				)
+			})
+			.collect(),
+		callables: interface
+			.callables
+			.iter()
+			.map(|(&key, summary)| (merger.decl_key(key), summary.merged(merger)))
+			.collect(),
+		value_origins: interface
+			.value_origins
+			.iter()
+			.map(|(&key, value)| (merger.decl_key(key), value.merged(merger)))
+			.collect(),
 		key_set_params: interface
 			.key_set_params
 			.iter()

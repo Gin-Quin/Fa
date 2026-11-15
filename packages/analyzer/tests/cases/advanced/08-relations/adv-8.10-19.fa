@@ -19,7 +19,7 @@ export function = () => {
 	ana.bestFriend = bao
 	ana.spouse = cleo
 	console.log(bao.bestFriendOf.size, cleo.spouse?.name ?? "none")
-	let copiedTown = town
+	let copiedTown = copy town
 	town.people.delete(bao)
 	console.log(ana.bestFriend?.name ?? "none", cleo.bestFriend?.name ?? "none")
 	use copiedBao = copiedTown.people.find((person) => person.name == "Bao")

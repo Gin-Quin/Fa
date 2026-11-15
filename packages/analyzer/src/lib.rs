@@ -45,6 +45,7 @@ pub mod parallel;
 pub mod pipeline;
 mod program;
 pub mod proofs;
+pub mod provenance;
 pub mod scan;
 pub mod session;
 pub mod stable_names;

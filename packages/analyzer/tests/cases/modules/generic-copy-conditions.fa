@@ -1,0 +1,16 @@
+-- Imported generic copy conditions are semantic metadata, without runtime arguments.
+-- file: library/borrow.fa
+export function = <Item>(item: Item): Item => item
+-- file: library/clone.fa
+export function = <Item>(item: Item): Item => copy item
+-- file: library/relay.fa
+export function = <Item>(item: Item): Item => borrow(item)
+-- file: application/main.fa
+export function = () => {
+	let values = [1, 2]
+	let borrowed = library.borrow(values) -- error: MEM004
+	let relayed = library.relay(values) -- error: MEM004
+	let cloned = library.clone(values)
+	console.log(cloned, values)
+}
+function task = (value: Task<Integer>): Task<Integer> => library.clone(value) -- error: MEM003

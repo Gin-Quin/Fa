@@ -122,3 +122,35 @@ fn locals_that_leave_their_frame_escape() {
 		assert!(!stays(&session, file, name), "`{name}` escapes");
 	}
 }
+
+#[test]
+fn captured_locals_escape_even_when_the_capture_only_reads_them() {
+	let (session, file) = analyzed(
+		r#"type Reader = () => String
+function makeReader = (prefix: String): Reader => {
+	let capturedSum = "{prefix}:123456789012345678901234567890"
+	() => capturedSum + "!"
+}
+function makeStored = (prefix: String): { read: Reader } => {
+	let capturedCall = "{prefix}:123456789012345678901234567890"
+	{ read = () => capturedCall.toUpperCase() }
+}
+async function launchTask = (prefix: String) => {
+	let capturedTask = "{prefix}:123456789012345678901234567890"
+	let task = start do {
+		await Task.yield()
+		capturedTask + "!"
+	}
+	console.log(await task)
+}
+console.log(makeReader("a")(), makeStored("b").read())
+await launchTask("c")
+"#,
+	);
+	for name in ["capturedSum", "capturedCall", "capturedTask"] {
+		assert!(
+			!stays(&session, file, name),
+			"`{name}` escapes in a capture"
+		);
+	}
+}

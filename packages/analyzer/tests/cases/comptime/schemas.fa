@@ -28,7 +28,7 @@ function capitalizeLiterals = (schema: Schema): Schema throws IndexError => when
 		}
 		Schema.Union { items = capitalized }
 	}
-	else => schema
+	else => copy schema
 }
 type Shouted = TypeFromSchema<@capitalizeLiterals(@typeToSchema("hello" | "world"))>
 let shout: Shouted = "hEllo"

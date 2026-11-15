@@ -1,0 +1,22 @@
+-- A module owns its resource, and a resource's destructor still owns its fields.
+-- file: library/Held.foreign.fa
+export type = {
+	value: Integer
+	function destroy = (self) => {}
+}
+-- file: library/Container.foreign.fa
+export type = {
+	held: Held
+	function destroy = (self) => {}
+}
+-- file: library/instance.fa
+export = Held { value = 1 }
+-- file: application/main.fa
+function construct = (): library.Container => library.Container {
+	held = library.Held { value = 2 }
+}
+export function = () => {
+	let external = library.instance -- error: MEM003
+	let nested = construct().held -- error: MEM003
+	console.log(external.value, nested.value)
+}

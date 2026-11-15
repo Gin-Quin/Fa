@@ -595,6 +595,8 @@ pub enum View<'t> {
 	/// `await value`: a call of an `async` function, or a `Task`
 	/// (`check/tasks.rs`).
 	Await(NodeId),
+	/// `copy value`: an explicit structural copy.
+	Copy(NodeId),
 	/// `start call`, `start do { … }`: a `Task` (`check/tasks.rs`).
 	Start(NodeId),
 	/// `break`, `break value`
@@ -1215,6 +1217,7 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 		Node::Readonly { right } => View::Readonly(id(*right)),
 
 		Node::Await { right } => View::Await(id(*right)),
+		Node::Copy { right } => View::Copy(id(*right)),
 		Node::Start { right } => View::Start(id(*right)),
 		// tier 3: `AN001` until mapped
 		Node::Relation { .. } | Node::InRelation { .. } => View::Unsupported(node.kind_name()),

@@ -1,0 +1,62 @@
+-- analysis-target: native
+-- file: Held.foreign.fa
+export type = {
+	id: Integer
+	function destroy = (self) => {}
+}
+-- file: Running.foreign.fa
+export type = {
+	id: Integer
+	pending: Task<Integer>
+	function destroy = (self) => {}
+}
+-- file: Receiver.worker.fa
+export type = {
+	function accept = (self, value: Held): Integer => value.id
+	function pair = (self, first: Held, second: Held): Integer => first.id + second.id
+	function scalar = (self, value: { id: Integer }): Integer => value.id
+	function nested = (self, value: { inside: { id: Integer } }): Integer => value.inside.id
+	function result = (self): { id: Integer } => Running { id = 7, pending = start do { 1 } }
+}
+-- file: forward.fa
+export function = <Value: Held>(value: Value): Integer => do {
+	mutable worker = Receiver {}
+	worker.accept(value)
+}
+-- file: fresh.fa
+export function = <Value: Held>(make: () => Value): Integer => do {
+	mutable worker = Receiver {}
+	let value = make()
+	worker.accept(value)
+}
+-- file: main.fa
+use { Mutex } = std.concurrency
+function borrow = (value: Held): Integer => do {
+	mutable worker = Receiver {}
+	worker.accept(value) -- error MEM002
+}
+function make = (): Held => Held { id = 4 }
+function rejects = (value: Held): Integer => forward(value) -- error MEM003
+async function main = () => {
+	mutable worker = Receiver {}
+	let moved = Held { id = 1 }
+	use alias = moved
+	console.log(await worker.accept(moved))
+	console.log(moved.id) -- error MEM002
+	console.log(alias.id) -- error MEM002
+	let repeated = Held { id = 2 }
+	console.log(await worker.pair(repeated, repeated)) -- error MEM002
+	mutable guarded = Mutex<Held> { value = Held { id = 3 } }
+	let guard = guarded.tryLock() ?? return
+	console.log(await worker.accept(guard.value)) -- error MEM002
+	console.log(await worker.accept(Held { id = 4 }))
+	console.log(fresh(make))
+	let running = Running { id = 6, pending = start do { 1 } }
+	console.log(await worker.scalar(running))
+	console.log(running.id)
+	console.log(await worker.nested({ inside = running }))
+	console.log(running.id)
+	console.log((await worker.result()).id)
+	worker.stop()
+}
+await main()

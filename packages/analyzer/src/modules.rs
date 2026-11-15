@@ -658,6 +658,11 @@ pub struct Interface {
 	pub implicit_writes: FxHashMap<ParamId, Vec<(Vec<Sym>, TypeId)>>,
 	/// Generic parameter order and capabilities of externally callable functions.
 	pub generic_functions: FxHashMap<NodeId, GenericFunction>,
+	/// Inferred semantic copy conditions, independent of runtime capabilities.
+	pub copy_requirements: FxHashMap<NodeId, Vec<crate::analysis::CopyRequirement>>,
+	/// Callable bodies and value origins survive after the provider AST is dropped.
+	pub callables: FxHashMap<DeclKey, crate::provenance::CallableSummary>,
+	pub value_origins: FxHashMap<DeclKey, std::sync::Arc<crate::provenance::ValueOrigin>>,
 	/// Key sets and derived types reached by the exported signatures.
 	pub key_set_params: FxHashMap<ParamId, GenericKeySet>,
 	pub derived_params: FxHashMap<ParamId, crate::analysis::DerivedParam>,
@@ -860,6 +865,12 @@ impl Interface {
 		for (&function, &owner) in &self.function_owners {
 			parts.push((105, key_hash(function), types.decl_hash(owner), 0));
 		}
+		for (&key, summary) in &self.callables {
+			parts.push((107, types.decl_hash(key), 0, summary.stable_hash(types)));
+		}
+		for (&key, value) in &self.value_origins {
+			parts.push((108, types.decl_hash(key), 0, value.stable_hash(types)));
+		}
 		for exported in self.members.values().chain(&self.export) {
 			parts.push((
 				1,
@@ -941,6 +952,26 @@ impl Interface {
 					),
 				};
 				parts.push((8, key_hash(decl), ((index as u128) << 8) | kind, value));
+			}
+		}
+		for (&decl, requirements) in &self.copy_requirements {
+			for requirement in requirements {
+				let gate = requirement.resource_gate.map_or(0, |(receiver, path)| {
+					types
+						.list_items(path)
+						.iter()
+						.fold(types.stable_hash(receiver), |hash, &name| {
+							hash.rotate_left(7) ^ types.stable_hash(name)
+						})
+				});
+				parts.push((
+					106,
+					key_hash(decl),
+					u128::from(requirement.explicit)
+						| u128::from(requirement.task_transfer) << 1
+						| u128::from(requirement.task_only) << 2,
+					types.stable_hash(requirement.subject) ^ gate.rotate_left(19),
+				));
 			}
 		}
 		for (&param, info) in &self.key_set_params {

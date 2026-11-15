@@ -47,7 +47,9 @@ Open items that are not yet assigned to a running engineer, or that need a follo
   `uses_collection_return`); later allow coroutine collection ranges spanning
   no suspension. Measure indirect recursion before extending cycle detection.
   Frame grants currently follow lowering order; prefer loops if measurements
-  justify it. The `nbody` delta after the
+  justify it. Preserve the shared 128-byte recursive offer sub-budget when
+  extending constructor destinations; the one/four-split relative depth gate
+  uses a 256 KiB native stack and excludes exact literals. The `nbody` delta after the
   reviewed by-value rule (861.2 M → 867.2 M) is attributed to a loop-alignment
   NOP executed six million times; retain the profile for future code-layout work.
 

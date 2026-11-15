@@ -5,7 +5,7 @@ use fa_analyzer::ids::NodeId;
 use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::{TemplatePart, TemplateParts, View};
 use inkwell::IntPredicate;
-use inkwell::values::{IntValue, PointerValue};
+use inkwell::values::{BasicValue, InstructionOpcode, IntValue, PointerValue};
 
 use crate::error::Error;
 use crate::lower::values::{IntRepr, Repr, Val};
@@ -415,9 +415,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.string_parts_with(&self.builder, value)
 	}
 
-	/// Decode a String in either representation. Inline bytes are a snapshot
-	/// of the SSA value, so an intervening write to its original place cannot
-	/// change them. Allocating in the entry block avoids growing a loop's stack.
+	/// Decode a String in either representation. An immutable parameter may
+	/// borrow its original place; other inline bytes use an SSA snapshot so an
+	/// intervening write cannot change them. Entry allocas bound loop storage.
 	pub(crate) fn string_parts_with(
 		&self,
 		builder: &inkwell::builder::Builder<'ctx>,
@@ -437,15 +437,36 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.expect("a block")
 			.get_parent()
 			.expect("a function");
-		let entry = function.get_first_basic_block().expect("an entry");
-		let allocator = self.context.create_builder();
-		if let Some(first) = entry.get_first_instruction() {
-			allocator.position_before(&first);
-		} else {
-			allocator.position_at_end(entry);
-		}
-		let snapshot = allocator.build_alloca(self.string_type, "inline_string")?;
-		builder.build_store(snapshot, pair)?;
+		// A readonly parameter is an immutable reference for the entire call.
+		// Its loaded value can borrow inline bytes from that original place;
+		// mutable places and computed values still require an SSA snapshot.
+		let borrowed = pair.as_instruction_value().and_then(|instruction| {
+			if instruction.get_opcode() != InstructionOpcode::Load {
+				return None;
+			}
+			let pointer = instruction.get_operand(0)?.value()?.into_pointer_value();
+			self.frame
+				.as_ref()
+				.is_some_and(|frame| {
+					frame.function == function && frame.readonly_strings.contains(&pointer)
+				})
+				.then_some(pointer)
+		});
+		let snapshot = match borrowed {
+			Some(pointer) => pointer,
+			None => {
+				let entry = function.get_first_basic_block().expect("an entry");
+				let allocator = self.context.create_builder();
+				if let Some(first) = entry.get_first_instruction() {
+					allocator.position_before(&first);
+				} else {
+					allocator.position_at_end(entry);
+				}
+				let snapshot = allocator.build_alloca(self.string_type, "inline_string")?;
+				builder.build_store(snapshot, pair)?;
+				snapshot
+			}
+		};
 		let bytes = builder
 			.build_select(inline, snapshot, bytes, "")?
 			.into_pointer_value();

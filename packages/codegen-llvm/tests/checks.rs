@@ -325,7 +325,7 @@ console.log(first(1, "a b"), Walker.walk(1, "a b"), generic(1, 7, "a b"))
 		);
 		for name in ["fa.first", "fa.second", "fa.walk", "fa.generic.0"] {
 			let body = function(&ir, name);
-			assert!(body.contains("alloca [512 x i8]"), "{body}");
+			assert!(body.contains("alloca [128 x i8]"), "{body}");
 			assert!(!body.contains("alloca [2048 x i8]"), "{body}");
 		}
 	}
@@ -345,8 +345,99 @@ console.log(first(1, "a b"), Walker.walk(1, "a b"), generic(1, 7, "a b"))
 		let ir = ir_of("remaining-recursive-offer", &source);
 		let body = function(&ir, "fa.count");
 		assert!(body.contains("alloca [48 x i8]"), "{body}");
-		assert!(body.contains("alloca [464 x i8]"), "{body}");
+		assert!(body.contains("alloca [128 x i8]"), "{body}");
 		assert!(body.contains("@fa_string_split_into("), "{body}");
+
+		let source = r#"
+function count = (n: Integer, text: String): Integer => {
+ let a = text.split(" ")
+ let b = text.split(" ")
+ let c = text.split(" ")
+ let d = text.split(" ")
+ if n > 0 { count(n - 1, text) + a.length + b.length + c.length + d.length } else { a.length + b.length + c.length + d.length }
+}
+console.log(count(1, "a b"))
+"#;
+		let ir = ir_of("shared-recursive-offers", source);
+		let body = function(&ir, "fa.count");
+		assert_eq!(body.matches("alloca [128 x i8]").count(), 1, "{body}");
+		assert_eq!(body.matches("@fa_string_split_into(").count(), 1, "{body}");
+		assert_eq!(body.matches("@fa_string_split(").count(), 3, "{body}");
+
+		// Exact literals consume the total budget, independently of offer order.
+		for (length, offer) in [(50, Some(80)), (54, None)] {
+			let exact = (32 + length * 8 + 15) & !15;
+			let literal = std::iter::repeat_n("n", length)
+				.collect::<Vec<_>>()
+				.join(", ");
+			let declarations = format!("let exact = [{literal}]\nlet words = text.split(\" \")");
+			let source = format!(
+				"function count = (n: Integer, text: String): Integer => {{\n{declarations}\nif n > 0 {{ count(n - 1, text) + exact.length + words.length }} else {{ exact.length + words.length }}\n}}\nconsole.log(count(1, \"a b\"))\n"
+			);
+			let ir = ir_of(&format!("literal-before-offer-{length}"), &source);
+			let body = function(&ir, "fa.count");
+			assert!(body.contains(&format!("alloca [{exact} x i8]")), "{body}");
+			assert_eq!(
+				body.contains("@fa_string_split_into("),
+				offer.is_some(),
+				"{body}"
+			);
+			if let Some(bytes) = offer {
+				assert!(body.contains(&format!("alloca [{bytes} x i8]")), "{body}");
+			}
+		}
+		for (length, fits) in [(42, true), (50, false)] {
+			let exact = (32 + length * 8 + 15) & !15;
+			let literal = std::iter::repeat_n("n", length)
+				.collect::<Vec<_>>()
+				.join(", ");
+			let declarations = format!("let words = text.split(\" \")\nlet exact = [{literal}]");
+			let source = format!(
+				"function count = (n: Integer, text: String): Integer => {{\n{declarations}\nif n > 0 {{ count(n - 1, text) + exact.length + words.length }} else {{ exact.length + words.length }}\n}}\nconsole.log(count(1, \"a b\"))\n"
+			);
+			let ir = ir_of(&format!("offer-before-literal-{length}"), &source);
+			let body = function(&ir, "fa.count");
+			assert!(body.contains("alloca [128 x i8]"), "{body}");
+			assert_eq!(
+				body.contains(&format!("alloca [{exact} x i8]")),
+				fits,
+				"{body}"
+			);
+		}
+	}
+
+	#[test]
+	fn readonly_string_parameters_borrow_inline_bytes_without_snapshots() {
+		let ir = ir_of(
+			"readonly-string-bytes",
+			r#"
+function read = (text: String, n: Integer): Integer => if n > 0 {
+ read(text, n - 1) + text.split(" ").length
+} else { text.split(" ").length }
+function change = (text: String): Integer => {
+ mutable local = text
+ local += "extra"
+ local.split(" ").length
+}
+mutable text = "a b"
+console.log(read(text, 1), change(text))
+"#,
+		);
+		let read = function(&ir, "fa.read");
+		assert!(
+			read.lines()
+				.any(|line| line.contains("select i1") && line.contains("ptr %0,")),
+			"{read}"
+		);
+		assert!(function(&ir, "fa.change").contains("inline_string"), "{ir}");
+		let ir = optimized_ir(
+			"recursive-split-scratch",
+			include_str!("programs/recursive-collection-offers.fa"),
+		);
+		let body = function(&ir, "fa.four");
+		assert!(body.contains("@fa_string_split_into("), "{body}");
+		assert!(!body.contains("alloca %struct.Splitting"), "{body}");
+		assert!(!body.contains("inline_string"), "{body}");
 	}
 
 	#[test]

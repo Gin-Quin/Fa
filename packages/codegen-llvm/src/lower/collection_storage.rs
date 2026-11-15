@@ -16,6 +16,7 @@ use crate::lower::values::{Repr, Val};
 const COLLECTION_BUDGET: u64 = 2048;
 const FRAME_BUDGET: u64 = 4096;
 const RECURSIVE_FRAME_BUDGET: u64 = 512;
+const RECURSIVE_OFFER_BUDGET: u64 = 128;
 
 #[derive(Clone, Copy)]
 pub(super) struct CollectionBuffer<'ctx> {
@@ -24,6 +25,9 @@ pub(super) struct CollectionBuffer<'ctx> {
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	pub(super) fn recursive_collection_frame(&self) -> bool {
+		self.frame().collection_budget == RECURSIVE_FRAME_BUDGET
+	}
 	/// The resolved graph includes methods and source generic declarations.
 	/// Instances inherit their declaration's cycle; indirect recursion is not
 	/// inferred from function values. Nested function bodies have their own node.
@@ -343,7 +347,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if matches!(self.node_repr(node)?, Repr::Columnar(_)) {
 			return Ok(None);
 		}
-		let bytes = COLLECTION_BUDGET.min(
+		let recursive = self.recursive_collection_frame();
+		let offer_budget = if recursive {
+			RECURSIVE_OFFER_BUDGET.saturating_sub(self.frame().collection_offer_bytes)
+		} else {
+			COLLECTION_BUDGET
+		};
+		let bytes = offer_budget.min(
 			self.frame()
 				.collection_budget
 				.saturating_sub(self.frame().collection_bytes),
@@ -351,12 +361,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if bytes < 64 {
 			return Ok(None);
 		}
-		Ok(self
-			.collection_stack(node, bytes)?
-			.map(|pointer| CollectionBuffer {
-				pointer,
-				bytes: self.usize.const_int(bytes, false),
-			}))
+		let Some(pointer) = self.collection_stack(node, bytes)? else {
+			return Ok(None);
+		};
+		if recursive {
+			self.frame_mut().collection_offer_bytes += bytes;
+		}
+		Ok(Some(CollectionBuffer {
+			pointer,
+			bytes: self.usize.const_int(bytes, false),
+		}))
 	}
 
 	/// Both branches select final storage before initializing a payload.

@@ -142,6 +142,10 @@ struct Frame<'ctx> {
 	/// Fixed collection storage reserved in this function's entry block.
 	collection_bytes: u64,
 	collection_budget: u64,
+	/// Speculative call-result storage, separate from exact literal blocks.
+	collection_offer_bytes: u64,
+	/// Avoid repeated inline-byte snapshots in recursive frames.
+	readonly_strings: rustc_hash::FxHashSet<PointerValue<'ctx>>,
 	collection_locals: rustc_hash::FxHashSet<(FileId, SymbolId)>,
 	function: FunctionValue<'ctx>,
 	/// Recursive nodes allocated by this function belong to the caller's region.
@@ -1218,6 +1222,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			early_destination: None,
 			collection_bytes: 0,
 			collection_budget,
+			collection_offer_bytes: 0,
+			readonly_strings: rustc_hash::FxHashSet::default(),
 			collection_locals: rustc_hash::FxHashSet::default(),
 			function,
 			arena: false,
@@ -1335,6 +1341,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					.into_pointer_value();
 				index += 1;
 				self.slots.insert(param.symbol, Slot { pointer, repr });
+				if repr == Repr::Str
+					&& function.borrowed[position]
+					&& self.recursive_collection_frame()
+				{
+					self.frame_mut().readonly_strings.insert(pointer);
+				}
 				continue;
 			}
 			let slot = self.alloca(repr, "parameter")?;

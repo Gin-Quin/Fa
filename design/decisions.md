@@ -482,8 +482,10 @@ applies to arrays, maps, sets, pools, columnars, their growing variants, and
 Implementation choices:
 
 - **Budgets:** at most 2 KiB per collection and 4 KiB of collection storage per
-  non-recursive function invocation (512 bytes in a resolved direct-call cycle;
-  see the reviewed rule below), including headers, alignment, indices and directories.
+  non-recursive function invocation. A resolved direct-call cycle has 512 bytes
+  total, including at most 128 bytes summed over all call-result offers in the
+  frame (see the reviewed rule below). Headers, alignment, indices and directories
+  count toward these limits.
   Two KiB accommodates an ordinary stable-table chunk and its index, or small
   pool/segment bookkeeping; the frame cap bounds the sum of many such literals.
   The limits are shared by every target rather than tuned to a benchmark.
@@ -529,8 +531,9 @@ Implementation choices:
   retain its segment addresses and any later segments must remain independently allocated.
 - **Construction scope:** literals directly initializing a `let`, and nonempty
   separator `String.split` directly initializing a proven non-escaping local.
-  `split` receives a fixed caller buffer up to 2 KiB, bounded by the remaining
-  frame budget (see the reviewed offer rule below). A byte-length upper bound can
+  `split` receives a fixed caller buffer up to 2 KiB in a non-recursive function;
+  recursive calls draw from a shared 128-byte offer budget per frame. Both are
+  bounded by the remaining collection frame budget (see the reviewed rule below). A byte-length upper bound can
   prove it fits without counting; otherwise counting stops as soon as the slot
   budget is exceeded. It chooses the frame or ordinary heap path before building
   any items. The bounded scan trades some CPU work for avoiding allocation and
@@ -573,9 +576,26 @@ These verdicts supersede the initial implementation choices above:
   blocks retain their exact aligned size, within both byte budgets. Recursion
   through function values is not detected in this revision, as accepted by
   the review.
-- **Call-result offers:** reserve `min(2 KiB, remaining frame budget)`, and
-  offer nothing below 64 bytes. Select final frame or heap storage before
-  constructing items; do not copy out later.
+- **Call-result offers (tightened by Fable for the user):** non-recursive
+  functions reserve `min(2 KiB, remaining frame budget)`. In a resolved
+  direct-call cycle, all offers share a **128-byte per-frame sub-budget**
+  inside the 512-byte collection budget. Each reserves
+  `min(128 - offer bytes reserved, 512 - collection bytes reserved)` with the
+  existing alignment and no offer below 64 bytes. Literals consume only the
+  total collection budget, in either lowering order. Charge offer bytes only
+  when storage is actually reserved. Forwarded offers reserve no frame bytes
+  and are unchanged. Further results take the heap path before construction;
+  never copy out later.
+- **Recursive scratch (implementation):** `split_into` calls in recursive
+  functions keep their scanning/construction scratch in the helper's transient
+  frame (`noinline` on the call), instead of embedding it at every recursive
+  level. Immutable borrowed String parameters in recursive frames decode inline
+  bytes directly from the parameter's stable place. Primitive parameters cannot
+  be mutated; computed values and mutable places retain SSA snapshots against
+  intervening writes. This optimization is confined to recursive functions,
+  where it is needed to control frame storage. A broader experiment changed
+  three benchmark binaries and is not retained. The storage constants are
+  unchanged.
 - **Output alias invariant:** an output destination is never reachable from
   an argument, capture or global during the call. This justifies `noalias`.
   Future forwarding into existing fields or ordinary push/insert slots must
@@ -586,12 +606,14 @@ These verdicts supersede the initial implementation choices above:
   A large frame must not jump over a worker's guard page. This does not add
   freestanding signal recovery or per-worker alternate signal stacks.
 
-Validation found a conflict between the prescribed 512-byte recursive call offer
-and the factor-two recursion-depth gate: a live split local reaches only
-359/1,226 native and 1,839/7,308 wasm levels relative to the baseline. A
-128-byte recursive offer reaches 791 and 5,462 respectively. This experiment
-is not retained; the offer policy awaits Fable. Full data is in
-`native-goose-stack-review-results.json`.
+The relative recursion-depth gate applies only to call-result offers: the
+single-live-split and four-live-split programs must reach within a factor of
+two of baseline depth on native and wasm. Native measurements use a 256 KiB
+stack limit; wasm retains its default 1 MiB shadow stack. Exact literal blocks
+are excluded from this relative gate and remain bounded by the 512-byte total.
+The former 512-byte offer failed the gate; the shared 128-byte sub-budget
+prevents repeated speculative offers from recreating that cost. Measurements
+and validation are recorded in `native-goose-stack-review-results.json`.
 
 
 ## Capacity and reserve on every collection (2026-11-15)

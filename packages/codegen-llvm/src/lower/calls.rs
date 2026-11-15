@@ -845,7 +845,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => "fa_string_code_points",
 				};
 				let function = self.runtime.function(name)?;
-				let array = self.call_value(function, &call)?;
+				let invocation = self.builder.build_call(function, &call, "")?;
+				if name == "fa_string_split_into" && self.recursive_collection_frame() {
+					// The split helper has bounded scanning/construction scratch.
+					// Keep that scratch in one transient helper frame, rather than
+					// embedding it in every live recursive invocation.
+					invocation.add_attribute(
+						inkwell::attributes::AttributeLoc::Function,
+						self.runtime.attribute("noinline"),
+					);
+				}
+				let array = invocation
+					.try_as_basic_value()
+					.basic()
+					.expect("an array result");
 				Ok(self.fresh(Val::new(self.node_repr(node)?, array)))
 			}
 			"String#get" => {

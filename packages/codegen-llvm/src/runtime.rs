@@ -198,6 +198,31 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		runtime.set_triple(&self.module.get_triple());
 		runtime.set_data_layout(&self.module.get_data_layout());
 		self.module.link_in_module(runtime)?;
+		// Every constructor returns a complete initialized growing header,
+		// including empty, frame and heap results. Preserve that fact when
+		// an owner slot is promoted, so conditional header loads can leave a
+		// stable loop just as loads through borrowed collection slots can.
+		let bytes = if self.usize.get_bit_width() == 64 {
+			64
+		} else {
+			40
+		};
+		for name in [
+			"fa_segmented_new",
+			"fa_segmented_local",
+			"fa_segmented_new_into",
+			"fa_segmented_from_array",
+			"fa_segmented_from_array_capacity",
+		] {
+			let function = self.function(name)?;
+			for (kind, value) in [("dereferenceable", bytes), ("align", 8)] {
+				function.add_attribute(
+					AttributeLoc::Return,
+					self.context
+						.create_enum_attribute(Attribute::get_named_enum_kind_id(kind), value),
+				);
+			}
+		}
 		// no threads without the C library: the state of each thread is global
 		if self.target == Target::NativeFreestanding {
 			for global in self.module.get_globals() {

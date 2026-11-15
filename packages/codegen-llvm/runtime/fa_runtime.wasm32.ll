@@ -6358,26 +6358,38 @@ define hidden ptr @fa_segmented_at(ptr nocapture noundef readonly %0, i64 nounde
 
 12:                                               ; preds = %4
   %13 = tail call i64 @llvm.ctlz.i64(i64 %10, i1 true), !range !41
-  %14 = sext i32 %8 to i64
-  %15 = sub nsw i64 %14, %13
-  %16 = add nsw i64 %15, 63
-  %17 = shl nsw i64 -1, %16
-  %18 = trunc i64 %13 to i32
-  %19 = sub nuw nsw i32 64, %18
-  br label %20
+  %14 = sub nuw nsw i64 64, %13
+  %15 = sext i32 %8 to i64
+  %16 = sub nsw i64 %15, %13
+  %17 = add nsw i64 %16, 63
+  %18 = shl nuw i64 1, %17
+  %19 = icmp ult i64 %10, 4
+  br i1 %19, label %20, label %25
 
 20:                                               ; preds = %4, %12
-  %21 = phi i64 [ %17, %12 ], [ 0, %4 ]
-  %22 = phi i32 [ %19, %12 ], [ 0, %4 ]
-  %23 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %24 = load ptr, ptr %23, align 8, !tbaa !116
-  %25 = getelementptr inbounds ptr, ptr %24, i32 %22
-  %26 = load ptr, ptr %25, align 4, !tbaa !6
-  %27 = add i64 %21, %1
-  %28 = mul nsw i64 %27, %2
-  %29 = trunc i64 %28 to i32
-  %30 = getelementptr inbounds i8, ptr %26, i32 %29
-  ret ptr %30
+  %21 = phi i64 [ %14, %12 ], [ 0, %4 ]
+  %22 = phi i64 [ %18, %12 ], [ 0, %4 ]
+  %23 = trunc i64 %21 to i32
+  %24 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %23
+  br label %31
+
+25:                                               ; preds = %12
+  %26 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %27 = load ptr, ptr %26, align 8, !tbaa !116
+  %28 = trunc i64 %14 to i32
+  %29 = getelementptr ptr, ptr %27, i32 %28
+  %30 = getelementptr ptr, ptr %29, i32 -3
+  br label %31
+
+31:                                               ; preds = %20, %25
+  %32 = phi i64 [ %22, %20 ], [ %18, %25 ]
+  %33 = phi ptr [ %24, %20 ], [ %30, %25 ]
+  %34 = load ptr, ptr %33, align 4, !tbaa !6
+  %35 = sub nsw i64 %1, %32
+  %36 = mul nsw i64 %35, %2
+  %37 = trunc i64 %36 to i32
+  %38 = getelementptr inbounds i8, ptr %34, i32 %37
+  ret ptr %38
 }
 
 ; Function Attrs: nounwind optsize
@@ -6475,7 +6487,7 @@ define hidden void @fa_segmented_reserve(ptr noundef %0, i64 noundef %1, i64 nou
   %7 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 1
   %8 = load i16, ptr %7, align 8, !tbaa !120
   %9 = icmp eq i16 %8, 0
-  br i1 %9, label %65, label %10
+  br i1 %9, label %80, label %10
 
 10:                                               ; preds = %4
   %11 = sext i16 %8 to i64
@@ -6497,7 +6509,7 @@ define hidden void @fa_segmented_reserve(ptr noundef %0, i64 noundef %1, i64 nou
   %27 = shl nuw i64 1, %26
   %28 = icmp sgt i64 %6, %27
   %29 = select i1 %25, i1 %28, i1 false
-  br i1 %29, label %30, label %65
+  br i1 %29, label %30, label %80
 
 30:                                               ; preds = %10
   %31 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 2
@@ -6505,256 +6517,291 @@ define hidden void @fa_segmented_reserve(ptr noundef %0, i64 noundef %1, i64 nou
   %33 = icmp eq i16 %32, 3
   %34 = zext i1 %33 to i16
   %35 = icmp ugt i16 %8, %34
-  br i1 %35, label %36, label %42
+  br i1 %35, label %36, label %40
 
 36:                                               ; preds = %30
   %37 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
   %38 = trunc i64 %2 to i32
   %39 = zext i1 %33 to i64
-  br label %45
+  br label %52
 
-40:                                               ; preds = %45
-  %41 = load i16, ptr %31, align 2, !tbaa !118
-  br label %42
+40:                                               ; preds = %63, %30
+  %41 = phi i16 [ %8, %30 ], [ %74, %63 ]
+  %42 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %43 = load ptr, ptr %42, align 8, !tbaa !116
+  %44 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
+  %45 = icmp eq ptr %43, %44
+  br i1 %45, label %49, label %46
 
-42:                                               ; preds = %40, %30
-  %43 = phi i16 [ %41, %40 ], [ %32, %30 ]
+46:                                               ; preds = %40
+  %47 = icmp slt i16 %41, 12
+  %48 = select i1 %47, i32 32, i32 128
+  tail call void @fa_free(ptr noundef %43, i32 noundef %48, i32 noundef 4) #53
+  store ptr %44, ptr %42, align 8, !tbaa !116
+  br label %49
+
+49:                                               ; preds = %40, %46
   store i16 0, ptr %7, align 8, !tbaa !120
-  %44 = icmp eq i16 %43, 3
-  br i1 %44, label %62, label %63
+  %50 = load i16, ptr %31, align 2, !tbaa !118
+  %51 = icmp eq i16 %50, 3
+  br i1 %51, label %77, label %78
 
-45:                                               ; preds = %36, %45
-  %46 = phi i64 [ %39, %36 ], [ %58, %45 ]
-  %47 = load ptr, ptr %37, align 8, !tbaa !116
-  %48 = trunc i64 %46 to i32
-  %49 = getelementptr inbounds ptr, ptr %47, i32 %48
-  %50 = load ptr, ptr %49, align 4, !tbaa !6
-  %51 = load i32, ptr %13, align 4, !tbaa !113
-  %52 = sext i32 %51 to i64
-  %53 = tail call i64 @llvm.usub.sat.i64(i64 %46, i64 1)
-  %54 = add nsw i64 %53, %52
-  %55 = shl nuw i64 1, %54
-  %56 = trunc i64 %55 to i32
-  %57 = mul i32 %56, %38
-  tail call void @fa_free(ptr noundef %50, i32 noundef %57, i32 noundef 16) #53
-  %58 = add nuw nsw i64 %46, 1
-  %59 = load i16, ptr %7, align 8, !tbaa !120
-  %60 = sext i16 %59 to i64
-  %61 = icmp slt i64 %58, %60
-  br i1 %61, label %45, label %40, !llvm.loop !123
+52:                                               ; preds = %36, %63
+  %53 = phi i64 [ %39, %36 ], [ %73, %63 ]
+  %54 = icmp ult i64 %53, 3
+  br i1 %54, label %55, label %58
 
-62:                                               ; preds = %42
-  store i16 4, ptr %31, align 2, !tbaa !118
+55:                                               ; preds = %52
+  %56 = trunc i64 %53 to i32
+  %57 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %56
   br label %63
 
-63:                                               ; preds = %42, %62
-  %64 = tail call i64 @llvm.smax.i64(i64 %6, i64 %21)
-  br label %70
+58:                                               ; preds = %52
+  %59 = load ptr, ptr %37, align 8, !tbaa !116
+  %60 = trunc i64 %53 to i32
+  %61 = getelementptr ptr, ptr %59, i32 %60
+  %62 = getelementptr ptr, ptr %61, i32 -3
+  br label %63
 
-65:                                               ; preds = %4, %10
-  %66 = phi i64 [ %21, %10 ], [ 0, %4 ]
-  %67 = icmp sgt i64 %6, %66
-  br i1 %67, label %68, label %119
+63:                                               ; preds = %55, %58
+  %64 = phi ptr [ %57, %55 ], [ %62, %58 ]
+  %65 = load ptr, ptr %64, align 4, !tbaa !6
+  %66 = load i32, ptr %13, align 4, !tbaa !113
+  %67 = sext i32 %66 to i64
+  %68 = tail call i64 @llvm.usub.sat.i64(i64 %53, i64 1)
+  %69 = add nsw i64 %68, %67
+  %70 = shl nuw i64 1, %69
+  %71 = trunc i64 %70 to i32
+  %72 = mul i32 %71, %38
+  tail call void @fa_free(ptr noundef %65, i32 noundef %72, i32 noundef 16) #53
+  %73 = add nuw nsw i64 %53, 1
+  %74 = load i16, ptr %7, align 8, !tbaa !120
+  %75 = sext i16 %74 to i64
+  %76 = icmp slt i64 %73, %75
+  br i1 %76, label %52, label %40, !llvm.loop !123
 
-68:                                               ; preds = %65
-  %69 = icmp eq i16 %8, 0
-  br i1 %69, label %70, label %82
+77:                                               ; preds = %49
+  store i16 4, ptr %31, align 2, !tbaa !118
+  br label %78
 
-70:                                               ; preds = %63, %68
-  %71 = phi i64 [ %64, %63 ], [ %6, %68 ]
-  br label %72
+78:                                               ; preds = %49, %77
+  %79 = tail call i64 @llvm.smax.i64(i64 %6, i64 %21)
+  br label %85
 
-72:                                               ; preds = %70, %72
-  %73 = phi i64 [ 0, %70 ], [ %78, %72 ]
-  %74 = icmp ult i64 %73, 62
-  %75 = shl nuw nsw i64 1, %73
-  %76 = icmp ult i64 %75, %71
-  %77 = select i1 %74, i1 %76, i1 false
-  %78 = add nuw nsw i64 %73, 1
-  br i1 %77, label %72, label %79, !llvm.loop !124
+80:                                               ; preds = %4, %10
+  %81 = phi i64 [ %21, %10 ], [ 0, %4 ]
+  %82 = icmp sgt i64 %6, %81
+  br i1 %82, label %83, label %133
 
-79:                                               ; preds = %72
-  %80 = trunc i64 %73 to i32
-  %81 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  store i32 %80, ptr %81, align 4, !tbaa !113
-  br label %82
+83:                                               ; preds = %80
+  %84 = icmp eq i16 %8, 0
+  br i1 %84, label %85, label %97
 
-82:                                               ; preds = %79, %68
-  %83 = phi i64 [ %71, %79 ], [ %6, %68 ]
-  %84 = phi i16 [ 0, %79 ], [ %8, %68 ]
-  %85 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  br label %86
+85:                                               ; preds = %78, %83
+  %86 = phi i64 [ %79, %78 ], [ %6, %83 ]
+  br label %87
 
-86:                                               ; preds = %103, %82
-  %87 = phi i16 [ %104, %103 ], [ %84, %82 ]
-  %88 = icmp eq i16 %87, 0
-  br i1 %88, label %100, label %89
+87:                                               ; preds = %85, %87
+  %88 = phi i64 [ 0, %85 ], [ %93, %87 ]
+  %89 = icmp ult i64 %88, 62
+  %90 = shl nuw nsw i64 1, %88
+  %91 = icmp ult i64 %90, %86
+  %92 = select i1 %89, i1 %91, i1 false
+  %93 = add nuw nsw i64 %88, 1
+  br i1 %92, label %87, label %94, !llvm.loop !124
 
-89:                                               ; preds = %86
-  %90 = sext i16 %87 to i64
-  %91 = add nsw i64 %90, -1
-  %92 = load i32, ptr %85, align 4, !tbaa !113
-  %93 = sext i32 %92 to i64
-  %94 = tail call i64 @llvm.usub.sat.i64(i64 %91, i64 1)
-  %95 = add i64 %94, %93
-  %96 = shl nuw i64 1, %95
-  %97 = icmp ne i16 %87, 1
-  %98 = zext i1 %97 to i64
-  %99 = shl i64 %96, %98
-  br label %100
+94:                                               ; preds = %87
+  %95 = trunc i64 %88 to i32
+  %96 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
+  store i32 %95, ptr %96, align 4, !tbaa !113
+  br label %97
 
-100:                                              ; preds = %86, %89
-  %101 = phi i64 [ %99, %89 ], [ 0, %86 ]
-  %102 = icmp slt i64 %101, %83
-  br i1 %102, label %103, label %105
+97:                                               ; preds = %94, %83
+  %98 = phi i64 [ %86, %94 ], [ %6, %83 ]
+  %99 = phi i16 [ 0, %94 ], [ %8, %83 ]
+  %100 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
+  br label %101
 
-103:                                              ; preds = %100
+101:                                              ; preds = %118, %97
+  %102 = phi i16 [ %119, %118 ], [ %99, %97 ]
+  %103 = icmp eq i16 %102, 0
+  br i1 %103, label %115, label %104
+
+104:                                              ; preds = %101
+  %105 = sext i16 %102 to i64
+  %106 = add nsw i64 %105, -1
+  %107 = load i32, ptr %100, align 4, !tbaa !113
+  %108 = sext i32 %107 to i64
+  %109 = tail call i64 @llvm.usub.sat.i64(i64 %106, i64 1)
+  %110 = add i64 %109, %108
+  %111 = shl nuw i64 1, %110
+  %112 = icmp ne i16 %102, 1
+  %113 = zext i1 %112 to i64
+  %114 = shl i64 %111, %113
+  br label %115
+
+115:                                              ; preds = %101, %104
+  %116 = phi i64 [ %114, %104 ], [ 0, %101 ]
+  %117 = icmp slt i64 %116, %98
+  br i1 %117, label %118, label %120
+
+118:                                              ; preds = %115
   tail call fastcc void @segmented_allocate(ptr noundef nonnull %0, i64 noundef %2) #52
-  %104 = load i16, ptr %7, align 8, !tbaa !120
-  br label %86, !llvm.loop !125
+  %119 = load i16, ptr %7, align 8, !tbaa !120
+  br label %101, !llvm.loop !125
 
-105:                                              ; preds = %100
-  %106 = load i64, ptr %0, align 8, !tbaa !119
-  %107 = icmp eq i64 %106, 0
-  br i1 %107, label %108, label %119
+120:                                              ; preds = %115
+  %121 = load i64, ptr %0, align 8, !tbaa !119
+  %122 = icmp eq i64 %121, 0
+  br i1 %122, label %123, label %133
 
-108:                                              ; preds = %105
-  %109 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %110 = load ptr, ptr %109, align 8, !tbaa !116
-  %111 = load ptr, ptr %110, align 4, !tbaa !6
-  %112 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  store ptr %111, ptr %112, align 8, !tbaa !121
-  %113 = load i32, ptr %85, align 4, !tbaa !113
-  %114 = zext nneg i32 %113 to i64
-  %115 = shl i64 %2, %114
-  %116 = trunc i64 %115 to i32
-  %117 = getelementptr inbounds i8, ptr %111, i32 %116
-  %118 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  store ptr %117, ptr %118, align 4, !tbaa !122
-  br label %119
+123:                                              ; preds = %120
+  %124 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
+  %125 = load ptr, ptr %124, align 4, !tbaa !6
+  %126 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
+  store ptr %125, ptr %126, align 8, !tbaa !121
+  %127 = load i32, ptr %100, align 4, !tbaa !113
+  %128 = zext nneg i32 %127 to i64
+  %129 = shl i64 %2, %128
+  %130 = trunc i64 %129 to i32
+  %131 = getelementptr inbounds i8, ptr %125, i32 %130
+  %132 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
+  store ptr %131, ptr %132, align 4, !tbaa !122
+  br label %133
 
-119:                                              ; preds = %105, %108, %65
+133:                                              ; preds = %120, %123, %80
   ret void
 }
 
 ; Function Attrs: nounwind optsize
-define internal fastcc void @segmented_allocate(ptr noundef %0, i64 noundef %1) unnamed_addr #3 {
-  %3 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 1
-  %4 = load i16, ptr %3, align 8, !tbaa !120
-  %5 = sext i16 %4 to i32
-  %6 = icmp eq i16 %4, 0
-  br i1 %6, label %7, label %19
+define internal fastcc void @segmented_allocate(ptr nocapture noundef %0, i64 noundef %1) unnamed_addr #3 {
+  %3 = alloca [16 x i8], align 16
+  %4 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 1
+  %5 = load i16, ptr %4, align 8, !tbaa !120
+  %6 = sext i16 %5 to i32
+  %7 = icmp eq i16 %5, 0
+  br i1 %7, label %8, label %20
 
-7:                                                ; preds = %2
-  %8 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 2
-  %9 = load i16, ptr %8, align 2, !tbaa !118
-  %10 = icmp eq i16 %9, 3
-  br i1 %10, label %11, label %16
+8:                                                ; preds = %2
+  %9 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 2
+  %10 = load i16, ptr %9, align 2, !tbaa !118
+  %11 = icmp eq i16 %10, 3
+  br i1 %11, label %12, label %17
 
-11:                                               ; preds = %7
-  %12 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
-  %13 = load ptr, ptr %12, align 4, !tbaa !6
-  %14 = icmp eq ptr %13, null
-  br i1 %14, label %15, label %16
+12:                                               ; preds = %8
+  %13 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
+  %14 = load ptr, ptr %13, align 4, !tbaa !6
+  %15 = icmp eq ptr %14, null
+  br i1 %15, label %16, label %17
 
-15:                                               ; preds = %11
-  store i16 4, ptr %8, align 2, !tbaa !118
-  br label %16
+16:                                               ; preds = %12
+  store i16 4, ptr %9, align 2, !tbaa !118
+  br label %17
 
-16:                                               ; preds = %7, %11, %15
-  %17 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  %18 = load i32, ptr %17, align 4, !tbaa !113
-  br label %24
+17:                                               ; preds = %8, %12, %16
+  %18 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
+  %19 = load i32, ptr %18, align 4, !tbaa !113
+  br label %25
 
-19:                                               ; preds = %2
-  %20 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  %21 = load i32, ptr %20, align 4, !tbaa !113
-  %22 = add nsw i32 %5, -1
-  %23 = add i32 %22, %21
-  br label %24
+20:                                               ; preds = %2
+  %21 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
+  %22 = load i32, ptr %21, align 4, !tbaa !113
+  %23 = add nsw i32 %6, -1
+  %24 = add i32 %23, %22
+  br label %25
 
-24:                                               ; preds = %19, %16
-  %25 = phi i32 [ %18, %16 ], [ %21, %19 ]
-  %26 = phi i32 [ 63, %16 ], [ 62, %19 ]
-  %27 = phi i32 [ %18, %16 ], [ %23, %19 ]
-  %28 = icmp slt i16 %4, 64
-  %29 = icmp slt i32 %27, %26
-  %30 = select i1 %28, i1 %29, i1 false
-  br i1 %30, label %31, label %41
+25:                                               ; preds = %20, %17
+  %26 = phi i32 [ %19, %17 ], [ %22, %20 ]
+  %27 = phi i32 [ 63, %17 ], [ 62, %20 ]
+  %28 = phi i32 [ %19, %17 ], [ %24, %20 ]
+  %29 = icmp slt i16 %5, 32
+  %30 = icmp slt i32 %28, %27
+  %31 = select i1 %29, i1 %30, i1 false
+  br i1 %31, label %32, label %42
 
-31:                                               ; preds = %24
-  %32 = icmp sgt i64 %1, 0
-  br i1 %32, label %33, label %42
+32:                                               ; preds = %25
+  %33 = icmp sgt i64 %1, 0
+  br i1 %33, label %34, label %43
 
-33:                                               ; preds = %31
-  %34 = sext i16 %4 to i64
-  %35 = sext i32 %25 to i64
-  %36 = tail call i64 @llvm.usub.sat.i64(i64 %34, i64 1)
-  %37 = add i64 %36, %35
-  %38 = udiv i64 4294967295, %1
-  %39 = lshr i64 %38, %37
-  %40 = icmp eq i64 %39, 0
-  br i1 %40, label %41, label %42
+34:                                               ; preds = %32
+  %35 = sext i16 %5 to i64
+  %36 = sext i32 %26 to i64
+  %37 = tail call i64 @llvm.usub.sat.i64(i64 %35, i64 1)
+  %38 = add i64 %37, %36
+  %39 = udiv i64 4294967295, %1
+  %40 = lshr i64 %39, %38
+  %41 = icmp eq i64 %40, 0
+  br i1 %41, label %42, label %43
 
-41:                                               ; preds = %33, %24
+42:                                               ; preds = %34, %25
   tail call fastcc void @out_of_memory() #56
   unreachable
 
-42:                                               ; preds = %33, %31
-  %43 = icmp eq i16 %4, 3
-  br i1 %43, label %44, label %58
+43:                                               ; preds = %34, %32
+  switch i16 %5, label %59 [
+    i16 11, label %44
+    i16 3, label %44
+  ]
 
-44:                                               ; preds = %42
-  %45 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %46 = load ptr, ptr %45, align 8, !tbaa !116
-  %47 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
-  %48 = icmp eq ptr %46, %47
-  br i1 %48, label %49, label %58
+44:                                               ; preds = %43, %43
+  %45 = icmp eq i16 %5, 3
+  %46 = select i1 %45, i32 32, i32 128
+  %47 = tail call ptr @fa_alloc(i32 noundef %46, i32 noundef 4) #53
+  %48 = icmp ugt i16 %5, 3
+  br i1 %48, label %49, label %55
 
 49:                                               ; preds = %44
-  %50 = tail call ptr @fa_alloc(i32 noundef 256, i32 noundef 4) #53
-  %51 = load ptr, ptr %45, align 8, !tbaa !116
-  %52 = load i64, ptr %51, align 1
-  %53 = getelementptr inbounds i8, ptr %51, i32 4
-  %54 = load i64, ptr %53, align 1
-  store i64 %52, ptr %50, align 1
-  %55 = getelementptr inbounds i8, ptr %50, i32 4
-  store i64 %54, ptr %55, align 1
-  store ptr %50, ptr %45, align 8, !tbaa !116
-  %56 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  %57 = load i32, ptr %56, align 4, !tbaa !113
-  br label %58
+  %50 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %51 = load ptr, ptr %50, align 8, !tbaa !116
+  call void @llvm.lifetime.start.p0(i64 16, ptr nonnull %3)
+  %52 = getelementptr inbounds i8, ptr %51, i32 16
+  call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 16 dereferenceable(16) %3, ptr noundef nonnull align 1 dereferenceable(16) %52, i32 16, i1 false)
+  tail call void @llvm.memmove.p0.p0.i32(ptr noundef nonnull align 1 dereferenceable(16) %47, ptr noundef nonnull align 1 dereferenceable(16) %51, i32 16, i1 false)
+  %53 = getelementptr inbounds i8, ptr %47, i32 16
+  call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 1 dereferenceable(16) %53, ptr noundef nonnull align 16 dereferenceable(16) %3, i32 16, i1 false)
+  call void @llvm.lifetime.end.p0(i64 16, ptr nonnull %3)
+  %54 = load ptr, ptr %50, align 8, !tbaa !116
+  tail call void @fa_free(ptr noundef %54, i32 noundef 32, i32 noundef 4) #53
+  br label %55
 
-58:                                               ; preds = %49, %44, %42
-  %59 = phi i32 [ %57, %49 ], [ %25, %44 ], [ %25, %42 ]
-  %60 = sext i16 %4 to i64
-  %61 = sext i32 %59 to i64
-  %62 = tail call i64 @llvm.usub.sat.i64(i64 %60, i64 1)
-  %63 = add i64 %62, %61
-  %64 = shl nuw i64 1, %63
-  %65 = trunc i64 %64 to i32
-  %66 = trunc i64 %1 to i32
-  %67 = mul i32 %65, %66
-  %68 = tail call ptr @fa_alloc(i32 noundef %67, i32 noundef 16) #53
-  %69 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %70 = load ptr, ptr %69, align 8, !tbaa !116
-  %71 = getelementptr inbounds ptr, ptr %70, i32 %5
-  store ptr %68, ptr %71, align 4, !tbaa !6
-  %72 = icmp slt i16 %4, 3
-  br i1 %72, label %73, label %78
+55:                                               ; preds = %49, %44
+  %56 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  store ptr %47, ptr %56, align 8, !tbaa !116
+  %57 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
+  %58 = load i32, ptr %57, align 4, !tbaa !113
+  br label %59
 
-73:                                               ; preds = %58
-  %74 = load ptr, ptr %69, align 8, !tbaa !116
-  %75 = getelementptr inbounds ptr, ptr %74, i32 %5
-  %76 = load ptr, ptr %75, align 4, !tbaa !6
-  %77 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %5
-  store ptr %76, ptr %77, align 4, !tbaa !6
+59:                                               ; preds = %43, %55
+  %60 = phi i32 [ %26, %43 ], [ %58, %55 ]
+  %61 = sext i16 %5 to i64
+  %62 = sext i32 %60 to i64
+  %63 = tail call i64 @llvm.usub.sat.i64(i64 %61, i64 1)
+  %64 = add i64 %63, %62
+  %65 = shl nuw i64 1, %64
+  %66 = trunc i64 %65 to i32
+  %67 = trunc i64 %1 to i32
+  %68 = mul i32 %66, %67
+  %69 = tail call ptr @fa_alloc(i32 noundef %68, i32 noundef 16) #53
+  %70 = icmp slt i16 %5, 3
+  br i1 %70, label %71, label %73
+
+71:                                               ; preds = %59
+  %72 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %6
   br label %78
 
-78:                                               ; preds = %73, %58
-  %79 = load i16, ptr %3, align 8, !tbaa !120
-  %80 = add i16 %79, 1
-  store i16 %80, ptr %3, align 8, !tbaa !120
+73:                                               ; preds = %59
+  %74 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %75 = load ptr, ptr %74, align 8, !tbaa !116
+  %76 = getelementptr ptr, ptr %75, i32 %6
+  %77 = getelementptr ptr, ptr %76, i32 -3
+  br label %78
+
+78:                                               ; preds = %73, %71
+  %79 = phi ptr [ %77, %73 ], [ %72, %71 ]
+  store ptr %69, ptr %79, align 4, !tbaa !6
+  %80 = load i16, ptr %4, align 8, !tbaa !120
+  %81 = add i16 %80, 1
+  store i16 %81, ptr %4, align 8, !tbaa !120
   ret void
 }
 
@@ -6843,7 +6890,7 @@ define hidden noundef ptr @fa_segmented_new_into(i64 noundef %0, i64 noundef %1,
 }
 
 ; Function Attrs: noinline nounwind optsize
-define hidden void @fa_segmented_next(ptr noundef %0, i64 noundef %1, i32 noundef %2) local_unnamed_addr #16 {
+define hidden void @fa_segmented_next(ptr nocapture noundef %0, i64 noundef %1, i32 noundef %2) local_unnamed_addr #16 {
   %4 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
   %5 = load i32, ptr %4, align 4, !tbaa !113
   %6 = icmp slt i32 %5, 0
@@ -6884,31 +6931,45 @@ define hidden void @fa_segmented_next(ptr noundef %0, i64 noundef %1, i32 nounde
   br label %29
 
 29:                                               ; preds = %28, %21
-  %30 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %31 = load ptr, ptr %30, align 8, !tbaa !116
+  %30 = icmp ult i64 %23, 3
+  br i1 %30, label %31, label %34
+
+31:                                               ; preds = %29
   %32 = trunc i64 %23 to i32
-  %33 = getelementptr inbounds ptr, ptr %31, i32 %32
-  %34 = load ptr, ptr %33, align 4, !tbaa !6
-  %35 = add i64 %22, %10
-  %36 = mul nsw i64 %35, %1
-  %37 = trunc i64 %36 to i32
-  %38 = getelementptr inbounds i8, ptr %34, i32 %37
-  %39 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  store ptr %38, ptr %39, align 8, !tbaa !121
-  %40 = load ptr, ptr %33, align 4, !tbaa !6
-  %41 = sext i32 %7 to i64
-  %42 = tail call i64 @llvm.usub.sat.i64(i64 %23, i64 1)
-  %43 = add nsw i64 %42, %41
-  %44 = shl i64 %1, %43
+  %33 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %32
+  br label %40
+
+34:                                               ; preds = %29
+  %35 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %36 = load ptr, ptr %35, align 8, !tbaa !116
+  %37 = trunc i64 %23 to i32
+  %38 = getelementptr ptr, ptr %36, i32 %37
+  %39 = getelementptr ptr, ptr %38, i32 -3
+  br label %40
+
+40:                                               ; preds = %31, %34
+  %41 = phi ptr [ %33, %31 ], [ %39, %34 ]
+  %42 = load ptr, ptr %41, align 4, !tbaa !6
+  %43 = add i64 %22, %10
+  %44 = mul nsw i64 %43, %1
   %45 = trunc i64 %44 to i32
-  %46 = getelementptr inbounds i8, ptr %40, i32 %45
-  %47 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  store ptr %46, ptr %47, align 4, !tbaa !122
+  %46 = getelementptr inbounds i8, ptr %42, i32 %45
+  %47 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
+  store ptr %46, ptr %47, align 8
+  %48 = load ptr, ptr %41, align 4, !tbaa !6
+  %49 = sext i32 %7 to i64
+  %50 = tail call i64 @llvm.usub.sat.i64(i64 %23, i64 1)
+  %51 = add nsw i64 %50, %49
+  %52 = shl i64 %1, %51
+  %53 = trunc i64 %52 to i32
+  %54 = getelementptr inbounds i8, ptr %48, i32 %53
+  %55 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
+  store ptr %54, ptr %55, align 4, !tbaa !122
   ret void
 }
 
 ; Function Attrs: alwaysinline nounwind optsize
-define hidden ptr @fa_segmented_push_slot(ptr noundef %0, i64 noundef %1, i32 noundef %2) local_unnamed_addr #14 {
+define hidden ptr @fa_segmented_push_slot(ptr nocapture noundef %0, i64 noundef %1, i32 noundef %2) local_unnamed_addr #14 {
   %4 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
   %5 = load ptr, ptr %4, align 8, !tbaa !121
   %6 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
@@ -6942,50 +7003,46 @@ define hidden void @fa_segmented_append(ptr noundef %0, ptr nocapture noundef re
   %8 = load i64, ptr %0, align 8, !tbaa !119
   %9 = add nsw i64 %8, %2
   store i64 %9, ptr %0, align 8, !tbaa !119
-  br label %34
+  br label %30
 
 10:                                               ; preds = %5
-  %11 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  %12 = load i32, ptr %11, align 4, !tbaa !113
-  %13 = icmp slt i32 %12, 0
-  %14 = select i1 %13, i32 %4, i32 %12
-  %15 = icmp sgt i64 %2, 0
-  br i1 %15, label %16, label %33
+  %11 = icmp sgt i64 %2, 0
+  br i1 %11, label %12, label %29
 
-16:                                               ; preds = %10
-  %17 = mul nsw i64 %3, %2
-  %18 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  %19 = load ptr, ptr %18, align 4, !tbaa !122
-  %20 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  %21 = load ptr, ptr %20, align 8, !tbaa !121
-  %22 = ptrtoint ptr %19 to i32
-  %23 = ptrtoint ptr %21 to i32
-  %24 = sub i32 %22, %23
-  %25 = sext i32 %24 to i64
-  %26 = icmp sgt i64 %17, %25
-  br i1 %26, label %33, label %27
+12:                                               ; preds = %10
+  %13 = mul nsw i64 %3, %2
+  %14 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
+  %15 = load ptr, ptr %14, align 4, !tbaa !122
+  %16 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
+  %17 = load ptr, ptr %16, align 8, !tbaa !121
+  %18 = ptrtoint ptr %15 to i32
+  %19 = ptrtoint ptr %17 to i32
+  %20 = sub i32 %18, %19
+  %21 = sext i32 %20 to i64
+  %22 = icmp sgt i64 %13, %21
+  br i1 %22, label %29, label %23
 
-27:                                               ; preds = %16
-  %28 = trunc i64 %17 to i32
-  tail call fastcc void @copy_bytes(ptr noundef %21, ptr noundef %1, i32 noundef %28) #52
-  %29 = load ptr, ptr %20, align 8, !tbaa !121
-  %30 = getelementptr inbounds i8, ptr %29, i32 %28
-  store ptr %30, ptr %20, align 8, !tbaa !121
-  %31 = load i64, ptr %0, align 8, !tbaa !119
-  %32 = add nsw i64 %31, %2
-  store i64 %32, ptr %0, align 8, !tbaa !119
-  br label %34
+23:                                               ; preds = %12
+  %24 = trunc i64 %13 to i32
+  tail call fastcc void @copy_bytes(ptr noundef %17, ptr noundef %1, i32 noundef %24) #52
+  %25 = load ptr, ptr %16, align 8, !tbaa !121
+  %26 = getelementptr inbounds i8, ptr %25, i32 %24
+  store ptr %26, ptr %16, align 8, !tbaa !121
+  %27 = load i64, ptr %0, align 8, !tbaa !119
+  %28 = add nsw i64 %27, %2
+  store i64 %28, ptr %0, align 8, !tbaa !119
+  br label %30
 
-33:                                               ; preds = %16, %10
-  tail call fastcc void @segmented_append_runs(ptr noundef nonnull %0, ptr noundef %1, i64 noundef %2, i64 noundef %3, i32 noundef %14) #52
-  br label %34
+29:                                               ; preds = %12, %10
+  tail call fastcc void @segmented_append_runs(ptr noundef %0, ptr noundef %1, i64 noundef %2, i64 noundef %3, i32 noundef %4) #52
+  br label %30
 
-34:                                               ; preds = %33, %27, %7
+30:                                               ; preds = %29, %23, %7
   ret void
 }
 
 ; Function Attrs: noinline nounwind optsize
-define internal fastcc void @segmented_append_runs(ptr noundef %0, ptr nocapture noundef readonly %1, i64 noundef %2, i64 noundef %3, i32 noundef %4) unnamed_addr #16 {
+define internal fastcc void @segmented_append_runs(ptr nocapture noundef %0, ptr nocapture noundef readonly %1, i64 noundef %2, i64 noundef %3, i32 noundef %4) unnamed_addr #16 {
   %6 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
   %7 = load i32, ptr %6, align 4, !tbaa !113
   %8 = icmp slt i32 %7, 0
@@ -7041,48 +7098,44 @@ define internal fastcc void @segmented_append_runs(ptr noundef %0, ptr nocapture
 }
 
 ; Function Attrs: alwaysinline nounwind optsize
-define hidden void @fa_segmented_fill(ptr noundef %0, i64 noundef %1, i32 noundef %2, i32 noundef %3) local_unnamed_addr #14 {
-  %5 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  %6 = load i32, ptr %5, align 4, !tbaa !113
-  %7 = icmp slt i32 %6, 0
-  %8 = select i1 %7, i32 %3, i32 %6
-  %9 = icmp sgt i64 %1, 0
-  br i1 %9, label %10, label %27
+define hidden void @fa_segmented_fill(ptr nocapture noundef %0, i64 noundef %1, i32 noundef %2, i32 noundef %3) local_unnamed_addr #14 {
+  %5 = icmp sgt i64 %1, 0
+  br i1 %5, label %6, label %23
 
-10:                                               ; preds = %4
-  %11 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  %12 = load ptr, ptr %11, align 4, !tbaa !122
-  %13 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  %14 = load ptr, ptr %13, align 8, !tbaa !121
-  %15 = ptrtoint ptr %12 to i32
-  %16 = ptrtoint ptr %14 to i32
-  %17 = sub i32 %15, %16
-  %18 = sext i32 %17 to i64
-  %19 = icmp slt i64 %18, %1
-  br i1 %19, label %27, label %20
+6:                                                ; preds = %4
+  %7 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
+  %8 = load ptr, ptr %7, align 4, !tbaa !122
+  %9 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
+  %10 = load ptr, ptr %9, align 8, !tbaa !121
+  %11 = ptrtoint ptr %8 to i32
+  %12 = ptrtoint ptr %10 to i32
+  %13 = sub i32 %11, %12
+  %14 = sext i32 %13 to i64
+  %15 = icmp slt i64 %14, %1
+  br i1 %15, label %23, label %16
 
-20:                                               ; preds = %10
-  %21 = trunc i32 %2 to i8
-  %22 = trunc i64 %1 to i32
-  tail call fastcc void @fill_bytes(ptr noundef %14, i8 noundef zeroext %21, i32 noundef %22) #52
-  %23 = load ptr, ptr %13, align 8, !tbaa !121
-  %24 = getelementptr inbounds i8, ptr %23, i32 %22
-  store ptr %24, ptr %13, align 8, !tbaa !121
-  %25 = load i64, ptr %0, align 8, !tbaa !119
-  %26 = add nsw i64 %25, %1
-  store i64 %26, ptr %0, align 8, !tbaa !119
-  br label %28
+16:                                               ; preds = %6
+  %17 = trunc i32 %2 to i8
+  %18 = trunc i64 %1 to i32
+  tail call fastcc void @fill_bytes(ptr noundef %10, i8 noundef zeroext %17, i32 noundef %18) #52
+  %19 = load ptr, ptr %9, align 8, !tbaa !121
+  %20 = getelementptr inbounds i8, ptr %19, i32 %18
+  store ptr %20, ptr %9, align 8, !tbaa !121
+  %21 = load i64, ptr %0, align 8, !tbaa !119
+  %22 = add nsw i64 %21, %1
+  store i64 %22, ptr %0, align 8, !tbaa !119
+  br label %24
 
-27:                                               ; preds = %10, %4
-  tail call fastcc void @segmented_fill_runs(ptr noundef nonnull %0, i64 noundef %1, i32 noundef %2, i32 noundef %8) #52
-  br label %28
+23:                                               ; preds = %6, %4
+  tail call fastcc void @segmented_fill_runs(ptr noundef %0, i64 noundef %1, i32 noundef %2, i32 noundef %3) #52
+  br label %24
 
-28:                                               ; preds = %27, %20
+24:                                               ; preds = %23, %16
   ret void
 }
 
 ; Function Attrs: noinline nounwind optsize
-define internal fastcc void @segmented_fill_runs(ptr noundef %0, i64 noundef %1, i32 noundef %2, i32 noundef %3) unnamed_addr #16 {
+define internal fastcc void @segmented_fill_runs(ptr nocapture noundef %0, i64 noundef %1, i32 noundef %2, i32 noundef %3) unnamed_addr #16 {
   %5 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
   %6 = load i32, ptr %5, align 4, !tbaa !113
   %7 = icmp slt i32 %6, 0
@@ -7137,145 +7190,166 @@ define internal fastcc void @segmented_fill_runs(ptr noundef %0, i64 noundef %1,
 ; Function Attrs: alwaysinline nounwind optsize
 define hidden void @fa_segmented_extend_to(ptr noundef %0, i32 noundef %1, ptr nocapture noundef readonly %2, i64 noundef %3, i64 noundef %4, i64 noundef %5, i32 noundef %6) local_unnamed_addr #14 {
   %8 = icmp slt i64 %4, 1
-  br i1 %8, label %101, label %9
+  br i1 %8, label %112, label %9
 
 9:                                                ; preds = %7
-  %10 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 3
-  %11 = load i32, ptr %10, align 4, !tbaa !113
-  %12 = add i64 %4, %3
-  %13 = zext nneg i32 %11 to i64
-  %14 = shl nuw i64 1, %13
-  %15 = icmp ugt i64 %12, %14
-  br i1 %15, label %19, label %16
+  %10 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 1
+  %11 = load i16, ptr %10, align 8, !tbaa !120
+  %12 = icmp slt i16 %11, 2
+  br i1 %12, label %13, label %16
+
+13:                                               ; preds = %9
+  %14 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 7
+  %15 = mul nsw i64 %5, %3
+  br label %63
 
 16:                                               ; preds = %9
-  %17 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 7
-  %18 = mul nsw i64 %5, %3
-  br label %48
+  %17 = add i64 %4, %3
+  %18 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 3
+  %19 = load i32, ptr %18, align 4, !tbaa !113
+  %20 = zext nneg i32 %19 to i64
+  %21 = shl nuw i64 1, %20
+  %22 = icmp ugt i64 %17, %21
+  br i1 %22, label %26, label %23
 
-19:                                               ; preds = %9
-  %20 = lshr i64 %3, %13
-  %21 = icmp eq i64 %20, 0
-  br i1 %21, label %22, label %24
+23:                                               ; preds = %16
+  %24 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 7
+  %25 = mul nsw i64 %5, %3
+  br label %63
 
-22:                                               ; preds = %19
-  %23 = sext i32 %11 to i64
-  br label %31
+26:                                               ; preds = %16
+  %27 = lshr i64 %3, %20
+  %28 = icmp eq i64 %27, 0
+  br i1 %28, label %29, label %31
 
-24:                                               ; preds = %19
-  %25 = tail call i64 @llvm.ctlz.i64(i64 %20, i1 true), !range !41
-  %26 = sub nuw nsw i64 64, %25
-  %27 = sext i32 %11 to i64
-  %28 = sub nsw i64 %27, %25
-  %29 = add nsw i64 %28, 63
-  %30 = shl nsw i64 -1, %29
-  br label %31
+29:                                               ; preds = %26
+  %30 = sext i32 %19 to i64
+  br label %38
 
-31:                                               ; preds = %22, %24
-  %32 = phi i64 [ %23, %22 ], [ %27, %24 ]
-  %33 = phi i64 [ 0, %22 ], [ %30, %24 ]
-  %34 = phi i64 [ 0, %22 ], [ %26, %24 ]
-  %35 = add i64 %33, %3
-  %36 = add nsw i64 %35, %4
-  %37 = tail call i64 @llvm.usub.sat.i64(i64 %34, i64 1)
-  %38 = add nsw i64 %37, %32
-  %39 = shl nuw i64 1, %38
-  %40 = icmp sgt i64 %36, %39
-  br i1 %40, label %41, label %42
+31:                                               ; preds = %26
+  %32 = tail call i64 @llvm.ctlz.i64(i64 %27, i1 true), !range !41
+  %33 = sub nuw nsw i64 64, %32
+  %34 = sext i32 %19 to i64
+  %35 = sub nsw i64 %34, %32
+  %36 = add nsw i64 %35, 63
+  %37 = shl nsw i64 -1, %36
+  br label %38
 
-41:                                               ; preds = %31
-  tail call fastcc void @segmented_extend_runs(ptr noundef %0, i32 noundef %1, ptr noundef nonnull %2, i64 noundef %3, i64 noundef %4, i64 noundef %5, i32 noundef %11) #52
-  br label %101
+38:                                               ; preds = %29, %31
+  %39 = phi i64 [ %30, %29 ], [ %34, %31 ]
+  %40 = phi i64 [ 0, %29 ], [ %37, %31 ]
+  %41 = phi i64 [ 0, %29 ], [ %33, %31 ]
+  %42 = add i64 %40, %3
+  %43 = add nsw i64 %42, %4
+  %44 = tail call i64 @llvm.usub.sat.i64(i64 %41, i64 1)
+  %45 = add nsw i64 %44, %39
+  %46 = shl nuw i64 1, %45
+  %47 = icmp sgt i64 %43, %46
+  br i1 %47, label %48, label %49
 
-42:                                               ; preds = %31
-  %43 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 6
-  %44 = load ptr, ptr %43, align 8, !tbaa !116
-  %45 = trunc i64 %34 to i32
-  %46 = getelementptr inbounds ptr, ptr %44, i32 %45
-  %47 = mul nsw i64 %35, %5
-  br label %48
+48:                                               ; preds = %38
+  tail call fastcc void @segmented_extend_runs(ptr noundef %0, i32 noundef %1, ptr noundef nonnull %2, i64 noundef %3, i64 noundef %4, i64 noundef %5, i32 noundef %19) #52
+  br label %112
 
-48:                                               ; preds = %42, %16
-  %49 = phi i64 [ %47, %42 ], [ %18, %16 ]
-  %50 = phi ptr [ %46, %42 ], [ %17, %16 ]
-  %51 = load ptr, ptr %50, align 4, !tbaa !6
-  %52 = trunc i64 %49 to i32
-  %53 = getelementptr inbounds i8, ptr %51, i32 %52
-  %54 = icmp slt i32 %1, 0
-  br i1 %54, label %55, label %74
+49:                                               ; preds = %38
+  %50 = icmp ult i64 %41, 3
+  br i1 %50, label %51, label %54
 
-55:                                               ; preds = %48
-  %56 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 2
-  %57 = load i64, ptr %56, align 8, !tbaa !73
-  %58 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
-  %59 = load i64, ptr %58, align 8, !tbaa !79
-  %60 = sub nsw i64 %57, %59
-  %61 = icmp slt i64 %60, %4
-  br i1 %61, label %62, label %64, !prof !35
+51:                                               ; preds = %49
+  %52 = trunc i64 %41 to i32
+  %53 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 7, i32 %52
+  br label %60
 
-62:                                               ; preds = %55
+54:                                               ; preds = %49
+  %55 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 6
+  %56 = load ptr, ptr %55, align 8, !tbaa !116
+  %57 = trunc i64 %41 to i32
+  %58 = getelementptr ptr, ptr %56, i32 %57
+  %59 = getelementptr ptr, ptr %58, i32 -3
+  br label %60
+
+60:                                               ; preds = %54, %51
+  %61 = phi ptr [ %53, %51 ], [ %59, %54 ]
+  %62 = mul nsw i64 %42, %5
+  br label %63
+
+63:                                               ; preds = %60, %23, %13
+  %64 = phi i64 [ %62, %60 ], [ %25, %23 ], [ %15, %13 ]
+  %65 = phi ptr [ %61, %60 ], [ %24, %23 ], [ %14, %13 ]
+  %66 = load ptr, ptr %65, align 4, !tbaa !6
+  %67 = trunc i64 %64 to i32
+  %68 = getelementptr inbounds i8, ptr %66, i32 %67
+  %69 = icmp slt i32 %1, 0
+  br i1 %69, label %70, label %89
+
+70:                                               ; preds = %63
+  %71 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 2
+  %72 = load i64, ptr %71, align 8, !tbaa !73
+  %73 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
+  %74 = load i64, ptr %73, align 8, !tbaa !79
+  %75 = sub nsw i64 %72, %74
+  %76 = icmp slt i64 %75, %4
+  br i1 %76, label %77, label %79, !prof !35
+
+77:                                               ; preds = %70
   tail call fastcc void @array_extend_room(ptr noundef nonnull %0, i64 noundef %4, i64 noundef %5) #52
-  %63 = load i64, ptr %58, align 8, !tbaa !79
-  br label %64
+  %78 = load i64, ptr %73, align 8, !tbaa !79
+  br label %79
 
-64:                                               ; preds = %55, %62
-  %65 = phi i64 [ %59, %55 ], [ %63, %62 ]
-  %66 = load ptr, ptr %0, align 8, !tbaa !69
-  %67 = mul nsw i64 %65, %5
-  %68 = trunc i64 %67 to i32
-  %69 = getelementptr inbounds i8, ptr %66, i32 %68
-  %70 = mul nsw i64 %5, %4
-  %71 = trunc i64 %70 to i32
-  tail call fastcc void @copy_bytes(ptr noundef %69, ptr noundef %53, i32 noundef %71) #52
-  %72 = load i64, ptr %58, align 8, !tbaa !79
-  %73 = add nsw i64 %72, %4
-  store i64 %73, ptr %58, align 8, !tbaa !79
-  br label %101
+79:                                               ; preds = %70, %77
+  %80 = phi i64 [ %74, %70 ], [ %78, %77 ]
+  %81 = load ptr, ptr %0, align 8, !tbaa !69
+  %82 = mul nsw i64 %80, %5
+  %83 = trunc i64 %82 to i32
+  %84 = getelementptr inbounds i8, ptr %81, i32 %83
+  %85 = mul nsw i64 %5, %4
+  %86 = trunc i64 %85 to i32
+  tail call fastcc void @copy_bytes(ptr noundef %84, ptr noundef %68, i32 noundef %86) #52
+  %87 = load i64, ptr %73, align 8, !tbaa !79
+  %88 = add nsw i64 %87, %4
+  store i64 %88, ptr %73, align 8, !tbaa !79
+  br label %112
 
-74:                                               ; preds = %48
-  %75 = icmp eq i64 %5, 0
-  br i1 %75, label %76, label %79
+89:                                               ; preds = %63
+  %90 = icmp eq i64 %5, 0
+  br i1 %90, label %91, label %94
 
-76:                                               ; preds = %74
+91:                                               ; preds = %89
   tail call void @fa_segmented_reserve(ptr noundef %0, i64 noundef %4, i64 noundef 0, i32 poison) #52
-  %77 = load i64, ptr %0, align 8, !tbaa !119
-  %78 = add nsw i64 %77, %4
-  store i64 %78, ptr %0, align 8, !tbaa !119
-  br label %101
+  %92 = load i64, ptr %0, align 8, !tbaa !119
+  %93 = add nsw i64 %92, %4
+  store i64 %93, ptr %0, align 8, !tbaa !119
+  br label %112
 
-79:                                               ; preds = %74
-  %80 = mul nsw i64 %5, %4
-  %81 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  %82 = load ptr, ptr %81, align 4, !tbaa !122
-  %83 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  %84 = load ptr, ptr %83, align 8, !tbaa !121
-  %85 = ptrtoint ptr %82 to i32
-  %86 = ptrtoint ptr %84 to i32
-  %87 = sub i32 %85, %86
-  %88 = sext i32 %87 to i64
-  %89 = icmp sgt i64 %80, %88
-  br i1 %89, label %96, label %90
+94:                                               ; preds = %89
+  %95 = mul nsw i64 %5, %4
+  %96 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
+  %97 = load ptr, ptr %96, align 4, !tbaa !122
+  %98 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
+  %99 = load ptr, ptr %98, align 8, !tbaa !121
+  %100 = ptrtoint ptr %97 to i32
+  %101 = ptrtoint ptr %99 to i32
+  %102 = sub i32 %100, %101
+  %103 = sext i32 %102 to i64
+  %104 = icmp sgt i64 %95, %103
+  br i1 %104, label %111, label %105
 
-90:                                               ; preds = %79
-  %91 = trunc i64 %80 to i32
-  tail call fastcc void @copy_bytes(ptr noundef %84, ptr noundef %53, i32 noundef %91) #52
-  %92 = load ptr, ptr %83, align 8, !tbaa !121
-  %93 = getelementptr inbounds i8, ptr %92, i32 %91
-  store ptr %93, ptr %83, align 8, !tbaa !121
-  %94 = load i64, ptr %0, align 8, !tbaa !119
-  %95 = add nsw i64 %94, %4
-  store i64 %95, ptr %0, align 8, !tbaa !119
-  br label %101
+105:                                              ; preds = %94
+  %106 = trunc i64 %95 to i32
+  tail call fastcc void @copy_bytes(ptr noundef %99, ptr noundef %68, i32 noundef %106) #52
+  %107 = load ptr, ptr %98, align 8, !tbaa !121
+  %108 = getelementptr inbounds i8, ptr %107, i32 %106
+  store ptr %108, ptr %98, align 8, !tbaa !121
+  %109 = load i64, ptr %0, align 8, !tbaa !119
+  %110 = add nsw i64 %109, %4
+  store i64 %110, ptr %0, align 8, !tbaa !119
+  br label %112
 
-96:                                               ; preds = %79
-  %97 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  %98 = load i32, ptr %97, align 4, !tbaa !113
-  %99 = icmp slt i32 %98, 0
-  %100 = select i1 %99, i32 %1, i32 %98
-  tail call fastcc void @segmented_append_runs(ptr noundef nonnull %0, ptr noundef %53, i64 noundef %4, i64 noundef %5, i32 noundef %100) #52
-  br label %101
+111:                                              ; preds = %94
+  tail call fastcc void @segmented_append_runs(ptr noundef nonnull %0, ptr noundef %68, i64 noundef %4, i64 noundef %5, i32 noundef %1) #52
+  br label %112
 
-101:                                              ; preds = %96, %90, %76, %41, %64, %7
+112:                                              ; preds = %111, %105, %91, %48, %79, %7
   ret void
 }
 
@@ -7303,110 +7377,121 @@ define internal fastcc void @segmented_extend_runs(ptr noundef %0, i32 noundef %
 
 21:                                               ; preds = %20, %13, %7
   %22 = icmp sgt i64 %4, 0
-  br i1 %22, label %23, label %96
+  br i1 %22, label %23, label %101
 
 23:                                               ; preds = %21
   %24 = zext nneg i32 %11 to i64
   %25 = sext i32 %11 to i64
   %26 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 6
   %27 = icmp eq i64 %5, 0
-  %28 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  %29 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
-  %30 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
-  %31 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
-  br label %32
+  %28 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 5
+  %29 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 4
+  %30 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
+  br label %31
 
-32:                                               ; preds = %23, %92
-  %33 = phi i64 [ %3, %23 ], [ %93, %92 ]
-  %34 = phi i64 [ %4, %23 ], [ %94, %92 ]
-  %35 = lshr i64 %33, %24
-  %36 = icmp eq i64 %35, 0
-  %37 = tail call i64 @llvm.ctlz.i64(i64 %35, i1 true), !range !41
-  %38 = sub nuw nsw i64 64, %37
-  %39 = sub nsw i64 %25, %37
-  %40 = add nsw i64 %39, 63
-  %41 = shl nsw i64 -1, %40
-  %42 = select i1 %36, i64 0, i64 %41
-  %43 = select i1 %36, i64 0, i64 %38
-  %44 = tail call i64 @llvm.usub.sat.i64(i64 %43, i64 1)
-  %45 = add nsw i64 %44, %25
-  %46 = shl nuw i64 1, %45
-  %47 = add i64 %42, %33
-  %48 = sub nsw i64 %46, %47
-  %49 = tail call i64 @llvm.smin.i64(i64 %34, i64 %48)
-  %50 = load ptr, ptr %26, align 8, !tbaa !116
-  %51 = trunc i64 %43 to i32
-  %52 = getelementptr inbounds ptr, ptr %50, i32 %51
-  %53 = load ptr, ptr %52, align 4, !tbaa !6
-  %54 = mul nsw i64 %47, %5
-  %55 = trunc i64 %54 to i32
-  %56 = getelementptr inbounds i8, ptr %53, i32 %55
-  br i1 %12, label %57, label %67
+31:                                               ; preds = %23, %97
+  %32 = phi i64 [ %3, %23 ], [ %98, %97 ]
+  %33 = phi i64 [ %4, %23 ], [ %99, %97 ]
+  %34 = lshr i64 %32, %24
+  %35 = icmp eq i64 %34, 0
+  %36 = tail call i64 @llvm.ctlz.i64(i64 %34, i1 true), !range !41
+  %37 = sub nuw nsw i64 64, %36
+  %38 = sub nsw i64 %25, %36
+  %39 = add nsw i64 %38, 63
+  %40 = shl nuw i64 1, %39
+  %41 = select i1 %35, i64 0, i64 %40
+  %42 = select i1 %35, i64 0, i64 %37
+  %43 = tail call i64 @llvm.usub.sat.i64(i64 %42, i64 1)
+  %44 = add nsw i64 %43, %25
+  %45 = shl nuw i64 1, %44
+  %46 = sub i64 %41, %32
+  %47 = add i64 %45, %46
+  %48 = tail call i64 @llvm.smin.i64(i64 %33, i64 %47)
+  %49 = icmp ult i64 %42, 3
+  br i1 %49, label %50, label %53
 
-57:                                               ; preds = %32
-  %58 = load ptr, ptr %0, align 8, !tbaa !69
-  %59 = load i64, ptr %31, align 8, !tbaa !79
-  %60 = mul nsw i64 %59, %5
-  %61 = trunc i64 %60 to i32
-  %62 = getelementptr inbounds i8, ptr %58, i32 %61
-  %63 = mul nsw i64 %49, %5
-  %64 = trunc i64 %63 to i32
-  tail call fastcc void @copy_bytes(ptr noundef %62, ptr noundef %56, i32 noundef %64) #52
-  %65 = load i64, ptr %31, align 8, !tbaa !79
-  %66 = add nsw i64 %65, %49
-  store i64 %66, ptr %31, align 8, !tbaa !79
-  br label %92
+50:                                               ; preds = %31
+  %51 = trunc i64 %42 to i32
+  %52 = getelementptr inbounds %struct.FaSegmented, ptr %2, i32 0, i32 7, i32 %51
+  br label %58
 
-67:                                               ; preds = %32
-  br i1 %27, label %68, label %71
+53:                                               ; preds = %31
+  %54 = load ptr, ptr %26, align 8, !tbaa !116
+  %55 = trunc i64 %42 to i32
+  %56 = getelementptr ptr, ptr %54, i32 %55
+  %57 = getelementptr ptr, ptr %56, i32 -3
+  br label %58
 
-68:                                               ; preds = %67
-  tail call void @fa_segmented_reserve(ptr noundef %0, i64 noundef %49, i64 noundef 0, i32 poison) #52
-  %69 = load i64, ptr %0, align 8, !tbaa !119
-  %70 = add nsw i64 %69, %49
-  store i64 %70, ptr %0, align 8, !tbaa !119
-  br label %92
+58:                                               ; preds = %50, %53
+  %59 = phi ptr [ %52, %50 ], [ %57, %53 ]
+  %60 = load ptr, ptr %59, align 4, !tbaa !6
+  %61 = sub nsw i64 %32, %41
+  %62 = mul nsw i64 %61, %5
+  %63 = trunc i64 %62 to i32
+  %64 = getelementptr inbounds i8, ptr %60, i32 %63
+  br i1 %12, label %65, label %75
 
-71:                                               ; preds = %67
-  %72 = load i32, ptr %28, align 4, !tbaa !113
-  %73 = icmp slt i32 %72, 0
-  %74 = select i1 %73, i32 %1, i32 %72
-  %75 = icmp sgt i64 %48, 0
-  br i1 %75, label %76, label %91
+65:                                               ; preds = %58
+  %66 = load ptr, ptr %0, align 8, !tbaa !69
+  %67 = load i64, ptr %30, align 8, !tbaa !79
+  %68 = mul nsw i64 %67, %5
+  %69 = trunc i64 %68 to i32
+  %70 = getelementptr inbounds i8, ptr %66, i32 %69
+  %71 = mul nsw i64 %48, %5
+  %72 = trunc i64 %71 to i32
+  tail call fastcc void @copy_bytes(ptr noundef %70, ptr noundef %64, i32 noundef %72) #52
+  %73 = load i64, ptr %30, align 8, !tbaa !79
+  %74 = add nsw i64 %73, %48
+  store i64 %74, ptr %30, align 8, !tbaa !79
+  br label %97
 
-76:                                               ; preds = %71
-  %77 = mul nsw i64 %49, %5
-  %78 = load ptr, ptr %29, align 4, !tbaa !122
-  %79 = load ptr, ptr %30, align 8, !tbaa !121
-  %80 = ptrtoint ptr %78 to i32
-  %81 = ptrtoint ptr %79 to i32
-  %82 = sub i32 %80, %81
-  %83 = sext i32 %82 to i64
-  %84 = icmp sgt i64 %77, %83
-  br i1 %84, label %91, label %85
+75:                                               ; preds = %58
+  br i1 %27, label %76, label %79
 
-85:                                               ; preds = %76
-  %86 = trunc i64 %77 to i32
-  tail call fastcc void @copy_bytes(ptr noundef %79, ptr noundef %56, i32 noundef %86) #52
-  %87 = load ptr, ptr %30, align 8, !tbaa !121
-  %88 = getelementptr inbounds i8, ptr %87, i32 %86
-  store ptr %88, ptr %30, align 8, !tbaa !121
-  %89 = load i64, ptr %0, align 8, !tbaa !119
-  %90 = add nsw i64 %89, %49
-  store i64 %90, ptr %0, align 8, !tbaa !119
-  br label %92
+76:                                               ; preds = %75
+  tail call void @fa_segmented_reserve(ptr noundef %0, i64 noundef %48, i64 noundef 0, i32 poison) #52
+  %77 = load i64, ptr %0, align 8, !tbaa !119
+  %78 = add nsw i64 %77, %48
+  store i64 %78, ptr %0, align 8, !tbaa !119
+  br label %97
 
-91:                                               ; preds = %76, %71
-  tail call fastcc void @segmented_append_runs(ptr noundef nonnull %0, ptr noundef %56, i64 noundef %49, i64 noundef %5, i32 noundef %74) #52
-  br label %92
+79:                                               ; preds = %75
+  %80 = icmp sgt i64 %47, 0
+  br i1 %80, label %81, label %96
 
-92:                                               ; preds = %91, %85, %68, %57
-  %93 = add nsw i64 %49, %33
-  %94 = sub nsw i64 %34, %49
-  %95 = icmp sgt i64 %94, 0
-  br i1 %95, label %32, label %96, !llvm.loop !129
+81:                                               ; preds = %79
+  %82 = mul nsw i64 %48, %5
+  %83 = load ptr, ptr %28, align 4, !tbaa !122
+  %84 = load ptr, ptr %29, align 8, !tbaa !121
+  %85 = ptrtoint ptr %83 to i32
+  %86 = ptrtoint ptr %84 to i32
+  %87 = sub i32 %85, %86
+  %88 = sext i32 %87 to i64
+  %89 = icmp sgt i64 %82, %88
+  br i1 %89, label %96, label %90
 
-96:                                               ; preds = %92, %21
+90:                                               ; preds = %81
+  %91 = trunc i64 %82 to i32
+  tail call fastcc void @copy_bytes(ptr noundef %84, ptr noundef %64, i32 noundef %91) #52
+  %92 = load ptr, ptr %29, align 8, !tbaa !121
+  %93 = getelementptr inbounds i8, ptr %92, i32 %91
+  store ptr %93, ptr %29, align 8, !tbaa !121
+  %94 = load i64, ptr %0, align 8, !tbaa !119
+  %95 = add nsw i64 %94, %48
+  store i64 %95, ptr %0, align 8, !tbaa !119
+  br label %97
+
+96:                                               ; preds = %81, %79
+  tail call fastcc void @segmented_append_runs(ptr noundef %0, ptr noundef %64, i64 noundef %48, i64 noundef %5, i32 noundef %1) #52
+  br label %97
+
+97:                                               ; preds = %96, %90, %76, %65
+  %98 = add nsw i64 %48, %32
+  %99 = sub nsw i64 %33, %48
+  %100 = icmp sgt i64 %99, 0
+  br i1 %100, label %31, label %101, !llvm.loop !129
+
+101:                                              ; preds = %97, %21
   ret void
 }
 
@@ -7423,7 +7508,7 @@ define hidden ptr @fa_segmented_run(ptr nocapture noundef readonly %0, i64 nound
 
 13:                                               ; preds = %5
   %14 = sext i32 %9 to i64
-  br label %22
+  br label %23
 
 15:                                               ; preds = %5
   %16 = tail call i64 @llvm.ctlz.i64(i64 %11, i1 true), !range !41
@@ -7431,92 +7516,118 @@ define hidden ptr @fa_segmented_run(ptr nocapture noundef readonly %0, i64 nound
   %18 = sext i32 %9 to i64
   %19 = sub nsw i64 %18, %16
   %20 = add nsw i64 %19, 63
-  %21 = shl nsw i64 -1, %20
-  br label %22
+  %21 = shl nuw i64 1, %20
+  %22 = icmp ult i64 %11, 4
+  br i1 %22, label %23, label %29
 
-22:                                               ; preds = %13, %15
-  %23 = phi i64 [ %14, %13 ], [ %18, %15 ]
-  %24 = phi i64 [ 0, %13 ], [ %21, %15 ]
+23:                                               ; preds = %13, %15
+  %24 = phi i64 [ %14, %13 ], [ %18, %15 ]
   %25 = phi i64 [ 0, %13 ], [ %17, %15 ]
-  %26 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %27 = load ptr, ptr %26, align 8, !tbaa !116
-  %28 = trunc i64 %25 to i32
-  %29 = getelementptr inbounds ptr, ptr %27, i32 %28
-  %30 = load ptr, ptr %29, align 4, !tbaa !6
-  %31 = tail call i64 @llvm.usub.sat.i64(i64 %25, i64 1)
-  %32 = add nsw i64 %31, %23
-  %33 = shl i64 %2, %32
-  %34 = trunc i64 %33 to i32
-  %35 = getelementptr inbounds i8, ptr %30, i32 %34
-  store ptr %35, ptr %4, align 4, !tbaa !6
-  %36 = load ptr, ptr %26, align 8, !tbaa !116
-  %37 = getelementptr inbounds ptr, ptr %36, i32 %28
-  %38 = load ptr, ptr %37, align 4, !tbaa !6
-  %39 = add i64 %24, %1
-  %40 = mul nsw i64 %39, %2
-  %41 = trunc i64 %40 to i32
-  %42 = getelementptr inbounds i8, ptr %38, i32 %41
-  ret ptr %42
+  %26 = phi i64 [ 0, %13 ], [ %21, %15 ]
+  %27 = trunc i64 %25 to i32
+  %28 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %27
+  br label %35
+
+29:                                               ; preds = %15
+  %30 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %31 = load ptr, ptr %30, align 8, !tbaa !116
+  %32 = trunc i64 %17 to i32
+  %33 = getelementptr ptr, ptr %31, i32 %32
+  %34 = getelementptr ptr, ptr %33, i32 -3
+  br label %35
+
+35:                                               ; preds = %23, %29
+  %36 = phi i64 [ %24, %23 ], [ %18, %29 ]
+  %37 = phi i1 [ true, %23 ], [ false, %29 ]
+  %38 = phi i64 [ %25, %23 ], [ %17, %29 ]
+  %39 = phi i64 [ %26, %23 ], [ %21, %29 ]
+  %40 = phi ptr [ %28, %23 ], [ %34, %29 ]
+  %41 = load ptr, ptr %40, align 4, !tbaa !6
+  %42 = tail call i64 @llvm.usub.sat.i64(i64 %38, i64 1)
+  %43 = add nsw i64 %42, %36
+  %44 = shl i64 %2, %43
+  %45 = trunc i64 %44 to i32
+  %46 = getelementptr inbounds i8, ptr %41, i32 %45
+  store ptr %46, ptr %4, align 4, !tbaa !6
+  br i1 %37, label %47, label %50
+
+47:                                               ; preds = %35
+  %48 = trunc i64 %38 to i32
+  %49 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %48
+  br label %56
+
+50:                                               ; preds = %35
+  %51 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %52 = load ptr, ptr %51, align 8, !tbaa !116
+  %53 = trunc i64 %38 to i32
+  %54 = getelementptr ptr, ptr %52, i32 %53
+  %55 = getelementptr ptr, ptr %54, i32 -3
+  br label %56
+
+56:                                               ; preds = %47, %50
+  %57 = phi ptr [ %49, %47 ], [ %55, %50 ]
+  %58 = load ptr, ptr %57, align 4, !tbaa !6
+  %59 = sub nsw i64 %1, %39
+  %60 = mul nsw i64 %59, %2
+  %61 = trunc i64 %60 to i32
+  %62 = getelementptr inbounds i8, ptr %58, i32 %61
+  ret ptr %62
 }
 
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(read, argmem: readwrite, inaccessiblemem: none)
 define hidden i64 @fa_segmented_next_byte(ptr nocapture noundef readonly %0, i64 noundef %1, i64 noundef %2, i32 noundef %3, i32 noundef %4, ptr nocapture noundef %5, ptr nocapture noundef %6) local_unnamed_addr #15 {
-  %8 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 3
-  %9 = load i32, ptr %8, align 4, !tbaa !113
-  %10 = icmp slt i32 %9, 0
-  %11 = select i1 %10, i32 %4, i32 %9
-  %12 = icmp slt i64 %1, %2
-  br i1 %12, label %13, label %44
+  %8 = icmp slt i64 %1, %2
+  br i1 %8, label %9, label %40
 
-13:                                               ; preds = %7
-  %14 = trunc i32 %3 to i8
-  %15 = load ptr, ptr %5, align 4, !tbaa !6
-  br label %16
+9:                                                ; preds = %7
+  %10 = trunc i32 %3 to i8
+  %11 = load ptr, ptr %5, align 4, !tbaa !6
+  br label %12
 
-16:                                               ; preds = %13, %40
-  %17 = phi ptr [ %15, %13 ], [ %41, %40 ]
-  %18 = phi i64 [ %1, %13 ], [ %42, %40 ]
+12:                                               ; preds = %9, %36
+  %13 = phi ptr [ %11, %9 ], [ %37, %36 ]
+  %14 = phi i64 [ %1, %9 ], [ %38, %36 ]
+  %15 = load ptr, ptr %6, align 4, !tbaa !6
+  %16 = icmp eq ptr %13, %15
+  br i1 %16, label %17, label %20
+
+17:                                               ; preds = %12
+  %18 = tail call ptr @fa_segmented_run(ptr noundef %0, i64 noundef %14, i64 noundef 1, i32 noundef %4, ptr noundef nonnull %6) #52
+  store ptr %18, ptr %5, align 4, !tbaa !6
   %19 = load ptr, ptr %6, align 4, !tbaa !6
-  %20 = icmp eq ptr %17, %19
-  br i1 %20, label %21, label %24
+  br label %20
 
-21:                                               ; preds = %16
-  %22 = tail call ptr @fa_segmented_run(ptr noundef %0, i64 noundef %18, i64 noundef 1, i32 noundef %11, ptr noundef nonnull %6) #52
-  store ptr %22, ptr %5, align 4, !tbaa !6
-  %23 = load ptr, ptr %6, align 4, !tbaa !6
-  br label %24
+20:                                               ; preds = %17, %12
+  %21 = phi ptr [ %18, %17 ], [ %13, %12 ]
+  %22 = phi ptr [ %19, %17 ], [ %15, %12 ]
+  %23 = ptrtoint ptr %22 to i32
+  %24 = ptrtoint ptr %21 to i32
+  %25 = sub i32 %23, %24
+  %26 = sext i32 %25 to i64
+  %27 = sub nsw i64 %2, %14
+  %28 = tail call i64 @llvm.smin.i64(i64 %27, i64 %26)
+  %29 = trunc i64 %28 to i32
+  %30 = tail call fastcc i32 @next_byte(ptr noundef %21, i32 noundef %29, i32 noundef 0, i8 noundef zeroext %10) #52
+  %31 = zext i32 %30 to i64
+  %32 = icmp sgt i64 %28, %31
+  br i1 %32, label %33, label %36
 
-24:                                               ; preds = %21, %16
-  %25 = phi ptr [ %22, %21 ], [ %17, %16 ]
-  %26 = phi ptr [ %23, %21 ], [ %19, %16 ]
-  %27 = ptrtoint ptr %26 to i32
-  %28 = ptrtoint ptr %25 to i32
-  %29 = sub i32 %27, %28
-  %30 = sext i32 %29 to i64
-  %31 = sub nsw i64 %2, %18
-  %32 = tail call i64 @llvm.smin.i64(i64 %31, i64 %30)
-  %33 = trunc i64 %32 to i32
-  %34 = tail call fastcc i32 @next_byte(ptr noundef %25, i32 noundef %33, i32 noundef 0, i8 noundef zeroext %14) #52
-  %35 = zext i32 %34 to i64
-  %36 = icmp sgt i64 %32, %35
-  br i1 %36, label %37, label %40
+33:                                               ; preds = %20
+  %34 = getelementptr inbounds i8, ptr %21, i32 %30
+  store ptr %34, ptr %5, align 4, !tbaa !6
+  %35 = add nsw i64 %14, %31
+  br label %40
 
-37:                                               ; preds = %24
-  %38 = getelementptr inbounds i8, ptr %25, i32 %34
-  store ptr %38, ptr %5, align 4, !tbaa !6
-  %39 = add nsw i64 %18, %35
-  br label %44
+36:                                               ; preds = %20
+  %37 = getelementptr inbounds i8, ptr %21, i32 %29
+  store ptr %37, ptr %5, align 4, !tbaa !6
+  %38 = add nsw i64 %28, %14
+  %39 = icmp slt i64 %38, %2
+  br i1 %39, label %12, label %40
 
-40:                                               ; preds = %24
-  %41 = getelementptr inbounds i8, ptr %25, i32 %33
-  store ptr %41, ptr %5, align 4, !tbaa !6
-  %42 = add nsw i64 %32, %18
-  %43 = icmp slt i64 %42, %2
-  br i1 %43, label %16, label %44
-
-44:                                               ; preds = %40, %7, %37
-  %45 = phi i64 [ %39, %37 ], [ %2, %7 ], [ %2, %40 ]
-  ret i64 %45
+40:                                               ; preds = %36, %7, %33
+  %41 = phi i64 [ %35, %33 ], [ %2, %7 ], [ %2, %36 ]
+  ret i64 %41
 }
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(argmem: readwrite)
@@ -7553,7 +7664,7 @@ define hidden void @fa_segmented_free(ptr noundef %0, i64 noundef %1, i32 nounde
   %4 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 2
   %5 = load i16, ptr %4, align 2, !tbaa !118
   %6 = icmp eq i16 %5, 2
-  br i1 %6, label %45, label %7
+  br i1 %6, label %56, label %7
 
 7:                                                ; preds = %3
   %8 = icmp eq i16 %5, 3
@@ -7571,46 +7682,64 @@ define hidden void @fa_segmented_free(ptr noundef %0, i64 noundef %1, i32 nounde
   %18 = select i1 %17, i32 %2, i32 %16
   %19 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
   %20 = sext i32 %18 to i64
-  br label %26
+  br label %33
 
-21:                                               ; preds = %26, %7
-  %22 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
-  %23 = load ptr, ptr %22, align 8, !tbaa !116
-  %24 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
-  %25 = icmp eq ptr %23, %24
-  br i1 %25, label %41, label %40
+21:                                               ; preds = %44, %7
+  %22 = phi i16 [ %11, %7 ], [ %52, %44 ]
+  %23 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
+  %24 = load ptr, ptr %23, align 8, !tbaa !116
+  %25 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7
+  %26 = icmp eq ptr %24, %25
+  br i1 %26, label %30, label %27
 
-26:                                               ; preds = %14, %26
-  %27 = phi i64 [ %9, %14 ], [ %36, %26 ]
-  %28 = load ptr, ptr %19, align 8, !tbaa !116
-  %29 = trunc i64 %27 to i32
-  %30 = getelementptr inbounds ptr, ptr %28, i32 %29
-  %31 = load ptr, ptr %30, align 4, !tbaa !6
-  %32 = tail call i64 @llvm.usub.sat.i64(i64 %27, i64 1)
-  %33 = add i64 %32, %20
-  %34 = shl i64 %1, %33
-  %35 = trunc i64 %34 to i32
-  tail call void @fa_free(ptr noundef %31, i32 noundef %35, i32 noundef 16) #53
-  %36 = add nuw nsw i64 %27, 1
-  %37 = load i16, ptr %10, align 8, !tbaa !120
-  %38 = sext i16 %37 to i64
-  %39 = icmp slt i64 %36, %38
-  br i1 %39, label %26, label %21, !llvm.loop !130
+27:                                               ; preds = %21
+  %28 = icmp slt i16 %22, 12
+  %29 = select i1 %28, i32 32, i32 128
+  tail call void @fa_free(ptr noundef %24, i32 noundef %29, i32 noundef 4) #53
+  store ptr %25, ptr %23, align 8, !tbaa !116
+  br label %30
 
-40:                                               ; preds = %21
-  tail call void @fa_free(ptr noundef %23, i32 noundef 256, i32 noundef 4) #53
-  br label %41
+30:                                               ; preds = %21, %27
+  %31 = load i16, ptr %4, align 2, !tbaa !118
+  %32 = icmp eq i16 %31, 0
+  br i1 %32, label %55, label %56
 
-41:                                               ; preds = %40, %21
-  %42 = load i16, ptr %4, align 2, !tbaa !118
-  %43 = icmp eq i16 %42, 0
-  br i1 %43, label %44, label %45
+33:                                               ; preds = %14, %44
+  %34 = phi i64 [ %9, %14 ], [ %51, %44 ]
+  %35 = icmp ult i64 %34, 3
+  br i1 %35, label %36, label %39
 
-44:                                               ; preds = %41
+36:                                               ; preds = %33
+  %37 = trunc i64 %34 to i32
+  %38 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %37
+  br label %44
+
+39:                                               ; preds = %33
+  %40 = load ptr, ptr %19, align 8, !tbaa !116
+  %41 = trunc i64 %34 to i32
+  %42 = getelementptr ptr, ptr %40, i32 %41
+  %43 = getelementptr ptr, ptr %42, i32 -3
+  br label %44
+
+44:                                               ; preds = %36, %39
+  %45 = phi ptr [ %38, %36 ], [ %43, %39 ]
+  %46 = load ptr, ptr %45, align 4, !tbaa !6
+  %47 = tail call i64 @llvm.usub.sat.i64(i64 %34, i64 1)
+  %48 = add i64 %47, %20
+  %49 = shl i64 %1, %48
+  %50 = trunc i64 %49 to i32
+  tail call void @fa_free(ptr noundef %46, i32 noundef %50, i32 noundef 16) #53
+  %51 = add nuw nsw i64 %34, 1
+  %52 = load i16, ptr %10, align 8, !tbaa !120
+  %53 = sext i16 %52 to i64
+  %54 = icmp slt i64 %51, %53
+  br i1 %54, label %33, label %21, !llvm.loop !130
+
+55:                                               ; preds = %30
   tail call void @fa_free(ptr noundef nonnull %0, i32 noundef 40, i32 noundef 8) #53
-  br label %45
+  br label %56
 
-45:                                               ; preds = %3, %44, %41
+56:                                               ; preds = %3, %55, %30
   ret void
 }
 
@@ -7631,13 +7760,13 @@ define hidden ptr @fa_segmented_flatten(ptr nocapture noundef readonly %0, i64 n
   %14 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 6
   br label %16
 
-15:                                               ; preds = %16, %3
+15:                                               ; preds = %38, %3
   ret ptr %7
 
-16:                                               ; preds = %10, %16
-  %17 = phi i64 [ %8, %10 ], [ %37, %16 ]
-  %18 = phi i64 [ 0, %10 ], [ %36, %16 ]
-  %19 = phi i64 [ 0, %10 ], [ %35, %16 ]
+16:                                               ; preds = %10, %38
+  %17 = phi i64 [ %8, %10 ], [ %45, %38 ]
+  %18 = phi i64 [ 0, %10 ], [ %44, %38 ]
+  %19 = phi i64 [ 0, %10 ], [ %43, %38 ]
   %20 = tail call i64 @llvm.usub.sat.i64(i64 %18, i64 1)
   %21 = add i64 %20, %13
   %22 = shl nuw i64 1, %21
@@ -7647,18 +7776,32 @@ define hidden ptr @fa_segmented_flatten(ptr nocapture noundef readonly %0, i64 n
   %26 = mul nsw i64 %19, %1
   %27 = trunc i64 %26 to i32
   %28 = getelementptr inbounds i8, ptr %25, i32 %27
-  %29 = load ptr, ptr %14, align 8, !tbaa !116
-  %30 = trunc i64 %18 to i32
-  %31 = getelementptr inbounds ptr, ptr %29, i32 %30
-  %32 = load ptr, ptr %31, align 4, !tbaa !6
-  %33 = mul nsw i64 %24, %1
-  %34 = trunc i64 %33 to i32
-  tail call fastcc void @copy_bytes(ptr noundef %28, ptr noundef %32, i32 noundef %34) #52
-  %35 = add nsw i64 %24, %19
-  %36 = add nuw nsw i64 %18, 1
-  %37 = load i64, ptr %0, align 8, !tbaa !119
-  %38 = icmp slt i64 %35, %37
-  br i1 %38, label %16, label %15, !llvm.loop !131
+  %29 = icmp ult i64 %18, 3
+  br i1 %29, label %30, label %33
+
+30:                                               ; preds = %16
+  %31 = trunc i64 %18 to i32
+  %32 = getelementptr inbounds %struct.FaSegmented, ptr %0, i32 0, i32 7, i32 %31
+  br label %38
+
+33:                                               ; preds = %16
+  %34 = load ptr, ptr %14, align 8, !tbaa !116
+  %35 = trunc i64 %18 to i32
+  %36 = getelementptr ptr, ptr %34, i32 %35
+  %37 = getelementptr ptr, ptr %36, i32 -3
+  br label %38
+
+38:                                               ; preds = %30, %33
+  %39 = phi ptr [ %32, %30 ], [ %37, %33 ]
+  %40 = load ptr, ptr %39, align 4, !tbaa !6
+  %41 = mul nsw i64 %24, %1
+  %42 = trunc i64 %41 to i32
+  tail call fastcc void @copy_bytes(ptr noundef %28, ptr noundef %40, i32 noundef %42) #52
+  %43 = add nsw i64 %24, %19
+  %44 = add nuw nsw i64 %18, 1
+  %45 = load i64, ptr %0, align 8, !tbaa !119
+  %46 = icmp slt i64 %43, %45
+  br i1 %46, label %16, label %15, !llvm.loop !131
 }
 
 ; Function Attrs: nounwind optsize
@@ -7757,44 +7900,41 @@ define hidden noundef ptr @fa_segmented_from_array_capacity(ptr noundef %0, i64 
   %23 = load i64, ptr %12, align 8, !tbaa !119
   %24 = add nsw i64 %23, %20
   store i64 %24, ptr %12, align 8, !tbaa !119
-  br label %48
+  br label %45
 
 25:                                               ; preds = %11
-  %26 = load i32, ptr %13, align 4, !tbaa !113
-  %27 = icmp slt i32 %26, 0
-  %28 = select i1 %27, i32 %2, i32 %26
-  %29 = icmp sgt i64 %20, 0
-  br i1 %29, label %30, label %47
+  %26 = icmp sgt i64 %20, 0
+  br i1 %26, label %27, label %44
 
-30:                                               ; preds = %25
-  %31 = mul nsw i64 %20, %1
-  %32 = getelementptr inbounds %struct.FaSegmented, ptr %12, i32 0, i32 5
-  %33 = load ptr, ptr %32, align 4, !tbaa !122
-  %34 = getelementptr inbounds %struct.FaSegmented, ptr %12, i32 0, i32 4
-  %35 = load ptr, ptr %34, align 8, !tbaa !121
-  %36 = ptrtoint ptr %33 to i32
-  %37 = ptrtoint ptr %35 to i32
-  %38 = sub i32 %36, %37
-  %39 = sext i32 %38 to i64
-  %40 = icmp sgt i64 %31, %39
-  br i1 %40, label %47, label %41
+27:                                               ; preds = %25
+  %28 = mul nsw i64 %20, %1
+  %29 = getelementptr inbounds %struct.FaSegmented, ptr %12, i32 0, i32 5
+  %30 = load ptr, ptr %29, align 4, !tbaa !122
+  %31 = getelementptr inbounds %struct.FaSegmented, ptr %12, i32 0, i32 4
+  %32 = load ptr, ptr %31, align 8, !tbaa !121
+  %33 = ptrtoint ptr %30 to i32
+  %34 = ptrtoint ptr %32 to i32
+  %35 = sub i32 %33, %34
+  %36 = sext i32 %35 to i64
+  %37 = icmp sgt i64 %28, %36
+  br i1 %37, label %44, label %38
 
-41:                                               ; preds = %30
-  %42 = trunc i64 %31 to i32
-  tail call fastcc void @copy_bytes(ptr noundef %35, ptr noundef %19, i32 noundef %42) #52
-  %43 = load ptr, ptr %34, align 8, !tbaa !121
-  %44 = getelementptr inbounds i8, ptr %43, i32 %42
-  store ptr %44, ptr %34, align 8, !tbaa !121
-  %45 = load i64, ptr %12, align 8, !tbaa !119
-  %46 = add nsw i64 %45, %20
-  store i64 %46, ptr %12, align 8, !tbaa !119
-  br label %48
+38:                                               ; preds = %27
+  %39 = trunc i64 %28 to i32
+  tail call fastcc void @copy_bytes(ptr noundef %32, ptr noundef %19, i32 noundef %39) #52
+  %40 = load ptr, ptr %31, align 8, !tbaa !121
+  %41 = getelementptr inbounds i8, ptr %40, i32 %39
+  store ptr %41, ptr %31, align 8, !tbaa !121
+  %42 = load i64, ptr %12, align 8, !tbaa !119
+  %43 = add nsw i64 %42, %20
+  store i64 %43, ptr %12, align 8, !tbaa !119
+  br label %45
 
-47:                                               ; preds = %30, %25
-  tail call fastcc void @segmented_append_runs(ptr noundef nonnull %12, ptr noundef %19, i64 noundef %20, i64 noundef %1, i32 noundef %28) #52
-  br label %48
+44:                                               ; preds = %27, %25
+  tail call fastcc void @segmented_append_runs(ptr noundef nonnull %12, ptr noundef %19, i64 noundef %20, i64 noundef %1, i32 noundef %2) #52
+  br label %45
 
-48:                                               ; preds = %22, %41, %47
+45:                                               ; preds = %22, %38, %44
   tail call void @fa_array_free(ptr noundef nonnull %0, i64 noundef %1) #52
   ret ptr %12
 }

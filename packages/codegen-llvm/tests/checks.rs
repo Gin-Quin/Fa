@@ -978,6 +978,30 @@ console.log(items.length)
 	}
 
 	#[test]
+	fn growing_default_k_requires_a_closed_empty_origin() {
+		let prefix = "mutable items: GrowingArray<Integer> = []\nfor value in 0..40 { items.push(value) }\nlet index = try Integer.parse(arguments.get(0) ?? \"9\")\n";
+		let plain = ir_of(
+			"growing-default-origin",
+			&format!("{prefix}console.log(try items[index])\n"),
+		);
+		assert!(!plain.contains("segment_k"), "{plain}");
+		for (name, change) in [
+			("reserve", "items.reserve(1000)"),
+			(
+				"replace",
+				"items = GrowingArray<Integer>.from([1, 2], capacity = 100)",
+			),
+			("copy", "let other = items\nconsole.log(other)"),
+		] {
+			let ir = ir_of(
+				&format!("growing-default-reject-{name}"),
+				&format!("{prefix}{change}\nconsole.log(try items[index])\n"),
+			);
+			assert!(ir.contains("segment_k"), "{name}: {ir}");
+		}
+	}
+
+	#[test]
 	fn growing_index_loops_load_the_first_segment_before_the_loop() {
 		let ir = optimized_ir(
 			"growing-index-loop",

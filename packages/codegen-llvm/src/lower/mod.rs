@@ -265,6 +265,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	copy_functions: std::cell::RefCell<FxHashMap<String, FunctionValue<'ctx>>>,
 	/// The nodes reading each local (last uses).
 	local_uses: std::cell::RefCell<FxHashMap<SymbolId, Vec<NodeId>>>,
+	/// Closed-use proofs for empty growing-array origins, per source symbol.
+	default_growing_origins: std::cell::RefCell<FxHashMap<(FileId, SymbolId), bool>>,
 	/// The parent of every node (last uses).
 	node_parents: std::cell::RefCell<Vec<usize>>,
 	/// Whether the program reports its leaks (`Options::leak_check`).
@@ -389,6 +391,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			drop_functions: std::cell::RefCell::new(FxHashMap::default()),
 			copy_functions: std::cell::RefCell::new(FxHashMap::default()),
 			local_uses: std::cell::RefCell::new(FxHashMap::default()),
+			default_growing_origins: std::cell::RefCell::new(FxHashMap::default()),
 			node_parents: std::cell::RefCell::new(Vec::new()),
 			leak_check: false,
 			tbaa: std::cell::OnceCell::new(),

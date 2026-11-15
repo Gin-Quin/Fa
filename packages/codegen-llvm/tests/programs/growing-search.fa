@@ -1,0 +1,35 @@
+-- Search observes changes to later bytes after every matching loop body.
+-- asynchronous: false
+function scan = (text: GrowingArray<Byte>, stop: Integer) throws IndexError mutates text[..] => {
+	for byte, position in text {
+		if byte == 59 {
+			console.log(position)
+			if position + 1 < text.length {
+				try text[position + 1] = 59
+			}
+			if position == stop - 2 {
+				continue
+			}
+			if position == stop {
+				break
+			}
+		}
+	}
+}
+mutable contiguous = GrowingArray<Byte>.from([59, 97, 97, 97, 97], capacity = 100)
+try scan(contiguous, 3)
+-- prints: 0
+-- prints: 1
+-- prints: 2
+-- prints: 3
+mutable segmented: GrowingArray<Byte> = []
+for position in 0..130 {
+	segmented.push(if position == 63 { 59 } else { 97 })
+}
+try scan(segmented, 66)
+-- prints: 63
+-- prints: 64
+-- prints: 65
+-- prints: 66
+mutable empty: GrowingArray<Byte> = []
+try scan(empty, 0)

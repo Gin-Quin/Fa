@@ -29,10 +29,12 @@ void fa_exit(int32_t code) {
 }
 
 static long allocated;
+static long allocated_bytes;
 
 void *fa_alloc(size_t size, size_t align) {
 	(void)align;
 	allocated += 1;
+	allocated_bytes += (long)size;
 	return malloc(size);
 }
 
@@ -40,6 +42,7 @@ void fa_free(void *bytes, size_t size, size_t align) {
 	(void)size;
 	(void)align;
 	allocated -= 1;
+	allocated_bytes -= (long)size;
 	free(bytes);
 }
 
@@ -1157,7 +1160,7 @@ static void test_collection_destinations(void) {
 	}
 	CHECK(*(int64_t *)fa_segmented_at(growing, 19, sizeof(int64_t), 3) == 19);
 	void *frame_first = fa_segmented_at(growing, 0, sizeof(int64_t), 3);
-	fa_segmented_reserve(growing, 200, sizeof(int64_t), 3);
+	fa_segmented_reserve(growing, 40000, sizeof(int64_t), 3);
 	CHECK(frame_first == fa_segmented_at(growing, 0, sizeof(int64_t), 3));
 	CHECK(*(int64_t *)fa_segmented_at(growing, 19, sizeof(int64_t), 3) == 19);
 	fa_segmented_reset(growing, sizeof(int64_t), 3);
@@ -1202,6 +1205,42 @@ static void test_storage_hints(void) {
     CHECK(fa_segmented_capacity(a) >= 11000);
     fa_segmented_free(a, 1, 6);
     fa_segmented_free(b, 8, 3);
+
+    // The first three pointers remain inline. Eight overflow pointers cover
+    // segments 3..10; adding segment 11 moves only the directory.
+    long bytes_before = allocated_bytes;
+    FaSegmented *directory = fa_segmented_new();
+    int64_t *kept = 0;
+    uint8_t **small = 0;
+    for (int64_t i = 0; i <= 8192; i += 1) {
+        int64_t *slot = fa_segmented_push_slot(directory, sizeof(int64_t), 3);
+        *slot = i;
+        if (i == 0) { kept = slot; }
+        if (i == 32) {
+            CHECK(directory->segments == 4);
+            small = directory->segment;
+            CHECK(small != directory->inline_segment);
+            CHECK(allocated_bytes - bytes_before == (long)(sizeof(FaSegmented) + 64 * sizeof(int64_t) + 8 * sizeof(void *)));
+        }
+        if (i == 8191) { CHECK(directory->segments == 11 && directory->segment == small); }
+    }
+    CHECK(directory->segments == 12 && directory->segment != small);
+    CHECK(kept == fa_segmented_at(directory, 0, sizeof(int64_t), 3) && *kept == 0);
+    CHECK(allocated_bytes - bytes_before == (long)(sizeof(FaSegmented) + 16384 * sizeof(int64_t) + FA_SEGMENTS * sizeof(void *)));
+    for (int64_t i = 0; i <= 8192; i += 1) {
+        CHECK(*(int64_t *)fa_segmented_at(directory, i, sizeof(int64_t), 3) == i);
+    }
+    // Rebuilding an empty reservation releases its old directory, so sized
+    // deallocation never has to infer a directory size from a reset count.
+    fa_segmented_reset(directory, sizeof(int64_t), 3);
+    fa_segmented_reserve(directory, 20000, sizeof(int64_t), 3);
+    CHECK(directory->segments == 1 && directory->segment == directory->inline_segment);
+    fa_segmented_free(directory, sizeof(int64_t), 3);
+    CHECK(allocated_bytes == bytes_before);
+    directory = fa_segmented_new();
+    for (int64_t i = 0; i < 40; i += 1) { *(int64_t *)fa_segmented_push_slot(directory, sizeof(int64_t), 3) = i; }
+    fa_segmented_free(directory, sizeof(int64_t), 3);
+    CHECK(allocated_bytes == bytes_before); // free the eight-entry directory too
     for (int mode = 0; mode < 3; mode += 1) {
         FaTable *table = mode == 0 ? fa_table_new(4, sizeof(TestTableEntry))
                          : mode == 1 ? fa_table_new_growing(4, sizeof(TestTableEntry))

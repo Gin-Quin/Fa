@@ -2223,6 +2223,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// a body acting only on the items equal to a constant byte: the loop
 		// goes from one such item to the next (`copies.rs`)
 		let matched = self.matched_byte(pattern, item, body)?;
+		// The iteration rule keeps this header stable. A contiguous live
+		// prefix can use the ordinary byte search and direct item address;
+		// only the bytes remain live across executions of the loop body.
+		let growing_flat = if growing && matched.is_some() {
+			let contiguous = self.growing_single_segment(array)?;
+			let field = self
+				.builder
+				.build_struct_gep(self.segmented_type(), array, 6, "")?;
+			let first = self
+				.builder
+				.build_load(self.pointer_type(), field, "first_items")?;
+			self.tag(
+				inkwell::values::BasicValue::as_instruction_value(&first).expect("a load"),
+				true,
+			)?;
+			Some((first.into_pointer_value(), contiguous))
+		} else {
+			None
+		};
 		let test = self.append_block("for_item");
 		let body_block = self.append_block("for_item_body");
 		let step = self.append_block("for_item_step");
@@ -2246,10 +2265,33 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder.build_store(counter.pointer, position)?;
 		}
 		if let (Some(byte), Some(length), Some((cursor, end))) = (matched, growing_length, run) {
-			let next = self.runtime.function("fa_segmented_next_byte")?;
+			let flat = if let Some((items, contiguous)) = growing_flat {
+				let direct = self.append_block("search_contiguous");
+				let segmented = self.append_block("search_segmented");
+				let join = self.append_block("search_found");
+				self.builder
+					.build_conditional_branch(contiguous, direct, segmented)?;
+				self.builder.position_at_end(direct);
+				let found = self
+					.call_value(
+						self.runtime.function("fa_bytes_next")?,
+						&[
+							items.into(),
+							position.into(),
+							length.into(),
+							self.context.i32_type().const_int(byte, false).into(),
+						],
+					)?
+					.into_int_value();
+				self.builder.build_unconditional_branch(join)?;
+				self.builder.position_at_end(segmented);
+				Some((found, direct, join))
+			} else {
+				None
+			};
 			position = self
 				.call_value(
-					next,
+					self.runtime.function("fa_segmented_next_byte")?,
 					&[
 						array.into(),
 						position.into(),
@@ -2261,7 +2303,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					],
 				)?
 				.into_int_value();
-			// the segment cursor now designates the item found
+			if let Some((found, direct, join)) = flat {
+				let segmented = self.builder.get_insert_block().expect("a block");
+				self.builder.build_unconditional_branch(join)?;
+				self.builder.position_at_end(join);
+				let merged = self.builder.build_phi(i64, "found_position")?;
+				merged.add_incoming(&[(&found, direct), (&position, segmented)]);
+				position = merged.as_basic_value().into_int_value();
+			}
 			self.builder.build_store(counter.pointer, position)?;
 		}
 		let length = match (parts, growing_length) {
@@ -2275,10 +2324,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(more, body_block, exit)?;
 		self.builder.position_at_end(body_block);
-		let pointer = match (parts, run) {
-			(Some((items, _)), _) => self.item_pointer(items, item, position)?,
-			(None, Some(run)) => self.growing_next_item(array, item, position, run)?,
-			(None, None) => self.growing_at(&self.builder, array, item, position)?,
+		let pointer = if let Some((items, contiguous)) = growing_flat {
+			let direct = self.append_block("item_contiguous");
+			let segmented = self.append_block("item_segmented");
+			let join = self.append_block("item_found");
+			self.builder
+				.build_conditional_branch(contiguous, direct, segmented)?;
+			self.builder.position_at_end(direct);
+			let first = self.item_pointer(items, item, position)?;
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(segmented);
+			let later =
+				self.growing_next_item(array, item, position, run.expect("a segmented cursor"))?;
+			let segmented_end = self.builder.get_insert_block().expect("a block");
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(join);
+			let pointer = self.builder.build_phi(self.pointer_type(), "found_item")?;
+			pointer.add_incoming(&[(&first, direct), (&later, segmented_end)]);
+			pointer.as_basic_value().into_pointer_value()
+		} else {
+			match (parts, run) {
+				(Some((items, _)), _) => self.item_pointer(items, item, position)?,
+				(None, Some(run)) => self.growing_next_item(array, item, position, run)?,
+				(None, None) => self.growing_at(&self.builder, array, item, position)?,
+			}
 		};
 
 		// a reference to a later item in a nested loop never overlaps this one

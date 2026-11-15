@@ -39,7 +39,25 @@ for round in 0..3 {
 -- Immutable static and runtime frame storage use the same indexing path.
 function local = (value: Integer): Integer throws IndexError => {
 	let frame: GrowingArray<Integer> = [value, value + 1, value + 2]
-	try read(frame, -1)
+	try frame[-1]
 }
 let fixed: GrowingArray<Integer> = [10, 20, 30]
 console.log(try read(fixed, -2), try local(40)) -- prints: 20 42
+
+-- A closed empty owner keeps default k, including over directory growth.
+mutable known: GrowingArray<Integer> = []
+for value in 0..16 { known.push(value) }
+use retained = try known[0]
+for value in 16..10000 { known.push(value) }
+let selected = try Integer.parse(arguments.get(0) ?? "8200")
+console.log(retained, try known[selected], try known[-1]) -- prints: 0 8200 9999
+-- Reservation and whole-owner replacement must reject that proof.
+mutable planned: GrowingArray<Integer> = []
+planned.reserve(1024)
+for value in 0..600 { planned.push(value) }
+console.log(try planned[500]) -- prints: 500
+mutable replaced: GrowingArray<Integer> = []
+for value in 0..30 { replaced.push(value) }
+replaced = GrowingArray<Integer>.from([], capacity = 128)
+for value in 0..100 { replaced.push(value + 100) }
+console.log(try replaced[70]) -- prints: 170

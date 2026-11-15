@@ -630,7 +630,7 @@ Measurements and validation are recorded in `native-goose-stack-review-results.j
 - `reserve` needs a mutable receiver on every target. Arrays, sets and ordered columnars use `mutates self` (their items may move); strings use the same effect as appends. All other collections use `mutates self.capacity`: reservation preserves existing item addresses and length/size references, but may change capacity. Maps and sets reserve both entry storage and the index (accounting for tombstones and load limits).
 - Copies preserve contents, not spare capacity. A copied `GrowingArray` starts with one segment large enough for its length. Its header keeps a small inline segment directory and allocates further directory entries only when needed. `k` is fixed while items exist. On an empty array, reservation may replace retained segments with one larger first block, preserving at least the old total capacity; the assignment that emptied it already invalidated references into the former items.
 
-- **Directory detail**: the growing-array header is 64 bytes on 64-bit native targets and 40 on wasm32: three segment pointers inline, then a directory of 64 pointers allocated on the fourth segment. A 64-bit length bounds the number of segments; allocating the directory once keeps growth simple on every target, without moving an item. Explicit reservations choose the smallest power-of-two first block that fits; unreserved arrays keep the approximately 64-byte default.
+- **Directory detail**: the growing-array header is 64 bytes on 64-bit native targets and 40 on wasm32. The first three segment pointers always stay inline. The fourth segment allocates eight **overflow** pointers, enough for eleven segments altogether. The twelfth segment reallocates that directory once to its final size: 64 pointers on 64-bit targets, 32 on wasm32. Only the directory moves; every item keeps its address. A lookup reloads the directory from the header after a call that may grow the array. An empty reservation that rebuilds the first segment frees its old overflow directory before resetting the segment count; this lets sized deallocation infer either directory size from that count without another header field. Explicit reservations choose the smallest power-of-two first block that fits; unreserved arrays keep the approximately 64-byte default.
 - **Argument ownership**: a constructor keeps its copied or moved source registered for cleanup until all capacity expressions succeed. This preserves normal left-to-right argument evaluation and frees the source if a later hint throws. Storage hints still evaluate their expressions on JavaScript, despite not allocating storage; the Boolean-array-to-`Uint8Array` optimization evaluates the hint before the fill-loop bound too.
 
 ### Storage and capacity integration (2026-11-15)
@@ -668,6 +668,39 @@ Measurements and validation are recorded in `native-goose-stack-review-results.j
 	- most of the gap to Goose is not the segments: `Array<Byte>` is itself 1.26 times Goose and `String` 1.16 times. In time, 41 ms of the 58 ms belong to code the three versions share; that part is followed under the Goose goal, not under this decision;
 	- the benchmark reserves its buffers, so every array is already one contiguous first segment. A reserved region of address space would run the same path (one compare against the first segment, one addition): **it cannot gain anything here**, and the conditional "reserved first segment" stays as written, to be judged only on `benchmarks/growing-index` with arrays whose size is not announced.
 - **Next step: fix the segmented code, as the decision says ("otherwise, profile first").** The +8.8% of instructions is a regression of the per-array `k`, which the decision asked to check ("`push` and indexing of default arrays don't get slower"), and nothing structural explains 47 M instructions more than `Array` on arrays of one segment. In order: (1) in a loop that neither grows nor assigns the array, load `k`, the first segment's pointer and its size once, and index with one compare and one addition before any `clz` (the stores of `appendInteger` and `add`); merge that compare with the bound check when the capacity covers the length; (2) acceptance: at most the 206.5 M instructions of `c74a2278`, then at most 1.10 times `Array<Byte>` in instructions as well (195 M); (3) write `benchmarks/growing-index` and apply the thresholds on both benchmarks, with paired runs.
+
+### GrowingArray contiguous fast paths (implementation, 2026-11-15)
+
+- An allocated segment count of at most one is a sufficient proof that the
+  live prefix fits in the first segment, including frame/static literals and
+  zero-size items. Indexing checks a positive index against the live first-segment prefix
+  with one comparison; the ordinary bounds and negative-index normalization
+  remain on the fallback. More than one allocated
+  segment conservatively keeps the `k` lookup, including its first-segment
+  comparison: retained or preallocated segments need not contain live items.
+- This count test avoids reconstructing `2^k` at every indexing site or copy.
+  Stable loops can select a contiguous version once. Growing-array pointer
+  loads describe the complete initialized header and its eight-byte alignment;
+  this permits speculative header loads, without asserting immutability across
+  growth or replacement.
+- A closed-use proof can keep the default `k` of a nonzero-size empty local
+  owner: every use must be a direct `push`, indexing or iteration. Replacement,
+  reservation, aliases and unknown uses reject the proof, as do foreign and
+  multifile programs. These ordinary pushes and nonzero-size block appends
+  never change `k`; zero-size appends can reserve and are excluded. The proof
+  is cached per source symbol and uses the item's layout, never a collection
+  length. General values still read `k` from their header.
+- Overflow lookups select between the overflow directory's start and the
+  legal one-past-inline pointer, then use `segment - 3` for either. Inline
+  indices step backward into their header; overflow indices step forward
+  within their directory. No pointer before an allocation is formed. The
+  highest set bit of a nonzero index gives both its segment and its start,
+  avoiding a separate right shift before `clz`.
+- Byte-match iteration uses the ordinary array search when there is at most
+  one segment, with the header captured before iteration under the existing
+  iteration rule. Each search still reads the current bytes after the previous
+  body; the segmented cursor remains the fallback. Append/fill/search helpers
+  defer the default `k` normalization to the segmented helper that needs it.
 
 ### Caller buffers for array transforms (implementation, 2026-11-15)
 

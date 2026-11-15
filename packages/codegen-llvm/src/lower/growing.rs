@@ -21,8 +21,10 @@
 //!   copied bytewise into a temporary array that doesn't own them, freed at
 //!   the end of the statement (`Cleanup::Shallow`).
 
-use fa_analyzer::analysis::NodeFlags;
+use fa_analyzer::analysis::{Callee, NodeFlags};
 use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::symbols::{Resolution, SymbolKind};
+use fa_analyzer::syntax::View;
 use inkwell::IntPredicate;
 use inkwell::builder::Builder;
 use inkwell::types::StructType;
@@ -113,6 +115,33 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)
 	}
 
+	/// A sufficient contiguity proof: a live item outside the first block
+	/// requires a second allocated segment. Zero segments means zero items.
+	pub(super) fn growing_single_segment(
+		&self,
+		array: PointerValue<'ctx>,
+	) -> Result<IntValue<'ctx>, Error> {
+		let metadata = self
+			.builder
+			.build_struct_gep(self.segmented_type(), array, 1, "")?;
+		let field = self
+			.builder
+			.build_struct_gep(self.segment_metadata_type(), metadata, 0, "")?;
+		let count = self
+			.builder
+			.build_load(self.context.i16_type(), field, "segment_count")?;
+		self.tag(
+			inkwell::values::BasicValue::as_instruction_value(&count).expect("a load"),
+			true,
+		)?;
+		Ok(self.builder.build_int_compare(
+			IntPredicate::ULE,
+			count.into_int_value(),
+			self.context.i16_type().const_int(1, false),
+			"contiguous",
+		)?)
+	}
+
 	/// The length of a `GrowingArray`.
 	pub(crate) fn growing_length(
 		&self,
@@ -170,19 +199,48 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.and_then(|block| block.get_parent())
 			.expect("a function");
 		let segment_items = |builder: &Builder<'ctx>, segment: IntValue<'ctx>| {
-			let directory = builder.build_struct_gep(self.segmented_type(), array, 5, "")?;
-			let slots = builder.build_load(self.pointer_type(), directory, "segments")?;
-			if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&slots) {
-				self.tag(instruction, true)?;
-			}
-			let slots = slots.into_pointer_value();
+			let field = builder.build_struct_gep(self.segmented_type(), array, 5, "")?;
+			let directory = builder.build_load(self.pointer_type(), field, "segments")?;
+			self.tag(
+				inkwell::values::BasicValue::as_instruction_value(&directory).expect("a load"),
+				true,
+			)?;
+			let inline = builder.build_struct_gep(self.segmented_type(), array, 6, "")?;
+			// One past the inline array is a valid base for negative offsets
+			// back into it. The overflow directory uses nonnegative offsets.
+			// Both choices therefore share segment - SEGMENTS, without forming
+			// a pointer before either allocation.
+			let inline_end = unsafe {
+				builder.build_in_bounds_gep(
+					self.pointer_type(),
+					inline,
+					&[i64.const_int(u64::from(SEGMENTS), false)],
+					"",
+				)?
+			};
+			let in_header = builder.build_int_compare(
+				IntPredicate::ULT,
+				segment,
+				i64.const_int(u64::from(SEGMENTS), false),
+				"inline_segment",
+			)?;
+			let base = builder
+				.build_select(
+					in_header,
+					inline_end,
+					directory.into_pointer_value(),
+					"segment_base",
+				)?
+				.into_pointer_value();
+			let offset =
+				builder.build_int_sub(segment, i64.const_int(u64::from(SEGMENTS), false), "")?;
 			let slot =
-				unsafe { builder.build_in_bounds_gep(self.pointer_type(), slots, &[segment], "")? };
-
+				unsafe { builder.build_in_bounds_gep(self.pointer_type(), base, &[offset], "")? };
 			let items = builder.build_load(self.pointer_type(), slot, "segment_items")?;
-			if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&items) {
-				self.tag(instruction, true)?;
-			}
+			self.tag(
+				inkwell::values::BasicValue::as_instruction_value(&items).expect("a load"),
+				true,
+			)?;
 			Ok::<_, Error>(items.into_pointer_value())
 		};
 		let first_capacity =
@@ -204,14 +262,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			unsafe { builder.build_in_bounds_gep(self.llvm_type(item), items, &[index], "")? };
 		builder.build_unconditional_branch(join)?;
 		builder.position_at_end(later_block);
-		let high = builder.build_right_shift(index, k, false, "")?;
-		// segment `s = 64 - clz(index >> k)`, whose first index is `2^(k + s - 1)`
+		// Here index >= 2^k, hence it is nonzero. Its highest set bit
+		// gives both the segment and its start without shifting the index
+		// before ctlz: floor(log2(index)) - k + 1.
 		let ctlz = self.intrinsic("llvm.ctlz", &[i64.into()])?;
 		let zeros = builder
 			.build_call(
 				ctlz,
 				&[
-					high.into(),
+					index.into(),
 					self.context.bool_type().const_all_ones().into(),
 				],
 				"",
@@ -220,11 +279,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.basic()
 			.expect("a count")
 			.into_int_value();
-		let segment = builder.build_int_sub(i64.const_int(64, false), zeros, "segment")?;
-		let shift = builder.build_int_add(segment, k, "")?;
-		let shift = builder.build_int_sub(shift, i64.const_int(1, false), "")?;
-		let first = builder.build_left_shift(i64.const_int(1, false), shift, "")?;
+		let bit = builder.build_int_sub(i64.const_int(63, false), zeros, "index_bit")?;
+		let segment = builder.build_int_sub(bit, k, "")?;
+		let segment = builder.build_int_add(segment, i64.const_int(1, false), "segment")?;
+		let first = builder.build_left_shift(i64.const_int(1, false), bit, "")?;
 		let items = segment_items(builder, segment)?;
+		let later_end = builder.get_insert_block().expect("a block");
 		let offset = builder.build_int_sub(index, first, "")?;
 		let in_later_segment =
 			unsafe { builder.build_in_bounds_gep(self.llvm_type(item), items, &[offset], "")? };
@@ -233,7 +293,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let pointer = builder.build_phi(self.pointer_type(), "item")?;
 		pointer.add_incoming(&[
 			(&in_first_segment, first_block),
-			(&in_later_segment, later_block),
+			(&in_later_segment, later_end),
 		]);
 		Ok(pointer.as_basic_value().into_pointer_value())
 	}
@@ -320,6 +380,62 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(self.fresh(Val::new(to, converted)))
 	}
 
+	/// An empty owner whose complete use set only indexes, iterates and
+	/// pushes cannot change its default k. Unknown calls, aliases, reserve,
+	/// replacement and exported/multifile uses conservatively reject it.
+	fn growing_default_origin(&self, node: NodeId, item: Repr) -> bool {
+		if !self.other_files.is_empty()
+			|| !self.analysis.foreign_args.is_empty()
+			|| self.collection_data_size(self.llvm_type(item)) == 0
+		{
+			return false;
+		}
+		let View::Index { target, .. } = self.view(node) else {
+			return false;
+		};
+		let Resolution::Local(symbol) = self.analysis.resolution(self.ungrouped(target)) else {
+			return false;
+		};
+		if let Some(&known) = self
+			.default_growing_origins
+			.borrow()
+			.get(&(self.file, symbol))
+		{
+			return known;
+		}
+		let binding = self.analysis.symbols.symbol(symbol);
+		let empty = matches!(binding.kind, SymbolKind::Let | SymbolKind::Mutable)
+			&& matches!(self.view(binding.decl_node), View::Declaration { value: Some(value), .. }
+				if matches!(self.view(self.ungrouped(value)), View::Array { items } if items.iter().next().is_none()));
+		let parents = self.parents();
+		let known = empty && self.analysis.resolutions.iter().enumerate().all(|(index, resolution)| {
+			if *resolution != Resolution::Local(symbol) { return true; }
+			let mut at = NodeId::new(index);
+			loop {
+				let Some(&parent) = parents.get(at.index()) else { return false; };
+				if parent == usize::MAX { return false; }
+				let parent = NodeId::new(parent);
+				match self.view(parent) {
+					View::Group(_) => at = parent,
+					View::Index { target, .. } => return target == at,
+					View::For { iterable, .. } => return iterable == at,
+					View::Access { target, .. } if target == at => {
+						let Some(&call) = parents.get(parent.index()) else { return false; };
+						if call == usize::MAX { return false; }
+						return self.analysis.call(NodeId::new(call)).is_some_and(|call| {
+							matches!(call.callee, Callee::Builtin(id) if fa_analyzer::builtins::get(id).path == "Array#push")
+						});
+					}
+					_ => return false,
+				}
+			}
+		});
+		self.default_growing_origins
+			.borrow_mut()
+			.insert((self.file, symbol), known);
+		known
+	}
+
 	/// The place `growing[index]`, checked when the node has `INDEX_CHECK`.
 	pub(crate) fn growing_item(
 		&mut self,
@@ -337,26 +453,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.convert(index, Repr::Int(IntRepr::I64), node.index())?
 			.int();
 		let length = self.growing_length(&self.builder, array)?;
-		// The header exists even when this index fails. Read k before the
-		// conditional bounds checks, so LICM can keep it outside a loop.
-		let k = self.growing_k(&self.builder, array)?;
 		let may_be_negative = index_node.is_none_or(|index_node| self.may_be_negative(index_node));
 		let checked = self.flags(node).contains(NodeFlags::INDEX_CHECK);
-		// Test whether the whole live prefix is contiguous, independently of
-		// the index. LLVM can unswitch a stable loop on this condition, so its
-		// contiguous version keeps only the ordinary bounds check and GEP.
-		// A never-filled empty header has k = -1; mask that speculative shift.
-		let shift = self
-			.builder
-			.build_and(k, k.get_type().const_int(63, false), "")?;
-		let capacity = self.builder.build_left_shift(
-			k.get_type().const_int(1, false),
-			shift,
-			"first_capacity",
-		)?;
-		let contiguous =
-			self.builder
-				.build_int_compare(IntPredicate::ULE, length, capacity, "contiguous")?;
+		let default_k = self.growing_default_origin(node, item).then(|| {
+			self.context
+				.i64_type()
+				.const_int(u64::from(self.segment_bits(item)), false)
+		});
+		let contiguous = if default_k.is_some() {
+			self.context.bool_type().const_zero()
+		} else {
+			self.growing_single_segment(array)?
+		};
 		let first_slot = self
 			.builder
 			.build_struct_gep(self.segmented_type(), array, 6, "")?;
@@ -435,7 +543,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(segmented);
-		let pointer = self.growing_at_with_k(&self.builder, array, item, position, k)?;
+		let pointer = if let Some(k) = default_k {
+			self.growing_at_with_k(&self.builder, array, item, position, k)?
+		} else {
+			self.growing_at(&self.builder, array, item, position)?
+		};
 		let fallback = self.builder.get_insert_block().expect("a block");
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(join);

@@ -30,7 +30,7 @@ Fa is designed for AI agents as much as for humans: everything a function does â
 | `record Point(int x, int y)` | `type Point = { x: Integer, y: Integer }` |
 | `new Point(1, 2)` | `Point { x = 1, y = 2 }` |
 | `sealed interface` + `record` | `type S = Union { ... }` |
-| `interface Reader { ... }` | a structural constraint: `{ read: () => Array<Byte> }` |
+| `interface Reader { ... }` | a structural constraint: `{ read: () => Bytes }` |
 | `assert x == y;` | `assert x == y` |
 | `import java.util.List;` | nothing â€” files see their siblings |
 

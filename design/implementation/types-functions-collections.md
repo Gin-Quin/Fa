@@ -86,7 +86,7 @@ pub enum TypeKind {
 	FloatLit(FloatBits, ConstId),
 	BigInt, BigIntLit(ConstId),
 	Percentage,
-	String, StringLit(Sym), Character,
+	String, StringLit(Sym), Bytes,
 	// ── structured ────────────────────────────────────────────
 	Object(ShapeId),          // Shape { fields: &[FieldEntry] sorted by name bytes, nominal: Option<DeclId> }
 	Tuple(ListId),
@@ -120,7 +120,7 @@ Notes:
 - **Function signatures.** `FnSig { params: &[ParamSig], ret: TypeId, throws: TypeId, requires: &[(Sym, TypeId)], effects: EffectSetId, is_async: bool, passthrough: u32 }`, `ParamSig { ty: TypeId, variadic: bool, stored: bool }`. Parameter **names are not part of the identity** (they are kept in the spelling, for `Parameters` and messages); effect paths refer to parameters by index. `throws` is `NEVER` for no errors. `requires` is sorted by the stable hash of the requirement type (`advanced/requirements.md` keys requirements by shape). `passthrough` is the bitmask of function-typed parameters that are **not stored** (their effects become effects of the call, §4.5). Named arguments, defaults, generic parameters and composition chains are not types: they live in `FnDeclInfo`.
 - **Collections.** `CollKind = Array | GrowingArray | Set | GrowingSet | Map | GrowingMap | Pool | GrowingPool | Columnar | GrowingColumnar | OrderedColumnar | RelationPool(RelationId)`. `key` is `NONE` except for maps.
 - **Reference types** `Ref(T, owner)` appear in parameter types, return types, relation fields and inferred `use` types. Locals never hold `Ref` inside another type except `Optional` (`(T in c)?`) and `Iterator` (`D23`).
-- **Compile-time values.** `ConstValue = Bool | Int(I256) | String(Sym) | Character(Sym) | EnumMember(NominalId, u16) | FieldsValue(FieldsShapeId, Bitset) | KeySet(FieldsShapeId, Bitset) | Array<ListOfConst> | Tuple<..> | Object(ShapeId, ..)`, hash-consed: equal values have equal `ConstId`, so `Matrix<Float, 2 + 2, 4> ≡ Matrix<Float, 4, 4>` falls out of interning the argument list.
+- **Compile-time values.** `ConstValue = Bool | Int(I256) | String(Sym) | EnumMember(NominalId, u16) | FieldsValue(FieldsShapeId, Bitset) | KeySet(FieldsShapeId, Bitset) | Array<ListOfConst> | Tuple<..> | Object(ShapeId, ..)`, hash-consed: equal values have equal `ConstId`, so `Matrix<Float, 2 + 2, 4> ≡ Matrix<Float, 4, 4>` falls out of interning the argument list.
 
 ### 2.3 Cached per-type flags
 
@@ -132,7 +132,7 @@ Computed once when a `TypeId` is interned, stored in a parallel `Vec<TypeFlags>`
 | `FLAT` | invalidation-free (`reference-checking#owning-edges`): primitives, literal unions, enums, fields, relation references, objects of flat fields | reference checker |
 | `TRIVIALLY_COPYABLE` | owns no memory | native copy/drop, JS copy elision |
 | `COMPARABLE` | `==` defined: no function, no `Task`, no thread-safe handle field (`D17`) | `==`, `Set`, `Map` keys, `includes` |
-| `ORDERED` | `<` defined: numbers of one kind, `Percentage`, `String`, `Character` | `sort()`, comparisons |
+| `ORDERED` | `<` defined: numbers of one kind, `Percentage`, `String` (UTF-16 code unit order) | `sort()`, comparisons |
 | `MOVE_ONLY` | contains `Task` or a type with `destroy` | copies, escaping captures, collections |
 | `HAS_VOID` | contains `Void` in a data position | `TY071` |
 | `RECURSIVE` | part of a recursive graph | `DeepKeys`, heap boxing |
@@ -589,7 +589,6 @@ The numeric rules themselves (literal adaptation, range arithmetic, overflow, re
 - `Int(a..b, s) ≤ Int(c..d, s')` iff `c ≤ a` and `b ≤ d`, for **reading and copying**. For a **view inside an aggregate** (an element of a collection, a field reached through a parameter or `use`), additionally `JS_BIGINT(s) == JS_BIGINT(s')` (`D2`, `CV005` "an `Array<Int64>` is not an `Array<Integer>` on every target: convert it with `map((x) => Integer(x))`"). Native views with a different width are handled by specialization (element conversion on load, `D54`).
 - `Float(F32) ≤ Float(F64)` (`D11`); no other implicit conversion between kinds: `Integer`, `Float`, `BigInt`, `Percentage` are unrelated (`CV001`).
 - Integer literal types adapt to any integer type containing them, to a float type and to `BigInt`; float literals to `Float32`/`Float64`; never to `Percentage` without `%`.
-- `Character ≤ String` (a value conversion natively, `D12`).
 - `Byte` is `UInt8`; `Integer` has the range of `Int64` with storage `Default`; `Int64` written explicitly has storage `I64` (`D2`).
 
 ### 3.4 Anonymous unions and optionals
@@ -611,7 +610,7 @@ Run on every union written by the user (annotation, `type`, generic argument, co
 | --- | --- |
 | `number` | `Integer`, ranged and sized integers up to 32 bits and their unsigned forms, `Float`, `Float32`, `Percentage`, enumerations, `Fields` with ≤ 32 flags, their literals |
 | `bigint` | `BigInt`, `Int64`, `UInt64`, `Int128`, `UInt128` written explicitly, `Fields` with > 32 flags |
-| `string` | `String`, `Character`, string literals |
+| `string` | `String`, string literals |
 | `boolean`, `none`, `function`, `range`, `task` | the obvious |
 | `array` | `Array`, `GrowingArray`, `OrderedColumnar`, tuples (all are JavaScript arrays) |
 | one kind per other collection constructor | `Set`, `Map`, `Pool`… (each a distinct JavaScript class or class-tagged object) |
@@ -1176,7 +1175,7 @@ console.log(Child { fieldA = 1, fieldC = "c" }.fieldB)
 
 - Written between angle brackets (decision "Generic angle brackets"): a type declares them right after its name, `type Name<P1, P2: C = D, n: T>`; a function at the start of its signature, `function name = <P>(…) => …`, methods `function map = <Result>(self, …)`, lambdas `<P>(…) => …` and function types `<P>(value: P) => P`.
 - **Capitalized** name: type parameter; optional constraint `: C` (any type; a union means "one of these types", an object type means "has at least these fields", method requirements written as function fields with `self`: `{ describe: (self) => String }`); optional default `= D`.
-- **Lowercase** name: compile-time value parameter; its annotation is the type of the value (required: `GN001`). Allowed value types: `Boolean`, integer types, `String`, `Character`, enumerations, `Fields` (key sets), and arrays, tuples, objects of them (`GN006` for `Float`, functions, collections other than arrays…).
+- **Lowercase** name: compile-time value parameter; its annotation is the type of the value (required: `GN001`). Allowed value types: `Boolean`, integer types, `String`, enumerations, `Fields` (key sets), and arrays, tuples, objects of them (`GN006` for `Float`, functions, collections other than arrays…).
 - A constraint or default may reference earlier parameters (`select = <Entity, keys: Keys<Entity>>(…)`); referencing a later one is `GN002`. Defaults must satisfy constraints (`GN003`). Duplicate names `GN004`. A parameter after one with a default must have a default (`GN005`).
 - A lambda can declare generic parameters, and a function type can have them (a generic function type). A lambda without generic parameters is generic when its expected type is a generic function type; a generic function type is never inferred. A value of a generic function type must be known at compile time, so a generic function type is written only as the type of a parameter of a `function` declaration (methods included), which receives a named function, a lambda written as the argument, or the caller's own parameter of a generic function type; anywhere else (`let`, `static`, `mutable`, return type, field, collection element, parameter of a lambda or of a function type) it is `GN030` (decisions of 2026-11-15, "Generic angle brackets"). `async` precedes the generic parameters: `async <Item>(item: Item) => …`. A function with a parameter of a generic function type is instantiated per function argument. A lambda inside a generic declaration uses the enclosing parameters.
 
@@ -1843,7 +1842,7 @@ console.log(size(11))
 
 - A parameter is an **immutable reference** to the argument: never copied (native: aggregates by pointer, scalars by value since they can't be mutated; JavaScript: the value, objects and collections being references).
 - `mutates p` (or a path below `p`): the function writes through the reference; the caller's argument must be a **mutable place** (`EF011` "`addBonus` mutates its argument, but `alice` is immutable"); a temporary (a call result, a literal) is `EF012` (`D24`).
-- A parameter can't be replaced (`p = …`: `EF013` "a parameter can't be replaced: return the new value"); a primitive parameter can't be mutated at all (`mutates value` on a primitive: `EF014`). Primitive = numbers, `Boolean`, `String`, `Character`, enums, `Fields`, literal unions, `None`, ranges, function values.
+- A parameter can't be replaced (`p = …`: `EF013` "a parameter can't be replaced: return the new value"); a primitive parameter can't be mutated at all (`mutates value` on a primitive: `EF014`). Primitive = numbers, `Boolean`, `String`, enums, `Fields`, literal unions, `None`, ranges, function values.
 - The argument keeps its type: `Type<p>` (§3.11.7).
 - Aliasing: a place passed to a mutated/invalidated parameter must not overlap other arguments, used requirements, used module-level values or references captured by callback arguments (`advanced/reference-checking#arguments-that-alias`; `EF030`).
 
@@ -3360,7 +3359,7 @@ Each item: what is ambiguous or contradictory (with the pages), then the decisio
 
 **D11. `Float32` and `Float64`.** No rule says whether a `Float32` is accepted as a `Float`. **Decision:** `Float32 ≤ Float64` implicitly (exact widening, like integer ranges); mixed arithmetic gives `Float64`; `Float64 → Float32` is the explicit `Float32(x)` (rounding, never fails).
 
-**D12. `Character ≤ String`.** Natively a `Character` is not laid out like a `String`. **Decision:** keep the rule; a copy converts; a view of a collection of `Character` as a collection of `String` is an element-conversion view (`D54`).
+**D12. `Character ≤ String`.** Superseded on 2026-11-15: there is no `Character` type; `text[i]` and the loop variable over a string are `String`s (`design/decisions.md`, "Strings: UTF-16 semantics, UTF-8 storage").
 
 **D13. Enumerations: ordering, `parse`, `members`.** **Decision:** not ordered (`TY085`; compare `Integer(a) < Integer(b)`), no arithmetic; `parse` is an exact, case-sensitive match of the member name; `members` is a static `Array<Color>` in declaration order.
 

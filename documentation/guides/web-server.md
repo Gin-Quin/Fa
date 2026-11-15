@@ -44,7 +44,7 @@ export = {
 
 ## Typed request and response bodies
 
-Types are the schema. `Json.parse`, from `std.json`, reads the type you expect from the context, and either returns a value of that type or throws a `JsonError`:
+Types are the schema. `Json.parse`, from `std.json`, reads the type you expect from the context, and either returns a value of that type or throws a `JsonError`. The body of a request is [`Bytes`](/values/bytes#input-and-output), which `Json.parse` reads directly (`request.text()` decodes it into a `String`):
 
 ```fa
 -- application/handleCreateUser.fa
@@ -237,7 +237,7 @@ Handlers are ordinary functions, so they test without a running server:
 ```fa
 -- application/handleCreateUser.test.fa
 test "rejects a malformed body" {
-	let response = handleCreateUser(Request { body = "{{ not json" })
+	let response = handleCreateUser(Request { body = "{{ not json".toUtf8() })
 
 	assert response.status == 400
 }

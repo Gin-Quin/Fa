@@ -88,7 +88,7 @@ A1 `async` in function types, A2 colorless async on JavaScript (`___sync` rules,
 
 ### Other cross-cutting decisions
 
-Stops (a failed runtime check stops the program, exit code 101, uncatchable; `values/errors#stops`), deep equality (`operations/logical#equality`), optionals (`T??` is `T?`, `?.` short-circuits the chain), strings (grapheme `length` as a deliberate difference from JavaScript, slices typed `String in text`), destructuring (rest patterns, defaults, `try let`), tests (test files export nothing, fresh module-level values per test), build-time code (one interpreter, declared configuration types, network only through the lockfile).
+Stops (a failed runtime check stops the program, exit code 101, uncatchable; `values/errors#stops`), deep equality (`operations/logical#equality`), optionals (`T??` is `T?`, `?.` short-circuits the chain), strings (UTF-16 code units exactly as in JavaScript since 2026-11-15, replacing the grapheme `length`; slices typed `String in text`), destructuring (rest patterns, defaults, `try let`), tests (test files export nothing, fresh module-level values per test), build-time code (one interpreter, declared configuration types, network only through the lockfile).
 
 ## Points to review
 

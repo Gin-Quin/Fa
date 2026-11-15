@@ -215,7 +215,7 @@ Canonicalization rules:
 - A local reference stands for the place it designates: `use person = people[0]; person.age` is the path `people[0].age`.
 - An element whose index or key isn't known is `[..]`.
 - **Relation crossing**: a place reached through a relation field restarts at the collection of the target. In `node.next?.data` with `next: (Node in self.#nodes)?`, the place is `self.#nodes[..].data`. The identity of the step is `Unknown`, and the read of `node.next` itself is a read of `self.#nodes[@node].next`.
-- A string slice `text[a..b]` is `text.Characters(a..b)`.
+- A string slice `text[a..b]` is `text.Characters(a..b)` (the step keeps its name; its bounds are UTF-16 code unit positions).
 - After narrowing `x is Circle` (or `x is not none`), reads of `x`'s fields go through `Payload(Circle)`.
 
 ### 3.2 Owning edges and flatness
@@ -738,7 +738,7 @@ Entering `for x in L` (where `L` is a place; a temporary collection has no const
 
 For relations, the implied effects are what triggers the error: `for friend in ana.friends { town.people.delete(friend) }`: `L = town.people[@ana].friends`; the implied effect `mutates town.people[..].friends` has `L` at or below it → `REF012` "deleting `friend` removes it from `ana.friends` (implied `mutates town.people[..].friends`), which is being iterated".
 
-The loop variable: a reference with place `L[Unknown]` (or `L[Symbol(index, 0)]` when the index binding exists), `kind = LoopVariable`, writable iff `L` is writable and the element is not read-only (set elements, map keys). For a range or a string, the loop variable is a copy (`Integer`, `Character`).
+The loop variable: a reference with place `L[Unknown]` (or `L[Symbol(index, 0)]` when the index binding exists), `kind = LoopVariable`, writable iff `L` is writable and the element is not read-only (set elements, map keys). For a range or a string, the loop variable is a copy (`Integer`; a `String` of one code point).
 
 ### 5.9 Arguments that alias
 
@@ -3664,7 +3664,7 @@ Initialization order and reachability ([15.7](#157-module-level-values-and-initi
 
 | Kind | Names |
 | --- | --- |
-| Types | `Boolean`, `String`, `Character`, `Integer`, `Float`, `BigInt`, `Percentage`, `Byte`, `Int8`…`Int128`, `UInt8`…`UInt128`, `Float32`, `Float64`, `None`, `Never`, `Void`, `Array`, `Set`, `Map`, `Pool`, `Columnar`, `OrderedColumnar`, `GrowingArray`, `GrowingSet`, `GrowingMap`, `GrowingPool`, `GrowingColumnar`, `Tuple`, `Range`, `Task`, `Optional`, `Error`, `Schema`, `Subscription` (D25) |
+| Types | `Boolean`, `String`, `Bytes`, `Integer`, `Float`, `BigInt`, `Percentage`, `Byte`, `Int8`…`Int128`, `UInt8`…`UInt128`, `Float32`, `Float64`, `None`, `Never`, `Void`, `Array`, `Set`, `Map`, `Pool`, `Columnar`, `OrderedColumnar`, `GrowingArray`, `GrowingSet`, `GrowingMap`, `GrowingPool`, `GrowingColumnar`, `Tuple`, `Range`, `Task`, `Optional`, `Error`, `Schema`, `Subscription` (D25) |
 | Type constructors and functions | `Enum`, `Union`, `Errors`, `Fields`, `CStruct`, `CArray`, `Pick`, `Omit`, `Type`, the other type functions |
 | Values | `console`, `Math`, `Task` |
 | Errors | `IndexError`, `KeyNotFound`, `DivisionByZero`, `ArithmeticError`, `Cancelled`, `ParseError` (used by `Integer.parse`) |

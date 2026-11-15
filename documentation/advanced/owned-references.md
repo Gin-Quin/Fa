@@ -55,7 +55,7 @@ The compiler doesn't guess which operations are dangerous: every function declar
 What a mutation invalidates depends on the **type** of the value, because replacing a value destroys what it owned:
 
 - A **flat** value owns nothing: a primitive (number, boolean, character), a union of literals, a reference stored in a [relation](/advanced/relations), or an object whose fields are all flat. Mutating it invalidates nothing.
-- Any other value owns memory: the elements of a collection, the characters of a string, the payload of a union (including an optional), the children of a [recursive type](/advanced/memory-management#recursive-types). Mutating it invalidates every reference into that memory: the elements, the [string slices](/values/strings#slices), the payload, and everything inside them.
+- Any other value owns memory: the elements of a collection, the storage of a string, the payload of a union (including an optional), the children of a [recursive type](/advanced/memory-management#recursive-types). Mutating it invalidates every reference into that memory: the elements, the [string slices](/values/strings#slices), the payload, and everything inside them.
 
 A union that is not a union of literals is never flat, even when its members hold no heap memory, like `Integer?`: a new value may change its member, and so what its payload is. A relation reference is the exception, because a local reference never points into it: `use friend = ana.bestFriend` designates the target, not the field.
 

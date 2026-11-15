@@ -31,7 +31,7 @@ Fa is designed for AI agents as much as for humans: everything a function does â
 | `go f()` | `start f()`: a task that isn't kept is detached and copies its arguments, like `go` |
 | `chan T` | `Channel<T>` |
 | `make(chan T, 10)` | `Channel<T> { capacity = 10 }` |
-| `interface{ Read() []byte }` | a structural constraint: `{ read: () => Array<Byte> }` |
+| `interface{ Read() []byte }` | a structural constraint: `{ read: () => Bytes }` |
 | `import "fmt"` | nothing â€” files see their siblings |
 
 ## Errors, without the ceremony

@@ -320,10 +320,10 @@ A `String` is `{ ptr, length in bytes, capacity | flags }`, 24 bytes, UTF-8.
 
 - **Static strings** (literals) live in read-only data, with a "static" flag in the capacity word. They are never freed, and a first mutation allocates and copies. Since identity is not observable, this is invisible, and it makes the most common string, the literal, free to "copy". This is not copy-on-write: an owned string is never shared.
 - **Small strings** (at most 23 bytes) are stored inline in the 24 bytes, with no allocation.
-- **An "ASCII only" flag** is maintained on every write (a cheap vectorized check of the new bytes). It makes `length` and indexing O(1) in the common case. Otherwise, a heap string caches its grapheme count and lazily builds breadcrumbs (the offset of every 64th grapheme), so indexing scans at most 64 graphemes ([strings](../documentation/values/strings.md#indexing), [Q5](#q5-string-representation-and-the-cost-of-grapheme-length)).
-- **A slice** (`use word = text[0..5]`) is `{ ptr, length }`: a view, never owning, tracked by the invalidation rules. Its bounds are grapheme boundaries.
-- A sequential walk over a string runs one segmentation scan, not one per index. The Unicode tables are generated into the runtime at build time.
-- A `Character` can hold several code points: it is a small string with inline storage, not one integer.
+- **An "ASCII only" flag** is maintained on every write (a cheap vectorized check of the new bytes). It makes `length` and indexing O(1) in the common case. Otherwise, a heap string caches its UTF-16 length and lazily builds breadcrumbs (the offset of every 64th code unit), so indexing scans at most 64 code units (decision of 2026-11-15, which replaces grapheme clusters by UTF-16 code units: [decisions](decisions.md), "Strings: UTF-16 semantics, UTF-8 storage"; [strings](../documentation/values/strings.md#indexing), [Q5](#q5-string-representation-and-the-cost-of-grapheme-length)).
+- **A slice** (`use word = text[0..5]`) is `{ ptr, length }`: a view, never owning, tracked by the invalidation rules. Its bounds are code unit positions, and it carries the ASCII flag of its string.
+- A sequential walk over a string decodes one code point per step. The Unicode tables (UAX #29) are linked only into programs that call `characters()`.
+- There is no `Character` type: `text[i]` is a `String` of one code unit, stored inline, and compared with a literal as a code unit without being built.
 
 ### Objects and tuples
 
@@ -894,13 +894,13 @@ Decided (2026-11-01), the compiler-made heap blocks of [memory management](../do
 - **Escaping closures**: a function value is `{ fn, env }`. An environment of at most 8 bytes that is trivially copyable is stored **in the `env` word itself**, with no allocation (one captured integer, float or small object). A larger environment is a heap block whose header points at a static descriptor `{ size, align, copy, drop }`; copying the closure copies the block, destroying it frees the block.
 - **Task frames**: the frame size of each async instance is known at compile time, so frames come from a **per-thread size-class allocator** (free lists per size class, no lock, no atomic). A frame is freed when its task is awaited, cancelled or destroyed.
 - **`BigInt`**: one 64-bit word. A value that fits in 63 bits is stored inline (tagged), so the common case is plain integer arithmetic with an overflow check; a larger value points at a uniquely owned block of limbs.
-- **`Character`**: up to 15 bytes of UTF-8 inline (every grapheme in practice); longer grapheme clusters go to a heap block.
+- **`Character`**: removed on 2026-11-15 (a one-unit `String` is an inline string).
 
 The documentation now says that objects are values stored inline, where they are declared (in a frame, in their parent, in a collection slot), rather than "on the stack".
 
 ### Q5. String representation and the cost of grapheme `length`
 
-Decided (2026-11-01). `length` is not O(1) in general, but every common case is, and no loop over indices is quadratic:
+Decided (2026-11-01), then changed on 2026-11-15: the same representation now counts **UTF-16 code units** instead of grapheme clusters (read "code unit" for "grapheme" below, no segmentation scan; the bytes may hold lone surrogates, WTF-8; see [decisions](decisions.md), "Strings: UTF-16 semantics, UTF-8 storage"). `length` is not O(1) in general, but every common case is, and no loop over indices is quadratic:
 
 - **Small-string optimization**: a `String` is 24 bytes, and a string of at most 23 bytes is stored inline in them (the last byte holds the remaining capacity and the flags). Most keys, names and identifiers never allocate.
 - **Flags**: static (a literal in read-only data), inline, ASCII. The ASCII flag is maintained on every write by a vectorized check of the new bytes; with it, `length`, indexing and slicing are byte arithmetic.

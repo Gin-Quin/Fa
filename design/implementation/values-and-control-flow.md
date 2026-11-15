@@ -68,7 +68,7 @@ A **literal adapts** to its expected type (`values/numbers#literals`):
 | float (`1.5`, `1e6`) | `Float32` (rounded to nearest, error if it overflows to infinity), `Float64` | `Float` |
 | `12n` | `BigInt` only | `BigInt` |
 | `50%`, `12.5%` | `Percentage` only | `Percentage` |
-| string (`"a"`) | `String`; `Character` when it holds exactly one grapheme cluster | `String` |
+| string (`"a"`) | `String` | `String` |
 | `true`/`false`, `none` | `Boolean`; any optional | `Boolean`; error without expected type [D-21] |
 
 Never: an integer literal never becomes a `Percentage`; a float literal never becomes an integer; `none` never becomes a non-optional type.
@@ -123,8 +123,8 @@ Every interpolated value and every `console.log` argument goes through `toString
 | `Percentage` | `fraction × 100` formatted like a `Float64` after rounding to 15 significant digits, then `%`: `50%`, `12.5%`, `10%` (not `10.000000000000002%`) [D-6] |
 | `Boolean` | `true`, `false` |
 | `none` | `none` |
-| `String`, `Character` at top level | raw text |
-| `String`, `Character` nested in a composite | quoted, with Fa escapes: `"a\"b"` |
+| `String` at top level | raw text |
+| `String` nested in a composite | quoted, with Fa escapes: `"a\"b"` |
 | tuple | `(1, "one")` |
 | array (and growing array) | `[1, 2, 3]`, `[]` |
 | object | `{ x = 1, y = 2 }` in declaration order, `{}` when empty; no type name (typing is structural) |
@@ -531,7 +531,7 @@ Every compiler on every target must accept exactly the programs these rules acce
 | `wrapping*`, `saturating*`, bitwise methods, any other call | the full range of the declared return type (`Integer<min = 0>` for `length`) |
 
 2. **Conditions refine** in the branches of `if`, `while`, `when`, `and`, `or`, `not`, and after early exits: a comparison `x < e`, `x <= e`, `x > e`, `x >= e` where `e` is a constant or a place with a known interval refines `x` (and `e` symmetrically) in both branches; `x is a..b` intersects in the true branch and excludes in the false branch; `x == literal` makes `x` exact (false branch: excludes the value); `x != literal` the reverse. An excluded value at an interval end shrinks the interval (`[0, 10]` minus `{0}` is `[1, 10]`).
-3. **Lengths.** The length of a collection (or the grapheme count of a string [D-97]) is known from its literal until it is mutated. Relational facts: `index < c.length` inside `for index in 0..c.length` and `for item, index in c`; after a guard `if index < c.length` (or in the `else` of its negation), where the guarded expression is a place or a place plus or minus a constant; equal lengths for a copy and for `map` of a collection. An index `i` into a collection of length `L` is proven when `0 ≤ i < L` or `-L ≤ i < 0` is implied by the facts.
+3. **Lengths.** The length of a collection (or the UTF-16 length of a string [D-97]) is known from its literal until it is mutated. Relational facts: `index < c.length` inside `for index in 0..c.length` and `for item, index in c`; after a guard `if index < c.length` (or in the `else` of its negation), where the guarded expression is a place or a place plus or minus a constant; equal lengths for a copy and for `map` of a collection. An index `i` into a collection of length `L` is proven when `0 ≤ i < L` or `-L ≤ i < 0` is implied by the facts.
 4. **Loops** are analysed to a fixpoint. Widening [D-96]: from the second iteration on, a lower bound that decreased becomes `−∞` and an upper bound that increased becomes `+∞` (then clipped by the type). After `mutable count = 0` and a loop body `count += 1`, `count` is `[0, max]`.
 5. **Mutations drop facts.** Assignment replaces; any other mutation of the place drops its facts; a mutation that may change a collection's length drops its length facts.
 
@@ -762,17 +762,18 @@ Sources: `values/strings` (incl. `:::implementation`), `operations/string`, `get
 
 ### Static semantics
 
-- A string literal is a `String`, or a `Character` when a `Character` is expected and the literal is exactly one grapheme cluster (UAX #29 tables of the compiler). An interpolated string is always a `String`.
-- `Character` is accepted where `String` is expected (no conversion visible); the reverse is E-STR-8.
-- `+`: both operands `String` or `Character`; the result is a `String`. Any other operand: E-STR-7. `+=` on a mutable `String` target with a `String` or `Character` value. There is no `*` (use `repeat`).
+- A string literal is a `String`, interpolated or not. There is no `Character` type (decision of 2026-11-15, `design/decisions.md` "Strings: UTF-16 semantics, UTF-8 storage"): the name is unknown, with a fix that names `String`.
+- A `String` is a sequence of UTF-16 code units on every target; every length, position and order below is in code units, exactly as in JavaScript.
+- `+`: both operands `String`; the result is a `String`. Any other operand: E-STR-7. `+=` on a mutable `String` target with a `String` value. There is no `*` (use `repeat`).
 - Interpolation: each expression must have a `toString` (every type except function types and `Void`): E-STR-11 for `Void`, E-STR-12 for a function value [D-39]. An interpolation that can fail must be covered (`"{try items[i]}"` inside a function that declares `IndexError`, or the whole string followed by `catch`).
-- `length`: property, `Integer<min = 0>`, grapheme count; known as a fact for literals [D-97].
-- Indexing `s[i]` with an integer: a `Character`; negative indices count from the end; unproven index: `throws IndexError`; proven out of bounds: E-NUM-17. Non-integer index: E-STR-10. `s.get(i)`: `Character?`.
+- `length`: property, `Integer<min = 0>`, the number of UTF-16 code units; known as a fact for literals [D-97].
+- Indexing `s[i]` with an integer: a `String` of one code unit (possibly a lone surrogate); negative indices count from the end; unproven index: `throws IndexError`; proven out of bounds: E-NUM-17. Non-integer index: E-STR-10. `s.get(i)`: `String?`. `s.codeUnitAt(i)`: `UInt16`, same bound rules as `s[i]`.
 - Slicing `s[range]`: a new `String` (copy) with `let`/`mutable`; `use w = s[range]` declares a slice of type `String in s`, invalidated by any mutation of `s` (appending, assigning, assigning the field that holds it). Bounds from `−length` to `length`; an inverted range gives `""` [D-42]; unproven bounds: `throws IndexError`.
 - Strings are immutable through methods: no method mutates. A `mutable` string changes only by assignment and `+=`.
-- Ordering `< <= > >=`: by Unicode code point (on `String` and `Character`); `==`: same sequence of scalar values, no Unicode normalization [D-43]; a literal operand adapts to `Character` when the other side is a `Character`.
+- Ordering `< <= > >=`: by UTF-16 code unit, as JavaScript's `<`; `==`: same sequence of code units, no Unicode normalization [D-43].
 - `is in` on a string: E-CMP-6 ("use `includes`").
-- Method table (`operations/string#methods`): `isEmpty()`, `get(index)`, `includes/startsWith/endsWith(search)`, `indexOf/lastIndexOf(search): Integer?`, `toUpperCase()/toLowerCase()` (Unicode default case mapping, locale-independent), `trim/trimStart/trimEnd()`, `padStart/padEnd(length: Integer, filler: String = " ")`, `repeat(count: Integer<min = 0>)`, `replace(search, replacement)` (first match), `replaceAll(...)`, `split(separator): Array<String>` (empty separator: characters), `characters(): Array<Character>`, `codePoints(): Array<UInt32>`, `toString()`, `String.compareLocale(a, b, locale: String? = none): Integer`; `Array<String>.join(separator)`. Every position and search is in grapheme clusters, and a search never matches part of a grapheme cluster (`"e\u{301}".includes("e")` is `false`). No regular expressions.
+- Method table (`operations/string#methods`): `isEmpty()`, `get(index)`, `includes/startsWith/endsWith(search)`, `indexOf/lastIndexOf(search): Integer?`, `toUpperCase()/toLowerCase()` (Unicode default case mapping, locale-independent), `trim/trimStart/trimEnd()`, `padStart/padEnd(length: Integer, filler: String = " ")`, `repeat(count: Integer<min = 0>)`, `replace(search, replacement)` (first match), `replaceAll(...)`, `split(separator): Array<String>` (empty separator: code units), `characters(): Array<String>` (grapheme clusters, the only operation using UAX #29), `codePoints(): Array<UInt32>` (`.length` of it counts without building the array), `codeUnitAt(index): UInt16`, `isWellFormed(): Boolean`, `utf8Length(): Integer<min = 0>`, `toUtf8(): Bytes`, `String.fromUtf8(bytes: Bytes): String throws Utf8Error`, `String.fromUtf8Lossy(bytes: Bytes): String`, `toString()`, `String.compareLocale(a, b, locale: String? = none): Integer`; `Array<String>.join(separator)`. Every position and search is in code units, and a search can match a part of a grapheme cluster or of a surrogate pair (`"e\u{301}".includes("e")` is `true`), as in JavaScript. The former `bytes()` is replaced by `toUtf8()`. No regular expressions.
+- `Bytes` (`values/bytes`): a prelude type, a fixed-length sequence of `Byte`: `Bytes.from(items: Array<Byte>)`, `Bytes.filled(length, value: Byte = 0)`, `length`, `isEmpty()`, `get(index): Byte?`, indexing and slicing with the array rules (`use` slices, item assignment on a mutable value, no `push`/`insert`/`delete`), iteration, `==`, `toArray()`, `toString()` (array notation). `Utf8Error { position: Integer }` is a prelude error.
 
 ### Diagnostics
 
@@ -785,8 +786,8 @@ Sources: `values/strings` (incl. `:::implementation`), `operations/string`, `get
 | E-STR-5 | empty interpolation `{}` or `{ }` |
 | E-STR-6 | unterminated interpolation |
 | E-STR-7 | `+` with a non-string operand: "expected a `String`, found an `Integer`: use `"Score: {score}"` or `score.toString()`" |
-| E-STR-8 | `String` where a `Character` is expected (non-literal) |
-| E-STR-9 | literal with zero or several grapheme clusters where a `Character` is expected (`let c: Character = "ab"`, `= ""`) |
+| E-STR-8 | retired (was: `String` where a `Character` is expected) |
+| E-STR-9 | retired (was: literal that is not one grapheme cluster where a `Character` is expected) |
 | E-STR-10 | string indexed by a non-integer, non-range value |
 | E-STR-11 | interpolating a `Void` expression |
 | E-STR-12 | interpolating a function value [D-39] |
@@ -795,15 +796,16 @@ Sources: `values/strings` (incl. `:::implementation`), `operations/string`, `get
 ### Runtime semantics
 
 - Source line breaks are `\n`, including `\r\n` and lone `\r` in the source file [D-16].
-- `length`, indexing, slicing, iteration, searches: grapheme clusters (UAX #29 of the compiler's Unicode version on native; of the engine's `Intl.Segmenter` on JavaScript — the one documented divergence).
+- `length`, indexing, slicing, searches: UTF-16 code units, identical on every target and in the compile-time interpreter. Only `characters()` segments grapheme clusters (UAX #29 of the compiler's Unicode version on native; of the engine's `Intl.Segmenter` on JavaScript — the one documented divergence).
+- An index or a slice that cuts a surrogate pair yields a lone surrogate (no error); concatenating a lone high and a lone low surrogate yields the pair. Every output and `toUtf8()` write `U+FFFD` for a lone surrogate.
 - `IndexError` from unproven indices and slices.
-- Iteration yields `Character` copies (with the index for `for c, i in s`).
+- Iteration yields the code points, as `String` copies of one or two code units (a lone surrogate as it is); the index of `for c, i in s` is the code unit position of the code point (it advances by 2 after a pair).
 
 ### Lowering
 
-**Native** (`values/strings:::implementation`, LLVM Q5): `String` = 24 bytes `{ ptr, byte length, capacity | flags (static, inline, ASCII) }`; ≤ 23 bytes inline; literals in read-only data with their grapheme count computed at compile time, copied only when a mutable string is created from one; heap strings cache their grapheme count and build breadcrumbs (byte offset of every 64th grapheme) at the second indexing after a write; a write clears both; ASCII flag maintained on every write (O(1) `length` and indexing). Slice = `{ ptr, byte length }` on grapheme boundaries. `<` = `memcmp` of UTF-8 (code point order). `Character` = small inline string. Interpolation: compute the pieces, sum the byte lengths, allocate once, write.
+**Native** (`values/strings:::implementation`, LLVM Q5): `String` = 24 bytes `{ ptr, byte length, capacity | flags (static, inline, ASCII) }`; ≤ 23 bytes inline; the bytes are UTF-8 extended to lone surrogates (WTF-8, a pair always stored as its four-byte code point), with a second flag, surrogates, set only by a cut pair; literals in read-only data with their UTF-16 length computed at compile time, copied only when a mutable string is created from one; heap strings cache their UTF-16 length (non-continuation bytes plus four-byte sequences) and build breadcrumbs (byte offset of every 64th code unit) at the second position conversion after a write; a write clears both; ASCII flag (every byte below `0x80`; `'\r'` no longer excluded) maintained on every write (O(1) `length` and indexing, a position is a byte offset). Slice = `{ ptr, byte length }` plus the ASCII flag of its string. `<` = `memcmp` of the bytes, inverted when the first differing bytes are a four-byte lead (`F0`–`F4`) against `EE`/`EF`, and compared by code unit at the difference when a surrogates flag is set. Searches run on the bytes and convert byte offsets to code unit positions; a needle starting with a lone low surrogate or ending with a lone high one is searched by code unit. `s[i]` = inline string, compared with a literal as a code unit without being built; `codeUnitAt` = the unit. `utf8Length()` = the byte length. No ropes. `Bytes` = the layout of `Array<Byte>`; `toUtf8`/`fromUtf8` move the block when the source is dead, `fromUtf8` validates and computes the ASCII flag. Interpolation: compute the pieces, sum the byte lengths, allocate once, write.
 
-**JavaScript**: a JS string. `+` → `+`. Interpolation → a template literal; a `String`, `Character` or integer goes in directly, other values through `$fa.str(value)` (floats `Float32`, percentages, optionals, composites). Grapheme operations through a shared `Intl.Segmenter("und", { granularity: "grapheme" })` with an ASCII fast path (`/^[\x00-\x7F]*$/`). Caveat: JavaScript strings can't cache a grapheme count, so `length` on non-ASCII text is O(n) per call: the backend hoists `s.length` out of loops when `s` isn't mutated. `<` → helper comparing by code point only when either string contains a surrogate (`/[\uD800-\uDFFF]/`), else JS `<`. `==` → `===`. Slices → `substring` (a copy; invalidation is compile-time only). `indexOf` → JS `indexOf` converted to a grapheme index, `-1` → `undefined` (`none`); `includes`/`startsWith`/`endsWith`/`indexOf`/`replace`/`split` must reject matches whose ends are not grapheme boundaries (helper; ASCII fast path is the plain JS call). `toUpperCase`/`toLowerCase`/`trim*`/`padStart`/`padEnd` (pad length in graphemes: helper unless ASCII) /`repeat` → JS. `codePoints()` → `Array.from(s, (c) => c.codePointAt(0))`.
+**JavaScript**: a JS string. `+` → `+`. Interpolation → a template literal; a `String` or integer goes in directly, other values through `$fa.str(value)` (floats `Float32`, percentages, optionals, composites). Every operation is the JavaScript one, with no helper and no cache: `length` → `.length`, `s[i]` → `s[i]` after the bound check, `<` → `<`, `==` → `===`, slices → `slice` (a copy; invalidation is compile-time only), `indexOf`/`lastIndexOf` → JS, `-1` → `undefined` (`none`), `includes`/`startsWith`/`endsWith`/`replace`/`replaceAll`/`split`/`toUpperCase`/`toLowerCase`/`trim*`/`padStart`/`padEnd`/`repeat`/`isWellFormed` → JS, `codeUnitAt` → `charCodeAt`. Iteration → `for…of`, or with an index a loop on `codePointAt` advancing by the code point's length. `characters()` → a shared `Intl.Segmenter("und", { granularity: "grapheme" })`. `codePoints()` → `Array.from(s, (c) => c.codePointAt(0))`. `utf8Length()` → `Buffer.byteLength(s)` on Bun and Node, a `charCodeAt` loop on `web`. `toUtf8()` → shared `TextEncoder`; `String.fromUtf8` → shared `TextDecoder("utf-8", { fatal: true, ignoreBOM: true })` (a failure becomes `Utf8Error`), `fromUtf8Lossy` → the same without `fatal`. `Bytes` → `Uint8Array` (`slice()` to copy, `subarray()` for a `use` slice, helpers for `==` and `toString`).
 
 ### Tests
 
@@ -820,22 +822,24 @@ Valid:
 - T-STR-9 `let user: { name: String? } = { name = none } · console.log("Name: {user.name ?? "anonymous"}")` → `Name: anonymous`
 - T-STR-10 `type Point = { x: Integer, y: Integer } · console.log("Origin: {Point { x = 0, y = 0 }}")` → `Origin: { x = 0, y = 0 }`
 - T-STR-11 `console.log("{0.5} {50%} {none} {true} {[1, 2]} {(1, "a")}")` → `0.5 50% none true [1, 2] (1, "a")`
-- T-STR-12 `let snow: Character = "☃" · let flag: Character = "🇫🇷" · console.log(snow, flag)` → `☃ 🇫🇷`
-- T-STR-13 `let first: Character = "F" · let text: String = first · console.log("Letter: " + first, text)` → `Letter: F F`
-- T-STR-14 `console.log("héllo".length, "🇫🇷".length, "e\u{301}".length)` → `5 1 1`
+- T-STR-12 `let face = "😀" · console.log(face[0].length, face[0].isWellFormed(), face[0] + face[1] == face, face[0..1] + face[1..] == face)` → `1 false true true`
+- T-STR-13 `let name = "Fa" · let first: String = name[0] · console.log("Letter: " + first, name.codeUnitAt(0))` → `Letter: F 70`
+- T-STR-14 `console.log("héllo".length, "🇫🇷".length, "e\u{301}".length, "héllo".utf8Length(), "😀".utf8Length())` → `5 4 2 6 4`
 - T-STR-15 `let name = "Fa" · console.log(name[0], name[-1], name[0] == "F")` → `F a true` (no `try`: literal length fact)
 - T-STR-16 `let s = "hello" · console.log(s[1..3], s[1..=3], s[1..], s[..2], s[-3..])` → `el ell ello he llo`
 - T-STR-17 `let s = "hello" · console.log(s[3..1] == "")` → `true` [D-42]
 - T-STR-18 `function idx = (): Integer => 10 · let s = "abc" · console.log(s.get(idx()), s[idx()] catch error => "?")` → `none ?`
 - T-STR-19 `mutable output = "" · for item in [1, 2, 3] { · output += item.toString() · output += "," · } · console.log(output)` → `1,2,3,`
-- T-STR-20 `for c, i in "aé🇫🇷" { console.log("{i}:{c}") }` → `0:a / 1:é / 2:🇫🇷`
-- T-STR-21 `console.log("abc" < "abd", "Z" < "a", "\u{FFFF}" < "\u{10000}")` → `true true true` (code point order; JS code-unit order would say `false` for the last)
+- T-STR-20 `for c, i in "aé😀b" { console.log("{i}:{c}") }` → `0:a / 1:é / 2:😀 / 4:b`
+- T-STR-21 `console.log("abc" < "abd", "Z" < "a", "\u{FFFF}" < "\u{10000}")` → `true true false` (UTF-16 code unit order, as JS: `U+10000` starts with the unit `D800`)
 - T-STR-22 `console.log("é" == "e\u{301}")` → `false` [D-43]
 - T-STR-23 `let t = "hello world" · console.log(t.includes("world"), t.startsWith("hello"), t.endsWith("world"), t.indexOf("world"), t.indexOf("planet"))` → `true true true 6 none`
 - T-STR-24 `console.log("hello-world".replace("-", " "), "a-b-c".replaceAll("-", " "), "a,b,c".split(","), ["a", "b"].join(", "))` → `hello world a b c ["a", "b", "c"] a, b`
 - T-STR-25 `console.log("ß".toUpperCase(), "  padded  ".trim(), "ab".repeat(3), "7".padStart(3, "0"))` → `SS padded ababab 007`
-- T-STR-26 `console.log("e\u{301}x".includes("e"), "🇫🇷🇩🇪".indexOf("🇩🇪"))` → `false 1`
-- T-STR-27 `console.log("abc".codePoints(), "ab".characters(), "a😀".split(""))` → `[97, 98, 99] ["a", "b"] ["a", "😀"]`
+- T-STR-26 `console.log("e\u{301}x".includes("e"), "🇫🇷🇩🇪".indexOf("🇩🇪"), "🇫🇷🇩🇪".characters().length, "😀".includes("😀"[0]))` → `true 4 2 true`
+- T-STR-27 `console.log("abc".codePoints(), "ab".characters(), "ab".split(""), "a😀".split("").length, "a😀".codePoints().length)` → `[97, 98, 99] ["a", "b"] ["a", "b"] 3 2`
+- T-STR-31 `let bytes = "héllo".toUtf8() · console.log(bytes.length, bytes[1], bytes, String.fromUtf8(bytes) catch error => "?")` → `6 195 [104, 195, 169, 108, 108, 111] héllo`
+- T-STR-32 `console.log(String.fromUtf8(Bytes.from([104, 255])) catch error => error.position, String.fromUtf8Lossy(Bytes.from([104, 255])), "😀"[0].toUtf8())` → `1 h� [239, 191, 189]`
 - T-STR-28 `console.log(String.compareLocale("a", "b") < 0)` → `true`
 - T-STR-29 `mutable text = "hello world" · use word = text[0..5] · console.log(word)` → `hello`
 - T-STR-30 `console.log("a" + "b" + "c", "x".isEmpty(), "".isEmpty())` → `abc false true`
@@ -848,8 +852,8 @@ Invalid:
 - T-STR-43 `let s = "a } b"` ⇒ E-STR-4
 - T-STR-44 `let s = "a {} b"` ⇒ E-STR-5
 - T-STR-45 `let score = 42 · let label = "Score: " + score` ⇒ E-STR-7
-- T-STR-46 `let text = "F" · let c: Character = text` ⇒ E-STR-8
-- T-STR-47 `let letters: Character = "ab"` ⇒ E-STR-9; `let e: Character = ""` ⇒ E-STR-9
+- T-STR-46 `let c: Character = "F"` ⇒ unknown type `Character` (fix: `String`)
+- T-STR-47 `mutable bytes = Bytes.filled(2) · bytes.push(1)` ⇒ E-OBJ-5 (no such method)
 - T-STR-48 `let s = "abc" · let c = s[true]` ⇒ E-STR-10
 - T-STR-49 `function log = (m: String) => { · console.log(m) · } · console.log("{log("a")}")` ⇒ E-STR-11
 - T-STR-50 `function f = (x: Integer) => x · console.log("{f}")` ⇒ E-STR-12
@@ -1210,7 +1214,7 @@ Sources: `operations/logical`, `control-flow/conditionals#narrowing`, `types/uni
 
 **Equality** (`==`, `!=`, result `Boolean`):
 
-- The operand types must be **compatible**: one is accepted where the other is expected. Specifically: an optional with its base type (or `none`); integers of any sizes and ranges with each other; `String` with `Character`; a literal adapts to the type of the other operand (`name[0] == "F"` compares characters; `point == { x = 1, y = 2 }` types the literal as the other side's type); structural object types where one is accepted by the other. Otherwise `E-CMP-1` ("cannot compare `String` with `Integer`"). Integers with floats, floats of different widths, `BigInt` with integers, `Percentage` with numbers: E-CMP-1.
+- The operand types must be **compatible**: one is accepted where the other is expected. Specifically: an optional with its base type (or `none`); integers of any sizes and ranges with each other; a literal adapts to the type of the other operand (`point == { x = 1, y = 2 }` types the literal as the other side's type); structural object types where one is accepted by the other. Otherwise `E-CMP-1` ("cannot compare `String` with `Integer`"). Integers with floats, floats of different widths, `BigInt` with integers, `Percentage` with numbers: E-CMP-1.
 - A type containing a function (function pointer field, function value) can't be compared: `E-CMP-4`.
 - The right side is a type name (`living == Animal`): `E-CMP-8` ("`Animal` is a type: use `is`").
 - Chaining `a == b == c`, `a != b == c`: `E-CMP-3`.
@@ -1219,7 +1223,7 @@ Sources: `operations/logical`, `control-flow/conditionals#narrowing`, `types/uni
 
 **Ordering** (`<`, `<=`, `>`, `>=`):
 
-- Ordered types: integers (any sizes, mixed), floats of the same type, `BigInt`, `Percentage`, `String`/`Character` (code point order). Anything else (`Boolean`, tuples, objects, collections, optionals, unions): `E-CMP-2`. Mixed kinds: E-CMP-1.
+- Ordered types: integers (any sizes, mixed), floats of the same type, `BigInt`, `Percentage`, `String` (UTF-16 code unit order). Anything else (`Boolean`, tuples, objects, collections, optionals, unions): `E-CMP-2`. Mixed kinds: E-CMP-1.
 - Chains: `a < b <= c` means `a < b and b <= c` with `b` evaluated once, short-circuiting. All operators of a chain go in one direction (`<`/`<=` or `>`/`>=`): mixing is `E-CMP-3`. A parenthesized comparison is a `Boolean` operand: `(a < b) < c` is E-CMP-2.
 - NaN: every ordering is `false`.
 
@@ -1411,7 +1415,7 @@ Uncovered: `E-ERR-3` ("`loadScore` can fail with `ApiError`. Use `try` to propag
 
 - The name is required and exists only in the handler; its type is the union of the error types of the failing expressions of the left operand (left operand = everything the precedence gives it: `a + f() catch e => 0` covers `a + f()`).
 - The handler is an expression or a block (`{` after `=>` is a block); `return`, `throw`, `break`, `continue` in it act on the enclosing function or loop (it is not a function).
-- Type [D-98]: like the branches of an `if`: with an expected type, both the left operand and the handler are checked against it; without one, the handler is checked with the left operand's type as expected type (so `items[i] catch error => 0` stays an `Integer`, and `s[i] catch error => "?"` a `Character`), and the result is the union of both widened types; a `Never` handler adds nothing.
+- Type [D-98]: like the branches of an `if`: with an expected type, both the left operand and the handler are checked against it; without one, the handler is checked with the left operand's type as expected type (so `items[i] catch error => 0` stays an `Integer`, and `s[i] catch error => "?"` a `String`), and the result is the union of both widened types; a `Never` handler adds nothing.
 - `when error is { … }` in the handler must be exhaustive over the error union.
 
 **Misuses:**
@@ -1604,7 +1608,7 @@ Source: `control-flow/conditionals` (canonical for `if`, narrowing, `when`), `ty
 | `Boolean` | `true` and `false` |
 | integer type | literals and ranges **with literal bounds** covering the subject's interval (minus excluded values) |
 | union of literals | every literal |
-| `Float`, `String`, `Character`, objects, collections… | `else` required |
+| `Float`, `String`, objects, collections… | `else` required |
 
 - A branch whose patterns are all matched by earlier branches (including a duplicate literal): `W-WHEN-1`; an `else` when everything is covered: `W-WHEN-2`.
 
@@ -1689,7 +1693,7 @@ Source: `control-flow/loops`, `values/ranges#iterating-over-a-range`, `advanced/
 - Iterable, evaluated once: a `Range` with a start (E-RNG-3), a collection (`Array`, `Set`, `Map`, `Pool`, `Columnar`, `OrderedColumnar`, growing versions), a `String`, an iterator (`values()` chains). Anything else: `E-LOOP-1` ("cannot iterate over an `Integer`: use a range `0..count`"); an optional collection: E-OPT-1.
 - Pattern: a name, `name, index`, or a destructuring pattern (object, tuple); omitted when unused (`for 0..10 { }`, `for items { }`). An array pattern in a `for`: `E-LOOP-2` (an element-wise `IndexError` would be hidden; use a tuple) [D-32].
 - `index` only over `Array`, `GrowingArray`, `String` (and `OrderedColumnar`, which has the positional interface): `E-LOOP-3` otherwise [D-73]. It is an immutable `Integer` with the facts `0 ≤ index < collection.length`.
-- Loop variables: over a range or a string, immutable copies (`Integer` with the range's interval; `Character`); assigning them is E-DECL-3 [D-72]. Over a collection, **references** to the elements: mutable when the collection is a mutable place (a `mutable` value, a `mutates` parameter, a `mutable use`), read-only otherwise; `Set`/`GrowingSet` elements and `Map` keys always read-only; destructured names are references to the fields. Writing through them mutates the collection (a parameter needs the corresponding `mutates` effect, e.g. `mutates players[..].score`).
+- Loop variables: over a range or a string, immutable copies (`Integer` with the range's interval; a `String` of one code point); assigning them is E-DECL-3 [D-72]. Over a collection, **references** to the elements: mutable when the collection is a mutable place (a `mutable` value, a `mutates` parameter, a `mutable use`), read-only otherwise; `Set`/`GrowingSet` elements and `Map` keys always read-only; destructured names are references to the fields. Writing through them mutates the collection (a parameter needs the corresponding `mutates` effect, e.g. `mutates players[..].score`).
 - Iteration rule (`advanced/reference-checking#iteration`): the body can't mutate the iterated place `L` or a place above it, mutate `L.length`/`L.size`, or invalidate a place that may designate an element of `L`, directly, through an alias, or through the effects of a called function (implied relation effects included): `E-LOOP-4` (naming the operation: "cannot add elements to `scores` while iterating over it"; "`register` mutates `people.size` while the loop iterates over `people`"). Writing elements in place is allowed.
 - `for` is a statement: using it as a value is `E-LOOP-6`; `break <value>` in a `for` or `while` is `E-LOOP-7`.
 - `@for`: the iterable must be a `static` value (`E-LOOP-8`); unrolled (out of scope). `for parallel`: native only (concurrency, out of scope).
@@ -1880,7 +1884,7 @@ The ten most consequential are D-4, D-1/D-2, D-5, D-7, D-8, D-9, D-17, D-23, D-2
 - **D-94 (C) Literal operands that don't fit the other operand's type.** `a + 1000` with `a: Int8`. **Decision:** the literal contributes its exact value; the base type is `a`'s; the sink decides (E-NUM-10 unannotated, valid into `Integer`).
 - **D-95 (C) Excluded values.** "An integer keeps a range and a set of excluded values." **Decision:** a list of at most 8 excluded intervals per place; beyond, the oldest are dropped (sound: dropping a fact only loses precision). Fixed so that every compiler agrees.
 - **D-96 (C) Loop widening.** "A bound that keeps growing becomes unknown." **Decision:** widen from the second iteration of the fixpoint (a bound that moved outward becomes infinite, then clipped by the type); identical for references (reference checking uses the same widening).
-- **D-97 (C) String lengths as facts.** The docs index `"Fa"[0]` without `try`, but rule 3 of range analysis only mentions collections. **Decision:** a string literal's grapheme count is a length fact, like a collection literal's length, until the string is mutated.
+- **D-97 (C) String lengths as facts.** The docs index `"Fa"[0]` without `try`, but rule 3 of range analysis only mentions collections. **Decision:** a string literal's UTF-16 length is a length fact, like a collection literal's length, until the string is mutated.
 - **D-105 (C) Float-to-integer conversions and facts.** "`Integer.round(f)` throws unless it is a literal". **Decision:** an exact float fact counts as a literal (`let f = 2.7` then `Integer.round(f)` needs no `try`), consistent with integer conversions, which use facts.
 
 ### Printing
@@ -1900,7 +1904,7 @@ The ten most consequential are D-4, D-1/D-2, D-5, D-7, D-8, D-9, D-17, D-23, D-2
 - **D-41 (C) Range bound types.** "The bounds are integers of any integer type" but `start`/`end` are `Integer?`. **Decision:** bounds must fit `Integer` by the usual range rule (`UInt64` needs a proof or conversion); floats/`BigInt`/strings E-RNG-2.
 - **D-42 (C) Inverted slices.** Ranges: "a slice with an end before its start is empty". **Decision:** confirmed for strings and arrays; only the bounds themselves are checked (`IndexError` when outside `[-length, length]`).
 - **D-43 (C) String equality and normalization.** **Decision:** `==` compares scalar values exactly, no normalization (`"é" != "e\u{301}"`), as JavaScript does; normalization would be an explicit method later.
-- **D-44 (C) `Character` literals.** **Decision:** only a plain literal (no interpolation) with exactly one grapheme cluster adapts to `Character` (`""` is E-STR-9); `Character + Character` is a `String`.
+- **D-44 (C) `Character` literals.** Superseded on 2026-11-15: there is no `Character` type (`design/decisions.md`, "Strings: UTF-16 semantics, UTF-8 storage").
 - **D-64 (B) Tuples on JavaScript.** **Decision:** plain JS arrays, copied under the same "observable write" rule as objects.
 - **D-78 (C) Spreading a superset.** `{ ...hero }` where a `Human` is expected brings `powers`. **Decision:** E-OBJ-1, as the page says ("can't have fields the expected type lacks"); copy into the narrower type first (`let h: Human = hero`).
 - **D-79 (C) Field before a spread.** Only "a field written after the spread replaces the copied one" is specified. **Decision:** a field written before a spread that provides it is E-OBJ-8 (a dead write; one way: spread first); a later spread may replace an earlier spread's fields (same types).
@@ -1951,7 +1955,7 @@ The ten most consequential are D-4, D-1/D-2, D-5, D-7, D-8, D-9, D-17, D-23, D-2
 - **D-77 (C) Impossible literal patterns.** **Decision:** E-WHEN-3 (consistent with E-CMP-7 for `is`).
 - **D-84 (C) Parenthesized comparisons.** **Decision:** `(a < b) < c` is E-CMP-2 (a `Boolean` is not ordered); `(a < b) == c` is a valid `Boolean` equality.
 - **D-92 (B) Error values on JavaScript.** **Decision:** classes extending a runtime `FaError`, not `Error` (no stack capture on the failure path, which is an ordinary control flow in Fa); debug builds may capture stacks.
-- **D-98 (C) Type of a `catch` expression.** **Decision:** typed like the two branches of an `if`, the handler using the left operand's type as its expected type when there is no outer one (`s[i] catch error => "?"` is a `Character`).
+- **D-98 (C) Type of a `catch` expression.** **Decision:** typed like the two branches of an `if`, the handler using the left operand's type as its expected type when there is no outer one (`s[i] catch error => "?"` is a `String`).
 - **D-99 (C) `?.` on a `Void` method.** **Decision:** allowed as a statement only (E-OPT-4 when its value is used).
 - **D-100 (C) `Never` on the right of `??`.** `x ?? return 0` follows from "`Never` fits anywhere". **Decision:** allowed, the result is non-optional; the left place is not narrowed by it (it is not a test).
 - **D-102 (C) Narrowing inside closures.** Unspecified. **Decision:** a closure sees the narrowings of its captured places at creation (escaping closures capture copies, non-escaping ones run during the call); a write to the place inside the closure, or by another callback of the same call, drops it inside the closure.
@@ -1964,7 +1968,7 @@ The checker (`fa-checker`, a new crate on the parser's tree, as decided in the s
 
 0. **Parser prerequisites.** Diagnostics with spans instead of `panic!` (the checker and the tests need error nodes); precedence fixes D-1, D-2, D-3; arbitrary-precision integer literals D-13; negative literals D-14; literal diagnostics D-11, D-12; CRLF D-16; nested strings in interpolation; rest patterns; `else`-on-next-line diagnostic. Unlocks: every `T-LEX-*` and the syntax-error tests.
 1. **Names, scopes, declarations** (section 5 without references): scopes, shadowing, same-scope redeclaration, assignment to undeclared, `let`/`mutable`, deep immutability, the declaration shape errors. Needs: 0. Unlocks most `T-DECL-1…5`, `T-DECL-20…30`.
-2. **Type representation and expected-type propagation** (sections 2.1–2.5): scalars, `String`/`Character`, `Boolean`, `None`/`Void`/`Never`, optionals (`T?` flattening), objects (literal checking, missing/extra fields, typed literals), tuples, anonymous unions and their validity, function types (enough for calls). Literal adaptation (no ranges yet). `toString` and `console.log` in the runtime of the JS backend. Unlocks: first output tests (`T-STR-1…13`, `T-OBJ-1…5`, `T-TUP-1…4`).
+2. **Type representation and expected-type propagation** (sections 2.1–2.5): scalars, `String`, `Boolean`, `None`/`Void`/`Never`, optionals (`T?` flattening), objects (literal checking, missing/extra fields, typed literals), tuples, anonymous unions and their validity, function types (enough for calls). Literal adaptation (no ranges yet). `toString` and `console.log` in the runtime of the JS backend. Unlocks: first output tests (`T-STR-1…13`, `T-OBJ-1…5`, `T-TUP-1…4`).
 3. **Expressions without flow facts**: booleans and conditions (no truthiness), equality/ordering compatibility (section 13 minus narrowing), string concatenation and interpolation (section 7), number kinds and the result-type table (6.6) with literal adaptation, conversions as plain typed calls, `if`/`when`/`do` block values and the typing of `if`/`when` expressions (D-29), `Never`. JS backend: statement lifting (section 19). Unlocks: `T-BOOL-*`, `T-CMP-1…11`, `T-IF-*`, `T-DO-*`, the kind-mixing errors.
 4. **Flow facts engine** (2.1, 14): a structured walk with an environment of facts per place, joins at merges, early exits, the end-of-narrowing events (assignments, calls with `mutates`, `await`). First users: optionals (`is none`, `== none`, `?.`, `??`), union narrowing with `is Type`, literal narrowing, `when` on named unions/booleans/literal unions with exhaustiveness and `as` bindings, `assert`. Unlocks: `T-OPT-*`, `T-NAR-*` (non-integer), `T-WHEN-*` (non-integer).
 5. **Errors** (section 15): `throws` signatures and inference for single-expression bodies, failing expressions and the coverage rule, `try`/`catch` typing, `throw`, `Error`, built-in errors, `when` on errors, escaped errors at the top level. Needs: 4 (`when error is` narrows). Must precede 6, since index, division and conversion failures are errors. JS: `FaError` classes, `catch` lowering. Native: tagged results. Unlocks: `T-ERR-*`.

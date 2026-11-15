@@ -1,9 +1,20 @@
 import { describe, expect, test } from "bun:test";
 
 import { FaHashMap } from "./collections.js";
-import { faAssign, faCopy, faCopyInto } from "./copy.js";
+import { FaAtomic, FaChannel, FaMutex } from "./concurrency.js";
+import { faAssign, faCopy, faCopyGraph, faCopyInto } from "./copy.js";
 
 describe("copies", () => {
+	test("structural and relation-graph copies retain shared synchronization handles", () => {
+		const values = [new FaAtomic(0), new FaMutex({ value: 1 }), new FaChannel(1)];
+		const source = { values };
+		for (const copy of [faCopy(source), faCopyGraph(source)]) {
+			expect(copy).not.toBe(source);
+			expect(copy.values).not.toBe(values);
+			for (let index = 0; index < values.length; index++)
+				expect(copy.values[index]).toBe(values[index]);
+		}
+	});
 	test("faCopy copies nested objects and collections", () => {
 		const value = { name: "A", pets: [{ name: "Rex" }], tags: new Set(["x"]) };
 		const copy = faCopy(value);

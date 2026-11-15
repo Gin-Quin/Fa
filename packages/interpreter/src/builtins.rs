@@ -439,6 +439,8 @@ pub fn call(
 	let arg = |index: usize| argument(&arguments, index);
 	Ok(match path {
 		// ── strings ──
+		"String#capacity" => Value::int(text(&receiver)?.encode_utf16().count() as i64),
+		"String.from" => receiver.clone(),
 		"String#length" => Value::int(grapheme_count(text(&receiver)?) as i64),
 		"String#isEmpty" => Value::Boolean(text(&receiver)?.is_empty()),
 		"String#get" => {
@@ -607,9 +609,18 @@ pub fn call(
 		}
 
 		// ── arrays, sets, maps (reading) ──
-		"Array#length" => Value::int(receiver.items().map_or(0, <[Value]>::len) as i64),
-		"Set#size" => Value::int(receiver.items().map_or(0, <[Value]>::len) as i64),
-		"Map#size" => match &receiver {
+		"Array#capacity"
+		| "Pool#capacity"
+		| "Columnar#capacity"
+		| "OrderedColumnar#capacity"
+		| "OrderedColumnar#length"
+		| "Pool#size"
+		| "Columnar#size"
+		| "Array#length" => Value::int(receiver.items().map_or(0, <[Value]>::len) as i64),
+		"Set#capacity" | "Set#size" => {
+			Value::int(receiver.items().map_or(0, <[Value]>::len) as i64)
+		}
+		"Map#capacity" | "Map#size" => match &receiver {
 			Value::Map(entries) => Value::int(entries.len() as i64),
 			_ => Value::int(0),
 		},
@@ -750,8 +761,14 @@ pub fn call(
 				_ => Value::Boolean(mine.iter().all(|item| contains(&other, item))),
 			}
 		}
-		"Array.from" => list(iterate(&receiver)?),
-		"Set.from" => {
+		"Array.from"
+		| "GrowingArray.from"
+		| "Pool.from"
+		| "GrowingPool.from"
+		| "Columnar.from"
+		| "GrowingColumnar.from"
+		| "OrderedColumnar.from" => list(iterate(&receiver)?),
+		"Set.from" | "GrowingSet.from" => {
 			let mut set = Vec::new();
 			for item in iterate(&receiver)? {
 				if !contains(&set, &item) {
@@ -760,7 +777,7 @@ pub fn call(
 			}
 			Value::Set(Arc::new(set))
 		}
-		"Map.from" => {
+		"Map.from" | "GrowingMap.from" => {
 			let mut entries = Vec::new();
 			for item in iterate(&receiver)? {
 				let (key, value) = pair(item)?;
@@ -799,6 +816,9 @@ pub fn mutate(
 	receiver: &mut Value,
 	arguments: Vec<Value>,
 ) -> Result<Value, Error> {
+	if path.ends_with("#reserve") {
+		return Ok(Value::None);
+	}
 	let arg = |index: usize| argument(&arguments, index).cloned();
 	match receiver {
 		Value::Array(items) => {

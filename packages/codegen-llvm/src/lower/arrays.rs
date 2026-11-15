@@ -173,6 +173,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "`Array.from`"));
 		};
 		let item = self.item_repr(item_type, node)?;
+		let source = if matches!(source.repr, Repr::Pool(_) | Repr::Columnar(_)) {
+			let source = self.fresh(source);
+			let view = self.pool_view(source, node)?;
+			self.emit_copy(view)?
+		} else {
+			source
+		};
 		let source = if let Repr::Growing(_) = source.repr {
 			// taken: its items move into an array
 			let source = self.fresh(source);

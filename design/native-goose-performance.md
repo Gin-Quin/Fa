@@ -1149,3 +1149,66 @@ Avec `LLVM_SYS_181_PREFIX`, `CARGO_TARGET_DIR=$HOME/.cache/fa-goose-target` et
   `GrowingArray`, et le cas d'analyseur `ref-44.fa` ;
 - le runtime C est régénéré par `generate.sh` (IR versionné identique à celui
   qu'il produit) ; le `fa` de release est reconstruit avant les mesures.
+
+
+## Capacité et réservation (2026-11-15)
+
+`capacity`, `reserve(additional)` et `from(source, capacity = n)` sont disponibles
+sur les chaînes et toutes les collections redimensionnables, dont toutes les
+variantes croissantes et `OrderedColumnar`. `Bytes` reste de longueur fixe.
+L'en-tête de `GrowingArray` passe à 64 octets (40 sur wasm32), avec trois
+pointeurs de segments intégrés ; `k` appartient au tableau et une réservation à
+vide donne un premier bloc contigu. Les adresses des éléments existants restent
+stables. Les conventions de retour des fonctions ne changent pas.
+
+Les portages en octets réservent `parts`, `joined`, `output` et `lastEntry`.
+`main.fa` réserve aussi `output` : c'est l'usage naturel de l'API pour un bloc
+borné de lignes, dont le stockage est réutilisé entre les blocs.
+
+Mesure : `variants.py`, 21 passages alternés, CPU 1, médiane utilisateur + système,
+3 000 000 entrées ; Callgrind sur le processus entier à 300 000 entrées.
+Goose est compilé avec **clang 18, `-O2`**, vérifié dans les journaux de construction
+(`GOOSE_CC` et `CC` explicitement définis). VM partagée : charge moyenne de 9,5
+à la collecte finale ; les temps avant/après ne sont pas appariés. Les
+[données brutes](native-goose-capacity-results.json) gardent les échantillons,
+les commandes, les empreintes des exécutables et les vérifications contre Rust.
+
+| Version | Médiane CPU | Instructions | Variation des instructions depuis `c74a2278` |
+| --- | ---: | ---: | ---: |
+| `String` | 0,1810 s | 174,412 M | +0,15 % |
+| `Array<Byte>` | 0,1968 s | 177,365 M | −6,80 % |
+| `GrowingArray<Byte>` | 0,2136 s | 224,643 M | +8,79 % |
+| Goose | 0,1557 s | 148,698 M | stable |
+
+La réservation réduit les croissances de l'`Array`. Le tableau croissant vaut
+1,086 fois l'`Array` en temps, mais reste à 1,372 fois Goose : le critère de
+clôture de la décision n'est donc pas atteint. Sa hausse d'instructions est
+réelle : `appendInteger` +11,47 M, `main` +5,73 M et `add` +2,87 M, partiellement
+compensées par la disparition des allocations de croissance. L'assembleur montre
+le coût du `k` variable, des choix de segment et des chargements d'en-tête ; sa
+lecture avant les contrôles de bornes permet à LLVM de la sortir de la boucle
+d'écriture des chiffres. Il reste un travail de performance ; cette mesure ne
+justifie pas à elle seule une réservation d'espace virtuel.
+
+**Contrôle des 25 programmes** : toutes les sorties restent identiques à Rust.
+Les variations au-delà des quelques instructions de démarrage sont : `calc`
++0,068 %, `records` +0,149 %, `respond` +0,256 %, `sexp` −0,052 %,
+`string-building` +0,151 %, `word-count` +0,406 % et `words` −0,257 %.
+Les 18 autres restent à 113 instructions près. Les correctifs finaux de libération
+des sources lorsqu'une expression de capacité lève une erreur, et du chemin
+JavaScript des tableaux de booléens, produisent les mêmes 27 exécutables natifs
+d'audit, octet pour octet, que ceux mesurés (liaison avec `CC=clang18`).
+
+
+Un contrôle supplémentaire conserve un `GrowingArray<Integer>` **sans
+réservation** : un million d'éléments, dix millions de lectures à pas 997,
+21 passages alternés. Médianes CPU avant/après : 0,1331 / 0,1378 s ; médiane des
+rapports appariés : 1,0054 (nouveau plus rapide dans 10 paires sur 21).
+Callgrind, avec 100 000 lectures après la même initialisation : +300 139
+instructions (+2,08 %). Le curseur de `push` conserve les quatre chargements
+d'en-tête vérifiés par le test d'IR ; l'indexation à `k` variable garde un coût.
+
+Validation finale : 1 090 tests Rust dans 53 suites, zéro échec, huit ignorés ;
+Clippy sans avertissement ; 514 tests du runtime JavaScript ; documentation,
+construction du site et tests C avec ASan/UBSan. Les programmes s'exécutent sur
+native, freestanding et wasm avec détection des fuites, y compris à `-O0`.

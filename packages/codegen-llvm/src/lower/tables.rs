@@ -1638,8 +1638,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if source.repr == Repr::Never {
 			return Ok(source);
 		}
-		let zero = self.context.i64_type().const_zero();
-		let result = self.table_new(table, zero)?;
+		let hint_index = if table.value.is_some() { 1 } else { 2 };
+		let capacity = match info.arguments.get(hint_index) {
+			Some(Argument::Given(hint)) => {
+				let hint = self.expr(*hint)?;
+				if hint.repr == Repr::Never {
+					return Ok(hint);
+				}
+				self.convert(hint, Repr::Int(IntRepr::I64), node.index())?
+					.int()
+			}
+			_ => self.context.i64_type().const_zero(),
+		};
+		let result = self.table_new(table, capacity)?;
+		self.reserve_storage(Val::new(repr, result), capacity, node)?;
 		match source.repr {
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, node)?;

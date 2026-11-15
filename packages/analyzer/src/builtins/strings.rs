@@ -1,5 +1,5 @@
 //! The members of `String` and `Character` values (`operations/string.md`,
-//! values brief §7). No method mutates its receiver. Positions, lengths and
+//! values brief §7). Only storage reservation mutates its receiver. Positions, lengths and
 //! searches count grapheme clusters; the analyzer only types them.
 //!
 //! Paths: `String#name` for the members of the values (a `Character` has the
@@ -31,6 +31,20 @@ const fn method(params: &'static [Param], ret: Ty) -> Signature {
 }
 
 static NO_ARGUMENT_STRING: Signature = method(&[], STRING);
+static RESERVE: Signature = method(&[param("additional", Ty::Natural)], Ty::Is(TypeId::VOID));
+static FROM: Signature = Signature {
+	params: &[
+		param("source", STRING),
+		Param {
+			name: "capacity",
+			ty: Ty::Natural,
+			default: true,
+		},
+	],
+	variadic: false,
+	ret: STRING,
+	throws: None,
+};
 static IS_EMPTY: Signature = method(&[], Ty::Is(TypeId::BOOLEAN));
 static GET: Signature = method(
 	&[param("index", INTEGER)],
@@ -79,6 +93,9 @@ macro_rules! members {
 
 members! {
 	// `String` and `Character` are type names (scalars.rs) with members here
+	"String.from" => Function(&FROM),
+	"String#capacity" => Property(Ty::Natural),
+	"String#reserve" => Function(&RESERVE),
 	"String.compareLocale" => Function(&COMPARE_LOCALE),
 	"String#length" => Property(Ty::Natural),
 	"String#isEmpty" => Function(&IS_EMPTY),

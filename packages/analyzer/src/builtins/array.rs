@@ -57,6 +57,11 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Array#push",
 		kind: Function(&PUSH),
 	},
+	Builtin {
+		path: "Array#capacity",
+		kind: Property(Ty::Natural),
+	},
+	method("Array#reserve", &RESERVE),
 	method("Array#get", &ONE),
 	method("Array#insert", &TWO),
 	method("Array#delete", &ONE),
@@ -86,17 +91,22 @@ pub static BUILTINS: &[Builtin] = &[
 	method("Map.from", &FROM),
 	method("GrowingArray.from", &FROM),
 	method("GrowingSet.from", &SET_FROM),
-	method("GrowingMap.from", &SOURCE),
+	method("GrowingMap.from", &FROM),
 	method("Pool.from", &FROM),
-	method("GrowingPool.from", &SOURCE),
+	method("GrowingPool.from", &FROM),
 	method("Columnar.from", &FROM),
-	method("GrowingColumnar.from", &SOURCE),
-	method("OrderedColumnar.from", &SOURCE),
+	method("GrowingColumnar.from", &FROM),
+	method("OrderedColumnar.from", &FROM),
 	// sets (§5.4); `GrowingSet` values share these paths
 	Builtin {
 		path: "Set#size",
 		kind: Property(Ty::Natural),
 	},
+	Builtin {
+		path: "Set#capacity",
+		kind: Property(Ty::Natural),
+	},
+	method("Set#reserve", &RESERVE),
 	method("Set#isEmpty", &NONE),
 	method("Set#includes", &ONE),
 	method("Set#add", &ONE),
@@ -121,6 +131,11 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Map#size",
 		kind: Property(Ty::Natural),
 	},
+	Builtin {
+		path: "Map#capacity",
+		kind: Property(Ty::Natural),
+	},
+	method("Map#reserve", &RESERVE),
 	method("Map#isEmpty", &NONE),
 	method("Map#includes", &ONE),
 	method("Map#get", &ONE),
@@ -142,6 +157,11 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Pool#size",
 		kind: Property(Ty::Natural),
 	},
+	Builtin {
+		path: "Pool#capacity",
+		kind: Property(Ty::Natural),
+	},
+	method("Pool#reserve", &RESERVE),
 	method("Pool#isEmpty", &NONE),
 	method("Pool#add", &ONE),
 	method("Pool#delete", &ONE),
@@ -162,6 +182,11 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Columnar#size",
 		kind: Property(Ty::Natural),
 	},
+	Builtin {
+		path: "Columnar#capacity",
+		kind: Property(Ty::Natural),
+	},
+	method("Columnar#reserve", &RESERVE),
 	method("Columnar#isEmpty", &NONE),
 	method("Columnar#add", &ONE),
 	method("Columnar#delete", &ONE),
@@ -182,6 +207,11 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "OrderedColumnar#length",
 		kind: Property(Ty::Natural),
 	},
+	Builtin {
+		path: "OrderedColumnar#capacity",
+		kind: Property(Ty::Natural),
+	},
+	method("OrderedColumnar#reserve", &RESERVE),
 	method("OrderedColumnar#isEmpty", &NONE),
 	method("OrderedColumnar#add", &ONE),
 	method("OrderedColumnar#get", &ONE),
@@ -261,8 +291,11 @@ static TWO: Signature = signature(&[param("first", false), param("second", false
 static COUNT: Signature = signature(&[param("count", true)]);
 /// `join(separator)`: on an array of strings
 static JOIN: Signature = signature(&[param("separator", false)]);
-/// `GrowingPool.from(source)`: no option
-static SOURCE: Signature = signature(&[param("source", false)]);
+static RESERVE: Signature = signature(&[Param {
+	name: "additional",
+	ty: Ty::Natural,
+	default: false,
+}]);
 /// `Array.from(source, capacity = hint)`
 static FROM: Signature = signature(&[param("source", false), param("capacity", true)]);
 /// `sort(compare = natural)`
@@ -288,6 +321,8 @@ pub enum EffectStep {
 	Last,
 	/// `self.size`.
 	Size,
+	/// `self.capacity`.
+	Capacity,
 	/// `self.length`.
 	Length,
 	/// `element`: the reference given as first argument (`Pool.delete`).
@@ -332,7 +367,10 @@ pub fn effects(kind: CollKind, operation: &str) -> &'static [CollectionEffect] {
 	const INVALIDATES_FROM: &[CollectionEffect] = &[invalidates(ElementsFrom)];
 	const INVALIDATES_LAST: &[CollectionEffect] = &[invalidates(Last)];
 	const INVALIDATES_ARGUMENT: &[CollectionEffect] = &[invalidates(Argument)];
+	const MUTATES_CAPACITY: &[CollectionEffect] = &[mutates(EffectStep::Capacity)];
 	match (kind, operation) {
+		(CollKind::Array | CollKind::Set | CollKind::OrderedColumnar, "reserve") => MUTATES_SELF,
+		(_, "reserve") => MUTATES_CAPACITY,
 		(CollKind::Array | CollKind::OrderedColumnar | CollKind::GrowingArray, "[]=") => {
 			MUTATES_ELEMENT
 		}
@@ -374,6 +412,7 @@ pub fn effect_set(types: &mut TypeStore, kind: CollKind, operation: &str) -> Eff
 			EffectStep::Last => &[PathStep::Last],
 			EffectStep::Size => &[PathStep::Size],
 			EffectStep::Length => &[PathStep::Length],
+			EffectStep::Capacity => &[PathStep::Field(types.syms.intern("capacity"))],
 			EffectStep::Argument => {
 				// `invalidates element`: the path of the first parameter
 				let path = types.path(PathRoot::Param(0), &[]);

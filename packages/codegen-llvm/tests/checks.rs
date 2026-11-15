@@ -70,6 +70,25 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn reservation_precedes_a_push_loop_without_growth_calls_in_the_loop() {
+		let ir = ir_of(
+			"reserve-loop",
+			r#"
+function fill = (items: Array<Integer>, count: Integer<min = 0>) mutates items => {
+    items.reserve(count)
+    for i in 0..count { items.push(i) }
+}
+mutable items: Array<Integer> = []
+fill(items, 100)
+console.log(items.length)
+"#,
+		);
+		let fill = function(&ir, "fa.fill");
+		assert_eq!(count(fill, "@fa_array_reserve_additional("), 1, "{fill}");
+		assert!(!fill.contains("@fa_array_grow("), "{fill}");
+	}
+
+	#[test]
 	fn an_unproven_sum_is_checked_and_proven_differences_are_nsw() {
 		let ir = ir_of(
 			"fib",

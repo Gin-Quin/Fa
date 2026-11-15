@@ -1,0 +1,12 @@
+function prepare = (): Integer => {
+    mutable items = Array.from([1, 2], capacity = 100)
+    items.reserve(200)
+    items.push(3)
+    assert items.capacity == items.length
+    mutable text = String.from("hello", capacity = 100)
+    text.reserve(200)
+    assert text.capacity == text.length
+    items.length + text.length
+}
+let result = @prepare()
+console.log(result) -- prints: 8

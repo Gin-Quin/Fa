@@ -23,6 +23,7 @@ mod aliasing;
 mod arith;
 mod arrays;
 mod calls;
+mod capacity;
 mod closures;
 mod columns;
 mod constants;

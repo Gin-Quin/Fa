@@ -868,7 +868,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Resolution::Builtin(id) = self.analysis.resolution(member) else {
 			return Err(self.unsupported(node.index(), "this member access"));
 		};
-		match fa_analyzer::builtins::get(id).path {
+		let path = fa_analyzer::builtins::get(id).path;
+		if path.ends_with("#capacity") {
+			return self.storage_capacity(value);
+		}
+		match path {
 			"Pointer#value" => {
 				let target = self.type_of(member);
 				self.pointer_value(value, target, member)

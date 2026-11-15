@@ -1,0 +1,20 @@
+mutable array = [1]
+array.reserve(-1) -- error: E-NUM-6
+array.reserve(1.5) -- error: E-TYPE-1
+let immutable = [1]
+immutable.reserve(10) -- error: EFF007
+mutable text = "hello"
+text.reserve(-1) -- error: E-NUM-6
+let fixed = "fixed"
+fixed.reserve(10) -- error: EFF007
+mutable growing: GrowingArray<Integer> = [1]
+use first = growing[0]
+growing.reserve(100)
+console.log(first)
+mutable movable = [1]
+use moved = movable[0]
+movable.reserve(100)
+console.log(moved) -- error: REF001
+mutable counted: GrowingArray<Integer> = [1]
+function preallocate = (items: GrowingArray<Integer>) mutates items.capacity => items.reserve(100)
+preallocate(counted)

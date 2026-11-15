@@ -1606,28 +1606,26 @@ impl<'a> Lowerer<'a> {
 
 /// Whether a built-in method changes its receiver.
 fn mutates(path: &str) -> bool {
-	matches!(
-		path,
-		"Array#push"
-			| "Array#pop"
-			| "Array#insert"
-			| "Array#delete"
-			| "Array#take"
-			| "Array#clear"
-			| "Array#reverseInPlace"
-			| "Array#sortInPlace"
-			| "Array#deleteWhere"
-			| "Set#add"
-			| "Set#delete"
-			| "Set#take"
-			| "Set#clear"
-			| "Set#deleteWhere"
-			| "Map#delete"
-			| "Map#take"
-			| "Map#clear"
-			| "Map#getOrInsert"
-			| "Map#deleteWhere"
-	)
+	path.ends_with("#reserve")
+		|| matches!(
+			path,
+			"Array#push"
+				| "Array#pop"
+				| "Array#insert"
+				| "Array#delete"
+				| "Array#take"
+				| "Array#clear"
+				| "Array#reverseInPlace"
+				| "Array#sortInPlace"
+				| "Array#deleteWhere"
+				| "Set#add" | "Set#delete"
+				| "Set#take" | "Set#clear"
+				| "Set#deleteWhere"
+				| "Map#delete"
+				| "Map#take" | "Map#clear"
+				| "Map#getOrInsert"
+				| "Map#deleteWhere"
+		)
 }
 
 /// The node of a function's `FnInfo`: its declaration, or the lambda of an

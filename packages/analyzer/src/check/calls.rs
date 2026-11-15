@@ -396,8 +396,9 @@ impl Walker<'_> {
 					for (param, written) in params.iter_mut().zip(signature.params) {
 						param.has_default = written.default;
 						// `counter.add(1, ordering = Ordering.relaxed)` (std.concurrency)
-						if builtins::get(builtin).path.contains('#')
-							&& matches!(written.ty, builtins::Ty::Ordering)
+						if builtins::get(builtin).path == "String.from"
+							|| (builtins::get(builtin).path.contains('#')
+								&& matches!(written.ty, builtins::Ty::Ordering))
 						{
 							param.builtin_name = Some(self.s.types.syms.intern(written.name));
 						}

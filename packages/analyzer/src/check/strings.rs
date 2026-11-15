@@ -202,7 +202,11 @@ impl Walker<'_> {
 			let count = grapheme_count(self.s.types.syms.resolve(text));
 			return Some(self.s.types.int_literal((count as i128).into()));
 		}
-		builtins::value_type(&mut self.s.types, id)
+		let ty = builtins::value_type(&mut self.s.types, id)?;
+		if name == "reserve" {
+			return Some(self.with_effects(ty, crate::types::CollKind::Array, name));
+		}
+		Some(ty)
 	}
 }
 

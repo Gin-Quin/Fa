@@ -310,7 +310,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		path: &str,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
+		if path.ends_with("#reserve") {
+			return self.reserve_call(node, info);
+		}
 		match path {
+			"String.from" => self.string_from(node, info),
+			"GrowingSet.from" => self.table_method(node, "Set.from", info),
+			"GrowingMap.from" => self.table_method(node, "Map.from", info),
+			"Pool.from" | "GrowingPool.from" | "Columnar.from" | "GrowingColumnar.from" => {
+				self.pool_from(node, info)
+			}
+			"OrderedColumnar.from" => {
+				let Some(values) = self.array_from_arguments(info)? else {
+					return Ok(Val::never());
+				};
+				self.array_from(node, values)
+			}
 			// tasks (tasks.rs)
 			"Task.yield" | "Task.all" | "Task.any" | "Task.settled" | "Task#cancel"
 			| "std.time.sleep" => self.task_builtin(node, path, info),
@@ -426,7 +441,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				let source = self.expr(*source)?;
 				let repr = self.node_repr(node)?;
-				self.array_of_table(source, repr, node)
+				let result = self.array_of_table(source, repr, node)?;
+				let capacity = match info.arguments.get(1) {
+					Some(Argument::Given(hint)) => {
+						let hint = self.expr(*hint)?;
+						if hint.repr == Repr::Never {
+							return Ok(hint);
+						}
+						Some(hint)
+					}
+					_ => None,
+				};
+				let result = self.take(result, None)?;
+				self.array_from(node, (result, capacity))
 			}
 			"Array.from" => {
 				let Some(values) = self.array_from_arguments(info)? else {
@@ -435,16 +462,39 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.array_from(node, values)
 			}
 			"GrowingArray.from" => {
-				let Some((source, _)) = self.array_from_arguments(info)? else {
+				let Some((source, capacity)) = self.array_from_arguments(info)? else {
 					return Ok(Val::never());
 				};
 				if !matches!(source.repr, Repr::Array(_) | Repr::Growing(_)) {
 					return Err(self.unsupported(node.index(), "`GrowingArray.from` of this value"));
 				}
-				// the source was taken: the conversion moves its items
-				let source = self.fresh(source);
+				// Convert through an owned flat array so the first segment uses the requested size.
 				let repr = self.node_repr(node)?;
-				self.convert(source, repr, node.index())
+				let Repr::Growing(item_type) = repr else {
+					unreachable!("a growing array");
+				};
+				let source = self.fresh(source);
+				let flat = self.convert(source, Repr::Array(item_type), node.index())?;
+				let flat = self.take(flat, None)?;
+				let item = self.item_repr(item_type, node)?;
+				let capacity = match capacity {
+					Some(capacity) => self
+						.convert(capacity, Repr::Int(IntRepr::I64), node.index())?
+						.int(),
+					None => self.context.i64_type().const_zero(),
+				};
+				let result = self
+					.call_value(
+						self.runtime.function("fa_segmented_from_array_capacity")?,
+						&[
+							flat.value.expect("an array").into(),
+							self.item_size_const(item).into(),
+							self.segment_k(item).into(),
+							capacity.into(),
+						],
+					)?
+					.into_pointer_value();
+				Ok(self.fresh(Val::new(repr, result)))
 			}
 
 			_ if path.starts_with("Math.")
@@ -517,7 +567,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The arguments of `Array.from(source, capacity = n)`.
-	fn array_from_arguments(
+	pub(crate) fn array_from_arguments(
 		&mut self,
 		info: &CallInfo,
 	) -> Result<Option<(Val<'ctx>, Option<Val<'ctx>>)>, Error> {
@@ -530,7 +580,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					return Ok(None);
 				}
 				let lowered = if position == 0 {
-					self.take(lowered, Some(*value))?
+					// Keep ownership registered while later arguments run:
+					// a throwing capacity expression must drop this source.
+					let owned = self.take(lowered, Some(*value))?;
+					self.fresh(owned)
 				} else {
 					lowered
 				};
@@ -540,7 +593,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 		}
-		Ok(source.map(|source| (source, capacity)))
+		match source {
+			Some(source) => Ok(Some((self.take(source, None)?, capacity))),
+			None => Ok(None),
+		}
 	}
 
 	/// The array a variadic parameter collects: the values, and the items of

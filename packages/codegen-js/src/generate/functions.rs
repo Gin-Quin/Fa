@@ -646,6 +646,28 @@ impl Generator<'_> {
 		arguments: &[Argument],
 	) -> Expr {
 		let path = builtins::get(builtin).path;
+		if path.ends_with("#reserve") {
+			let receiver = self.receiver(callee);
+			let nodes: Vec<NodeId> = arguments
+				.iter()
+				.filter_map(|argument| match argument {
+					Argument::Given(node) => Some(*node),
+					_ => None,
+				})
+				.collect();
+			let (lines, values) = self.capture(|g| g.in_order(&nodes, |g, node| g.expr(node)));
+			let receiver = self.keep_before(receiver, &lines);
+			self.out.append(lines);
+			let values = std::iter::once(receiver.text)
+				.chain(values.into_iter().map(|value| value.text))
+				.collect::<Vec<_>>();
+			return Expr::primary(format!("(void ({}))", values.join(", ")));
+		}
+		if path == "String.from" {
+			let values = self.simple_arguments(arguments);
+			// Argument evaluation is retained even when the capacity hint is unused.
+			return js::call("((source, capacity) => source)", &values);
+		}
 		// tasks and waits (tasks.rs)
 		if let Some(call) = self.task_builtin(n, callee, path, arguments) {
 			return call;
@@ -756,6 +778,9 @@ impl Generator<'_> {
 				))
 			}
 			"Array.from" | "Set.from" | "Map.from" => self.collection_from(n, path, arguments),
+			"GrowingArray.from" => self.collection_from(n, "Array.from", arguments),
+			"GrowingSet.from" => self.collection_from(n, "Set.from", arguments),
+			"GrowingMap.from" => self.collection_from(n, "Map.from", arguments),
 			"Pool.from" | "GrowingPool.from" | "Columnar.from" | "GrowingColumnar.from" => {
 				self.collection_from(n, "Pool.from", arguments)
 			}

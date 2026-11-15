@@ -305,6 +305,46 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(self.fresh(Val::new(repr, pool)))
 	}
 
+	/// `from` copies the source into stable slots, preallocating its hint.
+	pub(crate) fn pool_from(&mut self, node: NodeId, info: &CallInfo) -> Result<Val<'ctx>, Error> {
+		let Some((source, capacity)) = self.array_from_arguments(info)? else {
+			return Ok(Val::never());
+		};
+		// Restore temporary ownership: views borrow the source's items.
+		let source = self.fresh(source);
+		let source = self.pool_view(source, node)?;
+		let source = self.growing_view(source)?;
+		let Repr::Array(source_item) = source.repr else {
+			return Err(self.unsupported(node.index(), "from this source into a pool"));
+		};
+		let repr = self.node_repr(node)?;
+		let item = self.pool_element(repr, node)?;
+		let place = self.pool_place(repr, node)?;
+		let result = self.collection_new(&self.builder, repr, item)?;
+		let source_pointer = source.value.expect("an array").into_pointer_value();
+		let (_, length) = self.array_parts(source_pointer)?;
+		let capacity = match capacity {
+			Some(capacity) => self
+				.convert(capacity, Repr::Int(IntRepr::I64), node.index())?
+				.int(),
+			None => length,
+		};
+		self.reserve_storage(Val::new(repr, result), capacity, node)?;
+		self.for_each_item_value(
+			source_pointer,
+			self.item_repr(source_item, node)?,
+			length,
+			|this, value| {
+				let owned = this.emit_copy(this.convert(value, item, node.index())?)?;
+				let slot = this
+					.call_value(this.runtime.function("fa_pool_add_slot")?, &[result.into()])?
+					.into_pointer_value();
+				this.element_write(&this.builder, place, slot, owned.value.expect("an element"))
+			},
+		)?;
+		Ok(self.fresh(Val::new(repr, result)))
+	}
+
 	/// The given arguments of a call, in order.
 	fn given_arguments(info: &CallInfo) -> Vec<NodeId> {
 		info.arguments

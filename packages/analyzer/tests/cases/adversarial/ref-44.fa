@@ -1,0 +1,19 @@
+-- a loop pushing an array's own items onto it, read by index or through an alias: the loop
+-- can't become a block copy of the array into itself
+mutable bytes: Array<Byte> = [1, 2, 3]
+for position in 0..bytes.length {
+	bytes.push(bytes[position]) -- error: REF013
+}
+mutable use alias = bytes
+for position in 0..3 {
+	bytes.push(try alias[position]) -- error: REF013
+}
+for byte in bytes {
+	bytes.push(byte) -- error: REF012, error: REF013
+}
+function copyInto = (target: Array<Byte>, source: Array<Byte>) mutates target => {
+	for byte in source {
+		target.push(byte)
+	}
+}
+copyInto(bytes, bytes) -- error: REF013

@@ -346,6 +346,56 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 		source: Option<NodeId>,
 	) -> Result<(), Error> {
+		self.push_onto(array, value, node, source, None)
+	}
+
+	/// The slot holding the array of `place.push(argument)`, when the place
+	/// is a local or a parameter and its plain fields: its header was just
+	/// loaded from that slot, and the argument assigns nothing.
+	fn push_receiver_slot(
+		&mut self,
+		call: NodeId,
+		argument: NodeId,
+	) -> Result<Option<PointerValue<'ctx>>, Error> {
+		let View::Call { callee, .. } = self.view(call) else {
+			return Ok(None);
+		};
+		let View::Access { target, members } = self.view(callee) else {
+			return Ok(None);
+		};
+		let members: Vec<NodeId> = members.iter().collect();
+		if !matches!(
+			self.invariant_place(target, &members[..members.len() - 1])?,
+			Some(Repr::Array(_))
+		) {
+			return Ok(None);
+		}
+		let mut stack = vec![argument.index()];
+		while let Some(node) = stack.pop() {
+			if matches!(
+				self.view(NodeId::new(node)),
+				View::Assignment { .. } | View::CompoundAssignment { .. }
+			) {
+				return Ok(None);
+			}
+			self.tree.nodes[node].for_each_child(|child| stack.push(child));
+		}
+		Ok(match self.receiver_place(call)? {
+			Some(slot) if matches!(slot.repr, Repr::Array(_)) => Some(slot.pointer),
+			_ => None,
+		})
+	}
+
+	/// `array.push(item)`; `slot`: the slot the array was loaded from
+	/// ([`Self::push_receiver_slot`]).
+	fn push_onto(
+		&mut self,
+		array: Val<'ctx>,
+		value: Val<'ctx>,
+		node: NodeId,
+		source: Option<NodeId>,
+		receiver: Option<PointerValue<'ctx>>,
+	) -> Result<(), Error> {
 		let Repr::Array(item_type) = array.repr else {
 			return Err(self.unsupported(node.index(), "`push` on this value"));
 		};
@@ -372,13 +422,82 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.tag(store, true)?;
 			return Ok(());
 		}
+		// `fa_array_push_slot`, written here with the type-based alias tags:
+		// the header (`fa header`) never shares memory with an item, so a
+		// loop of pushes keeps the header pointer, the length, the capacity
+		// and the items pointer in registers, reloading them only after the
+		// cold call that grows a full array (it never changes the length).
+		let header = self.header_type();
+		let i64 = self.context.i64_type();
+		let length_pointer = self.builder.build_struct_gep(header, array, 1, "")?;
+		let length = self.builder.build_load(i64, length_pointer, "length")?;
+		let capacity_pointer = self.builder.build_struct_gep(header, array, 2, "")?;
+		let capacity = self.builder.build_load(i64, capacity_pointer, "capacity")?;
+		for loaded in [length, capacity] {
+			if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&loaded) {
+				self.tag(instruction, true)?;
+			}
+		}
+		let length = length.into_int_value();
+		let room = self.builder.build_int_compare(
+			IntPredicate::SLT,
+			length,
+			capacity.into_int_value(),
+			"",
+		)?;
+		let room_block = self.builder.get_insert_block().expect("a block");
+		let grow = self.append_block("push_grow");
+		let store = self.append_block("push_store");
+		let branch = self.builder.build_conditional_branch(room, store, grow)?;
+		self.likely(branch)?;
+		self.builder.position_at_end(grow);
 		let size = self.item_size(item)?;
-		let reserve = self.runtime.function("fa_array_push_slot")?;
-		let slot = self
-			.call_value(reserve, &[array.into(), size.into()])?
-			.into_pointer_value();
-		self.builder
+		self.call_runtime("fa_array_grow", &[array.into(), size.into()])?;
+		// The call doesn't change the slot, but LLVM can't know it: read it
+		// again, so that the next pushes find the header (then its length,
+		// its capacity, its items) in registers on both paths.
+		let reloaded = match receiver {
+			Some(slot) => {
+				let reloaded = self
+					.builder
+					.build_load(self.pointer_type(), slot, "header")?;
+				if let Some(instruction) =
+					inkwell::values::BasicValue::as_instruction_value(&reloaded)
+				{
+					self.tag(instruction, false)?;
+				}
+				Some((reloaded, self.builder.get_insert_block().expect("a block")))
+			}
+			None => None,
+		};
+		self.builder.build_unconditional_branch(store)?;
+		self.builder.position_at_end(store);
+		let array = match reloaded {
+			Some((reloaded, grown)) => {
+				let phi = self.builder.build_phi(self.pointer_type(), "header")?;
+				phi.add_incoming(&[(&array, room_block), (&reloaded, grown)]);
+				phi.as_basic_value().into_pointer_value()
+			}
+			None => array,
+		};
+		let length_pointer = self.builder.build_struct_gep(header, array, 1, "")?;
+		let items_pointer = self.builder.build_struct_gep(header, array, 0, "")?;
+		let items = self
+			.builder
+			.build_load(self.pointer_type(), items_pointer, "items")?;
+		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&items) {
+			self.tag(instruction, true)?;
+		}
+		let slot = self.item_pointer(items.into_pointer_value(), item, length)?;
+		let stored = self
+			.builder
 			.build_store(slot, value.value.expect("an item"))?;
+		self.tag(stored, false)?;
+		let next = self
+			.builder
+			.build_int_nsw_add(length, i64.const_int(1, false), "")?;
+		let stored = self.builder.build_store(length_pointer, next)?;
+		self.tag(stored, true)?;
 		Ok(())
 	}
 
@@ -536,7 +655,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		match (path, values.as_slice()) {
 			("Array#push", [value]) => {
-				self.array_push(array, *value, node, Some(arguments[0]))?;
+				let slot = self.push_receiver_slot(node, arguments[0])?;
+				self.push_onto(array, *value, node, Some(arguments[0]), slot)?;
 				Ok(Val::void())
 			}
 			("Array#get", [index]) => self.array_get(array, *index, node),
@@ -1778,6 +1898,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 		pattern: Option<NodeId>,
 		has_index: bool,
+		iterable: NodeId,
 		array: Val<'ctx>,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
@@ -1809,6 +1930,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some(symbol) => Some(self.slot_of(symbol, node)?),
 			None => None,
 		};
+		if !growing && let Some(copy) = self.copy_loop(pattern, has_index, iterable, body, false)? {
+			// a loop only pushing the items onto another array (`copies.rs`)
+			let (_, length) = self.array_parts(array)?;
+			self.copy_all_items(copy, array, length)?;
+			return Ok(Val::void());
+		}
 		let counter = self.alloca(Repr::Int(IntRepr::I64), "position")?;
 		let i64 = self.context.i64_type();
 		self.builder
@@ -1821,13 +1948,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			Some(self.array_parts(array)?)
 		};
+		// a body acting only on the items equal to a constant byte: the loop
+		// goes from one such item to the next (`copies.rs`)
+		let matched = match parts {
+			Some(_) => self.matched_byte(pattern, item, body)?,
+			None => None,
+		};
 		let test = self.append_block("for_item");
 		let body_block = self.append_block("for_item_body");
 		let step = self.append_block("for_item_step");
 		let exit = self.append_block("end_for_item");
 		self.builder.build_unconditional_branch(test)?;
 		self.builder.position_at_end(test);
-		let position = self.load(counter)?.int();
+		let mut position = self.load(counter)?.int();
+		if let (Some(byte), Some((items, length))) = (matched, parts) {
+			let next = self.runtime.function("fa_bytes_next")?;
+			position = self
+				.call_value(
+					next,
+					&[
+						items.into(),
+						position.into(),
+						length.into(),
+						self.context.i32_type().const_int(byte, false).into(),
+					],
+				)?
+				.into_int_value();
+			self.builder.build_store(counter.pointer, position)?;
+		}
 		let length = match parts {
 			Some((_, length)) => length,
 			None => self.growing_length(&self.builder, array)?,
@@ -1969,22 +2117,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let Resolution::Local(symbol) = self.analysis.resolution(target) else {
 				continue;
 			};
+			// A parameter (a `mutates` one, to push) is a root of its own in
+			// the function: no other parameter, module-level value or
+			// callback argument overlaps it (reference checking).
 			if !matches!(
 				self.analysis.symbols.symbol(symbol).kind,
-				SymbolKind::Let | SymbolKind::Mutable
+				SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Parameter { .. }
 			) {
 				continue;
 			}
 			// the array is mentioned once: by this push
 			let mut uses = 0;
+			let mut calls = 0;
 			let mut stack = vec![body.index()];
 			while let Some(node) = stack.pop() {
 				if self.analysis.resolution(NodeId::new(node)) == Resolution::Local(symbol) {
 					uses += 1;
 				}
+				if matches!(self.view(NodeId::new(node)), View::Call { .. }) {
+					calls += 1;
+				}
 				self.tree.nodes[node].for_each_child(|child| stack.push(child));
 			}
 			if uses != 1 {
+				continue;
+			}
+			// A local that functions or closures reach (a module-level value,
+			// a capture) may be replaced by a call in the loop, with a block
+			// without the reserved room: no call but this push.
+			let reached = self.shared.contains_key(&symbol)
+				|| self
+					.analysis
+					.functions
+					.values()
+					.any(|function| function.captures.contains(&symbol));
+			if reached && calls != 1 {
 				continue;
 			}
 			let mut slot = self.slot_of(symbol, target)?;
@@ -2035,7 +2202,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.expect("an array")
 				.into_pointer_value();
 			let (_, length) = self.array_parts(array)?;
-			let capacity = saturating(self, "llvm.sadd.sat", length, rounds)?;
 			let size = self.item_size(item)?;
 			let end_reserve = if members.len() > 1 {
 				// Reserving a field early must not move existing items: an alias
@@ -2055,10 +2221,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			} else {
 				None
 			};
-			self.call_runtime(
-				"fa_array_reserve",
-				&[array.into(), capacity.into(), size.into()],
-			)?;
+			// room grown geometrically, as the pushes would: a loop nested in
+			// another one doesn't reallocate at every outer round
+			self.call_runtime("fa_array_room", &[array.into(), rounds.into(), size.into()])?;
 			if let Some(end) = end_reserve {
 				self.builder.build_unconditional_branch(end)?;
 				self.builder.position_at_end(end);

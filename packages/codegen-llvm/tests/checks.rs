@@ -344,10 +344,67 @@ mod with_llvm {
 			"type Bucket = { items: Array<Integer> }\nfunction fill = (count: Integer): Bucket => { mutable bucket = Bucket { items = [] }\nfor index in 0..count { bucket.items.push(index) }\nbucket }\nconsole.log(fill(9))\n",
 		);
 		let fill = function(&ir, "fa.fill");
-		let reserve = fill.find("@fa_array_reserve(").expect("a reservation");
+		let reserve = fill.find("@fa_array_room(").expect("a reservation");
 		let body = fill.find("for_body:").expect("a counted loop");
 		assert!(reserve < body, "{fill}");
-		assert!(fill[body..].contains("@fa_array_push_slot("), "{fill}");
+		assert!(fill[body..].contains("@fa_array_grow("), "{fill}");
+	}
+
+	/// A program with the loops that `lower/copies.rs` turns into block
+	/// copies, fills and searches.
+	const COPY_LOOPS: &str = "function copyAll = (target: Array<Byte>, source: Array<Byte>) mutates target => {\n\tfor byte in source {\n\t\ttarget.push(byte)\n\t}\n}\nfunction copyRange = (target: Array<Byte>, source: Array<Byte>, start: Integer, end: Integer) throws IndexError mutates target => {\n\tfor position in start..end {\n\t\ttarget.push(try source[position])\n\t}\n}\nfunction pad = (target: Array<Byte>, count: Integer) mutates target => {\n\tfor _ in 0..count {\n\t\ttarget.push(48)\n\t}\n}\nfunction count = (text: Array<Byte>): Integer => {\n\tmutable found = 0\n\tfor byte in text {\n\t\tif byte == 59 {\n\t\t\tfound += 1\n\t\t}\n\t}\n\tfound\n}\nmutable target: Array<Byte> = []\nlet source: Array<Byte> = [1, 59, 3]\ncopyAll(target, source)\ntry copyRange(target, source, 0, 2)\npad(target, arguments.length)\nconsole.log(target, count(target))\n";
+
+	#[test]
+	fn a_loop_pushing_the_items_of_another_array_is_one_block_copy() {
+		let ir = ir_of("copy-loops-items", COPY_LOOPS);
+		let all = function(&ir, "fa.copyAll");
+		assert_eq!(count(all, "@fa_array_extend("), 1, "{all}");
+		assert!(!all.contains("@fa_array_grow("), "{all}");
+		assert!(!all.contains("for_item_body"), "{all}");
+	}
+
+	#[test]
+	fn a_range_copy_checks_its_bounds_once_and_keeps_the_rounds_for_the_errors() {
+		let ir = ir_of("copy-loops-range", COPY_LOOPS);
+		let range = function(&ir, "fa.copyRange");
+		let (check, rest) = range.split_once("copy_range:").expect("a hoisted check");
+		assert!(check.contains("icmp sle"), "{range}");
+		assert!(!check.contains("@fa_error_index("), "{range}");
+		let (copy, rounds) = rest.split_once("copy_range_rounds:").expect("the rounds");
+		assert_eq!(count(copy, "@fa_array_extend("), 1, "{range}");
+		assert!(rounds.contains("@fa_error_index("), "{range}");
+		assert!(rounds.contains("@fa_array_grow("), "{range}");
+	}
+
+	#[test]
+	fn a_loop_pushing_one_byte_is_a_fill_and_a_byte_test_a_search() {
+		let ir = ir_of("copy-loops-fill", COPY_LOOPS);
+		let pad = function(&ir, "fa.pad");
+		assert_eq!(count(pad, "@fa_array_fill("), 1, "{pad}");
+		assert!(!pad.contains("@fa_array_grow("), "{pad}");
+		let search = function(&ir, "fa.count");
+		assert_eq!(count(search, "@fa_bytes_next("), 1, "{search}");
+	}
+
+	#[test]
+	fn consecutive_pushes_keep_the_header_in_registers() {
+		// only the cold paths that grow the array read it again
+		let pushes: String = (0..12)
+			.map(|index| format!("\ttarget.push({index})\n"))
+			.collect();
+		let source = format!(
+			"function many = (target: Array<Byte>) mutates target => {{\n{pushes}}}\nmutable a: Array<Byte> = []\nmutable b: Array<Byte> = []\nmany(a)\nmany(b)\nmany(a)\nconsole.log(a, b)\n"
+		);
+		let ir = optimized_ir("consecutive-pushes", &source);
+		let many = function(&ir, "fa.many");
+		assert_eq!(count(many, "@fa_array_grow("), 12, "{many}");
+		let hot: usize = many
+			.split("\n\n")
+			.filter(|block| !block.starts_with("push_grow"))
+			.map(|block| count(block, " = load "))
+			.sum();
+		// the slot, the length, the capacity and the items, once
+		assert_eq!(hot, 4, "{many}");
 	}
 
 	#[test]

@@ -26,6 +26,7 @@ mod calls;
 mod closures;
 mod columns;
 mod constants;
+mod copies;
 mod division;
 mod foreign;
 mod growing;
@@ -2371,7 +2372,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return match value.repr {
 				Repr::Str => self.for_characters(node, pattern, has_index, value, body),
 				Repr::Array(_) | Repr::Growing(_) => {
-					self.for_items(node, pattern, has_index, value, body)
+					self.for_items(node, pattern, has_index, iterable, value, body)
 				}
 				Repr::Map(_) | Repr::Set(_) => self.for_entries(node, pattern, value, body),
 				Repr::Pool(_) | Repr::Columnar(_) => self.for_pool(node, pattern, value, body),
@@ -2392,6 +2393,17 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				(end.int(), inclusive)
 			}
 			None => (i64.const_int(i64::MAX as u64, true), true),
+		};
+		// a loop only pushing the same byte: one fill (`copies.rs`)
+		if !open_end && let Some((push, byte)) = self.fill_loop(iterable, body)? {
+			self.fill_range(push, byte, start.int(), end, inclusive)?;
+			return Ok(Val::void());
+		}
+		// a loop only copying items of an array: one block copy when the
+		// range is inside it, else the rounds below (`copies.rs`)
+		let copied = match self.copy_loop(pattern, has_index, iterable, body, true)? {
+			Some(copy) if !open_end => Some(self.copy_range(copy, start.int(), end, inclusive)?),
+			_ => None,
 		};
 		let reserved =
 			self.reserve_for_pushes(body, start.int(), (!open_end).then_some(end), inclusive)?;
@@ -2448,6 +2460,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.builder.build_store(counter.pointer, next)?;
 		self.builder.build_unconditional_branch(test)?;
 		self.builder.position_at_end(exit);
+		if let Some((_, done)) = copied {
+			self.builder.build_unconditional_branch(done)?;
+			self.builder.position_at_end(done);
+		}
 		for push in reserved {
 			self.reserved_pushes.remove(&push);
 		}

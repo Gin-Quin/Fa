@@ -1563,7 +1563,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	// ── await ─────────────────────────────────────────────────────────────
 
 	/// The expression inside groups.
-	fn ungrouped(&self, mut node: NodeId) -> NodeId {
+	pub(crate) fn ungrouped(&self, mut node: NodeId) -> NodeId {
 		while let View::Group(inner) = self.view(node) {
 			node = inner;
 		}

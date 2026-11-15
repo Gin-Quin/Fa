@@ -1,0 +1,28 @@
+-- The block copies, fills and searches of block-copies.fa, built without optimizations.
+-- opt-level: 0
+function copyRange = (target: Array<Byte>, source: Array<Byte>, start: Integer, end: Integer) throws IndexError mutates target => {
+	for position in start..end {
+		target.push(try source[position])
+	}
+}
+let source: Array<Byte> = [10, 11, 12, 13, 14]
+mutable target: Array<Byte> = []
+for byte in source {
+	target.push(byte)
+}
+try copyRange(target, source, 1, 3)
+try copyRange(target, source, 4, 1)
+console.log(target) -- prints: [10, 11, 12, 13, 14, 11, 12]
+copyRange(target, source, 4, 6) catch error => console.log("error: {error}") -- prints: error: IndexError { index = 5, length = 5 }
+console.log(target.length) -- prints: 8
+for _ in 0..3 {
+	target.push(48)
+}
+console.log(target) -- prints: [10, 11, 12, 13, 14, 11, 12, 14, 48, 48, 48]
+mutable found: Array<Integer> = []
+for byte, position in target {
+	if byte == 48 {
+		found.push(position)
+	}
+}
+console.log(found) -- prints: [8, 9, 10]

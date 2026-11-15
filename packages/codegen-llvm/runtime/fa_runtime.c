@@ -1397,6 +1397,17 @@ static size_t next_byte(const uint8_t *text, size_t length, size_t offset, uint8
 	return length;
 }
 
+/// The index of the first item equal to `byte` at or after `offset` in the
+/// items of an array of bytes, or `length` (`src/lower/copies.rs`: a loop
+/// whose body only acts on the items equal to a constant skips the others).
+FA_EXPORT int64_t fa_bytes_next(const uint8_t *items, int64_t offset, int64_t length,
+                                int32_t byte) {
+	if (offset >= length) {
+		return length;
+	}
+	return (int64_t)next_byte(items, (size_t)length, (size_t)offset, (uint8_t)byte);
+}
+
 /// The byte offset of the first (or last) match of `search` whose two ends
 /// are grapheme boundaries, or -1 (`faFindMatches`).
 static int64_t find(const uint8_t *text, size_t text_length, size_t simple, const uint8_t *search,
@@ -2166,6 +2177,73 @@ FA_EXPORT void *fa_array_push_slot(void *header, int64_t item_size) {
 	void *slot = array->items + array->length * item_size;
 	array->length += 1;
 	return slot;
+}
+
+void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t item_size);
+
+/// `array_grow`, out of line, for the pushes the compiler writes inline
+/// (`src/lower/arrays.rs`, `array_push`): their common path keeps the
+/// header in registers, and only a full array calls this.
+FA_EXPORT __attribute__((noinline)) void fa_array_grow(void *header, int64_t item_size) {
+	array_grow(header, item_size);
+}
+
+/// Makes room for `count` more items, grown geometrically like the pushes.
+static __attribute__((noinline)) void array_extend_room(FaArrayHeader *array, int64_t count,
+                                                        int64_t item_size) {
+	int64_t length = array->length;
+	if (length > INT64_MAX - count || array->capacity > INT64_MAX / 2) {
+		out_of_memory();
+	}
+	int64_t capacity = array->capacity < 2 ? 4 : array->capacity * 2;
+	if (capacity < length + count) {
+		capacity = length + count;
+	}
+	fa_array_reserve(array, capacity, item_size);
+}
+
+/// Makes room for `count` more items (`count >= 0`), grown geometrically
+/// like the pushes: before a loop that pushes `count` times
+/// (`src/lower/arrays.rs`, `reserve_for_pushes`). Inline: the room is
+/// usually there.
+FA_EXPORT __attribute__((always_inline)) void fa_array_room(FaArrayHeader *array, int64_t count,
+                                                          int64_t item_size) {
+	if (__builtin_expect(count > array->capacity - array->length, 0)) {
+		array_extend_room(array, count, item_size);
+	}
+}
+
+/// Appends `count` copies of a byte to an array of bytes: a loop pushing
+/// the same byte `count` times (`src/lower/copies.rs`). Inline: short runs
+/// are a few bounded stores.
+FA_EXPORT __attribute__((always_inline)) void fa_array_fill(FaArrayHeader *array, int64_t count,
+                                                          int32_t byte) {
+	if (count <= 0) {
+		return;
+	}
+	fa_array_room(array, count, 1);
+	fill_bytes(array->items + array->length, (uint8_t)byte, (size_t)count);
+	array->length += count;
+}
+
+/// Appends `count` items of `source`, from item `start` (bytewise): what a
+/// loop pushing them one by one does (`src/lower/copies.rs`), with room
+/// made once. The caller checked `0 <= start` and `start + count <=
+/// source->length`. The items are read once the room is made, from the
+/// block the source has then: the source may be the array itself. Inline:
+/// most copies are short and find room.
+FA_EXPORT __attribute__((always_inline)) void fa_array_extend(FaArrayHeader *array,
+                                                            const FaArrayHeader *source,
+                                                            int64_t start, int64_t count,
+                                                            int64_t item_size) {
+	if (count <= 0) {
+		return;
+	}
+	fa_array_room(array, count, item_size);
+	int64_t length = array->length;
+	copy_bytes(array->items + length * item_size, source->items + start * item_size,
+	           (size_t)(count * item_size));
+	array->length = length + count;
 }
 
 /// Appends the items of `source` to `array` (bytewise).

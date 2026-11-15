@@ -3,7 +3,8 @@
 
 Builds both languages, retains optimized LLVM IR/C/assembly, checks against Rust,
 then alternates timed runs. Outputs live under the ignored audit/build directory.
-Use --directory to retain a baseline before rebuilding the compiler.
+Use --directory to retain a baseline before rebuilding the compiler. VARIANTS names other
+Fa versions of a benchmark (`string-building-bytes`), compared with the same Goose and Rust.
 """
 
 import argparse
@@ -30,6 +31,11 @@ DEFAULTS = {
     "spectral-norm": 4000, "string-building": 3000000, "strlist": 2000000,
     "sum": 32000000, "tree": 21, "word-count": 5000000, "words": 500000,
 }
+# Other Fa versions of a benchmark, measured against the same Goose and Rust programs:
+# name -> (benchmark directory, Fa source). `string-building-bytes` builds bytes in an
+# `Array<Byte>`, like the Goose port.
+VARIANTS = {"string-building-bytes": ("string-building", "bytes.fa")}
+DEFAULTS.update({name: DEFAULTS[directory] for name, (directory, _) in VARIANTS.items()})
 AUDIT = {name: max(1, size // 10) for name, size in DEFAULTS.items()}
 AUDIT.update({"binary-trees": 14, "fib": 35, "interp": 17, "scene": 9,
               "tree": 17, "fannkuch-redux": 9, "words": 100000,
@@ -120,12 +126,18 @@ def goose_command(directory, size):
     return [str(directory / "goose/main")] + ([] if constant else [str(size)])
 
 
+def fa_source(name):
+    """The benchmark directory and the Fa source of a benchmark or a variant."""
+    directory, source = VARIANTS.get(name, (name, "main.fa"))
+    return ROOT / "benchmarks" / directory, source
+
+
 def build(name, size, directory, runtime_size=False):
-    source = ROOT / "benchmarks" / name
+    source, fa_file = fa_source(name)
     fa_dir, goose_dir = directory / "fa", directory / "goose"
     fa_dir.mkdir(parents=True, exist_ok=True)
     goose_dir.mkdir(parents=True, exist_ok=True)
-    execute([os.environ.get("FA", ROOT / "target/release/fa"), "build", source / "main.fa",
+    execute([os.environ.get("FA", ROOT / "target/release/fa"), "build", source / fa_file,
              "--target=native", "--emit-ir", f"--output={fa_dir}"], fa_dir / "build.log")
     fa = fa_dir / "native/main"
     goose_source = (source / "main.goose").read_text()
@@ -201,7 +213,7 @@ def main():
                 if args.rebuild_fa:
                     fa_dir = directory / "fa"
                     execute([os.environ.get("FA", ROOT / "target/release/fa"), "build",
-                             ROOT / "benchmarks" / name / "main.fa", "--target=native", "--emit-ir",
+                             fa_source(name)[0] / fa_source(name)[1], "--target=native", "--emit-ir",
                              f"--output={fa_dir}"], fa_dir / "build.log")
                     exe = fa_dir / "native/main"
                     exe.with_suffix(".s").write_bytes(execute(["objdump", "-d", "--no-show-raw-insn", exe]))

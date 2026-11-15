@@ -165,6 +165,14 @@ optimizations, their safety conditions, the latest measurements and remaining
 gaps. It also explains how to reproduce comparisons with `N` supplied at runtime
 for both languages, and links the raw samples and validation results.
 
+`string-building/bytes.fa` is a second Fa version of `string-building`, written like
+the Goose port: growable byte buffers (`Array<Byte>`, until the `Bytes` type exists),
+`split` as ranges into the text and `join` into a new buffer, integers formatted by
+hand. It prints the same output. The audit measures it as `string-building-bytes`,
+against the same Goose and Rust programs:
+`python3 benchmarks/audit/compare.py string-building string-building-bytes --directory … --default-sizes`.
+The runner of this page (`run.ts`) only builds the `main.fa` of each benchmark.
+
 ## Fairness rules
 
 - **Same algorithm, same output.** Both versions do the same work in the same order, including the floating-point operations (the order of the operands matters for the last bits), and print exactly the same text. The runner compares every output with the Rust one before timing.

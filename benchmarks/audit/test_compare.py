@@ -1,6 +1,6 @@
 import unittest
 
-from compare import goose_source_at_size
+from compare import AUDIT, DEFAULTS, ROOT, VARIANTS, fa_source, goose_source_at_size
 
 
 class RuntimeSizes(unittest.TestCase):
@@ -27,6 +27,16 @@ class RuntimeSizes(unittest.TestCase):
     def test_programs_already_reading_argv_are_unchanged(self):
         source = "import os;\nfn main() { print(args().len); }\n"
         self.assertEqual(goose_source_at_size(source, 7, runtime=True), source)
+
+
+class Variants(unittest.TestCase):
+    def test_variants_use_the_programs_and_sizes_of_their_benchmark(self):
+        for name, (directory, source) in VARIANTS.items():
+            self.assertEqual(fa_source(name), (ROOT / "benchmarks" / directory, source))
+            self.assertTrue((ROOT / "benchmarks" / directory / source).exists())
+            self.assertEqual(DEFAULTS[name], DEFAULTS[directory])
+            self.assertEqual(AUDIT[name], AUDIT[directory])
+        self.assertEqual(fa_source("sum"), (ROOT / "benchmarks" / "sum", "main.fa"))
 
 
 if __name__ == "__main__":

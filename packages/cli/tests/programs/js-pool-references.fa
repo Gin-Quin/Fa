@@ -1,0 +1,21 @@
+-- Primitive references identify slots, including slot zero and duplicates.
+mutable scores = Pool<Integer>.from([7, 7])
+use first = scores.find((value) => value == 7)
+if first is not none { first = 8 }
+use second = scores.find((value) => value == 7)
+if second is not none { scores.delete(second) }
+console.log(scores, scores.size) -- prints: [8] 1
+use zero = scores.add(0)
+use duplicate = scores.add(8)
+scores.delete(zero)
+console.log(duplicate, scores.size) -- prints: 8 2
+console.log(scores.take(duplicate), scores.size) -- prints: 8 1
+
+mutable words = Pool<String>.from(["a", "a"])
+use word = words.find((value) => value == "a")
+if word is not none { word += "!" }
+use other = words.find((value) => value == "a")
+if other is not none { words.delete(other) }
+console.log(words, words.size) -- prints: ["a!"] 1
+use missing = words.find((value) => value == "missing")
+console.log(missing is none) -- prints: true

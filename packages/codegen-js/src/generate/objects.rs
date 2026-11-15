@@ -1520,6 +1520,25 @@ impl Generator<'_> {
 			return (!name.is_empty()).then(|| name.clone());
 		}
 		let (wanted, body) = match self.types.kind(ty) {
+			TypeKind::Tuple(list) => {
+				let items = self.types.list_items(list).to_vec();
+				let parts: Vec<String> = items
+					.into_iter()
+					.enumerate()
+					.map(|(index, item)| {
+						let read = Expr::primary(format!("value[{index}]"));
+						if self.is_composite(item) {
+							self.copy_of(read, item).text
+						} else {
+							read.text
+						}
+					})
+					.collect();
+				(
+					"copy$tuple".to_string(),
+					format!("(value) => [{}]", parts.join(", ")),
+				)
+			}
 			// an owner of related collections: copied with its links (relations.rs)
 			TypeKind::Object(_) if self.owns_related_elements(ty) => {
 				let helper = self.helper("faCopyGraph");

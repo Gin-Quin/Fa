@@ -357,8 +357,8 @@ impl Generator<'_> {
 	/// `collections/pools.md`). On JavaScript, a `Pool` or a `Columnar` of
 	/// objects is a `Set` of these objects: a reference is the object, which
 	/// keeps its identity until deleted; an `OrderedColumnar` is an array of
-	/// objects (its methods are the array's). Pools of primitive values
-	/// aren't lowered yet.
+	/// objects (its methods are the array's). Pools of primitive values use
+	/// stable slots (`FaValuePool`), without boxing object pools.
 	pub(crate) fn pool_call(
 		&mut self,
 		n: NodeId,
@@ -372,11 +372,13 @@ impl Generator<'_> {
 			return self.value_pool_call(n, callee, name, arguments);
 		}
 		if let TypeKind::Collection(_, item, _) = self.types.kind(receiver_type)
-			&& !matches!(self.types.kind(item), TypeKind::Object(_))
-		{
+			&& !matches!(
+				self.types.kind(item),
+				TypeKind::Object(_) | TypeKind::Tuple(_)
+			) {
 			return self.unsupported(
 				n,
-				"a pool or a columnar of values that are neither objects nor primitive values",
+				"a pool or a columnar of values that are neither objects, tuples nor primitive values",
 			);
 		}
 		if owner == "OrderedColumnar" && name != "add" {

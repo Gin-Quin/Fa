@@ -26,6 +26,9 @@ pub enum Error {
 	Unavailable,
 	/// LLVM reported an error (verification, passes, object emission).
 	Llvm(String),
+	/// The JIT could not load the program in memory (`jit.rs`): it is
+	/// linked into an executable instead.
+	Jit(String),
 	/// An external tool could not run or failed.
 	Tool { command: String, message: String },
 	/// Reading or writing a file failed.
@@ -44,6 +47,7 @@ impl fmt::Display for Error {
 			Error::Builder(error) => write!(formatter, "IR builder error: {error}"),
 			Error::Unavailable => write!(formatter, "{}", crate::LLVM_MISSING),
 			Error::Llvm(message) => write!(formatter, "LLVM error: {message}"),
+			Error::Jit(message) => write!(formatter, "the JIT can't load the program: {message}"),
 			Error::Tool { command, message } => write!(formatter, "`{command}` failed: {message}"),
 			Error::Io(error) => write!(formatter, "I/O error: {error}"),
 		}

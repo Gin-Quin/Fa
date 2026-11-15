@@ -225,16 +225,31 @@ pub(crate) fn run_native(
 		target.name(),
 		fnv1a(&[path.display().to_string().as_bytes(), &source].concat())
 	));
-	let artifact = match build_native(
-		backend,
-		&path,
-		target,
-		options,
-		mode,
-		Some(&directory),
-		true,
-	) {
-		Ok(artifact) => artifact,
+	let built = if target == fa_codegen_llvm::Target::Native {
+		crate::build::load_native(backend, &path, target, options, mode, &directory)
+	} else {
+		build_native(
+			backend,
+			&path,
+			target,
+			options,
+			mode,
+			Some(&directory),
+			true,
+		)
+		.map(crate::build::NativeProgram::Linked)
+	};
+	let artifact = match built {
+		Ok(crate::build::NativeProgram::Linked(artifact)) => artifact,
+		// loaded in this process by the JIT: the program runs here, and its
+		// exit ends this process
+		Ok(crate::build::NativeProgram::Loaded(program)) => {
+			let arguments: Vec<&std::ffi::OsStr> = program_arguments
+				.iter()
+				.map(|argument| argument.as_os_str())
+				.collect();
+			return program.run(&path.display().to_string(), &arguments);
+		}
 		Err(message) => {
 			crate::color::eprint_diagnostics(&message);
 			return 1;

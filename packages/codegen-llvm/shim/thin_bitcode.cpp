@@ -35,3 +35,11 @@ extern "C" int fa_write_thin_bitcode(LLVMModuleRef module, const char *path) {
 extern "C" void fa_use_init_array(LLVMTargetMachineRef machine) {
 	reinterpret_cast<llvm::TargetMachine *>(machine)->Options.UseInitArray = true;
 }
+
+// Makes a target machine compile the thread-local variables of a module as
+// emulated ones (calls of `__emutls_get_address`, of libgcc or compiler-rt):
+// the object is then loaded in memory by the JIT (`src/jit.rs`), which has
+// no thread-local storage segment to give it.
+extern "C" void fa_use_emulated_tls(LLVMTargetMachineRef machine) {
+	reinterpret_cast<llvm::TargetMachine *>(machine)->Options.EmulatedTLS = true;
+}

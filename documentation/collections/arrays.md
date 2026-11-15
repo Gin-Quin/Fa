@@ -65,7 +65,7 @@ There is one form per situation: using `from` where the context already gives th
 
 Every resizable collection exposes a read-only `capacity: Integer<min = 0>` property and `reserve(additional: Integer<min = 0>)`, returning `Void`. These apply to `Array`, `Set`, `Map`, `Pool`, `Columnar`, `OrderedColumnar` and all their growing variants. `from(source, capacity = n)` requests room for at least `n` items in total, never truncating the source.
 
-Natively, `capacity` is the number of items the collection can hold without allocating or reallocating storage, including its live items. `reserve(n)` makes room for at least `length + n` items (`size + n` for an unordered collection); it never changes the contents or their order and never shrinks storage. The allocator may provide more room than requested. On a map or set, the capacity accounts for the hash index's load limit and tombstones as well as entry storage. Deletion may reduce capacity when it releases pages.
+Natively, `capacity` is the number of items the collection can hold without allocating or reallocating storage, including its live items. `reserve(n)` takes a number of **additional** items, while the `capacity` option of `from` is a total: it makes room for at least `length + n` items (`size + n` for an unordered collection); it never changes the contents or their order and never shrinks storage. The allocator may provide more room than requested. On a map or set, the capacity accounts for the hash index's load limit and tombstones as well as entry storage. Deletion may reduce capacity when it releases pages.
 
 ```fa
 mutable buffer = Array<Integer>.from([], capacity = 1000)
@@ -75,7 +75,9 @@ buffer.push(42)
 
 `capacity` takes constant time. It is a storage observation, not a portable limit: on JavaScript and during compile-time evaluation, storage hints are ignored, `reserve` does nothing, and `capacity` equals `length` (or `size`). This avoids tracking fictitious storage that the JavaScript engine does not expose. Always use `length` or `size` for program logic.
 
-`reserve` requires a `mutable` receiver on every target. On `Array`, `Set` and `OrderedColumnar` it declares `mutates self`, like `push` or `add`: reallocation may move every item, invalidating references even when a particular reservation fits. On `Map`, `Pool`, `Columnar` and all growing collections it declares `mutates self.capacity`: existing items never move during reservation, references into them and into `size` or `length` stay valid. `capacity` itself may change after insertion, deletion or reservation. A copy preserves values, not spare capacity; reserve the destination when needed.
+The only relation that holds on every target is `capacity >= length` (or `size`). The value itself is unspecified: it differs between targets, between versions of the allocator, and between a call evaluated at compile time and the same call at run time. An assertion such as `assert buffer.capacity >= 1000` therefore only passes natively. To bound a buffer, compare its `length` with a limit of your own.
+
+`reserve` requires a `mutable` receiver on every target. On `Array`, `Set` and `OrderedColumnar` it declares `mutates self`, like `push` or `add`: reallocation may move every item, invalidating references even when a particular reservation fits. On `Map`, `Pool`, `Columnar` and all growing collections it declares `mutates self.capacity`: existing items never move during reservation, references into them and into `size` or `length` stay valid. An effect on `length` or `size` implies the same effect on `capacity`, since adding or deleting may allocate or release storage: a function that declares `mutates items.length` may call `items.reserve`, while `mutates items.capacity` alone allows neither `push` nor `add`. A copy preserves values, not spare capacity; reserve the destination when needed.
 
 ## Adding and removing items
 

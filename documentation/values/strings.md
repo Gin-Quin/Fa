@@ -237,9 +237,9 @@ output.reserve(100) -- room for 100 more bytes than its current byte length
 output += "hello"
 ```
 
-Natively, `capacity` counts storage bytes, not UTF-16 code units: it is at least the current byte length, and an inline string has room for 23 bytes (11 on wasm32). A static string reports its byte length until a reservation or append gives it owned storage. `reserve(n)` makes room for at least the current byte length plus `n`, never shrinks and never changes the text. It requires a `mutable` receiver and declares `mutates self`, like an append: references into the string must be declared again afterwards.
+Natively, `capacity` counts storage bytes, not UTF-16 code units: it is at least the current byte length, and an inline string has room for 23 bytes (11 on wasm32). A static string reports its byte length until a reservation or append gives it owned storage. `reserve(n)` takes a number of additional bytes, so no length has to be converted from code units: it makes room for at least the current byte length plus `n`, never shrinks and never changes the text. It requires a `mutable` receiver and declares `mutates self`, like an append: references into the string must be declared again afterwards.
 
-On JavaScript and during compile-time evaluation, the hints are ignored, `reserve` does nothing and `capacity` equals `length`. This keeps the property constant-time without measuring an encoding or inventing storage the engine does not expose. Use `utf8Length()` to measure an encoding, and `length` for code-unit positions. Capacity is a storage hint, not a portable limit. Copies need not preserve spare capacity.
+On JavaScript and during compile-time evaluation, the hints are ignored, `reserve` does nothing and `capacity` equals `length`. This keeps the property constant-time without measuring an encoding or inventing storage the engine does not expose. Use `utf8Length()` to measure an encoding, and `length` for code-unit positions. Capacity is a storage hint, not a portable limit: only `capacity >= length` holds on every target (see [capacity and reservation](/collections/arrays#capacity-and-reservation)). Copies need not preserve spare capacity.
 
 :::implementation
 ## Implementation details

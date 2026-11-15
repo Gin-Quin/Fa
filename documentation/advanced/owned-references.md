@@ -130,6 +130,8 @@ Adding an element to a collection that never moves its elements, like a [`Pool`]
 | | `getOrInsert` | `mutates self.size` | all |
 | `GrowingSet`, `GrowingPool`, `GrowingColumnar` | `add` | `mutates self.size`: growing collections never delete or move | all |
 
+`reserve` declares `mutates self` on `Array`, `Set` and `OrderedColumnar`, and `mutates self.capacity` on every other collection, where it moves no item. An effect on `length` or `size` implies the same effect on `capacity`. See [capacity and reservation](/collections/arrays#capacity-and-reservation).
+
 Relations add implied effects to these operations: deleting a linked object also writes the fields that pointed at it. See [reference checking](/advanced/reference-checking#relations).
 
 ### Exact keys and indices

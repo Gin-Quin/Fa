@@ -1,0 +1,26 @@
+-- `mutates items.capacity` alone allows neither `push` nor `add`: the
+-- implication goes from `length` and `size` to `capacity`, not back
+function pushOnly = (items: GrowingArray<Integer>) mutates items.capacity => {
+	items.push(1) -- error: EFF004
+}
+function addOnly = (names: GrowingSet<String>) mutates names.capacity => {
+	names.add("Ana") -- error: EFF004
+}
+function insertOnly = (scores: GrowingMap<String, Integer>) mutates scores.capacity => {
+	scores.getOrInsert("Ana", 1) -- error: EFF004
+}
+-- a map has a `size`, not a `length`; an array has a `length`, not a `size`
+function insertByLength = (scores: GrowingMap<String, Integer>) mutates scores.length => { -- error: EFF008
+	scores.getOrInsert("Ana", 1)
+}
+function pushBySize = (items: GrowingArray<Integer>) mutates items.size => { -- error: EFF008
+	items.push(1)
+}
+-- `reserve` of an `Array` may move its items: `mutates items.length` doesn't cover it
+function reserveArray = (items: Array<Integer>) mutates items.length => {
+	items.reserve(10) -- error: EFF004
+}
+-- the length of one collection doesn't cover the capacity of another
+function reserveOther = (a: GrowingArray<Integer>, b: GrowingArray<Integer>) mutates a.length => {
+	b.reserve(10) -- error: EFF001
+}

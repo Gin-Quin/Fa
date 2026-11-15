@@ -265,7 +265,7 @@ fn pools_give_fresh_references() {
 	);
 	assert_eq!(
 		builtins::effects::effects_of_kind(CollKind::GrowingArray, "push"),
-		[builtins::effects::BuiltinEffect::MutatesSize]
+		[builtins::effects::BuiltinEffect::MutatesLength]
 	);
 }
 

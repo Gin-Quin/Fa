@@ -1,0 +1,33 @@
+-- The same function evaluated at compile time (`@`) and at run time: growing
+-- collections, reservations, read-only maps, region trees, string building.
+type Tree = Union { Leaf = { value: Integer }, List = { items: Array<Tree> } }
+function tree = (depth: Integer<min = 0, max = 6>): Tree => if depth == 0 { Tree.Leaf { value = 1 } } else {
+	mutable items: Array<Tree> = []
+	for 0..3 { items.push(tree(depth - 1)) }
+	Tree.List { items }
+}
+function leaves = (tree: Tree): Integer => when tree is {
+	Tree.Leaf as { value } => value
+	Tree.List as { items } => {
+		mutable sum = 0
+		for item in items { sum += leaves(item) }
+		sum
+	}
+}
+function mix = (n: Integer<min = 0, max = 100>): String => {
+	let names: Map<Integer, String> = [(1, "one"), (2, "two"), (3, "three")]
+	mutable growing = GrowingArray<Integer>.from([], capacity = 10)
+	growing.reserve(n)
+	for i in 0..n { growing.push(i * i) }
+	mutable counts: GrowingMap<String, Integer> = []
+	for i in 0..n { counts["{i %% 4}"] = (counts.get("{i %% 4}") ?? 0) + 1 }
+	mutable text = String.from("", capacity = 5)
+	for i in 0..n { text += names.get(i %% 4) ?? "-" }
+	mutable total = 0
+	for value in growing { total += value }
+	"{total} {counts.size} {counts.get("1") ?? 0} {text.length} {text} {leaves(tree(4))}"
+}
+let early = @mix(9)
+console.log(early) -- prints: 204 4 2 25 -onetwothree-onetwothree- 81
+console.log(mix(9)) -- prints: 204 4 2 25 -onetwothree-onetwothree- 81
+console.log(early == mix(9)) -- prints: true

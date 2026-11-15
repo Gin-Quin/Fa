@@ -39,6 +39,9 @@ pub(crate) struct ByteFill {
 	inclusive: bool,
 	/// The value pushed.
 	value: bool,
+	/// The capacity given to `Array.from([], capacity = …)`: a storage hint
+	/// that JavaScript doesn't take, evaluated before the end of the range.
+	capacity: Option<NodeId>,
 }
 
 impl Generator<'_> {
@@ -101,18 +104,32 @@ impl Generator<'_> {
 		if !self.only_indexed(symbol, declaration, next) {
 			return None;
 		}
+		let capacity = self
+			.analysis
+			.call(self.strip_groups(value))
+			.and_then(|call| match call.arguments.get(1) {
+				Some(Argument::Given(capacity)) => Some(*capacity),
+				_ => None,
+			});
 		Some(ByteFill {
 			symbol,
 			end,
 			inclusive,
 			value: pushed,
+			capacity,
 		})
 	}
 
 	/// Writes the declaration of a byte array (its fill loop included).
 	/// The declared value is never evaluated: `[]`, or `Array.from([], …)`,
-	/// whose capacity JavaScript doesn't take (`collection_from`).
+	/// whose capacity only keeps its effects (`collection_from`).
 	pub(crate) fn byte_array_declaration(&mut self, fill: ByteFill) {
+		if let Some(capacity) = fill.capacity {
+			let hint = self.expr(capacity);
+			if !hint.pure {
+				self.out.line(format!("void ({});", hint.text));
+			}
+		}
 		let end = self.expr(fill.end);
 		let count = if fill.inclusive {
 			let one = Expr::constant("1", Prec::Primary);

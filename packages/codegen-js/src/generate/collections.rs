@@ -116,33 +116,66 @@ impl Generator<'_> {
 		}
 	}
 
+	/// The values of the arguments of a `from` without its capacity, a
+	/// storage hint that JavaScript doesn't take. The hint is still
+	/// evaluated, where it is written: the arguments written before it are
+	/// first kept in temporaries when it has effects.
+	fn before_capacity(&mut self, nodes: &[NodeId], capacity: Option<NodeId>) -> Vec<Expr> {
+		let Some(capacity) = capacity else {
+			return self.in_order(nodes, |g, node| g.expr(node));
+		};
+		let mut written: Vec<(usize, NodeId)> = nodes.iter().copied().enumerate().collect();
+		written.push((nodes.len(), capacity));
+		written.sort_by_key(|(_, node)| self.tree.span(node.index()).start);
+		let ordered: Vec<NodeId> = written.iter().map(|(_, node)| *node).collect();
+		let mut values: Vec<Option<Expr>> = self
+			.in_order(&ordered, |g, node| g.expr(node))
+			.into_iter()
+			.map(Some)
+			.collect();
+		let at = written
+			.iter()
+			.position(|(index, _)| *index == nodes.len())
+			.expect("the capacity");
+		let hint = values[at].take().expect("the capacity");
+		if !hint.pure {
+			for earlier in values[..at].iter_mut().flatten() {
+				if !earlier.stable {
+					let temp = self.temp();
+					self.out.line(format!("const {temp} = {};", earlier.text));
+					*earlier = Expr::name(temp, true);
+				}
+			}
+			self.out.line(format!("void ({});", hint.text));
+		}
+		let mut result: Vec<Option<Expr>> = vec![None; nodes.len()];
+		for ((index, _), value) in written.iter().zip(values) {
+			if let Some(value) = value {
+				result[*index] = Some(value);
+			}
+		}
+		result
+			.into_iter()
+			.map(|value| value.expect("a value"))
+			.collect()
+	}
+
 	/// `String.from(text, capacity = n)`: the text itself (a JavaScript
 	/// string is an immutable value), after the capacity is evaluated.
 	pub(crate) fn string_from(&mut self, arguments: &[Argument]) -> Expr {
-		let nodes: Vec<NodeId> = arguments
-			.iter()
-			.filter_map(|argument| match argument {
-				Argument::Given(value) => Some(*value),
-				_ => None,
-			})
-			.collect();
-		let values = self.in_order(&nodes, |g, node| g.expr(node));
-		let mut values = values.into_iter();
-		let Some(text) = values.next() else {
+		let Some(Argument::Given(text)) = arguments.first() else {
 			return Expr::constant("\"\"", Prec::Primary);
 		};
-		match values.next().filter(|capacity| !capacity.pure) {
-			Some(capacity) => Expr::new(
-				format!("({}, {})", capacity.at(Prec::Assign), text.at(Prec::Assign)),
-				Prec::Primary,
-			),
-			None => text,
-		}
+		let capacity = match arguments.get(1) {
+			Some(Argument::Given(capacity)) => Some(*capacity),
+			_ => None,
+		};
+		self.before_capacity(&[*text], capacity).remove(0)
 	}
 
 	/// `Array.from(source)`, `Set.from(source, key = …)`, `Map.from(source)`:
 	/// a new collection of the call's type with the source's items (the
-	/// capacity is a hint JavaScript doesn't take).
+	/// capacity is a hint JavaScript doesn't take: `before_capacity`).
 	pub(crate) fn collection_from(
 		&mut self,
 		n: NodeId,
@@ -157,8 +190,12 @@ impl Generator<'_> {
 			("Set.from", Some(Argument::Given(key))) => Some(*key),
 			_ => None,
 		};
+		let capacity = match arguments.get(if path == "Set.from" { 2 } else { 1 }) {
+			Some(Argument::Given(capacity)) => Some(*capacity),
+			_ => None,
+		};
 		let nodes: Vec<NodeId> = std::iter::once(source).chain(key).collect();
-		let values = self.in_order(&nodes, |g, node| g.expr(node));
+		let values = self.before_capacity(&nodes, capacity);
 		let source_ty = self.type_of(source);
 		let ty = self.type_of(n);
 		let item = match self.types.kind(ty) {

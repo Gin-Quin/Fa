@@ -8,18 +8,23 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 - **Benchmarks against Goose**: add the benchmarks of https://aardappel.github.io/goose/bench/results.html and a Goose column next to Rust. *Assigned.*
 - **Parallel and streaming pipeline** (`design/parallel-pipeline.md`): steps 1–5 *assigned*; step 6 (LLVM per module, ThinLTO) and step 7 (language server) to schedule after.
 
-- **Caller destinations for native returns (user decision, 2026-11-15):** finish
-  destination passing for fresh user-function collection results and object/tuple
-  results, including direct calls, generics, closures/function values, branches,
-  recursive forwarding, fields, collection slots, errors and async instances.
+- **Caller destinations for native returns (user decision, 2026-11-15):**
+  finish collection buffer forwarding through user functions and constructors.
+  Synchronous object/tuple calls now use output slots (direct calls, supported
+  generic instances, function values/lambdas, blocks, `if`/`when`, nested fields
+  and mapped array elements). Still needed: coalesce returned named locals
+  (NRVO); forward into recursive early boxes, pushed/inserted collection slots
+  and existing fields when alias/error rules allow it; cover structural layout
+  conversions, optional/union/fallback/catch/loop results and coroutine promises.
   Preserve analyzer moves and existing foreign `sret`, early recursive boxes and
-  in-place pushed object construction. Do not use stack-to-heap copy-out as a
-  substitute. Current support passes a bounded caller buffer to nonempty-separator
-  `String.split` used by a proven non-escaping immutable local; larger results
-  choose the heap before constructing any items. Extend this protocol to
-  other collection `map`/`filter` methods, `from` with capacity hints or collection
-  conversions, empty-separator splits, and the other fresh collection
-  constructors, including table indices and stable segments.
+  in-place pushed object construction. Never use stack-to-heap copy-out.
+  Bounded caller buffers currently cover local nonempty-separator `String.split`,
+  array `map`/`filter` and required copies of live borrowed `Array.from` without
+  explicit hints. Extend to other collection transforms, `from` with capacity
+  hints or conversions, empty-separator splits and other fresh constructors,
+  including table indices and stable segments. A return containing type parameters
+  inside a tuple (`Tuple<T, T>`) already fails outside its generic instance in
+  the native baseline; resolve that layout instantiation independently.
 - **Immutable storage coverage (native, 2026-11-15):** add compact immutable
   object-columnar chunks that preserve the reference ABI, broader escape proofs
   for borrowed parameters/non-escaping captures/async intervals, and static

@@ -120,6 +120,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			),
 			(Value::String(text), Repr::Str) => self.string_constant(text),
 			(Value::None, Repr::None) => Val {
+				destination: None,
 				repr: Repr::None,
 				value: None,
 			},

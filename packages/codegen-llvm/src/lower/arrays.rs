@@ -1276,19 +1276,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.for_each_index(length, |this, index| {
 					let slot = this.array_item_slot(array, item, index)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
-					let mapped = this.call_collection_callback(
+					let (items, _) = this.array_parts(result)?;
+					let pointer = this.item_pointer(items, result_item, index)?;
+					let mapped = this.call_collection_callback_into(
 						*callback,
 						callback_node,
 						&[],
 						&[slot],
 						&[index_value],
+						Some(Slot {
+							pointer,
+							repr: result_item,
+						}),
 					)?;
 					let mapped = this.owned_as(mapped, result_item, None)?;
-					let (items, _) = this.array_parts(result)?;
-					let pointer = this.item_pointer(items, result_item, index)?;
-					if let Some(raw) = mapped.value {
-						this.builder.build_store(pointer, raw)?;
-					}
+					this.store(
+						Slot {
+							pointer,
+							repr: result_item,
+						},
+						mapped,
+						node,
+					)?;
 					let completed =
 						this.builder
 							.build_int_add(index, i64.const_int(1, false), "")?;
@@ -1415,6 +1424,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					}
 					"Array#some" => Val::new(Repr::Bool, self.context.bool_type().const_zero()),
 					_ => Val {
+						destination: None,
 						repr: Repr::None,
 						value: None,
 					},
@@ -1586,6 +1596,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let result = self.alloca(repr, "popped")?;
 				let none = self.convert(
 					Val {
+						destination: None,
 						repr: Repr::None,
 						value: None,
 					},

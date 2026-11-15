@@ -341,3 +341,11 @@ assert a != Point { x = 2, y = 1 }
 ```
 
 See [structural typing](/advanced/structural-typing) for how object types relate to each other.
+
+:::implementation
+## Implementation details
+
+### Native
+
+- In synchronous compilation mode, functions write object results into a caller-provided return slot. Fresh object literals and forwarded calls can initialize a fresh local, an enclosing object's field, a tuple item, or a mapped array element directly. `if` and `when` branches share that destination. Throwing functions return an error pointer separately; completed fields are cleaned up if a later field fails. Existing-place assignments and structural conversions keep their staging and value semantics. Coroutine compilation retains its promise representation.
+:::

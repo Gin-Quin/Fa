@@ -711,6 +711,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return self.sync_literal(node, &info);
 		}
 		let structure = self.object_type(info.ty);
+		let destination = if info.member.is_none() {
+			self.destination_for(node, Repr::Object(info.ty))
+		} else {
+			None
+		};
 		// the given values in the written order, then the defaults
 		let mut order: Vec<usize> = (0..info.fields.len()).collect();
 		order.sort_by_key(|&position| match info.fields[position].1 {
@@ -737,7 +742,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				_ => None,
 			};
 			let outer = self.pending_box.replace(early);
-			let lowered = self.field_value(field, name, repr, &mut spreads);
+			let field_destination = destination
+				.filter(|_| self.uses_return_slot(repr))
+				.map(|slot| {
+					self.builder
+						.build_struct_gep(structure, slot.pointer, index, "result.field")
+						.map(|pointer| Slot { pointer, repr })
+				})
+				.transpose()?;
+			let lowered = match field {
+				FieldValue::Given(value) | FieldValue::Default(value)
+					if field_destination.is_some() =>
+				{
+					self.expr_with_destination(value, field_destination)
+				}
+				_ => self.field_value(field, name, repr, &mut spreads),
+			};
 			let lowered = match lowered {
 				Ok(lowered) if lowered.repr != Repr::Never => {
 					let source = match field {
@@ -760,18 +780,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);
 			}
-			lowered_fields.push((index, lowered));
+			// Keep fields owned until the whole constructor succeeds.
+			lowered_fields.push((index, self.fresh(lowered), field_destination));
 		}
 		let mut value = structure.get_undef();
-		for (index, lowered) in lowered_fields {
-			if let Some(raw) = lowered.value {
+		for (index, lowered, field_destination) in lowered_fields {
+			let lowered = self.take(lowered, None)?;
+			if let Some(slot) = destination {
+				let pointer = match field_destination {
+					Some(field) => field.pointer,
+					None => self.builder.build_struct_gep(
+						structure,
+						slot.pointer,
+						index,
+						"result.field",
+					)?,
+				};
+				self.store(
+					Slot {
+						pointer,
+						repr: lowered.repr,
+					},
+					lowered,
+					node,
+				)?;
+			} else if let Some(raw) = lowered.value {
 				value = self
 					.builder
 					.build_insert_value(value, raw, index, "")?
 					.into_struct_value();
 			}
 		}
-		let object = self.fresh(Val::new(Repr::Object(info.ty), value));
+		let object = self.fresh(match destination {
+			Some(slot) => self.load_destination(slot)?,
+			None => Val::new(Repr::Object(info.ty), value),
+		});
 		match info.member.and_then(|member| self.member_of_type(member)) {
 			Some((nominal, index)) => self.build_member(nominal, index, Some(object), node),
 			None => Ok(object),
@@ -823,6 +866,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.fresh(self.emit_copy(Val::new(source_repr, raw))?)
 				}
 				FieldValue::None => Val {
+					destination: None,
 					repr: Repr::None,
 					value: None,
 				},
@@ -1195,6 +1239,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let result = self.alloca(repr, "chain")?;
 		let none = self.convert(
 			Val {
+				destination: None,
 				repr: Repr::None,
 				value: None,
 			},
@@ -1241,6 +1286,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Some(result) = result {
 			let none = self.convert(
 				Val {
+					destination: None,
 					repr: Repr::None,
 					value: None,
 				},

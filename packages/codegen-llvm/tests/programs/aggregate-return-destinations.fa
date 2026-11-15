@@ -1,0 +1,54 @@
+-- asynchronous: false
+type Data = { value: Integer, text: String }
+type Wrapped = { data: Data, pair: Tuple<Integer, String> }
+
+function make = (n: Integer): Data => Data {
+	value = n
+	text = "owned text {n} longer than an inline string"
+}
+
+function relay = (n: Integer): Data => if n > 0 { relay(n - 1) } else { make(n) }
+function pair = (n: Integer): Tuple<Integer, String> => (n, "tuple payload {n} longer than inline")
+function wrapped = (n: Integer): Wrapped => Wrapped { data = make(n), pair = pair(n) }
+function choose = (n: Integer): Data => when n is {
+	0 => make(10)
+	else => make(20)
+}
+function generic = <T>(value: T, n: Integer): Tuple<Integer, Integer> => (n, n)
+
+let built = wrapped(7)
+let selected = choose(0)
+let genericPair = generic(8, 8)
+console.log(built.data.value, built.pair[0], selected.value, genericPair[1], relay(10).value)
+-- prints: 7 7 10 8 0
+
+let indirect = make
+function factory = (offset: Integer) => (n: Integer) => make(n + offset)
+let closure = factory(1)
+let indirectPair = pair
+console.log(indirect(4).value, closure(5).value, indirectPair(6)[0])
+-- prints: 4 6 6
+
+function failedObject = (text: String): Data throws ParseError => Data {
+	text = "first field {text} with an owned payload beyond the inline limit"
+	value = try Integer.parse(text)
+}
+function failedTuple = (text: String): Tuple<String, Integer> throws ParseError => (
+	"first tuple item {text} with an owned payload beyond the inline limit",
+	try Integer.parse(text)
+)
+for 0..100 {
+	assert (failedObject("bad") catch error => make(-1)).value == -1
+	assert (failedTuple("bad") catch error => ("failed", -1))[1] == -1
+}
+console.log(failedObject("12").value catch error => -1)
+-- prints: 12
+
+let transformed = [1, 2, 3].map((n) => make(n))
+console.log(transformed.length, (transformed.get(2) ?? make(0)).value)
+-- prints: 3 3
+
+let task = start make(9)
+let taskValue = await task
+console.log(taskValue.value)
+-- prints: 9

@@ -232,6 +232,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				arguments.push(pointer.into());
 			}
 		}
+		let return_slot = if function.return_slot {
+			let slot = self.call_return_slot(node, ret)?;
+			arguments.insert(usize::from(function.lambda), slot.pointer.into());
+			Some(slot)
+		} else {
+			None
+		};
 		// the sources of the reactive places given (D24), right before the call
 		self.pass_argument_sources(node, function.declaration, function.info.params.len())?;
 		// an awaited or started call: its async instance (tasks.rs)
@@ -250,6 +257,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		for write_back in write_backs {
 			self.write_back(write_back)?;
+		}
+		if return_slot.is_some() {
+			return self.slot_call_result(raw, ret, throws, return_slot);
 		}
 		if throws {
 			let result = raw.expect("a result");
@@ -1018,6 +1028,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			(Repr::Percentage, Repr::F64 | Repr::F32) => {
 				let as_double = Val {
+					destination: None,
 					repr: Repr::F64,
 					value: value.value,
 				};

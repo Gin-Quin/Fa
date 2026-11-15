@@ -677,6 +677,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let from = if value.repr == Repr::Percentage {
 			Val {
+				destination: None,
 				repr: Repr::F64,
 				value: value.value,
 			}

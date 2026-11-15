@@ -45,6 +45,7 @@ pub(crate) mod program;
 mod reactivity;
 mod references;
 mod relations;
+mod return_destinations;
 mod tables;
 mod tasks;
 mod text;
@@ -93,6 +94,9 @@ pub(crate) struct Function<'ctx> {
 	/// Read-only aggregate parameters borrowed from the caller's storage.
 	borrowed: Vec<bool>,
 	ret: Repr,
+	/// A synchronous object/tuple result slot precedes ordinary parameters
+	/// (after the environment, when present).
+	return_slot: bool,
 	/// Whether it throws: it returns `{ result, ptr error }` (or the error alone).
 	throws: bool,
 	/// A lambda, or a local function using locals of the function around it:
@@ -128,6 +132,8 @@ struct LoopFrame<'ctx> {
 
 /// The function being lowered.
 struct Frame<'ctx> {
+	return_slot: Option<Slot<'ctx>>,
+	destination: Option<(NodeId, Slot<'ctx>)>,
 	/// Fixed collection storage reserved in this function's entry block.
 	collection_bytes: u64,
 	collection_locals: rustc_hash::FxHashSet<(FileId, SymbolId)>,
@@ -697,6 +703,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(());
 		}
 		let value = self.convert(value, slot.repr, node.index())?;
+		if value.destination == Some(slot.pointer) {
+			return Ok(());
+		}
 		if let Some(raw) = value.value {
 			let instruction = self.builder.build_store(slot.pointer, raw)?;
 			self.tag(instruction, false)?;
@@ -1021,7 +1030,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				types.push(self.pointer_type().into());
 			}
 			let throws = info.throws != TypeId::NEVER;
-			let fn_type = match (ret.has_value(), throws) {
+			let return_slot = self.uses_return_slot(ret);
+			if return_slot {
+				types.insert(usize::from(lambda), self.pointer_type().into());
+			}
+			let fn_type = match (ret.has_value() && !return_slot, throws) {
 				(true, false) => self.llvm_type(ret).fn_type(&types, false),
 				(false, false) => self.context.void_type().fn_type(&types, false),
 				(true, true) => self
@@ -1050,6 +1063,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				Some(Linkage::Internal),
 			);
 			value.set_call_conventions(FAST_CALLING_CONVENTION);
+			if return_slot {
+				self.add_return_slot_attribute(value, ret, throws, u32::from(lambda));
+			}
 			self.runtime.add_attributes(value, &["nounwind"]);
 			// Tiny leaf helpers often contain a generic runtime path (for
 			// example `items.get(i) ?? fallback`). Inline them where the
@@ -1093,6 +1109,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				by_pointer,
 				borrowed,
 				ret,
+				return_slot,
 				throws,
 				lambda,
 				by_reference,
@@ -1160,6 +1177,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let outer = self.cleanups.take();
 		self.saved_cleanups.push(outer);
 		self.frame = Some(Frame {
+			return_slot: None,
+			destination: None,
 			collection_bytes: 0,
 			collection_locals: rustc_hash::FxHashSet::default(),
 			function,
@@ -1230,6 +1249,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.frame_mut().arena = function.arena_body.is_some();
 		self.frame_mut().throws = throws;
 		self.begin_function_task(&function)?;
+		if function.return_slot {
+			let pointer = value
+				.get_nth_param(u32::from(lambda))
+				.expect("a return slot")
+				.into_pointer_value();
+			self.frame_mut().return_slot = Some(Slot { pointer, repr: ret });
+			self.frame_mut().destination = Some((info.body, Slot { pointer, repr: ret }));
+		}
 		let mut saved = Vec::new();
 		if lambda && !captures.is_empty() {
 			let environment = value
@@ -1239,7 +1266,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			saved = self.bind_captures(environment, &captures, by_reference)?;
 		}
 		// the parameters, then their defaults in order
-		let mut index = u32::from(lambda);
+		let mut index = u32::from(lambda) + u32::from(function.return_slot);
 		let by_pointer = function.by_pointer.clone();
 		for (position, (param, (repr, has_default))) in info.params.iter().zip(params).enumerate() {
 			if by_pointer[position] {
@@ -1381,6 +1408,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		} else {
 			value
 		};
+		if let Some(slot) = self.frame().return_slot {
+			self.store(slot, value, node)?;
+			self.drop_to(0)?;
+			return if self.frame().throws {
+				self.return_raw(Some(self.pointer_type().const_null().into()))
+			} else {
+				self.return_raw(None)
+			};
+		}
 		let top_level = self.frame().owner.is_none() && !self.in_task_body();
 		if top_level && !self.leak_check && !self.in_coroutine() {
 			self.drop_at_exit()?;
@@ -1699,6 +1735,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			},
 			Value::String(text) => self.string_constant(&text),
 			Value::None => Val {
+				destination: None,
 				repr: Repr::None,
 				value: None,
 			},
@@ -1734,10 +1771,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		};
 		let count = statements.len();
 		let scope = self.mark();
+		let destination = self.destination_at(node);
 		let mut last = Val::void();
 		for (index, statement) in statements.iter().enumerate() {
 			let mark = self.mark();
-			let value = self.expr(statement)?;
+			let value = if index + 1 == count && want {
+				self.expr_with_destination(statement, destination)?
+			} else {
+				self.expr(statement)?
+			};
 			if value.repr == Repr::Never {
 				// what follows a `return` or a `break` is unreachable
 				self.end_scope(scope, None)?;
@@ -1826,6 +1868,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			)),
 			View::String(text) => Ok(self.string_constant(text)),
 			View::None => Ok(Val {
+				destination: None,
 				repr: Repr::None,
 				value: None,
 			}),
@@ -2039,7 +2082,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			View::Return(value) => {
 				let result = match value {
-					Some(value) => self.expr(value)?,
+					Some(value) => self.expr_with_destination(value, self.frame().return_slot)?,
 					None => Val::void(),
 				};
 				self.build_return(result, value.unwrap_or(node))?;
@@ -2148,7 +2191,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.frame_mut().collection_locals.insert(key);
 			self.fresh(value)
 		} else {
-			self.expr(value_node)?
+			let repr = self.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())?;
+			let destination = if self.uses_return_slot(repr) {
+				Some(self.slot_of(symbol, node)?)
+			} else {
+				None
+			};
+			self.expr_with_destination(value_node, destination)?
 		};
 		if value.repr == Repr::Never {
 			return Ok(Val::never());
@@ -2272,7 +2321,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let repr = self.node_repr(node).unwrap_or(Repr::Void);
 		let slot = if repr.has_value() && else_body.is_some() {
-			Some(self.alloca(repr, "if")?)
+			Some(match self.destination_for(node, repr) {
+				Some(slot) => slot,
+				None => self.alloca(repr, "if")?,
+			})
 		} else {
 			None
 		};
@@ -2288,10 +2340,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			if let Some(body) = body {
 				let owned = slot.is_some();
 				let value = self.region(slot.map(|slot| slot.repr), body, |this| {
-					match this.view(body) {
+					this.with_destination(body, slot, |this| match this.view(body) {
 						View::If { .. } => this.expr(body),
 						_ => this.block(body, owned),
-					}
+					})
 				})?;
 				if value.repr == Repr::Never {
 					continue;
@@ -2310,7 +2362,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(Val::never());
 		}
 		match slot {
-			Some(slot) => Ok(self.fresh(self.load(slot)?)),
+			Some(slot) => Ok(self.fresh(self.load_destination(slot)?)),
 			None => Ok(Val::void()),
 		}
 	}

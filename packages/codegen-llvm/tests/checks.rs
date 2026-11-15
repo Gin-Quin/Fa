@@ -207,6 +207,54 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn aggregate_results_use_and_forward_the_callers_return_slot() {
+		let ir = ir_of(
+			"aggregate-return-slots",
+			r#"
+type Data = { a: Integer, b: Integer }
+function make = (n: Integer): Data => Data { a = n, b = n + 1 }
+function relay = (n: Integer): Data => if n > 0 { relay(n - 1) } else { make(n) }
+function pair = (n: Integer): Tuple<Integer, Integer> => (n, n + 1)
+type Wrapped = { data: Data }
+function wrapped = (n: Integer): Wrapped => Wrapped { data = make(n) }
+let data = wrapped(2)
+let tuple = pair(3)
+console.log(data.data.a, tuple[0], relay(2).a)
+"#,
+		);
+		for name in ["fa.make", "fa.relay", "fa.pair", "fa.wrapped"] {
+			let body = function(&ir, name);
+			assert!(body.lines().next().unwrap().contains("void"), "{body}");
+			assert!(body.lines().next().unwrap().contains("sret("), "{body}");
+			assert!(!body.contains("return.result = alloca"), "{body}");
+			assert!(!body.contains("ret {"), "{body}");
+		}
+		let make = function(&ir, "fa.make");
+		assert!(make.contains("result.field"), "{make}");
+		assert!(!make.contains("insertvalue"), "{make}");
+	}
+
+	#[test]
+	fn throwing_aggregate_returns_keep_errors_outside_the_result_slot() {
+		let ir = ir_of(
+			"aggregate-return-errors",
+			r#"
+type Data = { number: Integer }
+function parse = (text: String): Data throws ParseError => Data { number = try Integer.parse(text) }
+let value = parse("2") catch error => Data { number = -1 }
+console.log(value.number)
+"#,
+		);
+		let body = function(&ir, "fa.parse");
+		assert!(
+			body.lines().next().unwrap().contains("fastcc ptr"),
+			"{body}"
+		);
+		assert!(!body.contains("sret("), "{body}");
+		assert!(!body.contains("ret {"), "{body}");
+	}
+
+	#[test]
 	fn reservation_precedes_a_push_loop_without_growth_calls_in_the_loop() {
 		let ir = ir_of(
 			"reserve-loop",
@@ -740,7 +788,7 @@ console.log(items.length)
 			.1;
 		let allocation = build.find("@fa_arena_alloc(").expect("an arena allocation");
 		let recursion = build
-			.find("@fa.build.arena(i64 %")
+			.find("@fa.build.arena(ptr %")
 			.expect("a recursive call");
 		assert!(allocation < recursion, "{build}");
 		assert!(!build.contains("@fa_alloc("), "{build}");

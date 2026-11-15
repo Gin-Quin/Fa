@@ -533,9 +533,10 @@ Implementation choices:
   budget is exceeded. It chooses the frame or ordinary heap path before building
   any items. The bounded scan trades some CPU work for avoiding allocation and
   relocation; all Unicode boundary checks are preserved. Empty separators
-  keep the existing character/compact-character path. User-function return slots,
-  `map`, `filter`, `from` and aggregate return destinations remain explicit
-  follow-up work in `design/todo.md`; no post-construction copy onto the stack.
+  keep the existing character/compact-character path. Array `map`/`filter`, required borrowed `Array.from` copies and synchronous
+  object/tuple return slots are covered by the extensions below. Collection
+  return forwarding and the remaining constructor paths are tracked in
+  `design/todo.md`; no post-construction copy onto the stack.
 - **Targets:** use the same ABI and fixed limits on native, freestanding and
   wasm32. On wasm, entry allocas use LLVM's linear-memory shadow stack; no
   input-dependent extension or larger suspended task frame is permitted.
@@ -606,3 +607,27 @@ not a claim that all construction paths have been converted at once.
   arrays retain their existing storage: moving a heap owner beats copying it
   into a frame. Explicit hints retain the existing source-snapshot-before-hint
   semantics until that case can choose final storage before the snapshot.
+
+### Object and tuple return slots (implementation, 2026-11-15)
+
+- In synchronous compilation mode, object and tuple results use a caller-owned
+  output pointer before ordinary parameters, after a closure environment when
+  present. Successful nonthrowing functions return `void` and mark that pointer
+  with LLVM `sret`. Throwing functions return only their error pointer: LLVM
+  requires an `sret` function to return `void`, so their destination is plain.
+  This placement also meets LLVM's first-or-second-parameter `sret` constraint.
+- Direct calls, generic instances with supported layouts, function-value thunks
+  and lambdas share this protocol. A fresh local, nested object field/tuple item,
+  mapped array element or forwarding return supplies its actual slot. Literals,
+  blocks, `if` and `when` forward it. Structural conversions and existing-place
+  assignments retain staging until aliasing and error behavior permit direct
+  construction. Never overwrite an existing owner before its RHS succeeds.
+- Completed constructor fields remain individually registered until the whole
+  object/tuple succeeds. A later field error drops them without treating an
+  unfinished object as initialized. Task and arena adapters read result slots
+  only on success; errors retain their zero-payload promise representation.
+- Coroutine compilation retains its current promise ABI, including synchronous
+  calls in that mode. Returning a named local still needs result-slot coalescing
+  (NRVO) to remove its aggregate load/store; this change covers fresh expression
+  construction and forwarding, not all return forms. Those precise gaps remain
+  listed in `design/todo.md`.

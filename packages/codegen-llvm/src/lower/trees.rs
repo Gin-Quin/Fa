@@ -517,6 +517,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Some(inkwell::module::Linkage::Internal),
 				);
 				self.runtime.add_attributes(body, &["nounwind"]);
+				if f.return_slot {
+					self.add_return_slot_attribute(body, f.ret, f.throws, u32::from(f.lambda));
+				}
 				body.set_call_conventions(FAST_CALLING_CONVENTION);
 				self.functions.get_mut(&key).expect("builder").arena_body = Some(body);
 				let b = self.context.create_builder();
@@ -526,7 +529,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					f.value.get_param_iter().map(Into::into).collect();
 				let call = b.build_call(body, &arguments, "root")?;
 				call.set_call_convention(FAST_CALLING_CONVENTION);
-				let root = call.try_as_basic_value().basic().expect("root");
+				let raw = call.try_as_basic_value().basic();
+				let root = if f.return_slot {
+					let pointer = f
+						.value
+						.get_nth_param(u32::from(f.lambda))
+						.expect("return slot")
+						.into_pointer_value();
+					self.raw_from_return_slot(
+						&b,
+						super::Slot {
+							pointer,
+							repr: f.ret,
+						},
+						raw,
+					)?
+				} else {
+					raw.expect("root")
+				};
 				let value = if f.throws {
 					b.build_extract_value(root.into_struct_value(), 0, "")?
 				} else {
@@ -538,7 +558,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					&[pointer.into()],
 					"",
 				)?;
-				b.build_return(Some(&root))?;
+				if f.return_slot {
+					b.build_return(raw.as_ref().map(|v| v as _))?;
+				} else {
+					b.build_return(Some(&root))?;
+				}
 			}
 		}
 		Ok(())

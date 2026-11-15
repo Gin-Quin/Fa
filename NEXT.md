@@ -1,6 +1,8 @@
 # Compiler completion in progress (2026-11-07)
 
-Integration: branch `compiler`, worktree `.claude/worktrees/lead`. The main checkout
+Integration: branch `compiler`, worktree `.claude/worktrees/lead`; since 2026-11-15
+`perf/native-goose` is merged into it on the branch `integrate/trunk` (worktree
+`.claude/worktrees/trunk`, "Trunk integration" in `design/decisions.md`). The main checkout
 is shared and dirty: preserve it. The user requested completion of all remaining
 compiler work and explicitly authorized parallel agents.
 

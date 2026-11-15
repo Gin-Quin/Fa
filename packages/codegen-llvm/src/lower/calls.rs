@@ -137,31 +137,100 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Repr::Function(ty) => ty,
 					_ => self.type_of(callee),
 				};
-				// the parameters the function type says it changes: the
-				// caller's places, not copies (ft-1)
+				let closure = if self.analysis.function_defaults.contains_key(&node) {
+					let pair = closure.value.expect("a function").into_struct_value();
+					let environment = self
+						.builder
+						.build_extract_value(pair, 1, "")?
+						.into_pointer_value();
+					let entry = self.default_entry(&self.builder, environment)?;
+					self.make_closure_of(entry, environment, ty)?
+				} else {
+					closure
+				};
+				// The instance determines the storage of a variadic item too.
+				let closure = if self.is_generic_function_type(ty) {
+					self.generic_instance_value(closure, node)?
+				} else {
+					closure
+				};
+				let Repr::Function(ty) = closure.repr else {
+					return Err(self.unsupported(node.index(), "calling this value"));
+				};
+				let (params, _, _) = self.value_signature(ty, node)?;
+				let fa_analyzer::types::TypeKind::Function(signature) = self.types().kind(ty)
+				else {
+					unreachable!()
+				};
+				let parameter_types = self
+					.types()
+					.params(self.types().sig(signature).params)
+					.to_vec();
+				// The caller's places, for the parameters the type mutates.
 				let changed = self.changed_parameters(ty);
-				let mut arguments = Vec::new();
-				let mut places = Vec::new();
-				for (position, argument) in info.arguments.iter().enumerate() {
-					let Argument::Given(argument) = argument else {
-						return Err(self.unsupported(node.index(), "these arguments"));
-					};
-					if changed.contains(&position) && self.is_place(*argument) {
-						let place = self.place(*argument)?;
-						if self.borrows_parameter(place.repr) {
-							arguments.push(Val::new(place.repr, self.zero_value(place.repr)));
-							places.push(Some(place.pointer));
-							continue;
+				let mut order: Vec<_> = info.arguments.iter().enumerate().collect();
+				order.sort_by_key(|(_, argument)| match argument {
+					Argument::Given(value) => self.tree.spans[value.index()].start,
+					Argument::Variadic(values) => values
+						.first()
+						.map_or(usize::MAX, |value| self.tree.spans[value.index()].start),
+					_ => usize::MAX,
+				});
+				let mut arguments = vec![Val::void(); info.arguments.len()];
+				let mut places = vec![None; info.arguments.len()];
+				for (position, argument) in order {
+					let value = match argument {
+						Argument::Given(argument) => {
+							if changed.contains(&position) && self.is_place(*argument) {
+								let place = self.place(*argument)?;
+								if self.value_borrows_parameter(place.repr) {
+									arguments[position] =
+										Val::new(place.repr, self.zero_value(place.repr));
+									places[position] = Some(place.pointer);
+									continue;
+								}
+							}
+							let value = self.expr(*argument)?;
+							if value.repr == Repr::Never {
+								return Ok(value);
+							}
+							if self.call_argument_takes_task(node, *argument) {
+								self.prepare_owned_projection(value, params[position], *argument)?
+							} else {
+								self.convert(value, params[position], argument.index())?
+							}
 						}
-					}
-					let value = self.expr(*argument)?;
-					if value.repr == Repr::Never {
-						return Ok(value);
-					}
-					// a task moves into the callee, which owns it
-					let value = self.give_task(value, *argument)?;
-					arguments.push(value);
-					places.push(None);
+						Argument::Variadic(values) => {
+							match self.variadic_array(params[position], values, node)? {
+								Some(value) => value,
+								None => return Ok(Val::never()),
+							}
+						}
+						Argument::Default
+							if self.analysis.function_defaults.contains_key(&node) =>
+						{
+							Val::new(params[position], self.zero_value(params[position]))
+						}
+						_ => return Err(self.unsupported(node.index(), "these arguments")),
+					};
+					arguments[position] = value;
+				}
+				// A later argument may fail. Keep the sources owned until all
+				// argument expressions, including variadic spreads, succeeded.
+				for (position, argument) in info.arguments.iter().enumerate() {
+					arguments[position] = match argument {
+						Argument::Given(source) if self.call_argument_takes_task(node, *source) => {
+							self.take(arguments[position], None)?
+						}
+						Argument::Variadic(_)
+							if self.types().takes_task_parameter(
+								self.concrete_type(parameter_types[position].ty),
+							) =>
+						{
+							self.take(arguments[position], None)?
+						}
+						_ => arguments[position],
+					};
 				}
 				let catches = self
 					.analysis
@@ -229,6 +298,36 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(raw)
 	}
 
+	/// The formal view controls transfer: fields absent from the parameter
+	/// do not turn an ordinary borrow into consumption of its actual owner.
+	fn call_argument_takes_task(&self, call: NodeId, value: NodeId) -> bool {
+		self.analysis
+			.task_arguments
+			.get(&call)
+			.is_some_and(|arguments| {
+				arguments.iter().any(|&(argument, ty)| {
+					argument == value && self.types().takes_task_parameter(self.concrete_type(ty))
+				})
+			})
+	}
+
+	fn function_parameter_type(
+		&self,
+		function: &super::Function<'ctx>,
+		position: usize,
+	) -> Option<TypeId> {
+		let signature = self.types().sig(function.info.sig?);
+		let ty = self.types().params(signature.params).get(position)?.ty;
+		let mut arguments: Vec<_> = function
+			.types
+			.iter()
+			.map(|(&param, &ty)| (param, ty))
+			.collect();
+		arguments.sort_unstable_by_key(|&(param, _)| param);
+		let (params, arguments): (Vec<_>, Vec<_>) = arguments.into_iter().unzip();
+		Some(self.concrete_type(self.substitute_params(ty, &params, &arguments)))
+	}
+
 	/// A direct call of a function (of this file or another), the
 	/// arguments in parameter order from `info`.
 	pub(crate) fn call_function(
@@ -289,16 +388,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut write_backs = Vec::new();
 		// the given arguments are evaluated in the written order (named
 		// arguments may come in another order than the parameters)
-		let mut given: Vec<(usize, NodeId)> = info
+		let mut given: Vec<(usize, Option<NodeId>)> = info
 			.arguments
 			.iter()
 			.enumerate()
 			.filter_map(|(position, argument)| match argument {
-				Argument::Given(value) => Some((position, *value)),
+				Argument::Given(value) => Some((position, Some(*value))),
+				Argument::Variadic(values) => Some((position, values.first().copied())),
 				_ => None,
 			})
 			.collect();
-		given.sort_by_key(|(_, value)| self.tree.spans[value.index()].start);
+		given.sort_by_key(|(_, value)| {
+			value.map_or(usize::MAX, |value| self.tree.spans[value.index()].start)
+		});
 		let mut evaluated: rustc_hash::FxHashMap<usize, Val<'ctx>> = Default::default();
 		let receiver_first = matches!(info.arguments.first(), Some(Argument::Receiver(_)));
 		let mut receiver_value = None;
@@ -316,26 +418,59 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			receiver_value = Some(lowered);
 		}
-		for (position, value) in given {
-			if by_pointer.get(position) == Some(&true) {
-				let repr = self.concrete_param_repr(&function, params[position].0, Some(value))?;
-				let (pointer, write_back) =
-					self.argument_place(node, Some(value), repr, function.borrowed[position])?;
-				places.insert(position, pointer);
-				write_backs.extend(write_back);
-				continue;
+		for (position, _) in given {
+			match &info.arguments[position] {
+				Argument::Given(value) => {
+					let consuming = self.call_argument_takes_task(node, *value);
+					if by_pointer.get(position) == Some(&true) && !consuming {
+						let repr =
+							self.concrete_param_repr(&function, params[position].0, Some(*value))?;
+						let (pointer, write_back) = self.argument_place(
+							node,
+							Some(*value),
+							repr,
+							function.borrowed[position],
+						)?;
+						places.insert(position, pointer);
+						write_backs.extend(write_back);
+						continue;
+					}
+					let lowered = self.expr(*value)?;
+					if lowered.repr == Repr::Never {
+						return Ok(Val::never());
+					}
+					let lowered = if consuming {
+						let repr =
+							self.concrete_param_repr(&function, params[position].0, Some(*value))?;
+						self.prepare_owned_projection(lowered, repr, *value)?
+					} else {
+						lowered
+					};
+					evaluated.insert(position, lowered);
+				}
+				Argument::Variadic(values) => {
+					let Some(array) = self.variadic_array(params[position].0, values, node)? else {
+						return Ok(Val::never());
+					};
+					evaluated.insert(position, array);
+				}
+				_ => unreachable!("only explicit arguments are evaluated"),
 			}
-			let lowered = self.expr(value)?;
-			if lowered.repr == Repr::Never {
-				return Ok(Val::never());
-			}
-			evaluated.insert(position, lowered);
 		}
+		let mut task_transfers = Vec::new();
 		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
 		if function.lambda {
 			// a local function using locals around it: its environment
 			let (captures, by_reference) = (function.captures.clone(), function.by_reference);
 			let environment = self.build_environment(&captures, by_reference, node)?;
+			if !by_reference && !captures.is_empty() {
+				let owned = self.make_closure_of(
+					self.pointer_type().const_null(),
+					environment,
+					function.info.ty,
+				)?;
+				self.fresh(owned);
+			}
 			arguments.push(environment.into());
 		}
 		for (position, ((repr, has_default), argument)) in
@@ -359,11 +494,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Argument::Given(argument) => {
 					let lowered = evaluated[&position];
-					// a task moves into the callee, which owns it
-					let lowered = self.give_task(lowered, *argument)?;
 					let lowered =
 						self.convert_argument(&function, lowered, repr, argument.index())?;
-					arguments.push(lowered.value.expect("an argument").into());
+					if self.call_argument_takes_task(node, *argument) {
+						task_transfers.push(lowered);
+					}
+					if by_pointer[position] {
+						let slot = self.alloca(lowered.repr, "owned_argument")?;
+						self.builder
+							.build_store(slot.pointer, lowered.value.expect("an argument"))?;
+						arguments.push(slot.pointer.into());
+					} else {
+						arguments.push(lowered.value.expect("an argument").into());
+					}
 					if has_default {
 						arguments.push(self.context.bool_type().const_int(1, false).into());
 					}
@@ -377,10 +520,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					arguments.push(super::zero_of(ty).into());
 					arguments.push(self.context.bool_type().const_zero().into());
 				}
-				Argument::Variadic(values) => {
-					let Some(array) = self.variadic_array(repr, values, node)? else {
-						return Ok(Val::never());
-					};
+				Argument::Variadic(_) => {
+					let array = evaluated[&position];
+					if self
+						.function_parameter_type(&function, position)
+						.is_some_and(|ty| self.types().takes_task_parameter(ty))
+					{
+						task_transfers.push(array);
+					}
 					arguments.push(array.value.expect("an array").into());
 				}
 				_ => return Err(self.unsupported(node.index(), "these arguments")),
@@ -400,6 +547,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		// the sources of the reactive places given (D24), right before the call
 		self.pass_argument_sources(node, function.declaration, function.info.params.len())?;
+		// Every expression and conversion has succeeded. Only invocation
+		// transfers these fresh owners; an earlier error still drops them.
+		for value in task_transfers {
+			self.take(value, None)?;
+		}
 		// an awaited or started call: its async instance (tasks.rs)
 		let raw = match self.task_call(node, &function, &arguments)? {
 			Some(super::tasks::TaskCall::Task(task)) => {
@@ -1086,6 +1238,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.iter()
 			.map(|&argument| merger.ty(argument))
 			.collect();
+		let module = merger.module(module);
 		drop(merger);
 		let mut scratch = fa_analyzer::types::TypeStore::view(self.types().global());
 		let list = scratch.list(&arguments);
@@ -1209,6 +1362,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			})
 			.map(SymbolId::new)
+	}
+
+	/// Literal values captured by a semantic instance. The analyzer records
+	/// the exact static binder, so equal names in nested scopes cannot alias.
+	pub(super) fn value_bindings_for(
+		&self,
+		bindings: &[(fa_analyzer::ids::ParamId, TypeId)],
+	) -> rustc_hash::FxHashMap<SymbolId, TypeId> {
+		let mut result = self.value_bindings.borrow().clone();
+		for (&symbol, &param) in &self.analysis.value_parameters {
+			let own = self.types().param(param);
+			let owner = self.types().merger(None).decl_key(own.owner);
+			if let Some((_, value)) = bindings.iter().find(|(param, _)| {
+				let info = self.types().param(*param);
+				info.index == own.index && self.types().merger(None).decl_key(info.owner) == owner
+			}) {
+				result.insert(symbol, self.concrete_type(*value));
+			}
+		}
+		result
 	}
 
 	/// The current value bindings, in a stable order (a part of the key of

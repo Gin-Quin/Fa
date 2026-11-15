@@ -395,6 +395,7 @@ impl Walker<'_> {
 		let externs = self.a.externs.clone();
 		// where each key given is (the export and the members got theirs
 		// when published)
+		let signature_names = self.interface_signature_names();
 		let keys: FxHashMap<DeclKey, KeyedDecl> = self
 			.modules
 			.keyed
@@ -466,6 +467,8 @@ impl Walker<'_> {
 		interface.function_owners = function_owners;
 		interface.nested_types = nested_types;
 		interface.parameters = parameters;
+		interface.signature_names = signature_names;
+		interface.computed_functions = self.a.computed_functions.clone();
 		interface.implicit_writes = implicit_writes;
 		interface.generic_functions = generic_functions;
 		interface.key_set_params = key_set_params;

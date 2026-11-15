@@ -212,6 +212,11 @@ impl SymbolTable {
 		kind: ScopeKind,
 	) -> ScopeId {
 		if let Some(&scope) = self.by_owner.get(&owner) {
+			// A generic expression lambda first opens its binder scope. Its
+			// parameters then reuse that scope as their function boundary.
+			if kind == ScopeKind::Function {
+				self.scopes[scope.index()].kind = ScopeKind::Function;
+			}
 			return scope;
 		}
 		let scope = ScopeId::new(self.scopes.len());

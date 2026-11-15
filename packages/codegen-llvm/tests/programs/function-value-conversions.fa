@@ -1,0 +1,75 @@
+use { sleep } = std.time
+
+type Small = { x: Integer }
+type Large = { a: Integer, x: Integer }
+function read = (value: Small): Integer => value.x
+let callback: (value: Large) => Integer = read
+console.log(callback(Large { a = 1, x = 7 })) -- prints: 7
+
+type Stored = { x: Integer, extra: String }
+function stored = (): Stored => Stored {
+	x = 5,
+	extra = "a deliberately long extra string released by the return projection"
+}
+let projected: () => Small = stored
+console.log(projected()) -- prints: { x = 5 }
+
+function wide = (value: UInt128): UInt128 => value
+let number: (value: UInt32) => UInt128 = wide
+console.log(number(7) + UInt128(1)) -- prints: 8
+
+function maybe = (value: UInt128?): UInt128? => value
+let optional: (value: UInt32?) => UInt128? = maybe
+console.log(optional(9), optional(none)) -- prints: 9 none
+type Numeric = (value: UInt128) => UInt128
+function factory = (offset: UInt128): Numeric => (value: UInt128) => value + offset
+let captured: (value: UInt32) => UInt128 = factory(UInt128(10))
+console.log(captured(3)) -- prints: 13
+
+function change = (value: Small) mutates value.x => { value.x += 2 }
+type Change = (value: Large) => Void mutates value
+let changing: Change = change
+mutable value = Large { a = 4, x = 7 }
+changing(value)
+console.log(value.a, value.x) -- prints: 4 9
+
+async function asyncWide = (value: UInt128): UInt128 => {
+	await sleep(1)
+	console.log("body")
+	value
+}
+let delayed: async (value: UInt32) => UInt128 = asyncWide
+let task = start delayed(9)
+console.log("queued") -- prints: queued
+console.log(await task) -- prints: body
+-- prints: 9
+
+async function changeLater = (value: Small) mutates value.x => {
+	await sleep(1)
+	value.x += 3
+}
+type AsyncChange = async (value: Large) => Void mutates value
+let changingLater: AsyncChange = changeLater
+await changingLater(value)
+console.log(value.a, value.x) -- prints: 4 12
+
+function mark = (value: UInt128): UInt128 => do {
+	console.log("sync body")
+	value
+}
+let lifted: async (value: UInt32) => UInt128 = mark
+let liftedTask = start lifted(10)
+console.log("sync queued") -- prints: sync queued
+console.log(await liftedTask) -- prints: sync body
+-- prints: 10
+
+type Failure = Errors { Bad }
+function maybeChange = (value: Small): Integer throws Failure.Bad mutates value.x => {
+	value.x += 1
+	if value.x > 0 { throw Failure.Bad }
+	value.x
+}
+type Failing = (value: Large) => Integer throws Failure.Bad mutates value
+let failing: Failing = maybeChange
+let result = failing(value) catch _error => -1
+console.log(result, value.x) -- prints: -1 13

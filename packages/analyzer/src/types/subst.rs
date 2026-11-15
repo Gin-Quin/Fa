@@ -160,6 +160,15 @@ impl TypeStore {
 					.collect();
 				let ret = self.substitute_in(sig.ret, bindings, cache);
 				let throws = self.substitute_in(sig.throws, bindings, cache);
+				let requirements = self.requirements(sig.requires).to_vec();
+				let requirements: Vec<_> = requirements
+					.into_iter()
+					.map(|requirement| crate::types::Requirement {
+						ty: self.substitute_in(requirement.ty, bindings, cache),
+						..requirement
+					})
+					.collect();
+				let requires = self.req_list(&requirements);
 				let params = self.param_list(&params);
 				// binding its own parameters instantiates a generic function type
 				let opened = self.list_items(sig.generics).iter().any(|&generic| {
@@ -169,6 +178,7 @@ impl TypeStore {
 					params,
 					ret,
 					throws,
+					requires,
 					generics: if opened { ListId::EMPTY } else { sig.generics },
 					..sig
 				})

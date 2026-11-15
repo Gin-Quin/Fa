@@ -32,6 +32,7 @@ impl Walker<'_> {
 		for (index, item) in items.iter().enumerate() {
 			let element = expected_items.as_ref().map(|elements| elements[index]);
 			let ty = self.check(item, element);
+			self.note_copy_site(item);
 			if let Some(element) = element {
 				self.sink(item, ty, element);
 			}

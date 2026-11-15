@@ -342,7 +342,14 @@ impl Session {
 			matches!(
 				declared.kind,
 				SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive | SymbolKind::Derived
-			)
+			) || self
+				.interface(self.module_of_decl(decl))
+				.is_some_and(|interface| {
+					interface
+						.keys
+						.get(&decl)
+						.is_some_and(|key| interface.computed_functions.contains(&key.node))
+				})
 		}) && self.module_role(self.module_of_decl(decl)).is_module()
 	}
 

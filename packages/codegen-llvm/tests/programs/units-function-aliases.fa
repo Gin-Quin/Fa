@@ -1,0 +1,21 @@
+-- file: library/operators.fa
+export namespace = {
+	function original = (): Integer => 41
+	function identity = <Item>(value: Item): Item => value
+	function greet = (text: String = "default"): String => text
+	function choose = <Item>(value: Item, other: Item = value): Item => other
+}
+-- file: application/main.fa
+use { original, identity, greet, choose } = library.operators
+function alias = original
+function same = identity
+function greeting = greet
+function choice = choose
+export function = () => {
+	console.log(alias(), same(7), same<String>("word"))
+	console.log(greeting(), greeting("given"))
+	console.log(choice(7), choice<String>("first", "second"))
+}
+-- prints: 41 7 word
+-- prints: default given
+-- prints: 7 second

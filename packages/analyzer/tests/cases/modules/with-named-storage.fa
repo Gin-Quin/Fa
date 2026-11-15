@@ -1,0 +1,22 @@
+-- require-split: true
+-- file: library/bound.fa
+function add = (first: Integer, second: Integer): Integer => first + second
+export function = add with (second = 2)
+-- file: library/alias.fa
+export function = bound
+-- file: application/main.fa
+function build = (initial: String) => do {
+	mutable prefix = initial
+	function target = (first: Integer, second: Integer): String => "{prefix}:{first + second}"
+	function stored = target with (second = 2)
+	prefix = "after"
+	let before = stored(1)
+	let later = stored(3)
+	function alias = stored
+	() => before + "/" + later + "/" + alias(5)
+}
+export function = () => {
+	let reader = build("before")
+	console.log(reader()) -- prints: before:3/before:5/before:7
+	console.log(library.bound(first = 3), library.alias(first = 4)) -- prints: 5 6
+}

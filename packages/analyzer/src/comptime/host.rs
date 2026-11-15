@@ -20,13 +20,28 @@ pub struct SessionHost<'s> {
 }
 
 impl SessionHost<'_> {
-	fn lower(&self, file: FileId, node: NodeId) -> Option<Function> {
+	fn lower(&self, key: FnKey) -> Option<Function> {
+		let instance = self
+			.session
+			.comptime
+			.instances
+			.lock()
+			.expect("the compile-time instance registry")
+			.get(key)
+			.cloned();
+		let source = instance.as_ref().map_or(key, |instance| instance.source);
+		let context = instance.map_or_else(super::instances::Context::default, |instance| {
+			instance.context
+		});
+		let (file, node) = (FileId(source.0), NodeId(source.1));
 		let source = self.session.source_file(file);
 		if !source.done {
 			return None;
 		}
 		let tree = Arc::clone(&source.tree);
-		Lowerer::new(self.session, file, &tree, self.session.analysis(file)).function(node)
+		Lowerer::new(self.session, file, &tree, self.session.analysis(file))
+			.with_instance(context)
+			.function(node)
 	}
 
 	/// Evaluates the value node `n` of `file` (module-level values allowed).
@@ -46,7 +61,7 @@ impl Host for SessionHost<'_> {
 			return Ok(Arc::clone(function));
 		}
 		let function = self
-			.lower(FileId(key.0), NodeId(key.1))
+			.lower(key)
 			.ok_or_else(|| Error::Unsupported("this function".into()))?;
 		let function = Arc::new(function);
 		self.session
@@ -54,6 +69,14 @@ impl Host for SessionHost<'_> {
 			.functions
 			.insert(key, Arc::clone(&function));
 		Ok(function)
+	}
+
+	fn instantiate(&mut self, function: FnKey, application: FnKey) -> Result<FnKey, Error> {
+		super::instances::instantiate(self.session, None, function, application)
+	}
+
+	fn bind_partial(&mut self, function: FnKey, site: FnKey) -> Result<FnKey, Error> {
+		super::instances::bind_partial(self.session, None, function, site)
 	}
 
 	fn global(&mut self, key: GlobalKey) -> Result<Value, Error> {
@@ -74,7 +97,9 @@ impl Host for SessionHost<'_> {
 			View::Declaration {
 				value: Some(value), ..
 			}
-			| View::ExportValue { value, .. } => self.evaluate(file, value),
+			| View::ExportValue { value, .. }
+			| View::Function { value, .. }
+			| View::ExportFunction { value, .. } => self.evaluate(file, value),
 			_ => Err(Error::Unsupported("this module-level value".into())),
 		};
 		self.session

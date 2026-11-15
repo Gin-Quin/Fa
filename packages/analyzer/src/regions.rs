@@ -5,6 +5,7 @@
 //! Native lowering retains its target-dependent size/layout guards; it may not
 //! enable a region from a missing fact or from a file-local approximation.
 
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -213,54 +214,73 @@ struct RegionFile<'a> {
 	tree: &'a fa_parser::TypedSyntaxTree,
 	analysis: &'a Analysis,
 	types: &'a TypeStore,
-	parents: Vec<Option<NodeId>>,
-	owners: Vec<Option<NodeId>>,
-	function_names: FxHashMap<NodeId, String>,
+	owners: OnceCell<Vec<Option<NodeId>>>,
+	function_names: OnceCell<FxHashMap<NodeId, String>>,
 }
 
 impl<'a> RegionFile<'a> {
 	fn new(session: &'a Session, file: FileId) -> Self {
 		let tree = session.tree(file);
 		let analysis = session.analysis(file);
-		let mut parents = vec![None; tree.nodes.len()];
-		for (index, node) in tree.nodes.iter().enumerate() {
-			node.for_each_child(|child| parents[child] = Some(NodeId::new(index)));
-		}
-		let bodies: FxHashMap<_, _> = analysis
-			.functions
-			.iter()
-			.map(|(&key, info)| (info.body, key))
-			.collect();
-		let mut owners = vec![None; tree.nodes.len()];
-		let mut stack: Vec<_> = parents
-			.iter()
-			.enumerate()
-			.filter(|(_, parent)| parent.is_none())
-			.map(|(index, _)| (NodeId::new(index), None))
-			.collect();
-		while let Some((node, owner)) = stack.pop() {
-			let owner = bodies.get(&node).copied().or(owner);
-			owners[node.index()] = owner;
-			tree.nodes[node.index()]
-				.for_each_child(|child| stack.push((NodeId::new(child), owner)));
-		}
-		let function_names = analysis
-			.functions
-			.keys()
-			.filter_map(|&function| {
-				function_key(session, file, function).map(|name| (function, name))
-			})
-			.collect();
 		Self {
 			session,
 			file,
 			tree,
 			analysis,
 			types: session.types(),
-			parents,
-			owners,
-			function_names,
+			owners: OnceCell::new(),
+			function_names: OnceCell::new(),
 		}
+	}
+
+	/// Most files contain no admissible recursive root; derive ownership
+	/// only when a concrete claim actually needs it.
+	fn owners(&self) -> &[Option<NodeId>] {
+		self.owners.get_or_init(|| {
+			let bodies: FxHashMap<_, _> = self
+				.analysis
+				.functions
+				.iter()
+				.map(|(&key, info)| (info.body, key))
+				.collect();
+			let mut owners = vec![None; self.tree.nodes.len()];
+			let mut stack: Vec<_> = self
+				.analysis
+				.parent_edges
+				.iter()
+				.enumerate()
+				.filter(|(_, parent)| **parent == usize::MAX)
+				.map(|(index, _)| (NodeId::new(index), None))
+				.collect();
+			while let Some((node, owner)) = stack.pop() {
+				let owner = bodies.get(&node).copied().or(owner);
+				owners[node.index()] = owner;
+				self.tree.nodes[node.index()]
+					.for_each_child(|child| stack.push((NodeId::new(child), owner)));
+			}
+			owners
+		})
+	}
+
+	fn function_names(&self) -> &FxHashMap<NodeId, String> {
+		self.function_names.get_or_init(|| {
+			self.analysis
+				.functions
+				.keys()
+				.filter_map(|&function| {
+					function_key(self.session, self.file, function).map(|name| (function, name))
+				})
+				.collect()
+		})
+	}
+
+	fn parent(&self, node: NodeId) -> Option<NodeId> {
+		self.analysis
+			.parent_edges
+			.get(node.index())
+			.copied()
+			.filter(|&parent| parent != usize::MAX)
+			.map(NodeId::new)
 	}
 
 	fn view(&self, node: NodeId) -> View<'a> {
@@ -539,7 +559,7 @@ impl<'a> RegionFile<'a> {
 			|| (!matches!(self.types.kind(root.ty), TypeKind::NamedUnion(..))
 				&& sig.throws != TypeId::NEVER)
 			|| info.params.iter().any(|param| param.default.is_some())
-			|| !self.function_names.contains_key(&function)
+			|| !self.function_names().contains_key(&function)
 			|| matches!(
 				info.declaration.map(|node| self.view(node)),
 				None | Some(View::Lambda { .. })
@@ -625,8 +645,8 @@ impl<'a> RegionFile<'a> {
 			return false;
 		};
 		let mut current = node;
-		while let Some(parent) = self.parents[current.index()] {
-			if self.owners[parent.index()] != Some(function) {
+		while let Some(parent) = self.parent(current) {
+			if self.owners()[parent.index()] != Some(function) {
 				break;
 			}
 			let subject = match self.view(parent) {
@@ -659,7 +679,7 @@ impl<'a> RegionFile<'a> {
 			) {
 				return true;
 			}
-			let Some(parent) = self.parents[node.index()] else {
+			let Some(parent) = self.parent(node) else {
 				return false;
 			};
 			// The data literal of a member constructor is transparent. Do not
@@ -676,7 +696,7 @@ impl<'a> RegionFile<'a> {
 			node = inner;
 		}
 		if !self.root_array(self.analysis.type_of(node), root.ty)
-			|| self.owners[node.index()] != Some(function)
+			|| self.owners()[node.index()] != Some(function)
 		{
 			return false;
 		}
@@ -687,7 +707,7 @@ impl<'a> RegionFile<'a> {
 			return false;
 		};
 		let symbol = self.analysis.symbols.symbol(symbol);
-		matches!(self.view(symbol.decl_node), View::Declaration { value: Some(value), .. } if self.array_literal(value) && self.owners[value.index()] == Some(function))
+		matches!(self.view(symbol.decl_node), View::Declaration { value: Some(value), .. } if self.array_literal(value) && self.owners()[value.index()] == Some(function))
 	}
 
 	fn embedded(&self, at: TypeId, root: &Root) -> bool {
@@ -752,7 +772,7 @@ impl<'a> RegionFile<'a> {
 				.map(|(&key, _)| key)
 				.collect();
 			for function in &builders {
-				claims.insert(builder_key(&self.function_names[function], &root.name));
+				claims.insert(builder_key(&self.function_names()[function], &root.name));
 			}
 			if mentioned.iter().any(|&ty| self.embedded(ty, &root))
 				|| self.analysis.functions.values().any(|info| {
@@ -796,7 +816,7 @@ impl<'a> RegionFile<'a> {
 				) {
 				continue;
 			}
-			let owner = self.owners[symbol.decl_node.index()];
+			let owner = self.owners()[symbol.decl_node.index()];
 			match self.view(symbol.decl_node) {
 				View::Declaration {
 					value: Some(value), ..
@@ -807,7 +827,8 @@ impl<'a> RegionFile<'a> {
 						} else if let Some(array) = stable_type_name(self.types, symbol.ty) {
 							claims.insert(format!(
 								"child-array{SEPARATOR}{}{SEPARATOR}{}{SEPARATOR}{array}",
-								root.name, self.function_names[&function]
+								root.name,
+								self.function_names()[&function]
 							));
 						}
 					} else if self.array_projection(value, root) {
@@ -849,7 +870,7 @@ impl<'a> RegionFile<'a> {
 			}
 			claims.insert(format!("constructed{SEPARATOR}{}", root.name));
 			let Some(function) =
-				self.owners[node.index()].filter(|function| builders.contains(function))
+				self.owners()[node.index()].filter(|function| builders.contains(function))
 			else {
 				reject(claims);
 				continue;
@@ -868,7 +889,7 @@ impl<'a> RegionFile<'a> {
 		for index in 0..self.tree.nodes.len() {
 			let node = NodeId::new(index);
 			let ty = self.analysis.type_of(node);
-			let owner = self.owners[index].filter(|owner| builders.contains(owner));
+			let owner = self.owners()[index].filter(|owner| builders.contains(owner));
 			let constant_roots = self.analysis.constant(node).is_some_and(|value| {
 				!matches!(value, fa_interpreter::Value::None)
 					&& !matches!(value, fa_interpreter::Value::Member(member) if member.data.is_none())
@@ -894,7 +915,7 @@ impl<'a> RegionFile<'a> {
 			if ty == TypeId::VOID {
 				if let View::Assignment { target, value, .. } = self.view(node) {
 					let own_local = owner.is_some()
-						&& matches!(self.analysis.resolution(target), Resolution::Local(symbol) if self.analysis.symbols.symbol(symbol).kind == SymbolKind::Mutable && self.owners[self.analysis.symbols.symbol(symbol).decl_node.index()] == owner)
+						&& matches!(self.analysis.resolution(target), Resolution::Local(symbol) if self.analysis.symbols.symbol(symbol).kind == SymbolKind::Mutable && self.owners()[self.analysis.symbols.symbol(symbol).decl_node.index()] == owner)
 						&& matches!(self.view(target), View::Name(_));
 					if self.place_contains(target, root)
 						&& (!own_local
@@ -980,7 +1001,7 @@ impl<'a> RegionFile<'a> {
 							&& matches!(self.analysis.resolution(value), Resolution::Local(symbol) if {
 								let symbol = self.analysis.symbols.symbol(symbol);
 								matches!(symbol.kind, SymbolKind::Mutable | SymbolKind::Let)
-									&& self.owners[symbol.decl_node.index()] == self.owners[index]
+									&& self.owners()[symbol.decl_node.index()] == self.owners()[index]
 							}) && matches!(builtin, Some("Array#push" | "Array#reserve"));
 					if !allowed_array {
 						reject(claims);

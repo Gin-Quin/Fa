@@ -682,40 +682,43 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// with the same unfolding, `Node` and `Link`). Recursive edges are
 	/// compared by their layout: pointers.
 	pub(crate) fn same_layout(&self, from: Repr, to: Repr) -> bool {
-		if self.compressed_edge(from) != self.compressed_edge(to) {
-			return false;
-		}
-		let (from, to) = match (from, to) {
-			(Repr::Rec(a), Repr::Rec(b)) => match (self.repr_of(a, 0), self.repr_of(b, 0)) {
-				(Ok(a), Ok(b)) => (a, b),
+		let mut pending = vec![(from, to)];
+		let mut seen = FxHashSet::default();
+		while let Some((from, to)) = pending.pop() {
+			if from == to || !seen.insert((from, to)) {
+				continue;
+			}
+			if self.compressed_edge(from) != self.compressed_edge(to) {
+				return false;
+			}
+			match (from, to) {
+				(Repr::Rec(a), Repr::Rec(b))
+				| (Repr::Array(a), Repr::Array(b))
+				| (Repr::Growing(a), Repr::Growing(b))
+				| (Repr::Pool(a), Repr::Pool(b)) => match (self.repr_of(a, 0), self.repr_of(b, 0)) {
+					(Ok(a), Ok(b)) => pending.push((a, b)),
+					_ => return false,
+				},
+				(Repr::Optional(a), Repr::Optional(b)) => pending.push((a.repr(), b.repr())),
+				(Repr::Object(a), Repr::Object(b)) => {
+					let types = self.types();
+					let names = |ty| {
+						types
+							.fields_of(ty)
+							.iter()
+							.map(|field| types.syms.resolve(field.name))
+					};
+					if !names(a).eq(names(b)) || self.object_type(a) != self.object_type(b) {
+						return false;
+					}
+					// Equal LLVM structs can still contain functions with different
+					// call ABIs. Those fields need their compiled adapters too.
+					pending.extend(self.object_fields(a).into_iter().zip(self.object_fields(b)));
+				}
 				_ => return false,
-			},
-			(Repr::Optional(a), Repr::Optional(b)) => {
-				return a != b && self.same_layout(a.repr(), b.repr());
 			}
-			// arrays of items with the same representation (an instance's
-			// `Array(Item)` and the `Array(String)` it was made for)
-			// pools too (a generic `Pool<Item>` parameter of another file)
-			(Repr::Array(a), Repr::Array(b))
-			| (Repr::Growing(a), Repr::Growing(b))
-			| (Repr::Pool(a), Repr::Pool(b)) => {
-				return match (self.repr_of(a, 0), self.repr_of(b, 0)) {
-					(Ok(a), Ok(b)) => a == b || self.same_layout(a, b),
-					_ => false,
-				};
-			}
-			pair => pair,
-		};
-		let (Repr::Object(a), Repr::Object(b)) = (from, to) else {
-			return false;
-		};
-		if a == b {
-			return true;
 		}
-		let types = self.types();
-		let names =
-			|ty: TypeId| -> Vec<_> { types.fields_of(ty).iter().map(|field| field.name).collect() };
-		names(a) == names(b) && self.object_type(a) == self.object_type(b)
+		true
 	}
 
 	/// An optional converted to an optional of another representation (`Node?`

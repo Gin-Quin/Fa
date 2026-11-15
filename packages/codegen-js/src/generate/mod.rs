@@ -27,6 +27,7 @@ pub(crate) mod modules;
 mod number_api;
 mod numbers;
 mod objects;
+mod partial;
 mod patterns;
 mod reactivity;
 pub(crate) mod references;
@@ -147,6 +148,7 @@ pub(crate) struct Generator<'s> {
 	pub(crate) errors: Vec<Diagnostic>,
 	/// The JavaScript name of each symbol declared so far.
 	names: HashMap<SymbolId, String>,
+	closure_temporaries: HashMap<NodeId, (String, String)>,
 	/// The names visible at the current point.
 	scopes: Scopes,
 	/// The statements being written.
@@ -301,6 +303,7 @@ pub(crate) fn generate_module(
 		helpers: BTreeSet::new(),
 		errors: Vec::new(),
 		names: HashMap::new(),
+		closure_temporaries: HashMap::new(),
 		scopes: Scopes::new(),
 		out: Writer::new(),
 		direct_key: None,
@@ -797,7 +800,11 @@ impl<'s> Generator<'s> {
 		);
 		let hidden = self.hidden_names.clone();
 		self.scopes.push();
+		let saved_closures = std::mem::take(&mut self.closure_temporaries);
+		let saved_guards = std::mem::take(&mut self.guard_frames);
 		let result = f(self);
+		self.closure_temporaries = saved_closures;
+		self.guard_frames = saved_guards;
 		self.scopes.pop();
 		self.hidden_names = hidden;
 		let fcx = std::mem::replace(&mut self.fcx, saved);

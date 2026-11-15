@@ -27,7 +27,7 @@ function referenced = (early: Boolean): Array<Integer> => {
 	mutable items = [1, 2]
 	use first = items[0]
 	if early {
-		return items
+		return copy items
 	}
 	first = 3
 	items
@@ -39,7 +39,7 @@ function captured = (early: Boolean): Array<Integer> => {
 	mutable items = [1, 2]
 	function append = () => { items.push(3) }
 	if early {
-		return items
+		return copy items
 	}
 	append()
 	items

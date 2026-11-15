@@ -562,7 +562,7 @@ impl Walker<'_> {
 		let (module, decl) = self.proxy_decl(symbol)?;
 		let params = self.s.interface(module)?.parameters.get(&decl)?.clone();
 		// a method called on a value: the receiver fills `self`
-		let skip = usize::from(method);
+		let skip = usize::from(method && params.len() == count + 1);
 		if params.len() != count + skip {
 			return None;
 		}

@@ -1,0 +1,12 @@
+-- A qualified method call borrows self; a narrower data view does not own extra Task fields.
+-- file: Holder.fa
+export type = {
+	id: Integer
+	task: Task<Integer>
+	function identifier = (self): Integer => self.id
+}
+-- file: main.fa
+async function work = (): Integer => 1
+function inspect = (value: { id: Integer }): Integer => value.id
+let holder = Holder { id = 7, task = start work() }
+console.log(Holder.identifier(holder), inspect(holder), await holder.task catch _error => -1) -- prints: 7 7 1

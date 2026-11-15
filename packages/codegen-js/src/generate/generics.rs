@@ -62,7 +62,7 @@ impl Generator<'_> {
 			.unwrap_or_default()
 	}
 
-	fn hidden_for_generics(&self, generics: &[ParamId]) -> Vec<Hidden> {
+	pub(crate) fn hidden_for_generics(&self, generics: &[ParamId]) -> Vec<Hidden> {
 		fa_analyzer::modules::generic_requirements(self.types, generics)
 	}
 
@@ -174,7 +174,7 @@ impl Generator<'_> {
 		self.hidden_arguments_bound(call, generics, hidden, &bindings, &methods)
 	}
 
-	fn hidden_arguments_bound(
+	pub(crate) fn hidden_arguments_bound(
 		&mut self,
 		call: NodeId,
 		generics: &[ParamId],

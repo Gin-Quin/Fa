@@ -5,7 +5,7 @@
 //   proven index is a plain `array[i]`; the helpers here check the others.
 // - A `Map` with primitive keys is a JavaScript `Map`; with object or tuple
 //   keys, a `FaHashMap`, which has the same interface.
-// - A `Set` of primitives without `key` is a JavaScript `Set`; any other set
+// - A `Set` of primitives is a JavaScript `Set`; any other set
 //   is a `FaSet`, which has the interface of a JavaScript `Set`.
 // - A `Range` value is a `FaRange`.
 
@@ -682,8 +682,7 @@ export class FaHashMap {
 // @fa-helper FaSet deps: FaHashMap faHash faKeyEquals
 /**
  * A set that is not a plain JavaScript `Set` of primitives: elements compared
- * by Fa `==` (objects, tuples), or by a `key` function (`Set.from(users,
- * key = (user) => user.id)`, D33). It has the interface of a JavaScript `Set`
+ * by Fa `==` (objects, tuples). It has the interface of a JavaScript `Set`
  * (`has`, `add`, `delete`, `size`, iteration), so that the code using a set
  * doesn't depend on its kind.
  * @template T
@@ -694,11 +693,9 @@ export class FaSet {
 
 	/**
 	 * @param {Iterable<T>} [values]
-	 * @param {{ key?: (value: T) => unknown, hash?: (key: any) => number, equals?: (a: any, b: any) => boolean }} [options]
+	 * @param {{ hash?: (key: T) => number, equals?: (a: T, b: T) => boolean }} [options] compiler-generated operations
 	 */
 	constructor(values, options = {}) {
-		/** @type {((value: T) => unknown) | undefined} */
-		this.key = options.key;
 		this.#elements = new FaHashMap(
 			undefined,
 			options.hash ?? faHash,
@@ -717,25 +714,16 @@ export class FaSet {
 	}
 
 	/**
-	 * An empty set with the same key function, hash and equality.
+	 * An empty set with the same generated hash and equality.
 	 * @returns {FaSet<T>}
 	 */
 	emptyCopy() {
 		return new FaSet(undefined, {
-			key: this.key,
 			hash: this.#elements.hash,
 			equals: this.#elements.equals,
 		});
 	}
 
-	/**
-	 * What identifies a value in this set: its key, or the value itself.
-	 * @param {T} value
-	 * @returns {unknown}
-	 */
-	keyOf(value) {
-		return this.key === undefined ? value : this.key(value);
-	}
 
 	/** @returns {number} */
 	get size() {
@@ -747,7 +735,7 @@ export class FaSet {
 	 * @returns {boolean}
 	 */
 	has(value) {
-		return this.#elements.has(this.keyOf(value));
+		return this.#elements.has(value);
 	}
 
 	/**
@@ -756,9 +744,8 @@ export class FaSet {
 	 * @returns {this}
 	 */
 	add(value) {
-		const key = this.keyOf(value);
-		if (!this.#elements.has(key)) {
-			this.#elements.set(key, value);
+		if (!this.#elements.has(value)) {
+			this.#elements.set(value, value);
 		}
 		return this;
 	}
@@ -768,7 +755,7 @@ export class FaSet {
 	 * @returns {boolean} whether it was present
 	 */
 	delete(value) {
-		return this.#elements.delete(this.keyOf(value));
+		return this.#elements.delete(value);
 	}
 
 	/**
@@ -777,9 +764,8 @@ export class FaSet {
 	 * @returns {T | undefined}
 	 */
 	take(value) {
-		const key = this.keyOf(value);
-		const element = this.#elements.get(key);
-		return this.#elements.delete(key) ? element : undefined;
+		const element = this.#elements.get(value);
+		return this.#elements.delete(value) ? element : undefined;
 	}
 
 	/** @returns {void} */
@@ -822,7 +808,7 @@ export class FaSet {
 
 // @fa-helper faSetEmptyLike deps: FaSet
 /**
- * An empty set of the same kind as `set` (same key function).
+ * An empty set of the same kind as `set` (same generated hash/equality).
  * @template T
  * @param {Set<T> | FaSet<T>} set
  * @returns {Set<T> | FaSet<T>}
@@ -849,7 +835,7 @@ export function faSetTake(set, value) {
 
 // @fa-helper faSetUnion deps: faSetEmptyLike
 /**
- * `a.union(b)`: a new set, keyed like `a` (the receiver).
+ * `a.union(b)`: a new set of the same representation as `a`.
  * @template T
  * @param {Set<T> | FaSet<T>} a
  * @param {Set<T> | FaSet<T>} b
@@ -868,21 +854,16 @@ export function faSetUnion(a, b) {
 
 // @fa-helper faSetIntersection deps: faSetEmptyLike
 /**
- * `a.intersection(b)`: the elements of `a` that are in `b`, compared with
- * `a`'s key function.
+ * `a.intersection(b)`: the elements of `a` that are in `b`.
  * @template T
  * @param {Set<T> | FaSet<T>} a
  * @param {Set<T> | FaSet<T>} b
  * @returns {Set<T> | FaSet<T>}
  */
 export function faSetIntersection(a, b) {
-	const other = faSetEmptyLike(a);
-	for (const value of b) {
-		other.add(value);
-	}
 	const result = faSetEmptyLike(a);
 	for (const value of a) {
-		if (other.has(value)) {
+		if (b.has(value)) {
 			result.add(value);
 		}
 	}
@@ -891,42 +872,33 @@ export function faSetIntersection(a, b) {
 
 // @fa-helper faSetDifference deps: faSetEmptyLike
 /**
- * `a.difference(b)`: the elements of `a` that are not in `b`, compared with
- * `a`'s key function.
+ * `a.difference(b)`: the elements of `a` that are not in `b`.
  * @template T
  * @param {Set<T> | FaSet<T>} a
  * @param {Set<T> | FaSet<T>} b
  * @returns {Set<T> | FaSet<T>}
  */
 export function faSetDifference(a, b) {
-	const other = faSetEmptyLike(a);
-	for (const value of b) {
-		other.add(value);
-	}
 	const result = faSetEmptyLike(a);
 	for (const value of a) {
-		if (!other.has(value)) {
+		if (!b.has(value)) {
 			result.add(value);
 		}
 	}
 	return result;
 }
 
-// @fa-helper faSetIsSubsetOf deps: faSetEmptyLike
+// @fa-helper faSetIsSubsetOf
 /**
- * `a.isSubsetOf(b)`, compared with `a`'s key function.
+ * `a.isSubsetOf(b)`, using standard element equality.
  * @template T
  * @param {Set<T> | FaSet<T>} a
  * @param {Set<T> | FaSet<T>} b
  * @returns {boolean}
  */
 export function faSetIsSubsetOf(a, b) {
-	const other = faSetEmptyLike(a);
-	for (const value of b) {
-		other.add(value);
-	}
 	for (const value of a) {
-		if (!other.has(value)) {
+		if (!b.has(value)) {
 			return false;
 		}
 	}

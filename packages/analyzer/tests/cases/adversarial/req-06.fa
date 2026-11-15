@@ -1,4 +1,3 @@
--- pending: AN001 (effects in function types not supported yet)
 -- a function value whose type declares a requirement: called without a provider
 type Database = { name: String }
 type Loader = (id: String) => String requires database: Database

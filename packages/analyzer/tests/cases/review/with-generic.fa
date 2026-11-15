@@ -1,0 +1,15 @@
+function choose = <Left, Right>(left: Left, right: Right): Left => left
+function keep = choose with (right = 4)
+console.log(keep("hello"), keep(8)) -- prints: hello 8
+
+function chooseRight = <Left, Right>(left: Left, right: Right): Right => right
+function fixed = chooseRight with (left = "ignored")
+console.log(fixed(9), fixed("tail")) -- prints: 9 tail
+
+type Reader = <Value>(value: Value) => String
+function make = (prefix: String): Reader => {
+	function stringify = <Value>(value: Value, suffix: String): String => "{prefix}:{value}:{suffix}"
+	stringify with (suffix = "end")
+}
+let reader = make("captured")
+console.log(reader(3), reader("ok")) -- prints: captured:3:end captured:ok:end

@@ -1,0 +1,46 @@
+use { sleep } = std.time
+
+function add = (
+	first: Integer,
+	second: Integer = first + 1,
+	last: Integer? = 9
+) => first + second + (last ?? 0)
+function fixed = add with (first = 2)
+function chained = fixed with (last = none)
+console.log(fixed(), fixed(last = none), chained()) -- prints: 14 5 5
+console.log(fixed(second = 8), chained(second = 7)) -- prints: 19 9
+let plain = fixed
+console.log(plain(4, none)) -- prints: 6
+
+function generic = <Item>(value: Item, times: Integer = 2, last: Integer = times + 1) =>
+	(value, times, last)
+function repeated = generic with (times = 4)
+console.log(repeated("text"), repeated<Integer>(8, last = 10)) -- prints: ("text", 4, 5) (8, 4, 10)
+
+function nestedDefaults = <offset: Integer>() => do {
+	function choose = <Item>(value: Item, times: Integer = offset) => (value, times)
+	function fixed = choose with (value = 1)
+	fixed()
+}
+console.log(nestedDefaults<8>(), nestedDefaults<12>()) -- prints: (1, 8) (1, 12)
+
+function next = (): Integer => do {
+	console.log("default")
+	7
+}
+async function delayed = (label: String, value: Integer = next()): String => {
+	await sleep(1)
+	"{label}:{value}"
+}
+function later = delayed with (label = "default")
+let queued = start later(value = 3)
+console.log("queued") -- prints: queued
+console.log(await queued) -- prints: default:3
+let cancelled = start later(value = 4)
+console.log("before cancel") -- prints: before cancel
+cancelled.cancel()
+await sleep(2)
+console.log("cancelled") -- prints: cancelled
+console.log(await later()) -- prints: default
+-- prints: default:7
+console.log(await later(value = 9)) -- prints: default:9

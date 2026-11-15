@@ -584,6 +584,9 @@ impl NodeFlags {
 /// The analysis of one file.
 #[derive(Clone)]
 pub struct Analysis {
+	/// Immutable parent edges from the initial module scan, shared by the
+	/// checker and whole-program proofs. Roots contain `usize::MAX`.
+	pub parent_edges: std::sync::Arc<Vec<usize>>,
 	/// The analyzed file.
 	pub file: FileId,
 	/// The type of every node (`UNSET` for nodes without one).
@@ -622,6 +625,16 @@ pub struct Analysis {
 	pub interval_values: Interner<Interval>,
 	/// The type arguments of a generic call, typed literal or generic function value (M2).
 	pub instantiations: FxHashMap<NodeId, ListId>,
+	/// Exact binder identities/order corresponding to each instantiation list.
+	pub instantiation_parameters: FxHashMap<NodeId, Vec<ParamId>>,
+	/// Compile-time value binders, without guessing from a static name.
+	pub value_parameters: FxHashMap<SymbolId, ParamId>,
+	/// Semantic copy conditions of generic bodies, with no runtime ABI cost.
+	pub copy_requirements: FxHashMap<NodeId, Vec<CopyRequirement>>,
+	/// Value facts independent of the visible structural function signature.
+	pub value_origins: FxHashMap<NodeId, std::sync::Arc<crate::provenance::ValueOrigin>>,
+	pub callable_keys: FxHashMap<NodeId, crate::ids::DeclKey>,
+	pub callables: FxHashMap<crate::ids::DeclKey, crate::provenance::CallableSummary>,
 	/// The methods selected by a generic application: structural type ids
 	/// alone cannot distinguish declarations with equal data fields.
 	pub instantiated_methods: FxHashMap<NodeId, Vec<GenericMethod>>,
@@ -640,6 +653,24 @@ pub struct Analysis {
 	pub method_instantiations: FxHashMap<NodeId, WrittenType>,
 	/// Every call node: its callee and its arguments in parameter order.
 	pub calls: FxHashMap<NodeId, CallInfo>,
+	/// A `with` expression: arguments copied now, and residual parameter order.
+	pub partial_applications: FxHashMap<NodeId, PartialApplication>,
+	/// Named function expressions evaluated once and stored as values.
+	pub computed_functions: rustc_hash::FxHashSet<NodeId>,
+	/// Global aliases of plain declaration templates: their source expression
+	/// is valid before the alias's statement, as ordinary functions are hoisted.
+	pub static_function_aliases: FxHashMap<NodeId, NodeId>,
+	/// Function factories evaluated during analysis, by initializer node.
+	/// Their VM closures are reified through the same AOT templates as runtime closures.
+	pub known_functions: FxHashMap<NodeId, fa_interpreter::Value>,
+	/// Typed AOT values after the callable provenance has been completed.
+	pub function_constants: FxHashMap<NodeId, crate::constants::ConstantValue>,
+	/// Declaration defaults retained by a computed named function, per call.
+	/// Presence selects its declaration entry, even if every argument is given.
+	pub function_defaults: FxHashMap<NodeId, Vec<bool>>,
+	/// Explicit applications which keep a declaration's defaults on the
+	/// applied function value, independently of its structural signature.
+	pub applied_defaults: rustc_hash::FxHashSet<NodeId>,
 	/// Throwing callbacks given to a non-storing user function: each given
 	/// argument node and the function parameter's type widened with its
 	/// callback errors. Native instances use precisely these signatures.
@@ -654,9 +685,16 @@ pub struct Analysis {
 	/// capture (`FnInfo::captures`) when created; the others see the
 	/// captured variables themselves (advanced brief §5.11, D3).
 	pub escapes: rustc_hash::FxHashSet<NodeId>,
+	/// Captures moved into an escaping environment at this expression site
+	/// (lambda/start-do, or the name read materializing a local function).
+	pub moved_captures: FxHashMap<NodeId, Vec<SymbolId>>,
+	pub collection_moved_captures: FxHashMap<NodeId, Vec<(SymbolId, TypeId)>>,
 	/// The `let` and `mutable` locals of blocks and functions whose value
 	/// never outlives the function's frame ([`Analysis::is_non_escaping`]).
 	pub non_escaping: rustc_hash::FxHashSet<SymbolId>,
+	/// Roots mentioned by `use`, `reuse` or `provide`, collected during
+	/// checking so whole-program proofs need not rescan the syntax tree.
+	pub reference_sources: rustc_hash::FxHashSet<SymbolId>,
 	/// Every `type` declaration node: its type, fields in declaration order,
 	/// functions.
 	pub type_decls: FxHashMap<NodeId, TypeDecl>,
@@ -679,6 +717,23 @@ pub struct Analysis {
 	/// parameter, a field of one: `holder.task` returned or passed): the
 	/// place gives the value up (a zero, which its drop skips).
 	pub moved_reads: rustc_hash::FxHashSet<NodeId>,
+	/// Reads transferred only when the instantiated value actually owns a
+	/// Task. Ordinary arrays/resources passed as parameters stay borrowed.
+	pub task_moves: FxHashMap<NodeId, TypeId>,
+	/// Explicit argument values transferred by each call's Task-parameter
+	/// ABI, including fresh temporaries. Evaluate and own them in source
+	/// order, then give them up only when every argument is ready to invoke.
+	/// The type is the substituted parameter type; generic types use the
+	/// same `takes_task_parameter` witness as conditional local moves.
+	pub task_arguments: FxHashMap<NodeId, Vec<(NodeId, TypeId)>>,
+	/// Structural sinks that transfer an owned source into a narrower type
+	/// containing Task fields. Preserve the kept fields and destroy extras.
+	/// For generic types, apply this operation only when both the actual
+	/// source and target follow `takes_task_parameter` after substitution.
+	pub owned_projections: rustc_hash::FxHashSet<NodeId>,
+	/// A last-use transfer of an owned generic local, conditional on owning
+	/// a collection or unique value. Pure shared handles keep their lexical owner.
+	pub collection_moves: FxHashMap<NodeId, TypeId>,
 	/// Every destructuring pattern node (`ObjectPattern`, `ArrayPattern`,
 	/// `TuplePattern`) of a declaration, a `for` or a parameter: what each
 	/// element reads and binds ([`PatternInfo`]).
@@ -1313,6 +1368,22 @@ pub struct ArithInfo {
 	pub root: bool,
 }
 
+/// A generic body's copy, checked after substituting its type parameters.
+/// A Task parameter may transfer at its last use; a borrowed collection
+/// still requires an explicit structural copy.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CopyRequirement {
+	pub subject: TypeId,
+	pub explicit: bool,
+	pub task_transfer: bool,
+	/// Only the consuming Task ABI forbids this read. Resources remain
+	/// borrowed at calls, so a previous generic call never consumes them.
+	pub task_only: bool,
+	/// This copy is needed only when a moved field crosses a Resource owner.
+	/// The list contains string-literal types naming its ancestor fields.
+	pub resource_gate: Option<(TypeId, ListId)>,
+}
+
 /// What the backends need of a function or a lambda node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FnInfo {
@@ -1422,6 +1493,47 @@ impl WrittenType {
 		}
 	}
 
+	/// Substitutes the written arguments without replacing their declaration
+	/// identity with a structurally equal type.
+	pub fn substituted(
+		&self,
+		types: &mut crate::types::TypeStore,
+		bindings: &crate::types::Bindings,
+	) -> Self {
+		let arguments = types.list_items(self.arguments).to_vec();
+		let origins = arguments
+			.iter()
+			.enumerate()
+			.map(|(index, &ty)| {
+				if let crate::types::TypeKind::Param(param) = types.kind(ty)
+					&& let Some(origin) = bindings.origins.get(&param)
+				{
+					return Some(origin.clone());
+				}
+				self.origins
+					.get(index)
+					.and_then(|origin| origin.as_ref())
+					.map(|origin| origin.substituted(types, bindings))
+			})
+			.collect();
+		let arguments: Vec<_> = arguments
+			.into_iter()
+			.map(|ty| types.substitute(ty, bindings))
+			.collect();
+		let arguments = types.list(&arguments);
+		Self {
+			declaration: self.declaration,
+			arguments,
+			origins: std::sync::Arc::new(origins),
+			methods: std::sync::Arc::new(
+				self.methods
+					.iter()
+					.map(|method| method.substituted(types, bindings))
+					.collect(),
+			),
+		}
+	}
+
 	/// Stable identity for interface and object-cache invalidation.
 	pub fn stable_hash(&self, types: &crate::types::TypeStore) -> u128 {
 		let mut hash = types.decl_hash(self.declaration);
@@ -1455,6 +1567,29 @@ impl GenericMethod {
 					.map(|method| method.merged(merger))
 					.collect(),
 			),
+		}
+	}
+
+	/// Keeps a selected declaration while specializing its generic owner.
+	pub fn substituted(
+		&self,
+		types: &mut crate::types::TypeStore,
+		bindings: &crate::types::Bindings,
+	) -> Self {
+		let arguments = types.list_items(self.arguments).to_vec();
+		let arguments: Vec<_> = arguments
+			.into_iter()
+			.map(|ty| types.substitute(ty, bindings))
+			.collect();
+		Self {
+			arguments: types.list(&arguments),
+			methods: std::sync::Arc::new(
+				self.methods
+					.iter()
+					.map(|method| method.substituted(types, bindings))
+					.collect(),
+			),
+			..self.clone()
 		}
 	}
 
@@ -1547,10 +1682,28 @@ pub struct CallInfo {
 	pub arguments: Vec<Argument>,
 }
 
+/// A function with some parameters bound by name. Bound values occur in
+/// source order; remaining parameters retain their original positional order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PartialApplication {
+	pub function: NodeId,
+	pub original_type: TypeId,
+	/// The target declaration's defaults, in original parameter order.
+	pub defaults: Vec<bool>,
+	pub bound: Vec<(u16, NodeId)>,
+	pub remaining: Vec<u16>,
+	pub names: Vec<Option<Sym>>,
+	pub bound_names: Vec<Sym>,
+	/// Arguments for the original generic binders, including untouched binders.
+	pub generic_arguments: ListId,
+	pub generic_parameters: Vec<ParamId>,
+}
+
 impl Analysis {
 	/// An empty analysis of a file with `nodes` nodes.
 	pub fn new(file: FileId, nodes: usize) -> Self {
 		Self {
+			parent_edges: std::sync::Arc::default(),
 			file,
 			types: vec![TypeId::UNSET; nodes],
 			resolutions: vec![Resolution::Unresolved; nodes],
@@ -1564,6 +1717,12 @@ impl Analysis {
 			intervals: FxHashMap::default(),
 			interval_values: Interner::new(),
 			instantiations: FxHashMap::default(),
+			instantiation_parameters: FxHashMap::default(),
+			value_parameters: FxHashMap::default(),
+			copy_requirements: FxHashMap::default(),
+			value_origins: FxHashMap::default(),
+			callable_keys: FxHashMap::default(),
+			callables: FxHashMap::default(),
 			instantiated_methods: FxHashMap::default(),
 			instantiation_origins: FxHashMap::default(),
 			written_types: FxHashMap::default(),
@@ -1571,9 +1730,19 @@ impl Analysis {
 			function_owners: FxHashMap::default(),
 			method_instantiations: FxHashMap::default(),
 			calls: FxHashMap::default(),
+			partial_applications: FxHashMap::default(),
+			computed_functions: Default::default(),
+			static_function_aliases: Default::default(),
+			known_functions: Default::default(),
+			function_constants: Default::default(),
+			function_defaults: FxHashMap::default(),
+			applied_defaults: rustc_hash::FxHashSet::default(),
 			callback_types: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
+			moved_captures: FxHashMap::default(),
+			collection_moved_captures: FxHashMap::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),
+			reference_sources: rustc_hash::FxHashSet::default(),
 			requirement_args: FxHashMap::default(),
 			type_decls: FxHashMap::default(),
 			objects: FxHashMap::default(),
@@ -1581,6 +1750,10 @@ impl Analysis {
 			json_defaults: FxHashMap::default(),
 			inline_field_orders: FxHashMap::default(),
 			moved_reads: rustc_hash::FxHashSet::default(),
+			task_moves: FxHashMap::default(),
+			task_arguments: FxHashMap::default(),
+			owned_projections: rustc_hash::FxHashSet::default(),
+			collection_moves: FxHashMap::default(),
 			patterns: FxHashMap::default(),
 			relations: Vec::new(),
 			relation_fields: FxHashMap::default(),

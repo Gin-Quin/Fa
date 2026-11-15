@@ -1132,6 +1132,12 @@ fn merge_interface(
 		..*exported
 	};
 	Interface {
+		computed_functions: interface.computed_functions.clone(),
+		signature_names: interface
+			.signature_names
+			.iter()
+			.map(|(&decl, names)| (decl, names.merged(merger)))
+			.collect(),
 		export: interface
 			.export
 			.as_ref()
@@ -1274,6 +1280,35 @@ fn merge_interface(
 				)
 			})
 			.collect(),
+		copy_requirements: interface
+			.copy_requirements
+			.iter()
+			.map(|(&decl, requirements)| {
+				(
+					decl,
+					requirements
+						.iter()
+						.map(|requirement| crate::analysis::CopyRequirement {
+							subject: merger.ty(requirement.subject),
+							resource_gate: requirement
+								.resource_gate
+								.map(|(receiver, path)| (merger.ty(receiver), merger.list(path))),
+							..*requirement
+						})
+						.collect(),
+				)
+			})
+			.collect(),
+		callables: interface
+			.callables
+			.iter()
+			.map(|(&key, summary)| (merger.decl_key(key), summary.merged(merger)))
+			.collect(),
+		value_origins: interface
+			.value_origins
+			.iter()
+			.map(|(&key, value)| (merger.decl_key(key), value.merged(merger)))
+			.collect(),
 		key_set_params: interface
 			.key_set_params
 			.iter()
@@ -1411,6 +1446,7 @@ impl Parsed {
 	/// The bytes its tree holds (nodes, spans, source).
 	pub(crate) fn tree_bytes(&self) -> usize {
 		self.tree.nodes.capacity() * size_of::<fa_parser::Node>()
+			+ self.scan.parent_edges.capacity() * size_of::<usize>()
 			+ self.tree.spans.capacity() * size_of::<fa_parser::SourceSpan>()
 			+ self.tree.source.len()
 	}

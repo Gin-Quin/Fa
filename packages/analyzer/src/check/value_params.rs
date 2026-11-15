@@ -54,6 +54,7 @@ impl Walker<'_> {
 		});
 		self.s.types.set_param_bounds(param, ty, default_ty);
 		let symbol = self.declare(generic, name, SymbolKind::Static);
+		self.a.value_parameters.insert(symbol, param);
 		let symbol = self.a.symbols.symbol_mut(symbol);
 		symbol.ty = ty;
 		symbol.state = DeclState::Done;
@@ -112,6 +113,10 @@ impl Walker<'_> {
 				let symbol = self.a.symbols.lookup(self.body.scope, sym)?;
 				let data = self.a.symbols.symbol(symbol);
 				let (kind, ty) = (data.kind, data.ty);
+				if let Some(&param) = self.a.value_parameters.get(&symbol) {
+					self.set_resolution(n, Resolution::Local(symbol));
+					return Some(self.s.types.intern(TypeKind::Param(param)));
+				}
 				if kind != SymbolKind::Static || !self.s.types.is_literal(ty) {
 					return None;
 				}

@@ -1,0 +1,23 @@
+function atCompileTime = (): Integer => {
+	mutable original = [1]
+	mutable duplicate = copy original
+	duplicate.push(2)
+	original.length * 10 + duplicate.length
+}
+static checked = @atCompileTime()
+console.log(checked) -- prints: 12
+
+function clone = <Item>(item: Item): Item => copy item
+mutable original = { items = [1, 2] }
+mutable duplicate = copy original
+duplicate.items.push(3)
+console.log(original.items, duplicate.items) -- prints: [1, 2] [1, 2, 3]
+mutable cloned = clone(original)
+cloned.items.push(4)
+console.log(original.items, cloned.items) -- prints: [1, 2] [1, 2, 4]
+
+function moved = (test: Boolean): Array<Integer> => {
+	let values = [7]
+	if test { values } else { values }
+}
+console.log(moved(true), moved(false)) -- prints: [7] [7]

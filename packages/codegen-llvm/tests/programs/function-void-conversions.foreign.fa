@@ -1,0 +1,30 @@
+use { sleep } = std.time
+type Lease = {
+	id: Integer
+	function destroy = (self) => console.log("drop {self.id}")
+}
+function make = (id: Integer): Lease => Lease { id }
+let discard: (id: Integer) => Void = make
+discard(7) -- prints: drop 7
+console.log("after") -- prints: after
+
+async function later = (id: Integer): Lease => {
+	await sleep(1)
+	make(id)
+}
+let discardLater: async (id: Integer) => Void = later
+await discardLater(8) -- prints: drop 8
+console.log("after async") -- prints: after async
+
+function identity = <Item>(value: Item): Item => value
+type Ignore = <Item>(value: Item) => Void
+let ignore: Ignore = identity
+ignore(9)
+ignore("a long string whose copied result must also be released")
+
+type Source = { value: (id: Integer) => Lease }
+type Target = { value: (id: Integer) => Void }
+let source = Source { value = make }
+let target: Target = source
+target.value(10) -- prints: drop 10
+console.log("done") -- prints: done

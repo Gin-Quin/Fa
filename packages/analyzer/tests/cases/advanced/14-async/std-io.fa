@@ -36,10 +36,10 @@ let text = File.read("settings.json") catch error => ""
 sleep(1)
 let elapsed: Integer = monotonic()
 
--- move-only: a socket used after it moved
+-- Sockets are shared handles: retaining a second binding is allowed.
 async function twice = (stream: TcpStream) => {
 	let moved = stream
-	let again = stream -- error MEM002
+	let again = stream
 }
 
 -- `read` mutates its buffer: it must be `mutable`

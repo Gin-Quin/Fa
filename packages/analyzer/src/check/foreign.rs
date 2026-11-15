@@ -899,13 +899,6 @@ impl Walker<'_> {
 		true
 	}
 
-	/// Whether values of a type can't be copied, only moved: a task, a
-	/// worker's handle, a resource, and every type holding one
-	/// (`TypeStore::is_move_only`).
-	pub(crate) fn is_moved_handle(&self, ty: crate::ids::TypeId) -> bool {
-		self.s.types.is_move_only(ty)
-	}
-
 	/// The move-only values a call moves into its callee (its arguments: the
 	/// callee owns them), a literal into its fields, a closure into its
 	/// environment.
@@ -918,8 +911,6 @@ impl Walker<'_> {
 	/// A copy of a move-only value (a declaration, an assignment, a returned
 	/// value, an item pushed) moves it: a later use is `MEM002`.
 	pub(crate) fn note_resource_move(&mut self, value: NodeId) {
-		// a worker's handle is shared by a copy (a `start` of its method):
-		// it moves where `move_handles` says
 		self.consume_local(value, false);
 	}
 
@@ -929,9 +920,75 @@ impl Walker<'_> {
 	/// owned here (a `use`, a loop variable, `self`) can't give a field up:
 	/// `MEM002`, saying to move the whole value.
 	fn consume_local(&mut self, value: NodeId, handles: bool) {
-		let value = self.strip_groups(value);
-		let ty = self.a.type_of(value);
-		if !self.body.flow.reachable || !self.s.types.is_move_only(ty) {
+		let mut value = self.strip_groups(value);
+		while let View::Try(inner) = self.view(value) {
+			value = self.strip_groups(inner);
+		}
+		let branches: Option<Vec<NodeId>> = match self.view(value) {
+			View::Do(inner) => Some(vec![inner]),
+			View::Block { statements } => Some(statements.last().into_iter().collect()),
+			View::If {
+				condition,
+				then_body,
+				else_body,
+				..
+			} => Some(match self.s.types.kind(self.a.type_of(condition)) {
+				crate::types::TypeKind::BoolLit(true) => vec![then_body],
+				crate::types::TypeKind::BoolLit(false) => else_body.into_iter().collect(),
+				_ => std::iter::once(then_body).chain(else_body).collect(),
+			}),
+			View::When { arms, .. } => Some(arms.iter().map(|arm| arm.value).collect()),
+			View::Catch {
+				expression,
+				handler,
+				..
+			} => Some(vec![expression, handler]),
+			View::Fallback { operands } => Some(operands.iter().collect()),
+			_ => None,
+		};
+		if let Some(branches) = branches {
+			for branch in branches {
+				self.consume_local(branch, handles);
+			}
+			return;
+		}
+		let actual = self.a.type_of(value);
+		let ty = self.a.coercion(value).unwrap_or(actual);
+		if !self.body.flow.reachable {
+			return;
+		}
+		if self.s.types.takes_task_parameter(ty) && self.s.types.is_resource(actual) {
+			let diagnostic = self.diagnostic(
+				&crate::diagnostics::codes::advanced::MEM002,
+				value,
+				"this structural value consumes its Task fields, but the source has `destroy`; its fields can't be moved out of their owner",
+			);
+			self.report_flow(diagnostic);
+			return;
+		}
+		if self.fresh_field_owner(value)
+			&& ((!handles && self.s.types.is_move_only(ty))
+				|| (handles && self.s.types.could_own_task(ty)))
+		{
+			self.mark_fresh_field_transfer(value, ty, handles);
+			if let Some(resource_gate) = self.moved_field_gate(value) {
+				self.defer_copy_condition(
+					value,
+					crate::analysis::CopyRequirement {
+						subject: ty,
+						explicit: false,
+						task_transfer: false,
+						task_only: handles,
+						resource_gate: Some(resource_gate),
+					},
+				);
+			}
+			return;
+		}
+		if !self.s.types.is_move_only(ty) || (handles && !self.s.types.takes_task_parameter(ty)) {
+			if self.s.types.could_own_task(ty) {
+				self.consume_task_conditionally(value, ty);
+			}
 			return;
 		}
 		if !handles
@@ -964,12 +1021,24 @@ impl Walker<'_> {
 			return;
 		};
 		let kind = self.a.symbols.symbol(symbol).kind;
-		let owned = matches!(
-			kind,
-			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Parameter { .. }
-		);
+		let owned = (matches!(kind, SymbolKind::Let | SymbolKind::Mutable)
+			|| (matches!(kind, SymbolKind::Parameter { .. })
+				&& self
+					.s
+					.types
+					.could_own_task(self.a.symbols.symbol(symbol).ty)))
+			&& self.owns_task_symbol_at(symbol, value);
+		if !owned {
+			let diagnostic = self.diagnostic(
+				&crate::diagnostics::codes::advanced::MEM002,
+				value,
+				"this value is borrowed here and can't be moved or copied; transfer an owned value instead",
+			);
+			self.report_flow(diagnostic);
+			return;
+		}
 		// the backends make the place give the value up (`moved_reads`)
-		if owned && self.s.types.owns_unique(ty) {
+		if owned && self.s.types.is_move_only(ty) {
 			self.a.moved_reads.insert(value);
 		}
 		if root == value {
@@ -1004,17 +1073,6 @@ impl Walker<'_> {
 				return;
 			}
 		}
-		if !owned {
-			let text = tree.text(value.index()).to_string();
-			let name = tree.text(root.index()).to_string();
-			let message = format!(
-				"`{text}` can't be moved out: `{name}` isn't owned here (a reference, a loop variable or `self`); move the whole value instead"
-			);
-			let diagnostic =
-				self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value, message);
-			self.report_flow(diagnostic);
-			return;
-		}
 		if let Some(place) = self.place_of(value)
 			&& !self
 				.body
@@ -1034,9 +1092,25 @@ impl Walker<'_> {
 		let mut current = value;
 		let collection = loop {
 			match syntax::view(&tree, current) {
-				View::Group(inner) => current = inner,
-				View::Access { target, .. } => current = target,
+				View::Group(inner) | View::Try(inner) => current = inner,
+				View::Access { target, members } => {
+					if members.last().is_some_and(|member| {
+						matches!(self.a.resolution(member), Resolution::Builtin(builtin) if crate::builtins::get(builtin).path.ends_with("#value"))
+					}) {
+						let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value,
+							"this value is borrowed from another owner and can't be moved or copied");
+						self.report_flow(diagnostic);
+						return;
+					}
+					current = target;
+				}
 				View::Index { target, .. } => break target,
+				View::Call { .. } => {
+					match crate::lower::copies::element_view(&tree, &self.a, current) {
+						Some((target, false)) => break target,
+						_ => return,
+					}
+				}
 				_ => return,
 			}
 		};
@@ -1097,6 +1171,17 @@ impl Walker<'_> {
 	/// A field assigned again (`holder.task = …`), or its local as a whole:
 	/// its moved fields are back.
 	pub(crate) fn restore_moved_fields(&mut self, target: NodeId) {
+		if let Some(place) = self.place_of(target) {
+			self.body
+				.flow
+				.conditional_consumed
+				.retain(|entry| !self.places.is_at_or_below(entry.0, place));
+			if self.places.parent(place).is_none()
+				&& let Some(symbol) = self.place_symbol(place)
+			{
+				self.reset_consumed(symbol);
+			}
+		}
 		if self.body.flow.moved_fields.is_empty() {
 			return;
 		}

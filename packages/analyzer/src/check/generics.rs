@@ -855,7 +855,12 @@ impl Walker<'_> {
 
 	/// The declaration identity accompanying an inferred data type. The
 	/// structural unifier intentionally ignores it; method selection cannot.
-	fn infer_written_origin(&mut self, declared: TypeId, value: NodeId, bindings: &mut Bindings) {
+	pub(super) fn infer_written_origin(
+		&mut self,
+		declared: TypeId,
+		value: NodeId,
+		bindings: &mut Bindings,
+	) {
 		if let Some(origin) = self.written_origin(value) {
 			self.infer_type_origin(declared, origin, bindings);
 		}
@@ -1170,23 +1175,7 @@ impl Walker<'_> {
 		if self.own_generics(target).is_empty() || !self.own_generics(actual).is_empty() {
 			return None;
 		}
-		// the name, or the last member of a path (`library.transforms.identity`)
-		let named = match self.view(n) {
-			View::Name(_) => n,
-			View::Access { members, .. } => members.last()?,
-			_ => return None,
-		};
-		let crate::symbols::Resolution::Local(symbol) = self.a.resolution(named) else {
-			return None;
-		};
-		let generics = match self.direct_function(symbol) {
-			Some(declaration) => self.a.function(declaration)?.generics.clone(),
-			// a function of another file: the parameters its export publishes
-			None if self.a.symbols.symbol(symbol).kind == SymbolKind::Function => {
-				self.exported_generics(symbol)
-			}
-			None => return None,
-		};
+		let generics = self.generic_declaration_parameters(n);
 		if generics.is_empty() {
 			return None;
 		}
@@ -1197,6 +1186,35 @@ impl Walker<'_> {
 		let ty = self.generic_function_type(actual, &types);
 		self.set_type(n, ty);
 		Some(ty)
+	}
+
+	/// The declaration's complete parameter list, including value and phantom
+	/// parameters that cannot be recovered from its runtime signature.
+	pub(super) fn generic_declaration_parameters(&mut self, n: NodeId) -> Vec<ParamId> {
+		let n = self.strip_groups(n);
+		// the name, or the last member of a path (`library.transforms.identity`)
+		let named = match self.view(n) {
+			View::Name(_) => n,
+			View::Access { members, .. } => match members.last() {
+				Some(last) => last,
+				None => return Vec::new(),
+			},
+			_ => return Vec::new(),
+		};
+		let crate::symbols::Resolution::Local(symbol) = self.a.resolution(named) else {
+			return Vec::new();
+		};
+		match self.direct_function(symbol) {
+			Some(declaration) => self
+				.a
+				.function(declaration)
+				.map_or_else(Vec::new, |info| info.generics.clone()),
+			// a function of another file: the parameters its export publishes
+			None if self.a.symbols.symbol(symbol).kind == SymbolKind::Function => {
+				self.exported_generics(symbol)
+			}
+			None => Vec::new(),
+		}
 	}
 
 	/// `f<Integer>`: the explicit arguments of a value of a generic function
@@ -1302,6 +1320,23 @@ impl Walker<'_> {
 			return Some(self.diagnostic(&crate::diagnostics::codes::values::E_GEN_1, n, message));
 		}
 		for (&our, &their) in ours.iter().zip(&theirs) {
+			if self.s.types.param(our).value != self.s.types.param(their).value {
+				let kind = if self.s.types.param(their).value {
+					"a compile-time value"
+				} else {
+					"a type"
+				};
+				return Some(self.diagnostic(
+					&crate::diagnostics::codes::values::E_GEN_1,
+					n,
+					format!(
+						"`{}` must accept {kind} for its generic parameter `{}`, as `{}` requires",
+						self.display(actual),
+						self.param_name(our),
+						self.display(target)
+					),
+				));
+			}
 			let wanted = self.s.types.param_constraint(our);
 			if wanted.is_unset() || wanted == TypeId::UNKNOWN {
 				continue;
@@ -1397,8 +1432,12 @@ impl Walker<'_> {
 	}
 
 	pub(super) fn record_instantiation(&mut self, n: NodeId, bindings: &Bindings) -> ListId {
+		self.copy_instantiations.insert(n, bindings.clone());
 		let list = self.s.types.list(&bindings.types);
 		self.a.instantiations.insert(n, list);
+		self.a
+			.instantiation_parameters
+			.insert(n, bindings.params.clone());
 		let mut methods: Vec<_> = bindings
 			.methods
 			.iter()

@@ -1199,7 +1199,8 @@ impl Generator<'_> {
 			// Erased parameters may own objects or collections. Their copies
 			// use faCopy, which leaves primitive instantiations unchanged.
 			| TypeKind::Param(_)
-			| TypeKind::Range => true,
+			| TypeKind::Range
+			| TypeKind::Function(_) => true,
 			TypeKind::Union(list) => self
 				.types
 				.list_items(list)
@@ -1231,7 +1232,17 @@ impl Generator<'_> {
 		value: Expr,
 		destination_mutable: bool,
 	) -> Expr {
+		if let Some(owned) = self.take_closure_temporary(node, &value) {
+			return owned;
+		}
 		let ty = self.type_of(node);
+		if self.contains_function_value(ty)
+			&& !self.is_move(node)
+			&& !self.analysis.moved_reads.contains(&node)
+			&& self.value_place_root(node).is_some()
+		{
+			return self.copy_of(value, ty);
+		}
 		// a place's value, not the last use of a local (D15); a new
 		// collection of a place's elements shares them when they are composite
 		let owns = match fa_analyzer::lower::copies::element_view(self.tree, self.analysis, node) {
@@ -1292,6 +1303,9 @@ impl Generator<'_> {
 	/// a call result is always fresh. A `mutable` local of the function, or
 	/// a `let` bound to a fresh value, is returned as is.
 	pub(crate) fn copy_returned(&mut self, node: NodeId, value: Expr) -> Expr {
+		if let Some(owned) = self.take_closure_temporary(node, &value) {
+			return owned;
+		}
 		let ty = self.type_of(node);
 		if !self.is_composite(ty) || self.is_move(node) {
 			return value;
@@ -1451,6 +1465,9 @@ impl Generator<'_> {
 	/// composite fields copied by their own functions; `None` for the types
 	/// copied by `faCopy` (unions, maps, sets).
 	fn copy_function(&mut self, ty: TypeId) -> Option<String> {
+		if matches!(self.types.kind(ty), TypeKind::Function(_)) {
+			return Some(self.helper("faRetainShared").to_string());
+		}
 		if let Some(name) = self.copies.get(&ty) {
 			// empty while being generated: a recursive type, copied by `faCopy`
 			return (!name.is_empty()).then(|| name.clone());

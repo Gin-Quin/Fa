@@ -231,10 +231,11 @@ describe("copies (types brief 3.2.7, D60, values brief D-81)", () => {
 		expect([...copied.keys()][0]).toBe(key);
 		expect(copied.get({ k: 1 })).toEqual({ v: 1 });
 		expect(copied.get({ k: 1 })).not.toBe(map.get(key));
-		const set = new FaSet(["A"], { key: (/** @type {string} */ t) => t.toLowerCase() });
+		const set = new FaSet([{ text: "A" }]);
 		const setCopy = faCopy(set);
 		expect(setCopy).toBeInstanceOf(FaSet);
-		expect(setCopy.has("a")).toBe(true);
+		expect(setCopy.has({ text: "A" })).toBe(true);
+		expect(setCopy.has({ text: "a" })).toBe(false);
 		const plain = faCopy(new Map([["a", [1]]]));
 		expect(plain).toBeInstanceOf(Map);
 		expect(plain.get("a")).toEqual([1]);

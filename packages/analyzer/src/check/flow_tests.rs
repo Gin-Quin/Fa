@@ -874,6 +874,29 @@ fn literal_and_range_patterns_refine_integers() {
 // ── index proofs ──────────────────────────────────────────────────────────
 
 #[test]
+fn proven_indices_can_span_both_signs() {
+	let source = "let alphabet = \"abcdefghijklmnopqrstuvwxyz\"\nfunction at = (index: Integer<min = -26, max = 25>): Character => alphabet[index]\n";
+	let checked = analyze(source);
+	assert!(checked.codes().is_empty(), "{:?}", checked.codes());
+	assert!(
+		!checked
+			.flags("alphabet[index]")
+			.contains(NodeFlags::INDEX_CHECK)
+	);
+	let outside = source.replace("min = -26", "min = -27");
+	assert_eq!(codes(&outside), ["E-ERR-3"]);
+	let array = analyze(
+		"let values = [1, 2, 3]\nfunction at = (index: Integer<min = -3, max = 2>): Integer => values[index]\n",
+	);
+	assert!(array.codes().is_empty(), "{:?}", array.codes());
+	assert!(
+		!array
+			.flags("values[index]")
+			.contains(NodeFlags::INDEX_CHECK)
+	);
+}
+
+#[test]
 fn indices_proven_by_lengths() {
 	let c = analyze("let array = [1, 2, 3]\nlet a = array[2]\nlet b = array[-3]\n");
 	assert_eq!(c.codes(), Vec::<&str>::new());

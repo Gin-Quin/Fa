@@ -1,0 +1,39 @@
+type Point = { a: Integer, b: Integer }
+type Change = (point: Point) => Void mutates point.a
+function changeA = (point: Point) mutates point.a => { point.a += 1 }
+let change: Change = changeA
+mutable point = Point { a = 1, b = 2 }
+change(point)
+console.log(point.a, point.b) -- prints: 2 2
+
+type Context = { count: Integer }
+type Push = (items: Array<Integer>) => Void requires state: Context mutates items, state.count
+function push = (items: Array<Integer>) requires context: Context mutates items, context.count => {
+	context.count += 1
+	items.push(3)
+}
+let callback: Push = push
+mutable context = Context { count = 0 }
+provide Context = context
+mutable values: Array<Integer> = []
+callback(values)
+console.log(context.count, values) -- prints: 1 [3]
+
+type Pop = (items: Array<Integer>) => Void mutates items.length invalidates items[..]
+function pop = (items: Array<Integer>) mutates items.length invalidates items[..] => {
+	items.pop()
+}
+let popValues: Pop = pop
+popValues(values)
+console.log(values.length) -- prints: 0
+
+type Cell<Item> = { value: Item }
+type Reader = <Item>() => Item requires cell: Cell<Item>
+function read = <Item>(): Item requires source: Cell<Item> => copy source.value
+let reader: Reader = read
+mutable cell = Cell<Integer> { value = 7 }
+provide Cell<Integer> = cell
+console.log(reader<Integer>()) -- prints: 7
+mutable text = Cell<String> { value = "generic requirement" }
+provide Cell<String> = text
+console.log(reader<String>()) -- prints: generic requirement

@@ -1,0 +1,41 @@
+use { sleep } = std.time
+
+type Lease = {
+	id: Integer
+	function destroy = (self) => console.log("drop {self.id}")
+}
+type Small = { pending: Task<Integer>, lease: Lease }
+type Large = { extra: Lease, pending: Task<Integer>, lease: Lease }
+
+async function answer = (value: Integer): Integer => {
+	await sleep(1)
+	value
+}
+async function make = (value: Integer): Large => Large {
+	extra = Lease { id = value + 100 },
+	pending = start answer(value),
+	lease = Lease { id = value }
+}
+async function consume = (value: Small, number: UInt128): UInt128 throws Cancelled => {
+	console.log(try await value.pending)
+	number
+}
+let callback: async (value: Large, number: UInt32) => UInt128 throws Cancelled = consume
+console.log(try await callback(await make(7), 9)) -- prints: drop 107
+-- prints: 7
+-- prints: drop 7
+-- prints: 9
+
+let returning: async (value: Integer) => Small = make
+let result = await returning(8)
+console.log(try await result.pending) -- prints: drop 108
+-- prints: 8
+
+function small = (value: UInt128): UInt128 => value + UInt128(1)
+type Entry = { callback: (value: UInt128) => UInt128 }
+type NumericEntry = { callback: (value: UInt32) => UInt128 }
+function entry = (): Entry => Entry { callback = small }
+let converted: () => NumericEntry = entry
+let holder = converted()
+console.log(holder.callback(9)) -- prints: 10
+-- prints: drop 8

@@ -1,0 +1,28 @@
+-- file: main.fa
+use { sleep } = std.time
+
+
+type Failure = Errors { Bad }
+function fail = (): Integer throws Failure.Bad => throw Failure.Bad
+async function pending = (_held: Held = Held { id = 1 }): Integer => {
+	await sleep(1000)
+	1
+}
+function consume = (_task: Task<Integer>, _number: Integer, _extra: Integer) => {}
+async function probe = () => {
+	let task = start pending()
+	let residual = consume with (_extra = 0)
+	residual(task, fail()) catch _error => {
+		-- prints: destroyed 1
+		console.log("caught") -- prints: caught
+	}
+	console.log("owned") -- prints: owned
+}
+await probe()
+console.log("finished") -- prints: finished
+
+-- file: Held.foreign.fa
+export type = {
+	id: Integer
+	function destroy = (self) => console.log("destroyed {self.id}")
+}

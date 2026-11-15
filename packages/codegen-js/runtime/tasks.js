@@ -29,6 +29,7 @@
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
 
 import { FaGuard } from "./concurrency.js";
+import { faRetainShared, faReleaseShared } from "./ownership.js";
 import { FaError } from "./errors.js";
 import { faExit, faIsError, faReport, faWriteError } from "./main.js";
 import { faStop } from "./stops.js";
@@ -474,7 +475,28 @@ export function faAsyncValue(sync, instance) {
 	return sync;
 }
 
-// @fa-helper faCallValue
+// @fa-helper faKeepFunctionResult deps: faReleaseShared
+/**
+ * Invokes one already retained Function owner. A suspended call keeps its
+ * environment until its real finally blocks run, including after cancellation.
+ * @param {Function} f
+ * @param {() => any} invoke
+ * @returns {any}
+ */
+export function faKeepFunctionResult(f, invoke) {
+	let result;
+	try {
+		result = invoke();
+	} catch (error) {
+		faReleaseShared(f);
+		throw error;
+	}
+	if (result instanceof Promise) return result.finally(() => faReleaseShared(f));
+	faReleaseShared(f);
+	return result;
+}
+
+// @fa-helper faCallValue deps: faRetainShared faKeepFunctionResult
 /**
  * `await f(…)` of a value of an `async` function type, in an async
  * instance: its async instance when it has one, a plain call otherwise (a
@@ -485,11 +507,14 @@ export function faAsyncValue(sync, instance) {
  * @returns {any}
  */
 export function faCallValue(task, f, ...args) {
-	const instance = /** @type {any} */ (f).$async;
-	return instance === undefined ? f(...args) : instance(task, ...args);
+	faRetainShared(f);
+	return faKeepFunctionResult(f, () => {
+		const instance = /** @type {any} */ (f).$async;
+		return instance === undefined ? f(...args) : instance(task, ...args);
+	});
 }
 
-// @fa-helper faStartValue deps: faStart faStartCall
+// @fa-helper faStartValue deps: FaTask faRunTask faWhenDone faRetainShared faReleaseShared faKeepFunctionResult
 /**
  * `start f(…)` of a value of an `async` function type: a task of its async
  * instance, or of the plain call.
@@ -499,13 +524,30 @@ export function faCallValue(task, f, ...args) {
  * @returns {FaTask}
  */
 export function faStartValue(parent, f, ...args) {
-	const instance = /** @type {any} */ (f).$async;
-	return instance === undefined
-		? faStartCall(parent, f, ...args)
-		: faStart(parent, instance, ...args);
+	faRetainShared(f);
+	const task = new FaTask(parent);
+	let entered = false;
+	faWhenDone(task, () => {
+		if (!entered) faReleaseShared(f);
+	});
+	queueMicrotask(() =>
+		faRunTask(
+			task,
+			(self) => {
+				entered = true;
+				return faKeepFunctionResult(f, () => {
+					const instance = /** @type {any} */ (f).$async;
+					return instance === undefined ? f(...args) : instance(self, ...args);
+				});
+			},
+			[],
+			true,
+		),
+	);
+	return task;
 }
 
-// @fa-helper faStartValueDynamic deps: faSched faFinished faStartValue
+// @fa-helper faStartValueDynamic deps: faSched faFinished faStartValue faRetainShared faReleaseShared
 /**
  * [`faStartValue`] in a function that isn't `async` (the blocking depth).
  * @param {Function} f
@@ -513,7 +555,13 @@ export function faStartValue(parent, f, ...args) {
  * @returns {FaTask}
  */
 export function faStartValueDynamic(f, ...args) {
-	return faSched.depth > 0 ? faFinished(f, ...args) : faStartValue(null, f, ...args);
+	if (faSched.depth <= 0) return faStartValue(null, f, ...args);
+	faRetainShared(f);
+	try {
+		return faFinished(f, ...args);
+	} finally {
+		faReleaseShared(f);
+	}
 }
 
 // @fa-helper faDetach deps: faSched

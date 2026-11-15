@@ -45,6 +45,16 @@ impl Walker<'_> {
 	/// Lowers the compile-time expression `n`, checks that it is pure, and
 	/// evaluates it; an error is reported at `at`.
 	pub(super) fn evaluate_at(&mut self, n: NodeId, at: NodeId) -> Option<Value> {
+		self.evaluate_with_context(n, at, false)
+	}
+
+	/// A named function expression uses ordinary compile-time evaluation,
+	/// but a runtime input explains why `let` is required (FN110).
+	pub(super) fn evaluate_function_value(&mut self, n: NodeId, at: NodeId) -> Option<Value> {
+		self.evaluate_with_context(n, at, true)
+	}
+
+	fn evaluate_with_context(&mut self, n: NodeId, at: NodeId, function: bool) -> Option<Value> {
 		// an `@` call evaluated already: its value, or its error reported
 		let n = self.strip_groups(n);
 		if self.comptime_evaluated.contains(&n) {
@@ -58,21 +68,47 @@ impl Walker<'_> {
 		let (expr, slots) = match lowered {
 			Ok(lowered) => lowered,
 			Err(not_known) => {
-				self.report_not_known(&not_known);
+				if function {
+					self.report_unknown_function(
+						at,
+						&format!("`{}` is only known at runtime", not_known.name),
+					);
+				} else {
+					self.report_not_known(&not_known);
+				}
 				return None;
 			}
 		};
 		if let Some(what) = self.expr_impurity(&expr) {
-			self.report_impure(at, &what);
+			if function {
+				self.report_unknown_function(
+					at,
+					&format!("it depends on {what}, which isn't pure"),
+				);
+			} else {
+				self.report_impure(at, &what);
+			}
 			return None;
 		}
 		match self.run(&expr, slots) {
 			Ok(value) => Some(value),
+			Err(Error::Impure(what)) if function => {
+				self.report_unknown_function(
+					at,
+					&format!("it depends on {what}, which isn't pure"),
+				);
+				None
+			}
 			Err(error) => {
 				self.report_comptime_error(at, &error);
 				None
 			}
 		}
+	}
+
+	fn report_unknown_function(&mut self, at: NodeId, why: &str) {
+		let diagnostic = self.diagnostic(&crate::diagnostics::codes::types::FN110, at, format!("this function isn't known at compile time: {why}; use `let` for a function constructed at runtime"));
+		self.report(diagnostic);
 	}
 
 	/// Runs a lowering; when it needed modules of other units of a parallel
@@ -257,7 +293,20 @@ impl Walker<'_> {
 	/// The lowered function of a key: of this file (analyzed by now) or of
 	/// another file whose analysis is done.
 	fn lower_function(&mut self, key: FnKey) -> Result<Function, Error> {
-		let (file, node) = (FileId(key.0), NodeId(key.1));
+		let instance = self
+			.s
+			.comptime
+			.instances
+			.lock()
+			.expect("the compile-time instance registry")
+			.get(key)
+			.cloned();
+		let source = instance.as_ref().map_or(key, |instance| instance.source);
+		let context = instance
+			.map_or_else(crate::comptime::instances::Context::default, |instance| {
+				instance.context
+			});
+		let (file, node) = (FileId(source.0), NodeId(source.1));
 		let not_ready = || {
 			Error::Unsupported(
 				"a function whose analysis is not finished (a cycle through compile-time code)"
@@ -273,8 +322,9 @@ impl Walker<'_> {
 			return self
 				.with_rehydration(|w| {
 					let externals = w.externals();
-					let lowerer =
-						Lowerer::new(&*w.s, file, &w.tree, &w.a).with_externals(externals);
+					let lowerer = Lowerer::new(&*w.s, file, &w.tree, &w.a)
+						.with_externals(externals)
+						.with_instance(context.clone());
 					lowerer.function(node)
 				})
 				.ok_or_else(not_ready);
@@ -285,7 +335,8 @@ impl Walker<'_> {
 		self.with_rehydration(|w| {
 			let tree = Arc::clone(&w.s.source_file(file).tree);
 			let session: &crate::Session = w.s;
-			let lowerer = Lowerer::new(session, file, &tree, session.analysis(file));
+			let lowerer = Lowerer::new(session, file, &tree, session.analysis(file))
+				.with_instance(context.clone());
 			lowerer.function(node)
 		})
 		.ok_or_else(not_ready)
@@ -325,7 +376,9 @@ impl Walker<'_> {
 			View::Declaration {
 				value: Some(value), ..
 			} => value,
-			View::ExportValue { value, .. } => value,
+			View::ExportValue { value, .. }
+			| View::Function { value, .. }
+			| View::ExportFunction { value, .. } => value,
 			_ => return Err(Error::Unsupported("this module-level value".into())),
 		};
 		let lowered = self.with_rehydration(|w| {
@@ -435,6 +488,7 @@ impl Walker<'_> {
 		);
 		if data.kind != SymbolKind::Let
 			|| !module_level
+			|| self.s.types.contains_shared_handle(data.ty)
 			|| self.s.types.is_recovering(data.ty)
 			|| !self.is_constant_expression(value, 0)
 		{
@@ -1165,6 +1219,19 @@ impl Host for Walker<'_> {
 		let function = Arc::new(self.lower_function(key)?);
 		self.s.comptime.functions.insert(key, Arc::clone(&function));
 		Ok(function)
+	}
+
+	fn instantiate(&mut self, function: FnKey, application: FnKey) -> Result<FnKey, Error> {
+		crate::comptime::instances::instantiate(
+			self.s,
+			Some((self.file, &self.a)),
+			function,
+			application,
+		)
+	}
+
+	fn bind_partial(&mut self, function: FnKey, site: FnKey) -> Result<FnKey, Error> {
+		crate::comptime::instances::bind_partial(self.s, Some((self.file, &self.a)), function, site)
 	}
 
 	fn global(&mut self, key: GlobalKey) -> Result<Value, Error> {

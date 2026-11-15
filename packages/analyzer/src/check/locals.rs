@@ -3,7 +3,7 @@
 //! of the function (natively, a short string in a stack buffer instead of a
 //! heap block), since nothing reads them after the function returns.
 //!
-//! A pass over the finished file. A local is a `let` or `mutable` declared
+//! Read uses are recorded during the ordinary analysis walk. A local is a `let` or `mutable` declared
 //! in a block or a function (not at the module level). Each read of it is
 //! classified by what uses the value:
 //!
@@ -46,42 +46,54 @@ enum Use {
 impl Walker<'_> {
 	/// Fills `Analysis::non_escaping` for the file (after its walk).
 	pub(super) fn record_non_escaping(&mut self) {
-		let tree = std::sync::Arc::clone(&self.tree);
-		let count = tree.nodes.len();
-		// the parent table of the walk (built once per file)
-		self.parent(NodeId::new(0));
-		let parents = self.parents.take().unwrap_or_default();
 		let mut candidates: FxHashSet<SymbolId> = FxHashSet::default();
-		let mut escaped: FxHashSet<SymbolId> = FxHashSet::default();
+		// Captures outlive the local use that appears inside their body. An
+		// operator or call there may only read its operand, while the closure
+		// still keeps that operand beyond the original function's frame.
+		let mut escaped: FxHashSet<SymbolId> = self
+			.a
+			.functions
+			.values()
+			.flat_map(|function| function.captures.iter())
+			.chain(
+				self.a
+					.starts
+					.values()
+					.flat_map(|start| start.captures.iter()),
+			)
+			.copied()
+			.collect();
 		// `into[t]`: the locals whose values went into `t`
 		let mut into: FxHashMap<SymbolId, Vec<SymbolId>> = FxHashMap::default();
-		for index in 0..count {
-			let node = NodeId::new(index);
-			if !matches!(syntax::view(&tree, node), View::Name(_)) {
+		for (&symbol, reads) in &self.move_uses {
+			if !self.is_frame_local(symbol) {
 				continue;
 			}
-			let Resolution::Local(symbol) = self.a.resolution(node) else {
-				continue;
-			};
-			if !candidates.contains(&symbol) {
-				if !self.is_frame_local(symbol) {
+			for read in reads {
+				let node = read.node;
+				// Uses through aliases and calls of capturing functions are
+				// recorded for moves too; they aren't direct reads of this name.
+				if self.a.resolution(node) != Resolution::Local(symbol)
+					|| !matches!(self.view(node), View::Name(_))
+				{
 					continue;
 				}
 				candidates.insert(symbol);
-			}
-			if escaped.contains(&symbol) {
-				continue;
-			}
-			match self.use_of(node, &parents) {
-				Use::InPlace => {}
-				Use::Into(target) if self.is_frame_local(target) => {
-					into.entry(target).or_default().push(symbol);
+				if escaped.contains(&symbol) {
+					continue;
 				}
-				Use::Into(_) | Use::Escapes => {
-					escaped.insert(symbol);
+				match self.use_of(node) {
+					Use::InPlace => {}
+					Use::Into(target) if self.is_frame_local(target) => {
+						into.entry(target).or_default().push(symbol);
+					}
+					Use::Into(_) | Use::Escapes => {
+						escaped.insert(symbol);
+					}
 				}
 			}
 		}
+
 		// what went into an escaping local escapes with it
 		let mut pending: Vec<SymbolId> = escaped.iter().copied().collect();
 		while let Some(symbol) = pending.pop() {
@@ -109,8 +121,8 @@ impl Walker<'_> {
 	}
 
 	/// How the read `n` of a local uses its value.
-	fn use_of(&self, n: NodeId, parents: &[Option<NodeId>]) -> Use {
-		let parent_of = |node: NodeId| parents.get(node.index()).copied().flatten();
+	fn use_of(&self, n: NodeId) -> Use {
+		let parent_of = |node: NodeId| self.parent(node);
 		let mut child = n;
 		loop {
 			let Some(parent) = parent_of(child) else {
@@ -129,7 +141,7 @@ impl Walker<'_> {
 					return match parent_of(parent).map(|outer| syntax::view(&self.tree, outer)) {
 						// a named argument: an argument of the call
 						Some(View::Call { .. }) => {
-							self.argument_use(parent_of(parent).expect("a call"), parents)
+							self.argument_use(parent_of(parent).expect("a call"))
 						}
 						// a field of an object literal
 						Some(View::Object { .. } | View::TypedObject { .. }) => Use::Escapes,
@@ -145,7 +157,7 @@ impl Walker<'_> {
 					return if callee == child {
 						Use::InPlace
 					} else {
-						self.argument_use(parent, parents)
+						self.argument_use(parent)
 					};
 				}
 				View::Access { target, .. } | View::OptionalAccess { target, .. }
@@ -176,7 +188,7 @@ impl Walker<'_> {
 				// a statement: dropped, unless it is the value of its block
 				View::Block { statements } => {
 					let last = statements.iter().last() == Some(child);
-					return if last && self.is_value_block(parent, parents) {
+					return if last && self.is_value_block(parent) {
 						Use::Escapes
 					} else {
 						Use::InPlace
@@ -192,11 +204,9 @@ impl Walker<'_> {
 	/// How the call `call` uses the arguments given to it: a user function
 	/// reads them in place (parameters are references); a built-in that
 	/// stores them keeps them, and so does a detached `start` (it moves them).
-	fn argument_use(&self, call: NodeId, parents: &[Option<NodeId>]) -> Use {
-		let started = parents
-			.get(call.index())
-			.copied()
-			.flatten()
+	fn argument_use(&self, call: NodeId) -> Use {
+		let started = self
+			.parent(call)
 			.is_some_and(|parent| matches!(syntax::view(&self.tree, parent), View::Start(_)));
 		if started {
 			return Use::Escapes;
@@ -218,8 +228,8 @@ impl Walker<'_> {
 	/// Whether the value of a block is used: anything but a statement
 	/// position (a loop body, a test, a block statement) or the body of a
 	/// function returning `Void`.
-	fn is_value_block(&self, block: NodeId, parents: &[Option<NodeId>]) -> bool {
-		let Some(parent) = parents.get(block.index()).copied().flatten() else {
+	fn is_value_block(&self, block: NodeId) -> bool {
+		let Some(parent) = self.parent(block) else {
 			return false;
 		};
 		match syntax::view(&self.tree, parent) {

@@ -187,7 +187,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			if !matches!(
 				symbol.kind,
 				SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
-			) {
+			) && !self.analysis.computed_functions.contains(&symbol.decl_node)
+			{
 				continue;
 			}
 			let kind = symbols.scope(symbol.scope).kind;
@@ -223,6 +224,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			(state.analysis, &state.symbol_functions)
 		};
 		match analysis.symbols.symbol(symbol).kind {
+			SymbolKind::Function
+				if analysis
+					.computed_functions
+					.contains(&analysis.symbols.symbol(symbol).decl_node) =>
+			{
+				Some(Reached::Value(file, symbol))
+			}
 			SymbolKind::Function => Some(Reached::Function(file, *functions.get(&symbol)?)),
 			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive => {
 				Some(Reached::Value(file, symbol))
@@ -314,9 +322,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	) -> Result<Function<'ctx>, Error> {
 		let current = self.file;
 		if file == current {
-			let key = match self.generic_functions.contains_key(&key) {
-				true => self.instance(key, call)?,
-				false => key,
+			let key = match self.generic_functions.get(&key) {
+				Some(info) if info.generics.is_empty() => self.lambda_instance(key, &[])?,
+				Some(_) => self.instance(key, call)?,
+				None => key,
 			};
 			return match self.functions.get(&key) {
 				Some(function) => Ok(function.clone()),
@@ -365,12 +374,34 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// A name of another file as a value: its global, or its function.
 	pub(crate) fn external_name(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
-		let reached = self.external(self.analysis.resolution(node));
-		match reached.map(|reached| self.reached_slot(reached, node)) {
-			Some(Ok(Some(slot))) => self.load(slot),
-			Some(Err(error)) => Err(error),
-			_ => Err(self.unsupported(node.index(), "this name of another file")),
+		let Some(reached) = self.external(self.analysis.resolution(node)) else {
+			return Err(self.unsupported(node.index(), "this name of another file"));
+		};
+		if let Some(slot) = self.reached_slot(reached, node)? {
+			return self.load(slot);
 		}
+		let ty = self.concrete_type(self.type_of(node));
+		if self.is_generic_function_type(ty) {
+			return match reached {
+				Reached::Function(file, declaration) => {
+					let current = self.file;
+					self.switch_file(file);
+					let value = self.foreign_generic_declaration_value(ty, declaration);
+					self.switch_file(current);
+					value
+				}
+				Reached::RemoteFunction(key) => {
+					self.remote_generic_declaration_value(key, ty, node)
+				}
+				_ => unreachable!("a function has no global slot"),
+			};
+		}
+		let function = match reached {
+			Reached::Function(file, declaration) => self.function_in(file, declaration, node)?,
+			Reached::RemoteFunction(key) => self.remote_function(key, node)?,
+			_ => unreachable!("a function has no global slot"),
+		};
+		self.external_declaration_value(&function, node)
 	}
 
 	/// `library.counter.count`, `counter.value.field`: the value a path
@@ -503,6 +534,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					self.namespace_values(value, out);
 				}
 				View::Declaration { .. } => out.push(statement),
+				View::Function { .. } if self.analysis.computed_functions.contains(&statement) => {
+					out.push(statement)
+				}
 				_ => {}
 			}
 		}
@@ -551,7 +585,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		loop {
 			if matches!(
 				self.view(current),
-				View::Declaration { .. } | View::ExportValue { .. } | View::Destructuring { .. }
+				View::Declaration { .. }
+					| View::ExportValue { .. }
+					| View::Destructuring { .. }
+					| View::Function { .. }
+					| View::ExportFunction { .. }
 			) {
 				return current;
 			}

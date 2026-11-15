@@ -39,6 +39,7 @@ source_filename = "fa_runtime.c"
 %struct.TableChunk = type { ptr, i32, i32 }
 %struct.WideSlot = type { i64, i64 }
 %struct.FaShared = type { i64, i64, ptr, i64 }
+%struct.FaEnvironment = type { ptr, ptr, i64 }
 %struct.FaAtomicBlock = type { %struct.FaShared, i64 }
 %struct.FaExecutor = type { ptr, ptr, ptr, ptr, i64, i64, ptr, i64, i64, i64, ptr, i64, i64, i64, i64, ptr, ptr, %struct.FaTask, i32, i32, i32, i32, i64, i32, i64, ptr, ptr, [32 x ptr], i32 }
 %struct.FaTask = type { ptr, ptr, ptr, i32, i32 }
@@ -18774,6 +18775,37 @@ define void @fa_shared_release(ptr noundef %0) local_unnamed_addr #2 {
 
 14:                                               ; preds = %11, %3, %1
   ret void
+}
+
+; Function Attrs: mustprogress nofree norecurse nounwind optsize willreturn memory(argmem: readwrite)
+define noundef ptr @fa_environment_retain(ptr noundef returned %0) local_unnamed_addr #40 {
+  %2 = icmp eq ptr %0, null
+  br i1 %2, label %6, label %3
+
+3:                                                ; preds = %1
+  %4 = getelementptr inbounds %struct.FaEnvironment, ptr %0, i64 0, i32 2
+  %5 = atomicrmw add ptr %4, i64 1 monotonic, align 8
+  br label %6
+
+6:                                                ; preds = %3, %1
+  ret ptr %0
+}
+
+; Function Attrs: mustprogress nofree norecurse nounwind optsize willreturn memory(argmem: readwrite)
+define i32 @fa_environment_release(ptr noundef %0) local_unnamed_addr #40 {
+  %2 = icmp eq ptr %0, null
+  br i1 %2, label %8, label %3
+
+3:                                                ; preds = %1
+  %4 = getelementptr inbounds %struct.FaEnvironment, ptr %0, i64 0, i32 2
+  %5 = atomicrmw sub ptr %4, i64 1 acq_rel, align 8
+  %6 = icmp eq i64 %5, 1
+  %7 = zext i1 %6 to i32
+  br label %8
+
+8:                                                ; preds = %3, %1
+  %9 = phi i32 [ 0, %1 ], [ %7, %3 ]
+  ret i32 %9
 }
 
 ; Function Attrs: nounwind optsize

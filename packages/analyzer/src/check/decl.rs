@@ -100,6 +100,9 @@ impl Walker<'_> {
 				self.check_stmt(statement);
 			}
 		}
+		if let Some(value) = result.1 {
+			self.check_block_borrow(value, scope);
+		}
 		// a task bound in the block ends with it: its borrows too (tasks.rs)
 		self.end_block_tasks(scope, result.1);
 		self.body.scope = parent;
@@ -427,10 +430,6 @@ impl Walker<'_> {
 			(Some((value, actual)), None) => self.sink_unannotated(value, actual),
 			_ => {}
 		}
-		// `let other = worker`: a worker's handle moves (concurrency.rs)
-		if let Some(value) = value {
-			self.move_worker_handle(value, n);
-		}
 		let ty = self.memo(n, |w| {
 			let text = w.decl_text(n, name);
 			// written twice: the same type, spelled the same (not `Round` for `Shape.Circle`)
@@ -512,6 +511,8 @@ impl Walker<'_> {
 		if let (Some(symbol), Some(value)) = (self.a.symbols.symbol_of_decl(n), value) {
 			self.reset_consumed(symbol);
 			self.bind_value(symbol, value);
+			let place = self.places.symbol(symbol);
+			self.bind_value_source(place, self.a.symbols.symbol(symbol).ty, value);
 			// a member of a named union: known to hold it (unions.md)
 			let declared = self.a.symbols.symbol(symbol).ty;
 			if self.body.flow.reachable
@@ -583,7 +584,8 @@ impl Walker<'_> {
 			}
 			// a generic function as a value needs its parameters (GN015)
 			_ if matches!(self.s.types.kind(actual), TypeKind::Function(_))
-				&& !self.free_params(actual).is_empty() =>
+				&& (!self.free_params(actual).is_empty()
+					|| !self.generic_declaration_parameters(value).is_empty()) =>
 			{
 				let diagnostic = self.diagnostic(
 					&crate::diagnostics::codes::types::GN015,
@@ -659,6 +661,11 @@ impl Walker<'_> {
 		// a closure stored into a place escapes; a copy, maybe a move (moves.rs)
 		self.escape(value, n);
 		self.note_copy_site(value);
+		if place.assignable
+			&& let Some(target) = self.place_of(target)
+		{
+			self.bind_value_source(target, place.ty, value);
+		}
 		// flow: the value's facts replace the place's (numbers.rs)
 		if let Some(symbol) = place.symbol.filter(|_| place.assignable && !place.below) {
 			self.assign_value(symbol, value);

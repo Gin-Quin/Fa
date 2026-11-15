@@ -1,0 +1,24 @@
+use { sleep } = std.time
+
+type Step = (value: Integer) => Integer
+function make = (bias: Integer): Step => (value: Integer = bias) => value + bias
+let captured = make(4)
+console.log(captured(7)) -- prints: 11
+
+function invoke = (step: Step): Integer => step(8)
+console.log(invoke((value: Integer = 3) => value + 1)) -- prints: 9
+
+async function delayed = (value: Integer = 10): Integer => {
+	await sleep(1)
+	value + 1
+}
+let named: async (value: Integer) => Integer = delayed
+console.log(await named(12)) -- prints: 13
+
+type AsyncStep = async (value: Integer) => Integer
+function makeAsync = (bias: Integer): AsyncStep => async (value: Integer = bias) => {
+	await sleep(1)
+	value + bias
+}
+let asynchronous = makeAsync(5)
+console.log(await asynchronous(7)) -- prints: 12

@@ -394,6 +394,7 @@ impl TypedSyntaxTree {
 			Node::Throw { right } => PrefixWithoutParenthesis!("throw ", right),
 			Node::Assert { right } => PrefixWithoutParenthesis!("assert ", right),
 			Node::Await { right } => Prefix!("await ", right),
+			Node::Copy { right } => Prefix!("copy ", right),
 			Node::Start { right } => Prefix!("start ", right),
 			Node::Catch {
 				expression,

@@ -10,6 +10,7 @@
 //!   parallelism.
 //! - The namespace blocks, the export statement, whether the file has
 //!   reactive code: what the walk used to find by scanning every node.
+//! - Parent edges, shared by the checker and the whole-program proofs.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -27,6 +28,9 @@ const MAX_CHAIN: usize = 6;
 /// What the scan of a file found.
 #[derive(Clone, Debug, Default)]
 pub struct FileScan {
+	/// Parent edges collected in this same scan; no separate tree walk is
+	/// needed by the checker or by later proof consumers.
+	pub parent_edges: std::sync::Arc<Vec<usize>>,
 	/// The names the module system resolves, in the order first written
 	/// (the `@` of a compile-time call stripped), with what they designate.
 	pub imports: Vec<(Box<str>, ModuleEntry)>,
@@ -143,7 +147,13 @@ pub fn scan(
 	let mut imported: Vec<String> = Vec::new();
 	// a lone file has no imports: only the rest is collected
 	let resolving = resolver.is_some();
+	let mut parents = vec![usize::MAX; tree.nodes.len()];
 	for index in 0..tree.nodes.len() {
+		tree.nodes[index].for_each_child(|child| {
+			if let Some(parent) = parents.get_mut(child) {
+				*parent = index;
+			}
+		});
 		let node = NodeId::new(index);
 		if syntax::is_reactive(tree, node) {
 			out.has_reactivity = true;
@@ -202,6 +212,7 @@ pub fn scan(
 			}
 		}
 	}
+	out.parent_edges = std::sync::Arc::new(parents);
 	let Some(resolver) = resolver else {
 		return out;
 	};
@@ -269,4 +280,39 @@ pub fn scan(
 	dependencies.retain(|dependency| dependency != module);
 	out.dependencies = dependencies;
 	out
+}
+
+#[cfg(test)]
+mod tests {
+	#[test]
+	fn parent_edges_are_shared_and_keep_nested_function_boundaries() {
+		let source = "function outer = (x: Integer): Integer => {\nfunction inc = (y: Integer): Integer => x + y\ninc(1)\n}\nconsole.log(outer(3))\n";
+		let (session, file) = crate::analyze_source(source);
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		let analysis = session.analysis(file);
+		assert!(std::sync::Arc::ptr_eq(
+			&analysis.parent_edges,
+			&session.source_file(file).scan.parent_edges
+		));
+		assert_eq!(analysis.parent_edges.len(), session.tree(file).nodes.len());
+		assert_eq!(analysis.parent_edges[session.tree(file).root], usize::MAX);
+		let inc = analysis
+			.functions
+			.values()
+			.find(|info| {
+				info.symbol.is_some_and(|symbol| {
+					session
+						.types()
+						.syms
+						.resolve(analysis.symbols.symbol(symbol).name)
+						== "inc"
+				})
+			})
+			.unwrap();
+		assert_eq!(analysis.parent_edges[inc.body.index()], inc.lambda.index());
+	}
 }

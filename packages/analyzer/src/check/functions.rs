@@ -160,6 +160,11 @@ impl Walker<'_> {
 					}
 				}
 				let ty = self.generic_function_type(ty, &generics);
+				for key in [n, value] {
+					if let Some(info) = self.a.functions.get_mut(&key) {
+						info.ty = ty;
+					}
+				}
 				if let Some(declared) = declared
 					&& !self.s.types.is_recovering(declared)
 					&& !self.s.types.is_recovering(ty)
@@ -229,9 +234,35 @@ impl Walker<'_> {
 				self.body = saved;
 				ty
 			}
+			View::Call { .. } if annotation.is_none() => {
+				let ty = self.check_function_factory(value);
+				if !self.s.types.is_recovering(ty) && self.signature_of(ty).is_none() {
+					let diagnostic = self.diagnostic(
+						&E_TYPE_1,
+						value,
+						format!(
+							"this factory returns a `{}`, but a `function` declaration needs a function",
+							self.display(ty)
+						),
+					);
+					self.report(diagnostic);
+				} else if let Some(computed) = self.evaluate_function_value(value, value)
+					&& matches!(computed, fa_interpreter::Value::Function(_))
+				{
+					self.a.known_functions.insert(value, computed);
+				}
+				ty
+			}
 			// `function f = g then h`, `function f = chain[1..]` (compose.rs)
-			View::Compose { .. } | View::Index { .. } if annotation.is_none() => {
+			View::Compose { .. } | View::Index { .. } | View::PartialApplication { .. }
+				if annotation.is_none() =>
+			{
 				let ty = self.check(value, None);
+				if let Some(partial) = self.a.partial_applications.get(&value).cloned() {
+					for (_, bound) in partial.bound {
+						self.evaluate_function_value(bound, bound);
+					}
+				}
 				if !self.s.types.is_recovering(ty) && self.signature_of(ty).is_none() {
 					let message = format!(
 						"`{}` is not a function: a `function` declaration needs a function",
@@ -240,10 +271,22 @@ impl Walker<'_> {
 					let diagnostic = self.diagnostic(&E_TYPE_1, value, message);
 					self.report(diagnostic);
 				}
+
 				ty
 			}
 			View::Name(_) if annotation.is_none() => {
-				let ty = self.check(value, None);
+				let mut ty = self.check(value, None);
+				let parameters = self.generic_declaration_parameters(value);
+				if !parameters.is_empty() && self.own_generics(ty).is_empty() {
+					let generics: Vec<_> = parameters
+						.into_iter()
+						.map(|param| self.s.types.intern(TypeKind::Param(param)))
+						.collect();
+					ty = self.generic_function_type(ty, &generics);
+					self.set_type(value, ty);
+				}
+				self.escape(value, n);
+				self.note_copy_site(value);
 				if !self.s.types.is_recovering(ty) && self.signature_of(ty).is_none() {
 					let message = format!(
 						"`{}` is not a function: a `function` declaration needs a function",
@@ -251,6 +294,35 @@ impl Walker<'_> {
 					);
 					let diagnostic = self.diagnostic(&E_TYPE_1, value, message);
 					self.report(diagnostic);
+				}
+				if !self.s.types.is_recovering(ty) && self.signature_of(ty).is_some() {
+					if self.known_function_template(value) {
+						if let Some(source) = self.function_alias_symbol(value) {
+							let declaration = self.a.symbols.symbol(source).decl_node;
+							if let View::Function { value: source, .. } = self.view(declaration)
+								&& let Some(computed) = self.a.known_functions.get(&source).cloned()
+							{
+								self.a.known_functions.insert(value, computed);
+							}
+						}
+						if symbol.is_some_and(|symbol| {
+							matches!(
+								self.a
+									.symbols
+									.scope(self.a.symbols.symbol(symbol).scope)
+									.kind,
+								crate::symbols::ScopeKind::Module
+									| crate::symbols::ScopeKind::Namespace
+							)
+						}) && let Some(source) = self.static_function_alias_source(value)
+						{
+							self.a.static_function_aliases.insert(n, source);
+						}
+					} else if let Some(computed) = self.evaluate_function_value(value, value)
+						&& matches!(computed, fa_interpreter::Value::Function(_))
+					{
+						self.a.known_functions.insert(value, computed);
+					}
 				}
 				ty
 			}
@@ -259,7 +331,94 @@ impl Walker<'_> {
 		if let Some(symbol) = symbol {
 			self.a.symbols.symbol_mut(symbol).ty = ty;
 		}
+		let computed = matches!(
+			self.view(value),
+			View::Compose { .. }
+				| View::PartialApplication { .. }
+				| View::Index { .. }
+				| View::Call { .. }
+				| View::Name(_)
+		);
+		if computed {
+			self.a.computed_functions.insert(n);
+		}
 		TypeId::VOID
+	}
+
+	/// A declaration names code even when it captures runtime DATA. Other
+	/// function-valued expressions must satisfy the ordinary compile-time rule.
+	fn known_function_template(&mut self, value: NodeId) -> bool {
+		let Some(symbol) = self.function_alias_symbol(value) else {
+			return false;
+		};
+		self.direct_function(symbol).is_some()
+			|| self
+				.a
+				.computed_functions
+				.contains(&self.a.symbols.symbol(symbol).decl_node)
+			|| self
+				.a
+				.externs
+				.contains_key(&self.a.symbols.symbol(symbol).decl_node)
+			|| self
+				.proxy_exported(symbol)
+				.is_some_and(|exported| exported.kind == SymbolKind::Function)
+	}
+
+	fn plain_external_function(&mut self, symbol: SymbolId) -> bool {
+		if !self
+			.proxy_exported(symbol)
+			.is_some_and(|exported| exported.kind == SymbolKind::Function)
+		{
+			return false;
+		}
+		let Some(Resolution::External(key)) = self.external_resolution(symbol) else {
+			return false;
+		};
+		let module = self.s.types.decl_key_data(key).module;
+		self.s.interface(module).is_some_and(|interface| {
+			interface
+				.keys
+				.get(&key)
+				.is_some_and(|decl| !interface.computed_functions.contains(&decl.node))
+		})
+	}
+
+	fn static_function_alias_source(&mut self, value: NodeId) -> Option<NodeId> {
+		let symbol = self.function_alias_symbol(value)?;
+		let declaration = self.a.symbols.symbol(symbol).decl_node;
+		if let Some(&source) = self.a.static_function_aliases.get(&declaration) {
+			return Some(source);
+		}
+		if let Some(source) = self.direct_function(symbol) {
+			let info = self.a.function(source)?;
+			let symbol = self.a.symbols.symbol_of_decl(source)?;
+			if info.captures.is_empty()
+				&& matches!(
+					self.a
+						.symbols
+						.scope(self.a.symbols.symbol(symbol).scope)
+						.kind,
+					crate::symbols::ScopeKind::Module | crate::symbols::ScopeKind::Namespace
+				) {
+				return Some(value);
+			}
+		}
+		self.plain_external_function(symbol).then_some(value)
+	}
+
+	fn function_alias_symbol(&mut self, value: NodeId) -> Option<SymbolId> {
+		let Resolution::Local(mut symbol) = self.a.resolution(value) else {
+			return None;
+		};
+		let mut seen = FxHashSet::default();
+		while seen.insert(symbol) {
+			match self.external_resolution(symbol) {
+				Some(Resolution::Local(next)) => symbol = next,
+				_ => return Some(symbol),
+			}
+		}
+		None
 	}
 
 	/// The generic parameters of a generic lambda or function, declared in a
@@ -337,10 +496,11 @@ impl Walker<'_> {
 		let ty = self.check_lambda(n, signature, body, expected);
 		self.rigid_params.truncate(rigid);
 		self.body.scope = saved;
+		let ty = self.generic_function_type(ty, &generics);
 		if let Some(info) = self.a.functions.get_mut(&n) {
 			info.generics = params;
+			info.ty = ty;
 		}
-		let ty = self.generic_function_type(ty, &generics);
 		self.set_type(n, ty);
 		ty
 	}
@@ -444,7 +604,8 @@ impl Walker<'_> {
 			}
 		}
 		self.lambda_entry_writes = entry_writes;
-		// a captured task or worker's handle moves into the closure
+		// Captures are borrowed by a temporary callback, copied by an
+		// escaping closure. A Task cannot satisfy that capture-copy.
 		let captured: Vec<SymbolId> = self
 			.a
 			.functions
@@ -452,18 +613,7 @@ impl Walker<'_> {
 			.map(|info| info.captures.clone())
 			.unwrap_or_default();
 		for symbol in captured {
-			let symbol_type = self.a.symbols.symbol(symbol).ty;
-			if self.is_moved_handle(symbol_type)
-				&& self.body.flow.reachable
-				&& !self
-					.body
-					.flow
-					.consumed
-					.iter()
-					.any(|&(other, _)| other == symbol)
-			{
-				self.body.flow.consumed.push((symbol, n));
-			}
+			self.note_use(n, symbol);
 		}
 		ty
 	}
@@ -661,6 +811,7 @@ impl Walker<'_> {
 		for (default, expected, quiet) in defaults {
 			self.quiet += u32::from(quiet);
 			let actual = self.check(default, expected);
+			self.note_copy_site(default);
 			if let Some(expected) = expected {
 				self.sink(default, actual, expected);
 			}
@@ -718,13 +869,9 @@ impl Walker<'_> {
 			Some(cx) => self.finish_effects(cx, owner.declaration),
 			None => declared_effects,
 		};
-		// a lambda's type doesn't carry the effects it infers: they happen
-		// where it is created (the callee it is given to runs it)
-		let effects = if owner.declaration.is_none() && !written_effects {
-			crate::ids::EffectSetId::EMPTY
-		} else {
-			effects
-		};
+		// finish_effects already separates captured places, which are replayed
+		// in the enclosing context, from the lambda's own parameters. Their
+		// mutations stay in its signature, including its native call ABI.
 		// declared requirements, and the inferred ones of a single expression
 		let mut all_requires = declared_requires.clone();
 		if let Some(cx) = &cx {
@@ -790,13 +937,17 @@ impl Walker<'_> {
 		});
 		if let TypeKind::Function(sig) = self.s.types.kind(ty) {
 			let mut sig = self.s.types.sig(sig);
-			if sig.throws != throws {
+			if sig.throws != throws || sig.effects != effects {
 				sig.throws = throws;
+				sig.effects = effects;
 				ty = self.s.types.function(sig);
 				self.set_type(lambda, ty);
 			}
 		}
 		let sig = self.signature_id(ty);
+		if self.is_worker_method(signature.parameters) {
+			self.check_worker_signature(lambda, ty);
+		}
 		for key in [Some(lambda), owner.declaration].into_iter().flatten() {
 			if let Some(info) = self.a.functions.get_mut(&key) {
 				info.ty = ty;
@@ -1154,6 +1305,29 @@ impl Walker<'_> {
 	/// doesn't resolve in the current scope.
 	pub(super) fn find_name_use(&mut self, n: NodeId, names: &[&str]) -> Option<(NodeId, String)> {
 		if let View::Name(name) = self.view(n) {
+			let label = self
+				.parent(n)
+				.is_some_and(|parent| match self.view(parent) {
+					View::Access { target, .. } | View::OptionalAccess { target, .. } => {
+						target != n
+					}
+					View::Assignment {
+						target,
+						value: Some(_),
+						..
+					} if target == n => self.parent(parent).is_some_and(|outer| {
+						matches!(
+							self.view(outer),
+							View::Object { .. }
+								| View::TypedObject { .. }
+								| View::Call { .. } | View::PartialApplication { .. }
+						)
+					}),
+					_ => false,
+				});
+			if label {
+				return None;
+			}
 			let text = self.tree.name(name);
 			if names.contains(&text) {
 				let sym = self.s.types.syms.intern(text);
@@ -1475,10 +1649,10 @@ impl Walker<'_> {
 	pub(super) fn check_partial_application(
 		&mut self,
 		n: NodeId,
-		_function: NodeId,
-		_arguments: NodeList<'_>,
+		function: NodeId,
+		arguments: NodeList<'_>,
 	) -> TypeId {
-		self.unsupported(n, "`with`")
+		self.check_partial(n, function, arguments)
 	}
 
 	/// The `function` declaration with a signature that a call of `symbol`

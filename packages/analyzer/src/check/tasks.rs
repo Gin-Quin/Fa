@@ -655,6 +655,9 @@ impl Walker<'_> {
 		self.finish_function_async(&cx, node, None, Mode::Started);
 		if detached {
 			// it outlives the statement: it copies what it captures (A12)
+			for &symbol in &captures {
+				self.note_use(n, symbol);
+			}
 			self.escape_closure(node, n);
 			if throws != TypeId::NEVER {
 				self.report_detached_throws(n, throws);
@@ -694,6 +697,7 @@ impl Walker<'_> {
 	/// around it, and `CONC010` for a blocking call of a primitive or of
 	/// another file's function that can't block on the target.
 	pub(super) fn after_call(&mut self, n: NodeId, callee: NodeId) {
+		self.a.task_arguments.remove(&n);
 		if self.builtin_path(n, callee) == Some("Pointer#write")
 			&& let Some(crate::analysis::Argument::Given(value)) =
 				self.a.calls.get(&n).and_then(|call| call.arguments.first())
@@ -701,6 +705,14 @@ impl Walker<'_> {
 			self.note_copy_site(*value);
 		}
 		let mode = self.tasks.modes.get(&n).copied().unwrap_or(Mode::Blocking);
+		if self
+			.builtin_path(n, callee)
+			.is_some_and(|path| path.ends_with("#reduce"))
+			&& let Some(initial) = self.a.calls.get(&n).and_then(|call| call.arguments.get(1))
+			&& let Argument::Given(initial) = *initial
+		{
+			self.note_copy_site(initial);
+		}
 		let target = self.call_target(n, callee);
 		// `task.cancel()` (A11)
 		if let View::Access {
@@ -717,24 +729,62 @@ impl Walker<'_> {
 		// a task or a worker's handle given to a function moves into it
 		// (concurrency.md: they can't be copied; the callee owns them)
 		if let Some(CallInfo {
-			callee: crate::analysis::Callee::Function(_) | crate::analysis::Callee::Value,
+			callee: kind @ (crate::analysis::Callee::Function(_) | crate::analysis::Callee::Value),
 			arguments,
 		}) = self.a.calls.get(&n).cloned()
 		{
-			// (the receiver of a method, `worker.squares(…)`, is not given)
-			let receiver = match self.view(self.strip_groups(callee)) {
-				View::Access { target, .. } => Some(self.strip_groups(target)),
-				_ => None,
-			};
-			let given: Vec<NodeId> = arguments
-				.iter()
-				.filter_map(|argument| match argument {
-					Argument::Given(value) if Some(self.strip_groups(*value)) != receiver => {
-						Some(*value)
+			let borrowed_self = self.borrowed_self_argument(kind, callee, arguments.len());
+			let params = self
+				.signature_of(self.a.type_of(callee))
+				.map(|signature| self.s.types.params(signature.params).to_vec())
+				.unwrap_or_default();
+			let bindings = self.copy_instantiations.get(&n).cloned();
+			let offset = usize::from(
+				matches!(arguments.first(), Some(Argument::Receiver(_)))
+					&& params.len() + 1 == arguments.len(),
+			);
+			let mut task_arguments = Vec::new();
+			let mut given = Vec::new();
+			for (index, argument) in arguments.iter().enumerate() {
+				let formal = index
+					.checked_sub(offset)
+					.and_then(|index| params.get(index))
+					.map(|param| param.ty);
+				let formal = formal.map(|ty| match &bindings {
+					Some(bindings) => self.s.types.substitute(ty, bindings),
+					None => ty,
+				});
+				if let Argument::Variadic(values) = argument {
+					for &value in values {
+						self.note_copy_site(value);
+						let ty = formal.map_or_else(
+							|| self.a.type_of(value),
+							|ty| match self.view(value) {
+								View::Spread(_) => ty,
+								_ => self.array_item(ty),
+							},
+						);
+						if self.s.types.could_own_task(ty) {
+							task_arguments.push((value, ty));
+						}
 					}
-					_ => None,
-				})
-				.collect();
+				} else if let Argument::Given(value) = *argument
+					&& borrowed_self != Some(index)
+				{
+					let ty = formal.unwrap_or_else(|| self.a.type_of(value));
+					if self.s.types.could_own_task(ty) {
+						task_arguments.push((value, ty));
+						given.push(value);
+					}
+				}
+			}
+			if !task_arguments.is_empty() {
+				task_arguments.sort_unstable_by_key(|(value, _)| {
+					let span = self.tree.spans[value.index()];
+					(span.start, span.end)
+				});
+				self.a.task_arguments.insert(n, task_arguments);
+			}
 			self.move_handles(&given);
 		}
 		// `pool.submit(task)`: the task is stored until a worker is free, so it
@@ -820,6 +870,47 @@ impl Walker<'_> {
 			}
 			_ => {}
 		}
+	}
+
+	/// Namespace calls include `self` as an explicit argument. That
+	/// parameter stays borrowed, including when its declaration is imported
+	/// and therefore uses `Callee::Value` in this unit.
+	fn borrowed_self_argument(&self, kind: Callee, callee: NodeId, count: usize) -> Option<usize> {
+		if let Callee::Function(function) = kind {
+			let info = self.a.function(function)?;
+			return (info.params.len() == count)
+				.then(|| {
+					info.params.iter().position(|param| {
+						self.a.symbols.symbol(param.symbol).kind == SymbolKind::SelfParameter
+					})
+				})
+				.flatten();
+		}
+		let mut callee = self.strip_groups(callee);
+		while let View::Call { callee: inner, .. } = self.view(callee)
+			&& self.a.instantiations.contains_key(&callee)
+		{
+			callee = self.strip_groups(inner);
+		}
+		let name = match self.view(callee) {
+			View::Access { members, .. } | View::OptionalAccess { members, .. } => {
+				members.last()?
+			}
+			_ => callee,
+		};
+		let (module, declaration) = match self.a.resolution(name) {
+			Resolution::Local(symbol) => self.proxy_decl(symbol)?,
+			resolution @ Resolution::External(_) => self.s.external_node(resolution)?,
+			_ => return None,
+		};
+		let params = self.s.interface(module)?.parameters.get(&declaration)?;
+		(params.len() == count)
+			.then(|| {
+				params
+					.iter()
+					.position(|param| param.kind == SymbolKind::SelfParameter)
+			})
+			.flatten()
 	}
 
 	/// The path of the built-in a call calls, if any.
@@ -1725,8 +1816,23 @@ impl Walker<'_> {
 			_ => false,
 		};
 		let awaited = self.tasks.awaited_start == Some(n) || worker;
+		let transferred: Vec<_> = self
+			.a
+			.task_arguments
+			.get(&call)
+			.into_iter()
+			.flatten()
+			.filter(|(_, ty)| self.s.types.takes_task_parameter(*ty))
+			.map(|&(value, _)| self.strip_groups(value))
+			.collect();
 		for value in arguments {
 			let value = self.strip_groups(value);
+			// A consuming formal parameter owns this value inside the task.
+			// The source frame neither keeps a borrow nor destroys it at the
+			// statement boundary. A narrower ordinary view still borrows.
+			if transferred.contains(&value) {
+				continue;
+			}
 			if !awaited {
 				self.check_temporary_argument(n, value);
 			}
@@ -2199,6 +2305,81 @@ pub(crate) struct Borrow {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::check::test_support::{analyzed, node};
+
+	#[test]
+	fn task_arguments_include_fresh_and_conditional_values() {
+		let source = "async function work = (): Integer => 1\nfunction sink = (task: Task<Integer>): Void => {}\nfunction many = (...tasks: Task<Integer>): Void => {}\nfunction ignore = <Value>(value: Value): Void => {}\nfunction forward = <Value>(value: Value): Void => ignore(value)\nsink(start work())\nignore(start work())\nignore([1])\nmany(start work(), start work())\n";
+		let (session, file) = analyzed(source);
+		let analysis = session.analysis(file);
+		for (text, count) in [
+			("sink(start work())", 1),
+			("ignore(start work())", 1),
+			("many(start work(), start work())", 2),
+			("ignore(value)", 1),
+		] {
+			let call = node(&session, file, text);
+			let arguments = &analysis.task_arguments[&call];
+			assert_eq!(arguments.len(), count, "{text}");
+			for &(value, ty) in arguments {
+				assert!(session.types().could_own_task(ty), "{text}");
+				if matches!(
+					crate::syntax::view(session.tree(file), value),
+					View::Start(_)
+				) {
+					assert!(!analysis.moved_reads.contains(&value), "{text}");
+				}
+			}
+		}
+		assert!(
+			!analysis
+				.task_arguments
+				.contains_key(&node(&session, file, "ignore([1])"))
+		);
+	}
+
+	#[test]
+	fn a_structural_parameter_borrows_task_fields_outside_its_view() {
+		let source = "async function work = (): Integer => 1\ntype Holder = { id: Integer, task: Task<Integer> }\nfunction inspect = (value: { id: Integer }): Integer => value.id\nlet holder = Holder { id = 1, task = start work() }\nconsole.log(inspect(holder), await holder.task catch _error => -1)\n";
+		let (session, file) = analyzed(source);
+		let call = node(&session, file, "inspect(holder)");
+		assert!(!session.analysis(file).task_arguments.contains_key(&call));
+	}
+
+	#[test]
+	fn imported_self_stays_borrowed_in_a_namespace_call() {
+		let files = [
+			("Holder.fa".to_string(), "export type = { task: Task<Integer>, function inspect = (self): Void => {} }\n".to_string()),
+			("main.fa".to_string(), "async function work = (): Integer => 1\nlet holder = Holder { task = start work() }\nHolder.inspect(holder)\nconsole.log(await holder.task catch _error => -1)\n".to_string()),
+		];
+		let resolver = crate::CodebaseResolver::from_texts(&files, Some("main.fa"));
+		let mut session = crate::Session::new();
+		session.set_resolver(Box::new(resolver));
+		let program = session.analyze_program("main").expect("a program");
+		let file = program.entry.expect("an entry");
+		for unit in program.files {
+			assert!(
+				session.diagnostics(unit).is_empty(),
+				"{:?}",
+				session.diagnostics(unit)
+			);
+		}
+		let call = node(&session, file, "Holder.inspect(holder)");
+		let argument = match session.analysis(file).calls[&call].arguments[0] {
+			Argument::Given(value) => value,
+			ref other => panic!("{other:?}"),
+		};
+		assert!(!session.analysis(file).task_arguments.contains_key(&call));
+		assert!(!session.analysis(file).moved_reads.contains(&argument));
+	}
+
+	#[test]
+	fn a_started_call_owns_its_consumed_fresh_or_parameter_argument() {
+		let source = "type Bundle = { id: Integer, pending: Task<Integer> }\nasync function work = (): Integer => 1\nfunction bundle = (): Bundle => Bundle { id = 1, pending = start work() }\nfunction accept = (_value: Bundle): Void => {}\nfunction launch = (value: Bundle): Task<Void> => start accept(value)\nlet first = start accept(bundle())\nawait first\nlet second = launch(bundle())\nawait second\n";
+		analyzed(source);
+		let source = "type Bundle = { id: Integer, pending: Task<Integer> }\nasync function work = (): Integer => 1\nfunction bundle = (): Bundle => Bundle { id = 1, pending = start work() }\nfunction inspect = (_view: { id: Integer }): Void => {}\nlet borrowed = start inspect(bundle())\nawait borrowed\n";
+		assert_eq!(crate::check::test_support::codes(source), ["CONC018"]);
+	}
 
 	#[test]
 	fn merging_keeps_the_chain_of_the_targets_removed() {

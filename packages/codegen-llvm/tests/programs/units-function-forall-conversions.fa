@@ -1,0 +1,28 @@
+-- Converted forall tables preserve exact type/value instances across units.
+-- file: library/adapters.fa
+export namespace = {
+	type Failure = Errors { Bad }
+	type Fallible = <Item>(value: Item) => Item throws Failure.Bad
+	function wrap = (source: <Value>(value: Value) => Value): Fallible => source
+	type Numeric = <Mark>(value: UInt32) => UInt128
+	function numeric = (source: <Mark>(value: UInt128) => UInt128): Numeric => source
+	type Label = <text: String>() => String
+	function label = (source: Label): Label => source
+}
+-- file: application/main.fa
+function identity = <Item>(value: Item): Item => value
+function wide = <Mark>(value: UInt128): UInt128 => value
+function label = <text: String>(): String => text
+export function = () => {
+	let throwing = library.adapters.wrap(identity)
+	console.log(throwing(11) catch _error => 0, throwing("foreign") catch _error => "")
+	let numeric = library.adapters.numeric(wide)
+	console.log(numeric<String>(12) + UInt128(1))
+	console.log(numeric<Integer>(13) + UInt128(1))
+	let name = library.adapters.label(label)
+	console.log(name<"first">(), name<"second">())
+}
+-- prints: 11 foreign
+-- prints: 13
+-- prints: 14
+-- prints: first second

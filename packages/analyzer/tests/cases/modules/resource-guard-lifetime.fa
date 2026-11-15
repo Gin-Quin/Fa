@@ -1,0 +1,35 @@
+-- A borrowed Resource cannot outlive a Guard local to the argument's block.
+-- file: library/Held.foreign.fa
+export type = {
+	value: Integer
+	function destroy = (self) => {}
+}
+-- file: library/borrow.fa
+use { Mutex } = std.concurrency
+export function = <Value>(mutex: Mutex<Value>, _sample: Value, consume: (Value) => Integer): Integer => consume(do {
+	let guard = mutex.tryLock() ?? return -1
+	guard.value
+})
+-- file: application/main.fa
+use { Mutex } = std.concurrency
+function read = (value: library.Held): Integer => value.value
+function direct = (mutex: Mutex<library.Held>): Integer => read(do {
+	let guard = mutex.tryLock() ?? return -1
+	guard.value -- error: MEM002
+})
+function aliased = (mutex: Mutex<library.Held>): Integer => read(do {
+	let guard = mutex.tryLock() ?? return -1
+	use held = guard.value
+	held -- error: MEM002
+})
+function branched = (mutex: Mutex<library.Held>, choose: Boolean): Integer => read(do {
+	let guard = mutex.tryLock() ?? return -1
+	if choose {
+		guard.value -- error: MEM002
+	} else {
+		guard.value -- error: MEM002
+	}
+})
+function generic = (mutex: Mutex<library.Held>, held: library.Held): Integer => library.borrow(mutex, held, (value) => value.value) -- error: MEM003
+function scalar = (mutex: Mutex<Integer>): Integer => library.borrow(mutex, 1, (value) => value)
+export function = () => {}

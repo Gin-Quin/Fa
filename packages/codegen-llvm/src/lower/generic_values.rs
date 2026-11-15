@@ -52,6 +52,7 @@ type ProducerKey = (
 	NodeId,
 	Vec<(Repr, TypeId)>,
 	Vec<(ParamId, GenericMethod)>,
+	ProducerKind,
 );
 
 /// The generic function types equal up to the names of their parameters.
@@ -66,12 +67,56 @@ pub(crate) struct GenericClass {
 }
 
 /// What makes values of a class.
-#[derive(Clone)]
-enum ProducerKind {
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum ProducerKind {
 	/// A generic lambda, under the bindings of the instance around it.
 	Lambda,
 	/// A generic function declaration used as a value.
 	Declaration,
+	/// A `with` closure whose remaining parameters are generic.
+	Partial,
+	DefaultLambda,
+	DefaultDeclaration,
+	DefaultPartial,
+	/// A signature conversion forwards each class request to its source.
+	Adapter {
+		from: TypeId,
+		to: TypeId,
+	},
+}
+
+impl ProducerKind {
+	fn base(self) -> Self {
+		match self {
+			Self::DefaultLambda => Self::Lambda,
+			Self::DefaultDeclaration => Self::Declaration,
+			Self::DefaultPartial => Self::Partial,
+			other => other,
+		}
+	}
+	pub(super) fn with_defaults(self) -> Self {
+		match self.base() {
+			Self::Lambda => Self::DefaultLambda,
+			Self::Declaration => Self::DefaultDeclaration,
+			Self::Partial => Self::DefaultPartial,
+			_ => unreachable!(),
+		}
+	}
+	fn captures_outer(self) -> bool {
+		matches!(self.base(), Self::Lambda | Self::Partial)
+	}
+
+	fn defaults(self) -> bool {
+		matches!(
+			self,
+			Self::DefaultLambda | Self::DefaultDeclaration | Self::DefaultPartial
+		)
+	}
+}
+
+enum InstanceIndex<'ctx> {
+	Constant(inkwell::values::IntValue<'ctx>),
+	Global(GlobalValue<'ctx>),
 }
 
 /// A maker of values of a class, and its table.
@@ -83,6 +128,7 @@ pub(crate) struct Producer<'ctx> {
 	bindings: FxHashMap<ParamId, Repr>,
 	types: FxHashMap<ParamId, TypeId>,
 	methods: Vec<(ParamId, GenericMethod)>,
+	values: FxHashMap<fa_analyzer::ids::SymbolId, TypeId>,
 	/// Stands for the table until it is defined (`finish_generic_tables`).
 	placeholder: GlobalValue<'ctx>,
 	entries: Vec<PointerValue<'ctx>>,
@@ -121,11 +167,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// A generic function type with its own parameters bound to `arguments`
 	/// (both concrete): the type of an instance.
-	fn instantiate_generic(&self, generic: TypeId, arguments: &[TypeId]) -> TypeId {
+	pub(super) fn instantiate_generic(&self, generic: TypeId, arguments: &[TypeId]) -> TypeId {
 		let module = self.session.module_id(self.file);
 		let mut merger = self.types().merger(Some(module));
 		let global = merger.ty(generic);
 		let arguments: Vec<TypeId> = arguments.iter().map(|&ty| merger.ty(ty)).collect();
+		let module = merger.module(module);
 		drop(merger);
 		let mut scratch = TypeStore::view(self.types().global());
 		let own = scratch_generics(&scratch, global);
@@ -152,6 +199,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let global = merger.ty(ty);
 		let params: Vec<ParamId> = params.iter().map(|&param| merger.param(param)).collect();
 		let arguments: Vec<TypeId> = arguments.iter().map(|&ty| merger.ty(ty)).collect();
+		let module = merger.module(module);
 		drop(merger);
 		let mut scratch = TypeStore::view(self.types().global());
 		let instance = scratch.substitute(
@@ -226,11 +274,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<usize, Error> {
 		let site = self.location(node.index());
 		let data = &self.generic_values.classes[class];
-		if let Some(index) = data
-			.instances
-			.iter()
-			.position(|(known, _, selected)| *known == reprs && *selected == methods)
-		{
+		if let Some(index) = data.instances.iter().position(|(known, exact, selected)| {
+			*known == reprs && *exact == types && *selected == methods
+		}) {
 			return Ok(index);
 		}
 		if data.instances.len() >= MOST_INSTANCES {
@@ -264,22 +310,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// The producer of a class for a node of the file being lowered, under
 	/// the current bindings (a lambda) or none (a declaration).
 	fn producer(&mut self, class: usize, node: NodeId, kind: ProducerKind) -> usize {
-		let bindings = match kind {
-			ProducerKind::Lambda => self.bindings.borrow().clone(),
-			ProducerKind::Declaration => FxHashMap::default(),
+		let bindings = if !kind.captures_outer() {
+			FxHashMap::default()
+		} else {
+			self.bindings.borrow().clone()
 		};
 		let mut entries: Vec<(ParamId, Repr)> = bindings
 			.iter()
 			.map(|(&param, &repr)| (param, repr))
 			.collect();
 		entries.sort_by_key(|(param, _)| *param);
-		let mut methods = if matches!(kind, ProducerKind::Lambda) {
+		let mut methods = if kind.captures_outer() {
 			self.method_bindings.borrow().clone()
 		} else {
 			Vec::new()
 		};
 		methods.sort_by_key(|(param, method)| (*param, method.name));
-		let types = if matches!(kind, ProducerKind::Lambda) {
+		let types = if kind.captures_outer() {
 			self.type_bindings.borrow().clone()
 		} else {
 			FxHashMap::default()
@@ -292,6 +339,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.map(|(param, repr)| (repr, types.get(&param).copied().unwrap_or(TypeId::UNKNOWN)))
 				.collect(),
 			methods.clone(),
+			kind,
 		);
 		if let Some(&producer) = self.generic_values.keys.get(&key) {
 			return producer;
@@ -310,6 +358,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			bindings,
 			types,
 			methods,
+			values: if !kind.captures_outer() {
+				FxHashMap::default()
+			} else {
+				self.value_bindings.borrow().clone()
+			},
 			placeholder,
 			entries: Vec::new(),
 		});
@@ -319,7 +372,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// A type of this unit's view in the global store (shared by the units of
 	/// a build).
-	fn global_type(&self, ty: TypeId) -> TypeId {
+	pub(super) fn global_type(&self, ty: TypeId) -> TypeId {
 		let module = self.session.module_id(self.file);
 		let mut merger = self.types().merger(Some(module));
 		merger.ty(ty)
@@ -329,7 +382,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// in every unit of a build: the stable hash of the type with its own
 	/// parameters replaced by markers, in order (their names and
 	/// constraints left out, as `generic_class` compares them).
-	fn class_key(&self, ty: TypeId) -> String {
+	pub(super) fn class_key(&self, ty: TypeId) -> String {
 		let global = self.global_type(ty);
 		let mut scratch = TypeStore::view(self.types().global());
 		let own = scratch_generics(&scratch, global);
@@ -368,7 +421,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// defines at the end, or, compiled per unit, the table the entry
 	/// object defines once every instance of the class is known (the
 	/// producer reported to the driver).
-	fn generic_table_of(
+	pub(super) fn generic_table_of(
 		&mut self,
 		ty: TypeId,
 		node: NodeId,
@@ -381,12 +434,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.placeholder
 				.as_pointer_value());
 		}
+		self.split_generic_table(ty, node, kind, self.session.module(self.file).to_string())
+	}
+
+	fn split_generic_table(
+		&mut self,
+		ty: TypeId,
+		node: NodeId,
+		kind: ProducerKind,
+		module: String,
+	) -> Result<PointerValue<'ctx>, Error> {
 		// the bindings of the instance around a lambda, by the position of
 		// each parameter in its owner's list (what another session can
 		// find again)
 		let mut bindings = Vec::new();
 		let mut methods = Vec::new();
-		if matches!(kind, ProducerKind::Lambda) {
+		if kind.captures_outer() {
 			let current: Vec<(ParamId, Repr)> = self
 				.bindings
 				.borrow()
@@ -437,8 +500,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			methods.sort_by_key(|(owner, index, method)| (*owner, *index, method.name));
 		}
-		let module = self.session.module(self.file).to_string();
 		let mut table = format!("fa.gv.table.{module}.{}", node.index());
+		if kind.defaults() {
+			table.push_str(".defaults");
+		}
+		if let ProducerKind::Adapter { from, to } = kind {
+			table.push_str(&format!(
+				".adapter.{:x}.{:x}",
+				self.types().stable_hash(from),
+				self.types().stable_hash(to)
+			));
+		}
 		if !bindings.is_empty() {
 			let types: Vec<TypeId> = bindings.iter().map(|&(_, _, ty)| ty).collect();
 			table.push('.');
@@ -467,7 +539,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			class: self.class_key(ty),
 			module,
 			node: node.index() as u32,
-			lambda: matches!(kind, ProducerKind::Lambda),
+			lambda: !matches!(kind.base(), ProducerKind::Declaration),
+			defaults: kind.defaults(),
+			adapter: match kind {
+				ProducerKind::Adapter { from, to } => Some((from, to)),
+				_ => None,
+			},
+			asynchronous: self.tasks.asynchronous
+				&& matches!(self.types().kind(ty), TypeKind::Function(sig) if self.types().sig(sig).is_async),
 			bindings,
 			methods,
 		};
@@ -482,7 +561,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// compiled per unit, the constant the entry object defines once every
 	/// instance of the class is known (`fa.gv.index.<class>.<instance>`,
 	/// folded by the link's optimization).
-	fn instance_index(
+	pub(super) fn instance_index(
 		&mut self,
 		generic: TypeId,
 		reprs: Vec<Repr>,
@@ -490,11 +569,47 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		methods: &[GenericMethod],
 		node: NodeId,
 	) -> Result<inkwell::values::IntValue<'ctx>, Error> {
+		match self.instance_index_source(generic, reprs, arguments, methods, node)? {
+			InstanceIndex::Constant(index) => Ok(index),
+			InstanceIndex::Global(global) => Ok(self
+				.builder
+				.build_load(self.usize, global.as_pointer_value(), "")?
+				.into_int_value()),
+		}
+	}
+
+	pub(super) fn instance_index_for_builder(
+		&mut self,
+		generic: TypeId,
+		reprs: Vec<Repr>,
+		arguments: &[TypeId],
+		methods: &[GenericMethod],
+		node: NodeId,
+		builder: &inkwell::builder::Builder<'ctx>,
+	) -> Result<inkwell::values::IntValue<'ctx>, Error> {
+		match self.instance_index_source(generic, reprs, arguments, methods, node)? {
+			InstanceIndex::Constant(index) => Ok(index),
+			InstanceIndex::Global(global) => Ok(builder
+				.build_load(self.usize, global.as_pointer_value(), "")?
+				.into_int_value()),
+		}
+	}
+
+	fn instance_index_source(
+		&mut self,
+		generic: TypeId,
+		reprs: Vec<Repr>,
+		arguments: &[TypeId],
+		methods: &[GenericMethod],
+		node: NodeId,
+	) -> Result<InstanceIndex<'ctx>, Error> {
 		if !self.is_split() {
 			let class = self.generic_class(generic);
 			let index =
 				self.class_instance(class, reprs, arguments.to_vec(), methods.to_vec(), node)?;
-			return Ok(self.usize.const_int(index as u64, false));
+			return Ok(InstanceIndex::Constant(
+				self.usize.const_int(index as u64, false),
+			));
 		}
 		let arguments: Vec<TypeId> = arguments
 			.iter()
@@ -525,10 +640,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !needs.instances.contains(&instance) {
 			needs.instances.push(instance);
 		}
-		Ok(self
-			.builder
-			.build_load(self.usize, global.as_pointer_value(), "")?
-			.into_int_value())
+		Ok(InstanceIndex::Global(global))
 	}
 
 	/// Defines the entry of a producer's table for an instance of its class
@@ -585,13 +697,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		for &argument in &request.instance.arguments {
 			reprs.push(self.repr_of(argument, node.index())?);
 		}
-		let kind = if producer.lambda {
+		let kind = if let Some((from, to)) = producer.adapter {
+			ProducerKind::Adapter { from, to }
+		} else if self.analysis.partial_applications.contains_key(&node) {
+			ProducerKind::Partial
+		} else if producer.lambda {
 			ProducerKind::Lambda
 		} else {
 			ProducerKind::Declaration
 		};
+		let kind = if producer.defaults {
+			kind.with_defaults()
+		} else {
+			kind
+		};
 		let saved = self.bindings.replace(bindings);
+		let parameter_values: Vec<_> = types.iter().map(|(&param, &ty)| (param, ty)).collect();
 		let saved_types = self.type_bindings.replace(types);
+		let saved_values = self
+			.value_bindings
+			.replace(self.value_bindings_for(&parameter_values));
 		let mut captured_methods = Vec::new();
 		for &(owner, index, ref method) in &producer.methods {
 			let param = self
@@ -613,9 +738,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.bindings.replace(saved);
 		self.type_bindings.replace(saved_types);
 		self.method_bindings.replace(saved_methods);
+		self.value_bindings.replace(saved_values);
 		let entry = entry?;
 		let name = producer.entry_symbol(&request.instance);
-		self.export_entry(entry, &name)?;
+		if producer.asynchronous {
+			self.export_async_entries(entry, &name);
+		} else {
+			self.export_entry(entry, &name)?;
+		}
 		self.generic_needs_mut().entries.push(name);
 		Ok(())
 	}
@@ -677,15 +807,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let by_reference = !self.analysis.escapes.contains(&node) && given_to_call;
 		let environment = self.build_environment(&captures, by_reference, node)?;
 		let closure = self.closure_pair(table, environment, self.type_of(node))?;
-		Ok(if by_reference {
+		let closure = if by_reference {
 			closure
 		} else {
 			self.fresh(closure)
-		})
+		};
+		self.generic_function_defaults(closure, ty, node, ProducerKind::Lambda)
 	}
 
 	/// A generic function declaration used as a generic function value: its
-	/// table, with no environment.
+	/// table and the shared environment of every instance when it captures locals.
 	pub(crate) fn generic_declaration_value(
 		&mut self,
 		declaration: NodeId,
@@ -695,8 +826,97 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !self.is_generic_function_type(ty) {
 			return Err(self.unsupported(node.index(), "this generic function value"));
 		}
+		let captures = self.find_captures(declaration);
+		if captures.is_empty() {
+			// Enclosing value/type binders can affect defaults and methods
+			// even when this function captures no runtime data.
+			let kind = if self.type_bindings.borrow().is_empty()
+				&& self.method_bindings.borrow().is_empty()
+				&& self.value_bindings.borrow().is_empty()
+			{
+				ProducerKind::Declaration
+			} else {
+				ProducerKind::Lambda
+			};
+			let table = self.generic_table_of(ty, declaration, kind)?;
+			let closure =
+				self.closure_pair(table, self.pointer_type().const_null(), self.type_of(node))?;
+			return self.generic_function_defaults(closure, ty, declaration, kind);
+		}
+		let table = self.generic_table_of(ty, declaration, ProducerKind::Lambda)?;
+		let lambda = self
+			.analysis
+			.function(declaration)
+			.expect("a generic declaration")
+			.lambda;
+		let by_reference = !self.analysis.escapes.contains(&lambda);
+		let environment = self.build_environment(&captures, by_reference, node)?;
+		let closure = self.closure_pair(table, environment, self.type_of(node))?;
+		let closure = if by_reference {
+			closure
+		} else {
+			self.fresh(closure)
+		};
+		self.generic_function_defaults(closure, ty, declaration, ProducerKind::Lambda)
+	}
+
+	/// Module-level foreign functions have no runtime captures. Keep the
+	/// producer in its defining module, with the caller's closed forall type.
+	pub(super) fn foreign_generic_declaration_value(
+		&mut self,
+		ty: TypeId,
+		declaration: NodeId,
+	) -> Result<Val<'ctx>, Error> {
 		let table = self.generic_table_of(ty, declaration, ProducerKind::Declaration)?;
-		self.closure_pair(table, self.pointer_type().const_null(), self.type_of(node))
+		let closure = self.closure_pair(table, self.pointer_type().const_null(), ty)?;
+		self.generic_function_defaults(closure, ty, declaration, ProducerKind::Declaration)
+	}
+
+	pub(super) fn remote_generic_declaration_value(
+		&mut self,
+		key: fa_analyzer::ids::DeclKey,
+		ty: TypeId,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let module = self.types().decl_key_data(key).module;
+		let Some(interface) = self.session.interface(module) else {
+			return Err(self.unsupported(node.index(), "this generic function of another module"));
+		};
+		let Some(declaration) = interface.node_of(key) else {
+			return Err(self.unsupported(node.index(), "this generic function of another module"));
+		};
+		let defaults = interface
+			.parameters
+			.get(&declaration)
+			.is_some_and(|params| params.iter().any(|param| param.has_default));
+		let path = self.types().module_path(module).to_string();
+		let table =
+			self.split_generic_table(ty, declaration, ProducerKind::Declaration, path.clone())?;
+		let closure = self.closure_pair(table, self.pointer_type().const_null(), ty)?;
+		if !defaults {
+			return Ok(closure);
+		}
+		let table =
+			self.split_generic_table(ty, declaration, ProducerKind::DefaultDeclaration, path)?;
+		self.with_default_entry(closure, table)
+	}
+
+	fn generic_function_defaults(
+		&mut self,
+		value: Val<'ctx>,
+		ty: TypeId,
+		node: NodeId,
+		kind: ProducerKind,
+	) -> Result<Val<'ctx>, Error> {
+		let defaults = self
+			.analysis
+			.function(node)
+			.is_some_and(|info| info.params.iter().any(|param| param.default.is_some()));
+		if !defaults {
+			return Ok(value);
+		}
+		let entry = self.generic_table_of(ty, node, kind.with_defaults())?;
+		self.with_default_entry(value, entry)
 	}
 
 	/// `{ table, environment }` as a value of type `ty`.
@@ -783,6 +1003,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_load(self.pointer_type(), slot, "")?
 			.into_pointer_value();
+		if self.analysis.applied_defaults.contains(&node) {
+			let defaults = self.default_entry(&self.builder, environment)?;
+			let slot = unsafe {
+				self.builder
+					.build_in_bounds_gep(self.pointer_type(), defaults, &[index], "")?
+			};
+			let defaults = self
+				.builder
+				.build_load(self.pointer_type(), slot, "")?
+				.into_pointer_value();
+			// The specialized entry still unwraps one defaults adapter. Give
+			// it an adapter owning the original payload, with a specialized
+			// default entry instead of the polymorphic table.
+			let original = self.default_environment(&self.builder, environment)?;
+			let value = self.closure_pair(entry, original, instance)?;
+			return self.with_default_entry(value, defaults);
+		}
 		self.closure_pair(entry, environment, instance)
 	}
 
@@ -819,15 +1056,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		types: &[TypeId],
 		methods: &[GenericMethod],
 	) -> Result<PointerValue<'ctx>, Error> {
-		let (file, node, kind, bindings, types_bindings, captured_methods) = {
+		let (file, node, kind, bindings, types_bindings, captured_methods, values) = {
 			let data = &self.generic_values.producers[producer];
 			(
 				data.file,
 				data.node,
-				data.kind.clone(),
+				data.kind,
 				data.bindings.clone(),
 				data.types.clone(),
 				data.methods.clone(),
+				data.values.clone(),
 			)
 		};
 		let current = self.file;
@@ -835,7 +1073,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let saved = self.bindings.replace(bindings);
 		let saved_types = self.type_bindings.replace(types_bindings);
 		let saved_methods = self.method_bindings.replace(captured_methods);
+		let saved_values = self.value_bindings.replace(values);
 		let entry = self.generic_entry_in_file(node, kind, reprs, types, methods);
+		self.value_bindings.replace(saved_values);
 		self.bindings.replace(saved);
 		self.type_bindings.replace(saved_types);
 		self.method_bindings.replace(saved_methods);
@@ -851,14 +1091,59 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		types: &[TypeId],
 		methods: &[GenericMethod],
 	) -> Result<PointerValue<'ctx>, Error> {
-		let generics = match self.generic_functions.get(&node) {
-			Some(info) => info.generics.clone(),
-			None => return Err(self.unsupported(node.index(), "this generic function value")),
+		let defaults = kind.defaults();
+		let kind = kind.base();
+		if let ProducerKind::Adapter { from, to } = kind {
+			if !self.instance_allowed(&self.own_generics(to), types) {
+				return Ok(self.never_called_entry());
+			}
+			return self.generic_adapter_entry(node, from, to, types, methods);
+		}
+		// A non-generic compile-time closure from another unit still needs
+		// its own wave-local definition. Reusing the main object's internal
+		// template would export only a declaration from an instance wave.
+		if matches!(kind, ProducerKind::Lambda)
+			&& !self.generic_functions.contains_key(&node)
+			&& let Some(info) = self.analysis.function(node).cloned()
+		{
+			self.generic_functions.insert(node, info);
+		}
+		let generics = if matches!(kind, ProducerKind::Partial) {
+			self.own_generics(self.type_of(node))
+		} else {
+			match self.generic_functions.get(&node) {
+				Some(info) => info.generics.clone(),
+				None => self
+					.analysis
+					.function(node)
+					.map(|info| info.generics.clone())
+					.ok_or_else(|| self.unsupported(node.index(), "this generic function value"))?,
+			}
 		};
 		if !self.instance_allowed(&generics, types) {
 			return Ok(self.never_called_entry());
 		}
 		self.note_instance_types(&generics, types, reprs);
+		if matches!(kind, ProducerKind::Partial) {
+			let mut bindings = self.bindings.borrow().clone();
+			bindings.extend(generics.iter().copied().zip(reprs.iter().copied()));
+			let mut type_bindings = self.type_bindings.borrow().clone();
+			type_bindings.extend(generics.iter().copied().zip(types.iter().copied()));
+			let mut selected = self.method_bindings.borrow().clone();
+			selected.extend(methods.iter().filter_map(|method| {
+				generics
+					.get(method.parameter as usize)
+					.map(|&param| (param, method.clone()))
+			}));
+			let saved = self.bindings.replace(bindings);
+			let saved_types = self.type_bindings.replace(type_bindings);
+			let saved_methods = self.method_bindings.replace(selected);
+			let entry = self.partial_generic_entry(node, defaults);
+			self.bindings.replace(saved);
+			self.type_bindings.replace(saved_types);
+			self.method_bindings.replace(saved_methods);
+			return entry;
+		}
 		let key = match kind {
 			ProducerKind::Lambda => {
 				let mut type_bindings = self.type_bindings.borrow().clone();
@@ -871,9 +1156,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						.map(|&param| (param, method.clone()))
 				}));
 				let saved = self.method_bindings.replace(selected);
-				let result = self.lambda_instance(node, reprs);
+				let parameter_values: Vec<_> = generics
+					.iter()
+					.copied()
+					.zip(types.iter().copied())
+					.collect();
+				let saved_values = self
+					.value_bindings
+					.replace(self.value_bindings_for(&parameter_values));
+				let result = if self.generic_functions.contains_key(&node) {
+					self.lambda_instance(node, reprs)
+				} else {
+					Ok(node)
+				};
 				self.method_bindings.replace(saved);
 				self.type_bindings.replace(saved_types);
+				self.value_bindings.replace(saved_values);
 				result?
 			}
 			ProducerKind::Declaration => {
@@ -893,15 +1191,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					methods.to_vec(),
 				)?
 			}
+			_ => unreachable!("handled above"),
 		};
 		let function = self.functions[&key].clone();
-		Ok(match kind {
-			ProducerKind::Lambda => function.value.as_global_value().as_pointer_value(),
-			ProducerKind::Declaration => self
-				.thunk_of(&function)?
+		if defaults {
+			return self.function_default_entry(&function);
+		}
+		let thunk = self.needs_value_thunk(&function);
+		let entry = if thunk {
+			self.thunk_of(&function)?
 				.as_global_value()
-				.as_pointer_value(),
-		})
+				.as_pointer_value()
+		} else {
+			function.value.as_global_value().as_pointer_value()
+		};
+		self.async_value_entry(&function, entry, thunk)
 	}
 
 	/// Whether type arguments satisfy the constraints of parameters.

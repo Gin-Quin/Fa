@@ -1,0 +1,43 @@
+function xyz = (x: Integer, y: Integer, z: Integer) => x + y + z
+function xz = xyz with (y = 1)
+console.log(xz(2, 3)) -- prints: 6
+console.log(xz(z = 8, x = 1)) -- prints: 10
+function neither = xz with (x = 4)
+console.log(neither(z = 5)) -- prints: 10
+
+type Operation = (x: Integer, y: Integer, z: Integer) => Integer
+type Residual = (x: Integer, z: Integer) => Integer
+function bind = (operation: Operation, middle: Integer): Residual => operation with (y = middle)
+function runtime = () => {
+	mutable middle = 2
+	let partial = bind(xyz, middle)
+	middle = 9
+	console.log(partial(3, 4), middle) -- prints: 9 9
+}
+runtime()
+
+function size = (items: Array<Integer>, extra: Integer): Integer => items.length + extra
+function own = () => {
+	let partial = size with (items = [1, 2])
+	console.log(partial(3)) -- prints: 5
+}
+own()
+
+type Text = (left: String) => String
+function make = (label: String): Text => {
+	function concatenate = (left: String, right: String) => "{label}:{left}:{right}"
+	concatenate with (right = "end")
+}
+let text = make("prefix")
+console.log(text("start")) -- prints: prefix:start:end
+
+mutable order = ""
+function take = (value: Integer): Integer mutates order => {
+	order += "{value}"
+	value
+}
+console.log(xz(z = take(3), x = take(2)), order) -- prints: 6 32
+
+function total = (first: Integer, ...values: Integer): Integer => values.reduce((sum, value) => sum + value, first)
+function more = total with (first = 5)
+console.log(more(1, ...[2, 3]), more()) -- prints: 11 5

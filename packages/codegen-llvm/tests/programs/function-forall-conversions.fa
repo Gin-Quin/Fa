@@ -1,0 +1,50 @@
+use { sleep } = std.time
+
+type Failure = Errors { Bad }
+function identity = <Item>(value: Item): Item => value
+type MayFail = <Item>(value: Item) => Item throws Failure.Bad
+let throwing: MayFail = identity
+console.log(try throwing(7), try throwing("word")) -- prints: 7 word
+
+function wide = <Mark>(value: UInt128): UInt128 => value
+type Numeric = <Mark>(value: UInt32) => UInt128
+let numeric: Numeric = wide
+console.log(numeric<String>(8) + UInt128(1)) -- prints: 9
+console.log(numeric<Integer>(9) + UInt128(1)) -- prints: 10
+
+async function delayed = <Item>(value: Item): Item => {
+	await sleep(1)
+	value
+}
+type AsyncMayFail = async <Item>(value: Item) => Item throws Failure.Bad
+let later: AsyncMayFail = delayed
+let task = start later("async")
+console.log("queued") -- prints: queued
+console.log(try await task) -- prints: async
+
+type AsyncIdentity = async <Item>(value: Item) => Item
+let lifted: AsyncIdentity = identity
+let immediate = start lifted("lifted")
+console.log("lift queued") -- prints: lift queued
+console.log(await immediate) -- prints: lifted
+
+function label = <text: String>(): String => text
+type Label = <text: String>() => String
+let name: Label = label
+console.log(name<"first">(), name<"second">()) -- prints: first second
+
+type Describer = <Item: { describe: (self) => String }>(item: Item) => String
+type FallibleDescriber = <Item: { describe: (self) => String }>(item: Item) => String throws Failure.Bad
+function makeDescriber = (prefix: String): Describer => <Item: { describe: (self) => String }>(item: Item): String => prefix + item.describe()
+function adaptDescriber = (describe: Describer): FallibleDescriber => describe
+type Person = {
+	name: String
+	function describe = (self): String => "Hello {self.name}"
+}
+type Greeting = {
+	name: String
+	function describe = (self): String => "Hi {self.name}"
+}
+let describe = adaptDescriber(makeDescriber("say: "))
+console.log(try describe(Person { name = "Ada" })) -- prints: say: Hello Ada
+console.log(try describe(Greeting { name = "Bea" })) -- prints: say: Hi Bea

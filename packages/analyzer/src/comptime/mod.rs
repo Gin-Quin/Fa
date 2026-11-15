@@ -14,6 +14,7 @@
 
 pub mod host;
 pub mod inputs;
+pub mod instances;
 pub mod lower;
 pub mod schema;
 
@@ -62,6 +63,8 @@ pub struct State {
 	pub globals: FxHashMap<GlobalKey, GlobalState>,
 	/// The impure primitive each function may reach (`None`: pure).
 	pub purity: FxHashMap<FnKey, Option<String>>,
+	/// Semantic instances live only during compilation, behind opaque VM keys.
+	pub instances: std::sync::Mutex<instances::Instances>,
 }
 
 impl Default for State {
@@ -73,6 +76,7 @@ impl Default for State {
 			functions: FxHashMap::default(),
 			globals: FxHashMap::default(),
 			purity: FxHashMap::default(),
+			instances: Default::default(),
 		}
 	}
 }
@@ -203,13 +207,23 @@ pub fn impurity(
 		}
 		match expr {
 			Expr::Impure(what) => found = Some(what.to_string()),
-			Expr::Function(key) | Expr::CallFunction(key, _) => {
+			Expr::CallFunction(key, _) => {
 				if let Some(Some(what)) = functions(*key) {
 					found = Some(what);
 				}
 			}
-			Expr::Closure { function, .. } => {
-				if let Some(Some(what)) = functions(*function) {
+			Expr::Call(callee, _) => {
+				let mut callee = callee.as_ref();
+				while let Expr::Instantiate(value, _) = callee {
+					callee = value;
+				}
+				let key = match callee {
+					Expr::Function(key) | Expr::Closure { function: key, .. } => Some(*key),
+					_ => None,
+				};
+				if let Some(key) = key
+					&& let Some(Some(what)) = functions(key)
+				{
 					found = Some(what);
 				}
 			}
@@ -245,10 +259,19 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 		| Expr::Continue
 		| Expr::Impure(_)
 		| Expr::Unsupported(_) => {}
+		Expr::Partial {
+			function, bound, ..
+		} => {
+			visit(function, f);
+			for (_, value) in bound {
+				visit(value, f);
+			}
+		}
 		Expr::Let(_, value)
 		| Expr::Loop(value)
 		| Expr::Throw(value)
 		| Expr::Assert(value, _)
+		| Expr::Instantiate(value, _)
 		| Expr::Negate(_, value)
 		| Expr::Convert(_, value)
 		| Expr::Not(value)

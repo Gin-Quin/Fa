@@ -23,13 +23,93 @@ use crate::diagnostics::codes::advanced::{
 };
 use crate::flow::Step;
 use crate::flow::refs::RefState;
-use crate::ids::{NodeId, PlaceId, SymbolId, TypeId};
+use crate::ids::{NodeId, PlaceId, ScopeId, SymbolId, TypeId};
 use crate::symbols::{DeclState, Resolution, Symbol, SymbolKind};
 use crate::syntax::{self, Name, View};
 use crate::types::{CollKind, TypeKind};
 
 impl Walker<'_> {
+	/// A block's result must survive the local owners it destroys. Ordinary
+	/// local values can move out, but fields protected by a local Guard (or
+	/// still owned by a Resource's destructor) need a real copy. Recording
+	/// that copy also publishes the condition for a generic payload.
+	pub(super) fn check_block_borrow(&mut self, value: NodeId, scope: ScopeId) {
+		let mut pending = vec![value];
+		while let Some(value) = pending.pop() {
+			let value = self.strip_groups(value);
+			if let Some(place) = self.reference_place(value) {
+				let Some(owner) = self.place_symbol(place) else {
+					continue;
+				};
+				let mut owner_scope = Some(self.a.symbols.symbol(owner).scope);
+				while let Some(current) = owner_scope {
+					if current == scope {
+						break;
+					}
+					owner_scope = self.a.symbols.scope(current).parent;
+				}
+				if owner_scope.is_none() {
+					continue;
+				}
+				let alias = matches!(self.a.resolution(value), Resolution::Local(symbol) if self.is_alias(symbol));
+				let mut protected = alias;
+				let mut ancestor = place;
+				while let Some(parent) = self.places.get(ancestor).parent {
+					if self.place_type(parent).is_some_and(|ty| {
+						self.s.types.is_resource(ty)
+							|| matches!(
+								self.s.types.kind(ty),
+								TypeKind::Sync(crate::types::SyncKind::Guard, _)
+							)
+					}) {
+						protected = true;
+						break;
+					}
+					ancestor = parent;
+				}
+				if protected {
+					self.note_copy_site(value);
+				}
+				continue;
+			}
+			match self.view(value) {
+				View::Do(body) | View::Try(body) | View::Return(Some(body)) => pending.push(body),
+				View::Block { statements } => pending.extend(statements.last()),
+				View::If {
+					then_body,
+					else_body,
+					..
+				} => {
+					pending.push(then_body);
+					pending.extend(else_body);
+				}
+				View::When { arms, .. } => pending.extend(arms.iter().map(|arm| arm.value)),
+				View::Catch {
+					expression,
+					handler,
+					..
+				} => pending.extend([expression, handler]),
+				View::Fallback { operands } => pending.extend(operands.iter()),
+				_ => {}
+			}
+		}
+	}
+
 	// ── declaring references ──────────────────────────────────────────────
+
+	pub(super) fn record_reference_source(&mut self, mut value: NodeId) {
+		loop {
+			value = match self.view(value) {
+				View::Group(inner) => inner,
+				View::Access { target, .. } | View::Index { target, .. } => target,
+				View::Call { callee, .. } => callee,
+				_ => break,
+			};
+		}
+		if let Resolution::Local(symbol) = self.a.resolution(value) {
+			self.a.reference_sources.insert(symbol);
+		}
+	}
 
 	/// `use name = place` and `mutable use name = place`.
 	pub(super) fn check_use(
@@ -454,13 +534,17 @@ impl Walker<'_> {
 			self.report(diagnostic);
 		}
 		// a local of an enclosing function: captured (`FnInfo::captures`)
-		if !matches!(
+		if (!matches!(
 			kind,
 			SymbolKind::Function
 				| SymbolKind::Type
 				| SymbolKind::Namespace
 				| SymbolKind::TypeParameter
-		) && self.is_captured(symbol)
+		) || self
+			.a
+			.computed_functions
+			.contains(&self.a.symbols.symbol(symbol).decl_node))
+			&& self.is_captured(symbol)
 			&& let Some(cx) = self.body.functions.last_mut()
 			&& !cx.captures.contains(&symbol)
 		{
@@ -534,6 +618,9 @@ impl Walker<'_> {
 				let diagnostic =
 					self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, n, message);
 				self.report_flow(diagnostic);
+			}
+			if self.check_moved_borrow(n, symbol) {
+				return;
 			}
 			let kind = self.a.symbols.symbol(symbol).kind;
 			if matches!(kind, SymbolKind::Use | SymbolKind::MutableUse)
@@ -650,7 +737,7 @@ impl Walker<'_> {
 
 	/// Whether a symbol is declared at the top level of the file (or in a
 	/// block of it), outside every function.
-	fn declared_outside_functions(&self, symbol: SymbolId) -> bool {
+	pub(crate) fn declared_outside_functions(&self, symbol: SymbolId) -> bool {
 		let mut current = Some(self.a.symbols.symbol(symbol).scope);
 		while let Some(scope) = current {
 			let data = self.a.symbols.scope(scope);
@@ -835,13 +922,20 @@ impl Walker<'_> {
 		let mut ty = self.a.symbols.symbol(symbol).ty;
 		for step in self.place_steps(place) {
 			ty = match step {
-				Step::Field(name) => self
-					.s
-					.types
-					.fields_of(ty)
-					.iter()
-					.find(|field| field.name == name)
-					.map(|field| field.ty)?,
+				Step::Field(name) => match self.s.types.kind(ty) {
+					TypeKind::Sync(crate::types::SyncKind::Guard, item)
+						if self.s.types.syms.resolve(name) == "value" =>
+					{
+						item
+					}
+					_ => self
+						.s
+						.types
+						.fields_of(ty)
+						.iter()
+						.find(|field| field.name == name)
+						.map(|field| field.ty)?,
+				},
 				Step::Length | Step::Size | Step::Capacity => TypeId::INTEGER,
 				Step::Payload(member) => member,
 				Step::Index(_) | Step::All | Step::Range(..) | Step::Child | Step::Characters => {

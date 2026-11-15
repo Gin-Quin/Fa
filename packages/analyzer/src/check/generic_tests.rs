@@ -111,6 +111,51 @@ fn generic_functions_as_values() {
 }
 
 #[test]
+fn phantom_and_value_generic_function_aliases_need_annotations() {
+	for declaration in [
+		"function source = <Phantom>(value: Integer): Integer => value\n",
+		"function source = <text: String>(): String => text\n",
+	] {
+		assert_eq!(
+			codes(&format!("{declaration}let alias = source\n")),
+			["GN015"]
+		);
+		assert_eq!(
+			codes(&format!("{declaration}let alias = (source)\n")),
+			["GN015"]
+		);
+	}
+	analyzed(
+		"function source = <text: String>(): String => text\ntype Label = <text: String>() => String\nlet alias: Label = source\nlet text = alias<\"word\">()\n",
+	);
+}
+
+#[test]
+fn generic_function_types_keep_value_parameter_kinds_and_constraints() {
+	analyzed(
+		"type Label = <text: String>() => String\nfunction source = <text: String>(): String => text\nfunction useLabel = (label: Label): String => label<\"word\">()\nlet word = useLabel(source)\n",
+	);
+	assert_eq!(
+		codes(
+			"type TypeArgument = <Item>() => Integer\nfunction source = <item: Integer>(): Integer => item\nlet alias: TypeArgument = source\n"
+		),
+		["E-GEN-1"]
+	);
+	assert_eq!(
+		codes(
+			"type ValueArgument = <item: Integer>() => Integer\nfunction source = <Item>(): Integer => 1\nlet alias: ValueArgument = source\n"
+		),
+		["E-GEN-1"]
+	);
+	assert_eq!(
+		codes(
+			"type Label = <text: String>() => String\nfunction source = <text: \"fixed\">(): String => text\nlet alias: Label = source\n"
+		),
+		["E-GEN-1"]
+	);
+}
+
+#[test]
 fn array_methods() {
 	let (session, file) = analyzed(
 		"mutable users = [\"Ana\"]\nusers.push(\"Bao\")\nusers.insert(0, \"Cleo\")\nlet last = users.pop()\nlet numbers = [1, 2, 3]\nlet doubled = numbers.map((x) => x * 2)\nlet labels = numbers.map((x, index) => \"{index}\")\nlet evens = numbers.filter((x) => x %% 2 == 0)\nlet total = numbers.reduce((sum, x) => sum + x, 0)\nlet big = numbers.find((x) => x > 1)\nlet sorted = numbers.sort()\nlet sum = numbers.sum()\nlet where = numbers.indexOf(2)\n",

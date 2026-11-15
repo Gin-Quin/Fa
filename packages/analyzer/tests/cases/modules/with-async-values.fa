@@ -1,0 +1,16 @@
+-- require-split: true
+-- A residual forall carries both async entries through unit instance waves.
+-- file: library/make.fa
+use { sleep } = std.time
+export function = (prefix: String) => do {
+	async function render = <Value>(value: Value, delay: Integer): String => {
+		await sleep(delay)
+		"{prefix}:{value}"
+	}
+	render with (delay = 1)
+}
+-- file: application/main.fa
+export async function = () => {
+	let render = library.make("imported")
+	console.log(await render(7), await render("ok")) -- prints: imported:7 imported:ok
+}

@@ -1,3 +1,217 @@
+## Current analyzer-partial checkpoint (2026-11-07, supersedes old notes below)
+
+- Final ownership policy: Resource/destroy and Task are unique/noncopyable;
+  Resource parameters borrow, even when containing Task. Task-consuming ABI
+  stops at Resource/Sync. Collections need explicit copy unless a proved move.
+  Escaping captures cannot own any unique value. Root owns JS/native unique
+  Resource/AOT integration; do not restore the abandoned Resource-RC prototype.
+- VM factories now retain semantic instances (exact type/value bindings and
+  selected written methods), including forwarding forall functions, executing
+  constraint methods, and returning a closed forall. API/snapshot:
+  /tmp/fa-vm-function-instances.patch and /tmp/fa-vm-function-instances-checkpoint.
+  Analyzer439+cases/corpus/pipeline/docs, clippy,2fixtures x3LLVM were green.
+- Retained defaults of with are implemented: portable SignatureNames/defaults,
+  Function origin/constant intrinsic defaults, named omissions, generic explicit
+  applications, a separate native default entry in a counted adapter, default
+  flags for source lambdas, and split generic producer role/cache separation.
+  Ten with fixtures pass3LLVM with leak-check, including imported factory
+  defaults, outer generic value binders and Resource default cancellation.
+  Source Function.captures is the one capture order; preserve bindings/methods.
+- The fresh child of an async Partial is created before its own first suspend;
+  cancellation guards drop that child before its borrowed parameters/env. This
+  preserves the EXISTING native source-function default timing.
+- OPEN language-order question sent to Root: Native source start evaluates
+  parameter defaults immediately; JS source start waits for its first turn.
+  The docs specify arguments now/body later, but not default binding explicitly.
+  Do not change JS globally until answered. Repro saved outside corpus at
+  /tmp/fa-with-start-default-timing.fa. Corpus tests independent of this choice
+  cover actual default values and cancellation after the child has started.
+- Native indirect Function ABI now borrows aggregates independently of program
+  async mode; forwarding thunks adapt raw source entries. Partial/await/start
+  preserve changed argument places. Lambda parameter effects are kept (captured
+  effects were already separated), and Function effects use covering paths.
+  Analyzer441+cases/corpus/pipeline/docs,11 with fixtures x3LLVM, and clippy are
+  green. Checkpoint: /tmp/fa-function-value-abi-checkpoint; sequential delta
+  /tmp/fa-function-value-abi.patch after the defaults checkpoint.
+- Concrete native Function coercions are compiled adapters with counted envs,
+  argument/result conversion, structural mutation writeback on return/error/
+  cancellation and requirements forwarded by key. Async wrappers keep input/env
+  owners until real invocation. On wasm only an async source signature may use
+  the low-bit DATA-table tag; synchronous function-table indices can be odd.
+- Native results transfer retained fields and destroy excluded fields using
+  Root's owned_projections module (copied here, with the old Object-Resource
+  representation gate only). Function children are marked fresh before convert.
+  Local/global field names compare by text in same_layout and projections;
+  otherwise a representation-only conversion could copy and double-free a Task.
+  Non-generic destroy lookup also matches the globalized declared type.
+  Root's final Task-parameter predicate is used (Resource params borrow), and
+  proofs' pending_box-in-Frame fix is coalesced. Preserve Root ResourceDrop ABI.
+- Validation: analyzer442+cases/corpus/pipeline/docs;47 LLVM checks;8 function-value
+  native programs (7+one historical platform skip on wasm/freestanding),11 with
+  and2 factories programs on all3 LLVM targets;clippy clean. New regressions cover
+  optional 128-bit inputs, captured callable owners, changed views, errors, async
+  lifts, Task/Resource carriers, dropped extras and Function-valued return fields.
+- Concrete JS numeric adapter is supplied only as a patch against proofs'
+  production: /tmp/fa-js-function-numeric-adapters.patch. It uses his compiled
+  templates, copies/adopts the target once, handles numeric optionals/async and
+  preserves non-numeric omission markers. Proofs will validate after his freeze;
+  it is NOT applied to this old minimal JS tree. Forall/structural deep adaptation
+  still needs the shared AOT operations; no runtime Fa schema walk is allowed.
+- Native generic-to-generic adapters now forward target-class requests to the
+  source class, preserving exact type/value arguments and method selections.
+  A counted adapter environment retains the original unboxed function pair;
+  each requested entry reuses the compiled concrete signature conversion.
+  Producer roles and source/target signatures survive per-unit instance waves.
+  Class instances compare exact arguments as well as representations/methods:
+  `label<"first">()` and `label<"second">()` must not share one String instance.
+  Generic function types now accept their documented compile-time value binders,
+  with type/value kind and constraint checks. Unannotated declaration aliases
+  still report GN015, including phantom parameters absent from runtime types.
+- Validation of that delta: analyzer444+cases/corpus/pipeline/docs, clippy
+  workspace clean, and both forall conversion fixtures pass all3 LLVM targets
+  with leak checking (one also requires compilation by units). The cases cover
+  numeric arguments, fewer errors, async conversions/lifts, captured callables,
+  same-layout Person/Greeting methods, phantom types and distinct String values.
+  Sequential patch after the concrete checkpoint:
+  /tmp/fa-generic-function-adapters.patch; snapshot of the same name.
+- Native object conversions now check child representations coinductively before
+  reusing an LLVM layout. Equal-size Function pairs can require different call
+  entries; skipping their adapters trapped in wasm or ran a lifted body eagerly.
+  Deep object fields now retain numeric/error/async conversions and owned envs.
+- The documented return-to-Void rule is implemented in Function assignability:
+  any source result is accepted and dropped. Native counted adapters already
+  drop returned Resource/Task/string values on sync and async paths; regressions
+  also cover forall values and a converted Function field. Analyzer445 complete,
+ 47 LLVM checks, both new fixtures on3 targets with leak checks, clippy clean.
+  Delta: /tmp/fa-function-deep-void.patch after the generic checkpoint.
+  JS consumer-only follow-up /tmp/fa-js-function-void-adapters.patch is supplied
+  sequentially after the numeric adapter; proofs validates it in production.
+- Function aliases now materialize their named values as owned computed locals,
+  consume JS expression temporaries, and register their escaping capture copies.
+  Their complete generic contract is retained, including phantom value binders;
+  statically known calls still keep Source FnInfo's defaults/callback instances.
+  Targeted analyzer regression and named alias/captures/defaults/Mutex/value-binder
+  fixture on3LLVM/leak are green. Full analyzer/clippy of this new alias delta
+  is still required before final integration (prior445/clippy preceded it).
+- Function types accept complete `mutates`/`invalidates` paths and `requires`.
+  They declare parameters/requirements in their own scope and reuse the body's
+  path validation/normalization. Requirement assignment compares keys by type,
+  independently of their local names. Type-only parameters have no unused-value
+  warning. The adversarial req-06 case is active again and checks missing provide.
+  Analyzer447 full, JS crate full, Bun fixture,3LLVM fixture/leaks and clippy are
+  green; this also validates the preceding alias delta. The golden check-bits.fa
+  has the same explicit `copy items` migration already present on Root.
+  Delta /tmp/fa-function-type-clauses.patch follows the alias checkpoint.
+- Plain module-level aliases now forward to their source function instead of
+  reading an uninitialized computed slot when used before their declaration.
+  Aliases of runtime `let` values or callback parameters report FN110; named
+  functions with runtime DATA captures and checked compositions/with values keep
+  their lexical owners. Constant factory aliases retain the cached VM function.
+  Native imported functions materialize ordinary or forall values, including
+  declaration defaults and per-unit generic producer/default tables.
+  Analyzer448 full, JS crate full, early alias Bun probe, two alias fixtures on
+  all3LLVM/leak, and workspace clippy are green. Sequential delta:
+  /tmp/fa-function-alias-hoisting.patch after function-type-clauses.
+- OPEN before final full/integration: JS erased F:(UInt32)=>UInt128 needs a
+  static call capability when concrete F
+  actually accepts UInt128/returns UInt32; concrete numeric adapters alone do not
+  cover that generic constraint. Also audit deep structural Function fields.
+  Field/index effects/requires and native returns-as-Void are validated above;
+  JS adapters still need the production-template consumer and its full run.
+- OPEN language questions sent to Root (still errored at this checkpoint):
+  (1) start/default timing above; (2) adapting Resource-with-Array returns to
+  Plain-with-Array would need a structural copy before destroy can observe its
+  fields: restriction vs implicit copy contract; (3) direct throw in do/catch:
+  analyzer ignores catch, both backends use it, errors.md says throw exits the
+  function like return. Repro /tmp/fa-split-do-catch-repro/main.fa. No guessed
+  semantic edit was made. Local methods capturing DATA also need constructor
+  provenance/environment transport (Projection::Method like Finalizer), no new
+  language prohibition; coordinated with proofs.
+- Pending after these: constant-composition factories/finite-depth reifier,
+  union written-origin joins, deferred generic keyloop effect signatures,
+  documented rules/Schema/native nominal cases, destruction effect summaries,
+  and measured analyzer pass fusion. No final fullLLVM/commit yet; coalesce
+  Root AOT/TypeInfo/Resource and proofs wire/Function templates before full.
+
+## with implementation active (analyzer-partial, 2026-11-07)
+
+- This separate tree starts at compiler aa3e050 (ecda origins + root proofs +
+  interpreter heap continuations). It does NOT include unintegrated root
+  Copy/TypeInfo/AOT/Resource/Function-env WIP. Keep its target separate.
+- Uncommitted frontend: PartialApplication side table; FN100..104, FN072;
+  captures checked and bound parameters inferred, other generics retained;
+  residual effects/positions remapped. Direct function declarations accept with.
+- SignatureNames is portable metadata, not part of FnSig identity. References
+  by DeclKey keep recursive named types finite. The module interface publishes,
+  hashes (tag109) and merges these names. with uses visible annotations, including
+  function parameters/fields/imported aliases. 5 targeted tests pass, including
+  partially fixed generics and structural equality with differently named params.
+- Expr::Partial is flattened to Op::Partial and uses Gather/Finish in the VM;
+  no Rust evaluation recursion. Closure.bound already existed. Three interpreter
+  tests cover evaluation once/in source order, defaults seeing bound parameters,
+  and binding residual positions in another with. Analyzer lower/read_symbol
+  handles with and local declared aliases. comptime::visit handles its children.
+- Full analyzer+interpreter green after migrating obsolete walk_tests AN001
+  expectation to the three actual unresolved names. Log:
+  /tmp/fa-partial-frontend-interpreter-recovery.log (session70616).
+- Do not remove co-9..12 pending until all backends work. Named/default calls of
+  declared partials, constant factory FN110, original generic order/capabilities,
+  imported/native split declarations, async forwarding, and copy-core/provenance
+  integration remain open. Index-in-effect bindings currently conservatively All;
+  precise constant indices can be retained later.
+- Root specifically requires NoTask on bound values even generic/fresh, no FnOnce.
+  Copy/move collection policy must be applied after copy-core rebase; note_copy_site
+  alone would wrongly use Task parameter consumption. Add portable Partial origin
+  (callee + bound values + residual argument mapping) for copy/CONC008 summaries.
+- JS MUST use the existing counted Function protocol. Proofs says:
+  faOwnShared(fn, finalizer) returns a count1 function; copy Function retains;
+  register_function_temporary(site, value) once; values via copy_stored; static
+  finalizer calls storage_drop_function(ty), function target faReleaseShared.
+  aa3e050 lacks these hooks/flags/scope drops; do not invent a parallel protocol.
+  Proofs/root will extract a coalesced FnEnv delta after validation. VM/native can
+  proceed independently until then.
+- Native design: closure env {drop ptr, copy ptr, refs:i64, target Function pair,
+  bound values}. First two fields preserve existing Function dispatcher ABI.
+  Refcount header is the same as proofs normal closures. Body forwards residual
+  ABI arguments and borrows env fields for bound composites; mutated bound params
+  are rejected. Generic partial values should reuse generic_values tables with a
+  ProducerKind::Partial (lambda=true in split serialization; detect Partial AST
+  at define_generic_entry). Original target can itself be a generic function
+  table; wrapper entry selects its full original type arguments, combining fixed
+  and residual ones. Avoid losing original forall binders to residual binding
+  maps (temporarily exclude original binder ids when concretizing its class).
+  Producer keys and helper names must include exact types/method selections,
+  not only Repr, including phantom outer bindings.
+- Native monomorphic and residual-forall with are now implemented. Common
+  review/with-runtime.fa and with-generic.fa pass on native/freestanding/wasm,
+  including captured prefix, fresh array, runtime snapshot and two types of one
+  residual forall. Source FnInfo.captures replaces the old scanner and generic
+  declarations with captures now materialize a real environment. Constructing
+  a forall residual must not automatically instantiate that new value using
+  the target's full instantiation list (currently its list is removed from a).
+- Proofs' /tmp/fa-function-rc-native.patch and /tmp/fa-function-rc-js.patch are
+  applied (all3 runtime IR regenerated), plus task lifetime runtime delta
+  /tmp/fa-function-task-lifetime-analyzer.patch. Keep root/proofs coalescence;
+  the JS minimal bridge uses local contains_function_value/faDropFunctions and
+  must coalesce to root AOT/contains_shared_handle instead of publishing a second
+  runtime graph walker. JS with uses faOwnShared, staged capture guards,
+  register_function_temporary, copy_stored and storage_drop_function.
+  Bun CLI printing tests 5/5 green with the two common fixtures;3 LLVM targets
+  repassed after the Function RC change (/tmp/fa-partial-native-function-rc.log).
+- Names/bound-parameter metadata just extended for named residual-declaration
+  calls and FN102 on binding again through chained with. cargo check analyzer
+  green; new tests and named/chained runtime additions await the end of root's
+  CPU window. SignatureNames.Function.bound=Some(..) distinguishes partials;
+  merge/hash remap names. Defaults not yet implemented in this metadata.
+- OPEN with work: retained defaults (FnSig deliberately has no default flags;
+  need a secondary default-aware entry/portable visible contract, preserving
+  ordinary first-class Function ABI), true async native wrapper retaining env
+  before initial suspension (proofs supplies runtime/RC helpers; current partial
+  calls target sync), compiletime factory binding FN110 and emitted constant
+  closures, imported/split partial declarations, requires forwarding, callback
+  error specializations, explicit Copy/capture/provenance/TypeInfo integration.
+  Do not remove co-9..12 pending or claim the whole with feature complete yet.
+
 # Compiler completion in progress (2026-11-07)
 
 Integration: branch `compiler`, worktree `.claude/worktrees/lead`. The main checkout

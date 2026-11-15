@@ -204,6 +204,66 @@ fn a_block_without_return_type_drops_its_last_value() {
 }
 
 #[test]
+fn void_function_contracts_accept_and_discard_any_result() {
+	assert_clean(
+		"function number = (): Integer => 1\nlet discard: () => Void = number\ndiscard()\nfunction invoke = (action: () => Void) => { action() }\ninvoke(number)\ninvoke(() => \"ignored\")\n",
+	);
+	assert_clean(
+		"type Identity = <Item>(value: Item) => Void\nfunction identity = <Item>(value: Item): Item => value\nlet discard: Identity = identity\ndiscard(1)\ndiscard(\"word\")\n",
+	);
+	assert_eq!(
+		codes("function nothing = () => {}\nlet needsValue: () => Integer = nothing\n"),
+		["E-TYPE-1"]
+	);
+}
+
+#[test]
+fn function_aliases_store_their_captures_and_generic_contracts() {
+	assert_clean(
+		"function identity = <Item>(value: Item): Item => value\nfunction alias = identity\nlet number = alias(1)\nlet word = alias<String>(\"word\")\n",
+	);
+	assert_clean(
+		"function label = <text: String>(): String => text\nfunction alias = label\nlet text = alias<\"word\">()\n",
+	);
+	let source = "type Lease = { id: Integer, function destroy = (self) => console.log(self.id) }\nfunction make = (lease: Lease) => do { function read = () => lease.id\nfunction alias = read\nalias }\n";
+	let mut session = Session::new();
+	let file = session.set_source("main.foreign", std::sync::Arc::from(source));
+	session.analyze_file(file);
+	let diagnostics = session.diagnostics(file);
+	assert!(
+		diagnostics
+			.iter()
+			.any(|diagnostic| diagnostic.code.id == "MEM003"),
+		"{diagnostics:?}"
+	);
+}
+
+#[test]
+fn unknown_function_aliases_need_let() {
+	assert_eq!(
+		codes(
+			"function invalid = (callback: () => Integer) => do { function alias = callback\nalias }\n"
+		),
+		["FN110"]
+	);
+	assert_clean(
+		"function source = () => 7\nfunction invoke = (callback: () => Integer): Integer => callback()\nlet result = invoke(alias)\nfunction alias = source\n",
+	);
+	assert_eq!(
+		codes(
+			"function make = (value: Integer) => (other: Integer) => value + other\nlet original = make(3)\nfunction alias = original\n"
+		),
+		["FN110"]
+	);
+	assert_clean(
+		"function make = (value: Integer) => (other: Integer) => value + other\nfunction original = make(3)\nfunction alias = original\nlet value = alias(4)\n",
+	);
+	assert_clean(
+		"namespace helpers = { function original = () => 7 }\nuse { original } = helpers\nfunction alias = original\nlet value = alias()\n",
+	);
+}
+
+#[test]
 fn return_statements() {
 	assert_clean("function f = (x: Integer): Integer => {\n\treturn x\n}\n");
 	assert_eq!(

@@ -99,6 +99,7 @@ pub(crate) enum Op {
 	Global(GlobalKey),
 	Function(FnKey),
 	Closure(FnKey, Vec<Slot>),
+	Partial(FnKey, Node, Vec<(usize, Node)>),
 	Let(Slot, Node),
 	Assign(Place, Node),
 	Read(Place),
@@ -133,6 +134,7 @@ pub(crate) enum Op {
 	Fallback(Node, Node),
 	Is(Node, TypeTest, bool),
 	IsIn(Node, Node, bool),
+	Instantiate(Node, FnKey),
 	Call(Node, Vec<Argument>),
 	CallFunction(FnKey, Vec<Argument>),
 	Builtin(&'static str, Vec<Node>),
@@ -223,6 +225,18 @@ impl<'a> Builder<'a> {
 				ir::Expr::Closure { function, captures } => {
 					Op::Closure(*function, captures.clone())
 				}
+				ir::Expr::Partial {
+					site,
+					function,
+					bound,
+				} => Op::Partial(
+					*site,
+					self.add(function),
+					bound
+						.iter()
+						.map(|(index, value)| (*index, self.add(value)))
+						.collect(),
+				),
 				ir::Expr::Let(slot, value) => Op::Let(*slot, self.add(value)),
 				ir::Expr::Assign(place, value) => Op::Assign(self.place(place), self.add(value)),
 				ir::Expr::Read(place) => Op::Read(self.place(place)),
@@ -283,6 +297,9 @@ impl<'a> Builder<'a> {
 				}
 				ir::Expr::IsIn(value, collection, negated) => {
 					Op::IsIn(self.add(value), self.add(collection), *negated)
+				}
+				ir::Expr::Instantiate(value, application) => {
+					Op::Instantiate(self.add(value), *application)
 				}
 				ir::Expr::Call(callee, arguments) => {
 					Op::Call(self.add(callee), self.arguments(arguments))

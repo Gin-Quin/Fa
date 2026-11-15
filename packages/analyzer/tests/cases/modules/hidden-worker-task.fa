@@ -1,0 +1,26 @@
+-- analysis-target: native
+-- file: Plain.worker.fa
+export type = {
+	function number = (self): Integer => 1
+}
+-- file: makeReader.fa
+use { Mutex } = std.concurrency
+type Action = () => Integer
+export function = (gate: Mutex<Task<Integer>>): Action => {
+	return () => if gate.tryLock() != none { 1 } else { 0 }
+}
+-- file: main.fa
+use { Mutex, WorkerPool } = std.concurrency
+type Action = () => Integer
+async function main = () => {
+	let pending = start do { 1 }
+	mutable gate = Mutex<Task<Integer>> { value = pending }
+	let made = makeReader(gate)
+	let stored = { action = made }
+	let annotated: Action = stored.action
+	mutable pool = WorkerPool<Plain> { count = 1 }
+	let work = await pool.submit((_worker) => annotated()) -- error CONC008
+	await work
+	pool.shutdown()
+}
+await main()

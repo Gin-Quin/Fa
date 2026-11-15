@@ -55,9 +55,16 @@ impl Walker<'_> {
 		&mut self,
 		requires: NodeList<'_>,
 	) -> Vec<(Requirement, SymbolId)> {
+		self.declare_requirement_nodes(requires.iter())
+	}
+
+	pub(crate) fn declare_requirement_nodes(
+		&mut self,
+		requires: impl Iterator<Item = NodeId>,
+	) -> Vec<(Requirement, SymbolId)> {
 		let tree = Arc::clone(&self.tree);
 		let mut found: Vec<(Requirement, NodeId, NodeId)> = Vec::new();
-		for node in requires.iter() {
+		for node in requires {
 			let View::Assignment {
 				target,
 				annotation: Some(annotation),

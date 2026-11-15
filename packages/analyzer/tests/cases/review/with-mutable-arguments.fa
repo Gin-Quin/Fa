@@ -1,0 +1,36 @@
+use { sleep } = std.time
+
+type Point = { value: Integer }
+type Change = (point: Point) => Void mutates point
+
+function add = (point: Point, amount: Integer) mutates point.value => {
+	point.value += amount
+}
+function fixed = add with (amount = 3)
+mutable point = Point { value = 4 }
+fixed(point)
+console.log(point.value) -- prints: 7
+
+let change: Change = fixed
+change(point)
+console.log(point.value) -- prints: 10
+function apply = (point: Point, change: Change) mutates point => { change(point) }
+apply(point, (point) => { point.value += 2 })
+console.log(point.value) -- prints: 12
+
+async function delayed = (point: Point, amount: Integer) mutates point.value => {
+	await sleep(1)
+	point.value += amount
+}
+let later = delayed with (amount = 5)
+await later(point)
+console.log(point.value) -- prints: 17
+let task = start later(point)
+await task
+console.log(point.value) -- prints: 22
+
+type Read = (point: Point) => Integer
+function reader: Read = (point) => point.value
+console.log(reader(point)) -- prints: 22
+let values = [Point { value = 8 }, Point { value = 9 }]
+console.log(values.map((value) => value.value)) -- prints: [8, 9]

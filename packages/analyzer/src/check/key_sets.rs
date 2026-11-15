@@ -511,7 +511,11 @@ impl Walker<'_> {
 					.insert(pattern, (key.clone(), subject.map(|(ty, _, _)| ty)));
 			}
 			let output = self.output.len();
-			let buffered = self.body.flow_buffers.last().map_or(0, Vec::len);
+			let buffered = self
+				.body
+				.flow_buffers
+				.last()
+				.map_or(0, |buffer| buffer.diagnostics.len());
 			self.check_for_items(n, pattern, index, (iterable, TypeId::STRING), body);
 			// the errors of this key name it (and the application)
 			let note = subject.and_then(|(_, module, span)| {
@@ -532,9 +536,9 @@ impl Walker<'_> {
 			});
 			let mut produced: Vec<Diagnostic> = self.output.split_off(output);
 			if let Some(buffer) = self.body.flow_buffers.last_mut()
-				&& buffer.len() > buffered
+				&& buffer.diagnostics.len() > buffered
 			{
-				produced.extend(buffer.split_off(buffered));
+				produced.extend(buffer.diagnostics.split_off(buffered));
 			}
 			for mut diagnostic in produced {
 				let identity = (
@@ -593,16 +597,22 @@ impl Walker<'_> {
 			self.a.arith.remove(&node);
 			self.a.intervals.remove(&node);
 			self.a.instantiations.remove(&node);
+			self.a.instantiation_parameters.remove(&node);
 			self.a.instantiated_methods.remove(&node);
 			self.a.instantiation_origins.remove(&node);
 			self.a.written_types.remove(&node);
 			self.a.method_instantiations.remove(&node);
 			self.a.callback_types.remove(&node);
 			self.a.calls.remove(&node);
+			self.a.function_defaults.remove(&node);
+			self.a.partial_applications.remove(&node);
+			self.named_signatures.remove(&node);
 			self.a.objects.remove(&node);
 			self.a.patterns.remove(&node);
 			self.a.key_reads.remove(&node);
 			self.a.moved_reads.remove(&node);
+			self.a.task_arguments.remove(&node);
+			self.a.owned_projections.remove(&node);
 			self.a.constants.remove(&node);
 			self.a.comptime_branches.remove(&node);
 			self.a.unrolled.remove(&node);

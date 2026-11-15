@@ -7,6 +7,7 @@
 //! A [`ProofFile`] is one analyzed file; a [`Prover`] establishes a
 //! [`Goal`] for the values of its [`Claim`] places, a greatest fixpoint.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use fa_parser::TypedSyntaxTree;
@@ -79,9 +80,9 @@ pub struct ProofFile<'a> {
 	pub(crate) analysis: &'a Analysis,
 	types: &'a TypeStore,
 	/// The parent of every node (`usize::MAX` for the root).
-	pub(crate) parents: Vec<usize>,
+	pub(crate) parents: Cow<'a, [usize]>,
 	/// The locals that a reference designates a part of.
-	referenced: FxHashSet<SymbolId>,
+	referenced: &'a FxHashSet<SymbolId>,
 	/// The file's module, naming its own places in the facts.
 	module: String,
 	/// Whether values may come from outside the program (see [`OPAQUE`]).
@@ -90,45 +91,30 @@ pub struct ProofFile<'a> {
 
 impl<'a> ProofFile<'a> {
 	pub fn new(tree: &'a TypedSyntaxTree, analysis: &'a Analysis, types: &'a TypeStore) -> Self {
-		let mut parents = vec![usize::MAX; tree.nodes.len()];
-		for (index, node) in tree.nodes.iter().enumerate() {
-			node.for_each_child(|child| {
-				if child < parents.len() {
-					parents[child] = index;
-				}
-			});
-		}
 		let mut file = ProofFile {
 			tree,
 			analysis,
 			types,
-			parents,
-			referenced: FxHashSet::default(),
+			parents: if analysis.parent_edges.len() == tree.nodes.len() {
+				Cow::Borrowed(analysis.parent_edges.as_slice())
+			} else {
+				// Public callers can also supply a partial analysis.
+				let mut parents = vec![usize::MAX; tree.nodes.len()];
+				for (index, node) in tree.nodes.iter().enumerate() {
+					node.for_each_child(|child| {
+						if let Some(parent) = parents.get_mut(child) {
+							*parent = index;
+						}
+					});
+				}
+				Cow::Owned(parents)
+			},
+			referenced: &analysis.reference_sources,
 			module: String::new(),
 			opaque: false,
 		};
 		file.opaque = file.compute_opaque();
-		// the locals below the value of a `use`, `reuse` or `provide`
-		for index in 0..tree.nodes.len() {
-			let value = match file.view(NodeId::new(index)) {
-				View::Use { value, .. }
-				| View::Reuse { value, .. }
-				| View::Provide { value, .. } => value,
-				_ => continue,
-			};
-			let mut current = value;
-			loop {
-				current = match file.view(current) {
-					View::Group(inner) => inner,
-					View::Access { target, .. } | View::Index { target, .. } => target,
-					View::Call { callee, .. } => callee,
-					_ => break,
-				};
-			}
-			if let Resolution::Local(symbol) = analysis.resolution(current) {
-				file.referenced.insert(symbol);
-			}
-		}
+
 		file
 	}
 
@@ -212,9 +198,9 @@ impl<'a> ProofFile<'a> {
 		if !self.analysis.key_loop_bodies.is_empty() {
 			return true;
 		}
-		let builds = (0..self.tree.nodes.len()).any(|at| {
-			matches!(self.analysis.call(NodeId::new(at)).map(|info| info.callee),
-				Some(Callee::Builtin(id))
+		let builds = self.analysis.calls.values().any(|info| {
+			matches!(info.callee,
+				Callee::Builtin(id)
 					if matches!(crate::builtins::get(id).path, "Json.parse" | "Pointer#read"))
 		});
 		// C code writing a value that isn't a lone integer (a local's own
@@ -319,7 +305,7 @@ impl<'a> ProofFile<'a> {
 	}
 
 	fn referenced_locals(&self) -> &FxHashSet<SymbolId> {
-		&self.referenced
+		self.referenced
 	}
 
 	/// The positions of the parameters a function type changes (`mutates`,

@@ -9,12 +9,12 @@ use ethnum::I256;
 
 use crate::analysis::NodeFlags;
 use crate::builtins;
-use crate::check::Walker;
+use crate::check::{FnCx, Walker};
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::types::{CL020, FN028, TY003, TY007, TY008, TY040};
 use crate::diagnostics::codes::values::{E_DECL_9, E_NUM_13};
 use crate::ids::{NodeId, TypeId};
-use crate::symbols::{Resolution, SymbolKind};
+use crate::symbols::{DeclState, Resolution, ScopeKind, SymbolKind};
 use crate::syntax::{self, Name, NodeList, SignatureView, View};
 use crate::types::{CollKind, FnSig, IntType, ParamSig, TypeFlags, TypeKind};
 
@@ -500,16 +500,23 @@ impl Walker<'_> {
 		signature: SignatureView<'_>,
 		body: NodeId,
 	) -> TypeId {
-		// `<T>(value: T) => T`: a generic function type, whose parameters are
-		// declared in a scope of its own
-		if !signature.generics.is_empty() {
-			let saved = self.body.scope;
+		let saved = self.body.scope;
+		let generics = if signature.generics.is_empty() {
+			self.body.scope = self
+				.a
+				.symbols
+				.scope_for(n, Some(saved), ScopeKind::Function);
+			Vec::new()
+		} else {
 			let generics = self.declare_generics(n, "this function type", signature.generics);
-			let ty = self.function_type_expr_with(n, signature, body, &generics);
-			self.body.scope = saved;
-			return ty;
-		}
-		self.function_type_expr_with(n, signature, body, &[])
+			self.a
+				.symbols
+				.scope_for(n, Some(saved), ScopeKind::Function);
+			generics
+		};
+		let ty = self.function_type_expr_with(n, signature, body, &generics);
+		self.body.scope = saved;
+		ty
 	}
 
 	/// A function type whose generic parameters (if any) are declared.
@@ -520,18 +527,13 @@ impl Walker<'_> {
 		body: NodeId,
 		generics: &[crate::ids::ParamId],
 	) -> TypeId {
-		if generics
-			.iter()
-			.any(|&param| self.s.types.param(param).value)
-		{
-			return self.unsupported(n, "a compile-time value parameter of a function type");
-		}
 		let tree = Arc::clone(&self.tree);
-		// `(…) => R throws E mutates p`: the clauses wrap the return type
+		// Clauses written after the arrow wrap its return type in the AST.
 		let mut body = body;
 		let mut written_throws = signature.throws;
-		let mut mutated_names: Vec<NodeId> = Vec::new();
-		let mut unsupported_clause = false;
+		let mut mutated: Vec<_> = signature.mutates.iter().collect();
+		let mut invalidated: Vec<_> = signature.invalidates.iter().collect();
+		let mut required: Vec<_> = signature.requires.iter().collect();
 		loop {
 			match syntax::view(&tree, body) {
 				View::Throws { signature, errors } => {
@@ -540,40 +542,44 @@ impl Walker<'_> {
 				}
 				View::Effect {
 					signature,
-					kind: fa_parser::nodes::EffectKind::Mutates,
+					kind,
 					paths,
 				} => {
-					for path in paths.iter() {
-						match syntax::view(&tree, path) {
-							View::Name(_) => mutated_names.push(path),
-							_ => unsupported_clause = true,
+					match kind {
+						fa_parser::nodes::EffectKind::Mutates => mutated.extend(paths.iter()),
+						fa_parser::nodes::EffectKind::Invalidates => {
+							invalidated.extend(paths.iter())
 						}
 					}
 					body = signature;
 				}
-				View::Effect { signature, .. } | View::Requires { signature, .. } => {
-					unsupported_clause = true;
+				View::Requires {
+					signature,
+					requirements,
+				} => {
+					required.extend(requirements.iter());
 					body = signature;
 				}
 				_ => break,
 			}
 		}
-		let mut param_names: Vec<Option<&str>> = Vec::with_capacity(signature.parameters.len());
 		let mut params = Vec::with_capacity(signature.parameters.len());
 		for (index, parameter) in signature.parameters.iter().enumerate() {
 			self.set_flag(parameter, NodeFlags::TYPE_EXPR);
 			// `(self) => String`: a method required by a structural type; the
 			// type is the method without its receiver (FieldFlags::METHOD)
 			if index == 0 && is_self_parameter(&tree, parameter) {
+				if let View::Name(name) = syntax::view(&tree, parameter) {
+					let ty = self
+						.self_type(self.body.scope)
+						.map_or(TypeId::UNKNOWN, |(ty, _)| ty);
+					let symbol = self.declare(parameter, name, SymbolKind::SelfParameter);
+					let entry = self.a.symbols.symbol_mut(symbol);
+					entry.ty = ty;
+					entry.state = DeclState::Done;
+				}
 				continue;
 			}
-			param_names.push(match syntax::view(&tree, parameter) {
-				View::Assignment { target, .. } => match syntax::view(&tree, target) {
-					View::Name(name) => Some(tree.name(name)),
-					_ => None,
-				},
-				_ => None,
-			});
 			let (variadic, ty) = match syntax::view(&tree, parameter) {
 				View::Assignment {
 					target,
@@ -595,30 +601,41 @@ impl Walker<'_> {
 				});
 			}
 			let ty = if variadic { self.s.types.array(ty) } else { ty };
+			if let View::Assignment { target, .. } = syntax::view(&tree, parameter) {
+				let target = match syntax::view(&tree, target) {
+					View::Spread(inner) => inner,
+					_ => target,
+				};
+				if let View::Name(name) = syntax::view(&tree, target) {
+					let symbol = self.declare(
+						parameter,
+						name,
+						SymbolKind::Parameter {
+							index: params.len() as u16,
+						},
+					);
+					let entry = self.a.symbols.symbol_mut(symbol);
+					entry.ty = ty;
+					entry.state = DeclState::Done;
+					self.set_resolution(target, Resolution::Local(symbol));
+					self.set_type(target, ty);
+					self.set_flag(target, NodeFlags::TYPE_EXPR);
+				}
+			}
 			params.push(ParamSig { ty, variadic });
 		}
 		let ret = self.check_type_expr(body);
 		let throws = written_throws.map_or(TypeId::NEVER, |errors| self.check_type_expr(errors));
-		let unsupported = unsupported_clause
-			|| !signature.requires.is_empty()
-			|| !signature.mutates.is_empty()
-			|| !signature.invalidates.is_empty();
-		if unsupported {
-			return self.unsupported(n, "these effects in function types");
-		}
-		// `mutates p`: a whole parameter, by name (the writes of C functions)
-		let mut mutated = Vec::with_capacity(mutated_names.len());
-		for path in mutated_names {
-			let text = tree.text(path.index());
-			match param_names.iter().position(|name| *name == Some(text)) {
-				Some(index) => mutated.push(
-					self.s
-						.types
-						.path(crate::types::PathRoot::Param(index as u16), &[]),
-				),
-				None => return self.unsupported(path, "this path in a function type"),
-			}
-		}
+		let requirements: Vec<_> = self
+			.declare_requirement_nodes(required.into_iter())
+			.into_iter()
+			.map(|(requirement, _)| requirement)
+			.collect();
+		self.body
+			.functions
+			.push(FnCx::new(n, None, TypeId::VOID, self.body.scope));
+		let effects = self.declared_effect_paths(n, mutated.into_iter(), invalidated.into_iter());
+		self.body.functions.pop();
 		let generics: Vec<TypeId> = generics
 			.iter()
 			.map(|&param| self.s.types.intern(TypeKind::Param(param)))
@@ -626,12 +643,13 @@ impl Walker<'_> {
 		self.memo(n, |w| {
 			let base = w.s.types.simple_sig(&[], ret, throws);
 			let params = w.s.types.param_list(&params);
-			let effects = w.s.types.effect_set(&mutated, &[]);
+			let requires = w.s.types.req_list(&requirements);
 			let generics = w.s.types.list(&generics);
 			w.s.types.function(FnSig {
 				params,
 				is_async: signature.is_async,
 				effects,
+				requires,
 				generics,
 				..base
 			})

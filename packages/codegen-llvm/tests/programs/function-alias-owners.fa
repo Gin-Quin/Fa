@@ -1,0 +1,38 @@
+use { Mutex } = std.concurrency
+
+function invoke = (callback: () => Integer): Integer => callback()
+console.log(invoke(early)) -- prints: 41
+function original = () => 41
+function early = original
+
+type Label = (suffix: String) => String
+function make = (prefix: String): Label => {
+	function original = (suffix: String = "!"): String => prefix + suffix
+	function alias = original
+	console.log(alias())
+	alias
+}
+let retained = make("a long prefix retained with its named function alias")
+-- prints: a long prefix retained with its named function alias!
+console.log(retained("?")) -- prints: a long prefix retained with its named function alias?
+
+function identity = <Item>(value: Item): Item => value
+function same = identity
+console.log(same(7), same<String>("word")) -- prints: 7 word
+function label = <text: String>(): String => text
+function name = label
+console.log(name<"first">(), name<"second">()) -- prints: first second
+
+type Reader = () => Integer
+function reader = (initial: Integer): Reader => {
+	mutable cell = Mutex<Integer> { value = initial }
+	function original = (): Integer => {
+		let guard = cell.tryLock() ?? return -1
+		guard.value
+	}
+	function alias = original
+	console.log(alias())
+	alias
+}
+let read = reader(23) -- prints: 23
+console.log(read()) -- prints: 23

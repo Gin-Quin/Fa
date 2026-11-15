@@ -83,6 +83,16 @@ pub struct Closure {
 	pub captured: Vec<Value>,
 	/// Arguments given in advance (`f with (y = 0)`), by parameter index.
 	pub bound: Vec<(usize, Value)>,
+	/// The exact AOT `with` template and its evaluated inputs. Runtime
+	/// calls use `bound`; reification keeps this chain instead of guessing
+	/// a template from the flattened original function and its layout.
+	pub partials: Vec<PartialClosure>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PartialClosure {
+	pub site: crate::ir::FnKey,
+	pub arguments: Vec<Value>,
 }
 
 /// A compile-time value.

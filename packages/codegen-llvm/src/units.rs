@@ -53,7 +53,7 @@ unsafe extern "C" {
 /// compiler is never reused.
 const VERSION: &str = concat!(
 	env!("CARGO_PKG_VERSION"),
-	"-split-7-platform-1-effects-1-errors-1-regions-1"
+	"-split-7-platform-1-effects-1-errors-1-regions-1-defaults-1-value-abi-1-function-adapters-1-forall-adapters-1-deep-layout-1-alias-sources-1"
 );
 
 /// A file name made of a module path.
@@ -594,10 +594,21 @@ fn entry_object(
 		global.set_constant(true);
 		global.set_visibility(GlobalVisibility::Hidden);
 	}
-	for (symbol, entries) in &inputs.generic_tables.tables {
+	for (symbol, entries, asynchronous) in &inputs.generic_tables.tables {
 		let entries: Vec<inkwell::values::PointerValue<'_>> = entries
 			.iter()
 			.map(|entry| {
+				if *asynchronous {
+					let table = module.add_global(pointer.array_type(2), None, entry);
+					table.set_visibility(GlobalVisibility::Hidden);
+					table.set_alignment(16);
+					// SAFETY: the provider defines a two-pointer entry table.
+					return unsafe {
+						table
+							.as_pointer_value()
+							.const_gep(context.i8_type(), &[i64.const_int(1, false)])
+					};
+				}
 				declare(entry, void.fn_type(&[], false))
 					.as_global_value()
 					.as_pointer_value()
@@ -2041,7 +2052,9 @@ fn generic_tables(units: &[UnitOutput]) -> Result<GenericTables, Error> {
 			.values()
 			.map(|instance| producer.entry_symbol(instance))
 			.collect();
-		tables.tables.push((producer.table.clone(), entries));
+		tables
+			.tables
+			.push((producer.table.clone(), entries, producer.asynchronous));
 	}
 	Ok(tables)
 }

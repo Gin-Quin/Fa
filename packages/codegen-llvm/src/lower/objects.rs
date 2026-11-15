@@ -781,7 +781,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				FieldValue::Given(value) => self.early_box(repr, value)?,
 				_ => None,
 			};
-			let outer = self.pending_box.replace(early);
+			let outer = self.frame().pending_box.replace(early);
 			// a default of a generic type's field (`#items: Array<Item> = []`):
 			// under the literal's type arguments
 			let saved = match field {
@@ -814,7 +814,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.bindings.replace(saved);
 			}
 			// (a box of a pair lives in the arena: nothing to free)
-			if let Some((unused, _)) = self.pending_box.replace(outer)
+			if let Some((unused, _)) = self.frame().pending_box.replace(outer)
 				&& !paired.contains_key(&position)
 			{
 				let one = self.usize.const_int(1, false);

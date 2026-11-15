@@ -92,6 +92,9 @@ pub(crate) struct Tasks<'ctx> {
 	pub(crate) dev: bool,
 	/// The async instances, by the synchronous instance's function.
 	instances: FxHashMap<FunctionValue<'ctx>, AsyncInstance<'ctx>>,
+	/// Tagged function values and their two entries. Instance waves export
+	/// the table as data, retaining its tag when another unit links it.
+	value_entries: FxHashMap<PointerValue<'ctx>, (PointerValue<'ctx>, PointerValue<'ctx>)>,
 	/// The async instances to lower, by their synchronous function.
 	pending: Vec<FunctionValue<'ctx>>,
 	/// The async instance being lowered.
@@ -814,7 +817,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Whether a function declaration is `async`.
-	fn is_async_function(&self, function: &Function<'ctx>) -> bool {
+	pub(super) fn is_async_function(&self, function: &Function<'ctx>) -> bool {
 		function
 			.info
 			.sig
@@ -895,6 +898,50 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.lazy_suspend(coroutine.mode, |_| Ok(()))
 	}
 
+	/// Synthetic wrappers have no source-level parameter symbols. Their
+	/// arguments follow the same ownership protocol as an ordinary async
+	/// function: detached calls own the copied arguments, while unique
+	/// arguments are owned until transferred to the wrapped call.
+	pub(super) fn prepare_value_parameters(
+		&mut self,
+		parameters: &[(Val<'ctx>, bool)],
+	) -> Result<PointerValue<'ctx>, Error> {
+		let coroutine = self.coroutine().expect("an async wrapper");
+		let i32 = self.context.i32_type();
+		let owns = self
+			.builder
+			.build_and(coroutine.mode, i32.const_int(MODE_OWNS, false), "")?;
+		let owns = self
+			.builder
+			.build_int_compare(IntPredicate::NE, owns, i32.const_zero(), "")?;
+		let copied = self.alloca(Repr::Bool, "owns_parameters")?;
+		self.builder.build_store(copied.pointer, owns)?;
+		let unique = self.alloca(Repr::Bool, "owns_unique_parameters")?;
+		self.builder
+			.build_store(unique.pointer, self.context.bool_type().const_int(1, false))?;
+		for &(value, moved) in parameters {
+			if self.needs_drop(value.repr) {
+				let slot = self.alloca(value.repr, "wrapper_parameter")?;
+				self.builder
+					.build_store(slot.pointer, value.value.expect("an argument"))?;
+				self.own_flagged(
+					slot,
+					if moved {
+						unique.pointer
+					} else {
+						copied.pointer
+					},
+				);
+			}
+		}
+		Ok(unique.pointer)
+	}
+
+	pub(super) fn suspend_value_body(&mut self) -> Result<(), Error> {
+		let mode = self.coroutine().expect("an async wrapper").mode;
+		self.lazy_suspend(mode, |_| Ok(()))
+	}
+
 	/// Suspends when `mode` says the task is started (lazy).
 	fn lazy_suspend(
 		&mut self,
@@ -934,7 +981,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The async instance of a function, declared on first use and lowered
 	/// later (`lower_next_async_instance`).
-	fn async_instance(&mut self, function: &Function<'ctx>) -> Result<FunctionValue<'ctx>, Error> {
+	pub(super) fn async_instance(
+		&mut self,
+		function: &Function<'ctx>,
+	) -> Result<FunctionValue<'ctx>, Error> {
 		if let Some(instance) = self.tasks.instances.get(&function.value) {
 			return Ok(instance.function.value);
 		}
@@ -1803,8 +1853,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		while let View::Group(group) = self.view(inner) {
 			inner = group;
 		}
-		// a task, a resource, a type holding one (`TypeStore::owns_unique`)
-		if !self.types().owns_unique(self.type_of(inner)) {
+		// Only Task parameters consume their argument. Resources borrow it.
+		if !self
+			.types()
+			.takes_task_parameter(self.concrete_type(self.type_of(inner)))
+		{
 			return Ok(value);
 		}
 		if !self.is_temporary(value)
@@ -2118,13 +2171,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Lowers another function from inside the current one (a `start do`,
 	/// a combinator), then comes back.
-	fn nested_function(
+	pub(super) fn nested_function(
 		&mut self,
 		function: FunctionValue<'ctx>,
 		ret: Repr,
 		body: impl FnOnce(&mut Self) -> Result<(), Error>,
 	) -> Result<(), Error> {
-		let resume = self.builder.get_insert_block().expect("a block");
+		let resume = self.builder.get_insert_block();
 		let outer = self.frame.take();
 		let owner = outer.as_ref().and_then(|frame| frame.owner);
 		let saved_slots = std::mem::take(&mut self.slots);
@@ -2135,7 +2188,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.frame = outer;
 		self.slots = saved_slots;
 		self.owned_locals = saved_owned;
-		self.builder.position_at_end(resume);
+		match resume {
+			Some(resume) => self.builder.position_at_end(resume),
+			None => self.builder.clear_insertion_position(),
+		}
 		result?;
 		ended
 	}
@@ -3386,52 +3442,183 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let instance = self.async_instance(function)?;
 		let entry = if thunk {
-			let name = format!("{}.thunk", instance.get_name().to_string_lossy());
-			match self.module.get_function(&name) {
-				Some(existing) => existing,
-				None => {
-					let mut parameters: Vec<BasicMetadataTypeEnum<'ctx>> =
-						vec![self.pointer_type().into()];
-					parameters.extend(instance.get_type().get_param_types());
-					let thunk_type = self.pointer_type().fn_type(&parameters, false);
-					let thunk =
-						self.module
-							.add_function(&name, thunk_type, Some(Linkage::Internal));
-					thunk.set_call_conventions(FAST_CALLING_CONVENTION);
-					self.runtime.add_attributes(thunk, &["nounwind"]);
-					let builder = self.context.create_builder();
-					builder.position_at_end(self.context.append_basic_block(thunk, "entry"));
-					let arguments: Vec<BasicMetadataValueEnum<'ctx>> =
-						thunk.get_param_iter().skip(1).map(Into::into).collect();
-					let call = builder.build_call(instance, &arguments, "")?;
-					call.set_call_convention(FAST_CALLING_CONVENTION);
-					let frame = call.try_as_basic_value().basic().expect("a frame");
-					builder.build_return(Some(&frame))?;
-					thunk
-				}
-			}
+			self.forwarding_thunk(function, instance)?
 		} else {
 			instance
 		};
+		Ok(self.async_entries(sync, entry.as_global_value().as_pointer_value()))
+	}
+
+	/// The tagged entries of an async function value, including wrappers
+	/// whose entries do not correspond to a source function declaration.
+	pub(super) fn async_entries(
+		&mut self,
+		sync: PointerValue<'ctx>,
+		asynchronous: PointerValue<'ctx>,
+	) -> PointerValue<'ctx> {
 		let pointer = self.pointer_type();
 		let table_type = self
 			.context
 			.struct_type(&[pointer.into(), pointer.into()], false);
 		let table = self.module.add_global(table_type, None, "fa.async_entries");
-		table.set_initializer(&table_type.const_named_struct(&[
-			sync.into(),
-			entry.as_global_value().as_pointer_value().into(),
-		]));
+		table.set_initializer(&table_type.const_named_struct(&[sync.into(), asynchronous.into()]));
 		table.set_constant(true);
 		table.set_linkage(Linkage::Private);
 		table.set_alignment(16);
 		// SAFETY: one byte into a global of 16 bytes
-		Ok(unsafe {
+		let entry = unsafe {
 			table.as_pointer_value().const_gep(
 				self.context.i8_type(),
 				&[self.context.i64_type().const_int(1, false)],
 			)
-		})
+		};
+		self.tasks.value_entries.insert(entry, (sync, asynchronous));
+		entry
+	}
+
+	/// Defines the entry pair used by an async instance in a generic table
+	/// of another unit. Disallowed instances contain the unreachable stub
+	/// in both slots and can never be called through a well-typed value.
+	pub(super) fn export_async_entries(&mut self, entry: PointerValue<'ctx>, name: &str) {
+		let (sync, asynchronous) = self
+			.tasks
+			.value_entries
+			.get(&entry)
+			.copied()
+			.unwrap_or((entry, entry));
+		let pointer = self.pointer_type();
+		let ty = self
+			.context
+			.struct_type(&[pointer.into(), pointer.into()], false);
+		let table = self.module.add_global(ty, None, name);
+		table.set_initializer(&ty.const_named_struct(&[sync.into(), asynchronous.into()]));
+		table.set_constant(true);
+		table.set_alignment(16);
+		self.export_symbol(name.to_string());
+	}
+
+	/// Creates the child's lazy frame before the wrapper's first suspend.
+	/// Parameter defaults therefore run at invocation, while its body waits
+	/// for the wrapper's first turn. The caller guards the child until then.
+	pub(super) fn create_wrapped_frame(
+		&mut self,
+		closure: Val<'ctx>,
+		ty: TypeId,
+		arguments: (&[Val<'ctx>], &[Option<PointerValue<'ctx>>]),
+		flags: &[IntValue<'ctx>],
+		requirements: &[PointerValue<'ctx>],
+		node: NodeId,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let (arguments, places) = arguments;
+		let (params, ret, throws) = self.value_signature(ty, node)?;
+		let pair = closure.value.expect("a function").into_struct_value();
+		let entry = self
+			.builder
+			.build_extract_value(pair, 0, "")?
+			.into_pointer_value();
+		let environment = self.builder.build_extract_value(pair, 1, "")?;
+		let mut arguments_lowered: Vec<BasicMetadataValueEnum<'ctx>> = vec![environment.into()];
+		arguments_lowered.extend(self.lower_value_arguments(&params, arguments, places, node)?);
+		arguments_lowered.extend(flags.iter().copied().map(BasicMetadataValueEnum::from));
+		arguments_lowered.extend(
+			requirements
+				.iter()
+				.copied()
+				.map(BasicMetadataValueEnum::from),
+		);
+		let pointer = self.pointer_type();
+		let sync_type =
+			self.indirect_type_with_defaults(&params, ret, throws, flags.len(), requirements.len());
+		let mut async_parameters = sync_type.get_param_types();
+		async_parameters.push(self.context.i32_type().into());
+		let async_type = pointer.fn_type(&async_parameters, false);
+		let address = self.builder.build_ptr_to_int(entry, self.usize, "")?;
+		let tag = self
+			.builder
+			.build_and(address, self.usize.const_int(1, false), "")?;
+		let has_async_type = matches!(self.types().kind(ty), TypeKind::Function(sig) if self.types().sig(sig).is_async);
+		let tagged = if has_async_type {
+			self.builder
+				.build_int_compare(IntPredicate::NE, tag, self.usize.const_zero(), "")?
+		} else {
+			// A wasm function pointer is a table index, which may be odd.
+			// Only an async function type can carry a tagged DATA pointer.
+			self.context.bool_type().const_zero()
+		};
+		let asynchronous = self.append_block("wrapped_async");
+		let synchronous = self.append_block("wrapped_sync");
+		let merged = self.append_block("wrapped_frame");
+		let result = self.alloca_type(pointer.into(), "child")?;
+		self.builder
+			.build_conditional_branch(tagged, asynchronous, synchronous)?;
+		self.builder.position_at_end(asynchronous);
+		let table = unsafe {
+			self.builder.build_gep(
+				self.context.i8_type(),
+				entry,
+				&[self.context.i64_type().const_all_ones()],
+				"",
+			)?
+		};
+		let asynchronous_entry = self.load_entry(table, 1)?;
+		let mut given = arguments_lowered.clone();
+		given.push(self.context.i32_type().const_int(MODE_LAZY, false).into());
+		let call = self
+			.builder
+			.build_indirect_call(async_type, asynchronous_entry, &given, "")?;
+		call.set_call_convention(FAST_CALLING_CONVENTION);
+		self.builder.build_store(
+			result,
+			call.try_as_basic_value().basic().expect("a child frame"),
+		)?;
+		self.builder.build_unconditional_branch(merged)?;
+		self.builder.position_at_end(synchronous);
+		let call = self
+			.builder
+			.build_indirect_call(sync_type, entry, &arguments_lowered, "")?;
+		call.set_call_convention(FAST_CALLING_CONVENTION);
+		let frame = self.finished_block(call.try_as_basic_value().basic(), ret, throws)?;
+		self.builder.build_store(result, frame)?;
+		self.builder.build_unconditional_branch(merged)?;
+		self.builder.position_at_end(merged);
+		Ok(self
+			.builder
+			.build_load(pointer, result, "")?
+			.into_pointer_value())
+	}
+
+	pub(super) fn await_wrapped_frame(
+		&mut self,
+		frame: PointerValue<'ctx>,
+		ret: Repr,
+		throws: bool,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let ready = self.append_block("wrapped_ready");
+		let resume = self.append_block("wrapped_first_turn");
+		let done = self.frame_done(frame)?;
+		self.builder.build_conditional_branch(done, ready, resume)?;
+		self.builder.position_at_end(resume);
+		self.build_frame_call(&self.builder, frame, 0)?;
+		self.builder.build_unconditional_branch(ready)?;
+		self.builder.position_at_end(ready);
+		self.await_frame(frame, Some(node))?;
+		let raw = self.take_result(frame, ret, throws)?;
+		self.call_result(raw, ret, throws)
+	}
+
+	pub(super) fn wrapper_task_type(&self, ty: TypeId) -> TypeId {
+		let mut merger = self.types().merger(Some(self.session.module_id(self.file)));
+		let ty = merger.ty(ty);
+		let module = merger.module(self.session.module_id(self.file));
+		drop(merger);
+		let mut types = fa_analyzer::types::TypeStore::view(self.types().global());
+		let TypeKind::Function(sig) = types.kind(ty) else {
+			unreachable!()
+		};
+		let sig = types.sig(sig);
+		let task = types.intern(TypeKind::Task(sig.ret, sig.throws));
+		types.merger(Some(module)).ty(task)
 	}
 
 	/// A call through a value of an `async` function type in an asynchronous
@@ -3444,8 +3631,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		closure: Val<'ctx>,
 		ty: TypeId,
 		arguments: &[Val<'ctx>],
+		places: &[Option<PointerValue<'ctx>>],
+		requirements: &[PointerValue<'ctx>],
 		node: NodeId,
 	) -> Result<Option<Val<'ctx>>, Error> {
+		let flags = self.call_default_flags(node);
 		if !self.tasks.asynchronous {
 			return Ok(None);
 		}
@@ -3467,10 +3657,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.into_pointer_value();
 		let environment = self.builder.build_extract_value(pair, 1, "")?;
 		let mut lowered: Vec<BasicMetadataValueEnum<'ctx>> = vec![environment.into()];
-		for (repr, argument) in params.iter().zip(arguments) {
-			let argument = self.convert(*argument, *repr, node.index())?;
-			lowered.push(argument.value.expect("an argument").into());
-		}
+		lowered.extend(self.lower_value_arguments(&params, arguments, places, node)?);
+		lowered.extend(flags.iter().copied().map(BasicMetadataValueEnum::from));
+		lowered.extend(
+			requirements
+				.iter()
+				.copied()
+				.map(BasicMetadataValueEnum::from),
+		);
 		let pointer = self.pointer_type();
 		let address = self.builder.build_ptr_to_int(entry, self.usize, "")?;
 		let tag = self
@@ -3490,7 +3684,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				"table",
 			)?
 		};
-		let sync_type = self.indirect_type(&params, ret, throws);
+		let sync_type =
+			self.indirect_type_with_defaults(&params, ret, throws, flags.len(), requirements.len());
 		let mut async_params = sync_type.get_param_types();
 		async_params.push(self.context.i32_type().into());
 		let async_type = pointer.fn_type(&async_params, false);

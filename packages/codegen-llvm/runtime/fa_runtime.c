@@ -7043,6 +7043,27 @@ FA_EXPORT void fa_shared_release(void *block) {
 	fa_free(block, (size_t)shared->size, 16);
 }
 
+/// The immutable captures of a heap closure are shared by its function
+/// values. Stack environments use their own no-op drop/copy entry points.
+typedef struct {
+	void (*drop)(void *);
+	void *(*copy)(void *);
+	int64_t count;
+} FaEnvironment;
+
+FA_EXPORT void *fa_environment_retain(void *block) {
+	if (block != 0) {
+		__atomic_fetch_add(&((FaEnvironment *)block)->count, 1, __ATOMIC_RELAXED);
+	}
+	return block;
+}
+
+/// The generated destructor drops captures and frees the block only at 1.
+FA_EXPORT int32_t fa_environment_release(void *block) {
+	return block != 0 && __atomic_fetch_sub(&((FaEnvironment *)block)->count, 1,
+	                                      __ATOMIC_ACQ_REL) == 1;
+}
+
 // ── atomics: the generated code reads and writes `value` with atomic
 // instructions (`FA_ATOMIC_VALUE` in `src/lower/parallel.rs`)
 

@@ -343,6 +343,7 @@ impl Walker<'_> {
 	/// `throw error`: leaves the function with an error value (`Never`).
 	pub(super) fn check_throw(&mut self, n: NodeId, value: NodeId) -> TypeId {
 		let ty = self.check(value, None);
+		self.note_copy_site(value);
 		self.memo(n, |w| {
 			if !w.s.types.is_recovering(ty) && !w.s.types.satisfies(ty, TypeId::ERROR) {
 				let message = format!(

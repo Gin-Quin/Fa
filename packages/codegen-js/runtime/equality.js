@@ -259,7 +259,7 @@ export function faHash(value) {
 			}
 			if (value instanceof FaSet) {
 				for (const item of value) {
-					sum = (sum + faHash(value.keyOf(item))) | 0;
+					sum = (sum + faHash(item)) | 0;
 				}
 				return faHashMix(sum ^ 0xc2b2ae35);
 			}

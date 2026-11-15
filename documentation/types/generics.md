@@ -262,6 +262,8 @@ type Index = Choose<(count > 255), UInt16, UInt8> -- a comparison in a generic l
 if count<limit { ... } -- error: `<limit` opens a generic list; write `count < limit`
 ```
 
+The mistake is reported once: the compiler then reads this `<` as a comparison, so the rest of the line and the block of the `if` are checked as usual.
+
 So a comparison is always written with whitespace after `<`, which the formatter does anyway, and a generic list starts on the line of its `<`: a `<` at the end of a line is a comparison. Its closing `>` can be on its own line:
 
 ```fa
@@ -269,6 +271,18 @@ type Lookup = Map<String, {
 	id: Integer
 	name: String
 }>
+```
+
+A line break inside a generic list never separates two items: the items are separated by commas. A list too long for its line keeps its first item on the line of `<`, and continues after each comma, with `>` on its own line. This is how the formatter writes it, once breaking the object types and the parameters of the line is not enough:
+
+```fa
+type Registry<Key: String | Integer,
+	Entry: { id: Key, name: String },
+	Fallback: { name: String } = Entry
+> = {
+	entries: Map<Key, Entry>
+	fallback: Fallback?
+}
 ```
 
 Rust has the same ambiguity and solves it with the turbofish (`sum::<f64>(...)`) in expressions; TypeScript and C# guess by looking ahead. Fa decides from the character that follows `<`, and then from the open generic lists, with no lookahead.
@@ -361,9 +375,52 @@ applyToBoth((value) => value, 1, "one") -- valid: the lambda is generic, from it
 applyToBoth((value: Integer) => value, 1, "one") -- error: the lambda isn't generic
 ```
 
-- **A value of a generic function type is known at compile time.** It is a named function or a lambda, given directly. It can't be a `mutable` value, an element of a collection, or a field of an object built at runtime. A function that receives one is compiled for each function it receives, like a generic function for each of its parameters, so `transform(number)` and `transform(text)` call two compiled versions of `identity`, without boxing.
+- **A value of a generic function type is known at compile time.** It is a named function or a lambda, given directly as an argument (see [where a generic function type is written](#where-a-generic-function-type-is-written)). A function that receives one is compiled for each function it receives, like a generic function for each of its parameters, so `transform(number)` and `transform(text)` call two compiled versions of `identity`, without boxing.
 - **Generic function types are never inferred**: they come from an annotation, like `transform` above. A lambda without generic parameters is generic only when its expected type is.
 - A generic function passed where a function type that isn't generic is expected is given its parameters by that type: in `["Ada", "Alan"].map(identity)`, `Value` is `String`.
+
+### Where a generic function type is written
+
+A generic function type is written in one place: as the type of a parameter of a function declared with `function` (a method included). Such a parameter receives:
+
+- a named generic function, like `identity`,
+- a lambda written as the argument,
+- a parameter of the calling function that has a generic function type itself.
+
+```fa
+function applyTwice = (transform: <Value>(value: Value) => Value, number: Integer, text: String) => {
+	applyToBoth(transform, number, text) -- valid: `transform` is known wherever `applyTwice` is compiled
+}
+```
+
+Everywhere else, a generic function type is an error: a `let`, `static` or `mutable` declaration, a return type, a field, an element of a collection, or a parameter of a lambda or of another function type.
+
+```fa
+let alias: <Value>(value: Value) => Value = identity -- error: use `identity` itself
+let same = <Value>(value: Value) => value -- error: use `function` to declare a function
+let numberIdentity: (value: Integer) => Integer = identity -- valid: not generic, `Value` is `Integer`
+
+```
+
+A function is named by its `function` declaration only, generic or not, so there is nothing an alias could add. A function that would return a generic function is written as one generic function with more parameters.
+
+### Async generic lambdas
+
+`async` comes first, then the generic parameters, as in a declaration, where `async` comes before `function` and the generic parameters start the signature. The same order is used for a function type:
+
+```fa
+async function fetchAll = <Item>(urls: Array<String>): Array<Item> => ...
+
+function forEach = (urls: Array<String>, action: async <Item>(item: Item) => Void) => ...
+
+forEach(urls, async <Item>(item: Item) => {
+	console.log("received")
+})
+```
+
+`<Item> async (item: Item) => ...` is a syntax error. `async` is the only keyword written before a lambda: its effects (`throws`, `mutates`...) are written after its return type, with or without generic parameters.
+
+### Enclosing generic parameters
 
 A lambda written inside a generic function or type can use the generic parameters of its enclosing declaration.
 

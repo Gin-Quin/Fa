@@ -1178,7 +1178,7 @@ console.log(Child { fieldA = 1, fieldC = "c" }.fieldB)
 - **Capitalized** name: type parameter; optional constraint `: C` (any type; a union means "one of these types", an object type means "has at least these fields", method requirements written as function fields with `self`: `{ describe: (self) => String }`); optional default `= D`.
 - **Lowercase** name: compile-time value parameter; its annotation is the type of the value (required: `GN001`). Allowed value types: `Boolean`, integer types, `String`, `Character`, enumerations, `Fields` (key sets), and arrays, tuples, objects of them (`GN006` for `Float`, functions, collections other than arrays…).
 - A constraint or default may reference earlier parameters (`select = <Entity, keys: Keys<Entity>>(…)`); referencing a later one is `GN002`. Defaults must satisfy constraints (`GN003`). Duplicate names `GN004`. A parameter after one with a default must have a default (`GN005`).
-- A lambda can declare generic parameters, and a function type can have them (a generic function type). A lambda without generic parameters is generic when its expected type is a generic function type; a generic function type is never inferred. A value of a generic function type must be known at compile time (a named function or a lambda, given directly): a `mutable`, a collection element or a runtime-built field of that type is `GN030`. A function with a parameter of a generic function type is instantiated per function argument. A lambda inside a generic declaration uses the enclosing parameters.
+- A lambda can declare generic parameters, and a function type can have them (a generic function type). A lambda without generic parameters is generic when its expected type is a generic function type; a generic function type is never inferred. A value of a generic function type must be known at compile time, so a generic function type is written only as the type of a parameter of a `function` declaration (methods included), which receives a named function, a lambda written as the argument, or the caller's own parameter of a generic function type; anywhere else (`let`, `static`, `mutable`, return type, field, collection element, parameter of a lambda or of a function type) it is `GN030` (decisions of 2026-11-15, "Generic angle brackets"). `async` precedes the generic parameters: `async <Item>(item: Item) => …`. A function with a parameter of a generic function type is instantiated per function argument. A lambda inside a generic declaration uses the enclosing parameters.
 
 #### 3.11.2 Explicit generic arguments (supersedes T4 and `D18`)
 
@@ -1259,7 +1259,7 @@ For a structural parameter `p: T`, `Type<p>` is `ImplicitParam(f, i)`, constrain
 | `GN016` | operation not allowed by the constraint |
 | `GN017` | error in code checked after substitution (with the application site) |
 | `GN020` | polymorphic recursion |
-| `GN030` | a value of a generic function type that isn't known at compile time (a `mutable`, a collection element, a field built at runtime) |
+| `GN030` | a generic function type written anywhere but as the type of a parameter of a `function` declaration (a `let`, `static` or `mutable`, a return type, a field, a collection element, a parameter of a lambda or of a function type), or an argument for such a parameter that isn't a named function, a lambda or the caller's own parameter |
 
 #### 3.11.10 Tests
 

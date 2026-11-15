@@ -1,0 +1,30 @@
+-- The result slot (`noalias`) given as the destination of an assignment to
+-- the local that is also the argument: `big = grow(big)`, a field, an item,
+-- and a returned owner (NRVO) that is also read by the callee.
+type Big = { a: Integer, b: Integer, c: Integer, d: Integer, text: String }
+type Holder = { big: Big, other: Big }
+function grow = (big: Big): Big => Big { a = big.b + 1, b = big.a + 10, c = big.d, d = big.c, text = "{big.text}+" }
+function swap = (first: Big, second: Big): Big => Big { a = second.a, b = first.b, c = second.c, d = first.d, text = "{first.text}{second.text}" }
+mutable big = Big { a = 1, b = 2, c = 3, d = 4, text = "x" }
+for 0..5 { big = grow(big) }
+console.log(big.a, big.b, big.c, big.d, big.text)
+big = swap(big, grow(big))
+console.log(big.a, big.b, big.c, big.d, big.text)
+mutable holder = Holder { big, other = grow(big) }
+holder.big = grow(holder.big)
+holder.other = swap(holder.big, holder.other)
+console.log(holder.big.a, holder.big.b, holder.other.a, holder.other.b, holder.other.text)
+mutable list = [big, grow(big)]
+for i in 0..2 { list[i] = grow(list[i]) catch _error => big }
+console.log((list.get(0) ?? big).a, (list.get(1) ?? big).b)
+function chain = (n: Integer): Big => {
+	mutable result = Big { a = n, b = n, c = n, d = n, text = "" }
+	for 0..n { result = grow(result) }
+	result
+}
+console.log(chain(7).a, chain(7).text)
+-- prints: 25 33 4 3 x+++++
+-- prints: 34 33 3 3 x+++++x++++++
+-- prints: 34 44 34 44 x+++++x+++++++x+++++x+++++++
+-- prints: 34 44
+-- prints: 41 +++++++

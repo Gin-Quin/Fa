@@ -21,6 +21,8 @@ An empty map needs its type:
 mutable inventory: Map<String, Integer> = []
 ```
 
+Storage can be planned with `from(source, capacity = n)`, the read-only `capacity` property and `reserve(additional)`. See [capacity and reservation](/collections/arrays#capacity-and-reservation) for the shared rules and effects.
+
 ## Access and update
 
 Reading a key with `map[key]` is checked at compile time when the compiler can prove the key is present. Otherwise, it `throws KeyNotFound`, so a missing key can never be mistaken for a value. Propagate the error with `try`, or handle it with `catch` (see [errors](/values/errors)):

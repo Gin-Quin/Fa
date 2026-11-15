@@ -227,6 +227,20 @@ It is the only string operation that depends on the Unicode tables: the segmenta
 
 The string API is the JavaScript `String` API, with a few differences that don't change what a position means: an unproven index throws instead of giving `undefined`, `indexOf` returns an optional instead of `-1`, and no value is converted to a string implicitly. See [string operations](/operations/string) for the list of methods.
 
+## Capacity and reservation
+
+`String.from(text, capacity = n)` copies a string and requests room for at least `n` bytes natively. The source must be a `String`; this is not an implicit conversion. A string exposes a read-only `capacity: Integer<min = 0>` property and `reserve(additional: Integer<min = 0>)`, returning `Void`:
+
+```fa
+mutable output = String.from("", capacity = 1000)
+output.reserve(100) -- room for 100 more bytes than its current byte length
+output += "hello"
+```
+
+Natively, `capacity` counts storage bytes, not UTF-16 code units: it is at least the current byte length, and an inline string has room for 23 bytes (11 on wasm32). A static string reports its byte length until a reservation or append gives it owned storage. `reserve(n)` makes room for at least the current byte length plus `n`, never shrinks and never changes the text. It requires a `mutable` receiver and declares `mutates self`, like an append: references into the string must be declared again afterwards.
+
+On JavaScript and during compile-time evaluation, the hints are ignored, `reserve` does nothing and `capacity` equals `length`. This keeps the property constant-time without measuring an encoding or inventing storage the engine does not expose. Use `utf8Length()` to measure an encoding, and `length` for code-unit positions. Capacity is a storage hint, not a portable limit. Copies need not preserve spare capacity.
+
 :::implementation
 ## Implementation details
 

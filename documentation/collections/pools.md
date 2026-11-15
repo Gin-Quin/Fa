@@ -43,6 +43,8 @@ let point = points.add({ x = 3, y = 4 }) -- bad practice: `point` is a copy, not
 
 A value with more fields than the element type is copied into the pool, and its extra fields are dropped: see [collections of supersets](/advanced/structural-typing#collections-of-supersets).
 
+Storage can be planned with `from(source, capacity = n)`, the read-only `capacity` property and `reserve(additional)`. See [capacity and reservation](/collections/arrays#capacity-and-reservation) for the shared rules and effects.
+
 ## Removing
 
 Remove a value with `delete`, passing a reference to it:

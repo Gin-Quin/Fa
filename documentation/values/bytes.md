@@ -37,7 +37,7 @@ buffer[0] = 255
 use header = buffer[0..2] -- a slice: no copy
 ```
 
-The length never changes: there is no `push`. To build a sequence of bytes of unknown length, fill an `Array<Byte>` and convert it with `Bytes.from(array)`.
+The length never changes: there is no `push`, `reserve`, `capacity` property or capacity option in `from` or `filled`. Spare storage cannot be used by a fixed-length value; `filled(n)` already allocates exactly the requested length. To build a sequence of bytes of unknown length, fill an `Array<Byte>` and convert it with `Bytes.from(array)`.
 
 | Operation | Returns |
 | --- | --- |

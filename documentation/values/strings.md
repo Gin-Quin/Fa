@@ -255,6 +255,8 @@ The semantics are UTF-16 code units; the native storage is UTF-8. Text arrives a
 
 ### Native
 
+Interpolation constructors and appended interpolations check each addition of byte lengths against the String representation limit before allocating or reserving. The check applies at both native and wasm pointer widths; an LLVM no-wrap annotation alone does not establish the bound.
+
 - **Layout.** A `String` is 24 bytes: a pointer, a length in bytes and a capacity with flags (static, inline, ASCII, surrogates). A string of at most 23 bytes is stored inline, without allocation. A literal is stored in read-only data, with its UTF-16 length computed at compile time, and copied only when a mutable string is created from it. There are no ropes: a `mutable` string that is appended to grows in place.
 - **Encoding.** The bytes are UTF-8, extended to lone surrogates (WTF-8): a lone surrogate is stored as the three bytes that the UTF-8 scheme gives to its value (`ED A0 80` to `ED BF BF`), and a surrogate pair is always stored as the four bytes of its code point. Equal strings therefore have equal bytes.
 - **The ASCII flag** says that every byte is below `0x80`. It is computed for literals at compile time, kept by copies and slices, kept by an append when the suffix has it, and computed by `String.fromUtf8` while it validates. It may be missing from an ASCII string (only slower), never set on another. With it, a code unit is a byte: `length` is the byte length, indexing is a load, a position is a byte offset.

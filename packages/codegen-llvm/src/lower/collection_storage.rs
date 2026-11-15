@@ -85,7 +85,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			let parent = NodeId::new(parent);
 			match self.view(parent) {
-				View::Group(_) => at = parent,
+				View::Group(_) | View::Try(_) => at = parent,
 				View::Declaration {
 					value: Some(value), ..
 				} if value == at => {

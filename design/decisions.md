@@ -535,7 +535,7 @@ Implementation choices:
   relocation; all Unicode boundary checks are preserved. Empty separators
   keep the existing character/compact-character path. Array `map`/`filter`, required borrowed `Array.from` copies and synchronous
   object/tuple return slots are covered by the extensions below. Collection
-  return forwarding and the remaining constructor paths are tracked in
+  return forwarding is implemented below; remaining constructor paths are tracked in
   `design/todo.md`; no post-construction copy onto the stack.
 - **Targets:** use the same ABI and fixed limits on native, freestanding and
   wasm32. On wasm, entry allocas use LLVM's linear-memory shadow stack; no
@@ -627,10 +627,9 @@ not a claim that all construction paths have been converted at once.
   unfinished object as initialized. Task and arena adapters read result slots
   only on success; errors retain their zero-payload promise representation.
 - Coroutine compilation retains its current promise ABI, including synchronous
-  calls in that mode. Returning a named local still needs result-slot coalescing
-  (NRVO) to remove its aggregate load/store; this change covers fresh expression
-  construction and forwarding, not all return forms. Those precise gaps remain
-  listed in `design/todo.md`.
+  calls in that mode. The local-coalescing extension below also removes the
+  aggregate transfer for proven immutable returned locals. Other return forms
+  remain precisely listed in `design/todo.md`.
 
 ### Collection return buffers (implementation, 2026-11-15)
 
@@ -661,3 +660,18 @@ not a claim that all construction paths have been converted at once.
   literals use one first segment sized at least to the type default, including
   on the heap, avoiding an intermediate flat array and its relocation. Later
   segments keep their ordinary stable-address rules.
+
+### Coalescing a returned immutable local (implementation, 2026-11-15)
+
+- An object/tuple local can occupy the caller's result slot from its declaration
+  when every successful exit returns that same immutable owner. Reuse existing
+  capture, reference and move proofs, and reject observer/reference contexts or
+  other owning uses. Other return forms keep their existing staging.
+- A normal move leaves the caller's bits intact. Scope/return cleanup omits that
+  particular owner only on the path transferring it; error cleanup still drops
+  it. The cleanup stack is retained for other branches. No new runtime drop flag
+  or stack-to-heap copy-out is introduced. This is necessary because zeroing a
+  moved-from local would otherwise zero the caller's result too.
+- `try` around an immutable initializer preserves its collection destination
+  proof, just like grouping. A thrown constructor drops its completed prefix
+  before the uninitialized caller owner is registered.

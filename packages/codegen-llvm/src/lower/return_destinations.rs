@@ -1,6 +1,7 @@
 //! Caller-owned result slots. Coroutine promises keep their separate ABI.
 
-use fa_analyzer::ids::NodeId;
+use fa_analyzer::ids::{NodeId, SymbolId};
+use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::View;
 use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::builder::Builder;
@@ -8,10 +9,91 @@ use inkwell::types::AnyType;
 use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue};
 
 use crate::error::Error;
+use crate::lower::ownership::Cleanup;
 use crate::lower::values::{Repr, Val};
 use crate::lower::{Lowering, Slot};
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	fn return_value_leaves(&self, root: NodeId, leaves: &mut Vec<NodeId>) {
+		let mut pending = vec![root];
+		while let Some(node) = pending.pop() {
+			match self.view(node) {
+				View::Group(inner) | View::Try(inner) | View::Do(inner) => pending.push(inner),
+				View::Block { statements } => {
+					if let Some(last) = statements.iter().last() {
+						pending.push(last);
+					}
+				}
+				View::If {
+					then_body,
+					else_body: Some(other),
+					..
+				} => pending.extend([then_body, other]),
+				View::When { arms, .. } => pending.extend(arms.iter().map(|arm| arm.value)),
+				View::Return(_) | View::Throw(_) => {}
+				_ if self
+					.node_repr(node)
+					.is_ok_and(|repr| matches!(repr, Repr::Void | Repr::Never)) => {}
+				_ => leaves.push(node),
+			}
+		}
+	}
+
+	/// Every successful exit must give up the same immutable owner. Alias,
+	/// capture and move facts come from the existing ownership proofs.
+	pub(super) fn returned_local_candidate(&mut self, body: NodeId) -> Option<SymbolId> {
+		let mut leaves = Vec::new();
+		self.return_value_leaves(body, &mut leaves);
+		let mut pending = vec![body];
+		while let Some(node) = pending.pop() {
+			match self.view(node) {
+				View::Lambda { .. } | View::Function { .. } => continue,
+				View::Use { .. } | View::Reuse { .. } | View::Provide { .. } | View::Watch(_) => {
+					return None;
+				}
+				View::Return(Some(value)) => self.return_value_leaves(value, &mut leaves),
+				_ => {}
+			}
+			self.tree.nodes[node.index()].for_each_child(|child| pending.push(NodeId::new(child)));
+		}
+		let Resolution::Local(symbol) = self.analysis.resolution(*leaves.first()?) else {
+			return None;
+		};
+		if !leaves
+			.iter()
+			.all(|node| self.analysis.resolution(*node) == Resolution::Local(symbol))
+			|| self.referenced_locals().contains(&symbol)
+			|| !self.collection_returned_binding(symbol)
+		{
+			return None;
+		}
+		Some(symbol)
+	}
+
+	pub(super) fn is_coalesced_return_read(&self, node: NodeId, repr: Repr) -> bool {
+		let Some(symbol) = self.frame().nrvo_local else {
+			return false;
+		};
+		repr == self.frame().ret
+			&& self.analysis.resolution(self.ungrouped(node)) == Resolution::Local(symbol)
+	}
+
+	pub(super) fn preserves_return_owner(
+		&self,
+		entry: Cleanup<'ctx>,
+		destination: Option<inkwell::values::PointerValue<'ctx>>,
+	) -> bool {
+		if self.frame().nrvo_local.is_none()
+			|| destination != self.frame().return_slot.map(|slot| slot.pointer)
+		{
+			return false;
+		}
+		match entry {
+			Cleanup::Local(slot) | Cleanup::Flagged(slot, _) => Some(slot.pointer) == destination,
+			_ => false,
+		}
+	}
+
 	pub(super) fn uses_return_slot(&self, repr: Repr) -> bool {
 		!self.tasks.asynchronous && matches!(repr, Repr::Object(_) | Repr::Tuple(_))
 	}

@@ -1228,6 +1228,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(value);
 		}
 		if let Some(node) = node
+			&& self.is_coalesced_return_read(node, value.repr)
+		{
+			// The local already occupies the caller's result slot. Keep its
+			// bits intact; normal-return cleanup excludes this owner, while
+			// error cleanup still destroys it. No run-time drop flag is needed.
+			return Ok(value);
+		}
+		if let Some(node) = node
 			&& let Some(slot) = self.movable_local(node, value.repr)
 		{
 			// the local gives its value up: its drop sees a zero
@@ -1342,6 +1350,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Ends a scope: drops what it registered after `mark`, in reverse order,
 	/// but `keep` (the value of the scope), which stays registered.
 	pub(crate) fn end_scope(&self, mark: usize, keep: Option<Val<'ctx>>) -> Result<(), Error> {
+		let destination = keep.and_then(|value| value.destination);
 		let entries = {
 			let mut cleanups = self.cleanups.borrow_mut();
 			let mark = mark.min(cleanups.len());
@@ -1350,6 +1359,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let keep = keep.and_then(|value| value.value);
 		let mut kept = None;
 		for entry in entries.into_iter().rev() {
+			if self.preserves_return_owner(entry, destination) {
+				continue;
+			}
 			if let Cleanup::Temp(temp) = entry
 				&& keep.is_some()
 				&& temp.value == keep
@@ -1403,11 +1415,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// of the scopes (`break`, `return`, a raised error); the entries stay
 	/// registered for the code that follows in the scopes.
 	pub(crate) fn drop_to(&self, mark: usize) -> Result<(), Error> {
+		self.drop_to_returning(mark, None)
+	}
+
+	pub(super) fn drop_to_returning(
+		&self,
+		mark: usize,
+		keep: Option<Val<'ctx>>,
+	) -> Result<(), Error> {
 		let entries: Vec<Cleanup<'ctx>> = {
 			let cleanups = self.cleanups.borrow();
 			cleanups[mark.min(cleanups.len())..].to_vec()
 		};
 		for entry in entries.into_iter().rev() {
+			if self.preserves_return_owner(entry, keep.and_then(|value| value.destination)) {
+				continue;
+			}
 			if self.terminated() {
 				break;
 			}
@@ -1478,8 +1501,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return None;
 		};
 		let slot = *self.owned_locals.get(&symbol)?;
-		// Frame storage and read-only globals cannot change owner. A store,
-		// return or escaping capture gets an independent heap copy instead.
+		// Callee-frame locals and unconditional read-only globals cannot
+		// change owner. Caller-provided return storage is deliberately absent
+		// from this set: its pointer may move back to that caller.
 		if self
 			.frame()
 			.collection_locals
@@ -1761,7 +1785,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The locals that a reference designates a part of (`use`, `reuse`,
 	/// `provide` of a place below them).
-	fn referenced_locals(&self) -> std::cell::Ref<'_, rustc_hash::FxHashSet<SymbolId>> {
+	pub(super) fn referenced_locals(&self) -> std::cell::Ref<'_, rustc_hash::FxHashSet<SymbolId>> {
 		if self.referenced.borrow().is_none() {
 			let mut referenced = rustc_hash::FxHashSet::default();
 			for index in 0..self.tree.nodes.len() {

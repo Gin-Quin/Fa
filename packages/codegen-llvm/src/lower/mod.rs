@@ -134,6 +134,7 @@ struct LoopFrame<'ctx> {
 /// The function being lowered.
 struct Frame<'ctx> {
 	return_slot: Option<Slot<'ctx>>,
+	nrvo_local: Option<SymbolId>,
 	return_buffer: Option<collection_storage::CollectionBuffer<'ctx>>,
 	collection_result_root: Option<NodeId>,
 	destination: Option<(NodeId, Slot<'ctx>)>,
@@ -1187,6 +1188,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.saved_cleanups.push(outer);
 		self.frame = Some(Frame {
 			return_slot: None,
+			nrvo_local: None,
 			return_buffer: None,
 			collection_result_root: None,
 			destination: None,
@@ -1267,6 +1269,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.into_pointer_value();
 			self.frame_mut().return_slot = Some(Slot { pointer, repr: ret });
 			self.frame_mut().destination = Some((info.body, Slot { pointer, repr: ret }));
+			self.frame_mut().collection_result_root = Some(info.body);
+			self.frame_mut().nrvo_local = self.returned_local_candidate(info.body);
 		}
 		if function.return_collection {
 			let at = u32::from(lambda);
@@ -1437,7 +1441,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		};
 		if let Some(slot) = self.frame().return_slot {
 			self.store(slot, value, node)?;
-			self.drop_to(0)?;
+			self.drop_to_returning(0, Some(value))?;
 			return if self.frame().throws {
 				self.return_raw(Some(self.pointer_type().const_null().into()))
 			} else {
@@ -1626,6 +1630,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// The slot of a local, created on first use: an alloca of the function
 	/// owning it, or a global for a top-level local that functions read.
 	fn slot_of(&mut self, symbol: SymbolId, node: NodeId) -> Result<Slot<'ctx>, Error> {
+		if self.frame().nrvo_local == Some(symbol) {
+			let slot = self.frame().return_slot.expect("coalesced return slot");
+			self.slots.insert(symbol, slot);
+			return Ok(slot);
+		}
 		if let Some(&(holder, repr)) = self.references.get(&symbol) {
 			let pointer = self
 				.builder
@@ -2172,7 +2181,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				{
 					return self.optional_element(slot.pointer, slot.repr, node);
 				}
-				let value = self.load(slot)?;
+				let value = if self.frame().nrvo_local == Some(symbol) {
+					self.load_destination(slot)?
+				} else {
+					self.load(slot)?
+				};
 				let narrowed = self.node_repr(node).unwrap_or(value.repr);
 				self.narrow_to(value, narrowed, node)
 			}

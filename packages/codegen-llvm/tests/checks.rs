@@ -314,6 +314,34 @@ console.log(list(2).length)
 	}
 
 	#[test]
+	fn an_immutable_returned_owner_coalesces_with_its_caller_slot() {
+		let ir = ir_of(
+			"coalesced-return-local",
+			r#"
+type Data = { number: Integer, text: String }
+function make = (n: Integer): Data => Data { number = n, text = "value {n}" }
+function returned = (n: Integer): Data => {
+ let result = make(n)
+ if n > 0 { return result }
+ return result
+}
+console.log(returned(2).number)
+"#,
+		);
+		let returned = function(&ir, "fa.returned");
+		assert!(returned.contains("@fa.make(ptr %0"), "{returned}");
+		assert!(
+			!returned.contains("alloca { i64, { ptr, i64, i64 } }"),
+			"{returned}"
+		);
+		assert!(!returned.contains("store {"), "{returned}");
+		assert!(
+			!returned.contains("call fastcc void @fa.drop"),
+			"{returned}"
+		);
+	}
+
+	#[test]
 	fn reservation_precedes_a_push_loop_without_growth_calls_in_the_loop() {
 		let ir = ir_of(
 			"reserve-loop",

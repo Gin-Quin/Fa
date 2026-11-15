@@ -149,7 +149,7 @@ let logger: Logger = { report = log }
 
 ### Native
 
-- In synchronous compilation mode, functions write tuple results into a caller-provided slot. Tuple literals initialize its items directly, and nested object/tuple calls can use each item’s address. Forwarded calls and `if`/`when` branches share the destination. Throwing functions return their error separately and clean up completed items if construction fails. Coroutine compilation retains its promise representation.
+- In synchronous compilation mode, functions write tuple results into a caller-provided slot. Tuple literals initialize its items directly, and nested object/tuple calls can use each item’s address. Forwarded calls and `if`/`when` branches share the destination. A proven movable immutable local can occupy that slot from its declaration when every successful exit returns it. Throwing functions return their error separately and clean up completed items if construction fails. Coroutine compilation retains its promise representation.
 
 ### JavaScript
 

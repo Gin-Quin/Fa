@@ -95,10 +95,15 @@ function data = (n: Integer): Data => Data { value = n, text = "owned text {n} l
 function fail = (text: String): Data throws ParseError => data(try Integer.parse(text))
 function arrayError = (text: String): Array<Data> throws ParseError => [data(1), try fail(text)]
 function growingError = (text: String): GrowingArray<Data> throws ParseError => [data(1), try fail(text)]
+function forwardError = (text: String): Integer throws ParseError => {
+	let items = try arrayError(text)
+	return items.length
+}
 for 0..100 {
 	let first = arrayError("bad") catch error => []
 	let second = growingError("bad") catch error => []
 	assert first.length == 0 and second.length == 0
+	assert (forwardError("bad") catch error => -1) == -1
 }
 let task = start makeGrowingArray(9)
 let taskValue = await task

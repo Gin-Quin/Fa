@@ -13,10 +13,11 @@ Open items that are not yet assigned to a running engineer, or that need a follo
   constructors and coroutine instances.
   Synchronous object/tuple calls now use output slots (direct calls, supported
   generic instances, function values/lambdas, blocks, `if`/`when`, nested fields
-  and mapped array elements), including immutable named locals when every
+  mapped array elements and eligible recursive early boxes), including immutable
+  named locals when every
   successful exit returns the same proven movable owner. Still needed: broader
-  local coalescing across different result owners; forwarding into recursive early
-  boxes, pushed/inserted collection slots
+  local coalescing across different result owners; forwarding into pushed/inserted
+  collection slots
   and existing fields when alias/error rules allow it; cover structural layout
   conversions, optional/union/fallback/catch/loop results and coroutine promises.
   Preserve analyzer moves and existing foreign `sret`, early recursive boxes and

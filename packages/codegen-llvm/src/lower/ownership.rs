@@ -178,8 +178,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ => self.alloc_rec(value.repr)?,
 		};
 		let data = if owned { value } else { self.emit_copy(value)? };
-		self.builder
-			.build_store(pointer, data.value.expect("a value"))?;
+		if data.destination != Some(pointer) {
+			self.builder
+				.build_store(pointer, data.value.expect("a value"))?;
+		}
 		if region {
 			self.builder.build_call(
 				self.runtime.function("fa_arena_leave")?,

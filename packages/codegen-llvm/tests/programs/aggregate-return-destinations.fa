@@ -83,3 +83,13 @@ function localArrayError = (text: String): Integer throws ParseError => {
 for 0..100 {
 	assert (localArrayError("bad") catch error => -1) == -1
 }
+
+type EarlyNode = { value: Integer, next: EarlyNode? }
+function makeEarly = (n: Integer): EarlyNode => if n > 0 {
+	EarlyNode { value = n, next = makeEarly(n - 1) }
+} else { EarlyNode { value = 0 } }
+function detachedValue = (node: EarlyNode?): EarlyNode => EarlyNode { value = (node?.value ?? 0) + 10 }
+function composed = (n: Integer): EarlyNode => EarlyNode { value = n, next = detachedValue(makeEarly(n)) }
+for 0..100 {
+	assert (composed(3).next?.value ?? 0) == 13
+}

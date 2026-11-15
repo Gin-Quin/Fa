@@ -107,6 +107,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) {
 		// LLVM sret requires a void result. Throwing functions instead return
 		// just their error pointer and use the same plain destination parameter.
+		// Every caller supplies a fresh private destination, including guarded
+		// early boxes. Existing owners retain staging before assignment.
+		function.add_attribute(
+			AttributeLoc::Param(index),
+			self.runtime.attribute("noalias"),
+		);
 		if !throws {
 			let attribute = self.context.create_type_attribute(
 				Attribute::get_named_enum_kind_id("sret"),
@@ -124,7 +130,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	pub(super) fn destination_for(&self, node: NodeId, repr: Repr) -> Option<Slot<'ctx>> {
-		self.destination_at(node).filter(|slot| slot.repr == repr)
+		self.destination_at(node).filter(|slot| {
+			slot.repr == repr
+				&& (self.frame().early_destination != Some((slot.pointer, repr))
+					|| self.pending_box.get() == Some((slot.pointer, repr)))
+		})
 	}
 
 	pub(super) fn destination_at(&self, node: NodeId) -> Option<Slot<'ctx>> {
@@ -151,6 +161,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		slot: Option<Slot<'ctx>>,
 	) -> Result<Val<'ctx>, Error> {
 		self.with_destination(node, slot, |this| this.expr(node))
+	}
+
+	pub(super) fn expr_with_early_destination(
+		&mut self,
+		node: NodeId,
+		slot: Slot<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
+		let outer = self
+			.frame_mut()
+			.early_destination
+			.replace((slot.pointer, slot.repr));
+		let value = self.expr_with_destination(node, Some(slot));
+		self.frame_mut().early_destination = outer;
+		value
 	}
 
 	pub(super) fn load_destination(&self, slot: Slot<'ctx>) -> Result<Val<'ctx>, Error> {

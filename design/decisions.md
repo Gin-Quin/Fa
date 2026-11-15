@@ -675,3 +675,23 @@ not a claim that all construction paths have been converted at once.
 - `try` around an immutable initializer preserves its collection destination
   proof, just like grouping. A thrown constructor drops its completed prefix
   before the uninitialized caller owner is registered.
+
+### Constructing recursive return values in early boxes (implementation, 2026-11-15)
+
+- In synchronous mode, an eligible recursive field's existing early-box hint
+  can be the output slot of its object literal or call. The subsequent recursive
+  ownership conversion consumes the same box and omits the aggregate transfer.
+  This preserves parent-before-child allocation and the existing arena protocol.
+- Key the offer to the field's exact initializer expression. After evaluating
+  arguments, recheck that the pending-box hint still names that box and type:
+  an argument conversion may already have consumed it. A consumed hint cannot
+  be reused as an output overlapping a live input. That case keeps ordinary
+  staging; neither an item nor an existing owner is overwritten prematurely.
+
+Completed fields are written into the private output as soon as they are ready,
+while retaining their individual cleanup entries until the whole constructor
+succeeds. This avoids keeping earlier child values live across later calls.
+The aggregate output parameter is `noalias`: callers use fresh local/element/field
+storage or an unconsumed early box; existing-place assignments keep staging.
+This communicates the construction rule to LLVM instead of treating output
+writes as possible mutations of borrowed inputs.

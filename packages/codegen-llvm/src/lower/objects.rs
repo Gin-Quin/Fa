@@ -751,6 +751,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				})
 				.transpose()?;
 			let lowered = match field {
+				FieldValue::Given(value)
+					if early.is_some_and(|(_, repr)| self.uses_return_slot(repr)) =>
+				{
+					let (pointer, repr) = early.expect("an early box");
+					self.expr_with_early_destination(value, Slot { pointer, repr })
+				}
 				FieldValue::Given(value) | FieldValue::Default(value)
 					if field_destination.is_some() =>
 				{
@@ -780,12 +786,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);
 			}
-			// Keep fields owned until the whole constructor succeeds.
-			lowered_fields.push((index, self.fresh(lowered), field_destination));
-		}
-		let mut value = structure.get_undef();
-		for (index, lowered, field_destination) in lowered_fields {
-			let lowered = self.take(lowered, None)?;
 			if let Some(slot) = destination {
 				let pointer = match field_destination {
 					Some(field) => field.pointer,
@@ -796,15 +796,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						"result.field",
 					)?,
 				};
-				self.store(
-					Slot {
-						pointer,
-						repr: lowered.repr,
-					},
-					lowered,
-					node,
-				)?;
-			} else if let Some(raw) = lowered.value {
+				self.store(Slot { pointer, repr }, lowered, node)?;
+			}
+			// Keep fields owned until the whole constructor succeeds.
+			lowered_fields.push((index, self.fresh(lowered)));
+		}
+		let mut value = structure.get_undef();
+		for (index, lowered) in lowered_fields {
+			let lowered = self.take(lowered, None)?;
+			if destination.is_none()
+				&& let Some(raw) = lowered.value
+			{
 				value = self
 					.builder
 					.build_insert_value(value, raw, index, "")?

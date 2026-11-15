@@ -138,6 +138,7 @@ struct Frame<'ctx> {
 	return_buffer: Option<collection_storage::CollectionBuffer<'ctx>>,
 	collection_result_root: Option<NodeId>,
 	destination: Option<(NodeId, Slot<'ctx>)>,
+	early_destination: Option<(PointerValue<'ctx>, Repr)>,
 	/// Fixed collection storage reserved in this function's entry block.
 	collection_bytes: u64,
 	collection_locals: rustc_hash::FxHashSet<(FileId, SymbolId)>,
@@ -1192,6 +1193,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return_buffer: None,
 			collection_result_root: None,
 			destination: None,
+			early_destination: None,
 			collection_bytes: 0,
 			collection_locals: rustc_hash::FxHashSet::default(),
 			function,

@@ -878,6 +878,7 @@ console.log(items.length)
 			.find("@fa.build.arena(ptr %")
 			.expect("a recursive call");
 		assert!(allocation < recursion, "{build}");
+		assert!(!build.contains("return.result"), "{build}");
 		assert!(!build.contains("@fa_alloc("), "{build}");
 		assert!(!build.contains("@fa_arena_enter("), "{build}");
 	}

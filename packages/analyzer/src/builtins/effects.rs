@@ -9,9 +9,13 @@
 pub enum BuiltinEffect {
 	/// `mutates self`: any change (`push`, `insert`, `sortInPlace`, `clear`…).
 	MutatesSelf,
-	/// `mutates self.size` (or `.length`): adds an element, moves none.
+	/// `mutates self.size`: adds an element, moves none (a set, a map, a
+	/// pool, a columnar).
 	MutatesSize,
-	/// Storage reservation preserves items and length.
+	/// `mutates self.length`: adds an element, moves none (`GrowingArray`).
+	MutatesLength,
+	/// `mutates self.capacity`: reserves storage, moves no item and keeps
+	/// the length (`reserve` of a collection that never moves its items).
 	MutatesCapacity,
 	/// `invalidates self[self.length - 1]`: `pop`.
 	InvalidatesLast,
@@ -79,7 +83,8 @@ pub fn effects_of_kind(kind: crate::types::CollKind, method: &str) -> Vec<Builti
 		.map(|effect| match (effect.step, effect.invalidates) {
 			(EffectStep::Whole, _) => MutatesSelf,
 			(EffectStep::Capacity, _) => MutatesCapacity,
-			(EffectStep::Size | EffectStep::Length, _) => MutatesSize,
+			(EffectStep::Size, _) => MutatesSize,
+			(EffectStep::Length, _) => MutatesLength,
 			(EffectStep::Element, false) => MutatesKey(0),
 			(EffectStep::Element, true) => InvalidatesKey(0),
 			(EffectStep::ElementsFrom, _) => InvalidatesFrom(0),
@@ -114,6 +119,11 @@ mod tests {
 		assert_eq!(effects_of("Array#delete"), [InvalidatesFrom(0)]);
 		assert_eq!(effects_of("Map#delete"), [InvalidatesKey(0)]);
 		assert!(effects_of("Array#map").is_empty());
+		assert_eq!(effects_of("GrowingArray#push"), [MutatesLength]);
+		assert_eq!(effects_of("GrowingSet#add"), [MutatesSize]);
+		assert_eq!(effects_of("GrowingMap#getOrInsert"), [MutatesSize]);
+		assert_eq!(effects_of("GrowingArray#reserve"), [MutatesCapacity]);
+		assert_eq!(effects_of("Array#reserve"), [MutatesSelf]);
 		assert!(changes_receiver("Array#clear"));
 		assert!(!changes_receiver("Array#get"));
 	}

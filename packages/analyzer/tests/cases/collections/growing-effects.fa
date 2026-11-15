@@ -1,0 +1,70 @@
+-- `GrowingArray.push` declares `mutates self.length`, the other growing
+-- collections `mutates self.size`; an effect on `length` or `size` implies
+-- the same effect on `capacity`, so `reserve` needs nothing more
+function addOne = (items: GrowingArray<Integer>) mutates items.length => {
+	items.push(1)
+}
+function reserveSome = (items: GrowingArray<Integer>) mutates items.length => {
+	items.reserve(10)
+}
+function reserveThenPush = (items: GrowingArray<Integer>) mutates items.length => {
+	items.reserve(2)
+	items.push(2)
+	items.push(3)
+}
+function reserveWhole = (items: GrowingArray<Integer>) mutates items => {
+	items.reserve(10)
+	items.push(4)
+}
+function reserveKeys = (scores: GrowingMap<String, Integer>) mutates scores.size => {
+	scores.reserve(10)
+	scores.getOrInsert("Ana", 1)
+}
+function reserveNames = (names: GrowingSet<String>) mutates names.size => {
+	names.reserve(10)
+	names.add("Ana")
+}
+function reserveWholeSet = (names: GrowingSet<String>) mutates names => names.reserve(10)
+function reservePool = (scores: Pool<Integer>) mutates scores.size => {
+	scores.reserve(10)
+}
+function reserveArray = (items: Array<Integer>) mutates items => {
+	items.reserve(10)
+	items.push(1)
+}
+
+mutable values: GrowingArray<Integer> = []
+addOne(values)
+reserveSome(values)
+console.log("{values.length}") -- prints: 1
+-- a length effect invalidates no reference into the items
+function keepsReferences = (items: GrowingArray<Integer>): Integer throws IndexError mutates items.length => {
+	use first = try items[0]
+	reserveThenPush(items)
+	first
+}
+console.log(keepsReferences(values) catch error => 0) -- prints: 1
+reserveWhole(values)
+console.log("{values.length}") -- prints: 4
+mutable scores: GrowingMap<String, Integer> = []
+reserveKeys(scores)
+console.log("{scores.size}") -- prints: 1
+mutable names: GrowingSet<String> = []
+reserveNames(names)
+reserveWholeSet(names)
+console.log("{names.size}") -- prints: 1
+mutable pool: Pool<Integer> = []
+reservePool(pool)
+console.log("{pool.size}") -- prints: 0
+mutable array: Array<Integer> = []
+reserveArray(array)
+console.log("{array.length}") -- prints: 1
+
+-- a module-level value
+mutable buffer: GrowingArray<Integer> = []
+function fill = () mutates buffer.length => {
+	buffer.reserve(3)
+	buffer.push(5)
+}
+fill()
+console.log("{buffer.length}") -- prints: 1

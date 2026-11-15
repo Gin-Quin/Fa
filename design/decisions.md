@@ -631,6 +631,8 @@ is introduced. Collections and ordinary objects owning collections require
 `copy value` to keep both values usable. An implicit last-use move invalidates
 the source, including its aliases. Other ordinary objects retain value semantics.
 
+> **Superseded for resources declaring `destroy`** by [Lead decisions (2026-11-15)](#lead-decisions-2026-11-15), "Ownership landing". The counted-Resource policy below, including the Resource-sharing premise of the following paragraph, is historical; the new decision preserves explicit synchronization-handle sharing.
+
 Foreign resources and synchronization handles share their instance and state
 through counted local handles. The last owner finalizes a resource. A resource
 containing a collection is a sharing boundary: copying its handle does not copy
@@ -771,11 +773,11 @@ conservatively retain the check.
 - **A function's generic parameters start its signature** (after `=`), not its name: they are part of its type. So a lambda can declare them (`<Value>(value: Value) => value`), and a function type can have them (`(transform: <Value>(value: Value) => Value) => …`). A value of a generic function type must be known at compile time (a named function or a lambda given directly; `GN030` otherwise), and the function receiving it is instantiated per function argument, so nothing is boxed natively; on JavaScript it is erased. Generic function types are never inferred: an unannotated lambda is generic only when its expected type is.
 - **Tokenization, no lookahead**: (1) `<` followed by whitespace (space, tab, line break) is the comparison; any other `<` opens a generic list. (2) Inside an open generic list, `>` closes it; outside, it is the comparison. (3) Parentheses, brackets and braces suspend the list, so a comparison inside it is parenthesized: `Choose<(count > 255), UInt16, UInt8>`. (4) `<=`, `>=`, `=>` and `->` are longer tokens, never brackets (`Pool<people->bestFriend>`). Consequences: `a<b` is a syntax error (write `a < b`); a generic list starts on the line of its `<`; `>>` closes two lists (no shift operator).
 - **Exports**: `export type<First, Second> = …`, `export function = <Item>(…) => …`.
-- **Status**: implemented in the parser, the analyzer, the formatter, both backends' fixtures and the documentation (commits `48c2e330`..`c25b6b5d`). Left to implement, from the decisions below (also in `design/todo.md`): the narrower `GN030` (parameters of lambdas and of function types, the argument check) and the single `E-DECL-6` on `let f = <T>(…) => …`; the error message of `<Item> async (…)`; the formatter's breaking of long generic lists; the re-reading of an unclosed `<` as a comparison, and the message of an unclosed list after a type.
+- **Status**: implemented in the parser, the analyzer, the formatter, both backends' fixtures and the documentation (commits `48c2e330`..`c25b6b5d`). Left to implement, from the decisions below (also in `design/todo.md`): the narrower `GN030` (parameters of lambdas and of function types, the argument check) and the message wording of `E-DECL-6` on `let f = <T>(…) => …` (the single diagnostic is implemented); the error message of `<Item> async (…)`; the formatter's breaking of long generic lists; the re-reading of an unclosed `<` as a comparison, and the message of an unclosed list after a type.
 
 ### Open points of the implementation (decided by Fable for the user, 2026-11-15)
 
-- **A generic function type is written only as the type of a parameter of a `function` declaration** (named functions and methods). Its argument is a named generic function, a lambda written as the argument, or the caller's own parameter of a generic function type (forwarding: `function applyTwice = (transform: <Value>(value: Value) => Value, …) => applyToBoth(transform, …)`, instantiated transitively). Everywhere else it is `GN030`: `let`, `static` and `mutable` declarations (`let alias: <Value>(value: Value) => Value = identity`), return types, fields, collection elements, and parameters of lambdas or of function types (`run: (transform: <Value>(value: Value) => Value) => Integer`, accepted today). Reasons: one way to name a function (an alias adds nothing over `identity`, and `E-DECL-6` already refuses lambdas in declarations); the receiving function is instantiated per argument, which needs no compile-time evaluation of bindings, returns or fields, and never boxes; a lambda or a function type with such a parameter would itself be a value that must be known at compile time, a second level nobody asked for. The rule can be widened later without breaking code (first candidate: a generic method requirement in a constraint, `{ map: <Result>(self, …) => … }`, resolved statically like any method).
+- **A generic function type is written only as the type of a parameter of a `function` declaration** (named functions and methods). Its argument is a named generic function, a lambda written as the argument, or the caller's own parameter of a generic function type (forwarding: `function applyTwice = (transform: <Value>(value: Value) => Value, …) => applyToBoth(transform, …)`, instantiated transitively). Everywhere else it is `GN030`: `let`, `static` and `mutable` declarations (`let alias: <Value>(value: Value) => Value = identity`), return types, fields, collection elements, and parameters of lambdas or of function types (`run: (transform: <Value>(value: Value) => Value) => Integer`, accepted today). Reasons: one way to name a function (an alias adds nothing over `identity`, and `E-DECL-6` already refuses lambdas in declarations); native generic function parameters use instance tables, which need no compile-time evaluation of bindings, returns or fields, and never box; a lambda or a function type with such a parameter would itself be a value that must be known at compile time, a second level nobody asked for. The rule can be widened later without breaking code (first candidate: a generic method requirement in a constraint, `{ map: <Result>(self, …) => … }`, resolved statically like any method).
 - **`let f = <T>(…) => …` is `E-DECL-6` only**, with the fix `function f = <T>(…) => …`; the second error reported today (`GN015`) is dropped. `let g = identity` stays `GN015` (annotate with a function type that isn't generic, which binds the parameters: `let g: (value: Integer) => Integer = identity`).
 - **`async` comes before the generic parameters**: `async <Item>(item: Item) => …`, for lambdas and function types, as implemented. It mirrors the declaration (`async function name = <Item>(…) => …`: `async`, then the signature, which starts with its generic parameters) and TypeScript (`async <T>(x: T) => x`), so there is one order and it doesn't surprise JavaScript developers. `<Item> async (…) => …` is a syntax error whose message gives the right order. `async` is the only prefix of a lambda: effects (`throws`, `mutates`, `requires`…) follow the return type, unchanged by generic parameters.
 - **Long generic lists (formatter)**: rule 1 of the tokenizer stays (a `<` followed by a line break is a comparison), so the first item always stays on the line of `<`. A line break is never a separator inside a generic list (it ends an unclosed list, which is what makes the recovery below possible): items are separated by commas. The formatter breaks, in this order: (1) what follows the list (the parameters, the body), (2) a last item written between braces or parentheses, as today (`Map<String, {` … `}>`), (3) the list itself: a line break after each comma, the following items indented once, no trailing comma, and `>` on its own line at the indentation of the statement:
@@ -1273,3 +1275,79 @@ The worker-pool timeout fixture gives a replacement worker 1,000 ms to start and
 ## Coroutine decimal append cleanup (integration review C1, 2026-11-15)
 
 The decimal fallback of `append_integer` brackets `integer_string` and its append with the existing statement cleanup mark. In a coroutine the decimal is an owned temporary; its drop must stay in that branch, before the join reached by the inline and single-digit paths. The ordinary template/independent-parts paths create their decimals unconditionally, and `append_part` already brackets its temporaries. Scalar non-integer appends use the builder. No decimal outlives an append or a branch, and no storage or string semantics change. The regression fixtures cover started coroutines, Int32 and UInt8, loops, multi-part templates, construction, `toString`, other scalars, and suspension both between appends and inside a multi-part template, at O0/O3 with leak checks on every LLVM target.
+
+## Lead decisions (2026-11-15)
+
+### Repository and process (lead, 2026-11-15)
+
+- One trunk: `compiler` and `perf/native-goose` are merged on `integrate/trunk`; after review it becomes `main` (local; pushing is the user's call) and the two line names are deleted. Branch namespaces: `pending/*` (validated, to integrate), `wip/*` (unfinished snapshots), `refs/archive/*` (superseded branches, old stashes).
+- The web target is tested without a browser: the `web` build runs in a sandbox exposing only web-standard globals (no `process`, `Buffer`, `require`, `Bun`, `node:` imports). Ratchet files per target (`expected-skips/<target>.txt`), like the LLVM harness.
+- CPU thresholds: Fable's rule of 2026-11-15 stays (a result within ±0.05 of its threshold only counts with a same-binary control within 3%).
+
+### Ownership landing (lead, 2026-11-15, from `/home/claude-dev/fa-lead/reports/wip-assessment.md` §4.2)
+
+The final ownership policy is the user's (2026-11-07): `Task` and every type declaring `destroy` (and composites owning one) are unique/noncopyable; resource parameters are borrowed; collections and objects owning collections need `copy value` to keep both values usable, a proven last-use move is implicit and invalidates the source and its aliases; other ordinary objects keep value semantics; Mutex/Channel handles share identity; an escaping capture cannot own a unique value. The counted-Resource paragraph of "Explicit copies, shared resources and written type unions" is superseded. `Set` uses standard hashing and equality (no `key` option; use `Map`). No WIP snapshot is merged wholesale: focused slices (report §3.4).
+
+- Q1 **Defaults of a started function are evaluated when the task is created**, with the written arguments, in source order (native already does; JavaScript changes). Same as a JavaScript call of an async function. An error thrown by a default is thrown by the `start` expression; arguments already evaluated are dropped.
+- Q2 **No implicit copy inside a function adapter**: adapting a function returning a resource to one returning its plain data is an error whose fix is an explicit copy/projection at a visible site. Fields are never moved out from under `destroy`.
+- Q3 **A `throw` written inside `do … catch` is caught by that `catch`** (lexical, like JavaScript's `try`); an uncaught error leaves the function. `errors.md` is clarified; both backends already behave so; the compile-time interpreter and the analyzer's flow (moves and mutable state at the failure point) follow.
+- Q4 Local methods capturing data carry their environment through written method/finalizer capabilities; no new restriction.
+- Q5 Generic exact mutation: with unique resources the "shared resource" premise is gone. For generic synchronized payloads: conditional effect summaries resolved at specialization (fine-grained effects); only an instantiation that can't be proven gets a specific diagnostic. No language-wide generic restriction.
+- Q6 Defaults across files: a portable owner recipe for written declarations; where no written owner exists (anonymous nested object annotations) the explicit-argument diagnostic stays. Never pick a default from structural type equality.
+- Q7 Callable adaptation under erasure: compile-time specialization / static adapter within the generic-function-type scope of 2026-11-15 (`GN030`), same assignability on every target. Stored/returned generic function values ("forall") are dropped.
+- Q8 A finalizer binds its exact written owner and capabilities when it is constructed; never looked up later by structural type.
+- Q9 Resource origins through callable types and named-union payloads: metadata with exact owner identity in the one portable callable graph.
+- Q10 Across workers: independent copy, common Mutex, or proven exclusive transfer (user); implemented with unique owner/loan proofs and binary transport of protected data; only unproven transfers are rejected; `Task` never crosses.
+
+### Roadmap order (lead, 2026-11-15)
+
+1. Trunk (merge, review, `pending/*` integration, full baseline against Goose and Rust).
+2. Language semantics before optimization: strings (UTF-16 semantics, `Bytes`, no `Character`) and ownership (explicit `copy`, unique resources, `Set`, `with`), each on its integration branch, specification first.
+3. Completeness: native expected-skips to zero, compile-time values natively, analyzer pending cases and codes without emitter, interpreter coverage, JavaScript gaps, Node/web.
+4. Performance: every Goose benchmark at most 1.10× Goose, ahead of Rust; clean and optimized JavaScript output.
+5. `fa check`: clarity audit of every diagnostic, check time against `bun check`; the three project shapes on every target.
+
+### JavaScript targets, from the Node/web ratchet (lead, 2026-11-15, `reports/node-web-harness.md`)
+
+- **JSON parse errors are engine-independent**: the message and position of a `Json.parse` failure are Fa's (the native parser's wording is the reference); on JavaScript the engine's `SyntaxError` is replaced on the error path by a Fa scan that produces the same message. No fixture may depend on Bun's or V8's wording.
+- **`Pointer.allocate`/`free` on Node and web are refused at build time** (`FFI008`, like a call of an `@extern` function), never a run-time throw.
+- **Web has no command-line arguments** (`arguments` is empty, by design) and **cannot report a deadlock** (a page never exits; no `beforeExit`): the fixtures that need either are `-- skip-target: web`, and the documentation of the web target says so. The ratchet only lists real failures.
+- **`TcpListener.port` on Node** (bound asynchronously by `node:net`): left in the Node ratchet; decide with the standard library pass (make listening an awaited operation on every target, or keep it a Node limit).
+- To fix (real bug): the blocking instance of a generic async method called on web (`written-method-origins-async.fa`).
+
+## Records retained from the former resume note (2026-11-15)
+
+These are historical measurements and archive locations from before the trunk integration, not measurements of the current trunk. The new baseline and remaining experiments are tracked in `design/todo.md`.
+
+Baseline dbcee1d and exact Clang18 executables are archived in
+/tmp/fa-native-perf-next/compilers; reports are default-clang18-original16,
+initial-arrays-cpu.json and initial-arrays-memory.json. The latter uses GNU time,
+not inherited wait4 RSS. Baseline interp10496/Goose5504KiB, sexp57856/27136,
+scene7552/6656. CPU gaps remain largest on interp2.08x, scene1.50x, sexp1.39x,
+respond1.17x, records1.14x and lru1.12x. A general empty-array private-buffer
+prototype was rejected for regressions elsewhere. No overall win is claimed.
+Direct Root-to-Root compact fields remain a separate prototype; its interp
+instruction count regresses5.2 percent, so CPU/memory still require measurement.
+
+The all-payload relative16 experiment is preserved in
+/tmp/fa-native-perf-next/compilers/relative-edges-stage8 with strict manifests and reports
+relative16-{selected-instructions,memory,selected-cpu}.json. At original default sizes,
+18 quiet rotations using the same Clang 18 toolchain gave interp 66.89→54.31 ms versus
+Goose 39.45 ms; child RSS 7808→5888 KiB and faults 1635→1162. Instructions increased
+151.39→164.03 M. Calc regressed 220.67→240.05 ms without a memory saving, so the final
+candidate keeps all mixed/scalar payloads in the fixed 32-bit layout. These CPU numbers are
+the experiment's measurements, not final candidate measurements or an overall victory.
+The baseline, direct32 checkpoint and all reports/executables remain archived under
+/tmp/fa-native-perf-next. The final original 16 source/output/manifests are verified in
+direct-relative-final-clang18/preparation.json. Thirteen executable hashes are unchanged;
+their checked instruction counts are explicitly reused in instructions.json. The changed
+programs were profiled again: calc 1251.812 M (3.08 percent below baseline), interp 164.029 M
+(11.76 percent above baseline) and sexp 789.235 M (611 instructions above baseline). Final
+CPU samples await the next naturally quiet window after Root's combined full; no overall
+Goose victory is claimed.
+
+The external Codec reference checkout was `/home/claude-dev/projects/codec`, branch `codex/fa-worker-codecs`, AOT checkpoint `577e1e0`. Its binary-primitives/fromFunctions runtime is a reference for ownership slices 30–32, not a validated Fa transport integration. The separate repository's 129 tests do not validate the Fa consumers. The staged explicit-copy String-view regression is `/tmp/fa-native-perf-next/region-string-explicit-copy.fa`: preserve ancestor-arena view materialization when landing explicit Copy.
+
+The proposed split-aggregate optimization remains unimplemented: for a proven immutable `let parts = text.split(sep)` used only by `parts.length` and `parts.join(literal).length`, evaluate the source/separator once and retain a count and byte length when both are simple ASCII without CR and the separator is nonempty. Otherwise keep the ordinary array. The proof excludes other reads, captures, aliases and `use`; joining computes `bytes - (count - 1) * sep.length + (count - 1) * literal.length`. Test mutated inputs after declaration, empty/non-simple strings, evaluation order and leaks. Split views already reduce the allocation cost, so measure before implementing it and revisit the proof under the string redesign.
+
+Full LLVM workspace validations share `/tmp/fa-compiler-full-suite.lock` (`flock --close`, so children do not inherit the lock), use `CARGO_BUILD_JOBS=2` and two test threads, and keep sanitizer runs outside virtual-memory caps. The current Node/web harness enforces resident memory instead: JavaScript engines reserve sparse address space, so the former resume note's virtual-memory limit is not carried forward.

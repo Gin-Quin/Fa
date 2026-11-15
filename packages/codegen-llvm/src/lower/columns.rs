@@ -164,7 +164,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// `FaPool` of the runtime: `{ size, chunks, available, spare, count,
 	/// table_capacity, slot_size, capacity, pages, slots_offset }`.
-	fn pool_header(&self) -> inkwell::types::StructType<'ctx> {
+	pub(crate) fn pool_header(&self) -> inkwell::types::StructType<'ctx> {
 		let i64 = self.context.i64_type();
 		let i32 = self.context.i32_type();
 		let pointer = self.pointer_type();
@@ -180,6 +180,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				i32.into(),
 				i32.into(),
 				i32.into(),
+				i64.into(),
 			],
 			false,
 		)

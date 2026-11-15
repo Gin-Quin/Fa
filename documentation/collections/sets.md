@@ -214,6 +214,8 @@ The call above compiles to three `console.log` lines with no runtime lookup at a
 
 ### Native
 
+- **Immutable literals (current LLVM backend).** Constant `let` literals with supported scalar keys use read-only entries and index. Runtime local literals use a fixed frame buffer when the header, entries, index and any stable chunk directory fit the 2 KiB collection and 4 KiB frame budgets. Captured or asynchronous values and larger constructions keep heap storage. Static drops do nothing; frame drops destroy owned elements without freeing their storage. Static values copy for a mutable owner. Runtime owning or uncertain uses choose the heap before construction, without frame-to-heap copy-out. Duplicate constant elements retain set semantics.
+
 The set is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's maps since 1.24), with the values stored inline:
 
 - **Layout.** One allocation holding an array of control bytes followed by an array of values. A control byte is empty, deleted, or 7 bits of the value's hash. The control array is padded with a copy of its first group, so that probing never wraps in the middle of a group.

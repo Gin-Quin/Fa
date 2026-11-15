@@ -470,3 +470,73 @@ The question: Goose's growable arrays (`T[>..]`) are contiguous and never move, 
 	- *Otherwise, profile first.* A gap in `push`, iteration or copies is a bug of the segmented code (nothing structural explains it) and is fixed there. A gap in the views is fixed by running the methods on the segments.
 	- *Reserved first segment* only if, after that, a benchmark stays more than 10% slower than Goose **and** more than half of the gap is the segment lookup of indexing. Then: on 64-bit native targets only (never wasm32), for the arrays the compiler sees as alone and long-lived (module-level, or a local of a function that is not `async` and not called in a `for parallel` body, filled in a loop, without a capacity); 1 GiB reserved each, at most 64 live at once per process, an ordinary first segment when the budget is used or the system refuses.
 - **No `clear()` (user decision).** `GrowingArray` and every growing collection keep having no `clear()`: a method of a growing collection never invalidates a reference. Emptying one is an assignment of an empty collection, `x = []`, which replaces the value and so invalidates the references into it like any assignment. Natively, when the collection is held by a `mutable` variable or field, `x = []` drops the items and keeps the storage (the segments, pages and index), so the next elements reuse it; the memory is returned when the collection is destroyed.
+
+## Local immutable collections on the stack (user decision, 2026-11-15)
+
+**User rule:** every local immutable collection uses preallocated frame storage
+when its lifetime permits it. An immutable collection known at compile time,
+local or module-level, instead uses read-only data, like a string literal. This
+applies to arrays, maps, sets, pools, columnars, their growing variants, and
+`Bytes` once implemented. JavaScript keeps its existing objects and copy rules.
+
+Implementation choices:
+
+- **Budgets:** at most 2 KiB per collection and 4 KiB of collection storage per
+  function invocation, including headers, alignment, indices and directories.
+  All stack allocations have constant sizes and are emitted in the entry block,
+  so a loop reuses its space rather than accumulating allocations. Larger
+  constructions use the existing heap path. No input-sized `alloca`, virtual
+  address reservation or unbounded async frame is introduced. The budgets bound
+  additional space per call, not recursion depth; the existing native stack
+  overflow handler and wasm engine limits still apply. Freestanding retains its
+  existing limitation: stack overflow is not converted into a Fa stop there.
+- **Escapes (user decision): favor stack over heap, but heap over copy.** A
+  non-escaping collection uses frame storage. An owning field/collection/module
+  store, an escaping capture, a task/thread transfer, or survival across `await`
+  requires heap storage from creation. An unknown use also chooses the heap.
+  Never construct in a frame and copy out to rescue an escaping value. The
+  initial lowering proof accepts indexing, scalar properties, immediate builtin
+  receivers and iteration. It rejects owning and unknown reads, deferred
+  iterators, bound methods, captures, foreign exposure and asynchronous code. Heap locals retain the analyzer's existing moves. Static constants
+  still copy when a mutable owner needs independent storage.
+- **Return destinations (user decision):** a fresh collection returned by a
+  builtin or user function must be built directly in caller-provided storage
+  (a local, field, collection slot or forwarded return destination). Returning
+  is therefore not an escape. This rule also applies to objects and tuples:
+  returned aggregates must not be copied. Existing SSA moves, early recursive
+  boxes, direct construction of pushed object literals and foreign `sret` are
+  useful foundations, but do not implement a universal destination-passing ABI.
+  Until that ABI reaches a construction path, use the existing heap return and
+  ownership transfer, rather than introducing frame-to-heap copy-out.
+- **References:** `use` and iteration borrow the original slots; the analyzer's
+  mutability and invalidation rules remain authoritative. A reference cannot
+  outlive its owner. A value slice keeps its existing independent copy semantics.
+- **Destruction:** static storage drops nothing. Frame storage is never freed,
+  but its owned items are still dropped at each scope exit, including errors,
+  breaks and returns. A mutable copy of static data owns independent payloads.
+- **Layouts:** arrays retain `{ items, length, capacity }` and the word following
+  the header (already present for the 96-byte inline heap buffer). The word
+  distinguishes heap, static and frame storage without overloading the negative
+  capacity used for compact character arrays. Tables retain their ordinary
+  stable chunks and index, allocated together in frame storage when they fit.
+  Immutable pool reads use compact chunks because they never derive a chunk
+  from a slot address. Object columnars retain their aligned chunks: a 64 KiB
+  chunk cannot silently become a large stack allocation. Growing storage must
+  retain its segment addresses and any later segments must remain independently allocated.
+- **Construction scope:** literals directly initializing a `let`, and nonempty
+  separator `String.split` directly initializing a proven non-escaping local.
+  `split` receives a fixed 2 KiB caller buffer. A byte-length upper bound can
+  prove it fits without counting; otherwise counting stops as soon as the slot
+  budget is exceeded. It chooses the frame or ordinary heap path before building
+  any items. The bounded scan trades some CPU work for avoiding allocation and
+  relocation; all Unicode boundary checks are preserved. Empty separators
+  keep the existing character/compact-character path. User-function return slots,
+  `map`, `filter`, `from` and aggregate return destinations remain explicit
+  follow-up work in `design/todo.md`; no post-construction copy onto the stack.
+- **Targets:** use the same ABI and fixed limits on native, freestanding and
+  wasm32. On wasm, entry allocas use LLVM's linear-memory shadow stack; no
+  input-dependent extension or larger suspended task frame is permitted.
+
+The implementation report and tests specify the currently covered constructors
+and element shapes; this decision is the intended rule for every collection,
+not a claim that all construction paths have been converted at once.

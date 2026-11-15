@@ -1114,7 +1114,41 @@ static void test_tables(void) {
 	CHECK(allocated == before);
 }
 
+static void test_collection_destinations(void) {
+	long before = allocated;
+	_Alignas(16) uint8_t small[128];
+	FaArrayHeader *parts = fa_string_split_into((const uint8_t *)"a bb", 4, SIMPLE,
+	                                          (const uint8_t *)" ", 1, small, sizeof(small));
+	CHECK(parts == (FaArrayHeader *)small && parts->length == 2);
+	CHECK(fa_array_storage(parts) == 3 && allocated == before);
+	CHECK(string_length(&((FaString *)parts->items)[1]) == 2);
+	fa_array_free(parts, sizeof(FaString));
+	CHECK(allocated == before);
+	parts = fa_string_split_into((const uint8_t *)"a b c d e f g h", 15, SIMPLE,
+	                             (const uint8_t *)" ", 1, small, sizeof(small));
+	CHECK(parts != (FaArrayHeader *)small && parts->length == 8);
+	CHECK(fa_array_storage(parts) == 0);
+	fa_array_free(parts, sizeof(FaString));
+	CHECK(allocated == before);
+	_Alignas(16) uint8_t storage[2048];
+	FaSegmented *growing = fa_segmented_local(storage, 20, sizeof(int64_t), 3);
+	for (int64_t i = 0; i < 20; i += 1) {
+		*(int64_t *)fa_segmented_at(growing, i, sizeof(int64_t), 3) = i;
+	}
+	CHECK(*(int64_t *)fa_segmented_at(growing, 19, sizeof(int64_t), 3) == 19);
+	fa_segmented_free(growing, sizeof(int64_t), 3);
+	FaPool *pool = fa_pool_local(storage, 2, sizeof(int64_t));
+	*(int64_t *)fa_pool_at(pool, 0) = 42;
+	CHECK(fa_pool_seek(pool, 0) == 0 && *(int64_t *)fa_pool_at(pool, 0) == 42);
+	fa_pool_free(pool);
+	FaTable *table = fa_table_local(storage, 4, sizeof(TestTableEntry), 2);
+	CHECK(table->storage == 3 && table->length == 0);
+	fa_table_free(table, sizeof(TestTableEntry));
+	CHECK(allocated == before);
+}
+
 int main(void) {
+	test_collection_destinations();
 	test_tables();
 	test_integer_strings();
 	test_string_padding();

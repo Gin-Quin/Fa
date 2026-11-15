@@ -45,6 +45,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.pointer_type().into(),
 				self.pointer_type().into(),
 				self.pointer_type().array_type(SEGMENTS).into(),
+				i64.into(),
 			],
 			false,
 		)
@@ -558,6 +559,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		array: PointerValue<'ctx>,
 	) -> Result<(), Error> {
 		let item = self.item_repr(item_type, NodeId::new(0))?;
+		let field = builder.build_struct_gep(self.segmented_type(), array, 5, "")?;
+		let storage = builder
+			.build_load(self.context.i64_type(), field, "")?
+			.into_int_value();
+		let owned = builder.build_int_compare(
+			IntPredicate::NE,
+			storage,
+			storage.get_type().const_int(2, false),
+			"",
+		)?;
+		self.helper_when(builder, function, owned, |builder| {
+			builder.build_return(None)?;
+			Ok(())
+		})?;
 		if self.needs_drop(item) {
 			let length = self.growing_length(builder, array)?;
 			let item_llvm = self.llvm_type(item);

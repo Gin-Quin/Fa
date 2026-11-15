@@ -295,11 +295,44 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let element = self.pool_element(repr, node)?;
 		let place = self.pool_place(repr, node)?;
-		let pool = self.collection_new(&self.builder, repr, element)?;
-		for (value, _) in values {
-			let slot = self
-				.call_value(self.runtime.function("fa_pool_add_slot")?, &[pool.into()])?
-				.into_pointer_value();
+		let rows = !matches!(repr, Repr::Columnar(_))
+			&& !matches!(element, Repr::Object(ty) if self.has_sides(ty));
+		let count = values.len() as u64;
+		let pointer_size = u64::from(self.usize.get_bit_width() / 8);
+		let header_size = self.collection_data_size(self.pool_header().into());
+		let chunk_start = ((header_size + pointer_size + 7) & !7) + 8;
+		let item_size = self.collection_data_size(self.llvm_type(element));
+		let bytes =
+			((chunk_start + 24 + count.div_ceil(64) * 8 + 15) & !15) + count * item_size.max(4);
+		let buffer = if rows {
+			self.collection_stack(node, bytes)?
+		} else {
+			None
+		};
+		let pool = if let Some(buffer) = buffer {
+			self.call_value(
+				self.runtime.function("fa_pool_local")?,
+				&[
+					buffer.into(),
+					self.context.i64_type().const_int(count, false).into(),
+					self.item_size_const(element).into(),
+				],
+			)?
+			.into_pointer_value()
+		} else {
+			self.collection_new(&self.builder, repr, element)?
+		};
+		for (index, (value, _)) in values.into_iter().enumerate() {
+			let slot = if buffer.is_some() {
+				self.pool_at(
+					&self.builder,
+					pool,
+					self.context.i64_type().const_int(index as u64, false),
+				)?
+			} else {
+				self.call_value(self.runtime.function("fa_pool_add_slot")?, &[pool.into()])?
+					.into_pointer_value()
+			};
 			self.element_write(&self.builder, place, slot, value.value.expect("an element"))?;
 		}
 		Ok(self.fresh(Val::new(repr, pool)))
@@ -763,6 +796,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		builder.position_at_end(none);
 		builder.build_return(None)?;
 		builder.position_at_end(then);
+		let field = builder.build_struct_gep(self.pool_header(), pool, 10, "")?;
+		let storage = builder
+			.build_load(self.context.i64_type(), field, "")?
+			.into_int_value();
+		let owned = builder.build_int_compare(
+			IntPredicate::NE,
+			storage,
+			storage.get_type().const_int(2, false),
+			"",
+		)?;
+		self.helper_when(builder, function, owned, |builder| {
+			builder.build_return(None)?;
+			Ok(())
+		})?;
 		if self.needs_drop(element) {
 			self.helper_pool_each(builder, function, pool, |builder, address| {
 				let loaded = self.element_read(builder, place, address)?;

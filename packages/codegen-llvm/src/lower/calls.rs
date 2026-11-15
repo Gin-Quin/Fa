@@ -756,7 +756,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let name = match path {
 					"String#split" => {
 						string_argument(self, 0, &mut call)?;
-						"fa_string_split"
+						if let Some(destination) = self.collection_stack(node, 2048)? {
+							call.push(destination.into());
+							call.push(self.usize.const_int(2048, false).into());
+							"fa_string_split_into"
+						} else {
+							"fa_string_split"
+						}
 					}
 					"String#characters" => "fa_string_characters",
 					_ => "fa_string_code_points",

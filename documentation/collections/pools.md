@@ -159,6 +159,8 @@ Pools are the natural home for the objects of a graph, a scene, or an entity sys
 
 ### Native
 
+- **Immutable literals (current LLVM backend).** Constant `let` literals without relation sides use read-only headers, chunks, occupancy words and slots. Runtime local literals can use a compact read-only chunk in a fixed frame buffer (2 KiB per collection, 4 KiB per function); a read never needs to recover its chunk by masking its address. A mutable owner of static data requires an independent heap copy with the ordinary slab layout; runtime literals with owning or unknown uses choose the heap from creation. Captured or asynchronous values, relation-bearing elements and constructions above the budgets retain the heap path. Static drops do nothing; frame drops still destroy owned elements. References and iteration borrow the original slots.
+
 The pool is a **slab** (also called a hive or a colony): `plf::colony`, C++26 `std::hive` and the Rust `slab` crate are the references.
 
 - **Chunks.** A `Pool<T>` allocates chunks of one compile-time size, aligned to that size: 64 KiB, or more for a large `T` so that a chunk holds at least 64 slots. Large chunks are allocated with an aligned `mmap`. The header at the start of a chunk holds the occupancy bitmap (one `u64` word per 64 slots), the number of live slots, the head of the chunk's free list, and the links to the previous and next chunks.

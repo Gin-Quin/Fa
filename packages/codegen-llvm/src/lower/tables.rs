@@ -35,7 +35,7 @@ pub(crate) struct Table<'ctx> {
 }
 
 impl Table<'_> {
-	fn stable(self) -> bool {
+	pub(crate) fn stable(self) -> bool {
 		self.growing || self.value.is_some()
 	}
 }
@@ -45,7 +45,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// `{ ptr entries, i64 length, i64 used, i64 capacity, ptr index, i64
 	/// mask, i64 storage, i64 free, i64 occupied }`.
-	fn table_header(&self) -> StructType<'ctx> {
+	pub(crate) fn table_header(&self) -> StructType<'ctx> {
 		let i64 = self.context.i64_type();
 		let pointer = self.pointer_type();
 		self.context.struct_type(
@@ -55,6 +55,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				i64.into(),
 				i64.into(),
 				pointer.into(),
+				i64.into(),
 				i64.into(),
 				i64.into(),
 				i64.into(),
@@ -803,7 +804,50 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let table = self.table_of(repr)?;
 		let capacity = self.context.i64_type().const_int(items.len() as u64, false);
-		let pointer = self.table_new(table, capacity)?;
+		let count = items.len().max(4) as u64;
+		let entry_size = self.collection_data_size(table.entry.into());
+		let pointer_size = u64::from(self.usize.get_bit_width() / 8);
+		let mut bytes = self.collection_data_size(self.table_header().into());
+		if table.stable() {
+			let chunks = count.div_ceil(32);
+			bytes += self.collection_data_size(
+				self.context
+					.struct_type(
+						&[
+							self.pointer_type().into(),
+							self.context.i64_type().into(),
+							self.context.i64_type().into(),
+						],
+						false,
+					)
+					.into(),
+			) + chunks * pointer_size;
+			bytes = (bytes + 15) & !15;
+			bytes += chunks * 32 * entry_size;
+		} else {
+			bytes = (bytes + 15) & !15;
+			bytes += count * entry_size;
+		}
+		bytes = ((bytes + 7) & !7) + (count * 2).next_power_of_two().max(8) * 4;
+		let pointer = if let Some(buffer) = self.collection_stack(node, bytes)? {
+			let kind = if table.value.is_some() && !table.growing {
+				2
+			} else {
+				u64::from(table.growing)
+			};
+			self.call_value(
+				self.runtime.function("fa_table_local")?,
+				&[
+					buffer.into(),
+					capacity.into(),
+					self.entry_size(table).into(),
+					self.context.i32_type().const_int(kind, false).into(),
+				],
+			)?
+			.into_pointer_value()
+		} else {
+			self.table_new(table, capacity)?
+		};
 		let result = self.fresh(Val::new(repr, pointer));
 		for item in items.iter() {
 			let mark = self.mark();
@@ -1746,6 +1790,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		builder.position_at_end(none);
 		builder.build_return(None)?;
 		builder.position_at_end(then);
+		let field = builder.build_struct_gep(self.table_header(), pointer, 9, "")?;
+		let storage = builder
+			.build_load(self.context.i64_type(), field, "")?
+			.into_int_value();
+		let owned = builder.build_int_compare(
+			IntPredicate::NE,
+			storage,
+			storage.get_type().const_int(2, false),
+			"",
+		)?;
+		self.helper_when(builder, function, owned, |builder| {
+			builder.build_return(None)?;
+			Ok(())
+		})?;
 		let owning =
 			self.needs_drop(table.key) || table.value.is_some_and(|value| self.needs_drop(value));
 		if owning {

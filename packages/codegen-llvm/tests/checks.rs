@@ -70,6 +70,124 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn immutable_literals_use_readonly_data_for_every_collection() {
+		for (kind, literal, measure) in [
+			("Array<Integer>", "[2, 3, 5]", "length"),
+			("GrowingArray<Integer>", "[2, 3, 5]", "length"),
+			("Map<String, Integer>", "[(\"abcdefghijk\", 3)]", "size"),
+			("GrowingMap<Integer, Integer>", "[(2, 3)]", "size"),
+			("Set<String>", "[\"x\", \"x\", \"é\"]", "size"),
+			("Set<Float>", "[0.0, -0.0, 1.5]", "size"),
+			("GrowingSet<Integer>", "[2, 3]", "size"),
+			("Pool<String>", "[\"hello\"]", "size"),
+			("GrowingPool<Integer>", "[2, 3]", "size"),
+			("Columnar<{ value: Integer }>", "[{ value = 3 }]", "size"),
+			(
+				"GrowingColumnar<{ value: Integer }>",
+				"[{ value = 3 }]",
+				"size",
+			),
+		] {
+			let name = format!("readonly-{}", kind.split('<').next().unwrap());
+			let source = format!(
+				"let global: {kind} = {literal}\nfunction read = (): Integer => {{ let local: {kind} = {literal}\nlocal.{measure} + global.{measure} }}\nconsole.log(read())\n"
+			);
+			let ir = ir_of(&name, &source);
+			for constructor in [
+				"@fa_array_new(",
+				"@fa_table_new",
+				"@fa_pool_new(",
+				"@fa_columnar_new(",
+				"@fa_segmented_new(",
+				"@fa_alloc(",
+				"@heap_alloc(",
+			] {
+				assert!(!ir.contains(constructor), "{kind}: {ir}");
+			}
+			let full = std::fs::read_to_string(
+				PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+					.join("fa-checks")
+					.join(format!("{name}.ll")),
+			)
+			.unwrap();
+			assert!(
+				full.lines()
+					.any(|line| line.contains("@fa.collection.static") && line.contains("constant")),
+				"{kind}: {full}"
+			);
+		}
+	}
+
+	#[test]
+	fn runtime_immutable_literals_use_fixed_entry_allocas() {
+		for (kind, literal, measure) in [
+			("Array<Integer>", "[n, n + 1]", "length"),
+			("GrowingArray<Integer>", "[n, n + 1]", "length"),
+			("Map<Integer, Integer>", "[(n, n + 1)]", "size"),
+			("GrowingMap<Integer, Integer>", "[(n, n + 1)]", "size"),
+			("Set<Integer>", "[n, n + 1]", "size"),
+			("GrowingSet<Integer>", "[n, n + 1]", "size"),
+			("Pool<Integer>", "[n, n + 1]", "size"),
+			("GrowingPool<Integer>", "[n, n + 1]", "size"),
+		] {
+			let name = format!("frame-{}", kind.split('<').next().unwrap());
+			let source = format!(
+				"function read = (n: Integer): Integer => {{ let local: {kind} = {literal}\nlocal.{measure} }}\nconsole.log(read(3))\n"
+			);
+			let ir = ir_of(&name, &source);
+			assert!(ir.contains("collection.storage = alloca ["), "{kind}: {ir}");
+			for constructor in [
+				"@fa_array_new(",
+				"@fa_table_new",
+				"@fa_pool_new(",
+				"@fa_segmented_new(",
+				"@fa_alloc(",
+				"@heap_alloc(",
+			] {
+				assert!(!ir.contains(constructor), "{kind}: {ir}");
+			}
+		}
+	}
+
+	#[test]
+	fn collection_and_frame_budgets_keep_the_heap_fallback() {
+		let large = std::iter::repeat_n("n", 300).collect::<Vec<_>>().join(", ");
+		let source = format!(
+			"function read = (n: Integer): Integer => {{\nlet values = [{large}]\nvalues.get(299) ?? 0\n}}\nconsole.log(read(3))\n"
+		);
+		let ir = ir_of("large-frame-fallback", &source);
+		assert!(ir.contains("@fa_array_new("), "{ir}");
+		assert!(!ir.contains("collection.storage = alloca"), "{ir}");
+		let small = std::iter::repeat_n("n", 100).collect::<Vec<_>>().join(", ");
+		let declarations = (0..5)
+			.map(|i| format!("let a{i} = [{small}]\n"))
+			.collect::<String>();
+		let source = format!(
+			"function read = (n: Integer): Integer => {{\n{declarations}(a0.get(0) ?? 0) + (a1.get(0) ?? 0) + (a2.get(0) ?? 0) + (a3.get(0) ?? 0) + (a4.get(0) ?? 0)\n}}\nconsole.log(read(3))\n"
+		);
+		let ir = ir_of("total-frame-fallback", &source);
+		assert!(ir.contains("collection.storage = alloca"), "{ir}");
+		assert!(ir.contains("@fa_array_new("), "{ir}");
+	}
+
+	#[test]
+	fn escaping_literals_start_on_the_heap_and_split_receives_a_destination() {
+		let source = "function returned = (n: Integer): Array<Integer> => {\nlet items = [n, n + 1]\nitems\n}\nconsole.log(returned(2))\n";
+		let ir = ir_of("returned-collection-heap", source);
+		assert!(!ir.contains("collection.storage = alloca"), "{ir}");
+		assert!(ir.contains("@fa_array_new("), "{ir}");
+		assert!(!ir.contains("call fastcc ptr @fa.copy"), "{ir}");
+		let source = "function parts = (text: String): Integer => {\nlet words = text.split(\" \" )\nwords.length\n}\nconsole.log(parts(\"one two\"))\n";
+		let ir = ir_of("split-caller-destination", source);
+		assert!(
+			ir.contains("collection.storage = alloca [2048 x i8]"),
+			"{ir}"
+		);
+		assert!(ir.contains("@fa_string_split_into("), "{ir}");
+		assert!(!ir.contains("@fa_string_split("), "{ir}");
+	}
+
+	#[test]
 	fn an_unproven_sum_is_checked_and_proven_differences_are_nsw() {
 		let ir = ir_of(
 			"fib",

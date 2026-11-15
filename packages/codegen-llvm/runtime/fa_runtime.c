@@ -2086,6 +2086,13 @@ static void mark_items(FaArrayHeader *array, uint64_t marker) {
 	__builtin_memcpy((uint8_t *)array + sizeof(FaArrayHeader), &marker, 8);
 }
 
+// 0/1: ordinary heap storage, 2: immutable static, 3: frame storage.
+FA_EXPORT __attribute__((always_inline)) int32_t fa_array_storage(const FaArrayHeader *array) {
+	uint64_t marker;
+	__builtin_memcpy(&marker, (const uint8_t *)array + sizeof(FaArrayHeader), 8);
+	return marker >= 2 ? (int32_t)marker : 0;
+}
+
 /// Frees the block of the items of an array, unless it is the header's.
 /// Called before the items move to another block: the marker is cleared,
 /// since that block may happen to follow the header.
@@ -2458,10 +2465,62 @@ FA_EXPORT FaArrayHeader *fa_arguments(void) {
 
 /// Frees an array whose items were dropped: its block and its header.
 FA_EXPORT void fa_array_free(FaArrayHeader *array, int64_t item_size) {
+	if (fa_array_storage(array) != 0) { return; }
 	if (!inline_items(array)) {
 		fa_free(array->items, (size_t)(array->capacity < 0 ? array->length : array->capacity * item_size), 16);
 	}
 	fa_free(array, INLINE_ITEMS, sizeof(int64_t));
+}
+
+/// The same non-overlapping, boundary-checked search as `each_match`, but
+/// stop as soon as the caller's item budget is exceeded. Large inputs do
+/// not need a complete extra scan merely to choose ordinary heap storage.
+static size_t count_split_parts(const uint8_t *text, size_t length, size_t simple,
+                                const uint8_t *separator, size_t separator_length,
+                                size_t limit) {
+	size_t count = 1;
+	size_t offset = 0;
+	Boundaries starts = {text, length, 0, simple};
+	Boundaries ends = {text, length, 0, simple};
+	while (offset + separator_length <= length) {
+		if (simple) { offset = next_byte(text, length, offset, separator[0]); }
+		if (offset + separator_length > length) { break; }
+		if (bytes_at(text, length, offset, separator, separator_length) &&
+		    at_boundary(&starts, offset) && at_boundary(&ends, offset + separator_length)) {
+			count += 1;
+			if (count > limit) { return count; }
+			offset += separator_length;
+		} else { offset += 1; }
+	}
+	return count;
+}
+
+/// Construct directly in the caller's fixed destination when it fits.
+/// Count first: a large result takes the heap from the start, so no items
+/// are relocated or copied out of a partially filled frame buffer.
+FA_EXPORT void *fa_string_split_into(const uint8_t *text, size_t length, size_t capacity,
+                                     const uint8_t *separator, size_t separator_length,
+                                     void *destination, size_t bytes) {
+	if (separator_length == 0 || destination == 0 || bytes < INLINE_ITEMS) {
+		return fa_string_split(text, length, capacity, separator, separator_length);
+	}
+	size_t limit = (bytes - INLINE_ITEMS) / sizeof(FaString);
+	// At most one part per non-overlapping separator, plus the last part.
+	size_t count = length / separator_length < limit ? length / separator_length + 1
+	             : count_split_parts(text, length, capacity & SIMPLE, separator, separator_length, limit);
+	if (count > limit) {
+		return fa_string_split(text, length, capacity, separator, separator_length);
+	}
+	FaArrayHeader *parts = destination;
+	parts->items = (uint8_t *)destination + INLINE_ITEMS;
+	parts->length = 0;
+	parts->capacity = (int64_t)count;
+	mark_items(parts, 3);
+	Splitting splitting = {text, 0, separator_length, parts, capacity & SIMPLE};
+	each_match(text, length, capacity & SIMPLE, separator, separator_length, split_one, &splitting);
+	FaString *last = fa_array_push_slot(parts, sizeof(FaString));
+	*last = owned_copy_with(text + splitting.previous, length - splitting.previous, capacity & SIMPLE);
+	return parts;
 }
 
 // ── segmented storage (the growing collections) ────────────────────────
@@ -2485,6 +2544,7 @@ typedef struct {
 	uint8_t *cursor;
 	uint8_t *end;
 	uint8_t *segment[FA_SEGMENTS];
+	int64_t storage;
 } FaSegmented;
 
 /// The segment of item `index`, and the index of its first item.
@@ -2518,6 +2578,23 @@ FA_EXPORT __attribute__((always_inline)) void *fa_segmented_at(const FaSegmented
 FA_EXPORT FaSegmented *fa_segmented_new(void) {
 	FaSegmented *array = fa_alloc(sizeof(FaSegmented), sizeof(int64_t));
 	__builtin_memset(array, 0, sizeof(FaSegmented));
+	return array;
+}
+
+FA_EXPORT FaSegmented *fa_segmented_local(void *buffer, int64_t length,
+                                         int64_t item_size, int32_t k) {
+	FaSegmented *array = buffer;
+	__builtin_memset(array, 0, sizeof(FaSegmented));
+	array->storage = 3;
+	array->length = length;
+	uint8_t *next = (uint8_t *)(((uintptr_t)buffer + sizeof(FaSegmented) + 15) & ~(uintptr_t)15);
+	int64_t capacity = 0;
+	while (capacity < length) {
+		int64_t size = segment_size(array->segments, k);
+		array->segment[array->segments++] = next;
+		next += size * item_size;
+		capacity += size;
+	}
 	return array;
 }
 
@@ -2721,6 +2798,7 @@ FA_EXPORT void fa_segmented_reset(FaSegmented *array, int64_t item_size, int32_t
 
 /// Frees a `GrowingArray` whose items were dropped.
 FA_EXPORT void fa_segmented_free(FaSegmented *array, int64_t item_size, int32_t k) {
+	if (array->storage) { return; }
 	for (int64_t segment = 0; segment < array->segments; segment += 1) {
 		fa_free(array->segment[segment], (size_t)(segment_size(segment, k) * item_size), 16);
 	}
@@ -3188,7 +3266,40 @@ typedef struct {
 	uint32_t capacity;
 	uint32_t pages;
 	uint32_t slots_offset;
+	int64_t storage;
 } FaPool;
+
+/// A compact, read-only chunk needs no size alignment: only mutations
+/// derive a chunk from its element's address. Those require a heap copy.
+FA_EXPORT FaPool *fa_pool_local(void *buffer, int64_t length, int64_t item_size) {
+	FaPool *pool = buffer;
+	__builtin_memset(pool, 0, sizeof(FaPool));
+	pool->storage = 3;
+	pool->size = length;
+	pool->slot_size = item_size < 4 ? 4 : (uint32_t)item_size;
+	pool->capacity = (uint32_t)length;
+	pool->count = length ? 1 : 0;
+	pool->table_capacity = 1;
+	uint8_t *next = (uint8_t *)buffer + sizeof(FaPool);
+	pool->chunks = (PoolChunk **)next;
+	next += sizeof(PoolChunk *);
+	next = (uint8_t *)(((uintptr_t)next + 7) & ~(uintptr_t)7);
+	pool->available = (uint64_t *)next;
+	*pool->available = 0;
+	next += 8;
+	PoolChunk *chunk = (PoolChunk *)next;
+	*pool->chunks = chunk;
+	size_t words = ((size_t)length + 63) / 64;
+	__builtin_memset(chunk, 0, sizeof(PoolChunk) + words * 8);
+	next += sizeof(PoolChunk) + words * 8;
+	chunk->slots = (uint8_t *)(((uintptr_t)next + 15) & ~(uintptr_t)15);
+	chunk->live = (uint32_t)length;
+	chunk->bumped = (uint32_t)length;
+	for (int64_t index = 0; index < length; index += 1) {
+		chunk->occupancy[index / 64] |= (uint64_t)1 << (index % 64);
+	}
+	return pool;
+}
 
 /// A new empty pool of elements of `item_size` bytes.
 FA_EXPORT FaPool *fa_pool_new(int64_t item_size) {
@@ -3420,6 +3531,7 @@ FA_EXPORT void fa_pool_clear(FaPool *pool) {
 
 /// Frees a pool whose elements were dropped.
 FA_EXPORT void fa_pool_free(FaPool *pool) {
+	if (pool->storage) { return; }
 	pool_release_chunks(pool);
 	if (pool->spare != 0) {
 		give_pages((uint8_t *)pool->spare, pool->pages);
@@ -4714,6 +4826,8 @@ typedef struct {
 	int64_t free;
 	// Nonempty index slots, including tombstones. Bounds unsuccessful probes.
 	int64_t occupied;
+	// 0: heap, 2: immutable static, 3: function frame.
+	int64_t storage;
 } FaTable;
 
 #define TABLE_CHUNK_BITS 5
@@ -4831,6 +4945,7 @@ static int64_t index_slots(int64_t capacity) {
 /// A new empty table with room for `capacity` entries.
 FA_EXPORT FaTable *fa_table_new(int64_t capacity, int64_t entry_size) {
 	FaTable *table = fa_alloc(sizeof(FaTable), sizeof(int64_t));
+	table->storage = 0;
 	if (capacity < 4) {
 		capacity = 4;
 	}
@@ -4849,6 +4964,7 @@ FA_EXPORT FaTable *fa_table_new(int64_t capacity, int64_t entry_size) {
 /// for `capacity` entries.
 FA_EXPORT FaTable *fa_table_new_growing(int64_t capacity, int64_t entry_size) {
 	FaTable *table = fa_alloc(sizeof(FaTable), sizeof(int64_t));
+	table->storage = 0;
 	if (capacity < 4) {
 		capacity = 4;
 	}
@@ -4871,6 +4987,43 @@ FA_EXPORT FaTable *fa_table_new_growing(int64_t capacity, int64_t entry_size) {
 FA_EXPORT FaTable *fa_table_new_map(int64_t capacity, int64_t entry_size) {
 	FaTable *table = fa_table_new_growing(capacity, entry_size);
 	table->growing = 2;
+	return table;
+}
+
+/// All blocks of a fixed-size immutable literal share one frame allocation.
+/// Stable tables keep the usual 32-slot chunks, so references use the same ABI.
+FA_EXPORT FaTable *fa_table_local(void *buffer, int64_t capacity, int64_t entry_size,
+                                 int32_t kind) {
+	FaTable *table = buffer;
+	__builtin_memset(table, 0, sizeof(FaTable));
+	if (capacity < 4) { capacity = 4; }
+	table->capacity = capacity;
+	table->growing = kind;
+	table->storage = 3;
+	uint8_t *next = (uint8_t *)buffer + sizeof(FaTable);
+	if (kind) {
+		FaTableEntries *entries = (FaTableEntries *)next;
+		next += sizeof(FaTableEntries);
+		int64_t chunks = (capacity + TABLE_CHUNK_SLOTS - 1) / TABLE_CHUNK_SLOTS;
+		entries->chunks = (uint8_t **)next;
+		entries->count = chunks;
+		entries->capacity = chunks;
+		next += chunks * sizeof(uint8_t *);
+		next = (uint8_t *)(((uintptr_t)next + 15) & ~(uintptr_t)15);
+		for (int64_t chunk = 0; chunk < chunks; chunk += 1) {
+			entries->chunks[chunk] = next;
+			next += TABLE_CHUNK_SLOTS * entry_size;
+		}
+		table->entries = (uint8_t *)entries;
+	} else {
+		next = (uint8_t *)(((uintptr_t)next + 15) & ~(uintptr_t)15);
+		table->entries = next;
+		next += capacity * entry_size;
+	}
+	next = (uint8_t *)(((uintptr_t)next + 7) & ~(uintptr_t)7);
+	table->index = next;
+	table->mask = index_slots(capacity) - 1;
+	__builtin_memset(table->index, 0, (size_t)(table->mask + 1) * table_index_width(table->mask));
 	return table;
 }
 
@@ -5043,6 +5196,7 @@ FA_EXPORT void fa_table_clear(FaTable *table) {
 
 /// Frees a table whose keys and values were dropped.
 FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
+	if (table->storage) { return; }
 	if (table->growing) {
 		FaTableEntries *entries = (FaTableEntries *)table->entries;
 		for (int64_t chunk = 0; chunk < entries->count; chunk += 1) {

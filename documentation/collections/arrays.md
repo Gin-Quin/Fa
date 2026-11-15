@@ -26,7 +26,7 @@ Reserve capacity up front when you know the size, with the `capacity` option of 
 mutable buffer = Array<Integer>.from([], capacity = 1000)
 ```
 
-Arrays own their storage on the heap. See [memory management](/advanced/memory-management).
+Arrays own their storage. The native compiler can keep immutable values in read-only data or bounded stack storage. See [memory management](/advanced/memory-management).
 
 ## Creating collections
 
@@ -316,7 +316,9 @@ This is why Fa needs no `get_unchecked`: there is a single indexing syntax, chec
 
 ### Native
 
-- **Layout.** An array value is a pointer to a heap header `{ pointer, length, capacity }`. Small item buffers share the header's allocation; larger buffers use a separate block from `fa_alloc`. An empty array allocates its header only.
+- **Immutable literals.** Literal `let` arrays whose supported items are constant use read-only globals, including nested arrays and objects of constants. Other local `let` literals use a fixed entry-block buffer when their header and items fit 2 KiB and the function stays within its 4 KiB collection budget. Captured values, asynchronous programs and larger constructions keep the heap path. The word following the header marks static or frame storage; it is independent of the negative capacity used for compact character arrays. Static drops do nothing; frame drops destroy owned items without freeing the buffer. Static storage copies when another owner needs independent storage. Runtime literals with owning or unknown uses start on the heap and retain ordinary moves; a frame address is never copied out to rescue an escape. Nonempty-separator `split` can construct directly in a proven non-escaping local’s fixed caller buffer, with a heap choice before construction when it does not fit; other input-sized constructors and value slices keep their existing paths.
+
+- **Layout.** An array value is a pointer to a header `{ pointer, length, capacity }`. Small item buffers share the header's allocation; larger buffers use a separate block from `fa_alloc`. An empty array allocates its header only.
 - **Recursive items.** A collection supplies storage for its object items, including recursive objects: each object is stored directly in its slot, without an additional box. Direct recursive fields inside that object, including optionals, retain an owning box when their inline expansion would cycle. The same rule applies to map entries, set elements, growing arrays, pools and columnars. Copies still recursively copy owned payloads; moving the array's items follows the same reference invalidation rules.
 - **Growth.** The capacity doubles, starting at 4 items. Growth allocates a larger buffer, relocates the items bytewise, and frees the old buffer. Before a counted loop that always pushes one item to an empty array field, the compiler can reserve the loop's item count. It keeps the normal capacity checks: calls through aliases may add further items. A nonempty field is not reserved early, so references to its existing items remain valid until the actual push.
 - **`push`** has an inline fast path (`length < capacity`: store, then increment) and a cold call to the growth function. An object literal is stored field by field straight into the new slot, never built in a temporary and copied; a value with more fields than the item type is copied without them.

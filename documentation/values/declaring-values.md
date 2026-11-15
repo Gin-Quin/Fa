@@ -397,7 +397,7 @@ do {
 
 ### Native
 
-- `let` and `mutable` copy: a flat value is a `memcpy`, an owning value calls the generated `copy<T>`. The copy becomes a move when the source is not used afterwards.
+- `let` and `mutable` copy: a flat value is a `memcpy`, an owning value calls the generated `copy<T>`. The copy becomes a move when the source is not used afterwards and its storage can change owners. An immutable collection in static storage copies when an owner needs independent storage. A runtime collection with an owning or uncertain use starts on the heap; the compiler never adds a copy-out to keep an escaping value on the stack. Fresh return values are intended to be built directly in caller-provided storage (the general return-destination ABI remains to implement).
 - A `use` alias is a pointer to its place. A slice is a pointer and a length.
 - A `mutable use` is a pointer variable; `reuse` stores a new pointer.
 

@@ -8,6 +8,24 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 - **Benchmarks against Goose**: add the benchmarks of https://aardappel.github.io/goose/bench/results.html and a Goose column next to Rust. *Assigned.*
 - **Parallel and streaming pipeline** (`design/parallel-pipeline.md`): steps 1–5 *assigned*; step 6 (LLVM per module, ThinLTO) and step 7 (language server) to schedule after.
 
+- **Caller destinations for native returns (user decision, 2026-11-15):** finish
+  destination passing for fresh user-function collection results and object/tuple
+  results, including direct calls, generics, closures/function values, branches,
+  recursive forwarding, fields, collection slots, errors and async instances.
+  Preserve analyzer moves and existing foreign `sret`, early recursive boxes and
+  in-place pushed object construction. Do not use stack-to-heap copy-out as a
+  substitute. Current support passes a bounded caller buffer to nonempty-separator
+  `String.split` used by a proven non-escaping immutable local; larger results
+  choose the heap before constructing any items. Extend this protocol to
+  `map`, `filter`, `from`, empty-separator splits, and the other fresh collection
+  constructors, including table indices and stable segments.
+- **Immutable storage coverage (native, 2026-11-15):** add compact immutable
+  object-columnar chunks that preserve the reference ABI, broader escape proofs
+  for borrowed parameters/non-escaping captures/async intervals, and static
+  lowering of interpreter-produced composites, defaulted objects, unions and
+  composite table keys. Current unsupported cases keep ordinary heap storage;
+  `Bytes` is not implemented in this branch and must adopt the same storage rules.
+
 ## Bugs
 
 - Async follow-ups (after J1/W1): async lambdas and awaits through function values are blocking calls (native and JS); `fa test` runs tests in blocking mode; detached tasks don't copy their arguments on JavaScript; `.d.ts` files don't declare the two instances of an async function; J2 (workers on JavaScript) not done.

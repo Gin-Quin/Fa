@@ -231,6 +231,8 @@ If you find yourself writing `Map<String, Item>` with a fixed set of keys, use a
 
 ### Native
 
+- **Immutable literals (current LLVM backend).** A constant `let` literal with supported scalar keys uses read-only entries, index and chunk directory. A runtime local `let` literal can put all those blocks in a fixed frame buffer (2 KiB per collection, 4 KiB per function); the ordinary stable chunks are preserved. Larger, captured or asynchronous constructions keep heap storage. Static drops do nothing; frame drops destroy keys and values, and free no blocks. Static values copy when another owner needs independent storage. Runtime literals with owning or unknown uses start on the heap, avoiding frame-to-heap copy-out.
+
 The map is a **compact dict**, the design of Python's `dict` since 3.6 and of Zig's `ArrayHashMap`, with a Swiss-table index.
 
 - **Entries.** A chunked arena of `{ hash: u32, key: K, value: V }`, organized exactly like a [pool](/collections/pools): size-aligned chunks with an occupancy bitmap, per-chunk free lists, the bitset of chunks with a free slot (lowest chunk first). Keeping the hash in the entry lets the index be rebuilt without hashing the keys again, and lets a lookup compare the hash before calling the key's `==`.

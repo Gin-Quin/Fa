@@ -353,7 +353,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Branches to a new block when `condition` holds, else returns: the
 	/// builder continues in the new block.
-	fn helper_when(
+	pub(crate) fn helper_when(
 		&self,
 		builder: &Builder<'ctx>,
 		function: FunctionValue<'ctx>,
@@ -458,6 +458,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let array = value.into_pointer_value();
 				let present = builder.build_is_not_null(array, "")?;
 				self.helper_when(builder, function, present, |builder| {
+					builder.build_return(None)?;
+					Ok(())
+				})?;
+				let storage = builder
+					.build_call(
+						self.runtime.function("fa_array_storage")?,
+						&[array.into()],
+						"",
+					)?
+					.try_as_basic_value()
+					.basic()
+					.expect("storage")
+					.into_int_value();
+				let owned = builder.build_int_compare(
+					IntPredicate::NE,
+					storage,
+					storage.get_type().const_int(2, false),
+					"",
+				)?;
+				self.helper_when(builder, function, owned, |builder| {
 					builder.build_return(None)?;
 					Ok(())
 				})?;
@@ -1458,6 +1478,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return None;
 		};
 		let slot = *self.owned_locals.get(&symbol)?;
+		// Frame storage and read-only globals cannot change owner. A store,
+		// return or escaping capture gets an independent heap copy instead.
+		if self
+			.frame()
+			.collection_locals
+			.contains(&(self.file, symbol))
+		{
+			return None;
+		}
 		if self.shared.contains_key(&symbol) {
 			return None;
 		}

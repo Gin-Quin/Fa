@@ -146,7 +146,82 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.context
 			.i64_type()
 			.const_int(values.len() as u64, false);
-		let array = self.new_array(item, count, count)?;
+		if matches!(repr, Repr::Growing(_)) {
+			let size = self.collection_data_size(self.llvm_type(item));
+			let mut capacity = 0;
+			let mut segment_size = 1u64 << self.segment_bits(item);
+			let mut segments = 0;
+			while capacity < values.len() as u64 {
+				capacity += segment_size;
+				if segments != 0 {
+					segment_size *= 2;
+				}
+				segments += 1;
+			}
+			let header = self.collection_data_size(self.segmented_type().into());
+			let bytes = ((header + 15) & !15) + capacity * size;
+			if let Some(buffer) = self.collection_stack(node, bytes)? {
+				let array = self
+					.call_value(
+						self.runtime.function("fa_segmented_local")?,
+						&[
+							buffer.into(),
+							count.into(),
+							self.item_size_const(item).into(),
+							self.segment_k(item).into(),
+						],
+					)?
+					.into_pointer_value();
+				for (index, (value, _)) in values.into_iter().enumerate() {
+					let slot = self.growing_at(
+						&self.builder,
+						array,
+						item,
+						self.context.i64_type().const_int(index as u64, false),
+					)?;
+					self.builder
+						.build_store(slot, value.value.expect("an item"))?;
+				}
+				return Ok(self.fresh(Val::new(repr, array)));
+			}
+		}
+		let bytes = 32 + self.collection_data_size(self.llvm_type(item)) * values.len() as u64;
+		let stack = if matches!(repr, Repr::Array(_)) {
+			self.collection_stack(node, bytes)?
+		} else {
+			None
+		};
+		let array = if let Some(array) = stack {
+			let pointer = unsafe {
+				self.builder.build_gep(
+					self.context.i8_type(),
+					array,
+					&[self.context.i64_type().const_int(32, false)],
+					"collection.items",
+				)?
+			};
+			let fields: [inkwell::values::BasicValueEnum; 3] =
+				[pointer.into(), count.into(), count.into()];
+			for (index, value) in fields.into_iter().enumerate() {
+				let field =
+					self.builder
+						.build_struct_gep(self.header_type(), array, index as u32, "")?;
+				self.builder.build_store(field, value)?;
+			}
+			let marker = unsafe {
+				self.builder.build_gep(
+					self.context.i8_type(),
+					array,
+					&[self.context.i64_type().const_int(24, false)],
+					"collection.marker",
+				)?
+			};
+			self.builder
+				.build_store(marker, self.context.i64_type().const_int(3, false))?;
+			array
+		} else {
+			self.new_array(item, count, count)?
+		};
 		let (pointer, _) = self.array_parts(array)?;
 		for (index, (value, _)) in values.into_iter().enumerate() {
 			let index = self.context.i64_type().const_int(index as u64, false);

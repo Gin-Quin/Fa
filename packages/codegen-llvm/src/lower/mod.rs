@@ -24,6 +24,7 @@ mod arith;
 mod arrays;
 mod calls;
 mod closures;
+mod collection_storage;
 mod columns;
 mod constants;
 mod copies;
@@ -126,6 +127,9 @@ struct LoopFrame<'ctx> {
 
 /// The function being lowered.
 struct Frame<'ctx> {
+	/// Fixed collection storage reserved in this function's entry block.
+	collection_bytes: u64,
+	collection_locals: rustc_hash::FxHashSet<(FileId, SymbolId)>,
 	function: FunctionValue<'ctx>,
 	/// Recursive nodes allocated by this function belong to the caller's region.
 	arena: bool,
@@ -197,6 +201,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	frame: Option<Frame<'ctx>>,
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
+	readonly_collections: FxHashMap<(FileId, NodeId, Repr), Val<'ctx>>,
 	/// Line starts of the source, for locations.
 	lines: Vec<usize>,
 	/// The structs of object types.
@@ -372,6 +377,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			effectful_drops: std::cell::Cell::new(false),
 			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
 			virtual_code_points: FxHashMap::default(),
+			readonly_collections: FxHashMap::default(),
 			relation_sides: relations::relation_sides(
 				files.iter().map(|(file, _)| session.analysis(*file)),
 			),
@@ -1153,6 +1159,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let outer = self.cleanups.take();
 		self.saved_cleanups.push(outer);
 		self.frame = Some(Frame {
+			collection_bytes: 0,
+			collection_locals: rustc_hash::FxHashSet::default(),
 			function,
 			arena: false,
 			same_value_zero: false,
@@ -1632,6 +1640,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		else {
 			return Ok(None);
 		};
+		let repr = self.repr_of(ty, node.index())?;
+		if let Some(value) = self.readonly_collection(node, repr)? {
+			return Ok(Some(value));
+		}
 		let constant = self.comptime_value(node).or_else(|| match self.view(node) {
 			View::Integer(value) => Some(Value::Integer(value)),
 			View::Float(value) => Some(Value::Float(value)),
@@ -2124,7 +2136,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.slot_of(symbol, node)?;
 			return Ok(Val::void());
 		}
-		let value = self.expr(value_node)?;
+		let readonly = if self.analysis.symbols.symbol(symbol).kind == SymbolKind::Let {
+			let repr = self.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())?;
+			self.readonly_collection(value_node, repr)?
+		} else {
+			None
+		};
+		let value = if let Some(value) = readonly {
+			let key = (self.file, symbol);
+			self.frame_mut().collection_locals.insert(key);
+			self.fresh(value)
+		} else {
+			self.expr(value_node)?
+		};
 		if value.repr == Repr::Never {
 			return Ok(Val::never());
 		}

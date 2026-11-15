@@ -50,7 +50,7 @@ impl Generator<'_> {
 				self.scoped_watch_statements(statement, &statements[index + 1..], dest);
 				return;
 			}
-			self.guarded(statement, &Dest::Discard, |g| g.statement(statement));
+			self.guarded(|g| g.statement(statement));
 			if self.flushes_after(statement) {
 				self.flush();
 			}
@@ -60,8 +60,7 @@ impl Generator<'_> {
 			return;
 		}
 		if !self.flushes_after(last) {
-			let leaving = dest.clone();
-			self.guarded(last, &leaving, |g| g.into(last, dest));
+			self.guarded(|g| g.into(last, dest));
 			return;
 		}
 		// the pending `watch` blocks run after the last statement too
@@ -235,12 +234,21 @@ impl Generator<'_> {
 		let ty = self.type_of(n);
 		match dest {
 			Dest::Discard => {
-				// a new value holding a resource, discarded: dropped (resources.rs)
-				if !matches!(
+				let fresh = !matches!(
 					self.view(self.strip_groups(n)),
 					View::Name(_) | View::Access { .. } | View::Index { .. }
-				) && let Some(drop) = self.drop_function(ty)
-				{
+				);
+				if fresh
+					&& matches!(
+						self.types.kind(self.without_none(ty)),
+						fa_analyzer::types::TypeKind::Sync(fa_analyzer::types::SyncKind::Guard, _)
+					) {
+					let unlock = self.helper("faUnlock");
+					self.out.line(format!("{unlock}({});", value.text));
+					return;
+				}
+				// a new value holding a resource, discarded: dropped (resources.rs)
+				if fresh && let Some(drop) = self.drop_function(ty) {
 					self.out.line(format!("{drop}({});", value.text));
 					return;
 				}
@@ -856,7 +864,7 @@ impl Generator<'_> {
 			self.module_constant(name, value.text);
 			return;
 		}
-		if module_value {
+		if module_value || self.guard_binding(&name) {
 			self.out.line(format!("{name} = {};", value.text));
 		} else {
 			let keyword = if kind == BindingKind::Let {
@@ -952,11 +960,14 @@ impl Generator<'_> {
 			return;
 		}
 		let value_node = value;
+		let saved_move = self.fcx.moving_replaced;
+		self.fcx.moving_replaced = self.replaced_root_read(target_node, value);
 		let value = self.expr(value);
 		let value = match self.copy_into_local(target_node, value_node, &value) {
 			Some(reused) => reused,
 			None => self.copy_into(value_node, value, true),
 		};
+		self.fcx.moving_replaced = saved_move;
 		// a value holding a resource: the old one dropped (resources.rs)
 		if place.map.is_none()
 			&& let Some((drop, flag)) = self.drop_replaced(target_node)

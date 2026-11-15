@@ -1,4 +1,4 @@
-// helpers: FaStop, faStop, faOverflow, faCheckInteger, faQuote, faFormatArray, faSides, faFormatRecord, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat, faExit, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
+// helpers: FaStop, faStop, faOverflow, faCheckInteger, faQuote, faFormatRange, faSides, faFormatNested, faFormat, faExit, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
 
 function square(x) {
 	return faCheckInteger(x * x, "comptime.fa:1:44");

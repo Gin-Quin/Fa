@@ -1412,22 +1412,62 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let mut values = Vec::new();
 		for &argument in arguments {
-			let value = self.expr(argument)?;
+			let (node, spread) = match self.view(argument) {
+				View::Spread(inner) => (inner, true),
+				_ => (argument, false),
+			};
+			let value = self.expr(node)?;
 			if value.repr == Repr::Never {
 				return Ok(Val::never());
 			}
-			values.push((value, argument));
+			values.push((value, node, spread));
 		}
+		let separated = self.alloca(Repr::Bool, "print_separator")?;
+		self.builder
+			.build_store(separated.pointer, self.context.bool_type().const_zero())?;
 		self.call_runtime("fa_b_reset", &[])?;
-		for (index, (value, node)) in values.into_iter().enumerate() {
-			if index > 0 {
-				let space = self.string_constant(" ");
-				self.append_value(space, node)?;
+		for (value, node, spread) in values {
+			if spread {
+				let Repr::Array(item_type) = value.repr else {
+					return Err(self.unsupported(node.index(), "spreading this collection"));
+				};
+				let array = value.value.expect("an array").into_pointer_value();
+				let item = self.item_repr(item_type, node)?;
+				let (_, length) = self.array_parts(array)?;
+				self.for_each_item_value(array, item, length, |this, value| {
+					this.print_item(value, node, separated)
+				})?;
+			} else {
+				self.print_item(value, node, separated)?;
 			}
-			self.append_value(value, node)?;
 		}
 		self.call_runtime("fa_b_line", &[fd_value.into()])?;
 		Ok(Val::void())
+	}
+
+	/// Appends a console item, with a separator only after an earlier item.
+	fn print_item(
+		&mut self,
+		value: Val<'ctx>,
+		node: NodeId,
+		separated: Slot<'ctx>,
+	) -> Result<(), Error> {
+		let space = self.append_block("print_space");
+		let item = self.append_block("print_item");
+		let previous = self.load(separated)?.int();
+		self.builder
+			.build_conditional_branch(previous, space, item)?;
+		self.builder.position_at_end(space);
+		let separator = self.string_constant(" ");
+		self.append_value(separator, node)?;
+		self.branch_to(item)?;
+		self.builder.position_at_end(item);
+		self.append_value(value, node)?;
+		self.builder.build_store(
+			separated.pointer,
+			self.context.bool_type().const_int(1, false),
+		)?;
+		Ok(())
 	}
 
 	/// `value.property` of a built-in type, on the evaluated value.

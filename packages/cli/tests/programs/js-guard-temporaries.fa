@@ -1,0 +1,24 @@
+-- Awaited guards used as temporaries end with their statement.
+use { Mutex } = std.concurrency
+mutable mutex = Mutex<Integer> { value = 0 }
+(await mutex.lock()).value += 1
+(await mutex.lock()).value += 2
+console.log((await mutex.lock()).value) -- prints: 3
+
+mutex.tryLock()
+await mutex.lock()
+console.log((await mutex.lock()).value) -- prints: 3
+
+function read = <Value>(_guard: Value): Integer => 3
+console.log(read(await mutex.lock())) -- prints: 3
+console.log(read(_guard = await mutex.lock())) -- prints: 3
+console.log((await mutex.lock()).value) -- prints: 3
+
+type Failure = Errors { Bad }
+function fail = <Value>(_guard: Value): Integer throws Failure => { throw Failure.Bad }
+async function attempt = (mutex: Mutex<Integer>): Integer throws Failure => {
+	let value = try fail(await mutex.lock())
+	value
+}
+console.log(await attempt(mutex) catch _error => -1) -- prints: -1
+console.log((await mutex.lock()).value) -- prints: 3

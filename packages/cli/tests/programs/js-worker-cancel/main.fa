@@ -1,0 +1,10 @@
+-- Both a cold worker (import pending) and a worker with its module loaded.
+mutable store = Store { names = [] }
+let cold = start store.add("cancelled cold")
+cold.cancel()
+console.log(await store.add("first")) -- prints: 1
+let warm = start store.add("cancelled warm")
+warm.cancel()
+console.log(await store.add("second")) -- prints: 2
+console.log(await store.joined()) -- prints: first,second
+store.stop()

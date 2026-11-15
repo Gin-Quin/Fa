@@ -1,0 +1,9 @@
+-- exit: 0
+export type = {
+	names: Array<String>
+	function add = (self, name: String): Integer mutates self => {
+		self.names.push(name)
+		self.names.length
+	}
+	function joined = (self): String => self.names.join(",")
+}

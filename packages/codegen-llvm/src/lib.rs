@@ -26,6 +26,8 @@ mod error;
 pub mod facts;
 mod header;
 mod host;
+#[cfg(all(fa_llvm, unix))]
+mod jit;
 #[cfg(fa_llvm)]
 mod link;
 #[cfg(fa_llvm)]
@@ -50,7 +52,9 @@ pub use compile::{
 pub use error::Error;
 pub use header::c_header;
 pub use host::javascript_runtime;
-pub use options::{CLibrary, Libraries, OptLevel, Options, Target};
+#[cfg(all(fa_llvm, unix))]
+pub use jit::load;
+pub use options::{CLibrary, Libraries, OptLevel, Options, Target, jit_available};
 pub use split::{
 	EntryInputs, GenericEntryRequest, GenericInstance, GenericProducer, GenericTables,
 	GenericValueNeeds, PackageOutcome, SplitOptions, UnitOutput, UnitSymbols,
@@ -68,6 +72,62 @@ pub fn compile(
 	_options: &Options,
 	_output: &std::path::Path,
 ) -> Result<Artifact, Error> {
+	Err(Error::Unavailable)
+}
+
+/// What the backend compiles into one module.
+#[derive(Clone, Copy)]
+pub enum Source<'a> {
+	/// A standalone file, and its path in the locations of stops.
+	File {
+		file: fa_analyzer::ids::FileId,
+		path: &'a str,
+	},
+	/// A program of several files.
+	Program(&'a fa_analyzer::modules::Program),
+	/// The tests of a program: run with the index of a test as its first
+	/// argument, it runs that test.
+	Tests(&'a fa_analyzer::modules::Program),
+}
+
+/// How a program run in a child ended ([`JitProgram::run_in_child`]).
+#[derive(Clone, Debug)]
+pub struct ChildOutput {
+	/// The exit code (128 + the signal when a signal ended it).
+	pub code: i32,
+	/// What it wrote on the standard error.
+	pub stderr: Vec<u8>,
+}
+
+/// A program loaded in this process by the JIT (`jit.rs`): its `main`. A
+/// trait object, so that the `fa` command, which only passes it on to
+/// `fa-native`, references no code of LLVM and doesn't load `libLLVM`.
+pub trait LoadedProgram: std::fmt::Debug {
+	/// Runs `main` in this process, with the signals of a new program
+	/// (`SIGPIPE` ends it, where the compiler ignores it). Returns its exit
+	/// code, when `main` returns: a program that stops or exits ends the
+	/// process itself.
+	fn run(&self, name: &str, arguments: &[&std::ffi::OsStr]) -> i32;
+
+	/// Runs `main` in a child of this process (a copy made by `fork`: the
+	/// program is not compiled again), its standard input closed, and
+	/// returns its exit code and what it wrote on the standard error.
+	/// `None` when it didn't end before `timeout`, and was killed.
+	fn run_in_child(
+		&self,
+		name: &str,
+		arguments: &[&std::ffi::OsStr],
+		timeout: std::time::Duration,
+	) -> std::io::Result<Option<ChildOutput>>;
+}
+
+/// Without the JIT (no LLVM, or no `fork`): always [`Error::Unavailable`].
+#[cfg(not(all(fa_llvm, unix)))]
+pub fn load(
+	_session: &fa_analyzer::Session,
+	_source: Source<'_>,
+	_options: &Options,
+) -> Result<Box<dyn LoadedProgram>, Error> {
 	Err(Error::Unavailable)
 }
 

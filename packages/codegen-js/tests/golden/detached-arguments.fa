@@ -1,0 +1,8 @@
+type Box = { value: Integer }
+async function report = (value: Box) => console.log(value)
+async function collect = (...values: Box) => console.log(values)
+mutable values: Array<Box> = [{ value = 1 }]
+start report(values[0])
+start collect(...values)
+values[0].value = 2
+await Task.yield()

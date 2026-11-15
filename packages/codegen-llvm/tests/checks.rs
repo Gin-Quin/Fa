@@ -80,6 +80,70 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn appended_templates_check_the_total_before_reserving_on_both_pointer_widths() {
+		let source = "function append = (piece: String): String => {\nmutable out = \"\"\nout += \"{piece}{piece}{piece}\"\nout\n}\nconsole.log(append(\"abc\"))\n";
+		for (name, target, integer) in [
+			("append-size-native", Target::Native, "i64"),
+			("append-size-wasm", Target::Wasm, "i32"),
+		] {
+			let ir = ir_at_target(name, source, false, OptLevel::O0, target);
+			let body = function(&ir, "fa.append");
+			let checked: Vec<_> = body
+				.lines()
+				.filter(|line| line.contains(&format!("call {integer} @fa_string_size(")))
+				.collect();
+			assert_eq!(
+				checked.len(),
+				3,
+				"each piece must enter the checked size chain: {body}"
+			);
+			let last = checked
+				.last()
+				.expect("the last checked sum")
+				.trim()
+				.split_once(" = ")
+				.expect("a result")
+				.0;
+			let reserve = body
+				.lines()
+				.find(|line| line.contains("call void @fa_string_reserve("))
+				.expect("the reservation");
+			assert!(
+				reserve.contains(&format!("{integer} {last})")),
+				"reserve must use the checked total: {reserve}\n{body}"
+			);
+		}
+	}
+
+	#[test]
+	fn inline_utf8_bytes_are_not_assumed_to_be_a_positive_raw_length() {
+		let ir = ir_of(
+			"inline-utf8-length",
+			"function suffix = (text: String): String => text + \"!\"\nconsole.log(suffix(\"éééééééé\"))\n",
+		);
+		let mut checked = 0;
+		for line in ir.lines() {
+			let Some((_, comparison)) = line.split_once(" = icmp sge i64 ") else {
+				continue;
+			};
+			let Some(length) = comparison.strip_suffix(", 0") else {
+				continue;
+			};
+			assert!(
+				ir.lines().any(|definition| definition
+					.trim_start()
+					.starts_with(&format!("{length} = select i1 "))),
+				"the nonnegative length must select the inline length first: {line}\n{ir}"
+			);
+			checked += 1;
+		}
+		assert!(
+			checked > 0,
+			"the regression must exercise the length assumption: {ir}"
+		);
+	}
+
+	#[test]
 	fn callback_instances_keep_the_nonthrowing_calls_plain() {
 		let ir = ir_of(
 			"callback-instances",

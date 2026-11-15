@@ -113,6 +113,8 @@ struct LoopCx {
 /// The state of the JavaScript function being generated.
 #[derive(Default, Debug)]
 struct FnCx {
+	/// A root read transferred into the fresh value replacing its local.
+	moving_replaced: Option<NodeId>,
 	/// The next temporary number.
 	temps: u32,
 	/// Temporaries assigned inside expressions (`($t0 = f())`), declared at
@@ -253,6 +255,8 @@ pub(crate) struct Generator<'s> {
 	/// innermost statement last: released after the statement
 	/// (`reactivity.rs`).
 	pub(crate) guard_frames: Vec<Vec<String>>,
+	/// Bindings kept outside a statement's cleanup `try` block.
+	guard_bindings: Vec<Vec<String>>,
 	/// Whether the file calls `Mutex#tryLock` (computed at the first need).
 	has_try_lock: Option<bool>,
 	/// The index proofs and never-negative places of the analysis
@@ -344,6 +348,7 @@ pub(crate) fn generate_module(
 		byte_arrays: HashSet::new(),
 		parents: None,
 		guard_frames: Vec::new(),
+		guard_bindings: Vec::new(),
 		has_try_lock: None,
 		index_facts: std::cell::OnceCell::new(),
 		tasks: tasks::TasksCx {

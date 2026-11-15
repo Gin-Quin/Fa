@@ -1,3 +1,4 @@
+-- skip-target: web
 -- standalone: hello.fa, run as `fa run hello.fa Ada`
 -- args: Ada
 let name = arguments.get(0) ?? "World"

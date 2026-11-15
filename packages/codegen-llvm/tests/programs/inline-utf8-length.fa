@@ -1,0 +1,19 @@
+-- UTF-8 bytes in the second inline word can set its apparent sign bit.
+-- Both inline layouts (11 bytes on wasm32, 23 on 64-bit targets) are covered.
+function suffix = (text: String): String => text + "!"
+function verify = (text: String, repetitions: Integer<min = 0>) => {
+	assert text == "é".repeat(repetitions)
+	assert text.length == repetitions
+	assert suffix(text) == "é".repeat(repetitions) + "!"
+	assert text.toUpperCase() == "É".repeat(repetitions)
+	assert text.split("é").join("é") == text
+}
+mutable words: Array<String> = []
+for repetitions in 1..17 {
+	words.push("é".repeat(repetitions))
+}
+for text, i in words {
+	verify(text, i + 1)
+}
+console.log("inline UTF-8 length ok")
+-- prints: inline UTF-8 length ok

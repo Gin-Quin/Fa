@@ -62,7 +62,7 @@ export function faFormat(value) {
 	return typeof value === "string" ? value : faFormatNested(value);
 }
 
-// @fa-helper faFormatNested deps: faQuote faFormatArray faFormatRecord faFormatTagged faFormatMap faFormatSet faFormatRange
+// @fa-helper faFormatNested deps: faQuote faFormatRange faSides
 /**
  * The Fa notation of a value nested in a composite, decided from its
  * JavaScript representation: strings are quoted, `undefined` is `none`,
@@ -73,45 +73,85 @@ export function faFormat(value) {
  * @returns {string}
  */
 export function faFormatNested(value) {
-	switch (typeof value) {
-		case "string":
-			return faQuote(value);
-		case "undefined":
-			return "none";
-		case "object":
-			if (value === null) {
-				return "none";
+	// Tokens and value frames share one explicit stack. Joining once avoids
+	// rebuilding the whole suffix for each node of a recursive value.
+	/** @type {(string | { value: any })[]} */
+	const pending = [{ value }];
+	const parts = [];
+	while (pending.length > 0) {
+		const frame = /** @type {string | { value: any }} */ (pending.pop());
+		if (typeof frame === "string") {
+			parts.push(frame);
+			continue;
+		}
+		const item = frame.value;
+		if (typeof item !== "object" || item === null) {
+			parts.push(
+				typeof item === "string"
+					? faQuote(item)
+					: item == null
+						? "none"
+						: typeof item === "function"
+							? "<function>"
+							: String(item),
+			);
+			continue;
+		}
+		const tag = item[Symbol.toStringTag];
+		if (tag === "fa:Range") {
+			parts.push(faFormatRange(item));
+			continue;
+		}
+		if (typeof item[Symbol.for("fa.error")] === "string") {
+			parts.push(String(item));
+			continue;
+		}
+		if (
+			Array.isArray(item) ||
+			tag === "Set" ||
+			tag === "fa:Set" ||
+			tag === "fa:ValuePool" ||
+			tag === "Map" ||
+			tag === "fa:HashMap"
+		) {
+			const map = tag === "Map" || tag === "fa:HashMap";
+			const items = Array.isArray(item) ? item : Array.from(item);
+			parts.push("[");
+			pending.push("]");
+			for (let index = items.length - 1; index >= 0; index--) {
+				if (map) {
+					pending.push(")", { value: items[index][1] }, ", ", { value: items[index][0] }, "(");
+				} else {
+					pending.push({ value: items[index] });
+				}
+				if (index > 0) pending.push(", ");
 			}
-			if (Array.isArray(value)) {
-				return faFormatArray(value, faFormatNested);
+			continue;
+		}
+		const tagged = typeof item.$t === "string";
+		if (tagged) {
+			parts.push(item.$t);
+			if (Object.hasOwn(item, "$v")) {
+				parts.push("(");
+				pending.push(")", { value: item.$v });
+				continue;
 			}
-			// recognized by their tags, so that printing doesn't bring the
-			// collection classes into programs that don't use them
-			switch (/** @type {any} */ (value)[Symbol.toStringTag]) {
-				case "Map":
-				case "fa:HashMap":
-					// (a cast on a line of its own would read as a doc comment)
-					return faFormatMap(/** @type {any} */ (value), faFormatNested, faFormatNested);
-				case "Set":
-				case "fa:Set":
-				case "fa:ValuePool":
-					return faFormatSet(/** @type {Iterable<unknown>} */ (value), faFormatNested);
-				case "fa:Range":
-					return faFormatRange(/** @type {any} */ (value));
-			}
-			if (typeof (/** @type {any} */ (value)[Symbol.for("fa.error")]) === "string") {
-				// a Fa error (see `faIsError`)
-				return String(value);
-			}
-			if (typeof (/** @type {any} */ (value).$t) === "string") {
-				return faFormatTagged(value);
-			}
-			return faFormatRecord(value);
-		case "function":
-			return "<function>";
-		default:
-			return String(value);
+		}
+		const sides = item[faSides];
+		const keys = Object.keys(item).filter((key) => !key.startsWith("$") && !sides?.includes(key));
+		if (keys.length === 0) {
+			if (!tagged) parts.push("{}");
+			continue;
+		}
+		parts.push(tagged ? " { " : "{ ");
+		pending.push(" }");
+		for (let index = keys.length - 1; index >= 0; index--) {
+			const key = keys[index];
+			pending.push({ value: item[key] }, `${key.endsWith("$") ? key.slice(0, -1) : key} = `);
+			if (index > 0) pending.push(", ");
+		}
 	}
+	return parts.join("");
 }
 
 // @fa-helper faFormatOptional

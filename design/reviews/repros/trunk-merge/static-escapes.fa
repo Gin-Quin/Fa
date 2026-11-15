@@ -1,0 +1,46 @@
+-- Immutable literals in read-only data (B's static maps, sets and arrays on
+-- A's layouts) reaching mutable owners: returned, stored in fields, given to
+-- `mutates` parameters, reserved, and pushed to.
+type Box = { map: Map<String, Integer>, set: Set<Integer>, list: Array<Integer> }
+let lookup: Map<String, Integer> = [("one", 1), ("two", 2)]
+let numbers: Set<Integer> = [1, 2, 3]
+let list = [10, 20, 30]
+function getMap = (): Map<String, Integer> => lookup
+function getSet = (): Set<Integer> => numbers
+function getList = (): Array<Integer> => list
+function literalMap = (): Map<String, Integer> => [("a", 1)]
+function literalList = (): Array<Integer> => [4, 5, 6]
+function extend = (map: Map<String, Integer>, key: String) mutates map => {
+	map[key] = map.size
+}
+mutable m = getMap()
+m["three"] = 3
+m.reserve(100)
+mutable s = getSet()
+s.add(4)
+s.delete(1)
+mutable a = getList()
+a.push(40)
+a.reserve(50)
+mutable l = literalMap()
+extend(l, "b")
+mutable k = literalList()
+k.push(7)
+mutable box = Box { map = lookup, set = numbers, list }
+box.map["four"] = 4
+box.set.add(9)
+box.list.push(50)
+extend(box.map, "five")
+console.log(m.size, s.size, a.length, l.size, k.length) -- prints: 3 3 4 2 4
+console.log(box.map.size, box.set.size, box.list.length) -- prints: 4 4 4
+console.log(lookup.size, numbers.size, list.length, lookup.get("three"), numbers.includes(4)) -- prints: 2 3 3 none false
+function local = (n: Integer): Integer => {
+	let table: Map<Integer, Integer> = [(n, 1), (n + 1, 2)]
+	let values = [n, n]
+	mutable copy = table
+	copy[n + 5] = 3
+	mutable more = values
+	more.push(n)
+	copy.size + more.length + table.size + values.length
+}
+console.log(local(3)) -- prints: 10

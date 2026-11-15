@@ -22,10 +22,11 @@
 //! (`packages/analyzer/tests/cases`) that print something and expect no
 //! diagnostic. Every one must compile, but those listed for the target in
 //! `tests/expected-skips/<target>.txt` (a construct this backend doesn't
-//! compile yet, with the reason): any other compile error fails, and so does
-//! a listed program that compiles now (remove it from the list).
+//! compile yet, with the reason): any other compile error fails. Explicit
+//! `runtime: ` entries also allow an executed failure. A listed program that
+//! passes now fails the ratchet (remove it from the list).
 //! `FA_UPDATE_SKIPS=1` rewrites the list of each target run from what
-//! doesn't compile (review the diff). Without LLVM (`LLVM_SYS_181_PREFIX`
+//! doesn't pass (review the diff). Without LLVM (`LLVM_SYS_181_PREFIX`
 //! unset at build time), a single test prints why the others were not
 //! built.
 
@@ -623,6 +624,9 @@ mod with_llvm {
 					.collect::<Vec<_>>()
 			))),
 			fa_codegen_llvm::PackageOutcome::Failed(error) => Err(error),
+			fa_codegen_llvm::PackageOutcome::Loaded(_) => {
+				unreachable!("the units are linked: `in_memory` is not set")
+			}
 		}
 	}
 
@@ -665,7 +669,7 @@ mod with_llvm {
 			match outcome {
 				Outcome::Passed if expected.contains_key(&key) && !update => {
 					failures.push(format!(
-						"{path}: compiles now, remove it from tests/expected-skips/{}.txt",
+						"{path}: passes now, remove it from tests/expected-skips/{}.txt",
 						target.name()
 					))
 				}
@@ -701,6 +705,15 @@ mod with_llvm {
 					// written a clearer one)
 					let reason = expected.get(&key).cloned().unwrap_or(reason);
 					unsupported.insert(key, reason);
+				}
+				Outcome::Failed(reason)
+					if expected
+						.get(&key)
+						.is_some_and(|reason| reason.starts_with("runtime: ")) =>
+				{
+					let recorded = expected[&key].clone();
+					skipped.push(format!("{path}: {recorded}: {reason}"));
+					unsupported.insert(key, recorded);
 				}
 				Outcome::Failed(reason) => failures.push(format!("{path}: {reason}")),
 			}
@@ -764,7 +777,7 @@ mod with_llvm {
 	/// Writes the list of a target (`FA_UPDATE_SKIPS=1`).
 	fn write_expected_skips(target: Target, skips: &std::collections::BTreeMap<String, String>) {
 		let mut text = format!(
-			"# The programs the {} target doesn't compile yet, with the reason\n# (`tests/programs.rs`): any other compile error fails.\n",
+			"# The programs the {} target doesn't pass yet, with the reason\n# (`tests/programs.rs`): any other compile error fails.\n",
 			target.name()
 		);
 		for (path, reason) in skips {

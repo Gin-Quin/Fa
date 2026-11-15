@@ -23,6 +23,10 @@
 
 import { faStop } from "./stops.js";
 
+// @fa-helper faSharedHandle
+/** Shared synchronization handles are leaves of structural value copies. */
+export const faSharedHandle = Symbol.for("fa.shared.handle");
+
 // @fa-helper faNeedSharedMemory deps: faStop
 /**
  * Stops the program when this platform can't share memory with a worker:
@@ -38,12 +42,16 @@ export function faNeedSharedMemory(what) {
 	}
 }
 
-// @fa-helper FaAtomic deps: faNeedSharedMemory
+// @fa-helper FaAtomic deps: faNeedSharedMemory faSharedHandle
 /**
  * An `AtomicInteger` (a number) or an `AtomicBoolean`. The orderings make no
  * difference on one thread.
  */
 export class FaAtomic {
+	get [faSharedHandle]() {
+		return true;
+	}
+
 	/** @param {any} value */
 	constructor(value) {
 		/** @type {any} */
@@ -184,11 +192,15 @@ export class FaGuard {
 	}
 }
 
-// @fa-helper FaMutex deps: FaGuard faNeedSharedMemory
+// @fa-helper FaMutex deps: FaGuard faNeedSharedMemory faSharedHandle
 /**
  * A `Mutex(T)`: the value, and whether a guard holds it.
  */
 export class FaMutex {
+	get [faSharedHandle]() {
+		return true;
+	}
+
 	/** @param {any} value */
 	constructor(value) {
 		/** @type {any} */
@@ -320,7 +332,7 @@ export function faUnlock(guard) {
 	}
 }
 
-// @fa-helper FaChannel deps: faNeedSharedMemory
+// @fa-helper FaChannel deps: faNeedSharedMemory faSharedHandle
 /**
  * A `Channel(T)`: a queue, bounded by its capacity (`Infinity` without one).
  * Given to a worker (`share`), its queue moves into shared memory: the
@@ -331,6 +343,10 @@ export function faUnlock(guard) {
  * `faReceiveSync`: `Atomics.wait`).
  */
 export class FaChannel {
+	get [faSharedHandle]() {
+		return true;
+	}
+
 	/** @param {number | undefined} capacity */
 	constructor(capacity) {
 		/** @type {any[]} */

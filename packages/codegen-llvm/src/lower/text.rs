@@ -779,10 +779,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.append_string(target, Val::new(Repr::Str, one.into_struct_value()))?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(decimal);
+		// A coroutine decimal owns a temporary that exists only in this
+		// branch. Drop it here, before the other append paths join.
+		let mark = self.mark();
 		let text = self
 			.integer_string(value)?
 			.expect("an integer of at most 64 bits");
 		self.append_string(target, text)?;
+		self.end_statement(mark, None)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(join);
 		Ok(())
@@ -873,8 +877,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"",
 		)?;
 		let inline_length = builder.build_and(shifted, self.usize.const_int(31, false), "")?;
-		// a length is below `KIND_MASK` (2^62 natively): never negative, so
-		// that `codes[codes.length - 1]` after `codes[0]` needs no wrap
+		let length = builder
+			.build_select(inline, inline_length, length, "")?
+			.into_int_value();
+		// Only the decoded length is nonnegative: an inline raw word holds
+		// UTF-8 bytes and may have its sign bit set.
 		if length.get_zero_extended_constant().is_none() {
 			let positive = builder.build_int_compare(
 				IntPredicate::SGE,
@@ -887,9 +894,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.expect("llvm.assume");
 			builder.build_call(assume, &[positive.into()], "")?;
 		}
-		let length = builder
-			.build_select(inline, inline_length, length, "")?
-			.into_int_value();
 		Ok((bytes, length))
 	}
 
@@ -1281,7 +1285,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let mut extra = self.usize.const_zero();
 			for value in &values {
 				let (_, length) = self.string_parts(*value)?;
-				extra = self.builder.build_int_nuw_add(extra, length, "")?;
+				extra = self
+					.call_value(
+						self.runtime.function("fa_string_size")?,
+						&[extra.into(), length.into()],
+					)?
+					.into_int_value();
 			}
 			self.call_runtime("fa_string_reserve", &[target.into(), extra.into()])?;
 			for value in values {
@@ -1412,22 +1421,62 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let mut values = Vec::new();
 		for &argument in arguments {
-			let value = self.expr(argument)?;
+			let (node, spread) = match self.view(argument) {
+				View::Spread(inner) => (inner, true),
+				_ => (argument, false),
+			};
+			let value = self.expr(node)?;
 			if value.repr == Repr::Never {
 				return Ok(Val::never());
 			}
-			values.push((value, argument));
+			values.push((value, node, spread));
 		}
+		let separated = self.alloca(Repr::Bool, "print_separator")?;
+		self.builder
+			.build_store(separated.pointer, self.context.bool_type().const_zero())?;
 		self.call_runtime("fa_b_reset", &[])?;
-		for (index, (value, node)) in values.into_iter().enumerate() {
-			if index > 0 {
-				let space = self.string_constant(" ");
-				self.append_value(space, node)?;
+		for (value, node, spread) in values {
+			if spread {
+				let Repr::Array(item_type) = value.repr else {
+					return Err(self.unsupported(node.index(), "spreading this collection"));
+				};
+				let array = value.value.expect("an array").into_pointer_value();
+				let item = self.item_repr(item_type, node)?;
+				let (_, length) = self.array_parts(array)?;
+				self.for_each_item_value(array, item, length, |this, value| {
+					this.print_item(value, node, separated)
+				})?;
+			} else {
+				self.print_item(value, node, separated)?;
 			}
-			self.append_value(value, node)?;
 		}
 		self.call_runtime("fa_b_line", &[fd_value.into()])?;
 		Ok(Val::void())
+	}
+
+	/// Appends a console item, with a separator only after an earlier item.
+	fn print_item(
+		&mut self,
+		value: Val<'ctx>,
+		node: NodeId,
+		separated: Slot<'ctx>,
+	) -> Result<(), Error> {
+		let space = self.append_block("print_space");
+		let item = self.append_block("print_item");
+		let previous = self.load(separated)?.int();
+		self.builder
+			.build_conditional_branch(previous, space, item)?;
+		self.builder.position_at_end(space);
+		let separator = self.string_constant(" ");
+		self.append_value(separator, node)?;
+		self.branch_to(item)?;
+		self.builder.position_at_end(item);
+		self.append_value(value, node)?;
+		self.builder.build_store(
+			separated.pointer,
+			self.context.bool_type().const_int(1, false),
+		)?;
+		Ok(())
 	}
 
 	/// `value.property` of a built-in type, on the evaluated value.

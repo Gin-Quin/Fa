@@ -168,9 +168,12 @@ for both languages, and links the raw samples and validation results.
 `string-building/bytes.fa` is a second Fa version of `string-building`, written like
 the Goose port: growable byte buffers (`Array<Byte>`, until the `Bytes` type exists),
 `split` as ranges into the text and `join` into a new buffer, integers formatted by
-hand. It prints the same output. The audit measures it as `string-building-bytes`,
-against the same Goose and Rust programs:
-`python3 benchmarks/audit/compare.py string-building string-building-bytes --directory … --default-sizes`.
+hand. It prints the same output. `string-building/growing.fa` is the same program with
+`GrowingArray<Byte>` buffers, whose items never move, like Goose's `u8[>..]` arrays. The
+audit measures them as `string-building-bytes` and `string-building-growing`, against
+the same Goose and Rust programs:
+`python3 benchmarks/audit/compare.py string-building string-building-bytes string-building-growing --directory … --default-sizes`,
+and `audit/variants.py` times several of these builds against each other.
 The runner of this page (`run.ts`) only builds the `main.fa` of each benchmark.
 
 ## Fairness rules

@@ -967,3 +967,185 @@ doit donc pas être présentée comme validée avant son implémentation et ses 
 ni comme suffisante pour atteindre Goose avant de nouvelles mesures. Elle ne
 nécessite pas de changer la représentation publique des tableaux ou d’introduire
 des fragments empruntés dans les tableaux ordinaires.
+
+## String-building : variante en octets
+
+Travail du 15 novembre 2026. Objectif : que `string-building` écrit avec des
+**octets** soit au moins aussi rapide que la version `String`, sans nouvelle API
+du langage ni de la bibliothèque (pas de `pushAll`, de formatage vers des
+octets ni de `join` d'octets). Le type `Bytes` est décidé mais pas implémenté :
+les octets de longueur inconnue se construisent dans un `Array<Byte>` (stocké
+de façon compacte en natif). Une seconde variante, demandée ensuite, utilise
+`GrowingArray<Byte>`, dont les éléments ne bougent jamais, comme les tableaux
+`u8[>..]` de Goose qui vivent dans une région réservée.
+
+### Les programmes
+
+- `benchmarks/string-building/bytes.fa` reprend l'algorithme du portage Goose :
+  tampons d'octets extensibles, `split` en intervalles `(début, fin)` du texte
+  (les tranches de Goose, sans copie), `join` dans un nouveau tampon. Les
+  entiers sont formatés à la main : nombre de chiffres compté par comparaisons,
+  chiffres écrits depuis la fin deux par deux avec une table `00`…`99`. Le texte
+  du dernier élément est vérifié contre une chaîne construite comme dans
+  `main.fa`. Ces choix de portage sont ceux d'un utilisateur attentif : ils ne
+  sautent aucun travail fait par Goose (toutes les parties sont calculées et la
+  jointure est construite).
+- `benchmarks/string-building/growing.fa` est le même programme avec des
+  tampons `GrowingArray<Byte>`. `GrowingArray` n'a pas de `clear()` : le portage
+  affecte `[]`, la façon documentée de supprimer tous les éléments.
+- `compare.py` mesure ces variantes comme `string-building-bytes` et
+  `string-building-growing`, contre les mêmes programmes Goose et Rust, aux
+  mêmes tailles (`VARIANTS`). `variants.py` alterne plusieurs exécutables
+  fixés sur un CPU et compte leurs instructions.
+
+### Optimisations du compilateur et du runtime
+
+Toutes sont génériques : elles portent sur la forme des boucles, les types
+des éléments et les règles d'alias, jamais sur un benchmark, une taille ou une
+sortie.
+
+- **Copie par blocs** (`lower/copies.rs`, `copy_loop`). `for x in source {
+  cible.push(x) }` et `for i in a..b { cible.push(source[i]) }` (avec ou sans
+  `try`, `..=` compris) deviennent un seul `fa_array_extend` : place réservée
+  une fois avec une croissance géométrique, puis une copie. Conditions : le
+  corps est ce seul `push` ; son argument n'a aucune conversion au puits (ni
+  contrôle d'intervalle ni changement de représentation) ; les éléments ne
+  possèdent pas de mémoire ; source et cible sont lues depuis un local, un
+  paramètre et leurs champs ordinaires (aucun getter, index ni appel) ; rien
+  n'est réactif ; la fonction n'est pas une coroutine (ses boucles sont des
+  points coopératifs). Source et cible sont distinctes : l'analyseur refuse un
+  `push` dont l'argument est dans la cible (REF013) et la modification du
+  tableau parcouru (REF012), testé par `ref-44.fa`. La copie n'en dépend pas
+  pour autant : la place est faite avant de lire les éléments de la source,
+  depuis le bloc qu'elle a alors.
+- **Contrôle d'intervalle sorti de la boucle.** Une plage n'est copiée que si
+  `0 <= a <= b <= source.length` (`b < length` pour `a..=b`), vérifié une fois.
+  Sinon la boucle s'exécute telle qu'écrite : l'`IndexError` survient au même
+  tour, après les mêmes `push`, et un indice négatif compte depuis la fin.
+- **Remplissage.** `for _ in a..b { cible.push(octet) }` sur des octets devient
+  `fa_array_fill` (quelques écritures bornées pour les petites longueurs).
+- **Recherche.** Une boucle sur des octets dont le corps est seulement
+  `if octet == constante { … }` va d'une occurrence à la suivante avec
+  `fa_bytes_next`, seize octets à la fois. Les tours sautés ne font rien ; la
+  recherche s'exécute après le corps de l'occurrence précédente et lit donc ce
+  que ces tours auraient lu (une écriture par la variable de boucle compris).
+- **`push` en ligne.** Le chemin courant est écrit dans l'IR avec les étiquettes
+  TBAA (`fa header` pour l'en-tête, le type scalaire pour l'élément), et la
+  croissance passe par `fa_array_grow`, froid et hors ligne. Après cet appel,
+  le slot du tableau (local ou paramètre et champs) est relu et fusionné par
+  un `phi` : LLVM garde alors l'en-tête, la longueur, la capacité et les
+  éléments en registres d'un `push` à l'autre, au lieu de les relire en
+  mémoire à chaque fois (une chaîne de dépendances par la mémoire).
+- **Réservation avant une boucle comptée** (`reserve_for_pushes`). Elle accepte
+  les paramètres `mutates` (une racine distincte dans la fonction, d'après les
+  règles d'alias) et réserve de façon géométrique (`fa_array_room`), ce qui
+  supprime une réallocation par tour d'une boucle englobante.
+- **Correctif.** Un local de module ou capturé, réservé avant une boucle dont le
+  corps appelait une fonction capable de le remplacer (`xs = []`), recevait
+  ensuite des `push` sans contrôle de capacité dans le nouveau bloc : écriture
+  hors bornes, présente avant ce travail. Un tel local n'est plus réservé que
+  si le corps n'appelle rien d'autre que ce `push`.
+
+Pour `GrowingArray` (liste segmentée, décision « GrowingArray native layout ») :
+
+- **Curseur.** L'en-tête porte l'adresse de l'élément `length` et la fin de son
+  segment : un `push` est une comparaison, une écriture et un incrément ; le
+  segment suivant est trouvé ou alloué hors ligne (`fa_segmented_next`).
+- **Parcours par segment.** Une boucle `for` avance un pointeur dans le segment
+  et ne cherche le segment suivant qu'à sa fin (`fa_segmented_run`), au lieu
+  d'un `clz` par élément. La recherche d'octets continue depuis ce curseur.
+- **Copies, remplissages et recherches** de `copies.rs` acceptent un
+  `GrowingArray` en source ou en cible, avec une copie par segment
+  (`fa_segmented_append`, `fa_segmented_extend_to`, `fa_segmented_fill`) et un
+  chemin en ligne quand tout tient dans un segment.
+- **Indexation.** L'adresse d'un élément est calculée dans l'IR avec
+  l'étiquette d'en-tête (un `store` dans un élément ne fait plus relire le
+  pointeur de segment), et le contrôle `0 <= index < length` vient d'abord,
+  l'indice négatif étant traité dans un bloc froid, comme pour `Array`.
+- **`x = []`** sur un `GrowingArray` d'un local ou d'un champ supprime les
+  éléments (ceux qui possèdent de la mémoire sont libérés) et garde les
+  segments pour les `push` suivants (`fa_segmented_reset`). Les références dans
+  l'ancienne valeur sont déjà invalides.
+
+### Mesures
+
+Méthode : `compare.py --default-sizes --goose-runtime-size` construit les
+trois programmes Fa (`string-building`, `-bytes`, `-growing`), Goose avec `N`
+lu à l'exécution, et vérifie chaque sortie contre Rust. `variants.py` alterne
+ensuite les quatre exécutables, processus fixé au CPU 1 : trois séries de 21
+passages à 3 000 000 entrées, médiane du temps CPU utilisateur + système. Les
+instructions sont celles de Callgrind (processus entier) à 300 000 entrées. La
+VM restait partagée (charge moyenne de 1 à 1,4 pendant ces séries, de 4 à 6
+pendant le développement) ; les compteurs matériels sont inaccessibles
+(`perf_event_paranoid` = 4).
+
+| Version | Médiane CPU (63 passages) | Médianes des séries | Instructions |
+| --- | ---: | ---: | ---: |
+| `String` (`main.fa`) | 0,198 s | 0,201 / 0,192 / 0,202 | 174,1 M |
+| `Array<Byte>` (`bytes.fa`) | 0,191 s | 0,190 / 0,204 / 0,189 | 190,3 M |
+| `GrowingArray<Byte>` (`growing.fa`) | 0,230 s | 0,229 / 0,227 / 0,238 | 206,5 M |
+| Goose | 0,164 s | 0,160 / 0,180 / 0,171 | 148,7 M |
+
+Au départ, la première version du portage en octets prenait 0,540 s et
+580,0 M instructions, et la version `GrowingArray` 1 195,8 M instructions.
+
+- **`Array<Byte>` atteint la parité avec `String`** : médiane groupée 0,965×,
+  plus basse dans deux séries sur trois, minimum plus bas dans les trois. La
+  marge est mince : sur les 63 tours appariés, `Array<Byte>` est le plus rapide
+  dans 32. Il exécute 9 % d'instructions de plus que `String` avec un meilleur
+  débit (des copies et comparaisons d'octets simples, là où `String` passe par
+  le runtime des chaînes). La version `String` ne construit pas la jointure
+  (`join(…).length` calcule seulement sa longueur) ; le portage la construit,
+  comme Goose.
+- **`GrowingArray<Byte>` vaut 1,20× `Array<Byte>` en temps** (1,085× en
+  instructions) et reste plus lent que Goose : le seuil de 1,10× n'est atteint
+  qu'en instructions. L'écart, à 300 000 entrées : `appendInteger` +12,3 M
+  (chaque écriture indexée teste le premier segment et charge le pointeur de
+  segment ; le remplissage vérifie la place du segment courant), `add` +13,0 M
+  (la position du segment de début de chaque copie, un `clz` et des décalages,
+  et la recherche par segment), `main` +3,0 M (la remise à zéro par `[]`, un
+  appel par entrée) ; en sens inverse, aucune recopie lors de la croissance
+  (`memcpy` −12,8 M). Que l'écart en temps dépasse l'écart en instructions
+  désigne des chaînes de dépendances plus longues (calcul du segment avant
+  chaque accès, longueur et curseur écrits à chaque `push`) ; sans compteurs
+  matériels, cette attribution n'est pas mesurée. Les pistes : une taille de
+  premier segment propre au tableau (`k` avec `capacity`/`reserve`, hors du
+  périmètre de ce travail selon `design/todo.md`), un en-tête plus petit, et
+  un accès au segment du curseur sans `clz`.
+- Aucun programme du benchmark n'appelle une méthode qui aplatit un
+  `GrowingArray` (`fa_segmented_flatten`) : seuls `length`, `isEmpty`,
+  l'indexation, `push` et `for` sont utilisés.
+
+**Contrôle des autres programmes.** Les 25 programmes, compilés avant
+(`f1317521`) et après, aux tailles d'audit de `compare.py`, avec les mêmes
+binaires Goose et Rust : toutes les sorties sont identiques à celles de Rust et
+d'avant (`blur` vérifié à part, Goose refusant son `N` à l'exécution sous
+`checkfree` : 96 692 261 puis 96 692 230 instructions). Dix exécutables sont
+identiques octet par octet. Gains : `records` −1,9 %, `respond` −1,8 %,
+`graph` −1,4 %, `lru` −0,7 %, `fannkuch-redux` −0,1 %. Hausses : `scene`
++0,63 % (la réservation géométrique alloue des blocs plus grands :
+`array_extend_room` et `heap_alloc_slow`, alors que `build` lui-même baisse),
+`words` +0,30 % (le code des `push` écrits en ligne dans `main`),
+`sort-objects` +0,06 %. Les autres sont à ±600 instructions près. Les
+[données](native-goose-bytes-results.json) conservent les échantillons, les
+empreintes et les comptes avant et après.
+
+### Validation
+
+Avec `LLVM_SYS_181_PREFIX`, `CARGO_TARGET_DIR=$HOME/.cache/fa-goose-target` et
+`CARGO_BUILD_JOBS=4` :
+
+- `cargo fmt --all` ; `cargo clippy --workspace --all-targets` sans
+  avertissement ;
+- `cargo test --workspace --no-fail-fast` : tout passe (1 089 tests dans 53
+  suites), dont les programmes du backend sur native, native sans libc et wasm
+  avec détection des fuites, `doc_snippets` et les cas de l'analyseur. Dans
+  une exécution, l'assertion temporelle d'`async-starvation` a échoué sur wasm
+  sous charge ; isolée, la suite des programmes passe trois fois sur trois ;
+- nouveaux tests : `block-copies.fa` et `growing-blocks.fa` (sorties
+  identiques au backend JavaScript), leurs versions `-O0`, quatre tests d'IR
+  (copie en un bloc, contrôle sorti de la boucle avec les tours conservés,
+  remplissage et recherche, en-tête en registres) plus un pour le `push` d'un
+  `GrowingArray`, et le cas d'analyseur `ref-44.fa` ;
+- le runtime C est régénéré par `generate.sh` (IR versionné identique à celui
+  qu'il produit) ; le `fa` de release est reconstruit avant les mesures.

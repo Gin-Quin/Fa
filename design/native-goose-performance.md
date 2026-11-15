@@ -1149,3 +1149,71 @@ Avec `LLVM_SYS_181_PREFIX`, `CARGO_TARGET_DIR=$HOME/.cache/fa-goose-target` et
   `GrowingArray`, et le cas d'analyseur `ref-44.fa` ;
 - le runtime C est régénéré par `generate.sh` (IR versionné identique à celui
   qu'il produit) ; le `fa` de release est reconstruit avant les mesures.
+
+## Collections immuables : données constantes et pile (15 novembre 2026)
+
+Commit d’implémentation `97d431c5`. Les littéraux immuables pris en charge vivent
+soit en données constantes, soit dans un espace fixe de 2 Kio par collection et
+4 Kio par fonction. Les usages propriétaires ou incertains prennent le tas dès
+la création. `split` reçoit un tampon de l’appelant : borne prouvée ou comptage
+limité au budget, puis choix du stockage avant toute construction. Aucune
+reconnaissance de programme, taille de benchmark ou résultat attendu ; aucun
+changement du backend JavaScript.
+
+Les 25 programmes et les deux variantes passent les oracles Rust aux tailles
+d’audit **et** aux tailles par défaut. Les 27 journaux Goose confirment
+`llvm-18/bin/clang -O2` (`GOOSE_CC` et `CC` explicites). Callgrind utilise les
+tailles d’audit ; les temps sont les médianes CPU Fa de **21 passages alternés,
+CPU 1**, aux tailles par défaut, avec `variants.py`. Les exécutables sont les
+mêmes pour les deux tailles. Les temps d’un seul passage de `compare.py` ne
+servent pas de preuve de performance ; Goose n’est pas rechronométré sur 21
+passages. Machine partagée : conserver les échantillons plutôt que conclure
+sur chaque petit écart. Les comptages complets, commandes, empreintes, charges
+et échantillons sont dans le [JSON brut](native-goose-stack-collections-results.json).
+
+| Programme | Δ instructions | CPU avant (ms) | CPU après (ms) |
+| --- | ---: | ---: | ---: |
+| binary-trees | +11 instr. | 167.094 | 160.887 |
+| blur | -3 instr. | 97.438 | 99.251 |
+| calc | +0.0608 % | 552.023 | 561.898 |
+| fannkuch-redux | +44 instr. | 261.289 | 250.799 |
+| fib | -25 instr. | 971.786 | 972.919 |
+| graph | +11 instr. | 175.160 | 176.372 |
+| interp | -3 instr. | 31.536 | 29.931 |
+| lru | +12 instr. | 849.988 | 807.923 |
+| mandelbrot | +47 instr. | 1284.047 | 1250.089 |
+| nbody | -3 instr. | 1142.616 | 1102.234 |
+| particles | +47 instr. | 125.531 | 123.734 |
+| push | +25 instr. | 345.594 | 362.226 |
+| records | +11 instr. | 370.983 | 394.805 |
+| respond | +2.7804 % | 662.686 | 619.407 |
+| scene | +11 instr. | 29.492 | 29.792 |
+| sexp | -3 instr. | 310.724 | 311.766 |
+| sieve | +11 instr. | 1211.110 | 1170.718 |
+| sort-objects | -14.4616 % | 445.046 | 433.457 |
+| spectral-norm | +11 instr. | 966.112 | 950.889 |
+| string-building | -3.7304 % | 174.111 | 174.189 |
+| string-building-bytes | -0.3903 % | 181.957 | 169.740 |
+| string-building-growing | -0.3605 % | 225.674 | 210.125 |
+| strlist | +14 instr. | 346.390 | 344.510 |
+| sum | +11 instr. | 290.297 | 289.404 |
+| tree | +11 instr. | 153.732 | 156.829 |
+| word-count | -14.7855 % | 629.287 | 656.691 |
+| words | +30 instr. | 116.609 | 114.195 |
+
+Les 20 écarts les plus petits ne dépassent pas
+47 instructions. Les baisses nettes se concentrent sur `sort-objects`,
+`word-count` et `string-building` ; `calc` et
+`respond` exécutent davantage d’instructions. Les temps CPU ne suivent pas
+toujours ces comptages : ce relevé ne démontre pas un gain universel ni la
+parité générale avec Goose.
+
+Validation : workspace Rust, Clippy sans avertissement, 42 tests IR,
+ASan/UBSan, documentation et site ; 12 exécutions supplémentaires avec contrôle
+des fuites à `-O0`/`-O3` sur native, freestanding et wasm, toutes conformes.
+Les destinations de retour générales (fonctions utilisateur, objets, tuples),
+`map`/`filter`/`from`, les colonnes compactes sur pile et les autres limites sont
+listées précisément dans [les tâches restantes](todo.md#performance). Les deux
+règles de destination et d’échappement sont des
+[décisions utilisateur](decisions.md#local-immutable-collections-on-the-stack-user-decision-2026-11-15),
+la réalisation de l’ABI générale reste à faire.

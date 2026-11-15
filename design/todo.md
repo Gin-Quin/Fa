@@ -22,8 +22,9 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 - **Immutable storage coverage (native, 2026-11-15):** add compact immutable
   object-columnar chunks that preserve the reference ABI, broader escape proofs
   for borrowed parameters/non-escaping captures/async intervals, and static
-  lowering of interpreter-produced composites, defaulted objects, unions and
-  composite table keys. Current unsupported cases keep ordinary heap storage;
+  lowering of interpreter-evaluated initializers, defaulted objects, optional/enum/union
+  values, and 128-bit or composite table keys. Unsupported read-only shapes keep
+  the ordinary frame/heap construction path;
   `Bytes` is not implemented in this branch and must adopt the same storage rules.
 
 ## Bugs

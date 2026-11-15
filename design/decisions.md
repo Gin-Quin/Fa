@@ -483,6 +483,9 @@ Implementation choices:
 
 - **Budgets:** at most 2 KiB per collection and 4 KiB of collection storage per
   function invocation, including headers, alignment, indices and directories.
+  Two KiB accommodates an ordinary stable-table chunk and its index, or small
+  pool/segment bookkeeping; the frame cap bounds the sum of many such literals.
+  The limits are shared by every target rather than tuned to a benchmark.
   All stack allocations have constant sizes and are emitted in the entry block,
   so a loop reuses its space rather than accumulating allocations. Larger
   constructions use the existing heap path. No input-sized `alloca`, virtual

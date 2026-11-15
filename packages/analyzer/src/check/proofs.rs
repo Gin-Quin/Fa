@@ -81,10 +81,13 @@ impl Walker<'_> {
 		// it (`mutated_receiver`) or it is assigned
 		let _ = ty;
 		// a copy of a local has its length (`mutable results = numbers`)
-		let copied = self
-			.read_local(value)
-			.filter(|&source| source != symbol)
-			.and_then(|source| self.length_of(source));
+		let copied = match self.view(self.strip_groups(value)) {
+			View::Copy(inner) => self.expression_length(inner),
+			_ => self
+				.read_local(value)
+				.filter(|&source| source != symbol)
+				.and_then(|source| self.length_of(source)),
+		};
 		match copied.or_else(|| self.literal_length(value)) {
 			Some(length) => self.facts.interval(length),
 			None => IntervalId::NONE,
@@ -96,6 +99,9 @@ impl Walker<'_> {
 	/// brief §6.5 rule 3: "equal lengths for … `map`").
 	pub(crate) fn expression_length(&mut self, n: NodeId) -> Option<Interval> {
 		let n = self.strip_groups(n);
+		if let View::Copy(inner) = self.view(n) {
+			return self.expression_length(inner);
+		}
 		if let Some(symbol) = self.read_local(n) {
 			return self.length_of(symbol);
 		}

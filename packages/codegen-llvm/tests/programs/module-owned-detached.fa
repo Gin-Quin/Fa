@@ -1,0 +1,17 @@
+use { Mutex } = std.concurrency
+use { sleep } = std.time
+mutable gate = Mutex<Array<Integer>> { value = [7] }
+reactive count = 1
+watch {
+	console.log(count)
+	() => console.log("cleanup {gate.tryLock()?.value.length ?? 0}")
+}
+start do {
+	await sleep(1)
+	console.log(gate.tryLock()?.value.length ?? 0)
+}
+console.log("main ended")
+-- prints: 1
+-- prints: main ended
+-- prints: 1
+-- prints: cleanup 1

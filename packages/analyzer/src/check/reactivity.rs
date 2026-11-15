@@ -224,46 +224,11 @@ impl Walker<'_> {
 
 	// ── subscriptions ─────────────────────────────────────────────────────
 
-	/// `subscription.stop()` consumes the local (flow part of a call).
-	pub(crate) fn note_stop_call(&mut self, n: NodeId, callee: NodeId) {
-		if !self.body.flow.reachable {
-			return;
-		}
-		let View::Access { target, members } = self.view(callee) else {
-			return;
-		};
-		let Some(member) = members.last() else {
-			return;
-		};
-		let Resolution::Builtin(builtin) = self.a.resolution(member) else {
-			return;
-		};
-		// `subscription.stop()`, `worker.stop()` (concurrency.rs)
-		if !matches!(
-			builtins::get(builtin).path,
-			"Subscription#stop"
-				| "Worker#stop"
-				| "TcpListener#close"
-				| "TcpStream#close"
-				| "WorkerPool#shutdown"
-		) {
-			return;
-		}
-		let target = self.strip_groups(target);
-		if let Resolution::Local(symbol) = self.a.resolution(target)
-			&& !self
-				.body
-				.flow
-				.consumed
-				.iter()
-				.any(|&(other, _)| other == symbol)
-		{
-			self.body.flow.consumed.push((symbol, n));
-		}
-	}
-
 	/// A declaration gives its symbol a new value: it is not consumed.
 	pub(crate) fn reset_consumed(&mut self, symbol: SymbolId) {
+		self.body.flow.conditional_consumed.retain(|entry| {
+			self.places.get(entry.0).root != crate::flow::PlaceRoot::Symbol(symbol)
+		});
 		self.body
 			.flow
 			.consumed
@@ -272,6 +237,9 @@ impl Walker<'_> {
 
 	/// `MEM002`: the read of a consumed local (flow part of a name).
 	pub(crate) fn check_consumed(&mut self, n: NodeId) {
+		if self.is_direct_replacement(n) {
+			return;
+		}
 		if !self.body.flow.reachable {
 			return;
 		}

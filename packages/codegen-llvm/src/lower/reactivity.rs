@@ -542,7 +542,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				continue;
 			}
 			if !global {
-				let copy = matches!(kind, SymbolKind::Mutable | SymbolKind::MutableUse)
+				let copy = !matches!(kind, SymbolKind::Reactive | SymbolKind::Use)
+					&& !self.param_sources.contains_key(&symbol)
 					&& !referred.contains(&symbol);
 				captures.push(if copy {
 					Capture::Copy(symbol, repr)
@@ -597,7 +598,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Capture::Copy(symbol, _) => {
 					let slot = self.slot_of(symbol, node)?;
 					let value = self.load(slot)?;
-					self.emit_copy(value)?.value.expect("a value")
+					let moved = self.moves_capture(node, symbol);
+					let value = if moved {
+						self.give_up_place(node, slot)?;
+						value
+					} else {
+						self.emit_copy(value)?
+					};
+					value.value.expect("a value")
 				}
 				Capture::Source(symbol) => self.reactive_sources[&symbol].into(),
 				Capture::Derived(symbol) => self.derived_nodes[&symbol].into(),
@@ -630,8 +638,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let saved_slots = std::mem::take(&mut self.slots);
 		let saved_owned = std::mem::take(&mut self.owned_locals);
 		let saved_references = std::mem::take(&mut self.references);
-		let saved_sources = self.reactive_sources.clone();
-		let saved_derived = self.derived_nodes.clone();
+		let mut saved_sources = self.reactive_sources.clone();
+		let mut saved_derived = self.derived_nodes.clone();
 		let saved_params = std::mem::take(&mut self.param_sources);
 		self.reactive_sources.retain(|_, slot| is_global(*slot));
 		self.derived_nodes.retain(|_, slot| is_global(*slot));
@@ -701,6 +709,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.slots = saved_slots;
 		self.owned_locals = saved_owned;
 		self.references = saved_references;
+		// A callback can be the first generated reader of a module-level
+		// place. Its global slot must also be used by the declaration and
+		// writes generated later; only its local capture slots are temporary.
+		saved_sources.extend(
+			self.reactive_sources
+				.iter()
+				.filter(|(_, slot)| is_global(**slot))
+				.map(|(&symbol, &slot)| (symbol, slot)),
+		);
+		saved_derived.extend(
+			self.derived_nodes
+				.iter()
+				.filter(|(_, slot)| is_global(**slot))
+				.map(|(&symbol, &slot)| (symbol, slot)),
+		);
 		self.reactive_sources = saved_sources;
 		self.derived_nodes = saved_derived;
 		self.param_sources = saved_params;
@@ -965,12 +988,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				environment.into(),
 			],
 		)?;
-		if !self.is_module_statement(node) {
+		Ok(self.fresh(Val::new(Repr::Watch, observer)))
+	}
+
+	/// A bare watch statement belongs to its declaring block. A watch used
+	/// as a value transfers its one owner through the ordinary value path.
+	pub(crate) fn keep_watch_statement(&self, mut node: NodeId, value: Val<'ctx>) {
+		while let View::Group(inner) = self.view(node) {
+			node = inner;
+		}
+		if matches!(self.view(node), View::Watch(_))
+			&& self.unregister(value)
+			&& !self.is_module_statement(node)
+			&& let Some(observer) = value.value
+		{
 			self.cleanups
 				.borrow_mut()
-				.push(super::ownership::Cleanup::Dispose(observer));
+				.push(super::ownership::Cleanup::Dispose(
+					observer.into_pointer_value(),
+				));
 		}
-		Ok(Val::new(Repr::Watch, observer))
 	}
 
 	/// Whether a `watch` (or the declaration holding it) is a statement of

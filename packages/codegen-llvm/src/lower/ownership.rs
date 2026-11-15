@@ -88,6 +88,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Link(_)
 			| Repr::Links(_)
 			| Repr::Columnar(_)
+			| Repr::Watch
 			| Repr::Task(_) => true,
 			Repr::InlineUnion(nominal) => self.inline_union_needs_drop(nominal),
 			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
@@ -557,6 +558,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.effectful_drops.set(true);
 				self.build_sync_drop(builder, ty, value)?
 			}
+			Repr::Watch => {
+				self.effectful_drops.set(true);
+				builder.build_call(
+					self.runtime.function("fa_subscription_release")?,
+					&[value.into()],
+					"",
+				)?;
+			}
 			// a task: cancelled when not done (tasks.rs)
 			Repr::Task(_) => {
 				self.effectful_drops.set(true);
@@ -797,6 +806,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.into(),
 			// a copy of a handle designates the same value (parallel.rs)
 			Repr::Sync(_) => self.build_sync_copy(builder, value)?,
+			Repr::Watch => builder
+				.build_call(
+					self.runtime.function("fa_subscription_retain")?,
+					&[value.into()],
+					"",
+				)?
+				.try_as_basic_value()
+				.basic()
+				.expect("a subscription"),
 			// a task is moved, never copied (the analyzer's `MOVE_ONLY`)
 			Repr::Task(_) => value,
 			// a copy has no links (D18)
@@ -1657,7 +1675,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Cleanup::Dispose(observer) => {
 				self.effectful_drops.set(true);
 				self.builder.build_call(
-					self.runtime.function("fa_dispose")?,
+					self.runtime.function("fa_subscription_release")?,
 					&[observer.into()],
 					"",
 				)?;
@@ -1806,6 +1824,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	// ── last uses ───────────────────────────────────────────────────────
 
+	/// A capture transfer selected by the analyzer, with collection-only
+	/// generic transfers resolved against this native instance's actual type.
+	pub(crate) fn moves_capture(&self, site: NodeId, symbol: SymbolId) -> bool {
+		self.analysis
+			.moved_captures
+			.get(&site)
+			.is_some_and(|moved| moved.contains(&symbol))
+			|| self
+				.analysis
+				.collection_moved_captures
+				.get(&site)
+				.is_some_and(|moved| {
+					moved.iter().any(|&(captured, ty)| {
+						captured == symbol
+							&& self.types().requires_explicit_copy(self.concrete_type(ty))
+					})
+				})
+	}
+
 	/// The slot of an owned local whose read at `node` is its last use, so
 	/// that taking it moves it (analyzer's `MOVE` flag, or a conservative
 	/// local analysis: the last reference in the source, not in a loop or a
@@ -1846,8 +1883,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if self.analysis.flags_of(inner).contains(NodeFlags::MOVE) {
 			return Some(slot);
 		}
+		if self
+			.analysis
+			.collection_moves
+			.get(&inner)
+			.is_some_and(|&ty| self.types().requires_explicit_copy(self.concrete_type(ty)))
+		{
+			return Some(slot);
+		}
+		// A shared handle's lexical owner can have an observable final drop
+		// (unlock, dispose or destroy). A last textual read is not a semantic
+		// transfer: only the analyzer's MOVE above or a return can shorten it.
 		if self.is_returned_local(symbol, inner, repr)
-			|| self.is_last_use(symbol, inner, data.decl_node)
+			|| !self
+				.types()
+				.contains_shared_handle(self.concrete_type(data.ty))
+				&& self.is_last_use(symbol, inner, data.decl_node)
 		{
 			Some(slot)
 		} else {

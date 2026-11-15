@@ -25,6 +25,7 @@ mod compose;
 mod comptime;
 mod concurrency;
 mod control;
+mod copying;
 mod decl;
 mod destructuring;
 pub mod effects;
@@ -50,6 +51,7 @@ mod optionals;
 mod patterns;
 mod pools;
 mod proofs;
+mod provenance;
 pub(crate) mod reactivity;
 mod references;
 mod relations;
@@ -70,6 +72,8 @@ mod type_logic;
 mod type_ops;
 mod unused;
 mod value_params;
+mod value_state;
+mod wire;
 
 pub use tests::is_test_module;
 
@@ -247,8 +251,14 @@ pub struct Requirement {
 	pub needs: TypeId,
 }
 
-/// The context of the body being walked, swapped wholesale for on-demand
-/// analysis of a hoisted declaration (design §3.2).
+/// Diagnostics and semantic conditions retained together at loop fixpoints.
+#[derive(Clone, Debug, Default)]
+pub struct FlowBuffer {
+	pub diagnostics: Vec<Diagnostic>,
+	pub copy_conditions: Vec<(NodeId, crate::analysis::CopyRequirement)>,
+}
+
+/// The context swapped wholesale for on-demand hoisted declarations.
 #[derive(Clone, Debug)]
 pub struct BodyCx {
 	/// The current scope.
@@ -260,7 +270,7 @@ pub struct BodyCx {
 	/// The enclosing loops, innermost last.
 	pub loops: Vec<LoopCx>,
 	/// Flow diagnostics of the current loop iteration / SCC round (decision A3).
-	pub flow_buffers: Vec<Vec<Diagnostic>>,
+	pub flow_buffers: Vec<FlowBuffer>,
 	/// Narrowing requirements to re-validate (decision A2).
 	pub requirements: Vec<Requirement>,
 	/// The open `try` and `catch` operands, innermost last (`errors.rs`).
@@ -465,8 +475,28 @@ pub struct Walker<'s> {
 	pub(crate) declaration_depths: FxHashMap<SymbolId, (u32, u32)>,
 	/// The last use of each local so far (`moves.rs`).
 	pub(crate) last_uses: FxHashMap<SymbolId, moves::LastUse>,
+	/// All reads, for last uses in mutually exclusive branches (`moves.rs`).
+	pub(crate) move_uses: FxHashMap<SymbolId, Vec<moves::LastUse>>,
 	/// The value nodes in a copy position (`moves.rs`).
 	pub(crate) copy_sites: rustc_hash::FxHashSet<NodeId>,
+	/// Explicit copies are independent values (`copying.rs`).
+	pub(crate) explicit_copy_sites: rustc_hash::FxHashSet<NodeId>,
+	/// Slices copy their borrowed elements; recorded by check_index.
+	pub(crate) copy_slices: rustc_hash::FxHashSet<NodeId>,
+	/// Environment expression site -> the function whose captures it owns.
+	pub(crate) capture_creations: FxHashMap<NodeId, NodeId>,
+	/// Captures of functions, watchers and derived bodies alike.
+	pub(crate) capture_lists: FxHashMap<NodeId, Vec<SymbolId>>,
+	/// Binder identities at generic applications, for semantic copy conditions.
+	pub(crate) copy_instantiations: FxHashMap<NodeId, crate::types::Bindings>,
+	/// Deferred flow conditions from retained loop/SCC rounds.
+	pub(crate) copy_conditions: Vec<(NodeId, crate::analysis::CopyRequirement)>,
+	/// Materialized values whose captures must remain on their executor.
+	pub(crate) thread_values: Vec<(NodeId, NodeId, String)>,
+	pub(crate) thread_result_values: Vec<(NodeId, NodeId, String)>,
+	/// Evaluation-time snapshots, before later assignments can change a slot.
+	pub(crate) value_reads: FxHashMap<NodeId, Vec<value_state::ValueRead>>,
+	pub(crate) capture_value_reads: FxHashMap<(NodeId, SymbolId), Vec<value_state::ValueRead>>,
 	/// The providers of the requirements of the call being applied.
 	pub(crate) call_providers: Vec<Option<requirements::Provider>>,
 	/// The declared type of the callee's effect path being applied (advanced
@@ -642,7 +672,18 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		call_providers: Vec::new(),
 		declaration_depths: FxHashMap::default(),
 		last_uses: FxHashMap::default(),
+		move_uses: FxHashMap::default(),
 		copy_sites: rustc_hash::FxHashSet::default(),
+		explicit_copy_sites: rustc_hash::FxHashSet::default(),
+		copy_slices: rustc_hash::FxHashSet::default(),
+		capture_creations: FxHashMap::default(),
+		capture_lists: FxHashMap::default(),
+		copy_instantiations: FxHashMap::default(),
+		copy_conditions: Vec::new(),
+		thread_values: Vec::new(),
+		thread_result_values: Vec::new(),
+		value_reads: FxHashMap::default(),
+		capture_value_reads: FxHashMap::default(),
 		effect_types: FxHashMap::default(),
 		closure_writes: FxHashMap::default(),
 		rejected_effect_roots: rustc_hash::FxHashSet::default(),
@@ -669,6 +710,10 @@ pub fn analyze(session: &mut Session, file: FileId) {
 	walker.finish_relations();
 	// the last uses that are copies are moves (moves.rs)
 	walker.finish_moves();
+	walker.finish_value_origins();
+	walker.finish_copy_requirements();
+	walker.finish_thread_value_requirements();
+	walker.finish_wire_requirements();
 	// the static sets of reactivity, and its tables (reactivity.rs)
 	walker.finish_reactivity();
 	// the values never used (unused.rs)
@@ -709,6 +754,7 @@ impl Walker<'_> {
 			}
 			View::ImplicitMember(name) => self.check_implicit_member(n, name, expected),
 			View::Group(inner) => self.check_group(n, inner, expected),
+			View::Copy(inner) => self.check_copy(n, inner, expected),
 			View::EmptyGroup => self.check_empty_group(n),
 			View::Array { items } => self.check_array(n, items, expected),
 			View::Tuple { items } => self.check_tuple(n, items, expected),
@@ -921,6 +967,7 @@ impl Walker<'_> {
 			// the code after a `Never` expression is unreachable
 			self.body.flow.set_unreachable();
 		}
+		self.record_value_read(n, ty);
 		ty
 	}
 
@@ -1235,7 +1282,7 @@ impl Walker<'_> {
 			return;
 		}
 		let target = match self.body.flow_buffers.last_mut() {
-			Some(buffer) => buffer,
+			Some(buffer) => &mut buffer.diagnostics,
 			None => &mut self.output,
 		};
 		// one operation with two effects (`pool.delete`: the element and the
@@ -1274,7 +1321,7 @@ impl Walker<'_> {
 
 	/// Starts buffering the flow diagnostics of a loop round or an SCC round.
 	pub fn push_flow_buffer(&mut self) {
-		self.body.flow_buffers.push(Vec::new());
+		self.body.flow_buffers.push(FlowBuffer::default());
 	}
 
 	/// Ends the current round: `keep` its diagnostics (the stable round: they go
@@ -1284,8 +1331,11 @@ impl Walker<'_> {
 			return;
 		};
 		if keep {
-			for diagnostic in buffer {
+			for diagnostic in buffer.diagnostics {
 				self.report_flow(diagnostic);
+			}
+			for (site, requirement) in buffer.copy_conditions {
+				self.defer_copy_condition(site, requirement);
 			}
 		}
 	}

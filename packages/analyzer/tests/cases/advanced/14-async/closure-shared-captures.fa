@@ -1,0 +1,38 @@
+use { Mutex } = std.concurrency
+
+type Reader = () => Integer
+function make = (): Reader => {
+	mutable cell = Mutex<Integer> { value = 7 }
+	return () => cell.tryLock()?.value ?? -1
+}
+
+async function test = () => {
+	do {
+		let read = make()
+		do {
+			let nested = { reader = read }
+			let other = nested
+			console.log(other.reader())
+		}
+		console.log(read())
+	}
+	mutable cell = Mutex<Integer> { value = 10 }
+	function read = (): Integer => cell.tryLock()?.value ?? -1
+	let first = { reader = read }
+	cell = Mutex<Integer> { value = 20 }
+	let second = { reader = read }
+	console.log(first.reader(), second.reader(), read())
+	async function later = (): Integer => do {
+		await Task.yield()
+		cell.tryLock()?.value ?? -1
+	}
+	let delayed = later
+	let pending = start delayed()
+	console.log(await pending)
+}
+
+await test()
+-- prints: 7
+-- prints: 7
+-- prints: 10 20 20
+-- prints: 20

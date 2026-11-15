@@ -59,7 +59,7 @@ impl Generator<'_> {
 	/// before its body, which a recursive type calls.
 	pub(crate) fn drop_function(&mut self, ty: TypeId) -> Option<String> {
 		let ty = self.types.unfold(ty);
-		if !self.types.contains_resource(ty) {
+		if !self.types.contains_resource(ty) && !self.types.contains_shared_handle(ty) {
 			return None;
 		}
 		if let Some(name) = self.drops.get(&ty) {
@@ -86,6 +86,10 @@ impl Generator<'_> {
 	/// The statements of the drop function of a type.
 	fn drop_body(&mut self, ty: TypeId) -> Option<Vec<String>> {
 		match self.types.kind(ty) {
+			TypeKind::Sync(..) | TypeKind::Subscription | TypeKind::Function(_) => {
+				let release = self.helper("faReleaseShared");
+				Some(vec![format!("{release}(value);")])
+			}
 			TypeKind::Object(_) => {
 				let mut lines = Vec::new();
 				if self.types.is_resource(ty) {
@@ -298,20 +302,22 @@ impl Generator<'_> {
 	/// Whether a local or a parameter owns a value holding a resource.
 	pub(crate) fn owns_resource(&self, symbol: SymbolId) -> bool {
 		let info = self.analysis.symbols.symbol(symbol);
-		matches!(
-			info.kind,
-			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Parameter { .. }
-		) && self.types.contains_resource(info.ty)
+		matches!(info.kind, SymbolKind::Let | SymbolKind::Mutable)
+			&& self.types.contains_shared_handle(info.ty)
 	}
 
 	/// Whether a local moves out somewhere (as a whole): it needs a drop flag.
 	fn moves_out(&self, symbol: SymbolId) -> bool {
-		(0..self.tree.nodes.len()).any(|index| {
-			let node = NodeId::new(index);
-			matches!(self.view(node), View::Name(_))
-				&& self.analysis.resolution(node) == Resolution::Local(symbol)
-				&& self.moves_whole(node)
-		})
+		self.analysis
+			.moved_captures
+			.values()
+			.any(|captures| captures.contains(&symbol))
+			|| (0..self.tree.nodes.len()).any(|index| {
+				let node = NodeId::new(index);
+				matches!(self.view(node), View::Name(_))
+					&& self.analysis.resolution(node) == Resolution::Local(symbol)
+					&& self.moves_whole(node)
+			})
 	}
 
 	/// Whether the read of a local at a node moves it out.
@@ -353,7 +359,8 @@ impl Generator<'_> {
 		target: NodeId,
 		members: &[NodeId],
 	) -> Option<Expr> {
-		if !self.analysis.moved_reads.contains(&n) || !self.types.contains_resource(self.type_of(n))
+		if !self.analysis.moved_reads.contains(&n)
+			|| !self.types.contains_shared_handle(self.type_of(n))
 		{
 			return None;
 		}
@@ -403,7 +410,7 @@ impl Generator<'_> {
 		for &member in members {
 			read = self.apply_member(read, member, false);
 		}
-		let moved = if self.types.contains_resource(self.type_of(n)) {
+		let moved = if self.types.contains_shared_handle(self.type_of(n)) {
 			format!("{} = undefined, ", read.text)
 		} else {
 			String::new()

@@ -12,8 +12,8 @@ async function main = (flag: Boolean) => {
 	let holder = Holder { task = c }
 	console.log(await c)                 -- error: MEM002
 	let d = start compute(3)
-	console.log(run(() => d))
-	console.log(await d)                 -- error: MEM002
+	console.log(run(() => d))            -- error: MEM002
+	console.log(await d)
 	let e = start compute(4)
 	if flag {
 		let moved = same(e)

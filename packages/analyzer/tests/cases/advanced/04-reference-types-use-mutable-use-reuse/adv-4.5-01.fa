@@ -2,7 +2,7 @@
 type Pet = { name: String }
 type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
 mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }]
-let copied = people[1]
+let copied = copy people[1]
 use referenced = people[1]
 referenced.name = "Cleo"
 console.log(people[1].name) -- prints: Cleo

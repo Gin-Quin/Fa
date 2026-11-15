@@ -126,6 +126,7 @@ impl Walker<'_> {
 		self.use_reference(n);
 		// a stopped subscription is gone (reactivity.rs)
 		self.check_consumed(n);
+		self.check_conditional_task_read(n);
 		ty
 	}
 
@@ -188,6 +189,19 @@ impl Walker<'_> {
 		expected: Option<TypeId>,
 	) -> TypeId {
 		self.check(inner, expected)
+	}
+
+	/// `copy value`: an independent value, never a place or a consumption of
+	/// its source. The interpreter represents this copy with copy-on-write.
+	pub(super) fn check_copy(
+		&mut self,
+		n: NodeId,
+		inner: NodeId,
+		expected: Option<TypeId>,
+	) -> TypeId {
+		let ty = self.check(inner, expected);
+		self.explicit_copy_sites.insert(n);
+		ty
 	}
 
 	/// `()`: not a value (`E-TUP-1`, tuples.rs).
@@ -304,6 +318,7 @@ impl Walker<'_> {
 
 	/// `items[index]` (M1b).
 	pub(super) fn check_index(&mut self, n: NodeId, target: NodeId, index: NodeId) -> TypeId {
+		self.copy_slices.insert(n);
 		// `value[key]` in an `@for` over a key set (fields.rs)
 		if let Some(ty) = self.check_key_read(n, target, index) {
 			return ty;
@@ -324,6 +339,7 @@ impl Walker<'_> {
 		let index_ty = self.check(index, Some(TypeId::INTEGER));
 		let ty = self.memo(n, |w| w.index_type(n, target, target_ty, index, index_ty));
 		self.check_index_bounds(n, target, index);
+		self.check_conditional_task_read(n);
 		ty
 	}
 }

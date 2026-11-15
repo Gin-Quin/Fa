@@ -1,0 +1,16 @@
+-- A module watch survives main and detached work, then releases its cleanup.
+use { sleep } = std.time
+reactive count = 1
+watch {
+	console.log(count)
+	() => console.log("module cleanup")
+}
+start do {
+	await sleep(1)
+	console.log("detached ended")
+}
+console.log("main ended")
+-- prints: 1
+-- prints: main ended
+-- prints: detached ended
+-- prints: module cleanup

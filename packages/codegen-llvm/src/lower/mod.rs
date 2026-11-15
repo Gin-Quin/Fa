@@ -1872,10 +1872,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			value
 		};
 		let top_level = self.frame().owner.is_none() && !self.in_task_body();
-		if top_level && !self.leak_check && !self.in_coroutine() {
-			self.drop_at_exit()?;
-		} else {
-			self.drop_to(0)?;
+		// The runtime holds the root frame until detached work finishes.
+		// Its module owners are released by the final destroy, not by the
+		// end of main's body, which detached work can outlive.
+		if !(top_level && self.in_coroutine()) {
+			if top_level && !self.leak_check {
+				self.drop_at_exit()?;
+			} else {
+				self.drop_to(0)?;
+			}
 		}
 		if top_level && self.leak_check && !self.in_coroutine() {
 			self.call_runtime("fa_leak_check", &[])?;
@@ -2001,7 +2006,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let mark = self.mark();
 		self.call_entry_function()?;
 		self.end_statement(mark, None)?;
-		self.release_reactivity()?;
+		if !self.in_coroutine() {
+			self.release_reactivity()?;
+		}
 		self.build_return(Val::void(), root)
 	}
 
@@ -2215,7 +2222,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// Lowers a statement, dropping its value.
 	fn statement(&mut self, node: NodeId) -> Result<(), Error> {
-		self.expr(node)?;
+		let value = self.expr(node)?;
+		self.keep_watch_statement(node, value);
 		Ok(())
 	}
 
@@ -2226,6 +2234,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Block { statements } => statements,
 			_ => {
 				let value = self.expr(node)?;
+				if !want {
+					self.keep_watch_statement(node, value);
+				}
 				return Ok(if want { value } else { Val::void() });
 			}
 		};
@@ -2245,6 +2256,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				last = self.own(value, Some(statement))?;
 				self.end_statement(mark, Some(last))?;
 			} else {
+				self.keep_watch_statement(statement, value);
 				self.end_statement(mark, None)?;
 			}
 			self.flush_after(statement)?;
@@ -2572,6 +2584,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Unsupported(name) => Err(self.unsupported(node.index(), name)),
 			// design/async.md §3 (`tasks.rs`)
 			View::Await(operand) => self.await_expression(node, operand),
+			View::Copy(operand) => {
+				let value = self.expr(operand)?;
+				let copy = self.emit_copy(value)?;
+				Ok(self.fresh(copy))
+			}
 			View::Start(operand) => self.start_expression(node, operand),
 			other => Err(self.unsupported(node.index(), &format!("`{}`", variant_name(&other)))),
 		}

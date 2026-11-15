@@ -336,6 +336,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// a local function using locals around it: its environment
 			let (captures, by_reference) = (function.captures.clone(), function.by_reference);
 			let environment = self.build_environment(&captures, by_reference, node)?;
+			if !by_reference && !captures.is_empty() {
+				let owned = self.make_closure_of(
+					self.pointer_type().const_null(),
+					environment,
+					function.info.ty,
+				)?;
+				self.fresh(owned);
+			}
 			arguments.push(environment.into());
 		}
 		for (position, ((repr, has_default), argument)) in

@@ -22,6 +22,7 @@
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
 
 import { FaError } from "./errors.js";
+import { faOwnShared, faReleaseShared } from "./ownership.js";
 import { faSystemMessage } from "./system.js";
 import { faAlive } from "./tasks.js";
 
@@ -114,7 +115,7 @@ export class FaSocketWaits {
 	}
 }
 
-// @fa-helper FaTcpStream deps: FaSocketWaits
+// @fa-helper FaTcpStream deps: FaSocketWaits faOwnShared faSocketClose
 /** A `TcpStream`: a connected socket and the bytes received, not read yet. */
 export class FaTcpStream {
 	/**
@@ -165,10 +166,11 @@ export class FaTcpStream {
 			this.waits.notify();
 		});
 		socket.unref();
+		faOwnShared(this, faSocketClose);
 	}
 }
 
-// @fa-helper FaTcpListener deps: FaSocketWaits FaTcpStream NetError faNetHost faSystemMessage
+// @fa-helper FaTcpListener deps: FaSocketWaits FaTcpStream NetError faNetHost faSystemMessage faOwnShared faSocketClose
 /** A `TcpListener`: a listening socket and the connections not accepted yet. */
 export class FaTcpListener {
 	/**
@@ -185,7 +187,10 @@ export class FaTcpListener {
 		this.requested = port;
 		/** @type {any} */
 		this.server = null;
+		/** @type {boolean} */
+		this.closed = false;
 		this.waits = new FaSocketWaits(null);
+		faOwnShared(this, faSocketClose);
 		/** @type {any} */
 		const host_ = globalThis;
 		const net = host_.process?.getBuiltinModule?.("node:net");
@@ -358,24 +363,23 @@ export async function faSocketWrite(task, stream, bytes, count = bytes.length) {
 	}
 }
 
-// @fa-helper faSocketClose deps: FaTcpStream
+// @fa-helper faSocketClose deps: FaTcpStream faReleaseShared
 /**
  * `close()` of a listener or a stream (it is dropped).
  * @param {FaTcpListener | FaTcpStream} socket
  * @returns {void}
  */
 export function faSocketClose(socket) {
+	if (socket.closed) return;
+	socket.closed = true;
 	if (socket instanceof FaTcpStream) {
-		if (!socket.closed) {
-			socket.closed = true;
-			socket.socket.end();
-			socket.socket.unref();
-		}
+		socket.socket.end();
+		socket.socket.unref();
 		return;
 	}
 	socket.server?.close();
 	for (const stream of socket.queue) {
-		faSocketClose(stream);
+		faReleaseShared(stream);
 	}
 	socket.queue = [];
 }

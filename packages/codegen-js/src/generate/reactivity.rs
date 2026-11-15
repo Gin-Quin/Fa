@@ -431,6 +431,14 @@ impl Generator<'_> {
 		if self.top_statements.contains(&n) {
 			return false;
 		}
+		if self
+			.analysis
+			.symbols
+			.symbol_of_decl(n)
+			.is_some_and(|symbol| self.analysis.symbols.symbol(symbol).kind == SymbolKind::Derived)
+		{
+			return true;
+		}
 		match self.view(n) {
 			View::Watch(_) => true,
 			View::Declaration {
@@ -524,7 +532,8 @@ impl Generator<'_> {
 						View::Call { .. }
 							| View::TypedObject { .. }
 							| View::Object { .. } | View::Tuple { .. }
-					) && self.types.contains_resource(self.type_of(node))
+							| View::Lambda { .. } | View::Name(_)
+					) && self.types.contains_shared_handle(self.type_of(node))
 				});
 				self.has_try_lock = Some(known);
 				known
@@ -595,12 +604,19 @@ impl Generator<'_> {
 			self.out.close(&format!("finally {{ {drop} }}"));
 			return;
 		}
-		let helper = if self.holds_guard(n) {
+		let derived = self
+			.analysis
+			.symbols
+			.symbol_of_decl(n)
+			.is_some_and(|symbol| self.analysis.symbols.symbol(symbol).kind == SymbolKind::Derived);
+		let helper = if derived {
+			self.helper("faReleaseShared").to_string()
+		} else if self.holds_guard(n) {
 			self.helper("faUnlock").to_string()
 		} else if self.holds_task(n) {
 			self.task_drop(n)
 		} else {
-			self.helper("faDispose").to_string()
+			self.helper("faReleaseShared").to_string()
 		};
 		if rest.is_empty() {
 			if dest == Dest::Discard {
@@ -624,7 +640,7 @@ impl Generator<'_> {
 		cleanup: Option<NodeId>,
 	) -> Expr {
 		let captures = self.closure_captures(n);
-		let saved = self.copy_captured(&captures);
+		let saved = self.copy_values_at(&captures, false, Some(n));
 		let indent = self.out.indentation();
 		let (lines, temps) = self.in_function(n, |g| {
 			let (lines, ()) = g.capture_at(indent + 1, |g| {
@@ -650,6 +666,7 @@ impl Generator<'_> {
 			});
 			lines
 		});
+		let release = self.captured_release(&saved);
 		self.restore_captures(saved);
 		let mut body_lines = js::Writer::at(indent + 1);
 		if !temps.is_empty() {
@@ -657,10 +674,17 @@ impl Generator<'_> {
 		}
 		body_lines.append(lines);
 		let closing = "\t".repeat(indent);
-		Expr::new(
+		let function = Expr::new(
 			format!("() => {{\n{}{closing}}}", body_lines.finish()),
 			Prec::Assign,
-		)
+		);
+		match release {
+			Some(release) => {
+				let own = self.helper("faOwnShared");
+				js::call(own, &[function.text, release])
+			}
+			None => function,
+		}
 	}
 
 	/// The local at the root of a place expression (`a` of `a.b[0].c`).

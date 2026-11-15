@@ -580,6 +580,10 @@ pub struct KeyedDecl {
 pub enum GenericRequirement {
 	Value(ParamId),
 	Method(ParamId, Sym),
+	/// Universal type witness, even for a binder unused by the body.
+	TypeInfo(ParamId),
+	/// A statically compiled wire operation, possibly for an exact union recipe.
+	Codec(TypeId),
 }
 
 /// The complete generic parameter order and runtime needs of a function.
@@ -616,6 +620,7 @@ pub fn generic_requirements(types: &TypeStore, generics: &[ParamId]) -> Vec<Gene
 			requirements.push(GenericRequirement::Value(param));
 			continue;
 		}
+		requirements.push(GenericRequirement::TypeInfo(param));
 		for field in types.fields_of(info.constraint) {
 			if field.flags.contains(FieldFlags::METHOD) {
 				requirements.push(GenericRequirement::Method(param, field.name));
@@ -658,6 +663,13 @@ pub struct Interface {
 	pub implicit_writes: FxHashMap<ParamId, Vec<(Vec<Sym>, TypeId)>>,
 	/// Generic parameter order and capabilities of externally callable functions.
 	pub generic_functions: FxHashMap<NodeId, GenericFunction>,
+	/// Inferred semantic copy conditions, independent of runtime capabilities.
+	pub copy_requirements: FxHashMap<NodeId, Vec<crate::analysis::CopyRequirement>>,
+	/// Explicit transport capabilities, retaining their exact composite types.
+	pub wire_requirements: FxHashMap<DeclKey, Vec<TypeId>>,
+	/// Callable bodies and value origins survive after the provider AST is dropped.
+	pub callables: FxHashMap<DeclKey, crate::provenance::CallableSummary>,
+	pub value_origins: FxHashMap<DeclKey, std::sync::Arc<crate::provenance::ValueOrigin>>,
 	/// Key sets and derived types reached by the exported signatures.
 	pub key_set_params: FxHashMap<ParamId, GenericKeySet>,
 	pub derived_params: FxHashMap<ParamId, crate::analysis::DerivedParam>,
@@ -860,6 +872,12 @@ impl Interface {
 		for (&function, &owner) in &self.function_owners {
 			parts.push((105, key_hash(function), types.decl_hash(owner), 0));
 		}
+		for (&key, summary) in &self.callables {
+			parts.push((107, types.decl_hash(key), 0, summary.stable_hash(types)));
+		}
+		for (&key, value) in &self.value_origins {
+			parts.push((108, types.decl_hash(key), 0, value.stable_hash(types)));
+		}
 		for exported in self.members.values().chain(&self.export) {
 			parts.push((
 				1,
@@ -934,6 +952,8 @@ impl Interface {
 			for (index, requirement) in function.requirements.iter().enumerate() {
 				let (kind, value) = match *requirement {
 					GenericRequirement::Value(param) => (1, param_hash(param)),
+					GenericRequirement::TypeInfo(param) => (4, param_hash(param)),
+					GenericRequirement::Codec(ty) => (5, types.stable_hash(ty)),
 					GenericRequirement::Method(param, name) => (
 						2,
 						param_hash(param)
@@ -941,6 +961,34 @@ impl Interface {
 					),
 				};
 				parts.push((8, key_hash(decl), ((index as u128) << 8) | kind, value));
+			}
+		}
+		for (&declaration, requirements) in &self.wire_requirements {
+			for (index, &ty) in requirements.iter().enumerate() {
+				parts.push((
+					110,
+					types.decl_hash(declaration),
+					index as u128,
+					types.stable_hash(ty),
+				));
+			}
+		}
+		for (&decl, requirements) in &self.copy_requirements {
+			for requirement in requirements {
+				let gate = requirement.resource_gate.map_or(0, |(receiver, path)| {
+					types
+						.list_items(path)
+						.iter()
+						.fold(types.stable_hash(receiver), |hash, &name| {
+							hash.rotate_left(7) ^ types.stable_hash(name)
+						})
+				});
+				parts.push((
+					106,
+					key_hash(decl),
+					u128::from(requirement.explicit) | u128::from(requirement.task_transfer) << 1,
+					types.stable_hash(requirement.subject) ^ gate.rotate_left(19),
+				));
 			}
 		}
 		for (&param, info) in &self.key_set_params {
@@ -1119,5 +1167,33 @@ impl Program {
 					.iter()
 					.any(|diagnostic| diagnostic.severity == crate::Severity::Error)
 			})
+	}
+}
+
+#[cfg(test)]
+mod generic_requirement_tests {
+	use super::*;
+
+	#[test]
+	fn every_type_binder_has_a_type_descriptor_in_declaration_order() {
+		let (session, file) = crate::analyze_source(
+			"function select = <Unused, times: Integer, Item>(value: Item): Item => value\n",
+		);
+		let analysis = session.analysis(file);
+		let function = analysis
+			.functions
+			.values()
+			.find(|info| info.declaration.is_some())
+			.unwrap();
+		let params = &function.generics;
+		assert_eq!(params.len(), 3);
+		assert_eq!(
+			generic_requirements(session.types(), params),
+			[
+				GenericRequirement::TypeInfo(params[0]),
+				GenericRequirement::Value(params[1]),
+				GenericRequirement::TypeInfo(params[2]),
+			]
+		);
 	}
 }

@@ -104,12 +104,12 @@ pub static BUILTINS: &[Builtin] = &[
 	method("Array#sum", &NONE),
 	method("Array#join", &JOIN),
 	method("Array#values", &NONE),
-	// `Set.from(source, key = …, capacity = 0)`, `Map.from(source, capacity = 0)`
+	// `Set.from(source, capacity = 0)`, `Map.from(source, capacity = 0)`
 	// (D59): typed by the walk (`check/collections.rs`)
-	method("Set.from", &SET_FROM),
+	method("Set.from", &FROM),
 	method("Map.from", &FROM),
 	method("GrowingArray.from", &FROM),
-	method("GrowingSet.from", &SET_FROM),
+	method("GrowingSet.from", &FROM),
 	method("GrowingMap.from", &FROM),
 	method("Pool.from", &FROM),
 	method("GrowingPool.from", &FROM),
@@ -319,12 +319,6 @@ static RESERVE: Signature = signature(&[param("additional", false)]);
 static FROM: Signature = signature(&[param("source", false), param("capacity", true)]);
 /// `sort(compare = natural)`
 static COMPARE: Signature = signature(&[param("compare", true)]);
-/// `Set.from(source, key = …, capacity = 0)`
-static SET_FROM: Signature = signature(&[
-	param("source", false),
-	param("key", true),
-	param("capacity", true),
-]);
 
 /// The place an operation affects, below the collection (`self`).
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]

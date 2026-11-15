@@ -608,6 +608,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(resumed);
 		self.builder.build_unreachable()?;
 		self.builder.position_at_end(destroyed);
+		if coroutine.top {
+			// fa_run_main/fa_wasm_run destroys the root after every detached
+			// task has ended. Watch cleanups still see the module's values.
+			self.release_reactivity()?;
+			self.drop_to(0)?;
+		}
 		let result_drop = coroutine.ret.has_value() && self.needs_drop(coroutine.ret);
 		if result_drop || coroutine.throws {
 			let header =
@@ -738,6 +744,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)?;
 		self.builder.position_at_end(destroyed);
 		on_destroy(self)?;
+		if coroutine.top {
+			self.release_reactivity()?;
+		}
 		self.drop_to(0)?;
 		self.branch_to(coroutine.cleanup)?;
 		self.builder.position_at_end(resumed);
@@ -1954,7 +1963,47 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let detached = info.detached;
 		let eager = |this: &mut Self| -> Result<Option<PointerValue<'ctx>>, Error> {
+			// A detached block owns its captures even when it runs immediately.
+			// Give its snapshots the same lifetime as a lazy coroutine's inputs.
+			let mark = this.mark();
+			let mut saved = Vec::new();
+			if detached {
+				for (symbol, source) in this.start_captures(block, node)? {
+					let loaded = this.load(source)?;
+					let moved = this.moves_capture(node, symbol);
+					let loaded = if moved {
+						this.give_up_place(node, source)?;
+						loaded
+					} else {
+						this.emit_copy(loaded)?
+					};
+					let snapshot = this.alloca(source.repr, "captured")?;
+					this.store(snapshot, loaded, node)?;
+					saved.push((
+						symbol,
+						this.slots.insert(symbol, snapshot),
+						this.owned_locals.get(&symbol).copied(),
+					));
+					this.own_local(symbol, snapshot);
+				}
+			}
 			let raw = this.inline_task_block(block, ret, throws)?;
+			if detached {
+				this.drop_to(mark)?;
+				this.cleanups.borrow_mut().truncate(mark);
+				for (symbol, slot, owned) in saved {
+					if let Some(slot) = slot {
+						this.slots.insert(symbol, slot);
+					} else {
+						this.slots.remove(&symbol);
+					}
+					if let Some(owned) = owned {
+						this.owned_locals.insert(symbol, owned);
+					} else {
+						this.owned_locals.remove(&symbol);
+					}
+				}
+			}
 			if detached {
 				if let Some(raw) = raw {
 					this.drop_raw(raw, ret, throws)?;
@@ -1967,10 +2016,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let captures = this.start_captures(block, node)?;
 			let function = this.start_do_function(node, block, &captures, ret, throws, detached)?;
 			let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
-			for (_, slot) in &captures {
+			for (symbol, slot) in &captures {
 				if detached {
 					let value = this.load(*slot)?;
-					let value = this.emit_copy(value)?;
+					let moved = this.moves_capture(node, *symbol);
+					let value = if moved {
+						this.give_up_place(node, *slot)?;
+						value
+					} else {
+						this.emit_copy(value)?
+					};
 					arguments.push(value.value.expect("a value").into());
 				} else {
 					arguments.push(slot.pointer.into());
@@ -2335,7 +2390,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_unreachable()?;
 		self.builder.position_at_end(done);
 		let guard_type = self.type_of(call);
-		Ok(self.fresh(Val::new(Repr::Sync(guard_type), block)))
+		let guard = self.runtime_value("fa_guard_new", &[block.into()])?;
+		Ok(self.fresh(Val::new(Repr::Sync(guard_type), guard)))
 	}
 
 	/// `await channel.send(value)`: sent at once, or handed over in line;

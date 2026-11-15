@@ -28,9 +28,10 @@
 // Each helper starts at a `// @fa-helper <name> deps: <names>` line and ends at
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
 
-import { FaGuard } from "./concurrency.js";
+import { FaGuard, faUnlock } from "./concurrency.js";
 import { FaError } from "./errors.js";
 import { faExit, faIsError, faReport, faWriteError } from "./main.js";
+import { faDropOwned, faReleaseShared, faRetainShared, faUniqueDrop } from "./ownership.js";
 import { faStop } from "./stops.js";
 
 // @fa-helper faSched
@@ -158,11 +159,15 @@ export async function faCoop(task) {
 	faAlive(task);
 }
 
-// @fa-helper FaTask
+// @fa-helper FaTask deps: faUniqueDrop faDrop
 /**
  * A task: its outcome once it ended, what it waits on, the tasks it owns.
  */
 export class FaTask {
+	[faUniqueDrop]() {
+		faDrop(this);
+	}
+
 	/** @param {FaTask | null} parent the task owning it */
 	constructor(parent) {
 		/** @type {number} 0: running or waiting, 1: done, 2: cancelled */
@@ -384,6 +389,55 @@ export function faStart(parent, body, ...args) {
 	return task;
 }
 
+// @fa-helper faStartOwned deps: faStart faWhenDone
+/**
+ * A detached start-do owns its captures until the body's finally blocks
+ * finish. Cancellation before its first turn releases them without a call.
+ * @param {FaTask | null} parent
+ * @param {Function} body
+ * @param {() => void} release
+ * @returns {FaTask}
+ */
+export function faStartOwned(parent, body, release) {
+	let entered = false;
+	let owned = true;
+	const finish = () => {
+		if (!owned) return;
+		owned = false;
+		release();
+	};
+	const task = faStart(parent, async (self) => {
+		entered = true;
+		try {
+			return await body(self);
+		} finally {
+			finish();
+		}
+	});
+	faWhenDone(task, () => {
+		if (!entered) finish();
+	});
+	return task;
+}
+
+// @fa-helper faFinishedOwned deps: faFinished
+/** @param {Function} body @param {() => void} release @returns {FaTask} */
+export function faFinishedOwned(body, release) {
+	try {
+		return faFinished(body);
+	} finally {
+		release();
+	}
+}
+
+// @fa-helper faStartOwnedDynamic deps: faSched faFinishedOwned faStartOwned
+/** @param {Function} asynchronous @param {Function} blocking @param {() => void} release @returns {FaTask} */
+export function faStartOwnedDynamic(asynchronous, blocking, release) {
+	return faSched.depth > 0
+		? faFinishedOwned(blocking, release)
+		: faStartOwned(null, asynchronous, release);
+}
+
 // @fa-helper faStartCall deps: FaTask faRunTask
 /**
  * `start f(…)` of a function that has no async instance (it can't
@@ -474,7 +528,28 @@ export function faAsyncValue(sync, instance) {
 	return sync;
 }
 
-// @fa-helper faCallValue
+// @fa-helper faKeepFunctionResult deps: faReleaseShared
+/**
+ * Invokes one already retained Function owner. A suspended call keeps its
+ * environment until its real finally blocks run, including after cancellation.
+ * @param {Function} f
+ * @param {() => any} invoke
+ * @returns {any}
+ */
+export function faKeepFunctionResult(f, invoke) {
+	let result;
+	try {
+		result = invoke();
+	} catch (error) {
+		faReleaseShared(f);
+		throw error;
+	}
+	if (result instanceof Promise) return result.finally(() => faReleaseShared(f));
+	faReleaseShared(f);
+	return result;
+}
+
+// @fa-helper faCallValue deps: faRetainShared faKeepFunctionResult
 /**
  * `await f(…)` of a value of an `async` function type, in an async
  * instance: its async instance when it has one, a plain call otherwise (a
@@ -485,11 +560,14 @@ export function faAsyncValue(sync, instance) {
  * @returns {any}
  */
 export function faCallValue(task, f, ...args) {
-	const instance = /** @type {any} */ (f).$async;
-	return instance === undefined ? f(...args) : instance(task, ...args);
+	faRetainShared(f);
+	return faKeepFunctionResult(f, () => {
+		const instance = /** @type {any} */ (f).$async;
+		return instance === undefined ? f(...args) : instance(task, ...args);
+	});
 }
 
-// @fa-helper faStartValue deps: faStart faStartCall
+// @fa-helper faStartValue deps: FaTask faRunTask faWhenDone faRetainShared faReleaseShared faKeepFunctionResult
 /**
  * `start f(…)` of a value of an `async` function type: a task of its async
  * instance, or of the plain call.
@@ -499,13 +577,30 @@ export function faCallValue(task, f, ...args) {
  * @returns {FaTask}
  */
 export function faStartValue(parent, f, ...args) {
-	const instance = /** @type {any} */ (f).$async;
-	return instance === undefined
-		? faStartCall(parent, f, ...args)
-		: faStart(parent, instance, ...args);
+	faRetainShared(f);
+	const task = new FaTask(parent);
+	let entered = false;
+	faWhenDone(task, () => {
+		if (!entered) faReleaseShared(f);
+	});
+	queueMicrotask(() =>
+		faRunTask(
+			task,
+			(self) => {
+				entered = true;
+				return faKeepFunctionResult(f, () => {
+					const instance = /** @type {any} */ (f).$async;
+					return instance === undefined ? f(...args) : instance(self, ...args);
+				});
+			},
+			[],
+			true,
+		),
+	);
+	return task;
 }
 
-// @fa-helper faStartValueDynamic deps: faSched faFinished faStartValue
+// @fa-helper faStartValueDynamic deps: faSched faFinished faStartValue faRetainShared faReleaseShared
 /**
  * [`faStartValue`] in a function that isn't `async` (the blocking depth).
  * @param {Function} f
@@ -513,7 +608,13 @@ export function faStartValue(parent, f, ...args) {
  * @returns {FaTask}
  */
 export function faStartValueDynamic(f, ...args) {
-	return faSched.depth > 0 ? faFinished(f, ...args) : faStartValue(null, f, ...args);
+	if (faSched.depth <= 0) return faStartValue(null, f, ...args);
+	faRetainShared(f);
+	try {
+		return faFinished(f, ...args);
+	} finally {
+		faReleaseShared(f);
+	}
 }
 
 // @fa-helper faDetach deps: faSched
@@ -674,7 +775,7 @@ export function faRemove(line, waiter) {
 	}
 }
 
-// @fa-helper faLock deps: FaGuard faReady faAlive faRemove faCancelSignal faWaitShared
+// @fa-helper faLockWait deps: FaGuard faUnlock faReady faAlive faRemove faCancelSignal faWaitShared
 /**
  * `await mutex.lock()`: the guard, when every task that asked before has
  * released it.
@@ -683,7 +784,7 @@ export function faRemove(line, waiter) {
  * @param {string} where
  * @returns {Promise<FaGuard>}
  */
-export async function faLock(task, mutex, where) {
+export async function faLockWait(task, mutex, where) {
 	// shared with a worker: the shared lock, tried again when its word changes
 	if (mutex.cell != null) {
 		for (let attempt = 0; !mutex.acquire(); attempt += 1) {
@@ -693,9 +794,15 @@ export async function faLock(task, mutex, where) {
 	}
 	if (!mutex.locked) {
 		mutex.locked = true;
-		await faReady();
-		faAlive(task);
-		return new FaGuard(mutex);
+		const guard = new FaGuard(mutex);
+		try {
+			await faReady();
+			faAlive(task);
+			return guard;
+		} catch (error) {
+			faUnlock(guard);
+			throw error;
+		}
 	}
 	/** @type {FaGuard | undefined} */
 	const guard = await new Promise((resolve) => {
@@ -710,20 +817,25 @@ export async function faLock(task, mutex, where) {
 	task.wake = null;
 	if (task.state === 2) {
 		if (guard !== undefined) {
-			// handed over to a cancelled task: to the next one
-			const next = mutex.waiters.shift();
-			if (next === undefined) {
-				mutex.locked = false;
-			} else {
-				next.resolve(new FaGuard(mutex));
-			}
+			faUnlock(guard);
 		}
 		throw faCancelSignal;
 	}
 	return /** @type {FaGuard} */ (guard);
 }
 
-// @fa-helper faSend deps: ChannelClosed faReady faAlive faRemove faWaitShared
+// @fa-helper faLock deps: faLockWait faRetainShared faReleaseShared
+/** @param {FaTask} task @param {any} mutex @param {string} where @returns {Promise<FaGuard>} */
+export async function faLock(task, mutex, where) {
+	faRetainShared(mutex);
+	try {
+		return await faLockWait(task, mutex, where);
+	} finally {
+		faReleaseShared(mutex);
+	}
+}
+
+// @fa-helper faSendWait deps: ChannelClosed faReady faAlive faRemove faWaitShared
 /**
  * `await channel.send(value)`: waits while the channel is full; throws
  * `ChannelClosed` when it is (or gets) closed.
@@ -731,15 +843,17 @@ export async function faLock(task, mutex, where) {
  * @param {any} channel
  * @param {any} value
  * @param {string} where
+ * @param {{owned:boolean}} receipt
  * @returns {Promise<void>}
  */
-export async function faSend(task, channel, value, where) {
+export async function faSendWait(task, channel, value, where, receipt) {
 	// shared with a worker: tried again when its version word changes
 	if (channel.cell != null) {
 		for (let attempt = 0; ; attempt += 1) {
 			const version = Atomics.load(channel.cell, 3);
 			const sent = channel.pollSend(value);
 			if (sent === 1) {
+				receipt.owned = false;
 				return;
 			}
 			if (sent === -1) {
@@ -751,7 +865,8 @@ export async function faSend(task, channel, value, where) {
 	if (channel.closed) {
 		throw new ChannelClosed();
 	}
-	if (channel.trySend(value)) {
+	if (channel.offer(value)) {
+		receipt.owned = false;
 		await faReady();
 		faAlive(task);
 		return;
@@ -766,13 +881,27 @@ export async function faSend(task, channel, value, where) {
 		task.where = `Channel.send at ${where}`;
 	});
 	task.wake = null;
+	if (sent) receipt.owned = false;
 	faAlive(task);
 	if (!sent) {
 		throw new ChannelClosed();
 	}
 }
 
-// @fa-helper faReceive deps: faReady faAlive faRemove faWaitShared faWaiting
+// @fa-helper faSend deps: faSendWait faRetainShared faReleaseShared faDropOwned
+/** @param {FaTask} task @param {any} channel @param {any} value @param {string} where @returns {Promise<void>} */
+export async function faSend(task, channel, value, where) {
+	const receipt = { owned: true };
+	faRetainShared(channel);
+	try {
+		await faSendWait(task, channel, value, where, receipt);
+	} finally {
+		if (receipt.owned) faDropOwned(value);
+		faReleaseShared(channel);
+	}
+}
+
+// @fa-helper faReceiveWait deps: faReady faAlive faRemove faWaitShared faWaiting faDropOwned
 /**
  * `await channel.receive()`: the next value, `none` once the channel is
  * closed and empty.
@@ -781,7 +910,7 @@ export async function faSend(task, channel, value, where) {
  * @param {string} where
  * @returns {Promise<any>}
  */
-export async function faReceive(task, channel, where) {
+export async function faReceiveWait(task, channel, where) {
 	// shared with a worker: tried again when its version word changes
 	if (channel.cell != null) {
 		for (let attempt = 0; ; attempt += 1) {
@@ -796,6 +925,7 @@ export async function faReceive(task, channel, where) {
 	if (channel.head < channel.items.length || channel.closed) {
 		const value = channel.tryReceive();
 		await faReady();
+		if (task.state === 2) faDropOwned(value);
 		faAlive(task);
 		return value;
 	}
@@ -809,8 +939,20 @@ export async function faReceive(task, channel, where) {
 		task.where = `Channel.receive at ${where}`;
 	});
 	task.wake = null;
+	if (task.state === 2) faDropOwned(value);
 	faAlive(task);
 	return value;
+}
+
+// @fa-helper faReceive deps: faReceiveWait faRetainShared faReleaseShared
+/** @param {FaTask} task @param {any} channel @param {string} where @returns {Promise<any>} */
+export async function faReceive(task, channel, where) {
+	faRetainShared(channel);
+	try {
+		return await faReceiveWait(task, channel, where);
+	} finally {
+		faReleaseShared(channel);
+	}
 }
 
 // @fa-helper faWaitShared deps: faAlive
@@ -874,7 +1016,7 @@ export function faOnWorker() {
 	);
 }
 
-// @fa-helper faSendSync deps: faWaitSync faOnWorker ChannelClosed
+// @fa-helper faSendSyncWait deps: faWaitSync faOnWorker ChannelClosed
 /**
  * `channel.send(value)` in a blocking call: on the thread of a worker, a
  * channel shared with it is waited for (`Atomics.wait` on its version);
@@ -882,14 +1024,16 @@ export function faOnWorker() {
  * @param {any} channel
  * @param {any} value
  * @param {string} where
+ * @param {{owned:boolean}} receipt
  * @returns {void}
  */
-export function faSendSync(channel, value, where) {
+export function faSendSyncWait(channel, value, where, receipt) {
 	if (channel?.cell != null && faOnWorker()) {
 		for (;;) {
 			const version = Atomics.load(channel.cell, 3);
 			const sent = channel.pollSend(value);
 			if (sent === 1) {
+				receipt.owned = false;
 				return;
 			}
 			if (sent === -1) {
@@ -899,6 +1043,19 @@ export function faSendSync(channel, value, where) {
 		}
 	}
 	faWaitSync("Channel.send", where);
+}
+
+// @fa-helper faSendSync deps: faSendSyncWait faRetainShared faReleaseShared faDropOwned
+/** @param {any} channel @param {any} value @param {string} where */
+export function faSendSync(channel, value, where) {
+	const receipt = { owned: true };
+	faRetainShared(channel);
+	try {
+		faSendSyncWait(channel, value, where, receipt);
+	} finally {
+		if (receipt.owned) faDropOwned(value);
+		faReleaseShared(channel);
+	}
 }
 
 // @fa-helper faReceiveSync deps: faWaitSync faOnWorker faWaiting
@@ -1102,7 +1259,7 @@ export function faSendNow(channel, value) {
 		faSched.resolutions >= 127 ||
 		channel.cell != null ||
 		channel.closed ||
-		!channel.trySend(value)
+		!channel.offer(value)
 	) {
 		return false;
 	}

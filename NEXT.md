@@ -1,191 +1,173 @@
-## Written-origin validation completed (2026-11-07)
+# proofs/shared-handles — active checkpoints
 
-- analyzer-with is based on ef777e4. Its final frozen full workspace suite,
-  including native/freestanding/wasm, exited 0:
-  /tmp/fa-method-origin-workspace-final.log (session71691).
-- The first full found only the stale offset1 IndexError declaration in
-  disjoint_array_metadata_needs_a_non_wrapping_offset. The exact fixture fix
-  already validated in compiler0290400 is included; targeted and full reruns pass.
-- Workspace clippy and the JS runtime are checked again before this commit.
-- Separate analyzer-rules carries the next uncommitted copy/capture/FN086 lot,
-  plus the same origin base. Do not include it in this integration.
-- Remaining work includes generic destructor dispatch, the user-confirmed
-  union of different written origins at joins, with/remaining documented rules,
-  TypeFromSchema, deferred key-loop signatures and analyzer pass fusion.
-  Interpreter continuations/finding42 is assigned to proofs, not this branch.
+Worktree shared-handles, branch proofs/shared-handles, target /tmp/fa-shared-handles-target. HEAD64a31a8 is ancestry only, not a deliverable; broad WIP includes Copy-core and provenance patches supplied by analyzer. Never merge this worktree wholesale over root's unique-resource/AOT work. Parent integrates precise patches in /tmp/fa-shared-values. No documentation/ edits here. Historical backup stash c73686379d49beac2baab07553a9dd4d3b39c0a2 and /tmp/fa-shared-handles-before-ecda.patch must stay.
 
-# Compiler completion in progress (2026-11-06)
+Delivered/integrated/full LLVM+fmt+clippy green: metadata0d80b62, continuations2ec0e57, ROOT_REGIONS1a0d6bf, capacity a9b1375. interpreter-continuations and arena-regions worktrees are clean, unused and parent may remove them while retaining branches/logs.
 
-Integration: branch `compiler`, worktree `.claude/worktrees/lead`. The main checkout
-is shared and dirty: preserve it. The user requested completion of all remaining
-compiler work and explicitly authorized parallel agents.
+Final user semantics supersede all Resource-RC prototypes: destroy makes a type NONCOPYABLE, resources have one owner, ordinary resource parameters borrow (even when Resource contains Task). Task noncopyable and executor-affine, never retained. Sync/Function handles share counted state/environments. Collections require explicit copy or proven transfer. Escaping captures cannot contain unique Resource/Task. Set<T> has standard hashing/equality; NO key callback, use Map<Id,T> for separate keys. Parent owns runtime Set simplification; do not restore the old FaSet.key implementation from this tree. Resource GSAB/facade prototype files are archived in /tmp/fa-cancelled-resource-rc-prototype, removed locally, and are NOT a delivery.
 
-## Written methods (2026-11-06, active in analyzer-with)
+Checkpoints already applied by root: closures/Sync JS+native and Array mutation cleanup; Merger K::Sync(payload) fix (/tmp/fa-sync-payload-merge.patch, 2tests + original package Bun/native3); root coroutine module lifetime (/tmp/fa-module-lifetime-root.patch, module-watch-cleanup + module-owned-detached native/free/wasm green); ordinary Resource codec refusal / protected DATA codec traversal (/tmp/fa-unique-resource-codec.patch, 9codec tests green). No C/IR changes in module lifetime patch. Runtime faReactiveRelease must also run on explicit realm-worker close when transport is connected.
 
-- Branch `codex/analyzer-with` is now based on validated `ef777e4`, with
-  uncommitted method-origin work only. Do not use its target from another worktree.
-- `WrittenType` separates the named owner, its type arguments, their nested
-  written origins (shared by Arc), and required methods from structural TypeId.
-  `GenericMethod` carries parameter position/name, function DeclKey, owner args
-  and nested method selections. Bindings keep these until declaration_order.
-- Analyzer publishes sparse origins of values, returns and fields; generic
-  projections preserve Holder<Person> vs Holder<Greeting>. Imported interfaces
-  carry/remap/hash these facts. `function_owners` keeps type owner binders
-  separate from the method's own binders; `method_instantiations` records the
-  written receiver application. Selected methods contribute declaration uses.
-- JS passes selected methods instead of choosing the first equal TypeId.
-  Signature-only forall-value dispatch was shared by the lead in
-  `/tmp/fa-generic-value-signature-abi.patch` and applied. Type-owner hidden
-  parameters, including phantom values, are passed/bound at method calls.
-  copy_function no longer selects an empty alias's field order and drops data.
-- Native instances/requests/function-value tables include method selections;
-  nested selections and exact type bindings survive closures and callbacks.
-  Cache version is split-6 (reconcile with lead/platform/proofs on merge).
-  The identical metadata engineer patch `/tmp/fa-generic-concrete-fields.patch`
-  is applied here; do not duplicate it on integration. Mixed local/global
-  shape copies compare field names textually. Chained `x.value.describe`
-  dispatches from the prefix type, not just the root.
-- Bun and Node E2E and all three LLVM targets pass for explicit aliases,
-  imports, returns, exported values, forall values, Holder/Speaker and phantom
-  owners. The multifile fixture requires per-unit compilation: fallback to a
-  merged module is a failure. Logs: `/tmp/fa-method-origin-container-*`.
-- Built-in containers retain nested written origins (annotations, homogeneous
-  array literals, tuples, indices, loops, values/get/filter/reverse). Distinct
-  origins at a join must form a union with runtime dispatch (user decision);
-  that follow-up remains separate from this unique-origin lot.
-- Nominal objects now retain/substitute/infer phantom arguments, with HAS_PARAM
-  through wrappers. Their phantom values do not confer ownership flags. CStruct
-  substitution preserves field order; private access uses the declaration key
-  across instances. Unit regression for phantom objects and incremental alias
-  edits pass. Incomplete written applications cannot form invalid Bindings.
-- Async selected methods retain their sync/async pair and bind owner capabilities
-  in both ABIs. This new case, the complete analyzer, the historical structural
-  exclusions (removed), and workspace clippy are being retested after the ff to
-  `8c92474` in `/tmp/fa-method-origin-integrated-*`.
-- Metadata ef777e4 is merged and the covered generic-hidden-arguments pending
-  is removed. Full workspace LLVM, clippy and JS runtime validate this lot.
-  Subsequent work continues in analyzer-rules.
-- Generic destroy selection/invocation remains separate: scope drops and storage
-  drops need the same static owner capabilities, including through composites.
-  Preserve the lead's separate storage_drop_function and detached-task behavior.
-  No runtime native dictionary is introduced by this lot.
-- The generic expression-body key-loop inference hole remains assigned here:
-  `/tmp/fa-key-error-expression.fa`, mirrored by proofs' pending
-  generic-key-loop-inferred-errors.fa. Concrete deferred loops currently throw
-  away inferred summaries; exact checks/callers must run after specialization.
-- Afterwards: with/factories/remaining documented rules and TypeFromSchema,
-  analyzer pass fusion with 1000-file measurements, and stackless interpreter
-  continuations for finding 42. Do not document a new metaprogram recursion cap.
+Explicit NeedsCodec checkpoint: /tmp/fa-needs-codec-root.patch, generated by /tmp/fa-extract-needs-codec.py against current root after /tmp/fa-worker-affinity-sites-fixed.patch. Adds sparse uses, per-callable needs, recipe substitutions, ordered call ABI, portable Interface remap/hash(tag110;109 reserved with names), GenericRequirement::Codec(TypeId). No TypeInfo.codec universally. Stable arrays/objects compose leaf operations; a generic union is supplied as one exact normalized codec from the concrete caller. SCC of parameter substitutions rejects infinite structural growth for exact union needs, no arbitrary count limit. Local finish is authoritative when empty so removal invalidates importers. Unbound forall wire value is explicitly unsupported AN001 until it has a static adapter. Fully concrete unsupported payloads may have undefined codec while local; actual Task thread crossings are rejected frontend. DATA codec operations may traverse unique resources only under the synchronization/transfer owner, never fa.resource shared refs. Production Mutex/Channel/Worker binary hookup is STILL OPEN; existing JSON exchanges must ultimately disappear.
 
-## Integrated
+Latest NeedsCodec validations: analyzer386/386 units green (/tmp/fa-needs-codec-analyzer-lib.log), 3wire tests include add/remove same-signature exported needs invalidating3modules, JS13/13 codecs green (/tmp/fa-needs-codec-js-tests.log); whole JSlib and final clippy repeat in progress after minor cleanup. Long recursive16k objects/12k nominal arrays, independent decoded byte ownership, numeric unions, true worker wire compatibility, generic optional-array capability, no codec in ordinary generic calls are covered. Root's explicit Generator::new/tests::generated helper is retained; no auto-TypeInfo trigger. Codec bundle/root maintenance owned by parent, commit577e1e0, AOT facade only (18,629bytes), runtime/codec.js + codec-origin.json + scripts/update-codec.sh.
 
-All three original paused branches passed their complete LLVM workspace suites,
-clippy and JS runtime tests before integration: initial proofs (`f2f43d6`), native
-representations (`ca9f85a`), analyzer fixes (`91b749e`). Private package index proofs
-and per-file proof caches followed in `e436568`. Validated recursive return-path
-and empty-arena-leaf optimizations followed in `a39f3c4` (44 merged LLVM IR tests
-and merged workspace clippy also pass). Binary-trees uses112.71M instructions vs
-Goose128.15M; its CPU win is still open.
+Function RC prerequisites for analyzer-partial (aa3e050 without CopyCore): /tmp/fa-function-rc-native.patch209lines, exact dry-run on its tree, leaves its scanner/generic_values/partial.rs untouched; he applied it and regenerated3IR. /tmp/fa-function-rc-js.patch~370lines applied there, independent of Sync/Resource/transport. Local contains_function_value query only for this pre-Copy base; root keeps HAS_SHARED/AOT at integration. Isolated copy /tmp/fa-function-rc-check passed JSlib28/28. NEVER reuse /tmp/fa-shared-handles-target for that copy again: mixing workspace paths caused stale AST artifacts once, fixed by cleaning the five local crates and rebuilding. Every future copy has its own target.
 
-Sixteen clean integrated worktrees have been removed, branches preserved. Active,
-dirty, locked or unmerged trees are preserved; some locks belong to another live
-session. Records: `/tmp/fa-resume-cleaned-worktrees.json`.
+New Function Task lifetime fix: /tmp/fa-function-task-lifetime-root.patch and variant -analyzer.patch; both dry-run green on intended trees. faStartValue retains Function before queueMicrotask; cancellation before entry releases without call; cancellation while running releases only after real promise/finally. faCallValue retains through result; blocking Dynamic retains against reentrant release. No Task retain. 27runtime tasks tests green including6new regressions (/tmp/fa-function-task-lifetime-tests.log). Parent/analyzer notified; no opaque Resource changes.
 
-## Lead changes validated
+Next assigned by parent, before generic destructor lookup: native unique borrowed conditional results. Root fixture unique-resource-temporaries.foreign.fa passes Bun, fails3LLVM because if/block/region/fallback currently return owned/fresh even for borrowed Resource. Fix conditional ownership/cleanup across if/when/catch/fallback/blocks, preserve consumed Task ABI. Parent reserves ownership/mod/patterns native for this agent; catch is in objects.rs and must be changed only in its specific block. Also movable_local collection_moves now means requires_explicit_copy OR is_move_only; captures collection_moved_captures remain collection-only. Do not transfer arena parent owner merely by MOVE of a Root subtree. Native_perf is adding compact direct-link payloads; preserve member_payload_value/unbox_compact_data.
 
-The delivered documentation rewrite is merged with the later compiler notes.
-Stage2 rejects old generics (GN031), keeping recovery only for the migration tool.
-Fields is/is-not and compile-time evaluation, Color.members.length (also nested),
-and known-layout Bun pointers (C memory, opaque Fa values, copies, drops, writable
-C views) are implemented. Common fixtures run on Bun/native/freestanding/wasm.
+After conditional borrow fix: audit generic destructors JS/native; destroy_call/destroy_function decl.ty==ty lookup breaks after substitution. Bind written origin+owner type capabilities/method selections at constructor/finalizer, unique owner only. Parent owns unique hooks/moves/temporaries JS and typed_copy/TypeInfo; avoid whole-file overwrites of its sources. Need isolated snapshot on root current source + target distinct for this work.
 
-The first combined full suite found two newly merged proof fixtures still using
-old generics, one memory-test generator using Array(Integer), the obsolete
-formatter transition test, and a Bun async proof fixture depending on timer order.
-All are corrected; the failed test targets pass again. The async fixture now
-synchronizes reader/writer phases and also passed under QEMU. No failed program
-was skipped. Clippy,298 JS runtime tests and website check/snippets/build passed.
-The combined complete workspace suite, including LLVM and the traversal merge,
-passes (exit0): `/tmp/fa-lead-combined-workspace-full.log`. Final clippy,298 JS
-runtime tests and website check/snippets/build pass too.
+Validation constraints: full suites serialize with flock --close /tmp/fa-compiler-full-suite.lock, cargo jobs1/2, ulimit -v8000000. LLVM_SYS_181_PREFIX=/home/claude-dev/.local/llvm18/usr/lib/llvm-18; PATH includes Bun and LLVM bin. Do not run two cargo commands on the same target. No full active from this agent. git mutations use -c gc.auto=0. Never alter lead NEXT or other agent worktrees; no new sub-agent slots.
 
-## Active ownership
+### 2026-11-07 — native conditional Resource borrows
 
-- Lead platform support is integrated at `4a6ef8e`: Linux AArch64 runtime and
-  freestanding, wasm C libraries with importable factory/dispose, wasm tests,
-  timeouts and watch target retention. Complete suite with LLVM, clippy, website
-  and merge checks pass. The clean worktree was removed. Regenerate all three
-  runtime IR files after performance C changes.
-- Lead, `generic-pointers`: generic Pointer<T> on Bun using published runtime type
-  capabilities; direct/higher-order calls, composites, resources and task destruction
-  pass on Bun. Generic native ownership now uses concrete resource types; all
-  pointer programs pass on all three targets with leak checks. The full `/tmp/fa-generic-workspace-full.log` is now running after clean clippy
-  and targeted checks. Signature-only generic ABI patch shared with analyzer-with.
-- Analyzer, `analyzer-callbacks`, `d22ebd2`: native instance per callback error set
-  and exact effects, including exact variants. Complete LLVM suite passes (exit0)
-  in `/tmp/fa-exact-effects-workspace-fixed.log`, with clippy, formatting, runtime
-  and website checks green. Merge checks pass too: workspace clippy, callback programs on Bun and all three
-  native targets, plus all five C-library tests. Its old initial worktree was removed. `analyzer-with` separately owns with, missing documented
-  rules, TypeFromSchema/named Schema, interpreter continuation stack, method origin
-  and native method-specific instance keys, key-loop thrown summaries, pass fusion.
-- Proofs, `cross-file-metadata`, `0d80b62`: complete LLVM workspace suite passes
-  (exit0, `/tmp/fa-metadata-workspace-full.log`), with clippy and JS runtime green.
-  Imported Pick/Omit, EF004, cross-file key loops, hidden generic ABI, concrete
-  native field indices and JS generic copies are integrated. Merge checks pass:
-  analyzer units/cases, pipeline (after migrating its new Integer<> source string),
-  complete JS crate, generic programs on all three LLVM targets and all31 package
-  tests. Runtime298 and website checks pass too. The new notes are
-  applied to the rewritten documentation. Method origins remain analyzer-owned.
-- Native performance, `c80d6d9`: compact 32-bit map slots, short append loops,
-  reservation overflow guards and memoized recursive JSON writers passed the full
-  LLVM workspace suite before integration. Merged checks pass:47 IR tests,
-  object-cache invalidation, C libraries, ABI tests and reservation/map/append/JSON
-  programs on native, freestanding and wasm, with representative AArch64 QEMU
-  runs. C ASan/UBSan, JS runtime298, clippy and website checks pass. Next: stack strings
- 24–64bytes, recursive collections/sexp packing, remaining Goose gaps. No untested
-  optimization is treated as integrated; program semantics remain unchanged.
+Isolated source snapshot `/tmp/fa-native-unique-borrows`, target
+`/tmp/fa-unique-borrows-target`; baseline files in
+`/tmp/fa-native-unique-borrows-baseline`. Delivered patch
+`/tmp/fa-native-unique-borrows.patch` dry-runs against Root shared-values.
 
-## User effect decisions
+The patch tracks the ownership of Resource-containing control-flow results
+with a side flag (if/when/catch/fallback/loop); a borrowed branch never becomes
+a fresh owner. Borrowed anonymous-union wrappers use frame storage, owned ones
+keep their normal heap ABI. Backing temporaries of selected borrowed results
+survive until the enclosing statement, including break/fallback exits; each
+backing uses a presence flag so cleanup is dominated and reentrant/loop-safe.
+Lexical locals still end at their scope. No Resource/Task retain, no C or IR
+change. Native cache suffix `unique-borrows-1` invalidates old unsafe objects.
 
-An explicitly throws-typed callback can be caught normally. Its receiver declares
-only errors that really escape, including manual rethrows. Additional errors of a
-callback accepted by a non-stored parameter without throws remain transparent.
-Overdeclared throws and mutates are errors everywhere. Throws is exact by variant:
-only E.Bad can escape ⇒ throws E.Bad, not E={Bad,Other}. Function-type constraints
-retain fewer-effects assignability; foreign declarations have no body to check.
-Existing mutation-path coverage remains. Documentation records these decisions.
+Validation: cargo fmt; LLVM lib7/7; FA_PROGRAMS=resource LLVM programs all3targets
+(native, freestanding, wasm), leak checks and exact destructor order green:
+`/tmp/fa-unique-borrow-lib.log`, `/tmp/fa-unique-borrow-resource-final.log`.
+Clippy LLVM all-targets exits0; only baseline explicit_counter_loop in Root's
+parameter default prologue (mod.rs~1704), reported to Root. No complete workspace
+suite for this isolated WIP; Root will run final full after coalescing.
 
-## Validation discipline
+New frontend repro kept outside executable fixtures:
+`/tmp/fa-borrowed-resource-local-guard.foreign.fa`. Borrow of guard.value cannot
+leave a do-block whose local Guard is dropped; Root confirmed frontend refusal,
+Analyzer owns this rejection. Do not extend lexical Guard lifetime in backend.
 
-LLVM_SYS_181_PREFIX=/home/claude-dev/.local/llvm18/usr/lib/llvm-18, its bin and Bun
-on PATH. Cargo jobs1–2, tests2 threads, ulimit-v8000000 for full suites. Dedicated
-ASan runs outside the virtual-memory cap. Full suites serialize with
-`flock --close /tmp/fa-compiler-full-suite.lock ...`; never pass its FD to children.
-Targets are never shared between preparation and frozen validation worktrees.
+Next: audit generic destructor lookup and finalizer identity in another snapshot
+from current Root. Lookup by decl.ty==substituted ty fails; finalizers must bind
+WrittenType+owner args/caps/method provenance at creation. No universal TypeInfo
+key exists yet; use WrittenType.semantic_fingerprint and captured capabilities.
 
-Root stashes, including cba6f6a030c0cb2d1dc7105c74574fca83600a34, are already
-applied: do not reapply them. The documentation rewrite backup is
-`/tmp/fa-resume-rewritten-documentation.patch`. Git auto-gc cannot update the
-shared perf/native-goose ref; use `git -c gc.auto=0 commit`, preserve permissions.
+### 2026-11-07 — generic destructors (active next snapshot)
 
-After integration, audit `design/todo.md` against actual regressions and completed
-features, apply the remaining metaprogramming note, measure the analyzer on the
-1,000-file package and all Goose programs, then run the final combined checks.
-Do not remove unresolved items or mark the overall goal complete early.
+Root applied native unique-borrows. Its 3 fixtures now live in CLI so Bun and
+all3LLVM execute them. Root also fixed JS nested when/break subject temporaries
+and owns the AssignedOwner cleanup_frame machinery; never overwrite those files.
 
-Root worker/Errors WIP is saved explicitly in stash c9a0034315b5c4bdb7f3da0ecd9e02516e1f1b05 while metadata merges. Do not lose or reapply it twice. Generic-pointers sources remain frozen in their own worktree for the queued full.
+Active regular source snapshot `/tmp/fa-generic-destructors`, target
+`/tmp/fa-generic-destructors-target`. Stable base Root index tree
+b283e430b4872f04ac9f3c520310f734b699c0d2 + native unique-borrows patch. Baseline
+files `/tmp/fa-generic-destructors-baseline`. WARNING native lower/objects.rs
+baseline was corrected to delivered unique-borrows source, and src/units.rs
+baseline to unique-borrows version, so do not re-extract those old hunks.
 
-## Latest user decisions
+Implemented, not yet delivered:
+- Analysis.resource_drops[node] = ResourceDrop {owner:WrittenType,destroy:DeclKey},
+  recorded from existing Object/TypedObject walk only, forgotten for keyloops.
+  New check/resources.rs resolves aliases, inferred args, bare literal expected
+  origins from annotations/fields/arrays/tuples/returns/declared function args.
+- Interface.written_parameters: DeclKey(parameter)->WrittenType, hash tag111
+  (Root agreed), remap and collection during finish_interface. Proxy imported
+  functions must route through external_value_key before looking up parameters.
+- JS resources finalizer binds selected_method_name with owner args/methods.
+  Cache key includes ResourceDrop; unresolved generic args produce an inline
+  finalizer capturing current immutable caps, no ambient binder at drop.
+  drop_body now drops DATA fields only; Resource hook calls bound destroy first.
+- Native Resource finalizer chooses selected_method (existing instance/split wave),
+  semantic fingerprint includes selected method and written owner. Mutable self
+  ABI gets a stack slot containing Resource pointer when by_pointer[0].
+  No C/header/IR change. ReprResource and Optional(Resource) added to generic
+  return/argument concretization lists, preserving unique consuming/borrow ABI.
+- infer_literal now forwards origins from fields before checking constraints.
+  GenericMethod.name globalized by concrete_method before switching files.
+  DO NOT globalize GenericMethod.function there: Session.keyed requires the
+  source interface's exact DeclKey identity (attempt rejected all local methods).
+  Native field_index falls back to textual name for local/global Sym mismatch.
+- Exact value-param SymbolId->ParamId map in Walker lets constant_type forward
+  `label:String` to Phantom<label>, while ordinary nonliteral static stays refused.
+- Native cache suffix generic-resource-drops-1 appended after unique-borrows.
 
-All types are copyable, including Task and resources; this supersedes the older
-move-only rule. Copies share the same
-Task/resource and state, with reference counting; destroy/cancellation occurs on
-the last owner release. Analyzer owns acceptance and flow, native performance
-owns Task native retain/release, lead owns resources and JS Task lifetime.
-Do not add generic Copyable constraints or reject copies.
-`with` uses parameter names from the visible function signature, including a
-function-valued parameter or field. Analyzer owns this implementation.
+Tests so far:
+- basic Ticket<Integer>/String/make<T> Bun green.
+- local origin fixture: equal-layout Person/Greeting, generic alias, annotation,
+  field, Array, parameter, generic factory, inferred Ticket, phantom labels and
+  forwarding factory green Bun;3LLVM passed pre-last mutable-self assertion.
+- multi-file namespace model fixture generic-resource-destructors.fa now passes
+  native BOTH whole module and per-unit +leak-check. Other2targets pending final.
+- all FA_PROGRAMS=resource native/free/wasm green BEFORE last added mutable-self
+  constructor (the type existed but assertion insertion had missed comments).
+- First analyzer full active session1860, log
+  /tmp/fa-generic-destructor-analyzer-full.log:399unit + cases green, corpus/docs
+  ongoing. Production hook was just moved from after every check into existing
+  Object arms; rerun analyzer final after this semantic-preserving optimization.
+- New integration tests/resource_origins.rs changes imported consume's written
+  Ticket<Person> parameter to Ticket<Greeting>, asserts stable structural FnSig,
+  caller rechecked, destructor choice changed. Not compiled yet.
+- Most recent helper/backend debug FA_DEBUG_RESOURCE was REMOVED from sources.
+  First diagnostic logs parameter-proxy show method choices correctly bound.
 
-Joining written types with distinct methods/destructors forms their union, even
-when their fields have the same shape: runtime dispatch uses the actual member.
-Analyzer owns this after the frozen single-origin validation.
+Next actions: fmt; final analyzer, new resource_origins test, JS lib + Bun E2E
+  FA_PROGRAMS=generic-resource (multi analyzer cases via packages harness too),
+  FA_PROGRAMS=resource all3LLVM, clippy workspace. Correct only our warnings.
+  Root baseline payload_codec_for_type dead_code warning and default-param
+  explicit_counter_loop have already been fixed in newer Root; do not fold them.
+  Extract isolated patch against baseline, git apply --check Root (coalesce ABI
+  TypeInfo changes; preserve typed_copy/references/runtime). No full workspace
+  yet in snapshot; Root performs cumulative final full.
+
+Known follow-up coordinated, don't duplicate graphs: analyzer-partial with has
+SignatureNames tag109 following aliases/function types, but not per-parameter
+WrittenType. Enrich this graph after Root integrates with for bare Resource
+literals passed through callable TYPE aliases/parameters. written_parameters111
+covers declared functions/methods. Also audit named-union Resource payload origins
+separately; no repro yet, don't claim support merely from TypeId.
+
+Parent priority after this checkpoint: production Worker/WorkerPool/Mutex/Channel
+transport WITHOUT JSON, using AOT Codec (NeedsCodec already Root), exclusive moves
+and Mutex protection. General Resource RC/GSAB façade was cancelled: Resource
+has one owner, no retain; only Sync/Function envs counted. Use stable category
+refs for Sync/Function, protected Resource DATA codecs under Mutex. Root owns
+AOT typed_copy/typed_assign/references/runtime hooks and latest TypeInfo.layout,
+.isUnique, .assign/.fillOwned; no universal .codec or canonical .key.
+
+### Generic destructor checkpoint FINAL delivered
+
+`/tmp/fa-generic-destructors.patch` (40,155 bytes), extractor
+`/tmp/fa-extract-generic-destructors.py`, dry-runs against current Root.
+All debug hooks removed. Adds 4CLI programs (including generic Resource DATA
+inside named Union with reordered type arguments), one multi-file analyzer case,
+and meaningful incremental test. The latter changes an imported written
+parameter Ticket<Person>→Ticket<Greeting> without changing structural FnSig;
+its caller is rechecked and selects Greeting's destructor.
+
+Final validation:
+- `/tmp/fa-generic-destructor-analyzer-final.log`: exit0,399unit, cases, corpus,
+  pipeline6, resource_origins1 and docs.
+- `/tmp/fa-generic-destructor-resources-llvm-payload.log`: ALL resource programs
+  native/free/wasm green, leaks checked. Multi-file case runs whole+per-unit.
+- `/tmp/fa-generic-destructor-bun-payload-final.log`: new4 programs Bun green.
+- `/tmp/fa-generic-destructor-js-lib.log`:41/41.
+- `/tmp/fa-generic-destructor-package-{bun,node}.log`: exact same output.
+- `/tmp/fa-generic-destructor-clippy.log`: workspace all-targets exits0; only5
+  inherited warnings from Root's old b283 snapshot (codecs, typed_copy, param
+  prologue). Root newer source fixed them. LLVM final clippy same baseline1.
+- Rustfmt done. No complete workspace suite in this snapshot; Root cumulative
+  full covers actual integrated source. No C/IR/runtimeJS changed by this lot.
+
+Small final native fix: normalize resource_view AFTER box_data/unfold_rec in
+apply_member; an unboxed named-union payload can itself be Resource. place_members
+already normalized resource_place after unboxing, so no mutation-path change.
+
+Snapshot generic-destructors is now frozen/retained for repro, no cargo running.
+NEXT priority from Root remains production binary Worker/Pool/Mutex/Channel
+transport. Start from Root's newest source after ResourceDrop apply, preserve
+root typed_copy/typed_assign/references/runtime owner temporaries and pending_start
+fix. Root is fixing early Resource result drop under start make() separately;
+do not absorb that bug into transport. Need faReactiveRelease on realm close.

@@ -158,7 +158,14 @@ impl Generator<'_> {
 			_ => None,
 		};
 		let nodes: Vec<NodeId> = std::iter::once(source).chain(key).collect();
-		let values = self.in_order(&nodes, |g, node| g.expr(node));
+		let values = self.in_order(&nodes, |g, node| {
+			let value = g.expr(node);
+			if Some(node) == key {
+				g.copy_stored(node, value)
+			} else {
+				value
+			}
+		});
 		let source_ty = self.type_of(source);
 		let ty = self.type_of(n);
 		let item = match self.types.kind(ty) {

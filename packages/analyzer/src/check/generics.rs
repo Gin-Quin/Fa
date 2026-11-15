@@ -1397,6 +1397,7 @@ impl Walker<'_> {
 	}
 
 	pub(super) fn record_instantiation(&mut self, n: NodeId, bindings: &Bindings) -> ListId {
+		self.copy_instantiations.insert(n, bindings.clone());
 		let list = self.s.types.list(&bindings.types);
 		self.a.instantiations.insert(n, list);
 		let mut methods: Vec<_> = bindings

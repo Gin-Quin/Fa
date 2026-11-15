@@ -20,6 +20,12 @@ impl Generator<'_> {
 
 	/// The JavaScript of an expression, without the conversion at its sink.
 	pub(crate) fn expr_raw(&mut self, n: NodeId) -> Expr {
+		if self.analysis.wire_ambiguous_calls.contains(&n) {
+			return self.unsupported(
+				n,
+				"a generic function value whose binary transport capabilities are not bound to one static ABI",
+			);
+		}
 		// a value computed at compile time (constants.rs)
 		if let Some(value) = self.comptime_value(n) {
 			return self.constant_value(n, &value, self.type_of(n));
@@ -174,6 +180,10 @@ impl Generator<'_> {
 			View::Unsupported(kind) => self.unsupported(n, &format!("`{kind}`")),
 			// tasks (tasks.rs)
 			View::Await(operand) => self.await_expr(n, operand),
+			View::Copy(operand) => {
+				let value = self.expr(operand);
+				self.copy_value(value, self.type_of(operand))
+			}
 			View::Start(operand) => self.start_expr(n, operand),
 			_ => {
 				let kind = fa_analyzer::syntax::kind_name(self.tree, n);
@@ -249,6 +259,9 @@ impl Generator<'_> {
 				}
 				// an `async` function as a value: both instances (tasks.rs)
 				let declaration = self.analysis.symbols.symbol(symbol).decl_node;
+				if let Some(value) = self.captured_function_value(n, declaration) {
+					return value;
+				}
 				if self.tasks.instances.contains_key(&declaration)
 					&& let Some(value) = self.async_function_value(n, declaration)
 				{

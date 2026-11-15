@@ -1,7 +1,7 @@
 -- native
 function expensiveComputation = (n: Integer): Integer => n * n
 let numbers = [1, 2, 3, 4]
-mutable results = numbers
+mutable results = copy numbers
 for parallel number, index in numbers {
 	results[index] = expensiveComputation(number)
 }

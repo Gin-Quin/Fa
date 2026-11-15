@@ -42,6 +42,11 @@ impl Generator<'_> {
 			Some(summary) => hidden.extend(summary.requirements.iter().cloned()),
 			None => hidden.extend(self.hidden_for_generics(&info.generics)),
 		}
+		if let Some(key) = self.analysis.callable_keys.get(&info.lambda)
+			&& let Some(requirements) = self.analysis.wire_requirements.get(key)
+		{
+			hidden.extend(requirements.iter().copied().map(Hidden::Codec));
+		}
 		hidden
 	}
 
@@ -74,6 +79,20 @@ impl Generator<'_> {
 		let mut names = Vec::with_capacity(hidden.len());
 		for entry in hidden {
 			match entry {
+				Hidden::Codec(ty) => {
+					let name = self.declare_hidden_name("$codec");
+					self.hidden_names.insert(Hidden::Codec(ty), name.clone());
+					names.push(name);
+				}
+				Hidden::TypeInfo(param) => {
+					let wanted = format!(
+						"{}$type",
+						self.types.syms.resolve(self.types.param(param).name)
+					);
+					let name = self.declare_hidden_name(&wanted);
+					self.hidden_names.insert(entry, name.clone());
+					names.push(name);
+				}
 				Hidden::Value(param) => {
 					let name = match self.value_parameter_symbol(function, param) {
 						Some(symbol) => self.declare(symbol),
@@ -200,6 +219,22 @@ impl Generator<'_> {
 		for entry in hidden {
 			let value =
 				match entry {
+					Hidden::Codec(ty) => {
+						let subject =
+							self.analysis
+								.wire_arguments
+								.get(&call)
+								.and_then(|arguments| {
+									arguments.iter().find_map(|&(recipe, subject)| {
+										(recipe == ty).then_some(subject)
+									})
+								});
+						subject.map(|subject| {
+							self.wire_argument_codec(subject)
+								.unwrap_or_else(|| "undefined".into())
+						})
+					}
+					Hidden::TypeInfo(param) => binding(param).and_then(|ty| self.type_info(ty)),
 					Hidden::Value(param) => match binding(param) {
 						Some(ty) => {
 							let subject = self.analysis.key_set_params.iter().find_map(
@@ -239,6 +274,14 @@ impl Generator<'_> {
 			}
 		}
 		values
+	}
+
+	fn wire_argument_codec(&mut self, ty: TypeId) -> Option<String> {
+		if self.types.contains_resource(ty) {
+			self.payload_codec_for_type(ty)
+		} else {
+			self.codec_for_type(ty)
+		}
 	}
 
 	fn call_method_owner(&self, call: NodeId) -> Option<&fa_analyzer::analysis::WrittenType> {
@@ -309,6 +352,13 @@ impl Generator<'_> {
 						},
 					));
 					hidden.extend(summary.requirements);
+					if let Some(requirements) = self
+						.session
+						.interface(module)
+						.and_then(|interface| interface.wire_requirements.get(&key))
+					{
+						hidden.extend(requirements.iter().copied().map(Hidden::Codec));
+					}
 					return self.hidden_arguments_for(call, &generics, hidden);
 				}
 			}
@@ -347,7 +397,24 @@ impl Generator<'_> {
 		};
 		generics.splice(0..0, owner_params);
 		let hidden = self.hidden_for_generics(&generics);
-		self.hidden_arguments_for(call, &generics, hidden)
+		let mut values = self.hidden_arguments_for(call, &generics, hidden);
+		if !generics.is_empty()
+			&& let Some(subjects) = self.analysis.wire_calls.get(&call).cloned()
+		{
+			for subject in subjects {
+				match self.wire_argument_codec(subject) {
+					Some(codec) => values.push(codec),
+					None => {
+						self.unsupported(
+							call,
+							"the static binary codec of this indirect generic call",
+						);
+						values.push("undefined".into());
+					}
+				}
+			}
+		}
+		values
 	}
 
 	/// The value a value parameter is bound to: a literal type, or the
@@ -545,6 +612,16 @@ impl Generator<'_> {
 	/// The name of a hidden parameter (`$Item$describe`: Fa names never
 	/// contain `$`).
 	fn declare_hidden_name(&mut self, wanted: &str) -> String {
+		let wanted: String = wanted
+			.chars()
+			.map(|character| {
+				if character.is_ascii_alphanumeric() || matches!(character, '_' | '$') {
+					character
+				} else {
+					'_'
+				}
+			})
+			.collect();
 		let mut name = format!("${wanted}");
 		let mut suffix = 0;
 		while self.hidden_names.values().any(|known| *known == name) {

@@ -121,6 +121,29 @@ fn one_thread_runs_the_longest_chain_first() {
 }
 
 #[test]
+fn imported_generic_shared_handles_keep_their_array_payload() {
+	let files = vec![
+		("library/holder.fa".to_string(), "use { Mutex } = std.concurrency\nexport function = <Item>(_value: Item): Mutex<Item | none> => Mutex<Item | none> { value = none }\n".to_string()),
+		("library/forward.fa".to_string(), "use { Mutex } = std.concurrency\nexport function = <Element>(value: Element): Mutex<Element | none> => holder(value)\n".to_string()),
+		("application/main.fa".to_string(), "export function = () => { let cell = library.forward([1,2,3])\nlet guard = cell.tryLock()\nconsole.log(guard?.value?.length ?? 0) }\n".to_string()),
+	];
+	for (threads, seed) in [(1, 0), (2, 7), (2, 99)] {
+		let (_, report, _) = run(&files, threads, seed);
+		let errors: Vec<_> = report
+			.modules
+			.iter()
+			.flat_map(|module| module.diagnostics.iter())
+			.filter(|diagnostic| diagnostic.severity == crate::Severity::Error)
+			.map(|diagnostic| (&diagnostic.code.id, &diagnostic.message))
+			.collect();
+		assert!(
+			errors.is_empty(),
+			"threads={threads}, seed={seed}: {errors:?}"
+		);
+	}
+}
+
+#[test]
 fn a_run_publishes_every_interface_and_reports_in_path_order() {
 	let (session, report, order) = run(&chain_package(), 4, 0);
 	let modules: Vec<&str> = report

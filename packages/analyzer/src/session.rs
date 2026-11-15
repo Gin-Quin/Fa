@@ -1233,6 +1233,12 @@ fn merge_interface(
 						crate::modules::GenericRequirement::Value(param) => {
 							crate::modules::GenericRequirement::Value(merger.param(param))
 						}
+						crate::modules::GenericRequirement::TypeInfo(param) => {
+							crate::modules::GenericRequirement::TypeInfo(merger.param(param))
+						}
+						crate::modules::GenericRequirement::Codec(ty) => {
+							crate::modules::GenericRequirement::Codec(merger.ty(ty))
+						}
 						crate::modules::GenericRequirement::Method(param, name) => {
 							crate::modules::GenericRequirement::Method(
 								merger.param(param),
@@ -1249,6 +1255,45 @@ fn merge_interface(
 					},
 				)
 			})
+			.collect(),
+		wire_requirements: interface
+			.wire_requirements
+			.iter()
+			.map(|(&key, requirements)| {
+				(
+					merger.decl_key(key),
+					requirements.iter().map(|&ty| merger.ty(ty)).collect(),
+				)
+			})
+			.collect(),
+		copy_requirements: interface
+			.copy_requirements
+			.iter()
+			.map(|(&decl, requirements)| {
+				(
+					decl,
+					requirements
+						.iter()
+						.map(|requirement| crate::analysis::CopyRequirement {
+							subject: merger.ty(requirement.subject),
+							resource_gate: requirement
+								.resource_gate
+								.map(|(receiver, path)| (merger.ty(receiver), merger.list(path))),
+							..*requirement
+						})
+						.collect(),
+				)
+			})
+			.collect(),
+		callables: interface
+			.callables
+			.iter()
+			.map(|(&key, summary)| (merger.decl_key(key), summary.merged(merger)))
+			.collect(),
+		value_origins: interface
+			.value_origins
+			.iter()
+			.map(|(&key, value)| (merger.decl_key(key), value.merged(merger)))
 			.collect(),
 		key_set_params: interface
 			.key_set_params

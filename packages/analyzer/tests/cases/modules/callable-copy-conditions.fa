@@ -1,0 +1,27 @@
+-- Callable body contracts survive factories, fields and imported higher-order calls.
+-- file: library/clone.fa
+export function = <Item>(item: Item): Item => copy item
+-- file: library/invoke.fa
+type Identity = <Item>(value: Item) => Item
+export function = <Item>(transform: Identity, value: Item): Item => transform(value)
+-- file: library/factory.fa
+type Identity = <Item>(value: Item) => Item
+export function = (): Identity => <Item>(item: Item): Item => copy item
+-- file: library/wrap.fa
+type Identity = <Item>(value: Item) => Item
+export function = (transform: Identity): Identity => <Item>(item: Item): Item => transform(item)
+-- file: application/main.fa
+export function = () => console.log(library.invoke(library.clone, [1]))
+function imported = (task: Task<Integer>): Task<Integer> => library.invoke(library.clone, task) -- error: MEM003
+function factory = (task: Task<Integer>): Task<Integer> => {
+	let transform = library.factory()
+	transform(task) -- error: MEM003
+}
+function captured = (task: Task<Integer>): Task<Integer> => {
+	let transform = library.wrap(library.clone)
+	transform(task) -- error: MEM003
+}
+function field = (task: Task<Integer>): Task<Integer> => {
+	let box = { transform = library.clone }
+	box.transform(task) -- error: MEM003
+}

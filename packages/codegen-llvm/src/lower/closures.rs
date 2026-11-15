@@ -12,6 +12,7 @@
 use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::types::TypeKind;
+use inkwell::IntPredicate;
 use inkwell::module::Linkage;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType, StructType};
 use inkwell::values::{BasicMetadataValueEnum, FunctionValue, PointerValue};
@@ -56,15 +57,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		captures
 	}
 
-	/// The struct of an environment: its drop and its copy, then the
+	/// The struct of an environment: its drop, copy and owner count, then the
 	/// captured values (or pointers to them).
 	fn environment_type(
 		&self,
 		captures: &[SymbolId],
 		by_reference: bool,
 	) -> Result<StructType<'ctx>, Error> {
-		let mut fields: Vec<BasicTypeEnum<'ctx>> =
-			vec![self.pointer_type().into(), self.pointer_type().into()];
+		let mut fields: Vec<BasicTypeEnum<'ctx>> = vec![
+			self.pointer_type().into(),
+			self.pointer_type().into(),
+			self.context.i64_type().into(),
+		];
 		if by_reference {
 			fields.extend(
 				captures
@@ -90,13 +94,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		by_reference: bool,
 	) -> Result<Vec<(SymbolId, Option<Slot<'ctx>>)>, Error> {
 		let structure = self.environment_type(captures, by_reference)?;
+		if !by_reference && self.in_coroutine() {
+			let owner = self.frame().owner.expect("a closure function");
+			let ty = self.functions[&owner].info.ty;
+			let value = self.make_closure_of(self.pointer_type().const_null(), environment, ty)?;
+			let owned = self.emit_copy(value)?;
+			let slot = self.alloca(owned.repr, "capture_environment")?;
+			self.builder
+				.build_store(slot.pointer, owned.value.expect("a closure"))?;
+			self.cleanups
+				.borrow_mut()
+				.push(super::ownership::Cleanup::Local(slot));
+		}
 		let mut saved = Vec::new();
 		for (index, &symbol) in captures.iter().enumerate() {
 			let data = self.analysis.symbols.symbol(symbol);
 			let repr = self.repr_of(data.ty, data.decl_node.index())?;
 			let pointer =
 				self.builder
-					.build_struct_gep(structure, environment, index as u32 + 2, "")?;
+					.build_struct_gep(structure, environment, index as u32 + 3, "")?;
 			if by_reference {
 				// the variable itself
 				let pointer = self
@@ -237,7 +253,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let slot = self.slot_of(symbol, node)?;
 				let field =
 					self.builder
-						.build_struct_gep(structure, pointer, index as u32 + 2, "")?;
+						.build_struct_gep(structure, pointer, index as u32 + 3, "")?;
 				self.builder.build_store(field, slot.pointer)?;
 			}
 			pointer
@@ -252,14 +268,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder
 					.build_store(field, function.as_global_value().as_pointer_value())?;
 			}
+			let count = self.builder.build_struct_gep(structure, pointer, 2, "")?;
+			self.builder
+				.build_store(count, self.context.i64_type().const_int(1, false))?;
 			for (index, &symbol) in captures.iter().enumerate() {
 				let slot = self.slot_of(symbol, node)?;
 				let loaded = self.load(slot)?;
-				// the environment holds copies
-				let loaded = self.emit_copy(loaded)?;
+				let moved = self.moves_capture(node, symbol);
+				let loaded = if moved {
+					self.give_up_place(node, slot)?;
+					loaded
+				} else {
+					self.emit_copy(loaded)?
+				};
 				let field =
 					self.builder
-						.build_struct_gep(structure, pointer, index as u32 + 2, "")?;
+						.build_struct_gep(structure, pointer, index as u32 + 3, "")?;
 				self.builder
 					.build_store(field, loaded.value.expect("a value"))?;
 			}
@@ -330,10 +354,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.get_nth_param(0)
 			.expect("an environment")
 			.into_pointer_value();
+		let last = builder
+			.build_call(
+				self.runtime.function("fa_environment_release")?,
+				&[environment.into()],
+				"",
+			)?
+			.try_as_basic_value()
+			.basic()
+			.expect("a last-owner flag")
+			.into_int_value();
+		let last =
+			builder.build_int_compare(IntPredicate::NE, last, last.get_type().const_zero(), "")?;
+		let release = self.context.append_basic_block(drop, "release");
+		let kept = self.context.append_basic_block(drop, "kept");
+		builder.build_conditional_branch(last, release, kept)?;
+		builder.position_at_end(kept);
+		builder.build_return(None)?;
+		builder.position_at_end(release);
 		for (index, repr) in reprs.iter().enumerate().rev() {
 			if self.needs_drop(*repr) {
 				let field =
-					builder.build_struct_gep(structure, environment, index as u32 + 2, "")?;
+					builder.build_struct_gep(structure, environment, index as u32 + 3, "")?;
 				let loaded = builder.build_load(self.llvm_type(*repr), field, "")?;
 				builder.build_call(self.drop_function(*repr)?, &[loaded.into()], "")?;
 			}
@@ -357,37 +399,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.get_nth_param(0)
 			.expect("an environment")
 			.into_pointer_value();
-		let size_value = builder.build_int_cast(size, self.usize, "")?;
-		let copied = builder
+		let retained = builder
 			.build_call(
-				self.runtime.alloc()?,
-				&[size_value.into(), align.into()],
+				self.runtime.function("fa_environment_retain")?,
+				&[environment.into()],
 				"",
 			)?
 			.try_as_basic_value()
 			.basic()
-			.expect("an environment")
-			.into_pointer_value();
-		for index in 0..2 {
-			let from = builder.build_struct_gep(structure, environment, index, "")?;
-			let to = builder.build_struct_gep(structure, copied, index, "")?;
-			let loaded = builder.build_load(pointer, from, "")?;
-			builder.build_store(to, loaded)?;
-		}
-		for (index, repr) in reprs.iter().enumerate() {
-			let from = builder.build_struct_gep(structure, environment, index as u32 + 2, "")?;
-			let to = builder.build_struct_gep(structure, copied, index as u32 + 2, "")?;
-			let mut loaded = builder.build_load(self.llvm_type(*repr), from, "")?;
-			if self.needs_drop(*repr) {
-				loaded = builder
-					.build_call(self.copy_function(*repr)?, &[loaded.into()], "")?
-					.try_as_basic_value()
-					.basic()
-					.expect("a copy");
-			}
-			builder.build_store(to, loaded)?;
-		}
-		builder.build_return(Some(&copied))?;
+			.expect("an environment");
+		builder.build_return(Some(&retained))?;
 		Ok((drop, copy))
 	}
 
@@ -403,7 +424,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// A closure of a function of type `ty`: the type its entry is called
 	/// with (a value given where more errors are allowed is converted:
 	/// `adapt_function_errors`).
-	fn make_closure_of(
+	pub(crate) fn make_closure_of(
 		&self,
 		function: PointerValue<'ctx>,
 		environment: PointerValue<'ctx>,

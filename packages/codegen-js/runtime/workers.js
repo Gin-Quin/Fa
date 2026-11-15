@@ -32,9 +32,10 @@
 // Each helper starts at a `// @fa-helper <name> deps: <names>` line and ends at
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
 
-import { FaAtomic, FaChannel, FaMutex } from "./concurrency.js";
+import { FaAtomic, FaChannel, FaMutex, faOwnChannel, faOwnMutex } from "./concurrency.js";
 import { FaError } from "./errors.js";
 import { faExit, faIsError, faWriteError } from "./main.js";
+import { faOwnShared, faReleaseShared } from "./ownership.js";
 import { FaStop, faStopMessage } from "./stops.js";
 import {
 	faAlive,
@@ -81,7 +82,7 @@ export function faShare(value, depth = 0) {
 	}
 }
 
-// @fa-helper faRevive deps: FaAtomic FaMutex FaChannel
+// @fa-helper faRevive deps: FaAtomic FaMutex FaChannel faOwnShared faOwnMutex faOwnChannel
 /**
  * After a value came from another thread: its shared atomics and mutexes
  * (plain objects after the structured clone, marked `$faShared`) get their
@@ -95,16 +96,16 @@ export function faRevive(value, depth = 0) {
 		return value;
 	}
 	if (value.$faShared === "atomic") {
-		return Object.setPrototypeOf(value, FaAtomic.prototype);
+		return faOwnShared(Object.setPrototypeOf(value, FaAtomic.prototype), () => {});
 	}
 	if (value.$faShared === "mutex") {
 		value.waiters = [];
-		return Object.setPrototypeOf(value, FaMutex.prototype);
+		return faOwnMutex(Object.setPrototypeOf(value, FaMutex.prototype));
 	}
 	if (value.$faShared === "channel") {
 		value.receivers = [];
 		value.senders = [];
-		return Object.setPrototypeOf(value, FaChannel.prototype);
+		return faOwnChannel(Object.setPrototypeOf(value, FaChannel.prototype));
 	}
 	if (Array.isArray(value)) {
 		for (const item of value) {
@@ -118,7 +119,7 @@ export function faRevive(value, depth = 0) {
 	return value;
 }
 
-// @fa-helper FaWorker deps: faExit faWriteError faShare faRevive
+// @fa-helper FaWorker deps: faExit faWriteError faShare faRevive faOwnShared faWorkerStop
 /** A worker: its thread, and the calls sent to it that haven't answered. */
 export class FaWorker {
 	/**
@@ -167,6 +168,7 @@ export class FaWorker {
 		faShare(state);
 		this.thread.postMessage({ kind: 0, state });
 		this.thread.unref?.();
+		faOwnShared(this, faWorkerStop);
 	}
 
 	/**
@@ -409,7 +411,7 @@ export function faWorkerServe(init) {
 	}
 }
 
-// @fa-helper FaWorkerPool deps: FaWorker
+// @fa-helper FaWorkerPool deps: FaWorker faOwnShared faPoolDrop
 /** A worker pool: its workers, the free ones, and the works waiting for one. */
 export class FaWorkerPool {
 	/**
@@ -440,6 +442,7 @@ export class FaWorkerPool {
 			this.workers.push(worker);
 			this.free.push(worker);
 		}
+		faOwnShared(this, faPoolDrop);
 	}
 }
 
@@ -527,4 +530,15 @@ export function faPoolShutdown(pool) {
 		worker.stopping = true;
 		worker.settled();
 	}
+}
+
+// @fa-helper faPoolDrop deps: faPoolShutdown faReleaseShared
+/** @param {FaWorkerPool} pool */
+export function faPoolDrop(pool) {
+	faPoolShutdown(pool);
+	for (const worker of pool.workers) {
+		faReleaseShared(worker);
+	}
+	pool.workers = [];
+	pool.free = [];
 }

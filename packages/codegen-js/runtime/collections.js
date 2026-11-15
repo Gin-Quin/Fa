@@ -13,6 +13,7 @@ import { faCompare, faEquals, faHash, faKeyEquals } from "./equality.js";
 import { IndexError, KeyNotFound } from "./errors.js";
 import { faFormat } from "./format.js";
 import { faCheckInteger, faRangeOverflow } from "./integers.js";
+import { faContainerDrop, faReleaseShared, faRetainShared } from "./ownership.js";
 import { faStop } from "./stops.js";
 import { faCharacters, faStringCompare } from "./strings.js";
 
@@ -148,10 +149,19 @@ export function faArrayInsert(array, index, item) {
  * @template T
  * @param {T[]} array
  * @param {number} index
+ * @param {((item: T) => void) | undefined} [drop]
  * @returns {void}
  */
-export function faArrayDelete(array, index) {
-	array.splice(faNormalizeIndex(array.length, index), 1);
+export function faArrayDelete(array, index, drop) {
+	const item = array.splice(faNormalizeIndex(array.length, index), 1)[0];
+	drop?.(item);
+}
+
+// @fa-helper faArrayClear
+/** @template T @param {T[]} array @param {((item: T) => void) | undefined} [drop] */
+export function faArrayClear(array, drop) {
+	const removed = array.splice(0, array.length);
+	if (drop !== undefined) for (const item of removed) drop(item);
 }
 
 // @fa-helper faArrayTake deps: faNormalizeIndex
@@ -174,9 +184,10 @@ export function faArrayTake(array, index) {
  * @template T
  * @param {T[]} array
  * @param {(item: T) => boolean} predicate
+ * @param {((item: T) => void) | undefined} [drop]
  * @returns {void}
  */
-export function faArrayDeleteWhere(array, predicate) {
+export function faArrayDeleteWhere(array, predicate, drop) {
 	let kept = 0;
 	let index = 0;
 	try {
@@ -185,6 +196,8 @@ export function faArrayDeleteWhere(array, predicate) {
 			if (!predicate(item)) {
 				array[kept] = item;
 				kept += 1;
+			} else {
+				drop?.(item);
 			}
 		}
 	} finally {
@@ -480,7 +493,7 @@ export function faRangeValues(range, location) {
 	};
 }
 
-// @fa-helper FaHashMap deps: faHash faKeyEquals
+// @fa-helper FaHashMap deps: faHash faKeyEquals faContainerDrop faRetainShared faReleaseShared
 /**
  * A map compared by Fa `==` on its keys (deep, floats with SameValueZero),
  * for object and tuple keys. It has the interface of a JavaScript `Map`, and
@@ -491,6 +504,8 @@ export function faRangeValues(range, location) {
  * @template K, V
  */
 export class FaHashMap {
+	/** @type {boolean} */
+	#callbacksDropped = false;
 	/**
 	 * Every entry in insertion order, by its primitive key, or by the entry
 	 * itself for the other keys (an entry is never a key).
@@ -527,7 +542,19 @@ export class FaHashMap {
 	 * @returns {FaHashMap<K, V>}
 	 */
 	emptyCopy() {
-		return new FaHashMap(undefined, this.hash, this.equals);
+		return new FaHashMap(undefined, faRetainShared(this.hash), faRetainShared(this.equals));
+	}
+
+	/** Releases the owning callback environments once, after the items. */
+	dropCallbacks() {
+		if (this.#callbacksDropped) return;
+		this.#callbacksDropped = true;
+		faReleaseShared(this.hash);
+		faReleaseShared(this.equals);
+	}
+
+	[faContainerDrop]() {
+		this.dropCallbacks();
 	}
 
 	/** @returns {number} */
@@ -679,7 +706,7 @@ export class FaHashMap {
 	}
 }
 
-// @fa-helper FaSet deps: FaHashMap faHash faKeyEquals
+// @fa-helper FaSet deps: FaHashMap faHash faKeyEquals faContainerDrop faRetainShared faReleaseShared
 /**
  * A set that is not a plain JavaScript `Set` of primitives: elements compared
  * by Fa `==` (objects, tuples), or by a `key` function (`Set.from(users,
@@ -689,6 +716,8 @@ export class FaHashMap {
  * @template T
  */
 export class FaSet {
+	/** @type {boolean} */
+	#callbacksDropped = false;
 	/** @type {FaHashMap<unknown, T>} */
 	#elements;
 
@@ -722,10 +751,22 @@ export class FaSet {
 	 */
 	emptyCopy() {
 		return new FaSet(undefined, {
-			key: this.key,
-			hash: this.#elements.hash,
-			equals: this.#elements.equals,
+			key: faRetainShared(this.key),
+			hash: faRetainShared(this.#elements.hash),
+			equals: faRetainShared(this.#elements.equals),
 		});
+	}
+
+	/** Releases the key and hash/equality environments owned by this set. */
+	dropCallbacks() {
+		if (this.#callbacksDropped) return;
+		this.#callbacksDropped = true;
+		faReleaseShared(this.key);
+		this.#elements.dropCallbacks();
+	}
+
+	[faContainerDrop]() {
+		this.dropCallbacks();
 	}
 
 	/**

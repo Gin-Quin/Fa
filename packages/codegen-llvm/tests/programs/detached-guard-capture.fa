@@ -1,0 +1,14 @@
+-- asynchronous: false
+use { Mutex } = std.concurrency
+
+function test = () => {
+	mutable mutex = Mutex<Integer> { value = 7 }
+	let guard = mutex.tryLock()
+	if guard != none {
+		start do { console.log(guard.value) }
+	}
+	console.log(mutex.tryLock()?.value ?? -1)
+}
+test()
+-- prints: 7
+-- prints: -1

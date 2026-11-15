@@ -1,0 +1,46 @@
+-- A shared handle can be copied locally; the Task stored inside it still
+-- belongs to the executor that created it.
+-- analysis-target: native
+-- file: Holder.worker.fa
+use { Mutex, Channel } = std.concurrency
+export type = {
+	gate: Mutex<Task<Integer>>
+	function read = (self): Integer => 0
+	function receive = (self, channel: Channel<Task<Integer>>): Integer => 0 -- error CONC008
+	function result = (self): Mutex<Task<Integer>> => do { -- error CONC008
+		let task = start do { 1 }
+		Mutex<Task<Integer>> { value = task }
+	}
+}
+-- file: Plain.worker.fa
+export type = {
+	function value = (self): Integer => 1
+}
+-- file: main.fa
+use { Mutex, Channel, WorkerPool } = std.concurrency
+
+async function main = () => {
+	let pending = start do { 1 }
+	mutable gate = Mutex<Task<Integer>> { value = pending }
+	mutable localCopy = gate
+	mutable worker = Holder { gate } -- error CONC008
+	mutable pool = WorkerPool<Holder> { count = 1, state = Holder { gate = localCopy } } -- error CONC008
+	mutable channel = Channel<Task<Integer>> { capacity = 1 }
+	console.log(await worker.receive(channel)) -- error CONC008
+	mutable safe = WorkerPool<Plain> { count = 1 }
+	let work = await safe.submit((_worker) => { -- error CONC008
+		if gate.tryLock() != none {
+			console.log("captured")
+		}
+	})
+	await work
+	let returned = await safe.submit((_worker) => do { -- error CONC008
+		let task = start do { 2 }
+		Mutex<Task<Integer>> { value = task }
+	})
+	await returned
+	safe.shutdown()
+	pool.shutdown()
+	worker.stop()
+}
+await main()

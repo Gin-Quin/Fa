@@ -35,7 +35,7 @@ use fa_analyzer::syntax::View;
 use fa_analyzer::types::{CollKind, TypeKind};
 
 use crate::generate::{Dest, Generator, Kind};
-use crate::js::{self, Expr};
+use crate::js::{self, Expr, Prec};
 
 /// How a reference is held.
 #[derive(Clone, Debug)]
@@ -829,12 +829,16 @@ impl Generator<'_> {
 	/// Before an escaping closure: copies of the captures that may change
 	/// after its creation, which the closure reads instead. Returns the
 	/// aliases to restore after the closure is generated.
-	pub(crate) fn copy_captures(&mut self, info: &FnInfo) -> Vec<(SymbolId, Option<String>)> {
+	pub(crate) fn copy_captures(
+		&mut self,
+		info: &FnInfo,
+		site: NodeId,
+	) -> Vec<(SymbolId, Option<String>)> {
 		if !self.analysis.escapes.contains(&info.lambda) {
 			return Vec::new();
 		}
 		let captures = info.captures.clone();
-		self.copy_captured(&captures)
+		self.copy_values_at(&captures, false, Some(site))
 	}
 
 	/// Copies of the local values `symbols` that may change later, which a
@@ -858,22 +862,68 @@ impl Generator<'_> {
 		symbols: &[SymbolId],
 		module_values: bool,
 	) -> Vec<(SymbolId, Option<String>)> {
+		self.copy_values_at(symbols, module_values, None)
+	}
+
+	pub(crate) fn copy_values_at(
+		&mut self,
+		symbols: &[SymbolId],
+		module_values: bool,
+		site: Option<NodeId>,
+	) -> Vec<(SymbolId, Option<String>)> {
 		let mut saved = Vec::new();
 		for &symbol in symbols {
 			let kind = self.analysis.symbols.symbol(symbol).kind;
 			if kind == SymbolKind::Derived {
 				continue;
 			}
+			let ty = self.analysis.symbols.symbol(symbol).ty;
+			let moved = site.and_then(|site| {
+				if self
+					.analysis
+					.moved_captures
+					.get(&site)
+					.is_some_and(|moved| moved.contains(&symbol))
+				{
+					return Some("true".to_string());
+				}
+				let ty = self
+					.analysis
+					.collection_moved_captures
+					.get(&site)?
+					.iter()
+					.find_map(|&(captured, ty)| (captured == symbol).then_some(ty))?;
+				self.collection_ownership_condition(ty)
+			});
 			let changes = self.is_mutable_place(symbol)
 				|| self.aliases.contains_key(&symbol)
-				|| kind == SymbolKind::Use;
+				|| kind == SymbolKind::Use
+				|| self.types.contains_shared_handle(ty)
+				|| moved.is_some();
 			let reactive = kind == SymbolKind::Reactive;
 			if !changes || (self.is_module_value(symbol) && !reactive && !module_values) {
 				continue;
 			}
-			let ty = self.analysis.symbols.symbol(symbol).ty;
 			let current = Expr::name(self.name_of(symbol), true);
-			let value = if self.is_composite(ty) {
+			let value = if let Some(condition) = moved {
+				let transferred = match self.resource_flags.get(&symbol) {
+					Some(flag) => Expr::primary(format!("({flag} = false, {})", current.text)),
+					None => current.clone(),
+				};
+				if condition == "true" {
+					transferred
+				} else {
+					let copied = self.copy_value(current, ty);
+					Expr::new(
+						format!(
+							"({condition}) ? {} : {}",
+							transferred.at(Prec::Assign),
+							copied.at(Prec::Assign)
+						),
+						Prec::Conditional,
+					)
+				}
+			} else if self.is_composite(ty) {
 				self.copy_value(current, ty)
 			} else {
 				current
@@ -890,6 +940,71 @@ impl Generator<'_> {
 			saved.push((symbol, self.aliases.insert(symbol, name)));
 		}
 		saved
+	}
+
+	/// A function owns the snapshots prepared for it, including immutable
+	/// resource handles. Plain borrowed callbacks have no owning snapshots.
+	pub(crate) fn own_captured_closure(
+		&mut self,
+		site: NodeId,
+		value: Expr,
+		captures: &[(SymbolId, Option<String>)],
+	) -> Expr {
+		let Some(release) = self.captured_release(captures) else {
+			return value;
+		};
+		let helper = self.helper("faOwnShared");
+		let value = js::call(helper, &[value.text, release]);
+		self.register_function_temporary(site, value)
+	}
+
+	/// A fresh owning function value (a lambda, named materialization or an
+	/// ABI adapter). Its owner moves into stores and returned values.
+	pub(crate) fn register_function_temporary(&mut self, site: NodeId, value: Expr) -> Expr {
+		if self.guard_frames.is_empty() {
+			return value;
+		}
+		let temporary = self.inline_temp();
+		let flag = self.inline_temp();
+		let release = self.helper("faReleaseShared");
+		if let Some(frame) = self.guard_frames.last_mut() {
+			frame.push(format!("if ({flag}) {release}({temporary});"));
+		}
+		self.closure_temporaries
+			.insert(site, (temporary.clone(), flag.clone()));
+		Expr::primary(format!(
+			"({temporary} = {}, {flag} = true, {temporary})",
+			value.text
+		))
+	}
+
+	pub(crate) fn captured_release(
+		&mut self,
+		captures: &[(SymbolId, Option<String>)],
+	) -> Option<String> {
+		let mut drops = Vec::new();
+		for &(symbol, _) in captures.iter().rev() {
+			let ty = self.analysis.symbols.symbol(symbol).ty;
+			if let Some(drop) = self.drop_function(ty) {
+				let name = self.name_of(symbol);
+				drops.push(format!("{drop}({name});"));
+			}
+		}
+		if drops.is_empty() {
+			return None;
+		}
+		Some(format!("() => {{ {} }}", drops.join(" ")))
+	}
+
+	/// An owning store takes a newly materialized environment. Borrowed
+	/// arguments instead leave its cleanup at the end of the statement.
+	pub(crate) fn take_closure_temporary(&mut self, node: NodeId, value: &Expr) -> Option<Expr> {
+		let node = self.strip_groups(node);
+		let (temporary, flag) = self.closure_temporaries.remove(&node)?;
+		Some(Expr::primary(format!(
+			"({}, {flag} = false, {temporary})",
+			value.at(crate::js::Prec::Assign)
+		)))
 	}
 
 	/// Restores the aliases [`Generator::copy_captures`] replaced.

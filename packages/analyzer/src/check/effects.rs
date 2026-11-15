@@ -2277,6 +2277,7 @@ impl Walker<'_> {
 		lambda: NodeId,
 		declaration: Option<NodeId>,
 	) {
+		self.capture_lists.insert(lambda, cx.captures.clone());
 		for key in [Some(lambda), declaration].into_iter().flatten() {
 			if let Some(info) = self.a.functions.get_mut(&key) {
 				info.captures = cx.captures.clone();
@@ -2309,7 +2310,19 @@ impl Walker<'_> {
 	/// captures, so it can't write any of it (`REF021`). `value` is a lambda,
 	/// or the name of a local function; `at` where it escapes.
 	pub(crate) fn escape(&mut self, value: NodeId, at: NodeId) {
+		self.escape_value(value, at, &mut rustc_hash::FxHashSet::default());
+	}
+
+	fn escape_value(
+		&mut self,
+		value: NodeId,
+		at: NodeId,
+		seen: &mut rustc_hash::FxHashSet<NodeId>,
+	) {
 		let value = self.strip_groups(value);
+		if !seen.insert(value) {
+			return;
+		}
 		let lambda = match self.view(value) {
 			View::Lambda { .. } => value,
 			View::Name(_) => {
@@ -2317,6 +2330,14 @@ impl Walker<'_> {
 					return;
 				};
 				let Some(declaration) = self.direct_function(symbol) else {
+					let node = self.a.symbols.symbol(symbol).decl_node;
+					if let View::Declaration {
+						value: Some(initializer),
+						..
+					} = self.view(node)
+					{
+						self.escape_value(initializer, at, seen);
+					}
 					return;
 				};
 				match self.a.functions.get(&declaration) {
@@ -2324,8 +2345,60 @@ impl Walker<'_> {
 					None => return,
 				}
 			}
+			View::Copy(inner) | View::Do(inner) => {
+				self.escape_value(inner, at, seen);
+				return;
+			}
+			View::Return(Some(inner)) => {
+				self.escape_value(inner, at, seen);
+				return;
+			}
+			View::If {
+				then_body,
+				else_body,
+				..
+			} => {
+				self.escape_value(then_body, at, seen);
+				if let Some(other) = else_body {
+					self.escape_value(other, at, seen);
+				}
+				return;
+			}
+			View::When { arms, .. } => {
+				let values: Vec<_> = arms.iter().map(|arm| arm.value).collect();
+				for value in values {
+					self.escape_value(value, at, seen);
+				}
+				return;
+			}
+			View::Catch {
+				expression,
+				handler,
+				..
+			} => {
+				self.escape_value(expression, at, seen);
+				self.escape_value(handler, at, seen);
+				return;
+			}
+			View::Fallback { operands } => {
+				let values: Vec<_> = operands.iter().collect();
+				for value in values {
+					self.escape_value(value, at, seen);
+				}
+				return;
+			}
+			View::Block { statements } => {
+				if let Some(last) = statements.last() {
+					self.escape_value(last, at, seen);
+				}
+				return;
+			}
 			_ => return,
 		};
+		self.capture_creations.insert(value, lambda);
+		for symbol in self.capture_lists.get(&lambda).cloned().unwrap_or_default() {
+			self.note_use(value, symbol);
+		}
 		self.escape_closure(lambda, at);
 	}
 
@@ -2334,6 +2407,16 @@ impl Walker<'_> {
 	/// of what it captures.
 	pub(crate) fn escape_closure(&mut self, lambda: NodeId, at: NodeId) {
 		self.a.escapes.insert(lambda);
+		if self
+			.a
+			.function(lambda)
+			.is_none_or(|info| info.declaration.is_none())
+		{
+			self.capture_creations.entry(lambda).or_insert(lambda);
+			for symbol in self.capture_lists.get(&lambda).cloned().unwrap_or_default() {
+				self.note_use(lambda, symbol);
+			}
+		}
 		// requirements are not captured (requirements.rs)
 		self.check_stored_lambda(lambda);
 		let Some(writes) = self.closure_writes.get(&lambda).cloned() else {

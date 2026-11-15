@@ -1,0 +1,34 @@
+reactive count = 0
+
+function subscribe = (): Subscription => watch {
+	console.log("watch {count}")
+}
+
+let subscription = subscribe()
+do {
+	let copied = subscription
+	console.log("copied")
+}
+count = 1
+subscription.stop()
+count = 2
+do {
+	let owned = watch {
+		console.log("run")
+		() => console.log("disposed")
+	}
+	do {
+		let copied = owned
+		console.log("inner")
+	}
+	console.log("kept")
+}
+console.log("done")
+-- prints: watch 0
+-- prints: copied
+-- prints: watch 1
+-- prints: run
+-- prints: inner
+-- prints: kept
+-- prints: disposed
+-- prints: done

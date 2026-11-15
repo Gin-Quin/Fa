@@ -1392,6 +1392,26 @@ pub enum WrittenReturn {
 }
 
 impl WrittenType {
+	/// Canonical identity for descriptors and destructor caches. Every type
+	/// argument must first be substituted; JavaScript's generic descriptors
+	/// combine the same declaration/method keys with their actual type keys.
+	pub fn semantic_fingerprint(&self, types: &crate::types::TypeStore) -> u128 {
+		self.canonicalized(types).stable_hash(types)
+	}
+
+	fn canonicalized(&self, types: &crate::types::TypeStore) -> Self {
+		Self {
+			origins: std::sync::Arc::new(
+				self.origins
+					.iter()
+					.map(|origin| origin.as_ref().map(|origin| origin.canonicalized(types)))
+					.collect(),
+			),
+			methods: canonical_methods(&self.methods, types),
+			..self.clone()
+		}
+	}
+
 	/// A name without generic arguments.
 	pub fn named(declaration: crate::ids::DeclKey) -> Self {
 		Self {
@@ -1442,6 +1462,15 @@ impl WrittenType {
 }
 
 impl GenericMethod {
+	/// The same semantic method identity after canonicalizing nested selections.
+	pub fn semantic_fingerprint(&self, types: &crate::types::TypeStore) -> u128 {
+		let method = Self {
+			methods: canonical_methods(&self.methods, types),
+			..self.clone()
+		};
+		method.stable_hash(types)
+	}
+
 	/// Copies a selection and its dependencies into a shared type store.
 	pub fn merged(&self, merger: &mut crate::types::merge::Merger<'_>) -> Self {
 		Self {
@@ -1472,6 +1501,31 @@ impl GenericMethod {
 		}
 		hash
 	}
+}
+
+fn canonical_methods(
+	methods: &[GenericMethod],
+	types: &crate::types::TypeStore,
+) -> std::sync::Arc<Vec<GenericMethod>> {
+	let mut methods: Vec<_> = methods
+		.iter()
+		.map(|method| GenericMethod {
+			methods: canonical_methods(&method.methods, types),
+			..method.clone()
+		})
+		.collect();
+	methods.sort_by(|left, right| {
+		left.parameter
+			.cmp(&right.parameter)
+			.then_with(|| {
+				types
+					.syms
+					.resolve(left.name)
+					.cmp(types.syms.resolve(right.name))
+			})
+			.then_with(|| left.stable_hash(types).cmp(&right.stable_hash(types)))
+	});
+	std::sync::Arc::new(methods)
 }
 
 /// A parameter of a function or lambda.
@@ -1783,6 +1837,67 @@ impl Analysis {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn written_fingerprints_preserve_phantoms_and_canonicalize_methods() {
+		let mut types = crate::types::TypeStore::new();
+		let module = types.module("library");
+		let declaration = types.decl_key(module, &["Wrapper"], 0);
+		let destroy = types.decl_key(module, &["Wrapper", "destroy"], 0);
+		let display = types.decl_key(module, &["Label", "describe"], 0);
+		let first = GenericMethod {
+			parameter: 0,
+			name: types.syms.intern("destroy"),
+			function: destroy,
+			arguments: types.list(&[TypeId::INTEGER]),
+			methods: Default::default(),
+		};
+		let second = GenericMethod {
+			parameter: 1,
+			name: types.syms.intern("describe"),
+			function: display,
+			arguments: ListId::EMPTY,
+			methods: Default::default(),
+		};
+		let original = WrittenType {
+			declaration,
+			arguments: types.list(&[TypeId::INTEGER]),
+			origins: Default::default(),
+			methods: std::sync::Arc::new(vec![first.clone(), second.clone()]),
+		};
+		let permuted = WrittenType {
+			methods: std::sync::Arc::new(vec![second, first.clone()]),
+			..original.clone()
+		};
+		assert_eq!(
+			original.semantic_fingerprint(&types),
+			permuted.semantic_fingerprint(&types)
+		);
+		let phantom = WrittenType {
+			arguments: types.list(&[TypeId::STRING]),
+			..original.clone()
+		};
+		assert_ne!(
+			original.semantic_fingerprint(&types),
+			phantom.semantic_fingerprint(&types)
+		);
+		let other_method = GenericMethod {
+			arguments: types.list(&[TypeId::STRING]),
+			..first.clone()
+		};
+		assert_ne!(
+			first.semantic_fingerprint(&types),
+			other_method.semantic_fingerprint(&types)
+		);
+		let nested = WrittenType {
+			origins: std::sync::Arc::new(vec![Some(phantom)]),
+			..original.clone()
+		};
+		assert_ne!(
+			original.semantic_fingerprint(&types),
+			nested.semantic_fingerprint(&types)
+		);
+	}
 
 	#[test]
 	fn flags_by_name() {

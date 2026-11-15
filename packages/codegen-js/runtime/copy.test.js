@@ -12,6 +12,27 @@ describe("copies", () => {
 		expect(copy.pets[0]).not.toBe(value.pets[0]);
 	});
 
+	test("copies and in-place writes traverse deep recursive values iteratively", () => {
+		/** @type {any} */
+		let source;
+		for (let index = 0; index < 100000; index++) source = { value: index, next: source };
+		const copy = faCopy(source);
+		const nested = copy.next;
+		faAssign(copy, source);
+		expect(copy.next).toBe(nested);
+		let count = 0;
+		for (
+			let left = source, right = copy;
+			left !== undefined;
+			left = left.next, right = right.next
+		) {
+			if (right === left) throw new Error("shared a copied node");
+			if (right.value !== left.value) throw new Error("copied a wrong field");
+			count++;
+		}
+		expect(count).toBe(100000);
+	});
+
 	test("faCopyInto reuses the target's storage when the lengths match", () => {
 		const target = [1, 2];
 		expect(faCopyInto(target, [3, 4])).toBe(target);

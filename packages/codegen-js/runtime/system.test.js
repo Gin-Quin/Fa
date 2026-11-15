@@ -137,6 +137,13 @@ describe("faJsonParse", () => {
 });
 
 describe("faJsonStringify", () => {
+	test("deep recursive values use bounded stack space", () => {
+		/** @type {any} */
+		let value;
+		for (let index = 0; index < 100000; index++) value = { next: value };
+		const text = faJsonStringify(value);
+		expect(text).toBe('{"next":'.repeat(99999) + "{}" + "}".repeat(99999));
+	});
 	test("writes Fa values", () => {
 		expect(faJsonStringify({ name: "Ada", email: undefined, tags: ["a"] })).toBe(
 			'{"name":"Ada","tags":["a"]}',

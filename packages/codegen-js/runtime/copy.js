@@ -224,45 +224,47 @@ export function faCopyInto(target, source) {
  * @returns {T} the target
  */
 export function faAssign(target, source) {
-	const into = /** @type {any} */ (target);
-	const from = /** @type {any} */ (source);
-	if (into === from) {
-		return target;
-	}
-	if (Array.isArray(into)) {
-		into.length = 0;
-		for (const item of from) {
-			into.push(faCopy(item));
-		}
-	} else if (into instanceof Map || into instanceof FaHashMap) {
-		into.clear();
-		for (const [key, item] of from) {
-			into.set(key, faCopy(item));
-		}
-	} else if (
-		into instanceof Set ||
-		into instanceof FaSet ||
-		into[Symbol.toStringTag] === "fa:ValuePool"
-	) {
-		into.clear();
-		for (const item of from) {
-			into.add(item);
-		}
-	} else {
-		for (const key of Object.keys(from)) {
-			const old = into[key];
-			const next = from[key];
-			const sameKind =
-				typeof old === "object" &&
-				old !== null &&
-				typeof next === "object" &&
-				next !== null &&
-				Object.getPrototypeOf(old) === Object.getPrototypeOf(next) &&
-				old.$t === next.$t;
-			if (sameKind) {
-				faAssign(old, next);
-			} else {
-				into[key] = faCopy(next);
+	/** @type {any[]} */
+	const pending = [target, source];
+	while (pending.length > 0) {
+		const from = pending.pop();
+		const into = pending.pop();
+		if (into === from) continue;
+		if (Array.isArray(into)) {
+			into.length = 0;
+			for (const item of from) {
+				into.push(faCopy(item));
+			}
+		} else if (into instanceof Map || into instanceof FaHashMap) {
+			into.clear();
+			for (const [key, item] of from) {
+				into.set(key, faCopy(item));
+			}
+		} else if (
+			into instanceof Set ||
+			into instanceof FaSet ||
+			into[Symbol.toStringTag] === "fa:ValuePool"
+		) {
+			into.clear();
+			for (const item of from) {
+				into.add(item);
+			}
+		} else {
+			for (const key of Object.keys(from)) {
+				const old = into[key];
+				const next = from[key];
+				const sameKind =
+					typeof old === "object" &&
+					old !== null &&
+					typeof next === "object" &&
+					next !== null &&
+					Object.getPrototypeOf(old) === Object.getPrototypeOf(next) &&
+					old.$t === next.$t;
+				if (sameKind) {
+					pending.push(old, next);
+				} else {
+					into[key] = faCopy(next);
+				}
 			}
 		}
 	}

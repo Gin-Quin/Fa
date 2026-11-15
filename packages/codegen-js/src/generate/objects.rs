@@ -17,6 +17,8 @@
 //! - A composite value read from a place is copied where Fa's value
 //!   semantics need it (a `mutable` destination, or a mutable source).
 
+use std::collections::HashSet;
+
 use fa_analyzer::analysis::{FieldValue, NodeFlags};
 use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, NominalId, SymbolId, TypeId};
@@ -1199,6 +1201,7 @@ impl Generator<'_> {
 			// Erased parameters may own objects or collections. Their copies
 			// use faCopy, which leaves primitive instantiations unchanged.
 			| TypeKind::Param(_)
+			| TypeKind::Rec(_)
 			| TypeKind::Range => true,
 			TypeKind::Union(list) => self
 				.types
@@ -1232,6 +1235,9 @@ impl Generator<'_> {
 		destination_mutable: bool,
 	) -> Expr {
 		let ty = self.type_of(node);
+		if self.fcx.moving_replaced == Some(node) {
+			return value;
+		}
 		// a place's value, not the last use of a local (D15); a new
 		// collection of a place's elements shares them when they are composite
 		let owns = match fa_analyzer::lower::copies::element_view(self.tree, self.analysis, node) {
@@ -1261,6 +1267,64 @@ impl Generator<'_> {
 			return value;
 		}
 		self.copy_of(value, ty)
+	}
+
+	/// A single read of an optional local inside the fresh object replacing
+	/// it transfers the old root. No call or closure may retain a new alias
+	/// during construction, and multiple reads still need independent copies.
+	pub(crate) fn replaced_root_read(&self, target: NodeId, value: NodeId) -> Option<NodeId> {
+		let target = self.strip_groups(target);
+		let Resolution::Local(symbol) = self.analysis.resolution(target) else {
+			return None;
+		};
+		if !matches!(self.view(target), View::Name(_))
+			|| self.analysis.symbols.symbol(symbol).kind != SymbolKind::Mutable
+			|| self
+				.types
+				.contains_resource(self.analysis.symbols.symbol(symbol).ty)
+			|| !self.may_be_none(self.analysis.symbols.symbol(symbol).ty)
+			|| !matches!(
+				self.view(self.strip_groups(value)),
+				View::Object { .. } | View::TypedObject { .. } | View::Access { .. }
+			) {
+			return None;
+		}
+		let mut read = None;
+		let mut pending = vec![value];
+		let mut visited = HashSet::new();
+		while let Some(node) = pending.pop() {
+			if !visited.insert(node) {
+				return None;
+			}
+			// A type's omitted field defaults run during construction too.
+			if let Some(object) = self.analysis.object(node) {
+				pending.extend(object.fields.iter().filter_map(|(_, field)| match field {
+					FieldValue::Default(value) => Some(*value),
+					_ => None,
+				}));
+			}
+			if matches!(
+				self.view(node),
+				View::Call { .. }
+					| View::Lambda { .. }
+					| View::Function { .. }
+					| View::Start(_)
+					| View::Await(_)
+			) {
+				return None;
+			}
+			if matches!(self.view(node), View::Name(_))
+				&& self.analysis.resolution(node) == Resolution::Local(symbol)
+				&& read.replace(node).is_some()
+			{
+				return None;
+			}
+			pending.extend(fa_analyzer::syntax::children(self.tree, node));
+		}
+		if matches!(self.view(self.strip_groups(value)), View::Access { .. }) {
+			return (self.place_root(value) == Some(symbol)).then_some(value);
+		}
+		read
 	}
 
 	/// Whether a value read from a place is an element with relation

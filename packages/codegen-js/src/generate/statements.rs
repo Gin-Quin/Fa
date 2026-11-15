@@ -951,11 +951,14 @@ impl Generator<'_> {
 			return;
 		}
 		let value_node = value;
+		let saved_move = self.fcx.moving_replaced;
+		self.fcx.moving_replaced = self.replaced_root_read(target_node, value);
 		let value = self.expr(value);
 		let value = match self.copy_into_local(target_node, value_node, &value) {
 			Some(reused) => reused,
 			None => self.copy_into(value_node, value, true),
 		};
+		self.fcx.moving_replaced = saved_move;
 		// a value holding a resource: the old one dropped (resources.rs)
 		if place.map.is_none()
 			&& let Some((drop, flag)) = self.drop_replaced(target_node)

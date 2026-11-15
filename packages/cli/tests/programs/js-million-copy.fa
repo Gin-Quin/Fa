@@ -1,0 +1,10 @@
+-- Keep both roots live so this exercises a real million-node deep copy.
+type Link = { value: Integer, next: Link? }
+mutable head: Link? = none
+for index in 0..1000000 {
+	head = Link { value = index, next = head }
+}
+let snapshot = head
+console.log(snapshot == head) -- prints: true
+if head is not none { head.value = -1 }
+console.log(snapshot?.value, head?.value) -- prints: 999999 -1

@@ -1,0 +1,23 @@
+-- A real copy (the original remains in use), equality and traversal of a
+-- recursive value all use bounded JavaScript stack space.
+type Link = { value: Integer, next: Link? }
+mutable head: Link? = none
+for index in 0..20000 {
+	head = Link { value = index, next = head }
+}
+mutable snapshot = head
+console.log(snapshot == head) -- prints: true
+if head is not none {
+	head.value = -1
+	if head.next is not none {
+		head.next.value = -2
+	}
+}
+console.log(snapshot?.value, snapshot?.next?.value) -- prints: 19999 19998
+console.log(snapshot == head) -- prints: false
+use { Json } = std.json
+if snapshot is not none {
+	let text = "{snapshot}"
+	console.log(text.length > 100000) -- prints: true
+	console.log(Json.stringify(snapshot).length > 100000) -- prints: true
+}

@@ -113,6 +113,8 @@ struct LoopCx {
 /// The state of the JavaScript function being generated.
 #[derive(Default, Debug)]
 struct FnCx {
+	/// A root read transferred into the fresh value replacing its local.
+	moving_replaced: Option<NodeId>,
 	/// The next temporary number.
 	temps: u32,
 	/// Temporaries assigned inside expressions (`($t0 = f())`), declared at

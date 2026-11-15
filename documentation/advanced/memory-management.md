@@ -279,4 +279,6 @@ and exit code 101. wasm retains its ordinary 32-bit pointers.
 ### JavaScript
 
 - A copy of an object or a collection is a call of the generated copy function of its type. The copy is skipped only in two cases, so that the output stays predictable: when the read is a move (the last use of the source), and when both sides are immutable for their whole lives and have the same shape.
+- Recursive references count as composite values. Recursive copies use the iterative structural copier; copying a finite, non-recursive type keeps its specialized function. Equality already uses an explicit work stack below recursive edges. Generic printing, JSON writing and in-place object assignment also use work stacks, so the JavaScript call stack does not grow with a recursive value. Ordinary recursive values need no generated destruction helper: the JavaScript engine reclaims their objects.
+- A single read transferred into a fresh object replacing the same mutable optional local consumes the previous root (`head = Link { value, next = head }`). Selecting a child to replace that root consumes the child too (`head = head.next`). The JavaScript proof excludes calls, closures, suspension and multiple reads of the root during construction; those retain their copies. This is a move, and does not change Fa's value semantics or its reference invalidation rules.
 :::

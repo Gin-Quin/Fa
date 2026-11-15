@@ -4,6 +4,8 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Performance
 
+- **Coût des destinations de retour récursives (native, 2026-11-15)** : après construction directe dans les boîtes, `binary-trees` garde +6,13 % d’instructions et une hausse CPU dans l’audit des destinations de retour. Étudier la durée de vie du pointeur de sortie et la convention interne, tout en conservant la construction dans la destination et les règles d’alias ; aucune reconnaissance de benchmark ni suppression de contrôle.
+
 - **nbody aliasing (native)**: LLVM can't tell that `body` and `other` never designate the same element, so their fields stay in memory (Rust works around it with `split_at_mut`). Use the analyzer's facts (distinct indices, the alias rule) to emit `noalias`/scoped alias metadata, or keep fields in registers when no write can reach them. *Assigned to the LLVM backend's fourth shift.*
 - **Benchmarks against Goose**: add the benchmarks of https://aardappel.github.io/goose/bench/results.html and a Goose column next to Rust. *Assigned.*
 - **Parallel and streaming pipeline** (`design/parallel-pipeline.md`): steps 1–5 *assigned*; step 6 (LLVM per module, ThinLTO) and step 7 (language server) to schedule after.
@@ -12,14 +14,13 @@ Open items that are not yet assigned to a running engineer, or that need a follo
   extend the implemented synchronous collection buffer forwarding to remaining
   constructors and coroutine instances.
   Synchronous object/tuple calls now use output slots (direct calls, supported
-  generic instances, function values/lambdas, blocks, `if`/`when`, nested fields
+  generic instances, function values/lambdas, blocks, `if`/`when`, nested fields,
   mapped array elements and eligible recursive early boxes), including immutable
-  named locals when every
-  successful exit returns the same proven movable owner. Still needed: broader
-  local coalescing across different result owners; forwarding into pushed/inserted
-  collection slots
-  and existing fields when alias/error rules allow it; cover structural layout
-  conversions, optional/union/fallback/catch/loop results and coroutine promises.
+  named locals when every successful exit returns the same proven movable owner.
+  Still needed: coalesce mutable locals or different result owners; forward into
+  ordinary push/insert slots and existing fields when alias/error rules allow it;
+  cover structural/SoA conversions, optional/union/fallback/catch/loop results,
+  coroutine promises and blocking finished-task result slots.
   Preserve analyzer moves and existing foreign `sret`, early recursive boxes and
   in-place pushed object construction. Never use stack-to-heap copy-out.
   Collection-returning user functions now forward bounded buffers through direct

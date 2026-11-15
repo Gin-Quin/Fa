@@ -1304,3 +1304,95 @@ On ne peut pas attribuer précisément l’écart ancien à un effet matériel.
 Il n’est pas reproduit contre la base actuelle ; aucun ajustement spéculatif
 du compilateur n’est introduit. Données et échantillons :
 `native-goose-word-count-investigation.json`.
+
+## Destinations de retour après fusion des capacités (15 novembre 2026)
+
+Base : `perf/native-goose` à `591e050d` ; fusions `9d602477` et `f2caf4d9`.
+Les deux décisions de stockage/capacité et leurs audits sont conservés. Le
+header GrowingArray reste à 64/40 octets : compteur et marqueur de stockage
+partagent le mot précédant `k`. Les réservations conservent les segments
+existants ; aucun déplacement d’un élément stable hors d’un tampon de pile.
+
+L’implémentation finale (`35e38304`, `aedcd0a7`, `3ecd4cb1`, `beb031ef`,
+`8462a6c7`, `9e7d43d0`) transmet les tampons bornés à travers les fonctions synchrones,
+construit les retours objets/tuples dans leurs destinations et réutilise les
+boîtes récursives encore disponibles. Un propriétaire mutable ou qui s’échappe
+prend le tas dès la construction. Les exceptions détruisent les préfixes
+terminés ; aucun rattrapage par copie pile → tas. Les limites restantes sont
+précisées dans `design/todo.md`, notamment le mode coroutine, les autres
+constructeurs et les destinations nécessitant une conversion ou un engagement
+après succès. Une expérience de pré-écriture des arêtes privées n’est pas
+retenue : les 27 exécutables optimisés étaient identiques octet pour octet.
+
+Validation : workspace complet avec LLVM 18, clippy sans avertissement,
+50 tests IR, programmes avec détection des fuites sur native/freestanding/wasm
+à `-O0`/`-O3`, runtime C sous ASan/UBSan, snippets et site. Les 27 programmes
+(25 + deux variantes) coïncident avec Rust aux tailles d’audit et par défaut.
+Goose utilise clang 18 avec `-O2`, vérifié dans tous ses journaux de compilation.
+Le dernier workspace signale uniquement le test de temporisation connu
+`async-starvation` sur wasm (tâches occupées insuffisamment exécutées sous
+charge). Relancé seul en wasm `-O3` avec détection des fuites, il passe ; le
+workspace complet précédent passait également. Aucune autre défaillance.
+
+Callgrind emploie les tailles d’audit. Les temps suivants sont les médianes CPU
+de **21 passages alternés, épinglés sur CPU 1**, aux tailles par défaut
+(`variants.py`), avec les mêmes exécutables qu’à l’audit. Les écarts minimes
+d’instructions peuvent venir du démarrage ; les temps restent dispersés sur
+cet hôte partagé. Les mesures d’un seul passage de `compare.py` ne sont pas
+utilisées pour conclure sur le CPU.
+
+| Programme | Instructions avant → après | Δ instr. | CPU avant → après (ms) | Δ CPU |
+|---|---:|---:|---:|---:|
+| binary-trees | 156,028,780 → 165,586,130 | +6.125 % | 160.315 → 177.483 | +10.71 % |
+| blur | 96,721,766 → 96,721,763 | -0.000 % | 103.195 → 104.131 | +0.91 % |
+| calc | 329,037,800 → 329,237,811 | +0.061 % | 574.106 → 591.758 | +3.07 % |
+| fannkuch-redux | 137,603,626 → 137,785,059 | +0.132 % | 273.010 → 274.642 | +0.60 % |
+| fib | 236,886,701 → 236,886,693 | -0.000 % | 1059.237 → 1056.626 | -0.25 % |
+| graph | 10,342,195 → 10,342,220 | +0.000 % | 208.270 → 204.318 | -1.90 % |
+| interp | 17,180,456 → 17,180,453 | -0.000 % | 39.082 → 35.151 | -10.06 % |
+| lru | 42,253,247 → 42,253,259 | +0.000 % | 819.425 → 837.142 | +2.16 % |
+| mandelbrot | 440,663,042 → 440,663,067 | +0.000 % | 1248.037 → 1234.650 | -1.07 % |
+| nbody | 861,181,756 → 867,181,624 | +0.697 % | 1146.842 → 1118.314 | -2.49 % |
+| particles | 105,138,835 → 105,138,860 | +0.000 % | 144.993 → 138.802 | -4.27 % |
+| push | 135,092,768 → 135,092,779 | +0.000 % | 392.843 → 386.987 | -1.49 % |
+| records | 134,552,123 → 134,552,134 | +0.000 % | 405.406 → 408.548 | +0.78 % |
+| respond | 344,627,722 → 346,044,847 | +0.411 % | 675.998 → 632.269 | -6.47 % |
+| scene | 9,356,864 → 9,194,151 | -1.739 % | 42.152 → 43.357 | +2.86 % |
+| sexp | 184,602,668 → 184,602,665 | -0.000 % | 339.230 → 331.905 | -2.16 % |
+| sieve | 203,734,935 → 203,734,946 | +0.000 % | 1091.086 → 1104.646 | +1.24 % |
+| sort-objects | 161,223,444 → 137,908,278 | -14.461 % | 495.742 → 462.087 | -6.79 % |
+| spectral-norm | 530,737,431 → 530,737,406 | -0.000 % | 1029.929 → 1029.472 | -0.04 % |
+| string-building | 174,411,052 → 167,614,716 | -3.897 % | 199.211 → 193.236 | -3.00 % |
+| string-building-bytes | 177,364,862 → 175,420,476 | -1.096 % | 215.265 → 184.353 | -14.36 % |
+| string-building-growing | 224,642,352 → 224,199,171 | -0.197 % | 240.233 → 244.071 | +1.60 % |
+| strlist | 154,731,837 → 154,731,851 | +0.000 % | 354.374 → 359.015 | +1.31 % |
+| sum | 158,580,461 → 158,580,486 | +0.000 % | 303.644 → 295.174 | -2.79 % |
+| tree | 72,668,727 → 72,406,585 | -0.361 % | 145.166 → 142.727 | -1.68 % |
+| word-count | 247,576,942 → 211,119,787 | -14.726 % | 607.915 → 612.196 | +0.70 % |
+| words | 46,367,819 → 46,367,835 | +0.000 % | 127.589 → 120.833 | -5.30 % |
+
+Le bilan est mixte : `sort-objects` réduit les deux métriques, mais
+`binary-trees` garde une hausse d’instructions et de CPU liée à la nouvelle
+convention de retour. Le premier passage de cette convention ajoutait 10,23 %
+d’instructions ; la construction directe dans les boîtes récursives ramène
+l’écart à 6,13 %. Aucun contrôle n’est retiré pour effacer ce coût.
+
+Pour `word-count`, les instructions baissent de 14,73 %, mais la médiane finale
+passe de 607,9 à 612,2 ms (+0,7 %). Les répétitions précédentes face à la base
+fusionnée donnaient −1,4 % puis −5,6 % : on ne peut pas promettre un gain CPU.
+L’ancienne paire conserve un ralentissement dont la cause matérielle précise
+reste non isolée. Elle n’ajoute aucun tampon de collection dans la pile ; sa
+réservation de `main` diminue de 16 octets, et la simulation cache/branches
+n’indique pas de dégradation significative. Les compteurs `perf` sont interdits
+sur l’hôte. Voir aussi `native-goose-word-count-investigation.json`.
+
+Données brutes, tailles, empreintes des exécutables, commandes clang de Goose,
+oracles et **1 134 échantillons CPU** :
+`native-goose-stack-return-destinations-results.json`. Le compilateur de base
+a été construit depuis une archive de `591e050d` sous le `target/` de ce
+worktree ; les champs de révision de `compare.py` décrivent le dépôt courant,
+pas cette archive. La provenance explicite du JSON fait foi.
+
+Le dernier correctif distingue les symboles locaux par fichier, y compris
+lors de la résolution des globaux importés. Les 27 exécutables sont reconstruits
+après ce correctif et restent identiques aux exécutables mesurés.

@@ -1,0 +1,32 @@
+-- Capacity hints are evaluated on every target, where they are written
+-- (after the source), and their errors propagate.
+mutable trace = ""
+function note = (label: String, value: Integer<min = 0, max = 100>): Integer<min = 0, max = 100> mutates trace => {
+	trace += label
+	value
+}
+function source = (label: String): Array<Integer> mutates trace => {
+	trace += label
+	[1, 2]
+}
+function text = (label: String): String mutates trace => {
+	trace += label
+	"abc"
+}
+type Failure = Errors { Bad }
+function failing = (fail: Boolean): Integer<min = 0, max = 9> throws Failure.Bad => if fail { throw Failure.Bad } else { 4 }
+let a = Array.from(source("s"), capacity = note("c", 10))
+let s = String.from(text("t"), capacity = note("d", 10))
+let g = GrowingArray<Integer>.from(source("u"), capacity = note("e", 10))
+let m = Map.from([(note("k", 1), note("v", 2))], capacity = note("f", 10))
+let p = Pool.from(source("w"), capacity = note("h", 10))
+mutable r: Array<Integer> = []
+r.reserve(note("r", 5))
+mutable q = "x"
+q.reserve(note("q", 5))
+console.log(trace, a.length, s.length, g.length, m.size, p.size) -- prints: sctduekvfwhrq 2 3 2 1 2
+function attempt = (fail: Boolean): Integer throws Failure.Bad => {
+	let items = Array.from([1], capacity = try failing(fail))
+	items.length
+}
+console.log(attempt(false) catch _error => -1, attempt(true) catch _error => -1) -- prints: 1 -1

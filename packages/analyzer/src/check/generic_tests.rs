@@ -206,4 +206,10 @@ fn generic_parameters_are_written_between_angle_brackets() {
 	);
 	assert_eq!(symbol_type(&session, file, "a"), "Float");
 	assert_eq!(symbol_type(&session, file, "b"), "Integer");
+	// the second call is a call of the function returned, not of `makeAdder`
+	let analysis = session.analysis(file);
+	for text in ["makeAdder<Float>(5)(3)", "makeAdder(5)(3)"] {
+		let call = analysis.call(node(&session, file, text)).expect("a call");
+		assert!(matches!(call.callee, Callee::Value), "{text}");
+	}
 }

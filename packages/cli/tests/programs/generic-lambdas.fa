@@ -1,5 +1,4 @@
 -- Generic lambdas and generic function types: a function argument used at several types.
--- skip-target: native wasm native-freestanding (a parameter of a generic function type isn't instantiated per function argument natively yet)
 function identity = <Value>(value: Value): Value => value
 
 function applyToBoth = (transform: <Value>(value: Value) => Value, number: Integer, text: String) =>

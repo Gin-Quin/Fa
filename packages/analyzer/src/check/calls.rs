@@ -546,8 +546,13 @@ impl Walker<'_> {
 		};
 		let resolution = match self.view(callee) {
 			View::Name(_) => self.a.resolution(callee),
-			// `sum(Float)(…)`: the applied generic function
-			View::Call { callee: inner, .. } if self.a.instantiations.contains_key(&callee) => {
+			// `sum<Float>(…)`: the applied generic function (not the result
+			// of a call, `makeAdder(5)(3)`, whose instance is inferred)
+			View::Call { callee: inner, .. }
+				if self
+					.a
+					.has_flags(callee, crate::analysis::NodeFlags::GENERIC_APPLICATION) =>
+			{
 				match self.view(inner) {
 					// `library.firstOf<Integer>(…)`: a function of another file
 					View::Access { members, .. } => members

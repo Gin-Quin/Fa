@@ -1342,19 +1342,20 @@ static void test_tables(void) {
 		CHECK(table->capacity == 32 && table->used == 2);
 	}
 	CHECK(table_test_find(table, -1) == 0);
-	// `reserve` grows the index only, from its own hashes: no entry moves
+	// `reserve` grows the index, from its own hashes, and allocates the
+	// chunks of the entries to come: no entry moves
 	CHECK(fa_table_capacity(table) == 4);
 	TestTableEntry *kept = (TestTableEntry *)fa_table_entry(table, 0, sizeof(TestTableEntry));
 	fa_table_reserve(table, 100, sizeof(TestTableEntry), table_test_hash);
-	CHECK(fa_table_capacity(table) >= 101 && table->mask + 1 == 256 && table->capacity == 32);
+	CHECK(fa_table_capacity(table) >= 101 && table->mask + 1 == 256 && table->capacity == 128);
 	CHECK(table_test_find(table, -1) == 0 && kept->key == -1);
 	fa_table_reserve(table, 10, sizeof(TestTableEntry), table_test_hash);
-	CHECK(table->mask + 1 == 256);
+	CHECK(table->mask + 1 == 256 && table->capacity == 128);
 	// a full chunk leaves the list of chunks with a free entry, and returns to it
 	for (int64_t key = 0; key < 70; key += 1) {
 		table_test_insert(table, key);
 	}
-	CHECK(table->capacity == 96 && table->free == 3);
+	CHECK(table->capacity == 128 && table->free == 3);
 	table_test_kill(table, 5);
 	CHECK(table->free == 1 && table->chunks[0].next == 3);
 	CHECK(table_test_find(table, 5) < 0);
@@ -1903,10 +1904,46 @@ static void test_collection_destinations(void) {
 	*(int64_t *)fa_pool_at(pool, 0) = 42;
 	CHECK(fa_pool_seek(pool, 0) == 0 && *(int64_t *)fa_pool_at(pool, 0) == 42);
 	fa_pool_free(pool);
-	FaTable *table = fa_table_local(storage, 4, sizeof(TestTableEntry), 2);
-	CHECK(table->storage == 3 && table->length == 0);
-	fa_table_free(table, sizeof(TestTableEntry));
-	CHECK(allocated == before);
+	// a table in a frame: chunks of entries, dense entries, entries in the
+	// probe array; its entries are added without a block of the heap
+	for (int layout = 0; layout < 3; layout += 1) {
+		int64_t entry_size = layout == 0 ? (int64_t)sizeof(TestTableEntry)
+		                     : layout == 1 ? (int64_t)sizeof(TestTableEntry) | TABLE_DENSE
+		                                   : (int64_t)sizeof(TestKey32Entry) | TABLE_INLINE | TABLE_INLINE_KEY32;
+		FaTable *table = fa_table_local(storage, 4, entry_size);
+		CHECK(table->storage == 3 && table->length == 0);
+		for (int64_t key = 0; key < 4; key += 1) {
+			if (layout == 2) {
+				uint32_t narrow = (uint32_t)key;
+				TestKey32Entry *entry = fa_table_append(table, inline_key_hash(narrow), entry_size, 0, 0);
+				entry->key = narrow;
+				entry->value = narrow + 10;
+			} else {
+				TestTableEntry *entry = fa_table_append(table, table_test_hash(&key), entry_size, 0, table_test_hash);
+				entry->key = key;
+				entry->value = key + 10;
+			}
+		}
+		CHECK(table->length == 4);
+		for (int64_t key = 0; key < 5; key += 1) {
+			uint32_t narrow = (uint32_t)key;
+			int64_t position = layout == 2
+				? fa_table_find(table, inline_key_hash(narrow), &narrow, 0, entry_size, 4)
+				: fa_table_find(table, table_test_hash(&key), &key, table_test_equals, entry_size, 0);
+			CHECK((position >= 0) == (key < 4));
+			if (position >= 0 && layout == 2) {
+				CHECK(((TestKey32Entry *)fa_table_entry(table, position, entry_size))->value == narrow + 10);
+			} else if (position >= 0) {
+				CHECK(((TestTableEntry *)fa_table_entry(table, position, entry_size))->value == key + 10);
+			}
+		}
+		// a copy is an ordinary table of the heap
+		FaTable *copy = fa_table_copy(table, entry_size);
+		CHECK(copy->storage == 0 && copy->length == 4 && allocated > before);
+		fa_table_free(copy, entry_size);
+		fa_table_free(table, entry_size);
+		CHECK(allocated == before);
+	}
 }
 
 // Storage hints must allocate ahead, preserve addresses, and free every block.
@@ -1985,27 +2022,34 @@ static void test_storage_hints(void) {
         fa_segmented_free(formula, sizeof(int64_t), 3);
     }
     CHECK(allocated_bytes == bytes_before);
-    for (int mode = 0; mode < 3; mode += 1) {
-        FaTable *table = mode == 0 ? fa_table_new(4, sizeof(TestTableEntry))
-                         : mode == 1 ? fa_table_new_growing(4, sizeof(TestTableEntry))
-                                     : fa_table_new_map(4, sizeof(TestTableEntry));
-        fa_table_reserve_additional(table, 100, sizeof(TestTableEntry));
+    // chunks of entries, then dense entries: a reservation allocates the
+    // index and the entries, before and after deletions
+    for (int dense = 0; dense < 2; dense += 1) {
+        int64_t entry_size = (int64_t)sizeof(TestTableEntry) | (dense ? TABLE_DENSE : 0);
+        FaTable *table = fa_table_new(4, entry_size);
+        fa_table_reserve(table, 100, entry_size, table_test_hash);
         CHECK(fa_table_capacity(table) >= 100);
         reserved = allocated;
         for (int64_t i = 0; i < 100; i += 1) {
-            TestTableEntry *entry = fa_table_append(table, (uint64_t)i, sizeof(*entry), 0);
+            TestTableEntry *entry = fa_table_append(table, table_test_hash(&i), entry_size, 0, table_test_hash);
             entry->key = i;
+            // without deletions, the positions follow the insertions
+            CHECK(entry == (TestTableEntry *)fa_table_entry(table, i, entry_size));
         }
         CHECK(allocated == reserved);
-        if (mode != 1) {
-            for (int64_t i = 0; i < 50; i += 1) { fa_table_kill(table, i, sizeof(TestTableEntry)); }
-            fa_table_reserve_additional(table, 100, sizeof(TestTableEntry));
-            CHECK(fa_table_capacity(table) >= 150);
-            reserved = allocated;
-            for (int64_t i = 100; i < 200; i += 1) { fa_table_append(table, (uint64_t)i, sizeof(TestTableEntry), 0); }
-            CHECK(allocated == reserved);
+        for (int64_t i = 0; i < 50; i += 1) { fa_table_kill(table, table_test_hash(&i), i, entry_size); }
+        fa_table_reserve(table, 100, entry_size, table_test_hash);
+        CHECK(fa_table_capacity(table) >= 150);
+        reserved = allocated;
+        for (int64_t i = 100; i < 200; i += 1) {
+            TestTableEntry *entry = fa_table_append(table, table_test_hash(&i), entry_size, 0, table_test_hash);
+            entry->key = i;
         }
-        fa_table_free(table, sizeof(TestTableEntry));
+        CHECK(allocated == reserved && table->length == 150);
+        for (int64_t i = 0; i < 200; i += 1) {
+            CHECK((fa_table_find(table, table_test_hash(&i), &i, table_test_equals, entry_size, 0) >= 0) == (i >= 50));
+        }
+        fa_table_free(table, entry_size);
     }
     FaString string = owned_copy_with((const uint8_t *)"hello", 5, SIMPLE);
     fa_string_reserve(&string, 100);

@@ -251,13 +251,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Whether a function returning `repr` takes a buffer of its caller for
-	/// it. Maps and sets are always built on the heap: their entries and
-	/// their index have no layout for a fixed block yet (`design/todo.md`).
+	/// it.
 	pub(super) fn uses_collection_return(&self, repr: Repr) -> bool {
 		!self.tasks.asynchronous
 			&& matches!(
 				repr,
-				Repr::Array(_) | Repr::Growing(_) | Repr::Pool(_) | Repr::Columnar(_)
+				Repr::Array(_)
+					| Repr::Growing(_)
+					| Repr::Map(_) | Repr::Set(_)
+					| Repr::Pool(_) | Repr::Columnar(_)
 			)
 	}
 
@@ -452,7 +454,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Pure syntax constants only: evaluating a user function to discover a
 	/// constant here would change effects.
-	fn readonly_item(
+	pub(super) fn readonly_item(
 		&mut self,
 		node: NodeId,
 		repr: Repr,
@@ -603,6 +605,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		if matches!(repr, Repr::Pool(_) | Repr::Columnar(_)) {
 			return self.readonly_pool(node, repr, depth);
+		}
+		if matches!(repr, Repr::Map(_) | Repr::Set(_)) {
+			return self.readonly_table(node, repr, depth);
 		}
 		let (Repr::Array(item_type) | Repr::Growing(item_type)) = repr else {
 			return Ok(None);

@@ -113,6 +113,9 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 			("Array<Integer>", "[2, 3, 5]", "length"),
 			("GrowingArray<Integer>", "[2, 3, 5]", "length"),
 			("Map<String, Integer>", "[(\"abcdefghijk\", 3)]", "size"),
+			// entries in the probe array, with and without a tag
+			("Map<UInt16, UInt8>", "[(2, 3), (0, 1)]", "size"),
+			("Map<UInt32, UInt8>", "[(2, 3), (0, 1)]", "size"),
 			("GrowingMap<Integer, Integer>", "[(2, 3)]", "size"),
 			("Set<String>", "[\"x\", \"x\", \"é\"]", "size"),
 			("Set<Float>", "[0.0, -0.0, 1.5]", "size"),

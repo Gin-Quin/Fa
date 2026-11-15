@@ -50,13 +50,55 @@ const TABLE_DENSE: u64 = 1 << 40;
 const TABLE_INLINE: u64 = 1 << 41;
 /// A 32-bit key occupies its own presence word (`0` in a spare slot).
 const TABLE_INLINE_KEY32: u64 = 1 << 42;
+/// `TABLE_CHUNK_SLOTS` of the runtime: the entries of a chunk.
+pub(crate) const TABLE_CHUNK_SLOTS: u64 = 32;
+/// `storage` of a table in read-only data: nothing in it is dropped.
+pub(crate) const TABLE_STATIC: u64 = 2;
+
+/// What tells a constant key from the other keys of its literal: its bits
+/// (the canonical ones of a float), or its text.
+#[derive(PartialEq)]
+enum ConstantKey {
+	Word(u64),
+	Text(String),
+}
+
+/// The multiplier of the hashes: the golden ratio.
+const HASH_MULTIPLIER: u64 = 0x9E37_79B9_7F4A_7C15;
+
+/// `fa_hash_bytes` of the runtime.
+fn hash_bytes(bytes: &[u8]) -> u64 {
+	let mut hash = 0xcbf2_9ce4_8422_2325 ^ (bytes.len() as u64).wrapping_mul(HASH_MULTIPLIER);
+	let words = bytes.chunks_exact(8);
+	let rest = words.remainder();
+	for word in words {
+		let word = u64::from_le_bytes(word.try_into().expect("eight bytes"));
+		hash = (hash ^ word).wrapping_mul(HASH_MULTIPLIER);
+		hash ^= hash >> 29;
+	}
+	if !rest.is_empty() {
+		// the last 1 to 7 bytes, as one word
+		let word = if rest.len() >= 4 {
+			let low = u32::from_le_bytes(rest[..4].try_into().expect("four bytes"));
+			let high = u32::from_le_bytes(rest[rest.len() - 4..].try_into().expect("four bytes"));
+			u64::from(low) | (u64::from(high) << 32)
+		} else {
+			u64::from(rest[0])
+				| (u64::from(rest[rest.len() / 2]) << 8)
+				| (u64::from(rest[rest.len() - 1]) << 16)
+		};
+		hash = (hash ^ word).wrapping_mul(HASH_MULTIPLIER);
+	}
+	hash = (hash ^ (hash >> 33)).wrapping_mul(0xff51_afd7_ed55_8ccd);
+	hash ^ (hash >> 33)
+}
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	// ── layouts ─────────────────────────────────────────────────────────
 
 	/// `{ ptr chunks, i64 length, i64 used, i64 capacity, ptr index, i64
-	/// mask, i64 directory, i64 free, ptr entries, i64 room }`.
-	fn table_header(&self) -> StructType<'ctx> {
+	/// mask, i64 directory, i64 free, ptr entries, i64 room, i64 storage }`.
+	pub(crate) fn table_header(&self) -> StructType<'ctx> {
 		let i64 = self.context.i64_type();
 		let pointer = self.pointer_type();
 		self.context.struct_type(
@@ -71,9 +113,53 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				i64.into(),
 				pointer.into(),
 				i64.into(),
+				i64.into(),
 			],
 			false,
 		)
+	}
+
+	/// `TableChunk` of the runtime: `{ ptr entries, i32 live, i32 next }`.
+	pub(crate) fn table_chunk_type(&self) -> StructType<'ctx> {
+		let i32 = self.context.i32_type();
+		self.context
+			.struct_type(&[self.pointer_type().into(), i32.into(), i32.into()], false)
+	}
+
+	/// The slots of the index of a table of `count` entries (`index_slots`
+	/// of the runtime): at most half of them name an entry.
+	pub(crate) fn table_index_slots(count: u64) -> u64 {
+		(count * 2).max(8).next_power_of_two()
+	}
+
+	/// The bytes of a slot of the probe array of an inline table, and
+	/// whether its key is its own presence word (`inline_stride` of the
+	/// runtime).
+	pub(crate) fn inline_slot(&self, table: Table<'ctx>) -> (u64, bool) {
+		let key32 = matches!(table.key, Repr::Int(int) if int.bits == 32);
+		let entry = self.collection_data_size(table.entry.into());
+		(if key32 { entry } else { entry + 4 }, key32)
+	}
+
+	/// The bytes of the block `fa_table_local` lays a table of `capacity`
+	/// entries in: its header, then its probe array for inline entries,
+	/// else its index, its directory and its chunks of 32 entries.
+	fn table_local_bytes(&self, table: Table<'ctx>, capacity: u64) -> u64 {
+		let header = self.collection_data_size(self.table_header().into());
+		let slots = Self::table_index_slots(capacity);
+		if table.inline {
+			let (stride, key32) = self.inline_slot(table);
+			return header + (slots + u64::from(key32)) * stride;
+		}
+		let chunks = capacity.div_ceil(TABLE_CHUNK_SLOTS);
+		let directory = chunks * self.collection_data_size(self.table_chunk_type().into());
+		let entry = self.collection_data_size(table.entry.into());
+		let chunk = if entry > 0 {
+			TABLE_CHUNK_SLOTS * entry
+		} else {
+			16
+		};
+		((header + slots * 8 + directory + 15) & !15) + chunks * chunk
 	}
 
 	/// Whether the entries of maps of this type are dense: the whole program
@@ -172,6 +258,280 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return size.const_xor(flag);
 		}
 		size
+	}
+
+	// ── read-only literals ──────────────────────────────────────────────
+
+	/// The hash that [`Self::build_hash`] gives a constant key, and what
+	/// tells it from the other keys of its literal. `None` for the keys that
+	/// only the program hashes.
+	fn constant_key(
+		&self,
+		node: NodeId,
+		repr: Repr,
+		value: BasicValueEnum<'ctx>,
+	) -> Option<(u64, ConstantKey)> {
+		let mix = |mut value: u64| {
+			for multiplier in [0xff51_afd7_ed55_8ccd_u64, 0xc4ce_b9fe_1a85_ec53] {
+				value = (value ^ (value >> 33)).wrapping_mul(multiplier);
+			}
+			value ^ (value >> 33)
+		};
+		let mix_integer = |value: u64| {
+			let product = (value ^ (value >> 32)).wrapping_mul(HASH_MULTIPLIER);
+			product ^ (product >> 32)
+		};
+		Some(match repr {
+			Repr::Int(int) if int.bits <= 32 => {
+				let word = value.into_int_value().get_zero_extended_constant()?;
+				let product = word.wrapping_mul(HASH_MULTIPLIER);
+				let hash = if int.bits == 32 {
+					product.rotate_right(24)
+				} else {
+					product ^ (product >> 32)
+				};
+				(hash, ConstantKey::Word(word))
+			}
+			Repr::Int(int) if int.bits <= 64 => {
+				let value = value.into_int_value();
+				let word = if int.signed {
+					value.get_sign_extended_constant()? as u64
+				} else {
+					value.get_zero_extended_constant()?
+				};
+				(mix_integer(word), ConstantKey::Word(word))
+			}
+			Repr::Bool => {
+				let word = value.into_int_value().get_zero_extended_constant()?;
+				(mix_integer(word), ConstantKey::Word(word))
+			}
+			Repr::F64 | Repr::F32 | Repr::Percentage => {
+				// SameValueZero: `-0` is `0`, every `NaN` is one
+				let float = value.into_float_value().get_constant()?.0;
+				let bits = if float == 0.0 {
+					0
+				} else if float.is_nan() {
+					0x7ff8_0000_0000_0000
+				} else {
+					float.to_bits()
+				};
+				(mix(bits), ConstantKey::Word(bits))
+			}
+			Repr::Str => {
+				let text = self.constant_text(node)?;
+				(hash_bytes(text.as_bytes()), ConstantKey::Text(text))
+			}
+			_ => return None,
+		})
+	}
+
+	/// A map or a set literal of constants in read-only data, laid out as
+	/// the runtime lays out a table (`fa_runtime.c`, "Tables"): its header
+	/// ([`TABLE_STATIC`]), its index and its entries, each key where an
+	/// insertion would have put it. `None` when an item isn't a constant, or
+	/// a key isn't one [`Self::constant_key`] hashes.
+	pub(crate) fn readonly_table(
+		&mut self,
+		node: NodeId,
+		repr: Repr,
+		depth: usize,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		let View::Array { items } = self.view(node) else {
+			return Ok(None);
+		};
+		let table = self.table_of(repr)?;
+		let mut keys: Vec<(u64, ConstantKey)> = Vec::new();
+		let mut entries: Vec<Vec<BasicValueEnum<'ctx>>> = Vec::new();
+		for item in items.iter() {
+			let (key_node, value_node) = match table.value {
+				Some(_) => {
+					let View::Tuple { items: pair } = self.view(self.ungrouped(item)) else {
+						return Ok(None);
+					};
+					if pair.len() != 2 {
+						return Ok(None);
+					}
+					(pair.get(0).expect("a key"), pair.get(1))
+				}
+				None => (item, None),
+			};
+			let Some(key) = self.readonly_item(key_node, table.key, depth + 1)? else {
+				return Ok(None);
+			};
+			let Some(known) = self.constant_key(key_node, table.key, key) else {
+				return Ok(None);
+			};
+			let value = match (value_node, table.value) {
+				(Some(node), Some(repr)) => {
+					let Some(value) = self.readonly_item(node, repr, depth + 1)? else {
+						return Ok(None);
+					};
+					Some(value)
+				}
+				_ => None,
+			};
+			// a key written twice keeps its place, with its last value
+			let entry = match keys.iter().position(|(_, other)| *other == known.1) {
+				Some(position) => position,
+				None => {
+					keys.push(known);
+					entries.push(vec![key]);
+					entries.len() - 1
+				}
+			};
+			entries[entry].truncate(1);
+			entries[entry].extend(value);
+		}
+		let entries: Vec<_> = entries
+			.iter()
+			.map(|fields| table.entry.const_named_struct(fields))
+			.collect();
+		let count = keys.len() as u64;
+		let i64 = self.context.i64_type();
+		let i32 = self.context.i32_type();
+		let null = self.pointer_type().const_null();
+		let slots = Self::table_index_slots(count);
+		let mask = slots - 1;
+		let header = if table.inline {
+			let (_, key32) = self.inline_slot(table);
+			// a slot: the tag of the hash (0: empty) then the entry, or the
+			// entry alone when its 32-bit key says whether it is there (the
+			// key 0 then lives in one more slot, after the others)
+			let slot_type = if key32 {
+				table.entry
+			} else {
+				self.context
+					.struct_type(&[i32.into(), table.entry.into()], true)
+			};
+			let total = slots + u64::from(key32);
+			let mut probe = vec![None; total as usize];
+			let mut zero = false;
+			for ((hash, key), entry) in keys.iter().zip(entries) {
+				if key32 && *key == ConstantKey::Word(0) {
+					zero = true;
+					probe[slots as usize] = Some(entry);
+					continue;
+				}
+				let mut slot = hash & mask;
+				while probe[slot as usize].is_some() {
+					slot = (slot + 1) & mask;
+				}
+				probe[slot as usize] = Some(if key32 {
+					entry
+				} else {
+					let tag = match *hash as u32 {
+						0 => 0x8000_0000,
+						tag => tag,
+					};
+					slot_type.const_named_struct(&[
+						i32.const_int(u64::from(tag), false).into(),
+						entry.into(),
+					])
+				});
+			}
+			let probe: Vec<_> = probe
+				.into_iter()
+				.map(|slot| slot.unwrap_or_else(|| slot_type.const_zero()))
+				.collect();
+			let probe = self.readonly_global(
+				slot_type.const_array(&probe).into(),
+				"fa.collection.entries",
+			);
+			[
+				null.into(),
+				i64.const_int(count, false).into(),
+				i64.const_int(total, false).into(),
+				i64.const_int(u64::from(zero), false).into(),
+				probe.into(),
+				i64.const_int(mask, false).into(),
+				i64.const_zero().into(),
+				i64.const_zero().into(),
+				null.into(),
+				i64.const_zero().into(),
+				i64.const_int(TABLE_STATIC, false).into(),
+			]
+		} else {
+			// a slot of the index: the low half of the hash, then the
+			// position of the entry + 1, in the first empty slot from the
+			// one of the hash
+			let mut index = vec![0_u64; slots as usize];
+			for (position, (hash, _)) in keys.iter().enumerate() {
+				let mut slot = hash & mask;
+				while index[slot as usize] != 0 {
+					slot = (slot + 1) & mask;
+				}
+				index[slot as usize] = (hash & 0xffff_ffff) | ((position as u64 + 1) << 32);
+			}
+			let index: Vec<_> = index
+				.into_iter()
+				.map(|slot| i64.const_int(slot, false))
+				.collect();
+			let index = self.readonly_global(i64.const_array(&index).into(), "fa.collection.index");
+			// chunks of 32 entries, the last one with free entries; dense
+			// entries are one array, and their chunks only say which are live
+			let chunks = count.div_ceil(TABLE_CHUNK_SLOTS);
+			let capacity = chunks * TABLE_CHUNK_SLOTS;
+			let mut entries = entries;
+			entries.resize(capacity as usize, table.entry.const_zero());
+			let chunk_type = self.table_chunk_type();
+			let mut directory = Vec::new();
+			for (chunk, entries) in entries.chunks(TABLE_CHUNK_SLOTS as usize).enumerate() {
+				let live = (count - chunk as u64 * TABLE_CHUNK_SLOTS).min(TABLE_CHUNK_SLOTS);
+				let block = if table.dense {
+					null
+				} else {
+					self.readonly_global(
+						table.entry.const_array(entries).into(),
+						"fa.collection.entries",
+					)
+				};
+				directory.push(chunk_type.const_named_struct(&[
+					block.into(),
+					i32.const_int((1 << live) - 1, false).into(),
+					i32.const_zero().into(),
+				]));
+			}
+			let (directory, dense) = if chunks == 0 {
+				(null, null)
+			} else {
+				(
+					self.readonly_global(
+						chunk_type.const_array(&directory).into(),
+						"fa.collection.chunks",
+					),
+					if table.dense {
+						self.readonly_global(
+							table.entry.const_array(&entries).into(),
+							"fa.collection.entries",
+						)
+					} else {
+						null
+					},
+				)
+			};
+			let free = if count % TABLE_CHUNK_SLOTS == 0 {
+				0
+			} else {
+				chunks
+			};
+			let room = if table.dense { capacity } else { 0 };
+			[
+				directory.into(),
+				i64.const_int(count, false).into(),
+				i64.const_int(count, false).into(),
+				i64.const_int(capacity, false).into(),
+				index.into(),
+				i64.const_int(mask, false).into(),
+				i64.const_int(chunks, false).into(),
+				i64.const_int(free, false).into(),
+				dense.into(),
+				i64.const_int(room, false).into(),
+				i64.const_int(TABLE_STATIC, false).into(),
+			]
+		};
+		let header = self.table_header().const_named_struct(&header);
+		let pointer = self.readonly_global(header.into(), "fa.collection.static");
+		Ok(Some(Val::new(repr, pointer)))
 	}
 
 	// ── hashing and equality ────────────────────────────────────────────
@@ -603,8 +963,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let pointer = self
 			.call_value(new, &[capacity.into(), self.entry_size(table).into()])?
 			.into_pointer_value();
-		if table.dense && !table.inline && capacity.get_zero_extended_constant() != Some(0) {
-			// the dense entries too, up front
+		if !table.inline && capacity.get_zero_extended_constant() != Some(0) {
+			// the entries too, up front (an inline table has them in its
+			// probe array)
 			let hash_at = self.hash_at_function(table.key)?;
 			self.call_runtime(
 				"fa_table_reserve",
@@ -1030,7 +1391,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let table = self.table_of(repr)?;
 		let capacity = self.context.i64_type().const_int(items.len() as u64, false);
-		let pointer = self.table_new(table, capacity)?;
+		let bytes = self.table_local_bytes(table, items.len() as u64);
+		let local =
+			|this: &mut Self, buffer: PointerValue<'ctx>| -> Result<PointerValue<'ctx>, Error> {
+				Ok(this
+					.call_value(
+						this.runtime.function("fa_table_local")?,
+						&[
+							buffer.into(),
+							capacity.into(),
+							this.entry_size(table).into(),
+						],
+					)?
+					.into_pointer_value())
+			};
+		let pointer = if let Some(offer) = self.forwarded_collection_buffer(node) {
+			self.select_collection_buffer(offer, bytes, local, |this| {
+				this.table_new(table, capacity)
+			})?
+		} else if let Some(buffer) = self.collection_stack(node, bytes)? {
+			local(self, buffer)?
+		} else {
+			self.table_new(table, capacity)?
+		};
 		let result = self.fresh(Val::new(repr, pointer));
 		for item in items.iter() {
 			let mark = self.mark();
@@ -1068,7 +1451,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			self.end_statement(mark, None)?;
 		}
-		let _ = node;
 		Ok(result)
 	}
 
@@ -2084,6 +2466,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let owning =
 			self.needs_drop(table.key) || table.value.is_some_and(|value| self.needs_drop(value));
 		if owning {
+			// the keys and values of read-only data own nothing
+			let storage = builder.build_struct_gep(self.table_header(), pointer, 10, "")?;
+			let storage = builder
+				.build_load(self.context.i64_type(), storage, "")?
+				.into_int_value();
+			let constant = builder.build_int_compare(
+				IntPredicate::EQ,
+				storage,
+				storage.get_type().const_int(TABLE_STATIC, false),
+				"",
+			)?;
+			let owned = self.context.append_basic_block(function, "owned");
+			builder.build_conditional_branch(constant, none, owned)?;
+			builder.position_at_end(owned);
 			self.helper_entries(builder, function, pointer, table, |builder, entry| {
 				for (index, repr) in [(0, Some(table.key)), (1, table.value)] {
 					let Some(repr) = repr else { continue };

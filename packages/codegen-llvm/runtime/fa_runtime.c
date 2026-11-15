@@ -6983,6 +6983,9 @@ typedef struct {
 	// dense entries: the contiguous array, and the entries it has room for
 	uint8_t *entries;
 	int64_t room;
+	// 0: the heap, 2: read-only data, 3: a block of a function's frame. The
+	// last two are immutable, and none of their blocks is freed.
+	int64_t storage;
 } FaTable;
 
 /// In `entry_size`: the entries are dense (see above).
@@ -7519,11 +7522,54 @@ FA_EXPORT FaTable *fa_table_new(int64_t capacity, int64_t entry_size) {
 	table->free = 0;
 	table->entries = 0;
 	table->room = 0;
+	table->storage = 0;
 	if (entry_size & TABLE_INLINE) {
 		inline_new_slots(table, index_slots(capacity), entry_size);
 		return table;
 	}
 	table_new_index(table, index_slots(capacity));
+	return table;
+}
+
+/// An empty table with room for `capacity` entries in a block of the frame
+/// of its function (an immutable literal, `table_local_bytes` of
+/// `src/lower/tables.rs` gives the size of the block): its header, then its
+/// probe array for inline entries, else its directory, its index and its
+/// chunks of entries (one array for dense entries). The entries are then
+/// added like those of any table, without growing anything.
+FA_EXPORT FaTable *fa_table_local(void *buffer, int64_t capacity, int64_t entry_size) {
+	FaTable *table = buffer;
+	__builtin_memset(table, 0, sizeof(FaTable));
+	table->storage = 3;
+	uint8_t *next = (uint8_t *)buffer + sizeof(FaTable);
+	int64_t slots = index_slots(capacity);
+	table->index = next;
+	table->mask = slots - 1;
+	if (entry_size & TABLE_INLINE) {
+		int64_t count = inline_slots(slots - 1, entry_size);
+		__builtin_memset(next, 0, (size_t)(count * inline_stride(entry_size)));
+		table->used = count;
+		return table;
+	}
+	__builtin_memset(next, 0, (size_t)slots * sizeof(uint64_t));
+	next += (size_t)slots * sizeof(uint64_t);
+	int64_t chunks = (capacity + TABLE_CHUNK_SLOTS - 1) >> TABLE_CHUNK_BITS;
+	table->chunks = (TableChunk *)next;
+	table->directory = chunks;
+	next += (size_t)chunks * sizeof(TableChunk);
+	next = (uint8_t *)(((uintptr_t)next + 15) & ~(uintptr_t)15);
+	if (entry_size & TABLE_DENSE) {
+		table->entries = next;
+		table->room = chunks * TABLE_CHUNK_SLOTS;
+	}
+	for (int64_t chunk = 0; chunk < chunks; chunk += 1) {
+		table->chunks[chunk].entries =
+			entry_size & TABLE_DENSE ? 0 : next + (size_t)chunk * table_chunk_bytes(entry_size);
+		table->chunks[chunk].live = 0;
+		table->chunks[chunk].next = chunk + 1 < chunks ? (uint32_t)(chunk + 2) : 0;
+	}
+	table->free = chunks > 0 ? 1 : 0;
+	table->capacity = chunks * TABLE_CHUNK_SLOTS;
 	return table;
 }
 
@@ -7559,38 +7605,6 @@ static FA_COLD void table_dense_room(FaTable *table, int64_t entries, int64_t by
 	table->room = room;
 }
 
-/// `map.reserve(additional)`, `set.reserve(additional)`: room for
-/// `additional` more entries without a rehash. Only the index grows: the
-/// chunks of entries come with the entries, and never move.
-FA_EXPORT void fa_table_reserve(FaTable *table, int64_t additional, int64_t entry_size,
-                                uint64_t (*hash_at)(const void *)) {
-	if (additional <= 0) {
-		return;
-	}
-	if (additional > INT64_MAX - table->length) {
-		out_of_memory();
-	}
-	int64_t wanted = table->length + additional;
-	if (wanted < table->length ||
-	    wanted > (int64_t)(SIZE_MAX / 4) / (table_entry_bytes(entry_size) + 16)) {
-		out_of_memory();
-	}
-	int64_t slots = index_slots(wanted);
-	if (entry_size & TABLE_INLINE) {
-		if (slots > table->mask + 1) {
-			inline_grow(table, slots, entry_size);
-		}
-		return;
-	}
-	if (slots > table->mask + 1) {
-		table_grow_index(table, slots, hash_at, entry_size);
-	}
-	if (entry_size & TABLE_DENSE) {
-		table_dense_room(table, (wanted + TABLE_CHUNK_SLOTS - 1) & ~(int64_t)(TABLE_CHUNK_SLOTS - 1),
-		                 table_entry_bytes(entry_size));
-	}
-}
-
 /// Allocates one more chunk of entries, all free: the first of the list.
 static FA_COLD void table_new_chunk(FaTable *table, int64_t entry_size) {
 	int64_t chunk = table->capacity >> TABLE_CHUNK_BITS;
@@ -7615,6 +7629,54 @@ static FA_COLD void table_new_chunk(FaTable *table, int64_t entry_size) {
 	table->chunks[chunk].next = (uint32_t)table->free;
 	table->free = chunk + 1;
 	table->capacity += TABLE_CHUNK_SLOTS;
+}
+
+/// `map.reserve(additional)`, `set.reserve(additional)`: room for
+/// `additional` more entries without a rehash nor a new block. The index
+/// grows, and the chunks of the entries to come are allocated: the entries
+/// that are there never move.
+FA_EXPORT void fa_table_reserve(FaTable *table, int64_t additional, int64_t entry_size,
+                                uint64_t (*hash_at)(const void *)) {
+	if (additional <= 0) {
+		return;
+	}
+	if (additional > INT64_MAX - table->length) {
+		out_of_memory();
+	}
+	int64_t wanted = table->length + additional;
+	if (wanted < table->length ||
+	    wanted > (int64_t)(SIZE_MAX / 4) / (table_entry_bytes(entry_size) + 16)) {
+		out_of_memory();
+	}
+	int64_t slots = index_slots(wanted);
+	if (entry_size & TABLE_INLINE) {
+		if (slots > table->mask + 1) {
+			inline_grow(table, slots, entry_size);
+		}
+		return;
+	}
+	if (slots > table->mask + 1) {
+		table_grow_index(table, slots, hash_at, entry_size);
+	}
+	int64_t capacity = (wanted + TABLE_CHUNK_SLOTS - 1) & ~(int64_t)(TABLE_CHUNK_SLOTS - 1);
+	if (capacity <= table->capacity) {
+		return;
+	}
+	if (entry_size & TABLE_DENSE) {
+		table_dense_room(table, capacity, table_entry_bytes(entry_size));
+	}
+	while (table->capacity < capacity) {
+		table_new_chunk(table, entry_size);
+	}
+	// the chunks with a free entry, lowest first: a table without deletions
+	// keeps its insertion order
+	table->free = 0;
+	for (int64_t chunk = (table->capacity >> TABLE_CHUNK_BITS) - 1; chunk >= 0; chunk -= 1) {
+		if (table->chunks[chunk].live != TABLE_CHUNK_FULL) {
+			table->chunks[chunk].next = (uint32_t)table->free;
+			table->free = chunk + 1;
+		}
+	}
 }
 
 /// A new live entry for a key that is absent (`probe`: the result of its
@@ -7738,6 +7800,9 @@ FA_EXPORT void fa_table_clear(FaTable *table, int64_t entry_size) {
 
 /// Frees a table whose keys and values were dropped.
 FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
+	if (table->storage != 0) {
+		return;
+	}
 	if (entry_size & TABLE_INLINE) {
 		inline_free_slots(table->index, table->mask, entry_size);
 		fa_free(table, sizeof(FaTable), sizeof(int64_t));
@@ -7766,6 +7831,7 @@ FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
 FA_EXPORT FaTable *fa_table_copy(const FaTable *table, int64_t entry_size) {
 	FaTable *copy = fa_alloc(sizeof(FaTable), sizeof(int64_t));
 	*copy = *table;
+	copy->storage = 0;
 	if (entry_size & TABLE_INLINE) {
 		size_t bytes = (size_t)(inline_slots(table->mask, entry_size) * inline_stride(entry_size));
 		copy->index = fa_alloc(bytes, 8);

@@ -1,0 +1,100 @@
+-- opt-level: 0
+-- Maps and sets in read-only data and in the frame of their function:
+-- every layout of their entries (chunks, dense, in the probe array), every
+-- constant key, and the copies that a mutable owner takes.
+let lookup: Map<String, Integer> = [("short", 5), ("longer-than-eight", 8)]
+let unique: Set<String> = ["a", "a", "abcdefgh", "abcdefghijklmnop", "é"]
+console.log(lookup.get("short"), lookup.get("longer-than-eight"), lookup.get("none"), lookup.size, unique.size)
+-- prints: 5 8 none 2 4
+console.log(unique.includes("abcdefgh"), unique.includes("abcdefghijklmnop"), unique.includes("é"), unique.includes("missing"))
+-- prints: true true true false
+let numbers: Map<Integer, String> = [(1, "one"), (-2, "minus two"), (300000000000, "big"), (0, "zero")]
+console.log(numbers.get(1), numbers.get(-2), numbers.get(300000000000), numbers.get(0), numbers.get(7))
+-- prints: one minus two big zero none
+let small: Map<Integer<min = 0, max = 1000>, Integer<min = 0, max = 100>> = [(0, 1), (7, 2), (999, 3)]
+console.log(small.get(0), small.get(7), small.get(999), small.get(8), small.size)
+-- prints: 1 2 3 none 3
+let bytes: Map<Integer<min = 0, max = 200>, Boolean> = [(0, true), (200, false), (13, true)]
+console.log(bytes.get(0), bytes.get(200), bytes.get(13), bytes.get(14), bytes.size)
+-- prints: true false true none 3
+let floats: Set<Float> = [0.0, -0.0, 1.5, 2.5]
+console.log(floats.size, floats.includes(-0.0), floats.includes(1.5), floats.includes(3.5))
+-- prints: 3 true true false
+let flags: Map<Boolean, String> = [(true, "yes"), (false, "no")]
+console.log(flags.get(true), flags.get(false))
+-- prints: yes no
+let growing: GrowingMap<Integer, Integer> = [(2, 3), (4, 5)]
+let growingSet: GrowingSet<String> = ["x", "y"]
+console.log(growing.get(4), growing.size, growingSet.includes("y"), growingSet.includes("z"))
+-- prints: 5 2 true false
+mutable sum = 0
+for (key, value) in numbers { sum += key + value.length }
+console.log(sum)
+-- prints: 300000000018
+for word in unique { console.log(word) }
+-- prints: a
+-- prints: abcdefgh
+-- prints: abcdefghijklmnop
+-- prints: é
+mutable copy = lookup
+copy["new"] = 1
+copy.delete("short")
+console.log(copy.size, copy.get("new"), lookup.size, lookup.get("short"))
+-- prints: 2 1 2 5
+mutable grown = unique
+for index in 0..100 { grown.add("item {index}") }
+console.log(grown.size, unique.size, grown.includes("item 99"), grown.includes("é"))
+-- prints: 104 4 true true
+let many: Set<Integer> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40]
+mutable total = 0
+for value in many { total += value }
+console.log(many.size, total, many.includes(33), many.includes(41))
+-- prints: 40 820 true false
+mutable more = many
+more.add(41)
+more.delete(1)
+console.log(more.size, more.includes(41), more.includes(1), many.includes(1))
+-- prints: 40 true false true
+
+function local = (n: Integer, text: String): Integer => {
+	let map: Map<Integer, Integer> = [(n, n + 4), (n + 1, n + 5), (n, n + 6)]
+	let set: Set<Integer> = [n, n, n + 1]
+	let names: Map<String, String> = [(text, "{text} and a payload longer than an inline string"), ("other", text)]
+	let growingMap: GrowingMap<Integer, Integer> = [(n, n + 6)]
+	let growingSet: GrowingSet<Integer> = [n, n + 1]
+	let small: Map<Integer<min = 0, max = 1000>, Integer<min = 0, max = 100>> = [(0, 1), (7, 2)]
+	mutable sum = 0
+	for (key, value) in map { sum += key + value }
+	for value in set { sum += value }
+	for (name, value) in names { sum += name.length + value.length }
+	sum + (map.get(n) ?? 0) + (growingMap.get(n) ?? 0) + set.size + growingSet.size + (small.get(7) ?? 0) + (names.get(text) ?? "").length
+}
+console.log(local(10, "a key that is longer than twenty three bytes"))
+-- prints: 378
+function returned = (n: Integer): Map<Integer, Integer> => [(n, 1), (n + 1, 2)]
+function reads = (n: Integer): Integer => {
+	let map = returned(n)
+	(map.get(n) ?? 0) + (map.get(n + 1) ?? 0) + map.size
+}
+console.log(reads(5))
+-- prints: 5
+let kept = returned(8)
+console.log(kept)
+-- prints: [(8, 1), (9, 2)]
+let wide: Map<UInt32, UInt8> = [(0, 1), (7, 2), (4000000000, 3)]
+let noZero: Map<UInt32, UInt8> = [(5, 1), (13, 2)]
+console.log(wide.get(0), wide.get(7), wide.get(4000000000), wide.get(8), wide.size, noZero.get(0), noZero.get(13), noZero.size)
+-- prints: 1 2 3 none 3 none 2 2
+mutable widened = wide
+widened[9] = 9
+widened.delete(0)
+console.log(widened.size, widened.get(9), widened.get(0), wide.get(0), wide.size)
+-- prints: 3 9 none 1 3
+mutable smaller = small
+smaller[500] = 50
+console.log(smaller.size, smaller.get(500), small.get(500), small.size)
+-- prints: 4 50 none 3
+let empty: Map<String, Integer> = []
+let emptySet: Set<Integer> = []
+console.log(empty.size, empty.get("a"), emptySet.size, emptySet.includes(1))
+-- prints: 0 none 0 false

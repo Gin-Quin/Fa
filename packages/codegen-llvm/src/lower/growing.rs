@@ -342,6 +342,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let k = self.growing_k(&self.builder, array)?;
 		let may_be_negative = index_node.is_none_or(|index_node| self.may_be_negative(index_node));
 		let checked = self.flags(node).contains(NodeFlags::INDEX_CHECK);
+		// Test whether the whole live prefix is contiguous, independently of
+		// the index. LLVM can unswitch a stable loop on this condition, so its
+		// contiguous version keeps only the ordinary bounds check and GEP.
+		// A never-filled empty header has k = -1; mask that speculative shift.
+		let shift = self
+			.builder
+			.build_and(k, k.get_type().const_int(63, false), "")?;
+		let capacity = self.builder.build_left_shift(
+			k.get_type().const_int(1, false),
+			shift,
+			"first_capacity",
+		)?;
+		let contiguous =
+			self.builder
+				.build_int_compare(IntPredicate::ULE, length, capacity, "contiguous")?;
+		let first_slot = self
+			.builder
+			.build_struct_gep(self.segmented_type(), array, 6, "")?;
+		let first_items =
+			self.builder
+				.build_load(self.pointer_type(), first_slot, "first_items")?;
+		self.tag(
+			inkwell::values::BasicValue::as_instruction_value(&first_items).expect("a load"),
+			true,
+		)?;
 		let position = if checked && may_be_negative {
 			// `0 <= index < length` on the common path, as for arrays
 			// (`checked_item`): a negative index is counted from the end in
@@ -394,7 +419,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			position
 		};
+		let first = self.append_block("index_contiguous");
+		let segmented = self.append_block("index_segmented");
+		let join = self.append_block("index_item");
+		self.builder
+			.build_conditional_branch(contiguous, first, segmented)?;
+		self.builder.position_at_end(first);
+		let direct = unsafe {
+			self.builder.build_in_bounds_gep(
+				self.llvm_type(item),
+				first_items.into_pointer_value(),
+				&[position],
+				"",
+			)?
+		};
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(segmented);
 		let pointer = self.growing_at_with_k(&self.builder, array, item, position, k)?;
+		let fallback = self.builder.get_insert_block().expect("a block");
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(join);
+		let merged = self
+			.builder
+			.build_phi(self.pointer_type(), "indexed_item")?;
+		merged.add_incoming(&[(&direct, first), (&pointer, fallback)]);
+		let pointer = merged.as_basic_value().into_pointer_value();
+
 		Ok(Slot {
 			pointer,
 			repr: item,

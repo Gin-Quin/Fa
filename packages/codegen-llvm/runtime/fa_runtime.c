@@ -2870,26 +2870,29 @@ static __attribute__((noinline)) void segmented_extend_runs(void *target, int32_
 FA_EXPORT __attribute__((always_inline)) void fa_segmented_extend_to(
 	void *target, int32_t target_k, const FaSegmented *source, int64_t start, int64_t count,
 	int64_t item_size, int32_t k) {
-	k = source->k < 0 ? k : source->k;
-	if (count <= 0) {
-		return;
-	}
-	// inline: the items in one segment of the source
-	int64_t first;
-	int64_t segment = segment_of(start, k, &first);
-	if (start - first + count <= segment_size(segment, k)) {
-		const uint8_t *items = source->segment[segment] + (start - first) * item_size;
-		if (target_k < 0) {
-			FaArrayHeader *array = target;
-			fa_array_room(array, count, item_size);
-			copy_bytes(array->items + array->length * item_size, items, (size_t)(count * item_size));
-			array->length += count;
-		} else {
-			fa_segmented_append(target, items, count, item_size, target_k);
+	if (count <= 0) { return; }
+	// The checked range is nonempty, so the source has an initialized k.
+	k = source->k;
+	const uint8_t *items;
+	if ((uint64_t)start + (uint64_t)count <= ((uint64_t)1 << k)) {
+		items = source->inline_segment[0] + start * item_size;
+	} else {
+		int64_t first;
+		int64_t segment = segment_of(start, k, &first);
+		if (start - first + count > segment_size(segment, k)) {
+			segmented_extend_runs(target, target_k, source, start, count, item_size, k);
+			return;
 		}
-		return;
+		items = source->segment[segment] + (start - first) * item_size;
 	}
-	segmented_extend_runs(target, target_k, source, start, count, item_size, k);
+	if (target_k < 0) {
+		FaArrayHeader *array = target;
+		fa_array_room(array, count, item_size);
+		copy_bytes(array->items + array->length * item_size, items, (size_t)(count * item_size));
+		array->length += count;
+	} else {
+		fa_segmented_append(target, items, count, item_size, target_k);
+	}
 }
 
 /// The first item of the segment holding item `index`, and in `*end` the
@@ -2934,11 +2937,12 @@ FA_EXPORT int64_t fa_segmented_next_byte(const FaSegmented *array, int64_t offse
 /// `growing = []`: no item left (the caller dropped those owning memory),
 /// the segments kept for the next pushes.
 FA_EXPORT void fa_segmented_reset(FaSegmented *array, int64_t item_size, int32_t k) {
-	k = array->k < 0 ? k : array->k;
 	array->length = 0;
 	if (array->segments > 0) {
-		array->cursor = array->segment[0];
-		array->end = array->segment[0] + segment_size(0, k) * item_size;
+		// An allocated first segment always has an initialized k.
+		k = array->k;
+		array->cursor = array->inline_segment[0];
+		array->end = array->cursor + segment_size(0, k) * item_size;
 	} else {
 		array->cursor = 0;
 		array->end = 0;

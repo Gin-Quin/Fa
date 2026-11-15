@@ -978,6 +978,25 @@ console.log(items.length)
 	}
 
 	#[test]
+	fn growing_index_loops_load_the_first_segment_before_the_loop() {
+		let ir = optimized_ir(
+			"growing-index-loop",
+			"function write = (items: GrowingArray<Byte>, count: Integer) throws IndexError mutates items => {\nmutable position = count - 1\nwhile position >= 0 {\ntry items[position] = 7\nposition -= 1\n}\n}\nmutable a: GrowingArray<Byte> = [1, 2, 3]\nmutable b: GrowingArray<Byte> = [1, 2, 3, 4]\ntry write(a, arguments.length)\ntry write(b, arguments.length)\nconsole.log(a, b)\n",
+		);
+		assert!(ir.contains("contiguous"), "{ir}");
+		assert!(ir.contains("first_items"), "{ir}");
+		for block in ir.split("\n\n") {
+			let label = block.lines().next().unwrap_or("");
+			if label.starts_with("while_body") && !label.contains(".lr.ph") {
+				assert!(
+					!block.contains("first_items") || !block.contains(" = load ptr"),
+					"{block}"
+				);
+			}
+		}
+	}
+
+	#[test]
 	fn growing_pushes_advance_a_cursor_in_registers() {
 		// a push onto a `GrowingArray` compares its cursor with the end of the
 		// segment, stores and advances; only the cold path finds a segment

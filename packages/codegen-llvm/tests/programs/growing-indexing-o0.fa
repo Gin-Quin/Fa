@@ -1,0 +1,45 @@
+-- opt-level: 0
+-- Checked indexing before and after growth, with negative indices and an empty header.
+-- asynchronous: false
+function read = (items: GrowingArray<Integer>, index: Integer): Integer throws IndexError => try items[index]
+function write = (items: GrowingArray<Integer>, index: Integer, value: Integer) throws IndexError mutates items[index] => {
+	try items[index] = value
+}
+mutable items: GrowingArray<Integer> = []
+read(items, 0) catch error => console.log(error) -- prints: IndexError { index = 0, length = 0 }
+for i in 0..16 {
+	items.push(i)
+}
+use first = try items[0]
+use second = try items[9]
+-- The twelfth segment reallocates the directory, but neither reference moves.
+for i in 16..10000 {
+	items.push(i)
+	try write(items, -1, i * 2)
+}
+console.log(first, second, try read(items, -1)) -- prints: 0 9 19998
+mutable total = 0
+for i in 0..items.length {
+	try write(items, i, try read(items, i) + 1)
+	total += try read(items, i)
+}
+console.log(first, second, total) -- prints: 1 10 99999880
+read(items, -10001) catch error => console.log(error) -- prints: IndexError { index = -10001, length = 10000 }
+read(items, 10000) catch error => console.log(error) -- prints: IndexError { index = 10000, length = 10000 }
+-- Assignment can replace k and the first segment between loop iterations.
+for round in 0..3 {
+	items = []
+	items.reserve(1 + round * 100)
+	items.push(round)
+	console.log(try read(items, 0))
+}
+-- prints: 0
+-- prints: 1
+-- prints: 2
+-- Immutable static and runtime frame storage use the same indexing path.
+function local = (value: Integer): Integer throws IndexError => {
+	let frame: GrowingArray<Integer> = [value, value + 1, value + 2]
+	try read(frame, -1)
+}
+let fixed: GrowingArray<Integer> = [10, 20, 30]
+console.log(try read(fixed, -2), try local(40)) -- prints: 20 42

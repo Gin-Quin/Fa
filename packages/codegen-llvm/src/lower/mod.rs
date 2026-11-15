@@ -719,6 +719,24 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.build_load(self.llvm_type(slot.repr), slot.pointer, "")?;
 		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&value) {
 			self.tag(instruction, false)?;
+			if matches!(slot.repr, Repr::Growing(_)) {
+				// Even an empty growing array owns a complete initialized header.
+				// This lets LICM speculate its inline-pointer loads before a loop;
+				// it says nothing about whether the header can change in that loop.
+				let bytes = self.collection_data_size(self.segmented_type().into());
+				for (kind, value) in [("dereferenceable", bytes), ("align", 8)] {
+					instruction
+						.set_metadata(
+							self.context.metadata_node(&[self
+								.context
+								.i64_type()
+								.const_int(value, false)
+								.into()]),
+							self.context.get_kind_id(kind),
+						)
+						.map_err(|error| Error::Llvm(error.to_string()))?;
+				}
+			}
 		}
 		let value = self.freeze_union_padding(&self.builder, slot.repr, value);
 		Ok(Val::new(slot.repr, value))

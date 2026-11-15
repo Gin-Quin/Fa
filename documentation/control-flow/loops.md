@@ -73,7 +73,7 @@ The values extracted by a `for` loop are **references** to the elements of the c
 | a `Map`, a `GrowingMap`, with `(key, value)` | a read-only reference to the key, and a reference to the value, mutable if the map is |
 | a `Set`, a `GrowingSet` | read-only references: changing an element would change its place in the set |
 | a destructured element, like `{ name, age }` | references to the fields, mutable if the collection is |
-| a range, a `String` (even a `mutable` one) | immutable copies (an `Integer`, a `Character`) |
+| a range, a `String` (even a `mutable` one) | immutable copies (an `Integer`; a `String` holding one [code point](/values/strings#iterating-over-a-string)) |
 | an iterator | the values the iterator gives |
 
 Writing through a loop variable is a mutation of the collection: in a function, iterating a parameter and writing to its elements needs the effect `mutates players` (or a precise path like `mutates players[..].score`, see [mutating parameters](/functions/defining-functions#mutating-parameters)).

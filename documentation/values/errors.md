@@ -63,6 +63,7 @@ Fa also provides built-in error types for operations that can fail:
 | `DivisionByZero` | — | integer `//` and `%%` when the divisor is not provably non-zero (`/` never throws) |
 | `ArithmeticError` | `message: String` | `checked*` arithmetic methods, like `checkedAdd`, when the result does not fit; a conversion to a smaller integer type (`Int8(value)`, `Integer(bigInteger)`) or from a float (`Integer.round(value)`) that is not proven to fit; an integer `**` with an exponent not proven non-negative; a shift by an unproven amount |
 | `ParseError` | `input: String`, `message: String` | parsing text, like `Integer.parse(text)` |
+| `Utf8Error` | `position: Integer`, the index of the first invalid byte | decoding bytes that are not valid UTF-8 with [`String.fromUtf8(bytes)`](/values/bytes#text-and-bytes) |
 | `Cancelled` | — | awaiting a [cancelled task](/advanced/concurrency#cancelling-a-task) |
 
 Each of them is an `Errors` type with a single member of the same name, so `IndexError` is both the type to declare (`throws IndexError`) and the pattern to match (`when error is { IndexError => ... }`).
@@ -174,7 +175,7 @@ function printScore = () => {
 }
 ```
 
-`catch` covers every failing call of its left operand: in `parse(read(path)) catch error => fallback`, it handles the errors of `read` and of `parse`, and `error` has the union of their error types. The handler extends as far right as possible, like the body of a lambda; a handler written with braces is a block. The handler's value has the type of the left operand when it fits (`text[index] catch error => "?"` is a `Character`), like the branches of an [`if`](/control-flow/conditionals). Writing `try` and `catch` on the same expression is an error, and so is a `try` inside the left operand of a `catch`: the `catch` would handle the errors that `try` means to propagate.
+`catch` covers every failing call of its left operand: in `parse(read(path)) catch error => fallback`, it handles the errors of `read` and of `parse`, and `error` has the union of their error types. The handler extends as far right as possible, like the body of a lambda; a handler written with braces is a block. The handler's value has the type of the left operand when it fits (`text[index] catch error => "?"` is a `String`), like the branches of an [`if`](/control-flow/conditionals). Writing `try` and `catch` on the same expression is an error, and so is a `try` inside the left operand of a `catch`: the `catch` would handle the errors that `try` means to propagate.
 
 A `try` or a `catch` on an expression that can't fail is a warning, not an error, so that code keeps compiling when a function it calls stops failing.
 

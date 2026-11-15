@@ -19,7 +19,7 @@ type Totals = {
 let n = try Integer.parse(arguments.get(0) ?? "3000000")
 
 mutable totals = Totals {}
-mutable output = ""
+mutable output = String.from("", capacity = blockSize * 64)
 mutable lastEntry = ""
 for i in 0..n {
 	let label = labels[i %% labels.length]

@@ -3,7 +3,8 @@
 
 Builds both languages, retains optimized LLVM IR/C/assembly, checks against Rust,
 then alternates timed runs. Outputs live under the ignored audit/build directory.
-Use --directory to retain a baseline before rebuilding the compiler.
+Use --directory to retain a baseline before rebuilding the compiler. VARIANTS names other
+Fa versions of a benchmark (`string-building-bytes`), compared with the same Goose and Rust.
 """
 
 import argparse
@@ -26,17 +27,26 @@ import artifacts
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULTS = {
     "binary-trees": 17, "blur": 3000, "calc": 400000, "fannkuch-redux": 10,
-    "fib": 42, "graph": 100000, "interp": 21, "lru": 2000000,
+    "fib": 42, "graph": 100000, "growing-index": 1000000, "interp": 21, "lru": 2000000,
     "mandelbrot": 4000, "nbody": 15000000, "particles": 300000,
     "push": 32000000, "records": 4000000, "respond": 400000, "scene": 12,
     "sexp": 20000, "sieve": 100000000, "sort-objects": 1000000,
     "spectral-norm": 4000, "string-building": 3000000, "strlist": 2000000,
     "sum": 32000000, "tree": 21, "word-count": 5000000, "words": 500000,
 }
+# Other Fa versions of a benchmark, measured against the same Goose and Rust programs:
+# name -> (benchmark directory, Fa source). `string-building-bytes` builds bytes in an
+# `Array<Byte>`, like the Goose port; `string-building-growing` in `GrowingArray<Byte>`, whose
+# items never move, like Goose's `u8[>..]` arrays.
+VARIANTS = {"string-building-bytes": ("string-building", "bytes.fa"),
+            "string-building-growing": ("string-building", "growing.fa"),
+            "growing-index-array": ("growing-index", "array.fa")}
+DEFAULTS.update({name: DEFAULTS[directory] for name, (directory, _) in VARIANTS.items()})
 AUDIT = {name: max(1, size // 10) for name, size in DEFAULTS.items()}
 AUDIT.update({"binary-trees": 14, "fib": 35, "interp": 17, "scene": 9,
               "tree": 17, "fannkuch-redux": 9, "words": 100000,
-              "blur": 1000, "mandelbrot": 1000, "spectral-norm": 1000})
+              "blur": 1000, "mandelbrot": 1000, "spectral-norm": 1000,
+              "growing-index": 1000000, "growing-index-array": 1000000})
 GOOSE_SUITE = ("binary-trees", "blur", "calc", "graph", "interp", "lru", "particles",
                "push", "records", "respond", "scene", "sexp", "strlist", "sum", "tree", "words")
 SECONDARY = tuple(sorted(DEFAULTS.keys() - set(GOOSE_SUITE)))
@@ -164,9 +174,21 @@ def toolchain():
     return {"fa": fa, "goose": goose, "rust": rust}
 
 
+def fa_source(name):
+    """The benchmark directory and the Fa source of a benchmark or a variant."""
+    directory, source = VARIANTS.get(name, (name, "main.fa"))
+    return ROOT / "benchmarks" / directory, source
+
+
 def plan(name, size, compilers, runtime_size=False):
-    source = ROOT / "benchmarks" / name
-    fa = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*.fa")}
+    source, fa_file = fa_source(name)
+    if name in VARIANTS:
+        # a variant is one file, built as the benchmark's `main.fa`
+        fa = {"main.fa": (source / fa_file).read_bytes()}
+    else:
+        fa = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*.fa")
+              if path.name not in {variant for directory, variant in VARIANTS.values()
+                                   if directory == name}}
     text = fa["main.fa"].decode()
     fa_constant = FA_SIZE_LINE.search(text) is not None
     fa["main.fa"] = FA_SIZE_LINE.sub(lambda m: f"{m[1]}{size}{m[3]}", text, count=1).encode()
@@ -282,6 +304,7 @@ def main():
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--default-sizes", action="store_true")
+    parser.add_argument("--size", type=int, help="Override the selected sizes (growing-index: 16, 1000 or 1000000)")
     parser.add_argument("--profile", action="store_true")
     parser.add_argument("--goose-runtime-size", action="store_true",
                         help="Read BENCH_N from argv in generated Goose copies, keeping checkfree")
@@ -291,6 +314,8 @@ def main():
     parser.add_argument("--report", default="results.json", help="JSON filename inside --directory")
     parser.add_argument("--prepare-only", action="store_true", help="Build and validate without timing")
     args = parser.parse_args()
+    if args.size is not None and args.size < 1:
+        parser.error("--size must be positive")
     if args.runs < 1:
         parser.error("--runs must be positive")
     if args.rebuild_fa and not args.reuse:
@@ -315,7 +340,8 @@ def main():
                .decode().strip(), "working_tree_dirty": bool(execute(
                    ["git", "-c", f"safe.directory={ROOT}", "status", "--porcelain"])),
                "runs": args.runs, "measurements": "preparation" if args.prepare_only else "timing",
-               "size_set": "default" if args.default_sizes else "audit", "benchmarks": {}}
+               "size_set": "override" if args.size is not None
+               else "default" if args.default_sizes else "audit", "benchmarks": {}}
     results["command_line"] = sys.argv
     results["runner_source_sha256"] = artifacts.source_hash({
         path.name: path.read_bytes() for path in (Path(__file__), Path(artifacts.__file__))})
@@ -324,7 +350,7 @@ def main():
     results["selection"] = list(names)
     results["compilers"] = compilers
     for name in names:
-        size = (DEFAULTS if args.default_sizes else AUDIT)[name]
+        size = args.size if args.size is not None else (DEFAULTS if args.default_sizes else AUDIT)[name]
         directory = args.directory / name
         try:
             build_plan = plan(name, size, compilers, args.goose_runtime_size)

@@ -21,6 +21,8 @@ An empty map needs its type:
 mutable inventory: Map<String, Integer> = []
 ```
 
+Storage can be planned with `from(source, capacity = n)`, the read-only `capacity` property and `reserve(additional)`. See [capacity and reservation](/collections/arrays#capacity-and-reservation) for the shared rules and effects.
+
 ## Access and update
 
 Reading a key with `map[key]` is checked at compile time when the compiler can prove the key is present. Otherwise, it `throws KeyNotFound`, so a missing key can never be mistaken for a value. Propagate the error with `try`, or handle it with `catch` (see [errors](/values/errors)):
@@ -192,7 +194,7 @@ use score = scores.get("ana") -- declared again
 | `reserve(additional)` | `mutates self.capacity`: it moves no value |
 | `map[key]`, `get`, `includes`, `size`, `capacity`, `keys`, `values` | none |
 
-Like every collection, a map takes a `capacity` in `from` (`Map<String, Integer>.from([], capacity = 1000)`), has a read-only `capacity` property and a `reserve(additional)` method, which makes room for `additional` more keys (see [capacity](/collections/arrays#capacity)). Since the values live in stable slots, `reserve` invalidates nothing.
+A map created with `Map<String, Integer>.from([], capacity = 1000)` has room for 1000 keys, and `reserve(additional)` makes room for `additional` more. Since the values live in stable slots, `reserve` invalidates nothing.
 
 :::note
 Stable slots cost one indirection per lookup, compared to a hash table storing its values inline. In exchange, references into a map survive insertions.
@@ -233,6 +235,12 @@ If you find yourself writing `Map<String, Item>` with a fixed set of keys, use a
 ## Implementation details
 
 ### Native
+
+- **Returned collections.** In synchronous compilation mode, collection functions receive an optional bounded caller buffer and return the final header pointer. Fresh literals, supported transforms and proven moved immutable locals forward it through calls and return branches. A mutable or escaping owner supplies no frame buffer, so construction starts on the heap. Constant returned locals can share read-only storage with a proven immutable caller. Arrays and growing arrays construct aggregate-returning literal items directly in their final slots; completed items still drop on an error. Object-columnar chunks retain their larger heap layout.
+
+- **Reviewed storage limits.** The collection byte budget is 2 KiB; the total is 4 KiB per non-recursive frame and 512 bytes in a resolved direct-call cycle (including methods and generic instances). Literals reserve their exact aligned size. Non-recursive calls receive at most `min(2 KiB, remaining frame budget)`. In a direct-call cycle, all call-result offers share 128 bytes per frame inside the 512-byte total: each receives `min(128 − offer bytes reserved, 512 − collection bytes reserved)`, with no offer below 64 bytes. Exact literals count against the total in either lowering order; forwarded offers reserve no frame bytes. The inclusive 2× per-frame gate covers call-result offers (one and four live splits): unchecked depths must satisfy `baseline_depth ≤ 2 × final_depth + 8`, with eight frames for fixed setup overhead and native measurements under a 256 KiB stack limit. Leak-checked depths are informational; exact literals are excluded. Indirect recursion is not detected. Larger objects/tuples use caller output slots; a layout with at most two scalar leaves and 16 bytes on 64-bit targets, or exactly one scalar leaf on wasm32, returns by value. Small throwing results keep `{ value, error }`; register results store directly into their final owner. An output marked `noalias` is unreachable from arguments, captures and globals during the call. Native x86-64/aarch64 functions probe crossed stack pages.
+
+- **Immutable literals (current LLVM backend).** A constant `let` literal with supported scalar keys uses read-only entries, index and chunk directory. A runtime local `let` literal can put all those blocks in a fixed frame buffer (2 KiB per collection, 4 KiB per non-recursive function); the ordinary stable chunks are preserved. Larger, captured or asynchronous constructions keep heap storage. Static drops do nothing; frame drops destroy keys and values, and free no blocks. Static values copy when another owner needs independent storage. Runtime literals with owning or unknown uses start on the heap, avoiding frame-to-heap copy-out.
 
 The map is a **compact dict**, the design of Python's `dict` since 3.6 and of Zig's `ArrayHashMap`, with a Swiss-table index.
 

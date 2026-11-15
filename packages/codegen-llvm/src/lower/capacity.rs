@@ -6,11 +6,13 @@
 //! its heap block, its length when it shares static bytes); `reserve` gives an
 //! owned block room for that many more bytes (`fa_string_reserve`). An array
 //! reserves items, a map or a set entries (`fa_table_reserve`). A growing
-//! array, a pool and a columnar never move their elements and grow by
-//! chunks: their capacity is their size, and `reserve` is a hint.
+//! array, a pool and a columnar never move their elements: their capacity
+//! counts the segments or the chunks they hold, and `reserve` allocates the
+//! ones that are missing (`fa_segmented_reserve`, `fa_pool_reserve`).
 
 use fa_analyzer::analysis::{Argument, CallInfo};
 use fa_analyzer::ids::NodeId;
+use inkwell::values::IntValue;
 
 use crate::error::Error;
 use crate::lower::Lowering;
@@ -62,9 +64,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Growing(_) => {
 				let array = value.value.expect("an array").into_pointer_value();
-				self.growing_length(&self.builder, array)?
+				let capacity = self.runtime.function("fa_segmented_capacity")?;
+				self.call_value(capacity, &[array.into()])?.into_int_value()
 			}
-			Repr::Pool(_) | Repr::Columnar(_) => self.pool_size(value)?.int(),
+			Repr::Pool(_) | Repr::Columnar(_) => {
+				let pool = value.value.expect("a pool").into_pointer_value();
+				let capacity = self.runtime.function("fa_pool_capacity")?;
+				self.call_value(capacity, &[pool.into()])?.into_int_value()
+			}
 			_ => return Err(self.unsupported(node.index(), "the capacity of this value")),
 		};
 		Ok(Val::new(Repr::Int(IntRepr::I64), capacity))
@@ -141,11 +148,42 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					],
 				)?;
 			}
-			// elements that never move: they grow by chunks, `reserve` is a hint
-			Repr::Growing(_) | Repr::Pool(_) | Repr::Columnar(_) => {}
+			Repr::Growing(_) | Repr::Pool(_) | Repr::Columnar(_) => {
+				self.reserve_stable(receiver, additional_value, node)?;
+			}
 			_ => return Err(self.unsupported(node.index(), "`reserve` on this value")),
 		}
 		Ok(Val::void())
+	}
+
+	/// Room for `additional` more elements in a collection that never moves
+	/// them (a growing array, a pool, a columnar): the segments or the chunks
+	/// that are missing. Also the `capacity` of their `from`.
+	pub(crate) fn reserve_stable(
+		&self,
+		receiver: Val<'ctx>,
+		additional: IntValue<'ctx>,
+		node: NodeId,
+	) -> Result<(), Error> {
+		let pointer = receiver.value.expect("a collection").into_pointer_value();
+		match receiver.repr {
+			Repr::Growing(item) => {
+				let item = self.item_repr(item, node)?;
+				self.call_runtime(
+					"fa_segmented_reserve",
+					&[
+						pointer.into(),
+						additional.into(),
+						self.item_size_const(item).into(),
+						self.segment_k(item).into(),
+					],
+				)
+			}
+			Repr::Pool(_) | Repr::Columnar(_) => {
+				self.call_runtime("fa_pool_reserve", &[pointer.into(), additional.into()])
+			}
+			_ => Err(self.unsupported(node.index(), "`reserve` on this value")),
+		}
 	}
 
 	/// `String.from(text, capacity = n)`: a copy of the text with room for

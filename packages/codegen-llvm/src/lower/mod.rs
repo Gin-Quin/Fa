@@ -29,9 +29,11 @@ mod calls;
 mod capacity;
 mod chunks;
 mod closures;
+mod collection_storage;
 mod columns;
 mod compose;
 mod constants;
+mod copies;
 mod decimal;
 mod destination;
 mod division;
@@ -60,6 +62,7 @@ pub(crate) mod program;
 mod reactivity;
 mod references;
 mod relations;
+mod return_destinations;
 mod tables;
 mod tasks;
 mod testing;
@@ -89,7 +92,7 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, IntType, StructType};
+use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum, IntType, StructType};
 use inkwell::values::{BasicMetadataValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, IntPredicate};
 use rustc_hash::FxHashMap;
@@ -127,6 +130,10 @@ pub(crate) struct Function<'ctx> {
 	/// Read-only aggregate parameters borrowed from the caller's storage.
 	borrowed: Vec<bool>,
 	ret: Repr,
+	/// A synchronous object/tuple result slot precedes ordinary parameters
+	/// (after the environment, when present).
+	return_slot: bool,
+	return_collection: bool,
 	/// Whether it throws: it returns `{ result, ptr error }` (or the error alone).
 	throws: bool,
 	/// A lambda, or a local function using locals of the function around it:
@@ -171,6 +178,20 @@ struct LoopFrame<'ctx> {
 
 /// The function being lowered.
 struct Frame<'ctx> {
+	return_slot: Option<Slot<'ctx>>,
+	nrvo_local: Option<(FileId, SymbolId)>,
+	return_buffer: Option<collection_storage::CollectionBuffer<'ctx>>,
+	collection_result_root: Option<NodeId>,
+	destination: Option<(NodeId, Slot<'ctx>)>,
+	early_destination: Option<(PointerValue<'ctx>, Repr)>,
+	/// Fixed collection storage reserved in this function's entry block.
+	collection_bytes: u64,
+	collection_budget: u64,
+	/// Speculative call-result storage, separate from exact literal blocks.
+	collection_offer_bytes: u64,
+	/// Avoid repeated inline-byte snapshots in recursive frames.
+	readonly_strings: rustc_hash::FxHashSet<PointerValue<'ctx>>,
+	collection_locals: rustc_hash::FxHashSet<(FileId, SymbolId)>,
 	function: FunctionValue<'ctx>,
 	/// Buffers owned by this frame; their pointers never move between locals.
 	frame_strings: FxHashMap<(FileId, SymbolId), frame_strings::FrameString<'ctx>>,
@@ -273,6 +294,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	small_mutable_strings: FxHashMap<FileId, rustc_hash::FxHashSet<SymbolId>>,
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
+	readonly_collections: FxHashMap<(FileId, NodeId, Repr), Val<'ctx>>,
+	/// Source functions in a resolved direct-call cycle, shared by instances.
+	recursive_functions: rustc_hash::FxHashSet<(FileId, NodeId)>,
 	/// Line starts of the source, for locations.
 	lines: Vec<usize>,
 	/// The structs of object types.
@@ -338,6 +362,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	copy_functions: std::cell::RefCell<FxHashMap<String, FunctionValue<'ctx>>>,
 	/// The nodes reading each local (last uses).
 	local_uses: std::cell::RefCell<FxHashMap<SymbolId, Vec<NodeId>>>,
+	/// Closed-use proofs for empty growing-array origins, per source symbol.
+	default_growing_origins: std::cell::RefCell<FxHashMap<(FileId, SymbolId), bool>>,
 	/// The parent of every node (last uses).
 	node_parents: std::cell::RefCell<Vec<usize>>,
 	/// Whether the program reports its leaks (`Options::leak_check`).
@@ -546,6 +572,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			drop_functions: std::cell::RefCell::new(FxHashMap::default()),
 			copy_functions: std::cell::RefCell::new(FxHashMap::default()),
 			local_uses: std::cell::RefCell::new(FxHashMap::default()),
+			default_growing_origins: std::cell::RefCell::new(FxHashMap::default()),
 			node_parents: std::cell::RefCell::new(Vec::new()),
 			leak_check: false,
 			tests: Vec::new(),
@@ -564,6 +591,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			no_inline_maps: program::no_inline_maps(session, files),
 			packable_items: packed::packable_items(session, files),
 			packed_layouts: std::cell::RefCell::new(FxHashMap::default()),
+			readonly_collections: FxHashMap::default(),
+			recursive_functions: rustc_hash::FxHashSet::default(),
 			relation_sides: relations::relation_sides(
 				files.iter().map(|(file, _)| session.analysis(*file)),
 			),
@@ -701,6 +730,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			self.copy_cleanup_captures();
 		}
+		self.index_recursive_functions(&files);
 		self.prepare_tree_arenas()?;
 		if let Some(flag) = self.module.get_global("fa_compressed_links") {
 			let compressed = self.tree_arenas.compressed_any();
@@ -762,8 +792,36 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			flag.set_initializer(&self.context.bool_type().const_int(needed as u64, false));
 		}
 		self.runtime.internalize()?;
+		self.add_stack_probes();
 		self.keep_c_exports();
 		Ok(std::mem::take(&mut self.c_exports))
+	}
+
+	/// Makes every function probe each page of its frame, the helpers and
+	/// the coroutine instances included: a frame larger than a page (the
+	/// fixed storage of immutable collections, `collection_storage.rs`) can't
+	/// step over the guard page of the stack. LLVM 18 supports inline probes
+	/// on x86-64 and AArch64 Linux.
+	pub(crate) fn add_stack_probes(&self) {
+		let triple = self.module.get_triple();
+		let triple = triple.as_str().to_str().unwrap_or("");
+		let probed = triple.contains("linux")
+			&& (triple.starts_with("x86_64")
+				|| triple.starts_with("aarch64")
+				|| triple.starts_with("arm64"));
+		if !probed {
+			return;
+		}
+		let probe = self
+			.context
+			.create_string_attribute("probe-stack", "inline-asm");
+		for function in self
+			.module
+			.get_functions()
+			.filter(|function| function.count_basic_blocks() != 0)
+		{
+			function.add_attribute(AttributeLoc::Function, probe);
+		}
 	}
 
 	// ── locations and errors ────────────────────────────────────────────
@@ -937,6 +995,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	fn load(&self, slot: Slot<'ctx>) -> Result<Val<'ctx>, Error> {
+		self.load_place(slot, true)
+	}
+
+	/// The value of a local at the end of its scope, for its drop: a zero when
+	/// it moved out (`take`, `give_up_place`), so nothing is known of the
+	/// pointer it holds.
+	fn load_for_drop(&self, slot: Slot<'ctx>) -> Result<Val<'ctx>, Error> {
+		self.load_place(slot, false)
+	}
+
+	/// `complete`: the slot holds a value (not the zero left by a move).
+	fn load_place(&self, slot: Slot<'ctx>, complete: bool) -> Result<Val<'ctx>, Error> {
 		// an element of a columnar, gathered from its columns
 		if let Repr::Row(element) = slot.repr {
 			let value = self.gather(&self.builder, slot.pointer, element)?;
@@ -961,6 +1031,24 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					.set_metadata(self.context.metadata_node(&[]), kind)
 					.map_err(|error| Error::Llvm(error.to_string()))?;
 			}
+			if complete && matches!(slot.repr, Repr::Growing(_)) {
+				// Even an empty growing array owns a complete initialized header.
+				// This lets LICM speculate its inline-pointer loads before a loop;
+				// it says nothing about whether the header can change in that loop.
+				let bytes = self.collection_data_size(self.segmented_type().into());
+				for (kind, value) in [("dereferenceable", bytes), ("align", 8)] {
+					instruction
+						.set_metadata(
+							self.context.metadata_node(&[self
+								.context
+								.i64_type()
+								.const_int(value, false)
+								.into()]),
+							self.context.get_kind_id(kind),
+						)
+						.map_err(|error| Error::Llvm(error.to_string()))?;
+				}
+			}
 		}
 		let value = self.freeze_union_padding(&self.builder, slot.repr, value);
 		Ok(Val::new(slot.repr, value))
@@ -975,6 +1063,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(());
 		}
 		let value = self.convert(value, slot.repr, node.index())?;
+		if value.destination == Some(slot.pointer) {
+			return Ok(());
+		}
 		if let Some(raw) = value.value {
 			let instruction = self.builder.build_store(slot.pointer, raw)?;
 			self.tag(instruction, false)?;
@@ -1381,15 +1472,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				types.push(self.pointer_type().into());
 			}
 			let throws = info.throws != TypeId::NEVER || !callbacks.is_empty();
-			let fn_type = match (ret.has_value(), throws) {
-				(true, false) => self.llvm_type(ret).fn_type(&types, false),
-				(false, false) => self.context.void_type().fn_type(&types, false),
-				(true, true) => self
-					.context
-					.struct_type(&[self.llvm_type(ret), self.pointer_type().into()], false)
-					.fn_type(&types, false),
-				(false, true) => self.pointer_type().fn_type(&types, false),
-			};
+			let (fn_type, return_slot, return_collection) =
+				self.function_type_of(types, lambda, ret, throws);
 			let name = info
 				.symbol
 				.map(|symbol| {
@@ -1410,6 +1494,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				Some(Linkage::Internal),
 			);
 			value.set_call_conventions(FAST_CALLING_CONVENTION);
+			if return_slot {
+				self.add_return_slot_attribute(value, ret, throws, u32::from(lambda));
+			}
 			self.runtime.add_attributes(value, &["nounwind"]);
 			if self.is_split() && suffix.is_empty() && !is_lambda {
 				// a function other modules call: its symbol (`units.rs`)
@@ -1457,9 +1544,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					self.runtime.add_attributes(value, &["inlinehint"]);
 				}
 			}
-			for index in 0..types.len() {
+			for index in 0..fn_type.count_param_types() {
 				value.add_attribute(
-					AttributeLoc::Param(index as u32),
+					AttributeLoc::Param(index),
 					self.runtime.attribute("noundef"),
 				);
 			}
@@ -1474,6 +1561,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				by_pointer,
 				borrowed,
 				ret,
+				return_slot,
+				return_collection,
 				throws,
 				lambda,
 				by_reference,
@@ -1598,7 +1687,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.builder.position_at_end(start);
 		let outer = self.cleanups.take();
 		self.saved_cleanups.push(outer);
+		let collection_budget = self.collection_budget_for(owner);
 		self.frame = Some(Frame {
+			return_slot: None,
+			nrvo_local: None,
+			return_buffer: None,
+			collection_result_root: None,
+			destination: None,
+			early_destination: None,
+			collection_bytes: 0,
+			collection_budget,
+			collection_offer_bytes: 0,
+			readonly_strings: rustc_hash::FxHashSet::default(),
+			collection_locals: rustc_hash::FxHashSet::default(),
 			function,
 			frame_strings: FxHashMap::default(),
 			arena: false,
@@ -1680,6 +1781,32 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.frame_mut().arena = function.arena_body.is_some();
 		self.frame_mut().throws = throws;
 		self.begin_function_task(&function)?;
+		if function.return_slot {
+			let pointer = value
+				.get_nth_param(u32::from(lambda))
+				.expect("a return slot")
+				.into_pointer_value();
+			self.frame_mut().return_slot = Some(Slot { pointer, repr: ret });
+			self.frame_mut().destination = Some((info.body, Slot { pointer, repr: ret }));
+			self.frame_mut().collection_result_root = Some(info.body);
+			self.frame_mut().nrvo_local = self
+				.returned_local_candidate(info.body)
+				.map(|symbol| (self.file, symbol));
+		}
+		if function.return_collection {
+			let at = u32::from(lambda);
+			self.frame_mut().return_buffer = Some(collection_storage::CollectionBuffer {
+				pointer: value
+					.get_nth_param(at)
+					.expect("caller buffer")
+					.into_pointer_value(),
+				bytes: value
+					.get_nth_param(at + 1)
+					.expect("buffer size")
+					.into_int_value(),
+			});
+			self.frame_mut().collection_result_root = Some(info.body);
+		}
 		let mut saved = Vec::new();
 		if lambda && !captures.is_empty() {
 			let environment = value
@@ -1689,7 +1816,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			saved = self.bind_captures(environment, &captures, by_reference)?;
 		}
 		// the parameters, then their defaults in order
-		let mut index = u32::from(lambda);
+		let mut index = u32::from(lambda)
+			+ u32::from(function.return_slot)
+			+ 2 * u32::from(function.return_collection);
 		let by_pointer = function.by_pointer.clone();
 		for (position, (param, (repr, has_default))) in info.params.iter().zip(params).enumerate() {
 			if by_pointer[position] {
@@ -1744,6 +1873,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					_ => pointer,
 				};
 				self.slots.insert(param.symbol, Slot { pointer, repr });
+				if repr == Repr::Str
+					&& function.borrowed[position]
+					&& self.recursive_collection_frame()
+				{
+					self.frame_mut().readonly_strings.insert(pointer);
+				}
 				continue;
 			}
 			let slot = self.alloca(repr, "parameter")?;
@@ -1886,6 +2021,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		} else {
 			value
 		};
+		if let Some(slot) = self.frame().return_slot {
+			self.store(slot, value, node)?;
+			self.drop_to_returning(0, Some(value))?;
+			return if self.frame().throws {
+				self.return_raw(Some(self.pointer_type().const_null().into()))
+			} else {
+				self.return_raw(None)
+			};
+		}
 		let top_level = self.frame().owner.is_none() && !self.in_task_body();
 		if top_level && !self.leak_check && !self.in_coroutine() {
 			self.drop_at_exit()?;
@@ -2066,6 +2210,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// The slot of a local, created on first use: an alloca of the function
 	/// owning it, or a global for a top-level local that functions read.
 	fn slot_of(&mut self, symbol: SymbolId, node: NodeId) -> Result<Slot<'ctx>, Error> {
+		if self.frame().nrvo_local == Some((self.file, symbol)) {
+			let slot = self.frame().return_slot.expect("coalesced return slot");
+			self.slots.insert(symbol, slot);
+			return Ok(slot);
+		}
 		if let Some(&(holder, repr)) = self.references.get(&symbol) {
 			let pointer = self
 				.builder
@@ -2152,6 +2301,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		else {
 			return Ok(None);
 		};
+		// an immutable collection of constants: read-only data (`collection_storage.rs`)
+		let repr = self.repr_of(ty, node.index())?;
+		if let Some(value) = self.readonly_collection(node, repr)? {
+			return Ok(Some(value));
+		}
 		// the analyzer's constant expressions (literals, constant arithmetic,
 		// templates, other constants), then the values computed at compile time
 		let module_constant = self.analysis.module_constant(symbol).cloned();
@@ -2210,10 +2364,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				_ => Val::new(Repr::F64, self.context.f64_type().const_float(value)),
 			},
 			Value::String(text) => self.string_constant(&text),
-			Value::None => Val {
-				repr: Repr::None,
-				value: None,
-			},
+			Value::None => Val::none(),
 			value => {
 				let ty = self.type_of(node);
 				let built = self.constant_value(&value, ty, node)?;
@@ -2246,10 +2397,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		};
 		let count = statements.len();
 		let scope = self.mark();
+		let destination = self.destination_at(node);
 		let mut last = Val::void();
 		for (index, statement) in statements.iter().enumerate() {
 			let mark = self.mark();
-			let value = self.expr(statement)?;
+			let value = if index + 1 == count && want {
+				self.expr_with_destination(statement, destination)?
+			} else {
+				self.expr(statement)?
+			};
 			if value.repr == Repr::Never {
 				// what follows a `return` or a `break` is unreachable
 				self.end_scope(scope, None)?;
@@ -2358,10 +2514,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.context.bool_type().const_int(value as u64, false),
 			)),
 			View::String(text) => Ok(self.string_constant(text)),
-			View::None => Ok(Val {
-				repr: Repr::None,
-				value: None,
-			}),
+			View::None => Ok(Val::none()),
 			View::Template { parts } => self.template(parts),
 			View::Name(_) => self.name(node),
 			View::Group(inner) => self.expr(inner),
@@ -2576,7 +2729,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			View::Return(value) => {
 				let result = match value {
-					Some(value) => self.expr(value)?,
+					Some(value) => self.expr_with_destination(value, self.frame().return_slot)?,
 					None => Val::void(),
 				};
 				self.build_return(result, value.unwrap_or(node))?;
@@ -2657,9 +2810,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				{
 					return self.optional_element(slot.pointer, slot.repr, node);
 				}
-				let value = self.load(slot)?;
-				// a move-only value moved out: the local gives it up
-				if self.analysis.moved_reads.contains(&node) && value.repr == slot.repr {
+				// a local that occupies the caller's result slot (`return_destinations.rs`)
+				let coalesced = self.frame().nrvo_local == Some((self.file, symbol));
+				let value = if coalesced {
+					self.load_destination(slot)?
+				} else {
+					self.load(slot)?
+				};
+				// a move-only value moved out: the local gives it up (a coalesced
+				// local stays in the slot it is returned in)
+				if !coalesced
+					&& self.analysis.moved_reads.contains(&node)
+					&& value.repr == slot.repr
+				{
 					self.give_up_place(node, slot)?;
 					let value = self.fresh(value);
 					let narrowed = self.node_repr(node).unwrap_or(value.repr);
@@ -2702,7 +2865,45 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if let Some(value) = self.frame_string_declaration(node, symbol, value_node)? {
 			return Ok(value);
 		}
-		let value = self.expr(value_node)?;
+		let readonly = if self.analysis.symbols.symbol(symbol).kind == SymbolKind::Let {
+			let repr = self.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())?;
+			self.readonly_collection(value_node, repr)?
+		} else {
+			None
+		};
+		let value = if let Some(value) = readonly {
+			if let Some(offer) = self.frame().return_buffer
+				&& self.collection_returned_binding(symbol)
+			{
+				// A non-null offer proves the eventual owner immutable. Share
+				// static data then; unknown/mutable owners get one owning copy.
+				let pointer = self.select_collection_buffer(
+					offer,
+					0,
+					|_, _| Ok(value.value.expect("static collection").into_pointer_value()),
+					|this| {
+						Ok(this
+							.emit_copy(value)?
+							.value
+							.expect("owned copy")
+							.into_pointer_value())
+					},
+				)?;
+				self.fresh(Val::new(value.repr, pointer))
+			} else {
+				let key = (self.file, symbol);
+				self.frame_mut().collection_locals.insert(key);
+				self.fresh(value)
+			}
+		} else {
+			let repr = self.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())?;
+			let destination = if self.uses_return_slot(repr) {
+				Some(self.slot_of(symbol, node)?)
+			} else {
+				None
+			};
+			self.expr_with_destination(value_node, destination)?
+		};
 		if value.repr == Repr::Never {
 			return Ok(Val::never());
 		}
@@ -2745,8 +2946,28 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			&& let View::Template { parts } = self.view(value)
 		{
 			let slot = self.place(target)?;
-			if let Some(result) = self.string_template(parts, Some(slot), None)? {
+			if slot.repr == Repr::Str
+				&& let Some(result) = self.string_template(parts, Some(slot), None)?
+			{
 				return Ok(result);
+			}
+		}
+		// `growing = []`: the items dropped, the segments kept for reuse
+		if let View::Array { items } = self.view(self.ungrouped(value))
+			&& items.is_empty()
+			&& matches!(self.node_repr(target)?, Repr::Growing(_))
+			&& self.is_place(target)
+		{
+			let slot = self.place(target)?;
+			if let Repr::Growing(item_type) = slot.repr {
+				let array = self
+					.load(slot)?
+					.value
+					.expect("a growing array")
+					.into_pointer_value();
+				let item = self.item_repr(item_type, target)?;
+				self.growing_reset(array, item)?;
+				return Ok(Val::void());
 			}
 		}
 		let value_lowered = self.expr(value)?;
@@ -2833,7 +3054,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let repr = self.node_repr(node).unwrap_or(Repr::Void);
 		let slot = if repr.has_value() && else_body.is_some() {
-			Some(self.alloca(repr, "if")?)
+			Some(match self.destination_for(node, repr) {
+				Some(slot) => slot,
+				None => self.alloca(repr, "if")?,
+			})
 		} else {
 			None
 		};
@@ -2849,10 +3073,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			if let Some(body) = body {
 				let owned = slot.is_some();
 				let value = self.region(slot.map(|slot| slot.repr), body, |this| {
-					match this.view(body) {
+					this.with_destination(body, slot, |this| match this.view(body) {
 						View::If { .. } => this.expr(body),
 						_ => this.block(body, owned),
-					}
+					})
 				})?;
 				if value.repr == Repr::Never {
 					continue;
@@ -2871,7 +3095,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(Val::never());
 		}
 		match slot {
-			Some(slot) => Ok(self.fresh(self.load(slot)?)),
+			Some(slot) => Ok(self.fresh(self.load_destination(slot)?)),
 			None => Ok(Val::void()),
 		}
 	}
@@ -2993,7 +3217,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 						let array = value.value.expect("an array").into_pointer_value();
 						return self.for_packed(&layout, node, pattern, has_index, array, body);
 					}
-					self.for_items(node, pattern, has_index, value, body)
+					self.for_items(node, pattern, has_index, iterable, value, body)
 				}
 				Repr::Map(_) | Repr::Set(_) => self.for_entries(node, pattern, value, body),
 				Repr::Pool(_) | Repr::Columnar(_) => self.for_pool(node, pattern, value, body),
@@ -3017,6 +3241,17 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				(end.int(), inclusive)
 			}
 			None => (i64.const_int(i64::MAX as u64, true), true),
+		};
+		// a loop only pushing the same byte: one fill (`copies.rs`)
+		if !open_end && let Some((push, byte)) = self.fill_loop(iterable, body)? {
+			self.fill_range(push, byte, start.int(), end, inclusive)?;
+			return Ok(Val::void());
+		}
+		// a loop only copying items of an array: one block copy when the
+		// range is inside it, else the rounds below (`copies.rs`)
+		let copied = match self.copy_loop(pattern, has_index, iterable, body, true)? {
+			Some(copy) if !open_end => Some(self.copy_range(copy, start.int(), end, inclusive)?),
+			_ => None,
 		};
 		let reserved =
 			self.reserve_for_pushes(body, start.int(), (!open_end).then_some(end), inclusive)?;
@@ -3079,6 +3314,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.builder.build_store(counter.pointer, next)?;
 		self.builder.build_unconditional_branch(test)?;
 		self.builder.position_at_end(exit);
+		if let Some((_, done)) = copied {
+			self.builder.build_unconditional_branch(done)?;
+			self.builder.position_at_end(done);
+		}
 		for push in reserved {
 			self.reserved_pushes.remove(&push);
 		}

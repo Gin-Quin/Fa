@@ -38,7 +38,7 @@ State of the parser: checked on 2026-11-01 against `packages/parser` (commit `ac
 - **Tests** are written `T-<AREA>-<n>`. A test is a small standalone file; in this brief, ` · ` separates lines of the file (a newline in the real test) and `⇥` a tab. `→` gives the expected standard output (lines separated by ` / `), `⇒` the expected diagnostic, `⇒ stop` a [stop](#27-stops) (exit code 101, message on stderr), `⇒ exit 1` an escaped error. Unless written otherwise, every valid test must give the same output on every target (`native`, JavaScript).
 - `console.log(a, b, …)` prints the `toString` of each argument, separated by one space, followed by a newline (see [printing](#28-printing-tostring)). The tests rely on it.
 - "Interval" means a closed interval of mathematical integers `[lo, hi]`, with `lo`/`hi` possibly `−∞`/`+∞` in the checker. The checker computes intervals with arbitrary precision (or saturating at ±2^200), never with machine integers.
-- "Base type" of a ranged integer type: the type it refines (`Integer` for `Integer(min = 0)`, `Int8` for `Int8(min = 0)`).
+- "Base type" of a ranged integer type: the type it refines (`Integer` for `Integer<min = 0>`, `Int8` for `Int8<min = 0>`).
 - "Kind" of a number: integer (all integer types, ranged or not), `Float32`, `Float64`, `BigInt`, `Percentage`. Integer types of different widths are the **same kind**.
 
 ---
@@ -49,7 +49,7 @@ State of the parser: checked on 2026-11-01 against `packages/parser` (commit `ac
 
 The checker keeps two separate things about every value (`values/declaring-values#inferred-types`, spec review T1):
 
-- its **type**: what `Type(value)` returns and what generic inference uses. An unannotated binding gets the **widened** type of its initializer: a literal gives its base type (`42` → `Integer`, `"ready"` → `String`, `true` → `Boolean`, `1.5` → `Float`), never a literal type. A non-literal initializer keeps its type (`let x = f()` with `f(): Integer(min = 0)` is an `Integer(min = 0)`), except an integer arithmetic result, which gets its base type (section 6.4). An annotated binding has the annotated type. A `static` value keeps its literal type.
+- its **type**: what `Type<value>` returns and what generic inference uses. An unannotated binding gets the **widened** type of its initializer: a literal gives its base type (`42` → `Integer`, `"ready"` → `String`, `true` → `Boolean`, `1.5` → `Float`), never a literal type. A non-literal initializer keeps its type (`let x = f()` with `f(): Integer<min = 0>` is an `Integer<min = 0>`), except an integer arithmetic result, which gets its base type (section 6.4). An annotated binding has the annotated type. A `static` value keeps its literal type.
 - **flow facts** about each place: exact literal value, integer interval plus a set of excluded values, union member it was narrowed to (including `None`/not-`None`), length of a collection (and relational facts `index < collection.length`), validity of references. Facts make more programs valid without changing the type. They are used for assignability into ranged types, exhaustiveness, index and divisor proofs, overflow checks, always-true/false warnings and reference invalidation.
 
 Facts last while the place is not mutated: an assignment **replaces** the facts of the place by those of the new value; any other mutation (a `mutates` call, a write below the place) **drops** them; a `mutates p` call also drops the facts of every path below `p`. At an `await`, the facts of module-level values are dropped.
@@ -68,7 +68,7 @@ A **literal adapts** to its expected type (`values/numbers#literals`):
 | float (`1.5`, `1e6`) | `Float32` (rounded to nearest, error if it overflows to infinity), `Float64` | `Float` |
 | `12n` | `BigInt` only | `BigInt` |
 | `50%`, `12.5%` | `Percentage` only | `Percentage` |
-| string (`"a"`) | `String`; `Character` when it holds exactly one grapheme cluster | `String` |
+| string (`"a"`) | `String` | `String` |
 | `true`/`false`, `none` | `Boolean`; any optional | `Boolean`; error without expected type [D-21] |
 
 Never: an integer literal never becomes a `Percentage`; a float literal never becomes an integer; `none` never becomes a non-optional type.
@@ -94,7 +94,7 @@ A **place** is a local value, a parameter, a module-level value, or a path below
 
 - `Never` (bottom): the type of `return`, `throw`, `break`, `continue`, a `loop` without a reachable `break`, a call to a function returning `Never`. It satisfies every type and disappears from unions. Code after a `Never` expression in the same block is unreachable: `W-DO-2` (unreachable code).
 - `Void`: the result of a function without return type, of an assignment, of a declaration, of a `for`/`while`, of a statement `if`/`when`. A `Void` expression can't be bound (`let x = log("a")` → `E-DECL-9`), interpolated, compared, passed where a value is expected, or be the value of a block that is bound.
-- `None`: the type of `none`, member of every optional. `T?` = `T | None` = `Optional(T)`, `T??` = `T?`, `Never?` = `None`, `Void?` → `E-OPT-9`.
+- `None`: the type of `none`, member of every optional. `T?` = `T | None` = `Optional<T>`, `T??` = `T?`, `Never?` = `None`, `Void?` → `E-OPT-9`.
 
 ### 2.6 Effects used by this scope
 
@@ -123,8 +123,8 @@ Every interpolated value and every `console.log` argument goes through `toString
 | `Percentage` | `fraction × 100` formatted like a `Float64` after rounding to 15 significant digits, then `%`: `50%`, `12.5%`, `10%` (not `10.000000000000002%`) [D-6] |
 | `Boolean` | `true`, `false` |
 | `none` | `none` |
-| `String`, `Character` at top level | raw text |
-| `String`, `Character` nested in a composite | quoted, with Fa escapes: `"a\"b"` |
+| `String` at top level | raw text |
+| `String` nested in a composite | quoted, with Fa escapes: `"a\"b"` |
 | tuple | `(1, "one")` |
 | array (and growing array) | `[1, 2, 3]`, `[]` |
 | object | `{ x = 1, y = 2 }` in declaration order, `{}` when empty; no type name (typing is structural) |
@@ -150,7 +150,7 @@ Source: `getting-started/syntax-basics`.
 - Inside brackets, newlines and commas both separate items.
 - Identifiers: `[A-Za-z_][A-Za-z0-9_]*`, ASCII only; keywords can't be identifiers. Prefixes `#` (private) and `@` (compile-time). `self`/`Self` are special names; `skip`/`only` are keywords only after `test`.
 - Reserved keywords: `and as assert async await break catch continue derived do else export false for function if in invalidates is let loop mutable mutates namespace none not or parallel provide reactive readonly requires return reuse start static test then throw throws true try type use watch when while with`.
-- **Braces**: after `=>`, `if`, `else`, `do`, `loop`, `for`, `while`, `watch`, `test`, `namespace`, a `{` opens a block; after a type name, an object literal of that type; elsewhere in an expression, an object literal; where a key set is expected (`Pick(User, { name })`), a key set.
+- **Braces**: after `=>`, `if`, `else`, `do`, `loop`, `for`, `while`, `watch`, `test`, `namespace`, a `{` opens a block; after a type name, an object literal of that type; elsewhere in an expression, an object literal; where a key set is expected (`Pick<User, { name }>`), a key set.
 - There is no `!` token in the language: parser reports "Unexpected character '!'. Use `not`…" (keep, as `E-LEX-4`), except inside `!=`.
 
 ### Static semantics: errors
@@ -372,7 +372,7 @@ Valid:
 - T-DECL-7 `mutable people = [{ name = "Ana" }, { name = "Bao" }] · let c = people[1] · mutable d = c · d.name = "X" · console.log(people[1].name)` → `Bao`
 - T-DECL-8 `mutable players = [{ name = "Ana", score = 3 }, { name = "Bao", score = 7 }] · mutable use best = players[0] · for p in players { · if p.score > best.score { · reuse best = p · } · } · best.score += 10 · console.log(players[1].score)` → `17`
 - T-DECL-9 `mutable s = { a = 1 } · use x = s.a · x += 1 · console.log(s.a)` → `2` (primitive alias, JS rewrite)
-- T-DECL-10 `let five = 5 · let score: Integer(min = 0, max = 10) = five · console.log(score)` → `5` (fact)
+- T-DECL-10 `let five = 5 · let score: Integer<min = 0, max = 10> = five · console.log(score)` → `5` (fact)
 - T-DECL-11 `let n: Integer? = none · console.log(n)` → `none`
 - T-DECL-12 `let items = [10, 20, 30] · let last = items[2] · console.log(last)` → `30` (length fact, no `try`)
 - T-DECL-13 `mutable xs = [1, 2] · use first = xs[0] · xs.push(3) · use first = xs[0] · console.log(first)` → `1` (declared again after invalidation)
@@ -447,16 +447,16 @@ Lexical rules: a float has digits on both sides of `.`, or an exponent, or both;
 | `Int128` | integer | −2^127 … 2^127−1 | `i128` | `BigInt` |
 | `UInt8`/`Byte`, `UInt16`, `UInt32` | integer | 0 … 2^w−1 | `i8`…`i32` | number |
 | `UInt64`, `UInt128` | integer | 0 … 2^w−1 | `i64`, `i128` | `BigInt` |
-| `Integer(min = a, max = b)` | integer | `a..=b` | `i64` + `range` metadata | number |
-| `Int8(min = a, max = b)`, … | integer | `a..=b` within the type | width of the type | as the base type |
+| `Integer<min = a, max = b>` | integer | `a..=b` | `i64` + `range` metadata | number |
+| `Int8<min = a, max = b>`, … | integer | `a..=b` within the type | width of the type | as the base type |
 | `Float32` | `Float32` | IEEE binary32 | `float` | number rounded with `Math.fround` |
 | `Float`/`Float64` | `Float64` | IEEE binary64 | `double` | number |
 | `BigInt` | `BigInt` | arbitrary | inline tagged 63-bit or heap limbs [D-54] | `BigInt` |
 | `Percentage` | `Percentage` | fraction as binary64 (`50%` = `0.5`) | `double` | number |
 
-`Integer` and `Int64` are distinct type names with the same range [D-8]: they are mutually assignable as scalars (the range fits), the conversion is `BigInt(x)`/`Number(x)` on JavaScript, and `Int64 + Integer` has the base type `Int64` (the explicit width wins). Containers are not converted implicitly: `Array(Int8)`, `Array(Integer)` and `Array(Int64)` are three different types; an `Array(Integer(min = 0))` value is accepted by an immutable parameter `Array(Integer)` (same storage), not by a `mutates` one.
+`Integer` and `Int64` are distinct type names with the same range [D-8]: they are mutually assignable as scalars (the range fits), the conversion is `BigInt(x)`/`Number(x)` on JavaScript, and `Int64 + Integer` has the base type `Int64` (the explicit width wins). Containers are not converted implicitly: `Array<Int8>`, `Array<Integer>` and `Array<Int64>` are three different types; an `Array<Integer<min = 0>>` value is accepted by an immutable parameter `Array<Integer>` (same storage), not by a `mutates` one.
 
-Ranged types: `min`/`max` are compile-time value parameters; `min > max` is `E-NUM-13`; bounds outside the base type's range are `E-NUM-13`. `Integer(min = 0)` is the recommended non-negative type.
+Ranged types: `min`/`max` are compile-time value parameters; `min > max` is `E-NUM-13`; bounds outside the base type's range are `E-NUM-13`. `Integer<min = 0>` is the recommended non-negative type.
 
 ### 6.3 Literal and constant typing
 
@@ -470,7 +470,7 @@ Ranged types: `min`/`max` are compile-time value parameters; `min > max` is `E-N
 **Assignability** (C4): an integer value is accepted where an integer type is expected when its **interval** (from its type and its facts) is contained in the expected type's range. Otherwise:
 
 - if the value is an **arithmetic expression** (a tree of `+ - * // %% **` and unary `-` over integers, or a compound assignment), the result is **checked at runtime** at the sink (a stop on failure), and a **certain** overflow (interval disjoint from the range) is `E-NUM-10`;
-- any **other** expression (a name, a field, a call, an `if`, a literal) is a compile error, `E-NUM-14` ("`bar` may exceed the maximum value of 100: narrow it, or convert it with `Integer(max = 100)(bar)`"…; message suggests `T(value)` or an `if`), [D-89].
+- any **other** expression (a name, a field, a call, an `if`, a literal) is a compile error, `E-NUM-14` ("`bar` may exceed the maximum value of 100: narrow it, or convert it with `Integer<max = 100>(bar)`"…; message suggests `T(value)` or an `if`), [D-89].
 
 Examples: `let wide: Int16 = a + b` (Int8 operands): no check. `let d: Int8 = a + b`: runtime check. `let e: Int8 = 100 + 100`: E-NUM-10. `let byte: UInt8 = a` with `a: Int8`: E-NUM-14. `if a >= 0 { let p: UInt8 = a }`: valid (narrowed to `[0, 127]`).
 
@@ -484,7 +484,7 @@ Examples: `let wide: Int16 = a + b` (Int8 operands): no check. `let d: Int8 = a 
 | `Float(f32)`, `Float32(f64)` | exact / nearest | never |
 | `Float(p)` with `p: Percentage` | the fraction (`Float(50%)` = `0.5`) | never |
 | `BigInt(i)` | exact | never |
-| `Int8(i)`, `UInt16(i)`, `Integer(max = 100)(i)`, `Integer(b)` with `b: BigInt` | exact | `throws ArithmeticError` unless the value is proven to fit (facts, narrowing, literal); a certain failure (`Int8(300)`) is `E-NUM-10` |
+| `Int8(i)`, `UInt16(i)`, `Integer<max = 100>(i)`, `Integer(b)` with `b: BigInt` | exact | `throws ArithmeticError` unless the value is proven to fit (facts, narrowing, literal); a certain failure (`Int8(300)`) is `E-NUM-10` |
 | `Percentage(x)` | `x / 100` (formatter rewrites to `(x)%`) | never |
 | `Integer.round(f)`, `.floor`, `.ceil`, `.truncate` | rounded integer (round: halves away from zero) | `throws ArithmeticError` when NaN, infinite or out of range, unless `f` is a literal (then checked at compile time) |
 | `Integer.parse(s)` | — | `throws ParseError` (out of scope) |
@@ -498,7 +498,7 @@ Examples: `let wide: Int16 = a + b` (Int8 operands): no check. `let d: Int8 = a 
 | E-NUM-10 | certain overflow: an arithmetic result or a constant whose interval is disjoint from its sink type, or from the compute type at an intermediate node; certain failure of a conversion |
 | E-NUM-11 | mixing kinds (`Integer * Float`, `Float32 + Float64`, `Integer + BigInt`, `Integer * Percentage`, `Percentage + Float`): "cannot multiply `Integer` by `Float`. Use `Float(count) * ratio`" |
 | E-NUM-12 | integer or `BigInt` `//`/`%%` by a divisor proven to be zero (`5 // 0`) [D-91] |
-| E-NUM-13 | invalid ranged type (`Integer(min = 5, max = 1)`, `Int8(max = 300)`) |
+| E-NUM-13 | invalid ranged type (`Integer<min = 5, max = 1>`, `Int8<max = 300>`) |
 | E-NUM-14 | a non-arithmetic integer value not proven to fit its sink |
 | E-NUM-15 | unannotated mix of integer base types where neither contains the other |
 | E-NUM-16 | conversion that doesn't exist (`BigInt(1.5)`, `Percentage("a")`, `Integer(50%)`) |
@@ -528,16 +528,16 @@ Every compiler on every target must accept exactly the programs these rules acce
 | `x.abs()` | `[0, max(|a1|, |a2|)]`, or `[min(|a1|, |a2|), …]` when 0 ∉ a |
 | `x.clamp(m, M)` | `[min(max(a1, m1), M1), min(max(a2, m2), M2)]` |
 | `Math.max(a, b)` / `Math.min(a, b)` | `[max(a1, b1), max(a2, b2)]` / `[min(a1, b1), min(a2, b2)]` |
-| `wrapping*`, `saturating*`, bitwise methods, any other call | the full range of the declared return type (`Integer(min = 0)` for `length`) |
+| `wrapping*`, `saturating*`, bitwise methods, any other call | the full range of the declared return type (`Integer<min = 0>` for `length`) |
 
 2. **Conditions refine** in the branches of `if`, `while`, `when`, `and`, `or`, `not`, and after early exits: a comparison `x < e`, `x <= e`, `x > e`, `x >= e` where `e` is a constant or a place with a known interval refines `x` (and `e` symmetrically) in both branches; `x is a..b` intersects in the true branch and excludes in the false branch; `x == literal` makes `x` exact (false branch: excludes the value); `x != literal` the reverse. An excluded value at an interval end shrinks the interval (`[0, 10]` minus `{0}` is `[1, 10]`).
-3. **Lengths.** The length of a collection (or the grapheme count of a string [D-97]) is known from its literal until it is mutated. Relational facts: `index < c.length` inside `for index in 0..c.length` and `for item, index in c`; after a guard `if index < c.length` (or in the `else` of its negation), where the guarded expression is a place or a place plus or minus a constant; equal lengths for a copy and for `map` of a collection. An index `i` into a collection of length `L` is proven when `0 ≤ i < L` or `-L ≤ i < 0` is implied by the facts.
+3. **Lengths.** The length of a collection (or the UTF-16 length of a string [D-97]) is known from its literal until it is mutated. Relational facts: `index < c.length` inside `for index in 0..c.length` and `for item, index in c`; after a guard `if index < c.length` (or in the `else` of its negation), where the guarded expression is a place or a place plus or minus a constant; equal lengths for a copy and for `map` of a collection. An index `i` into a collection of length `L` is proven when `0 ≤ i < L` or `-L ≤ i < 0` is implied by the facts.
 4. **Loops** are analysed to a fixpoint. Widening [D-96]: from the second iteration on, a lower bound that decreased becomes `−∞` and an upper bound that increased becomes `+∞` (then clipped by the type). After `mutable count = 0` and a loop body `count += 1`, `count` is `[0, max]`.
 5. **Mutations drop facts.** Assignment replaces; any other mutation of the place drops its facts; a mutation that may change a collection's length drops its length facts.
 
 Nothing else is used: no reasoning on called function bodies (only signatures, including ranged return types), no other relation between places.
 
-**Uses of the facts**: (a) assignability into ranged types, (b) overflow checks, (c) index proofs (`items[i]` needs `try` unless proven; certainly out of bounds `array[3]` on a 3-item array is `E-NUM-17` [D-91]), (d) divisor proofs, (e) shift amounts, (f) `when` exhaustiveness on integers, (g) always-true/false warnings `W-NUM-2` (`if value < 20` with `value: Integer(min = 20)`: "the condition is always false").
+**Uses of the facts**: (a) assignability into ranged types, (b) overflow checks, (c) index proofs (`items[i]` needs `try` unless proven; certainly out of bounds `array[3]` on a 3-item array is `E-NUM-17` [D-91]), (d) divisor proofs, (e) shift amounts, (f) `when` exhaustiveness on integers, (g) always-true/false warnings `W-NUM-2` (`if value < 20` with `value: Integer<min = 20>`: "the condition is always false").
 
 ### 6.6 Arithmetic operators and result types
 
@@ -581,7 +581,7 @@ Explicit variants (methods, not part of arithmetic trees): `wrappingAdd/Sub/Mul/
 ### 6.9 Exponentiation
 
 - Right-associative; prefix `-` binds tighter (`-x ** 2` = `(-x) ** 2`).
-- Integers and `BigInt`: the exponent must be proven non-negative (literal, `Integer(min = 0)`, narrowing), otherwise `throws ArithmeticError`; proven negative: E-NUM-10. `0 ** 0` = `1`. Result interval per 6.5; overflow per 6.7.
+- Integers and `BigInt`: the exponent must be proven non-negative (literal, `Integer<min = 0>`, narrowing), otherwise `throws ArithmeticError`; proven negative: E-NUM-10. `0 ** 0` = `1`. Result interval per 6.5; overflow per 6.7.
 - Floats: IEEE `pow` (`Math.pow` on JavaScript). `Float ** Integer` is E-NUM-11 (a literal exponent adapts: `x ** 2` is valid).
 
 ### 6.10 Floats
@@ -631,7 +631,7 @@ Constants are not documented; proposal [D-52]: `Int8.minValue`, `Int8.maxValue` 
 
 **Native** (from the implementation sections):
 
-- Each integer type in its width; a ranged `Integer(min, max)` in `i64` with `range` metadata; ranged sized types in their width.
+- Each integer type in its width; a ranged `Integer<min, max>` in `i64` with `range` metadata; ranged sized types in their width.
 - Arithmetic computed in the compute type; a possible overflow is `llvm.s{add,sub,mul}.with.overflow` (at the node's width) or a compare against the sink bounds, then a cold branch to `fa_stop`; proven-safe nodes get `nsw`/`nuw`.
 - `//`, `%%` on signed: `sdiv`/`srem` then adjust by one when the remainder is non-zero and its sign differs from the divisor's; guard `INT_MIN %% -1` (return 0) and `INT_MIN // -1` (stop) before `sdiv`/`srem` [D-49]; unsigned: `udiv`/`urem`. An unproven divisor: `icmp eq 0`, cold branch to the `DivisionByZero` error path.
 - `**` on integers: square-and-multiply with overflow intrinsics; exponent check first.
@@ -673,11 +673,11 @@ Valid (output identical on all targets):
 - T-NUM-14 `function g = (a: Int8, b: Int8) => a + b · let s = g(-100, -29)` ⇒ stop (unannotated base type `Int8`)
 - T-NUM-15 `let x: UInt8 = 250 · let y: UInt8 = 10 · console.log(x.wrappingAdd(y), x.saturatingAdd(y))` → `4 255`
 - T-NUM-16 `let x: UInt8 = 250 · let y: UInt8 = 10 · console.log(x.checkedAdd(y) catch error => 0)` → `0`
-- T-NUM-17 `let small: Integer(min = 0, max = 100) = 87 · let bounded: Integer(min = 0, max = 200) = small * 2 · console.log(bounded)` → `174`
+- T-NUM-17 `let small: Integer<min = 0, max = 100> = 87 · let bounded: Integer<min = 0, max = 200> = small * 2 · console.log(bounded)` → `174`
 - T-NUM-18 `let a: Int8 = -5 · if a >= 0 { let p: UInt8 = a · console.log(p) } else { console.log("neg") }` → `neg`
 - T-NUM-19 `function read = (): Integer => 0 · let d = read() · console.log(10 // d catch error => -1)` → `-1`
 - T-NUM-20 `function read = (): Integer => 4 · let d = read() · if d != 0 { console.log(10 // d) }` → `2` (no `try`: narrowed)
-- T-NUM-21 `let divisor: Integer(min = 1) = 5 · console.log(10 // divisor)` → `2`
+- T-NUM-21 `let divisor: Integer<min = 1> = 5 · console.log(10 // divisor)` → `2`
 - T-NUM-22 `console.log(1 / 0, -1 / 0, (0.0 / 0.0).isNaN())` → `Infinity -Infinity true`
 - T-NUM-23 `let n = 0.0 / 0.0 · console.log(n == n, -0.0 == 0.0)` → `false true`
 - T-NUM-24 `console.log(0.1 + 0.2)` → `0.30000000000000004`
@@ -699,7 +699,7 @@ Valid (output identical on all targets):
 - T-NUM-40 `console.log(Math.max(3, 7), Math.min(3, 7), (-5).abs(), 15.clamp(0, 10), 2.0.sqrt())` → `7 3 5 10 1.4142135623730951`
 - T-NUM-41 `mutable count = 10 · count += 1 · count -= 2 · count *= 3 · count //= 4 · count %%= 5 · count **= 2 · console.log(count)` → `1`
 - T-NUM-42 `let a: Int8 = 10 · let b: Int32 = 1000 · let s = a + b · console.log(s)` → `1010` (`Int32`)
-- T-NUM-43 `function f = (): Integer(min = 20) => 25 · mutable value: Integer(min = 20) = f() · value -= 6` ⇒ stop (runtime check on a compound assignment; with `= 25` directly, the fact makes it E-NUM-10)
+- T-NUM-43 `function f = (): Integer<min = 20> => 25 · mutable value: Integer<min = 20> = f() · value -= 6` ⇒ stop (runtime check on a compound assignment; with `= 25` directly, the fact makes it E-NUM-10)
 - T-NUM-44 `let x: Int64 = 9_007_199_254_740_993 · console.log(x + 1)` → `9007199254740994` (exact on JS: `BigInt`)
 - T-NUM-45 `let x: Integer = 9_007_199_254_740_991 · let y = x + 0 · console.log(y)` → `9007199254740991`
 - T-NUM-46 (JS target) `function inc = (x: Integer) => x + 1 · console.log(inc(9_007_199_254_740_991))` ⇒ stop on JavaScript, `9007199254740992` on native (documented divergence)
@@ -708,9 +708,9 @@ Valid (output identical on all targets):
 - T-NUM-49 (native only: the constant is beyond 2^53) `function m = (): Integer => -9_223_372_036_854_775_807 - 1 · let x = m() · console.log(x %% -1)` → `0` (no `srem` trap)
 - T-NUM-50 `function m = (): Int32 => -2_147_483_648 · let x = m() · let y: Int32 = x // -1` ⇒ stop
 - T-NUM-51 `function big = (): Integer => 3_000_000_000 · let a = big() · let b = big() · let c: Integer = a * b // 3_000_000_000 · console.log(c)` → native `3000000000`; JS ⇒ stop (intermediate beyond 2^53)
-- T-NUM-52 `let value: Integer(min = 20) = 25 · if value < 20 { console.log("x") }` ⇒ W-NUM-2
-- T-NUM-53 `mutable count = 0 · for 0..10 { count += 1 } · let c: Integer(min = 0) = count · console.log(c)` → `10` (widening keeps the lower bound; `count += 1` keeps a runtime check)
-- T-NUM-54 `let i: Integer(min = 0, max = 2) = 1 · let array = [1, 2, 3] · console.log(array[i])` → `2` (no `try`)
+- T-NUM-52 `let value: Integer<min = 20> = 25 · if value < 20 { console.log("x") }` ⇒ W-NUM-2
+- T-NUM-53 `mutable count = 0 · for 0..10 { count += 1 } · let c: Integer<min = 0> = count · console.log(c)` → `10` (widening keeps the lower bound; `count += 1` keeps a runtime check)
+- T-NUM-54 `let i: Integer<min = 0, max = 2> = 1 · let array = [1, 2, 3] · console.log(array[i])` → `2` (no `try`)
 - T-NUM-55 `console.log(0.5 ** 2.0, 2.0 ** 0.5)` → `0.25 1.4142135623730951`
 - T-NUM-56 `console.log(-50%, 50% > 25%)` → `-50% true`
 
@@ -733,12 +733,12 @@ Invalid:
 - T-NUM-74 `let n = 3 · let p = n * 50%` ⇒ E-NUM-11; `let q = 50% * 2` ⇒ E-NUM-11; `let r = 50% + 0.5` ⇒ E-NUM-11
 - T-NUM-75 `let x = 5 // 0` ⇒ E-NUM-12; `let y = 5 %% 0` ⇒ E-NUM-12
 - T-NUM-76 `function read = (): Integer => 2 · let d = read() · let q = 10 // d` ⇒ E-ERR-3 (`DivisionByZero` not handled)
-- T-NUM-77 `let r: Integer(min = 5, max = 1) = 3` ⇒ E-NUM-13
+- T-NUM-77 `let r: Integer<min = 5, max = 1> = 3` ⇒ E-NUM-13
 - T-NUM-78 `function read = (): Int8 => 1 · let a = read() · let byte: UInt8 = a` ⇒ E-NUM-14
-- T-NUM-79 `mutable foo: Integer(max = 100) = 1 · function get = (): Integer(max = 200) => 150 · let bar = get() · foo = bar` ⇒ E-NUM-14
+- T-NUM-79 `mutable foo: Integer<max = 100> = 1 · function get = (): Integer<max = 200> => 150 · let bar = get() · foo = bar` ⇒ E-NUM-14
 - T-NUM-80 `function i8 = (): Int8 => 1 · function u8 = (): UInt8 => 1 · let s = i8() + u8()` ⇒ E-NUM-15; `let t: Int16 = i8() + u8()` valid
 - T-NUM-81 `let b = BigInt(1.5)` ⇒ E-NUM-16; `let p = (5n)%` ⇒ E-NUM-16
-- T-NUM-82 `let array = [1, 2, 3] · let item = array[3]` ⇒ E-NUM-17; `let value: Integer(min = 4) = 4 · let x = array[value]` ⇒ E-NUM-17
+- T-NUM-82 `let array = [1, 2, 3] · let item = array[3]` ⇒ E-NUM-17; `let value: Integer<min = 4> = 4 · let x = array[value]` ⇒ E-NUM-17
 - T-NUM-83 `let t = true + 1` ⇒ E-NUM-18
 - T-NUM-84 `let a: UInt8 = 1 · let b = a.shiftLeft(8)` ⇒ E-NUM-20; `a.shiftLeft(-1)` ⇒ E-NUM-20
 - T-NUM-85 `function n = (): Integer => 1 · let s = n() · let a: UInt8 = 1 · let b = a.shiftLeft(s)` ⇒ E-ERR-3 (`ArithmeticError` not handled)
@@ -762,17 +762,18 @@ Sources: `values/strings` (incl. `:::implementation`), `operations/string`, `get
 
 ### Static semantics
 
-- A string literal is a `String`, or a `Character` when a `Character` is expected and the literal is exactly one grapheme cluster (UAX #29 tables of the compiler). An interpolated string is always a `String`.
-- `Character` is accepted where `String` is expected (no conversion visible); the reverse is E-STR-8.
-- `+`: both operands `String` or `Character`; the result is a `String`. Any other operand: E-STR-7. `+=` on a mutable `String` target with a `String` or `Character` value. There is no `*` (use `repeat`).
+- A string literal is a `String`, interpolated or not. There is no `Character` type (decision of 2026-11-15, `design/decisions.md` "Strings: UTF-16 semantics, UTF-8 storage"): the name is unknown, with a fix that names `String`.
+- A `String` is a sequence of UTF-16 code units on every target; every length, position and order below is in code units, exactly as in JavaScript.
+- `+`: both operands `String`; the result is a `String`. Any other operand: E-STR-7. `+=` on a mutable `String` target with a `String` value. There is no `*` (use `repeat`).
 - Interpolation: each expression must have a `toString` (every type except function types and `Void`): E-STR-11 for `Void`, E-STR-12 for a function value [D-39]. An interpolation that can fail must be covered (`"{try items[i]}"` inside a function that declares `IndexError`, or the whole string followed by `catch`).
-- `length`: property, `Integer(min = 0)`, grapheme count; known as a fact for literals [D-97].
-- Indexing `s[i]` with an integer: a `Character`; negative indices count from the end; unproven index: `throws IndexError`; proven out of bounds: E-NUM-17. Non-integer index: E-STR-10. `s.get(i)`: `Character?`.
+- `length`: property, `Integer<min = 0>`, the number of UTF-16 code units; known as a fact for literals [D-97].
+- Indexing `s[i]` with an integer: a `String` of one code unit (possibly a lone surrogate); negative indices count from the end; unproven index: `throws IndexError`; proven out of bounds: E-NUM-17. Non-integer index: E-STR-10. `s.get(i)`: `String?`. `s.codeUnitAt(i)`: `UInt16`, same bound rules as `s[i]`.
 - Slicing `s[range]`: a new `String` (copy) with `let`/`mutable`; `use w = s[range]` declares a slice of type `String in s`, invalidated by any mutation of `s` (appending, assigning, assigning the field that holds it). Bounds from `−length` to `length`; an inverted range gives `""` [D-42]; unproven bounds: `throws IndexError`.
 - Strings are immutable through methods: no method mutates. A `mutable` string changes only by assignment and `+=`.
-- Ordering `< <= > >=`: by Unicode code point (on `String` and `Character`); `==`: same sequence of scalar values, no Unicode normalization [D-43]; a literal operand adapts to `Character` when the other side is a `Character`.
+- Ordering `< <= > >=`: by UTF-16 code unit, as JavaScript's `<`; `==`: same sequence of code units, no Unicode normalization [D-43].
 - `is in` on a string: E-CMP-6 ("use `includes`").
-- Method table (`operations/string#methods`): `isEmpty()`, `get(index)`, `includes/startsWith/endsWith(search)`, `indexOf/lastIndexOf(search): Integer?`, `toUpperCase()/toLowerCase()` (Unicode default case mapping, locale-independent), `trim/trimStart/trimEnd()`, `padStart/padEnd(length: Integer, filler: String = " ")`, `repeat(count: Integer(min = 0))`, `replace(search, replacement)` (first match), `replaceAll(...)`, `split(separator): Array(String)` (empty separator: characters), `characters(): Array(Character)`, `codePoints(): Array(UInt32)`, `toString()`, `String.compareLocale(a, b, locale: String? = none): Integer`; `Array(String).join(separator)`. Every position and search is in grapheme clusters, and a search never matches part of a grapheme cluster (`"e\u{301}".includes("e")` is `false`). No regular expressions.
+- Method table (`operations/string#methods`): `isEmpty()`, `get(index)`, `includes/startsWith/endsWith(search)`, `indexOf/lastIndexOf(search): Integer?`, `toUpperCase()/toLowerCase()` (Unicode default case mapping, locale-independent), `trim/trimStart/trimEnd()`, `padStart/padEnd(length: Integer, filler: String = " ")`, `repeat(count: Integer<min = 0>)`, `replace(search, replacement)` (first match), `replaceAll(...)`, `split(separator): Array<String>` (empty separator: code units), `characters(): Array<String>` (grapheme clusters, the only operation using UAX #29), `codePoints(): Array<UInt32>` (`.length` of it counts without building the array), `codeUnitAt(index): UInt16`, `isWellFormed(): Boolean`, `utf8Length(): Integer<min = 0>`, `toUtf8(): Bytes`, `String.fromUtf8(bytes: Bytes): String throws Utf8Error`, `String.fromUtf8Lossy(bytes: Bytes): String`, `toString()`, `String.compareLocale(a, b, locale: String? = none): Integer`; `Array<String>.join(separator)`. Every position and search is in code units, and a search can match a part of a grapheme cluster or of a surrogate pair (`"e\u{301}".includes("e")` is `true`), as in JavaScript. The former `bytes()` is replaced by `toUtf8()`. No regular expressions.
+- `Bytes` (`values/bytes`): a prelude type, a fixed-length sequence of `Byte`: `Bytes.from(items: Array<Byte>)`, `Bytes.filled(length, value: Byte = 0)`, `length`, `isEmpty()`, `get(index): Byte?`, indexing and slicing with the array rules (`use` slices, item assignment on a mutable value, no `push`/`insert`/`delete`), iteration, `==`, `toArray()`, `toString()` (array notation). `Utf8Error { position: Integer }` is a prelude error.
 
 ### Diagnostics
 
@@ -785,8 +786,8 @@ Sources: `values/strings` (incl. `:::implementation`), `operations/string`, `get
 | E-STR-5 | empty interpolation `{}` or `{ }` |
 | E-STR-6 | unterminated interpolation |
 | E-STR-7 | `+` with a non-string operand: "expected a `String`, found an `Integer`: use `"Score: {score}"` or `score.toString()`" |
-| E-STR-8 | `String` where a `Character` is expected (non-literal) |
-| E-STR-9 | literal with zero or several grapheme clusters where a `Character` is expected (`let c: Character = "ab"`, `= ""`) |
+| E-STR-8 | retired (was: `String` where a `Character` is expected) |
+| E-STR-9 | retired (was: literal that is not one grapheme cluster where a `Character` is expected) |
 | E-STR-10 | string indexed by a non-integer, non-range value |
 | E-STR-11 | interpolating a `Void` expression |
 | E-STR-12 | interpolating a function value [D-39] |
@@ -795,15 +796,16 @@ Sources: `values/strings` (incl. `:::implementation`), `operations/string`, `get
 ### Runtime semantics
 
 - Source line breaks are `\n`, including `\r\n` and lone `\r` in the source file [D-16].
-- `length`, indexing, slicing, iteration, searches: grapheme clusters (UAX #29 of the compiler's Unicode version on native; of the engine's `Intl.Segmenter` on JavaScript — the one documented divergence).
+- `length`, indexing, slicing, searches: UTF-16 code units, identical on every target and in the compile-time interpreter. Only `characters()` segments grapheme clusters (UAX #29 of the compiler's Unicode version on native; of the engine's `Intl.Segmenter` on JavaScript — the one documented divergence).
+- An index or a slice that cuts a surrogate pair yields a lone surrogate (no error); concatenating a lone high and a lone low surrogate yields the pair. Every output and `toUtf8()` write `U+FFFD` for a lone surrogate.
 - `IndexError` from unproven indices and slices.
-- Iteration yields `Character` copies (with the index for `for c, i in s`).
+- Iteration yields the code points, as `String` copies of one or two code units (a lone surrogate as it is); the index of `for c, i in s` is the code unit position of the code point (it advances by 2 after a pair).
 
 ### Lowering
 
-**Native** (`values/strings:::implementation`, LLVM Q5): `String` = 24 bytes `{ ptr, byte length, capacity | flags (static, inline, ASCII) }`; ≤ 23 bytes inline; literals in read-only data with their grapheme count computed at compile time, copied only when a mutable string is created from one; heap strings cache their grapheme count and build breadcrumbs (byte offset of every 64th grapheme) at the second indexing after a write; a write clears both; ASCII flag maintained on every write (O(1) `length` and indexing). Slice = `{ ptr, byte length }` on grapheme boundaries. `<` = `memcmp` of UTF-8 (code point order). `Character` = small inline string. Interpolation: compute the pieces, sum the byte lengths, allocate once, write.
+**Native** (`values/strings:::implementation`, LLVM Q5): `String` = 24 bytes `{ ptr, byte length, capacity | flags (static, inline, ASCII) }`; ≤ 23 bytes inline; the bytes are UTF-8 extended to lone surrogates (WTF-8, a pair always stored as its four-byte code point), with a second flag, surrogates, set only by a cut pair; literals in read-only data with their UTF-16 length computed at compile time, copied only when a mutable string is created from one; heap strings cache their UTF-16 length (non-continuation bytes plus four-byte sequences) and build breadcrumbs (byte offset of every 64th code unit) at the second position conversion after a write; a write clears both; ASCII flag (every byte below `0x80`; `'\r'` no longer excluded) maintained on every write (O(1) `length` and indexing, a position is a byte offset). Slice = `{ ptr, byte length }` plus the ASCII flag of its string. `<` = `memcmp` of the bytes, inverted when the first differing bytes are a four-byte lead (`F0`–`F4`) against `EE`/`EF`, and compared by code unit at the difference when a surrogates flag is set. Searches run on the bytes and convert byte offsets to code unit positions; a needle starting with a lone low surrogate or ending with a lone high one is searched by code unit. `s[i]` = inline string, compared with a literal as a code unit without being built; `codeUnitAt` = the unit. `utf8Length()` = the byte length. No ropes. `Bytes` = the layout of `Array<Byte>`; `toUtf8`/`fromUtf8` move the block when the source is dead, `fromUtf8` validates and computes the ASCII flag. Interpolation: compute the pieces, sum the byte lengths, allocate once, write.
 
-**JavaScript**: a JS string. `+` → `+`. Interpolation → a template literal; a `String`, `Character` or integer goes in directly, other values through `$fa.str(value)` (floats `Float32`, percentages, optionals, composites). Grapheme operations through a shared `Intl.Segmenter("und", { granularity: "grapheme" })` with an ASCII fast path (`/^[\x00-\x7F]*$/`). Caveat: JavaScript strings can't cache a grapheme count, so `length` on non-ASCII text is O(n) per call: the backend hoists `s.length` out of loops when `s` isn't mutated. `<` → helper comparing by code point only when either string contains a surrogate (`/[\uD800-\uDFFF]/`), else JS `<`. `==` → `===`. Slices → `substring` (a copy; invalidation is compile-time only). `indexOf` → JS `indexOf` converted to a grapheme index, `-1` → `undefined` (`none`); `includes`/`startsWith`/`endsWith`/`indexOf`/`replace`/`split` must reject matches whose ends are not grapheme boundaries (helper; ASCII fast path is the plain JS call). `toUpperCase`/`toLowerCase`/`trim*`/`padStart`/`padEnd` (pad length in graphemes: helper unless ASCII) /`repeat` → JS. `codePoints()` → `Array.from(s, (c) => c.codePointAt(0))`.
+**JavaScript**: a JS string. `+` → `+`. Interpolation → a template literal; a `String` or integer goes in directly, other values through `$fa.str(value)` (floats `Float32`, percentages, optionals, composites). Every operation is the JavaScript one, with no helper and no cache: `length` → `.length`, `s[i]` → `s[i]` after the bound check, `<` → `<`, `==` → `===`, slices → `slice` (a copy; invalidation is compile-time only), `indexOf`/`lastIndexOf` → JS, `-1` → `undefined` (`none`), `includes`/`startsWith`/`endsWith`/`replace`/`replaceAll`/`split`/`toUpperCase`/`toLowerCase`/`trim*`/`padStart`/`padEnd`/`repeat`/`isWellFormed` → JS, `codeUnitAt` → `charCodeAt`. Iteration → `for…of`, or with an index a loop on `codePointAt` advancing by the code point's length. `characters()` → a shared `Intl.Segmenter("und", { granularity: "grapheme" })`. `codePoints()` → `Array.from(s, (c) => c.codePointAt(0))`. `utf8Length()` → `Buffer.byteLength(s)` on Bun and Node, a `charCodeAt` loop on `web`. `toUtf8()` → shared `TextEncoder`; `String.fromUtf8` → shared `TextDecoder("utf-8", { fatal: true, ignoreBOM: true })` (a failure becomes `Utf8Error`), `fromUtf8Lossy` → the same without `fatal`. `Bytes` → `Uint8Array` (`slice()` to copy, `subarray()` for a `use` slice, helpers for `==` and `toString`).
 
 ### Tests
 
@@ -820,22 +822,24 @@ Valid:
 - T-STR-9 `let user: { name: String? } = { name = none } · console.log("Name: {user.name ?? "anonymous"}")` → `Name: anonymous`
 - T-STR-10 `type Point = { x: Integer, y: Integer } · console.log("Origin: {Point { x = 0, y = 0 }}")` → `Origin: { x = 0, y = 0 }`
 - T-STR-11 `console.log("{0.5} {50%} {none} {true} {[1, 2]} {(1, "a")}")` → `0.5 50% none true [1, 2] (1, "a")`
-- T-STR-12 `let snow: Character = "☃" · let flag: Character = "🇫🇷" · console.log(snow, flag)` → `☃ 🇫🇷`
-- T-STR-13 `let first: Character = "F" · let text: String = first · console.log("Letter: " + first, text)` → `Letter: F F`
-- T-STR-14 `console.log("héllo".length, "🇫🇷".length, "e\u{301}".length)` → `5 1 1`
+- T-STR-12 `let face = "😀" · console.log(face[0].length, face[0].isWellFormed(), face[0] + face[1] == face, face[0..1] + face[1..] == face)` → `1 false true true`
+- T-STR-13 `let name = "Fa" · let first: String = name[0] · console.log("Letter: " + first, name.codeUnitAt(0))` → `Letter: F 70`
+- T-STR-14 `console.log("héllo".length, "🇫🇷".length, "e\u{301}".length, "héllo".utf8Length(), "😀".utf8Length())` → `5 4 2 6 4`
 - T-STR-15 `let name = "Fa" · console.log(name[0], name[-1], name[0] == "F")` → `F a true` (no `try`: literal length fact)
 - T-STR-16 `let s = "hello" · console.log(s[1..3], s[1..=3], s[1..], s[..2], s[-3..])` → `el ell ello he llo`
 - T-STR-17 `let s = "hello" · console.log(s[3..1] == "")` → `true` [D-42]
 - T-STR-18 `function idx = (): Integer => 10 · let s = "abc" · console.log(s.get(idx()), s[idx()] catch error => "?")` → `none ?`
 - T-STR-19 `mutable output = "" · for item in [1, 2, 3] { · output += item.toString() · output += "," · } · console.log(output)` → `1,2,3,`
-- T-STR-20 `for c, i in "aé🇫🇷" { console.log("{i}:{c}") }` → `0:a / 1:é / 2:🇫🇷`
-- T-STR-21 `console.log("abc" < "abd", "Z" < "a", "\u{FFFF}" < "\u{10000}")` → `true true true` (code point order; JS code-unit order would say `false` for the last)
+- T-STR-20 `for c, i in "aé😀b" { console.log("{i}:{c}") }` → `0:a / 1:é / 2:😀 / 4:b`
+- T-STR-21 `console.log("abc" < "abd", "Z" < "a", "\u{FFFF}" < "\u{10000}")` → `true true false` (UTF-16 code unit order, as JS: `U+10000` starts with the unit `D800`)
 - T-STR-22 `console.log("é" == "e\u{301}")` → `false` [D-43]
 - T-STR-23 `let t = "hello world" · console.log(t.includes("world"), t.startsWith("hello"), t.endsWith("world"), t.indexOf("world"), t.indexOf("planet"))` → `true true true 6 none`
 - T-STR-24 `console.log("hello-world".replace("-", " "), "a-b-c".replaceAll("-", " "), "a,b,c".split(","), ["a", "b"].join(", "))` → `hello world a b c ["a", "b", "c"] a, b`
 - T-STR-25 `console.log("ß".toUpperCase(), "  padded  ".trim(), "ab".repeat(3), "7".padStart(3, "0"))` → `SS padded ababab 007`
-- T-STR-26 `console.log("e\u{301}x".includes("e"), "🇫🇷🇩🇪".indexOf("🇩🇪"))` → `false 1`
-- T-STR-27 `console.log("abc".codePoints(), "ab".characters(), "a😀".split(""))` → `[97, 98, 99] ["a", "b"] ["a", "😀"]`
+- T-STR-26 `console.log("e\u{301}x".includes("e"), "🇫🇷🇩🇪".indexOf("🇩🇪"), "🇫🇷🇩🇪".characters().length, "😀".includes("😀"[0]))` → `true 4 2 true`
+- T-STR-27 `console.log("abc".codePoints(), "ab".characters(), "ab".split(""), "a😀".split("").length, "a😀".codePoints().length)` → `[97, 98, 99] ["a", "b"] ["a", "b"] 3 2`
+- T-STR-31 `let bytes = "héllo".toUtf8() · console.log(bytes.length, bytes[1], bytes, String.fromUtf8(bytes) catch error => "?")` → `6 195 [104, 195, 169, 108, 108, 111] héllo`
+- T-STR-32 `console.log(String.fromUtf8(Bytes.from([104, 255])) catch error => error.position, String.fromUtf8Lossy(Bytes.from([104, 255])), "😀"[0].toUtf8())` → `1 h� [239, 191, 189]`
 - T-STR-28 `console.log(String.compareLocale("a", "b") < 0)` → `true`
 - T-STR-29 `mutable text = "hello world" · use word = text[0..5] · console.log(word)` → `hello`
 - T-STR-30 `console.log("a" + "b" + "c", "x".isEmpty(), "".isEmpty())` → `abc false true`
@@ -848,8 +852,8 @@ Invalid:
 - T-STR-43 `let s = "a } b"` ⇒ E-STR-4
 - T-STR-44 `let s = "a {} b"` ⇒ E-STR-5
 - T-STR-45 `let score = 42 · let label = "Score: " + score` ⇒ E-STR-7
-- T-STR-46 `let text = "F" · let c: Character = text` ⇒ E-STR-8
-- T-STR-47 `let letters: Character = "ab"` ⇒ E-STR-9; `let e: Character = ""` ⇒ E-STR-9
+- T-STR-46 `let c: Character = "F"` ⇒ unknown type `Character` (fix: `String`)
+- T-STR-47 `mutable bytes = Bytes.filled(2) · bytes.push(1)` ⇒ E-OBJ-5 (no such method)
 - T-STR-48 `let s = "abc" · let c = s[true]` ⇒ E-STR-10
 - T-STR-49 `function log = (m: String) => { · console.log(m) · } · console.log("{log("a")}")` ⇒ E-STR-11
 - T-STR-50 `function f = (x: Integer) => x · console.log("{f}")` ⇒ E-STR-12
@@ -911,11 +915,11 @@ Sources: `values/optionals`, `operations/logical#fallback-for-optionals`, `types
 
 ### Syntax (as parsed)
 
-`none` (`Node::None`); type suffix `T?` (`Node::Optional`), `Optional(T)`, `T | None`; safe access `a?.b`, `a?.m(args)` (`OptionalAccess`); fallback `a ?? b` (`Fallback { operands }`, left-associative).
+`none` (`Node::None`); type suffix `T?` (`Node::Optional`), `Optional<T>`, `T | None`; safe access `a?.b`, `a?.m(args)` (`OptionalAccess`); fallback `a ?? b` (`Fallback { operands }`, left-associative).
 
 ### Static semantics
 
-- `T?` = `Optional(T)` = `T | None`; `T??` = `T?`. A single `none`.
+- `T?` = `Optional<T>` = `T | None`; `T??` = `T?`. A single `none`.
 - `none` is accepted only where the expected type contains `None`: `let dog: Dog = none` is `E-OPT-2`. Without an expected type: E-DECL-11 [D-21].
 - A `T` is accepted where `T?` is expected (no conversion). A `T?` is not accepted where `T` is expected: `E-OPT-1` ("`user` may be `none`: narrow it with `if user is not none`, or use `?.` or `??`") — this covers field access, method calls, indexing, arithmetic, passing as an argument, using it in a condition (E-BOOL-1 there).
 - Optional in a condition: E-BOOL-1 (no truthiness).
@@ -956,18 +960,18 @@ Sources: `values/optionals`, `operations/logical#fallback-for-optionals`, `types
 - T-OPT-4 `type U = { name: String } · let u: U? = none · function n = (): String => { · console.log("called") · "x" · } · console.log(u?.name ?? n())` → `called / x`
 - T-OPT-5 `type U = { name: String } · let u: U? = { name = "Bo" } · function n = (): String => { · console.log("called") · "x" · } · console.log(u?.name ?? n())` → `Bo` (right side not evaluated)
 - T-OPT-6 `type A = { b: { c: Integer } } · let a: A? = none · console.log(a?.b.c)` → `none` (whole chain short-circuited)
-- T-OPT-7 `let values: Array(Integer?) = [1, none] · console.log(values.get(1), values.get(5))` → `none none`
+- T-OPT-7 `let values: Array<Integer?> = [1, none] · console.log(values.get(1), values.get(5))` → `none none`
 - T-OPT-8 `let m: Integer? = none · console.log(m == 42, m == none)` → `false true`
-- T-OPT-9 `function first = (xs: Array(Integer)): Integer => xs.get(0) ?? return -1 · console.log(first([]), first([7]))` → `-1 7`
+- T-OPT-9 `function first = (xs: Array<Integer>): Integer => xs.get(0) ?? return -1 · console.log(first([]), first([7]))` → `-1 7`
 - T-OPT-10 `type Dog = { name: String, function bark = (self) => console.log("{self.name}!") } · let d: Dog? = { name = "Rex" } · d?.bark()` → `Rex!`
 - T-OPT-11 `let a: Integer? = none · let b: Integer? = 2 · console.log(a ?? b ?? 3)` → `2`
-- T-OPT-12 `type MaybeInteger = Integer? · let x: Optional(Integer) = 3 · let y: Integer | None = x · let z: MaybeInteger = y · console.log(z)` → `3`
+- T-OPT-12 `type MaybeInteger = Integer? · let x: Optional<Integer> = 3 · let y: Integer | None = x · let z: MaybeInteger = y · console.log(z)` → `3`
 - T-OPT-20 `type Dog = { name: String } · let dog: Dog = none` ⇒ E-OPT-2
 - T-OPT-21 `type Dog = { name: String } · let dog: Dog? = none · console.log(dog.name)` ⇒ E-OPT-1
 - T-OPT-22 `let x: Integer? = 1 · let y = x + 1` ⇒ E-OPT-1
 - T-OPT-23 `type Dog = { name: String } · let dog: Dog? = none · if dog { }` ⇒ E-BOOL-1
 - T-OPT-24 `type U = { name: String } · let u = U { name = "a" } · let n = u?.name` ⇒ E-OPT-3
-- T-OPT-25 `let s: Array(Integer)? = none · let x = s?[0]` ⇒ E-OPT-5
+- T-OPT-25 `let s: Array<Integer>? = none · let x = s?[0]` ⇒ E-OPT-5
 - T-OPT-26 `let n = 5 · let m = n ?? 0` ⇒ E-OPT-6
 - T-OPT-27 `let a: Integer? = none · let r = a ?? 1 ?? 2` ⇒ E-OPT-6
 - T-OPT-28 `let n = 5 · if n is none { }` ⇒ E-CMP-7; `if n is not none { }` ⇒ W-CMP-1
@@ -982,12 +986,12 @@ Source: `values/tuples`.
 
 ### Syntax (as parsed)
 
-Value `(a, b, …)` with at least two items (`Node::Tuple` inside a `Group`); type `Tuple(A, B, …)`; access `t[0]` (`Index` with a literal); pattern `(a, b)`. `()` is `EmptyGroup`; `(x)` is a parenthesized expression; `(1,)` is a parse error.
+Value `(a, b, …)` with at least two items (`Node::Tuple` inside a `Group`); type `Tuple<A, B, …>`; access `t[0]` (`Index` with a literal); pattern `(a, b)`. `()` is `EmptyGroup`; `(x)` is a parenthesized expression; `(1,)` is a parse error.
 
 ### Static semantics
 
-- Type `Tuple(T1, …, Tn)`, n ≥ 2, element types widened when unannotated (`(1, "one")` is `Tuple(Integer, String)`). With an expected tuple type, elements are checked against it (literals adapt).
-- `()` as a value: `E-TUP-1`; `Tuple(A)` or `Tuple()`: `E-TUP-1`.
+- Type `Tuple<T1, …, Tn>`, n ≥ 2, element types widened when unannotated (`(1, "one")` is `Tuple<Integer, String>`). With an expected tuple type, elements are checked against it (literals adapt).
+- `()` as a value: `E-TUP-1`; `Tuple<A>` or `Tuple<>`: `E-TUP-1`.
 - Indexing: the index must be a non-negative integer literal (or a constant expression) smaller than n [D-31]: a non-literal index is `E-TUP-2` ("a tuple index must be a literal"), out of range or negative is `E-TUP-3`. `t.0` is `E-TUP-4` ("write `t[0]`").
 - Element assignment `t[0] = v` on a mutable tuple: allowed, `v` checked against the element type [D-31].
 - Equality element-wise; the two tuple types must be compatible (same arity, compatible element types: E-CMP-1); no ordering (E-CMP-2).
@@ -997,7 +1001,7 @@ Value `(a, b, …)` with at least two items (`Node::Tuple` inside a `Group`); ty
 
 | Id | Condition |
 | --- | --- |
-| E-TUP-1 | `()` as a value, `Tuple()`, `Tuple(A)` |
+| E-TUP-1 | `()` as a value, `Tuple<>`, `Tuple<A>` |
 | E-TUP-2 | non-literal tuple index |
 | E-TUP-3 | tuple index out of range or negative |
 | E-TUP-4 | `t.0` access |
@@ -1009,17 +1013,17 @@ Native: a struct with positional fields (same layout rules as objects). JavaScri
 ### Tests
 
 - T-TUP-1 `let pair = (1, "one") · console.log(pair, pair[0], pair[1])` → `(1, "one") 1 one`
-- T-TUP-2 `let typed: Tuple(Integer, String) = (1, "one") · let (n, t) = typed · console.log(n, t)` → `1 one`
-- T-TUP-3 `function divide = (a: Integer, b: Integer(min = 1)): Tuple(Integer, Integer) => (a // b, a %% b) · let (q, r) = divide(17, 5) · console.log(q, r)` → `3 2`
+- T-TUP-2 `let typed: Tuple<Integer, String> = (1, "one") · let (n, t) = typed · console.log(n, t)` → `1 one`
+- T-TUP-3 `function divide = (a: Integer, b: Integer<min = 1>): Tuple<Integer, Integer> => (a // b, a %% b) · let (q, r) = divide(17, 5) · console.log(q, r)` → `3 2`
 - T-TUP-4 `console.log((1, "a") == (1, "a"), (1, "a") != (2, "a"))` → `true true`
 - T-TUP-5 `mutable t = (1, 2) · let u = t · t[0] = 5 · console.log(t, u)` → `(5, 2) (1, 2)`
-- T-TUP-6 `let f: Tuple(Float, Integer) = (1, 2) · console.log(f[0] / 2.0)` → `0.5` (literal adapts)
+- T-TUP-6 `let f: Tuple<Float, Integer> = (1, 2) · console.log(f[0] / 2.0)` → `0.5` (literal adapts)
 - T-TUP-7 `let x = (1) · console.log(x + 1)` → `2` (grouping)
 - T-TUP-20 `let u = ()` ⇒ E-TUP-1
 - T-TUP-21 `function readIndex = (): Integer => 0 · let pair = (1, "one") · let v = pair[readIndex()]` ⇒ E-TUP-2
 - T-TUP-22 `let pair = (1, "one") · let v = pair[2]` ⇒ E-TUP-3; `pair[-1]` ⇒ E-TUP-3
 - T-TUP-23 `let pair = (1, "one") · let v = pair.0` ⇒ E-TUP-4
-- T-TUP-24 `type Point = { x: Integer, y: Integer } · let t: Tuple(Integer, Integer) = (3, 4) · let p: Point = t` ⇒ E-TYPE-1
+- T-TUP-24 `type Point = { x: Integer, y: Integer } · let t: Tuple<Integer, Integer> = (3, 4) · let p: Point = t` ⇒ E-TYPE-1
 - T-TUP-25 `let c = (1, 2) < (1, 3)` ⇒ E-CMP-2
 - T-TUP-26 `let c = (1, 2) == (1, 2, 3)` ⇒ E-CMP-1
 - T-TUP-27 `let pair = (1, 2) · pair[0] = 3` ⇒ E-DECL-4
@@ -1033,7 +1037,7 @@ Sources: `values/objects`, `getting-started/syntax-basics#braces`, `types/type-c
 
 ### Syntax (as parsed)
 
-- Object literal: `{ a = 1, b: T = 2, c, ...d }` (`Node::Members`; items separated by commas or newlines). Typed literal: `Point { x = 1 }`, `Point(Float) { … }`. Field access `a.b`; field assignment `a.b = v`; multi-field update `a .= { b = 1, c = 2 }` (`CompoundAssignment { operator: Update }`, the parser requires an object literal on the right).
+- Object literal: `{ a = 1, b: T = 2, c, ...d }` (`Node::Members`; items separated by commas or newlines). Typed literal: `Point { x = 1 }`, `Point<Float> { … }`. Field access `a.b`; field assignment `a.b = v`; multi-field update `a .= { b = 1, c = 2 }` (`CompoundAssignment { operator: Update }`, the parser requires an object literal on the right).
 - In a type: fields `name: T`, `name: T = default`, `name = default`, `readonly`, `#private`, methods `function m = (self, …) => …`, spreads `...Parent` (types are out of scope here).
 
 ### Static semantics
@@ -1106,7 +1110,7 @@ Field values are evaluated in written order; spreads at their position; then def
 - T-OBJ-6 `type S = { host: String, port: Integer, secure: Boolean } · mutable s = S { host = "a", port = 80, secure = false } · s .= { port = 8080, secure = true } · console.log(s)` → `{ host = "a", port = 8080, secure = true }`
 - T-OBJ-7 `type P = { x: Integer, y: Integer } · mutable p = P { x = 1, y = 2 } · p .= { x = p.y, y = p.x } · console.log(p)` → `{ x = 2, y = 1 }` [D-17]
 - T-OBJ-8 `type C = { a: Integer, b: Integer } · function n = (v: Integer): Integer => { · console.log(v) · v · } · let c = C { b = n(2), a = n(1) } · console.log(c)` → `2 / 1 / { a = 1, b = 2 }` (written order of evaluation, declaration order of printing)
-- T-OBJ-9 `type A = { readonly balance: Integer = 0, function deposit = (self, amount: Integer(min = 0)) mutates self.balance => { · self.balance += amount · } } · mutable a = A {} · a.deposit(100) · console.log(a.balance)` → `100`
+- T-OBJ-9 `type A = { readonly balance: Integer = 0, function deposit = (self, amount: Integer<min = 0>) mutates self.balance => { · self.balance += amount · } } · mutable a = A {} · a.deposit(100) · console.log(a.balance)` → `100`
 - T-OBJ-10 `type Counter = { #count: Integer = 0, function increment = (self) mutates self => { · self.#count += 1 · }, function current = (self): Integer => self.#count } · mutable c = Counter {} · c.increment() · console.log(c.current())` → `1`
 - T-OBJ-11 `type Point = { x: Integer, y: Integer } · console.log(Point { x = 1, y = 2 } == Point { x = 1, y = 2 }, Point { x = 1, y = 2 } != Point { x = 2, y = 1 })` → `true true`
 - T-OBJ-12 `type Human = { name: String } · type Super = { ...Human, powers: String } · let s = Super { name = "John", powers = "all" } · let h: Human = s · console.log(h)` → `{ name = "John" }`
@@ -1210,7 +1214,7 @@ Sources: `operations/logical`, `control-flow/conditionals#narrowing`, `types/uni
 
 **Equality** (`==`, `!=`, result `Boolean`):
 
-- The operand types must be **compatible**: one is accepted where the other is expected. Specifically: an optional with its base type (or `none`); integers of any sizes and ranges with each other; `String` with `Character`; a literal adapts to the type of the other operand (`name[0] == "F"` compares characters; `point == { x = 1, y = 2 }` types the literal as the other side's type); structural object types where one is accepted by the other. Otherwise `E-CMP-1` ("cannot compare `String` with `Integer`"). Integers with floats, floats of different widths, `BigInt` with integers, `Percentage` with numbers: E-CMP-1.
+- The operand types must be **compatible**: one is accepted where the other is expected. Specifically: an optional with its base type (or `none`); integers of any sizes and ranges with each other; a literal adapts to the type of the other operand (`point == { x = 1, y = 2 }` types the literal as the other side's type); structural object types where one is accepted by the other. Otherwise `E-CMP-1` ("cannot compare `String` with `Integer`"). Integers with floats, floats of different widths, `BigInt` with integers, `Percentage` with numbers: E-CMP-1.
 - A type containing a function (function pointer field, function value) can't be compared: `E-CMP-4`.
 - The right side is a type name (`living == Animal`): `E-CMP-8` ("`Animal` is a type: use `is`").
 - Chaining `a == b == c`, `a != b == c`: `E-CMP-3`.
@@ -1219,7 +1223,7 @@ Sources: `operations/logical`, `control-flow/conditionals#narrowing`, `types/uni
 
 **Ordering** (`<`, `<=`, `>`, `>=`):
 
-- Ordered types: integers (any sizes, mixed), floats of the same type, `BigInt`, `Percentage`, `String`/`Character` (code point order). Anything else (`Boolean`, tuples, objects, collections, optionals, unions): `E-CMP-2`. Mixed kinds: E-CMP-1.
+- Ordered types: integers (any sizes, mixed), floats of the same type, `BigInt`, `Percentage`, `String` (UTF-16 code unit order). Anything else (`Boolean`, tuples, objects, collections, optionals, unions): `E-CMP-2`. Mixed kinds: E-CMP-1.
 - Chains: `a < b <= c` means `a < b and b <= c` with `b` evaluated once, short-circuiting. All operators of a chain go in one direction (`<`/`<=` or `>`/`>=`): mixing is `E-CMP-3`. A parenthesized comparison is a `Boolean` operand: `(a < b) < c` is E-CMP-2.
 - NaN: every ordering is `false`.
 
@@ -1264,7 +1268,7 @@ Operands are evaluated left to right, each once; chains and `and`/`or` short-cir
 
 - T-CMP-1 `console.log(42 == 42, 42 != 0, "a" == "a")` → `true true true`
 - T-CMP-2 `console.log([1, 2, 3] == [1, 2, 3], [1, 2, 3] != [3, 2, 1])` → `true true`
-- T-CMP-3 `let a: Set(Integer) = [1, 2, 3] · let b: Set(Integer) = [3, 2, 1] · console.log(a == b)` → `true`
+- T-CMP-3 `let a: Set<Integer> = [1, 2, 3] · let b: Set<Integer> = [3, 2, 1] · console.log(a == b)` → `true`
 - T-CMP-4 `let a: Int8 = 5 · let b: UInt16 = 5 · console.log(a == b, a < b)` → `true false`
 - T-CMP-5 `let x = 50 · console.log(0 < x <= 100, 0 < x < 10)` → `true false`
 - T-CMP-6 `function f = (): Integer => { · console.log("f") · 5 · } · console.log(0 < f() <= 10)` → `f / true` (evaluated once)
@@ -1273,7 +1277,7 @@ Operands are evaluated left to right, each once; chains and `and`/`or` short-cir
 - T-CMP-9 `let answer = "yes" · console.log(answer is "y" | "yes")` → `true`
 - T-CMP-10 `let living: Integer | String = "x" · console.log(living is String, living is Integer)` → `true false`
 - T-CMP-11 `let role = "admin" · console.log(role is in ["admin", "moderator"], role is not in ["guest"])` → `true true`
-- T-CMP-12 `let xs: Array(Float) = [0.0 / 0.0] · let n = 0.0 / 0.0 · console.log(n is in xs, xs == xs)` → `false false` [D-65]
+- T-CMP-12 `let xs: Array<Float> = [0.0 / 0.0] · let n = 0.0 / 0.0 · console.log(n is in xs, xs == xs)` → `false false` [D-65]
 - T-CMP-13 `let n = 0.0 / 0.0 · console.log(n < 1.0, n >= 1.0, n == n)` → `false false false`
 - T-CMP-14 `console.log("abc" < "abd", "b" > "abc")` → `true true`
 - T-CMP-15 `let m: Integer? = 3 · console.log(m == 3, m != none)` → `true true`
@@ -1316,7 +1320,7 @@ Not narrowed: calls (`findUser()` twice are two values), indexing (`items[0]`), 
 | `v is none`, `v == none` | `None` | the base type |
 | `v is not none`, `v != none` | the base type | `None` |
 | `v is "ready"`, `v == "ready"` (any literal) | the literal (exact fact) | the type without that literal (a union of literals loses it; an open type records an excluded value) |
-| `v is 0..60` | the range (`Integer(min = 0, max = 59)` as a fact) | the complement: one interval, or the interval with an excluded interval |
+| `v is 0..60` | the range (`Integer<min = 0, max = 59>` as a fact) | the complement: one interval, or the interval with an excluded interval |
 | `v != 0`, `v != literal` | excludes the literal | exact literal |
 | `v < e`, `<=`, `>`, `>=` with a constant or a place with known interval | refined interval | refined interval |
 | `v is in ["a", "b"]` (literal array only) | `"a" \| "b"` | unchanged |
@@ -1366,7 +1370,7 @@ None: narrowing only removes checks and enables direct field access (native: pay
 - T-NAR-3 `type User = { name: String } · function greet = (user: User?) => { · if user is none or user.name == "" { · return · } · console.log(user.name) · } · greet({ name = "Bo" }) · greet(none)` → `Bo`
 - T-NAR-4 `mutable current: Integer? = 3 · mutable n = 0 · while current is not none { · console.log(current + 1) · n += 1 · current = if n < 2 { 10 } else { none } · }` → `4 / 11`
 - T-NAR-5 `function f = (divisor: Integer) => { · if divisor == 0 { · return · } · console.log(100 // divisor) · } · f(0) · f(7)` → `14` (no `try`: excluded value)
-- T-NAR-6 `function g = (score: Integer(min = 0, max = 100)) => { · if score is 0..60 { return } · let s: Integer(min = 60, max = 100) = score · console.log(s) · } · g(75)` → `75`
+- T-NAR-6 `function g = (score: Integer<min = 0, max = 100>) => { · if score is 0..60 { return } · let s: Integer<min = 60, max = 100> = score · console.log(s) · } · g(75)` → `75`
 - T-NAR-7 `function h = (role: String) => { · if role is in ["admin", "owner"] { · let r: "admin" | "owner" = role · console.log(r) · } · } · h("owner")` → `owner`
 - T-NAR-8 `type User = { name: String } · mutable user: User? = { name = "A" } · if user is not none { · user = { name = "B" } · console.log(user.name) · }` → `B` (the assigned value's facts keep the narrowing)
 - T-NAR-9 `function find = (): Integer? => none · mutable x: Integer? = 1 · if x is not none { · x = find() · console.log(x + 1) · }` ⇒ E-OPT-1
@@ -1411,7 +1415,7 @@ Uncovered: `E-ERR-3` ("`loadScore` can fail with `ApiError`. Use `try` to propag
 
 - The name is required and exists only in the handler; its type is the union of the error types of the failing expressions of the left operand (left operand = everything the precedence gives it: `a + f() catch e => 0` covers `a + f()`).
 - The handler is an expression or a block (`{` after `=>` is a block); `return`, `throw`, `break`, `continue` in it act on the enclosing function or loop (it is not a function).
-- Type [D-98]: like the branches of an `if`: with an expected type, both the left operand and the handler are checked against it; without one, the handler is checked with the left operand's type as expected type (so `items[i] catch error => 0` stays an `Integer`, and `s[i] catch error => "?"` a `Character`), and the result is the union of both widened types; a `Never` handler adds nothing.
+- Type [D-98]: like the branches of an `if`: with an expected type, both the left operand and the handler are checked against it; without one, the handler is checked with the left operand's type as expected type (so `items[i] catch error => 0` stays an `Integer`, and `s[i] catch error => "?"` a `String`), and the result is the union of both widened types; a `Never` handler adds nothing.
 - `when error is { … }` in the handler must be exhaustive over the error union.
 
 **Misuses:**
@@ -1454,8 +1458,8 @@ Errors are not falsy (`if result` is E-BOOL-1); `?.`/`??` don't apply to failing
 - T-ERR-3 `type E = Errors { A, B = { n: Integer } } · function f = (k: Integer): Integer throws E => when k is { · 0 => throw E.A · 1 => throw E.B { n = 7 } · else => k · } · function show = (k: Integer) => { · let v = f(k) catch error => when error is { · E.A => -1 · E.B as { n } => n · } · console.log(v) · } · show(0) · show(1) · show(5)` → `-1 / 7 / 5`
 - T-ERR-4 `type E = Errors { A, B } · function f = (): Integer throws E => throw E.B · function g = (): Integer throws E => { · let v = f() catch error => when error is { · E.A => 0 · else => throw error · } · v · } · console.log(g() catch e => 9)` → `9`
 - T-ERR-5 `type E = Errors { A } · function f = (): Integer throws E => throw E.A · function g = () => { · let v = f() catch error => { · console.log("failed: {error}") · return · } · console.log(v) · } · g()` → `failed: E.A`
-- T-ERR-6 `function third = (items: Array(Integer)): Integer throws IndexError => try items[2] · console.log(third([1, 2, 3]), third([1]) catch e => -1)` → `3 -1`
-- T-ERR-7 `function set = (s: Array(Integer), i: Integer) mutates s throws IndexError => { · try s[i] = 0 · } · mutable xs = [1, 2] · set(xs, 1) catch e => console.log("out") · set(xs, 5) catch e => console.log("out") · console.log(xs)` → `out / [1, 0]`
+- T-ERR-6 `function third = (items: Array<Integer>): Integer throws IndexError => try items[2] · console.log(third([1, 2, 3]), third([1]) catch e => -1)` → `3 -1`
+- T-ERR-7 `function set = (s: Array<Integer>, i: Integer) mutates s throws IndexError => { · try s[i] = 0 · } · mutable xs = [1, 2] · set(xs, 1) catch e => console.log("out") · set(xs, 5) catch e => console.log("out") · console.log(xs)` → `out / [1, 0]`
 - T-ERR-8 `type E = Errors { NetworkError = { message: String } } · let e = E.NetworkError { message = "Connection lost" } · console.log(e.toString())` → `E.NetworkError { message = "Connection lost" }`
 - T-ERR-9 `function parse = (t: String): Integer throws ParseError => try Integer.parse(t) · let total = (parse("1") + parse("x")) catch error => -1 · console.log(total)` → `-1` (one `catch` covers both calls)
 - T-ERR-10 `function f = (x: Integer): Integer => { · let r = do { · if x < 0 { return -1 } · x · } · r · } · console.log(f(-5), f(5))` → `-1 5`
@@ -1540,8 +1544,8 @@ The right side is evaluated once. Object fields are read (copied for `let`/`muta
 - T-DST-5 `let person = { name = "Ana", age = 3, city = "X" } · let { name, ...details } = person · console.log(name, details)` → `Ana { age = 3, city = "X" }`
 - T-DST-6 `let items = [1, 2, 3] · let [first, ...others] = items · console.log(first, others)` → `1 [2, 3]`
 - T-DST-7 `let array = [1, 2, 3] · let [first, second] = array · console.log(first, second)` → `1 2` (proven by the literal length)
-- T-DST-8 `function firstTwo = (values: Array(Integer)): Tuple(Integer, Integer) throws IndexError => { · try let [first, second] = values · (first, second) · } · console.log(firstTwo([4, 5, 6]), firstTwo([4]) catch e => (0, 0))` → `(4, 5) (0, 0)`
-- T-DST-9 `function f = (values: Array(Integer)) => { · if values.length >= 2 { · let [a, b] = values · console.log(a + b) · } · } · f([1, 2])` → `3`
+- T-DST-8 `function firstTwo = (values: Array<Integer>): Tuple<Integer, Integer> throws IndexError => { · try let [first, second] = values · (first, second) · } · console.log(firstTwo([4, 5, 6]), firstTwo([4]) catch e => (0, 0))` → `(4, 5) (0, 0)`
+- T-DST-9 `function f = (values: Array<Integer>) => { · if values.length >= 2 { · let [a, b] = values · console.log(a + b) · } · } · f([1, 2])` → `3`
 - T-DST-10 `let tuple = (1, "one") · let (number, name) = tuple · console.log(number, name)` → `1 one`
 - T-DST-11 `mutable o = { a = 1, b = 2 } · use { a, b } = o · a = 10 · console.log(o)` → `{ a = 10, b = 2 }`
 - T-DST-12 `let o = { a = 1 } · mutable { a } = o · a += 1 · console.log(a, o.a)` → `2 1`
@@ -1555,7 +1559,7 @@ The right side is evaluated once. Object fields are read (copied for `let`/`muta
 - T-DST-26 `let o = { a = 1, b = 2 } · let { a, b as a } = o` ⇒ E-DST-7
 - T-DST-27 `let o = { a = 1 } · let { a: first } = o` ⇒ E-DST-8
 - T-DST-28 `let xs = [1, 2] · let [...r, last] = xs` ⇒ E-DST-9
-- T-DST-29 `function f = (values: Array(Integer)) => { · let [a, b] = values · }` ⇒ E-ERR-3 ("prefix the declaration with `try`")
+- T-DST-29 `function f = (values: Array<Integer>) => { · let [a, b] = values · }` ⇒ E-ERR-3 ("prefix the declaration with `try`")
 - T-DST-30 `type U = { name: String } · let u: U? = none · let { name } = u` ⇒ E-OPT-1
 
 ---
@@ -1604,7 +1608,7 @@ Source: `control-flow/conditionals` (canonical for `if`, narrowing, `when`), `ty
 | `Boolean` | `true` and `false` |
 | integer type | literals and ranges **with literal bounds** covering the subject's interval (minus excluded values) |
 | union of literals | every literal |
-| `Float`, `String`, `Character`, objects, collections… | `else` required |
+| `Float`, `String`, objects, collections… | `else` required |
 
 - A branch whose patterns are all matched by earlier branches (including a duplicate literal): `W-WHEN-1`; an `else` when everything is covered: `W-WHEN-2`.
 
@@ -1645,12 +1649,12 @@ Source: `control-flow/conditionals` (canonical for `if`, narrowing, `when`), `ty
 - T-WHEN-1 `let foo = 3 · let result = when foo is { · 1 => "one" · 2 => "two" · 3 => "three" · else => "other" · } · console.log(result)` → `three`
 - T-WHEN-2 `let foo: Integer | String = 3 · console.log(when foo is { · Integer => "integer" · String => "string" · })` → `integer`
 - T-WHEN-3 `type MyUnion = Union { SomeString = String, SomeNumber = Integer, SomeObject = { baz: String, qux: Integer } } · let foo = MyUnion.SomeObject { baz = "hello", qux = 42 } · console.log(when foo is { · MyUnion.SomeNumber as number => "number: {number}" · MyUnion.SomeString as string => "string: {string}" · MyUnion.SomeObject as { baz, qux } => "object: {{ baz: {baz}, qux: {qux} }}" · })` → `object: { baz: hello, qux: 42 }`
-- T-WHEN-4 `type Position = { x: Float, y: Float } · type Shape = Union { Point, Circle = { radius: Float }, Rectangle = { width: Float, height: Float }, Segment = Tuple(Position, Position) } · function area = (shape: Shape): Float => when shape is { · Shape.Point => 0.0 · Shape.Circle as circle => circle.radius * circle.radius * 3.0 · Shape.Rectangle as { width, height } => width * height · Shape.Segment as (start, end) => 0.0 · } · console.log(area(Shape.Circle { radius = 2.0 }), area(Shape.Rectangle { width = 2.0, height = 3.0 }))` → `12 6`
+- T-WHEN-4 `type Position = { x: Float, y: Float } · type Shape = Union { Point, Circle = { radius: Float }, Rectangle = { width: Float, height: Float }, Segment = Tuple<Position, Position> } · function area = (shape: Shape): Float => when shape is { · Shape.Point => 0.0 · Shape.Circle as circle => circle.radius * circle.radius * 3.0 · Shape.Rectangle as { width, height } => width * height · Shape.Segment as (start, end) => 0.0 · } · console.log(area(Shape.Circle { radius = 2.0 }), area(Shape.Rectangle { width = 2.0, height = 3.0 }))` → `12 6`
 - T-WHEN-5 `function label = (score: Integer): String => when score is { · 0..60 => "fail" · 60..80 => "pass" · 80..=100 => "excellent" · else => "out of range" · } · console.log(label(59), label(60), label(100), label(101), label(-1))` → `fail pass excellent out of range out of range`
 - T-WHEN-6 `function answer = (key: String): String => when key is { · "y" | "yes" => "accepted" · "n" | "no" => "refused" · else => "unknown" · } · console.log(answer("yes"), answer("n"), answer("?"))` → `accepted refused unknown`
 - T-WHEN-7 `let b = false · console.log(when b is { · true => 1 · false => 0 · })` → `0` (exhaustive without `else`)
 - T-WHEN-8 `function sign = (n: Integer): String => when n is { · ..0 => "negative" · 0 => "zero" · 1.. => "positive" · } · console.log(sign(-3), sign(0), sign(9))` → `negative zero positive` (exhaustive over `Integer`)
-- T-WHEN-9 `function pct = (p: Integer(min = 0, max = 100)): String => when p is { · 0..=49 => "low" · 50..=100 => "high" · } · console.log(pct(50))` → `high`
+- T-WHEN-9 `function pct = (p: Integer<min = 0, max = 100>): String => when p is { · 0..=49 => "low" · 50..=100 => "high" · } · console.log(pct(50))` → `high`
 - T-WHEN-10 `function f = (x: Integer) => { · if x < 0 { return } · console.log(when x is { 0..10 => "small" · 10.. => "big" }) · } · f(3)` → `small` (exhaustive thanks to the fact `x ≥ 0`, [D-55])
 - T-WHEN-11 `function d = (v: Integer | String): String => when v is { · Integer as number => if number < 0 { "negative" } else { "positive or zero" } · String => "text" · } · console.log(d(-1), d("a"))` → `negative text`
 - T-WHEN-12 `type E = Errors { Timeout, NotFound = { id: String } } · function m = (error: E): String => when error is { · E.Timeout => "timeout" · E.NotFound => "missing {error.id}" · } · console.log(m(E.NotFound { id = "7" }))` → `missing 7` (plain local subject narrowed)
@@ -1662,7 +1666,7 @@ Source: `control-flow/conditionals` (canonical for `if`, narrowing, `when`), `ty
 - T-WHEN-21 `let s = "a" · when s is { "a" => 1 }` ⇒ E-WHEN-1 (`String` needs `else`)
 - T-WHEN-22 `function f = (p: Int8) => when p is { 300 => 1 · else => 2 }` ⇒ E-WHEN-3
 - T-WHEN-23 `function f = (v: Integer) => when v is { Integer as n if n > 0 => 1 · else => 2 }` ⇒ E-WHEN-4
-- T-WHEN-24 `function f = (t: Tuple(Integer, Integer)) => when t is { (1, 2) => 1 · else => 2 }` ⇒ E-WHEN-5
+- T-WHEN-24 `function f = (t: Tuple<Integer, Integer>) => when t is { (1, 2) => 1 · else => 2 }` ⇒ E-WHEN-5
 - T-WHEN-25 `let s = 3 · when { s > 2 => 1 }` ⇒ E-WHEN-7
 - T-WHEN-26 `let s = 3 · when s is { else => 1 · 3 => 2 }` ⇒ E-WHEN-8
 - T-WHEN-27 `let s = 3 · when s is { 1 => 1 · 1 => 2 · else => 3 }` ⇒ W-WHEN-1
@@ -1689,14 +1693,14 @@ Source: `control-flow/loops`, `values/ranges#iterating-over-a-range`, `advanced/
 - Iterable, evaluated once: a `Range` with a start (E-RNG-3), a collection (`Array`, `Set`, `Map`, `Pool`, `Columnar`, `OrderedColumnar`, growing versions), a `String`, an iterator (`values()` chains). Anything else: `E-LOOP-1` ("cannot iterate over an `Integer`: use a range `0..count`"); an optional collection: E-OPT-1.
 - Pattern: a name, `name, index`, or a destructuring pattern (object, tuple); omitted when unused (`for 0..10 { }`, `for items { }`). An array pattern in a `for`: `E-LOOP-2` (an element-wise `IndexError` would be hidden; use a tuple) [D-32].
 - `index` only over `Array`, `GrowingArray`, `String` (and `OrderedColumnar`, which has the positional interface): `E-LOOP-3` otherwise [D-73]. It is an immutable `Integer` with the facts `0 ≤ index < collection.length`.
-- Loop variables: over a range or a string, immutable copies (`Integer` with the range's interval; `Character`); assigning them is E-DECL-3 [D-72]. Over a collection, **references** to the elements: mutable when the collection is a mutable place (a `mutable` value, a `mutates` parameter, a `mutable use`), read-only otherwise; `Set`/`GrowingSet` elements and `Map` keys always read-only; destructured names are references to the fields. Writing through them mutates the collection (a parameter needs the corresponding `mutates` effect, e.g. `mutates players[..].score`).
+- Loop variables: over a range or a string, immutable copies (`Integer` with the range's interval; a `String` of one code point); assigning them is E-DECL-3 [D-72]. Over a collection, **references** to the elements: mutable when the collection is a mutable place (a `mutable` value, a `mutates` parameter, a `mutable use`), read-only otherwise; `Set`/`GrowingSet` elements and `Map` keys always read-only; destructured names are references to the fields. Writing through them mutates the collection (a parameter needs the corresponding `mutates` effect, e.g. `mutates players[..].score`).
 - Iteration rule (`advanced/reference-checking#iteration`): the body can't mutate the iterated place `L` or a place above it, mutate `L.length`/`L.size`, or invalidate a place that may designate an element of `L`, directly, through an alias, or through the effects of a called function (implied relation effects included): `E-LOOP-4` (naming the operation: "cannot add elements to `scores` while iterating over it"; "`register` mutates `people.size` while the loop iterates over `people`"). Writing elements in place is allowed.
 - `for` is a statement: using it as a value is `E-LOOP-6`; `break <value>` in a `for` or `while` is `E-LOOP-7`.
 - `@for`: the iterable must be a `static` value (`E-LOOP-8`); unrolled (out of scope). `for parallel`: native only (concurrency, out of scope).
 
 **`while`:** the condition is a `Boolean` (E-BOOL-1); it narrows the body, and its negation holds after a loop without `break`. A statement (E-LOOP-6 as a value). `while true` → W-BOOL-1 (use `loop`).
 
-**`while let <name> = <expr>`:** `<expr>` must be optional (`E-LOOP-10`, "`while let` needs an optional: use `while`") [D-34]; only a name (`E-LOOP-9` for a pattern); the value is copied into `name` (non-optional type) for the body; evaluated before each iteration; stops at the first `none` (on `Array(Integer?)`, a stored `none` also stops it, documented).
+**`while let <name> = <expr>`:** `<expr>` must be optional (`E-LOOP-10`, "`while let` needs an optional: use `while`") [D-34]; only a name (`E-LOOP-9` for a pattern); the value is copied into `name` (non-optional type) for the body; evaluated before each iteration; stops at the first `none` (on `Array<Integer?>`, a stored `none` also stops it, documented).
 
 **`loop`:** repeats until `break`, `return` or `throw`. Type: `Never` when no reachable `break` targets it; otherwise, as an expression, the union of the `break` values' types (widened, literal adaptation, E-IF-2 rules). In a `loop` whose value is used, every `break` carries a value (`E-LOOP-11`). In a `loop` used as a statement, `break <value>` drops the value: `W-LOOP-1` [D-62].
 
@@ -1740,16 +1744,16 @@ Source: `control-flow/loops`, `values/ranges#iterating-over-a-range`, `advanced/
 - T-LOOP-3 `let fruits = ["a", "b"] · for fruit, index in fruits { console.log(fruits[index]) }` → `a / b` (no `try`: index fact)
 - T-LOOP-4 `mutable players = [{ name = "John", score = 10 }, { name = "Jane", score = 12 }] · for player in players { player.score += 1 } · console.log(players[0].score, players[1].score)` → `11 13`
 - T-LOOP-5 `mutable scores = [1, 2, 3] · for score in scores { score += 1 } · console.log(scores)` → `[2, 3, 4]`
-- T-LOOP-6 `let usersById: Map(Integer, String) = [(1, "Ana"), (2, "Bao")] · for (id, name) in usersById { console.log("{id} -> {name}") }` → `1 -> Ana / 2 -> Bao`
+- T-LOOP-6 `let usersById: Map<Integer, String> = [(1, "Ana"), (2, "Bao")] · for (id, name) in usersById { console.log("{id} -> {name}") }` → `1 -> Ana / 2 -> Bao`
 - T-LOOP-7 `let people = [{ name = "Ana", age = 3 }] · for { name, age } in people { console.log("{name} is {age}") }` → `Ana is 3`
 - T-LOOP-8 `let users = [{ name = "Ana" }] · for { name as userName } in users { console.log(userName) }` → `Ana`
 - T-LOOP-9 `mutable remaining = 3 · while remaining > 0 { · console.log(remaining) · remaining -= 1 · }` → `3 / 2 / 1`
 - T-LOOP-10 `mutable stack = [1, 2, 3] · while let value = stack.pop() { console.log("Popped: {value}") }` → `Popped: 3 / Popped: 2 / Popped: 1`
-- T-LOOP-11 `mutable stack: Array(Integer?) = [1, none, 3] · mutable n = 0 · while let v = stack.pop() { n += 1 } · console.log(n)` → `1` (stops at the stored `none`)
+- T-LOOP-11 `mutable stack: Array<Integer?> = [1, none, 3] · mutable n = 0 · while let v = stack.pop() { n += 1 } · console.log(n)` → `1` (stops at the stored `none`)
 - T-LOOP-12 `let target = 50 · mutable candidate = 1 · let root = loop { · if candidate * candidate >= target { break candidate } · candidate += 1 · } · console.log(root)` → `8`
 - T-LOOP-13 `let numbers = [5, -1, 200, 7] · for number in numbers { · if number < 0 { continue } · if number > 100 { break } · console.log(number) · }` → `5`
-- T-LOOP-14 `function findFirstEven = (numbers: Array(Integer)): Integer? => { · for number in numbers { if number %% 2 == 0 { return number } } · none · } · console.log(findFirstEven([1, 3, 4, 6]), findFirstEven([1]))` → `4 none`
-- T-LOOP-15 `function findEmpty = (rows: Array(Array(Integer?))): Tuple(Integer, Integer)? => { · for row, r in rows { · for cell, c in row { if cell is none { return (r, c) } } · } · none · } · console.log(findEmpty([[1, 2], [3, none]]))` → `(1, 1)`
+- T-LOOP-14 `function findFirstEven = (numbers: Array<Integer>): Integer? => { · for number in numbers { if number %% 2 == 0 { return number } } · none · } · console.log(findFirstEven([1, 3, 4, 6]), findFirstEven([1]))` → `4 none`
+- T-LOOP-15 `function findEmpty = (rows: Array<Array<Integer?>>): Tuple<Integer, Integer>? => { · for row, r in rows { · for cell, c in row { if cell is none { return (r, c) } } · } · none · } · console.log(findEmpty([[1, 2], [3, none]]))` → `(1, 1)`
 - T-LOOP-16 `mutable i = 0 · loop { · i += 1 · if i == 3 { break } · } · console.log(i)` → `3`
 - T-LOOP-17 `for c in "hé" { console.log(c) }` → `h / é`
 - T-LOOP-18 `let evens = [1, 2, 3, 4].filter((n) => n %% 2 == 0) · console.log(evens)` → `[2, 4]`
@@ -1758,7 +1762,7 @@ Source: `control-flow/loops`, `values/ranges#iterating-over-a-range`, `advanced/
 - T-LOOP-21 `let x = 5 · for x in 0..2 { console.log(x) } · console.log(x)` → `0 / 1 / 5` (shadowing)
 - T-LOOP-30 `let n = 5 · for i in n { }` ⇒ E-LOOP-1
 - T-LOOP-31 `let pairs = [[1, 2]] · for [a, b] in pairs { }` ⇒ E-LOOP-2
-- T-LOOP-32 `let s: Set(Integer) = [1] · for v, i in s { }` ⇒ E-LOOP-3
+- T-LOOP-32 `let s: Set<Integer> = [1] · for v, i in s { }` ⇒ E-LOOP-3
 - T-LOOP-33 `mutable scores = [1, 2] · for score in scores { scores.push(0) }` ⇒ E-LOOP-4
 - T-LOOP-34 `mutable players = [{ score = 0 }] · for player, index in players { if player.score == 0 { players.delete(index) } }` ⇒ E-LOOP-4
 - T-LOOP-35 `let x = for i in 0..3 { }` ⇒ E-LOOP-6; `let y = while false { }` ⇒ E-LOOP-6
@@ -1770,7 +1774,7 @@ Source: `control-flow/loops`, `values/ranges#iterating-over-a-range`, `advanced/
 - T-LOOP-41 `for i in 0..3 { · [1].map((x) => { · break · x · }) · }` ⇒ E-LOOP-13
 - T-LOOP-42 `for i in 0..3 { break outer }` ⇒ E-LOOP-14
 - T-LOOP-43 `let scores = [1, 2] · for score in scores { score += 1 }` ⇒ E-DECL-3 (immutable collection: read-only references)
-- T-LOOP-44 `let s: Set(Integer) = [1] · mutable t = s · for v in t { v += 1 }` ⇒ E-DECL-3 (set elements read-only)
+- T-LOOP-44 `let s: Set<Integer> = [1] · mutable t = s · for v in t { v += 1 }` ⇒ E-DECL-3 (set elements read-only)
 - T-LOOP-45 `mutable i = 0 · loop { · i += 1 · if i > 2 { break i } · }` ⇒ W-LOOP-1
 - T-LOOP-46 `function server = (): Never => loop { console.log("x") }` valid (type `Never`); `function bad = (): Never => loop { break }` ⇒ E-LOOP-11
 
@@ -1816,7 +1820,7 @@ Statements run in order; values declared in the block are destroyed at its end, 
 - T-DO-1 `let helloWorld = do { · mutable hello = "Hello" · hello += " World" · hello += "!" · hello · } · console.log(helloWorld)` → `Hello World!`
 - T-DO-2 `let array = [1, 2, 3, 4, 5] · let sum = do { · mutable total = 0 · for value in array { total += value } · total · } · console.log(sum)` → `15`
 - T-DO-3 `let value = do { · let a = 2 · let b = 3 · a * b · } · console.log(value)` → `6`
-- T-DO-4 `function f = (n: Array(Integer)): Integer? => { · let result = do { · for x in n { if x %% 2 == 0 { return x } } · none · } · result · } · console.log(f([1, 4]), f([1]))` → `4 none`
+- T-DO-4 `function f = (n: Array<Integer>): Integer? => { · let result = do { · for x in n { if x %% 2 == 0 { return x } } · none · } · result · } · console.log(f([1, 4]), f([1]))` → `4 none`
 - T-DO-5 `function f = (): Integer => { · console.log("a") · 1 · } · let x = f() + do { · console.log("b") · 2 · } · console.log(x)` → `a / b / 3` (evaluation order kept by the JS lowering)
 - T-DO-6 `for i in 0..3 { · do { if i == 1 { continue } } · console.log(i) · }` → `0 / 2`
 - T-DO-7 `let x = do { · let a = 1 · }` ⇒ E-DO-1; `let y = do { }` ⇒ E-DO-1
@@ -1857,8 +1861,8 @@ The ten most consequential are D-4, D-1/D-2, D-5, D-7, D-8, D-9, D-17, D-23, D-2
 
 - **D-4 (C/B) Evaluation of integer expressions and where overflow is checked.** The pages say "the result of an operation has a range computed from the ranges of its operands … checked against the type it goes to" (numbers), while the native implementation note mixes "computed in a width large enough for the range of its result, up to 128 bits" and per-operation overflow flags, and the JS note checks each `Integer` operation at ±2^53. Nothing says whether `(a + b) // 2` with `Int8` operands may stop on the intermediate `a + b`. **Decision:** an arithmetic tree is exact; intermediate nodes are checked only against the **compute type** (`Int64`, or `Int128` with `UInt64`/`Int128` operands; ±(2^53−1) for number-represented integers on JS); the **root** is checked at its sink. Section 6.7. This makes `let avg: Int8 = (a + b) // 2` and `let c: Int16 = a + b` check-free, costs nothing on JS (doubles are exact to 2^53), and keeps one `i64` overflow intrinsic per `Integer` operation natively.
 - **D-89 (C) Arithmetic vs other expressions at a sink.** The pages give two behaviours for an integer that may not fit: `let d: Int8 = a + b` is checked at runtime, `let byte: UInt8 = a` is a compile error, `foo = bar` (wider range) is a compile error. **Decision:** made explicit: arithmetic trees (and compound assignments, unary `-`, `abs()`) get a runtime check; any other expression needs a proof or a conversion (E-NUM-14). Certain failures are always compile errors.
-- **D-104 (C) Prefix `-` on unsigned values.** "`-x` with `x: UInt8` is only valid when the result fits" can be read as a compile-time rule. **Decision:** unary minus is arithmetic: a runtime check at the sink when the interval may not fit, E-NUM-10 when it can't fit (`-x` with `x: UInt8(min = 1)` into a `UInt8`).
-- **D-8 (C/B) `Integer` vs `Int64`.** "`Integer` is an alias for `Int64`", yet on JS `Integer` is a number and an explicit `Int64` a `BigInt`. **Decision:** two type names with the same range: scalars convert implicitly (by range), with `BigInt(x)`/`Number(x)` on JS; `Int64` wins in a mixed base type; containers are invariant in the element's storage (`Array(Int8)`, `Array(Integer)`, `Array(Int64)` are distinct; a ranged refinement with the same storage passes to an immutable parameter). Spec change: say "has the range of `Int64`" (as the reference already does).
+- **D-104 (C) Prefix `-` on unsigned values.** "`-x` with `x: UInt8` is only valid when the result fits" can be read as a compile-time rule. **Decision:** unary minus is arithmetic: a runtime check at the sink when the interval may not fit, E-NUM-10 when it can't fit (`-x` with `x: UInt8<min = 1>` into a `UInt8`).
+- **D-8 (C/B) `Integer` vs `Int64`.** "`Integer` is an alias for `Int64`", yet on JS `Integer` is a number and an explicit `Int64` a `BigInt`. **Decision:** two type names with the same range: scalars convert implicitly (by range), with `BigInt(x)`/`Number(x)` on JS; `Int64` wins in a mixed base type; containers are invariant in the element's storage (`Array<Int8>`, `Array<Integer>`, `Array<Int64>` are distinct; a ranged refinement with the same storage passes to an immutable parameter). Spec change: say "has the range of `Int64`" (as the reference already does).
 - **D-9 (S/B) Target-dependent acceptance.** Range analysis promises that every compiler on every target accepts the same programs, but "a certain overflow of ±(2^53−1) is a compile error when compiling for JavaScript". **Decision:** the checker is target-independent (Int64 bounds); the JS rule is a **backend** diagnostic, E-NUM-19, emitted only when building for a JS target. Document it as the one exception, next to the documented runtime divergence (stops at 2^53).
 - **D-19 (C) `Float32` and `Float64`.** Integer widths "are not different kinds", nothing is said for floats; the result table has no mixed row. **Decision:** distinct types with no implicit conversion in either direction, no mixed arithmetic, comparison or equality (E-NUM-11/E-CMP-1); convert with `Float(x)`/`Float32(x)`. Float32 semantics differ (rounding), so mixing must be visible.
 - **D-20 (C) Literal adaptation precision.** "An integer literal adapts to a float type", "a float literal to `Float32`". **Decision:** an integer literal must be exactly representable in the float type (`16_777_217` isn't in `Float32`: E-NUM-8); a float literal is rounded to nearest but must not overflow to infinity (E-NUM-8). No silent precision loss for integers, IEEE rounding for decimals as everyone expects.
@@ -1880,7 +1884,7 @@ The ten most consequential are D-4, D-1/D-2, D-5, D-7, D-8, D-9, D-17, D-23, D-2
 - **D-94 (C) Literal operands that don't fit the other operand's type.** `a + 1000` with `a: Int8`. **Decision:** the literal contributes its exact value; the base type is `a`'s; the sink decides (E-NUM-10 unannotated, valid into `Integer`).
 - **D-95 (C) Excluded values.** "An integer keeps a range and a set of excluded values." **Decision:** a list of at most 8 excluded intervals per place; beyond, the oldest are dropped (sound: dropping a fact only loses precision). Fixed so that every compiler agrees.
 - **D-96 (C) Loop widening.** "A bound that keeps growing becomes unknown." **Decision:** widen from the second iteration of the fixpoint (a bound that moved outward becomes infinite, then clipped by the type); identical for references (reference checking uses the same widening).
-- **D-97 (C) String lengths as facts.** The docs index `"Fa"[0]` without `try`, but rule 3 of range analysis only mentions collections. **Decision:** a string literal's grapheme count is a length fact, like a collection literal's length, until the string is mutated.
+- **D-97 (C) String lengths as facts.** The docs index `"Fa"[0]` without `try`, but rule 3 of range analysis only mentions collections. **Decision:** a string literal's UTF-16 length is a length fact, like a collection literal's length, until the string is mutated.
 - **D-105 (C) Float-to-integer conversions and facts.** "`Integer.round(f)` throws unless it is a literal". **Decision:** an exact float fact counts as a literal (`let f = 2.7` then `Integer.round(f)` needs no `try`), consistent with integer conversions, which use facts.
 
 ### Printing
@@ -1900,7 +1904,7 @@ The ten most consequential are D-4, D-1/D-2, D-5, D-7, D-8, D-9, D-17, D-23, D-2
 - **D-41 (C) Range bound types.** "The bounds are integers of any integer type" but `start`/`end` are `Integer?`. **Decision:** bounds must fit `Integer` by the usual range rule (`UInt64` needs a proof or conversion); floats/`BigInt`/strings E-RNG-2.
 - **D-42 (C) Inverted slices.** Ranges: "a slice with an end before its start is empty". **Decision:** confirmed for strings and arrays; only the bounds themselves are checked (`IndexError` when outside `[-length, length]`).
 - **D-43 (C) String equality and normalization.** **Decision:** `==` compares scalar values exactly, no normalization (`"é" != "e\u{301}"`), as JavaScript does; normalization would be an explicit method later.
-- **D-44 (C) `Character` literals.** **Decision:** only a plain literal (no interpolation) with exactly one grapheme cluster adapts to `Character` (`""` is E-STR-9); `Character + Character` is a `String`.
+- **D-44 (C) `Character` literals.** Superseded on 2026-11-15: there is no `Character` type (`design/decisions.md`, "Strings: UTF-16 semantics, UTF-8 storage").
 - **D-64 (B) Tuples on JavaScript.** **Decision:** plain JS arrays, copied under the same "observable write" rule as objects.
 - **D-78 (C) Spreading a superset.** `{ ...hero }` where a `Human` is expected brings `powers`. **Decision:** E-OBJ-1, as the page says ("can't have fields the expected type lacks"); copy into the narrower type first (`let h: Human = hero`).
 - **D-79 (C) Field before a spread.** Only "a field written after the spread replaces the copied one" is specified. **Decision:** a field written before a spread that provides it is E-OBJ-8 (a dead write; one way: spread first); a later spread may replace an earlier spread's fields (same types).
@@ -1951,7 +1955,7 @@ The ten most consequential are D-4, D-1/D-2, D-5, D-7, D-8, D-9, D-17, D-23, D-2
 - **D-77 (C) Impossible literal patterns.** **Decision:** E-WHEN-3 (consistent with E-CMP-7 for `is`).
 - **D-84 (C) Parenthesized comparisons.** **Decision:** `(a < b) < c` is E-CMP-2 (a `Boolean` is not ordered); `(a < b) == c` is a valid `Boolean` equality.
 - **D-92 (B) Error values on JavaScript.** **Decision:** classes extending a runtime `FaError`, not `Error` (no stack capture on the failure path, which is an ordinary control flow in Fa); debug builds may capture stacks.
-- **D-98 (C) Type of a `catch` expression.** **Decision:** typed like the two branches of an `if`, the handler using the left operand's type as its expected type when there is no outer one (`s[i] catch error => "?"` is a `Character`).
+- **D-98 (C) Type of a `catch` expression.** **Decision:** typed like the two branches of an `if`, the handler using the left operand's type as its expected type when there is no outer one (`s[i] catch error => "?"` is a `String`).
 - **D-99 (C) `?.` on a `Void` method.** **Decision:** allowed as a statement only (E-OPT-4 when its value is used).
 - **D-100 (C) `Never` on the right of `??`.** `x ?? return 0` follows from "`Never` fits anywhere". **Decision:** allowed, the result is non-optional; the left place is not narrowed by it (it is not a test).
 - **D-102 (C) Narrowing inside closures.** Unspecified. **Decision:** a closure sees the narrowings of its captured places at creation (escaping closures capture copies, non-escaping ones run during the call); a write to the place inside the closure, or by another callback of the same call, drops it inside the closure.
@@ -1964,7 +1968,7 @@ The checker (`fa-checker`, a new crate on the parser's tree, as decided in the s
 
 0. **Parser prerequisites.** Diagnostics with spans instead of `panic!` (the checker and the tests need error nodes); precedence fixes D-1, D-2, D-3; arbitrary-precision integer literals D-13; negative literals D-14; literal diagnostics D-11, D-12; CRLF D-16; nested strings in interpolation; rest patterns; `else`-on-next-line diagnostic. Unlocks: every `T-LEX-*` and the syntax-error tests.
 1. **Names, scopes, declarations** (section 5 without references): scopes, shadowing, same-scope redeclaration, assignment to undeclared, `let`/`mutable`, deep immutability, the declaration shape errors. Needs: 0. Unlocks most `T-DECL-1…5`, `T-DECL-20…30`.
-2. **Type representation and expected-type propagation** (sections 2.1–2.5): scalars, `String`/`Character`, `Boolean`, `None`/`Void`/`Never`, optionals (`T?` flattening), objects (literal checking, missing/extra fields, typed literals), tuples, anonymous unions and their validity, function types (enough for calls). Literal adaptation (no ranges yet). `toString` and `console.log` in the runtime of the JS backend. Unlocks: first output tests (`T-STR-1…13`, `T-OBJ-1…5`, `T-TUP-1…4`).
+2. **Type representation and expected-type propagation** (sections 2.1–2.5): scalars, `String`, `Boolean`, `None`/`Void`/`Never`, optionals (`T?` flattening), objects (literal checking, missing/extra fields, typed literals), tuples, anonymous unions and their validity, function types (enough for calls). Literal adaptation (no ranges yet). `toString` and `console.log` in the runtime of the JS backend. Unlocks: first output tests (`T-STR-1…13`, `T-OBJ-1…5`, `T-TUP-1…4`).
 3. **Expressions without flow facts**: booleans and conditions (no truthiness), equality/ordering compatibility (section 13 minus narrowing), string concatenation and interpolation (section 7), number kinds and the result-type table (6.6) with literal adaptation, conversions as plain typed calls, `if`/`when`/`do` block values and the typing of `if`/`when` expressions (D-29), `Never`. JS backend: statement lifting (section 19). Unlocks: `T-BOOL-*`, `T-CMP-1…11`, `T-IF-*`, `T-DO-*`, the kind-mixing errors.
 4. **Flow facts engine** (2.1, 14): a structured walk with an environment of facts per place, joins at merges, early exits, the end-of-narrowing events (assignments, calls with `mutates`, `await`). First users: optionals (`is none`, `== none`, `?.`, `??`), union narrowing with `is Type`, literal narrowing, `when` on named unions/booleans/literal unions with exhaustiveness and `as` bindings, `assert`. Unlocks: `T-OPT-*`, `T-NAR-*` (non-integer), `T-WHEN-*` (non-integer).
 5. **Errors** (section 15): `throws` signatures and inference for single-expression bodies, failing expressions and the coverage rule, `try`/`catch` typing, `throw`, `Error`, built-in errors, `when` on errors, escaped errors at the top level. Needs: 4 (`when error is` narrows). Must precede 6, since index, division and conversion failures are errors. JS: `FaError` classes, `catch` lowering. Native: tagged results. Unlocks: `T-ERR-*`.

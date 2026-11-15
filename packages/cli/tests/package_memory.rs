@@ -41,10 +41,10 @@ fn generate(root: &Path, count: usize) {
 			let _ = write!(
 				text,
 				"\tfunction area{block} = (shape: Shape): Integer => when shape is {{\n\t\tShape.Circle as {{ radius }} => radius * radius * 3\n\t\tShape.Square as {{ side }} => side * side\n\t\tShape.Empty => 0\n\t}}\n\
-				\tfunction total{block} = (items: Array(Item)): Integer => {{\n\t\tmutable sum = 0\n\t\tfor index in 0..items.length {{\n\t\t\tsum += items[index].weight %% 13\n\t\t}}\n\t\tsum\n\t}}\n\
-				\tfunction lookup{block} = (key: String, items: Array(Item)): Item throws Failure => {{\n\t\tfor item in items {{\n\t\t\tif item.label == key {{\n\t\t\t\treturn item\n\t\t\t}}\n\t\t}}\n\t\tthrow Failure.Missing {{ key }}\n\t}}\n\
-				\tfunction safe{block} = (key: String, items: Array(Item)): Integer => lookup{block}(key, items).weight catch error => -1\n\
-				\tfunction firstOr{block}(Value) = (values: Array(Value), fallback: Value): Value => values.get(0) ?? fallback\n\
+				\tfunction total{block} = (items: Array<Item>): Integer => {{\n\t\tmutable sum = 0\n\t\tfor index in 0..items.length {{\n\t\t\tsum += items[index].weight %% 13\n\t\t}}\n\t\tsum\n\t}}\n\
+				\tfunction lookup{block} = (key: String, items: Array<Item>): Item throws Failure => {{\n\t\tfor item in items {{\n\t\t\tif item.label == key {{\n\t\t\t\treturn item\n\t\t\t}}\n\t\t}}\n\t\tthrow Failure.Missing {{ key }}\n\t}}\n\
+				\tfunction safe{block} = (key: String, items: Array<Item>): Integer => lookup{block}(key, items).weight catch error => -1\n\
+				\tfunction firstOr{block} = <Value>(values: Array<Value>, fallback: Value): Value => values.get(0) ?? fallback\n\
 				\tfunction level{block} = (value: Integer): Level => if value < 5 {{ .low }} else if value < 50 {{ .middle }} else {{ .high }}\n\
 				\tfunction compute{block} = (x: Integer): Integer => {{\n\t\tlet items = [make(x), make(x + 2)]\n\t\tlet shape = if x %% 2 == 0 {{ Shape.Circle {{ radius = x %% 7 }} }} else {{ Shape.Square {{ side = x %% 5 }} }}\n\t\tmutable result = total{block}(items) + area{block}(shape) + safe{block}(\"m{index}-{{x}}\", items) + firstOr{block}([x], 0)\n"
 			);
@@ -66,7 +66,7 @@ fn generate(root: &Path, count: usize) {
 	fs::write(
 		root.join("application/main.fa"),
 		format!(
-			"export function = (arguments: Array(String)): Integer => {{\n\tconsole.log(library.m{:04}.compute0(1))\n\t0\n}}\n",
+			"export function = (arguments: Array<String>): Integer => {{\n\tconsole.log(library.m{:04}.compute0(1))\n\t0\n}}\n",
 			count - 1
 		),
 	)

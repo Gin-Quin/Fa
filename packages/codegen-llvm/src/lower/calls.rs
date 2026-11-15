@@ -398,6 +398,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				arguments.push(pointer.into());
 			}
 		}
+		let return_slot = if function.return_slot {
+			let slot = self.call_return_slot(node, ret)?;
+			arguments.insert(usize::from(function.lambda), slot.pointer.into());
+			Some(slot)
+		} else {
+			None
+		};
+		if function.return_collection {
+			let offer = self.collection_call_buffer(node)?;
+			let (pointer, bytes) = offer
+				.map(|o| (o.pointer, o.bytes))
+				.unwrap_or((self.pointer_type().const_null(), self.usize.const_zero()));
+			arguments.insert(usize::from(function.lambda), pointer.into());
+			arguments.insert(usize::from(function.lambda) + 1, bytes.into());
+		}
 		// the sources of the reactive places given (D24), right before the call
 		self.pass_argument_sources(node, function.declaration, function.info.params.len())?;
 		// an awaited or started call: its async instance (tasks.rs)
@@ -413,6 +428,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		for write_back in write_backs {
 			self.write_back(write_back)?;
+		}
+		if return_slot.is_some() {
+			return self.slot_call_result(raw, ret, throws, return_slot);
 		}
 		if throws {
 			let result = raw.expect("a result");
@@ -827,7 +845,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				let source = self.expr(*source)?;
 				let repr = self.node_repr(node)?;
-				self.array_of_table(source, repr, node)
+				let result = self.array_of_table(source, repr, node)?;
+				let capacity = match info.arguments.get(1) {
+					Some(Argument::Given(hint)) => {
+						let hint = self.expr(*hint)?;
+						if hint.repr == Repr::Never {
+							return Ok(hint);
+						}
+						Some(hint)
+					}
+					_ => None,
+				};
+				let result = self.take(result, None)?;
+				self.array_from(node, (result, capacity))
 			}
 			"Pool.from" | "GrowingPool.from" | "Columnar.from" | "GrowingColumnar.from"
 				if matches!(self.node_repr(node)?, Repr::Pool(_) | Repr::Columnar(_)) =>
@@ -835,22 +865,50 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.pool_from(node, info)
 			}
 			"Array.from" | "OrderedColumnar.from" => {
+				if path == "Array.from"
+					&& let Some(result) = self.array_from_copy_into(node, info)?
+				{
+					return Ok(result);
+				}
 				let Some(values) = self.array_from_arguments(info)? else {
 					return Ok(Val::never());
 				};
 				self.array_from(node, values)
 			}
 			"GrowingArray.from" => {
-				let Some((source, _)) = self.array_from_arguments(info)? else {
+				let Some((source, capacity)) = self.array_from_arguments(info)? else {
 					return Ok(Val::never());
 				};
 				if !matches!(source.repr, Repr::Array(_) | Repr::Growing(_)) {
 					return Err(self.unsupported(node.index(), "`GrowingArray.from` of this value"));
 				}
-				// the source was taken: the conversion moves its items
-				let source = self.fresh(source);
+				// Convert through an owned flat array so the first segment uses the requested size.
 				let repr = self.node_repr(node)?;
-				self.convert(source, repr, node.index())
+				let Repr::Growing(item_type) = repr else {
+					unreachable!("a growing array");
+				};
+				let source = self.fresh(source);
+				let flat = self.convert(source, Repr::Array(item_type), node.index())?;
+				let flat = self.take(flat, None)?;
+				let item = self.item_repr(item_type, node)?;
+				let capacity = match capacity {
+					Some(capacity) => self
+						.convert(capacity, Repr::Int(IntRepr::I64), node.index())?
+						.int(),
+					None => self.context.i64_type().const_zero(),
+				};
+				let result = self
+					.call_value(
+						self.runtime.function("fa_segmented_from_array_capacity")?,
+						&[
+							flat.value.expect("an array").into(),
+							self.item_size_const(item).into(),
+							self.segment_k(item).into(),
+							capacity.into(),
+						],
+					)?
+					.into_pointer_value();
+				Ok(self.fresh(Val::new(repr, result)))
 			}
 
 			_ if path.starts_with("Math.")
@@ -1392,7 +1450,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The arguments of `Array.from(source, capacity = n)`.
-	fn array_from_arguments(
+	pub(crate) fn array_from_arguments(
 		&mut self,
 		info: &CallInfo,
 	) -> Result<Option<(Val<'ctx>, Option<Val<'ctx>>)>, Error> {
@@ -1405,7 +1463,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					return Ok(None);
 				}
 				let lowered = if position == 0 {
-					self.take(lowered, Some(*value))?
+					// Keep ownership registered while later arguments run:
+					// a throwing capacity expression must drop this source.
+					let owned = self.take(lowered, Some(*value))?;
+					self.fresh(owned)
 				} else {
 					lowered
 				};
@@ -1415,7 +1476,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 		}
-		Ok(source.map(|source| (source, capacity)))
+		match source {
+			Some(source) => Ok(Some((self.take(source, None)?, capacity))),
+			None => Ok(None),
+		}
 	}
 
 	/// The array a variadic parameter collects: the values, and the items of
@@ -1640,15 +1704,40 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						match (self.splits_into_views(node), split_nonempty) {
 							(true, true) => "fa_string_split_nonempty_views",
 							(false, true) => "fa_string_split_nonempty",
-							(true, false) => "fa_string_split_views",
-							(false, false) => "fa_string_split",
+							// the array in the caller's storage when it offers some
+							(views, false) => match self.collection_call_buffer(node)? {
+								Some(destination) => {
+									call.push(destination.pointer.into());
+									call.push(destination.bytes.into());
+									if views {
+										"fa_string_split_views_into"
+									} else {
+										"fa_string_split_into"
+									}
+								}
+								None if views => "fa_string_split_views",
+								None => "fa_string_split",
+							},
 						}
 					}
 					"String#characters" => "fa_string_characters",
 					_ => "fa_string_code_points",
 				};
 				let function = self.runtime.function(name)?;
-				let array = self.call_value(function, &call)?;
+				let invocation = self.builder.build_call(function, &call, "")?;
+				if name.ends_with("_into") && self.recursive_collection_frame() {
+					// The split helper has bounded scanning/construction scratch.
+					// Keep that scratch in one transient helper frame, rather than
+					// embedding it in every live recursive invocation.
+					invocation.add_attribute(
+						inkwell::attributes::AttributeLoc::Function,
+						self.runtime.attribute("noinline"),
+					);
+				}
+				let array = invocation
+					.try_as_basic_value()
+					.basic()
+					.expect("an array result");
 				Ok(self.fresh(Val::new(self.node_repr(node)?, array)))
 			}
 			"String#bytes" => {
@@ -1862,6 +1951,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			(Repr::Percentage, Repr::F64 | Repr::F32) => {
 				let as_double = Val {
+					destination: None,
 					repr: Repr::F64,
 					value: value.value,
 				};

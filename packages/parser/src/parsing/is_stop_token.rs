@@ -68,6 +68,7 @@ pub(crate) fn can_start_expression(kind: TokenKind) -> bool {
 			| TokenKind::ParenthesisOpenFunctionDeclaration
 			| TokenKind::BracesOpen
 			| TokenKind::BracketsOpen
+			| TokenKind::GenericOpen
 	)
 }
 

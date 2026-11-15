@@ -1,0 +1,95 @@
+-- asynchronous: false
+type Data = { value: Integer, text: String }
+type Wrapped = { data: Data, pair: Tuple<Integer, String> }
+
+function make = (n: Integer): Data => Data {
+	value = n
+	text = "owned text {n} longer than an inline string"
+}
+
+function relay = (n: Integer): Data => if n > 0 { relay(n - 1) } else { make(n) }
+function pair = (n: Integer): Tuple<Integer, String> => (n, "tuple payload {n} longer than inline")
+function wrapped = (n: Integer): Wrapped => Wrapped { data = make(n), pair = pair(n) }
+function choose = (n: Integer): Data => when n is {
+	0 => make(10)
+	else => make(20)
+}
+function generic = <T>(value: T, n: Integer): Tuple<Integer, Integer> => (n, n)
+
+let built = wrapped(7)
+let selected = choose(0)
+let genericPair = generic(8, 8)
+console.log(built.data.value, built.pair[0], selected.value, genericPair[1], relay(10).value)
+-- prints: 7 7 10 8 0
+
+let indirect = make
+function factory = (offset: Integer) => (n: Integer) => make(n + offset)
+let closure = factory(1)
+let indirectPair = pair
+console.log(indirect(4).value, closure(5).value, indirectPair(6)[0])
+-- prints: 4 6 6
+
+function failedObject = (text: String): Data throws ParseError => Data {
+	text = "first field {text} with an owned payload beyond the inline limit"
+	value = try Integer.parse(text)
+}
+function failedTuple = (text: String): Tuple<String, Integer> throws ParseError => (
+	"first tuple item {text} with an owned payload beyond the inline limit",
+	try Integer.parse(text)
+)
+for 0..100 {
+	assert (failedObject("bad") catch error => make(-1)).value == -1
+	assert (failedTuple("bad") catch error => ("failed", -1))[1] == -1
+}
+console.log(failedObject("12").value catch error => -1)
+-- prints: 12
+
+let transformed = [1, 2, 3].map((n) => make(n))
+console.log(transformed.length, (transformed.get(2) ?? make(0)).value)
+-- prints: 3 3
+
+let task = start make(9)
+let taskValue = await task
+console.log(taskValue.value)
+-- prints: 9
+
+function named = (text: String): Data throws ParseError => {
+	let local = make(30)
+	let number = try Integer.parse(text)
+	if number > 0 { return local }
+	return local
+}
+function namedTuple = (n: Integer): Tuple<Integer, String> => {
+	let local = pair(n)
+	return local
+}
+function different = (n: Integer): Data => {
+	let local = make(n)
+	if n > 0 { return local }
+	return make(-1)
+}
+for 0..100 {
+	assert (named("bad") catch error => make(-1)).value == -1
+	assert (try named("0")).text.length > 0
+	assert (try named("1")).value == 30
+	assert namedTuple(7)[0] == 7
+	assert different(0).value == -1
+}
+
+function localArrayError = (text: String): Integer throws ParseError => {
+	let items = [make(1), try failedObject(text)]
+	return items.length
+}
+for 0..100 {
+	assert (localArrayError("bad") catch error => -1) == -1
+}
+
+type EarlyNode = { value: Integer, next: EarlyNode? }
+function makeEarly = (n: Integer): EarlyNode => if n > 0 {
+	EarlyNode { value = n, next = makeEarly(n - 1) }
+} else { EarlyNode { value = 0 } }
+function detachedValue = (node: EarlyNode?): EarlyNode => EarlyNode { value = (node?.value ?? 0) + 10 }
+function composed = (n: Integer): EarlyNode => EarlyNode { value = n, next = detachedValue(makeEarly(n)) }
+for 0..100 {
+	assert (composed(3).next?.value ?? 0) == 13
+}

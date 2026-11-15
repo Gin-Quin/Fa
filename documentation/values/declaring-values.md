@@ -397,7 +397,7 @@ do {
 
 ### Native
 
-- `let` and `mutable` copy: a flat value is a `memcpy`, an owning value calls the generated `copy<T>`. The copy becomes a move when the source is not used afterwards.
+- `let` and `mutable` copy: a flat value is a `memcpy`, an owning value calls the generated `copy<T>`. The copy becomes a move when the source is not used afterwards and its storage can change owners. An immutable collection in static storage copies when an owner needs independent storage. A runtime collection with an owning or uncertain use starts on the heap; the compiler never adds a copy-out to keep an escaping value on the stack. Fresh return values are intended to be built directly in caller-provided storage (the general return-destination ABI remains to implement).
 - **Parameters are never copied.** Every parameter is passed by reference (a pointer to the caller's place, or to a temporary of the caller), mutated or not; only a scalar that fits in a register (a number, a boolean, a pointer) is passed by value, which is the same thing for it. A callee copies a parameter only when it stores it (an escaping use) and the analyzer can't move it.
 - **Module-level `let` values with a known value are constants**: folded into the code that reads them, or stored once in read-only data, never reloaded in a loop (the analyzer gives their values, `Analysis::module_constants`). Other immutable module-level values are invariant loads.
 - A `use` alias is a pointer to its place. A slice is a pointer and a length.

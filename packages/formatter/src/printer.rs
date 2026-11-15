@@ -31,6 +31,9 @@ enum Separator {
 	NewLines,
 	/// Commas on one line, new lines otherwise, ex: the items of a list.
 	Commas,
+	/// Commas, on one line or before each new line, ex: the items of a generic list, which a
+	/// line break doesn't separate.
+	CommasOnEveryLine,
 }
 
 /// A part of the source printed as a sequence: a statement, an item, a `when` branch...
@@ -345,7 +348,7 @@ impl<'a> Printer<'a> {
 			if printed || !body.is_empty() {
 				match separator {
 					Separator::NewLines => body.push(HardLine),
-					Separator::Commas => body.push(Line),
+					Separator::Commas | Separator::CommasOnEveryLine => body.push(Line),
 				};
 				if self.has_blank_line(previous_end, element.start) {
 					body.push(HardLine);
@@ -362,6 +365,7 @@ impl<'a> Printer<'a> {
 						Document::text(comma),
 						Document::text(","),
 					)),
+					Separator::CommasOnEveryLine => body.text(","),
 					Separator::NewLines => body.text(comma),
 				};
 			}
@@ -1152,7 +1156,8 @@ impl<'a> Printer<'a> {
 	/// inside. Like the arguments of a type in parentheses, it stays on one line (an item can
 	/// break inside, like an object). With comments, the first item stays on the line of the
 	/// `<` (a `<` followed by a space or a new line is a comparison; a comment there is written
-	/// right after it), and the next items go on their own lines, then the `>`.
+	/// right after it), and the next items go on their own lines, each after the comma of the
+	/// item before it (a line break doesn't separate the items of a generic list), then the `>`.
 	fn generic_list(
 		&mut self,
 		open: usize,
@@ -1197,7 +1202,7 @@ impl<'a> Printer<'a> {
 			Some(previous_end),
 			close,
 			&elements,
-			Separator::Commas,
+			Separator::CommasOnEveryLine,
 			|printer, position| print(printer, items[position]),
 		);
 		if !sequence.has_body {

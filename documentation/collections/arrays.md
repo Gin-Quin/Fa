@@ -26,7 +26,7 @@ Reserve capacity up front when you know the size, with the `capacity` option of 
 mutable buffer = Array<Integer>.from([], capacity = 1000)
 ```
 
-Arrays own their storage on the heap. See [memory management](/advanced/memory-management).
+Arrays own their storage. The native compiler can keep immutable values in read-only data or bounded stack storage. See [memory management](/advanced/memory-management).
 
 ## Creating collections
 
@@ -57,9 +57,34 @@ let users = Set.from(userList, key = (user) => user.id)
 mutable buffer = Array<Integer>.from([], capacity = 1000)
 ```
 
-The options are `capacity`, for every collection (see [capacity](#capacity)), and `key`, for `Set` and `GrowingSet` (see [custom key](/collections/sets#custom-key)). Any other option is an error.
+The options are `capacity`, a storage hint for every collection, the growing variants and `OrderedColumnar` included (see [capacity and reservation](#capacity-and-reservation)), and `key`, for `Set` and `GrowingSet` (see [custom key](/collections/sets#custom-key)). Any other option is an error.
 
 There is one form per situation: using `from` where the context already gives the type (and no option is passed) is a warning, and the formatter rewrites it into a plain literal.
+
+## Capacity and reservation
+
+A collection has a **capacity**: the number of elements it can hold before it needs more memory. It grows on its own, but when you know how many elements are coming, say so, and the collection allocates once instead of growing several times:
+
+```fa
+mutable buffer = Array<Integer>.from([], capacity = 1000) -- room for 1000 items
+
+for index in 0..1000 {
+	buffer.push(index) -- never reallocates
+}
+
+buffer.reserve(500) -- room for 500 more items
+console.log(buffer.capacity) -- at least 1500 natively
+```
+
+Every resizable collection exposes a read-only `capacity: Integer<min = 0>` property and `reserve(additional: Integer<min = 0>)`, returning `Void`. These apply to `Array`, `Set`, `Map`, `Pool`, `Columnar`, `OrderedColumnar` and all their growing variants. `from(source, capacity = n)` requests room for at least `n` items in total, never truncating the source.
+
+Natively, `capacity` is the number of items the collection can hold without allocating or reallocating storage, including its live items. `reserve(n)` takes a number of **additional** items, while the `capacity` option of `from` is a total: it makes room for at least `length + n` items (`size + n` for an unordered collection); it never changes the contents or their order and never shrinks storage. The allocator may provide more room than requested. On a map or set, the capacity accounts for the hash index's load limit and tombstones as well as entry storage. Deletion may reduce capacity when it releases pages.
+
+`capacity` takes constant time. It is a storage observation, not a portable limit: on JavaScript and during compile-time evaluation, storage hints are ignored, `reserve` does nothing, and `capacity` equals `length` (or `size`). This avoids tracking fictitious storage that the JavaScript engine does not expose. Always use `length` or `size` for program logic. A [`String`](/values/strings#capacity-and-reservation) has the same property, option and method, counted in bytes natively.
+
+The only relation that holds on every target is `capacity >= length` (or `size`). The value itself is unspecified: it differs between targets, between versions of the allocator, and between a call evaluated at compile time and the same call at run time. An assertion such as `assert buffer.capacity >= 1000` therefore only passes natively. To bound a buffer, compare its `length` with a limit of your own.
+
+`reserve` requires a `mutable` receiver on every target. On `Array`, `Set` and `OrderedColumnar` it declares `mutates self`, like `push` or `add`: reallocation may move every item, invalidating references even when a particular reservation fits. On `Map`, `Pool`, `Columnar` and all growing collections it declares `mutates self.capacity`: existing items never move during reservation, references into them and into `size` or `length` stay valid. An effect on `length` or `size` implies the same effect on `capacity`, since adding or deleting may allocate or release storage: a function that declares `mutates items.length` may call `items.reserve`, while `mutates items.capacity` alone allows neither `push` nor `add`. A copy preserves values, not spare capacity; reserve the destination when needed.
 
 ## Adding and removing items
 
@@ -96,27 +121,6 @@ users.push("Dan")
 
 console.log(first) -- error: `first` was invalidated by `users.push`: declare it again with `use first = users[...]`
 ```
-
-## Capacity
-
-A collection has a **capacity**: the number of elements it can hold before it needs more memory. It grows on its own, but when you know how many elements are coming, say so, and the collection allocates once instead of growing several times:
-
-```fa
-mutable buffer = Array<Integer>.from([], capacity = 1000) -- room for 1000 items
-
-for index in 0..1000 {
-	buffer.push(index) -- never reallocates
-}
-
-buffer.reserve(500) -- room for 500 more items
-console.log(buffer.capacity) -- at least 1500 natively
-```
-
-- `from(…, capacity = n)` creates the collection with room for at least `n` elements.
-- `capacity` is a read-only property: the number of elements the collection can hold without allocating, never less than `length`.
-- `reserve(additional)` makes room for at least `additional` elements more than the current `length`. It requires a `mutable` array and, like `push`, declares `mutates self`: it may move the items.
-
-Every collection has them, and so does [`String`](/values/strings#capacity), counted in bytes. On JavaScript, the engine manages the memory: `reserve` does nothing and `capacity` is the `length` (the `size` of the collections without positions), so a program must never depend on its exact value.
 
 ## Access and update
 
@@ -266,7 +270,7 @@ An array stores its items **contiguously**, in a single block of memory, with it
 | `insert`, `delete(index)` | linear in the number of items after `index` |
 | `includes`, `indexOf`, `find` | linear |
 
-Reserve the capacity with `from` or `reserve` when you know it, to skip the intermediate reallocations (see [capacity](#capacity)). When references must survive `push`, use a [`GrowingArray`](/collections/growing-collections), which never moves its items.
+Reserve the capacity with `from` or `reserve` when you know it, to skip the intermediate reallocations (see [capacity and reservation](#capacity-and-reservation)). When references must survive `push`, use a [`GrowingArray`](/collections/growing-collections), which never moves its items.
 
 ## Smart bound checks
 
@@ -337,7 +341,14 @@ This is why Fa needs no `get_unchecked`: there is a single indexing syntax, chec
 
 ### Native
 
-- **Layout.** An array value is a pointer to a heap header `{ pointer, length, capacity }`. Small item buffers share the header's allocation; larger buffers use a separate block from `fa_alloc`. An empty array allocates its header only.
+- **Returned collections.** In synchronous compilation mode, collection functions receive an optional bounded caller buffer and return the final header pointer. Fresh literals, supported transforms and proven moved immutable locals forward it through calls and return branches. A mutable or escaping owner supplies no frame buffer, so construction starts on the heap. Constant returned locals can share read-only storage with a proven immutable caller. Arrays and growing arrays construct aggregate-returning literal items directly in their final slots; completed items still drop on an error. Object-columnar chunks retain their larger heap layout.
+
+- **Reviewed storage limits.** The collection byte budget is 2 KiB; the total is 4 KiB per non-recursive frame and 512 bytes in a resolved direct-call cycle (including methods and generic instances). Literals reserve their exact aligned size. Non-recursive calls receive at most `min(2 KiB, remaining frame budget)`. In a direct-call cycle, all call-result offers share 128 bytes per frame inside the 512-byte total: each receives `min(128 − offer bytes reserved, 512 − collection bytes reserved)`, with no offer below 64 bytes. Exact literals count against the total in either lowering order; forwarded offers reserve no frame bytes. The inclusive 2× per-frame gate covers call-result offers (one and four live splits): unchecked depths must satisfy `baseline_depth ≤ 2 × final_depth + 8`, with eight frames for fixed setup overhead and native measurements under a 256 KiB stack limit. Leak-checked depths are informational; exact literals are excluded. Indirect recursion is not detected. Larger objects/tuples use caller output slots; a layout with at most two scalar leaves and 16 bytes on 64-bit targets, or exactly one scalar leaf on wasm32, returns by value. Small throwing results keep `{ value, error }`; register results store directly into their final owner. An output marked `noalias` is unreachable from arguments, captures and globals during the call. Native x86-64/aarch64 functions probe crossed stack pages.
+
+- **Immutable literals.** Literal `let` arrays whose supported items are constant use read-only globals, including nested arrays and objects of constants. Other local `let` literals use a fixed entry-block buffer when their header and items fit 2 KiB and the non-recursive function stays within its 4 KiB collection budget. Captured values, asynchronous programs and larger constructions keep the heap path. The word following the header marks static or frame storage; it is independent of the negative capacity used for compact character arrays. Static drops do nothing; frame drops destroy owned items without freeing the buffer. Static storage copies when another owner needs independent storage. Runtime literals with owning or unknown uses start on the heap and retain ordinary moves; a frame address is never copied out to rescue an escape. Nonempty-separator `split` can construct directly in a proven non-escaping local’s fixed caller buffer, with a heap choice before construction when it does not fit; other input-sized constructors and value slices keep their existing paths.
+
+- **Caller destinations.** `map` and `filter` can build a proven immutable local directly in its fixed caller buffer, using the input length as a capacity bound and selecting the heap before construction if it does not fit. Callback errors drop the completed prefix. `Array.from` of a live borrowed array without an explicit capacity hint constructs its required value copy directly in the same bounded storage; already owned or movable arrays keep their storage. Explicit capacity hints retain the existing snapshot-before-hint path.
+- **Layout.** An array value is a pointer to a header `{ pointer, length, capacity }`. Small item buffers share the header's allocation; larger buffers use a separate block from `fa_alloc`. An empty array allocates its header only.
 - **Recursive items.** A collection supplies storage for its object items, including recursive objects: each object is stored directly in its slot, without an additional box. Direct recursive fields inside that object, including optionals, retain an owning box when their inline expansion would cycle. The same rule applies to map entries, set elements, growing arrays, pools and columnars. Copies still recursively copy owned payloads; moving the array's items follows the same reference invalidation rules.
 - **Growth.** The capacity doubles, starting at 4 items. Growth allocates a larger buffer, relocates the items bytewise, and frees the old buffer. Before a counted loop that always pushes one item to an empty array field, the compiler can reserve the loop's item count. It keeps the normal capacity checks: calls through aliases may add further items. A nonempty field is not reserved early, so references to its existing items remain valid until the actual push.
 - **Capacity.** `from(…, capacity = n)` allocates `n` items up front; `reserve(additional)` grows the buffer to at least `length + additional` items (doubling when that is more), so a `reserve` in a loop stays constant on average. `capacity` reads the header.

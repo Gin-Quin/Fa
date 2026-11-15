@@ -1617,7 +1617,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				// a detached task owns copies of its arguments
 				let mut owned = arguments.to_vec();
 				if detached {
-					let mut position = usize::from(function.lambda);
+					let mut position = usize::from(function.lambda)
+						+ usize::from(function.return_slot)
+						+ 2 * usize::from(function.return_collection);
 					for (index, (repr, has_default)) in function.params.iter().enumerate() {
 						let by_pointer = function.by_pointer.get(index).copied().unwrap_or(false);
 						if !by_pointer && !has_default && self.needs_drop(*repr) {
@@ -1642,6 +1644,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let call = this.builder.build_call(function.value, arguments, "")?;
 					call.set_call_convention(FAST_CALLING_CONVENTION);
 					let raw = call.try_as_basic_value().basic();
+					let raw = if function.return_slot {
+						let BasicMetadataValueEnum::PointerValue(pointer) =
+							arguments[usize::from(function.lambda)]
+						else {
+							unreachable!("return slot")
+						};
+						Some(this.raw_from_return_slot(
+							&this.builder,
+							Slot { pointer, repr: ret },
+							raw,
+						)?)
+					} else {
+						raw
+					};
 					if detached {
 						if let Some(raw) = raw {
 							this.drop_raw(raw, ret, throws)?;
@@ -1686,7 +1702,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	// ── await ─────────────────────────────────────────────────────────────
 
 	/// The expression inside groups.
-	fn ungrouped(&self, mut node: NodeId) -> NodeId {
+	pub(crate) fn ungrouped(&self, mut node: NodeId) -> NodeId {
 		while let View::Group(inner) = self.view(node) {
 			node = inner;
 		}

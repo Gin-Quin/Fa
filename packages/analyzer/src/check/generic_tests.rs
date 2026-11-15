@@ -181,3 +181,22 @@ fn compile_time_value_parameters() {
 		["GN008"]
 	);
 }
+
+#[test]
+fn generic_parameters_are_written_between_angle_brackets() {
+	// parentheses are a call: reported, then read as the generic application
+	assert_eq!(codes(&format!("{PICK}let f = pick(Float)(2)\n")), ["GN031"]);
+	assert_eq!(codes("let a: Array(Integer) = []\n"), ["GN031"]);
+	assert_eq!(codes("let a: Integer(min = 0) = 1\n"), ["GN031"]);
+	// angle brackets on a function that isn't generic
+	assert_eq!(
+		codes("function f = (a: Integer) => a\nlet g = f<Integer>(1)\n"),
+		["GN007"]
+	);
+	// a generic function returning a function: the brackets, then two calls
+	let (session, file) = analyzed(
+		"function makeAdder = <Value: Integer | Float>(base: Value) => (value: Value) => base + value\nlet a = makeAdder<Float>(5)(3)\nlet b = makeAdder(5)(3)\n",
+	);
+	assert_eq!(symbol_type(&session, file, "a"), "Float");
+	assert_eq!(symbol_type(&session, file, "b"), "Integer");
+}

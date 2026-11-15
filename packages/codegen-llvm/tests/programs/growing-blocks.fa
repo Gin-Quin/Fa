@@ -1,0 +1,133 @@
+-- GrowingArray: pushes through the segment cursor, loops walking the segments, block copies,
+-- fills and searches across segments, and `[]` keeping the segments for the next pushes.
+
+function copyRange = (target: GrowingArray<Byte>, source: GrowingArray<Byte>, start: Integer, end: Integer) throws IndexError mutates target => {
+	for position in start..end {
+		target.push(try source[position])
+	}
+}
+
+function poke = (target: GrowingArray<Byte>, index: Integer) throws IndexError mutates target => {
+	try target[index] = 0
+}
+
+-- the first segment of a `GrowingArray<Byte>` holds 64 bytes, then 64, 128, 256…
+mutable bytes: GrowingArray<Byte> = []
+for value in 0..300 {
+	bytes.push(Byte(value %% 256))
+}
+use first = try bytes[0]
+use late = try bytes[200]
+for value in 0..1000 {
+	bytes.push(7)
+}
+console.log(first, late, bytes.length) -- prints: 0 200 1300
+
+-- a loop over the items, across segments
+mutable total = 0
+for byte in bytes {
+	total += byte
+}
+console.log(total) -- prints: 40586
+
+-- copies across segments, both ways
+mutable copied: GrowingArray<Byte> = []
+try copyRange(copied, bytes, 60, 200)
+console.log(copied.length, try copied[0], try copied[139]) -- prints: 140 60 199
+mutable flat: Array<Byte> = []
+for byte in bytes {
+	flat.push(byte)
+}
+console.log(flat.length, try flat[255], try flat[256]) -- prints: 1300 255 0
+mutable back: GrowingArray<Byte> = []
+for byte in flat {
+	back.push(byte)
+}
+for position in 120..130 {
+	back.push(try flat[position])
+}
+console.log(back.length, try back[1300], try back[1309]) -- prints: 1310 120 129
+-- a range leaving the source: the pushes before the bad index, then `IndexError`
+mutable partial: GrowingArray<Byte> = []
+copyRange(partial, bytes, 1298, 1302) catch error => console.log("error: {error}") -- prints: error: IndexError { index = 1300, length = 1300 }
+console.log(partial.length) -- prints: 2
+try copyRange(partial, bytes, -2, 1)
+console.log(partial.length, try partial[2], try partial[4]) -- prints: 5 7 0
+
+-- fills across segments
+mutable filled: GrowingArray<Byte> = []
+for _ in 0..150 {
+	filled.push(48)
+}
+for _ in 0..-3 {
+	filled.push(49)
+}
+console.log(filled.length, try filled[0], try filled[149]) -- prints: 150 48 48
+
+-- searches across segments, matches on the boundaries
+mutable text: GrowingArray<Byte> = []
+for position in 0..400 {
+	text.push(if position == 0 or position == 63 or position == 64 or position == 127 or position == 128 or position == 399 { 59 } else { 97 })
+}
+mutable found: Array<Integer> = []
+for byte, position in text {
+	if byte == 59 {
+		found.push(position)
+	}
+}
+console.log(found) -- prints: [0, 63, 64, 127, 128, 399]
+-- the body changes the items it reaches
+for byte in text {
+	if byte == 59 {
+		byte = 44
+	}
+}
+console.log(try text[63], try text[64], try text[65]) -- prints: 44 44 97
+
+-- negative indices on writes and reads
+try text[-1] = 33
+console.log(try text[399], try text[-400]) -- prints: 33 44
+poke(text, -401) catch error => console.log("error: {error}") -- prints: error: IndexError { index = -401, length = 400 }
+
+-- `[]` keeps the segments: the next pushes reuse them
+mutable reused: GrowingArray<Byte> = []
+for round in 0..3 {
+	reused = []
+	for value in 0..(100 + round * 100) {
+		reused.push(Byte(value %% 200))
+	}
+	console.log(reused.length, try reused[reused.length - 1])
+}
+-- prints: 100 99
+-- prints: 200 199
+-- prints: 300 99
+reused = []
+let again = reused.get(10)
+console.log(again ?? 0, reused.length, reused.isEmpty()) -- prints: 0 0 true
+reused.push(5)
+console.log(reused) -- prints: [5]
+
+-- items owning memory are dropped by `[]` (checked by the leak checks)
+mutable words: GrowingArray<String> = []
+for round in 0..3 {
+	words = []
+	for index in 0..70 {
+		words.push("word {index} of round {round}")
+	}
+}
+console.log(words.length, try words[69]) -- prints: 70 word 69 of round 2
+
+-- other scalar items
+mutable integers: GrowingArray<Integer> = []
+let more = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+for round in 0..3 {
+	for value in more {
+		integers.push(value * round)
+	}
+}
+console.log(integers.length, try integers[29]) -- prints: 30 20
+mutable floats: GrowingArray<Float> = []
+for value in integers {
+	floats.push(Float(value) / 2.0)
+}
+console.log(floats.length, try floats[29]) -- prints: 30 10

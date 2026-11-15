@@ -204,8 +204,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ => self.alloc_rec(value.repr)?,
 		};
 		let data = if owned { value } else { self.emit_copy(value)? };
-		self.builder
-			.build_store(pointer, data.value.expect("a value"))?;
+		if data.destination != Some(pointer) {
+			self.builder
+				.build_store(pointer, data.value.expect("a value"))?;
+		}
 		if region {
 			self.builder.build_call(
 				self.runtime.function("fa_arena_leave")?,
@@ -380,7 +382,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Branches to a new block when `condition` holds, else returns: the
 	/// builder continues in the new block.
-	fn helper_when(
+	pub(crate) fn helper_when(
 		&self,
 		builder: &Builder<'ctx>,
 		function: FunctionValue<'ctx>,
@@ -509,6 +511,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					)?;
 					return Ok(());
 				}
+				let storage = builder
+					.build_call(
+						self.runtime.function("fa_array_storage")?,
+						&[array.into()],
+						"",
+					)?
+					.try_as_basic_value()
+					.basic()
+					.expect("storage")
+					.into_int_value();
+				let owned = builder.build_int_compare(
+					IntPredicate::NE,
+					storage,
+					storage.get_type().const_int(2, false),
+					"",
+				)?;
+				self.helper_when(builder, function, owned, |builder| {
+					builder.build_return(None)?;
+					Ok(())
+				})?;
 				if item == Repr::Str {
 					let cap_pointer = builder.build_struct_gep(self.header_type(), array, 2, "")?;
 					let cap = builder
@@ -1350,6 +1372,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return self.escape_frame_string(value);
 		}
 		if let Some(node) = node
+			&& self.is_coalesced_return_read(node, value.repr)
+		{
+			// The local already occupies the caller's result slot. Keep its
+			// bits intact; normal-return cleanup excludes this owner, while
+			// error cleanup still destroys it. No run-time drop flag is needed.
+			return Ok(value);
+		}
+		if let Some(node) = node
 			&& let Some(slot) = self.movable_local(node, value.repr)
 		{
 			// the local gives its value up: its drop sees a zero
@@ -1624,7 +1654,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	fn drop_place(&self, slot: Slot<'ctx>, flags: &[FieldFlag<'ctx>]) -> Result<(), Error> {
 		if flags.is_empty() {
 			if self.needs_drop(slot.repr) {
-				let value = self.load(slot)?;
+				let value = self.load_for_drop(slot)?;
 				self.emit_drop(value)?;
 			}
 			return Ok(());
@@ -1736,7 +1766,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(())
 			}
 			Cleanup::Local(slot) => {
-				let value = self.load(slot)?;
+				let value = self.load_for_drop(slot)?;
 				self.emit_drop(value)
 			}
 			Cleanup::Dispose(observer) => {
@@ -1772,6 +1802,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Ends a scope: drops what it registered after `mark`, in reverse order,
 	/// but `keep` (the value of the scope), which stays registered.
 	pub(crate) fn end_scope(&self, mark: usize, keep: Option<Val<'ctx>>) -> Result<(), Error> {
+		let destination = keep.and_then(|value| value.destination);
 		let entries = {
 			let mut cleanups = self.cleanups.borrow_mut();
 			let mark = mark.min(cleanups.len());
@@ -1780,6 +1811,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let keep = keep.and_then(|value| value.value);
 		let mut kept = None;
 		for entry in entries.into_iter().rev() {
+			if self.preserves_return_owner(entry, destination) {
+				continue;
+			}
 			if let Cleanup::Temp(temp) = entry
 				&& keep.is_some()
 				&& temp.value == keep
@@ -1833,11 +1867,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// of the scopes (`break`, `return`, a raised error); the entries stay
 	/// registered for the code that follows in the scopes.
 	pub(crate) fn drop_to(&self, mark: usize) -> Result<(), Error> {
+		self.drop_to_returning(mark, None)
+	}
+
+	pub(super) fn drop_to_returning(
+		&self,
+		mark: usize,
+		keep: Option<Val<'ctx>>,
+	) -> Result<(), Error> {
 		let entries: Vec<Cleanup<'ctx>> = {
 			let cleanups = self.cleanups.borrow();
 			cleanups[mark.min(cleanups.len())..].to_vec()
 		};
 		for entry in entries.into_iter().rev() {
+			if self.preserves_return_owner(entry, keep.and_then(|value| value.destination)) {
+				continue;
+			}
 			if self.terminated() {
 				break;
 			}
@@ -1896,7 +1941,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// local analysis: the last reference in the source, not in a loop or a
 	/// lambda that its declaration is outside of, not in an assignment whose
 	/// target reads it).
-	fn movable_local(&self, node: NodeId, repr: Repr) -> Option<Slot<'ctx>> {
+	pub(crate) fn movable_local(&self, node: NodeId, repr: Repr) -> Option<Slot<'ctx>> {
 		let mut inner = node;
 		while let View::Group(group) = self.view(inner) {
 			inner = group;
@@ -1908,6 +1953,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return None;
 		};
 		let slot = *self.owned_locals.get(&symbol)?;
+		// Callee-frame locals and unconditional read-only globals cannot
+		// change owner. Caller-provided return storage is deliberately absent
+		// from this set: its pointer may move back to that caller.
+		if self
+			.frame()
+			.collection_locals
+			.contains(&(self.file, symbol))
+		{
+			return None;
+		}
 		if self.shared.contains_key(&symbol) {
 			return None;
 		}
@@ -1943,7 +1998,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// A direct return ends this local's lifetime even when another branch
 	/// reads it later in the source. Keep the proof closed to passive values
 	/// with no references, captures, foreign exposure or observer cleanups.
-	fn is_returned_local(&self, symbol: SymbolId, node: NodeId, repr: Repr) -> bool {
+	pub(super) fn is_returned_local(&self, symbol: SymbolId, node: NodeId, repr: Repr) -> bool {
 		let Some(owner) = self.frame().owner else {
 			return false;
 		};
@@ -2019,7 +2074,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		true
 	}
 
-	fn is_last_use(&self, symbol: SymbolId, node: NodeId, declaration: NodeId) -> bool {
+	pub(super) fn is_last_use(&self, symbol: SymbolId, node: NodeId, declaration: NodeId) -> bool {
 		// a reference into the local (`use ana = town.people.add(…)`) may
 		// still read it after its last textual read
 		if self.referenced_locals().contains(&symbol) {

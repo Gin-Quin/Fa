@@ -229,7 +229,7 @@ fn optional_type_written_twice() {
 
 #[test]
 fn optional_type_twice_in_a_call() {
-	assert_statement("Array(Integer??)", "Array(Integer??)");
+	assert_statement("Array<Integer??>", "Array<Integer??>");
 }
 
 #[test]

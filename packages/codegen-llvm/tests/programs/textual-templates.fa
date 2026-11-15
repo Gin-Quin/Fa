@@ -65,5 +65,29 @@ function replaceDuringEvaluation = (): Integer mutates buffer => {
 let independent = "independent string data"
 buffer = "{independent}:{replaceDuringEvaluation()}"
 assert buffer == "independent string data:42"
+-- A string read by a template stays the value it had, even when a later
+-- part changes its variable in place.
+mutable other = "a string long enough to own a heap buffer"
+function rewriteOther = (): Integer mutates other => {
+	other = ""
+	other += "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+	1
+}
+other += "!"
+let snapshot = "{other}:{rewriteOther()}"
+assert snapshot == "a string long enough to own a heap buffer!:1"
+other = "a string long enough to own a heap buffer"
+other += "!"
+buffer = "{other}:{rewriteOther()}"
+assert buffer == "a string long enough to own a heap buffer!:1"
+-- References and functions reading the destination keep the allocating path.
+mutable aliased = "a long string that owns its buffer for the alias test"
+use view = aliased
+aliased = "<{view}>"
+assert aliased == "<a long string that owns its buffer for the alias test>"
+function readOther = (): String => other
+other = "a string long enough to own a heap buffer, read by a function"
+other = "({readOther()})"
+assert other == "(a string long enough to own a heap buffer, read by a function)"
 console.log("textual templates ok")
 -- prints: textual templates ok

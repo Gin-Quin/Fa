@@ -72,22 +72,43 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let item_types = self.tuple_items(ty);
 		let structure = self.tuple_type(ty);
+		let destination = self.destination_for(node, repr);
+		let mut completed = Vec::new();
 		let mut value = structure.get_undef();
 		for (index, (item, item_type)) in items.iter().zip(item_types).enumerate() {
-			let lowered = self.expr(item)?;
+			let item_repr = self.repr_of(item_type, item.index())?;
+			let field_destination = destination
+				.map(|slot| {
+					self.builder
+						.build_struct_gep(structure, slot.pointer, index as u32, "result.item")
+						.map(|pointer| super::Slot {
+							pointer,
+							repr: item_repr,
+						})
+				})
+				.transpose()?;
+			let lowered = self.expr_with_destination(item, field_destination)?;
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);
 			}
-			let item_repr = self.repr_of(item_type, item.index())?;
 			let lowered = self.owned_as(lowered, item_repr, Some(item))?;
-			if let Some(raw) = lowered.value {
+			completed.push(self.fresh(lowered));
+			if let Some(slot) = field_destination {
+				self.store(slot, lowered, item)?;
+			} else if let Some(raw) = lowered.value {
 				value = self
 					.builder
 					.build_insert_value(value, raw, index as u32, "")?
 					.into_struct_value();
 			}
 		}
-		Ok(self.fresh(Val::new(repr, value)))
+		for item in completed {
+			self.take(item, None)?;
+		}
+		Ok(self.fresh(match destination {
+			Some(slot) => self.load_destination(slot)?,
+			None => Val::new(repr, value),
+		}))
 	}
 
 	/// Appends `(1, "one")`.
@@ -231,7 +252,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder.build_store(slot, raw)?;
 		}
 		let array_value = self.fresh(Val::new(Repr::Array(item_type), array));
-		let result = self.for_items(node, pattern, has_index, array_value, body)?;
+		let result = self.for_items(node, pattern, has_index, iterable, array_value, body)?;
 		// what the loop variable wrote, back into the place
 		if self.is_place(iterable) {
 			let place = self.place(iterable)?;

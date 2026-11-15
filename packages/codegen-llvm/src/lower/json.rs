@@ -372,10 +372,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let repr = self.repr_of(ty, call.index())?;
 		if !repr.has_value() {
-			return Ok(Val {
-				repr: Repr::None,
-				value: None,
-			});
+			return Ok(Val::none());
 		}
 		let reader = self.json_reader(ty, repr, call)?;
 		let value = self.call_value(reader, &[tree.into()])?;
@@ -707,10 +704,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						self.owned_as(built, repr, None)?
 					}
 					(None, None) => {
-						let none = Val {
-							repr: Repr::None,
-							value: None,
-						};
+						let none = Val::none();
 						self.json_adapt(none, repr, call)?
 					}
 				};

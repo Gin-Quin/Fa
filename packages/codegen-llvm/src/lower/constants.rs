@@ -119,10 +119,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.context.bool_type().const_int(*value as u64, false),
 			),
 			(Value::String(text), Repr::Str) => self.string_constant(text),
-			(Value::None, Repr::None) => Val {
-				repr: Repr::None,
-				value: None,
-			},
+			(Value::None, Repr::None) => Val::none(),
 			(Value::None, Repr::Optional(_)) => {
 				Val::new(repr, super::zero_of(self.llvm_type(repr)))
 			}

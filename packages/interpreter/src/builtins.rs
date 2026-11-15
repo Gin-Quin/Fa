@@ -434,8 +434,9 @@ pub fn call(
 	Ok(match path {
 		// ── strings ──
 		"String#length" => Value::int(grapheme_count(text(&receiver)?) as i64),
-		// the room of a string, in bytes: exactly its bytes at compile time
-		"String#capacity" => Value::int(text(&receiver)?.len() as i64),
+		// the room of a string is its JavaScript length at compile time, as on JavaScript:
+		// a value of the interpreter has no spare room
+		"String#capacity" => Value::int(text(&receiver)?.encode_utf16().count() as i64),
 		"String.from" => Value::String(Arc::from(text(&receiver)?)),
 		// a value of the interpreter grows on demand: `reserve` is a hint
 		_ if path.ends_with("#reserve") => Value::None,
@@ -629,9 +630,14 @@ pub fn call(
 		}
 
 		// ── arrays, sets, maps (reading) ──
-		"Array#length" | "Array#capacity" => {
-			Value::int(receiver.items().map_or(0, <[Value]>::len) as i64)
-		}
+		"Array#length"
+		| "Array#capacity"
+		| "Pool#size"
+		| "Pool#capacity"
+		| "Columnar#size"
+		| "Columnar#capacity"
+		| "OrderedColumnar#length"
+		| "OrderedColumnar#capacity" => Value::int(receiver.items().map_or(0, <[Value]>::len) as i64),
 		"Set#size" | "Set#capacity" => {
 			Value::int(receiver.items().map_or(0, <[Value]>::len) as i64)
 		}
@@ -702,8 +708,14 @@ pub fn call(
 				_ => Value::Boolean(mine.iter().all(|item| contains(&other, item))),
 			}
 		}
-		"Array.from" => list(iterate(&receiver)?),
-		"Set.from" => {
+		"Array.from"
+		| "GrowingArray.from"
+		| "Pool.from"
+		| "GrowingPool.from"
+		| "Columnar.from"
+		| "GrowingColumnar.from"
+		| "OrderedColumnar.from" => list(iterate(&receiver)?),
+		"Set.from" | "GrowingSet.from" => {
 			let mut set = Vec::new();
 			for item in iterate(&receiver)? {
 				if !contains(&set, &item) {
@@ -712,7 +724,7 @@ pub fn call(
 			}
 			Value::Set(Arc::new(set))
 		}
-		"Map.from" => {
+		"Map.from" | "GrowingMap.from" => {
 			let mut entries = Vec::new();
 			for item in iterate(&receiver)? {
 				let (key, value) = pair(item)?;

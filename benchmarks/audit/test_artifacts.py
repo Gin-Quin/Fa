@@ -146,7 +146,8 @@ class SuiteSelection(unittest.TestCase):
         self.assertEqual(set(compare.GOOSE_SUITE), {
             "binary-trees", "blur", "calc", "graph", "interp", "lru", "particles", "push",
             "records", "respond", "scene", "sexp", "strlist", "sum", "tree", "words"})
-        self.assertEqual(len(compare.SECONDARY), 9)
+        # nine own ports, `growing-index` and the three variants (`compare.VARIANTS`)
+        self.assertEqual(len(compare.SECONDARY), 9 + 1 + len(compare.VARIANTS))
         self.assertFalse(set(compare.GOOSE_SUITE) & set(compare.SECONDARY))
         self.assertEqual(set(compare.GOOSE_SUITE) | set(compare.SECONDARY), set(compare.DEFAULTS))
 

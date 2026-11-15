@@ -224,7 +224,8 @@ Other things you will enjoy:
 | `//` comments | `--`; `//` is floor division |
 | Backtick templates | every string interpolates with `{}` |
 | Single-quoted strings | double quotes only |
-| `text.length` counts UTF-16 code units | `length` counts grapheme clusters, what a reader sees as characters: `"é👍🏽".length == 2` |
+| `text.length` counts UTF-16 code units | the same, on every target, native ones included: `"😀".length == 2`. Indexing, slicing, `indexOf` and `<` work on code units too; `text.characters()` gives the grapheme clusters |
+| `Uint8Array`, `TextEncoder`, `TextDecoder` | [`Bytes`](/values/bytes), `text.toUtf8()`, `String.fromUtf8(bytes)` |
 | Integers beyond `Number.MAX_SAFE_INTEGER` silently lose precision | on JavaScript targets, an `Integer` that leaves ±(2^53 − 1) stops the program; use `Int64` or `BigInt` (JavaScript `BigInt`s) for larger values |
 | Semicolons | none |
 | `arr[i]` always works | `throws IndexError` unless provably in bounds; `.get(i)` returns `T?` |

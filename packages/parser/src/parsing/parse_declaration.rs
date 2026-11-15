@@ -6,7 +6,9 @@ use crate::nodes::{DeclarationKind, Node};
 use crate::parsing::is_stop_token::{can_start_expression, is_parenthesis_open, is_stop_token};
 use crate::parsing::parse_delimited::parse_delimited;
 use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
-use crate::parsing::parse_generic_list::{parse_generic_list, report_spaced_generic_open};
+use crate::parsing::parse_generic_list::{
+	parse_generic_list, report_spaced_generic_open, written_generic_list,
+};
 use crate::parsing::parse_pattern::{is_pattern_start, parse_pattern};
 use crate::priority::Priority;
 use crate::tokens::TokenKind;
@@ -438,16 +440,19 @@ pub(crate) fn parse_generic_parameters(context: &mut Context<'_>) -> GenericPara
 		} else {
 			TokenKind::GenericClose
 		};
-		let (parameters, _) = parse_generic_list(context, closing, parse_generic_parameter);
+		let (parameters, _) = parse_generic_list(context, closing, None, parse_generic_parameter);
 		return GenericParameters {
 			parameters,
 			angle_brackets: true,
 		};
 	}
 
+	let list = written_generic_list(context);
 	context.error_at_token_with_code(
 		"GN031",
-		"Generic parameters use angle brackets: write `<Item>` for a type, or `function first = <Item>(items: Array<Item>) => …` for a function. Run `fa migrate-generics --write <path>` to update existing code",
+		format!(
+			"Generic parameters use angle brackets: write `<{list}>`. Run `fa migrate-generics --write <path>` to update existing code"
+		),
 	);
 	let (parameters, _) = parse_delimited(context, TokenKind::ParenthesisClose, |context| {
 		parse_generic_parameter(context, &[TokenKind::Comma, TokenKind::ParenthesisClose])
@@ -485,8 +490,12 @@ pub(crate) fn parse_optional_generic_parameters(context: &mut Context<'_>) -> Ge
 pub(crate) fn parse_generic_function(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
 	const EXAMPLE: &str = "like `<Item>(items: Array<Item>): Item? => items.get(0)`";
 	let start = context.token().start;
-	let (generics, _) =
-		parse_generic_list(context, TokenKind::GenericClose, parse_generic_parameter);
+	let (generics, _) = parse_generic_list(
+		context,
+		TokenKind::GenericClose,
+		None,
+		parse_generic_parameter,
+	);
 	if !is_parenthesis_open(context.kind()) {
 		context.error_at_token(format!(
 			"Expected the parameters of a generic function after its generic list, {EXAMPLE}"
@@ -522,14 +531,16 @@ pub(crate) fn report_generic_parameters_on_a_function_name(
 	declaration: &str,
 ) {
 	if matches!(context.kind(), TokenKind::GenericOpen | TokenKind::LessThan) {
+		let list = written_generic_list(context);
 		context.error_at_token(format!(
-			"The generic parameters of a function belong to its value: write `{declaration} = <Item>(items: Array<Item>) => …`"
+			"The generic parameters of a function belong to its value: write `{declaration} = <{list}>(…) => …`"
 		));
 	} else if is_parenthesis_open(context.kind()) {
+		let list = written_generic_list(context);
 		context.error_at_token_with_code(
 			"GN031",
 			format!(
-				"The generic parameters of a function belong to its value: write `{declaration} = <Item>(items: Array<Item>) => …`. Run `fa migrate-generics --write <path>` to update existing code"
+				"The generic parameters of a function belong to its value: write `{declaration} = <{list}>(…) => …`. Run `fa migrate-generics --write <path>` to update existing code"
 			),
 		);
 	}

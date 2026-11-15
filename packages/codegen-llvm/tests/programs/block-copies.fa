@@ -1,0 +1,161 @@
+-- Loops that only copy items into an array (block copies), only push one byte (fills), or only
+-- act on the items equal to a byte (searches): the same pushes, errors and rounds as the loops.
+
+function copyAll = (target: Array<Byte>, source: Array<Byte>) mutates target => {
+	for byte in source {
+		target.push(byte)
+	}
+}
+
+function copyRange = (target: Array<Byte>, source: Array<Byte>, start: Integer, end: Integer) throws IndexError mutates target => {
+	for position in start..end {
+		target.push(try source[position])
+	}
+}
+
+function copyThrough = (target: Array<Byte>, source: Array<Byte>, start: Integer, last: Integer) throws IndexError mutates target => {
+	for position in start..=last {
+		target.push(try source[position])
+	}
+}
+
+let source: Array<Byte> = [10, 11, 12, 13, 14]
+mutable target: Array<Byte> = [1]
+copyAll(target, source)
+console.log(target) -- prints: [1, 10, 11, 12, 13, 14]
+let empty: Array<Byte> = []
+copyAll(target, empty)
+console.log(target.length) -- prints: 6
+
+-- ranges inside the source: one copy
+mutable copied: Array<Byte> = []
+try copyRange(copied, source, 1, 4)
+console.log(copied) -- prints: [11, 12, 13]
+try copyThrough(copied, source, 3, 4)
+console.log(copied) -- prints: [11, 12, 13, 13, 14]
+-- empty ranges push nothing, even outside the source
+try copyRange(copied, source, 2, 2)
+try copyRange(copied, source, 9, 3)
+try copyRange(copied, source, -7, -9)
+try copyThrough(copied, source, 4, 3)
+console.log(copied.length) -- prints: 5
+
+-- a range leaving the source: the items before the bad index are pushed, then `IndexError`
+mutable partial: Array<Byte> = []
+copyRange(partial, source, 3, 8) catch error => console.log("error: {error}") -- prints: error: IndexError { index = 5, length = 5 }
+console.log(partial) -- prints: [13, 14]
+copyThrough(partial, source, 0, 5) catch error => console.log("error at {partial.length}") -- prints: error at 7
+console.log(partial) -- prints: [13, 14, 10, 11, 12, 13, 14]
+-- negative indices count from the end, round by round
+mutable fromEnd: Array<Byte> = []
+try copyRange(fromEnd, source, -2, 2)
+console.log(fromEnd) -- prints: [13, 14, 10, 11]
+copyRange(fromEnd, source, -6, -4) catch error => console.log("error: {error}") -- prints: error: IndexError { index = -6, length = 5 }
+console.log(fromEnd.length) -- prints: 4
+
+-- a copy that makes the target grow, many times, from an array of its own
+mutable grown: Array<Byte> = []
+mutable block: Array<Byte> = []
+for value in 0..100 {
+	block.push(Byte(value))
+}
+for round in 0..50 {
+	copyAll(grown, block)
+	try copyRange(grown, block, round, 100)
+}
+console.log(grown.length, try grown[4999], try grown[grown.length - 1]) -- prints: 8775 50 99
+
+-- other scalar items
+mutable integers: Array<Integer> = [-1]
+let moreIntegers = [1, 2, 3, 9007199254740991]
+for value in moreIntegers {
+	integers.push(value)
+}
+console.log(integers) -- prints: [-1, 1, 2, 3, 9007199254740991]
+mutable floats: Array<Float> = []
+let moreFloats = [0.5, -2.25]
+for position in 0..2 {
+	floats.push(moreFloats[position])
+}
+console.log(floats) -- prints: [0.5, -2.25]
+mutable flags: Array<Boolean> = [false]
+let moreFlags = [true, false, true]
+for flag in moreFlags {
+	flags.push(flag)
+}
+console.log(flags) -- prints: [false, true, false, true]
+mutable small: Array<Int16> = []
+let moreSmall: Array<Int16> = [-300, 300]
+for value in moreSmall {
+	small.push(value)
+}
+console.log(small) -- prints: [-300, 300]
+
+-- an object field as the target
+type Buffer = {
+	bytes: Array<Byte> = []
+}
+mutable buffer = Buffer {}
+for byte in source {
+	buffer.bytes.push(byte)
+}
+for position in 1..3 {
+	buffer.bytes.push(source[position])
+}
+console.log(buffer.bytes) -- prints: [10, 11, 12, 13, 14, 11, 12]
+
+-- fills
+function pad = (target: Array<Byte>, count: Integer) mutates target => {
+	for _ in 0..count {
+		target.push(48)
+	}
+}
+mutable padded: Array<Byte> = []
+pad(padded, 3)
+pad(padded, 0)
+pad(padded, -4)
+console.log(padded) -- prints: [48, 48, 48]
+pad(padded, 40)
+console.log(padded.length, try padded[42]) -- prints: 43 48
+mutable through: Array<Byte> = []
+for _ in 1..=2 {
+	through.push(255)
+}
+console.log(through) -- prints: [255, 255]
+mutable signed: Array<Int8> = []
+for _ in 0..3 {
+	signed.push(-1)
+}
+console.log(signed) -- prints: [-1, -1, -1]
+
+-- searches
+function semicolons = (text: Array<Byte>): Array<Integer> => {
+	mutable found: Array<Integer> = []
+	for byte, position in text {
+		if byte == 59 {
+			found.push(position)
+		}
+	}
+	found
+}
+console.log(semicolons([59, 1, 59, 59, 2, 3, 59])) -- prints: [0, 2, 3, 6]
+console.log(semicolons([1, 2, 3])) -- prints: []
+console.log(semicolons(empty)) -- prints: []
+mutable long: Array<Byte> = []
+for position in 0..100 {
+	long.push(if position %% 17 == 16 { 59 } else { 97 })
+}
+console.log(semicolons(long)) -- prints: [16, 33, 50, 67, 84]
+-- the body changes the items it reaches and breaks: the search reads them as the rounds would
+mutable marks: Array<Byte> = [59, 0, 59, 59, 0, 59]
+mutable rounds = 0
+for byte, position in marks {
+	if byte == 59 {
+		rounds += 1
+		byte = 44
+		if position == 3 {
+			break
+		}
+	}
+}
+console.log(marks, rounds) -- prints: [44, 0, 44, 44, 0, 59] 3

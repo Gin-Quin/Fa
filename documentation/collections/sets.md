@@ -29,6 +29,8 @@ setOfHumans.add(anotherJohn) -- not added: an equal Human is already present
 
 Note that the third human *is* stored: `{ name = "John", age = 22 }` is not equal to `{ name = "John", age = 20 }`.
 
+Storage can be planned with `from(source, capacity = n)`, the read-only `capacity` property and `reserve(additional)`. See [capacity and reservation](/collections/arrays#capacity-and-reservation) for the shared rules and effects.
+
 ## Custom key
 
 Pass a `key` function to `Set.from` when the identity of a value is carried by one of its parts, such as an id. Two values are then the same when their keys are equal, and only the key is hashed. The key can be of any type that a [map key](/collections/maps#keys) accepts:
@@ -80,8 +82,6 @@ if tags.add("fa") {
 | `add`, `delete`, `take`, `deleteWhere`, `clear` | `mutates self` |
 | `reserve(additional)` | `mutates self`: it may rebuild the table |
 | `includes`, `size`, `capacity`, `find`, `union`, `intersection`, `difference`, `isSubsetOf` | none |
-
-Like every collection, a set takes a `capacity` in `from`, has a read-only `capacity` property and a `reserve(additional)` method, which makes room for `additional` more values (see [capacity](/collections/arrays#capacity)): `Set<String>.from([], capacity = 100)`.
 
 The values of a set can't be modified in place: their content decides where they are stored. A reference to a value of a set is read-only, even in a `mutable` set, and so is the loop variable. To change a value, delete it and add the new one. For the same reason, the element type of a set is exact: a `Set<Hero>` is not a `Set<Human>`, even where a [structural view](/advanced/structural-typing) would accept a `Hero` for a `Human`.
 
@@ -216,6 +216,12 @@ The call above compiles to three `console.log` lines with no runtime lookup at a
 ## Implementation details
 
 ### Native
+
+- **Returned collections.** In synchronous compilation mode, collection functions receive an optional bounded caller buffer and return the final header pointer. Fresh literals, supported transforms and proven moved immutable locals forward it through calls and return branches. A mutable or escaping owner supplies no frame buffer, so construction starts on the heap. Constant returned locals can share read-only storage with a proven immutable caller. Arrays and growing arrays construct aggregate-returning literal items directly in their final slots; completed items still drop on an error. Object-columnar chunks retain their larger heap layout.
+
+- **Reviewed storage limits.** The collection byte budget is 2 KiB; the total is 4 KiB per non-recursive frame and 512 bytes in a resolved direct-call cycle (including methods and generic instances). Literals reserve their exact aligned size. Non-recursive calls receive at most `min(2 KiB, remaining frame budget)`. In a direct-call cycle, all call-result offers share 128 bytes per frame inside the 512-byte total: each receives `min(128 − offer bytes reserved, 512 − collection bytes reserved)`, with no offer below 64 bytes. Exact literals count against the total in either lowering order; forwarded offers reserve no frame bytes. The inclusive 2× per-frame gate covers call-result offers (one and four live splits): unchecked depths must satisfy `baseline_depth ≤ 2 × final_depth + 8`, with eight frames for fixed setup overhead and native measurements under a 256 KiB stack limit. Leak-checked depths are informational; exact literals are excluded. Indirect recursion is not detected. Larger objects/tuples use caller output slots; a layout with at most two scalar leaves and 16 bytes on 64-bit targets, or exactly one scalar leaf on wasm32, returns by value. Small throwing results keep `{ value, error }`; register results store directly into their final owner. An output marked `noalias` is unreachable from arguments, captures and globals during the call. Native x86-64/aarch64 functions probe crossed stack pages.
+
+- **Immutable literals (current LLVM backend).** Constant `let` literals with supported scalar keys use read-only entries and index. Runtime local literals use a fixed frame buffer when the header, entries, index and any stable chunk directory fit the 2 KiB collection and 4 KiB non-recursive frame budgets. Captured or asynchronous values and larger constructions keep heap storage. Static drops do nothing; frame drops destroy owned elements without freeing their storage. Static values copy for a mutable owner. Runtime owning or uncertain uses choose the heap before construction, without frame-to-heap copy-out. Duplicate constant elements retain set semantics.
 
 The set is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's maps since 1.24), with the values stored inline:
 

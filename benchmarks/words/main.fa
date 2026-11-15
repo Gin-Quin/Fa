@@ -1,5 +1,5 @@
 -- Word frequencies: a vocabulary of random words, a text of N words drawn from it with a skew
--- towards its front, split into words, then counted in a `Map(String, Integer)`.
+-- towards its front, split into words, then counted in a `Map<String, Integer>`.
 
 let letters = "abcdefghijklmnopqrstuvwxyz"
 

@@ -4,7 +4,7 @@
 use fa_analyzer::ids::{NodeId, NominalId, TypeId};
 use fa_analyzer::types::{CollKind, FloatBits, IntStorage, NominalKind, TypeKind};
 use inkwell::types::BasicTypeEnum;
-use inkwell::values::{BasicValueEnum, IntValue};
+use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use rustc_hash::FxHashSet;
 
 use crate::error::Error;
@@ -241,6 +241,8 @@ impl Repr {
 /// A lowered value: its representation and, unless `Void` or `Never`, its IR value.
 #[derive(Copy, Clone, Debug)]
 pub struct Val<'ctx> {
+	/// Fresh aggregate already constructed at this address.
+	pub destination: Option<PointerValue<'ctx>>,
 	pub repr: Repr,
 	pub value: Option<BasicValueEnum<'ctx>>,
 }
@@ -248,6 +250,7 @@ pub struct Val<'ctx> {
 impl<'ctx> Val<'ctx> {
 	pub fn new(repr: Repr, value: impl Into<BasicValueEnum<'ctx>>) -> Self {
 		Val {
+			destination: None,
 			repr,
 			value: Some(value.into()),
 		}
@@ -255,6 +258,7 @@ impl<'ctx> Val<'ctx> {
 
 	pub fn void() -> Self {
 		Val {
+			destination: None,
 			repr: Repr::Void,
 			value: None,
 		}
@@ -262,7 +266,17 @@ impl<'ctx> Val<'ctx> {
 
 	pub fn never() -> Self {
 		Val {
+			destination: None,
 			repr: Repr::Never,
+			value: None,
+		}
+	}
+
+	/// `none`: no IR value.
+	pub fn none() -> Self {
+		Val {
+			destination: None,
+			repr: Repr::None,
 			value: None,
 		}
 	}
@@ -800,6 +814,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		if value.repr == to || !to.has_value() || value.repr == Repr::Never {
 			return Ok(Val {
+				destination: value.destination.filter(|_| to.has_value()),
 				repr: if to.has_value() { value.repr } else { to },
 				value: if to.has_value() { value.value } else { None },
 			});

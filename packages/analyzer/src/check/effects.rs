@@ -1061,10 +1061,37 @@ impl Walker<'_> {
 					};
 					let text = tree.name(name).to_string();
 					let (step, next) = match (text.as_str(), self.s.types.kind(ty)) {
-						("length", TypeKind::Collection(..) | TypeKind::String) => {
-							(PathStep::Length, TypeId::INTEGER)
+						("length", TypeKind::String) => (PathStep::Length, TypeId::INTEGER),
+						("length" | "size", TypeKind::Collection(kind, ..)) => {
+							// `length` on the collections with positions, `size`
+							// on the others (a set, a map, a pool, a columnar);
+							// the other one is reported, and read as the right one
+							let positioned = matches!(
+								kind,
+								CollKind::Array
+									| CollKind::GrowingArray | CollKind::OrderedColumnar
+							);
+							let (has, step) = if positioned {
+								("length", PathStep::Length)
+							} else {
+								("size", PathStep::Size)
+							};
+							if text != has {
+								let owner = path_text(&self.s.types, path, &|index| {
+									self.effect_param_name(index)
+								});
+								let diagnostic = self.diagnostic(
+									&EFF008,
+									member,
+									format!(
+										"a `{}` has a `{has}`, not a `{text}`: write `{owner}.{has}`",
+										kind.name()
+									),
+								);
+								self.report(diagnostic);
+							}
+							(step, TypeId::INTEGER)
 						}
-						("size", TypeKind::Collection(..)) => (PathStep::Size, TypeId::INTEGER),
 						("capacity", TypeKind::Collection(..) | TypeKind::String) => {
 							(PathStep::Capacity, TypeId::INTEGER)
 						}
@@ -2136,6 +2163,10 @@ impl Walker<'_> {
 			BuiltinEffect::MutatesSize => {
 				let size = self.places.child(base, Step::Size);
 				self.record_effect(size, false, n, true);
+			}
+			BuiltinEffect::MutatesLength => {
+				let length = self.places.child(base, Step::Length);
+				self.record_effect(length, false, n, true);
 			}
 			BuiltinEffect::MutatesCapacity => {
 				let capacity = self.places.child(base, Step::Capacity);

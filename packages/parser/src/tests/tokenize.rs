@@ -273,6 +273,7 @@ fn operators_with_common_characters() {
 	assert_tokens(">>", vec![TokenKind::GreaterThan, TokenKind::GreaterThan]);
 	// the first `<` is not followed by a space: it opens a generic list
 	assert_tokens("<<", vec![TokenKind::GenericOpen, TokenKind::LessThan]);
+	assert_tokens("< <", vec![TokenKind::LessThan, TokenKind::LessThan]);
 }
 
 #[test]
@@ -741,9 +742,10 @@ fn comparison_operators_keep_priority_over_generic_brackets() {
 fn generic_lists_and_new_lines() {
 	// `>` is a closing token: a line continues before it
 	assert_short_tokens("Map<String,\n\tInteger\n>", "Map < String , Integer >");
+	// a line break never separates two items: it ends a list left open
 	assert_short_tokens(
 		"type Pair<Left\n\tRight\n> = {}",
-		"type Pair < Left ¶ Right > = { }",
+		"type Pair < Left ¶ Right gt = { }",
 	);
 	assert_short_tokens("Array<Integer>\nnext", "Array < Integer > ¶ next");
 	// a `<` followed by a new line is a comparison, which continues on the next line
@@ -787,8 +789,10 @@ fn unclosed_generic_lists() {
 	assert_short_tokens("[a <b] > c", "[ a < b ] gt c");
 	assert_short_tokens("{ a <b } > c", "{ a < b } gt c");
 	assert_short_tokens("f(A<B<C) > d", "f ( A < B < C ) gt d");
-	// otherwise, the next `>` closes the list, even on another line
-	assert_short_tokens("a <b\nc > d", "a < b ¶ c > d");
+	// and so does the end of the statement: `>` is a comparison again on the next line
+	assert_short_tokens("a <b\nc > d", "a < b ¶ c gt d");
+	assert_short_tokens("a <b\n<T>(c) => c", "a < b ¶ < T > ( c ) => c");
+	assert_short_tokens("a <b\n(c > d)", "a < b ¶ ( c gt d )");
 	// the tokenizer doesn't report them: the parser does, where they open
 	assert!(tokenizer_messages("a <b").is_empty());
 	assert!(tokenizer_messages("f(a <b)").is_empty());
@@ -830,4 +834,111 @@ fn garbled_brackets_never_panic() {
 			.count();
 		assert!(closed <= opened, "{source:?}");
 	}
+}
+
+#[test]
+fn generic_brackets() {
+	use TokenKind::*;
+	assert_tokens(
+		"Array<Integer>",
+		vec![Identifier, GenericOpen, Identifier, GenericClose],
+	);
+	assert_tokens("a < b", vec![Identifier, LessThan, Identifier]);
+	assert_tokens("a <\nb", vec![Identifier, LessThan, Identifier]);
+	assert_tokens("a<b", vec![Identifier, GenericOpen, Identifier]);
+	assert_tokens("a > b", vec![Identifier, GreaterThan, Identifier]);
+	// `>>` closes two lists
+	assert_tokens(
+		"A<B<C>>",
+		vec![
+			Identifier,
+			GenericOpen,
+			Identifier,
+			GenericOpen,
+			Identifier,
+			GenericClose,
+			GenericClose,
+		],
+	);
+	// brackets suspend a generic list
+	assert_tokens(
+		"C<(a > b)>",
+		vec![
+			Identifier,
+			GenericOpen,
+			ParenthesisOpen,
+			Identifier,
+			GreaterThan,
+			Identifier,
+			ParenthesisClose,
+			GenericClose,
+		],
+	);
+	// `=>`, `->`, `>=` and `<=` are never brackets
+	assert_tokens(
+		"A<(x) => B>",
+		vec![
+			Identifier,
+			GenericOpen,
+			ParenthesisOpenFunctionDeclaration,
+			Identifier,
+			ParenthesisClose,
+			FatArrow,
+			Identifier,
+			GenericClose,
+		],
+	);
+	assert_tokens(
+		"Pool<a->b>",
+		vec![
+			Identifier,
+			GenericOpen,
+			Identifier,
+			Arrow,
+			Identifier,
+			GenericClose,
+		],
+	);
+	// a new line ends a generic list left open by mistake: `>` is a comparison again
+	assert_tokens(
+		"a<b\nc > d",
+		vec![
+			Identifier,
+			GenericOpen,
+			Identifier,
+			Stop,
+			Identifier,
+			GreaterThan,
+			Identifier,
+		],
+	);
+	// a closing bracket closes the generic lists left open inside it
+	assert_tokens(
+		"(a<b) > c",
+		vec![
+			ParenthesisOpen,
+			Identifier,
+			GenericOpen,
+			Identifier,
+			ParenthesisClose,
+			GreaterThan,
+			Identifier,
+		],
+	);
+	// a generic list can span lines, and its `>` can start a line
+	assert_tokens(
+		"Map<String, {\n\tid: Integer\n}>",
+		vec![
+			Identifier,
+			GenericOpen,
+			Identifier,
+			Comma,
+			BracesOpen,
+			Identifier,
+			Colon,
+			Identifier,
+			BracesClose,
+			GenericClose,
+		],
+	);
 }

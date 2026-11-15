@@ -135,44 +135,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// `Pool.from(source, capacity = n)`, and the same of the growing pools
-	/// and the columnars: a new collection of copies of the source's items
-	/// (their elements never move: the capacity is a hint).
-	pub(crate) fn pool_from(&mut self, node: NodeId, info: &CallInfo) -> Result<Val<'ctx>, Error> {
-		let repr = self.node_repr(node)?;
-		let Some(Argument::Given(source_node)) = info.arguments.first() else {
-			return Err(self.unsupported(node.index(), "this `from`"));
-		};
-		let source = self.expr(*source_node)?;
-		if source.repr == Repr::Never {
-			return Ok(source);
-		}
-		// the capacity, for its effects
-		if let Some(Argument::Given(capacity)) = info.arguments.get(1) {
-			let capacity = self.expr(*capacity)?;
-			if capacity.repr == Repr::Never {
-				return Ok(capacity);
-			}
-		}
-		let Repr::Array(item_type) = source.repr else {
-			return Err(self.unsupported(source_node.index(), "this source of `from`"));
-		};
-		let item = self.item_repr(item_type, *source_node)?;
-		let element = self.pool_element(repr, node)?;
-		let place = self.pool_place(repr, node)?;
-		let pool = self.collection_new(&self.builder, repr, element)?;
-		let array = source.value.expect("an array").into_pointer_value();
-		let (_, length) = self.array_parts(array)?;
-		let add = self.runtime.function("fa_pool_add_slot")?;
-		self.for_each_item_value(array, item, length, |this, value| {
-			let copy = this.emit_copy(value)?;
-			let copy = this.convert(copy, element, node.index())?;
-			let slot = this.call_value(add, &[pool.into()])?.into_pointer_value();
-			this.element_write(&this.builder, place, slot, copy.value.expect("an element"))
-		})?;
-		Ok(self.fresh(Val::new(repr, pool)))
-	}
-
 	/// `pool.size`: the first field of the pool.
 	pub(crate) fn pool_size(&self, pool: Val<'ctx>) -> Result<Val<'ctx>, Error> {
 		let pointer = pool.value.expect("a pool").into_pointer_value();
@@ -333,14 +295,106 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let element = self.pool_element(repr, node)?;
 		let place = self.pool_place(repr, node)?;
-		let pool = self.collection_new(&self.builder, repr, element)?;
-		for (value, _) in values {
-			let slot = self
-				.call_value(self.runtime.function("fa_pool_add_slot")?, &[pool.into()])?
-				.into_pointer_value();
+		let rows = !matches!(repr, Repr::Columnar(_))
+			&& !matches!(element, Repr::Object(ty) if self.has_sides(ty));
+		let count = values.len() as u64;
+		let pointer_size = u64::from(self.usize.get_bit_width() / 8);
+		let header_size = self.collection_data_size(self.pool_header().into());
+		let chunk_start = ((header_size + pointer_size + 7) & !7) + 8;
+		let item_size = self.collection_data_size(self.llvm_type(element));
+		let bytes =
+			((chunk_start + 24 + count.div_ceil(64) * 8 + 15) & !15) + count * item_size.max(4);
+		let forwarded = if rows {
+			self.forwarded_collection_buffer(node)
+		} else {
+			None
+		};
+		let buffer = if rows && forwarded.is_none() {
+			self.collection_stack(node, bytes)?
+		} else {
+			None
+		};
+		let pool = if let Some(offer) = forwarded {
+			self.call_value(
+				self.runtime.function("fa_pool_new_into")?,
+				&[
+					self.context.i64_type().const_int(count, false).into(),
+					self.item_size_const(element).into(),
+					offer.pointer.into(),
+					offer.bytes.into(),
+					self.context.i64_type().const_int(bytes, false).into(),
+				],
+			)?
+			.into_pointer_value()
+		} else if let Some(buffer) = buffer {
+			self.call_value(
+				self.runtime.function("fa_pool_local")?,
+				&[
+					buffer.into(),
+					self.context.i64_type().const_int(count, false).into(),
+					self.item_size_const(element).into(),
+				],
+			)?
+			.into_pointer_value()
+		} else {
+			self.collection_new(&self.builder, repr, element)?
+		};
+		for (index, (value, _)) in values.into_iter().enumerate() {
+			let slot = if buffer.is_some() || forwarded.is_some() {
+				self.pool_at(
+					&self.builder,
+					pool,
+					self.context.i64_type().const_int(index as u64, false),
+				)?
+			} else {
+				self.call_value(self.runtime.function("fa_pool_add_slot")?, &[pool.into()])?
+					.into_pointer_value()
+			};
 			self.element_write(&self.builder, place, slot, value.value.expect("an element"))?;
 		}
 		Ok(self.fresh(Val::new(repr, pool)))
+	}
+
+	/// `Pool.from(source, capacity = n)`, and the same of the growing pools
+	/// and the columnars: a new collection of copies of the source's items,
+	/// in stable slots, with the chunks its capacity asks for.
+	pub(crate) fn pool_from(&mut self, node: NodeId, info: &CallInfo) -> Result<Val<'ctx>, Error> {
+		let Some((source, capacity)) = self.array_from_arguments(info)? else {
+			return Ok(Val::never());
+		};
+		// Restore temporary ownership: views borrow the source's items.
+		let source = self.fresh(source);
+		let source = self.pool_view(source, node)?;
+		let source = self.growing_view(source)?;
+		let Repr::Array(source_item) = source.repr else {
+			return Err(self.unsupported(node.index(), "from this source into a pool"));
+		};
+		let repr = self.node_repr(node)?;
+		let item = self.pool_element(repr, node)?;
+		let place = self.pool_place(repr, node)?;
+		let result = self.collection_new(&self.builder, repr, item)?;
+		let source_pointer = source.value.expect("an array").into_pointer_value();
+		let (_, length) = self.array_parts(source_pointer)?;
+		let capacity = match capacity {
+			Some(capacity) => self
+				.convert(capacity, Repr::Int(IntRepr::I64), node.index())?
+				.int(),
+			None => length,
+		};
+		self.reserve_stable(Val::new(repr, result), capacity, node)?;
+		self.for_each_item_value(
+			source_pointer,
+			self.item_repr(source_item, node)?,
+			length,
+			|this, value| {
+				let owned = this.emit_copy(this.convert(value, item, node.index())?)?;
+				let slot = this
+					.call_value(this.runtime.function("fa_pool_add_slot")?, &[result.into()])?
+					.into_pointer_value();
+				this.element_write(&this.builder, place, slot, owned.value.expect("an element"))
+			},
+		)?;
+		Ok(self.fresh(Val::new(repr, result)))
 	}
 
 	/// The given arguments of a call, in order.
@@ -853,6 +907,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		builder.position_at_end(none);
 		builder.build_return(None)?;
 		builder.position_at_end(then);
+		let field = builder.build_struct_gep(self.pool_header(), pool, 11, "")?;
+		let storage = builder
+			.build_load(self.context.i64_type(), field, "")?
+			.into_int_value();
+		let owned = builder.build_int_compare(
+			IntPredicate::NE,
+			storage,
+			storage.get_type().const_int(2, false),
+			"",
+		)?;
+		self.helper_when(builder, function, owned, |builder| {
+			builder.build_return(None)?;
+			Ok(())
+		})?;
 		if self.needs_drop(element) {
 			self.helper_pool_each(builder, function, pool, |builder, address| {
 				let loaded = self.element_read(builder, place, address)?;

@@ -13,6 +13,10 @@ use crate::types::{ConstValue, PathRoot, PathStep, TypeStore};
 /// Whether `declared` covers `actual` (advanced brief §3.6): same root, and
 /// each step of `declared` matches the step of `actual` at its position
 /// (`[..]` matches any index), `declared` being no longer than `actual`.
+/// An effect on `c.length` or `c.size` also covers the same effect on
+/// `c.capacity` (adding or deleting may allocate or release storage), not
+/// the converse ("Capacity and reserve on every collection" in
+/// `design/decisions.md`).
 pub fn path_covers(types: &TypeStore, declared: PathId, actual: PathId) -> bool {
 	if declared == actual {
 		return true;
@@ -22,10 +26,25 @@ pub fn path_covers(types: &TypeStore, declared: PathId, actual: PathId) -> bool 
 	if d.root != a.root || d_steps.len() > a_steps.len() {
 		return false;
 	}
-	d_steps
-		.iter()
-		.zip(a_steps)
-		.all(|(d, a)| step_covers(*d, *a))
+	let steps_cover = |declared: &[PathStep], actual: &[PathStep]| {
+		declared
+			.iter()
+			.zip(actual)
+			.all(|(d, a)| step_covers(*d, *a))
+	};
+	if steps_cover(d_steps, a_steps) {
+		return true;
+	}
+	// `c.length` or `c.size` covers `c.capacity`
+	let (Some((d_last, d_parent)), Some((a_last, a_parent))) =
+		(d_steps.split_last(), a_steps.split_last())
+	else {
+		return false;
+	};
+	d_steps.len() == a_steps.len()
+		&& matches!(d_last, PathStep::Length | PathStep::Size)
+		&& *a_last == PathStep::Capacity
+		&& steps_cover(d_parent, a_parent)
 }
 
 fn step_covers(declared: PathStep, actual: PathStep) -> bool {
@@ -207,6 +226,7 @@ mod tests {
 					"[..]" => PathStep::All,
 					"length" => PathStep::Length,
 					"size" => PathStep::Size,
+					"capacity" => PathStep::Capacity,
 					"[0]" => PathStep::IndexConst(self.zero()),
 					"[p1]" => PathStep::IndexParam(1),
 					field => PathStep::Field(self.types.syms.intern(field)),
@@ -258,6 +278,36 @@ mod tests {
 		let invalidates_element = normalized_set(&mut fx.types, &[], &[element]);
 		assert!(set_covers(&fx.types, invalidates_element, element, false));
 		assert!(!set_covers(&fx.types, invalidates_element, size, false));
+	}
+
+	#[test]
+	fn length_and_size_cover_capacity() {
+		let mut fx = Fixture {
+			types: TypeStore::new(),
+		};
+		let length = fx.path(PathRoot::Param(0), &["length"]);
+		let size = fx.path(PathRoot::Param(0), &["size"]);
+		let capacity = fx.path(PathRoot::Param(0), &["capacity"]);
+		let other = fx.path(PathRoot::Param(1), &["capacity"]);
+		let nested_length = fx.path(PathRoot::Param(0), &["[..]", "length"]);
+		let nested_capacity = fx.path(PathRoot::Param(0), &["[0]", "capacity"]);
+		let score = fx.path(PathRoot::Param(0), &["score"]);
+		assert!(path_covers(&fx.types, length, capacity));
+		assert!(path_covers(&fx.types, size, capacity));
+		assert!(path_covers(&fx.types, nested_length, nested_capacity));
+		assert!(!path_covers(&fx.types, capacity, length));
+		assert!(!path_covers(&fx.types, capacity, size));
+		assert!(!path_covers(&fx.types, length, other));
+		assert!(!path_covers(&fx.types, length, score));
+		assert!(!path_covers(&fx.types, length, nested_capacity));
+		let mutates_length = normalized_set(&mut fx.types, &[length], &[]);
+		assert!(set_covers(&fx.types, mutates_length, capacity, false));
+		let mutates_capacity = normalized_set(&mut fx.types, &[capacity], &[]);
+		assert!(!set_covers(&fx.types, mutates_capacity, length, false));
+		assert!(!set_covers(&fx.types, mutates_capacity, size, false));
+		// the implied path is dropped when both are declared
+		let both = normalized_set(&mut fx.types, &[capacity, length], &[]);
+		assert_eq!(fx.types.effects(both).0, &[length]);
 	}
 
 	#[test]

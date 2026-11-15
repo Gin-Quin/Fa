@@ -392,11 +392,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				arguments.push(self.context.bool_type().const_int(1, false).into());
 			}
 		}
+		// the storage the Fa function takes for its result: a slot of the
+		// wrapper, no buffer (`return_destinations.rs`, `collection_storage.rs`)
+		if callee.return_collection {
+			arguments.insert(0, self.pointer_type().const_null().into());
+			arguments.insert(1, self.usize.const_zero().into());
+		}
+		let return_slot = if callee.return_slot {
+			let slot = self.alloca(callee.ret, "c_result")?;
+			arguments.insert(0, slot.pointer.into());
+			Some(slot)
+		} else {
+			None
+		};
 		let call = self.builder.build_call(callee.value, &arguments, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
 		let returned = call.try_as_basic_value().basic();
 		// the result and the error
-		let (result, error) = match (errors.is_some(), callee.ret.has_value()) {
+		let by_value = callee.ret.has_value() && return_slot.is_none();
+		let (result, error) = match (errors.is_some(), by_value) {
 			(false, _) => (returned, None),
 			(true, true) => {
 				let pair = returned.expect("a pair").into_struct_value();
@@ -418,6 +432,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder.build_return(Some(&status))?;
 			self.builder.position_at_end(succeeded);
 		}
+		// a result built in the slot is read once the call succeeded
+		let result = match return_slot {
+			Some(slot) => self.load(slot)?.value,
+			None => result,
+		};
 		let i32 = self.context.i32_type();
 		match (errors, result) {
 			(Some(_), result) => {

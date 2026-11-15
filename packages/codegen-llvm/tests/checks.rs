@@ -32,6 +32,16 @@ mod with_llvm {
 	}
 
 	fn ir_at(name: &str, source: &str, overflow_checks: bool, opt_level: OptLevel) -> String {
+		ir_at_target(name, source, overflow_checks, opt_level, Target::Native)
+	}
+
+	fn ir_at_target(
+		name: &str,
+		source: &str,
+		overflow_checks: bool,
+		opt_level: OptLevel,
+		target: Target,
+	) -> String {
 		let mut session = Session::new();
 		let file = session.set_source("main", Arc::from(source));
 		session.analyze_file(file);
@@ -44,7 +54,7 @@ mod with_llvm {
 		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
 			.join("fa-checks")
 			.join(name);
-		let artifact = compile(&session, file, "test.fa", Target::Native, &options, &output)
+		let artifact = compile(&session, file, "test.fa", target, &options, &output)
 			.unwrap_or_else(|error| panic!("{name}: {error}"));
 		let ir = std::fs::read_to_string(artifact.ir.expect("the IR")).expect("the IR file");
 		// keep the program's own functions
@@ -95,6 +105,566 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 		for header in specialized {
 			assert!(header.contains("{ i64, ptr }"), "{header}");
 		}
+	}
+
+	#[test]
+	fn immutable_literals_use_readonly_data_for_every_collection() {
+		for (kind, literal, measure) in [
+			("Array<Integer>", "[2, 3, 5]", "length"),
+			("GrowingArray<Integer>", "[2, 3, 5]", "length"),
+			("Map<String, Integer>", "[(\"abcdefghijk\", 3)]", "size"),
+			("GrowingMap<Integer, Integer>", "[(2, 3)]", "size"),
+			("Set<String>", "[\"x\", \"x\", \"é\"]", "size"),
+			("Set<Float>", "[0.0, -0.0, 1.5]", "size"),
+			("GrowingSet<Integer>", "[2, 3]", "size"),
+			("Pool<String>", "[\"hello\"]", "size"),
+			("GrowingPool<Integer>", "[2, 3]", "size"),
+			("Columnar<{ value: Integer }>", "[{ value = 3 }]", "size"),
+			(
+				"GrowingColumnar<{ value: Integer }>",
+				"[{ value = 3 }]",
+				"size",
+			),
+		] {
+			let name = format!("readonly-{}", kind.split('<').next().unwrap());
+			let source = format!(
+				"let global: {kind} = {literal}\nfunction read = (): Integer => {{ let local: {kind} = {literal}\nlocal.{measure} + global.{measure} }}\nconsole.log(read())\n"
+			);
+			let ir = ir_of(&name, &source);
+			for constructor in [
+				"@fa_array_new(",
+				"@fa_table_new",
+				"@fa_pool_new(",
+				"@fa_columnar_new(",
+				"@fa_segmented_new(",
+				"@fa_alloc(",
+				"@heap_alloc(",
+			] {
+				assert!(!ir.contains(constructor), "{kind}: {ir}");
+			}
+			let full = std::fs::read_to_string(
+				PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+					.join("fa-checks")
+					.join(format!("{name}.ll")),
+			)
+			.unwrap();
+			assert!(
+				full.lines()
+					.any(|line| line.contains("@fa.collection.static") && line.contains("constant")),
+				"{kind}: {full}"
+			);
+		}
+	}
+
+	#[test]
+	fn runtime_immutable_literals_use_fixed_entry_allocas() {
+		for (kind, literal, measure) in [
+			("Array<Integer>", "[n, n + 1]", "length"),
+			("GrowingArray<Integer>", "[n, n + 1]", "length"),
+			("Map<Integer, Integer>", "[(n, n + 1)]", "size"),
+			("GrowingMap<Integer, Integer>", "[(n, n + 1)]", "size"),
+			("Set<Integer>", "[n, n + 1]", "size"),
+			("GrowingSet<Integer>", "[n, n + 1]", "size"),
+			("Pool<Integer>", "[n, n + 1]", "size"),
+			("GrowingPool<Integer>", "[n, n + 1]", "size"),
+		] {
+			let name = format!("frame-{}", kind.split('<').next().unwrap());
+			let source = format!(
+				"function read = (n: Integer): Integer => {{ let local: {kind} = {literal}\nlocal.{measure} }}\nconsole.log(read(3))\n"
+			);
+			let ir = ir_of(&name, &source);
+			assert!(ir.contains("collection.storage = alloca ["), "{kind}: {ir}");
+			for constructor in [
+				"@fa_array_new(",
+				"@fa_table_new",
+				"@fa_pool_new(",
+				"@fa_segmented_new(",
+				"@fa_alloc(",
+				"@heap_alloc(",
+			] {
+				assert!(!ir.contains(constructor), "{kind}: {ir}");
+			}
+		}
+	}
+
+	#[test]
+	fn collection_and_frame_budgets_keep_the_heap_fallback() {
+		let large = std::iter::repeat_n("n", 300).collect::<Vec<_>>().join(", ");
+		let source = format!(
+			"function read = (n: Integer): Integer => {{\nlet values = [{large}]\nvalues.get(299) ?? 0\n}}\nconsole.log(read(3))\n"
+		);
+		let ir = ir_of("large-frame-fallback", &source);
+		assert!(ir.contains("@fa_array_new("), "{ir}");
+		assert!(!ir.contains("collection.storage = alloca"), "{ir}");
+		let small = std::iter::repeat_n("n", 100).collect::<Vec<_>>().join(", ");
+		let declarations = (0..5)
+			.map(|i| format!("let a{i} = [{small}]\n"))
+			.collect::<String>();
+		let source = format!(
+			"function read = (n: Integer): Integer => {{\n{declarations}(a0.get(0) ?? 0) + (a1.get(0) ?? 0) + (a2.get(0) ?? 0) + (a3.get(0) ?? 0) + (a4.get(0) ?? 0)\n}}\nconsole.log(read(3))\n"
+		);
+		let ir = ir_of("total-frame-fallback", &source);
+		assert!(ir.contains("collection.storage = alloca"), "{ir}");
+		assert!(ir.contains("@fa_array_new("), "{ir}");
+	}
+
+	#[test]
+	fn escaping_literals_start_on_the_heap_and_split_receives_a_destination() {
+		let source = "function returned = (n: Integer): Array<Integer> => {\nlet items = [n, n + 1]\nitems\n}\nconsole.log(returned(2))\n";
+		let ir = ir_of("returned-collection-heap", source);
+		assert!(!ir.contains("collection.storage = alloca"), "{ir}");
+		assert!(ir.contains("@fa_array_new_into("), "{ir}");
+		assert!(ir.contains("ptr null, i64 0, i64 2"), "{ir}");
+		assert!(!ir.contains("call fastcc ptr @fa.copy"), "{ir}");
+		let source = "function parts = (text: String): Integer => {\nlet words = text.split(\" \" )\nwords.length\n}\nconsole.log(parts(\"one two\"))\n";
+		let ir = ir_of("split-caller-destination", source);
+		assert!(
+			ir.contains("collection.storage = alloca [2048 x i8]"),
+			"{ir}"
+		);
+		assert!(ir.contains("@fa_string_split_into("), "{ir}");
+		assert!(!ir.contains("@fa_string_split("), "{ir}");
+	}
+
+	#[test]
+	fn fresh_array_methods_receive_bounded_caller_destinations() {
+		for (name, expression) in [
+			("map", "source.map((n) => n + 1)"),
+			("filter", "source.filter((n) => n > 0)"),
+			("from", "Array.from(source)"),
+		] {
+			let source = format!(
+				"function read = (source: Array<Integer>): Integer => {{\nlet result = {expression}\nresult.length\n}}\nconsole.log(read([1, 2, 3]))\n"
+			);
+			let ir = ir_of(&format!("caller-{name}"), &source);
+			assert!(
+				ir.contains("collection.storage = alloca [2048 x i8]"),
+				"{name}: {ir}"
+			);
+			assert!(ir.contains("@fa_array_new_into("), "{name}: {ir}");
+		}
+	}
+
+	#[test]
+	fn large_aggregate_results_use_and_forward_the_callers_return_slot() {
+		let ir = ir_of(
+			"aggregate-return-slots",
+			r#"
+type Data = { a: Integer, b: Integer, c: Integer }
+function make = (n: Integer): Data => Data { a = n, b = n + 1, c = n + 2 }
+function relay = (n: Integer): Data => if n > 0 { relay(n - 1) } else { make(n) }
+function pair = (n: Integer): Tuple<Integer, Integer, Integer> => (n, n + 1, n + 2)
+type Wrapped = { data: Data }
+function wrapped = (n: Integer): Wrapped => Wrapped { data = make(n) }
+let data = wrapped(2)
+let tuple = pair(3)
+console.log(data.data.a, tuple[0], relay(2).a)
+"#,
+		);
+		for name in ["fa.make", "fa.relay", "fa.pair", "fa.wrapped"] {
+			let body = function(&ir, name);
+			assert!(body.lines().next().unwrap().contains("void"), "{body}");
+			assert!(body.lines().next().unwrap().contains("sret("), "{body}");
+			assert!(!body.contains("return.result = alloca"), "{body}");
+			assert!(!body.contains("ret {"), "{body}");
+		}
+		let make = function(&ir, "fa.make");
+		assert!(make.contains("result.field"), "{make}");
+		assert!(!make.contains("insertvalue"), "{make}");
+	}
+
+	#[test]
+	fn small_aggregate_results_stay_in_ssa() {
+		let ir = ir_of(
+			"small-aggregate-registers",
+			r#"
+type Data = { a: Integer, b: Integer }
+function make = (n: Integer): Data => Data { a = n, b = n + 1 }
+function relay = (n: Integer): Data => if n > 0 { relay(n - 1) } else { make(n) }
+function pair = (n: Integer): Tuple<Integer, Integer> => (n, n + 1)
+function parse = (text: String): Data throws ParseError => Data { a = try Integer.parse(text), b = 0 }
+let data = parse("2") catch error => Data { a = -1, b = -1 }
+console.log(relay(2).a, pair(3)[0], data.a)
+"#,
+		);
+		for name in ["fa.make", "fa.relay", "fa.pair", "fa.parse"] {
+			let body = function(&ir, name);
+			assert!(!body.lines().next().unwrap().contains("void"), "{body}");
+			assert!(!body.contains("sret("), "{body}");
+			assert!(body.contains("ret {"), "{body}");
+			assert!(!body.contains("return.result"), "{body}");
+		}
+	}
+
+	#[test]
+	fn aggregate_return_choice_counts_scalar_leaves_on_each_target() {
+		let source = r#"
+type One = { a: Integer }
+type Two = { a: One, b: Integer }
+type Three = { a: Boolean, b: Boolean, c: Boolean }
+function one = (n: Integer): One => One { a = n }
+function two = (n: Integer): Two => Two { a = one(n), b = n }
+function three = (n: Integer): Three => Three { a = n > 0, b = n > 1, c = n > 2 }
+console.log(one(1).a, two(2).b, three(3).a)
+"#;
+		for target in [Target::Native, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("aggregate-leaves-{}", target.name()),
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			assert!(!function(&ir, "fa.one").contains("sret("), "{ir}");
+			assert_eq!(
+				function(&ir, "fa.two").contains("sret("),
+				target == Target::Wasm,
+				"{ir}"
+			);
+			assert!(function(&ir, "fa.three").contains("sret("), "{ir}");
+		}
+	}
+
+	#[test]
+	fn direct_call_cycles_limit_collection_frames_including_methods_and_generics() {
+		let ir = ir_of(
+			"recursive-collection-budgets",
+			r#"
+function first = (n: Integer, text: String): Integer => {
+ let words = text.split(" ")
+ if n > 0 { second(n - 1, text) + words.length } else { words.length }
+}
+function second = (n: Integer, text: String): Integer => {
+ let words = text.split(" ")
+ if n > 0 { generic(n - 1, 7, text) + words.length } else { words.length }
+}
+type Walker = {
+ function walk = (n: Integer, text: String): Integer => {
+  let words = text.split(" ")
+  if n > 0 { Walker.walk(n - 1, text) + words.length } else { words.length }
+ }
+}
+function generic = <T>(n: Integer, value: T, text: String): Integer => {
+ let words = text.split(" ")
+ if n > 0 { first(n - 1, text) + words.length } else { words.length }
+}
+console.log(first(1, "a b"), Walker.walk(1, "a b"), generic(1, 7, "a b"))
+"#,
+		);
+		for name in ["fa.first", "fa.second", "fa.walk", "fa.generic.0"] {
+			let body = function(&ir, name);
+			assert!(body.contains("alloca [128 x i8]"), "{body}");
+			assert!(!body.contains("alloca [2048 x i8]"), "{body}");
+		}
+	}
+
+	#[test]
+	fn call_offers_use_only_the_remaining_recursive_frame_budget() {
+		let literal = std::iter::repeat_n("n", 54).collect::<Vec<_>>().join(", ");
+		let source = format!(
+			"function count = (n: Integer, text: String): Integer => {{\nlet exact = [{literal}]\nlet words = text.split(\" \")\nif n > 0 {{ count(n - 1, text) + exact.length + words.length }} else {{ exact.length + words.length }}\n}}\nconsole.log(count(1, \"a b\"))\n"
+		);
+		let ir = ir_of("remaining-recursive-budget", &source);
+		let body = function(&ir, "fa.count");
+		assert!(body.contains("alloca [464 x i8]"), "{body}");
+		assert!(!body.contains("alloca [48 x i8]"), "{body}");
+		assert!(!body.contains("@fa_string_split_into("), "{body}");
+		let source = source.replace(&literal, "n");
+		let ir = ir_of("remaining-recursive-offer", &source);
+		let body = function(&ir, "fa.count");
+		assert!(body.contains("alloca [48 x i8]"), "{body}");
+		assert!(body.contains("alloca [128 x i8]"), "{body}");
+		assert!(body.contains("@fa_string_split_into("), "{body}");
+
+		let source = r#"
+function count = (n: Integer, text: String): Integer => {
+ let a = text.split(" ")
+ let b = text.split(" ")
+ let c = text.split(" ")
+ let d = text.split(" ")
+ if n > 0 { count(n - 1, text) + a.length + b.length + c.length + d.length } else { a.length + b.length + c.length + d.length }
+}
+console.log(count(1, "a b"))
+"#;
+		let ir = ir_of("shared-recursive-offers", source);
+		let body = function(&ir, "fa.count");
+		assert_eq!(body.matches("alloca [128 x i8]").count(), 1, "{body}");
+		assert_eq!(body.matches("@fa_string_split_into(").count(), 1, "{body}");
+		assert_eq!(body.matches("@fa_string_split(").count(), 3, "{body}");
+
+		// Exact literals consume the total budget, independently of offer order.
+		for (length, offer) in [(50, Some(80)), (54, None)] {
+			let exact = (32 + length * 8 + 15) & !15;
+			let literal = std::iter::repeat_n("n", length)
+				.collect::<Vec<_>>()
+				.join(", ");
+			let declarations = format!("let exact = [{literal}]\nlet words = text.split(\" \")");
+			let source = format!(
+				"function count = (n: Integer, text: String): Integer => {{\n{declarations}\nif n > 0 {{ count(n - 1, text) + exact.length + words.length }} else {{ exact.length + words.length }}\n}}\nconsole.log(count(1, \"a b\"))\n"
+			);
+			let ir = ir_of(&format!("literal-before-offer-{length}"), &source);
+			let body = function(&ir, "fa.count");
+			assert!(body.contains(&format!("alloca [{exact} x i8]")), "{body}");
+			assert_eq!(
+				body.contains("@fa_string_split_into("),
+				offer.is_some(),
+				"{body}"
+			);
+			if let Some(bytes) = offer {
+				assert!(body.contains(&format!("alloca [{bytes} x i8]")), "{body}");
+			}
+		}
+		for (length, fits) in [(42, true), (50, false)] {
+			let exact = (32 + length * 8 + 15) & !15;
+			let literal = std::iter::repeat_n("n", length)
+				.collect::<Vec<_>>()
+				.join(", ");
+			let declarations = format!("let words = text.split(\" \")\nlet exact = [{literal}]");
+			let source = format!(
+				"function count = (n: Integer, text: String): Integer => {{\n{declarations}\nif n > 0 {{ count(n - 1, text) + exact.length + words.length }} else {{ exact.length + words.length }}\n}}\nconsole.log(count(1, \"a b\"))\n"
+			);
+			let ir = ir_of(&format!("offer-before-literal-{length}"), &source);
+			let body = function(&ir, "fa.count");
+			assert!(body.contains("alloca [128 x i8]"), "{body}");
+			assert_eq!(
+				body.contains(&format!("alloca [{exact} x i8]")),
+				fits,
+				"{body}"
+			);
+		}
+	}
+
+	#[test]
+	fn readonly_string_parameters_borrow_inline_bytes_without_snapshots() {
+		let ir = ir_of(
+			"readonly-string-bytes",
+			r#"
+function read = (text: String, n: Integer): Integer => if n > 0 {
+ read(text, n - 1) + text.split(" ").length
+} else { text.split(" ").length }
+function change = (text: String): Integer => {
+ mutable local = text
+ local += "extra"
+ local.split(" ").length
+}
+mutable text = "a b"
+console.log(read(text, 1), change(text))
+"#,
+		);
+		let read = function(&ir, "fa.read");
+		assert!(
+			read.lines()
+				.any(|line| line.contains("select i1") && line.contains("ptr %0,")),
+			"{read}"
+		);
+		assert!(function(&ir, "fa.change").contains("inline_string"), "{ir}");
+		let ir = optimized_ir(
+			"recursive-split-scratch",
+			include_str!("programs/recursive-collection-offers.fa"),
+		);
+		let body = function(&ir, "fa.four");
+		assert!(body.contains("@fa_string_split_into("), "{body}");
+		assert!(!body.contains("alloca %struct.Splitting"), "{body}");
+		assert!(!body.contains("inline_string"), "{body}");
+	}
+
+	#[test]
+	fn throwing_aggregate_returns_keep_errors_outside_the_result_slot() {
+		let ir = ir_of(
+			"aggregate-return-errors",
+			r#"
+type Data = { number: Integer, padding: Integer, more: Integer }
+function parse = (text: String): Data throws ParseError => Data { number = try Integer.parse(text), padding = 0, more = 0 }
+let value = parse("2") catch error => Data { number = -1, padding = 0, more = 0 }
+console.log(value.number)
+"#,
+		);
+		let body = function(&ir, "fa.parse");
+		assert!(
+			body.lines().next().unwrap().contains("fastcc ptr"),
+			"{body}"
+		);
+		assert!(!body.contains("sret("), "{body}");
+		assert!(!body.contains("ret {"), "{body}");
+	}
+
+	#[test]
+	fn collection_functions_forward_bounded_buffers_for_every_literal_layout() {
+		for (kind, literal, measure) in [
+			("Array<Integer>", "[n, n + 1]", "length"),
+			("GrowingArray<Integer>", "[n, n + 1]", "length"),
+			("Map<Integer, Integer>", "[(n, n + 1)]", "size"),
+			("GrowingMap<Integer, Integer>", "[(n, n + 1)]", "size"),
+			("Set<Integer>", "[n, n + 1]", "size"),
+			("GrowingSet<Integer>", "[n, n + 1]", "size"),
+			("Pool<Integer>", "[n, n + 1]", "size"),
+			("GrowingPool<Integer>", "[n, n + 1]", "size"),
+		] {
+			let source = format!(
+				"function make = (n: Integer): {kind} => {literal}\nfunction read = (n: Integer): Integer => {{ let local = make(n)\nlocal.{measure} }}\nconsole.log(read(2))\n"
+			);
+			let ir = ir_of(
+				&format!("return-{}", kind.split('<').next().unwrap()),
+				&source,
+			);
+			let make = function(&ir, "fa.make");
+			assert!(
+				make.lines()
+					.next()
+					.unwrap()
+					.contains("(ptr noundef %0, i64 noundef %1, i64 noundef %2)"),
+				"{kind}: {make}"
+			);
+			assert!(
+				!make.contains("collection.storage = alloca"),
+				"{kind}: {make}"
+			);
+			let read = function(&ir, "fa.read");
+			assert!(
+				read.contains("collection.storage = alloca [2048 x i8]"),
+				"{kind}: {read}"
+			);
+			assert!(read.contains("i64 2048"), "{kind}: {read}");
+			assert!(!make.contains("call fastcc ptr @fa.copy"), "{kind}: {make}");
+		}
+	}
+
+	#[test]
+	fn literal_elements_use_their_final_aggregate_return_slot() {
+		let ir = ir_of(
+			"literal-item-destinations",
+			r#"
+type Data = { number: Integer, text: String }
+function make = (n: Integer): Data => Data { number = n, text = "value {n}" }
+function list = (n: Integer): Array<Data> => [make(n), make(n + 1)]
+console.log(list(2).length)
+"#,
+		);
+		let list = function(&ir, "fa.list");
+		assert!(list.contains("call fastcc void @fa.make(ptr"), "{list}");
+		assert!(!list.contains("return.result = alloca"), "{list}");
+		assert!(!list.contains("store {"), "{list}");
+	}
+
+	#[test]
+	fn an_immutable_returned_owner_coalesces_with_its_caller_slot() {
+		let ir = ir_of(
+			"coalesced-return-local",
+			r#"
+type Data = { number: Integer, text: String }
+function make = (n: Integer): Data => Data { number = n, text = "value {n}" }
+function returned = (n: Integer): Data => {
+ let result = make(n)
+ if n > 0 { return result }
+ return result
+}
+console.log(returned(2).number)
+"#,
+		);
+		let returned = function(&ir, "fa.returned");
+		assert!(returned.contains("@fa.make(ptr %0"), "{returned}");
+		assert!(
+			!returned.contains("alloca { i64, { ptr, i64, i64 } }"),
+			"{returned}"
+		);
+		assert!(!returned.contains("store {"), "{returned}");
+		assert!(
+			!returned.contains("call fastcc void @fa.drop"),
+			"{returned}"
+		);
+	}
+
+	#[test]
+	fn coalesced_local_ids_do_not_alias_imported_globals() {
+		use fa_analyzer::modules::CodebaseResolver;
+		let fields = (0..64)
+			.map(|i| format!("mutable v{i} = {i}\n"))
+			.collect::<String>();
+		let sum = (0..64)
+			.map(|i| format!("remote.v{i}"))
+			.collect::<Vec<_>>()
+			.join(" + ");
+		let padding = (0..64)
+			.map(|i| format!("p{i}: Integer"))
+			.collect::<Vec<_>>()
+			.join(", ");
+		let library = format!(
+			"function padding = ({padding}): Integer => p0\nexport namespace = {{\n{fields}}}\n"
+		);
+		let main = format!(
+			"use remote = library.values\ntype Data = {{ number: Integer, text: String }}\nfunction build = (n: Integer): Data => {{\nlet result = Data {{ number = n + {sum}, text = \"owned payload {{n}} beyond the inline limit\" }}\nreturn result\n}}\nexport function = () => {{ let item = build(7)\nconsole.log(item.number) }}\n"
+		);
+		let files = vec![
+			("library/values.fa".to_string(), library),
+			("application/main.fa".to_string(), main),
+		];
+		let mut session = Session::new();
+		session.set_resolver(Box::new(CodebaseResolver::from_texts(
+			&files,
+			Some("application/main.fa"),
+		)));
+		let program = session.analyze_package(Some("application/main"));
+		let main = session.file_of_module("application/main").unwrap();
+		let library = session.file_of_module("library/values").unwrap();
+		let index = session
+			.analysis(main)
+			.symbols
+			.symbols()
+			.iter()
+			.position(|symbol| session.types().syms.resolve(symbol.name) == "result")
+			.unwrap();
+		assert!(
+			session
+				.types()
+				.syms
+				.resolve(session.analysis(library).symbols.symbols()[index].name)
+				.starts_with('v'),
+			"fixture must collide file-local IDs"
+		);
+		let options = Options {
+			opt_level: OptLevel::O0,
+			emit_ir: true,
+			leak_check: true,
+			..Options::default()
+		};
+		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+			.join("fa-checks")
+			.join("return-global-ids");
+		let artifact =
+			fa_codegen_llvm::compile_program(&session, &program, Target::Native, &options, &output)
+				.unwrap();
+		let ir = std::fs::read_to_string(artifact.ir.as_ref().unwrap()).unwrap();
+		let build = function(&ir, "fa.build");
+		assert!(
+			!build.contains("local = alloca"),
+			"the returned local must be coalesced: {build}"
+		);
+		let result = fa_codegen_llvm::run(&artifact, &[]).unwrap();
+		assert!(
+			result.status.success(),
+			"{}",
+			String::from_utf8_lossy(&result.stderr)
+		);
+		assert_eq!(String::from_utf8_lossy(&result.stdout), "2023\n");
+	}
+
+	#[test]
+	fn reservation_precedes_a_push_loop_without_growth_calls_in_the_loop() {
+		let ir = ir_of(
+			"reserve-loop",
+			r#"
+function fill = (items: Array<Integer>, count: Integer<min = 0>) mutates items => {
+    items.reserve(count)
+    for i in 0..count { items.push(i) }
+}
+mutable items: Array<Integer> = []
+fill(items, 100)
+console.log(items.length)
+"#,
+		);
+		let fill = function(&ir, "fa.fill");
+		assert_eq!(count(fill, "@fa_array_reserve_additional("), 1, "{fill}");
+		assert!(!fill.contains("@fa_array_grow("), "{fill}");
 	}
 
 	#[test]
@@ -528,10 +1098,158 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 			"type Bucket = { items: Array<Integer> }\nfunction fill = (count: Integer): Bucket => { mutable bucket = Bucket { items = [] }\nfor index in 0..count { bucket.items.push(index) }\nbucket }\nconsole.log(fill(9))\n",
 		);
 		let fill = function(&ir, "fa.fill");
-		let reserve = fill.find("@fa_array_reserve(").expect("a reservation");
+		let reserve = fill.find("@fa_array_room(").expect("a reservation");
 		let body = fill.find("for_body:").expect("a counted loop");
 		assert!(reserve < body, "{fill}");
-		assert!(fill[body..].contains("@fa_array_push_slot("), "{fill}");
+		assert!(fill[body..].contains("@fa_array_grow("), "{fill}");
+	}
+
+	/// A program with the loops that `lower/copies.rs` turns into block
+	/// copies, fills and searches.
+	const COPY_LOOPS: &str = "function copyAll = (target: Array<Byte>, source: Array<Byte>) mutates target => {\n\tfor byte in source {\n\t\ttarget.push(byte)\n\t}\n}\nfunction copyRange = (target: Array<Byte>, source: Array<Byte>, start: Integer, end: Integer) throws IndexError mutates target => {\n\tfor position in start..end {\n\t\ttarget.push(try source[position])\n\t}\n}\nfunction pad = (target: Array<Byte>, count: Integer) mutates target => {\n\tfor _ in 0..count {\n\t\ttarget.push(48)\n\t}\n}\nfunction count = (text: Array<Byte>): Integer => {\n\tmutable found = 0\n\tfor byte in text {\n\t\tif byte == 59 {\n\t\t\tfound += 1\n\t\t}\n\t}\n\tfound\n}\nmutable target: Array<Byte> = []\nlet source: Array<Byte> = [1, 59, 3]\ncopyAll(target, source)\ntry copyRange(target, source, 0, 2)\npad(target, arguments.length)\nconsole.log(target, count(target))\n";
+
+	#[test]
+	fn a_loop_pushing_the_items_of_another_array_is_one_block_copy() {
+		let ir = ir_of("copy-loops-items", COPY_LOOPS);
+		let all = function(&ir, "fa.copyAll");
+		assert_eq!(count(all, "@fa_array_extend("), 1, "{all}");
+		assert!(!all.contains("@fa_array_grow("), "{all}");
+		assert!(!all.contains("for_item_body"), "{all}");
+	}
+
+	#[test]
+	fn a_range_copy_checks_its_bounds_once_and_keeps_the_rounds_for_the_errors() {
+		let ir = ir_of("copy-loops-range", COPY_LOOPS);
+		let range = function(&ir, "fa.copyRange");
+		let (check, rest) = range.split_once("copy_range:").expect("a hoisted check");
+		assert!(check.contains("icmp sle"), "{range}");
+		assert!(!check.contains("@fa_error_index("), "{range}");
+		let (copy, rounds) = rest.split_once("copy_range_rounds:").expect("the rounds");
+		assert_eq!(count(copy, "@fa_array_extend("), 1, "{range}");
+		assert!(rounds.contains("@fa_error_index("), "{range}");
+		assert!(rounds.contains("@fa_array_grow("), "{range}");
+	}
+
+	#[test]
+	fn a_loop_pushing_one_byte_is_a_fill_and_a_byte_test_a_search() {
+		let ir = ir_of("copy-loops-fill", COPY_LOOPS);
+		let pad = function(&ir, "fa.pad");
+		assert_eq!(count(pad, "@fa_array_fill("), 1, "{pad}");
+		assert!(!pad.contains("@fa_array_grow("), "{pad}");
+		let search = function(&ir, "fa.count");
+		assert_eq!(count(search, "@fa_bytes_next("), 1, "{search}");
+	}
+
+	#[test]
+	fn consecutive_pushes_keep_the_header_in_registers() {
+		// only the cold paths that grow the array read it again
+		let pushes: String = (0..12)
+			.map(|index| format!("\ttarget.push({index})\n"))
+			.collect();
+		let source = format!(
+			"function many = (target: Array<Byte>) mutates target => {{\n{pushes}}}\nmutable a: Array<Byte> = []\nmutable b: Array<Byte> = []\nmany(a)\nmany(b)\nmany(a)\nconsole.log(a, b)\n"
+		);
+		let ir = optimized_ir("consecutive-pushes", &source);
+		let many = function(&ir, "fa.many");
+		assert_eq!(count(many, "@fa_array_grow("), 12, "{many}");
+		let hot: usize = many
+			.split("\n\n")
+			.filter(|block| !block.starts_with("push_grow"))
+			.map(|block| count(block, " = load "))
+			.sum();
+		// the slot, the length, the capacity and the items, once
+		assert_eq!(hot, 4, "{many}");
+	}
+
+	#[test]
+	fn growing_lookup_has_no_index_dependent_branch_beyond_bounds() {
+		let source = "function lookup = (items: GrowingArray<Integer>, index: Integer<min = 0>): Integer throws IndexError => try items[index]\nmutable items: GrowingArray<Integer> = []\nfor value in 0..1000 { items.push(value) }\nconsole.log(try lookup(items, 7), try lookup(items, 900))\n";
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("growing-branchless-{}", target.name()),
+				source,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let lookup = function(&ir, "fa.lookup");
+			// Exactly the bounds guard and the index-independent segment-count
+			// guard. The lookup itself contains no branch and no select.
+			assert_eq!(count(lookup, "br i1"), 2, "{lookup}");
+			assert_eq!(count(lookup, "icmp "), 2, "{lookup}");
+			assert_eq!(count(lookup, "@llvm.ctlz.i64("), 1, "{lookup}");
+			assert!(lookup.contains("segment_code = or i64"), "{lookup}");
+			assert!(!lookup.contains("select i1"), "{lookup}");
+			assert!(lookup.contains("item_address = add"), "{lookup}");
+			assert!(lookup.contains("item_pointer = inttoptr"), "{lookup}");
+			assert!(!lookup.contains("segment_start"), "{lookup}");
+		}
+	}
+
+	#[test]
+	fn growing_default_k_requires_a_closed_empty_origin() {
+		let prefix = "mutable items: GrowingArray<Integer> = []\nfor value in 0..40 { items.push(value) }\nlet index = try Integer.parse(arguments.get(0) ?? \"9\")\n";
+		let plain = ir_of(
+			"growing-default-origin",
+			&format!("{prefix}console.log(try items[index])\n"),
+		);
+		assert!(!plain.contains("segment_k"), "{plain}");
+		for (name, change) in [
+			("reserve", "items.reserve(1000)"),
+			(
+				"replace",
+				"items = GrowingArray<Integer>.from([1, 2], capacity = 100)",
+			),
+			("copy", "let other = items\nconsole.log(other)"),
+		] {
+			let ir = ir_of(
+				&format!("growing-default-reject-{name}"),
+				&format!("{prefix}{change}\nconsole.log(try items[index])\n"),
+			);
+			assert!(ir.contains("segment_k"), "{name}: {ir}");
+		}
+	}
+
+	#[test]
+	fn growing_index_loops_load_the_first_segment_before_the_loop() {
+		let ir = optimized_ir(
+			"growing-index-loop",
+			"function write = (items: GrowingArray<Byte>, count: Integer) throws IndexError mutates items => {\nmutable position = count - 1\nwhile position >= 0 {\ntry items[position] = 7\nposition -= 1\n}\n}\nmutable a: GrowingArray<Byte> = [1, 2, 3]\nmutable b: GrowingArray<Byte> = [1, 2, 3, 4]\ntry write(a, arguments.length)\ntry write(b, arguments.length)\nconsole.log(a, b)\n",
+		);
+		assert!(ir.contains("contiguous"), "{ir}");
+		assert!(ir.contains("first_items"), "{ir}");
+		for block in ir.split("\n\n") {
+			let label = block.lines().next().unwrap_or("");
+			if label.starts_with("while_body") && !label.contains(".lr.ph") {
+				assert!(
+					!block.contains("first_items") || !block.contains(" = load ptr"),
+					"{block}"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn growing_pushes_advance_a_cursor_in_registers() {
+		// a push onto a `GrowingArray` compares its cursor with the end of the
+		// segment, stores and advances; only the cold path finds a segment
+		let pushes: String = (0..12)
+			.map(|index| format!("\ttarget.push({index})\n"))
+			.collect();
+		let source = format!(
+			"function many = (target: GrowingArray<Byte>) mutates target => {{\n{pushes}}}\nmutable a: GrowingArray<Byte> = []\nmutable b: GrowingArray<Byte> = []\nmany(a)\nmany(b)\nmany(a)\nconsole.log(a, b)\n"
+		);
+		let ir = optimized_ir("growing-pushes", &source);
+		let many = function(&ir, "fa.many");
+		assert_eq!(count(many, "@fa_segmented_next("), 12, "{many}");
+		assert!(!many.contains("@llvm.ctlz"), "{many}");
+		let hot: usize = many
+			.split("\n\n")
+			.filter(|block| !block.starts_with("push_next_segment"))
+			.map(|block| count(block, " = load "))
+			.sum();
+		// the slot, the cursor, the end and the length, once
+		assert_eq!(hot, 4, "{many}");
 	}
 
 	#[test]
@@ -703,10 +1421,9 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 			.expect("a body")
 			.1;
 		let allocation = build.find("@fa_arena_alloc(").expect("an arena allocation");
-		let recursion = build
-			.find("@fa.build.arena(i64 %")
-			.expect("a recursive call");
+		let recursion = build.find("@fa.build.arena(").expect("a recursive call");
 		assert!(allocation < recursion, "{build}");
+		assert!(!build.contains("return.result"), "{build}");
 		assert!(!build.contains("@fa_alloc("), "{build}");
 		assert!(!build.contains("@fa_arena_enter("), "{build}");
 	}

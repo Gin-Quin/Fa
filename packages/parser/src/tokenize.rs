@@ -81,6 +81,7 @@ pub(crate) fn tokenize_range(
 			&& !kind.skips_newlines_before()
 		{
 			tokens.push(stop);
+			lexer.end_statement(kind);
 		}
 
 		tokens.push(token);
@@ -149,6 +150,26 @@ impl Lexer<'_> {
 		if let Some(position) = self.brackets.iter().rposition(|open| *open == bracket) {
 			self.brackets.truncate(position);
 		}
+	}
+
+	/// The end of a statement, before the token of `kind` just read. A generic list never holds
+	/// one (a line break doesn't separate its items), so the lists still open were a mistake,
+	/// like `a <b`, which the parser reports where they open: `>` is a comparison again.
+	fn end_statement(&mut self, kind: TokenKind) {
+		// the bracket opened by the token itself belongs to the next statement
+		let opened = matches!(
+			kind,
+			TokenKind::ParenthesisOpen
+				| TokenKind::BracesOpen
+				| TokenKind::BracketsOpen
+				| TokenKind::GenericOpen
+		)
+		.then(|| self.brackets.pop())
+		.flatten();
+		while self.brackets.last() == Some(&Bracket::Generic) {
+			self.brackets.pop();
+		}
+		self.brackets.extend(opened);
 	}
 
 	fn error(&mut self, message: impl Into<String>, start: usize, end: usize) {

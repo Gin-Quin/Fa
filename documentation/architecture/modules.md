@@ -200,7 +200,7 @@ An asynchronous function is exported with `export async function`:
 ```fa
 export async function = (url: String): String throws HttpError => {
 	let response = try await std.http.get(url)
-	response.body
+	response.text()
 }
 ```
 
@@ -424,10 +424,10 @@ Every file sees the **prelude**, the names that the compiler provides. It is the
 
 | Kind | Names |
 | --- | --- |
-| Types | `Boolean`, `String`, `Character`, `Integer`, `Float`, `BigInt`, `Percentage`, `Byte`, `Int8` to `Int128`, `UInt8` to `UInt128`, `Float32`, `Float64`, `None`, `Never`, `Void`, `Array`, `Set`, `Map`, `Pool`, `Columnar`, the `Growing` collections, `Tuple`, `Range`, `Task`, `Optional`, `Error`, `Schema`, `Subscription` |
+| Types | `Boolean`, `String`, `Bytes`, `Integer`, `Float`, `BigInt`, `Percentage`, `Byte`, `Int8` to `Int128`, `UInt8` to `UInt128`, `Float32`, `Float64`, `None`, `Never`, `Void`, `Array`, `Set`, `Map`, `Pool`, `Columnar`, the `Growing` collections, `Tuple`, `Range`, `Task`, `Optional`, `Error`, `Schema`, `Subscription` |
 | Type constructors and functions | `Enum`, `Union`, `Errors`, `Fields`, `CStruct`, `CArray`, `Pick`, `Omit`, `Type` and the other [type functions](/types/type-functions) |
 | Values | `console` (`console.log`, and `console.error` for the error output), `Math`, `Task` (with `Task.all`, `Task.any` and `Task.settled`) |
-| Errors | `IndexError`, `KeyNotFound`, `DivisionByZero`, `ArithmeticError`, `ParseError`, `Cancelled` |
+| Errors | `IndexError`, `KeyNotFound`, `DivisionByZero`, `ArithmeticError`, `ParseError`, `Utf8Error`, `Cancelled` |
 | Static values | `target` and `configuration` (see [configuration at compile time](/architecture/configuration#configuration-at-compile-time)) |
 | Standard library | `std` |
 | Standalone files and scripts | `arguments`, the command-line arguments |
@@ -552,7 +552,7 @@ The entry function may be asynchronous, to use `await`:
 -- application/main.fa
 export async function = (): Integer throws HttpError => {
 	let page = try await std.http.get("https://example.com")
-	console.log(page.body)
+	console.log(page.text())
 	0
 }
 ```

@@ -63,7 +63,7 @@ The rules of `==` and `!=`:
 - **Only data is compared.** Objects compare their data fields; relation fields and `#private` fields are not compared. Functions can't be compared: comparing values whose type contains a function (a function pointer field, for example) is an error. The same goes for tasks, iterators, [references](/advanced/owned-references) and the thread-safe types (`Mutex`, atomics, `Channel`), whose content can change under the reader.
 - **Collections**: an `Array` compares its items in order; a `Set`, a `Pool` and a `Map` compare without order (two maps are equal when they have the same keys, with equal values).
 - **Floats** follow IEEE 754: `NaN == NaN` is `false` and `-0.0 == 0.0` is `true`. See [floats](/values/numbers#floats).
-- **Strings** compare their code points exactly, with no Unicode normalization, as in JavaScript.
+- **Strings** compare their code units exactly, with no Unicode normalization, as in JavaScript.
 - A union value is equal to another when both hold the same member, with equal contents.
 
 `==` and `!=` against a literal or `none` also [narrow](/control-flow/conditionals#narrowing) the value, like `is`.
@@ -155,7 +155,7 @@ A chain is evaluated like a sequence of comparisons joined by `and`, but **each 
 
 A chain goes in one direction: `<` and `<=`, or `>` and `>=`. Mixing directions (`a < b > c`) is an error, and so is chaining `==` or `!=` (`a == b == c`).
 
-The ordered types are the numbers (integers between themselves, floats of the same type, big integers, percentages), strings and characters (by Unicode code point, see [comparing strings](/operations/string#comparing)). Booleans, tuples, objects and collections are not ordered: compare their parts explicitly. A comparison in parentheses is a `Boolean`, so `(a < b) < c` is an error, while `(a < b) == c` compares two booleans.
+The ordered types are the numbers (integers between themselves, floats of the same type, big integers, percentages), strings (by UTF-16 code unit, as in JavaScript, see [comparing strings](/operations/string#comparing)). Booleans, tuples, objects and collections are not ordered: compare their parts explicitly. A comparison in parentheses is a `Boolean`, so `(a < b) < c` is an error, while `(a < b) == c` compares two booleans.
 
 ## Negation
 

@@ -86,7 +86,7 @@ Checking is not one left-to-right pass: type functions and compile-time evaluati
 
 Everything up to the **checked tree** is target-neutral: parsing, name resolution, structural typing, ranges, the `mutates` / `invalidates` / `throws` / `requires` effects, reference invalidation, relation validation. This is not an economy, it is the point of the design: memory safety in Fa is a *checking* problem, solved once, and both backends inherit it. The compile-time interpreter runs on the same checked tree.
 
-Everything after it is native-only. In particular, **monomorphization and layouts do not exist for JavaScript**, where `Array(Item)` is erased and an object is a JavaScript object. A language feature is acceptable only if it lowers cheaply on both sides. The rule from the design notes applies here: *no feature may force per-value wrapping on a JavaScript hot path*. Each design choice below is checked against it, and where a native technique has a JavaScript cost, it is stated.
+Everything after it is native-only. In particular, **monomorphization and layouts do not exist for JavaScript**, where `Array<Item>` is erased and an object is a JavaScript object. A language feature is acceptable only if it lowers cheaply on both sides. The rule from the design notes applies here: *no feature may force per-value wrapping on a JavaScript hot path*. Each design choice below is checked against it, and where a native technique has a JavaScript cost, it is stated.
 
 ### Why no middle IR with a control-flow graph
 
@@ -230,9 +230,9 @@ unit key = hash(
 
 - A **local, content-addressed** directory (`~/.cache/fa/`), shared by every project of the machine. Entries are published atomically; a corrupt or interrupted entry is a miss; eviction is bounded.
 - Libraries are shared as source and pinned by the lockfile hash ([dependencies](../documentation/architecture/dependencies.md#lockfile)), so a library's non-generic units have a key independent of the application. They are compiled once per (library version, configuration). A cached archive is a local build product, not a package format.
-- **Generic instances** are keyed by (generic function, canonical type arguments, layouts), not by the project using them, and get deterministic symbol names. `Array(Integer).push` is compiled once per machine, per compiler version.
+- **Generic instances** are keyed by (generic function, canonical type arguments, layouts), not by the project using them, and get deterministic symbol names. `Array<Integer>.push` is compiled once per machine, per compiler version.
 - A **remote cache** is the same store behind a URL.
-- The toolchain ships **pre-built instances** of the common standard collections (`Array(Byte)`, `Array(Integer)`, `Map(String, String)`...).
+- The toolchain ships **pre-built instances** of the common standard collections (`Array<Byte>`, `Array<Integer>`, `Map<String, String>`...).
 - A no-op build runs no LLVM work and no link.
 
 ### 6. Linking
@@ -273,7 +273,7 @@ An attribute is emitted only when its exact LLVM contract holds ([LangRef](https
 | --- | --- |
 | A parameter is an immutable reference | `ptr readonly nonnull noundef align A dereferenceable(N)`; `nocapture` unless a reference into it is returned; `noalias` only under [Q3](#q3-may-a-mutated-place-be-aliased-by-another-argument) |
 | A parameter is `mutates` | `ptr nonnull noundef align A dereferenceable(N)`; `noalias` only under Q3 |
-| `Integer(min = a, max = b)` | `range(i64 a, i64 b+1)` on parameters and returns, `!range` on loads (computed without overflow at the integer limits) |
+| `Integer<min = a, max = b>` | `range(i64 a, i64 b+1)` on parameters and returns, `!range` on loads (computed without overflow at the integer limits) |
 | A sum cannot overflow | `add nsw` / `nuw` |
 | A sum can overflow | `llvm.sadd.with.overflow`, then a branch with weights marking the overflow path cold |
 | An index is proven in bounds | `getelementptr inbounds`, no comparison at all |
@@ -305,7 +305,7 @@ Memory safety alone does not imply Rust's exclusive mutable borrows: Fa allows a
 | Fa | LLVM | Notes |
 | --- | --- | --- |
 | `Int8`..`Int128`, `UInt8`..`UInt128`, `Integer` (`Int64`), `Byte` | `i8`..`i128` | `i128` needs the `compiler-rt` builtins (`__divti3`...) in the runtime |
-| `Integer(min, max)` | `i64` with `range` | Storage is the base type; the range is a fact, not a representation. Sized types exist for compact storage. |
+| `Integer<min, max>` | `i64` with `range` | Storage is the base type; the range is a fact, not a representation. Sized types exist for compact storage. |
 | `Float`, `Float32` | `double`, `float` | |
 | `Boolean` | `i1` in registers, `i8` in memory | |
 | `Percentage` | `double` | its own type, a plain float at runtime |
@@ -320,10 +320,10 @@ A `String` is `{ ptr, length in bytes, capacity | flags }`, 24 bytes, UTF-8.
 
 - **Static strings** (literals) live in read-only data, with a "static" flag in the capacity word. They are never freed, and a first mutation allocates and copies. Since identity is not observable, this is invisible, and it makes the most common string, the literal, free to "copy". This is not copy-on-write: an owned string is never shared.
 - **Small strings** (at most 23 bytes) are stored inline in the 24 bytes, with no allocation.
-- **An "ASCII only" flag** is maintained on every write (a cheap vectorized check of the new bytes). It makes `length` and indexing O(1) in the common case. Otherwise, a heap string caches its grapheme count and lazily builds breadcrumbs (the offset of every 64th grapheme), so indexing scans at most 64 graphemes ([strings](../documentation/values/strings.md#indexing), [Q5](#q5-string-representation-and-the-cost-of-grapheme-length)).
-- **A slice** (`use word = text[0..5]`) is `{ ptr, length }`: a view, never owning, tracked by the invalidation rules. Its bounds are grapheme boundaries.
-- A sequential walk over a string runs one segmentation scan, not one per index. The Unicode tables are generated into the runtime at build time.
-- A `Character` can hold several code points: it is a small string with inline storage, not one integer.
+- **An "ASCII only" flag** is maintained on every write (a cheap vectorized check of the new bytes). It makes `length` and indexing O(1) in the common case. Otherwise, a heap string caches its UTF-16 length and lazily builds breadcrumbs (the offset of every 64th code unit), so indexing scans at most 64 code units (decision of 2026-11-15, which replaces grapheme clusters by UTF-16 code units: [decisions](decisions.md), "Strings: UTF-16 semantics, UTF-8 storage"; [strings](../documentation/values/strings.md#indexing), [Q5](#q5-string-representation-and-the-cost-of-grapheme-length)).
+- **A slice** (`use word = text[0..5]`) is `{ ptr, length }`: a view, never owning, tracked by the invalidation rules. Its bounds are code unit positions, and it carries the ASCII flag of its string.
+- A sequential walk over a string decodes one code point per step. The Unicode tables (UAX #29) are linked only into programs that call `characters()`.
+- There is no `Character` type: `text[i]` is a `String` of one code unit, stored inline, and compared with a literal as a code unit without being built.
 
 ### Objects and tuples
 
@@ -339,7 +339,7 @@ An object is a struct stored inline: in an `alloca`, in a parent object, in a co
 | `A \| B \| C` (anonymous) | the same, with tag = index in the **canonical order of the member types** (sorted by shape hash), so `A \| B` and `B \| A` are one type. |
 | `T?` | a union with `None`, with **niche optimization**: when `T` has an invalid bit pattern, `none` uses it and no tag is stored. |
 
-Niches come free from many Fa types: a non-null pointer (arrays, strings and collections always hold a non-null pointer, an empty array points at a dangling aligned address as in Rust), an enum with spare values, a `Boolean`, a ranged integer (`Integer(min = 0)?` can use -1), a stored reference. `Optional(Integer)` is the only common optional that needs a tag. The first version can use explicit tags everywhere and add niches one by one.
+Niches come free from many Fa types: a non-null pointer (arrays, strings and collections always hold a non-null pointer, an empty array points at a dangling aligned address as in Rust), an enum with spare values, a `Boolean`, a ranged integer (`Integer<min = 0>?` can use -1), a stored reference. `Optional<Integer>` is the only common optional that needs a tag. The first version can use explicit tags everywhere and add niches one by one.
 
 ### Functions and calls
 
@@ -369,7 +369,7 @@ This is where Fa differs most from Rust, C++ and Zig, whose types are nominal an
 - a type with *more* fields can be passed where fewer are expected, **without a copy and without truncation** (parameters are references; `use` aliases do not copy);
 - a copy to a narrower type drops the extra fields, and an object literal may not have extra fields;
 - a read-only collection of supersets can be passed where a collection of the narrower type is expected ([collections of supersets](../documentation/advanced/structural-typing.md#collections-of-supersets));
-- a parameter keeps the type of its argument, `Type(parameter)`: an unannotated copy of it keeps every field ([keeping the type of the argument](../documentation/advanced/structural-typing.md#keeping-the-type-of-the-argument));
+- a parameter keeps the type of its argument, `Type<parameter>`: an unannotated copy of it keeps every field ([keeping the type of the argument](../documentation/advanced/structural-typing.md#keeping-the-type-of-the-argument));
 - generic constraints are shapes (`Entity: { id: Integer }`);
 - anonymous unions are structural.
 
@@ -412,7 +412,7 @@ Alternatives considered:
 Given a parameter of declared type `D` and an argument of actual type `S ⊇ D`, the callee can only touch fields of `D` ("the narrowed view is a compile-time restriction, not a runtime transformation"). So its machine code depends on exactly one thing about `S`: **where each field of `D` sits inside `S`**. That is the *view* of `D` in `S`:
 
 - for an object in memory: the offset of each field of `D`, recursively for nested objects stored inline (`human.address.city` is one constant offset);
-- for a row of a `Columnar(S)`: the column of each field of `D`, plus the row index;
+- for a row of a `Columnar<S>`: the column of each field of `D`, plus the row index;
 - for an anonymous union field whose members differ (`A | B` in `S`, `A | B | C` in `D`): the tag mapping.
 
 | Situation | Lowering | Runtime cost |
@@ -428,19 +428,19 @@ A narrowing copy is **never** a `memcpy` of the start of `S`, and it never destr
 
 This is the generic machinery that explicit generics need anyway: `function readId(Item: { id: Integer })` is instantiated on the *full* type of the argument. A structural parameter is the same thing, with two differences: the type checker still sees `D` (the specialization is invisible to it), and the key is the view, not the type, so it shares more.
 
-**Writing through a view.** A `mutates` parameter writes the fields of `D` into `S`. Decided ([mutating through a narrower type](../documentation/advanced/structural-typing.md#mutating-through-a-narrower-type)): reading is covariant, writing is invariant, so the checker only accepts an argument whose fields named by `mutates` have exactly the type of `D`'s. A view typed `score: Integer` never writes into a field `score: Integer(min = 0, max = 10)`.
+**Writing through a view.** A `mutates` parameter writes the fields of `D` into `S`. Decided ([mutating through a narrower type](../documentation/advanced/structural-typing.md#mutating-through-a-narrower-type)): reading is covariant, writing is invariant, so the checker only accepts an argument whose fields named by `mutates` have exactly the type of `D`'s. A view typed `score: Integer` never writes into a field `score: Integer<min = 0, max = 10>`.
 
-### 4. `Type(parameter)`: when the full type matters
+### 4. `Type<parameter>`: when the full type matters
 
-Decided: inside a function, a parameter keeps the type of its argument, `Type(human)`, which only exposes the fields of `Human`. So `let copy = human` copies every field of the argument, and only an annotation (`let copy: Human = human`) narrows.
+Decided: inside a function, a parameter keeps the type of its argument, `Type<human>`, which only exposes the fields of `Human`. So `let copy = human` copies every field of the argument, and only an annotation (`let copy: Human = human`) narrows.
 
-A function that copies a parameter without annotation, returns `Type(human)` or reflects on it needs more than the view: the size and alignment of `S`, and its `copy` and `drop` functions. Such a parameter is specialized on the **full type** `S`, exactly like an explicit generic parameter; its result is constructed in the caller's destination, which knows `S`. A parameter that is only read or written field by field keeps a view key, which shares more instances. The checker records, per function and per parameter, which of the two keys it needs.
+A function that copies a parameter without annotation, returns `Type<human>` or reflects on it needs more than the view: the size and alignment of `S`, and its `copy` and `drop` functions. Such a parameter is specialized on the **full type** `S`, exactly like an explicit generic parameter; its result is constructed in the caller's destination, which knows `S`. A parameter that is only read or written field by field keeps a view key, which shares more instances. The checker records, per function and per parameter, which of the two keys it needs.
 
 ### 5. Instance keys and deduplication
 
 Specialization could multiply code. Two cheap levels keep it in check:
 
-1. **Instance key** (before lowering, from the types only): `hash(function, for each structural parameter its view (or its full type, for a parameter that is copied, returned as Type() or reflected on), generic arguments, names it reflects on)`. Two arguments with the same view share an instance, whatever their types. This key is the cache key. It must cover everything the generated code depends on; two instances are never merged on equal LLVM types alone.
+1. **Instance key** (before lowering, from the types only): `hash(function, for each structural parameter its view (or its full type, for a parameter that is copied, returned as `Type<…>` or reflected on), generic arguments, names it reflects on)`. Two arguments with the same view share an instance, whatever their types. This key is the cache key. It must cover everything the generated code depends on; two instances are never merged on equal LLVM types alone.
 2. **Code hash** (after lowering): hash the generated function. If it equals an existing one, emit an LLVM `alias` instead of a second body. `ageOf(hero)` and `ageOf(human)` below produce the same code and one machine function.
 
 The linker's `--icf` is the last net. None of this needs a footprint analysis of the function body: the work is done by hashing. (Keying instances on the fields actually read, rather than on all of `D`, would share a little more, but the key would then change with the body; the code hash already catches those cases.)
@@ -499,7 +499,7 @@ Neither function copies anything, truncates anything, or looks anything up. Afte
 
 ### Columnar rows
 
-`for human in people`, with `people: Columnar(Hero)`, hands out a reference that is a row index, not a pointer. Calling `scoreOf(human)` specializes `scoreOf` on a *row view*: the base of the `score` column and the index. A destructured loop (`for { age } in people`) walks the `age` column only and never assembles a `Hero`. Reading a whole row is a gather, as the documentation says.
+`for human in people`, with `people: Columnar<Hero>`, hands out a reference that is a row index, not a pointer. Calling `scoreOf(human)` specializes `scoreOf` on a *row view*: the base of the `score` column and the index. A destructured loop (`for { age } in people`) walks the `age` column only and never assembles a `Hero`. Reading a whole row is a gather, as the documentation says.
 
 ### Unions
 
@@ -513,10 +513,10 @@ Unions of literals (`"north" | "south"`) are plain integers, and widening them i
 
 ### Collections of supersets
 
-Decided (see [collections of supersets](../documentation/advanced/structural-typing.md#collections-of-supersets)): `Array(Hero)` is accepted where `Array(Human)` is expected **when the parameter is not `mutates`**. A mutated collection of supersets is a compile error, because the callee could add a `Human` to storage laid out for `Hero`; the author writes the generic form instead:
+Decided (see [collections of supersets](../documentation/advanced/structural-typing.md#collections-of-supersets)): `Array<Hero>` is accepted where `Array<Human>` is expected **when the parameter is not `mutates`**. A mutated collection of supersets is a compile error, because the callee could add a `Human` to storage laid out for `Hero`; the author writes the generic form instead:
 
 ```fa
-function keepNamed(Item: Human) = (items: Array(Item)) mutates items => {
+function keepNamed = <Item: Human>(items: Array<Item>) mutates items => {
 	items.deleteWhere((item) => item.name == "")
 }
 ```
@@ -549,7 +549,7 @@ Decided. A function value is compiled once, so it cannot be specialized on its a
 ```fa
 type HumanHandler = (human: Human) => Void
 
-let handlers: Array(HumanHandler) = [logScore, logName]
+let handlers: Array<HumanHandler> = [logScore, logName]
 
 for handler in handlers {
 	handler(hero) -- `logScore` reads `score` at offset 32, `Hero` has it at 56
@@ -563,9 +563,9 @@ HeroAsHuman = { offsets: { age = 0, name = 32, score = 56 }, stride = 64,
                 size = 64, align = 8, copy = copy<Hero>, drop = drop<Hero> }
 ```
 
-- The offsets are recursive for nested objects; the stride serves collections of supersets; size, alignment, copy and drop serve a parameter that is copied without annotation or returned as `Type(parameter)`, since the caller can't know whether the callee does it.
+- The offsets are recursive for nested objects; the stride serves collections of supersets; size, alignment, copy and drop serve a parameter that is copied without annotation or returned as `Type<parameter>`, since the caller can't know whether the callee does it.
 - A table is static data, generated once per pair (actual type, declared type). A caller passing the exact type passes the identity table.
-- In the entry point, a field access is a load of the offset (hoisted out of loops by LLVM) and a load of the field. A result typed `Type(parameter)` is constructed in the caller's destination.
+- In the entry point, a field access is a load of the offset (hoisted out of loops by LLVM) and a load of the field. A result typed `Type<parameter>` is constructed in the caller's destination.
 - `mutates` writes go to the original, and returned references stay valid, so a call through a value behaves exactly like a direct call, and like JavaScript.
 
 Function types declare their effects like functions do (`type Reset = (player: Player) => Void mutates player`), and a function can be stored in a function type only if the type declares all its effects ([function types](../documentation/functions/defining-functions.md#function-types)).
@@ -574,7 +574,7 @@ Function types declare their effects like functions do (`type Reset = (player: P
 
 None of the machinery above exists for the JavaScript target: objects are dynamic, a view is just a property read, and there is nothing to specialize. A narrowing copy calls the copy function generated for the destination type (never a spread, which would keep the extra fields).
 
-`Type(parameter)` is erased, except where the function needs the actual type: an unannotated copy of a parameter, and a reflection on it. Decided ([Q16](#q16-copying-a-parameter-in-javascript)): such a function is emitted once per argument type, as in native code, and a function value receives the copy function of the actual argument as a hidden argument, like the native table. Structural typing therefore costs the JavaScript backend nothing, which is the point of keeping layouts out of the shared checker.
+`Type<parameter>` is erased, except where the function needs the actual type: an unannotated copy of a parameter, and a reflection on it. Decided ([Q16](#q16-copying-a-parameter-in-javascript)): such a function is emitted once per argument type, as in native code, and a function value receives the copy function of the actual argument as a hidden argument, like the native table. Structural typing therefore costs the JavaScript backend nothing, which is the point of keeping layouts out of the shared checker.
 
 ---
 
@@ -638,13 +638,13 @@ The documentation already picks the semantics; this section picks the data struc
 
 | Fa | Layout and technique | Borrowed from | Elements move on growth? |
 | --- | --- | --- | --- |
-| `Array(T)` | `{ ptr, length, capacity }`, doubling growth, inline fast path for `push` | Rust `Vec`, C++ `std::vector` | yes |
-| `Set(T)` | open-addressing **Swiss table**: 1 control byte per slot (7-bit hash tag), group probing with SIMD | Abseil `flat_hash_set`, Rust `hashbrown`, Go 1.24 maps | yes (rehash) |
-| `Map(K, V)` | **compact dict**: a Swiss-style index of `u32` slot ids, plus entries in a stable chunked arena | Python dict, Zig `ArrayHashMap` | **no** (stable slots, as documented) |
-| `Pool(T)` | **slab / hive**: size-aligned chunks, occupancy bitmap, per-chunk free lists, lowest chunk filled first | C++26 `std::hive` / `plf::colony`, `slab` | **no** |
-| `Columnar(T)` | one chunked column per field, same slot index across columns, shared occupancy | Zig `MultiArrayList`, struct-of-arrays | no |
-| `OrderedColumnar(T)` | one `Array` per field | Zig `MultiArrayList` | yes |
-| `GrowingArray(T)` | **segmented list**: segments of doubling size, `O(1)` index with `clz` | Zig `SegmentedList`, C++ `std::deque` | **no** |
+| `Array<T>` | `{ ptr, length, capacity }`, doubling growth, inline fast path for `push` | Rust `Vec`, C++ `std::vector` | yes |
+| `Set<T>` | open-addressing **Swiss table**: 1 control byte per slot (7-bit hash tag), group probing with SIMD | Abseil `flat_hash_set`, Rust `hashbrown`, Go 1.24 maps | yes (rehash) |
+| `Map<K, V>` | **compact dict**: a Swiss-style index of `u32` slot ids, plus entries in a stable chunked arena | Python dict, Zig `ArrayHashMap` | **no** (stable slots, as documented) |
+| `Pool<T>` | **slab / hive**: size-aligned chunks, occupancy bitmap, per-chunk free lists, lowest chunk filled first | C++26 `std::hive` / `plf::colony`, `slab` | **no** |
+| `Columnar<T>` | one chunked column per field, same slot index across columns, shared occupancy | Zig `MultiArrayList`, struct-of-arrays | no |
+| `OrderedColumnar<T>` | one `Array` per field | Zig `MultiArrayList` | yes |
+| `GrowingArray<T>` | **segmented list**: segments of doubling size, `O(1)` index with `clz` | Zig `SegmentedList`, C++ `std::deque` | **no** |
 | `GrowingPool`, `GrowingMap`, `GrowingSet`, `GrowingColumnar` | the same without deletion: pure bump arenas, no free list or bitmap | `bumpalo`, `typed-arena` | no |
 
 The invalidation table in the documentation ("Effects of the collections") and this table are the same table: a collection *declares* `mutates self` when its representation can move elements, and `mutates self.length` or `mutates self.size` when it cannot.
@@ -676,7 +676,7 @@ Rehashing rebuilds only the index, from the hashes stored in the entries; entrie
 
 The data structure behind relations, entity systems and `add` returning a reference.
 
-- **Chunks** of one compile-time size per `Pool(T)`, aligned to that size (64 KiB or more for large `T`). A header at the start of each chunk holds an occupancy bitmap, a count and the link to the next chunk.
+- **Chunks** of one compile-time size per `Pool<T>`, aligned to that size (64 KiB or more for large `T`). A header at the start of each chunk holds an occupancy bitmap, a count and the link to the next chunk.
 - `add`: pop the free list of the lowest chunk that has a free slot, else bump the current chunk, else allocate a chunk (cold). It returns the slot pointer. A literal argument is **constructed directly in the slot**. Filling the lowest chunks first keeps the pool dense; the details are in the implementation section of `documentation/collections/pools.md`.
 - `delete(ref)`: relation cleanup, `drop<T>`, clear the occupancy bit (the chunk header is `ptr & ~(chunk_size - 1)`, so no search), push the slot on the free list (the next index is stored in the dead slot). Slots are reused without any generation check: static invalidation and eager relation cleanup make it safe.
 - Iteration: for each chunk, for each 64-bit occupancy word, `tzcnt` to the next live slot. A Pool of flat elements is destroyed by freeing its chunks without visiting the elements.
@@ -742,7 +742,7 @@ This is the reason relations require stable-address collections: the links are r
 
 - the same monomorphizer, cache and attribute logic serve user code and the standard library, which is the "one mechanism" goal;
 - `hash`, `eq` and `copy` for the element type are *inlined* into the collection code, which a type-erased Rust runtime cannot do;
-- a precompiled instance such as `Map(String, Integer)` is shared by every program through the cache, and the common instances ship with the compiler.
+- a precompiled instance such as `Map<String, Integer>` is shared by every program through the cache, and the common instances ship with the compiler.
 
 The rejected alternative was hand-written IR builders in the compiler, one per operation, with a type-erased Rust runtime for the cold paths: more code, in the less testable place.
 
@@ -774,7 +774,7 @@ Swift's `swifterror` (the error in a dedicated register) would make the happy pa
 | Stack overflow | always | guard page |
 | Input decoding | always: untrusted bytes are never assumed valid | validated once, while building the typed value |
 
-Everything else was removed by the checker. The range analysis ([numbers](../documentation/values/numbers.md#ranges-through-arithmetic)) runs in the checker for concrete code and again, cheaply, per monomorphic instance whose ranges depend on generic parameters (`Matrix(Float, 4, 4)` bounds the indices of `get` by `rows - 1`). Its proofs have two jobs: deciding whether an operation adds a typed error to a function's signature (which must be right before LLVM sees anything), and letting the lowering omit the check. Each emitted check consults a "proven" bit recorded on the tree node. A fact is killed by any write, call, callback, suspension or thread that can change what it is about.
+Everything else was removed by the checker. The range analysis ([numbers](../documentation/values/numbers.md#ranges-through-arithmetic)) runs in the checker for concrete code and again, cheaply, per monomorphic instance whose ranges depend on generic parameters (`Matrix<Float, 4, 4>` bounds the indices of `get` by `rows - 1`). Its proofs have two jobs: deciding whether an operation adds a typed error to a function's signature (which must be right before LLVM sees anything), and letting the lowering omit the check. Each emitted check consults a "proven" bit recorded on the tree node. A fact is killed by any write, call, callback, suspension or thread that can change what it is about.
 
 ### Arithmetic that LLVM does not do the Fa way
 
@@ -816,7 +816,7 @@ Getting `wasm` is almost free once `native` works, which is a strong argument fo
 
 ### Foreign code
 
-Decided on 2026-11-01, specified in [foreign code](../documentation/advanced/foreign-code.md): bindings live in `*.foreign.fa` files, the only code the checker trusts instead of proving (`@extern` declarations, `Pointer(T)`, `CString`, `destroy` on move-only handle types). `CStruct` gives the C layout ([Q1](#q1-canonical-field-order-and-the-c-abi)); every other type keeps the canonical layout, and the view ABI is never exposed. A call to C is a direct call with the target's C convention; `CStruct` arguments are classified like clang does (`fa-llvm` implements the System V, AAPCS64 and Windows x64 rules). `fa bind` reads headers with libclang once, and its output is committed, so builds never parse C. `build.cLibrary` exports a foreign file's namespace as C functions (status codes for `throws`, thread-local last error, initialization at load time). Cross-language ThinLTO with clang-built libraries goes through `lld`. A Rust shim must not build a `&mut` to Fa storage that may be aliased, and must not let a Rust panic unwind into Fa code. A Rust shim must not build a `&mut` to Fa storage that may be aliased, and must not let a Rust panic unwind into Fa code.
+Decided on 2026-11-01, specified in [foreign code](../documentation/advanced/foreign-code.md): bindings live in `*.foreign.fa` files, the only code the checker trusts instead of proving (`@extern` declarations, `Pointer<T>`, `CString`, `destroy` on move-only handle types). `CStruct` gives the C layout ([Q1](#q1-canonical-field-order-and-the-c-abi)); every other type keeps the canonical layout, and the view ABI is never exposed. A call to C is a direct call with the target's C convention; `CStruct` arguments are classified like clang does (`fa-llvm` implements the System V, AAPCS64 and Windows x64 rules). `fa bind` reads headers with libclang once, and its output is committed, so builds never parse C. `build.cLibrary` exports a foreign file's namespace as C functions (status codes for `throws`, thread-local last error, initialization at load time). Cross-language ThinLTO with clang-built libraries goes through `lld`. A Rust shim must not build a `&mut` to Fa storage that may be aliased, and must not let a Rust panic unwind into Fa code. A Rust shim must not build a `&mut` to Fa storage that may be aliased, and must not let a Rust panic unwind into Fa code.
 
 ### Compile-time evaluation
 
@@ -837,7 +837,7 @@ The tests that matter most are the ones that compare Fa against itself. The LLVM
 - **Sanitizers.** The runtime and generated code are run under AddressSanitizer and leak detection. Fa promises no leaks and no use-after-free; the sanitizer is the independent check of that promise.
 - **Golden IR tests.** Lower small programs and compare the text IR with committed files. These pin the attributes and the layouts, which is where regressions hide. Most run on the recording `Backend`, whose output is LLVM-syntax text, so they need no LLVM; a smaller set goes through real LLVM and its verifier (`--emit=llvm-ir`).
 - **Layout tests.** For a corpus of types: equal shapes have equal layouts, every view offset is in bounds, and `size`/`align` match what LLVM's data layout reports.
-- **Structural-typing tests.** The cases of the [view table](#3-passing-a-superset-where-a-subset-is-expected): different offsets, nested views, columnar rows, narrowing copies that keep the source's extra fields alive, `Type(parameter)`, collections of supersets, and the instance and alias counts of the worked example.
+- **Structural-typing tests.** The cases of the [view table](#3-passing-a-superset-where-a-subset-is-expected): different offsets, nested views, columnar rows, narrowing copies that keep the source's extra fields alive, `Type<parameter>`, collections of supersets, and the instance and alias counts of the worked example.
 - **Memory tests.** Last use with a live `use` alias, partial initialization, cleanup on every kind of exit, stale aliases through callbacks and module-level values, deep recursive values (no stack overflow), integer limits.
 - **Relation tests.** Every cardinality, cycles, self-links, replacement, deletion, duplicates, immediate slot reuse, and copies and moves of owners.
 - **Cache tests.** Change a body: one unit rebuilds. Change a signature: its callers rebuild. Add a sibling file: name resolution is re-checked. Rebuild twice: byte-identical objects.
@@ -853,7 +853,7 @@ Each milestone ends with something that runs, and adds the timers and golden tes
 | --- | --- | --- |
 | **M0** | `fa-checker` skeleton on the parser's tree (names, signatures, a first subset of types and effects); `Backend` trait with the recording backend; integers, booleans, functions, `if`, loops, `fa-runtime` with `print` and `panic`; `fa build --target=native` through `llvm-sys` and `lld`; every unsupported construct is a clear compile error | a Fibonacci program compiles, runs, and its IR is a golden test |
 | **M1** | objects, tuples, optionals, unions, `when`, `throws` / `try` / `catch`; layouts; flat vs owning; copies, moves, construction in the destination and the cleanup stack; references and invalidation for a synchronous subset; `String`, `Array` | the examples of `values/` and `control-flow/` run, with ASan clean |
-| **M2** | generics and monomorphization; specialization by view, `Type(parameter)` and instance deduplication; the staged local cache | the worked example above produces two instances and one alias; a body edit rebuilds one unit |
+| **M2** | generics and monomorphization; specialization by view, `Type<parameter>` and instance deduplication; the staged local cache | the worked example above produces two instances and one alias; a body edit rebuilds one unit |
 | **M3** | `Set`, `Map`, `Pool`, `Columnar`, `Growing*`; relations; fusion; the standard library on intrinsics | the examples of `collections/` and `advanced/relations` run; benchmarks vs C++/Rust/Zig exist |
 | **M4** | the `release`, `max` and `size` profiles; cross-module inlining; parallel codegen; ThinLTO; remote cache; verify mode in CI | compile-time budget in CI; differential tests green |
 | **M5** | async, workers, `for parallel`; `wasm` | the examples of `advanced/concurrency` run on `native` |
@@ -894,13 +894,13 @@ Decided (2026-11-01), the compiler-made heap blocks of [memory management](../do
 - **Escaping closures**: a function value is `{ fn, env }`. An environment of at most 8 bytes that is trivially copyable is stored **in the `env` word itself**, with no allocation (one captured integer, float or small object). A larger environment is a heap block whose header points at a static descriptor `{ size, align, copy, drop }`; copying the closure copies the block, destroying it frees the block.
 - **Task frames**: the frame size of each async instance is known at compile time, so frames come from a **per-thread size-class allocator** (free lists per size class, no lock, no atomic). A frame is freed when its task is awaited, cancelled or destroyed.
 - **`BigInt`**: one 64-bit word. A value that fits in 63 bits is stored inline (tagged), so the common case is plain integer arithmetic with an overflow check; a larger value points at a uniquely owned block of limbs.
-- **`Character`**: up to 15 bytes of UTF-8 inline (every grapheme in practice); longer grapheme clusters go to a heap block.
+- **`Character`**: removed on 2026-11-15 (a one-unit `String` is an inline string).
 
 The documentation now says that objects are values stored inline, where they are declared (in a frame, in their parent, in a collection slot), rather than "on the stack".
 
 ### Q5. String representation and the cost of grapheme `length`
 
-Decided (2026-11-01). `length` is not O(1) in general, but every common case is, and no loop over indices is quadratic:
+Decided (2026-11-01), then changed on 2026-11-15: the same representation now counts **UTF-16 code units** instead of grapheme clusters (read "code unit" for "grapheme" below, no segmentation scan; the bytes may hold lone surrogates, WTF-8; see [decisions](decisions.md), "Strings: UTF-16 semantics, UTF-8 storage"). `length` is not O(1) in general, but every common case is, and no loop over indices is quadratic:
 
 - **Small-string optimization**: a `String` is 24 bytes, and a string of at most 23 bytes is stored inline in them (the last byte holds the remaining capacity and the flags). Most keys, names and identifiers never allocate.
 - **Flags**: static (a literal in read-only data), inline, ASCII. The ASCII flag is maintained on every write by a vectorized check of the new bytes; with it, `length`, indexing and slicing are byte arithmetic.
@@ -918,7 +918,7 @@ Decided (2026-11-01): **keep the stable slots**, a language guarantee (`getOrIns
 
 ### Q7. The internal intrinsic layer for the standard library
 
-Decided (2026-11-01): **the collections are written in Fa**, in the standard library, on top of an internal namespace `intrinsics` that only the standard library's files can see. It is not written with `@`, which means compile time in Fa. It provides a `Pointer(T)` type and operations that each lower to one LLVM instruction or intrinsic: sized `allocate`, `reallocate` and `free`, `offset`, `load`, `store`, `copyBytes`, `moveBytes`, `fillBytes`, `countLeadingZeros`, `countTrailingZeros`, `popCount`, `byteSwap`, a 16-byte group match for Swiss tables, atomic operations, and the hints `likely`, `assume` and `unreachable`.
+Decided (2026-11-01): **the collections are written in Fa**, in the standard library, on top of an internal namespace `intrinsics` that only the standard library's files can see. It is not written with `@`, which means compile time in Fa. It provides a `Pointer<T>` type and operations that each lower to one LLVM instruction or intrinsic: sized `allocate`, `reallocate` and `free`, `offset`, `load`, `store`, `copyBytes`, `moveBytes`, `fillBytes`, `countLeadingZeros`, `countTrailingZeros`, `popCount`, `byteSwap`, a 16-byte group match for Swiss tables, atomic operations, and the hints `likely`, `assume` and `unreachable`.
 
 - **Run fast**: the element's `hash`, `==` and copy are inlined into the collection code by monomorphization, which a type-erased runtime can't do.
 - **Compile fast**: the collections go through the same monomorphizer and the same cache as user code, and the instances of the common types (`Array`, `Set` and `Map` of the primitives and of `String`) are **precompiled per target and profile and shipped with the compiler** as a seed of the cache: a small program instantiates none of them.
@@ -962,7 +962,7 @@ Decided: tasks are scoped. See [async, workers and `for parallel`](#async-worker
 
 ### Q15. An unannotated copy of a parameter
 
-Decided: `let copy = human` has the type of the argument, `Type(human)`, and keeps every field. See [`Type(parameter)`](#4-typeparameter-when-the-full-type-matters).
+Decided: `let copy = human` has the type of the argument, `Type<human>`, and keeps every field. See [`Type<parameter>`](#4-typeparameter-when-the-full-type-matters).
 
 ### Q16. Copying a parameter in JavaScript
 

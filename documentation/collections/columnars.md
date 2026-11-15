@@ -6,6 +6,8 @@ In other languages this is called a **struct of arrays**, or a `MultiArrayList` 
 
 Internally, a columnar keeps one column per field of the object type, split into pages like a [`Pool`](/collections/pools) (see [how it works](#how-it-works)).
 
+Storage can be planned with `from(source, capacity = n)`, the read-only `capacity` property and `reserve(additional)`. See [capacity and reservation](/collections/arrays#capacity-and-reservation) for the shared rules and effects.
+
 ## When to use one
 
 A columnar pays off when you repeatedly read a *few* fields across *many* objects, because those fields are contiguous in memory and nothing else is loaded alongside them. Typical uses:
@@ -66,8 +68,6 @@ Unlike a pool, a reference into a columnar points at fields spread across severa
 | `delete(element)`, `take(element)` | `invalidates element` |
 | `deleteWhere`, `clear` | `mutates self` |
 | `reserve(additional)` | `mutates self.capacity`: it moves no element |
-
-Like every collection, a columnar takes a `capacity` in `from`, and has a read-only `capacity` property and a `reserve(additional)` method (see [capacity](/collections/arrays#capacity)).
 
 ```fa
 use jane = columnar.add({ name = "Jane", age = 28 })
@@ -140,6 +140,12 @@ Start with an array. Move to a columnar when you have measured a loop that touch
 ## Implementation details
 
 ### Native
+
+- **Returned collections.** In synchronous compilation mode, collection functions receive an optional bounded caller buffer and return the final header pointer. Fresh literals, supported transforms and proven moved immutable locals forward it through calls and return branches. A mutable or escaping owner supplies no frame buffer, so construction starts on the heap. Constant returned locals can share read-only storage with a proven immutable caller. Arrays and growing arrays construct aggregate-returning literal items directly in their final slots; completed items still drop on an error. Object-columnar chunks retain their larger heap layout.
+
+- **Reviewed storage limits.** The collection byte budget is 2 KiB; the total is 4 KiB per non-recursive frame and 512 bytes in a resolved direct-call cycle (including methods and generic instances). Literals reserve their exact aligned size. Non-recursive calls receive at most `min(2 KiB, remaining frame budget)`. In a direct-call cycle, all call-result offers share 128 bytes per frame inside the 512-byte total: each receives `min(128 − offer bytes reserved, 512 − collection bytes reserved)`, with no offer below 64 bytes. Exact literals count against the total in either lowering order; forwarded offers reserve no frame bytes. The inclusive 2× per-frame gate covers call-result offers (one and four live splits): unchecked depths must satisfy `baseline_depth ≤ 2 × final_depth + 8`, with eight frames for fixed setup overhead and native measurements under a 256 KiB stack limit. Leak-checked depths are informational; exact literals are excluded. Indirect recursion is not detected. Larger objects/tuples use caller output slots; a layout with at most two scalar leaves and 16 bytes on 64-bit targets, or exactly one scalar leaf on wasm32, returns by value. Small throwing results keep `{ value, error }`; register results store directly into their final owner. An output marked `noalias` is unreachable from arguments, captures and globals during the call. Native x86-64/aarch64 functions probe crossed stack pages.
+
+- **Immutable literals (current LLVM backend).** Supported constant `let` literals use read-only globals containing the normal columns, slots, occupancy words and chunk directory. Column chunks keep their size alignment, so references use the ordinary field-address calculation. Runtime object columnars currently keep the heap path: their minimum aligned chunk exceeds the 2 KiB collection budget. Primitive columnars use the compact immutable pool path. The non-recursive frame budget is 4 KiB. Static destruction does nothing; storing a value into a mutable or escaping owner copies into the ordinary owned layout.
 
 - **Columns.** There is one column per field of the element type, with the field's own layout: a `Columnar<Human>` with `name: String` and `age: Integer` has a column of string headers and a column of `i64`. Nested objects are not split further in the first version: a field holding an object is one column of that object type.
 - **Chunks.** All columns share the same chunk capacity `2^k` slots, chosen per type so that the widest column fills about 64 KiB. Slot `i` is in chunk `i >> k` at offset `i & (2^k - 1)` in every column. A chunk is one allocation holding the runs of every column one after the other, each run aligned to 64 bytes, preceded by a header with the occupancy bitmap, the live count, and the head of the chunk's free list. The columnar keeps an array of chunk pointers: a slot index is a shift, a mask and one load away from its fields.

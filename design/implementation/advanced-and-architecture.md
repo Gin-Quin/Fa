@@ -79,7 +79,7 @@ A test without an `error` line must compile and print exactly the listed lines. 
 
 ```fa
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
 type Player = { name: String, score: Integer }
 ```
 
@@ -128,7 +128,7 @@ A function's summary is everything a caller needs, and is computed when the func
 | **module-level writes** (part of `mutates`) | declared / inferred | |
 | **pure** (bit) | inferred | `@` calls, `derived`, fusion |
 | **reads reactive** (set of reactive module-level places, transitive) and **may write reactive** (bit) | inferred | [11](#11-reactivity) |
-| **needs full argument type** per structural parameter (`Type(parameter)` copy, return or reflection) | inferred | [10.7](#107-lowering) |
+| **needs full argument type** per structural parameter (`Type<parameter>` copy, return or reflection) | inferred | [10.7](#107-lowering) |
 | **depends on target** (bit: reads `target` or `configuration`) | inferred | per-target caching |
 | **reaches a C call / an I/O primitive** | inferred | purity, `fa run` sandbox |
 
@@ -215,7 +215,7 @@ Canonicalization rules:
 - A local reference stands for the place it designates: `use person = people[0]; person.age` is the path `people[0].age`.
 - An element whose index or key isn't known is `[..]`.
 - **Relation crossing**: a place reached through a relation field restarts at the collection of the target. In `node.next?.data` with `next: (Node in self.#nodes)?`, the place is `self.#nodes[..].data`. The identity of the step is `Unknown`, and the read of `node.next` itself is a read of `self.#nodes[@node].next`.
-- A string slice `text[a..b]` is `text.Characters(a..b)`.
+- A string slice `text[a..b]` is `text.Characters(a..b)` (the step keeps its name; its bounds are UTF-16 code unit positions).
 - After narrowing `x is Circle` (or `x is not none`), reads of `x`'s fields go through `Payload(Circle)`.
 
 ### 3.2 Owning edges and flatness
@@ -271,7 +271,7 @@ The walk computes, for every operation, the effects it has on places. An effect 
 3. Replace a requirement root by the path of the place that provides it at this call ([9.3](#93-resolution-at-a-call)); a temporary provider drops the effect.
 4. The **declared type** of the callee's parameter, with the call's type arguments substituted, is attached to the substituted path: it decides the owning edges ([5.5](#55-what-an-effect-invalidates)).
 
-Reference types of the callee's parameters and return type are substituted the same way: `firstPerson(persons: Array(Person)): (Person in persons)?` called as `firstPerson(town.people)` returns `(Person in town.people)?`.
+Reference types of the callee's parameters and return type are substituted the same way: `firstPerson(persons: Array<Person>): (Person in persons)?` called as `firstPerson(town.people)` returns `(Person in town.people)?`.
 
 ### 3.6 What a body may do
 
@@ -334,7 +334,7 @@ function increment = (value: Integer) mutates value => { -- error EFF005
 ```
 
 ```fa
-function addGuest = (names: Array(String)) => names.push("guest") -- inferred: mutates names
+function addGuest = (names: Array<String>) => names.push("guest") -- inferred: mutates names
 let fixed = ["a"]
 addGuest(fixed) -- error EFF007
 mutable guests = ["a"]
@@ -349,12 +349,12 @@ function reset = (player: Player) => {
 ```
 
 ```fa
-function resetAll = (players: Array(Player)) mutates players[..].score => {
+function resetAll = (players: Array<Player>) mutates players[..].score => {
 	for player in players {
 		player.score = 0
 	}
 }
-function rename = (players: Array(Player)) mutates players[..].score => {
+function rename = (players: Array<Player>) mutates players[..].score => {
 	for player in players {
 		player.name = "x" -- error EFF004
 	}
@@ -362,7 +362,7 @@ function rename = (players: Array(Player)) mutates players[..].score => {
 ```
 
 ```fa
-function remove = (items: Pool(String)) invalidates items => { -- error EFF009
+function remove = (items: Pool<String>) invalidates items => { -- error EFF009
 	items.clear()
 }
 ```
@@ -378,7 +378,7 @@ function noop = (player: Player) mutates player => { -- error EFF011
 ```
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 function register = (name: String) mutates people.size => {
 	people.add({ name = name })
 	people = [] -- error EFF004 (only `people.size` is declared)
@@ -386,7 +386,7 @@ function register = (name: String) mutates people.size => {
 ```
 
 ```fa
-function wipe = (items: Array(Integer)) mutates items => {
+function wipe = (items: Array<Integer>) mutates items => {
 	items.deleteWhere((item) => item < 0) -- valid: `mutates items` covers the deletions
 }
 ```
@@ -417,7 +417,7 @@ Rules:
 - Inside a type, a field type names a collection of the enclosing value: a `Person` reached as `Person in town.people` has `bestFriend: (Person in town.people)?`.
 - A function returns a reference **only** when its declared return type says `in`, and the owner path starts at a parameter or a module-level value (`REF008` otherwise). With an inferred return type, a reference-typed expression is copied: `function pick = (persons, index) => persons[index]` returns a `Person`.
 - When the argument substituted into a returned reference type is a temporary (`firstPerson(makePeople())`), the result is a reference into a temporary: it can only be copied with `let` (`REF017` with `use`).
-- `REF010` a local collection of references: any type that contains a reference type as a type argument outside a relation field (`Array(Person in people)`, `Map(String, Person in people)`, an object type with a reference-typed field that is not a relation side), in a local, a parameter, a return type or a module-level value: "keep indices, or declare a relation `Pool`".
+- `REF010` a local collection of references: any type that contains a reference type as a type argument outside a relation field (`Array<Person in people>`, `Map<String, Person in people>`, an object type with a reference-typed field that is not a relation side), in a local, a parameter, a return type or a module-level value: "keep indices, or declare a relation `Pool`".
 - Assignability: `T in p` is accepted where `T in q` is expected only when `p` and `q` are the same owner path (after substitution). `T in p` is accepted where a plain `T` is expected by a **read** (parameter, comparison): it is a reference. Assigned to `let`/`mutable`, it is copied. `none` is accepted where `(T in p)?` is expected.
 
 ### 4.2 `use`
@@ -455,7 +455,7 @@ Semantics:
 ### 4.5 Tests
 
 ```fa
-mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
+mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }]
 let copied = people[1]
 use referenced = people[1]
 referenced.name = "Cleo"
@@ -471,14 +471,14 @@ use chosen = if true { 1 } else { 2 } -- error REF004
 ```
 
 ```fa
-let persons: Array(Person) = [Person {}, Person {}]
+let persons: Array<Person> = [Person {}, Person {}]
 use someone = persons[1]
-console.log(@typeToString(Type(someone))) -- prints: Person in persons
+console.log(@typeToString(Type<someone>)) -- prints: Person in persons
 someone.name = "x" -- error REF015 (`persons` is immutable: the alias is read-only)
 ```
 
 ```fa
-mutable players: Array(Player) = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
+mutable players: Array<Player> = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
 mutable use best = players[0]
 for player in players {
 	if player.score > best.score {
@@ -490,8 +490,8 @@ console.log(players[1].score) -- prints: 17
 ```
 
 ```fa
-mutable players: Array(Player) = [Player { name = "Ana", score = 3 }]
-mutable others: Array(Player) = [Player { name = "Bao", score = 7 }]
+mutable players: Array<Player> = [Player { name = "Ana", score = 3 }]
+mutable others: Array<Player> = [Player { name = "Bao", score = 7 }]
 mutable use best = players[0]
 reuse best = others[0] -- error REF006
 use fixed = players[0]
@@ -499,33 +499,33 @@ reuse fixed = players[0] -- error REF005
 ```
 
 ```fa
-mutable scores: Map(String, Integer) = [("ana", 10)]
+mutable scores: Map<String, Integer> = [("ana", 10)]
 mutable use current = scores.get("ana")
 reuse current = none
 console.log(current) -- prints: none
 ```
 
 ```fa
-mutable people: Array(Person) = [Person { name = "Ana" }]
+mutable people: Array<Person> = [Person { name = "Ana" }]
 use a = people[0]
 use a = people[0] -- error REF003
 ```
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 mutable use current = people.add({ name = "Ana" })
 use current = people.add({ name = "Bao" }) -- error REF007
 ```
 
 ```fa
-mutable tags: Set(String) = Set.from(["a"])
+mutable tags: Set<String> = Set.from(["a"])
 for tag in tags {
 	tag = "b" -- error REF014 (set elements are read-only)
 }
 ```
 
 ```fa
-function firstPerson = (persons: Array(Person)): (Person in persons)? => {
+function firstPerson = (persons: Array<Person>): (Person in persons)? => {
 	if persons.length == 0 {
 		return none
 	}
@@ -542,13 +542,13 @@ if first is not none {
 ```fa
 function addressOf = (user: { address: { city: String } }): { city: String } in user => user.address -- error REF008 (no collection on the path)
 function makePeople = () => [Person { name = "Ana" }]
-function firstOf = (persons: Array(Person)): (Person in persons)? => persons.get(0)
+function firstOf = (persons: Array<Person>): (Person in persons)? => persons.get(0)
 use p = firstOf(makePeople()) -- error REF017
 let q = firstOf(makePeople()) -- valid: a copy
 ```
 
 ```fa
-function keep = (people: Pool(Person), chosen: Array(Person in people)) => {} -- error REF010
+function keep = (people: Pool<Person>, chosen: Array<Person in people>) => {} -- error REF010
 ```
 
 ---
@@ -738,7 +738,7 @@ Entering `for x in L` (where `L` is a place; a temporary collection has no const
 
 For relations, the implied effects are what triggers the error: `for friend in ana.friends { town.people.delete(friend) }`: `L = town.people[@ana].friends`; the implied effect `mutates town.people[..].friends` has `L` at or below it → `REF012` "deleting `friend` removes it from `ana.friends` (implied `mutates town.people[..].friends`), which is being iterated".
 
-The loop variable: a reference with place `L[Unknown]` (or `L[Symbol(index, 0)]` when the index binding exists), `kind = LoopVariable`, writable iff `L` is writable and the element is not read-only (set elements, map keys). For a range or a string, the loop variable is a copy (`Integer`, `Character`).
+The loop variable: a reference with place `L[Unknown]` (or `L[Symbol(index, 0)]` when the index binding exists), `kind = LoopVariable`, writable iff `L` is writable and the element is not read-only (set elements, map keys). For a range or a string, the loop variable is a copy (`Integer`; a `String` of one code point).
 
 ### 5.9 Arguments that alias
 
@@ -802,7 +802,7 @@ Module-level values and requirements are never captured.
 Valid programs print; invalid ones are rejected at the marked line. Most come from the documentation.
 
 ```fa
-mutable persons: Array(Person) = [Person {}, Person {}, Person {}]
+mutable persons: Array<Person> = [Person {}, Person {}, Person {}]
 use someone = persons[1]
 someone.age = 30
 persons.pop() -- invalidates persons[persons.length - 1] = persons[2]: `someone` (index 1) stays valid
@@ -812,7 +812,7 @@ console.log(someone.age) -- error REF001
 ```
 
 ```fa
-mutable people: Array(Person) = [Person { name = "Ana", age = 31, pets = [Pet { name = "Rex" }] }]
+mutable people: Array<Person> = [Person { name = "Ana", age = 31, pets = [Pet { name = "Rex" }] }]
 use person = people[0]
 use age = people[0].age
 use initials = people[0].name[0..1]
@@ -826,7 +826,7 @@ console.log(initials) -- error REF001
 ```
 
 ```fa
-mutable persons: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }]
+mutable persons: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }]
 use someone = persons[1]
 persons.delete(0)
 console.log(someone.name) -- error REF001
@@ -835,7 +835,7 @@ console.log(someone.name) -- prints: Bao
 ```
 
 ```fa
-mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+mutable scores: Map<String, Integer> = [("ana", 10), ("bao", 7)]
 use score = scores.get("ana")
 scores.delete("bao")
 if score is not none {
@@ -845,7 +845,7 @@ if score is not none {
 
 ```fa
 function readName = (): String => "ana"
-mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+mutable scores: Map<String, Integer> = [("ana", 10), ("bao", 7)]
 use score = scores.get("ana")
 let name = readName()
 scores.delete(name)
@@ -853,7 +853,7 @@ console.log(score) -- error REF001
 ```
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 use ana = people.add({ name = "Ana" })
 use bao = people.add({ name = "Bao" })
 people.delete(bao)
@@ -866,7 +866,7 @@ if someone is not none {
 ```
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 use ana = people.add({ name = "Ana", age = 31 })
 people.add({ name = "Bao", age = 12 })
 people.deleteWhere((person) => person.age < 18)
@@ -874,7 +874,7 @@ console.log(ana.name) -- error REF001
 ```
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 use ana = people.add({ name = "Ana", age = 31 })
 people.add({ name = "Bao", age = 12 })
 people.deleteWhere((person) => person.age < 18)
@@ -885,7 +885,7 @@ if ana is not none {
 ```
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 mutable use current = people.add({ name = "Ana" })
 people.delete(current)
 reuse current = people.add({ name = "Bao" })
@@ -894,7 +894,7 @@ console.log(current.name) -- prints: Bao
 
 ```fa
 let leaving = true
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 use ana = people.add(Person { name = "Ana" })
 if leaving {
 	people.delete(ana)
@@ -904,7 +904,7 @@ console.log(ana.name) -- error REF002
 
 ```fa
 let leaving = true
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 use ana = people.add(Person { name = "Ana" })
 if leaving {
 	people.delete(ana)
@@ -914,8 +914,8 @@ console.log(ana?.name ?? "gone") -- prints: gone
 ```
 
 ```fa
-function example = (index: Integer(min = 0, max = 2)) => {
-	mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }, Person { name = "Dan" }]
+function example = (index: Integer<min = 0, max = 2>) => {
+	mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }, Person { name = "Dan" }]
 	use current = people[index]
 	use last = people[3]
 	people.delete(index + 1)
@@ -925,8 +925,8 @@ function example = (index: Integer(min = 0, max = 2)) => {
 ```
 
 ```fa
-function example = (i: Integer(min = 1, max = 2), j: Integer(min = 0, max = 3)) => {
-	mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }, Person { name = "Dan" }]
+function example = (i: Integer<min = 1, max = 2>, j: Integer<min = 0, max = 3>) => {
+	mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }, Person { name = "Dan" }]
 	use a = people[0]
 	use b = people[i]
 	use c = people[j]
@@ -940,7 +940,7 @@ function example = (i: Integer(min = 1, max = 2), j: Integer(min = 0, max = 3)) 
 ```
 
 ```fa
-mutable pool: Pool(Person) = []
+mutable pool: Pool<Person> = []
 pool.add(Person { name = "Ana" })
 use found = pool.find((person) => person.name == "Ana")
 use added = pool.add(Person { name = "Bao" })
@@ -951,7 +951,7 @@ if found is not none {
 ```
 
 ```fa
-mutable pool: Pool(Person) = []
+mutable pool: Pool<Person> = []
 use added = pool.add(Person { name = "Bao" })
 use found = pool.find((person) => person.name == "Bao") -- found after the add: may be `added`
 if found is not none {
@@ -961,15 +961,15 @@ if found is not none {
 ```
 
 ```fa
-function pick = (persons: Array(Person), index: Integer): Person in persons => persons[index] -- throws IndexError, inferred
-mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }]
+function pick = (persons: Array<Person>, index: Integer): Person in persons => persons[index] -- throws IndexError, inferred
+mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }]
 use chosen = try pick(people, 2)
 people.delete(1)
 console.log(chosen.name) -- error REF001 (identities don't cross a user function)
 ```
 
 ```fa
-mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
+mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }]
 use first = people[0]
 for index in 0..10 {
 	console.log(first.name) -- error REF002
@@ -981,7 +981,7 @@ for index in 0..10 {
 ```
 
 ```fa
-mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
+mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }]
 mutable use first = people[0]
 for index in 0..3 {
 	console.log(first.name)
@@ -1004,7 +1004,7 @@ console.log(numbers) -- prints: [1, 2, 3, 1]
 ```
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 use ana = people.add(Person { name = "Ana", age = 31 })
 people.deleteWhere((person) => person.age < ana.age) -- error REF013
 let limit = ana.age
@@ -1022,7 +1022,7 @@ swap(team, team) -- error REF013
 ```
 
 ```fa
-mutable pool: Pool(Person) = []
+mutable pool: Pool<Person> = []
 for human in pool {
 	if human.name == "John" {
 		pool.delete(human) -- error REF012
@@ -1045,7 +1045,7 @@ console.log(scores) -- prints: [1, 1, 1]
 ```
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 function register = (name: String) mutates people.size => {
 	people.add({ name = name })
 }
@@ -1063,13 +1063,13 @@ console.log(iterator.toArray())
 
 ```fa
 type Guest = { name: String, welcomed: Boolean = false }
-function addGuest = (guests: Array(Guest), name: String) mutates guests => {
+function addGuest = (guests: Array<Guest>, name: String) mutates guests => {
 	guests.push(Guest { name = name })
 }
 function welcome = (guest: Guest) mutates guest.welcomed => {
 	guest.welcomed = true
 }
-mutable guests: Array(Guest) = [Guest { name = "Ana" }, Guest { name = "Bao" }]
+mutable guests: Array<Guest> = [Guest { name = "Ana" }, Guest { name = "Bao" }]
 use second = guests[1]
 welcome(guests[1])
 console.log(second.welcomed) -- prints: true
@@ -1081,7 +1081,7 @@ console.log(second.name) -- error REF001
 function age = (person: { age: Integer }) mutates person => {
 	person.age += 1
 }
-mutable people: Array(Person) = [Person { name = "Ana", pets = [Pet { name = "Rex" }] }]
+mutable people: Array<Person> = [Person { name = "Ana", pets = [Pet { name = "Rex" }] }]
 use pet = people[0].pets[0]
 age(people[0]) -- the callee's type has only `age`: nothing owned is reachable
 console.log(pet.name) -- prints: Rex
@@ -1090,7 +1090,7 @@ console.log(pet.name) -- prints: Rex
 ```fa
 function main = () => {
 	mutable count = 0
-	mutable callbacks: Array(() => Void) = []
+	mutable callbacks: Array<() => Void> = []
 	callbacks.push(() => {
 		count += 1 -- error REF021
 	})
@@ -1126,7 +1126,7 @@ function main = () => {
 
 ```fa
 type Inventory = {
-	items: Pool(String)
+	items: Pool<String>
 	function remove = (self, item: String in self.items) invalidates item => {
 		self.items.delete(item)
 	}
@@ -1140,9 +1140,9 @@ console.log(sword) -- error REF001
 ```
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 use ana = people.add(Person { name = "Ana" })
-mutable others: Pool(Person) = []
+mutable others: Pool<Person> = []
 others.delete(ana) -- error REF020 (`ana` is a reference into `people`, not `others`)
 ```
 
@@ -1154,7 +1154,7 @@ The rules (memory-management page): objects inline; collections own the heap; ev
 
 ### 6.1 Static rules
 
-- `MEM001` a recursive type without an indirection through a union or an optional: "`Node` has infinite size" (`next: Node`). Recursion through `T?`, a named union, a collection (`Array(Folder)`) is fine.
+- `MEM001` a recursive type without an indirection through a union or an optional: "`Node` has infinite size" (`next: Node`). Recursion through `T?`, a named union, a collection (`Array<Folder>`) is fine.
 - Recursion is allowed through named declarations only; polymorphic recursion is an error (types brief).
 - A move-only value (task — out of scope —, a `destroy` type, a worker handle, a `Subscription`) used after it was moved: `MEM002` "`database` was moved at line 7".
 - A `Void` value can't be bound with `let`.
@@ -1252,7 +1252,7 @@ console.log(copy?.value ?? -1) -- prints: 999999
 ```
 
 ```fa
-mutable pool: Pool(Person) = []
+mutable pool: Pool<Person> = []
 use john = pool.add({ name = "John", age = 20 })
 john.age += 1
 console.log(pool.find((person) => person.name == "John")?.age ?? 0) -- prints: 21
@@ -1260,7 +1260,7 @@ console.log(pool.find((person) => person.name == "John")?.age ?? 0) -- prints: 2
 
 ```fa
 type Human = { name: String, age: Integer }
-mutable people: Array(Human) = [{ name = "John", age = 20 }, { name = "Jane", age = 21 }]
+mutable people: Array<Human> = [{ name = "John", age = 20 }, { name = "Jane", age = 21 }]
 mutable copiedHuman = people[1]
 copiedHuman.age = 23
 console.log(people[1].age) -- prints: 21
@@ -1314,15 +1314,15 @@ The collection pages and the standard library own the APIs; the reference checke
 
 ```fa
 type Town = {
-	people: Pool(Person) = []
+	people: Pool<Person> = []
 	type Person = {
 		name: String
 		bestFriend: (Person in people)?            -- direct side, one-to-many
-		bestFriendOf: Pool(people->bestFriend)     -- reverse side
+		bestFriendOf: Pool<people->bestFriend>     -- reverse side
 		mentor: (Person in people)?                -- direct side, one-to-one
 		mentee: (people->mentor)?                  -- reverse side
-		friends: Pool(Person in people)            -- direct side, many-to-many
-		friendOf: Pool(in people->friends)         -- reverse side
+		friends: Pool<Person in people>            -- direct side, many-to-many
+		friendOf: Pool<in people->friends>         -- reverse side
 		spouse: (people->spouse)?                  -- symmetric
 	}
 }
@@ -1342,18 +1342,18 @@ For each field of an object type `E` (the element type) whose type mentions `in`
 | Field type | Kind |
 | --- | --- |
 | `(T in c)?`, field of the element type of some collection `H`, `c` not owned by the field's own type | direct side (one-to-many or one-to-one: decided by its reverse side) |
-| `Pool(T in c)` | direct side, many-to-many |
+| `Pool<T in c>` | direct side, many-to-many |
 | `(T in c)?` on the type that owns `c` | owner field |
-| `Pool(c->f)` | reverse side, one-to-many of `f` |
+| `Pool<c->f>` | reverse side, one-to-many of `f` |
 | `(c->f)?` where `f` is another field | reverse side, one-to-one of `f` |
 | `(c->f)?` where `f` is this field | symmetric |
-| `Pool(in c->f)` | reverse side, many-to-many of `f` |
-| `T in c` (not optional), `Array(T in c)`, any other wrapping | `REL002` "a direct side is optional or a `Pool`: it becomes `none` (or loses its target) when the target is deleted" |
+| `Pool<in c->f>` | reverse side, many-to-many of `f` |
+| `T in c` (not optional), `Array<T in c>`, any other wrapping | `REL002` "a direct side is optional or a `Pool`: it becomes `none` (or loses its target) when the target is deleted" |
 
 5. Pairing: every direct side has **exactly one** reverse side, on the element type of its target collection `c`, naming the holder collection `H` (the collection whose elements carry the direct side) and the field. Errors:
-   - `REL001` direct side without reverse side: "`bestFriend` has no reverse side: declare one, for example `bestFriendOf: Pool(people->bestFriend)`";
+   - `REL001` direct side without reverse side: "`bestFriend` has no reverse side: declare one, for example `bestFriendOf: Pool<people->bestFriend>`";
    - `REL006` two reverse sides for the same direct side;
-   - `REL007` reverse shape doesn't match the direct side (`Pool(people->friends)` for a many-to-many: "use `Pool(in people->friends)`"; `Pool(in people->bestFriend)` for an optional direct side);
+   - `REL007` reverse shape doesn't match the direct side (`Pool<people->friends>` for a many-to-many: "use `Pool<in people->friends>`"; `Pool<in people->bestFriend>` for an optional direct side);
    - `REL008` the reverse side names a field that is not a direct side, or a collection whose elements don't have that field;
    - `REL009` the reverse side is declared on a type that is not the element type of the direct side's target collection;
    - `REL015` an owner field that is not optional; `REL018` an owner field into a collection of another type;
@@ -1485,7 +1485,7 @@ Relation sides (reference fields, and the relation pools of many-to-many and rev
 
 Implied effects count: for "calling a mutating function requires a `mutable` value" (deleting a user of `blog.users` writes `blog.posts[..].author`, so `blog` must be mutable — it is, since `blog.users` is), for the iteration rule, for the alias rule (with the two allowed overlaps), and for reactivity.
 
-**(decision D47)** When a function receives the collection alone (`users: Pool(Blog.User)`), the implied effect is `owner(users).posts[..].author`, an effect on a place of the **caller**: at the call site, `owner(blog.users)` = `blog`. Inside the callee, it is covered by the declared `mutates users` / `invalidates user` (declared effects cover their implied effects).
+**(decision D47)** When a function receives the collection alone (`users: Pool<Blog.User>`), the implied effect is `owner(users).posts[..].author`, an effect on a place of the **caller**: at the call site, `owner(blog.users)` = `blog`. Inside the callee, it is covered by the declared `mutates users` / `invalidates user` (declared effects cover their implied effects).
 
 ### 8.7 Owner fields
 
@@ -1499,10 +1499,10 @@ Implied effects count: for "calling a mutating function requires a `mutable` val
 | Side | Representation |
 | --- | --- |
 | direct `(T in c)?` | the field holds the target object, or the `none` value |
-| reverse one-to-many `Pool(c->f)` | a field holding a JavaScript `Set` of holder objects |
+| reverse one-to-many `Pool<c->f>` | a field holding a JavaScript `Set` of holder objects |
 | reverse one-to-one, symmetric | a field holding the object, or `none` |
-| direct many-to-many `Pool(T in c)` | a `Set` of targets |
-| reverse many-to-many `Pool(in c->f)` | a `Set` of holders |
+| direct many-to-many `Pool<T in c>` | a `Set` of targets |
+| reverse many-to-many `Pool<in c->f>` | a `Set` of holders |
 | owner field | a field holding the object or `none` |
 
 Writes call small runtime helpers (`fa.rel.setOneToMany(x, "bestFriend", "bestFriendOf", t)`, …) or are inlined; the read of a relation pool exposes the `Set` through the Fa relation-pool API (`size`, `includes`, iteration). An element constructed by `add` gets its relation fields initialized (`none`, empty `Set`s) by the generated element constructor; an inactive copy gets the same empty fields, created by `copy_E`, so reads need no check. `delete` calls a generated `unlink_E(e, owner)` then `set.delete(e)`. On a `Columnar` represented by columns, references are slot indices and links store indices (the columnar brief decides the representation; the algorithms are unchanged).
@@ -1536,15 +1536,15 @@ Writes call small runtime helpers (`fa.rel.setOneToMany(x, "bestFriend", "bestFr
 
 ```fa
 type Town = {
-	people: Pool(Person) = []
+	people: Pool<Person> = []
 	type Person = {
 		name: String
 		bestFriend: (Person in people)?
-		bestFriendOf: Pool(people->bestFriend)
+		bestFriendOf: Pool<people->bestFriend>
 		mentor: (Person in people)?
 		mentee: (people->mentor)?
-		friends: Pool(Person in people)
-		friendOf: Pool(in people->friends)
+		friends: Pool<Person in people>
+		friendOf: Pool<in people->friends>
 		spouse: (people->spouse)?
 	}
 }
@@ -1593,49 +1593,49 @@ type Person = {
 	name: String
 	bestFriend: (Person in people)? -- error REL001
 }
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 ```
 
 ```fa
-mutable people: Array(Person) = []
+mutable people: Array<Person> = []
 type Person = {
 	name: String
 	bestFriend: (Person in people)? -- error REL003
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }
 ```
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 type Person = {
 	name: String
 	bestFriend: Person in people -- error REL002
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }
 ```
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 type Person = {
-	friends: Pool(Person in people)
-	friendOf: Pool(people->friends) -- error REL007
+	friends: Pool<Person in people>
+	friendOf: Pool<people->friends> -- error REL007
 }
 ```
 
 ```fa
-mutable people: Pool(Person) = []
-type Person = {
-	bestFriend: (Person in people)?
-	bestFriendOf: Pool(people->bestFriend)
-	alsoBestFriendOf: Pool(people->bestFriend) -- error REL006
-}
-```
-
-```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 type Person = {
 	bestFriend: (Person in people)?
-	bestFriendOf: Pool(people->bestFriend) = [] -- error REL013
+	bestFriendOf: Pool<people->bestFriend>
+	alsoBestFriendOf: Pool<people->bestFriend> -- error REL006
+}
+```
+
+```fa
+mutable people: Pool<Person> = []
+type Person = {
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool<people->bestFriend> = [] -- error REL013
 }
 ```
 
@@ -1683,9 +1683,9 @@ console.log(ana.bestFriendOf.size) -- prints: 1 (the original is untouched)
 
 ```fa
 type Blog = {
-	users: Pool(User) = []
-	posts: Pool(Post) = []
-	type User = { name: String, articles: Pool(posts->author) }
+	users: Pool<User> = []
+	posts: Pool<Post> = []
+	type User = { name: String, articles: Pool<posts->author> }
 	type Post = { title: String, author: (User in users)? }
 }
 mutable blog: Blog = {}
@@ -1698,11 +1698,11 @@ console.log(post.author?.name ?? "none") -- prints: none
 ```
 
 ```fa
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 type Person = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }
 function befriend = (person: Person in people, friend: Person in people) mutates person.bestFriend => {
 	person.bestFriend = friend
@@ -1716,7 +1716,7 @@ befriend(ana, ana) -- error REF013
 
 ```fa
 -- the LinkedList of the relations page, verbatim, then:
-mutable list: LinkedList(String) = {}
+mutable list: LinkedList<String> = {}
 use first = list.add("first")
 use second = list.add("second")
 list.add("third")
@@ -1729,7 +1729,7 @@ console.log(second.data) -- error REF001
 
 ```fa
 type Bag = {
-	#items: Pool(Item) = []
+	#items: Pool<Item> = []
 	first: (Item in #items)?
 	type Item = { label: String }
 	function clearAll = (self) mutates self.#items => {
@@ -1740,8 +1740,8 @@ type Bag = {
 ```
 
 ```fa
-mutable people: Pool(Person) = []
-type Person = { name: String, bestFriend: (Person in people)?, bestFriendOf: Pool(people->bestFriend) }
+mutable people: Pool<Person> = []
+type Person = { name: String, bestFriend: (Person in people)?, bestFriendOf: Pool<people->bestFriend> }
 use ana = people.add({ name = "Ana" })
 ana.bestFriend = ana
 console.log(ana.bestFriendOf.size) -- prints: 1
@@ -1769,7 +1769,7 @@ The key of a requirement is the **exact shape** of its type:
 
 - aliases are transparent (`type AppLogger = Logger` is the key of `Logger`);
 - two named object types with the same public data fields are the same key; a type with `#private` fields, a named union, an `Errors` type, an `Enum` and a `CStruct` are keyed by declaration;
-- generic types are keyed with their arguments (`Cache(User)` ≠ `Cache(Post)`);
+- generic types are keyed with their arguments (`Cache<User>` ≠ `Cache<Post>`);
 - no subtyping: `requires logger: Logger` is satisfied only by a provided `Logger`-shaped key.
 
 `keyOf(type) = internedShape(resolveAliases(type))`. **(decision D11)** For the ABI order of hidden parameters, keys are sorted by a **stable content hash of the shape** (field names and field type hashes, recursively; declaration identity for nominal types), not by `TypeId`, whose numbering depends on the order of analysis.
@@ -1913,7 +1913,7 @@ log() -- prints: x
 ```
 
 ```fa
-type Trace = { breadcrumbs: Array(String) }
+type Trace = { breadcrumbs: Array<String> }
 function addBreadcrumb = (label: String) requires trace: Trace mutates trace => {
 	trace.breadcrumbs.push(label)
 }
@@ -1948,7 +1948,7 @@ export function = () requires logger: Logger => {} -- error REQ002 (in applicati
 ```fa
 type Loader = (id: String) => String requires database: Database
 type Database = { find: (id: String) => String }
-function loadAll = (ids: Array(String), load: Loader): Array(String) requires database: Database => ids.map((id) => load(id))
+function loadAll = (ids: Array<String>, load: Loader): Array<String> requires database: Database => ids.map((id) => load(id))
 provide Database = { find = (id) => "user {id}" }
 function fromDatabase = (id: String): String requires database: Database => database.find(id)
 console.log(loadAll(["1"], fromDatabase)) -- prints: ["user 1"]
@@ -1998,15 +1998,15 @@ A literal written where a type is expected must have exactly the fields of that 
 - `let human: Human = superHuman` copies `Human`'s fields only (a narrowing copy). Moving is possible only into the same shape.
 - `use human: Human = superHuman` aliases; `human.powers` is a type error (`powers` is not part of `Human`); nothing is dropped.
 - Parameters are references: passing a `SuperHuman` to a `Human` parameter copies nothing.
-- A parameter keeps the type of its argument, `Type(parameter)`: `mutable copy = human` (no annotation) copies every field of the argument; `function same = (human: Human) => human` returns `Type(human)`. `use` aliases and loop variables keep the type of what they designate. `Type(human)` is a hidden generic parameter.
-- A collection stores the layout of its element type: `humans.push(superHuman)` narrows; `let copied: Array(Human) = superHumans` copies every element narrowed.
+- A parameter keeps the type of its argument, `Type<parameter>`: `mutable copy = human` (no annotation) copies every field of the argument; `function same = (human: Human) => human` returns `Type<human>`. `use` aliases and loop variables keep the type of what they designate. `Type<human>` is a hidden generic parameter.
+- A collection stores the layout of its element type: `humans.push(superHuman)` narrows; `let copied: Array<Human> = superHumans` copies every element narrowed.
 
 ### 10.5 Mutation through a narrower type
 
-- A function that **mutates** a parameter receives only arguments whose **written** fields (the fields named by its `mutates` paths, down to the fields actually written) have **exactly** the type it writes: `STR004` "`penalize` writes `score: Integer` into `player.score`, an `Integer(min = 0, max = 10)`". Reading is covariant, writing is invariant. Fields not written are free.
+- A function that **mutates** a parameter receives only arguments whose **written** fields (the fields named by its `mutates` paths, down to the fields actually written) have **exactly** the type it writes: `STR004` "`penalize` writes `score: Integer` into `player.score`, an `Integer<min = 0, max = 10>`". Reading is covariant, writing is invariant. Fields not written are free.
 - A `readonly` field is never accepted where a function writes that field (`STR007`).
-- A collection of supersets is accepted by a parameter that is only read; a **mutated** collection parameter needs exactly its element type (`STR005` "`addJohn` mutates `humans`, so it needs an `Array(Human)`: make it generic").
-- `Set` elements and `Map` keys are invariant even when read: a `Set(Hero)` is never a `Set(Human)` (`STR006`). Map values follow the general rule.
+- A collection of supersets is accepted by a parameter that is only read; a **mutated** collection parameter needs exactly its element type (`STR005` "`addJohn` mutates `humans`, so it needs an `Array<Human>`: make it generic").
+- `Set` elements and `Map` keys are invariant even when read: a `Set<Hero>` is never a `Set<Human>` (`STR006`). Map values follow the general rule.
 - `==` compares the fields of the **declared** type of its operands (two `Human` parameters are equal when their `name` is).
 
 ### 10.6 Errors
@@ -2026,7 +2026,7 @@ A literal written where a type is expected must have exactly the fields of that 
 
 ### 10.7 Lowering
 
-**Native** (`compilation-with-llvm.md`, structural typing): canonical layout (alignment descending, then name); **specialization by view**: a direct call whose argument has a different view gets an instance whose key is `(function, view of each structural parameter, generic arguments, names reflected on)`; a parameter that needs the full type (unannotated copy, `Type(parameter)` return, reflection) is keyed by its full type (summary bit, [2.3](#23-function-summaries)); deduplication by code hash; function values get a view entry point with a static table `{offsets, stride, size, align, copy, drop}` per (actual, declared) pair; a narrowing copy calls `copy<Source → Destination>`, never a `memcpy` of a prefix; read-only collections of supersets specialize on stride and offsets.
+**Native** (`compilation-with-llvm.md`, structural typing): canonical layout (alignment descending, then name); **specialization by view**: a direct call whose argument has a different view gets an instance whose key is `(function, view of each structural parameter, generic arguments, names reflected on)`; a parameter that needs the full type (unannotated copy, `Type<parameter>` return, reflection) is keyed by its full type (summary bit, [2.3](#23-function-summaries)); deduplication by code hash; function values get a view entry point with a static table `{offsets, stride, size, align, copy, drop}` per (actual, declared) pair; a narrowing copy calls `copy<Source → Destination>`, never a `memcpy` of a prefix; read-only collections of supersets specialize on stride and offsets.
 
 **JavaScript**: objects are dynamic; a view is a property read; nothing is specialized, except:
 
@@ -2087,7 +2087,7 @@ let other: Contact = human -- error STR003
 
 ```fa
 type Scored = { score: Integer }
-type Player = { name: String, score: Integer(min = 0, max = 10) }
+type Player = { name: String, score: Integer<min = 0, max = 10> }
 function penalize = (scored: Scored) mutates scored => {
 	scored.score = -5
 }
@@ -2103,34 +2103,34 @@ console.log(player.name) -- prints: Bo
 ```fa
 type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }
-function logNames = (humans: Array(Human)) => {
+function logNames = (humans: Array<Human>) => {
 	for human in humans {
 		console.log(human.name)
 	}
 }
 let superHumans = [SuperHuman { name = "A", powers = "x" }]
 logNames(superHumans) -- prints: A
-function addJohn = (humans: Array(Human)) mutates humans => {
+function addJohn = (humans: Array<Human>) mutates humans => {
 	humans.push({ name = "John" })
 }
 mutable heroes = [SuperHuman { name = "A", powers = "x" }]
 addJohn(heroes) -- error STR005
-function keepNamed(Item: Human) = (items: Array(Item)) mutates items => {
+function keepNamed = <Item: Human>(items: Array<Item>) mutates items => {
 	items.deleteWhere((item) => item.name == "")
 }
 keepNamed(heroes) -- valid
 ```
 
 ```fa
-function countTags = (tags: Set(Human)) => tags.size
-let heroes: Set(SuperHuman) = Set.from([SuperHuman { name = "A", powers = "x" }])
+function countTags = (tags: Set<Human>) => tags.size
+let heroes: Set<SuperHuman> = Set.from([SuperHuman { name = "A", powers = "x" }])
 countTags(heroes) -- error STR006
 ```
 
 ```fa
 type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }
-function renamed = (human: Human, name: String): Type(human) => {
+function renamed = (human: Human, name: String): Type<human> => {
 	mutable copy = human
 	copy.name = name
 	copy
@@ -2142,7 +2142,7 @@ console.log(john) -- prints: { name = "John" }
 ```
 
 ```fa
-function readId(Item: { id: Integer }) = (item: Item): Integer => item.id
+function readId = <Item: { id: Integer }>(item: Item): Integer => item.id
 type Comment = { text: String }
 console.log(readId({ id = 1, name = "Ana" })) -- prints: 1
 readId(Comment { text = "Hello" }) -- error STR001
@@ -2244,7 +2244,7 @@ flush()
 
 - A reactive collection or object: the value is the plain JavaScript value; its source tree `x$s` creates child sources on demand: `track(x$s.index(2))`, `track(x$s.length)`, `notify(x$s.field("count"))`. Collection mutators are followed by the notifications their effects imply (`push`: the length and the whole value).
 - A reactive field of an object type: a hidden property `count$s` created by the constructor of that type; reads and writes through a field typed `reactive` are instrumented.
-- **Instances by reactiveness**: a function receiving a reactive place (or a value with reactive fields through a plain view) gets an instance compiled for it, with a hidden source argument per reactive parameter (`push$r(array, array$s, value)`). **(decision D24)** This is the one place, with `Type(parameter)`, where the JavaScript backend emits several instances of a function.
+- **Instances by reactiveness**: a function receiving a reactive place (or a value with reactive fields through a plain view) gets an instance compiled for it, with a hidden source argument per reactive parameter (`push$r(array, array$s, value)`). **(decision D24)** This is the one place, with `Type<parameter>`, where the JavaScript backend emits several instances of a function.
 - `watch` returns a node; at every exit of its scope the compiler emits `dispose(watch$1)` (and in `finally` for errors). `subscription.stop()` is `dispose`.
 - `derived` nodes are disposed the same way at the end of their scope.
 
@@ -2375,7 +2375,7 @@ subscription.stop() -- error MEM002
 ```
 
 ```fa
-function bump = (numbers: Array(Integer)) mutates numbers => numbers.push(0)
+function bump = (numbers: Array<Integer>) mutates numbers => numbers.push(0)
 reactive values = [1]
 watch {
 	console.log(values.length)
@@ -2454,7 +2454,7 @@ watch { ping = pong + 1 } -- valid statically (each watch writes what the other 
 | `@for item in items { }` | `For { is_compile_time: true }` |
 | `@readFile(path)`, `@readDirectory(path)`, `@parseJson(text)`, `@typeToString(T)`, `@typeToSchema(T)`, `@import(url)`, `@extern(symbol)` | built-in compile-time operations |
 | `@test "name" { }` | `Test { is_compile_time: true }` |
-| `Type(value)` | type function (no `@`) |
+| `Type<value>` | type function (no `@`) |
 
 `@` is never used on a value: `@version` is `META012` "a static value is used plainly: write `version`".
 
@@ -2486,7 +2486,7 @@ watch { ping = pong + 1 } -- valid statically (each watch writes what the other 
 | Operation | Type | Rules |
 | --- | --- | --- |
 | `@readFile(path: String)` | `String` (exact) | path relative to the folder of the current file; must stay inside the root (package folder, workspace folder, or the standalone file's folder): `META008`; missing: `META009`. The file becomes a build input. |
-| `@readDirectory(path)` | `Array(DirectoryEntry)`, `DirectoryEntry = { name: String, path: String, isDirectory: Boolean }` (decision D28), sorted by name | `path` of an entry is relative to the same folder as the argument, so `@readFile(file.path)` works; the listing is a build input |
+| `@readDirectory(path)` | `Array<DirectoryEntry>`, `DirectoryEntry = { name: String, path: String, isDirectory: Boolean }` (decision D28), sorted by name | `path` of an entry is relative to the same folder as the argument, so `@readFile(file.path)` works; the listing is a build input |
 | `@parseJson(text)` | the exact type of the JSON value (objects → object types with those keys, arrays → arrays of the join of their elements, integral numbers → `Integer`, others → `Float`) | malformed: `META005` |
 | `@typeToString(T)` | `String` | the name written at the use site; `Person in persons` for a reference |
 | `@typeToSchema(T)` | `Schema` | per types-at-runtime |
@@ -2550,14 +2550,14 @@ static fruits = ["apple", "banana", "cherry"]
 ```
 
 ```fa
-function repeatText(count: Integer(min = 0)) = (value: String): String => {
+function repeatText = <count: Integer<min = 0>>(value: String): String => {
 	mutable result = ""
 	@for 0..count {
 		result += value
 	}
 	result
 }
-console.log(repeatText(3)("ab")) -- prints: ababab
+console.log(repeatText<3>("ab")) -- prints: ababab
 ```
 
 ```fa
@@ -2613,7 +2613,7 @@ console.log(@version) -- error META012
 
 ```fa
 let x = 12
-console.log(@typeToString(Type(x))) -- prints: Integer
+console.log(@typeToString(Type<x>)) -- prints: Integer
 type User = { name: String }
 console.log(@typeToString(User)) -- prints: User
 ```
@@ -2625,8 +2625,8 @@ console.log(@typeToString(User)) -- prints: User
 ### 13.1 Files and visibility
 
 - A foreign file ends with `.foreign.fa` and is named by the part before (`Database.foreign.fa` is `Database`); single export like any file.
-- Only foreign files can: declare and call `@extern` functions (`FFI001`), use `Pointer(T)` and `CString` (`FFI002`), declare `destroy` in a type (`FFI003`).
-- Other files can't use a value whose **public** type contains `Pointer` or `CString` (`FFI002`). **(decision D29)** "Contains" means: in a public field, a parameter, a result, a type argument. A **private** field (`#handle: Pointer(Sqlite3)`) of a type declared in a foreign file is allowed: that is how `Database` is used from `main.fa`.
+- Only foreign files can: declare and call `@extern` functions (`FFI001`), use `Pointer<T>` and `CString` (`FFI002`), declare `destroy` in a type (`FFI003`).
+- Other files can't use a value whose **public** type contains `Pointer` or `CString` (`FFI002`). **(decision D29)** "Contains" means: in a public field, a parameter, a result, a type argument. A **private** field (`#handle: Pointer<Sqlite3>`) of a type declared in a foreign file is allowed: that is how `Database` is used from `main.fa`.
 - `CStruct`, `CArray` and the `std.c` types are usable in every file. `Pointer` and `CString` are in the prelude of foreign files only.
 
 ### 13.2 C types and declarations
@@ -2637,15 +2637,15 @@ console.log(@typeToString(User)) -- prints: User
 | `float`, `double` | `Float32`, `Float64` |
 | `bool` | `Boolean` |
 | `char`, `int`, `long`, `size_t`, … | `c.Char`, `c.Int`, `c.Long`, `c.SizeT` from `std.c`, sized for the target |
-| `T *` | `Pointer(T)?` (`none` is `NULL`); `_Nonnull`: `Pointer(T)` |
-| `void *` | `Pointer(Void)?` |
+| `T *` | `Pointer<T>?` (`none` is `NULL`); `_Nonnull`: `Pointer<T>` |
+| `void *` | `Pointer<Void>?` |
 | `const char *` | `CString` |
 | `struct` | `CStruct { ... }` (nominal, C layout, declaration order); opaque: `CStruct { }` |
-| `T field[N]` | `CArray(T, N)` |
+| `T field[N]` | `CArray<T, N>` |
 | `enum`, integer `#define` | `static` integers |
 | function pointer | a function type |
 
-Declaration: `function close: (database: Pointer(Sqlite3)) => c.Int = @extern("sqlite3_close")`. Rules:
+Declaration: `function close: (database: Pointer<Sqlite3>) => c.Int = @extern("sqlite3_close")`. Rules:
 
 - A parameter C writes through is declared `mutates` (trusted).
 - `FFI005`: an `@extern` function declares `throws` or `requires`. It is never pure.
@@ -2657,11 +2657,11 @@ Declaration: `function close: (database: Pointer(Sqlite3)) => c.Int = @extern("s
 
 | Parameter | Argument | C receives |
 | --- | --- | --- |
-| `Pointer(T)` | `Array(T)` | pointer to the first element |
-| `Pointer(T)` with `mutates` | a `mutable` value of type `T` | its address (`FFI010` if not mutable) |
-| `Pointer(T)` without `mutates` | any `T` | its address, read-only |
+| `Pointer<T>` | `Array<T>` | pointer to the first element |
+| `Pointer<T>` with `mutates` | a `mutable` value of type `T` | its address (`FFI010` if not mutable) |
+| `Pointer<T>` without `mutates` | any `T` | its address, read-only |
 | `CString` | `String` | a zero-terminated copy (literals are stored with the zero byte) |
-| `Pointer(Void)` | anything a `Pointer(T)` parameter accepts **(decision D50)** | as above (C's implicit conversion to `void *`) |
+| `Pointer<Void>` | anything a `Pointer<T>` parameter accepts **(decision D50)** | as above (C's implicit conversion to `void *`) |
 
 Pointers made from Fa values are valid for the duration of the call.
 
@@ -2708,7 +2708,7 @@ function close: (handle: c.Int) => c.Int = @extern("close") -- error FFI001
 ```fa
 -- Database.foreign.fa
 export type = {
-	#handle: Pointer(Sqlite3)
+	#handle: Pointer<Sqlite3>
 	function destroy = (self) => sqlite3.close(self.#handle)
 }
 -- main.fa
@@ -2719,7 +2719,7 @@ console.log(database) -- error MEM002
 
 ```fa
 -- main.fa
-function leak = (pointer: Pointer(Integer)) => {} -- error FFI002
+function leak = (pointer: Pointer<Integer>) => {} -- error FFI002
 ```
 
 ```fa
@@ -2731,8 +2731,8 @@ export namespace = {
 
 ```fa
 type Vertex = CStruct {
-	position: CArray(Float32, 3)
-	color: CArray(UInt8, 4)
+	position: CArray<Float32, 3>
+	color: CArray<UInt8, 4>
 }
 type Wrong = CStruct { name: String } -- error FFI009
 ```
@@ -2747,9 +2747,9 @@ open(...) -- error FFI008
 -- native, linking libc: qsort with a compile-time callback
 -- libc.foreign.fa
 export namespace = {
-	function sort: (base: Pointer(Void), count: c.SizeT, size: c.SizeT, compare: (a: Pointer(Void), b: Pointer(Void)) => c.Int) => Void mutates base = @extern("qsort")
-	function compareInts = (a: Pointer(Void), b: Pointer(Void)): c.Int => ...
-	function sorted = (values: Array(Int32)): Array(Int32) => {
+	function sort: (base: Pointer<Void>, count: c.SizeT, size: c.SizeT, compare: (a: Pointer<Void>, b: Pointer<Void>) => c.Int) => Void mutates base = @extern("qsort")
+	function compareInts = (a: Pointer<Void>, b: Pointer<Void>): c.Int => ...
+	function sorted = (values: Array<Int32>): Array<Int32> => {
 		mutable copy = values
 		sort(copy, copy.length, 4, compareInts)
 		copy
@@ -2803,14 +2803,14 @@ Lowering (native): outline the body into `body(start, end, env)`; `env` holds po
 
 ### 14.3 Thread-safe types
 
-- `Mutex(T)`, `AtomicInteger`, `AtomicBoolean`, `Channel(T)` from `std.concurrency`, and objects/tuples whose fields are all thread-safe.
+- `Mutex<T>`, `AtomicInteger`, `AtomicBoolean`, `Channel<T>` from `std.concurrency`, and objects/tuples whose fields are all thread-safe.
 - **Handles**: copying shares (reference counted, atomic counts on native); the only exception to "assignment copies".
 - Their methods don't declare `mutates self`, so several iterations/threads can use one at once, and a function receiving one doesn't declare `mutates`.
 - **(decision D23)** Declared `mutable` where created; `let counter = AtomicInteger { value = 0 }` is `CONC007` "a thread-safe value is declared with `mutable`".
-- `T` of `Mutex(T)`/`Channel(T)` can't contain references or relations (`CONC006`).
+- `T` of `Mutex<T>`/`Channel<T>` can't contain references or relations (`CONC006`).
 - `Mutex.lock()` returns a guard (`mutable guard = stats.lock()`), released at the end of the guard's scope; `guard.value` is a reference valid while the guard lives, written through a `mutable` guard; `tryLock(): Guard?`.
 - Atomics: `load`, `store`, `increment`/`decrement`/`add` (return the new value), `swap`, `compareAndSwap(expected, value): Boolean`, optional `ordering = Ordering.relaxed | acquire | release | acquireRelease | sequential` (default).
-- Channel: `Channel(T) { capacity = n }` (unbounded without), `send(value)` (throws `ChannelClosed`), `receive(): T?` (`none` when closed and empty), `trySend(value): Boolean`, `tryReceive(): T?`, `close()`.
+- Channel: `Channel<T> { capacity = n }` (unbounded without), `send(value)` (throws `ChannelClosed`), `receive(): T?` (`none` when closed and empty), `trySend(value): Boolean`, `tryReceive(): T?`, `close()`.
 - Blocking waits on JavaScript and wasm (`lock`, `send`, `receive`, worker calls): `CONC010` "`lock` can't be called blocking on target `bun`".
 
 Lowering: native — refcounted heap blocks; `Mutex` a lock whose blocking path parks the thread; atomics are LLVM atomic instructions with the ordering. JavaScript — an `AtomicInteger` is an object `{ value }` updated with plain operations (single thread); a `Mutex` an object with a `locked` flag and the value.
@@ -2866,7 +2866,7 @@ console.log(results) -- prints: [1, 4, 9, 16]
 ```fa
 -- native
 let numbers = [1, 2, 3]
-mutable results: Array(Integer) = []
+mutable results: Array<Integer> = []
 for parallel number in numbers {
 	results.push(number) -- error CONC002
 }
@@ -2917,15 +2917,15 @@ let counter = AtomicInteger { value = 0 } -- error CONC007
 
 ```fa
 use { Mutex } = std.concurrency
-mutable people: Pool(Person) = []
-mutable shared = Mutex(Person in people) { value = ... } -- error CONC006
+mutable people: Pool<Person> = []
+mutable shared = Mutex<Person in people> { value = ... } -- error CONC006
 ```
 
 ```fa
 -- native
 use { Mutex } = std.concurrency
 type Stats = { visits: Integer }
-mutable stats = Mutex(Stats) { value = { visits = 0 } }
+mutable stats = Mutex<Stats> { value = { visits = 0 } }
 for parallel index in 0..100 {
 	mutable guard = stats.lock()
 	guard.value.visits += 1
@@ -2936,7 +2936,7 @@ console.log(stats.lock().value.visits) -- prints: 100
 ```fa
 -- target bun
 use { Mutex } = std.concurrency
-mutable stats = Mutex(Integer) { value = 0 }
+mutable stats = Mutex<Integer> { value = 0 }
 let guard = stats.lock() -- error CONC010
 let maybe = stats.tryLock() -- valid
 ```
@@ -2944,7 +2944,7 @@ let maybe = stats.tryLock() -- valid
 ```fa
 -- MathWorker.worker.fa
 export type = {
-	numbers: Array(Integer)
+	numbers: Array<Integer>
 	function sum = (self): Integer => self.numbers.reduce((total, number) => total + number, 0)
 }
 -- main.fa (native)
@@ -3042,10 +3042,10 @@ Every lookup result **including misses** is recorded as a dependency of the decl
 
 ### 15.6 The entry point
 
-- The entry file (`entry`, default `application/main.fa`) exports a function. Accepted signatures: parameters `()` or `(arguments: Array(String))`; return type none or `Integer`; `throws` anything; no `requires` (`REQ002`); `async` later. Anything else is `MOD015` "the entry function takes `(arguments: Array(String))` or nothing, and returns an `Integer` exit code or nothing".
+- The entry file (`entry`, default `application/main.fa`) exports a function. Accepted signatures: parameters `()` or `(arguments: Array<String>)`; return type none or `Integer`; `throws` anything; no `requires` (`REQ002`); `async` later. Anything else is `MOD015` "the entry function takes `(arguments: Array<String>)` or nothing, and returns an `Integer` exit code or nothing".
 - **(decision D51)** The effects of the entry function are inferred, even with a block body, like those of tests and top-level statements: nothing calls it, so there is no caller to inform (it may still declare them).
 - Exit code: the returned `Integer`, or `0`; `1` if an error escapes (reported on stderr with its `toString()`); `101` on a stop. On `web`, `arguments` is empty and the exit code ignored.
-- `arguments` holds the arguments after the program name, without it. **(decision D4)** A standalone file and a script see an implicit immutable value `arguments: Array(String)` at their top level (the guides use it); its index 0 is the **first argument** (the guides' `arguments.get(1)` must become `arguments.get(0)`). If the standalone file also exports a function, it is called after the top-level statements, with the same arguments, and its result is the exit code.
+- `arguments` holds the arguments after the program name, without it. **(decision D4)** A standalone file and a script see an implicit immutable value `arguments: Array<String>` at their top level (the guides use it); its index 0 is the **first argument** (the guides' `arguments.get(1)` must become `arguments.get(0)`). If the standalone file also exports a function, it is called after the top-level statements, with the same arguments, and its result is the exit code.
 
 ### 15.7 Module-level values and initialization
 
@@ -3155,7 +3155,7 @@ export = 1
 
 ```fa
 -- file: library/people.fa
-export mutable: Pool(Person) = []
+export mutable: Pool<Person> = []
 function clearPeople = () mutates people => {
 	people.clear()
 }
@@ -3247,7 +3247,7 @@ export function = () => console.log(library.order.first)
 
 ```fa
 -- file: application/main.fa
-export function = (arguments: Array(String)): Integer => {
+export function = (arguments: Array<String>): Integer => {
 	console.log(arguments.length)
 	3
 }
@@ -3327,7 +3327,7 @@ export = { name = "tool", targets = ["native"], build = { output = "out" } }
 ```fa
 -- package.fa
 let version = "2.1.0"
-function withServerTargets = (targets: Array(Target)): Array(Target) => [...targets, "bun", "node"]
+function withServerTargets = (targets: Array<Target>): Array<Target> => [...targets, "bun", "node"]
 export = {
 	name = "farm"
 	version = version
@@ -3665,7 +3665,7 @@ Initialization order and reachability ([15.7](#157-module-level-values-and-initi
 
 | Kind | Names |
 | --- | --- |
-| Types | `Boolean`, `String`, `Character`, `Integer`, `Float`, `BigInt`, `Percentage`, `Byte`, `Int8`…`Int128`, `UInt8`…`UInt128`, `Float32`, `Float64`, `None`, `Never`, `Void`, `Array`, `Set`, `Map`, `Pool`, `Columnar`, `OrderedColumnar`, `GrowingArray`, `GrowingSet`, `GrowingMap`, `GrowingPool`, `GrowingColumnar`, `Tuple`, `Range`, `Task`, `Optional`, `Error`, `Schema`, `Subscription` (D25) |
+| Types | `Boolean`, `String`, `Bytes`, `Integer`, `Float`, `BigInt`, `Percentage`, `Byte`, `Int8`…`Int128`, `UInt8`…`UInt128`, `Float32`, `Float64`, `None`, `Never`, `Void`, `Array`, `Set`, `Map`, `Pool`, `Columnar`, `OrderedColumnar`, `GrowingArray`, `GrowingSet`, `GrowingMap`, `GrowingPool`, `GrowingColumnar`, `Tuple`, `Range`, `Task`, `Optional`, `Error`, `Schema`, `Subscription` (D25) |
 | Type constructors and functions | `Enum`, `Union`, `Errors`, `Fields`, `CStruct`, `CArray`, `Pick`, `Omit`, `Type`, the other type functions |
 | Values | `console`, `Math`, `Task` |
 | Errors | `IndexError`, `KeyNotFound`, `DivisionByZero`, `ArithmeticError`, `Cancelled`, `ParseError` (used by `Integer.parse`) |
@@ -3683,7 +3683,7 @@ Initialization order and reachability ([15.7](#157-module-level-values-and-initi
 | `console.error(values...)` **(decision D39)** | same, on stderr | all | 1 |
 | `Math.min`, `max`, `abs`, `floor`, `round`, `sign`, `pow`, `fround` | per `values/numbers` | all | 1 |
 | `Integer.parse(text): Integer throws ParseError` **(decision D7)** | | all | 1 |
-| `Set.from`, `Map.from`, `Array(T).from(values, capacity = n)` | collections brief | all | 1–2 |
+| `Set.from`, `Map.from`, `Array<T>.from(values, capacity = n)` | collections brief | all | 1–2 |
 | `std.fs.File.read(path): String throws FileError` **(decision D9)** | blocking | native, bun, node (`web`: compile error) | 2 |
 | `std.json.Json.parse(text): T throws JsonError` (type-directed by the expected type), `Json.stringify(value): String` (D9) | | all | 3 |
 | `std.time.now(): Integer` (milliseconds; impure) (D9) | | all | 2 |
@@ -3709,7 +3709,7 @@ Each guide is a test of the toolchain once its features exist. With the decision
 
 - **Hello world** (tier 1): `fa run hello.fa` prints `Hello, World!`; the `greet` version prints `Hello, World!`; `fa run hello.fa Ada` with `arguments.get(0)` prints `Hello, Ada!`; `fa new package hello` + `fa develop` prints `Hello, World!`; `fa test` passes `greets by name`; `fa build` produces the configured targets.
 - **Build your application** (tiers 1–2): with `scores.csv` = `Ana, 90\nBao, 70\n`, `fa run` / `fa preview` prints `Scores:    2`, `Average:   80` (the float formatting of `80.0.round()` is owned by the numbers brief), `Highest:   Ana (90)`, `Lowest:    Bao (70)`, exit 0; a missing file: the error `ScoreError.FileNotFound` is reported, exit 1; the four tests pass; `build/native/scores` exists after `fa build --target=native`. Needs `std.fs.File.read`, `Integer.parse`, `arguments.get(0)`.
-- **Performance** (tier 2–3): fusion of pure chains (observable only by allocation counts and by the order of effects of impure callbacks), `Array(Integer).from([], capacity = n)`, `static` + `@if`; `fa preview --profile` is not in the CLI table: tier 4, add it to the table when implemented.
+- **Performance** (tier 2–3): fusion of pure chains (observable only by allocation counts and by the order of effects of impure callbacks), `Array<Integer>.from([], capacity = n)`, `static` + `@if`; `fa preview --profile` is not in the CLI table: tier 4, add it to the table when implemented.
 - **Deploy a library** (tier 3): sources, tags, lockfile, `fa check`, `fa test --target=native`. The breaking-change table is informative; a future `fa` command could diff interface hashes between two tags.
 - **Web server**: needs `async` and `std.http`: after this iteration. The fixes it needs now (D8: `error.message` → `error.toString()`; `now()` → `std.time.now()`) are documentation fixes.
 
@@ -3733,7 +3733,7 @@ Capture mode depends on later uses, which a single forward walk hasn't seen. **R
 
 ### D4. `arguments` in standalone files, and its first index
 
-`hello-world` and `build-your-application` use `arguments.get(1)` for the first user argument, while `modules` says `arguments` excludes the program name (so the first argument is index 0); and only `hello-world` says a standalone file has an implicit `arguments`. **Resolution:** keep `modules`: index 0 is the first argument (like `process.argv.slice(2)`, no surprise for JS developers who already slice); standalone files and scripts get an implicit immutable `arguments: Array(String)` at their top level. Fix both guides to `arguments.get(0)` and mention the implicit `arguments` in `architecture/overview`.
+`hello-world` and `build-your-application` use `arguments.get(1)` for the first user argument, while `modules` says `arguments` excludes the program name (so the first argument is index 0); and only `hello-world` says a standalone file has an implicit `arguments`. **Resolution:** keep `modules`: index 0 is the first argument (like `process.argv.slice(2)`, no surprise for JS developers who already slice); standalone files and scripts get an implicit immutable `arguments: Array<String>` at their top level. Fix both guides to `arguments.get(0)` and mention the implicit `arguments` in `architecture/overview`.
 
 ### D5. `fa run file.fa a b` vs `fa run file.fa -- a b`
 
@@ -3813,7 +3813,7 @@ Printing a `Person` with `bestFriendOf` could recurse forever or dump a whole gr
 
 ### D24. Per-instance code on JavaScript
 
-"Functions are monomorphized" for reactivity, and `Type(parameter)` needs the actual copy function, but the JavaScript backend erases generics. **Resolution:** the JavaScript backend emits extra instances only in these two cases: a function receiving a reactive place (or a value with reactive fields), keyed by which parameters are reactive; and a function that copies or reflects on a parameter's full type, keyed by the argument type. Everything else is one JavaScript function.
+"Functions are monomorphized" for reactivity, and `Type<parameter>` needs the actual copy function, but the JavaScript backend erases generics. **Resolution:** the JavaScript backend emits extra instances only in these two cases: a function receiving a reactive place (or a value with reactive fields), keyed by which parameters are reactive; and a function that copies or reflects on a parameter's full type, keyed by the argument type. Everything else is one JavaScript function.
 
 ### D25. The type of `let subscription = watch { }`
 
@@ -3829,11 +3829,11 @@ Allowed by `modules`, but a named declaration would be declared once per iterati
 
 ### D28. `@readDirectory`'s result
 
-The web-server guide uses `file.name` and `file.path`. **Resolution:** `Array(DirectoryEntry)` with `{ name: String, path: String, isDirectory: Boolean }`, sorted by name, `path` relative to the folder of the reading file.
+The web-server guide uses `file.name` and `file.path`. **Resolution:** `Array<DirectoryEntry>` with `{ name: String, path: String, isDirectory: Boolean }`, sorted by name, `path` relative to the folder of the reading file.
 
 ### D29. "A value whose type contains `Pointer`"
 
-`Database` (used from `main.fa`) has a `#handle: Pointer(...)` field. **Resolution:** "contains" means its public shape; private fields of a type declared in a foreign file may hold pointers.
+`Database` (used from `main.fa`) has a `#handle: Pointer<...>` field. **Resolution:** "contains" means its public shape; private fields of a type declared in a foreign file may hold pointers.
 
 ### D30. A module file without export
 
@@ -3905,7 +3905,7 @@ Demand-driven generation could skip errors in unreachable library files. **Resol
 
 ### D47. Implied effects through a collection received alone
 
-A function receiving `users: Pool(Blog.User)` deletes a user, which writes `blog.posts[..].author`, a place it can't name. **Resolution:** the implied effect is expressed on the owner of the argument (`owner(users).posts[..].author`) and substituted at the call site; inside the callee it is covered by the declared effect on `users`.
+A function receiving `users: Pool<Blog.User>` deletes a user, which writes `blog.posts[..].author`, a place it can't name. **Resolution:** the implied effect is expressed on the owner of the argument (`owner(users).posts[..].author`) and substituted at the call site; inside the callee it is covered by the declared effect on `users`.
 
 ### D48. Enforcing "only modified through its owner"
 
@@ -3915,9 +3915,9 @@ A function receiving `users: Pool(Blog.User)` deletes a user, which writes `blog
 
 Compile-time code uses "the target's arithmetic": a value valid on `native` may overflow on JavaScript. **Resolution:** evaluate with the target's semantics; an overflow is the compile error `META013`.
 
-### D50. `Pointer(Void)` parameters
+### D50. `Pointer<Void>` parameters
 
-The `qsort` binding takes `base: Pointer(Void)`, but the passing table only maps `Array(T)` to `Pointer(T)`. **Resolution:** a `Pointer(Void)` parameter accepts every argument a `Pointer(T)` parameter would (like C's conversion to `void *`).
+The `qsort` binding takes `base: Pointer<Void>`, but the passing table only maps `Array<T>` to `Pointer<T>`. **Resolution:** a `Pointer<Void>` parameter accepts every argument a `Pointer<T>` parameter would (like C's conversion to `void *`).
 
 ### D51. Effects of the entry function
 
@@ -3963,7 +3963,7 @@ Goal: the hello-world and build-your-application guides run with `fa run`, `fa b
 | --- | --- |
 | Interpreter | `static`, `@` calls, `@if`/`@for`, `@readFile`, `@readDirectory`, `@parseJson`, `@typeToString`, `@typeToSchema`, `@test`, limits, purity checks, per-target analysis (D22), computed configuration files, `target` and `configuration` |
 | Relations | classification and errors, writes, implied effects, `unlink`, owner fields, copies with relinking; JavaScript, then native (with `Pool`, `Columnar`, `GrowingPool`, `GrowingColumnar`) |
-| Structural typing | `Type(parameter)` instances on JavaScript; views and specialization on native (LLVM M2) |
+| Structural typing | `Type<parameter>` instances on JavaScript; views and specialization on native (LLVM M2) |
 | Packages | workspaces, sibling packages, Git and remote dependencies, lockfile, cache, `fa update`, `@import`, `DependencySource.generate` |
 | Tooling | language server with incremental analysis ([21.4](#214-incremental-analysis-language-server-fa-develop-fa-test---watch)); `fa format` |
 | Standard library | `std.time.now`, `Set.from`/`Map.from`, `Array.from(capacity)` |

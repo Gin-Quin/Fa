@@ -1,5 +1,5 @@
 -- brief: ✗ tf-19: TF004 (the compile-time function throws) "Only string literals are supported"
--- (types-at-runtime.md: `type Invalid = CapitalizeSecondLetter(Integer)`)
+-- (types-at-runtime.md: `type Invalid = CapitalizeSecondLetter<Integer>`)
 type SchemaError = Errors {
 	Unsupported = { message: String }
 }

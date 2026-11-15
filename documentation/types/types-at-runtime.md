@@ -70,7 +70,7 @@ let json = Json.stringify(schema)
 | --- | --- | --- |
 | `Schema.Named` | `name: String`, `definition: Schema` | a type used through a name, like `MyType` or `Point<Integer>` |
 | `Schema.Reference` | `name: String` | a recursive use of the enclosing `Schema.Named` with this name |
-| `Schema.Boolean`, `Schema.String`, `Schema.Character`, `Schema.Percentage`, `Schema.BigInt`, `Schema.None`, `Schema.Never`, `Schema.Void` | none | the type of the same name |
+| `Schema.Boolean`, `Schema.String`, `Schema.Bytes`, `Schema.Percentage`, `Schema.BigInt`, `Schema.None`, `Schema.Never`, `Schema.Void` | none | the type of the same name |
 | `Schema.Integer` | `bits: 8 \| 16 \| 32 \| 64 \| 128`, `signed: Boolean = true`, `min: BigInt?`, `max: BigInt?` | an integer type, with its range when it is narrower than its storage |
 | `Schema.Float` | `bits: 32 \| 64` | a float type |
 | `Schema.BooleanLiteral`, `Schema.IntegerLiteral`, `Schema.FloatLiteral`, `Schema.StringLiteral` | `value`, of the matching type (`BigInt` for integers) | a literal type |

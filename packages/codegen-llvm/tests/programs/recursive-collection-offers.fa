@@ -1,0 +1,20 @@
+-- asynchronous: false
+-- Each collection stays live until after the recursive call.
+function one = (n: Integer, text: String): Integer => {
+	let words = text.split(" ")
+	if n > 0 { one(n - 1, text) + words.length } else { words.length }
+}
+
+function four = (n: Integer, text: String): Integer => {
+	let a = text.split(" ")
+	let b = text.split(" ")
+	let c = text.split(" ")
+	let d = text.split(" ")
+	if n > 0 {
+		four(n - 1, text) + a.length + b.length + c.length + d.length
+	} else {
+		a.length + b.length + c.length + d.length
+	}
+}
+
+console.log(one(40, "a b"), four(40, "a b")) -- prints: 82 328

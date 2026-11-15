@@ -43,6 +43,8 @@ let point = points.add({ x = 3, y = 4 }) -- bad practice: `point` is a copy, not
 
 A value with more fields than the element type is copied into the pool, and its extra fields are dropped: see [collections of supersets](/advanced/structural-typing#collections-of-supersets).
 
+Storage can be planned with `from(source, capacity = n)`, the read-only `capacity` property and `reserve(additional)`. See [capacity and reservation](/collections/arrays#capacity-and-reservation) for the shared rules and effects.
+
 ## Removing
 
 Remove a value with `delete`, passing a reference to it:
@@ -106,7 +108,7 @@ Compare with an array, where `push` may reallocate the storage and invalidate ev
 | `reserve(additional)` | `mutates self.capacity` | nothing |
 | `size`, `capacity`, `find`, `includes`, iteration | none | nothing |
 
-`pool.size` is the number of elements. A pool has a `size` rather than a `length`: its elements have no positions, so there is no index to bound. Like every collection, a pool takes a `capacity` in `from` (`Pool<Human>.from([], capacity = 1000)`), has a read-only `capacity` property, and `reserve(additional)` allocates the pages for `additional` more elements up front (see [capacity](/collections/arrays#capacity)): since pages never move, it invalidates nothing.
+`pool.size` is the number of elements. A pool has a `size` rather than a `length`: its elements have no positions, so there is no index to bound. `Pool<Human>.from([], capacity = 1000)` and `reserve(additional)` allocate the pages for the elements to come up front: since pages never move, `reserve` invalidates nothing.
 
 Two pools are equal when they hold equal elements the same number of times, in any order. Relation fields are not compared, as for every [equality](/operations/logical#equality) of linked objects. The same holds for columnars.
 
@@ -159,6 +161,12 @@ Pools are the natural home for the objects of a graph, a scene, or an entity sys
 ## Implementation details
 
 ### Native
+
+- **Returned collections.** In synchronous compilation mode, collection functions receive an optional bounded caller buffer and return the final header pointer. Fresh literals, supported transforms and proven moved immutable locals forward it through calls and return branches. A mutable or escaping owner supplies no frame buffer, so construction starts on the heap. Constant returned locals can share read-only storage with a proven immutable caller. Arrays and growing arrays construct aggregate-returning literal items directly in their final slots; completed items still drop on an error. Object-columnar chunks retain their larger heap layout.
+
+- **Reviewed storage limits.** The collection byte budget is 2 KiB; the total is 4 KiB per non-recursive frame and 512 bytes in a resolved direct-call cycle (including methods and generic instances). Literals reserve their exact aligned size. Non-recursive calls receive at most `min(2 KiB, remaining frame budget)`. In a direct-call cycle, all call-result offers share 128 bytes per frame inside the 512-byte total: each receives `min(128 − offer bytes reserved, 512 − collection bytes reserved)`, with no offer below 64 bytes. Exact literals count against the total in either lowering order; forwarded offers reserve no frame bytes. The inclusive 2× per-frame gate covers call-result offers (one and four live splits): unchecked depths must satisfy `baseline_depth ≤ 2 × final_depth + 8`, with eight frames for fixed setup overhead and native measurements under a 256 KiB stack limit. Leak-checked depths are informational; exact literals are excluded. Indirect recursion is not detected. Larger objects/tuples use caller output slots; a layout with at most two scalar leaves and 16 bytes on 64-bit targets, or exactly one scalar leaf on wasm32, returns by value. Small throwing results keep `{ value, error }`; register results store directly into their final owner. An output marked `noalias` is unreachable from arguments, captures and globals during the call. Native x86-64/aarch64 functions probe crossed stack pages.
+
+- **Immutable literals (current LLVM backend).** Constant `let` literals without relation sides use read-only headers, chunks, occupancy words and slots. Runtime local literals can use a compact read-only chunk in a fixed frame buffer (2 KiB per collection, 4 KiB per non-recursive function); a read never needs to recover its chunk by masking its address. A mutable owner of static data requires an independent heap copy with the ordinary slab layout; runtime literals with owning or unknown uses choose the heap from creation. Captured or asynchronous values, relation-bearing elements and constructions above the budgets retain the heap path. Static drops do nothing; frame drops still destroy owned elements. References and iteration borrow the original slots.
 
 The pool is a **slab** (also called a hive or a colony): `plf::colony`, C++26 `std::hive` and the Rust `slab` crate are the references.
 

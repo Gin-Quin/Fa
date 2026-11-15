@@ -26,7 +26,7 @@ use fa_analyzer::syntax::View;
 use fa_analyzer::types::TypeKind;
 use inkwell::GlobalVisibility;
 use inkwell::module::Linkage;
-use inkwell::types::{BasicMetadataTypeEnum, BasicType};
+use inkwell::types::BasicMetadataTypeEnum;
 use inkwell::values::FunctionValue;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -915,15 +915,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			types.push(self.pointer_type().into());
 		}
 		let throws = sig.throws != TypeId::NEVER || callback_errors;
-		let fn_type = match (ret.has_value(), throws) {
-			(true, false) => self.llvm_type(ret).fn_type(&types, false),
-			(false, false) => self.context.void_type().fn_type(&types, false),
-			(true, true) => self
-				.context
-				.struct_type(&[self.llvm_type(ret), self.pointer_type().into()], false)
-				.fn_type(&types, false),
-			(false, true) => self.pointer_type().fn_type(&types, false),
-		};
+		let (fn_type, return_slot, return_collection) =
+			self.function_type_of(types, false, ret, throws);
 		let value = match self.module.get_function(&name) {
 			Some(value) => value,
 			None => {
@@ -934,6 +927,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					.as_global_value()
 					.set_visibility(GlobalVisibility::Hidden);
 				value.set_call_conventions(FAST_CALLING_CONVENTION);
+				if return_slot {
+					self.add_return_slot_attribute(value, ret, throws, 0);
+				}
 				self.runtime.add_attributes(value, &["nounwind"]);
 				if ret == Repr::Never && !throws {
 					self.runtime.add_attributes(value, &["noreturn"]);
@@ -964,6 +960,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			by_pointer,
 			borrowed,
 			ret,
+			return_slot,
+			return_collection,
 			throws,
 			lambda: false,
 			by_reference: false,
@@ -1076,6 +1074,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			self.copy_cleanup_captures();
 		}
+		self.index_recursive_functions(&files);
 		self.prepare_tree_arenas()?;
 		// the functions the program reaches (all without a reachability)
 		let selective = self
@@ -1125,6 +1124,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.define_format_union()?;
 		self.define_boxes()?;
 		self.export_box_functions();
+		self.add_stack_probes();
 		self.finish_linkage()?;
 		let mut symbols = std::mem::take(&mut self.split_mut().symbols);
 		symbols.c_exports = self.c_exports().to_vec();
@@ -1170,6 +1170,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			self.copy_cleanup_captures();
 		}
+		self.index_recursive_functions(&files);
 		let no_location = || Error::Unsupported {
 			message: "an instance of a generic function (split build)".to_string(),
 			location: String::new(),
@@ -1260,6 +1261,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.define_format_union()?;
 		self.define_boxes()?;
 		self.export_box_functions();
+		self.add_stack_probes();
 		self.finish_linkage()?;
 		let mut symbols = std::mem::take(&mut self.split_mut().symbols);
 		symbols.effectful_drops = self.effectful_drops.get();

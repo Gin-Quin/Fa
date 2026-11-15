@@ -387,6 +387,7 @@ fn namespace_has_no_parameters() {
 #[test]
 fn empty_generic_parameters_are_reported() {
 	assert_error_message("type T<> = Integer", "A generic list can't be empty");
+	assert_error_message("let a: Array<> = []", "A generic list can't be empty");
 	assert_error_message("function f = <>() => x", "A generic list can't be empty");
 	assert_error_message("function f = <x>() => x", "needs a type");
 }
@@ -633,4 +634,37 @@ fn garbled_generic_lists_never_panic() {
 		parse(&format!("let x = {source}\nlet y = 1"));
 		parse(&format!("f({source})"));
 	}
+}
+
+#[test]
+fn generic_lists_are_reported() {
+	// a comparison without a space after `<`
+	assert_error_message("if count<limit { }", "write `count < limit`");
+	assert_error_message("let a = x<1", "write `x < 1`");
+	// the old forms between parentheses
+	assert_error_message(
+		"type Pair(Left, Right) = Left",
+		"Generic parameters use angle brackets: write `<Left, Right>`",
+	);
+	assert_error_message(
+		"function first(Item) = (items: Array<Item>) => items",
+		"write `function first = <Item>(…) => …`",
+	);
+	assert_error_message(
+		"function first<Item> = (items: Array<Item>) => items",
+		"write `function first = <Item>(…) => …`",
+	);
+	assert_error_message(
+		"export function<Item> = (items: Array<Item>) => items",
+		"write `export function = <Item>(…) => …`",
+	);
+	assert_error_message(
+		"let f = <Item> 12",
+		"Expected the parameters of a generic function",
+	);
+	// the misplaced parameters stay on the declaration, where the analyzer reads them
+	assert_eq!(
+		parse("function first<Item> = (items: Array<Item>) => items").to_string(),
+		"function first<Item> = (items: Array<Item>) => items;"
+	);
 }

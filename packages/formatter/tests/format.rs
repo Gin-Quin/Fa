@@ -532,13 +532,13 @@ fn long_generic_lists_stay_on_one_line() {
 		"type Shouted = TypeFromSchema<Schema.Union { items = [Schema.StringLiteral { value = \"hEllo\" }, Schema.StringLiteral { value = \"wOrld\" }] }>\n",
 		"type Shouted = TypeFromSchema<Schema.Union {\n\titems = [Schema.StringLiteral { value = \"hEllo\" }, Schema.StringLiteral { value = \"wOrld\" }]\n}>\n",
 	);
-	// with a comment, the first item stays on the line of the `<`: a `<` followed by a new line
-	// would be a comparison
+	// with a comment, the first item stays on the line of the `<` (a `<` followed by a new line
+	// would be a comparison), and the comma stays: a line break doesn't separate two items
 	let source = "type Pair<Left, -- the first one\n\tRight> = {}\n";
 	let formatted = format(source).expect("formatted");
 	assert_eq!(
 		formatted,
-		"type Pair<Left -- the first one\n\tRight\n> = {}\n"
+		"type Pair<Left, -- the first one\n\tRight\n> = {}\n"
 	);
 	assert_eq!(format(&formatted).as_deref(), Ok(formatted.as_str()));
 	assert_eq!(parse(&formatted).to_string(), parse(source).to_string());
@@ -546,7 +546,32 @@ fn long_generic_lists_stay_on_one_line() {
 
 #[test]
 fn comments_in_generic_lists_are_kept() {
-	assert_keeps_comments("type Pair<Left -- the left one\n\tRight\n> = {}\n");
+	assert_keeps_comments("type Pair<Left, -- the left one\n\tRight\n> = {}\n");
 	assert_keeps_comments("type Pair<-- the items\n\tLeft, Right> = {}\n");
 	assert_keeps_comments("let x: Map<String, --- keys --- Integer> = y\n");
+}
+
+#[test]
+fn writes_generic_lists_on_the_line_of_their_angle_bracket() {
+	assert_formats(
+		"type Pair<Left,Right> = { left: Left, right: Right }\nfunction first = <Item>(items: Array<Item>): Item? => items.get(0)\nlet total = sum<Float>([1, 2])\n",
+		"type Pair<Left, Right> = { left: Left, right: Right }\nfunction first = <Item>(items: Array<Item>): Item? => items.get(0)\nlet total = sum<Float>([1, 2])\n",
+	);
+	// the items of a generic list break, never the list after its `<`
+	assert_formats(
+		"type Lookup = Map<String, {\n\tid: Integer\n\tname: String\n}>\n",
+		"type Lookup = Map<String, {\n\tid: Integer\n\tname: String\n}>\n",
+	);
+	assert_formats(
+		"let ranged: Integer<min = 0,max = 10> = 0\nlet pairs: Array<Tuple<Integer, String>> = []\n",
+		"let ranged: Integer<min = 0, max = 10> = 0\nlet pairs: Array<Tuple<Integer, String>> = []\n",
+	);
+	assert_formats(
+		"function apply = (transform: <Value>(value: Value) => Value) => transform(1)\nexport function = async <Item>(items: Array<Item>) => items\n",
+		"function apply = (transform: <Value>(value: Value) => Value) => transform(1)\nexport function = async <Item>(items: Array<Item>) => items\n",
+	);
+	assert_formats(
+		"if count < limit {\n\tx\n}\n",
+		"if count < limit {\n\tx\n}\n",
+	);
 }

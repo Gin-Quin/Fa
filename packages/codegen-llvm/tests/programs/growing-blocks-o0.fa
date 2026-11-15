@@ -1,0 +1,28 @@
+-- The GrowingArray paths of growing-blocks.fa, built without optimizations.
+-- opt-level: 0
+mutable bytes: GrowingArray<Byte> = []
+for value in 0..130 {
+	bytes.push(Byte(value))
+}
+use first = try bytes[0]
+mutable copy: GrowingArray<Byte> = []
+for byte in bytes {
+	copy.push(byte)
+}
+for position in 60..70 {
+	copy.push(try bytes[position])
+}
+for _ in 0..70 {
+	copy.push(59)
+}
+console.log(first, copy.length, try copy[139], try copy[-1]) -- prints: 0 210 69 59
+mutable count = 0
+for byte in copy {
+	if byte == 59 {
+		count += 1
+	}
+}
+console.log(count) -- prints: 71
+copy = []
+copy.push(1)
+console.log(copy) -- prints: [1]

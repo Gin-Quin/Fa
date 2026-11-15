@@ -1,0 +1,339 @@
+//! Caller-owned result slots. Coroutine promises keep their separate ABI.
+
+use fa_analyzer::ids::{NodeId, SymbolId};
+use fa_analyzer::symbols::Resolution;
+use fa_analyzer::syntax::View;
+use inkwell::attributes::{Attribute, AttributeLoc};
+use inkwell::builder::Builder;
+use inkwell::types::{AnyType, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType};
+use inkwell::values::{BasicValue, BasicValueEnum, CallSiteValue, FunctionValue};
+
+use crate::error::Error;
+use crate::lower::ownership::Cleanup;
+use crate::lower::values::{Repr, Val};
+use crate::lower::{Lowering, Slot};
+use crate::target::Target;
+
+/// Count scalar leaves, saturating above the largest by-value limit.
+fn scalar_leaves(ty: BasicTypeEnum<'_>) -> u32 {
+	match ty {
+		BasicTypeEnum::StructType(ty) => ty
+			.get_field_types()
+			.into_iter()
+			.map(scalar_leaves)
+			.fold(0, |sum, count| (sum + count).min(3)),
+		BasicTypeEnum::ArrayType(ty) => scalar_leaves(ty.get_element_type())
+			.saturating_mul(ty.len())
+			.min(3),
+		_ => 1,
+	}
+}
+
+impl<'ctx> Lowering<'_, 'ctx> {
+	fn return_value_leaves(&self, root: NodeId, leaves: &mut Vec<NodeId>) {
+		let mut pending = vec![root];
+		while let Some(node) = pending.pop() {
+			match self.view(node) {
+				View::Group(inner) | View::Try(inner) | View::Do(inner) => pending.push(inner),
+				View::Block { statements } => {
+					if let Some(last) = statements.iter().last() {
+						pending.push(last);
+					}
+				}
+				View::If {
+					then_body,
+					else_body: Some(other),
+					..
+				} => pending.extend([then_body, other]),
+				View::When { arms, .. } => pending.extend(arms.iter().map(|arm| arm.value)),
+				View::Return(_) | View::Throw(_) => {}
+				_ if self
+					.node_repr(node)
+					.is_ok_and(|repr| matches!(repr, Repr::Void | Repr::Never)) => {}
+				_ => leaves.push(node),
+			}
+		}
+	}
+
+	/// Every successful exit must give up the same immutable owner. Alias,
+	/// capture and move facts come from the existing ownership proofs.
+	pub(super) fn returned_local_candidate(&mut self, body: NodeId) -> Option<SymbolId> {
+		let mut leaves = Vec::new();
+		self.return_value_leaves(body, &mut leaves);
+		let mut pending = vec![body];
+		while let Some(node) = pending.pop() {
+			match self.view(node) {
+				View::Lambda { .. } | View::Function { .. } => continue,
+				View::Use { .. } | View::Reuse { .. } | View::Provide { .. } | View::Watch(_) => {
+					return None;
+				}
+				View::Return(Some(value)) => self.return_value_leaves(value, &mut leaves),
+				_ => {}
+			}
+			self.tree.nodes[node.index()].for_each_child(|child| pending.push(NodeId::new(child)));
+		}
+		let Resolution::Local(symbol) = self.analysis.resolution(*leaves.first()?) else {
+			return None;
+		};
+		if !leaves
+			.iter()
+			.all(|node| self.analysis.resolution(*node) == Resolution::Local(symbol))
+			|| self.referenced_locals().contains(&symbol)
+			|| !self.collection_returned_binding(symbol)
+		{
+			return None;
+		}
+		Some(symbol)
+	}
+
+	pub(super) fn is_coalesced_return_read(&self, node: NodeId, repr: Repr) -> bool {
+		let Some((file, symbol)) = self.frame().nrvo_local else {
+			return false;
+		};
+		file == self.file
+			&& repr == self.frame().ret
+			&& self.analysis.resolution(self.ungrouped(node)) == Resolution::Local(symbol)
+	}
+
+	pub(super) fn preserves_return_owner(
+		&self,
+		entry: Cleanup<'ctx>,
+		destination: Option<inkwell::values::PointerValue<'ctx>>,
+	) -> bool {
+		if self.frame().nrvo_local.is_none()
+			|| destination != self.frame().return_slot.map(|slot| slot.pointer)
+		{
+			return false;
+		}
+		match entry {
+			Cleanup::Local(slot) | Cleanup::Flagged(slot, _) => Some(slot.pointer) == destination,
+			_ => false,
+		}
+	}
+
+	pub(super) fn uses_return_slot(&self, repr: Repr) -> bool {
+		if self.tasks.asynchronous || !matches!(repr, Repr::Object(_) | Repr::Tuple(_)) {
+			return false;
+		}
+		let ty = self.llvm_type(repr);
+		let leaves = scalar_leaves(ty);
+		let by_value = if self.target == Target::Wasm {
+			leaves == 1
+		} else {
+			leaves <= 2 && self.collection_data_size(ty) <= 16
+		};
+		!by_value
+	}
+
+	/// The type of a function of the program, from its parameters (`types`,
+	/// its environment first when it has one). The storage its caller gives
+	/// for the result comes right after the environment: a slot for an object
+	/// or a tuple, a buffer and its size for a collection
+	/// (`collection_storage.rs`). The function returns its result, unless it
+	/// is built in a slot, with its error when it throws. Also whether it
+	/// takes a slot, and a buffer.
+	pub(super) fn function_type_of(
+		&self,
+		mut types: Vec<BasicMetadataTypeEnum<'ctx>>,
+		environment: bool,
+		ret: Repr,
+		throws: bool,
+	) -> (FunctionType<'ctx>, bool, bool) {
+		let at = usize::from(environment);
+		let return_slot = self.uses_return_slot(ret);
+		let return_collection = self.uses_collection_return(ret);
+		if return_collection {
+			types.insert(at, self.pointer_type().into());
+			types.insert(at + 1, self.usize.into());
+		}
+		if return_slot {
+			types.insert(at, self.pointer_type().into());
+		}
+		let fn_type = match (ret.has_value() && !return_slot, throws) {
+			(true, false) => self.llvm_type(ret).fn_type(&types, false),
+			(false, false) => self.context.void_type().fn_type(&types, false),
+			(true, true) => self
+				.context
+				.struct_type(&[self.llvm_type(ret), self.pointer_type().into()], false)
+				.fn_type(&types, false),
+			(false, true) => self.pointer_type().fn_type(&types, false),
+		};
+		(fn_type, return_slot, return_collection)
+	}
+
+	pub(super) fn add_return_slot_attribute(
+		&self,
+		function: FunctionValue<'ctx>,
+		repr: Repr,
+		throws: bool,
+		index: u32,
+	) {
+		// LLVM sret requires a void result. Throwing functions instead return
+		// just their error pointer and use the same plain destination parameter.
+		// Every caller supplies a fresh private destination, including guarded
+		// early boxes. Existing owners retain staging before assignment.
+		function.add_attribute(
+			AttributeLoc::Param(index),
+			self.runtime.attribute("noalias"),
+		);
+		if !throws {
+			let attribute = self.context.create_type_attribute(
+				Attribute::get_named_enum_kind_id("sret"),
+				self.llvm_type(repr).as_any_type_enum(),
+			);
+			function.add_attribute(AttributeLoc::Param(index), attribute);
+		}
+	}
+
+	/// The attributes of the result slot on a call through a function value:
+	/// those of the function (`add_return_slot_attribute`). A target may pass
+	/// an `sret` pointer in a register of its own (`x8` on AArch64), so both
+	/// sides must say it; a direct call reads them from its function.
+	pub(super) fn add_return_slot_call_attribute(
+		&self,
+		call: CallSiteValue<'ctx>,
+		repr: Repr,
+		throws: bool,
+		index: u32,
+	) {
+		call.add_attribute(
+			AttributeLoc::Param(index),
+			self.runtime.attribute("noalias"),
+		);
+		if !throws {
+			let attribute = self.context.create_type_attribute(
+				Attribute::get_named_enum_kind_id("sret"),
+				self.llvm_type(repr).as_any_type_enum(),
+			);
+			call.add_attribute(AttributeLoc::Param(index), attribute);
+		}
+	}
+
+	fn destination_node(&self, mut node: NodeId) -> NodeId {
+		while let View::Group(inner) | View::Try(inner) = self.view(node) {
+			node = inner;
+		}
+		node
+	}
+
+	pub(super) fn destination_for(&self, node: NodeId, repr: Repr) -> Option<Slot<'ctx>> {
+		self.destination_at(node).filter(|slot| {
+			slot.repr == repr
+				&& (self.frame().early_destination != Some((slot.pointer, repr))
+					|| self.pending_box.get() == Some((slot.pointer, repr)))
+		})
+	}
+
+	pub(super) fn destination_at(&self, node: NodeId) -> Option<Slot<'ctx>> {
+		let (target, slot) = self.frame().destination?;
+		(self.destination_node(target) == self.destination_node(node)).then_some(slot)
+	}
+
+	pub(super) fn with_destination<T>(
+		&mut self,
+		node: NodeId,
+		slot: Option<Slot<'ctx>>,
+		lower: impl FnOnce(&mut Self) -> Result<T, Error>,
+	) -> Result<T, Error> {
+		let outer = self.frame().destination;
+		self.frame_mut().destination = slot.map(|slot| (node, slot));
+		let result = lower(self);
+		self.frame_mut().destination = outer;
+		result
+	}
+
+	pub(super) fn expr_with_destination(
+		&mut self,
+		node: NodeId,
+		slot: Option<Slot<'ctx>>,
+	) -> Result<Val<'ctx>, Error> {
+		self.with_destination(node, slot, |this| this.expr(node))
+	}
+
+	pub(super) fn expr_with_early_destination(
+		&mut self,
+		node: NodeId,
+		slot: Slot<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
+		let outer = self
+			.frame_mut()
+			.early_destination
+			.replace((slot.pointer, slot.repr));
+		let value = self.expr_with_destination(node, Some(slot));
+		self.frame_mut().early_destination = outer;
+		value
+	}
+
+	pub(super) fn load_destination(&self, slot: Slot<'ctx>) -> Result<Val<'ctx>, Error> {
+		let mut value = self.load(slot)?;
+		value.destination = Some(slot.pointer);
+		Ok(value)
+	}
+
+	pub(super) fn call_return_slot(
+		&mut self,
+		node: NodeId,
+		repr: Repr,
+	) -> Result<Slot<'ctx>, Error> {
+		match self.destination_for(node, repr) {
+			Some(slot) => Ok(slot),
+			None => self.alloca(repr, "return.result"),
+		}
+	}
+
+	pub(super) fn slot_call_result(
+		&mut self,
+		raw: Option<BasicValueEnum<'ctx>>,
+		ret: Repr,
+		throws: bool,
+		slot: Option<Slot<'ctx>>,
+	) -> Result<Val<'ctx>, Error> {
+		let Some(slot) = slot else {
+			return self.call_result(raw, ret, throws);
+		};
+		if throws {
+			self.raise_if_error(raw.expect("an error pointer").into_pointer_value())?;
+		}
+		Ok(self.fresh(self.load_destination(slot)?))
+	}
+
+	/// Adapt to the existing task-promise/arena-wrapper raw result. An error
+	/// must never read an unfinished result slot or expose its abandoned fields.
+	pub(super) fn raw_from_return_slot(
+		&self,
+		builder: &Builder<'ctx>,
+		slot: Slot<'ctx>,
+		error: Option<BasicValueEnum<'ctx>>,
+	) -> Result<BasicValueEnum<'ctx>, Error> {
+		let Some(error) = error else {
+			return Ok(builder.build_load(self.llvm_type(slot.repr), slot.pointer, "result")?);
+		};
+		let function = builder
+			.get_insert_block()
+			.expect("a block")
+			.get_parent()
+			.expect("a function");
+		let failed = builder.get_insert_block().expect("a block");
+		let success = self.context.append_basic_block(function, "result_success");
+		let join = self.context.append_basic_block(function, "result_ready");
+		let okay = builder.build_is_null(error.into_pointer_value(), "")?;
+		builder.build_conditional_branch(okay, success, join)?;
+		builder.position_at_end(success);
+		let value = builder.build_load(self.llvm_type(slot.repr), slot.pointer, "result")?;
+		builder.build_unconditional_branch(join)?;
+		builder.position_at_end(join);
+		let result = builder.build_phi(self.llvm_type(slot.repr), "result")?;
+		result.add_incoming(&[
+			(&super::zero_of(self.llvm_type(slot.repr)), failed),
+			(&value, success),
+		]);
+		let ty = self.context.struct_type(
+			&[self.llvm_type(slot.repr), self.pointer_type().into()],
+			false,
+		);
+		let pair = builder.build_insert_value(ty.get_undef(), result.as_basic_value(), 0, "")?;
+		Ok(builder
+			.build_insert_value(pair, error, 1, "")?
+			.as_basic_value_enum())
+	}
+}

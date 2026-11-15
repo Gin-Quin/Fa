@@ -1770,7 +1770,9 @@ impl Prover<'_> {
 					&& effects.iter().any(|effect| {
 						!matches!(
 							effect,
-							BuiltinEffect::MutatesSize | BuiltinEffect::MutatesCapacity
+							BuiltinEffect::MutatesSize
+								| BuiltinEffect::MutatesLength
+								| BuiltinEffect::MutatesCapacity
 						)
 					});
 				if moves {

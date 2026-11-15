@@ -1199,6 +1199,20 @@ impl Walker<'_> {
 		Some(ty)
 	}
 
+	/// `f<T>` where `f` has no generic parameters: `GN007`.
+	pub(super) fn not_generic_function(&mut self, n: NodeId, callee: NodeId) -> TypeId {
+		let ty = self.check(callee, None);
+		self.memo(n, |w| {
+			if !w.s.types.is_recovering(ty) {
+				let text = w.tree.text(callee.index()).to_string();
+				let message = format!("`{text}` has no generic parameters: call it without `<…>`");
+				let diagnostic = w.diagnostic(&GN007, n, message);
+				w.report(diagnostic);
+			}
+			TypeId::UNKNOWN
+		})
+	}
+
 	/// `f<Integer>`: the explicit arguments of a value of a generic function
 	/// type (a parameter, a `let`, a field, `function f: Identity = …`): the
 	/// instance's type. `None` when the callee isn't one, or when the list may

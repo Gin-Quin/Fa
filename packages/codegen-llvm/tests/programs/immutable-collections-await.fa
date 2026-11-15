@@ -1,0 +1,12 @@
+-- opt-level: 0
+async function retained = (n: Integer): Array<String> => {
+	let values = ["owned payload from {n} that is longer than twenty three bytes"]
+	await Task.yield()
+	values
+}
+let first = start retained(1)
+let second = start retained(2)
+console.log(await first)
+-- prints: ["owned payload from 1 that is longer than twenty three bytes"]
+console.log(await second)
+-- prints: ["owned payload from 2 that is longer than twenty three bytes"]

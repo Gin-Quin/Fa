@@ -640,6 +640,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let ty = target.get_type();
 		let function = self.module.add_function(name, ty, None);
 		function.set_call_conventions(target.get_call_conventions());
+		// its parameters are passed as the entry's are (a result slot says
+		// how, `return_destinations.rs`)
+		for index in 0..function.count_params() {
+			let location = inkwell::attributes::AttributeLoc::Param(index);
+			for attribute in target.attributes(location) {
+				function.add_attribute(location, attribute);
+			}
+		}
 		let builder = self.context.create_builder();
 		builder.position_at_end(self.context.append_basic_block(function, "entry"));
 		let arguments: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = function

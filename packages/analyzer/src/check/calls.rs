@@ -168,6 +168,10 @@ impl Walker<'_> {
 			// type functions: later milestones
 			return self.unsupported(n, "calling a type");
 		}
+		// `f<Integer>`: `f` has no generic parameters (generics.rs)
+		if syntax::is_angle_application(&self.tree, n) {
+			return self.not_generic_function(n, callee);
+		}
 		// a local function called by name is not used as a value (moves.rs)
 		let saved_callee = self.callee_name_node.replace(self.strip_groups(callee));
 		let callee_ty = self.check(callee, None);

@@ -404,13 +404,33 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<(), Error> {
 		function.set_call_conventions(FAST_CALLING_CONVENTION);
 		let error_type = self.pointer_type();
+		// the storage the caller gives for the result (`return_destinations.rs`,
+		// `collection_storage.rs`): a slot, which the last step fills, or a
+		// buffer, which it may use
+		let own_slot = self.uses_return_slot(ret).then(|| {
+			function
+				.get_nth_param(1)
+				.expect("a result slot")
+				.into_pointer_value()
+		});
+		let own_buffer = self.uses_collection_return(ret).then(|| {
+			(
+				function.get_nth_param(1).expect("a buffer"),
+				function.get_nth_param(2).expect("the size of a buffer"),
+			)
+		});
+		if own_slot.is_some() {
+			self.add_return_slot_attribute(function, ret, throws, 1);
+		}
+		let result_parameters =
+			usize::from(own_slot.is_some()) + 2 * usize::from(own_buffer.is_some());
 		// the composition's own result shape
 		let finish = |this: &Self,
 		              value: Option<BasicValueEnum<'ctx>>,
 		              error: Option<PointerValue<'ctx>>|
 		 -> Result<(), Error> {
 			let error = error.unwrap_or_else(|| error_type.const_null());
-			match (ret.has_value(), throws) {
+			match (ret.has_value() && own_slot.is_none(), throws) {
 				(true, false) => {
 					builder.build_return(Some(&value.expect("a result")))?;
 				}
@@ -438,11 +458,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.into_pointer_value();
 		let given: Vec<BasicMetadataValueEnum<'ctx>> = function
 			.get_param_iter()
-			.skip(1)
+			.skip(1 + result_parameters)
 			.map(BasicMetadataValueEnum::from)
 			.collect();
 		let mut previous: Option<(Repr, BasicValueEnum<'ctx>)> = None;
 		for (index, (callee, (step_params, step_ret, step_throws))) in parts.iter().enumerate() {
+			let last = index + 1 == parts.len();
 			// the step's entry and environment
 			let (entry, step_environment) = match *callee {
 				Callee::Direct(thunk) => (
@@ -472,6 +493,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			};
 			let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = vec![step_environment.into()];
+			// the storage of the step's result: the composition's own for the
+			// last step, else a slot of this function and no buffer
+			let step_slot = if self.uses_return_slot(*step_ret) {
+				let slot = match own_slot {
+					Some(slot) if last => slot,
+					_ => builder.build_alloca(self.llvm_type(*step_ret), "step_result")?,
+				};
+				arguments.push(slot.into());
+				Some(slot)
+			} else {
+				None
+			};
+			if self.uses_collection_return(*step_ret) {
+				match own_buffer {
+					Some((buffer, bytes)) if last => {
+						arguments.push(buffer.into());
+						arguments.push(bytes.into());
+					}
+					_ => {
+						arguments.push(self.pointer_type().const_null().into());
+						arguments.push(self.usize.const_zero().into());
+					}
+				}
+			}
 			match &previous {
 				None => arguments.extend(given.iter().copied()),
 				Some((repr, value)) => {
@@ -487,9 +532,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let step_type = self.indirect_type(step_params, *step_ret, *step_throws);
 			let call = builder.build_indirect_call(step_type, entry, &arguments, "")?;
 			call.set_call_convention(FAST_CALLING_CONVENTION);
+			if step_slot.is_some() {
+				self.add_return_slot_call_attribute(call, *step_ret, *step_throws, 1);
+			}
 			let result = call.try_as_basic_value().basic();
 			// the step's result and error
-			let (value, error) = match (step_ret.has_value(), *step_throws) {
+			let (value, error) = match (step_ret.has_value() && step_slot.is_none(), *step_throws) {
 				(true, false) => (result, None),
 				(false, false) => (None, None),
 				(true, true) => {
@@ -522,7 +570,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				finish(self, None, Some(error))?;
 				builder.position_at_end(next);
 			}
-			if index + 1 == parts.len() {
+			// a result built in a slot is read once the step succeeded (the
+			// last one's is already where the caller reads it)
+			let value = match step_slot {
+				Some(slot) if own_slot != Some(slot) => {
+					Some(builder.build_load(self.llvm_type(*step_ret), slot, "")?)
+				}
+				Some(_) => None,
+				None => value,
+			};
+			if last {
+				if let (Some(slot), Some(value)) = (own_slot, value) {
+					builder.build_store(slot, value)?;
+				}
 				finish(self, value, None)?;
 			} else if let Some(value) = value {
 				previous = Some((*step_ret, value));

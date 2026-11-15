@@ -74,10 +74,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return self.convert(inner.expect("a recursive value"), narrowed, node.index());
 		}
 		if narrowed == Repr::None {
-			return Ok(Val {
-				repr: Repr::None,
-				value: None,
-			});
+			return Ok(Val::none());
 		}
 		Ok(value)
 	}
@@ -341,7 +338,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.node_repr(node)?
 		};
 		let slot = if repr.has_value() {
-			Some(self.alloca(repr, "when")?)
+			Some(match self.destination_for(node, repr) {
+				Some(slot) => slot,
+				None => self.alloca(repr, "when")?,
+			})
 		} else {
 			None
 		};
@@ -389,10 +389,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let owned = slot.is_some();
 			let arm = decision.value;
 			let value = self.region(slot.map(|slot| slot.repr), arm, |this| {
-				match this.view(arm) {
+				this.with_destination(arm, slot, |this| match this.view(arm) {
 					View::Block { .. } => this.block(arm, owned),
 					_ => this.expr(arm),
-				}
+				})
 			})?;
 			if value.repr != Repr::Never {
 				if let Some(slot) = slot {
@@ -413,7 +413,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(Val::never());
 		}
 		match slot {
-			Some(slot) => Ok(self.fresh(self.load(slot)?)),
+			Some(slot) => Ok(self.fresh(self.load_destination(slot)?)),
 			None => Ok(Val::void()),
 		}
 	}

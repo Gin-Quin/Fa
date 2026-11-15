@@ -531,11 +531,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let target_parameters = target_type.get_param_types();
 		let params = function.params.clone();
 		let by_pointer = function.by_pointer.clone();
-		// the indirect ABI (`indirect_type`): every argument, the
-		// aggregates borrowed (`borrows_parameter`), no default flags;
-		// then the target's other parameters (requirements)
+		// the caller's storage for the result comes first, as in the target
+		// (`return_destinations.rs`, `collection_storage.rs`)
+		let return_parameters =
+			usize::from(function.return_slot) + 2 * usize::from(function.return_collection);
+		// the indirect ABI (`indirect_type`): the result's storage, every
+		// argument, the aggregates borrowed (`borrows_parameter`), no default
+		// flags; then the target's other parameters (requirements)
 		let mut parameters: Vec<BasicMetadataTypeEnum<'ctx>> = vec![self.pointer_type().into()];
-		let mut at = 0;
+		parameters.extend(target_parameters.iter().take(return_parameters).copied());
+		let mut at = return_parameters;
 		for (repr, has_default) in &params {
 			parameters.push(if self.borrows_parameter(*repr) {
 				self.pointer_type().into()
@@ -554,10 +559,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.add_function(&name, thunk_type, Some(Linkage::Internal));
 		thunk.set_call_conventions(FAST_CALLING_CONVENTION);
 		self.runtime.add_attributes(thunk, &["nounwind"]);
+		if function.return_slot {
+			self.add_return_slot_attribute(thunk, function.ret, function.throws, 1);
+		}
 		let builder = self.context.create_builder();
 		builder.position_at_end(self.context.append_basic_block(thunk, "entry"));
-		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
 		let mut given = thunk.get_param_iter().skip(1);
+		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = given
+			.by_ref()
+			.take(return_parameters)
+			.map(BasicMetadataValueEnum::from)
+			.collect();
 		for (index, (repr, has_default)) in params.iter().enumerate() {
 			let argument = given.next().expect("an argument");
 			if by_pointer[index] && !self.borrows_parameter(*repr) {
@@ -597,6 +609,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let at = NodeId::new(node);
 		let retagged = Val {
+			destination: None,
 			repr: Repr::Function(to),
 			value: value.value,
 		};
@@ -733,8 +746,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"",
 		)?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
+		// a result built in the caller's slot: the same slot for both, and
+		// only the error is returned (`return_destinations.rs`)
+		let return_slot = self.uses_return_slot(ret);
+		if return_slot {
+			self.add_return_slot_attribute(function, ret, true, 1);
+			self.add_return_slot_call_attribute(call, ret, false, 1);
+		}
 		let null = pointer.const_null();
-		if ret.has_value() {
+		if ret.has_value() && !return_slot {
 			let pair_type = self
 				.context
 				.struct_type(&[self.llvm_type(ret), pointer.into()], false);
@@ -870,15 +890,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				BasicMetadataTypeEnum::from(self.llvm_type(*repr))
 			}
 		}));
-		match (ret.has_value(), throws) {
-			(true, false) => self.llvm_type(ret).fn_type(&types, false),
-			(false, false) => self.context.void_type().fn_type(&types, false),
-			(true, true) => self
-				.context
-				.struct_type(&[self.llvm_type(ret), self.pointer_type().into()], false)
-				.fn_type(&types, false),
-			(false, true) => self.pointer_type().fn_type(&types, false),
-		}
+		self.function_type_of(types, true, ret, throws).0
 	}
 
 	/// Collection callbacks borrow their original element slots. A recursive
@@ -890,6 +902,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		before: &[Val<'ctx>],
 		items: &[Slot<'ctx>],
 		after: &[Val<'ctx>],
+	) -> Result<Val<'ctx>, Error> {
+		self.call_collection_callback_into(callback, node, before, items, after, None)
+	}
+
+	/// `call_collection_callback` whose result is built in `destination`
+	/// when the callback returns it in a caller's slot.
+	pub(super) fn call_collection_callback_into(
+		&mut self,
+		callback: Val<'ctx>,
+		node: NodeId,
+		before: &[Val<'ctx>],
+		items: &[Slot<'ctx>],
+		after: &[Val<'ctx>],
+		destination: Option<Slot<'ctx>>,
 	) -> Result<Val<'ctx>, Error> {
 		// the type of the value given (an instance of a generic lambda, `generic_values.rs`)
 		let ty = match callback.repr {
@@ -914,7 +940,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			arguments.push(self.collection_item_view(slot, expected, node.index())?);
 		}
 		arguments.extend_from_slice(after);
-		let result = self.call_closure_lending(callback, ty, &arguments, &places, node)?;
+		let result = self.with_destination(node, destination, |this| {
+			this.call_closure_lending(callback, ty, &arguments, &places, node)
+		})?;
 		self.end_scope(mark, Some(result))?;
 		Ok(result)
 	}
@@ -1034,12 +1062,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let argument = self.convert(*argument, *repr, node.index())?;
 			lowered.push(argument.value.expect("an argument").into());
 		}
+		let return_slot = if self.uses_return_slot(ret) {
+			let slot = self.call_return_slot(node, ret)?;
+			lowered.insert(1, slot.pointer.into());
+			Some(slot)
+		} else {
+			None
+		};
+		if self.uses_collection_return(ret) {
+			let offer = self.collection_call_buffer(node)?;
+			let (pointer, bytes) = offer
+				.map(|o| (o.pointer, o.bytes))
+				.unwrap_or((self.pointer_type().const_null(), self.usize.const_zero()));
+			lowered.insert(1, pointer.into());
+			lowered.insert(2, bytes.into());
+		}
 		let fn_type = self.indirect_type(&params, ret, throws);
 		let call = self
 			.builder
 			.build_indirect_call(fn_type, function, &lowered, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
-		let result = self.call_result(call.try_as_basic_value().basic(), ret, throws)?;
+		if return_slot.is_some() {
+			self.add_return_slot_call_attribute(call, ret, throws, 1);
+		}
+		let result =
+			self.slot_call_result(call.try_as_basic_value().basic(), ret, throws, return_slot)?;
 		self.end_scope(mark, Some(result))?;
 		Ok(result)
 	}

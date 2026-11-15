@@ -702,6 +702,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(value.index(), "this callback"));
 		}
 		let (target, params, ret) = (callee.value, callee.params.clone(), callee.ret);
+		let return_slot = callee.return_slot;
 		// C gives the Fa representations of these types directly
 		let c_of = |repr: Repr| -> Option<BasicTypeEnum<'ctx>> {
 			match repr {
@@ -731,14 +732,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			},
 		};
 		let (function, builder) = self.helper_function(&name, function_type);
-		let arguments: Vec<BasicMetadataValueEnum<'ctx>> = function
+		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = function
 			.get_param_iter()
 			.map(BasicMetadataValueEnum::from)
 			.collect();
+		// a result the Fa function builds in a slot (`return_destinations.rs`)
+		let slot = if return_slot {
+			let slot = builder.build_alloca(self.llvm_type(ret), "result")?;
+			arguments.insert(0, slot.into());
+			Some(slot)
+		} else {
+			None
+		};
 		let call = builder.build_call(target, &arguments, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
-		match call.try_as_basic_value().basic() {
-			Some(result) if ret != Repr::Void => builder.build_return(Some(&result))?,
+		match (slot, call.try_as_basic_value().basic()) {
+			(Some(slot), _) => {
+				let result = builder.build_load(self.llvm_type(ret), slot, "")?;
+				builder.build_return(Some(&result))?
+			}
+			(None, Some(result)) if ret != Repr::Void => builder.build_return(Some(&result))?,
 			_ => builder.build_return(None)?,
 		};
 		Ok(function)

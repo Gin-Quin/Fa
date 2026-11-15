@@ -601,7 +601,7 @@ pub(crate) fn parse_expression_right(
 /// `target<arguments>`, from the `<`: `closing` is `GenericClose`, or `GreaterThan` after a `<`
 /// followed by a space (see `is_spaced_generic_open`).
 fn parse_generic_application(context: &mut Context<'_>, left: usize, closing: TokenKind) -> usize {
-	let (arguments, end) = parse_generic_arguments(context, closing);
+	let (arguments, end) = parse_generic_arguments(context, closing, left);
 	let start = context.span(left).start;
 	context.insert(
 		Node::GenericApplication {

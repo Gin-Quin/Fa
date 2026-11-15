@@ -13,20 +13,25 @@ use crate::tokens::TokenKind;
 /// Parse a generic list from its `<` to its `>`, and return the items with the end of the `>`.
 /// `closing` is `GenericClose`, or `GreaterThan` for a list whose `<` is followed by a space,
 /// like `Array< Integer>` (reported by the caller, and parsed as a list to recover). Items are
-/// separated by commas or new lines. A list that is never closed is reported where it opens:
-/// it is often a comparison written without a space after `<`.
+/// separated by commas: a line break never separates two items, it ends a list left open (only
+/// the list read to recover takes its items line by line). A list that is never closed is
+/// reported where it opens: it is often a comparison written without a space after `<`, which
+/// the message spells with `target`, the expression before the `<` of an application.
 pub(crate) fn parse_generic_list<'source>(
 	context: &mut Context<'source>,
 	closing: TokenKind,
+	target: Option<usize>,
 	mut parse_item: impl FnMut(&mut Context<'source>, &[TokenKind]) -> usize,
 ) -> (Vec<usize>, usize) {
 	let open = context.token();
 	context.go_to_next_token();
 	let stop_at = [TokenKind::Comma, closing];
+	let recovers = closing != TokenKind::GenericClose;
 	let mut items = Vec::new();
 
 	loop {
-		while matches!(context.kind(), TokenKind::Comma | TokenKind::Stop) {
+		while context.kind() == TokenKind::Comma || (recovers && context.kind() == TokenKind::Stop)
+		{
 			context.go_to_next_token();
 		}
 
@@ -43,20 +48,15 @@ pub(crate) fn parse_generic_list<'source>(
 			}
 			return (items, end);
 		}
-		if kind == TokenKind::End || kind.is_closing() {
-			context.error(
-				"This `<` opens a generic list that is never closed: close it with `>`, or put a space after `<` for a comparison, like `a < b`",
-				open.start,
-				open.end,
-			);
+		if matches!(kind, TokenKind::Stop | TokenKind::End) || kind.is_closing() {
+			let message = unclosed_list_message(context, target, &items);
+			context.error(message, open.start, open.end);
 			return (items, context.last_end());
 		}
 
 		let before = context.token_index;
 		let item = parse_item(context, &stop_at);
-		if closing == TokenKind::GenericClose
-			&& let Node::Comparison { operators, .. } = context.at(item)
-		{
+		if !recovers && let Node::Comparison { operators, .. } = context.at(item) {
 			// rule 3: `Storage<size < 256>` reads, but a comparison holding `>` can't
 			let symbol = operators.first().map_or("<", |operator| operator.symbol());
 			let span = context.span(item);
@@ -77,7 +77,7 @@ pub(crate) fn parse_generic_list<'source>(
 		{
 			let found = context.describe_token();
 			context.error_at_token(format!(
-				"Expected `,` or `>`, found {found}: separate the items of a generic list with commas or new lines"
+				"Expected `,` or `>`, found {found}: separate the items of a generic list with commas"
 			));
 			context.skip_until(&stop_at);
 		}
@@ -94,13 +94,38 @@ pub(crate) fn parse_generic_list<'source>(
 	}
 }
 
-/// Parse the arguments of a generic application, from `<` to `>`: types and compile-time
-/// values, positional or named, like `<String, Integer>` or `<min = 0, max = 9>`.
+/// The message of a generic list that is never closed. After an expression, like in
+/// `if count<limit { … }`, it gives the comparison to write: `count < limit`.
+fn unclosed_list_message(context: &Context<'_>, target: Option<usize>, items: &[usize]) -> String {
+	const MAX_OPERAND_LENGTH: usize = 40;
+	let operands = target.zip(items.first()).and_then(|(target, first)| {
+		let target = context.span(target);
+		let first = context.span(*first);
+		// the operand only, not the block that follows it, like in `if count<limit { … }`
+		let first = context
+			.text(first.start, first.end)
+			.split(|character: char| character.is_whitespace() || character == '{')
+			.next()
+			.filter(|first| !first.is_empty())?;
+		(target.end - target.start <= MAX_OPERAND_LENGTH)
+			.then(|| (context.text(target.start, target.end), first))
+	});
+	match operands {
+		Some((target, first)) => format!(
+			"`<{first}` opens a generic list that is never closed: close it with `>`, or put a space after `<` for a comparison: write `{target} < {first}`"
+		),
+		None => "This `<` opens a generic list that is never closed: close it with `>`, or put a space after `<` for a comparison, like `a < b`".to_string(),
+	}
+}
+
+/// Parse the arguments of the generic application of `target`, from `<` to `>`: types and
+/// compile-time values, positional or named, like `<String, Integer>` or `<min = 0, max = 9>`.
 pub(crate) fn parse_generic_arguments(
 	context: &mut Context<'_>,
 	closing: TokenKind,
+	target: usize,
 ) -> (Vec<usize>, usize) {
-	parse_generic_list(context, closing, |context, stop_at| {
+	parse_generic_list(context, closing, Some(target), |context, stop_at| {
 		parse_expression(
 			context,
 			Priority::Comma,
@@ -155,6 +180,36 @@ pub(crate) fn is_spaced_generic_open(context: &Context<'_>, left: usize) -> bool
 		}
 	}
 	false
+}
+
+/// The list written between the bracket at the current token and the bracket that closes it,
+/// like `Left, Right` in `(Left, Right)`, for a message that tells where to write it. `Item`
+/// when the list is empty, never closed or on several lines.
+pub(crate) fn written_generic_list<'source>(context: &Context<'source>) -> &'source str {
+	let open = context.token();
+	let mut depth: usize = 0;
+	for token in &context.tokens[context.token_index + 1..] {
+		match token.kind {
+			TokenKind::End => break,
+			TokenKind::ParenthesisOpen
+			| TokenKind::ParenthesisOpenFunctionDeclaration
+			| TokenKind::BracesOpen
+			| TokenKind::BracketsOpen
+			| TokenKind::GenericOpen => depth += 1,
+			kind if kind.is_closing() => {
+				if depth == 0 {
+					let list = context.text(open.end, token.start).trim();
+					if !list.is_empty() && !list.contains('\n') {
+						return list;
+					}
+					break;
+				}
+				depth -= 1;
+			}
+			_ => {}
+		}
+	}
+	"Item"
 }
 
 /// Report a `<` followed by a space where a generic list is expected, like `Array< Integer>`.

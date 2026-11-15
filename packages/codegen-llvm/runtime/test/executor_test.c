@@ -30,10 +30,12 @@ void fa_exit(int32_t code) {
 }
 
 static long allocated;
+static long allocated_bytes;
 
 void *fa_alloc(size_t size, size_t align) {
 	(void)align;
 	__atomic_fetch_add(&allocated, 1, __ATOMIC_RELAXED);
+	__atomic_fetch_add(&allocated_bytes, (long)size, __ATOMIC_RELAXED);
 	return malloc(size);
 }
 
@@ -41,6 +43,7 @@ void fa_free(void *bytes, size_t size, size_t align) {
 	(void)size;
 	(void)align;
 	__atomic_fetch_sub(&allocated, 1, __ATOMIC_RELAXED);
+	__atomic_fetch_sub(&allocated_bytes, (long)size, __ATOMIC_RELAXED);
 	free(bytes);
 }
 
@@ -1843,7 +1846,183 @@ static void test_queues(void) {
 	fa_run_main(root, 0);
 }
 
+static void test_collection_destinations(void) {
+	long before = allocated;
+	_Alignas(16) uint8_t small[128];
+	FaArrayHeader *fresh = fa_array_new_into(0, 12, sizeof(int64_t), small, sizeof(small));
+	CHECK(fresh == (FaArrayHeader *)small && fa_array_storage(fresh) == 3);
+	CHECK(fresh->capacity == 12 && allocated == before);
+	fa_array_free(fresh, sizeof(int64_t));
+	fresh = fa_array_new_into(0, 13, sizeof(int64_t), small, sizeof(small));
+	CHECK(fresh != (FaArrayHeader *)small && fa_array_storage(fresh) == 0);
+	fa_array_free(fresh, sizeof(int64_t));
+	CHECK(allocated == before);
+	FaArrayHeader *parts = fa_string_split_into((const uint8_t *)"a bb", 4, SIMPLE,
+	                                          (const uint8_t *)" ", 1, small, sizeof(small));
+	CHECK(parts == (FaArrayHeader *)small && parts->length == 2);
+	CHECK(fa_array_storage(parts) == 3 && allocated == before);
+	CHECK(string_length(&((FaString *)parts->items)[1]) == 2);
+	fa_array_free(parts, sizeof(FaString));
+	CHECK(allocated == before);
+	parts = fa_string_split_into((const uint8_t *)"a b c d e f g h", 15, SIMPLE,
+	                             (const uint8_t *)" ", 1, small, sizeof(small));
+	CHECK(parts != (FaArrayHeader *)small && parts->length == 8);
+	CHECK(fa_array_storage(parts) == 0);
+	fa_array_free(parts, sizeof(FaString));
+	CHECK(allocated == before);
+	_Alignas(16) uint8_t storage[2048];
+	FaSegmented *returned = fa_segmented_new_into(3, sizeof(int64_t), 3, storage, sizeof(storage));
+	CHECK(returned == (FaSegmented *)storage && returned->length == 3);
+	CHECK(returned->storage == 3 && allocated == before);
+	fa_segmented_free(returned, sizeof(int64_t), 3);
+	returned = fa_segmented_new_into(20, sizeof(int64_t), 3, small, sizeof(small));
+	CHECK(returned != (FaSegmented *)small && returned->length == 20);
+	CHECK(returned->storage == 0 && returned->segments == 1);
+	fa_segmented_free(returned, sizeof(int64_t), 3);
+	FaPool *returned_pool = fa_pool_new_into(3, sizeof(int64_t), storage, sizeof(storage), sizeof(storage));
+	CHECK(returned_pool == (FaPool *)storage && returned_pool->size == 3);
+	fa_pool_free(returned_pool);
+	CHECK(allocated == before);
+	FaSegmented *growing = fa_segmented_local(storage, 20, sizeof(int64_t), 3);
+	for (int64_t i = 0; i < 20; i += 1) {
+		*(int64_t *)fa_segmented_at(growing, i, sizeof(int64_t), 3) = i;
+	}
+	CHECK(*(int64_t *)fa_segmented_at(growing, 19, sizeof(int64_t), 3) == 19);
+	void *frame_first = fa_segmented_at(growing, 0, sizeof(int64_t), 3);
+	fa_segmented_reserve(growing, 40000, sizeof(int64_t), 3);
+	CHECK(frame_first == fa_segmented_at(growing, 0, sizeof(int64_t), 3));
+	CHECK(*(int64_t *)fa_segmented_at(growing, 19, sizeof(int64_t), 3) == 19);
+	fa_segmented_reset(growing, sizeof(int64_t), 3);
+	fa_segmented_reserve(growing, 512, sizeof(int64_t), 3);
+	fa_segmented_free(growing, sizeof(int64_t), 3);
+	growing = fa_segmented_local(storage, 0, sizeof(int64_t), 3);
+	fa_segmented_reserve(growing, 100, sizeof(int64_t), 3);
+	fa_segmented_free(growing, sizeof(int64_t), 3);
+	CHECK(allocated == before);
+	FaPool *pool = fa_pool_local(storage, 2, sizeof(int64_t));
+	*(int64_t *)fa_pool_at(pool, 0) = 42;
+	CHECK(fa_pool_seek(pool, 0) == 0 && *(int64_t *)fa_pool_at(pool, 0) == 42);
+	fa_pool_free(pool);
+	FaTable *table = fa_table_local(storage, 4, sizeof(TestTableEntry), 2);
+	CHECK(table->storage == 3 && table->length == 0);
+	fa_table_free(table, sizeof(TestTableEntry));
+	CHECK(allocated == before);
+}
+
+// Storage hints must allocate ahead, preserve addresses, and free every block.
+static void test_storage_hints(void) {
+    long before = allocated;
+    CHECK(sizeof(FaSegmented) <= 64);
+    FaSegmented *a = fa_segmented_new();
+    FaSegmented *b = fa_segmented_new();
+    fa_segmented_reserve(a, 1000, 1, 6);
+    fa_segmented_reserve(b, 17, 8, 3);
+    CHECK(a->k == 10 && b->k == 5);
+    CHECK(fa_segmented_capacity(a) == 1024 && fa_segmented_capacity(b) == 32);
+    long reserved = allocated;
+    for (int64_t i = 0; i < 1000; i += 1) { *(uint8_t *)fa_segmented_push_slot(a, 1, 6) = (uint8_t)i; }
+    for (int64_t i = 0; i < 17; i += 1) { *(int64_t *)fa_segmented_push_slot(b, 8, 3) = i; }
+    CHECK(allocated == reserved);
+    uint8_t *first = fa_segmented_at(a, 0, 1, 6);
+    fa_segmented_reserve(a, 10000, 1, 6);
+    reserved = allocated;
+    for (int64_t i = 1000; i < 11000; i += 1) { *(uint8_t *)fa_segmented_push_slot(a, 1, 6) = (uint8_t)i; }
+    CHECK(allocated == reserved && first == fa_segmented_at(a, 0, 1, 6));
+    for (int64_t i = 0; i < 11000; i += 1) { CHECK(*(uint8_t *)fa_segmented_at(a, i, 1, 6) == (uint8_t)i); }
+    CHECK(*(int64_t *)fa_segmented_at(b, 16, 8, 3) == 16);
+    fa_segmented_reset(a, 1, 6);
+    CHECK(fa_segmented_capacity(a) >= 11000);
+    fa_segmented_free(a, 1, 6);
+    fa_segmented_free(b, 8, 3);
+
+    // The first three pointers remain inline and are mirrored in the heap
+    // directory. Eleven slots cover segments 0..10 before its one reallocation.
+    long bytes_before = allocated_bytes;
+    FaSegmented *directory = fa_segmented_new();
+    int64_t *kept = 0;
+    uintptr_t *small = 0;
+    for (int64_t i = 0; i <= 8192; i += 1) {
+        int64_t *slot = fa_segmented_push_slot(directory, sizeof(int64_t), 3);
+        *slot = i;
+        if (i == 0) { kept = slot; }
+        if (i == 32) {
+            CHECK(directory->segments == 4);
+            small = directory->segment;
+            CHECK(small != directory->inline_segment);
+            for (int slot = 0; slot < FA_INLINE_SEGMENTS; slot += 1) {
+                CHECK(directory->segment[slot] == directory->inline_segment[slot]);
+            }
+            CHECK(allocated_bytes - bytes_before == (long)(sizeof(FaSegmented) + 64 * sizeof(int64_t) + FA_DIRECTORY_INITIAL * sizeof(void *)));
+        }
+        if (i == 8191) { CHECK(directory->segments == 11 && directory->segment == small); }
+    }
+    CHECK(directory->segments == 12 && directory->segment != small);
+    CHECK(kept == fa_segmented_at(directory, 0, sizeof(int64_t), 3) && *kept == 0);
+    CHECK(allocated_bytes - bytes_before == (long)(sizeof(FaSegmented) + 16384 * sizeof(int64_t) + FA_SEGMENTS * sizeof(void *)));
+    for (int64_t i = 0; i <= 8192; i += 1) {
+        CHECK(*(int64_t *)fa_segmented_at(directory, i, sizeof(int64_t), 3) == i);
+    }
+    // Rebuilding an empty reservation releases its old directory, so sized
+    // deallocation never has to infer a directory size from a reset count.
+    fa_segmented_reset(directory, sizeof(int64_t), 3);
+    fa_segmented_reserve(directory, 20000, sizeof(int64_t), 3);
+    CHECK(directory->segments == 1 && directory->segment == directory->inline_segment);
+    fa_segmented_free(directory, sizeof(int64_t), 3);
+    CHECK(allocated_bytes == bytes_before);
+    directory = fa_segmented_new();
+    for (int64_t i = 0; i < 40; i += 1) { *(int64_t *)fa_segmented_push_slot(directory, sizeof(int64_t), 3) = i; }
+    fa_segmented_free(directory, sizeof(int64_t), 3);
+    CHECK(allocated_bytes == bytes_before); // free the eleven-entry directory too
+    for (int k = 0; k <= 6; k += 1) {
+        FaSegmented *formula = fa_segmented_new();
+        fa_segmented_reserve(formula, (int64_t)1 << k, sizeof(int64_t), 3);
+        for (int64_t i = 0; i < 5000; i += 1) {
+            *(int64_t *)fa_segmented_push_slot(formula, sizeof(int64_t), 3) = i;
+        }
+        for (int64_t i = 0; i < 5000; i += 1) {
+            CHECK(*(int64_t *)fa_segmented_at(formula, i, sizeof(int64_t), 3) == i);
+        }
+        fa_segmented_free(formula, sizeof(int64_t), 3);
+    }
+    CHECK(allocated_bytes == bytes_before);
+    for (int mode = 0; mode < 3; mode += 1) {
+        FaTable *table = mode == 0 ? fa_table_new(4, sizeof(TestTableEntry))
+                         : mode == 1 ? fa_table_new_growing(4, sizeof(TestTableEntry))
+                                     : fa_table_new_map(4, sizeof(TestTableEntry));
+        fa_table_reserve_additional(table, 100, sizeof(TestTableEntry));
+        CHECK(fa_table_capacity(table) >= 100);
+        reserved = allocated;
+        for (int64_t i = 0; i < 100; i += 1) {
+            TestTableEntry *entry = fa_table_append(table, (uint64_t)i, sizeof(*entry), 0);
+            entry->key = i;
+        }
+        CHECK(allocated == reserved);
+        if (mode != 1) {
+            for (int64_t i = 0; i < 50; i += 1) { fa_table_kill(table, i, sizeof(TestTableEntry)); }
+            fa_table_reserve_additional(table, 100, sizeof(TestTableEntry));
+            CHECK(fa_table_capacity(table) >= 150);
+            reserved = allocated;
+            for (int64_t i = 100; i < 200; i += 1) { fa_table_append(table, (uint64_t)i, sizeof(TestTableEntry), 0); }
+            CHECK(allocated == reserved);
+        }
+        fa_table_free(table, sizeof(TestTableEntry));
+    }
+    FaString string = owned_copy_with((const uint8_t *)"hello", 5, SIMPLE);
+    fa_string_reserve(&string, 100);
+    CHECK(fa_string_storage_capacity(&string) >= 105);
+    reserved = allocated;
+    fa_string_append(&string, (const uint8_t *)"!", 1, SIMPLE);
+    CHECK(allocated == reserved && string_length(&string) == 6);
+    size_t string_capacity = fa_string_storage_capacity(&string);
+    fa_string_append(&string, (const uint8_t *)"é", 2, 0);
+    CHECK(allocated == reserved && fa_string_storage_capacity(&string) == string_capacity);
+    fa_free((void *)string.bytes, string.capacity & KIND_MASK, 1);
+    CHECK(allocated == before);
+}
+
 int main(void) {
+	test_storage_hints();
+	test_collection_destinations();
 	test_tables();
 	test_inline_key32();
 	test_inline_loop_reservations();

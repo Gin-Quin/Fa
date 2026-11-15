@@ -136,6 +136,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			} else {
 				self.owned_as(value, repr, node)?
 			};
+			if borrowed && let Some(pointer) = value.destination {
+				return Ok((pointer, None));
+			}
 			let slot = self.alloca(repr, "argument")?;
 			self.store(slot, value, node.unwrap_or(call))?;
 			return Ok((

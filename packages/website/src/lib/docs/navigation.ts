@@ -19,6 +19,7 @@ export const navigation: Array<{ title: string; pages: string[] }> = [
 			"values/numbers",
 			"values/booleans",
 			"values/strings",
+			"values/bytes",
 			"values/objects",
 			"values/tuples",
 			"values/optionals",

@@ -55,7 +55,7 @@ The compiler doesn't guess which operations are dangerous: every function declar
 What a mutation invalidates depends on the **type** of the value, because replacing a value destroys what it owned:
 
 - A **flat** value owns nothing: a primitive (number, boolean, character), a union of literals, a reference stored in a [relation](/advanced/relations), or an object whose fields are all flat. Mutating it invalidates nothing.
-- Any other value owns memory: the elements of a collection, the characters of a string, the payload of a union (including an optional), the children of a [recursive type](/advanced/memory-management#recursive-types). Mutating it invalidates every reference into that memory: the elements, the [string slices](/values/strings#slices), the payload, and everything inside them.
+- Any other value owns memory: the elements of a collection, the storage of a string, the payload of a union (including an optional), the children of a [recursive type](/advanced/memory-management#recursive-types). Mutating it invalidates every reference into that memory: the elements, the [string slices](/values/strings#slices), the payload, and everything inside them.
 
 A union that is not a union of literals is never flat, even when its members hold no heap memory, like `Integer?`: a new value may change its member, and so what its payload is. A relation reference is the exception, because a local reference never points into it: `use friend = ana.bestFriend` designates the target, not the field.
 
@@ -129,6 +129,8 @@ Adding an element to a collection that never moves its elements, like a [`Pool`]
 | [`GrowingMap`](/collections/growing-collections) | `map[key] = value` | `mutates self[key], self.size` | all but the references into the replaced value |
 | | `getOrInsert` | `mutates self.size` | all |
 | `GrowingSet`, `GrowingPool`, `GrowingColumnar` | `add` | `mutates self.size`: growing collections never delete or move | all |
+
+`reserve` declares `mutates self` on `Array`, `Set` and `OrderedColumnar`, and `mutates self.capacity` on every other collection, where it moves no item. An effect on `length` or `size` implies the same effect on `capacity`. See [capacity and reservation](/collections/arrays#capacity-and-reservation).
 
 Relations add implied effects to these operations: deleting a linked object also writes the fields that pointed at it. See [reference checking](/advanced/reference-checking#relations).
 

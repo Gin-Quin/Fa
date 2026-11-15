@@ -1,0 +1,35 @@
+-- Random indexed reads and writes, with no capacity hint or reservation.
+-- The size is 16, 1,000 or 1,000,000; the operation count is independent of it.
+let modulus = 1_000_000_007
+let operations = 4_000_000
+
+type Random = {
+	state: Integer
+
+	function next = (self, bound: Integer<min = 1>): Integer mutates self => {
+		self.state = self.state * 48271 %% 2147483647
+		self.state %% bound
+	}
+}
+
+let n = try Integer.parse(arguments.get(0) ?? "1000000")
+assert n > 0
+mutable items: GrowingArray<Integer> = []
+for i in 0..n {
+	items.push(i)
+}
+mutable random = Random { state = 7 }
+mutable reads = 0
+for 0..operations {
+	let index = random.next(n)
+	reads = (reads + try items[index]) %% modulus
+}
+for 0..operations {
+	let index = random.next(n)
+	try items[index] = random.next(1_000_000)
+}
+mutable writes = 0
+for item in items {
+	writes = (writes + item) %% modulus
+}
+console.log("items: {n}, reads: {reads}, writes: {writes}")

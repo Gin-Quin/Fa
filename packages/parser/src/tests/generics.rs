@@ -188,9 +188,16 @@ fn generic_parameters_written_over_several_lines() {
 		"type Pair<Left, Right> = {}",
 	);
 	assert_statement(
-		"type Pair<Left\n\tRight> = {}",
-		"type Pair<Left, Right> = {}",
+		"type Registry<Key: String | Integer,\n\tEntry: { id: Key },\n\tFallback = Entry\n> = {}",
+		"type Registry<Key: (String | Integer), Entry: {\n\tid: Key\n}, Fallback = Entry> = {}",
 	);
+	assert_statement(
+		"let lookup: Map<String,\n\tArray<Integer>\n> = []",
+		"let lookup: Map<String, Array<Integer>> = []",
+	);
+	// a line break never separates two items: it ends a list left open
+	assert_error_message("type Pair<Left\n\tRight> = {}", "never closed");
+	assert_error_message("let pair: Pair<Left\n\tRight> = []", "never closed");
 }
 
 #[test]
@@ -218,7 +225,7 @@ fn old_generic_declarations_are_reported() {
 	assert_statement("Array(Integer)", "Array(Integer)");
 	assert_error_message(
 		"type Pair(Left, Right) = { left: Left }",
-		"Generic parameters use angle brackets",
+		"Generic parameters use angle brackets: write `<Left, Right>`",
 	);
 	assert_error_message(
 		"function first(Item) = (items: Array(Item)): Item? => items.get(0)",
@@ -379,7 +386,7 @@ fn generic_functions_carry_their_list_on_the_value() {
 fn generic_parameters_after_a_function_name_are_reported() {
 	assert_error_message(
 		"function first<Item> = (items: Array<Item>) => items",
-		"write `function first = <Item>(items: Array<Item>) => …`",
+		"write `function first = <Item>(…) => …`",
 	);
 	assert_eq!(
 		error_count("function first<Item> = (items: Array<Item>) => items"),
@@ -387,7 +394,12 @@ fn generic_parameters_after_a_function_name_are_reported() {
 	);
 	assert_error_message(
 		"export function<Item> = (items: Array<Item>) => items",
-		"write `export function = <Item>(items: Array<Item>) => …`",
+		"write `export function = <Item>(…) => …`",
+	);
+	// the message gives the list to move
+	assert_error_message(
+		"function pair<Left, Right: Integer> = (left: Left, right: Right) => left",
+		"write `function pair = <Left, Right: Integer>(…) => …`",
 	);
 	assert_error_message(
 		"function first(Item) = (items: Array(Item)) => items",

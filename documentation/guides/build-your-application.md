@@ -163,7 +163,7 @@ use { File } = std.fs
 export function = (arguments: Array<String>): Integer throws ScoreError => {
 	let path = arguments.get(0) ?? "scores.csv"
 
-	let contents = File.read(path) catch error => throw ScoreError.FileNotFound { path }
+	let contents = File.readText(path) catch error => throw ScoreError.FileNotFound { path }
 
 	let scores = try parseScores(contents)
 
@@ -183,7 +183,7 @@ export function = (arguments: Array<String>): Integer throws ScoreError => {
 }
 ```
 
-`arguments` holds the arguments given after the program, so `arguments.get(0)` is the first one. `File.read` reads a whole file (it throws a `FileError`, and doesn't exist on the `web` target); `catch` turns its failure into a `ScoreError`. `try` propagates the errors of `parseScores` to the caller. After `if summary is none { return 0 }`, `summary` is narrowed to `Summary`, so its fields can be read directly.
+`arguments` holds the arguments given after the program, so `arguments.get(0)` is the first one. `File.readText` reads a whole file as text (it throws a `FileError`, and doesn't exist on the `web` target; `File.read` gives its [bytes](/values/bytes#input-and-output)); `catch` turns its failure into a `ScoreError`. `try` propagates the errors of `parseScores` to the caller. After `if summary is none { return 0 }`, `summary` is narrowed to `Summary`, so its fields can be read directly.
 
 The entry function returns an `Integer` exit code and `throws ScoreError`. If an error reaches it, Fa prints the error and exits with a non-zero code, so you never write that plumbing yourself.
 

@@ -1,0 +1,138 @@
+-- opt-level: 0
+-- Immutable storage remains a value when ownership leaves its frame.
+let primes: Array<Integer> = [2, 3, 5, 7, 11, 13]
+let lookup: Map<String, Integer> = [("short", 5), ("longer-than-eight", 8)]
+let unique: Set<String> = ["a", "a", "abcdefgh", "abcdefghijklmnop", "é"]
+console.log(primes.get(4), lookup.get("short"), lookup.get("longer-than-eight"), unique.size)
+-- prints: 11 5 8 4
+console.log(unique.includes("abcdefgh"), unique.includes("abcdefghijklmnop"), unique.includes("é"), unique.includes("missing"))
+-- prints: true true true false
+
+function local = (n: Integer): Integer => {
+	let array: Array<Integer> = [n, n + 1, n + 2]
+	let growing: GrowingArray<Integer> = [n, n + 3]
+	let map: Map<Integer, Integer> = [(n, n + 4), (n + 1, n + 5)]
+	let set: Set<Integer> = [n, n, n + 1]
+	let growingMap: GrowingMap<Integer, Integer> = [(n, n + 6)]
+	let growingSet: GrowingSet<Integer> = [n, n + 1]
+	let pool: Pool<Integer> = [n, n + 7]
+	let growingPool: GrowingPool<Integer> = [n, n + 8]
+	let columns: Columnar<{ value: Integer }> = [{ value = n }, { value = n + 9 }]
+	let growingColumns: GrowingColumnar<{ value: Integer }> = [{ value = n }]
+	mutable sum = 0
+	for value in array { sum += value }
+	for value in growing { sum += value }
+	for value in pool { sum += value }
+	for value in growingPool { sum += value }
+	for { value } in columns { sum += value }
+	for value in growingColumns { sum += value.value }
+	sum + (map.get(n) ?? 0) + (growingMap.get(n) ?? 0) + set.size + growingSet.size
+}
+console.log(local(10)) -- prints: 184
+
+function returned = (n: Integer): Array<String> => {
+	let items = ["owned {n} with a payload longer than an inline string", "another {n}"]
+	items
+}
+let escaped = returned(17)
+console.log(escaped.get(0)) -- prints: owned 17 with a payload longer than an inline string
+
+function inField = (n: Integer): { items: Array<Integer> } => {
+	let items = [n, n + 1]
+	{ items }
+}
+console.log(inField(9).items) -- prints: [9, 10]
+
+function copied = (n: Integer): Integer => {
+	let items = [n, n + 1]
+	mutable other = items
+	other.push(100)
+	other[0] = 77
+	use first = items[0]
+	let slice = items[0..1]
+	first + (slice.get(0) ?? 0) + other.length
+}
+console.log(copied(6)) -- prints: 15
+
+function recursive = (n: Integer): Integer => {
+	let items = [n, n + 1]
+	if n == 0 { items.get(0) ?? 0 } else { (items.get(0) ?? 0) + recursive(n - 1) }
+}
+console.log(recursive(100)) -- prints: 5050
+
+function ownedItems = (n: Integer): Integer => {
+	let array = ["long owned payload from runtime {n} beyond twenty three bytes"]
+	let map: Map<String, Array<String>> = [("key", array)]
+	let nested = [["constant nested string"]]
+	let pool: Pool<String> = ["another owned runtime payload of {n} that must be dropped"]
+	(map.get("key") ?? []).length + nested.length + pool.size
+}
+console.log(ownedItems(19)) -- prints: 3
+
+function constantKinds = (): Integer => {
+	let a: GrowingArray<Integer> = [1, 2]
+	let b: GrowingMap<Integer, Integer> = [(1, 2)]
+	let c: GrowingSet<Integer> = [1, 1, 2]
+	let d: Pool<String> = ["first", "second"]
+	let e: GrowingPool<Boolean> = [true, false, true]
+	let f: Columnar<{ name: String, count: Integer }> = [{ name = "one", count = 1 }, { name = "two", count = 2 }]
+	let g: GrowingColumnar<{ value: Integer }> = [{ value = 7 }]
+	mutable result = a.length + b.size + c.size + d.size + e.size
+	for { count } in f { result += count }
+	for row in g { result += row.value }
+	result
+}
+console.log(constantKinds()) -- prints: 20
+
+-- Runtime-sized constructors keep their bounded heap fallback.
+function large = (n: Integer<min = 0>): Integer => {
+	let items = "x ".repeat(n).split(" ")
+	items.length
+}
+console.log(large(10000)) -- prints: 10001
+
+-- Repeated literal construction reuses the function's fixed frame space.
+function repeated = (n: Integer): Integer => {
+	mutable sum = 0
+	for i in 0..n {
+		let items = [i, i + 1]
+		sum += items.get(0) ?? 0
+	}
+	sum
+}
+console.log(repeated(10000)) -- prints: 49995000
+
+type Reader = () => Integer
+function capture = (n: Integer): Reader => {
+	let values = [n, n + 1]
+	() => values.get(0) ?? 0
+}
+let reader = capture(42)
+console.log(reader()) -- prints: 42
+
+let constantMap: Map<String, Array<String>> = [("key", ["static nested payload"])]
+let aliasMap = constantMap
+mutable changed = aliasMap
+changed["key"] = ["changed"]
+console.log(constantMap.get("key"), changed.get("key"))
+-- prints: ["static nested payload"] ["changed"]
+
+let zeroSet: Set<Float> = [0.0, -0.0, 1.5]
+let negativeSet: Set<Integer> = [-7, -7, 2]
+console.log(zeroSet.size, zeroSet.includes(-0.0), negativeSet.size, negativeSet.includes(-7))
+-- prints: 2 true 2 true
+
+function splitLocal = (text: String, separator: String): Integer => {
+	let words = text.split(separator)
+	mutable sum = words.length
+	for word in words { sum += word.length }
+	sum
+}
+console.log(splitLocal("a bb ccc", " "), splitLocal("é 🌻", " "), splitLocal("abc", ""))
+-- prints: 9 4 6
+function splitReturned = (text: String): Array<String> => {
+	let words = text.split(" ")
+	words
+}
+console.log(splitReturned("kept alive after return"))
+-- prints: ["kept", "alive", "after", "return"]

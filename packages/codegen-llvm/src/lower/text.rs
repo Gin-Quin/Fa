@@ -3,9 +3,9 @@
 
 use fa_analyzer::ids::NodeId;
 use fa_analyzer::symbols::Resolution;
-use fa_analyzer::syntax::{TemplatePart, TemplateParts};
+use fa_analyzer::syntax::{TemplatePart, TemplateParts, View};
 use inkwell::IntPredicate;
-use inkwell::values::{IntValue, PointerValue};
+use inkwell::values::{BasicValue, InstructionOpcode, IntValue, PointerValue};
 
 use crate::error::Error;
 use crate::lower::values::{IntRepr, Repr, Val};
@@ -15,6 +15,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Decimal text borrows a private scratch buffer until the statement
 	/// ends. `take` copies the view when a string must escape into an owner;
 	/// immediate consumers (padding, parsing, interpolation) need no copy.
+	/// In a coroutine, the rest of the statement may suspend (`await`): the
+	/// view would then point into a stack that the resumption doesn't keep,
+	/// so the text is an owned temporary instead.
 	pub(crate) fn integer_string(&mut self, value: Val<'ctx>) -> Result<Option<Val<'ctx>>, Error> {
 		let Repr::Int(int) = value.repr else {
 			return Ok(None);
@@ -22,7 +25,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if int.bits > 64 {
 			return Ok(None);
 		}
-		let scratch = self.alloca_type(self.context.i8_type().array_type(24).into(), "digits")?;
 		let raw = if int.signed {
 			self.builder
 				.build_int_s_extend_or_bit_cast(value.int(), self.context.i64_type(), "")?
@@ -30,6 +32,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder
 				.build_int_z_extend_or_bit_cast(value.int(), self.context.i64_type(), "")?
 		};
+		if self.in_coroutine() {
+			let name = if int.signed {
+				"fa_string_i64"
+			} else {
+				"fa_string_u64"
+			};
+			let text = self.call_with_pair(name, &[raw.into()], Repr::Str)?;
+			return Ok(Some(self.fresh(text)));
+		}
+		let scratch = self.alloca_type(self.context.i8_type().array_type(24).into(), "digits")?;
 		let name = if int.signed {
 			"fa_decimal_i64"
 		} else {
@@ -96,6 +108,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(None)
 	}
 
+	/// Whether evaluating an expression runs no code that could change a
+	/// place: no call, no assignment, only reads and operators.
+	fn is_inert(&self, node: NodeId) -> bool {
+		matches!(
+			self.view(node),
+			View::Integer(_)
+				| View::Float(_)
+				| View::String(_)
+				| View::Boolean(_)
+				| View::None | View::Name(_)
+				| View::Group(_)
+				| View::Access { .. }
+				| View::Index { .. }
+				| View::Arithmetic { .. }
+				| View::Negate(_)
+				| View::Equality { .. }
+				| View::Comparison { .. }
+				| View::Logic { .. }
+				| View::Not(_)
+		) && fa_analyzer::syntax::children(self.tree, node).all(|child| self.is_inert(child))
+	}
+
 	/// Common textual/scalar templates need no shared builder. Evaluate all
 	/// expressions first, then borrow their values for one exact-sized join.
 	pub(super) fn string_template(
@@ -132,9 +166,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 		}
+		// A borrowed string must outlive the evaluation of the later parts:
+		// copy it when one of them may run code that changes its place.
+		let last_effect = parts
+			.iter()
+			.enumerate()
+			.filter(
+				|(_, part)| matches!(part, TemplatePart::Expression(node) if !self.is_inert(*node)),
+			)
+			.map(|(index, _)| index)
+			.last();
 		let mut values = Vec::new();
 		let mut simple = self.simple_flag();
-		for part in parts.iter() {
+		for (index, part) in parts.iter().enumerate() {
 			let value = match part {
 				TemplatePart::Text("") => continue,
 				TemplatePart::Text(text) => self.string_constant(text),
@@ -143,10 +187,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if value.repr == Repr::Never {
 				return Ok(Some(value));
 			}
-			let value = if value.repr == Repr::Str {
-				value
-			} else {
+			let value = if value.repr != Repr::Str {
 				self.integer_string(value)?.expect("a checked integer")
+			} else if last_effect.is_some_and(|last| index < last)
+				&& matches!(part, TemplatePart::Expression(_))
+				&& !self.is_temporary(value)
+			{
+				self.own(value, None)?
+			} else {
+				value
 			};
 			let (bytes, length) = self.string_parts(value)?;
 			let empty = self.builder.build_int_compare(
@@ -747,9 +796,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.string_parts_with(&self.builder, value)
 	}
 
-	/// Decode a String in either representation. Inline bytes are a snapshot
-	/// of the SSA value, so an intervening write to its original place cannot
-	/// change them. Allocating in the entry block avoids growing a loop's stack.
+	/// Decode a String in either representation. An immutable parameter may
+	/// borrow its original place; other inline bytes use an SSA snapshot so an
+	/// intervening write cannot change them. Entry allocas bound loop storage.
 	pub(crate) fn string_parts_with(
 		&self,
 		builder: &inkwell::builder::Builder<'ctx>,
@@ -773,27 +822,49 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.expect("a block")
 			.get_parent()
 			.expect("a function");
-		let entry = function.get_first_basic_block().expect("an entry");
-		let allocator = self.context.create_builder();
-		if let Some(first) = entry.get_first_instruction() {
-			allocator.position_before(&first);
-		} else {
-			allocator.position_at_end(entry);
-		}
-		let snapshot = allocator.build_alloca(self.string_type, "inline_string")?;
-		// only an inline string is stored (a view or a heap string, like the
-		// parts of a split, needs no snapshot)
-		let before = builder.get_insert_block().expect("a block");
-		let store = self.context.append_basic_block(function, "inline_snapshot");
-		let join = self.context.append_basic_block(function, "string_bytes");
-		builder.build_conditional_branch(inline, store, join)?;
-		builder.position_at_end(store);
-		builder.build_store(snapshot, pair)?;
-		builder.build_unconditional_branch(join)?;
-		builder.position_at_end(join);
-		let phi = builder.build_phi(self.pointer_type(), "bytes")?;
-		phi.add_incoming(&[(&snapshot, store), (&bytes, before)]);
-		let bytes = phi.as_basic_value().into_pointer_value();
+		// A readonly parameter is an immutable reference for the entire call.
+		// Its loaded value can borrow inline bytes from that original place;
+		// mutable places and computed values still require an SSA snapshot.
+		let borrowed = pair.as_instruction_value().and_then(|instruction| {
+			if instruction.get_opcode() != InstructionOpcode::Load {
+				return None;
+			}
+			let pointer = instruction.get_operand(0)?.value()?.into_pointer_value();
+			self.frame
+				.as_ref()
+				.is_some_and(|frame| {
+					frame.function == function && frame.readonly_strings.contains(&pointer)
+				})
+				.then_some(pointer)
+		});
+		let bytes = match borrowed {
+			Some(pointer) => builder
+				.build_select(inline, pointer, bytes, "")?
+				.into_pointer_value(),
+			None => {
+				let entry = function.get_first_basic_block().expect("an entry");
+				let allocator = self.context.create_builder();
+				if let Some(first) = entry.get_first_instruction() {
+					allocator.position_before(&first);
+				} else {
+					allocator.position_at_end(entry);
+				}
+				let snapshot = allocator.build_alloca(self.string_type, "inline_string")?;
+				// only an inline string is stored (a view or a heap string, like the
+				// parts of a split, needs no snapshot)
+				let before = builder.get_insert_block().expect("a block");
+				let store = self.context.append_basic_block(function, "inline_snapshot");
+				let join = self.context.append_basic_block(function, "string_bytes");
+				builder.build_conditional_branch(inline, store, join)?;
+				builder.position_at_end(store);
+				builder.build_store(snapshot, pair)?;
+				builder.build_unconditional_branch(join)?;
+				builder.position_at_end(join);
+				let phi = builder.build_phi(self.pointer_type(), "bytes")?;
+				phi.add_incoming(&[(&snapshot, store), (&bytes, before)]);
+				phi.as_basic_value().into_pointer_value()
+			}
+		};
 		let shifted = builder.build_right_shift(
 			capacity,
 			self.usize

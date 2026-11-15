@@ -162,6 +162,17 @@ Slow (the [comparison](#fa-rust-and-goose) has the numbers), and what the fifth 
 
 [`audit/`](audit/README.md) holds the tools that compare Fa's native executables with Goose's (CPU time against the same binaries, Goose given its size at run time, callgrind profiles, hot instruction runs). What the native backend changed for the Goose suite, under which conditions, what it gained and what remains is in `design/llvm-backend-plan.md` ("Native representations of the Goose work").
 
+`string-building/bytes.fa` is a second Fa version of `string-building`, written like
+the Goose port: growable byte buffers (`Array<Byte>`, until the `Bytes` type exists),
+`split` as ranges into the text and `join` into a new buffer, integers formatted by
+hand. It prints the same output. `string-building/growing.fa` is the same program with
+`GrowingArray<Byte>` buffers, whose items never move, like Goose's `u8[>..]` arrays. The
+audit measures them as `string-building-bytes` and `string-building-growing`, against
+the same Goose and Rust programs:
+`python3 benchmarks/audit/compare.py string-building string-building-bytes string-building-growing --directory … --default-sizes`,
+and `audit/variants.py` times several of these builds against each other.
+The runner of this page (`run.ts`) only builds the `main.fa` of each benchmark.
+
 ## Fairness rules
 
 - **Same algorithm, same output.** Both versions do the same work in the same order, including the floating-point operations (the order of the operands matters for the last bits), and print exactly the same text. The runner compares every output with the Rust one before timing.
@@ -623,3 +634,24 @@ Measured on 2026-11-04 (load average 9 to 13), `fa build --target=native` choosi
 
 Full LTO gives the smallest executables (29 to 67% smaller) and less CPU, and its link is one thread: the 1,000-file build takes 2.4 times the wall time of ThinLTO's, within the memory budget. The executables print the same; they are byte-identical with 1 and 6 threads.
 
+## GrowingArray indexing audit
+
+`growing-index/main.fa` uses an unreserved `GrowingArray<Integer>`;
+`array.fa` uses an unreserved `Array<Integer>`, Goose uses `i64[>..]`,
+and `main.rs` is the safe `Vec` reference. Each fills 16, 1,000 or 1,000,000 items,
+then performs four million random reads and four million random writes using
+Park-Miller (seed 7), and prints the read checksum and final item checksum
+modulo 1,000,000,007. Initialization and the final sequential checksum are
+included. No version announces capacity. Every intermediate stays below 2^53
+at these sizes.
+
+```bash
+python3 benchmarks/audit/compare.py growing-index growing-index-array --size 16 --directory benchmarks/audit/build/index-small --profile
+python3 benchmarks/audit/compare.py growing-index growing-index-array --size 1000 --directory benchmarks/audit/build/index-cache --profile
+python3 benchmarks/audit/compare.py growing-index growing-index-array --size 1000000 --directory benchmarks/audit/build/index-large --profile
+```
+
+Use `benchmarks/audit/variants.py` for 21 alternating runs of all three
+executables together, pinned to CPU 1, with user plus system CPU time. Pass
+Rust's output through `--expected` and `--profile-expected`; both `--size`
+and `--profile-size` are 16, 1,000 or 1,000,000 for the three rows.

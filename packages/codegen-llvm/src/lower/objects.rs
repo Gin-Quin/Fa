@@ -891,6 +891,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return self.sync_literal(node, &info);
 		}
 		let structure = self.object_type(info.ty);
+		let destination = if info.member.is_none() {
+			self.destination_for(node, Repr::Object(info.ty))
+		} else {
+			None
+		};
 		// the given values in the written order, then the defaults
 		let mut order: Vec<usize> = (0..info.fields.len()).collect();
 		order.sort_by_key(|&position| match info.fields[position].1 {
@@ -931,9 +936,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				_ => None,
 			};
+			let field_destination = destination
+				.filter(|_| self.uses_return_slot(repr))
+				.map(|slot| {
+					self.builder
+						.build_struct_gep(structure, slot.pointer, index, "result.field")
+						.map(|pointer| Slot { pointer, repr })
+				})
+				.transpose()?;
 			let lowered = match field {
 				// a default value of a type of another file, evaluated there
 				FieldValue::Constant(constant) => self.constant_field(&info, index, constant, node),
+				FieldValue::Given(value)
+					if early.is_some_and(|(_, repr)| self.uses_return_slot(repr)) =>
+				{
+					let (pointer, repr) = early.expect("an early box");
+					self.expr_with_early_destination(value, Slot { pointer, repr })
+				}
+				FieldValue::Given(value) | FieldValue::Default(value)
+					if field_destination.is_some() =>
+				{
+					self.expr_with_destination(value, field_destination)
+				}
 				_ => self.field_value(field, name, repr, &mut spreads),
 			};
 			let lowered = match lowered {
@@ -974,18 +998,37 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);
 			}
-			lowered_fields.push((index, lowered));
+			if let Some(slot) = destination {
+				let pointer = match field_destination {
+					Some(field) => field.pointer,
+					None => self.builder.build_struct_gep(
+						structure,
+						slot.pointer,
+						index,
+						"result.field",
+					)?,
+				};
+				self.store(Slot { pointer, repr }, lowered, node)?;
+			}
+			// Keep fields owned until the whole constructor succeeds.
+			lowered_fields.push((index, self.fresh(lowered)));
 		}
 		let mut value = structure.get_undef();
 		for (index, lowered) in lowered_fields {
-			if let Some(raw) = lowered.value {
+			let lowered = self.take(lowered, None)?;
+			if destination.is_none()
+				&& let Some(raw) = lowered.value
+			{
 				value = self
 					.builder
 					.build_insert_value(value, raw, index, "")?
 					.into_struct_value();
 			}
 		}
-		let object = self.fresh(Val::new(Repr::Object(info.ty), value));
+		let object = self.fresh(match destination {
+			Some(slot) => self.load_destination(slot)?,
+			None => Val::new(Repr::Object(info.ty), value),
+		});
 		match info.member.and_then(|member| self.member_of_type(member)) {
 			Some((nominal, index)) => self.build_member(nominal, index, Some(object), node),
 			None => Ok(object),
@@ -1227,10 +1270,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					// a field of the spread value: copied
 					self.fresh(self.emit_copy(Val::new(source_repr, raw))?)
 				}
-				FieldValue::None => Val {
-					repr: Repr::None,
-					value: None,
-				},
+				FieldValue::None => Val::none(),
 				// lowered by the caller (`constant_field`)
 				FieldValue::Constant(_) => {
 					return Err(self.unsupported(0, "this default value"));
@@ -1517,6 +1557,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			&& let Resolution::Builtin(property) = self.analysis.resolution(first)
 			&& fa_analyzer::builtins::get(property).path == "String#length"
 			&& matches!(self.view(target), View::Call { .. })
+			&& self.node_repr(target)? == Repr::Str
 			&& let Some(info) = self.analysis.call(target)
 			&& let fa_analyzer::analysis::Callee::Builtin(method) = info.callee
 			&& fa_analyzer::builtins::get(method).path == "Array#join"
@@ -1791,14 +1832,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let repr = self.node_repr(node)?;
 		let result = self.alloca(repr, "chain")?;
-		let none = self.convert(
-			Val {
-				repr: Repr::None,
-				value: None,
-			},
-			repr,
-			node.index(),
-		)?;
+		let none = self.convert(Val::none(), repr, node.index())?;
 		if let Some(raw) = none.value {
 			self.builder.build_store(result.pointer, raw)?;
 		}
@@ -1843,14 +1877,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			false => None,
 		};
 		if let Some(result) = result {
-			let none = self.convert(
-				Val {
-					repr: Repr::None,
-					value: None,
-				},
-				repr,
-				node.index(),
-			)?;
+			let none = self.convert(Val::none(), repr, node.index())?;
 			if let Some(raw) = none.value {
 				self.builder.build_store(result.pointer, raw)?;
 			}
@@ -2606,7 +2633,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let data = if repr.has_value() {
 				self.unbox(value, repr)?
 			} else {
-				Val { repr, value: None }
+				Val {
+					destination: None,
+					repr,
+					value: None,
+				}
 			};
 			if repr == Repr::Str {
 				let quoted = self.append_block("format_quoted");

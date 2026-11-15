@@ -60,7 +60,7 @@ and in freeing.
 | `lru` | `Node` | 32 (four `Integer`) | 16 (`i32`, `i32`, two `u32` pool links) |
 | `lru` | map entry | 32 (`{hash, live, key, value}`) + 8-byte index slot, dead entries kept until compaction; since the map work: 16 (`{key, value}`, a chunk bit) + 8-byte slot, dead entries reused | 8 (`i32` key + `u32` link) |
 | `calc` | `Expression` | box 16 (`Number`, `Negation`, `Parenthesized`), 48 (`Binary`: a 24-byte `Character` operator) | 1 tag + varint / `u16` links |
-| `calc`, `sexp` | parser text | `Array(Character)`: 24 per character | the text's bytes: 1 per character |
+| `calc`, `sexp` | parser text | `Array<Character>`: 24 per character | the text's bytes: 1 per character |
 | `sexp` | `Sexp` | box 32 + name block 16 (`Symbol`), 16 (`Number`), 16 + array header 24 + 8 per child (`List`) | 1 tag + 4-byte link + inline name / varint |
 | `binary-trees` | `Tree` | 32 (`{i1, ptr}` × 2), one block per node | 8 (two `u32` relative links), one pool per tree |
 | `scene` | `SceneNode` | 112 boxed + array header + 8 per child | 117 inline in one pool, `u32` child links |
@@ -144,7 +144,7 @@ overlap by a few percent. Paths are under `packages/codegen-llvm/`.
 
 | Cause | Class | Share | Where |
 | --- | --- | ---: | --- |
-| Parser: `current()` copies a `Character` from `Array(Character)` (1.43 M calls, 31 instructions each), `digitValue` = `digits.indexOf` | b a g h | 45% | as in `calc` |
+| Parser: `current()` copies a `Character` from `Array<Character>` (1.43 M calls, 31 instructions each), `digitValue` = `digits.indexOf` | b a g h | 45% | as in `calc` |
 | Generation: letters appended as 1-byte strings, numbers through a template, `self.text` through `self` | b f g | 25% | `src/lower/text.rs`, `src/lower/arith.rs:826` |
 | Symbols built character by character (`name += character`) into a fresh block, a box per node, an array (header + items) per list | d e | 20% | runtime `string_grow`, `heap_alloc_slow` |
 | `characters()` of the 9.6 M-byte text: 230 MB of 24-byte strings | e b | 6% (and the RSS) | runtime `fa_string_characters` |
@@ -224,7 +224,7 @@ behind, `respond` and `calc` stay 2x+ behind until fixes 1 (append lowering), 2,
 
 - `calc`, `sexp`: `digitValue` uses `digits.indexOf(character)` (a search) where Goose compares a
   byte range; `calc`'s `edited` copies the text where Goose edits its buffer in place; both parse
-  an `Array(Character)` built from the text where Goose indexes the bytes (the comment "indexing a
+  an `Array<Character>` built from the text where Goose indexes the bytes (the comment "indexing a
   string counts grapheme clusters" is outdated for simple strings).
 - `words`, `lru`: Goose presizes its table (4x the vocabulary, 2x the capacity); Fa's `Map` grows
   from empty. `lru` probes three times per miss (`get`, store, `delete` by key) where Goose keeps

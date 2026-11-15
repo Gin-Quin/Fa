@@ -67,7 +67,7 @@ See [destructuring](/operations/destructuring).
 ## Types
 
 ```
-Boolean  String  Character
+Boolean  String  Bytes
 Integer  Float  BigInt  Percentage  Byte
 Int8  Int16  Int32  Int64  Int128  UInt8  UInt16  UInt32  UInt64  UInt128  Float32  Float64
 None  Never  Void
@@ -79,9 +79,10 @@ Tuple<A, B>  Range  Task<T>  Optional<T>  T?
 
 - `Integer` has the range and native storage of `Int64` (two types, not interchangeable inside collections), and `Float` is `Float64`; `Byte` is `UInt8`. A `Float32` is accepted where a `Float` is expected, but arithmetic, comparisons and equality never mix the two. `T?` is `Optional<T>`, which is `T | None`, and `T??` is `T?`.
 - Every integer type is a range of `Integer` values with a storage width: `Int8` is `Integer<min = -128, max = 127>` stored in 8 bits.
-- `Character` is one grapheme cluster, and the `length` of a string counts graphemes (unlike JavaScript, which counts UTF-16 units). A `Character` is accepted where a `String` is expected.
-- A string stores UTF-8 bytes: `bytes()` gives them (an `Array<Byte>`), `characters()` gives an `Array<Character>` that is a view of the string; reading either without keeping it builds no array. `String.from(text, capacity = n)`, the `capacity` property (in bytes) and `reserve(additional)` (`mutates self`) manage the room of a growing string.
-- `let middle = text[1..3]` copies the characters; `use middle = text[1..3]` is a slice of type `String in text`, a reference into the string, invalidated by any mutation of the string.
+- A `String` is a sequence of UTF-16 code units on every target, exactly like a JavaScript string: `length`, `text[i]` (a `String` of length 1), slices, `indexOf` and `<` work on code units. `for character in text` visits the code points, `text.characters()` gives the grapheme clusters, and there is no character type.
+- `Bytes` is a fixed-length sequence of bytes (a `Uint8Array` on JavaScript). `text.toUtf8()` encodes a string, `String.fromUtf8(bytes)` decodes one (`throws Utf8Error`), and `text.utf8Length()` counts the bytes without encoding. Input and output give and take `Bytes`; their `Text` variants (`File.readText`) decode UTF-8.
+- `String.from(text, capacity = n)`, the `capacity` property (in bytes natively) and `reserve(additional)` (`mutates self`) manage the room of a growing string.
+- `let middle = text[1..3]` copies the code units; `use middle = text[1..3]` is a slice of type `String in text`, a reference into the string, invalidated by any mutation of the string.
 - `Void` is the type of "no value": the return type of a function that returns nothing, also usable as a type argument (`Task<Void>`). It can't be bound with `let`, and it is not `None`.
 - `Never` is the bottom type: the type of `throw`, `return`, `break`, `continue`, of a `loop` without `break` and of a call to a function returning `Never`.
 - There is no `Any` type: use generics or unions.
@@ -438,7 +439,7 @@ if name is not none { }                   -- narrows `name` to `String`
 
 - `throw` exits the function with an error. A call that can fail must be preceded by `try` or followed by `catch`.
 - Errors are never part of the return type, and are never falsy. There is no `!` (only `!=`) and no postfix `?`.
-- The built-in errors are `Errors` types with one member of the same name: `IndexError { index, length }`, `KeyNotFound { key }`, `DivisionByZero`, `ArithmeticError { message }`, `ParseError { input, message }` and `Cancelled`. `Error` only exposes `toString()`.
+- The built-in errors are `Errors` types with one member of the same name: `IndexError { index, length }`, `KeyNotFound { key }`, `DivisionByZero`, `ArithmeticError { message }`, `ParseError { input, message }`, `Utf8Error { position }` and `Cancelled`. `Error` only exposes `toString()`.
 - An optional is an absence; an error is a failure. `?.` and `??` only apply to optionals.
 - `try` also prefixes an assignment whose target can fail: `try scores[index] = 0`.
 - A runtime check that the compiler could not prove away (an integer overflow, a failed `assert` outside tests), a stack overflow or an exhausted memory **stops the program**: `stop: <reason>` and the source location on the error output, and the exit code 101. An `assert` is always evaluated, and narrows the code after it. A stop can't be caught or thrown; in a test, it fails the test.
@@ -512,6 +513,8 @@ let copy = ada                                 -- a copy
 | `GrowingMap` | `map[key] = value` | `mutates self[key], self.size` |
 | `Map`, `Pool`, `Columnar` and the growing collections | `reserve` | `mutates self.capacity` |
 | `String` | `reserve` | `mutates self` |
+
+`reserve` declares `mutates self` on `Array`, `Set` and `OrderedColumnar`, and `mutates self.capacity` on every other collection, where it moves no item. An effect on `length` or `size` implies the same effect on `capacity`. See [capacity and reservation](/collections/arrays#capacity-and-reservation).
 
 A mutation gives a new value to a place, which stays valid; it invalidates the local references into the memory the old value owned, deduced from its type: nothing for a flat value (a primitive, a union of literals, a relation reference, an object of flat fields), and the elements, string slices, union payload or recursive children otherwise. Mutating a whole collection invalidates every reference into it. An invalidation means the place itself may have disappeared, or may designate another element; it always names precise places. Both target every local reference that may designate the affected elements. The compiler keeps the exact key or index of each reference when it is known at compile time (like the range of an integer), and knows that a reference returned by `add` is distinct from every reference that existed before: the other references stay valid. The facts it uses are fixed (see [reference checking](/advanced/reference-checking)).
 

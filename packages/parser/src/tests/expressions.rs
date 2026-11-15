@@ -344,7 +344,7 @@ fn percentage_literals() {
 #[test]
 fn optional_suffix() {
 	assert_statement("value?", "value?");
-	assert_statement("Array(Integer)?", "Array(Integer)?");
+	assert_statement("Array<Integer>?", "Array<Integer>?");
 }
 
 #[test]
@@ -536,8 +536,8 @@ fn digit_separators() {
 
 #[test]
 fn relations() {
-	assert_statement("Bag(Self->bestFriend)", "Bag((Self -> bestFriend))");
-	assert_statement("Bag(in Self->bestFriends)", "Bag(in (Self -> bestFriends))");
+	assert_statement("Bag<Self->bestFriend>", "Bag<(Self -> bestFriend)>");
+	assert_statement("Bag<in Self->bestFriends>", "Bag<in (Self -> bestFriends)>");
 	assert_statement("(Self->bestFriend)?", "((Self -> bestFriend))?");
 }
 

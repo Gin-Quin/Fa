@@ -89,7 +89,7 @@ Each growing collection is its standard counterpart without the machinery that r
 | `GrowingMap` | entries in pages, plus an index | No free slots among the entries, which are dense. |
 | `GrowingSet` | values in pages, plus an index | Unlike a `Set`, whose values are stored in the hash table and move when it grows, the values live in stable pages, and the index holds their slot numbers: references survive insertions. `includes` reads one more place in memory than in a `Set`. |
 
-A `GrowingArray` is a little slower to index than an `Array`, since it has to find the segment first, but iterating over it is as fast. The other growing collections are faster than their standard counterparts, except `GrowingSet`, which trades some `includes` speed for stable references.
+A `GrowingArray` is a little slower to index than an `Array`, since it has to find the segment first, but iterating over it is as fast. A `GrowingArray` created with a `capacity` (`GrowingArray<Integer>.from([], capacity = 1000)`) holds that many items in its first segment: as long as it stays within its capacity, it is a single block, indexed as directly as an `Array`, and it keeps growing by segments past it. The other growing collections are faster than their standard counterparts, except `GrowingSet`, which trades some `includes` speed for stable references.
 
 ## Freeing the memory
 
@@ -105,12 +105,34 @@ function parse = (source: String): SyntaxTree => {
 
 To keep the data beyond the scope, return the collection itself rather than references into it.
 
+## Emptying a growing collection
+
+There is no `clear`: no method of a growing collection invalidates a reference. To empty one, assign an empty collection to it:
+
+```fa
+mutable tokens: GrowingArray<Token> = []
+
+for line in lines {
+	tokens = [] -- empties `tokens`: its memory is kept for the next line
+	for word in line.split(" ") {
+		tokens.push(Token { text = word })
+	}
+	console.log(tokens.length)
+}
+```
+
+The assignment replaces the whole collection, so, like any assignment, it invalidates the references into the old one. The memory of the collection is not released: the next elements reuse it, which makes a growing collection a good buffer to fill again and again. It is released when the collection is destroyed.
+
 :::implementation
 ## Implementation details
 
 ### Native
 
-- **`GrowingArray`** is a **segmented list** (Zig's `SegmentedList`). With a first segment of `2^k` items, segment `s` holds `2^k` items for `s = 0` and `2^(k + s - 1)` items after, so every segment after the first doubles the capacity. Item `i` lives in segment `s = 0` when `i < 2^k`, and otherwise in segment `s = floor(log2(i >> k)) + 1` (one `clz`), at offset `i - 2^(k + s - 1)`. The header holds the length and a small fixed array of segment pointers (64 entries cover any length). Iteration runs a plain loop over each segment. `k` is chosen so that the first segment fills about 64 bytes.
+- **`GrowingArray`** is a **segmented list** (Zig's `SegmentedList`) on every native target, including wasm32 and the freestanding one; it never reserves address space (see "GrowingArray native layout" in `design/decisions.md`). With a first segment of `2^k` items, segment `s` holds `2^k` items for `s = 0` and `2^(k + s - 1)` items after, so every segment after the first doubles the capacity. Item `i` lives in segment `s = 0` when `i < 2^k`, and otherwise in segment `s = floor(log2(i >> k)) + 1` (one `clz`), at offset `i - 2^(k + s - 1)`.
+	- **`k` belongs to the array**, not to its item type: it is stored in the header, never changes, and is read once before a loop. By default the first segment fills about 64 bytes. With a capacity (`from(items, capacity = n)`, or `reserve` on an empty array), `k` is the smallest value with `2^k >= n`: the array is one contiguous block until it outgrows its capacity. `reserve` on a non-empty array allocates the next segments ahead.
+	- **The header** holds the length, `k`, the cursor and the end of the current segment (`push` is one compare, one store and one increment), and the segment pointers. It is kept small: a few pointers inline, the others in a table allocated when they are needed (the table may move, the segments never do).
+	- **Iteration, copies and the read-only methods** run segment by segment: a plain loop or one block copy per segment. No method copies the array into a flat one, except those that produce an `Array`.
+	- **`x = []`** on a `GrowingArray` held by a `mutable` variable or field drops the items and keeps the segments: the length goes back to 0 and the cursor to the first segment. The other growing collections keep their chunks, pages and index the same way.
 - **`GrowingPool`** is a list of chunks with a bump pointer in the last one: no bitmap, no free list, no per-slot state. Iteration walks every slot of every chunk; only the last chunk is partially filled. Destruction frees the chunks, and visits the elements only if they own memory.
 - **`GrowingColumnar`** is the columnar layout with a bump index instead of the occupancy bitmap and the free lists.
 - **`GrowingMap`** is the compact dict of `Map` without the occupancy bitmap and the free lists: entries are appended to the last chunk, and the index has no tombstones.

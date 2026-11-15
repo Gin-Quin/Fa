@@ -193,6 +193,13 @@ fn generic_parameters_are_written_between_angle_brackets() {
 		codes("function f = (a: Integer) => a\nlet g = f<Integer>(1)\n"),
 		["GN007"]
 	);
+	// a generic function is one of its instances in its own definition
+	assert_eq!(
+		codes(
+			"function count = <Item>(items: Array<Item>, from: Integer): Integer => if from >= items.length { 0 } else { 1 + count<Item>(items, from + 1) }\n"
+		),
+		["GN007"]
+	);
 	// a generic function returning a function: the brackets, then two calls
 	let (session, file) = analyzed(
 		"function makeAdder = <Value: Integer | Float>(base: Value) => (value: Value) => base + value\nlet a = makeAdder<Float>(5)(3)\nlet b = makeAdder(5)(3)\n",

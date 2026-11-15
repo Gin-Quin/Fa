@@ -1199,13 +1199,24 @@ impl Walker<'_> {
 		Some(ty)
 	}
 
-	/// `f<T>` where `f` has no generic parameters: `GN007`.
+	/// `f<T>` where `f` takes no generic arguments: `GN007`. A generic
+	/// function is one of its instances in its own definition.
 	pub(super) fn not_generic_function(&mut self, n: NodeId, callee: NodeId) -> TypeId {
 		let ty = self.check(callee, None);
+		let own = match self.a.resolution(self.strip_groups(callee)) {
+			crate::symbols::Resolution::Local(symbol) => !self.declared_generics(symbol).is_empty(),
+			_ => false,
+		};
 		self.memo(n, |w| {
 			if !w.s.types.is_recovering(ty) {
 				let text = w.tree.text(callee.index()).to_string();
-				let message = format!("`{text}` has no generic parameters: call it without `<…>`");
+				let message = if own {
+					format!(
+						"`{text}` calls itself with its own generic parameters: call it without `<…>`"
+					)
+				} else {
+					format!("`{text}` has no generic parameters: call it without `<…>`")
+				};
 				let diagnostic = w.diagnostic(&GN007, n, message);
 				w.report(diagnostic);
 			}

@@ -819,7 +819,9 @@ impl Walker<'_> {
 				self.check_generic_lambda(n, signature, body, expected)
 			}
 			// a lambda written without types where a generic function type is expected
-			View::Lambda { signature, body } if self.takes_expected_generics(signature, expected) => {
+			View::Lambda { signature, body }
+				if self.takes_expected_generics(signature, expected) =>
+			{
 				self.check_lambda_of_generic_type(n, signature, body, expected)
 			}
 			View::Lambda { signature, body } => self.check_lambda(n, signature, body, expected),

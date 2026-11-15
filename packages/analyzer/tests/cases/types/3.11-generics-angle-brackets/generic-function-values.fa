@@ -1,7 +1,7 @@
 -- note: generic function values (phase 2 of "Generic functions carry their list on the
--- function value"): a generic function type is called at several types
-type Identity = <T>(value: T) => T
-function same: Identity = <T>(value: T): T => value
+-- function value"): a generic function type is the type of a parameter, whose argument (a
+-- named generic function or a lambda) is called at several types
+function same = <T>(value: T): T => value
 function describe = (transform: <T>(value: T) => T): String => {
 	let number = transform(1) -- type number: Integer
 	let text = transform("a") -- type text: String
@@ -11,23 +11,15 @@ console.log(describe(<T>(value: T) => value)) -- prints: 1 a
 console.log(describe(same)) -- prints: 1 a
 function identity = <T>(value: T) => value
 console.log(describe(identity)) -- prints: 1 a
+-- a lambda without types is generic from its expected type
+console.log(describe((value) => value)) -- prints: 1 a
 console.log(same(3), same<String>("b")) -- prints: 3 b
 
--- stored in fields and collections, returned
-type Toolbox = { identity: Identity }
-let box = Toolbox { identity = <T>(value: T) => value }
-console.log(box.identity(2), box.identity("c")) -- prints: 2 c
-let tools: Array<Identity> = [<T>(value: T) => value, same]
-for tool in tools {
-	console.log(tool(5), tool("d"))
-}
--- prints: 5 d
--- prints: 5 d
-function make = (): Identity => <T>(value: T) => value
-let made = make() -- type made: <T>(T) => T
-console.log(made(6), made<Boolean>(true)) -- prints: 6 true
+-- forwarded to another parameter of a generic function type; explicit arguments on the value
+function twice = (transform: <T>(value: T) => T): String => "{describe(transform)} {transform<Boolean>(true)}"
+console.log(twice(same), twice(<T>(value: T) => value)) -- prints: 1 a true 1 a true
 
 -- instantiated where a function type that isn't generic is expected
 let numbers = [1, 2].map(<T>(value: T) => value) -- type numbers: Array<Integer>
 function apply = (transform: (value: Integer) => Integer): Integer => transform(7)
-console.log(numbers, apply(same), apply(made)) -- prints: [1, 2] 7 7
+console.log(numbers, apply(same)) -- prints: [1, 2] 7

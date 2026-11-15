@@ -15,6 +15,7 @@ export function = (transform: <Value>(value: Value) => Value) => {
 -- file: application/main.fa
 function identity = <Item>(value: Item): Item => value
 function pairUp = <Item>(value: Item): Tuple<Item, Item> => (value, value)
+function showPairs = (tuple: <Item>(value: Item) => Tuple<Item, Item>) => console.log(tuple(7), tuple("x"))
 export function = () => {
 	library.printing(identity)
 	let twice = library.transforms.applyTwice(identity, 4)
@@ -22,8 +23,7 @@ export function = () => {
 	console.log(twice, words)
 	let tagged = library.transforms.wrapper("tag")
 	console.log(tagged(1), tagged(2.5))
-	let tuple: <Item>(value: Item) => Tuple<Item, Item> = pairUp
-	console.log(tuple(7), tuple("x"))
+	showPairs(pairUp)
 }
 -- prints: 1 one true
 -- prints: 4 same

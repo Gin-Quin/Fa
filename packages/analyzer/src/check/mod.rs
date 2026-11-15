@@ -357,6 +357,10 @@ pub struct Walker<'s> {
 	pub(crate) generic_params: FxHashMap<NodeId, Vec<crate::ids::ParamId>>,
 	/// The parameters of the generic declarations being walked: rigid, not inferred.
 	pub(crate) rigid_params: Vec<crate::ids::ParamId>,
+	/// Whether the type expression about to be checked is the type of a
+	/// parameter, the one place where a generic function type is written
+	/// (`GN030` elsewhere; `check_parameter_type`).
+	pub(crate) parameter_type: bool,
 	/// The `TypeFromSchema` applications that are the value of a generic
 	/// type function (or a result of its logic): built per application
 	/// (`schemas.rs`).
@@ -602,6 +606,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		hoisted_blocks: rustc_hash::FxHashSet::default(),
 		generic_params: FxHashMap::default(),
 		rigid_params: Vec::new(),
+		parameter_type: false,
 		schema_logic: rustc_hash::FxHashSet::default(),
 		deferred_comptime: 0,
 		schema_identity: None,
@@ -812,6 +817,10 @@ impl Walker<'_> {
 			// a generic lambda (phase 2 of "Generic functions carry their list on the function value", functions.rs)
 			View::Lambda { signature, body } if !signature.generics.is_empty() => {
 				self.check_generic_lambda(n, signature, body, expected)
+			}
+			// a lambda written without types where a generic function type is expected
+			View::Lambda { signature, body } if self.takes_expected_generics(signature, expected) => {
+				self.check_lambda_of_generic_type(n, signature, body, expected)
 			}
 			View::Lambda { signature, body } => self.check_lambda(n, signature, body, expected),
 			View::Parameters { items } => self.check_parameters(n, items),

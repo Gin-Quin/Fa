@@ -11,7 +11,7 @@ use crate::analysis::NodeFlags;
 use crate::builtins;
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
-use crate::diagnostics::codes::types::{CL020, FN028, TY003, TY007, TY008, TY040};
+use crate::diagnostics::codes::types::{CL020, FN028, GN030, TY003, TY007, TY008, TY040};
 use crate::diagnostics::codes::values::{E_DECL_9, E_NUM_13};
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
@@ -19,9 +19,22 @@ use crate::syntax::{self, Name, NodeList, SignatureView, View};
 use crate::types::{CollKind, FnSig, IntType, ParamSig, TypeFlags, TypeKind};
 
 impl Walker<'_> {
+	/// The type written for a parameter (of a function, a lambda or a
+	/// function type): it may be a generic function type, whose value is then
+	/// known wherever the function is compiled (generics page, "Where a
+	/// generic function type is written").
+	pub(super) fn check_parameter_type(&mut self, n: NodeId) -> TypeId {
+		self.parameter_type = true;
+		let ty = self.check_type_expr(n);
+		self.parameter_type = false;
+		ty
+	}
+
 	/// The type a type expression denotes.
 	pub fn check_type_expr(&mut self, n: NodeId) -> TypeId {
 		let tree = Arc::clone(&self.tree);
+		// only the type written right after a parameter's name: not its parts
+		let parameter_type = std::mem::take(&mut self.parameter_type);
 		let ty = match syntax::view(&tree, n) {
 			View::Name(name) => self.memo(n, |w| w.type_name(n, name)),
 			View::Group(inner) => {
@@ -44,7 +57,9 @@ impl Walker<'_> {
 				self.set_flag(signature, NodeFlags::TYPE_EXPR);
 				self.memo(n, |_| ty)
 			}
-			View::Lambda { signature, body } => self.function_type_expr(n, signature, body),
+			View::Lambda { signature, body } => {
+				self.function_type_expr(n, signature, body, parameter_type)
+			}
 			// literal types (types brief §3.1.2)
 			View::Integer(value) => self.memo(n, |w| w.s.types.int_literal(value)),
 			View::String(text) => self.memo(n, |w| w.s.types.string_literal(text)),
@@ -499,10 +514,22 @@ impl Walker<'_> {
 		n: NodeId,
 		signature: SignatureView<'_>,
 		body: NodeId,
+		parameter_type: bool,
 	) -> TypeId {
 		// `<T>(value: T) => T`: a generic function type, whose parameters are
 		// declared in a scope of its own
 		if !signature.generics.is_empty() {
+			if !parameter_type {
+				return self.memo(n, |w| {
+					let diagnostic = w.diagnostic(
+						&GN030,
+						n,
+						"a value of a generic function type must be known at compile time: only a parameter can have this type, and it is given a named function or a lambda",
+					);
+					w.report(diagnostic);
+					TypeId::UNKNOWN
+				});
+			}
 			let saved = self.body.scope;
 			let generics = self.declare_generics(n, "this function type", signature.generics);
 			let ty = self.function_type_expr_with(n, signature, body, &generics);
@@ -581,10 +608,10 @@ impl Walker<'_> {
 					..
 				} => (
 					matches!(syntax::view(&tree, target), View::Spread(_)),
-					self.check_type_expr(annotation),
+					self.check_parameter_type(annotation),
 				),
 				// `(Integer) => Integer`: an unnamed parameter is its type
-				_ => (false, self.check_type_expr(parameter)),
+				_ => (false, self.check_parameter_type(parameter)),
 			};
 			if variadic && index + 1 != signature.parameters.len() {
 				self.memo(parameter, |w| {

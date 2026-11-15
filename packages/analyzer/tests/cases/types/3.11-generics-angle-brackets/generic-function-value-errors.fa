@@ -1,15 +1,25 @@
 -- note: what a generic function type accepts (decision "Generic functions carry their list on
--- the function value": a constraint can't be narrower than the type's)
-type Identity = <T>(value: T) => T
-type Numeric = <T: Integer | Float>(value: T) => T
+-- the function value": a constraint can't be narrower than the type's), and where it is
+-- written: as the type of a parameter only (generics page, "Where a generic function type is
+-- written"; `GN030` elsewhere)
 function plain = (value: Integer): Integer => value
 function describe = (transform: <T>(value: T) => T) => transform(1)
 describe(plain) -- error: E-GEN-2
-function narrow: Numeric = <T: Integer>(value: T): T => value -- error: E-GEN-1
-function wide: Numeric = <T>(value: T): T => value
-function two: Identity = <T, U>(value: T): T => value -- error: E-GEN-1
-function numbers = (transform: Numeric) => transform(1.5)
+function narrow = <T: Integer>(value: T): T => value
+function wide = <T>(value: T): T => value
+function two = <T, U>(value: T): T => value
+function numeric = <T: Integer | Float>(value: T): T => value
+function numbers = (transform: <T: Integer | Float>(value: T) => T) => transform(1.5)
 numbers(wide)
-numbers(narrow)
-describe(wide) -- error: E-GEN-1
-let number = wide<String>("a") -- error: GN010
+numbers(numeric)
+numbers(narrow) -- error: E-GEN-1
+describe(two) -- error: E-GEN-1
+describe(numeric) -- error: E-GEN-1
+let number = numeric<String>("a") -- error: GN010
+-- a generic function type anywhere but as the type of a parameter
+type Identity = <T>(value: T) => T -- error: GN030
+type Toolbox = { identity: <T>(value: T) => T } -- error: GN030
+let tools: Array<<T>(value: T) => T> = [] -- error: GN030
+function make = (): Identity => wide -- a return type names it through an alias, reported above
+let alias: <T>(value: T) => T = wide -- error: GN030
+function annotated: <T>(value: T) => T = <T>(value: T): T => value -- error: GN030

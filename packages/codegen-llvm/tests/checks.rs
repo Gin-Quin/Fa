@@ -1466,7 +1466,7 @@ console.log(items.length)
 	fn a_generic_function_type_called_at_growing_types_is_an_error() {
 		let error = full_ir(
 			"generic-values-growth",
-			"type Grow = <T>(value: T, depth: Integer, again: Grow) => Integer\nfunction grow: Grow = <T>(value: T, depth: Integer, again: Grow): Integer => {\n\tif depth == 0 {\n\t\treturn 0\n\t}\n\tagain([value], depth - 1, again)\n}\nconsole.log(grow(1, 3, grow))\n",
+			"function grow = <T>(value: T, depth: Integer, again: <U>(value: U, depth: Integer) => Integer): Integer => {\n\tif depth == 0 {\n\t\treturn 0\n\t}\n\tagain([value], depth - 1)\n}\nfunction turn = <U>(value: U, depth: Integer): Integer => grow(value, depth, turn)\nconsole.log(turn(1, 3))\n",
 		)
 		.expect_err("a polymorphic recursion");
 		let message = error.to_string();

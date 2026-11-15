@@ -11,7 +11,7 @@ type Imported = library.Greeting
 function describe = <Item: { describe: (self) => String }>(item: Item): String => item.describe()
 function identity = <Item>(item: Item): Item => item
 function makeGreeting = (): library.Greeting => library.Greeting { name = "Cleo" }
-type Describe = <Item: { describe: (self) => String }>(item: Item) => String
+function showBoth = (show: <Item: { describe: (self) => String }>(item: Item) => String, person: Person, greeting: library.Greeting): String => "{show(person)} {show(greeting)}"
 type Holder<Item> = { value: Item }
 type Speaker<Item: { describe: (self) => String }> = {
 	value: Item
@@ -31,8 +31,7 @@ export function = () => {
 -- prints: Hi Bea
 	console.log(identity(greeting).describe(), makeGreeting().describe(), library.make().describe(), library.person.describe())
 -- prints: Hi Bea Hi Cleo Hi Dara Hi Ed
-	let show: Describe = describe
-	console.log(show(person), show(greeting))
+	console.log(showBoth(describe, person, greeting))
 -- prints: Hello Ada Hi Bea
 	let holder = Holder<Imported> { value = greeting }
 	let localHolder = Holder<Person> { value = person }

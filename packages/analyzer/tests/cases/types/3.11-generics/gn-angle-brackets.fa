@@ -1,7 +1,7 @@
--- generic parameters are written between angle brackets: parentheses are a call (GN009)
+-- generic parameters are written between angle brackets: parentheses are a call (GN031)
 function pick = <Value: Integer | Float>(value: Value): Value => value
-let a: Array(Integer) = [] -- error: GN009
-let b = pick(Float)(2) -- error: GN009
+let a: Array(Integer) = [] -- error: GN031
+let b = pick(Float)(2) -- error: GN031
 let c = pick<Float>(2) -- type c: Float
 function plain = (value: Integer) => value
 let d = plain<Integer>(1) -- error: GN007
@@ -9,5 +9,5 @@ let d = plain<Integer>(1) -- error: GN007
 function applyToBoth = (transform: <Value>(value: Value) => Value, number: Integer, text: String) =>
 	(transform(number), transform(text))
 let e = applyToBoth((value) => value, 1, "one")
-let f = applyToBoth((value: Integer) => value, 1, "one") -- error: E-TYPE-1, error: E-TYPE-1 (the lambda isn't generic)
+let f = applyToBoth((value: Integer) => value, 1, "one") -- error: E-GEN-2 (the lambda isn't generic)
 mutable handlers: Array<<Value>(value: Value) => Value> = [] -- error: GN030

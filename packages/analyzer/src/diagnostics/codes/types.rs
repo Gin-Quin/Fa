@@ -77,7 +77,7 @@ codes! {
 	GN016 = "GN016", Error, [], "operation not allowed by the constraint";
 	GN017 = "GN017", Error, [], "error in code checked after substitution (with the application site)";
 	GN020 = "GN020", Error, [], "polymorphic recursion";
-	GN030 = "GN030", Error, [], "generic parameters on a lambda";
+	GN030 = "GN030", Error, [], "a value of a generic function type that isn't known at compile time";
 	GN031 = "GN031", Error, [], "generic arguments or parameters written with parentheses";
 	TF001 = "TF001", Error, [], "type function applications nest too deeply (256)";
 	TF002 = "TF002", Error, [], "error inside an applied type function";

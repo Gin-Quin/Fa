@@ -345,6 +345,54 @@ impl Walker<'_> {
 		ty
 	}
 
+	/// Whether a lambda without a generic list is generic from its expected
+	/// type (generics page: "a lambda without generic parameters is generic
+	/// only when its expected type is"): the type is a generic function type,
+	/// and the lambda writes no type, so that every type it has is the
+	/// expected one. A lambda that annotates a parameter isn't generic
+	/// (`E-GEN-2`).
+	pub(super) fn takes_expected_generics(
+		&self,
+		signature: SignatureView<'_>,
+		expected: Option<TypeId>,
+	) -> bool {
+		expected.is_some_and(|expected| !self.own_generics(expected).is_empty())
+			&& signature.returns.is_none()
+			&& signature
+				.parameters
+				.iter()
+				.all(|parameter| matches!(self.view(parameter), View::Name(_)))
+	}
+
+	/// A lambda that is generic from its expected type
+	/// ([`Self::takes_expected_generics`]): the parameters of that type are
+	/// rigid in its body, and its type is the generic function type.
+	pub(super) fn check_lambda_of_generic_type(
+		&mut self,
+		n: NodeId,
+		signature: SignatureView<'_>,
+		body: NodeId,
+		expected: Option<TypeId>,
+	) -> TypeId {
+		let params = expected
+			.map(|expected| self.own_generics(expected))
+			.unwrap_or_default();
+		let generics: Vec<TypeId> = params
+			.iter()
+			.map(|&param| self.s.types.intern(TypeKind::Param(param)))
+			.collect();
+		let rigid = self.rigid_params.len();
+		self.rigid_params.extend(params.iter().copied());
+		let ty = self.check_lambda(n, signature, body, expected);
+		self.rigid_params.truncate(rigid);
+		if let Some(info) = self.a.functions.get_mut(&n) {
+			info.generics = params;
+		}
+		let ty = self.generic_function_type(ty, &generics);
+		self.set_type(n, ty);
+		ty
+	}
+
 	/// A lambda: its parameter types, return type and effects come from the
 	/// expected function type when there is one (types brief §4.6); without
 	/// one, its parameters must be annotated (`FN061`) and its return type is
@@ -894,7 +942,7 @@ impl Walker<'_> {
 		for (index, param) in syntaxes.iter().enumerate() {
 			let expected = expected_params.get(index).copied();
 			let declared = match (param.annotation, expected) {
-				(Some(annotation), _) => self.check_type_expr(annotation),
+				(Some(annotation), _) => self.check_parameter_type(annotation),
 				(None, Some(expected)) if expected.variadic => self.array_item(expected.ty),
 				(None, Some(expected)) => expected.ty,
 				(None, None) if lenient => TypeId::UNKNOWN,

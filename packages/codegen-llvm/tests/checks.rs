@@ -666,7 +666,7 @@ console.log(items.length)
 "#,
 		);
 		let fill = function(&ir, "fa.fill");
-		assert_eq!(count(fill, "@fa_array_reserve_additional("), 1, "{fill}");
+		assert_eq!(count(fill, "@fa_array_reserve("), 1, "{fill}");
 		assert!(!fill.contains("@fa_array_grow("), "{fill}");
 	}
 
@@ -1145,8 +1145,9 @@ console.log(items.length)
 
 	#[test]
 	fn consecutive_pushes_keep_the_header_in_registers() {
-		// only the cold paths that grow the array read it again
-		let pushes: String = (0..12)
+		// only the cold paths that grow the array read it again (enough
+		// pushes for `many` to stay a function of its own)
+		let pushes: String = (0..24)
 			.map(|index| format!("\ttarget.push({index})\n"))
 			.collect();
 		let source = format!(
@@ -1154,7 +1155,7 @@ console.log(items.length)
 		);
 		let ir = optimized_ir("consecutive-pushes", &source);
 		let many = function(&ir, "fa.many");
-		assert_eq!(count(many, "@fa_array_grow("), 12, "{many}");
+		assert_eq!(count(many, "@fa_array_grow("), 24, "{many}");
 		let hot: usize = many
 			.split("\n\n")
 			.filter(|block| !block.starts_with("push_grow"))
@@ -1236,7 +1237,8 @@ console.log(items.length)
 	fn growing_pushes_advance_a_cursor_in_registers() {
 		// a push onto a `GrowingArray` compares its cursor with the end of the
 		// segment, stores and advances; only the cold path finds a segment
-		let pushes: String = (0..12)
+		// (enough pushes for `many` to stay a function of its own)
+		let pushes: String = (0..24)
 			.map(|index| format!("\ttarget.push({index})\n"))
 			.collect();
 		let source = format!(
@@ -1244,7 +1246,7 @@ console.log(items.length)
 		);
 		let ir = optimized_ir("growing-pushes", &source);
 		let many = function(&ir, "fa.many");
-		assert_eq!(count(many, "@fa_segmented_next("), 12, "{many}");
+		assert_eq!(count(many, "@fa_segmented_next("), 24, "{many}");
 		assert!(!many.contains("@llvm.ctlz"), "{many}");
 		let hot: usize = many
 			.split("\n\n")
@@ -1466,16 +1468,20 @@ console.log(items.length)
 	}
 
 	#[test]
-	fn a_generic_function_type_called_at_growing_types_is_an_error() {
+	fn a_generic_function_type_that_names_itself_is_not_written() {
+		// a generic function type is written as the type of a parameter
+		// only (`GN030`): the type of a function that takes itself has no
+		// name, so no class of instances grows without end (the polymorphic
+		// recursion that `generic_values.rs` reports)
 		let error = full_ir(
 			"generic-values-growth",
-			"function grow = <T>(value: T, depth: Integer, again: <U>(value: U, depth: Integer) => Integer): Integer => {\n\tif depth == 0 {\n\t\treturn 0\n\t}\n\tagain([value], depth - 1)\n}\nfunction turn = <U>(value: U, depth: Integer): Integer => grow(value, depth, turn)\nconsole.log(turn(1, 3))\n",
+			"type Grow = <T>(value: T, depth: Integer, again: Grow) => Integer\nfunction grow: Grow = <T>(value: T, depth: Integer, again: Grow): Integer => {\n\tif depth == 0 {\n\t\treturn 0\n\t}\n\tagain([value], depth - 1, again)\n}\nconsole.log(grow(1, 3, grow))\n",
 		)
-		.expect_err("a polymorphic recursion");
+		.expect_err("a generic function type outside a parameter");
 		let message = error.to_string();
-		assert!(message.contains("test.fa:6:2: error"), "{message}");
-		assert!(message.contains("`Array<Array<Integer>>`"), "{message}");
+		assert!(message.contains("test.fa:1:13: error[GN030]"), "{message}");
 	}
+
 	#[test]
 	fn disjoint_array_metadata_needs_a_non_wrapping_offset() {
 		let source = |offset: &str| {

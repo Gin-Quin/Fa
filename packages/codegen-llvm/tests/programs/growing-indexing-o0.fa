@@ -37,12 +37,12 @@ for round in 0..3 {
 -- prints: 1
 -- prints: 2
 -- Immutable static and runtime frame storage use the same indexing path.
-function local = (value: Integer): Integer throws IndexError => {
+function local = (value: Integer, index: Integer): Integer throws IndexError => {
 	let frame: GrowingArray<Integer> = [value, value + 1, value + 2]
-	try frame[-1]
+	try frame[index]
 }
 let fixed: GrowingArray<Integer> = [10, 20, 30]
-console.log(try read(fixed, -2), try local(40)) -- prints: 20 42
+console.log(try read(fixed, -2), try local(40, -1)) -- prints: 20 42
 
 -- A closed empty owner keeps default k, including over directory growth.
 mutable known: GrowingArray<Integer> = []

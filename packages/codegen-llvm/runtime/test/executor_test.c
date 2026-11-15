@@ -1052,7 +1052,10 @@ static void test_tree_regions(void) {
 	fa_arena_enter();
 	fa_array_init_region_local(local, 0, 0, sizeof(uint64_t));
 	for (uint64_t index = 0; index < 10; index += 1) {
-		*(uint64_t *)fa_array_region_push_slot(local, sizeof(uint64_t)) = index + 123;
+		// a push of the generated code: only the growth is the runtime's
+		if (local->length >= local->capacity) { fa_array_region_grow(local, sizeof(uint64_t)); }
+		((uint64_t *)local->items)[local->length] = index + 123;
+		local->length += 1;
 	}
 	CHECK(allocated == before + 1 && tree_arena == 0);
 	children = fa_array_into_region(local, sizeof(uint64_t));
@@ -2053,13 +2056,13 @@ static void test_storage_hints(void) {
     }
     FaString string = owned_copy_with((const uint8_t *)"hello", 5, SIMPLE);
     fa_string_reserve(&string, 100);
-    CHECK(fa_string_storage_capacity(&string) >= 105);
+    CHECK(fa_string_room(string.length, string.capacity) >= 105);
     reserved = allocated;
     fa_string_append(&string, (const uint8_t *)"!", 1, SIMPLE);
     CHECK(allocated == reserved && string_length(&string) == 6);
-    size_t string_capacity = fa_string_storage_capacity(&string);
+    size_t string_capacity = fa_string_room(string.length, string.capacity);
     fa_string_append(&string, (const uint8_t *)"é", 2, 0);
-    CHECK(allocated == reserved && fa_string_storage_capacity(&string) == string_capacity);
+    CHECK(allocated == reserved && fa_string_room(string.length, string.capacity) == string_capacity);
     fa_free((void *)string.bytes, string.capacity & KIND_MASK, 1);
     CHECK(allocated == before);
 }

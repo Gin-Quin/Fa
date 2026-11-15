@@ -80,7 +80,7 @@ One item per ordered slice of [the WIP assessment §3.4](reviews/ownership-wip-2
 
 ## 3. Completeness
 
-One entry per work package of [the dated inventory §4](reviews/inventory-2026-11-15.md#4-work-packages), with completed portions removed. Cross-references to semantics above describe the same work, not a second assignment.
+One entry per work package of [the dated inventory §4](reviews/inventory-2026-11-15.md#4-proposed-work-packages-native-first-then-js), with completed portions removed. Cross-references to semantics above describe the same work, not a second assignment.
 
 - **WP1 — Native expected-skips to zero.** Returned primitive references/use/reuse, anonymous-union fields and method values, Enum/Optional conversions, rest patterns, range writes/equality, optional-array get, checkedPow/float constants and Fa type names. Also close the new deep-recursion runtime entries: js-million-copy on all LLVM targets and js-deep-values on wasm; audit unbounded copy/equality/format helpers. Sets/string slices follow O17–18/WP9. See native/wasm ratchet files.
 - **WP2 — Native compile-time values.** Lower Schema named members, @readDirectory and per-item @for; remove the five genuine native/wasm compile-time skips only when their fixtures pass. TypeFromSchema inside a generic type needs its own cross-target cases.
@@ -96,7 +96,7 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 - **WP12 — Node/web residuals.** Harness and web exclusions are integrated. Close the six remaining target entries listed below; preserve sandbox global/worker/clone restrictions and exact ratchets.
 - **WP13 — CLI/project shapes.** Complete per-test include/timeout, decide LCOV coverage versus documentation, standalone-file test discovery and native/wasm workspace package-name resolution. Exercise the full command/shape matrix and dependencies described in section 5.
 - **WP14 — Interpreter coverage.** Patterns/rest, when/then, conversions, members/receivers, effect/type values, assignments, imported statics and compile-time parameters, one focused construct per slice. The continuation stack is already integrated; preserve exact step/heap/depth accounting and check the ulimit regression before reopening it.
-- **WP15 — Freestanding completeness.** Float output without libc, BigInt, JSON and stack-overflow behavior; reduce the ratchet to intentional AN004 target refusals. Add a synchronized native queued-worker-cancellation check and classify the observed freestanding eager-worker result (the JS directory fixture is outside the LLVM single-file corpus).
+- **WP15 — Freestanding completeness.** Float output without libc, BigInt, JSON and stack-overflow behavior; reduce the ratchet to intentional AN004 target refusals. Worker-cancellation timing is tracked below (the JS directory fixture is outside the LLVM single-file corpus).
 
 ### Exact Node/web ratchets and JavaScript follow-ups
 

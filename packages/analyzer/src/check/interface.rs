@@ -206,6 +206,34 @@ impl Walker<'_> {
 			}
 			field_defaults.insert(decl, published);
 		}
+		let member_defaults: Vec<_> = self
+			.a
+			.member_fields
+			.iter()
+			.map(|(&member, fields)| {
+				let defaults: Vec<_> = fields
+					.iter()
+					.filter_map(|field| field.default.map(|default| (field.name, default)))
+					.collect();
+				(member, defaults)
+			})
+			.collect();
+		let mut published_member_defaults = FxHashMap::default();
+		for (member, defaults) in member_defaults {
+			let mut published = Vec::with_capacity(defaults.len());
+			for (name, default) in defaults {
+				let value = if self.is_constant_expression(default, 0) {
+					self.quiet += 1;
+					let value = self.evaluate_at(default, default);
+					self.quiet -= 1;
+					value.filter(|value| !value.has_function())
+				} else {
+					None
+				};
+				published.push((name, value));
+			}
+			published_member_defaults.insert(member, published);
+		}
 		// the functions other files call directly: exports, members, type functions
 		let interface = &self.s.source_file(self.file).interface;
 		called.extend(
@@ -395,6 +423,7 @@ impl Walker<'_> {
 		let externs = self.a.externs.clone();
 		// where each key given is (the export and the members got theirs
 		// when published)
+		let signature_names = self.interface_signature_names();
 		let keys: FxHashMap<DeclKey, KeyedDecl> = self
 			.modules
 			.keyed
@@ -466,6 +495,8 @@ impl Walker<'_> {
 		interface.function_owners = function_owners;
 		interface.nested_types = nested_types;
 		interface.parameters = parameters;
+		interface.signature_names = signature_names;
+		interface.computed_functions = self.a.computed_functions.clone();
 		interface.implicit_writes = implicit_writes;
 		interface.generic_functions = generic_functions;
 		interface.key_set_params = key_set_params;
@@ -474,6 +505,7 @@ impl Walker<'_> {
 		interface.key_loop_params = key_loop_params;
 		interface.statics = statics;
 		interface.field_defaults = field_defaults;
+		interface.member_defaults = published_member_defaults;
 		interface.export_names = export_names;
 		interface.declared = declared;
 		interface.uses = uses;

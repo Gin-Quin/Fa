@@ -24,6 +24,75 @@ fn type_of(session: &Session, file: FileId, text: &str) -> String {
 
 const POINT: &str = "type Point = { x: Integer, y: Integer = 0 }\n";
 
+#[test]
+fn inline_union_payloads_keep_their_own_defaults() {
+	let source = r#"
+type Choices = Union {
+	One = { value: Integer = 1 }
+	Two = { value: Integer = 2 }
+	Required = { value: Integer }
+}
+let first = Choices.One {}
+let second = Choices.Two {}
+console.log(first.value, second.value)
+"#;
+	let (session, file) = analyze_source(source);
+	assert!(
+		session.diagnostics(file).is_empty(),
+		"{:?}",
+		session.diagnostics(file)
+	);
+	let analysis = session.analysis(file);
+	for (literal, expected) in [("Choices.One {}", "1"), ("Choices.Two {}", "2")] {
+		let object = &analysis.objects[&node(&session, file, literal)];
+		let [(_, FieldValue::Default(default))] = object.fields.as_slice() else {
+			panic!("missing member default: {object:?}");
+		};
+		assert_eq!(session.tree(file).text(default.index()), expected);
+	}
+	assert_eq!(
+		codes(&format!("{source}let required = Choices.Required {{}}\n")),
+		["E-OBJ-2"]
+	);
+}
+
+#[test]
+fn recursive_and_generic_union_payloads_have_defaults() {
+	assert_clean(
+		r#"
+type Tree = Union {
+	List = { items: Array<Tree> = [] }
+	Leaf = { value: Integer }
+}
+function empty = (): Tree => Tree.List {}
+type Group<Item> = Union {
+	Many = { items: Array<Item> = [] }
+	Single = { value: Item }
+}
+let emptyGroup = Group<Integer>.Many {}
+type Label<text: String> = Union { Text = { value: String = text } }
+function label = <text: String>(): String => Label<text>.Text {}.value
+console.log(empty(), emptyGroup.items.length, Label<"payload">.Text {}.value, label<"forwarded">())
+"#,
+	);
+}
+
+#[test]
+fn union_payload_defaults_participate_in_the_interface_hash() {
+	let hash = |value| {
+		let source = format!("export type = Union {{ Item = {{ value: Integer = {value} }} }}\n");
+		let (session, file) = analyze_source(&source);
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		session.source_file(file).interface.hash(session.types())
+	};
+	assert_ne!(hash(1), hash(2));
+	assert_eq!(hash(2), hash(2));
+}
+
 // ── declarations ────────────────────────────────────────────────────────
 
 #[test]

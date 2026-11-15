@@ -71,12 +71,10 @@ fn sinks_check_assignability() {
 }
 
 #[test]
-fn unsupported_constructs_report_an001_once_and_quietly() {
-	// the unknown names inside the unsupported partial application are not
-	// reported, and one AN001 stands for the outermost unsupported construct
+fn partial_application_checks_its_unresolved_values() {
 	assert_eq!(
 		codes("let x = nope with (y = other with (z = nope))\n"),
-		["AN001"]
+		["E-DECL-1", "E-DECL-1", "E-DECL-1"]
 	);
 }
 

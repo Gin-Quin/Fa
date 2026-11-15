@@ -29,6 +29,7 @@ use fa_parser::TypedSyntaxTree;
 
 use crate::analysis::{Analysis, Argument, Callee, FieldValue, PatternBinding};
 use crate::builtins;
+use crate::comptime::instances::Context;
 use crate::ids::{FileId, NodeId, SymbolId, TypeId};
 use crate::lower::when::{self, Literal, Test};
 use crate::session::Session;
@@ -36,6 +37,7 @@ use crate::symbols::{Resolution, ScopeKind, SymbolKind};
 use crate::syntax::{
 	self, ArithOp, BindingKind, CompareOp, CompareOps, LogicOp, NodeList, TemplatePart, View,
 };
+use crate::types::Bindings;
 use crate::types::{CollKind, FloatBits, IntStorage, NominalKind, TypeKind, TypeStore};
 
 thread_local! {
@@ -86,6 +88,7 @@ pub struct NotKnown {
 
 /// Lowers the nodes of one file.
 pub struct Lowerer<'a> {
+	context: Context,
 	session: &'a Session,
 	file: FileId,
 	tree: &'a TypedSyntaxTree,
@@ -118,6 +121,7 @@ impl<'a> Lowerer<'a> {
 		a: &'a Analysis,
 	) -> Self {
 		Self {
+			context: Context::default(),
 			session,
 			file,
 			tree,
@@ -137,6 +141,279 @@ impl<'a> Lowerer<'a> {
 	pub fn with_externals(mut self, externals: FxHashMap<SymbolId, Resolution>) -> Self {
 		self.externals = externals;
 		self
+	}
+
+	pub fn with_instance(mut self, context: Context) -> Self {
+		self.context = context;
+		self
+	}
+
+	fn concrete_type(&self, ty: TypeId) -> TypeId {
+		self.context
+			.concrete_type(self.types(), self.session.module_id(self.file), ty)
+	}
+
+	fn function_key(&self, file: FileId, node: NodeId) -> FnKey {
+		self.session
+			.comptime
+			.instances
+			.lock()
+			.expect("the compile-time instance registry")
+			.function(fn_key(file, node), self.context.clone())
+	}
+
+	fn instantiated_key(&self, file: FileId, node: NodeId, call: NodeId) -> FnKey {
+		let Some(params) = self.a.instantiation_parameters.get(&call) else {
+			return self.function_key(file, node);
+		};
+		let Some(&arguments) = self.a.instantiations.get(&call) else {
+			return self.function_key(file, node);
+		};
+		let mut given = Bindings {
+			params: params.clone(),
+			types: self.types().list_items(arguments).to_vec(),
+			..Default::default()
+		};
+		for (index, origin) in self
+			.a
+			.instantiation_origins
+			.get(&call)
+			.into_iter()
+			.flatten()
+		{
+			if let Some(&param) = params.get(*index as usize) {
+				given.origins.insert(param, origin.clone());
+			}
+		}
+		for method in self.a.instantiated_methods.get(&call).into_iter().flatten() {
+			if let Some(&param) = params.get(method.parameter as usize) {
+				given.methods.push((param, method.clone()));
+			}
+		}
+		let context = self
+			.context
+			.applied(self.types(), self.session.module_id(self.file), &given);
+		self.session
+			.comptime
+			.instances
+			.lock()
+			.expect("the compile-time instance registry")
+			.function(fn_key(file, node), context)
+	}
+
+	fn constraint_method(&self, callee: NodeId) -> Option<crate::analysis::GenericMethod> {
+		let View::Access { target, members } = syntax::view(self.tree, callee) else {
+			return None;
+		};
+		let member = members.last()?;
+		let Resolution::Field(shape, index) = self.a.resolution(member) else {
+			return None;
+		};
+		let field = self.types().shape_fields(shape).get(index as usize)?;
+		if !field.flags.contains(crate::types::FieldFlags::METHOD) {
+			return None;
+		}
+		let receiver = members
+			.len()
+			.checked_sub(2)
+			.and_then(|index| members.get(index))
+			.unwrap_or(target);
+		let TypeKind::Param(param) = self.types().kind(self.a.type_of(receiver)) else {
+			return None;
+		};
+		let key = super::instances::parameter_key(self.types(), param);
+		self.context
+			.capabilities
+			.methods
+			.iter()
+			.find(|entry| {
+				super::instances::parameter_key(self.types(), entry.0) == key
+					&& self.types().syms.resolve(entry.1.name)
+						== self.types().syms.resolve(field.name)
+			})
+			.map(|entry| entry.1.clone())
+	}
+
+	fn method_value(&mut self, method: &crate::analysis::GenericMethod) -> Option<Expr> {
+		let local = self.a.symbols.symbols().iter().find_map(|symbol| {
+			let key = symbol.key?;
+			(self.types().merger(None).decl_key(key) == method.function).then_some(symbol.decl_node)
+		});
+		let (file, node) = match local {
+			Some(node) => (self.file, node),
+			None => {
+				let (file, _) = self.declared_of(Resolution::External(method.function))?;
+				let (_, node) = self
+					.session
+					.external_node(Resolution::External(method.function))?;
+				(file, node)
+			}
+		};
+		let analysis = if file == self.file {
+			self.a
+		} else {
+			self.session.analysis(file)
+		};
+		let info = analysis.function(node)?;
+		let mut context = self.context.clone();
+		if let Some(owner) = analysis
+			.function_owners
+			.get(&node)
+			.and_then(|owner| analysis.type_decls.get(owner))
+		{
+			let mut bindings = Bindings {
+				params: owner.generics.clone(),
+				types: self.types().list_items(method.arguments).to_vec(),
+				..Default::default()
+			};
+			for selected in method.methods.iter() {
+				if let Some(&param) = bindings.params.get(selected.parameter as usize) {
+					bindings.methods.push((param, selected.clone()));
+				}
+			}
+			context = context.applied(self.types(), self.session.module_id(file), &bindings);
+		}
+		let key = self
+			.session
+			.comptime
+			.instances
+			.lock()
+			.expect("the compile-time instance registry")
+			.function(fn_key(file, node), context);
+		if info.captures.is_empty() {
+			return Some(Expr::Function(key));
+		}
+		if file != self.file {
+			return None;
+		}
+		let captures = info
+			.captures
+			.iter()
+			.map(|capture| self.slots.get(capture).copied())
+			.collect::<Option<Vec<_>>>()?;
+		Some(Expr::Closure {
+			function: key,
+			captures,
+		})
+	}
+
+	fn application(&self, call: NodeId) -> Option<FnKey> {
+		let params = self.a.instantiation_parameters.get(&call)?;
+		let list = *self.a.instantiations.get(&call)?;
+		let arguments = self.types().list_items(list).to_vec();
+		let mut given = Bindings {
+			params: params.clone(),
+			types: arguments.clone(),
+			..Default::default()
+		};
+		for (index, origin) in self
+			.a
+			.instantiation_origins
+			.get(&call)
+			.into_iter()
+			.flatten()
+		{
+			if let Some(&param) = params.get(*index as usize) {
+				given.origins.insert(param, origin.clone());
+			}
+		}
+		for method in self.a.instantiated_methods.get(&call).into_iter().flatten() {
+			if let Some(&param) = params.get(method.parameter as usize) {
+				given.methods.push((param, method.clone()));
+			}
+		}
+		let concrete =
+			self.context
+				.applied(self.types(), self.session.module_id(self.file), &given);
+		let mut merger = self.types().merger(Some(self.session.module_id(self.file)));
+		let params: Vec<_> = params.iter().map(|&param| merger.param(param)).collect();
+		drop(merger);
+		let arguments = params
+			.iter()
+			.zip(arguments)
+			.map(|(&param, ty)| {
+				concrete
+					.bound(self.types(), param)
+					.unwrap_or_else(|| self.concrete_type(ty))
+			})
+			.collect();
+		let origins = params
+			.iter()
+			.enumerate()
+			.filter_map(|(index, &param)| {
+				let key = super::instances::parameter_key(self.types(), param);
+				concrete
+					.capabilities
+					.origins
+					.iter()
+					.find(|entry| super::instances::parameter_key(self.types(), entry.0) == key)
+					.map(|entry| (index as u16, entry.1.clone()))
+			})
+			.collect();
+		let mut methods = Vec::new();
+		for (index, &param) in params.iter().enumerate() {
+			let key = super::instances::parameter_key(self.types(), param);
+			methods.extend(
+				concrete
+					.capabilities
+					.methods
+					.iter()
+					.filter(|entry| super::instances::parameter_key(self.types(), entry.0) == key)
+					.map(|entry| crate::analysis::GenericMethod {
+						parameter: index as u16,
+						..entry.1.clone()
+					}),
+			);
+		}
+		Some(
+			self.session
+				.comptime
+				.instances
+				.lock()
+				.expect("the compile-time instance registry")
+				.application(super::instances::Application {
+					arguments,
+					origins,
+					methods,
+				}),
+		)
+	}
+
+	fn apply_function(&self, value: Expr, call: NodeId) -> Expr {
+		match self.application(call) {
+			Some(application) => Expr::Instantiate(value.boxed(), application),
+			None => value,
+		}
+	}
+
+	fn value_parameter(&self, symbol: SymbolId) -> Option<Value> {
+		let &param = self.a.value_parameters.get(&symbol)?;
+		let mut merger = self.types().merger(Some(self.session.module_id(self.file)));
+		let param = merger.param(param);
+		drop(merger);
+		let ty = self.context.bound(self.types(), param)?;
+		self.literal_type(ty)
+	}
+
+	fn literal_type(&self, ty: TypeId) -> Option<Value> {
+		let types = self.types();
+		match types.kind(ty) {
+			TypeKind::Int(_) => types
+				.as_int(ty)
+				.filter(|int| int.min == int.max)
+				.map(|int| Value::Integer(int.min)),
+			TypeKind::BoolLit(value) => Some(Value::Boolean(value)),
+			TypeKind::StringLit(text) => Some(Value::string(types.syms.resolve(text))),
+			TypeKind::None => Some(Value::None),
+			TypeKind::EnumMember(nominal, index) => {
+				Some(Value::Member(Arc::new(fa_interpreter::value::Member {
+					name: Arc::from(member_name(types, nominal, index)),
+					kind: MemberKind::Enumeration,
+					data: None,
+				})))
+			}
+			_ => None,
+		}
 	}
 
 	/// Lets the compile-time expression read module-level `let` values.
@@ -253,6 +530,7 @@ impl<'a> Lowerer<'a> {
 	/// The kind of number of a type, with the range of the target (D49):
 	/// on JavaScript, a number-represented integer is bounded by ±(2^53 − 1).
 	pub fn num(&self, ty: TypeId) -> Num {
+		let ty = self.concrete_type(ty);
 		let types = self.types();
 		match types.kind(ty) {
 			TypeKind::Int(_) => {
@@ -428,6 +706,9 @@ impl<'a> Lowerer<'a> {
 		let data = self.a.symbols.symbol(symbol);
 		let name = self.session.types.syms.resolve(data.name).to_string();
 		// the variable of an `@for` analyzed per item (check/comptime.rs)
+		if let Some(value) = self.value_parameter(symbol) {
+			return Expr::Const(value);
+		}
 		if let Some(value) = self.a.comptime_locals.get(&data.decl_node) {
 			return Expr::Const(value.clone());
 		}
@@ -437,9 +718,26 @@ impl<'a> Lowerer<'a> {
 				None => self.not_known(n, &name),
 			},
 			SymbolKind::Function => {
+				if let View::Function { value, .. } | View::ExportFunction { value, .. } =
+					syntax::view(self.tree, data.decl_node)
+					&& let Some(value) = self.a.known_functions.get(&value)
+				{
+					return Expr::Const(value.clone());
+				}
+				if let View::Function { value, .. } | View::ExportFunction { value, .. } =
+					syntax::view(self.tree, data.decl_node)
+					&& self.a.function(data.decl_node).is_none()
+				{
+					if self.a.computed_functions.contains(&data.decl_node)
+						&& self.is_module_level(symbol)
+					{
+						return Expr::Global(global_key(self.file, data.decl_node));
+					}
+					return self.expr(value);
+				}
 				let info = self.a.function(data.decl_node);
 				let captures = info.map(|info| info.captures.clone()).unwrap_or_default();
-				let key = fn_key(self.file, data.decl_node);
+				let key = self.instantiated_key(self.file, data.decl_node, n);
 				if captures.is_empty() {
 					Expr::Function(key)
 				} else {
@@ -548,7 +846,19 @@ impl<'a> Lowerer<'a> {
 		};
 		let name = self.session.types.syms.resolve(declared.name).to_string();
 		match declared.kind {
-			SymbolKind::Function => Expr::Function(fn_key(file, declared.function.unwrap_or(decl))),
+			SymbolKind::Function
+				if self
+					.session
+					.source_file(file)
+					.interface
+					.computed_functions
+					.contains(&decl) =>
+			{
+				Expr::Global(global_key(file, decl))
+			}
+			SymbolKind::Function => {
+				Expr::Function(self.function_key(file, declared.function.unwrap_or(decl)))
+			}
 			SymbolKind::Let if self.globals => Expr::Global(global_key(file, decl)),
 			SymbolKind::Let => self.not_known(n, &name),
 			SymbolKind::Static => match self.session.source_file(file).interface.statics.get(&decl)
@@ -631,6 +941,9 @@ impl<'a> Lowerer<'a> {
 				},
 			},
 			View::Group(inner) => self.expr(inner),
+			// Every interpreter value is already independent: reads clone its
+			// Arc, and writes detach the changed object/collection path.
+			View::Copy(inner) => self.expr(inner),
 			View::EmptyGroup => Expr::none(),
 			View::Array { items } => self.array(n, items),
 			View::Tuple { items } => {
@@ -767,6 +1080,20 @@ impl<'a> Lowerer<'a> {
 			}
 			View::Assignment { target, value, .. } => self.assignment(target, value),
 			View::UpdateFields { target, value } => self.update_fields(target, value),
+			View::Function { value, .. } | View::ExportFunction { value, .. }
+				if self.a.computed_functions.contains(&n) =>
+			{
+				let Some(symbol) = self.a.symbols.symbol_of_decl(n) else {
+					return Expr::none();
+				};
+				let value = self
+					.a
+					.known_functions
+					.get(&value)
+					.map_or_else(|| self.expr(value), |value| Expr::Const(value.clone()));
+				let slot = self.bind(symbol);
+				Expr::Let(slot, value.boxed())
+			}
 			View::TypeDecl { .. } | View::Namespace { .. } | View::Function { .. } => Expr::none(),
 			View::ExportValue { value, .. } => self.expr(value),
 			View::ExportFunction { .. } | View::ExportType { .. } | View::ExportNamespace(_) => {
@@ -775,7 +1102,18 @@ impl<'a> Lowerer<'a> {
 			View::Lambda { .. } => self.lambda(n),
 			View::Parameters { .. } | View::DestructuredParameter { .. } => Expr::none(),
 			View::Compose { .. } => self.unsupported("`then`"),
-			View::PartialApplication { .. } => self.unsupported("`with`"),
+			View::PartialApplication { .. } => match self.a.partial_applications.get(&n).cloned() {
+				Some(partial) => Expr::Partial {
+					site: self.function_key(self.file, n),
+					function: self.expr(partial.function).boxed(),
+					bound: partial
+						.bound
+						.into_iter()
+						.map(|(index, value)| (index as usize, self.expr(value)))
+						.collect(),
+				},
+				None => self.unsupported("`with` without a checked binding"),
+			},
 			View::Provide { .. } => self.impure("`provide`"),
 			View::Watch(_) => self.impure("a `watch` block"),
 			View::If {
@@ -1082,7 +1420,7 @@ impl<'a> Lowerer<'a> {
 			}
 		}
 		Expr::Closure {
-			function: fn_key(self.file, n),
+			function: self.function_key(self.file, n),
 			captures: slots,
 		}
 	}
@@ -1395,6 +1733,13 @@ impl<'a> Lowerer<'a> {
 	/// A call, from its `CallInfo`.
 	fn call(&mut self, n: NodeId, callee: NodeId, arguments: syntax::NodeList<'_>) -> Expr {
 		let Some(info) = self.a.call(n).cloned() else {
+			if self
+				.a
+				.has_flags(n, crate::analysis::NodeFlags::GENERIC_APPLICATION)
+			{
+				let value = self.expr(callee);
+				return self.apply_function(value, n);
+			}
 			return self.unsupported(format!("`{}`", self.text(callee)));
 		};
 		// the receiver of a method: the callee without its last member
@@ -1431,7 +1776,7 @@ impl<'a> Lowerer<'a> {
 					.map(|info| info.captures.clone())
 					.unwrap_or_default();
 				if captures.is_empty() {
-					Expr::CallFunction(fn_key(self.file, declaration), args)
+					Expr::CallFunction(self.instantiated_key(self.file, declaration, n), args)
 				} else {
 					let read = match symbol {
 						Some(symbol) => self.read_symbol(callee, symbol),
@@ -1519,7 +1864,18 @@ impl<'a> Lowerer<'a> {
 				}
 			}
 			Callee::Value => {
-				let args = self.arguments(&info.arguments, Some(callee));
+				let mut args = self.arguments(&info.arguments, Some(callee));
+				if let Some(method) = self.constraint_method(callee) {
+					let Some(value) = self.method_value(&method) else {
+						return self.unsupported("the selected generic method");
+					};
+					let Some(receiver) = receiver(self) else {
+						return self.unsupported("this method receiver");
+					};
+					args.insert(0, Arg::Value(receiver));
+					let value = self.apply_function(value, n);
+					return Expr::Call(value.boxed(), args);
+				}
 				// a function of another file, or a method of a type of another file
 				let last = match syntax::view(self.tree, callee) {
 					View::Access { members, .. } => members.last(),
@@ -1537,12 +1893,19 @@ impl<'a> Lowerer<'a> {
 					&& let Some((file, declared)) = self.declared_of(resolution)
 					&& let Some((_, decl)) = self.session.external_node(resolution)
 					&& declared.kind == SymbolKind::Function
+					&& !self
+						.session
+						.source_file(file)
+						.interface
+						.computed_functions
+						.contains(&decl)
 				{
 					let node = declared.function.unwrap_or(decl);
-					return Expr::CallFunction(fn_key(file, node), args);
+					return Expr::CallFunction(self.instantiated_key(file, node, n), args);
 				}
 				let _ = arguments;
 				let callee = self.expr(callee);
+				let callee = self.apply_function(callee, n);
 				Expr::Call(callee.boxed(), args)
 			}
 		}

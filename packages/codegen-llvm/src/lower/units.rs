@@ -352,6 +352,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			types: types.iter().map(|&bound| merger.ty(bound)).collect(),
 			..Default::default()
 		};
+		let module = merger.module(module);
 		drop(merger);
 		let mut scratch = fa_analyzer::types::TypeStore::view(self.types().global());
 		let substituted = scratch.substitute(global, &bindings);
@@ -479,8 +480,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// A declaration of another unit, and whether it is a function
 	/// (`None`: a type, a namespace).
 	pub(crate) fn remote(&self, key: DeclKey) -> Option<(DeclKey, bool)> {
-		match self.remote_decl(key)?.kind {
-			SymbolKind::Function => Some((key, true)),
+		let declared = self.remote_decl(key)?;
+		match declared.kind {
+			SymbolKind::Function => Some((
+				key,
+				!self
+					.session
+					.interface(declared.module)
+					.is_some_and(|interface| interface.computed_functions.contains(&declared.decl)),
+			)),
 			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive => Some((key, false)),
 			_ => None,
 		}
@@ -1007,7 +1015,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					let sig = self.types().sig(sig);
 					bound.extend(self.types().list_items(sig.generics).iter().copied());
 					stack.extend(self.types().params(sig.params).iter().map(|param| param.ty));
-					stack.push(sig.ret);
+					stack.extend([sig.ret, sig.throws]);
+					stack.extend(
+						self.types()
+							.requirements(sig.requires)
+							.iter()
+							.map(|requirement| requirement.ty),
+					);
 				}
 				TypeKind::Object(shape) => {
 					if let Some(nominal) = self.types().shape(shape).nominal {
@@ -1277,11 +1291,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// (except, in a wave, those the unit's main object defines).
 	fn lower_used_functions(&mut self, files: &[FileId]) -> Result<(), Error> {
 		loop {
+			let mut lowered = false;
+			while self.lower_next_function_adapter()? {
+				lowered = true;
+			}
 			while let Some((file, instance)) = self.pending_instances.pop() {
 				self.switch_file(file);
 				self.lower_function(instance)?;
 			}
-			let mut lowered = false;
 			while self.lower_next_async_instance()? {
 				lowered = true;
 			}
@@ -1309,7 +1326,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					lowered = true;
 				}
 			}
-			if !lowered && self.pending_instances.is_empty() {
+			if !lowered
+				&& self.pending_instances.is_empty()
+				&& self.function_adapters.borrow().is_empty()
+				&& self.generic_function_adapters.borrow().is_empty()
+			{
 				return Ok(());
 			}
 		}
@@ -1330,7 +1351,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					matches!(
 						declared.kind,
 						SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
-					)
+					) || interface.computed_functions.contains(node)
 				})
 			})
 			.collect();
@@ -1343,7 +1364,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let statement = self.declaring_statement(node);
 			if !matches!(
 				self.view(statement),
-				View::Declaration { .. } | View::ExportValue { .. } | View::Destructuring { .. }
+				View::Declaration { .. }
+					| View::ExportValue { .. }
+					| View::Destructuring { .. }
+					| View::Function { .. }
+					| View::ExportFunction { .. }
 			) {
 				return Err(self.unsupported(node.index(), "this module value (split build)"));
 			}
@@ -1534,10 +1559,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.filter(|&statement| {
 				// the module-level values are initialized by `fa.init.*`
 				!(self.module_file
-					&& matches!(
+					&& (matches!(
 						self.view(statement),
 						View::Declaration { .. } | View::ExportValue { .. }
-					))
+					) || self.analysis.computed_functions.contains(&statement)))
 			})
 			.collect();
 		self.top_level_statements(&statements)?;

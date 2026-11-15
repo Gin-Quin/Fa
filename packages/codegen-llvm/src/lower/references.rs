@@ -25,6 +25,7 @@ use crate::lower::values::{Repr, Val};
 use crate::lower::{Lowering, Slot};
 
 /// What a call with a parameter passed by pointer does after the call.
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum WriteBack<'ctx> {
 	/// The parameter was a view of `place`: its fields written back by name.
 	Fields { place: Slot<'ctx>, view: Slot<'ctx> },
@@ -183,7 +184,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// After a call: the changes of a view written back into its place.
-	pub(crate) fn write_back(&mut self, write_back: WriteBack<'ctx>) -> Result<(), Error> {
+	pub(crate) fn write_back(&self, write_back: WriteBack<'ctx>) -> Result<(), Error> {
 		match write_back {
 			WriteBack::Temporary(slot) => {
 				let value = self.load(slot)?;

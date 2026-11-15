@@ -140,7 +140,7 @@ impl Generator<'_> {
 		}
 	}
 
-	/// `Array.from(source)`, `Set.from(source, key = …)`, `Map.from(source)`:
+	/// `Array.from(source)`, `Set.from(source)`, `Map.from(source)`:
 	/// a new collection of the call's type with the source's items (the
 	/// capacity is a hint JavaScript doesn't take).
 	pub(crate) fn collection_from(
@@ -153,12 +153,18 @@ impl Generator<'_> {
 			return self.unsupported(n, &format!("`{path}` without a source"));
 		};
 		let source = *source;
-		let key = match (path, arguments.get(1)) {
-			("Set.from", Some(Argument::Given(key))) => Some(*key),
-			_ => None,
-		};
-		let nodes: Vec<NodeId> = std::iter::once(source).chain(key).collect();
+		let nodes: Vec<NodeId> = arguments
+			.iter()
+			.filter_map(|argument| match argument {
+				Argument::Given(node) => Some(*node),
+				_ => None,
+			})
+			.collect();
 		let values = self.in_order(&nodes, |g, node| g.expr(node));
+		for (&node, value) in nodes.iter().zip(&values).skip(1) {
+			// Capacity is a hint on JS, but evaluating it may have effects.
+			self.finish(node, value.clone(), &super::Dest::Discard);
+		}
 		let source_ty = self.type_of(source);
 		let ty = self.type_of(n);
 		let item = match self.types.kind(ty) {
@@ -203,20 +209,10 @@ impl Generator<'_> {
 				Expr::primary(format!("new {class}({})", items.text))
 			}
 			"Pool.from" => Expr::primary(format!("new Set({})", items.text)),
-			"Set.from" => match key.map(|_| values[1].clone()) {
-				Some(key) => {
-					let class = self.helper("FaSet");
-					Expr::primary(format!(
-						"new {class}({}, {{ key: {} }})",
-						items.text,
-						key.at(Prec::Assign)
-					))
-				}
-				None => {
-					let class = self.set_class(item);
-					Expr::primary(format!("new {class}({})", items.text))
-				}
-			},
+			"Set.from" => {
+				let class = self.set_class(item);
+				Expr::primary(format!("new {class}({})", items.text))
+			}
 			_ => {
 				let key_ty = match self.types.kind(ty) {
 					TypeKind::Collection(_, _, key) => key,

@@ -1,0 +1,17 @@
+-- require-split: true
+-- file: application/main.fa
+function plus = library.make(5)
+export function = () => {
+	console.log(library.fixed(), library.fixed(second = 5)) -- prints: 21 15
+	console.log(library.repeated("imported"), library.repeated<Integer>(9, last = 12)) -- prints: ("imported", 6, 7) (9, 6, 12)
+	console.log(plus(), plus(value = 8)) -- prints: 10 13
+}
+-- file: library/fixed.fa
+function add = (first: Integer, second: Integer = first + 1) => first + second
+export function = add with (first = 10)
+-- file: library/repeated.fa
+function select = <Item>(value: Item, times: Integer = 2, last: Integer = times + 1) =>
+	(value, times, last)
+export function = select with (times = 6)
+-- file: library/make.fa
+export function = (bias: Integer) => (value: Integer = bias) => value + bias

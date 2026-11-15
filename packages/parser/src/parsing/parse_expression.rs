@@ -166,6 +166,13 @@ fn parse_left_expression<'source>(
 			let name = context.name();
 			Single!(Node::Identifier { name })
 		}
+		TokenKind::Copy
+			if context.lookup_next_token_kind() == TokenKind::BracesOpen
+				&& stop_at.contains(&TokenKind::BracesOpen) =>
+		{
+			let name = context.name();
+			Single!(Node::Identifier { name })
+		}
 		TokenKind::Invalid => {
 			// already reported by the tokenizer
 			Single!(Node::Invalid)
@@ -262,6 +269,9 @@ fn parse_left_expression<'source>(
 		TokenKind::Try => parse_try(context, stop_at),
 		TokenKind::Await => parse_prefix(context, Priority::TryAwaitStart, stop_at, |right| {
 			Node::Await { right }
+		}),
+		TokenKind::Copy => parse_prefix(context, Priority::Prefix, stop_at, |right| Node::Copy {
+			right,
 		}),
 		TokenKind::Start => parse_prefix(context, Priority::TryAwaitStart, stop_at, |right| {
 			Node::Start { right }

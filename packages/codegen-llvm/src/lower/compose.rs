@@ -258,7 +258,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// one byte into (`tasks.rs`, `async_value_entry`). A composition calls
 	/// its steps' synchronous entries in turn, as JavaScript calls them: an
 	/// async step runs blocking.
-	fn synchronous_entry(
+	pub(super) fn synchronous_entry(
 		&self,
 		function: FunctionValue<'ctx>,
 		builder: &Builder<'ctx>,
@@ -475,7 +475,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			match &previous {
 				None => arguments.extend(given.iter().copied()),
 				Some((repr, value)) => {
-					if self.borrows_parameter(*repr) {
+					if self.value_borrows_parameter(*repr) {
 						let slot = builder.build_alloca(self.llvm_type(*repr), "step")?;
 						builder.build_store(slot, *value)?;
 						arguments.push(slot.into());

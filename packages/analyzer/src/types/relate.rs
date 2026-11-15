@@ -364,22 +364,39 @@ impl TypeStore {
 			}
 			// parameters are contravariant
 			self.assignable(expected.ty, actual.ty, Mode::Read)?;
+			// The stored function must not consume a Task through an argument
+			// that its visible contract borrows (notably a Resource view).
+			if self.takes_task_parameter(actual.ty) && !self.takes_task_parameter(expected.ty) {
+				return Err(Reason::Mismatch);
+			}
 		}
-		self.assignable(source.ret, target.ret, Mode::Read)?;
+		if target.ret != TypeId::VOID {
+			self.assignable(source.ret, target.ret, Mode::Read)?;
+		}
 		self.assignable(source.throws, target.throws, Mode::Read)?;
 		if source.is_async && !target.is_async {
 			return Err(Reason::Mismatch);
 		}
 		let target_requirements = self.requirements(target.requires).to_vec();
 		let source_requirements = self.requirements(source.requires).to_vec();
-		if !source_requirements
-			.iter()
-			.all(|requirement| target_requirements.contains(requirement))
-		{
+		if !source_requirements.iter().all(|requirement| {
+			target_requirements
+				.iter()
+				.any(|target| target.ty == requirement.ty)
+		}) {
 			return Err(Reason::Mismatch);
 		}
-		if source.effects != target.effects && source.effects != crate::ids::EffectSetId::EMPTY {
-			return Err(Reason::Mismatch);
+		if source.effects != target.effects {
+			let (mutates, invalidates) = self.effects(source.effects);
+			if mutates
+				.iter()
+				.any(|&path| !crate::effects::set_covers(self, target.effects, path, false))
+				|| invalidates
+					.iter()
+					.any(|&path| !crate::effects::set_covers(self, target.effects, path, true))
+			{
+				return Err(Reason::Mismatch);
+			}
 		}
 		Ok(())
 	}
@@ -403,6 +420,9 @@ impl TypeStore {
 			else {
 				return Err(Reason::Mismatch);
 			};
+			if self.param(source).value != self.param(target_param).value {
+				return Err(Reason::Mismatch);
+			}
 			let wanted = self.param_constraint(source);
 			if !wanted.is_unset() && wanted != TypeId::UNKNOWN {
 				let given = self.param_constraint(target_param);

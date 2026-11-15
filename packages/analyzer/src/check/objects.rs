@@ -10,7 +10,7 @@ use crate::builtins;
 use crate::check::{PlaceInfo, Walker};
 use crate::diagnostics::Code;
 use crate::diagnostics::codes::analyzer::AN001;
-use crate::diagnostics::codes::types::{FN042, TY021, TY053, TY054, TY055, TY056, TY084};
+use crate::diagnostics::codes::types::{FN042, FN086, TY021, TY053, TY054, TY055, TY056, TY084};
 use crate::diagnostics::codes::values::{
 	E_DECL_4, E_OBJ_1, E_OBJ_2, E_OBJ_3, E_OBJ_4, E_OBJ_5, E_OBJ_10, E_OBJ_11, E_OBJ_13, E_OPT_1,
 	E_TYPE_1,
@@ -442,6 +442,7 @@ impl Walker<'_> {
 				.annotation
 				.map(|annotation| self.check_type_expr(annotation));
 			let actual = self.check(field.value, declared);
+			self.note_copy_site(field.value);
 			if let Some(declared) = declared {
 				self.sink(field.value, actual, declared);
 			}
@@ -527,7 +528,11 @@ impl Walker<'_> {
 		object: TypeId,
 		member: Option<TypeId>,
 	) {
-		let (decl, declared) = self.object_declaration(object);
+		let (decl, declared) =
+			match member.and_then(|member| self.member_payload_fields(member, object)) {
+				Some(fields) => (None, fields),
+				None => self.object_declaration(object),
+			};
 		let inside = self.is_inside_type(object);
 		// the values: every visit
 		for field in fields {
@@ -540,8 +545,9 @@ impl Walker<'_> {
 			if let Some(expected) = expected {
 				self.sink(field.value, actual, expected);
 			}
-			// a task or a worker's handle moves into the field
-			self.move_handles(&[field.value]);
+			// Stored fields are values; a Task moves, and a structural copy
+			// of a collection requires `copy` unless this is its last use.
+			self.note_copy_site(field.value);
 		}
 		let result = member.unwrap_or(object);
 		self.memo(n, |w| {
@@ -651,6 +657,70 @@ impl Walker<'_> {
 			);
 			result
 		});
+	}
+
+	/// Inline payloads keep the defaults of their exact nominal member.
+	/// Looking up the structural object would mix the defaults of variants
+	/// such as `One = { value = 1 }` and `Two = { value = 2 }`.
+	fn member_payload_fields(&mut self, member: TypeId, object: TypeId) -> Option<Vec<FieldDecl>> {
+		let TypeKind::Member(nominal, index) = self.s.types.kind(member) else {
+			return None;
+		};
+		let owner = self.s.types.nominal(nominal).key;
+		if let Some(mut fields) = self.a.member_fields.get(&(owner, index)).cloned() {
+			for field in &mut fields {
+				if let Some(actual) = self
+					.s
+					.types
+					.fields_of(object)
+					.iter()
+					.find(|actual| actual.name == field.name)
+				{
+					field.ty = actual.ty;
+				}
+			}
+			return Some(fields);
+		}
+		let module = self.s.types.decl_key_data(owner).module;
+		if module == self.s.module_id(self.file) {
+			return None;
+		}
+		let interface = self.s.interface(module)?;
+		let defaults = if interface.complete {
+			interface.member_defaults.get(&(owner, index))?.clone()
+		} else {
+			// A module cycle will replay this literal once the exact member
+			// defaults are published. Never borrow defaults from an unrelated
+			// object that happens to have this shape in the meantime.
+			self.modules.deferred = true;
+			Vec::new()
+		};
+		let mut fields: Vec<_> = self
+			.s
+			.types
+			.fields_of(object)
+			.iter()
+			.map(|field| FieldDecl {
+				node: NodeId::new(0),
+				name: field.name,
+				ty: field.ty,
+				default: None,
+				constant: None,
+				flags: field.flags,
+			})
+			.collect();
+		for (name, value) in defaults {
+			let Some(field) = fields.iter_mut().find(|field| field.name == name) else {
+				continue;
+			};
+			if let Some(value) = value {
+				field.constant = Some(self.a.field_constants.len() as u32);
+				self.a.field_constants.push(value);
+			} else {
+				self.opaque_defaults.insert((object, name));
+			}
+		}
+		Some(fields)
 	}
 
 	/// The fields of an object type, as declared (the declaration of its
@@ -880,6 +950,7 @@ impl Walker<'_> {
 		self.revalidate_fields(target, members);
 		// a field moved out of its local (foreign.rs)
 		self.check_moved_fields(n, target, false);
+		self.check_conditional_task_read(n);
 		ty
 	}
 
@@ -1053,6 +1124,14 @@ impl Walker<'_> {
 		} else if let Some(function) = self.type_function(ty, &text) {
 			self.set_resolution(first, Resolution::Local(function));
 			let function_ty = self.symbol_type(function, first);
+			let function_ty = if let Some(owner) = self.receiver_origin.clone()
+				&& let Some(bindings) = self.written_bindings(&owner)
+			{
+				self.a.method_instantiations.insert(first, owner);
+				self.s.types.substitute(function_ty, &bindings)
+			} else {
+				function_ty
+			};
 			self.set_type(first, function_ty);
 			function_ty
 		} else {
@@ -1108,11 +1187,59 @@ impl Walker<'_> {
 		let text = self.tree.name(name).to_string();
 		// a recursive reference reads like the type it stands for
 		let receiver = self.s.types.unfold(receiver);
-		let found = self.find_member(member, receiver, &text);
+		let mut found = self.find_member(member, receiver, &text);
+		if let Some((ty, kind)) = found {
+			let bound = match self.a.resolution(member) {
+				Resolution::Local(function) if matches!(kind, MemberKind::Function) => {
+					self.is_method(function)
+				}
+				Resolution::Builtin(builtin) if matches!(kind, MemberKind::Builtin) => {
+					builtins::get(builtin).path.contains('#')
+						&& matches!(self.s.types.kind(ty), TypeKind::Function(_))
+				}
+				Resolution::Field(_, _) => {
+					matches!(kind, MemberKind::Field(flags) if flags.contains(FieldFlags::METHOD))
+				}
+				_ => false,
+			};
+			if bound && !self.method_is_used_directly(member) {
+				let diagnostic = self.diagnostic(&FN086, member, "a method through an instance must be called: write a lambda that calls it instead of keeping a bound method");
+				self.report(diagnostic);
+				found = Some((TypeId::UNKNOWN, kind));
+			}
+		}
 		if let Some((ty, _)) = found {
 			self.set_type(member, ty);
 		}
 		found
+	}
+
+	fn method_is_used_directly(&self, member: NodeId) -> bool {
+		let Some(mut access) = self.parent(member) else {
+			return false;
+		};
+		if !matches!(self.view(access), View::Access { members, .. } | View::OptionalAccess { members, .. } if members.last() == Some(member))
+		{
+			return false;
+		}
+		while let Some(parent) = self.parent(access) {
+			match self.view(parent) {
+				View::Group(inner) if inner == access => access = parent,
+				View::Assignment { target, .. } | View::CompoundAssignment { target, .. }
+					if target == access =>
+				{
+					return true;
+				}
+				View::Call { callee, .. } if callee == access => {
+					if !syntax::is_angle_application(&self.tree, parent) {
+						return true;
+					}
+					access = parent;
+				}
+				_ => return false,
+			}
+		}
+		false
 	}
 
 	fn find_member(

@@ -1,6 +1,6 @@
--- brief: ✓ se-3: key option → 2
+-- Separate keys belong to maps; replacing one id keeps the entry count.
 type User = { id: Integer, email: String }
-mutable users = Set.from([User { id = 1, email = "a" }, User { id = 2, email = "b" }], key = (user) => user.id)
-users.add({ id = 1, email = "c" })
+mutable users = Map.from([(1, User { id = 1, email = "a" }), (2, User { id = 2, email = "b" })])
+users[1] = User { id = 1, email = "c" }
 console.log(users.size)
 -- prints: 2

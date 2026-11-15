@@ -88,11 +88,20 @@ impl Walker<'_> {
 		self.after_call(n, callee);
 		// `pool.submit(…)` of a pool without `timeout` (concurrency.rs)
 		let ty = self.submit_without_timeout(n, callee, ty);
+		self.check_worker_call_transfers(n, callee, ty);
 		// `@add(2, 4)`: evaluated while compiling (comptime.rs)
 		if comptime {
 			self.evaluate_call(n);
 		}
 		ty
+	}
+
+	pub(super) fn check_function_factory(&mut self, n: NodeId) -> TypeId {
+		let tree = std::sync::Arc::clone(&self.tree);
+		let View::Call { callee, arguments } = crate::syntax::view(&tree, n) else {
+			return self.check(n, None);
+		};
+		self.check_runtime_call(n, callee, arguments, None, true)
 	}
 
 	/// A call (evaluated at compile time when `comptime`: its errors are
@@ -135,6 +144,13 @@ impl Walker<'_> {
 			return ty;
 		}
 		if let Some(ty) = self.generic_function_application(n, callee, arguments) {
+			if self
+				.visible_parameter_defaults(callee)
+				.iter()
+				.any(|&default| default)
+			{
+				self.a.applied_defaults.insert(n);
+			}
 			return ty;
 		}
 		// `Set.from(…)`, `Map.from(…)` (collections.rs)
@@ -208,7 +224,7 @@ impl Walker<'_> {
 				});
 			}
 		};
-		let (kind, params) = self.callee_parameters(callee, sig.params);
+		let (kind, params) = self.callee_parameters(n, callee, sig.params);
 		// the generic parameters of the function called, in declaration
 		// order: the order of its recorded instantiation
 		let declared = self.callee_generics(callee, kind);
@@ -218,6 +234,21 @@ impl Walker<'_> {
 		let mut free = self.free_params(callee_ty);
 		// a value of a generic function type: each call instantiates its own parameters
 		free.extend(self.own_generics(callee_ty));
+		// Phantom/value binders can be absent from the runtime signature.
+		// They still need inference/defaults, except after an explicit
+		// application or inside the same rigid generic definition.
+		let applied = matches!(self.view(self.strip_groups(callee)), View::Call { .. })
+			&& self
+				.a
+				.flags_of(self.strip_groups(callee))
+				.contains(crate::analysis::NodeFlags::GENERIC_APPLICATION);
+		if !applied && self.own_generics(callee_ty).is_empty() {
+			for &param in &declared {
+				if !self.rigid_params.contains(&param) && !free.contains(&param) {
+					free.push(param);
+				}
+			}
+		}
 		let (inferred, mut generic_problems, synthesized) = if free.is_empty() {
 			(None, Vec::new(), Vec::new())
 		} else {
@@ -336,6 +367,28 @@ impl Walker<'_> {
 					self.view_sink = !matches!(kind, Callee::Builtin(_));
 					self.sink(value, actual, expected);
 					self.view_sink = false;
+					// A structural view can't transfer Tasks out of a resource
+					// whose destructor still owns the complete argument.
+					if matches!(kind, Callee::Function(_) | Callee::Value)
+						&& self.s.types.takes_task_parameter(expected)
+						&& (self.s.types.is_resource(actual)
+							|| self
+								.s
+								.types
+								.flags(actual)
+								.contains(crate::types::TypeFlags::HAS_PARAM))
+					{
+						self.defer_copy_condition(
+							value,
+							crate::analysis::CopyRequirement {
+								subject: expected,
+								explicit: true,
+								task_transfer: false,
+								task_only: false,
+								resource_gate: Some((actual, crate::ids::ListId::EMPTY)),
+							},
+						);
+					}
 				}
 			}
 			if round == 0
@@ -392,6 +445,11 @@ impl Walker<'_> {
 				&& let Some(Resolution::Local(method)) =
 					members.last().map(|member| w.a.resolution(member))
 				&& w.modules.methods.get(&method) == Some(&true)
+				&& w.proxy_decl(method)
+					.and_then(|(module, declaration)| {
+						w.s.interface(module)?.parameters.get(&declaration)
+					})
+					.is_some_and(|params| params.len() == binding.arguments.len() + 1)
 			{
 				binding.arguments.insert(0, Argument::Receiver(callee));
 			}
@@ -488,7 +546,17 @@ impl Walker<'_> {
 		});
 		// its requirements (requirements.rs), then its effects on the
 		// arguments' places, a mutable receiver (effects.rs)
-		let requires = self.s.types.requirements(sig.requires).to_vec();
+		let requires: Vec<_> = self
+			.s
+			.types
+			.requirements(sig.requires)
+			.to_vec()
+			.into_iter()
+			.map(|requirement| crate::types::Requirement {
+				ty: substitute(self, requirement.ty),
+				..requirement
+			})
+			.collect();
 		self.call_providers = if requires.is_empty() {
 			Vec::new()
 		} else {
@@ -497,8 +565,6 @@ impl Walker<'_> {
 		};
 		self.apply_call_effects(n, callee, sig.effects);
 		self.call_providers.clear();
-		// `subscription.stop()` consumes it (reactivity.rs)
-		self.note_stop_call(n, callee);
 		ty
 	}
 
@@ -522,6 +588,7 @@ impl Walker<'_> {
 	/// and defaults for a direct call of a declaration.
 	fn callee_parameters(
 		&mut self,
+		call: NodeId,
 		callee: NodeId,
 		params: crate::ids::ParamListId,
 	) -> (Callee, Vec<BindParam>) {
@@ -598,6 +665,38 @@ impl Walker<'_> {
 						.collect();
 					return (Callee::Value, params);
 				}
+				if self.a.symbols.symbol(symbol).kind == crate::symbols::SymbolKind::Function
+					&& self
+						.direct_function(symbol)
+						.is_none_or(|decl| self.a.function(decl).is_none())
+					&& let Some(names) = self
+						.named_signature(callee)
+						.and_then(|names| self.resolved_signature_names(names))
+					&& let crate::signatures::SignatureNames::Function {
+						parameters,
+						defaults,
+						..
+					} = &*names && parameters.len() == sigs.len()
+				{
+					let mut defaults = defaults.clone();
+					defaults.resize(sigs.len(), false);
+					if defaults.iter().any(|&default| default) {
+						self.a.function_defaults.insert(call, defaults.clone());
+					}
+					let params = sigs
+						.iter()
+						.zip(parameters)
+						.zip(defaults)
+						.map(|((&sig, &name), has_default)| BindParam {
+							sig,
+							named: None,
+							builtin_name: name,
+							has_default,
+							passed: false,
+						})
+						.collect();
+					return (Callee::Value, params);
+				}
 				let Some(declaration) = self.direct_function(symbol) else {
 					return plain(Callee::Value);
 				};
@@ -643,7 +742,7 @@ impl Walker<'_> {
 	/// arguments first, in order, the remaining ones into the variadic
 	/// parameter; then named ones. Pure: the diagnostics are returned.
 	fn bind_arguments(
-		&self,
+		&mut self,
 		call: NodeId,
 		arguments: &[ArgSyntax],
 		params: &[BindParam],
@@ -665,7 +764,7 @@ impl Walker<'_> {
 			match *argument {
 				ArgSyntax::Named(node, name_node, value) => {
 					named_seen = true;
-					let text = self.tree.text(name_node.index());
+					let text = self.tree.text(name_node.index()).to_string();
 					let found = params.iter().enumerate().find(|(_, param)| {
 						param
 							.named
@@ -678,6 +777,21 @@ impl Walker<'_> {
 						&& params
 							.iter()
 							.all(|param| param.named.is_none() && param.builtin_name.is_none());
+					let rebound = if found.is_none() {
+						let callee = match self.view(call) {
+							View::Call { callee, .. } => Some(callee),
+							_ => None,
+						};
+						callee
+							.and_then(|callee| self.named_signature(callee))
+							.and_then(|names| self.resolved_signature_names(names))
+							.is_some_and(|names| {
+								matches!(&*names, crate::signatures::SignatureNames::Function {bound: Some(bound), ..}
+								if bound.iter().any(|&name| self.s.types.syms.resolve(name) == text))
+							})
+					} else {
+						false
+					};
 					let error = match found {
 						_ if by_value && binding.errors.iter().any(|error| error.0.id == FN027.id) => {
 							None
@@ -686,6 +800,7 @@ impl Walker<'_> {
 							&FN027,
 							"named arguments only exist for direct calls of a `function`: pass the arguments by position".to_string(),
 						)),
+						None if rebound => Some((&crate::diagnostics::codes::types::FN102, format!("`{text}` is already bound by `with`"))),
 						None => Some((&FN023, format!("this function has no parameter `{text}`"))),
 						Some((_, param)) if param.sig.variadic => Some((
 							&FN026,
@@ -964,6 +1079,7 @@ impl Walker<'_> {
 			Some(value) => {
 				let actual = self.check(value, Some(data));
 				self.sink(value, actual, data);
+				self.note_copy_site(value);
 			}
 			None => {
 				for argument in arguments.iter() {

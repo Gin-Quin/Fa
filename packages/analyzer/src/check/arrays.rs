@@ -232,6 +232,7 @@ impl Walker<'_> {
 				continue;
 			}
 			let ty = self.check(item, expected_item);
+			self.note_copy_site(item);
 			if let Some(expected_item) = expected_item {
 				self.sink(item, ty, expected_item);
 			}

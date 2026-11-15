@@ -1,0 +1,14 @@
+-- prints: 1 2 0
+-- file: application/main.fa
+export function = () => console.log(library.values.Choices.One {}.value, library.values.Choices.Two {}.value, library.values.Group<Integer>.Many {}.items.length)
+-- file: library/values.fa
+export namespace = {
+	type Choices = Union {
+		One = { value: Integer = 1 }
+		Two = { value: Integer = 2 }
+	}
+	type Group<Item> = Union {
+		Many = { items: Array<Item> = [] }
+		Single = { value: Item }
+	}
+}

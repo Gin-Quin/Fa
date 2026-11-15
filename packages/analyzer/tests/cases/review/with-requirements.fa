@@ -1,0 +1,24 @@
+use { sleep } = std.time
+
+type Config = { prefix: String }
+function render = (value: Integer, suffix: String): String requires config: Config => "{config.prefix}{value}{suffix}"
+function fixed = render with (suffix = "!")
+provide Config = { prefix = "value:" }
+console.log(fixed(3)) -- prints: value:3!
+
+type Slot<Value> = { value: Value }
+function combine = <Value>(first: Value, second: Value): Value requires slot: Slot<Value> => slot.value
+function chosen = combine with (first = 1)
+provide Slot<Integer> = { value = 9 }
+console.log(chosen(2)) -- prints: 9
+
+function sum = (bias: Integer, ...items: Integer): Integer requires slot: Slot<Integer> => items.reduce((total, item) => total + item, bias) + slot.value
+function shifted = sum with (bias = 4)
+console.log(shifted(1, 2)) -- prints: 16
+
+async function delayed = (value: Integer, delay: Integer): String requires config: Config => {
+	await sleep(delay)
+	"{config.prefix}{value}"
+}
+let later = delayed with (delay = 1)
+console.log(await later(7)) -- prints: value:7

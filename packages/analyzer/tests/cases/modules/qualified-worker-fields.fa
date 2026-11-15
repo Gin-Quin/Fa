@@ -1,0 +1,12 @@
+-- analysis-target: native
+-- file: application/main.fa
+export function = () => {
+	mutable qualified = library.Echo { value = 3 }
+	console.log(qualified.value) -- error CONC008
+	qualified.stop()
+}
+-- file: library/Echo.worker.fa
+export type = {
+	value: Integer
+	function read = (self): Integer => self.value
+}

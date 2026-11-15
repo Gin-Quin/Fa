@@ -1,0 +1,9 @@
+-- prints: 7 9 x
+type Identity = <Item>(item: Item) => Item
+function identity = <Value>(value: Value): Value => copy value
+function apply = <Value>(read: Identity, value: Value): Value => read(value)
+console.log(
+	apply((identity), 7)
+	apply(((identity)), 9)
+	apply((<Value>(value: Value): Value => copy value), "x")
+)

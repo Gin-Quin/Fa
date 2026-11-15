@@ -92,6 +92,12 @@ pub struct GenericProducer {
 	pub node: u32,
 	/// A lambda (else a declaration).
 	pub lambda: bool,
+	/// Entries accepting the declaration-default presence flags.
+	pub defaults: bool,
+	/// Exact global source/target signatures for a converted forall table.
+	pub adapter: Option<(fa_analyzer::ids::TypeId, fa_analyzer::ids::TypeId)>,
+	/// Its instances expose tagged synchronous/asynchronous entry tables.
+	pub asynchronous: bool,
 	/// The bindings of the instance around a lambda: each parameter by its
 	/// owner's node and its position in the owner's generic parameters,
 	/// and the type it stands for (a global type of the run).
@@ -123,8 +129,9 @@ pub struct GenericEntryRequest {
 /// compiled per unit, defined by its entry object.
 #[derive(Clone, Debug, Default)]
 pub struct GenericTables {
-	/// Each table: its symbol and its entries' symbols, in index order.
-	pub tables: Vec<(String, Vec<String>)>,
+	/// Each table: its symbol, its entries' symbols in index order, and
+	/// whether those symbols name tagged async-entry tables.
+	pub tables: Vec<(String, Vec<String>, bool)>,
 	/// Each index: its symbol and its value.
 	pub indices: Vec<(String, u64)>,
 }

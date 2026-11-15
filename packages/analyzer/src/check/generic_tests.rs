@@ -111,6 +111,51 @@ fn generic_functions_as_values() {
 }
 
 #[test]
+fn phantom_and_value_generic_function_aliases_need_annotations() {
+	for declaration in [
+		"function source = <Phantom>(value: Integer): Integer => value\n",
+		"function source = <text: String>(): String => text\n",
+	] {
+		assert_eq!(
+			codes(&format!("{declaration}let alias = source\n")),
+			["GN015"]
+		);
+		assert_eq!(
+			codes(&format!("{declaration}let alias = (source)\n")),
+			["GN015"]
+		);
+	}
+	analyzed(
+		"function source = <text: String>(): String => text\ntype Label = <text: String>() => String\nlet alias: Label = source\nlet text = alias<\"word\">()\n",
+	);
+}
+
+#[test]
+fn generic_function_types_keep_value_parameter_kinds_and_constraints() {
+	analyzed(
+		"type Label = <text: String>() => String\nfunction source = <text: String>(): String => text\nfunction useLabel = (label: Label): String => label<\"word\">()\nlet word = useLabel(source)\n",
+	);
+	assert_eq!(
+		codes(
+			"type TypeArgument = <Item>() => Integer\nfunction source = <item: Integer>(): Integer => item\nlet alias: TypeArgument = source\n"
+		),
+		["E-GEN-1"]
+	);
+	assert_eq!(
+		codes(
+			"type ValueArgument = <item: Integer>() => Integer\nfunction source = <Item>(): Integer => 1\nlet alias: ValueArgument = source\n"
+		),
+		["E-GEN-1"]
+	);
+	assert_eq!(
+		codes(
+			"type Label = <text: String>() => String\nfunction source = <text: \"fixed\">(): String => text\nlet alias: Label = source\n"
+		),
+		["E-GEN-1"]
+	);
+}
+
+#[test]
 fn array_methods() {
 	let (session, file) = analyzed(
 		"mutable users = [\"Ana\"]\nusers.push(\"Bao\")\nusers.insert(0, \"Cleo\")\nlet last = users.pop()\nlet numbers = [1, 2, 3]\nlet doubled = numbers.map((x) => x * 2)\nlet labels = numbers.map((x, index) => \"{index}\")\nlet evens = numbers.filter((x) => x %% 2 == 0)\nlet total = numbers.reduce((sum, x) => sum + x, 0)\nlet big = numbers.find((x) => x > 1)\nlet sorted = numbers.sort()\nlet sum = numbers.sum()\nlet where = numbers.indexOf(2)\n",
@@ -179,5 +224,56 @@ fn compile_time_value_parameters() {
 	assert_eq!(
 		codes("type M<rows: Integer> = { x: Integer }\nlet n = 3\ntype T = M<n>\n"),
 		["GN008"]
+	);
+}
+
+#[test]
+fn compile_time_value_defaults_are_checked_and_ordered() {
+	assert_eq!(
+		codes("function f = <value: Int8 = 300>(): Int8 => value\n"),
+		["GN003"]
+	);
+	assert_eq!(
+		codes("function f = <value: Integer = \"word\">(): Integer => value\n"),
+		["GN003"]
+	);
+	assert_eq!(
+		codes("let initial = 3\nfunction f = <value: Integer = initial>(): Integer => value\n"),
+		["GN008"]
+	);
+	for source in [
+		"function f = <first: Integer = 1, last: Integer>(): Integer => first + last\n",
+		"function f = <First = Integer, last: Integer>(): Integer => last\n",
+		"function f = <first: Integer = 1, Last>(): Integer => first\n",
+	] {
+		assert_eq!(codes(source), ["GN005"], "{source}");
+	}
+	analyzed(
+		"function f = <first: Integer = 3, last: Integer = first>(): Integer => first + last\nlet value = f()\n",
+	);
+	assert_eq!(
+		codes("function f = <Value>(): Integer => 1\nlet value = f()\n"),
+		["GN015"]
+	);
+}
+
+#[test]
+fn function_value_applications_use_defaults() {
+	let (session, file) = analyzed(
+		"type Label = <text: String = \"default\">() => String\nfunction source = <text: String>(): String => text\nlet label: Label = source\nlet defaultLabel = label()\nlet givenLabel = label<\"given\">()\ntype Pair = <First, Last = First>(first: First, last: Last) => Last\nfunction choose = <First, Last>(first: First, last: Last): Last => last\nlet pair: Pair = choose\nlet item = pair<Integer>(1, 2)\n",
+	);
+	assert_eq!(symbol_type(&session, file, "defaultLabel"), "String");
+	assert_eq!(symbol_type(&session, file, "item"), "Integer");
+	let application = node(&session, file, "label()");
+	let arguments = session.analysis(file).instantiation(application).unwrap();
+	assert_eq!(
+		session.display_type(session.types().list_items(arguments)[0]),
+		"\"default\""
+	);
+	assert_eq!(
+		codes(
+			"type Pair = <First, Last>(first: First, last: Last) => Last\nfunction choose = <First, Last>(first: First, last: Last): Last => last\nlet pair: Pair = choose\nlet item = pair<Integer>(1, 2)\n"
+		),
+		["GN015"]
 	);
 }

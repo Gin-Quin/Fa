@@ -1,0 +1,23 @@
+-- require-split: true
+-- file: application/main.fa
+function number = library.makeNumber(9)
+function text = library.makeText("foreign")
+function keep = library.makeKeep("stored")
+function reused = library.forward(library.constant)
+function add6 = library.makeOffset<6>()
+export function = () => {
+	console.log(number(4), text(3), keep("ignored")) -- prints: 13 foreign:3 stored
+	console.log(reused(4), add6(1)) -- prints: 7 7
+}
+-- file: library/makeNumber.fa
+export function = (value: Integer) => (other: Integer) => value + other
+-- file: library/makeText.fa
+export function = (prefix: String) => (number: Integer) => "{prefix}:{number}"
+-- file: library/makeKeep.fa
+export function = <Item>(value: Item) => (_other: Item) => value
+-- file: library/constant.fa
+export function = makeNumber(3)
+-- file: library/forward.fa
+export function = (transform: (Integer) => Integer) => (value: Integer) => transform(value)
+-- file: library/makeOffset.fa
+export function = <offset: Integer>() => (value: Integer) => value + offset

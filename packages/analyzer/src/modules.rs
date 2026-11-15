@@ -625,6 +625,10 @@ pub fn generic_requirements(types: &TypeStore, generics: &[ParamId]) -> Vec<Gene
 	requirements
 }
 
+/// Constant defaults published by a type, or `None` for runtime defaults
+/// that a literal in another file must provide explicitly.
+pub type FieldDefaults = Vec<(Sym, Option<fa_interpreter::Value>)>;
+
 /// What other files see of a file: everything another file, the program
 /// analysis and the backends read of it, so that its tree and its analysis
 /// can be dropped once it is analyzed and generated
@@ -652,12 +656,21 @@ pub struct Interface {
 	pub nested_types: FxHashMap<NodeId, Vec<TypeFunction>>,
 	/// The parameters of its functions other files may call, by declaration.
 	pub parameters: FxHashMap<NodeId, Vec<Parameter>>,
+	/// Visible function names through aliases, fields and factory results.
+	pub signature_names: FxHashMap<NodeId, Arc<crate::signatures::SignatureNames>>,
+	/// Function declarations whose initializer builds a stored function value.
+	pub computed_functions: rustc_hash::FxHashSet<NodeId>,
 	/// The fields written into copies of an implicit `Type<parameter>`,
 	/// keyed by that hidden generic parameter. Callers must reject narrower
 	/// field types even when the callee's tree has been dropped (`EF004`).
 	pub implicit_writes: FxHashMap<ParamId, Vec<(Vec<Sym>, TypeId)>>,
 	/// Generic parameter order and capabilities of externally callable functions.
 	pub generic_functions: FxHashMap<NodeId, GenericFunction>,
+	/// Inferred semantic copy conditions, independent of runtime capabilities.
+	pub copy_requirements: FxHashMap<NodeId, Vec<crate::analysis::CopyRequirement>>,
+	/// Callable bodies and value origins survive after the provider AST is dropped.
+	pub callables: FxHashMap<DeclKey, crate::provenance::CallableSummary>,
+	pub value_origins: FxHashMap<DeclKey, std::sync::Arc<crate::provenance::ValueOrigin>>,
 	/// Key sets and derived types reached by the exported signatures.
 	pub key_set_params: FxHashMap<ParamId, GenericKeySet>,
 	pub derived_params: FxHashMap<ParamId, crate::analysis::DerivedParam>,
@@ -671,7 +684,11 @@ pub struct Interface {
 	/// The default values of the fields of its types, by type declaration:
 	/// each field with a default, and its value when the default is a
 	/// constant expression (the typed literals of other files fill them in).
-	pub field_defaults: FxHashMap<NodeId, Vec<(Sym, Option<fa_interpreter::Value>)>>,
+	pub field_defaults: FxHashMap<NodeId, FieldDefaults>,
+	/// Defaults of inline payloads, keyed by the nominal union member rather
+	/// than the structural payload type. Empty entries also identify inline
+	/// payloads that must not inherit another object's defaults.
+	pub member_defaults: FxHashMap<(DeclKey, u16), FieldDefaults>,
 	/// The names its declarations are exported as to the other modules of a
 	/// program: the file's name, then the namespace path, joined with `$`
 	/// (`counter$count`); `Type$name` for the functions of its types.
@@ -820,6 +837,12 @@ impl Interface {
 			.map(|(&key, keyed)| (keyed.node, key))
 			.collect();
 		let key_hash = |node: NodeId| by_node.get(&node).map_or(0, |&key| types.decl_hash(key));
+		for &decl in &self.computed_functions {
+			parts.push((114, key_hash(decl), 0, 1));
+		}
+		for (&decl, names) in &self.signature_names {
+			parts.push((109, key_hash(decl), 0, names.stable_hash(types)));
+		}
 		for (&decl, &parameters) in &self.type_parameters {
 			let hash = types
 				.list_items(parameters)
@@ -859,6 +882,12 @@ impl Interface {
 		}
 		for (&function, &owner) in &self.function_owners {
 			parts.push((105, key_hash(function), types.decl_hash(owner), 0));
+		}
+		for (&key, summary) in &self.callables {
+			parts.push((107, types.decl_hash(key), 0, summary.stable_hash(types)));
+		}
+		for (&key, value) in &self.value_origins {
+			parts.push((108, types.decl_hash(key), 0, value.stable_hash(types)));
 		}
 		for exported in self.members.values().chain(&self.export) {
 			parts.push((
@@ -943,6 +972,26 @@ impl Interface {
 				parts.push((8, key_hash(decl), ((index as u128) << 8) | kind, value));
 			}
 		}
+		for (&decl, requirements) in &self.copy_requirements {
+			for requirement in requirements {
+				let gate = requirement.resource_gate.map_or(0, |(receiver, path)| {
+					types
+						.list_items(path)
+						.iter()
+						.fold(types.stable_hash(receiver), |hash, &name| {
+							hash.rotate_left(7) ^ types.stable_hash(name)
+						})
+				});
+				parts.push((
+					106,
+					key_hash(decl),
+					u128::from(requirement.explicit)
+						| u128::from(requirement.task_transfer) << 1
+						| u128::from(requirement.task_only) << 2,
+					types.stable_hash(requirement.subject) ^ gate.rotate_left(19),
+				));
+			}
+		}
 		for (&param, info) in &self.key_set_params {
 			parts.push((
 				9,
@@ -1020,6 +1069,18 @@ impl Interface {
 					key_hash(decl),
 					rustc_hash::FxBuildHasher.hash_one(text) as u128,
 					0,
+				));
+			}
+		}
+		for (&(owner, member), defaults) in &self.member_defaults {
+			parts.push((112, types.decl_hash(owner), u128::from(member), 0));
+			for (name, value) in defaults {
+				let text = format!("{}={value:?}", types.syms.resolve(*name));
+				parts.push((
+					112,
+					types.decl_hash(owner),
+					u128::from(member),
+					rustc_hash::FxBuildHasher.hash_one(text) as u128,
 				));
 			}
 		}

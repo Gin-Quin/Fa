@@ -1,0 +1,33 @@
+type Tree = Union {
+	List = { items: Array<Tree> = [] }
+	Leaf = { value: Integer = 7 }
+}
+function empty = (): Tree => Tree.List {}
+mutable first = Tree.List {}
+first.items.push(Tree.Leaf {})
+let second = Tree.List {}
+console.log(first.items.length, second.items.length)
+-- prints: 1 0
+console.log(empty())
+-- prints: Tree.List { items = [] }
+type Choices = Union {
+	One = { value: Integer = 1 }
+	Two = { value: Integer = 2 }
+}
+console.log(Choices.One {}.value, Choices.Two {}.value)
+-- prints: 1 2
+type Group<Item> = Union {
+	Many = { items: Array<Item> = [] }
+	Single = { value: Item }
+}
+let group = Group<Integer>.Many {}
+console.log(group.items.length)
+-- prints: 0
+type Label<text: String> = Union {
+	Text = { value: String = text }
+}
+console.log(Label<"payload">.Text {}.value)
+-- prints: payload
+function label = <text: String>(): String => Label<text>.Text {}.value
+console.log(label<"forwarded">())
+-- prints: forwarded

@@ -92,9 +92,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		ty: TypeId,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		self.constant_value_with_functions(value, ty, node, &Default::default())
+	}
+
+	pub(super) fn constant_value_with_functions(
+		&mut self,
+		value: &Value,
+		ty: TypeId,
+		node: NodeId,
+		functions: &rustc_hash::FxHashMap<
+			usize,
+			std::sync::Arc<fa_analyzer::constants::ConstantFunction>,
+		>,
+	) -> Result<Val<'ctx>, Error> {
 		let repr = self.repr_of(ty, node.index())?;
 		let unsupported = |this: &Self| this.unsupported(node.index(), "this compile-time value");
 		Ok(match (value, repr) {
+			(Value::Function(function), Repr::Function(_)) => {
+				let function = functions
+					.get(&(std::sync::Arc::as_ptr(function) as usize))
+					.ok_or_else(|| unsupported(self))?;
+				let value = self.constant_function(function, node)?;
+				self.convert(value, repr, node.index())?
+			}
 			(Value::Integer(integer), Repr::Int(int)) => {
 				Val::new(repr, self.const_int(int.bits, *integer))
 			}
@@ -140,7 +160,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let [member] = members.as_slice() else {
 					return Err(unsupported(self));
 				};
-				let inner = self.constant_value(value, *member, node)?;
+				let inner = self.constant_value_with_functions(value, *member, node, functions)?;
 				self.convert(inner, repr, node.index())?
 			}
 			// a union of literal types (the items of a static array of
@@ -156,7 +176,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				else {
 					return Err(unsupported(self));
 				};
-				let inner = self.constant_value(value, member, node)?;
+				let inner = self.constant_value_with_functions(value, member, node, functions)?;
 				let inner = if self.needs_drop(inner.repr) {
 					self.fresh(inner)
 				} else {
@@ -180,7 +200,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let array = self.new_array(item, count, count)?;
 				let (pointer, _) = self.array_parts(array)?;
 				for (index, value) in items.iter().enumerate() {
-					let value = self.constant_value(value, item_type, node)?;
+					let value =
+						self.constant_value_with_functions(value, item_type, node, functions)?;
 					let value = self.convert(value, item, node.index())?;
 					let index = self.context.i64_type().const_int(index as u64, false);
 					let slot = self.item_pointer(pointer, item, index)?;
@@ -202,7 +223,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let mut tuple = structure.get_undef();
 				for (index, (value, item_type)) in items.iter().zip(item_types).enumerate() {
 					let item_repr = self.repr_of(item_type, node.index())?;
-					let value = self.constant_value(value, item_type, node)?;
+					let value =
+						self.constant_value_with_functions(value, item_type, node, functions)?;
 					let value = self.convert(value, item_repr, node.index())?;
 					let raw = value
 						.value
@@ -225,7 +247,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						return Err(unsupported(self));
 					};
 					let field_repr = self.repr_of(field.ty, node.index())?;
-					let value = self.constant_value(value, field.ty, node)?;
+					let value =
+						self.constant_value_with_functions(value, field.ty, node, functions)?;
 					let value = self.convert(value, field_repr, node.index())?;
 					let raw = value
 						.value
@@ -258,7 +281,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				let data = match (&member.data, self.member_data(nominal, index)) {
 					(Some(data), Some(data_type)) => {
-						let value = self.constant_value(data, data_type, node)?;
+						let value =
+							self.constant_value_with_functions(data, data_type, node, functions)?;
 						Some(if self.needs_drop(value.repr) {
 							self.fresh(value)
 						} else {
@@ -317,9 +341,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.const_int(entries.len() as u64, false);
 				let pointer = self.table_new(table, capacity)?;
 				for (key, value) in entries.iter() {
-					let key = self.constant_value(key, key_type, node)?;
+					let key = self.constant_value_with_functions(key, key_type, node, functions)?;
 					let key = self.convert(key, table.key, node.index())?;
-					let value = self.constant_value(value, value_type, node)?;
+					let value =
+						self.constant_value_with_functions(value, value_type, node, functions)?;
 					let value =
 						self.convert(value, table.value.unwrap_or(Repr::Bool), node.index())?;
 					self.table_insert(pointer, table, key, Some(value), node)?;
@@ -334,7 +359,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let capacity = self.context.i64_type().const_int(items.len() as u64, false);
 				let pointer = self.table_new(table, capacity)?;
 				for item in items.iter() {
-					let item = self.constant_value(item, item_type, node)?;
+					let item =
+						self.constant_value_with_functions(item, item_type, node, functions)?;
 					let item = self.convert(item, table.key, node.index())?;
 					self.table_insert(pointer, table, item, None, node)?;
 				}

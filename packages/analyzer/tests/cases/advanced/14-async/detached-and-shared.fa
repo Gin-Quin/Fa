@@ -7,10 +7,11 @@ function announce = (message: String) requires logger: Logger => logger.info(mes
 async function main = () => {
 	mutable scores: Array<Integer> = [1, 2, 3]
 	-- a detached task copies its arguments: `scores` stays free
-	start upload(scores)
+	start upload(copy scores)
 	scores.push(4)
+	let taskScores = copy scores
 	start do {
-		await upload(scores)
+		await upload(taskScores)
 	}
 	scores.push(5)
 

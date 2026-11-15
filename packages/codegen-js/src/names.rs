@@ -111,6 +111,7 @@ const RESERVED: &[&str] = &[
 	"Uint32Array",
 	"Uint8Array",
 	"WeakMap",
+	"WeakSet",
 	"Worker",
 	"clearTimeout",
 	"console",

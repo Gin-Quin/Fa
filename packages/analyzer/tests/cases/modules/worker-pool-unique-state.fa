@@ -1,0 +1,12 @@
+-- analysis-target: native
+-- file: main.foreign.fa
+use { WorkerPool } = std.concurrency
+mutable pool = WorkerPool<Holder> { count = 2, state = Holder { ticket = Ticket { id = 1 } } } -- error MEM003
+pool.shutdown()
+-- file: Holder.worker.fa
+export type = { ticket: Ticket }
+-- file: Ticket.foreign.fa
+export type = {
+	id: Integer
+	function destroy = (self) => {}
+}

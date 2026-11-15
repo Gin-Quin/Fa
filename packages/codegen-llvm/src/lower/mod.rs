@@ -32,12 +32,15 @@ mod closures;
 mod columns;
 mod compose;
 mod constants;
+mod default_values;
 mod destination;
 mod division;
 mod edits;
 mod fields;
 mod foreign;
 mod frozen;
+mod function_adapters;
+mod function_constants;
 pub(crate) mod generic_values;
 mod growing;
 mod hoisting;
@@ -49,9 +52,11 @@ mod iterators;
 mod json;
 mod numbers;
 mod objects;
+mod owned_projections;
 mod ownership;
 mod packed;
 mod parallel;
+mod partial;
 mod patterns;
 mod pools;
 pub(crate) mod program;
@@ -162,6 +167,8 @@ struct LoopFrame<'ctx> {
 
 /// The function being lowered.
 struct Frame<'ctx> {
+	/// A reserved recursive box belongs to this function's SSA/control flow.
+	pending_box: std::cell::Cell<Option<(PointerValue<'ctx>, Repr)>>,
 	function: FunctionValue<'ctx>,
 	/// Recursive nodes allocated by this function belong to the caller's region.
 	arena: bool,
@@ -276,6 +283,11 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	callback_instances: FxHashMap<CallbackInstanceKey<'ctx>, (FileId, NodeId)>,
 	/// The instances still to lower, with their file.
 	pending_instances: Vec<(FileId, NodeId)>,
+	/// Concrete function coercions requested while lowering values. Their
+	/// bodies are generated with an independent frame in the ordinary queue.
+	function_adapters: std::cell::RefCell<Vec<function_adapters::FunctionAdapter<'ctx>>>,
+	generic_function_adapters:
+		std::cell::RefCell<Vec<function_adapters::GenericFunctionAdapter<'ctx>>>,
 	/// The representations of the generic parameters of the function being
 	/// lowered (an instance).
 	bindings: std::cell::RefCell<FxHashMap<fa_analyzer::ids::ParamId, Repr>>,
@@ -339,9 +351,6 @@ pub(crate) struct Lowering<'a, 'ctx> {
 		inkwell::values::MetadataValue<'ctx>,
 		inkwell::values::MetadataValue<'ctx>,
 	)>,
-	/// A block allocated for the box of a recursive field before its value
-	/// was computed ([`Lowering::object_literal`]), which `box_rec` uses.
-	pending_box: std::cell::Cell<Option<(PointerValue<'ctx>, Repr)>>,
 	/// Whether a drop of the program does more than free memory (calls a
 	/// `destroy`, releases a thread-safe value, disposes an observer): the
 	/// drops at the end of `main` then run, else they are skipped.
@@ -514,6 +523,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			instances: FxHashMap::default(),
 			callback_instances: FxHashMap::default(),
 			pending_instances: Vec::new(),
+			function_adapters: std::cell::RefCell::new(Vec::new()),
+			generic_function_adapters: std::cell::RefCell::new(Vec::new()),
 			bindings: std::cell::RefCell::new(FxHashMap::default()),
 			type_bindings: std::cell::RefCell::new(FxHashMap::default()),
 			method_bindings: std::cell::RefCell::new(Vec::new()),
@@ -536,7 +547,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			leak_check: false,
 			tests: Vec::new(),
 			tbaa: std::cell::OnceCell::new(),
-			pending_box: std::cell::Cell::new(None),
 			effectful_drops: std::cell::Cell::new(false),
 			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
 			field_flags: std::cell::RefCell::new(FxHashMap::default()),
@@ -719,6 +729,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.lower_test_main()?;
 		}
 		loop {
+			if self.lower_next_function_adapter()? {
+				continue;
+			}
 			if let Some((file, instance)) = self.pending_instances.pop() {
 				self.switch_file(file);
 				self.lower_function(instance)?;
@@ -1210,7 +1223,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.generic_functions.insert(node, info);
 				continue;
 			}
-			if info.declaration.is_none() && self.inside_generic_function(node) {
+			if self.inside_generic_function(node) {
 				// a lambda of a generic function: declared per instance of the
 				// function around it, when evaluated (`closures.rs`)
 				self.generic_functions.insert(node, info);
@@ -1249,14 +1262,33 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// Whether a parameter of this representation is passed as a pointer to
 	/// the caller's value (never copied): every aggregate but a function
 	/// value, outside of asynchronous programs (whose tasks may outlive the
-	/// caller's places). The same for direct and indirect calls.
+	/// caller's places). This is the source function's direct convention.
 	pub(crate) fn borrows_parameter(&self, repr: Repr) -> bool {
-		// a move-only value moves into its function: by value
-		let moved =
-			matches!(repr, Repr::Object(ty) | Repr::Tuple(ty) if self.types().owns_unique(ty));
+		// Only Task parameters transfer ownership. Resources borrow even
+		// when their payload contains a Task.
+		let moved = matches!(repr, Repr::Object(ty) | Repr::Tuple(ty)
+			if self.types().takes_task_parameter(self.concrete_type(ty)));
 		!self.tasks.asynchronous
 			&& !moved && !matches!(repr, Repr::Function(_))
 			&& self.llvm_type(repr).is_struct_type()
+	}
+
+	/// A function value borrows aggregates in every program. Its convention
+	/// cannot depend on the stored function's effects or on whether another
+	/// part of the program starts tasks. A forwarding thunk adapts the source
+	/// function's convention, loading a borrowed aggregate when necessary.
+	pub(crate) fn value_borrows_parameter(&self, repr: Repr) -> bool {
+		let subject = match repr {
+			Repr::Optional(scalar) => scalar.repr(),
+			_ => repr,
+		};
+		let transferred = match subject {
+			Repr::Object(ty) | Repr::Tuple(ty) | Repr::Row(ty) => {
+				self.types().takes_task_parameter(self.concrete_type(ty))
+			}
+			_ => false,
+		};
+		!transferred && !matches!(repr, Repr::Function(_)) && self.llvm_type(repr).is_struct_type()
 	}
 
 	/// Declares a function (or an instance of a generic one, under the
@@ -1307,18 +1339,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			// caller's place (memory management page: parameters are references)
 			let mut by_pointer = vec![false; info.params.len()];
 			let mut borrowed = vec![false; info.params.len()];
-			if !is_lambda {
-				let (mutates, invalidates) = self.types().effects(sig.effects);
-				for path in mutates.iter().chain(invalidates) {
-					let (data, _) = self.types().path_data(*path);
-					let index = match data.root {
-						fa_analyzer::types::PathRoot::Param(index) => index as usize,
-						fa_analyzer::types::PathRoot::SelfParam => 0,
-						_ => continue,
-					};
-					if let Some(flag) = by_pointer.get_mut(index) {
-						*flag = true;
-					}
+			let (mutates, invalidates) = self.types().effects(sig.effects);
+			for path in mutates.iter().chain(invalidates) {
+				let (data, _) = self.types().path_data(*path);
+				let index = match data.root {
+					fa_analyzer::types::PathRoot::Param(index) => index as usize,
+					fa_analyzer::types::PathRoot::SelfParam => 0,
+					_ => continue,
+				};
+				if let Some(flag) = by_pointer.get_mut(index) {
+					*flag = true;
 				}
 			}
 			for (position, param) in info.params.iter().enumerate() {
@@ -1345,9 +1375,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 						));
 					}
 					// a borrowed parameter with a default: the caller's place,
-					// or null and a false flag for the default (a lambda's
-					// callers give every argument)
-					let has_default = param.default.is_some() && !is_lambda;
+					// or null and a false flag for the default. An ordinary
+					// indirect call's thunk marks every argument as supplied.
+					let has_default = param.default.is_some();
 					types.push(self.pointer_type().into());
 					if has_default {
 						types.push(self.context.bool_type().into());
@@ -1356,7 +1386,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					continue;
 				}
 				types.push(self.llvm_type(repr).into());
-				let has_default = param.default.is_some() && !is_lambda;
+				let has_default = param.default.is_some();
 				if has_default {
 					types.push(self.context.bool_type().into());
 				}
@@ -1508,7 +1538,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					let variable = !matches!(
 						data.kind,
 						SymbolKind::Function | SymbolKind::Type | SymbolKind::Namespace
-					);
+					) || self.analysis.computed_functions.contains(&data.decl_node);
 					if variable {
 						let symbol_owner = self.owner_of_scope(data.scope);
 						if symbol_owner.is_none() && symbol_owner != Some(owner) {
@@ -1585,6 +1615,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let outer = self.cleanups.take();
 		self.saved_cleanups.push(outer);
 		self.frame = Some(Frame {
+			pending_box: std::cell::Cell::new(None),
 			function,
 			arena: false,
 			same_value_zero: false,
@@ -1671,7 +1702,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.get_nth_param(0)
 				.expect("an environment")
 				.into_pointer_value();
-			saved = self.bind_captures(environment, &captures, by_reference)?;
+			saved = self.bind_captures(environment, &captures, by_reference, info.ty)?;
 		}
 		// the parameters, then their defaults in order
 		let mut index = u32::from(lambda);
@@ -1991,10 +2022,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.filter(|&statement| {
 				// the module-level values are initialized above
 				!(self.module_file
-					&& matches!(
+					&& (matches!(
 						self.view(statement),
 						View::Declaration { .. } | View::ExportValue { .. }
-					))
+					) || self.analysis.computed_functions.contains(&statement)))
 			})
 			.collect();
 		self.top_level_statements(&statements)?;
@@ -2311,6 +2342,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	fn expr_inner(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		if let Some(value) = self.analysis.function_constants.get(&node).cloned() {
+			let value = self.compiled_function_constant(&value, node)?;
+			return Ok(self.fresh(value));
+		}
 		// a value computed at compile time (advanced brief §12): scalars and
 		// strings; the other values are compiled from their expression
 		if let Some(value) = self.compile_time_scalar(node)? {
@@ -2319,6 +2354,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		// `f then g`, `chain[1..]` (compose.rs)
 		if self.analysis.compositions.contains_key(&node) {
 			return self.composition_value(node);
+		}
+		if self.analysis.partial_applications.contains_key(&node) {
+			return self.partial_value(node);
 		}
 		match self.view(node) {
 			View::Error => Err(self.unsupported(node.index(), "code with errors")),
@@ -2453,6 +2491,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Declaration { value, .. } => self.declaration(node, value),
 			View::Watch(_) => self.watch(node),
 			View::ExportValue { value, .. } => self.declaration(node, Some(value)),
+			View::ExportFunction { value, .. }
+				if self.analysis.computed_functions.contains(&node) =>
+			{
+				self.declaration(node, Some(value))
+			}
 			View::ExportFunction { .. } | View::ExportType { .. } => Ok(Val::void()),
 			// the members of a namespace of a module are initialized in the
 			// program's order; a program file's, where it is declared
@@ -2480,6 +2523,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.reactive_write(node, target, |this| {
 					this.compound_assignment(node, op, target, value)
 				})
+			}
+			View::Function { value, .. } if self.analysis.computed_functions.contains(&node) => {
+				self.declaration(node, Some(value))
 			}
 			View::Function { .. } | View::TypeDecl { .. } => Ok(Val::void()),
 			View::If {
@@ -2572,6 +2618,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Unsupported(name) => Err(self.unsupported(node.index(), name)),
 			// design/async.md §3 (`tasks.rs`)
 			View::Await(operand) => self.await_expression(node, operand),
+			View::Copy(operand) => {
+				let value = self.expr(operand)?;
+				let copy = self.emit_copy(value)?;
+				Ok(self.fresh(copy))
+			}
 			View::Start(operand) => self.start_expression(node, operand),
 			other => Err(self.unsupported(node.index(), &format!("`{}`", variant_name(&other)))),
 		}

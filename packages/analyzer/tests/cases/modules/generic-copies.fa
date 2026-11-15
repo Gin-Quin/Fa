@@ -2,7 +2,7 @@
 -- file: library/copies.fa
 export namespace = {
 	function value = <Value>(value: Value): Value => value
-	function array = <Item>(items: Array<Item>): Array<Item> => items
+	function array = <Item>(items: Array<Item>): Array<Item> => copy items
 	function stored = <Item>(item: Item): Array<Item> => [item]
 }
 -- file: application/main.fa

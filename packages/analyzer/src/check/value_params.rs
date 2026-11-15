@@ -11,7 +11,7 @@ use std::sync::Arc;
 use ethnum::I256;
 
 use crate::check::Walker;
-use crate::diagnostics::codes::types::{GN006, GN008};
+use crate::diagnostics::codes::types::{GN003, GN006, GN008};
 use crate::ids::{NodeId, ParamId, TypeId};
 use crate::symbols::{DeclState, Resolution, SymbolKind};
 use crate::syntax::{self, ArithOp, Name, NodeList, View};
@@ -49,15 +49,46 @@ impl Walker<'_> {
 			let diagnostic = self.diagnostic(&GN006, annotation.unwrap_or(generic), message);
 			self.report(diagnostic);
 		}
-		let default_ty = default.map_or(TypeId::UNSET, |default| {
-			self.constant_type(default).unwrap_or(TypeId::UNKNOWN)
-		});
+		let default_ty =
+			default.map_or(TypeId::UNSET, |default| self.checked_constant_type(default));
+		if !default_ty.is_unset()
+			&& !self.s.types.is_recovering(default_ty)
+			&& !self.s.types.is_recovering(ty)
+			&& !self.s.types.satisfies(default_ty, ty)
+		{
+			let message = format!(
+				"the default `{}` doesn't satisfy the constraint `{}`",
+				self.display(default_ty),
+				self.display(ty)
+			);
+			let diagnostic = self.diagnostic(&GN003, default.unwrap_or(generic), message);
+			self.report(diagnostic);
+		}
 		self.s.types.set_param_bounds(param, ty, default_ty);
 		let symbol = self.declare(generic, name, SymbolKind::Static);
+		self.a.value_parameters.insert(symbol, param);
 		let symbol = self.a.symbols.symbol_mut(symbol);
 		symbol.ty = ty;
 		symbol.state = DeclState::Done;
 		self.set_type(target, ty);
+	}
+
+	fn checked_constant_type(&mut self, node: NodeId) -> TypeId {
+		self.set_flag(node, crate::analysis::NodeFlags::TYPE_EXPR);
+		let ty = match self.constant_type(node) {
+			Some(ty) => ty,
+			None => self.memo(node, |walker| {
+				let diagnostic = walker.diagnostic(
+					&GN008,
+					node,
+					"a compile-time value is expected here: a literal or a constant expression",
+				);
+				walker.report(diagnostic);
+				TypeId::UNKNOWN
+			}),
+		};
+		self.memo(node, |_| ty);
+		ty
 	}
 
 	/// Whether values of `ty` have an exact equality (types brief §3.11.1).
@@ -112,6 +143,10 @@ impl Walker<'_> {
 				let symbol = self.a.symbols.lookup(self.body.scope, sym)?;
 				let data = self.a.symbols.symbol(symbol);
 				let (kind, ty) = (data.kind, data.ty);
+				if let Some(&param) = self.a.value_parameters.get(&symbol) {
+					self.set_resolution(n, Resolution::Local(symbol));
+					return Some(self.s.types.intern(TypeKind::Param(param)));
+				}
 				if kind != SymbolKind::Static || !self.s.types.is_literal(ty) {
 					return None;
 				}
@@ -193,24 +228,7 @@ impl Walker<'_> {
 				types.push(ty);
 				continue;
 			}
-			self.set_flag(argument, crate::analysis::NodeFlags::TYPE_EXPR);
-			let ty = match self.constant_type(argument) {
-				Some(ty) => ty,
-				None => {
-					self.memo(argument, |w| {
-						let diagnostic = w.diagnostic(
-							&GN008,
-							argument,
-							"a compile-time value is expected here: a literal or a constant expression",
-						);
-						w.report(diagnostic);
-						TypeId::UNKNOWN
-					});
-					TypeId::UNKNOWN
-				}
-			};
-			self.memo(argument, |_| ty);
-			types.push(ty);
+			types.push(self.checked_constant_type(argument));
 		}
 		types
 	}

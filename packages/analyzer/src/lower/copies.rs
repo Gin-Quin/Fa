@@ -145,7 +145,7 @@ pub fn is_mutable_place(analysis: &Analysis, root: SymbolId) -> bool {
 /// position (`NodeFlags::MOVE`, parentheses skipped).
 pub fn is_move(tree: &TypedSyntaxTree, analysis: &Analysis, n: NodeId) -> bool {
 	let mut n = n;
-	while let View::Group(inner) = syntax::view(tree, n) {
+	while let View::Group(inner) | View::Try(inner) = syntax::view(tree, n) {
 		n = inner;
 	}
 	analysis.has_flags(n, NodeFlags::MOVE)

@@ -120,6 +120,67 @@ fn mutated_arguments_must_be_mutable() {
 }
 
 #[test]
+fn function_type_effects_cover_more_precise_stored_effects() {
+	let source = "type Point = { a: Integer, b: Integer }\ntype Change = (point: Point) => Void mutates point\nfunction changeA = (point: Point) mutates point.a => { point.a += 1 }\nlet change: Change = changeA\nmutable point = Point { a = 1, b = 2 }\nchange(point)\n";
+	assert_eq!(codes(source), Vec::<&str>::new());
+	// Coverage remains directional: a callback cannot acquire permission
+	// to change a parameter merely by being stored in a pure function type.
+	let rejected = source.replace(
+		"type Change = (point: Point) => Void mutates point",
+		"type Change = (point: Point) => Void",
+	);
+	assert_eq!(codes(&rejected), ["E-TYPE-1"]);
+}
+
+#[test]
+fn function_types_declare_full_paths_and_requirements_in_their_own_scope() {
+	let source = "type Point = { a: Integer, b: Integer }\ntype Change = (point: Point) => Void mutates point.a\nfunction changeA = (point: Point) mutates point.a => { point.a += 1 }\nlet change: Change = changeA\nmutable point = Point { a = 1, b = 2 }\nchange(point)\n";
+	assert_eq!(codes(source), Vec::<&str>::new());
+	assert_eq!(
+		codes(&source.replace("=> Void mutates point.a", "=> Void mutates point.b")),
+		["E-TYPE-1"]
+	);
+	let requirements = "type Context = { count: Integer }\ntype Push = (items: Array<Integer>) => Void requires state: Context mutates items, state.count\nfunction push = (items: Array<Integer>) requires context: Context mutates items, context.count => { context.count += 1\nitems.push(3) }\nlet callback: Push = push\nmutable context = Context { count = 0 }\nprovide Context = context\nmutable values: Array<Integer> = []\ncallback(values)\n";
+	assert_eq!(codes(requirements), Vec::<&str>::new());
+	assert_eq!(
+		codes(
+			"type Context = { count: Integer }\ntype Needs = () => Void requires context: Context\nconsole.log(context)\n"
+		),
+		["E-DECL-1"]
+	);
+	assert_eq!(
+		codes(
+			"type Pop = (items: Array<Integer>) => Void mutates items.length invalidates items[..]\nfunction pop = (items: Array<Integer>) mutates items.length invalidates items[..] => { items.pop() }\nlet callback: Pop = pop\n"
+		),
+		Vec::<&str>::new()
+	);
+	assert_eq!(
+		codes(
+			"type Indexed = (items: Array<{ value: Integer }>, index: Integer) => Void mutates items[index].value\n"
+		),
+		Vec::<&str>::new()
+	);
+	assert_eq!(
+		codes("type Invalid = (value: Integer) => Void mutates value\n"),
+		["EFF005"]
+	);
+	assert_eq!(
+		codes("type Invalid = (value: { count: Integer }) => Void mutates value.missing\n"),
+		["EFF008"]
+	);
+	assert_eq!(
+		codes("type Invalid = (items: Array<Integer>) => Void invalidates items\n"),
+		["EFF009"]
+	);
+	assert_eq!(
+		codes(
+			"type Cell<Item> = { value: Item }\ntype Reader = <Item>() => Item requires cell: Cell<Item>\nfunction read = <Item>(): Item requires source: Cell<Item> => copy source.value\nlet reader: Reader = read\nmutable cell = Cell<Integer> { value = 7 }\nprovide Cell<Integer> = cell\nlet value = reader<Integer>()\n"
+		),
+		Vec::<&str>::new()
+	);
+}
+
+#[test]
 fn iteration_and_aliasing() {
 	assert_eq!(
 		codes("mutable xs = [1, 2]\nfor x in xs {\n\txs.push(0)\n}\n"),

@@ -86,6 +86,16 @@ pub trait Host {
 	fn function(&mut self, key: FnKey) -> Result<Arc<Function>, Error>;
 	/// The value of a module-level value (evaluated once).
 	fn global(&mut self, key: crate::ir::GlobalKey) -> Result<Value, Error>;
+	/// Applies the analyzer's checked generic arguments to a function value.
+	fn instantiate(&mut self, _function: FnKey, _application: FnKey) -> Result<FnKey, Error> {
+		Err(Error::Unsupported(
+			"a generic function application without a typed host".into(),
+		))
+	}
+	/// Records the generic arguments fixed by a checked `with` expression.
+	fn bind_partial(&mut self, function: FnKey, _site: FnKey) -> Result<FnKey, Error> {
+		Ok(function)
+	}
 }
 
 /// How control leaves an expression (an implementation detail of the evaluator).

@@ -59,7 +59,7 @@ impl Generator<'_> {
 	/// before its body, which a recursive type calls.
 	pub(crate) fn drop_function(&mut self, ty: TypeId) -> Option<String> {
 		let ty = self.types.unfold(ty);
-		if !self.types.contains_resource(ty) {
+		if !self.types.contains_resource(ty) && !self.contains_function_value(ty) {
 			return None;
 		}
 		if let Some(name) = self.drops.get(&ty) {
@@ -86,6 +86,10 @@ impl Generator<'_> {
 	/// The statements of the drop function of a type.
 	fn drop_body(&mut self, ty: TypeId) -> Option<Vec<String>> {
 		match self.types.kind(ty) {
+			TypeKind::Function(_) => {
+				Some(vec![format!("{}(value);", self.helper("faReleaseShared"))])
+			}
+			TypeKind::Param(_) => Some(vec![format!("{}(value);", self.helper("faDropFunctions"))]),
 			TypeKind::Object(_) => {
 				let mut lines = Vec::new();
 				if self.types.is_resource(ty) {
@@ -285,14 +289,58 @@ impl Generator<'_> {
 		}
 	}
 
+	/// A local backend query on this pre-Copy frontend. The integrated
+	/// implementation uses TypeStore::contains_shared_handle instead.
+	pub(crate) fn contains_function_value(&self, ty: TypeId) -> bool {
+		let mut pending = vec![ty];
+		let mut seen = std::collections::HashSet::new();
+		while let Some(ty) = pending.pop() {
+			if ty.is_unset() || !seen.insert(ty) {
+				continue;
+			}
+			match self.types.kind(ty) {
+				TypeKind::Function(_) | TypeKind::Param(_) => return true,
+				TypeKind::Object(_) => {
+					pending.extend(self.types.fields_of(ty).iter().map(|field| field.ty))
+				}
+				TypeKind::Tuple(list) | TypeKind::Union(list) => {
+					pending.extend(self.types.list_items(list))
+				}
+				TypeKind::Collection(_, item, key) => pending.extend([item, key]),
+				TypeKind::Rec(_) => pending.extend(self.types.rec_target(ty)),
+				TypeKind::Member(nominal, index) => {
+					pending.push(self.types.payload(nominal, index))
+				}
+				TypeKind::NamedUnion(nominal, mask) => {
+					for index in 0..self
+						.types
+						.sym_list(self.types.nominal(nominal).members)
+						.len() as u16
+					{
+						if self.types.mask_has(mask, index) {
+							pending.push(self.types.payload(nominal, index));
+						}
+					}
+				}
+				_ => {}
+			}
+		}
+		false
+	}
+
+	pub(crate) fn storage_drop_function(&mut self, ty: TypeId) -> Option<String> {
+		self.drop_function(ty)
+	}
+
 	/// The local or parameter that a declaration (or a parameter) makes
 	/// own a value holding a resource, dropped at the end of its block.
 	pub(crate) fn owned_resource(&self, n: NodeId) -> Option<SymbolId> {
-		if !matches!(self.view(n), View::Declaration { .. }) {
+		let owns_partial = self.analysis.computed_functions.contains(&n);
+		if !owns_partial && !matches!(self.view(n), View::Declaration { .. }) {
 			return None;
 		}
 		let symbol = self.analysis.symbols.symbol_of_decl(n)?;
-		self.owns_resource(symbol).then_some(symbol)
+		(owns_partial || self.owns_resource(symbol)).then_some(symbol)
 	}
 
 	/// Whether a local or a parameter owns a value holding a resource.
@@ -301,7 +349,9 @@ impl Generator<'_> {
 		matches!(
 			info.kind,
 			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Parameter { .. }
-		) && self.types.contains_resource(info.ty)
+		) && (self.types.contains_resource(info.ty)
+			|| (!matches!(info.kind, SymbolKind::Parameter { .. })
+				&& self.contains_function_value(info.ty)))
 	}
 
 	/// Whether a local moves out somewhere (as a whole): it needs a drop flag.

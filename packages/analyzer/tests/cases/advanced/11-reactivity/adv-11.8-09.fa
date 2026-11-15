@@ -4,5 +4,5 @@ let subscription = watch {
 }
 subscription.stop()
 count = 1
-subscription.stop() -- error MEM002
+subscription.stop()
 -- prints: 0

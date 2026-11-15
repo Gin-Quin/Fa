@@ -498,13 +498,15 @@ describe("FaSet (D33)", () => {
 
 	test("the first equal element is kept", () => {
 		const first = { id: 1, name: "first" };
-		const set = new FaSet([first, { id: 1, name: "second" }], { key: (user) => user.id });
+		const set = new FaSet([first, { id: 1, name: "first" }]);
 		expect(set.size).toBe(1);
 		expect([...set][0]).toBe(first);
-		expect(set.has({ id: 1, name: "other" })).toBe(true);
-		expect(faSetTake(set, { id: 1, name: "" })).toBe(first);
+		expect(set.has({ id: 1, name: "other" })).toBe(false);
+		expect(faSetTake(set, { id: 1, name: "first" })).toBe(first);
 		expect(set.size).toBe(0);
-		expect(faSetTake(set, { id: 1, name: "" })).toBeUndefined();
+		expect(faSetTake(set, { id: 1, name: "first" })).toBeUndefined();
+		set.add(first).add({ id: 1, name: "second" });
+		expect(set.size).toBe(2);
 	});
 
 	test("has the JavaScript Set interface", () => {
@@ -525,11 +527,12 @@ describe("FaSet (D33)", () => {
 		expect(set.size).toBe(0);
 	});
 
-	test("an empty set of the same kind keeps the key function", () => {
-		const set = new FaSet([], { key: (/** @type {string} */ text) => text.toLowerCase() });
-		const empty = /** @type {FaSet<string>} */ (faSetEmptyLike(set));
-		empty.add("A");
-		expect(empty.has("a")).toBe(true);
+	test("an empty set of the same kind keeps structural equality", () => {
+		const set = new FaSet([{ x: 1 }]);
+		const empty = /** @type {FaSet<{x:number}>} */ (faSetEmptyLike(set));
+		empty.add({ x: 2 });
+		expect(empty.has({ x: 2 })).toBe(true);
+		expect(empty.has({ x: 1 })).toBe(false);
 		expect(faSetEmptyLike(new Set([1]))).toEqual(new Set());
 	});
 
@@ -541,18 +544,13 @@ describe("FaSet (D33)", () => {
 		expect([...faSetDifference(a, b)]).toEqual([1]);
 		expect(faSetIsSubsetOf(new Set([2, 3]), a)).toBe(true);
 		expect(faSetIsSubsetOf(a, b)).toBe(false);
-		const caseless = new FaSet(["A", "b"], { key: (/** @type {string} */ t) => t.toLowerCase() });
-		const other = new Set(["a", "C"]);
-		expect([...faSetIntersection(caseless, other)]).toEqual(["A"]);
-		expect([...faSetDifference(caseless, other)]).toEqual(["b"]);
-		expect(faSetUnion(caseless, other).size).toBe(3);
-		expect(faSetUnion(caseless, other)).toBeInstanceOf(FaSet);
-		expect(
-			faSetIsSubsetOf(
-				new FaSet(["B"], { key: (/** @type {string} */ t) => t.toLowerCase() }),
-				caseless,
-			),
-		).toBe(true);
+		const structural = new FaSet([{ id: 1 }, { id: 2 }]);
+		const other = new FaSet([{ id: 2 }, { id: 3 }]);
+		expect([...faSetIntersection(structural, other)]).toEqual([{ id: 2 }]);
+		expect([...faSetDifference(structural, other)]).toEqual([{ id: 1 }]);
+		expect(faSetUnion(structural, other).size).toBe(3);
+		expect(faSetUnion(structural, other)).toBeInstanceOf(FaSet);
+		expect(faSetIsSubsetOf(new FaSet([{ id: 2 }]), structural)).toBe(true);
 	});
 });
 

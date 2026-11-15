@@ -66,6 +66,8 @@ pub(crate) enum Cleanup<'ctx> {
 	Shallow(PointerValue<'ctx>, IntValue<'ctx>),
 	/// A `watch` block, disposed at the end of its scope.
 	Dispose(PointerValue<'ctx>),
+	/// Restore a changed structural view on return, error or cancellation.
+	WriteBack(super::references::WriteBack<'ctx>),
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -183,9 +185,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.build_call(self.runtime.function("fa_arena_enter")?, &[], "")?;
 			}
 		}
-		let pointer = match self.pending_box.get() {
+		let pointer = match self.frame().pending_box.get() {
 			Some((pointer, repr)) if repr == value.repr => {
-				self.pending_box.set(None);
+				self.frame().pending_box.set(None);
 				pointer
 			}
 			_ => self.alloc_rec(value.repr)?,
@@ -1611,11 +1613,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Whether a parameter is moved in by its caller, so the function owns
-	/// it: a parameter (not `self`, which a method borrows) of a move-only
-	/// type (`TypeStore::owns_unique`).
+	/// it: a parameter (not `self`, which a method borrows) whose concrete
+	/// type follows the Task transfer ABI. Resource parameters borrow.
 	pub(crate) fn is_moved_parameter(&self, symbol: SymbolId) -> bool {
 		let data = self.analysis.symbols.symbol(symbol);
-		matches!(data.kind, SymbolKind::Parameter { .. }) && self.types().owns_unique(data.ty)
+		matches!(data.kind, SymbolKind::Parameter { .. })
+			&& self
+				.types()
+				.takes_task_parameter(self.concrete_type(data.ty))
 	}
 
 	/// Stops dropping a slot registered with `Cleanup::Local` (a value built
@@ -1641,6 +1646,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Emits the drop of a cleanup entry.
 	fn drop_entry(&self, entry: Cleanup<'ctx>) -> Result<(), Error> {
 		match entry {
+			Cleanup::WriteBack(view) => self.write_back(view),
 			Cleanup::Temp(value) => self.emit_drop(value),
 			Cleanup::Shallow(view, size) => {
 				self.builder.build_call(

@@ -461,7 +461,7 @@ console.log(run(good), run(failE) catch _error => -1, run(failF) catch _error =>
 	fn collection_slots_inline_objects_with_other_direct_recursive_edges() {
 		let ir = ir_of(
 			"mixed-recursive-items",
-			"type Node = { value: Integer, next: Node?, children: Array<Node> }\nfunction append = (node: Node, child: Node): Void mutates node => { node.children.push(child) }\nmutable root = Node { value = 0, children = [] }\nappend(root, Node { value = 1, children = [] })\nconsole.log(root.children.length)\n",
+			"type Node = { value: Integer, next: Node?, children: Array<Node> }\nfunction append = (node: Node, child: Node): Void mutates node => { node.children.push(copy child) }\nmutable root = Node { value = 0, children = [] }\nappend(root, Node { value = 1, children = [] })\nconsole.log(root.children.length)\n",
 		);
 		let append = function(&ir, "fa.append");
 		assert!(append.contains("store { ptr, ptr, i64 }"), "{append}");
@@ -866,10 +866,10 @@ mod drop_flags {
 		// `destroy` calls `usleep` with the descriptor: one call per drop
 		let head = "function release: (microseconds: UInt32) => Int32 = @extern(\"usleep\")\ntype Handle = {\n\tdescriptor: UInt32\n\tfunction destroy = (self) => {\n\t\trelease(self.descriptor)\n\t}\n}\nfunction close = (handle: Handle) => console.log(\"closing\")\n";
 		let cases = [
-			// moved on every path: destroyed by `close` only, no flag
+			// moved on every path: destroyed by the inner owner, no flag
 			(
 				"moved",
-				"do {\n\tlet handle = Handle { descriptor = 1 }\n\tclose(handle)\n\tconsole.log(\"after\")\n}\n",
+				"do {\n\tlet handle = Handle { descriptor = 1 }\n\tdo { let moved = handle\nconsole.log(moved.descriptor) }\n\tconsole.log(\"after\")\n}\n",
 				1,
 				false,
 			),
@@ -880,17 +880,17 @@ mod drop_flags {
 				1,
 				false,
 			),
-			// moved on one path: destroyed by `close` or at the end, by its flag
+			// moved on one path: destroyed by the inner owner or at the end
 			(
 				"maybe",
-				"do {\n\tlet handle = Handle { descriptor = 3 }\n\tif arguments.length > 1 {\n\t\tclose(handle)\n\t}\n\tconsole.log(\"after\")\n}\n",
+				"do {\n\tlet handle = Handle { descriptor = 3 }\n\tif arguments.length > 1 {\n\t\tlet moved = handle\n\t\tconsole.log(moved.descriptor)\n\t}\n\tconsole.log(\"after\")\n}\n",
 				2,
 				true,
 			),
 			// a field moved out, then assigned again: no flag either
 			(
 				"field",
-				"type Holder = { label: String, handle: Handle }\ndo {\n\tmutable holder = Holder { label = \"h\", handle = Handle { descriptor = 4 } }\n\tclose(holder.handle)\n\tholder.handle = Handle { descriptor = 5 }\n\tconsole.log(holder.label)\n}\n",
+				"type Holder = { label: String, handle: Handle }\ndo {\n\tmutable holder = Holder { label = \"h\", handle = Handle { descriptor = 4 } }\n\tdo { let moved = holder.handle\nconsole.log(moved.descriptor) }\n\tholder.handle = Handle { descriptor = 5 }\n\tconsole.log(holder.label)\n}\n",
 				2,
 				false,
 			),

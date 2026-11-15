@@ -198,6 +198,14 @@ pub enum Expr {
 		function: FnKey,
 		captures: Vec<Slot>,
 	},
+	/// Copies the function and evaluates its bound arguments once, in source
+	/// order. Indices refer to the function value's remaining parameters.
+	Partial {
+		/// The source template, separate from the original function's key.
+		site: FnKey,
+		function: Box<Expr>,
+		bound: Vec<(usize, Expr)>,
+	},
 	/// Binds a local (a declaration): its value is `none`.
 	Let(Slot, Box<Expr>),
 	/// Writes a place: its value is `none`.
@@ -258,6 +266,8 @@ pub enum Expr {
 	Is(Box<Expr>, TypeTest, bool),
 	/// `value is in collection` (`negated`: `is not in`).
 	IsIn(Box<Expr>, Box<Expr>, bool),
+	/// Instantiates a generic function value through its host's typed metadata.
+	Instantiate(Box<Expr>, FnKey),
 	/// A call of a function value.
 	Call(Box<Expr>, Vec<Arg>),
 	/// A direct call of a function.

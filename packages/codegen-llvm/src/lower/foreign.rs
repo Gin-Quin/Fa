@@ -940,7 +940,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !self.types().is_resource(ty) {
 			return None;
 		}
-		let Some(declaration) = self.analysis.type_decls.values().find(|decl| decl.ty == ty) else {
+		let global = self.global_type(ty);
+		let Some(declaration) = self
+			.analysis
+			.type_decls
+			.values()
+			.find(|decl| decl.ty == ty || self.global_type(decl.ty) == global)
+		else {
 			return self
 				.destroy_in_other_files(ty)
 				.or_else(|| self.remote_destroy(ty));

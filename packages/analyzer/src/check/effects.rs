@@ -884,75 +884,81 @@ impl Walker<'_> {
 		mutates: NodeList<'_>,
 		invalidates: NodeList<'_>,
 	) -> EffectSetId {
+		self.declared_effect_paths(lambda, mutates.iter(), invalidates.iter())
+	}
+
+	pub(crate) fn declared_effect_paths(
+		&mut self,
+		lambda: NodeId,
+		mutates: impl Iterator<Item = NodeId>,
+		invalidates: impl Iterator<Item = NodeId>,
+	) -> EffectSetId {
 		if let Some(&set) = self.declared_effect_sets.get(&lambda) {
 			return set;
 		}
 		let mut mutated = Vec::new();
 		let mut invalidated = Vec::new();
-		for (paths, kind) in [(mutates, false), (invalidates, true)] {
-			for node in paths.iter() {
-				let Some((path, ty)) = self.signature_path(node) else {
-					continue;
-				};
-				let (data, steps) = self.s.types.path_data(path);
-				if steps.is_empty()
-					&& !kind && !matches!(data.root, PathRoot::ModuleValue(_))
-					&& self.is_primitive(ty)
+		for (node, kind) in mutates
+			.map(|node| (node, false))
+			.chain(invalidates.map(|node| (node, true)))
+		{
+			let Some((path, ty)) = self.signature_path(node) else {
+				continue;
+			};
+			let (data, steps) = self.s.types.path_data(path);
+			if steps.is_empty()
+				&& !kind && !matches!(data.root, PathRoot::ModuleValue(_))
+				&& self.is_primitive(ty)
+			{
+				let text = path_text(&self.s.types, path, &|index| self.effect_param_name(index));
+				let diagnostic = self.diagnostic(
+					&EFF005,
+					node,
+					format!(
+						"`{text}` is a `{}`: a primitive value can't be mutated, return the new value instead",
+						self.display(ty)
+					),
+				);
+				self.report(diagnostic);
+				if let View::Name(_) = self.view(self.strip_groups(node))
+					&& let Resolution::Local(symbol) = self.a.resolution(self.strip_groups(node))
 				{
-					let text =
-						path_text(&self.s.types, path, &|index| self.effect_param_name(index));
-					let diagnostic = self.diagnostic(
-						&EFF005,
-						node,
-						format!(
-							"`{text}` is a `{}`: a primitive value can't be mutated, return the new value instead",
-							self.display(ty)
-						),
-					);
-					self.report(diagnostic);
-					if let View::Name(_) = self.view(self.strip_groups(node))
-						&& let Resolution::Local(symbol) =
-							self.a.resolution(self.strip_groups(node))
-					{
-						self.rejected_effect_roots.insert(symbol);
-					}
-					continue;
+					self.rejected_effect_roots.insert(symbol);
 				}
-				let names_element = steps.iter().any(|step| {
-					matches!(
-						step,
-						PathStep::All
-							| PathStep::IndexConst(_)
-							| PathStep::IndexParam(_)
-							| PathStep::IndexFrom(_)
-							| PathStep::Last
-					)
-				});
-				if kind
-					&& !names_element
-					&& !matches!(self.s.types.kind(ty), TypeKind::Ref(..))
-					&& !self.s.types.is_recovering(ty)
-				{
-					let text =
-						path_text(&self.s.types, path, &|index| self.effect_param_name(index));
-					let base = self.s.types.path(data.root, &[]);
-					let root =
-						path_text(&self.s.types, base, &|index| self.effect_param_name(index));
-					let diagnostic = self.diagnostic(
+				continue;
+			}
+			let names_element = steps.iter().any(|step| {
+				matches!(
+					step,
+					PathStep::All
+						| PathStep::IndexConst(_)
+						| PathStep::IndexParam(_)
+						| PathStep::IndexFrom(_)
+						| PathStep::Last
+				)
+			});
+			if kind
+				&& !names_element
+				&& !matches!(self.s.types.kind(ty), TypeKind::Ref(..))
+				&& !self.s.types.is_recovering(ty)
+			{
+				let text = path_text(&self.s.types, path, &|index| self.effect_param_name(index));
+				let base = self.s.types.path(data.root, &[]);
+				let root = path_text(&self.s.types, base, &|index| self.effect_param_name(index));
+				let diagnostic = self.diagnostic(
 						&EFF009,
 						node,
 						format!(
 							"`invalidates` names elements (`{text}[index]`, `{text}[..]`): a change of `{text}` itself is `mutates {root}`"
 						),
 					);
-					self.report(diagnostic);
-					continue;
-				}
-				if kind {
-					invalidated.push(path);
-				} else {
-					mutated.push(path);
-				}
+				self.report(diagnostic);
+				continue;
+			}
+			if kind {
+				invalidated.push(path);
+			} else {
+				mutated.push(path);
 			}
 		}
 		let set = normalized_set(&mut self.s.types, &mutated, &invalidated);
@@ -2277,6 +2283,7 @@ impl Walker<'_> {
 		lambda: NodeId,
 		declaration: Option<NodeId>,
 	) {
+		self.capture_lists.insert(lambda, cx.captures.clone());
 		for key in [Some(lambda), declaration].into_iter().flatten() {
 			if let Some(info) = self.a.functions.get_mut(&key) {
 				info.captures = cx.captures.clone();
@@ -2309,7 +2316,19 @@ impl Walker<'_> {
 	/// captures, so it can't write any of it (`REF021`). `value` is a lambda,
 	/// or the name of a local function; `at` where it escapes.
 	pub(crate) fn escape(&mut self, value: NodeId, at: NodeId) {
+		self.escape_value(value, at, &mut rustc_hash::FxHashSet::default());
+	}
+
+	fn escape_value(
+		&mut self,
+		value: NodeId,
+		at: NodeId,
+		seen: &mut rustc_hash::FxHashSet<NodeId>,
+	) {
 		let value = self.strip_groups(value);
+		if !seen.insert(value) {
+			return;
+		}
 		let lambda = match self.view(value) {
 			View::Lambda { .. } => value,
 			View::Name(_) => {
@@ -2317,6 +2336,14 @@ impl Walker<'_> {
 					return;
 				};
 				let Some(declaration) = self.direct_function(symbol) else {
+					let node = self.a.symbols.symbol(symbol).decl_node;
+					if let View::Declaration {
+						value: Some(initializer),
+						..
+					} = self.view(node)
+					{
+						self.escape_value(initializer, at, seen);
+					}
 					return;
 				};
 				match self.a.functions.get(&declaration) {
@@ -2324,8 +2351,60 @@ impl Walker<'_> {
 					None => return,
 				}
 			}
+			View::Copy(inner) | View::Do(inner) => {
+				self.escape_value(inner, at, seen);
+				return;
+			}
+			View::Return(Some(inner)) => {
+				self.escape_value(inner, at, seen);
+				return;
+			}
+			View::If {
+				then_body,
+				else_body,
+				..
+			} => {
+				self.escape_value(then_body, at, seen);
+				if let Some(other) = else_body {
+					self.escape_value(other, at, seen);
+				}
+				return;
+			}
+			View::When { arms, .. } => {
+				let values: Vec<_> = arms.iter().map(|arm| arm.value).collect();
+				for value in values {
+					self.escape_value(value, at, seen);
+				}
+				return;
+			}
+			View::Catch {
+				expression,
+				handler,
+				..
+			} => {
+				self.escape_value(expression, at, seen);
+				self.escape_value(handler, at, seen);
+				return;
+			}
+			View::Fallback { operands } => {
+				let values: Vec<_> = operands.iter().collect();
+				for value in values {
+					self.escape_value(value, at, seen);
+				}
+				return;
+			}
+			View::Block { statements } => {
+				if let Some(last) = statements.last() {
+					self.escape_value(last, at, seen);
+				}
+				return;
+			}
 			_ => return,
 		};
+		self.capture_creations.insert(value, lambda);
+		for symbol in self.capture_lists.get(&lambda).cloned().unwrap_or_default() {
+			self.note_use(value, symbol);
+		}
 		self.escape_closure(lambda, at);
 	}
 
@@ -2334,6 +2413,16 @@ impl Walker<'_> {
 	/// of what it captures.
 	pub(crate) fn escape_closure(&mut self, lambda: NodeId, at: NodeId) {
 		self.a.escapes.insert(lambda);
+		if self
+			.a
+			.function(lambda)
+			.is_none_or(|info| info.declaration.is_none())
+		{
+			self.capture_creations.entry(lambda).or_insert(lambda);
+			for symbol in self.capture_lists.get(&lambda).cloned().unwrap_or_default() {
+				self.note_use(lambda, symbol);
+			}
+		}
 		// requirements are not captured (requirements.rs)
 		self.check_stored_lambda(lambda);
 		let Some(writes) = self.closure_writes.get(&lambda).cloned() else {

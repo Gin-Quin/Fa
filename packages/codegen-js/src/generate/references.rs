@@ -892,6 +892,61 @@ impl Generator<'_> {
 		saved
 	}
 
+	/// A fresh owning function value (a lambda, named materialization or an
+	/// ABI adapter). Its owner moves into stores and returned values.
+	pub(crate) fn register_function_temporary(&mut self, site: NodeId, value: Expr) -> Expr {
+		self.register_owned_temporary(site, value, "faReleaseShared")
+	}
+
+	pub(crate) fn register_owned_temporary(
+		&mut self,
+		site: NodeId,
+		value: Expr,
+		drop: &'static str,
+	) -> Expr {
+		let release = self.helper(drop).to_string();
+		self.register_drop_temporary(site, value, release)
+	}
+
+	pub(crate) fn register_drop_temporary(
+		&mut self,
+		site: NodeId,
+		value: Expr,
+		release: String,
+	) -> Expr {
+		if self.guard_frames.is_empty() {
+			return value;
+		}
+		let temporary = self.inline_temp();
+		let flag = self.inline_temp();
+		let cleanup = format!("if ({flag}) {{ {flag} = false; {release}({temporary}); }}");
+		// The function guard also covers a throwing initializer. A statement
+		// clears the flag after normal cleanup, so the fallback cannot drop twice.
+		if self.guard_frames.len() > 1 {
+			self.guard_frames[0].push(cleanup.clone());
+		}
+		if let Some(frame) = self.guard_frames.last_mut() {
+			frame.push(cleanup);
+		}
+		self.closure_temporaries
+			.insert(site, (temporary.clone(), flag.clone()));
+		Expr::primary(format!(
+			"({temporary} = {}, {flag} = true, {temporary})",
+			value.text
+		))
+	}
+
+	/// An owning store takes a newly materialized environment. Borrowed
+	/// arguments instead leave its cleanup at the end of the statement.
+	pub(crate) fn take_closure_temporary(&mut self, node: NodeId, value: &Expr) -> Option<Expr> {
+		let node = self.strip_groups(node);
+		let (temporary, flag) = self.closure_temporaries.remove(&node)?;
+		Some(Expr::primary(format!(
+			"({}, {flag} = false, {temporary})",
+			value.at(crate::js::Prec::Assign)
+		)))
+	}
+
 	/// Restores the aliases [`Generator::copy_captures`] replaced.
 	pub(crate) fn restore_captures(&mut self, saved: Vec<(SymbolId, Option<String>)>) {
 		for (symbol, alias) in saved {

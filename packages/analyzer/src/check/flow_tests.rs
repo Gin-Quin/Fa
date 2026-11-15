@@ -747,6 +747,26 @@ fn errors_leaving_a_function_are_declared() {
 }
 
 #[test]
+fn direct_throws_are_intercepted_by_the_lexical_catch() {
+	let source = "type Failure = Errors { Bad, Other }\nfunction run = (bad: Boolean): Integer => {\nlet value = do { if bad { throw Failure.Bad }\n7 } catch error => when error is { Failure.Bad => 9 }\nvalue\n}\nconsole.log(run(true), run(false))\n";
+	assert!(codes(source).is_empty(), "{:?}", codes(source));
+	let rethrow = "type Failure = Errors { Bad, Other }\nfunction run = (): Integer throws Failure.Bad => {\ndo { throw Failure.Bad } catch error => throw error\n}\n";
+	assert!(codes(rethrow).is_empty(), "{:?}", codes(rethrow));
+	let declared = "type Failure = Errors { Bad }\nfunction run = (): Integer throws Failure.Bad => {\ndo { throw Failure.Bad } catch _error => 1\n}\n";
+	assert_eq!(codes(declared), ["E-ERR-10"]);
+	let nested = "type Failure = Errors { Bad }\nfunction run = (): Integer => {\ndo { function fail = (): Integer => { throw Failure.Bad }\nfail() } catch _error => 1\n}\n";
+	assert!(codes(nested).contains(&"E-ERR-2"));
+}
+
+#[test]
+fn caught_throws_keep_mutations_and_moves_from_the_failing_path() {
+	let mutation = "type Failure = Errors { Bad }\nfunction run = (): Integer => {\nmutable items = [7]\ndo { items.clear()\nthrow Failure.Bad } catch _error => items[0]\n}\n";
+	assert_eq!(codes(mutation), ["E-ERR-3"]);
+	let moved = "type Failure = Errors { Bad }\nfunction consume = (task: Task<Integer>): Void => task.cancel()\nfunction run = (): Void => {\nlet task = start do { 7 }\ndo { consume(task)\nthrow Failure.Bad } catch _error => task.cancel()\n}\n";
+	assert_eq!(codes(moved), ["MEM002"]);
+}
+
+#[test]
 fn misused_try_and_catch() {
 	assert_eq!(codes("let y = 5 catch e => 0\n"), ["W-ERR-2"]);
 	assert_eq!(
@@ -872,6 +892,29 @@ fn literal_and_range_patterns_refine_integers() {
 }
 
 // ── index proofs ──────────────────────────────────────────────────────────
+
+#[test]
+fn proven_indices_can_span_both_signs() {
+	let source = "let alphabet = \"abcdefghijklmnopqrstuvwxyz\"\nfunction at = (index: Integer<min = -26, max = 25>): Character => alphabet[index]\n";
+	let checked = analyze(source);
+	assert!(checked.codes().is_empty(), "{:?}", checked.codes());
+	assert!(
+		!checked
+			.flags("alphabet[index]")
+			.contains(NodeFlags::INDEX_CHECK)
+	);
+	let outside = source.replace("min = -26", "min = -27");
+	assert_eq!(codes(&outside), ["E-ERR-3"]);
+	let array = analyze(
+		"let values = [1, 2, 3]\nfunction at = (index: Integer<min = -3, max = 2>): Integer => values[index]\n",
+	);
+	assert!(array.codes().is_empty(), "{:?}", array.codes());
+	assert!(
+		!array
+			.flags("values[index]")
+			.contains(NodeFlags::INDEX_CHECK)
+	);
+}
 
 #[test]
 fn indices_proven_by_lengths() {

@@ -9,7 +9,6 @@ analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-15.fa: line 5: 
 analyzer/tests/cases/types/3.4-anonymous-unions-and-optionals/un-5.fa: line 4: this member is not supported by the native backend yet
 analyzer/tests/cases/types/3.8-enumerations/en-1.fa: line 5: converting a value from Enum(NominalId(2147483659)) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
 analyzer/tests/cases/types/3.8-enumerations/en-2.fa: line 3: converting a value from Enum(NominalId(2147483659)) to Int(IntRepr { bits: 64, signed: true }) is not supported by the native backend yet
-analyzer/tests/cases/types/4.8-function-types-and-assignability/ft-9.fa: line 3: this member is not supported by the native backend yet
 analyzer/tests/cases/types/5.4-set-t-and-growingset-t/se-3.fa: line 3: the `key` of `Set.from` is not supported by the native backend yet
 analyzer/tests/cases/values/07-strings-and-characters/T-STR-29.fa: line 3: indexing this value is not supported by the native backend yet
 analyzer/tests/cases/values/09-none-and-optionals/T-OPT-7.fa: line 3: `get` on this array is not supported by the native backend yet

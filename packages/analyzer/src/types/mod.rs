@@ -345,7 +345,7 @@ bitflags! {
 		const COMPARABLE = 1 << 3;
 		/// `<` is defined.
 		const ORDERED = 1 << 4;
-		/// Contains a task or a type with `destroy`: copies are moves.
+		/// Owns a Task or a resource, directly or through a composite.
 		const MOVE_ONLY = 1 << 5;
 		/// Contains `Void` in a data position (`TY071`).
 		const HAS_VOID = 1 << 6;
@@ -358,6 +358,8 @@ bitflags! {
 		/// Contains `Pointer` or `CString` in its public shape: only foreign
 		/// files can use it (`FFI002`, decision D29).
 		const HAS_FOREIGN = 1 << 10;
+		/// Contains a shared resource or synchronization handle.
+		const HAS_SHARED = 1 << 11;
 		/// The 4 bits of the [`RuntimeKind`].
 		const KIND = 0b1111 << 16;
 	}

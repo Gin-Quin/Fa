@@ -12,6 +12,7 @@
 // and shared.
 
 import { FaHashMap, FaSet } from "./collections.js";
+import { faRetainShared } from "./ownership.js";
 import { faSides } from "./relations.js";
 
 // @fa-helper faCopyShell deps: FaHashMap FaSet
@@ -44,7 +45,7 @@ export function faCopyShell(source) {
 	return Object.create(Object.getPrototypeOf(source));
 }
 
-// @fa-helper faCopy deps: faCopyShell FaHashMap FaSet faSides
+// @fa-helper faCopy deps: faRetainShared faCopyShell FaHashMap FaSet faSides
 /**
  * A deep structural copy of a Fa value. Iterative: long recursive chains
  * (linked lists) don't overflow the stack.
@@ -53,6 +54,7 @@ export function faCopyShell(source) {
  * @returns {T}
  */
 export function faCopy(value) {
+	if (typeof value === "function") return faRetainShared(value);
 	if (typeof value !== "object" || value === null) {
 		return value;
 	}
@@ -63,6 +65,7 @@ export function faCopy(value) {
 	 * @returns {any}
 	 */
 	const copyLater = (item) => {
+		if (typeof item === "function") return faRetainShared(item);
 		if (typeof item !== "object" || item === null) {
 			return item;
 		}
@@ -125,7 +128,7 @@ export function faUnlinked(value) {
 	return value;
 }
 
-// @fa-helper faCopyGraph deps: faCopyShell FaHashMap FaSet faSides
+// @fa-helper faCopyGraph deps: faRetainShared faCopyShell FaHashMap FaSet faSides
 /**
  * A copy of an owner of related collections (advanced brief 8.5, copies):
  * every object is copied once, and every reference to an object of the
@@ -145,6 +148,7 @@ export function faCopyGraph(value) {
 	 * @returns {any}
 	 */
 	const copyOf = (item) => {
+		if (typeof item === "function") return faRetainShared(item);
 		if (typeof item !== "object" || item === null) {
 			return item;
 		}

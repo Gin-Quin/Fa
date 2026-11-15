@@ -1,0 +1,40 @@
+use { sleep } = std.time
+
+async function greet = (name: String, delay: Integer): String => {
+	await sleep(delay)
+	console.log("hello {name}")
+	name
+}
+
+let slow = greet with (delay = 20)
+let fast = greet with (delay = 1)
+let first = start slow("slow")
+let second = start fast("fast")
+console.log("queued") -- prints: queued
+console.log(await first) -- prints: hello fast
+-- prints: hello slow
+-- prints: slow
+console.log(await second) -- prints: fast
+
+type Greeter = async (name: String) => String
+function make = (prefix: String): Greeter => {
+	async function named = (name: String, delay: Integer): String => {
+		await sleep(delay)
+		"{prefix}:{name}"
+	}
+	named with (delay = 1)
+}
+let captured = make("captured")
+console.log(await captured("value")) -- prints: captured:value
+
+let cancelled = start captured("cancelled")
+cancelled.cancel()
+await sleep(2)
+console.log("cancelled") -- prints: cancelled
+
+async function identity = <Value>(value: Value, delay: Integer): Value => {
+	await sleep(delay)
+	value
+}
+function later = identity with (delay = 1)
+console.log(await later(42), await later("generic")) -- prints: 42 generic

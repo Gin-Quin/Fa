@@ -143,6 +143,18 @@ impl Walker<'_> {
 		item: TypeId,
 		members: NodeList<'_>,
 	) -> TypeId {
+		if kind == SyncKind::WorkerPool {
+			self.defer_copy_condition(
+				n,
+				crate::analysis::CopyRequirement {
+					subject: item,
+					explicit: true,
+					task_transfer: false,
+					task_only: false,
+					resource_gate: None,
+				},
+			);
+		}
 		let mut given: Vec<(String, NodeId, NodeId)> = Vec::new();
 		for member in members.iter() {
 			match self.view(member) {
@@ -182,6 +194,14 @@ impl Walker<'_> {
 			}
 			let actual = self.check(*value, expected);
 			self.pool_state = saved;
+			if (kind, name.as_str()) == (SyncKind::Mutex, "value") {
+				// A mutex owns its payload, including an erased Task transfer.
+				self.note_copy_site(*value);
+			}
+			if (kind, name.as_str()) == (SyncKind::WorkerPool, "state") {
+				self.defer_thread_value(n, *value, "the worker pool's state");
+				self.note_copy_site(*value);
+			}
 			if let Some(expected) = expected {
 				self.sink(*value, actual, expected);
 			}
@@ -189,6 +209,7 @@ impl Walker<'_> {
 		self.memo(n, |w| {
 			// a pool's workers run on threads, like workers (`worker_created`)
 			if kind == SyncKind::WorkerPool {
+				w.check_thread_transfer(n, item, "the worker pool's state");
 				w.a.reads_target = true;
 				let target_name = w.s.target().to_string();
 				if !builtins::concurrency::has_workers(&target_name) && w.reported_once.insert((n, CONC010.id)) {
@@ -1056,8 +1077,26 @@ impl Walker<'_> {
 	}
 
 	/// Whether a type name (`MathWorker`) is the export of a `*.worker.fa` file.
-	pub(super) fn is_worker_type_name(&self, target: NodeId) -> bool {
+	pub(super) fn is_worker_type_name(&mut self, target: NodeId) -> bool {
 		let target = self.strip_groups(target);
+		let is_export = |w: &Self, declaration| {
+			let module = w.s.types.decl_key_data(declaration).module;
+			w.s.types.module_path(module).ends_with(".worker")
+				&& w.s.interface(module).is_some_and(|interface| {
+					interface.export.is_some_and(|export| {
+						export.key == declaration && export.kind == crate::symbols::SymbolKind::Type
+					})
+				})
+		};
+		if let Some(origin) = self.written_origin(target) {
+			if is_export(self, origin.declaration) {
+				return true;
+			}
+			let resolved = self.resolve_written_type(origin);
+			return is_export(self, resolved.declaration);
+		}
+		// An incomplete dependency cycle can still expose the export proxy
+		// before its written type has been published.
 		let Resolution::Local(symbol) = self.a.resolution(target) else {
 			return false;
 		};
@@ -1076,6 +1115,8 @@ impl Walker<'_> {
 		if self.s.types.is_recovering(state) {
 			return state;
 		}
+		self.check_thread_transfer(n, state, "the worker's state");
+		self.defer_thread_value(n, n, "the worker's state");
 		self.a.reads_target = true;
 		let target_name = self.s.target().to_string();
 		if !builtins::concurrency::has_workers(&target_name)
@@ -1102,36 +1143,6 @@ impl Walker<'_> {
 		worker
 	}
 
-	/// `let other = worker`: the handle moves, `worker` can't be used
-	/// afterwards (`MEM002`); a socket of `std.net` too.
-	pub(super) fn move_worker_handle(&mut self, value: NodeId, at: NodeId) {
-		if !self.body.flow.reachable {
-			return;
-		}
-		let Some(symbol) = self.read_local(value) else {
-			return;
-		};
-		let ty = self.a.symbols.symbol(symbol).ty;
-		if matches!(
-			self.s.types.kind(ty),
-			TypeKind::Sync(
-				SyncKind::Worker
-					| SyncKind::TcpListener
-					| SyncKind::TcpStream
-					| SyncKind::WorkerPool,
-				_
-			)
-		) && !self
-			.body
-			.flow
-			.consumed
-			.iter()
-			.any(|&(other, _)| other == symbol)
-		{
-			self.body.flow.consumed.push((symbol, at));
-		}
-	}
-
 	/// The work given to `pool.submit(work)` runs on a worker's thread (its
 	/// calls of the worker do, natively the whole function): the rules of
 	/// worker code apply to it (`CONC008`, concurrency.md "Workers"). A
@@ -1144,7 +1155,14 @@ impl Walker<'_> {
 	/// so that the functions it calls are followed into every file, as for
 	/// the methods of `*.worker.fa` files.
 	pub(super) fn check_submitted_work(&mut self, work: NodeId) {
+		self.defer_thread_value(work, work, "the submitted work");
+		self.defer_thread_result(work, work, "the submitted work's result");
 		let work = self.strip_groups(work);
+		if let TypeKind::Function(sig) = self.s.types.kind(self.type_of(work)) {
+			let sig = self.s.types.sig(sig);
+			self.check_thread_transfer(work, sig.ret, "the submitted function's result");
+			self.check_thread_transfer(work, sig.throws, "the submitted function's error");
+		}
 		let body = match self.view(work) {
 			View::Lambda { .. } => work,
 			View::Name(_) => {
@@ -1159,6 +1177,16 @@ impl Walker<'_> {
 			}
 			_ => return,
 		};
+		if let Some(info) = self.a.function(body) {
+			let captures = info.captures.clone();
+			for capture in captures {
+				self.check_thread_transfer(
+					work,
+					self.a.symbols.symbol(capture).ty,
+					"a submitted function's capture",
+				);
+			}
+		}
 		if !self.a.submitted_works.contains(&work) {
 			self.a.submitted_works.push(work);
 		}
@@ -1222,6 +1250,100 @@ impl Walker<'_> {
 		}
 		None
 	}
+	/// Checks actual storage crossing a worker boundary. Shared handles are
+	/// copied locally, but their contents still belong to an executor.
+	pub(super) fn check_thread_transfer(&mut self, at: NodeId, ty: TypeId, what: &str) {
+		if self.s.types.contains_executor_task(ty)
+			&& self.reported_once.insert((at, "executor-task-transfer"))
+		{
+			let message = format!(
+				"{what} (`{}`) contains a `Task`: a task belongs to the executor that created it and can't cross threads, including through a `Mutex`, `Channel`, resource or pointer; await it on its own executor and transfer its result",
+				self.display(ty)
+			);
+			let diagnostic = self.diagnostic(&CONC008, at, message);
+			self.report(diagnostic);
+		} else if self.s.types.contains_executor_guard(ty)
+			&& self.reported_once.insert((at, "executor-guard-transfer"))
+		{
+			let message = format!(
+				"{what} (`{}`) contains a mutex guard: a guard can't cross threads; transfer the `Mutex` and acquire a new guard on the destination executor",
+				self.display(ty)
+			);
+			let diagnostic = self.diagnostic(&CONC008, at, message);
+			self.report(diagnostic);
+		}
+	}
+
+	pub(super) fn check_worker_signature(&mut self, at: NodeId, ty: TypeId) {
+		self.defer_thread_result(at, at, "a worker method's result");
+		let TypeKind::Function(sig) = self.s.types.kind(ty) else {
+			return;
+		};
+		let sig = self.s.types.sig(sig);
+		let parameters = self.s.types.params(sig.params).to_vec();
+		for parameter in parameters.into_iter().skip(1) {
+			self.check_thread_transfer(at, parameter.ty, "a worker method's argument");
+		}
+		self.check_thread_transfer(at, sig.ret, "a worker method's result");
+		self.check_thread_transfer(at, sig.throws, "a worker method's error");
+	}
+
+	pub(super) fn check_worker_call_transfers(
+		&mut self,
+		at: NodeId,
+		callee: NodeId,
+		result: TypeId,
+	) {
+		let View::Access { target, .. } = self.view(self.strip_groups(callee)) else {
+			return;
+		};
+		if !matches!(
+			self.s.types.kind(self.type_of(target)),
+			TypeKind::Sync(SyncKind::Worker, _)
+		) {
+			return;
+		}
+		let arguments = self
+			.a
+			.calls
+			.get(&at)
+			.map(|call| call.arguments.clone())
+			.unwrap_or_default();
+		for argument in arguments {
+			match argument {
+				crate::analysis::Argument::Given(value)
+					if self.strip_groups(value) != self.strip_groups(target) =>
+				{
+					self.check_thread_transfer(
+						value,
+						self.type_of(value),
+						"a worker method's argument",
+					);
+					self.defer_thread_value(value, value, "a worker method's argument");
+				}
+				crate::analysis::Argument::Variadic(items) => {
+					for value in items {
+						self.check_thread_transfer(
+							value,
+							self.type_of(value),
+							"a worker method's variadic argument",
+						);
+						self.defer_thread_value(
+							value,
+							value,
+							"a worker method's variadic argument",
+						);
+					}
+				}
+				_ => {}
+			}
+		}
+		self.check_thread_transfer(at, result, "a worker method's result");
+		self.defer_thread_result(at, callee, "a worker method's result");
+		if let TypeKind::Function(sig) = self.s.types.kind(self.type_of(callee)) {
+			self.check_thread_transfer(at, self.s.types.sig(sig).throws, "a worker method's error");
+		}
+	}
 }
 
 /// Why a write is allowed in a parallel body.
@@ -1232,4 +1354,50 @@ enum Allowed {
 	Variable,
 	/// `T[i]` of this collection.
 	Indexed(SymbolId),
+}
+
+#[cfg(test)]
+mod stored_payload_tests {
+	fn errors(source: &str) -> (crate::Session, crate::ids::FileId, Vec<String>) {
+		let mut session = crate::Session::new();
+		let file = session.set_source("stored.foreign", source.into());
+		session.analyze_file(file);
+		let errors = session
+			.diagnostics(file)
+			.iter()
+			.filter(|d| d.severity == crate::Severity::Error)
+			.map(|d| format!("{} {}", d.code.id, d.message))
+			.collect();
+		(session, file, errors)
+	}
+
+	#[test]
+	fn erased_mutex_payloads_publish_their_conditional_task_move() {
+		let source = "use { Mutex } = std.concurrency\nfunction holder = <Item>(value: Item): Mutex<Item> => Mutex<Item> { value = value }\nfunction make = (pending: Task<Integer>): Mutex<Task<Integer>> => holder(pending)\n";
+		let (session, file, errors) = errors(source);
+		assert!(errors.is_empty(), "{errors:?}");
+		assert!(
+			session
+				.analysis(file)
+				.task_moves
+				.values()
+				.any(|&ty| matches!(session.types().kind(ty), crate::types::TypeKind::Param(_)))
+		);
+	}
+
+	#[test]
+	fn erased_mutex_payloads_cannot_take_a_borrowed_resource() {
+		let source = "use { Mutex } = std.concurrency\ntype Token = { id: Integer, function destroy = (self) => {} }\nfunction holder = <Item>(value: Item): Mutex<Item> => Mutex<Item> { value = value }\nfunction invalid = (value: Token): Mutex<Token> => holder(value)\n";
+		let (_, _, errors) = errors(source);
+		assert_eq!(errors.len(), 1, "{errors:?}");
+		assert!(errors[0].starts_with("MEM003"), "{errors:?}");
+	}
+
+	#[test]
+	fn erased_mutex_payloads_cannot_implicitly_copy_a_collection_parameter() {
+		let source = "use { Mutex } = std.concurrency\nfunction holder = <Item>(value: Item): Mutex<Item> => Mutex<Item> { value = value }\nfunction invalid = (value: Array<Integer>): Mutex<Array<Integer>> => holder(value)\n";
+		let (_, _, errors) = errors(source);
+		assert_eq!(errors.len(), 1, "{errors:?}");
+		assert!(errors[0].starts_with("MEM004"), "{errors:?}");
+	}
 }

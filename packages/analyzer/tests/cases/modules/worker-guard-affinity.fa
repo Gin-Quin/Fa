@@ -1,0 +1,50 @@
+-- analysis-target: native
+-- Local guard copies share one acquisition. Every worker acquires its own.
+-- file: Plain.worker.fa
+export type = {
+	function read = (self): Integer => 1
+	function invoke = (self, action: () => Integer): Integer => action()
+}
+-- file: Holder.worker.fa
+export type = {
+	action: () => Integer
+	function read = (self): Integer => self.action()
+}
+-- file: wrap.fa
+type Action<T> = () => T
+export function = <T>(read: Action<T>): Action<T> => { return () => read() }
+-- file: main.fa
+use { Mutex, WorkerPool } = std.concurrency
+async function main = () => {
+	mutable mutex = Mutex<Integer> { value = 1 }
+	mutable guard = mutex.tryLock() ?? return
+	let localCopy = guard
+	console.log(localCopy.value)
+	let made = wrap(() => guard.value)
+	let stored = { action = made }
+	let annotated: () => Integer = stored.action
+	mutable worker = Plain {}
+	mutable holder = Holder { action = annotated } -- error CONC008
+	mutable badPool = WorkerPool<Holder> { count = 1, state = Holder { action = annotated } } -- error CONC008
+	console.log(await worker.invoke(annotated)) -- error CONC008
+	mutable pool = WorkerPool<Plain> { count = 1 }
+	let direct = await pool.submit((_worker) => guard.value) -- error CONC008
+	console.log(await direct)
+	let hidden = await pool.submit((_worker) => annotated()) -- error CONC008
+	console.log(await hidden)
+	let returned = await pool.submit((_worker) => { -- error CONC008
+		mutable local = Mutex<Integer> { value = 2 }
+		local.tryLock()
+	})
+	console.log((await returned) != none)
+	let safe = await pool.submit((_worker) => {
+		mutable acquired = mutex.tryLock() ?? return 0
+		acquired.value
+	})
+	console.log(await safe)
+	pool.shutdown()
+	badPool.shutdown()
+	holder.stop()
+	worker.stop()
+}
+await main()

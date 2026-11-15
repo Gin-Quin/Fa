@@ -87,14 +87,50 @@ impl Generator<'_> {
 		}
 		// `MathWorker { … }`: a worker made from the state built (workers.rs)
 		if self.is_worker(n) {
-			let state = self.object_value(&info);
+			let state = self.object_value(n, &info);
 			return self.worker_literal(state);
 		}
-		self.object_value(&info)
+		self.object_value(n, &info)
+	}
+
+	/// A payload's default is written in its union's generic scope, but
+	/// evaluated for this constructor's actual arguments.
+	fn payload_default(
+		&mut self,
+		site: NodeId,
+		info: &fa_analyzer::analysis::ObjectInfo,
+		default: NodeId,
+	) -> Expr {
+		let Some(member) = info.member else {
+			return self.expr(default);
+		};
+		let TypeKind::Member(nominal, _) = self.types.kind(member) else {
+			return self.expr(default);
+		};
+		let nominal = self.types.nominal(nominal);
+		let Some((_, params)) = self.types.generic_nominal(nominal.key) else {
+			return self.expr(default);
+		};
+		let arguments = self.types.list_items(nominal.args).to_vec();
+		let hidden = self.hidden_for_generics(&params);
+		let methods = self
+			.analysis
+			.written_types
+			.get(&site)
+			.map(|owner| owner.methods.as_ref().clone())
+			.or_else(|| self.analysis.instantiated_methods.get(&site).cloned())
+			.unwrap_or_default();
+		let values =
+			self.hidden_arguments_bound(site, &params, hidden.clone(), &arguments, &methods);
+		let saved = self.hidden_names.clone();
+		self.hidden_names.extend(hidden.into_iter().zip(values));
+		let result = self.expr(default);
+		self.hidden_names = saved;
+		result
 	}
 
 	/// An object literal of an object type: the fields in declaration order.
-	fn object_value(&mut self, info: &fa_analyzer::analysis::ObjectInfo) -> Expr {
+	fn object_value(&mut self, site: NodeId, info: &fa_analyzer::analysis::ObjectInfo) -> Expr {
 		let info = info.clone();
 		let spreads = info
 			.fields
@@ -152,7 +188,7 @@ impl Generator<'_> {
 			let property = Self::property(self.types.syms.resolve(*name));
 			let value = match (value, given) {
 				(_, Some(given)) => given,
-				(FieldValue::Default(default), None) => self.expr(*default),
+				(FieldValue::Default(default), None) => self.payload_default(site, &info, *default),
 				// a default value of a type of another file, evaluated there
 				(FieldValue::Constant(constant), None) => {
 					let field_ty = self
@@ -1199,7 +1235,8 @@ impl Generator<'_> {
 			// Erased parameters may own objects or collections. Their copies
 			// use faCopy, which leaves primitive instantiations unchanged.
 			| TypeKind::Param(_)
-			| TypeKind::Range => true,
+			| TypeKind::Range
+			| TypeKind::Function(_) => true,
 			TypeKind::Union(list) => self
 				.types
 				.list_items(list)
@@ -1231,7 +1268,17 @@ impl Generator<'_> {
 		value: Expr,
 		destination_mutable: bool,
 	) -> Expr {
+		if let Some(owned) = self.take_closure_temporary(node, &value) {
+			return owned;
+		}
 		let ty = self.type_of(node);
+		if self.contains_function_value(ty)
+			&& !self.is_move(node)
+			&& !self.analysis.moved_reads.contains(&node)
+			&& self.value_place_root(node).is_some()
+		{
+			return self.copy_of(value, ty);
+		}
 		// a place's value, not the last use of a local (D15); a new
 		// collection of a place's elements shares them when they are composite
 		let owns = match fa_analyzer::lower::copies::element_view(self.tree, self.analysis, node) {
@@ -1292,6 +1339,9 @@ impl Generator<'_> {
 	/// a call result is always fresh. A `mutable` local of the function, or
 	/// a `let` bound to a fresh value, is returned as is.
 	pub(crate) fn copy_returned(&mut self, node: NodeId, value: Expr) -> Expr {
+		if let Some(owned) = self.take_closure_temporary(node, &value) {
+			return owned;
+		}
 		let ty = self.type_of(node);
 		if !self.is_composite(ty) || self.is_move(node) {
 			return value;
@@ -1451,6 +1501,9 @@ impl Generator<'_> {
 	/// composite fields copied by their own functions; `None` for the types
 	/// copied by `faCopy` (unions, maps, sets).
 	fn copy_function(&mut self, ty: TypeId) -> Option<String> {
+		if matches!(self.types.kind(ty), TypeKind::Function(_)) {
+			return Some(self.helper("faRetainShared").to_string());
+		}
 		if let Some(name) = self.copies.get(&ty) {
 			// empty while being generated: a recursive type, copied by `faCopy`
 			return (!name.is_empty()).then(|| name.clone());

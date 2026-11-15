@@ -45,6 +45,7 @@ struct Gather {
 
 enum Finish {
 	Arguments(Target),
+	Partial(crate::ir::FnKey, Vec<usize>),
 	Builtin(&'static str),
 	Mutate(&'static str, Place),
 	Array,
@@ -82,6 +83,7 @@ enum Binary {
 }
 
 enum Unary {
+	Instantiate(FnKey),
 	Negate(Num),
 	Convert(Num),
 	Not,
@@ -241,6 +243,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				function: *function,
 				captured: Vec::new(),
 				bound: Vec::new(),
+				partials: Vec::new(),
 			}))),
 			Op::Closure(function, captures) => Self::done(Value::Function(Arc::new(Closure {
 				function: *function,
@@ -249,7 +252,18 @@ impl<'i, 'h> Machine<'i, 'h> {
 					.map(|&slot| self.frame().locals[slot as usize].clone())
 					.collect(),
 				bound: Vec::new(),
+				partials: Vec::new(),
 			}))),
+			Op::Instantiate(value, application) => self.evaluate_after(
+				*value,
+				Continuation::Unary(Unary::Instantiate(*application)),
+			),
+			Op::Partial(site, function, bound) => self.gather(
+				std::iter::once(Input::Expr(*function))
+					.chain(bound.iter().map(|(_, value)| Input::Expr(*value)))
+					.collect(),
+				Finish::Partial(*site, bound.iter().map(|(index, _)| *index).collect()),
+			),
 			Op::Let(slot, value) => {
 				self.evaluate_after(*value, Continuation::Unary(Unary::Let(*slot)))
 			}
@@ -481,6 +495,34 @@ impl<'i, 'h> Machine<'i, 'h> {
 			.collect();
 		match finish {
 			Finish::Arguments(_) => unreachable!(),
+			Finish::Partial(site, indices) => {
+				let mut values = values.into_iter();
+				let Some(Value::Function(closure)) = values.next() else {
+					return Err(Error::Stop("`with` needs a function".into()).into());
+				};
+				let function = self.interpreter.host.bind_partial(closure.function, site)?;
+				let code = self.interpreter.code(function)?;
+				let remaining: Vec<_> = (0..code.params.len())
+					.filter(|index| !closure.bound.iter().any(|(bound, _)| bound == index))
+					.collect();
+				let mut result = (*closure).clone();
+				result.function = function;
+				let arguments: Vec<_> = values.collect();
+				result.partials.push(crate::value::PartialClosure {
+					site,
+					arguments: arguments.clone(),
+				});
+				for (index, value) in indices.into_iter().zip(arguments) {
+					let Some(&original) = remaining.get(index) else {
+						return Err(Error::Stop("bound parameter out of range".into()).into());
+					};
+					if result.bound.iter().any(|(bound, _)| *bound == original) {
+						return Err(Error::Stop("parameter bound twice".into()).into());
+					}
+					result.bound.push((original, value));
+				}
+				Self::done(Value::Function(Arc::new(result)))
+			}
 			Finish::Array => Self::done(Value::Array(Arc::new(values))),
 			Finish::Tuple => Self::done(Value::Tuple(Arc::new(values))),
 			Finish::Set => {
@@ -853,6 +895,17 @@ impl<'i, 'h> Machine<'i, 'h> {
 
 	fn unary(&mut self, op: Unary, value: Value) -> Result<Action, Flow> {
 		let result = match op {
+			Unary::Instantiate(application) => {
+				let Value::Function(function) = value else {
+					return Err(Error::Stop("generic application needs a function".into()).into());
+				};
+				let mut result = (*function).clone();
+				result.function = self
+					.interpreter
+					.host
+					.instantiate(function.function, application)?;
+				Value::Function(Arc::new(result))
+			}
 			Unary::Negate(num) => eval::negate(num, &value)?,
 			Unary::Convert(num) => eval::convert(num, &value)?,
 			Unary::Not => Value::Boolean(!boolean(value)?),

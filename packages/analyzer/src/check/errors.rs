@@ -22,6 +22,7 @@ use crate::check::Walker;
 use crate::diagnostics::codes::values::{
 	E_DECL_15, E_ERR_1, E_ERR_2, E_ERR_3, E_ERR_4, E_ERR_6, E_ERR_9, E_ERR_10, W_ERR_1, W_ERR_2,
 };
+use crate::flow::FlowState;
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::{ScopeKind, SymbolKind};
 use crate::syntax::{self, Name, View};
@@ -37,7 +38,7 @@ pub enum HandlerKind {
 }
 
 /// An open `try` or `catch` (its operand is being walked).
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Handler {
 	/// `try` or `catch`.
 	pub kind: HandlerKind,
@@ -48,6 +49,8 @@ pub struct Handler {
 	pub depth: usize,
 	/// The errors of the failing expressions met so far (`NEVER`: none).
 	pub errors: TypeId,
+	/// States reaching a caught failure, before an exit forgets its facts.
+	pub failures: Option<FlowState>,
 }
 
 impl Walker<'_> {
@@ -80,6 +83,7 @@ impl Walker<'_> {
 			.rposition(|handler| handler.depth == depth);
 		match handler {
 			Some(index) => {
+				self.record_caught_failure();
 				let current = self.body.handlers[index].errors;
 				let joined = if current == TypeId::NEVER {
 					errors
@@ -116,6 +120,28 @@ impl Walker<'_> {
 			node,
 			depth,
 			errors: TypeId::NEVER,
+			failures: None,
+		});
+	}
+
+	/// Keep mutations, moves and refinements at a failure before `throw`
+	/// makes the successful continuation unreachable. An intervening `try`
+	/// forwards to the same catch; a nested function has its own handlers.
+	fn record_caught_failure(&mut self) {
+		let depth = self.body.functions.len();
+		let Some(index) = self
+			.body
+			.handlers
+			.iter()
+			.rposition(|handler| handler.depth == depth && handler.kind == HandlerKind::Catch)
+		else {
+			return;
+		};
+		let current = self.body.flow.fork();
+		let previous = self.body.handlers[index].failures.take();
+		self.body.handlers[index].failures = Some(match previous {
+			Some(previous) => self.join_states(&previous, &current),
+			None => current,
 		});
 	}
 
@@ -340,9 +366,10 @@ impl Walker<'_> {
 		ty
 	}
 
-	/// `throw error`: leaves the function with an error value (`Never`).
+	/// `throw error`: enters a lexical catch, or leaves the function (`Never`).
 	pub(super) fn check_throw(&mut self, n: NodeId, value: NodeId) -> TypeId {
 		let ty = self.check(value, None);
+		self.note_copy_site(value);
 		self.memo(n, |w| {
 			if !w.s.types.is_recovering(ty) && !w.s.types.satisfies(ty, TypeId::ERROR) {
 				let message = format!(
@@ -356,7 +383,17 @@ impl Walker<'_> {
 		});
 		if self.s.types.satisfies(ty, TypeId::ERROR) && ty != TypeId::NEVER {
 			let errors = self.s.types.widen(ty);
-			self.propagate(n, errors, &E_ERR_2, "this throws");
+			let depth = self.body.functions.len();
+			if let Some(index) =
+				self.body.handlers.iter().rposition(|handler| {
+					handler.depth == depth && handler.kind == HandlerKind::Catch
+				}) {
+				self.record_caught_failure();
+				let current = self.body.handlers[index].errors;
+				self.body.handlers[index].errors = self.s.types.union(&[current, errors]);
+			} else {
+				self.propagate(n, errors, &E_ERR_2, "this throws");
+			}
 		}
 		self.body.flow.set_unreachable();
 		TypeId::NEVER
@@ -386,7 +423,8 @@ impl Walker<'_> {
 		} else {
 			self.check(expression, expected)
 		};
-		let errors = self.close_handler();
+		let caught = self.body.handlers.pop().expect("opened catch");
+		let errors = caught.errors;
 		if !statement
 			&& let Some(expected) = expected
 			&& left != TypeId::NEVER
@@ -396,6 +434,10 @@ impl Walker<'_> {
 		let end_left = std::mem::take(&mut self.body.flow);
 		// the handler: from the state before the failing expression, with the error bound
 		self.body.flow = self.join_states(&entry, &end_left);
+		if let Some(failures) = caught.failures {
+			let incoming = std::mem::take(&mut self.body.flow);
+			self.body.flow = self.join_states(&incoming, &failures);
+		}
 		let parent = self.body.scope;
 		let scope = self.a.symbols.scope_for(n, Some(parent), ScopeKind::Block);
 		self.body.scope = scope;

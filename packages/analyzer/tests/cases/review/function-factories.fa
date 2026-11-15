@@ -1,0 +1,88 @@
+function makeAdd = (value: Integer) => (other: Integer) => value + other
+function add3 = makeAdd(3)
+function add7 = makeAdd(add3(4))
+console.log(add3(1), add7(2)) -- prints: 4 9
+function makeText = (prefix: String) => (value: Integer) => "{prefix}:{value}"
+function label = makeText("compiled")
+console.log(label(5)) -- prints: compiled:5
+function makeReader = (value: Integer) => do {
+	function sum = (first: Integer, second: Integer) => first + second
+	sum with (first = value)
+}
+function read = makeReader(10)
+console.log(read(2)) -- prints: 12
+
+function keep = <Item>(value: Item) => (_other: Item) => value
+function keepNumber = keep(11)
+function keepText = keep("saved")
+console.log(keepNumber(2), keepText("other")) -- prints: 11 saved
+
+function makeHolder = (value: Integer) => do {
+	let holder = { read = (other: Integer) => value + other }
+	(other: Integer) => holder.read(other)
+}
+function held = makeHolder(20)
+console.log(held(3)) -- prints: 23
+
+function makeGeneric = <Item>(value: Item) => <Other>(_other: Other) => value
+function generic = makeGeneric(17)
+console.log(generic("unused"), generic(0)) -- prints: 17 17
+
+type Person = {
+	name: String
+	function describe = (self): String => "Hello {self.name}"
+}
+type Greeting = {
+	name: String
+	function describe = (self): String => "Hi {self.name}"
+}
+function makeDescription = <Item: { describe: (self) => String }>(value: Item) => (_unused: Integer) => value.describe()
+function person = makeDescription(Person { name = "Ada" })
+function greeting = makeDescription(Greeting { name = "Bea" })
+console.log(person(0), greeting(0)) -- prints: Hello Ada Hi Bea
+
+function makeNamed = <Item>(value: Item) => do {
+	function inner = (_ignored: Integer) => value
+	inner
+}
+function namedNumber = makeNamed(31)
+function namedText = makeNamed("named")
+console.log(namedNumber(0), namedText(1)) -- prints: 31 named
+
+function chooseDescription = (left: Boolean) => if left {
+	makeDescription(Person { name = "Cora" })
+} else {
+	makeDescription(Greeting { name = "Dora" })
+}
+function selectedDescription = chooseDescription(false)
+console.log(selectedDescription(0)) -- prints: Hi Dora
+
+function makeOffset = <offset: Integer>() => (value: Integer) => value + offset
+function add5 = makeOffset<5>()
+console.log(add5(2)) -- prints: 7
+function forwardOffset = <offset: Integer>() => makeOffset<offset>()
+function add8 = forwardOffset<8>()
+console.log(add8(1)) -- prints: 9
+
+type Identity = <Item>(value: Item) => Item
+function identity = <Item>(value: Item) => value
+function evaluate = (transform: Identity) => do {
+	let value = transform<Integer>(13)
+	(other: Integer) => value + other
+}
+function answer = evaluate(identity)
+console.log(answer(2)) -- prints: 15
+function returnIdentity = (transform: Identity) => transform
+function returned = returnIdentity(identity)
+console.log(returned("still generic"), returned(29)) -- prints: still generic 29
+
+function buildDescription = <Item: { describe: (self) => String }>(value: Item) => do {
+	let description = value.describe()
+	() => description
+}
+function eagerDescription = buildDescription(Greeting { name = "Eve" })
+console.log(eagerDescription()) -- prints: Hi Eve
+
+function makeLogger = () => () => console.log("called later")
+function logger = makeLogger()
+logger() -- prints: called later

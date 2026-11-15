@@ -1,0 +1,40 @@
+-- analysis-target: native
+-- file: Holder.worker.fa
+type Action = () => Integer
+export type = {
+	action: Action
+	function read = (self): Integer => self.action()
+	function invoke = (self, action: Action): Integer => action()
+}
+-- file: makeReader.fa
+use { Mutex } = std.concurrency
+type Action = () => Integer
+export function = (gate: Mutex<Task<Integer>>): Action => {
+	return () => if gate.tryLock() != none { 1 } else { 0 }
+}
+-- file: BadResult.worker.fa
+use { Mutex } = std.concurrency
+type Action = () => Integer
+export type = {
+	function read = (self): Action => { -- error CONC008
+		let pending = start do { 1 }
+		mutable gate = Mutex<Task<Integer>> { value = pending }
+		return () => if gate.tryLock() != none { 1 } else { 0 }
+	}
+}
+-- file: main.fa
+use { Mutex, WorkerPool } = std.concurrency
+type Action = () => Integer
+async function main = () => {
+	let pending = start do { 1 }
+	mutable gate = Mutex<Task<Integer>> { value = pending }
+	let made = makeReader(gate)
+	let stored = { action = made }
+	let annotated: Action = stored.action
+	mutable worker = Holder { action = annotated } -- error CONC008
+	mutable pool = WorkerPool<Holder> { count = 1, state = Holder { action = annotated } } -- error CONC008
+	console.log(await worker.invoke(annotated)) -- error CONC008
+	worker.stop()
+	pool.shutdown()
+}
+await main()

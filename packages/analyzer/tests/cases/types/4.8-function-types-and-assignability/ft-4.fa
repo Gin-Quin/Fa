@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: FN081
 -- brief: ✗ ft-4: FN081 (a function taking a Player can't take any Named)
 -- context: declarations reused from ft-1, ft-3

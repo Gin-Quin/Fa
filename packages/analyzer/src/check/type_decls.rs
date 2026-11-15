@@ -603,7 +603,9 @@ impl Walker<'_> {
 					}
 				}
 				(_, Some(definition)) => {
+					let previous = self.member_payload.replace((key, index as u16, definition));
 					let payload = self.check_type_expr(definition);
+					self.member_payload = previous;
 					// an object written inline: the order of its fields
 					let tree = std::sync::Arc::clone(&self.tree);
 					if let View::Object { items } = syntax::view(&tree, definition)

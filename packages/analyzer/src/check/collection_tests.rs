@@ -161,7 +161,7 @@ fn method_types_carry_the_effects_of_the_reference_table() {
 #[test]
 fn from_copies_collections_with_options() {
 	let (session, file) = analyzed(
-		"type User = { id: Integer, email: String }\nlet s = Set.from([1, 2, 2])\nlet f = Set<Float>.from([1, 2])\nlet m = Map.from([(\"a\", 1)])\nlet a = Array.from(s)\nlet users = Set.from([User { id = 1, email = \"a\" }], key = (user) => user.id)\n",
+		"type User = { id: Integer, email: String }\nlet s = Set.from([1, 2, 2])\nlet f = Set<Float>.from([1, 2])\nlet m = Map.from([(\"a\", 1)])\nlet a = Array.from(s)\nlet users = Set.from([User { id = 1, email = \"a\" }], capacity = 16)\n",
 	);
 	assert_eq!(symbol_type(&session, file, "s"), "Set<Integer>");
 	assert_eq!(symbol_type(&session, file, "f"), "Set<Float>");
@@ -172,7 +172,7 @@ fn from_copies_collections_with_options() {
 	let call = node(
 		&session,
 		file,
-		"Set.from([User { id = 1, email = \"a\" }], key = (user) => user.id)",
+		"Set.from([User { id = 1, email = \"a\" }], capacity = 16)",
 	);
 	let info = analysis.call(call).expect("a call");
 	let Callee::Builtin(builtin) = info.callee else {
@@ -181,9 +181,17 @@ fn from_copies_collections_with_options() {
 	assert_eq!(builtins::get(builtin).path, "Set.from");
 	assert!(matches!(
 		info.arguments.as_slice(),
-		[Argument::Given(_), Argument::Given(_), Argument::Default]
+		[Argument::Given(_), Argument::Given(_)]
 	));
 	assert_eq!(codes("let s = Set.from([1], size = 3)\n"), ["FN023"]);
+	for constructor in ["Set", "GrowingSet"] {
+		assert_eq!(
+			codes(&format!(
+				"let s = {constructor}.from([1], key = (value: Integer) => value)\n"
+			)),
+			["FN023"]
+		);
+	}
 	assert_eq!(codes("let m = Map.from([1, 2])\n"), ["CL005"]);
 	assert_eq!(codes("let s: Set<Integer> = Set.from([1])\n"), ["WCL001"]);
 	assert_eq!(

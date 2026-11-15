@@ -31,6 +31,9 @@ impl Generator<'_> {
 
 	/// The JavaScript of an expression, before its reactive instrumentation.
 	fn expr_value(&mut self, n: NodeId) -> Expr {
+		if self.analysis.partial_applications.contains_key(&n) {
+			return self.partial_value(n);
+		}
 		// `f then g`, `chain[1..]`: a function calling the steps in turn
 		if let Some(steps) = self.analysis.compositions.get(&n).cloned() {
 			return self.composition(&steps);
@@ -174,6 +177,10 @@ impl Generator<'_> {
 			View::Unsupported(kind) => self.unsupported(n, &format!("`{kind}`")),
 			// tasks (tasks.rs)
 			View::Await(operand) => self.await_expr(n, operand),
+			View::Copy(operand) => {
+				let value = self.expr(operand);
+				self.copy_value(value, self.type_of(operand))
+			}
 			View::Start(operand) => self.start_expr(n, operand),
 			_ => {
 				let kind = fa_analyzer::syntax::kind_name(self.tree, n);
@@ -240,6 +247,17 @@ impl Generator<'_> {
 	fn name(&mut self, n: NodeId) -> Expr {
 		match self.analysis.resolution(n) {
 			Resolution::Local(symbol) => {
+				if let Some(param) = self.analysis.value_parameters.get(&symbol)
+					&& let Some(value) = self
+						.hidden_names
+						.get(&super::generics::Hidden::Value(*param))
+				{
+					return Expr::constant(value.clone(), Prec::Primary);
+				}
+				let declaration = self.analysis.symbols.symbol(symbol).decl_node;
+				if let Some(&source) = self.analysis.static_function_aliases.get(&declaration) {
+					return self.expr(source);
+				}
 				let name = self.name_of(symbol);
 				// a derived value: its node, brought up to date (reactivity.rs)
 				if self.analysis.symbols.symbol(symbol).kind == SymbolKind::Derived

@@ -1,0 +1,16 @@
+type Label = <text: String = "default">() => String
+function source = <text: String>(): String => text
+function invoke = (label: Label): String => label()
+let label: Label = source
+console.log(label(), label<"given">(), invoke(source))
+-- prints: default given default
+
+type Pair = <First, Last = First>(first: First, last: Last) => Last
+function choose = <First, Last>(first: First, last: Last): Last => last
+let pair: Pair = choose
+console.log(pair<Integer>(1, 2), pair<String>("first", "last"))
+-- prints: 2 last
+
+function sum = <first: Integer = 3, last: Integer = first>(): Integer => first + last
+console.log(sum(), sum<7>(), sum<7, 9>())
+-- prints: 6 14 16

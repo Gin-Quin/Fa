@@ -43,6 +43,11 @@ impl Generator<'_> {
 			return;
 		};
 		let name = self.declare(symbol);
+		let binding = if self.is_module_value(symbol) {
+			name.clone()
+		} else {
+			format!("const {name}")
+		};
 		// a C function (foreign.rs)
 		if let Some(extern_symbol) = self.analysis.externs.get(&n).cloned() {
 			self.extern_declaration(n, &name, &extern_symbol);
@@ -113,14 +118,20 @@ impl Generator<'_> {
 				}
 				self.restore_captures(saved);
 			}
-			(View::Name(_), _) => {
+			(View::Name(_) | View::Access { .. }, _) => {
 				let alias = self.expr(value);
-				self.out.line(format!("const {name} = {};", alias.text));
+				let alias = self.copy_stored(value, alias);
+				self.out.line(format!("{binding} = {};", alias.text));
 			}
 			// `function f = g then h` (expressions.rs)
+			_ if self.analysis.partial_applications.contains_key(&value) => {
+				let partial = self.expr(value);
+				let partial = self.copy_stored(value, partial);
+				self.out.line(format!("{binding} = {};", partial.text));
+			}
 			_ if self.analysis.compositions.contains_key(&value) => {
 				let composed = self.expr(value);
-				self.out.line(format!("const {name} = {};", composed.text));
+				self.out.line(format!("{binding} = {};", composed.text));
 			}
 			_ => {
 				self.unsupported(n, "this function declaration");
@@ -256,6 +267,7 @@ impl Generator<'_> {
 				.get(&info.lambda)
 				.is_some_and(|summary| summary.starts);
 		let (parts, temps) = self.in_function(info.lambda, |g| {
+			g.guard_frames.push(Vec::new());
 			g.fcx.mode = mode;
 			// a generic function's hidden parameters first (generics.rs)
 			let mut parameters = g.declare_hidden(info.lambda);
@@ -379,6 +391,7 @@ impl Generator<'_> {
 			if required {
 				g.requirement_scopes.pop();
 			}
+			drops.extend(g.guard_frames.pop().unwrap_or_default());
 			if !drops.is_empty() {
 				if let Some(value) = expression.take() {
 					body.line(format!("return {};", value.text));
@@ -571,7 +584,24 @@ impl Generator<'_> {
 			Callee::Function(_) | Callee::Value => {
 				let omitted = match info.callee {
 					Callee::Function(declaration) => self.sentinel_slots(declaration, 0),
-					_ => Vec::new(),
+					_ => self
+						.analysis
+						.function_defaults
+						.get(&n)
+						.map(|defaults| {
+							let TypeKind::Function(signature) =
+								self.types.kind(self.type_of(callee))
+							else {
+								return Vec::new();
+							};
+							self.types
+								.params(self.types.sig(signature).params)
+								.iter()
+								.zip(defaults)
+								.map(|(param, &default)| default && self.may_be_none(param.ty))
+								.collect()
+						})
+						.unwrap_or_default(),
 				};
 				// `repeatText(2)("ab")`: the application's instance, one call
 				let stripped = self.strip_groups(callee);

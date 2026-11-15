@@ -1,0 +1,36 @@
+type Failure = Errors { Bad, Other }
+
+function answer = (bad: Boolean): Integer => {
+	do {
+		if bad { throw Failure.Bad }
+		7
+	} catch error => when error is {
+		Failure.Bad => 9
+	}
+}
+console.log(answer(true), answer(false)) -- prints: 9 7
+
+function nested = (): Integer => {
+	do {
+		do { throw Failure.Bad } catch error => throw error
+	} catch _error => 11
+}
+console.log(nested()) -- prints: 11
+
+function propagate = (): Integer throws Failure.Bad => {
+	do { throw Failure.Bad } catch error => throw error
+}
+console.log(propagate() catch _error => 13) -- prints: 13
+
+function inLoop = (text: String): Boolean => {
+	do {
+		for part in text.split(" ") {
+			if not part.isEmpty() { throw Failure.Bad }
+		}
+		false
+	} catch _error => true
+}
+console.log(inLoop("one two"), inLoop("")) -- prints: true false
+
+static handled = do { throw Failure.Other } catch _error => 19
+console.log(handled) -- prints: 19

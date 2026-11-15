@@ -781,15 +781,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				FieldValue::Given(value) => self.early_box(repr, value)?,
 				_ => None,
 			};
-			let outer = self.pending_box.replace(early);
+			let outer = self.frame().pending_box.replace(early);
 			// a default of a generic type's field (`#items: Array<Item> = []`):
 			// under the literal's type arguments
 			let saved = match field {
 				FieldValue::Default(_) => {
-					self.generic_type_bindings(info.ty, node)?.map(|bindings| {
+					let owner = info.member.unwrap_or(info.ty);
+					let arguments = self.generic_type_arguments(owner);
+					self.generic_type_bindings(owner, node)?.map(|bindings| {
 						let mut merged = self.bindings.borrow().clone();
 						merged.extend(bindings);
-						self.bindings.replace(merged)
+						let pairs: Vec<_> = arguments
+							.into_iter()
+							.flat_map(|(params, arguments)| params.into_iter().zip(arguments))
+							.collect();
+						let mut types = self.type_bindings.borrow().clone();
+						types.extend(pairs.iter().copied());
+						let values = self.value_bindings_for(&pairs);
+						(
+							self.bindings.replace(merged),
+							self.type_bindings.replace(types),
+							self.value_bindings.replace(values),
+						)
 					})
 				}
 				_ => None,
@@ -810,11 +823,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				other => other,
 			};
-			if let Some(saved) = saved {
-				self.bindings.replace(saved);
+			if let Some((reprs, types, values)) = saved {
+				self.bindings.replace(reprs);
+				self.type_bindings.replace(types);
+				self.value_bindings.replace(values);
 			}
 			// (a box of a pair lives in the arena: nothing to free)
-			if let Some((unused, _)) = self.pending_box.replace(outer)
+			if let Some((unused, _)) = self.frame().pending_box.replace(outer)
 				&& !paired.contains_key(&position)
 			{
 				let one = self.usize.const_int(1, false);
@@ -958,6 +973,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		use fa_analyzer::types::TypeKind;
 		let ty = self.concrete_type(ty);
 		let types = self.types();
+		if let TypeKind::Member(nominal, _) | TypeKind::NamedUnion(nominal, _) = types.kind(ty) {
+			let nominal = types.nominal(nominal);
+			let (_, params) = types.generic_nominal(nominal.key)?;
+			return Some((params, types.list_items(nominal.args).to_vec()));
+		}
 		let key_of = |ty: TypeId| match types.kind(ty) {
 			TypeKind::Object(shape) => types.shape(shape).nominal.map(|n| types.nominal(n).key),
 			_ => None,

@@ -524,7 +524,10 @@ impl Generator<'_> {
 						View::Call { .. }
 							| View::TypedObject { .. }
 							| View::Object { .. } | View::Tuple { .. }
-					) && self.types.contains_resource(self.type_of(node))
+							| View::Lambda { .. } | View::Name(_)
+							| View::PartialApplication { .. }
+					) && (self.types.contains_resource(self.type_of(node))
+						|| self.contains_function_value(self.type_of(node)))
 				});
 				self.has_try_lock = Some(known);
 				known

@@ -1,0 +1,26 @@
+-- file: main.fa
+use { sleep } = std.time
+function make = (): Held => do {
+	console.log("new")
+	Held { id = 7 }
+}
+async function delayed = (label: String, value: Held = make()): Integer => {
+	await sleep(20)
+	value.id + label.length
+}
+function later = delayed with (label = "x")
+let cancelled = start later() -- prints: new
+await sleep(1)
+console.log("queued") -- prints: queued
+cancelled.cancel()
+await sleep(1) -- prints: drop 7
+console.log("cancelled") -- prints: cancelled
+console.log(await later()) -- prints: new
+-- prints: drop 7
+-- prints: 8
+
+-- file: Held.foreign.fa
+export type = {
+	id: Integer
+	function destroy = (self) => console.log("drop", self.id)
+}

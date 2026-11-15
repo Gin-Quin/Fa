@@ -207,6 +207,7 @@ mod tests {
 		assert_eq!(typescript(&types, TypeId::INTEGER), "number");
 		assert_eq!(typescript(&types, TypeId::INT64), "bigint");
 		assert_eq!(typescript(&types, TypeId::STRING), "string");
+		assert_eq!(typescript(&types, TypeId::BYTES), "Uint8Array");
 		assert_eq!(typescript(&types, TypeId::BOOLEAN), "boolean");
 		assert_eq!(typescript(&types, TypeId::NONE), "undefined");
 	}

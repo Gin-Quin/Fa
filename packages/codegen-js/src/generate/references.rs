@@ -84,7 +84,11 @@ impl Generator<'_> {
 		let ty = self.without_none(ty);
 		matches!(
 			self.types.kind(ty),
-			TypeKind::Object(_) | TypeKind::Collection(..) | TypeKind::Tuple(_) | TypeKind::Range
+			TypeKind::Object(_)
+				| TypeKind::Bytes
+				| TypeKind::Collection(..)
+				| TypeKind::Tuple(_)
+				| TypeKind::Range
 		)
 	}
 
@@ -113,7 +117,12 @@ impl Generator<'_> {
 		let ty = self.analysis.symbols.symbol(symbol).ty;
 		let module_value = self.is_module_value(symbol);
 		if self.is_object_reference(ty) {
-			let value = self.expr(value);
+			let value = match self.view(self.strip_reference(value)) {
+				View::Index { target, index } => self
+					.native_slice(self.strip_reference(value), target, index, true)
+					.unwrap_or_else(|| self.expr(value)),
+				_ => self.expr(value),
+			};
 			let name = self.declare(symbol);
 			let keyword = match (module_value, mutable) {
 				(true, _) => "",
@@ -328,7 +337,12 @@ impl Generator<'_> {
 		};
 		match self.references.get(&symbol).cloned() {
 			Some(Reference::Object) => {
-				let value = self.expr(value);
+				let value = match self.view(self.strip_reference(value)) {
+					View::Index { target, index } => self
+						.native_slice(self.strip_reference(value), target, index, true)
+						.unwrap_or_else(|| self.expr(value)),
+					_ => self.expr(value),
+				};
 				let name = self.name_of(symbol);
 				self.out.line(format!("{name} = {};", value.text));
 			}
@@ -426,7 +440,9 @@ impl Generator<'_> {
 			View::Index { target, index } => {
 				let target_ty = self.type_of(target);
 				if self.type_of(index) == TypeId::RANGE || self.kind(target_ty) == Kind::Text {
-					let value = self.expr(node);
+					let value = self
+						.native_slice(node, target, index, true)
+						.unwrap_or_else(|| self.expr(node));
 					return Some(simple(None, Key::Value(value)));
 				}
 				let values = self.in_order(&[target, index], |g, part| g.expr(part));

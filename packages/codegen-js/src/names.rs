@@ -106,6 +106,7 @@ const RESERVED: &[&str] = &[
 	"TextDecoder",
 	"TextEncoder",
 	"TypeError",
+	"SyntaxError",
 	"URL",
 	"Uint16Array",
 	"Uint32Array",

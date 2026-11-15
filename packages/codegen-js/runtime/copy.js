@@ -23,6 +23,7 @@ import { faSides } from "./relations.js";
  * @returns {any}
  */
 export function faCopyShell(source) {
+	if (source instanceof Uint8Array) return source.slice();
 	if (Array.isArray(source)) {
 		return [];
 	}
@@ -66,6 +67,7 @@ export function faCopy(value) {
 		if (typeof item !== "object" || item === null) {
 			return item;
 		}
+		if (item instanceof Uint8Array) return item.slice();
 		const shell = faCopyShell(item);
 		pending.push(item, shell);
 		return shell;
@@ -148,6 +150,7 @@ export function faCopyGraph(value) {
 		if (typeof item !== "object" || item === null) {
 			return item;
 		}
+		if (item instanceof Uint8Array) return item.slice();
 		let copy = copies.get(item);
 		if (copy === undefined) {
 			copy = faCopyShell(item);
@@ -229,7 +232,9 @@ export function faAssign(target, source) {
 	if (into === from) {
 		return target;
 	}
-	if (Array.isArray(into)) {
+	if (into instanceof Uint8Array) {
+		into.set(from.slice());
+	} else if (Array.isArray(into)) {
 		into.length = 0;
 		for (const item of from) {
 			into.push(faCopy(item));

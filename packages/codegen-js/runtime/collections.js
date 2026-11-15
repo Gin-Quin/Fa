@@ -14,7 +14,6 @@ import { IndexError, KeyNotFound } from "./errors.js";
 import { faFormat } from "./format.js";
 import { faCheckInteger, faRangeOverflow } from "./integers.js";
 import { faStop } from "./stops.js";
-import { faCharacters, faStringCompare } from "./strings.js";
 
 // @fa-helper faNormalizeIndex deps: IndexError
 /**
@@ -321,14 +320,14 @@ export function faSortFloats(array) {
 	return array.sort((a, b) => a - b);
 }
 
-// @fa-helper faSortStrings deps: faArraySortInPlace faStringCompare
+// @fa-helper faSortStrings
 /**
- * `texts.sortInPlace()`: by code point, without `faCompare`'s type tests.
+ * `texts.sortInPlace()`: JavaScript UTF-16 code unit order.
  * @param {string[]} array
  * @returns {string[]} the array
  */
 export function faSortStrings(array) {
-	faArraySortInPlace(array, faStringCompare);
+	array.sort();
 	return array;
 }
 
@@ -1201,7 +1200,7 @@ export function faMapFind(map, predicate) {
 	return undefined;
 }
 
-// @fa-helper faIterable deps: FaRange faRangeValues faCharacters
+// @fa-helper faIterable deps: FaRange faRangeValues
 /**
  * The items of the source of a `from`: a range gives its integers, a string
  * its characters, any other collection itself.
@@ -1209,9 +1208,6 @@ export function faMapFind(map, predicate) {
  * @returns {Iterable<any>}
  */
 export function faIterable(source) {
-	if (typeof source === "string") {
-		return faCharacters(source);
-	}
 	return source instanceof FaRange ? faRangeValues(source) : source;
 }
 

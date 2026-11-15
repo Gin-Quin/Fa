@@ -2,6 +2,7 @@
 //! (`fa_analyzer::lower::when`) as an `if` / `else if` chain on the subject,
 //! evaluated once. The last arm of an exhaustive `when` needs no test.
 
+use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::lower::when::{Decision, Literal, Test, decision_list};
 use fa_analyzer::syntax::View;
@@ -21,7 +22,19 @@ impl Generator<'_> {
 			self.unsupported(n, "this `when`");
 			return;
 		};
-		let subject_value = self.expr(list.subject);
+		let units = self.has(self.strip_groups(list.subject), NodeFlags::STRING_CODE_UNIT)
+			&& list.decisions.iter().all(|decision| {
+				decision.binding.is_none()
+					&& decision.tests.iter().all(|test| match test {
+						Test::Equals(Literal::String(text)) => text.encode_utf16().count() == 1,
+						_ => false,
+					})
+			});
+		let subject_value = if units {
+			self.indexed_code_unit(list.subject)
+		} else {
+			self.expr(list.subject)
+		};
 		let subject = if subject_value.stable {
 			subject_value
 		} else {
@@ -33,7 +46,7 @@ impl Generator<'_> {
 		let subject_type = list.subject_type;
 		let count = list.decisions.len();
 		if count >= FLAT_WHEN_ARMS {
-			self.flat_when(&list.decisions, &subject, subject_type, &dest);
+			self.flat_when(&list.decisions, &subject, subject_type, &dest, units);
 			return;
 		}
 		let mut opened = false;
@@ -44,7 +57,22 @@ impl Generator<'_> {
 			} else {
 				let mut tests = Vec::new();
 				for test in &decision.tests {
-					tests.push(self.when_test(&subject, subject_type, test));
+					tests.push(if units {
+						let Test::Equals(Literal::String(text)) = test else {
+							unreachable!("single-unit cases")
+						};
+						js::binary(
+							&subject,
+							"===",
+							&Expr::constant(
+								text.encode_utf16().next().unwrap().to_string(),
+								Prec::Primary,
+							),
+							Prec::Equality,
+						)
+					} else {
+						self.when_test(&subject, subject_type, test)
+					});
 				}
 				Some(tests)
 			};
@@ -90,6 +118,7 @@ impl Generator<'_> {
 		subject: &Expr,
 		subject_type: TypeId,
 		dest: &Dest,
+		units: bool,
 	) {
 		let count = decisions.len();
 		let cases: Option<Vec<Vec<Expr>>> = if decisions
@@ -108,7 +137,19 @@ impl Generator<'_> {
 					decision
 						.tests
 						.iter()
-						.map(|test| self.case_constant(subject_type, test))
+						.map(|test| {
+							if units {
+								let Test::Equals(Literal::String(text)) = test else {
+									return None;
+								};
+								Some(Expr::constant(
+									text.encode_utf16().next()?.to_string(),
+									Prec::Primary,
+								))
+							} else {
+								self.case_constant(subject_type, test)
+							}
+						})
 						.collect()
 				})
 				.collect()
@@ -144,7 +185,22 @@ impl Generator<'_> {
 			}
 			let mut tests = Vec::new();
 			for test in &decision.tests {
-				tests.push(self.when_test(subject, subject_type, test));
+				tests.push(if units {
+					let Test::Equals(Literal::String(text)) = test else {
+						unreachable!("unit literals")
+					};
+					js::binary(
+						subject,
+						"===",
+						&Expr::constant(
+							text.encode_utf16().next().unwrap().to_string(),
+							Prec::Primary,
+						),
+						Prec::Equality,
+					)
+				} else {
+					self.when_test(subject, subject_type, test)
+				});
 			}
 			self.out.open(format!("if ({})", join_or(&tests)));
 			self.when_arm(decision, subject, dest);
@@ -387,6 +443,13 @@ impl Generator<'_> {
 			TypeKind::EnumMember(nominal, index) => {
 				let value = self.enum_value(nominal, index);
 				js::binary(subject, "===", &value, Prec::Equality)
+			}
+			TypeKind::Bytes => Expr::new(
+				format!("{} instanceof Uint8Array", subject.at(Prec::Relational)),
+				Prec::Relational,
+			),
+			TypeKind::Collection(fa_analyzer::types::CollKind::Array, ..) | TypeKind::Tuple(_) => {
+				js::call("Array.isArray", std::slice::from_ref(&subject.text))
 			}
 			TypeKind::None => js::binary(
 				subject,

@@ -187,13 +187,13 @@ describe("sorting (D35)", () => {
 		expect(faArraySort([3n, -1n, 20n])).toEqual([-1n, 3n, 20n]);
 	});
 
-	test("strings by code point, tuples lexicographically", () => {
+	test("strings by code unit, tuples lexicographically", () => {
 		expect(faArraySort(["b", "a", "\u{10000}", "￿", "B"])).toEqual([
 			"B",
 			"a",
 			"b",
-			"￿",
 			"\u{10000}",
+			"￿",
 		]);
 		expect(
 			faArraySort([

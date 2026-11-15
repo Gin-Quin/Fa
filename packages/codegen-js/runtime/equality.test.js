@@ -197,7 +197,7 @@ describe("natural order (D35)", () => {
 		expect(faCompare(2, 2)).toBe(0);
 		expect(faCompare(NaN, 1)).toBe(0);
 		expect(faCompare(1n, 2n)).toBe(-1);
-		expect(faCompare("￿", "\u{10000}")).toBe(-1);
+		expect(faCompare("￿", "\u{10000}")).toBe(1);
 		expect(faCompare([1, "b"], [1, "a"])).toBe(1);
 		expect(faCompare([1], [1, 0])).toBeLessThan(0);
 	});

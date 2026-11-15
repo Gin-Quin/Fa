@@ -1,7 +1,7 @@
 // `std.fs`, `std.time` and `std.json` (advanced brief D9). `std.time.now()`
 // compiles to `Date.now()` and needs no helper.
 //
-// - `File.read(path)`, `File.readBytes(path)` and `File.write(path, text)`
+// - `File.read/readText(path)` and `File.write/writeText(path, value)`
 //   work through the `node:fs` module of Bun, Node and Deno
 //   (`process.getBuiltinModule`): blocking with its `*Sync` functions,
 //   awaited with `fs.promises` (`faFileAwait`: the other tasks run
@@ -19,6 +19,7 @@
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
 
 import { FaError } from "./errors.js";
+import { faUtf8Decoder } from "./strings.js";
 import { faAlive } from "./tasks.js";
 
 /** @typedef {import("./tasks.js").FaTask} FaTask */
@@ -125,29 +126,29 @@ export function faFileCall(path, operation) {
 	}
 }
 
-// @fa-helper faReadFile deps: faFileCall
+// @fa-helper faReadFile deps: faFileCall faUtf8Decoder
 /**
- * `File.read(path)`: the whole file, as UTF-8.
+ * `File.readText(path)`: the whole file, strictly decoded from UTF-8.
  * @param {string} path
  * @returns {string}
  */
 export function faReadFile(path) {
-	return faFileCall(path, (fs) => fs.readFileSync(path, "utf8"));
+	return faFileCall(path, (fs) => faUtf8Decoder.decode(fs.readFileSync(path)));
 }
 
 // @fa-helper faReadBytes deps: faFileCall
 /**
- * `File.readBytes(path)`: the whole file, as an `Array(Byte)`.
+ * `File.read(path)`: the whole file, as Bytes.
  * @param {string} path
- * @returns {number[]}
+ * @returns {Uint8Array}
  */
 export function faReadBytes(path) {
-	return faFileCall(path, (fs) => Array.from(fs.readFileSync(path)));
+	return faFileCall(path, (fs) => new Uint8Array(fs.readFileSync(path)));
 }
 
 // @fa-helper faWriteFile deps: faFileCall
 /**
- * `File.write(path, text)`: creates or replaces the file, in UTF-8.
+ * `File.writeText(path, text)`: creates or replaces the file, in UTF-8.
  * @param {string} path
  * @param {string} text
  * @returns {void}
@@ -196,31 +197,31 @@ export async function faFileAwait(task, path, operation) {
 	return /** @type {T} */ (outcome.value);
 }
 
-// @fa-helper faReadFileAsync deps: faFileAwait
+// @fa-helper faReadFileAsync deps: faFileAwait faUtf8Decoder
 /**
- * `await File.read(path)`.
+ * `await File.readText(path)`.
  * @param {FaTask} task
  * @param {string} path
  * @returns {Promise<string>}
  */
 export function faReadFileAsync(task, path) {
-	return faFileAwait(task, path, (fs) => fs.readFile(path, "utf8"));
+	return faFileAwait(task, path, async (fs) => faUtf8Decoder.decode(await fs.readFile(path)));
 }
 
 // @fa-helper faReadBytesAsync deps: faFileAwait
 /**
- * `await File.readBytes(path)`.
+ * `await File.read(path)`.
  * @param {FaTask} task
  * @param {string} path
- * @returns {Promise<number[]>}
+ * @returns {Promise<Uint8Array>}
  */
 export function faReadBytesAsync(task, path) {
-	return faFileAwait(task, path, async (fs) => Array.from(await fs.readFile(path)));
+	return faFileAwait(task, path, async (fs) => new Uint8Array(await fs.readFile(path)));
 }
 
 // @fa-helper faWriteFileAsync deps: faFileAwait
 /**
- * `await File.write(path, text)`.
+ * `await File.writeText(path, text)`.
  * @param {FaTask} task
  * @param {string} path
  * @param {string} text
@@ -268,14 +269,15 @@ export function faMonotonic() {
  *   its fields next (`"x"`: its fields next to `"type"`, `"V"`: under
  *   `"value"`).
  *
- * @param {string} text
+ * @param {any} text
  * @param {any} schema
+ * @param {(text: any) => any} [read]
  * @returns {any}
  */
-export function faJsonParse(text, schema) {
+export function faJsonParse(text, schema, read = JSON.parse) {
 	let data;
 	try {
-		data = JSON.parse(text);
+		data = read(text);
 	} catch (error) {
 		throw new JsonError(String(/** @type {any} */ (error)?.message ?? error));
 	}
@@ -298,6 +300,13 @@ function faJsonConvert(data, schema, where) {
 			case "b":
 				if (typeof data === "boolean") return data;
 				throw fail("a boolean");
+			case "B":
+				if (
+					Array.isArray(data) &&
+					data.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+				)
+					return Uint8Array.from(data);
+				throw fail("an array of bytes");
 			case "s":
 				if (typeof data === "string") return data;
 				throw fail("a string");
@@ -479,6 +488,8 @@ function faJsonIs(value, schema) {
 		switch (schema) {
 			case "b":
 				return typeof value === "boolean";
+			case "B":
+				return value instanceof Uint8Array;
 			case "s":
 				return typeof value === "string";
 			case "f":
@@ -565,7 +576,7 @@ function faJsonWrite(value, schema) {
 		if (Object.hasOwn(value, "type")) return `{"type":${type},"value":${fields}}`;
 		return fields === "{}" ? `{"type":${type}}` : `{"type":${type},${fields.slice(1)}`;
 	}
-	if (Array.isArray(value) || value instanceof Set) {
+	if (Array.isArray(value) || value instanceof Uint8Array || value instanceof Set) {
 		return `[${Array.from(value, (item) => faJsonWrite(item, null) ?? "null").join(",")}]`;
 	}
 	const map = value instanceof Map || value[Symbol.toStringTag] === "fa:HashMap";
@@ -676,4 +687,127 @@ function faJsonFields(value, fields, open) {
 	}
 	if (parts.length === 0 && open !== "{") return `${open.slice(0, -1)}}`;
 	return `${open}${parts.join(",")}}`;
+}
+
+// @fa-helper faWriteBytes deps: faFileCall
+/** @param {string} path @param {Uint8Array} bytes @returns {void} */
+export function faWriteBytes(path, bytes) {
+	faFileCall(path, (fs) => fs.writeFileSync(path, bytes));
+}
+
+// @fa-helper faWriteBytesAsync deps: faFileAwait
+/** @param {FaTask} task @param {string} path @param {Uint8Array} bytes @returns {Promise<void>} */
+export function faWriteBytesAsync(task, path, bytes) {
+	return faFileAwait(task, path, (fs) => fs.writeFile(path, bytes));
+}
+
+// @fa-helper faJsonReadBytes deps: faUtf8Decoder
+/** Parse bytes directly. Decode only JSON string tokens, never the input
+ * document. JSON.parse validates escapes and scalar spelling.
+ * An explicit container stack also accepts deeply nested documents.
+ * @param {string | Uint8Array} bytes @returns {any}
+ */
+export function faJsonReadBytes(bytes) {
+	if (typeof bytes === "string") return JSON.parse(bytes);
+	let index = 0;
+	const fail = () => {
+		throw new SyntaxError(`Invalid JSON at byte ${index}`);
+	};
+	const space = () => {
+		while (bytes[index] === 32 || bytes[index] === 9 || bytes[index] === 10 || bytes[index] === 13)
+			index++;
+	};
+	const string = () => {
+		const start = index++;
+		while (index < bytes.length) {
+			const byte = bytes[index++];
+			if (byte === 34) return JSON.parse(faUtf8Decoder.decode(bytes.subarray(start, index)));
+			if (byte === 92) index++;
+		}
+		return fail();
+	};
+	/** @type {{value: any, object: boolean, state: number, key: string}[]} */
+	const stack = [];
+	let root;
+	let hasRoot = false;
+	/** @param {any} value */
+	const append = (value) => {
+		const frame = stack[stack.length - 1];
+		if (frame === undefined) {
+			if (hasRoot) fail();
+			root = value;
+			hasRoot = true;
+		} else if (frame.object) {
+			Object.defineProperty(frame.value, frame.key, {
+				value,
+				writable: true,
+				enumerable: true,
+				configurable: true,
+			});
+			frame.state = 3;
+		} else {
+			frame.value.push(value);
+			frame.state = 3;
+		}
+	};
+	while (true) {
+		space();
+		const frame = stack[stack.length - 1];
+		if (frame === undefined && hasRoot) {
+			if (index !== bytes.length) fail();
+			return root;
+		}
+		if (frame !== undefined) {
+			const close = frame.object ? 125 : 93;
+			if ((frame.state === 0 || frame.state === 3) && bytes[index] === close) {
+				index++;
+				stack.pop();
+				continue;
+			}
+			if (frame.state === 3) {
+				if (bytes[index++] !== 44) fail();
+				frame.state = 1;
+				space();
+			}
+			if (frame.object && frame.state !== 2) {
+				if (bytes[index] !== 34) fail();
+				frame.key = string();
+				space();
+				if (bytes[index++] !== 58) fail();
+				frame.state = 2;
+				space();
+			}
+		}
+		const byte = bytes[index];
+		if (byte === 123 || byte === 91) {
+			const object = byte === 123;
+			const value = object ? {} : [];
+			append(value);
+			stack.push({ value, object, state: 0, key: "" });
+			index++;
+		} else if (byte === 34) append(string());
+		else {
+			const start = index;
+			while (
+				index < bytes.length &&
+				bytes[index] !== 44 &&
+				bytes[index] !== 93 &&
+				bytes[index] !== 125 &&
+				bytes[index] !== 32 &&
+				bytes[index] !== 9 &&
+				bytes[index] !== 10 &&
+				bytes[index] !== 13
+			)
+				index++;
+			if (index === start) fail();
+			let token = "";
+			for (let offset = start; offset < index; offset++) {
+				if (bytes[offset] > 127) fail();
+				token += String.fromCharCode(bytes[offset]);
+			}
+			const value = JSON.parse(token);
+			if (typeof value === "object" && value !== null) fail();
+			append(value);
+		}
+	}
 }

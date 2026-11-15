@@ -82,7 +82,7 @@ export function faFormatNested(value) {
 			if (value === null) {
 				return "none";
 			}
-			if (Array.isArray(value)) {
+			if (Array.isArray(value) || value instanceof Uint8Array) {
 				return faFormatArray(value, faFormatNested);
 			}
 			// recognized by their tags, so that printing doesn't bring the
@@ -310,4 +310,10 @@ export function faFormatRange(range) {
 		return `${start}..`;
 	}
 	return `${start}${range.includesEnd ? "..=" : ".."}${range.end}`;
+}
+
+// @fa-helper faFormatBytes
+/** @param {Uint8Array} bytes @returns {string} */
+export function faFormatBytes(bytes) {
+	return `[${bytes.join(", ")}]`;
 }

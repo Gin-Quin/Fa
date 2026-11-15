@@ -1,0 +1,10 @@
+-- prints: 12 é日😀�
+-- prints: 4 failed
+use { File } = std.fs
+let path = "__TEST_DIRECTORY__/text"
+File.writeText(path, "é日😀" + "😀"[0]) catch error => console.log("write failed")
+let bytes = File.read(path) catch error => Bytes.filled(0)
+let text = File.readText(path) catch error => "?"
+console.log(bytes.length, text)
+File.write(path, Bytes.from([97, 255, 240, 159])) catch error => console.log("write failed")
+console.log((File.read(path) catch error => Bytes.filled(0)).length, File.readText(path) catch error => "failed")

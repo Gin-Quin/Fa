@@ -1,0 +1,33 @@
+-- prints: [1, 2] [1, 2] [1, 2, 9, 4]
+-- prints: [255, 2] [1, 2] [255, 2, 9, 4]
+-- prints: [255, 2, 9, 4] [1, 2, 9, 4]
+-- prints: [9, 4]
+-- prints: [5, 4] [255, 2, 5, 4]
+-- prints: [2, 5, 4] [255, 2, 5, 4]
+-- prints: é日😀 é日😀
+-- prints: order
+-- prints: order
+-- prints: [7, 7, 7]
+mutable data = Bytes.from([1, 2, 3, 4])
+let copy = data[0..2]
+use view = data[0..2]
+data[2] = 9
+console.log(copy, view, data)
+mutable use writable = data[0..2]
+writable[0] = 255
+console.log(writable, copy, data)
+mutable second = data
+second[0] = 1
+console.log(data, second)
+reuse writable = data[2..4]
+console.log(writable)
+writable[0] = 5
+console.log(writable, data)
+function slice = (data: Bytes, start: Integer, end: Integer): Bytes throws IndexError => try data[start..end]
+console.log(slice(data, 1, 4) catch error => Bytes.filled(0), data)
+let text = "é日😀"
+console.log(text[0..=-1], text[-4..])
+function order = (value: Byte): Byte => { console.log("order")
+	value
+}
+console.log(Bytes.filled(value = order(7), length = order(3)))

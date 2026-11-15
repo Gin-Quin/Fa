@@ -1,0 +1,13 @@
+-- prints: Zoé😀
+-- prints: [0, 195, 255] [0,195,255]
+-- prints: bad
+-- prints: Bytes true
+use { Json } = std.json
+let input = "{{\"name\":\"Zoé😀\"}}".toUtf8()
+let result: { name: String } = Json.parse(input) catch error => ({ name = "?" })
+console.log(result.name)
+let bytes: Bytes = Json.parse("[0,195,255]".toUtf8()) catch error => Bytes.filled(0)
+console.log(bytes, Json.stringify(bytes))
+let invalid: String = Json.parse(Bytes.from([34, 255, 34])) catch error => "bad"
+console.log(invalid)
+console.log(@typeToString(Bytes), @typeToSchema(Bytes) == Schema.Bytes)

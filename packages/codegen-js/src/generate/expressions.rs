@@ -1,13 +1,14 @@
 //! Expressions: names, booleans, comparisons, `if` values and the lifting of
 //! constructs that need statements (values brief §8, §13, §19).
 
+use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{CompareOp, LogicOp, View};
 use fa_analyzer::types::TypeKind;
 
-use crate::generate::{Dest, Generator, Kind, Repr};
+use crate::generate::{Dest, Generator, Repr};
 use crate::js::{self, Expr, Prec};
 
 impl Generator<'_> {
@@ -78,6 +79,34 @@ impl Generator<'_> {
 				right,
 				negated,
 			} => {
+				let unit_left = self
+					.has(self.strip_groups(left), NodeFlags::STRING_CODE_UNIT)
+					.then(|| self.one_unit_literal(right))
+					.flatten();
+				let unit_right = self
+					.has(self.strip_groups(right), NodeFlags::STRING_CODE_UNIT)
+					.then(|| self.one_unit_literal(left))
+					.flatten();
+				if unit_left.is_some() || unit_right.is_some() {
+					let values = self.in_order(&[left, right], |g, operand| {
+						if (operand == left && unit_left.is_some())
+							|| (operand == right && unit_right.is_some())
+						{
+							g.indexed_code_unit(operand)
+						} else {
+							Expr::constant(
+								unit_left.or(unit_right).unwrap().to_string(),
+								Prec::Primary,
+							)
+						}
+					});
+					return js::binary(
+						&values[0],
+						if negated { "!==" } else { "===" },
+						&values[1],
+						Prec::Equality,
+					);
+				}
 				let values = self.in_order(&[left, right], |g, operand| g.expr(operand));
 				self.equality(left, right, &values[0], &values[1], negated)
 			}
@@ -395,14 +424,9 @@ impl Generator<'_> {
 	}
 
 	/// One ordering `a < b` between two values of a node's operands.
-	fn order(&mut self, left: NodeId, op: CompareOp, a: &Expr, b: &Expr) -> Expr {
+	fn order(&mut self, _left: NodeId, op: CompareOp, a: &Expr, b: &Expr) -> Expr {
 		let symbol = op.symbol();
-		if self.kind(self.type_of(left)) == Kind::Text {
-			let compare = self.helper("faStringCompare");
-			let call = js::call(compare, &[a.text.clone(), b.text.clone()]);
-			let zero = Expr::constant("0", Prec::Primary);
-			return js::binary(&call, symbol, &zero, Prec::Relational);
-		}
+
 		js::binary(a, symbol, b, Prec::Relational)
 	}
 

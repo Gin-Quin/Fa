@@ -40,3 +40,7 @@ let second = start narrow(-42)
 console.log(await second) -- prints: i-42-42-42-42
 let third = start scalars(true, 255, .blue)
 console.log(await third) -- prints: true255blue
+
+-- A decimal longer than wasm inline room must release its heap buffer.
+let fourth = start build(123_456_789_012_345, false)
+console.log(await fourth) -- prints: t1234567890123450123456789012345246913578024690123456789012345!x123456789012345y123456789012346123456789012345k123456789012345false

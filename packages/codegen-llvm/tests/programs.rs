@@ -789,6 +789,64 @@ mod with_llvm {
 	}
 
 	#[test]
+	#[cfg(unix)]
+	fn native_arguments_replace_invalid_utf8() {
+		use std::ffi::OsString;
+		use std::os::unix::ffi::OsStringExt;
+		use std::process::Command;
+		let directory = std::env::temp_dir().join(format!("fa-arguments-{}", std::process::id()));
+		std::fs::create_dir_all(&directory).expect("a temporary directory");
+		let input = [
+			b"ASCII".as_slice(),
+			b"\xF0\x9F",
+			b"\xED\xA0\x80",
+			b"\xE1\x80x",
+			b"\xC0\xAF",
+			b"\xF4\x90\x80\x80",
+			b"\xEF\xBB\xBF\xE2\x82",
+			b"\x80z",
+			b"",
+			b"an argument long enough to need owned storage: \xE1\x80x",
+		];
+		let mut expected = String::new();
+		for bytes in input {
+			let text = String::from_utf8_lossy(bytes);
+			expected.push_str(&format!("{} true {text}\n", text.encode_utf16().count()));
+		}
+		expected.push_str(&format!("{}\n", input.len()));
+		let path =
+			Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/strings_arguments.fa");
+		for target in [Target::Native, Target::NativeFreestanding]
+			.into_iter()
+			.filter(|target| {
+				*target != Target::NativeFreestanding
+					|| cfg!(all(target_arch = "x86_64", target_os = "linux"))
+			}) {
+			let options = Options {
+				leak_check: true,
+				..Options::default()
+			};
+			let artifact = compile_file(&path, target, &options, &directory.join(target.name()))
+				.unwrap_or_else(|error| panic!("{target:?}: {error}"));
+			let output = Command::new(&artifact.output)
+				.args(input.map(|bytes| OsString::from_vec(bytes.to_vec())))
+				.output()
+				.expect("the program runs");
+			assert!(
+				output.status.success(),
+				"{target:?}: {}",
+				String::from_utf8_lossy(&output.stderr)
+			);
+			assert_eq!(
+				String::from_utf8_lossy(&output.stdout),
+				expected,
+				"{target:?}"
+			);
+		}
+		std::fs::remove_dir_all(directory).expect("remove the test directory");
+	}
+
+	#[test]
 	fn native_programs() {
 		run_all(Target::Native);
 	}

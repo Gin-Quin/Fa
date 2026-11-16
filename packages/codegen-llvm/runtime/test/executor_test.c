@@ -1398,6 +1398,89 @@ static void test_tree_regions(void) {
 	free(memory);
 }
 
+static Utf8Info scalar_utf8_info(const uint8_t *bytes, size_t length) {
+	Utf8Info info = {0, SIZE_MAX};
+	size_t position = 0;
+	while (position < length) {
+		size_t start = position;
+		int valid;
+		uint32_t code = utf8_decode(bytes, length, &position, &valid);
+		if (!valid) { info.error = start; break; }
+		info.units += 1 + (code > 0xFFFF);
+	}
+	return info;
+}
+
+static void test_utf8_input(void) {
+	long before = allocated, bytes_before = allocated_bytes;
+	struct { const char *input; const char *output; size_t error; } cases[] = {
+		{"", "", SIZE_MAX}, {"ASCII", "ASCII", SIZE_MAX},
+		{"\xC3\xA9\xE6\x97\xA5\xF0\x9F\x98\x80", "\xC3\xA9\xE6\x97\xA5\xF0\x9F\x98\x80", SIZE_MAX},
+		{"\xEF\xBB\xBF", "\xEF\xBB\xBF", SIZE_MAX},
+		{"\xF0\x9F", "\xEF\xBF\xBD", 0},
+		{"\xED\xA0\x80", "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD", 0},
+		{"\xE1\x80x", "\xEF\xBF\xBDx", 0},
+		{"\xC0\xAF", "\xEF\xBF\xBD\xEF\xBF\xBD", 0},
+		{"\xF4\x90\x80\x80", "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD", 0},
+		{"\xEF\xBB\xBF\xE2\x82", "\xEF\xBB\xBF\xEF\xBF\xBD", 3},
+		{"\x80z", "\xEF\xBF\xBDz", 0},
+		{"\xE0\x9F\xBF", "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD", 0},
+		{"\xF0\x8F\xBF\xBF", "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD", 0},
+		{"a\xE2\x82\xACz\xE2\x82", "a\xE2\x82\xACz\xEF\xBF\xBD", 5},
+	};
+	for (size_t item = 0; item < sizeof cases / sizeof *cases; item += 1) {
+		for (size_t prefix = 0; prefix < 32; prefix += 1) {
+			for (size_t suffix = 0; suffix <= 32; suffix += 32) {
+				size_t input_length = c_length(cases[item].input);
+				size_t output_length = c_length(cases[item].output);
+				size_t length = prefix + input_length + suffix;
+				uint8_t *input = malloc(length ? length : 1);
+				fill_bytes(input, 'a', prefix);
+				copy_bytes(input + prefix, (const uint8_t *)cases[item].input, input_length);
+				fill_bytes(input + prefix + input_length, 'z', suffix);
+				Utf8Info actual = utf8_validate(input, length);
+				Utf8Info scalar = scalar_utf8_info(input, length);
+				CHECK(actual.units == scalar.units && actual.error == scalar.error);
+				CHECK(actual.error == (cases[item].error == SIZE_MAX ? SIZE_MAX : prefix + cases[item].error));
+				FaString result;
+				fa_string_from_utf8_lossy(input, length, &result);
+				const uint8_t *text = string_bytes(&result);
+				CHECK(string_length(&result) == prefix + output_length + suffix);
+				CHECK(string_equal_bytes(text + prefix, (const uint8_t *)cases[item].output, output_length));
+				CHECK(fa_string_length(text, string_length(&result), result.capacity)
+				      == prefix + unit_count((const uint8_t *)cases[item].output, output_length) + suffix);
+				CHECK(fa_string_is_well_formed(text, string_length(&result), result.capacity));
+				if (string_owned(result.capacity)) { fa_string_free(result.bytes, result.capacity); }
+				free(input);
+			}
+		}
+	}
+	// Exercise each lane and each byte value against the scalar decoder, with
+	// valid multibyte sequences on both sides of the mutated lane.
+	uint8_t data[64];
+	for (size_t index = 0; index < sizeof data; index += 4) {
+		copy_bytes(data + index, (const uint8_t *)"\xF0\x9F\x98\x80", 4);
+	}
+	for (size_t index = 0; index < sizeof data; index += 1) {
+		uint8_t old = data[index];
+		for (unsigned byte = 0; byte < 256; byte += 1) {
+			data[index] = (uint8_t)byte;
+			for (size_t length = 16; length <= sizeof data; length += 1) {
+				Utf8Info actual = utf8_validate(data, length);
+				Utf8Info scalar = scalar_utf8_info(data, length);
+				if (actual.units != scalar.units || actual.error != scalar.error) {
+					printf("UTF-8 vector mismatch lane=%zu byte=%u length=%zu actual=%zu/%zu scalar=%zu/%zu\n",
+					       index, byte, length, actual.units, actual.error, scalar.units, scalar.error);
+					fflush(0);
+				}
+				CHECK(actual.units == scalar.units && actual.error == scalar.error);
+			}
+		}
+		data[index] = old;
+	}
+	CHECK(allocated == before && allocated_bytes == bytes_before);
+}
+
 static void test_arguments(void) {
 	char *argv[] = {"program", "one", "two"};
 	for (int32_t argc = -1; argc <= 3; argc += 1) {
@@ -1415,6 +1498,30 @@ static void test_arguments(void) {
 		argument_count = 0;
 		CHECK(allocated == before);
 	}
+	long before = allocated, bytes_before = allocated_bytes;
+	char *external[] = {"program", "\xC3\xA9\xF0\x9F\x98\x80", "\xE1\x80x",
+	                    "a long argument that needs owned replacement bytes: \xED\xA0\x80", "ASCII", ""};
+	fa_arguments_init(6, external);
+	CHECK(arguments_have_owners);
+	CHECK(fa_string_length(argument_items[0].bytes, argument_items[0].length, argument_items[0].capacity) == 3);
+	for (unsigned visit = 0; visit < 2; visit += 1) {
+		FaArrayHeader *array = fa_arguments();
+		FaString *items = (FaString *)(void *)array->items;
+		CHECK(fa_string_length(string_bytes(items + 1), string_length(items + 1), items[1].capacity) == 2);
+		CHECK(!string_owned(items[2].capacity));
+		for (size_t index = 0; index < argument_count; index += 1) {
+			if (string_owned(items[index].capacity)) { fa_string_free(items[index].bytes, items[index].capacity); }
+		}
+		fa_array_free(array, sizeof(FaString));
+	}
+	for (size_t index = 0; index < argument_count; index += 1) {
+		if (string_owned(argument_items[index].capacity)) { fa_string_free(argument_items[index].bytes, argument_items[index].capacity); }
+	}
+	fa_free(argument_items, sizeof(FaString) * (argument_count + 1), sizeof(void *));
+	argument_items = 0;
+	argument_count = 0;
+	arguments_have_owners = 0;
+	CHECK(allocated == before && allocated_bytes == bytes_before);
 }
 
 static void test_character_views(void) {
@@ -2358,6 +2465,7 @@ int main(void) {
 	test_nonempty_splits();
 	test_region_slice_views();
 	test_tree_regions();
+	test_utf8_input();
 	test_arguments();
 	test_character_views();
 	test_allocator_fast_paths();

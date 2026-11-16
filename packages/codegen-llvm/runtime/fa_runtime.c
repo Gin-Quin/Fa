@@ -3951,13 +3951,174 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_pad(const uint8_t *bytes
 	*out = result;
 }
 
+// ── UTF-8 input ─────────────────────────────────────────────────────────
+
+typedef struct {
+	size_t units;
+	size_t error; // SIZE_MAX on success; otherwise the first invalid subpart
+} Utf8Info;
+
+/// Strict decoding and replacement decoding share the same byte consumption.
+/// A bad continuation is left for the next subpart; valid continuations before
+/// it belong to this one. In particular ED A0 80 produces three replacements.
+static uint32_t utf8_decode(const uint8_t *bytes, size_t length, size_t *position, int *valid) {
+	uint8_t first = bytes[(*position)++];
+	*valid = 1;
+	if (first < 128) { return first; }
+	unsigned width;
+	uint32_t code;
+	if (first >= 0xC2 && first <= 0xDF) { width = 2; code = first & 31; }
+	else if (first >= 0xE0 && first <= 0xEF) { width = 3; code = first & 15; }
+	else if (first >= 0xF0 && first <= 0xF4) { width = 4; code = first & 7; }
+	else { *valid = 0; return 0xFFFD; }
+	for (unsigned index = 1; index < width; index += 1) {
+		uint8_t lower = 0x80, upper = 0xBF;
+		if (index == 1) {
+			if (first == 0xE0) { lower = 0xA0; }
+			if (first == 0xED) { upper = 0x9F; }
+			if (first == 0xF0) { lower = 0x90; }
+			if (first == 0xF4) { upper = 0x8F; }
+		}
+		if (*position == length || bytes[*position] < lower || bytes[*position] > upper) {
+			*valid = 0;
+			return 0xFFFD;
+		}
+		code = (code << 6) | (bytes[(*position)++] & 63);
+	}
+	return code;
+}
+
+#if !defined(__wasm__)
+static unsigned utf8_lane_mask(ByteVector lanes) {
+#if defined(__x86_64__)
+	typedef char SignedByteVector __attribute__((vector_size(16)));
+	return (unsigned)__builtin_ia32_pmovmskb128((SignedByteVector)lanes);
+#else
+	uint64_t words[2];
+	__builtin_memcpy(words, &lanes, sizeof words);
+	uint64_t low = (words[0] >> 7) & UINT64_C(0x0101010101010101);
+	uint64_t high = (words[1] >> 7) & UINT64_C(0x0101010101010101);
+	return (unsigned)((low * UINT64_C(0x0102040810204080)) >> 56)
+	     | (unsigned)((high * UINT64_C(0x0102040810204080)) >> 56) << 8;
+#endif
+}
+
+/// Validate a complete prefix of a 16-byte block. Leave a trailing partial
+/// sequence for the next block; every vector therefore starts at a boundary.
+static size_t utf8_vector(const uint8_t *bytes, size_t *units) {
+	ByteVector chunk;
+	__builtin_memcpy(&chunk, bytes, sizeof chunk);
+	unsigned non_ascii = utf8_lane_mask(chunk);
+	if (non_ascii == 0) { *units = 16; return 16; }
+	unsigned continuation = utf8_lane_mask((chunk >= 0x80) & (chunk <= 0xBF));
+	unsigned two = utf8_lane_mask((chunk >= 0xC2) & (chunk <= 0xDF));
+	unsigned three = utf8_lane_mask((chunk >= 0xE0) & (chunk <= 0xEF));
+	unsigned four = utf8_lane_mask((chunk >= 0xF0) & (chunk <= 0xF4));
+	unsigned expected = ((two | three | four) << 1) | ((three | four) << 2) | (four << 3);
+	unsigned invalid = non_ascii & ~(continuation | two | three | four);
+	invalid |= continuation ^ expected;
+	invalid |= (utf8_lane_mask(chunk == 0xE0) << 1) & utf8_lane_mask(chunk < 0xA0);
+	invalid |= (utf8_lane_mask(chunk == 0xED) << 1) & utf8_lane_mask(chunk > 0x9F);
+	invalid |= (utf8_lane_mask(chunk == 0xF0) << 1) & utf8_lane_mask(chunk < 0x90);
+	invalid |= (utf8_lane_mask(chunk == 0xF4) << 1) & utf8_lane_mask(chunk > 0x8F);
+	size_t tail = 15;
+	while (tail > 12 && (bytes[tail] & 0xC0) == 0x80) { tail -= 1; }
+	uint8_t lead = bytes[tail];
+	size_t width = lead >= 0xF0 && lead <= 0xF4 ? 4
+	             : lead >= 0xE0 && lead <= 0xEF ? 3
+	             : lead >= 0xC2 && lead <= 0xDF ? 2 : 1;
+	size_t consumed = tail + width > 16 ? tail : 16;
+	unsigned mask = (1U << consumed) - 1;
+	// A new lead at the tail cannot hide an unfinished preceding sequence.
+	if ((invalid & mask) || (consumed < 16 && (expected & (1U << consumed)))) { return 0; }
+	*units = consumed - (size_t)__builtin_popcount(continuation & mask)
+	                  + (size_t)__builtin_popcount(four & mask);
+	return consumed;
+}
+#endif
+
+/// Validation computes the UTF-16 count and ASCII fact in the same pass.
+/// Native targets use 16-byte vectors; wasm retains its portable word ASCII
+/// path and scalar Unicode decoder without requiring the SIMD128 extension.
+static Utf8Info utf8_validate(const uint8_t *bytes, size_t length) {
+	Utf8Info result = {0, SIZE_MAX};
+	size_t position = 0;
+#if !defined(__wasm__)
+	while (length - position >= 16) {
+		size_t units;
+		size_t consumed = utf8_vector(bytes + position, &units);
+		if (!consumed) { break; }
+		position += consumed;
+		result.units += units;
+	}
+#else
+	while (length - position >= 8) {
+		uint64_t word;
+		__builtin_memcpy(&word, bytes + position, sizeof word);
+		if (word & UINT64_C(0x8080808080808080)) { break; }
+		position += 8;
+		result.units += 8;
+	}
+#endif
+	while (position < length) {
+		size_t start = position;
+		int valid;
+		uint32_t code = utf8_decode(bytes, length, &position, &valid);
+		if (!valid) { result.error = start; return result; }
+		result.units += 1 + (code > 0xFFFF);
+	}
+	return result;
+}
+
+static void utf8_copy_valid(const uint8_t *bytes, size_t length, size_t units, FaString *out) {
+	uint8_t *target = fa_string_allocate(length, units == length ? SIMPLE : 0, out);
+	copy_bytes(target, bytes, length);
+	fa_string_set_unit_count(target, length, out->capacity, units);
+}
+
+/// External nonthrowing text inputs and String.fromUtf8Lossy share this path.
+FA_EXPORT void fa_string_from_utf8_lossy(const uint8_t *bytes, size_t length, FaString *out) {
+	Utf8Info info = utf8_validate(bytes, length);
+	if (info.error == SIZE_MAX) { utf8_copy_valid(bytes, length, info.units, out); return; }
+	size_t encoded = info.error, units = info.units, position = info.error;
+	while (position < length) {
+		int valid;
+		uint32_t code = utf8_decode(bytes, length, &position, &valid);
+		encoded = fa_string_size(encoded, code < 128 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4);
+		units += 1 + (code > 0xFFFF);
+	}
+	uint8_t *target = fa_string_allocate(encoded, 0, out);
+	copy_bytes(target, bytes, info.error);
+	size_t written = info.error;
+	position = info.error;
+	while (position < length) {
+		int valid;
+		uint32_t code = utf8_decode(bytes, length, &position, &valid);
+		written += encode_point(target + written, code);
+	}
+	fa_string_set_unit_count(target, encoded, out->capacity, units);
+}
+
 // ── arguments ───────────────────────────────────────────────────────────
 
 static FaString *argument_items;
 #if defined(__wasm__)
 static uint8_t *argument_bytes;
+static size_t argument_bytes_size;
 #endif
 static size_t argument_count;
+static int arguments_have_owners;
+
+static FaString argument_string(const uint8_t *bytes, size_t length) {
+	Utf8Info info = utf8_validate(bytes, length);
+	if (info.error == SIZE_MAX) {
+		return (FaString){bytes, length, info.units == length ? SIMPLE : STRING_LITERAL | info.units};
+	}
+	FaString result;
+	fa_string_from_utf8_lossy(bytes, length, &result);
+	arguments_have_owners |= string_owned(result.capacity);
+	return result;
+}
 
 #if !defined(__wasm__)
 /// Keeps the user arguments: `argv` without the program (`argv[0]`).
@@ -3966,10 +4127,7 @@ FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
 	argument_items = fa_alloc(sizeof(FaString) * (argument_count + 1), sizeof(void *));
 	for (size_t index = 0; index < argument_count; index += 1) {
 		const char *text = argv[index + 1];
-		argument_items[index].bytes = (const uint8_t *)text;
-		argument_items[index].length = c_length(text);
-		argument_items[index].capacity =
-		    simple_flag((const uint8_t *)text, argument_items[index].length);
+		argument_items[index] = argument_string((const uint8_t *)text, c_length(text));
 	}
 }
 #else
@@ -3980,6 +4138,7 @@ FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
 	size_t size = (size_t)fa_host_arguments_size();
 	uint8_t *bytes = fa_alloc(size == 0 ? 1 : size, 1);
 	argument_bytes = bytes;
+	argument_bytes_size = size == 0 ? 1 : size;
 	fa_host_arguments_copy(bytes);
 	argument_count = 0;
 	for (size_t index = 0; index < size; index += 1) {
@@ -3990,9 +4149,7 @@ FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
 	size_t item = 0;
 	for (size_t index = 0; index < size; index += 1) {
 		if (bytes[index] == 0) {
-			argument_items[item].bytes = bytes + start;
-			argument_items[item].length = index - start;
-			argument_items[item].capacity = simple_flag(bytes + start, index - start);
+			argument_items[item] = argument_string(bytes + start, index - start);
 			item += 1;
 			start = index + 1;
 		}
@@ -4576,6 +4733,14 @@ FA_EXPORT FaArrayHeader *fa_arguments(void) {
 	FaArrayHeader *array = fa_array_new((int64_t)count, (int64_t)count,
 	                                    (int64_t)sizeof(FaString));
 	copy_bytes(array->items, (const uint8_t *)argument_items, sizeof(FaString) * count);
+	if (arguments_have_owners) {
+		FaString *items = (FaString *)(void *)array->items;
+		for (size_t index = 0; index < count; index += 1) {
+			if (string_owned(items[index].capacity)) {
+				items[index].capacity = STRING_LITERAL | fa_string_length(items[index].bytes, items[index].length, items[index].capacity);
+			}
+		}
+	}
 	// Finish the header after the copy: the optimizer need not prove that
 	// the allocator returned disjoint header and item storage.
 	array->length = (int64_t)count;
@@ -5885,13 +6050,22 @@ FA_EXPORT void fa_leak_check(void) {
 		builder_capacity = 0;
 	}
 	if (argument_items != 0) {
+		if (arguments_have_owners) {
+			for (size_t index = 0; index < argument_count; index += 1) {
+				if (string_owned(argument_items[index].capacity)) {
+					fa_string_free(argument_items[index].bytes, argument_items[index].capacity);
+				}
+			}
+		}
 		fa_free(argument_items, sizeof(FaString) * (argument_count + 1), sizeof(void *));
 		argument_items = 0;
+		arguments_have_owners = 0;
 	}
 #if defined(__wasm__)
 	if (argument_bytes != 0) {
-		fa_free(argument_bytes, 1, 1);
+		fa_free(argument_bytes, argument_bytes_size, 1);
 		argument_bytes = 0;
+		argument_bytes_size = 0;
 	}
 #endif
 	if (fa_live_blocks != 0 || live_tree_arenas != 0) {

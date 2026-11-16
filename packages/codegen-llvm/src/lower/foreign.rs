@@ -882,17 +882,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			("CString#toString", _, _) => {
 				let strlen = self.runtime.cstring_length()?;
 				let length = self.call_value(strlen, &[pointer.into()])?.into_int_value();
-				let empty = self.pointer_type().const_null();
 				let result = self.call_with_pair(
-					"fa_concat",
-					&[
-						pointer.into(),
-						length.into(),
-						self.usize.const_zero().into(),
-						empty.into(),
-						self.usize.const_zero().into(),
-						self.simple_flag().into(),
-					],
+					"fa_string_from_utf8_lossy",
+					&[pointer.into(), length.into()],
 					Repr::Str,
 				)?;
 				Ok(self.fresh(result))

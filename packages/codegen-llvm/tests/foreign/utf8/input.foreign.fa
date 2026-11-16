@@ -1,0 +1,19 @@
+function input: (index: Int32) => CString = @extern("fa_test_utf8_text")
+function inputBytes: (index: Int32) => Pointer<Byte> = @extern("fa_test_utf8_text")
+
+function show = (index: Int32) => {
+	let text = input(index).toString()
+	console.log(text.length, text.isWellFormed(), text.codeUnitAt(0) catch _ => 0, text.codeUnitAt(-1) catch _ => 0)
+}
+
+show(0) -- prints: 4 true 65279 56832
+show(1) -- prints: 1 true 65533 65533
+show(2) -- prints: 3 true 65533 65533
+show(3) -- prints: 2 true 65533 120
+show(4) -- prints: 2 true 65533 65533
+show(5) -- prints: 4 true 65533 65533
+show(6) -- prints: 2 true 65279 65533
+show(7) -- prints: 2 true 65533 122
+show(8) -- prints: 0 true 0 0
+show(9) -- prints: 57 true 97 120
+console.log(inputBytes(2).toArray(3)) -- prints: [237, 160, 128]

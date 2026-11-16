@@ -16,12 +16,12 @@ Every CPU verdict requires the same-binary control to differ by <3% on both meas
 | — | `fannkuch-redux` | — | unmeasured | — | — | — | — | — |
 | — | `fib` | — | unmeasured | — | — | — | — | — |
 | — | `graph` | — | unmeasured | — | — | — | — | — |
-| — | `growing-index` | — | unmeasured | — | — | — | — | — |
+| secondary | `growing-index` | 1000000 | 0.975 / 0.987 [0.773, 1.119] | 1.113 / 1.000 [0.827, 1.250] | 1.153 | 1.167 | 0.932/0.872 fail | not resolved / not resolved |
 | — | `growing-index-array` | — | unmeasured | — | — | — | — | — |
 | — | `growing-index-array@1000` | — | unmeasured | — | — | — | — | — |
 | — | `growing-index-array@16` | — | unmeasured | — | — | — | — | — |
-| — | `growing-index@1000` | — | unmeasured | — | — | — | — | — |
-| — | `growing-index@16` | — | unmeasured | — | — | — | — | — |
+| secondary | `growing-index@1000` | 1000 | 0.989 / 1.018 [0.865, 1.200] | 1.004 / 1.079 [0.874, 1.109] | 1.146 | 1.177 | 0.939/0.917 fail | not resolved / not resolved |
+| secondary | `growing-index@16` | 16 | 1.224 / 1.224 [1.026, 1.490] | 1.167 / 1.288 [0.897, 1.470] | 1.146 | 1.177 | 1.059/1.097 fail | not resolved / not resolved |
 | — | `interp` | — | unmeasured | — | — | — | — | — |
 | — | `lru` | — | unmeasured | — | — | — | — | — |
 | — | `lru-open` | — | unmeasured | — | — | — | — | — |
@@ -29,7 +29,7 @@ Every CPU verdict requires the same-binary control to differ by <3% on both meas
 | — | `nbody` | — | unmeasured | — | — | — | — | — |
 | — | `particles` | — | unmeasured | — | — | — | — | — |
 | — | `particles-reserved` | — | unmeasured | — | — | — | — | — |
-| — | `push` | — | unmeasured | — | — | — | — | — |
+| goose | `push` | 32000000 | 1.067 / 1.064 [0.966, 1.225] | 0.953 / 0.889 [0.816, 1.198] | 1.116 | 0.938 | 1.064/1.098 fail | not resolved / not resolved |
 | — | `push-array` | — | unmeasured | — | — | — | — | — |
 | — | `records` | — | unmeasured | — | — | — | — | — |
 | — | `respond` | — | unmeasured | — | — | — | — | — |
@@ -41,7 +41,7 @@ Every CPU verdict requires the same-binary control to differ by <3% on both meas
 | — | `spectral-norm` | — | unmeasured | — | — | — | — | — |
 | — | `string-building` | — | unmeasured | — | — | — | — | — |
 | — | `string-building-bytes` | — | unmeasured | — | — | — | — | — |
-| — | `string-building-growing` | — | unmeasured | — | — | — | — | — |
+| secondary | `string-building-growing` | 3000000 | 1.143 / 1.143 [1.038, 1.372] | 0.181 / 0.197 [0.156, 0.217] | 1.262 | 0.215 | 0.988/1.007 pass | behind / goal met |
 | — | `strlist` | — | unmeasured | — | — | — | — | — |
 | — | `sum` | — | unmeasured | — | — | — | — | — |
 | — | `sum-reserved` | — | unmeasured | — | — | — | — | — |
@@ -64,12 +64,12 @@ Wasm and Bun timings use the size shown, including process startup; errors are r
 | `fannkuch-redux` | — | — | — | 9 | 136.698 / 108.299 / 105.879 | — | — | — |
 | `fib` | — | — | — | 35 | 236.888 / 236.994 / 293.224 | — | — | — |
 | `graph` | — | — | — | 10000 | 10.451 / 7.005 / 17.902 | — | — | — |
-| `growing-index` | — | — | — | 1000000 | 365.175 / 316.771 / 312.957 | — | — | — |
+| `growing-index` | 0.250 / 0.256 / 0.224 | 9472 / 9856 / 9728 | 29184 / 18888 / 341920 | 1000000 | 365.175 / 316.771 / 312.957 | — | — | — |
 | `growing-index-array` | — | — | — | 1000000 | 314.168 / 316.771 / 312.957 | — | — | — |
 | `growing-index-array@1000` | — | — | — | 1000 | 300.196 / 300.304 / 292.344 | — | — | — |
 | `growing-index-array@16` | — | — | — | 16 | 300.182 / 300.288 / 292.322 | — | — | — |
-| `growing-index@1000` | — | — | — | 1000 | 344.205 / 300.304 / 292.344 | — | — | — |
-| `growing-index@16` | — | — | — | 16 | 344.182 / 300.288 / 292.322 | — | — | — |
+| `growing-index@1000` | 0.067 / 0.068 / 0.067 | 1664 / 2048 / 2048 | 29184 / 18888 / 341920 | 1000 | 344.205 / 300.304 / 292.344 | — | — | — |
+| `growing-index@16` | 0.079 / 0.065 / 0.068 | 1664 / 2048 / 1920 | 29184 / 18888 / 341920 | 16 | 344.182 / 300.288 / 292.322 | — | — | — |
 | `interp` | — | — | — | 17 | 18.857 / 17.593 / 37.150 | — | — | — |
 | `lru` | — | — | — | 200000 | 19.154 / 17.889 / 53.806 | — | — | — |
 | `lru-open` | — | — | — | 200000 | 20.953 / 17.889 / 21.916 | — | — | — |
@@ -77,7 +77,7 @@ Wasm and Bun timings use the size shown, including process startup; errors are r
 | `nbody` | — | — | — | 1500000 | 867.184 / 871.789 / 720.326 | — | — | — |
 | `particles` | — | — | — | 30000 | 105.170 / 105.580 / 105.520 | — | — | — |
 | `particles-reserved` | — | — | — | 30000 | 105.170 / 105.580 / 105.520 | — | — | — |
-| `push` | — | — | — | 3200000 | 135.551 / 121.473 / 144.458 | — | — | — |
+| `push` | 0.400 / 0.375 / 0.420 | 256640 / 255872 / 255872 | 21112 / 18864 / 341944 | 3200000 | 135.551 / 121.473 / 144.458 | — | — | — |
 | `push-array` | — | — | — | 3200000 | 135.095 / 121.473 / 144.458 | — | — | — |
 | `records` | — | — | — | 400000 | 80.088 / 73.389 / 130.261 | — | — | — |
 | `respond` | — | — | — | 40000 | 234.435 / 189.706 / 414.536 | — | — | — |
@@ -89,7 +89,7 @@ Wasm and Bun timings use the size shown, including process startup; errors are r
 | `spectral-norm` | — | — | — | 1000 | 535.731 / 608.315 / 691.207 | — | — | — |
 | `string-building` | — | — | — | 300000 | 236.670 / 148.698 / 872.495 | — | — | — |
 | `string-building-bytes` | — | — | — | 300000 | 176.345 / 148.698 / 872.518 | — | — | — |
-| `string-building-growing` | — | — | — | 300000 | 187.641 / 148.698 / 872.518 | — | — | — |
+| `string-building-growing` | 0.206 / 0.180 / 1.135 | 1664 / 2048 / 2176 | 49576 / 18896 / 346248 | 300000 | 187.641 / 148.698 / 872.518 | — | — | — |
 | `strlist` | — | — | — | 200000 | 86.936 / 81.084 / 195.021 | — | — | — |
 | `sum` | — | — | — | 3200000 | 161.783 / 142.684 / 149.521 | — | — | — |
 | `sum-reserved` | — | — | — | 3200000 | 161.783 / 142.684 / 149.521 | — | — | — |

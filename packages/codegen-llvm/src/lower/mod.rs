@@ -1851,6 +1851,28 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					.into_pointer_value();
 				index += 1;
 				let pointer = match (has_default, param.default) {
+					(true, Some(default))
+						if self.explicit_reference_parameter(info.ty, position) =>
+					{
+						let flag = value.get_nth_param(index).expect("a flag").into_int_value();
+						index += 1;
+						let given_block = self.builder.get_insert_block().expect("a block");
+						let use_default = self.append_block("default");
+						let join = self.append_block("given");
+						self.builder
+							.build_conditional_branch(flag, join, use_default)?;
+						self.builder.position_at_end(use_default);
+						let address = self
+							.borrowed_result(default)?
+							.value
+							.expect("a reference address");
+						let default_end = self.builder.get_insert_block().expect("a block");
+						self.branch_to(join)?;
+						self.builder.position_at_end(join);
+						let chosen = self.builder.build_phi(self.pointer_type(), "parameter")?;
+						chosen.add_incoming(&[(&pointer, given_block), (&address, default_end)]);
+						chosen.as_basic_value().into_pointer_value()
+					}
 					(true, Some(default)) => {
 						// not given: the default, in a slot the function owns
 						let flag = value.get_nth_param(index).expect("a flag").into_int_value();
@@ -1893,6 +1915,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 						chosen.as_basic_value().into_pointer_value()
 					}
 					_ => pointer,
+				};
+				let repr = if self.explicit_reference_parameter(info.ty, position) {
+					if let Repr::Optional(element) = repr {
+						self.nullable_references.insert(param.symbol, ());
+						element.repr()
+					} else {
+						repr
+					}
+				} else {
+					repr
 				};
 				self.slots.insert(param.symbol, Slot { pointer, repr });
 				if repr == Repr::Str

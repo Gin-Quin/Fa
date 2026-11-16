@@ -95,6 +95,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// known from the whole program's facts in a build per unit (a unit, or
 	/// an instance emitted by a module that doesn't read the relation's file).
 	pub(crate) fn side_repr(&self, object: TypeId, name: Sym) -> Option<Repr> {
+		// The field marker survives generic owner substitution, including
+		// recursive nested element types whose concrete shape is new.
+		if let Some(field) = self.types().fields_of(object).iter().find(|field|
+			field.name == name && field.flags.contains(fa_analyzer::types::FieldFlags::RELATION)) {
+			let types = self.types();
+			let unfold = |ty| types.rec_target(ty).unwrap_or(ty);
+			return match types.kind(field.ty) {
+				fa_analyzer::types::TypeKind::Collection(fa_analyzer::types::CollKind::RelationPool(_), item, _) => Some(Repr::Links(unfold(item))),
+				fa_analyzer::types::TypeKind::Union(list) => types.list_items(list).iter()
+					.find(|&&member| member != TypeId::NONE).map(|&target| Repr::Link(unfold(target))),
+				_ => None,
+			};
+		}
 		if let Some(repr) = self
 			.relation_sides
 			.get(&object)
@@ -107,7 +120,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Whether an object type has relation sides.
 	pub(crate) fn has_sides(&self, object: TypeId) -> bool {
-		self.relation_sides.contains_key(&object)
+		self.types().fields_of(object).iter().any(|field| field.flags.contains(fa_analyzer::types::FieldFlags::RELATION))
+			|| self.relation_sides.contains_key(&object)
 			|| self
 				.fact_sides(object)
 				.is_some_and(|sides| !sides.is_empty())

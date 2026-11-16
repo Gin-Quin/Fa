@@ -1,0 +1,16 @@
+type Model = {
+	nodes: Pool<Node> = []
+	type Node = {
+		value: Integer
+		next: (Node in nodes)?
+		previous: (nodes->next)?
+	}
+	function add = (self, value: Integer): Node in self.nodes mutates self.nodes.size => self.nodes.add({ value = value })
+	function connect = (self, node: Node in self.nodes, next: Node in self.nodes) mutates node.next => { node.next = next }
+}
+mutable a: Model = {}
+mutable b: Model = {}
+use one = a.add(1)
+use two = b.add(2)
+a.connect(one, two) -- error: REF020
+one.next = two -- error: REL012

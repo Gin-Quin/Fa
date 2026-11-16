@@ -1520,6 +1520,48 @@ impl Walker<'_> {
 		}
 	}
 
+	/// A relation field's target collection, with its holder's owner bound.
+	/// The boolean distinguishes a scalar target from a relation pool.
+	pub(super) fn reference_field_collection(
+		&mut self,
+		place: crate::ids::PlaceId,
+	) -> Option<(crate::ids::PlaceId, bool)> {
+		let entry = self.places.get(place);
+		let Some(crate::flow::Step::Field(field)) = entry.step else {
+			return None;
+		};
+		let holder = self.canonical_reference_place(entry.parent?);
+		let ty = self.place_type(holder)?;
+		let name = self.s.types.syms.resolve(field).to_string();
+		let side = self.side_of(ty, &name)?;
+		let declaration = self.relations.sides[side].clone();
+		let collection = declaration.collection?;
+		let owner = if declaration.shape == Shape::Owner {
+			Some(holder)
+		} else {
+			self.collection_owner(holder)
+		};
+		let target = self.relation_collection_place(collection.reference, owner)?;
+		let scalar = matches!(
+			declaration.shape,
+			Shape::Owner | Shape::Direct { many: false } | Shape::Reverse { many: false, .. }
+		);
+		Some((target, scalar))
+	}
+
+	pub(super) fn reference_field_target(
+		&mut self,
+		place: crate::ids::PlaceId,
+	) -> crate::ids::PlaceId {
+		match self.reference_field_collection(place) {
+			Some((collection, true)) => self.places.child(
+				collection,
+				crate::flow::Step::Index(crate::flow::Identity::Existing(self.body.flow.time)),
+			),
+			_ => place,
+		}
+	}
+
 	/// The owner of the collection an element place belongs to (`town1` for
 	/// an element of `town1.people`); `None` for a module-level collection.
 	fn collection_owner(&self, place: crate::ids::PlaceId) -> Option<crate::ids::PlaceId> {
@@ -2190,7 +2232,9 @@ impl Walker<'_> {
 						self.places.get(other).step,
 						Some(crate::flow::Step::Index(_) | crate::flow::Step::All)
 					);
+				let permitted_owner = self.declared_reference_owner(n, argument);
 				if element
+					|| permitted_owner
 					|| matches!(
 						self.places.get(other).step,
 						Some(crate::flow::Step::Length | crate::flow::Step::Size)

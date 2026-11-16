@@ -392,7 +392,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				place
 			}
-			None => self.reference_place(value)?,
+			None => {
+				let place = self.reference_place(value)?;
+				if matches!(self.node_repr(value)?, Repr::Optional(_))
+					&& !matches!(place.repr, Repr::Optional(_)) {
+					self.nullable_references.insert(symbol, ());
+				}
+				place
+			}
 		};
 		let data = self.analysis.symbols.symbol(symbol);
 		if self.shared.contains_key(&symbol) {
@@ -658,7 +665,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			inner = group;
 		}
 		if self.is_place(inner) {
-			return self.place(inner);
+			let place = self.place(inner)?;
+			if let Repr::Link(target) = place.repr {
+				let pointer = self.builder.build_load(self.pointer_type(), place.pointer, "relation_target")?.into_pointer_value();
+				return Ok(Slot { pointer, repr: self.repr_of(target, inner.index())? });
+			}
+			return Ok(place);
 		}
 		// `map.getOrInsert(key, value)`: the value in the map
 		if let Some(info) = self.analysis.call(inner).cloned()

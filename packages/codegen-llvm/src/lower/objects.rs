@@ -1624,6 +1624,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				_ => self.build_member(nominal, index, None, node),
 			};
 		}
+		// A method used through its type is an unbound function value:
+		// the caller supplies self, so the type name is never a runtime load.
+		if self.flags(target).contains(NodeFlags::TYPE_EXPR) {
+			if let Some(member) = members.last() {
+				if let Resolution::Local(symbol) = self.analysis.resolution(member) {
+					let data = self.analysis.symbols.symbol(symbol);
+					if data.kind == fa_analyzer::symbols::SymbolKind::Function {
+						return self.function_value(data.decl_node, node);
+					}
+				}
+			}
+			if let Some(reached) = self.callee_function(node) {
+				let function = match reached {
+					super::program::Reached::Function(file, declaration) => {
+						self.function_in(file, declaration, node)?
+					}
+					super::program::Reached::RemoteFunction(key) => {
+						self.remote_function(key, node)?
+					}
+					_ => unreachable!("a reached function"),
+				};
+				return self.applied_external_function_value(&function, node);
+			}
+		}
 		// `Integer.maxValue`, `Float.infinity`…
 		if let Resolution::Builtin(id) = self.analysis.resolution(first)
 			&& members.len() == 1

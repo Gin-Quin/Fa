@@ -126,6 +126,7 @@ impl Walker<'_> {
 			},
 		};
 		for member in members {
+			place = self.reference_field_target(place);
 			place = self.member_step(place, member)?;
 		}
 		Some(place)
@@ -896,8 +897,10 @@ impl Walker<'_> {
 				let Some((path, ty)) = self.signature_path(node) else {
 					continue;
 				};
+				let reference_parameter = self.declared_reference_parameter(path);
 				let (data, steps) = self.s.types.path_data(path);
-				if steps.is_empty()
+				if reference_parameter.is_none()
+					&& steps.is_empty()
 					&& !kind && !matches!(data.root, PathRoot::ModuleValue(_))
 					&& self.is_primitive(ty)
 				{
@@ -932,6 +935,7 @@ impl Walker<'_> {
 				});
 				if kind
 					&& !names_element
+					&& reference_parameter.is_none()
 					&& !matches!(self.s.types.kind(ty), TypeKind::Ref(..))
 					&& !self.s.types.is_recovering(ty)
 				{
@@ -951,6 +955,20 @@ impl Walker<'_> {
 					continue;
 				}
 				if kind {
+					if let Some(symbol) = reference_parameter {
+						if let View::Assignment {
+							annotation: Some(annotation),
+							..
+						} = self.view(self.a.symbols.symbol(symbol).decl_node)
+						{
+							if let Some((owner, _)) = self
+								.reference_annotation(annotation)
+								.and_then(|owner| self.signature_path(owner))
+							{
+								mutated.push(self.extend_path(owner, PathStep::Size));
+							}
+						}
+					}
 					invalidated.push(path);
 				} else {
 					mutated.push(path);
@@ -1977,7 +1995,11 @@ impl Walker<'_> {
 		let (base, node) = match data.root {
 			PathRoot::Param(index) => {
 				let node = argument_node(index as usize)?;
-				(self.place_of(node)?, node)
+				let place = match arguments.get(index as usize) {
+					Some(Argument::Receiver(callee)) => self.callee_receiver_place(*callee)?,
+					_ => self.place_of(node)?,
+				};
+				(place, node)
 			}
 			PathRoot::SelfParam => {
 				let node = argument_node(0).or(receiver)?;

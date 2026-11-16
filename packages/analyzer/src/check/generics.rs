@@ -231,13 +231,16 @@ impl Walker<'_> {
 				&& w.rec_references.get(&symbol) == Some(&generic)
 			{
 				let own = w.s.types.rec_info(rec).args;
+				// Captured enclosing parameters follow the declaration's own
+				// parameters and are implicit in its recursive applications.
+				let own = w.s.types.list_items(own).get(..params.len());
 				// the whole definition is the application: a type function
 				// applying itself at new arguments never stops (TF001)
 				let whole = match syntax::view(&w.tree, w.a.symbols.symbol(symbol).decl_node) {
 					View::TypeDecl { value, .. } => w.strip_groups(value) == n,
 					_ => false,
 				};
-				if whole && w.s.types.list_items(own) != args.as_slice() {
+				if whole && own != Some(args.as_slice()) {
 					let name = w.display(generic);
 					let message = format!(
 						"`{name}` applies itself at new arguments each time: its applications nest without end (more than 256)"
@@ -246,7 +249,7 @@ impl Walker<'_> {
 					w.report(diagnostic);
 					return TypeId::UNKNOWN;
 				}
-				if w.s.types.list_items(own) != args.as_slice() {
+				if own != Some(args.as_slice()) {
 					let name = w.display(generic);
 					let message = format!(
 						"`{name}` refers to itself with other type arguments (polymorphic recursion): use its own parameters, `{name}`"

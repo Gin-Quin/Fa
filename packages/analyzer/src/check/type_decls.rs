@@ -427,6 +427,7 @@ impl Walker<'_> {
 			let mut flags = FieldFlags::empty();
 			flags.set(FieldFlags::READONLY, readonly);
 			flags.set(FieldFlags::REACTIVE, reactive);
+			flags.set(FieldFlags::RELATION, relation.is_some());
 			flags.set(FieldFlags::PRIVATE, text.starts_with('#'));
 			flags.set(
 				FieldFlags::METHOD,
@@ -672,12 +673,30 @@ impl Walker<'_> {
 			return ty;
 		}
 		let data = self.a.symbols.symbol(symbol);
+		let enclosing_scope = data.scope;
 		let name = self.s.types.syms.resolve(data.name).to_string();
 		let object = matches!(
 			self.view(data.decl_node),
 			View::TypeDecl { value, .. } if matches!(self.view(value), View::Object { .. })
 		);
-		let params = self.type_generics(symbol).unwrap_or_default();
+		let mut params = self.type_generics(symbol).unwrap_or_default();
+		// A nested recursive type also captures its enclosing type parameters.
+		// They must be arguments of the recursive edge, so instantiating the
+		// owner substitutes every traversal back into that nested type.
+		let mut scope = Some(enclosing_scope);
+		while let Some(current) = scope {
+			let current = self.a.symbols.scope(current);
+			for &symbol in &current.symbols {
+				let symbol = self.a.symbols.symbol(symbol);
+				if symbol.kind == SymbolKind::TypeParameter
+					&& let crate::types::TypeKind::Param(param) = self.s.types.kind(symbol.ty)
+					&& !params.contains(&param)
+				{
+					params.push(param);
+				}
+			}
+			scope = current.parent;
+		}
 		let args: Vec<TypeId> = params
 			.iter()
 			.map(|&param| self.s.types.intern(crate::types::TypeKind::Param(param)))

@@ -888,8 +888,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	pub(crate) fn signature_borrows(&self, ty: TypeId, position: usize, repr: Repr) -> bool {
-		self.borrows_parameter(repr)
-			|| matches!(self.types().kind(ty), TypeKind::Function(sig)
+		self.borrows_parameter(repr) || self.explicit_reference_parameter(ty, position)
+	}
+
+	pub(crate) fn explicit_reference_parameter(&self, ty: TypeId, position: usize) -> bool {
+		matches!(self.types().kind(ty), TypeKind::Function(sig)
 			if self.types().params(self.types().sig(sig).params).get(position).is_some_and(|param| param.reference.is_some()))
 	}
 

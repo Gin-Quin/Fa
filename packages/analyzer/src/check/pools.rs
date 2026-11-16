@@ -204,7 +204,9 @@ impl Walker<'_> {
 		let Some(collection) = self.callee_receiver_place(callee) else {
 			return;
 		};
-		let element = self.place_of(argument);
+		let element = self
+			.reference_place(argument)
+			.map(|place| self.canonical_reference_place(place));
 		let inside = element.is_some_and(|element| {
 			let entry = self.places.get(element);
 			entry.parent == Some(collection) && matches!(entry.step, Some(Step::Index(_)))

@@ -165,7 +165,15 @@ impl Walker<'_> {
 				format!("`{text}` must name a collection or string reached from a parameter or module-level value: bind the owner in the caller, then return a reference into it"));
 			self.report(diagnostic);
 		}
-		path.map(|(path, _)| path)
+		path.map(|(path, _)| {
+			let (data, steps) = self.s.types.path_data(path);
+			if data.root == crate::types::PathRoot::SelfParam {
+				let steps = steps.to_vec();
+				self.s.types.path(crate::types::PathRoot::Param(0), &steps)
+			} else {
+				path
+			}
+		})
 	}
 
 	/// The flow place of that collection in the function's own scope.
@@ -270,6 +278,26 @@ impl Walker<'_> {
 		}
 	}
 
+	/// A whole dependent parameter denotes a collection element even after
+	/// its ordinary runtime item type is erased.
+	pub(super) fn declared_reference_parameter(
+		&self,
+		path: crate::ids::PathId,
+	) -> Option<SymbolId> {
+		let (data, steps) = self.s.types.path_data(path);
+		if !steps.is_empty() {
+			return None;
+		}
+		let crate::types::PathRoot::Param(index) = data.root else {
+			return None;
+		};
+		self.reference_parameters.keys().copied().find(|&symbol| {
+			let data = self.a.symbols.symbol(symbol);
+			data.scope == self.body.scope
+				&& matches!(data.kind, SymbolKind::Parameter { index: position } if position == index)
+		})
+	}
+
 	/// The signature explicitly relates a dependent element and its owner.
 	/// Other pairs of element arguments still need the ordinary disjointness proof.
 	pub(super) fn declared_reference_overlap(
@@ -278,16 +306,32 @@ impl Walker<'_> {
 		from: Option<NodeId>,
 		other: NodeId,
 	) -> bool {
+		self.dependent_reference_pairs(n)
+			.iter()
+			.any(|&(dependent, owner)| {
+				from == Some(dependent) && other == owner
+					|| from == Some(owner) && other == dependent
+			})
+	}
+
+	pub(super) fn declared_reference_owner(&mut self, n: NodeId, argument: NodeId) -> bool {
+		self.dependent_reference_pairs(n)
+			.iter()
+			.any(|&(_, owner)| owner == argument)
+	}
+
+	fn dependent_reference_pairs(&mut self, n: NodeId) -> Vec<(NodeId, NodeId)> {
 		let View::Call { callee, .. } = self.view(n) else {
-			return false;
+			return Vec::new();
 		};
 		let TypeKind::Function(sig) = self.s.types.kind(self.type_of(callee)) else {
-			return false;
+			return Vec::new();
 		};
 		let sig = self.s.types.sig(sig);
 		let Some(call) = self.a.calls.get(&n).cloned() else {
-			return false;
+			return Vec::new();
 		};
+		let mut pairs = Vec::new();
 		let params = self.s.types.params(sig.params).to_vec();
 		let skip = call.arguments.len().saturating_sub(params.len());
 		for (param, arg) in params.iter().zip(call.arguments.iter().skip(skip)) {
@@ -302,13 +346,9 @@ impl Walker<'_> {
 			else {
 				continue;
 			};
-			if from == Some(*dependent) && other == owner
-				|| from == Some(owner) && other == *dependent
-			{
-				return true;
-			}
+			pairs.push((*dependent, owner));
 		}
-		false
+		pairs
 	}
 
 	pub(super) fn record_reference_result(
@@ -353,26 +393,49 @@ impl Walker<'_> {
 
 	/// Reference parameters keep independent roots for their declared effects,
 	/// but their validity and returned owner use the declared collection path.
-	fn canonical_reference_place(&mut self, place: PlaceId) -> PlaceId {
-		let Some(symbol) = self.place_symbol(place) else {
-			return place;
+	pub(super) fn canonical_reference_place(&mut self, place: PlaceId) -> PlaceId {
+		let mut place = if let Some(owner) = self
+			.place_symbol(place)
+			.and_then(|symbol| self.reference_parameters.get(&symbol).copied())
+		{
+			let mut owner = owner;
+			for step in self.place_steps(place) {
+				owner = self.places.child(owner, step);
+			}
+			owner
+		} else {
+			place
 		};
-		let Some(mut owner) = self.reference_parameters.get(&symbol).copied() else {
-			return place;
-		};
-		for step in self.place_steps(place) {
-			owner = self.places.child(owner, step);
+		let mut current = place;
+		let mut suffix = Vec::new();
+		while let Some(parent) = self.places.get(current).parent {
+			let step = self.places.get(current).step.expect("child step");
+			if matches!(step, Step::Index(_) | Step::All)
+				&& self.relation_pool_places.contains(&parent)
+			{
+				if let Some((target, _)) = self.reference_field_collection(parent) {
+					place = self.places.child(target, step);
+					for step in suffix.into_iter().rev() {
+						place = self.places.child(place, step);
+					}
+					break;
+				}
+			}
+			suffix.push(step);
+			current = parent;
 		}
-		owner
+		place
 	}
 
 	/// The place a `use` designates: a place expression (through `try`).
-	fn reference_place(&mut self, value: NodeId) -> Option<PlaceId> {
+	pub(super) fn reference_place(&mut self, value: NodeId) -> Option<PlaceId> {
 		let value = self.strip_groups(value);
 		let tree = Arc::clone(&self.tree);
 		match syntax::view(&tree, value) {
 			View::Try(inner) => self.reference_place(inner),
-			View::Name(_) | View::Access { .. } | View::Index { .. } => self.place_of(value),
+			View::Name(_) | View::Access { .. } | View::Index { .. } => self
+				.place_of(value)
+				.map(|place| self.reference_field_target(place)),
 			View::Call { callee, arguments } => self
 				.reference_results
 				.get(&value)

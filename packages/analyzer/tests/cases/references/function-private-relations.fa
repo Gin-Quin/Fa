@@ -1,0 +1,61 @@
+-- prints: second
+-- prints: third
+-- prints: first
+-- the LinkedList of the relations page, verbatim, then:
+type LinkedList<Data> = {
+	-- every node lives here (private field)
+	#nodes: Pool<Node> = []
+
+	type Node = {
+		data: Data
+
+		-- one-to-one: a node is the `next` of at most one node
+		next: (Node in #nodes)?
+		previous: (#nodes->next)?
+	}
+
+	-- owner fields: the ends of the list
+	firstChild: (Node in #nodes)?
+	lastChild: (Node in #nodes)?
+
+	-- append a node: adding to a pool never moves the other nodes
+	function add = (self, data: Data): Node in self.#nodes mutates self.#nodes.size, self.#nodes[..].next, self.firstChild, self.lastChild => {
+		use newNode = self.#nodes.add(Node { data = data })
+		use last = self.lastChild -- the last node, not the field: see below
+
+		if last is not none {
+			last.next = newNode -- `newNode.previous` becomes `last`
+		} else {
+			self.firstChild = newNode
+		}
+
+		self.lastChild = newNode
+		newNode
+	}
+
+	-- unlink and destroy a node
+	function remove = (self, node: Node in self.#nodes) mutates self.#nodes[..].next, self.firstChild, self.lastChild invalidates node => {
+		use previous = node.previous
+		use next = node.next
+
+		if previous is not none {
+			previous.next = next -- one-to-one: `node.next` becomes `none`, `next.previous` becomes `previous`
+		} else {
+			self.firstChild = next
+		}
+
+		if next is none {
+			self.lastChild = previous
+		}
+
+		self.#nodes.delete(node) -- cleans up the links that remain
+	}
+}
+mutable list: LinkedList<String> = {}
+use first = list.add("first")
+use second = list.add("second")
+list.add("third")
+console.log(first.next?.data ?? "") -- prints: second
+list.remove(second)
+console.log(first.next?.data ?? "") -- prints: third
+console.log(first.next?.previous?.data ?? "") -- prints: first

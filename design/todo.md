@@ -83,7 +83,7 @@ One item per ordered slice of [the WIP assessment §3.4](reviews/ownership-wip-2
 
 One entry per work package of [the dated inventory §4](reviews/inventory-2026-11-15.md#4-proposed-work-packages-native-first-then-js), with completed portions removed. Cross-references to semantics above describe the same work, not a second assignment.
 
-- **WP1 — Native expected-skips to zero.** Returned primitive references/use/reuse, anonymous-union fields and method values, Enum/Optional conversions, rest patterns, range writes/equality, optional-array get, checkedPow/float constants and Fa type names. Also close the new deep-recursion runtime entries: js-million-copy on all LLVM targets and js-deep-values on wasm; audit unbounded copy/equality/format helpers. Sets/string slices follow O17–18/WP9. See native/wasm ratchet files.
+- **WP1 — Native expected-skips to zero.** Primitive use/reuse of remaining built-in reference producers, anonymous-union fields and method values, Enum/Optional conversions, rest patterns, range writes/equality, optional-array get, checkedPow/float constants and Fa type names. Also close the new deep-recursion runtime entries: js-million-copy on all LLVM targets and js-deep-values on wasm; audit unbounded copy/equality/format helpers. Sets/string slices follow O17–18/WP9. See native/wasm ratchet files.
 - **WP2 — Native compile-time values.** Lower Schema named members, @readDirectory and per-item @for; remove the five genuine native/wasm compile-time skips only when their fixtures pass. TypeFromSchema inside a generic type needs its own cross-target cases.
 - **WP3 — Native/wasm leftovers.** Non-scalar while-let, relation assignment, async lambdas/function-value awaits, wasm async-function-values, O0 large-parameter limits and a wasm shadow-stack overflow trap (verify stack-first). The large-payload fixture has 8,196 parameters, above Node's O0 limit; floats_and_strings is already fixed.
 - **WP4 — Native run/test residuals.** ORC, fork isolation and O0 tests are integrated. Native/wasm tests still need build.link/libraryPaths and per-unit package coverage. Confirm whether native run should keep O3; C-library runs and develop currently retain linked execution (possible dlopen/JIT follow-ups). See the JIT decision and WP13.
@@ -93,7 +93,7 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 - **WP8 — Analyzer pending batch B.** Types/advanced M2/M3, references/relations, callable/type assignability, configuration/dependencies and the remaining diagnostic registry codes. Split by rule; require zero unaccounted pending cases/codes and enforce the registry contract. Deferred key-loop thrown/copy summaries and caller refresh are O33.
 - **WP9 — Strings/Bytes.** The implementation scope and cross-target acceptance are in section 2; no redesign code has landed.
 - **WP10 — Generics.** The remaining GN030, messages, async ordering, formatter and recovery work is in section 2. The merge settled tuple-ending block lambdas as WFN001 and E-DECL-6 already emits once; neither is a missing feature.
-- **WP11 — JavaScript completeness.** Gaps branch is integrated: guards, deep values, detached snapshots, worker cancellation, enum equality, console spreads, tuple pools and async declarations have regressions. Remaining refusal families: mixed/composite pools, user-returned primitive references, first-class builtins, recursive JSON parse schemas and missing erased generic/key-set metadata. Resource destruction belongs to ownership; generic pointers and CStruct-by-value ABI remain separate gaps. See the exhaustive js-gaps report.
+- **WP11 — JavaScript completeness.** Gaps branch is integrated: guards, deep values, detached snapshots, worker cancellation, enum equality, console spreads, tuple pools and async declarations have regressions. Remaining refusal families: mixed/composite pools, first-class builtins, recursive JSON parse schemas and missing erased generic/key-set metadata. Resource destruction belongs to ownership; generic pointers and CStruct-by-value ABI remain separate gaps. See the exhaustive js-gaps report.
 - **WP12 — Node/web residuals.** Harness and web exclusions are integrated. Close the six remaining target entries listed below; preserve sandbox global/worker/clone restrictions and exact ratchets.
 - **WP13 — CLI/project shapes.** Complete per-test include/timeout, decide LCOV coverage versus documentation, standalone-file test discovery and native/wasm workspace package-name resolution. Exercise the full command/shape matrix and dependencies described in section 5.
 - **WP14 — Interpreter coverage.** Patterns/rest, when/then, conversions, members/receivers, effect/type values, assignments, imported statics and compile-time parameters, one focused construct per slice. The continuation stack is already integrated; preserve exact step/heap/depth accounting and check the ulimit regression before reopening it.
@@ -112,6 +112,16 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 - **Review's pre-existing O0 freestanding link bug.** Per-unit packages reference `_exit` from the hosted fault handler. Add the missing O0 + multi-file fixture and guard hosted runtime code for freestanding; do not hide it with a skip. Also cover another unit's function used directly as a value/composition, currently unsupported.
 - **Timing-dependent wasm fixture.** `tasks-awaited-starter.fa` passed the first and third full LLVM runs and an isolated rerun, but failed the second full run under load: the 5 ms sleep expired before the detached task resumed after yield. Replace wall-clock ordering assumptions with explicit completion synchronization while retaining the observable starter-order assertions; no skip or weakened expectation.
 
+## Contained links (adopted, 2026-11-16)
+
+Owner-path function references and nested-reference-field rejection are implemented.
+Next slices follow [Pool links](pool-links.md): InlineArray separately; link binding,
+containment diagnostics and effects; dense paged native storage and Index limits;
+JavaScript direct-object links; whole-owner copy/move relinking; interpreter,
+reflection/JSON/worker boundaries. Acceptance programs are
+`references/links-acceptance-{model,tree,scene}.fa` in the analyzer cases. Integrate
+`collections/inline-arrays.md` from its assigned branch before the website build.
+
 ## 4. Performance
 
 - **Faithful Goose ports (2026-11-16).** The [sixteen-port audit](../benchmarks/audit/ports/README.md)
@@ -119,13 +129,12 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
   GrowingArray with documented index marks; the reserved Array is `push-array`.
   Next: unreserved sum/particles/blur (UInt16 stencil temporary), direct-output
   respond with retained variants. Before scene/interp/sexp/calc/tree/binary-trees/
-  graph pool ports, decide compact one-way growing-pool links and bounded inline
-  ordered child references; preserve recursive variants and change Rust pairings
-  together. Decide exact words/lru slot algorithms versus standard Map comparisons;
+  graph pool ports, implement the adopted compact one-way growing-pool links
+  ([decision](pool-links.md)) and bounded inline ordered child references; preserve
+  recursive variants and change Rust pairings together. Decide exact words/lru slot algorithms versus standard Map comparisons;
   words needs Int32 counts and a borrowed-key ownership policy. Sexp needs reverse
-  sibling order and its parser error path. The current scene-children probe is
-  wrongly accepted and stores values instead of rejecting Array reference fields;
-  add the missing rejection (`benchmarks/audit/ports/scene-children/main.fa`).
+  sibling order and its parser error path. The scene-children probe now correctly rejects unsupported Array reference
+  fields as REF010; convert it to explicit links once their storage is implemented.
 - **GrowingArray push and scan (faithful push port).** At 3.2 M items, the scalar
   segment scan executes 25.60 M instructions versus 12.00 M for Goose's vectorized
   scan and the reserved Array control; use a plain inner loop over each segment

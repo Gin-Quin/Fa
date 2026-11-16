@@ -147,10 +147,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let Argument::Given(argument) = argument else {
 						return Err(self.unsupported(node.index(), "these arguments"));
 					};
-					if (changed.contains(&position)
-						|| matches!(self.types().kind(ty), fa_analyzer::types::TypeKind::Function(sig) if self.types().params(self.types().sig(sig).params).get(position).is_some_and(|param| param.reference.is_some())))
-						&& self.is_place(*argument)
-					{
+					if self.explicit_reference_parameter(ty, position) {
+						let address = self.borrowed_result(*argument)?;
+						let (params, _, _) = self.value_signature(ty, node)?;
+						let repr = params[position];
+						arguments.push(Val::new(repr, self.zero_value(repr)));
+						places.push(Some(
+							address
+								.value
+								.expect("a reference address")
+								.into_pointer_value(),
+						));
+						continue;
+					}
+					if (changed.contains(&position)) && self.is_place(*argument) {
 						let place = self.place(*argument)?;
 						if self.signature_borrows(ty, position, place.repr) {
 							arguments.push(Val::new(place.repr, self.zero_value(place.repr)));
@@ -321,6 +331,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			receiver_value = Some(lowered);
 		}
 		for (position, value) in given {
+			if self.explicit_reference_parameter(function.info.ty, position) {
+				let address = self.borrowed_result(value)?;
+				places.insert(
+					position,
+					address
+						.value
+						.expect("a reference address")
+						.into_pointer_value(),
+				);
+				continue;
+			}
 			if by_pointer.get(position) == Some(&true) {
 				let repr = self.concrete_param_repr(&function, params[position].0, Some(value))?;
 				let (pointer, write_back) =

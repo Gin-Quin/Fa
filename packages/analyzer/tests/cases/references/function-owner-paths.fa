@@ -1,4 +1,5 @@
 -- prints: 7
+-- prints: 7
 -- prints: 15
 -- prints: 9
 -- prints: 11
@@ -9,6 +10,7 @@ type Model = {
 	nodes: GrowingPool<Node> = []
 	type Node = { value: Integer }
 	function add = (self, value: Integer): Node in self.nodes mutates self.nodes.size => self.nodes.add({ value = value })
+	function head = (self): (Node in self.nodes)? => self.nodes.find((_node) => true)
 	function set = (self, node: Node in self.nodes, value: Integer) mutates node.value => { node.value = value }
 }
 function exercise = () => {
@@ -16,6 +18,10 @@ function exercise = () => {
 	use node = model.add(3)
 	model.set(node, 7)
 	console.log(node.value)
+	type Reader = (model: Model) => (Model.Node in model.nodes)?
+	let read: Reader = Model.head
+	use head = read(model)
+	console.log(head?.value ?? 0)
 	let make = Model.add
 	use bound = make(model, 15)
 	console.log(bound.value)

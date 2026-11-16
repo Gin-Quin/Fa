@@ -811,7 +811,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						(
 							declaration.index() as u32,
 							index as u32,
-							self.global_methods(&[method.clone()])[0].clone(),
+							self.global_methods(std::slice::from_ref(method))[0].clone(),
 						)
 					})
 					.collect();

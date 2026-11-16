@@ -458,6 +458,9 @@ impl Generator<'_> {
 				let name = self.name_of(function);
 				Expr::name(name, true)
 			}
+			Resolution::External(_) => self
+				.external_value(member)
+				.unwrap_or_else(|| self.unsupported(member, "this imported function of a type")),
 			Resolution::Builtin(builtin) if builtins::get(builtin).path == "Enum.members" => {
 				let denoted = match self.analysis.resolution(target) {
 					Resolution::Local(symbol) => self.analysis.symbols.symbol(symbol).ty,

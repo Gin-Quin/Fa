@@ -364,6 +364,8 @@ do {
 
 ## Closures
 
+A closure never consumes its captures. A nonescaping closure borrows them; an escaping closure may own immutable snapshots, but its body still cannot move them out because it can be called again. Awaiting or otherwise consuming a captured Task is `MEM002`: pass it from its owning scope as a consuming parameter, such as `finish(task)`. Storing captured structure data needs `copy` (`MEM004`); move or create a unique resource in its owning scope instead. Structure and resource parameters still borrow: adding a parameter alone does not permit moving them. Only Task-owning parameters currently transfer ownership.
+
 A nonescaping closure borrows its captures. An escaping closure owns immutable captures, using the same storage rules: ordinary values copy, a structure can move at its last use, and otherwise needs an explicit independent value before capture. An escaping closure cannot own any unique value, even at its last use; there is no one-shot closure exception (`MEM003`). A `mutable use` cannot be captured. Module-level values and requirements retain their separate rules in [closures](/functions/defining-functions#closures).
 
 ```fa

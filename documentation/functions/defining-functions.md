@@ -387,6 +387,8 @@ An anonymous function, or a function declared inside a block, can use the values
 
 A closure that **doesn't escape** uses the values themselves, like in JavaScript: it sees their current value, and can modify a captured `mutable` value.
 
+A closure never consumes a capture, including a nonescaping capture. A captured Task cannot be awaited or moved (`MEM002`); pass it explicitly as a Task-owning parameter from its owning scope. A captured structure can be read or explicitly copied, but cannot move out (`MEM004`). Structure and resource parameters remain borrows; `copy` is the fix for storing structure data, while a unique resource must move or be created in its owning scope.
+
 ```fa
 function main = () => {
 	mutable greeting = "Hello"

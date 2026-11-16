@@ -1357,8 +1357,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// caller's places). The same for direct and indirect calls.
 	pub(crate) fn borrows_parameter(&self, repr: Repr) -> bool {
 		// a move-only value moves into its function: by value
-		let moved =
-			matches!(repr, Repr::Object(ty) | Repr::Tuple(ty) if self.types().owns_unique(ty));
+		let moved = matches!(repr, Repr::Object(ty) | Repr::Tuple(ty) if self.types().parameter_can_be_consumed(self.concrete_type(ty)));
 		!self.tasks.asynchronous
 			&& !moved && !matches!(repr, Repr::Function(_))
 			&& self.llvm_type(repr).is_struct_type()

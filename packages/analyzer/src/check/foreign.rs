@@ -899,19 +899,12 @@ impl Walker<'_> {
 		true
 	}
 
-	/// Whether values of a type can't be copied, only moved: a task, a
-	/// worker's handle, a resource, and every type holding one
-	/// (`TypeStore::is_move_only`).
-	pub(crate) fn is_moved_handle(&self, ty: crate::ids::TypeId) -> bool {
-		self.s.types.is_move_only(ty)
-	}
-
 	/// The move-only values a call moves into its callee (its arguments: the
 	/// callee owns them), a literal into its fields, a closure into its
 	/// environment.
 	pub(crate) fn move_handles(&mut self, values: &[NodeId]) {
 		for &value in values {
-			self.consume_local(value, true);
+			self.consume_local(value);
 		}
 	}
 
@@ -920,7 +913,7 @@ impl Walker<'_> {
 	pub(crate) fn note_resource_move(&mut self, value: NodeId) {
 		// a worker's handle is shared by a copy (a `start` of its method):
 		// it moves where `move_handles` says
-		self.consume_local(value, false);
+		self.consume_local(value);
 	}
 
 	/// Consumes what `value` reads when its type is move-only: a local or a
@@ -928,17 +921,10 @@ impl Walker<'_> {
 	/// can't be used whole until the field is assigned again). A value not
 	/// owned here (a `use`, a loop variable, `self`) can't give a field up:
 	/// `MEM002`, saying to move the whole value.
-	fn consume_local(&mut self, value: NodeId, handles: bool) {
+	fn consume_local(&mut self, value: NodeId) {
 		let value = self.strip_groups(value);
 		let ty = self.a.type_of(value);
-		if !self.body.flow.reachable || !self.s.types.is_move_only(ty) {
-			return;
-		}
-		if !handles
-			&& matches!(
-				self.s.types.kind(ty),
-				crate::types::TypeKind::Sync(crate::types::SyncKind::Worker, _)
-			) {
+		if !self.body.flow.reachable || !self.s.types.is_unique(ty) {
 			return;
 		}
 		let tree = std::sync::Arc::clone(&self.tree);
@@ -963,13 +949,13 @@ impl Walker<'_> {
 		let Resolution::Local(symbol) = self.a.resolution(root) else {
 			return;
 		};
-		let kind = self.a.symbols.symbol(symbol).kind;
-		let owned = matches!(
-			kind,
-			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Parameter { .. }
-		);
+		let owned = self.ownership_source_owned(symbol, value);
+		if root == value && !owned {
+			self.report_borrowed_move(value, symbol);
+			return;
+		}
 		// the backends make the place give the value up (`moved_reads`)
-		if owned && self.s.types.owns_unique(ty) {
+		if owned && self.s.types.is_unique(ty) {
 			self.a.moved_reads.insert(value);
 		}
 		if root == value {
@@ -1005,14 +991,7 @@ impl Walker<'_> {
 			}
 		}
 		if !owned {
-			let text = tree.text(value.index()).to_string();
-			let name = tree.text(root.index()).to_string();
-			let message = format!(
-				"`{text}` can't be moved out: `{name}` isn't owned here (a reference, a loop variable or `self`); move the whole value instead"
-			);
-			let diagnostic =
-				self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value, message);
-			self.report_flow(diagnostic);
+			self.report_borrowed_move(value, symbol);
 			return;
 		}
 		if let Some(place) = self.place_of(value)
@@ -1025,6 +1004,30 @@ impl Walker<'_> {
 		{
 			self.body.flow.moved_fields.push((place, value));
 		}
+	}
+
+	/// A borrow never transfers ownership, whether it came from a
+	/// parameter, a reference, or a closure's enclosing scope.
+	pub(crate) fn report_borrowed_move(&mut self, value: NodeId, symbol: SymbolId) {
+		let data = self.a.symbols.symbol(symbol);
+		let name = self.s.types.syms.resolve(data.name).to_string();
+		let captured = self.ownership_body(data.decl_node) != self.ownership_body(value);
+		let message = if captured && self.s.types.parameter_can_be_consumed(data.ty) {
+			format!(
+				"`{name}` is borrowed from its enclosing scope: a closure never consumes its captures; pass it from the owning scope as a consuming parameter, e.g. `finish({name})`"
+			)
+		} else if captured {
+			format!(
+				"`{name}` is borrowed from its enclosing scope: a closure never consumes its captures; move or create the unique value in its owning scope instead"
+			)
+		} else {
+			format!(
+				"`{name}` is borrowed here and cannot be moved; move or create the unique value in its owning scope instead"
+			)
+		};
+		let diagnostic =
+			self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value, message);
+		self.report_flow(diagnostic);
 	}
 
 	/// A move-only value read out of an item of a collection (`items[0]`,

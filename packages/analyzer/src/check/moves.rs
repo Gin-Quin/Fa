@@ -15,7 +15,11 @@ use crate::analysis::NodeFlags;
 use crate::check::Walker;
 use crate::ids::{NodeId, SymbolId, TypeId};
 use crate::symbols::SymbolKind;
+use crate::syntax::View;
 use crate::types::TypeKind;
+
+mod concrete;
+mod graph;
 
 /// The last use of a local seen so far.
 #[derive(Copy, Clone, Debug)]
@@ -27,6 +31,13 @@ pub(crate) struct LastUse {
 }
 
 impl Walker<'_> {
+	fn record_move_read(&mut self, node: NodeId, symbol: SymbolId) {
+		let reads = self.move_reads.entry(node).or_default();
+		if !reads.contains(&symbol) {
+			reads.push(symbol);
+		}
+	}
+
 	/// Records the loop and function depth of a local's declaration.
 	pub(crate) fn note_declaration(&mut self, symbol: SymbolId) {
 		let depth = (
@@ -40,6 +51,9 @@ impl Walker<'_> {
 	/// Records a use of a local (a read or a write of its name, or through
 	/// an alias of a place below it).
 	pub(crate) fn note_use(&mut self, n: NodeId, symbol: SymbolId) {
+		if n.0 != u32::MAX {
+			self.record_move_read(n, symbol);
+		}
 		let Some(&(loops, functions)) = self.declaration_depths.get(&symbol) else {
 			return;
 		};
@@ -54,7 +68,38 @@ impl Walker<'_> {
 		let value = self.strip_groups(value);
 		// a resource (a type with `destroy`) is moved (foreign.rs)
 		self.note_resource_move(value);
-		self.copy_sites.insert(value);
+		self.record_copy_sources(value);
+	}
+
+	/// A conditional stores only its selected value; a block stores its
+	/// final expression. Record those actual reads, not the branch syntax.
+	fn record_copy_sources(&mut self, node: NodeId) {
+		let mut pending = vec![node];
+		while let Some(node) = pending.pop() {
+			let node = self.strip_groups(node);
+			match self.view(node) {
+				View::Do(inner) | View::Try(inner) => pending.push(inner),
+				View::If {
+					then_body,
+					else_body,
+					..
+				} => {
+					pending.push(then_body);
+					pending.extend(else_body);
+				}
+				View::When { arms, .. } => pending.extend(arms.iter().map(|arm| arm.value)),
+				View::Catch {
+					expression,
+					handler,
+					..
+				} => pending.extend([expression, handler]),
+				View::Fallback { operands } => pending.extend(operands.iter()),
+				View::Block { statements } => pending.extend(statements.last()),
+				_ => {
+					self.copy_sites.insert(node);
+				}
+			}
+		}
 	}
 
 	/// The use of a name node: a local itself, or the place an alias designates.
@@ -62,6 +107,13 @@ impl Walker<'_> {
 		let kind = self.a.symbols.symbol(symbol).kind;
 		match kind {
 			SymbolKind::Let | SymbolKind::Mutable => self.note_use(n, symbol),
+			SymbolKind::Parameter { .. }
+			| SymbolKind::SelfParameter
+			| SymbolKind::CatchBinding
+			| SymbolKind::PatternBinding
+			| SymbolKind::Reactive
+			| SymbolKind::Derived
+			| SymbolKind::Requirement { .. } => self.record_move_read(n, symbol),
 			SymbolKind::Use | SymbolKind::MutableUse | SymbolKind::LoopVariable { copy: false } => {
 				// every place it may designate here (a `reuse` on one branch only)
 				let mut places: Vec<crate::ids::PlaceId> = self
@@ -76,6 +128,7 @@ impl Walker<'_> {
 						&& root != symbol
 					{
 						// a read through the alias is not a copy of the root
+						self.record_move_read(n, root);
 						self.note_use(NodeId(u32::MAX), root);
 					}
 				}
@@ -88,6 +141,7 @@ impl Walker<'_> {
 					// used as a value: it may run at any later point
 					let value = self.callee_name_node != Some(n);
 					for capture in info.captures.clone() {
+						self.record_move_read(n, capture);
 						self.note_use(NodeId(u32::MAX), capture);
 						if value {
 							self.pinned_captures.insert(capture);
@@ -101,6 +155,7 @@ impl Walker<'_> {
 
 	/// At the end of the walk: the `MOVE` flag on each last use that is a copy.
 	pub(crate) fn finish_moves(&mut self) {
+		self.finish_concrete_moves();
 		let uses: Vec<(SymbolId, LastUse)> = self
 			.last_uses
 			.iter()
@@ -115,7 +170,7 @@ impl Walker<'_> {
 				continue;
 			}
 			let ty = self.a.symbols.symbol(symbol).ty;
-			if self.owns_memory(ty) {
+			if self.s.types.is_ordinary(ty) && self.owns_memory(ty) {
 				self.set_flag(last.node, NodeFlags::MOVE);
 			}
 		}

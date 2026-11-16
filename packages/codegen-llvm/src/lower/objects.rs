@@ -1774,7 +1774,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				// a move-only field (a task, a resource) moves out of a
 				// temporary object: its other fields are dropped now, the
 				// field is a temporary itself
-				if self.types().owns_unique(field_type)
+				if self.types().is_unique(field_type)
 					&& self.destroy_function(object).is_none()
 					&& self.is_temporary(value)
 				{

@@ -373,7 +373,11 @@ impl Walker<'_> {
 		});
 		if self.s.types.satisfies(ty, TypeId::ERROR) && ty != TypeId::NEVER {
 			let errors = self.s.types.widen(ty);
-			self.propagate(n, errors, &E_ERR_2, "this throws");
+			if self.inside_catch() {
+				self.can_fail(n, errors);
+			} else {
+				self.propagate(n, errors, &E_ERR_2, "this throws");
+			}
 		}
 		self.body.flow.set_unreachable();
 		TypeId::NEVER

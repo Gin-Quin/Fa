@@ -1801,7 +1801,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		operand: NodeId,
 	) -> Result<(PointerValue<'ctx>, bool), Error> {
 		let frame = value.value.expect("a task").into_pointer_value();
-		self.give_task(value, operand)?;
+		self.give_owned(value, operand)?;
 		Ok((frame, true))
 	}
 
@@ -1810,7 +1810,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// a field, an item) gives it up (null, which its drop skips). For an
 	/// `await`, an argument (the callee owns its task parameters), a
 	/// returned or stored value.
-	pub(crate) fn give_task(
+	pub(crate) fn give_owned(
 		&mut self,
 		value: Val<'ctx>,
 		operand: NodeId,
@@ -1820,7 +1820,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			inner = group;
 		}
 		// a task, a resource, a type holding one (`TypeStore::owns_unique`)
-		if !self.types().owns_unique(self.type_of(inner)) {
+		if !matches!(
+			self.types()
+				.ownership(self.concrete_type(self.type_of(inner))),
+			fa_analyzer::types::Ownership::Unique | fa_analyzer::types::Ownership::Structure
+		) {
 			return Ok(value);
 		}
 		if !self.is_temporary(value)

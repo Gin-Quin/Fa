@@ -1414,3 +1414,10 @@ Point 1 introduces TypeStore::ownership as the canonical category contract: Ordi
 The existing is_move_only/owns_unique methods are legacy flow/ABI selectors, not competing definitions of these categories; their consumers migrate when point 2 activates the concrete store and borrow rules. No backend lifetime change is enabled by the category-only checkpoint.
 
 **Error payload data (decided by the lead, 2026-11-16).** An Errors payload cannot own a Task, destroy resource, built-in lifetime owner or a composite owning one. MEM005 reports it at the payload declaration and asks for an identifier or description of the resource instead. Shared synchronization handles are allowed. The open Error type is conservatively a structure, never unique: a last use moves, copy is allowed, and keeping both requires an explicit copy (MEM004). A concrete member uses its payload category. Generic payload conditions that still depend on a type parameter must be checked at instantiation along with the remaining generic ownership conditions; this does not permit unique payloads.
+
+
+### Ownership enforcement: capture borrows (decided by the lead, 2026-11-16)
+
+A closure never consumes its captures. Nonescaping captures borrow; an escaping closure's immutable snapshots cannot be moved out by a body that may run again. Consuming a captured Task is MEM002, with the captured name and the explicit parameter spelling (`finish(task)`) in the diagnostic. A stored captured structure needs `copy` (MEM004); a unique resource moves or is created in its owning scope. Only Task-owning parameters currently transfer; structure/resource parameters remain borrows. Passing a structure/resource as a parameter does not itself authorize moving it.
+
+Point 2 preserves the unique field moves already supported by the analyzer and targets; its temporary MEM004 refusal applies only to newly enabled structure field moves, until point 4 supplies their drop/transfer support. The enforcement report lists the supported field paths precisely.

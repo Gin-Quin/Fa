@@ -640,6 +640,9 @@ pub struct Analysis {
 	pub method_instantiations: FxHashMap<NodeId, WrittenType>,
 	/// Every call node: its callee and its arguments in parameter order.
 	pub calls: FxHashMap<NodeId, CallInfo>,
+	/// Concrete argument contracts: true transfers ownership, false borrows.
+	/// An absent generic-dependent contract is resolved by its instantiation.
+	pub argument_ownership: FxHashMap<NodeId, bool>,
 	/// Throwing callbacks given to a non-storing user function: each given
 	/// argument node and the function parameter's type widened with its
 	/// callback errors. Native instances use precisely these signatures.
@@ -1571,6 +1574,7 @@ impl Analysis {
 			function_owners: FxHashMap::default(),
 			method_instantiations: FxHashMap::default(),
 			calls: FxHashMap::default(),
+			argument_ownership: FxHashMap::default(),
 			callback_types: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),

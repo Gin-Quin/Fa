@@ -159,7 +159,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						return Ok(value);
 					}
 					// a task moves into the callee, which owns it
-					let value = self.give_task(value, *argument)?;
+					let value = if self
+						.analysis
+						.argument_ownership
+						.get(argument)
+						.copied()
+						.unwrap_or_else(|| {
+							self.types().parameter_can_be_consumed(
+								self.concrete_type(self.type_of(*argument)),
+							)
+						}) {
+						self.give_owned(value, *argument)?
+					} else {
+						value
+					};
 					arguments.push(value);
 					places.push(None);
 				}
@@ -360,7 +373,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Argument::Given(argument) => {
 					let lowered = evaluated[&position];
 					// a task moves into the callee, which owns it
-					let lowered = self.give_task(lowered, *argument)?;
+					let lowered = if self
+						.analysis
+						.argument_ownership
+						.get(argument)
+						.copied()
+						.unwrap_or_else(|| {
+							self.types().parameter_can_be_consumed(
+								self.concrete_type(self.type_of(*argument)),
+							)
+						}) {
+						self.give_owned(lowered, *argument)?
+					} else {
+						lowered
+					};
 					let lowered =
 						self.convert_argument(&function, lowered, repr, argument.index())?;
 					arguments.push(lowered.value.expect("an argument").into());

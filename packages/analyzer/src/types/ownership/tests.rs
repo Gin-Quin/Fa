@@ -477,3 +477,31 @@ fn implicit_type_parameters_defer_ownership() {
 	let array = types.array(implicit);
 	assert_eq!(types.ownership(array), Ownership::Dependent);
 }
+
+#[test]
+fn task_parameters_transfer_but_resources_and_other_lifetimes_borrow() {
+	let mut types = TypeStore::new();
+	let task = task(&mut types);
+	let owned = field(&mut types, "task", task);
+	let plain = types.object(&[owned], None);
+	assert!(types.takes_task_parameter(plain));
+	let nominal = nominal(&mut types, "Held", NominalKind::Resource, &[]);
+	let held = types.object(&[owned], Some(nominal));
+	assert!(types.is_unique(held) && types.contains_resource(held));
+	assert!(!types.takes_task_parameter(held));
+	let array = types.array(held);
+	assert!(!types.takes_task_parameter(array));
+	let optional = types.optional(task);
+	assert!(types.takes_task_parameter(optional));
+	for kind in [
+		SyncKind::Mutex,
+		SyncKind::Channel,
+		SyncKind::Guard,
+		SyncKind::Worker,
+		SyncKind::WorkerPool,
+	] {
+		let handle = types.intern(TypeKind::Sync(kind, task));
+		assert!(!types.takes_task_parameter(handle));
+		assert!(!types.contains_resource(handle));
+	}
+}

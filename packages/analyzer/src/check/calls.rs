@@ -380,6 +380,37 @@ impl Walker<'_> {
 			callback_errors.push(throws);
 			self.s.types.union(&callback_errors)
 		};
+		// Record the visible parameter contract after substitution. Self
+		// always borrows, including an unbound static method call.
+		if matches!(kind, Callee::Function(_) | Callee::Value) {
+			for (parameter, argument) in params.iter().zip(&binding.arguments) {
+				let self_ = parameter
+					.named
+					.is_some_and(|(name, _)| self.s.types.syms.resolve(name) == "self");
+				let target = substitute(self, parameter.sig.ty);
+				let category = self.s.types.ownership(target);
+				let mode = if self_ {
+					Some(false)
+				} else if matches!(
+					category,
+					crate::types::Ownership::Dependent | crate::types::Ownership::Unresolved
+				) {
+					None
+				} else {
+					Some(self.s.types.parameter_can_be_consumed(target))
+				};
+				if let Argument::Given(value) = argument {
+					match mode {
+						Some(mode) => {
+							self.a.argument_ownership.insert(*value, mode);
+						}
+						None => {
+							self.a.argument_ownership.remove(value);
+						}
+					}
+				}
+			}
+		}
 		self.can_fail(n, if comptime { TypeId::NEVER } else { throws });
 
 		let ty = self.memo(n, |w| {

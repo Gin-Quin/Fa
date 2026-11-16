@@ -1730,7 +1730,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// type (`TypeStore::owns_unique`).
 	pub(crate) fn is_moved_parameter(&self, symbol: SymbolId) -> bool {
 		let data = self.analysis.symbols.symbol(symbol);
-		matches!(data.kind, SymbolKind::Parameter { .. }) && self.types().owns_unique(data.ty)
+		matches!(data.kind, SymbolKind::Parameter { .. })
+			&& self
+				.types()
+				.parameter_can_be_consumed(self.concrete_type(data.ty))
 	}
 
 	/// Stops dropping a slot registered with `Cleanup::Local` (a value built

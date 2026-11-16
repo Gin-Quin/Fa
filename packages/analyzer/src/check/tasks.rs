@@ -439,12 +439,20 @@ impl Walker<'_> {
 				immediate_task: immediate,
 			},
 		);
+		let borrowed = self.read_local(operand).is_some_and(|symbol| {
+			if self.ownership_source_owned(symbol, operand) {
+				return false;
+			}
+			self.report_borrowed_move(operand, symbol);
+			true
+		});
 		// awaiting a field moves it out of its local (foreign.rs)
-		if local.is_none() {
+		if local.is_none() && !borrowed {
 			self.move_handles(&[operand]);
 		}
 		// awaiting consumes the task
 		if let Some(symbol) = local
+			&& !borrowed
 			&& self.body.flow.reachable
 			&& !self
 				.body
@@ -729,13 +737,33 @@ impl Walker<'_> {
 			let given: Vec<NodeId> = arguments
 				.iter()
 				.filter_map(|argument| match argument {
-					Argument::Given(value) if Some(self.strip_groups(*value)) != receiver => {
+					Argument::Given(value)
+						if Some(self.strip_groups(*value)) != receiver
+							&& self
+								.a
+								.argument_ownership
+								.get(value)
+								.copied()
+								.unwrap_or_else(|| {
+									self.s
+										.types
+										.parameter_can_be_consumed(self.a.type_of(*value))
+								}) =>
+					{
 						Some(*value)
 					}
 					_ => None,
 				})
 				.collect();
-			self.move_handles(&given);
+			for value in given {
+				if self.s.types.is_resource(self.a.type_of(value)) {
+					let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value,
+						"this resource cannot transfer a Task-owning projection: its destructor still needs every field; pass the complete resource to a borrowing parameter instead");
+					self.report_flow(diagnostic);
+				} else {
+					self.move_handles(&[value]);
+				}
+			}
 		}
 		// `pool.submit(task)`: the task is stored until a worker is free, so it
 		// escapes, and its captures are copies (concurrency.md)

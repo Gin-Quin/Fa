@@ -298,10 +298,10 @@ impl Generator<'_> {
 	/// Whether a local or a parameter owns a value holding a resource.
 	pub(crate) fn owns_resource(&self, symbol: SymbolId) -> bool {
 		let info = self.analysis.symbols.symbol(symbol);
-		matches!(
-			info.kind,
-			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Parameter { .. }
-		) && self.types.contains_resource(info.ty)
+		(matches!(info.kind, SymbolKind::Let | SymbolKind::Mutable)
+			|| (matches!(info.kind, SymbolKind::Parameter { .. })
+				&& self.types.parameter_can_be_consumed(info.ty)))
+			&& self.types.contains_resource(info.ty)
 	}
 
 	/// Whether a local moves out somewhere (as a whole): it needs a drop flag.

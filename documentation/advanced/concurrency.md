@@ -132,6 +132,29 @@ Whether a function can be called blocking on a target is part of its **interface
 
 ## Tasks
 
+A closure never consumes what it captures. Even a nonescaping closure cannot await or move a captured Task: pass that Task as an explicit parameter from its owning scope. Task-owning parameters transfer; structure and resource parameters still borrow.
+
+```fa
+async function work = (): Integer => 1
+async function outer = (): Integer => {
+	let task = start work()
+	async function finish = (): Integer => await task -- error: MEM002
+	await finish()
+}
+```
+
+Make the transfer visible at the call:
+
+```fa
+async function work = (): Integer => 1
+async function finish = (task: Task<Integer>): Integer => await task catch _error => -1
+async function outer = (): Integer => {
+	let task = start work()
+	await finish(task)
+}
+```
+
+
 `start` evaluates the written arguments and omitted parameter defaults when the task is created, in source order; only its body waits for the task's first turn. An error from a default is an error of the `start` expression, and already evaluated owned arguments are destroyed if creation fails. Cancelling before the first turn does not undo defaults that already ran.
 
 ```fa

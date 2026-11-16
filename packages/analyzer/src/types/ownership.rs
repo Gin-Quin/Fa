@@ -127,6 +127,37 @@ impl TypeStore {
 		})
 	}
 
+	/// A Task parameter transfers ownership, including a plain composite
+	/// owning one. Resource and synchronization boundaries keep borrowing.
+	pub fn takes_task_parameter(&self, ty: TypeId) -> bool {
+		self.owned_any(ty, |types, ty| matches!(types.kind(ty), TypeKind::Task(..)))
+	}
+
+	/// Whether the current parameter contract transfers this type. Keep
+	/// this policy separate from unique ownership: resources borrow, and a
+	/// future explicit consuming contract may also permit other types.
+	pub fn parameter_can_be_consumed(&self, ty: TypeId) -> bool {
+		self.takes_task_parameter(ty)
+	}
+
+	/// Visits owned data, stopping at every terminal ownership boundary.
+	pub(super) fn owned_any(&self, ty: TypeId, predicate: impl Fn(&Self, TypeId) -> bool) -> bool {
+		let mut graph = OwnedGraph::default();
+		graph.push(ty);
+		while let Some((ty, _)) = graph.pending.pop() {
+			if ty.is_unset() || !graph.visited.insert(ty) {
+				continue;
+			}
+			if predicate(self, ty) {
+				return true;
+			}
+			if self.ownership_leaf(ty).is_none() {
+				graph.children(self, ty);
+			}
+		}
+		false
+	}
+
 	pub fn is_structure(&self, ty: TypeId) -> bool {
 		self.ownership(ty) == Ownership::Structure
 	}

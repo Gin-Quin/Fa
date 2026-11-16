@@ -75,6 +75,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn needs_drop(&self, repr: Repr) -> bool {
 		match repr {
 			Repr::Str
+			| Repr::Bytes
 			| Repr::BigInt
 			| Repr::Array(_)
 			| Repr::Union
@@ -493,6 +494,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					"",
 				)?;
 			}
+			Repr::Bytes => {
+				builder.build_call(self.runtime.function("fa_bytes_free")?, &[value.into()], "")?;
+			}
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, NodeId::new(0))?;
 				let array = value.into_pointer_value();
@@ -796,6 +800,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				// `packed::packable_items` admits no copy
 				return Err(Error::Llvm("a copy of a packed array".into()));
 			}
+			Repr::Bytes => builder
+				.build_call(self.runtime.function("fa_bytes_copy")?, &[value.into()], "")?
+				.try_as_basic_value()
+				.basic()
+				.expect("Bytes copy"),
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, NodeId::new(0))?;
 				let array = value.into_pointer_value();
@@ -1372,12 +1381,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Takes a value to store it into an owner: moves a temporary or a local
 	/// read for the last time (`node`), copies anything else.
+	fn escape_owned_storage(&self, value: Val<'ctx>) -> Result<Val<'ctx>, Error> {
+		if value.repr == Repr::Bytes {
+			let owned = self.call_value(
+				self.runtime.function("fa_bytes_own")?,
+				&[value.value.expect("Bytes").into()],
+			)?;
+			Ok(Val::new(Repr::Bytes, owned))
+		} else {
+			self.escape_frame_string(value)
+		}
+	}
+
 	pub(crate) fn take(&self, value: Val<'ctx>, node: Option<NodeId>) -> Result<Val<'ctx>, Error> {
 		if value.value.is_none() || !self.needs_drop(value.repr) {
 			return Ok(value);
 		}
 		if self.unregister(value) {
-			return self.escape_frame_string(value);
+			return self.escape_owned_storage(value);
 		}
 		if let Some(node) = node
 			&& self.is_coalesced_return_read(node, value.repr)
@@ -1397,7 +1418,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder
 					.build_store(flag, self.context.bool_type().const_zero())?;
 			}
-			return self.escape_frame_string(value);
+			return self.escape_owned_storage(value);
 		}
 		self.emit_copy(value)
 	}

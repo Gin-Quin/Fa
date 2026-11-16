@@ -118,6 +118,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::F32 => TypeId::FLOAT32,
 			Repr::Percentage => TypeId::PERCENTAGE,
 			Repr::Str => TypeId::STRING,
+			Repr::Bytes => TypeId::BYTES,
 			Repr::Object(ty) => ty,
 			_ => return None,
 		})

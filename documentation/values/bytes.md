@@ -108,6 +108,7 @@ The shared slice proof requires an inclusive end to name an existing byte and ch
 ### Native
 
 - A `Bytes` has the layout of an `Array<Byte>` (see [arrays](/collections/arrays)), without spare capacity. A slice is a pointer and a length.
+- The native lowering keeps `Bytes` distinct from arrays, including in constants, optionals and unions. An owning value points to its block header; a borrowed value tags the address of a two-word descriptor (payload pointer and pointer-sized byte length) with its low bit. The descriptor is 16 bytes on 64-bit targets and 8 on wasm32. Borrowed calls preserve this tag; `use` and `reuse` snapshot the descriptor, while whole-place aliases retain the owner's place. Owning copies detach borrowed or read-only storage. Byte comparison and hashing always read raw bytes, even when they resemble a string's cut-surrogate edge form. Array traversal mechanics use a temporary stack header that borrows the same payload.
 - `Bytes.from(array)` and `toArray()` copy, or move the block when the source is not used afterwards.
 - `toUtf8()` and `String.fromUtf8` copy, or move the block of a heap string or of the `Bytes` when the source is not used afterwards. `String.fromUtf8` validates the bytes in one vectorized pass, which also computes the ASCII flag of the string. See [strings](/values/strings).
 - Reading text (`File.readText`) reads the bytes into the block that becomes the string, then validates it: there is no second copy and no transcoding.

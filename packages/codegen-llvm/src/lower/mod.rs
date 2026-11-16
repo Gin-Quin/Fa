@@ -24,6 +24,7 @@ mod appends;
 mod arith;
 mod arrays;
 mod big_integers;
+mod bytes;
 pub(crate) mod c_library;
 mod calls;
 mod capacity;
@@ -340,7 +341,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// place they designate, and its representation.
 	references: FxHashMap<SymbolId, (PointerValue<'ctx>, Repr)>,
 	/// Independent descriptor storage for copied String content designations.
-	string_view_slots: FxHashMap<SymbolId, Slot<'ctx>>,
+	content_view_slots: FxHashMap<SymbolId, Slot<'ctx>>,
 	/// The places of the `provide` statements lowered so far.
 	provided: FxHashMap<NodeId, Slot<'ctx>>,
 	/// The receiver of the method call being lowered when it is already
@@ -569,7 +570,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			pending_receiver: None,
 			provided: FxHashMap::default(),
 			references: FxHashMap::default(),
-			string_view_slots: FxHashMap::default(),
+			content_view_slots: FxHashMap::default(),
 			saved_cleanups: Vec::new(),
 			owned_locals: FxHashMap::default(),
 			drop_functions: std::cell::RefCell::new(FxHashMap::default()),
@@ -3262,6 +3263,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let value = self.expr(iterable)?;
 			return match value.repr {
 				Repr::Str => self.for_characters(node, pattern, has_index, value, body),
+				Repr::Bytes => {
+					let array = self.bytes_as_array(value)?;
+					self.for_items(node, pattern, has_index, iterable, array, body)
+				}
 				Repr::Array(_) | Repr::Growing(_) => {
 					let mut source = iterable;
 					while let View::Group(inner) = self.view(source) {

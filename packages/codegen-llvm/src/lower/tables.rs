@@ -831,6 +831,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let loaded = builder.build_load(self.llvm_type(target_repr), address, "")?;
 				call_hash(target_repr, loaded)?
 			}
+			Repr::Bytes => builder
+				.build_call(self.runtime.function("fa_bytes_hash")?, &[value.into()], "")?
+				.try_as_basic_value()
+				.basic()
+				.expect("Bytes hash")
+				.into_int_value(),
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, NodeId::new(0))?;
 				let header = self.header_type();

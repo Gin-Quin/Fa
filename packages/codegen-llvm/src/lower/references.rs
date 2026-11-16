@@ -34,43 +34,53 @@ pub(crate) enum WriteBack<'ctx> {
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
-	fn snapshot_string_designation(
+	fn snapshot_content_designation(
 		&mut self,
 		symbol: SymbolId,
 		place: Slot<'ctx>,
 	) -> Result<Slot<'ctx>, Error> {
-		if place.repr != Repr::Str {
+		if !matches!(place.repr, Repr::Str | Repr::Bytes) {
 			return Ok(place);
 		}
-		let snapshot = match self.string_view_slots.get(&symbol) {
+		let ty = if place.repr == Repr::Bytes {
+			self.bytes_reference_type()
+		} else {
+			self.string_type
+		};
+		let snapshot = match self.content_view_slots.get(&symbol) {
 			Some(&slot) => slot,
 			None => {
 				let slot = if self.shared.contains_key(&symbol) || self.frame().owner.is_none() {
-					let global = self
-						.module
-						.add_global(self.string_type, None, "fa.string_view");
-					global.set_initializer(&self.string_type.const_zero());
+					let global = self.module.add_global(ty, None, "fa.content_view");
+					global.set_initializer(&ty.const_zero());
 					global.set_linkage(inkwell::module::Linkage::Internal);
 					Slot {
 						pointer: global.as_pointer_value(),
-						repr: Repr::Str,
+						repr: place.repr,
 					}
 				} else {
-					self.alloca(Repr::Str, "string_view")?
+					Slot {
+						pointer: self.alloca_type(ty.into(), "content_view")?,
+						repr: place.repr,
+					}
 				};
-				self.string_view_slots.insert(symbol, slot);
+				self.content_view_slots.insert(symbol, slot);
 				slot
 			}
 		};
 		let pointer = self
 			.call_value(
-				self.runtime.function("fa_string_reference")?,
+				self.runtime.function(if place.repr == Repr::Bytes {
+					"fa_bytes_reference"
+				} else {
+					"fa_string_reference"
+				})?,
 				&[place.pointer.into(), snapshot.pointer.into()],
 			)?
 			.into_pointer_value();
 		Ok(Slot {
 			pointer,
-			repr: Repr::Str,
+			repr: place.repr,
 		})
 	}
 
@@ -334,7 +344,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			None => self.reference_place(value)?,
 		};
-		let place = self.snapshot_string_designation(symbol, place)?;
+		let place = self.snapshot_content_designation(symbol, place)?;
 		let data = self.analysis.symbols.symbol(symbol);
 		if self.shared.contains_key(&symbol) {
 			// a top-level reference that functions read
@@ -465,7 +475,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some((place, _)) => place,
 			None => self.reference_place(value)?,
 		};
-		let place = self.snapshot_string_designation(symbol, place)?;
+		let place = self.snapshot_content_designation(symbol, place)?;
 		self.builder.build_store(holder, place.pointer)?;
 		Ok(Val::void())
 	}
@@ -486,6 +496,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut inner = value;
 		while let View::Group(group) | View::Try(group) = self.view(inner) {
 			inner = group;
+		}
+		if let View::Index { target, index } = self.view(inner)
+			&& self.node_repr(target)? == Repr::Bytes
+			&& self.node_repr(index)? == Repr::Range
+		{
+			let value = self.bytes_slice(inner, target, index, true)?;
+			let slot = self.alloca(Repr::Bytes, "bytes_slice_place")?;
+			self.builder
+				.build_store(slot.pointer, value.value.expect("a byte view"))?;
+			return Ok(slot);
 		}
 		if let View::Index { target, index } = self.view(inner)
 			&& self.node_repr(target)? == Repr::Str

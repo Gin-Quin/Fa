@@ -1172,6 +1172,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					&[bytes.into(), length.into(), capacity.into()],
 				)
 			}
+			Repr::Bytes => {
+				let array = self.bytes_as_array(value)?;
+				self.append_aggregate(array, node)
+			}
 			// a set of flags: `{ read, write }` (fields.rs)
 			Repr::Int(_)
 				if let Some(ty) = self.printed_fields_type(node)
@@ -1728,6 +1732,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Repr::Int(crate::lower::values::IntRepr::I64),
 					self.growing_length(&self.builder, array)?,
 				))
+			}
+			"Bytes#length" => {
+				let array = self.bytes_as_array(value)?;
+				self.array_length(array)
 			}
 			"Array#length" => {
 				if let fa_analyzer::syntax::View::Access { target, members } = self.view(node)

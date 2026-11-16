@@ -549,7 +549,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The pointer to an item, after the bounds check when the node has
 	/// `INDEX_CHECK` (an `IndexError`).
-	fn checked_item(
+	pub(super) fn checked_item(
 		&mut self,
 		node: NodeId,
 		array: PointerValue<'ctx>,
@@ -661,6 +661,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		index: NodeId,
 	) -> Result<Slot<'ctx>, Error> {
 		let array = self.expr(target)?;
+		if array.repr == Repr::Bytes {
+			return self.bytes_index_place(node, array, index);
+		}
 		if let Repr::Growing(_) = array.repr {
 			let index_node = index;
 			let index = self.expr(index)?;
@@ -871,7 +874,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `array.get(index)`: the item, or `none`.
-	fn array_get(
+	pub(super) fn array_get(
 		&mut self,
 		array: Val<'ctx>,
 		index: Val<'ctx>,
@@ -1457,7 +1460,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `text.codePoints().get(index)`: a `UInt32?`.
-	fn code_point_get(
+	pub(super) fn code_point_get(
 		&mut self,
 		node: NodeId,
 		code_points: NodeId,

@@ -1,0 +1,43 @@
+function filled = (length: Integer<min = 0>, value: Byte): Bytes => Bytes.filled(length, value)
+function sample = (bytes: Bytes, index: Integer): Byte? => bytes.get(index)
+function part = (bytes: Bytes, start: Integer, end: Integer): Bytes throws IndexError => try bytes[start..end]
+
+let original = Bytes.from([1, 2, 3, 4])
+console.log(original.length, original.isEmpty(), original.toArray(), original.toString()) -- prints: 4 false [1, 2, 3, 4] [1, 2, 3, 4]
+console.log(sample(original, -1), sample(original, -4), sample(original, -5), sample(original, 4)) -- prints: 4 1 none none
+console.log(try part(original, -3, -1), try part(original, 4, 2), try part(Bytes.filled(0), 0, 0)) -- prints: [2, 3] [] []
+console.log(filled(3, 255), Bytes.filled(2), Bytes.filled(0).isEmpty()) -- prints: [255, 255, 255] [0, 0] true
+
+mutable data = Bytes.from([10, 20, 30, 40])
+mutable other = data
+other[0] = 99
+console.log(data, other, data == other, data == Bytes.from([10, 20, 30, 40])) -- prints: [10, 20, 30, 40] [99, 20, 30, 40] false true
+mutable total = 0
+for byte, index in data { total += byte + index }
+console.log(total) -- prints: 106
+
+do {
+	mutable use current = data[0..1]
+	use saved = current
+	for index in 0..3 { reuse current = data[index..index + 1] }
+	console.log(current, saved, current.length, saved.length) -- prints: [30] [10] 1 1
+	mutable use writable = data[1..3]
+	try writable[0] = 77
+	console.log(data, writable) -- prints: [10, 77, 30, 40] [77, 30]
+	let detached = writable
+	console.log(detached == writable, detached.toArray()) -- prints: true [77, 30]
+}
+
+static constant = Bytes.from([0, 255, 128])
+static nested = { bytes = Bytes.from([4, 5]) }
+mutable fromConstant = constant
+try fromConstant[0] = 7
+static initial = Bytes.from([8, 9])
+mutable immediate = initial
+try immediate[0] = 6
+console.log(constant, nested.bytes, fromConstant, immediate) -- prints: [0, 255, 128] [4, 5] [7, 255, 128] [6, 9]
+let union: Bytes | String = original
+console.log(union is Bytes, union is String, @typeToSchema(Bytes) == Schema.Bytes) -- prints: true false true
+mutable set: Set<Bytes> = []
+set.add(original)
+console.log(set.includes(Bytes.from([1, 2, 3, 4])), set.includes(Bytes.from([1, 2]))) -- prints: true false

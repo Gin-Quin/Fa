@@ -1183,6 +1183,44 @@ static void test_utf16_strings(void) {
 	CHECK(allocated_bytes == bytes_before);
 }
 
+static void test_byte_blocks(void) {
+	long before = allocated, bytes_before = allocated_bytes;
+	CHECK(sizeof(FaBytesView) == sizeof(void *) * 2);
+	FaArrayHeader *owner = fa_bytes_filled(160, 255);
+	FaBytesView first, second;
+	CHECK(!fa_bytes_slice_view(owner, 1, 159, 3, &first));
+	void *view = fa_bytes_view_pointer(&first);
+	CHECK(bytes_parts(view).items == owner->items + 1 && bytes_parts(view).length == 158);
+	FaBytesReference snapshot;
+	void **saved = fa_bytes_reference(&view, &snapshot);
+	CHECK(!fa_bytes_slice_view(owner, -2, -1, 3, &second));
+	view = fa_bytes_view_pointer(&second);
+	CHECK(bytes_parts(*saved).length == 158 && bytes_parts(view).length == 1);
+	bytes_parts(*saved).items[0] = 7;
+	CHECK(owner->items[1] == 7);
+	FaArrayHeader *detached = fa_bytes_copy(*saved);
+	CHECK(fa_bytes_equal(detached, *saved));
+	CHECK(fa_bytes_hash(detached) == fa_bytes_hash(*saved));
+	detached->items[0] = 8;
+	CHECK(owner->items[1] == 7 && !fa_bytes_equal(detached, *saved));
+	fa_bytes_free(*saved);
+	fa_bytes_free(view);
+	fa_bytes_free(detached);
+	fa_bytes_free(owner);
+	const uint8_t raw_low[] = {0x98, 0x80};
+	const uint8_t wtf8_low[] = {0xED, 0xB8, 0x80};
+	void *raw = fa_bytes_from(raw_low, sizeof raw_low);
+	void *encoded = fa_bytes_from(wtf8_low, sizeof wtf8_low);
+	CHECK(!fa_bytes_equal(raw, encoded));
+	fa_bytes_free(raw);
+	fa_bytes_free(encoded);
+	void *empty = fa_bytes_filled(0, 0);
+	CHECK(!fa_bytes_slice_view(empty, 0, 0, 3, &first));
+	CHECK(bytes_parts(fa_bytes_view_pointer(&first)).length == 0);
+	fa_bytes_free(empty);
+	CHECK(allocated == before && allocated_bytes == bytes_before);
+}
+
 static void test_allocator_fast_paths(void) {
 	const size_t sizes[] = {0, 1, 8, 16, 24, 32, 128};
 	for (size_t at = 0; at < sizeof sizes / sizeof sizes[0]; at += 1) {
@@ -2613,6 +2651,7 @@ int main(void) {
 	test_integer_strings();
 	test_string_padding();
 	test_utf16_strings();
+	test_byte_blocks();
 	test_inline_strings();
 	test_nonempty_splits();
 	test_region_slice_views();

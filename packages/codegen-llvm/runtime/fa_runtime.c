@@ -3825,22 +3825,30 @@ static void *split_unicode(const uint8_t *text, size_t length, size_t capacity,
 	return parts;
 }
 
-static const void *string_slice(const uint8_t *text, size_t length, size_t capacity,
-                               int64_t start, int64_t end, int8_t flags, FaString *out,
-                               int view) {
-	int64_t count = (int64_t)fa_string_length(text, length, capacity);
-	int64_t from = 0;
-	int64_t to = count;
+static __attribute__((always_inline)) const void *slice_bounds(int64_t count,
+    int64_t start, int64_t end, int8_t flags, int64_t *from, int64_t *to) {
+	*from = 0;
+	*to = count;
 	if (flags & 1) {
 		if (start < -count || start > count) { return fa_error_index(start, count); }
-		from = start < 0 ? start + count : start;
+		*from = start < 0 ? start + count : start;
 	}
 	if (flags & 2) {
 		int inclusive = (flags & 4) != 0;
 		if (end < -count || end > count - inclusive) { return fa_error_index(end, count); }
-		to = (end < 0 ? end + count : end) + inclusive;
+		*to = (end < 0 ? end + count : end) + inclusive;
 	}
-	if (to < from) { to = from; }
+	if (*to < *from) { *to = *from; }
+	return 0;
+}
+
+static const void *string_slice(const uint8_t *text, size_t length, size_t capacity,
+                               int64_t start, int64_t end, int8_t flags, FaString *out,
+                               int view) {
+	int64_t from, to;
+	const void *error = slice_bounds((int64_t)fa_string_length(text, length, capacity),
+	                                start, end, flags, &from, &to);
+	if (error) { return error; }
 	unit_slice(text, length, capacity, (size_t)from, (size_t)to, out, view);
 	return 0;
 }
@@ -4756,25 +4764,9 @@ FA_EXPORT __attribute__((noinline)) int64_t fa_index_from_end(int64_t index, int
 FA_EXPORT const void *fa_array_slice(const FaArrayHeader *array, int64_t start, int64_t end,
                                      int8_t flags, int64_t item_size, void **out) {
 	fa_array_materialize((FaArrayHeader *)array);
-	int64_t length = array->length;
-	int64_t from = 0;
-	int64_t to = length;
-	if (flags & 1) {
-		if (start < -length || start > length) {
-			return fa_error_index(start, length);
-		}
-		from = start < 0 ? start + length : start;
-	}
-	if (flags & 2) {
-		int inclusive = (flags & 4) != 0;
-		if (end < -length || end > (inclusive ? length - 1 : length)) {
-			return fa_error_index(end, length);
-		}
-		to = (end < 0 ? end + length : end) + inclusive;
-	}
-	if (to < from) {
-		to = from;
-	}
+	int64_t from, to;
+	const void *error = slice_bounds(array->length, start, end, flags, &from, &to);
+	if (error) { return error; }
 	FaArrayHeader *slice = fa_array_new(to - from, to - from, item_size);
 	copy_bytes(slice->items, array->items + from * item_size, (size_t)((to - from) * item_size));
 	*out = slice;
@@ -4970,6 +4962,107 @@ FA_EXPORT void fa_array_free(FaArrayHeader *array, int64_t item_size) {
 		fa_free(array->items, (size_t)(array->capacity < 0 ? array->length : array->capacity * item_size), 16);
 	}
 	fa_free(array, INLINE_ITEMS, sizeof(int64_t));
+}
+
+// ── fixed-length byte blocks ────────────────────────────────────────────
+
+typedef struct { uint8_t *items; size_t length; } FaBytesView;
+typedef struct { void *value; FaBytesView view; } FaBytesReference;
+
+/// Owners keep the array block layout. A tagged pointer addresses only the
+/// two-word borrowed descriptor: it has no capacity, marker or allocation.
+static FaBytesView bytes_parts(const void *bytes) {
+	uintptr_t address = (uintptr_t)bytes;
+	if (address & 1) { return *(const FaBytesView *)(address & ~(uintptr_t)1); }
+	const FaArrayHeader *owner = bytes;
+	return (FaBytesView){owner->items, (size_t)owner->length};
+}
+
+FA_EXPORT __attribute__((always_inline)) void fa_bytes_array_view(const void *bytes, FaArrayHeader *out) {
+	FaBytesView view = bytes_parts(bytes);
+	*out = (FaArrayHeader){view.items, (int64_t)view.length, (int64_t)view.length};
+	mark_items(out, ARRAY_FRAME);
+}
+
+FA_EXPORT void *fa_bytes_filled(int64_t length, uint8_t value) {
+	if (length < 0 || (uint64_t)length > SIZE_MAX - INLINE_ITEMS) { out_of_memory(); }
+	FaArrayHeader *out = fa_array_new(length, length, 1);
+	fill_bytes(out->items, value, (size_t)length);
+	return out;
+}
+
+FA_EXPORT void *fa_bytes_from(const uint8_t *items, size_t length) {
+	if (length > SIZE_MAX - INLINE_ITEMS) { out_of_memory(); }
+#if SIZE_MAX > INT64_MAX
+	if (length > INT64_MAX) { out_of_memory(); }
+#endif
+	FaArrayHeader *out = fa_array_new((int64_t)length, (int64_t)length, 1);
+	copy_bytes(out->items, items, length);
+	return out;
+}
+
+FA_EXPORT void *fa_bytes_copy(const void *bytes) {
+	if (!bytes) { return 0; }
+	FaBytesView view = bytes_parts(bytes);
+	return fa_bytes_from(view.items, view.length);
+}
+
+FA_EXPORT void fa_bytes_free(void *bytes) {
+	if (!bytes || ((uintptr_t)bytes & 1)) { return; }
+	FaArrayHeader *owner = bytes;
+	if (fa_array_storage(owner) != 0) { return; }
+	if (inline_items(owner)) {
+		fa_free(owner, INLINE_ITEMS + (size_t)owner->capacity, 16);
+	} else { fa_array_free(owner, 1); }
+}
+
+FA_EXPORT void *fa_bytes_own(void *bytes) {
+	if (bytes && (((uintptr_t)bytes & 1) || fa_array_storage(bytes) != 0)) {
+		return fa_bytes_copy(bytes);
+	}
+	return bytes;
+}
+
+FA_EXPORT __attribute__((always_inline)) int32_t fa_bytes_equal(const void *left, const void *right) {
+	FaBytesView a = bytes_parts(left), b = bytes_parts(right);
+	return string_equal_canonical(a.items, a.length, b.items, b.length);
+}
+
+uint64_t fa_hash_bytes(const uint8_t *bytes, size_t length);
+FA_EXPORT uint64_t fa_bytes_hash(const void *bytes) {
+	FaBytesView view = bytes_parts(bytes);
+	return fa_hash_bytes(view.items, view.length);
+}
+
+FA_EXPORT const void *fa_bytes_slice(const void *bytes, int64_t start, int64_t end,
+    int8_t flags, void **out) {
+	FaBytesView view = bytes_parts(bytes);
+	int64_t from, to;
+	const void *error = slice_bounds((int64_t)view.length, start, end, flags, &from, &to);
+	if (error) { return error; }
+	*out = fa_bytes_from(view.items + from, (size_t)(to - from));
+	return 0;
+}
+
+FA_EXPORT const void *fa_bytes_slice_view(const void *bytes, int64_t start, int64_t end,
+    int8_t flags, FaBytesView *out) {
+	FaBytesView view = bytes_parts(bytes);
+	int64_t from, to;
+	const void *error = slice_bounds((int64_t)view.length, start, end, flags, &from, &to);
+	if (error) { return error; }
+	*out = (FaBytesView){view.items + from, (size_t)(to - from)};
+	return 0;
+}
+
+FA_EXPORT __attribute__((always_inline)) void *fa_bytes_view_pointer(FaBytesView *view) {
+	return (void *)((uintptr_t)view | 1);
+}
+
+FA_EXPORT __attribute__((always_inline)) void **fa_bytes_reference(void **place, FaBytesReference *snapshot) {
+	if (!((uintptr_t)*place & 1)) { return place; }
+	snapshot->view = bytes_parts(*place);
+	snapshot->value = fa_bytes_view_pointer(&snapshot->view);
+	return &snapshot->value;
 }
 
 /// The same non-overlapping ASCII search as `each_ascii_match`, but

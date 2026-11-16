@@ -705,6 +705,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		match path {
 			// `collection.parallel()`: the collection, which the operation reads
+			_ if path.starts_with("Bytes") => self.bytes_builtin(node, path, info),
 			"Collection#parallel" => self.receiver(node),
 			// tasks (tasks.rs)
 			"Task.yield" | "Task.all" | "Task.any" | "Task.settled" | "Task#cancel"

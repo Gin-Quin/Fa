@@ -155,6 +155,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.context.bool_type().const_int(*value as u64, false),
 			),
 			(Value::String(text), Repr::Str) => self.text_constant(text),
+			(Value::Bytes(bytes), Repr::Bytes) => {
+				let pointer = self.constant_bytes(bytes);
+				let i64 = self.context.i64_type();
+				let count = i64.const_int(bytes.len() as u64, false);
+				let header = self.context.const_struct(
+					&[
+						pointer.into(),
+						count.into(),
+						count.into(),
+						i64.const_int(super::arrays::ARRAY_STATIC_MARKER, false)
+							.into(),
+					],
+					false,
+				);
+				Val::new(
+					Repr::Bytes,
+					self.readonly_global(header.into(), "fa.bytes.static"),
+				)
+			}
 			(Value::None, Repr::None) => Val::none(),
 			(Value::None, Repr::Optional(_)) => {
 				Val::new(repr, super::zero_of(self.llvm_type(repr)))

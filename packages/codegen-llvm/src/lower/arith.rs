@@ -1113,6 +1113,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Ok(equal)
 			}
+			Repr::Bytes if op.is_none() => {
+				let right = self.convert(right, Repr::Bytes, node.index())?;
+				let equal = self
+					.call_value(
+						self.runtime.function("fa_bytes_equal")?,
+						&[
+							left.value.expect("Bytes").into(),
+							right.value.expect("Bytes").into(),
+						],
+					)?
+					.into_int_value();
+				Ok(self.builder.build_int_compare(
+					IntPredicate::NE,
+					equal,
+					equal.get_type().const_zero(),
+					"",
+				)?)
+			}
 			Repr::Array(item_type) if op.is_none() => {
 				self.arrays_equal(left, right, item_type, node)
 			}

@@ -101,7 +101,7 @@ impl Walker<'_> {
 				let step = if self.type_of(self.strip_groups(index)) == TypeId::RANGE {
 					Step::All
 				} else {
-					Step::Index(self.identity_of(index))
+					Step::Index(self.reference_index_identity(index, Some(self.type_of(target))))
 				};
 				places
 					.into_iter()
@@ -228,6 +228,55 @@ impl Walker<'_> {
 				Identity::Interval(self.facts.interval(set.hull))
 			}
 			_ => Identity::Unknown,
+		}
+	}
+
+	/// References save the evaluated sequence index. A negative value is not
+	/// numerically distinct from its normalized positive position; map keys keep
+	/// their raw value. Length-based indices retain an interval snapshot.
+	pub(super) fn reference_index_identity(
+		&mut self,
+		index: NodeId,
+		container: Option<TypeId>,
+	) -> Identity {
+		let identity = self.identity_of(index);
+		self.normalize_reference_index(identity, container)
+	}
+
+	fn normalize_reference_index(
+		&mut self,
+		identity: Identity,
+		container: Option<TypeId>,
+	) -> Identity {
+		if container.is_some_and(|ty| {
+			matches!(
+				self.s.types.kind(ty),
+				TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)
+			)
+		}) {
+			return identity;
+		}
+		match identity {
+			Identity::Exact(value) if value < 0 => Identity::FromEnd(value),
+			Identity::Symbol(symbol, offset)
+				if self
+					.identity_interval(identity)
+					.is_none_or(|range| range.lo < I256::ZERO) =>
+			{
+				Identity::NormalizedSymbol(symbol, offset)
+			}
+			Identity::Interval(id) if self.facts.interval_value(id).lo < I256::ZERO => {
+				Identity::Unknown
+			}
+			Identity::LengthOf(place, offset)
+				if self
+					.identity_interval(identity)
+					.is_some_and(|range| range.lo >= I256::ZERO) =>
+			{
+				Identity::LengthSnapshot(place, offset, self.body.flow.track_reference_epoch(place))
+			}
+			Identity::LengthOf(..) => Identity::Unknown,
+			other => other,
 		}
 	}
 
@@ -521,6 +570,7 @@ impl Walker<'_> {
 			self.check_iteration(place, invalidates, n, call);
 			self.invalidate_references(place, invalidates, n);
 		}
+		self.advance_reference_epochs(place, invalidates, n);
 		if matches!(owner, Owner::Local | Owner::Outside) {
 			return;
 		}
@@ -623,6 +673,42 @@ impl Walker<'_> {
 		}
 	}
 
+	fn advance_reference_epochs(&mut self, place: PlaceId, invalidates: bool, node: NodeId) {
+		if self.body.flow.reference_epochs.is_empty() {
+			return;
+		}
+		let entry = self.places.get(place);
+		let changed = match entry.step {
+			Some(Step::Length | Step::Size) => entry.parent,
+			Some(Step::Capacity) => None,
+			Some(Step::Index(_) | Step::Range(..)) if invalidates => entry.parent,
+			_ if invalidates
+				|| self
+					.effect_type
+					.or_else(|| self.place_type(place))
+					.is_none_or(|ty| !self.is_flat(ty)) =>
+			{
+				Some(place)
+			}
+			_ => None,
+		};
+		let Some(changed) = changed else {
+			return;
+		};
+		let changed = self.canonical_reference_place(changed);
+		let epochs = self.body.flow.reference_epochs.clone();
+		for (index, &(place, epoch)) in epochs.iter().enumerate() {
+			let normalized = self.canonical_reference_place(place);
+			if self.may_be_at_or_below(normalized, changed) {
+				self.body.flow.reference_epochs[index].1 = if epoch == 0 {
+					node.0.saturating_add(1)
+				} else {
+					u32::MAX
+				};
+			}
+		}
+	}
+
 	/// The effect path of a place for the innermost function: its root is a
 	/// parameter, `self` or a module-level value.
 	pub(super) fn effect_path(&mut self, place: PlaceId) -> Option<PathId> {
@@ -644,14 +730,19 @@ impl Walker<'_> {
 				Step::Length => PathStep::Length,
 				Step::Size => PathStep::Size,
 				Step::Capacity => PathStep::Capacity,
-				Step::Index(Identity::Exact(value)) => {
+				Step::Index(Identity::Exact(value) | Identity::FromEnd(value)) => {
 					PathStep::IndexConst(self.s.types.constant(ConstValue::Int(I256::from(value))))
 				}
-				Step::Index(Identity::Symbol(index, 0)) => {
+				Step::Index(Identity::Symbol(index, 0) | Identity::NormalizedSymbol(index, 0)) => {
 					match self.a.symbols.symbol(index).kind {
 						SymbolKind::Parameter { index } => PathStep::IndexParam(index),
 						_ => PathStep::All,
 					}
+				}
+				Step::Index(Identity::Key(key))
+					if !matches!(self.s.types.const_value(key), ConstValue::Binding(_)) =>
+				{
+					PathStep::IndexConst(key)
 				}
 				Step::Payload(_) | Step::Characters => continue,
 				Step::Index(_) | Step::Range(..) | Step::All | Step::Child => PathStep::All,
@@ -893,6 +984,17 @@ impl Walker<'_> {
 		match (a, b) {
 			(Identity::Symbol(x, i), Identity::Symbol(y, j)) if x == y => i != j,
 			(Identity::LengthOf(x, i), Identity::LengthOf(y, j)) if x == y => i != j,
+			(Identity::LengthSnapshot(x, i, a), Identity::LengthSnapshot(y, j, b))
+				if x == y && a == b && a != u32::MAX =>
+			{
+				i != j
+			}
+			(Identity::LengthSnapshot(x, i, epoch), Identity::LengthOf(y, j))
+			| (Identity::LengthOf(y, j), Identity::LengthSnapshot(x, i, epoch))
+				if x == y && epoch != u32::MAX && epoch == self.body.flow.reference_epoch(x) =>
+			{
+				i != j
+			}
 			(Identity::Fresh(x), Identity::Fresh(y)) => x != y,
 			(Identity::Key(x), Identity::Key(y)) => x != y,
 			(Identity::Existing(before), Identity::Fresh(after))
@@ -961,6 +1063,13 @@ impl Walker<'_> {
 				}
 				Some(offset(self.facts.interval_set_value(int).hull, k))
 			}
+			Identity::LengthSnapshot(place, offset, epoch) => {
+				if epoch != u32::MAX && epoch == self.body.flow.reference_epoch(place) {
+					self.identity_interval(Identity::LengthOf(place, offset))
+				} else {
+					None
+				}
+			}
 			Identity::LengthOf(place, k) => {
 				let fact = self.body.flow.fact(place).or_else(|| {
 					self.place_symbol(place)
@@ -970,9 +1079,12 @@ impl Walker<'_> {
 				(length != crate::ids::IntervalId::NONE)
 					.then(|| offset(self.facts.interval_value(length), k))
 			}
-			Identity::Fresh(_) | Identity::Existing(_) | Identity::Key(_) | Identity::Unknown => {
-				None
-			}
+			Identity::Fresh(_)
+			| Identity::Existing(_)
+			| Identity::Key(_)
+			| Identity::Unknown
+			| Identity::FromEnd(_)
+			| Identity::NormalizedSymbol(..) => None,
 		}
 	}
 
@@ -2231,6 +2343,9 @@ impl Walker<'_> {
 							ConstValue::Int(value) => Step::Index(
 								i64::try_from(value).map_or(Identity::Unknown, Identity::Exact),
 							),
+							ConstValue::String(_) | ConstValue::Bool(_) => {
+								Step::Index(Identity::Key(value))
+							}
 							_ => Step::Index(Identity::Unknown),
 						},
 						PathStep::IndexParam(index) => match argument_node(index as usize) {
@@ -2243,6 +2358,12 @@ impl Walker<'_> {
 							Step::Range(start, Identity::Unknown, false)
 						}
 						PathStep::Last => Step::Index(Identity::LengthOf(place, -1)),
+					};
+					let step = match step {
+						Step::Index(identity) => Step::Index(
+							self.normalize_reference_index(identity, self.place_type(place)),
+						),
+						other => other,
 					};
 					place = self.places.child(place, step);
 				}

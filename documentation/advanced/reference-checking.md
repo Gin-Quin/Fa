@@ -408,4 +408,9 @@ The checker is shared by every target. It runs on the typed tree, after name res
 
 Retain symbolic owner paths and dependent reference parameters/results before ordinary type erasure. Substitute parameter/receiver paths at calls, including private fields, imported declarations and generic instances. Validate returned places and dependent arguments with the existing place/identity engine. A user result has unknown identity unless a direct callee's every reachable reference result is fresh; function values never promise freshness. Publish contracts and freshness in semantic interfaces/cache hashes. Local-pool escapes and temporary result borrows must fail before code generation. Link containment is an additional type/path dependency check using the same ownership engine, not a second alias or heap-reachability solver.
 
+Negative sequence indices are compared as normalized positions, never as raw
+negative numbers distinct from positive indices. Index and length facts used
+by a reference describe its evaluation point; a later growing append does not
+move that reference to the new last element. Map keys keep their raw identity.
+
 :::

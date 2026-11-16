@@ -40,11 +40,17 @@ pub enum PlaceRoot {
 pub enum Identity {
 	/// A known value: a literal, or the exact fact of the index.
 	Exact(i64),
+	/// A negative sequence index, normalized against its container at evaluation.
+	/// Its position cannot be compared with a raw numeric index.
+	FromEnd(i64),
+	/// An immutable index that may have needed normalization at evaluation.
+	NormalizedSymbol(SymbolId, i32),
 	/// An immutable binding (`let`, parameter, range loop variable) plus an
 	/// offset: its interval is its current fact plus the offset.
 	Symbol(SymbolId, i32),
 	/// `c.length + k` while the length of `c` hasn't changed.
 	LengthOf(PlaceId, i32),
+	LengthSnapshot(PlaceId, i32, u32),
 	/// A snapshot of the interval of a value that may change (a `mutable`).
 	Interval(crate::ids::IntervalId),
 	/// A reference returned by a call that returns fresh ones, at this time.
@@ -233,6 +239,7 @@ pub struct FlowState {
 	pub iterating: SmallVec<[PlaceId; 2]>,
 	/// The freshness clock (M2).
 	pub time: u32,
+	pub reference_epochs: SmallVec<[(PlaceId, u32); 2]>,
 	/// The move-only locals consumed on some path (`subscription.stop()`,
 	/// advanced brief §11.3), with the consuming node: a later use is `MEM002`.
 	pub consumed: SmallVec<[(SymbolId, NodeId); 1]>,
@@ -269,6 +276,7 @@ impl FlowState {
 			values: SmallVec::new(),
 			iterating: SmallVec::new(),
 			time: 0,
+			reference_epochs: SmallVec::new(),
 			consumed: SmallVec::new(),
 			moved_fields: SmallVec::new(),
 			tasks: SmallVec::new(),
@@ -373,6 +381,19 @@ impl FlowState {
 	/// The state where two branches meet. Unreachable states are the
 	/// identity; otherwise only places known on both sides keep a fact, the
 	/// pointwise join of the two. With a shared base, only the places either
+	pub fn reference_epoch(&self, place: PlaceId) -> u32 {
+		self.reference_epochs
+			.iter()
+			.find(|entry| entry.0 == place)
+			.map_or(0, |entry| entry.1)
+	}
+	pub fn track_reference_epoch(&mut self, place: PlaceId) -> u32 {
+		if !self.reference_epochs.iter().any(|entry| entry.0 == place) {
+			self.reference_epochs.push((place, 0));
+		}
+		self.reference_epoch(place)
+	}
+
 	fn reference_class(&self, symbol: SymbolId) -> SymbolId {
 		self.same_references
 			.binary_search_by_key(&symbol, |entry| entry.0)
@@ -514,6 +535,20 @@ impl FlowState {
 		}
 		joined.refs = refs::join_refs(&mut facts.refs, &self.refs, &other.refs);
 		joined.same_references = self.joined_reference_aliases(other, &joined.refs);
+		joined.reference_epochs = self.reference_epochs.clone();
+		for &(place, _) in &other.reference_epochs {
+			if !joined.reference_epochs.iter().any(|entry| entry.0 == place) {
+				joined.reference_epochs.push((place, 0));
+			}
+		}
+		for entry in &mut joined.reference_epochs {
+			let (left, right) = (
+				self.reference_epoch(entry.0),
+				other.reference_epoch(entry.0),
+			);
+			entry.1 = if left == right { left } else { u32::MAX };
+		}
+		joined.reference_epochs.sort_unstable();
 		joined.values = self.values.clone();
 		for &(place, value) in &other.values {
 			match joined.values.binary_search_by_key(&place, |entry| entry.0) {

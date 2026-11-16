@@ -1,0 +1,12 @@
+type Node = { children: Array<Integer> }
+function exercise = (): Array<Integer> throws IndexError => {
+ mutable values: GrowingArray<Node> = [{ children = [1] }]
+ use last = values[-1]
+ values.push({ children = [2] })
+ use item = try last.children[0]
+ item += 10
+ [try values[0].children[0], try values[1].children[0]]
+}
+static result = @exercise()
+console.log(result) -- prints: [11, 2]
+console.log(try exercise()) -- prints: [11, 2]

@@ -100,6 +100,17 @@ impl Walker<'_> {
 				self.check_stmt(statement);
 			}
 		}
+		// Value blocks are also checked directly by branches and function bodies,
+		// outside `check`, so publish their evaluated result at this boundary.
+		let origins = if result.0 == TypeId::NEVER {
+			Default::default()
+		} else {
+			result
+				.1
+				.map(|value| self.evaluated_origins(value))
+				.unwrap_or_default()
+		};
+		self.value_origins.insert(n, origins);
 		// a task bound in the block ends with it: its borrows too (tasks.rs)
 		self.end_block_tasks(scope, result.1);
 		self.body.scope = parent;

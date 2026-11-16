@@ -677,6 +677,17 @@ impl Walker<'_> {
 		}
 
 		if let Resolution::External(key) = self.reference_callee_resolution(callee) {
+			if self.tree.text(callee.index()).contains("places.field") {
+				eprintln!(
+					"IMPORT TRACE file={:?} key={:?} data={:?} iface={:?}",
+					self.file,
+					key,
+					self.s.types.decl_key_data(key),
+					self.s
+						.interface(self.s.types.decl_key_data(key).module)
+						.map(|i| (i.complete, i.keys.get(&key), &i.reference_origins))
+				);
+			}
 			let interface = self.s.interface(self.s.types.decl_key_data(key).module)?;
 			let decl = interface.keys.get(&key)?.node;
 			return interface.reference_origins.get(&decl).cloned();
@@ -924,7 +935,7 @@ impl Walker<'_> {
 		let method = path.rsplit('#').next().unwrap_or(path);
 		let identity = match method {
 			"get" | "getOrInsert" => match arguments.first() {
-				Some(key) => self.identity_of(key),
+				Some(key) => self.reference_index_identity(key, self.callee_receiver_type(callee)),
 				None => crate::flow::Identity::Unknown,
 			},
 			// an element that exists now: distinct from the ones added later

@@ -118,7 +118,8 @@ impl Walker<'_> {
 				origins.owned = origins.places.is_empty();
 			}
 			View::Index { target, index } => {
-				let step = Step::Index(self.identity_of(index));
+				let step =
+					Step::Index(self.reference_index_identity(index, Some(self.type_of(target))));
 				origins = self.project_origins(self.evaluated_origins(target), step);
 				origins.places = self.places_of(node);
 				origins.opaque = false;

@@ -1656,3 +1656,10 @@ not only field names. They are exported and hashed with their key representation
 a negative array index remains general because normalization depends on length.
 The generated matrix includes nested arrays, string and Int64 map keys, negative
 array indices and calls through function values using those functions.
+
+Sequence-index provenance distinguishes negative and possibly negative indices
+from raw numeric keys. Their normalized position may overlap a positive index;
+map keys remain raw. Length-derived index facts are snapshots, so growing a
+collection does not reinterpret a previously selected position. Formal index
+parameters remain available when publishing declared effects. Value blocks
+publish origins at `walk_block`, including blocks checked directly by branches.

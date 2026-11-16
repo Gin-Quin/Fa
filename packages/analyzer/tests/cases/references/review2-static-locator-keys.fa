@@ -22,7 +22,7 @@ function exercise = (): Array<Integer> throws IndexError | KeyNotFound => {
  selected += 1
  use mapped = try choose(values, true)
  mapped += 1
- [values[0].numbers[1], try values[0].table["fixed"], try values[0].wide[-7]]
+ [try values[0].numbers[1], try values[0].table["fixed"], try values[0].wide[-7]]
 }
 static result = @exercise()
 console.log(result) -- prints: [53, 24, 34]

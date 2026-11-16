@@ -332,12 +332,21 @@ fn referenced_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 }
 
 fn deleted_while_iterated_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
-	concrete_map_names(session.types(), deleted_while_iterated_map_types(session, files))
+	concrete_map_names(
+		session.types(),
+		deleted_while_iterated_map_types(session, files),
+	)
 }
 
 fn concrete_map_names(types: &TypeStore, maps: BTreeSet<TypeId>) -> BTreeSet<String> {
-	maps.into_iter().filter(|&ty| !types.flags(ty).contains(fa_analyzer::types::TypeFlags::HAS_PARAM))
-		.filter_map(|ty| stable_type_name(types, ty)).collect()
+	maps.into_iter()
+		.filter(|&ty| {
+			!types
+				.flags(ty)
+				.contains(fa_analyzer::types::TypeFlags::HAS_PARAM)
+		})
+		.filter_map(|ty| stable_type_name(types, ty))
+		.collect()
 }
 
 /// See [`REFERENCED_MAPS`]: a node of the map type in the value of a `use`,
@@ -556,6 +565,24 @@ pub(crate) fn short_reference(
 	true
 }
 
+/// Exact facts are usual. Recursive generic applications can conservatively
+/// retain only a concrete key or item component; the same matching is used
+/// when reading and validating cached decisions.
+pub(crate) fn contains_map_fact(set: &BTreeSet<String>, key: &str) -> bool {
+	set.contains(key)
+		|| set
+			.iter()
+			.filter_map(|family| family.strip_prefix("\u{1f}map-family:"))
+			.any(|family| {
+				let Some((map_key, item)) = family.split_once('\u{1e}') else {
+					return false;
+				};
+				key.starts_with("Map<")
+					&& (map_key == "*" || key.starts_with(&format!("Map<{map_key}, ")))
+					&& (item == "*" || key.ends_with(&format!(", {item}>")))
+			})
+}
+
 #[cfg(test)]
 mod tests {
 	use super::stable_type_name;
@@ -679,22 +706,4 @@ mod tests {
 		);
 		assert_eq!(found[0], found[1], "{found:?}");
 	}
-}
-
-/// Exact facts are usual. Recursive generic applications can conservatively
-/// retain only a concrete key or item component; the same matching is used
-/// when reading and validating cached decisions.
-pub(crate) fn contains_map_fact(set: &BTreeSet<String>, key: &str) -> bool {
-	set.contains(key)
-		|| set
-			.iter()
-			.filter_map(|family| family.strip_prefix("\u{1f}map-family:"))
-			.any(|family| {
-				let Some((map_key, item)) = family.split_once('\u{1e}') else {
-					return false;
-				};
-				key.starts_with("Map<")
-					&& (map_key == "*" || key.starts_with(&format!("Map<{map_key}, ")))
-					&& (item == "*" || key.ends_with(&format!(", {item}>")))
-			})
 }

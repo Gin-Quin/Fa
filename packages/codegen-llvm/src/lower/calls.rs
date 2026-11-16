@@ -268,31 +268,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			function.info.sig,
 			function.throws,
 		);
-		// an instance's result typed with its type parameters: the type of
-		// the call (`twice(7)`: `Array(Integer)`, not `Array(Value)`)
-		let ret = match ret {
-			Repr::Object(ty)
-			| Repr::Array(ty)
-			| Repr::Function(ty)
-			| Repr::Tuple(ty)
-			| Repr::Rec(ty)
-			| Repr::Map(ty)
-			| Repr::Set(ty)
-			| Repr::Growing(ty)
-			| Repr::Pool(ty)
-			| Repr::Columnar(ty)
-			| Repr::Sync(ty)
-			| Repr::Task(ty)
-				if !function.bindings.is_empty()
-					&& self
-						.types()
-						.flags(ty)
-						.contains(fa_analyzer::types::TypeFlags::HAS_PARAM) =>
-			{
-				self.node_repr(node).unwrap_or(ret)
-			}
-			_ => ret,
-		};
+		// Resolve the declared layout under the callee's exact bindings, then
+		// restore the caller before evaluating any argument.
+		let ret = self.concrete_call_repr(&function, ret, true);
 		// a method of a worker of an asynchronous program: a call on its thread (tasks.rs)
 		if let Some(value) = self.worker_call(node, &function, info)? {
 			return Ok(value);
@@ -319,7 +297,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut receiver_value = None;
 		if receiver_first && by_pointer.first() == Some(&true) {
 			let receiver = self.method_receiver(node);
-			let repr = self.concrete_param_repr(&function, params[0].0, receiver)?;
+			let repr = self.concrete_call_repr(&function, params[0].0, false);
 			let (pointer, write_back) =
 				self.argument_place(node, None, repr, function.borrowed[0])?;
 			places.insert(0, pointer);
@@ -344,7 +322,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				continue;
 			}
 			if by_pointer.get(position) == Some(&true) {
-				let repr = self.concrete_param_repr(&function, params[position].0, Some(value))?;
+				let repr = self.concrete_call_repr(&function, params[position].0, false);
 				let (pointer, write_back) =
 					self.argument_place(node, Some(value), repr, function.borrowed[position])?;
 				places.insert(position, pointer);
@@ -633,37 +611,55 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		result
 	}
 
-	/// The representation of a parameter of an instance typed with its type
-	/// parameters (`self: Pair<Left, Right>`), as the caller sees it: the
-	/// representation of the argument (`argument`) given to it.
-	fn concrete_param_repr(
+	/// A call keeps its declared slot layout, even if the given value is
+	/// narrower. Normalize under the callee without evaluating caller code.
+	fn concrete_call_repr(
 		&self,
 		function: &super::Function<'ctx>,
 		repr: Repr,
-		argument: Option<NodeId>,
-	) -> Result<Repr, Error> {
+		returning: bool,
+	) -> Repr {
+		if function.bindings.is_empty() && function.types.is_empty() {
+			return repr;
+		}
+		let mut bindings = self.bindings.borrow().clone();
+		bindings.extend(
+			function
+				.bindings
+				.iter()
+				.map(|(param, repr)| (*param, *repr)),
+		);
+		let saved = self.bindings.replace(bindings);
+		let mut types = self.type_bindings.borrow().clone();
+		types.extend(function.types.iter().map(|(param, ty)| (*param, *ty)));
+		let saved_types = self.type_bindings.replace(types);
+		let repr = self.concrete_bound_repr(repr, returning);
+		self.type_bindings.replace(saved_types);
+		self.bindings.replace(saved);
+		repr
+	}
+
+	fn concrete_bound_repr(&self, repr: Repr, returning: bool) -> Repr {
 		match repr {
-			Repr::Object(ty)
-			| Repr::Array(ty)
-			| Repr::Function(ty)
-			| Repr::Tuple(ty)
-			| Repr::Map(ty)
-			| Repr::Set(ty)
-			| Repr::Growing(ty)
-			| Repr::Pool(ty)
-			| Repr::Columnar(ty)
-				if !function.bindings.is_empty()
-					&& self
-						.types()
-						.flags(ty)
-						.contains(fa_analyzer::types::TypeFlags::HAS_PARAM) =>
-			{
-				match argument {
-					Some(argument) => self.node_repr(argument),
-					None => Ok(repr),
-				}
-			}
-			_ => Ok(repr),
+			Repr::Optional(item) => Repr::Optional(
+				super::values::Scalar::of(self.concrete_bound_repr(item.repr(), returning))
+					.unwrap_or(item),
+			),
+			Repr::Object(ty) => Repr::Object(self.concrete_type(ty)),
+			Repr::Array(ty) => Repr::Array(self.concrete_type(ty)),
+			Repr::Function(ty) => Repr::Function(self.concrete_type(ty)),
+			Repr::Tuple(ty) => Repr::Tuple(self.concrete_type(ty)),
+			Repr::Map(ty) => Repr::Map(self.concrete_type(ty)),
+			Repr::Set(ty) => Repr::Set(self.concrete_type(ty)),
+			Repr::Growing(ty) => Repr::Growing(self.concrete_type(ty)),
+			Repr::Pool(ty) => Repr::Pool(self.concrete_type(ty)),
+			Repr::Columnar(ty) => Repr::Columnar(self.concrete_type(ty)),
+			// These are result normalizations only: their parameter-address
+			// conventions are handled separately by argument_place.
+			Repr::Rec(ty) if returning => Repr::Rec(self.concrete_type(ty)),
+			Repr::Sync(ty) if returning => Repr::Sync(self.concrete_type(ty)),
+			Repr::Task(ty) if returning => Repr::Task(self.concrete_type(ty)),
+			_ => repr,
 		}
 	}
 
@@ -689,6 +685,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		repr: Repr,
 		at: usize,
 	) -> Result<Val<'ctx>, Error> {
+		let repr = self.concrete_call_repr(function, repr, false);
 		if function.bindings.is_empty() {
 			return self.convert(value, repr, at);
 		}

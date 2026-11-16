@@ -119,7 +119,7 @@ Next slices follow [Pool links](pool-links.md): InlineArray separately; link bin
 containment diagnostics and effects; dense paged native storage and Index limits;
 JavaScript direct-object links; whole-owner copy/move relinking; interpreter,
 reflection/JSON/worker boundaries. Acceptance programs are
-`references/links-acceptance-{model,tree,scene}.fa` in the analyzer cases. Integrate
+`references/links-acceptance-{model,tree,scene,chain-index-copy,containment-errors,target-errors}.fa` in the analyzer cases. Integrate
 `collections/inline-arrays.md` from its assigned branch before the website build.
 
 ## 4. Performance

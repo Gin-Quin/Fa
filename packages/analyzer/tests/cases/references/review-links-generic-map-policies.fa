@@ -17,3 +17,18 @@ function exercise = (): Array<Integer> throws KeyNotFound => {
 static result = @exercise()
 console.log(result) -- prints: [9, 0, 9]
 console.log(try exercise()) -- prints: [9, 0, 9]
+
+function pause = () => {}
+function read = <Item>(entries: Map<String, Item>): Item? => {
+ use slot = entries.get("key")
+ pause()
+ if slot is none { none } else { copy slot }
+}
+function invoke = (action: <Value>(entries: Map<String, Value>) => Value?, entries: Map<String, Integer>): Integer => action(entries) ?? 0
+function viaValue = (): Integer => {
+ let entries: Map<String, Integer> = [("key", 9)]
+ invoke(read, entries)
+}
+static indirect = @viaValue()
+console.log(indirect) -- prints: 9
+console.log(viaValue()) -- prints: 9

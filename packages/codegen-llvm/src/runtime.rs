@@ -36,6 +36,11 @@ use inkwell::{AddressSpace, IntPredicate};
 use crate::error::Error;
 use crate::target::Target;
 
+unsafe extern "C" {
+	/// `shim/thin_bitcode.cpp`: LLVM has no C API for Function::deleteBody.
+	fn fa_delete_function_body(function: llvm_sys::prelude::LLVMValueRef);
+}
+
 /// The exit status of a stopped program (values brief 2.7).
 pub const STOP_EXIT_CODE: i32 = 101;
 
@@ -1371,11 +1376,9 @@ fn declarations_of(text: &str) -> Result<Vec<u8>, Error> {
 		if function.count_basic_blocks() == 0 {
 			continue;
 		}
-		for block in function.get_basic_blocks() {
-			// SAFETY: the blocks belong to this function only
-			unsafe { block.delete() }
-				.map_err(|()| Error::Llvm("can't drop a runtime body".into()))?;
-		}
+		// SAFETY: this is a function owned by this local module. LLVM drops
+		// every cross-block use before freeing any instruction or block.
+		unsafe { fa_delete_function_body(inkwell::values::AsValueRef::as_value_ref(&function)) };
 		function.set_linkage(Linkage::External);
 	}
 	// the globals the program reads (`fa_blocking_depth`): declared; the
@@ -1408,4 +1411,67 @@ fn declarations_of(text: &str) -> Result<Vec<u8>, Error> {
 		}
 	}
 	Ok(module.write_bitcode_to_memory().as_slice().to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn runtime_declarations_drop_cross_block_values_before_freeing_blocks() {
+		let source = r#"
+@callback = constant ptr @forward
+define i64 @loop(i64 %length) {
+entry:
+  %buffer = alloca i64
+  br label %body
+body:
+  %index = phi i64 [0, %entry], [%next, %body]
+  store i64 %index, ptr %buffer
+  %value = load i64, ptr %buffer
+  %next = add i64 %value, 1
+  %more = icmp ult i64 %next, %length
+  br i1 %more, label %body, label %exit
+exit:
+  ret i64 %next
+}
+define i64 @forward(i64 %length) {
+  %result = call i64 @loop(i64 %length)
+  ret i64 %result
+}
+"#;
+		// The old per-block deletion writes through freed cross-block Use
+		// links under Valgrind. Repetition also exercises context teardown.
+		for _ in 0..8 {
+			let bits = declarations_of(source).expect("runtime declarations");
+			let context = Context::create();
+			let buffer = MemoryBuffer::create_from_memory_range_copy(&bits, "declarations");
+			let module =
+				Module::parse_bitcode_from_buffer(&buffer, &context).expect("valid bitcode");
+			module.verify().expect("valid declarations");
+			assert_eq!(module.get_functions().count(), 2);
+			assert!(
+				module
+					.get_functions()
+					.all(|function| function.count_basic_blocks() == 0)
+			);
+		}
+	}
+
+	#[test]
+	fn every_runtime_can_be_reduced_to_verified_declarations() {
+		for text in [TIER1_64, TIER1_AARCH64, TIER1_WASM32] {
+			let bits = declarations_of(text).expect("runtime declarations");
+			let context = Context::create();
+			let buffer = MemoryBuffer::create_from_memory_range_copy(&bits, "runtime declarations");
+			let module =
+				Module::parse_bitcode_from_buffer(&buffer, &context).expect("valid bitcode");
+			module.verify().expect("valid runtime declarations");
+			assert!(
+				module
+					.get_functions()
+					.all(|function| function.count_basic_blocks() == 0)
+			);
+		}
+	}
 }

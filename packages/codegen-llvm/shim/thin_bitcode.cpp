@@ -8,6 +8,7 @@
 #include "llvm/Analysis/ModuleSummaryAnalysis.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/ModuleSummaryIndex.h"
 #include "llvm/Support/raw_ostream.h"
@@ -42,4 +43,11 @@ extern "C" void fa_use_init_array(LLVMTargetMachineRef machine) {
 // no thread-local storage segment to give it.
 extern "C" void fa_use_emulated_tls(LLVMTargetMachineRef machine) {
 	reinterpret_cast<llvm::TargetMachine *>(machine)->Options.EmulatedTLS = true;
+}
+
+// Drop all cross-block references before destroying any instructions. Deleting
+// blocks individually through LLVMDeleteBasicBlock leaves later blocks holding
+// uses of freed instructions (allocas, PHIs and loop-carried values).
+extern "C" void fa_delete_function_body(LLVMValueRef function) {
+	llvm::cast<llvm::Function>(llvm::unwrap(function))->deleteBody();
 }

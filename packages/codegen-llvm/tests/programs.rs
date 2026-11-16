@@ -634,6 +634,7 @@ mod with_llvm {
 	fn run_all(target: Target) {
 		let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
 			.join("fa-programs")
+			.join(std::process::id().to_string())
 			.join(target.name());
 		std::fs::create_dir_all(&directory).expect("a directory");
 		let programs = programs();

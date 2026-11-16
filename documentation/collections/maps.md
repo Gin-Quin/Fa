@@ -280,5 +280,5 @@ each slot rather than using `tzcnt`; the randomized hash seed remains planned.
 
 - A map whose keys are primitives (`Integer`, `Float`, `String`, `Boolean`, a union of literals) is a JavaScript `Map`. Its iteration order is the insertion order, which the documentation allows since it promises no order.
 - A map whose keys are objects or tuples can't use a JavaScript `Map` directly, which compares objects by identity. It is a JavaScript `Map` from the structural hash of the key (a 32-bit number, computed by a function generated per key type) to the entry, or to an array of entries when several keys share a hash. Each entry is `{ key, value }`, and the key is compared with the generated `==`.
-- A reference to an object value is the object itself. A reference to a primitive value is the key: `use count = counts.getOrInsert(word, 0)` then `count += 1` compiles to `counts.set(word, counts.get(word) + 1)`.
+- A reference to an object value is the object itself, including function parameters and results. A borrowed primitive or mixed-union slot uses a cached accessor cell retaining the map and key: reads and writes call the map's `get` and `set`. Aliases, defaults and user calls forward that cell; repeated borrowing of the same slot reuses it. The weak container cache bounds stale-key retention; see the [reference ABI](/advanced/owned-references).
 :::

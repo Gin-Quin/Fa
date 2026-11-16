@@ -1,3 +1,4 @@
+-- require-split: true
 -- prints: 9
 -- prints: 9
 -- file: main.fa

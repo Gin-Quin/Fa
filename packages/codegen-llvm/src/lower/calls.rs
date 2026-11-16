@@ -296,7 +296,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let receiver_first = matches!(info.arguments.first(), Some(Argument::Receiver(_)));
 		let mut receiver_value = None;
 		if receiver_first && by_pointer.first() == Some(&true) {
-			let receiver = self.method_receiver(node);
 			let repr = self.concrete_call_repr(&function, params[0].0, false);
 			let (pointer, write_back) =
 				self.argument_place(node, None, repr, function.borrowed[0])?;

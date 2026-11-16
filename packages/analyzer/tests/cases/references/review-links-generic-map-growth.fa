@@ -1,3 +1,4 @@
+-- require-split: true
 -- A retained slot exists only inside generic code, including an imported call chain.
 -- prints: 9
 -- prints: 9

@@ -6,7 +6,7 @@ use smallvec::smallvec;
 
 use crate::analysis::{Callee, FieldValue};
 use crate::check::Walker;
-use crate::flow::{Identity, Step};
+use crate::flow::{CallableBindings, Identity, Step};
 use crate::ids::{NodeId, PlaceId, Sym, TypeId};
 use crate::symbols::Resolution;
 use crate::syntax::View;
@@ -177,6 +177,23 @@ impl Walker<'_> {
 		Some(path)
 	}
 
+	pub(super) fn record_callable_call(&mut self, call: NodeId) {
+		if !self.body.flow.reachable || self.body.flow.callable_values.is_empty() {
+			return;
+		}
+		match self.callable_calls.entry(call) {
+			std::collections::hash_map::Entry::Vacant(entry) => {
+				entry.insert(self.body.flow.callable_values.clone());
+			}
+			std::collections::hash_map::Entry::Occupied(mut entry) => {
+				crate::flow::join_callable_bindings(
+					entry.get_mut(),
+					&self.body.flow.callable_values,
+				);
+			}
+		}
+	}
+
 	pub(super) fn record_callable_read(&mut self, node: NodeId, _ty: TypeId) {
 		if !self.body.flow.reachable
 			|| self.body.flow.callable_values.is_empty()
@@ -189,12 +206,25 @@ impl Walker<'_> {
 		let Some(place) = self.place_of(node) else {
 			return;
 		};
-		let Some(path) = self.callable_path(place) else {
+		let sources = self.callable_place_sources(place, &self.body.flow.callable_values);
+		if sources.is_empty() {
 			return;
+		}
+		let recorded = self.callable_reads.entry(node).or_default();
+		for source in sources {
+			if !recorded.contains(&source) {
+				recorded.push(source);
+			}
+		}
+	}
+
+	fn callable_place_sources(&self, place: PlaceId, values: &CallableBindings) -> Vec<ReadSource> {
+		let Some(path) = self.callable_path(place) else {
+			return Vec::new();
 		};
 		let root = self.places.get(place).root;
 		let mut bindings = Vec::new();
-		for (known, sources) in &self.body.flow.callable_values {
+		for (known, sources) in values {
 			if self.places.get(*known).root != root {
 				continue;
 			}
@@ -207,16 +237,13 @@ impl Walker<'_> {
 					.zip(&path)
 					.all(|(a, b)| projection_matches(*a, *b))
 			{
-				bindings.push((prefix.len(), sources.clone()));
+				bindings.push((prefix.len(), sources));
 			}
 		}
 		bindings.sort_unstable_by_key(|(length, _)| std::cmp::Reverse(*length));
-		if bindings.is_empty() {
-			return;
-		}
-		let recorded = self.callable_reads.entry(node).or_default();
+		let mut recorded = Vec::new();
 		for (length, sources) in bindings {
-			for value in &sources {
+			for value in sources {
 				let source = ReadSource {
 					value: *value,
 					path: path[length..].to_vec(),
@@ -225,11 +252,49 @@ impl Walker<'_> {
 					recorded.push(source);
 				}
 			}
-			// An uncertain override can retain an ancestor's value on another
-			// incoming path. A known replacement completely hides that ancestor.
+			// Unknown replacements also retain the ancestor on another path.
 			if !sources.contains(&None) {
 				break;
 			}
+		}
+		recorded
+	}
+
+	/// A borrowed capture of a callable slot is read when the outer call
+	/// runs, rather than at the captured function's declaration.
+	pub(crate) fn callable_targets_at_call(&self, call: NodeId, place: PlaceId) -> Vec<NodeId> {
+		let Some(bindings) = self.callable_calls.get(&call) else {
+			return Vec::new();
+		};
+		let mut search = TargetSearch::new(call);
+		search.pending.clear();
+		for source in self.callable_place_sources(place, bindings) {
+			if let Some(value) = source.value {
+				search.push((value, source.path));
+			}
+		}
+		self.search_callable_targets(search).0
+	}
+
+	pub(crate) fn callable_is_borrowed_capture(&mut self, value: NodeId) -> bool {
+		let Some(place) = self.place_of(value) else {
+			return false;
+		};
+		let Some(symbol) = self.place_symbol(place) else {
+			return false;
+		};
+		self.ownership_body(self.a.symbols.symbol(symbol).decl_node) != self.ownership_body(value)
+	}
+
+	pub(crate) fn callable_borrowed_targets(&mut self, call: NodeId) -> Vec<NodeId> {
+		let callee = match self.view(call) {
+			View::Call { callee, .. } => callee,
+			_ => return Vec::new(),
+		};
+		if self.callable_is_borrowed_capture(callee) {
+			Vec::new()
+		} else {
+			self.callable_targets(callee)
 		}
 	}
 
@@ -312,7 +377,10 @@ impl Walker<'_> {
 	}
 
 	pub(crate) fn callable_target_facts(&self, value: NodeId) -> (Vec<NodeId>, bool) {
-		let mut pending = TargetSearch::new(value);
+		self.search_callable_targets(TargetSearch::new(value))
+	}
+
+	fn search_callable_targets(&self, mut pending: TargetSearch) -> (Vec<NodeId>, bool) {
 		let mut targets = Vec::new();
 		while let Some((value, path)) = pending.pop() {
 			if let Some(inputs) = crate::lower::copies::result_inputs(&self.tree, value) {
@@ -536,6 +604,23 @@ mod tests {
 		analyzed(&program(
 			"let invoke = read\nlet moved = copy items",
 			"invoke() + moved.length",
+		));
+	}
+
+	#[test]
+	fn captured_callable_slots_are_observed_at_the_call() {
+		let prefix = "type Reader = () => Integer\nfunction demo = (): Integer => {\nlet first = [1]\nlet second = [1, 2]\nfunction readFirst = (): Integer => first.length\nfunction readSecond = (): Integer => second.length\nmutable current: Reader = readFirst\nfunction invoke = (): Integer => current()\ncurrent = readSecond\n";
+		assert_eq!(
+			codes(&format!(
+				"{prefix}let moved = second\ninvoke() + moved.length\n}}\nconsole.log(demo())\n"
+			)),
+			["MEM004"]
+		);
+		analyzed(&format!(
+			"{prefix}let moved = first\ninvoke() + moved.length\n}}\nconsole.log(demo())\n"
+		));
+		analyzed(&format!(
+			"{prefix}let moved = copy second\ninvoke() + moved.length\n}}\nconsole.log(demo())\n"
 		));
 	}
 }

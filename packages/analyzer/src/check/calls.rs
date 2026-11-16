@@ -537,6 +537,7 @@ impl Walker<'_> {
 			let name = self.tree.text(callee.index()).to_string();
 			self.resolve_requirements(n, &name, &requires)
 		};
+		self.record_callable_call(n);
 		self.apply_call_effects(n, callee, sig.effects);
 		self.call_providers.clear();
 		// `subscription.stop()` consumes it (reactivity.rs)

@@ -466,6 +466,8 @@ pub struct Walker<'s> {
 	/// show`): read whenever it is called, never moved (`moves.rs`).
 	pub(crate) pinned_captures: rustc_hash::FxHashSet<SymbolId>,
 	pub(crate) callable_reads: callable_values::CallableReads,
+	/// Sources available after written arguments and before call effects.
+	pub(crate) callable_calls: FxHashMap<NodeId, crate::flow::CallableBindings>,
 	/// The effects written in each function's signature, by lambda node.
 	pub(crate) declared_effect_sets: FxHashMap<NodeId, crate::ids::EffectSetId>,
 	/// The captured locals each closure writes, with the write (by lambda
@@ -652,6 +654,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		callee_name_node: None,
 		pinned_captures: rustc_hash::FxHashSet::default(),
 		callable_reads: FxHashMap::default(),
+		callable_calls: FxHashMap::default(),
 		parallel: Vec::new(),
 		parallel_callbacks: rustc_hash::FxHashSet::default(),
 		parallel_views: Vec::new(),

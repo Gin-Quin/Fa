@@ -250,10 +250,7 @@ impl Walker<'_> {
 			for (call, info) in &calls {
 				let functions = match info.callee {
 					Callee::Function(function) => vec![function],
-					Callee::Value => match self.view(*call) {
-						View::Call { callee, .. } => self.callable_targets(callee),
-						_ => Vec::new(),
-					},
+					Callee::Value => self.callable_borrowed_targets(*call),
 					_ => Vec::new(),
 				};
 				for function in functions {
@@ -289,6 +286,7 @@ impl Walker<'_> {
 						};
 						bindings.insert(param.symbol, argument_places);
 					}
+					self.expand_callable_capture_reads(*call, &free, &mut places);
 					let body = self.ownership_read_context(*call, &defaults);
 					for &place in &places {
 						let Some(symbol) = self.place_symbol(place) else {
@@ -310,6 +308,30 @@ impl Walker<'_> {
 			}
 		}
 		reads
+	}
+
+	/// A free callable place is a dependency on its value at this call.
+	/// Expand recursively, using the same free-place summaries as ordinary
+	/// calls; cycles visit each place once.
+	fn expand_callable_capture_reads(
+		&self,
+		call: NodeId,
+		free: &FxHashMap<NodeId, FxHashSet<PlaceId>>,
+		places: &mut FxHashSet<PlaceId>,
+	) {
+		let mut pending: Vec<_> = places.iter().copied().collect();
+		while let Some(place) = pending.pop() {
+			for function in self.callable_targets_at_call(call, place) {
+				let Some(info) = self.a.function(function) else {
+					continue;
+				};
+				for &source in free.get(&info.lambda).into_iter().flatten() {
+					if places.insert(source) {
+						pending.push(source);
+					}
+				}
+			}
+		}
 	}
 
 	/// Defaults run only at calls which omit them. Keep their observations

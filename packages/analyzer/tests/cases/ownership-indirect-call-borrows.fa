@@ -1,6 +1,7 @@
 -- prints: 2 2
 -- prints: 1 1
 -- prints: 2 2
+-- prints: 3 3
 
 type Reader = () => Integer
 function zero = (): Integer => 0
@@ -33,9 +34,23 @@ function projected = (): Integer => {
 	selected() + moved.length
 }
 
+function switched = (): Integer => {
+	let first = [1]
+	let second = [1, 2]
+	function readFirst = (): Integer => first.length
+	function readSecond = (): Integer => second.length
+	mutable current: Reader = readFirst
+	function invoke = (): Integer => current()
+	current = readSecond
+	let moved = first
+	invoke() + moved.length
+}
+
 static independentResult = @independent()
 static replacedResult = @replaced()
 static projectedResult = @projected()
+static switchedResult = @switched()
 console.log(independentResult, independent())
 console.log(replacedResult, replaced())
 console.log(projectedResult, projected())
+console.log(switchedResult, switched())

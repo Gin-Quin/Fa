@@ -420,6 +420,7 @@ def main():
                    path.name: path.read_bytes() for path in (Path(__file__), Path(artifacts.__file__),
                    Path(measurements.__file__), Path(tables.__file__),
                    Path(__file__).with_name("sizes.txt"), Path(__file__).with_name("hot.py"))})}
+    results["compiler_source_revision"] = os.environ.get("FA_SOURCE_REVISION")
     if args.mode == "secondary":
         results["secondary_memory_limit_mib"] = args.secondary_memory_mib
         results["runtime"] = artifacts.executable_identity(os.environ.get("BUN", str(Path.home() / ".bun/bin/bun")))

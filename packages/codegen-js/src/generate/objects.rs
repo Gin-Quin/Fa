@@ -30,6 +30,15 @@ use fa_analyzer::types::{CollKind, ConstValue, NominalKind, TypeKind};
 use crate::generate::{Generator, Kind};
 use crate::js::{self, Expr, Prec};
 
+/// A scalar reference can select a local variable or a located member.
+pub(crate) struct LocalChoice {
+	pub selector: String,
+	pub locals: Vec<String>,
+	pub helper: String,
+	pub container: String,
+	pub key: String,
+}
+
 /// An assignable place, its container evaluated once.
 pub(crate) struct Place {
 	/// The JavaScript of the place (`point.x`, `items[$t0]`, `count`).
@@ -41,6 +50,7 @@ pub(crate) struct Place {
 	pub(crate) map: Option<(String, String)>,
 	/// Erased references write through the carrier or update the object in place.
 	pub(crate) reference: Option<(String, String)>,
+	pub(crate) choice: Option<LocalChoice>,
 }
 
 impl Place {
@@ -51,11 +61,29 @@ impl Place {
 			ty,
 			map: None,
 			reference: None,
+			choice: None,
 		}
 	}
 
 	/// The statement writing a value into the place.
 	pub(crate) fn write(&self, value: &str) -> String {
+		if let Some(choice) = &self.choice {
+			let mut text = format!(
+				"{{ const $referenceValue = {value}; switch ({}) {{",
+				choice.selector
+			);
+			for (index, local) in choice.locals.iter().enumerate() {
+				text.push_str(&format!(
+					" case {}: {local} = $referenceValue; break;",
+					index + 1
+				));
+			}
+			text.push_str(&format!(
+				" default: {}({}, {}, $referenceValue); }} }}",
+				choice.helper, choice.container, choice.key
+			));
+			return text;
+		}
 		if let Some((helper, carrier)) = &self.reference {
 			return format!("{helper}({carrier}, {value});");
 		}
@@ -1002,6 +1030,9 @@ impl Generator<'_> {
 				let Resolution::Local(symbol) = self.analysis.resolution(target) else {
 					return None;
 				};
+				if let Some(place) = self.local_choice_place(symbol, ty) {
+					return Some(place);
+				}
 				let mut text = self.name_of(symbol);
 				// a narrowed local designates its payload, the same JavaScript
 				// value (`if x is not none { x += 1 }`)
@@ -1023,6 +1054,7 @@ impl Generator<'_> {
 					ty,
 					map,
 					reference,
+					choice: None,
 				})
 			}
 			View::Access {
@@ -1107,6 +1139,7 @@ impl Generator<'_> {
 						ty: self.type_of(target),
 						map: Some((container_value.primary_text(), position.text)),
 						reference: None,
+						choice: None,
 					});
 				}
 				if self.index_needs_normalizing(target, index) {

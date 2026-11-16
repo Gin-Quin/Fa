@@ -8,6 +8,7 @@ use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
 use fa_analyzer::types::{CollKind, PathRoot, PathStep, TypeKind};
 
+use crate::generate::objects::{LocalChoice, Place};
 use crate::generate::{Dest, Generator, Kind};
 use crate::js::{self, Expr};
 
@@ -27,6 +28,11 @@ enum Key {
 	/// The innermost container can be an object, array or map.
 	Dynamic(Expr),
 	Value(Expr),
+	Choice {
+		selector: Expr,
+		locals: Vec<String>,
+		key: Expr,
+	},
 }
 
 #[derive(Clone, Debug)]
@@ -357,6 +363,29 @@ impl Generator<'_> {
 		let optional = if parts.optional { "?." } else { "" };
 		match &parts.key {
 			Key::Whole(text, _) => Expr::primary(text.clone()),
+			Key::Choice {
+				selector,
+				locals,
+				key,
+			} => {
+				let mut value = self.read_parts(&Parts {
+					container: parts.container.clone(),
+					key: Key::Dynamic(key.clone()),
+					optional: parts.optional,
+				});
+				for (index, local) in locals.iter().enumerate().rev() {
+					value = Expr::new(
+						format!(
+							"{} === {} ? {local} : {}",
+							selector.text,
+							index + 1,
+							value.text
+						),
+						js::Prec::Conditional,
+					);
+				}
+				Expr::primary(format!("({})", value.text))
+			}
 			Key::Value(value) | Key::Set(value) => value.clone(),
 			Key::Field(field) => Expr::primary(format!(
 				"{}{}.{}",
@@ -457,7 +486,7 @@ impl Generator<'_> {
 			Key::Index(key) | Key::Entry(key) | Key::Dynamic(key) | Key::Set(key) => {
 				Some((parts.container.clone()?, key.clone()))
 			}
-			Key::Whole(_, None) | Key::Value(_) => None,
+			Key::Whole(_, None) | Key::Value(_) | Key::Choice { .. } => None,
 		}
 	}
 
@@ -693,6 +722,173 @@ impl Generator<'_> {
 		access.unwrap_or(Access::Dynamic)
 	}
 
+	/// Plan scalar alternatives without introducing boxes for local variables.
+	fn scalar_reference_targets(&mut self, symbol: SymbolId) -> Vec<String> {
+		let mut pending = vec![symbol];
+		let mut visited = HashSet::new();
+		let mut locals = Vec::new();
+		while let Some(current) = pending.pop() {
+			if !visited.insert(current) {
+				continue;
+			}
+			for index in 0..self.tree.nodes.len() {
+				let node = NodeId::new(index);
+				let value = match self.view(node) {
+					View::Use { value, .. }
+						if self.analysis.symbols.symbol_of_decl(node) == Some(current) =>
+					{
+						value
+					}
+					View::Reuse { value, .. }
+						if self.analysis.resolution(node) == Resolution::Local(current) =>
+					{
+						value
+					}
+					_ => continue,
+				};
+				let value = self.strip_reference(value);
+				if !matches!(self.view(value), View::Name(_)) {
+					continue;
+				}
+				let Resolution::Local(source) = self.analysis.resolution(value) else {
+					continue;
+				};
+				let info = self.analysis.symbols.symbol(source);
+				if matches!(info.kind, SymbolKind::Use | SymbolKind::MutableUse) {
+					pending.push(source);
+				} else if !self.is_object_reference(info.ty)
+					&& !self.map_aliases.contains_key(&source)
+				{
+					match self.references.get(&source) {
+						Some(Reference::Place(Parts {
+							key: Key::Whole(local, None),
+							..
+						})) => locals.push(local.clone()),
+						Some(_) => {}
+						None => locals.push(self.name_of(source)),
+					}
+				}
+			}
+		}
+		locals.sort();
+		locals.dedup();
+		locals
+	}
+
+	fn choice_values(&mut self, parts: &Parts, locals: &[String]) -> Option<(Expr, Expr, Expr)> {
+		let absent = || Expr::primary("undefined");
+		match &parts.key {
+			Key::Whole(local, None) => {
+				let position = locals.iter().position(|candidate| candidate == local)?;
+				Some((
+					absent(),
+					absent(),
+					Expr::primary((position + 1).to_string()),
+				))
+			}
+			Key::Choice {
+				selector,
+				locals: source,
+				key,
+			} => {
+				let mut selected = "0".to_string();
+				for (index, local) in source.iter().enumerate().rev() {
+					let position = locals.iter().position(|candidate| candidate == local)?;
+					selected = format!(
+						"{} === {} ? {} : {selected}",
+						selector.text,
+						index + 1,
+						position + 1
+					);
+				}
+				Some((
+					parts.container.clone()?,
+					key.clone(),
+					Expr::new(selected, js::Prec::Conditional),
+				))
+			}
+			_ => self
+				.parts_pair(parts)
+				.map(|(container, key)| (container, key, Expr::primary("0"))),
+		}
+	}
+
+	fn bind_local_choice(&mut self, symbol: SymbolId, parts: Parts, locals: Vec<String>) -> bool {
+		let Some((container, key, selector)) = self.choice_values(&parts, &locals) else {
+			return false;
+		};
+		let name = self.declare(symbol);
+		let names = [
+			format!("{name}$container"),
+			format!("{name}$key"),
+			format!("{name}$choice"),
+		];
+		for (name, value) in names.iter().zip([container, key, selector]) {
+			let keyword = if self.is_module_value(symbol) || self.guard_binding(name) {
+				""
+			} else {
+				"let "
+			};
+			self.out.line(format!("{keyword}{name} = {};", value.text));
+		}
+		self.bind_reference_parts(
+			symbol,
+			Parts {
+				container: Some(Expr::name(names[0].clone(), false)),
+				key: Key::Choice {
+					selector: Expr::name(names[2].clone(), false),
+					locals,
+					key: Expr::name(names[1].clone(), false),
+				},
+				optional: parts.optional,
+			},
+		);
+		true
+	}
+
+	/// Snapshot the selected location before evaluating an assignment's value.
+	pub(super) fn local_choice_place(&mut self, symbol: SymbolId, ty: TypeId) -> Option<Place> {
+		let Reference::Place(parts) = self.references.get(&symbol)?.clone() else {
+			return None;
+		};
+		let Key::Choice {
+			selector,
+			locals,
+			key,
+		} = parts.key
+		else {
+			return None;
+		};
+		let selector = self.keep_value_part(selector);
+		let container = self.keep_value_part(parts.container?);
+		let key = self.keep_value_part(key);
+		let text = self
+			.read_parts(&Parts {
+				container: Some(container.clone()),
+				key: Key::Choice {
+					selector: selector.clone(),
+					locals: locals.clone(),
+					key: key.clone(),
+				},
+				optional: parts.optional,
+			})
+			.text;
+		let helper = self.helper("faReferenceSet");
+		Some(Place {
+			text,
+			ty,
+			map: None,
+			reference: None,
+			choice: Some(LocalChoice {
+				selector: selector.text,
+				locals,
+				helper: helper.to_string(),
+				container: container.text,
+				key: key.text,
+			}),
+		})
+	}
+
 	pub(crate) fn use_declaration(&mut self, node: NodeId, value: NodeId, mutable: bool) {
 		let Some(symbol) = self.analysis.symbols.symbol_of_decl(node) else {
 			return;
@@ -715,6 +911,12 @@ impl Generator<'_> {
 		let Some(mut parts) = self.reference_parts(value, true) else {
 			return;
 		};
+		if mutable {
+			let locals = self.scalar_reference_targets(symbol);
+			if !locals.is_empty() && self.bind_local_choice(symbol, parts.clone(), locals) {
+				return;
+			}
+		}
 		if let Key::Value(value) = &parts.key {
 			let name = self.declare(symbol);
 			let keyword = if self.is_module_value(symbol) || self.guard_binding(&name) {
@@ -819,6 +1021,30 @@ impl Generator<'_> {
 			{
 				continue;
 			}
+			let locals = self.scalar_reference_targets(symbol);
+			if self.analysis.symbols.symbol(symbol).kind == SymbolKind::MutableUse
+				&& !locals.is_empty()
+			{
+				let name = self.declare(symbol);
+				let container = format!("{name}$container");
+				let key = format!("{name}$key");
+				let selector = format!("{name}$choice");
+				self.module_slots
+					.extend([container.clone(), key.clone(), selector.clone()]);
+				self.bind_reference_parts(
+					symbol,
+					Parts {
+						container: Some(Expr::name(container, false)),
+						key: Key::Choice {
+							selector: Expr::name(selector, false),
+							locals,
+							key: Expr::name(key, false),
+						},
+						optional: self.may_be_none(ty),
+					},
+				);
+				continue;
+			}
 			if let View::Name(_) = self.view(self.strip_reference(value))
 				&& let Resolution::Local(source) =
 					self.analysis.resolution(self.strip_reference(value))
@@ -861,6 +1087,33 @@ impl Generator<'_> {
 				let value = self.expr(value);
 				let name = self.declare(symbol);
 				self.out.line(format!("{name} = {};", value.text));
+			}
+			Some(Reference::Place(Parts {
+				container: Some(container),
+				key: Key::Choice {
+					selector,
+					locals,
+					key,
+				},
+				..
+			})) => {
+				let Some(parts) = self.reference_parts(value, true) else {
+					return;
+				};
+				let Some((new_container, new_key, new_selector)) =
+					self.choice_values(&parts, &locals)
+				else {
+					self.unsupported(node, "this reference selection");
+					return;
+				};
+				let new_container = self.keep_value_part(new_container);
+				let new_key = self.keep_value_part(new_key);
+				let new_selector = self.keep_value_part(new_selector);
+				self.out
+					.line(format!("{} = {};", container.text, new_container.text));
+				self.out.line(format!("{} = {};", key.text, new_key.text));
+				self.out
+					.line(format!("{} = {};", selector.text, new_selector.text));
 			}
 			Some(Reference::Place(parts)) => {
 				let absent = matches!(self.view(self.strip_reference(value)), View::None);
@@ -922,6 +1175,15 @@ impl Generator<'_> {
 							Key::Entry(key) => Key::Entry(self.keep_value_part(key)),
 							Key::Dynamic(key) => Key::Dynamic(self.keep_value_part(key)),
 							Key::Set(key) => Key::Set(self.keep_value_part(key)),
+							Key::Choice {
+								selector,
+								locals,
+								key,
+							} => Key::Choice {
+								selector: self.keep_value_part(selector),
+								locals,
+								key: self.keep_value_part(key),
+							},
 							other => other,
 						};
 						return Some(parts);
@@ -1293,8 +1555,27 @@ impl Generator<'_> {
 	/// value a reference designates (not a value of a map, which `set`
 	/// replaces, nor a union or an optional place).
 	pub(crate) fn writes_in_place(&mut self, target: NodeId) -> bool {
+		let storage_ty = match self.view(target) {
+			View::Name(_) => match self.analysis.resolution(target) {
+				Resolution::Local(symbol)
+					if !matches!(self.references.get(&symbol), Some(Reference::Object)) =>
+				{
+					self.analysis.symbols.symbol(symbol).ty
+				}
+				_ => self.type_of(target),
+			},
+			View::Access { members, .. } => {
+				match members.last().map(|node| self.analysis.resolution(node)) {
+					Some(Resolution::Field(shape, index)) => {
+						self.types.shape_fields(shape)[index as usize].ty
+					}
+					_ => self.type_of(target),
+				}
+			}
+			_ => self.type_of(target),
+		};
 		let ty = self.type_of(target);
-		if !self.is_object_reference(ty) {
+		if self.may_be_none(storage_ty) || !self.is_object_reference(ty) {
 			return false;
 		}
 		match self.view(target) {

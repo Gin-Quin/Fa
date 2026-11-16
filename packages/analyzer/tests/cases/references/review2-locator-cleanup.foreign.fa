@@ -1,3 +1,4 @@
+-- file: main.foreign.fa
 type Node = { left: Integer, right: Integer }
 let scratchOwners: Array<Node> = [{ left = 3, right = 4 }]
 function choose = (values: Array<Node>, right: Boolean): Integer in values throws IndexError => {

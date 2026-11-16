@@ -967,7 +967,7 @@ impl Generator<'_> {
 			return;
 		};
 		if self.needs_statements(value) {
-			if place.map.is_some() {
+			if place.map.is_some() || place.reference.is_some() || place.choice.is_some() {
 				// a value of a map: computed into a temporary, then `set`
 				let temp = self.temp();
 				self.out.line(format!("let {temp};"));

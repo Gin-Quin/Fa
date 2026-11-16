@@ -333,6 +333,7 @@ mod tests {
 				.or_else(|| exports[0].strip_prefix("async function "))
 				.or_else(|| exports[0].strip_prefix("class "))
 				.or_else(|| exports[0].strip_prefix("const "))
+				.or_else(|| exports[0].strip_prefix("let "))
 				.unwrap_or_else(|| panic!("`{}` exports `{}`", helper.name, exports[0]));
 			let declared: String = declared
 				.chars()

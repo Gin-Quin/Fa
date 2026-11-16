@@ -15,7 +15,7 @@ import { FaHashMap, faIsBytes, FaSet } from "./collections.js";
 import { faSharedHandle } from "./concurrency.js";
 import { faSides } from "./relations.js";
 
-// @fa-helper faCopyShell deps: FaHashMap FaSet faIsBytes
+// @fa-helper faCopyShell deps: FaHashMap FaSet
 /**
  * An empty container of the same kind as `source`: an array, a `Map`, a
  * `FaHashMap` or `FaSet` with the same hash and key function, a `Set`, or an
@@ -24,7 +24,6 @@ import { faSides } from "./relations.js";
  * @returns {any}
  */
 export function faCopyShell(source) {
-	if (faIsBytes(source)) return source.slice();
 	if (Array.isArray(source)) {
 		return [];
 	}

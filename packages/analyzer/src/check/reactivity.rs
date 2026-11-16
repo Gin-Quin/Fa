@@ -249,18 +249,8 @@ impl Walker<'_> {
 		) {
 			return;
 		}
-		let target = self.strip_groups(target);
-		self.move_handles(&[target]);
-		if let Resolution::Local(symbol) = self.a.resolution(target)
-			&& !self
-				.body
-				.flow
-				.consumed
-				.iter()
-				.any(|&(other, _)| other == symbol)
-		{
-			self.body.flow.consumed.push((symbol, n));
-		}
+		let members: Vec<_> = members.iter().take(members.len() - 1).collect();
+		self.note_lifetime_end(n, target, &members);
 	}
 
 	/// A declaration gives its symbol a new value: it is not consumed.

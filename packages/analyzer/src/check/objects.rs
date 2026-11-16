@@ -856,6 +856,12 @@ impl Walker<'_> {
 						};
 					}
 					Some((ty, _)) => {
+						if let Some(place) = place {
+							w.move_places.insert(n, vec![place]);
+							if let Some(symbol) = w.place_symbol(place) {
+								w.record_move_read(n, symbol);
+							}
+						}
 						if let Some(owner) = selected_owner {
 							w.a.method_instantiations.insert(member, owner);
 						}

@@ -70,7 +70,7 @@ A copy preserves contents, not spare capacity. Reserve the destination separatel
 
 ### Explicit `copy`
 
-`copy expression` evaluates its operand once and produces a fresh, independent value of the operand's type. An expected type can narrow the stored result, as for any assignment. It is a value, never an assignable place or an alias. An explicit expected-type projection, such as `function data = (resource: Resource): Plain => copy resource`, copies only the copyable plain data fields; it does not duplicate the resource or its destructor. A retained unique field still makes that projection illegal. It recursively copies owned data, including collections and recursive children; shared handles remain shared. It accepts ordinary values too. It cannot duplicate a Task, a resource or any owned composite containing one (`MEM003`).
+`copy expression` evaluates its operand once and produces a fresh, independent value of the operand's type. An expected type can narrow the stored result, as for any assignment. It is a value, never an assignable place or an alias. For a plain data record, an expected-type projection copies only its retained fields; omitted fields stay with the source. A retained unique field makes the copy illegal. A resource or built-in lifetime owner always needs a written data projection first: `copy resource` is `MEM003`, even with a plain expected type. It recursively copies owned data, including collections and recursive children; shared handles remain shared. It accepts ordinary values too. It cannot duplicate a Task, a resource or any owned composite containing one (`MEM003`).
 
 Access, indexing and calls bind more tightly than `copy`; arithmetic binds less tightly: `copy source.items + other` means `(copy source.items) + other`. Parenthesize a larger operand: `copy (left ?? right)`. `copy` is reserved, like `await`: `copy(x)` copies the parenthesized expression, `copy [1, 2]` and `copy[0]` copy array literals, and `copy -x` copies the negated value. Whitespace does not change its meaning; a newline may follow it. A variable, parameter, function or type cannot be named `copy` (`E-LEX-3`: “`copy` is reserved: it copies a value (`copy items`); choose another name”). After a dot it is accepted as a member name, just like `await`: `object.copy(value)` calls that member.
 
@@ -234,6 +234,34 @@ console.log(read(first), read(first), read(second)) -- parameters only borrow
 ```
 
 An implicit function adapter cannot copy a resource result into a plain data result. Write the projection and any required `copy` visibly in the source function. A borrowed structural view can read fields for the duration of a call; it does not remove the resource's destructor.
+
+### Structural projections
+
+A store is checked on what is actually stored. A conversion to a narrower data type builds a value from its retained fields only. Keeping only ordinary fields needs no `copy`, even when a discarded field owns a structure:
+
+```fa
+function label = (box: { items: Array<Integer>, name: String }): { name: String } => box
+```
+
+A retained structure field follows the normal store rule. A borrowed parameter cannot surrender it; a still-used source needs `copy` (`MEM004` on the retained field). A last-use owner may transfer its retained fields under the field move rules:
+
+```fa
+function select = (box: { items: Array<Integer>, name: String }): { items: Array<Integer> } => box -- error: MEM004: box.items needs copy
+function selectCopy = (box: { items: Array<Integer>, name: String }): { items: Array<Integer> } => ({ items = copy box.items })
+```
+
+A resource declaring `destroy`, or a built-in lifetime owner, cannot be narrowed implicitly when stored (`MEM002`). Write the data projection visibly; `copy resource` remains `MEM003`. No conversion may silently drop its destructor:
+
+```fa
+-- Held.foreign.fa: destroy declarations belong to foreign files.
+type Held = { name: String, function destroy = (self) => {} }
+let resource = Held { name = "file" }
+let invalid: { name: String } = resource -- error: MEM002: write { name = resource.name }
+let plain = { name = resource.name }
+console.log(plain)
+```
+
+Borrowing a narrower view does not truncate its owner. See [structural typing](/advanced/structural-typing#copying-narrows-referencing-does-not).
 
 ### Shared handles
 

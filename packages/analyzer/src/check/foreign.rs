@@ -908,6 +908,56 @@ impl Walker<'_> {
 		}
 	}
 
+	/// Closing a handle invalidates its place but leaves its storage/drop
+	/// bookkeeping in place: the runtime ends its lifetime itself.
+	pub(crate) fn note_lifetime_end(&mut self, call: NodeId, target: NodeId, members: &[NodeId]) {
+		let Some(place) = self.access_place(target, members) else {
+			return;
+		};
+		let Some(symbol) = self.place_symbol(place) else {
+			return;
+		};
+		if !self.ownership_source_owned(symbol, call) {
+			self.report_borrowed_move(call, symbol);
+			return;
+		}
+		let root = self.places.symbol(symbol);
+		let mut parent = self.places.parent(place);
+		let mut resource = false;
+		while let Some(holder) = parent {
+			resource |= self
+				.place_type(holder)
+				.is_some_and(|ty| self.s.types.has_lifetime_boundary(ty));
+			parent = self.places.parent(holder);
+		}
+		if resource {
+			let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, call,
+				"this field belongs to a resource whose destructor still owns every field; end the complete resource's lifetime in its owning scope instead");
+			self.report_flow(diagnostic);
+			return;
+		}
+		self.lifetime_ends.insert(call, place);
+		if place == root {
+			if !self
+				.body
+				.flow
+				.consumed
+				.iter()
+				.any(|&(other, _)| other == symbol)
+			{
+				self.body.flow.consumed.push((symbol, call));
+			}
+		} else if !self
+			.body
+			.flow
+			.moved_fields
+			.iter()
+			.any(|&(other, _)| other == place)
+		{
+			self.body.flow.moved_fields.push((place, call));
+		}
+	}
+
 	/// A copy of a move-only value (a declaration, an assignment, a returned
 	/// value, an item pushed) moves it: a later use is `MEM002`.
 	pub(crate) fn note_resource_move(&mut self, value: NodeId) {
@@ -925,15 +975,15 @@ impl Walker<'_> {
 		let value = self.strip_groups(value);
 		let actual = self.a.type_of(value);
 		let ty = self.a.coercion(value).unwrap_or(actual);
-		if !self.body.flow.reachable || !self.s.types.is_unique(ty) {
+		if !self.body.flow.reachable
+			|| self.store_ownership(value) != crate::types::Ownership::Unique
+		{
 			return;
 		}
-		if self.s.types.has_destroy_boundary(actual)
-			&& !self.s.types.preserves_resource_owner(actual, ty)
+		if self.s.types.has_lifetime_boundary(actual)
+			&& !self.s.types.preserves_lifetime_owner(actual, ty)
 		{
-			let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value,
-				"this resource cannot transfer an owning projection: its destructor still needs every field; move the complete resource instead");
-			self.report_flow(diagnostic);
+			self.report_projection_erasure(value, actual, ty);
 			return;
 		}
 		let tree = std::sync::Arc::clone(&self.tree);
@@ -983,12 +1033,12 @@ impl Walker<'_> {
 			let holders = std::iter::once(root).chain(members.iter().take(count - 1));
 			let resource = holders
 				.into_iter()
-				.find(|&holder| self.s.types.has_destroy_boundary(self.a.type_of(holder)));
+				.find(|&holder| self.s.types.has_lifetime_boundary(self.a.type_of(holder)));
 			if let Some(resource) = resource {
 				let text = tree.text(value.index()).to_string();
 				let name = tree.text(resource.index()).to_string();
 				let message = format!(
-					"`{text}` can't be moved out of `{name}`: its type has `destroy`, which uses every field; move the whole value instead"
+					"`{text}` can't be moved out of `{name}`: its type owns a lifetime that must stay whole; move the whole value instead"
 				);
 				let diagnostic =
 					self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value, message);

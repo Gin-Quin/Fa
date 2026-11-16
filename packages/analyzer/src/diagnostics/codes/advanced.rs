@@ -70,8 +70,8 @@ codes! {
 	FFI012 = "FFI012", Error, [], "an API function that uses a module-level mutable value not thread-safe; module-level values initialized at load time";
 	FFI013 = "FFI013", Error, [], "cLibrary with a JavaScript target";
 	FFI014 = "FFI014", Error, [], "a cLibrary API that isn't a namespace of functions with C types, throwing one Errors type";
-	MEM002 = "MEM002", Error, ["CONC009"], "on a later use). Without a binding, the watch lives to the end of its scope; at module level, for the program";
-	MEM003 = "MEM003", Error, [], "a Database can't be copied";
+	MEM002 = "MEM002", Error, ["CONC009"], "a value or path was moved or invalidated, a borrow cannot transfer ownership, or a conversion would erase a lifetime owner";
+	MEM003 = "MEM003", Error, [], "a unique value cannot be copied or owned by an escaping capture";
 	MEM004 = "MEM004", Error, [], "an implicit store would duplicate a structure; write copy, borrow with use, or move at the last use";
 	MEM005 = "MEM005", Error, [], "an error payload owns a unique value: keep an identifier or a description of the resource instead (lead, 2026-11-16). Synchronization…";
 	META001 = "META001", Error, [], "argument of a compile-time call not known at compile time";

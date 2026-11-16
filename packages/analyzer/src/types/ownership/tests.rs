@@ -69,6 +69,57 @@ fn destructor_boundaries_survive_only_whole_resource_lifting() {
 }
 
 #[test]
+fn a_projection_classifies_only_retained_data() {
+	let mut types = TypeStore::new();
+	let array = types.array(TypeId::INTEGER);
+	let item = field(&mut types, "items", array);
+	let name = field(&mut types, "name", TypeId::STRING);
+	let task = task(&mut types);
+	let pending = field(&mut types, "pending", task);
+	let source = types.object(&[item, name, pending], None);
+	let names = types.object(&[name], None);
+	let items = types.object(&[item], None);
+	let projection = types.store_projection(source, names);
+	assert_eq!(projection.ownership, Ownership::Ordinary);
+	assert!(projection.erased_owner.is_none());
+	assert_eq!(
+		types.store_projection(source, items).ownership,
+		Ownership::Structure
+	);
+	assert_eq!(
+		types.store_projection(source, source).ownership,
+		Ownership::Unique
+	);
+	let owner = nominal(&mut types, "Resource", NominalKind::Resource, &[]);
+	let resource = types.object(&[name], Some(owner));
+	assert_eq!(
+		types.store_projection(resource, names).erased_owner,
+		Some(resource)
+	);
+	let source = types.array(resource);
+	let target = types.array(names);
+	assert_eq!(
+		types.store_projection(source, target).erased_owner,
+		Some(resource)
+	);
+}
+
+#[test]
+fn widening_does_not_invent_an_owned_union_alternative() {
+	let mut types = TypeStore::new();
+	let task = task(&mut types);
+	let union = types.union(&[task, TypeId::STRING]);
+	assert_eq!(
+		types.store_projection(TypeId::STRING, union).ownership,
+		Ownership::Ordinary
+	);
+	assert_eq!(
+		types.store_projection(task, union).ownership,
+		Ownership::Unique
+	);
+}
+
+#[test]
 fn ordinary_scalars_literals_and_type_level_values() {
 	let mut types = TypeStore::new();
 	let text = types.string_literal("ordinary");

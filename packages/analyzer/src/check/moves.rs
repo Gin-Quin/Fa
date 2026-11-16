@@ -33,7 +33,7 @@ pub(crate) struct LastUse {
 }
 
 impl Walker<'_> {
-	fn record_move_read(&mut self, node: NodeId, symbol: SymbolId) {
+	pub(crate) fn record_move_read(&mut self, node: NodeId, symbol: SymbolId) {
 		let reads = self.move_reads.entry(node).or_default();
 		if !reads.contains(&symbol) {
 			reads.push(symbol);
@@ -162,7 +162,9 @@ impl Walker<'_> {
 					// used as a value: it may run at any later point
 					let value = self.callee_name_node != Some(n);
 					for capture in info.captures.clone() {
-						self.record_move_read(n, capture);
+						if value {
+							self.record_move_read(n, capture);
+						}
 						self.note_use(NodeId(u32::MAX), capture);
 						if value {
 							self.pinned_captures.insert(capture);

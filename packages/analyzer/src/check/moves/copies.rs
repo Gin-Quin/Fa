@@ -12,13 +12,22 @@ use crate::syntax::View;
 use crate::types::{Ownership, TypeKind};
 
 impl Walker<'_> {
+	/// Widening the destination cannot introduce owned data that the
+	/// source does not have. Structural projection checks retained fields.
+	pub(crate) fn store_ownership(&mut self, value: NodeId) -> Ownership {
+		let actual = self.a.type_of(value);
+		let target = self.a.coercion(value).unwrap_or(actual);
+		self.s.types.store_projection(actual, target).ownership
+	}
+
 	pub(super) fn finish_copy_checks(&mut self, conflicts: &FxHashMap<NodeId, NodeId>) {
 		for index in 0..self.tree.nodes.len() {
 			let site = NodeId::new(index);
-			if matches!(self.view(site), View::Copy(_))
-				&& self.s.types.is_unique(self.a.type_of(site))
+			if let View::Copy(inner) = self.view(site)
+				&& (self.store_ownership(inner) == Ownership::Unique
+					|| self.s.types.has_lifetime_boundary(self.a.type_of(inner)))
 			{
-				let ty = self.display(self.a.type_of(site));
+				let ty = self.display(self.a.type_of(inner));
 				let diagnostic = self.diagnostic(&MEM003, site, format!("`{ty}` is unique or owns a unique value and cannot be copied; move its owner, or create a new instance instead"));
 				self.report(diagnostic);
 			}
@@ -26,14 +35,28 @@ impl Walker<'_> {
 		let mut sites: Vec<_> = self.copy_sites.iter().copied().collect();
 		sites.sort_unstable();
 		for value in sites {
-			if !self.copy_reads_place(value) || self.ownership_unreachable(value) {
+			if self.ownership_unreachable(value) {
 				continue;
 			}
+			let actual = self.a.type_of(value);
 			let ty = self
 				.a
 				.coercion(value)
 				.unwrap_or_else(|| self.a.type_of(value));
-			let category = self.s.types.ownership(ty);
+			if self
+				.s
+				.types
+				.store_projection(actual, ty)
+				.erased_owner
+				.is_some()
+			{
+				self.report_projection_erasure(value, actual, ty);
+				continue;
+			}
+			if !self.copy_reads_place(value) {
+				continue;
+			}
+			let category = self.store_ownership(value);
 			if !matches!(category, Ownership::Structure | Ownership::Unique) {
 				continue;
 			}
@@ -52,6 +75,65 @@ impl Walker<'_> {
 			} else {
 				self.report_structure_copy(value, conflicts.get(&value).copied());
 			}
+		}
+	}
+
+	pub(crate) fn check_function_projection_owner(
+		&mut self,
+		node: NodeId,
+		actual: crate::ids::TypeId,
+		target: crate::ids::TypeId,
+	) {
+		let TypeKind::Function(source) = self.s.types.kind(actual) else {
+			return;
+		};
+		let TypeKind::Function(target) = self.s.types.kind(target) else {
+			return;
+		};
+		let actual = self.s.types.sig(source).ret;
+		let target = self.s.types.sig(target).ret;
+		if self
+			.s
+			.types
+			.store_projection(actual, target)
+			.erased_owner
+			.is_some()
+			&& !self.output.iter().any(|diagnostic| {
+				diagnostic.code.id == MEM002.id && diagnostic.location.span == self.span(node)
+			}) {
+			let diagnostic = self.diagnostic(&MEM002, node, format!("this function returns `{}`, whose lifetime cannot be erased by an implicit result adapter; return a written data projection from the function body, e.g. `{{ name = resource.name }}`, with `copy` on retained structure fields", self.display(actual)));
+			self.report_flow(diagnostic);
+		}
+	}
+
+	pub(crate) fn report_projection_erasure(
+		&mut self,
+		value: NodeId,
+		actual: crate::ids::TypeId,
+		ty: crate::ids::TypeId,
+	) {
+		if !self.output.iter().any(|diagnostic| {
+			diagnostic.code.id == MEM002.id && diagnostic.location.span == self.span(value)
+		}) {
+			let source = self.tree.text(value.index());
+			let fields = self
+				.s
+				.types
+				.fields_of(ty)
+				.iter()
+				.filter(|field| {
+					!field.flags.intersects(
+						crate::types::FieldFlags::METHOD | crate::types::FieldFlags::RELATION,
+					)
+				})
+				.map(|field| {
+					let name = self.s.types.syms.resolve(field.name);
+					format!("{name} = {source}.{name}")
+				})
+				.collect::<Vec<_>>()
+				.join(", ");
+			let diagnostic = self.diagnostic(&MEM002, value, format!("this conversion would erase the lifetime owner `{}`; its destructor must stay with its owner; write a data projection explicitly, e.g. `{{ {fields} }}`, adding `copy` to any retained structure field", self.display(actual)));
+			self.report(diagnostic);
 		}
 	}
 
@@ -110,17 +192,42 @@ impl Walker<'_> {
 	}
 
 	fn report_structure_copy(&mut self, value: NodeId, later: Option<NodeId>) {
-		let ty = self.display(
-			self.a
-				.coercion(value)
-				.unwrap_or_else(|| self.a.type_of(value)),
-		);
-		let text = self.tree.text(value.index());
+		let actual = self.a.type_of(value);
+		let target = self.a.coercion(value).unwrap_or(actual);
+		let ty = self.display(target);
+		let text = self.tree.text(value.index()).to_string();
+		let mut retained = Vec::new();
+		if actual != target {
+			for field in self.s.types.fields_of(target).to_vec() {
+				if let Some(source) = self
+					.s
+					.types
+					.fields_of(actual)
+					.iter()
+					.find(|source| source.name == field.name)
+					.copied() && self.s.types.store_projection(source.ty, field.ty).ownership
+					== Ownership::Structure
+				{
+					let name = self.s.types.syms.resolve(field.name);
+					retained.push(format!(
+						"`{text}.{name}` (write `{name} = copy {text}.{name}` in a projection)"
+					));
+				}
+			}
+		}
+		let projection = if retained.is_empty() {
+			String::new()
+		} else {
+			format!(
+				"; retained field {} needs an independent copy",
+				retained.join(", ")
+			)
+		};
 		let reason = later.map_or_else(
 			|| "its source is borrowed or this field cannot transfer ownership here".to_string(),
 			|node| format!("its source is used again on line {}", self.line_of(node)),
 		);
-		let mut diagnostic = self.diagnostic(&MEM004, value, format!("storing `{text}` would silently copy the structure `{ty}`: {reason}; write `copy {text}`, borrow with `use`, or move the later use before this store"));
+		let mut diagnostic = self.diagnostic(&MEM004, value, format!("storing `{text}` would silently copy the structure `{ty}`: {reason}{projection}; write `copy {text}`, borrow with `use`, or move the later use before this store"));
 		if let Some(node) = later {
 			diagnostic = diagnostic.with_related(
 				Location {
@@ -244,5 +351,80 @@ mod tests {
 			codes("function bad = <Item>(task: Task<Item>): Task<Item> => copy task\n"),
 			["MEM003"]
 		);
+	}
+
+	#[test]
+	fn projecting_ordinary_fields_does_not_copy_the_discarded_collection() {
+		analyzed(
+			"function label = (box: { items: Array<Integer>, name: String }): { name: String } => box\n",
+		);
+		assert_eq!(
+			codes(
+				"function selected = (box: { items: Array<Integer>, name: String }): { items: Array<Integer> } => box\n"
+			),
+			["MEM004"]
+		);
+		analyzed(
+			"function selected = (box: { items: Array<Integer>, name: String }): { items: Array<Integer> } => ({ items = copy box.items })\n",
+		);
+	}
+
+	#[test]
+	fn storing_an_ordinary_union_member_does_not_move_its_source() {
+		analyzed(
+			"let name = \"ordinary\"\nlet first: String | Task<Integer> = name\nlet second: String | Task<Integer> = copy name\nconsole.log(name, first, second)\n",
+		);
+	}
+
+	#[test]
+	fn a_resource_requires_a_written_data_projection() {
+		for (body, expected) in [
+			(
+				"let plain: { name: String } = held\nconsole.log(plain)",
+				vec!["MEM002"],
+			),
+			(
+				"let plain: { name: String } = copy held\nconsole.log(plain)",
+				vec!["MEM003"],
+			),
+			(
+				"let plain = { name = held.name }\nconsole.log(plain)",
+				vec![],
+			),
+		] {
+			let source = format!(
+				"type Held = {{ name: String, function destroy = (self) => {{}} }}\nlet held = Held {{ name = \"kept\" }}\n{body}\n"
+			);
+			let mut session = crate::Session::new();
+			let file = session.set_source("projection.foreign", std::sync::Arc::from(source));
+			session.analyze_file(file);
+			let diagnostics = session.diagnostics(file);
+			assert_eq!(
+				diagnostics
+					.iter()
+					.map(|diagnostic| diagnostic.code.id)
+					.collect::<Vec<_>>(),
+				expected,
+				"{diagnostics:?}"
+			);
+			if expected == ["MEM002"] {
+				assert!(
+					diagnostics[0].message.contains("name = held.name"),
+					"{diagnostics:?}"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn a_function_adapter_cannot_erase_a_result_destructor() {
+		let source = "type Held = { name: String, function destroy = (self) => {} }\nfunction acquire = (): Held => Held { name = \"file\" }\ntype Plain = { name: String }\nlet make: () => Plain = acquire\nconsole.log(make())\n";
+		let mut session = crate::Session::new();
+		let file = session.set_source("adapter.foreign", std::sync::Arc::from(source));
+		session.analyze_file(file);
+		let diagnostics = session.diagnostics(file);
+		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+		assert_eq!(diagnostics[0].code.id, "MEM002", "{diagnostics:?}");
+		assert!(diagnostics[0].message.contains("function body"));
 	}
 }

@@ -27,7 +27,7 @@ use crate::ids::{
 	ParamListId, PathId, RecId, ReqListId, ShapeId, SigId, StepListId, Sym, SymIntId, SymListId,
 };
 pub use int::{ComputeType, IntStorage, IntType, Interval};
-pub use ownership::Ownership;
+pub use ownership::{Ownership, StoreProjection};
 pub use relate::{Mode, Reason};
 pub use store::TypeStore;
 pub use subst::{Bindings, Candidates};

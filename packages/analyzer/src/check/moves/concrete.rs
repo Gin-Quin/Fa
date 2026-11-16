@@ -6,7 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::graph::Graph;
 use crate::analysis::{Argument, Callee, FieldValue, NodeFlags};
 use crate::check::Walker;
-use crate::ids::{NodeId, SymbolId};
+use crate::ids::{NodeId, PlaceId, SymbolId};
 use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::View;
 
@@ -38,11 +38,7 @@ impl Walker<'_> {
 				if matches!(self.view(value), View::Name(_))
 					&& let Resolution::Local(symbol) = self.a.resolution(value)
 					&& matches!(
-						self.s.types.ownership(
-							self.a
-								.coercion(value)
-								.unwrap_or_else(|| self.a.type_of(value))
-						),
+						self.store_ownership(value),
 						crate::types::Ownership::Structure | crate::types::Ownership::Unique
 					) {
 					sources.entry(symbol).or_default().push(value);
@@ -62,9 +58,9 @@ impl Walker<'_> {
 					}
 					let actual = self.a.type_of(value);
 					let subject = self.a.coercion(value).unwrap_or(actual);
-					let unique = self.s.types.is_unique(subject);
-					let complete = !self.s.types.has_destroy_boundary(actual)
-						|| self.s.types.preserves_resource_owner(actual, subject);
+					let unique = self.store_ownership(value) == crate::types::Ownership::Unique;
+					let complete = !self.s.types.has_lifetime_boundary(actual)
+						|| self.s.types.preserves_lifetime_owner(actual, subject);
 					if reachable
 						&& complete && self.ownership_source_owned(symbol, value)
 						&& (unique || conflict.is_none())
@@ -154,15 +150,23 @@ impl Walker<'_> {
 
 	/// A local call observes its captures when it runs, after evaluating
 	/// arguments. Include globals and transitive local calls in that read.
-	fn ownership_reads(&self) -> FxHashMap<NodeId, Vec<SymbolId>> {
+	fn ownership_reads(&mut self) -> FxHashMap<NodeId, Vec<SymbolId>> {
 		let mut reads = self.move_reads.clone();
-		// A borrowed argument stays live through the call, not just until
-		// its expression was evaluated (later arguments may store an owner).
-		for (&call, info) in &self.a.calls {
+		for (call, place) in self.lifetime_ends.clone() {
+			self.observe_places(call, [place], &mut reads);
+		}
+		let calls: Vec<_> = self
+			.a
+			.calls
+			.iter()
+			.map(|(&call, info)| (call, info.clone()))
+			.collect();
+		// Arguments and method receivers borrow until the call completes,
+		// including while later arguments are evaluated.
+		for (call, info) in &calls {
 			for argument in &info.arguments {
-				let node = match *argument {
-					Argument::Given(node) => node,
-					_ => continue,
+				let Argument::Given(node) = *argument else {
+					continue;
 				};
 				if self.copy_sites.contains(&self.strip_groups(node))
 					|| self
@@ -175,49 +179,102 @@ impl Walker<'_> {
 						}) {
 					continue;
 				}
-				if let Some(symbol) = crate::lower::copies::place_root(&self.tree, &self.a, node) {
-					let output = reads.entry(call).or_default();
-					if !output.contains(&symbol) {
-						output.push(symbol);
-					}
+				let places = self.read_places(node);
+				self.observe_places(*call, places, &mut reads);
+			}
+			if let View::Call { callee, .. } = self.view(*call) {
+				let consumes_receiver = self.builtin_path(*call, callee).is_some_and(|path| {
+					matches!(
+						path,
+						"Subscription#stop"
+							| "Worker#stop" | "WorkerPool#shutdown"
+							| "TcpListener#close" | "TcpStream#close"
+					)
+				});
+				if !consumes_receiver && matches!(self.view(callee), View::Access { .. }) {
+					let places = self.move_places.get(&callee).cloned().unwrap_or_default();
+					self.observe_places(*call, places, &mut reads);
 				}
 			}
 		}
-		let mut free: FxHashMap<NodeId, FxHashSet<SymbolId>> = FxHashMap::default();
+		let mut free: FxHashMap<NodeId, FxHashSet<PlaceId>> = FxHashMap::default();
 		for (&node, symbols) in &reads {
+			if self.access_roots.contains(&node) {
+				continue;
+			}
 			let body = self.ownership_body(node);
 			for &symbol in symbols {
-				if self.ownership_body(self.a.symbols.symbol(symbol).decl_node) != body {
-					free.entry(body).or_default().insert(symbol);
+				if self.ownership_body(self.a.symbols.symbol(symbol).decl_node) == body {
+					continue;
+				}
+				let paths: Vec<_> = self
+					.move_places
+					.get(&node)
+					.into_iter()
+					.flatten()
+					.copied()
+					.filter(|&place| self.place_symbol(place) == Some(symbol))
+					.collect();
+				if paths.is_empty() {
+					free.entry(body)
+						.or_default()
+						.insert(self.places.symbol(symbol));
+				} else {
+					free.entry(body).or_default().extend(paths);
 				}
 			}
 		}
 		loop {
 			let mut changed = false;
-			for (&call, info) in &self.a.calls {
+			for (call, info) in &calls {
 				let Callee::Function(function) = info.callee else {
 					continue;
 				};
 				let Some(callee) = self.a.functions.get(&function) else {
 					continue;
 				};
-				let symbols = free.get(&callee.lambda).cloned().unwrap_or_default();
-				let body = self.ownership_body(call);
-				let output = reads.entry(call).or_default();
-				for symbol in symbols {
-					if !output.contains(&symbol) {
-						output.push(symbol);
-					}
+				let places = free.get(&callee.lambda).cloned().unwrap_or_default();
+				let body = self.ownership_body(*call);
+				for &place in &places {
+					let Some(symbol) = self.place_symbol(place) else {
+						continue;
+					};
 					if self.ownership_body(self.a.symbols.symbol(symbol).decl_node) != body {
-						changed |= free.entry(body).or_default().insert(symbol);
+						changed |= free.entry(body).or_default().insert(place);
 					}
 				}
+				self.observe_places(*call, places, &mut reads);
 			}
 			if !changed {
 				break;
 			}
 		}
 		reads
+	}
+
+	fn read_places(&self, node: NodeId) -> Vec<PlaceId> {
+		let node = self.strip_groups(node);
+		self.move_places.get(&node).cloned().unwrap_or_default()
+	}
+
+	fn observe_places(
+		&mut self,
+		node: NodeId,
+		places: impl IntoIterator<Item = PlaceId>,
+		reads: &mut FxHashMap<NodeId, Vec<SymbolId>>,
+	) {
+		for place in places {
+			if let Some(symbol) = self.place_symbol(place) {
+				let symbols = reads.entry(node).or_default();
+				if !symbols.contains(&symbol) {
+					symbols.push(symbol);
+				}
+				let paths = self.move_places.entry(node).or_default();
+				if !paths.contains(&place) {
+					paths.push(place);
+				}
+			}
+		}
 	}
 }
 
@@ -295,6 +352,16 @@ mod tests {
 				"function both = (left: Array<Integer>, right: { items: Array<Integer> }) => console.log(left, right.items)\nfunction run = () => { let items = [1]\nboth(items, { items = items }) }\n"
 			),
 			[false, false]
+		);
+	}
+
+	#[test]
+	fn an_alias_argument_borrows_the_owner_through_later_arguments() {
+		assert_eq!(
+			crate::check::test_support::codes(
+				"function both = (left: Array<Integer>, right: { items: Array<Integer> }) => console.log(left, right.items)\nfunction run = () => { let items = [1]\nuse alias = items\nboth(alias, { items = items }) }\n"
+			),
+			["MEM004"]
 		);
 	}
 

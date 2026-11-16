@@ -28,6 +28,11 @@ impl Walker<'_> {
 		// Several transfers of the same place share one traversal. A
 		// successful replacement ends the previous value's lifetime.
 		let mut moves: FxHashMap<PlaceId, Vec<NodeId>> = FxHashMap::default();
+		for (&node, &place) in &self.lifetime_ends {
+			if graph.at.contains_key(&node) {
+				moves.entry(place).or_default().push(node);
+			}
+		}
 		for &node in &self.a.moved_reads {
 			if graph.at.contains_key(&node)
 				&& let Some(places) = self.move_places.get(&node)
@@ -90,10 +95,17 @@ impl Walker<'_> {
 		}) {
 			return;
 		}
-		let text = self.tree.text(moved.index());
+		let text = if let crate::syntax::View::Call { callee, .. } = self.view(moved) {
+			let callee = self.tree.text(callee.index());
+			callee
+				.rsplit_once('.')
+				.map_or(callee, |(receiver, _)| receiver)
+		} else {
+			self.tree.text(moved.index())
+		};
 		let line = self.line_of(moved);
 		let diagnostic = self.diagnostic(&MEM002, node,
-			format!("`{text}` was moved on line {line} and may no longer be used here; use its new owner, or assign the moved place before using it again"))
+			format!("`{text}` was moved or its lifetime ended on line {line} and may no longer be used here; use its new owner, or assign the place before using it again"))
 			.with_related(Location { file: self.file, span: self.span(moved) }, "ownership transferred here");
 		self.report(diagnostic);
 	}
@@ -149,5 +161,44 @@ mod tests {
 			"{WORK}async function run = (): Integer => {{ let task = start work()\nlet pending = start do {{ await task }}\nawait pending }}\n"
 		);
 		assert_eq!(codes(&source), ["MEM002"]);
+	}
+
+	#[test]
+	fn a_local_call_reads_the_captured_field_instead_of_its_whole_owner() {
+		analyzed(&format!(
+			"{WORK}async function run = (): Integer => {{ let holder = {{ task = start work(), count = 2 }}\nfunction read = (): Integer => holder.count\nlet task = holder.task\nconsole.log(read())\nawait task }}\n"
+		));
+	}
+
+	#[test]
+	fn a_call_can_borrow_a_sibling_while_consuming_a_task_field() {
+		analyzed(&format!(
+			"{WORK}function choose = (count: Integer, task: Task<Integer>): Task<Integer> => task\nasync function run = (): Integer => {{ let holder = {{ task = start work(), count = 2 }}\nlet task = choose(holder.count, holder.task)\nawait task }}\n"
+		));
+	}
+
+	#[test]
+	fn closing_a_field_preserves_its_siblings() {
+		analyzed(
+			"let holder = { subscription = watch { console.log(1) }, count = 2 }\nholder.subscription.stop()\nconsole.log(holder.count)\n",
+		);
+		assert_eq!(
+			codes(
+				"let holder = { subscription = watch { console.log(1) }, count = 2 }\nholder.subscription.stop()\nconsole.log(holder.subscription)\n"
+			),
+			["MEM002"]
+		);
+	}
+
+	#[test]
+	fn a_catch_does_not_restore_a_closed_subscription() {
+		let source = "function run = (text: String) => { let subscription = watch { console.log(1) }\ndo { subscription.stop()\nInteger.parse(text) } catch _error => console.log(subscription) }\n";
+		assert_eq!(codes(source), ["MEM002"]);
+	}
+
+	#[test]
+	fn a_closure_cannot_end_a_captured_lifetime() {
+		let source = "function run = () => { let subscription = watch { console.log(1) }\nfunction finish = () => subscription.stop()\nfinish() }\n";
+		assert_eq!(codes(source), ["MEM002"]);
 	}
 }

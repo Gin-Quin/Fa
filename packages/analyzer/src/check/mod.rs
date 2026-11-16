@@ -481,6 +481,8 @@ pub struct Walker<'s> {
 	pub(crate) move_places: FxHashMap<NodeId, Vec<PlaceId>>,
 	/// Replacements restore ownership at their successful assignment.
 	pub(crate) move_writes: FxHashMap<NodeId, PlaceId>,
+	/// Explicit operations ending a unique handle's lifetime in place.
+	pub(crate) lifetime_ends: FxHashMap<NodeId, PlaceId>,
 	/// The providers of the requirements of the call being applied.
 	pub(crate) call_providers: Vec<Option<requirements::Provider>>,
 	/// The declared type of the callee's effect path being applied (advanced
@@ -662,6 +664,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		move_reads: FxHashMap::default(),
 		move_places: FxHashMap::default(),
 		move_writes: FxHashMap::default(),
+		lifetime_ends: FxHashMap::default(),
 		effect_types: FxHashMap::default(),
 		closure_writes: FxHashMap::default(),
 		rejected_effect_roots: rustc_hash::FxHashSet::default(),
@@ -940,6 +943,9 @@ impl Walker<'_> {
 			| View::Requires { .. }
 			| View::Effect { .. } => self.check_type_in_value_position(n),
 		};
+		if matches!(self.view(n), View::Index { .. }) {
+			self.note_place_read(n);
+		}
 		if let Some(slot) = self.a.types.get_mut(n.index())
 			&& slot.is_unset()
 		{
@@ -1125,6 +1131,7 @@ impl Walker<'_> {
 		};
 		match self.s.types.assignable(actual, target, Mode::Copy) {
 			Ok(()) => {
+				self.check_function_projection_owner(n, actual, target);
 				// a `Character` stored as a `String` is converted
 				if self.s.types.kind(actual) == TypeKind::Character
 					&& self.s.types.kind(target) == TypeKind::String

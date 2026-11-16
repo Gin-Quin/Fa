@@ -10,6 +10,9 @@ use rustc_hash::FxHashSet;
 
 use super::{FieldFlags, SyncKind, TypeId, TypeKind, TypeStore};
 
+mod projection;
+pub use projection::StoreProjection;
+
 /// The storage rule of a type. Unique ownership takes precedence over structure
 /// ownership; neither is inferred from the implementation's copy/drop flags.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

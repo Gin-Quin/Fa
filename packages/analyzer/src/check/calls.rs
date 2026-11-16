@@ -402,12 +402,10 @@ impl Walker<'_> {
 				if let Argument::Given(value) = argument {
 					let actual = self.a.type_of(*value);
 					if mode == Some(true)
-						&& self.s.types.has_destroy_boundary(actual)
-						&& !self.s.types.preserves_resource_owner(actual, target)
+						&& self.s.types.has_lifetime_boundary(actual)
+						&& !self.s.types.preserves_lifetime_owner(actual, target)
 					{
-						let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, *value,
-							"this resource cannot transfer a Task-owning projection: its destructor still needs every field; pass the complete resource to a borrowing parameter instead");
-						self.report_flow(diagnostic);
+						self.report_projection_erasure(*value, actual, target);
 					}
 					match mode {
 						Some(mode) => {

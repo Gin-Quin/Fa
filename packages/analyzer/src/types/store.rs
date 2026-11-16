@@ -762,37 +762,15 @@ impl TypeStore {
 	/// Destructors of the possible actual root values, through aliases and
 	/// selected union payloads. Ordinary data fields are not root boundaries.
 	fn resource_roots(&self, ty: TypeId) -> Vec<NominalId> {
-		let mut resources = Vec::new();
-		let mut pending = vec![ty];
-		let mut seen = rustc_hash::FxHashSet::default();
-		while let Some(ty) = pending.pop() {
-			if ty.is_unset() || !seen.insert(ty) {
-				continue;
-			}
-			match self.kind(ty) {
-				TypeKind::Object(shape) => {
-					if let Some(nominal) = self
-						.shape(shape)
-						.nominal
-						.filter(|&n| self.nominal(n).kind == NominalKind::Resource)
-					{
-						resources.push(nominal);
-					}
-				}
-				TypeKind::Rec(_) => pending.extend(self.rec_target(ty)),
-				TypeKind::Union(list) => pending.extend(self.list_items(list)),
-				TypeKind::Member(nominal, index) => pending.push(self.payload(nominal, index)),
-				TypeKind::NamedUnion(nominal, mask) => {
-					for index in 0..self.sym_list(self.nominal(nominal).members).len() as u16 {
-						if self.mask_has(mask, index) {
-							pending.push(self.payload(nominal, index));
-						}
-					}
-				}
-				_ => {}
-			}
-		}
-		resources
+		self.lifetime_roots(ty)
+			.into_iter()
+			.filter_map(|ty| {
+				let TypeKind::Object(shape) = self.kind(ty) else {
+					return None;
+				};
+				self.shape(shape).nominal
+			})
+			.collect()
 	}
 
 	/// A possible root destructor prevents field extraction until narrowing.
@@ -810,6 +788,57 @@ impl TypeStore {
 				let target = self.nominal(target);
 				actual.key == target.key && actual.args == target.args
 			})
+		})
+	}
+
+	/// Root lifetime owners, including built-ins, are never erased by a
+	/// structural projection. Owned fields may be projected separately.
+	fn lifetime_roots(&self, ty: TypeId) -> Vec<TypeId> {
+		let mut roots = Vec::new();
+		let mut pending = vec![ty];
+		let mut seen = rustc_hash::FxHashSet::default();
+		while let Some(ty) = pending.pop() {
+			if ty.is_unset() || !seen.insert(ty) {
+				continue;
+			}
+			match self.kind(ty) {
+				TypeKind::Object(_) if self.is_resource(ty) => roots.push(ty),
+				TypeKind::Sync(..) | TypeKind::Subscription if self.is_unique(ty) => roots.push(ty),
+				TypeKind::Rec(_) => pending.extend(self.rec_target(ty)),
+				TypeKind::Union(list) => pending.extend(self.list_items(list)),
+				TypeKind::Member(nominal, index) => pending.push(self.payload(nominal, index)),
+				TypeKind::NamedUnion(nominal, mask) => {
+					for index in 0..self.sym_list(self.nominal(nominal).members).len() as u16 {
+						if self.mask_has(mask, index) {
+							pending.push(self.payload(nominal, index));
+						}
+					}
+				}
+				_ => {}
+			}
+		}
+		roots
+	}
+
+	pub fn has_lifetime_boundary(&self, ty: TypeId) -> bool {
+		!self.lifetime_roots(ty).is_empty()
+	}
+
+	pub fn preserves_lifetime_owner(&self, actual: TypeId, target: TypeId) -> bool {
+		let targets = self.lifetime_roots(target);
+		self.lifetime_roots(actual).iter().all(|&actual| {
+			if self.is_resource(actual) {
+				return targets.iter().any(|&target| {
+					self.is_resource(target) && self.preserves_resource_owner(actual, target)
+				});
+			}
+			targets
+				.iter()
+				.any(|&target| match (self.kind(actual), self.kind(target)) {
+					(TypeKind::Sync(actual, _), TypeKind::Sync(target, _)) => actual == target,
+					(TypeKind::Subscription, TypeKind::Subscription) => true,
+					_ => false,
+				})
 		})
 	}
 

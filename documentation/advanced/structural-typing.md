@@ -115,7 +115,33 @@ logName(superHuman) -- no copy, no truncation
 
 The narrowed view is a compile-time restriction, not a runtime transformation.
 
-Narrowing selects the destination fields; it does not authorize a hidden collection copy. At a proven last use of a data record the retained fields can transfer and unused fields are destroyed. A resource retains all its fields for `destroy`, so narrowing an owned resource result cannot silently move them or copy a collection. Write an explicit data projection and the required `copy` at a visible site; implicit function adapters that would duplicate resource-owned data are rejected.
+A store is checked on what is actually stored. Narrowing builds a value from the retained fields only. Discarded fields do not introduce a copy requirement:
+
+```fa
+function label = (box: { items: Array<Integer>, name: String }): { name: String } => box
+```
+
+Retaining a structure field from a borrowed or still-used source is `MEM004` on that field. Write the projection and its copy explicitly:
+
+```fa
+function select = (box: { items: Array<Integer>, name: String }): { items: Array<Integer> } => box -- error: MEM004: box.items needs copy
+function selectCopy = (box: { items: Array<Integer>, name: String }): { items: Array<Integer> } => ({ items = copy box.items })
+```
+
+At a proven last use of an owned data record the retained fields can transfer and unused fields are destroyed. This follows the [field move rules](/advanced/memory-management#partial-field-moves).
+
+A resource declaring `destroy`, or a built-in lifetime owner, cannot be narrowed implicitly when stored. No conversion, including a function adapter, may silently discard its destructor. Write a data projection; `copy resource` remains `MEM003`:
+
+```fa
+-- Held.foreign.fa: destroy declarations belong to foreign files.
+type Held = { name: String, function destroy = (self) => {} }
+let resource = Held { name = "file" }
+let invalid: { name: String } = resource -- error: MEM002: write { name = resource.name }
+let plain = { name = resource.name }
+console.log(plain)
+```
+
+A borrowed structural view may still read the resource's fields for the duration of a call: it neither truncates the resource nor removes its destructor.
 
 ## Object literals have exactly the expected fields
 

@@ -1589,5 +1589,18 @@ to disappear when range facts exclude it. Read-only literal construction and
 reserve/growth, clear, iteration and deletion keep every 32-bit key available.
 Bump the object-cache version for the changed append ABI.
 
-Validation and measurement are recorded incrementally in the lead report;
-acceptance results will be added after the complete comparison.
+Validation: LLVM-enabled workspace 1,378 passed, zero failed, eight existing
+ignored; 90 IR checks included. C ASan/UBSan passes. Shared fixtures additionally
+pass Bun/Node/web and every LLVM target with leak checks. A borrowed-only runtime
+literal is verified to call `fa_table_local` in a fixed 160-byte frame block;
+read-only and explicit-copy cases are separate.
+
+All 36 audit rows pass exact output/source checks and the +1% instruction gate.
+Lru: 20,241,014 → 18,739,665 Ir (−7.417%); words unchanged, word-count −5 startup
+instructions. Largest other increase is five Ir on lru-open (+0.000024%). The
+21-round CPU-5 before/after/Goose/Rust series fails the identical-binary control
+on all three map rows. CPU gains and regressions are **not resolved**; preserve
+these first samples, with no retiming to replace them. Canonical profiles,
+artifacts, paired samples and strict-control tables are retained in
+`benchmarks/results/2026-11-16-collections-{before,probes}.json` and the generated
+`2026-11-16-collections-probes.md`. No benchmark source or string code changed.

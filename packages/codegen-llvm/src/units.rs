@@ -53,7 +53,7 @@ unsafe extern "C" {
 /// compiler is never reused.
 const VERSION: &str = concat!(
 	env!("CARGO_PKG_VERSION"),
-	"-split-7-platform-1-effects-1-errors-1-regions-1-packed-capacity-1-frame-1-sync-payload-1-region-string-view-1-region-edges-1-inline-length-2-template-size-1-coroutine-decimal-1-array-capacities-1"
+	"-split-7-platform-1-effects-1-errors-1-regions-1-packed-capacity-1-frame-1-sync-payload-1-region-string-view-1-region-edges-1-inline-length-3-template-size-1-coroutine-decimal-1-array-capacities-1"
 );
 
 /// A file name made of a module path.
@@ -482,14 +482,32 @@ fn compile_instances(
 	})
 }
 
-/// One section per function (ELF), so that `--gc-sections` drops the
-/// functions nothing calls.
+/// Separate ELF sections let `--gc-sections` discard unused functions and
+/// their constants, including function pointers that would retain them.
 fn function_sections(module: &Module<'_>) {
 	for function in module.get_functions() {
 		if function.count_basic_blocks() > 0 {
 			let name = function.get_name().to_string_lossy().into_owned();
 			function.set_section(Some(&format!(".text.{name}")));
 		}
+	}
+	for global in module.get_globals() {
+		let name = global.get_name().to_string_lossy();
+		if global.get_initializer().is_none()
+			|| name.starts_with("llvm.")
+			|| global
+				.get_section()
+				.is_some_and(|section| !section.to_bytes().is_empty())
+			|| global.get_thread_local_mode().is_some()
+		{
+			continue;
+		}
+		let section = if global.is_constant() {
+			".data.rel.ro"
+		} else {
+			".data"
+		};
+		global.set_section(Some(&format!("{section}.{name}")));
 	}
 }
 

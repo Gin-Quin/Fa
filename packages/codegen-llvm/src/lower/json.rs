@@ -45,7 +45,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	fn json_parse(&mut self, node: NodeId, info: &CallInfo) -> Result<Val<'ctx>, Error> {
-		let ty = self.type_of(node);
+		let ty = self.concrete_type(self.type_of(node));
 		let mut schema = Vec::new();
 		if !self.json_schema(ty, 0, &mut schema) {
 			return Err(self.unsupported(node.index(), "`Json.parse` of this type"));
@@ -86,7 +86,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if value.repr == Repr::Never {
 			return Ok(value);
 		}
-		let ty = self.type_of(argument);
+		let ty = self.concrete_type(self.type_of(argument));
 		let repr = self.repr_of(ty, node.index())?;
 		let value = if value.repr == repr || !repr.has_value() {
 			value

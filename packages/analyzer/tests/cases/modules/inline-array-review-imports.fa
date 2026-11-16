@@ -1,3 +1,5 @@
+-- opt-level: 0
+-- require-split: true
 -- file: library/inline.fa
 export namespace = {
  type Box<capacity: UInt32> = {

@@ -580,6 +580,7 @@ impl Generator<'_> {
 	/// The name of a hidden parameter (`$Item$describe`: Fa names never
 	/// contain `$`).
 	fn declare_hidden_name(&mut self, wanted: &str) -> String {
+		let wanted = crate::names::synthesized_name(wanted);
 		let mut name = format!("${wanted}");
 		let mut suffix = 0;
 		while self.hidden_names.values().any(|known| *known == name) {

@@ -80,6 +80,7 @@ impl Walker<'_> {
 					}
 				}
 			}
+			self.check_structure_capture_stores(&graph);
 			self.check_move_validity(&graph);
 		}
 		conflicts

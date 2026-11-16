@@ -2382,11 +2382,7 @@ impl Walker<'_> {
 				.syms
 				.resolve(self.a.symbols.symbol(symbol).name)
 				.to_string();
-			let reason = if self.unknown_callback_escapes.contains_key(&lambda) {
-				" This callback may reach a function value whose type doesn't say whether it keeps the callback: call a known borrowing function directly, or give a callback whose captures it can own."
-			} else {
-				""
-			};
+			let reason = self.unknown_callback_retention_hint(lambda);
 			let message = format!(
 				"`{name}` is captured by copy, since the closure escapes (line {line}): the write would be lost. Return the new value, or pass mutable state as a parameter.{reason}"
 			);

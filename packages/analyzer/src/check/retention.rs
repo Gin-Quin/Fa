@@ -28,6 +28,14 @@ impl Retention {
 }
 
 impl Walker<'_> {
+	pub(crate) fn unknown_callback_retention_hint(&self, function: NodeId) -> &'static str {
+		if self.unknown_callback_escapes.contains_key(&function) {
+			" This callback may reach a function value whose type doesn't say whether it keeps the callback: call a known borrowing function directly, or give a callback whose captures it can own."
+		} else {
+			""
+		}
+	}
+
 	/// The single retention query. Function types will eventually carry
 	/// `invalidates parameter`; until then an unknown origin may keep it.
 	fn may_callee_keep_argument(&self, call: NodeId, index: usize) -> Retention {

@@ -715,7 +715,7 @@ mod tests {
 		] {
 			assert_eq!(
 				codes(&program(statements, result)),
-				["MEM004"],
+				["MEM004", "MEM004"],
 				"{statements}"
 			);
 		}
@@ -734,7 +734,7 @@ mod tests {
 				"if chain.next is not none {\nlet invoke = chain.next.run\nlet moved = items\ninvoke() + moved.length\n} else { 0 }"
 			)
 		);
-		assert_eq!(codes(&source), ["MEM004"]);
+		assert_eq!(codes(&source), ["MEM004", "MEM004"]);
 	}
 
 	#[test]

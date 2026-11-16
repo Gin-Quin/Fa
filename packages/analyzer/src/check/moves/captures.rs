@@ -1,12 +1,111 @@
 //! Ownership constraints on immutable escaping function environments.
 
 use crate::check::Walker;
-use crate::diagnostics::{Location, codes::advanced::MEM003};
+use crate::diagnostics::{
+	Location,
+	codes::advanced::{MEM003, MEM004},
+};
 use crate::ids::{NodeId, SymbolId};
 use crate::syntax::{self, View};
 use crate::types::{FieldFlags, Ownership, TypeKind};
 
 impl Walker<'_> {
+	/// Borrowing cannot supply an owned capture. A later direct source use
+	/// also proves that the capture needs an independent snapshot.
+	pub(super) fn check_structure_capture_stores(&mut self, graph: &super::graph::Graph) {
+		let functions: Vec<_> = self
+			.a
+			.escapes
+			.iter()
+			.filter_map(|&lambda| self.a.function(lambda).cloned())
+			.collect();
+		for info in functions {
+			let creation = info.declaration.unwrap_or(info.lambda);
+			let Some(events) = graph.at.get(&creation) else {
+				continue;
+			};
+			if !events.iter().any(|&index| graph.reachable[index]) {
+				continue;
+			}
+			let mut copies = Vec::new();
+			for symbol in info.captures {
+				let Some(mut ty) = self.capture_types.get(&(info.lambda, symbol)).copied() else {
+					continue;
+				};
+				while let TypeKind::Ref(target, _) = self.s.types.kind(ty) {
+					ty = target;
+				}
+				if !self.s.types.is_structure(ty) {
+					continue;
+				}
+				let owned = self.ownership_source_owned(symbol, creation);
+				let later = graph.later_uses_where(symbol, |node| {
+					matches!(self.view(node), View::Name(_))
+						&& self.move_places.get(&node).is_some_and(|places| {
+							places
+								.iter()
+								.any(|&place| self.place_symbol(place) == Some(symbol))
+						})
+				});
+				let witness = events
+					.iter()
+					.filter(|&&index| graph.reachable[index])
+					.find_map(|&index| later[index]);
+				if !owned || witness.is_some() {
+					copies.push((symbol, ty, witness));
+				}
+			}
+			if copies.is_empty() || !self.reported_once.insert((info.lambda, "capture-copy")) {
+				continue;
+			}
+			let description = copies
+				.iter()
+				.map(|(symbol, ty, later)| {
+					let name = self
+						.s
+						.types
+						.syms
+						.resolve(self.a.symbols.symbol(*symbol).name);
+					let reason = later
+						.map(|node| format!("used again on line {}", self.line_of(node)))
+						.unwrap_or_else(|| "borrowed from its owner".to_string());
+					format!("`{name}` (`{}`), {reason}", self.display(*ty))
+				})
+				.collect::<Vec<_>>()
+				.join("; ");
+			let symbols: Vec<_> = copies.iter().map(|&(symbol, _, _)| symbol).collect();
+			let field = symbols
+				.iter()
+				.find_map(|&symbol| self.capture_field_snapshot(info.body, symbol))
+				.unwrap_or_default();
+			let reason = self.unknown_callback_retention_hint(info.lambda);
+			let mut diagnostic = self.diagnostic(&MEM004, creation, format!("this escaping function would silently copy a structure capture: {description}; create `let snapshot = copy value` before capturing it, keep the function nonescaping to borrow it, or move the later use before the capture.{field}{reason}"));
+			for (symbol, _, later) in copies {
+				if let Some(node) = later {
+					diagnostic = diagnostic.with_related(
+						Location {
+							file: self.file,
+							span: self.span(node),
+						},
+						"this later use keeps the source alive",
+					);
+				} else {
+					diagnostic = diagnostic.with_related(
+						Location {
+							file: self.file,
+							span: self.span(self.a.symbols.symbol(symbol).decl_node),
+						},
+						"this binding borrows the value and cannot give away its ownership",
+					);
+				}
+			}
+			if let Some(fix) = self.capture_snapshot_fix(info.lambda, info.declaration, &symbols) {
+				diagnostic = diagnostic.with_fix(fix);
+			}
+			self.report(diagnostic);
+		}
+	}
+
 	/// An owned environment reads its captures at creation, including when
 	/// the function is never called. Keep the source-place snapshot.
 	pub(super) fn capture_creation_reads(
@@ -75,11 +174,7 @@ impl Walker<'_> {
 			.iter()
 			.find_map(|(symbol, _)| self.capture_field_snapshot(info.body, *symbol))
 			.unwrap_or_default();
-		let reason = if self.unknown_callback_escapes.contains_key(&lambda) {
-			" The callback may reach a function value whose type doesn't say whether it keeps the callback; call a known borrowing function directly, or give a callback whose captures it can own."
-		} else {
-			""
-		};
+		let reason = self.unknown_callback_retention_hint(lambda);
 		let message = format!(
 			"an escaping function cannot own the unique capture {names}: `copy` cannot duplicate it; keep the function nonescaping, or keep the unique owner in its owning scope and pass it explicitly when needed.{field}{reason}"
 		);
@@ -206,6 +301,16 @@ mod tests {
 	}
 
 	#[test]
+	fn owned_structure_captures_require_independence_from_borrows_and_later_uses() {
+		for source in [
+			"type Reader = () => Integer\nfunction keep = (items: Array<Integer>): Reader => () => items.length\n",
+			"type Reader = () => Integer\nfunction keep = (): Array<Reader> => {\nlet items = [1]\nlet callbacks: Array<Reader> = [() => items.length]\nconsole.log(items.length)\ncallbacks\n}\n",
+		] {
+			assert_eq!(codes(source), ["MEM004"]);
+		}
+	}
+
+	#[test]
 	fn an_escaping_capture_reads_its_source_when_it_is_created() {
 		assert_eq!(
 			codes(
@@ -217,31 +322,38 @@ mod tests {
 
 	#[test]
 	fn unique_capture_diagnostic_explains_unknown_retention_and_field_snapshot() {
-		let source = "type Reader = () => Integer\nfunction run = (operation: (Reader) => Integer, holder: { task: Task<Integer>, count: Integer }): Integer => operation(() => holder.count)\n";
-		let mut session = crate::Session::new();
-		let file = session.set_source("captures.fa", std::sync::Arc::from(source));
-		session.analyze_file(file);
-		let diagnostics: Vec<_> = session
-			.diagnostics(file)
-			.iter()
-			.filter(|diagnostic| diagnostic.code.id != "W-DECL-2")
-			.collect();
-		assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
-		let diagnostic = diagnostics[0];
-		assert_eq!(diagnostic.code.id, "MEM003");
-		assert!(
-			diagnostic
-				.message
-				.contains("type doesn't say whether it keeps the callback"),
-			"{}",
-			diagnostic.message
-		);
-		assert!(
-			diagnostic.message.contains("let count = holder.count"),
-			"{}",
-			diagnostic.message
-		);
-		assert!(!diagnostic.related.is_empty());
+		for (field, code) in [
+			("task: Task<Integer>", "MEM003"),
+			("items: Array<Integer>", "MEM004"),
+		] {
+			let source = format!(
+				"type Reader = () => Integer\nfunction run = (operation: (Reader) => Integer, holder: {{ {field}, count: Integer }}): Integer => operation(() => holder.count)\n"
+			);
+			let mut session = crate::Session::new();
+			let file = session.set_source("captures.fa", std::sync::Arc::from(source));
+			session.analyze_file(file);
+			let diagnostics: Vec<_> = session
+				.diagnostics(file)
+				.iter()
+				.filter(|diagnostic| diagnostic.code.id != "W-DECL-2")
+				.collect();
+			assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+			let diagnostic = diagnostics[0];
+			assert_eq!(diagnostic.code.id, code);
+			assert!(
+				diagnostic
+					.message
+					.contains("type doesn't say whether it keeps the callback"),
+				"{}",
+				diagnostic.message
+			);
+			assert!(
+				diagnostic.message.contains("let count = holder.count"),
+				"{}",
+				diagnostic.message
+			);
+			assert!(!diagnostic.related.is_empty());
+		}
 	}
 
 	#[test]

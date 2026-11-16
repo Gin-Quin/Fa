@@ -87,11 +87,19 @@ impl Graph {
 	/// value's lifetime; a loop can reach the same read on its next round.
 	/// The witness is an actual conflicting read, ready for a diagnostic.
 	pub fn later_uses(&self, symbol: SymbolId) -> Vec<Option<NodeId>> {
+		self.later_uses_where(symbol, |_| true)
+	}
+
+	pub fn later_uses_where(
+		&self,
+		symbol: SymbolId,
+		observes: impl Fn(NodeId) -> bool,
+	) -> Vec<Option<NodeId>> {
 		let mut before = vec![false; self.events.len()];
 		let mut after = vec![None; self.events.len()];
 		let mut pending = VecDeque::new();
 		for (index, event) in self.events.iter().enumerate() {
-			if self.reachable[index] && event.reads.contains(&symbol) {
+			if self.reachable[index] && event.reads.contains(&symbol) && observes(event.node) {
 				before[index] = true;
 				pending.push_back((index, event.node));
 			}

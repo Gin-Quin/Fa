@@ -1577,3 +1577,10 @@ An escaping function's named local-function dependencies are handles, not an exp
 ### Ownership enforcement: capture-creation observations (2026-11-16)
 
 Owned capture creation is a runtime use even if the callback is never called. Save its designated source places alongside creation-time types and callable origins, and feed that event to the same ownership CFG as ordinary reads. Named declarations have runtime events; their bodies are still separate graphs. A store before an escaping capture cannot move its source past that creation event: MEM004 names the later creation and offers the existing explicit-copy edit at the earlier store. Named handle discovery traverses the callee/arguments evaluated by `start call()`, but a `start do` body remains a separate capture context. This observation step does not itself enable capture transfers or change named environment construction.
+
+
+### Ownership enforcement: explicit capture snapshot fixes (2026-11-16)
+
+An explicit capture-snapshot fix copies data at the implicit store's evaluation point. A named block function receives snapshot locals immediately before its declaration; an anonymous function receives a `do` expression whose local snapshots precede the resulting lambda. Rewrite resolved references to the captured bindings, preserving object shorthand keys and avoiding existing names. Group multiple captures in one fix. Nested store diagnostics may overlap the capture rewrite, so migration applies a fix, reanalyzes, and then applies the next fix; do not compose overlapping edits from an old source version.
+
+This checkpoint checks borrowed structure captures and later direct source reads in the CFG. Complete borrowed-call/default/callback observations and capture-transfer consumers remain coordinated with declaration environments; this is not the completed concrete ownership slice.

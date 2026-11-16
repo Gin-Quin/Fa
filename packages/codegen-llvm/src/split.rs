@@ -92,7 +92,8 @@ pub struct GenericProducer {
 	pub node: u32,
 	/// A lambda (else a declaration).
 	pub lambda: bool,
-	/// The bindings of the instance around a lambda: each parameter by its
+	/// Captured instance bindings of a lambda, or the complete fixed owner
+	/// prefix of a declaration: each parameter by its
 	/// owner's node and its position in the owner's generic parameters,
 	/// and the type it stands for (a global type of the run).
 	pub bindings: Vec<(u32, u32, fa_analyzer::ids::TypeId)>,

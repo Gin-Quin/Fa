@@ -1551,6 +1551,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		target: NodeId,
 		members: NodeList<'_>,
 	) -> Result<Val<'ctx>, Error> {
+		if self.is_generic_function_type(self.type_of(node))
+			&& let Some(reached) = self.callee_function(node)
+		{
+			return self.reached_generic_function_value(reached, node);
+		}
 		// `Palette.Color.red`, `Self.Shade.Dark`: the types declared inside
 		// types first; the rest reads like a member of the last of them
 		let nested = members

@@ -366,6 +366,17 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// A name of another file as a value: its global, or its function.
 	pub(crate) fn external_name(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
 		let reached = self.external(self.analysis.resolution(node));
+		if let Some(reached @ (Reached::Function(..) | Reached::RemoteFunction(_))) = reached {
+			if self.is_generic_function_type(self.type_of(node)) {
+				return self.reached_generic_function_value(reached, node);
+			}
+			let function = match reached {
+				Reached::Function(file, decl) => self.function_in(file, decl, node)?,
+				Reached::RemoteFunction(key) => self.remote_function(key, node)?,
+				_ => unreachable!("a function"),
+			};
+			return self.applied_external_function_value(&function, node);
+		}
 		match reached.map(|reached| self.reached_slot(reached, node)) {
 			Some(Ok(Some(slot))) => self.load(slot),
 			Some(Err(error)) => Err(error),

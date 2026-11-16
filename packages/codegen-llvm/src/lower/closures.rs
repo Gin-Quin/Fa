@@ -444,22 +444,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// a generic function used as a generic function value (`generic_values.rs`)
 			if self.generic_functions.contains_key(&declaration) {
 				// given where an instance is expected (`names.map(identity)`)
-				if self.analysis.instantiation(node).is_some()
+				if (self.analysis.instantiation(node).is_some()
+					|| self.call_method_owner(node).is_some())
 					&& !self.is_generic_function_type(self.type_of(node))
 				{
 					let key = self.instance(declaration, node)?;
 					let function = self.functions[&key].clone();
 					let thunk = self.thunk_of(&function)?;
-					// the type of the instance
-					let list = self.analysis.instantiation(node).expect("an instantiation");
-					let arguments: Vec<TypeId> = self
-						.types()
-						.list_items(list)
+					let (params, arguments): (Vec<_>, Vec<_>) = function
+						.types
 						.iter()
-						.map(|&argument| self.concrete_type(argument))
-						.collect();
-					let generics = self.generic_functions[&declaration].generics.clone();
-					let ty = self.substitute_params(self.type_of(node), &generics, &arguments);
+						.map(|(&param, &ty)| (param, ty))
+						.unzip();
+					let ty = self.substitute_params(self.type_of(node), &params, &arguments);
 					return self.make_closure_of(
 						thunk.as_global_value().as_pointer_value(),
 						self.pointer_type().const_null(),

@@ -1154,7 +1154,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// A selection made while checking a generic body may still refer to
 	/// that body's parameters. Preserve its exact owner arguments and method
 	/// dependencies before switching to the file declaring the selected method.
-	fn concrete_method(&self, method: GenericMethod) -> GenericMethod {
+	pub(super) fn concrete_method(&self, method: GenericMethod) -> GenericMethod {
 		let arguments = self.types().list_items(method.arguments).to_vec();
 		let mut dependencies = method.methods.as_ref().clone();
 		dependencies.extend(self.forwarded_methods(&arguments));
@@ -1215,9 +1215,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		&self,
 		call: NodeId,
 	) -> Option<&fa_analyzer::analysis::WrittenType> {
-		let mut callee = match self.view(self.strip_groups(call)) {
+		let mut root = call;
+		while let View::Group(inner) = self.view(root) {
+			root = inner;
+		}
+		let mut callee = match self.view(root) {
 			View::Call { callee, .. } => callee,
-			View::Access { .. } | View::OptionalAccess { .. } => self.strip_groups(call),
+			View::Access { .. } | View::OptionalAccess { .. } => root,
 			_ => return None,
 		};
 		loop {

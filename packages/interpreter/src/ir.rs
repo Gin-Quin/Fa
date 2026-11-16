@@ -192,11 +192,12 @@ pub enum Expr {
 	Global(GlobalKey),
 	/// A named function as a value.
 	Function(FnKey),
-	/// A lambda or local function: captures the current values of these
-	/// slots (copies), received by the function's `captures`.
+	/// A lambda or local function. Nonescaping closures retain places;
+	/// escaping closures snapshot the data in these slots.
 	Closure {
 		function: FnKey,
 		captures: Vec<Slot>,
+		borrowed: bool,
 	},
 	/// Binds a local (a declaration): its value is `none`.
 	Let(Slot, Box<Expr>),
@@ -204,6 +205,10 @@ pub enum Expr {
 	Assign(Place, Box<Expr>),
 	/// Reads a place (a compound assignment reads its target).
 	Read(Place),
+	/// Retain a place across a call; an optional lookup may give `none`.
+	Borrow(Place, bool),
+	/// Materialize the data designated by an explicitly borrowed call result.
+	Dereference(Box<Expr>),
 	/// Statements; the value of the last one (`none` when empty).
 	Block(Vec<Expr>),
 	/// `if`: the value of the branch taken (`none` without `else`).
@@ -268,8 +273,12 @@ pub enum Expr {
 	Builtin(&'static str, Vec<Expr>),
 	/// A built-in method changing its receiver (`Array#push`, `Set#add`).
 	Mutate(&'static str, Place, Vec<Expr>),
+	/// A collection operation whose result is its element place.
+	BorrowBuiltin(&'static str, Place, Vec<Expr>),
 	/// A list literal.
 	Array(Vec<Item>),
+	/// A stable collection, whose element indices survive unrelated deletions.
+	Pool(Vec<Item>),
 	/// A set literal.
 	Set(Vec<Item>),
 	/// A map literal: tuples of key and value.

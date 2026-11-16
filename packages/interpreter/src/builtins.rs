@@ -80,6 +80,7 @@ pub fn map_insert(entries: &mut Vec<(Value, Value)>, key: Value, value: Value) {
 pub fn count(value: &Value) -> Option<usize> {
 	match value {
 		Value::Array(items) | Value::Set(items) | Value::Tuple(items) => Some(items.len()),
+		Value::Pool(pool) => Some(pool.len),
 		Value::Map(entries) => Some(entries.len()),
 		Value::String(text) => Some(text.len()),
 		Value::Range {
@@ -99,6 +100,7 @@ pub fn count(value: &Value) -> Option<usize> {
 pub fn iterate(value: &Value) -> Result<Vec<Value>, Error> {
 	match value {
 		Value::Array(items) | Value::Set(items) | Value::Tuple(items) => Ok(items.to_vec()),
+		Value::Pool(pool) => Ok(pool.values().cloned().collect()),
 		Value::Map(entries) => Ok(entries
 			.iter()
 			.map(|(key, value)| Value::Tuple(Arc::new(vec![key.clone(), value.clone()])))
@@ -139,6 +141,7 @@ pub fn iterate(value: &Value) -> Result<Vec<Value>, Error> {
 pub fn includes(collection: &Value, value: &Value) -> Result<bool, Error> {
 	match collection {
 		Value::Array(items) | Value::Set(items) | Value::Tuple(items) => Ok(contains(items, value)),
+		Value::Pool(pool) => Ok(pool.values().any(|item| equals(item, value))),
 		Value::Map(entries) => Ok(map_get(entries, value).is_some()),
 		Value::String(haystack) => Ok(haystack.contains(text(value)?)),
 		Value::Range {
@@ -176,6 +179,9 @@ pub fn field(value: &Value, name: &str) -> Result<Value, Error> {
 		},
 		Value::String(text) if name == "length" => Ok(Value::int(grapheme_count(text) as i64)),
 		Value::Array(items) if name == "length" => Ok(Value::int(items.len() as i64)),
+		Value::Pool(pool) if name == "size" || name == "capacity" => {
+			Ok(Value::int(pool.len as i64))
+		}
 		Value::Set(items) if name == "size" => Ok(Value::int(items.len() as i64)),
 		Value::Map(entries) if name == "size" => Ok(Value::int(entries.len() as i64)),
 		Value::Range {
@@ -273,7 +279,15 @@ pub fn index(value: &Value, index: &Value) -> Result<Value, Error> {
 		};
 	}
 	match value {
-		Value::Array(items) | Value::Tuple(items) => {
+		Value::Pool(pool) => {
+			let index = integer(index)?;
+			pool.slots
+				.get(position(index, pool.slots.len())?)
+				.and_then(Option::as_ref)
+				.cloned()
+				.ok_or_else(|| index_error(index, pool.slots.len()))
+		}
+		Value::Array(items) | Value::Tuple(items) | Value::Set(items) => {
 			let index = integer(index)?;
 			Ok(items[position(index, items.len())?].clone())
 		}
@@ -296,6 +310,15 @@ pub fn index(value: &Value, index: &Value) -> Result<Value, Error> {
 /// `value[index]`, to change it (a map gets the key).
 pub fn index_mut(value: &mut Value, key: Value) -> Result<&mut Value, Flow> {
 	match value {
+		Value::Pool(pool) => {
+			let pool = Arc::make_mut(pool);
+			let index = integer(&key)?;
+			let count = pool.slots.len();
+			pool.slots
+				.get_mut(position(index, count)?)
+				.and_then(Option::as_mut)
+				.ok_or_else(|| index_error(index, count).into())
+		}
 		Value::Array(items) | Value::Tuple(items) => {
 			let items = Arc::make_mut(items);
 			let index = integer(&key)?;
@@ -635,7 +658,7 @@ pub fn call(
 		| "Columnar#size"
 		| "Columnar#capacity"
 		| "OrderedColumnar#length"
-		| "OrderedColumnar#capacity" => Value::int(receiver.items().map_or(0, <[Value]>::len) as i64),
+		| "OrderedColumnar#capacity" => Value::int(count(&receiver).unwrap_or(0) as i64),
 		"Set#size" | "Set#capacity" => {
 			Value::int(receiver.items().map_or(0, <[Value]>::len) as i64)
 		}
@@ -776,10 +799,54 @@ pub fn mutate(
 	}
 	let arg = |index: usize| argument(&arguments, index).cloned();
 	match receiver {
+		Value::Pool(pool) => {
+			let pool = Arc::make_mut(pool);
+			match path {
+				"Pool#add" | "Columnar#add" => {
+					let value = arg(0)?;
+					reserve_growth(interpreter, pool.slots.len(), pool.slots.capacity())?;
+					pool.slots.push(Some(value.clone()));
+					pool.len += 1;
+					Ok(value)
+				}
+				"Pool#delete" | "Pool#take" | "Columnar#delete" | "Columnar#take" => {
+					let reference = arg(0)?;
+					let index = match &reference {
+						Value::Reference(reference) => {
+							reference.keys.last().and_then(|key| match key {
+								crate::references::Key::Index(index) => {
+									index.as_int().and_then(usize_of)
+								}
+								_ => None,
+							})
+						}
+						_ => None,
+					}
+					.ok_or_else(|| stop("removing a pool element needs its borrowed place"))?;
+					let value = pool
+						.slots
+						.get_mut(index)
+						.and_then(Option::take)
+						.ok_or_else(|| stop("this pool element was already removed"))?;
+					pool.len -= 1;
+					Ok(if path.ends_with("#take") {
+						value
+					} else {
+						Value::None
+					})
+				}
+				"Pool#clear" | "Columnar#clear" => {
+					pool.slots.clear();
+					pool.len = 0;
+					Ok(Value::None)
+				}
+				_ => Err(Error::Unsupported(format!("`{path}`"))),
+			}
+		}
 		Value::Array(items) => {
 			let list = Arc::make_mut(items);
 			let result = match path {
-				"Array#push" => {
+				"Array#push" | "OrderedColumnar#add" => {
 					let value = arg(0)?;
 					reserve_growth(interpreter, list.len(), list.capacity())?;
 					list.push(value);

@@ -205,7 +205,15 @@ impl Generator<'_> {
 		{
 			let receiver = self.receiver(callee);
 			let receiver = self.keep_value_part(receiver);
-			let predicate = self.analysis.call(node)?.arguments.iter().find_map(|argument| match argument { Argument::Given(node) => Some(*node), _ => None })?;
+			let predicate = self
+				.analysis
+				.call(node)?
+				.arguments
+				.iter()
+				.find_map(|argument| match argument {
+					Argument::Given(node) => Some(*node),
+					_ => None,
+				})?;
 			let predicate = self.expr(predicate);
 			let find = self.helper("faFindReference");
 			return Some(js::call(find, &[receiver.text, predicate.text]));

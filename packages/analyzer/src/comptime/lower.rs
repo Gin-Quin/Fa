@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use ethnum::I256;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fa_interpreter::Value;
 use fa_interpreter::ir::{
@@ -94,6 +94,7 @@ pub struct Lowerer<'a> {
 	js: bool,
 	slots: FxHashMap<SymbolId, Slot>,
 	aliases: FxHashMap<SymbolId, Place>,
+	borrowed_values: FxHashSet<NodeId>,
 	next: Slot,
 	/// Lowering a compile-time expression: no enclosing function's frame.
 	compile_time: bool,
@@ -125,6 +126,7 @@ impl<'a> Lowerer<'a> {
 			js: super::is_js_target(session.target()),
 			slots: FxHashMap::default(),
 			aliases: FxHashMap::default(),
+			borrowed_values: FxHashSet::default(),
 			next: 0,
 			compile_time: true,
 			globals: false,
@@ -165,6 +167,21 @@ impl<'a> Lowerer<'a> {
 		self.compile_time = false;
 		self.globals = true;
 		let info = self.a.function(node)?.clone();
+		if info
+			.sig
+			.is_some_and(|sig| self.types().sig(sig).reference.is_some())
+		{
+			self.mark_reference_result(info.body);
+			let mut nodes = vec![info.body];
+			while let Some(node) = nodes.pop() {
+				match syntax::view(self.tree, node) {
+					View::Return(Some(value)) => self.mark_reference_result(value),
+					View::Lambda { .. } | View::Function { .. } => continue,
+					_ => {}
+				}
+				nodes.extend(syntax::children(self.tree, node));
+			}
+		}
 		let name = match info.symbol {
 			Some(symbol) => self
 				.session
@@ -189,7 +206,19 @@ impl<'a> Lowerer<'a> {
 			.collect();
 		// the defaults, then the patterns of destructured parameters
 		for (index, param) in info.params.iter().enumerate() {
-			params[index].default = param.default.map(|default| self.expr(default));
+			let reference = info.sig.is_some_and(|sig| {
+				self.types()
+					.params(self.types().sig(sig).params)
+					.get(index)
+					.is_some_and(|param| param.reference.is_some())
+			});
+			params[index].default = param.default.map(|default| {
+				if reference {
+					self.borrow_value(default)
+				} else {
+					self.expr(default)
+				}
+			});
 		}
 		let mut prologue = Vec::new();
 		for param in &info.params {
@@ -453,6 +482,7 @@ impl<'a> Lowerer<'a> {
 					Expr::Closure {
 						function: key,
 						captures: slots,
+						borrowed: !info.is_some_and(|info| self.a.escapes.contains(&info.lambda)),
 					}
 				}
 			}
@@ -587,6 +617,9 @@ impl<'a> Lowerer<'a> {
 
 	/// Lowers an expression or a statement.
 	pub fn expr(&mut self, n: NodeId) -> Expr {
+		if self.borrowed_values.contains(&n) {
+			return self.borrow_value(n);
+		}
 		// a value the analysis computed at compile time (`@` calls, statics)
 		if let Some(value) = self.a.constants.get(&n) {
 			return Expr::Const(value.clone());
@@ -653,7 +686,14 @@ impl<'a> Lowerer<'a> {
 			View::Index { target, index } => {
 				Expr::Index(self.expr(target).boxed(), self.expr(index).boxed())
 			}
-			View::Call { callee, arguments } => self.call(n, callee, arguments),
+			View::Call { callee, arguments } => {
+				let call = self.call(n, callee, arguments);
+				if self.call_borrows(callee) {
+					Expr::Dereference(call.boxed())
+				} else {
+					call
+				}
+			}
 			View::Arithmetic { op, operands } => self.arithmetic(n, op, operands),
 			View::Negate(value) => {
 				if let View::Integer(integer) = syntax::view(self.tree, value) {
@@ -755,10 +795,12 @@ impl<'a> Lowerer<'a> {
 			View::Use { value, .. } => self.use_binding(n, value),
 			View::Reuse { name: _, value } => match self.a.resolution(n) {
 				Resolution::Local(symbol) => {
-					if let Some(place) = self.place(value) {
-						self.aliases.insert(symbol, place);
-					}
-					Expr::none()
+					let value = self.borrow_value(value);
+					self.slots
+						.get(&symbol)
+						.copied()
+						.map(|slot| Expr::Let(slot, value.boxed()))
+						.unwrap_or_else(Expr::none)
 				}
 				_ => Expr::none(),
 			},
@@ -768,7 +810,19 @@ impl<'a> Lowerer<'a> {
 			}
 			View::Assignment { target, value, .. } => self.assignment(target, value),
 			View::UpdateFields { target, value } => self.update_fields(target, value),
-			View::TypeDecl { .. } | View::Namespace { .. } | View::Function { .. } => Expr::none(),
+			View::Function { value, .. } => {
+				if let Some(info) = self.a.function(n)
+					&& !info.captures.is_empty()
+					&& let Some(symbol) = info.symbol
+				{
+					let closure = self.lambda(value);
+					let slot = self.bind(symbol);
+					Expr::Let(slot, closure.boxed())
+				} else {
+					Expr::none()
+				}
+			}
+			View::TypeDecl { .. } | View::Namespace { .. } => Expr::none(),
 			View::ExportValue { value, .. } => self.expr(value),
 			View::ExportFunction { .. } | View::ExportType { .. } | View::ExportNamespace(_) => {
 				Expr::none()
@@ -858,6 +912,13 @@ impl<'a> Lowerer<'a> {
 	fn array(&mut self, n: NodeId, items: NodeList<'_>) -> Expr {
 		let lowered = self.items(items.iter());
 		match self.types().kind(self.a.type_of(n)) {
+			TypeKind::Collection(
+				CollKind::Pool
+				| CollKind::GrowingPool
+				| CollKind::Columnar
+				| CollKind::GrowingColumnar,
+				..,
+			) => Expr::Pool(lowered),
 			TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..) => Expr::Set(lowered),
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..) => Expr::Map(lowered),
 			_ => Expr::Array(lowered),
@@ -1004,18 +1065,112 @@ impl<'a> Lowerer<'a> {
 		let Some(symbol) = self.a.symbols.symbol_of_decl(n) else {
 			return Expr::none();
 		};
-		match self.place(value) {
-			Some(place) => {
-				self.aliases.insert(symbol, place);
-				Expr::none()
+		let value = self.borrow_value(value);
+		let slot = self.bind(symbol);
+		Expr::Let(slot, value.boxed())
+	}
+
+	fn call_borrows(&self, callee: NodeId) -> bool {
+		matches!(self.types().kind(self.a.type_of(callee)), TypeKind::Function(sig) if self.types().sig(sig).reference.is_some())
+	}
+
+	fn mark_reference_result(&mut self, value: NodeId) {
+		match syntax::view(self.tree, value) {
+			View::Group(inner) | View::Try(inner) | View::Do(inner) | View::Return(Some(inner)) => {
+				self.mark_reference_result(inner)
 			}
-			None => {
-				// a temporary: bound once
-				let value = self.expr(value);
-				let slot = self.bind(symbol);
-				Expr::Let(slot, value.boxed())
+			View::Block { statements } => {
+				if let Some(last) = statements.last() {
+					self.mark_reference_result(last);
+				}
 			}
+			View::If {
+				then_body,
+				else_body,
+				..
+			} => {
+				self.mark_reference_result(then_body);
+				if let Some(body) = else_body {
+					self.mark_reference_result(body);
+				}
+			}
+			View::When { arms, .. } => {
+				for arm in arms.iter() {
+					self.mark_reference_result(arm.value);
+				}
+			}
+			View::Catch {
+				expression,
+				handler,
+				..
+			} => {
+				self.mark_reference_result(expression);
+				self.mark_reference_result(handler);
+			}
+			View::None
+			| View::Name(_)
+			| View::Access { .. }
+			| View::Index { .. }
+			| View::Call { .. } => {
+				self.borrowed_values.insert(value);
+			}
+			_ => {}
 		}
+	}
+
+	fn receiver_place(&mut self, callee: NodeId) -> Option<Place> {
+		let View::Access { target, members } = syntax::view(self.tree, callee) else {
+			return None;
+		};
+		let mut place = self.place(target)?;
+		for member in members.iter().take(members.len().saturating_sub(1)) {
+			let View::Name(name) = syntax::view(self.tree, member) else {
+				return None;
+			};
+			place
+				.steps
+				.push(Step::Field(Arc::from(self.tree.name(name))));
+		}
+		Some(place)
+	}
+
+	fn borrow_value(&mut self, value: NodeId) -> Expr {
+		match syntax::view(self.tree, value) {
+			View::Group(inner) | View::Try(inner) => return self.borrow_value(inner),
+			View::None => return Expr::none(),
+			View::Call { callee, arguments } if self.call_borrows(callee) => {
+				return self.call(value, callee, arguments);
+			}
+			View::Call { callee, .. } => {
+				if let Some(info) = self.a.call(value)
+					&& let Callee::Builtin(builtin) = info.callee
+					&& let Some(place) = self.receiver_place(callee)
+				{
+					let values = info
+						.arguments
+						.iter()
+						.filter_map(|argument| match argument {
+							Argument::Given(value) => Some(self.expr(*value)),
+							_ => None,
+						})
+						.collect();
+					return Expr::BorrowBuiltin(builtins::get(builtin).path, place, values);
+				}
+			}
+			_ => {}
+		}
+		if let Some(place) = self.place(value) {
+			let optional = matches!(syntax::view(self.tree, value), View::Name(_))
+				&& self
+					.types()
+					.union_members(&self.a.type_of(value))
+					.contains(&TypeId::NONE);
+			return Expr::Borrow(place, optional);
+		}
+		self.unsupported(format!(
+			"a reference to `{}` at compile time",
+			self.text(value)
+		))
 	}
 
 	/// `target = value`.
@@ -1086,6 +1241,7 @@ impl<'a> Lowerer<'a> {
 		Expr::Closure {
 			function: fn_key(self.file, n),
 			captures: slots,
+			borrowed: !self.a.escapes.contains(&n),
 		}
 	}
 
@@ -1156,6 +1312,19 @@ impl<'a> Lowerer<'a> {
 		}
 		let iterable = match (compile_time, self.a.unrolled.get(&n)) {
 			(true, Some(items)) => Expr::Const(Value::array(items.clone())),
+			_ if self.place(iterable).is_some()
+				&& matches!(self.types().kind(self.a.type_of(iterable)), TypeKind::Collection(kind, ..) if !matches!(kind, CollKind::Map | CollKind::GrowingMap))
+				&& pattern
+					.and_then(|pattern| self.a.symbols.symbol_of_decl(pattern))
+					.is_some_and(|symbol| {
+						matches!(
+							self.a.symbols.symbol(symbol).kind,
+							SymbolKind::LoopVariable { copy: false }
+						)
+					}) =>
+			{
+				self.borrow_value(iterable)
+			}
 			_ => self.expr(iterable),
 		};
 		let (item, prologue) = match pattern {
@@ -1447,16 +1616,32 @@ impl<'a> Lowerer<'a> {
 				if builtins::std_library::impurity(path).is_some() {
 					return self.impure(path);
 				}
+				if matches!(
+					path,
+					"Pool#add"
+						| "Pool#find" | "Columnar#add"
+						| "Columnar#find" | "OrderedColumnar#add"
+						| "OrderedColumnar#find"
+						| "Array#get" | "Array#find"
+						| "Map#get" | "Map#getOrInsert"
+				) && let Some(place) = self.receiver_place(callee)
+				{
+					let values = info
+						.arguments
+						.iter()
+						.filter_map(|argument| match argument {
+							Argument::Given(value) => Some(self.expr(*value)),
+							_ => None,
+						})
+						.collect();
+					return Expr::Dereference(Expr::BorrowBuiltin(path, place, values).boxed());
+				}
 				let method = path.contains('#');
 				let mut values = Vec::new();
 				let place = if method {
 					// the effects table of the built-ins (one source, `builtins/array.rs`)
 					if crate::builtins::effects::changes_receiver(path) {
-						let target = match syntax::view(self.tree, callee) {
-							View::Access { target, members } if members.len() == 1 => Some(target),
-							_ => None,
-						};
-						match target.and_then(|target| self.place(target)) {
+						match self.receiver_place(callee) {
 							Some(place) => Some(place),
 							None => return self.unsupported(format!("`{path}` on this value")),
 						}
@@ -1472,7 +1657,16 @@ impl<'a> Lowerer<'a> {
 				};
 				for argument in &info.arguments {
 					match argument {
-						Argument::Given(value) => values.push(self.expr(*value)),
+						Argument::Given(value) => values.push(
+							if matches!(
+								path,
+								"Pool#delete" | "Pool#take" | "Columnar#delete" | "Columnar#take"
+							) {
+								self.borrow_value(*value)
+							} else {
+								self.expr(*value)
+							},
+						),
 						Argument::Variadic(items) => {
 							let items = self.items(items.iter().copied());
 							values.push(Expr::Array(items));
@@ -1554,10 +1748,26 @@ impl<'a> Lowerer<'a> {
 		let mut args = Vec::with_capacity(arguments.len());
 		for argument in arguments {
 			args.push(match argument {
-				Argument::Given(value) => Arg::Value(self.expr(*value)),
+				Argument::Given(value) => {
+					let mut node = *value;
+					while let View::Group(inner) | View::Try(inner) = syntax::view(self.tree, node) { node = inner; }
+					let borrow = self.place(node).is_some() || matches!(syntax::view(self.tree, node), View::Call { callee, .. } if self.call_borrows(callee));
+					let value = if borrow { self.borrow_value(*value) } else {
+						// An owned argument temporary belongs to the caller, so an
+						// ordinary read of a borrowed result happens before it dies.
+						let value = self.expr(*value);
+						let slot = self.temp();
+						Expr::Block(vec![Expr::Let(slot, value.boxed()), Expr::Borrow(Place { slot, steps: Vec::new() }, false)])
+					};
+					Arg::Value(value)
+				}
 				Argument::Default | Argument::Missing => Arg::Default,
 				Argument::Variadic(items) => Arg::Variadic(self.items(items.iter().copied())),
 				Argument::Receiver(_) => {
+					if let Some(place) = callee.and_then(|callee| self.receiver_place(callee)) {
+						args.push(Arg::Value(Expr::Borrow(place, false)));
+						continue;
+					}
 					let receiver =
 						callee.and_then(|callee| match syntax::view(self.tree, callee) {
 							View::Access { target, members }

@@ -436,7 +436,7 @@ pub struct Walker<'s> {
 	/// Borrowed call results, recorded once after that evaluation's effects.
 	pub(crate) reference_results: FxHashMap<NodeId, PlaceId>,
 	/// Borrowed result leaves, captured before their branch flow is joined.
-	pub(crate) reference_values: FxHashMap<NodeId, Vec<PlaceId>>,
+	pub(crate) reference_values: FxHashMap<NodeId, Option<Vec<PlaceId>>>,
 	/// Whole reference annotations in borrowing positions; nested storage is never allowed.
 	pub(crate) borrowed_type_nodes: rustc_hash::FxHashSet<NodeId>,
 	pub(crate) type_expression_root: Option<NodeId>,
@@ -951,12 +951,11 @@ impl Walker<'_> {
 			// the code after a `Never` expression is unreachable
 			self.body.flow.set_unreachable();
 		}
-		if self.body.flow.reachable
-			&& self
-				.body
-				.functions
-				.last()
-				.is_some_and(|cx| cx.ref_owner.is_some())
+		if self
+			.body
+			.functions
+			.last()
+			.is_some_and(|cx| cx.ref_owner.is_some())
 			&& matches!(
 				self.view(n),
 				View::Name(_)
@@ -965,7 +964,7 @@ impl Walker<'_> {
 					| View::Call { .. }
 					| View::Try(_)
 			) {
-			let origins = self.reference_origins(n);
+			let origins = self.body.flow.reachable.then(|| self.reference_origins(n));
 			self.reference_values.insert(n, origins);
 		}
 		ty

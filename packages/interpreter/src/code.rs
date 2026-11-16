@@ -98,10 +98,12 @@ pub(crate) enum Op {
 	Local(Slot),
 	Global(GlobalKey),
 	Function(FnKey),
-	Closure(FnKey, Vec<Slot>),
+	Closure(FnKey, Vec<Slot>, bool),
 	Let(Slot, Node),
 	Assign(Place, Node),
 	Read(Place),
+	Borrow(Place, bool),
+	Dereference(Node),
 	Block(Vec<Node>),
 	If(Node, Node, Option<Node>),
 	Loop(Node),
@@ -137,7 +139,9 @@ pub(crate) enum Op {
 	CallFunction(FnKey, Vec<Argument>),
 	Builtin(&'static str, Vec<Node>),
 	Mutate(&'static str, Place, Vec<Node>),
+	BorrowBuiltin(&'static str, Place, Vec<Node>),
 	Array(Vec<Item>),
+	Pool(Vec<Item>),
 	Set(Vec<Item>),
 	Map(Vec<Item>),
 	Tuple(Vec<Node>),
@@ -220,12 +224,16 @@ impl<'a> Builder<'a> {
 				ir::Expr::Local(slot) => Op::Local(*slot),
 				ir::Expr::Global(key) => Op::Global(*key),
 				ir::Expr::Function(key) => Op::Function(*key),
-				ir::Expr::Closure { function, captures } => {
-					Op::Closure(*function, captures.clone())
-				}
+				ir::Expr::Closure {
+					function,
+					captures,
+					borrowed,
+				} => Op::Closure(*function, captures.clone(), *borrowed),
 				ir::Expr::Let(slot, value) => Op::Let(*slot, self.add(value)),
 				ir::Expr::Assign(place, value) => Op::Assign(self.place(place), self.add(value)),
 				ir::Expr::Read(place) => Op::Read(self.place(place)),
+				ir::Expr::Borrow(place, optional) => Op::Borrow(self.place(place), *optional),
+				ir::Expr::Dereference(value) => Op::Dereference(self.add(value)),
 				ir::Expr::Block(statements) => {
 					Op::Block(statements.iter().map(|node| self.add(node)).collect())
 				}
@@ -298,7 +306,13 @@ impl<'a> Builder<'a> {
 					self.place(place),
 					arguments.iter().map(|node| self.add(node)).collect(),
 				),
+				ir::Expr::BorrowBuiltin(path, place, arguments) => Op::BorrowBuiltin(
+					path,
+					self.place(place),
+					arguments.iter().map(|node| self.add(node)).collect(),
+				),
 				ir::Expr::Array(items) => Op::Array(self.items(items)),
+				ir::Expr::Pool(items) => Op::Pool(self.items(items)),
 				ir::Expr::Set(items) => Op::Set(self.items(items)),
 				ir::Expr::Map(items) => Op::Map(self.items(items)),
 				ir::Expr::Tuple(items) => {

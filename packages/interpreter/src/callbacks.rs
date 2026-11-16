@@ -18,6 +18,7 @@ enum Container {
 }
 enum Kind {
 	Find,
+	FindIndex,
 	Filter(Container, bool),
 	Map(bool),
 	Quantifier(bool),
@@ -49,6 +50,10 @@ impl Callback {
 		matches!(
 			path,
 			"Array#find"
+				| "Pool#find"
+				| "Columnar#find"
+				| "OrderedColumnar#find"
+				| "Array#findIndex"
 				| "Set#find" | "Map#find"
 				| "Array#filter"
 				| "Set#filter"
@@ -84,7 +89,9 @@ impl Callback {
 			Value::Map(_) => Container::Map,
 			_ => Container::Array,
 		};
-		let kind = if path.ends_with("#find") {
+		let kind = if path.ends_with("#findIndex") {
+			Kind::FindIndex
+		} else if path.ends_with("#find") {
 			Kind::Find
 		} else if path.ends_with("#filter") {
 			Kind::Filter(container, false)
@@ -140,6 +147,11 @@ impl Callback {
 						return Ok(Progress::Done(item.clone()));
 					}
 				}
+				Kind::FindIndex => {
+					if boolean(value)? {
+						return Ok(Progress::Done(Value::int(self.position as i64)));
+					}
+				}
 				Kind::Filter(_, inverse) => {
 					if boolean(value)? != *inverse {
 						self.output.push(item.clone());
@@ -165,7 +177,9 @@ impl Callback {
 				item.clone(),
 				Value::int(self.position as i64),
 			],
-			Kind::Filter(_, true) | Kind::Find | Kind::Quantifier(_) => vec![item.clone()],
+			Kind::Filter(_, true) | Kind::Find | Kind::FindIndex | Kind::Quantifier(_) => {
+				vec![item.clone()]
+			}
 			_ => vec![item.clone(), Value::int(self.position as i64)],
 		};
 		Ok(Progress::Call {
@@ -177,7 +191,7 @@ impl Callback {
 
 	fn finish(self: Box<Self>) -> Result<Progress, Error> {
 		let value = match self.kind {
-			Kind::Find => Value::None,
+			Kind::Find | Kind::FindIndex => Value::None,
 			Kind::Quantifier(every) => Value::Boolean(every),
 			Kind::Reduce => self.total,
 			Kind::Filter(Container::Set, _) => Value::Set(Arc::new(self.output)),

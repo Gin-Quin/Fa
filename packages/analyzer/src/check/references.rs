@@ -205,6 +205,7 @@ impl Walker<'_> {
 				let places = self
 					.reference_values
 					.get(&value)
+					.and_then(Option::as_ref)
 					.cloned()
 					.unwrap_or_else(|| self.reference_origins(value));
 				!places.is_empty()
@@ -219,7 +220,8 @@ impl Walker<'_> {
 	/// The reachable values of a structured result, not its control syntax.
 	fn reference_result_leaves(&self, value: NodeId) -> Vec<NodeId> {
 		let value = self.strip_groups(value);
-		if self.type_of(value) == TypeId::NEVER {
+		if self.type_of(value) == TypeId::NEVER || self.reference_values.get(&value) == Some(&None)
+		{
 			return Vec::new();
 		}
 		match self.view(value) {
@@ -233,6 +235,15 @@ impl Walker<'_> {
 				else_body,
 				..
 			} => {
+				if let Some(&taken) = self.a.comptime_branches.get(&value) {
+					return if taken {
+						self.reference_result_leaves(then_body)
+					} else {
+						else_body
+							.map(|body| self.reference_result_leaves(body))
+							.unwrap_or_default()
+					};
+				}
 				let mut leaves = self.reference_result_leaves(then_body);
 				if let Some(body) = else_body {
 					leaves.extend(self.reference_result_leaves(body));
@@ -330,6 +341,7 @@ impl Walker<'_> {
 		let places = self
 			.reference_values
 			.get(&value)
+			.and_then(Option::as_ref)
 			.cloned()
 			.unwrap_or_else(|| self.reference_origins(value));
 		if places.is_empty() {

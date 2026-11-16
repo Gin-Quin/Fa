@@ -155,6 +155,21 @@ impl Generator<'_> {
 					.collect::<Option<Vec<_>>>()?;
 				Expr::constant(format!("[{}]", parts.join(", ")), Prec::Primary)
 			}
+			Value::Pool(pool) => {
+				let TypeKind::Collection(_, item, _) = types.kind(ty) else {
+					return None;
+				};
+				let parts = pool
+					.values()
+					.map(|value| self.comptime_text(value, item).map(|expr| expr.text))
+					.collect::<Option<Vec<_>>>()?;
+				let class = if self.is_value_pool(ty) {
+					self.helper("FaValuePool")
+				} else {
+					"Set"
+				};
+				Expr::primary(format!("new {class}([{}])", parts.join(", ")))
+			}
 			Value::Set(items) => {
 				let item = match types.kind(ty) {
 					TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, item, _) => item,
@@ -236,7 +251,7 @@ impl Generator<'_> {
 				))
 			}
 			// functions are built by the runtime: not yet
-			Value::Function(_) => return None,
+			Value::Function(_) | Value::Reference(_) => return None,
 		})
 	}
 

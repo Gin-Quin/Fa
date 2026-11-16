@@ -31,6 +31,7 @@ pub mod ir;
 pub mod json;
 mod machine;
 pub mod memory;
+pub mod references;
 pub mod types;
 pub mod value;
 
@@ -748,6 +749,7 @@ mod tests {
 					Expr::Closure {
 						function: FnKey(0, 2),
 						captures: vec![0],
+						borrowed: false,
 					},
 				],
 			),

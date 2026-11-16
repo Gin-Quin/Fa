@@ -1,6 +1,7 @@
 //! The evaluator's explicit continuation and call stacks. No Fa call,
 //! default argument, callback, or expression evaluation recurses in Rust.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use ethnum::I256;
@@ -9,6 +10,7 @@ use crate::callbacks::{Callback, Progress};
 use crate::code::{Argument, Code, Item, Node, Op, Part, Place, Step};
 use crate::eval::{self, Error, Eval, Flow, Interpreter};
 use crate::ir::{ArithOp, CompareOp, FnKey, Num, Slot, TypeTest};
+use crate::references::{Key, Reference};
 use crate::value::{Closure, Member, MemberKind, Object, Value, equals};
 use crate::{builtins, memory};
 
@@ -24,6 +26,9 @@ enum Target {
 }
 
 struct Frame {
+	generation: u64,
+	function: Option<FnKey>,
+	default_slots: HashMap<(FnKey, Slot), Slot>,
 	code: Arc<Code>,
 	locals: Vec<Value>,
 }
@@ -47,7 +52,9 @@ enum Finish {
 	Arguments(Target),
 	Builtin(&'static str),
 	Mutate(&'static str, Place),
+	BorrowBuiltin(&'static str, Place),
 	Array,
+	Pool,
 	Set,
 	Map,
 	Tuple,
@@ -59,19 +66,13 @@ enum Finish {
 
 enum PlaceAction {
 	Read,
+	Borrow(bool),
+	BorrowBuiltin(&'static str, Vec<Value>),
 	Write(Value),
 	Mutate(&'static str, Vec<Value>),
 }
 
-enum PlaceStep {
-	Field(Arc<str>),
-	Index(Value),
-}
-
-struct ResolvedPlace {
-	slot: Slot,
-	steps: Vec<PlaceStep>,
-}
+type ResolvedPlace = Reference;
 
 enum Binary {
 	Arith(ArithOp, Num),
@@ -82,6 +83,7 @@ enum Binary {
 }
 
 enum Unary {
+	Dereference,
 	Negate(Num),
 	Convert(Num),
 	Not,
@@ -98,6 +100,11 @@ enum Unary {
 }
 
 enum Iteration {
+	Borrowed {
+		owner: Arc<Reference>,
+		keys: Vec<Value>,
+		position: usize,
+	},
 	Range {
 		current: I256,
 		end: Option<I256>,
@@ -121,6 +128,7 @@ struct For {
 enum CallbackFinish {
 	Value,
 	Mutate(ResolvedPlace),
+	Borrow(ResolvedPlace),
 }
 
 enum Continuation {
@@ -155,6 +163,7 @@ enum Continuation {
 pub(crate) struct Machine<'i, 'h> {
 	interpreter: &'i mut Interpreter<'h>,
 	frames: Vec<Frame>,
+	next_generation: u64,
 	stack: Vec<Continuation>,
 }
 
@@ -193,7 +202,14 @@ impl<'i, 'h> Machine<'i, 'h> {
 		let locals = vec![Value::None; code.slots as usize];
 		Ok(Self {
 			interpreter,
-			frames: vec![Frame { code, locals }],
+			frames: vec![Frame {
+				code,
+				locals,
+				generation: 0,
+				function: None,
+				default_slots: HashMap::new(),
+			}],
+			next_generation: 1,
 			stack: Vec::new(),
 		})
 	}
@@ -235,21 +251,30 @@ impl<'i, 'h> Machine<'i, 'h> {
 		let code = Arc::clone(&self.frame().code);
 		match &code.nodes[node] {
 			Op::Const(value) => Self::done(value.clone()),
-			Op::Local(slot) => Self::done(self.frame().locals[*slot as usize].clone()),
+			Op::Local(slot) => {
+				Self::done(self.read_value(self.frame().locals[*slot as usize].clone())?)
+			}
 			Op::Global(key) => Self::done(self.interpreter.host.global(*key)?),
 			Op::Function(function) => Self::done(Value::Function(Arc::new(Closure {
 				function: *function,
 				captured: Vec::new(),
 				bound: Vec::new(),
 			}))),
-			Op::Closure(function, captures) => Self::done(Value::Function(Arc::new(Closure {
-				function: *function,
-				captured: captures
-					.iter()
-					.map(|&slot| self.frame().locals[slot as usize].clone())
-					.collect(),
-				bound: Vec::new(),
-			}))),
+			Op::Closure(function, captures, borrowed) => {
+				let mut captured = Vec::with_capacity(captures.len());
+				for &slot in captures {
+					captured.push(if *borrowed {
+						Value::Reference(Arc::new(self.slot_reference(slot)))
+					} else {
+						self.read_value(self.frame().locals[slot as usize].clone())?
+					});
+				}
+				Self::done(Value::Function(Arc::new(Closure {
+					function: *function,
+					captured,
+					bound: Vec::new(),
+				})))
+			}
 			Op::Let(slot, value) => {
 				self.evaluate_after(*value, Continuation::Unary(Unary::Let(*slot)))
 			}
@@ -257,6 +282,12 @@ impl<'i, 'h> Machine<'i, 'h> {
 				self.evaluate_after(*value, Continuation::Assign(place.clone()))
 			}
 			Op::Read(place) => self.place(place.clone(), PlaceAction::Read),
+			Op::Borrow(place, optional) => {
+				self.place(place.clone(), PlaceAction::Borrow(*optional))
+			}
+			Op::Dereference(value) => {
+				self.evaluate_after(*value, Continuation::Unary(Unary::Dereference))
+			}
 			Op::Block(nodes) => {
 				let mut nodes = nodes.clone().into_iter();
 				match nodes.next() {
@@ -344,7 +375,12 @@ impl<'i, 'h> Machine<'i, 'h> {
 				arguments.iter().map(|&node| Input::Expr(node)).collect(),
 				Finish::Mutate(path, place.clone()),
 			),
+			Op::BorrowBuiltin(path, place, arguments) => self.gather(
+				arguments.iter().map(|&node| Input::Expr(node)).collect(),
+				Finish::BorrowBuiltin(path, place.clone()),
+			),
 			Op::Array(items) => self.gather_items(items.clone(), Finish::Array),
+			Op::Pool(items) => self.gather_items(items.clone(), Finish::Pool),
 			Op::Set(items) => self.gather_items(items.clone(), Finish::Set),
 			Op::Map(items) => self.gather_items(items.clone(), Finish::Map),
 			Op::Tuple(nodes) => self.gather(
@@ -482,6 +518,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 		match finish {
 			Finish::Arguments(_) => unreachable!(),
 			Finish::Array => Self::done(Value::Array(Arc::new(values))),
+			Finish::Pool => Self::done(Value::Pool(Arc::new(crate::value::Pool::new(values)))),
 			Finish::Tuple => Self::done(Value::Tuple(Arc::new(values))),
 			Finish::Set => {
 				let mut set = Vec::new();
@@ -537,55 +574,217 @@ impl<'i, 'h> Machine<'i, 'h> {
 				}
 			}
 			Finish::Mutate(path, place) => self.place(place, PlaceAction::Mutate(path, values)),
+			Finish::BorrowBuiltin(path, place) => {
+				self.place(place, PlaceAction::BorrowBuiltin(path, values))
+			}
 			Finish::Place(place, action) => {
-				let mut keys = values.into_iter();
-				let resolved = ResolvedPlace {
-					slot: place.slot,
-					steps: place
-						.steps
-						.into_iter()
-						.map(|step| match step {
-							Step::Field(name) => PlaceStep::Field(name),
-							Step::Index(_) => PlaceStep::Index(keys.next().expect("a place index")),
-						})
-						.collect(),
-				};
+				let absent = place.steps.is_empty()
+					&& matches!(self.frame().locals[place.slot as usize], Value::None);
+				let resolved = self.resolve_place(place, values)?;
 				match action {
-					PlaceAction::Read => {
-						Self::done(Self::locate(self.locals(), &resolved)?.clone())
+					PlaceAction::Read => Self::done(self.read_reference(&resolved)?),
+					PlaceAction::Borrow(optional) => {
+						if optional && absent {
+							return Self::done(Value::None);
+						}
+						match self.read_reference(&resolved) {
+							Ok(_) => Self::done(Value::Reference(Arc::new(resolved))),
+							Err(Error::Thrown(_)) if optional => Self::done(Value::None),
+							Err(error) => Err(error.into()),
+						}
+					}
+					PlaceAction::BorrowBuiltin(path, arguments) => {
+						self.borrow_builtin(path, resolved, arguments)
 					}
 					PlaceAction::Write(value) => {
-						*Self::locate(self.locals(), &resolved)? = value;
+						self.update_reference(&resolved, |slot, _| {
+							*slot = value;
+							Ok(())
+						})?;
 						Self::done(Value::None)
 					}
 					PlaceAction::Mutate(path, mut arguments) if Callback::mutating(path) => {
-						let receiver = Self::locate(self.locals(), &resolved)?.clone();
-						arguments.insert(0, receiver);
+						arguments.insert(0, self.read_reference(&resolved)?);
 						self.start_callback(path, arguments, CallbackFinish::Mutate(resolved))
 					}
 					PlaceAction::Mutate(path, arguments) => {
-						let frame = self.frames.last_mut().expect("an evaluation frame");
-						Self::done(builtins::mutate(
-							self.interpreter,
-							path,
-							Self::locate(&mut frame.locals, &resolved)?,
-							arguments,
-						)?)
+						Self::done(self.update_reference(&resolved, |receiver, interpreter| {
+							builtins::mutate(interpreter, path, receiver, arguments)
+						})?)
 					}
 				}
 			}
 		}
 	}
 
-	fn locate<'f>(locals: &'f mut [Value], place: &ResolvedPlace) -> Result<&'f mut Value, Flow> {
-		let mut current = &mut locals[place.slot as usize];
-		for step in &place.steps {
-			current = match step {
-				PlaceStep::Field(name) => builtins::field_mut(current, name)?,
-				PlaceStep::Index(key) => builtins::index_mut(current, key.clone())?,
+	fn slot_reference(&self, slot: Slot) -> Reference {
+		if let Value::Reference(reference) = &self.frame().locals[slot as usize] {
+			return (**reference).clone();
+		}
+		Reference {
+			frame: self.frames.len() - 1,
+			generation: self.frame().generation,
+			slot,
+			keys: Vec::new(),
+		}
+	}
+
+	fn canonical_reference(&self, reference: &Reference) -> Result<Reference, Error> {
+		let mut reference = reference.clone();
+		loop {
+			let frame = self
+				.frames
+				.get(reference.frame)
+				.filter(|frame| frame.generation == reference.generation)
+				.ok_or_else(|| {
+					Error::Stop("a compile-time reference outlived its collection".into())
+				})?;
+			let Some(Value::Reference(parent)) = frame.locals.get(reference.slot as usize) else {
+				return Ok(reference);
+			};
+			let mut keys = parent.keys.clone();
+			keys.extend(reference.keys);
+			reference = (**parent).clone();
+			reference.keys = keys;
+		}
+	}
+
+	fn read_value(&self, value: Value) -> Result<Value, Error> {
+		match value {
+			Value::Reference(reference) => self.read_reference(&reference),
+			value => Ok(value),
+		}
+	}
+
+	fn read_reference(&self, reference: &Reference) -> Result<Value, Error> {
+		let reference = self.canonical_reference(reference)?;
+		let mut value = self.frames[reference.frame]
+			.locals
+			.get(reference.slot as usize)
+			.cloned()
+			.ok_or_else(|| Error::Stop("an invalid compile-time reference slot".into()))?;
+		for key in &reference.keys {
+			value = match key {
+				Key::Field(name) => builtins::field(&value, name)?,
+				Key::Index(index) => builtins::index(&value, index)?,
 			};
 		}
-		Ok(current)
+		Ok(value)
+	}
+
+	fn update_reference<R>(
+		&mut self,
+		reference: &Reference,
+		f: impl FnOnce(&mut Value, &mut Interpreter<'h>) -> Result<R, Error>,
+	) -> Result<R, Error> {
+		let reference = self.canonical_reference(reference)?;
+		let mut value = self.frames[reference.frame]
+			.locals
+			.get_mut(reference.slot as usize)
+			.ok_or_else(|| Error::Stop("an invalid compile-time reference slot".into()))?;
+		for key in &reference.keys {
+			value = match key {
+				Key::Field(name) => builtins::field_mut(value, name).map_err(Error::from)?,
+				Key::Index(index) => {
+					builtins::index_mut(value, index.clone()).map_err(Error::from)?
+				}
+			};
+		}
+		f(value, self.interpreter)
+	}
+
+	fn resolve_place(&mut self, place: Place, keys: Vec<Value>) -> Result<Reference, Flow> {
+		let mut resolved = self.slot_reference(place.slot);
+		let mut keys = keys.into_iter();
+		for step in place.steps {
+			let key = match step {
+				Step::Field(name) => Key::Field(name),
+				Step::Index(_) => {
+					let mut key = keys.next().expect("an evaluated index");
+					if let Some(index) = key.as_int().filter(|index| *index < I256::ZERO)
+						&& let Some(items) = self.read_reference(&resolved)?.items()
+					{
+						key = Value::Integer(index + I256::from(items.len() as u64));
+					}
+					Key::Index(key)
+				}
+			};
+			resolved = resolved.child(key);
+		}
+		Ok(resolved)
+	}
+
+	fn borrow_builtin(
+		&mut self,
+		path: &'static str,
+		collection: Reference,
+		arguments: Vec<Value>,
+	) -> Result<Action, Flow> {
+		match path {
+			"Array#find" | "Pool#find" | "Columnar#find" | "OrderedColumnar#find" => {
+				let value = self.read_reference(&collection)?;
+				let keys: Vec<_> = if let Value::Pool(pool) = &value {
+					pool.slots
+						.iter()
+						.enumerate()
+						.filter_map(|(index, value)| {
+							value.as_ref().map(|_| Value::int(index as i64))
+						})
+						.collect()
+				} else {
+					(0..builtins::count(&value).unwrap_or(0))
+						.map(|index| Value::int(index as i64))
+						.collect()
+				};
+				let items = keys
+					.into_iter()
+					.map(|key| Value::Reference(Arc::new(collection.child(Key::Index(key)))))
+					.collect();
+				let mut values = vec![Value::Array(Arc::new(items))];
+				values.extend(arguments);
+				self.start_callback(
+					"Array#findIndex",
+					values,
+					CallbackFinish::Borrow(collection),
+				)
+			}
+			"Pool#add" | "Columnar#add" | "OrderedColumnar#add" => {
+				let index = match self.read_reference(&collection)? {
+					Value::Pool(pool) => pool.slots.len(),
+					other => other.items().map_or(0, <[Value]>::len),
+				};
+				self.update_reference(&collection, |receiver, interpreter| {
+					builtins::mutate(interpreter, path, receiver, arguments)
+				})?;
+				Self::done(Value::Reference(Arc::new(
+					collection.child(Key::Index(Value::int(index as i64))),
+				)))
+			}
+			"Array#get" | "Map#get" | "Map#getOrInsert" => {
+				let key = arguments
+					.first()
+					.cloned()
+					.ok_or_else(|| Error::Stop("a reference lookup needs a key".into()))?;
+				if path == "Map#getOrInsert" {
+					self.update_reference(&collection, |receiver, interpreter| {
+						builtins::mutate(interpreter, path, receiver, arguments)
+					})?;
+				}
+				let key = match (key.as_int(), self.read_reference(&collection)?) {
+					(Some(index), Value::Array(items)) if index < I256::ZERO => {
+						Value::Integer(index + I256::from(items.len() as u64))
+					}
+					_ => key,
+				};
+				let reference = collection.child(Key::Index(key));
+				match self.read_reference(&reference) {
+					Ok(_) => Self::done(Value::Reference(Arc::new(reference))),
+					Err(Error::Thrown(_)) if path != "Map#getOrInsert" => Self::done(Value::None),
+					Err(error) => Err(error.into()),
+				}
+			}
+			_ => Err(Error::Unsupported(format!("a reference from `{path}`")).into()),
+		}
 	}
 
 	fn call_function(
@@ -626,7 +825,15 @@ impl<'i, 'h> Machine<'i, 'h> {
 		for (&slot, value) in code.captures.iter().zip(captured) {
 			locals[slot as usize] = value;
 		}
-		self.frames.push(Frame { code, locals });
+		let generation = self.next_generation;
+		self.next_generation += 1;
+		self.frames.push(Frame {
+			code,
+			locals,
+			generation,
+			function: Some(key),
+			default_slots: HashMap::new(),
+		});
 		self.stack.push(Continuation::Function);
 		self.parameters(arguments.into_iter(), 0)
 	}
@@ -669,6 +876,35 @@ impl<'i, 'h> Machine<'i, 'h> {
 		self.callback(Callback::new(path, arguments)?, None, finish)
 	}
 
+	/// Defaults are evaluated in the callee, but owned argument storage lives
+	/// through the caller's read of a borrowed result. Reuse one slot per
+	/// default entry instead of retaining a frame or allocating on each call.
+	fn default_argument(&mut self, parameter: Slot, value: Value) -> Result<Value, Error> {
+		if matches!(value, Value::None | Value::Reference(_)) || self.frames.len() < 2 {
+			return Ok(value);
+		}
+		let function = self.frame().function.expect("a function default");
+		let caller_index = self.frames.len() - 2;
+		let caller = &mut self.frames[caller_index];
+		let key = (function, parameter);
+		let slot = if let Some(&slot) = caller.default_slots.get(&key) {
+			slot
+		} else {
+			self.interpreter.reserve(memory::values_size(1))?;
+			let slot = caller.locals.len() as Slot;
+			caller.locals.push(Value::None);
+			caller.default_slots.insert(key, slot);
+			slot
+		};
+		caller.locals[slot as usize] = value;
+		Ok(Value::Reference(Arc::new(Reference {
+			frame: caller_index,
+			generation: caller.generation,
+			slot,
+			keys: Vec::new(),
+		})))
+	}
+
 	fn callback(
 		&mut self,
 		callback: Box<Callback>,
@@ -689,8 +925,41 @@ impl<'i, 'h> Machine<'i, 'h> {
 			}
 			Progress::Done(value) => match finish {
 				CallbackFinish::Value => Self::done(value),
+				CallbackFinish::Borrow(collection) => {
+					if matches!(value, Value::None) {
+						Self::done(Value::None)
+					} else {
+						let value = if let Value::Pool(pool) = self.read_reference(&collection)? {
+							let position = value
+								.as_int()
+								.and_then(|index| usize::try_from(index).ok())
+								.ok_or_else(|| {
+									Error::Stop("a find result needs an element position".into())
+								})?;
+							let slot = pool
+								.slots
+								.iter()
+								.enumerate()
+								.filter(|(_, value)| value.is_some())
+								.nth(position)
+								.map(|(slot, _)| slot)
+								.ok_or_else(|| {
+									Error::Stop("the found element no longer exists".into())
+								})?;
+							Value::int(slot as i64)
+						} else {
+							value
+						};
+						Self::done(Value::Reference(Arc::new(
+							collection.child(Key::Index(value)),
+						)))
+					}
+				}
 				CallbackFinish::Mutate(place) => {
-					*Self::locate(self.locals(), &place)? = value;
+					self.update_reference(&place, |slot, _| {
+						*slot = value;
+						Ok(())
+					})?;
 					Self::done(Value::None)
 				}
 			},
@@ -720,6 +989,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 					Err(Flow::Error(error)) => return Err(error.into()),
 					Err(_) => Value::None,
 				};
+				let value = self.default_argument(slot, value)?;
 				self.locals()[slot as usize] = value;
 				self.parameters(arguments, parameter)
 			}
@@ -811,6 +1081,27 @@ impl<'i, 'h> Machine<'i, 'h> {
 					}
 					Continuation::ForIterable(item, index, body) => {
 						let values = match value {
+							Value::Reference(owner) => {
+								let value = self.read_reference(&owner)?;
+								let keys = match &value {
+									Value::Pool(pool) => pool
+										.slots
+										.iter()
+										.enumerate()
+										.filter_map(|(index, value)| {
+											value.as_ref().map(|_| Value::int(index as i64))
+										})
+										.collect(),
+									_ => (0..builtins::count(&value).unwrap_or(0))
+										.map(|index| Value::int(index as i64))
+										.collect(),
+								};
+								Iteration::Borrowed {
+									owner,
+									keys,
+									position: 0,
+								}
+							}
 							Value::Range {
 								start,
 								end,
@@ -853,6 +1144,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 
 	fn unary(&mut self, op: Unary, value: Value) -> Result<Action, Flow> {
 		let result = match op {
+			Unary::Dereference => self.read_value(value)?,
 			Unary::Negate(num) => eval::negate(num, &value)?,
 			Unary::Convert(num) => eval::convert(num, &value)?,
 			Unary::Not => Value::Boolean(!boolean(value)?),
@@ -905,6 +1197,17 @@ impl<'i, 'h> Machine<'i, 'h> {
 
 	fn for_next(&mut self, mut state: For) -> Result<Action, Flow> {
 		let value = match &mut state.values {
+			Iteration::Borrowed {
+				owner,
+				keys,
+				position,
+			} => {
+				let Some(key) = keys.get(*position) else {
+					return Self::done(Value::None);
+				};
+				*position += 1;
+				Value::Reference(Arc::new(owner.child(Key::Index(key.clone()))))
+			}
 			Iteration::Values { values, position } => match values.get(*position) {
 				Some(value) => {
 					*position += 1;

@@ -6,6 +6,7 @@ function replace = <Item>(values: Array<Item>, value: Item) throws IndexError mu
  target = copy value
 }
 function entry = <Item>(values: Map<String, Item>): (Item in values)? => values.get("key")
+function indexed = <Item>(entries: Map<String, Item>): Item in entries throws KeyNotFound => try entries["key"]
 function duplicate = <Item>(entries: Map<String, Item>): Map<String, Item> => copy entries
 function check = (): Integer throws IndexError | KeyNotFound => {
  mutable values: Array<Integer | Node> = [Node { value = 7 }]
@@ -16,6 +17,11 @@ function check = (): Integer throws IndexError | KeyNotFound => {
  mutable entries: Map<String, Integer | Node> = [("key", Node { value = 7 })]
  use item = entry(entries)
  if item is not none { item = 9 }
+ use byIndex = try indexed(entries)
+ byIndex = 11
+ let viaGet = entries.get("key")
+ if viaGet is Integer { if viaGet != 11 { return 0 } } else { return 0 }
+ byIndex = 9
  let copied = duplicate(entries)
  let words: Map<String, String | Node> = [("key", "text")]
  let copiedWords = duplicate(words)

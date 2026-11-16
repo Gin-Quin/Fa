@@ -179,7 +179,7 @@ let size = when value is {
 }
 ```
 
-A recursive type is built through a union or an optional (`next: Node?`), and stored on the heap automatically. The child is still a copy, owned by its parent: to share nodes, use a `Pool` and [relations](/advanced/relations). See [unions](/types/unions).
+A recursive type is built through a union or an optional (`next: Node?`), and stored on the heap automatically. The child is owned by its parent, and recursive values are structures: last use moves, otherwise write `copy` to keep both owners. To share nodes, use a `Pool` and [relations](/advanced/relations). See [unions](/types/unions).
 
 ## The preprocessor, replaced
 

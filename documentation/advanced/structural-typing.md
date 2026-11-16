@@ -115,7 +115,7 @@ logName(superHuman) -- no copy, no truncation
 
 The narrowed view is a compile-time restriction, not a runtime transformation.
 
-Narrowing selects the destination fields; it does not authorize a hidden collection copy. At a proven last use of an ordinary owner the retained fields can transfer and unused fields are destroyed. A resource retains all its fields for `destroy`, so narrowing an owned resource result cannot silently move them or copy a collection. Write an explicit data projection and the required `copy` at a visible site; implicit function adapters that would duplicate resource-owned data are rejected.
+Narrowing selects the destination fields; it does not authorize a hidden collection copy. At a proven last use of a data record the retained fields can transfer and unused fields are destroyed. A resource retains all its fields for `destroy`, so narrowing an owned resource result cannot silently move them or copy a collection. Write an explicit data projection and the required `copy` at a visible site; implicit function adapters that would duplicate resource-owned data are rejected.
 
 ## Object literals have exactly the expected fields
 
@@ -332,5 +332,5 @@ The strategy is detailed in `design/compilation-with-llvm.md`.
 
 - Objects are dynamic: a view is a plain property read, and nothing is specialized.
 - A narrowing copy calls the copy function generated for the destination type, which reads only its fields; a spread (`{ ...value }`) would keep the extra ones.
-- An unannotated copy of an erased parameter copies the complete concrete shape with the structural copy helper. Mutable destinations, returned borrowed values and stored elements use the ordinary copy rules; primitive values pass through unchanged. An array of generic elements needs element copies too. Type-dependent reflection (`@typeToString(Type<human>)`) still needs the actual argument type.
+- An unannotated copy of an erased parameter copies the complete concrete shape with the structural copy helper. Mutable destinations, returned borrowed values and stored elements obey the structure copy/move rules (a borrowed structure requires visible `copy`); primitive values pass through unchanged. An array of generic elements needs element copies too. Type-dependent reflection (`@typeToString(Type<human>)`) still needs the actual argument type.
 :::

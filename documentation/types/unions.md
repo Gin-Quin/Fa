@@ -18,7 +18,7 @@ Anonymous unions are structural: `String | Integer` and `Integer | String` are t
 
 A union is flattened, and a member that another member already covers disappears: `"north" | String` is `String`, `Int8 | Integer` is `Integer`, `Integer? | None` is `Integer?`, and `Never` disappears from any union. This applies to literals, ranges, `None`, enumeration and named union members, `Fields` and collections; object, tuple and function members never disappear this way: they must be [distinguishable](#members-must-be-distinguishable), including preserved written origins as described below.
 
-A member (field or method) that every alternative has with compatible types is available on the union without narrowing. Reading a field returns the union of its alternatives' field types; writing requires a type accepted by every alternative (the same writable field type). A common method has the same parameter names and types in every alternative; its result is the union of the results, and its effects are the union of the effects. The call dispatches to the actual alternative. Otherwise narrow first: the diagnostic identifies the alternative missing the member or the differing signatures.
+A member (field or method) that every alternative has with compatible types is available on the union without narrowing. Reading a field returns the union of its alternatives' field types; writing requires a type accepted by every alternative (the same writable field type). A common method has the same visible call parameter names and types in every alternative (apart from its implicit receiver); its result is the union of the results, and its effects are the union of the effects. The call dispatches to the actual alternative. Otherwise narrow first: the diagnostic identifies the alternative missing the member or the differing signatures.
 
 ```fa
 type Circle = { radius: Float, function area = (self): Float => self.radius * self.radius * 3.14 }
@@ -266,7 +266,7 @@ type Folder = {
 }
 ```
 
-There is no `Box` type: you never allocate the recursive part yourself.
+There is no `Box` type: you never allocate the recursive part yourself. A recursive value is a [structure](/advanced/memory-management#structures): moving its last use transfers its children; keeping two owners requires explicit `copy`. This applies even when every leaf is ordinary data.
 
 The rules of recursive types:
 

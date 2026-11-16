@@ -369,7 +369,7 @@ Use a local reference for short-lived work on a stored value. Use a relation whe
 
 ## Relations and recursion
 
-A type can't contain itself directly, because its size would be infinite. Recursion through a union, including an optional (`next: Node?`), is allowed: the compiler stores the child on the heap, but it is still a copy, owned by its parent (see [recursive types](/advanced/memory-management#recursive-types)). There is no `Box` type.
+A type can't contain itself directly, because its size would be infinite. Recursion through a union, including an optional (`next: Node?`), is allowed: the compiler stores the child on the heap, owned by its parent. Recursive values are structures: the child transfers at the owner's last use, or needs explicit `copy` to keep both owners (see [recursive types](/advanced/memory-management#recursive-types)). There is no `Box` type.
 
 Owned children make trees: a node can't have two parents, and a child can't point back to its parent. As soon as objects need to point at each other (a doubly linked list, a graph, a parent and its children), store them in a stable-address collection and link them with relations.
 

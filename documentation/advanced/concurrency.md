@@ -412,7 +412,7 @@ async function main = () => {
 
 The rules:
 
-- The value the caller holds is a **handle** to the worker. Like a task, it can't be copied, only moved.
+- The value the caller holds is a **unique handle** to the worker. It moves, `copy` is `MEM003`, and a parameter borrows it (unlike a Task-consuming parameter). WorkerPool, socket/listener, guard and subscription owners follow the same unique lifetime rule. Only Mutex, Channel and atomics share identity when copied.
 - **Calls are queued**: a worker runs one call at a time, in the order the calls were made, so its state is never accessed by two threads at once. A method declared with `mutates self` modifies the worker's state, and needs a `mutable` handle.
 - The caller can't read or write the fields of a worker: it only calls its methods. The fields are given when the worker is created.
 - A started call uses the handle, like any started call uses its arguments: the worker can't be stopped or moved until the task is awaited or cancelled.
@@ -597,7 +597,7 @@ Immutable values need none of this: a value that no thread modifies can be read 
 
 ### Mutexes
 
-A `Mutex` protects a value. `lock()` waits until the value is available, and returns a guard giving access to it:
+A `Mutex` protects a value. Its handle is shared, but each guard returned by `lock()` or `tryLock()` is a unique owner of that acquisition: it moves, cannot be copied, and is borrowed in a parameter. `lock()` waits until the value is available, and returns a guard giving access to it:
 
 ```fa
 use { Mutex } = std.concurrency
@@ -768,7 +768,7 @@ The strategy is detailed in `design/compilation-with-llvm.md`, and decided for a
 
 - **Async instance**: `name___async`, an `async function` of JavaScript taking its task first (`name___async($task, …)`); `await` becomes `await`. **Sync instance**: `name___sync`, a plain function. Each is emitted only when a call needs it, and a function with one instance keeps its plain name; an exported one is also a Promise API (`name`) for JavaScript callers, and the other modules import `name$sync` and `name$async`. On `bun` and `node`, the blocking primitives map to the synchronous APIs (`readFileSync`) or, for timers, to `Atomics.wait` on a private `SharedArrayBuffer`. An `await` of a mutex or a channel that is ready doesn't `await` at all.
 - **`start`** binds written arguments and omitted defaults immediately in source order, with cleanup if binding fails; only the body begins in a microtask (`faStart`). A synchronous default-entry/portable owner recipe keeps defaults separate from the scheduled body. This is the specified creation timing on every target; the legacy JavaScript binder must be updated in ownership slice O24. The `Task` object holds its outcome (a value, a Fa error, or cancelled), the end of its current wait, and the tasks it owns.
-- **Detached calls** copy borrowed argument values at the `start`, including fields, indexed values, spread elements and method receivers, unless the analysis marks them moved. Only the started call copies: nested calls evaluating its arguments retain ordinary borrowing. Worker transport already snapshots its arguments and needs no additional copy. A `start do` uses the analysis's capture list. Synchronization handles keep their shared identity; module-level values are read by the block rather than captured.
+- **Detached calls** store arguments and captures at the `start`, including fields, indexed values, spread elements and method receivers. Ordinary values copy, structures move or need visible `copy`, and unique captures are forbidden. Only the started call owns these stored values: nested calls evaluating its arguments retain ordinary borrowing. Worker transport already snapshots its arguments and needs no additional copy. A `start do` uses the analysis's capture list. Synchronization handles keep their shared identity; module-level values are read by the block rather than captured.
 - **Guards** bound to locals unlock at block exit. An awaited `lock()` or a `tryLock()` used temporarily, including as a positional or named argument, unlocks at the end of its statement. A generated `try`/`finally` also releases it if evaluation throws or leaves the scope; a binding initialized inside that `try` is declared outside it. A fresh guard result whose value is discarded is passed directly to `faUnlock` at the discard point.
 - **Cancellation**: `cancel()` marks the task, ends its current wait (a timer is cleared, a place in a line is left) and cancels the tasks it owns, synchronously; the waits of the runtime check the mark when they resume and throw a signal that no `catch` keeps, so that only the `finally` blocks of the task (its scope exits) run. Errors are Fa values, never rejected promises.
 - **Coop budget**: an `await` that resolves without waiting counts, and every 128 of them a macrotask lets timers and I/O run; the loops of async instances check the clock every 128 iterations and give the thread back once the current macrotask lasted 4 ms.

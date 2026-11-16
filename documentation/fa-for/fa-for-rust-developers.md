@@ -281,7 +281,7 @@ Fa doesn't compile to Rust. To use a Rust crate, expose `#[unsafe(no_mangle)] pu
 | `unwrap()` | there is none; handle with `catch`, or propagate with `try` |
 | `&T` / `&mut T` | parameters are already references; declare `mutates name` for a mutable one |
 | `let mut r = &a; r = &b;` | `mutable use r = a`, then `reuse r = b` |
-| `clone()` | `copy value` for collections; ordinary assignment preserves value semantics |
+| `clone()` | `copy value` for structures; ordinary assignment preserves value semantics |
 | `impl Trait` | a structural constraint: `Item: { field: Type }` |
 | `Box<T>` | not needed: recursion through a union or an optional is automatic |
 | `Vec::with_capacity(n)` | `Array<Integer>.from([], capacity = n)` |

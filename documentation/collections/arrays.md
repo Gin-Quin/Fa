@@ -176,7 +176,7 @@ Adding or removing items of an array while iterating over it is a compile error.
 
 ## Slicing and copying
 
-Assigning an existing array moves it at last use. To keep both arrays, write `let duplicate = copy original`. This rule extends to every collection and to elements owning collections. `get`, indexing and iteration borrow elements; storing a borrowed element that owns a collection requires `copy`. See [memory management](/advanced/memory-management).
+Assigning an existing array moves it at last use. To keep both arrays, write `let duplicate = copy original`. This is the general structure rule, including recursive values and elements owning structures. `get`, indexing and iteration borrow elements; storing a borrowed structure element requires `copy`. See [memory management](/advanced/memory-management).
 
 Indexing with a [range](/values/ranges) copies the selected items into a new array. `..` excludes the upper bound, `..=` includes it.
 

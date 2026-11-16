@@ -26,6 +26,8 @@ person.name = "Bao"
 console.log(previous.name, person.name) -- Ana Bao
 ```
 
+Function values copy their callable handle and may retain an immutable environment; this does not duplicate the structures already captured at creation. Captures themselves follow the [closure storage rules](#closures).
+
 An object whose only non-scalar fields are strings is ordinary. `String` never requires `copy`. The native cost of storing a long string is specified in the implementation notes of this page and of [strings](/values/strings).
 
 ### Structures
@@ -66,7 +68,7 @@ A copy preserves contents, not spare capacity. Reserve the destination separatel
 
 ### Explicit `copy`
 
-`copy expression` evaluates its operand once and produces a fresh, independent value of the operand's type. An expected type can narrow the stored result, as for any assignment. It is a value, never an assignable place or an alias. An explicit expected-type projection, such as `function data = (resource: Resource): Plain => copy resource`, copies only the copyable plain data fields; it does not duplicate the resource or its destructor. A retained unique field still makes that projection illegal. It recursively copies owned data, including nested collections; shared handles remain shared. It accepts ordinary values too. It cannot duplicate a Task, a resource or any owned composite containing one (`MEM003`).
+`copy expression` evaluates its operand once and produces a fresh, independent value of the operand's type. An expected type can narrow the stored result, as for any assignment. It is a value, never an assignable place or an alias. An explicit expected-type projection, such as `function data = (resource: Resource): Plain => copy resource`, copies only the copyable plain data fields; it does not duplicate the resource or its destructor. A retained unique field still makes that projection illegal. It recursively copies owned data, including collections and recursive children; shared handles remain shared. It accepts ordinary values too. It cannot duplicate a Task, a resource or any owned composite containing one (`MEM003`).
 
 Access, indexing and calls bind more tightly than `copy`; arithmetic binds less tightly: `copy source.items + other` means `(copy source.items) + other`. Parenthesize a larger operand: `copy (left ?? right)`. `copy` is contextual: `copy(x)` calls a function named `copy`, `copy[0]` indexes a value named `copy`, `object.copy` names a field or method, and `let copy = 1` declares a name. A spaced prefix starts a copy; `copy - 2` remains subtraction, and `if copy { … }` tests the value named `copy`.
 
@@ -102,11 +104,115 @@ function choose = (flag: Boolean): Array<Integer> => {
 console.log(choose(true), choose(false))
 ```
 
-The compiler must prove exclusive ownership. A borrowed parameter, a `use` alias, an iteration variable, an indexed element still owned by a collection, or an imported module value cannot silently surrender its owner's storage. Use `copy` to obtain independent copyable data; use `take` to remove an element with ownership. The fields of a last-use ordinary owner, fresh or already bound, may transfer while its unused fields are destroyed. A resource's fields cannot move out from under `destroy`: transfer the whole resource, or explicitly copy a copyable data field.
+The compiler must prove exclusive ownership. A borrowed parameter, a `use` alias, an iteration variable, an indexed element of a collection that stays live, or an imported module value cannot silently surrender its owner's storage. Use `copy` to obtain independent copyable data; use `take` to remove an element with ownership. The fields of a last-use data record, fresh or already bound, may transfer while its unused fields are destroyed. A resource's fields cannot move out from under `destroy`: transfer the whole resource, or explicitly copy a copyable data field.
+
+#### Partial field moves
+
+A move invalidates exactly the moved path. A field path can contain fields of fields and known tuple positions, in a local or temporary that the code owns. After a field moves, its siblings remain usable; the moved field and references into it are invalid. Passing, copying, storing or returning the owner as a whole is `MEM002` until the missing field is assigned again. The diagnostic names the moved path and the line of its move, and suggests `copy` at that move or replacing the field before the whole use.
+
+```fa
+mutable holder = { nested = { items = [1], count = 2 }, pair = ([3], 4) }
+let items = holder.nested.items
+let tupleItems = holder.pair[0] -- a tuple position, not a collection lookup
+console.log(holder.nested.count, holder.pair[1], items, tupleItems)
+holder.nested.items = [5]
+holder.pair[0] = [6]
+console.log(holder) -- every field is initialized again
+```
+
+A temporary can give up a field too. An indexed collection element transfers only when removed by an owning operation, or when the whole collection is at its last use:
+
+```fa
+type Holder = { items: Array<Integer>, count: Integer }
+function make = (): Holder => Holder { items = [1], count = 2 }
+let items = make().items -- transfers from the temporary, destroys unused siblings
+let matrix = [[1], [2]]
+let first = matrix[0] -- consumes the collection's last use; remaining items are destroyed
+console.log(items, first)
+```
+
+A whole use before restoring a moved field is invalid:
+
+```fa
+mutable holder = { items = [1], count = 2 }
+let items = holder.items
+console.log(holder.count, items) -- siblings remain valid
+console.log(holder) -- error: MEM002: holder.items moved on line 2
+-- Fix: write `copy holder.items` at the move, or assign holder.items before this whole use.
+```
+
+A conditional partial move invalidates the same field on paths where it happened. After joining the branches, a whole use is invalid until the field is definitely initialized on every path; sibling reads still work:
+
+```fa
+function invalid = (take: Boolean) => {
+	mutable holder = { items = [1], count = 2 }
+	if take {
+		let items = holder.items
+		console.log(items)
+	}
+	console.log(holder.count)
+	console.log(holder) -- error: MEM002: holder.items may have moved in the branch
+	-- Fix: copy at the branch's move, or assign holder.items after the branch.
+}
+```
+
+A partial move never leaves a hole through a collection index or key while that collection stays live. Use `take` to remove the item, or `copy` to keep both:
+
+```fa
+mutable matrix = [[1], [2]]
+let row = matrix[0] -- error: MEM004: use `copy matrix[0]` or `matrix.take(0)`
+console.log(matrix, row)
+mutable rows: Map<String, Array<Integer>> = [("one", [1])]
+let entry = rows.get("one") -- error: MEM004: use `copy rows.get("one")` or `rows.take("one")`
+console.log(rows, entry)
+```
+
+A `use` reference cannot give away the value it borrows, even when its target is a local:
+
+```fa
+mutable holder = { items = [1], count = 2 }
+use borrowed = holder
+let items = borrowed.items -- error: MEM004: write `copy borrowed.items`
+console.log(holder.count, items)
+```
+
+A borrowed parameter cannot transfer a field either:
+
+```fa
+function extract = (holder: { items: Array<Integer> }): Array<Integer> => holder.items -- error: MEM004
+-- Fix: return `copy holder.items`, or return a reference naming the caller's owner.
+```
+
+A resource stays whole for its destructor, including at its last explicit use:
+
+```fa
+-- Held.foreign.fa
+type Held = { items: Array<Integer>, function destroy = (self) => {} }
+let held = Held { items = [1] }
+let items = held.items -- error: MEM004: write `copy held.items`; destroy still owns this field
+console.log(items)
+```
+
+A unique resource field cannot be copied as a fix (`MEM003`); transfer its complete resource owner instead. These limits apply equally to pattern bindings. A conditional whole move and a conditional partial move use the same flow rule.
 
 ### Unique values
 
-A `Task`, a type declaring `destroy` (a resource), and every composite owning one are unique. The built-in move-only worker, worker-pool and socket handles retain their documented unique lifetimes. Assignment transfers ownership; using the old owner is `MEM002`. `copy` is `MEM003`. A second resource requires a new instance, such as `open`, `create` or a constructor.
+A `Task`, a type declaring `destroy` (a resource), and every composite owning one are unique. Built-in lifetime owners are unique too; the only shared identity types are the synchronization handles listed below. Except for the Task-consuming contract below, its parameter borrows; it has no counted shared-owner exception. Assignment transfers ownership; using the old owner is `MEM002`. `copy` is `MEM003`. A second resource requires a new instance, such as `open`, `create` or a constructor.
+
+| Built-in value | Category and lifetime |
+| --- | --- |
+| `Task<Result>` (with its declared errors) | unique; await/Task-consuming calls consume its owner; cancellation ends its computation; executor-local |
+| Worker handle of a `*.worker.fa` type | unique; `stop()` or scope exit ends the worker |
+| `WorkerPool<Worker>` | unique; `shutdown()` or scope exit ends its pool |
+| `std.net.TcpListener` | unique; `close()` or destruction ends the listener |
+| `std.net.TcpStream` | unique; `close()` or destruction ends the socket |
+| `Guard<Value>` returned by Mutex locking | unique; destruction ends the lock acquisition |
+| `Subscription` | unique; `stop()` or scope exit ends the subscription |
+| `Mutex<Value>`, `Channel<Value>`, `AtomicInteger`, `AtomicBoolean` | shared synchronization handles; copies retain the same identity |
+
+Any further built-in lifetime owner, including a library server resource with close/stop/dispose, follows the unique rule; the explicit synchronization handles retain their sharing contract. A method name alone does not make an ordinary user type unique: its `destroy` does. Foreign `Pointer` and `CString` are addresses, not automatic allocation owners; foreign code wraps an owned C lifetime in a resource with `destroy`.
+
+To make a unique handle available to several users, put its one owner behind a common Mutex or communicate through a Channel to the task that owns it. Copying the handle itself cannot create another owner.
 
 ```fa
 let task = start do { 42 }
@@ -129,7 +235,7 @@ An implicit function adapter cannot copy a resource result into a plain data res
 
 ### Shared handles
 
-`Mutex`, `AtomicInteger`, `AtomicBoolean` and `Channel` handles share identity: assignment or `copy` gives access to the same state. A composite containing both a handle and a structure copies its owned data independently and retains the handle. Sharing a handle does not authorize an unprotected borrow of its payload.
+`Mutex`, `AtomicInteger`, `AtomicBoolean` and `Channel` handles share identity: assignment or `copy` gives access to the same state. An explicit copy of a composite containing both a handle and a structure duplicates its owned data independently and retains the handle; keeping both composites requires `copy`. Sharing a handle does not authorize an unprotected borrow of its payload.
 
 ```fa
 use { Mutex } = std.concurrency
@@ -140,7 +246,7 @@ mutable same = mutex
 
 ## Objects are stored inline
 
-An ordinary object lives in its function frame, in a parent field or in a collection slot. It has no separate allocation. Heap storage belongs to collections, recursive values, task frames, escaping environments and shared handles. The physical choice of frame, static or heap storage does not change ownership.
+An object lives in its function frame, in a parent field or in a collection slot. It has no separate allocation. Heap storage belongs to collections, recursive values, task frames, escaping environments and shared handles. The physical choice of frame, static or heap storage does not change ownership.
 
 ### Recursive types
 
@@ -198,7 +304,7 @@ A collection owns its elements and releases them with its storage. Construction 
 
 ### Heap blocks made by the compiler
 
-The compiler also allocates recursive nodes, task frames and escaping closure environments when their lifetime requires it. Synchronization handles use reference counting. An implementation may count immutable function environments and local acquisition/subscription control blocks to release them once; this does not make resources or Tasks copyable. Ordinary objects and strings have no reference count.
+The compiler also allocates recursive nodes, task frames and escaping closure environments when their lifetime requires it. Synchronization handles use reference counting. An implementation may count immutable function environments. Acquisition/subscription bookkeeping does not give their handles shared ownership; resources and Tasks are never made copyable by internal counting. Ordinary objects and strings have no reference count.
 
 ### Iterating yields references
 
@@ -273,8 +379,8 @@ Across workers, use an independent copy, a common `Mutex`, or a proven exclusive
 
 | Code | Message and rule | Fix |
 | --- | --- | --- |
-| `MEM002` | Value was moved or invalidated; it cannot be used here. Also: a borrowed resource or a field needed by its destructor cannot transfer ownership. | Use the new owner, copy copyable data before moving, acquire a new resource, or transfer the complete resource. |
-| `MEM003` | `T` owns a Task or a value with `destroy` and can't be copied; move it instead. An escaping capture cannot own it either. | Move the owner, create a new resource, or keep the closure nonescaping. `copy` cannot fix this. |
+| `MEM002` | Value was moved or invalidated; it cannot be used here. A partial move names the exact path and move line; the whole owner is invalid until the field is assigned again. Also: a borrowed resource or a field needed by its destructor cannot transfer ownership. | Use the new owner, copy copyable data before moving, acquire a new resource, or transfer the complete resource. |
+| `MEM003` | `T` is unique or owns a unique value and can't be copied; move it instead. An escaping capture cannot own it either. | Move the owner, create a new resource, or keep the closure nonescaping. `copy` cannot fix this. |
 | `MEM004` | Copying `T` duplicates a structure; write `copy value` explicitly or stop using the source so it can move. | Write `copy` at the storage site; for a capture, first create a local snapshot and capture its last use. |
 
 The following deliberately invalid example documents `MEM004`. Enforcement is a later implementation slice:
@@ -291,7 +397,7 @@ A move invalidates aliases too (`MEM002`):
 let task = start do { 1 }
 use borrowed = task
 let owner = task
-console.log(await borrowed) -- error: MEM002: use `owner`
+console.log(await borrowed catch _error => -1) -- error: MEM002: use `owner`
 ```
 
 An explicit copy cannot consume a unique value (`MEM003`):

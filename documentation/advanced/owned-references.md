@@ -290,7 +290,7 @@ Because every value in Fa is destroyed at the end of its scope, a reference cann
 
 ## Returning a reference
 
-Returning a reference into a collection that is local to the function is impossible, since the collection is destroyed on return. An ordinary result copies out; a result owning a collection requires explicit `copy`, and a unique element must be removed with an owning operation such as `take`:
+Returning a reference into a collection that is local to the function is impossible, since the collection is destroyed on return. An ordinary result copies out; a structure result requires explicit `copy`, and a unique element must be removed with an owning operation such as `take`:
 
 ```fa
 function createPerson = (): Person => {

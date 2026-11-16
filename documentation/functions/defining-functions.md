@@ -111,7 +111,7 @@ A default value is evaluated at each call that doesn't pass the argument, like i
 function slice = (text: String, start: Integer = 0, end: Integer = text.length) => ...
 ```
 
-A default value runs inside the function: its effects, like the errors it may throw, are effects of the function, declared in its signature when the body is a block.
+A default value runs during call binding, before the body. For `start`, binding happens when the task is created, with the written arguments in source order; only the body waits for the task's first turn. Its effects, including errors, belong to that call and are declared in the function's signature when the body is a block. A failing started default fails the `start` expression and releases previously evaluated owned arguments.
 
 The parameters and the top-level declarations of the body share one scope: declaring a value with the name of a parameter is an error.
 
@@ -133,7 +133,7 @@ move(x = 1, 2) -- error: a positional argument can't follow a named argument
 move(1, 2, x = 3) -- error: `x` is already given
 ```
 
-Named arguments and default values belong to the declaration: they work in direct calls, not through a value of a [function type](#function-types).
+Named arguments and default values belong to the declaration: they work in direct calls, not through a value of a [function type](#function-types). Defaults come from the exact written declaration, including across files and generic instantiations; structural type equality never selects another declaration's defaults. When an anonymous nested annotation has no written default owner, supply the argument explicitly.
 
 ### Variadic parameters
 
@@ -720,6 +720,10 @@ function readPoint = (point: Point) => {
 
 :::implementation
 ## Implementation details
+
+### Default and callable ownership
+
+Visible names, default owners, written parameter origins and finalizer/method capabilities use one portable callable metadata graph. Written declarations publish a stable owner recipe with exact generic bindings; an anonymous nested annotation without such an owner retains the explicit-argument diagnostic. A started call binds defaults at creation through the synchronous default entry on every target, with cleanup of earlier owned arguments on failure. Do not add defaults to structural function-type identity or look them up by an equal type.
 
 ### Native and WebAssembly recursion
 

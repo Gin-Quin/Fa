@@ -152,7 +152,7 @@ let subscription = watch {
 subscription.stop() -- runs the cleanup; `subscription` can't be used afterwards
 ```
 
-The subscription is a `Subscription`, from the prelude. It can't be copied, only moved, and `stop()` consumes it.
+The subscription is a `Subscription`, from the prelude. It is a [unique built-in owner](/advanced/memory-management#unique-values): it moves, `copy` is `MEM003`, parameters borrow, and `stop()` consumes it. A copied counted subscription handle is not part of the language.
 
 ## Batching
 

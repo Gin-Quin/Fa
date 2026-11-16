@@ -56,3 +56,11 @@ stress and compile-time evaluation.
 outcomes, 28 IR controls, instruction rows and fixture hashes. The six failing
 standalone LLVM runs are C1. The package failures distinguish C1 from the two
 pre-existing issues; none is suppressed as an expected skip.
+
+## Fixed-layout regressions
+
+The fixes on `perf/collections` (`632d4eed`, `75613ae9`) promote C1/C2 and the sibling boundaries into `packages/cli/tests/programs/map-generic-*.fa` and `packages/codegen-llvm/tests/programs/async-map-generic-layout.fa`. The shared corpus runs O3 on Bun/Node/web and LLVM targets, including whole-program and split packages. `cargo test -p fa-codegen-llvm --test map_layouts` supplies 24 O0/leak executions across all three LLVM targets. The `checks` suite checks caller/instance layout agreement at every inline integer width and separate generic readonly chunked/inline headers on native and wasm.
+
+`fixes.json` retains final adversarial outcomes, source hashes, split constructor/instance IR calls, and the optimization firing/budget controls. All 105 standalone outcomes pass. Each of the three package matrices has five passing executable checks; its freestanding O0 link is still blocked by the pre-existing M1 (`_exit`, `sigaction`, `raise`, plus `strtod` with leak checking). Keep reporting that link failure, not treating it as a passing execution.
+
+To inspect the split IR, run the package helper above with `FA_KEEP_OBJECTS=1` and `FA_REVIEW_PACKAGE=per-unit-delete` or `per-unit-generic`, then disassemble its O3 `objects/*.bc` files with LLVM 18 `llvm-dis`. For deletion, `application~main` and `library~prune.inst1` must both use `1099511627792` (DENSE plus 16-byte entry size). For reference stability, `library~create` and `library~replace.inst1` must both use 16 (chunked). This holds on native, wasm and freestanding.

@@ -1,0 +1,298 @@
+{
+  "source_commits": [
+    "632d4eed",
+    "75613ae9"
+  ],
+  "review_base": "d3d569a8",
+  "findings": {
+    "C1": {
+      "before": "Native/freestanding crash and wasm size 3 at O0/O3; Bun passes.",
+      "after": "All six LLVM executions pass; split caller and instance share DENSE | 16."
+    },
+    "C2": {
+      "before": "Pre-existing: generic insertion disappears (none instead of 70).",
+      "after": "Whole-program and split package regressions pass; constructor and instance share chunked entry size 16."
+    },
+    "M1": {
+      "status": "Pre-existing, open in design/todo.md",
+      "symbols": [
+        "_exit",
+        "sigaction",
+        "raise",
+        "strtod"
+      ],
+      "blocked": "Per-unit native-freestanding O0 with leak checking."
+    }
+  },
+  "review_standalone": {
+    "executions": 105,
+    "passed": 105,
+    "cases": [
+      "aliases-closures",
+      "await",
+      "budgets",
+      "captured",
+      "compile-time",
+      "escape",
+      "generic",
+      "generic-delete",
+      "owner-method",
+      "private-error",
+      "probe-effects",
+      "probe-shifts",
+      "stable",
+      "stress",
+      "widths"
+    ],
+    "max_rss_kib": 198912,
+    "llvm_optimization_levels": [
+      0,
+      3
+    ],
+    "llvm_targets": [
+      "native",
+      "wasm",
+      "native-freestanding"
+    ],
+    "bun_executions": 15
+  },
+  "review_packages": [
+    {
+      "case": "per-unit",
+      "passed": [
+        "native-O0 PASS",
+        "native-O3 PASS",
+        "wasm-O0 PASS",
+        "wasm-O3 PASS",
+        "native-freestanding-O3 PASS"
+      ],
+      "known_m1_only": true,
+      "max_rss_kib": 157048
+    },
+    {
+      "case": "per-unit-delete",
+      "passed": [
+        "native-O0 PASS",
+        "native-O3 PASS",
+        "wasm-O0 PASS",
+        "wasm-O3 PASS",
+        "native-freestanding-O3 PASS"
+      ],
+      "known_m1_only": true,
+      "max_rss_kib": 145772
+    },
+    {
+      "case": "per-unit-generic",
+      "passed": [
+        "native-O0 PASS",
+        "native-O3 PASS",
+        "wasm-O0 PASS",
+        "wasm-O3 PASS",
+        "native-freestanding-O3 PASS"
+      ],
+      "known_m1_only": true,
+      "max_rss_kib": 149556
+    }
+  ],
+  "split_ir_checks": [
+    {
+      "case": "per-unit-delete",
+      "target": "native",
+      "module": "application~main.bc",
+      "entry_size_with_flags": 1099511627792,
+      "calls": [
+        "%0 = tail call ptr @fa_table_new(i64 3, i64 1099511627792)",
+        "%3 = call ptr @fa_table_entry(ptr %0, i64 %1, i64 1099511627792)",
+        "%4 = call ptr @fa_table_append(ptr %0, i64 0, i64 1099511627792, i64 %1, i64 0, ptr nonnull @fa.hash_at)",
+        "%8 = call ptr @fa_table_entry(ptr %0, i64 %6, i64 1099511627792)",
+        "%9 = call ptr @fa_table_append(ptr %0, i64 -9172280018570214421, i64 1099511627792, i64 %6, i64 0, ptr nonnull @fa.hash_at)",
+        "%13 = call ptr @fa_table_entry(ptr %0, i64 %11, i64 1099511627792)",
+        "%14 = call ptr @fa_table_append(ptr %0, i64 -4586140011432590859, i64 1099511627792, i64 %11, i64 0, ptr nonnull @fa.hash_at)"
+      ]
+    },
+    {
+      "case": "per-unit-delete",
+      "target": "native",
+      "module": "library~prune.inst1.bc",
+      "entry_size_with_flags": 1099511627792,
+      "calls": [
+        "%6 = tail call i32 @fa_table_live(ptr nonnull %1, i64 %entry_position.02, i64 1099511627792)",
+        "%7 = tail call ptr @fa_table_entry(ptr %1, i64 %entry_position.02, i64 1099511627792)",
+        "tail call void @fa_table_kill(ptr %1, i64 %13, i64 %entry_position.02, i64 1099511627792)"
+      ]
+    },
+    {
+      "case": "per-unit-delete",
+      "target": "wasm",
+      "module": "application~main.bc",
+      "entry_size_with_flags": 1099511627792,
+      "calls": [
+        "%0 = tail call ptr @fa_table_new(i64 3, i64 1099511627792)",
+        "%3 = call ptr @fa_table_entry(ptr %0, i64 %1, i64 1099511627792)",
+        "%4 = call ptr @fa_table_append(ptr %0, i64 0, i64 1099511627792, i64 %1, i64 0, ptr nonnull @fa.hash_at)",
+        "%8 = call ptr @fa_table_entry(ptr %0, i64 %6, i64 1099511627792)",
+        "%9 = call ptr @fa_table_append(ptr %0, i64 -9172280018570214421, i64 1099511627792, i64 %6, i64 0, ptr nonnull @fa.hash_at)",
+        "%13 = call ptr @fa_table_entry(ptr %0, i64 %11, i64 1099511627792)",
+        "%14 = call ptr @fa_table_append(ptr %0, i64 -4586140011432590859, i64 1099511627792, i64 %11, i64 0, ptr nonnull @fa.hash_at)"
+      ]
+    },
+    {
+      "case": "per-unit-delete",
+      "target": "wasm",
+      "module": "library~prune.inst1.bc",
+      "entry_size_with_flags": 1099511627792,
+      "calls": [
+        "%6 = tail call i32 @fa_table_live(ptr nonnull %1, i64 %entry_position.02, i64 1099511627792)",
+        "%7 = tail call ptr @fa_table_entry(ptr %1, i64 %entry_position.02, i64 1099511627792)",
+        "tail call void @fa_table_kill(ptr %1, i64 %13, i64 %entry_position.02, i64 1099511627792)"
+      ]
+    },
+    {
+      "case": "per-unit-delete",
+      "target": "native-freestanding",
+      "module": "application~main.bc",
+      "entry_size_with_flags": 1099511627792,
+      "calls": [
+        "%0 = tail call ptr @fa_table_new(i64 3, i64 1099511627792)",
+        "%3 = call ptr @fa_table_entry(ptr %0, i64 %1, i64 1099511627792)",
+        "%4 = call ptr @fa_table_append(ptr %0, i64 0, i64 1099511627792, i64 %1, i64 0, ptr nonnull @fa.hash_at)",
+        "%8 = call ptr @fa_table_entry(ptr %0, i64 %6, i64 1099511627792)",
+        "%9 = call ptr @fa_table_append(ptr %0, i64 -9172280018570214421, i64 1099511627792, i64 %6, i64 0, ptr nonnull @fa.hash_at)",
+        "%13 = call ptr @fa_table_entry(ptr %0, i64 %11, i64 1099511627792)",
+        "%14 = call ptr @fa_table_append(ptr %0, i64 -4586140011432590859, i64 1099511627792, i64 %11, i64 0, ptr nonnull @fa.hash_at)"
+      ]
+    },
+    {
+      "case": "per-unit-delete",
+      "target": "native-freestanding",
+      "module": "library~prune.inst1.bc",
+      "entry_size_with_flags": 1099511627792,
+      "calls": [
+        "%6 = tail call i32 @fa_table_live(ptr nonnull %1, i64 %entry_position.02, i64 1099511627792)",
+        "%7 = tail call ptr @fa_table_entry(ptr %1, i64 %entry_position.02, i64 1099511627792)",
+        "tail call void @fa_table_kill(ptr %1, i64 %13, i64 %entry_position.02, i64 1099511627792)"
+      ]
+    },
+    {
+      "case": "per-unit-generic",
+      "target": "native",
+      "module": "library~create.bc",
+      "entry_size_with_flags": 16,
+      "calls": [
+        "%5 = tail call ptr @fa_table_new(i64 16, i64 16)",
+        "%18 = call ptr @fa_table_entry(ptr %5, i64 %13, i64 16)",
+        "%19 = call ptr @fa_table_append(ptr %5, i64 %12, i64 16, i64 %13, i64 0, ptr nonnull @fa.hash_at)",
+        "%22 = call ptr @fa_table_entry(ptr %5, i64 %16, i64 16)",
+        "%23 = call ptr @fa_table_append(ptr %5, i64 0, i64 16, i64 %16, i64 0, ptr nonnull @fa.hash_at)"
+      ]
+    },
+    {
+      "case": "per-unit-generic",
+      "target": "native",
+      "module": "library~replace.inst1.bc",
+      "entry_size_with_flags": 16,
+      "calls": [
+        "%12 = call ptr @fa_table_entry(ptr %4, i64 %10, i64 16)",
+        "%13 = call ptr @fa_table_append(ptr %4, i64 %9, i64 16, i64 %10, i64 0, ptr nonnull @fa.hash_at)"
+      ]
+    },
+    {
+      "case": "per-unit-generic",
+      "target": "wasm",
+      "module": "library~create.bc",
+      "entry_size_with_flags": 16,
+      "calls": [
+        "%5 = tail call ptr @fa_table_new(i64 16, i64 16)",
+        "%19 = call ptr @fa_table_entry(ptr %5, i64 %14, i64 16)",
+        "%20 = call ptr @fa_table_append(ptr %5, i64 %13, i64 16, i64 %14, i64 0, ptr nonnull @fa.hash_at)",
+        "%23 = call ptr @fa_table_entry(ptr %5, i64 %17, i64 16)",
+        "%24 = call ptr @fa_table_append(ptr %5, i64 0, i64 16, i64 %17, i64 0, ptr nonnull @fa.hash_at)"
+      ]
+    },
+    {
+      "case": "per-unit-generic",
+      "target": "wasm",
+      "module": "library~replace.inst1.bc",
+      "entry_size_with_flags": 16,
+      "calls": [
+        "%12 = call ptr @fa_table_entry(ptr %4, i64 %10, i64 16)",
+        "%13 = call ptr @fa_table_append(ptr %4, i64 %9, i64 16, i64 %10, i64 0, ptr nonnull @fa.hash_at)"
+      ]
+    },
+    {
+      "case": "per-unit-generic",
+      "target": "native-freestanding",
+      "module": "library~create.bc",
+      "entry_size_with_flags": 16,
+      "calls": [
+        "%5 = tail call ptr @fa_table_new(i64 16, i64 16)",
+        "%18 = call ptr @fa_table_entry(ptr %5, i64 %13, i64 16)",
+        "%19 = call ptr @fa_table_append(ptr %5, i64 %12, i64 16, i64 %13, i64 0, ptr nonnull @fa.hash_at)",
+        "%22 = call ptr @fa_table_entry(ptr %5, i64 %16, i64 16)",
+        "%23 = call ptr @fa_table_append(ptr %5, i64 0, i64 16, i64 %16, i64 0, ptr nonnull @fa.hash_at)"
+      ]
+    },
+    {
+      "case": "per-unit-generic",
+      "target": "native-freestanding",
+      "module": "library~replace.inst1.bc",
+      "entry_size_with_flags": 16,
+      "calls": [
+        "%12 = call ptr @fa_table_entry(ptr %4, i64 %10, i64 16)",
+        "%13 = call ptr @fa_table_append(ptr %4, i64 %9, i64 16, i64 %10, i64 0, ptr nonnull @fa.hash_at)"
+      ]
+    }
+  ],
+  "optimization_controls": [
+    "negative native off firing assertions False",
+    "negative native on firing assertions True",
+    "negative wasm off firing assertions False",
+    "negative wasm on firing assertions True",
+    "header native off firing assertions False",
+    "header native on firing assertions True",
+    "header wasm off firing assertions False",
+    "header wasm on firing assertions True",
+    "positive native off firing assertions False",
+    "positive native on firing assertions True",
+    "positive wasm off firing assertions False",
+    "positive wasm on firing assertions True",
+    "scalar64 native off firing assertions False",
+    "scalar64 native on firing assertions True",
+    "scalar64 wasm off firing assertions False",
+    "scalar64 wasm on firing assertions True",
+    "ordinary native off headers 0 required 42",
+    "ordinary native on headers 42 required 42",
+    "ordinary wasm off headers 0 required 42",
+    "ordinary wasm on headers 42 required 42",
+    "recursive native off headers 0 required 5",
+    "recursive native on headers 5 required 5",
+    "recursive wasm off headers 0 required 5",
+    "recursive wasm on headers 5 required 5",
+    "literal native off headers 0 required 41",
+    "literal native on headers 41 required 41",
+    "literal wasm off headers 0 required 41",
+    "literal wasm on headers 41 required 41"
+  ],
+  "regular_regressions": {
+    "o0_llvm_executions": 24,
+    "ir_tests": 97,
+    "source_sha256": {
+      "packages/cli/tests/programs/map-generic-delete-direct.fa": "534245bf8be0fe1d0be93fb1e7aae8f68c2128278dde5e1f38e7d4605fb98a12",
+      "packages/cli/tests/programs/map-generic-delete.fa": "a7707b74f45c8ae99ca7a4600b4d8485ae9cfc00f1a231ebaa64dfb8c2ea693e",
+      "packages/cli/tests/programs/map-generic-helper-layouts.fa": "e98e40fccdf35be96cd227c7a56e51a3eb28a8e674c32e98ce712aea2164537b",
+      "packages/cli/tests/programs/map-generic-operations.fa": "d4f9707fc3ec07bb36817dc37b4908a12051810bc5a5ac01441d1639779e2cfa",
+      "packages/cli/tests/programs/map-generic-ranged-view.fa": "62f4829ebb45aaf47c3f8c22bc8739bf798be6e7b9cbb53f58d3562f4a6e1b69",
+      "packages/cli/tests/programs/map-generic-readonly.fa": "cc795ac2781d8f1495e120d6b00f946db50fbb909fa69880344de95ecacefadb",
+      "packages/cli/tests/programs/map-generic-reference.fa": "de68e2f67475c05b3e15270f557b49401e7ba74961de2f359e1ff69f5faf7a87",
+      "packages/cli/tests/programs/map-generic-units-delete.fa": "ecd4ae80cecc15e9e213da7a619917e75f790d7e0255fc644e601e9fb73a6f16",
+      "packages/cli/tests/programs/map-generic-units-reference.fa": "caa9392aa775fb02246a40325bd78b9b238d008330fd32abec5d26e9a7dc4f9c",
+      "packages/codegen-llvm/tests/programs/async-map-generic-layout.fa": "64a1e1657135f6e69ff76d50ff04491a54be75d32b0ad1f685959b6b0221fa59"
+    }
+  },
+  "workspace_validation": "In progress; see the appended Review fixes report.",
+  "runtime_sanitizers": {
+    "compiler": "gcc",
+    "tests_passed": 1,
+    "executed": true
+  }
+}

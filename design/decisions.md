@@ -1838,5 +1838,10 @@ requiring both a chunked 32-entry block and a nine-slot inline block, plus
 leak-checked O0/O3 execution. Scalar-range, optional, union and enum views
 have shared runtime regressions too.
 
-Validation is in progress; results and fixtures are appended to the engineer
-report. No benchmark source/runtime C/String code changes are involved.
+Focused validation passes: 97 IR tests, 24 O0/leak executions, the shared O3
+map corpus on all LLVM targets, 105 reviewer standalone executions, 15 package
+executions (only the three pre-existing M1 links remain blocked), 12 split IR
+module checks and 28 independent optimization controls. Workspace Clippy is
+warning-free; the GCC sanitizer runtime test actually executes and passes.
+Full workspace validation is in progress and recorded in the engineer report.
+No benchmark source/runtime C/String code changes are involved.

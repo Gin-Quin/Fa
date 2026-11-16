@@ -447,6 +447,19 @@ function main = () => {
 }
 ```
 
+A local function that escapes creates its immutable environment once, when execution reaches its declaration. Each capture is one store under the ordinary ownership rules. All handles share that environment; copying a function never copies its captures:
+
+```fa
+function main = () => {
+	let items = [1]
+	function read = () => items.length -- moves `items` into this environment
+	let readers = (read, read) -- both handles share the environment
+	console.log(readers[0](), readers[1]())
+}
+```
+
+A direct call before the declaration borrows the captured values at the call, so they must already be initialized. Taking an escaping function value before its declaration is an error when it captures anything: move the declaration above that use, or pass the value as a parameter. A function without captures has no environment and no such restriction. Reaching the declaration again in another loop iteration or recursive call creates a new environment for that execution.
+
 A value that can't be copied, like a [task](/advanced/concurrency#tasks) or a value of a type with a [`destroy`](/advanced/foreign-code#releasing-c-resources) function, can't be captured by an escaping closure.
 
 Modifying a captured value is not an effect that the closure declares: the value belongs to the enclosing function, which sees the change. To share state with an escaping closure, pass it as a mutated parameter, or return the new value. The compiler can share immutable storage when no write or lifetime difference can be observed; this optimization never makes an otherwise forbidden collection copy legal. A closure can't capture a `mutable use` alias.

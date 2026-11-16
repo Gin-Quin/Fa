@@ -14,4 +14,5 @@ function scoped = (): String => {
 static calculated = @scoped()
 console.log(calculated) -- prints: {"inside":{"text":"a","next":{"text":"b"}},"outside":{"number":1,"next":{"number":2}}}
 console.log(scoped()) -- prints: {"inside":{"text":"a","next":{"text":"b"}},"outside":{"number":1,"next":{"number":2}}}
-console.log(Json.stringify({ ﬀ = 2, 𐐀 = 1 })) -- prints: {"𐐀":1,"ﬀ":2}
+static unicode = @parseJson("{{\"ﬀ\": 2, \"𐐀\": 1}}")
+console.log(Json.stringify(unicode)) -- prints: {"𐐀":1,"ﬀ":2}

@@ -16,14 +16,15 @@ function names = (schema: Schema): String => when schema is {
 }
 static anonymousNames = @names(@typeToSchema({ z: Integer, a: Integer }))
 static declaredNames = @names(@typeToSchema(Declared))
-static unicodeNames = @names(@typeToSchema({ ﬀ: Integer, 𐐀: Integer }))
+static unicode = @parseJson("{{\"ﬀ\": 2, \"𐐀\": 1}}")
+static unicodeNames = @names(@typeToSchema(Type<unicode>))
 console.log(anonymousNames, declaredNames, unicodeNames) -- prints: a,z b,a 𐐀,ﬀ
 
-function keys = <Item, fields: Keys<Item>>(value: Item) => {
+function keys = <Item, fields: Keys<Item>>(_value: Item) => {
 	@for key in fields { console.log(key) }
 }
-keys<@typeOf(first), { z, a }>(first)
-keys<@typeOf(second), { a, z }>(second)
+keys<Type<first>, { z, a }>(first)
+keys<Type<second>, { a, z }>(second)
 -- prints: a
 -- prints: z
 -- prints: a
@@ -41,3 +42,11 @@ console.log({ z = mark("first", 9), a = mark("second", 1) })
 function printed = (): String => "{ { z = 9, a = 1 } }"
 static compileTime = @printed()
 console.log(compileTime) -- prints: { a = 1, z = 9 }
+
+console.log(@typeToString({ z: Integer, a: Integer })) -- prints: { a: Integer, z: Integer }
+console.log(@typeToString({ a: Integer, z: Integer })) -- prints: { a: Integer, z: Integer }
+type Original = { z: Integer, c: String, b: Integer, a: String }
+static pickedNames = @names(@typeToSchema(Pick<Original, { z, b, a }>))
+console.log(pickedNames) -- prints: a,b,z
+let picked: Pick<Original, { z, b, a }> = { z = 9, b = 2, a = "a" }
+console.log(picked) -- prints: { a = "a", b = 2, z = 9 }

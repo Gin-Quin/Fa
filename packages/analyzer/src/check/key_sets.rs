@@ -363,7 +363,7 @@ impl Walker<'_> {
 		fields
 	}
 
-	/// Records the order the fields of an anonymous object type are written in.
+	/// Records the enumeration order of a structural or derived object type.
 	pub(super) fn record_field_order(&mut self, ty: TypeId, names: Vec<Sym>) {
 		self.key_sets.field_orders.entry(ty).or_insert(names);
 	}

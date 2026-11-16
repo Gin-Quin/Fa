@@ -29,7 +29,7 @@ use fa_parser::TypedSyntaxTree;
 
 use crate::analysis::{Analysis, Argument, Callee, FieldValue, NodeFlags, PatternBinding};
 use crate::builtins;
-use crate::ids::{FileId, NodeId, SymbolId, TypeId};
+use crate::ids::{FileId, NodeId, ParamId, SymbolId, TypeId};
 use crate::lower::when::{self, Literal, Test};
 use crate::session::Session;
 use crate::symbols::{Resolution, ScopeKind, SymbolKind};
@@ -93,6 +93,7 @@ pub struct Lowerer<'a> {
 	/// Arithmetic follows JavaScript's numbers (a JavaScript target).
 	js: bool,
 	slots: FxHashMap<SymbolId, Slot>,
+	key_slots: FxHashMap<ParamId, Slot>,
 	aliases: FxHashMap<SymbolId, Place>,
 	next: Slot,
 	/// Lowering a compile-time expression: no enclosing function's frame.
@@ -124,6 +125,7 @@ impl<'a> Lowerer<'a> {
 			a,
 			js: super::is_js_target(session.target()),
 			slots: FxHashMap::default(),
+			key_slots: FxHashMap::default(),
 			aliases: FxHashMap::default(),
 			next: 0,
 			compile_time: true,
@@ -190,6 +192,21 @@ impl<'a> Lowerer<'a> {
 			None => "<lambda>".to_string(),
 		};
 		let mut params = Vec::with_capacity(info.params.len());
+		for &param in &info.generics {
+			if self.a.key_set_params.contains_key(&param)
+				&& let Some(symbol) =
+					self.a
+						.value_parameter_symbol(self.types(), self.tree, node, param)
+			{
+				let slot = self.bind(symbol);
+				self.key_slots.insert(param, slot);
+				params.push(Param {
+					slot,
+					default: None,
+				});
+			}
+		}
+		let hidden = params.len();
 		for param in &info.params {
 			let slot = self.bind(param.symbol);
 			params.push(Param {
@@ -204,7 +221,7 @@ impl<'a> Lowerer<'a> {
 			.collect();
 		// the defaults, then the patterns of destructured parameters
 		for (index, param) in info.params.iter().enumerate() {
-			params[index].default = param.default.map(|default| self.expr(default));
+			params[hidden + index].default = param.default.map(|default| self.expr(default));
 		}
 		let mut prologue = Vec::new();
 		for param in &info.params {
@@ -1475,12 +1492,12 @@ impl<'a> Lowerer<'a> {
 		current.unwrap_or_else(Expr::none)
 	}
 
-	/// An object literal: its fields in declaration order (`objects`).
+	/// Initializers run in source order; stored fields follow the type order.
 	fn object(&mut self, n: NodeId) -> Expr {
 		let Some(info) = self.a.object(n).cloned() else {
 			return self.unsupported("this object");
 		};
-		let mut spreads: FxHashMap<NodeId, Slot> = FxHashMap::default();
+		let mut initializers: FxHashMap<NodeId, Slot> = FxHashMap::default();
 		let mut statements = Vec::new();
 		let mut given: Vec<_> = info
 			.fields
@@ -1496,14 +1513,14 @@ impl<'a> Lowerer<'a> {
 			let slot = self.temp();
 			let expression = self.expr(node);
 			statements.push(Expr::Let(slot, expression.boxed()));
-			spreads.insert(node, slot);
+			initializers.insert(node, slot);
 		}
 
 		let mut fields = Vec::with_capacity(info.fields.len());
 		for (name, value) in &info.fields {
 			let name: Arc<str> = Arc::from(self.session.types.syms.resolve(*name));
 			let value = match *value {
-				FieldValue::Given(value) => Expr::Local(spreads[&value]),
+				FieldValue::Given(value) => Expr::Local(initializers[&value]),
 				FieldValue::Default(value) => self.expr(value),
 				FieldValue::Constant(index) => match self.a.field_constants.get(index as usize) {
 					Some(value) => Expr::Const(value.clone()),
@@ -1511,16 +1528,7 @@ impl<'a> Lowerer<'a> {
 				},
 				FieldValue::None => Expr::none(),
 				FieldValue::Spread(value) => {
-					let slot = match spreads.get(&value) {
-						Some(&slot) => slot,
-						None => {
-							let slot = self.temp();
-							let lowered = self.expr(value);
-							statements.push(Expr::Let(slot, lowered.boxed()));
-							spreads.insert(value, slot);
-							slot
-						}
-					};
+					let slot = initializers[&value];
 					Expr::Field(Expr::Local(slot).boxed(), Arc::clone(&name), false)
 				}
 			};
@@ -1559,7 +1567,8 @@ impl<'a> Lowerer<'a> {
 
 		match info.callee {
 			Callee::Function(declaration) => {
-				let args = self.arguments(&info.arguments, Some(callee));
+				let mut args = self.key_arguments(self.file, declaration, n, callee);
+				args.extend(self.arguments(&info.arguments, Some(callee)));
 				let symbol = self.a.symbols.symbol_of_decl(declaration);
 				let captures = self
 					.a
@@ -1719,13 +1728,79 @@ impl<'a> Lowerer<'a> {
 					&& declared.kind == SymbolKind::Function
 				{
 					let node = declared.function.unwrap_or(decl);
-					return Expr::CallFunction(fn_key(file, node), args);
+					let mut hidden = self.key_arguments(file, node, n, callee);
+					hidden.extend(args);
+					return Expr::CallFunction(fn_key(file, node), hidden);
 				}
 				let _ = arguments;
 				let callee = self.expr(callee);
 				Expr::Call(callee.boxed(), args)
 			}
 		}
+	}
+
+	/// Key-set parameters carry their ordered paths, just as on JavaScript.
+	fn key_arguments(
+		&mut self,
+		file: FileId,
+		function: NodeId,
+		call: NodeId,
+		callee: NodeId,
+	) -> Vec<Arg> {
+		let analysis = if file == self.file {
+			self.a
+		} else {
+			self.session.analysis(file)
+		};
+		let Some(info) = analysis.function(function) else {
+			return Vec::new();
+		};
+		let generics = info.generics.clone();
+		let bindings = self
+			.a
+			.instantiation(call)
+			.or_else(|| self.a.instantiation(callee));
+		let bindings = bindings
+			.map(|list| self.types().list_items(list).to_vec())
+			.unwrap_or_default();
+		let mut arguments = Vec::new();
+		for (index, param) in generics.into_iter().enumerate() {
+			if !analysis.key_set_params.contains_key(&param) {
+				continue;
+			}
+			let binding = bindings.get(index).copied().unwrap_or(TypeId::UNKNOWN);
+			let value = match self.types().kind(binding) {
+				TypeKind::Param(parameter) => {
+					self.key_slots.get(&parameter).copied().map(Expr::Local)
+				}
+				TypeKind::Tuple(list) => match self.types().list_items(list) {
+					&[fields, bits] => {
+						self.types()
+							.as_int(bits)
+							.and_then(|int| int.literal())
+							.map(|bits| {
+								Expr::Const(Value::array(
+									self.types()
+										.fields_leaves(fields)
+										.iter()
+										.enumerate()
+										.filter(|(index, _)| {
+											(bits >> *index as u32) & I256::ONE == I256::ONE
+										})
+										.map(|(_, path)| Value::string(path))
+										.collect(),
+								))
+							})
+					}
+					_ => None,
+				},
+				_ => None,
+			};
+			arguments.push(Arg::Value(
+				value.unwrap_or_else(|| self.unsupported("this key-set argument")),
+			));
+		}
+		arguments
 	}
 
 	fn arguments(&mut self, arguments: &[Argument], callee: Option<NodeId>) -> Vec<Arg> {

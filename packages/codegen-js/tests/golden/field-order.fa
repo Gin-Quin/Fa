@@ -1,0 +1,8 @@
+-- Anonymous fields use type order; only moved effects require temporaries.
+function pure = (x: Integer, y: Integer) => { z = x, a = y }
+function effect = (label: String, value: Integer): Integer => {
+	console.log(label)
+	value
+}
+let ordered = { z = effect("first", 9), a = effect("second", 1) }
+console.log(pure(9, 1), ordered)

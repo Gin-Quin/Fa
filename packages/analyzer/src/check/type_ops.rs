@@ -702,8 +702,14 @@ impl Walker<'_> {
 		}
 		// a selection of the fields is a new structural type
 		entries.retain(|entry| !entry.flags.contains(FieldFlags::PRIVATE));
-		let names: Vec<Sym> = entries.iter().map(|entry| entry.name).collect();
 		let ty = self.s.types.object(&entries, None);
+		let names: Vec<Sym> = self
+			.s
+			.types
+			.fields_of(ty)
+			.iter()
+			.map(|field| field.name)
+			.collect();
 		self.record_field_order(ty, names.clone());
 		self.a.inline_field_orders.entry(ty).or_insert(names);
 		Some(ty)

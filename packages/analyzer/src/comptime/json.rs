@@ -171,22 +171,6 @@ fn decorate(
 				return;
 			};
 			let properties = Arc::make_mut(properties);
-			let order: Vec<_> = declaration
-				.map(|d| d.fields.iter().map(|f| f.name).collect())
-				.or_else(|| analysis.inline_field_orders.get(&ty).cloned())
-				.unwrap_or_default();
-			properties.sort_by_key(|property| match property {
-				Value::Object(object) => object
-					.get("name")
-					.and_then(Value::as_str)
-					.and_then(|name| {
-						order
-							.iter()
-							.position(|&sym| types.syms.resolve(sym) == name)
-					})
-					.unwrap_or(usize::MAX),
-				_ => usize::MAX,
-			});
 			for property in properties {
 				let Value::Object(object) = property else {
 					continue;

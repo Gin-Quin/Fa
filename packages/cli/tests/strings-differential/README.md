@@ -53,7 +53,10 @@ and absence of allocations.
 JSON shards cover runtime, compile-time parsing, all-subject round trips,
 String/Bytes union input, and serialization through objects, arrays, maps,
 optionals, primitive/object/empty named members, pinned/unpinned enumerations,
-flags and recursive records. Allocation shards compare the exit code and stop
+flags and recursive records. Field-enumeration shards cross every subject with
+reordered anonymous literals, declared order, nested and recursive objects,
+scoped recursive names, object-union discriminants, printing, schema reflection
+and key loops (including generic key sets). Allocation shards compare the exit code and stop
 message for impossible repetition, both padding directions and byte buffers.
 
 A literal beyond 2000 characters gets its own shard: debug compile-time

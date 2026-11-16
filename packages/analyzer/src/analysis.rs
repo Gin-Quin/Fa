@@ -1562,6 +1562,43 @@ pub struct CallInfo {
 }
 
 impl Analysis {
+	/// The static symbol read by a function's compile-time value parameter.
+	pub fn value_parameter_symbol(
+		&self,
+		types: &crate::types::TypeStore,
+		tree: &fa_parser::TypedSyntaxTree,
+		function: NodeId,
+		param: ParamId,
+	) -> Option<SymbolId> {
+		let name = types.param(param).name;
+		// the declaration holds the generic parameters, not the lambda
+		let declaration = self
+			.function(function)
+			.and_then(|info| info.declaration)
+			.unwrap_or(function);
+		let owner = self
+			.function_owners
+			.get(&function)
+			.copied()
+			.filter(|owner| {
+				self.type_decls
+					.get(owner)
+					.is_some_and(|info| info.generics.contains(&param))
+			})
+			.unwrap_or(declaration);
+		let span = tree.spans[owner.index()];
+		self.symbols
+			.symbols()
+			.iter()
+			.position(|symbol| {
+				symbol.kind == crate::symbols::SymbolKind::Static && symbol.name == name && {
+					let declared = tree.spans[symbol.decl_node.index()];
+					span.start <= declared.start && declared.end <= span.end
+				}
+			})
+			.map(SymbolId::new)
+	}
+
 	/// An empty analysis of a file with `nodes` nodes.
 	pub fn new(file: FileId, nodes: usize) -> Self {
 		Self {

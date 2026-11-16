@@ -31,7 +31,7 @@ assert @typeToString({ x: Integer, y: Integer }) == "{ x: Integer, y: Integer }"
 
 For `Type<value>`, it is the name of the type the value was declared or created with, and the base type of a literal otherwise.
 
-An anonymous type is printed as it is spelled: the fields of an object in declaration order, the members of a union in the order they are written, a ranged integer with the bounds that differ from its base type (`Integer<min = 0>`), and a function type with its parameter names and its effects.
+An anonymous type is printed as it is spelled: the fields of an object in its [type-defined order](/values/objects#field-order), the members of a union in the order they are written, a ranged integer with the bounds that differ from its base type (`Integer<min = 0>`), and a function type with its parameter names and its effects.
 
 ## `@typeToSchema(Type): Schema`
 

@@ -187,11 +187,20 @@ fn discriminant_matches(value: &Value, schema: &Value) -> bool {
 	match kind(schema) {
 		"StringLiteral" | "BooleanLiteral" => property(schema, "value") == Some(value),
 		"Integer" => value.as_int().is_some_and(|number| {
-			property(schema, "min").and_then(Value::as_int).is_none_or(|min| number >= min)
-				&& property(schema, "max").and_then(Value::as_int).is_none_or(|max| number <= max)
+			property(schema, "min")
+				.and_then(Value::as_int)
+				.is_none_or(|min| number >= min)
+				&& property(schema, "max")
+					.and_then(Value::as_int)
+					.is_none_or(|max| number <= max)
 		}),
-		"Union" => list_property(schema, "items").iter().any(|member| discriminant_matches(value, member)),
-		"Named" => discriminant_matches(value, property(schema, "definition").unwrap_or(&Value::None)),
+		"Union" => list_property(schema, "items")
+			.iter()
+			.any(|member| discriminant_matches(value, member)),
+		"Named" => discriminant_matches(
+			value,
+			property(schema, "definition").unwrap_or(&Value::None),
+		),
 		_ => true,
 	}
 }
@@ -300,11 +309,15 @@ impl<'s> Writer<'_, '_, 's> {
 			"StringLiteral" | "BooleanLiteral" | "Integer" => discriminant_matches(value, schema),
 			"Fields" => matches!(value, Value::Integer(_)),
 			"Float" => matches!(value, Value::Float(_)),
-			"Object" => matches!(value, Value::Object(object) if list_property(schema, "properties").iter().all(|field| {
-				let Some(name) = property(field, "name").and_then(Value::as_str) else { return false };
-				object.get(name).is_some_and(|value| discriminant_matches(value, property(field, "definition").unwrap_or(&Value::None)))
-			})),
-			"Tuple" => matches!(value, Value::Tuple(items) if items.len() == list_property(schema, "items").len()),
+			"Object" => {
+				matches!(value, Value::Object(object) if list_property(schema, "properties").iter().all(|field| {
+					let Some(name) = property(field, "name").and_then(Value::as_str) else { return false };
+					object.get(name).is_some_and(|value| discriminant_matches(value, property(field, "definition").unwrap_or(&Value::None)))
+				}))
+			}
+			"Tuple" => {
+				matches!(value, Value::Tuple(items) if items.len() == list_property(schema, "items").len())
+			}
 			"Collection" => match property(schema, "kind").and_then(Value::as_str) {
 				Some("Array" | "GrowingArray") => matches!(value, Value::Array(_)),
 				Some("Set" | "GrowingSet") => matches!(value, Value::Set(_)),

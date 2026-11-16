@@ -622,10 +622,11 @@ function schemaNames = (schema: Schema): String => when schema is {
     else => "none"
 }
 static names = @schemaNames(@typeToSchema({ z: String, a: String }))
-function keys = <Item, fields: Keys<Item>>(value: Item): String => {
+static spelling = @typeToString({ z: String, a: String })
+function keys = <Item, fields: Keys<Item>>(_value: Item, suffix: String = ""): String => {
     mutable names: Array<String> = []
     @for key in fields { names.push(key) }
-    names.join(",")
+    names.join(",") + suffix
 }
 function fieldProbe = (text: String): String => {
     let left = { z = text, a = "a" }
@@ -635,9 +636,9 @@ function fieldProbe = (text: String): String => {
     type Node = { text: String, next: Node? }
     let inside = Node { next = Node { next = none, text = text }, text = text }
     let pair = { outside = outside(text), inside = inside }
-    let printed = left.toString().startsWith("{{ a = ") and right.toString().startsWith("{{ a = ") and nested.toString().startsWith("{{ a = {{ a = ") and declared.toString().startsWith("{{ b = ")
-    let reflected = names + ":" + keys<@typeOf(left), { z, a }>(left) + ":" + keys<@typeOf(right), { a, z }>(right)
-    [printed.toString(), reflected, units(Json.stringify(left)), units(Json.stringify(right)), units(Json.stringify(nested)), units(Json.stringify(declared)), units(Json.stringify(pair)), units(Json.stringify([copy pair, pair])), units(variant(Forward { a = "a", z = text, kind = "forward" })), units(variant(Reverse { kind = "reverse", z = text, a = "a" })), units(distinct({ z = text })), units(distinct({ a = text }))].join("|")
+    let printed = "{left}".startsWith("{{ a = ") and "{right}".startsWith("{{ a = ") and "{nested}".startsWith("{{ a = {{ a = ") and "{declared}".startsWith("{{ b = ")
+    let reflected = spelling + ":" + names + ":" + keys<Type<left>, { z, a }>(left) + ":" + keys<Type<right>, { a, z }>(right)
+    ["{printed}", reflected, units(Json.stringify(left)), units(Json.stringify(right)), units(Json.stringify(nested)), units(Json.stringify(declared)), units(Json.stringify(pair)), units(Json.stringify([copy pair, pair])), units(variant(Forward { a = "a", z = text, kind = "forward" })), units(variant(Reverse { kind = "reverse", z = text, a = "a" })), units(distinct({ z = text })), units(distinct({ a = text }))].join("|")
 }
 """
     oracle = r"""
@@ -645,7 +646,7 @@ const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
 for(const text of JSON.parse(await Bun.stdin.text())) {
     const left={a:"a",z:text},right={a:"a",z:text},nested={a:right,z:left},declared={b:text,a:"a"};
     const pair={inside:{text,next:{text}},outside:{z:text,next:{z:text}}};
-    console.log(["true","a,z:a,z:a,z",...[left,right,nested,declared,pair,[pair,pair],{kind:"forward",z:text,a:"a"},{a:"a",z:text,kind:"reverse"},{z:text},{a:text}].map(value=>units(JSON.stringify(value)))].join("|"));
+    console.log(["true","{ a: String, z: String }:a,z:a,z:a,z",...[left,right,nested,declared,pair,[pair,pair],{kind:"forward",z:text,a:"a"},{a:"a",z:text,kind:"reverse"},{z:text},{a:text}].map(value=>units(JSON.stringify(value)))].join("|"));
 }
 """
     values = subjects()

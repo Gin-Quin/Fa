@@ -1,7 +1,7 @@
 //! The spelling of a type expression (`@typeToString`, decision D49): a
 //! name as written with its arguments (`UserId`, `Point(Integer)`), an
 //! anonymous type canonically (`{ x: Integer, y: Integer }`, fields in the
-//! order they are written, `Never` left out of a union). A type built by an
+//! type's order, `Never` left out of a union). A type built by an
 //! operation is anonymous: a spread spells its fields, the spread ones where
 //! the spread is written (`type B = { ...A, b: Integer }` is `{ a: String,
 //! b: Integer }`); a type function (`Optionalize(Integer)`, `Optional(…)`,
@@ -104,79 +104,13 @@ impl Walker<'_> {
 					// those of its first step)
 					return self.function_spelling(argument);
 				}
-				// `Parameters<F>`: the parameters' order; `Record<keys, T>`: the
-				// keys' order
-				if matches!(text, "Parameters" | "Record")
-					&& self.type_declaration(callee, text).is_none()
-					&& let Some(first) = arguments.first()
+				// Object type operations produce anonymous types in canonical order.
+				if matches!(
+					text,
+					"Parameters" | "Record" | "Partial" | "Required" | "Pick" | "Omit"
+				) && self.type_declaration(callee, text).is_none()
 				{
-					let order: Vec<String> = if text == "Parameters" {
-						self.parameter_names(first, 0)?
-							.into_iter()
-							.map(Option::unwrap_or_default)
-							.collect()
-					} else {
-						match syntax::view(&tree, first) {
-							View::Object { items } => items
-								.iter()
-								.filter_map(|item| match syntax::view(&tree, item) {
-									View::Name(name) => Some(tree.name(name).to_string()),
-									View::TypedObject { target, .. } => {
-										match syntax::view(&tree, target) {
-											View::Name(name) => Some(tree.name(name).to_string()),
-											_ => None,
-										}
-									}
-									_ => None,
-								})
-								.collect(),
-							_ => return None,
-						}
-					};
-					let Some(Spelled::Object(result)) = self.result_fields(n) else {
-						return None;
-					};
-					let mut fields: Vec<(String, String)> = order
-						.iter()
-						.filter_map(|name| result.iter().find(|(other, _)| other == name).cloned())
-						.collect();
-					for field in result {
-						if !fields.iter().any(|(name, _)| *name == field.0) {
-							fields.push(field);
-						}
-					}
-					return Some(Spelled::Object(fields));
-				}
-				// a built-in operation on an object type keeps the order its
-				// argument writes the fields in (`Partial<P>`)
-				if matches!(text, "Partial" | "Required" | "Pick" | "Omit")
-					&& self.type_declaration(callee, text).is_none()
-					&& let Some(first) = arguments.first()
-				{
-					let order = match self.spell_fields(first, bindings, depth + 1) {
-						Some(Spelled::Object(fields)) => fields,
-						_ => Vec::new(),
-					};
-					let Some(Spelled::Object(result)) = self.result_fields(n) else {
-						return None;
-					};
-					let bare = |name: &str| {
-						name.trim_start_matches("readonly ")
-							.trim_start_matches("reactive ")
-							.to_string()
-					};
-					let mut fields: Vec<(String, String)> = Vec::with_capacity(result.len());
-					for (name, _) in &order {
-						if let Some(field) = result.iter().find(|(other, _)| *other == bare(name)) {
-							fields.push(field.clone());
-						}
-					}
-					for field in result {
-						if !fields.iter().any(|(name, _)| *name == field.0) {
-							fields.push(field);
-						}
-					}
-					return Some(Spelled::Object(fields));
+					return self.result_fields(n);
 				}
 				// a type of this file applied: `Point(Integer)`, or a type
 				// function expanded; anything else is displayed
@@ -250,6 +184,16 @@ impl Walker<'_> {
 						_ => return None,
 					}
 				}
+				let order = self.ordered_fields(self.type_of(n));
+				fields.sort_by_key(|(name, _)| {
+					let bare = name
+						.trim_start_matches("readonly ")
+						.trim_start_matches("reactive ");
+					order
+						.iter()
+						.position(|field| self.s.types.syms.resolve(field.name) == bare)
+						.unwrap_or(usize::MAX)
+				});
 				Some(Spelled::Object(fields))
 			}
 			View::Union { operands } => {

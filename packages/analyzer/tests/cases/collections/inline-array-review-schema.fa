@@ -12,3 +12,7 @@ console.log(zero.capacity, zero) -- prints: 0 []
 let bytes: RoundTrip<InlineArray<UInt8, 255>> = [1]
 let words: RoundTrip<InlineArray<UInt16, 256>> = [2]
 console.log(bytes.capacity, words.capacity) -- prints: 255 256
+
+static largest = Schema.InlineArray { item = Schema.String, capacity = 4294967295 }
+type Largest = TypeFromSchema<largest>
+assert @typeToSchema(Largest) == largest

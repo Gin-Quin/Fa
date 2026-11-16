@@ -298,6 +298,9 @@ pub enum Node {
 	Await {
 		right: usize,
 	},
+	Copy {
+		right: usize,
+	},
 	Start {
 		right: usize,
 	},
@@ -748,6 +751,7 @@ impl Node {
 			| Node::Try { right }
 			| Node::Throw { right }
 			| Node::Await { right }
+			| Node::Copy { right }
 			| Node::Start { right }
 			| Node::Assert { right }
 			| Node::InRelation { right }
@@ -1034,6 +1038,7 @@ impl Node {
 			Node::Throw { .. } => "Throw",
 			Node::Catch { .. } => "Catch",
 			Node::Await { .. } => "Await",
+			Node::Copy { .. } => "Copy",
 			Node::Start { .. } => "Start",
 			Node::Assert { .. } => "Assert",
 			Node::Provide { .. } => "Provide",

@@ -575,3 +575,19 @@ fn writes_generic_lists_on_the_line_of_their_angle_bracket() {
 		"if count < limit {\n\tx\n}\n",
 	);
 }
+
+#[test]
+fn explicit_copy_keeps_prefix_and_ordinary_names_distinct() {
+	assert_formats(
+		"let independent=copy source.items\n",
+		"let independent = copy source.items\n",
+	);
+	assert_formats(
+		"let independent=copy (a??b)\n",
+		"let independent = copy (a ?? b)\n",
+	);
+	assert_formats(
+		"let copy=1\ncopy(value)\ncopy[0]\n",
+		"let copy = 1\ncopy(value)\ncopy[0]\n",
+	);
+}

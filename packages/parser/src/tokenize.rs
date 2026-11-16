@@ -91,6 +91,7 @@ pub(crate) fn tokenize_range(
 	tokens.push(Token::new(TokenKind::End, end, end));
 	resolve_contextual_keywords(&mut tokens);
 	resolve_start_keywords(&mut tokens);
+	resolve_copy_keywords(&mut tokens);
 	mark_function_declaration_parentheses(&mut tokens);
 	tokens
 }
@@ -694,6 +695,7 @@ fn keyword_or_identifier(word: &[u8]) -> TokenKind {
 		b"try" => TokenKind::Try,
 		b"catch" => TokenKind::Catch,
 		b"start" => TokenKind::Start,
+		b"copy" => TokenKind::Copy,
 		b"provide" => TokenKind::Provide,
 		b"assert" => TokenKind::Assert,
 		b"requires" => TokenKind::Requires,
@@ -796,8 +798,34 @@ fn is_contextual_keyword(kind: TokenKind) -> bool {
 	)
 }
 
+/// A spaced prefix before an expression. Existing bindings, fields and
+/// calls named `copy` retain their meaning (`copy[0]`, `copy(value)`).
+fn resolve_copy_keywords(tokens: &mut [Token]) {
+	for index in 0..tokens.len() {
+		if tokens[index].kind != TokenKind::Copy {
+			continue;
+		}
+		let prefix = tokens.get(index + 1).is_some_and(|next| {
+			next.start > tokens[index].end
+				&& !matches!(next.kind, TokenKind::In | TokenKind::Minus)
+				&& crate::parsing::is_stop_token::can_start_expression(next.kind)
+		});
+		let member = index > 0
+			&& matches!(
+				tokens[index - 1].kind,
+				TokenKind::Dot | TokenKind::QuestionMarkDot
+			);
+		if !prefix || member {
+			tokens[index].kind = TokenKind::Identifier;
+		}
+	}
+}
+
 /// A token that can be a declared name: a name, or a contextual keyword (`start` included, which
 /// is a name after a declaration keyword, like in `reactive start = 0`).
 fn is_identifier_like(kind: TokenKind) -> bool {
-	matches!(kind, TokenKind::Identifier | TokenKind::Start) || is_contextual_keyword(kind)
+	matches!(
+		kind,
+		TokenKind::Identifier | TokenKind::Start | TokenKind::Copy
+	) || is_contextual_keyword(kind)
 }

@@ -318,3 +318,13 @@ fn an_optional_operand_is_quoted_alone() {
 		"{messages:#?}"
 	);
 }
+
+#[test]
+fn copying_a_closure_keeps_its_escape_checks() {
+	assert_eq!(
+		codes(
+			"type Action = () => Void\nfunction make = (): Action => { mutable count = 0\nfunction change = () => { count += 1 }\ncopy change }\n"
+		),
+		["REF021"]
+	);
+}

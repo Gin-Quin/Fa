@@ -174,6 +174,10 @@ impl Generator<'_> {
 			View::Unsupported(kind) => self.unsupported(n, &format!("`{kind}`")),
 			// tasks (tasks.rs)
 			View::Await(operand) => self.await_expr(n, operand),
+			View::Copy(operand) => {
+				let value = self.expr(operand);
+				self.copy_value(value, self.type_of(n))
+			}
 			View::Start(operand) => self.start_expr(n, operand),
 			_ => {
 				let kind = fa_analyzer::syntax::kind_name(self.tree, n);

@@ -1,0 +1,47 @@
+function atCompileTime = (): Integer => {
+	mutable original = [1]
+	mutable duplicate = copy original
+	duplicate.push(2)
+	original.length * 10 + duplicate.length
+}
+static checked = @atCompileTime()
+console.log(checked) -- prints: 12
+
+function clone = <Item>(item: Item): Item => copy item
+mutable original = { items = [1, 2] }
+mutable duplicate = copy original
+duplicate.items.push(3)
+console.log(original.items, duplicate.items) -- prints: [1, 2] [1, 2, 3]
+mutable cloned = clone(original)
+cloned.items.push(4)
+console.log(original.items, cloned.items) -- prints: [1, 2] [1, 2, 4]
+
+function moved = (test: Boolean): Array<Integer> => {
+	let values = [7]
+	if test { values } else { values }
+}
+console.log(moved(true), moved(false)) -- prints: [7] [7]
+
+-- The operand runs exactly once; a copy is a value rather than a place.
+mutable evaluations = 0
+function source = (): Array<Integer> mutates evaluations => {
+	evaluations += 1
+	[5]
+}
+let evaluated = copy source()
+console.log(evaluations, evaluated) -- prints: 1 [5]
+
+-- Ordinary names and calls keep their meaning.
+function copy = (value: Integer): Integer => value + 1
+console.log(copy(4)) -- prints: 5
+
+-- A copy keeps the exact written method origin.
+type Label = { value: Integer, function read = (self): Integer => self.value }
+let label = Label { value = 8 }
+let copiedLabel = copy label
+console.log(copiedLabel.read()) -- prints: 8
+
+-- Contextual expected types still narrow a copy's stored fields.
+let wide = { value = 9, extra = 10 }
+let narrow: { value: Integer } = copy wide
+console.log(narrow.value) -- prints: 9

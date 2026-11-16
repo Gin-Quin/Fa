@@ -630,7 +630,8 @@ impl<'a> Lowerer<'a> {
 					None => self.unsupported(format!("`{}`", self.text(n))),
 				},
 			},
-			View::Group(inner) => self.expr(inner),
+			// VM reads already clone values; mutation uses copy-on-write.
+			View::Group(inner) | View::Copy(inner) => self.expr(inner),
 			View::EmptyGroup => Expr::none(),
 			View::Array { items } => self.array(n, items),
 			View::Tuple { items } => {

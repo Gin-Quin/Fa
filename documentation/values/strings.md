@@ -239,6 +239,8 @@ Grapheme segmentation and case conversion depend on Unicode tables: the segmenta
 
 ## String API
 
+Text entering through an operation that declares no decoding error, including command-line arguments, environment text and `CString.toString()`, is decoded as `String.fromUtf8Lossy`: invalid UTF-8 becomes one `U+FFFD` per maximal invalid subpart, following WHATWG. Such input never stops the program. `String.fromUtf8` and `File.readText` remain strict and report their declared error. Read bytes when their exact values matter.
+
 The string API is the JavaScript `String` API, with a few differences that don't change what a position means: an unproven index throws instead of giving `undefined`, `indexOf` returns an optional instead of `-1`, and no value is converted to a string implicitly. See [string operations](/operations/string) for the list of methods.
 
 `String.compareLocale` is available only at runtime: it depends on the locale data of the machine running the program and cannot be evaluated at compile time.
@@ -267,7 +269,7 @@ On JavaScript and during compile-time evaluation, the hints are ignored, `reserv
 :::implementation
 ## Implementation details
 
-The semantics are UTF-16 code units; the native storage is UTF-8. Text arrives and leaves as UTF-8 (files, the network, C), so nothing is transcoded at these boundaries, and ASCII text, the common case, pays nothing: one byte is one code unit.
+The semantics are UTF-16 code units; the native storage is UTF-8. Text arrives and leaves as UTF-8 (files, the network, C), and ASCII text, the common case, pays nothing: one byte is one code unit. Native arguments and `CString.toString()` validate external bytes and replace maximal invalid subparts with `U+FFFD`; Node and Bun already decode command-line arguments this way. Successful strict text reads retain their validated UTF-8 bytes.
 
 String literal types store well-formed UTF-8. A runtime `Schema.StringLiteral` is data: the well-formedness restriction applies to known compile-time construction and whenever a schema becomes a type, not to an unknown runtime payload. An exact compile-time value containing a lone surrogate widens to `String`; schema reconstruction or using that value as a literal type must diagnose it rather than replace or encode away the surrogate.
 

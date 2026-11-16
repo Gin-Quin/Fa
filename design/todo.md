@@ -26,6 +26,8 @@ The analyzer/prelude/tooling, JavaScript backend and compile-time interpreter ar
 
 The standard library deferrals and optional bulk-loop optimization are recorded below; neither changes this redesign's current language contract.
 
+- Standard library pass: provide a way to obtain exact bytes from an existing `CString`, with an explicit length/terminator contract. Today only a separate C binding returning `Pointer<Byte>` and `toArray(count)` provides that route; `CString.toString()` decodes with replacement.
+
 ### Ownership, explicit copies, Set and with
 
 One item per ordered slice of [the WIP assessment §3.4](reviews/ownership-wip-2026-11-15.md#34-ordered-focused-slices). Its dependency graph and acceptance criteria are authoritative; the ten questions are resolved by "Lead decisions (2026-11-15)". Generic values remain restricted by GN030. O35 is measured only after the semantic work stabilizes.

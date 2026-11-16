@@ -121,6 +121,8 @@ mutable vertices: Array<Vertex> = []
 | `Pointer.allocate(value)` | moves `value` into a new block of memory, and returns a pointer to it |
 | `pointer.free()` | destroys the value of a block made by `Pointer.allocate`, and frees it |
 
+`CString.toString()` decodes the bytes before the first zero as UTF-8, replacing each maximal invalid subpart with one `U+FFFD`, following WHATWG, like `String.fromUtf8Lossy`. Invalid text never stops the program. For exact bytes, a C binding returning `Pointer<Byte>` can use `toArray(count)` with a known byte count; `CString` itself has no byte accessor.
+
 What a pointer designates is not checked: reading a pointer that C freed, or reading past the end of a C array, is the error the compiler can't catch. This is why pointers stay in foreign files.
 
 ### Passing Fa values to C

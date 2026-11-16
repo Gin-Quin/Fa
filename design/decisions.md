@@ -1496,3 +1496,7 @@ Keep the indexed copy/fill loops in JavaScript until their proof includes more t
 ### Chained compile-time string views
 
 The interpreter lowerer shares receiver extraction for calls, method arguments, code-point counts and UTF-8 loops, including grouped flattened field chains. A loaded input can be counted/iterated under an 8 KiB evaluation budget without allocating a result array or encoded Bytes. The regression failed with Memory(8192) before this correction; both paths now pass. A compile-time unrolled iterable retains its ordinary precomputed-array path. No builtin, signature, type, runtime id or flag bit changes.
+
+## External text decoding (lead decision, 2026-11-16)
+
+External text operations with no declared decoding error, including arguments, environment text and `CString.toString()`, use WHATWG replacement decoding: one U+FFFD per maximal invalid subpart, without stopping the program. Operations with a declared text error remain strict (`String.fromUtf8`, `File.readText`). Exact input bytes are read as bytes. Node and Bun already decode arguments with replacement. `CString` has no direct byte accessor; a C binding returning `Pointer<Byte>` can copy a known number of bytes with `toArray(count)`. A direct CString byte route is deferred to the standard library pass; no API is added in this redesign.

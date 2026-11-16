@@ -1,0 +1,15 @@
+-- Concrete ownership must report MEM004 at `let moved = items`:
+-- the borrowed callback passed through `invoke` reads `items` in `apply`.
+-- Fix: `let moved = copy items`, or call `apply(invoke)` before the move.
+type Reader = () => Integer
+function apply = (callback: Reader): Integer => callback()
+
+function run = (): Integer => {
+	let items = [1]
+	function read = (): Integer => items.length
+	let invoke = read
+	let moved = items
+	apply(invoke) + moved.length
+}
+
+console.log(run())

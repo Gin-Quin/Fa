@@ -1,0 +1,16 @@
+-- prints: 1 1
+type Reader = () => Integer
+function borrow = (callback: Reader): Integer => callback()
+
+function run = (): Integer => {
+	mutable count = 0
+	let invoke = none ?? borrow
+	invoke(() => {
+		count += 1
+		count
+	})
+	count
+}
+
+static compiled = @run()
+console.log(compiled, run())

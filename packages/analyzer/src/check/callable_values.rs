@@ -443,11 +443,16 @@ impl Walker<'_> {
 	fn search_callable_targets(&self, mut pending: TargetSearch) -> CallableFacts {
 		let mut facts = CallableFacts::default();
 		while let Some((value, path)) = pending.pop() {
+			if self.a.type_of(value) == TypeId::NONE {
+				continue;
+			}
 			if let Some(inputs) = crate::lower::copies::result_inputs(&self.tree, value) {
 				pending.extend(inputs.into_iter().map(|input| (input, path.clone())));
 				continue;
 			}
 			match self.view(value) {
+				// A missing optional contributes no callable to `??`.
+				View::None => {}
 				View::Copy(inner) | View::Spread(inner) | View::Return(Some(inner)) => {
 					pending.push((inner, path))
 				}

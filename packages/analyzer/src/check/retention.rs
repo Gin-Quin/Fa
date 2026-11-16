@@ -535,7 +535,7 @@ mod tests {
 		for &file in &program.files {
 			let errors: Vec<_> = session
 				.diagnostics(file)
-				.into_iter()
+				.iter()
 				.filter(|diagnostic| diagnostic.severity == crate::Severity::Error)
 				.collect();
 			assert!(errors.is_empty(), "{errors:?}");
@@ -547,7 +547,9 @@ mod tests {
 
 	#[test]
 	fn a_local_callable_assignment_still_borrows_its_captures() {
-		analyzed("type Reader = () => Integer\nfunction run = (): Integer => {\nmutable count = 0\nfunction add = (): Integer => { count += 1\ncount }\nmutable invoke: Reader = add\nlet saved = invoke\ninvoke = saved\ninvoke()\ncount\n}\n");
+		analyzed(
+			"type Reader = () => Integer\nfunction run = (): Integer => {\nmutable count = 0\nfunction add = (): Integer => { count += 1\ncount }\nmutable invoke: Reader = add\nlet saved = invoke\ninvoke = saved\ninvoke()\ncount\n}\n",
+		);
 	}
 
 	#[test]
@@ -555,11 +557,18 @@ mod tests {
 		let source = "type Reader = () => Integer\nfunction forward = (operation: (Reader) => Integer, callback: Reader): Integer => operation(callback)\nfunction run = (operation: (Reader) => Integer): Integer => {\nmutable count = 0\nforward(operation, () => { count += 1\ncount })\n}\n";
 		let (session, file) = crate::analyze_source(source);
 		let diagnostics = session.diagnostics(file);
-		let errors: Vec<_> = diagnostics.iter().filter(|diagnostic| diagnostic.severity == crate::Severity::Error).collect();
+		let errors: Vec<_> = diagnostics
+			.iter()
+			.filter(|diagnostic| diagnostic.severity == crate::Severity::Error)
+			.collect();
 		assert_eq!(errors.len(), 1, "{errors:?}");
 		assert_eq!(errors[0].code.id, "REF021");
 		assert!(errors[0].message.contains("`count`"));
-		assert!(errors[0].message.contains("type doesn't say whether it keeps"));
+		assert!(
+			errors[0]
+				.message
+				.contains("type doesn't say whether it keeps")
+		);
 		assert!(errors[0].message.contains("known borrowing function"));
 	}
 
@@ -568,7 +577,23 @@ mod tests {
 		let source = include_str!("../../tests/cases/ownership-retained-callback-snapshot.fa");
 		let (session, file) = analyzed(source);
 		let tree = session.tree(file);
-		let value = session.analysis(file).constants.iter().find(|(node, _)| tree.text(node.index()) == "@snapshot()").unwrap().1;
+		let value = session
+			.analysis(file)
+			.constants
+			.iter()
+			.find(|(node, _)| tree.text(node.index()) == "@snapshot()")
+			.unwrap()
+			.1;
 		assert_eq!(value.to_text(), "14");
+	}
+
+	#[test]
+	fn an_absent_fallback_does_not_hide_a_known_borrowing_callee() {
+		analyzed(include_str!(
+			"../../tests/cases/ownership-known-fallback-callback.fa"
+		));
+		analyzed(
+			"type Reader = () => Integer\ntype Invoker = (Reader) => Integer\nfunction borrow = (callback: Reader): Integer => callback()\nfunction run = (): Integer => {\nmutable count = 0\nlet missing: Invoker? = none\nlet invoke = missing ?? borrow\ninvoke(() => { count += 1\ncount })\ncount\n}\n",
+		);
 	}
 }

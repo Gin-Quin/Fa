@@ -12,6 +12,7 @@ pub mod global;
 pub mod int;
 pub mod layer;
 pub mod merge;
+pub mod ownership;
 pub mod relate;
 pub mod store;
 pub mod subst;
@@ -26,6 +27,7 @@ use crate::ids::{
 	ParamListId, PathId, RecId, ReqListId, ShapeId, SigId, StepListId, Sym, SymIntId, SymListId,
 };
 pub use int::{ComputeType, IntStorage, IntType, Interval};
+pub use ownership::Ownership;
 pub use relate::{Mode, Reason};
 pub use store::TypeStore;
 pub use subst::{Bindings, Candidates};

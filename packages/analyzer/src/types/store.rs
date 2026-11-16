@@ -759,17 +759,15 @@ impl TypeStore {
 		}
 	}
 
-	/// Whether values of a type can't be copied, only moved (`design/decisions.md`,
-	/// "A type holding a task is move-only"): a `Task`, a worker's handle, a
-	/// resource (a type with `destroy`), and every object, tuple, union or
-	/// collection that contains one.
+	/// Legacy flow selector, retained until the concrete move checks migrate.
+	/// The semantic ownership categories are [`TypeStore::ownership`].
 	pub fn is_move_only(&self, ty: TypeId) -> bool {
 		self.holds_move_only(ty, Holds::MoveOnly, &mut Vec::new())
 	}
 
-	/// [`TypeStore::is_move_only`] without the worker handles, which a
-	/// backend may share (counted): the values whose copy would be dropped
-	/// twice (a task, a resource, a type holding one).
+	/// Legacy backend transfer/drop selector; not an ownership category.
+	/// Its consumers migrate with the concrete move/borrow checks. Use
+	/// [`TypeStore::ownership`] for the language's unique/shared distinction.
 	pub fn owns_unique(&self, ty: TypeId) -> bool {
 		self.holds_move_only(ty, Holds::Unique, &mut Vec::new())
 	}

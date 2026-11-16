@@ -1406,3 +1406,11 @@ Full LLVM workspace validations share `/tmp/fa-compiler-full-suite.lock` (`flock
   boundary. Combine phases into a dated JSON and generate Markdown from it.
   Fa has no source DWARF: line-level profile attribution is to assembly/IR, with
   source locations established by inspection, not invented source-line counts.
+
+### Ownership enforcement: category queries (2026-11-16)
+
+Point 1 introduces TypeStore::ownership as the canonical category contract: Ordinary, Structure, Unique and SharedHandle, with Dependent for an owned type parameter and Unresolved for recovery/incomplete declarations. Queries use an iterative ownership-graph DFS, not the backend layout/copy flags: data fields (including private/readonly/reactive fields), tuple items, selected union payloads, collection items/keys and CArray items own values; references, pointers, iterators, relation links, method signatures, function signatures and phantom arguments do not. Shared handles stop payload traversal. An owned cycle makes a structure; a repeated DAG child does not. Unique membership takes precedence. Late recursive targets and nominal payloads are reread rather than cached. Concrete generic instances use their substituted fields. Value parameters and symbolic integer bounds remain scalar data.
+
+The existing is_move_only/owns_unique methods are legacy flow/ABI selectors, not competing definitions of these categories; their consumers migrate when point 2 activates the concrete store and borrow rules. No backend lifetime change is enabled by the category-only checkpoint.
+
+**Error payload data (decided by the lead, 2026-11-16).** An Errors payload cannot own a Task, destroy resource, built-in lifetime owner or a composite owning one. MEM005 reports it at the payload declaration and asks for an identifier or description of the resource instead. Shared synchronization handles are allowed. The open Error type is conservatively a structure, never unique: a last use moves, copy is allowed, and keeping both requires an explicit copy (MEM004). A concrete member uses its payload category. Generic payload conditions that still depend on a type parameter must be checked at instantiation along with the remaining generic ownership conditions; this does not permit unique payloads.

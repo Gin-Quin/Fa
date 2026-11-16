@@ -464,7 +464,7 @@ mod tests {
 					.static_values
 					.get(&crate::ids::SymbolId(symbol as u32)),
 				Some(&Value::int(expected)),
-				"{name}: {:?}", session.comptime.functions.values().find(|function| function.name == "selected")
+				"{name}"
 			);
 		}
 	}

@@ -1414,3 +1414,7 @@ of the machine running the program. The interpreter refuses `String.compareLocal
 with that explanation and adds no ICU dependency (lead decision, 2026-11-16).
 A malformed compile-time string infers `String`; a literal type always holds
 well-formed text, so literal-type symbols remain UTF-8 (same lead decision).
+
+## String integration: grouped calls and bounded text (2026-11-16)
+
+Both lowerers unwrap a direct callee's groups before reading its receiver, preserving the reviewed builtin identity and allocation facts. Saved bound methods retain function-value semantics. Compile-time well-formed concatenation writes once into its final shared UTF-8 allocation, with the cached unit length known from its inputs. The buffer is initialized from complete UTF-8 strings before being exposed as `Arc<str>`. This removes the intermediate full-size buffer that exhausted allocator address-space reservations under the existing 512 MB check limit; evaluation still preflights its existing memory budget. Neither the limit nor the memory regression was changed.

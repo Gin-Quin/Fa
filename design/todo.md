@@ -126,6 +126,18 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
   sibling order and its parser error path. The current scene-children probe is
   wrongly accepted and stores values instead of rejecting Array reference fields;
   add the missing rejection (`benchmarks/audit/ports/scene-children/main.fa`).
+- **GrowingArray push and scan (faithful push port).** At 3.2 M items, the scalar
+  segment scan executes 25.60 M instructions versus 12.00 M for Goose's vectorized
+  scan and the reserved Array control; use a plain inner loop over each segment
+  without a per-item run-end test. Construction is 128.35 M versus Array 121.95 M
+  and Goose 109.00 M: inspect cursor/length header promotion and paired Int32
+  stores (two scalar writes versus Goose's one 8-byte item store). Segment-growth
+  calls total only 5,406 inclusive instructions; do not prioritize allocator
+  tuning or add reservation to the port. Mark indexing contributes 0.85 M versus
+  Array 0.45 M. Default CPU: 1.119 / 1.143 times Goose, passing control but broad
+  IQR; direct Array comparison straddles equality, so its CPU direction remains
+  unresolved. Keep all bounds and stable-address guarantees. Raw samples/profile
+  annotations: `benchmarks/results/2026-11-16-ports.json`.
 
 The 2026-11-16 trunk baseline is [generated from the recorded JSON](../benchmarks/README.md#trunk-baseline--2026-11-16). Of the original Goose 16, eight meet the ≤1.10× CPU gate, six are behind and two are unresolved; against the matching Rust rows, twelve meet the strict faster-than gate, one is behind and three are unresolved. Native CPU, instructions, RSS and sizes are separate. A threshold margin within ±0.05 requires an interleaved same-binary control within 3% on both estimates. Preserve the first primary series; supplemental diagnostics do not replace it.
 

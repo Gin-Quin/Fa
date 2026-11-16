@@ -179,6 +179,19 @@ Select either name with `audit/compare.py`; `run.ts` runs the main only.
 The [port audit](audit/ports/README.md) explains the remaining differences and
 which recursive mains await language representation decisions.
 
+The [2026-11-16 push checkpoint](results/2026-11-16-ports.md)
+([raw samples and provenance](results/2026-11-16-ports.json)) measures both forms
+with the current compiler. Main push is 1.119 / 1.143 [1.024, 1.196] times Goose
+CPU at 32 million items, with a passing control; audit instructions at 3.2 million
+items are 155.50 M versus Goose 121.47 M. Its GrowingArray scan stays scalar
+(25.60 M instructions versus 12.00 M for Goose's vectorized scan), and append
+reloads/writes cursor and length metadata. The separate push-array CPU series
+fails its control and is **not resolved** under this task's stricter rule; its
+generated table uses `--require-control`, preserving raw phase verdicts in JSON.
+The direct paired GrowingArray/Array estimates straddle equality (1.078 / 0.995),
+so they establish no CPU direction. The historical trunk baseline below is
+unchanged. No compiler optimization is included in this port checkpoint.
+
 ## Fairness rules
 
 - **Same algorithm, same output.** Both versions do the same work in the same order, including the floating-point operations (the order of the operands matters for the last bits), and print exactly the same text. The runner compares every output with the Rust one before timing.

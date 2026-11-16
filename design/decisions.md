@@ -1509,3 +1509,14 @@ prescribed for local reference collections in the reference documentation.
 pair with the suite's only safe Rust push row (`push.rs`, Vec+reserve/indices);
 its allocation policy differs from Fa's segmented growth. No compiler changes
 are part of this port audit.
+
+At the completed push checkpoint, the 21-round CPU-5 series is 1.119 / 1.143
+times Goose with a passing control, so the faithful main remains behind the
+1.10 goal. Audit-size profiles isolate scalar GrowingArray iteration and hot
+cursor/length metadata work; segment allocation is negligible. Preserve the
+first series and its broad quartiles. The direct Array pair straddles equality,
+and the separate Array series fails its control, so neither establishes a CPU
+improvement. The driver has an optional `--require-control` publication policy:
+every failed control renders as `not resolved`, raw phase samples/verdicts stay
+intact, and the policy survives re-rendering of combined JSON. Its default
+historical near-threshold policy is unchanged. See the dated ports results.

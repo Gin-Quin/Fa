@@ -139,3 +139,10 @@ Use `--supplemental` for that diagnostic series.
 
 `--update-readme` replaces only the marked generated result block, preserves the
 rest of the README byte-for-byte, links the canonical JSON and is idempotent.
+
+When a task requires every CPU verdict to pass its control, render with
+`--require-control`. The combined JSON records this stricter publication policy;
+failed controls display `not resolved` regardless of the threshold margin. Raw
+phase samples and verdicts stay intact, and rendering the combined JSON again
+retains its strict policy. Without this option, the historical near-threshold
+policy remains in effect.

@@ -401,6 +401,8 @@ def main():
     parser.add_argument("--markdown", type=Path)
     parser.add_argument("--update-readme", action="store_true",
                         help="With --render, replace only the generated README result block")
+    parser.add_argument("--require-control", action="store_true",
+                        help="With --render, require a passing control for every CPU verdict")
     parser.add_argument("--supplemental", action="store_true",
                         help="Retain this diagnostic series in JSON without replacing headline table rows")
     parser.add_argument("--secondary-memory-mib", type=int, default=512)
@@ -408,8 +410,11 @@ def main():
                         help="Interleave an already prepared Fa variant (one selected benchmark, CPU mode)")
     args = parser.parse_args()
     if args.render:
-        tables.render(args.render, args.report, args.markdown, args.update_readme)
+        tables.render(args.render, args.report, args.markdown, args.update_readme,
+                      require_control=args.require_control)
         return
+    if args.require_control:
+        parser.error("--require-control requires --render")
     if args.update_readme:
         parser.error("--update-readme requires --render")
     if not args.directory:

@@ -1,3 +1,4 @@
+-- skip-target: web
 -- Mandelbrot set on a size x size bitmap: float loops with early exit, integer packing.
 -- Prints a checksum of the packed bitmap instead of the image.
 

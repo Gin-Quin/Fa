@@ -140,7 +140,7 @@ impl Generator<'_> {
 				let (lines, fallback) = self.capture_at(indent, |g| g.expr(default));
 				if !lines.is_empty() {
 					// a default that needs statements: assigned when the field is `none`
-					let declared = if module_value {
+					let declared = if module_value || self.guard_binding(&name) {
 						name.clone()
 					} else {
 						format!("let {name}")
@@ -160,6 +160,11 @@ impl Generator<'_> {
 			self.copy_value(value, ty)
 		} else {
 			value
+		};
+		let keyword = if !module_value && self.guard_binding(&name) {
+			""
+		} else {
+			keyword
 		};
 		self.out.line(format!("{keyword}{name} = {};", value.text));
 	}

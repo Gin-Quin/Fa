@@ -1,0 +1,9 @@
+type Color = Enum { red, green, blue }
+function pick = (index: Integer): Color => if index == 0 { .red } else { .blue }
+let color = pick(1)
+console.log(color == Color.blue, color != Color.red) -- prints: true true
+function optional = (index: Integer): Color? => if index < 0 { none } else { pick(index) }
+let first = optional(1)
+let second = optional(1)
+console.log(first == second, first != second) -- prints: true false
+console.log(optional(-1) == optional(-1)) -- prints: true

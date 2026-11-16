@@ -22,6 +22,15 @@ import {
 } from "./format.js";
 
 describe("top level (values brief 2.8, D-5)", () => {
+	test("deep recursive values use bounded stack space", () => {
+		/** @type {any} */
+		let value;
+		for (let index = 0; index < 100000; index++) value = { next: value };
+		const text = faFormat(value);
+		expect(text.length).toBe(1100004);
+		expect(text.startsWith("{ next = { next = ")).toBe(true);
+		expect(text.endsWith("none" + " }".repeat(100000))).toBe(true);
+	});
 	test("strings are raw, other values in Fa notation", () => {
 		expect(faFormat("hello")).toBe("hello");
 		expect(faFormat('a"b')).toBe('a"b');

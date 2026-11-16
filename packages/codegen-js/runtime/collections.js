@@ -1364,3 +1364,14 @@ export class FaValuePool {
 		return this.#slots.values();
 	}
 }
+
+// @fa-helper faIsBytes
+/** Typed arrays from other JavaScript realms are still Bytes. ArrayBuffer's
+ * internal view test rejects objects that merely imitate the tag.
+ * @param {unknown} value @returns {value is Uint8Array}
+ */
+export function faIsBytes(value) {
+	return (
+		ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === "[object Uint8Array]"
+	);
+}

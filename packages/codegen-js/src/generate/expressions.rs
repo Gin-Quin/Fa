@@ -395,10 +395,12 @@ impl Generator<'_> {
 		};
 		// enumeration members are numbers (or optionals of them: `undefined`)
 		let enumeration = |ty: TypeId| {
-			matches!(
-				self.types.kind(ty),
-				TypeKind::Enum(..) | TypeKind::EnumMember(..)
-			)
+			self.types.union_members(&ty).iter().all(|&member| {
+				matches!(
+					self.types.kind(member),
+					TypeKind::Enum(..) | TypeKind::EnumMember(..) | TypeKind::None
+				)
+			})
 		};
 		if comparable(left_repr)
 			|| comparable(right_repr)

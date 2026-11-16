@@ -1,0 +1,69 @@
+-- Detached calls snapshot mutable arguments before the caller changes them.
+async function report = (values: Array<Integer>) => {
+	console.log(values)
+}
+mutable values = [1, 2]
+start report(values)
+values[0] = 9
+console.log(values) -- prints: [9, 2]
+await Task.yield()
+-- prints: [1, 2]
+
+type Box = { value: Integer }
+type Holder = {
+	items: Array<Box>
+	async function report = (self) => console.log("receiver {self.items}")
+}
+async function reportBoxes = (label: String, items: Array<Box>) => console.log("{label} {items}")
+async function reportOne = (item: Box) => console.log("index {item.value}")
+async function reportSpread = (...items: Box) => console.log("spread {items}")
+mutable holder = Holder { items = [{ value = 1 }] }
+start reportBoxes("field", holder.items)
+try holder.items[0].value = 2
+console.log("field caller", holder.items) -- prints: field caller [{ value = 2 }]
+await Task.yield()
+-- prints: field [{ value = 1 }]
+
+start reportOne(try holder.items[0])
+try holder.items[0].value = 3
+await Task.yield()
+-- prints: index 2
+
+start holder.report()
+try holder.items[0].value = 4
+await Task.yield()
+-- prints: receiver [{ value = 3 }]
+
+start reportSpread(...holder.items)
+try holder.items[0].value = 5
+await Task.yield()
+-- prints: spread [{ value = 4 }]
+
+-- Argument evaluation itself retains ordinary borrowing: this call must
+-- modify the caller's array before the detached task takes its snapshot.
+function bump = (items: Array<Box>): Array<Box> throws IndexError mutates items => {
+	try items[0].value += 1
+	items
+}
+start reportBoxes("nested", try bump(holder.items))
+console.log("nested caller", holder.items) -- prints: nested caller [{ value = 6 }]
+try holder.items[0].value = 7
+await Task.yield()
+-- prints: nested [{ value = 6 }]
+
+-- The data of an optional composite is copied, while its mutex stays shared.
+use { Mutex } = std.concurrency
+type SharedPayload = { label: Integer, mutex: Mutex<Integer> }
+async function reportShared = (value: SharedPayload?) => {
+	if value is not none {
+		console.log("shared {value.label} {(await value.mutex.lock()).value}")
+	}
+}
+mutable payload: SharedPayload? = SharedPayload { label = 1, mutex = Mutex<Integer> { value = 0 } }
+start reportShared(payload)
+if payload is not none {
+	payload.label = 2
+	(await payload.mutex.lock()).value = 9
+}
+await Task.yield()
+-- prints: shared 1 9

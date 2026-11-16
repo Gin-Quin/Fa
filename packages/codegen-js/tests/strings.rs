@@ -32,7 +32,7 @@ fn strings_and_bytes_agree_on_javascript_targets() {
 			let output = generate(&mut session, file, &Options::new(target, fixture)).unwrap();
 			let script = directory.join(format!("{fixture}-{}.mjs", target.name()));
 			std::fs::write(&script, &output.code).unwrap();
-			let engine = if target == Target::Node {
+			let engine = if target != Target::Bun {
 				PathBuf::from(std::env::var_os("HOME").unwrap()).join(".local/bin/node")
 			} else {
 				bun.clone()
@@ -42,7 +42,18 @@ fn strings_and_bytes_agree_on_javascript_targets() {
 				"JavaScript test engine {} is required",
 				engine.display()
 			);
-			let result = Command::new(engine).arg(&script).output().unwrap();
+			let mut command = Command::new(engine);
+			if target == Target::Web {
+				command.args([
+					"--experimental-vm-modules",
+					"--disable-warning=ExperimentalWarning",
+				]);
+				command.arg(
+					PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+						.join("../cli/tests/programs/web-runner.mjs"),
+				);
+			}
+			let result = command.arg(&script).output().unwrap();
 			assert!(
 				result.status.success(),
 				"{} {fixture}: {}",
@@ -64,4 +75,30 @@ fn strings_and_bytes_agree_on_javascript_targets() {
 		}
 	}
 	std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn explicit_views_only_link_the_runtime_they_use() {
+	for (source, required, absent) in [
+		(
+			"for byte in \"é😀\".toUtf8() { console.log(byte) }",
+			"faUtf8Values",
+			"faUtf8Encoder",
+		),
+		(
+			"function count = (text: String) => text.codePoints().length\nconsole.log(count(\"é😀\"))",
+			"faCodePointCount",
+			"faStringCodePoints",
+		),
+		(
+			"use { Json } = std.json\nlet value: Integer = Json.parse(\"1\") catch error => 0\nconsole.log(value)",
+			"faJsonParse",
+			"faJsonReadBytes",
+		),
+	] {
+		let (mut session, file) = fa_analyzer::analyze_source(source);
+		let output = generate(&mut session, file, &Options::new(Target::Bun, "views.fa")).unwrap();
+		assert!(output.helpers.contains(&required), "{required}");
+		assert!(!output.helpers.contains(&absent), "{absent}");
+	}
 }

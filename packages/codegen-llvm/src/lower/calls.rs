@@ -724,11 +724,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					match argument {
 						Argument::Variadic(nodes) => {
 							for &value in nodes {
-								if matches!(self.view(value), View::Spread(_)) {
-									return Err(
-										self.unsupported(value.index(), "spreading arguments")
-									);
-								}
 								values.push(value);
 							}
 						}

@@ -1,0 +1,29 @@
+-- Frame collections (B: read-only and frame maps, sets and arrays) and frame
+-- strings (A) held across suspensions in coroutine frames, results returned
+-- by tasks, and the sizes reserved before an await.
+use { sleep } = std.time
+type Big = { a: Integer, b: String, c: Array<Integer>, d: Integer }
+function make = (n: Integer): Big => Big { a = n, b = "big {n} with a text long enough to leave the frame", c = [n, n * 2], d = n + 1 }
+async function work = (n: Integer): Big => {
+	let table: Map<Integer, String> = [(n, "first {n}"), (n + 1, "second"), (n + 2, "third")]
+	let constants: Set<String> = ["alpha", "beta", "gamma"]
+	let numbers = [n, n + 1, n + 2]
+	mutable text = String.from("t", capacity = 30)
+	text += "{n}"
+	let big = make(n)
+	await sleep(1)
+	mutable sum = 0
+	for value in numbers { sum += value }
+	await Task.yield()
+	assert constants.includes("beta")
+	text += table.get(n) ?? "missing"
+	Big { a = sum, b = "{text}|{big.b}", c = big.c, d = table.size + constants.size }
+}
+let tasks = [start work(1), start work(20), start work(300)]
+for task in tasks {
+	let big = await task catch _error => make(0)
+	console.log(big.a, big.b, big.c, big.d)
+}
+-- prints: 6 t1first 1|big 1 with a text long enough to leave the frame [1, 2] 6
+-- prints: 63 t20first 20|big 20 with a text long enough to leave the frame [20, 40] 6
+-- prints: 903 t300first 300|big 300 with a text long enough to leave the frame [300, 600] 6

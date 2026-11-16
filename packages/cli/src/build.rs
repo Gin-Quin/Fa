@@ -678,8 +678,19 @@ pub(crate) fn build_native(
 	output: Option<&Path>,
 	development: bool,
 ) -> Result<fa_codegen_llvm::Artifact, String> {
-	let artifact =
-		build_native_artifact(backend, path, target, options, mode, output, development)?;
+	let built = build_native_artifact(
+		backend,
+		path,
+		target,
+		options,
+		mode,
+		output,
+		development,
+		false,
+	)?;
+	let NativeProgram::Linked(artifact) = built else {
+		unreachable!("a program is loaded in memory only when asked")
+	};
 	if let Some(loader) = &artifact.loader {
 		let directory = if path.is_dir() {
 			Some(path)
@@ -701,6 +712,39 @@ pub(crate) fn build_native(
 	Ok(artifact)
 }
 
+/// A native program ready to run: an executable, or the program loaded in
+/// this process by the JIT.
+pub(crate) enum NativeProgram {
+	Linked(fa_codegen_llvm::Artifact),
+	Loaded(Box<dyn fa_codegen_llvm::LoadedProgram>),
+}
+
+/// `fa run --target=native`: the program loaded in this process by the JIT
+/// (design/decisions.md, "Interpreter scope and JIT for native tests"), or
+/// an executable in `output` when the JIT doesn't apply
+/// (`fa_codegen_llvm::jit_available`) or can't load it. A package compiled
+/// per unit keeps its cached objects: the JIT loads them.
+pub(crate) fn load_native(
+	backend: &dyn native::Backend,
+	path: &Path,
+	target: fa_codegen_llvm::Target,
+	options: &fa_codegen_llvm::Options,
+	mode: Mode,
+	output: &Path,
+) -> Result<NativeProgram, String> {
+	build_native_artifact(
+		backend,
+		path,
+		target,
+		options,
+		mode,
+		Some(output),
+		true,
+		true,
+	)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_native_artifact(
 	backend: &dyn native::Backend,
 	path: &Path,
@@ -709,7 +753,8 @@ fn build_native_artifact(
 	mode: Mode,
 	output: Option<&Path>,
 	development: bool,
-) -> Result<fa_codegen_llvm::Artifact, String> {
+	jit: bool,
+) -> Result<NativeProgram, String> {
 	if !fa_codegen_llvm::llvm_available() {
 		return Err(format!(
 			"fa: the `{}` target needs the LLVM backend, and this `fa` was built without LLVM: run scripts/setup-llvm.sh, export LLVM_SYS_181_PREFIX and rebuild\n",
@@ -752,8 +797,14 @@ fn build_native_artifact(
 			development,
 			output,
 			mode.verbose,
+			jit,
 		) {
-			crate::streaming::NativeBuilt::Built(artifact) => return Ok(artifact),
+			crate::streaming::NativeBuilt::Built(artifact) => {
+				return Ok(NativeProgram::Linked(artifact));
+			}
+			crate::streaming::NativeBuilt::Loaded(program) => {
+				return Ok(NativeProgram::Loaded(program));
+			}
 			crate::streaming::NativeBuilt::Failed(message) => return Err(message),
 			crate::streaming::NativeBuilt::Fallback(reason) => {
 				if mode.verbose {
@@ -849,6 +900,13 @@ fn build_native_artifact(
 	} else {
 		native::Input::Program(&loaded.inner.program)
 	};
+	// the program in this process, without an object nor a link
+	if jit && fa_codegen_llvm::jit_available(target, options, &libraries) {
+		let program = timings::phase("llvm", || backend.load(loaded.session(), input, options))?;
+		if let Some(program) = program {
+			return Ok(NativeProgram::Loaded(program));
+		}
+	}
 	// generation, optimization and link: one call for now
 	timings::phase("llvm", || {
 		backend.compile(
@@ -860,4 +918,5 @@ fn build_native_artifact(
 			&libraries,
 		)
 	})
+	.map(NativeProgram::Linked)
 }

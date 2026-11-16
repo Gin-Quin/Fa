@@ -73,6 +73,7 @@ const RESERVED: &[&str] = &[
 	"ArrayBuffer",
 	"Atomics",
 	"BigInt",
+	"Buffer",
 	"BigInt64Array",
 	"BigUint64Array",
 	"Boolean",

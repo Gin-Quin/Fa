@@ -583,22 +583,45 @@ pub(crate) fn run_llvm_tests(
 		);
 		return 1;
 	}
-	let options = fa_codegen_llvm::Options {
+	let mut options = fa_codegen_llvm::Options {
 		asynchronous: Some(program.asynchronous),
 		..fa_codegen_llvm::Options::default()
 	};
-	let artifact = match backend.compile(
-		session,
-		crate::native::Input::Tests(program),
-		target,
-		&options,
-		&directory.join("tests"),
-		&fa_codegen_llvm::Libraries::default(),
-	) {
-		Ok(artifact) => artifact,
-		Err(message) => {
-			eprint!("{message}");
-			return 1;
+	if target == fa_codegen_llvm::Target::Native {
+		// the dev profile (design/decisions.md, "Interpreter scope and JIT
+		// for native tests")
+		options.opt_level = fa_codegen_llvm::OptLevel::O0;
+	}
+	let libraries = fa_codegen_llvm::Libraries::default();
+	// `native`: the tests loaded in this process by the JIT, each run in a
+	// forked child; else (and when the JIT can't load them) an executable
+	let loaded = if fa_codegen_llvm::jit_available(target, &options, &libraries) {
+		match backend.load(session, crate::native::Input::Tests(program), &options) {
+			Ok(loaded) => loaded,
+			Err(message) => {
+				eprint!("{message}");
+				return 1;
+			}
+		}
+	} else {
+		None
+	};
+	let artifact = if loaded.is_some() {
+		None
+	} else {
+		match backend.compile(
+			session,
+			crate::native::Input::Tests(program),
+			target,
+			&options,
+			&directory.join("tests"),
+			&libraries,
+		) {
+			Ok(artifact) => Some(artifact),
+			Err(message) => {
+				eprint!("{message}");
+				return 1;
+			}
 		}
 	};
 	let mut passed = 0;
@@ -620,28 +643,45 @@ pub(crate) fn run_llvm_tests(
 			continue;
 		}
 		let _ = std::io::Write::flush(&mut std::io::stdout());
-		let mut command = if let Some(loader) = &artifact.loader {
-			let runtime = match fa_codegen_llvm::javascript_runtime() {
-				Ok(runtime) => runtime,
-				Err(error) => {
-					eprintln!("fa test: {error}");
-					return 1;
-				}
-			};
-			let mut command = Command::new(runtime);
-			command.arg(loader);
-			command
-		} else {
-			Command::new(&artifact.output)
-		};
-		command
-			.arg(index.to_string())
-			.stdin(std::process::Stdio::null())
-			.stdout(std::process::Stdio::inherit())
-			.stderr(std::process::Stdio::piped());
 		let timeout = test_timeout();
-		let output = llvm_test_output(&mut command, timeout);
-		let output = match output {
+		let index = index.to_string();
+		let output = match (&loaded, &artifact) {
+			(Some(program), _) => program
+				.run_in_child("tests", &[std::ffi::OsStr::new(&index)], timeout)
+				.map(|output| output.map(|output| (output.code, output.stderr)))
+				.map_err(|error| format!("fa test: can't run the test in a child: {error}")),
+			(None, Some(artifact)) => {
+				let mut command = if let Some(loader) = &artifact.loader {
+					let runtime = match fa_codegen_llvm::javascript_runtime() {
+						Ok(runtime) => runtime,
+						Err(error) => {
+							eprintln!("fa test: {error}");
+							return 1;
+						}
+					};
+					let mut command = Command::new(runtime);
+					command.arg(loader);
+					command
+				} else {
+					Command::new(&artifact.output)
+				};
+				command
+					.arg(&index)
+					.stdin(std::process::Stdio::null())
+					.stdout(std::process::Stdio::inherit())
+					.stderr(std::process::Stdio::piped());
+				llvm_test_output(&mut command, timeout)
+					.map(|output| output.map(|output| (exit_code(output.status), output.stderr)))
+					.map_err(|error| {
+						format!(
+							"fa test: can't run `{}`: {error}",
+							artifact.output.display()
+						)
+					})
+			}
+			(None, None) => unreachable!("the tests are loaded or linked"),
+		};
+		let (code, stderr) = match output {
 			Ok(Some(output)) => output,
 			Ok(None) => {
 				failed += 1;
@@ -652,22 +692,18 @@ pub(crate) fn run_llvm_tests(
 				);
 				continue;
 			}
-			Err(error) => {
-				eprintln!(
-					"fa test: can't run `{}`: {error}",
-					artifact.output.display()
-				);
+			Err(message) => {
+				eprintln!("{message}");
 				return 1;
 			}
 		};
-		let code = exit_code(output.status);
 		if code == 0 {
 			passed += 1;
 			println!("✓ {name}");
 			continue;
 		}
 		failed += 1;
-		let (report, stops) = failure_report(&String::from_utf8_lossy(&output.stderr), code);
+		let (report, stops) = failure_report(&String::from_utf8_lossy(&stderr), code);
 		if stops {
 			stopped = Some(file.as_str());
 		}

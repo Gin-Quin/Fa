@@ -17,6 +17,8 @@
 //! - A composite value read from a place is copied where Fa's value
 //!   semantics need it (a `mutable` destination, or a mutable source).
 
+use std::collections::HashSet;
+
 use fa_analyzer::analysis::{FieldValue, NodeFlags};
 use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, NominalId, SymbolId, TypeId};
@@ -479,7 +481,14 @@ impl Generator<'_> {
 					let receiver = self.keep(value);
 					let index = self.temp();
 					let normalize = self.helper("faNormalizeIndex");
-					Expr::new(format!("({index}) => {}.charCodeAt({normalize}({}.length, {index}))", receiver.primary_text(), receiver.primary_text()), Prec::Assign)
+					Expr::new(
+						format!(
+							"({index}) => {}.charCodeAt({normalize}({}.length, {index}))",
+							receiver.primary_text(),
+							receiver.primary_text()
+						),
+						Prec::Assign,
+					)
 				}
 				"Pointer#value" => {
 					let target = self.type_of(member);
@@ -1290,6 +1299,7 @@ impl Generator<'_> {
 			// Erased parameters may own objects or collections. Their copies
 			// use faCopy, which leaves primitive instantiations unchanged.
 			| TypeKind::Param(_)
+			| TypeKind::Rec(_)
 			| TypeKind::Range => true,
 			TypeKind::Union(list) => self
 				.types
@@ -1323,6 +1333,9 @@ impl Generator<'_> {
 		destination_mutable: bool,
 	) -> Expr {
 		let ty = self.type_of(node);
+		if self.fcx.moving_replaced == Some(node) {
+			return value;
+		}
 		// A native bytes slice already owns its copy; do not copy it again.
 		if ty == TypeId::BYTES
 			&& let View::Index { index, .. } = self.view(self.strip_groups(node))
@@ -1359,6 +1372,64 @@ impl Generator<'_> {
 			return value;
 		}
 		self.copy_of(value, ty)
+	}
+
+	/// A single read of an optional local inside the fresh object replacing
+	/// it transfers the old root. No call or closure may retain a new alias
+	/// during construction, and multiple reads still need independent copies.
+	pub(crate) fn replaced_root_read(&self, target: NodeId, value: NodeId) -> Option<NodeId> {
+		let target = self.strip_groups(target);
+		let Resolution::Local(symbol) = self.analysis.resolution(target) else {
+			return None;
+		};
+		if !matches!(self.view(target), View::Name(_))
+			|| self.analysis.symbols.symbol(symbol).kind != SymbolKind::Mutable
+			|| self
+				.types
+				.contains_resource(self.analysis.symbols.symbol(symbol).ty)
+			|| !self.may_be_none(self.analysis.symbols.symbol(symbol).ty)
+			|| !matches!(
+				self.view(self.strip_groups(value)),
+				View::Object { .. } | View::TypedObject { .. } | View::Access { .. }
+			) {
+			return None;
+		}
+		let mut read = None;
+		let mut pending = vec![value];
+		let mut visited = HashSet::new();
+		while let Some(node) = pending.pop() {
+			if !visited.insert(node) {
+				return None;
+			}
+			// A type's omitted field defaults run during construction too.
+			if let Some(object) = self.analysis.object(node) {
+				pending.extend(object.fields.iter().filter_map(|(_, field)| match field {
+					FieldValue::Default(value) => Some(*value),
+					_ => None,
+				}));
+			}
+			if matches!(
+				self.view(node),
+				View::Call { .. }
+					| View::Lambda { .. }
+					| View::Function { .. }
+					| View::Start(_)
+					| View::Await(_)
+			) {
+				return None;
+			}
+			if matches!(self.view(node), View::Name(_))
+				&& self.analysis.resolution(node) == Resolution::Local(symbol)
+				&& read.replace(node).is_some()
+			{
+				return None;
+			}
+			pending.extend(fa_analyzer::syntax::children(self.tree, node));
+		}
+		if matches!(self.view(self.strip_groups(value)), View::Access { .. }) {
+			return (self.place_root(value) == Some(symbol)).then_some(value);
+		}
+		read
 	}
 
 	/// Whether a value read from a place is an element with relation
@@ -1555,6 +1626,25 @@ impl Generator<'_> {
 			return (!name.is_empty()).then(|| name.clone());
 		}
 		let (wanted, body) = match self.types.kind(ty) {
+			TypeKind::Tuple(list) => {
+				let items = self.types.list_items(list).to_vec();
+				let parts: Vec<String> = items
+					.into_iter()
+					.enumerate()
+					.map(|(index, item)| {
+						let read = Expr::primary(format!("value[{index}]"));
+						if self.is_composite(item) {
+							self.copy_of(read, item).text
+						} else {
+							read.text
+						}
+					})
+					.collect();
+				(
+					"copy$tuple".to_string(),
+					format!("(value) => [{}]", parts.join(", ")),
+				)
+			}
 			// an owner of related collections: copied with its links (relations.rs)
 			TypeKind::Object(_) if self.owns_related_elements(ty) => {
 				let helper = self.helper("faCopyGraph");

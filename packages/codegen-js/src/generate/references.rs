@@ -84,11 +84,7 @@ impl Generator<'_> {
 		let ty = self.without_none(ty);
 		matches!(
 			self.types.kind(ty),
-			TypeKind::Object(_)
-				| TypeKind::Bytes
-				| TypeKind::Collection(..)
-				| TypeKind::Tuple(_)
-				| TypeKind::Range
+			TypeKind::Object(_) | TypeKind::Collection(..) | TypeKind::Tuple(_) | TypeKind::Range
 		)
 	}
 
@@ -116,7 +112,9 @@ impl Generator<'_> {
 		};
 		let ty = self.analysis.symbols.symbol(symbol).ty;
 		let module_value = self.is_module_value(symbol);
-		if self.is_object_reference(ty) {
+		let byte_slice = self.without_none(ty) == TypeId::BYTES
+			&& matches!(self.view(self.strip_reference(value)), View::Index { index, .. } if self.type_of(index) == TypeId::RANGE);
+		if self.is_object_reference(ty) || byte_slice {
 			let value = match self.view(self.strip_reference(value)) {
 				View::Index { target, index } => self
 					.native_slice(self.strip_reference(value), target, index, true)

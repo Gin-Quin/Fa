@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
+import { runInNewContext } from "node:vm";
 
+import { faIsBytes } from "./collections.js";
 import { faAssign, faCopy, faCopyGraph } from "./copy.js";
 import { faBytesEqual, faEquals, faHash } from "./equality.js";
 import { faFormat, faFormatBytes } from "./format.js";
@@ -35,4 +37,26 @@ test("byte notation never decodes text", () => {
 	expect(faFormat(data)).toBe("[195, 169, 255]");
 	expect(faFormat({ data })).toBe("{ data = [195, 169, 255] }");
 	expect(faFormatBytes(new Uint8Array())).toBe("[]");
+});
+
+test("assigning object fields replaces byte buffers whose lengths differ", () => {
+	const target = { bytes: new Uint8Array([1]) };
+	faAssign(target, { bytes: new Uint8Array([2, 3]) });
+	expect(target.bytes).toEqual(new Uint8Array([2, 3]));
+	faAssign(target, { bytes: new Uint8Array([4]) });
+	expect(target.bytes).toEqual(new Uint8Array([4]));
+});
+
+test("bytes from another realm keep their type, equality, copies and notation", () => {
+	const foreign = runInNewContext("new Uint8Array([195, 169])");
+	const local = new Uint8Array([195, 169]);
+	expect(faIsBytes(foreign)).toBe(true);
+	expect(faIsBytes({ [Symbol.toStringTag]: "Uint8Array" })).toBe(false);
+	expect(faIsBytes(new Uint8ClampedArray(2))).toBe(false);
+	expect(faEquals(foreign, local)).toBe(true);
+	expect(faFormat(foreign)).toBe("[195, 169]");
+	const copy = faCopy(foreign);
+	expect(faIsBytes(copy)).toBe(true);
+	copy[0] = 0;
+	expect(foreign[0]).toBe(195);
 });

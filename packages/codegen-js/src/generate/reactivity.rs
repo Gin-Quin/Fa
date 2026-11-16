@@ -492,20 +492,30 @@ impl Generator<'_> {
 			match self.view(parent) {
 				// `(await mutex.lock()).value`: the awaited guard
 				View::Group(_) | View::Await(_) => child = parent,
+				// A named argument is represented as an assignment node.
+				View::Assignment {
+					value: Some(value), ..
+				} if value == child
+					&& parents[parent.index()].is_some_and(|grandparent| {
+						matches!(self.view(grandparent), View::Call { .. })
+					}) =>
+				{
+					child = parent
+				}
 				View::Access { target, .. } | View::OptionalAccess { target, .. } => {
 					return target == child;
 				}
 				View::Equality { .. } | View::Is { .. } => return true,
+				View::Call { callee, .. } => return callee != child,
 				_ => return false,
 			}
 		}
 		false
 	}
 
-	/// Generates statement `n` (`generate`), then releases the guards its
-	/// temporaries hold: after it, or in a `finally` when it leaves the
-	/// block (`return`, `throw`, `break`, `continue`, a value returned).
-	pub(crate) fn guarded(&mut self, n: NodeId, dest: &Dest, generate: impl FnOnce(&mut Self)) {
+	/// Generates a statement, releasing its temporary guards in a `finally`
+	/// on normal completion, exceptions and control-flow exits alike.
+	pub(crate) fn guarded(&mut self, generate: impl FnOnce(&mut Self)) {
 		// a guard of `tryLock`, a new value holding a resource (resources.rs)
 		let has_try_lock = match self.has_try_lock {
 			Some(known) => known,
@@ -535,28 +545,36 @@ impl Generator<'_> {
 			return;
 		}
 		self.guard_frames.push(Vec::new());
+		self.guard_bindings.push(Vec::new());
 		let (lines, ()) = self.capture(generate);
 		let mut release = self.guard_frames.pop().unwrap_or_default();
+		let bindings = self.guard_bindings.pop().unwrap_or_default();
 		if release.is_empty() {
 			self.out.append(lines);
 			return;
 		}
 		// the last temporary first
 		release.reverse();
-		let leaves = *dest == Dest::Return
-			|| matches!(
-				self.view(n),
-				View::Return(_) | View::Throw(_) | View::Break(_) | View::Continue
-			);
-		if leaves {
-			self.out.line("try {");
-			self.out.append(lines);
-			self.out
-				.line(format!("}} finally {{ {} }}", release.join(" ")));
-		} else {
-			self.out.append(lines);
-			self.out.line(release.join(" "));
+		if !bindings.is_empty() {
+			self.out.line(format!("let {};", bindings.join(", ")));
 		}
+		self.out.line("try {");
+		self.out.append(super::functions::indent_by_one(lines));
+		self.out
+			.line(format!("}} finally {{ {} }}", release.join(" ")));
+	}
+
+	/// A declaration initialized while holding a temporary guard must stay
+	/// visible after the statement's `try`/`finally` releases that guard.
+	pub(crate) fn guard_binding(&mut self, name: &str) -> bool {
+		if self.guard_frames.last().is_none_or(Vec::is_empty) {
+			return false;
+		}
+		if let Some(bindings) = self.guard_bindings.last_mut() {
+			bindings.push(name.to_string());
+			return true;
+		}
+		false
 	}
 
 	/// A `watch` statement or subscription disposed at the end of its block:

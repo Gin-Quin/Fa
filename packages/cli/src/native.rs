@@ -17,6 +17,7 @@ use fa_analyzer::ids::FileId;
 use fa_analyzer::modules::Program;
 
 /// What the backend compiles: one file, or a program of several files.
+#[derive(Clone, Copy)]
 pub enum Input<'a> {
 	/// A standalone file using no other file, and its path as shown.
 	File { file: FileId, shown: &'a str },
@@ -40,6 +41,16 @@ pub trait Backend: Sync {
 		output: &Path,
 		libraries: &fa_codegen_llvm::Libraries,
 	) -> Result<fa_codegen_llvm::Artifact, String>;
+
+	/// Compiles an analyzed program and loads it in this process (the JIT
+	/// of `fa run` and `fa test` on `native`, `fa_codegen_llvm::load`):
+	/// `Ok(None)` when the JIT can't load it, and the caller links it.
+	fn load(
+		&self,
+		session: &Session,
+		input: Input<'_>,
+		options: &fa_codegen_llvm::Options,
+	) -> Result<Option<Box<dyn fa_codegen_llvm::LoadedProgram>>, String>;
 
 	/// Analyzes a package on the pipeline and compiles each unit into an
 	/// object of its own (design/parallel-pipeline.md §3.3), on the thread

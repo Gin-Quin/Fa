@@ -300,13 +300,6 @@ function faJsonConvert(data, schema, where) {
 			case "b":
 				if (typeof data === "boolean") return data;
 				throw fail("a boolean");
-			case "B":
-				if (
-					Array.isArray(data) &&
-					data.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
-				)
-					return Uint8Array.from(data);
-				throw fail("an array of bytes");
 			case "s":
 				if (typeof data === "string") return data;
 				throw fail("a string");
@@ -488,8 +481,6 @@ function faJsonIs(value, schema) {
 		switch (schema) {
 			case "b":
 				return typeof value === "boolean";
-			case "B":
-				return value instanceof Uint8Array;
 			case "s":
 				return typeof value === "string";
 			case "f":
@@ -548,54 +539,67 @@ function faJsonWrite(value, schema) {
 		const written = faJsonWriteAs(value, schema);
 		if (written !== null) return written;
 	}
-	switch (typeof value) {
-		case "undefined":
-			return undefined;
-		case "bigint":
-			return value.toString();
-		case "number":
-			return Number.isFinite(value) ? String(value) : "null";
-		case "string":
-		case "boolean":
-			return JSON.stringify(value);
-		case "function":
-			return undefined;
-	}
-	if (value === null) return "null";
-	// a member of a named union: tagged by `"type"`, its data under `"value"`
-	// when it isn't an object, or when its object has its own `type` field
-	if (typeof value.$t === "string") {
-		const type = JSON.stringify(value.$t.slice(value.$t.lastIndexOf(".") + 1));
-		if ("$v" in value) {
-			const data = faJsonWrite(value.$v, null);
-			return data === undefined ? `{"type":${type}}` : `{"type":${type},"value":${data}}`;
-		}
-		const fields = /** @type {string} */ (
-			faJsonWrite(Object.fromEntries(Object.entries(value).filter(([key]) => key !== "$t")), null)
-		);
-		if (Object.hasOwn(value, "type")) return `{"type":${type},"value":${fields}}`;
-		return fields === "{}" ? `{"type":${type}}` : `{"type":${type},${fields.slice(1)}`;
-	}
-	if (Array.isArray(value) || value instanceof Uint8Array || value instanceof Set) {
-		return `[${Array.from(value, (item) => faJsonWrite(item, null) ?? "null").join(",")}]`;
-	}
-	const map = value instanceof Map || value[Symbol.toStringTag] === "fa:HashMap";
-	/** @type {Iterable<[any, any]>} */
-	const entries = map ? value.entries() : Object.entries(value);
+	if (value === undefined || typeof value === "function") return undefined;
+	/** @type {(string | { value: any, record?: boolean })[]} */
+	const pending = [{ value }];
 	const parts = [];
-	for (const [key, item] of entries) {
-		let name = String(key);
-		if (!map) {
-			if (name.startsWith("$")) continue;
-			// a field named like a property of `Object.prototype` (`constructor$`)
-			if (name.endsWith("$")) name = name.slice(0, -1);
+	while (pending.length > 0) {
+		const frame = /** @type {string | { value: any, record?: boolean }} */ (pending.pop());
+		if (typeof frame === "string") {
+			parts.push(frame);
+			continue;
 		}
-		const written = faJsonWrite(item, null);
-		if (written !== undefined) {
-			parts.push(`${JSON.stringify(name)}:${written}`);
+		const item = frame.value;
+		if (item === null || typeof item !== "object") {
+			parts.push(typeof item === "bigint" ? item.toString() : (JSON.stringify(item) ?? "null"));
+			continue;
 		}
+		if (!frame.record && typeof item.$t === "string") {
+			const type = JSON.stringify(item.$t.slice(item.$t.lastIndexOf(".") + 1));
+			parts.push(`{"type":${type}`);
+			if ("$v" in item) {
+				if (item.$v === undefined || typeof item.$v === "function") {
+					parts.push("}");
+				} else {
+					parts.push(',"value":');
+					pending.push("}", { value: item.$v });
+				}
+				continue;
+			}
+			if (Object.hasOwn(item, "type")) {
+				parts.push(',"value":');
+				pending.push("}", { value: item, record: true });
+				continue;
+			}
+		} else if (Array.isArray(item) || item instanceof Set) {
+			const items = Array.isArray(item) ? item : Array.from(item);
+			parts.push("[");
+			pending.push("]");
+			for (let index = items.length - 1; index >= 0; index--) {
+				pending.push({ value: items[index] });
+				if (index > 0) pending.push(",");
+			}
+			continue;
+		} else {
+			parts.push("{");
+		}
+		const map = item instanceof Map || item[Symbol.toStringTag] === "fa:HashMap";
+		/** @type {[string, any][]} */
+		const entries = Array.from(map ? item.entries() : Object.entries(item));
+		const fields = entries.filter(
+			([key, value]) =>
+				(map || !key.startsWith("$")) && value !== undefined && typeof value !== "function",
+		);
+		pending.push("}");
+		for (let index = fields.length - 1; index >= 0; index--) {
+			const [key, value] = fields[index];
+			const name = !map && key.endsWith("$") ? key.slice(0, -1) : String(key);
+			pending.push({ value }, `${JSON.stringify(name)}:`);
+			if (index > 0) pending.push(",");
+		}
+		if (!frame.record && typeof item.$t === "string" && fields.length > 0) parts.push(",");
 	}
-	return `{${parts.join(",")}}`;
+	return parts.join("");
 }
 
 /**

@@ -7,10 +7,10 @@
 // representation is enough to decide (`==` doesn't depend on Fa types that
 // share a representation).
 
-import { FaHashMap, FaSet } from "./collections.js";
+import { FaHashMap, faIsBytes, FaSet } from "./collections.js";
 import { faSides } from "./relations.js";
 
-// @fa-helper faDeepEquals deps: FaHashMap FaSet faSides faBytesEqual
+// @fa-helper faDeepEquals deps: FaHashMap FaSet faSides faBytesEqual faIsBytes
 /**
  * Deep structural equality of two Fa values. Numbers compare with `===`
  * (NaN is never equal, `-0` equals `0`), or with SameValueZero when
@@ -54,9 +54,8 @@ export function faDeepEquals(a, b, sameValueZero) {
 		if (typeX !== "object" || typeY !== "object" || x === null || y === null) {
 			return false;
 		}
-		if (x instanceof Uint8Array || y instanceof Uint8Array) {
-			if (!(x instanceof Uint8Array && y instanceof Uint8Array) || !faBytesEqual(x, y))
-				return false;
+		if (faIsBytes(x) || faIsBytes(y)) {
+			if (!(faIsBytes(x) && faIsBytes(y)) || !faBytesEqual(x, y)) return false;
 			continue;
 		}
 		if (Array.isArray(x)) {

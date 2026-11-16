@@ -1,4 +1,4 @@
-// helpers: faQuote, faFormatError, FaError, faCaught, faSegmenter, faCharacters, faStringCodePoints, faCodePointCount, faUtf8Encoder, faUtf8LossyDecoder, faUtf8Decoder, Utf8Error, faInvalidUtf8, faFromUtf8, faUtf8Values, IndexError, faNormalizeIndex, faSliceBounds, faIndex, faBytesEqual, faFormatArray, faSides, faFormatRecord, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat, faFormatOptional, faFormatBytes, faExit, FaStop, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
+// helpers: faQuote, faFormatError, FaError, faCaught, faSegmenter, faCharacters, faStringCodePoints, faCodePointCount, faUtf8Encoder, faUtf8LossyDecoder, faUtf8Decoder, Utf8Error, faInvalidUtf8, faFromUtf8, faUtf8Values, IndexError, faNormalizeIndex, faSliceBounds, faIndex, faBytesEqual, faIsBytes, faFormatRange, faSides, faFormatNested, faFormat, faFormatOptional, faFormatArray, faFormatBytes, faExit, FaStop, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
 
 const format = (value) => faFormatOptional(value, String);
 const format$1 = (value) => faFormatArray(value, faQuote);
@@ -53,20 +53,32 @@ function inspect(text, i, replacement) {
 	const $t13 = replacement;
 	console.log(`${$t14} ${$t15} ${text.replaceAll("-", () => $t13)}`);
 	console.log(`${faCodePointCount(text)} ${format$2(faStringCodePoints(text))} ${format$1(faCharacters(text))} ${faFormatBytes(faUtf8Encoder.encode(text))}`);
+	const at = ($t16) => text.charCodeAt(faNormalizeIndex(text.length, $t16));
+	let $t17;
+	try {
+		$t17 = at(i);
+	} catch ($e) {
+		const error = faCaught($e);
+		$t17 = 0;
+	}
+	console.log($t17);
 	for (const point of text) {
 		console.log(point);
 	}
-	for (let index = 0, $t16; index < text.length; index += $t16 > 0xffff ? 2 : 1) {
-		$t16 = text.codePointAt(index);
-		const point = String.fromCodePoint($t16);
+	for (const point of text) {
+		console.log(point);
+	}
+	for (let index = 0, $t18; index < text.length; index += $t18 > 0xffff ? 2 : 1) {
+		$t18 = text.codePointAt(index);
+		const point = String.fromCodePoint($t18);
 		console.log(`${index} ${point}`);
 	}
 	for (const byte of faUtf8Values(text)) {
 		console.log(String(byte));
 	}
-	let $t17 = 0;
+	let $t19 = 0;
 	for (const byte of faUtf8Values(text)) {
-		const index = $t17++;
+		const index = $t19++;
 		console.log(`${index} ${byte}`);
 	}
 }
@@ -91,7 +103,7 @@ function binary(input, index) {
 	let data = new Uint8Array(3);
 	console.log(faFormatBytes(Uint8Array.from(input)));
 	data[0] = 255;
-	const copy = data.slice(0, 2).slice();
+	const copy = data.slice(0, 2);
 	const view = data.subarray(0, 1);
 	console.log(`${data.length} ${format(data.at(index))} ${format$2(Array.from(data))} ${faFormatBytes(data)} ${faBytesEqual(data, copy)} ${faFormatBytes(view)}`);
 	let $t0;

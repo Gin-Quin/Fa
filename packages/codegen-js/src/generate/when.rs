@@ -444,10 +444,10 @@ impl Generator<'_> {
 				let value = self.enum_value(nominal, index);
 				js::binary(subject, "===", &value, Prec::Equality)
 			}
-			TypeKind::Bytes => Expr::new(
-				format!("{} instanceof Uint8Array", subject.at(Prec::Relational)),
-				Prec::Relational,
-			),
+			TypeKind::Bytes => {
+				let helper = self.helper("faIsBytes");
+				js::call(helper, std::slice::from_ref(&subject.text))
+			}
 			TypeKind::Collection(fa_analyzer::types::CollKind::Array, ..) | TypeKind::Tuple(_) => {
 				js::call("Array.isArray", std::slice::from_ref(&subject.text))
 			}

@@ -191,7 +191,6 @@ impl Generator<'_> {
 			TypeKind::Boolean => "\"b\"".to_string(),
 			TypeKind::BoolLit(value) => format!("[\"l\", {value}]"),
 			TypeKind::String => "\"s\"".to_string(),
-			TypeKind::Bytes => "\"B\"".to_string(),
 			TypeKind::StringLit(sym) => {
 				format!(
 					"[\"l\", {}]",

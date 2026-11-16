@@ -8,8 +8,70 @@ import { FaAtomic, FaChannel, FaMutex, faUnlock } from "./concurrency.js";
 import { faEquals } from "./equality.js";
 import { FaError, IndexError } from "./errors.js";
 import { FaStop } from "./stops.js";
-import { faCancelSignal } from "./tasks.js";
-import { faRevive, faShare, faWorkerAnswer, faWorkerError } from "./workers.js";
+import { faCancel, faCancelSignal } from "./tasks.js";
+import {
+	faRevive,
+	faShare,
+	FaWorker,
+	faWorkerAnswer,
+	faWorkerError,
+	faWorkerStart,
+} from "./workers.js";
+
+describe("queued worker calls", () => {
+	function setup() {
+		/** @type {any[]} */
+		const messages = [];
+		/** @type {FaWorker} */
+		const worker = Object.assign(Object.create(FaWorker.prototype), {
+			calls: new Map(),
+			next: 0,
+			waiting: [],
+			waitingHead: 0,
+			active: null,
+			scheduled: false,
+			dead: false,
+			stopping: false,
+			thread: {
+				postMessage: (/** @type {any} */ message) => messages.push(structuredClone(message)),
+			},
+		});
+		return { worker, messages };
+	}
+
+	test("cancellation before the starter suspends never commits the call", async () => {
+		const { worker, messages } = setup();
+		const args = [{ value: 1 }];
+		const task = faWorkerStart(null, worker, "test#add", args, []);
+		args[0].value = 9;
+		faCancel(task);
+		await Promise.resolve();
+		expect(messages.map((message) => message.kind)).toEqual([1, 2]);
+		expect(messages[0].args).toEqual([{ value: 1 }]);
+		expect(worker.calls.size).toBe(0);
+		expect(worker.waiting).toEqual([]);
+	});
+
+	test("queued calls wait for the running call and cancelled ones are skipped", async () => {
+		const { worker, messages } = setup();
+		faWorkerStart(null, worker, "test#first", [], []);
+		await Promise.resolve();
+		const cancelled = faWorkerStart(null, worker, "test#second", [], []);
+		faWorkerStart(null, worker, "test#third", [], []);
+		faCancel(cancelled);
+		await Promise.resolve();
+		expect(messages.filter((message) => message.kind === 3).map((message) => message.id)).toEqual([
+			0,
+		]);
+		worker.calls.delete(0);
+		worker.active = null;
+		worker.dispatch();
+		await Promise.resolve();
+		expect(messages.filter((message) => message.kind === 3).map((message) => message.id)).toEqual([
+			0, 2,
+		]);
+	});
+});
 
 describe("faWorkerError", () => {
 	test("rebuilds an error with its class", () => {
@@ -150,4 +212,22 @@ describe("faWorkerAnswer", () => {
 			expect(exception).toBe(faCancelSignal);
 		}
 	});
+});
+
+test("shared mutexes and channels preserve Bytes as Uint8Array", () => {
+	const bytes = new Uint8Array([0, 195, 169, 255]);
+	const mutex = new FaMutex({ bytes });
+	const channel = new FaChannel(1);
+	channel.trySend(bytes);
+	faShare([mutex, channel]);
+	const [otherMutex, otherChannel] = faRevive(structuredClone([mutex, channel]));
+	const guard = otherMutex.tryLock();
+	expect(guard.value.bytes).toEqual(bytes);
+	guard.value.bytes[0] = 42;
+	faUnlock(guard);
+	const mine = mutex.tryLock();
+	expect(mine.value.bytes[0]).toBe(42);
+	expect(mine.value.bytes).toBeInstanceOf(Uint8Array);
+	faUnlock(mine);
+	expect(otherChannel.tryReceive()).toEqual(bytes);
 });

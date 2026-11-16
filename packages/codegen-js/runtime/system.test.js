@@ -137,6 +137,13 @@ describe("faJsonParse", () => {
 });
 
 describe("faJsonStringify", () => {
+	test("deep recursive values use bounded stack space", () => {
+		/** @type {any} */
+		let value;
+		for (let index = 0; index < 100000; index++) value = { next: value };
+		const text = faJsonStringify(value);
+		expect(text).toBe('{"next":'.repeat(99999) + "{}" + "}".repeat(99999));
+	});
 	test("writes Fa values", () => {
 		expect(faJsonStringify({ name: "Ada", email: undefined, tags: ["a"] })).toBe(
 			'{"name":"Ada","tags":["a"]}',
@@ -248,15 +255,16 @@ describe("JSON byte inputs", () => {
 			expect(() => faJsonParse(new Uint8Array(bytes), "s", faJsonReadBytes)).toThrow(JsonError);
 		}
 	});
-	test("bytes serialize as an array and schema decoding checks every byte", async () => {
+	test("byte JSON inputs can hold arrays whose schema checks every byte", async () => {
 		const { faJsonReadBytes } = await import("./system.js");
-		const value = new Uint8Array([0, 127, 255]);
-		expect(faJsonStringify(value, "B")).toBe("[0,127,255]");
-		expect(faJsonParse(new TextEncoder().encode("[0,127,255]"), "B", faJsonReadBytes)).toEqual(
+		const value = [0, 127, 255];
+		const schema = ["a", ["i", "0", "255"]];
+		expect(faJsonStringify(value, schema)).toBe("[0,127,255]");
+		expect(faJsonParse(new TextEncoder().encode("[0,127,255]"), schema, faJsonReadBytes)).toEqual(
 			value,
 		);
 		for (const text of ["[256]", "[-1]", "[0.5]", '["1"]', "{}", "null"]) {
-			expect(() => faJsonParse(text, "B")).toThrow(JsonError);
+			expect(() => faJsonParse(text, schema)).toThrow(JsonError);
 		}
 	});
 });

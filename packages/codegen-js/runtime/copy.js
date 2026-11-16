@@ -11,10 +11,11 @@
 // shared; functions are shared; set elements and map keys are read-only in Fa
 // and shared.
 
-import { FaHashMap, FaSet } from "./collections.js";
+import { FaHashMap, faIsBytes, FaSet } from "./collections.js";
+import { faSharedHandle } from "./concurrency.js";
 import { faSides } from "./relations.js";
 
-// @fa-helper faCopyShell deps: FaHashMap FaSet
+// @fa-helper faCopyShell deps: FaHashMap FaSet faIsBytes
 /**
  * An empty container of the same kind as `source`: an array, a `Map`, a
  * `FaHashMap` or `FaSet` with the same hash and key function, a `Set`, or an
@@ -23,7 +24,7 @@ import { faSides } from "./relations.js";
  * @returns {any}
  */
 export function faCopyShell(source) {
-	if (source instanceof Uint8Array) return source.slice();
+	if (faIsBytes(source)) return source.slice();
 	if (Array.isArray(source)) {
 		return [];
 	}
@@ -45,7 +46,7 @@ export function faCopyShell(source) {
 	return Object.create(Object.getPrototypeOf(source));
 }
 
-// @fa-helper faCopy deps: faCopyShell FaHashMap FaSet faSides
+// @fa-helper faCopy deps: faCopyShell FaHashMap FaSet faSides faSharedHandle faIsBytes
 /**
  * A deep structural copy of a Fa value. Iterative: long recursive chains
  * (linked lists) don't overflow the stack.
@@ -64,10 +65,10 @@ export function faCopy(value) {
 	 * @returns {any}
 	 */
 	const copyLater = (item) => {
-		if (typeof item !== "object" || item === null) {
+		if (typeof item !== "object" || item === null || item[faSharedHandle] === true) {
 			return item;
 		}
-		if (item instanceof Uint8Array) return item.slice();
+		if (faIsBytes(item)) return item.slice();
 		const shell = faCopyShell(item);
 		pending.push(item, shell);
 		return shell;
@@ -127,7 +128,7 @@ export function faUnlinked(value) {
 	return value;
 }
 
-// @fa-helper faCopyGraph deps: faCopyShell FaHashMap FaSet faSides
+// @fa-helper faCopyGraph deps: faCopyShell FaHashMap FaSet faSides faSharedHandle faIsBytes
 /**
  * A copy of an owner of related collections (advanced brief 8.5, copies):
  * every object is copied once, and every reference to an object of the
@@ -147,10 +148,10 @@ export function faCopyGraph(value) {
 	 * @returns {any}
 	 */
 	const copyOf = (item) => {
-		if (typeof item !== "object" || item === null) {
+		if (typeof item !== "object" || item === null || item[faSharedHandle] === true) {
 			return item;
 		}
-		if (item instanceof Uint8Array) return item.slice();
+		if (faIsBytes(item)) return item.slice();
 		let copy = copies.get(item);
 		if (copy === undefined) {
 			copy = faCopyShell(item);
@@ -213,7 +214,7 @@ export function faCopyInto(target, source) {
 	return target;
 }
 
-// @fa-helper faAssign deps: faCopy FaHashMap FaSet
+// @fa-helper faAssign deps: faCopy FaHashMap FaSet faIsBytes
 /**
  * Writes a whole value into an existing object or collection, in place, so
  * that the live references to it (and to its nested objects of the same
@@ -227,47 +228,50 @@ export function faCopyInto(target, source) {
  * @returns {T} the target
  */
 export function faAssign(target, source) {
-	const into = /** @type {any} */ (target);
-	const from = /** @type {any} */ (source);
-	if (into === from) {
-		return target;
-	}
-	if (into instanceof Uint8Array) {
-		into.set(from.slice());
-	} else if (Array.isArray(into)) {
-		into.length = 0;
-		for (const item of from) {
-			into.push(faCopy(item));
-		}
-	} else if (into instanceof Map || into instanceof FaHashMap) {
-		into.clear();
-		for (const [key, item] of from) {
-			into.set(key, faCopy(item));
-		}
-	} else if (
-		into instanceof Set ||
-		into instanceof FaSet ||
-		into[Symbol.toStringTag] === "fa:ValuePool"
-	) {
-		into.clear();
-		for (const item of from) {
-			into.add(item);
-		}
-	} else {
-		for (const key of Object.keys(from)) {
-			const old = into[key];
-			const next = from[key];
-			const sameKind =
-				typeof old === "object" &&
-				old !== null &&
-				typeof next === "object" &&
-				next !== null &&
-				Object.getPrototypeOf(old) === Object.getPrototypeOf(next) &&
-				old.$t === next.$t;
-			if (sameKind) {
-				faAssign(old, next);
-			} else {
-				into[key] = faCopy(next);
+	/** @type {any[]} */
+	const pending = [target, source];
+	while (pending.length > 0) {
+		const from = pending.pop();
+		const into = pending.pop();
+		if (into === from) continue;
+		if (faIsBytes(into)) {
+			into.set(from);
+		} else if (Array.isArray(into)) {
+			into.length = 0;
+			for (const item of from) {
+				into.push(faCopy(item));
+			}
+		} else if (into instanceof Map || into instanceof FaHashMap) {
+			into.clear();
+			for (const [key, item] of from) {
+				into.set(key, faCopy(item));
+			}
+		} else if (
+			into instanceof Set ||
+			into instanceof FaSet ||
+			into[Symbol.toStringTag] === "fa:ValuePool"
+		) {
+			into.clear();
+			for (const item of from) {
+				into.add(item);
+			}
+		} else {
+			for (const key of Object.keys(from)) {
+				const old = into[key];
+				const next = from[key];
+				const sameKind =
+					typeof old === "object" &&
+					old !== null &&
+					typeof next === "object" &&
+					next !== null &&
+					Object.getPrototypeOf(old) === Object.getPrototypeOf(next) &&
+					(!faIsBytes(old) || old.length === next.length) &&
+					old.$t === next.$t;
+				if (sameKind) {
+					pending.push(old, next);
+				} else {
+					into[key] = faCopy(next);
+				}
 			}
 		}
 	}

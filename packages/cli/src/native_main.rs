@@ -40,6 +40,25 @@ impl Backend for Llvm {
 		compiled.map_err(|error| format!("{error}\n"))
 	}
 
+	fn load(
+		&self,
+		session: &Session,
+		input: Input<'_>,
+		options: &fa_codegen_llvm::Options,
+	) -> Result<Option<Box<dyn fa_codegen_llvm::LoadedProgram>>, String> {
+		let source = match input {
+			Input::File { file, shown } => fa_codegen_llvm::Source::File { file, path: shown },
+			Input::Program(program) => fa_codegen_llvm::Source::Program(program),
+			Input::Tests(program) => fa_codegen_llvm::Source::Tests(program),
+		};
+		match fa_codegen_llvm::load(session, source, options) {
+			Ok(program) => Ok(Some(program)),
+			// the caller links it (`FA_JIT_TRACE=1` says why)
+			Err(fa_codegen_llvm::Error::Jit(_)) => Ok(None),
+			Err(error) => Err(format!("{error}\n")),
+		}
+	}
+
 	fn compile_package(
 		&self,
 		root: &mut Session,

@@ -1,0 +1,6 @@
+-- Decided point 5: impossible sizes must end in the allocation stop (stop: out of memory, exit 101).
+-- Node: uncaught RangeError: Invalid string length, raw stack, exit 1.
+function grow = (n: Integer<min = 0>): Integer => "abc".repeat(n).length
+console.log(grow(600000000))
+function pad = (n: Integer): Integer => "abc".padStart(n, "é").length
+console.log(pad(1200000000))

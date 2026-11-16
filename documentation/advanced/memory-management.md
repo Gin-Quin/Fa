@@ -403,7 +403,7 @@ An operation that invalidates an iteration's references is rejected. Use `delete
 
 ## Parameters are references
 
-Ordinary and structure parameters are borrowed, never copied at a call. A resource parameter is borrowed too. Only the explicit Task-consuming contract above transfers ownership. `mutates` permits mutation of a borrowed place and requires a mutable argument.
+Ordinary and structure parameters are borrowed, never copied at a call. A resource parameter is borrowed too. Only the explicit Task-consuming contract above transfers ownership. `mutates` permits mutation of a borrowed place and requires a mutable argument. [Defaults](/functions/defining-functions#parameters) follow written arguments: an existing value is borrowed, and a fresh value is a temporary owned by the call; consuming defaults must build their value.
 
 ```fa
 function append = (values: Array<Integer>) mutates values => values.push(3)

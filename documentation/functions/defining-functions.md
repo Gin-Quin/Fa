@@ -113,6 +113,15 @@ function slice = (text: String, start: Integer = 0, end: Integer = text.length) 
 
 A default value runs during call binding, before the body. For `start`, binding happens when the task is created, with the written arguments in source order; only the body waits for the task's first turn. Its effects, including errors, belong to that call and are declared in the function's signature when the body is a block. A failing started default fails the `start` expression and releases previously evaluated owned arguments.
 
+An omitted argument follows the same rules as a written one: `= shared` borrows an existing value for the call, without copying or finalizing it, while a literal, a call result or `copy shared` builds a temporary owned and cleaned up by the call; a consuming Task-owning parameter's default must build its value, since consuming an existing one on every call is an error (`MEM002`).
+
+```fa
+let shared = [1, 2]
+function size = (items: Array<Integer> = shared): Integer => items.length
+function independent = (items: Array<Integer> = copy shared): Integer => items.length
+console.log(size(), independent(), shared.length) -- 2 2 2
+```
+
 The parameters and the top-level declarations of the body share one scope: declaring a value with the name of a parameter is an error.
 
 ### Named arguments

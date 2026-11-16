@@ -6,18 +6,21 @@ function converted = (): Array<{ keep: Float }> => {
 	result
 }
 static projected = @converted()
-console.log(projected) -- prints: [{ keep = 1.25 }]
+assert projected.get(0)?.keep == 1.25
+console.log(projected.length) -- prints: 1
 
 type Small = { value: Float32, extra: String, next: Small? }
 type Wide = { value: Float, next: Wide? }
-function widen = (): Wide => {
+function widen = (): Integer => {
 	let small = Small { value = 1.25, extra = "head", next = Small { value = 2.5, extra = "tail" } }
 	let wide: Wide = copy small
 	assert small.extra == "head"
-	wide
+	assert wide.value == 1.25
+	assert wide.next?.value == 2.5
+	if wide.next is none { 0 } else { 2 }
 }
 static wide = @widen()
-console.log(wide.value, wide.next?.value) -- prints: 1.25 2.5
+console.log(wide) -- prints: 2
 
 function choose = (flag: Boolean): Array<Float> => {
 	let first: Array<Float32> = [1.25]
@@ -25,4 +28,5 @@ function choose = (flag: Boolean): Array<Float> => {
 	copy (if flag { first } else { second })
 }
 static chosen = @choose(true)
-console.log(chosen.get(0)) -- prints: 1.25
+assert chosen.get(0) == 1.25
+console.log(chosen.length) -- prints: 1

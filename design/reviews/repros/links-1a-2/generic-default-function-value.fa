@@ -1,0 +1,14 @@
+function pick = <Item>(values: Array<Item>, node: Item in values = try values[0]): Item in values throws IndexError => node
+type Pick = (values: Array<Integer>, node: Integer in values = try values[0]) => Integer in values throws IndexError
+function exercise = (): Integer throws IndexError => {
+ mutable values: Array<Integer> = [1]
+ let choose: Pick = pick
+ use a = try choose(values)
+ a = 7
+ use b = try pick(values)
+ b += 2
+ values[0]
+}
+static result = @exercise()
+console.log(result) -- prints: 9
+console.log(try exercise()) -- prints: 9

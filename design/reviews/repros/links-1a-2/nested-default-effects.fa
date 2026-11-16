@@ -1,0 +1,23 @@
+-- Nested methods, dependent reference defaults and both effect spellings.
+type World = {
+ nodes: GrowingPool<Node> = []
+ type Node = {
+  world: Integer
+  type Tools = {
+   function create = (owner: World, node: Node in owner.nodes = owner.nodes.add({ world = 3 })): Node in owner.nodes mutates owner.nodes.size => node
+   function wide = (owner: World, node: Node in owner.nodes) mutates owner.nodes[..].world => { node.world += 2 }
+   function narrow = (owner: World, node: Node in owner.nodes) mutates node.world => { node.world += 4 }
+  }
+ }
+}
+function exercise = (): Integer => {
+ mutable owner: World = {}
+ use node = World.Node.Tools.create(owner)
+ World.Node.Tools.wide(owner, node)
+ World.Node.Tools.narrow(owner, node)
+ function read = (): Integer => node.world
+ read()
+}
+static result = @exercise()
+console.log(result) -- prints: 9
+console.log(exercise()) -- prints: 9

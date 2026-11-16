@@ -1,0 +1,18 @@
+-- Expected: borrowing a loop result preserves the selected element's place.
+function pick = (values: Array<Integer>, yes: Boolean): Integer in values throws IndexError => {
+ loop {
+  if yes { break try values[0] }
+  break try values[1]
+ }
+}
+function exercise = (): Array<Integer> throws IndexError => {
+ mutable values: Array<Integer> = [1, 2]
+ use a = try pick(values, true)
+ a = 7
+ use b = try pick(values, false)
+ b = 9
+ values
+}
+static result = @exercise()
+console.log(result) -- prints: [7, 9]
+console.log(try exercise()) -- prints: [7, 9]

@@ -1,0 +1,42 @@
+-- Reflection, nested keys, reused dirty storage and distinct counter widths.
+type RoundTrip<Item> = TypeFromSchema<@typeToSchema(Item)>
+type Key = RoundTrip<InlineArray<InlineArray<String, 2>, 2>>
+function key = (text: String): Key => [[text]]
+function dirty = (): Key => {
+	mutable items: Key = [["discarded"]]
+	items.clear()
+	items.push(["kept"])
+	items
+}
+let first = key("kept")
+let second = dirty()
+assert first == second
+mutable map: Map<Key, Integer> = []
+map[first] = 1
+map[second] = 2
+assert map.size == 1
+assert try map[key("kept")] == 2
+map[[]] = 3
+assert map.size == 2
+assert try map[[]] == 3
+let expected: Key = [["kept"]]
+assert second == expected
+console.log("nested keys") -- prints: nested keys
+static schema = @typeToSchema(Key)
+assert schema == Schema.InlineArray {
+	item = Schema.InlineArray { item = Schema.String, capacity = 2 }
+	capacity = 2
+}
+function count = <capacity: UInt32>(): Integer throws CapacityError => {
+	mutable items: InlineArray<Integer, capacity> = []
+	for i in 0..capacity { try items.push(i) }
+	mutable full = false
+	items.push(9) catch _error => { full = true }
+	assert full
+	assert items.length == capacity
+	items.length
+}
+console.log(try count<0>(), try count<1>(), try count<255>(), try count<256>()) -- prints: 0 1 255 256
+static a = @count<255>()
+static b = @count<256>()
+console.log(a, b) -- prints: 255 256

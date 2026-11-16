@@ -1,0 +1,40 @@
+export namespace = {
+	-- Every operation through generic methods, callbacks and compile-time calls.
+	function append = <Item, capacity: UInt32>(items: InlineArray<Item, capacity>, item: Item)
+		throws CapacityError mutates items.length => { try items.push(item) }
+	function operate = <capacity: UInt32>(items: InlineArray<String, capacity>)
+		throws CapacityError | IndexError mutates items => {
+		assert items.length == 0
+		assert items.capacity == capacity
+		assert items.pop() is none
+		assert items.get(-1) is none
+		try append<String, capacity>(items, "one")
+		try append<String, capacity>(items, "two")
+		try append<String, capacity>(items, "three")
+		mutable overflowed = false
+		items.push("overflow") catch _error => { overflowed = true }
+		assert overflowed
+		assert items.length == 3
+		assert items[2] == "three"
+		assert items.get(0) == "one"
+		assert items.get(3) is none
+		items[1] = "changed"
+		for item in items { item += "!" }
+		assert items.pop() == "three!"
+		assert items.take(1) == "changed!"
+		try append<String, capacity>(items, "deleted")
+		try items.delete(0)
+		assert try items[0] == "deleted"
+		items.clear()
+		assert items.length == 0
+		assert items.pop() is none
+		try append<String, capacity>(items, "result")
+	}
+	type Buffer<capacity: UInt32> = {
+		items: InlineArray<String, capacity> = []
+		function exercise = (self) throws CapacityError | IndexError mutates self.items => {
+			let callback = operate<capacity>
+			try callback(self.items)
+		}
+	}
+}

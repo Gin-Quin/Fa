@@ -1,0 +1,13 @@
+type Resource = {
+	name: String
+	function destroy = (self) => { console.log("drop {self.name}") }
+}
+function clear = <Item, capacity: UInt32>(items: InlineArray<Item, capacity>) mutates items => { items.clear() }
+function run = <Item, capacity: UInt32>(create: () => Item) throws CapacityError => {
+	mutable items: InlineArray<Item, capacity> = []
+	try items.push(create())
+	let cleanup = clear<Item, capacity>
+	cleanup(items)
+	console.log(items.length) -- prints: 0
+}
+try run<Resource, 1>(() => Resource { name = "callback" }) -- prints: drop callback

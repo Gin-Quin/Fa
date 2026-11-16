@@ -1617,7 +1617,7 @@ Internal ASCII/Unicode bodies retain the original ABI, ownership, cleanup and ar
 
 The frozen-field proof consults the complete WRITTEN_FIELDS set, including possible later compatible shapes. Hash that full sorted set into each native object-cache key and bump its format version: logging only existing members would miss newly added writes. No memory effects or alias claims are weakened.
 
-The faithful byte-parser ports retain toUtf8().get() instead of code-unit reads. Before O3, the frozen-field pass recognizes fa_string_utf8_byte alongside string_code_unit_slow; the wrapper has not been inlined yet. Both readers depend on the proven frozen field’s ASCII bit. The existing receiver, group and size restrictions stay unchanged, and the native cache generation advances to frozen-ascii-2. ASCII clones fold UTF-8 replacement handling; Unicode clones keep it.
+The faithful byte-parser ports retain toUtf8().get() instead of code-unit reads. Before O3, the frozen-field pass recognizes fa_string_utf8_byte alongside string_code_unit_slow; the wrapper has not been inlined yet. Both readers depend on the proven frozen field’s ASCII bit. The existing receiver, group and size restrictions stay unchanged, and the native cache generation advances to frozen-ascii-2. ASCII clones fold UTF-8 replacement handling; Unicode clones keep it. The unchanged faithful calc port measures 123,860,738 instructions with this selection, versus 125,614,692 on trunk cbe3c5a6 and 128,672,404 before the byte-reader fix. These are audit-size Callgrind counts; CPU comparisons use the separate controlled series.
 
 ## Trunk performance baseline (implementation, 2026-11-16)
 

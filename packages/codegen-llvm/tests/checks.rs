@@ -1869,7 +1869,15 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 
 	#[test]
 	fn recursive_object_array_regions_require_closed_structural_edges() {
-		let fixture = ir_of("object-array-region-copy-fixture", include_str!("programs/region-object-arrays.fa"));
+		let converted = ir_of(
+			"object-array-region-coercion-fallback",
+			include_str!("programs/region-object-coercion-fallback.fa"),
+		);
+		assert!(!converted.contains("@fa.build.arena("), "{converted}");
+		let fixture = ir_of(
+			"object-array-region-copy-fixture",
+			include_str!("programs/region-object-arrays.fa"),
+		);
 		assert!(fixture.contains("@fa.build.arena("), "{fixture}");
 		assert!(fixture.contains("@fa.copy.region_children"), "{fixture}");
 		let source = "type Tree = { value: Integer, children: Array<Tree> }\nfunction build = (depth: Integer): Tree => { mutable tree = Tree { value = depth, children = [] }\nif depth > 0 { for index in 0..3 { tree.children.push(build(depth - 1)) } }\ntree }\nfunction change = (tree: Tree): Void mutates tree => { tree.value += 1\nfor child in tree.children { change(child) } }\nmutable root = build(2)\nchange(root)\nconsole.log(root)\n";

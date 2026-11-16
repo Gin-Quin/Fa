@@ -616,6 +616,29 @@ impl<'a> RegionFile<'a> {
 		root.nominal.is_none() && !self.contains(ty, root.ty) && self.passive(ty, false)
 	}
 
+	fn unproven_conversion(&self, node: NodeId, root: &Root) -> bool {
+		let Some(&target) = self.analysis.coercions.get(&node) else {
+			return false;
+		};
+		if root.nominal.is_some() {
+			return false;
+		}
+		let source = self.analysis.type_of(node);
+		let from_root = self.contains(source, root.ty);
+		let to_root = self.contains(target, root.ty);
+		if from_root {
+			return !to_root;
+		}
+		to_root
+			&& !matches!(self.types.kind(source), TypeKind::None | TypeKind::Never)
+			&& !self
+				.analysis
+				.object(node)
+				.is_some_and(|object| object.ty == root.ty)
+			&& !(self.root_array(target, root.ty)
+				&& matches!(self.types.kind(source), TypeKind::Collection(CollKind::Array, item, _) if item == TypeId::NEVER))
+	}
+
 	fn array_projection(&self, node: NodeId, root: &Root) -> bool {
 		let mut pending = vec![node];
 		while let Some(node) = pending.pop() {
@@ -894,6 +917,11 @@ impl<'a> RegionFile<'a> {
 		for index in 0..self.tree.nodes.len() {
 			let node = NodeId::new(index);
 			let ty = self.analysis.type_of(node);
+			if self.unproven_conversion(node, root) {
+				// A structural conversion can manufacture this layout without
+				// entering its builder. Its owning fields have no region proof.
+				reject(claims);
+			}
 			let owner = self.owners[index].filter(|owner| builders.contains(owner));
 			if let View::Access { target, members } | View::OptionalAccess { target, members } =
 				self.view(node)
@@ -1511,6 +1539,14 @@ console.log(saved)
 			let (claims, resolved) = facts(&format!("{tree}\n{suffix}\n"));
 			assert!(resolved.is_empty(), "{suffix}: {claims:#?}");
 		}
+	}
+
+	#[test]
+	fn structural_root_conversions_keep_ordinary_ownership() {
+		let (claims, resolved) = facts(include_str!(
+			"../../codegen-llvm/tests/programs/region-object-coercion-fallback.fa"
+		));
+		assert!(resolved.is_empty(), "{claims:#?}");
 	}
 
 	#[test]

@@ -1,0 +1,40 @@
+-- Construction with runtime lengths, field mutation, later structural
+-- mutation and independent copies must retain ordinary value semantics.
+-- asynchronous: true
+type Tree = { value: Integer, children: Array<Tree> }
+
+function build = (depth: Integer, width: Integer): Tree => {
+	mutable tree = Tree { value = depth, children = [] }
+	if depth == 0 { return tree }
+	for index in 0..width {
+		tree.children.push(build(depth - 1, index))
+	}
+	tree
+}
+
+function sum = (tree: Tree): Integer => {
+	mutable result = tree.value
+	for child in tree.children { result += sum(child) }
+	result
+}
+
+function grow = (tree: Tree) mutates tree => {
+	tree.value += 10
+	tree.children.push(build(0, 0))
+}
+
+function extract = (): Tree throws IndexError => {
+	let root = build(2, 3)
+	try root.children[2]
+}
+
+mutable tree = build(2, 3)
+let original = tree
+grow(tree)
+assert sum(original) == 5
+assert sum(tree) == 15
+assert original.children.length == 3
+assert tree.children.length == 4
+assert sum(try extract()) == 1
+assert build(1, -2).children.length == 0
+console.log("recursive array reservation ok") -- prints: recursive array reservation ok

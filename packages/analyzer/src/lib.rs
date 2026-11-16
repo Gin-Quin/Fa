@@ -27,7 +27,9 @@
 pub mod analysis;
 pub mod builtins;
 pub mod c_library;
+pub mod capacities;
 pub mod check;
+mod closed_world;
 pub mod comptime;
 pub mod configuration;
 pub mod diagnostics;

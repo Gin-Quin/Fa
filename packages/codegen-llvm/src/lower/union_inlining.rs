@@ -1,9 +1,11 @@
-//! Expand a scalar leaf of a throwing, directly recursive union traversal.
-//! The first arm is tested on already evaluated arguments; recursive arms
-//! remain calls. No allocation or cleanup belongs to the expanded arm.
+//! Expand a scalar leaf of a directly recursive union traversal at its
+//! recursive calls, as the callee's dispatch would select it: the leaf member
+//! is tested on already evaluated arguments; other members remain calls. The
+//! leaf is scalar arithmetic over its fields, parameters and constants; no
+//! call, allocation, cleanup or `try` belongs to the expanded arm.
 
 use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
-use fa_analyzer::lower::when::{Test, arm_bindings, decision_list};
+use fa_analyzer::lower::when::{Decision, DecisionList, Test, arm_bindings, decision_list};
 use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::View;
 use fa_analyzer::types::TypeKind;
@@ -17,7 +19,12 @@ fn scalar(repr: Repr) -> bool {
 	matches!(repr, Repr::Int(_) | Repr::Bool | Repr::F32 | Repr::F64)
 }
 
+/// Operations of a leaf: none calls, throws or allocates. A failed
+/// arithmetic check stops the program the same way in the caller.
+const LEAF_OPERATIONS: usize = 16;
+
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// Scalar arithmetic over the operands of [`Self::scalar_union_operand`].
 	fn scalar_union_leaf(
 		&self,
 		node: NodeId,
@@ -25,9 +32,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		bindings: &[SymbolId],
 		data: TypeId,
 	) -> bool {
-		if !scalar(self.node_repr(node).unwrap_or(Repr::Never)) {
-			return false;
+		let mut stack = vec![node];
+		let mut count = 0;
+		while let Some(node) = stack.pop() {
+			count += 1;
+			if count > LEAF_OPERATIONS || !scalar(self.node_repr(node).unwrap_or(Repr::Never)) {
+				return false;
+			}
+			match self.view(node) {
+				View::Group(_) | View::Arithmetic { .. } | View::Negate(_) => self.tree.nodes
+					[node.index()]
+				.for_each_child(|child| stack.push(NodeId::new(child))),
+				_ if self.scalar_union_operand(node, function, bindings, data) => {}
+				_ => return false,
+			}
 		}
+		true
+	}
+
+	fn scalar_union_operand(
+		&self,
+		node: NodeId,
+		function: &Function<'ctx>,
+		bindings: &[SymbolId],
+		data: TypeId,
+	) -> bool {
 		match self.view(node) {
 			View::Integer(_) | View::Float(_) | View::Boolean(_) => true,
 			View::Name(_) => {
@@ -73,6 +102,59 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
+	/// The first arm whose member has only scalar fields and whose value is a
+	/// scalar leaf. Earlier arms only test other members, which exclude it:
+	/// testing its member first selects the same arm.
+	fn union_leaf_arm(
+		&self,
+		list: &DecisionList<'_>,
+		function: &Function<'ctx>,
+	) -> Option<(usize, TypeId, Vec<SymbolId>, NodeId)> {
+		for (position, decision) in list.decisions.iter().enumerate() {
+			let [Test::IsType(member)] = decision.tests.as_slice() else {
+				return None;
+			};
+			if let Some((bindings, leaf)) = self.union_leaf(decision, *member, function) {
+				return Some((position, *member, bindings, leaf));
+			}
+		}
+		None
+	}
+
+	fn union_leaf(
+		&self,
+		decision: &Decision<'_>,
+		member: TypeId,
+		function: &Function<'ctx>,
+	) -> Option<(Vec<SymbolId>, NodeId)> {
+		let TypeKind::Member(nominal, index) = self.types().kind(member) else {
+			return None;
+		};
+		let data = self.member_data(nominal, index)?;
+		if self.types().fields_of(data).is_empty()
+			|| self.destroy_function(data).is_some()
+			|| !self.object_fields(data).iter().all(|r| scalar(*r))
+		{
+			return None;
+		}
+		let bindings: Vec<_> = decision
+			.binding
+			.map(|binding| arm_bindings(self.tree, self.analysis, binding))
+			.unwrap_or_default()
+			.into_iter()
+			.map(|binding| binding.symbol)
+			.collect();
+		if bindings
+			.iter()
+			.any(|symbol| self.shared.contains_key(symbol) || self.references.contains_key(symbol))
+		{
+			return None;
+		}
+		let leaf = self.base_expression(decision.value)?;
+		self.scalar_union_leaf(leaf, function, &bindings, data)
+			.then_some((bindings, leaf))
+	}
+
 	pub(super) fn recursive_union_base(
 		&mut self,
 		function: &Function<'ctx>,
@@ -83,7 +165,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			|| !self.functions.values().any(|f| f.value == function.value)
 			|| self.tasks.asynchronous
 			|| function.lambda
-			|| !function.throws
 			|| !function.captures.is_empty()
 			|| !function.bindings.is_empty()
 			|| !function.values.is_empty()
@@ -132,43 +213,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if function.params[parameter].0 != Repr::Union {
 			return Ok(None);
 		}
-		let Some(first) = list.decisions.first() else {
+		let Some((position, member, bindings, leaf)) = self.union_leaf_arm(&list, function) else {
 			return Ok(None);
 		};
-		let [Test::IsType(member)] = first.tests.as_slice() else {
-			return Ok(None);
-		};
-		let TypeKind::Member(nominal, index) = self.types().kind(*member) else {
-			return Ok(None);
-		};
-		let Some(data) = self.member_data(nominal, index) else {
-			return Ok(None);
-		};
-		if self.types().fields_of(data).is_empty()
-			|| self.destroy_function(data).is_some()
-			|| !self.object_fields(data).iter().all(|r| scalar(*r))
-		{
-			return Ok(None);
-		}
-		let bindings: Vec<_> = first
-			.binding
-			.map(|binding| arm_bindings(self.tree, self.analysis, binding))
-			.unwrap_or_default()
-			.into_iter()
-			.map(|binding| binding.symbol)
-			.collect();
-		if bindings
-			.iter()
-			.any(|symbol| self.shared.contains_key(symbol) || self.references.contains_key(symbol))
-		{
-			return Ok(None);
-		}
-		let Some(leaf) = self.base_expression(first.value) else {
-			return Ok(None);
-		};
-		if !self.scalar_union_leaf(leaf, function, &bindings, data) {
-			return Ok(None);
-		}
+		let first = &list.decisions[position];
 		// Do not bypass a narrowing return boundary. The original body
 		// remains responsible for its checked storage/range conversion.
 		let lossless = match (self.node_repr(leaf)?, function.ret) {
@@ -209,7 +257,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Repr::Union,
 				BasicValueEnum::try_from(arguments[parameter]).expect("a union argument"),
 			);
-			let test = self.box_is_typed(subject, *member, Some(list.subject_type))?;
+			let test = self.box_is_typed(subject, member, Some(list.subject_type))?;
 			let base = self.append_block("union_leaf");
 			let recurse = self.append_block("union_recursive_call");
 			let end = self.append_block("union_recursive_result");
@@ -227,10 +275,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.get_type()
 				.get_return_type()
 				.expect("a scalar result ABI");
-			let value = self
-				.builder
-				.build_insert_value(raw_type.into_struct_type().const_zero(), value, 0, "")?
-				.as_basic_value_enum();
+			// A throwing function returns its value with a null error.
+			let value = if function.throws {
+				self.builder
+					.build_insert_value(raw_type.into_struct_type().const_zero(), value, 0, "")?
+					.as_basic_value_enum()
+			} else {
+				value
+			};
 			let base_end = self.builder.get_insert_block().expect("a block");
 			self.builder.build_unconditional_branch(end)?;
 			self.builder.position_at_end(recurse);

@@ -19,7 +19,6 @@ use crate::types::{CollKind, FieldFlags, NominalKind, PathRoot, TypeFlags, TypeK
 
 /// Parts of a portable claim. Stable type/declaration spellings escape controls.
 pub const SEPARATOR: char = '\u{1f}';
-const MODULE_SEPARATOR: char = '\u{1e}';
 const OPAQUE: &str = "opaque";
 
 /// The fact selecting a root type after the complete program was checked.
@@ -85,31 +84,9 @@ pub fn candidate_types(session: &Session, file: FileId) -> Vec<TypeId> {
 /// every unit names that required manifest. This keeps total work linear in
 /// modules, while a missing first module or any other module rejects the proof.
 pub fn unit_claims(session: &Session, files: &[FileId]) -> BTreeSet<String> {
-	let mut claims = BTreeSet::new();
-	let modules = session.region_modules();
-	let Some(first) = modules.first() else {
-		return claims;
-	};
-	let leader = format!("{first:?}");
-	claims.insert(format!("requires{SEPARATOR}{leader}"));
+	let mut claims = crate::closed_world::claims(session, files);
 	for &file in files {
-		let module = session.module(file);
-		claims.insert(format!("module{SEPARATOR}{module:?}"));
-		if module == first {
-			let modules: Vec<_> = modules.iter().map(|module| format!("{module:?}")).collect();
-			claims.insert(format!(
-				"manifest{SEPARATOR}{leader}{SEPARATOR}{}",
-				modules.join(&MODULE_SEPARATOR.to_string())
-			));
-		}
-		let source = session.source_file(file);
-		if !source.done
-			|| source.deferred
-			|| session
-				.diagnostics(file)
-				.iter()
-				.any(|diagnostic| diagnostic.severity == crate::Severity::Error)
-		{
+		if !crate::closed_world::checked(session, file) {
 			claims.insert(OPAQUE.to_string());
 			continue;
 		}
@@ -122,12 +99,9 @@ pub fn unit_claims(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 /// for a complete graph, a valid shape, at least one constructor, and no
 /// forbidden use or constructor outside an admitted builder in any unit.
 pub fn resolve_claims(claims: BTreeSet<String>) -> BTreeSet<String> {
-	if claims.contains(OPAQUE) {
+	if claims.contains(OPAQUE) || !crate::closed_world::complete(&claims) {
 		return BTreeSet::new();
 	}
-	let mut requires = BTreeSet::new();
-	let mut manifests = BTreeSet::new();
-	let mut modules = BTreeSet::new();
 	let mut candidates = BTreeSet::new();
 	let mut rejected = BTreeSet::new();
 	let mut capacity_observed = BTreeSet::new();
@@ -138,15 +112,7 @@ pub fn resolve_claims(claims: BTreeSet<String>) -> BTreeSet<String> {
 	for claim in claims {
 		let parts: Vec<_> = claim.split(SEPARATOR).collect();
 		match parts.as_slice() {
-			["requires", leader] => {
-				requires.insert((*leader).to_string());
-			}
-			["module", module] => {
-				modules.insert((*module).to_string());
-			}
-			["manifest", leader, expected] => {
-				manifests.insert(((*leader).to_string(), (*expected).to_string()));
-			}
+			["requires", _] | ["module", _] | ["manifest", _, _] => {}
 			["candidate", root] => {
 				candidates.insert((*root).to_string());
 			}
@@ -180,17 +146,6 @@ pub fn resolve_claims(claims: BTreeSet<String>) -> BTreeSet<String> {
 			}
 			_ => return BTreeSet::new(),
 		}
-	}
-	if requires.len() != 1 || manifests.len() != 1 {
-		return BTreeSet::new();
-	}
-	let (leader, expected) = manifests.first().expect("one manifest");
-	let expected: BTreeSet<_> = expected
-		.split(MODULE_SEPARATOR)
-		.map(str::to_string)
-		.collect();
-	if !requires.contains(leader) || expected != modules || !modules.contains(leader) {
-		return BTreeSet::new();
 	}
 	let mut resolved = BTreeSet::new();
 	for root in candidates.intersection(&constructed) {

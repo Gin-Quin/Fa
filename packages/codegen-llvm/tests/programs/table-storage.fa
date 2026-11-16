@@ -78,8 +78,12 @@ function reads = (n: Integer): Integer => {
 console.log(reads(5))
 -- prints: 5
 let kept = returned(8)
-console.log(kept)
--- prints: [(8, 1), (9, 2)]
+-- Map iteration order is unspecified; preserve exact formatting in either order.
+let rendered = "{kept}"
+assert rendered == "[(8, 1), (9, 2)]" or rendered == "[(9, 2), (8, 1)]"
+assert kept.size == 2
+console.log(kept.get(8), kept.get(9))
+-- prints: 1 2
 let wide: Map<UInt32, UInt8> = [(0, 1), (7, 2), (4000000000, 3)]
 let noZero: Map<UInt32, UInt8> = [(5, 1), (13, 2)]
 console.log(wide.get(0), wide.get(7), wide.get(4000000000), wide.get(8), wide.size, noZero.get(0), noZero.get(13), noZero.size)

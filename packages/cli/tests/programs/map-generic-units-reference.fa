@@ -1,0 +1,45 @@
+-- asynchronous: false
+-- Whole-program and per-unit generic map layout agreement.
+-- file: application/main.fa
+export function = (): Integer => {
+	mutable map = library.create(-1)
+	assert map.get(7) is none
+	library.replace(map, Int64(7), UInt64(70))
+	assert map.get(7) == UInt64(70)
+	use held = map.getOrInsert(0, 0)
+	for i in 1..300 { map[Int64(i)] = UInt64(i) }
+	held += 1
+	assert held == UInt64(11)
+	assert map.get(-1) == UInt64.maxValue
+	map.deleteWhere((key, _) => key != -1)
+	assert map.size == 1
+	assert map.get(-1) == UInt64.maxValue
+	mutable inlineMap = library.inline(7)
+	inlineMap.reserve(1000)
+	assert inlineMap.get(UInt64.maxValue) == 20
+	assert inlineMap.take(7) == 30
+	assert inlineMap.get(0) == 10
+	console.log("per-unit ok")
+	0
+}
+-- file: library/create.fa
+export function = (key: Int64): Map<Int64, UInt64> => {
+	mutable map = Map<Int64, UInt64>.from([(key, UInt64.maxValue)], capacity = 16)
+	map[0] = 10
+	map
+}
+-- file: library/inline.fa
+export function = (key: UInt64): Map<UInt64, UInt8> => {
+	mutable map: Map<UInt64, UInt8> = [(0, 10), (UInt64.maxValue, 20)]
+	map[key] = 30
+	map
+}
+-- file: library/replace.fa
+export function = <K, V>(map: Map<K, V>, key: K, value: V) mutates map => {
+	map.reserve(1000)
+	map[key] = value
+}
+-- prints: per-unit ok
+
+-- file: package.fa
+export = { name = "mapLayoutRegression" }

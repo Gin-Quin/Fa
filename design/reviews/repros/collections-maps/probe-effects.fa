@@ -1,0 +1,51 @@
+-- asynchronous: false
+-- A private KEY32 candidate: both miss and hit cache, effect and backedge guards.
+type Failure = Errors { Changed }
+function change = (map: Map<UInt32, UInt64>, key: UInt32) throws Failure.Changed mutates map => {
+	map.clear()
+	for i in 0..100 { map[UInt32(i)] = UInt64(i) }
+	map.reserve(1000)
+	map[key] = 456
+	throw Failure.Changed
+}
+function run = (input: UInt32) => {
+	let key = input
+	mutable map = Map<UInt32, UInt64>.from([], capacity = 16)
+	for round in 0..40 {
+		assert map.get(key) is none
+		for i in 0..20 { map[UInt32(i)] = UInt64(i) }
+		map[key] = 123
+		assert map.get(key) == UInt64(123)
+		let failed = do {
+			change(map, key)
+			false
+		} catch _ => true
+		assert failed
+		map[key] = 789
+		assert map.take(key) == UInt64(789)
+		assert map.get(key) is none
+		map[key] = 321
+		map.clear()
+		assert map.get(key) is none
+		map = Map<UInt32, UInt64>.from([], capacity = 32)
+	}
+	-- A mutation lowered before the producer can follow it via a backedge.
+	mutable turn = 0
+	loop {
+		if turn == 1 { map[46] = 460 }
+		if turn == 0 {
+			assert map.get(key) is none
+			turn = 1
+			continue
+		}
+		map[key] = 999
+		break
+	}
+	assert map.get(key) == UInt64(999)
+	assert map.get(46) == UInt64(460)
+	assert map.size == 2
+}
+run(0)
+run(91)
+run(UInt32.maxValue)
+console.log("effects ok") -- prints: effects ok

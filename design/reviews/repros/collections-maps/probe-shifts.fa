@@ -1,0 +1,21 @@
+-- asynchronous: false
+-- Collision run wraps 31 -> 0. Delete before/after a cached hole/hit.
+function run = (query: UInt32) => {
+	let key = query
+	mutable map = Map<UInt32, UInt32>.from([(1, 10), (46, 20), (91, 30)], capacity = 16)
+	let found = map.get(key)
+	map.delete(1)
+	map.delete(46)
+	map.delete(UInt32.maxValue)
+	map[key] = 42
+	assert map.get(key) == 42
+	assert map.take(key) == 42
+	assert map.get(key) is none
+	map[key] = 43
+	assert map.get(key) == 43
+	console.log(found is none)
+}
+run(136)             -- prints: true
+run(91)              -- prints: false
+run(0)               -- prints: true
+run(UInt32.maxValue) -- prints: true

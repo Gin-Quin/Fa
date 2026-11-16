@@ -1,0 +1,18 @@
+-- asynchronous: false
+-- Whole-program and per-unit generic map layout agreement.
+-- file: application/main.fa
+export function = (): Integer => {
+	mutable map: Map<Int64, Int64> = [(0, 10), (-1, 20), (9223372036854775807, 30)]
+	library.prune(map)
+	assert map.size == 0
+	console.log("per-unit ok")
+	0
+}
+-- file: library/prune.fa
+export function = <K, V>(map: Map<K, V>) mutates map => {
+	map.deleteWhere((_key, _value) => true)
+}
+-- prints: per-unit ok
+
+-- file: package.fa
+export = { name = "mapLayoutRegression" }

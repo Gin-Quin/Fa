@@ -14,7 +14,7 @@ function xorshift = (x: UInt64): UInt64 => {
 
 let n = 32_000_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
 
-mutable data = Array<Int32>.from([], capacity = n)
+mutable data: Array<Int32> = []
 mutable r: UInt64 = 12345
 for 0..n {
 	r = xorshift(r)

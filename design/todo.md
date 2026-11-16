@@ -5,13 +5,25 @@ The single list of open work, in the order of [the journal's Next roadmap](journ
 ## 1. Trunk follow-ups
 
 - **Finish the trunk transition.** Review is delivered in `review/trunk-merge`; C1 and M1 are fixed. After final lead acceptance, move the trunk to `main` and retire the old line names. Renaming is outside this integration task.
-- **Remaining pending performance branches.** Measure and review map probes/frame map headers and split streams separately before integration; their optimizations were deliberately excluded here. Use the recorded 2026-11-16 trunk baseline (section 4) with exact inputs, outputs and toolchain manifests.
+- **Remaining pending performance branch.** Measure and review split streams separately before integration; that optimization was deliberately excluded here. Use the recorded 2026-11-16 trunk baseline (section 4) with exact inputs, outputs and toolchain manifests.
+- **Collection CPU controls.** Obtain separately labelled quiet lru/word-count comparisons for the successors: positive-probe controls fail on all three map rows; scalar64 lru/word-count controls fail. Preserve every first series in `benchmarks/results/2026-11-16-collections-{probes,headers,positive,scalar64}.json` and the accepted header lru win. Scalar64 words has a passing control but remains 1.171 / 1.137× Goose (ratio of medians / paired median), ahead of Rust; String work remains separate. Further private-header register/alignment tuning requires a new passing CPU comparison.
 - **Recursion across units.** Publish the shared call graph through `facts.rs` so a cross-unit call does not automatically reduce a caller's frame collections from 4 KiB to 512 bytes. See "Trunk integration" in `decisions.md`.
 - **Cleanup metadata.** Restore `dereferenceable` for growing-header cleanup loads only with a moved flag or proof that the local is never zeroed by a move.
+- **JavaScript optional wide-integer equality.** The pre-scalar64 compiler (`574bcf21`) fails `let map: Map<Int64, Int64> = [(1, 11)]` followed by `assert map.get(1) == 11`, printing equal-looking 11 operands. Preserve numeric equality across the optional BigInt-backed Int64 and Integer representations; explicitly typed Int64 expectations already pass. Add the optional/narrow and unsigned cases to JS regression coverage. Also preserve wide literal representation inside generic integer constructors: `design/reviews/repros/collections-maps/js-generic-wide-literal/main.fa` instantiates a constant `Map<UInt32,V>` with `V = Int64` but stores a Number, so `held == Int64(7)` fails with equal-looking operands on Bun/Node/web. This predates the native map fixes; reproduce with `fa run <path>`.
+- **Map borrow initializer proof.** Scalar64 inline slots are available under the existing reference exclusions, but word-count numeric keys remain chunked: `short_reference` rejects `random.next` inside the reference-producing getOrInsert initializer. Separate effects evaluated before the returned reference exists from calls after it; retain escaping/callback/async and live-reference invalidation proofs consistently in whole-program and per-unit facts. Do not rewrite the benchmark to force eligibility.
 - **Read-only table hash parity.** Automate key-by-key equality of compile-time `constant_key` and runtime hashes. The review's `repros/trunk-merge/table-keys.fa` verifies observable scalar-key behavior but is not yet a CI hash-parity test.
 - **Performance records.** Condense the later French sections of `native-goose-performance.md` (strings, bytes, frame collections, destinations, capacity, GrowingArray), then remove it and its four first-round JSON files once their evidence is retained.
 - **Native conversion between recursive object types overflows the compiler's stack.** Found on `perf/aggregates`, present on trunk `864167d6`: `type Node = { value: Integer, next: Node? }`, `type Other = { value: Int8, next: Other? }`, `let converted: Node = Other { value = 1, next = Other { value = 2 } }` passes `fa check` and builds for Bun, but `fa build --target=native` aborts with a Rust stack overflow (the field conversion recurses over the type pair without a helper per pair). Emit one conversion helper per (source, target) pair, or report a diagnostic; add the program to the native fixtures. Coordinate with `feature/ownership` (copies and conversions).
 - **Review m3 refactoring.** Split the long `readonly_table`, `build_composition_body`, `lower_function_body`, `builtin_call` and `for_items` by responsibility, preserving their tested behavior. See the lead's `trunk-merge-review.md`.
+
+- **Analyzer: reject Array fields of stored references.**
+  `benchmarks/audit/ports/scene-children/main.fa` declares
+  `children: Array<SceneNode in nodes>`. It is accepted and prints 0 on native,
+  wasm and Bun after the original child changes to 2, silently storing owned
+  copies. The reference/relation rules prohibit this field: reject it with a
+  diagnostic instead of erasing its reference type. The pool-link language
+  study does not authorize this current missing rejection; do not fix it in
+  the benchmark-port task.
 
 ## 2. Language semantics
 
@@ -119,20 +131,37 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
   budget, but optimized compilation is still expensive. Preserve the memory ABI,
   snapshot evaluation order and all result/callback/key assertions while reducing
   scalar expansion; use a controlled CPU-5 measurement before claiming a gain.
-
-- **Faithful Goose ports (2026-11-16).** The [sixteen-port audit](../benchmarks/audit/ports/README.md)
-  records all structures/passes and intended Rust rows. Push now uses unreserved
-  GrowingArray with documented index marks; the reserved Array is `push-array`.
-  Next: unreserved sum/particles/blur (UInt16 stencil temporary), direct-output
-  respond with retained variants. Before scene/interp/sexp/calc/tree/binary-trees/
-  graph pool ports, finish compact one-way growing-pool links and the link-field
-  contract for bounded inline ordered child references (`InlineArray` of owned
-  items is implemented); preserve recursive variants and change Rust pairings
-  together. Decide exact words/lru slot algorithms versus standard Map comparisons;
-  words needs Int32 counts and a borrowed-key ownership policy. Sexp needs reverse
-  sibling order and its parser error path. The current scene-children probe is
-  wrongly accepted and stores values instead of rejecting Array reference fields;
-  add the missing rejection (`benchmarks/audit/ports/scene-children/main.fa`).
+- **Deferred Goose pool ports (lead, 2026-11-16).** The
+  [sixteen-port audit](../benchmarks/audit/ports/README.md) records all structures,
+  passes and intended Rust rows. Scene/interp/sexp/calc/tree/binary-trees/graph
+  wait for the language study of one-way growing-pool links, compact widths and
+  bounded inline ordered lists (`InlineArray` of owned items is implemented). Do not
+  use CArray integer-link approximations. Retain the current main rows until then; when replacing them, keep recursive
+  variants and change Rust pairings together. Sexp needs reverse sibling order
+  and its parser error path. The separate missing Array-reference-field
+  rejection is an analyzer bug in section 1.
+- **Stored borrowed slice keys for explicit words.** Standard Map remains the
+  main comparator with a 1.10-times-Goose goal (Int32 counters are delivered).
+  `benchmarks/audit/ports/words-slice-key/main.fa` gets REL001/REL002 for a
+  `key: String in text` slot field. Define owner-scoped stored slice lifetimes
+  and representation before an explicit table can match Goose; do not substitute
+  owning keys or hand-encoded ranges. Its intended Rust row is words_open.rs.
+- **Continuation collection costs, ranked (2026-11-16).** The
+  [twelve-row results](../benchmarks/results/2026-11-16-ports-2.md) preserve the
+  first CPU series and strict controls. First inspect String append mode/capacity
+  facts and last-use field returns: direct respond adds 29.72 M audit instructions
+  versus interpolation, with 189,946 cold append calls (25.72 M inclusive) and
+  40,000 slow String copies (6.50 M inclusive). Coordinate with feature/strings;
+  the copy alone does not explain the gap. Next retain masked Array-index and
+  stored-node validity facts in lru-open, including backward-shift deletion:
+  39,041 mapRemove calls cost 1.78 M inclusive instructions. Preserve checked
+  failure paths; do not add unchecked benchmark accesses. Standard Map remains
+  the main target: retain lookup probes through remove/insert and short-key
+  hash/compare facts (words has 28.38 M versus Goose 22.41 M instructions, with
+  small allocator costs). These are profile targets, not demonstrated CPU gains.
+  Sum/blur meet the CPU goal; particles/respond/words/lru and four variants fail
+  controls. Keep those eight series unresolved and append a separately labeled
+  quiet recheck later rather than replacing the first samples.
 - **GrowingArray push and scan (faithful push port).** At 3.2 M items, the scalar
   segment scan executes 25.60 M instructions versus 12.00 M for Goose's vectorized
   scan and the reserved Array control; use a plain inner loop over each segment
@@ -150,7 +179,7 @@ The 2026-11-16 trunk baseline is [generated from the recorded JSON](../benchmark
 
 Ranked by the sum of CPU gap budgets over the 25 distinct ports at default sizes (one execution each; variants are controls, not duplicate weights). The budgets use point estimates and include explicitly unresolved rows; they are the time required to reach min(1.10× Goose, Rust), not demonstrated optimization gains. Proposed gains need controlled measurements.
 
-1. **Maps and short keys — 0.377 s per sweep.** `word-count` dominates (1.925× Goose); `lru` is narrowly behind (1.106×), `words` unresolved (1.174×). Extend the dense/inline probe layout beyond ≤32-bit keys/values where reference and delete-iteration proofs permit it; inspect the 64-bit numeric half of word-count separately from its ≤6-byte string keys. Preserve source widths and GrowingMap stability. Propagate uniform short-string lengths to append/hash/compare, and examine carrying a valid lookup probe through a later removal. Compare A's chosen map layout against B on these exact inputs: the trunk improves A but still trails B on word-count. Eager reservation is not the demonstrated hot cause. The String key/build/compare part overlaps `feature/strings`; scalar probe layout and lifetime proofs do not.
+1. **Maps and short keys — 0.377 s per sweep.** `word-count` dominates (1.925× Goose); `lru` is narrowly behind (1.106×), `words` unresolved (1.174×). Close the recorded borrow-initializer proof for word-count’s 64-bit numeric half separately from its ≤6-byte string keys. Preserve source widths and GrowingMap stability. Propagate uniform short-string lengths to append/hash/compare. Compare A's chosen map layout against B on these exact inputs: the trunk improves A but still trails B on word-count. Eager reservation is not the demonstrated hot cause. The String key/build/compare part overlaps `feature/strings`; scalar probe layout and lifetime proofs do not.
 2. **Array shape and bulk-operation facts — 0.321 s.** `nbody`: retain the five-element literal's extent through field-only mutations and borrow calls; Rust's Vec/slices become a fully unrolled register computation, while Fa/Goose retain inner loops (867 M versus Rust 720 M instructions at audit size). `sieve`: extend the existing byte-only fill-loop recognition to Boolean 0/1; the marking loop already matches Rust, but initialization is a four-byte store loop instead of bulk memset. `fannkuch-redux`: recognize or version the checked prefix-reversal loop, preserving the original error/mutation path; do not assert unproven indices. Validate CPU gains and floating operation order, including the nbody alignment effect retained from the earlier storage review.
 3. **String construction, destinations and comparison — 0.176 s.** `string-building`, `respond`, `sort-objects`, and the unresolved `strlist` row share temporary construction, buffer/header work or generic string comparison. Restore the useful B-path behavior on current inputs: trunk String building is 237.268 M instructions versus B 167.614 M; sort is 176.809 M versus B 137.908 M. Isolate the merged split-into callback path (+7.557 M versus A), short ASCII comparison and small transient buffers. Coordinate with `feature/strings` (UTF-16 semantics, UTF-8/WTF-8 storage, Bytes); port proofs and acceptance cases rather than optimizing obsolete helpers. Keep all overflow-length checks. Revisit count/byte-length-only split aggregation after measuring the new implementation. Extend aggregate/collection destinations to existing fields, push/insert and remaining from/transform/split cases under alias/error rules; retain small-result ABI and foreign sret.
 4. **Aggregate storage and traversal — 0.143 s.** `scene`, `sexp`, `interp`, `records`: default-size cache profiles are in the baseline JSON. Scene crosses the modeled 8 MiB cache (776,875 LL data misses versus Goose 76,192) and performs three recursive walks where Goose uses two pool scans and one recursive update; Exact counted reservations for empty array fields now remove geometric slack under a closed capacity-observation proof (`perf/aggregates`, 2026-11-16); scene's modeled LL data misses fall from 776,875 to 96,420. Coallocating those child arrays in the root region was built and measured slower on hardware (decisions, "object child arrays stay in the heap"); what remains against Goose is traversal shape (recursive walks against flat pool scans: 54 M against 22 M instructions at depth 12; per-node `frame %% 7` recomputed in `animate`), construction through temporaries (build 13 M against 6 M) and branch mispredictions of the variable child loops. A region proof for object roots must exclude convertible layouts by whole-program inventory: `analysis.coercions` misses optional narrowing and adapted function returns (today's optional-edge object roots are not exposed: a convertible layout either embeds the root, which the proof rejects, or has only passive non-owning fields and no edge). Sexp's owned list arrays/headers and symbol payloads use 57,856 KiB versus 27,136 KiB and cause 1.67× LL data misses; construct/freeze child storage in the owning region while preserving references. Interp fits the modeled LL cache: focus on case dispatch and narrow/wide relative-link decode dependency chains, not a blanket memory explanation. Records' default-size LL traffic is essentially equal to Goose: inspect temporary/payload construction and packed pushes. Keep frame strings, root regions, child arrays, capacity facts and existing compact payload correctness. Broader destinations for mutable/different owners, structural/SoA conversions, optional/union/fallback/catch/loop and coroutine/task results, table indices/stable segments and coroutine collection constructors remain follow-ups. Preserve noalias and avoid stack-to-heap copy-out; fix Tuple<T,T> return-layout instantiation independently. Compact object-columnar chunks, static interpreter/defaulted aggregates and composite table keys remain within this cause family.

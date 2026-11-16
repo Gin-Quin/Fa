@@ -1985,6 +1985,327 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 		}
 	}
 	#[test]
+	fn private_inline_map_headers_stay_in_the_frame_and_escaping_maps_keep_owners() {
+		let private = ir_of(
+			"local-map-header",
+			"mutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 128)\nmap[2] = 3\nconsole.log(map.get(2), map.size)\n",
+		);
+		assert!(private.contains("@fa_table_new_local("), "{private}");
+		let escaping = ir_of(
+			"escaping-map-header",
+			"function make = (): Map<UInt32, UInt32> => {\nmutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 128)\nmap[2] = 3\nmap\n}\nconsole.log(make().size)\n",
+		);
+		assert!(!escaping.contains("@fa_table_new_local("), "{escaping}");
+		let copied = ir_of(
+			"copied-map-header",
+			"mutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 128)\nlet other = copy map\nmap[2] = 3\nconsole.log(other.size, map.size)\n",
+		);
+		assert!(!copied.contains("@fa_table_new_local("), "{copied}");
+	}
+
+	#[test]
+	fn map_headers_shared_between_top_level_parts_keep_an_owner() {
+		// One large statement forces the initializer into several real LLVM
+		// functions without changing process-wide environment variables.
+		let padding = "x".repeat(70_000);
+		let source = format!(
+			"mutable map = Map<UInt32, UInt32>.from([(0, 1)], capacity = 128)\nassert \"{padding}\".length == 70000\nmap[2] = 3\nconsole.log(map.get(2), map.size)\n"
+		);
+		let ir = ir_of("map-header-top-level-parts", &source);
+		assert!(
+			count(&ir, "define internal void @fa.top_level_part") >= 2,
+			"{ir}"
+		);
+		assert!(!ir.contains("@fa_table_new_local("), "{ir}");
+	}
+
+	#[test]
+	fn private_map_headers_share_literal_and_recursive_frame_budgets() {
+		for (target_name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+			for (case, maps, recursive, fixed, expected) in [
+				("ordinary", 48, false, false, 42),
+				("recursive", 8, true, false, 5),
+				("literal", 48, false, true, 41),
+			] {
+				let mut source =
+					String::from("function many = (depth: Integer, key: UInt32): Integer => {\n");
+				if fixed {
+					source.push_str("let fixed: Map<UInt32, UInt32> = [(key, 1)]\n");
+				}
+				for index in 0..maps {
+					source.push_str(&format!(
+						"mutable map{index} = Map<UInt32, UInt32>.from([(key, 0)], capacity = 32)\n"
+					));
+				}
+				if recursive {
+					source.push_str("if depth > 0 { return many(depth - 1, key) }\n");
+				} else {
+					source.push_str("assert depth == 0\n");
+				}
+				let mut sizes: Vec<_> = (0..maps).map(|index| format!("map{index}.size")).collect();
+				if fixed {
+					sizes.push("fixed.size".into());
+				}
+				source.push_str(&format!(
+					"console.log({})\n0\n}}\nconsole.log(many(0, 7))\n",
+					sizes.join(", ")
+				));
+				let ir = ir_at_target(
+					&format!("map-headers-budget-{target_name}-{case}"),
+					&source,
+					false,
+					OptLevel::O0,
+					target,
+				);
+				let body = function(&ir, "fa.many");
+				assert_eq!(
+					count(body, "@fa_table_new_local("),
+					expected,
+					"{case}/{target_name}: {body}"
+				);
+				assert_eq!(
+					count(body, "@fa_table_local("),
+					usize::from(fixed),
+					"{case}/{target_name}: {body}"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn generic_readonly_maps_keep_separate_chunked_and_inline_headers() {
+		let source = include_str!("../../cli/tests/programs/map-generic-readonly.fa");
+		for (name, target, extension) in [
+			("native", Target::Native, "ll"),
+			("wasm", Target::Wasm, "wasm.ll"),
+		] {
+			let name = format!("map-generic-readonly-{name}");
+			ir_at_target(&name, source, false, OptLevel::O0, target);
+			let full = std::fs::read_to_string(
+				PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+					.join("fa-checks")
+					.join(format!("{name}.{extension}")),
+			)
+			.unwrap();
+			assert_eq!(
+				full.lines()
+					.filter(|line| line.starts_with("@fa.collection.static"))
+					.count(),
+				2,
+				"{full}"
+			);
+			assert!(
+				full.contains("[8 x <{ i32, i32, { i16, i64 } }>]"),
+				"{full}"
+			);
+			assert!(full.contains("[32 x { i32, i64 }]"), "{full}");
+		}
+	}
+
+	#[test]
+	fn generic_map_instances_share_the_callers_layout_policy() {
+		for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+			for (key, flags) in [
+				("Int8", 1_u64 << 41),
+				("Int16", 1 << 41),
+				("UInt32", (1 << 41) | (1 << 42)),
+				("Int64", (1 << 41) | (1 << 43)),
+			] {
+				for (case, body, extra, expected) in [
+					("inline", "map[key] = value", "", flags),
+					(
+						"delete",
+						"map.deleteWhere((_key, _value) => true)",
+						"",
+						1 << 40,
+					),
+					(
+						"caller-reference",
+						"map[key] = value",
+						"use held = map.getOrInsert(key, 0)\nmap.reserve(1000)\nconsole.log(held)\n",
+						0,
+					),
+					(
+						"generic-reference",
+						"use held = map.getOrInsert(key, value)\nmap.reserve(1000)\nconsole.log(held)",
+						"",
+						0,
+					),
+				] {
+					let source = format!(
+						"function change = <K, V>(map: Map<K, V>, key: K, value: V) mutates map => {{\n{body}\n}}\nfunction run = (key: {key}) => {{\nmutable map = Map<{key}, Int64>.from([], capacity = 16)\nchange(map, key, Int64(7))\n{extra}console.log(map.size)\n}}\nrun(3)\n"
+					);
+					let ir = ir_at_target(
+						&format!("map-generic-{case}-{key}-{name}"),
+						&source,
+						false,
+						OptLevel::O0,
+						target,
+					);
+					for function_name in ["fa.run", "fa.change.0"] {
+						let body = function(&ir, function_name);
+						if expected != 0 {
+							assert!(
+								body.contains(&format!("i64 {expected})")),
+								"{case} {key} {name}: {body}"
+							);
+						} else {
+							assert!(!body.contains("i64 1099511627776)"), "{body}");
+						}
+						if expected != flags {
+							assert!(!body.contains(&format!("i64 {flags})")), "{body}");
+						}
+					}
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn scalar64_map_slots_preserve_reference_and_iteration_fallbacks() {
+		for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+			for (key, value, flags) in [
+				("Int64", "Int64", (1_u64 << 41) | (1 << 43)),
+				("UInt64", "UInt64", (1 << 41) | (1 << 43)),
+				("UInt32", "Int64", (1 << 41) | (1 << 42)),
+				("UInt16", "Float", 1 << 41),
+				("UInt8", "Int64", 1 << 41),
+			] {
+				let source = format!(
+					"function run = (key: {key}) => {{\nmutable map = Map<{key}, {value}>.from([], capacity = 16)\nmap[key] = 7\nconsole.log(map.get(key))\n}}\nrun(3)\n"
+				);
+				let ir = ir_at_target(
+					&format!("scalar64-{key}-{value}-{name}"),
+					&source,
+					false,
+					OptLevel::O0,
+					target,
+				);
+				let body = function(&ir, "fa.run");
+				assert!(body.contains(&format!("i64 {flags})")), "{body}");
+			}
+			for (case, collection, extra, expected) in [
+				(
+					"reference",
+					"Map",
+					"use held = map.getOrInsert(key, 0)\nmap[4] = 9\nheld += 1\n",
+					0,
+				),
+				("growing", "GrowingMap", "", 0),
+				(
+					"delete-iteration",
+					"Map",
+					"map.deleteWhere((_, value) => value == 0)\n",
+					1_u64 << 40,
+				),
+			] {
+				let source = format!(
+					"function run = (key: Int64) => {{\nmutable map = {collection}<Int64, Int64>.from([], capacity = 16)\nmap[key] = 7\n{extra}console.log(map.get(key))\n}}\nrun(3)\n"
+				);
+				let ir = ir_at_target(
+					&format!("scalar64-fallback-{case}-{name}"),
+					&source,
+					false,
+					OptLevel::O0,
+					target,
+				);
+				let body = function(&ir, "fa.run");
+				assert!(!body.contains("i64 10995116277760)"), "{body}");
+				assert_eq!(body.contains("i64 1099511627776)"), expected != 0, "{body}");
+			}
+			let source = "let map: Map<UInt8, Int64> = [(0, 7), (255, 9)]\nconsole.log(map.get(0), map.get(255))\n";
+			ir_at_target(
+				&format!("scalar64-static-padding-{name}"),
+				source,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let full = std::fs::read_to_string(
+				PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+					.join("fa-checks")
+					.join(format!(
+						"scalar64-static-padding-{name}.{}",
+						match target {
+							Target::Wasm => "wasm.ll",
+							_ => "ll",
+						}
+					)),
+			)
+			.expect("the complete IR including globals");
+			assert!(full.contains("<{ i32, i32, { i8, i64 } }>"), "{full}");
+		}
+	}
+
+	#[test]
+	fn private_map_lookups_feed_positive_updates_and_removals() {
+		let source = |extra: &str| {
+			format!(
+				"function run = (input: UInt32) => {{\nlet key = input\nmutable map = Map<UInt32, UInt32>.from([(key, 7)], capacity = 16)\n{extra}\nconsole.log(map.get(key))\nmap[key] = 8\nconsole.log(map.take(key))\n}}\nrun(3)\n"
+			)
+		};
+		for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+			let ir = ir_at_target(
+				&format!("positive-map-probe-{name}"),
+				&source(""),
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let body = function(&ir, "fa.run");
+			assert!(body.contains("probe_cached"), "{body}");
+			assert!(!body.contains("@fa_table_remove("), "{body}");
+			assert!(body.contains("store i1 true, ptr %probe_valid"), "{body}");
+			let borrowed = ir_at_target(
+				&format!("positive-map-borrow-{name}"),
+				&source("use borrowed = map.get(key)\nconsole.log(borrowed)"),
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let body = function(&borrowed, "fa.run");
+			assert!(!body.contains("probe_cached"), "{body}");
+			assert!(body.contains("@fa_table_remove("), "{body}");
+			let parameter = source("")
+				.replace("let key = input\n", "")
+				.replace("(input: UInt32)", "(key: UInt32)");
+			let ir = ir_at_target(
+				&format!("positive-map-parameter-{name}"),
+				&parameter,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			assert!(!function(&ir, "fa.run").contains("probe_cached"), "{ir}");
+		}
+	}
+
+	#[test]
+	fn private_inline_maps_reuse_negative_probes_but_references_and_callbacks_do_not() {
+		let source = |extra: &str| {
+			format!(
+				"function append = (items: Array<UInt32>, value: UInt32) mutates items => {{ items.push(value) }}\nmutable values: Map<UInt32, UInt32> = []\nmutable items: Array<UInt32> = []\nlet key: UInt32 = 3\n{extra}\nif values.get(key) is none {{\nappend(items, key)\nvalues[key] = 7\n}}\nconsole.log(values.get(key))\n"
+			)
+		};
+		let reused = ir_of("map-probe-reuse", &source(""));
+		assert!(reused.contains("probe_cached"), "{reused}");
+		let reference = ir_of(
+			"map-probe-borrow",
+			&source("use present = values.get(key)\nconsole.log(present)"),
+		);
+		assert!(!reference.contains("probe_cached"), "{reference}");
+		let callback = ir_of(
+			"map-probe-callback",
+			&source("let kept = [1].map((item) => item + 1)\nconsole.log(kept)"),
+		);
+		assert!(!callback.contains("probe_cached"), "{callback}");
+		let generic = ir_of(
+			"map-probe-generic",
+			&source("function identity = <T>(value: T): T => value\nconsole.log(identity(1))"),
+		);
+		assert!(!generic.contains("probe_cached"), "{generic}");
+	}
+	#[test]
 	fn inline_arrays_have_narrow_counters_and_no_heap_buffer() {
 		for target in [Target::Native, Target::Wasm, Target::NativeFreestanding] {
 			let ir = ir_at_target(

@@ -407,6 +407,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		// the sources of the reactive places given (D24), right before the call
 		self.pass_argument_sources(node, function.declaration, function.info.params.len())?;
+		self.invalidate_named_map_probes(&function, node, info)?;
 		// an awaited or started call: its async instance (tasks.rs)
 		let raw = match self.task_call(node, &function, &arguments)? {
 			Some(super::tasks::TaskCall::Task(task)) => {
@@ -634,7 +635,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The receiver of a method call (`pair` in `pair.swap()`, `a.b` in
 	/// `a.b.c()`).
-	fn method_receiver(&self, call: NodeId) -> Option<NodeId> {
+	pub(super) fn method_receiver(&self, call: NodeId) -> Option<NodeId> {
 		let View::Call { callee, .. } = self.view(call) else {
 			return None;
 		};
@@ -671,7 +672,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.map(|(param, bound)| (*param, *bound)),
 		);
 		let saved = self.bindings.replace(merged);
+		let mut types = self.type_bindings.borrow().clone();
+		types.extend(function.types.iter().map(|(&param, &ty)| (param, ty)));
+		let saved_types = self.type_bindings.replace(types);
 		let converted = self.convert(value, repr, at);
+		self.type_bindings.replace(saved_types);
 		self.bindings.replace(saved);
 		converted
 	}

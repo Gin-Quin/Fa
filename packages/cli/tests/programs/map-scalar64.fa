@@ -1,0 +1,88 @@
+-- Wide scalar entries preserve every bit, alignment, copy and shifting deletion.
+-- asynchronous: false
+-- require-split: true
+
+let exact: Int64 = 9_007_199_254_740_993
+let unsignedExact: UInt64 = 9_007_199_254_740_993
+
+function frameLiteral = (key: Int64) => {
+	let map: Map<Int64, Int64> = [(0, Int64.minValue), (key, 7), (-1, Int64.maxValue)]
+	assert map.get(0) == Int64.minValue
+	assert map.get(key) == Int64(7)
+	assert map.get(-1) == Int64.maxValue
+}
+
+function wide = () => {
+	mutable map: Map<Int64, Int64> = []
+	map[0] = Int64.minValue
+	map[-1] = Int64.maxValue
+	map[Int64.minValue] = -1
+	map[Int64.maxValue] = 0
+	map[1_099_511_627_776] = 9_007_199_254_740_993
+	for i in 1..300 { map[Int64(i)] = Int64(i * 2) }
+	map.reserve(2000)
+	assert map.get(0) == Int64.minValue
+	assert map.get(-1) == Int64.maxValue
+	assert map.get(Int64.minValue) == Int64(-1)
+	assert map.get(Int64.maxValue) == Int64(0)
+	assert map.get(1_099_511_627_776) == exact
+	for i in 1..300 { assert map.get(Int64(i)) == Int64(i * 2) }
+	for i in 1..300 { if i %% 2 == 0 { assert map.delete(Int64(i)) } }
+	for i in 1..300 {
+		if i %% 2 == 0 { assert map.get(Int64(i)) is none } else { assert map.get(Int64(i)) == Int64(i * 2) }
+	}
+	let other = copy map
+	assert other.size == map.size
+	for (key, value) in other { assert map.get(key) == value }
+	assert map.take(-1) == Int64.maxValue
+	assert map.get(-1) is none
+	assert other.get(-1) == Int64.maxValue
+	map[-1] = Int64.minValue
+	assert map.get(-1) == Int64.minValue
+	map.clear()
+	assert map.size == 0
+	map[-1] = 7
+	map[0] = 8
+	assert map.get(-1) == Int64(7)
+	assert map.get(0) == Int64(8)
+}
+
+let high: UInt64 = 9_223_372_036_854_775_808
+let unsigned: Map<UInt64, UInt64> = [(0, UInt64.maxValue), (UInt64.maxValue, 0), (9_223_372_036_854_775_808, 9_007_199_254_740_993)]
+mutable unsignedCopy = copy unsigned
+assert unsignedCopy.get(0) == UInt64.maxValue
+assert unsignedCopy.get(UInt64.maxValue) == UInt64(0)
+assert unsignedCopy.get(9_223_372_036_854_775_808) == unsignedExact
+assert unsignedCopy.delete(UInt64.maxValue)
+unsignedCopy[UInt64.maxValue] = 9_223_372_036_854_775_808
+unsignedCopy.reserve(128)
+assert unsignedCopy.get(UInt64.maxValue) == high
+assert unsigned.get(UInt64.maxValue) == UInt64(0)
+
+-- Boolean assertions also run on freestanding, without float formatting.
+function verify = (condition: Boolean) => { assert condition }
+
+function tagged = (key: UInt8, wideKey: UInt16) => {
+	let small: Map<UInt8, Int64> = [(key, Int64.minValue), (255, Int64.maxValue)]
+	assert small.get(key) == Int64.minValue
+	assert small.get(255) == Int64.maxValue
+	mutable floats: Map<UInt16, Float> = [(wideKey, 1.25), (65535, -2.5)]
+	floats.reserve(200)
+	floats[0] = 3.5
+	verify(floats.get(wideKey) == 1.25)
+	verify(floats.take(65535) == -2.5)
+	verify(floats.get(0) == 3.5)
+	let duplicate = copy floats
+	verify(duplicate.get(wideKey) == 1.25)
+}
+
+let narrow: Map<UInt32, Int64> = [(0, Int64.minValue), (UInt32.maxValue, Int64.maxValue)]
+assert narrow.get(0) == Int64.minValue
+assert narrow.get(UInt32.maxValue) == Int64.maxValue
+let taggedStatic: Map<UInt8, Int64> = [(0, Int64.minValue), (255, Int64.maxValue)]
+assert taggedStatic.get(0) == Int64.minValue
+assert taggedStatic.get(255) == Int64.maxValue
+frameLiteral(7)
+wide()
+tagged(7, 9)
+console.log("scalar64 maps") -- prints: scalar64 maps

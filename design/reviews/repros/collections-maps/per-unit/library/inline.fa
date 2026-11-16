@@ -1,0 +1,5 @@
+export function = (key: UInt64): Map<UInt64, UInt8> => {
+	mutable map: Map<UInt64, UInt8> = [(0, 10), (UInt64.maxValue, 20)]
+	map[key] = 30
+	map
+}

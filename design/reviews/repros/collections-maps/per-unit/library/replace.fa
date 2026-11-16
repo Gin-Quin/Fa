@@ -1,0 +1,4 @@
+export function = (map: Map<Int64, UInt64>, key: Int64, value: UInt64) mutates map => {
+	map.reserve(1000)
+	map[key] = value
+}

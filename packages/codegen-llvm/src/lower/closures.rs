@@ -437,7 +437,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			return self.composition_value(value);
 		}
-		let Some(function) = self.functions.get(&declaration).cloned() else {
+		let key = if self
+			.generic_functions
+			.get(&declaration)
+			.is_some_and(|info| info.generics.is_empty())
+		{
+			self.lambda_instance(declaration, &[])?
+		} else {
+			declaration
+		};
+		let Some(function) = self.functions.get(&key).cloned() else {
 			// a generic function used as a generic function value (`generic_values.rs`)
 			if self.generic_functions.contains_key(&declaration) {
 				// given where an instance is expected (`names.map(identity)`)

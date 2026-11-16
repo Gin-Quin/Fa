@@ -417,10 +417,10 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		if self.target == Target::Native {
 			for name in ["__multi3", "__udivti3", "__umodti3", "__divti3", "__modti3"] {
 				if let Some(builtin) = self.module.get_function(name) {
-					for block in builtin.get_basic_blocks() {
-						// SAFETY: the blocks belong to this function only
-						unsafe { block.delete() }
-							.map_err(|()| Error::Llvm(format!("can't drop `{name}`")))?;
+					// SAFETY: drop cross-block uses before deleting the body,
+					// just as for the declaration-only runtime module.
+					unsafe {
+						fa_delete_function_body(inkwell::values::AsValueRef::as_value_ref(&builtin))
 					}
 					builtin.set_linkage(Linkage::External);
 				}

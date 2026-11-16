@@ -1526,3 +1526,7 @@ instructions 164.03 M → 159.43 M (Goose 148.79 M), audit −2.23%; every other
 row within +0.03%. The tag dispatch is already an IR `switch` that LLVM lowers to
 three compares; the narrow/far link format costs one predictable test per binary
 node and was left alone. CPU: see the aggregate report.
+
+### Ownership enforcement: reference-result integration boundary (lead, 2026-11-16)
+
+User-function reference parameters and results, their owner-path metadata, escape checking and target ABI belong to `links/spec-references`, currently in review. Ownership point 2 does not duplicate or alter that work. Merge main after it lands, then reconcile reference escape checks with move validity, `use` aliases across moves, and closures capturing references. Existing VM place bindings, captures and concrete moves remain in the ownership task. The uncommitted reference-result experiment was removed before landing.

@@ -381,6 +381,8 @@ def main():
     parser.add_argument("--prepare-only", action="store_true", help="Alias for --mode prepare")
     parser.add_argument("--render", type=Path, nargs="+", help="Merge phase JSON and generate Markdown")
     parser.add_argument("--markdown", type=Path)
+    parser.add_argument("--supplemental", action="store_true",
+                        help="Retain this diagnostic series in JSON without replacing headline table rows")
     parser.add_argument("--secondary-memory-mib", type=int, default=512)
     parser.add_argument("--additional", action="append", default=[], metavar="NAME=DIRECTORY",
                         help="Interleave an already prepared Fa variant (one selected benchmark, CPU mode)")
@@ -421,6 +423,7 @@ def main():
                    Path(measurements.__file__), Path(tables.__file__),
                    Path(__file__).with_name("sizes.txt"), Path(__file__).with_name("hot.py"))})}
     results["compiler_source_revision"] = os.environ.get("FA_SOURCE_REVISION")
+    results["supplemental"] = args.supplemental
     if args.mode == "secondary":
         results["secondary_memory_limit_mib"] = args.secondary_memory_mib
         results["runtime"] = artifacts.executable_identity(os.environ.get("BUN", str(Path.home() / ".bun/bin/bun")))

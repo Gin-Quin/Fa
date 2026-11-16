@@ -82,6 +82,9 @@ class Statistics(unittest.TestCase):
         self.assertIn('`example`', output)
         self.assertIn('`example@16`', output)
         self.assertIn('build failed', output)
+        other['supplemental'] = True
+        output = tables.markdown({'series': [phase, other]})
+        self.assertNotIn('`example@16`', output)
 
 
 if __name__ == '__main__':

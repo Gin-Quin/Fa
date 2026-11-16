@@ -114,3 +114,10 @@ by the variant, ratio of medians and paired median/quartiles). Apply the documen
 1.10 GrowingArray/Array gate to both estimates with the same control; this field
 does not invent a threshold for arbitrary variants. The same option replaces the
 old variants timer's multi-binary series.
+
+`FA_SOURCE_REVISION` records the compiler source commit separately from the
+runner/input commit (use it for parent/custom compiler builds). `--supplemental`
+retains a diagnostic series in combined JSON while excluding it from headline
+Markdown rows: parent profiles and extra variant series cannot silently replace
+trunk measurements. Native variant CPU pairs can be supplemental while the
+primary per-program series stays fixed.

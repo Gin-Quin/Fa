@@ -12,6 +12,8 @@ def markdown(report):
     phases = report["series"]
     rows = {}
     for phase in phases:
+        if phase.get("supplemental"):
+            continue
         for name, result in phase["benchmarks"].items():
             # Size overrides are separate rows; audit/default are matched by name.
             key = name if phase["size_set"] != "override" else f"{name}@{result['size']}"

@@ -105,7 +105,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The element at an address of a pool, or gathered from the columns of
 	/// a columnar (`place` is [`Lowering::pool_place`]'s).
-	fn element_read(
+	pub(super) fn element_read(
 		&self,
 		builder: &Builder<'ctx>,
 		place: Repr,
@@ -225,7 +225,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A loop over the elements of a pool in a helper (a drop, a copy).
-	fn helper_pool_each(
+	pub(super) fn helper_pool_each(
 		&self,
 		builder: &Builder<'ctx>,
 		function: FunctionValue<'ctx>,

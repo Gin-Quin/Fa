@@ -100,7 +100,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The size of an item and `k`, as the runtime takes them.
-	fn segment_arguments(&self, item: Repr) -> (IntValue<'ctx>, IntValue<'ctx>) {
+	pub(super) fn segment_arguments(&self, item: Repr) -> (IntValue<'ctx>, IntValue<'ctx>) {
 		(
 			self.item_size_const(item),
 			self.context

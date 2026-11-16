@@ -12,8 +12,9 @@ use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::syntax::{ArithOp, CompareOp, NodeList};
 use inkwell::IntPredicate;
+use inkwell::builder::Builder;
 use inkwell::module::Linkage;
-use inkwell::values::{BasicMetadataValueEnum, FloatValue, IntValue};
+use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FloatValue, IntValue};
 
 use crate::error::Error;
 use crate::lower::Lowering;
@@ -167,35 +168,48 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value: IntValue<'ctx>,
 		from: IntRepr,
 	) -> Result<Val<'ctx>, Error> {
+		let word = self.big_from_int_with(&self.builder, value, from)?;
+		Ok(self.fresh(Val::new(Repr::BigInt, word)))
+	}
+
+	pub(super) fn big_from_int_with(
+		&self,
+		builder: &Builder<'ctx>,
+		value: IntValue<'ctx>,
+		from: IntRepr,
+	) -> Result<BasicValueEnum<'ctx>, Error> {
+		let call = |name, args: &[BasicMetadataValueEnum<'ctx>]| -> Result<_, Error> {
+			Ok(builder
+				.build_call(self.runtime.function(name)?, args, "")?
+				.try_as_basic_value()
+				.basic()
+				.expect("a BigInt"))
+		};
 		let i64 = self.context.i64_type();
 		if from.bits <= 64 {
 			let (name, wide) = match (from.signed, from.bits < 64) {
 				(true, true) => (
 					"fa_bigint_from_i64",
-					self.builder.build_int_s_extend(value, i64, "")?,
+					builder.build_int_s_extend(value, i64, "")?,
 				),
 				(true, false) => ("fa_bigint_from_i64", value),
 				(false, true) => (
 					"fa_bigint_from_u64",
-					self.builder.build_int_z_extend(value, i64, "")?,
+					builder.build_int_z_extend(value, i64, "")?,
 				),
 				(false, false) => ("fa_bigint_from_u64", value),
 			};
-			return self.big_call(name, &[wide.into()]);
+			return call(name, &[wide.into()]);
 		}
-		let low = self.builder.build_int_truncate(value, i64, "")?;
-		let shifted = self.builder.build_right_shift(
-			value,
-			value.get_type().const_int(64, false),
-			false,
-			"",
-		)?;
-		let high = self.builder.build_int_truncate(shifted, i64, "")?;
+		let low = builder.build_int_truncate(value, i64, "")?;
+		let shifted =
+			builder.build_right_shift(value, value.get_type().const_int(64, false), false, "")?;
+		let high = builder.build_int_truncate(shifted, i64, "")?;
 		let signed = self
 			.context
 			.i32_type()
 			.const_int(u64::from(from.signed), false);
-		self.big_call(
+		call(
 			"fa_bigint_from_128",
 			&[low.into(), high.into(), signed.into()],
 		)
@@ -307,10 +321,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The nearest `Float` of a `BigInt` (`Number(a)` on JavaScript).
-	pub(crate) fn big_to_float(&self, value: Val<'ctx>) -> Result<FloatValue<'ctx>, Error> {
+	pub(super) fn big_to_float_with(
+		&self,
+		builder: &Builder<'ctx>,
+		value: Val<'ctx>,
+	) -> Result<FloatValue<'ctx>, Error> {
 		let function = self.runtime.function("fa_bigint_to_f64")?;
-		Ok(self
-			.call_value(function, &[value.int().into()])?
+		Ok(builder
+			.build_call(function, &[value.int().into()], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("a float")
 			.into_float_value())
 	}
 

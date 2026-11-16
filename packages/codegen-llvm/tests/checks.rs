@@ -80,6 +80,41 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn explicit_converting_copy_runs_one_owning_operation() {
+		let source = "function widen = (small: Array<Int8>): Array<Integer> => copy small\nlet small: Array<Int8> = [1, 2]\nconsole.log(small.length, widen(small).length)\n";
+		for (name, target) in [
+			("copy-convert-native", Target::Native),
+			("copy-convert-wasm", Target::Wasm),
+		] {
+			let ir = ir_at_target(name, source, true, OptLevel::O0, target);
+			let main = function(&ir, "fa.widen");
+			assert_eq!(
+				main.matches("call ptr @fa.copy.convert(").count(),
+				1,
+				"{ir}"
+			);
+			assert!(
+				!main.contains("call ptr @fa.copy("),
+				"the converted result must not be copied again: {ir}"
+			);
+			assert!(
+				!ir.contains("@fa_array_copy("),
+				"the converter builds the target directly: {ir}"
+			);
+		}
+	}
+
+	#[test]
+	fn explicit_copy_materializes_even_a_registered_call_result() {
+		let ir = ir_of(
+			"copy-call-result",
+			"function make = (): Array<Integer> => [1, 2]\nlet items = copy make()\nconsole.log(items)\n",
+		);
+		let main = function(&ir, "main");
+		assert_eq!(main.matches("call ptr @fa.copy(").count(), 1, "{ir}");
+	}
+
+	#[test]
 	fn appended_templates_check_the_total_before_reserving_on_both_pointer_widths() {
 		let source = "function append = (piece: String): String => {\nmutable out = \"\"\nout += \"{piece}{piece}{piece}\"\nout\n}\nconsole.log(append(\"abc\"))\n";
 		for (name, target, integer) in [

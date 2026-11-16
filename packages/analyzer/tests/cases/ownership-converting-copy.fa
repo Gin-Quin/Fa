@@ -1,0 +1,51 @@
+-- Explicit copies convert their completed result, including recursive parts.
+type Small = { value: Int8, next: Small? }
+type Wide = { value: Integer, next: Wide? }
+
+let small = Small { value = 1, next = Small { value = 2 } }
+let wide: Wide = copy small
+console.log(small.value, wide.value, wide.next?.value) -- prints: 1 1 2
+
+let bytes: Array<Int8> = [1, 2]
+mutable integers: Array<Integer> = copy bytes
+integers.push(3)
+console.log(bytes.length, integers.length, integers[1]) -- prints: 2 3 2
+
+function select = (flag: Boolean, a: Array<Int8>, b: Array<Int16>): Array<Integer> => copy (if flag { a } else { b })
+console.log(select(true, bytes, [4, 5, 6]).length) -- prints: 2
+console.log(select(false, bytes, [4, 5, 6]).length) -- prints: 3
+
+function fallback = (a: Array<Int8>?, b: Array<Int16>): Array<Integer> => copy (a ?? b)
+console.log(fallback(bytes, [4]).length) -- prints: 2
+console.log(fallback(none, [4]).length) -- prints: 1
+
+let records = [{ name = "Ada", unused = [1] }]
+let names: Array<{ name: String }> = copy records
+console.log(names[0].name, records[0].unused.length) -- prints: Ada 1
+
+let optional: Array<Integer?> = copy bytes
+let mixed: Array<Int8 | String> = copy bytes
+let wide64: Array<Int64> = copy bytes
+console.log(optional[1], mixed[0], wide64[0] + 1) -- prints: 2 1 2
+let narrowMixed: Array<Int8 | String> = [1, "two"]
+let wideMixed: Array<Integer | String> = copy narrowMixed
+console.log(wideMixed[0], wideMixed[1]) -- prints: 1 two
+
+let growing: GrowingArray<Int8> = [1, 2]
+let widerGrowing: GrowingArray<Integer> = copy growing
+console.log(growing.length, widerGrowing.length) -- prints: 2 2
+
+let smallSet: Set<Int8> = [1, 2]
+let largeSet: Set<Integer> = copy smallSet
+console.log(smallSet.size, largeSet.size, largeSet.includes(2)) -- prints: 2 2 true
+
+let smallMap: Map<Int8, Int8> = [(1, 2)]
+let largeMap: Map<Integer, Integer> = copy smallMap
+console.log(smallMap.size, largeMap.size, largeMap.get(1)) -- prints: 1 1 2
+
+let points: Pool<{ x: Int8 }> = [{ x = 1 }]
+let widePoints: Pool<{ x: Integer }> = copy points
+console.log(points.size, widePoints.size) -- prints: 1 1
+let rows: Columnar<{ x: Int8, name: String }> = [{ x = 1, name = "Ada" }]
+let wideRows: Columnar<{ x: Integer, name: String }> = copy rows
+for row in wideRows { console.log(row.x, row.name) } -- prints: 1 Ada

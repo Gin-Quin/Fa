@@ -117,72 +117,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Boxes a value into a union, by the type of its representation.
 	pub(crate) fn box_value(&self, value: Val<'ctx>, node: usize) -> Result<Val<'ctx>, Error> {
 		if let Repr::InlineUnion(nominal) = value.repr {
-			// copy_box returns its input for a bare member, because ordinary
-			// bare boxes are static. A stack view must never take that path:
-			// use a real static box, and copy only members carrying data.
-			let mut pointer = self.pointer_type().const_null();
-			let mut any_bare = self.context.bool_type().const_zero();
-			let mut has_bare = false;
-			let tag = self
-				.builder
-				.build_extract_value(value.value.expect("a union").into_struct_value(), 0, "")?
-				.into_int_value();
-			let count = self
-				.types()
-				.sym_list(self.types().nominal(nominal).members)
-				.len() as u16;
-			for index in 0..count {
-				if self.member_data(nominal, index).is_some() {
-					continue;
-				}
-				has_bare = true;
-				let id = self
-					.context
-					.i64_type()
-					.const_int(self.member_id(nominal, index), false);
-				let ty = self.box_type(None);
-				let global = self.module.add_global(ty, None, "fa.member");
-				global.set_initializer(&ty.const_named_struct(&[id.into()]));
-				global.set_constant(true);
-				global.set_linkage(inkwell::module::Linkage::Private);
-				let bare = self
-					.builder
-					.build_int_compare(IntPredicate::EQ, tag, id, "")?;
-				any_bare = self.builder.build_or(any_bare, bare, "")?;
-				pointer = self
-					.builder
-					.build_select(bare, global.as_pointer_value(), pointer, "")?
-					.into_pointer_value();
-			}
-			let bare_end = self.builder.get_insert_block().expect("a block");
-			let end = if has_bare {
-				let copy = self.append_block("box_payload");
-				let end = self.append_block("boxed_union");
-				self.builder.build_conditional_branch(any_bare, end, copy)?;
-				self.builder.position_at_end(copy);
-				Some(end)
-			} else {
-				None
-			};
-			let view = self.union_view(value)?;
-			let copied = self.call_value(
-				self.box_copy_function(),
-				&[view.value.expect("a view").into()],
-			)?;
-			let result = if let Some(end) = end {
-				let copied_end = self.builder.get_insert_block().expect("a block");
-				self.builder.build_unconditional_branch(end)?;
-				self.builder.position_at_end(end);
-				let result = self.builder.build_phi(self.pointer_type(), "box")?;
-				result.add_incoming(&[
-					(&pointer, bare_end),
-					(&copied.into_pointer_value(), copied_end),
-				]);
-				result.as_basic_value()
-			} else {
-				copied
-			};
-			return Ok(self.fresh(Val::new(Repr::Union, result)));
+			let copied =
+				self.copy_inline_box(&self.builder, nominal, value.value.expect("a union"))?;
+			return Ok(self.fresh(Val::new(Repr::Union, copied)));
 		}
 		let Some(ty) = self.canonical_type(value.repr) else {
 			return Err(self.unsupported(node, "storing this value in a union"));
@@ -205,6 +142,84 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			Ok(self.fresh(boxed))
 		}
+	}
+
+	/// Materialize an independent box, including static storage for bare
+	/// members. Usable from an ownership helper without a caller frame.
+	pub(super) fn copy_inline_box(
+		&self,
+		builder: &inkwell::builder::Builder<'ctx>,
+		nominal: NominalId,
+		value: inkwell::values::BasicValueEnum<'ctx>,
+	) -> Result<inkwell::values::BasicValueEnum<'ctx>, Error> {
+		let function = builder
+			.get_insert_block()
+			.expect("a block")
+			.get_parent()
+			.expect("a function");
+		// copy_box returns its input for a bare member, because ordinary
+		// bare boxes are static. A stack view must never take that path:
+		// use a real static box, and copy only members carrying data.
+		let mut pointer = self.pointer_type().const_null();
+		let mut any_bare = self.context.bool_type().const_zero();
+		let mut has_bare = false;
+		let tag = builder
+			.build_extract_value(value.into_struct_value(), 0, "")?
+			.into_int_value();
+		let count = self
+			.types()
+			.sym_list(self.types().nominal(nominal).members)
+			.len() as u16;
+		for index in 0..count {
+			if self.member_data(nominal, index).is_some() {
+				continue;
+			}
+			has_bare = true;
+			let id = self
+				.context
+				.i64_type()
+				.const_int(self.member_id(nominal, index), false);
+			let ty = self.box_type(None);
+			let global = self.module.add_global(ty, None, "fa.member");
+			global.set_initializer(&ty.const_named_struct(&[id.into()]));
+			global.set_constant(true);
+			global.set_linkage(inkwell::module::Linkage::Private);
+			let bare = builder.build_int_compare(IntPredicate::EQ, tag, id, "")?;
+			any_bare = builder.build_or(any_bare, bare, "")?;
+			pointer = builder
+				.build_select(bare, global.as_pointer_value(), pointer, "")?
+				.into_pointer_value();
+		}
+		let bare_end = builder.get_insert_block().expect("a block");
+		let end = if has_bare {
+			let copy = self.context.append_basic_block(function, "box_payload");
+			let end = self.context.append_basic_block(function, "boxed_union");
+			builder.build_conditional_branch(any_bare, end, copy)?;
+			builder.position_at_end(copy);
+			Some(end)
+		} else {
+			None
+		};
+		let view = self.inline_union_slot(builder, value)?;
+		let copied = builder
+			.build_call(self.box_copy_function(), &[view.into()], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("a copied box");
+		let result = if let Some(end) = end {
+			let copied_end = builder.get_insert_block().expect("a block");
+			builder.build_unconditional_branch(end)?;
+			builder.position_at_end(end);
+			let result = builder.build_phi(self.pointer_type(), "box")?;
+			result.add_incoming(&[
+				(&pointer, bare_end),
+				(&copied.into_pointer_value(), copied_end),
+			]);
+			result.as_basic_value()
+		} else {
+			copied
+		};
+		Ok(result)
 	}
 
 	/// The items of an anonymous union type (without `None`).
@@ -505,6 +520,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		&self,
 		ty: inkwell::types::BasicTypeEnum<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
+		self.allocate_for_with(&self.builder, ty)
+	}
+
+	pub(super) fn allocate_for_with(
+		&self,
+		builder: &inkwell::builder::Builder<'ctx>,
+		ty: inkwell::types::BasicTypeEnum<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
 		fn wide(ty: inkwell::types::BasicTypeEnum<'_>) -> bool {
 			match ty {
 				BasicTypeEnum::IntType(int) => int.get_bit_width() > 64,
@@ -517,7 +540,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 		}
 		let size = inkwell::types::BasicType::size_of(&ty).expect("a sized value");
-		self.allocate_aligned(size, if wide(ty) { 16 } else { 8 })
+		let size = builder.build_int_cast(size, self.usize, "")?;
+		let align = self.usize.const_int(if wide(ty) { 16 } else { 8 }, false);
+		Ok(builder
+			.build_call(self.runtime.alloc()?, &[size.into(), align.into()], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("a block")
+			.into_pointer_value())
 	}
 
 	fn allocate_aligned(

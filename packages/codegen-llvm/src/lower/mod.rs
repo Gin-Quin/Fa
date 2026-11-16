@@ -33,6 +33,7 @@ mod collection_storage;
 mod columns;
 mod compose;
 mod constants;
+mod converting_copies;
 mod copies;
 mod decimal;
 mod destination;
@@ -361,6 +362,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The generated drops and copies, by shape.
 	drop_functions: std::cell::RefCell<FxHashMap<String, FunctionValue<'ctx>>>,
 	copy_functions: std::cell::RefCell<FxHashMap<String, FunctionValue<'ctx>>>,
+	/// Bodies queued after their declarations, including recursive pairs.
+	pending_converting_copies:
+		std::cell::RefCell<Vec<(converting_copies::CopyPair, FunctionValue<'ctx>)>>,
 	/// The nodes reading each local (last uses).
 	local_uses: std::cell::RefCell<FxHashMap<SymbolId, Vec<NodeId>>>,
 	/// Closed-use proofs for empty growing-array origins, per source symbol.
@@ -573,6 +577,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			owned_locals: FxHashMap::default(),
 			drop_functions: std::cell::RefCell::new(FxHashMap::default()),
 			copy_functions: std::cell::RefCell::new(FxHashMap::default()),
+			pending_converting_copies: std::cell::RefCell::new(Vec::new()),
 			local_uses: std::cell::RefCell::new(FxHashMap::default()),
 			default_growing_origins: std::cell::RefCell::new(FxHashMap::default()),
 			node_parents: std::cell::RefCell::new(Vec::new()),
@@ -851,7 +856,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	pub(crate) fn type_of(&self, node: NodeId) -> TypeId {
-		self.analysis.type_of(node)
+		self.analysis
+			.copy_inputs
+			.get(&node)
+			.filter(|input| !input.produces)
+			.map_or_else(|| self.analysis.type_of(node), |input| input.target)
 	}
 
 	/// The check bits of a node; without overflow checks, never
@@ -2456,6 +2465,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if matches!(value.repr, Repr::Void | Repr::Never) {
 			return Ok(value);
 		}
+		if let Some(input) = self.analysis.copy_inputs.get(&node).copied() {
+			return if input.produces {
+				self.explicit_copy(value, input.source, input.target, node)
+			} else {
+				Ok(value)
+			};
+		}
 		match self.analysis.coercion(node) {
 			Some(target) if self.flags(node).contains(NodeFlags::SINK_CHECK) => {
 				self.sink_check(value, target, node)
@@ -2741,11 +2757,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Unsupported(name) => Err(self.unsupported(node.index(), name)),
 			// design/async.md §3 (`tasks.rs`)
 			View::Await(operand) => self.await_expression(node, operand),
-			View::Copy(operand) => {
-				let value = self.expr(operand)?;
-				let copied = self.emit_copy(value)?;
-				Ok(self.fresh(copied))
-			}
+			// Its result producers fulfill this boundary in `expr`; forwarding
+			// branches join those owned results without a second copy.
+			View::Copy(operand) => self.expr(operand),
 			View::Start(operand) => self.start_expression(node, operand),
 			other => Err(self.unsupported(node.index(), &format!("`{}`", variant_name(&other)))),
 		}

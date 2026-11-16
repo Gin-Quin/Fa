@@ -1,0 +1,44 @@
+-- Copies of region-backed views survive the region, including result branches.
+-- opt-level: 0
+-- asynchronous: false
+type Tree = Union {
+	Leaf = { text: String }
+	Pair = { left: Tree, right: Tree }
+}
+function leaf = (): Tree.Leaf => Tree.Leaf {
+	text = "a long frozen string whose owner must survive copies"
+}
+function churn = (): Tree.Leaf => Tree.Leaf {
+	text = "XXXXXXXXXX completely different data that overwrites the same freed node XXXXXXXXXX"
+}
+function field = (): String => copy leaf().text
+function block = (): String => copy (do {
+	let parent = leaf()
+	parent.text
+})
+function branch = (flag: Boolean): String => {
+	let parent = leaf()
+	copy (if flag { parent.text } else { "x" })
+}
+function projection = (): { text: String } => copy leaf()
+function split = (): Array<String> => {
+	mutable text = "a long sentence whose bytes must survive the local string"
+	copy text.split(" ")
+}
+let first = field()
+let second = block()
+let third = branch(true)
+let plain = projection()
+let parts = split()
+let other = churn()
+assert first == "a long frozen string whose owner must survive copies"
+assert first == second
+assert first == third
+assert first == plain.text
+assert "{other}".includes("XXXXXXXXXX")
+assert parts.get(0) == "a"
+mutable extended = copy first
+extended += "!"
+assert first == "a long frozen string whose owner must survive copies"
+assert extended == "a long frozen string whose owner must survive copies!"
+console.log("independent region copies") -- prints: independent region copies

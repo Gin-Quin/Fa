@@ -3,6 +3,7 @@
 
 use fa_analyzer::ids::{NodeId, NominalId, TypeId};
 use fa_analyzer::types::{CollKind, FloatBits, IntStorage, NominalKind, TypeKind};
+use inkwell::builder::Builder;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use rustc_hash::FxHashSet;
@@ -677,17 +678,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		from: IntRepr,
 		to: IntRepr,
 	) -> Result<IntValue<'ctx>, Error> {
+		self.int_to_with(&self.builder, value, from, to)
+	}
+
+	pub(super) fn int_to_with(
+		&self,
+		builder: &Builder<'ctx>,
+		value: IntValue<'ctx>,
+		from: IntRepr,
+		to: IntRepr,
+	) -> Result<IntValue<'ctx>, Error> {
 		let target = self.int_type(to.bits);
 		Ok(if to.bits == from.bits {
 			value
 		} else if to.bits > from.bits {
 			if from.signed {
-				self.builder.build_int_s_extend(value, target, "")?
+				builder.build_int_s_extend(value, target, "")?
 			} else {
-				self.builder.build_int_z_extend(value, target, "")?
+				builder.build_int_z_extend(value, target, "")?
 			}
 		} else {
-			self.builder.build_int_truncate(value, target, "")?
+			builder.build_int_truncate(value, target, "")?
 		})
 	}
 
@@ -806,6 +817,67 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
+	/// Bounded primitive conversion, independent of the caller's frame and
+	/// temporary registry. A newly allocated BigInt belongs to the result.
+	pub(super) fn scalar_conversion(
+		&self,
+		builder: &Builder<'ctx>,
+		value: Val<'ctx>,
+		to: Repr,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		let Some(raw) = value.value else {
+			return Ok(None);
+		};
+
+		let converted = match (value.repr, to) {
+			(Repr::Int(from), Repr::Int(int)) => Val::new(
+				to,
+				self.int_to_with(builder, raw.into_int_value(), from, int)?,
+			),
+			(Repr::Int(from), Repr::F64 | Repr::F32) => {
+				let target = if to == Repr::F64 {
+					self.context.f64_type()
+				} else {
+					self.context.f32_type()
+				};
+				let raw = raw.into_int_value();
+				Val::new(
+					to,
+					if from.signed {
+						builder.build_signed_int_to_float(raw, target, "")?
+					} else {
+						builder.build_unsigned_int_to_float(raw, target, "")?
+					},
+				)
+			}
+			(Repr::Int(from), Repr::BigInt) => Val::new(
+				Repr::BigInt,
+				self.big_from_int_with(builder, raw.into_int_value(), from)?,
+			),
+			(Repr::BigInt, Repr::F64 | Repr::F32) => {
+				let wide = self.big_to_float_with(builder, value)?;
+				if to == Repr::F64 {
+					Val::new(to, wide)
+				} else {
+					Val::new(
+						to,
+						builder.build_float_trunc(wide, self.context.f32_type(), "")?,
+					)
+				}
+			}
+			(Repr::F32, Repr::F64) => Val::new(
+				to,
+				builder.build_float_ext(raw.into_float_value(), self.context.f64_type(), "")?,
+			),
+			(Repr::F64, Repr::F32) => Val::new(
+				to,
+				builder.build_float_trunc(raw.into_float_value(), self.context.f32_type(), "")?,
+			),
+			_ => return Ok(None),
+		};
+		Ok(Some(converted))
+	}
+
 	pub(crate) fn convert(
 		&self,
 		value: Val<'ctx>,
@@ -876,55 +948,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(raw) = value.value else {
 			return Err(self.unsupported(node, "a value of type `Void`"));
 		};
+		if let Some(converted) = self.scalar_conversion(&self.builder, value, to)? {
+			return Ok(if to == Repr::BigInt {
+				self.fresh(converted)
+			} else {
+				converted
+			});
+		}
 		Ok(match (value.repr, to) {
-			(Repr::Int(from), Repr::Int(int)) => {
-				Val::new(to, self.int_to(raw.into_int_value(), from, int)?)
-			}
-			(Repr::Int(from), Repr::F64 | Repr::F32) => {
-				let target = if to == Repr::F64 {
-					self.context.f64_type()
-				} else {
-					self.context.f32_type()
-				};
-				let raw = raw.into_int_value();
-				Val::new(
-					to,
-					if from.signed {
-						self.builder.build_signed_int_to_float(raw, target, "")?
-					} else {
-						self.builder.build_unsigned_int_to_float(raw, target, "")?
-					},
-				)
-			}
-			(Repr::Int(from), Repr::BigInt) => self.big_from_int(raw.into_int_value(), from)?,
-			(Repr::BigInt, Repr::F64 | Repr::F32) => {
-				let wide = self.big_to_float(value)?;
-				if to == Repr::F64 {
-					Val::new(to, wide)
-				} else {
-					Val::new(
-						to,
-						self.builder
-							.build_float_trunc(wide, self.context.f32_type(), "")?,
-					)
-				}
-			}
-			(Repr::F32, Repr::F64) => Val::new(
-				to,
-				self.builder.build_float_ext(
-					raw.into_float_value(),
-					self.context.f64_type(),
-					"",
-				)?,
-			),
-			(Repr::F64, Repr::F32) => Val::new(
-				to,
-				self.builder.build_float_trunc(
-					raw.into_float_value(),
-					self.context.f32_type(),
-					"",
-				)?,
-			),
 			// items of the same representation (an instance's `Array(Item)`)
 			(Repr::Array(a), Repr::Array(b))
 				if self.item_repr(a, NodeId::new(node))?

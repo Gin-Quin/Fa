@@ -1077,7 +1077,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The number of bytes compared bitwise for keys whose `==` is their bits
 	/// (whole-byte integers), or 0 for the others (compared by `fa.key_equals`).
-	fn bitwise_key_size(table: Table<'ctx>) -> u64 {
+	pub(super) fn bitwise_key_size(table: Table<'ctx>) -> u64 {
 		match table.key {
 			Repr::Int(int) if matches!(int.bits, 8 | 16 | 32 | 64 | 128) => u64::from(int.bits / 8),
 			_ => 0,
@@ -2550,7 +2550,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A loop over the live entries of a table in a helper.
-	fn helper_entries(
+	pub(super) fn helper_entries(
 		&self,
 		builder: &Builder<'ctx>,
 		function: FunctionValue<'ctx>,

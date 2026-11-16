@@ -1064,7 +1064,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The items and the length of an array, from a helper's builder.
-	fn helper_array_parts(
+	pub(super) fn helper_array_parts(
 		&self,
 		builder: &Builder<'ctx>,
 		array: PointerValue<'ctx>,

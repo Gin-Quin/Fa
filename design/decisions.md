@@ -1975,7 +1975,12 @@ layouts and all value assertions. No expected-skip list changes.
   loops, changing layouts or adding floating-point reassociation/contract flags.
   Exact floating-state, generic/function-value/callback/capture/async, O0/leak
   and whole/split/cache tests cover the proof and its fallbacks. Measurements
-  and final acceptance follow in the array performance report.
+  and final acceptance follow in the array performance report. The first CPU
+  series passes its control (1.000995/1.003666) and observes 4.81%/3.55%
+  before/after reductions. All 40 instruction gates pass; nbody falls 13.146%
+  to 753 M Ir. Goose passes (0.881/0.882); Rust remains ahead (1.122/1.091).
+  Retain the general proof; outer-loop/register promotion remains a follow-up.
+  Quartiles describe samples, without a claim of statistical significance.
 
 ## Array performance — GrowingArray loop facts (2026-11-16)
 

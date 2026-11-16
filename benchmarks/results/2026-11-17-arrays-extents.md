@@ -26,7 +26,7 @@ Every CPU verdict requires the same-binary control to differ by <3% on both meas
 | — | `lru` | — | unmeasured | — | — | — | — | — |
 | — | `lru-open` | — | unmeasured | — | — | — | — | — |
 | — | `mandelbrot` | — | unmeasured | — | — | — | — | — |
-| — | `nbody` | — | unmeasured | — | — | — | — | — |
+| secondary | `nbody` | 15000000 | 0.881 / 0.882 [0.849, 0.945] | 1.122 / 1.091 [1.041, 1.230] | 0.864 | 1.046 | 1.001/1.004 pass | goal met / behind |
 | — | `particles` | — | unmeasured | — | — | — | — | — |
 | — | `particles-reserved` | — | unmeasured | — | — | — | — | — |
 | — | `push` | — | unmeasured | — | — | — | — | — |
@@ -74,7 +74,7 @@ Wasm and Bun timings use the size shown, including process startup; errors are r
 | `lru` | — | — | — | 200000 | 19.154 / 17.889 / 53.753 | — | — | — |
 | `lru-open` | — | — | — | 200000 | 20.953 / 17.889 / 21.916 | — | — | — |
 | `mandelbrot` | — | — | — | 1000 | 440.665 / 441.518 / 440.805 | — | — | — |
-| `nbody` | — | — | — | 1500000 | 753.184 / 871.789 / 720.326 | — | — | — |
+| `nbody` | 1.092 / 1.239 / 0.973 | 1664 / 2048 / 1920 | 33368 / 18912 / 346648 | 1500000 | 753.184 / 871.789 / 720.326 | — | — | — |
 | `particles` | — | — | — | 30000 | 105.170 / 105.580 / 105.520 | — | — | — |
 | `particles-reserved` | — | — | — | 30000 | 105.170 / 105.580 / 105.520 | — | — | — |
 | `push` | — | — | — | 3200000 | 135.551 / 121.473 / 144.458 | — | — | — |

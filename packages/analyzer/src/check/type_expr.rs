@@ -131,9 +131,22 @@ impl Walker<'_> {
 					return ty;
 				}
 				SymbolKind::TypeParameter => return self.symbol_type(symbol, n),
-				// a `static` value is its literal type (M3: `static` is not analyzed yet)
+				// A `static` value can denote its well-formed literal type.
 				SymbolKind::Static => {
 					let ty = self.symbol_type(symbol, n);
+					let value = self
+						.a
+						.static_values
+						.get(&symbol)
+						.cloned()
+						.or_else(|| self.external_static(symbol));
+					if matches!(value, Some(fa_interpreter::Value::String(text)) if !text.is_well_formed())
+					{
+						let diagnostic =
+							self.diagnostic(&TY008, n, super::schemas::LONE_SURROGATE_TYPE);
+						self.report(diagnostic);
+						return TypeId::UNKNOWN;
+					}
 					return if self.s.types.is_literal(ty) {
 						ty
 					} else {

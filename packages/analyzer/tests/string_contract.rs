@@ -431,3 +431,66 @@ fn editor_surface_has_no_retired_type_or_byte_view() {
 		assert!(!hover.markdown.contains("grapheme"));
 	}
 }
+
+#[test]
+fn computed_literal_types_reject_surrogates_at_each_entry_point() {
+	const ROOT: &str = "cases/values/07-strings-and-characters/";
+	for (name, code, span) in [
+		("schema-known-lone-surrogate.fa", "TF042", "half"),
+		(
+			"schema-static-lone-surrogate.fa",
+			"TF042",
+			"@literal(\"😀\"[0])",
+		),
+		(
+			"schema-reconstruct-lone-surrogate.fa",
+			"TF042",
+			"TypeFromSchema<@literal(\"😀\"[0])>",
+		),
+		("schema-generic-lone-surrogate.fa", "TF042", "Cut<String>"),
+		(
+			"schema-nested-lone-surrogate.fa",
+			"TF042",
+			"TypeFromSchema<@tuple(\"😀\"[0])>",
+		),
+		("static-lone-surrogate-type.fa", "TY008", "half"),
+		("static-lone-surrogate-type-argument.fa", "TY008", "half"),
+	] {
+		let source = std::fs::read_to_string(
+			std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+				.join("tests")
+				.join(format!("{ROOT}{name}")),
+		)
+		.unwrap();
+		for target in [
+			"bun",
+			"node",
+			"web",
+			"native",
+			"native-freestanding",
+			"wasm",
+		] {
+			assert_diagnostic_on_target(
+				&source,
+				code,
+				span,
+				&[
+					"a literal type cannot hold a lone surrogate",
+					"use `String`",
+					"well-formed",
+				],
+				target,
+			);
+		}
+		let (session, file) = analyze_source(&source);
+		let diagnostics = session.diagnostics(file);
+		assert_eq!(
+			diagnostics
+				.iter()
+				.filter(|d| d.severity == fa_analyzer::diagnostics::Severity::Error)
+				.count(),
+			1,
+			"{name}: {diagnostics:#?}"
+		);
+	}
+}

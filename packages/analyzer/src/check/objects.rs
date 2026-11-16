@@ -545,6 +545,7 @@ impl Walker<'_> {
 		}
 		let result = member.unwrap_or(object);
 		self.memo(n, |w| {
+
 			let type_name = w.display(object);
 			let mut given: Vec<Sym> = Vec::new();
 			for field in fields {
@@ -649,6 +650,7 @@ impl Walker<'_> {
 					fields: values,
 				},
 			);
+			w.check_literal_schema_constructor(n, result);
 			result
 		});
 	}

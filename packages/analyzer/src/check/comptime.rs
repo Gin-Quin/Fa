@@ -381,6 +381,9 @@ impl Walker<'_> {
 				w.report(diagnostic);
 			}
 			let computed = value.and_then(|value| w.evaluate_at(value, value));
+			if let (Some(at), Some(computed)) = (value, &computed) {
+				w.check_literal_schema_value(at, computed);
+			}
 			let computed = match computed {
 				Some(computed) if computed.has_function() => {
 					let diagnostic = w.diagnostic(
@@ -846,6 +849,7 @@ impl Walker<'_> {
 		let value = self.evaluate_at(n, n);
 		self.comptime_evaluated.insert(n);
 		if let Some(value) = value {
+			self.check_literal_schema_value(n, &value);
 			self.a.constants.insert(n, value);
 		}
 	}

@@ -830,12 +830,8 @@ impl Walker<'_> {
 	pub(super) fn report_readonly_element(&mut self, target: NodeId, symbol: SymbolId) -> bool {
 		let readonly = self.readonly_elements.contains(&symbol)
 			|| self.body.flow.ref_state(symbol).is_some_and(|state| {
-				self.facts
-					.refs
-					.get(state)
-					.places
-					.iter()
-					.any(|&place| self.readonly_place(place))
+				let state = self.facts.refs.get(state);
+				state.readonly || state.places.iter().any(|&place| self.readonly_place(place))
 			}) || self
 			.reference_parameters
 			.get(&symbol)

@@ -11,3 +11,9 @@ function nested = (nodes: Array<Node>, node: Node in nodes) mutates node.keys =>
  use found = node.keys.find((value) => value == 7)
  if found is not none { found = 9 } -- error: CL031
 }
+
+type PickKey = (nodes: Array<Node>) => Integer in nodes throws IndexError
+function unknownResult = (nodes: Array<Node>, pick: PickKey) throws IndexError => {
+ use key = try pick(nodes)
+ key = 9 -- error: CL031
+}

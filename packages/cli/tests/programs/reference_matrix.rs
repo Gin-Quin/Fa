@@ -528,7 +528,7 @@ fn generated_reference_matrix() {
 	for (source, expected, id) in [
 		(
 			include_str!("../../../analyzer/tests/cases/references/review2-nested-result-paths.fa"),
-			"[8, 8]",
+			"[8, 8, 4]",
 			100002,
 		),
 		(
@@ -538,6 +538,13 @@ fn generated_reference_matrix() {
 			"[5, 15, 20]",
 			100003,
 		),
+		(
+			include_str!(
+				"../../../analyzer/tests/cases/references/review2-opaque-result-aliases.fa"
+			),
+			"[1, 1]",
+			100004,
+		),
 	] {
 		let source = source
 			.split("static ")
@@ -545,7 +552,11 @@ fn generated_reference_matrix() {
 			.unwrap()
 			.replace("Node", &format!("NestedNode{id}"))
 			.replace("exercise", &format!("exercise{id}"));
-		let source = if id == 100002 {
+		let mut source = source;
+		for name in ["field", "preserve", "slot", "pick", "observe", "Pick"] {
+			source = source.replace(name, &format!("{name}{id}"));
+		}
+		let source = if matches!(id, 100002 | 100004) {
 			source.replace(
 				&format!("exercise{id} = ()"),
 				&format!("exercise{id} = (_flag: Boolean)"),

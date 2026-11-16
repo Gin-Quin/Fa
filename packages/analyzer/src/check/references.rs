@@ -28,6 +28,12 @@ use crate::symbols::{DeclState, Resolution, Symbol, SymbolKind};
 use crate::syntax::{self, Name, View};
 use crate::types::{CollKind, TypeKind};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReferenceReach {
+	Owned,
+	ReadOnly,
+}
+
 impl Walker<'_> {
 	// ── declaring references ──────────────────────────────────────────────
 
@@ -103,6 +109,7 @@ impl Walker<'_> {
 					..RefState::valid(designated)
 				});
 				self.body.flow.set_ref_state(symbol, state);
+				self.bind_reference_identity(symbol, value);
 				// the narrowing of the place, as a fact of the alias
 				let declared_ty = self.a.symbols.symbol(symbol).ty;
 				let narrowed = self.s.types.widen(actual);
@@ -218,14 +225,39 @@ impl Walker<'_> {
 		self.place_of(owner)
 	}
 
-	pub(super) fn reference_is_fresh(&mut self, value: NodeId) -> bool {
+	pub(super) fn reference_is_fresh(&mut self, value: NodeId, owner: Option<PlaceId>) -> bool {
+		let Some(owner) = owner else {
+			return false;
+		};
+		let owner = self.canonical_reference_place(owner);
+		let depth = self.place_steps(owner).len();
 		let origins = self.evaluated_origins(value);
 		!origins.owned
 			&& origins.places.iter().all(|&place| {
-				self.place_steps(place)
-					.iter()
-					.any(|step| matches!(step, Step::Index(crate::flow::Identity::Fresh(_))))
+				let place = self.canonical_reference_place(place);
+				self.may_be_at_or_below(place, owner)
+					&& matches!(
+						self.place_steps(place).get(depth),
+						Some(Step::Index(crate::flow::Identity::Fresh(_)))
+					)
 			})
+	}
+
+	fn bind_reference_identity(&mut self, symbol: SymbolId, value: NodeId) {
+		let mut value = self.strip_groups(value);
+		while let View::Try(inner) = self.view(value) {
+			value = self.strip_groups(inner);
+		}
+		let source = match self.view(value) {
+			View::Name(_) => match self.a.resolution(value) {
+				Resolution::Local(source) if self.body.flow.ref_state(source).is_some() => {
+					Some(source)
+				}
+				_ => None,
+			},
+			_ => None,
+		};
+		self.body.flow.bind_reference_alias(symbol, source);
 	}
 
 	/// Reference origins use the same flow places as effects and calls.
@@ -248,6 +280,7 @@ impl Walker<'_> {
 	/// The result must cross an element of its declared owner. Metadata such
 	/// as `values.length` is below the collection but is not an owned element.
 	fn reference_is_inside(&mut self, place: PlaceId, owner: PlaceId) -> bool {
+		let owner = self.canonical_reference_place(owner);
 		let place = self.canonical_reference_place(place);
 		self.may_be_at_or_below(place, owner)
 			&& matches!(
@@ -279,7 +312,7 @@ impl Walker<'_> {
 		}
 		let summary = self.reference_value_summary(value);
 		let valid = self.reference_result_valid(value, Some(owner));
-		let fresh = self.reference_is_fresh(value);
+		let fresh = self.reference_is_fresh(value, Some(owner));
 		let layout = self.reference_result_layout(value, owner);
 		if let Some(cx) = self.body.functions.last_mut()
 			&& cx.ref_owner == Some(owner)
@@ -610,6 +643,17 @@ impl Walker<'_> {
 		}
 		let mut summary = Vec::new();
 		for closure in origins.closures {
+			if let TypeKind::Function(expected) = self.s.types.kind(self.type_of(callee))
+				&& self
+					.a
+					.functions
+					.get(&closure.lambda)
+					.and_then(|info| info.sig)
+					.is_some_and(|actual| {
+						self.s.types.sig(actual).reference != self.s.types.sig(expected).reference
+					}) {
+				return None;
+			}
 			if !closure.projection.is_empty() {
 				return None;
 			}
@@ -680,6 +724,10 @@ impl Walker<'_> {
 		}
 		if result.places.is_empty() {
 			for &(owner, _, _) in &owners {
+				if let Some(owner_ty) = self.place_type(owner) {
+					result.readonly |=
+						self.type_reference_reaches(owner_ty, sig.ret, ReferenceReach::ReadOnly);
+				}
 				result.places.push(
 					self.places
 						.child(owner, Step::Index(crate::flow::Identity::Unknown)),
@@ -693,6 +741,13 @@ impl Walker<'_> {
 		if sig.fresh && self.direct_reference_callee(callee) {
 			self.body.flow.time += 1;
 			let identity = crate::flow::Identity::Fresh(self.body.flow.time);
+			for bound in &mut result.bounds {
+				if bound.formal.is_none()
+					&& owners.iter().any(|&(owner, _, _)| owner == bound.place)
+				{
+					bound.place = self.places.child(bound.place, Step::Index(identity));
+				}
+			}
 			for place in &mut result.places {
 				for &(owner, _, _) in &owners {
 					if self.may_be_at_or_below(*place, owner) {
@@ -1014,6 +1069,7 @@ impl Walker<'_> {
 					..RefState::valid(designated)
 				});
 				self.body.flow.set_ref_state(symbol, state);
+				self.bind_reference_identity(symbol, value);
 				// the facts known of the old place are not the new one's
 				let own = self.places.symbol(symbol);
 				self.body.flow.drop_below(&self.places, own);
@@ -1436,20 +1492,36 @@ impl Walker<'_> {
 							|| self
 								.effect_type
 								.or_else(|| self.place_type(raw_place))
-								.is_none_or(|ty| !self.is_flat(ty)))
+								.is_none_or(|ty| {
+									self.type_reference_reaches(
+										ty,
+										self.a.symbols.symbol(symbol).ty,
+										ReferenceReach::Owned,
+									)
+								}))
 				});
-			let reached = bounded
-				|| designated_places.iter().any(|&designated| {
-					if invalidates {
-						self.may_be_at_or_below(designated, place)
-					} else {
-						self.mutation_invalidates(designated, place)
-					}
+			// A descendant bound's representative is metadata, not an exact place.
+			// A formal root remains exact relative to effects through that same root.
+			let precise = current.bounds.is_empty()
+				|| current.bounds.iter().any(|bound| {
+					bound
+						.formal
+						.is_some_and(|formal| self.place_symbol(raw_place) == Some(formal))
 				});
-			let touched = reached
-				|| designated_places
-					.iter()
-					.any(|&designated| self.may_overlap(designated, place));
+			let reached = !self.effect_protected_references.contains(&symbol)
+				&& (bounded
+					|| precise
+						&& designated_places.iter().any(|&designated| {
+							if invalidates {
+								self.may_be_at_or_below(designated, place)
+							} else {
+								self.mutation_invalidates(designated, place)
+							}
+						}));
+			let touched = bounded
+				|| reached || designated_places
+				.iter()
+				.any(|&designated| self.may_overlap(designated, place));
 			if touched {
 				// the facts read through the alias may be stale; its narrowing
 				// stays when the effect is below what it designates, or changes
@@ -1485,6 +1557,96 @@ impl Walker<'_> {
 			});
 			self.body.flow.set_ref_state(symbol, next);
 		}
+	}
+
+	/// Follow type projections, distinguishing owning edges from read-only
+	/// set elements and map keys. Relation fields never own their targets.
+	fn type_reference_reaches(
+		&mut self,
+		owner: TypeId,
+		referent: TypeId,
+		property: ReferenceReach,
+	) -> bool {
+		let mut pending = vec![(owner, false)];
+		let mut seen = rustc_hash::FxHashSet::default();
+		while let Some((ty, reached)) = pending.pop() {
+			if !seen.insert((ty, reached)) {
+				continue;
+			}
+			if reached
+				&& (self.s.types.satisfies(ty, referent) || self.s.types.satisfies(referent, ty))
+			{
+				return true;
+			}
+			match self.s.types.kind(ty) {
+				TypeKind::Collection(kind, item, key) => {
+					let item_reached = reached
+						|| property == ReferenceReach::Owned
+						|| matches!(kind, CollKind::Set | CollKind::GrowingSet);
+					pending.push((item, item_reached));
+					if matches!(kind, CollKind::Map | CollKind::GrowingMap) {
+						pending.push((key, true));
+					}
+				}
+				TypeKind::Object(_) => pending.extend(
+					self.s
+						.types
+						.fields_of(ty)
+						.iter()
+						.filter(|field| !field.flags.contains(crate::types::FieldFlags::RELATION))
+						.map(|field| (field.ty, reached)),
+				),
+				TypeKind::Tuple(list) | TypeKind::Union(list) => {
+					let reached = reached
+						|| property == ReferenceReach::Owned
+							&& matches!(self.s.types.kind(ty), TypeKind::Union(_));
+					pending.extend(
+						self.s
+							.types
+							.list_items(list)
+							.iter()
+							.map(|&item| (item, reached)),
+					);
+				}
+				TypeKind::Rec(_) => pending.push((self.s.types.unfold(ty), reached)),
+				TypeKind::NamedUnion(nominal, mask) => {
+					if property == ReferenceReach::Owned
+						&& matches!(self.s.types.kind(referent), TypeKind::Member(target, index) if target == nominal && self.s.types.mask_has(mask, index))
+					{
+						return true;
+					}
+					let reached = reached || property == ReferenceReach::Owned;
+					for index in 0..self
+						.s
+						.types
+						.sym_list(self.s.types.nominal(nominal).members)
+						.len()
+					{
+						if self.s.types.mask_has(mask, index as u16) {
+							pending.push((self.s.types.payload(nominal, index as u16), reached));
+						}
+					}
+				}
+				TypeKind::Member(nominal, index) => {
+					pending.push((self.s.types.payload(nominal, index), reached))
+				}
+				TypeKind::String | TypeKind::StringLit(_) => {
+					if property == ReferenceReach::Owned
+						&& self.s.types.satisfies(TypeId::STRING, referent)
+					{
+						return true;
+					}
+				}
+				TypeKind::Param(_) | TypeKind::Unknown => {
+					if reached || property == ReferenceReach::Owned {
+						return true;
+					}
+				}
+				TypeKind::CArray(item, _) => pending.push((item, reached)),
+				_ => {}
+			}
+		}
+		false
 	}
 
 	/// `mutates p` invalidates `r` when `r` is strictly below `p` and the

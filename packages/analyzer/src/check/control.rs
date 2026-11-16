@@ -937,6 +937,7 @@ impl Walker<'_> {
 				reported: false,
 			});
 			self.body.flow.set_ref_state(variable, state);
+			self.body.flow.bind_reference_alias(variable, None);
 		}
 
 		self.enter_loop(n, LoopKind::For, None, false);

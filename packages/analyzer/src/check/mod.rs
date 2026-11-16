@@ -444,6 +444,7 @@ pub struct Walker<'s> {
 	/// The place each `use` alias and `for` variable over a collection designates.
 	pub(crate) aliases: FxHashMap<SymbolId, PlaceId>,
 	/// Borrowed call results, recorded once after that evaluation's effects.
+	pub(crate) effect_protected_references: Vec<SymbolId>,
 	pub(crate) invalid_reference_arguments: rustc_hash::FxHashSet<NodeId>,
 	pub(crate) reference_results: FxHashMap<NodeId, crate::flow::values::ValueOrigins>,
 	/// Borrowed result leaves, captured before their branch flow is joined.
@@ -642,6 +643,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		implicit_write_calls: Vec::new(),
 		key_sets: key_sets::KeySetState::default(),
 		aliases: FxHashMap::default(),
+		effect_protected_references: Vec::new(),
 		invalid_reference_arguments: rustc_hash::FxHashSet::default(),
 		reference_results: FxHashMap::default(),
 		value_origins: FxHashMap::default(),

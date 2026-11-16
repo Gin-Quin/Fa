@@ -1,17 +1,17 @@
 function exercise = (flag: Boolean): Array<Integer> => {
- mutable low = 1
- mutable high = 10
- mutable values = [20]
- mutable use current = low
- if flag { reuse current = high } else { reuse current = values[0] }
- use saved = current
- current += 2
- reuse current = low
- saved += 3
- current += 4
- [low, high, values[0]]
+	mutable low = 1
+	mutable high = 10
+	mutable values = [20]
+	mutable use current = low
+	if flag { reuse current = high } else { reuse current = values[0] }
+	use saved = current
+	current += 2
+	reuse current = low
+	saved += 3
+	current += 4
+	[low, high, values[0]]
 }
 static first = @exercise(true)
 static second = @exercise(false)
-console.log(first, second) -- prints: [5, 15, 20] [5, 10, 25]
+console.log(first, second)                   -- prints: [5, 15, 20] [5, 10, 25]
 console.log(exercise(true), exercise(false)) -- prints: [5, 15, 20] [5, 10, 25]

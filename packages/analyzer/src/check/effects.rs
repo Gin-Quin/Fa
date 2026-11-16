@@ -445,10 +445,13 @@ impl Walker<'_> {
 		let evaluated = self.evaluated_origins(target);
 		for bound in evaluated.bounds {
 			if bound.formal.is_none() {
-				let saved = self.effect_type;
-				self.effect_type = Some(self.type_of(target));
-				self.record_effect(bound.place, false, n, false);
-				self.effect_type = saved;
+				self.record_bounded_effect(
+					bound.place,
+					Some(self.type_of(target)),
+					target,
+					n,
+					false,
+				);
 			}
 		}
 		for place in self.places_of(target) {
@@ -462,6 +465,30 @@ impl Walker<'_> {
 				self.record_effect(size, false, n, true);
 			}
 		}
+	}
+
+	fn protect_reference_argument(&mut self, argument: NodeId) -> Vec<SymbolId> {
+		let protected = self
+			.root_symbol(argument)
+			.filter(|&symbol| self.body.flow.ref_state(symbol).is_some())
+			.map(|symbol| self.body.flow.reference_equivalents(symbol))
+			.unwrap_or_default();
+		std::mem::replace(&mut self.effect_protected_references, protected)
+	}
+
+	fn record_bounded_effect(
+		&mut self,
+		owner: PlaceId,
+		ty: Option<TypeId>,
+		argument: NodeId,
+		n: NodeId,
+		call: bool,
+	) {
+		let protected = self.protect_reference_argument(argument);
+		let effect_type = std::mem::replace(&mut self.effect_type, ty);
+		self.record_effect(owner, false, n, call);
+		self.effect_type = effect_type;
+		self.effect_protected_references = protected;
 	}
 
 	/// An effect on `place` at node `n` (advanced brief §5.7 steps 6–8):
@@ -1490,6 +1517,8 @@ impl Walker<'_> {
 			self.check_captured_references(n, function);
 		}
 		// the places the call changes, with the argument each one comes from
+		let mut bound_protections: rustc_hash::FxHashMap<(PlaceId, NodeId), bool> =
+			rustc_hash::FxHashMap::default();
 		let mut changed: Vec<(PlaceId, bool, Option<NodeId>)> = Vec::new();
 		let mut builtin_effects: Vec<BuiltinEffect> = Vec::new();
 		let mut receiver_places = Vec::new();
@@ -1610,6 +1639,19 @@ impl Walker<'_> {
 						self.temporary_mutated(path, &info.arguments, &name);
 					}
 					for (place, base, argument) in places {
+						if self
+							.evaluated_origins(argument)
+							.bounds
+							.iter()
+							.any(|bound| bound.formal.is_none() && bound.place == place)
+						{
+							let keeps_root =
+								!invalidates || !self.s.types.path_data(path).1.is_empty();
+							bound_protections
+								.entry((place, argument))
+								.and_modify(|old| *old &= keeps_root)
+								.or_insert(keeps_root);
+						}
 						// a parameter of the payload's type changes the payload only:
 						// a parameter is never replaced (`EFF006`); one typed
 						// `Array?` or a union may stand for the optional itself
@@ -1705,12 +1747,24 @@ impl Walker<'_> {
 		self.kept_narrowings = kept;
 		if !receiver_places.is_empty() {
 			let bounds = self.evaluated_origins(callee).bounds;
-			for bound in bounds {
-				if bound.formal.is_none() {
-					let saved = self.effect_type;
-					self.effect_type = self.callee_receiver_type(callee);
-					self.record_effect(bound.place, false, n, true);
-					self.effect_type = saved;
+			for &effect in &builtin_effects {
+				let receiver_ty = self.callee_receiver_type(callee);
+				let ty = match effect {
+					BuiltinEffect::MutatesSize
+					| BuiltinEffect::MutatesLength
+					| BuiltinEffect::MutatesCapacity => Some(TypeId::INTEGER),
+					BuiltinEffect::MutatesKey(_) => {
+						receiver_ty.and_then(|ty| match self.s.types.kind(ty) {
+							TypeKind::Collection(_, item, _) => Some(item),
+							_ => None,
+						})
+					}
+					_ => receiver_ty,
+				};
+				for bound in &bounds {
+					if bound.formal.is_none() {
+						self.record_bounded_effect(bound.place, ty, callee, n, true);
+					}
 				}
 			}
 			for base in receiver_places {
@@ -1734,10 +1788,16 @@ impl Walker<'_> {
 				}
 			}
 		} else {
-			for (place, invalidates, _) in changed {
+			for (place, invalidates, argument) in changed {
+				let previous = argument
+					.filter(|&argument| bound_protections.get(&(place, argument)) == Some(&true))
+					.map(|argument| self.protect_reference_argument(argument));
 				self.effect_type = self.effect_types.get(&place).copied();
 				self.record_effect(place, invalidates, n, true);
 				self.effect_type = None;
+				if let Some(previous) = previous {
+					self.effect_protected_references = previous;
+				}
 			}
 			let cause = format!("`{name}`");
 			for place in implied {

@@ -777,7 +777,8 @@ impl Walker<'_> {
 						cx.as_ref().and_then(|cx| cx.ref_owner),
 					);
 					let summary = self.reference_value_summary(value_node);
-					let fresh = self.reference_is_fresh(value_node);
+					let fresh = self
+						.reference_is_fresh(value_node, cx.as_ref().and_then(|cx| cx.ref_owner));
 					let layout = cx
 						.as_ref()
 						.and_then(|cx| cx.ref_owner)
@@ -1057,6 +1058,7 @@ impl Walker<'_> {
 					});
 					let state = self.facts.refs.state(state);
 					self.body.flow.set_ref_state(symbol, state);
+					self.body.flow.bind_reference_alias(symbol, None);
 				} else if self.contains_reference_type(annotation) {
 					self.check_reference_annotation(annotation);
 				}

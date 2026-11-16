@@ -183,6 +183,7 @@ impl Walker<'_> {
 				reported: false,
 			});
 			self.body.flow.set_ref_state(symbol, state);
+			self.body.flow.bind_reference_alias(symbol, None);
 		}
 	}
 }

@@ -224,6 +224,9 @@ pub struct FlowState {
 	pub vacuous: bool,
 	/// Reference validity per symbol (M2, advanced brief §5.1).
 	pub refs: SmallVec<[(SymbolId, RefStateId); 4]>,
+	/// Definite reference equivalence classes; equal may-origin sets are not
+	/// evidence of equivalence. Joins intersect these partitions.
+	pub same_references: SmallVec<[(SymbolId, SymbolId); 4]>,
 	/// Function values contained in local storage, including field projections.
 	pub values: SmallVec<[(PlaceId, u32); 4]>,
 	/// The places being iterated (M2, advanced brief §5.8).
@@ -262,6 +265,7 @@ impl FlowState {
 			vacuous: false,
 			facts: FactMap::new(),
 			refs: SmallVec::new(),
+			same_references: SmallVec::new(),
 			values: SmallVec::new(),
 			iterating: SmallVec::new(),
 			time: 0,
@@ -369,6 +373,90 @@ impl FlowState {
 	/// The state where two branches meet. Unreachable states are the
 	/// identity; otherwise only places known on both sides keep a fact, the
 	/// pointwise join of the two. With a shared base, only the places either
+	fn reference_class(&self, symbol: SymbolId) -> SymbolId {
+		self.same_references
+			.binary_search_by_key(&symbol, |entry| entry.0)
+			.ok()
+			.map_or(symbol, |index| self.same_references[index].1)
+	}
+
+	pub fn reference_equivalents(&self, symbol: SymbolId) -> Vec<SymbolId> {
+		let class = self.reference_class(symbol);
+		let mut members: Vec<_> = self
+			.same_references
+			.iter()
+			.filter(|entry| entry.1 == class)
+			.map(|entry| entry.0)
+			.collect();
+		if !members.contains(&symbol) {
+			members.push(symbol);
+		}
+		members
+	}
+
+	/// Rebinding separates the destination from its former class. A `use` of
+	/// a reference snapshots the selected location, preserving definite aliasing.
+	pub fn bind_reference_alias(&mut self, symbol: SymbolId, source: Option<SymbolId>) {
+		if source == Some(symbol) {
+			return;
+		}
+		let old = self.reference_class(symbol);
+		self.same_references.retain(|entry| entry.0 != symbol);
+		let remaining = self
+			.same_references
+			.iter()
+			.filter(|entry| entry.1 == old)
+			.map(|entry| entry.0)
+			.min();
+		if let Some(representative) = remaining {
+			for entry in &mut self.same_references {
+				if entry.1 == old {
+					entry.1 = representative;
+				}
+			}
+		}
+		let Some(source) = source else {
+			return;
+		};
+		let mut members = self.reference_equivalents(source);
+		members.push(symbol);
+		let representative = *members.iter().min().expect("nonempty reference class");
+		self.same_references
+			.retain(|entry| !members.contains(&entry.0));
+		self.same_references
+			.extend(members.into_iter().map(|member| (member, representative)));
+		self.same_references.sort_unstable();
+	}
+
+	fn joined_reference_aliases(
+		&self,
+		other: &Self,
+		refs: &[(SymbolId, RefStateId)],
+	) -> SmallVec<[(SymbolId, SymbolId); 4]> {
+		let mut classes: rustc_hash::FxHashMap<_, Vec<SymbolId>> = rustc_hash::FxHashMap::default();
+		for &(symbol, _) in refs {
+			classes
+				.entry((self.reference_class(symbol), other.reference_class(symbol)))
+				.or_default()
+				.push(symbol);
+		}
+		let mut result: SmallVec<[_; 4]> = classes
+			.into_values()
+			.filter(|members| members.len() > 1)
+			.flat_map(|members| {
+				let representative = *members
+					.iter()
+					.min()
+					.expect("nonempty joined reference class");
+				members
+					.into_iter()
+					.map(move |symbol| (symbol, representative))
+			})
+			.collect();
+		result.sort_unstable();
+		result
+	}
+
 	/// side changed are visited.
 	pub fn join(
 		&self,
@@ -425,6 +513,7 @@ impl FlowState {
 			}
 		}
 		joined.refs = refs::join_refs(&mut facts.refs, &self.refs, &other.refs);
+		joined.same_references = self.joined_reference_aliases(other, &joined.refs);
 		joined.values = self.values.clone();
 		for &(place, value) in &other.values {
 			match joined.values.binary_search_by_key(&place, |entry| entry.0) {
@@ -513,6 +602,32 @@ mod tests {
 
 	use super::*;
 	use crate::types::IntStorage;
+
+	#[test]
+	fn reference_equivalence_survives_copies_and_intersects_at_joins() {
+		let mut left = FlowState::new();
+		let mut facts = FactStore::new();
+		let mut types = TypeStore::new();
+		for symbol in [SymbolId(0), SymbolId(1), SymbolId(2)] {
+			let state = facts.refs.state(refs::RefState::valid(PlaceId(0)));
+			left.set_ref_state(symbol, state);
+		}
+		left.bind_reference_alias(SymbolId(1), Some(SymbolId(0)));
+		left.bind_reference_alias(SymbolId(2), Some(SymbolId(1)));
+		let mut right = left.clone();
+		right.bind_reference_alias(SymbolId(0), None);
+		assert_eq!(
+			right.reference_equivalents(SymbolId(1)),
+			vec![SymbolId(1), SymbolId(2)]
+		);
+		assert_eq!(right.reference_equivalents(SymbolId(0)), vec![SymbolId(0)]);
+		let joined = left.join(&right, &mut facts, &mut types);
+		assert_eq!(
+			joined.reference_equivalents(SymbolId(1)),
+			vec![SymbolId(1), SymbolId(2)]
+		);
+		assert_eq!(joined.reference_equivalents(SymbolId(0)), vec![SymbolId(0)]);
+	}
 
 	fn i(lo: i128, hi: i128) -> Interval {
 		Interval::from_i128(lo, hi)

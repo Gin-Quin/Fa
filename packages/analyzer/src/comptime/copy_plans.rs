@@ -49,10 +49,17 @@ impl Planner<'_, '_> {
 	}
 
 	fn step(&mut self, source: TypeId, target: TypeId) -> CopyStep {
-		if source == target {
+		let types = self.lower.types();
+		// A borrowed structural view may designate a larger object. An
+		// owning value keeps its written fields even when its visible source
+		// and target types are identical.
+		if source == target
+			&& !matches!(
+				types.kind(target),
+				TypeKind::Object(_) | TypeKind::Tuple(_) | TypeKind::Union(_)
+			) {
 			return CopyStep::Value;
 		}
-		let types = self.lower.types();
 		let module = self.lower.session.module_id(self.lower.file);
 		let from = types.rec_target(source).unwrap_or(source);
 		let to = types.rec_target(target).unwrap_or(target);
@@ -65,7 +72,11 @@ impl Planner<'_, '_> {
 				return CopyStep::Alias(self.node(bound, target));
 			}
 		}
-		if preserves_copy_alternative(types, module, source, target) {
+		if !matches!(
+			types.kind(source),
+			TypeKind::Object(_) | TypeKind::Tuple(_) | TypeKind::Union(_)
+		) && preserves_copy_alternative(types, module, source, target)
+		{
 			return CopyStep::Value;
 		}
 		if matches!(

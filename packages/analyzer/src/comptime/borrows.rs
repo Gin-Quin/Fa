@@ -37,10 +37,10 @@ impl Lowerer<'_> {
 			{
 				continue;
 			}
+			// Result joins preserve the same loan as their selected producer.
+			self.borrowed_results.insert(value);
 			if let Some(inputs) = crate::lower::copies::result_inputs(self.tree, value) {
 				pending.extend(inputs);
-			} else {
-				self.borrowed_results.insert(value);
 			}
 		}
 		self.expr(node)

@@ -637,6 +637,17 @@ impl<'a> Lowerer<'a> {
 		if let Some(input) = self.a.copy_inputs.get(&n).filter(|input| input.produces) {
 			return Expr::Copy(self.copy_plan(input.source, input.target), value.boxed());
 		}
+		let source = self.a.type_of(n);
+		let target = self.a.coercions.get(&n).copied().unwrap_or(source);
+		if !self.borrowed_results.contains(&n)
+			&& !self.a.copy_inputs.contains_key(&n)
+			&& self.types().ownership(target) == crate::types::ownership::Ownership::Ordinary
+			&& matches!(
+				self.types().kind(target),
+				TypeKind::Object(_) | TypeKind::Tuple(_) | TypeKind::Union(_)
+			) {
+			return Expr::Copy(self.copy_plan(source, target), value.boxed());
+		}
 		value
 	}
 

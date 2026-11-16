@@ -433,6 +433,47 @@ mod tests {
 	}
 
 	#[test]
+	fn ordinary_projection_does_not_retain_omitted_collection_fields() {
+		let source = include_str!("../../tests/cases/ownership-ordinary-projection.fa");
+		let (session, file) = crate::analyze_source(source);
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		for name in [
+			"projected",
+			"sameType",
+			"optionalView",
+			"aliasedView",
+			"explicitView",
+		] {
+			let analysis = session.analysis(file);
+			let symbol = analysis
+				.symbols
+				.symbols()
+				.iter()
+				.position(|symbol| session.types().syms.resolve(symbol.name) == name)
+				.unwrap();
+			let Some(Value::Object(value)) = analysis
+				.static_values
+				.get(&crate::ids::SymbolId(symbol as u32))
+			else {
+				panic!("expected a computed object")
+			};
+			assert_eq!(
+				value
+					.fields
+					.iter()
+					.map(|(name, _)| name.as_ref())
+					.collect::<Vec<_>>(),
+				["name"],
+				"{name}"
+			);
+		}
+	}
+
+	#[test]
 	fn compile_time_callbacks_borrow_items_and_preserve_completed_effects() {
 		let (session, file) = crate::analyze_source(include_str!(
 			"../../tests/cases/ownership-compiletime-callbacks.fa"

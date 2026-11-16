@@ -1,0 +1,34 @@
+-- Owning ordinary projections retain only their visible fields; arguments borrow.
+type Label = { name: String }
+type Box = { items: Array<Integer>, name: String }
+function label = (box: Box): Label => box
+function identity = (box: Label): Label => box
+function optional = (box: Label?): Label? => box
+function throughAlias = (box: Label): Label => {
+	use alias = box
+	alias
+}
+function explicit = (box: Label): Label => copy box
+function update = (value: Label) mutates value.name => { value.name = "B" }
+function inspect = (): String => {
+	mutable box = Box { items = [1], name = "A" }
+	mutable owned = identity(box)
+	update(owned)
+	let before = box.name
+	update(box)
+	"{before} {owned.name} {box.name} {box.items.length}"
+}
+static projected = @label(Box { items = [1], name = "A" })
+static sameType = @identity(Box { items = [1], name = "A" })
+static optionalView = @optional(Box { items = [1], name = "A" })
+static aliasedView = @throughAlias(Box { items = [1], name = "A" })
+static explicitView = @explicit(Box { items = [1], name = "A" })
+static inspected = @inspect()
+console.log(
+	projected.name
+	sameType.name
+	optionalView.name
+	aliasedView.name
+	explicitView.name
+)                                 -- prints: A A A A A
+console.log(inspected, inspect()) -- prints: A B B 1 A B B 1

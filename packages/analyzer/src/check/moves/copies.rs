@@ -58,11 +58,31 @@ impl Walker<'_> {
 			String::new()
 		};
 		let diagnostic = self.diagnostic(&MEM004, value, format!("converting `{source}` from `{}` to `{}` changes items or recursive parts from `{}` to `{}`: the items are stored differently and the conversion walks the whole value; write `copy {source}`, even at its last use{generic}{enclosing}", self.display(actual), self.display(target), self.display(source_item), self.display(target_item)))
-			.with_fix(Fix { title: format!("Convert every part with `copy {source}`"), edits: vec![TextEdit {
-				location: Location { file: self.file, span: SourceSpan::new(self.span(value).start, self.span(value).start) },
-				replacement: "copy ".into(),
-			}] });
+			.with_fix(Fix { title: format!("Convert every part with `copy {source}`"), edits: vec![self.explicit_copy_edit(value)] });
 		self.report_flow(diagnostic);
+	}
+
+	/// A shorthand field keeps its name: `{ items = copy items }`.
+	fn explicit_copy_edit(&self, value: NodeId) -> TextEdit {
+		let start = self.span(value).start;
+		let shorthand = matches!(self.view(value), View::Name(_))
+			&& self.parent(value).is_some_and(|parent| {
+				matches!(
+					self.view(parent),
+					View::Object { .. } | View::TypedObject { .. }
+				)
+			});
+		TextEdit {
+			location: Location {
+				file: self.file,
+				span: SourceSpan::new(start, start),
+			},
+			replacement: if shorthand {
+				format!("{} = copy ", self.tree.text(value.index()))
+			} else {
+				"copy ".to_string()
+			},
+		}
 	}
 
 	/// Only value-preserving result paths lead to a Copy operand. Copying
@@ -395,16 +415,9 @@ impl Walker<'_> {
 				"this later use keeps the source alive",
 			);
 		}
-		let start = self.span(value).start;
 		diagnostic = diagnostic.with_fix(Fix {
 			title: format!("Make an independent copy of `{text}`"),
-			edits: vec![TextEdit {
-				location: Location {
-					file: self.file,
-					span: SourceSpan { start, end: start },
-				},
-				replacement: "copy ".to_string(),
-			}],
+			edits: vec![self.explicit_copy_edit(value)],
 		});
 		self.report(diagnostic);
 	}
@@ -439,6 +452,40 @@ mod tests {
 		}
 		assert!(fixed.contains("duplicate = copy items"));
 		analyzed(&fixed);
+	}
+
+	#[test]
+	fn copy_fixes_expand_shorthand_field_stores() {
+		for (source, expected) in [
+			(
+				"let items = [1]\nlet box = { items }\nconsole.log(items, box)\n",
+				"items = copy items",
+			),
+			(
+				"type Box = { items: Array<Integer> }\nlet items = [1]\nlet box = Box { items }\nconsole.log(items, box)\n",
+				"items = copy items",
+			),
+			(
+				"type Box = { items: Array<Integer> }\nlet items: Array<Int8> = [1]\nlet box = Box { items }\nconsole.log(box)\n",
+				"items = copy items",
+			),
+		] {
+			let (session, file) = crate::analyze_source(source);
+			let diagnostics = session.diagnostics(file);
+			let diagnostic = diagnostics
+				.iter()
+				.find(|diagnostic| diagnostic.code.id == "MEM004")
+				.expect("a structure store or conversion");
+			let mut fixed = source.to_string();
+			for edit in diagnostic.fixes[0].edits.iter().rev() {
+				fixed.replace_range(
+					edit.location.span.start as usize..edit.location.span.end as usize,
+					&edit.replacement,
+				);
+			}
+			assert!(fixed.contains(expected), "{fixed}");
+			analyzed(&fixed);
+		}
 	}
 
 	#[test]

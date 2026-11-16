@@ -674,16 +674,24 @@ mod tests {
 		host.0.insert(
 			FnKey(0, 24),
 			Arc::new(Function {
-				name: "evenKey".into(),
-				params: vec![Param {
-					slot: 0,
-					default: None,
-				}],
+				name: "evenKeyWithValue".into(),
+				params: (0..2)
+					.map(|slot| Param {
+						slot,
+						default: None,
+					})
+					.collect(),
 				captures: Vec::new(),
-				slots: 1,
-				body: Expr::CallFunction(
-					FnKey(0, 20),
-					vec![Arg::Value(Expr::Index(local(0), int(0).boxed()))],
+				slots: 2,
+				body: Expr::If(
+					Expr::CallFunction(FnKey(0, 20), vec![Arg::Value(*local(0))]).boxed(),
+					Expr::Equals(
+						local(1),
+						Expr::Arith(ArithOp::Multiply, INTEGER, local(0), int(10).boxed()).boxed(),
+						false,
+					)
+					.boxed(),
+					Some(Expr::Const(Value::Boolean(false)).boxed()),
 				),
 			}),
 		);

@@ -1733,9 +1733,8 @@ impl Walker<'_> {
 			if matches!(
 				self.view(value),
 				View::Name(_) | View::Access { .. } | View::Index { .. }
-			) && let Some(place) = self.place_of(value)
-			{
-				reads.push(place);
+			) {
+				reads.extend(self.places_of(value));
 			}
 		}
 		self.add_task(

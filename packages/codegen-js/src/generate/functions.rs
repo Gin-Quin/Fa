@@ -119,8 +119,27 @@ impl Generator<'_> {
 				self.reference_bindings = saved_references;
 				self.reference_layout = fa_analyzer::analysis::ReferenceLayout::General;
 				self.emit_reference_family(n, &name);
-				if let Some((name, code)) = self.promise_api(n) {
-					self.out.line(format!("const {name} = {code};"));
+				for references in self.reference_variants(n) {
+					let reference = self.reference_suffix(&generics, &references);
+					for numeric in &numbers {
+						let number = numeric
+							.as_ref()
+							.map(|v| self.variant_suffix(n, v))
+							.unwrap_or_default();
+						let suffix = format!("{number}{reference}");
+						if let Some((name, code)) = self.promise_api(n, &suffix) {
+							self.out.line(format!("const {name} = {code};"));
+						}
+						if !references.is_empty()
+							&& let Some(instances) = self.tasks.instances.get(&n).cloned()
+							&& let (Some(sync), Some(asynchronous)) =
+								(instances.sync_name, instances.async_name)
+						{
+							let helper = self.helper("faAsyncValue");
+							self.out
+								.line(format!("{helper}({sync}{suffix}, {asynchronous}{suffix});"));
+						}
+					}
 				}
 				// the instance receiving reactive places (D24, reactivity.rs)
 				if self.reactive_instances.contains(&n) {

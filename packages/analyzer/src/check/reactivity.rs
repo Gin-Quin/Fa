@@ -1109,10 +1109,14 @@ impl Pass {
 					let field = members
 						.first()
 						.map(|member| w.s.types.syms.intern(w.tree.text(member.index())));
-					match (w.place_of(holder), field) {
-						(Some(place), Some(field)) => w.implied_write(place, field),
-						_ => Vec::new(),
-					}
+					field
+						.map(|field| {
+							w.places_of(holder)
+								.into_iter()
+								.flat_map(|place| w.implied_write(place, field))
+								.collect()
+						})
+						.unwrap_or_default()
 				}
 				_ => Vec::new(),
 			},
@@ -1125,17 +1129,22 @@ impl Pass {
 					let field = members
 						.first()
 						.map(|member| w.s.types.syms.intern(w.tree.text(member.index())));
-					match (w.place_of(holder), field) {
-						(Some(place), Some(field)) => w.implied_write(place, field),
-						_ => Vec::new(),
-					}
+					field
+						.map(|field| {
+							w.places_of(holder)
+								.into_iter()
+								.flat_map(|place| w.implied_write(place, field))
+								.collect()
+						})
+						.unwrap_or_default()
 				}
 				_ => Vec::new(),
 			},
-			(false, View::Call { callee, .. }) => match w.callee_receiver_place(callee) {
-				Some(collection) => w.implied_delete(collection),
-				None => Vec::new(),
-			},
+			(false, View::Call { callee, .. }) => w
+				.callee_receiver_places(callee)
+				.into_iter()
+				.flat_map(|collection| w.implied_delete(collection))
+				.collect(),
 			_ => Vec::new(),
 		};
 		for place in implied {

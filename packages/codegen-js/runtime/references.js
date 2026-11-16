@@ -1,3 +1,5 @@
+import { faAssign } from "./copy.js";
+
 // @fa-helper faReferenceKey
 /** The second half of the most recently returned general reference. */
 export let faReferenceKey;
@@ -43,4 +45,18 @@ export function faReferenceSet(container, key, value) {
 	if (container instanceof Map || tag === "fa:ValuePool" || tag === "fa:HashMap")
 		container.set(key, value);
 	else container[key] = value;
+}
+
+// @fa-helper faMapAssign deps: faAssign
+/**
+ * Replace a map value while preserving bare references to an existing object.
+ * The caller applies the ordinary storage copy/move rules to value.
+ * @param {any} map
+ * @param {any} key
+ * @param {any} value
+ */
+export function faMapAssign(map, key, value) {
+ const previous = map.get(key);
+ if (previous !== null && typeof previous === "object" && value !== null && typeof value === "object") faAssign(previous, value);
+ else map.set(key, value);
 }

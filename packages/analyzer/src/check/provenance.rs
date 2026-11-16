@@ -96,7 +96,7 @@ impl Walker<'_> {
 						continue;
 					};
 					let step = Step::Field(self.s.types.syms.intern(self.tree.name(name)));
-					origins = Self::project_origins(origins, step);
+					origins = self.project_origins(origins, step);
 				}
 				origins.places = self.places_of(node);
 				origins.opaque = false;
@@ -107,7 +107,7 @@ impl Walker<'_> {
 			}
 			View::Index { target, index } => {
 				let step = Step::Index(self.identity_of(index));
-				origins = Self::project_origins(self.evaluated_origins(target), step);
+				origins = self.project_origins(self.evaluated_origins(target), step);
 				origins.places = self.places_of(node);
 				origins.opaque = false;
 				for place in origins.places.clone() {
@@ -140,13 +140,29 @@ impl Walker<'_> {
 			}
 			View::Array { items } | View::Tuple { items } => {
 				origins.owned = true;
+				let mut shifted = false;
 				for (index, value) in items.iter().enumerate() {
+					let spread = matches!(self.view(value), View::Spread(_));
 					for mut closure in self.evaluated_origins(value).closures {
-						closure
-							.projection
-							.insert(0, Step::Index(Identity::Exact(index as i64)));
+						if spread {
+							if matches!(closure.projection.first(), Some(Step::Index(_))) {
+								closure.projection[0] = Step::Index(Identity::Unknown);
+							} else {
+								closure.projection.insert(0, Step::Index(Identity::Unknown));
+							}
+						} else {
+							closure.projection.insert(
+								0,
+								Step::Index(if shifted {
+									Identity::Unknown
+								} else {
+									Identity::Exact(index as i64)
+								}),
+							);
+						}
 						origins.closures.push(closure);
 					}
+					shifted |= spread;
 				}
 			}
 			View::Assignment {
@@ -180,16 +196,12 @@ impl Walker<'_> {
 		self.value_origins.insert(node, origins);
 	}
 
-	fn project_origins(mut origins: ValueOrigins, step: Step) -> ValueOrigins {
+	fn project_origins(&self, mut origins: ValueOrigins, step: Step) -> ValueOrigins {
 		origins.closures.retain_mut(|closure| {
 			let Some(first) = closure.projection.first() else {
 				return false;
 			};
-			let matches = *first == step
-				|| matches!(
-					(first, step),
-					(Step::Index(_), Step::Index(Identity::Unknown))
-				);
+			let matches = !self.steps_distinct(*first, step);
 			if matches {
 				closure.projection.remove(0);
 			}
@@ -207,13 +219,17 @@ impl Walker<'_> {
 				continue;
 			}
 			let stored_steps = self.place_steps(stored);
-			if steps.starts_with(&stored_steps) {
+			let overlap = steps
+				.iter()
+				.zip(&stored_steps)
+				.all(|(a, b)| !self.steps_distinct(*a, *b));
+			if overlap && steps.len() >= stored_steps.len() {
 				let mut value = self.facts.origins.get(id).clone();
 				for &step in &steps[stored_steps.len()..] {
-					value = Self::project_origins(value, step);
+					value = self.project_origins(value, step);
 				}
 				result.join(&value);
-			} else if stored_steps.starts_with(&steps) {
+			} else if overlap && stored_steps.len() > steps.len() {
 				let mut value = self.facts.origins.get(id).clone();
 				for closure in &mut value.closures {
 					closure
@@ -231,7 +247,13 @@ impl Walker<'_> {
 			return;
 		}
 		let origins = self.evaluated_origins(value).copied();
-		let strong = places.len() == 1;
+		let strong = places.len() == 1
+			&& self.place_steps(places[0]).iter().all(|step| {
+				matches!(
+					step,
+					Step::Field(_) | Step::Index(Identity::Exact(_) | Identity::Key(_))
+				)
+			});
 		for place in places {
 			if strong {
 				// Replace projected provenance as well as the complete local.

@@ -3,8 +3,8 @@
 //! and calls, their coverage by the declared effects, the iteration rule.
 //!
 //! - An expression designating a place (`player.score`, `bodies[j].vx`, a
-//!   `use` alias, a `for` variable over a collection) has a flow place
-//!   ([`Walker::place_of`]): a root symbol and steps, an index step carrying
+//!   `use` alias, a `for` variable over a collection) has evaluated flow places
+//!   ([`Walker::places_of`]): a root symbol and steps, an index step carrying
 //!   the identity of its index (advanced brief §5.4).
 //! - Every write and every call with effects goes through
 //!   [`Walker::record_effect`]: the facts at and below the place go, the
@@ -107,17 +107,6 @@ impl Walker<'_> {
 			_ => self.evaluated_origins(n).places,
 		}
 	}
-
-	/// A definite place, used for facts that require one exact location.
-	pub(crate) fn place_of(&mut self, n: NodeId) -> Option<PlaceId> {
-		let places = self.places_of(n);
-		if let [place] = places.as_slice() {
-			Some(*place)
-		} else {
-			None
-		}
-	}
-
 	pub(crate) fn access_places(&mut self, target: NodeId, members: &[NodeId]) -> Vec<PlaceId> {
 		let mut members = members.iter().copied();
 		let mut places = self.places_of(target);
@@ -145,8 +134,9 @@ impl Walker<'_> {
 		places
 	}
 
-	pub(crate) fn access_place(&mut self, target: NodeId, members: &[NodeId]) -> Option<PlaceId> {
-		let places = self.access_places(target, members);
+	/// A singleton proof for numeric facts and narrowing only.
+	pub(crate) fn place_of(&mut self, node: NodeId) -> Option<PlaceId> {
+		let places = self.places_of(node);
 		if let [place] = places.as_slice() {
 			Some(*place)
 		} else {
@@ -836,7 +826,7 @@ impl Walker<'_> {
 	}
 
 	/// Whether two steps from the same place are proven to lead to different places.
-	fn steps_distinct(&self, a: Step, b: Step) -> bool {
+	pub(super) fn steps_distinct(&self, a: Step, b: Step) -> bool {
 		match (a, b) {
 			(Step::Field(x), Step::Field(y)) => x != y,
 			(Step::Field(_), _) | (_, Step::Field(_)) => true,
@@ -1527,18 +1517,21 @@ impl Walker<'_> {
 				// `stream.read(buffer)` mutates its argument (std_library.rs)
 				if path == "TcpStream#read"
 					&& let Some(Argument::Given(buffer)) = info.arguments.first()
-					&& let Some(place) = self.place_of(*buffer)
-					&& self.check_mutable_argument(place, *buffer, "read", false)
 				{
-					changed.push((place, false, Some(*buffer)));
+					for place in self.places_of(*buffer) {
+						if self.check_mutable_argument(place, *buffer, "read", false) {
+							changed.push((place, false, Some(*buffer)));
+						}
+					}
 				}
 				// a value stored into a collection escapes (closures)
 				if crate::builtins::effects::stores_arguments(path) {
 					// a collection that outlives the function (tasks.rs)
 					let outside = self
-						.callee_receiver_place(callee)
-						.and_then(|place| self.place_symbol(place))
-						.is_some_and(|symbol| !self.is_function_local(symbol));
+						.callee_receiver_places(callee)
+						.into_iter()
+						.filter_map(|place| self.place_symbol(place))
+						.any(|symbol| !self.is_function_local(symbol));
 					for argument in &info.arguments {
 						if let Argument::Given(value) = argument {
 							if outside {
@@ -1996,11 +1989,12 @@ impl Walker<'_> {
 		read: Vec<SymbolId>,
 	) {
 		for symbol in read {
-			let Some(module_place) = self.symbol_target(symbol) else {
-				continue;
-			};
+			let module_places = self.symbol_places(symbol);
 			for &(place, _, _) in changed {
-				if !self.may_overlap(place, module_place) {
+				if !module_places
+					.iter()
+					.any(|&module_place| self.may_overlap(place, module_place))
+				{
 					continue;
 				}
 				let name = self
@@ -2122,10 +2116,7 @@ impl Walker<'_> {
 			}
 			PathRoot::Requirement(index) => {
 				let provider = self.call_providers.get(index as usize).copied().flatten();
-				let places = self
-					.mutated_requirement_place(call.0, call.1, provider)
-					.into_iter()
-					.collect();
+				let places = self.mutated_requirement_places(call.0, call.1, provider);
 				(places, call.0)
 			}
 		};
@@ -2216,7 +2207,7 @@ impl Walker<'_> {
 			self.view(argument),
 			View::Object { .. } | View::TypedObject { .. }
 		);
-		if !temporary || self.place_of(argument).is_some() {
+		if !temporary || !self.places_of(argument).is_empty() {
 			return;
 		}
 		let message = format!(
@@ -2404,7 +2395,20 @@ impl Walker<'_> {
 		let entry = self.a.symbols.symbol(symbol);
 		let name = self.s.types.syms.resolve(entry.name).to_string();
 		let loop_variable = matches!(entry.kind, SymbolKind::LoopVariable { .. });
-		let designated = self.aliases.get(&symbol).copied();
+		let designated = self
+			.body
+			.flow
+			.ref_state(symbol)
+			.and_then(|state| {
+				self.facts
+					.refs
+					.get(state)
+					.places
+					.iter()
+					.copied()
+					.find(|&place| self.place_writable(place) != Writable::Yes)
+			})
+			.or_else(|| self.aliases.get(&symbol).copied());
 		let (code, message) = match designated {
 			Some(place) => {
 				let text = self.place_text(place);

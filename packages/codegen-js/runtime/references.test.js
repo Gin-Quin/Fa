@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { FaValuePool } from "./collections.js";
 import { faAssign } from "./copy.js";
-import { faReferenceKey, faReferenceRead, faReferenceResult, faReferenceSet } from "./references.js";
+import { faMapAssign, faReferenceKey, faReferenceRead, faReferenceResult, faReferenceSet } from "./references.js";
 
 test("container/key pairs forward primitive writes without carriers", () => {
 	const values = [7, 7];
@@ -82,4 +82,14 @@ test("general results are captured before another call can overwrite the scratch
 	faReferenceSet(container, key, 9);
 	expect(values).toEqual([{ left: 9, right: 2 }]);
 	expect(faReferenceRead(container, key)).toBe(9);
+});
+
+test("map replacement preserves existing object references and inserts new slots", () => {
+ const node = { value: 7 };
+ const values = new Map([["kept", node]]);
+ faMapAssign(values, "kept", { value: 9 });
+ expect(values.get("kept")).toBe(node);
+ expect(node.value).toBe(9);
+ faMapAssign(values,"new", { value: 11 });
+ expect(values.get("new")).toEqual({value:11});
 });

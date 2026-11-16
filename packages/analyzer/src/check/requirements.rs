@@ -33,8 +33,8 @@ pub struct Provided {
 	pub key: TypeId,
 	/// The scope of its block: it is visible below it.
 	pub scope: ScopeId,
-	/// The place provided (an alias), `None` for a temporary.
-	pub place: Option<PlaceId>,
+	/// The evaluated places provided (interned), empty for a temporary.
+	pub origins: u32,
 }
 
 /// Who provides a requirement of a callee at a call.
@@ -107,15 +107,22 @@ impl Walker<'_> {
 		let key = self.check_type_expr(ty);
 		let actual = self.check(value, Some(key));
 		self.sink(value, actual, key);
-		let place = match self.view(self.strip_groups(value)) {
-			View::Name(_) | View::Access { .. } | View::Index { .. } => self.place_of(value),
-			_ => None,
+		let places = match self.view(self.strip_groups(value)) {
+			View::Name(_) | View::Access { .. } | View::Index { .. } => self.places_of(value),
+			_ => Vec::new(),
 		};
+		let origins = self
+			.facts
+			.origins
+			.intern(crate::flow::values::ValueOrigins {
+				places,
+				..Default::default()
+			});
 		let provided = Provided {
 			node: n,
 			key,
 			scope: self.body.scope,
-			place,
+			origins,
 		};
 		// a `provide` walked again (a loop round) replaces its previous entry
 		self.body.provides.retain(|entry| entry.node != n);
@@ -365,34 +372,40 @@ impl Walker<'_> {
 
 	/// `REQ004`: a callee mutates a requirement whose provider is a
 	/// temporary or an immutable place. Returns the provider's place.
-	pub(crate) fn mutated_requirement_place(
+	pub(crate) fn mutated_requirement_places(
 		&mut self,
 		n: NodeId,
 		callee: &str,
 		provider: Option<Provider>,
-	) -> Option<PlaceId> {
-		match provider? {
-			Provider::Own(None) => None,
-			Provider::Own(Some(symbol)) => self.symbol_target(symbol),
+	) -> Vec<PlaceId> {
+		let Some(provider) = provider else {
+			return Vec::new();
+		};
+		match provider {
+			Provider::Own(None) => Vec::new(),
+			Provider::Own(Some(symbol)) => self.symbol_places(symbol),
 			Provider::Provided(provided) => {
-				let writable = provided.place.is_some_and(|place| {
-					self.place_writable(place) == super::effects::Writable::Yes
-				});
+				let places = self.facts.origins.get(provided.origins).places.clone();
+				let writable = !places.is_empty()
+					&& places
+						.iter()
+						.all(|&place| self.place_writable(place) == super::effects::Writable::Yes);
 				if !writable {
 					let key = self.display(provided.key);
-					let message = match provided.place {
-						None => format!(
+					let message = if places.is_empty() {
+						format!(
 							"`{callee}` mutates `{key}`, but the provided value is a temporary: declare it with `mutable value = …`, then `provide {key} = value`"
-						),
-						Some(_) => format!(
+						)
+					} else {
+						format!(
 							"`{callee}` mutates `{key}`, but the provided value is immutable: declare it with `mutable`"
-						),
+						)
 					};
 					let diagnostic = self.diagnostic(&REQ004, n, message);
 					self.report_flow(diagnostic);
-					return None;
+					return Vec::new();
 				}
-				provided.place
+				places
 			}
 		}
 	}

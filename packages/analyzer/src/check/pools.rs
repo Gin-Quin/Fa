@@ -233,16 +233,6 @@ impl Walker<'_> {
 		self.report_flow(diagnostic);
 	}
 
-	/// The place of the receiver of a method call `a.b.method(…)`: `a.b`.
-	pub(crate) fn callee_receiver_place(&mut self, callee: NodeId) -> Option<crate::ids::PlaceId> {
-		let callee = self.strip_groups(callee);
-		let View::Access { target, members } = self.view(callee) else {
-			return None;
-		};
-		let members: Vec<NodeId> = members.iter().collect();
-		self.access_place(target, &members[..members.len().saturating_sub(1)])
-	}
-
 	pub(crate) fn callee_receiver_places(&mut self, callee: NodeId) -> Vec<crate::ids::PlaceId> {
 		let callee = self.strip_groups(callee);
 		let View::Access { target, members } = self.view(callee) else {

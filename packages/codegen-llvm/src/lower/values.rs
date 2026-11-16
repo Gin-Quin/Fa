@@ -997,9 +997,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// tables of the same keys and values (`GrowingMap`, literal types)
 			(Repr::Map(_), Repr::Map(_)) | (Repr::Set(_), Repr::Set(_)) => {
 				let (a, b) = (self.table_of(value.repr)?, self.table_of(to)?);
-				if a.key != b.key
-					|| a.value != b.value
-					|| a.growing != b.growing
+				let same = |from, to| from == to || self.same_layout(from, to);
+				let same_value = match (a.value, b.value) {
+					(Some(from), Some(to)) => same(from, to),
+					(None, None) => true,
+					_ => false,
+				};
+				if !same(a.key, b.key)
+					|| !same_value || a.growing != b.growing
 					|| a.dense != b.dense
 					|| a.inline != b.inline
 				{

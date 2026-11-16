@@ -192,6 +192,7 @@ function generic = <T>(values: {generic_collection}): T in values throws Missing
 function defaulted = (values: {collection}, item: {element} in values = try at(values)): {element} in values throws Missing => item
 type Outer = {{
  type Reader = {{
+  marker{id}: Boolean = false
   function first = <T>(self, values: {generic_collection}): T in values throws Missing => try generic(values)
  }}
 }}
@@ -203,8 +204,12 @@ function exercise = (flag: Boolean): {result_type} throws {errors} => {{
 "#,
 		generic_collection = collection_of("T"),
 		result_type = if travel >= 9 { "Callback" } else { "Integer" },
-		errors = if obtain == 0 && row.indexed() {
-			"Missing | IndexError"
+		errors = if obtain == 0 && !matches!(travel, 5 | 6) {
+			if row.map() {
+				"Missing | KeyNotFound"
+			} else {
+				"Missing | IndexError"
+			}
 		} else {
 			"Missing"
 		},
@@ -215,7 +220,7 @@ function exercise = (flag: Boolean): {result_type} throws {errors} => {{
 	let origin = match obtain {
 		0 => {
 			if row.map() {
-				format!("owner.items[\"kept\"]{project}")
+				format!("try owner.items[\"kept\"]{project}")
 			} else {
 				format!("try owner.items[0]{project}")
 			}
@@ -341,6 +346,7 @@ function exercise = (flag: Boolean): {result_type} throws {errors} => {{
 		"Callback",
 		"Owner",
 		"Outer",
+		"Reader",
 		"at",
 		"generic",
 		"defaulted",
@@ -388,6 +394,7 @@ fn generated_reference_matrix() {
 	fs::create_dir_all(&scratch).unwrap();
 	let mut accepted = Vec::new();
 	let mut failures = Vec::new();
+	let mut manifest = String::new();
 	for (id, row) in rows.iter().enumerate() {
 		let (source, expected) = source(*row, id);
 		let path = scratch.join(format!("case-{id}.fa"));
@@ -401,8 +408,12 @@ fn generated_reference_matrix() {
 			.filter(|d| d.severity == Severity::Error)
 			.collect();
 		let allowed = row.rejected();
+		manifest.push_str(&format!(
+			"{id}\t{row:?}\t{}\t{expected}\n",
+			allowed.join(",")
+		));
 		if allowed.is_empty() && errors.is_empty() {
-			accepted.push((source, expected, id));
+			accepted.push((source, expected.to_string(), id));
 		} else if errors.is_empty() || errors.iter().any(|d| !allowed.contains(&d.code.id)) {
 			failures.push(format!(
 				"{row:?} {}: expected {allowed:?}, got {:?}",
@@ -414,6 +425,7 @@ fn generated_reference_matrix() {
 			));
 		}
 	}
+	fs::write(scratch.join("manifest.tsv"), manifest).unwrap();
 	assert!(failures.is_empty(), "{}", failures.join("\n"));
 	eprintln!(
 		"reference matrix: {} cases, {} accepted, {} rejected ({})",
@@ -426,6 +438,19 @@ fn generated_reference_matrix() {
 			"first 36 pairwise rows, fixed seed"
 		}
 	);
+	// Fixed regression seed covers key-only, static-key, general projection,
+	// nested-container and function-value conventions in one program.
+	let locator = include_str!("../../../analyzer/tests/cases/references/review2-locator-abi.fa");
+	accepted.push((
+		locator
+			.split("static result")
+			.next()
+			.unwrap()
+			.replace("exercise", "exercise100000")
+			.replace("exercise100000 = ()", "exercise100000 = (_flag: Boolean)"),
+		"[7, 18, 9, 6]".to_string(),
+		100000,
+	));
 	for (batch, cases) in accepted.chunks(8).enumerate() {
 		let mut text = String::new();
 		let mut lines = Vec::new();

@@ -470,7 +470,7 @@ impl Generator<'_> {
 		container
 	}
 
-	fn reference_call_generics(
+	pub(super) fn reference_call_generics(
 		&self,
 		call: NodeId,
 		sig: fa_analyzer::types::FnSig,
@@ -1295,6 +1295,17 @@ impl Generator<'_> {
 			}
 			_ => false,
 		}
+	}
+
+	pub(crate) fn map_value_may_be_borrowed(&mut self, target: NodeId) -> bool {
+		self.is_object_reference(self.type_of(target))
+			&& self.place_root(target).is_some_and(|root| {
+				self.referenced_roots().contains(&root)
+					|| matches!(
+						self.analysis.symbols.symbol(root).kind,
+						SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
+					) || self.is_module_value(root)
+			})
 	}
 
 	/// `place = value` in place: `faAssign(place, value)` (the value is

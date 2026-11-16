@@ -68,7 +68,10 @@ impl Walker<'_> {
 					}
 					View::Array { .. } => {
 						if let TypeKind::Collection(
-							CollKind::Pool | CollKind::GrowingPool,
+							CollKind::Pool
+							| CollKind::GrowingPool
+							| CollKind::Columnar
+							| CollKind::GrowingColumnar,
 							item,
 							_,
 						) = self.s.types.kind(self.type_of(value))
@@ -85,7 +88,10 @@ impl Walker<'_> {
 						{
 							if let View::Access { target, .. } = self.view(callee)
 								&& let TypeKind::Collection(
-									CollKind::Pool | CollKind::GrowingPool,
+									CollKind::Pool
+									| CollKind::GrowingPool
+									| CollKind::Columnar
+									| CollKind::GrowingColumnar,
 									item,
 									_,
 								) = self.s.types.kind(self.type_of(target))

@@ -68,7 +68,7 @@ impl Generator<'_> {
 			.unwrap_or(false)
 	}
 
-	fn reference_selection(
+	pub(super) fn reference_selection(
 		&self,
 		site: NodeId,
 		generics: &[ParamId],
@@ -86,6 +86,40 @@ impl Generator<'_> {
 			})
 			.collect();
 		self.reference_suffix(generics, &variant)
+	}
+
+	pub(super) fn reference_call_variant_suffix(&self, call: NodeId) -> String {
+		let View::Call { callee, .. } = self.view(call) else {
+			return String::new();
+		};
+		let TypeKind::Function(sig) = self.types.kind(self.type_of(callee)) else {
+			return String::new();
+		};
+		let generics = self.reference_call_generics(call, self.types.sig(sig));
+		let sensitive = match self
+			.analysis
+			.resolution(self.named_reference_callee(callee))
+		{
+			Resolution::Local(symbol) => self
+				.analysis
+				.reference_sensitive
+				.get(&self.analysis.symbols.symbol(symbol).decl_node)
+				.cloned()
+				.unwrap_or_default(),
+			resolution @ Resolution::External(_) => self
+				.session
+				.external_node(resolution)
+				.and_then(|(module, decl)| {
+					self.session
+						.interface(module)?
+						.reference_sensitive
+						.get(&decl)
+				})
+				.cloned()
+				.unwrap_or_default(),
+			_ => Vec::new(),
+		};
+		self.reference_selection(call, &generics, &sensitive)
 	}
 
 	fn named_reference_callee(&self, node: NodeId) -> NodeId {
@@ -107,7 +141,9 @@ impl Generator<'_> {
 
 	/// A generic function value names its representation body directly.
 	pub(super) fn reference_function_value(&mut self, node: NodeId, value: Expr) -> Expr {
-		if self.is_callee(node) {
+		if self.is_callee(node)
+			|| matches!(self.analysis.resolution(node), Resolution::Local(symbol) if self.tasks.instances.contains_key(&self.analysis.symbols.symbol(symbol).decl_node))
+		{
 			return value;
 		}
 		self.select_reference_body(node, node, value, false)

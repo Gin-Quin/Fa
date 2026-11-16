@@ -366,6 +366,30 @@ impl Generator<'_> {
 		if let Some(name) = &instances.async_name {
 			exports.push(format!("{name} as {export}$async"));
 		}
+		let generics = self.function_generics(declaration);
+		let base_exports = exports.clone();
+		for variant in self.reference_variants(declaration) {
+			let reference = self.reference_suffix(&generics, &variant);
+			let mut numbers = vec![String::new()];
+			numbers.extend(
+				self.integer_variants
+					.get(&declaration)
+					.into_iter()
+					.flatten()
+					.map(|v| self.variant_suffix(declaration, v)),
+			);
+			for number in numbers {
+				let suffix = format!("{number}{reference}");
+				if suffix.is_empty() {
+					continue;
+				}
+				for entry in &base_exports {
+					if let Some((local, export)) = entry.split_once(" as ") {
+						exports.push(format!("{local}{suffix} as {export}{suffix}"));
+					}
+				}
+			}
+		}
 		Some(exports)
 	}
 
@@ -548,7 +572,11 @@ impl Generator<'_> {
 	}
 
 	/// The lines after the instances of an exported function: its Promise API.
-	pub(crate) fn promise_api(&mut self, declaration: NodeId) -> Option<(String, String)> {
+	pub(crate) fn promise_api(
+		&mut self,
+		declaration: NodeId,
+		suffix: &str,
+	) -> Option<(String, String)> {
 		let instances = self.tasks.instances.get(&declaration)?;
 		if !instances.exported {
 			return None;
@@ -564,7 +592,10 @@ impl Generator<'_> {
 		if let Some(instances) = self.tasks.instances.get_mut(&declaration) {
 			instances.promise_name = Some(base.clone());
 		}
-		Some((base, format!("(...args) => {helper}({async_name}, args)")))
+		Some((
+			format!("{base}{suffix}"),
+			format!("(...args) => {helper}({async_name}{suffix}, args)"),
+		))
 	}
 
 	// ── calls ────────────────────────────────────────────────────────────
@@ -592,21 +623,39 @@ impl Generator<'_> {
 		function: String,
 		mut values: Vec<String>,
 	) -> Expr {
+		let reference_suffix = self.reference_call_variant_suffix(n);
+		let numeric_suffix = declaration
+			.and_then(|decl| {
+				self.call_variant(n, decl)
+					.map(|variant| self.variant_suffix(decl, &variant))
+			})
+			.or_else(|| {
+				let View::Call { callee, .. } = self.view(n) else {
+					return None;
+				};
+				self.external_variant_suffix(n, callee)
+			})
+			.unwrap_or_default();
+		let suffix = format!("{numeric_suffix}{reference_suffix}");
 		let mut suspends = declaration.is_some_and(|declaration| self.suspends(declaration));
 		let mut instances = declaration
 			.and_then(|declaration| self.tasks.instances.get(&declaration))
 			.cloned()
 			.unwrap_or_default();
+		if !suffix.is_empty() {
+			instances.async_name = instances.async_name.map(|name| format!("{name}{suffix}"));
+			instances.sync_name = instances.sync_name.map(|name| format!("{name}{suffix}"));
+		}
 		if let Some((path, export)) = &external {
 			suspends = true;
 			let asynchronous = self.tasks.asynchronous
 				&& (self.tasks.pending_start == Some(n) || self.tasks.awaited_calls.contains(&n))
 				&& self.mode() != Mode::Blocking;
 			if asynchronous {
-				instances.async_name = Some(self.import(path, &format!("{export}$async")));
+				instances.async_name = Some(self.import(path, &format!("{export}$async{suffix}")));
 			}
 			if !asynchronous || self.mode() == Mode::Dynamic {
-				instances.sync_name = Some(self.import(path, &format!("{export}$sync")));
+				instances.sync_name = Some(self.import(path, &format!("{export}$sync{suffix}")));
 			}
 		}
 		// a value of an `async` function type: its instances are found at
@@ -735,8 +784,18 @@ impl Generator<'_> {
 		if self.is_callee(n) {
 			return None;
 		}
+		let sensitive = self
+			.analysis
+			.reference_sensitive
+			.get(&declaration)
+			.cloned()
+			.unwrap_or_default();
+		let suffix = self.reference_selection(n, &self.function_generics(declaration), &sensitive);
 		let helper = self.helper("faAsyncValue");
-		Some(js::call(helper, &[sync, asynchronous]))
+		Some(js::call(
+			helper,
+			&[format!("{sync}{suffix}"), format!("{asynchronous}{suffix}")],
+		))
 	}
 
 	/// Whether a lambda has two instances (`faAsyncValue`): it is `async`

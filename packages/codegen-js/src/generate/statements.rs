@@ -925,12 +925,20 @@ impl Generator<'_> {
 			) {
 			let values = self.in_order(&[container, index, value], |g, node| g.expr(node));
 			let stored = self.copy_stored(value, values[2].clone());
-			self.out.line(format!(
-				"{}.set({}, {});",
-				values[0].primary_text(),
-				values[1].text,
-				stored.text
-			));
+			if self.map_value_may_be_borrowed(target_node) {
+				let helper = self.helper("faMapAssign");
+				self.out.line(format!(
+					"{helper}({}, {}, {});",
+					values[0].text, values[1].text, stored.text
+				));
+			} else {
+				self.out.line(format!(
+					"{}.set({}, {});",
+					values[0].primary_text(),
+					values[1].text,
+					stored.text
+				));
+			}
 			return;
 		}
 		if let View::Index { index, .. } = self.view(target_node)

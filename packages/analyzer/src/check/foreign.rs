@@ -758,19 +758,11 @@ impl Walker<'_> {
 	/// mutable parameter, or `self` of a mutating method).
 	fn is_mutable_place(&mut self, value: NodeId) -> bool {
 		let value = self.strip_groups(value);
-		let Some(place) = self.place_of(value) else {
-			return false;
-		};
-		let Some(symbol) = self.place_symbol(place) else {
-			return false;
-		};
-		matches!(
-			self.a.symbols.symbol(symbol).kind,
-			SymbolKind::Mutable
-				| SymbolKind::MutableUse
-				| SymbolKind::Parameter { .. }
-				| SymbolKind::SelfParameter
-		)
+		let places = self.places_of(value);
+		!places.is_empty()
+			&& places
+				.iter()
+				.all(|&place| self.place_writable(place) == super::effects::Writable::Yes)
 	}
 
 	/// `FFI006`: a callback is a `function` known at compile time, which
@@ -1015,15 +1007,16 @@ impl Walker<'_> {
 			self.report_flow(diagnostic);
 			return;
 		}
-		if let Some(place) = self.place_of(value)
-			&& !self
+		for place in self.places_of(value) {
+			if !self
 				.body
 				.flow
 				.moved_fields
 				.iter()
 				.any(|&(other, _)| other == place)
-		{
-			self.body.flow.moved_fields.push((place, value));
+			{
+				self.body.flow.moved_fields.push((place, value));
+			}
 		}
 	}
 
@@ -1099,13 +1092,18 @@ impl Walker<'_> {
 		if self.body.flow.moved_fields.is_empty() {
 			return;
 		}
-		let Some(place) = self.place_of(target) else {
+		let targets = self.places_of(target);
+		if targets.is_empty() {
 			return;
-		};
+		}
 		let places = std::mem::take(&mut self.body.flow.moved_fields);
 		let kept = places
 			.into_iter()
-			.filter(|&(moved, _)| !self.places.is_at_or_below(moved, place))
+			.filter(|&(moved, _)| {
+				!targets
+					.iter()
+					.all(|&place| self.places.is_at_or_below(moved, place))
+			})
 			.collect();
 		self.body.flow.moved_fields = kept;
 	}

@@ -22,6 +22,12 @@ impl Walker<'_> {
 		let root = NodeId::new(self.tree.root);
 		let mut bodies = vec![root];
 		bodies.extend(self.a.functions.values().map(|info| info.body));
+		bodies.extend(
+			self.a
+				.functions
+				.values()
+				.flat_map(|info| info.params.iter().filter_map(|param| param.default)),
+		);
 		bodies.extend(self.a.starts.values().filter_map(|info| info.block));
 		bodies.extend(self.a.watches.values().map(|info| info.body));
 		for index in 0..self.tree.nodes.len() {
@@ -89,12 +95,17 @@ impl Walker<'_> {
 				})
 			})
 			.collect();
-		values.extend(
-			self.a
-				.functions
-				.values()
-				.flat_map(|info| info.params.iter().filter_map(|param| param.default)),
-		);
+		// An omitted argument borrows exactly like a written argument.
+		// Only consuming parameters take ownership of their defaults.
+		values.extend(self.a.functions.values().flat_map(|info| {
+			info.params.iter().filter_map(|param| {
+				self.s
+					.types
+					.parameter_can_be_consumed(self.a.symbols.symbol(param.symbol).ty)
+					.then_some(param.default)
+					.flatten()
+			})
+		}));
 		for index in 0..self.tree.nodes.len() {
 			let node = NodeId::new(index);
 			if self.a.has_flags(node, NodeFlags::TYPE_EXPR) {
@@ -152,6 +163,12 @@ impl Walker<'_> {
 	/// arguments. Include globals and transitive local calls in that read.
 	fn ownership_reads(&mut self) -> FxHashMap<NodeId, Vec<SymbolId>> {
 		let mut reads = self.move_reads.clone();
+		let defaults: FxHashSet<_> = self
+			.a
+			.functions
+			.values()
+			.flat_map(|info| info.params.iter().filter_map(|param| param.default))
+			.collect();
 		for (call, place) in self.lifetime_ends.clone() {
 			self.observe_places(call, [place], &mut reads);
 		}
@@ -202,9 +219,11 @@ impl Walker<'_> {
 			if self.access_roots.contains(&node) {
 				continue;
 			}
-			let body = self.ownership_body(node);
+			let body = self.ownership_read_context(node, &defaults);
 			for &symbol in symbols {
-				if self.ownership_body(self.a.symbols.symbol(symbol).decl_node) == body {
+				if self.ownership_read_context(self.a.symbols.symbol(symbol).decl_node, &defaults)
+					== body
+				{
 					continue;
 				}
 				let paths: Vec<_> = self
@@ -233,13 +252,43 @@ impl Walker<'_> {
 				let Some(callee) = self.a.functions.get(&function) else {
 					continue;
 				};
-				let places = free.get(&callee.lambda).cloned().unwrap_or_default();
-				let body = self.ownership_body(*call);
+				let callee = callee.clone();
+				let mut places = free.get(&callee.lambda).cloned().unwrap_or_default();
+				let mut bindings = FxHashMap::default();
+				for (param, argument) in callee.params.iter().zip(&info.arguments) {
+					let argument_places = match *argument {
+						Argument::Given(value) | Argument::Receiver(value) => {
+							self.ownership_result_places(value)
+						}
+						Argument::Default => {
+							if let Some(default) = param.default {
+								for &place in free.get(&default).into_iter().flatten() {
+									places
+										.extend(self.substitute_argument_places(place, &bindings));
+								}
+								self.ownership_result_places(default)
+									.into_iter()
+									.flat_map(|place| {
+										self.substitute_argument_places(place, &bindings)
+									})
+									.collect()
+							} else {
+								Vec::new()
+							}
+						}
+						_ => Vec::new(),
+					};
+					bindings.insert(param.symbol, argument_places);
+				}
+				let body = self.ownership_read_context(*call, &defaults);
 				for &place in &places {
 					let Some(symbol) = self.place_symbol(place) else {
 						continue;
 					};
-					if self.ownership_body(self.a.symbols.symbol(symbol).decl_node) != body {
+					if self
+						.ownership_read_context(self.a.symbols.symbol(symbol).decl_node, &defaults)
+						!= body
+					{
 						changed |= free.entry(body).or_default().insert(place);
 					}
 				}
@@ -250,6 +299,72 @@ impl Walker<'_> {
 			}
 		}
 		reads
+	}
+
+	/// Defaults run only at calls which omit them. Keep their observations
+	/// separate from the unconditional observations of the function body.
+	fn ownership_read_context(&self, mut node: NodeId, defaults: &FxHashSet<NodeId>) -> NodeId {
+		loop {
+			if defaults.contains(&node)
+				|| matches!(
+					self.view(node),
+					View::Lambda { .. } | View::Test { .. } | View::Watch(_)
+				) || (matches!(self.view(node), View::Do(_))
+				&& self
+					.parent(node)
+					.is_some_and(|parent| matches!(self.view(parent), View::Start(_))))
+			{
+				return node;
+			}
+			let Some(parent) = self.parent(node) else {
+				return node;
+			};
+			node = parent;
+		}
+	}
+
+	fn ownership_result_places(&self, value: NodeId) -> Vec<PlaceId> {
+		let mut pending = vec![value];
+		let mut places = Vec::new();
+		while let Some(value) = pending.pop() {
+			if let Some(inputs) = crate::lower::copies::result_inputs(&self.tree, value) {
+				pending.extend(inputs);
+			} else {
+				places.extend(self.read_places(value));
+			}
+		}
+		places
+	}
+
+	fn substitute_argument_places(
+		&mut self,
+		place: PlaceId,
+		bindings: &FxHashMap<SymbolId, Vec<PlaceId>>,
+	) -> Vec<PlaceId> {
+		let Some(actual) = self
+			.place_symbol(place)
+			.and_then(|symbol| bindings.get(&symbol))
+		else {
+			return vec![place];
+		};
+		let mut steps = Vec::new();
+		let mut parent = place;
+		while let Some(step) = self.places.get(parent).step {
+			steps.push(step);
+			parent = self
+				.places
+				.parent(parent)
+				.expect("a projection has a parent");
+		}
+		actual
+			.iter()
+			.map(|&root| {
+				steps
+					.iter()
+					.rev()
+					.fold(root, |parent, &step| self.places.child(parent, step))
+			})
+			.collect()
 	}
 
 	fn read_places(&self, node: NodeId) -> Vec<PlaceId> {

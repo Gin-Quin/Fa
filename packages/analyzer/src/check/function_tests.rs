@@ -51,6 +51,87 @@ fn symbol_type(session: &Session, file: FileId, name: &str) -> String {
 // ── declarations and signatures ─────────────────────────────────────────
 
 #[test]
+fn existing_parameter_defaults_borrow_instead_of_storing() {
+	assert_clean(
+		"let shared = [1, 2]\nfunction size = (items: Array<Integer> = shared): Integer => items.length\nconsole.log(size(), shared.length)\n",
+	);
+	assert_clean(
+		"function size = (source: Array<Integer>, items: Array<Integer> = source): Integer => items.length\nlet shared = [1, 2]\nconsole.log(size(shared), shared.length)\n",
+	);
+	assert_clean(
+		"let shared = [1, 2]\nfunction size = (items: Array<Integer> = copy shared): Integer => items.length\nconsole.log(size(), shared.length)\n",
+	);
+}
+
+#[test]
+fn consuming_parameter_defaults_must_build_an_owner() {
+	let source = "async function work = (): Integer => 1\nlet task = start work()\nasync function finish = (value: Task<Integer> = task): Integer => await value catch _error => -1\n";
+	let (session, file) = analyze_source(source);
+	let diagnostics = session.diagnostics(file);
+	assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+	assert_eq!(diagnostics[0].code.id, "MEM002");
+	assert!(diagnostics[0].message.contains("every call"));
+	assert!(diagnostics[0].message.contains("build a new value"));
+	assert_clean(
+		"async function work = (): Integer => 1\nasync function finish = (value: Task<Integer> = start work()): Integer => await value catch _error => -1\n",
+	);
+	assert_clean(
+		"async function work = (): Integer => 1\nasync function finish = (value: Task<Integer> = do { let created = start work()\ncreated }): Integer => await value catch _error => -1\n",
+	);
+}
+
+#[test]
+fn stores_inside_a_borrowing_default_still_follow_ownership() {
+	assert_eq!(
+		codes(
+			"let shared = [1]\nfunction size = (items: Array<Array<Integer>> = [shared]): Integer => items.length\nconsole.log(size(), shared)\n"
+		),
+		["MEM004"]
+	);
+}
+
+#[test]
+fn a_default_keeps_its_source_live_only_when_omitted() {
+	assert_eq!(
+		codes(
+			"function run = () => { let items = [1]\nfunction size = (value: Array<Integer> = items): Integer => value.length\nlet held = items\nconsole.log(size(), held) }\n"
+		),
+		["MEM004"]
+	);
+	assert_clean(
+		"function run = () => { let items = [1]\nfunction size = (value: Array<Integer> = items): Integer => value.length\nlet held = items\nconsole.log(size([]), held) }\n",
+	);
+}
+
+#[test]
+fn an_existing_resource_default_borrows_and_must_still_be_live_at_the_call() {
+	let prefix = "type Held = { name: String, function destroy = (self) => {} }\n";
+	for (body, expected) in [
+		("console.log(label(), resource.name)", vec![]),
+		(
+			"let held = resource\nconsole.log(label(), held.name)",
+			vec!["MEM002"],
+		),
+	] {
+		let source = format!(
+			"{prefix}function run = () => {{ let resource = Held {{ name = \"file\" }}\nfunction label = (value: Held = resource): String => value.name\n{body} }}\n"
+		);
+		let mut session = Session::new();
+		let file = session.set_source("defaults.foreign", std::sync::Arc::from(source));
+		session.analyze_file(file);
+		let diagnostics = session.diagnostics(file);
+		assert_eq!(
+			diagnostics
+				.iter()
+				.map(|diagnostic| diagnostic.code.id)
+				.collect::<Vec<_>>(),
+			expected,
+			"{diagnostics:?}"
+		);
+	}
+}
+
+#[test]
 fn a_function_with_a_declared_return_type() {
 	let source = "function pick = (a: Integer, b: Boolean): Integer => a\nlet r = pick(1, true)\n";
 	assert_clean(source);

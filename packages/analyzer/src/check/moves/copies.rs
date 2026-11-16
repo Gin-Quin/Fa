@@ -111,6 +111,7 @@ impl Walker<'_> {
 	}
 
 	pub(super) fn finish_copy_checks(&mut self, conflicts: &FxHashMap<NodeId, NodeId>) {
+		self.check_consuming_defaults();
 		for index in 0..self.tree.nodes.len() {
 			let site = NodeId::new(index);
 			if let View::Copy(inner) = self.view(site)
@@ -169,6 +170,53 @@ impl Walker<'_> {
 				self.report(diagnostic);
 			} else {
 				self.report_structure_copy(value, conflicts.get(&value).copied());
+			}
+		}
+	}
+
+	/// A repeatedly evaluated consuming default must create its owner inside
+	/// that default. An existing value cannot be consumed at every call.
+	fn check_consuming_defaults(&mut self) {
+		let mut defaults: Vec<_> = self
+			.a
+			.functions
+			.values()
+			.flat_map(|info| &info.params)
+			.filter(|param| {
+				self.s
+					.types
+					.parameter_can_be_consumed(self.a.symbols.symbol(param.symbol).ty)
+			})
+			.filter_map(|param| param.default)
+			.collect();
+		defaults.sort_unstable();
+		defaults.dedup();
+		for default in defaults {
+			let span = self.span(default);
+			let mut pending = vec![default];
+			while let Some(value) = pending.pop() {
+				if let Some(inputs) = crate::lower::copies::result_inputs(&self.tree, value) {
+					pending.extend(inputs);
+					continue;
+				}
+				if !self.copy_reads_place(value) {
+					continue;
+				}
+				let created_here = crate::lower::copies::value_place_root(
+					&self.tree, &self.a, value,
+				)
+				.is_some_and(|symbol| {
+					let declaration = self.span(self.a.symbols.symbol(symbol).decl_node);
+					span.start <= declaration.start
+						&& declaration.end <= span.end
+						&& self.ownership_source_owned(symbol, value)
+				});
+				if created_here {
+					continue;
+				}
+				let source = self.tree.text(value.index());
+				let diagnostic = self.diagnostic(&MEM002, value, format!("the default `{source}` names an existing value, but this parameter consumes its argument at every call; build a new value in the default, e.g. `start work()`, or pass the value explicitly at the call"));
+				self.report(diagnostic);
 			}
 		}
 	}

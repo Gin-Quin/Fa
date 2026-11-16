@@ -2,6 +2,9 @@
 -- Repeated yields allocate MessageChannel ports that keep Node alive after done.
 use { sleep } = std.time
 mutable done = false
-start do { await sleep(5); done = true }
+start do {
+	await sleep(5)
+	done = true
+}
 while not done { await Task.yield() }
 console.log("done")

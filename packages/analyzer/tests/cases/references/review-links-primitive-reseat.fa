@@ -1,0 +1,14 @@
+function first = (values: Array<Integer>): Integer in values throws IndexError => try values[0]
+function bump = (values: Array<Integer>, value: Integer in values) mutates value => {
+	use destination = value
+	destination += 1
+}
+mutable values: Array<Integer> = [1, 5]
+mutable use chosen = try first(values)
+for i in 0..3 { bump(values, chosen) }
+reuse chosen = values[1]
+bump(values, chosen)
+use snapshot = chosen
+reuse chosen = try first(values)
+bump(values, snapshot)
+console.log(values) -- prints: [4, 7]

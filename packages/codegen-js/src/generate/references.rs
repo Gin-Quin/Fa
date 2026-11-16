@@ -5,14 +5,10 @@
 //!   reference to it: `const x = place`; `mutable use` is a `let`, which
 //!   `reuse` reassigns. A whole write through it (`x = value`) is done in
 //!   place (`faAssign`), so that every reference keeps seeing the value.
-//! - `use x = place` of a primitive place (a number, a string, a union…)
-//!   has no JavaScript equivalent: the container and the key are evaluated
-//!   once (a local name stays a name: re-reading it is the same Fa place),
-//!   and each use of `x` is the place (`player.score`, `items[$t0]`,
-//!   `counts.get($t1)`, written with `counts.set`). A `mutable use` of one is
-//!   a pair of locals `x$o` and `x$k`, which `reuse` reassigns; `reuse x =
-//!   none` empties the container. A whole local has no container: the pair
-//!   holds an accessor cell of the local (`{ get $v() …, set $v(…) … }`).
+//! - Primitive places use cached accessor cells. A local alias and every call
+//!   forward the same carrier; `mutable use` reseats its carrier. Pool cells
+//!   retain the slot index for delete/take and retire with that slot. Generic
+//!   references carry either that primitive cell or the bare object itself.
 //! - D60: a whole write of an object or a collection into a place rooted at
 //!   a value some reference designates is an in-place write (`faAssign`),
 //!   so that the reference sees the new value; union and optional places
@@ -42,14 +38,8 @@ use crate::js::{self, Expr};
 pub(crate) enum Reference {
 	/// An object or a collection: its JavaScript name holds it.
 	Object,
-	/// A reseatable reference to a primitive place: the `let` locals of its
-	/// container and key.
-	Pair {
-		container: String,
-		key: String,
-		map: bool,
-		optional: bool,
-	},
+	/// An erased item: either the object itself or a primitive cell.
+	Cell { carrier: String, erased: bool },
 }
 
 /// What designates a primitive place, evaluated once.
@@ -76,9 +66,7 @@ struct Parts {
 }
 
 impl Generator<'_> {
-	/// User reference functions use the existing accessor-cell representation
-	/// uniformly, including erased generic items, primitive fields and lookups.
-	/// Object aliases unwrap the cell once and retain the target object itself.
+	/// A borrowed result retains the designated place instead of copying data.
 	pub(crate) fn returns_reference(&self) -> bool {
 		self.current_function()
 			.and_then(|function| self.analysis.function(function))
@@ -127,13 +115,31 @@ impl Generator<'_> {
 			return;
 		}
 		let param = &info.params[position];
-		self.reference_cells.insert(param.symbol, name.to_string());
 		let ty = self.analysis.symbols.symbol(param.symbol).ty;
-		let access = if self.may_be_none(ty) { "?." } else { "." };
-		self.alias(param.symbol, format!("{name}{access}$v"));
 		if self.is_object_reference(ty) {
 			self.references.insert(param.symbol, Reference::Object);
+			return;
 		}
+		self.reference_cells.insert(param.symbol, name.to_string());
+		if matches!(self.types.kind(self.without_none(ty)), TypeKind::Param(_)) {
+			self.bind_erased_reference(param.symbol, name);
+			return;
+		}
+		let access = if self.may_be_none(ty) { "?." } else { "." };
+		self.alias(param.symbol, format!("{name}{access}$v"));
+	}
+
+	fn bind_erased_reference(&mut self, symbol: SymbolId, carrier: &str) {
+		let read = self.helper("faReferenceValue");
+		self.alias(symbol, format!("{read}({carrier})"));
+		self.reference_cells.insert(symbol, carrier.to_string());
+		self.references.insert(
+			symbol,
+			Reference::Cell {
+				carrier: carrier.to_string(),
+				erased: true,
+			},
+		);
 	}
 
 	/// Produce the address carrier before reading the designated value.
@@ -157,43 +163,29 @@ impl Generator<'_> {
 			return cell;
 		}
 		if self.is_object_reference(self.type_of(node)) {
-			let target = self.expr(node);
-			let target = self.keep_value_part(target);
-			let cell = format!("{{ $v: {} }}", target.text);
-			return if self.may_be_none(self.type_of(node)) {
-				Expr::primary(format!(
-					"({} === undefined ? undefined : {cell})",
-					target.text
-				))
-			} else {
-				Expr::primary(cell)
-			};
+			return self.expr(node);
 		}
 		let Some(parts) = self.reference_parts(node, false) else {
 			return self.unsupported(node, "this returned reference place");
 		};
+		self.cell_from_parts(node, &parts)
+	}
+
+	fn cell_from_parts(&mut self, node: NodeId, parts: &Parts) -> Expr {
 		let Some((container, key, map)) = self.pair_of(&parts) else {
 			return self.unsupported(node, "this returned reference place");
 		};
 		let container = self.keep_value_part(Expr::primary(container));
 		let key = self.keep_value_part(Expr::primary(key));
-		let read = if map {
-			format!("{}.get({})", container.text, key.text)
-		} else {
-			format!("{}[{}]", container.text, key.text)
-		};
-		let write = if map {
-			format!("{}.set({}, value)", container.text, key.text)
-		} else {
-			format!("{}[{}] = value", container.text, key.text)
-		};
-		let slot = if map {
-			format!("$k: {}, ", key.text)
-		} else {
-			String::new()
-		};
-		let cell =
-			format!("{{ {slot}get $v() {{ return {read}; }}, set $v(value) {{ {write}; }} }}");
+		let borrow = self.helper("faBorrowSlot");
+		let erased = matches!(
+			self.types.kind(self.without_none(self.type_of(node))),
+			TypeKind::Param(_)
+		);
+		let cell = format!(
+			"{borrow}({}, {}, {map}, {erased})",
+			container.text, key.text
+		);
 		if parts.optional {
 			Expr::primary(format!(
 				"({} === undefined ? undefined : {cell})",
@@ -207,6 +199,17 @@ impl Generator<'_> {
 	/// An erased Pool.add returns either an object or a primitive slot.
 	/// Dispatch once at insertion and retain the exact target in the cell.
 	fn generic_pool_reference(&mut self, node: NodeId) -> Option<Expr> {
+		if let View::Call { callee, .. } = self.view(node)
+			&& matches!(self.analysis.call(node).map(|call| call.callee), Some(Callee::Builtin(id)) if builtins::get(id).path == "Pool#find")
+			&& matches!(self.types.kind(self.receiver_type(callee)), TypeKind::Collection(_, item, _) if matches!(self.types.kind(item), TypeKind::Param(_)))
+		{
+			let receiver = self.receiver(callee);
+			let receiver = self.keep_value_part(receiver);
+			let predicate = self.analysis.call(node)?.arguments.iter().find_map(|argument| match argument { Argument::Given(node) => Some(*node), _ => None })?;
+			let predicate = self.expr(predicate);
+			let find = self.helper("faFindReference");
+			return Some(js::call(find, &[receiver.text, predicate.text]));
+		}
 		if let View::Call { callee, .. } = self.view(node)
 			&& matches!(self.analysis.call(node).map(|call| call.callee), Some(Callee::Builtin(id)) if builtins::get(id).path == "Pool#add")
 			&& matches!(self.types.kind(self.receiver_type(callee)), TypeKind::Collection(_, item, _) if matches!(self.types.kind(item), TypeKind::Param(_)))
@@ -229,16 +232,12 @@ impl Generator<'_> {
 			let data = self.copy_stored(argument, data);
 			let data = self.keep_value_part(data).text;
 			let result = self.temp();
-			let slot = self.temp();
-			let cell = format!(
-				"{{ $k: {slot}, get $v() {{ return {receiver}.get({slot}); }}, set $v(value) {{ {receiver}.set({slot}, value); }} }}"
-			);
-			// Use one expression so the lexical slot remains captured by its cell.
+			let borrow = self.helper("faBorrowSlot");
 			let add = self.helper("faAdd");
-			let assign = self.helper("faAssign");
 			let expression = format!(
-				"({receiver}[Symbol.toStringTag] === \"fa:ValuePool\" ? (() => {{ const {slot} = {receiver}.add({data}); return {cell}; }})() : (() => {{ const {slot} = {add}({receiver}, {data}); return {{ get $v() {{ return {slot}; }}, set $v(value) {{ {assign}({slot}, value); }} }}; }})())"
+				"({receiver}[Symbol.toStringTag] === \"fa:ValuePool\" ? {borrow}({receiver}, {receiver}.add({data}), true, true) : {add}({receiver}, {data}))"
 			);
+
 			self.out.line(format!("const {result} = {expression};"));
 			return Some(Expr::name(result, true));
 		}
@@ -249,7 +248,7 @@ impl Generator<'_> {
 
 	/// Whether references to values of a type are the JavaScript values
 	/// themselves: objects and collections (optional or not).
-	fn is_object_reference(&self, ty: TypeId) -> bool {
+	pub(crate) fn is_object_reference(&self, ty: TypeId) -> bool {
 		let ty = self.without_none(ty);
 		matches!(
 			self.types.kind(ty),
@@ -281,6 +280,21 @@ impl Generator<'_> {
 		};
 		let ty = self.analysis.symbols.symbol(symbol).ty;
 		let module_value = self.is_module_value(symbol);
+		if matches!(self.types.kind(self.without_none(ty)), TypeKind::Param(_)) {
+			let carrier = self.reference_cell(value);
+			let name = self.declare(symbol);
+			let keyword = if module_value {
+				""
+			} else if mutable {
+				"let "
+			} else {
+				"const "
+			};
+			self.out
+				.line(format!("{keyword}{name} = {};", carrier.text));
+			self.bind_erased_reference(symbol, &name);
+			return;
+		}
 		if self.is_object_reference(ty) {
 			let value = self.expr(value);
 			let name = self.declare(symbol);
@@ -293,98 +307,64 @@ impl Generator<'_> {
 			self.references.insert(symbol, Reference::Object);
 			return;
 		}
-		let Some(parts) = self.reference_parts(value, !mutable) else {
+		let node = self.strip_reference(value);
+		let existing = self.call_returns_reference(node)
+			|| matches!(self.analysis.resolution(node), Resolution::Local(source) if self.reference_cells.contains_key(&source));
+		if existing {
+			let carrier = self.reference_cell(value);
+			self.cell_declaration(symbol, carrier, mutable, ty);
+			return;
+		}
+		let Some(parts) = self.reference_parts(value, false) else {
 			return;
 		};
 		if let Key::Value(value) = parts.key {
 			let name = self.declare(symbol);
-			let keyword = match (module_value, mutable) {
-				(true, _) => "",
-				(false, true) => "let ",
-				(false, false) => "const ",
+			let keyword = if module_value {
+				""
+			} else if mutable {
+				"let "
+			} else {
+				"const "
 			};
 			self.out.line(format!("{keyword}{name} = {};", value.text));
 			return;
 		}
-		// a reference read by functions: its module-level pair, prepared
-		// before the functions were generated (`prepare_module_references`)
-		if let Some(Reference::Pair {
-			container: container_name,
-			key: key_name,
-			..
-		}) = self.references.get(&symbol).cloned()
-		{
-			if matches!(&parts.key, Key::Field(property) if property == "$v") {
-				self.reference_cells.insert(symbol, container_name.clone());
-			}
-			let Some((container, key, _)) = self.pair_of(&parts) else {
-				self.unsupported(n, "this reference");
-				return;
-			};
-			self.out.line(format!("{container_name} = {container};"));
-			self.out.line(format!("{key_name} = {key};"));
-			return;
-		}
-		if !mutable {
-			self.alias_parts(symbol, parts);
-			return;
-		}
-		let Some((container, key, map)) = self.pair_of(&parts) else {
-			self.unsupported(n, "this `mutable use`");
-			return;
-		};
-		let wanted = self.symbol_name(symbol);
-		let container_name = self.scopes.declare(&format!("{wanted}$o"));
-		let key_name = self.scopes.declare(&format!("{wanted}$k"));
-		self.out.line(format!(
-			"let {container_name} = {container}, {key_name} = {key};"
-		));
-		if matches!(&parts.key, Key::Field(property) if property == "$v") {
-			self.reference_cells.insert(symbol, container_name.clone());
-		}
-		let reference = Reference::Pair {
-			container: container_name,
-			key: key_name,
-			map,
-			optional: parts.optional || self.may_be_none(ty),
-		};
-		self.alias_pair(symbol, &reference);
-		self.references.insert(symbol, reference);
+		let carrier = self.cell_from_parts(value, &parts);
+		self.cell_declaration(symbol, carrier, mutable, ty);
 	}
 
-	/// The Fa name of a symbol.
-	fn symbol_name(&self, symbol: SymbolId) -> String {
-		self.types
-			.syms
-			.resolve(self.analysis.symbols.symbol(symbol).name)
-			.to_string()
-	}
-
-	/// Whether a module-level reference read by functions has a JavaScript
-	/// name of its own: an object reference, or a value computed once.
-	pub(crate) fn module_reference_has_name(&self, symbol: SymbolId) -> bool {
-		let info = self.analysis.symbols.symbol(symbol);
-		if self.is_object_reference(info.ty) {
-			return true;
-		}
-		let View::Use { value, .. } = self.view(info.decl_node) else {
-			return true;
+	fn cell_declaration(&mut self, symbol: SymbolId, carrier: Expr, mutable: bool, ty: TypeId) {
+		let module_value = self.is_module_value(symbol);
+		let name = self.declare(symbol);
+		let keyword = if module_value {
+			""
+		} else if mutable {
+			"let "
+		} else {
+			"const "
 		};
-		match self.view(self.strip_reference(value)) {
-			View::Index { target, index } => {
-				self.type_of(index) == TypeId::RANGE
-					|| self.kind(self.type_of(target)) == Kind::Text
-			}
-			_ => false,
-		}
+		self.out
+			.line(format!("{keyword}{name} = {};", carrier.text));
+		self.bind_primitive_reference(symbol, &name, ty);
 	}
 
-	/// The references of the module read by functions (module values),
-	/// prepared before the functions are generated: a primitive place gets
-	/// module-level `let`s for its container and key, which its declaration
-	/// assigns; a whole local is an alias of that local's name.
+	fn bind_primitive_reference(&mut self, symbol: SymbolId, name: &str, ty: TypeId) {
+		let access = if self.may_be_none(ty) { "?." } else { "." };
+		self.alias(symbol, format!("{name}{access}$v"));
+		self.reference_cells.insert(symbol, name.to_string());
+		self.references.insert(
+			symbol,
+			Reference::Cell {
+				carrier: name.to_string(),
+				erased: false,
+			},
+		);
+	}
+
+	/// Prepare carrier names before functions that read module references.
 	pub(crate) fn prepare_module_references(&mut self) {
-		let mut symbols: Vec<SymbolId> = self
+		let mut symbols: Vec<_> = self
 			.module_values
 			.iter()
 			.copied()
@@ -392,111 +372,31 @@ impl Generator<'_> {
 				matches!(
 					self.analysis.symbols.symbol(symbol).kind,
 					SymbolKind::Use | SymbolKind::MutableUse
-				) && !self.module_reference_has_name(symbol)
+				)
 			})
 			.collect();
 		symbols.sort();
 		for symbol in symbols {
-			let info = self.analysis.symbols.symbol(symbol);
-			let (ty, decl, kind) = (info.ty, info.decl_node, info.kind);
-			let View::Use { value, .. } = self.view(decl) else {
-				continue;
-			};
-			let value = self.strip_reference(value);
-			let (map, optional) = match self.view(value) {
-				View::Name(_) if kind == SymbolKind::Use => {
-					if let Resolution::Local(source) = self.analysis.resolution(value) {
-						let name = self.name_of(source);
-						self.alias(symbol, name);
-					}
+			let ty = self.analysis.symbols.symbol(symbol).ty;
+			let name = self.name_of(symbol);
+			if self.is_object_reference(ty) {
+				self.references.insert(symbol, Reference::Object);
+			} else if matches!(self.types.kind(self.without_none(ty)), TypeKind::Param(_)) {
+				self.bind_erased_reference(symbol, &name);
+			} else {
+				let decl = self.analysis.symbols.symbol(symbol).decl_node;
+				let value = match self.view(decl) {
+					View::Use { value, .. } => self.strip_reference(value),
+					_ => continue,
+				};
+				// Slices and characters are immutable values rather than writable slots.
+				if let View::Index { target, .. } = self.view(value)
+					&& self.kind(self.type_of(target)) == Kind::Text
+				{
 					continue;
 				}
-				// a `mutable use` of a whole local: a pair holding its cell
-				View::Name(_) => (false, false),
-				View::Index { target, .. } => {
-					let map = matches!(
-						self.types.kind(self.type_of(target)),
-						TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)
-					);
-					(map, false)
-				}
-				View::Call { .. } => {
-					let path = match self.analysis.call(value).map(|call| call.callee) {
-						Some(Callee::Builtin(builtin)) => builtins::get(builtin).path,
-						_ => "",
-					};
-					(
-						path.starts_with("Map#") || path.starts_with("Pool#"),
-						!matches!(path, "Map#getOrInsert" | "Pool#add"),
-					)
-				}
-				_ => (false, false),
-			};
-			let wanted = self.symbol_name(symbol);
-			let container = self.scopes.declare_global(&format!("{wanted}$o"));
-			let key = self.scopes.declare_global(&format!("{wanted}$k"));
-			self.module_slots.push(container.clone());
-			self.module_slots.push(key.clone());
-			let reference = Reference::Pair {
-				container,
-				key,
-				map,
-				optional: optional || self.may_be_none(ty),
-			};
-			self.alias_pair(symbol, &reference);
-			self.references.insert(symbol, reference);
-		}
-	}
-
-	/// Makes a symbol an alias of a place designated by `parts`.
-	fn alias_parts(&mut self, symbol: SymbolId, parts: Parts) {
-		let dot = if parts.optional { "?." } else { "." };
-		let container = parts.container.map(|container| container.primary_text());
-		let container = container.unwrap_or_default();
-		match parts.key {
-			Key::Whole(text, map) => {
-				if let Some(map) = map {
-					self.map_aliases.insert(symbol, map);
-				}
-				self.alias(symbol, text);
+				self.bind_primitive_reference(symbol, &name, ty);
 			}
-			Key::Field(property) => {
-				if property == "$v" {
-					self.reference_cells.insert(symbol, container.clone());
-				}
-				self.alias(symbol, format!("{container}{dot}{property}"));
-			}
-			Key::Index(index) => {
-				let access = if parts.optional { "?.[" } else { "[" };
-				self.alias(symbol, format!("{container}{access}{}]", index.text));
-			}
-			Key::Entry(key) => {
-				self.alias(symbol, format!("{container}{dot}get({})", key.text));
-				self.map_aliases.insert(symbol, (container, key.text));
-			}
-			Key::Value(_) => {}
-		}
-	}
-
-	/// Makes a symbol the alias of the place of a `mutable use` pair.
-	fn alias_pair(&mut self, symbol: SymbolId, reference: &Reference) {
-		let Reference::Pair {
-			container,
-			key,
-			map,
-			optional,
-		} = reference
-		else {
-			return;
-		};
-		let dot = if *optional { "?." } else { "." };
-		if *map {
-			self.alias(symbol, format!("{container}{dot}get({key})"));
-			self.map_aliases
-				.insert(symbol, (container.clone(), key.clone()));
-		} else {
-			let access = if *optional { "?.[" } else { "[" };
-			self.alias(symbol, format!("{container}{access}{key}]"));
 		}
 	}
 
@@ -507,25 +407,14 @@ impl Generator<'_> {
 			return;
 		};
 		match self.references.get(&symbol).cloned() {
+			Some(Reference::Cell { carrier, .. }) => {
+				let value = self.reference_cell(value);
+				self.out.line(format!("{carrier} = {};", value.text));
+			}
 			Some(Reference::Object) => {
 				let value = self.expr(value);
 				let name = self.name_of(symbol);
 				self.out.line(format!("{name} = {};", value.text));
-			}
-			Some(Reference::Pair { container, key, .. }) => {
-				if matches!(self.view(self.strip_groups(value)), View::None) {
-					self.out.line(format!("{container} = undefined;"));
-					return;
-				}
-				let Some(parts) = self.reference_parts(value, false) else {
-					return;
-				};
-				let Some((new_container, new_key, _)) = self.pair_of(&parts) else {
-					self.unsupported(value, "this place in a `reuse`");
-					return;
-				};
-				self.out.line(format!("{container} = {new_container};"));
-				self.out.line(format!("{key} = {new_key};"));
 			}
 			None => {
 				self.unsupported(n, "this `reuse`");
@@ -547,27 +436,6 @@ impl Generator<'_> {
 		match self.view(node) {
 			View::Name(_) => {
 				if let Resolution::Local(source) = self.analysis.resolution(node) {
-					// `use y = x` of a `mutable use x`: what `x` designates now
-					if let Some(Reference::Pair {
-						container,
-						key,
-						map,
-						optional,
-					}) = self.references.get(&source).cloned()
-					{
-						let container = self.keep_value_part(Expr::name(container, false));
-						let key = self.keep_value_part(Expr::name(key, false));
-						let key = if map {
-							Key::Entry(key)
-						} else {
-							Key::Index(key)
-						};
-						return Some(Parts {
-							container: Some(container),
-							key,
-							optional,
-						});
-					}
 					let text = self.name_of(source);
 					let map = self.map_aliases.get(&source).cloned();
 					return Some(simple(None, Key::Whole(text, map)));
@@ -801,10 +669,7 @@ impl Generator<'_> {
 		if let Some(cell) = self.reference_cells.get(&symbol) {
 			return Some(format!("{cell}.$k"));
 		}
-		match self.references.get(&symbol) {
-			Some(Reference::Pair { key, map: true, .. }) => Some(key.clone()),
-			_ => self.map_aliases.get(&symbol).map(|(_, key)| key.clone()),
-		}
+		self.map_aliases.get(&symbol).map(|(_, key)| key.clone())
 	}
 
 	/// The node of a place without its parentheses and `try`.

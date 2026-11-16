@@ -457,13 +457,7 @@ impl<'s> Generator<'s> {
 		self.plan_instances();
 		let mut module_values: Vec<SymbolId> = self.module_values.iter().copied().collect();
 		module_values.sort();
-		module_values.retain(|&symbol| {
-			// a reference to a primitive place has no name of its own
-			!matches!(
-				self.analysis.symbols.symbol(symbol).kind,
-				SymbolKind::Use | SymbolKind::MutableUse
-			) || self.module_reference_has_name(symbol)
-		});
+
 		let module_lets: Vec<String> = module_values
 			.iter()
 			.map(|&symbol| self.declare(symbol))

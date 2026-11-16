@@ -300,7 +300,19 @@ impl Generator<'_> {
 					parameters.push(name);
 					continue;
 				};
-				let (lines, value) = g.capture_at(indent + 2, |g| g.expr(default));
+				let reference = info.sig.is_some_and(|sig| {
+					g.types
+						.params(g.types.sig(sig).params)
+						.get(position)
+						.is_some_and(|param| param.reference.is_some())
+				});
+				let (lines, value) = g.capture_at(indent + 2, |g| {
+					if reference {
+						g.reference_cell(default)
+					} else {
+						g.expr(default)
+					}
+				});
 				if g.omitted_by_sentinel(param.symbol) {
 					let omitted = g.helper("faOmitted");
 					let test = if arrow {

@@ -1,0 +1,25 @@
+type Node = { value: Integer }
+function add = <Item>(owner: Pool<Item>, value: Item): Item in owner mutates owner.size => owner.add(copy value)
+function same = <Item>(owner: Pool<Item>, value: Item in owner): Item in owner => value
+function find = <Item>(owner: Pool<Item>): (Item in owner)? => owner.find((_item) => true)
+function replace = <Item>(owner: Pool<Item>, target: Item in owner, value: Item) mutates target => {
+	use destination = target
+	destination = copy value
+}
+mutable objects: Pool<Node> = []
+use node = add(objects, Node { value = 1 })
+use alias = same(objects, node)
+replace(objects, node, Node { value = 9 })
+console.log(alias.value) -- prints: 9
+use found = find(objects)
+if found is not none { console.log(found.value) } -- prints: 9
+mutable values: Pool<Integer> = []
+use first = add(values, 1)
+use second = add(values, 1)
+use kept = same(values, second)
+replace(values, kept, 9)
+console.log(kept) -- prints: 9
+values.delete(kept)
+console.log(values) -- prints: [1]
+values.clear()
+console.log(values.size) -- prints: 0

@@ -13,6 +13,7 @@ import { faCompare, faEquals, faHash, faKeyEquals } from "./equality.js";
 import { IndexError, KeyNotFound } from "./errors.js";
 import { faFormat } from "./format.js";
 import { faCheckInteger, faRangeOverflow } from "./integers.js";
+import { faReferenceCellTag } from "./references.js";
 import { faStop } from "./stops.js";
 import { faCharacters, faStringCompare } from "./strings.js";
 
@@ -1215,7 +1216,7 @@ export function faIterable(source) {
 	return source instanceof FaRange ? faRangeValues(source) : source;
 }
 
-// @fa-helper FaValuePool
+// @fa-helper FaValuePool deps: faReferenceCellTag
 /**
  * A `Pool` (or `GrowingPool`) of values that are not objects
  * (`Pool<Integer>`): its elements by slot, in a `Map` from a slot number to
@@ -1228,6 +1229,8 @@ export class FaValuePool {
 	/** @type {Map<number, T>} */
 	#slots = new Map();
 	#next = 0;
+	/** @type {Map<number, any> | undefined} */
+	#references;
 
 	/** @param {Iterable<T>} [values] */
 	constructor(values) {
@@ -1278,6 +1281,30 @@ export class FaValuePool {
 		return this.#slots.get(slot);
 	}
 
+	/** A primitive slot's carrier, allocated once and forwarded across calls.
+	 * @param {number} slot
+	 * @returns {any}
+	 */
+	reference(slot) {
+		this.#references ??= new Map();
+		let reference = this.#references.get(slot);
+		if (reference === undefined) {
+			const pool = this;
+			reference = {
+				[faReferenceCellTag]: true,
+				$k: slot,
+				get $v() {
+					return pool.get(slot);
+				},
+				set $v(value) {
+					pool.set(slot, value);
+				},
+			};
+			this.#references.set(slot, reference);
+		}
+		return reference;
+	}
+
 	/**
 	 * @param {number} slot
 	 * @param {T} value
@@ -1293,6 +1320,7 @@ export class FaValuePool {
 	 * @returns {boolean}
 	 */
 	delete(slot) {
+		this.#references?.delete(slot);
 		return this.#slots.delete(slot);
 	}
 
@@ -1303,13 +1331,14 @@ export class FaValuePool {
 	 */
 	take(slot) {
 		const value = this.#slots.get(slot);
-		this.#slots.delete(slot);
+		this.delete(slot);
 		return value;
 	}
 
 	/** @returns {void} */
 	clear() {
 		this.#slots.clear();
+		this.#references?.clear();
 	}
 
 	/**
@@ -1333,7 +1362,7 @@ export class FaValuePool {
 	deleteWhere(predicate) {
 		for (const [slot, value] of this.#slots) {
 			if (predicate(value)) {
-				this.#slots.delete(slot);
+				this.delete(slot);
 			}
 		}
 	}

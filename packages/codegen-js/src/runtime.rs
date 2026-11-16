@@ -33,6 +33,7 @@ pub const RUNTIME_FILES: &[(&str, &str)] = &[
 	("equality.js", include_str!("../runtime/equality.js")),
 	("format.js", include_str!("../runtime/format.js")),
 	("copy.js", include_str!("../runtime/copy.js")),
+	("references.js", include_str!("../runtime/references.js")),
 	("relations.js", include_str!("../runtime/relations.js")),
 	("reactive.js", include_str!("../runtime/reactive.js")),
 	("foreign.js", include_str!("../runtime/foreign.js")),

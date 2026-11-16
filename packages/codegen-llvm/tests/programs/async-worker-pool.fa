@@ -37,7 +37,8 @@ async function main = () => {
 	let inputs = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], [13], [14], [15], [16]]
 	mutable pending: Array<Task<Array<Integer>> throws WorkerTimeout> = []
 	for data in inputs {
-		pending.push(await workers.submit((worker) => await worker.process(data)))
+		let snapshot = copy data
+		pending.push(await workers.submit((worker) => await worker.process(snapshot)))
 	}
 	let results = await Task.all(pending) catch error => []
 	console.log("All results: {results}")

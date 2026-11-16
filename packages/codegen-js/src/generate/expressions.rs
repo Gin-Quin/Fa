@@ -14,11 +14,20 @@ impl Generator<'_> {
 	/// The JavaScript of an expression, converted for its sink when the
 	/// analyzer recorded a conversion or a range check there.
 	pub(crate) fn expr(&mut self, n: NodeId) -> Expr {
-		let value = if self.call_returns_reference(n) {
+		let value = if self.call_returns_reference(n) && !self.is_object_reference(self.type_of(n))
+		{
 			let View::Call { callee, arguments } = self.view(n) else {
 				unreachable!()
 			};
 			let cell = self.call(n, callee, arguments);
+			if matches!(
+				self.types.kind(self.without_none(self.type_of(n))),
+				TypeKind::Param(_)
+			) {
+				let read = self.helper("faReferenceValue");
+				let value = js::call(read, &[cell.text]);
+				return self.sink(n, value);
+			}
 			let access = if self.may_be_none(self.type_of(n)) {
 				"?."
 			} else {

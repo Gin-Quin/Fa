@@ -1,0 +1,11 @@
+-- prints: 9
+-- prints: 9
+function get = (
+	owner: GrowingPool<Integer>
+	node: Integer in owner = owner.add(7)
+): Integer in owner mutates owner.size => node
+mutable owner: GrowingPool<Integer> = []
+use result = get(owner)
+result = 9
+console.log(result)
+for value in owner { console.log(value) }

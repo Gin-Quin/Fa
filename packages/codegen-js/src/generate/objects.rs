@@ -39,6 +39,8 @@ pub(crate) struct Place {
 	/// A value of a map (`map[key]`, a reference to it): the map and the
 	/// key, evaluated once. `text` reads it; a write is `map.set(key, value)`.
 	pub(crate) map: Option<(String, String)>,
+	/// Erased references write through the carrier or update the object in place.
+	pub(crate) reference: Option<(String, String)>,
 }
 
 impl Place {
@@ -48,11 +50,15 @@ impl Place {
 			text,
 			ty,
 			map: None,
+			reference: None,
 		}
 	}
 
 	/// The statement writing a value into the place.
 	pub(crate) fn write(&self, value: &str) -> String {
+		if let Some((helper, carrier)) = &self.reference {
+			return format!("{helper}({carrier}, {value});");
+		}
 		match &self.map {
 			Some((map, key)) => format!("{map}.set({key}, {value});"),
 			None => format!("{} = {value};", self.text),
@@ -1002,7 +1008,22 @@ impl Generator<'_> {
 					ty = self.without_none(ty);
 					text = text.replace("?.[", "[").replace("?.", ".");
 				}
-				Some(Place { text, ty, map })
+				let reference = if let Some(super::references::Reference::Cell {
+					carrier,
+					erased: true,
+				}) = self.references.get(&symbol).cloned()
+				{
+					let write = self.helper("faReferenceWrite");
+					Some((write.to_string(), carrier))
+				} else {
+					None
+				};
+				Some(Place {
+					text,
+					ty,
+					map,
+					reference,
+				})
 			}
 			View::Access {
 				target: container,
@@ -1085,6 +1106,7 @@ impl Generator<'_> {
 						text: read.text,
 						ty: self.type_of(target),
 						map: Some((container_value.primary_text(), position.text)),
+						reference: None,
 					});
 				}
 				if self.index_needs_normalizing(target, index) {

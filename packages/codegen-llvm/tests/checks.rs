@@ -1088,8 +1088,7 @@ console.log(items.length)
 			"inline-recursive-items",
 			"type Node = { value: Integer, children: Array<Node> }\nfunction build = (depth: Integer): Node => { mutable node = Node { value = depth, children = [] }\nif depth > 0 { node.children.push(build(depth - 1)) }\nnode }\nconsole.log(build(3))\n",
 		);
-		// The closed region proof admits this builder: its body is the arena one.
-		let build = function(&ir, "fa.build.arena");
+		let build = function(&ir, "fa.build");
 		assert!(build.contains("store { ptr, i64 }"), "{build}");
 		assert!(!build.contains("@fa_alloc("), "{build}");
 		assert!(!build.contains("@fa_arena_alloc("), "{build}");
@@ -1891,47 +1890,6 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 			ir.contains("getelementptr inbounds i32, ptr %items"),
 			"{ir}"
 		);
-	}
-
-	#[test]
-	fn recursive_object_array_regions_require_closed_structural_edges() {
-		let converted = ir_of(
-			"object-array-region-coercion-fallback",
-			include_str!("programs/region-object-coercion-fallback.fa"),
-		);
-		assert!(!converted.contains("@fa.build.arena("), "{converted}");
-		let fixture = ir_of(
-			"object-array-region-copy-fixture",
-			include_str!("programs/region-object-arrays.fa"),
-		);
-		assert!(fixture.contains("@fa.build.arena("), "{fixture}");
-		assert!(fixture.contains("@fa.copy.region_children"), "{fixture}");
-		let source = "type Tree = { value: Integer, children: Array<Tree> }\nfunction build = (depth: Integer): Tree => { mutable tree = Tree { value = depth, children = [] }\nif depth > 0 { for index in 0..3 { tree.children.push(build(depth - 1)) } }\ntree }\nfunction change = (tree: Tree): Void mutates tree => { tree.value += 1\nfor child in tree.children { change(child) } }\nmutable root = build(2)\nchange(root)\nconsole.log(root)\n";
-		for (suffix, region, exact) in [
-			("", true, true),
-			("root.children.push(build(0))\n", false, true),
-			("let mutator = change\nmutator(root)\n", false, true),
-			(
-				"use alias = root.children\nconsole.log(alias)\n",
-				false,
-				true,
-			),
-			("console.log(root.children.capacity)\n", true, false),
-		] {
-			for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
-				let ir = ir_at_target(
-					&format!("object-array-region-{name}-{region}-{}", suffix.len()),
-					&format!("{source}{suffix}"),
-					true,
-					OptLevel::O0,
-					target,
-				);
-				assert_eq!(ir.contains("@fa.build.arena("), region, "{ir}");
-				let build = function(&ir, if region { "fa.build.arena" } else { "fa.build" });
-				assert_eq!(build.contains("@fa_array_reserve("), exact, "{build}");
-				assert_eq!(ir.contains("@fa_array_new_region_exact("), region, "{ir}");
-			}
-		}
 	}
 
 	#[test]

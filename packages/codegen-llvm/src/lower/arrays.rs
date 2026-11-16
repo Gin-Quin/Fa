@@ -190,12 +190,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let item = self.item_repr(item_type, source.unwrap_or(NodeId::new(0)))?;
 			let size = self.item_size(item)?;
 			let array = self.call_value(
-				self.runtime
-					.function(if self.arena_array_object(value.repr).is_some() {
-						"fa_array_into_region_exact"
-					} else {
-						"fa_array_into_region"
-					})?,
+				self.runtime.function("fa_array_into_region")?,
 				&[value.value.expect("an array").into(), size.into()],
 			)?;
 			return Ok(Val::new(value.repr, array));
@@ -393,16 +388,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder.build_store(length, zero)?;
 			array
 		} else if self.region_child_array(node, repr) {
-			if self.arena_array_object(repr).is_some() {
-				let size = self.item_size(item)?;
-				self.call_value(
-					self.runtime.function("fa_array_new_region_exact")?,
-					&[zero.into(), count.into(), size.into()],
-				)?
-				.into_pointer_value()
-			} else {
-				self.region_local_array(item, count)?
-			}
+			self.region_local_array(item, count)?
 		} else if let Some(offer) = self.forwarded_collection_buffer(node) {
 			let size = self.item_size(item)?;
 			self.call_value(

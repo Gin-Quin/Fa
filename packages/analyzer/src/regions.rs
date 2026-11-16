@@ -388,7 +388,7 @@ impl<'a> RegionFile<'a> {
 						}
 						_ => false,
 					};
-					if optional || self.root_array(field.ty, ty) {
+					if optional {
 						recursive = true;
 					} else if !self.passive(field.ty, false) {
 						return None;
@@ -578,90 +578,7 @@ impl<'a> RegionFile<'a> {
 		let View::Access { target, members } = self.view(callee) else {
 			return None;
 		};
-		match members.len() {
-			0 => None,
-			1 => Some(target),
-			length => members.iter().nth(length - 2),
-		}
-	}
-
-	/// A direct child-array field of an independent builder local. Parameters,
-	/// aliases, globals and deeper projections cannot publish new region edges.
-	fn builder_array_field(&self, call: NodeId, owner: Option<NodeId>, root: &Root) -> bool {
-		let Some(owner) = owner else { return false };
-		if root.nominal.is_some() {
-			return false;
-		}
-		let View::Call { callee, .. } = self.view(call) else {
-			return false;
-		};
-		let View::Access { target, members } = self.view(callee) else {
-			return false;
-		};
-		if members.len() != 2 || !self.direct_root(self.analysis.type_of(target), root.ty) {
-			return false;
-		}
-		let Resolution::Local(symbol) = self.analysis.resolution(target) else {
-			return false;
-		};
-		let symbol = self.analysis.symbols.symbol(symbol);
-		matches!(symbol.kind, SymbolKind::Mutable | SymbolKind::Let)
-			&& self.owners[symbol.decl_node.index()] == Some(owner)
-	}
-
-	/// Writing finite, non-owning data cannot detach or invalidate a region
-	/// edge. Union payloads retain their immutable compact-layout contract.
-	fn passive_write(&self, target: NodeId, root: &Root) -> bool {
-		let ty = self.analysis.type_of(target);
-		root.nominal.is_none() && !self.contains(ty, root.ty) && self.passive(ty, false)
-	}
-
-	/// Another object layout that has every structural field of an object root
-	/// may be assignable to it, through a coercion recorded or not (optional
-	/// narrowing, adapted callable returns, mutator views). Its owning fields
-	/// were never built in the region: the whole program keeps ordinary
-	/// ownership. Every value's type is in the inventory of its file.
-	fn convertible_into(&self, ty: TypeId, root: &Root) -> bool {
-		if root.nominal.is_some()
-			|| ty == root.ty
-			|| self.types.rec_target(ty) == Some(root.ty)
-			|| !matches!(self.types.kind(ty), TypeKind::Object(_))
-		{
-			return false;
-		}
-		let fields = self.types.fields_of(ty);
-		self.types
-			.fields_of(root.ty)
-			.iter()
-			.filter(|field| {
-				!field
-					.flags
-					.intersects(FieldFlags::PRIVATE | FieldFlags::METHOD)
-			})
-			.all(|expected| fields.iter().any(|field| field.name == expected.name))
-	}
-
-	fn unproven_conversion(&self, node: NodeId, root: &Root) -> bool {
-		let Some(&target) = self.analysis.coercions.get(&node) else {
-			return false;
-		};
-		if root.nominal.is_some() {
-			return false;
-		}
-		let source = self.analysis.type_of(node);
-		let from_root = self.contains(source, root.ty);
-		let to_root = self.contains(target, root.ty);
-		if from_root {
-			return !to_root;
-		}
-		to_root
-			&& !matches!(self.types.kind(source), TypeKind::None | TypeKind::Never)
-			&& !self
-				.analysis
-				.object(node)
-				.is_some_and(|object| object.ty == root.ty)
-			&& !(self.root_array(target, root.ty)
-				&& matches!(self.types.kind(source), TypeKind::Collection(CollKind::Array, item, _) if item == TypeId::NEVER))
+		(members.len() == 1).then_some(target)
 	}
 
 	fn array_projection(&self, node: NodeId, root: &Root) -> bool {
@@ -812,9 +729,7 @@ impl<'a> RegionFile<'a> {
 			for function in &builders {
 				claims.insert(builder_key(&self.function_names[function], &root.name));
 			}
-			if mentioned
-				.iter()
-				.any(|&ty| self.embedded(ty, &root) || self.convertible_into(ty, &root))
+			if mentioned.iter().any(|&ty| self.embedded(ty, &root))
 				|| self.analysis.functions.values().any(|info| {
 					info.captures.iter().any(|&symbol| {
 						self.contains(self.analysis.symbols.symbol(symbol).ty, root.ty)
@@ -914,41 +829,20 @@ impl<'a> RegionFile<'a> {
 				reject(claims);
 				continue;
 			};
-			for (name, value) in &object.fields {
+			for (_, value) in &object.fields {
 				let crate::analysis::FieldValue::Given(value) = *value else {
-					if root.nominal.is_none()
-						&& self
-							.types
-							.fields_of(object.ty)
-							.iter()
-							.any(|field| field.name == *name && self.root_array(field.ty, root.ty))
-					{
-						reject(claims);
-					}
 					continue;
 				};
-				if self.root_array(self.analysis.type_of(value), root.ty) {
-					if !self.child_array_origin(value, function, root) {
-						reject(claims);
-					} else if let Some(array) =
-						stable_type_name(self.types, self.analysis.type_of(value))
-					{
-						claims.insert(format!(
-							"child-array{SEPARATOR}{}{SEPARATOR}{}{SEPARATOR}{array}",
-							root.name, self.function_names[&function]
-						));
-					}
+				if self.root_array(self.analysis.type_of(value), root.ty)
+					&& !self.child_array_origin(value, function, root)
+				{
+					reject(claims);
 				}
 			}
 		}
 		for index in 0..self.tree.nodes.len() {
 			let node = NodeId::new(index);
 			let ty = self.analysis.type_of(node);
-			if self.unproven_conversion(node, root) {
-				// A structural conversion can manufacture this layout without
-				// entering its builder. Its owning fields have no region proof.
-				reject(claims);
-			}
 			let owner = self.owners[index].filter(|owner| builders.contains(owner));
 			if let View::Access { target, members } | View::OptionalAccess { target, members } =
 				self.view(node)
@@ -991,7 +885,6 @@ impl<'a> RegionFile<'a> {
 						&& matches!(self.analysis.resolution(target), Resolution::Local(symbol) if self.analysis.symbols.symbol(symbol).kind == SymbolKind::Mutable && self.owners[self.analysis.symbols.symbol(symbol).decl_node.index()] == owner)
 						&& matches!(self.view(target), View::Name(_));
 					if self.place_contains(target, root)
-						&& !self.passive_write(target, root)
 						&& (!own_local
 							|| self.root_array(self.analysis.type_of(target), root.ty)
 								&& value.is_some_and(|value| {
@@ -1006,7 +899,6 @@ impl<'a> RegionFile<'a> {
 				} else if let View::CompoundAssignment { target, .. }
 				| View::UpdateFields { target, .. } = self.view(node)
 					&& self.place_contains(target, root)
-					&& !self.passive_write(target, root)
 				{
 					reject(claims);
 				}
@@ -1078,14 +970,7 @@ impl<'a> RegionFile<'a> {
 								matches!(symbol.kind, SymbolKind::Mutable | SymbolKind::Let)
 									&& self.owners[symbol.decl_node.index()] == self.owners[index]
 							}) && matches!(builtin, Some("Array#push" | "Array#reserve"));
-					let builder_field = self.root_array(self.analysis.type_of(value), root.ty)
-						&& self.builder_array_field(node, owner, root)
-						&& matches!(builtin, Some("Array#push" | "Array#reserve"));
-					// Every body contributes its stores to this same closed proof.
-					// An indirect/imported function value has no such body identity.
-					let checked_call =
-						root.nominal.is_none() && matches!(call.callee, Callee::Function(_));
-					if !allowed_array && !builder_field && !checked_call {
+					if !allowed_array {
 						reject(claims);
 					}
 				}
@@ -1536,76 +1421,6 @@ console.log(saved)
 			resolved.iter().any(|fact| fact.starts_with("type\u{1f}")),
 			"{claims:#?}"
 		);
-	}
-
-	#[test]
-	fn recursive_object_arrays_keep_edges_closed_while_passive_fields_change() {
-		let (claims, resolved) = facts(include_str!("../../../benchmarks/scene/main.fa"));
-		assert!(
-			resolved.iter().any(|key| key.starts_with("type\u{1f}")),
-			"{claims:#?}"
-		);
-		assert!(
-			resolved
-				.iter()
-				.any(|key| key.starts_with("child-array\u{1f}")),
-			"{claims:#?}"
-		);
-	}
-
-	#[test]
-	fn recursive_object_array_edges_cannot_be_mutated_or_aliased_by_readers() {
-		let tree = "type Tree = { value: Integer, children: Array<Tree> }\nfunction build = (depth: Integer): Tree => { mutable tree = Tree { value = depth, children = [] }\nif depth > 0 { for index in 0..2 { tree.children.push(build(depth - 1)) } }\ntree }\n";
-		for suffix in [
-			"mutable tree = build(2)\ntree.children.push(build(0))\nconsole.log(tree)",
-			"function grow = (tree: Tree) mutates tree => { tree.children.push(build(0)) }\nmutable tree = build(2)\ngrow(tree)",
-			"mutable tree = build(2)\nuse children = tree.children\nconsole.log(children)",
-			"mutable tree = build(2)\ntry tree.children[0] = build(0)\nconsole.log(tree)",
-			"let holder = { tree = build(2) }\nconsole.log(holder)",
-		] {
-			let (claims, resolved) = facts(&format!("{tree}\n{suffix}\n"));
-			assert!(resolved.is_empty(), "{suffix}: {claims:#?}");
-		}
-	}
-
-	#[test]
-	fn structural_root_conversions_keep_ordinary_ownership() {
-		let (claims, resolved) = facts(include_str!(
-			"../../codegen-llvm/tests/programs/region-object-coercion-fallback.fa"
-		));
-		assert!(resolved.is_empty(), "{claims:#?}");
-	}
-
-	/// Conversions without a recorded coercion entry: the inventory of object
-	/// layouts rejects the root whatever path converts the value.
-	#[test]
-	fn convertible_object_layouts_keep_ordinary_ownership() {
-		let tree = "type Tree = { value: Integer, children: Array<Tree> }\ntype Leaf = { value: Integer, children: Array<Never> }\nfunction build = (depth: Integer): Tree => { mutable tree = Tree { value = depth, children = [] }\nif depth > 0 { for index in 0..2 { tree.children.push(build(depth - 1)) } }\ntree }\nfunction leaf = (value: Integer): Leaf => Leaf { value, children = [] }\nconsole.log(build(1))\n";
-		for suffix in [
-			"function maybe = (value: Integer): Leaf | None => if value > 0 { leaf(value) } else { none }\nlet converted: Tree | None = maybe(1)\nconsole.log(converted)",
-			"let make: (value: Integer) => Tree = leaf\nconsole.log(make(1))",
-			"type Wide = { value: Integer, children: Array<Tree>, extra: Integer }\nfunction wider = (value: Integer): Wide => Wide { value, children = [], extra = 1 }\nconsole.log(wider(1))",
-		] {
-			let (claims, resolved) = facts(&format!("{tree}{suffix}\n"));
-			assert!(resolved.is_empty(), "{suffix}: {claims:#?}");
-		}
-		let (claims, resolved) = facts(&format!(
-			"{}console.log(leaf(1))\n",
-			tree.replace("type Leaf = { value: Integer, children: Array<Never> }", "type Leaf = { value: Integer }")
-				.replace("Leaf { value, children = [] }", "Leaf { value }")
-		));
-		assert!(
-			resolved.iter().any(|key| key.starts_with("type\u{1f}")),
-			"a layout without the root's fields converts nothing: {claims:#?}"
-		);
-	}
-
-	#[test]
-	fn recursive_object_array_defaults_keep_ordinary_ownership() {
-		let (claims, resolved) = facts(
-			"type Tree = { value: Integer, children: Array<Tree> = [] }\nfunction build = (value: Integer): Tree => Tree { value }\nconsole.log(build(1))\n",
-		);
-		assert!(resolved.is_empty(), "{claims:#?}");
 	}
 
 	#[test]

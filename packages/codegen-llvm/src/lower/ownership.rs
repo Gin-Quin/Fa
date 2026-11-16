@@ -1010,14 +1010,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				for (index, field) in fields.into_iter().enumerate() {
 					if self.needs_drop(field) {
 						let raw = builder.build_extract_value(structure, index as u32, "")?;
-						let copied = if self.arena_repr(repr)
-							&& self.arena_array_object(field).is_some()
-						{
-							self.copy_region_child_array(builder, field, raw.into_pointer_value())?
-								.into()
-						} else {
-							self.call_copy(builder, field, raw)?
-						};
+						let copied = self.call_copy(builder, field, raw)?;
 						structure = builder
 							.build_insert_value(structure, copied, index as u32, "")?
 							.into_struct_value();
@@ -1039,75 +1032,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => value,
 		})
-	}
-
-	/// A root copy already entered its independent region. Its child-array
-	/// headers and every recursively copied child join that region. Ordinary
-	/// arrays keep the generic copier and one independent region per item.
-	fn copy_region_child_array(
-		&self,
-		b: &Builder<'ctx>,
-		repr: Repr,
-		source: PointerValue<'ctx>,
-	) -> Result<PointerValue<'ctx>, Error> {
-		let key = format!("region-child {}", self.shape_key(repr));
-		let function = if let Some(function) = self.copy_functions.borrow().get(&key).copied() {
-			function
-		} else {
-			let Repr::Array(item_type) = repr else {
-				unreachable!("a child array")
-			};
-			let signature = self
-				.pointer_type()
-				.fn_type(&[self.pointer_type().into()], false);
-			let (function, builder) = self.helper_function("fa.copy.region_children", signature);
-			self.copy_functions.borrow_mut().insert(key, function);
-			let source = function
-				.get_nth_param(0)
-				.expect("a child array")
-				.into_pointer_value();
-			let present = builder.build_is_not_null(source, "")?;
-			self.helper_when(&builder, function, present, |builder| {
-				builder.build_return(Some(&source))?;
-				Ok(())
-			})?;
-			let item = self.item_repr(item_type, NodeId::new(0))?;
-			let (items, length) = self.helper_array_parts(&builder, source)?;
-			let result = builder
-				.build_call(
-					self.runtime.function("fa_array_new_region_exact")?,
-					&[
-						length.into(),
-						length.into(),
-						self.item_size_const(item).into(),
-					],
-					"",
-				)?
-				.try_as_basic_value()
-				.basic()
-				.expect("a child array")
-				.into_pointer_value();
-			let (destination, _) = self.helper_array_parts(&builder, result)?;
-			self.helper_loop(&builder, function, length, |builder, index| {
-				let source = unsafe {
-					builder.build_in_bounds_gep(self.llvm_type(item), items, &[index], "")?
-				};
-				let value = builder.build_load(self.llvm_type(item), source, "")?;
-				let copied = self.call_copy(builder, item, value)?;
-				let destination = unsafe {
-					builder.build_in_bounds_gep(self.llvm_type(item), destination, &[index], "")?
-				};
-				builder.build_store(destination, copied)?;
-				Ok(())
-			})?;
-			builder.build_return(Some(&result))?;
-			function
-		};
-		Ok(b.build_call(function, &[source.into()], "")?
-			.try_as_basic_value()
-			.basic()
-			.expect("a copied child array")
-			.into_pointer_value())
 	}
 
 	/// Keep allocation and memcpy off the literal-copy path. Otherwise

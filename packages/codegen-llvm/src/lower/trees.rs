@@ -2,8 +2,7 @@
 //! closed over every unit (`fa_analyzer::regions`): no generic or asynchronous code, finite passive payloads
 //! and edges to the same root type. Every constructor belongs to a root builder;
 //! roots cannot escape through captures, fields, containers or global writes.
-//! Recursive edges stay immutable after construction; finite non-owning object
-//! fields may change. Builders may replace their own independent root locals.
+//! Node fields stay immutable, while builders may replace their own root locals.
 //! Union builders can throw; their wrapper frees partial trees on failure.
 //!
 //! Ordinary nodes need no destruction walk; an owning string or collection adds one
@@ -211,19 +210,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	pub(super) fn arena_child_array_type(&self, repr: Repr) -> bool {
-		self.arena_array_nominal(repr).is_some() || self.arena_array_object(repr).is_some()
-	}
-
-	pub(super) fn arena_array_object(&self, repr: Repr) -> Option<TypeId> {
-		let Repr::Array(item) = repr else { return None };
-		let item = self.types().rec_target(item).unwrap_or(item);
-		self.arena_object(item).then_some(item)
+		self.arena_array_nominal(repr).is_some()
 	}
 
 	/// Only fresh arrays of the proven builder may share its active region.
 	/// The same Array<Root> outside that builder remains an ordinary owner.
 	pub(super) fn region_child_array(&self, node: NodeId, repr: Repr) -> bool {
-		if !self.frame().arena || !self.arena_child_array_type(repr) {
+		if !self.frame().arena || self.arena_array_nominal(repr).is_none() {
 			return false;
 		}
 		let Some(function) = self.functions.iter().find_map(|(&node, function)| {
@@ -235,11 +228,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		else {
 			return false;
 		};
-		if let Some(root) = self.arena_array_object(repr)
-			&& let Some(root) = crate::facts::stable_type_name(self.types(), root)
-		{
-			return self.region_fact(&fa_analyzer::regions::builder_key(&function, &root));
-		}
 		let Some(array) = crate::facts::stable_type_name(self.types(), self.analysis.type_of(node))
 		else {
 			return false;
@@ -708,9 +696,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				shapes.insert(ty);
 				let valid = self.arena_type_fits(self.object_type(ty).into())
 					&& self.object_fields(ty).iter().all(|r| {
-						if matches!(r, Repr::Optional(Scalar::Rec(target)) if *target == ty)
-							|| matches!(r, Repr::Array(item) if self.types().rec_target(*item).unwrap_or(*item) == ty)
-						{
+						if matches!(r, Repr::Optional(Scalar::Rec(target)) if *target == ty) {
 							recursive = true;
 							true
 						} else {
@@ -838,13 +824,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let edge = self.edge_address(b, *field, edge)?;
 				pointer = b
 					.build_select(b.build_is_null(pointer, "")?, edge, pointer, "")?
-					.into_pointer_value();
-			} else if self.arena_array_object(*field) == Some(ty) {
-				let array = b
-					.build_extract_value(value.into_struct_value(), index as u32, "")?
-					.into_pointer_value();
-				pointer = b
-					.build_select(b.build_is_null(pointer, "")?, array, pointer, "")?
 					.into_pointer_value();
 			}
 		}

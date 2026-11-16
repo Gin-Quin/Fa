@@ -1419,44 +1419,18 @@ Full LLVM workspace validations share `/tmp/fa-compiler-full-suite.lock` (`flock
   Fa has no source DWARF: line-level profile attribution is to assembly/IR, with
   source locations established by inspection, not invented source-line counts.
 
-## Recursive object child arrays in root regions (2026-11-16)
+## Aggregate performance: object child arrays stay in the heap (2026-11-16)
 
-The next aggregate step extends the same closed region proof to objects with
-`Array<Root>` edges and finite non-owning fields. Structural writes remain
-confined to independent locals in named root builders; readers may write finite
-non-owning data, never replace an edge or child array. Known local function calls
-may mutate passive fields because every body contributes all stores to the closed
-proof. Indirect/imported mutating function values, aliases, captures, escaping
-arrays, unsupported defaults/spreads and missing/opaque contributions reject it.
-Union compact payloads keep their existing immutable contract.
-
-Object child arrays allocate their normal 32-byte headers and exact initial
-buffers in the current root region; empty leaves allocate no four-slot buffer.
-Construction pushes/reservations retain all bounds/capacity checks. Only frame
-child-array temporaries promise four physical slots; an exact region literal
-must allocate a new buffer when it grows. Buffers larger than a region chunk
-retain the runtime's external allocation and idempotent cleanup record.
-
-A copied root enters an independent region. Its object child-array copier places
-the new headers and recursively copied descendants under that same owner; a
-returned subtree therefore survives destruction of its source root. Ordinary
-arrays keep their existing copier and one independent owner per element. A root
-identifies its owner through a child-array header (including an empty leaf) or
-an existing optional edge. Root destruction frees the owner without a recursive
-node walk. Inline object items, ordinary pointer/header ABI, per-unit semantic
-facts and target/page-size guards remain unchanged. No traversal is reordered.
-
-Native/wasm positive/negative IR checks and native/freestanding/wasm leak fixtures
-cover passive mutation, later structural-mutation fallback, exact literal growth,
-whole-root and ordinary-forest copies, escaping subtrees, external buffers and
-per-unit builds. The complete scene prints its original output with the leak
-check enabled. Full-suite validation and measurements follow before acceptance.
-
-Conversions into an object root are excluded by inventory, not by coercion
-entries: `analysis.coercions` does not record every path (optional narrowing,
-an adapted function-value return, mutator views). Any other object layout of the
-complete program whose fields include every structural field of the root may be
-assignable to it, so its presence rejects the root (every value's type is in the
-inventory of its file, closed over fields, items and signatures). The recorded
-coercions remain checked for conversions out of the root. A layout that lacks
-one root field converts nothing and keeps the proof.
+Owning the child arrays of a recursive object in its root region (exact buffers
+next to their parent, root copies into an independent region; commits `4fd04130`,
+`d720d7be`, `1e7aa90f`, reverted) was built, validated and measured on `scene`.
+It saves 0.5% of the instructions but runs the traversals about 40% slower on the
+hardware (21-round series: 1.27× the CPU time of the exact heap reservations;
+frame-count variants isolate the walks, whose instructions are identical). The
+region interleaves headers, buffers and chunk ends; the heap keeps headers dense
+in their own size class and buffers by size. Larger chunks narrow the loss
+(4 KiB: 1.17×) without removing it. Exact heap reservations remain the layout.
+The analysis also showed that `analysis.coercions` misses conversions into an
+object root (optional narrowing, adapted function returns): a future region proof
+for object roots must exclude convertible layouts from the whole program's
+inventory instead of trusting coercion entries.

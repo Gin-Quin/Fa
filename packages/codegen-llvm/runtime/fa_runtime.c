@@ -5072,9 +5072,9 @@ static void region_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t
 	    (uint64_t)capacity > (uint64_t)INT64_MAX / (uint64_t)item_size) { out_of_memory(); }
 	size_t bytes = (size_t)capacity * (size_t)item_size;
 	uint64_t marker = array_marker(array);
-	// Frame-local arrays reserve their first four slots without exposing that
-	// room as capacity. Final exact-sized region buffers make no such promise.
-	if ((marker & ARRAY_REGION_LOCAL) && !(marker & ARRAY_REGION_HEAP) && capacity <= 4 &&
+	// Empty literals already have room for their first four items, without
+	// exposing that room as their capacity until the first growth/reserve.
+	if (!(marker & ARRAY_REGION_HEAP) && capacity <= 4 &&
 	    array->items == (uint8_t *)array + INLINE_ITEMS) {
 		array->capacity = capacity;
 		return;
@@ -5099,13 +5099,13 @@ static void region_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t
 	array->capacity = capacity;
 }
 
-static __attribute__((always_inline)) void *array_new_region(int64_t length, int64_t capacity, int64_t item_size, int exact) {
+FA_EXPORT __attribute__((always_inline)) void *fa_array_new_region(int64_t length, int64_t capacity, int64_t item_size) {
 	if (capacity < length) { capacity = length; }
 	if (length < 0 || capacity < 0 || item_size <= 0 ||
 	    (uint64_t)item_size > UINT64_MAX >> ARRAY_REGION_SIZE_SHIFT ||
 	    (uint64_t)capacity > SIZE_MAX / (uint64_t)item_size ||
 	    (uint64_t)capacity > (uint64_t)INT64_MAX / (uint64_t)item_size) { out_of_memory(); }
-	size_t room = (size_t)(!exact && capacity < 4 ? 4 : capacity);
+	size_t room = (size_t)(capacity < 4 ? 4 : capacity);
 	size_t bytes = room <= SIZE_MAX / (size_t)item_size ? room * (size_t)item_size : SIZE_MAX;
 	int inline_buffer = bytes <= ARENA_CHUNK_SIZE - ARENA_HEADER - INLINE_ITEMS;
 	FaArrayHeader *array = fa_arena_alloc(INLINE_ITEMS + (inline_buffer ? bytes : 0), 16);
@@ -5116,16 +5116,6 @@ static __attribute__((always_inline)) void *array_new_region(int64_t length, int
 	if (!inline_buffer) { region_array_reserve(array, capacity, item_size); }
 	array->length = length;
 	return array;
-}
-
-FA_EXPORT __attribute__((always_inline)) void *fa_array_new_region(int64_t length, int64_t capacity, int64_t item_size) {
-	return array_new_region(length, capacity, item_size, 0);
-}
-
-// Object child arrays are already in their final parent. Empty leaves need
-// only a header; later construction appends reserve their actual buffer.
-FA_EXPORT __attribute__((always_inline)) void *fa_array_new_region_exact(int64_t length, int64_t capacity, int64_t item_size) {
-	return array_new_region(length, capacity, item_size, 1);
 }
 
 // A fresh local child array keeps its header and first four slots in the
@@ -5146,14 +5136,14 @@ FA_EXPORT __attribute__((always_inline)) void fa_array_init_region_local(FaArray
 	array->length = length;
 }
 
-static __attribute__((always_inline)) void *array_into_region(void *header, int64_t item_size, int exact) {
+FA_EXPORT __attribute__((always_inline)) void *fa_array_into_region(void *header, int64_t item_size) {
 	FaArrayHeader *source = header;
 	uint64_t marker = array_marker(source);
 	if ((marker & ARRAY_REGION) && !(marker & ARRAY_REGION_LOCAL)) { return source; }
 	// The completed member may still expose its capacity. Shrinking an
 	// immutable inline payload requires the compiler's separate closed proof.
 	int64_t capacity = source->capacity;
-	FaArrayHeader *array = array_new_region(source->length, capacity, item_size, exact);
+	FaArrayHeader *array = fa_array_new_region(source->length, capacity, item_size);
 	copy_bytes(array->items, source->items, (size_t)source->length * (size_t)item_size);
 	free_array_items(source, item_size);
 	if (!(marker & ARRAY_REGION_LOCAL)) { fa_free(source, INLINE_ITEMS, sizeof(int64_t)); }
@@ -5162,14 +5152,6 @@ static __attribute__((always_inline)) void *array_into_region(void *header, int6
 		source->items = (uint8_t *)source + INLINE_ITEMS;
 	}
 	return array;
-}
-
-FA_EXPORT __attribute__((always_inline)) void *fa_array_into_region(void *header, int64_t item_size) {
-	return array_into_region(header, item_size, 0);
-}
-
-FA_EXPORT __attribute__((always_inline)) void *fa_array_into_region_exact(void *header, int64_t item_size) {
-	return array_into_region(header, item_size, 1);
 }
 
 // ── leak checks (tests) ─────────────────────────────────────────────────

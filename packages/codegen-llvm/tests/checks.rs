@@ -1088,7 +1088,8 @@ console.log(items.length)
 			"inline-recursive-items",
 			"type Node = { value: Integer, children: Array<Node> }\nfunction build = (depth: Integer): Node => { mutable node = Node { value = depth, children = [] }\nif depth > 0 { node.children.push(build(depth - 1)) }\nnode }\nconsole.log(build(3))\n",
 		);
-		let build = function(&ir, "fa.build");
+		// The closed region proof admits this builder: its body is the arena one.
+		let build = function(&ir, "fa.build.arena");
 		assert!(build.contains("store { ptr, i64 }"), "{build}");
 		assert!(!build.contains("@fa_alloc("), "{build}");
 		assert!(!build.contains("@fa_arena_alloc("), "{build}");

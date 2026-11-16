@@ -1,0 +1,18 @@
+type Value = Union { Empty, Number = Integer }
+type Color = Enum { Red, Blue }
+mutable values: InlineArray<Value?, 2> = [Value.Number(7), none]
+for item in values {
+	if item is Value.Number {
+		console.log(item) -- prints: Value.Number(7)
+	} else {
+		console.log("absent") -- prints: absent
+	}
+}
+mutable colors: InlineArray<Color?, 2> = [Color.Red, none]
+for color in colors {
+	if color is Color.Red {
+		console.log(color) -- prints: Red
+	} else {
+		console.log("absent") -- prints: absent
+	}
+}

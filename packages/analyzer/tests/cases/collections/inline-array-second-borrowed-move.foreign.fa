@@ -1,0 +1,4 @@
+type Resource = { name: String, function destroy = (self) => {} }
+function invalid = (items: InlineArray<Resource, 1>): InlineArray<Resource, 1> => items -- error: MEM002
+type Holder = { resource: Resource }
+function invalidField = (holder: Holder): Resource => holder.resource -- error: MEM002

@@ -120,7 +120,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value: BasicValueEnum<'ctx>,
 	) -> Result<BasicValueEnum<'ctx>, Error> {
 		if self.llvm_type(repr).is_struct_type() {
-			Ok(builder.build_load(self.llvm_type(repr), value.into_pointer_value(), "")?)
+			let loaded =
+				builder.build_load(self.llvm_type(repr), value.into_pointer_value(), "")?;
+			Ok(self.freeze_union_padding(builder, repr, loaded))
 		} else {
 			Ok(value)
 		}
@@ -371,6 +373,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.keep_aggregate_helper(function, repr);
 		self.drop_functions.borrow_mut().insert(key, function);
 		let value = function.get_nth_param(0).expect("a value");
+		if let Repr::Tuple(ty) = repr
+			&& self.inline_info(ty).is_some()
+		{
+			self.inline_ownership(&builder, function, ty, value.into_pointer_value(), None)?;
+			builder.build_return(None)?;
+			return Ok(function);
+		}
 		let value = self.helper_parameter(&builder, repr, value)?;
 		self.build_drop_body(&builder, function, repr, value)?;
 		builder.build_return(None)?;
@@ -408,6 +417,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let value = function
 			.get_nth_param(u32::from(ty.is_struct_type()))
 			.expect("a value");
+		if let Repr::Tuple(ty) = repr
+			&& self.inline_info(ty).is_some()
+		{
+			let out = function
+				.get_nth_param(0)
+				.expect("a destination")
+				.into_pointer_value();
+			self.inline_ownership(
+				&builder,
+				function,
+				ty,
+				value.into_pointer_value(),
+				Some(out),
+			)?;
+			builder.build_return(None)?;
+			return Ok(function);
+		}
 		let value = self.helper_parameter(&builder, repr, value)?;
 		if self.arena_repr(repr) {
 			builder.build_call(self.runtime.function("fa_arena_enter")?, &[], "")?;
@@ -432,6 +458,47 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			builder.build_return(Some(&copied))?;
 		}
 		Ok(function)
+	}
+
+	/// Drop a value already in a place without loading a wide aggregate.
+	pub(super) fn drop_at(
+		&self,
+		builder: &Builder<'ctx>,
+		repr: Repr,
+		source: PointerValue<'ctx>,
+	) -> Result<(), Error> {
+		if !self.needs_drop(repr) {
+			return Ok(());
+		}
+		let argument = if self.llvm_type(repr).is_struct_type() {
+			source.into()
+		} else {
+			builder.build_load(self.llvm_type(repr), source, "")?
+		};
+		builder.build_call(self.drop_function(repr)?, &[argument.into()], "")?;
+		Ok(())
+	}
+
+	/// Construct an owning copy directly in its destination.
+	pub(super) fn copy_into(
+		&self,
+		builder: &Builder<'ctx>,
+		repr: Repr,
+		source: PointerValue<'ctx>,
+		destination: PointerValue<'ctx>,
+	) -> Result<(), Error> {
+		if self.needs_drop(repr) && self.llvm_type(repr).is_struct_type() {
+			builder.build_call(
+				self.copy_function(repr)?,
+				&[destination.into(), source.into()],
+				"",
+			)?;
+		} else {
+			let value = builder.build_load(self.llvm_type(repr), source, "")?;
+			let value = self.call_copy(builder, repr, value)?;
+			builder.build_store(destination, value)?;
+		}
+		Ok(())
 	}
 
 	/// Calls the drop of a representation from a helper's builder.
@@ -774,7 +841,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.call_drop(builder, scalar.repr(), inner)?;
 			}
 			Repr::Tuple(ty) if self.inline_info(ty).is_some() => {
-				self.inline_ownership(builder, function, ty, value, false)?;
+				unreachable!("inline arrays use place helpers");
 			}
 			Repr::Object(_) | Repr::Tuple(_) => {
 				let fields = match repr {
@@ -790,16 +857,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				{
 					self.effectful_drops.set(true);
 					let argument = if destroy.get_type().get_param_types()[0].is_pointer_type() {
-						let slot = builder.build_alloca(value.get_type(), "destroyed")?;
-						builder.build_store(slot, value)?;
-						slot.into()
+						function.get_nth_param(0).expect("a resource place")
 					} else {
 						value
 					};
 					let call = builder.build_call(destroy, &[argument.into()], "")?;
 					call.set_call_convention(super::FAST_CALLING_CONVENTION);
 				}
-				let structure = value.into_struct_value();
+				let structure = if let Repr::Object(ty) = repr
+					&& self.destroy_function(ty).is_some()
+				{
+					// `destroy` may clear/replace inline fields. Drop the prefix
+					// it leaves initialized, from the same borrowed owner.
+					let source = function
+						.get_nth_param(0)
+						.expect("a resource place")
+						.into_pointer_value();
+					builder
+						.build_load(self.llvm_type(repr), source, "")?
+						.into_struct_value()
+				} else {
+					value.into_struct_value()
+				};
 				for (index, field) in fields.into_iter().enumerate().rev() {
 					if self.needs_drop(field) {
 						let raw = builder.build_extract_value(structure, index as u32, "")?;
@@ -1120,7 +1199,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.pack_optional(builder, scalar, present, copied)?
 			}
 			Repr::Tuple(ty) if self.inline_info(ty).is_some() => {
-				return self.inline_ownership(builder, function, ty, value, true);
+				unreachable!("inline arrays use place helpers");
 			}
 			Repr::Object(_) | Repr::Tuple(_) => {
 				let fields = match repr {
@@ -1889,8 +1968,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(())
 			}
 			Cleanup::Local(slot) => {
-				let value = self.load_for_drop(slot)?;
-				self.emit_drop(value)
+				if matches!(slot.repr, Repr::Row(_)) {
+					self.emit_drop(self.load_for_drop(slot)?)
+				} else {
+					self.drop_at(&self.builder, slot.repr, slot.pointer)
+				}
 			}
 			Cleanup::Dispose(observer) => {
 				self.effectful_drops.set(true);

@@ -12,7 +12,8 @@ async function main = (flag: Boolean) => {
 	let holder = Holder { task = c }
 	console.log(await c)                 -- error: MEM002
 	let d = start compute(3)
-	console.log(run(() => d))
+	let stored = [() => d]
+	console.log(run(stored[0]))
 	console.log(await d)                 -- error: MEM002
 	let e = start compute(4)
 	if flag {

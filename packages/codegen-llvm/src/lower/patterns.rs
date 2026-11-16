@@ -66,9 +66,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let (_, inner) = self.optional_split(value)?;
 			return self.unbox(inner.expect("a box"), narrowed);
 		}
-		if narrowed == scalar.repr() {
+		if narrowed == scalar.repr() || self.same_layout(scalar.repr(), narrowed) {
 			let (_, inner) = self.optional_split(value)?;
-			return Ok(inner.expect("a value"));
+			return Ok(Val {
+				repr: narrowed,
+				..inner.expect("a value")
+			});
 		}
 		if let Scalar::Rec(target) = scalar
 			&& self.repr_of(target, node.index())? == narrowed

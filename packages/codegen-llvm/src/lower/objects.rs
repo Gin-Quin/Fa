@@ -304,8 +304,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The value of a box narrowed to a member type of its union.
 	pub(crate) fn unbox(&self, value: Val<'ctx>, repr: Repr) -> Result<Val<'ctx>, Error> {
+		if value.repr == repr || self.same_layout(value.repr, repr) {
+			return Ok(Val { repr, ..value });
+		}
 		if let Repr::InlineUnion(nominal) = repr {
-			return self.boxed_to_inline(value, nominal);
+			return self.boxed_to_inline(self.union_view(value)?, nominal);
 		}
 		let value = self.union_view(value)?;
 		if let Repr::Object(data) = repr

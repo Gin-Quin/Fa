@@ -492,7 +492,9 @@ impl Walker<'_> {
 			}
 		}
 		self.lambda_entry_writes = entry_writes;
-
+		if self.a.escapes.contains(&n) {
+			self.escape_closure(n, n);
+		}
 		ty
 	}
 

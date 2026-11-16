@@ -24,7 +24,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Some((item, u32::try_from(int.min).ok()?))
 	}
 
-	fn inline_length_type(&self, capacity: u32) -> IntType<'ctx> {
+	pub(super) fn inline_length_type(&self, capacity: u32) -> IntType<'ctx> {
 		if capacity <= u8::MAX.into() {
 			self.context.i8_type()
 		} else if capacity <= u16::MAX.into() {
@@ -440,45 +440,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		builder: &Builder<'ctx>,
 		function: FunctionValue<'ctx>,
 		ty: TypeId,
-		value: BasicValueEnum<'ctx>,
-		copy: bool,
-	) -> Result<BasicValueEnum<'ctx>, Error> {
-		let structure = self.inline_type(ty);
+		source: PointerValue<'ctx>,
+		destination: Option<PointerValue<'ctx>>,
+	) -> Result<(), Error> {
 		let slot = Slot {
-			pointer: builder.build_alloca(structure, "inline.source")?,
+			pointer: source,
 			repr: Repr::Tuple(ty),
 		};
-		builder.build_store(slot.pointer, value)?;
+		let (_, capacity) = self.inline_info(ty).expect("an inline array");
+		let length_pointer = self.inline_length_pointer(builder, slot, ty)?;
 		let length = builder
-			.build_extract_value(value.into_struct_value(), 1, "")?
+			.build_load(self.inline_length_type(capacity), length_pointer, "")?
 			.into_int_value();
 		let count = builder.build_int_z_extend(length, self.context.i64_type(), "")?;
-		let destination = if copy {
-			Slot {
-				pointer: builder.build_alloca(structure, "inline.copy")?,
-				..slot
-			}
-		} else {
-			slot
-		};
 		self.helper_loop(builder, function, count, |builder, index| {
 			let source = self.inline_item(builder, slot, ty, index)?;
-			let raw = builder.build_load(self.llvm_type(source.repr), source.pointer, "")?;
-			if copy {
-				let raw = self.call_copy(builder, source.repr, raw)?;
-				let target = self.inline_item(builder, destination, ty, index)?;
-				builder.build_store(target.pointer, raw)?;
+			if let Some(pointer) = destination {
+				let target = self.inline_item(builder, Slot { pointer, ..slot }, ty, index)?;
+				self.copy_into(builder, source.repr, source.pointer, target.pointer)?;
 			} else {
-				self.call_drop(builder, source.repr, raw)?;
+				self.drop_at(builder, source.repr, source.pointer)?;
 			}
 			Ok(())
 		})?;
-		if copy {
-			let pointer = self.inline_length_pointer(builder, destination, ty)?;
-			builder.build_store(pointer, length)?;
-			Ok(builder.build_load(structure, destination.pointer, "")?)
-		} else {
-			Ok(value)
+		if let Some(pointer) = destination {
+			let length_pointer =
+				self.inline_length_pointer(builder, Slot { pointer, ..slot }, ty)?;
+			builder.build_store(length_pointer, length)?;
 		}
+		Ok(())
 	}
 }

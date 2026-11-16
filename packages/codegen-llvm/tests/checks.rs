@@ -2059,10 +2059,10 @@ mod drop_flags {
 		// `destroy` calls `usleep` with the descriptor: one call per drop
 		let head = "function release: (microseconds: UInt32) => Int32 = @extern(\"usleep\")\ntype Handle = {\n\tdescriptor: UInt32\n\tfunction destroy = (self) => {\n\t\trelease(self.descriptor)\n\t}\n}\nfunction close = (handle: Handle) => console.log(\"closing\")\n";
 		let cases = [
-			// moved on every path: destroyed by `close` only, no flag
+			// moved into an inner owner on every path, no flag
 			(
 				"moved",
-				"do {\n\tlet handle = Handle { descriptor = 1 }\n\tclose(handle)\n\tconsole.log(\"after\")\n}\n",
+				"do {\n\tlet handle = Handle { descriptor = 1 }\n\tdo { let moved = handle\n\tclose(moved) }\n\tconsole.log(\"after\")\n}\n",
 				1,
 				false,
 			),
@@ -2073,17 +2073,17 @@ mod drop_flags {
 				1,
 				false,
 			),
-			// moved on one path: destroyed by `close` or at the end, by its flag
+			// moved on one path: the inner owner or the outer flag drops it
 			(
 				"maybe",
-				"do {\n\tlet handle = Handle { descriptor = 3 }\n\tif arguments.length > 1 {\n\t\tclose(handle)\n\t}\n\tconsole.log(\"after\")\n}\n",
+				"do {\n\tlet handle = Handle { descriptor = 3 }\n\tif arguments.length > 1 {\n\t\tlet moved = handle\n\t\tclose(moved)\n\t}\n\tconsole.log(\"after\")\n}\n",
 				2,
 				true,
 			),
 			// a field moved out, then assigned again: no flag either
 			(
 				"field",
-				"type Holder = { label: String, handle: Handle }\ndo {\n\tmutable holder = Holder { label = \"h\", handle = Handle { descriptor = 4 } }\n\tclose(holder.handle)\n\tholder.handle = Handle { descriptor = 5 }\n\tconsole.log(holder.label)\n}\n",
+				"type Holder = { label: String, handle: Handle }\ndo {\n\tmutable holder = Holder { label = \"h\", handle = Handle { descriptor = 4 } }\n\tlet moved = holder.handle\n\tclose(moved)\n\tholder.handle = Handle { descriptor = 5 }\n\tconsole.log(holder.label)\n}\n",
 				2,
 				false,
 			),

@@ -27,10 +27,13 @@ def kinds():
     yield 'tuple', '(String, Int16)', '("tuple", 7)', '', False
     yield 'optional', 'String?', '"optional"', '', False
     yield 'anonymous_union', 'String | Integer', '"union"', '', False
+    yield 'anonymous_union_owned', 'String | { value: Array<String> }', '{ value = ["owned"] }', '', False
     yield 'named_union', 'Value', 'Value.Data { text = "payload", number = 7 }', 'type Value = Union { Empty, Data = { text: String, number: Int16 } }', False
+    yield 'named_union_owned', 'Value', 'Value.Data { value = ["owned"] }', 'type Value = Union { Empty, Data = { value: Array<String> } }', False
     yield 'array', 'Array<String>', '["array"]', '', False
     yield 'nested', 'InlineArray<String, 2>', '["nested"]', '', False
-    yield 'unique', 'Resource', 'Resource { name = "unique" }', 'type Resource = { name: String, function destroy = (self) => { assert self.name == "unique" } }', True
+    yield 'unique', 'Resource', 'Resource { name = "unique" }', 'type Resource = { name: String, function destroy = (self) => { assert self.name == "unique"\nconsole.log("drop unique") } }', True
+    yield 'unique_owned', 'Resource', 'Resource { values = ["long ".repeat(12)] }', 'type Resource = { values: InlineArray<String, 2>, function destroy = (self) => { assert self.values.length == 1\nself.values.clear()\nconsole.log("drop unique") } }', True
 
 
 CORE = '''
@@ -94,7 +97,8 @@ def generate_kind(directory, name, ty, seed, declarations, unique, synchronous=F
              'Color.Blue' if name == 'enum' else
              'none' if name == 'optional' else
              '7' if name == 'anonymous_union' else
-             'Value.Empty' if name == 'named_union' else
+             '"other"' if name == 'anonymous_union_owned' else
+             'Value.Empty' if name.startswith('named_union') else
              seed.replace('short', 'other').replace('long ', 'other ').replace('object', 'other').replace('owned', 'other').replace('tuple', 'other').replace('array', 'other').replace('nested', 'other'))
     copy = '' if unique else 'mutable duplicate = copy items\n    assert duplicate == items\n    try duplicate[0] = seed(true)\n    assert duplicate != items\n    let moved = duplicate\n    assert moved != items'
     source = declarations + '\n' + CORE.replace('TYPE', ty).replace('SEED', seed).replace('OTHER', other).replace('COPY', copy)
@@ -151,16 +155,18 @@ if pause { await Task.yield() }
     (directory / f'{name}.reference.reject.fa').write_text(negative)
     if unique:
         negative = declarations + f'\nlet items: InlineArray<{ty}, 3> = [{seed}]\nlet invalid = copy items\n-- error: MEM003\n'
-        (directory / 'unique.copy.reject.foreign.fa').write_text(negative)
+        (directory / f'{name}.copy.reject.foreign.fa').write_text(negative)
+        negative = declarations + f'\nfunction invalid = (items: InlineArray<{ty}, 3>): InlineArray<{ty}, 3> => items\n-- error: MEM002\n'
+        (directory / f'{name}.borrowed_move.reject.foreign.fa').write_text(negative)
         for label, expression, code in [('equality', 'assert items == items', 'E-CMP-4'), ('key', f'let invalid: Map<InlineArray<{ty}, 3>, Integer> = []', 'CL020')]:
             negative = declarations + f'\nlet items: InlineArray<{ty}, 3> = [{seed}]\n{expression}\n-- error: {code}\n'
-            (directory / f'unique.{label}.reject.foreign.fa').write_text(negative)
+            (directory / f'{name}.{label}.reject.foreign.fa').write_text(negative)
 
 
 def generate(directory):
     for kind in kinds():
         generate_kind(directory, *kind)
-        if kind[0] in ('integer', 'long_string', 'object', 'structure', 'named_union', 'nested', 'unique'):
+        if kind[0] in ('integer', 'long_string', 'object', 'structure', 'named_union', 'named_union_owned', 'anonymous_union_owned', 'nested', 'unique', 'unique_owned'):
             generate_kind(directory, *kind, synchronous=True)
 
 

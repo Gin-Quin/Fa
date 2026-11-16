@@ -60,8 +60,18 @@ mod with_llvm {
 		);
 		let stdout = String::from_utf8(output.stdout).unwrap();
 		let lines: Vec<_> = stdout.lines().collect();
-		assert_eq!(lines.len() % 2, 0, "an oracle/runtime pair per position");
-		for pair in lines.as_chunks::<2>().0 {
+		// Value observations come from the interpreter. Resource finalizers
+		// are observable on Bun; retain their complete trace in LLVM's oracle.
+		let observations: Vec<_> = lines
+			.iter()
+			.filter(|line| **line != "drop unique")
+			.collect();
+		assert_eq!(
+			observations.len() % 2,
+			0,
+			"an oracle/runtime pair per position"
+		);
+		for pair in observations.as_chunks::<2>().0 {
 			assert_eq!(
 				pair[0],
 				pair[1],

@@ -964,6 +964,24 @@ impl Walker<'_> {
 			return;
 		};
 		let kind = self.a.symbols.symbol(symbol).kind;
+		let borrowed = matches!(
+			kind,
+			SymbolKind::SelfParameter
+				| SymbolKind::Use
+				| SymbolKind::MutableUse
+				| SymbolKind::LoopVariable { copy: false }
+		) || (matches!(kind, SymbolKind::Parameter { .. })
+			&& !self
+				.s
+				.types
+				.consumes_parameter(self.a.symbols.symbol(symbol).ty));
+		if borrowed {
+			let text = tree.text(value.index());
+			let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value,
+				format!("`{text}` is borrowed and cannot move into owned storage: borrow it, move an owned local, or return a copyable data projection"));
+			self.report_flow(diagnostic);
+			return;
+		}
 		let owned = matches!(
 			kind,
 			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Parameter { .. }

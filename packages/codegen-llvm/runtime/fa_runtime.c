@@ -3525,14 +3525,6 @@ FA_EXPORT __attribute__((noinline)) int64_t string_code_unit_slow(const uint8_t 
 	return unit_at_position(text, length, unit_position(text, length, capacity, (size_t)index));
 }
 
-/// The lowering keeps the checked ASCII load separate from this fallback,
-/// so a missing-unit sentinel never enters the successful byte path.
-FA_EXPORT __attribute__((noinline, cold)) int64_t string_ascii_unit_fallback(const uint8_t *text,
-    size_t length, int64_t index) {
-	if (index < 0) { index += (int64_t)length; }
-	return (uint64_t)index < length ? text[index] : -1;
-}
-
 static void unit_string(uint16_t unit, FaString *out) {
 	if (unit < 0x80) { *out = ascii_string((uint8_t)unit); return; }
 	*out = (FaString){0};

@@ -340,6 +340,7 @@ pub(crate) fn with_module<R>(
 		}
 	}
 	keep_huge_functions_unoptimized(&module);
+	crate::optimize::specialize_ascii_methods(&module, &machine, options)?;
 	let pipeline = if asynchronous {
 		options.coroutine_pipeline()
 	} else {

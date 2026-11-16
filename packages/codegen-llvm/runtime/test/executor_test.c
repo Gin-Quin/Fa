@@ -889,15 +889,15 @@ static void test_utf16_strings(void) {
 	CHECK(simple_flag((const uint8_t *)"\r\nx", 3) == SIMPLE);
 	const uint8_t ascii_units[] = "abc";
 	for (int64_t i = 0; i < 3; i += 1) {
-		CHECK(string_ascii_unit_fallback(ascii_units, 3, i) == ascii_units[i]);
-		CHECK(string_ascii_unit_fallback(ascii_units, 3, i - 3) == ascii_units[i]);
+		CHECK(string_code_unit_slow(ascii_units, 3, SIMPLE, i) == ascii_units[i]);
+		CHECK(string_code_unit_slow(ascii_units, 3, SIMPLE, i - 3) == ascii_units[i]);
 	}
-	CHECK(string_ascii_unit_fallback(ascii_units, 3, 3) == -1);
-	CHECK(string_ascii_unit_fallback(ascii_units, 3, -4) == -1);
-	CHECK(string_ascii_unit_fallback(ascii_units, 3, INT64_MIN) == -1);
-	CHECK(string_ascii_unit_fallback(ascii_units, 3, INT64_MAX) == -1);
-	CHECK(string_ascii_unit_fallback(ascii_units, 0, 0) == -1);
-	CHECK(string_ascii_unit_fallback(ascii_units, 0, -1) == -1);
+	CHECK(string_code_unit_slow(ascii_units, 3, SIMPLE, 3) == -1);
+	CHECK(string_code_unit_slow(ascii_units, 3, SIMPLE, -4) == -1);
+	CHECK(string_code_unit_slow(ascii_units, 3, SIMPLE, INT64_MIN) == -1);
+	CHECK(string_code_unit_slow(ascii_units, 3, SIMPLE, INT64_MAX) == -1);
+	CHECK(string_code_unit_slow(ascii_units, 0, SIMPLE, 0) == -1);
+	CHECK(string_code_unit_slow(ascii_units, 0, SIMPLE, -1) == -1);
 	for (int64_t i = 0; i < 6; i += 1) {
 		CHECK(string_code_unit_slow(text, sizeof(text) - 1, 0, i) == units[i]);
 		CHECK(string_code_unit_slow(text, sizeof(text) - 1, 0, i - 6) == units[i]);

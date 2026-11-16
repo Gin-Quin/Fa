@@ -53,7 +53,7 @@ unsafe extern "C" {
 /// compiler is never reused.
 const VERSION: &str = concat!(
 	env!("CARGO_PKG_VERSION"),
-	"-split-7-platform-1-effects-1-errors-1-regions-1-packed-capacity-1-frame-1-sync-payload-1-region-string-view-1-region-edges-1-inline-length-1-template-size-1-coroutine-decimal-1"
+	"-split-7-platform-1-effects-1-errors-1-regions-1-packed-capacity-1-frame-1-sync-payload-1-region-string-view-1-region-edges-1-inline-length-1-template-size-1-coroutine-decimal-1-frozen-ascii-1"
 );
 
 /// A file name made of a module path.
@@ -110,6 +110,13 @@ fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: 
 		"dynamic-tls".hash(hasher);
 	}
 	split.facts.is_some().hash(hasher);
+	// Frozen-field queries include wider shapes and negative facts. New
+	// writes/shapes must invalidate caches even when no old member was read.
+	split
+		.facts
+		.as_ref()
+		.and_then(|facts| facts.set(crate::facts::WRITTEN_FIELDS))
+		.hash(hasher);
 	// emulated thread-local variables (`jit.rs`)
 	split.in_memory.hash(hasher);
 }
@@ -167,6 +174,7 @@ fn emit(
 		}
 	}
 	crate::compile::keep_huge_functions_unoptimized(module);
+	crate::optimize::specialize_ascii_methods(module, machine, options)?;
 	let pipeline = if split.lto {
 		if options.size {
 			"thinlto-pre-link<Oz>"
@@ -2163,4 +2171,30 @@ fn entry_is_asynchronous(
 			.get(key)
 			.is_some_and(|summary| summary.starts || summary.suspends)
 	})
+}
+
+#[cfg(test)]
+mod frozen_cache_tests {
+	use super::*;
+
+	fn key(source: &str) -> u64 {
+		let (session, file) = fa_analyzer::session::analyze_source(source);
+		let facts = crate::facts::ProgramFacts::of_unit(&session, &[file]);
+		let split = SplitOptions {
+			facts: Some(std::sync::Arc::new(facts)),
+			..SplitOptions::default()
+		};
+		let mut hash = StableHasher::default();
+		options_key(Target::Native, &Options::default(), &split, &mut hash);
+		hash.finish()
+	}
+
+	#[test]
+	fn written_fields_and_new_shapes_change_cached_object_keys() {
+		let base = "type Cursor = { text: String, position: Integer }\nmutable cursor = Cursor { text = \"ab\", position = 0 }\ncursor.position += 1\n";
+		assert_eq!(key(base), key(base));
+		assert_ne!(key(base), key(&format!("{base}cursor.text = \"é\"\n")));
+		let shape = "type Wide = { text: String, position: Integer, extra: Integer }\nmutable wide = Wide { text = \"x\", position = 0, extra = 0 }\nwide.text = \"é\"\n";
+		assert_ne!(key(base), key(&format!("{base}{shape}")));
+	}
 }

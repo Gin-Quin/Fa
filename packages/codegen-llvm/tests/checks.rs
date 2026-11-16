@@ -1092,12 +1092,11 @@ console.log(try equal("é", 0), try choose("a", 0))
 		);
 		for name in ["fa.equal", "fa.choose"] {
 			let body = function(&ir, name);
-			assert!(body.contains("@string_ascii_unit_fallback("), "{body}");
+			assert!(body.contains("@fa_index_from_end("), "{body}");
 			assert!(body.contains("@string_code_unit_slow("), "{body}");
 			assert!(
 				body.lines()
-					.filter(|line| line.contains("@string_ascii_unit_fallback(")
-						|| line.contains("@string_code_unit_slow("))
+					.filter(|line| line.contains("@string_code_unit_slow("))
 					.all(|line| line.contains("!range")),
 				"{body}"
 			);
@@ -1107,7 +1106,32 @@ console.log(try equal("é", 0), try choose("a", 0))
 	}
 
 	#[test]
-	fn ascii_index_fallback_reads_only_its_input() {
+	fn ascii_versioning_requires_a_whole_program_frozen_field() {
+		let source = include_str!("programs/strings_frozen_versions.fa");
+		let ir = complete_ir_at_target(
+			"frozen-version-proof",
+			source,
+			false,
+			OptLevel::O0,
+			Target::Native,
+		);
+		assert!(ir.contains("\"fa.frozen.ascii\""), "no frozen field marker");
+		let written = source.replace("try cursor.sum(0)", "cursor.text = text\ntry cursor.sum(0)");
+		let ir = complete_ir_at_target(
+			"mutable-version-proof",
+			&written,
+			false,
+			OptLevel::O0,
+			Target::Native,
+		);
+		assert!(
+			!ir.contains("\"fa.frozen.ascii\""),
+			"a written field was specialized"
+		);
+	}
+
+	#[test]
+	fn ascii_index_normalization_has_no_memory_effects() {
 		let ir = complete_ir_at_target(
 			"ascii-unit-effects",
 			r#"
@@ -1119,7 +1143,7 @@ console.log(text.codeUnitAt(index) catch _error => 0)
 			OptLevel::O3,
 			Target::Native,
 		);
-		let body = function(&ir, "string_ascii_unit_fallback");
+		let body = function(&ir, "fa_index_from_end");
 		let attribute = body
 			.lines()
 			.next()
@@ -1131,11 +1155,8 @@ console.log(text.codeUnitAt(index) catch _error => 0)
 			.lines()
 			.find(|line| line.starts_with(&format!("attributes {attribute} =")))
 			.expect("defined attributes");
-		assert!(attributes.contains("memory(argmem: read)"), "{attributes}");
-		assert!(
-			!body.contains("store ") && !body.contains("call "),
-			"{body}"
-		);
+		assert!(attributes.contains("memory(none)"), "{attributes}");
+		assert!(!body.contains("store "), "{body}");
 		assert!(ir.contains("@string_code_unit_slow("), "{ir}");
 	}
 

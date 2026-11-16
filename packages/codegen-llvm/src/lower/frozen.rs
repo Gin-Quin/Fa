@@ -473,6 +473,43 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				value,
 			});
 		}
+		// A single exact field can version the already-lowered body at O3.
+		// Record the real LLVM argument index, including hidden ABI slots.
+		if info.declaration.is_some()
+			&& info.captures.is_empty()
+			&& info.params.iter().all(|param| {
+				param.default.is_none() && !param.variadic && !self.is_moved_parameter(param.symbol)
+			}) {
+			let strings: Vec<_> = self
+				.frozen_reads
+				.iter()
+				.filter(|read| read.function == function && read.value.repr == Repr::Str)
+				.collect();
+			if let [read] = strings.as_slice()
+				&& let Some(argument) = function
+					.get_params()
+					.iter()
+					.position(|value| *value == read.pointer)
+			{
+				let offset = self
+					.target_data()
+					.offset_of_element(&self.object_type(owner), read.index)
+					.expect("a frozen field")
+					+ 2 * u64::from(self.usize.get_bit_width() / 8);
+				let owner_key = fa_analyzer::stable_names::stable_type_name(self.types(), owner)
+					.expect("a stable frozen field owner");
+				let field = self.types().fields_of(owner)[read.index as usize].name;
+				let key = format!(
+					"{argument},{offset},{owner_key}.{}",
+					self.types().syms.resolve(field)
+				);
+				function.add_attribute(
+					inkwell::attributes::AttributeLoc::Function,
+					self.context
+						.create_string_attribute("fa.frozen.ascii", &key),
+				);
+			}
+		}
 		Ok(())
 	}
 }

@@ -167,17 +167,20 @@ extern "C" unsigned fa_specialize_frozen_strings(LLVMModuleRef module) {
 			function.hasFnAttribute(llvm::Attribute::OptimizeNone) ||
 			!function.getArg(receiver)->getType()->isPointerTy()) { continue; }
 		unsigned instructions = 0;
-		bool reads_units = false;
+		bool reads_text = false;
 		for (const auto &block : function) {
 			instructions += block.size();
 			for (const auto &instruction : block) {
 				const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
-				if (call && call->getCalledFunction() && call->getCalledFunction()->getName() == "string_code_unit_slow") {
-					reads_units = true;
+				if (call && call->getCalledFunction()) {
+					auto name = call->getCalledFunction()->getName();
+					// Indexed UTF-8 reads still call their wrapper before O3.
+					// Both reader APIs dispatch on their String's ASCII flag.
+					reads_text |= name == "string_code_unit_slow" || name == "fa_string_utf8_byte";
 				}
 			}
 		}
-		if (!reads_units || instructions > 2048) { continue; }
+		if (!reads_text || instructions > 2048) { continue; }
 		indices[&function] = variants.size();
 		variants.push_back({&function, receiver, offset, parts[2].str()});
 	}

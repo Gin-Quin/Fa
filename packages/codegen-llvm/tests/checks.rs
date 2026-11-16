@@ -1131,6 +1131,57 @@ console.log(try equal("é", 0), try choose("a", 0))
 	}
 
 	#[test]
+	fn frozen_utf8_byte_parsers_specialize_before_the_reader_is_inlined() {
+		let source = include_str!("../../../benchmarks/calc/main.fa");
+		let ir = complete_ir_at_target(
+			"frozen-byte-parser",
+			source,
+			false,
+			OptLevel::O3,
+			Target::Native,
+		);
+		let variants: Vec<_> = ir
+			.split("define ")
+			.skip(1)
+			.filter(|body| {
+				body.lines()
+					.next()
+					.is_some_and(|line| line.contains("@fa.factor.arena.ascii("))
+			})
+			.map(|body| body.split_once("\n}").expect("a complete body").0)
+			.collect();
+		assert!(!variants.is_empty(), "the byte parser needs an ASCII body");
+		for body in variants {
+			assert!(body.contains("load i8"), "{body}");
+			assert!(!body.contains("@string_utf8_byte_slow("), "{body}");
+			assert!(!body.contains("@fa_string_utf8_byte("), "{body}");
+		}
+	}
+
+	#[test]
+	fn byte_parser_versioning_rejects_written_or_multiple_string_fields() {
+		let source = include_str!("../../cli/tests/programs/string-frozen-byte-reads.fa");
+		let written = source.replace(
+			"let cursor = ByteCursor { text }",
+			"mutable cursor = ByteCursor { text }\ncursor.text = text",
+		);
+		let multiple = source
+			.replace("\ttext: String\n", "\ttext: String\n\tother: String\n")
+			.replace("ByteCursor { text }", "ByteCursor { text, other = text }")
+			.replace(
+				"return accumulated",
+				"return accumulated + self.other.length",
+			);
+		for (name, source) in [
+			("written-byte-field", written),
+			("multiple-byte-fields", multiple),
+		] {
+			let ir = complete_ir_at_target(name, &source, false, OptLevel::O0, Target::Native);
+			assert!(!ir.contains("\"fa.frozen.ascii\""), "{name}");
+		}
+	}
+
+	#[test]
 	fn ascii_index_normalization_has_no_memory_effects() {
 		let ir = complete_ir_at_target(
 			"ascii-unit-effects",

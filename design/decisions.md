@@ -1611,11 +1611,13 @@ Numeric indexing dispatches on the ASCII flag before checking byte bounds, keepi
 
 ## Frozen String method variants (2026-11-16)
 
-At O3, specialize complete lowered LLVM bodies for a single String field proven unchanged after construction. Restrict duplication to mutually recursive method groups and their same-receiver callers: a single self-recursive method can already become one loop, and duplicating it regressed the measured sexp parser. Candidates have direct pointer receivers, synchronous bodies, no captures/default/consumed/variadic parameters, numeric unit reads and at most 2048 LLVM instructions. Size optimization and other optimization levels retain the ordinary body.
+At O3, specialize complete lowered LLVM bodies for a single String field proven unchanged after construction. Restrict duplication to mutually recursive method groups and their same-receiver callers: a single self-recursive method can already become one loop, and duplicating it regressed the measured sexp parser. Candidates have direct pointer receivers, synchronous bodies, no captures/default/consumed/variadic parameters, numeric unit or indexed UTF-8 byte reads and at most 2048 LLVM instructions. Size optimization and other optimization levels retain the ordinary body.
 
 Internal ASCII/Unicode bodies retain the original ABI, ownership, cleanup and arena choices. The original symbol becomes a capacity-flag dispatch with identical-prototype musttail calls. Function addresses continue to designate that symbol; only direct calls on the exact same receiver and stable type/field select a matching variant. The assumption loads the same capacity address using the target DataLayout. The pass runs before O3 and ThinLTO summaries in monolithic and separate-unit compilation.
 
 The frozen-field proof consults the complete WRITTEN_FIELDS set, including possible later compatible shapes. Hash that full sorted set into each native object-cache key and bump its format version: logging only existing members would miss newly added writes. No memory effects or alias claims are weakened.
+
+The faithful byte-parser ports retain toUtf8().get() instead of code-unit reads. Before O3, the frozen-field pass recognizes fa_string_utf8_byte alongside string_code_unit_slow; the wrapper has not been inlined yet. Both readers depend on the proven frozen field’s ASCII bit. The existing receiver, group and size restrictions stay unchanged, and the native cache generation advances to frozen-ascii-2. ASCII clones fold UTF-8 replacement handling; Unicode clones keep it.
 
 ## Trunk performance baseline (implementation, 2026-11-16)
 

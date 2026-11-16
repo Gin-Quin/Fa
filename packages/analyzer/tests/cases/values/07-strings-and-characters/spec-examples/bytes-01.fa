@@ -4,4 +4,3 @@ let empty = Bytes.filled(16) -- 16 bytes, all zero
 
 assert greeting.length == 2
 assert greeting[0] == 104
-

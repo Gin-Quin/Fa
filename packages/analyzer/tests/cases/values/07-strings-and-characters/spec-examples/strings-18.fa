@@ -3,4 +3,3 @@ let text = "a😀b"
 for character in text {
 	console.log(character)
 }
-

@@ -4,4 +4,3 @@ mutable name = "Ana"
 let previous = name
 name += "!"
 console.log(previous, name) -- Ana Ana!
-

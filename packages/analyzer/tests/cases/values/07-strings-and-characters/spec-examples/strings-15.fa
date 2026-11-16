@@ -1,4 +1,3 @@
 -- Specification example: strings 15
 let digit = "7"
 assert digit.codeUnitAt(0) == 55
-

@@ -4,4 +4,3 @@ mutable original = Bytes.from([1, 2])
 mutable duplicate = copy original
 duplicate[0] = 3
 console.log(original[0], duplicate[0]) -- 1 3
-

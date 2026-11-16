@@ -4,4 +4,3 @@ let text = "abc"
 let index = position()
 let unit = try text[index]      -- throws IndexError if `index` is out of bounds
 let maybeUnit = text.get(index) -- String?
-

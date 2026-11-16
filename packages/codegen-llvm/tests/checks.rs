@@ -80,6 +80,25 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn replacing_a_borrowed_callable_preserves_the_later_array_move() {
+		let source = include_str!("../../analyzer/tests/cases/ownership-indirect-call-borrows.fa");
+		for (name, target) in [
+			("callable-move-native", Target::Native),
+			("callable-move-wasm", Target::Wasm),
+		] {
+			let ir = ir_at_target(name, source, true, OptLevel::O0, target);
+			let explicit = function(&ir, "fa.independent");
+			assert_eq!(
+				explicit.matches("call ptr @fa.copy").count(),
+				1,
+				"{explicit}"
+			);
+			let moved = function(&ir, "fa.replaced");
+			assert!(!moved.contains("call ptr @fa.copy"), "{moved}");
+		}
+	}
+
+	#[test]
 	fn copying_an_owned_function_handle_only_retains_its_environment() {
 		let source =
 			include_str!("../../analyzer/tests/cases/ownership-function-handle-sharing.fa");

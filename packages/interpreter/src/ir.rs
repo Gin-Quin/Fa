@@ -255,6 +255,10 @@ pub enum Expr {
 	Assign(Place, Box<Expr>),
 	/// Reads a place (a compound assignment reads its target).
 	Read(Place),
+	/// Borrows an existing place, resolving its index expressions once.
+	Lend(Place),
+	/// Installs an owned result or a loan without changing its provenance.
+	Bind(Slot, Box<Expr>),
 	/// Statements; the value of the last one (`none` when empty).
 	Block(Vec<Expr>),
 	/// `if`: the value of the branch taken (`none` without `else`).

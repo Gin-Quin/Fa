@@ -247,6 +247,7 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 		| Expr::Impure(_)
 		| Expr::Unsupported(_) => {}
 		Expr::Let(_, value)
+		| Expr::Bind(_, value)
 		| Expr::Loop(value)
 		| Expr::Throw(value)
 		| Expr::Assert(value, _)
@@ -261,7 +262,7 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 			place(target, f);
 			visit(value, f);
 		}
-		Expr::Read(target) => place(target, f),
+		Expr::Read(target) | Expr::Lend(target) => place(target, f),
 		Expr::Block(values) | Expr::Tuple(values) | Expr::Builtin(_, values) => {
 			for value in values {
 				visit(value, f);

@@ -110,6 +110,8 @@ pub(crate) enum Op {
 	Let(Slot, Node),
 	Assign(Place, Node),
 	Read(Place),
+	Lend(Place),
+	Bind(Slot, Node),
 	Block(Vec<Node>),
 	If(Node, Node, Option<Node>),
 	Loop(Node),
@@ -241,6 +243,8 @@ impl<'a> Builder<'a> {
 				ir::Expr::Let(slot, value) => Op::Let(*slot, self.add(value)),
 				ir::Expr::Assign(place, value) => Op::Assign(self.place(place), self.add(value)),
 				ir::Expr::Read(place) => Op::Read(self.place(place)),
+				ir::Expr::Lend(place) => Op::Lend(self.place(place)),
+				ir::Expr::Bind(slot, value) => Op::Bind(*slot, self.add(value)),
 				ir::Expr::Block(statements) => {
 					Op::Block(statements.iter().map(|node| self.add(node)).collect())
 				}

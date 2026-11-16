@@ -30,6 +30,7 @@ mod copies;
 pub mod eval;
 pub mod ir;
 pub mod json;
+mod loans;
 mod machine;
 pub mod memory;
 pub mod types;
@@ -356,6 +357,140 @@ mod tests {
 			),
 			Err(Error::Thrown(Value::String(Arc::from("written"))))
 		);
+	}
+
+	#[test]
+	fn borrowed_arguments_forward_mutation_to_the_original_owner() {
+		let mut host = Functions::default();
+		let place = || Place {
+			slot: 0,
+			steps: Vec::new(),
+		};
+		let function = |body| Function {
+			name: "borrowed".into(),
+			params: vec![Param {
+				slot: 0,
+				default: None,
+			}],
+			captures: Vec::new(),
+			slots: 1,
+			body,
+		};
+		host.0.insert(
+			FnKey(0, 1),
+			Arc::new(function(Expr::Mutate("Array#push", place(), vec![int(2)]))),
+		);
+		host.0.insert(
+			FnKey(0, 2),
+			Arc::new(function(Expr::CallFunction(
+				FnKey(0, 1),
+				vec![Arg::Value(Expr::Lend(place()))].into(),
+			))),
+		);
+		let body = Expr::Block(vec![
+			Expr::Let(0, Expr::Array(vec![Item::One(int(1))]).boxed()),
+			Expr::CallFunction(FnKey(0, 2), vec![Arg::Value(Expr::Lend(place()))].into()),
+			Expr::Field(local(0), Arc::from("length"), false),
+		]);
+		assert_eq!(run(&mut host, &body, 1), Ok(Value::int(2)));
+	}
+
+	#[test]
+	fn a_reference_result_keeps_the_callers_place() {
+		let mut host = Functions::default();
+		host.0.insert(
+			FnKey(0, 1),
+			Arc::new(Function {
+				name: "first".into(),
+				params: vec![Param {
+					slot: 0,
+					default: None,
+				}],
+				captures: Vec::new(),
+				slots: 1,
+				body: Expr::Lend(Place {
+					slot: 0,
+					steps: vec![Step::Index(int(0))],
+				}),
+			}),
+		);
+		let body = Expr::Block(vec![
+			Expr::Let(
+				0,
+				Expr::Array(vec![Item::One(Expr::Array(vec![Item::One(int(1))]))]).boxed(),
+			),
+			Expr::Bind(
+				1,
+				Expr::CallFunction(
+					FnKey(0, 1),
+					vec![Arg::Value(Expr::Lend(Place {
+						slot: 0,
+						steps: Vec::new(),
+					}))]
+					.into(),
+				)
+				.boxed(),
+			),
+			Expr::Mutate(
+				"Array#push",
+				Place {
+					slot: 1,
+					steps: Vec::new(),
+				},
+				vec![int(2)],
+			),
+			Expr::Field(
+				Expr::Index(local(0), int(0).boxed()).boxed(),
+				Arc::from("length"),
+				false,
+			),
+		]);
+		assert_eq!(run(&mut host, &body, 2), Ok(Value::int(2)));
+		let child = Arc::new(vec![Value::int(1)]);
+		let original = Arc::as_ptr(&child);
+		let argument = Value::Array(Arc::new(vec![Value::Array(child)]));
+		let mut interpreter = Interpreter::new(&mut host, Limits::default());
+		let result = interpreter
+			.call_value(
+				&Value::Function(Arc::new(crate::value::Closure {
+					function: FnKey(0, 1),
+					captured: Vec::new(),
+					bound: Vec::new(),
+				})),
+				vec![argument],
+			)
+			.unwrap();
+		let Value::Array(child) = result else {
+			panic!("the selected array survives its temporary parent")
+		};
+		assert_eq!(Arc::as_ptr(&child), original);
+		assert_eq!(Arc::strong_count(&child), 1);
+	}
+
+	#[test]
+	fn returning_a_reference_to_a_source_local_restores_call_depth_on_error() {
+		let mut host = Functions::default();
+		host.0.insert(
+			FnKey(0, 1),
+			Arc::new(Function {
+				name: "invalid".into(),
+				params: Vec::new(),
+				captures: Vec::new(),
+				slots: 1,
+				body: Expr::Block(vec![
+					Expr::Let(0, Expr::Array(vec![Item::One(int(1))]).boxed()),
+					Expr::Lend(Place {
+						slot: 0,
+						steps: Vec::new(),
+					}),
+				]),
+			}),
+		);
+		let mut interpreter = Interpreter::new(&mut host, Limits::default());
+		assert!(
+			matches!(interpreter.evaluate(&Expr::CallFunction(FnKey(0, 1), Vec::new().into()), 0), Err(Error::Stop(message)) if message.contains("escapes a local owner"))
+		);
+		assert_eq!(interpreter.depth, 0);
 	}
 
 	#[test]

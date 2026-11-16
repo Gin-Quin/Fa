@@ -1,401 +1,220 @@
 import { describe, expect, test } from "bun:test";
 
+import { faIndex, faSliceBounds } from "./collections.js";
 import { IndexError } from "./errors.js";
 import {
-	faBoundaries,
 	faCharacters,
-	faIsSimpleText,
-	faStringBytes,
-	faStringBytesView,
+	faCodePointCount,
+	faFromUtf8,
+	faInvalidUtf8,
+	faIsWellFormed,
 	faStringCodePoints,
-	faStringCompare,
 	faStringCompareLocale,
-	faStringEndsWith,
-	faStringGet,
-	faStringIncludes,
-	faStringIndex,
-	faStringIndexOf,
-	faStringLastIndexOf,
-	faStringLength,
-	faStringPadEnd,
-	faStringPadStart,
-	faStringReplace,
-	faStringReplaceAll,
-	faStringSlice,
-	faStringSplit,
-	faStringStartsWith,
+	faUtf8Encoder,
+	faUtf8Length,
+	faUtf8LossyDecoder,
+	faUtf8Values,
+	Utf8Error,
 } from "./strings.js";
 
-const FAMILY = "👨‍👩‍👧‍👦"; // man, ZWJ, woman, ZWJ, girl, ZWJ, boy: one cluster
 const FRANCE = "🇫🇷";
 const GERMANY = "🇩🇪";
-const E_ACUTE = "é"; // e + combining acute accent
-const THUMBS = "👍🏽"; // with a skin tone modifier
+const ACCENT = "e\u0301";
+const FAMILY = "👨‍👩‍👧‍👦";
 
-/**
- * The error thrown by `run`.
- * @param {() => unknown} run
- * @returns {any}
- */
-function errorOf(run) {
-	try {
-		run();
-	} catch (exception) {
-		return exception;
-	}
-	throw new Error("no error");
-}
-
-describe("simple text fast path", () => {
-	test("ASCII without \\r is simple", () => {
-		expect(faIsSimpleText("")).toBe(true);
-		expect(faIsSimpleText("hello world\n\t~")).toBe(true);
-		expect(faIsSimpleText("\x00\x7f")).toBe(true);
-		expect(faIsSimpleText("a\r\nb")).toBe(false);
-		expect(faIsSimpleText("a\rb")).toBe(false);
-		expect(faIsSimpleText("é")).toBe(false);
-		expect(faIsSimpleText("\x80")).toBe(false);
-	});
-
-	test("long texts (encoded by chunks) agree with the regular expression", () => {
-		const reference = (/** @type {string} */ text) => /^[\x00-\x0c\x0e-\x7f]*$/.test(text);
-		for (const length of [255, 256, 1000, 16383, 16384, 16385, 40000]) {
-			const ascii = "abcdefghij;\n\t".repeat(Math.ceil(length / 13)).slice(0, length);
-			expect(faIsSimpleText(ascii)).toBe(true);
-			for (const position of [0, 1, length >> 1, 16383, 16384, length - 1]) {
-				if (position >= length) {
-					continue;
-				}
-				for (const intruder of ["\r", "\x80", "é", "\u{1F600}", "\ud800", "\udc00", "\uffff"]) {
-					const text = ascii.slice(0, position) + intruder + ascii.slice(position + 1);
-					expect([length, position, intruder, faIsSimpleText(text)]).toEqual([
-						length,
-						position,
-						intruder,
-						reference(text),
-					]);
-				}
-			}
+// Native operations have no Fa wrapper. Exercise their Fa bounds boundary
+// here; generated-program tests cover lowering and evaluation order.
+describe("UTF-16 string operations", () => {
+	test("length counts code units, including CRLF and combining marks", () => {
+		for (const [text, units] of [
+			["", 0],
+			["hello", 5],
+			["héllo", 5],
+			["日本語", 3],
+			["😀", 2],
+			[FRANCE, 4],
+			[ACCENT, 2],
+			["\r\n", 2],
+			[FAMILY, 11],
+		]) {
+			expect(text.length).toBe(units);
 		}
+	});
+	test("checked indexing and negative indices", () => {
+		expect(faIndex("hé😀", 0)).toBe("h");
+		expect(faIndex("hé😀", -1).charCodeAt(0)).toBe(0xde00);
+		expect(faIndex("hé😀", 2).charCodeAt(0)).toBe(0xd83d);
+		for (const index of [-5, 4]) expect(() => faIndex("hé😀", index)).toThrow(IndexError);
+		expect(() => faIndex("", 0)).toThrow(IndexError);
+	});
+	test("get uses at and returns undefined outside the string", () => {
+		expect("hé😀".at(-1)?.charCodeAt(0)).toBe(0xde00);
+		expect("hé😀".at(4)).toBeUndefined();
+		expect("".at(0)).toBeUndefined();
+	});
+	test("slices can cut and rejoin a surrogate pair", () => {
+		const face = "😀";
+		const half = face.slice(0, 1);
+		expect(half.length).toBe(1);
+		expect(faIsWellFormed(half)).toBe(false);
+		expect(half + face.slice(1)).toBe(face);
+		expect(face.slice(1, 0)).toBe("");
+		let rebuilt = half;
+		rebuilt += face[1];
+		expect(rebuilt).toBe(face);
+	});
+	test("slice bounds include negative and inverted ranges", () => {
+		expect(faSliceBounds(4, -2, -1, true)).toEqual([2, 4]);
+		expect(faSliceBounds(4, 3, 1, false)).toEqual([3, 3]);
+		expect(faSliceBounds(0, undefined, undefined, false)).toEqual([0, 0]);
+		for (const bounds of [
+			[-5, 2, false],
+			[0, 5, false],
+			[0, 4, true],
+		]) {
+			expect(() => faSliceBounds(4, ...bounds)).toThrow(IndexError);
+		}
+	});
+	test("searches can match a combining mark or half a pair", () => {
+		expect(ACCENT.includes("e")).toBe(true);
+		expect(ACCENT.startsWith("e")).toBe(true);
+		expect(ACCENT.endsWith("\u0301")).toBe(true);
+		expect("😀".includes("😀"[0])).toBe(true);
+		expect((FRANCE + GERMANY).indexOf(GERMANY)).toBe(4);
+		expect("é日😀x😀".lastIndexOf("😀")).toBe(5);
+		expect("".indexOf("")).toBe(0);
+		expect("é".indexOf("x")).toBe(-1);
+	});
+	test("split and replace use code units", () => {
+		expect("a😀".split("").length).toBe(3);
+		expect("".split("")).toEqual([]);
+		expect(ACCENT.replace("e", "a")).toBe("a\u0301");
+		expect("😀".replaceAll("😀"[0], "a")).toBe("a\ude00");
+		expect("a-b-c".replaceAll("-", " ")).toBe("a b c");
+		expect("ab".replaceAll("", "-")).toBe("-a-b-");
+	});
+	test("padding counts code units and may cut a filler pair", () => {
+		expect("é".padStart(3, "*")).toBe("**é");
+		expect(FRANCE.padEnd(5, "ab")).toBe(`${FRANCE}a`);
+		expect("x".padStart(2, "😀")).toBe("\ud83dx");
+		expect("ab".padEnd(6, "xyz")).toBe("abxyzx");
+		expect("é".padStart(5, "")).toBe("é");
+	});
+	test("order is by units and equality has no normalization", () => {
+		expect("\uffff" < "\u{10000}").toBe(false);
+		expect("😀" < "\ue000").toBe(true);
+		expect("é" === ACCENT).toBe(false);
+	});
+	test("case mapping, trimming, repeating, joining", () => {
+		expect("ß".toUpperCase()).toBe("SS");
+		expect("  é  ".trim()).toBe("é");
+		expect("日".repeat(3)).toBe("日日日");
+		expect(["é", "😀"].join(", ")).toBe("é, 😀");
 	});
 });
 
-describe("length counts grapheme clusters", () => {
-	test("documented values (T-STR-14)", () => {
-		expect(faStringLength("héllo")).toBe(5);
-		expect(faStringLength(FRANCE)).toBe(1);
-		expect(faStringLength(E_ACUTE)).toBe(1);
-	});
-
-	test("ASCII, empty, emoji sequences, combining marks, CRLF", () => {
-		expect(faStringLength("")).toBe(0);
-		expect(faStringLength("hello")).toBe(5);
-		expect(faStringLength(FAMILY)).toBe(1);
-		expect(FAMILY.length).toBe(11);
-		expect(faStringLength(THUMBS)).toBe(1);
-		expect(faStringLength(`${FRANCE}${GERMANY}`)).toBe(2);
-		expect(faStringLength(`a${FAMILY}b`)).toBe(3);
-		expect(faStringLength("é̂̃")).toBe(1);
-		expect(faStringLength("a\r\nb")).toBe(3);
-		expect(faStringLength("a\rb")).toBe(3);
-		expect(faStringLength("a\n\rb")).toBe(4);
-		expect(faStringLength("한국어")).toBe(3);
-		expect(faStringLength("각")).toBe(1); // conjoining jamo
-		expect(faStringLength("😀")).toBe(1);
-		expect(faStringLength("First line\nSecond line")).toBe(22);
-	});
-
-	test("characters (T-STR-20, T-STR-27)", () => {
-		expect(faCharacters("aé🇫🇷")).toEqual(["a", "é", FRANCE]);
-		expect(faCharacters("ab")).toEqual(["a", "b"]);
+describe("explicit Unicode views", () => {
+	test("characters alone segments graphemes", () => {
+		expect(faCharacters(FRANCE + GERMANY)).toEqual([FRANCE, GERMANY]);
+		expect(faCharacters(ACCENT + FAMILY + "👍🏽\r\n")).toEqual([ACCENT, FAMILY, "👍🏽", "\r\n"]);
+		expect(faCharacters("abc")).toEqual(["a", "b", "c"]);
 		expect(faCharacters("")).toEqual([]);
-		expect(faCharacters(`x${FAMILY}${E_ACUTE}`)).toEqual(["x", FAMILY, E_ACUTE]);
-		expect(faCharacters("a\r\nb")).toEqual(["a", "\r\n", "b"]);
 	});
-
-	test("boundaries are UTF-16 offsets", () => {
-		expect(faBoundaries("abc")).toEqual([0, 1, 2, 3]);
-		expect(faBoundaries(`a${E_ACUTE}b`)).toEqual([0, 1, 3, 4]);
-		expect(faBoundaries("")).toEqual([0]);
-	});
-});
-
-describe("indexing", () => {
-	test("documented values (T-STR-15, T-STR-18)", () => {
-		expect(faStringIndex("Fa", 0)).toBe("F");
-		expect(faStringIndex("Fa", -1)).toBe("a");
-		expect(faStringGet("abc", 10)).toBeUndefined();
-		expect(errorOf(() => faStringIndex("abc", 10))).toBeInstanceOf(IndexError);
-	});
-
-	test("graphemes and negative indices", () => {
-		const text = `a${FAMILY}${E_ACUTE}${FRANCE}`;
-		expect(faStringIndex(text, 0)).toBe("a");
-		expect(faStringIndex(text, 1)).toBe(FAMILY);
-		expect(faStringIndex(text, 2)).toBe(E_ACUTE);
-		expect(faStringIndex(text, 3)).toBe(FRANCE);
-		expect(faStringIndex(text, -1)).toBe(FRANCE);
-		expect(faStringIndex(text, -4)).toBe("a");
-		const error = errorOf(() => faStringIndex(text, 4));
-		expect(error).toBeInstanceOf(IndexError);
-		expect(error.index).toBe(4);
-		expect(error.length).toBe(4);
-		expect(String(error)).toBe("IndexError { index = 4, length = 4 }");
-		expect(errorOf(() => faStringIndex(text, -5)).index).toBe(-5);
-		expect(errorOf(() => faStringIndex("", 0))).toBeInstanceOf(IndexError);
-	});
-
-	test("get", () => {
-		expect(faStringGet(`${FRANCE}x`, 0)).toBe(FRANCE);
-		expect(faStringGet(`${FRANCE}x`, -1)).toBe("x");
-		expect(faStringGet(`${FRANCE}x`, 2)).toBeUndefined();
-		expect(faStringGet(`${FRANCE}x`, -3)).toBeUndefined();
-		expect(faStringGet("", 0)).toBeUndefined();
-		expect(faStringGet("abc", 1)).toBe("b");
-	});
-});
-
-describe("slicing", () => {
-	test("documented values (T-STR-16, T-STR-17, T-STR-29)", () => {
-		const s = "hello";
-		expect(faStringSlice(s, 1, 3, false)).toBe("el");
-		expect(faStringSlice(s, 1, 3, true)).toBe("ell");
-		expect(faStringSlice(s, 1, undefined, false)).toBe("ello");
-		expect(faStringSlice(s, undefined, 2, false)).toBe("he");
-		expect(faStringSlice(s, -3, undefined, false)).toBe("llo");
-		expect(faStringSlice(s, 3, 1, false)).toBe("");
-		expect(faStringSlice("hello world", 0, 5, false)).toBe("hello");
-		expect(faStringSlice("hello world", 6, undefined, false)).toBe("world");
-	});
-
-	test("bounds from -length to length, inclusive ends below length", () => {
-		expect(faStringSlice("abc", 0, 3, false)).toBe("abc");
-		expect(faStringSlice("abc", 3, 3, false)).toBe("");
-		expect(faStringSlice("abc", -3, -1, false)).toBe("ab");
-		expect(faStringSlice("abc", 0, -1, true)).toBe("abc");
-		expect(faStringSlice("abc", 0, 2, true)).toBe("abc");
-		expect(faStringSlice("abc", undefined, undefined, false)).toBe("abc");
-		expect(errorOf(() => faStringSlice("abc", 0, 4, false))).toBeInstanceOf(IndexError);
-		expect(errorOf(() => faStringSlice("abc", 0, 3, true))).toBeInstanceOf(IndexError);
-		expect(errorOf(() => faStringSlice("abc", -4, undefined, false))).toBeInstanceOf(IndexError);
-		expect(errorOf(() => faStringSlice("abc", 4, undefined, false)).index).toBe(4);
-		expect(faStringSlice("abc", 5 - 5, 1, false)).toBe("a");
-	});
-
-	test("graphemes", () => {
-		const text = `${FRANCE}${E_ACUTE}x${FAMILY}`;
-		expect(faStringSlice(text, 0, 2, false)).toBe(`${FRANCE}${E_ACUTE}`);
-		expect(faStringSlice(text, 1, -1, false)).toBe(`${E_ACUTE}x`);
-		expect(faStringSlice(text, -1, undefined, false)).toBe(FAMILY);
-		expect(faStringSlice(text, 2, 0, false)).toBe("");
-		expect(errorOf(() => faStringSlice(text, 0, 5, false)).length).toBe(4);
-	});
-});
-
-describe("searching never matches part of a grapheme cluster", () => {
-	test("documented values (T-STR-23, T-STR-26)", () => {
-		const t = "hello world";
-		expect(faStringIncludes(t, "world")).toBe(true);
-		expect(faStringStartsWith(t, "hello")).toBe(true);
-		expect(faStringEndsWith(t, "world")).toBe(true);
-		expect(faStringIndexOf(t, "world")).toBe(6);
-		expect(faStringIndexOf(t, "planet")).toBeUndefined();
-		expect(faStringIncludes(`${E_ACUTE}x`, "e")).toBe(false);
-		expect(faStringIndexOf(`${FRANCE}${GERMANY}`, GERMANY)).toBe(1);
-	});
-
-	test("includes", () => {
-		expect(faStringIncludes("", "")).toBe(true);
-		expect(faStringIncludes("abc", "")).toBe(true);
-		expect(faStringIncludes(E_ACUTE, "")).toBe(true);
-		expect(faStringIncludes(`a${E_ACUTE}`, E_ACUTE)).toBe(true);
-		expect(faStringIncludes(`a${E_ACUTE}`, "́")).toBe(false);
-		expect(faStringIncludes(FAMILY, "👨")).toBe(false);
-		expect(faStringIncludes(`👨 ${FAMILY}`, "👨")).toBe(true);
-		expect(faStringIncludes(THUMBS, "👍")).toBe(false);
-		// The regional indicators 🇷🇩 (Rwanda?) straddle 🇫🇷 and 🇩🇪.
-		expect(faStringIncludes(`${FRANCE}${GERMANY}`, "\u{1F1F7}\u{1F1E9}")).toBe(false);
-		expect(faStringIncludes("a\r\nb", "\r")).toBe(false);
-		expect(faStringIncludes("a\r\nb", "\r\n")).toBe(true);
-	});
-
-	test("a rejected match doesn't hide a later valid one", () => {
-		expect(faStringIndexOf(`${E_ACUTE}e`, "e")).toBe(1);
-		expect(faStringIndexOf(`${FAMILY}👨`, "👨")).toBe(1);
-		expect(faStringLastIndexOf(`e${E_ACUTE}`, "e")).toBe(0);
-	});
-
-	test("startsWith and endsWith", () => {
-		expect(faStringStartsWith(E_ACUTE, "e")).toBe(false);
-		expect(faStringStartsWith(`${E_ACUTE}x`, E_ACUTE)).toBe(true);
-		expect(faStringStartsWith("abc", "")).toBe(true);
-		expect(faStringStartsWith("abc", "abcd")).toBe(false);
-		expect(faStringEndsWith(FAMILY, "👦")).toBe(false);
-		expect(faStringEndsWith(`x${FAMILY}`, FAMILY)).toBe(true);
-		expect(faStringEndsWith("abc", "")).toBe(true);
-		expect(faStringEndsWith("é", "é")).toBe(true);
-		expect(faStringEndsWith("a\r\n", "\n")).toBe(false);
-	});
-
-	test("indexOf and lastIndexOf count graphemes", () => {
-		const text = `${FRANCE}ab${FAMILY}ab`;
-		expect(faStringIndexOf(text, "ab")).toBe(1);
-		expect(faStringLastIndexOf(text, "ab")).toBe(4);
-		expect(faStringIndexOf(text, FAMILY)).toBe(3);
-		expect(faStringLastIndexOf(text, "zz")).toBeUndefined();
-		expect(faStringIndexOf(text, "")).toBe(0);
-		expect(faStringLastIndexOf(text, "")).toBe(6);
-		expect(faStringLastIndexOf("abcabc", "abc")).toBe(3);
-		expect(faStringLastIndexOf("abcabc", "")).toBe(6);
-		expect(faStringIndexOf("aaa", "aa")).toBe(0);
-		expect(faStringLastIndexOf("aaa", "aa")).toBe(1);
-	});
-});
-
-describe("replace and split", () => {
-	test("documented values (T-STR-24, T-STR-27)", () => {
-		expect(faStringReplace("hello-world", "-", " ")).toBe("hello world");
-		expect(faStringReplaceAll("a-b-c", "-", " ")).toBe("a b c");
-		expect(faStringSplit("a,b,c", ",")).toEqual(["a", "b", "c"]);
-		expect(faStringSplit("a😀", "")).toEqual(["a", "😀"]);
-	});
-
-	test("the replacement is plain text", () => {
-		expect(faStringReplace("a-b", "-", "$&$&")).toBe("a$&$&b");
-		expect(faStringReplaceAll("a-b-c", "-", "$'")).toBe("a$'b$'c");
-		expect(faStringReplace(`${E_ACUTE}-x`, "-", "$1")).toBe(`${E_ACUTE}$1x`);
-	});
-
-	test("graphemes", () => {
-		expect(faStringReplace(`${E_ACUTE}e`, "e", "E")).toBe(`${E_ACUTE}E`);
-		expect(faStringReplaceAll(`e${E_ACUTE}e`, "e", "E")).toBe(`E${E_ACUTE}E`);
-		expect(faStringReplaceAll(`${FAMILY}👨`, "👨", "M")).toBe(`${FAMILY}M`);
-		expect(faStringReplaceAll("aaa", "aa", "b")).toBe("ba");
-		expect(faStringReplaceAll("abc", "x", "y")).toBe("abc");
-		expect(faStringReplace("abc", "x", "y")).toBe("abc");
-	});
-
-	test("an empty search", () => {
-		expect(faStringReplace("abc", "", "-")).toBe("-abc");
-		expect(faStringReplaceAll("abc", "", "-")).toBe("-a-b-c-");
-		expect(faStringReplaceAll(`${E_ACUTE}${FRANCE}`, "", "-")).toBe(`-${E_ACUTE}-${FRANCE}-`);
-		expect(faStringReplaceAll("", "", "-")).toBe("-");
-	});
-
-	test("split", () => {
-		expect(faStringSplit("a,b,", ",")).toEqual(["a", "b", ""]);
-		expect(faStringSplit("", ",")).toEqual([""]);
-		expect(faStringSplit("", "")).toEqual([]);
-		expect(faStringSplit("abc", ",")).toEqual(["abc"]);
-		expect(faStringSplit("a, b, c", ", ")).toEqual(["a", "b", "c"]);
-		expect(faStringSplit(`${E_ACUTE}e${E_ACUTE}`, "e")).toEqual([E_ACUTE, E_ACUTE]);
-		expect(faStringSplit(`x${FAMILY}y`, "")).toEqual(["x", FAMILY, "y"]);
-		expect(faStringSplit(`${FRANCE},${GERMANY}`, ",")).toEqual([FRANCE, GERMANY]);
-	});
-});
-
-describe("padding counts graphemes", () => {
-	test("documented values (T-STR-25)", () => {
-		expect(faStringPadStart("7", 3, "0")).toBe("007");
-		expect(faStringPadEnd("7", 3)).toBe("7  ");
-		expect(faStringPadStart("7", 3)).toBe("  7");
-	});
-
-	test("graphemes in the text and in the filler", () => {
-		expect(faStringPadStart(E_ACUTE, 3, "*")).toBe(`**${E_ACUTE}`);
-		expect(faStringPadEnd(FRANCE, 3, "ab")).toBe(`${FRANCE}ab`);
-		expect(faStringPadStart("x", 4, FAMILY)).toBe(`${FAMILY}${FAMILY}${FAMILY}x`);
-		expect(faStringPadEnd("x", 4, `${FRANCE}-`)).toBe(`x${FRANCE}-${FRANCE}`);
-		expect(faStringPadStart("abc", 2, "0")).toBe("abc");
-		expect(faStringPadStart(E_ACUTE, 1, "*")).toBe(E_ACUTE);
-		expect(faStringPadStart("é", 5, "")).toBe("é");
-		expect(faStringPadStart("ab", 5, "xyz")).toBe("xyzab");
-		expect(faStringPadEnd("ab", 6, "xyz")).toBe("abxyzx");
-	});
-});
-
-describe("code points and comparison", () => {
-	test("codePoints (T-STR-27)", () => {
-		expect(faStringCodePoints("abc")).toEqual([97, 98, 99]);
-		expect(faStringCodePoints("a😀")).toEqual([97, 0x1f600]);
-		expect(faStringCodePoints(E_ACUTE)).toEqual([0x65, 0x301]);
-		expect(faStringCodePoints("")).toEqual([]);
-	});
-
-	test("bytes", () => {
-		expect(faStringBytes("abc")).toEqual([97, 98, 99]);
-		expect(faStringBytes("aé")).toEqual([97, 0xc3, 0xa9]);
-		expect(faStringBytes("😀")).toEqual([0xf0, 0x9f, 0x98, 0x80]);
-		expect(faStringBytes("")).toEqual([]);
-		expect(faStringBytesView("ab")).toEqual([97, 98]);
-		expect(faStringBytesView("ab")).toBe(faStringBytesView("ab"));
-		expect(faStringBytesView("é")).toEqual([0xc3, 0xa9]);
-	});
-
-	test("comparison is by code point (T-STR-21)", () => {
-		expect(faStringCompare("abc", "abd")).toBe(-1);
-		expect(faStringCompare("Z", "a")).toBe(-1);
-		expect(faStringCompare("￿", "\u{10000}")).toBe(-1);
-		expect("￿" < "\u{10000}").toBe(false);
-		expect(faStringCompare("\u{10000}", "￿")).toBe(1);
-		expect(faStringCompare("abc", "abc")).toBe(0);
-		expect(faStringCompare("ab", "abc")).toBe(-1);
-		expect(faStringCompare("abc", "ab")).toBe(1);
-		expect(faStringCompare("", "")).toBe(0);
-		expect(faStringCompare("😀a", "😀b")).toBe(-1);
-		expect(faStringCompare("😀", "😀")).toBe(0);
-		expect(faStringCompare("\u{1F600}", "\u{1F601}")).toBe(-1);
-		expect(faStringCompare("😀", "😀x")).toBe(-1);
-		expect(faStringCompare("", "😀")).toBe(-1);
-		expect(faStringCompare("😀", "")).toBe(1);
-	});
-
-	test("comparison agrees with the code points on surrogates, paired or not", () => {
-		/** The order of the code points (a lone surrogate is its own code point). */
-		const reference = (/** @type {string} */ a, /** @type {string} */ b) => {
-			const x = Array.from(a, (c) => /** @type {number} */ (c.codePointAt(0)));
-			const y = Array.from(b, (c) => /** @type {number} */ (c.codePointAt(0)));
-			for (let index = 0; index < Math.min(x.length, y.length); index++) {
-				if (x[index] !== y[index]) {
-					return x[index] < y[index] ? -1 : 1;
-				}
-			}
-			return x.length < y.length ? -1 : x.length > y.length ? 1 : 0;
-		};
-		const pieces = ["a", "z", "퟿", "\ud800", "\udbff", "\udc00", "\udfff", "", "￿"];
-		const all = [...pieces, "\u{10000}", "\u{1F600}", "\u{10FFFF}"];
-		const strings = [""];
-		for (const first of all) {
-			strings.push(first);
-			for (const second of all) {
-				strings.push(first + second);
-			}
-		}
-		for (const a of strings) {
-			for (const b of strings) {
-				expect([a, b, faStringCompare(a, b)]).toEqual([a, b, reference(a, b)]);
-			}
+	test("codePoints and the count agree, including lone surrogates", () => {
+		for (const text of [
+			"",
+			"abc",
+			ACCENT,
+			FRANCE,
+			FAMILY,
+			"é日😀",
+			"\ud800x\udc00",
+			"\ud800\udc00",
+		]) {
+			const points = Array.from(text, (point) => point.codePointAt(0));
+			expect(faStringCodePoints(text)).toEqual(points);
+			expect(faCodePointCount(text)).toBe(points.length);
 		}
 	});
-
-	test("equality has no normalization (T-STR-22)", () => {
-		expect("é" === E_ACUTE).toBe(false);
+	test("well-formed fallback agrees with the native method", () => {
+		const pieces = ["", "a", "é", "日", "😀", "\ud800", "\udbff", "\udc00", "\udfff"];
+		for (const a of pieces)
+			for (const b of pieces) {
+				expect(faIsWellFormed(a + b)).toBe((a + b).isWellFormed());
+			}
 	});
-
-	test("compareLocale (T-STR-28)", () => {
-		expect(faStringCompareLocale("a", "b")).toBeLessThan(0);
+	test("compareLocale", () => {
+		expect(faStringCompareLocale("a", "b")).toBe(-1);
 		expect(faStringCompareLocale("b", "a")).toBe(1);
 		expect(faStringCompareLocale("a", "a")).toBe(0);
-		expect(faStringCompareLocale("a", "B", "en")).toBe(-1);
 	});
 });
 
-describe("the JavaScript methods Fa uses directly", () => {
-	test("case mapping, trimming and repeating (T-STR-25, T-STR-30)", () => {
-		expect("ß".toUpperCase()).toBe("SS");
-		expect("  padded  ".trim()).toBe("padded");
-		expect("ab".repeat(3)).toBe("ababab");
-		expect("a" + "b" + "c").toBe("abc");
-		expect(["a", "b"].join(", ")).toBe("a, b");
+describe("UTF-8", () => {
+	test("encoder, browser length and allocation-free iterator agree", () => {
+		for (const text of [
+			"",
+			"abc",
+			"héllo",
+			"日本語",
+			"😀",
+			FRANCE,
+			FAMILY,
+			ACCENT,
+			"\ufeff\0\r\n",
+			"\ud800",
+			"\udc00",
+			"a\ud800b\udc00",
+			"😀".repeat(200),
+		]) {
+			const bytes = faUtf8Encoder.encode(text);
+			expect(bytes).toBeInstanceOf(Uint8Array);
+			expect(faUtf8Length(text)).toBe(bytes.length);
+			expect(faUtf8Length(text)).toBe(Buffer.byteLength(text));
+			expect([...faUtf8Values(text)]).toEqual([...bytes]);
+		}
+	});
+	test("lone surrogates encode as U+FFFD", () => {
+		expect([...faUtf8Encoder.encode("😀"[0])]).toEqual([239, 191, 189]);
+	});
+	test("strict decoding preserves BOM and accepts all scalar boundaries", () => {
+		const text = "\ufeff\0\u007f\u0080\u07ff\u0800\ud7ff\ue000\uffff\u{10000}\u{10ffff}";
+		const bytes = faUtf8Encoder.encode(text);
+		expect(faFromUtf8(bytes)).toBe(text);
+		expect(faUtf8LossyDecoder.decode(bytes)).toBe(text);
+		expect(faInvalidUtf8(bytes)).toBe(-1);
+	});
+	test("malformed sequences at the start, middle and truncated end", () => {
+		const invalid = [
+			[255],
+			[128],
+			[192, 128],
+			[193, 191],
+			[224, 128, 128],
+			[237, 160, 128],
+			[240, 128, 128, 128],
+			[244, 144, 128, 128],
+			[245, 128, 128, 128],
+			[194],
+			[226, 130],
+			[240, 159, 152],
+			[226, 65, 128],
+			[240, 159, 65, 128],
+		];
+		for (const sequence of invalid)
+			for (const prefix of [[], [97], [195, 169, 230, 151, 165]]) {
+				const bytes = new Uint8Array([...prefix, ...sequence]);
+				expect(faInvalidUtf8(bytes)).toBe(prefix.length);
+				expect(() => faFromUtf8(bytes)).toThrow(Utf8Error);
+				try {
+					faFromUtf8(bytes);
+				} catch (error) {
+					expect(error.position).toBe(prefix.length);
+				}
+			}
+	});
+	test("lossy decoding replaces invalid bytes and preserves a BOM", () => {
+		expect(faUtf8LossyDecoder.decode(new Uint8Array([239, 187, 191, 104, 255]))).toBe("\ufeffh�");
+		expect(faUtf8LossyDecoder.decode(new Uint8Array([237, 160, 128]))).toBe("���");
 	});
 });

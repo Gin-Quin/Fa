@@ -1,4 +1,4 @@
--- Strings and characters (values brief §7): literals, characters, templates, members.
+-- Strings (values brief §7): literals, code units, templates, members.
 let greeting = "Hello" -- type greeting: String
 let snow: String = "☃" -- type snow: String
 let family: String = "👨‍👩‍👧" -- type family: String

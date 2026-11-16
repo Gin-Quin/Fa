@@ -1,0 +1,24 @@
+-- A static and the same run-time expression preserve exactly the same units.
+static high = "😀"[0]
+static low = "😀"[1..]
+static joined = high + low
+static nested = { items = [high, low], bytes = high.toUtf8() }
+static encoded = "é".toUtf8()
+static lookup: Map<String, String> = [("half", high)]
+static keyed: Map<String, String> = [(high, low)]
+static distinct: Set<String> = [high, low]
+type Piece = Union { Cut = { text: String } }
+static piece = Piece.Cut { text = high }
+function run = (text: String): Void throws IndexError => {
+	let first = try text[0]
+	let last = try text[1..]
+	console.log(high, low, high.length, low.length, high.isWellFormed()) -- prints: � � 1 1 false
+	console.log(high == first, low == last, joined == text) -- prints: true true true
+	console.log((try nested.items[0]) == first, (try nested.items[1]) == last, nested.bytes == first.toUtf8()) -- prints: true true true
+	console.log(encoded, encoded is Bytes, lookup.get("half") == high, distinct.size, keyed.get(high) == low) -- prints: [195, 169] true true 2 true
+	-- ^ warning: W-CMP-1
+	when piece is {
+		Piece.Cut as cut => console.log(cut.text == first) -- prints: true
+	}
+}
+try run("😀")

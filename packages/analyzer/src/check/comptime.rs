@@ -381,6 +381,9 @@ impl Walker<'_> {
 				w.report(diagnostic);
 			}
 			let computed = value.and_then(|value| w.evaluate_at(value, value));
+			if let (Some(at), Some(computed)) = (value, &computed) {
+				w.check_literal_schema_value(at, computed);
+			}
 			let computed = match computed {
 				Some(computed) if computed.has_function() => {
 					let diagnostic = w.diagnostic(
@@ -453,6 +456,9 @@ impl Walker<'_> {
 	/// arithmetic, comparisons and logic of constants, lists, tuples and
 	/// objects of constants, and the names of statics and module constants.
 	pub(super) fn is_constant_expression(&self, n: NodeId, depth: u32) -> bool {
+		if self.a.constants.contains_key(&n) {
+			return true;
+		}
 		if depth > 64 {
 			return false;
 		}
@@ -846,6 +852,7 @@ impl Walker<'_> {
 		let value = self.evaluate_at(n, n);
 		self.comptime_evaluated.insert(n);
 		if let Some(value) = value {
+			self.check_literal_schema_value(n, &value);
 			self.a.constants.insert(n, value);
 		}
 	}

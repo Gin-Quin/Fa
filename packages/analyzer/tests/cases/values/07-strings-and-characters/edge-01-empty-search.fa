@@ -1,0 +1,9 @@
+function rule = (text: String): String => {
+	let once = text.replace("", "|")
+	let all = text.replaceAll("", "|")
+	"{text.includes("")} {text.startsWith("")} {text.endsWith("")} {text.indexOf("")} {text.lastIndexOf("")} {once.length} {all.length} {all.isWellFormed()}"
+}
+static face = @rule("😀")
+static empty = @rule("")
+console.log(face, rule("😀") == face) -- prints: true true true 0 2 3 5 false true
+console.log(empty, rule("") == empty) -- prints: true true true 0 0 1 1 true true

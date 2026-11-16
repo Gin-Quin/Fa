@@ -430,6 +430,7 @@ impl Generator<'_> {
 
 	/// A call.
 	pub(crate) fn call(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
+		let callee = self.strip_groups(callee);
 		// `pick(value, { foo })`: the value copied to the node's type
 		if let Some(&value) = self.analysis.forwards.get(&n) {
 			let ty = self.type_of(n);
@@ -827,6 +828,7 @@ impl Generator<'_> {
 			by_slot[index] = Some(value);
 		}
 		if reordered {
+			first = self.keep(first);
 			// keep the written order of the values with effects: temporaries
 			for &(_, index) in &order {
 				let value = by_slot[index].take().expect("a value");
@@ -1011,6 +1013,32 @@ impl Generator<'_> {
 				let helper = self.helper("faParseInteger");
 				js::call(helper, &values)
 			}
+			"Bytes.from" => {
+				let values = self.builtin_arguments(n, arguments);
+				js::call("Uint8Array.from", &values)
+			}
+			"Bytes.filled" => {
+				let values = self.builtin_arguments(n, arguments);
+				let array = format!("new Uint8Array({})", values[0]);
+				Expr::primary(match values.get(1).filter(|value| value.as_str() != "0") {
+					Some(value) => format!("{array}.fill({value})"),
+					None => array,
+				})
+			}
+			"String.fromUtf8" | "String.fromUtf8Lossy" => {
+				let values = self.simple_arguments(arguments);
+				let helper = self.helper(if path == "String.fromUtf8" {
+					"faFromUtf8"
+				} else {
+					"faUtf8LossyDecoder"
+				});
+				let function = if path == "String.fromUtf8" {
+					helper.to_string()
+				} else {
+					format!("{helper}.decode")
+				};
+				js::call(&function, &values)
+			}
 			"String.compareLocale" => {
 				let values = self.simple_arguments(arguments);
 				let helper = self.helper("faStringCompareLocale");
@@ -1110,36 +1138,52 @@ impl Generator<'_> {
 				let receiver = self.receiver(callee);
 				Expr::primary(format!("{}.toString()", receiver.primary_text()))
 			}
-			_ if path.starts_with("String#") => {
+			_ if path.starts_with("String#") || path.starts_with("Bytes#") => {
 				let View::Access { .. } = self.view(callee) else {
 					return self.unsupported(n, &format!("`{path}`"));
 				};
 				let receiver = self.receiver(callee);
-				let nodes: Vec<Option<NodeId>> = arguments
-					.iter()
-					.map(|argument| match argument {
-						Argument::Given(value) => Some(*value),
-						_ => None,
+				let View::Call {
+					arguments: written, ..
+				} = self.view(n)
+				else {
+					unreachable!("a builtin call")
+				};
+				let (receiver, values) = self.arguments(n, receiver, arguments, written, &[]);
+				let values = values
+					.into_iter()
+					.enumerate()
+					.map(|(index, text)| {
+						let pure = match arguments.get(index) {
+							Some(Argument::Given(node)) => {
+								matches!(self.view(self.strip_groups(*node)), View::String(_))
+							}
+							_ => false,
+						};
+						Some(Expr::primary(text).with_purity(pure, pure))
 					})
 					.collect();
-				let given: Vec<NodeId> = nodes.iter().flatten().copied().collect();
-				let (lines, values) = self.capture(|g| g.in_order(&given, |g, node| g.expr(node)));
-				let mut receiver = receiver;
-				if !lines.is_empty() && !receiver.stable {
-					let temp = self.temp();
-					self.out.line(format!("const {temp} = {};", receiver.text));
-					receiver = Expr::name(temp, true);
-				}
-				self.out.append(lines);
-				let mut values = values.into_iter();
-				let arguments = nodes
-					.iter()
-					.map(|node| node.map(|_| values.next().expect("a value")))
-					.collect();
-				self.string_method(n, path, receiver, arguments)
+				self.string_method(n, path, receiver, values)
 			}
 			_ => self.unsupported(n, &format!("`{path}`")),
 		}
+	}
+
+	fn builtin_arguments(&mut self, n: NodeId, arguments: &[Argument]) -> Vec<String> {
+		let View::Call {
+			arguments: written, ..
+		} = self.view(n)
+		else {
+			unreachable!("a builtin call")
+		};
+		self.arguments(
+			n,
+			Expr::constant("undefined", Prec::Primary),
+			arguments,
+			written,
+			&[],
+		)
+		.1
 	}
 
 	/// The arguments of a built-in function: given ones, in order; omitted
@@ -1168,6 +1212,7 @@ impl Generator<'_> {
 	/// The receiver of a method call whose callee is `receiver.method` (or
 	/// `receiver?.method`: the receiver before `?.`).
 	pub(crate) fn receiver(&mut self, callee: NodeId) -> Expr {
+		let callee = self.strip_groups(callee);
 		match self.view(callee) {
 			View::Access { target, members } => self.access_prefix(callee, target, members),
 			View::OptionalAccess { target, members } if members.len() == 1 => self.expr(target),
@@ -1177,7 +1222,7 @@ impl Generator<'_> {
 
 	/// The type of the receiver of a method call.
 	pub(crate) fn receiver_type(&self, callee: NodeId) -> TypeId {
-		match self.view(callee) {
+		match self.view(self.strip_groups(callee)) {
 			View::Access { target, members } | View::OptionalAccess { target, members } => {
 				match members.len() {
 					0 | 1 => self.type_of(target),

@@ -1,0 +1,5 @@
+static half = "😀"[0]
+let concatenated = Schema.StringLiteral { value = half + "x" } -- error: TF042
+let interpolated = Schema.StringLiteral { value = "{half}" } -- error: TF042
+function cut = (): String => "😀"[0]
+let called = Schema.StringLiteral { value = @cut() + "x" } -- error: TF042

@@ -15,3 +15,6 @@ console.log(@square(5))
 @if target is "native" {
 	for parallel item in [1, 2] { }
 }
+
+static encoded: Bytes = "é".toUtf8()
+console.log(encoded, encoded.toArray())

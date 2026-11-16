@@ -368,6 +368,10 @@ pub struct Walker<'s> {
 	/// Inside such an application at its declaration: the `@` calls are
 	/// evaluated per application, not there.
 	pub(crate) deferred_comptime: u32,
+	/// Schema arguments are validated at the type application, once the value
+	/// is known (including per-application generic evaluation).
+	pub(crate) schema_input_depth: u32,
+	pub(crate) rejected_literal_schemas: rustc_hash::FxHashSet<NodeId>,
 	/// The declaration applying `TypeFromSchema` and the hash of its schema:
 	/// the identity of the named unions, enumerations and recursive types it
 	/// builds (`schemas.rs`).
@@ -609,6 +613,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		parameter_type: false,
 		schema_logic: rustc_hash::FxHashSet::default(),
 		deferred_comptime: 0,
+		schema_input_depth: 0,
+		rejected_literal_schemas: rustc_hash::FxHashSet::default(),
 		schema_identity: None,
 		in_type_function_code: false,
 		constraint_depth: 0,
@@ -1154,9 +1160,10 @@ impl Walker<'_> {
 			Err(_) if self.number_literal_sink(n, actual, target) => {}
 			Err(_) => {
 				let message = format!(
-					"a `{}` is not accepted where a `{}` is expected",
+					"a `{}` is not accepted where a `{}` is expected{}",
 					self.display(actual),
-					self.display(target)
+					self.display(target),
+					self.text_bytes_hint(n, actual, target)
 				);
 				let diagnostic = self.diagnostic(&codes::values::E_TYPE_1, n, message);
 				self.report_flow(diagnostic);

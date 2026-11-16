@@ -1,0 +1,5 @@
+-- Specification example: operations 4
+-- warning: W-NUM-2
+-- warning: W-NUM-2
+assert "héllo".length == 5
+assert "😀".length == 2

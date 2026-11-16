@@ -3,5 +3,5 @@
 -- digraphs, fullwidth letters, Deseret (backends review 2026-11-05, finding 18)
 console.log("łódź čeština".toUpperCase(), "ΣΑΣ".toLowerCase(), "ǅ".toUpperCase(), "ＡＢ".toLowerCase()) -- prints: ŁÓDŹ ČEŠTINA σας Ǆ ａｂ
 console.log("straße ﬁx ŉ".toUpperCase()) -- prints: STRASSE FIX ʼN
-console.log("İstanbul".toLowerCase().length, "ΟΔΥΣΣΕΥΣ, Σ.".toLowerCase()) -- prints: 8 οδυσσευς, σ.
+console.log("İstanbul".toLowerCase().length, "ΟΔΥΣΣΕΥΣ, Σ.".toLowerCase()) -- prints: 9 οδυσσευς, σ.
 console.log("𐐀𐐁".toLowerCase(), "ꞵ ǉ ա".toUpperCase(), "Hello, World".toUpperCase()) -- prints: 𐐨𐐩 Ꞵ Ǉ Ա HELLO, WORLD

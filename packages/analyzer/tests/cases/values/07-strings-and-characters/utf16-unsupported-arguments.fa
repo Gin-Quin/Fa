@@ -1,0 +1,16 @@
+-- The documented signatures do not import JS's optional arguments or coercions.
+let text = "a😀b"
+let startPosition = text.indexOf("a", 0) -- error: FN025
+let lastPosition = text.lastIndexOf("a", 0) -- error: FN025
+let includesPosition = text.includes("a", 0) -- error: FN025
+let startsPosition = text.startsWith("a", 0) -- error: FN025
+let endsPosition = text.endsWith("a", 0) -- error: FN025
+let splitLimit = text.split("a", 1) -- error: FN025
+let missingSeparator = text.split() -- error: FN024
+let replacementCallback = text.replace("a", (match: String) => match) -- error: E-TYPE-1
+let implicitSearch = text.includes(1) -- error: E-TYPE-1
+let fractionalIndex = text[0.5] -- error: E-TYPE-1
+let fractionalGet = text.get(0.5) -- error: E-TYPE-1
+let fractionalUnit = text.codeUnitAt(0.5) -- error: E-TYPE-1
+let fractionalRepeat = text.repeat(0.5) -- error: E-TYPE-1
+let fractionalPadding = text.padStart(0.5) -- error: E-TYPE-1

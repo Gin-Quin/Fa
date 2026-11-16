@@ -1366,6 +1366,9 @@ impl Walker<'_> {
 		if !self.body.flow.reachable {
 			return;
 		}
+		if self.reject_slice_structural_method(callee) {
+			return;
+		}
 		let Some(info) = self.a.calls.get(&n).cloned() else {
 			return;
 		};

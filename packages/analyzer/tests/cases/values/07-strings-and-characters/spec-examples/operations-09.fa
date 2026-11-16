@@ -1,0 +1,9 @@
+-- Specification example: operations 9
+let text = "a😀b"
+for character in text {
+	console.log(character)
+}
+
+for character, index in text {
+	console.log("{index}: {character}")
+}

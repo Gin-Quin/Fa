@@ -42,7 +42,8 @@ owned += " three"
 console.log(first, try owned[4..], owned.length) -- prints: one two three 13
 
 -- out of bounds
-let missing = ascii[20..] catch error => "caught"
+function sliceFrom = (text: String, start: Integer): String => text[start..] catch _error => "caught"
+let missing = sliceFrom(ascii, 20)
 console.log(missing) -- prints: caught
 let beyond = ascii.get(-20) ?? "?"
 console.log(beyond, ascii.get(-11) ?? "?") -- prints: ? h

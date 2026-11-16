@@ -238,7 +238,7 @@ pub struct Fact {                       // hash-consed in FactStore → FactId; 
 	pub narrowed: TypeId,               // UNSET = no narrowing; else the member set (a TypeId union/mask)
 	pub int: IntervalSetId,             // interval + ≤ 8 excluded intervals (values brief D-95); NONE = type range
 	pub literal: ConstId,               // exact literal (strings, booleans, enum members, numbers)
-	pub length: IntervalId,             // collection length / string grapheme count
+	pub length: IntervalId,             // collection length / string UTF-16 code unit count
 	pub key_present: ConstListId,       // map key proofs (types brief D32)
 }
 

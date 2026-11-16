@@ -1,0 +1,13 @@
+use { File } = std.fs
+function send = (data: Bytes) => console.log(data)
+function print = (text: String) => console.log(text)
+send("hello") -- error: E-TYPE-1
+print(Bytes.from([104])) -- error: E-TYPE-1
+let text: String = try File.read("file") -- error: E-TYPE-1
+File.write("file", "hello") catch _error => console.log("failed") -- error: E-TYPE-1
+File.writeText("file", Bytes.from([104])) catch _error => console.log("failed") -- error: E-TYPE-1
+File.readBytes("file") -- error: AN001
+let bytes: Bytes = "hello" -- error: E-TYPE-1
+let decoded = String.fromUtf8(Bytes.from([255])) -- error: E-ERR-3
+let obsoleteSchema = Schema.Character -- error: E-OBJ-5
+type ObsoleteType = Schema.Character -- error: TY007

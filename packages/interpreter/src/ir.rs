@@ -107,7 +107,8 @@ pub enum TypeTest {
 	Float,
 	/// A string.
 	String,
-	/// A character.
+	/// Binary data, distinct from an array.
+	Bytes,
 	/// An array.
 	Array,
 	/// A map.
@@ -214,6 +215,13 @@ pub enum Expr {
 	/// `for item, index in iterable { … }`: arrays, sets, maps (tuples of
 	/// key and value), ranges, strings (characters).
 	For {
+		item: Option<Slot>,
+		index: Option<Slot>,
+		iterable: Box<Expr>,
+		body: Box<Expr>,
+	},
+	/// A direct loop over `text.toUtf8()`, encoding one scalar at a time.
+	ForUtf8 {
 		item: Option<Slot>,
 		index: Option<Slot>,
 		iterable: Box<Expr>,

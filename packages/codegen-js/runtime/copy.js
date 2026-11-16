@@ -11,7 +11,7 @@
 // shared; functions are shared; set elements and map keys are read-only in Fa
 // and shared.
 
-import { FaHashMap, FaSet } from "./collections.js";
+import { FaHashMap, faIsBytes, FaSet } from "./collections.js";
 import { faSharedHandle } from "./concurrency.js";
 import { faSides } from "./relations.js";
 
@@ -45,7 +45,7 @@ export function faCopyShell(source) {
 	return Object.create(Object.getPrototypeOf(source));
 }
 
-// @fa-helper faCopy deps: faCopyShell FaHashMap FaSet faSides faSharedHandle
+// @fa-helper faCopy deps: faCopyShell FaHashMap FaSet faSides faSharedHandle faIsBytes
 /**
  * A deep structural copy of a Fa value. Iterative: long recursive chains
  * (linked lists) don't overflow the stack.
@@ -67,6 +67,7 @@ export function faCopy(value) {
 		if (typeof item !== "object" || item === null || item[faSharedHandle] === true) {
 			return item;
 		}
+		if (faIsBytes(item)) return item.slice();
 		const shell = faCopyShell(item);
 		pending.push(item, shell);
 		return shell;
@@ -126,7 +127,7 @@ export function faUnlinked(value) {
 	return value;
 }
 
-// @fa-helper faCopyGraph deps: faCopyShell FaHashMap FaSet faSides faSharedHandle
+// @fa-helper faCopyGraph deps: faCopyShell FaHashMap FaSet faSides faSharedHandle faIsBytes
 /**
  * A copy of an owner of related collections (advanced brief 8.5, copies):
  * every object is copied once, and every reference to an object of the
@@ -149,6 +150,7 @@ export function faCopyGraph(value) {
 		if (typeof item !== "object" || item === null || item[faSharedHandle] === true) {
 			return item;
 		}
+		if (faIsBytes(item)) return item.slice();
 		let copy = copies.get(item);
 		if (copy === undefined) {
 			copy = faCopyShell(item);
@@ -211,7 +213,7 @@ export function faCopyInto(target, source) {
 	return target;
 }
 
-// @fa-helper faAssign deps: faCopy FaHashMap FaSet
+// @fa-helper faAssign deps: faCopy FaHashMap FaSet faIsBytes
 /**
  * Writes a whole value into an existing object or collection, in place, so
  * that the live references to it (and to its nested objects of the same
@@ -231,7 +233,9 @@ export function faAssign(target, source) {
 		const from = pending.pop();
 		const into = pending.pop();
 		if (into === from) continue;
-		if (Array.isArray(into)) {
+		if (faIsBytes(into)) {
+			into.set(from);
+		} else if (Array.isArray(into)) {
 			into.length = 0;
 			for (const item of from) {
 				into.push(faCopy(item));
@@ -260,6 +264,7 @@ export function faAssign(target, source) {
 					typeof next === "object" &&
 					next !== null &&
 					Object.getPrototypeOf(old) === Object.getPrototypeOf(next) &&
+					(!faIsBytes(old) || old.length === next.length) &&
 					old.$t === next.$t;
 				if (sameKind) {
 					pending.push(old, next);

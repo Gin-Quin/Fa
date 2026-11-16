@@ -17,6 +17,38 @@ use crate::syntax::{TemplatePart, TemplateParts};
 use crate::types::TypeKind;
 
 impl Walker<'_> {
+	pub(super) fn removed_type_member_hint(&mut self, ty: TypeId, name: &str) -> &'static str {
+		if name == "Character" && ty == builtins::schema::schema(&mut self.s.types) {
+			": `Schema.Character` was removed; use `Schema.String` for text or `Schema.Bytes` for binary data"
+		} else {
+			""
+		}
+	}
+
+	/// Encoding and decoding are explicit, including at file boundaries.
+	pub(super) fn text_bytes_hint(
+		&mut self,
+		n: NodeId,
+		actual: TypeId,
+		target: TypeId,
+	) -> &'static str {
+		if is_string_like(&self.s.types, actual) && self.s.types.satisfies(TypeId::BYTES, target) {
+			": encode the text with `text.toUtf8()`, or use `File.writeText` to write text"
+		} else if actual == TypeId::BYTES && self.s.types.satisfies(TypeId::STRING, target) {
+			let value = match self.view(self.strip_groups(n)) {
+				crate::syntax::View::Try(value) => value,
+				_ => n,
+			};
+			if self.direct_string_call(value, "File.read") {
+				": use `File.readText(path)` to read UTF-8 text, or decode bytes with `String.fromUtf8(bytes)` and handle `Utf8Error` with `try` or `catch`"
+			} else {
+				": decode the bytes with `String.fromUtf8(bytes)` and handle `Utf8Error` with `try` or `catch`; use `String.fromUtf8Lossy(bytes)` to replace invalid sequences"
+			}
+		} else {
+			""
+		}
+	}
+
 	/// A template `"Hello {name}"`: every interpolated value must have a
 	/// `toString`. Always a `String`.
 	pub(super) fn template_type(&mut self, n: NodeId, parts: TemplateParts<'_>) -> TypeId {

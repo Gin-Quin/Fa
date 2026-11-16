@@ -1,0 +1,11 @@
+-- file: main.test.fa
+-- kind: test
+static input = @readFile("text.txt")
+static parsed = @parseJson("[\"é\",\"日\",\"😀\",\"\\ud800\"]")
+@test "compile-time text inputs remain UTF-8 and JSON escapes keep surrogates" {
+	assert input.trim() == "é日😀" and input.trim().length == 4
+	assert parsed.get(0) == "é" and parsed.get(1) == "日" and parsed.get(2) == "😀"
+	assert parsed.get(3) == "\u{10000}"[0]
+}
+-- file: text.txt
+é日😀

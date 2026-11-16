@@ -816,6 +816,10 @@ Supersedes the grapheme rules of strings ("Strings decision" of the spec review,
 - **`String.fromUtf8` keeps a byte order mark** (as `U+FEFF`), so that decoding then encoding gives the same bytes on every target (`TextDecoder` needs `ignoreBOM: true`).
 - **The lossy decoding is a second function**, `String.fromUtf8Lossy`, not an option of `fromUtf8`: whether a function throws can't depend on an argument. `File.readText` is strict (a `FileError`); `request.text()` and `response.text()` are lossy, as `fetch` is.
 - **`split("")` splits into code units**, and searches match code units (a search can match half of a surrogate pair or a part of a grapheme cluster), as in JavaScript.
+- **Literal replacements (decided by the lead, 2026-11-16).** `String#replace` and `String#replaceAll` insert the replacement as is: `$` has no special meaning (`$$`, `$&`, `` $` `` and `$'` are ordinary text), on every target and at compile time. The search is a string, so there are no captures; interpreting replacement data as a mini-language would silently change its meaning. JavaScript emits a literal without `$` unchanged, doubles `$` in a replacement literal, and uses a function returning a once-evaluated dynamic replacement. "JavaScript semantics" for strings means the UTF-16 model (lengths, positions, order, what a search matches), not every quirk of a JavaScript method; a quirk applies only when a page states it.
+- **Well-formed literal types (decided by the lead, 2026-11-16).** A string literal type always holds well-formed text, stored as UTF-8. A compile-time string value with a lone surrogate has type `String`, without an exact literal type. Turning it into a literal type, including `Schema.StringLiteral`, `TypeFromSchema` or a `static` used as a type, is an error: "a literal type cannot hold a lone surrogate"; use `String`, or make the value well-formed. Source escapes already require Unicode scalar values and cannot introduce lone surrogates. The runtime string value itself remains valid Fa data.
+- **Locale comparison is runtime only (decided by the lead, 2026-11-16).** `String.compareLocale` depends on the locale data of the machine running the program and is refused during compile-time evaluation with the usual `META002` diagnostic. This supersedes step 1's blanket CT eligibility for pure string methods. The native implementation currently ignores locale and compares code units; proper collation is a standard library follow-up, not part of this analyzer correction.
+- **Slice views cannot be replaced (decided by the lead, 2026-11-16).** A reference to a slice is a view of a range of items; assignment of the whole view is an error, even when the lengths match. Assign its items through a mutable view (a range-copy loop can become one block copy), or reseat a `mutable use` with `reuse`. This applies to Bytes, arrays (whose page previously specified only copied slices and was silent on whole assignment through a reference), and string slices. Ordinary mutable slice copies and whole-owner aliases remain assignable. The analyzer reports `REF016` at the assignment target and does not record a write effect for the rejected replacement.
 - **`Schema.Character` becomes `Schema.Bytes`.**
 - **The place step `Characters(range)`** of the analyzer (string slices) keeps its name; its bounds are code unit positions.
 
@@ -1243,6 +1247,23 @@ The regression fixture deliberately overlaps these numbers across two modules.
 - **Programs**: B's `capacity.fa` is `capacity-reservations.fa` beside A's; `growing-indexing.fa` indexes with a parameter, since A's analyzer proves a constant index of a literal (`E-ERR-10`); two of B's programs print floats and are listed as skipped on the freestanding target. `table-storage.fa` covers the ported tables.
 - **Benchmarks**: A's programs; `benchmarks/audit/compare.py` is A's planner with B's variants and sizes.
 - **`design/native-goose-performance.md`** is B's record, with the four JSON files of its first rounds: A had condensed the older record into these pages and deleted it, and B wrote its later measurements in it (`design/todo.md` asks to condense them too). The JSON records of the measurements in `design/` are left as their scripts wrote them (`bunfig.toml` keeps them out of `bun fmt`).
+
+
+## String redesign: analyzer contract (2026-11-15)
+
+- `Bytes` is `TypeKind::Bytes` / `TypeId::BYTES`, distinct from `Array<Byte>` and `String`. Its runtime kind is `RuntimeKind::Bytes` (a `Uint8Array` on JavaScript), so unions can distinguish bytes from arrays. It is comparable, owns memory and is not flat; item writes and references follow the array rules. The predefined id reuses the removed scalar's slot; its stable type hash uses a new tag, 39.
+- String literal lengths and their bound facts count UTF-16 units with `encode_utf16().count()`. A string index has type `String`; a direct `codeUnitAt` call uses the same proof and `INDEX_CHECK` / `CAN_FAIL` flags as indexing. Reading a bound method through a function value retains `throws IndexError` without a receiver-specific proof.
+- `NodeFlags::STRING_CODE_UNIT` marks a string index (not an `Array<String>` index). Backends can compare it with a literal, including a `when` pattern, without constructing a string. `CODE_POINT_COUNT` marks the access in a direct `text.codePoints().length`; `UTF8_ITERATION` marks the direct `text.toUtf8()` call used as a `for` iterable. These facts never change the expression's public type or evaluation order; a saved array or `Bytes` must still be built.
+- `Bytes.from` inherits the source array's known length, `Bytes.filled` its length argument's interval, and encoding a string literal its UTF-8 byte length. These constructor facts use the existing index proof engine. `Utf8Error` is appended to the built-in error table (id 12), preserving all existing runtime error ids. Built-in error payloads are installed in the type store; a catch with a single-variant `Errors` type knows that variant, so `error.position` is directly accessible.
+- The file API has four paths: `File.read` / `File.write` for bytes and `File.readText` / `File.writeText` for text; the old `File.readBytes` is replaced by `File.read`. All remain impure, throwing `FileError`, and may be awaited. `Json.parse` takes `String | Bytes`. There are no HTTP declarations in this prelude to migrate.
+
+## String analyzer review (2026-11-16)
+
+- Parentheses around a direct method preserve its builtin identity, just as parentheses around its receiver do. `(text.codeUnitAt)(i)` uses the same receiver-specific proof as `text.codeUnitAt(i)`; `(text.codePoints)().length` and `for byte in (text.toUtf8)()` retain the allocation facts. A method saved in a binding remains a function value. No builtin ids, signatures, types or flag bits change.
+- Literal UTF-8 byte-length proofs use the resolved receiver, including grouped callees and receivers, rather than assuming the root of an access is the string. Copies of a one-unit index and `Bytes` keep length facts independently of later writes to their source.
+- Exact-expression tests complement the line-based case annotations: they verify the node carrying each public flag, not a neighbouring node on the same line. Every fenced example of the three string/bytes pages has a standalone case, checked against the source page so examples cannot silently drift.
+
+
 ## JavaScript backend gaps (2026-11-15)
 
 - **Recursive values** retain the specialized copy path for finite types and use the existing iterative structural copier for recursive edges. Recursive references themselves are composite, so their children cannot accidentally be shared by a typed copy. Generic formatting, JSON writing and in-place assignment use explicit work stacks too; JSON parsing's schema support and resource destruction are separate work.
@@ -1372,3 +1393,86 @@ Every String view has O(1) UTF-16 length. Store its fixed count at creation in t
 Current compact storage is explicit: optimized split parts use two words (16native/8wasm) even on the non-ASCII path; packed/tree headers store byte length without a count. A non-ASCII split whose parts need counts must select the existing general String layout (24/12), while ASCII retains16/8. The earlier unit-count-only proposal is superseded: recovering byte extents by scanning would hide linear work in a length query.
 
 The lead explicitly permits compact additional counts on Unicode paths (2026-11-16), rather than an external metadata map. Packed ASCII headers remain1byte or1+usize (9native/5wasm). Non-ASCII adds an unsigned LEB128 UTF-16 count (1–9native/1–4wasm) while retaining byte length; no reader scans text to obtain either length. Inline arena strings retain the4-byte compact or16-byte ordinary prefix on ASCII; Unicode adds a2-byte unit count before its bytes. External arena strings retain their existing owning3-word descriptor and eagerly initialize the owner's Unicode count before storage. Readers select formats with the existing ASCII flag. Add IR/size assertions pinning the ASCII forms.
+## String redesign: JavaScript backend (2026-11-16)
+
+- UTF-16 strings use native JavaScript operations, with only the analyzer's index/range checks and optional search-result conversion. An indexed single-unit literal comparison uses `charCodeAt`, including `when` patterns without bindings. Code-point counting and UTF-8 iteration consume their analyzer facts without allocating arrays or byte buffers.
+- Bun and Node emit native `isWellFormed()` and `Buffer.byteLength`. The ES2022 browser target uses code-unit loops for both operations. Grapheme segmentation alone links one shared `Intl.Segmenter`. Encoding and strict/lossy decoding link their own shared encoder/decoder only when used; both decoders keep BOMs. Strict decoding scans for the malformed sequence's starting byte only on failure.
+- `Bytes` is a `Uint8Array` throughout copying, equality, formatting, type tests and file I/O. Whole-value byte references follow their owner when a replacement changes its length; slice references designate a subarray. Dynamic byte recognition uses an internal view check and the Uint8Array tag, so values from other JavaScript realms remain bytes. Owning slices use `slice`; `use` and `reuse` slices use `subarray`. JSON bytes are scanned directly with an explicit container stack: only string tokens are decoded, and native `JSON.parse` validates string escapes and scalar spelling. String-only JSON programs do not link the byte scanner or decoder.
+- Per the lead's 2026-11-16 replacement decision, replacement text is literal. A known replacement without `$` keeps the ordinary call; dollar signs in known text are doubled for JavaScript's replacement syntax; dynamic text is evaluated once before the call and returned by a replacement callback. Named arguments retain source evaluation order.
+
+- Mutexes and channels preserve Bytes with a tagged internal representation and share the UTF-8 encoder/decoder, including when their state crosses workers.
+- **Lead decision, 2026-11-16: whole-slice assignment.** A reference to a `Bytes` slice is a view of a range of items: its items can be assigned through a `mutable use`, and `reuse` can reseat it. Assigning the slice as a whole is forbidden. The analyzer will diagnose it and suggest assigning the items in a loop or using `reuse`; the JavaScript backend adds no whole-slice assignment operation. Bulk lowering of proven copy/fill loops is a follow-up.
+
+## String redesign: compile-time interpreter (2026-11-16)
+
+The interpreter's `Text` (also the string constant stored in `Analysis`) has two
+canonical representations: well-formed UTF-8 in `Arc<str>` with a cached UTF-16
+length, and `Arc<[u16]>` only for strings holding lone surrogates. Correctness
+comes first: indexing/slicing can preserve either half of a pair, and joining
+halves canonicalizes to well-formed UTF-8 again. `as_str()` returns `Option<&str>`;
+it never silently substitutes U+FFFD. Emitters must consume `units()` when it is
+`None`. Until the backend branches are integrated, such constants are explicitly
+refused at emission rather than changed.
+
+ASCII keeps one byte per unit, the existing shared text allocation, byte-based
+search/split/replace and concatenation, constant-time length, and direct indexing.
+Non-ASCII operations may walk code units or build bounded temporary unit buffers;
+the interpreter need not reproduce the native WTF-8 layout or breadcrumbs. Storing
+a UTF-16 copy of every ordinary string was rejected: it doubles the common ASCII
+payload and would duplicate ordinary text for the checker and emitters. Only a
+malformed value needs the raw-unit allocation. Strings remain copied on write by
+sharing immutable buffers. `Bytes` has its own value and runtime type test and
+stores `u8`, rather than the much larger per-item `Value` used by arrays. Preflight
+allocation checks include temporary conversions and collection outputs; the
+existing per-evaluation heap, step and depth budgets still apply.
+
+The lead confirmed that replacements are literal strings: `$` patterns have no
+special meaning. This applies to compile-time evaluation as on every target.
+
+Locale comparison is evaluated only at runtime: it depends on the locale data
+of the machine running the program. The interpreter refuses `String.compareLocale`
+with that explanation and adds no ICU dependency (lead decision, 2026-11-16).
+A malformed compile-time string infers `String`; a literal type always holds
+well-formed text, so literal-type symbols remain UTF-8 (same lead decision).
+
+## String integration: grouped calls and bounded text (2026-11-16)
+
+Both lowerers unwrap a direct callee's groups before reading its receiver, preserving the reviewed builtin identity and allocation facts. Saved bound methods retain function-value semantics. Compile-time well-formed concatenation writes once into its final shared UTF-8 allocation, with the cached unit length known from its inputs. The buffer is initialized from complete UTF-8 strings before being exposed as `Arc<str>`. This removes the intermediate full-size buffer that exhausted allocator address-space reservations under the existing 512 MB check limit; evaluation still preflights its existing memory budget. Neither the limit nor the memory regression was changed.
+
+## String integration: compile-time constants (2026-11-16)
+
+JavaScript preserves the interpreter's UTF-8 literal fast path. A malformed `Text` instead emits every UTF-16 unit as a four-digit JavaScript escape, including punctuation and line breaks; recursively stored values use the same emitter. Compact `Value::Bytes` emits a `Uint8Array`, retaining inferred Bytes types. Output encoding alone replaces lone surrogates. Native emission retains its explicit lone-surrogate refusal until it can write canonical WTF-8, UTF-16 lengths and ASCII/surrogate metadata; it must never use lossy output conversion for constants.
+
+## String integration: well-formed literal types (2026-11-16)
+
+The interpreter's lossless `Text` now makes the lead's literal-type rule enforceable: malformed values infer `String`; TY008 rejects a malformed static used as a type, and TF042 rejects known malformed schema construction and reconstruction. All paths share “a literal type cannot hold a lone surrogate: use `String`, or make the value well-formed”. Known constructors point at their field value, evaluated schemas at their initializer, and reconstruction at the direct or generic application. Schema inputs are validated after evaluation at the application, avoiding premature errors in deferred generic declarations. Recovery remembers rejected construction nodes and follows constant names, so reconstructing an already-rejected schema adds no duplicate. Unknown runtime Schema.StringLiteral payloads remain data. Joining a high and low half restores the exact well-formed literal type, including through schema reconstruction.
+
+## String edge cases (decided by the lead, 2026-11-16)
+
+These decisions apply on every target and at compile time; the matching shared fixtures are `values/07-strings-and-characters/edge-01` through `edge-13` (negative analyzer cases accompany 07/08). They make the analyzer review's recommendations normative, with the standard library deferrals in point 13.
+
+1. Empty search: includes/startsWith/endsWith are true, including on empty text; indexOf is 0 and lastIndexOf is length. Replace inserts once at the start. ReplaceAll inserts at every UTF-16 boundary including both ends (once on empty input), possibly splitting a pair.
+2. Split retains every empty field, including leading, trailing and repeated separators. Empty text with an empty separator gives []; with a nonempty separator it gives [""]. No match gives [text].
+3. Matches are consumed left to right without overlap in replaceAll and split. Searches longer than the source give false/none; unsuccessful replacements preserve the source.
+4. Padding targets no larger than length (including negative and zero), and empty fillers, preserve the source. Otherwise filler repetition is cut to the exact unit width, including inside a pair.
+5. Repeating zero times or repeating empty text gives "". Impossible sizes use the existing allocation/overflow stops, never wrapping or adding a declared error.
+6. Get and codeUnitAt normalize negative indices from the end. Outside the bounds get gives none; codeUnitAt throws IndexError.
+7. Strings, arrays and Bytes normalize negative slice endpoints. Start == length is valid and empty, reversed normalized bounds are empty, and empty [..] succeeds. An inclusive end must name an existing item; length is a valid end only for an exclusive range. Certain invalid bounds are compile errors; unproven bounds are checked, never clamped. The shared analyzer proof uses the effective exclusive end, including compile-time Range values.
+8. Strings have no item assignment, including through aliases: build a new string and assign its owner. Views have no structural operation (push/insert/delete/take/pop/clear/deleteWhere/reserve): change the owner, then reuse the view. Item writes through array/Bytes views remain legal. The analyzer rejects bound structural method selection as well as calls, checks every flow visit after reseating, and records no effect for rejected writes/calls.
+9. Case conversion preserves lone surrogates and uses Unicode's default full, context-sensitive mapping (final sigma), with no locale. Casing and characters() depend on the engine's Unicode tables on JavaScript and the compiler's tables natively/at compile time.
+10. Trim variants remove exactly ECMAScript white space and line terminators, without normalization: FEFF is removed; 0085 and 200B are retained. The full set is enumerated on the operations page.
+11. UTF-8 decoding follows WHATWG on every target and at compile time: lossy replacement is one U+FFFD per maximal invalid subpart; Utf8Error.position is the first byte of the first such subpart. BOMs remain text.
+12. A runtime Schema.StringLiteral value is data. Known compile-time construction and any reconstruction as a type enforce well-formed literal payloads; unknown runtime payloads need no new declared error.
+13. Defer compareLocale's default/invalid-locale/normalization policy and TcpStream's Array<Byte> → Bytes buffers to the standard library pass. Preserve runtime-only locale comparison. The review recommends a deterministic root default, root fallback for malformed/unsupported locales with the existing nonthrowing signature, and allowing collation equality without String equality (only the sign is promised). These are recorded recommendations for that pass, not newly implemented locale semantics.
+
+### Live array views found during string integration
+
+The shared point-08 fixture exposed that JavaScript `use` ranges of arrays were copies. Borrowed array ranges now use a live Array proxy with fixed normalized bounds; indexed writes reach the owner and iteration/methods/formatting/copying see the selected items. Ordinary owning slices still copy, Bytes still uses subarray, and String views are immutable JavaScript values. A mutable String view retains its local slot for reuse; compile-time place lowering unwraps `try` around a reseated place. No view's structural operation or whole assignment is added. Runtime tests cover overlapping/nested views, reflection, copies and item permutation, with the shared program on all JavaScript targets.
+
+## Byte loop integration decision (2026-11-16)
+
+Keep the indexed copy/fill loops in JavaScript until their proof includes more than bounds. For source `data[0..3]` and destination `data[1..4]`, a forward indexed copy of `[1, 2, 3, 4]` gives `[1, 1, 1, 1]`; set(subarray) snapshots and gives `[1, 1, 2, 3]`. Point-08's shared fixture pins the former. A future bulk lowering needs owner/interval relationships and a disjointness or equivalence proof, stable values and no per-iteration observable effects (including calls, suspension/reactivity and zero-iteration evaluation). The missing proof contract is in the performance to-do; no speculative backend-specific proof is duplicated here. This is the explicitly permitted deferral of integration step 5, with no semantic work deferred.
+
+### Chained compile-time string views
+
+The interpreter lowerer shares receiver extraction for calls, method arguments, code-point counts and UTF-8 loops, including grouped flattened field chains. A loaded input can be counted/iterated under an 8 KiB evaluation budget without allocating a result array or encoded Bytes. The regression failed with Memory(8192) before this correction; both paths now pass. A compile-time unrolled iterable retains its ordinary precomputed-array path. No builtin, signature, type, runtime id or flag bit changes.

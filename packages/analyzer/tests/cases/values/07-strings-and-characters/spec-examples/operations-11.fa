@@ -1,0 +1,4 @@
+-- Specification example: operations 11
+assert "abc" == "abc"
+assert "abc" < "abd" -- lexicographic, by code unit
+assert "Abc".toLowerCase() == "abc"

@@ -1,0 +1,6 @@
+-- Specification example: operations 2
+let score = 42
+
+let label = "Score: " + score                    -- error: E-STR-7 (expected a `String`, found an `Integer`
+let explicitLabel = "Score: " + score.toString() -- valid: explicit conversion
+let interpolatedLabel = "Score: {score}"         -- valid: interpolation

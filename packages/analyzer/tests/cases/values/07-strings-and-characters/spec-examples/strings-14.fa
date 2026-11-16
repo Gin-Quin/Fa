@@ -1,0 +1,4 @@
+-- Specification example: strings 14
+let digit = "7"
+assert digit.codeUnitAt(0) == 55
+

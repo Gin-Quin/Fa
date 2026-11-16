@@ -1,0 +1,16 @@
+function rule = (bytes: Bytes): String => {
+	let text = String.fromUtf8(bytes) catch error => return "{error.position} {String.fromUtf8Lossy(bytes).codePoints()}"
+	"ok {text.codePoints()}"
+}
+static prefix = @rule(Bytes.from([225, 128, 65]))
+static middle = @rule(Bytes.from([65, 225, 128, 66]))
+static truncated = @rule(Bytes.from([240, 159]))
+static surrogate = @rule(Bytes.from([237, 160, 128]))
+static above = @rule(Bytes.from([244, 144, 128, 128]))
+static bom = @rule(Bytes.from([239, 187, 191, 65]))
+console.log(prefix, rule(Bytes.from([225, 128, 65])) == prefix) -- prints: 0 [65533, 65] true
+console.log(middle, rule(Bytes.from([65, 225, 128, 66])) == middle) -- prints: 1 [65, 65533, 66] true
+console.log(truncated, rule(Bytes.from([240, 159])) == truncated) -- prints: 0 [65533] true
+console.log(surrogate, rule(Bytes.from([237, 160, 128])) == surrogate) -- prints: 0 [65533, 65533, 65533] true
+console.log(above, rule(Bytes.from([244, 144, 128, 128])) == above) -- prints: 0 [65533, 65533, 65533, 65533] true
+console.log(bom, rule(Bytes.from([239, 187, 191, 65])) == bom) -- prints: ok [65279, 65] true

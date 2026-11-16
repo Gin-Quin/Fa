@@ -12,7 +12,7 @@
 // enumeration, a tuple, a named union member, relation fields to leave out),
 // the backend composes the typed formatters below (`faFormatArray(items,
 // faFloat32ToString)`...), passing the formatter of each part.
-
+import { faIsBytes } from "./collections.js";
 import { faSides } from "./relations.js";
 
 /** @typedef {(value: any) => string} FaFormatter */
@@ -62,7 +62,7 @@ export function faFormat(value) {
 	return typeof value === "string" ? value : faFormatNested(value);
 }
 
-// @fa-helper faFormatNested deps: faQuote faFormatRange faSides
+// @fa-helper faFormatNested deps: faQuote faFormatRange faSides faIsBytes
 /**
  * The Fa notation of a value nested in a composite, decided from its
  * JavaScript representation: strings are quoted, `undefined` is `none`,
@@ -108,6 +108,7 @@ export function faFormatNested(value) {
 		}
 		if (
 			Array.isArray(item) ||
+			faIsBytes(item) ||
 			tag === "Set" ||
 			tag === "fa:Set" ||
 			tag === "fa:ValuePool" ||
@@ -115,7 +116,7 @@ export function faFormatNested(value) {
 			tag === "fa:HashMap"
 		) {
 			const map = tag === "Map" || tag === "fa:HashMap";
-			const items = Array.isArray(item) ? item : Array.from(item);
+			const items = Array.isArray(item) || faIsBytes(item) ? item : Array.from(item);
 			parts.push("[");
 			pending.push("]");
 			for (let index = items.length - 1; index >= 0; index--) {
@@ -350,4 +351,10 @@ export function faFormatRange(range) {
 		return `${start}..`;
 	}
 	return `${start}${range.includesEnd ? "..=" : ".."}${range.end}`;
+}
+
+// @fa-helper faFormatBytes
+/** @param {Uint8Array} bytes @returns {string} */
+export function faFormatBytes(bytes) {
+	return `[${bytes.join(", ")}]`;
 }

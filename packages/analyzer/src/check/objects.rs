@@ -545,6 +545,7 @@ impl Walker<'_> {
 		}
 		let result = member.unwrap_or(object);
 		self.memo(n, |w| {
+
 			let type_name = w.display(object);
 			let mut given: Vec<Sym> = Vec::new();
 			for field in fields {
@@ -649,6 +650,7 @@ impl Walker<'_> {
 					fields: values,
 				},
 			);
+			w.check_literal_schema_constructor(n, result);
 			result
 		});
 	}
@@ -878,6 +880,7 @@ impl Walker<'_> {
 			}
 		});
 		self.revalidate_fields(target, members);
+		self.reject_slice_structural_method(n);
 		// a field moved out of its local (foreign.rs)
 		self.check_moved_fields(n, target, false);
 		ty
@@ -1056,7 +1059,11 @@ impl Walker<'_> {
 			self.set_type(first, function_ty);
 			function_ty
 		} else {
-			let message = format!("`{}` has no member or function `{text}`", self.display(ty));
+			let message = format!(
+				"`{}` has no member or function `{text}`{}",
+				self.display(ty),
+				self.removed_type_member_hint(ty, &text)
+			);
 			let diagnostic = self.diagnostic(&E_OBJ_5, first, message);
 			self.report(diagnostic);
 			return TypeId::UNKNOWN;
@@ -1353,7 +1360,7 @@ impl Walker<'_> {
 			"`bytes()` was replaced by `toUtf8()`, which returns `Bytes`: use `text.toUtf8()` to encode UTF-8".to_string()
 		} else if crate::builtins::strings::is_string_like(&self.s.types, receiver) {
 			format!(
-				"a `{shown}` has no field or method `{text}`: see the string methods (`length`, `includes`, `split`…); no method changes a string"
+				"a `{shown}` has no field or method `{text}`: see the string methods (`length`, `includes`, `split`…); use assignment or `+=` to change the text (`reserve` only changes storage)"
 			)
 		} else if receiver == TypeId::BYTES {
 			format!(
@@ -1554,7 +1561,13 @@ impl Walker<'_> {
 			None => {
 				let index_ty = self.check(index, Some(TypeId::INTEGER));
 				let ty = self.memo(n, |w| w.index_type(n, target, root.ty, index, index_ty));
-				self.check_index_bounds(n, target, index);
+				// A string unit is never an assignment target. Its rejection
+				// must not also ask the caller to handle a bounds error.
+				if !crate::builtins::strings::is_string_like(&self.s.types, root.ty)
+					|| index_ty == TypeId::RANGE
+				{
+					self.check_index_bounds(n, target, index);
+				}
 				ty
 			}
 		};

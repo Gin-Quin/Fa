@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use ethnum::I256;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fa_interpreter::Value;
 use fa_interpreter::ir::{
@@ -27,7 +27,7 @@ use fa_interpreter::ir::{
 use fa_interpreter::value::MemberKind;
 use fa_parser::TypedSyntaxTree;
 
-use crate::analysis::{Analysis, Argument, Callee, FieldValue, PatternBinding};
+use crate::analysis::{Analysis, Argument, Callee, FieldValue, NodeFlags, PatternBinding};
 use crate::builtins;
 use crate::ids::{FileId, NodeId, SymbolId, TypeId};
 use crate::lower::when::{self, Literal, Test};
@@ -164,6 +164,21 @@ impl<'a> Lowerer<'a> {
 	pub fn function(mut self, node: NodeId) -> Option<Function> {
 		self.compile_time = false;
 		self.globals = true;
+		if let Some(expression) = super::json::default_node(node) {
+			let captures: Vec<Slot> = self
+				.default_captures(expression)
+				.into_iter()
+				.map(|symbol| self.bind(symbol))
+				.collect();
+			let body = self.expr(expression);
+			return Some(Function {
+				name: "<JSON field default>".into(),
+				params: Vec::new(),
+				captures,
+				slots: self.next,
+				body,
+			});
+		}
 		let info = self.a.function(node)?.clone();
 		let name = match info.symbol {
 			Some(symbol) => self
@@ -219,6 +234,46 @@ impl<'a> Lowerer<'a> {
 		})
 	}
 
+	/// The free values of a field default, in a stable order shared by its
+	/// synthetic function and the closure constructed at a JSON call.
+	fn default_captures(&self, expression: NodeId) -> Vec<SymbolId> {
+		let mut nodes = FxHashSet::default();
+		let mut pending = vec![expression];
+		while let Some(node) = pending.pop() {
+			if nodes.insert(node) {
+				pending.extend(syntax::children(self.tree, node));
+			}
+		}
+		let mut captures = Vec::new();
+		for &node in &nodes {
+			if !matches!(syntax::view(self.tree, node), View::Name(_)) {
+				continue;
+			}
+			let Resolution::Local(symbol) = self.a.resolution(node) else {
+				continue;
+			};
+			let data = self.a.symbols.symbol(symbol);
+			if nodes.contains(&data.decl_node) || self.is_module_level(symbol) {
+				continue;
+			}
+			match data.kind {
+				SymbolKind::Function => {
+					if let Some(info) = self.a.function(data.decl_node) {
+						captures.extend(info.captures.iter().copied());
+					}
+				}
+				SymbolKind::Static
+				| SymbolKind::Type
+				| SymbolKind::TypeParameter
+				| SymbolKind::Namespace => {}
+				_ => captures.push(symbol),
+			}
+		}
+		captures.sort_unstable_by_key(|symbol| symbol.0);
+		captures.dedup();
+		captures
+	}
+
 	fn bind(&mut self, symbol: SymbolId) -> Slot {
 		let slot = self.next;
 		self.next += 1;
@@ -246,6 +301,22 @@ impl<'a> Lowerer<'a> {
 
 	fn impure(&self, what: impl Into<String>) -> Expr {
 		Expr::Impure(Arc::from(what.into()))
+	}
+
+	/// Locale comparison reads machine data at evaluation time, without
+	/// changing the runtime purity rules for reactive expressions.
+	fn builtin_impurity(&self, path: &str) -> Option<Expr> {
+		if path == "String.compareLocale" {
+			Some(
+				self.impure(
+					"the machine's locale data (`String.compareLocale`; call it at runtime)",
+				),
+			)
+		} else if builtins::std_library::impurity(path).is_some() {
+			Some(self.impure(path))
+		} else {
+			None
+		}
 	}
 
 	// ── numbers ──────────────────────────────────────────────────────────
@@ -363,7 +434,7 @@ impl<'a> Lowerer<'a> {
 			TypeKind::Float(_) | TypeKind::FloatLit(..) => TypeTest::Float,
 			TypeKind::String => TypeTest::String,
 			TypeKind::StringLit(text) => TypeTest::Literal(Value::string(types.syms.resolve(text))),
-			TypeKind::Bytes => TypeTest::Array,
+			TypeKind::Bytes => TypeTest::Bytes,
 			TypeKind::Object(_) => TypeTest::Object,
 			TypeKind::Tuple(list) => TypeTest::Tuple(types.list_items(list).len()),
 			TypeKind::Union(list) => TypeTest::Union(
@@ -510,10 +581,9 @@ impl<'a> Lowerer<'a> {
 					"Float.epsilon" => Expr::Const(Value::Float(f64::EPSILON)),
 					_ => match self.literal_of(n) {
 						Some(value) => Expr::Const(value),
-						None if builtins::std_library::impurity(path).is_some() => {
-							self.impure(path)
-						}
-						None => self.unsupported(format!("`{path}`")),
+						None => self
+							.builtin_impurity(path)
+							.unwrap_or_else(|| self.unsupported(format!("`{path}`"))),
 					},
 				}
 			}
@@ -1152,9 +1222,19 @@ impl<'a> Lowerer<'a> {
 		if parallel {
 			return self.unsupported("`for parallel`");
 		}
-		let iterable = match (compile_time, self.a.unrolled.get(&n)) {
-			(true, Some(items)) => Expr::Const(Value::array(items.clone())),
-			_ => self.expr(iterable),
+		let unrolled = compile_time
+			.then(|| self.a.unrolled.get(&n).cloned())
+			.flatten();
+		let utf8_source =
+			if unrolled.is_none() && self.a.has_flags(iterable, NodeFlags::UTF8_ITERATION) {
+				self.string_call_receiver(iterable)
+			} else {
+				None
+			};
+		let utf8 = utf8_source.is_some();
+		let iterable = match unrolled {
+			Some(items) => Expr::Const(Value::array(items)),
+			None => utf8_source.unwrap_or_else(|| self.expr(iterable)),
 		};
 		let (item, prologue) = match pattern {
 			Some(pattern) => match syntax::view(self.tree, pattern) {
@@ -1184,11 +1264,20 @@ impl<'a> Lowerer<'a> {
 			Some(prologue) => Expr::Block(vec![prologue, body]),
 			None => body,
 		};
-		Expr::For {
-			item,
-			index: index_slot,
-			iterable: iterable.boxed(),
-			body: body.boxed(),
+		if utf8 {
+			Expr::ForUtf8 {
+				item,
+				index: index_slot,
+				iterable: iterable.boxed(),
+				body: body.boxed(),
+			}
+		} else {
+			Expr::For {
+				item,
+				index: index_slot,
+				iterable: iterable.boxed(),
+				body: body.boxed(),
+			}
 		}
 	}
 
@@ -1241,7 +1330,7 @@ impl<'a> Lowerer<'a> {
 	/// An assignable place: a local and the fields and items below it.
 	fn place(&mut self, n: NodeId) -> Option<Place> {
 		match syntax::view(self.tree, n) {
-			View::Group(inner) => self.place(inner),
+			View::Group(inner) | View::Try(inner) => self.place(inner),
 			View::Name(_) => match self.a.resolution(n) {
 				Resolution::Local(symbol) => {
 					if let Some(place) = self.aliases.get(&symbol) {
@@ -1276,6 +1365,39 @@ impl<'a> Lowerer<'a> {
 		}
 	}
 
+	fn strip_groups(&self, mut node: NodeId) -> NodeId {
+		while let View::Group(inner) = syntax::view(self.tree, node) {
+			node = inner;
+		}
+		node
+	}
+
+	/// The receiver prefix, including flattened field chains and grouped
+	/// direct callees. Share it with the allocation-free string views.
+	fn call_receiver(&mut self, callee: NodeId) -> Option<Expr> {
+		let callee = self.strip_groups(callee);
+		let (View::Access { target, members } | View::OptionalAccess { target, members }) =
+			syntax::view(self.tree, callee)
+		else {
+			return None;
+		};
+		let mut value = self.expr(target);
+		for member in members.iter().take(members.len().saturating_sub(1)) {
+			let View::Name(name) = syntax::view(self.tree, member) else {
+				return None;
+			};
+			value = Expr::Field(value.boxed(), Arc::from(self.tree.name(name)), false);
+		}
+		Some(value)
+	}
+
+	fn string_call_receiver(&mut self, call: NodeId) -> Option<Expr> {
+		let View::Call { callee, .. } = syntax::view(self.tree, self.strip_groups(call)) else {
+			return None;
+		};
+		self.call_receiver(callee)
+	}
+
 	/// `a.b.c`, `a?.b?.c`.
 	fn access(
 		&mut self,
@@ -1284,6 +1406,11 @@ impl<'a> Lowerer<'a> {
 		members: syntax::NodeList<'_>,
 		optional: bool,
 	) -> Expr {
+		if self.a.has_flags(n, NodeFlags::CODE_POINT_COUNT)
+			&& let Some(text) = self.string_call_receiver(target)
+		{
+			return Expr::Builtin("String#codePointCount", vec![text]);
+		}
 		// a member whose value the analysis knows (`Int8.maxValue`)
 		if let Some(value) = self.literal_of(n)
 			&& matches!(
@@ -1394,33 +1521,11 @@ impl<'a> Lowerer<'a> {
 
 	/// A call, from its `CallInfo`.
 	fn call(&mut self, n: NodeId, callee: NodeId, arguments: syntax::NodeList<'_>) -> Expr {
+		let callee = self.strip_groups(callee);
 		let Some(info) = self.a.call(n).cloned() else {
 			return self.unsupported(format!("`{}`", self.text(callee)));
 		};
-		// the receiver of a method: the callee without its last member
-		let receiver = |lowerer: &mut Self| -> Option<Expr> {
-			match syntax::view(lowerer.tree, callee) {
-				View::Access { target, members } | View::OptionalAccess { target, members } => {
-					if members.len() == 1 {
-						Some(lowerer.expr(target))
-					} else {
-						let mut value = lowerer.expr(target);
-						for member in members.iter().take(members.len() - 1) {
-							let View::Name(name) = syntax::view(lowerer.tree, member) else {
-								return None;
-							};
-							value = Expr::Field(
-								value.boxed(),
-								Arc::from(lowerer.tree.name(name)),
-								false,
-							);
-						}
-						Some(value)
-					}
-				}
-				_ => None,
-			}
-		};
+
 		match info.callee {
 			Callee::Function(declaration) => {
 				let args = self.arguments(&info.arguments, Some(callee));
@@ -1442,8 +1547,8 @@ impl<'a> Lowerer<'a> {
 			}
 			Callee::Builtin(id) => {
 				let path = builtins::get(id).path;
-				if builtins::std_library::impurity(path).is_some() {
-					return self.impure(path);
+				if let Some(impure) = self.builtin_impurity(path) {
+					return impure;
 				}
 				let method = path.contains('#');
 				let mut values = Vec::new();
@@ -1459,7 +1564,7 @@ impl<'a> Lowerer<'a> {
 							None => return self.unsupported(format!("`{path}` on this value")),
 						}
 					} else {
-						match receiver(self) {
+						match self.call_receiver(callee) {
 							Some(value) => values.push(value),
 							None => return self.unsupported(format!("`{path}`")),
 						}
@@ -1484,6 +1589,39 @@ impl<'a> Lowerer<'a> {
 					&& !matches!(path, "Map#getOrInsert")
 				{
 					values.pop();
+				}
+				if path == "Json.parse" {
+					let (schema, defaults) =
+						super::json::schema(self.types(), self.a, self.file, self.a.type_of(n));
+					let mut expressions = Vec::new();
+					let input = self.temp();
+					expressions.push(Expr::Let(input, values.remove(0).boxed()));
+					values.push(Expr::Local(input));
+					let mut closures = Vec::new();
+					for key in defaults {
+						let expression =
+							super::json::default_node(NodeId(key.1)).expect("a JSON default key");
+						let mut captures = Vec::new();
+						for symbol in self.default_captures(expression) {
+							let read = self.read_symbol(expression, symbol);
+							let slot = self.temp();
+							expressions.push(Expr::Let(slot, read.boxed()));
+							captures.push(slot);
+						}
+						closures.push(Item::One(Expr::Closure {
+							function: key,
+							captures,
+						}));
+					}
+					values.push(Expr::Builtin(
+						"$Json.bindDefaults",
+						vec![Expr::Const(schema), Expr::Array(closures)],
+					));
+					values.push(Expr::Const(Value::Boolean(crate::comptime::is_js_target(
+						&self.session.comptime.target,
+					))));
+					expressions.push(Expr::Builtin(path, values));
+					return Expr::Block(expressions);
 				}
 				// the paths of the flags, by bit
 				if path == "Fields#toStringArray"
@@ -1556,25 +1694,7 @@ impl<'a> Lowerer<'a> {
 				Argument::Default | Argument::Missing => Arg::Default,
 				Argument::Variadic(items) => Arg::Variadic(self.items(items.iter().copied())),
 				Argument::Receiver(_) => {
-					let receiver =
-						callee.and_then(|callee| match syntax::view(self.tree, callee) {
-							View::Access { target, members }
-							| View::OptionalAccess { target, members } => {
-								let mut value = self.expr(target);
-								for member in members.iter().take(members.len().saturating_sub(1)) {
-									let View::Name(name) = syntax::view(self.tree, member) else {
-										return None;
-									};
-									value = Expr::Field(
-										value.boxed(),
-										Arc::from(self.tree.name(name)),
-										false,
-									);
-								}
-								Some(value)
-							}
-							_ => None,
-						});
+					let receiver = callee.and_then(|callee| self.call_receiver(callee));
 					Arg::Value(receiver.unwrap_or_else(|| self.unsupported("this receiver")))
 				}
 			});

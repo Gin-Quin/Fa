@@ -530,6 +530,7 @@ impl Walker<'_> {
 		callee: NodeId,
 		params: crate::ids::ParamListId,
 	) -> (Callee, Vec<BindParam>) {
+		let callee = self.strip_groups(callee);
 		let sigs = self.s.types.params(params).to_vec();
 		let sigs = sigs.as_slice();
 		let plain = |kind| -> (Callee, Vec<BindParam>) {

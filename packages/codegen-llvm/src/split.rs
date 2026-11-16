@@ -257,6 +257,10 @@ pub struct SplitOptions {
 	/// The program is a C library (`build.cLibrary`): set by
 	/// `compile_package` from its `Libraries`.
 	pub c_library: Option<crate::options::CLibrary>,
+	/// The program is loaded in this process by the JIT instead of linked
+	/// (`jit.rs`, `fa run --target=native`): its objects are compiled with
+	/// emulated thread-local variables, and kept apart in the cache.
+	pub in_memory: bool,
 }
 
 /// What [`crate::compile_package`] gives besides the analysis' report.
@@ -264,6 +268,8 @@ pub struct SplitOptions {
 pub enum PackageOutcome {
 	/// The program, linked.
 	Built(crate::Artifact),
+	/// The program, loaded in this process ([`SplitOptions::in_memory`]).
+	Loaded(Box<dyn crate::LoadedProgram>),
 	/// The analysis found errors (in the report): nothing is linked.
 	Errors,
 	/// The program can't be compiled per unit (an asynchronous program, a

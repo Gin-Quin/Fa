@@ -244,6 +244,6 @@ The files to include and the timeout of each test are set in the `test` field of
 :::implementation
 ## Implementation details
 
-- Each test file is compiled once. Bun runs a process per file and resets the module bindings before each test. Native and WebAssembly run a fresh process for each test body, selected by its index (an argument on native, the `fa.testIndex` import on WebAssembly).
+- Each test file is compiled once. Bun runs a process per file and resets the module bindings before each test. Native tests compile at `-O0`, load the module through LLVM ORC in `fa-native`, and fork a fresh child for each test body. `FA_JIT=0` and programs the JIT cannot load use a linked executable. Native selects a body by an argument; WebAssembly runs a fresh process per body using the `fa.testIndex` import.
 - A failed check or timeout marks the remaining tests of that file as not run; other files continue. The native and WebAssembly runner kills a process that exceeds the configured timeout.
 :::

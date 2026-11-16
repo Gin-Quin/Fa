@@ -741,6 +741,34 @@ impl Generator<'_> {
 		written: NodeList<'_>,
 		omitted: &[bool],
 	) -> (Expr, Vec<String>) {
+		let receiver = (self.tasks.detached_call == Some(call))
+			.then(|| {
+				self.analysis
+					.call(call)?
+					.arguments
+					.iter()
+					.find_map(|argument| {
+						let Argument::Receiver(callee) = argument else {
+							return None;
+						};
+						match self.view(self.strip_groups(*callee)) {
+							View::Access { target, .. } | View::OptionalAccess { target, .. } => {
+								Some(target)
+							}
+							_ => None,
+						}
+					})
+			})
+			.flatten();
+		// A worker's transport already snapshots its arguments at send time.
+		let detached = self.tasks.detached_call == Some(call)
+			&& receiver.is_none_or(|node| !self.is_worker(node));
+		let first = if let Some(receiver) = receiver.filter(|_| detached) {
+			let copied = self.detached_argument(receiver, first);
+			self.keep_value(copied)
+		} else {
+			first
+		};
 		// the value nodes in parameter order
 		let mut slots: Vec<Slot> = Vec::new();
 		for (position, argument) in arguments.iter().enumerate() {
@@ -784,7 +812,8 @@ impl Generator<'_> {
 				Slot::Omitted(_) => unreachable!(),
 			})
 			.collect();
-		let (lines, values) = self.capture(|g| g.in_order(&nodes, |g, node| g.argument(node)));
+		let (lines, values) =
+			self.capture(|g| g.in_order(&nodes, |g, node| g.argument(node, detached)));
 		let mut first = first;
 		if !lines.is_empty() && !first.stable {
 			let temp = self.temp();
@@ -843,23 +872,41 @@ impl Generator<'_> {
 	}
 
 	/// One argument value: `...collection` for a spread.
-	fn argument(&mut self, node: NodeId) -> Expr {
+	fn argument(&mut self, node: NodeId, detached: bool) -> Expr {
 		match self.view(node) {
-			View::Spread(value) => {
-				let value = self.expr(value);
-				Expr::new(format!("...{}", value.at(Prec::Assign)), Prec::Assign)
-			}
-			// an argument a detached task copies (A12, tasks.rs)
-			_ if self.tasks.detached_copies.contains(&node) => {
-				let value = self.expr(node);
-				let ty = self.type_of(node);
-				if self.is_composite(ty) {
-					self.copy_of(value, ty)
+			View::Spread(source) => {
+				let value = self.expr(source);
+				let value = if detached {
+					self.detached_argument(source, value)
 				} else {
 					value
-				}
+				};
+				Expr::new(format!("...{}", value.at(Prec::Assign)), Prec::Assign)
+			}
+			_ if detached => {
+				let value = self.expr(node);
+				self.detached_argument(node, value)
 			}
 			_ => self.expr(node),
+		}
+	}
+
+	/// A detached call owns its arguments, including projected values and
+	/// spread elements. Ordinary copy facts preserve fresh values, last-use
+	/// moves and shared handles; resource expressions perform their own moves.
+	fn detached_argument(&mut self, node: NodeId, value: Expr) -> Expr {
+		let mut node = node;
+		while let View::Group(inner) | View::Try(inner) = self.view(node) {
+			node = inner;
+		}
+		if self
+			.types
+			.flags(self.type_of(node))
+			.contains(fa_analyzer::types::TypeFlags::MOVE_ONLY)
+		{
+			value
+		} else {
+			self.copy_stored(node, value)
 		}
 	}
 
@@ -1375,7 +1422,7 @@ enum Slot {
 }
 
 /// The lines of a writer, one level deeper.
-fn indent_by_one(lines: Writer) -> Writer {
+pub(super) fn indent_by_one(lines: Writer) -> Writer {
 	let text = lines.finish();
 	let mut out = Writer::at(0);
 	for line in text.lines() {

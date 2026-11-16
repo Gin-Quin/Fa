@@ -1,0 +1,9 @@
+-- A generic function value returned with an inferred return type. GN030 says
+-- a generic function type is written only as the type of a parameter, and
+-- `let g = identity` is GN015, but `wrap` itself is accepted; each call of it
+-- is then GN015 "`T` can't be inferred here: give it explicitly after the name
+-- of the function", which names a `T` that `wrap` doesn't have.
+-- Expected: one error on `wrap` (GN030: annotate a return type that isn't generic).
+function identity = <T>(value: T): T => value
+function wrap = () => identity
+console.log(wrap()(1), wrap()("a")) -- prints: 1 a

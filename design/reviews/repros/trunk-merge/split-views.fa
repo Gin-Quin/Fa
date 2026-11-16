@@ -1,0 +1,40 @@
+-- `split` into a buffer of the caller (B) with A's split views and frame
+-- strings: the parts outlive the string they were cut from, which is then
+-- replaced, grown or dropped.
+function parts = (text: String): Array<String> => text.split(",")
+function local = (n: Integer): Array<String> => {
+	mutable text = "first part {n},second part that is long enough,third"
+	text += ",{n}"
+	text.split(",")
+}
+function count = (n: Integer): Integer => {
+	let pieces = local(n)
+	mutable total = 0
+	for piece in pieces { total += piece.length }
+	total
+}
+mutable source = "alpha,beta gamma delta epsilon zeta eta theta,iota"
+let kept = parts(source)
+source = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+source += "!"
+console.log(kept) -- prints: ["alpha", "beta gamma delta epsilon zeta eta theta", "iota"]
+mutable all: Array<Array<String>> = []
+for n in 0..5 {
+	all.push(local(n))
+	console.log(count(n * 1000))
+}
+for list in all { console.log(list.get(0) ?? "", list.length) }
+mutable text = "a,bb,ccc"
+let short = text.split(",")
+text += ",dddd"
+console.log(short, text.split(",").length) -- prints: 49
+-- prints: 55
+-- prints: 55
+-- prints: 55
+-- prints: 55
+-- prints: first part 0 4
+-- prints: first part 1 4
+-- prints: first part 2 4
+-- prints: first part 3 4
+-- prints: first part 4 4
+-- prints: ["a", "bb", "ccc"] 4

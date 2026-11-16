@@ -1,0 +1,9 @@
+-- An async function started as a task, appending a template to a local
+-- string: its branch-local decimal must be dropped before the join.
+async function work = (n: Integer): String => {
+	mutable text = "t"
+	text += "{n}"
+	text
+}
+let task = start work(1)
+console.log(await task catch _error => "cancelled") -- prints: t1

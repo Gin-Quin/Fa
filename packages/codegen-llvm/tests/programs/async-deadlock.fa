@@ -1,3 +1,4 @@
+-- skip-target: web
 -- When every task waits and nothing can wake them, the program stops.
 use { Channel } = std.concurrency
 

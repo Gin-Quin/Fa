@@ -43,9 +43,11 @@ async function main = () => {
 	console.log("All results: {results}")
 	workers.shutdown()
 
-	-- a work longer than the timeout: cancelled, its worker restarted
-	mutable slow = WorkerPool<DataProcessor> { count = 1, state = DataProcessor { factor = 3, calls = 0 }, timeout = 300 }
-	let late = await (await slow.submit((worker) => await worker.spin(1000))) catch error => -1
+	-- A work longer than the timeout: cancelled, its worker restarted.
+	-- Keep a full second for the replacement worker to start under the
+	-- concurrent target harness; the slow work remains three times longer.
+	mutable slow = WorkerPool<DataProcessor> { count = 1, state = DataProcessor { factor = 3, calls = 0 }, timeout = 1000 }
+	let late = await (await slow.submit((worker) => await worker.spin(3000))) catch error => -1
 	console.log(late)
 	let quick = await (await slow.submit((worker) => await worker.spin(1))) catch error => -1
 	console.log(quick)
@@ -81,7 +83,7 @@ async function main = () => {
 		console.log(await counted catch error => -1)
 	}
 	-- the abandoned call ends, then its thread frees the old worker
-	await sleep(1500)
+	await sleep(3500)
 }
 
 await main()

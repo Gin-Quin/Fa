@@ -1,0 +1,44 @@
+-- Compiled per unit (and as one module): B's result slots and frame tables
+-- across A's units: a big object returned by a function of another unit,
+-- through a function value of another unit, a composition of functions of
+-- two units, a generic function parameter (A's instance tables), and frame
+-- maps in functions that call into another unit (the smaller budget).
+-- (A function of another unit as a value, or in a composition, is "not
+-- supported by the native backend yet": local wrappers are used.)
+-- file: library/shapes.fa
+export namespace = {
+	type Big = { a: Integer, b: String, c: Array<Integer>, d: Integer, e: Integer }
+	function make = (n: Integer): Big => Big { a = n, b = "big {n} with a long enough text", c = [n, n + 1], d = n * 2, e = n * 3 }
+	function grow = (big: Big): Big => Big { a = big.a + 1, b = "{big.b}!", c = [big.a], d = big.d, e = big.e }
+	function apply = (transform: <Value>(value: Value) => Value, big: Big): Big => transform(transform(big))
+	function lookup = (n: Integer): Integer => {
+		let table: Map<Integer, String> = [(n, "first {n}"), (n + 1, "second"), (n + 2, "third")]
+		let names: Set<String> = ["a", "b", "{n}"]
+		(table.get(n) ?? "").length + table.size + names.size
+	}
+}
+-- file: application/main.fa
+function same = <Value>(value: Value): Value => value
+function describe = (big: library.shapes.Big): String => "{big.a} {big.b.length} {big.c} {big.d} {big.e}"
+function makeHere = (n: Integer): library.shapes.Big => library.shapes.make(n)
+function growHere = (big: library.shapes.Big): library.shapes.Big => library.shapes.grow(big)
+function local = (n: Integer): Integer => {
+	let table: Map<String, Integer> = [("x{n}", n), ("y", 2), ("z", 3)]
+	(table.get("x{n}") ?? 0) + library.shapes.lookup(n)
+}
+export function = () => {
+	console.log(describe(library.shapes.make(1)))
+	let maker: (n: Integer) => library.shapes.Big = makeHere
+	console.log(describe(maker(2)))
+	let composed = makeHere then growHere
+	console.log(describe(composed(3)))
+	console.log(describe(library.shapes.apply(same, library.shapes.make(4))))
+	mutable sum = 0
+	for n in 0..20 { sum += local(n) }
+	console.log(sum)
+}
+-- prints: 1 29 [1, 2] 2 3
+-- prints: 2 29 [2, 3] 4 6
+-- prints: 4 30 [3] 6 9
+-- prints: 4 29 [4, 5] 8 12
+-- prints: 460

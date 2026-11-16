@@ -779,6 +779,8 @@ pub(crate) fn locate(path: Option<&Path>) -> Option<Project> {
 pub(crate) enum NativeBuilt {
 	/// The program, linked.
 	Built(fa_codegen_llvm::Artifact),
+	/// The program, loaded in this process by the JIT (`fa run`).
+	Loaded(Box<dyn fa_codegen_llvm::LoadedProgram>),
 	/// Errors: the messages to print.
 	Failed(String),
 	/// The program can't be compiled per unit (an asynchronous program, a
@@ -792,6 +794,7 @@ pub(crate) enum NativeBuilt {
 /// (design/parallel-pipeline.md §3.3): each unit is compiled into an object
 /// by the thread that analyzed it, then the program is linked. `output`:
 /// the folder of the executable, else the package's `<build.output>/<target>/`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_native(
 	backend: &dyn crate::native::Backend,
 	project: Project,
@@ -800,6 +803,7 @@ pub(crate) fn build_native(
 	development: bool,
 	output: Option<&Path>,
 	verbose: bool,
+	jit: bool,
 ) -> NativeBuilt {
 	let mut prepared = match prepare(&project, target.analysis_target(), None) {
 		Ok(prepared) => prepared,
@@ -833,6 +837,8 @@ pub(crate) fn build_native(
 		facts: None,
 		// set by `compile_package` from the libraries
 		c_library: None,
+		// set below, once the libraries are known
+		in_memory: false,
 	};
 	// a C library (`build.cLibrary`, `fa build` only): the API file is the entry
 	let configuration = prepared.configuration.as_ref().filter(|_| !development);
@@ -863,6 +869,11 @@ pub(crate) fn build_native(
 			})
 			.unwrap_or_default(),
 	};
+	// `fa run`: loaded in this process by the JIT, without a link
+	let split = fa_codegen_llvm::SplitOptions {
+		in_memory: jit && fa_codegen_llvm::jit_available(target, options, &libraries),
+		..split
+	};
 	let run = run_options(&entry);
 	let (report, outcome) = timings::phase("pipeline", || {
 		backend.compile_package(
@@ -885,6 +896,10 @@ pub(crate) fn build_native(
 		fa_codegen_llvm::PackageOutcome::Built(artifact) => {
 			crate::color::eprint_diagnostics(&rendered);
 			NativeBuilt::Built(artifact)
+		}
+		fa_codegen_llvm::PackageOutcome::Loaded(program) => {
+			crate::color::eprint_diagnostics(&rendered);
+			NativeBuilt::Loaded(program)
 		}
 		fa_codegen_llvm::PackageOutcome::Errors => NativeBuilt::Failed(rendered),
 		fa_codegen_llvm::PackageOutcome::Unsupported(reason) => NativeBuilt::Fallback(reason),

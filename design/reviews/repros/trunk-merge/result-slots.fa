@@ -1,0 +1,41 @@
+-- B's result slots (`sret`) through A's features: function values,
+-- compositions, generic function parameters, errors, optionals, recursion,
+-- methods, and a returned owner reused as the destination (NRVO).
+type Big = { a: Integer, b: String, c: Array<Integer>, d: Integer, e: Float }
+type Failure = Errors { Odd = { value: Integer } }
+function make = (n: Integer): Big => Big { a = n, b = "item number {n} with a long enough text", c = [n, n + 1], d = n * 3, e = 0.5 }
+function grow = (big: Big): Big => Big { a = big.a + 1, b = "{big.b}!", c = [big.a], d = big.d, e = big.e * 2.0 }
+function checked = (n: Integer): Big throws Failure => {
+	if n %% 2 == 1 { throw Failure.Odd { value = n } }
+	make(n)
+}
+function same = <T>(value: T): T => value
+function twice = (transform: <T>(value: T) => T, n: Integer): Big => transform(transform(make(n)))
+function named = (n: Integer): Big => {
+	let result = Big { a = n, b = "named {n} result value text", c = [1, 2, 3], d = 0, e = 1.0 }
+	if n > 100 {
+		return result
+	}
+	result
+}
+function deep = (n: Integer): Big => if n == 0 { make(0) } else { grow(deep(n - 1)) }
+function maybe = (n: Integer): Big? => if n > 0 { make(n) } else { none }
+function describe = (big: Big): String => "{big.a} {big.b.length} {big.c} {big.d} {big.e}"
+let value: (n: Integer) => Big = make
+console.log(describe(value(1))) -- prints: 1 37 [1, 2] 3 0.5
+let composed = make then grow then grow
+console.log(describe(composed(2))) -- prints: 4 39 [3] 6 2
+function apply = (maker: (n: Integer) => Big, n: Integer): Big => maker(n)
+console.log(describe(apply((n: Integer): Big => grow(make(n)), 3))) -- prints: 4 38 [3] 9 1
+console.log(describe(twice(same, 4))) -- prints: 4 37 [4, 5] 12 0.5
+console.log(describe(twice((x) => x, 5))) -- prints: 5 37 [5, 6] 15 0.5
+console.log(describe(checked(6) catch _error => make(-1))) -- prints: 6 37 [6, 7] 18 0.5
+console.log(describe(checked(7) catch _error => make(-1))) -- prints: -1 38 [-1, 0] -3 0.5
+console.log(describe(named(5)), describe(named(500))) -- prints: 5 25 [1, 2, 3] 0 1 500 27 [1, 2, 3] 0 1
+console.log(describe(deep(30))) -- prints: 30 67 [29] 0 536870912
+console.log(describe(maybe(8) ?? make(0)), describe(maybe(0) ?? make(9))) -- prints: 8 37 [8, 9] 24 0.5 9 37 [9, 10] 27 0.5
+mutable list: Array<Big> = []
+for n in 0..5 { list.push(make(n)) }
+mutable grown: Array<Big> = []
+for big in list { grown.push(grow(big)) }
+console.log(describe(grown.get(2) ?? make(0)), grown.length) -- prints: 3 38 [2] 6 1 5

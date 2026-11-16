@@ -1,5 +1,6 @@
-//! End-to-end tests: Fa programs run through `fa run` (the JavaScript
-//! backend, executed by Bun), their output compared with their annotations.
+//! End-to-end tests: Fa programs run through `fa run` on Bun, and through
+//! `fa build` on Node and in a web-global sandbox (see `programs/targets.rs`).
+//! All targets share annotations, filtering, comparisons and bounded workers.
 //!
 //! Two sets of programs:
 //!
@@ -20,7 +21,7 @@
 //! -- stderr: integer overflow    (a text that stderr contains)
 //! -- args: first second      (the program's arguments; or `-- arguments:`)
 //! -- overflow-checks: false  (`fa run --overflow-checks=false`)
-//! -- skip-target: native wasm (targets the program doesn't run on: `bun` skips it here)
+//! -- skip-target: native wasm (also accepts `bun`, `node` and `web`)
 //! -- asynchronous: false     (`fa run --asynchronous=false`)
 //! ```
 //!
@@ -38,6 +39,13 @@
 //! Bun is found on the `PATH` or in `~/.bun/bin`; without it, the tests
 //! print a message and pass. `FA_PROGRAMS=filter` runs only the programs
 //! whose path contains `filter`; `FA_VERBOSE=1` lists every result.
+//! Node is found at `~/.local/bin/node` or on PATH; without it only Node/web
+//! tests are skipped. Their exact failure ratchets are `expected-skips/*.txt`:
+//! an unlisted failure, listed success or stale entry fails. `FA_UPDATE_SKIPS=1`
+//! refreshes them after a complete run (never a filtered run); review the diff.
+
+#[path = "programs/targets.rs"]
+mod targets;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -45,12 +53,12 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-/// How many programs a test runs at the same time (each one is a Bun process).
+/// How many programs a test runs at the same time.
 const WORKERS: usize = 3;
 
 /// How many programs run at the same time, all tests together (they run in
 /// parallel): their memory adds up.
-const RUNNING_PROGRAMS: usize = 6;
+const RUNNING_PROGRAMS: usize = 3;
 
 /// The number of programs running, and its change.
 static RUNNING: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
@@ -66,10 +74,57 @@ fn limited<R>(f: impl FnOnce() -> R) -> R {
 	}
 	*count += 1;
 	drop(count);
-	let result = f();
-	*running.lock().unwrap_or_else(|poison| poison.into_inner()) -= 1;
-	changed.notify_one();
-	result
+	struct Permit;
+	impl Drop for Permit {
+		fn drop(&mut self) {
+			*RUNNING
+				.0
+				.lock()
+				.unwrap_or_else(|poison| poison.into_inner()) -= 1;
+			RUNNING.1.notify_one();
+		}
+	}
+	let _permit = Permit;
+	f()
+}
+
+/// A filesystem fixture may write a fixed external path (async-files.fa).
+/// Keep its executions on different targets apart; pure fixtures run freely.
+static ACTIVE_PATHS: (Mutex<std::collections::BTreeSet<PathBuf>>, Condvar) = (
+	Mutex::new(std::collections::BTreeSet::new()),
+	Condvar::new(),
+);
+
+struct ProgramPermit(PathBuf);
+impl ProgramPermit {
+	fn acquire(path: &Path) -> Option<Self> {
+		if !fs::read_to_string(path)
+			.expect("a readable program")
+			.contains("std.fs")
+		{
+			return None;
+		}
+		let path = path.canonicalize().expect("a program exists");
+		let (active, changed) = &ACTIVE_PATHS;
+		let mut paths = active.lock().unwrap_or_else(|poison| poison.into_inner());
+		while paths.contains(&path) {
+			paths = changed
+				.wait(paths)
+				.unwrap_or_else(|poison| poison.into_inner());
+		}
+		paths.insert(path.clone());
+		Some(Self(path))
+	}
+}
+impl Drop for ProgramPermit {
+	fn drop(&mut self) {
+		ACTIVE_PATHS
+			.0
+			.lock()
+			.unwrap_or_else(|poison| poison.into_inner())
+			.remove(&self.0);
+		ACTIVE_PATHS.1.notify_all();
+	}
 }
 
 /// The longest a program may run.
@@ -84,8 +139,10 @@ struct Expected {
 	args: Vec<String>,
 	/// Options of `fa run`, given before the file (`-- overflow-checks:`).
 	options: Vec<String>,
-	/// `-- skip-target: … bun …`: not run by this harness.
-	skipped: bool,
+	/// `-- skip-target: bun node web …`: omit the named targets.
+	skip_targets: Vec<String>,
+	/// Empty means Bun; other targets build and execute through `targets`.
+	target: &'static str,
 	/// Run as `fa build --minify=true` then `bun main.js`, instead of `fa run`.
 	minified: bool,
 	/// Whether the file says anything about its output.
@@ -139,7 +196,9 @@ fn expectations(text: &str) -> Expected {
 				.options
 				.push(format!("--overflow-checks={}", checks.trim()));
 		} else if let Some(targets) = comment.strip_prefix("skip-target:") {
-			expected.skipped |= targets.split_whitespace().any(|target| target == "bun");
+			expected
+				.skip_targets
+				.extend(targets.split_whitespace().map(str::to_string));
 		} else if let Some(mode) = comment.strip_prefix("asynchronous:") {
 			expected
 				.options
@@ -175,6 +234,7 @@ fn printed_lines(printed: &str, lines: &mut Vec<String>) {
 /// What a run gave.
 #[derive(Debug)]
 struct Outcome {
+	build_failed: bool,
 	stdout: String,
 	stderr: String,
 	exit: i32,
@@ -183,48 +243,66 @@ struct Outcome {
 /// Runs `fa run <options> <program> <args>` (or the minified build of the
 /// program) with a timeout.
 fn run(program: &Path, expected: &Expected, scratch: &Path, index: usize) -> Outcome {
+	let _program_permit = ProgramPermit::acquire(program);
 	let files = scratch.join(format!("{index}-files"));
 	let entry = multi_file_entry(program, &files);
 	let program = entry.as_deref().unwrap_or(program);
-	let stdout_path = scratch.join(format!("{index}.stdout"));
-	let stderr_path = scratch.join(format!("{index}.stderr"));
-	let mut command = if expected.minified {
+	let mut command = if expected.minified || !expected.target.is_empty() {
 		let directory = scratch.join(format!("{index}-build"));
-		let built = Command::new(env!("CARGO_BIN_EXE_fa"))
+		let target = if expected.target.is_empty() {
+			"bun"
+		} else {
+			expected.target
+		};
+		let mut build = Command::new(env!("CARGO_BIN_EXE_fa"));
+		build
 			.args([
 				"build",
-				"--target=bun",
-				"--minify=true",
+				&format!("--target={target}"),
 				"--overflow-checks=true",
 			])
 			.args(&expected.options)
 			.arg(format!("--output={}", directory.display()))
-			.arg(program)
-			.output()
-			.expect("`fa` runs");
-		if !built.status.success() {
+			.arg(program);
+		build.arg(format!("--minify={}", expected.minified));
+		let built = execute(&mut build, scratch, &format!("{index}-build"));
+		if built.exit != 0 {
 			return Outcome {
+				build_failed: true,
 				stdout: String::new(),
-				stderr: String::from_utf8_lossy(&built.stderr).into_owned(),
-				exit: -3,
+				stderr: built.stderr,
+				exit: built.exit,
 			};
 		}
-		// `--output=<directory>` writes into `<directory>/<target>/`
-		let mut command = Command::new(fa::find_bun().expect("Bun"));
-		command.arg(directory.join("bun").join("main.js"));
-		command
+		let entry = directory.join(target).join("main.js");
+		if target == "bun" {
+			let mut command = Command::new(fa::find_bun().expect("Bun"));
+			command.arg(entry);
+			command
+		} else {
+			targets::command(target, &entry)
+		}
 	} else {
 		let mut command = Command::new(env!("CARGO_BIN_EXE_fa"));
 		command.arg("run").args(&expected.options).arg(program);
 		command
 	};
+
+	command.args(&expected.args);
+	execute(&mut command, scratch, &index.to_string())
+}
+
+/// File-backed output avoids pipe deadlocks; builds and runs share the timeout
+/// and process-group cleanup. Cargo provides the one already-built `fa` binary.
+fn execute(command: &mut Command, scratch: &Path, name: &str) -> Outcome {
+	let stdout_path = scratch.join(format!("{name}.stdout"));
+	let stderr_path = scratch.join(format!("{name}.stderr"));
 	#[cfg(unix)]
 	{
 		use std::os::unix::process::CommandExt;
 		command.process_group(0);
 	}
 	let mut child = command
-		.args(&expected.args)
 		.env("XDG_CACHE_HOME", scratch.join("cache"))
 		.stdin(Stdio::null())
 		.stdout(fs::File::create(&stdout_path).unwrap())
@@ -232,9 +310,16 @@ fn run(program: &Path, expected: &Expected, scratch: &Path, index: usize) -> Out
 		.spawn()
 		.expect("`fa` runs");
 	let exit = wait_for_exit(&mut child, TIMEOUT);
+	let mut stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
+	match exit {
+		-2 => stderr.push_str("\nharness: timed out after 20 seconds\n"),
+		-4 => stderr.push_str("\nharness: resident memory exceeded 512 MiB\n"),
+		_ => {}
+	}
 	Outcome {
+		build_failed: false,
 		stdout: fs::read_to_string(&stdout_path).unwrap_or_default(),
-		stderr: fs::read_to_string(&stderr_path).unwrap_or_default(),
+		stderr,
 		exit,
 	}
 }
@@ -253,7 +338,10 @@ fn wait_for_exit(child: &mut Child, timeout: Duration) -> i32 {
 		if let Some(status) = child.try_wait().unwrap() {
 			return status.code().unwrap_or(-1);
 		}
-		if started.elapsed() > timeout {
+		// Bound resident memory, not virtual address space: JS engines and
+		// mimalloc reserve large sparse arenas. The machine is shared.
+		let over_memory_limit = resident_kib(child.id()).is_some_and(|rss| rss > 512 * 1024);
+		if started.elapsed() > timeout || over_memory_limit {
 			#[cfg(unix)]
 			{
 				let group = i32::try_from(child.id()).expect("a POSIX process id fits i32");
@@ -263,9 +351,28 @@ fn wait_for_exit(child: &mut Child, timeout: Duration) -> i32 {
 			}
 			let _ = child.kill();
 			let _ = child.wait();
-			return -2;
+			return if over_memory_limit { -4 } else { -2 };
 		}
 		std::thread::sleep(Duration::from_millis(5));
+	}
+}
+
+fn resident_kib(pid: u32) -> Option<usize> {
+	#[cfg(target_os = "linux")]
+	{
+		let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+		status.lines().find_map(|line| {
+			line.strip_prefix("VmRSS:")?
+				.split_whitespace()
+				.next()?
+				.parse()
+				.ok()
+		})
+	}
+	#[cfg(not(target_os = "linux"))]
+	{
+		let _ = pid;
+		None
 	}
 }
 
@@ -361,6 +468,9 @@ fn multi_file_entry(program: &Path, directory: &Path) -> Option<PathBuf> {
 fn compare(expected: &Expected, outcome: &Outcome) -> Option<String> {
 	let printed: Vec<&str> = outcome.stdout.lines().collect();
 	let mut problems = Vec::new();
+	if outcome.build_failed && (expected.exit != 1 || expected.stderr.is_empty()) {
+		problems.push("build failed".to_string());
+	}
 	if printed != expected.stdout {
 		problems.push(format!(
 			"stdout: expected {:?}, got {:?}",
@@ -402,10 +512,19 @@ fn run_all(
 			scope.spawn(|| {
 				loop {
 					let next = queue.lock().unwrap().next();
-					let Some((index, (path, expected))) = next else {
+					let Some((index, (path, mut expected))) = next else {
 						break;
 					};
-					let outcome = limited(|| run(&path, &expected, scratch, index));
+					let mut outcome = limited(|| run(&path, &expected, scratch, index));
+					if JAVASCRIPT_ORDER
+						.iter()
+						.any(|(file, _)| path.file_name().is_some_and(|name| name == *file))
+					{
+						expected.stdout.sort();
+						let mut lines: Vec<&str> = outcome.stdout.lines().collect();
+						lines.sort_unstable();
+						outcome.stdout = lines.join("\n");
+					}
 					results
 						.lock()
 						.unwrap()
@@ -483,7 +602,7 @@ fn programs_print_what_they_say() {
 			);
 			(path, expected)
 		})
-		.filter(|(_, expected)| !expected.skipped)
+		.filter(|(_, expected)| !expected.skip_targets.iter().any(|target| target == "bun"))
 		.collect();
 	let count = programs.len();
 	let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fa-programs");
@@ -531,6 +650,17 @@ const NATIVE_STDERR: &[(&str, &str)] = &[(
 	"the dev profile's warning about long turns is native only",
 )];
 
+fn async_expectations(path: &Path, text: &str) -> Expected {
+	let mut expected = expectations(text);
+	if NATIVE_STDERR
+		.iter()
+		.any(|(file, _)| path.file_name().is_some_and(|name| name == *file))
+	{
+		expected.stderr.clear();
+	}
+	expected
+}
+
 #[test]
 fn async_programs_print_what_they_print_natively() {
 	if !has_bun() {
@@ -545,26 +675,16 @@ fn async_programs_print_what_they_print_natively() {
 		})
 		.filter(|path| selected(path))
 		.map(|path| {
-			let mut expected = expectations(&fs::read_to_string(&path).unwrap());
-			let name = path.file_name().unwrap().to_string_lossy().into_owned();
-			if NATIVE_STDERR.iter().any(|(file, _)| *file == name) {
-				expected.stderr.clear();
-			}
+			let expected = async_expectations(&path, &fs::read_to_string(&path).unwrap());
 			(path, expected)
 		})
-		.filter(|(_, expected)| !expected.skipped)
+		.filter(|(_, expected)| !expected.skip_targets.iter().any(|target| target == "bun"))
 		.collect();
 	assert!(!programs.is_empty() || std::env::var("FA_PROGRAMS").is_ok());
 	let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fa-async");
 	let mut failures = Vec::new();
-	for (path, mut expected, mut outcome) in run_all(programs, &scratch) {
+	for (path, expected, outcome) in run_all(programs, &scratch) {
 		let name = path.file_name().unwrap().to_string_lossy().into_owned();
-		if JAVASCRIPT_ORDER.iter().any(|(file, _)| *file == name) {
-			expected.stdout.sort();
-			let mut lines: Vec<&str> = outcome.stdout.lines().collect();
-			lines.sort_unstable();
-			outcome.stdout = lines.join("\n");
-		}
 		// `-- pending: reason`: a construct the JavaScript backend lacks yet
 		match (compare(&expected, &outcome), &expected.pending) {
 			(Some(problem), None) => failures.push(format!("{name}:\n    {problem}")),
@@ -637,10 +757,7 @@ const ANALYZER_GAPS: &[(&str, &str)] = &[];
 /// doesn't generate, or doesn't run as annotated, yet (`fa_analyzer::analysis`
 /// documents how to lower what the analyzer types). A listed case that runs
 /// as annotated is reported, to be removed from the list.
-const BACKEND_GAPS: &[&str] = &[
-	// a 1,000,000-deep recursive value: copying it overflows Bun's stack
-	"advanced/06-memory-management-copies-moves-destruction-closures/adv-6.8-05.fa",
-];
+const BACKEND_GAPS: &[&str] = &[];
 
 /// The analyzer cases that describe a run: valid (no expected diagnostic),
 /// not pending, one file, not a test file, with a `prints:` or `exit:`.
@@ -651,7 +768,10 @@ fn runnable_case(text: &str) -> bool {
 			continue;
 		};
 		let comment = line[start + 2..].trim_start();
-		let key = comment.split(':').next().unwrap_or("").trim();
+		let key = comment
+			.split(|c: char| c == ':' || c.is_whitespace())
+			.next()
+			.unwrap_or("");
 		match key {
 			"pending" | "file" | "kind" | "error" => return false,
 			"prints" | "exit" => annotated = true,
@@ -719,7 +839,7 @@ fn analyzer_cases_print_what_they_say() {
 			continue;
 		}
 		let expected = expectations(&text);
-		if !expected.skipped {
+		if !expected.skip_targets.iter().any(|target| target == "bun") {
 			programs.push((path, expected));
 		}
 	}

@@ -1,4 +1,4 @@
-# The programs the native-freestanding target doesn't compile yet, with the reason
+# The programs the native-freestanding target doesn't pass yet, with the reason
 # (`tests/programs.rs`): any other compile error fails.
 analyzer/tests/cases/advanced/04-reference-types-use-mutable-use-reuse/adv-4.5-06.fa: line 3: a `use` of this value is not supported by the native backend yet
 analyzer/tests/cases/comptime/directories.fa: main.fa:4:19: this member is not supported by the native backend yet
@@ -64,6 +64,8 @@ cli/tests/programs/fast-paths.fa: floats (`snprintf` of the C library) on the fr
 cli/tests/programs/float32.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
 cli/tests/programs/floats.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
 cli/tests/programs/integer-arithmetic.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
+cli/tests/programs/js-deep-values.fa: Json.stringify needs a C library (AN004)
+cli/tests/programs/js-million-copy.fa: runtime: recursive deep copy/equality exhausts the stack at one million nodes; use iterative native helpers
 cli/tests/programs/number-api.fa: line 47: this name is not supported by the native backend yet
 cli/tests/programs/percentages.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet
 cli/tests/programs/printing.fa: floats (`snprintf` of the C library) on the freestanding target is not supported by the native backend yet

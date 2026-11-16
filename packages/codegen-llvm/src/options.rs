@@ -223,3 +223,19 @@ impl Options {
 		self.size || self.opt_level != OptLevel::O0
 	}
 }
+
+/// Whether `fa run` and `fa test` load a program in memory with the JIT
+/// (`jit.rs`) rather than link it: this build has LLVM and `fork`, the
+/// target is the `native` one of this machine, there is no C library to
+/// link and no file to write (`--emit-ir`, `--size`), and `FA_JIT` is not
+/// set to `0`.
+pub fn jit_available(target: Target, options: &Options, libraries: &Libraries) -> bool {
+	cfg!(all(fa_llvm, unix))
+		&& target == Target::Native
+		&& !options.emit_ir
+		&& !options.size
+		&& libraries.link.is_empty()
+		&& libraries.c_library.is_none()
+		&& std::env::var_os("FA_NATIVE_TRIPLE").is_none_or(|triple| triple.is_empty())
+		&& std::env::var_os("FA_JIT").is_none_or(|value| value != "0")
+}

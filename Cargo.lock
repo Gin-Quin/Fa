@@ -251,6 +251,7 @@ dependencies = [
  "fa-interpreter",
  "fa-parser",
  "inkwell",
+ "libc",
  "llvm-sys",
  "rustc-hash",
 ]

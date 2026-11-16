@@ -39,8 +39,10 @@ Usage: fa run [--target=<target>] [--overflow-checks=true|false]
 Compiles a standalone file, a script (`scripts/seed.fa`) or the application of a
 package for Bun, and runs it with Bun (found on the PATH or in ~/.bun/bin). The
 arguments after the file go to the program; a `--` right after the file is
-dropped. `--target=native|wasm` compiles with the LLVM backend instead. The exit
-code is the program's. `--asynchronous` overrides `build.asynchronous` (by
+dropped. `--target=native|wasm` compiles with the LLVM backend instead; the
+`native` program is loaded in memory by LLVM's JIT and runs at once, without an
+executable (`FA_JIT=0` links one, as does a program that links C libraries). The
+exit code is the program's. `--asynchronous` overrides `build.asynchronous` (by
 default, a program is asynchronous when it starts a task or may wait).
 "
 		}
@@ -91,6 +93,9 @@ when a test fails. `--watch` runs them again
 after each change. In a workspace, without a package, the tests of every package
 with test files run. `--target=native|wasm` compiles them with the LLVM backend and
 runs each test in its own process, using the wasm loader on Node or Bun for wasm.
+The `native` tests are compiled once in memory by LLVM's JIT, without
+optimization, and each test runs in a forked copy of that process (`FA_JIT=0`
+links an executable instead).
 `--watch` preserves the selected target. `--coverage` is not available yet.
 "
 		}

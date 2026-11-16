@@ -191,7 +191,7 @@ A stored link adds a containment condition to replacement: resetting a pool is a
 JavaScript objects never move, so the growing collections only differ from their standard counterparts by the methods they lack:
 
 - `GrowingArray` is a JavaScript array.
-- `GrowingPool` is a JavaScript array of its elements: there is no deletion, so the identity-based `Set` used by `Pool` is not needed. Object references are the objects themselves. Borrowed primitive or mixed-union slots use cached accessor cells keyed by the array and index, forwarded through aliases and user calls.
+- `GrowingPool` uses the same JavaScript object/value representations as `Pool`, with no removal operations. Object references are the objects themselves. Primitive and mixed-union borrows retain the direct slot array and its index; local reads and writes are array member accesses, and user calls pass allocation-free container/key parts. No accessor cell or reference cache is allocated.
 - `GrowingColumnar`, `GrowingMap` and `GrowingSet` use the representation of `Columnar`, `Map` and `Set`.
 
 ### Compact stored links: every target

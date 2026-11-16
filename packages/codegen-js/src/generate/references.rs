@@ -289,6 +289,9 @@ impl Generator<'_> {
 				_ => return None,
 			}
 		}
+		if self.is_value_pool(ty) {
+			return Some((Expr::primary(format!("{value}.$slots")), Some(false)));
+		}
 		let map = match self.types.kind(ty) {
 			TypeKind::Collection(
 				CollKind::Map
@@ -658,16 +661,11 @@ impl Generator<'_> {
 				} else if let Some(Callee::Builtin(id)) =
 					self.analysis.call(value).map(|call| call.callee)
 				{
-					Some(
-						if builtins::get(id).path.starts_with("Map#")
-							|| builtins::get(id).path.starts_with("Pool#")
-							|| builtins::get(id).path.starts_with("Columnar#")
-						{
-							Access::Map
-						} else {
-							Access::Bracket
-						},
-					)
+					Some(if builtins::get(id).path.starts_with("Map#") {
+						Access::Map
+					} else {
+						Access::Bracket
+					})
 				} else {
 					Some(Access::Dynamic)
 				}
@@ -749,51 +747,50 @@ impl Generator<'_> {
 				_ => Key::Index(Expr::name(key_name, true)),
 			};
 		}
-		if self.is_module_value(symbol) || mutable {
-			if let Some((container, key)) = self.parts_pair(&parts) {
-				let name = self.declare(symbol);
-				let (container_name, key_name) =
-					(format!("{name}$container"), format!("{name}$key"));
-				let keyword = if self.is_module_value(symbol) || {
-					let guarded = self.guard_binding(&container_name);
-					if guarded {
-						self.guard_binding(&key_name);
-					}
-					guarded
-				} {
-					""
-				} else {
-					"let "
-				};
-				self.out
-					.line(format!("{keyword}{container_name} = {};", container.text));
-				self.out
-					.line(format!("{keyword}{key_name} = {};", key.text));
-				let access = if mutable {
-					self.reseatable_access(symbol, value)
-				} else {
-					match parts.key {
-						Key::Entry(_) => Access::Map,
-						Key::Dynamic(_) => Access::Dynamic,
-						_ => Access::Bracket,
-					}
-				};
-				let key = match access {
-					Access::Map => Key::Entry(Expr::name(key_name, false)),
-					Access::Set => Key::Set(Expr::name(key_name, false)),
-					Access::Dynamic => Key::Dynamic(Expr::name(key_name, false)),
-					Access::Bracket => Key::Index(Expr::name(key_name, false)),
-				};
-				self.bind_reference_parts(
-					symbol,
-					Parts {
-						container: Some(Expr::name(container_name, false)),
-						key,
-						optional: parts.optional,
-					},
-				);
-				return;
-			}
+		if (self.is_module_value(symbol) || mutable)
+			&& let Some((container, key)) = self.parts_pair(&parts)
+		{
+			let name = self.declare(symbol);
+			let (container_name, key_name) = (format!("{name}$container"), format!("{name}$key"));
+			let keyword = if self.is_module_value(symbol) || {
+				let guarded = self.guard_binding(&container_name);
+				if guarded {
+					self.guard_binding(&key_name);
+				}
+				guarded
+			} {
+				""
+			} else {
+				"let "
+			};
+			self.out
+				.line(format!("{keyword}{container_name} = {};", container.text));
+			self.out
+				.line(format!("{keyword}{key_name} = {};", key.text));
+			let access = if mutable {
+				self.reseatable_access(symbol, value)
+			} else {
+				match parts.key {
+					Key::Entry(_) => Access::Map,
+					Key::Dynamic(_) => Access::Dynamic,
+					_ => Access::Bracket,
+				}
+			};
+			let key = match access {
+				Access::Map => Key::Entry(Expr::name(key_name, false)),
+				Access::Set => Key::Set(Expr::name(key_name, false)),
+				Access::Dynamic => Key::Dynamic(Expr::name(key_name, false)),
+				Access::Bracket => Key::Index(Expr::name(key_name, false)),
+			};
+			self.bind_reference_parts(
+				symbol,
+				Parts {
+					container: Some(Expr::name(container_name, false)),
+					key,
+					optional: parts.optional,
+				},
+			);
+			return;
 		}
 		self.bind_reference_parts(symbol, parts);
 	}
@@ -1139,11 +1136,11 @@ impl Generator<'_> {
 				values.first()?.text
 			));
 			self.out.line(format!(
-				"const {container} = {slot} !== undefined ? {pool} : undefined;"
+				"const {container} = {slot} !== undefined ? {pool}.$slots : undefined;"
 			));
 			return Some(Parts {
 				container: Some(Expr::name(container, true)),
-				key: Key::Entry(Expr::name(slot, true)),
+				key: Key::Index(Expr::name(slot, true)),
 				optional: true,
 			});
 		}
@@ -1155,8 +1152,8 @@ impl Generator<'_> {
 				values.first()?.text
 			));
 			return Some(Parts {
-				container: Some(receiver),
-				key: Key::Entry(Expr::name(slot, true)),
+				container: Some(Expr::primary(format!("{}.$slots", receiver.primary_text()))),
+				key: Key::Index(Expr::name(slot, true)),
 				optional: false,
 			});
 		}
@@ -1247,7 +1244,7 @@ impl Generator<'_> {
 			return None;
 		};
 		if let Some(Reference::Place(Parts {
-			key: Key::Entry(key) | Key::Dynamic(key),
+			key: Key::Index(key) | Key::Entry(key) | Key::Dynamic(key),
 			..
 		})) = self.references.get(&symbol)
 		{

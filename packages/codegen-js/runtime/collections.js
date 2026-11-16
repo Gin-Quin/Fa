@@ -1218,16 +1218,19 @@ export function faIterable(source) {
 // @fa-helper FaValuePool
 /**
  * A `Pool` (or `GrowingPool`) of values that are not objects
- * (`Pool<Integer>`): its elements by slot, in a `Map` from a slot number to
- * the value, iterated as its values. A reference to an element is the pool
- * and its slot (`get`, `set`): `add` gives the slot, `slotOf` finds one,
+ * (`Pool<Integer>`): a direct slot array, live indices and a free list.
+ * A reference is the slot array and its index, with no lookup on access.
+ * `add` gives the slot, `slotOf` finds one,
  * `delete` and `take` take one. Printed, copied and compared by its tag.
  * @template T
  */
 export class FaValuePool {
-	/** @type {Map<number, T>} */
-	#slots = new Map();
-	#next = 0;
+	/** Direct reference container; only live slots contain initialized values. @type {(T | undefined)[]} */
+	$slots = [];
+	/** @type {Set<number>} */
+	#live = new Set();
+	/** @type {number[]} */
+	#free = [];
 
 	/** @param {Iterable<T>} [values] */
 	constructor(values) {
@@ -1245,7 +1248,7 @@ export class FaValuePool {
 
 	/** @returns {number} */
 	get size() {
-		return this.#slots.size;
+		return this.#live.size;
 	}
 
 	/**
@@ -1254,9 +1257,9 @@ export class FaValuePool {
 	 * @returns {number} its slot
 	 */
 	add(value) {
-		const slot = this.#next;
-		this.#next += 1;
-		this.#slots.set(slot, value);
+		const slot = this.#free.pop() ?? this.$slots.length;
+		this.$slots[slot] = value;
+		this.#live.add(slot);
 		return slot;
 	}
 
@@ -1275,7 +1278,7 @@ export class FaValuePool {
 	 * @returns {T | undefined}
 	 */
 	get(slot) {
-		return this.#slots.get(slot);
+		return this.$slots[slot];
 	}
 
 	/**
@@ -1284,7 +1287,7 @@ export class FaValuePool {
 	 * @returns {this}
 	 */
 	set(slot, value) {
-		this.#slots.set(slot, value);
+		this.$slots[slot] = value;
 		return this;
 	}
 
@@ -1293,7 +1296,10 @@ export class FaValuePool {
 	 * @returns {boolean}
 	 */
 	delete(slot) {
-		return this.#slots.delete(slot);
+		if (!this.#live.delete(slot)) return false;
+		this.$slots[slot] = undefined;
+		this.#free.push(slot);
+		return true;
 	}
 
 	/**
@@ -1302,14 +1308,16 @@ export class FaValuePool {
 	 * @returns {T | undefined} its value
 	 */
 	take(slot) {
-		const value = this.#slots.get(slot);
+		const value = this.$slots[slot];
 		this.delete(slot);
 		return value;
 	}
 
 	/** @returns {void} */
 	clear() {
-		this.#slots.clear();
+		this.#live.clear();
+		this.$slots.length = 0;
+		this.#free.length = 0;
 	}
 
 	/**
@@ -1318,7 +1326,8 @@ export class FaValuePool {
 	 * @returns {number | undefined}
 	 */
 	slotOf(predicate) {
-		for (const [slot, value] of this.#slots) {
+		for (const slot of this.#live) {
+			const value = /** @type {T} */ (this.$slots[slot]);
 			if (predicate(value)) {
 				return slot;
 			}
@@ -1331,7 +1340,8 @@ export class FaValuePool {
 	 * @returns {void}
 	 */
 	deleteWhere(predicate) {
-		for (const [slot, value] of this.#slots) {
+		for (const slot of this.#live) {
+			const value = /** @type {T} */ (this.$slots[slot]);
 			if (predicate(value)) {
 				this.delete(slot);
 			}
@@ -1345,7 +1355,7 @@ export class FaValuePool {
 	 */
 	filter(predicate) {
 		const kept = new FaValuePool();
-		for (const value of this.#slots.values()) {
+		for (const value of this.values()) {
 			if (predicate(value)) {
 				kept.add(value);
 			}
@@ -1359,12 +1369,12 @@ export class FaValuePool {
 	}
 
 	/** @returns {IterableIterator<T>} */
-	values() {
-		return this.#slots.values();
+	*values() {
+		for (const slot of this.#live) yield /** @type {T} */ (this.$slots[slot]);
 	}
 
 	/** @returns {IterableIterator<T>} */
 	[Symbol.iterator]() {
-		return this.#slots.values();
+		return this.values();
 	}
 }

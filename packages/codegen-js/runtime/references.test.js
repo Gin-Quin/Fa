@@ -27,14 +27,14 @@ test("pool locators retain exact slot identity among duplicate values", () => {
 	const pool = new FaValuePool();
 	const first = pool.add(7);
 	const second = pool.add(7);
-	faReferenceSet(pool, second, 9);
+	faReferenceSet(pool.$slots, second, 9);
 	expect(pool.get(first)).toBe(7);
 	expect(pool.get(second)).toBe(9);
 	pool.delete(second);
 	const third = pool.add(11);
-	expect(third).not.toBe(second);
-	expect(faReferenceRead(pool, third)).toBe(11);
-	expect(faReferenceRead(pool, second)).toBeUndefined();
+	expect(third).toBe(second); // stale references are rejected before slot reuse
+	expect(faReferenceRead(pool.$slots, third)).toBe(11);
+	expect(pool.$slots.length).toBe(2);
 });
 
 test("object references remain bare objects with in-place writes", () => {
@@ -75,7 +75,7 @@ test("generic pool bodies can use ordinary object and primitive operations", () 
 	const numbers = new FaValuePool();
 	const slot = numbers.add(7);
 	expect(numbers.slotOf(() => true)).toBe(slot);
-	faReferenceSet(numbers, slot, 9);
+	faReferenceSet(numbers.$slots, slot, 9);
 	expect([...numbers]).toEqual([9]);
 	expect(numbers.slotOf(() => false)).toBeUndefined();
 });
@@ -98,4 +98,21 @@ test("map replacement preserves existing object references and inserts new slots
 	expect(node.value).toBe(9);
 	faMapAssign(values, "new", { value: 11 });
 	expect(values.get("new")).toEqual({ value: 11 });
+});
+
+test("primitive pool borrowing reads the direct slot array without a lookup", () => {
+	const pool = new FaValuePool([7]);
+	const container = pool.$slots;
+	const key = pool.slotOf(() => true);
+	pool.get = () => {
+		throw new Error("reference read performed a lookup");
+	};
+	expect(container[key]).toBe(7);
+	container[key] = 9;
+	expect([...pool]).toEqual([9]);
+	for (let index = 0; index < 10000; index++) {
+		pool.delete(key);
+		expect(pool.add(index)).toBe(key);
+	}
+	expect(pool.$slots.length).toBe(1);
 });

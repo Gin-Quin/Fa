@@ -367,7 +367,7 @@ place: evaluate its innermost container and key once, then rewrite each read or
 write to that member access. `use score = player.score; score += 1` emits
 `player.score += 1`. A mutable reference retains two locals reassigned by
 `reuse`. A map slot uses its existing `get`/`set` operations; a primitive pool
-uses its stable slot index. There are no accessor cells or reference caches.
+uses its slot array and stable slot index, with direct member accesses. There are no accessor cells or reference caches.
 
 At a function boundary a primitive or mixed-union reference has two parts:
 **(innermost container, key)**. For `values[i]` these are `(values, i)`;

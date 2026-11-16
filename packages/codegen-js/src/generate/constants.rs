@@ -18,14 +18,7 @@ impl Generator<'_> {
 	pub(crate) fn constant_value(&mut self, n: NodeId, value: &Value, ty: TypeId) -> Expr {
 		match self.comptime_text(value, ty) {
 			Some(expr) => expr,
-			None => self.unsupported(
-				n,
-				if value.has_lone_surrogates() {
-					"string constants with lone surrogates (not emitted yet)"
-				} else {
-					"this compile-time value"
-				},
-			),
+			None => self.unsupported(n, "this compile-time value"),
 		}
 	}
 
@@ -116,9 +109,13 @@ impl Generator<'_> {
 					.collect::<Vec<_>>()
 					.join(", ")
 			)),
-			Value::String(text) => {
-				Expr::constant(js::string_literal(text.as_str()?), Prec::Primary)
-			}
+			Value::String(text) => Expr::constant(
+				text.as_str().map_or_else(
+					|| js::string_literal_units(text.units()),
+					js::string_literal,
+				),
+				Prec::Primary,
+			),
 			// an empty pool, set or map (a field default of a type of another
 			// file): an empty collection of its class
 			Value::Array(items)

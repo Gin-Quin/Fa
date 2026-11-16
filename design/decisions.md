@@ -1418,3 +1418,7 @@ well-formed text, so literal-type symbols remain UTF-8 (same lead decision).
 ## String integration: grouped calls and bounded text (2026-11-16)
 
 Both lowerers unwrap a direct callee's groups before reading its receiver, preserving the reviewed builtin identity and allocation facts. Saved bound methods retain function-value semantics. Compile-time well-formed concatenation writes once into its final shared UTF-8 allocation, with the cached unit length known from its inputs. The buffer is initialized from complete UTF-8 strings before being exposed as `Arc<str>`. This removes the intermediate full-size buffer that exhausted allocator address-space reservations under the existing 512 MB check limit; evaluation still preflights its existing memory budget. Neither the limit nor the memory regression was changed.
+
+## String integration: compile-time constants (2026-11-16)
+
+JavaScript preserves the interpreter's UTF-8 literal fast path. A malformed `Text` instead emits every UTF-16 unit as a four-digit JavaScript escape, including punctuation and line breaks; recursively stored values use the same emitter. Compact `Value::Bytes` emits a `Uint8Array`, retaining inferred Bytes types. Output encoding alone replaces lone surrogates. Native emission retains its explicit lone-surrogate refusal until it can write canonical WTF-8, UTF-16 lengths and ASCII/surrogate metadata; it must never use lossy output conversion for constants.

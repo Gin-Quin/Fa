@@ -225,6 +225,17 @@ pub fn string_literal(text: &str) -> String {
 	out
 }
 
+/// Lossless literal for a malformed compile-time string. Escaping every unit
+/// also protects quotes, backslashes and line terminators in the same value.
+pub fn string_literal_units(units: impl Iterator<Item = u16>) -> String {
+	let mut out = String::from("\"");
+	for unit in units {
+		let _ = write!(out, "\\u{unit:04x}");
+	}
+	out.push('"');
+	out
+}
+
 /// The text of a template literal part (between backticks), escaped.
 pub fn template_text(text: &str) -> String {
 	let mut out = String::with_capacity(text.len());

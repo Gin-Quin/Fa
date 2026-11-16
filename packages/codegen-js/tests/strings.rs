@@ -102,3 +102,17 @@ fn explicit_views_only_link_the_runtime_they_use() {
 		assert!(!output.helpers.contains(&absent), "{absent}");
 	}
 }
+
+#[test]
+fn constants_preserve_raw_units_and_compact_bytes() {
+	let source = include_str!(
+		"../../analyzer/tests/cases/values/07-strings-and-characters/constant-code-units.fa"
+	);
+	for target in [Target::Bun, Target::Node, Target::Web] {
+		let (mut session, file) = fa_analyzer::analyze_source(source);
+		let output = generate(&mut session, file, &Options::new(target, "constants.fa")).unwrap();
+		assert!(output.code.contains(r#""\ud83d""#), "{}", output.code);
+		assert!(output.code.contains(r#""\ude00""#), "{}", output.code);
+		assert!(output.code.contains("new Uint8Array([195, 169])"));
+	}
+}

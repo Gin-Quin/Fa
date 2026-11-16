@@ -691,6 +691,38 @@ part of its coroutine's frame. This is an implementation choice under the existi
 ## Unobserved capacities of region arrays (2026-11-07)
 
 The closed ROOT_REGIONS proof also publishes `capacity-unobserved` for an admitted `Array<Root>` when no module observes that family's array capacity. A capacity read on either an ordinary root array or a child array removes this permission for both; reads through aliases, a function value and chained or pattern-bound fields count too. This is an additional positive fact, never an assumption from a missing negative claim: incomplete manifests, foreign code, deferred bodies and unsupported member-only arrays keep their conservative rejection. It reuses the existing semantic walk and fact dependency log. Native lowering may freeze a child array at its exact length only after consulting this fact; an absent fact preserves its original capacity.
+
+## Recursive aggregates: exact empty-field reservations (2026-11-16)
+
+The first isolated `scene` change removes the geometric slack of the existing
+counted append-loop reservation, without changing recursive ownership. The
+analyzer publishes a separate closed `arrays.capacities` permission when **no
+module reads any Array capacity**. This deliberately global rule covers aliases,
+widened element types, patterns and function values. An exact scanned-module
+manifest is required in whole-module and per-unit builds; missing/deferred/error
+contributions, generic bodies, key-loop snapshots and foreign declarations/calls
+reject it. C-library lowering also rejects it. The manifest implementation is
+shared with the unchanged root-region proof. Consultations invalidate cached
+objects when an observer appears in another unit.
+
+Only the already-proven counted append to an empty array field uses the permission:
+reserve its nonnegative trip count with `fa_array_reserve` rather than geometrically
+rounding it with `fa_array_room`. Keep the header's address, ordinary ownership and
+every push's capacity check. Calls through aliases and later structural mutations
+remain valid, and errors still destroy the constructed prefix. Nonempty fields and
+local arrays keep the previous path (locals need geometric amortization over
+repeated loops). This does not claim that the array is frozen after construction.
+
+`scene`'s 112-byte inline child objects previously reserved four slots even for one,
+two or three children. Its current object/array shape with mutable passive fields
+is outside the existing root-region proof. Region coallocation and smaller headers
+require a further structural-mutation/lifetime proof; they are not inferred from
+this capacity permission. No traversal is reordered: floating-point folds,
+exceptions and observable effects prevent a blanket allocation-order rewrite.
+
+Measurements and remaining distance are recorded in the generated aggregate
+results and `/home/claude-dev/fa-lead/reports/perf-aggregates.md` after validation.
+
 ## Compact payloads in proven root regions (2026-11-07)
 
 The analyzer's portable, closed root-region proof is shared by all compilation units.

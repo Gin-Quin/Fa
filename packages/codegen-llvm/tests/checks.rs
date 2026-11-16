@@ -1160,15 +1160,37 @@ console.log(items.length)
 
 	#[test]
 	fn empty_array_fields_reserve_before_the_loop_without_omitting_push_checks() {
-		let ir = ir_of(
-			"reserve-array-fields",
-			"type Bucket = { items: Array<Integer> }\nfunction fill = (count: Integer): Bucket => { mutable bucket = Bucket { items = [] }\nfor index in 0..count { bucket.items.push(index) }\nbucket }\nconsole.log(fill(9))\n",
-		);
-		let fill = function(&ir, "fa.fill");
-		let reserve = fill.find("@fa_array_room(").expect("a reservation");
-		let body = fill.find("for_body:").expect("a counted loop");
-		assert!(reserve < body, "{fill}");
-		assert!(fill[body..].contains("@fa_array_grow("), "{fill}");
+		let source = "type Bucket = { items: Array<Integer> }\nfunction fill = (count: Integer): Bucket => { mutable bucket = Bucket { items = [] }\nfor index in 0..count { bucket.items.push(index) }\nbucket }\nmutable result = fill(9)\nconsole.log(result)\n";
+		for (name, suffix, exact) in [
+			("unobserved", "", true),
+			("observed", "console.log(result.items.capacity)\n", false),
+			(
+				"alias",
+				"let alias = result.items\nconsole.log(alias.capacity)\n",
+				false,
+			),
+		] {
+			for (target_name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+				let ir = ir_at_target(
+					&format!("reserve-array-fields-{name}-{target_name}"),
+					&format!("{source}{suffix}"),
+					true,
+					OptLevel::O0,
+					target,
+				);
+				let fill = function(&ir, "fa.fill");
+				let expected = if exact {
+					"@fa_array_reserve("
+				} else {
+					"@fa_array_room("
+				};
+				let reserve = fill.find(expected).expect("a reservation");
+				let body = fill.find("for_body:").expect("a counted loop");
+				assert!(reserve < body, "{fill}");
+				assert!(fill[body..].contains("@fa_array_grow("), "{fill}");
+				assert_eq!(fill.contains("@fa_array_reserve("), exact, "{fill}");
+			}
+		}
 	}
 
 	/// A program with the loops that `lower/copies.rs` turns into block

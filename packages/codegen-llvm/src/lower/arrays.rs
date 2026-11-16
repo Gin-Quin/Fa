@@ -2098,8 +2098,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				array_value,
 				item,
 				path == "Array#sort",
-				&values,
-				&arguments,
+				values,
+				arguments,
 				node,
 			),
 			("Array#join" | "Array#joinedLength", [separator]) if item == Repr::Str => {

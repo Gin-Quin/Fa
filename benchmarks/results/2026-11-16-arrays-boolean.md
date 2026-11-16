@@ -36,7 +36,7 @@ Every CPU verdict requires the same-binary control to differ by <3% on both meas
 | — | `respond-interpolation` | — | unmeasured | — | — | — | — | — |
 | — | `scene` | — | unmeasured | — | — | — | — | — |
 | — | `sexp` | — | unmeasured | — | — | — | — | — |
-| — | `sieve` | — | unmeasured | — | — | — | — | — |
+| secondary | `sieve` | 100000000 | 1.019 / 1.002 [0.895, 1.166] | 0.907 / 0.935 [0.861, 1.014] | 0.816 | 0.999 | 0.970/0.900 fail | not resolved / not resolved |
 | — | `sort-objects` | — | unmeasured | — | — | — | — | — |
 | — | `spectral-norm` | — | unmeasured | — | — | — | — | — |
 | — | `string-building` | — | unmeasured | — | — | — | — | — |
@@ -84,7 +84,7 @@ Wasm and Bun timings use the size shown, including process startup; errors are r
 | `respond-interpolation` | — | — | — | 40000 | 204.717 / 189.706 / 414.536 | — | — | — |
 | `scene` | — | — | — | 9 | 9.482 / 7.901 / 9.234 | — | — | — |
 | `sexp` | — | — | — | 2000 | 81.323 / 77.535 / 118.522 | — | — | — |
-| `sieve` | — | — | — | 10000000 | 203.737 / 249.547 / 203.878 | — | — | — |
+| `sieve` | 1.159 / 1.137 / 1.277 | 99328 / 99584 / 99456 | 27144 / 18904 / 341048 | 10000000 | 203.737 / 249.547 / 203.878 | — | — | — |
 | `sort-objects` | — | — | — | 100000 | 176.362 / 119.373 / 206.578 | — | — | — |
 | `spectral-norm` | — | — | — | 1000 | 535.731 / 608.314 / 691.207 | — | — | — |
 | `string-building` | — | — | — | 300000 | 236.670 / 148.698 / 872.495 | — | — | — |

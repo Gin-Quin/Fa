@@ -1811,6 +1811,18 @@ Part 2 remains unimplemented at this completed-item context boundary.
   not an instruction-count speedup. CPU acceptance is measured separately.
   The largest other increase is 36 Ir on words (+0.000127%). Full native,
   freestanding and wasm executable/leak corpora pass (829/740/808 programs).
+- **Item 2 CPU outcome:** retain the first 21-round series at 100 million
+  items (105 samples, 21 orders, CPU 5), including the archived before
+  compiler in the same rounds. After/before point ratios are 0.876 / 0.901;
+  after/Goose 1.019 / 1.002 and after/Rust 0.907 / 0.935. The identical-binary
+  control is 0.970 / 0.900 and fails strict 3% on both estimators, so every
+  CPU gain/goal verdict remains **not resolved**. No favorable retiming
+  replaces this series. Keep the safe block-fill lowering and its complete
+  instruction gate, without claiming a demonstrated CPU speedup. Canonical
+  data: `benchmarks/results/2026-11-16-arrays-boolean.{json,md}`. All 1,392
+  distinct workspace tests validate; the initial run's sole stdout/stderr
+  capture flake passes in the unchanged 22-test workspace rerun and has a
+  separate harness follow-up in TODO.
 - **Constant remainder:** an exact positive immutable divisor declared outside
   the innermost loop can use the existing guarded unsigned reciprocal for a
   64-bit signed `%%` on native/freestanding targets. The singleton type, use

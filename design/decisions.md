@@ -1742,3 +1742,15 @@ word-count is 235,017,839 → 235,017,865 (+26 Ir). The 27 checkpoint records ar
 identical in the complete profile. No instruction win on these map benchmarks
 is claimed. Canonical scalar64 results now contain the complete instruction
 phase; full workspace and controlled CPU acceptance remain pending.
+
+The full corpus exposed two wrong pre-existing order assertions in
+`table-storage.fa` and its O0 counterpart: returned Map<Integer,Integer> printed
+[(9, 2), (8, 1)] instead of [(8, 1), (9, 2)]. The language specifies no map
+iteration order. Correct both fixtures to require the exact formatted string
+in either of the two possible orders, plus both keyed values and size two;
+print the keyed values deterministically. This preserves formatting/content
+checks and adds cardinality checking, without pinning a storage layout.
+No expected-skip changes. All other outputs in all three targets matched.
+Focused corrected fixtures pass all LLVM targets/leak checks (4/4), fmt and
+Clippy pass; the whole workspace is rerun. Compiler sources remain identical
+to 1f8e7118, so existing instruction profiles and archived binaries are valid.

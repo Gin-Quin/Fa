@@ -1,0 +1,8 @@
+-- asynchronous: false
+function prune = <K, V>(map: Map<K, V>) mutates map => {
+	map.deleteWhere((_key, _value) => true)
+}
+mutable map: Map<Int64, Int64> = [(0, 10), (-1, 20), (9223372036854775807, 30)]
+prune(map)
+assert map.size == 0
+console.log("generic delete ok") -- prints: generic delete ok

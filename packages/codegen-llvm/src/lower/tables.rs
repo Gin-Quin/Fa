@@ -171,40 +171,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		((header + slots * 8 + directory + 15) & !15) + chunks * chunk
 	}
 
-	/// Whether the entries of maps of this type are dense: the whole program
-	/// is lowered in this module, and nothing in it keeps a reference into the
-	/// values of such a map (`design/decisions.md`, "Dense maps"):
-	/// `program::unsafe_maps`.
-	pub(crate) fn dense_map(&self, ty: TypeId) -> bool {
-		if self.whole_program {
-			return !self.unsafe_maps.contains(&ty);
-		}
-		// per unit: the merged facts of every unit, by stable name (`facts.rs`)
-		self.program_facts.as_ref().is_some_and(|facts| {
-			crate::facts::stable_type_name(self.types(), ty).is_some_and(|name| {
-				!facts
-					.consulted(crate::facts::REFERENCED_MAPS, self.fact_log.as_deref())
-					.contains(&name)
-			})
+	/// Every table operation uses the same concrete type and the same
+	/// exclusions, including generic patterns (`facts::map_excluded`). A
+	/// lowering without complete program facts keeps stable chunks.
+	fn map_excluded(
+		&self,
+		ty: TypeId,
+		kind: &'static str,
+		local: &std::collections::BTreeSet<String>,
+	) -> bool {
+		crate::facts::map_excluded(self.types(), ty, |name| {
+			if self.whole_program {
+				local.contains(name)
+			} else {
+				self.program_facts.as_ref().is_none_or(|facts| {
+					facts
+						.consulted(kind, self.fact_log.as_deref())
+						.contains(name)
+				})
+			}
 		})
 	}
 
-	/// Whether a dense map type keeps its entries out of the probe array: a
-	/// `deleteWhere` iterates over maps of that type.
+	/// No reference into a map of this type outlives growth: entries may
+	/// move. The type has already been resolved by `table_of`.
+	fn dense_map(&self, ty: TypeId) -> bool {
+		!self.map_excluded(ty, crate::facts::REFERENCED_MAPS, &self.unsafe_maps)
+	}
+
+	/// A `deleteWhere` needs positions that shifting deletion cannot move.
 	fn deleted_while_iterated(&self, ty: TypeId) -> bool {
-		if self.whole_program {
-			return self.no_inline_maps.contains(&ty);
-		}
-		self.program_facts.as_ref().is_none_or(|facts| {
-			crate::facts::stable_type_name(self.types(), ty).is_none_or(|name| {
-				facts
-					.consulted(
-						crate::facts::DELETED_WHILE_ITERATED_MAPS,
-						self.fact_log.as_deref(),
-					)
-					.contains(&name)
-			})
-		})
+		self.map_excluded(
+			ty,
+			crate::facts::DELETED_WHILE_ITERATED_MAPS,
+			&self.no_inline_maps,
+		)
 	}
 
 	/// The key and value of a map or set type.
@@ -212,6 +213,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (Repr::Map(ty) | Repr::Set(ty)) = repr else {
 			return Err(Error::Llvm(format!("{repr:?} is not a table")));
 		};
+		let ty = self.concrete_type(ty);
 		let TypeKind::Collection(kind, item, key) = self.types().kind(ty) else {
 			return Err(Error::Llvm("a table without a collection type".into()));
 		};

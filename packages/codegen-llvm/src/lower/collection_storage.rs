@@ -567,7 +567,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 		repr: Repr,
 	) -> Result<Option<Val<'ctx>>, Error> {
-		let key = (self.file, node, repr);
+		let key = (self.file, node, self.shape_key(repr));
 		if let Some(value) = self.readonly_collections.get(&key) {
 			return Ok(Some(*value));
 		}

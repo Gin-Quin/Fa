@@ -2072,6 +2072,65 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 	}
 
 	#[test]
+	fn generic_map_instances_share_the_callers_layout_policy() {
+		for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+			for (key, flags) in [
+				("Int8", 1_u64 << 41),
+				("Int16", 1 << 41),
+				("UInt32", (1 << 41) | (1 << 42)),
+				("Int64", (1 << 41) | (1 << 43)),
+			] {
+				for (case, body, extra, expected) in [
+					("inline", "map[key] = value", "", flags),
+					(
+						"delete",
+						"map.deleteWhere((_key, _value) => true)",
+						"",
+						1 << 40,
+					),
+					(
+						"caller-reference",
+						"map[key] = value",
+						"use held = map.getOrInsert(key, 0)\nmap.reserve(1000)\nconsole.log(held)\n",
+						0,
+					),
+					(
+						"generic-reference",
+						"use held = map.getOrInsert(key, value)\nmap.reserve(1000)\nconsole.log(held)",
+						"",
+						0,
+					),
+				] {
+					let source = format!(
+						"function change = <K, V>(map: Map<K, V>, key: K, value: V) mutates map => {{\n{body}\n}}\nfunction run = (key: {key}) => {{\nmutable map = Map<{key}, Int64>.from([], capacity = 16)\nchange(map, key, Int64(7))\n{extra}console.log(map.size)\n}}\nrun(3)\n"
+					);
+					let ir = ir_at_target(
+						&format!("map-generic-{case}-{key}-{name}"),
+						&source,
+						false,
+						OptLevel::O0,
+						target,
+					);
+					for function_name in ["fa.run", "fa.change.0"] {
+						let body = function(&ir, function_name);
+						if expected != 0 {
+							assert!(
+								body.contains(&format!("i64 {expected})")),
+								"{case} {key} {name}: {body}"
+							);
+						} else {
+							assert!(!body.contains("i64 1099511627776)"), "{body}");
+						}
+						if expected != flags {
+							assert!(!body.contains(&format!("i64 {flags})")), "{body}");
+						}
+					}
+				}
+			}
+		}
+	}
+
+	#[test]
 	fn scalar64_map_slots_preserve_reference_and_iteration_fallbacks() {
 		for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
 			for (key, value, flags) in [

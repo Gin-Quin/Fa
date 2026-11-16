@@ -1786,3 +1786,42 @@ all 36 profiles, three CPU phases, 315 samples, 63 round orders, binary/source
 hashes and strict-control publication. Benchmark sources and driver unchanged.
 The dataset round-trips byte-for-byte; all 27 checkpoint rows are retained.
 Part 2 remains unimplemented at this completed-item context boundary.
+
+
+## Collection map review fixes (2026-11-16)
+
+C1 exposed an ABI disagreement: a generic `deleteWhere` used the generic
+map TypeId's dense layout while its concrete caller constructed scalar64
+inline slots. C2 has the same cause in the other direction: concrete callers
+requiring stable references passed chunked tables to generic mutation code
+using dense/inline entries. C2 predates scalar64.
+
+One policy now lives in `facts.rs::map_excluded`, called by
+`lower/tables.rs::table_of` after resolving the concrete instance. The same
+collectors supply whole-program exclusions and merged per-unit facts. Each
+generic key/value component becomes a wildcard, including nested parameters;
+non-generic components retain their stable identity. We deliberately widen
+constraints and repeated-parameter correlations rather than requiring a
+complete call/instance inventory before any constructor is lowered. This
+changes only representation eligibility, never accepted programs or map
+semantics. Generic code without exclusions retains inline entries at every
+supported integer width. Concrete reference facts apply inside instances too.
+
+Sibling checks exposed helper caches keyed only by scalar representations:
+`Map<Int64, Int64>` requiring chunks and an inline `Map<Integer, Integer>`
+shared a generic copy helper and crashed. Copy/drop/equality helpers and
+read-only literal caches now include exact type bindings; map representations
+carry concrete type identities, generic argument conversion forwards those
+bindings, and nested collections compare actual table layouts. Callback
+indexing also registers generic type methods before their child lambdas and
+defers local named closures to their enclosing instance. These retain accepted
+generic methods and captured-map code while avoiding eager erased layouts.
+
+Cache logs query all matching concrete/wildcard exclusions, including their
+absence; the object ABI version changes. Copies, drops, callbacks, readonly
+literals and frame constructors all pass through `table_of`; private headers
+and lookup hints retain their narrower separate proofs. M1 (split freestanding
+O0 runtime linking) is independent and remains a documented follow-up.
+
+Validation is in progress; results and fixtures are appended to the engineer
+report. No benchmark source/runtime C/String code changes are involved.

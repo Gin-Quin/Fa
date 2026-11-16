@@ -297,7 +297,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	small_mutable_strings: FxHashMap<FileId, rustc_hash::FxHashSet<SymbolId>>,
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
-	readonly_collections: FxHashMap<(FileId, NodeId, Repr), Val<'ctx>>,
+	readonly_collections: FxHashMap<(FileId, NodeId, String), Val<'ctx>>,
 	/// Source functions in a resolved direct-call cycle, shared by instances.
 	recursive_functions: rustc_hash::FxHashSet<(FileId, NodeId)>,
 	/// Line starts of the source, for locations.
@@ -415,11 +415,11 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The facts this lowering consulted (the key of a cached unit).
 	pub(crate) fact_log: Option<std::sync::Arc<crate::facts::FactLog>>,
 	/// The map types the program may keep a reference into the values of
-	/// (`program::unsafe_maps`).
-	unsafe_maps: rustc_hash::FxHashSet<TypeId>,
+	/// (`facts::referenced_maps`, including generic patterns).
+	unsafe_maps: std::collections::BTreeSet<String>,
 	/// The map types some `deleteWhere` iterates over while deleting: their
 	/// entries stay out of the probe array (`tables.rs`, `inline`).
-	no_inline_maps: rustc_hash::FxHashSet<TypeId>,
+	no_inline_maps: std::collections::BTreeSet<String>,
 	/// The union types whose arrays the program only builds with `push` and
 	/// reads with `for` (`packed::packable_items`).
 	packable_items: rustc_hash::FxHashSet<TypeId>,
@@ -513,6 +513,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.map(|(_, path)| path.clone())
 			.unwrap_or_default();
 		let state = program::FileState::new(session, entry, &path);
+		let fact_files: Vec<_> = files.iter().map(|(file, _)| *file).collect();
 		let mut lowering = Lowering {
 			session,
 			file: entry,
@@ -595,8 +596,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			fact_log: None,
 			index_proofs: std::cell::RefCell::new(None),
 			program_proof_claims: std::cell::OnceCell::new(),
-			unsafe_maps: program::unsafe_maps(session, files),
-			no_inline_maps: program::no_inline_maps(session, files),
+			unsafe_maps: crate::facts::referenced_maps(session, &fact_files),
+			no_inline_maps: crate::facts::deleted_while_iterated_maps(session, &fact_files),
 			packable_items: packed::packable_items(session, files),
 			packed_layouts: std::cell::RefCell::new(FxHashMap::default()),
 			readonly_collections: FxHashMap::default(),
@@ -1309,13 +1310,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				})
 			})
 			.collect();
+		// Children can precede their method declaration in node order. Their
+		// callbacks must see the enclosing type parameters before indexing.
+		self.generic_type_methods.extend(
+			type_generics
+				.iter()
+				.map(|(&node, info)| ((self.file, node), info.clone())),
+		);
 		for (node, mut info) in infos {
-			if let Some((generics, declared)) = type_generics.get(&node) {
+			if let Some((generics, _)) = type_generics.get(&node) {
 				let mut all = generics.clone();
 				all.extend(info.generics.iter().copied());
 				info.generics = all;
-				self.generic_type_methods
-					.insert((self.file, node), (generics.clone(), *declared));
 			}
 			if let Some(symbol) = info.symbol {
 				self.symbol_functions.insert(symbol, node);
@@ -1325,9 +1331,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.generic_functions.insert(node, info);
 				continue;
 			}
-			if info.declaration.is_none() && self.inside_generic_function(node) {
-				// a lambda of a generic function: declared per instance of the
-				// function around it, when evaluated (`closures.rs`)
+			if self.inside_generic_function(node) {
+				// A closure or local function inherits its enclosing instance,
+				// even when it declares no generic parameters of its own.
 				self.generic_functions.insert(node, info);
 				continue;
 			}

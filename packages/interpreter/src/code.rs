@@ -75,6 +75,12 @@ pub(crate) enum Argument {
 }
 
 #[derive(Clone)]
+pub(crate) struct Call {
+	pub arguments: Vec<Argument>,
+	pub order: Vec<usize>,
+}
+
+#[derive(Clone)]
 pub(crate) enum Step {
 	Field(Arc<str>),
 	Index(Node),
@@ -135,8 +141,8 @@ pub(crate) enum Op {
 	Fallback(Node, Node),
 	Is(Node, TypeTest, bool),
 	IsIn(Node, Node, bool),
-	Call(Node, Vec<Argument>),
-	CallFunction(FnKey, Vec<Argument>),
+	Call(Node, Call),
+	CallFunction(FnKey, Call),
 	Builtin(&'static str, Vec<Node>),
 	Mutate(&'static str, Place, Vec<Node>),
 	Array(Vec<Item>),
@@ -170,15 +176,20 @@ impl<'a> Builder<'a> {
 		node
 	}
 
-	fn arguments(&mut self, arguments: &'a [ir::Arg]) -> Vec<Argument> {
-		arguments
+	fn arguments(&mut self, call: &'a ir::Call) -> Call {
+		let arguments = call
+			.arguments
 			.iter()
 			.map(|argument| match argument {
 				ir::Arg::Value(value) => Argument::Value(self.add(value)),
 				ir::Arg::Default => Argument::Default,
 				ir::Arg::Variadic(items) => Argument::Variadic(self.items(items)),
 			})
-			.collect()
+			.collect();
+		Call {
+			arguments,
+			order: call.order.clone(),
+		}
 	}
 
 	fn items(&mut self, items: &'a [ir::Item]) -> Vec<Item> {

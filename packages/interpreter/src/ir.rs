@@ -3,7 +3,8 @@
 //! The analyzer turns the checked tree of a function (or of a compile-time
 //! expression) into an [`Expr`] tree where every decision of the analysis is
 //! explicit: names are frame slots, globals or functions; calls name their
-//! callee and give their arguments in parameter order; arithmetic carries the
+//! callee and bind arguments by parameter after written-order evaluation;
+//! arithmetic carries the
 //! range of its result under the target (decision D49); `when` is a chain of
 //! tests; built-in methods are named by their prelude path (`Array#push`).
 //!
@@ -181,6 +182,24 @@ pub enum Arg {
 	Variadic(Vec<Item>),
 }
 
+/// Arguments are bound in parameter order, after evaluating written
+/// arguments in source order. Defaults run later in the called frame.
+#[derive(Clone, Debug)]
+pub struct Call {
+	pub arguments: Vec<Arg>,
+	/// Parameter indices in evaluation order; empty means parameter order.
+	pub order: Vec<usize>,
+}
+
+impl From<Vec<Arg>> for Call {
+	fn from(arguments: Vec<Arg>) -> Self {
+		Self {
+			arguments,
+			order: Vec::new(),
+		}
+	}
+}
+
 /// A step below the root of a place.
 #[derive(Clone, Debug)]
 pub enum Step {
@@ -291,9 +310,9 @@ pub enum Expr {
 	/// `value is in collection` (`negated`: `is not in`).
 	IsIn(Box<Expr>, Box<Expr>, bool),
 	/// A call of a function value.
-	Call(Box<Expr>, Vec<Arg>),
+	Call(Box<Expr>, Call),
 	/// A direct call of a function.
-	CallFunction(FnKey, Vec<Arg>),
+	CallFunction(FnKey, Call),
 	/// A built-in function or method that doesn't change its arguments,
 	/// by its prelude path (`String#length`, `Array#map`, `Integer.parse`);
 	/// a method's receiver is the first argument.

@@ -300,10 +300,62 @@ mod tests {
 	fn calls_bind_arguments_and_defaults() {
 		let mut host = Functions::default();
 		host.0.insert(FnKey(0, 1), Arc::new(add()));
-		let call = Expr::CallFunction(FnKey(0, 1), vec![Arg::Value(int(2)), Arg::Value(int(4))]);
+		let call = Expr::CallFunction(
+			FnKey(0, 1),
+			crate::ir::Call::from(vec![Arg::Value(int(2)), Arg::Value(int(4))]),
+		);
 		assert_eq!(run(&mut host, &call, 0), Ok(Value::int(6)));
-		let call = Expr::CallFunction(FnKey(0, 1), vec![Arg::Value(int(2)), Arg::Default]);
+		let call = Expr::CallFunction(
+			FnKey(0, 1),
+			crate::ir::Call::from(vec![Arg::Value(int(2)), Arg::Default]),
+		);
 		assert_eq!(run(&mut host, &call, 0), Ok(Value::int(12)));
+	}
+
+	#[test]
+	fn calls_evaluate_written_arguments_before_binding_parameters_and_defaults() {
+		let mut host = Functions::default();
+		let mut difference = add();
+		difference.body = Expr::Arith(ArithOp::Subtract, INTEGER, local(0), local(1));
+		host.0.insert(FnKey(0, 1), Arc::new(difference));
+		let call = |arguments| {
+			Expr::CallFunction(
+				FnKey(0, 1),
+				crate::ir::Call {
+					arguments,
+					order: vec![1, 0],
+				},
+			)
+		};
+		assert_eq!(
+			run(
+				&mut host,
+				&call(vec![Arg::Value(int(2)), Arg::Value(int(7))]),
+				0
+			),
+			Ok(Value::int(-5))
+		);
+		let fail =
+			|message: &str| Expr::Throw(Expr::Const(Value::String(Arc::from(message))).boxed());
+		assert_eq!(
+			run(
+				&mut host,
+				&call(vec![Arg::Value(fail("left")), Arg::Value(fail("right"))]),
+				0
+			),
+			Err(Error::Thrown(Value::String(Arc::from("right"))))
+		);
+		let mut defaults = add();
+		defaults.params[0].default = Some(fail("default"));
+		host.0.insert(FnKey(0, 1), Arc::new(defaults));
+		assert_eq!(
+			run(
+				&mut host,
+				&call(vec![Arg::Default, Arg::Value(fail("written"))]),
+				0
+			),
+			Err(Error::Thrown(Value::String(Arc::from("written"))))
+		);
 	}
 
 	#[test]
@@ -319,9 +371,10 @@ mod tests {
 						let argument =
 							Expr::Arith(ArithOp::Subtract, INTEGER, local(0), int(1).boxed());
 						let call = match mode {
-							"value" => {
-								Expr::Call(Expr::Function(next).boxed(), vec![Arg::Value(argument)])
-							}
+							"value" => Expr::Call(
+								Expr::Function(next).boxed(),
+								crate::ir::Call::from(vec![Arg::Value(argument)]),
+							),
 							"callback" => Expr::Builtin(
 								"Array#get",
 								vec![
@@ -335,10 +388,14 @@ mod tests {
 									int(0),
 								],
 							),
-							"default" => {
-								Expr::CallFunction(next, vec![Arg::Value(argument), Arg::Default])
-							}
-							_ => Expr::CallFunction(next, vec![Arg::Value(argument)]),
+							"default" => Expr::CallFunction(
+								next,
+								crate::ir::Call::from(vec![Arg::Value(argument), Arg::Default]),
+							),
+							_ => Expr::CallFunction(
+								next,
+								crate::ir::Call::from(vec![Arg::Value(argument)]),
+							),
 						};
 						let result = Expr::If(
 							Expr::Compare(CompareOp::Greater, local(0), int(0).boxed()).boxed(),
@@ -373,11 +430,11 @@ mod tests {
 					let call = |n| {
 						Expr::CallFunction(
 							FnKey(0, 10),
-							if mode == "default" {
+							crate::ir::Call::from(if mode == "default" {
 								vec![Arg::Value(int(n)), Arg::Default]
 							} else {
 								vec![Arg::Value(int(n))]
-							},
+							}),
 						)
 					};
 					assert_eq!(
@@ -428,12 +485,12 @@ mod tests {
 							Expr::Compare(CompareOp::Greater, local(0), int(0).boxed()).boxed(),
 							Expr::CallFunction(
 								FnKey(0, 12),
-								vec![Arg::Value(Expr::Arith(
+								crate::ir::Call::from(vec![Arg::Value(Expr::Arith(
 									ArithOp::Subtract,
 									INTEGER,
 									local(0),
 									int(1).boxed(),
-								))],
+								))]),
 							)
 							.boxed(),
 							Some(Expr::Throw(Expr::Const(error.clone()).boxed()).boxed()),
@@ -441,7 +498,11 @@ mod tests {
 					}),
 				);
 				let caught = Expr::Catch {
-					body: Expr::CallFunction(FnKey(0, 12), vec![Arg::Value(int(9_000))]).boxed(),
+					body: Expr::CallFunction(
+						FnKey(0, 12),
+						crate::ir::Call::from(vec![Arg::Value(int(9_000))]),
+					)
+					.boxed(),
 					slot: Some(0),
 					handler: local(0),
 				};
@@ -456,7 +517,10 @@ mod tests {
 	fn preparation_and_continuations_do_not_consume_evaluation_steps() {
 		let mut host = Functions::default();
 		host.0.insert(FnKey(0, 1), Arc::new(add()));
-		let call = Expr::CallFunction(FnKey(0, 1), vec![Arg::Value(int(2)), Arg::Default]);
+		let call = Expr::CallFunction(
+			FnKey(0, 1),
+			crate::ir::Call::from(vec![Arg::Value(int(2)), Arg::Default]),
+		);
 		let mut interpreter = Interpreter::new(&mut host, Limits::default());
 		assert_eq!(interpreter.evaluate(&call, 0), Ok(Value::int(12)));
 		assert_eq!(interpreter.steps(), 6);
@@ -569,7 +633,7 @@ mod tests {
 				slots: 1,
 				body: Expr::CallFunction(
 					FnKey(0, 20),
-					vec![Arg::Value(Expr::Index(local(0), int(0).boxed()))],
+					crate::ir::Call::from(vec![Arg::Value(Expr::Index(local(0), int(0).boxed()))]),
 				),
 			}),
 		);
@@ -783,16 +847,16 @@ mod tests {
 				slots: 1,
 				body: Expr::CallFunction(
 					FnKey(0, 3),
-					vec![Arg::Value(Expr::Arith(
+					crate::ir::Call::from(vec![Arg::Value(Expr::Arith(
 						ArithOp::Add,
 						INTEGER,
 						local(0),
 						int(1).boxed(),
-					))],
+					))]),
 				),
 			}),
 		);
-		let call = Expr::CallFunction(FnKey(0, 3), vec![Arg::Value(int(1))]);
+		let call = Expr::CallFunction(FnKey(0, 3), crate::ir::Call::from(vec![Arg::Value(int(1))]));
 		let result = Interpreter::new(&mut host, limits).evaluate(&call, 0);
 		assert_eq!(result, Err(Error::Depth(50)));
 		// The configured call limit does not depend on the evaluation

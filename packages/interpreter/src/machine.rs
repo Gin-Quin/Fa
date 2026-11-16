@@ -6,7 +6,7 @@ use std::sync::Arc;
 use ethnum::I256;
 
 use crate::callbacks::{Callback, Progress};
-use crate::code::{Argument, Code, Item, Node, Op, Part, Place, Step};
+use crate::code::{Argument, Call, Code, Item, Node, Op, Part, Place, Step};
 use crate::eval::{self, Error, Eval, Flow, Interpreter};
 use crate::ir::{ArithOp, CompareOp, CopyPlan, FnKey, Num, Slot, TypeTest};
 use crate::value::{Closure, Member, MemberKind, Object, Value, equals};
@@ -44,7 +44,7 @@ struct Gather {
 }
 
 enum Finish {
-	Arguments(Target),
+	Arguments(Target, Vec<usize>),
 	Builtin(&'static str),
 	Mutate(&'static str, Place),
 	Array,
@@ -135,7 +135,7 @@ enum Continuation {
 		short: bool,
 	},
 	Fallback(Node),
-	Callee(Vec<Argument>),
+	Callee(Call),
 	Gather(Gather),
 	Assign(Place),
 	Loop(Node),
@@ -408,18 +408,31 @@ impl<'i, 'h> Machine<'i, 'h> {
 		self.evaluate_after(left, Continuation::BinaryLeft(op, right))
 	}
 
-	fn arguments(&mut self, target: Target, arguments: Vec<Argument>) -> Result<Action, Flow> {
-		self.gather(
-			arguments
-				.into_iter()
-				.map(|argument| match argument {
-					Argument::Value(value) => Input::Expr(value),
-					Argument::Default => Input::Default,
-					Argument::Variadic(items) => Input::Variadic(items),
-				})
-				.collect(),
-			Finish::Arguments(target),
-		)
+	fn arguments(&mut self, target: Target, call: Call) -> Result<Action, Flow> {
+		let order = if call.order.is_empty() {
+			(0..call.arguments.len()).collect()
+		} else {
+			call.order
+		};
+		let mut arguments: Vec<_> = call.arguments.into_iter().map(Some).collect();
+		let mut inputs = Vec::with_capacity(arguments.len());
+		for &parameter in &order {
+			let argument = arguments
+				.get_mut(parameter)
+				.and_then(Option::take)
+				.ok_or_else(|| Error::Stop("internal: invalid argument evaluation order".into()))?;
+			inputs.push(match argument {
+				Argument::Value(node) => Input::Expr(node),
+				Argument::Default => Input::Default,
+				Argument::Variadic(items) => Input::Variadic(items),
+			});
+		}
+		if inputs.len() != arguments.len() {
+			return Err(
+				Error::Stop("internal: incomplete argument evaluation order".into()).into(),
+			);
+		}
+		self.gather(inputs, Finish::Arguments(target, order))
 	}
 
 	fn gather_items(&mut self, items: Vec<Item>, finish: Finish) -> Result<Action, Flow> {
@@ -480,15 +493,19 @@ impl<'i, 'h> Machine<'i, 'h> {
 	}
 
 	fn finish(&mut self, finish: Finish, values: Vec<Option<Value>>) -> Result<Action, Flow> {
-		if let Finish::Arguments(target) = finish {
-			return Ok(Action::Call(target, values));
+		if let Finish::Arguments(target, order) = finish {
+			let mut arguments = vec![None; values.len()];
+			for (parameter, value) in order.into_iter().zip(values) {
+				arguments[parameter] = value;
+			}
+			return Ok(Action::Call(target, arguments));
 		}
 		let values: Vec<Value> = values
 			.into_iter()
 			.map(|value| value.expect("a supplied value"))
 			.collect();
 		match finish {
-			Finish::Arguments(_) => unreachable!(),
+			Finish::Arguments(..) => unreachable!(),
 			Finish::Array => Self::done(Value::Array(Arc::new(values))),
 			Finish::Tuple => Self::done(Value::Tuple(Arc::new(values))),
 			Finish::Set => {

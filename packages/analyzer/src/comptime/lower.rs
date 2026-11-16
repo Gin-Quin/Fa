@@ -1439,7 +1439,7 @@ impl<'a> Lowerer<'a> {
 		};
 		match info.callee {
 			Callee::Function(declaration) => {
-				let args = self.arguments(&info.arguments, Some(callee));
+				let args = self.arguments(&info.arguments, Some(callee), arguments);
 				let symbol = self.a.symbols.symbol_of_decl(declaration);
 				let captures = self
 					.a
@@ -1535,7 +1535,7 @@ impl<'a> Lowerer<'a> {
 				}
 			}
 			Callee::Value => {
-				let args = self.arguments(&info.arguments, Some(callee));
+				let args = self.arguments(&info.arguments, Some(callee), arguments);
 				// a function of another file, or a method of a type of another file
 				let last = match syntax::view(self.tree, callee) {
 					View::Access { members, .. } => members.last(),
@@ -1557,14 +1557,19 @@ impl<'a> Lowerer<'a> {
 					let node = declared.function.unwrap_or(decl);
 					return Expr::CallFunction(fn_key(file, node), args);
 				}
-				let _ = arguments;
 				let callee = self.expr(callee);
 				Expr::Call(callee.boxed(), args)
 			}
 		}
 	}
 
-	fn arguments(&mut self, arguments: &[Argument], callee: Option<NodeId>) -> Vec<Arg> {
+	fn arguments(
+		&mut self,
+		arguments: &[Argument],
+		callee: Option<NodeId>,
+		written: syntax::NodeList<'_>,
+	) -> fa_interpreter::ir::Call {
+		let order = crate::lower::calls::parameter_order(self.tree, written, arguments);
 		let mut args = Vec::with_capacity(arguments.len());
 		for argument in arguments {
 			args.push(match argument {
@@ -1595,7 +1600,10 @@ impl<'a> Lowerer<'a> {
 				}
 			});
 		}
-		args
+		fa_interpreter::ir::Call {
+			arguments: args,
+			order,
+		}
 	}
 
 	/// A `when`: its subject in a temporary, then its decisions in order.

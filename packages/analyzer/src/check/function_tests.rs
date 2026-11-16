@@ -61,6 +61,9 @@ fn existing_parameter_defaults_borrow_instead_of_storing() {
 	assert_clean(
 		"let shared = [1, 2]\nfunction size = (items: Array<Integer> = copy shared): Integer => items.length\nconsole.log(size(), shared.length)\n",
 	);
+	assert_clean(
+		"function size = (source: Array<Integer>, flag: Boolean, items: Array<Integer> = if flag { source } else { [] }): Integer => items.length\nlet shared = [1, 2]\nconsole.log(size(shared, true), shared.length)\n",
+	);
 }
 
 #[test]

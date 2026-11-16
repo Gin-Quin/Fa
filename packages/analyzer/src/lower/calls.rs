@@ -54,6 +54,36 @@ pub fn written_positions(
 		.collect()
 }
 
+/// Whole parameters in written evaluation order. Positional and variadic
+/// arguments precede named arguments, so a variadic group is contiguous.
+/// A method's receiver is evaluated first; omitted arguments have no work
+/// here and their defaults are evaluated later in parameter order.
+pub fn parameter_order(
+	tree: &TypedSyntaxTree,
+	written: NodeList<'_>,
+	arguments: &[Argument],
+) -> Vec<usize> {
+	let values = argument_values(arguments);
+	let nodes: Vec<_> = values.iter().map(|&(_, node)| node).collect();
+	let positions = written_positions(tree, written, &nodes);
+	let mut ranks = vec![usize::MAX; arguments.len()];
+	for ((parameter, _), rank) in values.into_iter().zip(positions) {
+		ranks[parameter] = ranks[parameter].min(rank.saturating_add(1));
+	}
+	for (parameter, argument) in arguments.iter().enumerate() {
+		if matches!(argument, Argument::Receiver(_)) {
+			ranks[parameter] = 0;
+		}
+	}
+	let mut order: Vec<_> = (0..arguments.len()).collect();
+	order.sort_by_key(|&parameter| ranks[parameter]);
+	if order.iter().copied().eq(0..arguments.len()) {
+		Vec::new()
+	} else {
+		order
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -83,5 +113,6 @@ mod tests {
 		let nodes: Vec<NodeId> = values.iter().map(|&(_, node)| node).collect();
 		// `x = 2` is written second, `y = 1` first
 		assert_eq!(written_positions(tree, written, &nodes), [1, 0]);
+		assert_eq!(parameter_order(tree, written, &call.arguments), [1, 0]);
 	}
 }

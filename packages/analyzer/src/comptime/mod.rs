@@ -307,12 +307,12 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 		}
 		Expr::Call(callee, arguments) => {
 			visit(callee, f);
-			for argument in arguments {
+			for argument in &arguments.arguments {
 				visit_argument(argument, f);
 			}
 		}
 		Expr::CallFunction(_, arguments) => {
-			for argument in arguments {
+			for argument in &arguments.arguments {
 				visit_argument(argument, f);
 			}
 		}

@@ -1628,25 +1628,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return self.array_method(target, "Array#joinedLength", &arguments);
 			}
 		}
-		// `codes.length` of a local standing for `text.codePoints()`, and
-		// direct `text.codePoints().length` and `text.toUtf8().length`.
-		if members.len() == 1
-			&& self.tree.text(first.index()) == "length"
-			&& let Some(call) = self.virtual_code_points_call(target).or_else(|| {
-				self.code_points_call(target).filter(|&call| {
-					self.is_bytes_call(call)
-						|| self
-							.analysis
-							.has_flags(node, fa_analyzer::analysis::NodeFlags::CODE_POINT_COUNT)
-				})
-			}) {
-			let text = self.receiver(call)?;
-			if text.repr == Repr::Never {
-				return Ok(text);
-			}
-			let count = self.text_view_length(call, text)?;
-			return Ok(Val::new(Repr::Int(super::values::IntRepr::I64), count));
+		if let Some(value) = self.text_count_prefix(node, target, first)? {
+			return self.apply_members(
+				node,
+				value,
+				self.type_of(first),
+				members.skip(1),
+				members.len() - 1,
+			);
 		}
+
 		// `value?.a.b`: the members after an optional access continue its chain
 		if let View::OptionalAccess {
 			target: inner,
@@ -2005,6 +1996,38 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		ty
 	}
 
+	/// A direct or virtual text collection followed by `length`. Flattened
+	/// method receivers must consume this fact before evaluating the array.
+	fn text_count_prefix(
+		&mut self,
+		node: NodeId,
+		target: NodeId,
+		first: NodeId,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		if self.tree.text(first.index()) != "length" {
+			return Ok(None);
+		}
+		let call = self.virtual_code_points_call(target).or_else(|| {
+			self.code_points_call(target).filter(|&call| {
+				self.is_bytes_call(call)
+					|| self.analysis.has_flags(node, NodeFlags::CODE_POINT_COUNT)
+					|| self.analysis.has_flags(first, NodeFlags::CODE_POINT_COUNT)
+			})
+		});
+		let Some(call) = call else {
+			return Ok(None);
+		};
+		let text = self.receiver(call)?;
+		if text.repr == Repr::Never {
+			return Ok(Some(text));
+		}
+		let count = self.text_view_length(call, text)?;
+		Ok(Some(Val::new(
+			Repr::Int(super::values::IntRepr::I64),
+			count,
+		)))
+	}
+
 	/// The receiver of a method call `a.b.method(…)`: `a.b`.
 	pub(crate) fn receiver(&mut self, call: NodeId) -> Result<Val<'ctx>, Error> {
 		if let Some(value) = self.pending_receiver.take() {
@@ -2027,6 +2050,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			return self.load(slot);
 		}
+		if count > 0
+			&& let Some(first) = members.first()
+			&& let Some(value) = self.text_count_prefix(callee, target, first)?
+		{
+			return self.apply_members(
+				callee,
+				value,
+				self.type_of(first),
+				members.skip(1),
+				count - 1,
+			);
+		}
+
 		// `self.text.toUtf8()`: the field read once by the method (`frozen.rs`)
 		if count >= 1
 			&& let Some(first) = members.first()

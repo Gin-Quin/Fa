@@ -574,9 +574,11 @@ bitflags! {
 		const STRING_CODE_UNIT = 1 << 19;
 		/// The `length` access of a direct `String#codePoints` call; count
 		/// code points in its receiver without allocating the array.
+		/// A flattened longer access carries the bit on its `length` member.
 		const CODE_POINT_COUNT = 1 << 20;
 		/// A direct `String#toUtf8` call used only as a `for` iterable;
-		/// visit encoded bytes without allocating the `Bytes` value.
+		/// use the target's direct encoding loop (a native cursor, or one
+		/// bulk encoding followed by indexed iteration on JavaScript).
 		const UTF8_ITERATION = 1 << 21;
 	}
 }

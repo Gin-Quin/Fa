@@ -116,3 +116,18 @@ fn constants_preserve_raw_units_and_compact_bytes() {
 		assert!(output.code.contains("new Uint8Array([195, 169])"));
 	}
 }
+
+#[test]
+fn counts_stay_allocation_free_through_method_chains() {
+	let source = include_str!("../../cli/tests/programs/review-code-point-count-array.fa");
+	for target in [Target::Bun, Target::Node, Target::Web] {
+		let (mut session, file) = fa_analyzer::analyze_source(source);
+		let output = generate(&mut session, file, &Options::new(target, "counts.fa")).unwrap();
+		assert!(output.helpers.contains(&"faCodePointCount"));
+		assert!(
+			!output.helpers.contains(&"faStringCodePoints"),
+			"{}",
+			output.program
+		);
+	}
+}

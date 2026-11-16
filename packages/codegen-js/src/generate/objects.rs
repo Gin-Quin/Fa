@@ -348,7 +348,15 @@ impl Generator<'_> {
 	/// `target.a.b…` for the given members (all of an access, or all but the
 	/// last for the receiver of a method).
 	pub(crate) fn access_chain(&mut self, n: NodeId, target: NodeId, members: &[NodeId]) -> Expr {
-		if let Some(count) = self.code_point_count(n, target) {
+		let fact = members
+			.first()
+			.copied()
+			.filter(|&first| self.has(first, NodeFlags::CODE_POINT_COUNT))
+			.unwrap_or(n);
+		if let Some(mut count) = self.code_point_count(fact, target) {
+			for &member in members.iter().skip(1) {
+				count = self.apply_member(count, member, false);
+			}
 			return count;
 		}
 		// `Database.OpenError.Failed`, `library.Farm.Error.Empty`: a member of a

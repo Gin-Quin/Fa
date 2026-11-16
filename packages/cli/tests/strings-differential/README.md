@@ -9,7 +9,8 @@ a generated shard. Failed sources and output remain under
 
 Both tiers use three parallel workers, sharing the program harness's bounded
 execution permits. They compare compile-time statics, Bun, Node, the real web
-sandbox, and native, wasm and native-freestanding with leak checks (O0 in the quick tier, O0/O3 in the full tier).
+sandbox, and native, wasm and native-freestanding with leak checks (O0 in the
+quick tier, O0/O3 in the full tier).
 Freestanding JSON retains its documented AN004 restriction. No disagreement is
 ratcheted, ignored or treated as success. Output and error logs are unique to
 shard, engine and optimization level.

@@ -14,6 +14,7 @@ import sys
 
 SEED = 0xFA1616
 FULL = "--full" in sys.argv
+PROBE_FORMS = []
 
 
 def literal(text):
@@ -330,7 +331,7 @@ def write_cases(output, name, prelude, cases, references, function, shard_size=1
             if compile_time:
                 source += f'\nstatic result{index} = @{function}({args})\n'
                 source += f'console.log("{index} static " + result{index})\n-- prints: {index} static {references[index]}\n'
-            runtime_function = ["probe","ownerProbe","viewProbe","splitProbe","fieldProbe","arrayProbe","poolProbe","compactProbe","frameProbe","reservedProbe"][index % 10] if function == "probe" else function
+            runtime_function = ["probe","ownerProbe","viewProbe","splitProbe","fieldProbe","arrayProbe","poolProbe","compactProbe","frameProbe","reservedProbe"][PROBE_FORMS[index] % 10] if function == "probe" else function
             source += f'console.log("{index} runtime " + (try {runtime_function}({args})))\n-- prints: {index} runtime {references[index]}\n'
         (output / f"{name}-{number:02}.fa").write_text(source)
 
@@ -443,6 +444,20 @@ static fromText = @unionParse("\"é\"")
 static fromBytes = @unionParse("\"😀\"".toUtf8())
 console.log(fromText, fromBytes) -- prints: 233 55357,56832
 console.log(try unionParse("\"é\""), try unionParse("\"😀\"".toUtf8())) -- prints: 233 55357,56832
+function rejected = (input: String | Bytes): Boolean => {
+    let text: String = Json.parse(identity(input)) catch _ => return true
+    text.length < 0
+}
+function failures = (): String => {
+    let malformed = rejected("{{")
+    let invalidUtf8 = rejected(Bytes.from([255]))
+    let wrongText = rejected("1")
+    let wrongBytes = rejected("1".toUtf8())
+    "{malformed}:{invalidUtf8}:{wrongText}:{wrongBytes}"
+}
+static invalid = @failures()
+console.log(invalid) -- prints: true:true:true:true
+console.log(failures()) -- prints: true:true:true:true
 '''
     (output/"json-union.fa").write_text(union)
 
@@ -481,6 +496,7 @@ def all_subjects():
     values += ["\u007f", "\u0080", "\u07ff", "\u0800", "\uffff", "\U00010000", "\U0010ffff", "\ud800", "\udbff", "\udc00", "\udfff"]
     whitespace="".join(map(chr,[*range(9,14),32,160,5760,*range(8192,8203),8232,8233,8239,8287,12288,65279]))
     values += [whitespace+"x"+whitespace, "a" * 4097, "é日😀" * 700]
+    values.append("\u007f\u0080\u07ff\u0800\uffff\U00010000\U0010ffff")
     return values
 
 
@@ -491,7 +507,7 @@ def subjects():
     # sampled in the dedicated cut/storage shards rather than multiplying probe.
     return ["", "abc", "aaa", "é", "日", "😀", "e\u0301", "👩🏽\u200d💻", "ΟΣ", "ßİıI",
             "\ufeff \t\r\na\u00a0\u3000", "\x85\u200ba\x85\u200b", "\0", "\ud83d", "\ude00",
-            "a\ud83db", "a\ude00b", "\ude00\ud83d", "a" * 64 + "😀é日", "é" * 65 + "😀z",
+            "a\ud83db", "a\ude00b", "\ud83dabc", "abc\ude00", "\ud83d\ud83d", "\ude00\ude00", "\ude00\ud83d", "a" * 9 + "😀é日", "a" * 23 + "😀é日", "a" * 64 + "😀é日", "é" * 65 + "😀z",
             "\u007f\u0080\u07ff\u0800\uffff\U00010000\U0010ffff"]
 
 
@@ -586,6 +602,21 @@ console.log([...values.map(v=>units(JSON.stringify(v))),units(text),units(text)]
     write_cases(output,"json-composites",prelude,[(literal(t),) for t in values],references,"composite",16)
 
 
+
+def large_cases(output, bun):
+    # The quick tier includes the large payload classes at compile time too,
+    # without repeating every expensive conversion of the semantic probe.
+    values = ["a" * 4097, "é日😀" * 700]
+    prelude = r"""
+function extent = (text: String): String => "{text.length}:{text.utf8Length()}:{text.isWellFormed()}:{text.codePoints().length}:{text.toUtf8().length}:{text.codeUnitAt(64) catch _ => 0}"
+"""
+    oracle = r"""
+const enc=new TextEncoder();
+for(const text of JSON.parse(await Bun.stdin.text())) console.log(`${text.length}:${enc.encode(text).length}:${text.isWellFormed()}:${Array.from(text).length}:${enc.encode(text).length}:${text.charCodeAt(64)}`);
+"""
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"large",prelude,[(literal(text),) for text in values],references,"extent",2)
+
 def allocation_cases(output):
     for name, expr in [("repeat",'"abc".repeat(n)'), ("pad-start",'"abc".padStart(n, "é")'), ("pad-end",'"abc".padEnd(n, "😀")'), ("bytes",'Bytes.filled(n)')]:
         (output/f"allocation-{name}.fa").write_text(f'function size = (n: Integer<min = 0>): Integer => {expr}.length\nconsole.log(size(9007199254740991))\n-- exit: 101\n-- stderr: stop: out of memory\n')
@@ -596,15 +627,31 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     bun = sys.argv[2] if len(sys.argv) > 2 else str(Path.home() / ".bun/bin/bun")
     rng = random.Random(SEED)
+    global PROBE_FORMS
     needles = ["", "a", "aa", ",", "é", "日", "😀", "\ud83d", "\ude00", "\ude00\ud83d", "\uffff", "\0", "$&", "longer-than-most-inputs"]
     cases = []
-    for index, text in enumerate(subjects()):
+    for index, text in enumerate(all_subjects()[:70]):
         # Every subject meets empty, surrogate-edge, and sampled ordinary needles.
-        for needle in (["", "\ud83d", "\ude00", needles[rng.randrange(len(needles))]] if FULL else [needles[rng.randrange(len(needles))]]):
+        for needle in ["", "\ud83d", "\ude00", needles[rng.randrange(len(needles))]]:
             cases.append((text, needle))
     # The decided edges that the sampled needles may miss (points 1 to 4).
     cases += [("aaa", "aa"), ("aaaa", "aa"), ("", ","), ("", ""), ("x", "😀"), ("😀", ""),
               ("a,b,,c", ","), ("abc", "abcd"), ("ab", "longer-than-most-inputs"), ("😀😀", "\ude00\ud83d")]
+    fixed_indices = list(range(len(cases) - 10, len(cases)))
+    # Append additional subjects after the original corpus, retaining every
+    # reviewed subject/needle/storage triple and its original index.
+    for text in all_subjects()[70:]:
+        for needle in ["", "\ud83d", "\ude00", needles[rng.randrange(len(needles))]]:
+            cases.append((text, needle))
+    PROBE_FORMS = list(range(len(cases)))
+    if not FULL:
+        # Select subject/needle/storage triples from the complete seeded corpus.
+        sample = random.Random(SEED)
+        chosen = [sample.choice([i for i, pair in enumerate(cases) if pair[0] == text and i not in fixed_indices]) for text in subjects()]
+        chosen += fixed_indices
+        PROBE_FORMS = chosen
+        cases = [cases[i] for i in chosen]
+    assert len({index % 10 for index in PROBE_FORMS}) == 10
     reference = subprocess.run([bun, "-e", ORACLE], input=json.dumps(cases, ensure_ascii=True), text=True, capture_output=True, check=True).stdout.splitlines()
     write_cases(output,"semantic",PRELUDE+REPRESENTATIONS,[(literal(text),literal(needle)) for text,needle in cases],reference,"probe",32 if FULL else 6)
     storage_oracle = r'''
@@ -644,6 +691,7 @@ async function crossing = (text: String): String throws IndexError => {
     copy_cases(output,bun)
     json_composites(output,bun)
     allocation_cases(output)
+    large_cases(output,bun)
     decoded = byte_cases(output,bun)
     json_cases(output,bun)
     cuts=edge_cases(output,bun)

@@ -136,13 +136,19 @@ impl Walker<'_> {
 		target: NodeId,
 		members: crate::syntax::NodeList<'_>,
 	) {
-		if members.len() == 1
-			&& members
-				.first()
-				.is_some_and(|member| self.tree.text(member.index()) == "length")
+		if members
+			.first()
+			.is_some_and(|member| self.tree.text(member.index()) == "length")
 			&& self.direct_string_call(target, "String#codePoints")
 		{
-			self.set_flag(n, crate::analysis::NodeFlags::CODE_POINT_COUNT);
+			// A flattened chain such as `.length.toString` has no separate
+			// access node for its length prefix. Mark that member instead.
+			let marked = if members.len() == 1 {
+				n
+			} else {
+				members.first().expect("length member")
+			};
+			self.set_flag(marked, crate::analysis::NodeFlags::CODE_POINT_COUNT);
 		}
 	}
 

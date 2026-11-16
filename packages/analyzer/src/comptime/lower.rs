@@ -1407,13 +1407,20 @@ impl<'a> Lowerer<'a> {
 		members: syntax::NodeList<'_>,
 		optional: bool,
 	) -> Expr {
-		if self.a.has_flags(n, NodeFlags::CODE_POINT_COUNT)
-			&& let Some(text) = self.string_call_receiver(target)
-		{
-			return Expr::Builtin("String#codePointCount", vec![text]);
-		}
+		let counted = self.a.has_flags(n, NodeFlags::CODE_POINT_COUNT)
+			|| members
+				.first()
+				.is_some_and(|first| self.a.has_flags(first, NodeFlags::CODE_POINT_COUNT));
+		let count = if counted {
+			self.string_call_receiver(target)
+				.map(|text| Expr::Builtin("String#codePointCount", vec![text]))
+		} else {
+			None
+		};
+		let counted = count.is_some();
 		// a member whose value the analysis knows (`Int8.maxValue`)
-		if let Some(value) = self.literal_of(n)
+		if !counted
+			&& let Some(value) = self.literal_of(n)
 			&& matches!(
 				members.last().map(|member| self.a.resolution(member)),
 				Some(Resolution::Builtin(_))
@@ -1438,12 +1445,14 @@ impl<'a> Lowerer<'a> {
 			}
 			_ => false,
 		};
-		let mut current = if static_target {
+		let mut current = if let Some(count) = count {
+			Some(count)
+		} else if static_target {
 			None
 		} else {
 			Some(self.expr(target))
 		};
-		for member in members.iter() {
+		for member in members.iter().skip(usize::from(counted)) {
 			let resolution = self.a.resolution(member);
 			let name: Arc<str> = match syntax::view(self.tree, member) {
 				View::Name(name) => Arc::from(self.tree.name(name)),

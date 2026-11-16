@@ -600,3 +600,19 @@ fn chained_string_views_respect_a_small_evaluation_budget() {
 		);
 	}
 }
+
+#[test]
+fn count_prefixes_in_flattened_method_chains_keep_the_fact() {
+	assert_flags(
+		"function format = (text: String): String => text.codePoints().length.toString()",
+		"length",
+		NodeFlags::CODE_POINT_COUNT,
+		NodeFlags::CAN_FAIL,
+	);
+	assert_flags(
+		"function format = (text: String): String => text.codePoints().length.toString()",
+		"text.codePoints().length.toString",
+		NodeFlags::empty(),
+		NodeFlags::CODE_POINT_COUNT,
+	);
+}

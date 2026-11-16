@@ -113,7 +113,7 @@ fn run_shard(index: usize, program: &Path, scratch: &Path, full: bool) -> Vec<St
 			run(
 				program,
 				&expected,
-				&scratch,
+				scratch,
 				index * 3
 					+ match target {
 						"bun" => 0,

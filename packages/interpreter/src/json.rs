@@ -12,6 +12,9 @@ use crate::eval::Error;
 use crate::text::Text;
 use crate::value::{Object, Value};
 
+mod write;
+pub(crate) use write::stringify;
+
 /// Parses a JSON text.
 pub fn parse(text: &str) -> Result<Value, Error> {
 	parse_inner(text, false)

@@ -533,6 +533,7 @@ pub fn call(
 	let receiver = arguments.first().cloned().unwrap_or(Value::None);
 	let arg = |index: usize| argument(&arguments, index);
 	Ok(match path {
+		"Json.stringify" => crate::json::stringify(interpreter, &receiver, arg(1)?)?,
 		"$Json.bindDefaults" => {
 			interpreter.reserve(receiver.text_size().saturating_mul(2))?;
 			let mut schema = receiver;

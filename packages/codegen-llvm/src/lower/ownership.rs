@@ -755,9 +755,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					builder.build_return(Some(&pair))?;
 					Ok(())
 				})?;
-				let length = builder.build_extract_value(pair, 1, "")?.into_int_value();
-				// a literal (kind 0, whatever its `SIMPLE` flag) is shared, and
-				// so is an empty string
+				// Only immortal literal storage can be shared. An empty owner
+				// may still own a reserved heap block; the slow copy makes it inline.
 				let shifted =
 					builder.build_left_shift(capacity, self.usize.const_int(3, false), "")?;
 				let before = builder.build_int_sub(shifted, self.usize.const_int(1, false), "")?;
@@ -777,14 +776,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					"",
 				)?;
 				let literal = builder.build_and(literal, well_formed_kind, "")?;
-				let empty = builder.build_int_compare(
-					IntPredicate::EQ,
-					length,
-					self.usize.const_zero(),
-					"",
-				)?;
-				let shared = builder.build_or(literal, empty, "")?;
-				let not_shared = builder.build_not(shared, "")?;
+				let not_shared = builder.build_not(literal, "")?;
 				self.helper_when(builder, function, not_shared, |builder| {
 					builder.build_return(Some(&pair))?;
 					Ok(())

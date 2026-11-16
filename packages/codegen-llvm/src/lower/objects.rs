@@ -1629,12 +1629,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 		}
 		// `codes.length` of a local standing for `text.codePoints()`, and
-		// `text.toUtf8().length`
+		// direct `text.codePoints().length` and `text.toUtf8().length`.
 		if members.len() == 1
 			&& self.tree.text(first.index()) == "length"
 			&& let Some(call) = self.virtual_code_points_call(target).or_else(|| {
-				self.code_points_call(target)
-					.filter(|&call| self.is_bytes_call(call))
+				self.code_points_call(target).filter(|&call| {
+					self.is_bytes_call(call)
+						|| self
+							.analysis
+							.has_flags(node, fa_analyzer::analysis::NodeFlags::CODE_POINT_COUNT)
+				})
 			}) {
 			let text = self.receiver(call)?;
 			if text.repr == Repr::Never {

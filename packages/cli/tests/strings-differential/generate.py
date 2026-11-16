@@ -13,6 +13,7 @@ import sys
 
 
 SEED = 0xFA1616
+FULL = "--full" in sys.argv
 
 
 def literal(text):
@@ -331,6 +332,8 @@ def byte_cases(output, bun):
                [0xF0,0x80,0x80,0xAF], [0xF4,0x90,0x80,0x80], [0xF5,0x80,0x80,0x80],
                [0xF8,0x88,0x80,0x80,0x80], [0xFC], [0xFE], [0xFF], [0xE1,0x80,0x41], [0xC2,0x41], [0xF0,0x9F,0x41], [0xF0,0x9F,0x92,0x41]]
     inputs = [[0x61] * prefix + value for prefix in [0, 1, 15, 16, 31, 32] for value in invalid]
+    if not FULL:
+        inputs = [([0x61] * [0, 1, 15, 16, 31, 32][i % 6]) + value for i, value in enumerate(invalid)]
     inputs += [[], [0], [0xEF,0xBB,0xBF], [0xF4,0x8F,0xBF,0xBF], [0xED,0x9F,0xBF], [0xE0,0xA0,0x80]]
     oracle = r'''
 const inputs=JSON.parse(await Bun.stdin.text());
@@ -412,9 +415,8 @@ function parsed = (json: String): String throws JsonError => {
 }
 '''
     write_cases(output,"json-runtime",prelude,[(literal(text),) for text in values],reference,"jsonProbe",32,False)
-    # Keep this separately compilable: the known missing CT serializer must
-    # not prevent the other independent operations from being exercised.
-    write_cases(output,"json-comptime",prelude,[(literal(text),) for text in values[:16]],reference[:16],"jsonProbe",32)
+    # Separate parse and round-trip shards keep failures attributable.
+    write_cases(output,"json-comptime",prelude,[(literal(text),) for text in values],reference,"jsonProbe",16)
     source=prelude
     for index,text in enumerate(values):
         document=json.dumps(text,ensure_ascii=True,separators=(",",":"))
@@ -438,7 +440,7 @@ console.log(try unionParse("\"é\""), try unionParse("\"😀\"".toUtf8())) -- pr
 def edge_cases(output,bun):
     cases=[]
     values=[]
-    for prefix in [0,8,19,20,21,22,23,60,61,62,63,64,65,127,4095]:
+    for prefix in ([0,8,19,20,21,22,23,60,61,62,63,64,65,127,4095] if FULL else [0,23,64]):
         source="a"*prefix+"😀é日😀z"
         for start,end in [(prefix,prefix+1),(prefix+1,prefix+2),(prefix+1,prefix+5)]:
             encoded=source.encode("utf-16-le")
@@ -461,7 +463,7 @@ function cutProbe = (source: String, start: Integer, end: Integer, needle: Strin
     return len(cases)
 
 
-def subjects():
+def all_subjects():
     values = ["", "a", "abc", "aaa", ",a,,", "é", "日", "😀", "é日😀a", "\ufffd", "\ufeff", "\0", "e\u0301", "👩🏽\u200d💻", "🇫🇷", "ΟΣ", "AΣ\u0301", "ßİıI", "\ufeff \t\r\na\u00a0\u3000", "\x85\u200ba\x85\u200b"]
     values += ["a" * n + "😀é日" for n in [8, 9, 10, 19, 20, 21, 22, 23, 24, 60, 61, 62, 63, 64, 65, 126, 127, 128]]
     values += ["é" * n + "😀z" for n in [10, 11, 30, 31, 32, 62, 63, 64, 65]]
@@ -470,6 +472,17 @@ def subjects():
     whitespace="".join(map(chr,[*range(9,14),32,160,5760,*range(8192,8203),8232,8233,8239,8287,12288,65279]))
     values += [whitespace+"x"+whitespace, "a" * 4097, "é日😀" * 700]
     return values
+
+
+def subjects():
+    if FULL:
+        return all_subjects()
+    # One fixed representative per semantic class; boundary magnitudes are
+    # sampled in the dedicated cut/storage shards rather than multiplying probe.
+    return ["", "abc", "aaa", "é", "日", "😀", "e\u0301", "👩🏽\u200d💻", "ΟΣ", "ßİıI",
+            "\ufeff \t\r\na\u00a0\u3000", "\x85\u200ba\x85\u200b", "\0", "\ud83d", "\ude00",
+            "a\ud83db", "a\ude00b", "\ude00\ud83d", "a" * 64 + "😀é日", "é" * 65 + "😀z",
+            "\u007f\u0080\u07ff\u0800\uffff\U00010000\U0010ffff"]
 
 
 def main():
@@ -481,13 +494,13 @@ def main():
     cases = []
     for index, text in enumerate(subjects()):
         # Every subject meets empty, surrogate-edge, and sampled ordinary needles.
-        for needle in ["", "\ud83d", "\ude00", needles[rng.randrange(len(needles))]]:
+        for needle in (["", "\ud83d", "\ude00", needles[rng.randrange(len(needles))]] if FULL else [needles[rng.randrange(len(needles))]]):
             cases.append((text, needle))
     # The decided edges that the sampled needles may miss (points 1 to 4).
     cases += [("aaa", "aa"), ("aaaa", "aa"), ("", ","), ("", ""), ("x", "😀"), ("😀", ""),
               ("a,b,,c", ","), ("abc", "abcd"), ("ab", "longer-than-most-inputs"), ("😀😀", "\ude00\ud83d")]
     reference = subprocess.run([bun, "-e", ORACLE], input=json.dumps(cases, ensure_ascii=True), text=True, capture_output=True, check=True).stdout.splitlines()
-    write_cases(output,"semantic",PRELUDE+REPRESENTATIONS,[(literal(text),literal(needle)) for text,needle in cases],reference,"probe",32)
+    write_cases(output,"semantic",PRELUDE+REPRESENTATIONS,[(literal(text),literal(needle)) for text,needle in cases],reference,"probe",32 if FULL else 6)
     storage_oracle = r'''
 const subjects=JSON.parse(await Bun.stdin.text());
 const enc=new TextEncoder();
@@ -525,7 +538,7 @@ async function crossing = (text: String): String throws IndexError => {
     decoded = byte_cases(output,bun)
     json_cases(output,bun)
     cuts=edge_cases(output,bun)
-    (output / "manifest.json").write_text(json.dumps({"seed": SEED, "subjects": len(subjects()), "pairs": len(cases), "decoders":decoded,"cut_views":cuts,"oracle": "Bun direct JavaScript"}, indent=2) + "\n")
+    (output / "manifest.json").write_text(json.dumps({"seed": SEED, "subjects": len(subjects()), "tier": "full" if FULL else "quick", "pairs": len(cases), "decoders":decoded,"cut_views":cuts,"oracle": "Bun direct JavaScript"}, indent=2) + "\n")
 
 
 if __name__ == "__main__":

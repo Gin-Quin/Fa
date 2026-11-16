@@ -13,7 +13,6 @@ import {
 	faUtf8Encoder,
 	faUtf8Length,
 	faUtf8LossyDecoder,
-	faUtf8Values,
 	Utf8Error,
 } from "./strings.js";
 
@@ -171,7 +170,6 @@ describe("UTF-8", () => {
 			expect(bytes).toBeInstanceOf(Uint8Array);
 			expect(faUtf8Length(text)).toBe(bytes.length);
 			expect(faUtf8Length(text)).toBe(Buffer.byteLength(text));
-			expect([...faUtf8Values(text)]).toEqual([...bytes]);
 		}
 	});
 	test("lone surrogates encode as U+FFFD", () => {

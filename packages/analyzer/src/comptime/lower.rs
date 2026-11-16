@@ -1591,6 +1591,17 @@ impl<'a> Lowerer<'a> {
 				{
 					values.pop();
 				}
+				if path == "Json.stringify"
+					&& let Some(Argument::Given(argument)) = info.arguments.first()
+				{
+					let (schema, _) = super::json::schema(
+						self.types(),
+						self.a,
+						self.file,
+						self.a.type_of(*argument),
+					);
+					values.push(Expr::Const(schema));
+				}
 				if path == "Json.parse" {
 					let (schema, defaults) =
 						super::json::schema(self.types(), self.a, self.file, self.a.type_of(n));

@@ -87,6 +87,13 @@ export function faReport(exception) {
 		faWriteError("stop: stack overflow");
 		return 101;
 	}
+	if (
+		exception instanceof RangeError &&
+		/^(Invalid (?:string|array|typed array) length|(?:Array buffer allocation failed|Out of memory))(?::.*)?$/i.test(exception.message)
+	) {
+		faWriteError("stop: out of memory");
+		return 101;
+	}
 	throw exception;
 }
 

@@ -138,32 +138,6 @@ export function faFromUtf8(bytes) {
 	}
 }
 
-// @fa-helper faUtf8Values
-/** Iterate an encoding without a byte buffer; for…of preserves lone
- * surrogates, which this encoder writes as U+FFFD.
- * @param {string} text @returns {Generator<number>}
- */
-export function* faUtf8Values(text) {
-	for (const point of text) {
-		let code = /** @type {number} */ (point.codePointAt(0));
-		if (code >= 0xd800 && code <= 0xdfff) code = 0xfffd;
-		if (code < 0x80) yield code;
-		else if (code < 0x800) {
-			yield 0xc0 | (code >> 6);
-			yield 0x80 | (code & 63);
-		} else if (code < 0x10000) {
-			yield 0xe0 | (code >> 12);
-			yield 0x80 | ((code >> 6) & 63);
-			yield 0x80 | (code & 63);
-		} else {
-			yield 0xf0 | (code >> 18);
-			yield 0x80 | ((code >> 12) & 63);
-			yield 0x80 | ((code >> 6) & 63);
-			yield 0x80 | (code & 63);
-		}
-	}
-}
-
 // @fa-helper faStringCompareLocale
 /** @param {string} a @param {string} b @param {string} [locale] @returns {number} */
 export function faStringCompareLocale(a, b, locale) {

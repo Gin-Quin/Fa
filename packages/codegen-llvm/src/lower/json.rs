@@ -59,6 +59,47 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		schema.push(0);
 		let schema = self.constant_bytes(&schema);
 		let out = self.alloca_type(self.pointer_type().into(), "json")?;
+		let error = self.json_parse_input(text, schema, out)?;
+		self.raise_if_error(error)?;
+		let document = self
+			.builder
+			.build_load(self.pointer_type(), out, "")?
+			.into_pointer_value();
+		// the root is the document's first field
+		let value = self.json_value(document, ty, node)?;
+		self.call_runtime("fa_json_free", &[document.into()])?;
+		Ok(self.fresh(value))
+	}
+
+	/// Dispatch an already evaluated String | Bytes without copying its input.
+	fn json_parse_input(
+		&mut self,
+		text: Val<'ctx>,
+		schema: PointerValue<'ctx>,
+		out: PointerValue<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		if text.repr == Repr::Union {
+			let is_text = self.box_is(text, TypeId::STRING)?;
+			let string_block = self.append_block("json_text");
+			let bytes_block = self.append_block("json_bytes");
+			let join = self.append_block("json_parsed");
+			self.builder
+				.build_conditional_branch(is_text, string_block, bytes_block)?;
+			self.builder.position_at_end(string_block);
+			let string = self.unbox(text, Repr::Str)?;
+			let string_error = self.json_parse_input(string, schema, out)?;
+			let string_end = self.builder.get_insert_block().expect("JSON text block");
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(bytes_block);
+			let bytes = self.unbox(text, Repr::Bytes)?;
+			let bytes_error = self.json_parse_input(bytes, schema, out)?;
+			let bytes_end = self.builder.get_insert_block().expect("JSON bytes block");
+			self.builder.build_unconditional_branch(join)?;
+			self.builder.position_at_end(join);
+			let error = self.builder.build_phi(self.pointer_type(), "json_error")?;
+			error.add_incoming(&[(&string_error, string_end), (&bytes_error, bytes_end)]);
+			return Ok(error.as_basic_value().into_pointer_value());
+		}
 		let (name, arguments): (&str, Vec<inkwell::values::BasicMetadataValueEnum<'ctx>>) =
 			if text.repr == Repr::Bytes {
 				(
@@ -72,18 +113,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					vec![bytes.into(), length.into(), schema.into(), out.into()],
 				)
 			};
-		let error = self
+		Ok(self
 			.call_value(self.runtime.function(name)?, &arguments)?
-			.into_pointer_value();
-		self.raise_if_error(error)?;
-		let document = self
-			.builder
-			.build_load(self.pointer_type(), out, "")?
-			.into_pointer_value();
-		// the root is the document's first field
-		let value = self.json_value(document, ty, node)?;
-		self.call_runtime("fa_json_free", &[document.into()])?;
-		Ok(self.fresh(value))
+			.into_pointer_value())
 	}
 
 	fn json_stringify(&mut self, node: NodeId, info: &CallInfo) -> Result<Val<'ctx>, Error> {

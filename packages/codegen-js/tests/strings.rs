@@ -82,8 +82,8 @@ fn explicit_views_only_link_the_runtime_they_use() {
 	for (source, required, absent) in [
 		(
 			"for byte in \"é😀\".toUtf8() { console.log(byte) }",
-			"faUtf8Values",
 			"faUtf8Encoder",
+			"faUtf8Values",
 		),
 		(
 			"function count = (text: String) => text.codePoints().length\nconsole.log(count(\"é😀\"))",

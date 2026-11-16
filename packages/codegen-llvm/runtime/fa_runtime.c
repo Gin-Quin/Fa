@@ -3573,7 +3573,7 @@ static void unit_slice_positions(const uint8_t *text, size_t length, size_t capa
 		                  view ? string_view_capacity(capacity, 0) : SIMPLE};
 		return;
 	}
-	if (view == 1) {
+	if (view) {
 		// Retain the two low-half bytes or the three high-half bytes. They
 		// remain inside the owner and readers expose their logical units.
 		if (!fa_virtual_string_slices) { __builtin_trap(); }

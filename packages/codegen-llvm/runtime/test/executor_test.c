@@ -1650,7 +1650,8 @@ static void test_unicode_transform_counts(void) {
 	                                             string_bytes(&low), string_length(&low));
 	CHECK(parts->length == 2);
 	FaString *items = (FaString *)(void *)parts->items;
-	CHECK(string_owned(items[0].capacity));
+	CHECK(!string_owned(items[0].capacity));
+	CHECK(items[0].bytes == source.bytes && items[0].length == 203);
 	CHECK(fa_string_length(items[0].bytes, items[0].length, items[0].capacity) == 101);
 	CHECK(!fa_string_is_well_formed(items[0].bytes, items[0].length, items[0].capacity));
 	drop_test_string_parts(parts);

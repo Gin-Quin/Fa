@@ -584,16 +584,7 @@ impl Generator<'_> {
 			return;
 		}
 		let utf8 = self.has(self.strip_groups(iterable), NodeFlags::UTF8_ITERATION);
-		let collection = if utf8 {
-			let View::Call { callee, .. } = self.view(self.strip_groups(iterable)) else {
-				unreachable!("UTF8_ITERATION is a call")
-			};
-			let text = self.receiver(callee);
-			let helper = self.helper("faUtf8Values");
-			js::call(helper, &[text.text])
-		} else {
-			self.expr(iterable)
-		};
+		let collection = self.expr(iterable);
 		let text = self.kind(self.type_of(iterable)) == Kind::Text;
 		self.push_scope();
 		let mut destructured = None;
@@ -661,26 +652,19 @@ impl Generator<'_> {
 			self.block_into(body, Dest::Discard);
 			self.fcx.loops.pop();
 			self.out.close("");
-		} else if utf8 && has_index {
-			let counter = self.temp();
-			self.out.line(format!("let {counter} = 0;"));
-			let name = variable_symbol
-				.map(|symbol| self.declare(symbol))
-				.unwrap_or_else(|| self.temp());
-			self.out
-				.open(format!("for (const {name} of {})", collection.text));
-			if let Some(symbol) = index_symbol {
-				let index = self.declare(symbol);
-				self.out.line(format!("const {index} = {counter}++;"));
-			}
-			self.fcx.loops.push(LoopCx {
-				dest: Dest::Discard,
-			});
-			self.coop_point();
-			self.block_into(body, Dest::Discard);
-			self.fcx.loops.pop();
-			self.out.close("");
-		} else if text || utf8 {
+		} else if utf8 {
+			// TextEncoder's bulk encoding and an indexed byte loop are much
+			// cheaper on JS engines than resuming a generator for every byte.
+			let items = self.keep(collection);
+			self.loop_over(
+				items,
+				variable_symbol,
+				destructured,
+				index_symbol,
+				true,
+				body,
+			);
+		} else if text {
 			self.loop_over(
 				collection,
 				variable_symbol,

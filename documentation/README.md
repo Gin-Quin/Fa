@@ -30,7 +30,7 @@ For humans:
 Memory management:
 
 - **Where data is stored is part of the type system** (`Person in people`): operations that move or remove elements are tracked, and an invalidated reference must be declared again before use.
-- **Safe, explicit relations** instead of weak pointers: a reference stored in a field names its collection and has a declared reverse side; the compiler keeps both sides in sync, and cleans them up when an object is deleted.
+- **Safe, explicit graph edges**: ordinary reference fields are relations with a declared reverse side, synchronized and cleaned up on deletion. An explicit `link` can instead name an element of a growing collection contained by the same complete owner, without a reverse side or individual deletion.
 - No garbage collector, no borrow checker.
 
 ## On graphics and user interfaces

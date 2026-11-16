@@ -649,19 +649,19 @@ impl Walker<'_> {
 			{
 				self.check_reference_annotation(annotation);
 			}
-			if let View::Assignment { target, .. } = self.view(parameter) {
-				if let View::Name(name) = self.view(target) {
-					let symbol = self.declare(
-						parameter,
-						name,
-						crate::symbols::SymbolKind::Parameter {
-							index: params.len() as u16,
-						},
-					);
-					let entry = self.a.symbols.symbol_mut(symbol);
-					entry.ty = ty;
-					entry.state = crate::symbols::DeclState::Done;
-				}
+			if let View::Assignment { target, .. } = self.view(parameter)
+				&& let View::Name(name) = self.view(target)
+			{
+				let symbol = self.declare(
+					parameter,
+					name,
+					crate::symbols::SymbolKind::Parameter {
+						index: params.len() as u16,
+					},
+				);
+				let entry = self.a.symbols.symbol_mut(symbol);
+				entry.ty = ty;
+				entry.state = crate::symbols::DeclState::Done;
 			}
 			let ty = if variadic { self.s.types.array(ty) } else { ty };
 			params.push(ParamSig {

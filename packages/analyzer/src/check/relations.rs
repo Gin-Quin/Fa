@@ -1341,6 +1341,7 @@ impl Walker<'_> {
 	pub(crate) fn contains_reference_type(&self, n: NodeId) -> bool {
 		let mut stack = vec![n];
 		let mut seen = FxHashSet::default();
+		let mut applied = FxHashMap::default();
 		while let Some(node) = stack.pop() {
 			if !seen.insert(node) {
 				continue;
@@ -1348,27 +1349,37 @@ impl Walker<'_> {
 			match self.view(node) {
 				View::RefType { .. } => return true,
 				View::Object { .. } | View::TypedObject { .. } | View::Lambda { .. } => continue,
+				View::Call { callee, arguments } => {
+					let callee = self.strip_groups(callee);
+					applied.insert(callee, arguments.len());
+					if let View::Access { members, .. } = self.view(callee)
+						&& let Some(last) = members.last() {
+						applied.insert(last, arguments.len());
+					}
+				}
 				View::Name(_) | View::Access { .. } => {
+					let supplied = applied.get(&node).copied().unwrap_or(0);
 					let resolved = match self.view(node) {
 						View::Access { members, .. } => members.last().unwrap_or(node),
 						_ => node,
 					};
-					if let resolution @ Resolution::External(_) = self.a.resolution(resolved) {
-						if self
+					if let resolution @ Resolution::External(_) = self.a.resolution(resolved)
+						&& self
 							.s
 							.external_node(resolution)
 							.is_some_and(|(module, decl)| {
 								self.s.interface(module).is_some_and(|interface| {
 									interface.reference_aliases.contains(&decl)
+										|| interface.reference_defaults.get(&decl).is_some_and(|defaults| defaults.iter().skip(supplied).any(|&reference| reference))
 								})
 							}) {
-							return true;
-						}
+						return true;
 					}
 					if let Resolution::Local(symbol) = self.a.resolution(resolved) {
 						if let Some((module, decl)) = self.proxy_decl(symbol) {
 							if self.s.interface(module).is_some_and(|interface| {
-								interface.reference_aliases.contains(&decl)
+									interface.reference_aliases.contains(&decl)
+										|| interface.reference_defaults.get(&decl).is_some_and(|defaults| defaults.iter().skip(supplied).any(|&reference| reference))
 							}) {
 								return true;
 							}
@@ -1377,7 +1388,10 @@ impl Walker<'_> {
 							if entry.kind == SymbolKind::Type {
 								match self.view(entry.decl_node) {
 									View::TypeDecl { value, .. }
-									| View::ExportType { value, .. } => stack.push(value),
+									| View::ExportType { value, .. } => {
+										stack.push(value);
+										stack.extend(self.reference_default_nodes(entry.decl_node).into_iter().skip(supplied).flatten());
+									},
 									_ => {}
 								}
 							}
@@ -1389,6 +1403,17 @@ impl Walker<'_> {
 			stack.extend(syntax::children(&self.tree, node));
 		}
 		false
+	}
+
+	pub(super) fn reference_default_nodes(&self, declaration: NodeId) -> Vec<Option<NodeId>> {
+		let parameters = match self.view(declaration) {
+			View::TypeDecl { parameters, .. } | View::ExportType { parameters, .. } => parameters,
+			_ => return Vec::new(),
+		};
+		parameters.iter().map(|parameter| match self.view(parameter) {
+			View::Assignment { value, .. } => value,
+			_ => None,
+		}).collect()
 	}
 
 	/// `x.f = t` (and `x = literal`): the checks of a relation write

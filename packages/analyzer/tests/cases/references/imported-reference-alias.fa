@@ -4,5 +4,9 @@ export mutable: GrowingPool<{ id: Integer }> = []
 export type = { id: Integer } in nodes
 -- file: Refs.fa
 export type = Array<Ref>
+-- file: Default.fa
+export type<Item = Ref> = Array<Item>
 -- file: main.fa
 type Holder = { children: Refs } -- error: REF010
+type Other = { children: Default } -- error: REF010
+type Owned = { children: Default<Integer> }

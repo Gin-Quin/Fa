@@ -631,12 +631,11 @@ impl Walker<'_> {
 				returns.map(|ret| {
 					self.function_type(
 						&param_sigs,
-						ret,
+						(ret, reference),
 						throws,
 						declared_effects,
 						&declared_requires,
 						owner.is_async,
-						reference,
 					)
 				})
 			};
@@ -838,12 +837,11 @@ impl Walker<'_> {
 			} else {
 				w.function_type(
 					&param_sigs,
-					ret,
+					(ret, reference),
 					throws,
 					effects,
 					&all_requires,
 					owner.is_async,
-					reference,
 				)
 			}
 		});
@@ -875,13 +873,13 @@ impl Walker<'_> {
 	fn function_type(
 		&mut self,
 		params: &[ParamSig],
-		ret: TypeId,
+		result: (TypeId, Option<crate::ids::PathId>),
 		throws: TypeId,
 		effects: crate::ids::EffectSetId,
 		requires: &[crate::types::Requirement],
 		is_async: bool,
-		reference: Option<crate::ids::PathId>,
 	) -> TypeId {
+		let (ret, reference) = result;
 		let base = self.s.types.simple_sig(&[], ret, throws);
 		let params = self.s.types.param_list(params);
 		let requires = self.s.types.req_list(requires);

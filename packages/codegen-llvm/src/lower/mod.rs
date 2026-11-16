@@ -1926,6 +1926,17 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				} else {
 					repr
 				};
+				let repr = if let Some(sig) = info.sig {
+					let params = self.types().params(self.types().sig(sig).params);
+					if let Some(path) = params.get(position).and_then(|param| param.reference) {
+						let roots: Vec<_> = params.iter().map(|param| param.ty).collect();
+						self.reference_item_repr(path, &roots, repr)
+					} else {
+						repr
+					}
+				} else {
+					repr
+				};
 				self.slots.insert(param.symbol, Slot { pointer, repr });
 				if repr == Repr::Str
 					&& function.borrowed[position]

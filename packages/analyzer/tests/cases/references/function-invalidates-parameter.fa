@@ -1,0 +1,11 @@
+type Inventory = {
+	items: Pool<String>
+	function remove = (self, item: String in self.items) invalidates item => {
+		self.items.delete(item)
+	}
+}
+mutable inventory = Inventory { items = [] }
+use sword = inventory.items.add("sword")
+use shield = inventory.items.add("shield")
+inventory.remove(sword)
+console.log(shield) -- prints: shield

@@ -15,9 +15,11 @@
 //!   `mutable use x` keeps that address in a slot of its own, which
 //!   `reuse x = place` changes.
 
-use fa_analyzer::ids::{NodeId, SymbolId};
+use fa_analyzer::analysis::Argument;
+use fa_analyzer::ids::{NodeId, PathId, SymbolId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
+use fa_analyzer::types::{CollKind, PathRoot, PathStep, TypeKind};
 use inkwell::values::PointerValue;
 
 use crate::error::Error;
@@ -42,10 +44,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			View::Block { statements } => statements.last(),
 			_ => Some(body),
 		};
-		if let Some(tail) = tail {
-			if !matches!(self.view(tail), View::Return(_) | View::Throw(_)) {
-				roots.insert(tail);
-			}
+		if let Some(tail) = tail
+			&& !matches!(self.view(tail), View::Return(_) | View::Throw(_))
+		{
+			roots.insert(tail);
 		}
 		let mut pending = vec![body];
 		while let Some(node) = pending.pop() {
@@ -54,7 +56,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					roots.insert(value);
 				}
 				View::Lambda { .. } | View::Function { .. } => continue,
-				_ => pending.extend(fa_analyzer::syntax::children(&self.tree, node)),
+				_ => pending.extend(fa_analyzer::syntax::children(self.tree, node)),
 			}
 		}
 		self.frame_mut().reference_returns = roots;
@@ -86,6 +88,85 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			result
 		};
 		Some((element, optional))
+	}
+
+	/// Locate the collection's type without evaluating any argument again.
+	fn reference_owner_type(&self, path: PathId, roots: &[TypeId]) -> Option<TypeId> {
+		let (data, steps) = self.types().path_data(path);
+		let mut ty = match data.root {
+			PathRoot::Param(index) => *roots.get(index as usize)?,
+			PathRoot::SelfParam => *roots.first()?,
+			PathRoot::ModuleValue(key) => {
+				let (file, symbol) = self.session.external(Resolution::External(key))?;
+				self.session.analysis(file).symbols.symbol(symbol).ty
+			}
+			_ => return None,
+		};
+		for step in steps {
+			ty = self.types().rec_target(ty).unwrap_or(ty);
+			ty = match step {
+				PathStep::Field(name) | PathStep::Private(name) => {
+					self.types()
+						.fields_of(ty)
+						.iter()
+						.find(|field| field.name == *name)?
+						.ty
+				}
+				_ => return None,
+			};
+		}
+		Some(self.concrete_type(ty))
+	}
+
+	/// Columnar elements keep their row locator, not an object-layout address.
+	pub(super) fn reference_item_repr(&self, path: PathId, roots: &[TypeId], repr: Repr) -> Repr {
+		if let Repr::Object(object) = repr
+			&& let Some(owner) = self.reference_owner_type(path, roots)
+			&& let TypeKind::Collection(CollKind::Columnar | CollKind::GrowingColumnar, item, _) =
+				self.types().kind(owner)
+			&& self.types().rec_target(item).unwrap_or(item) == self.concrete_type(object)
+		{
+			Repr::Row(object)
+		} else {
+			repr
+		}
+	}
+
+	pub(super) fn reference_result_repr(
+		&self,
+		node: NodeId,
+		element: TypeId,
+	) -> Result<Repr, Error> {
+		let repr = self.repr_of(element, node.index())?;
+		let View::Call { callee, .. } = self.view(node) else {
+			return Ok(repr);
+		};
+		let TypeKind::Function(sig) = self.types().kind(self.type_of(callee)) else {
+			return Ok(repr);
+		};
+		let Some(path) = self.types().sig(sig).reference else {
+			return Ok(repr);
+		};
+		let Some(call) = self.analysis.call(node) else {
+			return Ok(repr);
+		};
+		let roots: Vec<_> = call
+			.arguments
+			.iter()
+			.map(|argument| match argument {
+				Argument::Given(node) => self.type_of(*node),
+				Argument::Receiver(callee) => match self.view(*callee) {
+					View::Access { target, members } => self.type_of(if members.len() == 1 {
+						target
+					} else {
+						members.get(members.len() - 2).unwrap_or(target)
+					}),
+					_ => TypeId::UNKNOWN,
+				},
+				_ => TypeId::UNKNOWN,
+			})
+			.collect();
+		Ok(self.reference_item_repr(path, &roots, repr))
 	}
 
 	/// Evaluate a result as a borrowed address, without a copy, temporary
@@ -125,7 +206,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.value
 			.expect("a reference result address")
 			.into_pointer_value();
-		let repr = self.repr_of(element, node.index())?;
+		let repr = self.reference_result_repr(node, element)?;
 		if optional {
 			self.optional_element(pointer, repr, node)
 		} else {
@@ -395,7 +476,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			None => {
 				let place = self.reference_place(value)?;
 				if matches!(self.node_repr(value)?, Repr::Optional(_))
-					&& !matches!(place.repr, Repr::Optional(_)) {
+					&& !matches!(place.repr, Repr::Optional(_))
+				{
 					self.nullable_references.insert(symbol, ());
 				}
 				place
@@ -645,7 +727,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.unsupported(node.index(), "a reference result without a place")
 				})?
 				.into_pointer_value();
-			let repr = self.repr_of(element, node.index())?;
+			let repr = self.reference_result_repr(node, element)?;
 			return Ok(Some((Slot { pointer, repr }, optional)));
 		}
 		if let Some(slot) = self.array_reference(node)? {
@@ -667,8 +749,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if self.is_place(inner) {
 			let place = self.place(inner)?;
 			if let Repr::Link(target) = place.repr {
-				let pointer = self.builder.build_load(self.pointer_type(), place.pointer, "relation_target")?.into_pointer_value();
-				return Ok(Slot { pointer, repr: self.repr_of(target, inner.index())? });
+				let pointer = self
+					.builder
+					.build_load(self.pointer_type(), place.pointer, "relation_target")?
+					.into_pointer_value();
+				return Ok(Slot {
+					pointer,
+					repr: self.repr_of(target, inner.index())?,
+				});
 			}
 			return Ok(place);
 		}

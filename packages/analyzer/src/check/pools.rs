@@ -24,7 +24,7 @@ use crate::flow::Step;
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::Resolution;
 use crate::syntax::View;
-use crate::types::{CollKind, IntStorage, TypeKind};
+use crate::types::{CollKind, IntStorage};
 
 /// The builtin family of a pool or columnar kind: the owner of its paths.
 pub(crate) fn pool_owner(kind: CollKind) -> Option<&'static str> {
@@ -214,18 +214,6 @@ impl Walker<'_> {
 		if inside || self.s.types.is_recovering(self.type_of(argument)) {
 			return;
 		}
-		// a target read from a relation (`for friend in ana.friends`): an
-		// element of the relation's collection
-		if let Some(element) = element
-			&& let Some(parent) = self.places.get(element).parent
-			&& self.relation_pool_places.contains(&parent)
-		{
-			return;
-		}
-		// a reference parameter `element: T in pool` (relations.rs)
-		if self.is_reference_into(argument, collection) {
-			return;
-		}
 		let text = self.tree.text(argument.index()).to_string();
 		let collection_text = self.place_text(collection);
 		let message = format!(
@@ -286,11 +274,5 @@ impl Walker<'_> {
 		);
 		let diagnostic = self.diagnostic(&WCL002, value, message);
 		self.report(diagnostic);
-	}
-
-	/// Whether `argument` is a reference parameter or a value whose type is
-	/// a reference into `collection` (relations, M3).
-	fn is_reference_into(&self, argument: NodeId, _collection: crate::ids::PlaceId) -> bool {
-		matches!(self.s.types.kind(self.type_of(argument)), TypeKind::Ref(..))
 	}
 }

@@ -1133,6 +1133,7 @@ fn merge_interface(
 	};
 	Interface {
 		reference_aliases: interface.reference_aliases.clone(),
+		reference_defaults: interface.reference_defaults.clone(),
 		export: interface
 			.export
 			.as_ref()

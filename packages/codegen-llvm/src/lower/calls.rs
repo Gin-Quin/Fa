@@ -160,7 +160,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						));
 						continue;
 					}
-					if (changed.contains(&position)) && self.is_place(*argument) {
+					if changed.contains(&position) && self.is_place(*argument) {
 						let place = self.place(*argument)?;
 						if self.signature_borrows(ty, position, place.repr) {
 							arguments.push(Val::new(place.repr, self.zero_value(place.repr)));

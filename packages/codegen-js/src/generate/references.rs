@@ -142,10 +142,10 @@ impl Generator<'_> {
 		if matches!(self.view(node), View::None) {
 			return Expr::constant("undefined", crate::js::Prec::Primary);
 		}
-		if let Resolution::Local(symbol) = self.analysis.resolution(node) {
-			if let Some(cell) = self.reference_cells.get(&symbol) {
-				return Expr::name(cell.clone(), true);
-			}
+		if let Resolution::Local(symbol) = self.analysis.resolution(node)
+			&& let Some(cell) = self.reference_cells.get(&symbol)
+		{
+			return Expr::name(cell.clone(), true);
 		}
 		if self.call_returns_reference(node) {
 			let View::Call { callee, arguments } = self.view(node) else {
@@ -201,41 +201,40 @@ impl Generator<'_> {
 	/// An erased Pool.add returns either an object or a primitive slot.
 	/// Dispatch once at insertion and retain the exact target in the cell.
 	fn generic_pool_reference(&mut self, node: NodeId) -> Option<Expr> {
-		if let View::Call { callee, .. } = self.view(node) {
-			if matches!(self.analysis.call(node).map(|call| call.callee), Some(Callee::Builtin(id)) if builtins::get(id).path == "Pool#add")
-				&& matches!(self.types.kind(self.receiver_type(callee)), TypeKind::Collection(_, item, _) if matches!(self.types.kind(item), TypeKind::Param(_)))
-			{
-				let receiver = self.receiver(callee);
-				let receiver = self.keep_value_part(receiver).primary_text();
-				let argument = self
-					.analysis
-					.call(node)
-					.and_then(|call| call.arguments.first())
-					.and_then(|arg| {
-						if let Argument::Given(node) = arg {
-							Some(*node)
-						} else {
-							None
-						}
-					})
-					.expect("Pool.add argument");
-				let data = self.expr(argument);
-				let data = self.copy_stored(argument, data);
-				let data = self.keep_value_part(data).text;
-				let result = self.temp();
-				let slot = self.temp();
-				let cell = format!(
-					"{{ get $v() {{ return {receiver}.get({slot}); }}, set $v(value) {{ {receiver}.set({slot}, value); }} }}"
-				);
-				// Use one expression so the lexical slot remains captured by its cell.
-				let add = self.helper("faAdd");
-				let assign = self.helper("faAssign");
-				let expression = format!(
-					"({receiver}[Symbol.toStringTag] === \"fa:ValuePool\" ? (() => {{ const {slot} = {receiver}.add({data}); return {cell}; }})() : (() => {{ const {slot} = {add}({receiver}, {data}); return {{ get $v() {{ return {slot}; }}, set $v(value) {{ {assign}({slot}, value); }} }}; }})())"
-				);
-				self.out.line(format!("const {result} = {expression};"));
-				return Some(Expr::name(result, true));
-			}
+		if let View::Call { callee, .. } = self.view(node)
+			&& matches!(self.analysis.call(node).map(|call| call.callee), Some(Callee::Builtin(id)) if builtins::get(id).path == "Pool#add")
+			&& matches!(self.types.kind(self.receiver_type(callee)), TypeKind::Collection(_, item, _) if matches!(self.types.kind(item), TypeKind::Param(_)))
+		{
+			let receiver = self.receiver(callee);
+			let receiver = self.keep_value_part(receiver).primary_text();
+			let argument = self
+				.analysis
+				.call(node)
+				.and_then(|call| call.arguments.first())
+				.and_then(|arg| {
+					if let Argument::Given(node) = arg {
+						Some(*node)
+					} else {
+						None
+					}
+				})
+				.expect("Pool.add argument");
+			let data = self.expr(argument);
+			let data = self.copy_stored(argument, data);
+			let data = self.keep_value_part(data).text;
+			let result = self.temp();
+			let slot = self.temp();
+			let cell = format!(
+				"{{ get $v() {{ return {receiver}.get({slot}); }}, set $v(value) {{ {receiver}.set({slot}, value); }} }}"
+			);
+			// Use one expression so the lexical slot remains captured by its cell.
+			let add = self.helper("faAdd");
+			let assign = self.helper("faAssign");
+			let expression = format!(
+				"({receiver}[Symbol.toStringTag] === \"fa:ValuePool\" ? (() => {{ const {slot} = {receiver}.add({data}); return {cell}; }})() : (() => {{ const {slot} = {add}({receiver}, {data}); return {{ get $v() {{ return {slot}; }}, set $v(value) {{ {assign}({slot}, value); }} }}; }})())"
+			);
+			self.out.line(format!("const {result} = {expression};"));
+			return Some(Expr::name(result, true));
 		}
 		None
 	}

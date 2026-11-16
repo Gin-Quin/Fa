@@ -1627,12 +1627,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// A method used through its type is an unbound function value:
 		// the caller supplies self, so the type name is never a runtime load.
 		if self.flags(target).contains(NodeFlags::TYPE_EXPR) {
-			if let Some(member) = members.last() {
-				if let Resolution::Local(symbol) = self.analysis.resolution(member) {
-					let data = self.analysis.symbols.symbol(symbol);
-					if data.kind == fa_analyzer::symbols::SymbolKind::Function {
-						return self.function_value(data.decl_node, node);
-					}
+			if let Some(member) = members.last()
+				&& let Resolution::Local(symbol) = self.analysis.resolution(member)
+			{
+				let data = self.analysis.symbols.symbol(symbol);
+				if data.kind == fa_analyzer::symbols::SymbolKind::Function {
+					return self.function_value(data.decl_node, node);
 				}
 			}
 			if let Some(reached) = self.callee_function(node) {
@@ -2061,7 +2061,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let pointer = raw.value.expect("a reference address").into_pointer_value();
 				Ok(Slot {
 					pointer,
-					repr: self.repr_of(element, node.index())?,
+					repr: self.reference_result_repr(node, element)?,
 				})
 			}
 			View::Name(_) => {

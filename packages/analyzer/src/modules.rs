@@ -701,6 +701,8 @@ pub struct Interface {
 	pub relations: Vec<crate::analysis::Relation>,
 	/// Aliases whose denoted type contains a reference before runtime erasure.
 	pub reference_aliases: FxHashSet<NodeId>,
+	/// Reference-containing generic defaults, by declaration and position.
+	pub reference_defaults: FxHashMap<NodeId, Vec<bool>>,
 }
 
 /// The generic parameters reached by exported types, including binders
@@ -1027,6 +1029,11 @@ impl Interface {
 		}
 		for &decl in &self.reference_aliases {
 			parts.push((14, key_hash(decl), 1, 0));
+		}
+		for (&decl, defaults) in &self.reference_defaults {
+			for (index, &reference) in defaults.iter().enumerate() {
+				parts.push((15, key_hash(decl), index as u128, u128::from(reference)));
+			}
 		}
 		parts.push((4, u128::from(self.reads_target), 0, 0));
 		// the relations: their kind, types, sides and collections

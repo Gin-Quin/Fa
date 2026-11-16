@@ -1,13 +1,13 @@
 -- prints: 12
 -- prints: none
 -- prints: 13
-function same = (nodes: GrowingPool<Integer>, value: (Integer in nodes)?): (Integer in nodes)? => value
+function same = (nodes: GrowingPool<Integer>, value: (Integer in nodes)? = none): (Integer in nodes)? => value
 mutable nodes: GrowingPool<Integer> = []
 use first = nodes.add(10)
 use present = same(nodes, first)
 if present is not none { present = 12 }
 console.log(first)
-use absent = same(nodes, none)
+use absent = same(nodes)
 console.log(absent)
 type Identity = (nodes: GrowingPool<Integer>, value: (Integer in nodes)?) => (Integer in nodes)?
 let identity: Identity = same

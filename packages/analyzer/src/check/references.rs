@@ -207,10 +207,10 @@ impl Walker<'_> {
 			return;
 		}
 		let fresh = self.reference_is_fresh(value);
-		if let Some(cx) = self.body.functions.last_mut() {
-			if cx.ref_owner == Some(owner) {
-				cx.ref_fresh &= fresh;
-			}
+		if let Some(cx) = self.body.functions.last_mut()
+			&& cx.ref_owner == Some(owner)
+		{
+			cx.ref_fresh &= fresh;
 		}
 		let Some(place) = self.reference_place(value) else {
 			let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::REF008, value,
@@ -371,16 +371,23 @@ impl Walker<'_> {
 			return;
 		};
 		let mut callee = self.strip_groups(callee);
-		if let View::Call { callee: inner, .. } = self.view(callee) {
-			if self.a.has_flags(callee, NodeFlags::GENERIC_APPLICATION) {
-				callee = inner;
-			}
+		if let View::Call { callee: inner, .. } = self.view(callee)
+			&& self.a.has_flags(callee, NodeFlags::GENERIC_APPLICATION)
+		{
+			callee = inner;
 		}
 		let resolved = match self.view(callee) {
 			View::Access { members, .. } => members.last().unwrap_or(callee),
 			_ => callee,
 		};
-		let direct = matches!(self.a.resolution(resolved), Resolution::Local(symbol) if self.a.symbols.symbol(symbol).kind == SymbolKind::Function);
+		let direct = match self.a.resolution(resolved) {
+			Resolution::Local(symbol) => self.a.symbols.symbol(symbol).kind == SymbolKind::Function,
+			Resolution::External(key) => self.s.interface(self.s.types.decl_key_data(key).module)
+				.is_some_and(|interface| interface.keys.get(&key)
+					.and_then(|declaration| interface.declared.get(&declaration.node))
+					.is_some_and(|declaration| declaration.kind == SymbolKind::Function)),
+			_ => false,
+		};
 		let identity = if direct && sig.fresh {
 			self.body.flow.time += 1;
 			crate::flow::Identity::Fresh(self.body.flow.time)
@@ -412,14 +419,13 @@ impl Walker<'_> {
 			let step = self.places.get(current).step.expect("child step");
 			if matches!(step, Step::Index(_) | Step::All)
 				&& self.relation_pool_places.contains(&parent)
+				&& let Some((target, _)) = self.reference_field_collection(parent)
 			{
-				if let Some((target, _)) = self.reference_field_collection(parent) {
-					place = self.places.child(target, step);
-					for step in suffix.into_iter().rev() {
-						place = self.places.child(place, step);
-					}
-					break;
+				place = self.places.child(target, step);
+				for step in suffix.into_iter().rev() {
+					place = self.places.child(place, step);
 				}
+				break;
 			}
 			suffix.push(step);
 			current = parent;

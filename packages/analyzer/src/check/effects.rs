@@ -955,19 +955,16 @@ impl Walker<'_> {
 					continue;
 				}
 				if kind {
-					if let Some(symbol) = reference_parameter {
-						if let View::Assignment {
+					if let Some(symbol) = reference_parameter
+						&& let View::Assignment {
 							annotation: Some(annotation),
 							..
 						} = self.view(self.a.symbols.symbol(symbol).decl_node)
-						{
-							if let Some((owner, _)) = self
-								.reference_annotation(annotation)
-								.and_then(|owner| self.signature_path(owner))
-							{
-								mutated.push(self.extend_path(owner, PathStep::Size));
-							}
-						}
+						&& let Some((owner, _)) = self
+							.reference_annotation(annotation)
+							.and_then(|owner| self.signature_path(owner))
+					{
+						mutated.push(self.extend_path(owner, PathStep::Size));
 					}
 					invalidated.push(path);
 				} else {

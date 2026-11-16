@@ -4,6 +4,7 @@ type Node = { id: Int32 }
 type Ref = Node in nodes
 type Refs = Array<Ref>
 type List<Item> = Array<Item>
+type Default<Item = Ref> = Array<Item>
 type Plain = {
 	children: Array<Node in nodes> -- error: REF010
 	optional: Array<Node in nodes>? -- error: REF010
@@ -11,5 +12,8 @@ type Plain = {
 	nested: Array<Array<Node in nodes>> -- error: REF010
 	alias: Refs -- error: REF010
 	generic: List<Node in nodes> -- error: REF010
+	default: Default -- error: REF010
+	explicitDefault: Default<> -- error: REF010
+	overridden: Default<Integer>
 }
 -- This is the checked rejection of benchmarks/audit/ports/scene-children/main.fa.

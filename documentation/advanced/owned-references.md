@@ -347,3 +347,22 @@ anotherArrayOfPersons.push(someone)
 ```
 
 `take` moves rather than copies, and it declares the same effect as `delete`: `take(1)` on an array invalidates the references from index 1 on.
+
+:::implementation
+## Reference function ABI
+
+Native and wasm functions with an explicit borrowed result return its address
+(nullable for an optional), using the ordinary error-result ABI when they throw.
+Dependent parameters receive that same borrowed address, including primitive
+subfields; no owned temporary may replace the designated place. Local `use`
+keeps it, while an ordinary owning store follows the data's copy/move rules.
+Relation-field borrows read the target address once, rather than aliasing the
+field that can later be reassigned. Columnar references keep their row locator.
+
+JavaScript uses the existing accessor cells at user-function call boundaries
+for primitive slots, subfields and erased generic items. An object `use` unwraps
+the cell once and retains the object itself; writes through primitive parameters
+use its getter/setter. This call ABI does not add wrappers to stored object-link
+reads. Owner paths, effects and direct-call freshness stay compile-time facts;
+they survive callable interface merging, hashing and import substitution.
+:::

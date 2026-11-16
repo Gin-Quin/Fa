@@ -1,8 +1,11 @@
 function empty = <capacity: UInt32>(): InlineArray<Integer, capacity> => []
-function append = <Item, capacity: UInt32>(values: InlineArray<Item, capacity>, item: Item)
-	throws CapacityError mutates values.length => { try values.push(item) }
-function operate = <capacity: UInt32>(values: InlineArray<Integer, capacity>)
-	throws CapacityError | IndexError mutates values => {
+function append = <Item, capacity: UInt32>(
+	values: InlineArray<Item, capacity>
+	item: Item
+) throws CapacityError mutates values.length => { try values.push(item) }
+function operate = <capacity: UInt32>(
+	values: InlineArray<Integer, capacity>
+) throws CapacityError | IndexError mutates values => {
 	assert values.capacity == capacity
 	try append<Integer, capacity>(values, 1)
 	try append<Integer, capacity>(values, 2)
@@ -21,8 +24,7 @@ function operate = <capacity: UInt32>(values: InlineArray<Integer, capacity>)
 	assert values.pop() is none
 	try append<Integer, capacity>(values, 7)
 }
-function build = <capacity: UInt32>(): InlineArray<Integer, capacity>
-	throws CapacityError | IndexError => {
+function build = <capacity: UInt32>(): InlineArray<Integer, capacity> throws CapacityError | IndexError => {
 	mutable values = empty<capacity>()
 	try operate<capacity>(values)
 	values
@@ -33,7 +35,9 @@ console.log(values, values.capacity) -- prints: [7] 3
 
 type Buffer<capacity: UInt32> = {
 	items: InlineArray<Integer, capacity> = []
-	function append = (self, value: Integer) throws CapacityError mutates self.items.length => { try self.items.push(value) }
+	function append = (self, value: Integer) throws CapacityError mutates self.items.length => {
+		try self.items.push(value)
+	}
 	function room = (self): Integer => self.items.capacity
 }
 function boxed = (): Buffer<1> throws CapacityError => {
@@ -72,13 +76,15 @@ static inferredValues = @inferred()
 console.log(inferredValues) -- prints: [5]
 
 type Row = { values: Array<String> }
-function duplicate = <Item, capacity: UInt32>(items: InlineArray<Item, capacity>): InlineArray<Item, capacity> => copy items
+function duplicate = <Item, capacity: UInt32>(
+	items: InlineArray<Item, capacity>
+): InlineArray<Item, capacity> => copy items
 function check = (): InlineArray<Row, 2> throws IndexError => {
- mutable items: InlineArray<Row, 2> = [{ values = ["before"] }]
- let saved = duplicate<Row, 2>(items)
- try items[0].values[0] = "after"
- assert try saved[0].values[0] == "before"
- saved
+	mutable items: InlineArray<Row, 2> = [{ values = ["before"] }]
+	let saved = duplicate<Row, 2>(items)
+	try items[0].values[0] = "after"
+	assert try saved[0].values[0] == "before"
+	saved
 }
 console.log(try check()) -- prints: [{ values = ["before"] }]
 static saved = @check()

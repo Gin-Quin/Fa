@@ -2362,6 +2362,7 @@ impl Walker<'_> {
 		self.a.escapes.insert(lambda);
 		// requirements are not captured (requirements.rs)
 		self.check_stored_lambda(lambda);
+		self.check_unique_captures(lambda, at);
 		let Some(writes) = self.closure_writes.get(&lambda).cloned() else {
 			return;
 		};

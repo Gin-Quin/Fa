@@ -246,6 +246,18 @@ impl Walker<'_> {
 				Some(&place) => place,
 				None => self.places.symbol(symbol),
 			};
+			let declared = self
+				.place_type(place)
+				.unwrap_or(self.a.symbols.symbol(symbol).ty);
+			let actual = self.narrowed_place_type(place, declared);
+			let key = (lambda, symbol);
+			let captured = match self.capture_types.get(&key).copied() {
+				Some(previous) if previous != actual => self.s.types.join(previous, actual),
+				_ => actual,
+			};
+			if self.capture_types.insert(key, captured) != Some(captured) {
+				self.retention_version += 1;
+			}
 			let sources = self.callable_place_sources(place, &self.body.flow.callable_values);
 			if sources.is_empty() {
 				continue;

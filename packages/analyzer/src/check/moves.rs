@@ -17,6 +17,7 @@ use crate::ids::{NodeId, SymbolId, TypeId};
 use crate::symbols::SymbolKind;
 use crate::types::TypeKind;
 
+mod captures;
 mod concrete;
 mod copies;
 mod graph;

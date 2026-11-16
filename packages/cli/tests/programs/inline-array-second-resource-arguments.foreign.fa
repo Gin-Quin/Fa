@@ -1,6 +1,10 @@
 type Resource = {
 	name: String
-	function destroy = (self) => console.log("drop {self.name}")
+	payload: String = "owned".repeat(12)
+	function destroy = (self) => {
+		assert self.payload.length == 60
+		console.log("drop {self.name}")
+	}
 }
 type List = InlineArray<Resource, 1>
 type Failure = Errors { No }

@@ -55,6 +55,7 @@ pub(crate) mod reactivity;
 mod references;
 mod relations;
 mod requirements;
+mod retention;
 mod schemas;
 mod spelling;
 mod spreads;
@@ -466,6 +467,7 @@ pub struct Walker<'s> {
 	/// show`): read whenever it is called, never moved (`moves.rs`).
 	pub(crate) pinned_captures: rustc_hash::FxHashSet<SymbolId>,
 	pub(crate) callable_reads: callable_values::CallableReads,
+	pub(crate) callable_captures: FxHashMap<(NodeId, SymbolId), Vec<callable_values::ReadSource>>,
 	/// Sources available after written arguments and before call effects.
 	pub(crate) callable_calls: FxHashMap<NodeId, crate::flow::CallableBindings>,
 	/// The effects written in each function's signature, by lambda node.
@@ -654,6 +656,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		callee_name_node: None,
 		pinned_captures: rustc_hash::FxHashSet::default(),
 		callable_reads: FxHashMap::default(),
+		callable_captures: FxHashMap::default(),
 		callable_calls: FxHashMap::default(),
 		parallel: Vec::new(),
 		parallel_callbacks: rustc_hash::FxHashSet::default(),

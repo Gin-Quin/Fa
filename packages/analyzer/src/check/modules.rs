@@ -207,6 +207,8 @@ impl Walker<'_> {
 		if let Some((_, export)) = self.modules.export {
 			self.publish(export);
 		}
+		// Retention is settled before its portable parameter summaries.
+		self.finish_parameter_retention();
 		// the rest of what the program and the backends read of the file
 		self.publish_interface(root);
 		let deferred = self.modules.deferred;

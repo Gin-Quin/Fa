@@ -660,6 +660,8 @@ pub struct Analysis {
 	/// capture (`FnInfo::captures`) when created; the others see the
 	/// captured variables themselves (advanced brief §5.11, D3).
 	pub escapes: rustc_hash::FxHashSet<NodeId>,
+	/// Parameters whose callable data can be retained by their function.
+	pub kept_parameters: rustc_hash::FxHashSet<SymbolId>,
 	/// The `let` and `mutable` locals of blocks and functions whose value
 	/// never outlives the function's frame ([`Analysis::is_non_escaping`]).
 	pub non_escaping: rustc_hash::FxHashSet<SymbolId>,
@@ -1591,6 +1593,7 @@ impl Analysis {
 			argument_ownership: FxHashMap::default(),
 			callback_types: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
+			kept_parameters: rustc_hash::FxHashSet::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),
 			requirement_args: FxHashMap::default(),
 			type_decls: FxHashMap::default(),

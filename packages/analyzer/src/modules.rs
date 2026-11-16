@@ -537,6 +537,8 @@ pub struct Parameter {
 	/// A function-typed parameter the function only calls: its argument
 	/// may throw (`check/callbacks.rs`).
 	pub only_called: bool,
+	/// Whether the function can retain this parameter's callable data.
+	pub kept: bool,
 }
 
 /// A declaration of a file as the rest of the program sees it: the
@@ -901,7 +903,9 @@ impl Interface {
 				parts.push((
 					2,
 					types.decl_hash(param.key),
-					u128::from(param.has_default) | u128::from(param.only_called) << 1,
+					u128::from(param.has_default)
+						| u128::from(param.only_called) << 1
+						| u128::from(param.kept) << 2,
 					types.stable_hash(param.ty),
 				));
 			}

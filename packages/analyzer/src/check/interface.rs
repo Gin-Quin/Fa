@@ -246,6 +246,7 @@ impl Walker<'_> {
 					ty: symbol.ty,
 					has_default,
 					only_called: index < 32 && only_called & (1 << index) != 0,
+					kept: self.a.kept_parameters.contains(&param),
 				});
 			}
 			parameters.insert(decl, published);

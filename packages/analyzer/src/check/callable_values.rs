@@ -7,8 +7,8 @@ use smallvec::smallvec;
 use crate::analysis::{Callee, FieldValue};
 use crate::check::Walker;
 use crate::flow::{CallableBindings, Identity, Step};
-use crate::ids::{NodeId, PlaceId, Sym, TypeId};
-use crate::symbols::Resolution;
+use crate::ids::{NodeId, PlaceId, Sym, SymbolId, TypeId};
+use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::View;
 use crate::types::{FieldFlags, TypeKind};
 
@@ -23,6 +23,13 @@ enum Projection {
 pub(crate) struct ReadSource {
 	value: Option<NodeId>,
 	path: Vec<Projection>,
+}
+
+#[derive(Default)]
+pub(super) struct CallableFacts {
+	pub functions: Vec<NodeId>,
+	pub parameters: Vec<SymbolId>,
+	pub unknown: bool,
 }
 
 pub(super) type CallableReads = rustc_hash::FxHashMap<NodeId, Vec<ReadSource>>;
@@ -93,12 +100,12 @@ impl TargetSearch {
 }
 
 impl Walker<'_> {
-	fn callable_slot_type(&self, ty: TypeId) -> bool {
+	pub(super) fn callable_slot_type(&self, ty: TypeId) -> bool {
 		if ty.is_unset() {
 			return false;
 		}
 		match self.s.types.kind(ty) {
-			TypeKind::Function(_) => return true,
+			TypeKind::Function(_) | TypeKind::Param(_) => return true,
 			TypeKind::Object(_)
 			| TypeKind::Collection(..)
 			| TypeKind::CArray(..)
@@ -117,7 +124,7 @@ impl Walker<'_> {
 				continue;
 			}
 			match types.kind(ty) {
-				TypeKind::Function(_) => return true,
+				TypeKind::Function(_) | TypeKind::Param(_) => return true,
 				TypeKind::Object(shape) => pending.extend(
 					types
 						.shape_fields(shape)
@@ -195,6 +202,9 @@ impl Walker<'_> {
 	}
 
 	pub(super) fn record_callable_read(&mut self, node: NodeId, _ty: TypeId) {
+		if matches!(self.view(node), View::Lambda { .. } | View::Function { .. }) {
+			self.record_callable_captures(node);
+		}
 		if !self.body.flow.reachable
 			|| self.body.flow.callable_values.is_empty()
 			|| !matches!(
@@ -216,6 +226,51 @@ impl Walker<'_> {
 				recorded.push(source);
 			}
 		}
+	}
+
+	fn record_callable_captures(&mut self, node: NodeId) {
+		if !self.body.flow.reachable {
+			return;
+		}
+		let Some(info) = self.a.function(node) else {
+			return;
+		};
+		let lambda = info.lambda;
+		let captures = info.captures.clone();
+		for symbol in captures {
+			let place = match self.aliases.get(&symbol) {
+				Some(&place) => place,
+				None => self.places.symbol(symbol),
+			};
+			let sources = self.callable_place_sources(place, &self.body.flow.callable_values);
+			if sources.is_empty() {
+				continue;
+			}
+			let recorded = self.callable_captures.entry((lambda, symbol)).or_default();
+			for source in sources {
+				if !recorded.contains(&source) {
+					recorded.push(source);
+				}
+			}
+		}
+	}
+
+	pub(super) fn callable_capture_facts(&self, lambda: NodeId, symbol: SymbolId) -> CallableFacts {
+		let mut search = TargetSearch::new(lambda);
+		search.pending.clear();
+		for source in self
+			.callable_captures
+			.get(&(lambda, symbol))
+			.into_iter()
+			.flatten()
+		{
+			if let Some(value) = source.value {
+				search.push((value, source.path.clone()));
+			} else {
+				search.unknown = true;
+			}
+		}
+		self.search_callable_targets(search)
 	}
 
 	fn callable_place_sources(&self, place: PlaceId, values: &CallableBindings) -> Vec<ReadSource> {
@@ -273,7 +328,7 @@ impl Walker<'_> {
 				search.push((value, source.path));
 			}
 		}
-		self.search_callable_targets(search).0
+		self.search_callable_targets(search).functions
 	}
 
 	pub(crate) fn callable_is_borrowed_capture(&mut self, value: NodeId) -> bool {
@@ -373,15 +428,15 @@ impl Walker<'_> {
 	/// Concrete local bodies a value may call. Unknown values never fall
 	/// back to a mutable declaration's initializer.
 	pub(crate) fn callable_targets(&self, value: NodeId) -> Vec<NodeId> {
-		self.callable_target_facts(value).0
+		self.callable_source_facts(value).functions
 	}
 
-	pub(crate) fn callable_target_facts(&self, value: NodeId) -> (Vec<NodeId>, bool) {
+	pub(super) fn callable_source_facts(&self, value: NodeId) -> CallableFacts {
 		self.search_callable_targets(TargetSearch::new(value))
 	}
 
-	fn search_callable_targets(&self, mut pending: TargetSearch) -> (Vec<NodeId>, bool) {
-		let mut targets = Vec::new();
+	fn search_callable_targets(&self, mut pending: TargetSearch) -> CallableFacts {
+		let mut facts = CallableFacts::default();
 		while let Some((value, path)) = pending.pop() {
 			if let Some(inputs) = crate::lower::copies::result_inputs(&self.tree, value) {
 				pending.extend(inputs.into_iter().map(|input| (input, path.clone())));
@@ -391,7 +446,7 @@ impl Walker<'_> {
 				View::Copy(inner) | View::Spread(inner) | View::Return(Some(inner)) => {
 					pending.push((inner, path))
 				}
-				View::Lambda { .. } if path.is_empty() => targets.push(value),
+				View::Lambda { .. } if path.is_empty() => facts.functions.push(value),
 				View::Name(_) | View::Access { .. } | View::Index { .. } => {
 					let direct = if path.is_empty() {
 						if let Resolution::Local(symbol) = self.a.resolution(value) {
@@ -405,8 +460,16 @@ impl Walker<'_> {
 						None
 					};
 					if let Some(function) = direct {
-						targets.push(function);
+						facts.functions.push(function);
 					} else {
+						if let Some(symbol) =
+							crate::lower::copies::value_place_root(&self.tree, &self.a, value)
+							&& matches!(
+								self.a.symbols.symbol(symbol).kind,
+								SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
+							) {
+							facts.parameters.push(symbol);
+						}
 						if !self.callable_reads.contains_key(&value) {
 							pending.unknown = true;
 						}
@@ -494,14 +557,19 @@ impl Walker<'_> {
 								.into_iter()
 								.map(|node| (node, path.clone())),
 						);
+					} else {
+						pending.unknown = true;
 					}
 				}
-				_ => {}
+				_ => pending.unknown = true,
 			}
 		}
-		targets.sort_unstable();
-		targets.dedup();
-		(targets, pending.unknown)
+		facts.functions.sort_unstable();
+		facts.functions.dedup();
+		facts.parameters.sort_unstable();
+		facts.parameters.dedup();
+		facts.unknown = pending.unknown;
+		facts
 	}
 }
 

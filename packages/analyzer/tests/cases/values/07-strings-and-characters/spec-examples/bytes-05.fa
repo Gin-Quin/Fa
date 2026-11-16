@@ -1,4 +1,3 @@
 -- Specification example: bytes 05
 let bytes = "héllo".toUtf8()         -- Bytes, 6 bytes
 let text = try String.fromUtf8(bytes) -- "héllo"
-

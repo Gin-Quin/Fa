@@ -7,4 +7,3 @@ assert flags.characters().length == 2
 let accented = "e\u{301}" -- an `e` and a combining accent
 assert accented.length == 2
 assert accented.characters().length == 1
-

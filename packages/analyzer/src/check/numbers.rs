@@ -394,12 +394,14 @@ impl Walker<'_> {
 	/// holds the value of node `value` (its interval, for an integer; nothing
 	/// known otherwise). Called by `decl.rs` after the type part.
 	pub(crate) fn bind_value(&mut self, symbol: SymbolId, value: NodeId) {
+		self.bind_value_origins(symbol, value);
 		self.bind_or_assign(symbol, value, false);
 	}
 
 	/// The flow part of an assignment: like a binding, and the assigned value
 	/// narrows a local of a union type (values brief §14, T-NAR-8).
 	pub(crate) fn assign_value(&mut self, symbol: SymbolId, value: NodeId) {
+		self.bind_value_origins(symbol, value);
 		self.bind_or_assign(symbol, value, true);
 	}
 

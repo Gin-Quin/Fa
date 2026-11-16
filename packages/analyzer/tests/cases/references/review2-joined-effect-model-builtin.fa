@@ -1,0 +1,12 @@
+-- error: REF001
+-- Expected: REF001 on `kept`: after the join, `owner` may designate `model.b`, so `owner.clear()` may clear it.
+type Model = { a: Array<Integer>, b: Array<Integer> }
+function exercise = (chooseA: Boolean, i: Integer): Integer throws IndexError => {
+ mutable model: Model = { a = [1], b = [2] }
+ use kept = try model.b[i]
+ mutable use owner = model.b
+ if chooseA { reuse owner = model.a }
+ owner.clear()
+ kept
+}
+console.log(try exercise(false, 0))

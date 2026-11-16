@@ -50,6 +50,7 @@ mod optionals;
 mod patterns;
 mod pools;
 mod proofs;
+mod provenance;
 pub(crate) mod reactivity;
 mod references;
 mod relations;
@@ -234,6 +235,8 @@ pub struct LoopCx {
 	pub function_depth: usize,
 	/// The types of the `break` values of the current round.
 	pub break_types: Vec<(NodeId, TypeId)>,
+	pub break_origins: crate::flow::values::ValueOrigins,
+	pub break_nodes: Vec<NodeId>,
 	/// The hull of the integer `break` values of the current round (`None`
 	/// inside: a value that is not an integer).
 	pub break_values: Option<Option<crate::types::Interval>>,
@@ -436,7 +439,7 @@ pub struct Walker<'s> {
 	/// Borrowed call results, recorded once after that evaluation's effects.
 	pub(crate) reference_results: FxHashMap<NodeId, Vec<PlaceId>>,
 	/// Borrowed result leaves, captured before their branch flow is joined.
-	pub(crate) reference_values: FxHashMap<NodeId, Option<Vec<PlaceId>>>,
+	pub(crate) value_origins: FxHashMap<NodeId, crate::flow::values::ValueOrigins>,
 	/// Whole reference annotations in borrowing positions; nested storage is never allowed.
 	pub(crate) borrowed_type_nodes: rustc_hash::FxHashSet<NodeId>,
 	pub(crate) type_expression_root: Option<NodeId>,
@@ -444,7 +447,7 @@ pub struct Walker<'s> {
 	pub(crate) reference_parameters: FxHashMap<SymbolId, PlaceId>,
 	/// The collection each local iterator reads, and whether its items are
 	/// the collection's elements (`iterators.rs`).
-	pub(crate) iterator_locals: FxHashMap<SymbolId, (PlaceId, bool)>,
+	pub(crate) iterator_locals: FxHashMap<SymbolId, (Vec<PlaceId>, bool)>,
 	/// The relation fields and their uses (`relations.rs`).
 	pub(crate) relations: relations::RelationState,
 	/// The places of relation pools iterated by a loop: their loop
@@ -631,7 +634,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		key_sets: key_sets::KeySetState::default(),
 		aliases: FxHashMap::default(),
 		reference_results: FxHashMap::default(),
-		reference_values: FxHashMap::default(),
+		value_origins: FxHashMap::default(),
 		borrowed_type_nodes: rustc_hash::FxHashSet::default(),
 		type_expression_root: None,
 		reference_parameters: FxHashMap::default(),
@@ -951,22 +954,7 @@ impl Walker<'_> {
 			// the code after a `Never` expression is unreachable
 			self.body.flow.set_unreachable();
 		}
-		if self
-			.body
-			.functions
-			.last()
-			.is_some_and(|cx| cx.ref_owner.is_some())
-			&& matches!(
-				self.view(n),
-				View::Name(_)
-					| View::Access { .. }
-					| View::Index { .. }
-					| View::Call { .. }
-					| View::Try(_)
-			) {
-			let origins = self.body.flow.reachable.then(|| self.reference_origins(n));
-			self.reference_values.insert(n, origins);
-		}
+		self.record_value_origins(n);
 		ty
 	}
 
@@ -1448,6 +1436,19 @@ impl Walker<'_> {
 	}
 
 	fn function_type_parameter_names(&self, ty: TypeId) -> Vec<String> {
+		if let Some(info) = self.a.functions.values().find(|info| info.ty == ty) {
+			return info
+				.params
+				.iter()
+				.map(|param| {
+					self.s
+						.types
+						.syms
+						.resolve(self.a.symbols.symbol(param.symbol).name)
+						.to_string()
+				})
+				.collect();
+		}
 		for (index, node_ty) in self.a.types.iter().enumerate() {
 			if *node_ty != ty {
 				continue;

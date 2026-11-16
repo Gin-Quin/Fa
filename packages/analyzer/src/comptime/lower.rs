@@ -1115,6 +1115,11 @@ impl<'a> Lowerer<'a> {
 					self.mark_reference_result(arm.value);
 				}
 			}
+			View::Loop(_) => {
+				for value in self.a.loop_results.get(&value).cloned().unwrap_or_default() {
+					self.mark_reference_result(value);
+				}
+			}
 			View::Catch {
 				expression,
 				handler,
@@ -1152,6 +1157,11 @@ impl<'a> Lowerer<'a> {
 
 	fn borrow_value(&mut self, value: NodeId) -> Expr {
 		match syntax::view(self.tree, value) {
+			View::If { .. } | View::When { .. } | View::Catch { .. } | View::Do(_)
+			| View::Block { .. } | View::Loop(_) => {
+				self.mark_reference_result(value);
+				return self.expr(value);
+			}
 			View::Group(inner) | View::Try(inner) => return self.borrow_value(inner),
 			View::None => return Expr::none(),
 			View::Call { callee, arguments } if self.call_borrows(callee) => {

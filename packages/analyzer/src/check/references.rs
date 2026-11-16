@@ -91,11 +91,8 @@ impl Walker<'_> {
 		if let Some(place) = place {
 			self.aliases.insert(symbol, place);
 			if self.body.flow.reachable {
-				let designated = self.canonical_reference_place(place);
-				let places = origins
-					.into_iter()
-					.map(|place| self.canonical_reference_place(place))
-					.collect();
+				let designated = place;
+				let places = origins.into_iter().collect();
 				let state = self.facts.refs.state(RefState {
 					places,
 					..RefState::valid(designated)
@@ -212,85 +209,31 @@ impl Walker<'_> {
 	}
 
 	pub(super) fn reference_is_fresh(&mut self, value: NodeId) -> bool {
-		self.reference_result_leaves(value)
-			.into_iter()
-			.all(|value| {
-				if matches!(self.view(self.strip_groups(value)), View::None) {
-					return true;
-				}
-				let places = self
-					.reference_values
-					.get(&value)
-					.and_then(Option::as_ref)
-					.cloned()
-					.unwrap_or_else(|| self.reference_origins(value));
-				!places.is_empty()
-					&& places.iter().all(|&place| {
-						self.place_steps(place).iter().any(|step| {
-							matches!(step, Step::Index(crate::flow::Identity::Fresh(_)))
-						})
-					})
+		let origins = self.evaluated_origins(value);
+		!origins.owned
+			&& origins.places.iter().all(|&place| {
+				self.place_steps(place)
+					.iter()
+					.any(|step| matches!(step, Step::Index(crate::flow::Identity::Fresh(_))))
 			})
-	}
-
-	/// The reachable values of a structured result, not its control syntax.
-	fn reference_result_leaves(&self, value: NodeId) -> Vec<NodeId> {
-		let value = self.strip_groups(value);
-		if self.type_of(value) == TypeId::NEVER || self.reference_values.get(&value) == Some(&None)
-		{
-			return Vec::new();
-		}
-		match self.view(value) {
-			View::Block { statements } => statements
-				.last()
-				.map(|value| self.reference_result_leaves(value))
-				.unwrap_or_default(),
-			View::Do(body) => self.reference_result_leaves(body),
-			View::If {
-				then_body,
-				else_body,
-				..
-			} => {
-				if let Some(&taken) = self.a.comptime_branches.get(&value) {
-					return if taken {
-						self.reference_result_leaves(then_body)
-					} else {
-						else_body
-							.map(|body| self.reference_result_leaves(body))
-							.unwrap_or_default()
-					};
-				}
-				let mut leaves = self.reference_result_leaves(then_body);
-				if let Some(body) = else_body {
-					leaves.extend(self.reference_result_leaves(body));
-				}
-				leaves
-			}
-			View::When { arms, .. } => arms
-				.iter()
-				.flat_map(|arm| self.reference_result_leaves(arm.value))
-				.collect(),
-			View::Catch {
-				expression,
-				handler,
-				..
-			} => {
-				let mut leaves = self.reference_result_leaves(expression);
-				leaves.extend(self.reference_result_leaves(handler));
-				leaves
-			}
-			_ => vec![value],
-		}
 	}
 
 	/// Reference origins use the same flow places as effects and calls.
 	pub(super) fn reference_origins(&mut self, value: NodeId) -> Vec<PlaceId> {
+		if let Some(origins) = self.value_origins.get(&value) {
+			return origins
+				.places
+				.clone()
+				.into_iter()
+				.map(|place| self.reference_field_target(place))
+				.collect();
+		}
 		self.ensure_builtin_reference(value);
 		self.places_of(value)
 			.into_iter()
 			.map(|place| {
 				let place = self.reference_field_target(place);
-				self.canonical_reference_place(place)
+				place
 			})
 			.collect()
 	}
@@ -304,30 +247,18 @@ impl Walker<'_> {
 		if !self.body.flow.reachable || matches!(self.view(self.strip_groups(value)), View::None) {
 			return;
 		}
-		let leaves = self.reference_result_leaves(value);
-		if leaves.as_slice() != [self.strip_groups(value)] {
-			for leaf in leaves {
-				self.check_returned_reference(leaf, Some(owner));
-			}
-			return;
-		}
 		let fresh = self.reference_is_fresh(value);
 		if let Some(cx) = self.body.functions.last_mut()
 			&& cx.ref_owner == Some(owner)
 		{
 			cx.ref_fresh &= fresh;
 		}
-		let places = self
-			.reference_values
-			.get(&value)
-			.and_then(Option::as_ref)
-			.cloned()
-			.unwrap_or_else(|| self.reference_origins(value));
-		if places.is_empty() {
+		let origins = self.evaluated_origins(value);
+		let places = self.reference_origins(value);
+		if origins.owned {
 			let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::REF008, value,
 				"this result has no borrowed place: return a reference into the declared collection, or declare an ordinary owned result");
 			self.report_flow(diagnostic);
-			return;
 		}
 		if places.into_iter().all(|place| {
 			let place = self.canonical_reference_place(place);
@@ -590,7 +521,7 @@ impl Walker<'_> {
 		self.reference_origins(value).first().copied()
 	}
 
-	fn ensure_builtin_reference(&mut self, value: NodeId) {
+	pub(super) fn ensure_builtin_reference(&mut self, value: NodeId) {
 		let value = self.strip_groups(value);
 		if let View::Try(inner) = self.view(value) {
 			self.ensure_builtin_reference(inner);
@@ -799,11 +730,8 @@ impl Walker<'_> {
 		if self.body.flow.reachable {
 			let place = place.or_else(|| self.aliases.get(&symbol).copied());
 			if let Some(place) = place {
-				let designated = self.canonical_reference_place(place);
-				let places = origins
-					.into_iter()
-					.map(|place| self.canonical_reference_place(place))
-					.collect();
+				let designated = place;
+				let places = origins.into_iter().collect();
 				let state = self.facts.refs.state(RefState {
 					places,
 					..RefState::valid(designated)
@@ -844,21 +772,7 @@ impl Walker<'_> {
 			.map(|info| info.captures.clone())
 			.unwrap_or_default();
 		for symbol in captures {
-			let origins = self
-				.body
-				.flow
-				.ref_state(symbol)
-				.map(|state| self.facts.refs.get(state).places.to_vec())
-				.unwrap_or_else(|| self.aliases.get(&symbol).copied().into_iter().collect());
-			let origins = if origins.is_empty() {
-				self.reference_parameters
-					.get(&symbol)
-					.copied()
-					.into_iter()
-					.collect()
-			} else {
-				origins
-			};
+			let origins = self.symbol_places(symbol);
 			for place in origins {
 				let place = self.canonical_reference_place(place);
 				let Some(owner) = self.owner_place(place) else {
@@ -1206,13 +1120,19 @@ impl Walker<'_> {
 		if self.body.flow.refs.is_empty() {
 			return;
 		}
+		let place = self.canonical_reference_place(place);
 		let refs = self.body.flow.refs.clone();
 		for (symbol, state) in refs {
 			let current = self.facts.refs.get(state).clone();
 			if current.invalidated == Some((n, false)) {
 				continue;
 			}
-			let reached = current.places.iter().any(|&designated| {
+			let designated_places: Vec<_> = current
+				.places
+				.iter()
+				.map(|&place| self.canonical_reference_place(place))
+				.collect();
+			let reached = designated_places.iter().any(|&designated| {
 				if invalidates {
 					self.may_be_at_or_below(designated, place)
 				} else {
@@ -1220,8 +1140,7 @@ impl Walker<'_> {
 				}
 			});
 			let touched = reached
-				|| current
-					.places
+				|| designated_places
 					.iter()
 					.any(|&designated| self.may_overlap(designated, place));
 			if touched {
@@ -1229,7 +1148,7 @@ impl Walker<'_> {
 				// stays when the effect is below what it designates, or changes
 				// its payload only (`found.count = 1`, `found.add(1)`)
 				let depth = self.place_steps(place).len();
-				let payload_only = current.places.iter().all(|&designated| {
+				let payload_only = designated_places.iter().all(|&designated| {
 					self.place_steps(designated).len() < depth
 						|| designated == place && self.kept_narrowings.contains(&designated)
 				});

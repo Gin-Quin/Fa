@@ -1842,7 +1842,7 @@ impl Walker<'_> {
 		let reads = cx
 			.captures
 			.iter()
-			.filter_map(|&symbol| self.symbol_target(symbol))
+			.flat_map(|&symbol| self.symbol_places(symbol))
 			.collect();
 		self.add_task(
 			n,

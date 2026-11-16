@@ -1,0 +1,18 @@
+-- error: EFF011
+-- error: REF020
+-- error: REF009
+-- Expected: REF020 at the call: on the `chooseA = false` path `node` is in model.b, not in `owner` (model.a).
+type Node = { value: Integer }
+type Model = { a: GrowingPool<Node> = [], b: GrowingPool<Node> = [] }
+function identity = (owner: GrowingPool<Node>, node: Node in owner): Node in owner => node
+function wrong = (model: Model, chooseA: Boolean): Node in model.a mutates model.a.size, model.b.size => {
+ use node = model.b.add({ value = 7 })
+ mutable use owner = model.b
+ if chooseA { reuse owner = model.a }
+ identity(owner, node)
+}
+mutable model: Model = {}
+use returned = wrong(model, false)
+model.b = []
+model.b.add({ value = 99 })
+console.log(returned.value)

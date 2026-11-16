@@ -11,6 +11,7 @@
 pub mod facts;
 pub mod map;
 pub mod refs;
+pub mod values;
 
 use smallvec::SmallVec;
 
@@ -35,7 +36,7 @@ pub enum PlaceRoot {
 
 /// What an index designates (advanced brief §5.4): taken when the place is
 /// built, so that two places can be told apart (`distinct`).
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, PartialOrd, Ord)]
 pub enum Identity {
 	/// A known value: a literal, or the exact fact of the index.
 	Exact(i64),
@@ -58,7 +59,7 @@ pub enum Identity {
 }
 
 /// A step from a place to a place below it.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, PartialOrd, Ord)]
 pub enum Step {
 	/// `.field`.
 	Field(Sym),
@@ -223,6 +224,8 @@ pub struct FlowState {
 	pub vacuous: bool,
 	/// Reference validity per symbol (M2, advanced brief §5.1).
 	pub refs: SmallVec<[(SymbolId, RefStateId); 4]>,
+	/// Function values contained in local storage, including field projections.
+	pub values: SmallVec<[(PlaceId, u32); 4]>,
 	/// The places being iterated (M2, advanced brief §5.8).
 	pub iterating: SmallVec<[PlaceId; 2]>,
 	/// The freshness clock (M2).
@@ -259,6 +262,7 @@ impl FlowState {
 			vacuous: false,
 			facts: FactMap::new(),
 			refs: SmallVec::new(),
+			values: SmallVec::new(),
 			iterating: SmallVec::new(),
 			time: 0,
 			consumed: SmallVec::new(),
@@ -421,6 +425,15 @@ impl FlowState {
 			}
 		}
 		joined.refs = refs::join_refs(&mut facts.refs, &self.refs, &other.refs);
+		joined.values = self.values.clone();
+		for &(place, value) in &other.values {
+			match joined.values.binary_search_by_key(&place, |entry| entry.0) {
+				Ok(index) => {
+					joined.values[index].1 = facts.origins.join(joined.values[index].1, value)
+				}
+				Err(index) => joined.values.insert(index, (place, value)),
+			}
+		}
 		joined.iterating = self
 			.iterating
 			.iter()

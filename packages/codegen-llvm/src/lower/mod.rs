@@ -3416,7 +3416,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// `loop { … }`, whose value is the value of its `break`.
 	fn loop_expression(&mut self, node: NodeId, body: NodeId) -> Result<Val<'ctx>, Error> {
-		let repr = self.node_repr(node).unwrap_or(Repr::Void);
+		let repr = if self.reference_control(node) {
+			Repr::Pointer
+		} else {
+			self.node_repr(node).unwrap_or(Repr::Void)
+		};
 		let value = if repr.has_value() {
 			Some(self.alloca(repr, "loop")?)
 		} else {

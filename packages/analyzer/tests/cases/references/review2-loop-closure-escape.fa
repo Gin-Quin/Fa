@@ -1,0 +1,15 @@
+-- error: MEM004
+-- Expected: MEM004; a loop result must not hide a captured collection borrow.
+type Callback = () => Integer
+function make = (): Callback => {
+ mutable values: GrowingPool<Integer> = []
+ use value = values.add(7)
+ loop {
+  break () => value
+ }
+}
+function read = (): Integer => {
+ let callback = make()
+ callback()
+}
+console.log(read())

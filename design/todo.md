@@ -173,3 +173,8 @@ Ranked by the sum of CPU gap budgets over the 25 distinct ports at default sizes
 - **Command/shape matrix (WP13).** Standalone, package and workspace: check/build/run/test/develop/preview where supported, on every target. Cover native/wasm workspace package lookup, sibling/Git/remote dependencies on native/wasm/web, per-unit versus whole builds, link settings, standalone tests, watch and whole-workspace development/preview; make intentional target refusals explicit.
 - **CLI diagnostics and coverage policy.** Add CLI002/003/005/009, deno, missing-LLVM and fa update CLI001 cases; implement or revise advertised coverage and per-test configuration without silently ignoring options.
 - **Final reviews.** Schedule the second analyzer review after M2/M3, tooling review after the shape matrix, and final backend reviews after completeness. The trunk merge review is delivered; preserve its repros.
+
+### Findings outside the links reference branch (second review)
+
+- Destructured loop variables must keep their element places: `for { value } in values { value += 10 }` currently assigns to a JavaScript `const`, the evaluator keeps 1, and native/wasm correctly produce 11. Reproduction: `design/reviews/repros/links-1a-2/pre-existing-destructured-loop-write.fa`; the loops specification requires references.
+- Methods of a nested type must resolve the enclosing owner's fields: `World.Node` cannot currently read `owner.nodes` for a `World` parameter (EFF008/AN001). Reproduction: `design/reviews/repros/links-1a-2/pre-existing-nested-type-outer-field.fa` (also blocks `nested-default-effects.fa`).

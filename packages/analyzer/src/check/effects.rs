@@ -104,7 +104,7 @@ impl Walker<'_> {
 					.map(|place| self.places.child(place, step))
 					.collect()
 			}
-			_ => Vec::new(),
+			_ => self.evaluated_origins(n).places,
 		}
 	}
 
@@ -155,9 +155,7 @@ impl Walker<'_> {
 	}
 
 	pub(crate) fn symbol_places(&mut self, symbol: SymbolId) -> Vec<PlaceId> {
-		if !self.reference_parameters.contains_key(&symbol)
-			&& let Some(state) = self.body.flow.ref_state(symbol)
-		{
+		if let Some(state) = self.body.flow.ref_state(symbol) {
 			return self.facts.refs.get(state).places.to_vec();
 		}
 		// Fixed iteration aliases and captures have a single entry place.
@@ -1438,7 +1436,21 @@ impl Walker<'_> {
 		let name = self.callee_name(callee);
 		// the local functions it calls or is given: the references they
 		// capture are read here
-		let closures = self.called_closures(&info);
+		let mut closures = self.called_closures(&info);
+		closures.extend(
+			self.evaluated_origins(callee)
+				.closures
+				.into_iter()
+				.map(|origin| {
+					self.a
+						.functions
+						.get(&origin.lambda)
+						.and_then(|info| info.declaration)
+						.unwrap_or(origin.lambda)
+				}),
+		);
+		closures.sort_unstable();
+		closures.dedup();
 		for &function in &closures {
 			self.check_captured_references(n, function);
 		}
@@ -1689,19 +1701,28 @@ impl Walker<'_> {
 
 	/// The local functions a call runs or is given (by declaration).
 	fn called_closures(&self, info: &crate::analysis::CallInfo) -> Vec<NodeId> {
-		let mut closures: Vec<NodeId> = Vec::new();
+		let mut closures = Vec::new();
 		if let Callee::Function(declaration) = info.callee {
 			closures.push(declaration);
 		}
 		for argument in &info.arguments {
-			if let Argument::Given(value) = argument
-				&& let View::Name(_) = self.view(self.strip_groups(*value))
-				&& let Resolution::Local(symbol) = self.a.resolution(self.strip_groups(*value))
-				&& let Some(declaration) = self.direct_function(symbol)
-			{
-				closures.push(declaration);
+			if let Argument::Given(value) = argument {
+				if matches!(self.view(self.strip_groups(*value)), View::Lambda { .. }) {
+					continue;
+				}
+				closures.extend(self.evaluated_origins(*value).closures.into_iter().map(
+					|origin| {
+						self.a
+							.functions
+							.get(&origin.lambda)
+							.and_then(|info| info.declaration)
+							.unwrap_or(origin.lambda)
+					},
+				));
 			}
 		}
+		closures.sort_unstable();
+		closures.dedup();
 		closures
 	}
 
@@ -1756,27 +1777,29 @@ impl Walker<'_> {
 				stack.extend(syntax::children(&self.tree, node));
 			}
 			for symbol in captures {
-				let Some(&captured) = self.aliases.get(&symbol) else {
-					continue;
-				};
-				for &(place, _, _) in changed {
-					if !self.may_overlap(place, captured) {
-						continue;
+				for captured in self.symbol_places(symbol) {
+					for &(place, _, _) in changed {
+						if !self.may_overlap(place, captured) {
+							continue;
+						}
+						let changed_text = self.place_text(place);
+						let name = self
+							.s
+							.types
+							.syms
+							.resolve(self.a.symbols.symbol(symbol).name)
+							.to_string();
+						let message = format!(
+							"`{callee}` changes `{changed_text}`, and the function given to it reads `{name}`, which may designate an element of it: copy what the function needs first with `let`"
+						);
+						let diagnostic = self.diagnostic(
+							&crate::diagnostics::codes::advanced::REF013,
+							n,
+							message,
+						);
+						self.report_flow(diagnostic);
+						return;
 					}
-					let changed_text = self.place_text(place);
-					let name = self
-						.s
-						.types
-						.syms
-						.resolve(self.a.symbols.symbol(symbol).name)
-						.to_string();
-					let message = format!(
-						"`{callee}` changes `{changed_text}`, and the function given to it reads `{name}`, which may designate an element of it: copy what the function needs first with `let`"
-					);
-					let diagnostic =
-						self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
-					self.report_flow(diagnostic);
-					return;
 				}
 			}
 		}
@@ -1785,34 +1808,33 @@ impl Walker<'_> {
 				if Some(self.strip_groups(argument)) == from.map(|from| self.strip_groups(from)) {
 					continue;
 				}
-				let Some(other) = self.place_of(argument) else {
-					continue;
-				};
-				if matches!(
-					self.places.get(other).step,
-					Some(Step::Length | Step::Size | Step::Capacity)
-				) || !self.may_overlap(place, other)
-				{
-					continue;
+				for other in self.places_of(argument) {
+					if matches!(
+						self.places.get(other).step,
+						Some(Step::Length | Step::Size | Step::Capacity)
+					) || !self.may_overlap(place, other)
+					{
+						continue;
+					}
+					if self.declared_reference_overlap(n, from, argument) {
+						continue;
+					}
+					let changed_text = self.place_text(place);
+					let argument_text = self.tree.text(argument.index()).to_string();
+					let message = if other != place && self.may_be_at_or_below(other, place) {
+						format!(
+							"`{callee}` changes `{changed_text}`, and its argument `{argument_text}` is inside it: copy it first with `let`"
+						)
+					} else {
+						format!(
+							"`{callee}` changes `{changed_text}`, which its argument `{argument_text}` may also designate: pass different values, or copy one first with `let`"
+						)
+					};
+					let diagnostic =
+						self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
+					self.report_flow(diagnostic);
+					return;
 				}
-				if self.declared_reference_overlap(n, from, argument) {
-					continue;
-				}
-				let changed_text = self.place_text(place);
-				let argument_text = self.tree.text(argument.index()).to_string();
-				let message = if other != place && self.may_be_at_or_below(other, place) {
-					format!(
-						"`{callee}` changes `{changed_text}`, and its argument `{argument_text}` is inside it: copy it first with `let`"
-					)
-				} else {
-					format!(
-						"`{callee}` changes `{changed_text}`, which its argument `{argument_text}` may also designate: pass different values, or copy one first with `let`"
-					)
-				};
-				let diagnostic =
-					self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
-				self.report_flow(diagnostic);
-				return;
 			}
 		}
 	}
@@ -2045,7 +2067,7 @@ impl Walker<'_> {
 				};
 				let place = match arguments.get(index as usize) {
 					Some(Argument::Receiver(callee)) => self.callee_receiver_places(*callee),
-					_ => self.places_of(node),
+					_ => self.evaluated_origins(node).places,
 				};
 				(place, node)
 			}
@@ -2056,7 +2078,7 @@ impl Walker<'_> {
 				// `a.b.method()`: the receiver is `a.b`, not `a`
 				let place = match arguments.first() {
 					Some(Argument::Receiver(callee)) => self.callee_receiver_places(*callee),
-					_ => self.places_of(node),
+					_ => self.evaluated_origins(node).places,
 				};
 				(place, node)
 			}
@@ -2437,76 +2459,10 @@ impl Walker<'_> {
 	/// captures, so it can't write any of it (`REF021`). `value` is a lambda,
 	/// or the name of a local function; `at` where it escapes.
 	pub(crate) fn escape(&mut self, value: NodeId, at: NodeId) {
-		let value = self.strip_groups(value);
-		let lambda = match self.view(value) {
-			View::Copy(inner) => return self.escape(inner, at),
-			View::Block { statements } => {
-				if let Some(last) = statements.last() {
-					self.escape(last, at);
-				}
-				return;
-			}
-			View::If {
-				then_body,
-				else_body,
-				..
-			} => {
-				self.escape(then_body, at);
-				if let Some(body) = else_body {
-					self.escape(body, at);
-				}
-				return;
-			}
-			View::When { arms, .. } => {
-				let values: Vec<_> = arms.iter().map(|arm| arm.value).collect();
-				for value in values {
-					self.escape(value, at);
-				}
-				return;
-			}
-			View::Catch {
-				expression,
-				handler,
-				..
-			} => {
-				self.escape(expression, at);
-				self.escape(handler, at);
-				return;
-			}
-			View::Do(body) | View::Spread(body) => return self.escape(body, at),
-			View::Object { items } | View::Array { items } | View::Tuple { items } => {
-				let items: Vec<_> = items.iter().collect();
-				for value in items {
-					self.escape(value, at);
-				}
-				return;
-			}
-			View::TypedObject { members, .. } => {
-				let members: Vec<_> = members.iter().collect();
-				for value in members {
-					self.escape(value, at);
-				}
-				return;
-			}
-			View::Assignment {
-				value: Some(value), ..
-			} => return self.escape(value, at),
-			View::Lambda { .. } => value,
-			View::Name(_) => {
-				let Resolution::Local(symbol) = self.a.resolution(value) else {
-					return;
-				};
-				let Some(declaration) = self.direct_function(symbol) else {
-					return;
-				};
-				match self.a.functions.get(&declaration) {
-					Some(info) => info.lambda,
-					None => return,
-				}
-			}
-			_ => return,
-		};
-		self.escape_closure(lambda, at);
+		let origins = self.evaluated_origins(value);
+		for closure in origins.closures {
+			self.escape_closure(closure.lambda, at);
+		}
 	}
 
 	/// A closure (a lambda node, or a `watch` node or `derived` declaration,

@@ -610,6 +610,8 @@ pub struct Analysis {
 	/// `pick(value, { foo })`, `omit(value, { foo })` (the backends copy the
 	/// value's fields that the node's type has).
 	pub forwards: FxHashMap<NodeId, NodeId>,
+	/// Reachable break values of each loop expression, targeting that loop.
+	pub loop_results: FxHashMap<NodeId, Vec<NodeId>>,
 	/// The compositions (`f then g`, a slice of a known chain): their steps,
 	/// in order, flat (a step is a node of this file evaluating to a
 	/// function). A `function` declared with one is a known chain.
@@ -1560,6 +1562,7 @@ impl Analysis {
 			arith: FxHashMap::default(),
 			coercions: FxHashMap::default(),
 			forwards: FxHashMap::default(),
+			loop_results: FxHashMap::default(),
 			compositions: FxHashMap::default(),
 			intervals: FxHashMap::default(),
 			interval_values: Interner::new(),

@@ -150,6 +150,8 @@ impl Walker<'_> {
 				let inside_loop = self.body.inside_loop || !self.body.loops.is_empty();
 				let saved = std::mem::replace(&mut self.body, BodyCx::new(scope));
 				self.body.inside_loop = inside_loop;
+				self.body.flow.refs = saved.flow.refs.clone();
+				self.body.flow.values = saved.flow.values.clone();
 				let ty = self.check_function(value, signature, body, owner, expected);
 				self.body = saved;
 				self.rigid_params.truncate(rigid);
@@ -225,6 +227,8 @@ impl Walker<'_> {
 				let inside_loop = self.body.inside_loop || !self.body.loops.is_empty();
 				let saved = std::mem::replace(&mut self.body, BodyCx::new(scope));
 				self.body.inside_loop = inside_loop;
+				self.body.flow.refs = saved.flow.refs.clone();
+				self.body.flow.values = saved.flow.values.clone();
 				let ty = self.check_function(value, signature, body, owner, expected);
 				self.body = saved;
 				ty
@@ -1011,10 +1015,11 @@ impl Walker<'_> {
 						crate::flow::Step::Index(crate::flow::Identity::Unknown),
 					);
 					self.reference_parameters.insert(symbol, place);
+					let formal = self.places.symbol(symbol);
 					let state = self
 						.facts
 						.refs
-						.state(crate::flow::refs::RefState::valid(place));
+						.state(crate::flow::refs::RefState::valid(formal));
 					self.body.flow.set_ref_state(symbol, state);
 				} else if self.contains_reference_type(annotation) {
 					self.check_reference_annotation(annotation);

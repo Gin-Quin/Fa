@@ -59,7 +59,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				_ => pending.extend(fa_analyzer::syntax::children(self.tree, node)),
 			}
 		}
-		let mut pending: Vec<_> = roots.into_iter().collect();
+		self.prepare_reference_values(roots.into_iter().collect());
+	}
+
+	fn prepare_reference_values(&mut self, roots: Vec<NodeId>) {
+		let mut pending = roots;
 		let mut values = rustc_hash::FxHashSet::default();
 		while let Some(node) = pending.pop() {
 			values.insert(node);
@@ -75,6 +79,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					pending.extend(else_body);
 				}
 				View::When { arms, .. } => pending.extend(arms.iter().map(|arm| arm.value)),
+				View::Loop { .. } => pending.extend(
+					self.analysis
+						.loop_results
+						.get(&node)
+						.into_iter()
+						.flatten()
+						.copied(),
+				),
 				View::Catch {
 					expression,
 					handler,
@@ -83,7 +95,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				_ => {}
 			}
 		}
-		self.frame_mut().reference_returns = values;
+		self.frame_mut().reference_returns.extend(values);
 	}
 
 	/// The declared result of a user call, separated from its address ABI.
@@ -226,6 +238,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					| View::If { .. }
 					| View::When { .. }
 					| View::Catch { .. }
+					| View::Loop { .. }
 			)
 	}
 
@@ -774,6 +787,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut node = value;
 		while let View::Group(inner) | View::Try(inner) = self.view(node) {
 			node = inner;
+		}
+		if matches!(
+			self.view(node),
+			View::If { .. }
+				| View::When { .. }
+				| View::Catch { .. }
+				| View::Do(_)
+				| View::Block { .. }
+				| View::Loop { .. }
+		) {
+			self.prepare_reference_values(vec![node]);
+			let raw = self.borrowed_result(node)?;
+			let repr = self.reference_result_repr(node, self.type_of(node))?;
+			let optional = self
+				.types()
+				.union_members(&self.type_of(node))
+				.contains(&TypeId::NONE);
+			let pointer = raw
+				.value
+				.ok_or_else(|| {
+					self.unsupported(node.index(), "a structured reference without a place")
+				})?
+				.into_pointer_value();
+			return Ok(Some((Slot { pointer, repr }, optional)));
 		}
 		if let Some((element, optional)) = self.user_reference_result(node) {
 			let raw = self.call_present(node)?;

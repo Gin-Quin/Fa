@@ -201,21 +201,27 @@ impl Walker<'_> {
 		if !self.body.flow.reachable {
 			return;
 		}
-		let Some(collection) = self.callee_receiver_place(callee) else {
+		let collections = self.callee_receiver_places(callee);
+		if collections.is_empty() {
 			return;
-		};
-		let element = self
-			.reference_place(argument)
-			.map(|place| self.canonical_reference_place(place));
-		let inside = element.is_some_and(|element| {
-			let entry = self.places.get(element);
-			entry.parent == Some(collection) && matches!(entry.step, Some(Step::Index(_)))
-		});
+		}
+		let elements: Vec<_> = self.reference_origins(argument).into_iter().map(|place| self.canonical_reference_place(place)).collect();
+		let inside = !elements.is_empty()
+			&& collections.iter().all(|&collection| {
+				elements.iter().all(|&element| {
+					let entry = self.places.get(element);
+					entry.parent == Some(collection) && matches!(entry.step, Some(Step::Index(_)))
+				})
+			});
 		if inside || self.s.types.is_recovering(self.type_of(argument)) {
 			return;
 		}
 		let text = self.tree.text(argument.index()).to_string();
-		let collection_text = self.place_text(collection);
+		let collection_text = collections
+			.into_iter()
+			.map(|place| self.place_text(place))
+			.collect::<Vec<_>>()
+			.join(" or ");
 		let message = format!(
 			"`{text}` is not an element of `{collection_text}`: `{method}` takes a reference into it, from `use {text} = {collection_text}.add(…)`, `find` or a loop"
 		);

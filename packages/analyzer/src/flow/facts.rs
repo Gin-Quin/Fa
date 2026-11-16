@@ -223,6 +223,7 @@ pub struct FactStore {
 	loop_heads: FxHashMap<NodeId, crate::flow::FlowState>,
 	/// The states of local references (`flow/refs.rs`).
 	pub refs: crate::flow::refs::RefStore,
+	pub origins: crate::flow::values::OriginStore,
 }
 
 impl Default for FactStore {
@@ -242,6 +243,7 @@ impl FactStore {
 			bindings: FxHashMap::default(),
 			loop_heads: FxHashMap::default(),
 			refs: crate::flow::refs::RefStore::new(),
+			origins: crate::flow::values::OriginStore::default(),
 		};
 		store.intervals.intern(Interval::full());
 		store.sets.intern(IntervalSet::of(Interval::full()));

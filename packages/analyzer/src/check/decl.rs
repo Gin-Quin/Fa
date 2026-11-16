@@ -656,7 +656,9 @@ impl Walker<'_> {
 		self.restore_moved_fields(target);
 		// a relation side: written through its direct side (relations.rs)
 		self.check_relation_write(n, target, value);
-		// a closure stored into a place escapes; a copy, maybe a move (moves.rs)
+		// Retain the evaluated function values in their assigned storage.
+		let destinations = self.places_of(target);
+		self.store_value_origins(destinations, value);
 		self.escape(value, n);
 		self.note_copy_site(value);
 		// flow: the value's facts replace the place's (numbers.rs)

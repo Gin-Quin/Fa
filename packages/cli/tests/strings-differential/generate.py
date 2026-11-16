@@ -290,17 +290,38 @@ function storage = (text: String): String throws IndexError => {
 '''
 
 
+HEAVY_LITERAL = 2000
+
+
+def shards(cases, shard_size):
+    """Index ranges of the shards. A case with a literal beyond 4 KiB
+    takes seconds to evaluate at compile time in a debug build: it gets a
+    shard of its own, to stay within the runner's 20-second budget."""
+    start = 0
+    for index, case in enumerate(cases):
+        heavy = any(len(argument) > HEAVY_LITERAL for argument in case)
+        if heavy or index - start == shard_size:
+            if index > start:
+                yield range(start, index)
+            start = index
+        if heavy:
+            yield range(index, index + 1)
+            start = index + 1
+    if start < len(cases):
+        yield range(start, len(cases))
+
+
 def write_cases(output, name, prelude, cases, references, function, shard_size=12, compile_time=True):
-    for shard in range(0, len(cases), shard_size):
+    for number, indices in enumerate(shards(cases, shard_size)):
         source = prelude
-        for index in range(shard, min(shard + shard_size, len(cases))):
+        for index in indices:
             args = ", ".join(cases[index])
             if compile_time:
                 source += f'\nstatic result{index} = @{function}({args})\n'
                 source += f'console.log("{index} static " + result{index})\n-- prints: {index} static {references[index]}\n'
             runtime_function = ["probe","ownerProbe","viewProbe","splitProbe","fieldProbe","arrayProbe","poolProbe","compactProbe","frameProbe","reservedProbe"][index % 10] if function == "probe" else function
             source += f'console.log("{index} runtime " + (try {runtime_function}({args})))\n-- prints: {index} runtime {references[index]}\n'
-        (output / f"{name}-{shard // shard_size:02}.fa").write_text(source)
+        (output / f"{name}-{number:02}.fa").write_text(source)
 
 
 def byte_cases(output, bun):
@@ -496,10 +517,10 @@ async function crossing = (text: String): String throws IndexError => {
 }
 '''
     write_cases(output,"storage",prelude,[(literal(text),) for text in subjects()],storage_reference,"storage",12,False)
-    for shard in range(0,len(subjects()),12):
-        path=output / f"storage-{shard//12:02}.fa"
+    for number, indices in enumerate(shards([(literal(text),) for text in subjects()], 12)):
+        path=output / f"storage-{number:02}.fa"
         with path.open("a") as source:
-            for index in range(shard,min(shard+12,len(subjects()))):
+            for index in indices:
                 source.write(f'console.log("{index} await " + (try await crossing({literal(subjects()[index])})))\n-- prints: {index} await {storage_reference[index]}\n')
     decoded = byte_cases(output,bun)
     json_cases(output,bun)

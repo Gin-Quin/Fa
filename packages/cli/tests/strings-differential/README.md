@@ -44,3 +44,7 @@ compile-time round-trip shard deliberately exposes the known missing serializer
 without preventing other shards from running. No disagreement is ratcheted,
 ignored, or treated as success. A review branch can therefore have a failing
 regression until the implementation is repaired.
+
+A case with a literal beyond 2000 characters gets a shard of its own: its
+compile-time probe takes several seconds in a debug build, and every program
+must finish within the runner's 20-second budget.

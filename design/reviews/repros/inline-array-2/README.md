@@ -31,9 +31,10 @@ passing test corpus.
 | `sync-bound-in-async.fa` | `["kept"]` | `[]` on all targets/O0/O3 |
 | `callback-cleanup.foreign.fa` | `drop callback`, `0`, once only | `drop callback`, `1`, `drop callback` on all targets/O0/O3 |
 | `async-operations.fa` | `["result"]` | Assertion failure; wasm O0 signature trap |
+| `union-read.fa` | `true` | Compiler panic on all targets/O0/O3; ordinary Array control passes |
 | `wide-key.fa` | `9` | wasm O0/O3 module rejected: 1025 parameters exceeds 1000 |
 
-All these programs behave correctly on Bun. `async-direct.fa`,
+All these programs behave correctly on Bun. The named-union failure is minimized to three lines; `union-items.fa`, `union-keys-runtime.fa` and `union-keys.fa` preserve its mutation/key/compile-time siblings. `async-direct.fa`,
 `async-bound-array-control.fa` and `direct-cleanup.foreign.fa` pass all seven
 configurations. The ordinary resource-array callback control preserves the
 caller's length and destroys exactly once on LLVM; Bun misses its generic
@@ -83,7 +84,7 @@ negative indexing with META005, despite the runtime rule accepting negative
 indices. `captured-capacity.fa` and its scalar `captured-capacity-control.fa` both
 fail compile-time capture of an outer generic value. The runtime InlineArray
 variant works on Bun and is unsupported on LLVM; the scalar runtime control
-prints `0` on LLVM instead of `1`. These are reported separately from blockers.
+prints `0` on LLVM instead of `1`. These are reported separately from blockers. `negative-get{,-array-control}.fa` silently print runtime `2` then static `none` on all seven configurations. Generic methods with their own value list (`generic-method{,-array-control}.fa`) are also rejected with GN007 in both variants.
 
 ## Per-unit runner with leak checks
 

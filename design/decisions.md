@@ -1641,3 +1641,11 @@ This applies to local and other-file native lowering and JavaScript. The
 generated Resource rows check construction-derived destruction counts as well
 as the cross-engine trace, so agreement between two missing destructors cannot
 serve as a passing oracle.
+
+Wide evaluated aggregates get private stack snapshots at their original read.
+Helpers borrow those immutable snapshots; stores from them remain byte copies
+before LLVM SROA. This preserves evaluation order if a later argument mutates
+the source, and prevents capacity-sized SSA expansion and wasm argument
+promotion. Copies of owners still construct only the initialized prefix; an
+opaque byte snapshot neither creates another owner nor interprets spare slots.
+The same normalization runs for whole-program and per-unit compilation.

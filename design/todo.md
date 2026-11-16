@@ -110,10 +110,16 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 - **Worker cancellation follow-up.** Preserve preparation/commit snapshot timing, cancellation during import and linear queue processing. Investigate native/free dispatch with a synchronized queued call before treating the JS microtask-order fixture as a portable cancellation test.
 - **Resource-safe deep helpers and transport.** Ordinary JS copy/equality/assignment/format/JSON-write are iterative; recursive resource destruction and finite-schema JSON parsing still need their separately scoped work. Preserve prototype shared-handle identity, helper dependency isolation and clean generated output while landing ownership.
 - **Other inventory/review coverage.** Implement the provisional std.http surface; verify full-Unicode case conversion and JSON lone-surrogate output. Add regressions for move-mutable-use-branch and callback-capture-overlap when ownership lands. Reconcile pending-documentation implementation notes and stale historical spec-review entries when their subjects change.
-- **Review's pre-existing O0 freestanding link bug.** Per-unit packages reference `_exit` from the hosted fault handler. Add the missing O0 + multi-file fixture and guard hosted runtime code for freestanding; do not hide it with a skip. Also cover another unit's function used directly as a value/composition, currently unsupported.
-- **Timing-dependent wasm fixture.** `tasks-awaited-starter.fa` passed the first and third full LLVM runs and an isolated rerun, but failed the second full run under load: the 5 ms sleep expired before the detached task resumed after yield. Replace wall-clock ordering assumptions with explicit completion synchronization while retaining the observable starter-order assertions; no skip or weakened expectation.
+- **Other-unit callable values.** Cover another unit's function used directly as a value/composition, currently unsupported. The O0 freestanding hosted-handler link failure has its required split regression and is fixed.
 
 ## 4. Performance
+
+- **Wide asynchronous aggregate compilation.** Profile optimized compilation of
+  `packages/cli/tests/programs/inline-array-second-wide-async.fa`. Its native and
+  freestanding executions and leak checks pass within the 512 MiB compiler
+  budget, but optimized compilation is still expensive. Preserve the memory ABI,
+  snapshot evaluation order and all result/callback/key assertions while reducing
+  scalar expansion; use a controlled CPU-5 measurement before claiming a gain.
 
 - **Faithful Goose ports (2026-11-16).** The [sixteen-port audit](../benchmarks/audit/ports/README.md)
   records all structures/passes and intended Rust rows. Push now uses unreserved

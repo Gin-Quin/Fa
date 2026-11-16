@@ -243,7 +243,7 @@
 			"exit": 1,
 			"passed": false,
 			"mismatched_rows": [],
-			"reason": "4 errors",
+			"reason": "/tmp/fa-inline-final-baseline/sync_unique.foreign.fa:39:1: error[MEM002]: `items` was moved on line 38: it holds a task, a worker's handle or a resource, so it can't be copied, and the moved value can't be used afterwards",
 			"unobserved_rows": 3
 		},
 		{
@@ -251,7 +251,7 @@
 			"exit": 1,
 			"passed": false,
 			"mismatched_rows": [],
-			"reason": "4 errors",
+			"reason": "/tmp/fa-inline-final-baseline/sync_unique_owned.foreign.fa:40:1: error[MEM002]: `items` was moved on line 39: it holds a task, a worker's handle or a resource, so it can't be copied, and the moved value can't be used afterwards",
 			"unobserved_rows": 3
 		},
 		{
@@ -307,7 +307,7 @@
 			"exit": 1,
 			"passed": false,
 			"mismatched_rows": [],
-			"reason": "24 errors",
+			"reason": "/tmp/fa-inline-final-baseline/unique.foreign.fa:39:1: error[MEM002]: `items` was moved on line 38: it holds a task, a worker's handle or a resource, so it can't be copied, and the moved value can't be used afterwards",
 			"unobserved_rows": 13
 		},
 		{
@@ -315,7 +315,7 @@
 			"exit": 1,
 			"passed": false,
 			"mismatched_rows": [],
-			"reason": "24 errors",
+			"reason": "/tmp/fa-inline-final-baseline/unique_owned.foreign.fa:40:1: error[MEM002]: `items` was moved on line 39: it holds a task, a worker's handle or a resource, so it can't be copied, and the moved value can't be used afterwards",
 			"unobserved_rows": 13
 		}
 	],

@@ -70,6 +70,7 @@ pub(crate) struct Item {
 #[derive(Clone)]
 pub(crate) enum Argument {
 	Value(Node),
+	Borrow(Place),
 	Default,
 	Variadic(Vec<Item>),
 }
@@ -173,6 +174,7 @@ impl<'a> Builder<'a> {
 			.iter()
 			.map(|argument| match argument {
 				ir::Arg::Value(value) => Argument::Value(self.add(value)),
+				ir::Arg::Borrow(place) => Argument::Borrow(self.place(place)),
 				ir::Arg::Default => Argument::Default,
 				ir::Arg::Variadic(items) => Argument::Variadic(self.items(items)),
 			})

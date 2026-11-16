@@ -8,7 +8,8 @@ try append<Integer, 2>(values, 9)
 try append<Integer, 2>(values, 9)
 append<Integer, 2>(values, 10) catch _error => console.log("full") -- prints: full
 console.log(values, room<Integer, 2>(values)) -- prints: [9, 9] 2
-let zero = empty<Integer, 0>()
+mutable zero = empty<Integer, 0>()
+append<Integer, 0>(zero, 1) catch _error => console.log("zero full") -- prints: zero full
 console.log(zero) -- prints: []
 static bound = 2
 let other: InlineArray<Integer, bound * 2> = [1, 2, 3, 4]

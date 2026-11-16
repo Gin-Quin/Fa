@@ -8,3 +8,21 @@ static values = @build()
 console.log(values) -- prints: [1, 2, 2]
 static capacity = values.capacity
 console.log(capacity) -- prints: 4
+
+function append = (items: InlineArray<Integer, 1>) throws CapacityError mutates items.length => { try items.push(7) }
+function borrowed = (): InlineArray<Integer, 1> throws CapacityError => {
+	mutable items: InlineArray<Integer, 1> = []
+	try append(items)
+	append(items) catch _error => { assert items.length == 1 }
+	items
+}
+static result = @borrowed()
+console.log(result) -- prints: [7]
+
+function updated = (): InlineArray<Integer, 3> => {
+	mutable items: InlineArray<Integer, 3> = [1, 2]
+	for item in items { item += 3 }
+	items
+}
+static incremented = @updated()
+console.log(incremented) -- prints: [4, 5]

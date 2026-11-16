@@ -35,3 +35,12 @@ console.log(try bytes[254], try words[255]) -- prints: 254 255
 let expected: InlineArray<Integer, 1> = [5]
 console.log(one == expected) -- prints: true
 console.log(zero == zero) -- prints: true
+
+mutable bounded: InlineArray<Integer, 4> = []
+while bounded.length < 4 { bounded.push(bounded.length) }
+console.log(bounded, bounded[3]) -- prints: [0, 1, 2, 3] 3
+function remove = (items: InlineArray<Integer, 4>, index: Integer): Integer
+	throws IndexError mutates items.length invalidates items[index..] => try items.take(index)
+console.log(try remove(bounded, -2)) -- prints: 2
+remove(bounded, 9) catch _error => console.log("missing") -- prints: missing
+console.log(bounded) -- prints: [0, 1, 3]

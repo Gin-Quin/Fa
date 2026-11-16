@@ -147,6 +147,8 @@ pub enum Item {
 pub enum Arg {
 	/// A value.
 	Value(Expr),
+	/// A borrowed caller place, written back on return and on error.
+	Borrow(Place),
 	/// Omitted: the parameter's default.
 	Default,
 	/// The items collected by a variadic parameter.

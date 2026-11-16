@@ -1544,3 +1544,19 @@ maximum count; the native schema has a bounded-array tag. Validation happens
 before constructing the typed value, including in nested fields and unions.
 CapacityError's only member is InlineFull; existing built-in error numbers
 remain unchanged by appending it to the prelude error table.
+
+
+Inline capacities can be UInt32-constrained compile-time parameters as well as
+constant integer expressions. Their HAS_PARAM flag is retained independently
+of the items' ownership flags; native instantiation resolves the constant and
+JavaScript uses the existing hidden value parameter. Scalar optional results
+of get/pop are derived from the analyzed result type, preserving flattened
+optionals and the value-less representation of none.
+
+The interpreter's existing value-only user-call arguments lost mutations of
+borrowed lists. Calls now carry resolved caller places for borrowed arguments
+and write back their parameter slots on normal and error exits, including
+partially applied calls. Collection iteration binds ordinary loop variables
+to the original indexed place; index expressions are saved once before the
+loop. This uses the shared interpreter path rather than an InlineArray-only
+mutation mechanism.

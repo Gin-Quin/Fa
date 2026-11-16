@@ -104,7 +104,9 @@ Equality compares the length and corresponding initialized items in order. Unuse
 
 ### Native and WebAssembly
 
-An inline array is an aggregate containing `capacity` slots of the item's stride and the smallest unsigned length that can represent `capacity`, with normal alignment and padding. Capacities 0 through 255 use UInt8; 256 through 65,535 use UInt16, then UInt32 or UInt64 as needed by the supported target layout. Capacity zero has no item storage. Fields, locals, parameters, results and collection elements use this same layout; the list has no separately allocated header or item buffer.
+An inline array is an aggregate containing `capacity` slots of the item's stride and the smallest unsigned length that can represent `capacity`, with normal alignment and padding. Capacities 0 through 255 use UInt8; 256 through 65,535 use UInt16, then UInt32. Capacity zero has no item storage. Fields, locals, parameters, results and collection elements use this same layout; the list has no separately allocated header or item buffer.
+
+A recursive item keeps the owning indirection needed to break a cycle through inline lists; the fixed slot array never expands an infinite inline type.
 
 Only `[0, length)` is initialized. Construction, copying, moves, replacement, destruction and error cleanup must preserve that invariant. Unused slots are neither zero-filled nor read. Copies construct a new initialized prefix; moves transfer its ownership; destruction drops only that prefix. An append constructs its item before increasing length. Removing an item moves the suffix without copying or destroying its transferred owners a second time.
 

@@ -1153,9 +1153,33 @@ impl<'a> Lowerer<'a> {
 		if parallel {
 			return self.unsupported("`for parallel`");
 		}
+		let mut setup = Vec::new();
+		let mut borrowed = if !compile_time
+			&& matches!(
+				self.types().kind(self.a.type_of(iterable)),
+				TypeKind::Collection(
+					CollKind::Array | CollKind::InlineArray | CollKind::GrowingArray,
+					..
+				)
+			) {
+			self.place(iterable)
+		} else {
+			None
+		};
+		if let Some(place) = borrowed.as_mut() {
+			for step in &mut place.steps {
+				if let Step::Index(value) = step {
+					let slot = self.temp();
+					setup.push(Expr::Let(slot, value.clone().boxed()));
+					*value = Expr::Local(slot);
+				}
+			}
+		}
 		let iterable = match (compile_time, self.a.unrolled.get(&n)) {
 			(true, Some(items)) => Expr::Const(Value::array(items.clone())),
-			_ => self.expr(iterable),
+			_ => borrowed
+				.as_ref()
+				.map_or_else(|| self.expr(iterable), |place| Expr::Read(place.clone())),
 		};
 		let (item, prologue) = match pattern {
 			Some(pattern) => match syntax::view(self.tree, pattern) {
@@ -1171,7 +1195,7 @@ impl<'a> Lowerer<'a> {
 			},
 			None => (None, None),
 		};
-		let index_slot = if index {
+		let mut index_slot = if index {
 			let symbol = self.a.symbols.symbols().iter().position(|symbol| {
 				symbol.decl_node == n
 					&& matches!(symbol.kind, SymbolKind::LoopVariable { copy: true })
@@ -1180,17 +1204,37 @@ impl<'a> Lowerer<'a> {
 		} else {
 			None
 		};
+		if let Some(pattern) = pattern
+			&& let Some(symbol) = self.a.symbols.symbol_of_decl(pattern)
+			&& matches!(
+				self.a.symbols.symbol(symbol).kind,
+				SymbolKind::LoopVariable { copy: false }
+			) && let Some(mut place) = borrowed
+		{
+			let index = match index_slot {
+				Some(slot) => slot,
+				None => {
+					let slot = self.temp();
+					index_slot = Some(slot);
+					slot
+				}
+			};
+			place.steps.push(Step::Index(Expr::Local(index)));
+			self.aliases.insert(symbol, place);
+		}
 		let body = self.expr(body);
 		let body = match prologue {
 			Some(prologue) => Expr::Block(vec![prologue, body]),
 			None => body,
 		};
-		Expr::For {
+		let loop_expr = Expr::For {
 			item,
 			index: index_slot,
 			iterable: iterable.boxed(),
 			body: body.boxed(),
-		}
+		};
+		setup.push(loop_expr);
+		Expr::Block(setup)
 	}
 
 	/// `expression catch error { handler }`.
@@ -1571,10 +1615,33 @@ impl<'a> Lowerer<'a> {
 		let mut args = Vec::with_capacity(arguments.len());
 		for argument in arguments {
 			args.push(match argument {
-				Argument::Given(value) => Arg::Value(self.expr(*value)),
+				Argument::Given(value) => match self.place(*value) {
+					Some(place) => Arg::Borrow(place),
+					None => Arg::Value(self.expr(*value)),
+				},
 				Argument::Default | Argument::Missing => Arg::Default,
 				Argument::Variadic(items) => Arg::Variadic(self.items(items.iter().copied())),
 				Argument::Receiver(_) => {
+					let borrowed =
+						callee.and_then(|callee| match syntax::view(self.tree, callee) {
+							View::Access { target, members } => {
+								let mut place = self.place(target)?;
+								for member in members.iter().take(members.len().saturating_sub(1)) {
+									let View::Name(name) = syntax::view(self.tree, member) else {
+										return None;
+									};
+									place
+										.steps
+										.push(Step::Field(Arc::from(self.tree.name(name))));
+								}
+								Some(place)
+							}
+							_ => None,
+						});
+					if let Some(place) = borrowed {
+						args.push(Arg::Borrow(place));
+						continue;
+					}
 					let receiver =
 						callee.and_then(|callee| match syntax::view(self.tree, callee) {
 							View::Access { target, members }

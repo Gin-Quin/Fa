@@ -169,7 +169,10 @@ impl Walker<'_> {
 			return TypeId::NONE;
 		}
 		if let Some(kind) = collection_kind(text) {
-			let message = if matches!(kind, CollKind::Map | CollKind::GrowingMap) {
+			let message = if kind == CollKind::InlineArray {
+				"`InlineArray` needs its item type and capacity, ex: `InlineArray<Integer, 4>`"
+					.to_string()
+			} else if matches!(kind, CollKind::Map | CollKind::GrowingMap) {
 				format!(
 					"`{text}` needs the type of its keys and of its values, ex: `{text}(String, Integer)`"
 				)

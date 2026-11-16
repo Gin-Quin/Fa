@@ -116,3 +116,15 @@ fn inline_capacity_can_be_a_compile_time_parameter() {
 		"function empty = <Item, capacity: UInt32>(): InlineArray<Item, capacity> => []\nlet values = empty<Integer, 4>()\nconsole.log(values.capacity)\n",
 	);
 }
+
+#[test]
+fn inline_bounded_while_proves_pushes_and_the_final_index() {
+	let source = "mutable values: InlineArray<Integer, 4> = []\nwhile values.length < 4 { values.push(values.length) }\nconsole.log(values[3])\n";
+	let (session, file) = analyzed(source);
+	let analysis = session.analysis(file);
+	assert!(!analysis.has_flags(
+		node(&session, file, "values.push(values.length)"),
+		NodeFlags::CAPACITY_CHECK
+	));
+	assert!(!analysis.has_flags(node(&session, file, "values[3]"), NodeFlags::INDEX_CHECK));
+}

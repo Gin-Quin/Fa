@@ -15,7 +15,7 @@ use crate::{builtins, memory};
 enum Action {
 	Eval(Node),
 	Done(Eval),
-	Call(Target, Vec<Option<Value>>),
+	Call(Target, Vec<Option<Value>>, Vec<(usize, ResolvedPlace)>),
 }
 
 enum Target {
@@ -26,9 +26,11 @@ enum Target {
 struct Frame {
 	code: Arc<Code>,
 	locals: Vec<Value>,
+	writebacks: Vec<(Slot, ResolvedPlace)>,
 }
 
 enum Input {
+	Borrow(Place),
 	Expr(Node),
 	Constant(Value),
 	Spread(Node),
@@ -44,7 +46,7 @@ struct Gather {
 }
 
 enum Finish {
-	Arguments(Target),
+	Arguments(Target, Vec<(usize, ResolvedPlace)>),
 	Builtin(&'static str),
 	Mutate(&'static str, Place),
 	Array,
@@ -58,16 +60,19 @@ enum Finish {
 }
 
 enum PlaceAction {
+	Borrow(Box<Gather>),
 	Read,
 	Write(Value),
 	Mutate(&'static str, Vec<Value>),
 }
 
+#[derive(Clone)]
 enum PlaceStep {
 	Field(Arc<str>),
 	Index(Value),
 }
 
+#[derive(Clone)]
 struct ResolvedPlace {
 	slot: Slot,
 	steps: Vec<PlaceStep>,
@@ -171,7 +176,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 	) -> Result<Value, Error> {
 		let code = Arc::new(Code::expression(&crate::ir::Expr::none(), 0, || Ok(()))?);
 		Self::new(interpreter, code)?
-			.run(Action::Call(Target::Value(callee), arguments))
+			.run(Action::Call(Target::Value(callee), arguments, Vec::new()))
 			.map_err(Error::from)
 	}
 
@@ -193,7 +198,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 		let locals = vec![Value::None; code.slots as usize];
 		Ok(Self {
 			interpreter,
-			frames: vec![Frame { code, locals }],
+			frames: vec![Frame {
+				code,
+				locals,
+				writebacks: Vec::new(),
+			}],
 			stack: Vec::new(),
 		})
 	}
@@ -202,7 +211,9 @@ impl<'i, 'h> Machine<'i, 'h> {
 		loop {
 			let next = match action {
 				Action::Eval(node) => self.enter(node),
-				Action::Call(target, arguments) => self.call_function(target, arguments),
+				Action::Call(target, arguments, borrows) => {
+					self.call_function(target, arguments, borrows)
+				}
 				Action::Done(result) => {
 					let Some(continuation) = self.stack.pop() else {
 						return result;
@@ -406,11 +417,12 @@ impl<'i, 'h> Machine<'i, 'h> {
 				.into_iter()
 				.map(|argument| match argument {
 					Argument::Value(value) => Input::Expr(value),
+					Argument::Borrow(place) => Input::Borrow(place),
 					Argument::Default => Input::Default,
 					Argument::Variadic(items) => Input::Variadic(items),
 				})
 				.collect(),
-			Finish::Arguments(target),
+			Finish::Arguments(target, Vec::new()),
 		)
 	}
 
@@ -443,6 +455,9 @@ impl<'i, 'h> Machine<'i, 'h> {
 	fn gather_next(&mut self, mut gather: Gather) -> Result<Action, Flow> {
 		while let Some(input) = gather.remaining.next() {
 			match input {
+				Input::Borrow(place) => {
+					return self.place(place, PlaceAction::Borrow(Box::new(gather)));
+				}
 				Input::Constant(value) => gather.values.push(Some(value)),
 				Input::Default => gather.values.push(None),
 				Input::Expr(node) | Input::Spread(node) => {
@@ -472,15 +487,15 @@ impl<'i, 'h> Machine<'i, 'h> {
 	}
 
 	fn finish(&mut self, finish: Finish, values: Vec<Option<Value>>) -> Result<Action, Flow> {
-		if let Finish::Arguments(target) = finish {
-			return Ok(Action::Call(target, values));
+		if let Finish::Arguments(target, borrows) = finish {
+			return Ok(Action::Call(target, values, borrows));
 		}
 		let values: Vec<Value> = values
 			.into_iter()
 			.map(|value| value.expect("a supplied value"))
 			.collect();
 		match finish {
-			Finish::Arguments(_) => unreachable!(),
+			Finish::Arguments(..) => unreachable!(),
 			Finish::Array => Self::done(Value::Array(Arc::new(values))),
 			Finish::Tuple => Self::done(Value::Tuple(Arc::new(values))),
 			Finish::Set => {
@@ -551,6 +566,14 @@ impl<'i, 'h> Machine<'i, 'h> {
 						.collect(),
 				};
 				match action {
+					PlaceAction::Borrow(mut gather) => {
+						let value = Self::locate(self.locals(), &resolved)?.clone();
+						if let Finish::Arguments(_, borrows) = &mut gather.finish {
+							borrows.push((gather.values.len(), resolved));
+						}
+						gather.values.push(Some(value));
+						self.gather_next(*gather)
+					}
 					PlaceAction::Read => {
 						Self::done(Self::locate(self.locals(), &resolved)?.clone())
 					}
@@ -592,6 +615,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 		&mut self,
 		target: Target,
 		mut arguments: Vec<Option<Value>>,
+		mut borrows: Vec<(usize, ResolvedPlace)>,
 	) -> Result<Action, Flow> {
 		let (key, captured, bound) = match target {
 			Target::Function(key) => (key, Vec::new(), Vec::new()),
@@ -606,15 +630,23 @@ impl<'i, 'h> Machine<'i, 'h> {
 		};
 		let code = self.interpreter.code(key)?;
 		if !bound.is_empty() {
-			let mut given = arguments.into_iter();
+			let mut given = arguments.into_iter().enumerate();
+			let mut mapped = Vec::new();
 			arguments = (0..code.params.len())
-				.map(
-					|index| match bound.iter().find(|(bound, _)| *bound == index) {
-						Some((_, value)) => Some(value.clone()),
-						None => given.next().flatten(),
-					},
-				)
+				.map(|index| {
+					if let Some((_, value)) = bound.iter().find(|(bound, _)| *bound == index) {
+						return Some(value.clone());
+					}
+					let (supplied, value) = given.next()?;
+					if let Some((_, place)) =
+						borrows.iter().find(|(argument, _)| *argument == supplied)
+					{
+						mapped.push((index, place.clone()));
+					}
+					value
+				})
 				.collect();
+			borrows = mapped;
 		}
 		if self.interpreter.depth >= self.interpreter.limits.depth {
 			return Err(Error::Depth(self.interpreter.limits.depth).into());
@@ -626,7 +658,17 @@ impl<'i, 'h> Machine<'i, 'h> {
 		for (&slot, value) in code.captures.iter().zip(captured) {
 			locals[slot as usize] = value;
 		}
-		self.frames.push(Frame { code, locals });
+		let writebacks = borrows
+			.into_iter()
+			.filter_map(|(argument, place)| {
+				code.params.get(argument).map(|(slot, _)| (*slot, place))
+			})
+			.collect();
+		self.frames.push(Frame {
+			code,
+			locals,
+			writebacks,
+		});
 		self.stack.push(Continuation::Function);
 		self.parameters(arguments.into_iter(), 0)
 	}
@@ -685,6 +727,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				Ok(Action::Call(
 					Target::Value(function),
 					arguments.into_iter().map(Some).collect(),
+					Vec::new(),
 				))
 			}
 			Progress::Done(value) => match finish {
@@ -702,8 +745,12 @@ impl<'i, 'h> Machine<'i, 'h> {
 		// operation propagates it without performing another side effect.
 		match continuation {
 			Continuation::Function => {
-				self.frames.pop().expect("the called frame");
+				let mut frame = self.frames.pop().expect("the called frame");
 				self.interpreter.depth -= 1;
+				for (slot, place) in frame.writebacks {
+					*Self::locate(self.locals(), &place)? =
+						std::mem::replace(&mut frame.locals[slot as usize], Value::None);
+				}
 				match result {
 					Ok(value) | Err(Flow::Return(value)) => Self::done(value),
 					Err(Flow::Break(_) | Flow::Continue) => Self::done(Value::None),

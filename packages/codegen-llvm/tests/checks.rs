@@ -62,7 +62,8 @@ mod with_llvm {
 		let mut keep = false;
 		for line in ir.lines() {
 			if line.starts_with("define ") {
-				keep = line.contains("@main(") || line.contains("@fa.");
+				keep =
+					line.contains("@main(") || line.contains("@_start(") || line.contains("@fa.");
 			}
 			if keep {
 				kept.push_str(line);
@@ -1990,11 +1991,12 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 				"inline-array-layout",
 				r#"
 function first = (values: InlineArray<Int32, 255>): Int32 throws IndexError => try values[0]
+function second = (values: InlineArray<Int32, 256>): Int32 throws IndexError => try values[0]
 mutable small: InlineArray<Int32, 255> = [7]
 mutable large: InlineArray<Int32, 256> = [8]
 small.push(9)
 large.push(10)
-console.log(try first(small), large.length)
+console.log(try first(small), try second(large))
 "#,
 				true,
 				OptLevel::O0,

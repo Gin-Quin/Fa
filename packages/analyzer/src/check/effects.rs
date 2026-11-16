@@ -2419,6 +2419,9 @@ impl Walker<'_> {
 				.inline_array(self.a.symbols.symbol(symbol).ty)
 				.map(|(_, capacity)| I256::from(capacity))
 		});
+		if path == "Array#push" && capacity.is_some_and(|capacity| before.lo >= capacity) {
+			return;
+		}
 		let after = match path {
 			"Array#push" | "Array#insert" | "OrderedColumnar#add" => {
 				let hi = capacity.map_or(before.hi, |capacity| {

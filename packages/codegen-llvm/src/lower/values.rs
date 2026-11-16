@@ -79,6 +79,10 @@ pub enum Scalar {
 	Pointer,
 	Sync(TypeId),
 	Links(TypeId),
+	Function(TypeId),
+	Pool(TypeId),
+	Columnar(TypeId),
+	Task(TypeId),
 }
 
 impl Scalar {
@@ -103,6 +107,10 @@ impl Scalar {
 			Scalar::InlineUnion(nominal) => Repr::InlineUnion(nominal),
 			Scalar::Object(ty) => Repr::Object(ty),
 			Scalar::Array(item) => Repr::Array(item),
+			Scalar::Function(ty) => Repr::Function(ty),
+			Scalar::Pool(item) => Repr::Pool(item),
+			Scalar::Columnar(item) => Repr::Columnar(item),
+			Scalar::Task(ty) => Repr::Task(ty),
 			Scalar::Tuple(ty) => Repr::Tuple(ty),
 			Scalar::Range => Repr::Range,
 			Scalar::Rec(ty) => Repr::Rec(ty),
@@ -129,6 +137,10 @@ impl Scalar {
 			Repr::InlineUnion(nominal) => Scalar::InlineUnion(nominal),
 			Repr::Object(ty) => Scalar::Object(ty),
 			Repr::Array(item) => Scalar::Array(item),
+			Repr::Function(ty) => Scalar::Function(ty),
+			Repr::Pool(item) => Scalar::Pool(item),
+			Repr::Columnar(item) => Scalar::Columnar(item),
+			Repr::Task(ty) => Scalar::Task(ty),
 			Repr::Tuple(ty) => Scalar::Tuple(ty),
 			Repr::Range => Scalar::Range,
 			Repr::Rec(ty) => Scalar::Rec(ty),
@@ -427,6 +439,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					return Ok(Repr::None);
 				};
 				if !items.contains(&TypeId::NONE) {
+					return Ok(common);
+				}
+				if matches!(common, Repr::Optional(_) | Repr::None) {
 					return Ok(common);
 				}
 				match Scalar::of(common) {

@@ -148,7 +148,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				out.push(b';');
 			}
 			TypeKind::Collection(CollKind::InlineArray, item, _) => {
-				let Some((_, capacity)) = types.inline_array(ty) else {
+				let Some((_, capacity)) = self.inline_info(ty) else {
 					return false;
 				};
 				out.extend_from_slice(format!("A{capacity};").as_bytes());

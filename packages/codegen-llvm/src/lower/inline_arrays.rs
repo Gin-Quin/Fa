@@ -10,7 +10,7 @@ use inkwell::builder::Builder;
 use inkwell::types::{BasicType, IntType, StructType};
 use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 
-use super::values::{IntRepr, Repr, Scalar, Val};
+use super::values::{IntRepr, Repr, Val};
 use super::{Lowering, Slot};
 use crate::error::Error;
 
@@ -78,6 +78,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(self
 			.builder
 			.build_int_z_extend(length, self.context.i64_type(), "")?)
+	}
+
+	fn inline_length_at(&self, slot: Slot<'ctx>, ty: TypeId) -> Result<IntValue<'ctx>, Error> {
+		let (_, capacity) = self.inline_info(ty).expect("an inline array");
+		let pointer = self.inline_length_pointer(&self.builder, slot, ty)?;
+		let count = self
+			.builder
+			.build_load(self.inline_length_type(capacity), pointer, "inline.length")?
+			.into_int_value();
+		Ok(self
+			.builder
+			.build_int_z_extend(count, self.context.i64_type(), "")?)
 	}
 
 	pub(super) fn set_inline_length(
@@ -210,7 +222,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let index = self
 			.convert(value, Repr::Int(IntRepr::I64), node.index())?
 			.int();
-		let length = self.inline_length(self.load(slot)?)?;
+		let length = self.inline_length_at(slot, ty)?;
 		let position = self.counted_from_end(index, length)?;
 		if self.flags(node).contains(NodeFlags::INDEX_CHECK) {
 			let outside =
@@ -267,7 +279,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let (item_type, capacity) = self.inline_info(ty).expect("an inline array");
 		let item = self.item_repr(item_type, node)?;
-		let length = self.inline_length(self.load(slot)?)?;
+		let length = self.inline_length_at(slot, ty)?;
 		let i64 = self.context.i64_type();
 		match path {
 			"Array#push" => {
@@ -289,48 +301,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.set_inline_length(slot, ty, length)?;
 				Ok(Val::void())
 			}
-			"Array#get" => {
-				let view = self.inline_view_at(slot, ty)?;
-				self.array_get(view, values[0], node)
-			}
+			"Array#get" => self.inline_get(node, slot, ty, values[0]),
 			"Array#clear" => {
-				self.for_each_index(length, |this, index| {
-					let item_slot = this.inline_item(&this.builder, slot, ty, index)?;
-					let value = this.load(item_slot)?;
-					this.call_drop(&this.builder, item, value.value.expect("an item"))
-				})?;
+				if self.needs_drop(item) {
+					self.for_each_index(length, |this, index| {
+						let item_slot = this.inline_item(&this.builder, slot, ty, index)?;
+						let value = this.load(item_slot)?;
+						this.call_drop(&this.builder, item, value.value.expect("an item"))
+					})?;
+				}
 				self.set_inline_length(slot, ty, i64.const_zero())?;
 				Ok(Val::void())
 			}
-			"Array#pop" => {
-				let scalar = Scalar::of(item)
-					.ok_or_else(|| self.unsupported(node.index(), "this inline item optional"))?;
-				let result = self.alloca(Repr::Optional(scalar), "inline.popped")?;
-				self.builder
-					.build_store(result.pointer, super::zero_of(self.llvm_type(result.repr)))?;
-				let present = self.builder.build_int_compare(
-					IntPredicate::NE,
-					length,
-					i64.const_zero(),
-					"",
-				)?;
-				let body = self.append_block("inline.pop");
-				let end = self.append_block("inline.pop.end");
-				self.builder.build_conditional_branch(present, body, end)?;
-				self.builder.position_at_end(body);
-				let last = self
-					.builder
-					.build_int_sub(length, i64.const_int(1, false), "")?;
-				let item_slot = self.inline_item(&self.builder, slot, ty, last)?;
-				let value = self.load(item_slot)?;
-				let value = self.convert(value, result.repr, node.index())?;
-				self.builder
-					.build_store(result.pointer, value.value.expect("a popped item"))?;
-				self.set_inline_length(slot, ty, last)?;
-				self.builder.build_unconditional_branch(end)?;
-				self.builder.position_at_end(end);
-				Ok(self.fresh(self.load(result)?))
-			}
+			"Array#pop" => self.inline_pop(node, slot, ty, length),
 			"Array#delete" | "Array#take" => {
 				let index = self
 					.convert(values[0], Repr::Int(IntRepr::I64), node.index())?
@@ -346,7 +329,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				let destination = self.inline_item(&self.builder, slot, ty, position)?;
 				let removed = self.load(destination)?;
-				if path == "Array#delete" {
+				if path == "Array#delete" && self.needs_drop(item) {
 					self.call_drop(&self.builder, item, removed.value.expect("a removed item"))?;
 				}
 				let after = self
@@ -371,6 +354,83 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => Err(self.unsupported(node.index(), "this inline array method")),
 		}
+	}
+
+	fn inline_get(
+		&mut self,
+		node: NodeId,
+		slot: Slot<'ctx>,
+		ty: TypeId,
+		index: Val<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
+		let repr = self.node_repr(node)?;
+		if !repr.has_value() {
+			return Ok(Val::none());
+		}
+		let result = self.alloca(repr, "inline.got")?;
+		self.builder
+			.build_store(result.pointer, super::zero_of(self.llvm_type(repr)))?;
+		let index = self
+			.convert(index, Repr::Int(IntRepr::I64), node.index())?
+			.int();
+		let length = self.inline_length_at(slot, ty)?;
+		let position = self.counted_from_end(index, length)?;
+		let present = self
+			.builder
+			.build_int_compare(IntPredicate::ULT, position, length, "")?;
+		let body = self.append_block("inline.get");
+		let end = self.append_block("inline.get.end");
+		self.builder.build_conditional_branch(present, body, end)?;
+		self.builder.position_at_end(body);
+		let source = self.inline_item(&self.builder, slot, ty, position)?;
+		let value = self.load(source)?;
+		let value = self.convert(value, repr, node.index())?;
+		self.store(result, value, node)?;
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(end);
+		self.load(result)
+	}
+
+	fn inline_pop(
+		&mut self,
+		node: NodeId,
+		slot: Slot<'ctx>,
+		ty: TypeId,
+		length: IntValue<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
+		let repr = self.node_repr(node)?;
+		let result = if repr.has_value() {
+			let result = self.alloca(repr, "inline.popped")?;
+			self.builder
+				.build_store(result.pointer, super::zero_of(self.llvm_type(repr)))?;
+			Some(result)
+		} else {
+			None
+		};
+		let i64 = self.context.i64_type();
+		let present =
+			self.builder
+				.build_int_compare(IntPredicate::NE, length, i64.const_zero(), "")?;
+		let body = self.append_block("inline.pop");
+		let end = self.append_block("inline.pop.end");
+		self.builder.build_conditional_branch(present, body, end)?;
+		self.builder.position_at_end(body);
+		let last = self
+			.builder
+			.build_int_sub(length, i64.const_int(1, false), "")?;
+		if let Some(result) = result {
+			let source = self.inline_item(&self.builder, slot, ty, last)?;
+			let value = self.load(source)?;
+			let value = self.convert(value, repr, node.index())?;
+			self.store(result, value, node)?;
+		}
+		self.set_inline_length(slot, ty, last)?;
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(end);
+		Ok(match result {
+			Some(result) => self.fresh(self.load(result)?),
+			None => Val::none(),
+		})
 	}
 
 	/// Copy and destruction visit exactly the initialized prefix. The same

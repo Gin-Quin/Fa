@@ -188,6 +188,8 @@ pub enum Expr {
 	Const(Value),
 	/// A local.
 	Local(Slot),
+	/// Transfers an owned local at its proven last use, clearing the slot.
+	Move(Slot),
 	/// A module-level value (evaluated once by the host).
 	Global(GlobalKey),
 	/// A named function as a value.

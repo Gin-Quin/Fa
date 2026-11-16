@@ -236,6 +236,10 @@ impl<'i, 'h> Machine<'i, 'h> {
 		match &code.nodes[node] {
 			Op::Const(value) => Self::done(value.clone()),
 			Op::Local(slot) => Self::done(self.frame().locals[*slot as usize].clone()),
+			Op::Move(slot) => Self::done(std::mem::replace(
+				&mut self.locals()[*slot as usize],
+				Value::None,
+			)),
 			Op::Global(key) => Self::done(self.interpreter.host.global(*key)?),
 			Op::Function(function) => Self::done(Value::Function(Arc::new(Closure {
 				function: *function,
@@ -965,5 +969,45 @@ fn range_bound(value: Value) -> Result<Option<I256>, Error> {
 			"a range bound must be an integer, not `{}`",
 			other.to_text()
 		))),
+	}
+}
+
+#[cfg(test)]
+mod ownership_tests {
+	use super::*;
+	use crate::ir::{Expr, GlobalKey};
+
+	struct EmptyHost;
+	impl crate::Host for EmptyHost {
+		fn function(&mut self, _key: FnKey) -> Result<Arc<crate::ir::Function>, Error> {
+			Err(Error::Unsupported("no function in this test".into()))
+		}
+		fn global(&mut self, _key: GlobalKey) -> Result<Value, Error> {
+			Err(Error::Unsupported("no global in this test".into()))
+		}
+	}
+
+	#[test]
+	fn moving_an_array_does_not_leave_a_copy_on_write_owner() {
+		let code = Arc::new(Code::expression(&Expr::Move(0), 1, || Ok(())).unwrap());
+		let body = code.body;
+		let mut host = EmptyHost;
+		let mut interpreter = Interpreter::new(&mut host, crate::Limits::default());
+		let mut machine = Machine::new(&mut interpreter, code).unwrap();
+		let mut items = Vec::with_capacity(4);
+		items.push(Value::int(1));
+		let storage = Arc::new(items);
+		let original = Arc::as_ptr(&storage);
+		let original_items = storage.as_ptr();
+		machine.locals()[0] = Value::Array(storage);
+		let Ok(Action::Done(Ok(Value::Array(mut moved)))) = machine.enter(body) else {
+			panic!("a move must return the array");
+		};
+		assert!(matches!(machine.locals()[0], Value::None));
+		assert_eq!(Arc::as_ptr(&moved), original);
+		assert_eq!(Arc::strong_count(&moved), 1);
+		Arc::make_mut(&mut moved).push(Value::int(2));
+		assert_eq!(Arc::as_ptr(&moved), original);
+		assert_eq!(moved.as_ptr(), original_items);
 	}
 }

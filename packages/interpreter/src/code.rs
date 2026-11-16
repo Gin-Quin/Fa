@@ -96,6 +96,7 @@ pub(crate) enum Part {
 pub(crate) enum Op {
 	Const(Value),
 	Local(Slot),
+	Move(Slot),
 	Global(GlobalKey),
 	Function(FnKey),
 	Closure(FnKey, Vec<Slot>),
@@ -218,6 +219,7 @@ impl<'a> Builder<'a> {
 			let op = match expression {
 				ir::Expr::Const(value) => Op::Const(value.clone()),
 				ir::Expr::Local(slot) => Op::Local(*slot),
+				ir::Expr::Move(slot) => Op::Move(*slot),
 				ir::Expr::Global(key) => Op::Global(*key),
 				ir::Expr::Function(key) => Op::Function(*key),
 				ir::Expr::Closure { function, captures } => {

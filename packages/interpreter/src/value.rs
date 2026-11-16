@@ -1,10 +1,11 @@
 //! The values of compile-time evaluation.
 //!
-//! Fa values are copied when stored (values brief §2.3): a [`Value`] holds its
-//! composites behind an `Arc` and a change goes through `Arc::make_mut`, so a
-//! copy is a reference count until one side changes (copy on write). Values
-//! are `Send + Sync`: the analysis that stores them (constants for the
-//! backends) can move between threads.
+//! Composite values use `Arc` storage with copy on write. A read may borrow
+//! that storage; explicit Fa copies remain independent on mutation. Checked
+//! last-use stores use `ir::Expr::Move`, transferring the value and clearing
+//! its former slot so that a dead owner cannot force a later copy on write.
+//! Values are `Send + Sync`: cached compile-time results can move between
+//! analysis threads.
 //!
 //! Printing follows the runtime (`packages/codegen-js/runtime/format.js`): a
 //! string at the top level is its text, nested it is quoted; integers and

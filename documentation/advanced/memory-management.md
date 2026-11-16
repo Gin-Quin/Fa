@@ -74,6 +74,15 @@ A copy preserves contents, not spare capacity. Reserve the destination separatel
 
 Access, indexing and calls bind more tightly than `copy`; arithmetic binds less tightly: `copy source.items + other` means `(copy source.items) + other`. Parenthesize a larger operand: `copy (left ?? right)`. `copy` is reserved, like `await`: `copy(x)` copies the parenthesized expression, `copy [1, 2]` and `copy[0]` copy array literals, and `copy -x` copies the negated value. Whitespace does not change its meaning; a newline may follow it. A variable, parameter, function or type cannot be named `copy` (`E-LEX-3`: “`copy` is reserved: it copies a value (`copy items`); choose another name”). After a dot it is accepted as a member name, just like `await`: `object.copy(value)` calls that member.
 
+`copy` authorizes copying or converting its operand's completed value; fields, items and arguments inside the expression that computes it are checked at their own stores:
+
+```fa
+let small: Array<Int8> = [1, 2]
+let invalid: { items: Array<Integer> } = copy { items = small } -- error: MEM004: the enclosing copy does not reach this field store
+let valid: { items: Array<Integer> } = { items = copy small }
+console.log(valid)
+```
+
 ```fa
 function duplicate = <Item>(value: Item): Item => copy value
 let source = [1, 2]

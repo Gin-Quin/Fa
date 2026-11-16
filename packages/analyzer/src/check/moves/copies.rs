@@ -23,20 +23,8 @@ impl Walker<'_> {
 			return;
 		};
 		self.a.coercions.insert(value, target);
-		let mut parent = self.parent(value);
-		while let Some(node) = parent {
-			match self.view(node) {
-				View::Copy(_) => return,
-				View::Lambda { .. } | View::Test { .. } | View::Watch(_) => break,
-				View::Do(_)
-					if self
-						.parent(node)
-						.is_some_and(|parent| matches!(self.view(parent), View::Start(_))) =>
-				{
-					break;
-				}
-				_ => parent = self.parent(node),
-			}
+		if self.is_copy_operand_value(value) {
+			return;
 		}
 		if self
 			.s
@@ -54,6 +42,7 @@ impl Walker<'_> {
 			return;
 		}
 		let source = self.tree.text(value.index());
+		let enclosing = self.copy_scope_hint(value);
 		let generic = if self.view_sink {
 			if let TypeKind::Collection(crate::types::CollKind::Array, item, _) =
 				self.s.types.kind(target)
@@ -68,12 +57,62 @@ impl Walker<'_> {
 		} else {
 			String::new()
 		};
-		let diagnostic = self.diagnostic(&MEM004, value, format!("converting `{source}` from `{}` to `{}` changes items or recursive parts from `{}` to `{}`: the items are stored differently and the conversion walks the whole value; write `copy {source}`, even at its last use{generic}", self.display(actual), self.display(target), self.display(source_item), self.display(target_item)))
+		let diagnostic = self.diagnostic(&MEM004, value, format!("converting `{source}` from `{}` to `{}` changes items or recursive parts from `{}` to `{}`: the items are stored differently and the conversion walks the whole value; write `copy {source}`, even at its last use{generic}{enclosing}", self.display(actual), self.display(target), self.display(source_item), self.display(target_item)))
 			.with_fix(Fix { title: format!("Convert every part with `copy {source}`"), edits: vec![TextEdit {
 				location: Location { file: self.file, span: SourceSpan::new(self.span(value).start, self.span(value).start) },
 				replacement: "copy ".into(),
 			}] });
 		self.report_flow(diagnostic);
+	}
+
+	/// Only value-preserving result paths lead to a Copy operand. Copying
+	/// a call's result does not authorize conversions of its arguments.
+	fn is_copy_operand_value(&self, mut value: NodeId) -> bool {
+		while let Some(parent) = self.parent(value) {
+			let result = match self.view(parent) {
+				View::Copy(operand) => return operand == value,
+				View::Group(inner) | View::Do(inner) | View::Try(inner) => inner == value,
+				View::Block { statements } => statements.last() == Some(value),
+				View::If {
+					then_body,
+					else_body,
+					..
+				} => then_body == value || else_body == Some(value),
+				View::When { arms, .. } => arms.iter().any(|arm| arm.value == value),
+				View::Catch {
+					expression,
+					handler,
+					..
+				} => expression == value || handler == value,
+				View::Fallback { operands } => operands.iter().any(|operand| operand == value),
+				_ => false,
+			};
+			if !result {
+				return false;
+			}
+			value = parent;
+		}
+		false
+	}
+
+	fn copy_scope_hint(&self, mut value: NodeId) -> &'static str {
+		while let Some(parent) = self.parent(value) {
+			match self.view(parent) {
+				View::Copy(_) => {
+					return "; the enclosing `copy` copies its operand's completed value and does not reach this inner store or argument";
+				}
+				View::Lambda { .. } | View::Watch(_) | View::Test { .. } => break,
+				View::Do(_)
+					if self
+						.parent(parent)
+						.is_some_and(|node| matches!(self.view(node), View::Start(_))) =>
+				{
+					break;
+				}
+				_ => value = parent,
+			}
+		}
+		""
 	}
 
 	/// Widening the destination cannot introduce owned data that the
@@ -296,7 +335,8 @@ impl Walker<'_> {
 			|| "its source is borrowed or this field cannot transfer ownership here".to_string(),
 			|node| format!("its source is used again on line {}", self.line_of(node)),
 		);
-		let mut diagnostic = self.diagnostic(&MEM004, value, format!("storing `{text}` would silently copy the structure `{ty}`: {reason}{projection}; write `copy {text}`, borrow with `use`, or move the later use before this store"));
+		let enclosing = self.copy_scope_hint(value);
+		let mut diagnostic = self.diagnostic(&MEM004, value, format!("storing `{text}` would silently copy the structure `{ty}`: {reason}{projection}; write `copy {text}`, borrow with `use`, or move the later use before this store{enclosing}"));
 		if let Some(node) = later {
 			diagnostic = diagnostic.with_related(
 				Location {
@@ -564,5 +604,39 @@ mod tests {
 			codes("function narrow = (items: Array<Integer>): Array<Int8> => copy items\n"),
 			["E-TYPE-1"]
 		);
+	}
+
+	#[test]
+	fn copying_a_call_result_does_not_copy_its_arguments() {
+		let declarations = "function count = (items: Array<Integer>): Integer => items.length\nlet items: Array<Int8> = [1]\n";
+		assert_eq!(
+			codes(&format!(
+				"{declarations}let length = copy count(items)\nconsole.log(length)\n"
+			)),
+			["MEM004"]
+		);
+		analyzed(&format!(
+			"{declarations}let length = copy count(copy items)\nconsole.log(length)\n"
+		));
+	}
+
+	#[test]
+	fn copying_a_literal_result_does_not_copy_its_field_stores() {
+		let declarations = "let small: Array<Int8> = [1, 2]\n";
+		let source = format!(
+			"{declarations}let box: {{ items: Array<Integer> }} = copy {{ items = small }}\nconsole.log(box)\n"
+		);
+		let (session, file) = crate::analyze_source(&source);
+		let diagnostics = session.diagnostics(file);
+		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+		assert_eq!(diagnostics[0].code.id, "MEM004");
+		assert!(
+			diagnostics[0]
+				.message
+				.contains("does not reach this inner store")
+		);
+		analyzed(&format!(
+			"{declarations}let box: {{ items: Array<Integer> }} = {{ items = copy small }}\nconsole.log(box)\n"
+		));
 	}
 }

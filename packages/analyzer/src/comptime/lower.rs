@@ -27,7 +27,7 @@ use fa_interpreter::ir::{
 use fa_interpreter::value::MemberKind;
 use fa_parser::TypedSyntaxTree;
 
-use crate::analysis::{Analysis, Argument, Callee, FieldValue, PatternBinding};
+use crate::analysis::{Analysis, Argument, Callee, FieldValue, NodeFlags, PatternBinding};
 use crate::builtins;
 use crate::ids::{FileId, NodeId, SymbolId, TypeId};
 use crate::lower::when::{self, Literal, Test};
@@ -423,7 +423,11 @@ impl<'a> Lowerer<'a> {
 			return Expr::Read(place.clone());
 		}
 		if let Some(&slot) = self.slots.get(&symbol) {
-			return Expr::Local(slot);
+			return if self.a.has_flags(n, NodeFlags::MOVE) || self.a.moved_reads.contains(&n) {
+				Expr::Move(slot)
+			} else {
+				Expr::Local(slot)
+			};
 		}
 		let data = self.a.symbols.symbol(symbol);
 		let name = self.session.types.syms.resolve(data.name).to_string();
@@ -1789,4 +1793,46 @@ pub fn function_node(analysis: &Analysis, decl: NodeId) -> NodeId {
 		.iter()
 		.find(|(_, info)| info.declaration == Some(decl))
 		.map_or(decl, |(&node, _)| node)
+}
+
+#[cfg(test)]
+mod ownership_tests {
+	use super::*;
+
+	#[test]
+	fn checked_last_uses_lower_to_slot_transfers() {
+		let (session, file) = crate::analyze_source(
+			"function make = (): Array<Integer> => { let original = [1]\nlet result = original\nresult }\n",
+		);
+		assert!(
+			session
+				.diagnostics(file)
+				.iter()
+				.all(|diagnostic| diagnostic.severity != crate::Severity::Error)
+		);
+		let tree = session.tree(file);
+		let analysis = session.analysis(file);
+		let declaration = analysis
+			.functions
+			.iter()
+			.find(|(_, info)| {
+				info.symbol.is_some_and(|symbol| {
+					session
+						.types
+						.syms
+						.resolve(analysis.symbols.symbol(symbol).name)
+						== "make"
+				})
+			})
+			.map(|(&node, _)| node)
+			.unwrap();
+		let function = Lowerer::new(&session, file, tree, analysis)
+			.function(declaration)
+			.unwrap();
+		let mut moves = 0;
+		crate::comptime::visit(&function.body, &mut |expression| {
+			moves += usize::from(matches!(expression, Expr::Move(_)));
+		});
+		assert_eq!(moves, 2);
+	}
 }

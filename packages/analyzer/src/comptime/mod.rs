@@ -239,6 +239,7 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 	match expr {
 		Expr::Const(_)
 		| Expr::Local(_)
+		| Expr::Move(_)
 		| Expr::Global(_)
 		| Expr::Function(_)
 		| Expr::Closure { .. }

@@ -64,11 +64,13 @@ impl Walker<'_> {
 					}
 					let actual = self.a.type_of(value);
 					let subject = self.a.coercion(value).unwrap_or(actual);
-					let unique = self.store_ownership(value) == crate::types::Ownership::Unique;
+					let projection = self.s.types.store_projection(actual, subject);
+					let unique = projection.ownership == crate::types::Ownership::Unique;
 					let complete = !self.s.types.has_lifetime_boundary(actual)
 						|| self.s.types.preserves_lifetime_owner(actual, subject);
 					if reachable
-						&& complete && self.ownership_source_owned(symbol, value)
+						&& complete && !projection.needs_field_moves
+						&& self.ownership_source_owned(symbol, value)
 						&& (unique || conflict.is_none())
 					{
 						self.set_flag(value, NodeFlags::MOVE);

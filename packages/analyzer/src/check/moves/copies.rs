@@ -144,6 +144,20 @@ impl Walker<'_> {
 				self.report_projection_erasure(value, actual, ty);
 				continue;
 			}
+			let projection = self.s.types.store_projection(actual, ty);
+			if projection.needs_field_moves
+				&& !matches!(self.view(value), View::Copy(_))
+				&& !self.a.copy_inputs.contains_key(&value)
+			{
+				if projection.ownership == Ownership::Unique {
+					let source = self.tree.text(value.index());
+					let diagnostic = self.diagnostic(&MEM002, value, format!("this projection would move selected unique fields out of `{source}`; write the retained fields explicitly in the owning scope; remove a collection element with `take`/`pop` first, and keep a borrowed resource with its owner"));
+					self.report(diagnostic);
+				} else {
+					self.report_structure_copy(value, conflicts.get(&value).copied());
+				}
+				continue;
+			}
 			if !self.copy_reads_place(value) {
 				continue;
 			}
@@ -463,6 +477,43 @@ mod tests {
 		analyzed(
 			"let holder = { items = [1], count = 2 }\nlet items = copy holder.items\nconsole.log(holder.count, items)\n",
 		);
+	}
+
+	#[test]
+	fn projections_that_discard_siblings_wait_for_field_moves() {
+		let source = "type Box = { items: Array<Integer>, count: Integer }\nfunction inspect = (value: Integer): Integer => {\nlet box = Box { items = [value], count = 7 }\nlet stored: { items: Array<Integer> } = box\nstored.items.length\n}\n";
+		let (session, file) = crate::analyze_source(source);
+		let diagnostics = session.diagnostics(file);
+		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+		assert_eq!(diagnostics[0].code.id, "MEM004");
+		let mut fixed = source.to_string();
+		for edit in diagnostics[0].fixes[0].edits.iter().rev() {
+			fixed.replace_range(
+				edit.location.span.start as usize..edit.location.span.end as usize,
+				&edit.replacement,
+			);
+		}
+		analyzed(&fixed);
+		analyzed(
+			"type Box = { items: Array<Integer> }\nfunction inspect = (value: Integer): Integer => {\nlet box = Box { items = [value] }\nlet stored: { items: Array<Integer> } = box\nstored.items.length\n}\n",
+		);
+	}
+
+	#[test]
+	fn a_projected_copy_copies_only_retained_nonunique_fields() {
+		let source = "function inspect = (box: { items: Array<Integer>, task: Task<Integer> }): Integer => {\nlet stored: { items: Array<Integer> } = box\nstored.items.length\n}\n";
+		let (session, file) = crate::analyze_source(source);
+		let diagnostics = session.diagnostics(file);
+		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+		assert_eq!(diagnostics[0].code.id, "MEM004");
+		let mut fixed = source.to_string();
+		for edit in diagnostics[0].fixes[0].edits.iter().rev() {
+			fixed.replace_range(
+				edit.location.span.start as usize..edit.location.span.end as usize,
+				&edit.replacement,
+			);
+		}
+		analyzed(&fixed);
 	}
 
 	#[test]

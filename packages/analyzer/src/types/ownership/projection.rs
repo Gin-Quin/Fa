@@ -10,6 +10,9 @@ pub struct StoreProjection {
 	/// A conversion must never erase this root lifetime owner, even when
 	/// it occurs inside another retained field or a collection item.
 	pub erased_owner: Option<TypeId>,
+	/// Retaining owned data while discarding fields requires field-transfer
+	/// support, including destruction of the omitted parts.
+	pub needs_field_moves: bool,
 }
 
 impl TypeStore {
@@ -18,6 +21,7 @@ impl TypeStore {
 			return StoreProjection {
 				ownership: Ownership::Unresolved,
 				erased_owner: None,
+				needs_field_moves: false,
 			};
 		}
 		let mut pending = vec![(actual, target, false)];
@@ -28,6 +32,7 @@ impl TypeStore {
 		let mut dependent = false;
 		let mut unresolved = false;
 		let mut erased_owner = None;
+		let mut omitted_fields = false;
 		while let Some((actual, target, leaving)) = pending.pop() {
 			let pair = (actual, target);
 			if leaving {
@@ -86,6 +91,15 @@ impl TypeStore {
 					(TypeKind::Object(source), TypeKind::Object(destination))
 						if !self.is_resource(actual) =>
 					{
+						omitted_fields |= self.shape_fields(source).iter().any(|source| {
+							!source
+								.flags
+								.intersects(FieldFlags::RELATION | FieldFlags::METHOD)
+								&& !self
+									.shape_fields(destination)
+									.iter()
+									.any(|target| target.name == source.name)
+						});
 						for field in self.shape_fields(destination) {
 							if field
 								.flags
@@ -143,19 +157,22 @@ impl TypeStore {
 				Ownership::Ordinary | Ownership::SharedHandle => {}
 			}
 		}
+		let ownership = if unique {
+			Ownership::Unique
+		} else if unresolved {
+			Ownership::Unresolved
+		} else if dependent {
+			Ownership::Dependent
+		} else if structure {
+			Ownership::Structure
+		} else {
+			Ownership::Ordinary
+		};
 		StoreProjection {
-			ownership: if unique {
-				Ownership::Unique
-			} else if unresolved {
-				Ownership::Unresolved
-			} else if dependent {
-				Ownership::Dependent
-			} else if structure {
-				Ownership::Structure
-			} else {
-				Ownership::Ordinary
-			},
+			ownership,
 			erased_owner,
+			needs_field_moves: omitted_fields
+				&& matches!(ownership, Ownership::Structure | Ownership::Unique),
 		}
 	}
 }

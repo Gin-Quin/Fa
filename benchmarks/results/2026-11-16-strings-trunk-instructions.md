@@ -44,3 +44,26 @@ Generated from the two schema-2 profile JSON files; whole-process Callgrind at t
 All 36 rows meet the +1% gate. Largest increase: respond-interpolation (+0.644%).
 
 Sources: [2026-11-16-strings-main-profiles.json](2026-11-16-strings-main-profiles.json), [2026-11-16-strings-trunk-profiles.json](2026-11-16-strings-trunk-profiles.json). Initial regressing run retained separately in 2026-11-16-strings-trunk-initial-profiles.json.
+
+## Validation of the merged redesign
+
+With LLVM 18 enabled, CPUs 0–4 and two Cargo build jobs: workspace build, fmt check,
+Clippy with `-D warnings`, and the complete workspace suite pass. The latter has
+1,437 passing tests, zero failures and eight pre-existing ignored tests across
+73 suites. LLVM library 14/14 and IR checks 101/101 pass.
+
+| Program target | Passed | Existing skips | Failed |
+| --- | ---: | ---: | ---: |
+| native | 864 | 30 | 0 |
+| native-freestanding | 771 | 123 | 0 |
+| wasm | 843 | 51 | 0 |
+
+Bun: 115 programs and 553 annotated analyzer cases. Node: 684 passed;
+web sandbox: 677 passed; both have zero unexpected failures. Existing documented
+refusals and failure ratchets are unchanged. The corrected numbered spec fixtures
+include both new trunk ownership examples; previous examples retain their code,
+setup and expectations. No compiler source changed after c8ad4a5c.
+
+Runtime ASAN/UBSan, leak checks, all 18 JavaScript goldens, 308 Bun runtime tests,
+33 audit-driver tests and website type/snippet/prerender checks pass. Vendored
+Unicode source files retain their upstream bytes and checked hashes.

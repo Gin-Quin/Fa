@@ -706,6 +706,17 @@ mod tests {
 	}
 
 	#[test]
+	fn owning_result_boundaries_do_not_add_evaluation_steps() {
+		let mut host = Functions::default();
+		let mut interpreter = Interpreter::new(&mut host, Limits::default());
+		assert_eq!(
+			interpreter.evaluate(&Expr::Own(int(7).boxed()), 0),
+			Ok(Value::int(7))
+		);
+		assert_eq!(interpreter.steps(), 1);
+	}
+
+	#[test]
 	fn callback_builtins_preserve_results_and_atomic_mutations() {
 		let mut host = Functions::default();
 		let predicate = Expr::Equals(
@@ -789,15 +800,21 @@ mod tests {
 			FnKey(0, 24),
 			Arc::new(Function {
 				name: "evenKey".into(),
-				params: vec![Param {
-					slot: 0,
-					default: None,
-				}],
+				params: vec![
+					Param {
+						slot: 0,
+						default: None,
+					},
+					Param {
+						slot: 1,
+						default: None,
+					},
+				],
 				captures: Vec::new(),
-				slots: 1,
+				slots: 2,
 				body: Expr::CallFunction(
 					FnKey(0, 20),
-					crate::ir::Call::from(vec![Arg::Value(Expr::Index(local(0), int(0).boxed()))]),
+					crate::ir::Call::from(vec![Arg::Value(Expr::Local(0))]),
 				),
 			}),
 		);

@@ -2,7 +2,11 @@
 -- prints: 9 9
 -- prints: 7 7
 -- prints: 1 1
+-- prints: 1 1
 -- prints: 22 22
+-- prints: 1 1
+-- prints: 216 216
+-- prints: 2 2
 
 type Person = { score: Integer }
 function mark = (person: Person): Boolean mutates person.score => {
@@ -34,6 +38,12 @@ function copiedResult = (): Integer => {
 	if found != none { found.score = 9 }
 	people[0].score
 }
+function argumentResult = (): Integer => {
+	mutable people = [Person { score = 1 }]
+	mark(first(people) ?? Person { score = 0 })
+	people[0].score
+}
+
 function failed = (text: String): Integer => {
 	mutable people = [Person { score = 1 }, Person { score = 2 }]
 	do {
@@ -46,13 +56,48 @@ function failed = (text: String): Integer => {
 	if people.length > 0 { people[0].score * 10 + people.length } else { -1 }
 }
 
+function firstEarly = (people: Array<Person>): Person? => {
+	return people.find((_person) => true)
+}
+function earlyArgumentResult = (): Integer => {
+	mutable people = [Person { score = 1 }]
+	mark(firstEarly(people) ?? Person { score = 0 })
+	people[0].score
+}
+
+function mapCallbacks = (): Integer => {
+	let values: Map<String, Integer> = [("a", 1), ("b", 2)]
+	let mapped = values.map((key, value) => value + key.length)
+	let filtered = values.filter((key, value) => key == "b" and value == 2)
+	let found = values.find((key, value) => key == "a" and value == 1)
+	let all = values.every((key, value) => key.length > 0 and value > 0)
+	let any = values.some((_key, value) => value == 2)
+	let total = values.reduce((sum, key, value) => sum + key.length + value, 0)
+	if found != none and all and any {
+		mapped.size * 100 + filtered.size * 10 + total + found[1]
+	} else { -1 }
+}
+function setMapping = (): Integer => {
+	let values: Set<Integer> = [1, 2]
+	let mapped = values.map((_value) => 0)
+	mapped.length
+}
+
 static inspected = @inspect()
 static aliased = @alias()
 static selected = @temporary()
 static copied = @copiedResult()
+static valueArgument = @argumentResult()
 static survived = @failed("bad")
+static earlyArgument = @earlyArgumentResult()
+static maps = @mapCallbacks()
+static duplicates = @setMapping()
 console.log(inspected, inspect())
 console.log(aliased, alias())
 console.log(selected, temporary())
 console.log(copied, copiedResult())
+console.log(valueArgument, argumentResult())
 console.log(survived, failed("bad"))
+console.log(earlyArgument, earlyArgumentResult())
+console.log(maps, mapCallbacks())
+console.log(duplicates, setMapping())

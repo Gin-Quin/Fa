@@ -232,6 +232,7 @@ impl<'a> Lowerer<'a> {
 			}
 		}
 		let body = self.body(info.body);
+		let body = self.owned_result(body);
 		let body = if prologue.is_empty() {
 			body
 		} else {
@@ -868,7 +869,10 @@ impl<'a> Lowerer<'a> {
 			View::Do(body) => self.expr(body),
 			View::Break(value) => Expr::Break(value.map(|value| self.expr(value).boxed())),
 			View::Continue => Expr::Continue,
-			View::Return(value) => Expr::Return(value.map(|value| self.expr(value).boxed())),
+			View::Return(value) => Expr::Return(value.map(|value| {
+				let value = self.expr(value);
+				self.owned_result(value).boxed()
+			})),
 			View::Try(value) => self.expr(value),
 			View::Throw(value) => Expr::Throw(self.expr(value).boxed()),
 			View::Catch {
@@ -1098,6 +1102,12 @@ impl<'a> Lowerer<'a> {
 			}
 		}
 		Expr::Block(statements)
+	}
+
+	/// A normal function returns an owning value. A completed loan is
+	/// materialized at this store; an already owned/moved value transfers.
+	fn owned_result(&self, value: Expr) -> Expr {
+		Expr::Own(value.boxed())
 	}
 
 	/// A function literal: a closure over the slots of its captures.

@@ -239,6 +239,9 @@ pub enum Expr {
 	Move(Slot),
 	/// Copy or convert the completed value in its expected type.
 	Copy(Arc<CopyPlan>, Box<Expr>),
+	/// An owning store boundary for a completed result. This bookkeeping
+	/// operation adds no evaluation step and transfers already owned data.
+	Own(Box<Expr>),
 	/// A module-level value (evaluated once by the host).
 	Global(GlobalKey),
 	/// A named function as a value.

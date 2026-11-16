@@ -1,12 +1,10 @@
 //! Suspending builtin algorithms retain positions, never item snapshots.
 
-use std::sync::Arc;
-
 use ethnum::I256;
 
 use crate::eval::Error;
 use crate::loans::Out;
-use crate::value::{Value, contains};
+use crate::value::Value;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Container {
@@ -18,7 +16,7 @@ pub(crate) enum Container {
 enum Kind {
 	Find,
 	Filter(bool),
-	Map(bool),
+	Map,
 	Quantifier(bool),
 	Reduce,
 	Sort,
@@ -26,6 +24,8 @@ enum Kind {
 
 pub(crate) enum Argument {
 	Item(usize),
+	Key(usize),
+	MapValue(usize),
 	Value(Out),
 }
 
@@ -34,6 +34,7 @@ pub(crate) enum Output {
 	Found(Option<usize>),
 	Selected(Container, Vec<usize>),
 	Sorted(Vec<usize>),
+	Mapped(Container, Vec<Value>),
 }
 
 pub(crate) enum Progress {
@@ -108,7 +109,7 @@ impl Callback {
 		} else if path.ends_with("#deleteWhere") {
 			Kind::Filter(true)
 		} else if path.ends_with("#map") {
-			Kind::Map(matches!(container, Container::Set))
+			Kind::Map
 		} else if path.ends_with("#every") {
 			Kind::Quantifier(true)
 		} else if path.ends_with("#some") {
@@ -134,7 +135,7 @@ impl Callback {
 		} else {
 			Vec::new()
 		};
-		let output = if matches!(kind, Kind::Map(_)) {
+		let output = if matches!(kind, Kind::Map) {
 			Vec::with_capacity(length)
 		} else {
 			Vec::new()
@@ -173,7 +174,7 @@ impl Callback {
 						self.selected.push(self.position);
 					}
 				}
-				Kind::Map(_) => self.output.push(value),
+				Kind::Map => self.output.push(value),
 				Kind::Quantifier(every) => {
 					if boolean(value)? != every {
 						return Ok(Progress::Done(Output::Value(Value::Boolean(!every).into())));
@@ -187,17 +188,27 @@ impl Callback {
 		if self.position >= self.length {
 			return self.finish();
 		}
-		let item = Argument::Item(self.position);
-		let index = Argument::Value(Value::int(self.position as i64).into());
-		let arguments = match self.kind {
-			Kind::Reduce => vec![
-				Argument::Value(std::mem::replace(&mut self.total, Value::None.into())),
-				item,
-				index,
-			],
-			Kind::Find | Kind::Filter(true) | Kind::Quantifier(_) => vec![item],
-			_ => vec![item, index],
+		let mut arguments = if matches!(self.kind, Kind::Reduce) {
+			vec![Argument::Value(std::mem::replace(
+				&mut self.total,
+				Value::None.into(),
+			))]
+		} else {
+			Vec::new()
 		};
+		match self.container {
+			Container::Map => {
+				arguments.push(Argument::Key(self.position));
+				arguments.push(Argument::MapValue(self.position));
+			}
+			Container::Array => {
+				arguments.push(Argument::Item(self.position));
+				if !matches!(self.kind, Kind::Filter(true)) {
+					arguments.push(Argument::Value(Value::int(self.position as i64).into()));
+				}
+			}
+			Container::Set => arguments.push(Argument::Item(self.position)),
+		}
 		Ok(Progress::Call {
 			function: self.function.as_ref().expect("a checked callback").clone(),
 			arguments,
@@ -211,19 +222,7 @@ impl Callback {
 			Kind::Quantifier(every) => Output::Value(Value::Boolean(every).into()),
 			Kind::Reduce => Output::Value(self.total),
 			Kind::Filter(_) => Output::Selected(self.container, self.selected),
-			Kind::Map(true) => {
-				let mut set = self.output;
-				let mut position = 0;
-				while position < set.len() {
-					if contains(&set[..position], &set[position]) {
-						set.remove(position);
-					} else {
-						position += 1;
-					}
-				}
-				Output::Value(Value::Set(Arc::new(set)).into())
-			}
-			Kind::Map(false) => Output::Value(Value::array(self.output).into()),
+			Kind::Map => Output::Mapped(self.container, self.output),
 			Kind::Sort => unreachable!(),
 		};
 		Ok(Progress::Done(output))

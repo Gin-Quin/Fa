@@ -129,6 +129,7 @@ enum Unary {
 	Negate(Num),
 	Convert(Num),
 	Copy(Arc<CopyPlan>),
+	Own,
 	Not,
 	Boolean,
 	Is(TypeTest, bool),
@@ -378,10 +379,12 @@ impl<'i, 'h> Machine<'i, 'h> {
 	}
 
 	fn enter(&mut self, node: Node) -> Result<Action, Flow> {
-		self.interpreter.step()?;
 		// The Arc keeps this immutable code alive while calls below may ask
 		// the host to prepare another function.
 		let code = Arc::clone(&self.frame().code);
+		if !matches!(code.nodes[node], Op::Own(_)) {
+			self.interpreter.step()?;
+		}
 		match &code.nodes[node] {
 			Op::Const(value) => Self::done(value.clone()),
 			Op::Local(slot) => Self::done(self.value(self.frame().locals[*slot as usize].clone())?),
@@ -397,6 +400,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Op::Copy(plan, value) => {
 				self.evaluate_after(*value, Continuation::Unary(Unary::Copy(Arc::clone(plan))))
 			}
+			Op::Own(value) => self.evaluate_after(*value, Continuation::Unary(Unary::Own)),
 			Op::Global(key) => Self::done(self.interpreter.host.global(*key)?),
 			Op::Function(function) => Self::done(Value::Function(Arc::new(Closure::new(
 				*function,
@@ -1097,6 +1101,18 @@ impl<'i, 'h> Machine<'i, 'h> {
 								CallbackArgument::Item(position) => {
 									Out::Loan(self.callback_item(&state, position)?)
 								}
+								CallbackArgument::Key(position)
+								| CallbackArgument::MapValue(position) => {
+									let key = matches!(argument, CallbackArgument::Key(_));
+									let mut loan = self.callback_item(&state, position)?;
+									self.interpreter.reserve(Loan::projection_bytes(1))?;
+									loan.push(PlaceStep::Index(Value::int(if key {
+										0
+									} else {
+										1
+									})));
+									Out::Loan(loan)
+								}
 								CallbackArgument::Value(value) => value,
 							}))
 						})
@@ -1139,9 +1155,32 @@ impl<'i, 'h> Machine<'i, 'h> {
 		match output {
 			CallbackOutput::Value(value) => Ok(self.value(value)?.into()),
 			CallbackOutput::Found(Some(position)) => {
-				Ok(Out::Loan(self.callback_item(state, position)?))
+				let loan = self.callback_item(state, position)?;
+				if matches!(state.container, Container::Map) {
+					Ok(self.value(Out::Loan(loan))?.into())
+				} else {
+					Ok(Out::Loan(loan))
+				}
 			}
 			CallbackOutput::Found(None) => Ok(Value::None.into()),
+			CallbackOutput::Mapped(container, values) => {
+				if !matches!(container, Container::Map) {
+					return Ok(Value::array(values).into());
+				}
+				self.interpreter
+					.reserve(values.len().saturating_mul(size_of::<(Value, Value)>()))?;
+				let mut entries = Vec::with_capacity(values.len());
+				for (position, value) in values.into_iter().enumerate() {
+					let loan = self.callback_item(state, position)?;
+					let PlaceView::Entry((key, _)) = self.read_loan(&loan)? else {
+						return Err(
+							Error::Stop("internal: a mapped key needs a map entry".into()).into(),
+						);
+					};
+					entries.push((key.clone(), value));
+				}
+				Ok(Value::Map(Arc::new(entries)).into())
+			}
 			CallbackOutput::Selected(container, positions) if !state.mutating => {
 				self.interpreter
 					.reserve(memory::values_size(positions.len().saturating_mul(
@@ -1392,6 +1431,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 
 	fn unary(&mut self, op: Unary, value: Out) -> Result<Action, Flow> {
 		match op {
+			Unary::Own => return Self::done(self.value(value)?),
 			Unary::Bind(slot) => {
 				// An empty optional reference has no designated place. Keep it
 				// empty when the source reference is subsequently reseated.
@@ -1445,7 +1485,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				self.locals()[slot as usize] = value.into();
 				Value::None
 			}
-			Unary::Break | Unary::Return | Unary::Bind(_) => {
+			Unary::Break | Unary::Return | Unary::Bind(_) | Unary::Own => {
 				unreachable!("forwarded before inspecting the value")
 			}
 			Unary::Throw => return Err(Error::Thrown(value).into()),
@@ -1726,6 +1766,71 @@ mod ownership_tests {
 		}
 		fn global(&mut self, _key: GlobalKey) -> Result<Value, Error> {
 			Err(Error::Unsupported("no global in this test".into()))
+		}
+	}
+
+	#[test]
+	fn callback_arguments_borrow_original_array_and_map_items_without_another_owner() {
+		for map in [false, true] {
+			let code = Arc::new(Code::expression(&Expr::none(), 1, || Ok(())).unwrap());
+			let mut host = OneFunction(Arc::new(crate::ir::Function {
+				name: "inspect".into(),
+				params: vec![
+					crate::ir::Param {
+						slot: 0,
+						default: None,
+					},
+					crate::ir::Param {
+						slot: 1,
+						default: None,
+					},
+				],
+				captures: Vec::new(),
+				slots: 2,
+				body: Expr::Const(Value::Boolean(true)),
+			}));
+			let mut interpreter = Interpreter::new(&mut host, crate::Limits::default());
+			let mut machine = Machine::new(&mut interpreter, code).unwrap();
+			let item = Value::array(vec![Value::int(1)]);
+			machine.locals()[0] = if map {
+				Value::Map(Arc::new(vec![(Value::string("key"), item)]))
+			} else {
+				Value::array(vec![item])
+			}
+			.into();
+			let source = machine
+				.loan(&ResolvedPlace {
+					slot: 0,
+					steps: Vec::new(),
+				})
+				.unwrap();
+			let function =
+				Value::Function(Arc::new(Closure::new(FnKey(0, 0), Vec::new(), Vec::new())));
+			let Action::Call(target, arguments) = machine
+				.start_callback(
+					if map { "Map#some" } else { "Array#some" },
+					vec![Out::Loan(source), function.into()],
+					false,
+				)
+				.unwrap()
+			else {
+				panic!("the builtin calls its predicate")
+			};
+			let action = machine.call_function(target, arguments).unwrap();
+			let item = machine
+				.loan(&ResolvedPlace {
+					slot: if map { 1 } else { 0 },
+					steps: Vec::new(),
+				})
+				.unwrap();
+			assert_eq!(item.owner.frame, 0);
+			let PlaceView::Value(Value::Array(items)) = machine.read_loan(&item).unwrap() else {
+				panic!("the original item")
+			};
+			assert_eq!(Arc::strong_count(items), 1);
+			assert!(matches!(machine.run(action), Ok(Value::Boolean(true))));
+			assert_eq!(machine.frames.len(), 1);
+			assert_eq!(machine.frame().locals.len(), 1);
 		}
 	}
 

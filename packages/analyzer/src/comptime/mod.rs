@@ -254,6 +254,7 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 		| Expr::Negate(_, value)
 		| Expr::Convert(_, value)
 		| Expr::Copy(_, value)
+		| Expr::Own(value)
 		| Expr::Not(value)
 		| Expr::Is(value, ..)
 		| Expr::MemberData(value)
@@ -446,7 +447,11 @@ mod tests {
 			("aliased", 9),
 			("selected", 7),
 			("copied", 1),
+			("valueArgument", 1),
 			("survived", 22),
+			("earlyArgument", 1),
+			("maps", 216),
+			("duplicates", 2),
 		] {
 			let analysis = session.analysis(file);
 			let symbol = analysis

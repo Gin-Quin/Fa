@@ -504,11 +504,11 @@ fn remote_array_and_opaque_uses_invalidate_exact_extents() {
 	let consulted = std::fs::read_dir(directory.join("objects"))
 		.unwrap()
 		.flatten()
-		.filter_map(|entry| {
+		.filter(|entry| {
 			let name = entry.file_name().to_string_lossy().into_owned();
-			(name.contains("shape") && name.ends_with(".facts"))
-				.then(|| std::fs::read_to_string(entry.path()).unwrap())
+			name.contains("shape") && name.ends_with(".facts")
 		})
+		.map(|entry| std::fs::read_to_string(entry.path()).unwrap())
 		.collect::<String>();
 	assert!(
 		consulted.contains("proofs.claims\topaque\t0\n"),

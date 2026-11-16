@@ -1,0 +1,14 @@
+static schema = @typeToSchema(InlineArray<Integer, 2>)
+type Again = TypeFromSchema<schema>
+let values: Again = [1]
+console.log(values.capacity, values) -- prints: 2 [1]
+assert schema == Schema.InlineArray { item = Schema.Integer { bits = 64 }, capacity = 2 }
+
+type RoundTrip<Item> = TypeFromSchema<@typeToSchema(Item)>
+let nested: RoundTrip<InlineArray<InlineArray<String, 1>, 2>> = [["hello"]]
+console.log(nested.capacity, nested) -- prints: 2 [["hello"]]
+let zero: RoundTrip<InlineArray<Integer, 0>> = []
+console.log(zero.capacity, zero) -- prints: 0 []
+let bytes: RoundTrip<InlineArray<UInt8, 255>> = [1]
+let words: RoundTrip<InlineArray<UInt16, 256>> = [2]
+console.log(bytes.capacity, words.capacity) -- prints: 255 256

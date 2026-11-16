@@ -1843,7 +1843,11 @@ map corpus on all LLVM targets, 105 reviewer standalone executions, 15 package
 executions (only the three pre-existing M1 links remain blocked), 12 split IR
 module checks and 28 independent optimization controls. Workspace Clippy is
 warning-free; the GCC sanitizer runtime test actually executes and passes.
-Full workspace validation is in progress and recorded in the engineer report.
+Final LLVM-enabled workspace validation passes: 1,387 tests, zero failures,
+eight pre-existing ignored tests, 69 result groups. Native/freestanding/wasm
+program counts are 822/733/801 with unchanged skips; CLI Bun/Node/web, JIT,
+packages/workspaces, memory, C-library, formatter/parser, language-server and
+doctests all pass. No expected-skip list changed.
 No benchmark source/runtime C/String code changes are involved.
 
 The shared multi-file runner now recognizes an explicit `package.fa` fixture

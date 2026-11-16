@@ -289,7 +289,45 @@
       "packages/codegen-llvm/tests/programs/async-map-generic-layout.fa": "64a1e1657135f6e69ff76d50ff04491a54be75d32b0ad1f685959b6b0221fa59"
     }
   },
-  "workspace_validation": "In progress; see the appended Review fixes report.",
+  "workspace_validation": {
+    "groups": 69,
+    "passed": 1387,
+    "failed": 0,
+    "ignored": 8,
+    "llvm_enabled": true,
+    "cargo_build_jobs": 2,
+    "cpus": "0-4",
+    "command": "cargo test --workspace --no-fail-fast -- --test-threads=2 --nocapture",
+    "fmt_check": "passed",
+    "clippy_workspace_all_targets": "passed without warnings",
+    "native": {
+      "passed": 822,
+      "skipped": 31,
+      "failed": 0
+    },
+    "native-freestanding": {
+      "passed": 733,
+      "skipped": 120,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 801,
+      "skipped": 52,
+      "failed": 0
+    },
+    "node": {
+      "passed": 671,
+      "documented_refusals": 12,
+      "unchanged_ratchets": 3,
+      "unexpected": 0
+    },
+    "web": {
+      "passed": 663,
+      "documented_refusals": 15,
+      "unchanged_ratchets": 3,
+      "unexpected": 0
+    }
+  },
   "runtime_sanitizers": {
     "compiler": "gcc",
     "tests_passed": 1,
@@ -300,5 +338,6 @@
     "readonly": "Vary UInt32/UInt16 keys with fixed Int64 values; all assertions retained. Archived scalar64 native compiler reads 0 instead of 7.",
     "pre_existing_js_literal_repro": "design/reviews/repros/collections-maps/js-generic-wide-literal/main.fa",
     "corrected_cli_groups_passed": 11
-  }
+  },
+  "regression_fixture_commit": "84335ec5"
 }

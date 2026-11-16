@@ -1545,7 +1545,6 @@ before constructing the typed value, including in nested fields and unions.
 CapacityError's only member is InlineFull; existing built-in error numbers
 remain unchanged by appending it to the prelude error table.
 
-
 Inline capacities can be UInt32-constrained compile-time parameters as well as
 constant integer expressions. Their HAS_PARAM flag is retained independently
 of the items' ownership flags; native instantiation resolves the constant and
@@ -1560,3 +1559,9 @@ partially applied calls. Collection iteration binds ordinary loop variables
 to the original indexed place; index expressions are saved once before the
 loop. This uses the shared interpreter path rather than an InlineArray-only
 mutation mechanism.
+
+A constant inline capacity property still evaluates its receiver and destroys
+its temporary owner at the statement boundary. Native numeric-constant folding
+therefore excludes instance properties; JavaScript temporary-resource accesses
+include collection length/capacity reads. `None` items use one byte of slot
+storage with no semantic payload, so generic slot addressing retains a stride.

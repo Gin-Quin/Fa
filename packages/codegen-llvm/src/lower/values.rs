@@ -582,7 +582,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return self.context.i32_type().into();
 		}
 		match repr {
-			Repr::Bool => self.context.bool_type().into(),
+			// None carries no payload; a collection slot still has a byte stride.
+			Repr::Bool | Repr::None => self.context.bool_type().into(),
 			Repr::Int(int) => self.int_type(int.bits).into(),
 			Repr::BigInt => self.context.i64_type().into(),
 			Repr::F64 | Repr::Percentage => self.context.f64_type().into(),
@@ -622,7 +623,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					false,
 				)
 				.into(),
-			Repr::Void | Repr::Never | Repr::None => panic!("{repr:?} has no IR type"),
+			Repr::Void | Repr::Never => panic!("{repr:?} has no IR type"),
 		}
 	}
 

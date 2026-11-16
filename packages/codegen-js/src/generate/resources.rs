@@ -392,8 +392,14 @@ impl Generator<'_> {
 			View::Call { .. } | View::TypedObject { .. } | View::Object { .. } | View::Tuple { .. }
 		) || !members
 			.iter()
-			.all(|&member| matches!(self.analysis.resolution(member), Resolution::Field(..)))
-		{
+			.all(|&member| match self.analysis.resolution(member) {
+				Resolution::Field(..) => true,
+				Resolution::Builtin(id) => matches!(
+					fa_analyzer::builtins::get(id).path,
+					"Array#length" | "Array#capacity"
+				),
+				_ => false,
+			}) {
 			return None;
 		}
 		let drop = self.drop_function(self.type_of(target))?;

@@ -3,7 +3,7 @@
 -- optional and missing fields, literal and anonymous unions, growing arrays,
 -- maps in the order of `Object.entries`, escapes, integer bounds), written
 -- back, and the errors of malformed texts and of values of another type.
-use { Json } = std.json
+use { Json, JsonError } = std.json
 
 type Point = { x: Float, y: Float }
 type Shape = {
@@ -96,3 +96,13 @@ attempt("@")
 -- prints: JsonError { message = "JSON Parse error: Invalid escape character q" }
 -- prints: JsonError { message = "JSON Parse error: Invalid number" }
 -- prints: JsonError { message = "JSON Parse error: Unrecognized token '@'" }
+
+-- bounded inline lists use the same JSON array format, with capacity checked
+let inlineWords: InlineArray<String, 3> = ["first", "second"]
+console.log(Json.stringify(inlineWords)) -- prints: ["first","second"]
+let inlineNumbers: InlineArray<Integer, 2> = try Json.parse("[7,7]")
+console.log(inlineNumbers) -- prints: [7, 7]
+function parseInline = (text: String): InlineArray<Integer, 1> throws JsonError => try Json.parse(text)
+parseInline("[1,2]") catch _error => console.log("too many") -- prints: too many
+let inlineEmpty: InlineArray<Integer, 0> = try Json.parse("[]")
+console.log(inlineEmpty.length, Json.stringify(inlineEmpty)) -- prints: 0 []

@@ -27,7 +27,6 @@ let values = empty<Integer, 4>()
 
 The implementation accepts capacities from 0 through 4,294,967,295. A capacity parameter must be constrained to that range, for example with `UInt32`.
 
-
 ## Reading and writing
 
 `length` is the current number of items, between zero and `capacity`. `capacity` is the declared bound and never changes. Indexing, negative indices, `get`, iteration and item assignment follow the rules of an [Array](/collections/arrays):

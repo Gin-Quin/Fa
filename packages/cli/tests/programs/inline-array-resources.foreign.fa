@@ -55,3 +55,7 @@ function partial = (): InlineArray<Resource, 3> throws ConstructionError => [
 partial() catch _error => console.log("literal failed")
 -- prints: drop prefix
 -- prints: literal failed
+
+function temporary = (): InlineArray<Resource, 1> => [Resource { name = "temporary" }]
+console.log(temporary().capacity) -- prints: 1
+-- prints: drop temporary

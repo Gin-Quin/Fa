@@ -27,10 +27,3 @@ for item in pool { console.log(item.names) } -- prints: ["pooled", "second"]
 mutable array: Array<Box> = [{ names = ["array"] }]
 try array[0].names.push("second")
 console.log(array[0].names) -- prints: ["array", "second"]
-
-use { Json, JsonError } = std.json
-console.log(Json.stringify(duplicate.names)) -- prints: ["a long string with owned storage and punctuation","second"]
-let parsed: InlineArray<Integer, 2> = try Json.parse("[7,7]")
-console.log(parsed) -- prints: [7, 7]
-function parse = (text: String): InlineArray<Integer, 1> throws JsonError => try Json.parse(text)
-parse("[1,2]") catch _error => console.log("too many") -- prints: too many

@@ -119,8 +119,9 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
   GrowingArray with documented index marks; the reserved Array is `push-array`.
   Next: unreserved sum/particles/blur (UInt16 stencil temporary), direct-output
   respond with retained variants. Before scene/interp/sexp/calc/tree/binary-trees/
-  graph pool ports, decide compact one-way growing-pool links and bounded inline
-  ordered child references; preserve recursive variants and change Rust pairings
+  graph pool ports, finish compact one-way growing-pool links and the link-field
+  contract for bounded inline ordered child references (`InlineArray` of owned
+  items is implemented); preserve recursive variants and change Rust pairings
   together. Decide exact words/lru slot algorithms versus standard Map comparisons;
   words needs Int32 counts and a borrowed-key ownership policy. Sexp needs reverse
   sibling order and its parser error path. The current scene-children probe is

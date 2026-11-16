@@ -1628,15 +1628,26 @@ Tests require 42 ordinary headers, five recursive headers, or 41 after a 160-byt
 immutable literal; additional constructors fall back to the heap. Bump the object
 cache version. No input-sized stack allocation or map-value layout change.
 
-Three new IR tests pass, including firing/escaping/copy/shared initializer cases
-and all six pointer-width/budget cases. C ASan/UBSan passes with repeated local
-header growth, reserve, copy, clear and free. Full workspace, all-target fixtures
-and measurement acceptance follow in the lead report.
+Final validation: LLVM-enabled workspace 1,381 passed, zero failed, eight existing
+ignored, including all 93 IR checks. New shared fixtures pass Bun/Node/web and
+native/freestanding/wasm with leak checks. C ASan/UBSan, fmt and Clippy pass.
+Manual O0 IR confirms private frame headers in the reassignment loop and the
+throwing cleanup fixture, and the earlier immutable-literal path stays distinct.
 
-Header instruction checkpoint: lru is 19,070,292 Ir, +1.764% versus probe reuse
-alone, despite 181,188 fewer data reads. Extra register moves/stores offset the
-saved metadata loads. Do not call this a CPU gain or regression before its
-control series; CPU is the acceptance metric. The named-versus-literal LLVM
-header type produces identical optimized main IR in a scratch diagnostic and
-is not the cause. The partial profile checkpoint retains all completed rows;
-full workspace and final profile/CPU results remain pending.
+All 36 audit rows match exact output and unchanged source hashes. Lru rises
+18,739,665 → 19,070,292 Ir (+1.764%) versus probes alone, with 181,188 fewer data
+reads and more register moves/stores. All 35 other rows remain within +1%.
+The named/literal LLVM header type produces identical optimized main IR and is
+not the cause of that instruction trade-off.
+
+**Keep the port on CPU evidence.** In the first 21-round header series on CPU 5,
+header/probe-only CPU is 0.917 / 0.919 (ratio of medians / paired median), while
+Fa/Goose is 0.986 / 0.967 and Fa/Rust 0.489 / 0.491. The identical-binary control
+0.993 / 1.028 passes strict <3% on both measures. Lru meets both CPU goals in
+this series despite its additional instructions. Retain its broad quartiles;
+instruction count alone is not the acceptance metric. Words/word-count controls
+fail and their CPU verdicts remain not resolved. No primary series is replaced.
+
+Canonical complete profiles, samples, manifests and strict-control tables are
+`benchmarks/results/2026-11-16-collections-headers.{json,md}`; the earlier probe
+and baseline files remain separate. No benchmark source or string code changed.

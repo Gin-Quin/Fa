@@ -151,6 +151,21 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn primitive_item_widening_moves_without_a_collection_copy() {
+		let source = include_str!("../../analyzer/tests/cases/ownership-primitive-widening.fa");
+		for (name, target) in [
+			("primitive-widen-native", Target::Native),
+			("primitive-widen-wasm", Target::Wasm),
+		] {
+			let ir = ir_at_target(name, source, true, OptLevel::O0, target);
+			for name in ["fa.widen", "fa.throughBinding", "fa.throughBranch"] {
+				let body = function(&ir, name);
+				assert!(!body.contains("@fa.copy"), "{body}");
+			}
+		}
+	}
+
+	#[test]
 	fn an_owned_async_environment_is_retained_before_suspending() {
 		let source = include_str!("programs/async-ownership-environments.fa");
 		for (name, target) in [

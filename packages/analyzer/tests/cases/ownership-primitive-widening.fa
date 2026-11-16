@@ -1,0 +1,46 @@
+-- Primitive literal/range widening retains the item storage and moves at
+-- last use. It must not turn a legal transfer into a hidden collection copy.
+-- prints: [4, 5]
+-- prints: [4, 5]
+-- prints: [4, 5]
+-- prints: [5]
+-- prints: 24 24 15 15
+
+function widen = (value: Integer<min = 0, max = 10>): Array<Integer> => {
+	let narrow: Array<Integer<min = 0, max = 10>> = [value]
+	narrow
+}
+
+mutable values = widen(4)
+values.push(5)
+console.log(values)
+
+function throughBinding = (value: Integer<min = 0, max = 10>): Array<Integer> => {
+	let narrow: Array<Integer<min = 0, max = 10>> = [value]
+	let wide: Array<Integer> = narrow
+	wide
+}
+mutable bound = throughBinding(4)
+bound.push(5)
+console.log(bound)
+
+function throughBranch = (choose: Boolean, value: Integer<min = 0, max = 10>): Array<Integer> => {
+	let narrow: Array<Integer<min = 0, max = 10>> = [value]
+	let wide: Array<Integer> = if choose { narrow } else { [] }
+	wide
+}
+mutable selected = throughBranch(true, 4)
+selected.push(5)
+console.log(selected)
+mutable empty = throughBranch(false, 4)
+empty.push(5)
+console.log(empty)
+
+function evaluate = (choose: Boolean): Integer => {
+	mutable items = throughBranch(choose, 4)
+	items.push(5)
+	items.length * 10 + (items.get(0) ?? 0)
+}
+static compiledTrue = @evaluate(true)
+static compiledFalse = @evaluate(false)
+console.log(compiledTrue, evaluate(true), compiledFalse, evaluate(false))

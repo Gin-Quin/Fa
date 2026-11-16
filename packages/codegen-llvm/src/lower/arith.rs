@@ -1170,7 +1170,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Two arrays of the same length with equal items.
-	fn arrays_equal(
+	pub(super) fn arrays_equal(
 		&mut self,
 		left: Val<'ctx>,
 		right: Val<'ctx>,

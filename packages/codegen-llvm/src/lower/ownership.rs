@@ -73,10 +73,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Inlining their aggregate loads/stores expands thousands of unused
 	/// slots into SSA values, even when the initialized prefix is tiny.
 	pub(super) fn keep_aggregate_helper(&self, function: FunctionValue<'ctx>, repr: Repr) {
-		let ty = self.llvm_type(repr);
-		if ty.is_struct_type() && self.collection_data_size(ty) > 256 {
+		if self.wide_aggregate(repr) {
 			self.runtime.add_attributes(function, &["noinline"]);
 		}
+	}
+
+	pub(super) fn wide_aggregate(&self, repr: Repr) -> bool {
+		let ty = self.llvm_type(repr);
+		ty.is_struct_type() && self.collection_data_size(ty) > 256
 	}
 	/// Helper functions borrow aggregates by address, independently of their
 	/// width. In particular wasm must not flatten capacity into parameter count.

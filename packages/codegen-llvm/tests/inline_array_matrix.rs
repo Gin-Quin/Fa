@@ -145,6 +145,9 @@ mod with_llvm {
 	#[test]
 	fn generated_inline_array_matrix() {
 		let directory = directory();
+		if directory.exists() {
+			fs::remove_dir_all(&directory).unwrap();
+		}
 		fs::create_dir_all(&directory).unwrap();
 		assert!(
 			Command::new("python3")
@@ -168,6 +171,7 @@ mod with_llvm {
 			})
 			.collect();
 		files.sort();
+		assert!(!files.is_empty(), "the generated matrix has matching cases");
 		let mut failures = Vec::new();
 		for path in &files {
 			if path.to_string_lossy().contains(".reject.") {

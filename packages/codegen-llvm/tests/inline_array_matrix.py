@@ -33,7 +33,7 @@ def kinds():
     yield 'array', 'Array<String>', '["array"]', '', False
     yield 'nested', 'InlineArray<String, 2>', '["nested"]', '', False
     yield 'unique', 'Resource', 'Resource { name = "unique" }', 'type Resource = { name: String, function destroy = (self) => { assert self.name == "unique"\nconsole.log("drop unique") } }', True
-    yield 'unique_owned', 'Resource', 'Resource { values = ["long ".repeat(12)] }', 'type Resource = { values: InlineArray<String, 2>, function destroy = (self) => { assert self.values.length == 1\nself.values.clear()\nconsole.log("drop unique") } }', True
+    yield 'unique_owned', 'Resource', 'Resource { values = ["long ".repeat(12)] }', 'type Resource = { values: InlineArray<String, 2>, function destroy = (self) mutates self => { assert self.values.length == 1\nself.values.clear()\nconsole.log("drop unique") } }', True
 
 
 CORE = '''

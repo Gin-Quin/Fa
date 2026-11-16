@@ -1536,7 +1536,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 				self.tree.nodes[at].for_each_child(|child| leaf.push(child));
 			}
-			if !self.tasks.asynchronous {
+			let wide = self.wide_aggregate(ret)
+				|| params.iter().any(|(repr, _)| self.wide_aggregate(*repr));
+			if wide {
+				self.runtime.add_attributes(value, &["noinline"]);
+			} else if !self.tasks.asynchronous {
 				if !calls && (count <= 24 || (count <= 64 && loops <= 1)) {
 					self.runtime.add_attributes(value, &["alwaysinline"]);
 				} else if count <= 96 {

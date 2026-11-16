@@ -1626,3 +1626,11 @@ synchronous programs keep direct code pointers. Generic producers, compositions,
 error adapters and worker callbacks share this rule. Aggregate copy helpers use
 caller-owned result storage as well as address parameters, including their early
 return paths, so wide return values are not flattened either.
+
+Inline copy/drop/hash and nested equality helpers operate on initialized places,
+without loading capacity-sized values at entry. Wide helpers remain out of line
+to bound optimizer expansion. Resource destructors borrow the actual cleanup
+place; field cleanup observes their writes. The object-cache ABI suffix advances
+to `inline-length-4` for these calling conventions. Closure captures transfer
+unique ownership only when the closure escapes; aggregate literal fields and
+items publish that escape just as assignment does.

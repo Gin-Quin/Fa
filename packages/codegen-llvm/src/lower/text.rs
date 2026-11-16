@@ -5,7 +5,7 @@ use fa_analyzer::ids::NodeId;
 use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::{TemplatePart, TemplateParts, View};
 use inkwell::IntPredicate;
-use inkwell::values::{BasicValue, InstructionOpcode, IntValue, PointerValue};
+use inkwell::values::{BasicValue, FunctionValue, InstructionOpcode, IntValue, PointerValue};
 
 use crate::error::Error;
 use crate::lower::values::{IntRepr, Repr, Val};
@@ -1075,15 +1075,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// recursive values produce recursive calls instead of infinite IR
 	/// expansion. The borrowed value owns no additional storage here.
 	pub(super) fn append_aggregate(&mut self, value: Val<'ctx>, node: NodeId) -> Result<(), Error> {
-		let key = format!("format {:?} {}", self.file, self.shape_key(value.repr));
+		let function = self.aggregate_formatter(value.repr, node)?;
+		let argument = self.helper_argument(&self.builder, value.value.expect("a value"))?;
+		self.builder.build_call(function, &[argument.into()], "")?;
+		Ok(())
+	}
+
+	pub(super) fn aggregate_formatter(
+		&mut self,
+		repr: Repr,
+		node: NodeId,
+	) -> Result<FunctionValue<'ctx>, Error> {
+		let key = format!("format {:?} {}", self.file, self.shape_key(repr));
 		let cached = self.drop_functions.borrow().get(&key).copied();
 		let function = if let Some(function) = cached {
 			function
 		} else {
-			let argument_type = if self.llvm_type(value.repr).is_struct_type() {
+			let argument_type = if self.llvm_type(repr).is_struct_type() {
 				self.pointer_type().into()
 			} else {
-				self.llvm_type(value.repr)
+				self.llvm_type(repr)
 			};
 			let signature = self
 				.context
@@ -1094,24 +1105,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				signature,
 				Some(inkwell::module::Linkage::Internal),
 			);
-			self.keep_aggregate_helper(function, value.repr);
+			self.keep_aggregate_helper(function, repr);
 			self.runtime.add_attributes(function, &["nounwind"]);
 			self.drop_functions.borrow_mut().insert(key, function);
 			let saved_frame = self.frame.take();
 			let saved_block = self.builder.get_insert_block();
 			self.begin_function(function, Repr::Void, None);
-			let argument = self.helper_parameter(
-				&self.builder,
-				value.repr,
-				function.get_nth_param(0).expect("a value"),
-			)?;
-			let argument = Val::new(value.repr, argument);
-			match value.repr {
-				Repr::Object(ty) => self.append_object_fields(argument, ty, node)?,
-				Repr::Tuple(ty) => self.append_tuple(argument, ty, node)?,
-				Repr::Array(item) => self.append_array(argument, item, node)?,
-				Repr::Map(_) | Repr::Set(_) => self.append_table(argument, node)?,
-				_ => unreachable!("a composite formatter"),
+			let parameter = function.get_nth_param(0).expect("a value");
+			if let Repr::Tuple(ty) = repr
+				&& let Some((item, _)) = self.inline_info(ty)
+			{
+				let view = self.inline_view_at(
+					Slot {
+						pointer: parameter.into_pointer_value(),
+						repr,
+					},
+					ty,
+				)?;
+				self.append_array(view, item, node)?;
+			} else {
+				let argument = self.helper_parameter(&self.builder, repr, parameter)?;
+				let argument = Val::new(repr, argument);
+				match repr {
+					Repr::Object(ty) => self.append_object_fields(argument, ty, node)?,
+					Repr::Tuple(ty) => self.append_tuple(argument, ty, node)?,
+					Repr::Array(item) => self.append_array(argument, item, node)?,
+					Repr::Map(_) | Repr::Set(_) => self.append_table(argument, node)?,
+					_ => unreachable!("a composite formatter"),
+				}
 			}
 			self.end_scope(0, None)?;
 			self.builder.build_return(None)?;
@@ -1122,9 +1143,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			function
 		};
-		let argument = self.helper_argument(&self.builder, value.value.expect("a value"))?;
-		self.builder.build_call(function, &[argument.into()], "")?;
-		Ok(())
+		Ok(function)
 	}
 
 	/// The name of a member of an enumeration (`red`).

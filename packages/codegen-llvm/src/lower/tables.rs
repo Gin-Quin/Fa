@@ -978,6 +978,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some(Linkage::Internal),
 		);
 		self.runtime.add_attributes(function, &["nounwind"]);
+		self.keep_aggregate_helper(function, repr);
 		self.drop_functions.borrow_mut().insert(key, function);
 		// lowered as a function of its own
 		let saved_frame = self.frame.take();
@@ -986,10 +987,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.frame_mut().same_value_zero = same_value_zero;
 		let a = function.get_nth_param(0).expect("a").into_pointer_value();
 		let b = function.get_nth_param(1).expect("b").into_pointer_value();
-		let a = self.load(Slot { pointer: a, repr })?;
-		let b = self.load(Slot { pointer: b, repr })?;
 		let node = NodeId::new(0);
-		let equal = self.values_equal_any(a, b, node)?;
+		let equal = if let Repr::Tuple(ty) = repr
+			&& let Some((item, _)) = self.inline_info(ty)
+		{
+			let a = self.inline_view_at(Slot { pointer: a, repr }, ty)?;
+			let b = self.inline_view_at(Slot { pointer: b, repr }, ty)?;
+			self.arrays_equal(a, b, item, node)?
+		} else {
+			let a = self.load(Slot { pointer: a, repr })?;
+			let b = self.load(Slot { pointer: b, repr })?;
+			self.values_equal_any(a, b, node)?
+		};
 		let result = self.builder.build_int_z_extend(equal, i32, "")?;
 		self.end_scope(0, None)?;
 		self.builder.build_return(Some(&result))?;

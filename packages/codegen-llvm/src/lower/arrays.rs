@@ -2361,11 +2361,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_unconditional_branch(item_block)?;
 		self.builder.position_at_end(item_block);
 		let pointer = self.item_pointer(items, item, index)?;
-		let value = self.load(Slot {
-			pointer,
-			repr: item,
-		})?;
-		self.append_nested_of(value, item_type, node)?;
+		if let Repr::Tuple(ty) = item
+			&& self.inline_info(ty).is_some()
+		{
+			let format = self.aggregate_formatter(item, node)?;
+			self.builder.build_call(format, &[pointer.into()], "")?;
+		} else {
+			let value = self.load(Slot {
+				pointer,
+				repr: item,
+			})?;
+			self.append_nested_of(value, item_type, node)?;
+		}
 		let next = self
 			.builder
 			.build_int_nsw_add(index, i64.const_int(1, false), "")?;

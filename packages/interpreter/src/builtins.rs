@@ -796,7 +796,10 @@ pub fn mutate(
 ) -> Result<Value, Error> {
 	let result = mutate_internal(interpreter, path, receiver, arguments);
 	// Even a failed callback may already have changed a permitted item.
-	interpreter.portable(receiver)?;
+	if let Err(error) = interpreter.portable(receiver) {
+		*receiver = Value::None;
+		return Err(error);
+	}
 	interpreter.publish(result)
 }
 
@@ -807,12 +810,7 @@ pub(crate) fn mutate_internal(
 	arguments: Vec<Value>,
 ) -> Result<Value, Error> {
 	if crate::callbacks::Callback::mutating(path) && matches!(receiver, Value::Array(_)) {
-		let mut inputs = Vec::with_capacity(arguments.len() + 1);
-		inputs.push(receiver.clone());
-		inputs.extend(arguments);
-		let changed = interpreter.callback_builtin(path, inputs)?;
-		*receiver = changed;
-		return Ok(Value::None);
+		return crate::machine::Machine::mutate_builtin(interpreter, path, receiver, arguments);
 	}
 
 	// a value of the interpreter grows on demand: `reserve` is a hint

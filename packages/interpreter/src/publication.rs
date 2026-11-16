@@ -154,6 +154,7 @@ mod tests {
 		assert!(
 			matches!(crate::builtins::mutate(&mut interpreter, "Array#push", &mut receiver, vec![borrowed]), Err(Error::Stop(message)) if message.contains("borrowed callable"))
 		);
+		assert_eq!(receiver, Value::None);
 	}
 
 	#[test]

@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use ethnum::I256;
 
-use crate::callbacks::{Callback, Progress};
+use crate::callbacks::{
+	Argument as CallbackArgument, Callback, Container, Output as CallbackOutput, Progress,
+};
 use crate::code::{Argument, Call, Code, Item, Node, Op, Part, Place, Step};
 use crate::eval::{self, Error, Interpreter};
 use crate::ir::{ArithOp, CompareOp, CopyPlan, FnKey, Num, Slot, TypeTest};
@@ -165,9 +167,11 @@ struct For {
 	body: Node,
 }
 
-enum CallbackFinish {
-	Value,
-	Mutate(Loan),
+struct CallbackState {
+	source: Loan,
+	temporary: Option<Owner>,
+	container: Container,
+	mutating: bool,
 }
 
 enum Continuation {
@@ -197,7 +201,7 @@ enum Continuation {
 		parameter: usize,
 		slot: Slot,
 	},
-	Callback(Box<Callback>, CallbackFinish),
+	Callback(Box<Callback>, CallbackState),
 }
 
 pub(crate) struct Machine<'i, 'h> {
@@ -237,9 +241,38 @@ impl<'i, 'h> Machine<'i, 'h> {
 		let code = Arc::new(Code::expression(&crate::ir::Expr::none(), 0, || Ok(()))?);
 		let mut machine = Self::new(interpreter, code)?;
 		let action = machine
-			.start_callback(path, arguments, CallbackFinish::Value)
+			.start_callback(path, arguments.into_iter().map(Out::Value).collect(), false)
 			.unwrap_or_else(|flow| Action::Done(Err(flow)));
 		machine.run(action).map_err(Error::from)
+	}
+
+	pub fn mutate_builtin(
+		interpreter: &'i mut Interpreter<'h>,
+		path: &str,
+		receiver: &mut Value,
+		arguments: Vec<Value>,
+	) -> Result<Value, Error> {
+		let code = Arc::new(Code::expression(&crate::ir::Expr::none(), 1, || Ok(()))?);
+		let mut machine = Self::new(interpreter, code)?;
+		machine.locals()[0] = std::mem::replace(receiver, Value::None).into();
+		let prepare = (|| {
+			let loan = machine.loan(&ResolvedPlace {
+				slot: 0,
+				steps: Vec::new(),
+			})?;
+			let mut inputs = vec![Out::Loan(loan)];
+			inputs.extend(arguments.into_iter().map(Out::Value));
+			machine.start_callback(path, inputs, true)
+		})();
+		let result = machine.run(prepare.unwrap_or_else(|flow| Action::Done(Err(flow))));
+		let root = std::mem::replace(&mut machine.locals()[0], Value::None.into());
+		let Out::Value(value) = root else {
+			return Err(Error::Stop(
+				"internal: a public mutation lost its owner".into(),
+			));
+		};
+		*receiver = value;
+		result.map_err(Error::from)
 	}
 
 	fn new(interpreter: &'i mut Interpreter<'h>, code: Arc<Code>) -> Result<Self, Error> {
@@ -256,7 +289,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 		})
 	}
 
-	fn run(mut self, mut action: Action) -> eval::Eval {
+	fn run(&mut self, mut action: Action) -> eval::Eval {
 		loop {
 			let next = match action {
 				Action::Eval(node) => self.enter(node),
@@ -706,6 +739,18 @@ impl<'i, 'h> Machine<'i, 'h> {
 			}
 			return Ok(Action::Call(target, arguments));
 		}
+		if let Finish::Builtin(path) = finish
+			&& Callback::handles(path)
+		{
+			return self.start_callback(
+				path,
+				values
+					.into_iter()
+					.map(|value| value.unwrap_or_else(|| Value::None.into()))
+					.collect(),
+				false,
+			);
+		}
 		let values: Vec<Value> = values
 			.into_iter()
 			.map(|value| self.value(value.expect("a supplied value")))
@@ -761,18 +806,13 @@ impl<'i, 'h> Machine<'i, 'h> {
 				})
 			}
 			Finish::Builtin(path) => {
-				if Callback::handles(path) {
-					self.start_callback(path, values, CallbackFinish::Value)
-				} else {
-					Self::done(builtins::call_internal(self.interpreter, path, values)?)
-				}
+				Self::done(builtins::call_internal(self.interpreter, path, values)?)
 			}
 			Finish::Mutate(path, loan) => {
 				if Callback::mutating(path) {
-					let receiver = self.view_value(self.read_loan(&loan)?)?;
-					let mut arguments = values;
-					arguments.insert(0, receiver);
-					self.start_callback(path, arguments, CallbackFinish::Mutate(loan))
+					let mut arguments = vec![Out::Loan(loan)];
+					arguments.extend(values.into_iter().map(Out::Value));
+					self.start_callback(path, arguments, true)
 				} else {
 					Self::done(builtins::mutate_internal(
 						self.interpreter,
@@ -967,44 +1007,213 @@ impl<'i, 'h> Machine<'i, 'h> {
 	fn start_callback(
 		&mut self,
 		path: &str,
-		arguments: Vec<Value>,
-		finish: CallbackFinish,
+		arguments: Vec<Out>,
+		mutating: bool,
 	) -> Result<Action, Flow> {
-		if let Some(receiver) = arguments.first() {
-			self.interpreter
-				.reserve(memory::values_size(builtins::count(receiver).unwrap_or(0)))?;
+		let mut arguments = arguments.into_iter();
+		let receiver = arguments
+			.next()
+			.ok_or_else(|| Error::Stop("missing callback receiver".into()))?;
+		let view = match &receiver {
+			Out::Value(value) => PlaceView::Value(value),
+			Out::Loan(loan) => self.read_loan(loan)?,
+		};
+		let (container, length) = match view {
+			PlaceView::Value(Value::Array(items) | Value::Tuple(items)) => {
+				(Container::Array, items.len())
+			}
+			PlaceView::Value(Value::Set(items)) => (Container::Set, items.len()),
+			PlaceView::Value(Value::Map(entries)) => (Container::Map, entries.len()),
+			_ => return Err(Error::Stop("a callback receiver must be a collection".into()).into()),
+		};
+		let buffers = if path.contains("#sort")
+			|| path.ends_with("#deleteWhere")
+			|| path.ends_with("#filter")
+		{
+			length.saturating_mul(2 * size_of::<usize>())
+		} else if path.ends_with("#map") {
+			memory::values_size(length)
+		} else {
+			0
+		};
+		self.interpreter.reserve(buffers)?;
+		let (source, temporary) = self.rooted(receiver)?;
+		let state = CallbackState {
+			source,
+			temporary,
+			container,
+			mutating,
+		};
+		let make = (|| {
+			let mut arguments: Vec<_> = arguments.collect();
+			if let Some(function) = arguments.first_mut() {
+				*function = self.value(function.clone())?.into();
+			}
+			Ok::<_, Flow>(Callback::new(path, container, length, arguments)?)
+		})();
+		match make {
+			Ok(callback) => self.callback(callback, None, state),
+			Err(flow) => Ok(Action::Done(self.release_root(temporary, Err(flow)))),
 		}
-		self.callback(Callback::new(path, arguments)?, None, finish)
+	}
+
+	fn callback_item(&self, state: &CallbackState, position: usize) -> Result<Loan, Flow> {
+		self.interpreter.reserve(Loan::projection_bytes(1))?;
+		let mut loan = state.source.clone();
+		loan.push(if matches!(state.container, Container::Map) {
+			PlaceStep::Entry(position)
+		} else {
+			PlaceStep::Item(position)
+		});
+		self.read_loan(&loan)?;
+		Ok(loan)
 	}
 
 	fn callback(
 		&mut self,
-		callback: Box<Callback>,
-		value: Option<Value>,
-		finish: CallbackFinish,
+		mut callback: Box<Callback>,
+		mut value: Option<Value>,
+		state: CallbackState,
 	) -> Result<Action, Flow> {
-		match callback.advance(value)? {
-			Progress::Call {
-				function,
-				arguments,
-				next,
-			} => {
-				self.stack.push(Continuation::Callback(next, finish));
-				Ok(Action::Call(
-					Target::Value(function),
-					arguments
-						.into_iter()
-						.map(|value| Some(value.into()))
-						.collect(),
-				))
-			}
-			Progress::Done(value) => match finish {
-				CallbackFinish::Value => Self::done(value),
-				CallbackFinish::Mutate(place) => {
-					*Self::locate(&mut self.frames, &place)? = value;
-					Self::done(Value::None)
+		loop {
+			let progress = match callback.advance(value) {
+				Ok(progress) => progress,
+				Err(error) => {
+					return Ok(Action::Done(
+						self.release_root(state.temporary, Err(error.into())),
+					));
 				}
-			},
+			};
+			match progress {
+				Progress::Call {
+					function,
+					arguments,
+					next,
+				} => {
+					let arguments = arguments
+						.into_iter()
+						.map(|argument| {
+							Ok(Some(match argument {
+								CallbackArgument::Item(position) => {
+									Out::Loan(self.callback_item(&state, position)?)
+								}
+								CallbackArgument::Value(value) => value,
+							}))
+						})
+						.collect::<Result<_, Flow>>();
+					let arguments = match arguments {
+						Ok(arguments) => arguments,
+						Err(flow) => {
+							return Ok(Action::Done(self.release_root(state.temporary, Err(flow))));
+						}
+					};
+					self.stack.push(Continuation::Callback(next, state));
+					return Ok(Action::Call(Target::Value(function), arguments));
+				}
+				Progress::Compare { left, right, next } => {
+					let result = (|| {
+						let left = self.callback_item(&state, left)?;
+						let right = self.callback_item(&state, right)?;
+						let left = self.value(Out::Loan(left))?;
+						let right = self.value(Out::Loan(right))?;
+						let greater = eval::compare(CompareOp::Greater, &left, &right)?;
+						Ok::<_, Flow>(Value::int(i64::from(greater)))
+					})();
+					match result {
+						Ok(result) => value = Some(result),
+						Err(flow) => {
+							return Ok(Action::Done(self.release_root(state.temporary, Err(flow))));
+						}
+					}
+					callback = next;
+				}
+				Progress::Done(output) => {
+					let result = self.callback_output(output, &state);
+					return Ok(Action::Done(self.release_root(state.temporary, result)));
+				}
+			}
+		}
+	}
+
+	fn callback_output(&mut self, output: CallbackOutput, state: &CallbackState) -> Eval {
+		match output {
+			CallbackOutput::Value(value) => Ok(self.value(value)?.into()),
+			CallbackOutput::Found(Some(position)) => {
+				Ok(Out::Loan(self.callback_item(state, position)?))
+			}
+			CallbackOutput::Found(None) => Ok(Value::None.into()),
+			CallbackOutput::Selected(container, positions) if !state.mutating => {
+				self.interpreter
+					.reserve(memory::values_size(positions.len().saturating_mul(
+						if matches!(container, Container::Map) {
+							2
+						} else {
+							1
+						},
+					)))?;
+				let mut values = Vec::with_capacity(positions.len());
+				let mut entries = Vec::new();
+				for position in positions {
+					let loan = self.callback_item(state, position)?;
+					match self.read_loan(&loan)? {
+						PlaceView::Entry((key, value)) => {
+							entries.push((key.clone(), value.clone()))
+						}
+						PlaceView::Value(value) => values.push(value.clone()),
+					}
+				}
+				Ok(match container {
+					Container::Map => Value::Map(Arc::new(entries)),
+					Container::Set => Value::Set(Arc::new(values)),
+					Container::Array => Value::array(values),
+				}
+				.into())
+			}
+			CallbackOutput::Selected(_, positions) => {
+				let Value::Array(items) = Self::locate(&mut self.frames, &state.source)? else {
+					return Err(Error::Stop("a mutating callback requires an array".into()).into());
+				};
+				let mut position = 0;
+				let mut selected = positions.into_iter().peekable();
+				Arc::make_mut(items).retain(|_| {
+					let keep = selected.peek() == Some(&position);
+					if keep {
+						selected.next();
+					}
+					position += 1;
+					keep
+				});
+				Ok(Value::None.into())
+			}
+			CallbackOutput::Sorted(permutation) if !state.mutating => {
+				self.interpreter
+					.reserve(memory::values_size(permutation.len()))?;
+				let values = permutation
+					.into_iter()
+					.map(|position| self.value(Out::Loan(self.callback_item(state, position)?)))
+					.collect::<Result<_, _>>()?;
+				Ok(Value::array(values).into())
+			}
+			CallbackOutput::Sorted(permutation) => {
+				self.interpreter
+					.reserve(permutation.len().saturating_mul(size_of::<usize>()))?;
+				let mut destinations = vec![0; permutation.len()];
+				for (destination, &source) in permutation.iter().enumerate() {
+					destinations[source] = destination;
+				}
+				let Value::Array(items) = Self::locate(&mut self.frames, &state.source)? else {
+					return Err(Error::Stop("a mutating callback requires an array".into()).into());
+				};
+				let items = Arc::make_mut(items);
+				for position in 0..destinations.len() {
+					while destinations[position] != position {
+						let destination = destinations[position];
+						items.swap(position, destination);
+						destinations.swap(position, destination);
+					}
+				}
+				Ok(Value::None.into())
+			}
 		}
 	}
 
@@ -1055,6 +1264,13 @@ impl<'i, 'h> Machine<'i, 'h> {
 				Ok(_) | Err(Flow::Continue) => self.for_next(state),
 				Err(Flow::Break(_)) => self.finish_for(state, Ok(Value::None.into())),
 				Err(flow) => self.finish_for(state, Err(flow)),
+			},
+			Continuation::Callback(callback, state) => match result {
+				Ok(value) => match self.value(value) {
+					Ok(value) => self.callback(callback, Some(value), state),
+					Err(flow) => Ok(Action::Done(self.release_root(state.temporary, Err(flow)))),
+				},
+				Err(flow) => Ok(Action::Done(self.release_root(state.temporary, Err(flow)))),
 			},
 			Continuation::Catch(slot, handler) => match result {
 				Err(Flow::Error(Error::Thrown(error))) => {
@@ -1144,9 +1360,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 					Continuation::ForIterable(item, index, body) => {
 						self.for_iterable(value, item, index, body)
 					}
-					Continuation::Callback(callback, finish) => {
-						self.callback(callback, Some(self.value(value)?), finish)
-					}
+
 					_ => unreachable!("handled control boundary"),
 				}
 			}

@@ -952,6 +952,74 @@ mod tests {
 	}
 
 	#[test]
+	fn failed_mutating_callbacks_keep_item_writes_without_committing_reorder_or_deletion() {
+		let mut host = Functions::default();
+		host.0.insert(
+			FnKey(0, 61),
+			Arc::new(Function {
+				name: "reject".into(),
+				params: vec![Param {
+					slot: 0,
+					default: None,
+				}],
+				captures: Vec::new(),
+				slots: 1,
+				body: Expr::Block(vec![
+					Expr::Assign(
+						Place {
+							slot: 0,
+							steps: vec![Step::Field(Arc::from("score"))],
+						},
+						Expr::Arith(
+							ArithOp::Add,
+							INTEGER,
+							Expr::Field(local(0), Arc::from("score"), false).boxed(),
+							int(1).boxed(),
+						)
+						.boxed(),
+					),
+					Expr::Throw(Expr::Const(Value::error("Failure", Vec::new())).boxed()),
+				]),
+			}),
+		);
+		let callback = Value::Function(Arc::new(crate::value::Closure::new(
+			FnKey(0, 61),
+			Vec::new(),
+			Vec::new(),
+		)));
+		for path in ["Array#deleteWhere", "Array#sortInPlace"] {
+			let mut receiver = Value::array(
+				[3, 1, 2]
+					.into_iter()
+					.map(|score| Value::object(vec![("score", Value::int(score))]))
+					.collect(),
+			);
+			let Value::Array(items) = &receiver else {
+				unreachable!()
+			};
+			let allocation = Arc::as_ptr(items);
+			let mut interpreter = Interpreter::new(&mut host, Limits::default());
+			assert_eq!(
+				builtins::mutate(
+					&mut interpreter,
+					path,
+					&mut receiver,
+					vec![callback.clone()]
+				),
+				Err(Error::Thrown(Value::error("Failure", Vec::new())))
+			);
+			let Value::Array(items) = &receiver else {
+				panic!("the original collection survives")
+			};
+			assert_eq!(Arc::as_ptr(items), allocation);
+			assert_eq!(
+				receiver.to_text(),
+				"[{ score = 4 }, { score = 1 }, { score = 2 }]"
+			);
+		}
+	}
+
+	#[test]
 	fn closures_and_callbacks() {
 		let mut host = Functions::default();
 		// (n) => n * factor, with `factor` captured

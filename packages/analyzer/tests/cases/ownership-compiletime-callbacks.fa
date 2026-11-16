@@ -1,0 +1,58 @@
+-- prints: 2 2
+-- prints: 9 9
+-- prints: 7 7
+-- prints: 1 1
+-- prints: 22 22
+
+type Person = { score: Integer }
+function mark = (person: Person): Boolean mutates person.score => {
+	person.score += 1
+	true
+}
+function inspect = (): Integer => {
+	mutable people = [Person { score = 1 }]
+	let all = people.every((person, _index) => mark(person))
+	if all { people[0].score } else { -1 }
+}
+function alias = (): Integer => {
+	mutable people = [Person { score = 1 }]
+	use found = people.find((person) => person.score == 1)
+	if found != none { found.score = 9 }
+	people[0].score
+}
+function temporary = (): Integer => {
+	mutable found = [Person { score = 1 }].find((_person) => true)
+	if found != none {
+		found.score = 7
+		found.score
+	} else { -1 }
+}
+function first = (people: Array<Person>): Person? => people.find((_person) => true)
+function copiedResult = (): Integer => {
+	mutable people = [Person { score = 1 }]
+	mutable found = first(people)
+	if found != none { found.score = 9 }
+	people[0].score
+}
+function failed = (text: String): Integer => {
+	mutable people = [Person { score = 1 }, Person { score = 2 }]
+	do {
+		people.deleteWhere((person) => {
+			person.score += 1
+			let _number = try Integer.parse(text)
+			true
+		})
+	} catch _error => {}
+	if people.length > 0 { people[0].score * 10 + people.length } else { -1 }
+}
+
+static inspected = @inspect()
+static aliased = @alias()
+static selected = @temporary()
+static copied = @copiedResult()
+static survived = @failed("bad")
+console.log(inspected, inspect())
+console.log(aliased, alias())
+console.log(selected, temporary())
+console.log(copied, copiedResult())
+console.log(survived, failed("bad"))

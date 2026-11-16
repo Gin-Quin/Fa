@@ -1446,6 +1446,9 @@ impl<'a> Lowerer<'a> {
 		};
 		// the receiver of a method: the callee without its last member
 		let receiver = |lowerer: &mut Self| -> Option<Expr> {
+			if let Some(place) = lowerer.borrowed_receiver(callee) {
+				return Some(Expr::Lend(place));
+			}
 			match syntax::view(lowerer.tree, callee) {
 				View::Access { target, members } | View::OptionalAccess { target, members } => {
 					if members.len() == 1 {

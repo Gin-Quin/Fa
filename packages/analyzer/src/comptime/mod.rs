@@ -432,6 +432,40 @@ mod tests {
 	}
 
 	#[test]
+	fn compile_time_callbacks_borrow_items_and_preserve_completed_effects() {
+		let (session, file) = crate::analyze_source(include_str!(
+			"../../tests/cases/ownership-compiletime-callbacks.fa"
+		));
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		for (name, expected) in [
+			("inspected", 2),
+			("aliased", 9),
+			("selected", 7),
+			("copied", 1),
+			("survived", 22),
+		] {
+			let analysis = session.analysis(file);
+			let symbol = analysis
+				.symbols
+				.symbols()
+				.iter()
+				.position(|symbol| session.types().syms.resolve(symbol.name) == name)
+				.unwrap();
+			assert_eq!(
+				analysis
+					.static_values
+					.get(&crate::ids::SymbolId(symbol as u32)),
+				Some(&Value::int(expected)),
+				"{name}"
+			);
+		}
+	}
+
+	#[test]
 	fn compile_time_loops_and_patterns_borrow_original_items() {
 		let (session, file) = crate::analyze_source(include_str!(
 			"../../tests/cases/ownership-compiletime-loops.fa"

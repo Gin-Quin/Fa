@@ -1,47 +1,66 @@
-//! Built-ins that suspend while calling Fa code. Their state lives beside
-//! ordinary expression continuations, so a callback can recurse through
-//! another built-in without growing the native stack.
+//! Suspending builtin algorithms retain positions, never item snapshots.
 
 use std::sync::Arc;
 
 use ethnum::I256;
 
-use crate::builtins;
-use crate::eval::{self, Error};
-use crate::ir::CompareOp;
+use crate::eval::Error;
+use crate::loans::Out;
 use crate::value::{Value, contains};
 
-enum Container {
+#[derive(Clone, Copy)]
+pub(crate) enum Container {
 	Array,
 	Set,
 	Map,
 }
+
 enum Kind {
 	Find,
-	Filter(Container, bool),
+	Filter(bool),
 	Map(bool),
 	Quantifier(bool),
 	Reduce,
 	Sort,
 }
 
-pub(crate) struct Callback {
-	kind: Kind,
-	function: Option<Value>,
-	items: Vec<Value>,
-	position: usize,
-	output: Vec<Value>,
-	total: Value,
-	sort_position: usize,
+pub(crate) enum Argument {
+	Item(usize),
+	Value(Out),
+}
+
+pub(crate) enum Output {
+	Value(Out),
+	Found(Option<usize>),
+	Selected(Container, Vec<usize>),
+	Sorted(Vec<usize>),
 }
 
 pub(crate) enum Progress {
 	Call {
 		function: Value,
-		arguments: Vec<Value>,
+		arguments: Vec<Argument>,
 		next: Box<Callback>,
 	},
-	Done(Value),
+	Compare {
+		left: usize,
+		right: usize,
+		next: Box<Callback>,
+	},
+	Done(Output),
+}
+
+pub(crate) struct Callback {
+	kind: Kind,
+	container: Container,
+	function: Option<Value>,
+	length: usize,
+	position: usize,
+	selected: Vec<usize>,
+	output: Vec<Value>,
+	total: Out,
+	permutation: Vec<usize>,
+	sort_position: usize,
 }
 
 impl Callback {
@@ -71,27 +90,25 @@ impl Callback {
 		matches!(path, "Array#sortInPlace" | "Array#deleteWhere")
 	}
 
-	pub fn new(path: &str, arguments: Vec<Value>) -> Result<Box<Self>, Error> {
-		let receiver = arguments.first().cloned().unwrap_or(Value::None);
-		let arg = |index: usize| {
-			arguments
-				.get(index)
-				.cloned()
-				.ok_or_else(|| Error::Stop(format!("missing argument {index}")))
-		};
-		let container = match receiver {
-			Value::Set(_) => Container::Set,
-			Value::Map(_) => Container::Map,
-			_ => Container::Array,
-		};
+	pub fn new(
+		path: &str,
+		container: Container,
+		length: usize,
+		arguments: Vec<Out>,
+	) -> Result<Box<Self>, Error> {
+		let mut arguments = arguments.into_iter();
+		let function = arguments.next().and_then(|value| match value {
+			Out::Value(value) => Some(value),
+			Out::Loan(_) => None,
+		});
 		let kind = if path.ends_with("#find") {
 			Kind::Find
 		} else if path.ends_with("#filter") {
-			Kind::Filter(container, false)
+			Kind::Filter(false)
 		} else if path.ends_with("#deleteWhere") {
-			Kind::Filter(Container::Array, true)
+			Kind::Filter(true)
 		} else if path.ends_with("#map") {
-			Kind::Map(matches!(receiver, Value::Set(_)))
+			Kind::Map(matches!(container, Container::Set))
 		} else if path.ends_with("#every") {
 			Kind::Quantifier(true)
 		} else if path.ends_with("#some") {
@@ -102,28 +119,40 @@ impl Callback {
 			Kind::Sort
 		};
 		let sort = matches!(kind, Kind::Sort);
-		let function = if sort {
-			arguments.get(1).cloned()
-		} else {
-			Some(arg(1)?)
-		};
+		if !sort && function.is_none() {
+			return Err(Error::Stop("missing callback argument".into()));
+		}
 		let total = if matches!(kind, Kind::Reduce) {
-			arg(2)?
+			arguments
+				.next()
+				.ok_or_else(|| Error::Stop("missing initial accumulator".into()))?
 		} else {
-			Value::None
+			Value::None.into()
 		};
-		let items = if sort {
-			receiver.items().unwrap_or(&[]).to_vec()
+		let selected = if matches!(kind, Kind::Filter(_)) {
+			Vec::with_capacity(length)
 		} else {
-			builtins::iterate(&receiver)?
+			Vec::new()
+		};
+		let output = if matches!(kind, Kind::Map(_)) {
+			Vec::with_capacity(length)
+		} else {
+			Vec::new()
 		};
 		Ok(Box::new(Self {
 			kind,
+			container,
 			function,
-			items,
+			length,
 			position: usize::from(sort),
-			output: Vec::new(),
+			selected,
+			output,
 			total,
+			permutation: if sort {
+				(0..length).collect()
+			} else {
+				Vec::new()
+			},
 			sort_position: 1,
 		}))
 	}
@@ -133,74 +162,71 @@ impl Callback {
 			return self.sort(returned);
 		}
 		if let Some(value) = returned {
-			let item = &self.items[self.position];
-			match &self.kind {
+			match self.kind {
 				Kind::Find => {
 					if boolean(value)? {
-						return Ok(Progress::Done(item.clone()));
+						return Ok(Progress::Done(Output::Found(Some(self.position))));
 					}
 				}
-				Kind::Filter(_, inverse) => {
-					if boolean(value)? != *inverse {
-						self.output.push(item.clone());
+				Kind::Filter(inverse) => {
+					if boolean(value)? != inverse {
+						self.selected.push(self.position);
 					}
 				}
 				Kind::Map(_) => self.output.push(value),
 				Kind::Quantifier(every) => {
-					if boolean(value)? != *every {
-						return Ok(Progress::Done(Value::Boolean(!every)));
+					if boolean(value)? != every {
+						return Ok(Progress::Done(Output::Value(Value::Boolean(!every).into())));
 					}
 				}
-				Kind::Reduce => self.total = value,
+				Kind::Reduce => self.total = value.into(),
 				Kind::Sort => unreachable!(),
 			}
 			self.position += 1;
 		}
-		let Some(item) = self.items.get(self.position) else {
+		if self.position >= self.length {
 			return self.finish();
-		};
+		}
+		let item = Argument::Item(self.position);
+		let index = Argument::Value(Value::int(self.position as i64).into());
 		let arguments = match self.kind {
 			Kind::Reduce => vec![
-				std::mem::replace(&mut self.total, Value::None),
-				item.clone(),
-				Value::int(self.position as i64),
+				Argument::Value(std::mem::replace(&mut self.total, Value::None.into())),
+				item,
+				index,
 			],
-			Kind::Filter(_, true) | Kind::Find | Kind::Quantifier(_) => vec![item.clone()],
-			_ => vec![item.clone(), Value::int(self.position as i64)],
+			Kind::Find | Kind::Filter(true) | Kind::Quantifier(_) => vec![item],
+			_ => vec![item, index],
 		};
 		Ok(Progress::Call {
-			function: self.function.as_ref().expect("a callback").clone(),
+			function: self.function.as_ref().expect("a checked callback").clone(),
 			arguments,
 			next: self,
 		})
 	}
 
 	fn finish(self: Box<Self>) -> Result<Progress, Error> {
-		let value = match self.kind {
-			Kind::Find => Value::None,
-			Kind::Quantifier(every) => Value::Boolean(every),
-			Kind::Reduce => self.total,
-			Kind::Filter(Container::Set, _) => Value::Set(Arc::new(self.output)),
+		let output = match self.kind {
+			Kind::Find => Output::Found(None),
+			Kind::Quantifier(every) => Output::Value(Value::Boolean(every).into()),
+			Kind::Reduce => Output::Value(self.total),
+			Kind::Filter(_) => Output::Selected(self.container, self.selected),
 			Kind::Map(true) => {
-				let mut set = Vec::new();
-				for value in self.output {
-					if !contains(&set, &value) {
-						set.push(value);
+				let mut set = self.output;
+				let mut position = 0;
+				while position < set.len() {
+					if contains(&set[..position], &set[position]) {
+						set.remove(position);
+					} else {
+						position += 1;
 					}
 				}
-				Value::Set(Arc::new(set))
+				Output::Value(Value::Set(Arc::new(set)).into())
 			}
-			Kind::Filter(Container::Map, _) => {
-				let entries = self
-					.output
-					.into_iter()
-					.map(builtins::pair)
-					.collect::<Result<Vec<_>, _>>()?;
-				Value::Map(Arc::new(entries))
-			}
-			_ => Value::Array(Arc::new(self.output)),
+			Kind::Map(false) => Output::Value(Value::array(self.output).into()),
+			Kind::Sort => unreachable!(),
 		};
-		Ok(Progress::Done(value))
+		Ok(Progress::Done(output))
 	}
 
 	fn sort(mut self: Box<Self>, returned: Option<Value>) -> Result<Progress, Error> {
@@ -209,41 +235,36 @@ impl Callback {
 				.as_int()
 				.ok_or_else(|| Error::Stop(format!("`{}` is not an integer", value.to_text())))?;
 			if order > I256::ZERO {
-				self.items.swap(self.sort_position - 1, self.sort_position);
+				self.permutation
+					.swap(self.sort_position - 1, self.sort_position);
 				self.sort_position -= 1;
 			} else {
 				self.sort_position = 0;
 			}
 		}
 		loop {
-			if self.position >= self.items.len() {
-				return Ok(Progress::Done(Value::Array(Arc::new(self.items))));
+			if self.position >= self.length {
+				return Ok(Progress::Done(Output::Sorted(self.permutation)));
 			}
 			if self.sort_position == 0 {
 				self.position += 1;
 				self.sort_position = self.position;
 				continue;
 			}
-			if let Some(function) = &self.function {
-				return Ok(Progress::Call {
+			let left = self.permutation[self.sort_position - 1];
+			let right = self.permutation[self.sort_position];
+			return Ok(match &self.function {
+				Some(function) => Progress::Call {
 					function: function.clone(),
-					arguments: vec![
-						self.items[self.sort_position - 1].clone(),
-						self.items[self.sort_position].clone(),
-					],
+					arguments: vec![Argument::Item(left), Argument::Item(right)],
 					next: self,
-				});
-			}
-			if eval::compare(
-				CompareOp::Greater,
-				&self.items[self.sort_position - 1],
-				&self.items[self.sort_position],
-			)? {
-				self.items.swap(self.sort_position - 1, self.sort_position);
-				self.sort_position -= 1;
-			} else {
-				self.sort_position = 0;
-			}
+				},
+				None => Progress::Compare {
+					left,
+					right,
+					next: self,
+				},
+			});
 		}
 	}
 }

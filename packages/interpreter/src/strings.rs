@@ -175,6 +175,7 @@ pub(crate) fn call(
 		"String.from" | "String#toString" => receiver.clone(),
 		"String#isEmpty" => Value::Boolean(text.is_empty()),
 		"String#isWellFormed" => Value::Boolean(text.is_well_formed()),
+		"String#codePointCount" => Value::int(text.code_point_count() as i64),
 		"String#utf8Length" => Value::int(text.utf8_len() as i64),
 		"String#get" => position(number(arg(1)?)?, text.len())
 			.ok()
@@ -198,17 +199,25 @@ pub(crate) fn call(
 		}
 		"String#startsWith" | "String#endsWith" => {
 			let needle = string(arg(1)?)?;
-			let offset = if path == "String#endsWith" {
-				text.len().saturating_sub(needle.len())
+			let found = if let (Some(text), Some(needle)) = (text.as_str(), needle.as_str()) {
+				if path == "String#startsWith" {
+					text.starts_with(needle)
+				} else {
+					text.ends_with(needle)
+				}
 			} else {
-				0
+				let offset = if path == "String#endsWith" {
+					text.len().saturating_sub(needle.len())
+				} else {
+					0
+				};
+				needle.len() <= text.len()
+					&& text
+						.units()
+						.skip(offset)
+						.zip(needle.units())
+						.all(|(a, b)| a == b)
 			};
-			let found = needle.len() <= text.len()
-				&& text
-					.units()
-					.skip(offset)
-					.zip(needle.units())
-					.all(|(a, b)| a == b);
 			Value::Boolean(found)
 		}
 		"String#toUpperCase" | "String#toLowerCase" => {
@@ -229,7 +238,10 @@ pub(crate) fn call(
 				Value::string("")
 			} else if let Some(s) = text.as_str() {
 				interpreter.reserve_text(s.len().saturating_mul(count))?;
-				Value::String(s.repeat(count).into())
+				Value::String(Text::from_utf8(
+					Arc::from(s.repeat(count)),
+					text.len() * count,
+				))
 			} else {
 				let length = text.len().saturating_mul(count);
 				reserve_units(interpreter, length)?;
@@ -250,7 +262,7 @@ pub(crate) fn call(
 					let fill = filler.as_str().expect("ASCII");
 					let mut padding = fill.repeat(needed / fill.len());
 					padding.push_str(&fill[..needed % fill.len()]);
-					let pieces = [Text::from(padding), text.clone()];
+					let pieces = [Text::from_utf8(Arc::from(padding), needed), text.clone()];
 					Value::String(if path == "String#padStart" {
 						Text::concat(&pieces)
 					} else {
@@ -299,24 +311,10 @@ pub(crate) fn call(
 			)
 		}
 		"String#codePoints" => {
-			interpreter.reserve(crate::memory::values_size(text.len()))?;
-			let units: Vec<u16> = text.units().collect();
+			interpreter.reserve(crate::memory::values_size(text.code_point_count()))?;
+			let mut offset = 0;
 			let mut points = Vec::new();
-			let mut i = 0;
-			while i < units.len() {
-				let high = u32::from(units[i]);
-				i += 1;
-				let code = if (0xD800..=0xDBFF).contains(&high)
-					&& units
-						.get(i)
-						.is_some_and(|low| (0xDC00..=0xDFFF).contains(low))
-				{
-					let low = u32::from(units[i]);
-					i += 1;
-					0x10000 + ((high - 0xD800) << 10) + low - 0xDC00
-				} else {
-					high
-				};
+			while let Some(code) = text.next_scalar(&mut offset) {
 				points.push(Value::int(i64::from(code)));
 			}
 			list(points)
@@ -327,7 +325,7 @@ pub(crate) fn call(
 		}
 		"String.compareLocale" => {
 			return Err(Error::Unsupported(
-				"`String.compareLocale` at compile time".into(),
+				"`String.compareLocale`: the result depends on the locale data of the machine that runs the program".into(),
 			));
 		}
 		_ => return Err(Error::Unsupported(format!("`{path}`"))),
@@ -352,7 +350,18 @@ fn split(interpreter: &Interpreter<'_>, text: &Text, separator: &Text) -> Result
 		));
 	}
 	if let (Some(text), Some(separator)) = (text.as_str(), separator.as_str()) {
-		return Ok(list(text.split(separator).map(Value::string).collect()));
+		let ascii = text.is_ascii();
+		return Ok(list(
+			text.split(separator)
+				.map(|part| {
+					if ascii {
+						Value::String(Text::from_utf8(Arc::from(part), part.len()))
+					} else {
+						Value::string(part)
+					}
+				})
+				.collect(),
+		));
 	}
 	let units: Vec<u16> = text.units().collect();
 	let needle: Vec<u16> = separator.units().collect();
@@ -379,6 +388,9 @@ fn replace(
 	all: bool,
 ) -> Result<Value, Error> {
 	// Literal replacement, including '$' characters: Fa has no regex API.
+	if text.find(pattern, false).is_none() {
+		return Ok(Value::String(text.clone()));
+	}
 	let count = if all { text.len().saturating_add(1) } else { 1 };
 	let maximum = text
 		.len()
@@ -388,13 +400,18 @@ fn replace(
 		&& let (Some(text), Some(pattern), Some(replacement)) =
 			(text.as_str(), pattern.as_str(), replacement.as_str())
 	{
+		let output = if all {
+			text.replace(pattern, replacement)
+		} else {
+			text.replacen(pattern, replacement, 1)
+		};
 		return Ok(Value::String(
-			if all {
-				text.replace(pattern, replacement)
+			if text.is_ascii() && replacement.is_ascii() {
+				let length = output.len();
+				Text::from_utf8(Arc::from(output), length)
 			} else {
-				text.replacen(pattern, replacement, 1)
-			}
-			.into(),
+				output.into()
+			},
 		));
 	}
 	let units: Vec<u16> = text.units().collect();

@@ -292,6 +292,25 @@ impl Value {
 		}
 	}
 
+	/// Whether a constant needs an emitter that understands raw UTF-16 units.
+	pub fn has_lone_surrogates(&self) -> bool {
+		match self {
+			Value::String(text) => !text.is_well_formed(),
+			Value::Array(items) | Value::Tuple(items) | Value::Set(items) => {
+				items.iter().any(Self::has_lone_surrogates)
+			}
+			Value::Object(object) => object
+				.fields
+				.iter()
+				.any(|(_, value)| value.has_lone_surrogates()),
+			Value::Member(member) => member.data.as_ref().is_some_and(Self::has_lone_surrogates),
+			Value::Map(entries) => entries
+				.iter()
+				.any(|(key, value)| key.has_lone_surrogates() || value.has_lone_surrogates()),
+			_ => false,
+		}
+	}
+
 	/// The top-level `toString`: a string is its text, anything else its Fa
 	/// notation.
 	pub fn to_text(&self) -> String {

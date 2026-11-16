@@ -226,7 +226,7 @@ pub(crate) fn position(index: I256, length: usize) -> Result<usize, Error> {
 
 /// The bounds of a slice `items[range]` over `length` items: from `-length`
 /// to `length`, missing ones are the ends, an inverted range is empty.
-fn slice_bounds(
+pub(crate) fn slice_bounds(
 	start: Option<I256>,
 	end: Option<I256>,
 	inclusive: bool,
@@ -490,19 +490,6 @@ pub fn call(
 	let receiver = arguments.first().cloned().unwrap_or(Value::None);
 	let arg = |index: usize| argument(&arguments, index);
 	Ok(match path {
-		"Json.parse" => {
-			let input_size = match &receiver {
-				Value::Bytes(b) => b.len(),
-				Value::String(t) => t.utf8_len(),
-				_ => 0,
-			};
-			interpreter.reserve(input_size.saturating_mul(64))?;
-			crate::json::read(
-				&receiver,
-				arg(1)?,
-				arguments.get(2).and_then(Value::as_bool).unwrap_or(false),
-			)?
-		}
 		// String operations preserve raw code units, including lone surrogates.
 		_ if path.starts_with("String") || path.starts_with("Bytes") => {
 			return crate::strings::call(interpreter, path, &arguments);

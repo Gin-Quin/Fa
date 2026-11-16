@@ -220,6 +220,13 @@ pub enum Expr {
 		iterable: Box<Expr>,
 		body: Box<Expr>,
 	},
+	/// A direct loop over `text.toUtf8()`, encoding one scalar at a time.
+	ForUtf8 {
+		item: Option<Slot>,
+		index: Option<Slot>,
+		iterable: Box<Expr>,
+		body: Box<Expr>,
+	},
 	/// `break`, `break value`.
 	Break(Option<Box<Expr>>),
 	/// `continue`.

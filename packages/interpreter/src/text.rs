@@ -41,6 +41,12 @@ impl From<Arc<str>> for Text {
 }
 
 impl Text {
+	/// Internal producers already know the length; keep ASCII copies and
+	/// concatenations free of a second scan of their new buffer.
+	pub(crate) fn from_utf8(text: Arc<str>, length: usize) -> Self {
+		Self(Repr::Utf8 { text, length })
+	}
+
 	/// Canonicalizes a sequence: well-formed strings always take the UTF-8 path.
 	pub fn from_units(units: &[u16]) -> Self {
 		match String::from_utf16(units) {
@@ -123,7 +129,10 @@ impl Text {
 			return self.clone();
 		}
 		if self.is_ascii() {
-			return Self::from(&self.as_str().expect("ASCII")[start..end]);
+			return Self::from_utf8(
+				Arc::from(&self.as_str().expect("ASCII")[start..end]),
+				end - start,
+			);
 		}
 		match &self.0 {
 			Repr::Utf8 { text, .. } => {
@@ -136,13 +145,55 @@ impl Text {
 
 	/// A sequential code-point cursor. `offset` is a storage offset, while
 	/// the returned width is the public index increment in code units.
+	pub fn code_point_count(&self) -> usize {
+		match &self.0 {
+			Repr::Utf8 { text, .. } => {
+				if self.is_ascii() {
+					text.len()
+				} else {
+					text.chars().count()
+				}
+			}
+			Repr::Units(units) => char::decode_utf16(units.iter().copied()).count(),
+		}
+	}
+
+	/// A scalar cursor, retaining the numerical value of a lone surrogate.
+	pub fn next_scalar(&self, offset: &mut usize) -> Option<u32> {
+		match &self.0 {
+			Repr::Utf8 { text, .. } => {
+				let c = text.get(*offset..)?.chars().next()?;
+				*offset += c.len_utf8();
+				Some(u32::from(c))
+			}
+			Repr::Units(units) => {
+				let first = *units.get(*offset)?;
+				*offset += 1;
+				if (0xD800..=0xDBFF).contains(&first)
+					&& units
+						.get(*offset)
+						.is_some_and(|u| (0xDC00..=0xDFFF).contains(u))
+				{
+					let low = units[*offset];
+					*offset += 1;
+					Some(0x10000 + ((u32::from(first) - 0xD800) << 10) + u32::from(low) - 0xDC00)
+				} else {
+					Some(u32::from(first))
+				}
+			}
+		}
+	}
+
 	pub fn next_point(&self, offset: &mut usize) -> Option<(Self, usize)> {
 		match &self.0 {
 			Repr::Utf8 { text, .. } => {
 				let c = text.get(*offset..)?.chars().next()?;
 				let start = *offset;
 				*offset += c.len_utf8();
-				Some((Self::from(&text[start..*offset]), c.len_utf16()))
+				Some((
+					Self::from_utf8(Arc::from(&text[start..*offset]), c.len_utf16()),
+					c.len_utf16(),
+				))
 			}
 			Repr::Units(units) => {
 				let first = *units.get(*offset)?;
@@ -166,7 +217,7 @@ impl Text {
 			for piece in pieces {
 				text.push_str(piece.as_str().expect("well-formed"));
 			}
-			return text.into();
+			return Self::from_utf8(Arc::from(text), pieces.iter().map(Self::len).sum());
 		}
 		let units: Vec<u16> = pieces.iter().flat_map(Self::units).collect();
 		Self::from_units(&units)

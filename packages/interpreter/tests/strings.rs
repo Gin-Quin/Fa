@@ -592,3 +592,136 @@ fn spreading_strings_walks_points_and_bytes_walks_bytes() {
 		Ok(Value::array(vec![Value::int(195), Value::int(169)]))
 	);
 }
+
+#[test]
+fn utf8_loops_and_point_counts_do_not_allocate_their_views() {
+	let source = units(&[0xe9, 0x65e5, 0xd83d, 0xde00, 0xd800]);
+	let out = Place {
+		slot: 0,
+		steps: vec![],
+	};
+	let expr = Expr::Block(vec![
+		Expr::Let(0, Expr::Array(vec![]).boxed()),
+		Expr::ForUtf8 {
+			item: Some(1),
+			index: Some(2),
+			iterable: value(source).boxed(),
+			body: Expr::Mutate(
+				"Array#push",
+				out.clone(),
+				vec![Expr::Tuple(vec![Expr::Local(1), Expr::Local(2)])],
+			)
+			.boxed(),
+		},
+		Expr::Read(out),
+	]);
+	let expected = "é日😀�"
+		.as_bytes()
+		.iter()
+		.enumerate()
+		.map(|(i, b)| {
+			Value::Tuple(Arc::new(vec![
+				Value::int(i64::from(*b)),
+				Value::int(i as i64),
+			]))
+		})
+		.collect();
+	assert_eq!(run(expr, 3), Ok(Value::array(expected)));
+	let large = string(&"😀".repeat(10_000));
+	let limits = Limits {
+		memory: 1024,
+		..Limits::default()
+	};
+	let looped = Expr::ForUtf8 {
+		item: None,
+		index: None,
+		iterable: value(large.clone()).boxed(),
+		body: Expr::Break(None).boxed(),
+	};
+	assert_eq!(
+		Interpreter::new(&mut NoHost, limits).evaluate(&looped, 0),
+		Ok(Value::None)
+	);
+	let count = Expr::Builtin("String#codePointCount", vec![value(large)]);
+	assert_eq!(
+		Interpreter::new(&mut NoHost, limits).evaluate(&count, 0),
+		Ok(Value::int(10_000))
+	);
+}
+
+#[test]
+fn locale_comparison_is_explicitly_deferred_to_the_runtime_machine() {
+	let error = call(
+		"String.compareLocale",
+		vec![string("é"), string("z"), string("fr")],
+	)
+	.unwrap_err();
+	assert!(
+		matches!(error,Error::Unsupported(ref why) if why.contains("locale data of the machine"))
+	);
+}
+
+#[test]
+fn json_reads_utf8_bytes_and_preserves_escaped_surrogates() {
+	use fa_interpreter::value::{Member, MemberKind};
+	let schema = Value::Member(Arc::new(Member {
+		name: Arc::from("Schema.String"),
+		kind: MemberKind::Union,
+		data: None,
+	}));
+	assert_eq!(
+		call(
+			"Json.parse",
+			vec![
+				bytes("\"é日😀\"".as_bytes()),
+				schema.clone(),
+				Value::Boolean(true)
+			]
+		),
+		Ok(string("é日😀"))
+	);
+	assert_eq!(
+		call(
+			"Json.parse",
+			vec![bytes(b"\"\\ud800\""), schema.clone(), Value::Boolean(true)]
+		),
+		Ok(units(&[0xd800]))
+	);
+	assert_eq!(
+		call(
+			"Json.parse",
+			vec![
+				units(&[34, 0xd800, 34]),
+				schema.clone(),
+				Value::Boolean(true)
+			]
+		),
+		Ok(units(&[0xd800]))
+	);
+	for bad in [bytes(&[255]), bytes(b"["), bytes(b"1")] {
+		assert!(
+			matches!(call("Json.parse",vec![bad,schema.clone(),Value::Boolean(true)]),Err(Error::Thrown(Value::Member(ref m))) if m.name.as_ref() == "JsonError")
+		);
+	}
+}
+
+#[test]
+fn byte_copy_on_write_is_checked_before_allocating() {
+	let data = bytes(&vec![0; 4096]);
+	let place = Place {
+		slot: 0,
+		steps: vec![Step::Index(value(Value::int(0)))],
+	};
+	let expr = Expr::Block(vec![
+		Expr::Let(0, value(data).boxed()),
+		Expr::Assign(place, value(Value::int(255)).boxed()),
+	]);
+	let limits = Limits {
+		memory: 1024,
+		..Limits::default()
+	};
+	assert_eq!(
+		Interpreter::new(&mut NoHost, limits).evaluate(&expr, 1),
+		Err(Error::Memory(1024))
+	);
+}

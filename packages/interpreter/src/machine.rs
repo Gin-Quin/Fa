@@ -99,6 +99,13 @@ enum Unary {
 }
 
 enum Iteration {
+	Utf8 {
+		text: Text,
+		offset: usize,
+		buffer: [u8; 4],
+		position: usize,
+		length: usize,
+	},
 	Text {
 		text: Text,
 		offset: usize,
@@ -149,7 +156,7 @@ enum Continuation {
 	Loop(Node),
 	WhileCondition(Node, Node),
 	WhileBody(Node, Node),
-	ForIterable(Option<Slot>, Option<Slot>, Node),
+	ForIterable(Option<Slot>, Option<Slot>, Node, bool),
 	ForBody(For),
 	Catch(Option<Slot>, Node),
 	Function,
@@ -281,11 +288,15 @@ impl<'i, 'h> Machine<'i, 'h> {
 				self.evaluate_after(*condition, Continuation::WhileCondition(*condition, *body))
 			}
 			Op::For {
+				utf8,
 				item,
 				index,
 				iterable,
 				body,
-			} => self.evaluate_after(*iterable, Continuation::ForIterable(*item, *index, *body)),
+			} => self.evaluate_after(
+				*iterable,
+				Continuation::ForIterable(*item, *index, *body, *utf8),
+			),
 			Op::Break(value) => match value {
 				Some(value) => self.evaluate_after(*value, Continuation::Unary(Unary::Break)),
 				None => Err(Flow::Break(Value::None)),
@@ -564,6 +575,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				match action {
 					PlaceAction::Read => Self::done(Self::read(self.locals(), &resolved)?),
 					PlaceAction::Write(value) => {
+						self.reserve_edit(&resolved)?;
 						Self::edit(self.locals(), &resolved, |slot| {
 							*slot = value;
 							Ok(Value::None)
@@ -576,6 +588,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 						self.start_callback(path, arguments, CallbackFinish::Mutate(resolved))
 					}
 					PlaceAction::Mutate(path, arguments) => {
+						self.reserve_edit(&resolved)?;
 						let frame = self.frames.last_mut().expect("an evaluation frame");
 						let result = Self::edit(&mut frame.locals, &resolved, |receiver| {
 							Ok(builtins::mutate(
@@ -590,6 +603,84 @@ impl<'i, 'h> Machine<'i, 'h> {
 				}
 			}
 		}
+	}
+
+	/// Preflight copy-on-write and borrowed-slice buffers before changing a
+	/// place. Parent copies make their owned children shared as well.
+	fn reserve_edit(&self, place: &ResolvedPlace) -> Result<(), Error> {
+		let mut current = &self.frame().locals[place.slot as usize];
+		let mut shared = false;
+		let mut view: Option<(usize, usize)> = None;
+		let mut bytes = 0usize;
+		for step in &place.steps {
+			while let Value::Member(member) = current {
+				shared |= Arc::strong_count(member) > 1;
+				let Some(data) = &member.data else {
+					break;
+				};
+				current = data;
+			}
+			match (current, step) {
+				(Value::Object(object), PlaceStep::Field(name)) => {
+					if shared || Arc::strong_count(object) > 1 {
+						bytes = bytes.saturating_add(
+							object
+								.fields
+								.len()
+								.saturating_mul(std::mem::size_of::<(Arc<str>, Value)>()),
+						);
+						shared = true;
+					}
+					let Some(field) = object.get(name) else {
+						break;
+					};
+					current = field;
+				}
+				(Value::Array(items) | Value::Tuple(items), PlaceStep::Index(key)) => {
+					let (start, length) = view.unwrap_or((0, items.len()));
+					if shared || Arc::strong_count(items) > 1 {
+						bytes = bytes.saturating_add(memory::values_size(length));
+						shared = true;
+					}
+					if let Value::Range {
+						start: from,
+						end,
+						inclusive,
+					} = key
+					{
+						let (from, to) = builtins::slice_bounds(*from, *end, *inclusive, length)?;
+						bytes = bytes.saturating_add(memory::values_size(to - from));
+						view = Some((start + from, to - from));
+						shared = true;
+					} else if let Some(index) = key.as_int() {
+						current = &items[start + builtins::position(index, length)?];
+						view = None;
+					} else {
+						break;
+					}
+				}
+				(Value::Bytes(data), PlaceStep::Index(key)) => {
+					let (start, length) = view.unwrap_or((0, data.len()));
+					if view.is_none() && (shared || Arc::strong_count(data) > 1) {
+						bytes = bytes.saturating_add(data.len());
+					}
+					if let Value::Range {
+						start: from,
+						end,
+						inclusive,
+					} = key
+					{
+						let (from, to) = builtins::slice_bounds(*from, *end, *inclusive, length)?;
+						bytes = bytes.saturating_add(to - from);
+						view = Some((start + from, to - from));
+					} else {
+						break;
+					}
+				}
+				_ => break,
+			}
+		}
+		self.interpreter.reserve(bytes)
 	}
 
 	fn read(locals: &[Value], place: &ResolvedPlace) -> Result<Value, Flow> {
@@ -709,6 +800,16 @@ impl<'i, 'h> Machine<'i, 'h> {
 		arguments: Vec<Value>,
 		finish: CallbackFinish,
 	) -> Result<Action, Flow> {
+		if path == "Json.parse"
+			&& let Some(input) = arguments.first()
+		{
+			let length = match input {
+				Value::Bytes(b) => b.len(),
+				Value::String(t) => t.utf8_len(),
+				_ => 0,
+			};
+			self.interpreter.reserve(length.saturating_mul(64))?;
+		}
 		if let Some(receiver) = arguments.first() {
 			self.interpreter
 				.reserve(memory::values_size(builtins::count(receiver).unwrap_or(0)))?;
@@ -722,7 +823,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 		value: Option<Value>,
 		finish: CallbackFinish,
 	) -> Result<Action, Flow> {
-		match callback.advance(value)? {
+		match callback.advance(value, self.interpreter)? {
 			Progress::Call {
 				function,
 				arguments,
@@ -737,6 +838,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Progress::Done(value) => match finish {
 				CallbackFinish::Value => Self::done(value),
 				CallbackFinish::Mutate(place) => {
+					self.reserve_edit(&place)?;
 					Self::edit(self.locals(), &place, |slot| {
 						*slot = value;
 						Ok(Value::None)
@@ -859,8 +961,15 @@ impl<'i, 'h> Machine<'i, 'h> {
 							Self::done(Value::None)
 						}
 					}
-					Continuation::ForIterable(item, index, body) => {
+					Continuation::ForIterable(item, index, body, utf8) => {
 						let values = match value {
+							Value::String(text) if utf8 => Iteration::Utf8 {
+								text,
+								offset: 0,
+								buffer: [0; 4],
+								position: 0,
+								length: 0,
+							},
 							Value::Range {
 								start,
 								end,
@@ -958,6 +1067,27 @@ impl<'i, 'h> Machine<'i, 'h> {
 	fn for_next(&mut self, mut state: For) -> Result<Action, Flow> {
 		let mut width = 1;
 		let value = match &mut state.values {
+			Iteration::Utf8 {
+				text,
+				offset,
+				buffer,
+				position,
+				length,
+			} => {
+				if *position == *length {
+					let Some(code) = text.next_scalar(offset) else {
+						return Self::done(Value::None);
+					};
+					*length = char::from_u32(code)
+						.unwrap_or(char::REPLACEMENT_CHARACTER)
+						.encode_utf8(buffer)
+						.len();
+					*position = 0;
+				}
+				let value = Value::int(i64::from(buffer[*position]));
+				*position += 1;
+				value
+			}
 			Iteration::Text { text, offset } => match text.next_point(offset) {
 				Some((text, units)) => {
 					width = units as i64;

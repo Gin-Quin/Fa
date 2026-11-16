@@ -27,7 +27,7 @@ use fa_interpreter::ir::{
 use fa_interpreter::value::MemberKind;
 use fa_parser::TypedSyntaxTree;
 
-use crate::analysis::{Analysis, Argument, Callee, FieldValue, PatternBinding};
+use crate::analysis::{Analysis, Argument, Callee, FieldValue, NodeFlags, PatternBinding};
 use crate::builtins;
 use crate::ids::{FileId, NodeId, SymbolId, TypeId};
 use crate::lower::when::{self, Literal, Test};
@@ -164,6 +164,16 @@ impl<'a> Lowerer<'a> {
 	pub fn function(mut self, node: NodeId) -> Option<Function> {
 		self.compile_time = false;
 		self.globals = true;
+		if let Some(expression) = super::json::default_node(node) {
+			let body = self.expr(expression);
+			return Some(Function {
+				name: "<JSON field default>".into(),
+				params: Vec::new(),
+				captures: Vec::new(),
+				slots: self.next,
+				body,
+			});
+		}
 		let info = self.a.function(node)?.clone();
 		let name = match info.symbol {
 			Some(symbol) => self
@@ -1152,9 +1162,14 @@ impl<'a> Lowerer<'a> {
 		if parallel {
 			return self.unsupported("`for parallel`");
 		}
+		let utf8_source = self
+			.a
+			.has_flags(iterable, NodeFlags::UTF8_ITERATION)
+			.then(|| self.string_call_receiver(iterable))
+			.flatten();
 		let iterable = match (compile_time, self.a.unrolled.get(&n)) {
 			(true, Some(items)) => Expr::Const(Value::array(items.clone())),
-			_ => self.expr(iterable),
+			_ => self.expr(utf8_source.unwrap_or(iterable)),
 		};
 		let (item, prologue) = match pattern {
 			Some(pattern) => match syntax::view(self.tree, pattern) {
@@ -1184,11 +1199,20 @@ impl<'a> Lowerer<'a> {
 			Some(prologue) => Expr::Block(vec![prologue, body]),
 			None => body,
 		};
-		Expr::For {
-			item,
-			index: index_slot,
-			iterable: iterable.boxed(),
-			body: body.boxed(),
+		if utf8_source.is_some() {
+			Expr::ForUtf8 {
+				item,
+				index: index_slot,
+				iterable: iterable.boxed(),
+				body: body.boxed(),
+			}
+		} else {
+			Expr::For {
+				item,
+				index: index_slot,
+				iterable: iterable.boxed(),
+				body: body.boxed(),
+			}
 		}
 	}
 
@@ -1276,6 +1300,16 @@ impl<'a> Lowerer<'a> {
 		}
 	}
 
+	fn string_call_receiver(&self, call: NodeId) -> Option<NodeId> {
+		let View::Call { callee, .. } = syntax::view(self.tree, call) else {
+			return None;
+		};
+		let View::Access { target, members } = syntax::view(self.tree, callee) else {
+			return None;
+		};
+		(members.len() == 1).then_some(target)
+	}
+
 	/// `a.b.c`, `a?.b?.c`.
 	fn access(
 		&mut self,
@@ -1284,6 +1318,11 @@ impl<'a> Lowerer<'a> {
 		members: syntax::NodeList<'_>,
 		optional: bool,
 	) -> Expr {
+		if self.a.has_flags(n, NodeFlags::CODE_POINT_COUNT)
+			&& let Some(text) = self.string_call_receiver(target)
+		{
+			return Expr::Builtin("String#codePointCount", vec![self.expr(text)]);
+		}
 		// a member whose value the analysis knows (`Int8.maxValue`)
 		if let Some(value) = self.literal_of(n)
 			&& matches!(
@@ -1486,13 +1525,16 @@ impl<'a> Lowerer<'a> {
 					values.pop();
 				}
 				if path == "Json.parse" {
-					values.push(Expr::Const(crate::comptime::schema::schema(
-						self.types(),
-						self.a.type_of(n),
-					)));
+					let (schema, defaults) =
+						super::json::schema(self.types(), self.a, self.file, self.a.type_of(n));
+					values.push(Expr::Const(schema));
 					values.push(Expr::Const(Value::Boolean(crate::comptime::is_js_target(
 						&self.session.comptime.target,
 					))));
+					let mut expressions: Vec<Expr> =
+						defaults.into_iter().map(Expr::Function).collect();
+					expressions.push(Expr::Builtin(path, values));
+					return Expr::Block(expressions);
 				}
 				// the paths of the flags, by bit
 				if path == "Fields#toStringArray"

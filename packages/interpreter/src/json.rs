@@ -247,6 +247,10 @@ impl Parser<'_> {
 		if !digits(self) {
 			return Err(self.error("expected a digit"));
 		}
+		let digits_start = start + usize::from(self.bytes[start] == b'-');
+		if self.bytes[digits_start] == b'0' && self.position > digits_start + 1 {
+			return Err(self.error("leading zero in a number"));
+		}
 		let mut integral = true;
 		if self.peek() == Some(b'.') {
 			self.position += 1;
@@ -300,7 +304,7 @@ mod tests {
 /// JSON inputs use the same parser on a borrowed UTF-8 view of bytes. A
 /// malformed Fa string is escaped losslessly before parsing; no U+FFFD is
 /// introduced into a string value by the parser.
-pub(crate) fn read(input: &Value, schema: &Value, js: bool) -> Result<Value, Error> {
+fn read(input: &Value) -> Result<Value, Error> {
 	let parsed = match input {
 		Value::Bytes(bytes) => {
 			let text = std::str::from_utf8(bytes)
@@ -317,7 +321,77 @@ pub(crate) fn read(input: &Value, schema: &Value, js: bool) -> Result<Value, Err
 		Error::Thrown(value) => json_error(&value.to_text()),
 		other => other,
 	})?;
-	convert(&parsed, schema, js, "the value", &[], "", 0)
+	Ok(parsed)
+}
+
+/// A JSON conversion suspends when an omitted field needs its Fa default.
+/// The machine calls that function on its ordinary explicit call stack.
+/// Completed defaults are memoized by their input object and property identity
+/// while conversion resumes; map keys may contain arbitrary code units.
+pub(crate) struct Reader {
+	value: Value,
+	schema: Value,
+	js: bool,
+	defaults: Vec<((usize, usize), Value)>,
+	pending: Option<(usize, usize)>,
+}
+
+pub(crate) enum ReadProgress {
+	Call(Value),
+	Done(Value),
+}
+
+enum Failure {
+	Error(Error),
+	Default(Box<((usize, usize), Value)>),
+}
+impl From<Error> for Failure {
+	fn from(error: Error) -> Self {
+		Self::Error(error)
+	}
+}
+
+impl Reader {
+	pub fn new(input: &Value, schema: Value, js: bool) -> Result<Self, Error> {
+		Ok(Self {
+			value: read(input)?,
+			schema,
+			js,
+			defaults: Vec::new(),
+			pending: None,
+		})
+	}
+	pub fn advance(
+		&mut self,
+		returned: Option<Value>,
+		mut step: impl FnMut() -> Result<(), Error>,
+	) -> Result<ReadProgress, Error> {
+		if let Some(path) = self.pending.take() {
+			self.defaults
+				.push((path, returned.expect("the JSON default returned")));
+		}
+		match convert(
+			&self.value,
+			&self.schema,
+			self.js,
+			"the value",
+			ShapeContext {
+				names: &[],
+				owner: "",
+				depth: 0,
+			},
+			&self.defaults,
+			&mut step,
+		) {
+			Ok(value) => Ok(ReadProgress::Done(value)),
+			Err(Failure::Error(error)) => Err(error),
+			Err(Failure::Default(request)) => {
+				let (path, function) = *request;
+				self.pending = Some(path);
+				Ok(ReadProgress::Call(function))
+			}
+		}
+	}
 }
 
 fn escaped_input(text: &Text) -> Result<String, Error> {
@@ -376,19 +450,45 @@ fn list_property<'a>(value: &'a Value, name: &str) -> &'a [Value] {
 		.unwrap_or_default()
 }
 
+#[derive(Clone, Copy)]
+struct ShapeContext<'a> {
+	names: &'a [(&'a str, &'a Value)],
+	owner: &'a str,
+	depth: u32,
+}
+
 fn convert(
 	value: &Value,
 	schema: &Value,
 	js: bool,
 	at: &str,
-	names: &[(&str, &Value)],
-	owner: &str,
-	depth: u32,
-) -> Result<Value, Error> {
+	context: ShapeContext<'_>,
+	defaults: &[((usize, usize), Value)],
+	step: &mut dyn FnMut() -> Result<(), Error>,
+) -> Result<Value, Failure> {
+	step()?;
+	let ShapeContext {
+		names,
+		owner,
+		depth,
+	} = context;
 	if depth > 512 {
-		return Err(json_error("JSON is nested too deeply"));
+		return Err(json_error("JSON is nested too deeply").into());
 	}
-	let convert = |v, s, at: &str| self::convert(v, s, js, at, names, owner, depth + 1);
+	let mut convert = |v, s, at: &str| {
+		self::convert(
+			v,
+			s,
+			js,
+			at,
+			ShapeContext {
+				depth: depth + 1,
+				..context
+			},
+			defaults,
+			step,
+		)
+	};
 	let field = |name| property(schema, name).unwrap_or(&Value::None);
 	let fail = |expected: &str| {
 		let found = match value {
@@ -399,7 +499,9 @@ fn convert(
 			Value::Array(_) => "an array",
 			_ => "object",
 		};
-		json_error(&format!("{at} should be {expected}, not {found}"))
+		Failure::Error(json_error(&format!(
+			"{at} should be {expected}, not {found}"
+		)))
 	};
 	Ok(match kind(schema) {
 		"Named" => {
@@ -407,7 +509,19 @@ fn convert(
 			let definition = field("definition");
 			let mut nested = names.to_vec();
 			nested.push((name, definition));
-			return self::convert(value, definition, js, at, &nested, name, depth + 1);
+			return self::convert(
+				value,
+				definition,
+				js,
+				at,
+				ShapeContext {
+					names: &nested,
+					owner: name,
+					depth: depth + 1,
+				},
+				defaults,
+				step,
+			);
 		}
 		"Reference" => {
 			let name = field("name").as_str().unwrap_or("");
@@ -442,13 +556,12 @@ fn convert(
 			let bits = field("bits").as_int().unwrap_or(64.into()).as_u32();
 			let signed = field("signed").as_bool().unwrap_or(true);
 			if js
-				&& bits != 128
-				&& bits != 64
+				&& field("jsNumber").as_bool().unwrap_or(true)
 				&& number.abs() > I256::from(9_007_199_254_740_991i64)
 			{
-				return Err(json_error(&format!(
-					"{at} doesn't fit in an Integer on JavaScript"
-				)));
+				return Err(
+					json_error(&format!("{at} doesn't fit in an Integer on JavaScript")).into(),
+				);
 			}
 			let lo = if signed {
 				-(I256::ONE << (bits - 1))
@@ -459,14 +572,14 @@ fn convert(
 			let lo = field("min").as_int().unwrap_or(lo);
 			let hi = field("max").as_int().unwrap_or(hi);
 			if number < lo {
-				return Err(json_error(&format!(
-					"{at} should be at least {lo}, not {number}"
-				)));
+				return Err(
+					json_error(&format!("{at} should be at least {lo}, not {number}")).into(),
+				);
 			}
 			if number > hi {
-				return Err(json_error(&format!(
-					"{at} should be at most {hi}, not {number}"
-				)));
+				return Err(
+					json_error(&format!("{at} should be at most {hi}, not {number}")).into(),
+				);
 			}
 			Value::Integer(number)
 		}
@@ -478,8 +591,12 @@ fn convert(
 		}
 		"Union" => {
 			for member in list_property(schema, "items") {
-				if let Ok(value) = convert(value, member, at) {
-					return Ok(value);
+				match convert(value, member, at) {
+					Ok(value) => return Ok(value),
+					Err(suspended @ Failure::Default(..)) => return Err(suspended),
+					Err(Failure::Error(Error::Thrown(ref error))) if matches!(error,Value::Member(m) if m.name.as_ref() == "JsonError") =>
+						{}
+					Err(error) => return Err(error),
 				}
 			}
 			return Err(fail("one of the members of its union"));
@@ -510,7 +627,7 @@ fn convert(
 								convert(v, field("item"), &format!("{at}.{}", k.to_text()))?,
 							))
 						})
-						.collect::<Result<_, Error>>()?,
+						.collect::<Result<_, Failure>>()?,
 				))
 			}
 			_ => return Err(fail("a JSON collection")),
@@ -529,12 +646,33 @@ fn convert(
 					Some(value) => convert(value, ty, &format!("{at}.{name}"))?,
 					None => {
 						if let Some(initial) = property(field, "initial") {
-							initial.clone()
-						} else if let Ok(none) = convert(&Value::None, ty, &format!("{at}.{name}"))
-						{
-							none
+							if matches!(initial, Value::Function(_)) {
+								let path = (
+									value as *const Value as usize,
+									field as *const Value as usize,
+								);
+								match defaults.iter().find(|(p, _)| *p == path) {
+									Some((_, value)) => value.clone(),
+									None => {
+										return Err(Failure::Default(Box::new((
+											path,
+											initial.clone(),
+										))));
+									}
+								}
+							} else {
+								initial.clone()
+							}
 						} else {
-							return Err(json_error(&format!("{at} has no field `{name}`")));
+							match convert(&Value::None, ty, &format!("{at}.{name}")) {
+								Ok(none) => none,
+								Err(Failure::Error(Error::Thrown(_))) => {
+									return Err(
+										json_error(&format!("{at} has no field `{name}`")).into()
+									);
+								}
+								Err(error) => return Err(error),
+							}
 						}
 					}
 				};
@@ -589,6 +727,26 @@ fn convert(
 				},
 				data,
 			}))
+		}
+		"Fields" => {
+			let Value::Array(flags) = value else {
+				return Err(fail("an array of flags"));
+			};
+			let mut bits = I256::ZERO;
+			for flag in flags.iter() {
+				let Some(found) = list_property(schema, "paths")
+					.iter()
+					.find(|entry| entry.items().and_then(|items| items.first()) == Some(flag))
+				else {
+					return Err(fail("a known flag"));
+				};
+				bits |= found
+					.items()
+					.and_then(|items| items.get(1))
+					.and_then(Value::as_int)
+					.unwrap_or(I256::ZERO);
+			}
+			Value::Integer(bits)
 		}
 		"Enum" => {
 			let pinned = field("pinned").as_bool().unwrap_or(false);

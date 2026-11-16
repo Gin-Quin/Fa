@@ -14,6 +14,7 @@
 
 pub mod host;
 pub mod inputs;
+mod json;
 pub mod lower;
 pub mod schema;
 
@@ -294,7 +295,7 @@ pub fn visit(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
 			visit(a, f);
 			visit(b, f);
 		}
-		Expr::For { iterable, body, .. } => {
+		Expr::For { iterable, body, .. } | Expr::ForUtf8 { iterable, body, .. } => {
 			visit(iterable, f);
 			visit(body, f);
 		}

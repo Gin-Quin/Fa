@@ -17,6 +17,7 @@ enum Container {
 	Map,
 }
 enum Kind {
+	Json(Box<crate::json::Reader>),
 	Find,
 	Filter(Container, bool),
 	Map(bool),
@@ -48,7 +49,8 @@ impl Callback {
 	pub fn handles(path: &str) -> bool {
 		matches!(
 			path,
-			"Array#find"
+			"Json.parse"
+				| "Array#find"
 				| "Set#find" | "Map#find"
 				| "Array#filter"
 				| "Set#filter"
@@ -84,7 +86,13 @@ impl Callback {
 			Value::Map(_) => Container::Map,
 			_ => Container::Array,
 		};
-		let kind = if path.ends_with("#find") {
+		let kind = if path == "Json.parse" {
+			Kind::Json(Box::new(crate::json::Reader::new(
+				&receiver,
+				arg(1)?,
+				arg(2)?.as_bool().unwrap_or(false),
+			)?))
+		} else if path.ends_with("#find") {
 			Kind::Find
 		} else if path.ends_with("#filter") {
 			Kind::Filter(container, false)
@@ -105,14 +113,20 @@ impl Callback {
 		let function = if sort {
 			arguments.get(1).cloned()
 		} else {
-			Some(arg(1)?)
+			if path == "Json.parse" {
+				None
+			} else {
+				Some(arg(1)?)
+			}
 		};
 		let total = if matches!(kind, Kind::Reduce) {
 			arg(2)?
 		} else {
 			Value::None
 		};
-		let items = if sort {
+		let items = if path == "Json.parse" {
+			Vec::new()
+		} else if sort {
 			receiver.items().unwrap_or(&[]).to_vec()
 		} else {
 			builtins::iterate(&receiver)?
@@ -128,7 +142,21 @@ impl Callback {
 		}))
 	}
 
-	pub fn advance(mut self: Box<Self>, returned: Option<Value>) -> Result<Progress, Error> {
+	pub fn advance(
+		mut self: Box<Self>,
+		returned: Option<Value>,
+		interpreter: &mut crate::Interpreter<'_>,
+	) -> Result<Progress, Error> {
+		if let Kind::Json(reader) = &mut self.kind {
+			return match reader.advance(returned, || interpreter.step().map_err(Error::from))? {
+				crate::json::ReadProgress::Done(value) => Ok(Progress::Done(value)),
+				crate::json::ReadProgress::Call(function) => Ok(Progress::Call {
+					function,
+					arguments: Vec::new(),
+					next: self,
+				}),
+			};
+		}
 		if matches!(self.kind, Kind::Sort) {
 			return self.sort(returned);
 		}
@@ -152,7 +180,7 @@ impl Callback {
 					}
 				}
 				Kind::Reduce => self.total = value,
-				Kind::Sort => unreachable!(),
+				Kind::Sort | Kind::Json(_) => unreachable!(),
 			}
 			self.position += 1;
 		}
@@ -177,6 +205,7 @@ impl Callback {
 
 	fn finish(self: Box<Self>) -> Result<Progress, Error> {
 		let value = match self.kind {
+			Kind::Json(_) => unreachable!("JSON finishes through its reader"),
 			Kind::Find => Value::None,
 			Kind::Quantifier(every) => Value::Boolean(every),
 			Kind::Reduce => self.total,

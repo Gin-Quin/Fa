@@ -18,7 +18,14 @@ impl Generator<'_> {
 	pub(crate) fn constant_value(&mut self, n: NodeId, value: &Value, ty: TypeId) -> Expr {
 		match self.comptime_text(value, ty) {
 			Some(expr) => expr,
-			None => self.unsupported(n, "this compile-time value"),
+			None => self.unsupported(
+				n,
+				if value.has_lone_surrogates() {
+					"string constants with lone surrogates (not emitted yet)"
+				} else {
+					"this compile-time value"
+				},
+			),
 		}
 	}
 

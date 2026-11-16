@@ -134,6 +134,7 @@ impl Generator<'_> {
 						format!("for (const [key, item] of value) {{ {} }}", each.join(" "))
 					}
 					CollKind::Array
+					| CollKind::InlineArray
 					| CollKind::GrowingArray
 					| CollKind::Set
 					| CollKind::GrowingSet

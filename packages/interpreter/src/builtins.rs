@@ -781,6 +781,14 @@ pub fn mutate(
 			let result = match path {
 				"Array#push" => {
 					let value = arg(0)?;
+					if let Some(capacity) = arguments.get(1)
+						&& I256::from(list.len() as u64) >= integer(capacity)?
+					{
+						return Err(Error::Thrown(Value::error(
+							"CapacityError.InlineFull",
+							vec![],
+						)));
+					}
 					reserve_growth(interpreter, list.len(), list.capacity())?;
 					list.push(value);
 					Value::None

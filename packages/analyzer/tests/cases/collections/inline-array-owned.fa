@@ -1,0 +1,36 @@
+type Box = { names: InlineArray<String, 3> = [] }
+function make = (): Box => {
+	mutable box: Box = {}
+	try box.names.push("a long string with owned storage and punctuation")
+	try box.names.push("second")
+	box
+}
+mutable box = make()
+let duplicate = copy box
+box.names[0] = "changed"
+console.log(duplicate.names) -- prints: ["a long string with owned storage and punctuation", "second"]
+console.log(box.names.pop()) -- prints: second
+console.log(box.names.take(0)) -- prints: changed
+
+type Item = { number: Integer, rows: Array<Integer> }
+mutable items: InlineArray<Item, 3> = [{ number = 1, rows = [2, 3] }]
+let snapshot = copy items
+items[0].rows.push(4)
+console.log(snapshot[0].rows) -- prints: [2, 3]
+console.log(items[0].rows) -- prints: [2, 3, 4]
+items.clear()
+
+mutable pool: GrowingPool<Box> = []
+use entry = pool.add({ names = ["pooled"] })
+try entry.names.push("second")
+for item in pool { console.log(item.names) } -- prints: ["pooled", "second"]
+mutable array: Array<Box> = [{ names = ["array"] }]
+try array[0].names.push("second")
+console.log(array[0].names) -- prints: ["array", "second"]
+
+use { Json } = std.json
+console.log(Json.stringify(duplicate.names)) -- prints: ["a long string with owned storage and punctuation","second"]
+let parsed: InlineArray<Integer, 2> = try Json.parse("[7,7]")
+console.log(parsed) -- prints: [7, 7]
+function parse = (text: String): InlineArray<Integer, 1> throws JsonError => try Json.parse(text)
+parse("[1,2]") catch _error => console.log("too many") -- prints: too many

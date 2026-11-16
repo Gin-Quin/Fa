@@ -1017,6 +1017,7 @@ impl Generator<'_> {
 				js::call(helper, &values)
 			}
 			"Array#push" => {
+				let inline = self.types.inline_array(self.receiver_type(callee));
 				let receiver = self.receiver(callee);
 				let nodes: Vec<NodeId> = arguments
 					.iter()
@@ -1034,6 +1035,17 @@ impl Generator<'_> {
 				let receiver = self.keep_before(receiver, &lines);
 				self.out.append(lines);
 				let values: Vec<String> = values.into_iter().map(|value| value.text).collect();
+				if let Some((_, capacity)) = inline
+					&& self
+						.analysis
+						.has_flags(n, fa_analyzer::analysis::NodeFlags::CAPACITY_CHECK)
+				{
+					let helper = self.helper("faInlinePush");
+					return js::call(
+						helper,
+						&[receiver.text, capacity.to_string(), values[0].clone()],
+					);
+				}
 				Expr::primary(format!(
 					"{}.push({})",
 					receiver.primary_text(),

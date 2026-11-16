@@ -46,6 +46,7 @@ pub(crate) mod generic_values;
 mod growing;
 mod hoisting;
 mod index_proofs;
+mod inline_arrays;
 mod inline_unions;
 mod inlining;
 mod io;
@@ -3230,6 +3231,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				Repr::Pool(_) | Repr::Columnar(_) => self.for_pool(node, pattern, value, body),
 				Repr::Links(_) => self.for_links(node, pattern, value, body),
 				Repr::Range => self.for_range_value(node, pattern, value, body),
+				Repr::Tuple(ty) if self.inline_info(ty).is_some() => {
+					let view = if self.is_place(iterable) {
+						let slot = self.place(iterable)?;
+						self.inline_view_at(slot, ty)?
+					} else {
+						self.inline_view(value, ty)?
+					};
+					self.for_items(node, pattern, has_index, iterable, view, body)
+				}
 				Repr::Tuple(ty) if self.c_array_count(ty).is_some() => {
 					self.for_c_array(node, pattern, has_index, iterable, value, body)
 				}

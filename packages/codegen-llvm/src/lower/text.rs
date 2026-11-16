@@ -1489,6 +1489,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Resolution::Builtin(id) = self.analysis.resolution(member) else {
 			return Err(self.unsupported(node.index(), "this member access"));
 		};
+		if let Repr::Tuple(ty) = value.repr
+			&& let Some((_, capacity)) = self.inline_info(ty)
+		{
+			match fa_analyzer::builtins::get(id).path {
+				"Array#length" => {
+					return Ok(Val::new(
+						Repr::Int(IntRepr::I64),
+						self.inline_length(value)?,
+					));
+				}
+				"Array#capacity" => {
+					return Ok(Val::new(
+						Repr::Int(IntRepr::I64),
+						self.context.i64_type().const_int(capacity as u64, false),
+					));
+				}
+				_ => {}
+			}
+		}
 		match fa_analyzer::builtins::get(id).path {
 			"Pointer#value" => {
 				let target = self.type_of(member);

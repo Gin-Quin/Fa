@@ -122,6 +122,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The representations of the items of a tuple type.
 	pub(crate) fn tuple_reprs(&self, ty: TypeId) -> Vec<Repr> {
+		if let Some((item, _)) = self.inline_info(ty) {
+			return vec![self.item_repr(item, NodeId::new(0)).unwrap_or(Repr::Bool)];
+		}
 		self.tuple_items(ty)
 			.iter()
 			.map(|item| self.repr_of(*item, 0).unwrap_or(Repr::Bool))
@@ -678,6 +681,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let inner = inner.value.expect("an optional value");
 				self.call_drop(builder, scalar.repr(), inner)?;
 			}
+			Repr::Tuple(ty) if self.inline_info(ty).is_some() => {
+				self.inline_ownership(builder, function, ty, value, false)?;
+			}
 			Repr::Object(_) | Repr::Tuple(_) => {
 				let fields = match repr {
 					Repr::Object(ty) => self.object_fields(ty),
@@ -999,6 +1005,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let inner = inner.value.expect("an optional value");
 				let copied = self.call_copy(builder, scalar.repr(), inner)?;
 				self.pack_optional(builder, scalar, present, copied)?
+			}
+			Repr::Tuple(ty) if self.inline_info(ty).is_some() => {
+				return self.inline_ownership(builder, function, ty, value, true);
 			}
 			Repr::Object(_) | Repr::Tuple(_) => {
 				let fields = match repr {

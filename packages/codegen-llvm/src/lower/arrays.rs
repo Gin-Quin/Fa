@@ -219,6 +219,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Repr::Map(_) | Repr::Set(_) = repr {
 			return self.table_literal(node, repr, items);
 		}
+		if let Repr::Tuple(ty) = repr
+			&& self.inline_info(ty).is_some()
+		{
+			return self.inline_literal(node, ty, items);
+		}
 		// `[1.0, 2.0, 3.0]` as a `CArray(Float32, 3)`: its items inline
 		if let Repr::Tuple(ty) = repr
 			&& self.c_array_count(ty).is_some()
@@ -894,7 +899,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `array.get(index)`: the item, or `none`.
-	fn array_get(
+	pub(super) fn array_get(
 		&mut self,
 		array: Val<'ctx>,
 		index: Val<'ctx>,
@@ -972,6 +977,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		path: &str,
 		arguments: &[NodeId],
 	) -> Result<Val<'ctx>, Error> {
+		if let Some(ty) = self.inline_receiver_type(node) {
+			return self.inline_method(node, ty, path, arguments);
+		}
 		if path == "Array#get"
 			&& let [index] = arguments
 			&& let Some(text) = self.code_points_of(node)

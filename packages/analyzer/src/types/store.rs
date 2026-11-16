@@ -722,6 +722,23 @@ impl TypeStore {
 		self.intern(TypeKind::Pointer(target))
 	}
 
+	/// Item type and capacity of a bounded inline list.
+	pub fn inline_array(&self, ty: TypeId) -> Option<(TypeId, u32)> {
+		let TypeKind::Collection(crate::types::CollKind::InlineArray, item, capacity) =
+			self.kind(ty)
+		else {
+			return None;
+		};
+		let capacity = self.as_int(capacity)?;
+		(capacity.min == capacity.max)
+			.then(|| {
+				u32::try_from(capacity.min)
+					.ok()
+					.map(|capacity| (item, capacity))
+			})
+			.flatten()
+	}
+
 	/// `CArray(item, count)`.
 	pub fn c_array(&mut self, item: TypeId, count: u32) -> TypeId {
 		self.intern(TypeKind::CArray(item, count))
@@ -1724,8 +1741,13 @@ impl TypeStore {
 			}
 			TypeKind::Collection(collection, item, key) => {
 				let inherited = self.aggregate([item, key].into_iter(), F::COMPARABLE);
-				(inherited - F::FLAT - F::TRIVIALLY_COPYABLE)
-					.with_runtime_kind(collection.runtime_kind())
+				if collection == crate::types::CollKind::InlineArray {
+					self.flags(item)
+						.with_runtime_kind(collection.runtime_kind())
+				} else {
+					(inherited - F::FLAT - F::TRIVIALLY_COPYABLE)
+						.with_runtime_kind(collection.runtime_kind())
+				}
 			}
 			TypeKind::Function(sig) => {
 				let sig = self.sig(sig);

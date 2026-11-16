@@ -80,6 +80,10 @@ pub static ERRORS: &[BuiltinError] = &[
 		name: "NetError",
 		fields: &[("message", TypeId::STRING)],
 	},
+	BuiltinError {
+		name: "CapacityError",
+		fields: &[],
+	},
 ];
 
 macro_rules! error_types {
@@ -109,7 +113,8 @@ error_types!(
 	"WorkerTimeout",
 	"FileError",
 	"JsonError",
-	"NetError"
+	"NetError",
+	"CapacityError"
 );
 
 /// The built-in error named `name`, with its `Errors` type and member.
@@ -123,7 +128,11 @@ pub fn error_type(types: &mut TypeStore, name: &str) -> Option<TypeId> {
 	find(name)?;
 	let module = types.module(PRELUDE_MODULE);
 	let key = types.decl_key(module, &[name], 0);
-	let member = types.syms.intern(name);
+	let member = types.syms.intern(if name == "CapacityError" {
+		"InlineFull"
+	} else {
+		name
+	});
 	let members = types.intern_sym_list(&[member]);
 	let nominal = types.intern_nominal(NominalInfo {
 		key,

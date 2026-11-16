@@ -1848,7 +1848,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A constant box of a built-in error without data (`Cancelled`).
-	fn builtin_error(&self, name: &str) -> PointerValue<'ctx> {
+	pub(super) fn builtin_error(&self, name: &str) -> PointerValue<'ctx> {
 		let id = fa_analyzer::builtins::errors::ERRORS
 			.iter()
 			.position(|error| error.name == name)

@@ -1,0 +1,37 @@
+-- Ordered, bounded, initialized-prefix values on every engine/target.
+mutable values: InlineArray<Integer, 4> = [3, 3]
+use first = values[0]
+values.push(8)
+first += 1
+console.log(values) -- prints: [4, 3, 8]
+console.log(values.length, values.capacity) -- prints: 3 4
+console.log(values[-1], values.get(9)) -- prints: 8 none
+for value, index in values { value += index }
+console.log(values) -- prints: [4, 4, 10]
+console.log(values.pop()) -- prints: 10
+console.log(values.take(0)) -- prints: 4
+values.delete(0)
+console.log(values.pop()) -- prints: none
+values.push(9)
+values.clear()
+console.log(values.length, values.capacity) -- prints: 0 4
+
+function append = (items: InlineArray<Integer, 1>, value: Integer)
+	throws CapacityError mutates items.length => { try items.push(value) }
+mutable one: InlineArray<Integer, 1> = []
+try append(one, 5)
+append(one, 6) catch error => console.log(error) -- prints: CapacityError.InlineFull
+console.log(one) -- prints: [5]
+mutable zero: InlineArray<Integer, 0> = []
+console.log(zero, zero.length, zero.capacity) -- prints: [] 0 0
+
+mutable bytes: InlineArray<UInt8, 255> = []
+mutable words: InlineArray<UInt16, 256> = []
+for i in 0..255 { try bytes.push(UInt8(i)) }
+for i in 0..256 { try words.push(UInt16(i)) }
+console.log(bytes.length, bytes.capacity, words.length, words.capacity) -- prints: 255 255 256 256
+console.log(try bytes[254], try words[255]) -- prints: 254 255
+
+let expected: InlineArray<Integer, 1> = [5]
+console.log(one == expected) -- prints: true
+console.log(zero == zero) -- prints: true

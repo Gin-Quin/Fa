@@ -333,6 +333,9 @@ function faJsonConvert(data, schema, where) {
 			throw fail(JSON.stringify(schema[1]));
 		case "a":
 			if (!Array.isArray(data)) throw fail("an array");
+			if (schema[2] !== undefined && data.length > schema[2]) {
+				throw new JsonError(`${where} exceeds its inline array capacity ${schema[2]}`);
+			}
 			return data.map((item, index) => faJsonConvert(item, schema[1], `${where}[${index}]`));
 		case "m": {
 			if (data === null || typeof data !== "object" || Array.isArray(data)) {

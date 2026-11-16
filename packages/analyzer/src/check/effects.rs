@@ -1069,7 +1069,8 @@ impl Walker<'_> {
 							let positioned = matches!(
 								kind,
 								CollKind::Array
-									| CollKind::GrowingArray | CollKind::OrderedColumnar
+									| CollKind::InlineArray | CollKind::GrowingArray
+									| CollKind::OrderedColumnar
 							);
 							let (has, step) = if positioned {
 								("length", PathStep::Length)

@@ -10,11 +10,24 @@
 // - A `Range` value is a `FaRange`.
 
 import { faCompare, faEquals, faHash, faKeyEquals } from "./equality.js";
-import { IndexError, KeyNotFound } from "./errors.js";
+import { CapacityError, IndexError, KeyNotFound } from "./errors.js";
 import { faFormat } from "./format.js";
 import { faCheckInteger, faRangeOverflow } from "./integers.js";
 import { faStop } from "./stops.js";
 import { faCharacters, faStringCompare } from "./strings.js";
+
+// @fa-helper faInlinePush deps: CapacityError
+/**
+ * Appends only when the bounded initialized prefix has room.
+ * @template T
+ * @param {T[]} array
+ * @param {number} capacity
+ * @param {T} value
+ */
+export function faInlinePush(array, capacity, value) {
+	if (array.length >= capacity) throw new CapacityError();
+	array.push(value);
+}
 
 // @fa-helper faNormalizeIndex deps: IndexError
 /**

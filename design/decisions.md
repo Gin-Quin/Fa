@@ -1520,3 +1520,27 @@ improvement. The driver has an optional `--require-control` publication policy:
 every failed control renders as `not resolved`, raw phase samples/verdicts stay
 intact, and the policy survives re-rendering of combined JSON. Its default
 historical near-threshold policy is unchanged. See the dated ports results.
+
+
+## Links step 1b: InlineArray (2026-11-16)
+
+`InlineArray<Item, capacity>` is represented in the analyzer as a collection
+with a new kind and its integer capacity in the second type argument slot.
+This keeps capacity in type identity, stable hashes, substitutions and exported
+interfaces using the existing collection machinery. Capacity is invariant.
+The collection's category flags come from its items, unlike a heap collection.
+
+LLVM uses the existing aggregate ABI with a dedicated layout: an array of
+capacity item slots followed by the smallest unsigned initialized-prefix count.
+Copy and destruction traverse only that prefix. Existing read-only array
+algorithms can borrow a temporary stack header pointing at the inline slots;
+that header never owns storage and is never used for growth or destruction.
+JavaScript and the interpreter keep ordinary arrays and obtain the capacity
+from the analyzed type. A distinct capacity-check flag records conditional
+append errors independently of index checks.
+
+JSON schemas retain the bound: JavaScript's array schema carries an optional
+maximum count; the native schema has a bounded-array tag. Validation happens
+before constructing the typed value, including in nested fields and unions.
+CapacityError's only member is InlineFull; existing built-in error numbers
+remain unchanged by appending it to the prelude error table.

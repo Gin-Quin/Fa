@@ -109,7 +109,7 @@ impl Walker<'_> {
 	}
 
 	/// Whether a type contains a reference (`T in c`) or a relation field.
-	fn type_has_references(&self, ty: TypeId, depth: u32) -> bool {
+	pub(super) fn type_has_references(&self, ty: TypeId, depth: u32) -> bool {
 		if depth > 8 {
 			return false;
 		}

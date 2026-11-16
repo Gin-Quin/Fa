@@ -190,6 +190,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Val::new(repr, array),
 				}
 			}
+			(Value::Array(items), Repr::Tuple(inline)) if self.inline_info(inline).is_some() => {
+				let (item_type, _) = self.inline_info(inline).expect("an inline array");
+				let slot = self.alloca(repr, "inline.constant")?;
+				for (index, value) in items.iter().enumerate() {
+					let destination = self.inline_item(
+						&self.builder,
+						slot,
+						inline,
+						self.context.i64_type().const_int(index as u64, false),
+					)?;
+					let value = self.constant_value(value, item_type, node)?;
+					self.store(destination, value, node)?;
+				}
+				self.set_inline_length(
+					slot,
+					inline,
+					self.context.i64_type().const_int(items.len() as u64, false),
+				)?;
+				self.load(slot)?
+			}
 			(Value::Tuple(items), Repr::Tuple(_)) => {
 				let item_types = self.tuple_items(ty);
 				if item_types.len() != items.len() {

@@ -35,6 +35,9 @@ mod foreign;
 mod from;
 mod functions;
 mod generics;
+#[cfg(test)]
+mod inline_array_tests;
+mod inline_arrays;
 mod interface;
 mod iterators;
 mod key_sets;

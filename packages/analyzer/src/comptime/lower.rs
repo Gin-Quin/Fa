@@ -1329,6 +1329,18 @@ impl<'a> Lowerer<'a> {
 						"Range#start" | "Range#end" | "Range#includesEnd" => {
 							Expr::Field(value.boxed(), name, optional)
 						}
+						"Array#capacity"
+							if self
+								.types()
+								.as_int(self.a.type_of(member))
+								.is_some_and(|int| int.min == int.max) =>
+						{
+							let int = self
+								.types()
+								.as_int(self.a.type_of(member))
+								.expect("a constant capacity");
+							Expr::Block(vec![value, Expr::Const(Value::Integer(int.min))])
+						}
 						_ => Expr::Builtin(path, vec![value]),
 					}
 				}
@@ -1491,6 +1503,12 @@ impl<'a> Lowerer<'a> {
 					&& let View::Access { target, .. } = syntax::view(self.tree, callee)
 				{
 					values.push(self.fields_names(self.a.type_of(target)));
+				}
+				if path == "Array#push"
+					&& let View::Access { target, .. } = syntax::view(self.tree, callee)
+					&& let Some((_, capacity)) = self.types().inline_array(self.a.type_of(target))
+				{
+					values.push(Expr::Const(Value::Integer(I256::from(capacity))));
 				}
 				match place {
 					Some(place) => Expr::Mutate(path, place, values),

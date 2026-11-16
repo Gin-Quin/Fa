@@ -362,6 +362,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Repr::Rec(target),
 				}
 			}
+			TypeKind::Collection(CollKind::InlineArray, ..) => Repr::Tuple(ty),
 			TypeKind::Collection(CollKind::Array, item, _) => Repr::Array(item),
 			TypeKind::Collection(CollKind::GrowingArray, item, _) => Repr::Growing(item),
 			// a columnar is stored like a pool for now, by rows (the column
@@ -956,6 +957,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			(Repr::Task(from), Repr::Task(to_type))
 				if self.task_result_repr(from, node)?
 					== self.task_result_repr(to_type, node)? =>
+			{
+				Val::new(to, raw)
+			}
+			(Repr::Tuple(from_type), Repr::Tuple(to_type))
+				if self.inline_info(from_type).is_some()
+					&& self.inline_info(to_type).is_some()
+					&& self.llvm_type(value.repr) == self.llvm_type(to) =>
 			{
 				Val::new(to, raw)
 			}

@@ -2558,7 +2558,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.get(index as usize)
 				.map(|&sym| types.syms.resolve(sym).to_string())
 				.unwrap_or_default();
-			let name = if self.builtin_error_id(nominal).is_some() {
+			let name = if self.builtin_error_id(nominal).is_some() && type_name != "CapacityError" {
 				type_name
 			} else {
 				format!("{type_name}.{member_name}")

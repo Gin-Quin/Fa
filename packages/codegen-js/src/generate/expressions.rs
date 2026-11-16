@@ -113,6 +113,7 @@ impl Generator<'_> {
 				let test = match self.types.kind(set_ty) {
 					fa_analyzer::types::TypeKind::Collection(
 						fa_analyzer::types::CollKind::Array
+						| fa_analyzer::types::CollKind::InlineArray
 						| fa_analyzer::types::CollKind::GrowingArray,
 						..,
 					) => {

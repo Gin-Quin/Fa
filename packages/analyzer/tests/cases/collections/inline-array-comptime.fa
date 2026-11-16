@@ -1,0 +1,10 @@
+function build = (): InlineArray<Integer, 4> => {
+	mutable values: InlineArray<Integer, 4> = [1]
+	values.push(2)
+	values.push(2)
+	values
+}
+static values = @build()
+console.log(values) -- prints: [1, 2, 2]
+static capacity = values.capacity
+console.log(capacity) -- prints: 4

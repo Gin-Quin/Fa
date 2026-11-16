@@ -368,6 +368,7 @@ impl Walker<'_> {
 		let throws = substitute(self, sig.throws);
 		// `Integer.round(2.7)`, `a.shiftLeft(2)`: proven, they can't fail (math.rs)
 		let throws = self.number_api_throws(n, callee, kind, &binding.arguments, throws);
+		let throws = self.inline_push_throws(n, callee, kind, throws);
 		if !callback_errors.is_empty() && !matches!(kind, Callee::Builtin(_)) {
 			self.set_flag(n, NodeFlags::PASSES_ERRORS);
 			self.a.callback_types.insert(n, callback_types);

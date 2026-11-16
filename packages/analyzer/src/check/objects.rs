@@ -1308,8 +1308,25 @@ impl Walker<'_> {
 			TypeKind::Collection(kind, ..) if text == "parallel" => {
 				self.parallel_view_member(member, receiver, kind)
 			}
-			TypeKind::Collection(kind @ (CollKind::Array | CollKind::GrowingArray), item, _) => {
-				self.array_member(member, kind, item, text)
+			TypeKind::Collection(
+				kind @ (CollKind::Array | CollKind::GrowingArray | CollKind::InlineArray),
+				item,
+				_,
+			) => {
+				if kind == CollKind::InlineArray
+					&& !matches!(
+						text,
+						"length"
+							| "capacity" | "get" | "push"
+							| "pop" | "delete" | "take"
+							| "clear"
+					) {
+					self.no_member(member, receiver, text);
+					return None;
+				}
+				let (ty, member_kind) = self.array_member(member, kind, item, text)?;
+				let ty = self.inline_member_type(receiver, text, ty);
+				Some((ty, member_kind))
 			}
 			TypeKind::Collection(..) => self.collection_member(member, receiver, text),
 			TypeKind::Iterator(item, _) => self.iterator_member(member, receiver, item, text),
@@ -1635,7 +1652,11 @@ impl Walker<'_> {
 			self.report(diagnostic);
 		}
 		match self.s.types.kind(target_ty) {
-			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => item,
+			TypeKind::Collection(
+				CollKind::Array | CollKind::GrowingArray | CollKind::InlineArray,
+				item,
+				_,
+			) => item,
 			TypeKind::CArray(item, _) => item,
 			TypeKind::Collection(kind @ (CollKind::Set | CollKind::GrowingSet), ..) => {
 				let message = format!(

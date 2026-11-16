@@ -1,4 +1,4 @@
-//! The guarded reversal and its checked fallbacks also execute at O0.
+//! Reversal error order, mutations and counters also execute at O0.
 use std::path::Path;
 
 use fa_codegen_llvm::{OptLevel, Options, Target};

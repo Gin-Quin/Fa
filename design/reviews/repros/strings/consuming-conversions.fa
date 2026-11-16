@@ -1,0 +1,75 @@
+-- Consuming String <-> Bytes conversions: block transfers natively (dead sources).
+function units = (text: String): String => {
+	mutable result: Array<String> = []
+	for index in 0..text.length { result.push(text.codeUnitAt(index).toString()) }
+	result.join(",")
+}
+function lone = (count: Integer): String => {
+	mutable built = ""
+	for index in 0..count { built += "é" }
+	built += "😀"[0]
+	built += "z"
+	built
+}
+function encode = (count: Integer): Bytes => lone(count).toUtf8()
+function sum = (bytes: Bytes): Integer => {
+	mutable total = 0
+	for byte in bytes { total += byte }
+	total
+}
+for count in [0, 5, 10, 11, 40, 100] {
+	let bytes = encode(count)
+	console.log(count, bytes.length, sum(bytes), try bytes[-4], try bytes[-1])
+}
+-- prints: 0 4 741 239 122
+-- prints: 5 14 2561 239 122
+-- prints: 10 24 4381 239 122
+-- prints: 11 26 4745 239 122
+-- prints: 40 84 15301 239 122
+-- prints: 100 204 37141 239 122
+
+function decodeDead = (count: Integer): String throws Utf8Error => try String.fromUtf8(Bytes.from(encode(count).toArray()))
+for count in [0, 11, 100] {
+	let text = try decodeDead(count)
+	console.log(text.length, text.utf8Length(), text.isWellFormed(), try text.codeUnitAt(-2), text.indexOf("z") ?? -1)
+}
+-- prints: 2 4 true 65533 1
+-- prints: 13 26 true 65533 12
+-- prints: 102 204 true 65533 101
+
+function invalidDead = (count: Integer): Integer => {
+	mutable items: Array<Byte> = []
+	for index in 0..count { items.push(97) }
+	items.push(237)
+	items.push(160)
+	items.push(128)
+	let text = String.fromUtf8(Bytes.from(items)) catch error => return error.position
+	text.length
+}
+console.log(invalidDead(0), invalidDead(20), invalidDead(200)) -- prints: 0 20 200
+
+function lossyDead = (count: Integer): String => {
+	mutable items: Array<Byte> = []
+	for index in 0..count { items.push(97) }
+	items.push(240)
+	items.push(159)
+	items.push(98)
+	String.fromUtf8Lossy(Bytes.from(items))
+}
+for count in [0, 20, 200] {
+	let text = lossyDead(count)
+	console.log(text.length, text.isWellFormed(), try text.codeUnitAt(-2), text.utf8Length())
+}
+-- prints: 2 true 65533 4
+-- prints: 22 true 65533 24
+-- prints: 202 true 65533 204
+
+-- A decoded dead block, then grown and indexed past the breadcrumb interval.
+function grow = (count: Integer): String throws Utf8Error => {
+	mutable text = try String.fromUtf8(Bytes.from(encode(count).toArray()))
+	for index in 0..70 { text += "日" }
+	text
+}
+let grown = try grow(100)
+console.log(grown.length, try grown.codeUnitAt(101), try grown.codeUnitAt(171), grown.lastIndexOf("z") ?? -1) -- prints: 172 122 26085 101
+console.log(units(try grown[99..103])) -- prints: 233,65533,122,26085

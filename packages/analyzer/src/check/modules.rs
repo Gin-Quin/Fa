@@ -1000,6 +1000,24 @@ impl Walker<'_> {
 
 	// ── proxies and namespaces ──────────────────────────────────────────
 
+	/// A callable declaration's generic list, including functions reached
+	/// through a type rather than an exported module member.
+	pub(super) fn proxy_generics(&mut self, symbol: SymbolId) -> Option<crate::ids::ListId> {
+		if let Some(exported) = self.proxy_exported(symbol) {
+			return Some(exported.generics);
+		}
+		let symbol = self.modules.aliases.get(&symbol).copied().unwrap_or(symbol);
+		let Proxy::Decl { module, decl, .. } = self.modules.proxies.get(&symbol).cloned()? else {
+			return None;
+		};
+		self.ensure_analyzed(module);
+		self.s
+			.interface(module)?
+			.generic_functions
+			.get(&decl)
+			.map(|function| function.generics)
+	}
+
 	/// The declaration of another file a proxy symbol stands for, once
 	/// published (`None` for any other symbol).
 	pub(super) fn proxy_exported(&mut self, symbol: SymbolId) -> Option<Exported> {

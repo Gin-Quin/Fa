@@ -1592,3 +1592,13 @@ Native Sync values compare canonical exact types across local/global stores.
 Full validation exposed interleaved hot-reload status formatting. Build the
 status text before printing it, keeping each message contiguous when stderr
 and application stdout are collected together; existing assertions stay intact.
+
+A generic associated function value captures exactly its fixed owner's complete
+argument prefix, including phantom types, value parameters and forwarded method
+selections. Reuse positioned producer bindings for that prefix, anchored to the
+function declaration; lambdas keep their enclosing context. Entry construction
+validates the prefix, appends the function value's own arguments and rebases its
+method selections before checking substituted constraints or creating an
+instance. Imported type-function proxies read their generic lists from the same
+published function metadata as native instances. Split cache generation
+`reference-results-6` invalidates records with the earlier producer semantics.

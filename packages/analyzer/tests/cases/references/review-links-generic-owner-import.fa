@@ -2,7 +2,9 @@
 -- prints: 9
 -- prints: 9
 -- prints: A: 9 B: 9
+-- prints: B: 9 A: 9
 -- prints: A: one B: two
+-- prints: B: two A: one
 -- file: main.fa
 function apply = (transform: <Value>(value: Value) => Value): Integer => transform(9)
 function stable = (): Integer => apply(tool<String>.own)
@@ -11,11 +13,13 @@ console.log(result)
 console.log(stable())
 function applyText = (transform: <Value>(value: Value) => String): String => transform(9)
 console.log(applyText(labels<"A">.own), applyText(labels<"B">.own))
+console.log(applyText(labels<"B">.own), applyText(labels<"A">.own))
 type A = { text: String, function describe = (self): String => "A: {self.text}" }
 type B = { text: String, function describe = (self): String => "B: {self.text}" }
 function applyItem = <Item>(transform: <Value>(item: Item, value: Value) => String, item: Item): String => transform(item, 9)
 function forward = <Item: { describe: (self) => String }>(item: Item): String => applyItem(describer<Item>.own, item)
 console.log(forward(A { text = "one" }), forward(B { text = "two" }))
+console.log(forward(B { text = "two" }), forward(A { text = "one" }))
 -- file: tool.fa
 export type<Item> = { function own = <Value>(value: Value): Value => copy value }
 -- file: labels.fa

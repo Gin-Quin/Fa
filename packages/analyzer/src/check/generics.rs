@@ -192,12 +192,12 @@ impl Walker<'_> {
 	/// The generic parameters of the declaration of another file a proxy
 	/// symbol stands for.
 	pub(super) fn exported_generics(&mut self, symbol: SymbolId) -> Vec<ParamId> {
-		let Some(exported) = self.proxy_exported(symbol) else {
+		let Some(generics) = self.proxy_generics(symbol) else {
 			return Vec::new();
 		};
 		self.s
 			.types
-			.list_items(exported.generics)
+			.list_items(generics)
 			.iter()
 			.filter_map(|&generic| match self.s.types.kind(generic) {
 				TypeKind::Param(param) => Some(param),

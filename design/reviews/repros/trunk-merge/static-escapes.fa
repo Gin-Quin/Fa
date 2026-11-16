@@ -37,10 +37,10 @@ console.log(lookup.size, numbers.size, list.length, lookup.get("three"), numbers
 function local = (n: Integer): Integer => {
 	let table: Map<Integer, Integer> = [(n, 1), (n + 1, 2)]
 	let values = [n, n]
-	mutable copy = table
-	copy[n + 5] = 3
+	mutable duplicate = table
+	duplicate[n + 5] = 3
 	mutable more = values
 	more.push(n)
-	copy.size + more.length + table.size + values.length
+	duplicate.size + more.length + table.size + values.length
 }
 console.log(local(3)) -- prints: 10

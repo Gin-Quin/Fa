@@ -31,9 +31,9 @@ function source = (): Array<Integer> mutates evaluations => {
 let evaluated = copy source()
 console.log(evaluations, evaluated) -- prints: 1 [5]
 
--- Ordinary names and calls keep their meaning.
-function copy = (value: Integer): Integer => value + 1
-console.log(copy(4)) -- prints: 5
+-- Parentheses are a copy operand, even without a separating space.
+console.log(copy(5)) -- prints: 5
+console.log(copy[1, 2], copy -5) -- prints: [1, 2] -5
 
 -- A copy keeps the exact written method origin.
 type Label = { value: Integer, function read = (self): Integer => self.value }

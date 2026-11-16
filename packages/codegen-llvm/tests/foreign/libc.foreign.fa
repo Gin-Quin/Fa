@@ -17,9 +17,9 @@ function compareInts = (a: Pointer<Int32>, b: Pointer<Int32>): c.Int => {
 }
 
 function sorted = (values: Array<Int32>): Array<Int32> => {
-	mutable copy = values
-	sort(copy, copy.length, 4, compareInts)
-	copy
+	mutable duplicate = values
+	sort(duplicate, duplicate.length, 4, compareInts)
+	duplicate
 }
 
 console.log(absolute(-42)) -- prints: 42

@@ -8,8 +8,8 @@ function renamed = (human: { name: String }, name: String, depth: Integer): Type
 	if depth > 0 {
 		return renamed(human, name, depth - 1)
 	}
-	mutable copy = human
-	copy.name = name
-	copy
+	mutable duplicate = human
+	duplicate.name = name
+	duplicate
 }
 console.log(fine.name)

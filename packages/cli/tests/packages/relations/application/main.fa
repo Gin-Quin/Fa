@@ -13,8 +13,8 @@ export function = () => {
 		copied.push(person)
 	}
 	library.copies(copied)
-	for copy in copied {
-		console.log(copy.name, copy.bestFriend?.name ?? "none", copy.bestFriendOf.size)
+	for duplicate in copied {
+		console.log(duplicate.name, duplicate.bestFriend?.name ?? "none", duplicate.bestFriendOf.size)
 	}
 	library.people.delete(cleo)
 	console.log(ana.bestFriend?.name ?? "none", bao.bestFriendOf.size, ana.friendOf.size)

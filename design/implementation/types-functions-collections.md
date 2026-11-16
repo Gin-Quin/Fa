@@ -1397,9 +1397,9 @@ console.log(select<User2, { name, email }>(u))
 -- ✗ gn-24: D5 write-set through a type parameter: EF004 at the call
 type Tight = { name: "a" | "b" }
 function renamed = (human: { name: String }, name: String): Type<human> => {
-	mutable copy = human
-	copy.name = name
-	copy
+	mutable duplicate = human
+	duplicate.name = name
+	duplicate
 }
 let t = renamed(Tight { name = "a" }, "zzz")
 
@@ -3217,9 +3217,9 @@ points.add({ x = 1, y = 2, z = 3 })
 
 -- ✓ po-10: WCL002 (let copies) → 3 / 4
 use point = points.add({ x = 3, y = 4 })
-let copy = points.add({ x = 3, y = 4 })
+let duplicate = points.add({ x = 3, y = 4 })
 point.x += 1
-console.log(copy.x)
+console.log(duplicate.x)
 console.log(point.x)
 
 -- ✓ po-11: two equal values are two elements → 2
@@ -3345,7 +3345,7 @@ Each item: what is ambiguous or contradictory (with the pages), then the decisio
 
 **D4. Named-union members and their payload type.** "A `Shape.Circle` … its fields can be read like those of `{ radius: Float }`", but can it be *passed* as one, and what about `UserId.User` and `Integer`? **Decision:** a member with an **object** payload satisfies its payload object type (reads, views, structural parameters); a member with a non-object payload does not (bind it with `as`), which keeps the single-member-union idiom for distinct ids sound. A payload given as a *named* object type (`Car = CarData`) counts as an object payload, but is built with parentheses (`U.Car(value)`), like any non-literal type definition.
 
-**D5. Writes through a type parameter or `Type<parameter>`.** `structural-typing.md#keeping-the-type-of-the-argument` copies `human` (`Type<human>`) and writes `copy.name = name`; with an argument whose `name` is `"a" | "b"`, this writes any `String` into a narrower field. **Decision:** writes to fields reached through a value of a type parameter (explicit or implicit) are recorded in the function's write-set in terms of the constraint's fields, and every call checks the actual type for exactness on those leaves (`EF004`), exactly like "mutating through a narrower type". The documented examples stay valid.
+**D5. Writes through a type parameter or `Type<parameter>`.** `structural-typing.md#keeping-the-type-of-the-argument` copies `human` (`Type<human>`) and writes `duplicate.name = name`; with an argument whose `name` is `"a" | "b"`, this writes any `String` into a narrower field. **Decision:** writes to fields reached through a value of a type parameter (explicit or implicit) are recorded in the function's write-set in terms of the constraint's fields, and every call checks the actual type for exactness on those leaves (`EF004`), exactly like "mutating through a narrower type". The documented examples stay valid.
 
 **D6. Field access on anonymous unions.** Not specified. **Decision:** reading a field common to every object member is allowed (type: union of the member field types), TypeScript-style; writing it is allowed only if the field type is identical in every member. Needed to read a discriminant (`shape.kind`).
 

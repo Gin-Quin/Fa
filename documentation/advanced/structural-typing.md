@@ -236,9 +236,9 @@ A parameter is a reference to the argument, which can have more fields than the 
 
 ```fa
 function renamed = (human: Human, name: String): Type<human> => {
-	mutable copy = copy human -- an explicit copy of the argument, of type Type<human>
-	copy.name = name
-	copy
+	mutable duplicate = copy human -- an explicit copy of the argument, of type Type<human>
+	duplicate.name = name
+	duplicate
 }
 
 let clark = renamed(superHuman, "Clark") -- a SuperHuman: `powers` is kept
@@ -247,7 +247,7 @@ let john = renamed(Human { name = "Ana" }, "John") -- a Human
 
 A `use` alias and the loop variable of a `for` keep the type of the value they designate in the same way, whatever their annotation.
 
-`copy.name = name` writes a `String` into a value whose actual `name` field may be narrower, so each call is checked as in [mutating through a narrower type](#mutating-through-a-narrower-type): `renamed` can't be given a value whose `name` is `"Ana" | "Bao"`.
+`duplicate.name = name` writes a `String` into a value whose actual `name` field may be narrower, so each call is checked as in [mutating through a narrower type](#mutating-through-a-narrower-type): `renamed` can't be given a value whose `name` is `"Ana" | "Bao"`.
 
 This check also applies when `renamed` is imported, called through an import alias, or called by a wrapper (`EF004`). Its interface records the written paths and types, so the caller can check them without the function's source tree.
 
@@ -257,8 +257,8 @@ Only an annotation narrows the copy, as everywhere else:
 
 ```fa
 function nameOnly = (human: Human): Human => {
-	let copy: Human = copy human -- `powers` is dropped
-	copy
+	let duplicate: Human = copy human -- `powers` is dropped
+	duplicate
 }
 ```
 

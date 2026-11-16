@@ -6,10 +6,10 @@ An object is stored inline: on the stack, or inside the value that contains it (
 
 ```fa
 let original = { count = 1 }
-mutable copy = original
+mutable duplicate = original
 
-copy.count = 2
-console.log(original.count) -- 1: `copy` is a separate object
+duplicate.count = 2
+console.log(original.count) -- 1: `duplicate` is a separate object
 ```
 
 A structure (a recursive object, or an object owning a collection or recursive value) instead moves at last use, or requires `copy object` to keep both owners (`MEM004`); one owning a Task or resource is unique (`MEM003`). To refer to an existing object without copying it, use [`use`](/values/declaring-values#references-with-use). See [memory management](/advanced/memory-management).

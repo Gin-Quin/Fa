@@ -3,10 +3,10 @@
 mutable scores = Pool<Integer>.from([3, 7, 9])
 let big = scores.filter((score) => score > 5)
 console.log(big, big.size) -- prints: [7, 9] 2
-mutable copy = scores
-console.log(copy == scores) -- prints: true
-copy.add(1)
-console.log(copy == scores, copy.size, scores.size) -- prints: false 4 3
+mutable duplicate = scores
+console.log(duplicate == scores) -- prints: true
+duplicate.add(1)
+console.log(duplicate == scores, duplicate.size, scores.size) -- prints: false 4 3
 type Animal = { name: String, legs: Integer }
 mutable animals = Pool<Animal>.from([Animal { name = "ant", legs = 6 }, Animal { name = "cat", legs = 4 }])
 let walkers = animals.filter((animal) => animal.legs < 5)

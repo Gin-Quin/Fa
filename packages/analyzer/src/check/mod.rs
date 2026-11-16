@@ -378,7 +378,7 @@ pub struct Walker<'s> {
 	/// The bindings of each instance of a generic type (its functions are substituted).
 	pub(crate) instance_bindings: FxHashMap<TypeId, crate::types::Bindings>,
 	/// The fields written into values typed by an implicit generic
-	/// parameter (`copy.name = name` of `mutable copy = human` with
+	/// parameter (`duplicate.name = name` of `mutable duplicate = human` with
 	/// `Type<human>`): each path and the written type (structural.rs).
 	pub(crate) implicit_writes: FxHashMap<crate::ids::ParamId, Vec<(Vec<crate::ids::Sym>, TypeId)>>,
 	/// The calls of functions of this file, by callee text and declaration,

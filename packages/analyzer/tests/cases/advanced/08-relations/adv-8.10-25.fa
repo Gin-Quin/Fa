@@ -24,8 +24,8 @@ export function = () => {
 	use ana = library.people.add({ name = "Ana" })
 	use bao = library.people.add({ name = "Bao", bestFriend = ana })
 	let copied = library.copies(library.people)
-	for copy in copied {
-		console.log(copy.name, copy.bestFriend?.name ?? "none", copy.bestFriendOf.size)
+	for duplicate in copied {
+		console.log(duplicate.name, duplicate.bestFriend?.name ?? "none", duplicate.bestFriendOf.size)
 	}
 	console.log(ana.bestFriendOf.size)
 }

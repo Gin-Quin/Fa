@@ -227,6 +227,20 @@ impl<'source> Context<'source> {
 		self.error_with_code(code, message, start, end);
 	}
 
+	/// Report a missing name, with an actionable explanation for reserved `copy`.
+	pub fn error_expected_name(&mut self, message: impl Into<String>) {
+		if self.kind() == TokenKind::Copy {
+			self.error_at_token_with_code(
+				"E-LEX-3",
+				"`copy` is reserved: it copies a value (`copy items`); choose another name",
+			);
+		} else if self.token_is_keyword() {
+			self.error_at_token_with_code("E-LEX-3", message);
+		} else {
+			self.error_at_token(message);
+		}
+	}
+
 	fn token_span_for_error(&self) -> (usize, usize) {
 		let token = self.token();
 		if token.kind == TokenKind::Stop {

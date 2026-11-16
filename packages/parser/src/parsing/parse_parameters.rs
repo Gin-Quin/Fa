@@ -26,6 +26,12 @@ fn parse_parameter(context: &mut Context<'_>) -> usize {
 		context.go_to_next_token();
 	}
 
+	if context.kind() == TokenKind::Copy {
+		context.error_expected_name("Expected a parameter name");
+		context.skip_until(&PARAMETER_STOP_TOKENS);
+		return context.insert(Node::Invalid, start, context.last_end());
+	}
+
 	// a destructured parameter, like `{ x, y }: Point`
 	if is_pattern_start(context.kind()) && token_after_matching_close(context) == TokenKind::Colon {
 		let pattern = parse_pattern(context);

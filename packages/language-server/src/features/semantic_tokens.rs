@@ -191,10 +191,6 @@ fn classify_range(
 		};
 		match token.kind {
 			TokenKind::String => string(source, token.start, token.end, declarations, out),
-			TokenKind::Copy if declarations.contains_key(&token.start) => {
-				let (kind, modifiers) = declarations[&token.start];
-				push(out, kind, modifiers);
-			}
 			TokenKind::Identifier => {
 				let (token_type, modifiers) = classify_name(
 					&source[token.start..token.end],
@@ -542,17 +538,6 @@ fn declarations(tree: &TypedSyntaxTree) -> HashMap<usize, (TokenType, u32)> {
 	for start in implicit_members {
 		declarations.insert(start, (TokenType::EnumMember, 0));
 	}
-	// `copy` before a block delimiter is still a name in a condition or
-	// an iterable. The syntax tree resolves that contextual ambiguity.
-	for node in &tree.nodes {
-		if let Node::Identifier { name } = node
-			&& tree.name(*name) == "copy"
-		{
-			declarations
-				.entry(name.start as usize)
-				.or_insert((TokenType::Variable, 0));
-		}
-	}
 	declarations
 }
 
@@ -584,21 +569,24 @@ mod tests {
 	}
 
 	#[test]
-	fn copy_keyword_and_ordinary_copy_names_are_distinct() {
-		let classified =
-			classes("let copy = true\nif copy { console.log(copy) }\nlet own = copy [1]");
-		let copied: Vec<&str> = classified
+	fn reserved_copy_is_always_a_keyword_like_await() {
+		let classified = classes(
+			"copy(value)\ncopy[0]\ncopy -value\ncopy source.items\nsource.copy(value)\nsource.await(value)",
+		);
+		let keywords: Vec<&str> = classified
 			.iter()
 			.map(String::as_str)
-			.filter(|name| name.starts_with("copy:"))
+			.filter(|name| name.starts_with("copy:") || name.starts_with("await:"))
 			.collect();
 		assert_eq!(
-			copied,
+			keywords,
 			[
-				"copy:Variable+d+r",
-				"copy:Variable",
-				"copy:Variable",
-				"copy:Keyword"
+				"copy:Keyword",
+				"copy:Keyword",
+				"copy:Keyword",
+				"copy:Keyword",
+				"copy:Keyword",
+				"await:Keyword"
 			]
 		);
 	}

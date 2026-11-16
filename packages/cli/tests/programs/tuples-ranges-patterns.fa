@@ -23,9 +23,9 @@ console.log(low, high)
 -- prints: 1 9
 
 mutable r = 2..5
-let copy = r
+let duplicate = r
 r.end = 8
-console.log(r, copy, r.start, r.end, r.includesEnd, 4 is in r, 9 is in r)
+console.log(r, duplicate, r.start, r.end, r.includesEnd, 4 is in r, 9 is in r)
 -- prints: 2..8 2..5 2 8 false true false
 let letters = ["a", "b", "c", "d", "e"]
 let middle = 1..=3

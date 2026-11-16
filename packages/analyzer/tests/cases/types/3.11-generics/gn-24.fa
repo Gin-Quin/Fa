@@ -8,8 +8,8 @@ let a: A = { values = [] }
 let b: B = a
 type Tight = { name: "a" | "b" }
 function renamed = (human: { name: String }, name: String): Type<human> => {
-	mutable copy = human
-	copy.name = name
-	copy
+	mutable duplicate = human
+	duplicate.name = name
+	duplicate
 }
 let t = renamed(Tight { name = "a" }, "zzz")

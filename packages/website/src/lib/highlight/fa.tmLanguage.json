@@ -84,11 +84,11 @@
 				},
 				{
 					"name": "keyword.control.fa",
-					"match": "\\b(for|when|if|else|loop|break|continue|return|do|while|await|start|throw|try|catch|provide|parallel|watch|assert|skip|only)\\b"
+					"match": "\\b(for|when|if|else|loop|break|continue|return|do|while|await|copy|start|throw|try|catch|provide|parallel|watch|assert|skip|only)\\b"
 				},
 				{
 					"name": "keyword.operator.word.fa",
-					"match": "\\b(not|and|or|is|in|as|then|with)\\b|(?<![.\\w])copy(?=[ \t]+(?:[A-Za-z_0-9\"(\\[]))"
+					"match": "\\b(not|and|or|is|in|as|then|with)\\b"
 				}
 			]
 		},

@@ -1004,7 +1004,7 @@ async fn completion_offers_the_keywords() {
 		.as_array()
 		.unwrap()
 		.iter()
-		.find(|item| item["label"] == "let")
+		.find(|item| item["label"] == "copy")
 		.unwrap();
 	assert_eq!(keyword["kind"], 14, "keyword");
 }

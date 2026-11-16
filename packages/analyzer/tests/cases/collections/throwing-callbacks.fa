@@ -20,10 +20,10 @@ function arrays = (items: Array<Integer>): String throws Failure => {
 	let some = try items.some((value, index) => try keep(value) and value > 5)
 	let reduced = try items.reduce((total, value, index) => "{total}{try label(value)}", "")
 	let sorted = try items.sort((left, right) => (try label(left)).length - right)
-	mutable copy = items
-	try copy.sortInPlace((left, right) => (try label(left)).length - right)
-	try copy.deleteWhere((value) => try keep(value))
-	"{mapped.length} {filtered.length} {found} {every} {some} {reduced.length} {sorted.length} {copy.length}"
+	mutable duplicate = items
+	try duplicate.sortInPlace((left, right) => (try label(left)).length - right)
+	try duplicate.deleteWhere((value) => try keep(value))
+	"{mapped.length} {filtered.length} {found} {every} {some} {reduced.length} {sorted.length} {duplicate.length}"
 }
 
 function sets = (items: Set<Integer>): String throws Failure => {
@@ -33,9 +33,9 @@ function sets = (items: Set<Integer>): String throws Failure => {
 	let every = try items.every(keep)
 	let some = try items.some(keep)
 	let reduced = try items.reduce((total, value) => "{total}{try label(value)}", "")
-	mutable copy = items
-	try copy.deleteWhere(keep)
-	"{mapped.length} {filtered.size} {found} {every} {some} {reduced.length} {copy.size}"
+	mutable duplicate = items
+	try duplicate.deleteWhere(keep)
+	"{mapped.length} {filtered.size} {found} {every} {some} {reduced.length} {duplicate.size}"
 }
 
 function maps = (items: Map<Integer, String>): String throws Failure => {
@@ -45,9 +45,9 @@ function maps = (items: Map<Integer, String>): String throws Failure => {
 	let every = try items.every((key, value) => try keep(key))
 	let some = try items.some((key, value) => try keep(key))
 	let reduced = try items.reduce((total, key, value) => "{total}{try label(key)}", "")
-	mutable copy = items
-	try copy.deleteWhere((key, value) => try keep(key))
-	"{mapped.size} {filtered.size} {found is none} {every} {some} {reduced.length} {copy.size}"
+	mutable duplicate = items
+	try duplicate.deleteWhere((key, value) => try keep(key))
+	"{mapped.size} {filtered.size} {found is none} {every} {some} {reduced.length} {duplicate.size}"
 }
 
 function iterators = (items: Array<Integer>): String throws Failure => {

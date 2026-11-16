@@ -8,10 +8,10 @@ assert characters.get(-1) == "f"
 assert characters.get(6) == none
 assert characters.get(-7) == none
 
-mutable copy = characters
-copy.push("z")
+mutable duplicate = characters
+duplicate.push("z")
 assert characters.length == 6
-assert copy.join("") == "abcdefz"
+assert duplicate.join("") == "abcdefz"
 
 mutable editable = "abc".characters()
 try editable[1] = "x"

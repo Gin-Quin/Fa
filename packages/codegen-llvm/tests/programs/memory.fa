@@ -131,8 +131,8 @@ console.log(left, right, name, tags)
 -- characters and splits own their text
 mutable letters = 0
 for character in "héllo" {
-	let copy = character
-	letters += copy.length
+	let duplicate = character
+	letters += duplicate.length
 }
 let pieces = "a,b,,c".split(",")
 console.log(letters, pieces, "abc".characters())

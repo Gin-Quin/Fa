@@ -40,10 +40,10 @@ function literalCopies = () => {
 literalCopies()
 function templateCopies = (prefix: String) => {
 	let text = "{prefix}:123456789012345678901234567890"
-	let copy = text
-	assert copy.startsWith(prefix)
-	assert copy.endsWith(":123456789012345678901234567890")
-	assert text == copy
+	let duplicate = text
+	assert duplicate.startsWith(prefix)
+	assert duplicate.endsWith(":123456789012345678901234567890")
+	assert text == duplicate
 }
 templateCopies("short")
 templateCopies("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz")

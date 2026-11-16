@@ -58,7 +58,7 @@ pub(crate) fn parse_member_expression(context: &mut Context<'_>, stop_at: &[Toke
 			let right = if context.kind() == TokenKind::Identifier {
 				parse_member_identifier(context, stop_at)
 			} else {
-				context.error_at_token(
+				context.error_expected_name(
 					"Expected a field after `readonly`, like `readonly id: Integer`",
 				);
 				context.insert_missing()
@@ -68,7 +68,7 @@ pub(crate) fn parse_member_expression(context: &mut Context<'_>, stop_at: &[Toke
 		}
 		kind => {
 			let found = context.describe_token();
-			context.error_at_token(format!(
+			context.error_expected_name(format!(
 				"Expected a member, like `name = value`, `name: Type` or `...other`, found {found}"
 			));
 			let token = context.token();

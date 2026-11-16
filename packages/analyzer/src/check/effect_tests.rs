@@ -254,7 +254,7 @@ fn last_uses_that_copy_are_moves() {
 	// pushed into a collection: moved; a local function reading it later keeps it
 	let source = "function main = () => {\n\tlet item = [1]\n\tmutable all: Array<Array<Integer>> = []\n\tall.push(item)\n}\n";
 	assert!(moved(source, 4, "item"));
-	let source = "function main = () => {\n\tlet item = [1]\n\tfunction show = () => console.log(item)\n\tlet copy = item\n\tshow()\n}\n";
+	let source = "function main = () => {\n\tlet item = [1]\n\tfunction show = () => console.log(item)\n\tlet duplicate = item\n\tshow()\n}\n";
 	assert!(!moved(source, 4, "item"));
 }
 

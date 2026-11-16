@@ -20,7 +20,7 @@ pub fn parse_function_declaration(
 
 	if context.kind() != TokenKind::Identifier {
 		let found = context.describe_token();
-		context.error_at_token(format!(
+		context.error_expected_name(format!(
 			"Expected the name of the function after `function`, found {found}"
 		));
 		context.skip_to_statement_end();

@@ -4,9 +4,9 @@
 type Point = { x: Integer, y: Integer }
 mutable points: Pool<Point> = []
 use point = points.add({ x = 3, y = 4 })
-let copy = points.add({ x = 3, y = 4 })
+let duplicate = points.add({ x = 3, y = 4 })
 point.x += 1
-console.log(copy.x)
+console.log(duplicate.x)
 console.log(point.x)
 -- prints: 3
 -- prints: 4

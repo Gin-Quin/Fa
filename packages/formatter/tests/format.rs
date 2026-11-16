@@ -577,7 +577,7 @@ fn writes_generic_lists_on_the_line_of_their_angle_bracket() {
 }
 
 #[test]
-fn explicit_copy_keeps_prefix_and_ordinary_names_distinct() {
+fn reserved_copy_formats_every_operand_spelling() {
 	assert_formats(
 		"let independent=copy source.items\n",
 		"let independent = copy source.items\n",
@@ -587,7 +587,7 @@ fn explicit_copy_keeps_prefix_and_ordinary_names_distinct() {
 		"let independent = copy (a ?? b)\n",
 	);
 	assert_formats(
-		"let copy=1\ncopy(value)\ncopy[0]\n",
-		"let copy = 1\ncopy(value)\ncopy[0]\n",
+		"copy(value)\ncopy[0]\ncopy [1,2]\ncopy -value\ncopy -2\ncopy\nsource.items\nsource.copy(value)\n",
+		"copy (value)\ncopy [0]\ncopy [1, 2]\ncopy -value\ncopy -2\ncopy source.items\nsource.copy(value)\n",
 	);
 }

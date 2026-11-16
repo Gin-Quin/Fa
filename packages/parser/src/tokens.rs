@@ -55,8 +55,6 @@ pub enum TokenKind {
 	Break,
 	// contextual keyword (see `resolve_start_keywords`), so it keeps the following newline
 	Start,
-	// contextual prefix: `copy value`; declarations and `value.copy` keep the name
-	Copy,
 	// contextual keywords (see `resolve_contextual_keywords`), so they keep the following newline
 	Type,
 	Reactive,
@@ -99,6 +97,7 @@ pub enum TokenKind {
 	Reuse,
 	Async,
 	Await,
+	Copy,
 	Try,
 	Throw,
 	Provide,
@@ -213,7 +212,6 @@ impl TokenKind {
 				| TokenKind::Derived
 				| TokenKind::Namespace
 				| TokenKind::Start
-				| TokenKind::Copy
 				| TokenKind::QuestionMark
 				| TokenKind::Percent
 				| TokenKind::ParenthesisClose

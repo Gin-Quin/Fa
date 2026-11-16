@@ -477,7 +477,7 @@ See [requirements](/advanced/requirements).
 3. Where data lives is part of the type: a reference into `people` has the type `Person in people`. It is inferred for a `use`, and written in full in parameters, return types and relation fields.
 4. A reference cannot outlive what it points into. After an operation that invalidates it (a mutation of what it points into, or an invalidation of its place), a local reference must be declared again before it is used (`use someone = people[0]`, `use score = scores.get("ana")`); this redeclaration is allowed in the same scope, and one inside an inner block ends with that block. There is no runtime check and no generation counter.
 5. A field typed `T` or `T?` owns its stored value and follows the same copy/move rules, transitively through tuples, optionals and unions. A relation field links its target. Task/resource owners and built-in Worker, WorkerPool, TcpListener, TcpStream, Guard and Subscription owners are unique and cannot be explicitly copied (`MEM003`); their parameters borrow except for Task-consuming calls; synchronization handles share identity.
-6. Values still owned at scope exit are destroyed in reverse order; a moved source is not destroyed again. `copy expression` evaluates once, returns an independent value with the operand's type, and preserves shared-handle identity. It binds after access/calls and before arithmetic. `copy(x)` and an identifier named `copy` retain their meaning.
+6. Values still owned at scope exit are destroyed in reverse order; a moved source is not destroyed again. `copy expression` evaluates once, returns an independent value with the operand's type, and preserves shared-handle identity. It binds after access/calls and before arithmetic. `copy` is reserved: `copy(x)` copies the parenthesized expression, `copy[0]` copies an array literal, and `copy -x` copies the negated value. Names declared as `copy` are rejected (`E-LEX-3`); after a dot, member names follow the same rules as `await`.
 
 There is no garbage collector and no borrow checker.
 
@@ -485,7 +485,7 @@ There is no garbage collector and no borrow checker.
 mutable people: Pool<Person> = []
 
 use ada = people.add(Person { name = "Ada" })  -- a reference: `Person in people`
-let copy = ada                                 -- a copy
+let duplicate = ada                                 -- a copy
 ```
 
 | Collection | Operation | Effect |
@@ -783,7 +783,7 @@ Commands exit with `0` on success and `1` on failure; `fa run` and `fa preview` 
 
 ```
 and          as           assert       async        await        break
-catch        continue     derived      do           else         export
+catch        continue     copy         derived      do           else         export
 false        for          function     if           in           invalidates
 is           let          loop         mutable      mutates      namespace
 none         not          or           parallel     provide      reactive
@@ -792,4 +792,4 @@ test         then         throw        throws       true         try
 type         use          watch        when         while        with
 ```
 
-Contextual keywords include `skip` and `only` (after `test`), `start`, and the spaced `copy expression` prefix (`copy(x)` stays a call). Special names: `self` (the receiver of a method) and `Self` (the type being declared).
+`copy` is a reserved prefix, like `await`: `copy items` copies a value. Contextual keywords include `skip` and `only` (after `test`), and `start`. Special names: `self` (the receiver of a method) and `Self` (the type being declared).

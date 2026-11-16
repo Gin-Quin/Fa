@@ -13,25 +13,56 @@ fn explicit_copy_binds_after_access_and_before_arithmetic() {
 }
 
 #[test]
-fn copy_is_still_a_name_outside_the_spaced_prefix() {
-	assert_statement("let copy = values", "let copy = values");
-	assert_statement("copy[0]", "copy[0]");
-	assert_statement("copy(value)", "copy(value)");
-	assert_statement("source.copy(value)", "source.copy(value)");
-	assert_statement("copy - 2", "(copy - 2)");
+fn reserved_copy_accepts_every_operand_spelling() {
+	assert_statement("copy(value)", "(copy (value))");
+	assert_statement("copy (value)", "(copy (value))");
+	assert_statement("copy[0]", "(copy [0])");
+	assert_statement("copy [1, 2]", "(copy [1, 2])");
+	assert_statement("copy -value", "(copy (-value))");
+	assert_statement("copy -2", "(copy -2)");
+	assert_statement("copy - 2", "(copy (-2))");
+	assert_statement("copy\nvalues[0]", "(copy values[0])");
+	assert_statement("copy source.items()[0]", "(copy source.items()[0])");
 }
 
 #[test]
-fn copy_remains_a_loop_binding_and_a_condition_name() {
+fn copy_member_names_follow_await() {
+	for keyword in ["await", "copy"] {
+		let member = format!("source.{keyword}(value)");
+		assert_statement(&member, &member);
+		let optional = format!("source?.{keyword}");
+		assert_statement(&optional, &optional);
+		assert_has_error(&format!("let source = {{ {keyword} = 1 }}"));
+	}
+}
+
+#[test]
+fn reserved_copy_cannot_be_a_declared_name() {
 	for source in [
-		"let copy = [1]\nfor copy in copy { console.log(copy) }",
-		"let copy = true\nif copy { console.log(copy) }",
-		"let copy = false\nwhile copy { console.log(copy) }",
-		"let copy = 1\nwhen copy is { 1 => console.log(copy), else => console.log(0) }",
+		"let copy = 1",
+		"mutable copy = 1",
+		"use copy = source",
+		"static copy = 1",
+		"function copy = () => 1",
+		"type copy = Integer",
+		"namespace copy = {}",
+		"reactive copy = 1",
+		"derived copy = 1",
+		"function apply = (copy: Integer) => 1",
+		"function apply = (copy) => 1",
+		"let [copy] = [1]",
+		"let { field as copy } = source",
+		"for copy in values {}",
+		"type Record = { copy: Integer }",
+		"function generic = <copy>(item: Integer) => item",
 	] {
 		let tree = crate::parse(source);
 		assert!(
-			tree.diagnostics.is_empty(),
+			tree.diagnostics.iter().any(|diagnostic| {
+				diagnostic.code == Some("E-LEX-3")
+					&& diagnostic.message.contains("`copy items`")
+					&& diagnostic.message.contains("choose another name")
+			}),
 			"{source}: {:?}",
 			tree.diagnostics
 		);

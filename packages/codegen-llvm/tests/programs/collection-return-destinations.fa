@@ -58,8 +58,8 @@ function readCalls = (source: Array<Integer>): Integer => {
 	return a.length + b.length
 }
 function readCopy = (source: Array<Integer>): Integer => {
-	let copy = copied(source)
-	return copy.length
+	let duplicate = copied(source)
+	return duplicate.length
 }
 function readWords = (text: String): Integer => {
 	let parts = words(text)

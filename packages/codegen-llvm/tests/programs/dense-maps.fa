@@ -26,9 +26,9 @@ console.log(squares.size, removed, total) -- prints: 866 334 22655658
 console.log(squares.get(7 * 4) ?? 99, squares.get(7 * 3) ?? 99) -- prints: 16 99
 
 -- a copy is independent
-mutable copy = squares
-copy[7] = 5
-console.log(squares.get(7) ?? 0, copy.get(7) ?? 0, copy.size) -- prints: 1 5 866
+mutable duplicate = squares
+duplicate[7] = 5
+console.log(squares.get(7) ?? 0, duplicate.get(7) ?? 0, duplicate.size) -- prints: 1 5 866
 
 -- string keys own their bytes; entries move with them
 mutable names = Map<String, Integer>.from([], capacity = 2)

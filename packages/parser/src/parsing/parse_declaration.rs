@@ -98,11 +98,7 @@ pub(crate) fn parse_variable_declaration<'source>(
 	if context.kind() != TokenKind::Identifier {
 		let found = context.describe_token();
 		let message = format!("Expected a name after `{keyword}`, found {found}");
-		if context.token_is_keyword() {
-			context.error_at_token_with_code("E-LEX-3", message);
-		} else {
-			context.error_at_token(message);
-		}
+		context.error_expected_name(message);
 		context.skip_to_statement_end();
 		let end = context.last_end();
 		return context.insert(Node::Invalid, start, end);
@@ -305,7 +301,14 @@ pub(crate) fn parse_type_declaration(
 	};
 	context.go_to_next_token();
 
-	// the tokenizer only makes `type` and `namespace` keywords when a name follows
+	if context.kind() != TokenKind::Identifier {
+		let found = context.describe_token();
+		context.error_expected_name(format!("Expected a name after `{keyword}`, found {found}"));
+		context.skip_to_statement_end();
+		return context.insert(Node::Invalid, start, context.last_end());
+	}
+
+	// The tokenizer keeps the declaration keyword when a name follows.
 	let name_text = context.slice();
 	let name = context.name();
 	context.go_to_next_token();
@@ -379,7 +382,7 @@ pub(crate) struct GenericParameters {
 fn parse_generic_parameter(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
 	if context.kind() != TokenKind::Identifier {
 		let found = context.describe_token();
-		context.error_at_token(format!(
+		context.error_expected_name(format!(
 			"Expected a generic parameter, like `Item`, `Value: Integer | Float` or `rows: Integer`, found {found}"
 		));
 	}

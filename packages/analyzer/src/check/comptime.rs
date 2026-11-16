@@ -1158,6 +1158,17 @@ impl Walker<'_> {
 }
 
 impl Host for Walker<'_> {
+	fn function_may_throw(&mut self, key: FnKey) -> bool {
+		let analysis = if FileId(key.0) == self.file {
+			&self.a
+		} else {
+			self.s.analysis(FileId(key.0))
+		};
+		analysis
+			.function(NodeId(key.1))
+			.is_none_or(|info| info.throws != TypeId::NEVER)
+	}
+
 	fn function(&mut self, key: FnKey) -> Result<Arc<Function>, Error> {
 		if let Some(function) = self.s.comptime.functions.get(&key) {
 			return Ok(Arc::clone(function));

@@ -9,7 +9,9 @@ import {
 	faArrayInsert,
 	faArraySlice,
 	faArraySort,
+	faArraySortDirect,
 	faArraySortInPlace,
+	faArraySortInPlaceDirect,
 	faArrayTake,
 	faComparator,
 	faDeleteWhere,
@@ -195,6 +197,22 @@ describe("insert, delete, take, deleteWhere", () => {
 });
 
 describe("sorting (D35)", () => {
+	test("non-throwing sorting uses no explicit staging copy and stays stable", () => {
+		const items = [
+			{ key: 2, id: "a" },
+			{ key: 1, id: "b" },
+			{ key: 2, id: "c" },
+		];
+		Object.defineProperty(items, "slice", {
+			value() {
+				throw new Error("staging copy");
+			},
+		});
+		faArraySortInPlaceDirect(items, (a, b) => BigInt(a.key - b.key));
+		expect(items.map((item) => item.id)).toEqual(["b", "a", "c"]);
+		expect(faArraySortDirect([3, 1, 2])).toEqual([1, 2, 3]);
+	});
+
 	test("natural order never sorts numbers as strings", () => {
 		const items = [10, 9, 1, -5, 100];
 		faArraySortInPlace(items);

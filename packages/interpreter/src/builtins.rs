@@ -786,8 +786,8 @@ fn reserve_growth(
 }
 
 /// A built-in method changing its receiver in place (copied first only when
-/// another value shares it): the method's result. On an error, the receiver
-/// is unchanged.
+/// another value shares it): the method's result. Completed effects and
+/// callback writes remain on error; sorting commits its order on success.
 pub fn mutate(
 	interpreter: &mut Interpreter<'_>,
 	path: &str,
@@ -809,7 +809,9 @@ pub(crate) fn mutate_internal(
 	receiver: &mut Value,
 	arguments: Vec<Value>,
 ) -> Result<Value, Error> {
-	if crate::callbacks::Callback::mutating(path) && matches!(receiver, Value::Array(_)) {
+	if crate::callbacks::Callback::mutating(path)
+		&& matches!(receiver, Value::Array(_) | Value::Map(_) | Value::Set(_))
+	{
 		return crate::machine::Machine::mutate_builtin(interpreter, path, receiver, arguments);
 	}
 

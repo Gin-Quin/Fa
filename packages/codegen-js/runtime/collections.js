@@ -291,6 +291,32 @@ export function faArraySort(array, compare) {
 	return sorted;
 }
 
+// @fa-helper faArraySortInPlaceDirect deps: faCompare faComparator
+/**
+ * A comparator whose checked Fa type cannot throw needs no rollback storage.
+ * @template T
+ * @param {T[]} array
+ * @param {(a: T, b: T) => number | bigint} [compare]
+ * @returns {void}
+ */
+export function faArraySortInPlaceDirect(array, compare = faCompare) {
+	array.sort(faComparator(compare));
+}
+
+// @fa-helper faArraySortDirect deps: faArraySortInPlaceDirect
+/**
+ * A sorted construction with a non-throwing comparator.
+ * @template T
+ * @param {T[]} array
+ * @param {(a: T, b: T) => number | bigint} [compare]
+ * @returns {T[]}
+ */
+export function faArraySortDirect(array, compare) {
+	const sorted = array.slice();
+	faArraySortInPlaceDirect(sorted, compare);
+	return sorted;
+}
+
 // @fa-helper faSortIntegers
 /**
  * `numbers.sortInPlace()` on an array of number-represented integers (never
@@ -321,14 +347,14 @@ export function faSortFloats(array) {
 	return array.sort((a, b) => a - b);
 }
 
-// @fa-helper faSortStrings deps: faArraySortInPlace faStringCompare
+// @fa-helper faSortStrings deps: faStringCompare
 /**
  * `texts.sortInPlace()`: by code point, without `faCompare`'s type tests.
  * @param {string[]} array
  * @returns {string[]} the array
  */
 export function faSortStrings(array) {
-	faArraySortInPlace(array, faStringCompare);
+	array.sort(faStringCompare);
 	return array;
 }
 

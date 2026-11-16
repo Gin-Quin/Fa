@@ -64,6 +64,7 @@ mod reactivity;
 mod references;
 mod relations;
 mod return_destinations;
+mod sorting;
 mod tables;
 mod tasks;
 mod testing;

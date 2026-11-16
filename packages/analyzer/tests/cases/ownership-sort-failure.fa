@@ -1,0 +1,59 @@
+-- A throwing comparator changes data but never commits a partial order.
+type Item = { id: Integer, touched: Boolean, payload: Array<Integer> }
+function inspect = (text: String): (Integer, Boolean) => {
+	mutable items = [
+		Item { id = 4, touched = false, payload = [4] }
+		Item { id = 3, touched = false, payload = [3] }
+		Item { id = 2, touched = false, payload = [2] }
+		Item { id = 1, touched = false, payload = [1] }
+	]
+	mutable compared = 0
+	do {
+		items.sortInPlace((left, right) => {
+			left.touched = true
+			right.touched = true
+			compared += 1
+			if compared == 3 { let _number = try Integer.parse(text) }
+			left.id - right.id
+		})
+	} catch _error => {}
+	mutable order = 0
+	for item in items { order = order * 10 + item.id }
+	(order, items.some((item) => item.touched))
+}
+static checked = @inspect("bad")
+console.log(checked[0], checked[1]) -- prints: 4321 true
+let result = inspect("bad")
+console.log(result[0], result[1]) -- prints: 4321 true
+
+-- Successful staging applies ownership transfers through multi-item cycles.
+function successful = (text: String): Boolean => {
+	mutable items = [
+		Item { id = 3, touched = false, payload = [3] }
+		Item { id = 1, touched = false, payload = [1] }
+		Item { id = 4, touched = false, payload = [4] }
+		Item { id = 2, touched = false, payload = [2] }
+	]
+	do {
+		items.sortInPlace((left, right) => {
+			let _number = try Integer.parse(text)
+			left.id - right.id
+		})
+	} catch _error => { return false }
+	mutable order = 0
+	for item in items { order = order * 10 + item.id }
+	order == 1234 and items.every((item) => item.payload.sum() == item.id)
+}
+static sorted = @successful("7")
+console.log(sorted, successful("7")) -- prints: true true
+
+-- A nonthrowing float comparator sorts directly at compile time too.
+function direct = (): Boolean => {
+	mutable items = [3, 1, 2]
+	items.sortInPlace((a, b) => Float(a - b))
+	mutable order = 0
+	for item in items { order = order * 10 + item }
+	order == 123
+}
+static directResult = @direct()
+console.log(directResult, direct()) -- prints: true true

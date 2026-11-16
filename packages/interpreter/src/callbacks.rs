@@ -40,6 +40,11 @@ pub(crate) enum Output {
 }
 
 pub(crate) enum Progress {
+	Swap {
+		left: usize,
+		right: usize,
+		next: Box<Callback>,
+	},
 	Delete {
 		position: usize,
 		kept: usize,
@@ -71,6 +76,7 @@ pub(crate) struct Callback {
 	permutation: Vec<usize>,
 	sort_position: usize,
 	kept: usize,
+	staged: bool,
 }
 
 impl Callback {
@@ -108,6 +114,7 @@ impl Callback {
 		container: Container,
 		length: usize,
 		arguments: Vec<Out>,
+		staged: bool,
 	) -> Result<Box<Self>, Error> {
 		let mut arguments = arguments.into_iter();
 		let function = arguments.next().and_then(|value| match value {
@@ -161,13 +168,14 @@ impl Callback {
 			selected,
 			output,
 			total,
-			permutation: if sort {
+			permutation: if sort && staged {
 				(0..length).collect()
 			} else {
 				Vec::new()
 			},
 			sort_position: 1,
 			kept: 0,
+			staged,
 		}))
 	}
 
@@ -272,28 +280,51 @@ impl Callback {
 
 	fn sort(mut self: Box<Self>, returned: Option<Value>) -> Result<Progress, Error> {
 		if let Some(value) = returned {
-			let order = value
-				.as_int()
-				.ok_or_else(|| Error::Stop(format!("`{}` is not an integer", value.to_text())))?;
-			if order > I256::ZERO {
-				self.permutation
-					.swap(self.sort_position - 1, self.sort_position);
+			let positive = match value {
+				Value::Integer(order) => order > I256::ZERO,
+				Value::Float(order) | Value::Percentage(order) => order > 0.0,
+				_ => return Err(Error::Stop("a comparator must return a number".into())),
+			};
+			if positive {
+				let right = self.sort_position;
 				self.sort_position -= 1;
+				if self.staged {
+					self.permutation.swap(self.sort_position, right);
+				} else {
+					let left = self.sort_position;
+					return Ok(Progress::Swap {
+						left,
+						right,
+						next: self,
+					});
+				}
 			} else {
 				self.sort_position = 0;
 			}
 		}
 		loop {
 			if self.position >= self.length {
-				return Ok(Progress::Done(Output::Sorted(self.permutation)));
+				return Ok(Progress::Done(if self.staged {
+					Output::Sorted(self.permutation)
+				} else {
+					Output::Value(Value::None.into())
+				}));
 			}
 			if self.sort_position == 0 {
 				self.position += 1;
 				self.sort_position = self.position;
 				continue;
 			}
-			let left = self.permutation[self.sort_position - 1];
-			let right = self.permutation[self.sort_position];
+			let left = if self.staged {
+				self.permutation[self.sort_position - 1]
+			} else {
+				self.sort_position - 1
+			};
+			let right = if self.staged {
+				self.permutation[self.sort_position]
+			} else {
+				self.sort_position
+			};
 			return Ok(match &self.function {
 				Some(function) => Progress::Call {
 					function: function.clone(),

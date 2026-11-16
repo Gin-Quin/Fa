@@ -1317,10 +1317,17 @@ impl Generator<'_> {
 				js::call(name, &[array])
 			}
 			"Array#sort" | "Array#sortInPlace" => {
-				let name = if path == "Array#sort" {
-					"faArraySort"
-				} else {
-					"faArraySortInPlace"
+				let throws = nodes.first().is_some_and(|&value| {
+					match self.types.kind(self.type_of(value)) {
+						TypeKind::Function(sig) => self.types.sig(sig).throws != TypeId::NEVER,
+						_ => true,
+					}
+				});
+				let name = match (path == "Array#sort", throws) {
+					(true, true) => "faArraySort",
+					(false, true) => "faArraySortInPlace",
+					(true, false) => "faArraySortDirect",
+					(false, false) => "faArraySortInPlaceDirect",
 				};
 				let rest = if values.is_empty() {
 					Vec::new()

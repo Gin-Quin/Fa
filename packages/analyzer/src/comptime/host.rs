@@ -9,7 +9,7 @@ use fa_interpreter::{Error, Host, Interpreter, Limits, Value};
 
 use crate::comptime::GlobalState;
 use crate::comptime::lower::Lowerer;
-use crate::ids::{FileId, NodeId};
+use crate::ids::{FileId, NodeId, TypeId};
 use crate::session::Session;
 use crate::syntax::{self, View};
 
@@ -41,6 +41,13 @@ impl SessionHost<'_> {
 }
 
 impl Host for SessionHost<'_> {
+	fn function_may_throw(&mut self, key: FnKey) -> bool {
+		self.session
+			.analysis(FileId(key.0))
+			.function(NodeId(key.1))
+			.is_none_or(|info| info.throws != TypeId::NEVER)
+	}
+
 	fn function(&mut self, key: FnKey) -> Result<Arc<Function>, Error> {
 		if let Some(function) = self.session.comptime.functions.get(&key) {
 			return Ok(Arc::clone(function));

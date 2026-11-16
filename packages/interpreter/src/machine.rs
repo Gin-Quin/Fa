@@ -1031,7 +1031,20 @@ impl<'i, 'h> Machine<'i, 'h> {
 			PlaceView::Value(Value::Map(entries)) => (Container::Map, entries.len()),
 			_ => return Err(Error::Stop("a callback receiver must be a collection".into()).into()),
 		};
-		let buffers = if path.contains("#sort") || path.ends_with("#filter") {
+		let mut arguments: Vec<_> = arguments.collect();
+		if let Some(function) = arguments.first_mut() {
+			*function = self.value(function.clone())?.into();
+		}
+		let staged = !mutating
+			|| !path.contains("#sort")
+			|| match arguments.first() {
+				Some(Out::Value(Value::Function(function))) => {
+					self.interpreter.host.function_may_throw(function.function)
+				}
+				None => false,
+				_ => true,
+			};
+		let buffers = if (path.contains("#sort") && staged) || path.ends_with("#filter") {
 			length.saturating_mul(2 * size_of::<usize>())
 		} else if path.ends_with("#map") {
 			memory::values_size(length)
@@ -1046,16 +1059,12 @@ impl<'i, 'h> Machine<'i, 'h> {
 			container,
 			mutating,
 		};
-		let make = (|| {
-			let mut arguments: Vec<_> = arguments.collect();
-			if let Some(function) = arguments.first_mut() {
-				*function = self.value(function.clone())?.into();
-			}
-			Ok::<_, Flow>(Callback::new(path, container, length, arguments)?)
-		})();
+		let make = Callback::new(path, container, length, arguments, staged);
 		match make {
 			Ok(callback) => self.callback(callback, None, state),
-			Err(flow) => Ok(Action::Done(self.release_root(temporary, Err(flow)))),
+			Err(error) => Ok(Action::Done(
+				self.release_root(temporary, Err(error.into())),
+			)),
 		}
 	}
 
@@ -1087,6 +1096,16 @@ impl<'i, 'h> Machine<'i, 'h> {
 				}
 			};
 			match progress {
+				Progress::Swap { left, right, next } => {
+					let Value::Array(items) = Self::locate(&mut self.frames, &state.source)? else {
+						return Err(
+							Error::Stop("a sorting callback requires an array".into()).into()
+						);
+					};
+					Arc::make_mut(items).swap(left, right);
+					callback = next;
+					value = None;
+				}
 				Progress::Delete {
 					position,
 					kept,
@@ -1157,6 +1176,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				}
 				Progress::Compare { left, right, next } => {
 					let result = (|| {
+						self.interpreter.step().map_err(Flow::from)?;
 						let left = self.callback_item(&state, left)?;
 						let right = self.callback_item(&state, right)?;
 						let left = self.value(Out::Loan(left))?;

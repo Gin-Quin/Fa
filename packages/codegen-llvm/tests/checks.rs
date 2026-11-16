@@ -80,6 +80,30 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn sorting_stages_only_a_comparator_whose_type_can_throw() {
+		for (body, staged) in [
+			("items.sortInPlace((a, b) => a - b)", false),
+			(
+				"do { items.sortInPlace((a, b) => { let _n = try Integer.parse(text)\na - b }) } catch _error => {}",
+				true,
+			),
+		] {
+			let source = format!(
+				"function sort = (items: Array<Integer>, text: String) mutates items => {{\n{body}\n}}\nmutable items = [3, 1, 2]\nsort(items, \"bad\")\nconsole.log(items)\n"
+			);
+			for (name, target) in [
+				("sort-staging-native", Target::Native),
+				("sort-staging-wasm", Target::Wasm),
+			] {
+				let ir = ir_at_target(name, &source, true, OptLevel::O0, target);
+				let sort = function(&ir, "fa.sort");
+				assert_eq!(sort.contains("@fa_array_new("), staged, "{sort}");
+				assert_eq!(sort.contains("sort_cycle_test"), staged, "{sort}");
+			}
+		}
+	}
+
+	#[test]
 	fn explicit_converting_copy_runs_one_owning_operation() {
 		let source = "function widen = (small: Array<Int8>): Array<Integer> => copy small\nlet small: Array<Int8> = [1, 2]\nconsole.log(small.length, widen(small).length)\n";
 		for (name, target) in [

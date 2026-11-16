@@ -1147,6 +1147,58 @@ mod tests {
 	}
 
 	#[test]
+	fn nonthrowing_in_place_sort_needs_no_permutation_budget() {
+		// Isolate execution from the separately budgeted publication walk.
+		let mut host = Functions::default();
+		let mut items = Value::array((0..10_000).map(Value::int).collect());
+		let mut interpreter = Interpreter::new(
+			&mut host,
+			Limits {
+				memory: 8192,
+				..Limits::default()
+			},
+		);
+		assert_eq!(
+			crate::machine::Machine::mutate_builtin(
+				&mut interpreter,
+				"Array#sortInPlace",
+				&mut items,
+				Vec::new()
+			),
+			Ok(Value::None)
+		);
+		let Value::Array(values) = items else {
+			unreachable!()
+		};
+		assert_eq!(values.len(), 10_000);
+		assert_eq!(values[0], Value::int(0));
+		assert_eq!(values[9_999], Value::int(9_999));
+	}
+
+	#[test]
+	fn natural_sort_comparisons_obey_the_evaluation_budget() {
+		let mut host = Functions::default();
+		let mut items = Value::array((0..10_000).rev().map(Value::int).collect());
+		let mut interpreter = Interpreter::new(
+			&mut host,
+			Limits {
+				steps: 20,
+				memory: 8192,
+				..Limits::default()
+			},
+		);
+		assert_eq!(
+			crate::machine::Machine::mutate_builtin(
+				&mut interpreter,
+				"Array#sortInPlace",
+				&mut items,
+				Vec::new()
+			),
+			Err(Error::Steps(20))
+		);
+	}
+
+	#[test]
 	fn the_memory_is_bounded() {
 		let mut host = Functions::default();
 		let text = Place {

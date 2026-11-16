@@ -84,6 +84,11 @@ impl Error {
 pub trait Host {
 	/// The lowered function of a key.
 	fn function(&mut self, key: FnKey) -> Result<Arc<Function>, Error>;
+	/// Checked effects of a callable. Hosts without effect metadata must
+	/// conservatively retain failure staging.
+	fn function_may_throw(&mut self, _key: FnKey) -> bool {
+		true
+	}
 	/// The value of a module-level value (evaluated once).
 	fn global(&mut self, key: crate::ir::GlobalKey) -> Result<Value, Error>;
 }

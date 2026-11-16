@@ -879,6 +879,36 @@ mod tests {
 	}
 
 	#[test]
+	fn sorting_stages_only_a_comparator_whose_type_can_throw() {
+		for (body, staged) in [
+			("items.sortInPlace((a, b) => a - b)", false),
+			(
+				"do { items.sortInPlace((a, b) => { let _n = try Integer.parse(text)\na - b }) } catch _error => {}",
+				true,
+			),
+		] {
+			let source = format!(
+				"function sort = (items: Array<Integer>, text: String) mutates items => {{\n{body}\n}}\nmutable items = [3, 1, 2]\nsort(items, \"bad\")\nconsole.log(items)\n"
+			);
+			let (mut session, file) = fa_analyzer::analyze_source(&source);
+			let output =
+				generate(&mut session, file, &Options::new(Target::Bun, "sort.fa")).unwrap();
+			assert_eq!(
+				output.program.contains("faArraySortInPlace("),
+				staged,
+				"{}",
+				output.program
+			);
+			assert_eq!(
+				output.program.contains("faArraySortInPlaceDirect("),
+				!staged,
+				"{}",
+				output.program
+			);
+		}
+	}
+
+	#[test]
 	fn overflow_checks_are_on_by_default() {
 		let program = program(true);
 		assert!(program.contains("faCheckRange("), "{program}");

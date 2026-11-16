@@ -10,6 +10,7 @@ import {
 	Cancelled,
 	ChannelClosed,
 	faAsyncValue,
+	faBindGenerics,
 	faCallValue,
 	faCancel,
 	faCancelSignal,
@@ -376,5 +377,30 @@ describe("faWaitShared", () => {
 		const result = Bun.spawnSync([process.execPath, "-e", script]);
 		expect(result.exitCode).toBe(0);
 		expect(performance.now() - start).toBeLessThan(800);
+	});
+});
+
+describe("generic function conversion", () => {
+	test("binds capabilities before visible arguments", () => {
+		const identity = (_object, value) => value;
+		const converted = faBindGenerics(identity, false);
+		expect(["Ada", "Alan"].map(converted)).toEqual(["Ada", "Alan"]);
+		const place = { $v: 7 };
+		expect(converted(place)).toBe(place);
+	});
+	test("preserves the asynchronous task-first entry", async () => {
+		const calls = [];
+		const original = faAsyncValue(
+			(_object, value) => value,
+			async (task, object, value) => {
+				calls.push([task, object, value]);
+				return value;
+			},
+		);
+		const converted = faBindGenerics(original, true);
+		const task = root();
+		expect(converted(9)).toBe(9);
+		expect(await converted.$async(task, 11)).toBe(11);
+		expect(calls).toEqual([[task, true, 11]]);
 	});
 });

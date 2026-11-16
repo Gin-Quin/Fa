@@ -1564,23 +1564,25 @@ impl<'a> Lowerer<'a> {
 			return Expr::Const(value);
 		}
 		// the target: a value, or a type or namespace whose member is named
-		let static_target = match self.a.resolution(target) {
-			Resolution::Local(symbol) => matches!(
-				self.a.symbols.symbol(symbol).kind,
-				SymbolKind::Type | SymbolKind::Namespace
-			),
-			Resolution::Builtin(id) => {
-				!matches!(builtins::get(id).kind, builtins::BuiltinKind::Value(_))
-			}
-			Resolution::Folder(_) => true,
-			Resolution::External(..) => {
-				self.declared_of(self.a.resolution(target))
+		let static_target = self
+			.a
+			.has_flags(target, crate::analysis::NodeFlags::TYPE_EXPR)
+			|| match self.a.resolution(target) {
+				Resolution::Local(symbol) => matches!(
+					self.a.symbols.symbol(symbol).kind,
+					SymbolKind::Type | SymbolKind::Namespace
+				),
+				Resolution::Builtin(id) => {
+					!matches!(builtins::get(id).kind, builtins::BuiltinKind::Value(_))
+				}
+				Resolution::Folder(_) => true,
+				Resolution::External(..) => self
+					.declared_of(self.a.resolution(target))
 					.is_some_and(|(_, declared)| {
 						matches!(declared.kind, SymbolKind::Type | SymbolKind::Namespace)
-					})
-			}
-			_ => false,
-		};
+					}),
+				_ => false,
+			};
 		let mut current = if static_target {
 			None
 		} else {

@@ -412,7 +412,7 @@ impl Generator<'_> {
 	}
 
 	/// Whether a name is the callee of a call.
-	fn is_callee(&mut self, node: NodeId) -> bool {
+	pub(crate) fn is_callee(&mut self, node: NodeId) -> bool {
 		let parents = self.parents();
 		let mut current = node;
 		while let Some(parent) = parents[current.index()] {

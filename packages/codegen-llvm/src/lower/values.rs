@@ -707,6 +707,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			(Repr::Optional(a), Repr::Optional(b)) => {
 				return a != b && self.same_layout(a.repr(), b.repr());
 			}
+			(Repr::Sync(a), Repr::Sync(b)) => return self.same_concrete_type(a, b),
 			// arrays of items with the same representation (an instance's
 			// `Array(Item)` and the `Array(String)` it was made for)
 			// pools too (a generic `Pool<Item>` parameter of another file)

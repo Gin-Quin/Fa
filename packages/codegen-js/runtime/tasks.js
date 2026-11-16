@@ -474,6 +474,21 @@ export function faAsyncValue(sync, instance) {
 	return sync;
 }
 
+// @fa-helper faBindGenerics deps: faAsyncValue
+/**
+ * Bind an instantiated function's erased capabilities once at conversion.
+ * Preserve the task-first asynchronous entry when the function has one.
+ * @param {any} functionValue
+ * @param {...any} capabilities
+ * @returns {any}
+ */
+export function faBindGenerics(functionValue, ...capabilities) {
+	const bound = functionValue.bind(undefined, ...capabilities);
+	return functionValue.$async
+		? faAsyncValue(bound, (task, ...args) => functionValue.$async(task, ...capabilities, ...args))
+		: bound;
+}
+
 // @fa-helper faCallValue
 /**
  * `await f(…)` of a value of an `async` function type, in an async

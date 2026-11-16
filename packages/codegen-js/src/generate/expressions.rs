@@ -44,9 +44,11 @@ impl Generator<'_> {
 	pub(crate) fn expr_raw(&mut self, n: NodeId) -> Expr {
 		// a value computed at compile time (constants.rs)
 		if let Some(value) = self.comptime_value(n) {
-			return self.constant_value(n, &value, self.type_of(n));
+			let value = self.constant_value(n, &value, self.type_of(n));
+			return self.instantiated_function_value(n, value);
 		}
 		let value = self.expr_value(n);
+		let value = self.instantiated_function_value(n, value);
 		// reads and writes of reactive places (reactivity.rs)
 		self.reactive_expr(n, value)
 	}

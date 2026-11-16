@@ -58,7 +58,7 @@ def snapshot():
             "load_average": list(os.getloadavg())}
 
 
-def sample(command, expected, timeout=180):
+def sample(command, expected, timeout=180, max_rss_kib=None):
     """wait4 measures one child's CPU/RSS, independent of earlier children.
 
     Output goes to files so timeout handling cannot deadlock on a full pipe.
@@ -75,12 +75,22 @@ def sample(command, expected, timeout=180):
                 if pid:
                     process.returncode = os.waitstatus_to_exitcode(status)
                     break
+                if max_rss_kib is not None:
+                    status_text = Path(f"/proc/{process.pid}/status").read_text()
+                    rss = next((int(line.split()[1]) for line in status_text.splitlines()
+                                if line.startswith("VmRSS:")), 0)
+                    if rss > max_rss_kib:
+                        process.kill()
+                        process.wait()
+                        raise RuntimeError(f"{command[0]}: memory limit {max_rss_kib} KiB exceeded")
                 if time.perf_counter() - start > timeout:
                     process.kill()
                     process.wait()
                     raise RuntimeError(f"{command[0]}: timeout after {timeout}s")
                 time.sleep(.002)
         wall = time.perf_counter() - start
+        if max_rss_kib is not None and usage.ru_maxrss > max_rss_kib:
+            raise RuntimeError(f"{command[0]}: memory limit {max_rss_kib} KiB exceeded")
         if process.returncode:
             raise RuntimeError(f"{command[0]} exited {process.returncode}: "
                                + (directory / "stderr").read_text(errors="replace")[-1000:])

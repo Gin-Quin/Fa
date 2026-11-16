@@ -1361,9 +1361,9 @@ Full LLVM workspace validations share `/tmp/fa-compiler-full-suite.lock` (`flock
   Rust and a second label of the exact Fa binary. Preserve all samples, ratio of
   medians, paired median and type-7 paired quartiles. Apply the existing ±0.05
   threshold/control rule to both statistics; disagreement is unresolved.
-- Profiles use the audit inputs and explicit cache geometry; secondary targets
-  use those smaller inputs for a tractable order-of-magnitude comparison. Record
-  errors and sizes explicitly. Keep CPU, instruction, modeled cache miss, RSS and
+- Profiles use the audit inputs and explicit cache geometry. Secondary targets
+  use the same default inputs (three rounds, 512 MiB RSS ceiling); retain a second
+  audit-size series as a small-input proxy for outliers. Record errors and sizes explicitly. Keep CPU, instruction, modeled cache miss, RSS and
   executable-size measurements separate, with checked output for every execution.
 - Schema-2 phase JSON includes full compiler/artifact provenance and load at each
   boundary. Combine phases into a dated JSON and generate Markdown from it.

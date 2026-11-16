@@ -18,8 +18,9 @@ python3 benchmarks/audit/compare.py --suite all --directory benchmarks/audit/bui
 python3 benchmarks/audit/compare.py --suite all --directory benchmarks/audit/build/audit --mode prepare
 python3 benchmarks/audit/compare.py --suite all --directory benchmarks/audit/build/default --default-sizes --reuse --mode cpu --runs 21 --cpu 1 --report benchmarks/results/cpu.json
 python3 benchmarks/audit/compare.py --suite all --directory benchmarks/audit/build/audit --reuse --mode profile --report benchmarks/results/profiles.json
-# Secondary targets: audit sizes, three rounds; builds included on first invocation.
-python3 benchmarks/audit/compare.py --suite all --directory benchmarks/audit/build/audit --mode secondary --runs 3 --report benchmarks/results/secondary.json
+# Secondary targets: same default inputs, three rounds, a 512 MiB RSS ceiling.
+python3 benchmarks/audit/compare.py --suite all --directory benchmarks/audit/build/secondary --default-sizes --mode secondary --runs 3 --report benchmarks/results/secondary.json
+# Optionally repeat at audit sizes in another directory for successful small-input proxies.
 python3 benchmarks/audit/compare.py --render benchmarks/results/cpu.json benchmarks/results/profiles.json benchmarks/results/secondary.json --report benchmarks/results/baseline.json --markdown benchmarks/results/baseline.md
 ```
 
@@ -45,7 +46,7 @@ executable or output. `--reuse --rebuild-fa` checks Goose and Rust before rebuil
 only Fa. Use the real compiler for `FA`; wrappers hide dependencies and are rejected.
 Wasm manifests also validate the binary separately from its loader. Every timed,
 RSS and profiled run checks stdout, not only the warmup. No missing target is
-silently successful: error records remain in JSON.
+silently successful: error records remain in JSON and the driver exits nonzero.
 
 CPU rounds interleave Fa, Goose, Rust and **the exact Fa binary again** under the
 `fa_control` label. The order reverses each round and rotates every two rounds;
@@ -89,7 +90,7 @@ checked artifact manifests and start/end load snapshots, or an explicit `error`.
 - Profile: per-language `events` (`Ir`, `Dr`, `Dw`, `D1mr`, `DLmr`, etc.), path and
   SHA-256 of callgrind, function/assembly annotations. Counts are whole-process.
 - Secondary: runtime identity and `targets.{wasm,bun}` with CPU/wall samples and
-  medians and artifact manifest, or the explicit build/run/output error. Sizes
+  medians and artifact manifest, or the explicit build/run/output/timeout/memory-limit error. Sizes
   remain explicit: audit-size secondary times must not be divided by default-size
   native times.
 

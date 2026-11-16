@@ -68,6 +68,10 @@ class Statistics(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'timeout'):
             sample([sys.executable, '-c', 'import time; time.sleep(1)'], b'', timeout=.01)
 
+    def test_secondary_memory_ceiling_is_an_explicit_failure(self):
+        with self.assertRaisesRegex(RuntimeError, "memory limit 1 KiB exceeded"):
+            sample([sys.executable, '-c', 'import time; time.sleep(1)'], b'', max_rss_kib=1)
+
     def test_markdown_renders_errors_and_separate_override_rows(self):
         phase = {'mode': 'cpu', 'size_set': 'default', 'start': {'utc': '2026-11-16'},
                  'benchmarks': {'example': {'size': 10, 'error': 'build failed'}}}

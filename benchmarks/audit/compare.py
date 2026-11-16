@@ -300,7 +300,7 @@ def prepare(directory, build_plan, reuse=False, rebuild_fa=False):
     return {side: command(directory, side, build_plan) for side in ("fa", "goose", "rust")}, expected, manifests
 
 
-def secondary(directory, name, size, compilers, expected, runs, reuse):
+def secondary(directory, name, size, compilers, expected, runs, reuse, memory_mib):
     build_plan = plan(name, size, compilers)
     results = {}
     for target in ("wasm", "bun"):
@@ -336,7 +336,7 @@ def secondary(directory, name, size, compilers, expected, runs, reuse):
                     raise RuntimeError("wasm artifact hash differs")
             else:
                 # Validate before publishing any reuse manifest.
-                measurements.sample(command, expected)
+                measurements.sample(command, expected, max_rss_kib=memory_mib * 1024)
                 manifest = artifacts.save(destination, manifest_path, requested, relative,
                     [str(size)], "stdout.txt", expected, expected)
                 if target == "wasm":
@@ -346,7 +346,8 @@ def secondary(directory, name, size, compilers, expected, runs, reuse):
                     manifest.update(wasm=str(wasm[0].relative_to(destination)),
                                     wasm_sha256=artifacts.file_hash(wasm[0]))
                     (destination / manifest_path).write_text(json.dumps(manifest, indent=2) + "\n")
-            samples = [measurements.sample(command, expected) for _ in range(runs)]
+            samples = [measurements.sample(command, expected, max_rss_kib=memory_mib * 1024)
+                       for _ in range(runs)]
             results[target] = {"samples": samples, "cpu": statistics.median(s["cpu"] for s in samples),
                                "wall": statistics.median(s["wall"] for s in samples), "artifact": manifest}
         except (RuntimeError, OSError, subprocess.SubprocessError) as error:
@@ -380,6 +381,7 @@ def main():
     parser.add_argument("--prepare-only", action="store_true", help="Alias for --mode prepare")
     parser.add_argument("--render", type=Path, nargs="+", help="Merge phase JSON and generate Markdown")
     parser.add_argument("--markdown", type=Path)
+    parser.add_argument("--secondary-memory-mib", type=int, default=512)
     args = parser.parse_args()
     if args.render:
         tables.render(args.render, args.report, args.markdown)
@@ -390,8 +392,8 @@ def main():
         args.mode = "profile"
     if args.prepare_only:
         args.mode = "prepare"
-    if args.size is not None and args.size < 1 or args.runs < 1:
-        parser.error("size and runs must be positive")
+    if args.size is not None and args.size < 1 or args.runs < 1 or args.secondary_memory_mib < 1:
+        parser.error("size, runs and memory limit must be positive")
     if args.rebuild_fa and not args.reuse:
         parser.error("--rebuild-fa requires --reuse")
     try:
@@ -415,6 +417,7 @@ def main():
                    Path(measurements.__file__), Path(tables.__file__),
                    Path(__file__).with_name("sizes.txt"), Path(__file__).with_name("hot.py"))})}
     if args.mode == "secondary":
+        results["secondary_memory_limit_mib"] = args.secondary_memory_mib
         results["runtime"] = artifacts.executable_identity(os.environ.get("BUN", str(Path.home() / ".bun/bin/bun")))
     names = args.names or {"goose": GOOSE_SUITE, "secondary": SECONDARY, "all": sorted(DEFAULTS)}[args.suite]
     results["selection"] = list(names)
@@ -477,7 +480,8 @@ def main():
                     result[side]["repeated_events"] = [item["events"] for item in profiles]
                     result[side]["randomized_hasher"] = repetitions > 1
             elif args.mode == "secondary":
-                result["targets"] = secondary(directory, name, size, compilers, expected, args.runs, args.reuse)
+                result["targets"] = secondary(directory, name, size, compilers, expected, args.runs, args.reuse,
+                                               args.secondary_memory_mib)
             result["end"] = measurements.snapshot()
             results["benchmarks"][name] = result
             detail = (" ".join(f"Fa/{side}={value['ratio_of_medians']:.3f} ({value['verdict']})"
@@ -488,7 +492,8 @@ def main():
                                            "end": measurements.snapshot()}
             print(f"{name}: {error}", flush=True)
         save_report(report, results)
-    if any("error" in result for result in results["benchmarks"].values()):
+    if any("error" in result or any("error" in target for target in result.get("targets", {}).values())
+           for result in results["benchmarks"].values()):
         raise SystemExit(1)
 
 

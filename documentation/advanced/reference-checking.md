@@ -7,7 +7,7 @@ The checker runs on every target, before any code is generated. It has no runtim
 ## Vocabulary
 
 - A **place** is a memory location that holds a value: a local value, a parameter, a module-level value, a field of a place, an element of a collection, the characters of a string, the payload of a union.
-- A **local reference** is a name that designates a place without owning it: a `use` or `mutable use` alias, a parameter, a loop variable, an iterator. "Reference" means local reference on this page; a reference stored in a field is one side of a [relation](/advanced/relations).
+- A **local reference** is a name that designates a place without owning it: a `use` or `mutable use` alias, a parameter, a loop variable, an iterator. "Reference" means local reference on this page; a reference stored in a field is a relation or an explicit [link](/advanced/relations#links-without-a-reverse-side).
 - A reference is **valid** or **invalidated**. Using an invalidated reference (reading it, writing through it, passing it, moving another reference from it) is a compile error that names the operation that invalidated it.
 - A **fact** is what the checker knows about a value at a point of the program: an exact literal, an integer range, a narrowed union member (see [range analysis](/values/numbers#range-analysis) and [narrowing](/control-flow/conditionals#narrowing)). The facts used here are listed in [may designate](#may-designate).
 
@@ -160,7 +160,7 @@ The type of a reference is `T in path`: `T` is the type of the designated value,
 | `use score = scores.get("ana")` | `(Integer in scores)?` |
 | `use address = user.address` (not inside a collection) | `Address`: an alias, tracked like any reference, that can't be returned |
 
-- The type of a `use` is inferred, and may be written: `use someone: Person in persons = persons[1]`. It is written in full in parameters, return types and relation fields.
+- The type of a `use` is inferred, and may be written: `use someone: Person in persons = persons[1]`. It is written in full in parameters, return types, relation fields and link fields.
 - The path after `in` follows the grammar of [paths](#places-and-paths). At a call, the parameter names in the callee's reference types are replaced by the argument paths: `firstPerson(persons: Array<Person>): (Person in persons)?` called as `firstPerson(town.people)` returns a `(Person in town.people)?`. When that argument isn't a place (a temporary), the result can only be copied with `let`.
 - A parameter can be typed by another parameter: in `(self, node: Node in self.#nodes)`, the argument of `node` must be a reference into the argument of `self`. Private paths like `self.#nodes` may appear in a public signature: the caller holds a `Node in list.#nodes`, but can't read `list.#nodes`.
 - Owners are identified by their path, with the identities of [may designate](#may-designate): `town1.people` and `town2.people` are two owners; `towns[i].people` and `towns[j].people` may be the same one.
@@ -370,6 +370,28 @@ console.log(ana.name) -- error: `ana` may have been invalidated by `people.delet
 use ana = people.find((person) => person.name == "Ana") -- valid: `ana` may be invalidated, so it can be declared again
 ```
 
+## Link containment
+
+For every stored link holder H and target E, the checker proves E is an initialized whole element of the exact GrowingPool/GrowingArray instance, and every operation ending that collection incarnation also ends every surviving holder. Paths are static owner identities, with no runtime owner tag. Cross-pool links require both pools under one declared ordinary owner; independent module globals are not an enclosing owner. A direct self-linked module GrowingPool may be its own boundary. Shared handles, task frames and escaping environments stop containment: a Mutex holder cannot link into an external pool. Move/copy a complete closed owner into that payload instead.
+
+The containment graph is computed from declared types/paths, not current non-null heap contents. Resetting a target is allowed if every incoming holder dies in that reset (including holders inside its own elements). A root field or sibling collection that may survive makes target-only reset/extraction invalid, even after clearing a visible root. Moving/copying requires outgoing target bindings as well as incoming holders; only the complete declared owner rebinds them. Internal holder relocation is allowed under the same binding and ordinary category rules.
+
+| Rejection | Diagnostic and fix |
+| --- | --- |
+| Removable/unsupported target | Name the collection: use GrowingPool/GrowingArray or a relation with its reverse side. |
+| Different owner instance | Name both full paths: expected Node in second.nodes, got Node in first.nodes. |
+| Detached holder, return, throw or escaping capture | This value contains links into model.nodes; borrow with use, project its data, or copy/move the complete model. |
+| Partial target reset/extraction | model.root / model.otherNodes[..].next may outlive model.nodes; replace/move the complete model. |
+| Broad invalidating helper | Its declared mutates model.nodes may end the target incarnation; use the complete owner or declare the precise size/capacity/data effect. |
+| Recursive mutation only names starting node | This call may write self.nodes[..].world; declare that path. |
+| Destructor reaches dying target | The destructor/call reads a pool destroyed by this boundary; remove that access or move the resource outside the boundary. |
+
+New diagnostic IDs are allocated when containment is implemented; `REF010` already rejects hidden ordinary reference storage and `REF020` checks dependent reference arguments. Relation/owner fields retain their cleanup and full-owner-path rules; they do not count as untracked incoming link holders.
+
+Following a link restarts at its target collection, just like a relation: recursive traversal writes `self.nodes[..].world`. List/field writes and collection size/capacity effects do not invalidate target aliases. Replacing/removing InlineArray slots invalidates slot/payload aliases under its collection rules, while already bound link targets remain valid. Incoming links survive whole-element/tag replacement; old union payload borrows do not. A broad helper is checked by its declared effects even if its current body only appends.
+
+Destructors must not access any pool destroyed in the same boundary, directly, through module values or callees. Check their read/call summaries before admitting the resource. Destruction never follows a link. Complete-owner moves invalidate local aliases; copies create independent closed bindings. Compile-time evaluation applies the same containment rules.
+
 :::implementation
 ## Implementation details
 
@@ -380,4 +402,9 @@ The checker is shared by every target. It runs on the typed tree, after name res
 - **Joins.** A join is a pointwise union: invalidated wins, `mutable use` sets are united, identities are widened to their convex hull. Loops iterate until the state doesn't change; intervals are widened as for [range analysis](/values/numbers#range-analysis), so a loop needs at most a few passes.
 - **Interfaces.** The inferred freshness of a returned reference and the escape bit of each function-typed parameter are stored with the function's inferred effects, in the same cache entry.
 - **Messages.** An error names the reference, the operation that invalidated it and its line, and proposes the fix: `declare it again with use someone = persons[...]`, or `reuse` for a `mutable use`, or a copy with `let` for an overlapping argument.
+
+### Portable reference contracts
+
+Retain symbolic owner paths and dependent reference parameters/results before ordinary type erasure. Substitute parameter/receiver paths at calls, including private fields, imported declarations and generic instances. Validate returned places and dependent arguments with the existing place/identity engine. A user result has unknown identity unless a direct callee's every reachable reference result is fresh; function values never promise freshness. Publish contracts and freshness in semantic interfaces/cache hashes. Local-pool escapes and temporary result borrows must fail before code generation. Link containment is an additional type/path dependency check using the same ownership engine, not a second alias or heap-reachability solver.
+
 :::

@@ -311,3 +311,25 @@ fn namespace_declarations() {
 		"export namespace = {\n\tlet version = 1\n\tuse User = User\n\tstatic answer = 42\n\ttest \"adds\" {\n\t\tassert ((1 + 1) == 2)\n\t}\n}",
 	);
 }
+
+#[test]
+fn contextual_link_fields() {
+	assert_statement(
+		"{ link next: (Node in nodes)? = none }",
+		"{\n\tlink next: (Node in nodes)? = none\n}",
+	);
+	assert_statement(
+		"{ link: Integer, link = 1 }",
+		"{\n\tlink: Integer\n\tlink = 1\n}",
+	);
+	assert_statement("link + 1", "(link + 1)");
+	let tree = crate::parse(
+		"type Graph = { type Node = Union { Leaf, Pair = { link child: Node in nodes } } }",
+	);
+	assert!(!tree.has_errors(), "{:?}", tree.diagnostics);
+	assert!(
+		tree.nodes
+			.iter()
+			.any(|node| matches!(node, crate::nodes::Node::Link { .. }))
+	);
+}

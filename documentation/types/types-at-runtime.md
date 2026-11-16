@@ -142,6 +142,12 @@ This works because the members of a union are always [distinguishable at runtime
 
 Reflection is only needed when you want the *shape* of a type as data: for schema validation, serialization, or generating a form from a type. For that, use `@typeToSchema`.
 
+## Stored links in reflection
+
+Reflection retains a field's storage kind (ordinary, relation or explicit link), exact symbolic owner path and list shape. It also preserves InlineArray capacity and GrowingPool/GrowingArray Index. A link is never expanded into an owned recursive field. `Schema.Reference` still means a recursive **type name**, not a pool element reference. `TypeFromSchema` rejects unresolved or escaping owner paths instead of manufacturing an unbound link.
+
+Generated serializers/worker codecs use analyzed types at build time; they do not interpret schemas at runtime. A complete graph can become a compile-time immutable constant under the same containment/copy rules; exported edges are symbolic identities, never interpreter addresses. Generic print/equality/hash omit link fields. JSON conversion of graph-bearing types is rejected: project ordinary fields and identifiers explicitly.
+
 :::implementation
 ## Implementation details
 
@@ -158,5 +164,10 @@ Reflection is only needed when you want the *shape* of a type as data: for schem
 ### Type reconstruction
 
 - `TypeFromSchema` builds every schema member except `Schema.Fields`; pinned enumeration values other than their positions remain unsupported. A named union or enumeration takes the enclosing `Schema.Named` name, or the name of the applying declaration. A reference to an enclosing named schema builds a recursive type. A schema that is the value of a generic type function is evaluated for each application; an error is `TF004` at that application, with its `message`.
+
+
+### Link metadata and constants
+
+Keep storage kind, owner paths, capacity and Index in analyzed reflection metadata on every target. Reconstruction validates closed bindings before layout generation; Schema.Reference retains recursive-type semantics. Native/interpreter graph constants relocate symbolic owner/ordinal identities; JavaScript builds target objects before edges. Generated codecs/copy operations receive this metadata even in erased generic code. No runtime schema interpreter or accidental owning recursion is permitted.
 
 :::

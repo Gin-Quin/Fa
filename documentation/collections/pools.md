@@ -159,6 +159,10 @@ Pools are the natural home for the objects of a graph, a scene, or an entity sys
 | Iterate one field over many objects | [`Columnar`](/collections/columnars) |
 | Any of the above, never removing | [growing collections](/collections/growing-collections) |
 
+## Relations or links
+
+A deletable Pool stores persistent references as [relations](/advanced/relations): inverse maintenance makes deletion safe. A `link` field cannot target Pool; the diagnostic says that its elements can disappear and suggests GrowingPool/GrowingArray or a relation with its reverse side. Choosing GrowingPool adds [insertion order and Index limits](/collections/growing-collections#links-and-index-limits), and permits explicit links within a complete owner. Removing a reverse declaration never converts a relation to a link.
+
 :::implementation
 ## Implementation details
 

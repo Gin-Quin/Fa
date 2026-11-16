@@ -1,6 +1,12 @@
 # Implementation decisions
 
 Points the documentation left open or contradictory, and how the compiler resolves them. Each entry says where the question came from. When a decision changes what a user writes, the documentation is updated to match.
+## Links, step 1a (2026-11-16)
+
+The lead adopts Option A of [Pool links](pool-links.md), including its ten proposed answers and the decision reproduced there. `link` is a contextual field modifier; ordinary reference fields remain relations. Links target whole elements of GrowingPool/GrowingArray inside a complete declared owner. The collection chooses UInt8/16/32/64 Index (default UInt32), without silent widening; index exhaustion stops before publication. GrowingPool iteration is insertion order. InlineArray is a general bounded initialized-prefix list, with CapacityError on possibly-full push. Copies/moves preserve a complete owner's internal links; detached holders and incomplete owners are refused. Print/equality/hash omit links, JSON requires an explicit data projection, workers receive complete closed owners only. Stable dense pages and fixed-stride union slots are the initial native layout. Proven deletion, owning edges, packed variable-sized nodes and lru changes are deferred.
+
+Implementation sequence: reject hidden reference fields; preserve reference function owner paths; InlineArray independently; then containment/effects, engines, complete-owner copies and boundaries. Unsupported link storage remains rejected while these slices land. Reference contracts belong to callable interfaces and must survive method/parameter substitution, imports and function values; freshness crosses direct calls only, with every reachable reference result fresh.
+
 
 ## Programs and the command line
 

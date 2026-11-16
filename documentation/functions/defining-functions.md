@@ -256,6 +256,12 @@ Unlike a parameter, a module-level value can be replaced: a function that declar
 
 A value passed to a mutated parameter can't overlap anything else the call uses: another argument, a requirement or a module-level value that the function uses, or a reference captured by a callback argument. `swap(team, team)` with two mutated parameters is an error, since both arguments designate the same value; so is any call where the compiler can't prove that they are distinct. `use` aliases can still designate the same value as each other. See [arguments that alias](/advanced/reference-checking#arguments-that-alias).
 
+### Effects through links
+
+A method traversing [links](/advanced/relations#links-without-a-reverse-side) declares writes at the target collection: `mutates self.nodes[..].world`. `mutates node.world` covers only its starting place, not every node reached recursively. Changing `node.children` declares that field alone; appending nodes declares `self.nodes.size`. There is no implied reverse write. Growth and link writes preserve target aliases; a broad `mutates self.nodes` still needs the complete-owner containment proof because it could reset the pool.
+
+Use `(self, node: Node in self.nodes)` for a dependent reference parameter and `: Node in self.nodes` for a reference result. Function values, generic functions and imports retain this owner substitution; an inferred ordinary return is not a reference. The complete [scene example](/advanced/relations#complete-scene) snapshots its scalar-only Transform before recursion. Passing `node.world` directly to a call that may mutate every world overlaps if a child points back to node; links do not assert a tree.
+
 ### Invalidating references
 
 Some operations remove a precise element of a collection, or shift the following ones: deleting an element of a `Pool` or a `Map` removes it, deleting an element of an `Array` shifts the elements after it. The local references to these elements must be declared again before being used.
@@ -728,4 +734,9 @@ Visible names, default owners, written parameter origins and finalizer/method ca
 ### Native and WebAssembly recursion
 
 A small base case of a direct recursive call is evaluated at the call site when its guard and result use only scalar parameters and operations; an empty node of an arena, whose optional fields are all `none`, is also such a base case. A function whose body is a `when` over a union parameter has the same shortcut for a member whose fields are all scalar: at each recursive call, the member is tested on the evaluated argument and its arm (scalar arithmetic over its fields, the parameters and constants, without calls or `try`) is computed in place; the arms before it may only test other members. Arguments are evaluated once, in order. In speed builds, an integer sum through a final optional recursive call (`prefix + (child?.walk() ?? 0)`) exposes both return paths to LLVM's tail-recursion elimination, so that the last recursive edge can become an accumulator loop. Other effects and calls keep their evaluation order.
+
+### Reference interfaces on every target
+
+Reference result and parameter contracts retain symbolic owner paths through methods, generic specialization, function values and imports. Resolve the caller's collection path after call effects. Native aliases borrow existing places without copying; JavaScript object results retain object identity and primitive results carry their slot into the statically known collection. Direct all-return-path freshness is interface metadata; indirect calls retain the owner contract but not freshness. Link traversal effects restart at the target collection and use the ordinary overlap engine.
+
 :::

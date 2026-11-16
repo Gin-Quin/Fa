@@ -21,9 +21,9 @@ This page explains the model with examples. [Reference checking](/advanced/refer
 A reference is either:
 
 - **local**: declared with `use` or `mutable use`, received as a parameter, or returned by a function. The compiler tracks it statically, call after call. This page is about local references.
-- **stored**: a field typed `(Person in people)?` or `Pool<Person in people>`. A stored reference is always one side of a [relation](/advanced/relations), with a declared reverse side: the compiler updates both sides on every write, and when the target is deleted.
+- **stored**: a field typed `(Person in people)?` or `Pool<Person in people>`. A stored reference is either a [relation](/advanced/relations), maintained on writes/deletion, or an explicit [link](/advanced/relations#links-without-a-reverse-side), contained by an owner of growing collections.
 
-A local reference can't be stored as it is: a field typed `Person` or `Person?` owns a value under the [storage rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles). To store a reference, declare a relation. A local collection of references, like `Array<Person in people>`, is not allowed either: keep indices, or declare a relation `Pool`.
+A local reference can't be stored as it is: a field typed `Person` or `Person?` owns a value under the [storage rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles). To store a reference, declare a relation or an explicit link field. A local collection of references, like `Array<Person in people>`, is not allowed either: keep indices, or declare a relation `Pool`.
 
 ## Invalidation
 
@@ -167,7 +167,7 @@ if someone is not none {
 }
 ```
 
-Stored references don't need any of this: they are [relations](/advanced/relations), cleaned up at runtime when their target is deleted.
+Stored references use a different proof: relations clean up on deletion, while explicit links require growing targets and [complete-owner containment](/advanced/reference-checking#link-containment).
 
 ## After invalidation
 
@@ -327,9 +327,15 @@ if first is not none {
 }
 ```
 
+## Owner paths through methods
+
+An enclosing type binds its nested element types to each owner's collection instance. Methods may return `Node in self.nodes`; dependent parameters may write `(model: Model, node: Model.Node in model.nodes)`. Calls replace self/parameter paths with the caller's full path, including private and nested paths, through generic functions, imports and function values. Results stored with `use` borrow the caller's collection; an inferred ordinary result is still owned data. Only a direct call whose every reachable reference result comes from a fresh add exports freshness; calls through function values have unknown identity.
+
+A function following stored links needs that named owner path (or a module owner), because the target binding comes from the signature. A structural Node view may read ordinary fields but cannot invent a missing owner binding. Return a complete locally built owner to keep it alive; returning a reference into a local pool is `REF008`/`REF009`. A reference result into a temporary cannot be bound with `use` (`REF017`, alias of `REF004`): bind the owner first, or request an independent data value with `let` where ownership permits it.
+
 ## Moving an element out
 
-Every collection has a `take` method, which removes an element and returns it as a standalone value:
+Every deletable collection has a `take` method, which removes an element and returns it as a standalone value:
 
 ```fa
 mutable arrayOfPersons = [Person {}, Person {}, Person {}]

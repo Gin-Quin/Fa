@@ -829,6 +829,7 @@ impl TypedSyntaxTree {
 				let paths_str = self.items_to_string(paths, ", ");
 				format!("{signature_str} {} {paths_str}", kind.keyword())
 			}
+			Node::Link { right } => format!("link {}", self.node_to_string(*right)),
 			Node::Readonly { right } => {
 				let right_str = self.node_to_string(*right);
 				format!("readonly {right_str}")

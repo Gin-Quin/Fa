@@ -77,6 +77,10 @@ The range on `age` is enforced by the parser: a payload with `"age": 200` is rej
 A missing field takes its default value, freshly built for each object, even when the field is optional. Without a default, a missing optional field is `none`; another missing field is a `JsonError`.
 
 Named union members carry a `"type"` property with their member name: `{ "type": "Circle", "radius": 1 }`. A member without data is `{ "type": "Point" }`. Non-object data, or an object with its own `type` field, goes under `"value"`; a literal member stays the literal. An unknown tag is a `JsonError` listing the accepted members.
+### JSON and graph owners
+
+Converting a type containing explicit [links](/advanced/relations#links-without-a-reverse-side) to JSON is a compile-time error, including a complete owner: silently omitting edges or recursively following cycles would change the data. Use an explicit data type containing node identifiers and ordered adjacency lists. Validate every identifier when rebuilding links, and publish only the resulting complete owner. Generic printing, equality and hashing omit link fields; that observation rule does not authorize a JSON conversion.
+
 
 ## Errors are part of the signature
 

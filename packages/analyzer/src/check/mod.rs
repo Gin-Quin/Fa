@@ -904,6 +904,7 @@ impl Walker<'_> {
 			}
 			View::UpdateFields { target, value } => self.check_update_fields(n, target, value),
 			View::Readonly(field) => self.check_readonly(n, field),
+			View::Link(_) => self.unsupported(n, "stored link fields (not implemented yet)"),
 
 			// patterns (patterns.rs)
 			View::Destructuring {

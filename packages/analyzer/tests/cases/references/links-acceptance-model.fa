@@ -1,0 +1,18 @@
+-- pending: links slices 3–7 (adopted specification; no owned-copy fallback)
+type Model = {
+	nodes: GrowingPool<Node> = []
+	labels: GrowingPool<Label> = []
+	link root: (Node in nodes)? = none
+	type Label = { text: String }
+	type Node = {
+		value: Int32
+		link next: (Node in nodes)? = none
+		link label: (Label in labels)? = none
+	}
+}
+mutable first: Model = {}
+mutable second: Model = {}
+use label = first.labels.add({ text = "one" })
+use node = first.nodes.add({ value = 1, label = label })
+first.root = node
+-- second.root = node -- error: expected Node in second.nodes, got Node in first.nodes

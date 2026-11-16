@@ -831,6 +831,7 @@ impl<'a> Lowerer<'a> {
 			| View::ArrayPattern { .. }
 			| View::TuplePattern { .. }
 			| View::Readonly(_)
+			| View::Link(_)
 			| View::ErrorType
 			| View::Union { .. }
 			| View::Optional(_)

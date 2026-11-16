@@ -267,6 +267,11 @@ impl Walker<'_> {
 			let mut reactive = false;
 			let (field, readonly) = match syntax::view(&tree, item) {
 				View::Readonly(inner) => (inner, true),
+				View::Link(_) => {
+					self.unsupported(item, "stored link fields (not implemented yet)");
+					parts.incomplete = true;
+					continue;
+				}
 				// `reactive count: Integer` (advanced brief §11.2)
 				View::Declaration {
 					kind: BindingKind::Reactive,

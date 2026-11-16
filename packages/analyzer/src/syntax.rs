@@ -665,6 +665,8 @@ pub enum View<'t> {
 	},
 	/// `readonly field: T` in a type.
 	Readonly(NodeId),
+	/// A contextual stored-link field modifier.
+	Link(NodeId),
 }
 
 fn binding_kind(kind: DeclarationKind) -> BindingKind {
@@ -1215,6 +1217,7 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 			paths: list(paths),
 		},
 		Node::Readonly { right } => View::Readonly(id(*right)),
+		Node::Link { right } => View::Link(id(*right)),
 
 		Node::Await { right } => View::Await(id(*right)),
 		Node::Copy { right } => View::Copy(id(*right)),

@@ -26,6 +26,10 @@ fn parse_parameter(context: &mut Context<'_>) -> usize {
 		context.go_to_next_token();
 	}
 
+	if context.kind() == TokenKind::TripleDot && context.lookup_next_token_kind() == TokenKind::Copy
+	{
+		context.go_to_next_token();
+	}
 	if context.kind() == TokenKind::Copy {
 		context.error_expected_name("Expected a parameter name");
 		context.skip_until(&PARAMETER_STOP_TOKENS);

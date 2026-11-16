@@ -28,7 +28,7 @@ pub(crate) fn parse_for(context: &mut Context<'_>, is_compile_time: bool) -> usi
 				index = Some(context.name());
 				context.go_to_next_token();
 			} else {
-				context.error_at_token(format!(
+				context.error_expected_name(format!(
 					"Expected the name of the index after `,`, like `{keyword} item, index in items`"
 				));
 			}

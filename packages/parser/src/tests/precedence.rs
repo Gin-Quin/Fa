@@ -50,9 +50,13 @@ fn reserved_copy_cannot_be_a_declared_name() {
 		"derived copy = 1",
 		"function apply = (copy: Integer) => 1",
 		"function apply = (copy) => 1",
+		"function apply = (...copy: Integer) => 1",
 		"let [copy] = [1]",
 		"let { field as copy } = source",
 		"for copy in values {}",
+		"for item, copy in values {}",
+		"read() catch copy => 0",
+		"reuse copy = source",
 		"type Record = { copy: Integer }",
 		"function generic = <copy>(item: Integer) => item",
 	] {

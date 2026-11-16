@@ -198,7 +198,7 @@ pub(crate) fn parse_reuse(context: &mut Context<'_>, stop_at: &[TokenKind]) -> u
 	context.go_to_next_token();
 
 	if context.kind() != TokenKind::Identifier {
-		context.error_at_token(
+		context.error_expected_name(
 			"Expected the name of a `mutable use` reference after `reuse`, like `reuse best = player`",
 		);
 		context.skip_to_statement_end();

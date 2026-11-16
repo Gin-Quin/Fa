@@ -122,6 +122,12 @@ reflection/JSON/worker boundaries. Acceptance programs are
 `references/links-acceptance-{model,tree,scene,chain-index-copy,containment-errors,target-errors}.fa` in the analyzer cases. Integrate
 `collections/inline-arrays.md` from its assigned branch before the website build.
 
+Native storage facts remain conservative for types containing synchronization
+or FFI handles whose stable names are not yet defined (`Sync`, `Pointer`,
+`CString`, `CArray`). Extend that naming format in a separate reviewed change,
+with cache-version invalidation; physical layout equality already uses canonical
+types and must not be replaced by fact-name equality.
+
 ## 4. Performance
 
 - **Faithful Goose ports (2026-11-16).** The [sixteen-port audit](../benchmarks/audit/ports/README.md)

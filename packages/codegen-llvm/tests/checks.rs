@@ -795,6 +795,104 @@ console.log(items.length)
 	}
 
 	#[test]
+	fn positive_constant_remainders_keep_the_guarded_reciprocal_path() {
+		let source = r#"
+let modulus = 1_000_000_007
+function moduleConstant = (value: Integer): Integer => {
+	mutable result = value
+	for i in 0..4 { result = (result + i) %% modulus }
+	result
+}
+function localConstant = (value: Integer): Integer => {
+	let divisor: Integer = 7
+	mutable result = value
+	for i in 0..4 { result = (result + i) %% divisor }
+	result
+}
+function negative = (value: Integer): Integer => {
+	let divisor = -7
+	mutable result = value
+	for i in 0..4 { result = (result + i) %% divisor }
+	result
+}
+function quotient = (value: Integer): Integer => {
+	let divisor = 7
+	mutable result = value
+	for i in 0..4 { result = (result + i) // divisor }
+	result
+}
+function general = (value: Integer, divisor: Integer): Integer throws DivisionByZero => {
+	mutable result = value
+	for i in 0..4 { result = try (result + i) %% divisor }
+	result
+}
+function mutableDivisor = (value: Integer): Integer => {
+	mutable divisor = 7
+	mutable result = value
+	for i in 0..4 { result = result %% divisor
+	divisor += 1 }
+	result
+}
+function innerConstant = (value: Integer): Integer => {
+	mutable result = value
+	for i in 0..4 { let divisor = 7
+	result = result %% divisor }
+	result
+}
+function minusOne = (value: Integer): Integer => {
+	let divisor = -1
+	mutable result = value
+	for i in 0..4 { result = result %% divisor }
+	result
+}
+console.log(moduleConstant(-17), localConstant(-17), negative(-17), quotient(-17), general(-17, 0) catch _error => 99, mutableDivisor(-17), innerConstant(-17), minusOne(-17))
+"#;
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("constant-remainder-{target:?}"),
+				source,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			for name in ["fa.moduleConstant", "fa.localConstant"] {
+				let body = function(&ir, name);
+				assert_eq!(
+					body.contains("invariant_divisor:"),
+					target != Target::Wasm,
+					"{body}"
+				);
+				if target != Target::Wasm {
+					assert!(
+						body.contains("icmp sge i64"),
+						"negative values need the fallback: {body}"
+					);
+					assert!(body.contains("mul i128"), "the unsigned reciprocal: {body}");
+				}
+				assert!(body.contains("srem i64"), "the signed fallback: {body}");
+			}
+			for name in [
+				"fa.negative",
+				"fa.quotient",
+				"fa.general",
+				"fa.mutableDivisor",
+				"fa.innerConstant",
+				"fa.minusOne",
+			] {
+				let body = function(&ir, name);
+				assert!(!body.contains("invariant_divisor:"), "{body}");
+				assert!(!body.contains("mul i128"), "{body}");
+			}
+			let general = function(&ir, "fa.general");
+			assert_eq!(
+				count(general, "call ptr @fa_error_division_by_zero()"),
+				1,
+				"{general}"
+			);
+		}
+	}
+
+	#[test]
 	fn divisions_check_the_divisor_and_the_minimum_only_when_needed() {
 		let ir = ir_of(
 			"divisions",

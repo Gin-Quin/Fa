@@ -1788,6 +1788,22 @@ The dataset round-trips byte-for-byte; all 27 checkpoint rows are retained.
 Part 2 remains unimplemented at this completed-item context boundary.
 
 
+## Arrays and arithmetic performance (implementation, 2026-11-16)
+
+- **Constant remainder:** an exact positive immutable divisor declared outside
+  the innermost loop can use the existing guarded unsigned reciprocal for a
+  64-bit signed `%%` on native/freestanding targets. The singleton type, use
+  interval or initializer interval supplies the constant proof. The guard
+  still checks the actual divisor is positive and the dividend nonnegative;
+  negative dividends keep the floor-adjusted signed remainder. Zero and
+  minimum/-1 guards still precede this lowering. Exact negative/zero divisors,
+  constant quotients, unsigned helper calls and wasm retain their old paths.
+  No collection representation, runtime ABI or floating operation changes.
+- Firing/fallback IR checks and programs cover local/module constants, signed
+  endpoints, generic instances, callbacks/function values, captured constants,
+  suspension and whole-program/per-unit package compilation. Measurements and
+  final validation are recorded in the lead's `reports/perf-arrays.md`.
+
 ## Collection map review fixes (2026-11-16)
 
 C1 exposed an ABI disagreement: a generic `deleteWhere` used the generic

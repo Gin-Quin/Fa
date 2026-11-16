@@ -2999,6 +2999,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				return Ok(Val::void());
 			}
 		}
+		// Resolve the target once before evaluating its replacement.
+		let slot = self.place(target)?;
 		let value_lowered = self.expr(value)?;
 		if value_lowered.repr == Repr::Never {
 			return Ok(Val::never());
@@ -3009,7 +3011,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			&& self.is_place_read(value)
 			&& self.copies_bytewise(item_type, value)?
 		{
-			let slot = self.place(target)?;
 			let destination = self.load(slot)?;
 			let item = self.item_repr(item_type, value)?;
 			let size =
@@ -3027,7 +3028,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			)?;
 			return Ok(Val::void());
 		}
-		let slot = self.place(target)?;
 		if slot.repr == Repr::Str
 			&& self
 				.constant_text(value)

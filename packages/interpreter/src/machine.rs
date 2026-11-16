@@ -87,7 +87,7 @@ struct Gather {
 enum Finish {
 	Arguments(Target, Vec<usize>),
 	Builtin(&'static str),
-	Mutate(&'static str, Place),
+	Mutate(&'static str, Loan),
 	Array,
 	Set,
 	Map,
@@ -95,14 +95,19 @@ enum Finish {
 	Object(Vec<Arc<str>>),
 	Template,
 	Range(bool),
-	Place(Place, PlaceAction),
 }
 
 enum PlaceAction {
 	Read,
 	Lend,
-	Write(Value),
-	Mutate(&'static str, Vec<Value>),
+	Assign(Node),
+	Mutate(&'static str, Vec<Node>),
+}
+
+struct PlaceEvaluation {
+	loan: Loan,
+	remaining: std::vec::IntoIter<Step>,
+	action: PlaceAction,
 }
 
 struct ResolvedPlace {
@@ -175,7 +180,8 @@ enum Continuation {
 	Fallback(Node),
 	Callee(Call),
 	Gather(Gather),
-	Assign(Place),
+	Assign(Loan),
+	PlaceIndex(PlaceEvaluation),
 	Loop(Node),
 	WhileCondition(Node, Node),
 	WhileBody(Node, Node),
@@ -402,9 +408,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Op::Let(slot, value) => {
 				self.evaluate_after(*value, Continuation::Unary(Unary::Let(*slot)))
 			}
-			Op::Assign(place, value) => {
-				self.evaluate_after(*value, Continuation::Assign(place.clone()))
-			}
+			Op::Assign(place, value) => self.place(place.clone(), PlaceAction::Assign(*value)),
 			Op::Read(place) => self.place(place.clone(), PlaceAction::Read),
 			Op::Lend(place) => self.place(place.clone(), PlaceAction::Lend),
 			Op::Bind(slot, value) => {
@@ -493,10 +497,9 @@ impl<'i, 'h> Machine<'i, 'h> {
 				arguments.iter().map(|&node| Input::Expr(node)).collect(),
 				Finish::Builtin(path),
 			),
-			Op::Mutate(path, place, arguments) => self.gather(
-				arguments.iter().map(|&node| Input::Expr(node)).collect(),
-				Finish::Mutate(path, place.clone()),
-			),
+			Op::Mutate(path, place, arguments) => {
+				self.place(place.clone(), PlaceAction::Mutate(path, arguments.clone()))
+			}
 			Op::Array(items) => self.gather_items(items.clone(), Finish::Array),
 			Op::Set(items) => self.gather_items(items.clone(), Finish::Set),
 			Op::Map(items) => self.gather_items(items.clone(), Finish::Map),
@@ -626,15 +629,74 @@ impl<'i, 'h> Machine<'i, 'h> {
 	}
 
 	fn place(&mut self, place: Place, action: PlaceAction) -> Result<Action, Flow> {
-		let inputs = place
-			.steps
-			.iter()
-			.filter_map(|step| match step {
-				Step::Index(node) => Some(Input::Expr(*node)),
-				_ => None,
-			})
-			.collect();
-		self.gather(inputs, Finish::Place(place, action))
+		let loan = self.loan(&ResolvedPlace {
+			slot: place.slot,
+			steps: Vec::new(),
+		})?;
+		self.place_next(PlaceEvaluation {
+			loan,
+			remaining: place.steps.into_iter(),
+			action,
+		})
+	}
+
+	fn place_next(&mut self, mut state: PlaceEvaluation) -> Result<Action, Flow> {
+		while let Some(step) = state.remaining.next() {
+			// A failed prefix stops before evaluating any later index.
+			self.read_loan(&state.loan)?;
+			match step {
+				Step::Index(node) => {
+					return self.evaluate_after(node, Continuation::PlaceIndex(state));
+				}
+				Step::Field(name) => self.place_step(&mut state, PlaceStep::Field(name))?,
+			}
+		}
+		match state.action {
+			PlaceAction::Read => Self::done(self.read_loan(&state.loan)?.clone()),
+			PlaceAction::Lend => {
+				self.read_loan(&state.loan)?;
+				Self::done(Out::Loan(state.loan))
+			}
+			PlaceAction::Assign(value) => {
+				self.evaluate_after(value, Continuation::Assign(state.loan))
+			}
+			PlaceAction::Mutate(path, arguments) => {
+				self.read_loan(&state.loan)?;
+				self.gather(
+					arguments.into_iter().map(Input::Expr).collect(),
+					Finish::Mutate(path, state.loan),
+				)
+			}
+		}
+	}
+
+	fn place_step(&self, state: &mut PlaceEvaluation, mut step: PlaceStep) -> Result<(), Flow> {
+		let parent = self.read_loan(&state.loan)?;
+		let insert = state.remaining.len() == 0 && matches!(state.action, PlaceAction::Assign(_));
+		match &mut step {
+			PlaceStep::Index(key) => {
+				if !insert || !matches!(parent, Value::Map(_)) {
+					builtins::index_ref(parent, key)?;
+				}
+				// A reference designates the position selected now, including
+				// when its index was written relative to the end.
+				if let (Value::Array(items) | Value::Tuple(items), Value::Integer(index)) =
+					(parent, key) && *index < I256::ZERO
+				{
+					*index += I256::from(items.len() as u64);
+				}
+			}
+			PlaceStep::Field(name) if !insert => {
+				builtins::field_ref(parent, name)?;
+			}
+			PlaceStep::Field(_) => {}
+			PlaceStep::Capture(_) | PlaceStep::Bound(_) => {
+				unreachable!("source projections are fields and indices")
+			}
+		}
+		self.interpreter.reserve(Loan::projection_bytes(1))?;
+		state.loan.push(step);
+		Ok(())
 	}
 
 	fn finish(&mut self, finish: Finish, values: Vec<Option<Out>>) -> Result<Action, Flow> {
@@ -706,42 +768,19 @@ impl<'i, 'h> Machine<'i, 'h> {
 					Self::done(builtins::call_internal(self.interpreter, path, values)?)
 				}
 			}
-			Finish::Mutate(path, place) => self.place(place, PlaceAction::Mutate(path, values)),
-			Finish::Place(place, action) => {
-				let mut keys = values.into_iter();
-				let resolved = ResolvedPlace {
-					slot: place.slot,
-					steps: place
-						.steps
-						.into_iter()
-						.map(|step| match step {
-							Step::Field(name) => PlaceStep::Field(name),
-							Step::Index(_) => PlaceStep::Index(keys.next().expect("a place index")),
-						})
-						.collect(),
-				};
-				let loan = self.loan(&resolved)?;
-				match action {
-					PlaceAction::Read => Self::done(self.read_loan(&loan)?.clone()),
-					PlaceAction::Lend => {
-						self.read_loan(&loan)?;
-						Self::done(Out::Loan(loan))
-					}
-					PlaceAction::Write(value) => {
-						*Self::locate(&mut self.frames, &loan)? = value;
-						Self::done(Value::None)
-					}
-					PlaceAction::Mutate(path, mut arguments) if Callback::mutating(path) => {
-						let receiver = self.read_loan(&loan)?.clone();
-						arguments.insert(0, receiver);
-						self.start_callback(path, arguments, CallbackFinish::Mutate(loan))
-					}
-					PlaceAction::Mutate(path, arguments) => Self::done(builtins::mutate_internal(
+			Finish::Mutate(path, loan) => {
+				if Callback::mutating(path) {
+					let receiver = self.read_loan(&loan)?.clone();
+					let mut arguments = values;
+					arguments.insert(0, receiver);
+					self.start_callback(path, arguments, CallbackFinish::Mutate(loan))
+				} else {
+					Self::done(builtins::mutate_internal(
 						self.interpreter,
 						path,
 						Self::locate(&mut self.frames, &loan)?,
-						arguments,
-					)?),
+						values,
+					)?)
 				}
 			}
 		}
@@ -1044,8 +1083,13 @@ impl<'i, 'h> Machine<'i, 'h> {
 						}
 						self.gather_next(gather)
 					}
-					Continuation::Assign(place) => {
-						self.place(place, PlaceAction::Write(self.value(value)?))
+					Continuation::Assign(loan) => {
+						*Self::locate(&mut self.frames, &loan)? = self.value(value)?;
+						Self::done(Value::None)
+					}
+					Continuation::PlaceIndex(mut state) => {
+						self.place_step(&mut state, PlaceStep::Index(self.value(value)?))?;
+						self.place_next(state)
 					}
 					Continuation::WhileCondition(condition, body) => {
 						if boolean(self.value(value)?)? {
@@ -1503,16 +1547,17 @@ mod ownership_tests {
 		let mut machine = Machine::new(&mut interpreter, code).unwrap();
 		let entries = Arc::new(Vec::new());
 		machine.locals()[0] = Value::Map(Arc::clone(&entries)).into();
-		let result = machine.finish(
-			Finish::Place(
-				Place {
+		let mut state = PlaceEvaluation {
+			loan: machine
+				.loan(&ResolvedPlace {
 					slot: 0,
-					steps: vec![Step::Index(0)],
-				},
-				PlaceAction::Read,
-			),
-			vec![Some(Value::String(Arc::from("missing")).into())],
-		);
+					steps: Vec::new(),
+				})
+				.unwrap(),
+			remaining: Vec::new().into_iter(),
+			action: PlaceAction::Read,
+		};
+		let result = machine.place_step(&mut state, PlaceStep::Index(Value::string("missing")));
 		assert!(matches!(result, Err(Flow::Error(Error::Thrown(_)))));
 		let Out::Value(Value::Map(current)) = &machine.frame().locals[0] else {
 			panic!("the owner remains a map")

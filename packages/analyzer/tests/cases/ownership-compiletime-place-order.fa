@@ -1,0 +1,48 @@
+-- prints: 1 1
+-- prints: 12 12
+-- prints: 13 13
+-- prints: 1 1
+
+function next = (state: { calls: Integer }, amount: Integer): Integer mutates state.calls => {
+	state.calls = state.calls * 10 + amount
+	0
+}
+
+function inspect = (value: Integer): Integer => value
+
+function failedPrefix = (): Integer => {
+	mutable state = { calls = 0 }
+	let rows: Array<Array<Integer>> = []
+	do { inspect(rows[next(state, 1)][next(state, 2)]) } catch _error => 0
+	state.calls
+}
+
+function assigned = (): Integer => {
+	mutable state = { calls = 0 }
+	mutable values = [1]
+	do { values[next(state, 1)] = next(state, 2) } catch _error => {}
+	state.calls
+}
+
+function compound = (): Integer => {
+	mutable state = { calls = 0 }
+	mutable values = [1]
+	do { values[next(state, 1)] += next(state, 2) } catch _error => {}
+	state.calls + values[0]
+}
+
+function failedReceiver = (): Integer => {
+	mutable state = { calls = 0 }
+	mutable rows: Array<Array<Integer>> = []
+	do { rows[next(state, 1)].push(next(state, 2)) } catch _error => {}
+	state.calls
+}
+
+static prefix = @failedPrefix()
+static assignment = @assigned()
+static updated = @compound()
+static receiver = @failedReceiver()
+console.log(prefix, failedPrefix())
+console.log(assignment, assigned())
+console.log(updated, compound())
+console.log(receiver, failedReceiver())

@@ -432,6 +432,39 @@ mod tests {
 	}
 
 	#[test]
+	fn compile_time_places_validate_prefixes_and_evaluate_targets_once_before_values() {
+		let (session, file) = crate::analyze_source(include_str!(
+			"../../tests/cases/ownership-compiletime-place-order.fa"
+		));
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		for (name, expected) in [
+			("prefix", 1),
+			("assignment", 12),
+			("updated", 13),
+			("receiver", 1),
+		] {
+			let analysis = session.analysis(file);
+			let symbol = analysis
+				.symbols
+				.symbols()
+				.iter()
+				.position(|symbol| session.types().syms.resolve(symbol.name) == name)
+				.unwrap();
+			assert_eq!(
+				analysis
+					.static_values
+					.get(&crate::ids::SymbolId(symbol as u32)),
+				Some(&Value::int(expected)),
+				"{name}"
+			);
+		}
+	}
+
+	#[test]
 	fn compile_time_closures_borrow_current_bindings_aliases_and_default_sources() {
 		let (session, file) = crate::analyze_source(include_str!(
 			"../../tests/cases/ownership-compiletime-captures.fa"

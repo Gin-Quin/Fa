@@ -972,15 +972,19 @@ impl<'a> Lowerer<'a> {
 		}
 	}
 
-	/// `target op= value` (`text += "x"` for a string).
+	/// `target op= value`: designate the target once before reading or computing.
 	fn compound_assignment(&mut self, op: ArithOp, target: NodeId, value: NodeId) -> Expr {
-		let Some(place) = self.place(target) else {
+		let Some(source) = self.place(target) else {
 			return self.unsupported("this assignment");
 		};
-		let num = self.num(self.a.type_of(target));
+		let slot = self.temp();
+		let place = Place {
+			slot,
+			steps: Vec::new(),
+		};
+		let before = Expr::Read(place.clone());
 		let value = self.expr(value);
-		// `set += flags`, `set -= flags`
-		if matches!(
+		let updated = if matches!(
 			self.types().kind(self.a.type_of(target)),
 			TypeKind::Fields(_)
 		) {
@@ -989,32 +993,23 @@ impl<'a> Lowerer<'a> {
 			} else {
 				"Fields#difference"
 			};
-			return Expr::Assign(
-				place.clone(),
-				Expr::Builtin(path, vec![Expr::Read(place), value]).boxed(),
-			);
-		}
-		let num = if matches!(op, ArithOp::Add)
+			Expr::Builtin(path, vec![before, value])
+		} else if op == ArithOp::Add
 			&& matches!(self.types().kind(self.a.type_of(target)), TypeKind::String)
 		{
-			// `text += "x"`
-			return Expr::Assign(
-				place.clone(),
-				Expr::Template(vec![Part::Value(Expr::Read(place)), Part::Value(value)]).boxed(),
-			);
+			Expr::Template(vec![Part::Value(before), Part::Value(value)])
 		} else {
-			num
-		};
-		Expr::Assign(
-			place.clone(),
 			Expr::Arith(
 				Self::arith_op(op),
-				num,
-				Expr::Read(place).boxed(),
+				self.num(self.a.type_of(target)),
+				before.boxed(),
 				value.boxed(),
 			)
-			.boxed(),
-		)
+		};
+		Expr::Block(vec![
+			Expr::Bind(slot, Expr::Lend(source).boxed()),
+			Expr::Assign(place, updated.boxed()),
+		])
 	}
 
 	/// A chain of comparisons: `a < b <= c` is `a < b and b <= c`.

@@ -2072,6 +2072,49 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 	}
 
 	#[test]
+	fn private_map_lookups_feed_positive_updates_and_removals() {
+		let source = |extra: &str| {
+			format!(
+				"function run = (input: UInt32) => {{\nlet key = input\nmutable map = Map<UInt32, UInt32>.from([(key, 7)], capacity = 16)\n{extra}\nconsole.log(map.get(key))\nmap[key] = 8\nconsole.log(map.take(key))\n}}\nrun(3)\n"
+			)
+		};
+		for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+			let ir = ir_at_target(
+				&format!("positive-map-probe-{name}"),
+				&source(""),
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let body = function(&ir, "fa.run");
+			assert!(body.contains("probe_cached"), "{body}");
+			assert!(!body.contains("@fa_table_remove("), "{body}");
+			assert!(body.contains("store i1 true, ptr %probe_valid"), "{body}");
+			let borrowed = ir_at_target(
+				&format!("positive-map-borrow-{name}"),
+				&source("use borrowed = map.get(key)\nconsole.log(borrowed)"),
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let body = function(&borrowed, "fa.run");
+			assert!(!body.contains("probe_cached"), "{body}");
+			assert!(body.contains("@fa_table_remove("), "{body}");
+			let parameter = source("")
+				.replace("let key = input\n", "")
+				.replace("(input: UInt32)", "(key: UInt32)");
+			let ir = ir_at_target(
+				&format!("positive-map-parameter-{name}"),
+				&parameter,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			assert!(!function(&ir, "fa.run").contains("probe_cached"), "{ir}");
+		}
+	}
+
+	#[test]
 	fn private_inline_maps_reuse_negative_probes_but_references_and_callbacks_do_not() {
 		let source = |extra: &str| {
 			format!(

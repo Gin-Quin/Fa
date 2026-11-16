@@ -1,4 +1,4 @@
-//! Reuse negative inline-map probes until an index mutation invalidates them.
+//! Reuse private inline-map lookups until an index mutation invalidates them.
 //! Private function slots carry path-sensitive validity; no map header changes.
 
 use std::cell::{OnceCell, RefCell};
@@ -376,12 +376,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let same = self
 			.builder
 			.build_int_compare(IntPredicate::EQ, pointer, previous_table, "")?;
-		let applies = self.builder.build_and(valid, same, "")?;
+		let affected = self.builder.build_and(valid, same, "")?;
 		let i64 = self.context.i64_type();
 		let previous = self
 			.builder
 			.build_load(i64, entry.position, "")?
 			.into_int_value();
+		let negative =
+			self.builder
+				.build_int_compare(IntPredicate::SLT, previous, i64.const_zero(), "")?;
+		// A shift can relocate any positive slot. Only negative hints have
+		// the final-hole update proof; consume/invalidate positive lookups.
+		let applies = self.builder.build_and(affected, negative, "")?;
+		let keep = self
+			.builder
+			.build_or(self.builder.build_not(affected, "")?, negative, "")?;
+		self.builder
+			.build_store(entry.valid, self.builder.build_and(valid, keep, "")?)?;
 		let hash = self
 			.builder
 			.build_load(i64, entry.hash, "")?
@@ -521,13 +532,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				hashes.as_basic_value().into_int_value(),
 			)
 		};
-		let valid = self.builder.build_int_compare(
-			IntPredicate::SLT,
-			result.0,
-			self.context.i64_type().const_zero(),
-			"",
-		)?;
-		self.builder.build_store(entry.valid, valid)?;
+		self.builder
+			.build_store(entry.valid, self.context.bool_type().const_int(1, false))?;
 		self.builder.build_store(entry.table, pointer)?;
 		self.builder.build_store(entry.key, key.int())?;
 		self.builder.build_store(entry.position, result.0)?;

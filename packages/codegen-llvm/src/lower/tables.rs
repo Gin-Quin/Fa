@@ -1123,7 +1123,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
 		let key = self.convert(key, table.key, node.index())?;
-		if name == "fa_table_find"
+		// Inline removal reads the entry before release shifts the index, so
+		// it can consume the same guarded lookup as insertion/replacement.
+		if (name == "fa_table_find"
+			|| name == "fa_table_remove" && self.map_probe_inline_delete_supported(table))
 			&& let Some(result) = self.reuse_map_probe(pointer, table, key, node)?
 		{
 			return Ok(result);

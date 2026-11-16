@@ -1651,3 +1651,25 @@ fail and their CPU verdicts remain not resolved. No primary series is replaced.
 Canonical complete profiles, samples, manifests and strict-control tables are
 `benchmarks/results/2026-11-16-collections-headers.{json,md}`; the earlier probe
 and baseline files remain separate. No benchmark source or string code changed.
+
+### Successful same-key probe reuse (2026-11-16)
+
+Part 1 item 2 extends the accepted private inline KEY32 cache to found as well
+as missing slots. An inline remove/take only looks up its entry before release,
+so it can consume the same guarded lookup as insertion or value replacement.
+The ordinary lookup remains the fallback whenever the existing closed-program,
+layout, local owner/key, capture/reference or effect proof does not hold.
+
+Replacement of a scalar value changes no index position. Keep that position,
+but always load the new value from its slot. A deletion may move any positive
+slot by backward shifting: invalidate positive entries of that table before
+release. Negative entries retain their existing final-hole update; another
+map's release leaves a cached slot untouched. Append/growth, reserve, clear,
+drop and unknown effects keep their existing invalidation. Key/table identity
+checks and entry initialization still protect joins and backedges. No C runtime
+or String-key code changes; bump the object-cache generation for the lowering.
+
+New IR tests cover firing on native/wasm and fallback for references and key
+parameters. Programs cover same-key overwrite/take/delete, the sentinel, zero,
+wraparound colliding deletion, mutable keys and named calls that clear/rehash.
+Validation and measured acceptance follow in the continuation report.

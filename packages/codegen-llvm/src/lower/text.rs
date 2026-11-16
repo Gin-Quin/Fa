@@ -433,8 +433,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (bp, bl) = self.string_parts(right)?;
 		let equal = self
 			.call_value(
-				self.runtime.function("fa_string_equal")?,
-				&[ap.into(), al.into(), bp.into(), bl.into()],
+				self.runtime.function("fa_string_equal_flags")?,
+				&[
+					ap.into(),
+					al.into(),
+					ac.into(),
+					bp.into(),
+					bl.into(),
+					bc.into(),
+				],
 			)?
 			.into_int_value();
 		let equal = self.builder.build_int_compare(

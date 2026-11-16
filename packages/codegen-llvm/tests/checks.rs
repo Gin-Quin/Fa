@@ -1565,6 +1565,7 @@ console.log(length("é😀"), try read("日", 0))
 		);
 		assert!(!ir.contains("@string_equal_bytes("), "{ir}");
 		assert!(!ir.contains("@fa_string_equal("), "{ir}");
+		assert!(!ir.contains("@fa_string_equal_flags("), "{ir}");
 		assert!(ir.contains("load i8"), "{ir}");
 	}
 

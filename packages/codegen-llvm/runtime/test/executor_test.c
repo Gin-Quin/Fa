@@ -932,6 +932,67 @@ static void test_utf16_strings(void) {
 	CHECK(snapshot.bytes == text + 1 && snapshot.length == 5);
 	FaString whole = {(const uint8_t *)"owner", 5, SIMPLE};
 	CHECK(fa_string_reference(&whole, &snapshot) == &whole);
+	// Virtual cut spans keep only the bytes needed to recover each half:
+	// bytes 2..4 for a low head, bytes 0..3 for a high tail. No read may
+	// leave those physical spans, and owning copies write canonical WTF-8.
+	for (uint32_t code = 0x10000; code <= 0x10FFFF; code += 1021) {
+		uint8_t scalar[4], copied[3], expected_half[3];
+		CHECK(encode_point(scalar, code) == 4);
+		uint16_t high_unit = (uint16_t)(0xD800 + ((code - 0x10000) >> 10));
+		uint16_t low_unit = (uint16_t)(0xDC00 + ((code - 0x10000) & 1023));
+		size_t position = 0;
+		CHECK(decode(scalar, 3, &position) == high_unit && position == 3);
+		position = 0;
+		CHECK(decode(scalar + 2, 2, &position) == low_unit && position == 2);
+		CHECK(unit_count(scalar, 3) == 1 && unit_count(scalar + 2, 2) == 1);
+		CHECK(fa_string_encoded_length(scalar, 3, STRING_COUNTED_VIEW | 1) == 3);
+		CHECK(fa_string_encoded_length(scalar + 2, 2, STRING_COUNTED_VIEW | 1) == 3);
+		fa_string_copy_bytes(copied, scalar, 3, STRING_COUNTED_VIEW | 1);
+		CHECK(encode_point(expected_half, high_unit) == 3);
+		CHECK(__builtin_memcmp(copied, expected_half, 3) == 0);
+		fa_string_copy_bytes(copied, scalar + 2, 2, STRING_COUNTED_VIEW | 1);
+		CHECK(encode_point(expected_half, low_unit) == 3);
+		CHECK(__builtin_memcmp(copied, expected_half, 3) == 0);
+	}
+	const uint8_t both_edges[] = {0x98, 0x80, 'x', 0xF0, 0x9F, 0x98};
+	uint8_t canonical_edges[7];
+	CHECK(unit_count(both_edges, sizeof both_edges) == 3);
+	fa_string_copy_bytes(canonical_edges, both_edges, sizeof both_edges, STRING_COUNTED_VIEW | 3);
+	CHECK(__builtin_memcmp(canonical_edges, "\xED\xB8\x80x\xED\xA0\xBD", 7) == 0);
+	FaString owned_edges;
+	fa_string_own(both_edges, sizeof both_edges, STRING_COUNTED_VIEW | 3, &owned_edges);
+	CHECK(string_length(&owned_edges) == 7);
+	CHECK(__builtin_memcmp(string_bytes(&owned_edges), canonical_edges, 7) == 0);
+	CHECK(fa_string_equal(both_edges, sizeof both_edges, canonical_edges, 7));
+	CHECK(fa_string_compare(both_edges, sizeof both_edges, canonical_edges, 7) == 0);
+	CHECK(fa_string_compare(both_edges, sizeof both_edges, (const uint8_t *)"z", 1) > 0);
+	CHECK(fa_hash_string_bits((size_t)(uintptr_t)both_edges, sizeof both_edges, STRING_COUNTED_VIEW | 3) == fa_hash_bytes(canonical_edges, 7));
+	for (size_t middle = 0; middle <= 80; middle += 1) {
+		uint8_t physical[85] = {0x98, 0x80};
+		__builtin_memset(physical + 2, 'x', middle);
+		copy_bytes(physical + middle + 2, (const uint8_t *)"\xF0\x9F\x98", 3);
+		size_t physical_length = middle + 5;
+		size_t tag = STRING_COUNTED_VIEW | (middle + 2);
+		uint8_t canonical[86];
+		fa_string_copy_bytes(canonical, physical, physical_length, tag);
+		uint64_t hash = fa_hash_bytes(canonical, physical_length + 1);
+		CHECK(fa_hash_string_bits((size_t)(uintptr_t)physical, physical_length, tag) == hash);
+		// The excluded half's bits have no effect on the String's value.
+		physical[0] = 0xB8;
+		physical[physical_length - 1] = 0x9F;
+		CHECK(fa_string_equal_flags(physical, physical_length, tag, canonical, physical_length + 1, STRING_SURROGATES));
+		CHECK(fa_hash_string_bits((size_t)(uintptr_t)physical, physical_length, tag) == hash);
+		uint8_t inplace[86];
+		copy_bytes(inplace, physical, physical_length);
+		fa_string_copy_bytes(inplace, inplace, physical_length, tag);
+		CHECK(__builtin_memcmp(inplace, canonical, physical_length + 1) == 0);
+	}
+	CHECK(!fa_string_is_well_formed(both_edges, sizeof both_edges, STRING_COUNTED_VIEW | 3));
+	fa_string_write_utf8(canonical_edges, both_edges, sizeof both_edges, STRING_COUNTED_VIEW | 3);
+	CHECK(__builtin_memcmp(canonical_edges, "\xEF\xBF\xBDx\xEF\xBF\xBD", 7) == 0);
+	fa_virtual_string_slices = 0;
+	CHECK(fa_string_encoded_length(both_edges, sizeof both_edges, STRING_COUNTED_VIEW | 3) == sizeof both_edges);
+	fa_virtual_string_slices = 1;
 	// ASCII compact storage has no extra field. Unicode counts are bounded
 	// unsigned LEB128 values and preserve the full representation range.
 	uint8_t metadata[16] = "ascii";

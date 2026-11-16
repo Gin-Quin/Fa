@@ -788,6 +788,30 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.define_equal_box()?;
 		self.define_format_union()?;
 		self.define_boxes()?;
+		// The capability is program-wide, including late generic/callback
+		// instances. Separately compiled units and C libraries conservatively
+		// accept virtual views from other code; closed programs can erase it.
+		let virtual_views = !self.whole_program
+			|| self.c_library.is_some()
+			|| self
+				.module
+				.get_function("fa_string_slice_view")
+				.is_some_and(|function| {
+					inkwell::values::BasicValue::get_first_use(
+						&function.as_global_value().as_pointer_value(),
+					)
+					.is_some()
+				});
+		if let Some(flag) = self.module.get_global("fa_virtual_string_slices") {
+			flag.set_initializer(
+				&self
+					.context
+					.i32_type()
+					.const_int(virtual_views as u64, false),
+			);
+			flag.set_constant(true);
+			flag.set_linkage(Linkage::Internal);
+		}
 		// the drops at the end of `main` only free memory: the system takes
 		// it back at exit (drops with an effect: `destroy`, thread-safe values)
 		if let Some(flag) = self.module.get_global("fa.drops_at_exit") {

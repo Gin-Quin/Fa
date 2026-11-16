@@ -535,6 +535,13 @@ fn runtime_object(
 		flag.set_constant(true);
 		flag.set_linkage(Linkage::Internal);
 	}
+	// Every separately compiled unit may receive a view through a borrowed
+	// parameter or callback. This value never varies with a unit's cache key.
+	if let Some(flag) = module.get_global("fa_virtual_string_slices") {
+		flag.set_initializer(&context.i32_type().const_int(1, false));
+		flag.set_constant(true);
+		flag.set_linkage(Linkage::Internal);
+	}
 	runtime.define_platform()?;
 	// the clock of `std.time.now` (a lowering defines it on use otherwise)
 	runtime.now()?;

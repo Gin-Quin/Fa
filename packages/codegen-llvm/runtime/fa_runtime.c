@@ -118,6 +118,33 @@ typedef struct {
 #define INLINE_STRING_BYTES (sizeof(FaString) - 1)
 #define INLINE_LENGTH_SHIFT ((sizeof(size_t) - 1) * 8)
 
+// A closed program specializes this after all constructors/callbacks have
+// been lowered. Separate units and standalone runtime users keep support.
+FA_EXPORT int32_t fa_virtual_string_slices = 1;
+
+static int span_low_head(const uint8_t *bytes, size_t length) {
+	return fa_virtual_string_slices && length >= 2 && bytes[0] >= 0x80 && bytes[0] < 0xC0;
+}
+
+static int span_high_tail(const uint8_t *bytes, size_t length) {
+	return fa_virtual_string_slices && length >= 3 &&
+	       bytes[length - 3] >= 0xF0 && bytes[length - 3] <= 0xF4;
+}
+
+static int span_has_edges(const uint8_t *bytes, size_t length) {
+	return span_low_head(bytes, length) || span_high_tail(bytes, length);
+}
+
+static uint16_t span_low_unit(const uint8_t *bytes) {
+	return (uint16_t)(0xDC00 | ((bytes[0] & 15) << 6) | (bytes[1] & 63));
+}
+
+static uint16_t span_high_unit(const uint8_t *bytes) {
+	uint32_t prefix = ((uint32_t)(bytes[0] & 7) << 12) |
+	                  ((uint32_t)(bytes[1] & 63) << 6) | (bytes[2] & 63);
+	return (uint16_t)(0xD800 + ((prefix - 0x400) >> 4));
+}
+
 static const uint8_t *string_bytes(const FaString *string) {
 	return string->capacity & STRING_INLINE ? (const uint8_t *)string : string->bytes;
 }
@@ -233,6 +260,7 @@ static size_t simple_flag(const uint8_t *bytes, size_t length) {
 static size_t text_flags(const uint8_t *bytes, size_t length) {
 	size_t ascii = simple_flag(bytes, length);
 	if (ascii) { return ascii; }
+	if (span_has_edges(bytes, length)) { return STRING_SURROGATES; }
 	for (size_t i = 0; i + 2 < length; i += 1) {
 		if (bytes[i] == 0xED && bytes[i + 1] >= 0xA0) { return STRING_SURROGATES; }
 	}
@@ -265,6 +293,34 @@ static FA_NORETURN void out_of_memory(void) {
 }
 
 static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length);
+static size_t encode_point(uint8_t *out, uint32_t code);
+
+/// The physical span omits one byte of a low half's WTF-8 encoding. A
+/// high half retains three bytes, which must be rewritten when copied.
+FA_EXPORT __attribute__((always_inline)) size_t fa_string_encoded_length(
+    const uint8_t *bytes, size_t length, size_t capacity) {
+	return length + (!(capacity & SIMPLE) && span_low_head(bytes, length));
+}
+
+/// Materialize into an owning/output destination, never into borrowed
+/// storage. The middle is copied in one block; only cut ends are encoded.
+FA_EXPORT __attribute__((always_inline)) void fa_string_copy_bytes(
+    uint8_t *out, const uint8_t *bytes, size_t length, size_t capacity) {
+	if ((capacity & SIMPLE) || !span_has_edges(bytes, length)) {
+		copy_bytes(out, bytes, length);
+		return;
+	}
+	int low = span_low_head(bytes, length);
+	int high = span_high_tail(bytes, length);
+	size_t start = low ? 2 : 0;
+	size_t end = length - (high ? 3 : 0);
+	uint16_t low_unit = low ? span_low_unit(bytes) : 0;
+	uint16_t high_unit = high ? span_high_unit(bytes + end) : 0;
+	size_t written = low ? 3 : 0;
+	__builtin_memmove(out + written, bytes + start, end - start);
+	if (low) { encode_point(out, low_unit); }
+	if (high) { encode_point(out + written + end - start, high_unit); }
+}
 
 /// A block of `old` bytes replaced by one of `size` bytes holding its first
 /// `used` bytes: a large block by `fa_grow` (which moves the pages of a
@@ -624,7 +680,8 @@ static FaString owned_copy(const uint8_t *bytes, size_t length) {
 
 /// `owned_copy` of bytes known to be simple (`SIMPLE`), or to be scanned (0).
 static FaString owned_copy_with(const uint8_t *bytes, size_t length, size_t simple) {
-	if (length >= KIND_MASK) { out_of_memory(); }
+	size_t encoded = fa_string_encoded_length(bytes, length, simple);
+	if (encoded >= KIND_MASK) { out_of_memory(); }
 	FaString string;
 	if (length == 0) {
 		string.bytes = (const uint8_t *)"";
@@ -635,18 +692,18 @@ static FaString owned_copy_with(const uint8_t *bytes, size_t length, size_t simp
 	if (length == 1 && bytes[0] < 0x80) {
 		return ascii_string(bytes[0]);
 	}
-	if (length <= INLINE_STRING_BYTES) {
+	if (encoded <= INLINE_STRING_BYTES) {
 		FaString small = {0};
-		copy_bytes((uint8_t *)&small, bytes, length);
-		inline_string_tag(&small, length, (simple & SIMPLE) ? SIMPLE : text_flags(bytes, length));
+		fa_string_copy_bytes((uint8_t *)&small, bytes, length, simple);
+		inline_string_tag(&small, encoded, (simple & SIMPLE) ? SIMPLE : text_flags((uint8_t *)&small, encoded));
 		return small;
 	}
-	size_t block = string_block(length);
+	size_t block = string_block(encoded);
 	uint8_t *copy = string_alloc(&block, simple);
-	copy_bytes(copy, bytes, length);
+	fa_string_copy_bytes(copy, bytes, length, simple);
 	string.bytes = copy;
-	string.length = length;
-	string.capacity = block | ((simple & SIMPLE) ? SIMPLE : text_flags(copy, length));
+	string.length = encoded;
+	string.capacity = block | ((simple & SIMPLE) ? SIMPLE : text_flags(copy, encoded));
 	return string;
 }
 
@@ -2266,7 +2323,7 @@ static __attribute__((noinline)) int32_t string_equal_bytes(const uint8_t *left,
 	return 1;
 }
 
-FA_EXPORT __attribute__((always_inline)) int32_t fa_string_equal(const uint8_t *left,
+static __attribute__((always_inline)) int32_t string_equal_canonical(const uint8_t *left,
                                   size_t left_length, const uint8_t *right, size_t right_length) {
 	if (left_length != right_length) { return 0; }
 	if (left_length == 0) { return 1; }
@@ -2323,9 +2380,29 @@ static int32_t compare_units(const uint8_t *left, size_t left_length,
 	return (a < left_length || low_a) ? 1 : (b < right_length || low_b) ? -1 : 0;
 }
 
+FA_EXPORT __attribute__((always_inline)) int32_t fa_string_equal(const uint8_t *left,
+    size_t left_length, const uint8_t *right, size_t right_length) {
+	if (span_has_edges(left, left_length) || span_has_edges(right, right_length)) {
+		return compare_units(left, left_length, right, right_length) == 0;
+	}
+	return string_equal_canonical(left, left_length, right, right_length);
+}
+
+FA_EXPORT __attribute__((always_inline)) int32_t fa_string_equal_flags(const uint8_t *left,
+    size_t left_length, size_t left_capacity, const uint8_t *right, size_t right_length,
+    size_t right_capacity) {
+	if (left_capacity & right_capacity & SIMPLE) {
+		return string_equal_canonical(left, left_length, right, right_length);
+	}
+	return fa_string_equal(left, left_length, right, right_length);
+}
+
 /// Byte order is UTF-16 order until a surrogate or astral sequence differs.
 FA_EXPORT int32_t fa_string_compare(const uint8_t *left, size_t left_length, const uint8_t *right,
                                     size_t right_length) {
+	if (span_has_edges(left, left_length) || span_has_edges(right, right_length)) {
+		return compare_units(left, left_length, right, right_length);
+	}
 	size_t length = left_length < right_length ? left_length : right_length;
 	for (size_t index = 0; index < length; index += 1) {
 		if (left[index] != right[index]) {
@@ -2472,6 +2549,15 @@ static enum Break break_kind(uint32_t code) {
 /// Decodes the code point at `*index` (the input is valid UTF-8) and moves past it.
 static uint32_t decode(const uint8_t *bytes, size_t length, size_t *index) {
 	uint8_t first = bytes[*index];
+	if (fa_virtual_string_slices && *index == 0 && span_low_head(bytes, length)) {
+		*index = 2;
+		return span_low_unit(bytes);
+	}
+	if (fa_virtual_string_slices && first >= 0xF0 && first <= 0xF4 && length - *index == 3) {
+		uint16_t unit = span_high_unit(bytes + *index);
+		*index += 3;
+		return unit;
+	}
 	size_t count = first < 0x80 ? 1 : first < 0xE0 ? 2 : first < 0xF0 ? 3 : 4;
 	uint32_t code = count == 1 ? first : first & (0x7F >> count);
 	for (size_t offset = 1; offset < count && *index + offset < length; offset += 1) {
@@ -2561,11 +2647,14 @@ FA_EXPORT int32_t fa_string_is_well_formed(const uint8_t *bytes, size_t length, 
 	return (capacity & SIMPLE) || !(text_flags(bytes, length) & STRING_SURROGATES);
 }
 
-/// Output has the same byte length: each lone surrogate becomes U+FFFD.
+/// Output uses the logical byte length: each lone surrogate becomes U+FFFD.
 FA_EXPORT void fa_string_write_utf8(uint8_t *out, const uint8_t *bytes, size_t length, size_t capacity) {
-	if (out != bytes) { copy_bytes(out, bytes, length); }
+	size_t encoded = fa_string_encoded_length(bytes, length, capacity);
+	if (out != bytes || (!(capacity & SIMPLE) && span_has_edges(bytes, length))) {
+		fa_string_copy_bytes(out, bytes, length, capacity);
+	}
 	if (capacity & SIMPLE) { return; }
-	for (size_t i = 0; i + 2 < length; i += 1) {
+	for (size_t i = 0; i + 2 < encoded; i += 1) {
 		if (out[i] == 0xED && out[i + 1] >= 0xA0) {
 			out[i] = 0xEF; out[i + 1] = 0xBF; out[i + 2] = 0xBD;
 			i += 2;
@@ -3188,7 +3277,7 @@ static __attribute__((noinline)) size_t unit_count(const uint8_t *text, size_t l
 		count += (text[i] & 0xC0) != 0x80;
 		count += text[i] >= 0xF0;
 	}
-	return count;
+	return count + span_low_head(text, length) - span_high_tail(text, length);
 }
 
 static StringHeader *string_metadata(const uint8_t *text, size_t length, size_t capacity) {
@@ -8367,13 +8456,40 @@ FA_EXPORT FaTable *fa_table_copy(const FaTable *table, int64_t entry_size) {
 /// The hash of bytes (FNV-1a, then mixed).
 /// The hash of a string's bytes, eight bytes at a time (tables are
 /// insertion-ordered: the hash is never observable).
-FA_EXPORT uint64_t fa_hash_bytes(const uint8_t *bytes, size_t length) {
+typedef struct {
+	const uint8_t *bytes;
+	size_t physical;
+	int low;
+	int high;
+	uint8_t prefix[3];
+	uint8_t suffix[3];
+} StringByteSpan;
+
+static uint64_t span_word(const StringByteSpan *span, size_t index, size_t width) {
+	uint64_t word = 0;
+	for (size_t i = 0; i < width; i += 1) {
+		size_t at = index + i;
+		uint8_t byte;
+		if (span->low && at < 3) { byte = span->prefix[at]; }
+		else {
+			at -= (size_t)span->low;
+			byte = span->high && at >= span->physical - 3
+			           ? span->suffix[at - (span->physical - 3)] : span->bytes[at];
+		}
+		word |= (uint64_t)byte << (i * 8);
+	}
+	return word;
+}
+
+static __attribute__((always_inline)) uint64_t hash_byte_range(
+    const uint8_t *bytes, size_t length, const StringByteSpan *span) {
 	const uint64_t multiplier = 0x9E3779B97F4A7C15ull;
 	uint64_t hash = 0xcbf29ce484222325ull ^ (length * multiplier);
 	size_t index = 0;
 	for (; index + 8 <= length; index += 8) {
 		uint64_t word;
-		__builtin_memcpy(&word, bytes + index, 8);
+		if (span) { word = span_word(span, index, 8); }
+		else { __builtin_memcpy(&word, bytes + index, 8); }
 		hash = (hash ^ word) * multiplier;
 		hash ^= hash >> 29;
 	}
@@ -8384,12 +8500,22 @@ FA_EXPORT uint64_t fa_hash_bytes(const uint8_t *bytes, size_t length) {
 		if (rest >= 4) {
 			uint32_t low;
 			uint32_t high;
-			__builtin_memcpy(&low, bytes + index, 4);
-			__builtin_memcpy(&high, bytes + length - 4, 4);
+			if (span) {
+				low = (uint32_t)span_word(span, index, 4);
+				high = (uint32_t)span_word(span, length - 4, 4);
+			} else {
+				__builtin_memcpy(&low, bytes + index, 4);
+				__builtin_memcpy(&high, bytes + length - 4, 4);
+			}
 			word = low | ((uint64_t)high << 32);
 		} else {
-			word = bytes[index] | ((uint64_t)bytes[index + rest / 2] << 8) |
-			       ((uint64_t)bytes[length - 1] << 16);
+			if (span) {
+				word = span_word(span, index, 1) | (span_word(span, index + rest / 2, 1) << 8) |
+				       (span_word(span, length - 1, 1) << 16);
+			} else {
+				word = bytes[index] | ((uint64_t)bytes[index + rest / 2] << 8) |
+				       ((uint64_t)bytes[length - 1] << 16);
+			}
 		}
 		hash = (hash ^ word) * multiplier;
 	}
@@ -8399,10 +8525,25 @@ FA_EXPORT uint64_t fa_hash_bytes(const uint8_t *bytes, size_t length) {
 	return hash;
 }
 
+FA_EXPORT uint64_t fa_hash_bytes(const uint8_t *bytes, size_t length) {
+	return hash_byte_range(bytes, length, 0);
+}
+
+static __attribute__((noinline)) uint64_t hash_string_span(const uint8_t *bytes, size_t length) {
+	StringByteSpan span = {bytes, length, span_low_head(bytes, length), span_high_tail(bytes, length), {0}, {0}};
+	if (span.low) { encode_point(span.prefix, span_low_unit(bytes)); }
+	if (span.high) { encode_point(span.suffix, span_high_unit(bytes + length - 3)); }
+	return hash_byte_range(bytes, length + (size_t)span.low, &span);
+}
+
 /// The same hash, operating on an inline string's value without spilling
 /// its bytes to a temporary. External strings keep the byte-slice path.
 FA_EXPORT __attribute__((always_inline)) uint64_t fa_hash_string_bits(size_t first, size_t second, size_t third) {
-	if (!(third & STRING_INLINE)) { return fa_hash_bytes((const uint8_t *)(uintptr_t)first, second); }
+	if (!(third & STRING_INLINE)) {
+		const uint8_t *bytes = (const uint8_t *)(uintptr_t)first;
+		if (!(third & SIMPLE) && span_has_edges(bytes, second)) { return hash_string_span(bytes, second); }
+		return fa_hash_bytes(bytes, second);
+	}
 	size_t length = (third >> INLINE_LENGTH_SHIFT) & 31;
 	const uint64_t multiplier = 0x9E3779B97F4A7C15ull;
 	uint64_t hash = 0xcbf29ce484222325ull ^ (length * multiplier);

@@ -1,0 +1,141 @@
+//! Generated independent UTF-16 oracle, shared with the bounded program runner.
+
+use super::*;
+
+fn disagreement(expected: &Expected, outcome: &Outcome) -> Option<String> {
+	if outcome.exit != expected.exit || !outcome.stderr.is_empty() && outcome.build_failed {
+		return Some(format!("exit {}: {}", outcome.exit, outcome.stderr));
+	}
+	let actual: Vec<_> = outcome.stdout.lines().collect();
+	if actual.len() != expected.stdout.len() {
+		return Some(format!(
+			"expected {} lines, got {}: {}",
+			expected.stdout.len(),
+			actual.len(),
+			outcome.stderr
+		));
+	}
+	for (line, (want, got)) in expected.stdout.iter().zip(actual).enumerate() {
+		for (field, (want, got)) in want.split('|').zip(got.split('|')).enumerate() {
+			if want != got {
+				return Some(format!(
+					"line {}, field {}: expected {want:?}, got {got:?}",
+					line + 1,
+					field + 1
+				));
+			}
+		}
+		if want != got {
+			return Some(format!("line {}: differing field counts", line + 1));
+		}
+	}
+	None
+}
+
+#[test]
+fn generated_string_differential() {
+	let Some(bun) = fa::find_bun() else {
+		eprintln!("string differential: Bun is required for the independent oracle");
+		return;
+	};
+	let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+		.join(format!("strings-differential-{}", std::process::id()));
+	fs::create_dir_all(&scratch).expect("a scratch directory");
+	let generated = scratch.join("corpus");
+	let output = Command::new("python3")
+		.arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/strings-differential/generate.py"))
+		.arg(&generated)
+		.arg(bun)
+		.output()
+		.expect("Python runs the deterministic generator");
+	assert!(
+		output.status.success(),
+		"{}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+	let mut failures = Vec::new();
+	for (index, program) in fa_files(&generated).iter().enumerate() {
+		if !selected(program) {
+			continue;
+		}
+		let mut expected = expectations(&fs::read_to_string(program).expect("generated source"));
+		for target in ["bun", "node", "web"] {
+			expected.target = target;
+			let outcome = limited(|| {
+				run(
+					program,
+					&expected,
+					&scratch,
+					index * 3
+						+ match target {
+							"bun" => 0,
+							"node" => 1,
+							_ => 2,
+						},
+				)
+			});
+			if let Some(reason) = disagreement(&expected, &outcome) {
+				failures.push(format!("{} on {target}: {reason}", program.display()));
+			}
+		}
+		if fa_codegen_llvm::llvm_available() {
+			use fa_codegen_llvm::{OptLevel, Options, Target};
+			for target in [Target::Native, Target::Wasm, Target::NativeFreestanding] {
+				if expected
+					.skip_targets
+					.iter()
+					.any(|skip| skip == target.name())
+				{
+					continue;
+				}
+				for opt_level in [OptLevel::O0, OptLevel::O3] {
+					let options = Options {
+						opt_level,
+						leak_check: true,
+						..Options::default()
+					};
+					let destination =
+						scratch.join(format!("{index}-{}-{opt_level:?}", target.name()));
+					let artifact = match fa_codegen_llvm::compile_file(
+						program,
+						target,
+						&options,
+						&destination,
+					) {
+						Ok(artifact) => artifact,
+						Err(error) => {
+							failures.push(format!(
+								"{} on {target:?}/{opt_level:?}: {error}",
+								program.display()
+							));
+							continue;
+						}
+					};
+					let mut command = if let Some(loader) = &artifact.loader {
+						let mut command = Command::new(
+							fa_codegen_llvm::javascript_runtime().expect("a wasm runner"),
+						);
+						command.arg(loader);
+						command
+					} else {
+						Command::new(&artifact.output)
+					};
+					let outcome = limited(|| execute(&mut command, &scratch, "native-run"));
+					if let Some(reason) = disagreement(&expected, &outcome) {
+						failures.push(format!(
+							"{} on {target:?}/{opt_level:?}: {reason}",
+							program.display()
+						));
+					}
+				}
+			}
+		}
+		eprintln!(
+			"string differential: {} ({} disagreements so far)",
+			program.display(),
+			failures.len()
+		);
+	}
+	assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+	fs::remove_dir_all(scratch).expect("remove successful generated corpus");
+}

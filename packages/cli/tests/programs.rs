@@ -47,6 +47,9 @@
 #[path = "programs/targets.rs"]
 mod targets;
 
+#[path = "programs/string_differential.rs"]
+mod string_differential;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};

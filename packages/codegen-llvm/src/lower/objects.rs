@@ -60,6 +60,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.map(|index| index as u64 + 1)
 	}
 
+	/// Runtime errors and source-built errors share the ordinary object layout.
+	/// Declaration order is retained separately when formatting their fields.
+	fn builtin_error_fields(&self, nominal: NominalId) -> Option<Vec<(&'static str, TypeId)>> {
+		let id = self.builtin_error_id(nominal)?;
+		let mut fields = ERRORS[id as usize - 1].fields.to_vec();
+		fields.sort_unstable_by_key(|(name, _)| *name);
+		Some(fields)
+	}
+
 	/// The global id of a member of a named union (registered for printing).
 	pub(crate) fn member_id(&self, nominal: NominalId, index: u16) -> u64 {
 		let mut ids = self.union_ids.borrow_mut();
@@ -2284,9 +2293,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		members.sort_by_key(|(_, id)| *id);
 		members.dedup_by_key(|(_, id)| *id);
 		for ((nominal, index), id) in members {
-			let fields: Vec<Repr> = match self.builtin_error_id(nominal) {
-				Some(error) => ERRORS[error as usize - 1]
-					.fields
+			let fields: Vec<Repr> = match self.builtin_error_fields(nominal) {
+				Some(fields) => fields
 					.iter()
 					.map(|(_, ty)| self.repr_of(*ty, 0))
 					.collect::<Result<_, _>>()?,
@@ -2438,9 +2446,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		members.sort_by_key(|(_, id)| *id);
 		members.dedup_by_key(|(_, id)| *id);
 		for ((nominal, index), id) in members {
-			let fields: Vec<Repr> = match self.builtin_error_id(nominal) {
-				Some(error) => ERRORS[error as usize - 1]
-					.fields
+			let fields: Vec<Repr> = match self.builtin_error_fields(nominal) {
+				Some(fields) => fields
 					.iter()
 					.map(|(_, ty)| self.repr_of(*ty, 0))
 					.collect::<Result<_, _>>()?,
@@ -2593,8 +2600,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.map(|id| ERRORS[id as usize - 1].fields)
 				.filter(|fields| !fields.is_empty());
 			if let Some(fields) = builtin_fields {
-				// the box of the runtime: the id, then the fields
-				let reprs: Vec<Repr> = fields
+				// Storage is sorted by name; output follows declaration order.
+				let layout = self.builtin_error_fields(nominal).expect("a builtin error");
+				let reprs: Vec<Repr> = layout
 					.iter()
 					.map(|(_, ty)| self.repr_of(*ty, 0))
 					.collect::<Result<_, _>>()?;
@@ -2602,7 +2610,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				types.extend(reprs.iter().map(|repr| self.llvm_type(*repr)));
 				let ty = self.context.struct_type(&types, false);
 				let box_pointer = value.value.expect("a box").into_pointer_value();
-				for (position, ((field, _), repr)) in fields.iter().zip(reprs).enumerate() {
+				for (position, (field, _)) in fields.iter().enumerate() {
+					let index = layout
+						.iter()
+						.position(|(name, _)| name == field)
+						.expect("a payload field");
+					let repr = reprs[index];
 					let prefix = if position == 0 {
 						format!(" {{ {field} = ")
 					} else {
@@ -2612,7 +2625,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.append_value(prefix, node)?;
 					let pointer =
 						self.builder
-							.build_struct_gep(ty, box_pointer, position as u32 + 1, "")?;
+							.build_struct_gep(ty, box_pointer, index as u32 + 1, "")?;
 					let loaded = self.load(Slot { pointer, repr })?;
 					self.append_nested(loaded, node)?;
 				}

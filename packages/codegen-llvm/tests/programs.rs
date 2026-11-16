@@ -789,6 +789,54 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn strict_file_text_rejects_invalid_utf8() {
+		let directory = std::env::temp_dir().join(format!("fa-text-input-{}", std::process::id()));
+		std::fs::create_dir_all(&directory).expect("a temporary directory");
+		let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/utf8-input/read.fa");
+		let inputs = [
+			b"ASCII".as_slice(),
+			"é日😀".as_bytes(),
+			b"\xEF\xBB\xBF",
+			b"\xE1\x80x",
+			b"\xED\xA0\x80",
+			b"a long input with a truncated sequence after a vector block: \xF0\x9F",
+		];
+		for target in [Target::Native, Target::Wasm] {
+			let options = Options {
+				leak_check: true,
+				..Options::default()
+			};
+			let artifact = compile_file(&path, target, &options, &directory.join(target.name()))
+				.unwrap_or_else(|error| panic!("{target:?}: {error}"));
+			for (index, input) in inputs.iter().enumerate() {
+				let file = directory.join(format!("{index}.bin"));
+				std::fs::write(&file, input).expect("write the input bytes");
+				let result =
+					fa_codegen_llvm::run(&artifact, &[file.to_str().expect("a UTF-8 path")])
+						.expect("the program runs");
+				assert!(
+					result.status.success(),
+					"{target:?}: {}",
+					String::from_utf8_lossy(&result.stderr)
+				);
+				let expected = match std::str::from_utf8(input) {
+					Ok(text) => format!("{} true {text}\n", text.encode_utf16().count()),
+					Err(_) => format!(
+						"true true\nFileError {{ path = \"{}\", message = \"invalid UTF-8\" }}\n7 true invalid\n",
+						file.display()
+					),
+				};
+				assert_eq!(
+					String::from_utf8_lossy(&result.stdout),
+					expected,
+					"{target:?}, input {index}"
+				);
+			}
+		}
+		std::fs::remove_dir_all(directory).expect("remove the test directory");
+	}
+
+	#[test]
 	#[cfg(unix)]
 	fn native_arguments_replace_invalid_utf8() {
 		use std::ffi::OsString;

@@ -1916,16 +1916,16 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_assign_local(const FaStr
 		if (drop_destination) { fa_string_free(destination.bytes, destination.capacity); }
 		return;
 	}
-	size_t units = 0;
-	if (!(previous.capacity & SIMPLE)) { units = fa_string_length(bytes, physical, previous.capacity); }
 	FaString result;
 	uint8_t *target = fa_string_allocate_local(length, previous.capacity & STRING_FLAGS,
 	                                         buffer, &result, mutable);
 	size_t result_capacity = result.capacity;
+	int publish = !(previous.capacity & SIMPLE) && string_owned(result_capacity);
+	size_t units = publish ? fa_string_length(bytes, physical, previous.capacity) : 0;
 	if ((previous.capacity & SIMPLE) || !span_has_edges(bytes, physical)) {
 		__builtin_memmove(target, bytes, physical);
 	} else { fa_string_copy_bytes(target, bytes, physical, previous.capacity); }
-	if (!(previous.capacity & SIMPLE)) { fa_string_set_unit_count(target, length, result_capacity, units); }
+	if (publish) { fa_string_set_unit_count(target, length, result_capacity, units); }
 	if (owned) { fa_string_free(previous.bytes, previous.capacity); }
 	if (drop_destination) { fa_string_free(destination.bytes, destination.capacity); }
 	if ((previous.capacity & STRING_SURROGATES) && (result.capacity & STRING_INLINE)) { fa_string_finish(&result); }
@@ -4154,7 +4154,7 @@ static FaString argument_string(const uint8_t *bytes, size_t length) {
 
 #if !defined(__wasm__)
 /// Keeps the user arguments: `argv` without the program (`argv[0]`).
-FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
+FA_EXPORT __attribute__((noinline, cold)) void fa_arguments_init(int32_t argc, char **argv) {
 	argument_count = argc > 1 ? (size_t)argc - 1 : 0;
 	argument_items = fa_alloc(sizeof(FaString) * (argument_count + 1), sizeof(void *));
 	for (size_t index = 0; index < argument_count; index += 1) {
@@ -4164,7 +4164,7 @@ FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
 }
 #else
 /// Asks the host for the user arguments.
-FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
+FA_EXPORT __attribute__((noinline, cold)) void fa_arguments_init(int32_t argc, char **argv) {
 	(void)argc;
 	(void)argv;
 	size_t size = (size_t)fa_host_arguments_size();
@@ -10526,11 +10526,11 @@ typedef struct {
 	FaIo *io;
 } FaSocket;
 
-/// `FileError` (the fields in the order of `builtins/errors.rs`).
+/// Error payloads use the same name-sorted layout as ordinary Fa objects.
 typedef struct {
 	int64_t id;
-	FaString path;
 	FaString message;
+	FaString path;
 } FileErrorBox;
 
 #if !defined(__wasm__)
@@ -11271,7 +11271,12 @@ FA_EXPORT const void *fa_file_finish(FaFileJob *file, void *out) {
 		error = file_error(file->code, file->bytes, file->length, (const uint8_t *)file->path,
 		                   file->path_length);
 	} else if (file->kind == FILE_READ) {
-		*(FaString *)out = owned_copy(file->bytes, file->length);
+		Utf8Info info = utf8_validate(file->bytes, file->length);
+		if (info.error != SIZE_MAX) {
+			static const uint8_t message[] = "invalid UTF-8";
+			error = file_error(E_HOST, message, sizeof message - 1,
+			                   (const uint8_t *)file->path, file->path_length);
+		} else { utf8_copy_valid(file->bytes, file->length, info.units, (FaString *)out); }
 	} else if (file->kind == FILE_READ_BYTES) {
 		FaArrayHeader *array = fa_array_new((int64_t)file->length, (int64_t)file->length, 1);
 		if (file->length > 0) {

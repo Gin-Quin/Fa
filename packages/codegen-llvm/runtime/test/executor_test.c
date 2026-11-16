@@ -1548,6 +1548,38 @@ static void test_arguments(void) {
 	CHECK(allocated == before && allocated_bytes == bytes_before);
 }
 
+static void test_strict_file_text(void) {
+	fa_release_builder();
+	long before = allocated, bytes_before = allocated_bytes;
+	const char *inputs[] = {"\xC3\xA9\xE6\x97\xA5\xF0\x9F\x98\x80", "ASCII",
+	                       "a long text that needs an owning Unicode prefix: \xC3\xA9\xF0\x9F\x98\x80",
+	                       "\xE1\x80x", "\xED\xA0\x80", "\xF0\x9F"};
+	for (size_t index = 0; index < sizeof inputs / sizeof *inputs; index += 1) {
+		size_t length = c_length(inputs[index]);
+		FaFileJob *file = fa_file_job(FILE_READ, (const uint8_t *)"path", 4, 0, 0);
+		file->bytes = fa_alloc(length, 16);
+		file->length = file->room = length;
+		copy_bytes(file->bytes, (const uint8_t *)inputs[index], length);
+		FaString result = {0};
+		const FileErrorBox *error = fa_file_finish(file, &result);
+		if (index < 3) {
+			CHECK(!error);
+			CHECK(fa_string_length(string_bytes(&result), string_length(&result), result.capacity)
+			      == unit_count((const uint8_t *)inputs[index], length));
+			CHECK(string_equal_bytes(string_bytes(&result), (const uint8_t *)inputs[index], length));
+			if (string_owned(result.capacity)) { fa_string_free(result.bytes, result.capacity); }
+		} else {
+			CHECK(error && error->id == FILE_ERROR);
+			CHECK(fa_string_equal(string_bytes(&error->message), string_length(&error->message), (const uint8_t *)"invalid UTF-8", 13));
+			if (string_owned(error->message.capacity)) { fa_string_free(error->message.bytes, error->message.capacity); }
+			if (string_owned(error->path.capacity)) { fa_string_free(error->path.bytes, error->path.capacity); }
+			fa_free((void *)error, sizeof *error, sizeof(int64_t));
+		}
+	}
+	fa_release_builder();
+	CHECK(allocated == before && allocated_bytes == bytes_before);
+}
+
 static void test_character_views(void) {
 	uint8_t source[200];
 	for (size_t i = 0; i < sizeof source; i += 1) { source[i] = (uint8_t)('a' + i % 26); }
@@ -2491,6 +2523,7 @@ int main(void) {
 	test_tree_regions();
 	test_utf8_input();
 	test_arguments();
+	test_strict_file_text();
 	test_character_views();
 	test_allocator_fast_paths();
 	test_short_copies();

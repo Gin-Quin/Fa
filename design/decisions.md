@@ -1927,7 +1927,7 @@ The native object-cache version advances to `inline-length-3` so a cached caller
 
 Native JSON entry points resolve their concrete type before building schemas and memoizing readers/writers, so different capacity instances cannot reuse a symbolic reader with a different aggregate ABI. Hidden generic capability names use the same synthesized-name sanitizer as global helpers, including derived types displayed with angle brackets.
 
-The imported generic-owner O0 probe exposed an inherited freestanding link failure: an unused constant containing the libc stack-guard callback kept the callback live from a shared data section. Per-unit ELF emission separates initialized data sections as well as function sections, keeping explicit/compiler/TLS sections intact, so garbage collection discards the unused constant and callback together. The required split O0 imported-owner fixture covers this on every LLVM target.
+The imported generic-owner O0 probe exposed an inherited freestanding link failure: an unused constant containing the libc stack-guard callback kept the callback live from a shared data section. Per-unit ELF emission separates data sections as well as function sections, so garbage collection discards the unused constant and callback together (since the merge with the trunk, through the target machine: see "Links step 1b: merge with the trunk"). The required split O0 imported-owner fixture covers this on every LLVM target.
 
 Contextual generic function-value specialization also applies to lambdas and parenthesized names. JavaScript binds their destructor/method/value arguments exactly once at the node carrying the instantiation; native declaration values recover that node through their group parents before constructing the thunk. The inline callback fixture checks named, lambda and grouped values at runtime and compile time; the existing ordinary Array.map generic-lambda case remains the control.
 
@@ -2002,3 +2002,18 @@ The throwing-literal fixture constructs its resource prefix through a factory;
 moving a borrowed generic resource parameter into the prefix was invalid under
 the documented parameter contract. Typed errors retain their declared payload
 field formatter, independently of ordinary union payload representation order.
+
+## Links step 1b: merge with the trunk (2026-11-17)
+
+Objects linked without LTO (per-unit O0 builds, cached `fa run` objects, the
+JIT) are compiled by a target machine with LLVM's `FunctionSections` and
+`DataSections` (`fa_use_unique_sections` of the shim), as clang's
+`-ffunction-sections -fdata-sections`; the pass that named a section per
+function and global in the IR is removed. Sections named in the IR left the
+jump tables of every function in one shared `.rodata`: once any live
+function's jump table was there, `--gc-sections` kept every function those
+tables jump into. After the merge, the unused `json_value` of the
+freestanding runtime was kept this way, with its `strtod`, and the split O0
+freestanding imports fixtures no longer linked; the trunk's leak-checked
+per-unit map packages failed the same way. Wasm and ThinLTO objects are
+unchanged. The object-cache version is bumped.

@@ -1922,3 +1922,26 @@ Int64 value literal separately exposes a pre-existing JavaScript conversion
 bug (recorded with a durable repro in todo). The corrected fixture still
 fails on the archived scalar64 native compiler and preserves both static
 layouts and all value assertions. No expected-skip list changes.
+
+## Array performance — GrowingArray loop facts (2026-11-16)
+
+- Ordinary GrowingArray scans use one counted inner loop per live segment,
+  clamped to the snapshot length. There is no per-item segment-boundary lookup.
+  The existing iteration rule forbids resizing/replacing the iterated receiver,
+  including via callbacks; item mutations and all control flow remain live.
+  Zero-sized items and specialized byte searches retain the prior cursor path.
+- A synchronous counted loop over a private owner may hoist lookup metadata.
+  The full use set must stay in the owner's function and never expose its
+  header: only direct indexing, iteration, measurement, replacement and known
+  direct push/reserve calls are accepted globally. Within the loop replacement
+  and reserve are rejected. Exports, references, shared/reactive owners and
+  foreign-file uncertainty reject the proof. The invariant contiguous mode is
+  available to LLVM's existing loop unswitching, preserving the segmented path.
+- If that loop pushes, cursor/end/length use private scalar slots promoted by
+  LLVM, with write-through stores on every push. Cold segment growth refreshes
+  cursor/end; it leaves length unchanged. Other calls cannot reach this private
+  header. Index entries and items remain live. Unproven cases keep the prior
+  lowering, layout, bounds checks and error behavior. No inferred reservation,
+  runtime ABI change, string change or relaxed floating-point rule is involved.
+- Measurements and validation are recorded in the array performance report;
+  CPU acceptance requires the retained interleaved same-binary control.

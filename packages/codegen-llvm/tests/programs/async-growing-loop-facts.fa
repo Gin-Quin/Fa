@@ -1,0 +1,19 @@
+use { sleep } = std.time
+async function build = <Tag>(tag: Tag): GrowingArray<Integer> => {
+	mutable items: GrowingArray<Integer> = []
+	for i in 0..130 {
+		items.push(i)
+		if i %% 32 == 0 { await sleep(1) }
+	}
+	mutable total = 0
+	for item, index in items {
+		if index %% 32 == 0 { await sleep(1) }
+		item += 1
+		total += item
+	}
+	assert total == 8515
+	items
+}
+assert (await build(1)).length == 130
+assert (await build({ key = 1 })).length == 130
+console.log("async growing loop facts ok") -- prints: async growing loop facts ok

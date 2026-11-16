@@ -2557,7 +2557,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some(self.array_parts(array)?)
 		};
 		// a `GrowingArray` is walked segment by segment, with a pointer
-		let (growing_length, run) = if growing {
+		let matched = self.matched_byte(pattern, item, body)?;
+		let segmented_scan =
+			growing && matched.is_none() && self.collection_data_size(self.llvm_type(item)) != 0;
+		let (growing_length, run) = if growing && !segmented_scan {
 			let cursor = self.pointer_alloca("segment_cursor")?;
 			let end = self.pointer_alloca("segment_end")?;
 			let null = self.pointer_type().const_null();
@@ -2567,12 +2570,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Some(self.growing_length(&self.builder, array)?),
 				Some((cursor, end)),
 			)
+		} else if growing {
+			(Some(self.growing_length(&self.builder, array)?), None)
 		} else {
 			(None, None)
 		};
 		// a body acting only on the items equal to a constant byte: the loop
 		// goes from one such item to the next (`copies.rs`)
-		let matched = self.matched_byte(pattern, item, body)?;
 		// The iteration rule keeps this header stable. A contiguous live
 		// prefix can use the ordinary byte search and direct item address;
 		// only the bytes remain live across executions of the loop body.
@@ -2665,7 +2669,58 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(more, body_block, exit)?;
 		self.builder.position_at_end(body_block);
-		let pointer = if let Some((items, contiguous)) = growing_flat {
+		// The outer loop enters once per live segment. The inner loop has
+		// one counted bound and direct addresses, just like an Array scan.
+		// Iteration forbids changing this array's storage or length, even
+		// through calls; elements remain live and may be mutated normally.
+		let segment = if segmented_scan {
+			let end = self.pointer_alloca("scan_segment_end")?;
+			let first = self.growing_run(array, item, position, end)?;
+			let end = self
+				.builder
+				.build_load(self.pointer_type(), end, "scan_end")?
+				.into_pointer_value();
+			let bytes = self.builder.build_int_sub(
+				self.builder.build_ptr_to_int(end, self.usize, "")?,
+				self.builder.build_ptr_to_int(first, self.usize, "")?,
+				"",
+			)?;
+			let size = self
+				.builder
+				.build_int_cast(self.item_size_const(item), self.usize, "")?;
+			let count = self
+				.builder
+				.build_int_unsigned_div(bytes, size, "segment_room")?;
+			let count = self
+				.builder
+				.build_int_z_extend_or_bit_cast(count, i64, "")?;
+			let remaining = self.builder.build_int_sub(length, position, "")?;
+			let partial =
+				self.builder
+					.build_int_compare(IntPredicate::ULT, remaining, count, "")?;
+			let count = self
+				.builder
+				.build_select(partial, remaining, count, "segment_count")?
+				.into_int_value();
+			let limit = self
+				.builder
+				.build_int_add(position, count, "segment_limit")?;
+			let inner = self.append_block("for_segment_item");
+			self.builder.build_unconditional_branch(inner)?;
+			self.builder.position_at_end(inner);
+			let current = self.load(counter)?.int();
+			let offset = self
+				.builder
+				.build_int_sub(current, position, "segment_offset")?;
+			let pointer = self.item_pointer(first, item, offset)?;
+			position = current;
+			Some((pointer, limit, inner))
+		} else {
+			None
+		};
+		let pointer = if let Some((pointer, _, _)) = segment {
+			pointer
+		} else if let Some((items, contiguous)) = growing_flat {
 			let direct = self.append_block("item_contiguous");
 			let segmented = self.append_block("item_segmented");
 			let join = self.append_block("item_found");
@@ -2786,7 +2841,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_int_nsw_add(position, i64.const_int(1, false), "")?;
 		self.builder.build_store(counter.pointer, next)?;
-		self.builder.build_unconditional_branch(test)?;
+		if let Some((_, limit, inner)) = segment {
+			let more = self
+				.builder
+				.build_int_compare(IntPredicate::ULT, next, limit, "")?;
+			self.builder.build_conditional_branch(more, inner, test)?;
+		} else {
+			self.builder.build_unconditional_branch(test)?;
+		}
 		self.builder.position_at_end(exit);
 		Ok(Val::void())
 	}

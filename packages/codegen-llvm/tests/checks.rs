@@ -1452,6 +1452,79 @@ console.log(items, stable, words, maybe)
 	}
 
 	#[test]
+	fn growing_scans_have_a_counted_inner_loop_per_segment() {
+		let source = "function sum = (items: GrowingArray<Integer>): Integer => { mutable total = 0\nfor item in items { total += item }\ntotal }\nmutable items: GrowingArray<Integer> = []\nfor i in 0..arguments.length { items.push(i) }\nconsole.log(sum(items))\n";
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("growing-segment-scan-{}", target.name()),
+				source,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let sum = function(&ir, "fa.sum");
+			assert_eq!(count(sum, "@fa_segmented_run("), 1, "{sum}");
+			let inner = sum
+				.split("for_segment_item:")
+				.nth(1)
+				.expect("a counted inner loop");
+			assert!(!inner.contains("@fa_segmented_run("), "{inner}");
+			assert!(!inner.contains("next_segment"), "{inner}");
+			assert!(sum.contains("segment_limit"), "{sum}");
+		}
+		let ir = optimized_ir("growing-vector-scan", source);
+		assert!(ir.contains("vector.body"), "{ir}");
+	}
+
+	#[test]
+	fn growing_private_loop_facts_require_an_unexposed_stable_owner() {
+		let prefix = "mutable items: GrowingArray<Integer> = []\nfor i in 0..arguments.length { items.push(i) }\n";
+		let indexed = "mutable total = 0\nfor i in 0..arguments.length { total += try items[i] }\nconsole.log(total, items.length)\n";
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("growing-loop-facts-{}", target.name()),
+				&format!(
+					"function run = (count: Integer) throws IndexError => {{\n{}{} }}\ntry run(arguments.length)\n",
+					prefix.replace("arguments.length", "count"),
+					indexed.replace("arguments.length", "count")
+				),
+				false,
+				OptLevel::O0,
+				target,
+			);
+			assert!(ir.contains("push_cursor"), "{ir}");
+			let loops: Vec<_> = ir
+				.split("for_body")
+				.filter(|block| block.contains("segment_code"))
+				.collect();
+			assert!(!loops.is_empty(), "{ir}");
+			// Lookup invariants are SSA values loaded in the preheader, even
+			// at O0; directory entries and element bytes are still live loads.
+			let lookup = ir
+				.split("index_segmented:")
+				.nth(1)
+				.expect("a segmented lookup")
+				.split("index_item:")
+				.next()
+				.unwrap();
+			assert!(!lookup.contains("segment_k = load"), "{lookup}");
+			assert!(!lookup.contains("segments = load ptr"), "{lookup}");
+		}
+		for (name, body) in [
+			("replace", "items = [3, 4]\nconsole.log(try items[0])"),
+			("reserve", "items.reserve(10)\nconsole.log(try items[0])"),
+			(
+				"capture",
+				"function change = () mutates items => { items = [3, 4] }\nchange()\nconsole.log(try items[0])",
+			),
+		] {
+			let source = format!("{prefix}for 0..2 {{ {body} }}\n");
+			let ir = ir_of(&format!("growing-facts-reject-{name}"), &source);
+			assert!(ir.contains("segment_k"), "{name}: {ir}");
+		}
+	}
+
+	#[test]
 	fn growing_lookup_has_no_index_dependent_branch_beyond_bounds() {
 		let source = "function lookup = (items: GrowingArray<Integer>, index: Integer<min = 0>): Integer throws IndexError => try items[index]\nmutable items: GrowingArray<Integer> = []\nfor value in 0..1000 { items.push(value) }\nconsole.log(try lookup(items, 7), try lookup(items, 900))\n";
 		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {

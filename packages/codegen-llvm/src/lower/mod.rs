@@ -44,6 +44,7 @@ mod frame_strings;
 mod frozen;
 pub(crate) mod generic_values;
 mod growing;
+mod growing_loops;
 mod hoisting;
 mod index_proofs;
 mod inline_unions;
@@ -278,6 +279,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// length of each such value.
 	hoisted_arrays: FxHashMap<SymbolId, PointerValue<'ctx>>,
 	hoisted_parts: FxHashMap<PointerValue<'ctx>, (PointerValue<'ctx>, IntValue<'ctx>)>,
+	growing_loops: FxHashMap<PointerValue<'ctx>, growing_loops::GrowingLoop<'ctx>>,
 	/// The functions whose bodies are being expanded into the function being
 	/// lowered (`destination.rs`): their locals are its own.
 	expanded_functions: Vec<NodeId>,
@@ -544,6 +546,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			inline_reserved: FxHashMap::default(),
 			hoisted_arrays: FxHashMap::default(),
 			hoisted_parts: FxHashMap::default(),
+			growing_loops: FxHashMap::default(),
 			expanded_functions: Vec::new(),
 			frozen_reads: Vec::new(),
 			frozen_string_parts: Vec::new(),
@@ -3278,6 +3281,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let reserved =
 			self.reserve_for_pushes(body, start.int(), (!open_end).then_some(end), inclusive)?;
 		let hoisted = self.hoist_arrays(body)?;
+		let growing = self.hoist_growing(body)?;
 		let counter =
 			match pattern.and_then(|pattern| self.analysis.symbols.symbol_of_decl(pattern)) {
 				Some(symbol) => self.slot_of(symbol, node)?,
@@ -3348,6 +3352,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.inline_reserved.remove(&(self.file, append));
 		}
 		self.unhoist_arrays(hoisted);
+		self.unhoist_growing(growing);
 		Ok(Val::void())
 	}
 

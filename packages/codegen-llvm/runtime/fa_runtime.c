@@ -2908,30 +2908,6 @@ static int bytes_at(const uint8_t *text, size_t text_length, size_t offset, cons
 	return 1;
 }
 
-/// A walk over the grapheme boundaries of a text, for offsets that never
-/// decrease: each check costs amortized constant time, where `is_boundary`
-/// walks from the start. Every offset of a simple text is a boundary.
-typedef struct {
-	const uint8_t *bytes;
-	size_t length;
-	size_t index;
-	size_t simple;
-} Boundaries;
-
-static int at_boundary(Boundaries *boundaries, size_t offset) {
-	const uint8_t *bytes = boundaries->bytes;
-	// between two ASCII bytes other than "\r\n", always a boundary
-	if (boundaries->simple || offset == 0 || offset >= boundaries->length ||
-	    (bytes[offset] < 0x80 && bytes[offset - 1] < 0x80 &&
-	     !(bytes[offset - 1] == '\r' && bytes[offset] == '\n'))) {
-		return 1;
-	}
-	while (boundaries->index < offset) {
-		boundaries->index = next_boundary(bytes, boundaries->length, boundaries->index);
-	}
-	return boundaries->index == offset;
-}
-
 /// The offset of the first `byte` at or after `offset`, or `length`:
 /// sixteen bytes at a time, with bounded word and byte tails.
 static size_t next_byte(const uint8_t *text, size_t length, size_t offset, uint8_t byte) {
@@ -2987,6 +2963,7 @@ typedef struct {
 	const uint8_t *text;
 	size_t length;
 	size_t position;
+	size_t units;
 } UnitReader;
 
 static int32_t read_unit(UnitReader *reader) {
@@ -2994,6 +2971,7 @@ static int32_t read_unit(UnitReader *reader) {
 	if (offset == reader->length) { return -1; }
 	size_t next = offset;
 	uint32_t code = decode(reader->text, reader->length, &next);
+	reader->units += 1;
 	if (code < 0x10000) { reader->position = next * 2; return (int32_t)code; }
 	code -= 0x10000;
 	if (reader->position & 1) {
@@ -3004,13 +2982,18 @@ static int32_t read_unit(UnitReader *reader) {
 	return (int32_t)(0xD800 + (code >> 10));
 }
 
-static int matches_units(UnitReader text, const uint8_t *search, size_t length) {
-	UnitReader needle = {search, length, 0};
+static int match_unit_range(UnitReader text, const uint8_t *search, size_t length, UnitReader *after) {
+	UnitReader needle = {search, length, 0, 0};
 	int32_t unit;
 	while ((unit = read_unit(&needle)) >= 0) {
 		if (read_unit(&text) != unit) { return 0; }
 	}
+	if (after) { *after = text; }
 	return 1;
+}
+
+static int matches_units(UnitReader text, const uint8_t *search, size_t length) {
+	return match_unit_range(text, search, length, 0);
 }
 
 /// Only a low half at the start or a high half at the end can match inside
@@ -3024,11 +3007,11 @@ static int search_needs_units(const uint8_t *search, size_t length) {
 
 static __attribute__((noinline)) int64_t find_units(const uint8_t *text, size_t length,
     const uint8_t *search, size_t search_length, int last) {
-	UnitReader candidate = {text, length, 0};
+	UnitReader candidate = {text, length, 0, 0};
 	int64_t found = -1;
-	for (size_t index = 0;; index += 1) {
+	for (;;) {
 		if (matches_units(candidate, search, search_length)) {
-			found = (int64_t)index;
+			found = (int64_t)candidate.units;
 			if (!last) { return found; }
 		}
 		if (read_unit(&candidate) < 0) { return found; }
@@ -3071,7 +3054,7 @@ FA_EXPORT int32_t fa_string_includes(const uint8_t *text, size_t text_length, si
 FA_EXPORT int32_t fa_string_starts_with(const uint8_t *text, size_t text_length, size_t capacity,
                                         const uint8_t *search, size_t search_length) {
 	if (!(capacity & SIMPLE) && search_needs_units(search, search_length)) {
-		return matches_units((UnitReader){text, text_length, 0}, search, search_length);
+		return matches_units((UnitReader){text, text_length, 0, 0}, search, search_length);
 	}
 	return bytes_at(text, text_length, 0, search, search_length);
 }
@@ -3082,7 +3065,7 @@ FA_EXPORT int32_t fa_string_ends_with(const uint8_t *text, size_t text_length, s
 		size_t count = fa_string_length(text, text_length, capacity);
 		size_t needed = unit_count(search, search_length);
 		if (needed > count) { return 0; }
-		UnitReader tail = {text, text_length, 0};
+		UnitReader tail = {text, text_length, 0, 0};
 		for (size_t index = needed; index < count; index += 1) { (void)read_unit(&tail); }
 		return matches_units(tail, search, search_length);
 	}
@@ -3120,36 +3103,21 @@ FA_EXPORT int64_t fa_string_index_of(const uint8_t *text, size_t text_length, si
 	return string_index_of(text, text_length, capacity, search, search_length, last);
 }
 
-/// The non-overlapping matches of `search` whose ends are grapheme
-/// boundaries (`faFindMatches`): calls `found(offset)` for each, in order.
-static void each_match(const uint8_t *text, size_t text_length, size_t simple,
-                       const uint8_t *search, size_t search_length,
-                       void (*found)(void *, size_t), void *context) {
-	size_t offset = 0;
-	if (simple && search_length > 0) {
-		// every offset is a boundary: jump from one first byte to the next
-		offset = next_byte(text, text_length, 0, search[0]);
-		while (offset + search_length <= text_length) {
-			if (bytes_at(text, text_length, offset, search, search_length)) {
-				found(context, offset);
-				offset += search_length;
-			} else {
-				offset += 1;
-			}
-			offset = next_byte(text, text_length, offset, search[0]);
-		}
+/// Non-overlapping byte matches in an ASCII source. Unicode callers use
+/// the code-unit cursor; an empty needle visits every code-unit boundary.
+static void each_ascii_match(const uint8_t *text, size_t text_length,
+    const uint8_t *search, size_t search_length, void (*found)(void *, size_t), void *context) {
+	if (!search_length) {
+		for (size_t offset = 0; offset <= text_length; offset += 1) { found(context, offset); }
 		return;
 	}
-	Boundaries starts = {text, text_length, 0, simple};
-	Boundaries ends = {text, text_length, 0, simple};
+	size_t offset = next_byte(text, text_length, 0, search[0]);
 	while (offset + search_length <= text_length) {
-		if (bytes_at(text, text_length, offset, search, search_length) &&
-		    at_boundary(&starts, offset) && at_boundary(&ends, offset + search_length)) {
+		if (bytes_at(text, text_length, offset, search, search_length)) {
 			found(context, offset);
-			offset += search_length == 0 ? 1 : search_length;
-		} else {
-			offset += 1;
-		}
+			offset += search_length;
+		} else { offset += 1; }
+		offset = next_byte(text, text_length, offset, search[0]);
 	}
 }
 
@@ -3163,13 +3131,17 @@ typedef struct {
 	int done;
 } Replacing;
 
+static void replace_unicode(const uint8_t *text, size_t length, size_t capacity,
+    const uint8_t *search, size_t search_length, const uint8_t *replacement,
+    size_t replacement_length, int all, FaString *out);
+
 static void replace_one(void *context, size_t offset) {
 	Replacing *replacing = context;
 	if (replacing->done) {
 		return;
 	}
 	fa_b_bytes(replacing->text + replacing->previous, offset - replacing->previous);
-	fa_b_bytes(replacing->replacement, replacing->replacement_length);
+	fa_b_string(replacing->replacement, replacing->replacement_length, 0);
 	replacing->previous = offset + replacing->search_length;
 	replacing->done = !replacing->all;
 }
@@ -3179,9 +3151,14 @@ FA_EXPORT void fa_string_replace(const uint8_t *text, size_t text_length, size_t
                                  const uint8_t *search, size_t search_length,
                                  const uint8_t *replacement, size_t replacement_length,
                                  int32_t all, FaString *out) {
+	if (!(capacity & SIMPLE)) {
+		replace_unicode(text, text_length, capacity, search, search_length,
+		                replacement, replacement_length, all, out);
+		return;
+	}
 	fa_b_reset();
 	Replacing replacing = {text, 0, search_length, replacement, replacement_length, all, 0};
-	each_match(text, text_length, capacity & SIMPLE, search, search_length, replace_one,
+	each_ascii_match(text, text_length, search, search_length, replace_one,
 	           &replacing);
 	fa_b_bytes(text + replacing.previous, text_length - replacing.previous);
 	fa_b_take(out);
@@ -3207,6 +3184,11 @@ void fa_array_materialize(FaArrayHeader *array);
 
 void *fa_array_push_slot(void *array, int64_t item_size);
 void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t item_size);
+
+static void *split_unicode(const uint8_t *text, size_t length, size_t capacity,
+    const uint8_t *separator, size_t separator_length, int views, int nonempty, void *parts);
+static size_t count_unicode_parts(const uint8_t *text, size_t length,
+    const uint8_t *separator, size_t separator_length, size_t limit);
 
 typedef struct {
 	const uint8_t *text;
@@ -3306,6 +3288,9 @@ static size_t count_byte(const uint8_t *text, size_t length, uint8_t byte) {
 
 static void *split_text(const uint8_t *text, size_t length, size_t capacity,
                         const uint8_t *separator, size_t separator_length, int views, int nonempty) {
+	if (!(capacity & SIMPLE)) {
+		return split_unicode(text, length, capacity, separator, separator_length, views, nonempty, 0);
+	}
 	if (separator_length == 0) {
 		return characters_of(text, length, capacity);
 	}
@@ -3322,7 +3307,7 @@ static void *split_text(const uint8_t *text, size_t length, size_t capacity,
 	Splitting splitting = {text, 0, separator_length,
 	                       fa_array_new(0, (int64_t)room, sizeof(FaString)), capacity & SIMPLE,
 	                       views, nonempty, 1, raw_capacity};
-	each_match(text, length, capacity & SIMPLE, separator, separator_length, split_one,
+	each_ascii_match(text, length, separator, separator_length, split_one,
 	           &splitting);
 	if (!nonempty || splitting.previous != length) {
 		FaString *last = fa_array_push_slot(splitting.parts, sizeof(FaString));
@@ -3337,7 +3322,7 @@ static void *split_text(const uint8_t *text, size_t length, size_t capacity,
 	return splitting.parts;
 }
 
-/// `text.split(separator)`; an empty separator splits into characters.
+/// `text.split(separator)`; an empty separator splits into code units.
 FA_EXPORT void *fa_string_split(const uint8_t *text, size_t length, size_t capacity,
                                 const uint8_t *separator, size_t separator_length) {
 	return split_text(text, length, capacity, separator, separator_length, 0, 0);
@@ -3346,7 +3331,7 @@ FA_EXPORT void *fa_string_split(const uint8_t *text, size_t length, size_t capac
 /// `text.split(separator)` whose parts are views of the text's bytes
 /// (`src/lower/views.rs`): `text` points to bytes that outlive the parts
 /// unchanged (for an inline text, its snapshot in the caller's frame). An
-/// empty separator still gives characters.
+/// empty separator still gives code units.
 FA_EXPORT void *fa_string_split_views(const uint8_t *text, size_t length, size_t capacity,
                                       const uint8_t *separator, size_t separator_length) {
 	return split_text(text, length, capacity, separator, separator_length, 1, 0);
@@ -3643,21 +3628,20 @@ FA_EXPORT int32_t fa_string_get(const uint8_t *text, size_t length, size_t capac
 	return string_get_slow(text, length, capacity, index, out);
 }
 
-/// Copy a range, encoding cut pair boundaries as lone surrogates. A view
-/// uses the existing bytes when both boundaries fall between code points.
-static void unit_slice(const uint8_t *text, size_t length, size_t capacity,
-                       size_t from, size_t to, FaString *out, int view) {
-	if (from == to) {
-		*out = (FaString){view ? text + ((capacity & SIMPLE) ? from : unit_position(text, length, capacity, from) / 2) : (const uint8_t *)"", 0, view ? string_view_capacity(capacity, 0) : SIMPLE};
+/// A range whose physical positions and UTF-16 width are already known.
+/// Search cursors use this without rescanning an earlier part of a view.
+static void unit_slice_positions(const uint8_t *text, size_t length, size_t capacity,
+    size_t first, size_t last, size_t units, FaString *out, int view) {
+	if (!units) {
+		*out = (FaString){view ? text + first / 2 : (const uint8_t *)"", 0,
+		                  view ? string_view_capacity(capacity, 0) : SIMPLE};
 		return;
 	}
-	size_t first = (capacity & SIMPLE) ? from * 2 : unit_position(text, length, capacity, from);
-	size_t last = (capacity & SIMPLE) ? to * 2 : unit_position(text, length, capacity, to);
 	if (!(first & 1) && !(last & 1)) {
 		size_t bytes = last / 2 - first / 2;
 		if (view || (string_static(capacity) && bytes > 1)) {
-			size_t tag = view ? string_view_capacity(capacity, to - from)
-			                  : (capacity & SIMPLE) ? SIMPLE : STRING_LITERAL | (to - from);
+			size_t tag = view ? string_view_capacity(capacity, units)
+			                  : (capacity & SIMPLE) ? SIMPLE : STRING_LITERAL | units;
 			*out = (FaString){text + first / 2, bytes, tag};
 		} else { *out = owned_copy_with(text + first / 2, bytes, capacity & STRING_FLAGS); }
 		return;
@@ -3666,7 +3650,8 @@ static void unit_slice(const uint8_t *text, size_t length, size_t capacity,
 	size_t start = first / 2 + ((first & 1) ? 4 : 0);
 	size_t stop = last / 2;
 	size_t middle = stop > start ? stop - start : 0;
-	size_t size = middle + ((first & 1) ? 3 : 0) + ((last & 1) ? 3 : 0);
+	size_t encoded_middle = fa_string_encoded_length(text + start, middle, capacity);
+	size_t size = encoded_middle + ((first & 1) ? 3 : 0) + ((last & 1) ? 3 : 0);
 	uint8_t *bytes = fa_string_allocate(size, STRING_SURROGATES, out);
 	size_t offset = 0;
 	if (first & 1) {
@@ -3675,8 +3660,8 @@ static void unit_slice(const uint8_t *text, size_t length, size_t capacity,
 		copy_bytes(bytes, (uint8_t *)&unit, 3);
 		offset = 3;
 	}
-	copy_bytes(bytes + offset, text + start, middle);
-	offset += middle;
+	fa_string_copy_bytes(bytes + offset, text + start, middle, capacity);
+	offset += encoded_middle;
 	if (last & 1) {
 		FaString unit;
 		unit_string(unit_at_position(text, length, last & ~(size_t)1), &unit);
@@ -3684,11 +3669,126 @@ static void unit_slice(const uint8_t *text, size_t length, size_t capacity,
 	}
 	if (string_owned(out->capacity)) {
 		StringHeader *header = string_header(out->bytes);
-		header->units = to - from;
+		header->units = units;
 		header->breadcrumbs = 0;
 		header->conversions = 0;
 		header->bytes = size;
 	}
+}
+
+/// Copy a code-unit range, encoding a cut pair boundary as a lone surrogate.
+static void unit_slice(const uint8_t *text, size_t length, size_t capacity,
+                       size_t from, size_t to, FaString *out, int view) {
+	if (from == to && !view) { *out = (FaString){(const uint8_t *)"", 0, SIMPLE}; return; }
+	size_t first = (capacity & SIMPLE) ? from * 2 : unit_position(text, length, capacity, from);
+	size_t last = from == to ? first
+	            : (capacity & SIMPLE) ? to * 2 : unit_position(text, length, capacity, to);
+	unit_slice_positions(text, length, capacity, first, last, to - from, out, view);
+}
+
+/// Append the selected units directly into the destination builder. At most
+/// the two cut ends need synthetic bytes; no temporary owning slice is built.
+static void append_unit_range(const uint8_t *text, size_t length, size_t capacity,
+    size_t first, size_t last) {
+	if (first == last) { return; }
+	uint8_t edge[3];
+	size_t start = first / 2 + ((first & 1) ? 4 : 0);
+	size_t stop = last / 2;
+	if (first & 1) {
+		size_t size = encode_point(edge, unit_at_position(text, length, first));
+		fa_b_bytes(edge, size);
+	}
+	if (stop > start) { fa_b_string(text + start, stop - start, capacity); }
+	if (last & 1) {
+		size_t size = encode_point(edge, unit_at_position(text, length, last & ~(size_t)1));
+		fa_b_bytes(edge, size);
+	}
+}
+
+static void replace_unicode(const uint8_t *text, size_t length, size_t capacity,
+    const uint8_t *search, size_t search_length, const uint8_t *replacement,
+    size_t replacement_length, int all, FaString *out) {
+	fa_b_reset();
+	UnitReader candidate = {text, length, 0, 0};
+	size_t previous = 0;
+	for (;;) {
+		UnitReader after;
+		if (match_unit_range(candidate, search, search_length, &after)) {
+			append_unit_range(text, length, capacity, previous, candidate.position);
+			fa_b_string(replacement, replacement_length, 0);
+			previous = after.position;
+			if (!all) { break; }
+			candidate = after;
+			if (search_length) { continue; }
+		}
+		if (read_unit(&candidate) < 0) { break; }
+	}
+	append_unit_range(text, length, capacity, previous, length * 2);
+	fa_b_take(out);
+}
+
+static size_t count_unicode_parts(const uint8_t *text, size_t length,
+    const uint8_t *separator, size_t separator_length, size_t limit) {
+	if (!separator_length) { return unit_count(text, length); }
+	UnitReader candidate = {text, length, 0, 0};
+	size_t count = 1;
+	for (;;) {
+		UnitReader after;
+		if (match_unit_range(candidate, separator, separator_length, &after)) {
+			if (++count > limit) { return count; }
+			candidate = after;
+			continue;
+		}
+		if (read_unit(&candidate) < 0) { return count; }
+	}
+}
+
+static void split_unit_part(void *parts, const uint8_t *text, size_t length, size_t capacity,
+    size_t first, size_t last, size_t units, int views) {
+	FaString *part = fa_array_push_slot(parts, sizeof(FaString));
+	unit_slice_positions(text, length, capacity, first, last, units, part, views ? 2 : 0);
+}
+
+static void *split_unicode(const uint8_t *text, size_t length, size_t capacity,
+    const uint8_t *separator, size_t separator_length, int views, int nonempty, void *parts) {
+	size_t room = 4;
+	uint64_t raw_capacity = nonempty ? room : 0, raw_parts = 1;
+	if (!separator_length) { room = fa_string_length(text, length, capacity); raw_capacity = 0; }
+#if !defined(__wasm__)
+	else if (separator_length == 1) { room = 1 + count_byte(text, length, separator[0]); raw_capacity = 0; }
+#endif
+	if (!parts) { parts = fa_array_new(0, (int64_t)room, sizeof(FaString)); }
+	else { raw_capacity = 0; }
+	UnitReader candidate = {text, length, 0, 0};
+	size_t previous = 0, previous_units = 0;
+	if (!separator_length) {
+		while (read_unit(&candidate) >= 0) {
+			split_unit_part(parts, text, length, capacity, previous, candidate.position, 1, views);
+			previous = candidate.position;
+		}
+		return parts;
+	}
+	for (;;) {
+		UnitReader after;
+		if (match_unit_range(candidate, separator, separator_length, &after)) {
+			if (raw_capacity && ++raw_parts > raw_capacity) { raw_capacity *= 2; }
+			if (!nonempty || candidate.units != previous_units) {
+				split_unit_part(parts, text, length, capacity, previous, candidate.position,
+				                candidate.units - previous_units, views);
+			}
+			previous = after.position;
+			previous_units = after.units;
+			candidate = after;
+			continue;
+		}
+		if (read_unit(&candidate) < 0) { break; }
+	}
+	if (!nonempty || candidate.units != previous_units) {
+		split_unit_part(parts, text, length, capacity, previous, candidate.position,
+		                candidate.units - previous_units, views);
+	}
+	if (raw_capacity) { fa_array_reserve(parts, (int64_t)raw_capacity, sizeof(FaString)); }
+	return parts;
 }
 
 static const void *string_slice(const uint8_t *text, size_t length, size_t capacity,
@@ -4823,21 +4923,18 @@ FA_EXPORT void fa_array_free(FaArrayHeader *array, int64_t item_size) {
 	fa_free(array, INLINE_ITEMS, sizeof(int64_t));
 }
 
-/// The same non-overlapping, boundary-checked search as `each_match`, but
+/// The same non-overlapping ASCII search as `each_ascii_match`, but
 /// stop as soon as the caller's item budget is exceeded. Large inputs do
 /// not need a complete extra scan merely to choose ordinary heap storage.
-static size_t count_split_parts(const uint8_t *text, size_t length, size_t simple,
+static size_t count_split_parts(const uint8_t *text, size_t length,
                                 const uint8_t *separator, size_t separator_length,
                                 size_t limit) {
 	size_t count = 1;
 	size_t offset = 0;
-	Boundaries starts = {text, length, 0, simple};
-	Boundaries ends = {text, length, 0, simple};
 	while (offset + separator_length <= length) {
-		if (simple) { offset = next_byte(text, length, offset, separator[0]); }
+		offset = next_byte(text, length, offset, separator[0]);
 		if (offset + separator_length > length) { break; }
-		if (bytes_at(text, length, offset, separator, separator_length) &&
-		    at_boundary(&starts, offset) && at_boundary(&ends, offset + separator_length)) {
+		if (bytes_at(text, length, offset, separator, separator_length)) {
 			count += 1;
 			if (count > limit) { return count; }
 			offset += separator_length;
@@ -4857,8 +4954,9 @@ static void *split_text_into(const uint8_t *text, size_t length, size_t capacity
 	}
 	size_t limit = (bytes - INLINE_ITEMS) / sizeof(FaString);
 	// At most one part per non-overlapping separator, plus the last part.
-	size_t count = length / separator_length < limit ? length / separator_length + 1
-	             : count_split_parts(text, length, capacity & SIMPLE, separator, separator_length, limit);
+	size_t count = !(capacity & SIMPLE) ? count_unicode_parts(text, length, separator, separator_length, limit)
+	             : length / separator_length < limit ? length / separator_length + 1
+	             : count_split_parts(text, length, separator, separator_length, limit);
 	if (count > limit) {
 		return split_text(text, length, capacity, separator, separator_length, views, 0);
 	}
@@ -4867,8 +4965,11 @@ static void *split_text_into(const uint8_t *text, size_t length, size_t capacity
 	parts->length = 0;
 	parts->capacity = (int64_t)count;
 	mark_items(parts, ARRAY_FRAME);
+	if (!(capacity & SIMPLE)) {
+		return split_unicode(text, length, capacity, separator, separator_length, views, 0, parts);
+	}
 	Splitting splitting = {text, 0, separator_length, parts, capacity & SIMPLE, views, 0, 1, 0};
-	each_match(text, length, capacity & SIMPLE, separator, separator_length, split_one, &splitting);
+	each_ascii_match(text, length, separator, separator_length, split_one, &splitting);
 	FaString *last = fa_array_push_slot(parts, sizeof(FaString));
 	*last = split_part(&splitting, splitting.previous, length);
 	return parts;

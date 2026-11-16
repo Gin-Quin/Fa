@@ -1,6 +1,8 @@
 // helpers: FaStop, faStop, faOverflow, faCheckInteger, faSharedHandle, faNeedSharedMemory, FaGuard, FaMutex, faUnlock, faCancelSignal, faSched, faLater, faMacrotask, faReady, faAlive, faRemove, faWaitShared, faLock, faWriteError, faExit, faStopMessage, faIsStackOverflow, faIsError, faReport, FaTask, faWhenDone, faCancel, faEnd, faFatal, faSettle, faRunTask, faRunAsync, faWaiting, faLockNow
 
-function read(_guard) {
+const drop$none = () => {};
+
+function read($$Value$drop, _guard) {
 	return 1;
 }
 
@@ -15,7 +17,7 @@ async function main($task) {
 	let value;
 	try {
 		const $t4 = mutex;
-		value = read(($t6 = ($t5 = faLockNow($t4)) !== faWaiting ? $t5 : await faLock($task, $t4, "guard-temporaries.fa:5:27")));
+		value = read(drop$none, ($t6 = ($t5 = faLockNow($t4)) !== faWaiting ? $t5 : await faLock($task, $t4, "guard-temporaries.fa:5:27")));
 	} finally { faUnlock($t6); }
 	try {
 		const $t7 = mutex;

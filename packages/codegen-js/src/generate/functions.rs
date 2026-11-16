@@ -1041,12 +1041,10 @@ impl Generator<'_> {
 						.has_flags(n, fa_analyzer::analysis::NodeFlags::CAPACITY_CHECK)
 				{
 					let helper = self.helper("faInlinePush");
-					let mut arguments = vec![
-						receiver.text,
-						self.hidden_value(capacity)
-							.expect("a compile-time capacity"),
-						values[0].clone(),
-					];
+					let Some(capacity) = self.hidden_value(capacity) else {
+						return self.unsupported(n, "an unresolved inline-array capacity");
+					};
+					let mut arguments = vec![receiver.text, capacity, values[0].clone()];
 					let (item, _) = inline.expect("an inline array");
 					if let Some(drop) = self.drop_function(item) {
 						arguments.push(drop);
@@ -1275,7 +1273,7 @@ impl Generator<'_> {
 			js::call(name, &all)
 		};
 		let texts: Vec<String> = values.iter().map(|value| value.text.clone()).collect();
-		if let Some((item, _)) = self.types.inline_array(self.receiver_type(callee))
+		if let Some((item, _)) = self.types.inline_array_types(self.receiver_type(callee))
 			&& matches!(path, "Array#clear" | "Array#delete")
 			&& let Some(drop) = self.drop_function(item)
 		{

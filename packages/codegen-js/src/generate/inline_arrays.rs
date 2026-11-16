@@ -14,7 +14,7 @@ impl Generator<'_> {
 		items: NodeList<'_>,
 	) -> Option<Expr> {
 		let ty = self.type_of(node);
-		self.types.inline_array(ty)?;
+		self.types.inline_array_types(ty)?;
 		let drop = self.drop_function(ty)?;
 		let list = self.temp();
 		self.out.line(format!("const {list} = [];"));

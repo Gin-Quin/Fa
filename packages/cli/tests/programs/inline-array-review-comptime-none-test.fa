@@ -1,7 +1,9 @@
+function isNone = (value: Integer?): Boolean => value is none
+
 function build = (): Boolean => {
 	mutable values: InlineArray<none, 2> = []
 	values.push(none)
-	values.pop() is none -- warning: W-CMP-1
+	isNone(values.pop())
 }
 console.log(build()) -- prints: true
 static result = @build()
@@ -10,7 +12,7 @@ console.log(result) -- prints: true
 function ordinary = (): Boolean => {
 	mutable values: Array<none> = []
 	values.push(none)
-	values.pop() is none -- warning: W-CMP-1
+	isNone(values.pop())
 }
 console.log(ordinary()) -- prints: true
 static ordinaryResult = @ordinary()

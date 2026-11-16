@@ -25,6 +25,13 @@ impl Generator<'_> {
 			return self.constant_value(n, &value, self.type_of(n));
 		}
 		let value = self.expr_value(n);
+		let value = if self.analysis.instantiation(n).is_some()
+			&& matches!(self.view(n), View::Name(_) | View::Access { .. })
+		{
+			self.specialized_function_value(n, value)
+		} else {
+			value
+		};
 		// reads and writes of reactive places (reactivity.rs)
 		self.reactive_expr(n, value)
 	}

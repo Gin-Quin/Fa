@@ -82,6 +82,15 @@ impl Generator<'_> {
 					self.hidden_names.insert(entry, name.clone());
 					names.push(name);
 				}
+				Hidden::Drop(param) => {
+					let wanted = format!(
+						"${}$drop",
+						self.types.syms.resolve(self.types.param(param).name)
+					);
+					let name = self.declare_hidden_name(&wanted);
+					self.hidden_names.insert(entry, name.clone());
+					names.push(name);
+				}
 				Hidden::Method(param, method) => {
 					let info = self.types.param(param);
 					let wanted = format!(
@@ -212,6 +221,7 @@ impl Generator<'_> {
 						}
 						None => None,
 					},
+					Hidden::Drop(param) => binding(param).map(|ty| self.drop_argument(ty)),
 					Hidden::Method(param, method) => {
 						let parameter = generics
 							.iter()
@@ -496,6 +506,31 @@ impl Generator<'_> {
 			.get(&Hidden::Method(param, field.name))?
 			.clone();
 		Some(name)
+	}
+
+	/// A declaration inferred for a concrete function value needs the same
+	/// capabilities as an explicit application. Keep both async instances.
+	pub(crate) fn specialized_function_value(&mut self, n: NodeId, value: Expr) -> Expr {
+		let hidden = self.signature_hidden_arguments(n, n);
+		if hidden.is_empty() {
+			return value;
+		}
+		let value = self.keep(value);
+		let arguments = hidden.join(", ");
+		let sync = format!("((...$a) => {}({arguments}, ...$a))", value.primary_text());
+		if self.tasks.asynchronous
+			&& matches!(self.types.kind(self.type_of(n)), TypeKind::Function(sig) if self.types.sig(sig).is_async)
+		{
+			let call = self.helper("faCallValue");
+			let asynchronous = format!(
+				"(($task, ...$a) => {call}($task, {}, {arguments}, ...$a))",
+				value.text
+			);
+			let helper = self.helper("faAsyncValue");
+			js::call(helper, &[sync, asynchronous])
+		} else {
+			Expr::primary(sync)
+		}
 	}
 
 	/// A generic application used as a value (`repeatText(2)`): the

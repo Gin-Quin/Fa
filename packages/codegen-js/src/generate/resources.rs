@@ -17,7 +17,9 @@
 use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
-use fa_analyzer::types::{CollKind, TypeKind};
+use fa_analyzer::types::{CollKind, TypeFlags, TypeKind};
+
+use super::generics::Hidden;
 
 use crate::generate::Generator;
 use crate::js::{Expr, Prec};
@@ -59,11 +61,30 @@ impl Generator<'_> {
 	/// before its body, which a recursive type calls.
 	pub(crate) fn drop_function(&mut self, ty: TypeId) -> Option<String> {
 		let ty = self.types.unfold(ty);
-		if !self.types.contains_resource(ty) {
+		if let TypeKind::Param(param) = self.types.kind(ty) {
+			return self.hidden_names.get(&Hidden::Drop(param)).cloned();
+		}
+		if !self.may_hold_resource(ty) {
 			return None;
 		}
 		if let Some(name) = self.drops.get(&ty) {
 			return Some(name.clone());
+		}
+		// A drop containing a type parameter captures this function's
+		// destructor capability; it cannot be hoisted to module scope.
+		if self.types.flags(ty).contains(TypeFlags::HAS_PARAM) {
+			let name = self.scopes.declare_global("drop$generic");
+			self.drops.insert(ty, name.clone());
+			let body = self.drop_body(ty);
+			self.drops.remove(&ty);
+			let lines = body?;
+			if lines.is_empty() {
+				return None;
+			}
+			return Some(format!(
+				"(function {name}(value) {{ if (value === undefined) return; {} }})",
+				lines.join(" ")
+			));
 		}
 		let wanted = self
 			.types
@@ -81,6 +102,23 @@ impl Generator<'_> {
 			),
 		));
 		Some(name)
+	}
+
+	fn may_hold_resource(&self, ty: TypeId) -> bool {
+		self.types.contains_resource(ty) || self.types.flags(ty).contains(TypeFlags::HAS_PARAM)
+	}
+
+	pub(crate) fn drop_argument(&mut self, ty: TypeId) -> String {
+		if let Some(drop) = self.drop_function(ty) {
+			return drop;
+		}
+		if let Some(name) = self.drops.get(&TypeId::NONE) {
+			return name.clone();
+		}
+		let name = self.scopes.declare_global("drop$none");
+		self.drops.insert(TypeId::NONE, name.clone());
+		self.constants.push((name.clone(), "() => {}".into()));
+		name
 	}
 
 	/// The statements of the drop function of a type.
@@ -302,7 +340,9 @@ impl Generator<'_> {
 		matches!(
 			info.kind,
 			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Parameter { .. }
-		) && self.types.contains_resource(info.ty)
+		) && (self.types.contains_resource(info.ty)
+			|| (!matches!(info.kind, SymbolKind::Parameter { .. })
+				&& self.may_hold_resource(info.ty)))
 	}
 
 	/// Whether a local moves out somewhere (as a whole): it needs a drop flag.
@@ -354,8 +394,7 @@ impl Generator<'_> {
 		target: NodeId,
 		members: &[NodeId],
 	) -> Option<Expr> {
-		if !self.analysis.moved_reads.contains(&n) || !self.types.contains_resource(self.type_of(n))
-		{
+		if !self.analysis.moved_reads.contains(&n) || !self.may_hold_resource(self.type_of(n)) {
 			return None;
 		}
 		let (&last, before) = members.split_last()?;
@@ -410,7 +449,7 @@ impl Generator<'_> {
 		for &member in members {
 			read = self.apply_member(read, member, false);
 		}
-		let moved = if self.types.contains_resource(self.type_of(n)) {
+		let moved = if self.may_hold_resource(self.type_of(n)) {
 			format!("{} = undefined, ", read.text)
 		} else {
 			String::new()

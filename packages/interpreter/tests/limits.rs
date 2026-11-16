@@ -27,13 +27,13 @@ fn explicit_call_frames_are_checked_against_the_heap_budget() {
 		params: Vec::new(),
 		captures: Vec::new(),
 		slots: 0,
-		body: Expr::CallFunction(FnKey(0, 0), Vec::new()),
+		body: Expr::CallFunction(FnKey(0, 0), Vec::new().into()),
 	}));
 	let limits = Limits {
 		memory: 64 << 10,
 		..Limits::default()
 	};
 	let result = Interpreter::new(&mut host, limits)
-		.evaluate(&Expr::CallFunction(FnKey(0, 0), Vec::new()), 0);
+		.evaluate(&Expr::CallFunction(FnKey(0, 0), Vec::new().into()), 0);
 	assert_eq!(result, Err(Error::Memory(64 << 10)));
 }

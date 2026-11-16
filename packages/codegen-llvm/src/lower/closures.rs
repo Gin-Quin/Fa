@@ -30,28 +30,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The locals of enclosing functions that a lambda reads.
 	pub(crate) fn find_captures(&mut self, lambda: NodeId) -> Vec<SymbolId> {
-		let span = self.tree.spans[lambda.index()];
-		let mut captures = Vec::new();
-		let mut stack = vec![lambda.index()];
-		while let Some(node) = stack.pop() {
-			if let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(node)) {
+		// Use checked reads, not every resolved name in the syntax tree:
+		// named-argument labels resolve to the callee's parameters for IDE
+		// navigation, but do not capture or read those parameters.
+		let mut captures: Vec<_> = self
+			.analysis
+			.function(lambda)
+			.into_iter()
+			.flat_map(|info| &info.captures)
+			.copied()
+			.filter(|&symbol| {
 				let data = self.analysis.symbols.symbol(symbol);
-				let variable = !matches!(
+				!matches!(
 					data.kind,
 					SymbolKind::Function | SymbolKind::Type | SymbolKind::Namespace
-				);
-				// declared outside the lambda, in a function (top-level locals are globals)
-				let declared = self.tree.spans[data.decl_node.index()];
-				let outside = declared.start < span.start || declared.start >= span.end;
-				if variable
-					&& outside && self.owner_of_scope(data.scope).is_some()
-					&& !captures.contains(&symbol)
-				{
-					captures.push(symbol);
-				}
-			}
-			self.tree.nodes[node].for_each_child(|child| stack.push(child));
-		}
+				) && self.owner_of_scope(data.scope).is_some()
+			})
+			.collect();
 		captures.sort();
 		captures
 	}

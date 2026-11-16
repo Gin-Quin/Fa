@@ -1,0 +1,8 @@
+-- prints: 7
+
+function outer = (base: Integer): Integer => {
+	function add = (value: Integer): Integer => base + value
+	add(value = 3)
+}
+
+console.log(outer(4))

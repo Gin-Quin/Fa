@@ -13,3 +13,6 @@ export function = <K, V>(map: Map<K, V>) mutates map => {
 	map.deleteWhere((_key, _value) => true)
 }
 -- prints: per-unit ok
+
+-- file: package.fa
+export = { name = "mapLayoutRegression" }

@@ -282,10 +282,10 @@
       "packages/cli/tests/programs/map-generic-helper-layouts.fa": "e98e40fccdf35be96cd227c7a56e51a3eb28a8e674c32e98ce712aea2164537b",
       "packages/cli/tests/programs/map-generic-operations.fa": "d4f9707fc3ec07bb36817dc37b4908a12051810bc5a5ac01441d1639779e2cfa",
       "packages/cli/tests/programs/map-generic-ranged-view.fa": "62f4829ebb45aaf47c3f8c22bc8739bf798be6e7b9cbb53f58d3562f4a6e1b69",
-      "packages/cli/tests/programs/map-generic-readonly.fa": "cc795ac2781d8f1495e120d6b00f946db50fbb909fa69880344de95ecacefadb",
+      "packages/cli/tests/programs/map-generic-readonly.fa": "91631ba1c98413034add099bba9454b30d02f5474ed32f1a180227447a943489",
       "packages/cli/tests/programs/map-generic-reference.fa": "de68e2f67475c05b3e15270f557b49401e7ba74961de2f359e1ff69f5faf7a87",
-      "packages/cli/tests/programs/map-generic-units-delete.fa": "ecd4ae80cecc15e9e213da7a619917e75f790d7e0255fc644e601e9fb73a6f16",
-      "packages/cli/tests/programs/map-generic-units-reference.fa": "caa9392aa775fb02246a40325bd78b9b238d008330fd32abec5d26e9a7dc4f9c",
+      "packages/cli/tests/programs/map-generic-units-delete.fa": "f0682d6da5b5cab819fb96b5536975c2aacb3bd265b18458333c3781d46417ac",
+      "packages/cli/tests/programs/map-generic-units-reference.fa": "27eafee715aa9f93a2a10f99efaaa5f6403ec45f1aa4cd51a620d77e2c2b00cb",
       "packages/codegen-llvm/tests/programs/async-map-generic-layout.fa": "64a1e1657135f6e69ff76d50ff04491a54be75d32b0ad1f685959b6b0221fa59"
     }
   },
@@ -294,5 +294,11 @@
     "compiler": "gcc",
     "tests_passed": 1,
     "executed": true
+  },
+  "fixture_corrections": {
+    "packages": "Explicit package.fa plus package-root discovery in the shared CLI runner.",
+    "readonly": "Vary UInt32/UInt16 keys with fixed Int64 values; all assertions retained. Archived scalar64 native compiler reads 0 instead of 7.",
+    "pre_existing_js_literal_repro": "design/reviews/repros/collections-maps/js-generic-wide-literal/main.fa",
+    "corrected_cli_groups_passed": 11
   }
 }

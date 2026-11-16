@@ -2093,7 +2093,10 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 				2,
 				"{full}"
 			);
-			assert!(full.contains("[9 x { i32, i16 }]"), "{full}");
+			assert!(
+				full.contains("[8 x <{ i32, i32, { i16, i64 } }>]"),
+				"{full}"
+			);
 			assert!(full.contains("[32 x { i32, i64 }]"), "{full}");
 		}
 	}

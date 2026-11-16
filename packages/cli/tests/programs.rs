@@ -435,8 +435,8 @@ fn a_timeout_stops_the_program_below_the_fa_process() {
 
 /// A program of several files (`-- file: path` sections, like the LLVM
 /// backend's `async-workers.fa`): its files written into `directory`, and
-/// the path of its entry (`main.fa`, else the first `.fa` file). `None` for
-/// a program of one file.
+/// its package root, or the path of its entry (`main.fa`, else the first
+/// `.fa` file). `None` for a program of one file.
 fn multi_file_entry(program: &Path, directory: &Path) -> Option<PathBuf> {
 	let text = fs::read_to_string(program).ok()?;
 	let mut files: Vec<(String, String)> = Vec::new();
@@ -456,6 +456,9 @@ fn multi_file_entry(program: &Path, directory: &Path) -> Option<PathBuf> {
 		let path = directory.join(path);
 		fs::create_dir_all(path.parent()?).ok()?;
 		fs::write(&path, text).ok()?;
+	}
+	if files.iter().any(|(path, _)| path == "package.fa") {
+		return Some(directory.to_path_buf());
 	}
 	let entry = files
 		.iter()

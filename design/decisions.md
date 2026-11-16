@@ -1831,10 +1831,10 @@ literals and frame constructors all pass through `table_of`; private headers
 and lookup hints retain their narrower separate proofs. M1 (split freestanding
 O0 runtime linking) is independent and remains a documented follow-up.
 
-A generic constant constructor with a local `let` literal independently
-reproduced a crash when its Int64/chunked and Int16/inline instances reused
-one static header. The static-cache fix is guarded by native/wasm IR checks
-requiring both a chunked 32-entry block and a nine-slot inline block, plus
+A generic constant constructor with a local `let` literal exposed static
+header reuse between UInt32-key/chunked and UInt16-key/inline instances
+(both with Int64 values). The static-cache fix is guarded by native/wasm IR checks
+requiring both a chunked 32-entry block and an eight-slot tagged inline block, plus
 leak-checked O0/O3 execution. Scalar-range, optional, union and enum views
 have shared runtime regressions too.
 
@@ -1845,3 +1845,12 @@ module checks and 28 independent optimization controls. Workspace Clippy is
 warning-free; the GCC sanitizer runtime test actually executes and passes.
 Full workspace validation is in progress and recorded in the engineer report.
 No benchmark source/runtime C/String code changes are involved.
+
+The shared multi-file runner now recognizes an explicit `package.fa` fixture
+and invokes the package root, so library namespaces and split compilation
+are exercised on Bun, Node and web. The read-only fixture varies only
+Number-backed generic keys and retains concrete Int64 values: a generic
+Int64 value literal separately exposes a pre-existing JavaScript conversion
+bug (recorded with a durable repro in todo). The corrected fixture still
+fails on the archived scalar64 native compiler and preserves both static
+layouts and all value assertions. No expected-skip list changes.

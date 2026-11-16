@@ -40,3 +40,6 @@ export function = <K, V>(map: Map<K, V>, key: K, value: V) mutates map => {
 	map[key] = value
 }
 -- prints: per-unit ok
+
+-- file: package.fa
+export = { name = "mapLayoutRegression" }

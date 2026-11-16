@@ -1,0 +1,24 @@
+type Reader = () => Integer
+
+function borrowed = (items: Array<Integer>): Reader => () => items.length -- error: MEM004
+
+function named = (items: Array<Integer>): Reader => {
+	function read = (): Integer => items.length -- error: MEM004
+	read
+}
+
+function later = (): Array<Reader> => {
+	let items = [1]
+	let callbacks: Array<Reader> = [() => items.length] -- error: MEM004
+	console.log(items.length)
+	callbacks
+}
+
+function repeated = (): Array<Reader> => {
+	let items = [1]
+	mutable callbacks: Array<Reader> = []
+	for 0..3 {
+		callbacks.push(() => items.length) -- error: MEM004
+	}
+	callbacks
+}

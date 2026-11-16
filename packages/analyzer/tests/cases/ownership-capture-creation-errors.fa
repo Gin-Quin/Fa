@@ -10,7 +10,7 @@ function anonymous = (): (Array<Integer>, Array<Reader>) => {
 function alias = (): (Array<Integer>, Array<Reader>) => {
 	let items = [1]
 	use borrowed = items
-	let first = items -- error: MEM004
-	let callbacks: Array<Reader> = [() => borrowed.length]
+	let first = items                                      -- error: MEM004
+	let callbacks: Array<Reader> = [() => borrowed.length] -- error: MEM004
 	(first, callbacks)
 }

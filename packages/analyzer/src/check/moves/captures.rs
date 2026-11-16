@@ -40,12 +40,20 @@ impl Walker<'_> {
 				}
 				let owned = self.ownership_source_owned(symbol, creation);
 				let later = graph.later_uses_where(symbol, |node| {
-					matches!(self.view(node), View::Name(_))
-						&& self.move_places.get(&node).is_some_and(|places| {
-							places
-								.iter()
-								.any(|&place| self.place_symbol(place) == Some(symbol))
-						})
+					let creation = matches!(
+						self.view(node),
+						View::Lambda { .. } | View::Function { .. } | View::ExportFunction { .. }
+					) && self.a.function(node).is_some_and(|info| {
+						info.declaration.unwrap_or(info.lambda) == node
+							&& self.a.escapes.contains(&info.lambda)
+					});
+					creation
+						|| matches!(self.view(node), View::Name(_))
+							&& self.move_places.get(&node).is_some_and(|places| {
+								places
+									.iter()
+									.any(|&place| self.place_symbol(place) == Some(symbol))
+							})
 				});
 				let witness = events
 					.iter()
@@ -67,7 +75,16 @@ impl Walker<'_> {
 						.syms
 						.resolve(self.a.symbols.symbol(*symbol).name);
 					let reason = later
-						.map(|node| format!("used again on line {}", self.line_of(node)))
+						.map(|node| {
+							if node == creation {
+								format!(
+									"used again on the next loop iteration (line {})",
+									self.line_of(node)
+								)
+							} else {
+								format!("used again on line {}", self.line_of(node))
+							}
+						})
 						.unwrap_or_else(|| "borrowed from its owner".to_string());
 					format!("`{name}` (`{}`), {reason}", self.display(*ty))
 				})
@@ -308,6 +325,19 @@ mod tests {
 		] {
 			assert_eq!(codes(source), ["MEM004"]);
 		}
+	}
+
+	#[test]
+	fn repeated_structure_captures_require_a_snapshot_but_exclusive_uses_do_not() {
+		assert_eq!(
+			codes(
+				"type Reader = () => Integer\nfunction repeated = (): Array<Reader> => {\nlet items = [1]\nmutable callbacks: Array<Reader> = []\nfor 0..3 { callbacks.push(() => items.length) }\ncallbacks\n}\n"
+			),
+			["MEM004"]
+		);
+		analyzed(
+			"type Reader = () => Integer\nfunction exclusive = (choose: Boolean): Integer => {\nlet items = [1]\nif choose {\nlet callbacks: Array<Reader> = [() => items.length]\nreturn callbacks[0]()\n}\nitems.length\n}\n",
+		);
 	}
 
 	#[test]

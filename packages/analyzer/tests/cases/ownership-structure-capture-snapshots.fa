@@ -1,0 +1,51 @@
+-- prints: 1 2
+-- prints: 1 2
+
+type Reader = () => Integer
+
+function keep = (items: Array<Integer>): Reader => do {
+	let itemsSnapshot = copy items
+	() => itemsSnapshot.length
+}
+
+function check = (): (Integer, Integer) => {
+	mutable items = [1]
+	let read = keep(items)
+	items.push(2)
+	(read(), items.length)
+}
+
+static compiled = @check()
+console.log(compiled[0], compiled[1])
+let executed = check()
+console.log(executed[0], executed[1])
+
+function append = (items: Array<Integer>): Integer mutates items => {
+	items.push(2)
+	items.length
+}
+function retain = (before: Integer, reader: Reader): Reader => reader
+function ordered = (snapshotFirst: Boolean): Integer => {
+	mutable items = [1]
+	let read = if snapshotFirst {
+		retain(
+			reader = do {
+				let snapshot = copy items
+				() => snapshot.length
+			}
+			before = append(items)
+		)
+	} else {
+		retain(
+			before = append(items)
+			reader = do {
+				let snapshot = copy items
+				() => snapshot.length
+			}
+		)
+	}
+	read()
+}
+static writtenOrder = (@ordered(false), @ordered(true))
+console.log(writtenOrder[0], writtenOrder[1]) -- prints: 2 1
+console.log(ordered(false), ordered(true))    -- prints: 2 1

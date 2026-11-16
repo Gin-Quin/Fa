@@ -34,6 +34,46 @@ pub(crate) enum WriteBack<'ctx> {
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	fn snapshot_string_designation(
+		&mut self,
+		symbol: SymbolId,
+		place: Slot<'ctx>,
+	) -> Result<Slot<'ctx>, Error> {
+		if place.repr != Repr::Str {
+			return Ok(place);
+		}
+		let snapshot = match self.string_view_slots.get(&symbol) {
+			Some(&slot) => slot,
+			None => {
+				let slot = if self.shared.contains_key(&symbol) || self.frame().owner.is_none() {
+					let global = self
+						.module
+						.add_global(self.string_type, None, "fa.string_view");
+					global.set_initializer(&self.string_type.const_zero());
+					global.set_linkage(inkwell::module::Linkage::Internal);
+					Slot {
+						pointer: global.as_pointer_value(),
+						repr: Repr::Str,
+					}
+				} else {
+					self.alloca(Repr::Str, "string_view")?
+				};
+				self.string_view_slots.insert(symbol, slot);
+				slot
+			}
+		};
+		let pointer = self
+			.call_value(
+				self.runtime.function("fa_string_reference")?,
+				&[place.pointer.into(), snapshot.pointer.into()],
+			)?
+			.into_pointer_value();
+		Ok(Slot {
+			pointer,
+			repr: Repr::Str,
+		})
+	}
+
 	/// Whether a node designates a place (a local, a field, an item).
 	pub(crate) fn is_place(&self, node: NodeId) -> bool {
 		let stored = |kind| {
@@ -294,6 +334,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			None => self.reference_place(value)?,
 		};
+		let place = self.snapshot_string_designation(symbol, place)?;
 		let data = self.analysis.symbols.symbol(symbol);
 		if self.shared.contains_key(&symbol) {
 			// a top-level reference that functions read
@@ -411,6 +452,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Resolution::Local(symbol) = self.analysis.resolution(node) else {
 			return Err(self.unsupported(node.index(), "this `reuse`"));
 		};
+		// Functions are lowered before module initializers. A reseating may
+		// therefore be the first lowered use of a module-level reference.
+		if !self.references.contains_key(&symbol) && self.shared.contains_key(&symbol) {
+			let repr = self.repr_of(self.analysis.symbols.symbol(symbol).ty, node.index())?;
+			self.reference_holder(symbol, repr);
+		}
 		let Some(&(holder, _)) = self.references.get(&symbol) else {
 			return Err(self.unsupported(node.index(), "this `reuse`"));
 		};
@@ -418,6 +465,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some((place, _)) => place,
 			None => self.reference_place(value)?,
 		};
+		let place = self.snapshot_string_designation(symbol, place)?;
 		self.builder.build_store(holder, place.pointer)?;
 		Ok(Val::void())
 	}
@@ -443,9 +491,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			&& self.node_repr(target)? == Repr::Str
 			&& self.node_repr(index)? == Repr::Range
 		{
-			let text = self.expr(target)?;
+			let source = self
+				.is_place(target)
+				.then(|| self.place(target))
+				.transpose()?;
+			let text = match source {
+				Some(source) => self.load(source)?,
+				None => self.expr(target)?,
+			};
 			let range = self.expr(index)?;
-			let (bytes, length) = self.string_parts(text)?;
+			let (bytes, length) = match source {
+				Some(source) => self.string_place_parts(text, source.pointer)?,
+				None => self.string_parts(text)?,
+			};
 			let capacity = self.string_capacity(text)?;
 			let (start, end, flags) = self.range_parts(range)?;
 			let slot = if self.frame().owner.is_none() {

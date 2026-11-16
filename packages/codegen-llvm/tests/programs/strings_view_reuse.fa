@@ -1,0 +1,34 @@
+-- Copying a String designation snapshots the selected span.
+let text = "abcd"
+mutable use current = text[0..1]
+mutable use saved = text[0..1]
+for index in 0..3 {
+	reuse current = text[index..index + 1]
+	if index == 0 { reuse saved = current }
+}
+console.log(current, saved) -- prints: c a
+use other = current
+reuse current = text[3..4]
+console.log(current, other, saved) -- prints: d c a
+function select = (index: Integer) throws IndexError => {
+	reuse current = try text[index..index + 1]
+}
+try select(1)
+console.log(current, other, saved) -- prints: b c a
+
+-- An ordinary whole-String alias still follows its owner's place.
+mutable owner = "before"
+use whole = owner
+owner = "after"
+console.log(whole) -- prints: after
+
+-- Inline array items must be borrowed from the actual item, rather than
+-- from a reusable expression snapshot in the loop.
+mutable names: Array<String> = []
+for index in 0..3 { names.push("{index}x") }
+mutable use first = try names[0][0..1]
+for index in 0..3 {
+	use part = try names[index][0..1]
+	if index == 0 { reuse first = part }
+}
+console.log(first) -- prints: 0

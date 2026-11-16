@@ -925,6 +925,13 @@ static void test_utf16_strings(void) {
 	CHECK(string_counted_view(counted.capacity) && (counted.capacity & KIND_MASK) == 2);
 	CHECK(fa_string_length(counted.bytes, counted.length, counted.capacity) == 2);
 	CHECK(!string_owned(counted.capacity) && !string_static(counted.capacity));
+	FaString snapshot;
+	CHECK(fa_string_reference(0, &snapshot) == 0);
+	CHECK(fa_string_reference(&counted, &snapshot) == &snapshot);
+	counted.length = 0;
+	CHECK(snapshot.bytes == text + 1 && snapshot.length == 5);
+	FaString whole = {(const uint8_t *)"owner", 5, SIMPLE};
+	CHECK(fa_string_reference(&whole, &snapshot) == &whole);
 	// ASCII compact storage has no extra field. Unicode counts are bounded
 	// unsigned LEB128 values and preserve the full representation range.
 	uint8_t metadata[16] = "ascii";

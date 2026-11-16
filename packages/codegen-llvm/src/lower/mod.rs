@@ -339,6 +339,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The `mutable use` references: the slot holding the address of the
 	/// place they designate, and its representation.
 	references: FxHashMap<SymbolId, (PointerValue<'ctx>, Repr)>,
+	/// Independent descriptor storage for copied String content designations.
+	string_view_slots: FxHashMap<SymbolId, Slot<'ctx>>,
 	/// The places of the `provide` statements lowered so far.
 	provided: FxHashMap<NodeId, Slot<'ctx>>,
 	/// The receiver of the method call being lowered when it is already
@@ -567,6 +569,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			pending_receiver: None,
 			provided: FxHashMap::default(),
 			references: FxHashMap::default(),
+			string_view_slots: FxHashMap::default(),
 			saved_cleanups: Vec::new(),
 			owned_locals: FxHashMap::default(),
 			drop_functions: std::cell::RefCell::new(FxHashMap::default()),

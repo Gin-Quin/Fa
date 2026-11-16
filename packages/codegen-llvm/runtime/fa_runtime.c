@@ -152,6 +152,21 @@ static int string_counted_view(size_t capacity) {
 	       (capacity & STRING_COUNTED_VIEW) == STRING_COUNTED_VIEW;
 }
 
+/// A content view is a descriptor value, whereas a whole String alias
+/// still designates its owner's place. Snapshot only the former when a
+/// designation is copied or reseated; no payload is copied or owned here.
+FA_EXPORT __attribute__((always_inline)) const FaString *fa_string_reference(
+    const FaString *place, FaString *snapshot) {
+	if (!place) { return 0; }
+	size_t capacity = place->capacity;
+	if (!(capacity & STRING_INLINE) &&
+	    (string_counted_view(capacity) || (capacity & ~STRING_FLAGS) == KIND_MASK)) {
+		*snapshot = *place;
+		return snapshot;
+	}
+	return place;
+}
+
 /// A counted view never owns bytes. ASCII keeps the existing compact tag;
 /// literals cannot collide with the counted-view kind (they are well formed).
 static size_t string_view_capacity(size_t flags, size_t units) {

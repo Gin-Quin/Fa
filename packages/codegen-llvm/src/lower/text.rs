@@ -909,8 +909,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		builder: &inkwell::builder::Builder<'ctx>,
 		value: Val<'ctx>,
 	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
+		self.string_parts_source(builder, value, None)
+	}
+
+	/// A slice borrows its stable owner place, including an inline payload.
+	/// The analyzer invalidates that designation before the owner may change.
+	pub(crate) fn string_place_parts(
+		&self,
+		value: Val<'ctx>,
+		place: PointerValue<'ctx>,
+	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
+		self.string_parts_source(&self.builder, value, Some(place))
+	}
+
+	fn string_parts_source(
+		&self,
+		builder: &inkwell::builder::Builder<'ctx>,
+		value: Val<'ctx>,
+		source: Option<PointerValue<'ctx>>,
+	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
 		// a field read once at the entry of the method (`frozen.rs`)
-		if let Some(parts) = self.frozen_parts(value) {
+		if source.is_none()
+			&& let Some(parts) = self.frozen_parts(value)
+		{
 			return Ok(parts);
 		}
 		let pair = value.value.expect("a string").into_struct_value();
@@ -930,17 +951,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// A readonly parameter is an immutable reference for the entire call.
 		// Its loaded value can borrow inline bytes from that original place;
 		// mutable places and computed values still require an SSA snapshot.
-		let borrowed = pair.as_instruction_value().and_then(|instruction| {
-			if instruction.get_opcode() != InstructionOpcode::Load {
-				return None;
-			}
-			let pointer = instruction.get_operand(0)?.value()?.into_pointer_value();
-			self.frame
-				.as_ref()
-				.is_some_and(|frame| {
-					frame.function == function && frame.readonly_strings.contains(&pointer)
-				})
-				.then_some(pointer)
+		let borrowed = source.or_else(|| {
+			pair.as_instruction_value().and_then(|instruction| {
+				if instruction.get_opcode() != InstructionOpcode::Load {
+					return None;
+				}
+				let pointer = instruction.get_operand(0)?.value()?.into_pointer_value();
+				self.frame
+					.as_ref()
+					.is_some_and(|frame| {
+						frame.function == function && frame.readonly_strings.contains(&pointer)
+					})
+					.then_some(pointer)
+			})
 		});
 		let bytes = match borrowed {
 			Some(pointer) => builder

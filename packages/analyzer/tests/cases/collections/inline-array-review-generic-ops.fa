@@ -70,3 +70,16 @@ function inferred = (): InlineArray<Integer, 2> => {
 console.log(inferred()) -- prints: [5]
 static inferredValues = @inferred()
 console.log(inferredValues) -- prints: [5]
+
+type Row = { values: Array<String> }
+function duplicate = <Item, capacity: UInt32>(items: InlineArray<Item, capacity>): InlineArray<Item, capacity> => copy items
+function check = (): InlineArray<Row, 2> throws IndexError => {
+ mutable items: InlineArray<Row, 2> = [{ values = ["before"] }]
+ let saved = duplicate<Row, 2>(items)
+ try items[0].values[0] = "after"
+ assert try saved[0].values[0] == "before"
+ saved
+}
+console.log(try check()) -- prints: [{ values = ["before"] }]
+static saved = @check()
+console.log(saved) -- prints: [{ values = ["before"] }]

@@ -1649,3 +1649,9 @@ the source, and prevents capacity-sized SSA expansion and wasm argument
 promotion. Copies of owners still construct only the initialized prefix; an
 opaque byte snapshot neither creates another owner nor interprets spare slots.
 The same normalization runs for whole-program and per-unit compilation.
+
+Imported function names and namespace paths use the same reached-function
+resolver as direct calls and explicit generic applications. Their values use
+the existing synchronous/asynchronous thunks, including defaults and aggregate
+borrows. Non-LTO asynchronous units also run the coroutine pipeline at O0:
+dead-code removal alone cannot emit their unsplit coroutine intrinsics.

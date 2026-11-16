@@ -1680,3 +1680,15 @@ Lru is 19,070,292 → 19,047,821 Ir (−0.118%); words is unchanged and word-cou
 changes by −19 Ir. The complete profile is retained in
 `benchmarks/results/2026-11-16-collections-positive.{json,md}`. Full workspace
 validation is still running; controlled CPU measurements follow after it.
+
+Final item 2 validation: LLVM-enabled workspace 1,382 passed, zero failed,
+eight existing ignored (68 groups, 94 IR checks). Shared CLI 11/11 and LLVM
+4/4 pass, including native/freestanding/wasm leak checks. Fmt/Clippy are clean.
+The complete retained dataset adds 21 interleaved CPU-5 rounds on each map row,
+including the accepted-header compiler as the before actor. All three identical
+binary controls fail: lru 1.100 / 1.073, words 1.009 / 0.947, word-count
+0.939 / 0.948 (ratio of medians / paired median). Their CPU verdicts are **not
+resolved**; no speedup or regression is established. Keep the correct guarded
+reuse and its small instruction reduction. Preserve the accepted item 1 series
+separately; this unresolved series neither replaces nor reconfirms it. No source
+benchmark, String code or runtime ABI changed in this item.

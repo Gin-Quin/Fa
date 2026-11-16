@@ -1,5 +1,6 @@
 -- prints: 2 2
 -- prints: 1 1
+-- prints: 2 2
 
 type Reader = () => Integer
 function zero = (): Integer => 0
@@ -21,7 +22,20 @@ function replaced = (): Integer => {
 	invoke() + moved.length
 }
 
+function projected = (): Integer => {
+	let items = [1]
+	let snapshot = copy items
+	function read = (): Integer => snapshot.length
+	let holder = { run = read }
+	let readers = [holder.run, zero]
+	let selected = readers.get(0) ?? zero
+	let moved = items
+	selected() + moved.length
+}
+
 static independentResult = @independent()
 static replacedResult = @replaced()
+static projectedResult = @projected()
 console.log(independentResult, independent())
 console.log(replacedResult, replaced())
+console.log(projectedResult, projected())

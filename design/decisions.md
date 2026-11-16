@@ -1923,6 +1923,23 @@ bug (recorded with a durable repro in todo). The corrected fixture still
 fails on the archived scalar64 native compiler and preserves both static
 layouts and all value assertions. No expected-skip list changes.
 
+## Array performance — guarded range reversal (2026-11-16)
+
+- Recognize the ordinary six-statement two-ended swap over one scalar Array.
+  Both counters must be local mutable i64 values, distinct from the item storage;
+  copied scalar temporaries have no observable copy/drop effects. Representation
+  conversions, references, shared/reactive places and asynchronous programs
+  withhold the proof. Different steps or extra statements keep their loops.
+- Version the loop with `0 <= low < high < length`. The inclusive span and all
+  pair indices then fit i64 and stay in bounds. One typed pair loop replaces
+  its checks, with final low/high written exactly as after the original rounds.
+  No floating-point arithmetic is introduced or reordered. The original loop
+  remains the fallback, preserving negative-index normalization, error order,
+  no-op ranges, copies/drops and partial mutations. No runtime or ABI change.
+- Portable oracle, extreme bounds, generic/function-value/callback/capture,
+  async and per-unit cases cover firing and fallback behavior on every target.
+  Performance/validation records live in the array report and dated audit data.
+
 ## Array performance — GrowingArray loop facts (2026-11-16)
 
 - Ordinary GrowingArray scans use one counted inner loop per live segment,

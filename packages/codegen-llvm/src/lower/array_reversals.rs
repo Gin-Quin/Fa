@@ -8,6 +8,7 @@ use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{ArithOp, BindingKind, CompareOp, View};
 use inkwell::IntPredicate;
 use inkwell::basic_block::BasicBlock;
+use inkwell::values::{IntValue, PointerValue};
 
 use super::values::{IntRepr, Repr};
 use super::{Lowering, Slot};
@@ -243,6 +244,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(inside, fast, fallback)?;
 		self.builder.position_at_end(fast);
+		self.reverse_scalar_pairs(item, items, (low, high), (low_slot, high_slot))?;
+		self.builder.build_unconditional_branch(done)?;
+		self.builder.position_at_end(fallback);
+		Ok(Some(done))
+	}
+	/// Both halves are in bounds and disjoint; these items have no copy/drop
+	/// effects. Counter updates cannot overflow inside this proven range.
+	fn reverse_scalar_pairs(
+		&self,
+		item: Repr,
+		items: PointerValue<'ctx>,
+		(low, high): (IntValue<'ctx>, IntValue<'ctx>),
+		(low_slot, high_slot): (Slot<'ctx>, Slot<'ctx>),
+	) -> Result<(), Error> {
+		let i64 = self.context.i64_type();
 		let span = self.builder.build_int_nsw_sub(high, low, "")?;
 		let count = self
 			.builder
@@ -286,8 +302,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			high_slot.pointer,
 			self.builder.build_int_nsw_sub(high, half, "")?,
 		)?;
-		self.builder.build_unconditional_branch(done)?;
-		self.builder.position_at_end(fallback);
-		Ok(Some(done))
+		Ok(())
 	}
 }

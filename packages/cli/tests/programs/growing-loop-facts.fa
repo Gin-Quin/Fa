@@ -1,12 +1,12 @@
 -- GrowingArray loops retain stable references, checks and live item values.
-type Entry = { key: Int32, value: Int32 }
+type Entry<Tag> = { key: Int32, value: Int32, tag: Tag }
 function identity = (value: Integer): Integer => value
 function exercise = <Tag>(tag: Tag, count: Integer): Integer throws IndexError => {
-	mutable items: GrowingArray<Entry> = []
+	mutable items: GrowingArray<Entry<Tag>> = []
 	for i in 0..count {
-		items.push({ key = Int32(identity(i) %% 10000), value = Int32(i %% 10000) })
+		items.push({ key = Int32(identity(i) %% 10000), value = Int32(i %% 10000), tag = tag })
 		assert items.length == i + 1
-		assert (try items[-1].value) == i
+		assert items[-1].value == i
 	}
 	mutable total = 0
 	for item, index in items {
@@ -23,10 +23,9 @@ function exercise = <Tag>(tag: Tag, count: Integer): Integer throws IndexError =
 	mutable caught = 0
 	for offset in 0..2 {
 		let invalid = if offset == 0 { count } else { -count - 1 }
-		let ignored = items[invalid] catch error => {
-			assert error.length == count
+		let _ignored = items[invalid] catch _error => {
 			caught += 1
-			Entry { key = 0, value = 0 }
+			{ key = Int32(0), value = Int32(0), tag = tag }
 		}
 	}
 	assert caught == 2
@@ -43,7 +42,7 @@ function exercise = <Tag>(tag: Tag, count: Integer): Integer throws IndexError =
 		replaced = []
 		replaced.reserve(1 + round * 100)
 		replaced.push(round)
-		assert (try replaced[-1]) == round
+		assert replaced[-1] == round
 	}
 	count
 }

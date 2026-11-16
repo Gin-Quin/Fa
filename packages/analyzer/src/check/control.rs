@@ -250,6 +250,7 @@ impl Walker<'_> {
 		if let Some(expected) = expected {
 			return expected;
 		}
+		self.contextualize_empty_array_branches(branches, &mut types);
 		// integers: the common base type (`Int8 | Int16` is an `Int16`)
 		let kinds: SmallVec<[NumKind; 4]> = types.iter().map(|&ty| self.num_kind(ty)).collect();
 		if kinds.iter().all(|kind| matches!(kind, NumKind::Int(_))) {
@@ -313,6 +314,65 @@ impl Walker<'_> {
 			return TypeId::UNKNOWN;
 		}
 		union
+	}
+
+	/// A fresh empty constructor has no item representation to convert.
+	/// Infer it from another array branch, without widening existing values.
+	fn contextualize_empty_array_branches(
+		&mut self,
+		branches: &[(NodeId, TypeId)],
+		types: &mut [TypeId],
+	) {
+		let mut empty = Vec::new();
+		let mut candidates = Vec::new();
+		let mut index = 0;
+		for &(node, ty) in branches {
+			if ty == TypeId::NEVER {
+				continue;
+			}
+			if let TypeKind::Collection(CollKind::Array, item, _) = self.s.types.kind(ty) {
+				if item == TypeId::NEVER {
+					if let Some(nodes) = self.empty_array_constructors(node) {
+						empty.push((index, nodes));
+					} else {
+						candidates.push(types[index]);
+					}
+				} else {
+					candidates.push(types[index]);
+				}
+			}
+			index += 1;
+		}
+		if empty.is_empty() || candidates.is_empty() {
+			return;
+		}
+		let target = self.s.types.union(&candidates);
+		if !matches!(self.s.types.kind(target), TypeKind::Collection(CollKind::Array, item, _) if item != TypeId::NEVER)
+		{
+			return;
+		}
+		for (index, nodes) in empty {
+			types[index] = target;
+			for node in nodes {
+				self.set_type(node, target);
+			}
+		}
+	}
+
+	fn empty_array_constructors(&self, node: NodeId) -> Option<Vec<NodeId>> {
+		let mut pending = vec![node];
+		let mut nodes = Vec::new();
+		while let Some(node) = pending.pop() {
+			if self.a.type_of(node) == TypeId::NEVER {
+				continue;
+			}
+			nodes.push(node);
+			if matches!(self.view(node), View::Array { items } if items.is_empty()) {
+				continue;
+			}
+			pending.extend(crate::lower::copies::result_inputs(&self.tree, node)?);
+		}
+		(!nodes.is_empty()).then_some(nodes)
 	}
 
 	fn report_branch_mix(&mut self, n: NodeId, a: TypeId, b: TypeId) {

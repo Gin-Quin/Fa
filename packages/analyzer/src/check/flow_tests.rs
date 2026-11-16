@@ -6,6 +6,7 @@
 //! of a wide value gives a value spanning `Int8`.
 
 use crate::analysis::{ArithInfo, NodeFlags};
+use crate::check::test_support::analyzed;
 use crate::diagnostics::LineIndex;
 use crate::ids::{FileId, NodeId, TypeId};
 use crate::session::Session;
@@ -1014,5 +1015,24 @@ fn when_narrows_optionals_and_unions() {
 			"type Shape = Union { Circle = { radius: Float }, Square = { side: Float } }\nfunction r = (shape: Shape): Float => {\n\tif shape is Shape.Circle {\n\t\treturn shape.radius\n\t}\n\tshape.side\n}\n"
 		),
 		Vec::<&str>::new()
+	);
+}
+
+#[test]
+fn empty_array_branches_use_constructor_context_without_item_conversion() {
+	analyzed(
+		"function choose = (values: Array<String>, flag: Boolean) => if flag { copy values } else { [] }\n",
+	);
+	analyzed(
+		"function choose = (flag: Boolean) => if flag { [\"hello\"] } else { [] }\nmutable values = choose(false)\nvalues.push(\"later\")\n",
+	);
+	analyzed(
+		"function choose = (flag: Boolean) => when flag is {\ntrue => do { [] }\nelse => [\"hello\"]\n}\n",
+	);
+	assert_eq!(
+		codes(
+			"function empty = (): Array<Never> => []\nfunction choose = (flag: Boolean) => if flag { [\"hello\"] } else { empty() }\n"
+		),
+		["E-IF-2"]
 	);
 }

@@ -147,10 +147,55 @@ mod tests {
 		);
 		assert_eq!(
 			codes(
-				"use { WorkerPool } = std.concurrency\ntype Reader = () => Integer\nfunction size = (pool: WorkerPool<Integer>): Integer => pool.count\nfunction bad = (pool: WorkerPool<Integer>): Reader => () => size(pool)\n"
+				"use { TcpStream } = std.net\ntype Reader = () => Integer\nfunction size = (stream: TcpStream): Integer => { use borrowed = stream\n0 }\nfunction bad = (stream: TcpStream): Reader => () => size(stream)\n"
 			),
 			["MEM003"]
 		);
+	}
+
+	#[test]
+	fn an_owned_function_environment_retains_its_captured_function_handles() {
+		let resource = "type Reader = () => Integer\ntype Held = { name: String, function destroy = (self) => {} }\nfunction size = (value: Held): Integer => value.name.length\n";
+		for body in [
+			"function bad = (value: Held): Reader => {\nfunction read = (): Integer => size(value)\nlet selected = read\n() => selected()\n}\n",
+			"function bad = (value: Held): Reader => {\nfunction read = (): Integer => size(value)\nlet selected = read\nfunction next = (): Integer => selected()\nlet last = next\n() => last()\n}\n",
+		] {
+			assert_eq!(codes(&format!("{resource}{body}")), ["MEM003"]);
+		}
+	}
+
+	#[test]
+	fn unique_capture_diagnostic_explains_unknown_retention_and_field_snapshot() {
+		let source = "type Reader = () => Integer\nfunction run = (operation: (Reader) => Integer, holder: { task: Task<Integer>, count: Integer }): Integer => operation(() => holder.count)\n";
+		let mut session = crate::Session::new();
+		let file = session.set_source("captures.fa", std::sync::Arc::from(source));
+		session.analyze_file(file);
+		let diagnostics: Vec<_> = session
+			.diagnostics(file)
+			.iter()
+			.filter(|diagnostic| diagnostic.code.id != "W-DECL-2")
+			.collect();
+		assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+		let diagnostic = diagnostics[0];
+		assert_eq!(diagnostic.code.id, "MEM003");
+		assert!(
+			diagnostic
+				.message
+				.contains("type doesn't say whether it keeps the callback"),
+			"{}",
+			diagnostic.message
+		);
+		assert!(
+			diagnostic.message.contains("let count = holder.count"),
+			"{}",
+			diagnostic.message
+		);
+		assert!(!diagnostic.related.is_empty());
+	}
+
+	#[test]
+	fn capture_category_uses_the_type_narrowed_at_creation() {
+		assert!(codes("type Reader = () => Integer\ntype Held = { name: String, function destroy = (self) => {} }\nfunction make = (value: Held | Integer): Reader => if value is Integer { () => value } else { () => 0 }\n").is_empty());
 	}
 
 	#[test]

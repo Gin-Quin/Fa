@@ -1,0 +1,45 @@
+-- An escaping function cannot own a unique value, including through aliases.
+-- analysis-target: native
+-- file: main.fa
+type Reader = () => Integer
+
+function resource = (held: Held): Reader => () => held.name.length -- error: MEM003
+function alias = (held: Held): Reader => {
+	use borrowed = held
+	() => borrowed.name.length -- error: MEM003
+}
+function task = (pending: Task<Integer>): Reader => () => { -- error: MEM003
+	use borrowed = pending
+	0
+}
+
+use { TcpStream } = std.net
+function socketSize = (stream: TcpStream): Integer => {
+	use borrowed = stream
+	0
+}
+function socket = (stream: TcpStream): Reader => () => socketSize(stream) -- error: MEM003
+
+use { WorkerPool } = std.concurrency
+function poolSize = (pool: WorkerPool<State>): Integer => {
+	use borrowed = pool
+	0
+}
+function pool = (workers: WorkerPool<State>): Reader => () => poolSize(workers) -- error: MEM003
+
+function indirect = (held: Held): Reader => {
+	function read = (): Integer => held.name.length -- error: MEM003
+	let selected = read
+	() => selected()
+}
+
+-- file: State.worker.fa
+export type = {
+	function run = (self, value: Integer): Integer => value
+}
+
+-- file: Held.foreign.fa
+export type = {
+	name: String
+	function destroy = (self) => {}
+}

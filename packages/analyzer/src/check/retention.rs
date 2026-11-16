@@ -269,6 +269,42 @@ impl Walker<'_> {
 				self.escape_closure(function, call);
 			}
 		}
+		self.finish_owned_capture_escapes();
+	}
+
+	/// An owned environment keeps its captured function handles too. Walk
+	/// saved creation-time origins, rather than the current mutable slot.
+	fn finish_owned_capture_escapes(&mut self) {
+		let mut pending: Vec<_> = self.a.escapes.iter().copied().collect();
+		let mut checked = FxHashSet::default();
+		while let Some(function) = pending.pop() {
+			if !checked.insert(function) {
+				continue;
+			}
+			let Some(info) = self.a.function(function) else {
+				continue;
+			};
+			let at = info.declaration.unwrap_or(function);
+			let captures = info.captures.clone();
+			let unknown = self.unknown_callback_escapes.get(&function).copied();
+			for symbol in captures {
+				let ty = self
+					.capture_types
+					.get(&(function, symbol))
+					.copied()
+					.unwrap_or(self.a.symbols.symbol(symbol).ty);
+				if !self.callable_slot_type(ty) {
+					continue;
+				}
+				for retained in self.callable_capture_facts(function, symbol).functions {
+					if let Some(call) = unknown {
+						self.unknown_callback_escapes.insert(retained, call);
+					}
+					self.escape_closure(retained, at);
+					pending.push(retained);
+				}
+			}
+		}
 	}
 
 	fn retention_stores(&self) -> Vec<(NodeId, Option<NodeId>)> {

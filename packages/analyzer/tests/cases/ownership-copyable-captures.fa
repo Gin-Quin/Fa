@@ -1,0 +1,30 @@
+-- file: main.fa
+use { AtomicInteger } = std.concurrency
+type Reader = () => Integer
+
+function borrowed = (held: Held): Integer => {
+	function read = (): Integer => held.name.length
+	read()
+}
+function field = (held: Held): Reader => {
+	let count = held.name.length
+	() => count
+}
+function shared = (counter: AtomicInteger): Reader => () => counter.load()
+
+export function = () => {
+	let held = Held { name = "alpha" }
+	let count = field(held)
+	console.log(borrowed(held), count(), held.name) -- prints: 5 5 alpha
+	mutable counter = AtomicInteger { value = 4 }
+	let first = shared(counter)
+	let second = copy first
+	counter.store(9)
+	console.log(first(), second()) -- prints: 9 9
+} -- prints: closed alpha
+
+-- file: Held.foreign.fa
+export type = {
+	name: String
+	function destroy = (self) => console.log("closed {self.name}")
+}

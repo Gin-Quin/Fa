@@ -1560,3 +1560,10 @@ Function slots carry sparse evaluation-time expression sources in the existing f
 ### Ownership enforcement: parameter retention metadata (implementation, 2026-11-16)
 
 Retention uses one per-parameter flag, separate from consumption and the 32-bit syntax-based callback-error inference. Stored/returned callable origins seed a local dependency graph; known forwarding calls and defaults add edges, solved with a worklist. Cycles that only borrow retain nothing. Published parameter flags and their stable interface hash carry the result across files; unknown callees conservatively keep their callback argument. The query remains independent of the later `invalidates parameter` type contract. Capture-origin snapshots use the enclosing flow's existing callable sources, rather than reconstructing an alias's initializer from inside a fresh function body. A return inside a nested helper is attributed to that helper. This prepares escape and capture-store enforcement; recording the metadata alone does not activate those checks or change environment creation timing.
+
+
+### Ownership enforcement: unique escaping captures (2026-11-16)
+
+Captured type snapshots use the enclosing flow at creation, including narrowing, and the unique-capture guard unwraps a `use` reference to its designated value. Escaping environments retain any captured function handles, so escape checks propagate iteratively through their saved origins. Ordinary non-callable captures reject this origin search cheaply. Unknown-callee retention reasons propagate along the same edges. This does not change public handle categories or allow copying a unique value.
+
+The first concrete capture guard uses the lead-authorized conservative whole-binding rule; when an unused unique sibling causes rejection, its diagnostic suggests binding only the needed field before the function. The final language rule remains field-path capture, recorded as the next refinement in `todo.md`. Declaration-time structure stores, their move plans and named declaration environments are still a separate coordinated implementation.

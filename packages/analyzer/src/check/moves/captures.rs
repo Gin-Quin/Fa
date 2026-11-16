@@ -159,6 +159,7 @@ mod tests {
 		for body in [
 			"function bad = (value: Held): Reader => {\nfunction read = (): Integer => size(value)\nlet selected = read\n() => selected()\n}\n",
 			"function bad = (value: Held): Reader => {\nfunction read = (): Integer => size(value)\nlet selected = read\nfunction next = (): Integer => selected()\nlet last = next\n() => last()\n}\n",
+			"function bad = (value: Held): Reader => {\nfunction read = (): Integer => size(value)\nfunction outer = (): Integer => read()\nouter\n}\n",
 		] {
 			assert_eq!(codes(&format!("{resource}{body}")), ["MEM003"]);
 		}

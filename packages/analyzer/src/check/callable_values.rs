@@ -290,6 +290,51 @@ impl Walker<'_> {
 		self.search_callable_targets(search)
 	}
 
+	/// Named local functions are handle captures, not copies of the data
+	/// their bodies read. Nested declarations own their separate contexts.
+	pub(super) fn callable_handle_captures(&self, function: NodeId) -> Vec<NodeId> {
+		let Some(info) = self.a.function(function) else {
+			return Vec::new();
+		};
+		let root = NodeId::new(self.tree.root);
+		let mut pending = vec![info.body];
+		let mut handles = Vec::new();
+		while let Some(node) = pending.pop() {
+			if self
+				.a
+				.has_flags(node, crate::analysis::NodeFlags::TYPE_EXPR)
+			{
+				continue;
+			}
+			match self.view(node) {
+				View::Lambda { .. }
+				| View::Function { .. }
+				| View::ExportFunction { .. }
+				| View::TypeDecl { .. }
+				| View::ExportType { .. }
+				| View::Watch(_)
+				| View::Start(_)
+				| View::Test { .. } => continue,
+				View::Name(_) => {
+					if let Resolution::Local(symbol) = self.a.resolution(node)
+						&& let Some(declaration) = self.direct_function(symbol)
+						&& let Some(callee) = self.a.function(declaration)
+						&& callee.lambda != info.lambda
+					{
+						let owner = self.ownership_body(declaration);
+						if owner != info.lambda && owner != root {
+							handles.push(callee.lambda);
+						}
+					}
+				}
+				_ => pending.extend(crate::syntax::children(&self.tree, node)),
+			}
+		}
+		handles.sort_unstable();
+		handles.dedup();
+		handles
+	}
+
 	fn callable_place_sources(&self, place: PlaceId, values: &CallableBindings) -> Vec<ReadSource> {
 		let Some(path) = self.callable_path(place) else {
 			return Vec::new();

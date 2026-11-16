@@ -1,0 +1,19 @@
+-- A returned local function retains its sibling's handle, so the callback
+-- parameter that sibling captures is retained across the module boundary.
+-- file: main.fa
+type Reader = () => Integer
+function bad = (held: Held): Reader => keep(() => held.name.length) -- error: MEM003
+
+-- file: keep.fa
+type Reader = () => Integer
+export function = (callback: Reader): Reader => {
+	function read = (): Integer => callback()
+	function outer = (): Integer => read()
+	outer
+}
+
+-- file: Held.foreign.fa
+export type = {
+	name: String
+	function destroy = (self) => {}
+}

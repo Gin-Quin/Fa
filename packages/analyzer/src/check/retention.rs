@@ -287,6 +287,7 @@ impl Walker<'_> {
 			let at = info.declaration.unwrap_or(function);
 			let captures = info.captures.clone();
 			let unknown = self.unknown_callback_escapes.get(&function).copied();
+			let mut handles = self.callable_handle_captures(function);
 			for symbol in captures {
 				let ty = self
 					.capture_types
@@ -296,13 +297,16 @@ impl Walker<'_> {
 				if !self.callable_slot_type(ty) {
 					continue;
 				}
-				for retained in self.callable_capture_facts(function, symbol).functions {
-					if let Some(call) = unknown {
-						self.unknown_callback_escapes.insert(retained, call);
-					}
-					self.escape_closure(retained, at);
-					pending.push(retained);
+				handles.extend(self.callable_capture_facts(function, symbol).functions);
+			}
+			handles.sort_unstable();
+			handles.dedup();
+			for retained in handles {
+				if let Some(call) = unknown {
+					self.unknown_callback_escapes.insert(retained, call);
 				}
+				self.escape_closure(retained, at);
+				pending.push(retained);
 			}
 		}
 	}
@@ -396,6 +400,7 @@ impl Walker<'_> {
 			if !seen.insert(function) {
 				continue;
 			}
+			pending.extend(self.callable_handle_captures(function));
 			{
 				let Some(info) = self.a.function(function) else {
 					continue;
@@ -500,6 +505,12 @@ mod tests {
 		for name in ["keep", "forward", "capture", "store"] {
 			assert_eq!(retained(source, name), ["callback"], "{name}");
 		}
+	}
+
+	#[test]
+	fn returned_sibling_function_handles_retain_their_callbacks() {
+		let source = "type Reader = () => Integer\nfunction keep = (callback: Reader): Reader => {\nfunction read = (): Integer => callback()\nfunction outer = (): Integer => read()\nouter\n}\n";
+		assert_eq!(retained(source, "keep"), ["callback"]);
 	}
 
 	#[test]

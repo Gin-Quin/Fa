@@ -35,6 +35,7 @@ pub(crate) struct Callback {
 	output: Vec<Value>,
 	total: Value,
 	sort_position: usize,
+	map: bool,
 }
 
 pub(crate) enum Progress {
@@ -84,6 +85,7 @@ impl Callback {
 			path,
 			"Array#sortInPlace"
 				| "Array#deleteWhere"
+				| "Map#deleteWhere"
 				| "Pool#deleteWhere"
 				| "Columnar#deleteWhere"
 				| "OrderedColumnar#deleteWhere"
@@ -98,6 +100,7 @@ impl Callback {
 				.cloned()
 				.ok_or_else(|| Error::Stop(format!("missing argument {index}")))
 		};
+		let map = matches!(receiver, Value::Map(_));
 		let container = match receiver {
 			Value::Set(_) => Container::Set,
 			Value::Pool(_) => Container::Pool,
@@ -147,6 +150,7 @@ impl Callback {
 			output: Vec::new(),
 			total,
 			sort_position: 1,
+			map,
 		}))
 	}
 
@@ -186,16 +190,25 @@ impl Callback {
 		let Some(item) = self.items.get(self.position) else {
 			return self.finish();
 		};
-		let arguments = match self.kind {
-			Kind::Reduce => vec![
-				std::mem::replace(&mut self.total, Value::None),
-				item.clone(),
-				Value::int(self.position as i64),
-			],
-			Kind::Filter(_, true) | Kind::Find | Kind::FindIndex | Kind::Quantifier(_) => {
-				vec![item.clone()]
+		let arguments = if self.map {
+			let (key, value) = builtins::pair(item.clone())?;
+			if matches!(self.kind, Kind::Reduce) {
+				vec![std::mem::replace(&mut self.total, Value::None), key, value]
+			} else {
+				vec![key, value]
 			}
-			_ => vec![item.clone(), Value::int(self.position as i64)],
+		} else {
+			match self.kind {
+				Kind::Reduce => vec![
+					std::mem::replace(&mut self.total, Value::None),
+					item.clone(),
+					Value::int(self.position as i64),
+				],
+				Kind::Filter(_, true) | Kind::Find | Kind::FindIndex | Kind::Quantifier(_) => {
+					vec![item.clone()]
+				}
+				_ => vec![item.clone(), Value::int(self.position as i64)],
+			}
 		};
 		Ok(Progress::Call {
 			function: self.function.as_ref().expect("a callback").clone(),

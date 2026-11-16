@@ -243,7 +243,7 @@ pub struct Consulted<'f> {
 impl Consulted<'_> {
 	/// Whether the set holds a key (recorded).
 	pub fn contains(&self, key: &str) -> bool {
-		let answer = self.set.contains(key);
+		let answer = contains_map_fact(self.set, key);
 		if let Some(log) = self.log {
 			log.record(self.kind, key, answer);
 		}
@@ -287,6 +287,10 @@ impl ProgramFacts {
 		}
 	}
 
+	pub(crate) fn extend(&mut self, kind: &'static str, keys: BTreeSet<String>) {
+		self.facts.entry(kind).or_default().extend(keys);
+	}
+
 	/// The set of a kind.
 	pub fn set(&self, kind: &str) -> Option<&BTreeSet<String>> {
 		self.facts.get(kind)
@@ -303,7 +307,9 @@ impl ProgramFacts {
 
 	/// Whether the set of a kind holds a key.
 	pub fn contains(&self, kind: &str, key: &str) -> bool {
-		self.facts.get(kind).is_some_and(|set| set.contains(key))
+		self.facts
+			.get(kind)
+			.is_some_and(|set| contains_map_fact(set, key))
 	}
 }
 
@@ -314,36 +320,53 @@ fn is_map(types: &TypeStore, ty: TypeId) -> bool {
 	matches!(types.kind(ty), TypeKind::Collection(CollKind::Map, _, _))
 }
 
-/// The key of a map type in a fact set: its stable name, or `None` (a map
-/// type without one is never dense in a build per unit).
-fn map_key(types: &TypeStore, ty: TypeId) -> Option<String> {
-	if !is_map(types, ty) {
-		return None;
-	}
-	stable_type_name(types, ty)
+/// The map layouts used by all concrete applications in these files.
+pub(crate) fn map_facts(session: &Session, files: &[FileId]) -> ProgramFacts {
+	let mut inputs = crate::map_facts::MapFacts::default();
+	inputs.collect(session, files);
+	inputs.resolve(session.types())
+}
+
+fn referenced_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
+	concrete_map_names(session.types(), referenced_map_types(session, files))
+}
+
+fn deleted_while_iterated_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
+	concrete_map_names(session.types(), deleted_while_iterated_map_types(session, files))
+}
+
+fn concrete_map_names(types: &TypeStore, maps: BTreeSet<TypeId>) -> BTreeSet<String> {
+	maps.into_iter().filter(|&ty| !types.flags(ty).contains(fa_analyzer::types::TypeFlags::HAS_PARAM))
+		.filter_map(|ty| stable_type_name(types, ty)).collect()
 }
 
 /// See [`REFERENCED_MAPS`]: a node of the map type in the value of a `use`,
 /// `reuse` or `provide`, in an argument of a call of a function of the
 /// program other than as the whole argument, or in a lambda.
-pub(crate) fn referenced_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
+pub(super) fn referenced_map_types(session: &Session, files: &[FileId]) -> BTreeSet<TypeId> {
 	let types = session.types();
 	let mut found = BTreeSet::new();
 	for &file in files {
 		let tree = session.tree(file);
 		let analysis = session.analysis(file);
-		let mark = |root: NodeId, skip: Option<NodeId>, found: &mut BTreeSet<String>| {
+		let mark = |root: NodeId, skip: Option<NodeId>, found: &mut BTreeSet<TypeId>| {
 			let mut stack = vec![root.index()];
 			while let Some(at) = stack.pop() {
 				let node = NodeId::new(at);
-				if Some(node) != skip
-					&& let Some(key) = map_key(types, analysis.type_of(node))
-				{
-					found.insert(key);
+				if Some(node) != skip && is_map(types, analysis.type_of(node)) {
+					found.insert(analysis.type_of(node));
 				}
 				tree.nodes[at].for_each_child(|child| stack.push(child));
 			}
 		};
+		for function in analysis.functions.values() {
+			if function
+				.sig
+				.is_some_and(|sig| types.sig(sig).reference.is_some())
+			{
+				mark(function.body, None, &mut found);
+			}
+		}
 		let declared = declaration_lambdas(tree);
 		let parents = parents_of(tree);
 		for index in 0..tree.nodes.len() {
@@ -381,7 +404,10 @@ pub(crate) fn referenced_maps(session: &Session, files: &[FileId]) -> BTreeSet<S
 }
 
 /// See [`DELETED_WHILE_ITERATED_MAPS`].
-pub(crate) fn deleted_while_iterated_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
+pub(super) fn deleted_while_iterated_map_types(
+	session: &Session,
+	files: &[FileId],
+) -> BTreeSet<TypeId> {
 	let types = session.types();
 	let mut found = BTreeSet::new();
 	for &file in files {
@@ -402,9 +428,9 @@ pub(crate) fn deleted_while_iterated_maps(session: &Session, files: &[FileId]) -
 				continue;
 			}
 			if let View::Access { target, .. } = view(tree, callee)
-				&& let Some(key) = map_key(types, analysis.type_of(target))
+				&& is_map(types, analysis.type_of(target))
 			{
-				found.insert(key);
+				found.insert(analysis.type_of(target));
 			}
 		}
 	}
@@ -653,4 +679,22 @@ mod tests {
 		);
 		assert_eq!(found[0], found[1], "{found:?}");
 	}
+}
+
+/// Exact facts are usual. Recursive generic applications can conservatively
+/// retain only a concrete key or item component; the same matching is used
+/// when reading and validating cached decisions.
+pub(crate) fn contains_map_fact(set: &BTreeSet<String>, key: &str) -> bool {
+	set.contains(key)
+		|| set
+			.iter()
+			.filter_map(|family| family.strip_prefix("\u{1f}map-family:"))
+			.any(|family| {
+				let Some((map_key, item)) = family.split_once('\u{1e}') else {
+					return false;
+				};
+				key.starts_with("Map<")
+					&& (map_key == "*" || key.starts_with(&format!("Map<{map_key}, ")))
+					&& (item == "*" || key.ends_with(&format!(", {item}>")))
+			})
 }

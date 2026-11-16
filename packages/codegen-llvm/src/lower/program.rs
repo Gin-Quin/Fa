@@ -647,29 +647,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 }
 
-/// The map types whose values something in the program may keep a reference
-/// into (`design/decisions.md`, "Dense maps"): the others store their entries
-/// densely (`tables.rs`, `dense_map`). Syntactic and conservative, over every
-/// file of the program: a map type is unsafe when a node of that type appears
-/// in the value of a `use`, `mutable use`, `reuse` or `provide` (a reference),
-/// or in an argument of a call of a function of the program (parameters are
-/// references) other than as the whole argument (the map itself), or in a
-/// lambda (a callback may run while its caller holds a value).
-pub(crate) fn unsafe_maps(
+/// Both map policies use the same pre-lowering substitution pass as split builds.
+pub(crate) fn map_facts(
 	session: &Session,
 	files: &[(FileId, String)],
-) -> std::collections::BTreeSet<String> {
+) -> crate::facts::ProgramFacts {
 	let files: Vec<_> = files.iter().map(|(file, _)| *file).collect();
-	crate::facts::referenced_maps(session, &files)
-}
-
-/// The map types whose entries a `deleteWhere` deletes while it iterates
-/// over them: their entries stay in an array (deleting from the probe array
-/// shifts entries a running iteration still has to visit).
-pub(crate) fn no_inline_maps(
-	session: &Session,
-	files: &[(FileId, String)],
-) -> std::collections::BTreeSet<String> {
-	let files: Vec<_> = files.iter().map(|(file, _)| *file).collect();
-	crate::facts::deleted_while_iterated_maps(session, &files)
+	crate::facts::map_facts(session, &files)
 }

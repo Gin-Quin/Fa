@@ -171,7 +171,7 @@ fn units_agree_on_the_layout_of_maps() {
 		let option = format!("--target={target}");
 		let (stdout, stderr, code) = fa(&["run", &option, "maps"], &fixtures(), &cache);
 		assert_eq!(
-			stdout, "2 405 3 4 49 2442\n30 529\n",
+			stdout, "2 405 3 4 49 2442\n30 529\n9\n",
 			"{target}, stderr: {stderr}"
 		);
 		assert_eq!(code, 0, "{target}, stderr: {stderr}");

@@ -171,7 +171,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return false;
 		};
 		if self.whole_program {
-			return !self.unsafe_maps.contains(&name);
+			return !crate::facts::contains_map_fact(&self.unsafe_maps, &name);
 		}
 		self.program_facts.as_ref().is_some_and(|facts| {
 			!facts
@@ -188,7 +188,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return true;
 		};
 		if self.whole_program {
-			return self.no_inline_maps.contains(&name);
+			return crate::facts::contains_map_fact(&self.no_inline_maps, &name);
 		}
 		self.program_facts.as_ref().is_none_or(|facts| {
 			facts
@@ -540,7 +540,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// `fa.hash.<shape>(value) -> i64`: equal keys have equal hashes.
 	pub(crate) fn hash_function(&self, repr: Repr) -> Result<FunctionValue<'ctx>, Error> {
-		let key = format!("hash {repr:?}");
+		let key = format!("hash {}", self.shape_key(repr));
 		if let Some(function) = self.drop_functions.borrow().get(&key) {
 			return Ok(*function);
 		}
@@ -575,7 +575,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// the runtime calls it for the rare rebuilds of the index that need
 	/// the hashes of the keys (a set compacting its entries, a wide index).
 	pub(crate) fn hash_at_function(&self, repr: Repr) -> Result<FunctionValue<'ctx>, Error> {
-		let key = format!("hash_at {repr:?}");
+		let key = format!("hash_at {}", self.shape_key(repr));
 		if let Some(function) = self.drop_functions.borrow().get(&key) {
 			return Ok(*function);
 		}

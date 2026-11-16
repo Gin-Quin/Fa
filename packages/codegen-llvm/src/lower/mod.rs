@@ -511,6 +511,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.map(|(_, path)| path.clone())
 			.unwrap_or_default();
 		let state = program::FileState::new(session, entry, &path);
+		let map_facts = program::map_facts(session, files);
 		let mut lowering = Lowering {
 			session,
 			file: entry,
@@ -591,8 +592,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			fact_log: None,
 			index_proofs: std::cell::RefCell::new(None),
 			program_proof_claims: std::cell::OnceCell::new(),
-			unsafe_maps: program::unsafe_maps(session, files),
-			no_inline_maps: program::no_inline_maps(session, files),
+			unsafe_maps: map_facts
+				.set(crate::facts::REFERENCED_MAPS)
+				.cloned()
+				.unwrap_or_default(),
+			no_inline_maps: map_facts
+				.set(crate::facts::DELETED_WHILE_ITERATED_MAPS)
+				.cloned()
+				.unwrap_or_default(),
 			packable_items: packed::packable_items(session, files),
 			packed_layouts: std::cell::RefCell::new(FxHashMap::default()),
 			readonly_collections: FxHashMap::default(),

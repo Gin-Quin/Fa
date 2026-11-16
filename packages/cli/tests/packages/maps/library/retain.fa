@@ -1,0 +1,7 @@
+-- The slot is retained only in generic code, so its concrete map policy
+-- must reach the constructor in the application unit before it is lowered.
+export function = <Item>(entries: Map<String, Item>, value: Item) mutates entries => {
+ use slot = entries.getOrInsert("key", copy value)
+ for index in 0..100 { entries["key${index}"] = copy value }
+ slot = copy value
+}

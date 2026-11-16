@@ -1,0 +1,22 @@
+-- A retained slot exists only inside generic code, including an imported call chain.
+-- prints: 9
+-- prints: 9
+-- file: main.fa
+function exercise = (): Integer throws KeyNotFound => {
+ mutable entries: Map<String, Integer> = [("key", 7)]
+ forward(entries, 9)
+ try entries["key"]
+}
+static result = @exercise()
+console.log(result)
+console.log(try exercise())
+-- file: forward.fa
+export function = <Item>(entries: Map<String, Item>, value: Item) mutates entries => retain(entries, value)
+-- file: retain.fa
+export function = <Item>(entries: Map<String, Item>, value: Item) mutates entries => {
+ use slot = entries.getOrInsert("key", copy value)
+ for index in 0..100 {
+  entries["key${index}"] = copy value
+ }
+ slot = copy value
+}

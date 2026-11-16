@@ -181,29 +181,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if class.representative == global {
 				return index;
 			}
-			// renamed to the representative's parameters, both opened
-			let theirs: Vec<TypeId> = class
-				.generics
-				.iter()
-				.map(|&param| scratch.intern(TypeKind::Param(param)))
-				.collect();
-			let renamed = scratch.substitute(
-				global,
-				&Bindings {
-					params: own.clone(),
-					types: theirs.clone(),
-					..Default::default()
-				},
-			);
-			let opened = scratch.substitute(
-				class.representative,
-				&Bindings {
-					params: class.generics.clone(),
-					types: theirs,
-					..Default::default()
-				},
-			);
-			if renamed == opened {
+			if crate::map_facts::same_function_class(&mut scratch, global, class.representative) {
 				return index;
 			}
 		}

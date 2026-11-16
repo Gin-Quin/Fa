@@ -1328,10 +1328,15 @@ struct UnitRecorder {
 	units: std::sync::Mutex<Vec<Vec<String>>>,
 	/// The whole-program facts of the units so far, merged (`facts.rs`).
 	facts: std::sync::Mutex<crate::facts::ProgramFacts>,
+	map_facts: std::sync::Mutex<crate::map_facts::MapFacts>,
 }
 
 impl fa_analyzer::pipeline::UnitSink for UnitRecorder {
 	fn unit(&self, session: &mut Session, files: &[FileId]) {
+		self.map_facts
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.collect(session, files);
 		let facts = crate::facts::ProgramFacts::of_unit(session, files);
 		self.facts
 			.lock()
@@ -1651,6 +1656,13 @@ pub fn compile_package(
 		.facts
 		.into_inner()
 		.unwrap_or_else(|poisoned| poisoned.into_inner());
+	facts.merge(
+		recorder
+			.map_facts
+			.into_inner()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.resolve(root.types()),
+	);
 	facts.finish();
 	let split = &SplitOptions {
 		facts: Some(std::sync::Arc::new(facts)),

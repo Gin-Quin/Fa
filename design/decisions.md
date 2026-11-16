@@ -1561,3 +1561,16 @@ results merge addresses rather than loaded values. No interpreter address or
 internal carrier is a public constant. The link/relation initialization rules
 remain as decided: link defaults are explicit; collection-maintained sides start
 empty.
+
+Native map policies use canonical stable type names in both whole-program and
+split builds. Before lowering, retain each unit's map-use type templates and
+complete generic application tuples in the shared type store. Resolve them by
+type substitution, identifying binders by declaration and position, so imported
+and forwarding calls restrict the concrete maps they actually use. Keep tuple
+correlation and leave unused generic declarations and unrelated maps optimized.
+Type-growing recursive substitutions widen only the affected key/value family;
+cache fact reads and validation use the same family matching. Imported signatures
+and helper caches retain exact type bindings; map conversions require matching
+physical storage policies. Hash helpers use the same bound shape keys as copy
+and drop helpers. Generic map deletion also runs through the evaluator's existing
+mutating callback path, with separate key and value callback arguments.

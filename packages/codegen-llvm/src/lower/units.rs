@@ -795,6 +795,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			(bindings, arguments)
 		};
+		let exact_types: FxHashMap<_, _> = generics
+			.iter()
+			.copied()
+			.zip(arguments.iter().copied())
+			.collect();
 		let name = if arguments.is_empty() && callbacks.is_empty() && methods.is_empty() {
 			mangle(self.types(), key)
 		} else {
@@ -826,6 +831,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let mut merged = self.bindings.borrow().clone();
 		merged.extend(bindings.iter().map(|(param, repr)| (*param, *repr)));
 		let saved = self.bindings.replace(merged);
+		let mut merged_types = self.type_bindings.borrow().clone();
+		merged_types.extend(exact_types.iter().map(|(param, ty)| (*param, *ty)));
+		let saved_types = self.type_bindings.replace(merged_types);
 		let function = self.remote_signature(
 			key,
 			node,
@@ -837,7 +845,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			!callbacks.is_empty(),
 		);
 		self.bindings.replace(saved);
-		let function = function?;
+		self.type_bindings.replace(saved_types);
+		let mut function = function?;
+		function.types = exact_types;
 		let module = self.types().module_path(declared.module).to_string();
 		self.split_mut()
 			.remote_modules

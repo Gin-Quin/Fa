@@ -737,6 +737,53 @@ for(const [text,needle] of JSON.parse(await Bun.stdin.text())) {
     references = subprocess.run([bun,"-e",oracle],input=json.dumps(pairs,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
     write_cases(output,"split-storage",prelude,[(literal(text),literal(needle)) for text,needle in pairs],references,"splitForms",16)
 
+def region_slice_cases(output, bun):
+    # Keep this separate from split/view helpers: otherwise their capability
+    # masks a missing capability for slices stored in recursive regions.
+    prelude = PRELUDE.split("function probe", 1)[0] + r"""
+type SliceTree = Union { Leaf = { text: String }, List = { items: Array<SliceTree> } }
+function sliceLeaf = (text: String, start: Integer, end: Integer): SliceTree => SliceTree.Leaf {
+    text = text[start..end] catch _ => ""
+}
+function treeUnits = (tree: SliceTree): String => when tree is {
+    SliceTree.Leaf as { text } => "{text.length}:[" + units(text) + "]"
+    SliceTree.List as { items } => {
+        mutable rows: Array<String> = []
+        for item in items { rows.push(treeUnits(item)) }
+        rows.join(",")
+    }
+}
+function regionProbe = (text: String): String => {
+    let source = String.from(text, capacity = 4096)
+    mutable rows: Array<String> = []
+    for start in [0, if text.length > 0 { 1 } else { 0 }, if text.length > 1 { text.length - 1 } else { 0 }] {
+        let end = if text.length - start > 3 { start + 3 } else { text.length }
+        let leaf = sliceLeaf(source, start, end)
+        let duplicate = leaf
+        let tree = SliceTree.List { items = [leaf, duplicate] }
+        let copied = tree
+        rows.push(treeUnits(tree) + ";" + treeUnits(copied))
+    }
+    rows.join("|")
+}
+"""
+    oracle = r"""
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+for(const text of JSON.parse(await Bun.stdin.text())) {
+    const rows=[];
+    for(const start of [0,text.length>0?1:0,text.length>1?text.length-1:0]) {
+        const part=text.slice(start,Math.min(start+3,text.length));
+        const leaf=`${part.length}:[${units(part)}]`;
+        rows.push(`${leaf},${leaf};${leaf},${leaf}`);
+    }
+    console.log(rows.join("|"));
+}
+"""
+    values = subjects()
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"region-slices",prelude,[(literal(text),) for text in values],references,"regionProbe",16)
+
+
 def large_cases(output, bun):
     # The quick tier includes the large payload classes at compile time too,
     # without repeating every expensive conversion of the semantic probe.
@@ -827,6 +874,7 @@ async function crossing = (text: String): String throws IndexError => {
     allocation_cases(output)
     large_cases(output,bun)
     split_cases(output,bun)
+    region_slice_cases(output,bun)
     field_cases(output,bun)
     key_read_cases(output,bun)
     decoded = byte_cases(output,bun)

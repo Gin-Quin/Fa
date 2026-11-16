@@ -34,8 +34,12 @@ mod with_llvm {
 	}
 
 	#[test]
-	fn split_views_enable_virtual_surrogate_edges() {
+	fn view_constructors_enable_virtual_surrogate_edges() {
 		let cases = [
+			(
+				"fa_string_slice_region",
+				"type Tree = Union { Leaf = { text: String }, Branch = { left: Tree, right: Tree } }\nfunction build = (text: String): Tree => Tree.Leaf { text = text[1..3] catch _ => \"\" }\nfunction count = (tree: Tree): Integer => when tree is { Tree.Leaf as { text } => text.length, Tree.Branch as { left, right } => count(left) + count(right) }\nconsole.log(count(build(\"ééé\")))\n",
+			),
 			(
 				"fa_string_split_views",
 				include_str!("../../../design/reviews/repros/strings/split-cut-allocation.fa"),

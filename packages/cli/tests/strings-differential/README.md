@@ -38,7 +38,9 @@ lossy results come from WHATWG TextDecoder with BOM retention.
 
 Split-storage probes keep the source live while reading ordinary and filtered
 parts; native IR pins all three split-view constructors, including arrays in
-caller storage.
+caller storage. Independent region-slice shards put sliced strings into copied
+recursive trees without split helpers that could mask a missing view capability;
+the IR contract also pins the region-slice constructor.
 
 Storage probes exercise owners, views, split parts, object fields, arrays,
 pools, recursive unions, packed arrays, frame and reserved append paths, map

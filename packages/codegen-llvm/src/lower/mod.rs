@@ -800,6 +800,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			|| self.c_library.is_some()
 			|| [
 				"fa_string_slice_view",
+				"fa_string_slice_region",
 				"fa_string_split_views",
 				"fa_string_split_nonempty_views",
 				"fa_string_split_views_into",

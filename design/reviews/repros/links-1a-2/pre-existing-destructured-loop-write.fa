@@ -1,0 +1,10 @@
+-- Pre-existing: a loop writing through a destructured field (documentation/control-flow/loops.md). Expected 11 twice.
+type Node = { value: Integer }
+function exercise = (): Integer => {
+ mutable values: Array<Node> = [{ value = 1 }, { value = 2 }]
+ for { value } in values { value += 10 }
+ values[0].value
+}
+static result = @exercise()
+console.log(result)
+console.log(exercise())

@@ -1570,6 +1570,132 @@ static void test_inline_key32(void) {
 	}
 }
 
+// Wide values are aligned even behind the hash tags of 8/16-bit keys.
+static uint64_t scalar_table_hash(uint64_t key, int bits) {
+	if (bits == 64) { return inline_key64_hash(key); }
+	if (bits == 32) { return inline_key_hash((uint32_t)key); }
+	uint64_t product = key * 0x9E3779B97F4A7C15ull;
+	return product ^ (product >> 32);
+}
+
+static int64_t scalar_table_find(FaTable *table, uint64_t key, int bits, int64_t size) {
+	uint64_t storage[3] = {key, 0, 0};
+	return fa_table_find(table, scalar_table_hash(key, bits), storage, 0, size, bits / 8);
+}
+
+static void scalar_table_insert(FaTable *table, uint64_t key, int bits, int64_t size, int hint) {
+	int64_t position = scalar_table_find(table, key, bits, size);
+	CHECK(position < 0);
+	uint8_t *entry = fa_table_append(table, scalar_table_hash(key, bits), size,
+	                                 hint ? position : 0, key, 0);
+	CHECK(((uintptr_t)entry & 7) == 0);
+	__builtin_memcpy(entry, &key, (size_t)(bits / 8));
+	uint64_t value = key ^ 0xa5a5f0f0f00fa5a5ull;
+	__builtin_memcpy(entry + 8, &value, 8);
+}
+
+static void scalar_table_check(FaTable *table, const uint64_t *keys, const uint8_t *present,
+                               int count, int bits, int64_t size) {
+	int64_t length = 0;
+	for (int index = 0; index < count; index += 1) {
+		int64_t position = scalar_table_find(table, keys[index], bits, size);
+		CHECK((position >= 0) == (present[index] != 0));
+		if (position >= 0) {
+			uint8_t *entry = fa_table_entry(table, position, size);
+			CHECK(((uintptr_t)entry & 7) == 0);
+			uint64_t key = 0, value;
+			__builtin_memcpy(&key, entry, (size_t)(bits / 8));
+			__builtin_memcpy(&value, entry + 8, 8);
+			CHECK(key == keys[index] && value == (key ^ 0xa5a5f0f0f00fa5a5ull));
+			length += 1;
+		}
+	}
+	CHECK(table->length == length);
+	int64_t live = 0;
+	for (int64_t position = 0; position < table->used; position += 1) {
+		live += fa_table_live(table, position, size);
+	}
+	CHECK(live == length);
+}
+
+static void test_inline_scalar64(void) {
+	long before = allocated;
+	const int widths[] = {8, 16, 32, 64};
+	for (int mode = 0; mode < 4; mode += 1) {
+		int bits = widths[mode];
+		int64_t size = 16 | TABLE_INLINE | (bits == 32 ? TABLE_INLINE_KEY32 :
+		                                    bits == 64 ? TABLE_INLINE_KEY64 : 0);
+		CHECK(inline_offset(size) == (bits < 32 ? 8 : 0));
+		CHECK(inline_stride(size) == (bits < 32 ? 24 : 16));
+		for (int local = 0; local < 2; local += 1) {
+			FaTable header;
+			FaTable *table = local ? fa_table_new_local(&header, 4, size) : fa_table_new(4, size);
+			uint64_t keys[128];
+			uint8_t present[128] = {0};
+			uint64_t maximum = bits == 64 ? UINT64_MAX : ((uint64_t)1 << bits) - 1;
+			for (int index = 0; index < 128; index += 1) {
+				keys[index] = index == 0 ? 0 : index == 1 ? maximum :
+				              index == 2 ? maximum / 2 + 1 : index == 3 ? maximum / 2 :
+				              bits == 64 ? ((uint64_t)(index - 3) << 40) | (uint64_t)(index - 3) :
+				              (uint64_t)(index - 3);
+			}
+			uint32_t random = 98765;
+			for (int round = 0; round < 4000; round += 1) {
+				random ^= random << 13; random ^= random >> 17; random ^= random << 5;
+				int index = (int)(random & 127);
+				uint64_t key = keys[index];
+				if (present[index]) {
+					uint64_t storage[3] = {key, 0, 0};
+					int64_t position = fa_table_remove(table, scalar_table_hash(key, bits), storage,
+					                                   0, size, bits / 8);
+					CHECK(position >= 0);
+					fa_table_release(table, position, size);
+				} else { scalar_table_insert(table, key, bits, size, round & 1); }
+				present[index] = !present[index];
+				if (round % 37 == 0) { scalar_table_check(table, keys, present, 128, bits, size); }
+				if (round % 401 == 0) {
+					FaTable *copy = fa_table_copy(table, size);
+					CHECK(copy->storage == 0);
+					scalar_table_check(copy, keys, present, 128, bits, size);
+					fa_table_clear(copy, size);
+					CHECK(copy->length == 0 && scalar_table_find(copy, maximum, bits, size) < 0);
+					fa_table_free(copy, size);
+				}
+				if (round == 1000) { fa_table_reserve(table, 1000, size, 0); }
+				if (round == 2000) {
+					fa_table_clear(table, size);
+					__builtin_memset(present, 0, sizeof present);
+				}
+			}
+			scalar_table_check(table, keys, present, 128, bits, size);
+			fa_table_free(table, size);
+			CHECK(allocated == before);
+		}
+	}
+	// A 64-bit run crosses slot 63 -> 0; shifting must recompute full-width homes.
+	int64_t size = 16 | TABLE_INLINE | TABLE_INLINE_KEY64;
+	FaTable *table = fa_table_new(32, size);
+	uint64_t keys[24], next = 1ull << 48;
+	uint8_t present[24];
+	for (int index = 0; index < 24; index += 1) {
+		while ((scalar_table_hash(next, 64) & 63) != 63) { next += 1; }
+		keys[index] = next++; present[index] = 1;
+		scalar_table_insert(table, keys[index], 64, size, 1);
+	}
+	CHECK(scalar_table_find(table, keys[0], 64, size) == 63);
+	CHECK(scalar_table_find(table, keys[1], 64, size) == 0);
+	for (int index = 0; index < 24; index += 1) {
+		int removed = (index * 7) % 24;
+		int64_t position = scalar_table_find(table, keys[removed], 64, size);
+		CHECK(position >= 0);
+		fa_table_kill(table, scalar_table_hash(keys[removed], 64), position, size);
+		present[removed] = 0;
+		scalar_table_check(table, keys, present, 24, 64, size);
+	}
+	fa_table_free(table, size);
+	CHECK(allocated == before);
+}
+
 static void test_negative_probe_deletions(void) {
 	long before = allocated;
 	for (int compact = 0; compact < 2; compact += 1) {
@@ -2162,6 +2288,7 @@ int main(void) {
 	test_collection_destinations();
 	test_tables();
 	test_inline_key32();
+	test_inline_scalar64();
 	test_negative_probe_deletions();
 	test_local_map_headers();
 	test_inline_loop_reservations();

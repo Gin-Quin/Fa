@@ -39,8 +39,8 @@ pub(crate) struct Table<'ctx> {
 	/// no reference into its values outlives an insertion ([`Lowering::dense_map`]).
 	pub dense: bool,
 	/// A dense map of small entries stored in its probe array itself
-	/// (`TABLE_INLINE` of the runtime): integer keys and fields of at most
-	/// 32 bits, and no `deleteWhere` on maps of its type.
+	/// (`TABLE_INLINE` of the runtime): integer keys and scalar fields of at most
+	/// 64 bits, and no `deleteWhere` on maps of its type.
 	pub inline: bool,
 }
 
@@ -50,6 +50,8 @@ const TABLE_DENSE: u64 = 1 << 40;
 const TABLE_INLINE: u64 = 1 << 41;
 /// A 32-bit key occupies its own presence word (all ones has a spare slot).
 const TABLE_INLINE_KEY32: u64 = 1 << 42;
+/// A 64-bit key occupies its own presence word (all ones has a spare slot).
+const TABLE_INLINE_KEY64: u64 = 1 << 43;
 /// `TABLE_CHUNK_SLOTS` of the runtime: the entries of a chunk.
 pub(crate) const TABLE_CHUNK_SLOTS: u64 = 32;
 /// `storage` of a table in read-only data: nothing in it is dropped.
@@ -135,9 +137,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// whether its key is its own presence word (`inline_stride` of the
 	/// runtime).
 	pub(crate) fn inline_slot(&self, table: Table<'ctx>) -> (u64, bool) {
-		let key32 = matches!(table.key, Repr::Int(int) if int.bits == 32);
+		let own_key = matches!(table.key, Repr::Int(int) if matches!(int.bits, 32 | 64));
 		let entry = self.collection_data_size(table.entry.into());
-		(if key32 { entry } else { entry + 4 }, key32)
+		// A wide value needs an aligned entry after the 32-bit hash tag.
+		let prefix = if own_key {
+			0
+		} else if entry > 8 {
+			8
+		} else {
+			4
+		};
+		(entry + prefix, own_key)
 	}
 
 	/// The bytes of the block `fa_table_local` lays a table of `capacity`
@@ -147,8 +157,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let header = self.collection_data_size(self.table_header().into());
 		let slots = Self::table_index_slots(capacity);
 		if table.inline {
-			let (stride, key32) = self.inline_slot(table);
-			return header + (slots + u64::from(key32)) * stride;
+			let (stride, own_key) = self.inline_slot(table);
+			return header + (slots + u64::from(own_key)) * stride;
 		}
 		let chunks = capacity.div_ceil(TABLE_CHUNK_SLOTS);
 		let directory = chunks * self.collection_data_size(self.table_chunk_type().into());
@@ -218,12 +228,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let dense = kind == CollKind::Map && self.dense_map(ty);
 		let small = |repr: Repr| match repr {
-			Repr::Int(int) => int.bits <= 32,
-			Repr::Bool | Repr::F32 => true,
+			Repr::Int(int) => int.bits <= 64,
+			Repr::Bool | Repr::F32 | Repr::F64 | Repr::Percentage => true,
 			_ => false,
 		};
 		let inline = dense
-			&& matches!(key, Repr::Int(int) if matches!(int.bits, 8 | 16 | 32))
+			&& matches!(key, Repr::Int(int) if matches!(int.bits, 8 | 16 | 32 | 64))
 			&& value.is_some_and(small)
 			&& !self.deleted_while_iterated(ty);
 		Ok(Table {
@@ -242,10 +252,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let size = table.entry.size_of().expect("a sized entry");
 		if table.inline {
 			let flags = TABLE_INLINE
-				| if matches!(table.key, Repr::Int(int) if int.bits == 32) {
-					TABLE_INLINE_KEY32
-				} else {
-					0
+				| match table.key {
+					Repr::Int(int) if int.bits == 32 => TABLE_INLINE_KEY32,
+					Repr::Int(int) if int.bits == 64 => TABLE_INLINE_KEY64,
+					_ => 0,
 				};
 			let flag = size.get_type().const_int(flags, false);
 			// the size is far below the flag: xor sets it
@@ -392,21 +402,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let slots = Self::table_index_slots(count);
 		let mask = slots - 1;
 		let header = if table.inline {
-			let (_, key32) = self.inline_slot(table);
+			let (stride, own_key) = self.inline_slot(table);
 			// a slot: the tag of the hash (0: empty) then the entry, or the
-			// entry alone when its 32-bit key says whether it is there (the
+			// entry alone when its 32/64-bit key says whether it is there (the
 			// all-ones key then lives in one more slot, after the others)
-			let slot_type = if key32 {
+			let slot_type = if own_key {
 				table.entry
 			} else {
-				self.context
-					.struct_type(&[i32.into(), table.entry.into()], true)
+				let mut fields = vec![i32.into()];
+				if stride - self.collection_data_size(table.entry.into()) == 8 {
+					fields.push(i32.into());
+				}
+				fields.push(table.entry.into());
+				self.context.struct_type(&fields, true)
 			};
-			let total = slots + u64::from(key32);
+			let total = slots + u64::from(own_key);
 			let mut probe = vec![None; total as usize];
 			let mut sentinel = false;
 			for ((hash, key), entry) in keys.iter().zip(entries) {
-				if key32 && *key == ConstantKey::Word(u64::from(u32::MAX)) {
+				let sentinel_bits = match table.key {
+					Repr::Int(int) if int.bits == 32 => u64::from(u32::MAX),
+					_ => u64::MAX,
+				};
+				if own_key && *key == ConstantKey::Word(sentinel_bits) {
 					sentinel = true;
 					probe[slots as usize] = Some(entry);
 					continue;
@@ -415,24 +433,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				while probe[slot as usize].is_some() {
 					slot = (slot + 1) & mask;
 				}
-				probe[slot as usize] = Some(if key32 {
+				probe[slot as usize] = Some(if own_key {
 					entry
 				} else {
 					let tag = match *hash as u32 {
 						0 => 0x8000_0000,
 						tag => tag,
 					};
-					slot_type.const_named_struct(&[
-						i32.const_int(u64::from(tag), false).into(),
-						entry.into(),
-					])
+					let mut fields = vec![i32.const_int(u64::from(tag), false).into()];
+					if slot_type.count_fields() == 3 {
+						fields.push(i32.const_zero().into());
+					}
+					fields.push(entry.into());
+					slot_type.const_named_struct(&fields)
 				});
 			}
 			let probe: Vec<_> = probe
 				.into_iter()
 				.map(|slot| {
 					slot.unwrap_or_else(|| {
-						if key32 {
+						if own_key {
 							let key = self.llvm_type(table.key).into_int_type().const_all_ones();
 							table.entry.const_named_struct(&[
 								key.into(),
@@ -1199,11 +1219,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<PointerValue<'ctx>, Error> {
 		let append = self.runtime.function("fa_table_append")?;
 		let i64 = self.context.i64_type();
-		let key_bits = if table.inline && matches!(table.key, Repr::Int(int) if int.bits == 32) {
-			key.int()
-		} else {
-			self.context.i32_type().const_zero()
-		};
+		let key_bits =
+			if table.inline && matches!(table.key, Repr::Int(int) if matches!(int.bits, 32 | 64)) {
+				self.builder.build_int_z_extend(key.int(), i64, "")?
+			} else {
+				i64.const_zero()
+			};
 		let hash_at = self.hash_at_function(table.key)?;
 		let entry = self
 			.call_value(

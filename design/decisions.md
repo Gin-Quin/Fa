@@ -1692,3 +1692,32 @@ resolved**; no speedup or regression is established. Keep the correct guarded
 reuse and its small instruction reduction. Preserve the accepted item 1 series
 separately; this unresolved series neither replaces nor reconfirms it. No source
 benchmark, String code or runtime ABI changed in this item.
+
+
+### Scalar64 inline map entries (2026-11-16)
+
+Part 1 item 3 extends inline entries from 8/16/32-bit integer keys and narrow
+values to 64-bit integer keys and scalar values (integer, boolean, float) of
+at most 64 bits. Keep the existing dense-map reference proof, merged per-unit
+facts, deleteWhere exclusion and GrowingMap stable chunks. String keys and all
+String hashing/comparison/lowering are unchanged. Private header/probe proofs
+retain their 32-bit key restriction.
+
+KEY64 uses the full key as its presence marker. All ones lives after the probe
+array with the existing separate presence bit, just as KEY32. Hash homes for
+rehashing and backward shifts match generated integer hashing: xor with the
+upper 32 bits, multiply by the odd golden-ratio constant, xor again with the
+upper half. Each step is bijective. Preserve the existing KEY32 rotated hash.
+The append ABI now carries 64 raw key bits, zero-extending KEY32; bump the
+object-cache generation. All three runtime IR targets are regenerated.
+
+Small tagged keys with wide values use an 8-byte prefix (tag plus padding) so
+the entry remains ABI aligned. Narrow tagged entries keep their 4-byte prefix.
+Match runtime stride/offset, read-only global padding, frame-buffer sizing and
+copy/grow/clear/iteration. No unaligned wide loads or changes to shared Slot
+lowering. Runtime tests cover all four key widths, wide value bits, heap and
+private frame headers, randomized operations and 64-bit wraparound deletion.
+Shared fixtures separately cover full-width extrema, mutable/static/frame maps,
+copy independence, small-key alignment, references and deleteWhere/GrowingMap
+fallbacks. IR checks require firing and the three fallbacks on native and wasm.
+Full validation and controlled measurements follow.

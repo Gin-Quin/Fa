@@ -2072,6 +2072,82 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 	}
 
 	#[test]
+	fn scalar64_map_slots_preserve_reference_and_iteration_fallbacks() {
+		for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+			for (key, value, flags) in [
+				("Int64", "Int64", (1_u64 << 41) | (1 << 43)),
+				("UInt64", "UInt64", (1 << 41) | (1 << 43)),
+				("UInt32", "Int64", (1 << 41) | (1 << 42)),
+				("UInt16", "Float", 1 << 41),
+				("UInt8", "Int64", 1 << 41),
+			] {
+				let source = format!(
+					"function run = (key: {key}) => {{\nmutable map = Map<{key}, {value}>.from([], capacity = 16)\nmap[key] = 7\nconsole.log(map.get(key))\n}}\nrun(3)\n"
+				);
+				let ir = ir_at_target(
+					&format!("scalar64-{key}-{value}-{name}"),
+					&source,
+					false,
+					OptLevel::O0,
+					target,
+				);
+				let body = function(&ir, "fa.run");
+				assert!(body.contains(&format!("i64 {flags})")), "{body}");
+			}
+			for (case, collection, extra, expected) in [
+				(
+					"reference",
+					"Map",
+					"use held = map.getOrInsert(key, 0)\nmap[4] = 9\nheld += 1\n",
+					0,
+				),
+				("growing", "GrowingMap", "", 0),
+				(
+					"delete-iteration",
+					"Map",
+					"map.deleteWhere((_, value) => value == 0)\n",
+					1_u64 << 40,
+				),
+			] {
+				let source = format!(
+					"function run = (key: Int64) => {{\nmutable map = {collection}<Int64, Int64>.from([], capacity = 16)\nmap[key] = 7\n{extra}console.log(map.get(key))\n}}\nrun(3)\n"
+				);
+				let ir = ir_at_target(
+					&format!("scalar64-fallback-{case}-{name}"),
+					&source,
+					false,
+					OptLevel::O0,
+					target,
+				);
+				let body = function(&ir, "fa.run");
+				assert!(!body.contains("i64 10995116277760)"), "{body}");
+				assert_eq!(body.contains("i64 1099511627776)"), expected != 0, "{body}");
+			}
+			let source = "let map: Map<UInt8, Int64> = [(0, 7), (255, 9)]\nconsole.log(map.get(0), map.get(255))\n";
+			ir_at_target(
+				&format!("scalar64-static-padding-{name}"),
+				source,
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let full = std::fs::read_to_string(
+				PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+					.join("fa-checks")
+					.join(format!(
+						"scalar64-static-padding-{name}.{}",
+						match target {
+							Target::Wasm => "wasm.ll",
+							_ => "ll",
+						}
+					)),
+			)
+			.expect("the complete IR including globals");
+			assert!(full.contains("<{ i32, i32, { i8, i64 } }>"), "{full}");
+		}
+	}
+
+	#[test]
 	fn private_map_lookups_feed_positive_updates_and_removals() {
 		let source = |extra: &str| {
 			format!(

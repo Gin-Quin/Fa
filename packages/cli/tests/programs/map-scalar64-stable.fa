@@ -1,0 +1,21 @@
+-- References surviving writes and deleteWhere keep the original table layouts.
+-- asynchronous: false
+-- require-split: true
+mutable stable: Map<Int64, Int64> = [(1, 10), (-1, 20)]
+use value = stable.getOrInsert(1, 0)
+for i in 2..300 { stable[Int64(i)] = Int64(i) }
+stable.reserve(1000)
+value += 1
+assert stable.get(1) == Int64(11)
+assert value == Int64(11)
+mutable filtered: Map<UInt64, UInt64> = [(0, 10), (UInt64.maxValue, 20), (1, 30)]
+filtered.deleteWhere((key, _) => key != UInt64.maxValue)
+assert filtered.size == 1
+assert filtered.get(UInt64.maxValue) == UInt64(20)
+mutable growing: GrowingMap<Int64, Int64> = [(0, 10), (-1, 20)]
+use kept = growing.getOrInsert(0, 0)
+for i in 1..300 { growing[Int64(i)] = Int64(i) }
+kept += 1
+assert kept == Int64(11)
+assert growing.get(-1) == Int64(20)
+console.log("stable scalar64 maps") -- prints: stable scalar64 maps

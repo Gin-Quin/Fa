@@ -319,7 +319,7 @@ fn convert_value(value: &fa_interpreter::Value, skip_functions: bool) -> Option<
 		Value::Boolean(value) => ConfigValue::Boolean(*value),
 		Value::Integer(value) => ConfigValue::Integer(i256_to_i128(*value)),
 		Value::Float(value) => ConfigValue::Float(*value),
-		Value::String(text) => ConfigValue::String(text.to_string()),
+		Value::String(text) => ConfigValue::String(text.as_str()?.to_string()),
 		Value::Array(items) => {
 			ConfigValue::Array(items.iter().map(from_value).collect::<Option<_>>()?)
 		}

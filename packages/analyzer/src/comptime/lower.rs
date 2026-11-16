@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use ethnum::I256;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fa_interpreter::Value;
 use fa_interpreter::ir::{
@@ -27,7 +27,7 @@ use fa_interpreter::ir::{
 use fa_interpreter::value::MemberKind;
 use fa_parser::TypedSyntaxTree;
 
-use crate::analysis::{Analysis, Argument, Callee, FieldValue, PatternBinding};
+use crate::analysis::{Analysis, Argument, Callee, FieldValue, NodeFlags, PatternBinding};
 use crate::builtins;
 use crate::ids::{FileId, NodeId, SymbolId, TypeId};
 use crate::lower::when::{self, Literal, Test};
@@ -164,6 +164,21 @@ impl<'a> Lowerer<'a> {
 	pub fn function(mut self, node: NodeId) -> Option<Function> {
 		self.compile_time = false;
 		self.globals = true;
+		if let Some(expression) = super::json::default_node(node) {
+			let captures: Vec<Slot> = self
+				.default_captures(expression)
+				.into_iter()
+				.map(|symbol| self.bind(symbol))
+				.collect();
+			let body = self.expr(expression);
+			return Some(Function {
+				name: "<JSON field default>".into(),
+				params: Vec::new(),
+				captures,
+				slots: self.next,
+				body,
+			});
+		}
 		let info = self.a.function(node)?.clone();
 		let name = match info.symbol {
 			Some(symbol) => self
@@ -217,6 +232,46 @@ impl<'a> Lowerer<'a> {
 			slots: self.next,
 			body,
 		})
+	}
+
+	/// The free values of a field default, in a stable order shared by its
+	/// synthetic function and the closure constructed at a JSON call.
+	fn default_captures(&self, expression: NodeId) -> Vec<SymbolId> {
+		let mut nodes = FxHashSet::default();
+		let mut pending = vec![expression];
+		while let Some(node) = pending.pop() {
+			if nodes.insert(node) {
+				pending.extend(syntax::children(self.tree, node));
+			}
+		}
+		let mut captures = Vec::new();
+		for &node in &nodes {
+			if !matches!(syntax::view(self.tree, node), View::Name(_)) {
+				continue;
+			}
+			let Resolution::Local(symbol) = self.a.resolution(node) else {
+				continue;
+			};
+			let data = self.a.symbols.symbol(symbol);
+			if nodes.contains(&data.decl_node) || self.is_module_level(symbol) {
+				continue;
+			}
+			match data.kind {
+				SymbolKind::Function => {
+					if let Some(info) = self.a.function(data.decl_node) {
+						captures.extend(info.captures.iter().copied());
+					}
+				}
+				SymbolKind::Static
+				| SymbolKind::Type
+				| SymbolKind::TypeParameter
+				| SymbolKind::Namespace => {}
+				_ => captures.push(symbol),
+			}
+		}
+		captures.sort_unstable_by_key(|symbol| symbol.0);
+		captures.dedup();
+		captures
 	}
 
 	fn bind(&mut self, symbol: SymbolId) -> Slot {
@@ -379,7 +434,7 @@ impl<'a> Lowerer<'a> {
 			TypeKind::Float(_) | TypeKind::FloatLit(..) => TypeTest::Float,
 			TypeKind::String => TypeTest::String,
 			TypeKind::StringLit(text) => TypeTest::Literal(Value::string(types.syms.resolve(text))),
-			TypeKind::Bytes => TypeTest::Array,
+			TypeKind::Bytes => TypeTest::Bytes,
 			TypeKind::Object(_) => TypeTest::Object,
 			TypeKind::Tuple(list) => TypeTest::Tuple(types.list_items(list).len()),
 			TypeKind::Union(list) => TypeTest::Union(
@@ -1167,9 +1222,14 @@ impl<'a> Lowerer<'a> {
 		if parallel {
 			return self.unsupported("`for parallel`");
 		}
+		let utf8_source = self
+			.a
+			.has_flags(iterable, NodeFlags::UTF8_ITERATION)
+			.then(|| self.string_call_receiver(iterable))
+			.flatten();
 		let iterable = match (compile_time, self.a.unrolled.get(&n)) {
 			(true, Some(items)) => Expr::Const(Value::array(items.clone())),
-			_ => self.expr(iterable),
+			_ => self.expr(utf8_source.unwrap_or(iterable)),
 		};
 		let (item, prologue) = match pattern {
 			Some(pattern) => match syntax::view(self.tree, pattern) {
@@ -1199,11 +1259,20 @@ impl<'a> Lowerer<'a> {
 			Some(prologue) => Expr::Block(vec![prologue, body]),
 			None => body,
 		};
-		Expr::For {
-			item,
-			index: index_slot,
-			iterable: iterable.boxed(),
-			body: body.boxed(),
+		if utf8_source.is_some() {
+			Expr::ForUtf8 {
+				item,
+				index: index_slot,
+				iterable: iterable.boxed(),
+				body: body.boxed(),
+			}
+		} else {
+			Expr::For {
+				item,
+				index: index_slot,
+				iterable: iterable.boxed(),
+				body: body.boxed(),
+			}
 		}
 	}
 
@@ -1291,6 +1360,16 @@ impl<'a> Lowerer<'a> {
 		}
 	}
 
+	fn string_call_receiver(&self, call: NodeId) -> Option<NodeId> {
+		let View::Call { callee, .. } = syntax::view(self.tree, call) else {
+			return None;
+		};
+		let View::Access { target, members } = syntax::view(self.tree, callee) else {
+			return None;
+		};
+		(members.len() == 1).then_some(target)
+	}
+
 	/// `a.b.c`, `a?.b?.c`.
 	fn access(
 		&mut self,
@@ -1299,6 +1378,11 @@ impl<'a> Lowerer<'a> {
 		members: syntax::NodeList<'_>,
 		optional: bool,
 	) -> Expr {
+		if self.a.has_flags(n, NodeFlags::CODE_POINT_COUNT)
+			&& let Some(text) = self.string_call_receiver(target)
+		{
+			return Expr::Builtin("String#codePointCount", vec![self.expr(text)]);
+		}
 		// a member whose value the analysis knows (`Int8.maxValue`)
 		if let Some(value) = self.literal_of(n)
 			&& matches!(
@@ -1499,6 +1583,39 @@ impl<'a> Lowerer<'a> {
 					&& !matches!(path, "Map#getOrInsert")
 				{
 					values.pop();
+				}
+				if path == "Json.parse" {
+					let (schema, defaults) =
+						super::json::schema(self.types(), self.a, self.file, self.a.type_of(n));
+					let mut expressions = Vec::new();
+					let input = self.temp();
+					expressions.push(Expr::Let(input, values.remove(0).boxed()));
+					values.push(Expr::Local(input));
+					let mut closures = Vec::new();
+					for key in defaults {
+						let expression =
+							super::json::default_node(NodeId(key.1)).expect("a JSON default key");
+						let mut captures = Vec::new();
+						for symbol in self.default_captures(expression) {
+							let read = self.read_symbol(expression, symbol);
+							let slot = self.temp();
+							expressions.push(Expr::Let(slot, read.boxed()));
+							captures.push(slot);
+						}
+						closures.push(Item::One(Expr::Closure {
+							function: key,
+							captures,
+						}));
+					}
+					values.push(Expr::Builtin(
+						"$Json.bindDefaults",
+						vec![Expr::Const(schema), Expr::Array(closures)],
+					));
+					values.push(Expr::Const(Value::Boolean(crate::comptime::is_js_target(
+						&self.session.comptime.target,
+					))));
+					expressions.push(Expr::Builtin(path, values));
+					return Expr::Block(expressions);
 				}
 				// the paths of the flags, by bit
 				if path == "Fields#toStringArray"

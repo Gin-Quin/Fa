@@ -1,0 +1,2 @@
+-- Locale data is a property of the machine running the program.
+static order = String.compareLocale("é", "z", "fr") -- error AN001

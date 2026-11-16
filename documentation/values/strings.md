@@ -299,4 +299,12 @@ Interpolation constructors and appended interpolations check each addition of by
 - `utf8Length()` is `Buffer.byteLength(text)` on Bun and Node, and a loop over `charCodeAt` in browsers. It is `O(n)`: this is why it is a method and not a property.
 - `toUtf8()` is the `encode` of a shared `TextEncoder`. `String.fromUtf8` is the `decode` of a shared `TextDecoder("utf-8", { fatal: true, ignoreBOM: true })`, and `String.fromUtf8Lossy` the same without `fatal`.
 - `String.from(text, capacity = n)` is `text`, `reserve` compiles to nothing (its argument is still evaluated), and `capacity` is the `length`.
+### Compile-time interpreter
+
+- Ordinary text stays in shared UTF-8 storage with a cached UTF-16 length. Only a string holding lone surrogates needs raw UTF-16 storage. ASCII copies and concatenations retain their known lengths without rescanning their new buffers.
+- Indexing, slices, searches, padding and ordering use code units; iteration visits code points with code-unit indices. Concatenating cut halves joins a pair again. Formatting into another string preserves raw units; only an output or UTF-8 encoding replaces lone surrogates.
+- `Bytes` has distinct compact byte storage and a distinct type test. Encoding, strict/lossy decoding and parsing JSON bytes use the same rules as runtime evaluation. `@readFile` remains strict UTF-8 text.
+- Direct `codePoints().length` counts without building an array; direct iteration over `toUtf8()` encodes through a four-byte cursor without building `Bytes`. Allocation preflights include temporary conversions, borrowed slices and byte copies on write, under the interpreter's existing step, depth and heap limits.
+- `String.compareLocale` runs only at runtime: its result depends on the locale data of the machine running the program, so it cannot be evaluated at compile time.
+
 :::

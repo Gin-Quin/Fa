@@ -1382,3 +1382,35 @@ Full LLVM workspace validations share `/tmp/fa-compiler-full-suite.lock` (`flock
 
 - Mutexes and channels preserve Bytes with a tagged internal representation and share the UTF-8 encoder/decoder, including when their state crosses workers.
 - **Lead decision, 2026-11-16: whole-slice assignment.** A reference to a `Bytes` slice is a view of a range of items: its items can be assigned through a `mutable use`, and `reuse` can reseat it. Assigning the slice as a whole is forbidden. The analyzer will diagnose it and suggest assigning the items in a loop or using `reuse`; the JavaScript backend adds no whole-slice assignment operation. Bulk lowering of proven copy/fill loops is a follow-up.
+
+## String redesign: compile-time interpreter (2026-11-16)
+
+The interpreter's `Text` (also the string constant stored in `Analysis`) has two
+canonical representations: well-formed UTF-8 in `Arc<str>` with a cached UTF-16
+length, and `Arc<[u16]>` only for strings holding lone surrogates. Correctness
+comes first: indexing/slicing can preserve either half of a pair, and joining
+halves canonicalizes to well-formed UTF-8 again. `as_str()` returns `Option<&str>`;
+it never silently substitutes U+FFFD. Emitters must consume `units()` when it is
+`None`. Until the backend branches are integrated, such constants are explicitly
+refused at emission rather than changed.
+
+ASCII keeps one byte per unit, the existing shared text allocation, byte-based
+search/split/replace and concatenation, constant-time length, and direct indexing.
+Non-ASCII operations may walk code units or build bounded temporary unit buffers;
+the interpreter need not reproduce the native WTF-8 layout or breadcrumbs. Storing
+a UTF-16 copy of every ordinary string was rejected: it doubles the common ASCII
+payload and would duplicate ordinary text for the checker and emitters. Only a
+malformed value needs the raw-unit allocation. Strings remain copied on write by
+sharing immutable buffers. `Bytes` has its own value and runtime type test and
+stores `u8`, rather than the much larger per-item `Value` used by arrays. Preflight
+allocation checks include temporary conversions and collection outputs; the
+existing per-evaluation heap, step and depth budgets still apply.
+
+The lead confirmed that replacements are literal strings: `$` patterns have no
+special meaning. This applies to compile-time evaluation as on every target.
+
+Locale comparison is evaluated only at runtime: it depends on the locale data
+of the machine running the program. The interpreter refuses `String.compareLocale`
+with that explanation and adds no ICU dependency (lead decision, 2026-11-16).
+A malformed compile-time string infers `String`; a literal type always holds
+well-formed text, so literal-type symbols remain UTF-8 (same lead decision).

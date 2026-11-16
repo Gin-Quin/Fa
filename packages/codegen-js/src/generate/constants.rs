@@ -18,7 +18,14 @@ impl Generator<'_> {
 	pub(crate) fn constant_value(&mut self, n: NodeId, value: &Value, ty: TypeId) -> Expr {
 		match self.comptime_text(value, ty) {
 			Some(expr) => expr,
-			None => self.unsupported(n, "this compile-time value"),
+			None => self.unsupported(
+				n,
+				if value.has_lone_surrogates() {
+					"string constants with lone surrogates (not emitted yet)"
+				} else {
+					"this compile-time value"
+				},
+			),
 		}
 	}
 
@@ -101,7 +108,13 @@ impl Generator<'_> {
 				}
 			}
 			Value::Float(value) | Value::Percentage(value) => js::float_literal(*value),
-			Value::String(text) => Expr::constant(js::string_literal(text), Prec::Primary),
+			Value::Bytes(bytes) => Expr::primary(format!(
+				"new Uint8Array([{}])",
+				bytes.iter().map(u8::to_string).collect::<Vec<_>>().join(", ")
+			)),
+			Value::String(text) => {
+				Expr::constant(js::string_literal(text.as_str()?), Prec::Primary)
+			}
 			// an empty pool, set or map (a field default of a type of another
 			// file): an empty collection of its class
 			Value::Array(items)
@@ -140,7 +153,6 @@ impl Generator<'_> {
 			}
 			Value::Array(items) | Value::Tuple(items) => {
 				let item_types: Vec<TypeId> = match types.kind(ty) {
-					TypeKind::Bytes => vec![TypeId::UINT8; items.len()],
 					TypeKind::Collection(_, item, _) => vec![item; items.len()],
 					TypeKind::Tuple(list) => types.list_items(list).to_vec(),
 					_ => vec![TypeId::UNKNOWN; items.len()],
@@ -154,11 +166,7 @@ impl Generator<'_> {
 					)
 					.map(|(item, ty)| self.comptime_text(item, ty).map(|expr| expr.text))
 					.collect::<Option<Vec<_>>>()?;
-				if types.kind(ty) == TypeKind::Bytes {
-					Expr::primary(format!("new Uint8Array([{}])", parts.join(", ")))
-				} else {
-					Expr::constant(format!("[{}]", parts.join(", ")), Prec::Primary)
-				}
+				Expr::constant(format!("[{}]", parts.join(", ")), Prec::Primary)
 			}
 			Value::Set(items) => {
 				let item = match types.kind(ty) {

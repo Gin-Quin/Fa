@@ -107,6 +107,7 @@ pub(crate) enum Op {
 	Loop(Node),
 	While(Node, Node),
 	For {
+		utf8: bool,
 		item: Option<Slot>,
 		index: Option<Slot>,
 		iterable: Node,
@@ -242,6 +243,19 @@ impl<'a> Builder<'a> {
 					iterable,
 					body,
 				} => Op::For {
+					utf8: false,
+					item: *item,
+					index: *index,
+					iterable: self.add(iterable),
+					body: self.add(body),
+				},
+				ir::Expr::ForUtf8 {
+					item,
+					index,
+					iterable,
+					body,
+				} => Op::For {
+					utf8: true,
 					item: *item,
 					index: *index,
 					iterable: self.add(iterable),

@@ -120,7 +120,7 @@ The defaults run in about 0.25 to 2 seconds in Rust (see the [baseline](#trunk-b
 - **`bintrees` is `binary-trees`**: the same Benchmarks Game program. `binary-trees/main.goose` is Goose's `bintrees.goose` with the output of `main.rs`. `words` stays separate from `word-count`: same idea, but a different generator, text and output.
 - The other ten benchmarks got a Goose version written for them (`main.goose`, a direct port of `main.rs` reading its size from its arguments): inline `u8[..8]` strings where the words fit (`word-count`, `sort-objects`), `dictionary` for the maps, `sort` with a block for the comparator.
 
-The ports preserve many scalar widths (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys/values and `UInt32` links in `lru`, `Int32` literals in `interp`, `Int32` ids in `scene`. The audit identifies remaining differences: Goose's graph ids are unsigned, its sexp/calc numbers use varints, and its words counts are `i32` rather than Fa's Integer. `calc` reuses one generator text and damages it in place with string slices (`text = text[..index] + "#" + text[index + 1..]`, edited in place natively), as its sources do. `sexp` still owns child Arrays and walks them in forward source order, whereas Goose follows reverse-order sibling links. `scene` still owns child Arrays and makes three recursive passes; Goose animates and sums with flat pool scans. Its matrix has nine Float32 fields; fixed inline `CArray<Float32, 9>` is available, but an appendable bounded list of compact child references is not specified. The current trunk compiler exposes `text.bytes()` (read in place when indexed), which these ports use; the string-redesign migration is described in the audit.
+The ports preserve many scalar widths (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys/values and `UInt32` links in `lru`, `Int32` literals in `interp`, `Int32` ids in `scene`. The audit identifies remaining differences: Goose's graph ids are unsigned, its sexp/calc numbers use varints, while `words` now matches Goose's `i32` counts (`words-wide` preserves the original Integer counters). `calc` reuses one generator text and damages it in place with string slices (`text = text[..index] + "#" + text[index + 1..]`, edited in place natively), as its sources do. `sexp` still owns child Arrays and walks them in forward source order, whereas Goose follows reverse-order sibling links. `scene` still owns child Arrays and makes three recursive passes; Goose animates and sums with flat pool scans. Its matrix has nine Float32 fields; fixed inline `CArray<Float32, 9>` is available, but an appendable bounded list of compact child references is not specified. The current trunk compiler exposes `text.bytes()` (read in place when indexed), which these ports use; the string-redesign migration is described in the audit.
 
 The lead has deferred the pool ports to a language study (2026-11-16).
 `tree`, `binary-trees`, `interp`, `sexp`, `scene` and `calc` are **a different data
@@ -130,6 +130,19 @@ their current ratios as same-pool-layout comparisons. `words` and `lru` keep
 standard Fa Map as the main rows, with the same 1.10× Goose goal; explicit-table
 variants, where expressible, are separate comparisons with the matching Rust
 open-addressing rows.
+
+The [continuation results](results/2026-11-16-ports-2.md) record all twelve
+new mains and controls, with [raw samples and profiles](results/2026-11-16-ports-2.json).
+In the first 21-round CPU-5 series, unreserved `sum` and `blur` meet the 1.10×
+Goose goal. `particles`, `respond`, `words` and `lru` remain **not resolved**
+because their same-binary controls fail; favorable point estimates do not pass
+that gate. Of the retained variants, `sum-reserved` passes and
+`respond-interpolation` is behind with a passing control; the other four are
+unresolved. These are source and pairing corrections, without a demonstrated
+speedup over the preserved forms. Profiles identify String field appends/returns
+in `respond`, checked explicit-table operations in `lru-open`, and short-key
+hash/probe/compare in standard Map as follow-ups. No compiler changes are included.
+The historical trunk baseline below remains unchanged.
 
 #### What the ports found missing or wrong in Fa
 

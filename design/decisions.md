@@ -1553,3 +1553,15 @@ the checked driver and hashed as main.rs, while unused alternate entry files
 are excluded from other rows' manifests. Main words uses Int32 counters to match
 Goose; words-wide retains both original 64-bit-counter sources. Its Rust HashMap
 profiles retain the same three-execution policy as the standard map mains.
+
+
+The [continuation measurements](../benchmarks/results/2026-11-16-ports-2.md)
+apply strict controls to all twelve rows: main sum and blur meet the Goose goal;
+main particles/respond/words/lru remain unresolved. Sum-reserved also meets it;
+respond-interpolation is behind with a passing control, and the other four
+variants remain unresolved. Preserve the first 21-round series rather than
+retrying failed controls. Removing source capacity hints retains effectively
+identical kernels; the corrected ports do not establish a speedup. Profiles
+prioritize String field append/return costs, explicit-table checked operations
+and standard Map short-key probe work. No compiler optimization is part of this
+continuation; the implementation and language gaps remain separate TODOs.

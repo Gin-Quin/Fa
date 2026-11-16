@@ -138,6 +138,22 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
   `key: String in text` slot field. Define owner-scoped stored slice lifetimes
   and representation before an explicit table can match Goose; do not substitute
   owning keys or hand-encoded ranges. Its intended Rust row is words_open.rs.
+- **Continuation collection costs, ranked (2026-11-16).** The
+  [twelve-row results](../benchmarks/results/2026-11-16-ports-2.md) preserve the
+  first CPU series and strict controls. First inspect String append mode/capacity
+  facts and last-use field returns: direct respond adds 29.72 M audit instructions
+  versus interpolation, with 189,946 cold append calls (25.72 M inclusive) and
+  40,000 slow String copies (6.50 M inclusive). Coordinate with feature/strings;
+  the copy alone does not explain the gap. Next retain masked Array-index and
+  stored-node validity facts in lru-open, including backward-shift deletion:
+  39,041 mapRemove calls cost 1.78 M inclusive instructions. Preserve checked
+  failure paths; do not add unchecked benchmark accesses. Standard Map remains
+  the main target: retain lookup probes through remove/insert and short-key
+  hash/compare facts (words has 28.38 M versus Goose 22.41 M instructions, with
+  small allocator costs). These are profile targets, not demonstrated CPU gains.
+  Sum/blur meet the CPU goal; particles/respond/words/lru and four variants fail
+  controls. Keep those eight series unresolved and append a separately labeled
+  quiet recheck later rather than replacing the first samples.
 - **GrowingArray push and scan (faithful push port).** At 3.2 M items, the scalar
   segment scan executes 25.60 M instructions versus 12.00 M for Goose's vectorized
   scan and the reserved Array control; use a plain inner loop over each segment

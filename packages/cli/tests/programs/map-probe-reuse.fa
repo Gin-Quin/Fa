@@ -1,5 +1,6 @@
 -- A missing inline-map probe remains usable only while its index is unchanged.
 -- asynchronous: false
+-- require-split: true
 
 function append = (items: Array<UInt32>, value: UInt32) mutates items => {
 	items.push(value)

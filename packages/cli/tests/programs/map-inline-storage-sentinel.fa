@@ -1,5 +1,6 @@
 -- The KEY32 empty marker is also a real key, in read-only and frame literals.
 -- asynchronous: false
+-- require-split: true
 
 function literal = (key: UInt32) => {
 	let map: Map<UInt32, UInt32> = [(0, 10), (key, 20), (UInt32.maxValue, 30)]

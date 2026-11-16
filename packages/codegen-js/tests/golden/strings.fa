@@ -1,0 +1,36 @@
+function inspect = (text: String, i: Integer, replacement: String) => {
+	console.log(text.length, text.capacity, text.utf8Length(), text.isWellFormed())
+	console.log(text.get(i), text[i] catch error => "?", text.codeUnitAt(i) catch error => 0)
+	console.log(text[i..] catch error => "?", text[0..=i] catch error => "?")
+	console.log(text.indexOf("😀"), text.lastIndexOf("é"), text.includes("e"), text.startsWith("日"), text.endsWith("😀"))
+	console.log(text.split(""), text.padStart(10), text.padEnd(12, "é"), text < "\u{FFFF}")
+	console.log(text.replace("-", "x"), text.replace("-", "$&"), text.replace("-", replacement))
+	console.log(text.replaceAll("-", "x"), text.replaceAll("-", "$&"), text.replaceAll("-", replacement))
+	console.log(text.codePoints().length, text.codePoints(), text.characters(), text.toUtf8())
+	let at = text.codeUnitAt
+	console.log(at(i) catch error => 0)
+	for point, unused in text { console.log(point) }
+	for point in text { console.log(point) }
+	for point, index in text { console.log(index, point) }
+	for byte in text.toUtf8() { console.log(byte) }
+	for byte, index in text.toUtf8() { console.log(index, byte) }
+}
+function scan = (text: String) => {
+	for index in 0..text.length {
+		console.log(text[index] == "a", "日" == text[index])
+		console.log(when text[index] is { "a" => 1, "é" => 2, else => 3 })
+	}
+}
+function binary = (input: Array<Byte>, index: Integer) => {
+	mutable data = Bytes.filled(3)
+	console.log(Bytes.from(input))
+	data[0] = 255
+	let copy = data[0..2]
+	use view = data[0..1]
+	console.log(data.length, data.get(index), data.toArray(), data.toString(), data == copy, view)
+	console.log(String.fromUtf8(data) catch error => "{error.position}", String.fromUtf8Lossy(data))
+	console.log(Bytes.filled(3), Bytes.filled(3, 7))
+}
+inspect("é日😀-a", 0, "$1 $$ $&")
+scan("aé日😀")
+binary([97, 98, 99], 0)

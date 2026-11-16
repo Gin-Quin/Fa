@@ -1,0 +1,33 @@
+-- prints: [195, 169, 230, 151, 165, 240, 159, 152, 128]
+-- prints: 9 195 128 none false
+-- prints: true [195, 169, 230, 151, 165, 240, 159, 152, 128]
+-- prints: é日😀
+-- prints: 0 1 1
+-- prints: h� [239, 191, 189]
+-- prints: true
+-- prints: true false
+-- prints: [1, 2, 3] [0, 0, 0] [7, 7, 7]
+-- prints: 0:195 1:169 2:230 3:151 4:165 5:240 6:159 7:152 8:128
+-- prints: [195, 169] [195, 169]
+-- prints: true false
+let bytes = "é日😀".toUtf8()
+console.log(bytes)
+console.log(bytes.length, bytes[0], bytes[-1], bytes.get(100), bytes.isEmpty())
+console.log(bytes == Bytes.from(bytes.toArray()), bytes.toString())
+console.log(String.fromUtf8(bytes) catch error => "?")
+console.log(String.fromUtf8(Bytes.from([255])) catch error => error.position, String.fromUtf8(Bytes.from([97, 255])) catch error => error.position, String.fromUtf8(Bytes.from([97, 240, 159, 152])) catch error => error.position)
+console.log(String.fromUtf8Lossy(Bytes.from([104, 255])), "😀"[0].toUtf8())
+console.log((String.fromUtf8("\u{FEFF}é".toUtf8()) catch error => "?") == "\u{FEFF}é")
+function kind = (value: Bytes | Array<Byte>) => { console.log(value is Bytes, value is Array<Byte>) }
+kind(bytes)
+console.log(Bytes.from([1, 2, 3]).toArray(), Bytes.filled(3), Bytes.filled(3, 7))
+mutable output = ""
+for byte, index in "é日😀".toUtf8() {
+	if index > 0 { output += " " }
+	output += "{index}:{byte}"
+}
+console.log(output)
+
+static encoded: Bytes = "é".toUtf8()
+console.log(encoded, encoded.toArray())
+kind(encoded)

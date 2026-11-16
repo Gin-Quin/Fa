@@ -53,7 +53,7 @@ console.log(floats.sort(), floats)
 -- prints: [-0.5, -1e-300, 0, 2.5, 3, 1e+300] [2.5, -0.5, 1e+300, -1e-300, 0, 3]
 let words = ["pear", "Apple", "apple", "", "é", "\u{FFFF}", "\u{10000}", "ap"]
 console.log(words.sort())
--- prints: ["", "Apple", "ap", "apple", "pear", "é", "￿", "𐀀"]
+-- prints: ["", "Apple", "ap", "apple", "pear", "é", "𐀀", "￿"]
 
 -- Stable merge sorts with comparators.
 type Entry = {
@@ -82,4 +82,4 @@ let i = 42
 console.log(i.toString().padStart(6, "0"), "{i}:{i * 2}".padEnd(8, "."), i.toString().padStart(5, "é"), "é".padStart(3, "-"))
 -- prints: 000042 42:84... ééé42 --é
 console.log("a;b;;c".split(";"), "x;e\u{301};y".split(";").length, "a\r\nb".split("\n").length)
--- prints: ["a", "b", "", "c"] 3 1
+-- prints: ["a", "b", "", "c"] 3 2

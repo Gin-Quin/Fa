@@ -140,6 +140,7 @@ impl Generator<'_> {
 			}
 			Value::Array(items) | Value::Tuple(items) => {
 				let item_types: Vec<TypeId> = match types.kind(ty) {
+					TypeKind::Bytes => vec![TypeId::UINT8; items.len()],
 					TypeKind::Collection(_, item, _) => vec![item; items.len()],
 					TypeKind::Tuple(list) => types.list_items(list).to_vec(),
 					_ => vec![TypeId::UNKNOWN; items.len()],
@@ -153,7 +154,11 @@ impl Generator<'_> {
 					)
 					.map(|(item, ty)| self.comptime_text(item, ty).map(|expr| expr.text))
 					.collect::<Option<Vec<_>>>()?;
-				Expr::constant(format!("[{}]", parts.join(", ")), Prec::Primary)
+				if types.kind(ty) == TypeKind::Bytes {
+					Expr::primary(format!("new Uint8Array([{}])", parts.join(", ")))
+				} else {
+					Expr::constant(format!("[{}]", parts.join(", ")), Prec::Primary)
+				}
 			}
 			Value::Set(items) => {
 				let item = match types.kind(ty) {

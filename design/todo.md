@@ -123,18 +123,21 @@ One entry per work package of [the dated inventory §4](reviews/inventory-2026-1
 
 ## 4. Performance
 
-- **Faithful Goose ports (2026-11-16).** The [sixteen-port audit](../benchmarks/audit/ports/README.md)
-  records all structures/passes and intended Rust rows. Push now uses unreserved
-  GrowingArray with documented index marks; the reserved Array is `push-array`.
-  Next: unreserved sum/particles/blur (UInt16 stencil temporary), direct-output
-  respond with retained variants. Before scene/interp/sexp/calc/tree/binary-trees/
-  graph pool ports, decide compact one-way growing-pool links and bounded inline
-  ordered child references; preserve recursive variants and change Rust pairings
-  together. Decide exact words/lru slot algorithms versus standard Map comparisons;
-  words needs Int32 counts and a borrowed-key ownership policy. Sexp needs reverse
-  sibling order and its parser error path. The current scene-children probe is
-  wrongly accepted and stores values instead of rejecting Array reference fields;
-  add the missing rejection (`benchmarks/audit/ports/scene-children/main.fa`).
+- **Deferred Goose pool ports (lead, 2026-11-16).** The
+  [sixteen-port audit](../benchmarks/audit/ports/README.md) records all structures,
+  passes and intended Rust rows. Scene/interp/sexp/calc/tree/binary-trees/graph
+  wait for the language study of one-way growing-pool links, compact widths and
+  bounded inline ordered lists. Do not use CArray integer-link approximations.
+  Retain the current main rows until then; when replacing them, keep recursive
+  variants and change Rust pairings together. Sexp needs reverse sibling order
+  and its parser error path. The separate missing Array-reference-field
+  rejection is an analyzer bug in section 1.
+- **Stored borrowed slice keys for explicit words.** Standard Map remains the
+  main comparator with a 1.10-times-Goose goal (Int32 counters are delivered).
+  `benchmarks/audit/ports/words-slice-key/main.fa` gets REL001/REL002 for a
+  `key: String in text` slot field. Define owner-scoped stored slice lifetimes
+  and representation before an explicit table can match Goose; do not substitute
+  owning keys or hand-encoded ranges. Its intended Rust row is words_open.rs.
 - **GrowingArray push and scan (faithful push port).** At 3.2 M items, the scalar
   segment scan executes 25.60 M instructions versus 12.00 M for Goose's vectorized
   scan and the reserved Array control; use a plain inner loop over each segment

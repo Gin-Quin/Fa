@@ -9,7 +9,11 @@ type Vector = {
 	y: Float32
 	z: Float32
 
-	function add = (self, other: Vector): Vector => Vector { x = self.x + other.x, y = self.y + other.y, z = self.z + other.z }
+	function add = (self, other: Vector): Vector => Vector {
+		x = self.x + other.x
+		y = self.y + other.y
+		z = self.z + other.z
+	}
 }
 
 type Particle = {
@@ -64,7 +68,9 @@ for 0..steps {
 mutable total = 0
 for particle in particles {
 	let position = particle.position
-	total += try Integer.truncate(position.x * 16.0) + Integer.truncate(position.y * 16.0) + Integer.truncate(position.z * 16.0)
+	total += try Integer.truncate(position.x * 16.0)
+		+ Integer.truncate(position.y * 16.0)
+		+ Integer.truncate(position.z * 16.0)
 }
 console.log(particles.length)
 console.log(total)

@@ -188,6 +188,24 @@ Select either name with `audit/compare.py`; `run.ts` runs the main only.
 The [port audit](audit/ports/README.md) explains the remaining differences and
 which recursive mains await language representation decisions.
 
+The continuation keeps `sum`, `particles` and `blur` as unreserved Array mains;
+`sum-reserved`, `particles-reserved` and `blur-reserved` retain the original
+sources, including the old Integer stencil sum. Main `blur` uses UInt16, as
+Goose and Rust do. `respond` emits escaping directly into one output buffer;
+`respond-interpolation` retains the original temporary quoted strings. These
+variants keep the same Rust rows: sum.rs (collect), particles.rs (elementwise),
+blur_index.rs (flat indexing), and respond_dto.rs (the DTO, not streaming).
+
+`lru-open` is the explicit 8-byte Int32-key/UInt32-index slot table with Goose's
+Fibonacci hash, linear probing and backward-shift deletion; it uses the separate
+Rust `lru/open.rs`, adapted from lru_open.rs with zero as its empty marker.
+The main `lru` keeps standard Map and lru_hashmap.rs. Main `words` keeps standard
+Map with Int32 counts to match Goose; `words-wide` preserves the original Fa and
+Rust rows with 64-bit counts. Both are paired with words_hashmap.rs in the
+corresponding width. The requested borrowed-key words table is **blocked**:
+`audit/ports/words-slice-key/main.fa` gets REL001/REL002 for storing a String slice
+reference in a slot. No owning-key or encoded-range substitute is measured.
+
 The [2026-11-16 push checkpoint](results/2026-11-16-ports.md)
 ([raw samples and provenance](results/2026-11-16-ports.json)) measures both forms
 with the current compiler. Main push is 1.119 / 1.143 [1.024, 1.196] times Goose

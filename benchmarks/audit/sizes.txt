@@ -33,3 +33,4 @@ sum-reserved 3200000
 tree 17
 word-count 500000
 words 100000
+words-wide 100000

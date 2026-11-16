@@ -1544,3 +1544,12 @@ Respond appends escaping into one output buffer instead of returning quoted
 temporary strings. Since a primitive String parameter cannot declare mutates,
 an ordinary Output object owns that String and the helper mutates its text
 field, matching the existing documented object-field mutation model.
+
+The explicit lru variant uses Int32 keys and UInt32 arena indices, with zero as
+the empty slot since the head sentinel is never a cache entry. The matching safe
+Rust lru_open.rs row is adapted to the same zero marker and runtime size input;
+the probe/deletion order is preserved. A per-variant Rust entry is selected in
+the checked driver and hashed as main.rs, while unused alternate entry files
+are excluded from other rows' manifests. Main words uses Int32 counters to match
+Goose; words-wide retains both original 64-bit-counter sources. Its Rust HashMap
+profiles retain the same three-execution policy as the standard map mains.

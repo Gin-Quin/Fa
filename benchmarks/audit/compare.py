@@ -43,10 +43,11 @@ VARIANTS = {"string-building-bytes": ("string-building", "bytes.fa"),
             "particles-reserved": ("particles", "reserved.fa"),
             "blur-reserved": ("blur", "reserved.fa"),
             "respond-interpolation": ("respond", "interpolation.fa"),
-            "lru-open": ("lru", "open.fa")}
+            "lru-open": ("lru", "open.fa"),
+            "words-wide": ("words", "wide.fa")}
 # A structural variant can have its own matching Rust row. The selected entry
 # is copied as main.rs; alternate entries never pollute another row's manifest.
-RUST_VARIANTS = {"lru-open": "open.rs"}
+RUST_VARIANTS = {"lru-open": "open.rs", "words-wide": "wide.rs"}
 DEFAULTS.update({name: DEFAULTS[directory] for name, (directory, _) in VARIANTS.items()})
 AUDIT = {name: int(size) for name, size in
          (line.split() for line in Path(__file__).with_name("sizes.txt").read_text().splitlines())}
@@ -533,7 +534,7 @@ def main():
             elif args.mode == "profile":
                 for side in commands:
                     location = directory / ("rust-profile" if side == "rust" else side)
-                    repetitions = 3 if side == "rust" and name in ("lru", "words", "word-count") else 1
+                    repetitions = 3 if side == "rust" and name in ("lru", "words", "words-wide", "word-count") else 1
                     profiles = [profile(commands[side], location / f"run-{index}", expected)
                                 for index in range(repetitions)]
                     result[side] = sorted(profiles, key=lambda item: item["events"]["Ir"])[repetitions // 2]

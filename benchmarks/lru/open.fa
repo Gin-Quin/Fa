@@ -42,7 +42,11 @@ function linkFront = (nodes: Array<Node>, index: UInt32) throws IndexError mutat
 
 -- Stores a node in a freed slot if there is one, so that the array never exceeds the capacity
 -- plus the sentinels.
-function allocate = (nodes: Array<Node>, free: Array<UInt32>, node: Node): UInt32 throws IndexError mutates nodes, free => {
+function allocate = (
+	nodes: Array<Node>
+	free: Array<UInt32>
+	node: Node
+): UInt32 throws IndexError mutates nodes, free => {
 	let index = free.pop()
 	if index is none {
 		nodes.push(node)
@@ -59,7 +63,11 @@ type Slot = { key: Int32, index: UInt32 }
 function home = (key: Int32, mask: Integer<min = 0>): Integer throws ArithmeticError =>
 	try Integer(UInt64(key).wrappingMul(11400714819323198485).shiftRight(24).bitAnd(UInt64(mask)))
 
-function find = (slots: Array<Slot>, mask: Integer<min = 0>, key: Int32): Integer throws IndexError | ArithmeticError => {
+function find = (
+	slots: Array<Slot>
+	mask: Integer<min = 0>
+	key: Int32
+): Integer throws IndexError | ArithmeticError => {
 	mutable index = try home(key, mask)
 	loop {
 		let slot = try slots[index]
@@ -72,7 +80,11 @@ function find = (slots: Array<Slot>, mask: Integer<min = 0>, key: Int32): Intege
 }
 
 -- Backward-shift deletion, including wraparound, in the same order as Goose.
-function mapRemove = (slots: Array<Slot>, mask: Integer<min = 0>, at: Integer) throws IndexError | ArithmeticError mutates slots => {
+function mapRemove = (
+	slots: Array<Slot>
+	mask: Integer<min = 0>
+	at: Integer
+) throws IndexError | ArithmeticError mutates slots => {
 	mutable index = at
 	mutable next = index
 	loop {
@@ -82,7 +94,8 @@ function mapRemove = (slots: Array<Slot>, mask: Integer<min = 0>, at: Integer) t
 			break
 		}
 		let start = try home(slot.key, mask)
-		if (index < next and (start <= index or start > next)) or (index > next and start <= index and start > next) {
+		if (index < next and (start <= index or start > next))
+			or (index > next and start <= index and start > next) {
 			try slots[index] = slot
 			index = next
 		}
@@ -105,8 +118,8 @@ for 0..slotCount {
 	slots.push({ key = 0, index = 0 })
 }
 mutable nodes: Array<Node> = [
-	{ key = -1, value = 0, previous = head, next = tail },
-	{ key = -1, value = 0, previous = head, next = tail },
+	{ key = -1, value = 0, previous = head, next = tail }
+	{ key = -1, value = 0, previous = head, next = tail }
 ]
 mutable free: Array<UInt32> = []
 mutable count = 0
@@ -149,7 +162,12 @@ for 0..n {
 		-- Shifting deletion can invalidate the empty position found before eviction.
 		insert = try find(slots, mask, key)
 	}
-	let index = try allocate(nodes, free, { key, value = key %% 1000, previous = head, next = tail })
+	let index = try allocate(nodes, free, {
+		key
+		value = key %% 1000
+		previous = head
+		next = tail
+	})
 	try slots[insert] = { key, index }
 	try linkFront(nodes, index)
 	count += 1

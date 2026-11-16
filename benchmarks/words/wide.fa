@@ -1,0 +1,59 @@
+-- Word frequencies: a vocabulary of random words, a text of N words drawn from it with a skew
+-- towards its front, split into words, then counted in a `Map<String, Integer>`.
+
+let letters = "abcdefghijklmnopqrstuvwxyz"
+
+-- The xorshift64 generator of the Goose suite (`rng.goose`).
+function xorshift = (x: UInt64): UInt64 => {
+	mutable v = x
+	v = v.bitXor(v.shiftLeft(13))
+	v = v.bitXor(v.shiftRight(7))
+	v.bitXor(v.shiftLeft(17))
+}
+
+-- A number between 0 and `bound` (excluded), as the Goose suite reduces its random numbers.
+function randomBelow = (x: UInt64, bound: Integer<min = 1>): Integer => Integer(x %% UInt64(bound))
+
+let n = 500_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
+let vocabularySize = n // 10 + 16
+
+mutable r: UInt64 = 12345
+-- A vocabulary of words, indexed randomly to build the text.
+mutable vocabulary = Array<String>.from([], capacity = vocabularySize)
+for 0..vocabularySize {
+	mutable word = ""
+	r = xorshift(r)
+	let length = 3 + Integer(r %% 12)
+	for 0..length {
+		r = xorshift(r)
+		word += letters[Integer(r %% 26)]
+	}
+	vocabulary.push(word)
+}
+
+-- A text of N words drawn with a skew towards the front of the vocabulary.
+mutable text = ""
+for 0..n {
+	r = xorshift(r)
+	let a = randomBelow(r, vocabularySize)
+	text += try vocabulary[a * a // vocabularySize]
+	text += " "
+}
+-- The trailing space gives an empty part, which is not a word.
+let words = text.split(" ").filter((word) => not word.isEmpty())
+
+-- Sized for the vocabulary up front, as Goose sizes its table.
+mutable counts = Map<String, Integer>.from([], capacity = vocabularySize)
+for word in words {
+	use count = counts.getOrInsert(word, 0)
+	count += 1
+}
+
+mutable total = 0
+for (word, count) in counts {
+	-- The first byte of the word (ASCII: its first letter's code).
+	total += count * (word.length + (try word.bytes()[0]))
+}
+console.log(words.length)
+console.log(counts.size)
+console.log(total)

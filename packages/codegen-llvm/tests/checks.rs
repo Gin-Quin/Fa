@@ -1072,7 +1072,7 @@ console.log(items.length)
 	fn recursive_optionals_have_no_separate_presence_word() {
 		let ir = ir_of(
 			"nullable-edges",
-			"type Node = { value: Integer, next: Node? }\nlet list = Node { value = 1, next = Node { value = 2 } }\nmutable duplicate = list\ncopy.next = none\nconsole.log(list.next?.value ?? 0, duplicate.next?.value ?? 0)\n",
+			"type Node = { value: Integer, next: Node? }\nlet list = Node { value = 1, next = Node { value = 2 } }\nmutable duplicate = list\nduplicate.next = none\nconsole.log(list.next?.value ?? 0, duplicate.next?.value ?? 0)\n",
 		);
 		assert!(!ir.contains("{ i1, ptr }"), "{ir}");
 		assert!(ir.contains("{ ptr, i64 }"), "{ir}");

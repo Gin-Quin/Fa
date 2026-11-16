@@ -295,7 +295,7 @@ fn missing_fields_and_nominal_types() {
 #[test]
 fn type_of_a_parameter_is_an_implicit_generic() {
 	let (session, file) = analyzed(&format!(
-		"{HUMANS}function renamed = (human: Human, name: String): Type<human> => {{\n\tmutable duplicate = human\n\tcopy.name = name\n\tcopy\n}}\nlet clark = renamed(SuperHuman {{ name = \"Kal\", powers = \"flight\" }}, \"Clark\")\nlet powers = clark.powers\nlet john = renamed(Human {{ name = \"Ana\" }}, \"John\")\nlet count = 3\nlet same: Type<count> = 4\n"
+		"{HUMANS}function renamed = (human: Human, name: String): Type<human> => {{\n\tmutable duplicate = human\n\tduplicate.name = name\n\tduplicate\n}}\nlet clark = renamed(SuperHuman {{ name = \"Kal\", powers = \"flight\" }}, \"Clark\")\nlet powers = clark.powers\nlet john = renamed(Human {{ name = \"Ana\" }}, \"John\")\nlet count = 3\nlet same: Type<count> = 4\n"
 	));
 	assert_eq!(symbol_type(&session, file, "clark"), "SuperHuman");
 	assert_eq!(symbol_type(&session, file, "john"), "Human");

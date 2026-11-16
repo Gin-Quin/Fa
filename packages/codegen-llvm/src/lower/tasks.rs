@@ -1852,8 +1852,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		while let View::Group(group) = self.view(inner) {
 			inner = group;
 		}
-		// a task, a resource, a type holding one (`TypeStore::owns_unique`)
-		if !self.types().owns_unique(self.type_of(inner)) {
+		// Only Task-consuming parameters transfer; a Resource (including
+		// one containing a Task) still borrows from its caller.
+		if !self
+			.types()
+			.consumes_parameter(self.concrete_type(self.type_of(inner)))
+		{
 			return Ok(value);
 		}
 		if !self.is_temporary(value)

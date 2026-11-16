@@ -63,7 +63,7 @@ impl Generator<'_> {
 			};
 			return Piece::Text(text);
 		}
-		if let Some(drop) = self.printed_resource_drop(node) {
+		if let Some(drop) = self.temporary_resource_drop(node) {
 			if !self.guard_frames.is_empty() {
 				let temp = self.inline_temp();
 				self.guard_frames

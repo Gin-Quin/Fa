@@ -76,7 +76,7 @@ def positions(unique):
     yield 'object_field', 'mutable owner: Holder = {}\nlet trace = try exercise<3>(owner.items)\n"{trace}|{owner.items}"'
     for name, collection in [('pool_field', 'Pool<Holder>'), ('array_field', 'Array<Holder>')]:
         yield name, f'mutable owners: {collection} = [{{}}]\nmutable trace = ""\nfor owner in owners {{ trace = try exercise<3>(owner.items) }}\n"{{trace}}|{{owners}}"'
-    yield 'parameter_read', 'mutable items: List = []\nlet trace = try exercise<3>(items)\n"{trace}|{read(items)}"'
+    yield 'parameter_read', 'mutable items: List = []\nlet trace = try exercise<3>(items)\nlet callback = read\nlet seen = read(items)\nassert callback(items) == seen\nassert items.length == 1\n"{trace}|{seen}"'
     yield 'parameter_mutated', 'mutable items: List = []\nlet callback = exercise<3>\nlet trace = try callback(items)\n"{trace}|{items}"'
     yield 'result', 'let items = try build()\n"{items}"'
     yield 'capture', 'mutable items: List = []\nmutable trace = ""\ntry [0].map((_index) => { trace = try exercise<3>(items)\n0 })\n"{trace}|{items}"'

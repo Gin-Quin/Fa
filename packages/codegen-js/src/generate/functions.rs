@@ -465,6 +465,42 @@ impl Generator<'_> {
 
 	/// A call.
 	pub(crate) fn call(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
+		// On success the statement retains borrowed temporaries. On error
+		// release them before an enclosing catch, including argument errors.
+		self.guard_frames.push(Vec::new());
+		let (lines, value) = self.capture(|g| g.call_inner(n, callee, arguments));
+		let mut release = self.guard_frames.pop().expect("the call's temporaries");
+		if release.is_empty() {
+			self.out.append(lines);
+			return value;
+		}
+		release.reverse();
+		let release = release.join(" ");
+		let result = self.inline_temp();
+		let failed = (!self.guard_frames.is_empty()).then(|| self.inline_temp());
+		if let Some(failed) = &failed {
+			self.guard_frames
+				.last_mut()
+				.expect("an enclosing scope")
+				.push(format!("if (!{failed}) {{ {release} }}"));
+			self.out.line(format!("{failed} = false;"));
+		}
+		self.out.open("try");
+		self.out.append(indent_by_one(lines));
+		self.out.line(format!("{result} = {};", value.text));
+		if let Some(failed) = failed {
+			let error = self.temp();
+			self.out.reopen(&format!("catch ({error})"));
+			self.out
+				.line(format!("{failed} = true; {release} throw {error};"));
+			self.out.close("");
+		} else {
+			self.out.close(&format!("finally {{ {release} }}"));
+		}
+		Expr::name(result, false)
+	}
+
+	fn call_inner(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
 		// `pick(value, { foo })`: the value copied to the node's type
 		if let Some(&value) = self.analysis.forwards.get(&n) {
 			let ty = self.type_of(n);
@@ -922,7 +958,21 @@ impl Generator<'_> {
 				let value = self.expr(node);
 				self.detached_argument(node, value)
 			}
-			_ => self.expr(node),
+			_ => {
+				let value = self.expr(node);
+				if !self.types.consumes_parameter(self.type_of(node))
+					&& let Some(drop) = self.temporary_resource_drop(node)
+				{
+					let temp = self.inline_temp();
+					self.guard_frames
+						.last_mut()
+						.expect("a call")
+						.push(format!("{drop}({temp});"));
+					Expr::primary(format!("({temp} = {})", value.at(Prec::Assign)))
+				} else {
+					value
+				}
+			}
 		}
 	}
 

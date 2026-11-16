@@ -25,9 +25,9 @@ use crate::generate::Generator;
 use crate::js::{Expr, Prec};
 
 impl Generator<'_> {
-	/// Printing borrows a place, but owns a fresh result. In particular
-	/// pop/take transfer an item while get/find still borrow their collection.
-	pub(crate) fn printed_resource_drop(&mut self, mut node: NodeId) -> Option<String> {
+	/// A fresh resource result remains the caller's temporary when printed
+	/// or borrowed by a parameter. Pop/take transfer; get/find still borrow.
+	pub(crate) fn temporary_resource_drop(&mut self, mut node: NodeId) -> Option<String> {
 		while let View::Group(inner) | View::Try(inner) | View::Await(inner) = self.view(node) {
 			node = inner;
 		}

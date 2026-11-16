@@ -12,6 +12,7 @@ mandelbrot 1000
 nbody 1500000
 particles 30000
 push 3200000
+push-array 3200000
 records 400000
 respond 40000
 scene 9

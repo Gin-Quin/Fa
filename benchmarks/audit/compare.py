@@ -37,7 +37,8 @@ DEFAULTS = {
 # items never move, like Goose's `u8[>..]` arrays.
 VARIANTS = {"string-building-bytes": ("string-building", "bytes.fa"),
             "string-building-growing": ("string-building", "growing.fa"),
-            "growing-index-array": ("growing-index", "array.fa")}
+            "growing-index-array": ("growing-index", "array.fa"),
+            "push-array": ("push", "array.fa")}
 DEFAULTS.update({name: DEFAULTS[directory] for name, (directory, _) in VARIANTS.items()})
 AUDIT = {name: int(size) for name, size in
          (line.split() for line in Path(__file__).with_name("sizes.txt").read_text().splitlines())}
@@ -400,6 +401,8 @@ def main():
     parser.add_argument("--markdown", type=Path)
     parser.add_argument("--update-readme", action="store_true",
                         help="With --render, replace only the generated README result block")
+    parser.add_argument("--require-control", action="store_true",
+                        help="With --render, require a passing control for every CPU verdict")
     parser.add_argument("--supplemental", action="store_true",
                         help="Retain this diagnostic series in JSON without replacing headline table rows")
     parser.add_argument("--secondary-memory-mib", type=int, default=512)
@@ -407,8 +410,11 @@ def main():
                         help="Interleave an already prepared Fa variant (one selected benchmark, CPU mode)")
     args = parser.parse_args()
     if args.render:
-        tables.render(args.render, args.report, args.markdown, args.update_readme)
+        tables.render(args.render, args.report, args.markdown, args.update_readme,
+                      require_control=args.require_control)
         return
+    if args.require_control:
+        parser.error("--require-control requires --render")
     if args.update_readme:
         parser.error("--update-readme requires --render")
     if not args.directory:

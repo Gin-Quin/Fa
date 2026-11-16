@@ -93,7 +93,7 @@ From the Goose suite (the Fa and Rust versions print what the Goose program prin
 | Benchmark | What it stresses | Default size |
 | --- | --- | --- |
 | `sum` | the control: an `Array(Int32)` filled from a generator, scanned eight times | 32,000,000 |
-| `push` | pushing small objects, keeping the index of every 64th one across the growth | 32,000,000 |
+| `push` | an unreserved `GrowingArray` of small objects, keeping every 64th index across growth (`push-array`: the original reserved `Array`) | 32,000,000 |
 | `strlist` | a text built character by character, split into a list of owned strings, scanned four times | 2,000,000 words |
 | `records` | a log of variant records (a named union, one member with a `String`), aggregated four times with `when` | 4,000,000 |
 | `tree` | a complete binary tree of `Node?` children (one heap allocation per node), summed eight times | depth 21 |
@@ -115,12 +115,12 @@ The defaults run in about 0.25 to 2 seconds in Rust (see the [baseline](#trunk-b
 [Goose](https://github.com/aardappel/goose) is a systems language that compiles to C, with inline data structures, data stacks instead of an allocator, and relative references. Its suite (`bench/goose/`, `bench/rust/`, `bench/cpp/` and the manifest `bench/run_bench.py` of its repository, explained in `bench/design.md`) has sixteen benchmarks. Each was ported here:
 
 - **`main.goose` is the headline Goose implementation, verbatim** (the first `goose=` row of the manifest: `records_var.goose` for `records`, `graph.goose`, `particles.goose`, `respond.goose`, `blur.goose`, …), with only the number of its `// BENCH_N` line changed to our default size. It imports `rng.goose`, the suite's xorshift64, kept in `benchmarks/goose/`.
-- **`main.rs`** is adapted from the Goose repository's Rust row whose data structure matches the Fa port (written in each file's header): `Vec` (`sum`, `push`, `graph` nested, `blur` flat indexing), `Vec<String>` (`strlist`), `enum` + `String` (`records`), `Box` nodes (`tree`, `interp`, `sexp`, `calc`, `scene` with `Vec` children), `HashMap` (`words`, `lru`), the DTO (`respond`), elementwise `particles`. The Goose page compares Goose with the fastest safe Rust row, often an index arena, which Fa has no reason to imitate; the rows here are the ones that do the same work as the Fa program.
-- **`main.fa`** is an idiomatic Fa port: recursive values through optionals and unions where Goose links nodes with relative references, arrays of objects with integer indices where Goose keeps typed references into a grow-only array (`push`, `lru`), `Map` where Goose uses its open-addressing table or `dictionary`. The generator is `UInt64` with `bitXor`, `shiftLeft` and `shiftRight`, so it is a JavaScript `BigInt` on Bun and wasm's loader: exact, but slow there.
+- **`main.rs`** is adapted from the Goose repository's Rust row whose data structure matches the current Fa port (written in each file's header): `Vec` (`sum`, `push`, `graph` nested, `blur` flat indexing), `Vec<String>` (`strlist`), `enum` + `String` (`records`), `Box` nodes (`tree`, `interp`, `sexp`, `calc`, `scene` with `Vec` children), `HashMap` (`words`, `lru`), the DTO (`respond`), elementwise `particles`. When a Fa port becomes a pool implementation, pair it with Goose's corresponding Rust arena row; keep the Box row with the recursive variant. For `push`, the suite supplies only safe Rust `Vec+reserve` with indices: it matches the payload and marks, but has a different allocation policy from Fa's segmented GrowingArray.
+- **`main.fa`** must use the documented Fa collection corresponding to Goose's, with the same construction and traversal order. The [port audit](audit/ports/README.md) records all sixteen representations, passes, source-line evidence, intended Rust pairings and remaining gaps. Several existing mains still use owning recursive values where Goose uses pool links; their checksum agreement is not a same-structure comparison. Keep these implementations as named variants when faithful replacements become expressible. `push` now uses an unreserved GrowingArray and integer marks, the alternative explicitly prescribed by Fa's local-reference documentation. The generator is `UInt64` with `bitXor`, `shiftLeft` and `shiftRight`, so it is a JavaScript `BigInt` on Bun and wasm's loader: exact, but slow there.
 - **`bintrees` is `binary-trees`**: the same Benchmarks Game program. `binary-trees/main.goose` is Goose's `bintrees.goose` with the output of `main.rs`. `words` stays separate from `word-count`: same idea, but a different generator, text and output.
 - The other ten benchmarks got a Goose version written for them (`main.goose`, a direct port of `main.rs` reading its size from its arguments): inline `u8[..8]` strings where the words fit (`word-count`, `sort-objects`), `dictionary` for the maps, `sort` with a block for the comparator.
 
-The ports use the integer widths of their sources (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys, values and `UInt32` links in `lru`, `Int32` vertex ids and distances in `graph`, `Int32` numbers in `interp` and `sexp`, `Int32` ids in `scene`; `calc` reuses one generator text and damages it in place with string slices (`text = text[..index] + "#" + text[index + 1..]`, edited in place natively), as its sources do. Deviations: `sexp` keeps the children of a list in an `Array` (Rust: `Vec<Node>`) instead of Goose's first-child and next-sibling links; `scene` writes the 3x3 matrix as nine `Float32` fields (Fa has no fixed-size arrays); `respond`, `strlist`, `records`, `words`, `sexp` and `calc` read the bytes of a string with `text.bytes()` (sixth native shift), as Goose reads its `u8` buffers: the parsers of `calc` and `sexp` index `self.text.bytes()` (read in place, no array) instead of an `Array(Character)`, and `sexp` slices its symbols out of the text.
+The ports preserve many scalar widths (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys/values and `UInt32` links in `lru`, `Int32` literals in `interp`, `Int32` ids in `scene`. The audit identifies remaining differences: Goose's graph ids are unsigned, its sexp/calc numbers use varints, and its words counts are `i32` rather than Fa's Integer. `calc` reuses one generator text and damages it in place with string slices (`text = text[..index] + "#" + text[index + 1..]`, edited in place natively), as its sources do. `sexp` still owns child Arrays and walks them in forward source order, whereas Goose follows reverse-order sibling links. `scene` still owns child Arrays and makes three recursive passes; Goose animates and sums with flat pool scans. Its matrix has nine Float32 fields; fixed inline `CArray<Float32, 9>` is available, but an appendable bounded list of compact child references is not specified. The current trunk compiler exposes `text.bytes()` (read in place when indexed), which these ports use; the string-redesign migration is described in the audit.
 
 #### What the ports found missing or wrong in Fa
 
@@ -171,6 +171,26 @@ integer formatting, like the Goose port. `string-building/growing.fa` uses
 output and are measured as `string-building-bytes` and `string-building-growing`
 against the same Rust and Goose sources. `growing-index-array` is the `Array`
 control for `growing-index` (see the indexing methodology below).
+
+`push-array` keeps the original `push/array.fa` (reserved Array plus integer marks).
+The main `push` row uses an unreserved GrowingArray. Both use the suite's only
+safe Rust push row (reserved Vec plus indices), and the same Goose source.
+Select either name with `audit/compare.py`; `run.ts` runs the main only.
+The [port audit](audit/ports/README.md) explains the remaining differences and
+which recursive mains await language representation decisions.
+
+The [2026-11-16 push checkpoint](results/2026-11-16-ports.md)
+([raw samples and provenance](results/2026-11-16-ports.json)) measures both forms
+with the current compiler. Main push is 1.119 / 1.143 [1.024, 1.196] times Goose
+CPU at 32 million items, with a passing control; audit instructions at 3.2 million
+items are 155.50 M versus Goose 121.47 M. Its GrowingArray scan stays scalar
+(25.60 M instructions versus 12.00 M for Goose's vectorized scan), and append
+reloads/writes cursor and length metadata. The separate push-array CPU series
+fails its control and is **not resolved** under this task's stricter rule; its
+generated table uses `--require-control`, preserving raw phase verdicts in JSON.
+The direct paired GrowingArray/Array estimates straddle equality (1.078 / 0.995),
+so they establish no CPU direction. The historical trunk baseline below is
+unchanged. No compiler optimization is included in this port checkpoint.
 
 ## Fairness rules
 

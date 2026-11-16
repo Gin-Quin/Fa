@@ -5,6 +5,7 @@
 -- prints: 1 1
 -- prints: 22 22
 -- prints: 1 1
+-- prints: 35 35
 -- prints: 216 216
 -- prints: 2 2
 
@@ -25,9 +26,12 @@ function alias = (): Integer => {
 	people[0].score
 }
 function temporary = (): Integer => {
-	mutable found = [Person { score = 1 }].find((_person) => true)
+	mutable found = [Person { score = 1 }].find((person) => {
+		person.score += 1
+		true
+	})
 	if found != none {
-		found.score = 7
+		found.score += 5
 		found.score
 	} else { -1 }
 }
@@ -65,6 +69,16 @@ function earlyArgumentResult = (): Integer => {
 	people[0].score
 }
 
+function growingAlias = (): Integer => {
+	mutable people: GrowingArray<Person> = [Person { score = 1 }, Person { score = 2 }]
+	mutable use found = (people.find((person) => person.score == 1))
+	if found != none { found.score = 3 }
+	reuse found = people.find((person) => person.score == 2)
+	if found != none { found.score = 4 }
+	reuse found = people.find((_person) => false)
+	if found == none { people[0].score * 10 + people[1].score + 1 } else { -1 }
+}
+
 function mapCallbacks = (): Integer => {
 	let values: Map<String, Integer> = [("a", 1), ("b", 2)]
 	let mapped = values.map((key, value) => value + key.length)
@@ -90,6 +104,7 @@ static copied = @copiedResult()
 static valueArgument = @argumentResult()
 static survived = @failed("bad")
 static earlyArgument = @earlyArgumentResult()
+static growingReference = @growingAlias()
 static maps = @mapCallbacks()
 static duplicates = @setMapping()
 console.log(inspected, inspect())
@@ -99,5 +114,6 @@ console.log(copied, copiedResult())
 console.log(valueArgument, argumentResult())
 console.log(survived, failed("bad"))
 console.log(earlyArgument, earlyArgumentResult())
+console.log(growingReference, growingAlias())
 console.log(maps, mapCallbacks())
 console.log(duplicates, setMapping())

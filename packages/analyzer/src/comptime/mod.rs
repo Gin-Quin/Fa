@@ -450,6 +450,7 @@ mod tests {
 			("valueArgument", 1),
 			("survived", 22),
 			("earlyArgument", 1),
+			("growingReference", 35),
 			("maps", 216),
 			("duplicates", 2),
 		] {

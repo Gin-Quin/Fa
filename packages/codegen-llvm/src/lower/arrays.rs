@@ -1,9 +1,8 @@
 //! Arrays: a pointer to a header `{ ptr items, i64 length, i64 capacity }`
 //! whose items are stored inline in a block of the allocator.
 //!
-//! Arrays are values (types brief §5): binding or storing an array read
-//! from a place copies it ([`Lowering::copy_if_place`]); a parameter shares
-//! the caller's array (it is read-only, or `mutates` it).
+//! Owning stores, explicit copies and moves use the ownership lowering.
+//! A parameter borrows the caller's array (read-only, or `mutates` it).
 
 use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
@@ -966,6 +965,65 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A method of arrays: the receiver, then the arguments.
+	/// Search once and retain the actual item address, for both a value
+	/// result and a builtin reference binding. Growing storage stays put.
+	pub(crate) fn array_find_pointer(
+		&mut self,
+		collection: Val<'ctx>,
+		callback: Val<'ctx>,
+		callback_node: NodeId,
+		node: NodeId,
+	) -> Result<(PointerValue<'ctx>, Repr), Error> {
+		let (Repr::Array(item_type) | Repr::Growing(item_type)) = collection.repr else {
+			return Err(self.unsupported(node.index(), "finding an item of this collection"));
+		};
+		let item = self.item_repr(item_type, node)?;
+		let pointer = collection.value.expect("a collection").into_pointer_value();
+		let length = if matches!(collection.repr, Repr::Growing(_)) {
+			self.growing_length(&self.builder, pointer)?
+		} else {
+			self.array_parts(pointer)?.1
+		};
+		let result = self.alloca_type(self.pointer_type().into(), "found_item")?;
+		self.builder
+			.build_store(result, self.pointer_type().const_null())?;
+		let end = self.append_block("end_find");
+		self.for_each_index(length, |this, index| {
+			let index_value = Val::new(Repr::Int(IntRepr::I64), index);
+			let slot = if matches!(collection.repr, Repr::Growing(_)) {
+				Slot {
+					pointer: this.growing_at(&this.builder, pointer, item, index)?,
+					repr: item,
+				}
+			} else {
+				this.array_item_slot(pointer, item, index)?
+			};
+			let holds = this.call_collection_callback(
+				callback,
+				callback_node,
+				&[],
+				&[slot],
+				&[index_value],
+			)?;
+			let found = this.append_block("find_present");
+			let next = this.append_block("find_next");
+			this.builder
+				.build_conditional_branch(holds.int(), found, next)?;
+			this.builder.position_at_end(found);
+			this.builder.build_store(result, slot.pointer)?;
+			this.builder.build_unconditional_branch(end)?;
+			this.builder.position_at_end(next);
+			Ok(())
+		})?;
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(end);
+		let result = self
+			.builder
+			.build_load(self.pointer_type(), result, "")?
+			.into_pointer_value();
+		Ok((result, item))
+	}
+
 	pub(crate) fn array_method(
 		&mut self,
 		node: NodeId,
@@ -989,6 +1047,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return Ok(value);
 			}
 			values.push(value);
+		}
+		if path == "Array#find"
+			&& let ([callback], [callback_node]) = (values.as_slice(), arguments)
+		{
+			let (pointer, item) =
+				self.array_find_pointer(array, *callback, *callback_node, node)?;
+			return self.optional_element(pointer, item, node);
 		}
 		if let Repr::Growing(item_type) = array.repr {
 			match (path, values.as_slice()) {
@@ -1772,17 +1837,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder.build_store(length_pointer, kept)?;
 				Ok(Val::void())
 			}
-			("Array#find" | "Array#some" | "Array#every", [callback]) => {
-				let repr = self.collection_optional_repr(self.node_repr(node)?, item);
+			("Array#some" | "Array#every", [callback]) => {
+				let repr = self.node_repr(node)?;
 				let result = self.alloca(repr, "found")?;
-				let initial = match path {
-					"Array#every" => {
-						Val::new(Repr::Bool, self.context.bool_type().const_int(1, false))
-					}
-					"Array#some" => Val::new(Repr::Bool, self.context.bool_type().const_zero()),
-					_ => Val::none(),
-				};
-				let initial = self.convert(initial, repr, node.index())?;
+				let every = path == "Array#every";
+				let initial = Val::new(
+					Repr::Bool,
+					self.context.bool_type().const_int(u64::from(every), false),
+				);
 				self.builder
 					.build_store(result.pointer, initial.value.expect("a value"))?;
 				let (_, length) = self.array_parts(array)?;
@@ -1790,7 +1852,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let callback_node = arguments[0];
 				self.for_each_index(length, |this, index| {
 					let slot = this.array_item_slot(array, item, index)?;
-					let value = this.load(slot)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
 					let holds = this.call_collection_callback(
 						*callback,
@@ -1808,15 +1869,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					};
 					this.builder.build_conditional_branch(stop, found, next)?;
 					this.builder.position_at_end(found);
-					let answer = match path {
-						"Array#every" => {
-							Val::new(Repr::Bool, this.context.bool_type().const_zero())
-						}
-						"Array#some" => {
-							Val::new(Repr::Bool, this.context.bool_type().const_int(1, false))
-						}
-						_ => this.convert(value, repr, node.index())?,
-					};
+					let answer = Val::new(
+						Repr::Bool,
+						this.context.bool_type().const_int(u64::from(!every), false),
+					);
 					this.builder
 						.build_store(result.pointer, answer.value.expect("a value"))?;
 					this.builder.build_unconditional_branch(end)?;

@@ -398,7 +398,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The given arguments of a call, in order.
-	fn given_arguments(info: &CallInfo) -> Vec<NodeId> {
+	pub(super) fn given_arguments(info: &CallInfo) -> Vec<NodeId> {
 		info.arguments
 			.iter()
 			.filter_map(|argument| match argument {

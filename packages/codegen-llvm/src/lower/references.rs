@@ -426,6 +426,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// whether it may be null: `pool.add(…)`, `pool.find(…)` (pools.rs),
 	/// `map.get(key)` (tables.rs).
 	fn collection_reference(&mut self, value: NodeId) -> Result<Option<(Slot<'ctx>, bool)>, Error> {
+		let mut value = value;
+		while let View::Group(inner) | View::Try(inner) = self.view(value) {
+			value = inner;
+		}
+		if let Some(info) = self.analysis.call(value).cloned()
+			&& let fa_analyzer::analysis::Callee::Builtin(id) = info.callee
+			&& fa_analyzer::builtins::get(id).path == "Array#find"
+		{
+			let collection = self.receiver(value)?;
+			let arguments = Self::given_arguments(&info);
+			let [callback] = arguments.as_slice() else {
+				return Err(self.unsupported(value.index(), "this find callback"));
+			};
+			let function = self.expr(*callback)?;
+			let (pointer, repr) =
+				self.array_find_pointer(collection, function, *callback, value)?;
+			return Ok(Some((Slot { pointer, repr }, true)));
+		}
 		if let Some(found) = self.pool_reference(value)? {
 			return Ok(Some(found));
 		}

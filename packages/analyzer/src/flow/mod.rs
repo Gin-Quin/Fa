@@ -22,6 +22,9 @@ use crate::types::int::Interval;
 pub use facts::{Fact, FactStore, IntervalSet, MAX_EXCLUDED};
 pub use map::FactMap;
 
+/// A slot's incoming expression sources; None means an unknown value.
+pub type CallableSources = SmallVec<[Option<NodeId>; 1]>;
+
 /// Where a place starts.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum PlaceRoot {
@@ -234,6 +237,8 @@ pub struct FlowState {
 	/// task, a resource), with the moving node: the local can't be used as
 	/// a whole, nor the field, until the field is assigned again (`MEM002`).
 	pub moved_fields: SmallVec<[(PlaceId, NodeId); 1]>,
+	/// Evaluation-time function-slot sources, joined with the other flow facts.
+	pub callable_values: SmallVec<[(PlaceId, CallableSources); 2]>,
 	/// The kept tasks that may still run (their `start` nodes): they
 	/// borrow what they use until they end (`check/tasks.rs`).
 	pub tasks: SmallVec<[NodeId; 1]>,
@@ -263,6 +268,7 @@ impl FlowState {
 			time: 0,
 			consumed: SmallVec::new(),
 			moved_fields: SmallVec::new(),
+			callable_values: SmallVec::new(),
 			tasks: SmallVec::new(),
 			cancelled: SmallVec::new(),
 		}
@@ -441,6 +447,30 @@ impl FlowState {
 			}
 		}
 		joined.tasks = self.tasks.clone();
+		joined.callable_values = self.callable_values.clone();
+		for (place, sources) in &other.callable_values {
+			if let Some((_, known)) = joined.callable_values.iter_mut().find(|(p, _)| p == place) {
+				for source in sources {
+					if !known.contains(source) {
+						known.push(*source);
+					}
+				}
+			} else {
+				let mut sources = sources.clone();
+				sources.push(None);
+				joined.callable_values.push((*place, sources));
+			}
+		}
+		for (place, sources) in &mut joined.callable_values {
+			if !other.callable_values.iter().any(|(p, _)| p == place) && !sources.contains(&None) {
+				sources.push(None);
+			}
+			sources.sort_unstable();
+			sources.dedup();
+		}
+		joined
+			.callable_values
+			.sort_unstable_by_key(|(place, _)| *place);
 		for &task in &other.tasks {
 			if !joined.tasks.contains(&task) {
 				joined.tasks.push(task);

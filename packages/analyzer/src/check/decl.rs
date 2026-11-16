@@ -512,6 +512,8 @@ impl Walker<'_> {
 		if let (Some(symbol), Some(value)) = (self.a.symbols.symbol_of_decl(n), value) {
 			self.reset_consumed(symbol);
 			self.bind_value(symbol, value);
+			let place = self.places.symbol(symbol);
+			self.bind_callable_source(place, self.a.symbols.symbol(symbol).ty, value);
 			// a member of a named union: known to hold it (unions.md)
 			let declared = self.a.symbols.symbol(symbol).ty;
 			if self.body.flow.reachable
@@ -660,6 +662,11 @@ impl Walker<'_> {
 		self.escape(value, n);
 		self.note_copy_site(value);
 		// flow: the value's facts replace the place's (numbers.rs)
+		if place.assignable
+			&& let Some(target) = self.place_of(target)
+		{
+			self.bind_callable_source(target, place.ty, value);
+		}
 		if let Some(symbol) = place.symbol.filter(|_| place.assignable && !place.below) {
 			self.assign_value(symbol, value);
 		}

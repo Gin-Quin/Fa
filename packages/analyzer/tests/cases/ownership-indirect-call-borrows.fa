@@ -1,0 +1,27 @@
+-- prints: 2 2
+-- prints: 1 1
+
+type Reader = () => Integer
+function zero = (): Integer => 0
+
+function independent = (): Integer => {
+	let items = [1]
+	function read = (): Integer => items.length
+	let invoke = read
+	let moved = copy items
+	invoke() + moved.length
+}
+
+function replaced = (): Integer => {
+	let items = [1]
+	function read = (): Integer => items.length
+	mutable invoke: Reader = read
+	invoke = zero
+	let moved = items
+	invoke() + moved.length
+}
+
+static independentResult = @independent()
+static replacedResult = @replaced()
+console.log(independentResult, independent())
+console.log(replacedResult, replaced())

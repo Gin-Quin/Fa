@@ -18,6 +18,7 @@
 
 pub(crate) mod arrays;
 mod c_library;
+mod callable_values;
 mod callbacks;
 mod calls;
 mod collections;
@@ -464,6 +465,7 @@ pub struct Walker<'s> {
 	/// The locals captured by a local function used as a value (`let call =
 	/// show`): read whenever it is called, never moved (`moves.rs`).
 	pub(crate) pinned_captures: rustc_hash::FxHashSet<SymbolId>,
+	pub(crate) callable_reads: callable_values::CallableReads,
 	/// The effects written in each function's signature, by lambda node.
 	pub(crate) declared_effect_sets: FxHashMap<NodeId, crate::ids::EffectSetId>,
 	/// The captured locals each closure writes, with the write (by lambda
@@ -649,6 +651,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		lambda_call_writes: None,
 		callee_name_node: None,
 		pinned_captures: rustc_hash::FxHashSet::default(),
+		callable_reads: FxHashMap::default(),
 		parallel: Vec::new(),
 		parallel_callbacks: rustc_hash::FxHashSet::default(),
 		parallel_views: Vec::new(),
@@ -955,6 +958,7 @@ impl Walker<'_> {
 			// the code after a `Never` expression is unreachable
 			self.body.flow.set_unreachable();
 		}
+		self.record_callable_read(n, ty);
 		ty
 	}
 

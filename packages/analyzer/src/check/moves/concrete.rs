@@ -248,53 +248,62 @@ impl Walker<'_> {
 		loop {
 			let mut changed = false;
 			for (call, info) in &calls {
-				let Callee::Function(function) = info.callee else {
-					continue;
-				};
-				let Some(callee) = self.a.functions.get(&function) else {
-					continue;
-				};
-				let callee = callee.clone();
-				let mut places = free.get(&callee.lambda).cloned().unwrap_or_default();
-				let mut bindings = FxHashMap::default();
-				for (param, argument) in callee.params.iter().zip(&info.arguments) {
-					let argument_places = match *argument {
-						Argument::Given(value) | Argument::Receiver(value) => {
-							self.ownership_result_places(value)
-						}
-						Argument::Default => {
-							if let Some(default) = param.default {
-								for &place in free.get(&default).into_iter().flatten() {
-									places
-										.extend(self.substitute_argument_places(place, &bindings));
-								}
-								self.ownership_result_places(default)
-									.into_iter()
-									.flat_map(|place| {
-										self.substitute_argument_places(place, &bindings)
-									})
-									.collect()
-							} else {
-								Vec::new()
-							}
-						}
+				let functions = match info.callee {
+					Callee::Function(function) => vec![function],
+					Callee::Value => match self.view(*call) {
+						View::Call { callee, .. } => self.callable_targets(callee),
 						_ => Vec::new(),
-					};
-					bindings.insert(param.symbol, argument_places);
-				}
-				let body = self.ownership_read_context(*call, &defaults);
-				for &place in &places {
-					let Some(symbol) = self.place_symbol(place) else {
+					},
+					_ => Vec::new(),
+				};
+				for function in functions {
+					let Some(callee) = self.a.functions.get(&function) else {
 						continue;
 					};
-					if self
-						.ownership_read_context(self.a.symbols.symbol(symbol).decl_node, &defaults)
-						!= body
-					{
-						changed |= free.entry(body).or_default().insert(place);
+					let callee = callee.clone();
+					let mut places = free.get(&callee.lambda).cloned().unwrap_or_default();
+					let mut bindings = FxHashMap::default();
+					for (param, argument) in callee.params.iter().zip(&info.arguments) {
+						let argument_places = match *argument {
+							Argument::Given(value) | Argument::Receiver(value) => {
+								self.ownership_result_places(value)
+							}
+							Argument::Default => {
+								if let Some(default) = param.default {
+									for &place in free.get(&default).into_iter().flatten() {
+										places.extend(
+											self.substitute_argument_places(place, &bindings),
+										);
+									}
+									self.ownership_result_places(default)
+										.into_iter()
+										.flat_map(|place| {
+											self.substitute_argument_places(place, &bindings)
+										})
+										.collect()
+								} else {
+									Vec::new()
+								}
+							}
+							_ => Vec::new(),
+						};
+						bindings.insert(param.symbol, argument_places);
 					}
+					let body = self.ownership_read_context(*call, &defaults);
+					for &place in &places {
+						let Some(symbol) = self.place_symbol(place) else {
+							continue;
+						};
+						if self.ownership_read_context(
+							self.a.symbols.symbol(symbol).decl_node,
+							&defaults,
+						) != body
+						{
+							changed |= free.entry(body).or_default().insert(place);
+						}
+					}
+					self.observe_places(*call, places, &mut reads);
 				}
-				self.observe_places(*call, places, &mut reads);
 			}
 			if !changed {
 				break;

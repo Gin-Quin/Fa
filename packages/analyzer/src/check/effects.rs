@@ -480,6 +480,12 @@ impl Walker<'_> {
 	/// length of the collection whose `.length`/`.size` it is, the
 	/// relations `i < c.length` to a collection at or below it.
 	pub(crate) fn drop_place_facts(&mut self, place: PlaceId) {
+		for (known, sources) in &mut self.body.flow.callable_values {
+			if self.places.is_at_or_below(*known, place) {
+				sources.clear();
+				sources.push(None);
+			}
+		}
 		let entry = self.places.get(place);
 		let target = match (entry.step, entry.parent) {
 			(Some(Step::Length | Step::Size), Some(parent)) => parent,

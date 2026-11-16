@@ -14,6 +14,12 @@ pub struct StoreProjection {
 
 impl TypeStore {
 	pub fn store_projection(&mut self, actual: TypeId, target: TypeId) -> StoreProjection {
+		if actual.is_unset() || target.is_unset() {
+			return StoreProjection {
+				ownership: Ownership::Unresolved,
+				erased_owner: None,
+			};
+		}
 		let mut pending = vec![(actual, target, false)];
 		let mut seen = FxHashSet::default();
 		let mut active = FxHashSet::default();

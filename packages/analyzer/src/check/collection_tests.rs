@@ -35,7 +35,7 @@ fn list_literals_take_the_expected_collection() {
 }
 
 #[test]
-fn set_elements_and_map_keys_need_equality_and_are_exact() {
+fn collections_need_comparable_keys_and_explicit_item_conversions() {
 	assert_eq!(
 		codes("type Handler = { run: () => Void }\nlet hs: Set<Handler> = []\n"),
 		["CL020"]
@@ -44,19 +44,25 @@ fn set_elements_and_map_keys_need_equality_and_are_exact() {
 	// map values may be anything
 	assert!(codes("let m: Map<String, () => Void> = []\n").is_empty());
 	let types = "type Human = { name: String }\ntype Hero = { name: String, power: String }\n";
-	assert_eq!(
-		codes(&format!(
-			"{types}function f = (s: Set<Human>) => s.size\nlet heroes: Set<Hero> = []\nf(heroes)\n"
-		)),
-		["CL010"]
-	);
-	// map values follow the general rule: a read-only view of supersets
-	assert!(
-		codes(&format!(
-			"{types}function f = (m: Map<String, Human>) => m.size\nlet heroes: Map<String, Hero> = []\nf(heroes)\n"
-		))
-		.is_empty()
-	);
+	for collection in ["Set", "Map<String,"] {
+		let (source, target) = if collection == "Set" {
+			("Set<Hero>", "Set<Human>")
+		} else {
+			("Map<String, Hero>", "Map<String, Human>")
+		};
+		assert_eq!(
+			codes(&format!(
+				"{types}function f = (items: {target}) => items.size\nlet heroes: {source} = []\nf(heroes)\n"
+			)),
+			["MEM004"]
+		);
+		analyzed(&format!(
+			"{types}function f = (items: {target}) => items.size\nlet heroes: {source} = []\nf(copy heroes)\n"
+		));
+	}
+	analyzed(&format!(
+		"{types}function f = <Item: Human>(items: Map<String, Item>) => items.size\nlet heroes: Map<String, Hero> = []\nf(heroes)\n"
+	));
 	assert_eq!(codes("let s: Set = []\n"), ["TY003"]);
 	assert_eq!(codes("let m: Map<String> = []\n"), ["TY003"]);
 }

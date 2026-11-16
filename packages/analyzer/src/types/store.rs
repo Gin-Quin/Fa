@@ -803,7 +803,11 @@ impl TypeStore {
 			}
 			match self.kind(ty) {
 				TypeKind::Object(_) if self.is_resource(ty) => roots.push(ty),
-				TypeKind::Sync(..) | TypeKind::Subscription if self.is_unique(ty) => roots.push(ty),
+				TypeKind::Sync(..) | TypeKind::Subscription | TypeKind::Task(..)
+					if self.is_unique(ty) =>
+				{
+					roots.push(ty)
+				}
 				TypeKind::Rec(_) => pending.extend(self.rec_target(ty)),
 				TypeKind::Union(list) => pending.extend(self.list_items(list)),
 				TypeKind::Member(nominal, index) => pending.push(self.payload(nominal, index)),
@@ -837,6 +841,7 @@ impl TypeStore {
 				.any(|&target| match (self.kind(actual), self.kind(target)) {
 					(TypeKind::Sync(actual, _), TypeKind::Sync(target, _)) => actual == target,
 					(TypeKind::Subscription, TypeKind::Subscription) => true,
+					(TypeKind::Task(..), TypeKind::Task(..)) => true,
 					_ => false,
 				})
 		})

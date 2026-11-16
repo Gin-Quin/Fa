@@ -257,17 +257,26 @@ impl TypeStore {
 				if kind_a != kind_b {
 					return Err(Reason::Mismatch);
 				}
-				// set elements and map keys are exact (CL010); other items are views
-				let item_mode = if matches!(
-					kind_a,
-					crate::types::CollKind::Set | crate::types::CollKind::GrowingSet
-				) {
-					Mode::Exact
+				if mode != Mode::Copy
+					&& (!self.same_structure_item(item_a, item_b)
+						|| !self.same_structure_item(key_a, key_b))
+				{
+					return Err(Reason::Storage);
+				}
+				let parts = if mode == Mode::Copy {
+					Mode::Copy
 				} else {
 					Mode::View
 				};
-				self.assignable(key_a, key_b, Mode::Exact)?;
-				self.assignable(item_a, item_b, item_mode)
+				let part_reason = |reason| {
+					if reason == Reason::Range {
+						Reason::Field
+					} else {
+						reason
+					}
+				};
+				self.assignable(key_a, key_b, parts).map_err(part_reason)?;
+				self.assignable(item_a, item_b, parts).map_err(part_reason)
 			}
 			(K::Function(a), K::Function(b)) => self.relate_functions(a, b),
 			(K::Ref(target_a, path_a), K::Ref(target_b, path_b)) if path_a == path_b => {
@@ -583,7 +592,7 @@ mod tests {
 	}
 
 	#[test]
-	fn integer_and_int64_are_assignable_as_scalars_only() {
+	fn collection_item_changes_require_a_copy_relation() {
 		let mut store = TypeStore::new();
 		assert!(ok(&mut store, TypeId::INTEGER, TypeId::INT64));
 		assert!(ok(&mut store, TypeId::INT64, TypeId::INTEGER));
@@ -594,10 +603,7 @@ mod tests {
 			store.assignable(integers, int64s, Mode::Read),
 			Err(Reason::Storage)
 		);
-		assert_eq!(
-			store.assignable(int64s, integers, Mode::Copy),
-			Err(Reason::Storage)
-		);
+		assert_eq!(store.assignable(int64s, integers, Mode::Copy), Ok(()));
 		assert!(!ok(&mut store, int8s, integers));
 		// a ranged refinement with the same storage is a valid view
 		let naturals = {

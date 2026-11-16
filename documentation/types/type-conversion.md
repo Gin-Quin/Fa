@@ -6,6 +6,8 @@ Fa never converts a value to another kind of value behind your back. There are t
 - **the conversion cannot fail**: it is an explicit call, like `Float(count)`,
 - **the conversion can fail**: it is a function that declares its error with `throws`, like `Integer.parse("42")`.
 
+Changing the inside of an existing structure is an explicit `copy` in its expected type, as described below.
+
 `as` never converts a value: it only gives a name, when [destructuring](/operations/destructuring) or in a `when` branch.
 
 ## Structural assignment
@@ -61,6 +63,50 @@ type Animal = { name: String }
 let animal = Animal { name = "Zeus" }
 let human: Human = animal -- valid: Human and Animal are the same type
 ```
+
+## Converting the inside of a structure
+
+An implicit conversion never converts the inside of a [structure](/advanced/memory-management#structures). Changing a collection's item type, a field within its items, or a recursive part builds a new structure by converting every part. Write `copy value` in the expected type, even at the source's last use and even when passing an argument to a borrowed parameter (`MEM004` otherwise):
+
+```fa
+let small: Array<Int8> = [1, 2]
+let invalid: Array<Integer> = small -- error: MEM004: the items are stored differently; write copy small
+let wide: Array<Integer> = copy small
+function read = (items: Array<Integer>) => console.log(items)
+read(copy small)
+```
+
+```fa
+type Small = { value: Int8, next: Small? }
+type Wide = { value: Integer, next: Wide? }
+let small = Small { value = 1, next = Small { value = 2 } }
+let invalid: Wide = small -- error: MEM004: the conversion walks the whole value
+let wide: Wide = copy small
+console.log(wide.value)
+```
+
+Item types are invariant for implicit conversions with one exception: literal and range widening within the same primitive type. `Array<1 | 2>` and `Array<Integer<min = 0, max = 10>>` can be moved or borrowed as `Array<Integer>`; `Array<"a" | "b">` as `Array<String>`; a boolean literal as `Boolean`. A literal or range has its primitive type's storage. This exception never copies items.
+
+```fa
+let exact: Array<1 | 2> = [1, 2]
+function read = (items: Array<Integer>) => console.log(items)
+read(exact) -- borrows; no item conversion
+let wide: Array<Integer> = exact -- moves
+```
+
+Every other change requires `copy`: another numeric type, adding a union alternative or optionality, projecting an item's fields, or a different recursive type. For example, `Array<Int8>` to `Array<Int8 | String>`, `Array<Integer>` to `Array<Integer?>`, and `Array<Person>` to `Array<{ name: String }>` all construct new item storage. A copy does not introduce arbitrary numeric or fallible conversions: use explicit conversion calls in `map` when the source values do not already satisfy the destination type.
+
+A generic parameter preserves the argument's actual item type and borrows without conversion:
+
+```fa
+function logNames = <Item: { name: String }>(items: Array<Item>) => {
+	for item in items { console.log(item.name) }
+}
+let people = [{ name = "Ana", age = 30 }]
+logNames(people)
+```
+
+The rule is the same on every target. It does not depend on whether a particular JavaScript conversion could reuse the existing representation. A compiler may fuse an explicit copy with destruction of a last-use source.
 
 ## Optionals
 
@@ -139,14 +185,14 @@ let byte: Byte = readNumber() -- error: an Integer may not fit in a Byte, conver
 
 A `BigInt` converts the same way: `Integer(big)` and `Int8(big)` throw `ArithmeticError` unless the compiler proves that the value fits.
 
-`Integer` has the range and the storage of `Int64`, and the two convert implicitly as values. They are still two types: on JavaScript, an `Integer` is a number and an `Int64` a `BigInt`, so a collection of one is not a collection of the other. Convert the elements explicitly:
+`Integer` has the range and the storage of `Int64`, and the two convert implicitly as values. They remain different primitive types, so converting between their collection types requires `copy`:
 
 ```fa
 function total = (values: Array<Integer>): Integer => values.sum()
 
 let counters: Array<Int64> = [1, 2, 3]
-total(counters) -- error: an `Array<Int64>` is not an `Array<Integer>`
-total(counters.map((value) => Integer(value))) -- valid
+total(counters) -- error: MEM004: write copy counters
+total(copy counters) -- builds independent Integer items
 ```
 
 ### Percentages
@@ -239,7 +285,8 @@ See [creating collections](/collections/arrays#creating-collections).
 | More fields to fewer, stored | extra fields dropped; structures move or require explicit `copy` | no |
 | More fields to fewer, referenced | implicit: narrowed view with `use` | no |
 | Object literal with an extra field | none: compile error | compile error |
-| Collection of supersets to a parameter | implicit, if the parameter is not `mutates`; otherwise a generic function. Never for `Set` elements and `Map` keys | compile error if `mutates` |
+| Changing a structure's items or recursive parts | `copy value` in the expected type; a generic parameter can preserve the actual item type | `MEM004` without `copy` |
+| Literal/range item widening within one primitive type | implicit move or borrow; no item conversion | no |
 | `T` to `T?` | implicit | no |
 | `T?` to `T` | narrowing with `is none`, or `??` | no |
 | Literal to a number type | adapts to the expected type | no |
@@ -248,7 +295,7 @@ See [creating collections](/collections/arrays#creating-collections).
 | Between kinds of numbers | explicit call: `Float(x)` | no, except `Integer(bigInt)`: `throws ArithmeticError` |
 | `Float32` to `Float` | implicit | no |
 | `Float` to `Float32` | explicit call: `Float32(x)` | no: rounds |
-| `Int64` and `Integer` | implicit, for values; `map` for collections | no |
+| `Int64` and `Integer` | implicit for values; `copy` for collections | no |
 | `Percentage` to `Float` | explicit call: `Float(50%)` | no |
 | Value to string | interpolation or `.toString()` | no |
 | String to number or enumeration | `Integer.parse`, `Color.parse` | yes: `throws ParseError` |

@@ -188,10 +188,10 @@ humans.push(superHuman) -- a copy: the stored Human has no `powers`
 let copiedHumans: Array<Human> = copy superHumans -- copies every element, without `powers`
 ```
 
-A collection of supersets can be passed to a function that only reads it:
+Changing an existing collection’s item type requires `copy`, including for a read-only parameter. A generic function preserves the actual type and borrows it:
 
 ```fa
-function logNames = (humans: Array<Human>) => {
+function logNames = <Item: Human>(humans: Array<Item>) => {
 	for human in humans {
 		console.log(human.name)
 	}
@@ -200,11 +200,11 @@ function logNames = (humans: Array<Human>) => {
 logNames(superHumans) -- valid: no copy, no truncation
 ```
 
-The elements of a `Set` and the keys of a `Map` are the exception: they are placed by their hash and compared with `==`, which depend on all of their fields. A `Set<Hero>` is never a `Set<Human>`, and a `Map<Hero, Integer>` is never a `Map<Human, Integer>`, even when they are only read. For the same reason, a reference to a `Set` element or a `Map` key is read-only (see [reference checking](/advanced/reference-checking#use-and-mutable-use)). The values of a `Map` follow the general rule.
+This invariant applies to every collection, including `Set` items, `Map` keys and values. Literal/range widening within one primitive type is the only exception; see [item conversions](/types/type-conversion#converting-the-inside-of-a-structure). Set items and map keys are placed by their standard hash and equality; changing their type with an explicit copy rebuilds that placement. A reference to a set item or map key remains read-only (see [reference checking](/advanced/reference-checking#use-and-mutable-use)).
 
 Comparing two values with `==` compares the fields of their declared type: two `Human` parameters are equal when their `name` is, whatever the arguments hold beyond it.
 
-A function that mutates the collection can't receive a collection of supersets: it could add a `Human`, which has no `powers`, to an `Array<SuperHuman>`. Make the function generic instead. Its element type is then the full type of the argument, and only values of that type can be added:
+A function that mutates the collection also preserves its actual item type: otherwise it could add a `Human`, which has no `powers`, to an `Array<SuperHuman>`. Make the function generic instead. Its element type is then the full type of the argument, and only values of that type can be added:
 
 ```fa
 function addJohn = (humans: Array<Human>) mutates humans => {

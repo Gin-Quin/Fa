@@ -1132,6 +1132,7 @@ impl Walker<'_> {
 		match self.s.types.assignable(actual, target, Mode::Copy) {
 			Ok(()) => {
 				self.check_function_projection_owner(n, actual, target);
+				self.check_structure_conversion(n, actual, target);
 				// a `Character` stored as a `String` is converted
 				if self.s.types.kind(actual) == TypeKind::Character
 					&& self.s.types.kind(target) == TypeKind::String

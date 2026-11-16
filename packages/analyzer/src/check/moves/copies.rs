@@ -12,6 +12,70 @@ use crate::syntax::View;
 use crate::types::{Ownership, TypeKind};
 
 impl Walker<'_> {
+	pub(crate) fn check_structure_conversion(
+		&mut self,
+		value: NodeId,
+		actual: crate::ids::TypeId,
+		target: crate::ids::TypeId,
+	) {
+		let Some((source_item, target_item)) = self.s.types.structure_conversion(actual, target)
+		else {
+			return;
+		};
+		self.a.coercions.insert(value, target);
+		let mut parent = self.parent(value);
+		while let Some(node) = parent {
+			match self.view(node) {
+				View::Copy(_) => return,
+				View::Lambda { .. } | View::Test { .. } | View::Watch(_) => break,
+				View::Do(_)
+					if self
+						.parent(node)
+						.is_some_and(|parent| matches!(self.view(parent), View::Start(_))) =>
+				{
+					break;
+				}
+				_ => parent = self.parent(node),
+			}
+		}
+		if self
+			.s
+			.types
+			.store_projection(actual, target)
+			.erased_owner
+			.is_some()
+		{
+			self.report_projection_erasure(value, actual, target);
+			return;
+		}
+		if self.output.iter().any(|diagnostic| {
+			diagnostic.code.id == MEM004.id && diagnostic.location.span == self.span(value)
+		}) {
+			return;
+		}
+		let source = self.tree.text(value.index());
+		let generic = if self.view_sink {
+			if let TypeKind::Collection(crate::types::CollKind::Array, item, _) =
+				self.s.types.kind(target)
+			{
+				format!(
+					"; preserve the parameter's actual item type with `<Item: {}>(items: Array<Item>)`",
+					self.display(item)
+				)
+			} else {
+				"; make the parameter generic over the actual type to avoid converting its structure".to_string()
+			}
+		} else {
+			String::new()
+		};
+		let diagnostic = self.diagnostic(&MEM004, value, format!("converting `{source}` from `{}` to `{}` changes items or recursive parts from `{}` to `{}`: the items are stored differently and the conversion walks the whole value; write `copy {source}`, even at its last use{generic}", self.display(actual), self.display(target), self.display(source_item), self.display(target_item)))
+			.with_fix(Fix { title: format!("Convert every part with `copy {source}`"), edits: vec![TextEdit {
+				location: Location { file: self.file, span: SourceSpan::new(self.span(value).start, self.span(value).start) },
+				replacement: "copy ".into(),
+			}] });
+		self.report_flow(diagnostic);
+	}
+
 	/// Widening the destination cannot introduce owned data that the
 	/// source does not have. Structural projection checks retained fields.
 	pub(crate) fn store_ownership(&mut self, value: NodeId) -> Ownership {
@@ -54,6 +118,11 @@ impl Walker<'_> {
 				continue;
 			}
 			if !self.copy_reads_place(value) {
+				continue;
+			}
+			if self.output.iter().any(|diagnostic| {
+				diagnostic.code.id == MEM004.id && diagnostic.location.span == self.span(value)
+			}) {
 				continue;
 			}
 			let category = self.store_ownership(value);
@@ -426,5 +495,74 @@ mod tests {
 		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
 		assert_eq!(diagnostics[0].code.id, "MEM002", "{diagnostics:?}");
 		assert!(diagnostics[0].message.contains("function body"));
+	}
+
+	#[test]
+	fn converting_array_items_is_explicit_even_at_the_last_use() {
+		for suffix in [
+			"let wide: Array<Integer> = small\nconsole.log(wide)",
+			"function read = (items: Array<Integer>) => console.log(items)\nread(small)",
+		] {
+			let source = format!("let small: Array<Int8> = [1, 2]\n{suffix}\n");
+			let (session, file) = crate::analyze_source(&source);
+			let diagnostics = session.diagnostics(file);
+			assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+			assert_eq!(diagnostics[0].code.id, "MEM004");
+			assert!(diagnostics[0].message.contains("walks the whole value"));
+			let edit = &diagnostics[0].fixes[0].edits[0];
+			let mut fixed = source.clone();
+			fixed.insert_str(edit.location.span.start as usize, &edit.replacement);
+			analyzed(&fixed);
+		}
+	}
+
+	#[test]
+	fn widening_primitive_ranges_and_literals_does_not_convert_items() {
+		analyzed(
+			"let exact: Array<1 | 2> = [1, 2]\nfunction read = (items: Array<Integer>) => console.log(items)\nread(exact)\nlet wide: Array<Integer> = exact\nconsole.log(wide)\n",
+		);
+		analyzed(
+			"let exact: Array<\"a\" | \"b\"> = [\"a\", \"b\"]\nfunction read = (items: Array<String>) => console.log(items)\nread(exact)\nlet wide: Array<String> = exact\nconsole.log(wide)\n",
+		);
+		analyzed(
+			"let exact: Array<\"a\"> = [\"a\"]\nlet wider: Array<\"a\" | \"b\"> = exact\nconsole.log(wider)\n",
+		);
+	}
+
+	#[test]
+	fn adding_optionality_or_union_alternatives_changes_item_storage() {
+		for target in ["Integer?", "Integer | String"] {
+			assert_eq!(
+				codes(&format!(
+					"let items = [1, 2]\nlet other: Array<{target}> = items\nconsole.log(other)\n"
+				)),
+				["MEM004"]
+			);
+			analyzed(&format!(
+				"let items = [1, 2]\nlet other: Array<{target}> = copy items\nconsole.log(other)\n"
+			));
+		}
+	}
+
+	#[test]
+	fn a_different_recursive_type_requires_a_converting_copy() {
+		let declarations = "type Small = { value: Int8, next: Small? }\ntype Wide = { value: Integer, next: Wide? }\nlet small = Small { value = 1, next = Small { value = 2 } }\n";
+		assert_eq!(
+			codes(&format!(
+				"{declarations}let wide: Wide = small\nconsole.log(wide.value)\n"
+			)),
+			["MEM004"]
+		);
+		analyzed(&format!(
+			"{declarations}let wide: Wide = copy small\nconsole.log(wide.value)\n"
+		));
+	}
+
+	#[test]
+	fn copying_does_not_make_a_fallible_item_narrowing_implicit() {
+		assert_eq!(
+			codes("function narrow = (items: Array<Integer>): Array<Int8> => copy items\n"),
+			["E-TYPE-1"]
+		);
 	}
 }

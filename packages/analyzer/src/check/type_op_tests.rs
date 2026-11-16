@@ -66,7 +66,7 @@ fn recursion_needs_an_indirection_and_its_own_parameters() {
 fn recursive_types_are_compared_coinductively() {
 	assert!(
 		codes(
-			"type Node = { value: String, child: Node? }\ntype Link = { value: String, child: Link? }\nlet node = Node { value = \"a\", child = none }\nlet link: Link = node\n"
+			"type Node = { value: String, child: Node? }\ntype Link = { value: String, child: Link? }\nlet node = Node { value = \"a\", child = none }\nlet link: Link = copy node\n"
 		)
 		.is_empty()
 	);

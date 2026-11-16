@@ -174,6 +174,31 @@ console.log(scores) -- [10, 20, 30]
 
 Adding or removing items of an array while iterating over it is a compile error. See [loops](/control-flow/loops#loop-variables-are-references).
 
+## Changing the item type
+
+An array's item type is invariant for implicit conversions. Changing it builds a new array and requires `copy` in the expected type (`MEM004` otherwise), even at last use or for a borrowed argument:
+
+```fa
+let small: Array<Int8> = [1, 2]
+let invalid: Array<Integer> = small -- error: MEM004: write copy small
+let wide: Array<Integer> = copy small
+function read = (items: Array<Integer>) => console.log(items)
+read(copy small)
+```
+
+The only exception is literal and range widening within one primitive type; those types have the primitive's storage:
+
+```fa
+let exact: Array<1 | 2> = [1, 2]
+function read = (items: Array<Integer>) => console.log(items)
+read(exact) -- borrows
+let wide: Array<Integer> = exact -- moves
+```
+
+The same exception covers `Array<Integer<min = 0, max = 10>>` to `Array<Integer>`, `Array<"a" | "b">` to `Array<String>`, and boolean literals to `Boolean`. Another numeric type, adding a union alternative or optionality, or projecting an item's fields requires `copy`: for example `Array<Int8>` to `Array<Int8 | String>`, `Array<Integer>` to `Array<Integer?>`, and `Array<Person>` to `Array<{ name: String }>`.
+
+A generic signature `<Item: { name: String }>(items: Array<Item>)` preserves the actual item type and borrows without a conversion. The rule is identical on every target. See [type conversion](/types/type-conversion#converting-the-inside-of-a-structure).
+
 ## Slicing and copying
 
 Assigning an existing array moves it at last use. To keep both arrays, write `let duplicate = copy original`. This is the general structure rule, including recursive values and elements owning structures. `get`, indexing and iteration borrow elements; storing a borrowed structure element requires `copy`. See [memory management](/advanced/memory-management).

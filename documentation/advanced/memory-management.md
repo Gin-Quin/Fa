@@ -70,7 +70,7 @@ A copy preserves contents, not spare capacity. Reserve the destination separatel
 
 ### Explicit `copy`
 
-`copy expression` evaluates its operand once and produces a fresh, independent value of the operand's type. An expected type can narrow the stored result, as for any assignment. It is a value, never an assignable place or an alias. For a plain data record, an expected-type projection copies only its retained fields; omitted fields stay with the source. A retained unique field makes the copy illegal. A resource or built-in lifetime owner always needs a written data projection first: `copy resource` is `MEM003`, even with a plain expected type. It recursively copies owned data, including collections and recursive children; shared handles remain shared. It accepts ordinary values too. It cannot duplicate a Task, a resource or any owned composite containing one (`MEM003`).
+`copy expression` evaluates its operand once and produces a fresh, independent value in the expected type, or the operand's type when none is written. It is a value, never an assignable place or an alias. For a plain data record, an expected-type projection copies only its retained fields; omitted fields stay with the source. A retained unique field makes the copy illegal. A resource or built-in lifetime owner always needs a written data projection first: `copy resource` is `MEM003`, even with a plain expected type. It recursively copies owned data, including collections and recursive children; shared handles remain shared. It accepts ordinary values too. It cannot duplicate a Task, a resource or any owned composite containing one (`MEM003`).
 
 Access, indexing and calls bind more tightly than `copy`; arithmetic binds less tightly: `copy source.items + other` means `(copy source.items) + other`. Parenthesize a larger operand: `copy (left ?? right)`. `copy` is reserved, like `await`: `copy(x)` copies the parenthesized expression, `copy [1, 2]` and `copy[0]` copy array literals, and `copy -x` copies the negated value. Whitespace does not change its meaning; a newline may follow it. A variable, parameter, function or type cannot be named `copy` (`E-LEX-3`: “`copy` is reserved: it copies a value (`copy items`); choose another name”). After a dot it is accepted as a member name, just like `await`: `object.copy(value)` calls that member.
 
@@ -262,6 +262,33 @@ console.log(plain)
 ```
 
 Borrowing a narrower view does not truncate its owner. See [structural typing](/advanced/structural-typing#copying-narrows-referencing-does-not).
+
+### Converting structures
+
+An implicit conversion never converts the inside of a structure. Its item type is invariant, except literal and range widening within one primitive type: `Array<1 | 2>` or `Array<Integer<min = 0, max = 10>>` can move or borrow as `Array<Integer>`, `Array<"a" | "b">` as `Array<String>`, and boolean literals as `Boolean`. Those types have their primitive's storage, so this exception never copies items.
+
+Every other change builds a new structure by converting its parts and requires `copy` (`MEM004`): another numeric type, adding union alternatives or optionality, projecting items' fields, or a different recursive type. This applies at last use and to borrowed arguments too:
+
+```fa
+let small: Array<Int8> = [1, 2]
+let invalid: Array<Integer> = small -- error: MEM004: write copy small
+let wide: Array<Integer> = copy small
+function read = (items: Array<Integer>) => console.log(items)
+read(copy small)
+```
+
+```fa
+type Small = { value: Int8, next: Small? }
+type Wide = { value: Integer, next: Wide? }
+let small = Small { value = 1, next = Small { value = 2 } }
+let invalid: Wide = small -- error: MEM004: the conversion walks the whole value
+let wide: Wide = copy small
+console.log(wide.value)
+```
+
+`Array<Int8>` to `Array<Int8 | String>`, `Array<Integer>` to `Array<Integer?>`, and `Array<Person>` to `Array<{ name: String }>` require `copy` as well. For a parameter, `<Item: { name: String }>(items: Array<Item>)` keeps the actual item type and borrows without conversion. Projecting only the value's own fields, while keeping its items and recursive parts at their types, follows the preceding projection rule.
+
+This is a language rule shared by every target. A backend cannot give implicitly compatible item types different layouts. Its range-packing proofs must preserve every allowed view through the primitive base type. The compiler may fuse an explicit copy with destruction of a last-use source. See [type conversion](/types/type-conversion#converting-the-inside-of-a-structure).
 
 ### Shared handles
 

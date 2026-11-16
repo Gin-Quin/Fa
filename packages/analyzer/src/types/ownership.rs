@@ -10,6 +10,7 @@ use rustc_hash::FxHashSet;
 
 use super::{FieldFlags, SyncKind, TypeId, TypeKind, TypeStore};
 
+mod conversions;
 mod projection;
 pub use projection::StoreProjection;
 

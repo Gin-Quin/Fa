@@ -12,5 +12,6 @@ console.log(keys<Type<first>, { z, a }>(first), keyModule.keys<Type<second>, { a
 export function = <Item, fields: Keys<Item>>(value: Item, suffix: String = ""): String => {
 	mutable result: Array<String> = []
 	@for key in fields { result.push("{key}={value[key]}") }
+	result.sort()
 	result.join(",") + suffix
 }

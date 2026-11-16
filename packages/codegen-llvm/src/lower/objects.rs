@@ -1480,11 +1480,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.map(|field| field.name)
 					.collect::<Vec<_>>()
 			});
-
+		// an anonymous type: the order of the first literal that builds it
+		let literal = || {
+			let mut literals: Vec<_> = self
+				.analysis
+				.objects
+				.iter()
+				.filter(|(_, info)| info.ty == ty && info.decl.is_none())
+				.collect();
+			literals.sort_by_key(|(node, _)| **node);
+			literals.first().map(|(_, info)| {
+				info.fields
+					.iter()
+					.map(|(name, _)| *name)
+					.collect::<Vec<_>>()
+			})
+		};
 		// a member's inline data, a type built by `Pick` or `Omit`
 		let inline = || self.analysis.inline_field_orders.get(&ty).cloned();
 		let order: Vec<fa_analyzer::ids::Sym> = declared
 			.or_else(inline)
+			.or_else(literal)
 			.unwrap_or_else(|| shape.iter().map(|field| field.name).collect());
 		order
 			.into_iter()

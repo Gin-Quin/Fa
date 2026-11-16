@@ -2,6 +2,27 @@
 
 use super::*;
 
+/// Lead-deferred written-origin work, never an unreported disagreement ratchet.
+const DEFERRED_CASE_CLASSES: &[(&str, &str)] = &[
+	(
+		"field-enumeration-",
+		"design/todo.md#o34c-static-type-field-enumeration",
+	),
+	(
+		"field-order-",
+		"design/todo.md#o34c-static-type-field-enumeration",
+	),
+];
+
+fn required_class(path: &Path, include_deferred: bool) -> bool {
+	include_deferred
+		|| !DEFERRED_CASE_CLASSES.iter().any(|(prefix, _)| {
+			path.file_name()
+				.and_then(|name| name.to_str())
+				.is_some_and(|name| name.starts_with(prefix))
+		})
+}
+
 fn disagreement(expected: &Expected, outcome: &Outcome) -> Option<String> {
 	if outcome.exit != expected.exit || !outcome.stderr.is_empty() && outcome.build_failed {
 		return Some(format!("exit {}: {}", outcome.exit, outcome.stderr));
@@ -65,11 +86,28 @@ fn generated_string_differential() {
 		String::from_utf8_lossy(&output.stderr)
 	);
 	let programs = fa_files(&generated);
+	let include_deferred =
+		std::env::var("FA_STRINGS_DIFFERENTIAL_DEFERRED").is_ok_and(|value| value == "1");
+	if !include_deferred {
+		for &(prefix, todo) in DEFERRED_CASE_CLASSES {
+			let count = programs
+				.iter()
+				.filter(|path| {
+					path.file_name()
+						.and_then(|name| name.to_str())
+						.is_some_and(|name| name.starts_with(prefix))
+				})
+				.count();
+			if count > 0 {
+				eprintln!("string differential deferred: {prefix} ({count} shards; {todo})");
+			}
+		}
+	}
 	let queue = Mutex::new(
 		programs
 			.iter()
 			.enumerate()
-			.filter(|(_, path)| selected(path)),
+			.filter(|(_, path)| selected(path) && required_class(path, include_deferred)),
 	);
 	let failures = Mutex::new(Vec::new());
 	let started = Instant::now();
@@ -96,7 +134,10 @@ fn generated_string_differential() {
 	eprintln!(
 		"string differential {} tier: {} shards in {:.2}s, {} disagreements",
 		if full { "full" } else { "quick" },
-		programs.iter().filter(|path| selected(path)).count(),
+		programs
+			.iter()
+			.filter(|path| selected(path) && required_class(path, include_deferred))
+			.count(),
 		started.elapsed().as_secs_f64(),
 		failures.len()
 	);

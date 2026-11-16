@@ -53,12 +53,21 @@ and absence of allocations.
 JSON shards cover runtime, compile-time parsing, all-subject round trips,
 String/Bytes union input, and serialization through objects, arrays, maps,
 optionals, primitive/object/empty named members, pinned/unpinned enumerations,
-flags and recursive records. Field-enumeration shards cross every subject with
-reordered anonymous literals, declared order, nested and recursive objects,
-scoped recursive names, object-union discriminants, printing, schema reflection
-and key loops (including generic key sets). Allocation shards compare the exit code and stop
+flags and recursive records. Required JSON cases include same-name recursive types in separate scopes inside
+a declared envelope, and object-union shape/literal discrimination. Required
+key-read probes cross the subjects with nested keyed String borrows and sort
+their output, avoiding an assumption about field enumeration. Allocation shards compare the exit code and stop
 message for impossible repetition, both padding directions and byte buffers.
 
 A literal beyond 2000 characters gets its own shard: debug compile-time
 analysis can take several seconds, and every program must finish within the
 shared runner's 20-second budget.
+
+The lead explicitly defers static-type field enumeration to
+[O34c](../../../../design/todo.md#o34c-static-type-field-enumeration).
+`DEFERRED_CASE_CLASSES` in `../programs/string_differential.rs` is the named list:
+`field-order-` and `field-enumeration-`. They are generated and each exclusion is
+reported with its to-do link, but neither belongs to the required quick/full set.
+`FA_STRINGS_DIFFERENTIAL_DEFERRED=1 FA_PROGRAMS=field-` opts into those acceptance
+cases; they are expected to fail until the written-origins work lands. No other
+class is excluded.

@@ -338,19 +338,14 @@ impl Walker<'_> {
 	}
 
 	/// The fields of an object type in declaration order: as declared, as
-	/// ordered by name units for an anonymous type.
+	/// written for an anonymous type, else in the order of its shape.
 	pub(super) fn ordered_fields(&mut self, object: TypeId) -> Vec<FieldEntry> {
 		let mut fields = self.s.types.fields_of(object).to_vec();
 		let order: Option<Vec<Sym>> = match self.declared_fields(object) {
 			Some((_, declared)) if !declared.is_empty() => {
 				Some(declared.iter().map(|field| field.name).collect())
 			}
-			_ => self
-				.a
-				.inline_field_orders
-				.get(&object)
-				.or_else(|| self.key_sets.field_orders.get(&object))
-				.cloned(),
+			_ => self.key_sets.field_orders.get(&object).cloned(),
 		};
 		if let Some(order) = order {
 			fields.sort_by_key(|field| {
@@ -363,7 +358,7 @@ impl Walker<'_> {
 		fields
 	}
 
-	/// Records the enumeration order of a structural or derived object type.
+	/// Records the order the fields of an anonymous object type are written in.
 	pub(super) fn record_field_order(&mut self, ty: TypeId, names: Vec<Sym>) {
 		self.key_sets.field_orders.entry(ty).or_insert(names);
 	}

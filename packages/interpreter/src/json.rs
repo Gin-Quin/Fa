@@ -1,5 +1,5 @@
 //! `@parseJson(text)` (advanced brief §12.5): JSON to a value whose exact
-//! type the analyzer computes. Anonymous objects use name order, integral
+//! type the analyzer computes. Objects keep their key order, integral
 //! numbers written without a fraction or an exponent are integers, other
 //! numbers floats, `null` is `none`. Malformed JSON is a thrown
 //! `ParseError` (`META005` at the call).
@@ -172,16 +172,15 @@ impl Parser<'_> {
 					.collect(),
 			)));
 		}
-		let mut fields = fields
+		let fields = fields
 			.into_iter()
 			.map(|(key, v)| {
 				let key = key.as_str().ok_or_else(|| {
 					self.error("a compile-time object field name must be well-formed text")
 				})?;
-				Ok((Arc::<str>::from(key), v))
+				Ok((Arc::from(key), v))
 			})
 			.collect::<Result<Vec<_>, Error>>()?;
-		fields.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
 		Ok(Value::Object(Arc::new(Object { fields })))
 	}
 
@@ -805,7 +804,7 @@ mod tests {
 		.unwrap();
 		assert_eq!(
 			value.to_text(),
-			"{ debug = false, none = none, port = 8080, ratio = 0.5, tags = [\"a\", \"é\"] }"
+			"{ port = 8080, debug = false, ratio = 0.5, tags = [\"a\", \"é\"], none = none }"
 		);
 		assert!(matches!(parse("[1, 2"), Err(Error::Thrown(_))));
 		assert!(matches!(parse("{} x"), Err(Error::Thrown(_))));

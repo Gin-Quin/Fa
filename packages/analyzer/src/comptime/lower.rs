@@ -1490,35 +1490,18 @@ impl<'a> Lowerer<'a> {
 		current.unwrap_or_else(Expr::none)
 	}
 
-	/// Initializers run in source order; stored fields follow the type order.
+	/// An object literal: its fields in declaration order (`objects`).
 	fn object(&mut self, n: NodeId) -> Expr {
 		let Some(info) = self.a.object(n).cloned() else {
 			return self.unsupported("this object");
 		};
-		let mut initializers: FxHashMap<NodeId, Slot> = FxHashMap::default();
+		let mut spreads: FxHashMap<NodeId, Slot> = FxHashMap::default();
 		let mut statements = Vec::new();
-		let mut given: Vec<_> = info
-			.fields
-			.iter()
-			.filter_map(|(_, value)| match value {
-				FieldValue::Given(node) | FieldValue::Spread(node) => Some(*node),
-				_ => None,
-			})
-			.collect();
-		given.sort_by_key(|node| self.tree.spans[node.index()].start);
-		given.dedup();
-		for node in given {
-			let slot = self.temp();
-			let expression = self.expr(node);
-			statements.push(Expr::Let(slot, expression.boxed()));
-			initializers.insert(node, slot);
-		}
-
 		let mut fields = Vec::with_capacity(info.fields.len());
 		for (name, value) in &info.fields {
 			let name: Arc<str> = Arc::from(self.session.types.syms.resolve(*name));
 			let value = match *value {
-				FieldValue::Given(value) => Expr::Local(initializers[&value]),
+				FieldValue::Given(value) => self.expr(value),
 				FieldValue::Default(value) => self.expr(value),
 				FieldValue::Constant(index) => match self.a.field_constants.get(index as usize) {
 					Some(value) => Expr::Const(value.clone()),
@@ -1526,16 +1509,21 @@ impl<'a> Lowerer<'a> {
 				},
 				FieldValue::None => Expr::none(),
 				FieldValue::Spread(value) => {
-					let slot = initializers[&value];
+					let slot = match spreads.get(&value) {
+						Some(&slot) => slot,
+						None => {
+							let slot = self.temp();
+							let lowered = self.expr(value);
+							statements.push(Expr::Let(slot, lowered.boxed()));
+							spreads.insert(value, slot);
+							slot
+						}
+					};
 					Expr::Field(Expr::Local(slot).boxed(), Arc::clone(&name), false)
 				}
 			};
 			fields.push((name, value));
 		}
-		if info.decl.is_none() && info.member.is_none() {
-			fields.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
-		}
-
 		let object = Expr::Object(fields);
 		let value = match info.member {
 			Some(member) => match self.types().kind(member) {

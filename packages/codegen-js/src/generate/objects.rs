@@ -97,16 +97,7 @@ impl Generator<'_> {
 
 	/// An object literal of an object type: the fields in declaration order.
 	fn object_value(&mut self, info: &fa_analyzer::analysis::ObjectInfo) -> Expr {
-		let mut info = info.clone();
-		if info.decl.is_none() && info.member.is_none() {
-			info.fields.sort_by(|(a, _), (b, _)| {
-				self.types
-					.syms
-					.resolve(*a)
-					.encode_utf16()
-					.cmp(self.types.syms.resolve(*b).encode_utf16())
-			});
-		}
+		let info = info.clone();
 		let spreads = info
 			.fields
 			.iter()
@@ -305,20 +296,10 @@ impl Generator<'_> {
 			.map(|&(_, index)| slots[index].expect("a value"))
 			.collect();
 		let values = self.in_order(&nodes, &mut f);
-		let mut staged_through = None;
-		for (left, &(_, position)) in order.iter().enumerate() {
-			for (right, &(_, later)) in order.iter().enumerate().skip(left + 1) {
-				if position > later && (!values[left].pure || !values[right].pure) {
-					staged_through =
-						Some(staged_through.map_or(right, |last: usize| last.max(right)));
-				}
-			}
-		}
+		let reordered = order.windows(2).any(|pair| pair[0].1 > pair[1].1);
 		let mut by_slot: Vec<Option<Expr>> = vec![None; slots.len()];
-		for (source, (&(_, index), value)) in order.iter().zip(values).enumerate() {
-			// Preserve earlier reads/effects before the lifted prefix, leaving
-			// the unaffected suffix inline in the resulting object or call.
-			let value = if staged_through.is_some_and(|last| source <= last) && !value.stable {
+		for (&(_, index), value) in order.iter().zip(values) {
+			let value = if reordered && !value.stable {
 				let temp = self.temp();
 				self.out.line(format!("const {temp} = {};", value.text));
 				Expr::name(temp, true)

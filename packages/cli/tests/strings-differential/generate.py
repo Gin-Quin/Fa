@@ -559,6 +559,17 @@ type Status = Enum { ok = 200, failed = 500 }
 type Flags = Fields { first, nested { second, third }, single { child } }
 type Node = { text: String, children: Array<Node> }
 function read = (input: String | Bytes): Record throws JsonError => try Json.parse(identity(input))
+type Forward = { kind: "forward", z: String, a: String }
+type Reverse = { a: String, z: String, kind: "reverse" }
+function variant = (value: Forward | Reverse): String => Json.stringify(value)
+function distinct = (value: { z: String } | { a: String }): String => Json.stringify(value)
+function outside = (text: String): Node => Node { text = text, children = [Node { text = text, children = [] }] }
+function scoped = (text: String): String => {
+    type Node = { item: String, next: Node? }
+    let inside = Node { item = text, next = Node { item = text, next = none } }
+    type Envelope = { outside: Type<outside(text)>, inside: Type<inside> }
+    Json.stringify(Envelope { outside = outside(text), inside = inside })
+}
 function composite = (text: String): String throws JsonError => {
     mutable rows: Array<String> = []
     let record = Record { text = text, missing = none }
@@ -577,6 +588,11 @@ function composite = (text: String): String throws JsonError => {
     rows.push(units(Json.stringify(Status.failed)))
     rows.push(units(Json.stringify(Flags { first, nested { third }, single { child } })))
     rows.push(units(Json.stringify(Node { text = text, children = [Node { text = text, children = [] }] })))
+    rows.push(units(scoped(text)))
+    rows.push(units(variant(Forward { kind = "forward", z = text, a = "a" })))
+    rows.push(units(variant(Reverse { a = "a", z = text, kind = "reverse" })))
+    rows.push(units(distinct({ z = text })))
+    rows.push(units(distinct({ a = text })))
     let optional: Record? = record
     rows.push(units(Json.stringify(optional)))
     let enumeration: Status | String = Status.failed
@@ -593,7 +609,7 @@ const texts=JSON.parse(await Bun.stdin.text());
 const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
 for(const text of texts) {
 const map=Object.fromEntries([[text,text]]);
-const values=[{text},[text,null,"x"],map,{type:"Text",value:text},{type:"Row",text},{type:"Tagged",value:{type:"data",text}},{type:"Empty"},"literal",{type:"Detail",text},{type:"Missing"},"blue",500,["first","nested.third","single.child"],{text,children:[{text,children:[]}]},{text},500];
+const values=[{text},[text,null,"x"],map,{type:"Text",value:text},{type:"Row",text},{type:"Tagged",value:{type:"data",text}},{type:"Empty"},"literal",{type:"Detail",text},{type:"Missing"},"blue",500,["first","nested.third","single.child"],{text,children:[{text,children:[]}]},{outside:{text,children:[{text,children:[]}]},inside:{item:text,next:{item:text}}},{kind:"forward",z:text,a:"a"},{a:"a",z:text,kind:"reverse"},{z:text},{a:text},{text},500];
 console.log([...values.map(v=>units(JSON.stringify(v))),units(text),units(text)].join("|"));
 }
 """
@@ -610,6 +626,7 @@ def field_cases(output, bun):
     # recursive values; two unrelated recursive types with the same name.
     prelude = '-- skip-target: native-freestanding\nuse { Json } = std.json\n' + PRELUDE.split("function probe",1)[0] + r"""
 type Declared = { b: String, a: String }
+type Colliding = { z: String, a: String }
 type Forward = { kind: "forward", z: String, a: String }
 type Reverse = { a: String, z: String, kind: "reverse" }
 function variant = (value: Forward | Reverse): String => Json.stringify(value)
@@ -662,6 +679,32 @@ for(const text of JSON.parse(await Bun.stdin.text())) {
     basic = "\n".join(line for line in basic.splitlines() if not line.startswith(("-- skip-target:", "use { Json }", "function variant =", "function distinct ="))) + "\n"
     basic_reference = ["|".join(row.split("|", 2)[:2]) for row in references]
     write_cases(output,"field-order",basic,[(literal(text),) for text in values],basic_reference,"fieldProbe",16)
+
+def key_read_cases(output, bun):
+    # Exercise keyed places independently of the deferred enumeration order.
+    prelude = PRELUDE.split("function probe", 1)[0] + r"""
+type Leaf = { z: String, a: String }
+type Root = { right: Leaf, left: Leaf }
+function keys = <Item, fields: DeepKeys<Item>>(value: Item): String => {
+    mutable rows: Array<String> = []
+    @for key in fields { rows.push(key + "=[" + units(value[key]) + "]") }
+    rows.sort()
+    rows.join("|")
+}
+function keyProbe = (text: String): String => {
+    let owned = String.from(text, capacity = 4096)
+    let source = Root { right = Leaf { a = "a", z = owned }, left = Leaf { z = owned, a = "a" } }
+    keys<Root, { right { z, a }, left { a, z } }>(source)
+}
+"""
+    oracle = r"""
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+for(const text of JSON.parse(await Bun.stdin.text())) console.log(["left.a=[97]",`left.z=[${units(text)}]`,"right.a=[97]",`right.z=[${units(text)}]`].join("|"));
+"""
+    values = subjects()
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"key-reads",prelude,[(literal(text),) for text in values],references,"keyProbe",16)
+
 
 def split_cases(output, bun):
     needles = ["", "\ud83d", "\ude00", ","]
@@ -779,6 +822,7 @@ async function crossing = (text: String): String throws IndexError => {
     large_cases(output,bun)
     split_cases(output,bun)
     field_cases(output,bun)
+    key_read_cases(output,bun)
     decoded = byte_cases(output,bun)
     json_cases(output,bun)
     cuts=edge_cases(output,bun)

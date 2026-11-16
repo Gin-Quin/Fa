@@ -110,21 +110,10 @@ fn schema_flags(types: &TypeStore, ty: TypeId, depth: u32) -> Value {
 
 /// The schema of a type.
 pub fn schema(types: &TypeStore, ty: TypeId) -> Value {
-	describe(types, None, ty, 0, true)
+	describe(types, ty, 0, true)
 }
 
-/// Reflection carries the same declared field orders as JSON and printing.
-pub fn with_analysis(types: &TypeStore, analysis: &crate::analysis::Analysis, ty: TypeId) -> Value {
-	describe(types, Some(analysis), ty, 0, true)
-}
-
-fn describe(
-	types: &TypeStore,
-	analysis: Option<&crate::analysis::Analysis>,
-	ty: TypeId,
-	depth: u32,
-	named: bool,
-) -> Value {
+fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 	if depth > 32 {
 		return member("Never", Vec::new());
 	}
@@ -153,14 +142,11 @@ fn describe(
 			"Named",
 			vec![
 				("name", Value::string(name)),
-				(
-					"definition",
-					describe(types, analysis, ty, depth + 1, false),
-				),
+				("definition", describe(types, ty, depth + 1, false)),
 			],
 		);
 	}
-	let next = |ty: TypeId| describe(types, analysis, ty, depth + 1, true);
+	let next = |ty: TypeId| describe(types, ty, depth + 1, true);
 	match types.kind(ty) {
 		// a recursive use inside its own definition
 		TypeKind::Rec(rec) => {
@@ -227,26 +213,8 @@ fn describe(
 			)],
 		),
 		TypeKind::Object(shape) => {
-			let mut fields = types.shape_fields(shape).to_vec();
-			if let Some(analysis) = analysis {
-				let order: Vec<_> = analysis
-					.type_decls
-					.values()
-					.find(|decl| decl.ty == ty)
-					.map(|decl| decl.fields.iter().map(|field| field.name).collect())
-					.or_else(|| analysis.inline_field_orders.get(&ty).cloned())
-					.unwrap_or_default();
-				if !order.is_empty() {
-					fields.sort_by_key(|field| {
-						order
-							.iter()
-							.position(|&name| name == field.name)
-							.unwrap_or(usize::MAX)
-					});
-				}
-			}
-
-			let properties = fields
+			let properties = types
+				.shape_fields(shape)
 				.iter()
 				.map(|field| {
 					Value::object(vec![

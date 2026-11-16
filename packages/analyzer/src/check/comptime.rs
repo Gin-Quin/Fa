@@ -666,7 +666,7 @@ impl Walker<'_> {
 						w.a.constants.insert(n, value);
 						w.s.types.string_literal(&text)
 					} else {
-						let schema = comptime::schema::with_analysis(&w.s.types, &w.a, ty);
+						let schema = comptime::schema::schema(&w.s.types, ty);
 						let (defaults, order) = w.schema_defaults(ty);
 						let schema = comptime::schema::with_defaults(schema, &defaults, &order);
 						w.a.constants.insert(n, schema);

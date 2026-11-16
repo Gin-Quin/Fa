@@ -167,7 +167,7 @@ logProperties<Settings, { foo, baz, nested { foo } }>(settings)
 
 `@for` unrolls the loop at compile time: the call above compiles to three `console.log` lines, with no runtime lookup at all.
 
-`@for` over a key set goes through its leaves in the [subject type’s field order](/values/objects#field-order): a group stands for all of its members. Each `key` is a compile-time path, printed with dots (`"nested.foo"`), and `value[key]` reads the field at that path, with its own type. The body is checked once per key, after the loop is unrolled: an error names the key and the call that caused it.
+`@for` over a key set goes through its leaves, in declaration order: a group stands for all of its members. Each `key` is a compile-time path, printed with dots (`"nested.foo"`), and `value[key]` reads the field at that path, with its own type. The body is checked once per key, after the loop is unrolled: an error names the key and the call that caused it.
 
 The key set is a compile-time value parameter, so it is never inferred: `logProperties` always receives its parameters explicitly, before the runtime call. See [explicit parameters](/types/generics#explicit-parameters).
 

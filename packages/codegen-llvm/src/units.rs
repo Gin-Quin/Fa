@@ -178,6 +178,8 @@ fn emit(
 				crate::OptLevel::O3 => "thinlto-pre-link<O3>",
 			}
 		}
+	} else if options.asynchronous == Some(true) {
+		options.coroutine_pipeline()
 	} else {
 		options.pipeline()
 	};

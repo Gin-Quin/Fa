@@ -1,4 +1,10 @@
 -- prints: 5
+-- file: main.fa
+mutable model: Model = {}
+use added = model.add(3)
+use found = first(model)
+if found is not none { found.value = 5 }
+console.log(added.value)
 -- file: Model.fa
 export type = {
 	nodes: GrowingPool<Node> = []
@@ -7,9 +13,3 @@ export type = {
 }
 -- file: first.fa
 export function = (model: Model): (Model.Node in model.nodes)? => model.nodes.find((node) => true)
--- file: main.fa
-mutable model: Model = {}
-use added = model.add(3)
-use found = first(model)
-if found is not none { found.value = 5 }
-console.log(added.value)

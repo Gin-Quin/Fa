@@ -1,0 +1,9 @@
+mutable nodes: GrowingPool<Node> = []
+type Node = { id: Integer }
+type Box<Item> = { value: Item }
+type Hidden = Box<Node in nodes>
+use node = nodes.add({ id = 1 })
+let box = Hidden { value = node } -- error: REF010
+let direct = Box<Node in nodes> { value = node } -- error: REF010
+let owned = Box<Node> { value = node }
+console.log(owned.value.id)

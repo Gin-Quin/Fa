@@ -223,6 +223,7 @@ impl Walker<'_> {
 		members: NodeList<'_>,
 	) -> TypeId {
 		let ty = self.literal_target_type(target);
+		self.check_reference_annotation(target);
 		// `Permissions { read, write }` (fields.rs)
 		if self.is_fields(ty) {
 			return self.check_fields_literal(n, ty, members, false);

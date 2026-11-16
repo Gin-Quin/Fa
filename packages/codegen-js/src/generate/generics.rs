@@ -217,6 +217,11 @@ impl Generator<'_> {
 			.unwrap_or_default();
 		if let Some(owner) = self.call_method_owner(call) {
 			let prefix = self.types.list_items(owner.arguments).to_vec();
+			let own = generics.len().saturating_sub(prefix.len());
+			if bindings.len() > own {
+				bindings = bindings[bindings.len() - own..].to_vec();
+			}
+
 			for method in &mut methods {
 				method.parameter += prefix.len() as u16;
 			}

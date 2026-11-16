@@ -304,6 +304,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	lines: Vec<usize>,
 	/// The structs of object types.
 	object_types: std::cell::RefCell<FxHashMap<TypeId, StructType<'ctx>>>,
+	canonical_types: std::cell::RefCell<FxHashMap<TypeId, TypeId>>,
 	/// The global id of every member of a named union built or tested.
 	union_ids: std::cell::RefCell<FxHashMap<(fa_analyzer::ids::NominalId, u16), u64>>,
 	/// The generic functions, declared per instance.
@@ -553,6 +554,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			constants: FxHashMap::default(),
 			lines: state.lines.clone(),
 			object_types: std::cell::RefCell::new(FxHashMap::default()),
+			canonical_types: std::cell::RefCell::new(FxHashMap::default()),
 			union_ids: std::cell::RefCell::new(FxHashMap::default()),
 			type_ids: std::cell::RefCell::new(FxHashMap::default()),
 			generic_functions: FxHashMap::default(),

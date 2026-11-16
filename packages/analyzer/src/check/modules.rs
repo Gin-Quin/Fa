@@ -1470,12 +1470,7 @@ impl Walker<'_> {
 				&& self.nominal_member(current, text).is_none()
 				&& let Some(function) = self.type_function(current, text)
 			{
-				if let Some(owner) = self.receiver_origin.clone() {
-					self.a.method_instantiations.insert(member, owner);
-				}
-				self.set_resolution(member, Resolution::Local(function));
-				let ty = self.symbol_type(function, member);
-				self.set_type(member, ty);
+				let ty = self.associated_function_type(function, member, current);
 				return ty;
 			}
 			// `library.Database.OpenError`: a type declared inside the type

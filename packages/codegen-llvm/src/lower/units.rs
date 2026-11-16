@@ -364,14 +364,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	pub(crate) fn same_concrete_type(&self, left: TypeId, right: TypeId) -> bool {
 		let left = self.concrete_type(left);
 		let right = self.concrete_type(right);
+		let mut merger = self.types().merger(None);
+		let mut canonical = self.canonical_types.borrow_mut();
+		let left = *canonical.entry(left).or_insert_with(|| merger.ty(left));
+		let right = *canonical.entry(right).or_insert_with(|| merger.ty(right));
 		left == right
-			|| match (
-				crate::facts::stable_type_name(self.types(), left),
-				crate::facts::stable_type_name(self.types(), right),
-			) {
-				(Some(left), Some(right)) => left == right,
-				_ => false,
-			}
 	}
 
 	/// Notes the types an instance of a generic function is made for (its
@@ -1066,7 +1063,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	/// Whether a type mentions a generic parameter.
-	fn mentions_param(&self, ty: TypeId) -> bool {
+	pub(super) fn mentions_param(&self, ty: TypeId) -> bool {
 		let mut found = Vec::new();
 		self.collect_params(ty, &mut found);
 		!found.is_empty()

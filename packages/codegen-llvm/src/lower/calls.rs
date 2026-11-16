@@ -1215,8 +1215,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		&self,
 		call: NodeId,
 	) -> Option<&fa_analyzer::analysis::WrittenType> {
-		let View::Call { mut callee, .. } = self.view(call) else {
-			return None;
+		let mut callee = match self.view(self.strip_groups(call)) {
+			View::Call { callee, .. } => callee,
+			View::Access { .. } | View::OptionalAccess { .. } => self.strip_groups(call),
+			_ => return None,
 		};
 		loop {
 			while let View::Group(inner) = self.view(callee) {

@@ -1052,10 +1052,7 @@ impl Walker<'_> {
 			}
 			self.s.types.array(ty)
 		} else if let Some(function) = self.type_function(ty, &text) {
-			self.set_resolution(first, Resolution::Local(function));
-			let function_ty = self.symbol_type(function, first);
-			self.set_type(first, function_ty);
-			function_ty
+			self.associated_function_type(function, first, ty)
 		} else {
 			let message = format!("`{}` has no member or function `{text}`", self.display(ty));
 			let diagnostic = self.diagnostic(&E_OBJ_5, first, message);
@@ -1070,6 +1067,32 @@ impl Walker<'_> {
 			}
 		}
 		current
+	}
+
+	/// Static access fixes the written owner without binding self or the
+	/// function's own generic list.
+	pub(super) fn associated_function_type(
+		&mut self,
+		function: SymbolId,
+		member: NodeId,
+		receiver: TypeId,
+	) -> TypeId {
+		let ty = self.symbol_type(function, member);
+		let owner = self
+			.receiver_origin
+			.clone()
+			.map(|owner| self.resolve_written_type(owner));
+		let bindings = owner
+			.as_ref()
+			.and_then(|owner| self.written_bindings(owner))
+			.or_else(|| self.instance_bindings.get(&receiver).cloned());
+		if let Some(owner) = owner {
+			self.a.method_instantiations.insert(member, owner);
+		}
+		self.set_resolution(member, Resolution::Local(function));
+		let ty = bindings.map_or(ty, |bindings| self.s.types.substitute(ty, &bindings));
+		self.set_type(member, ty);
+		ty
 	}
 
 	/// The data a member of a named union holds, when it holds data that is

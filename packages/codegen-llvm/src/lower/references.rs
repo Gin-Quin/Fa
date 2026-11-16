@@ -125,7 +125,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.types()
 						.fields_of(ty)
 						.iter()
-						.find(|field| field.name == *name)?
+						.find(|field| self.same_field_name(field.name, *name))?
 						.ty
 				}
 				_ => return None,
@@ -430,7 +430,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				for (index, field) in view_fields.iter().enumerate() {
 					let Some(target) = place_fields
 						.iter()
-						.position(|other| other.name == field.name)
+						.position(|other| self.same_field_name(other.name, field.name))
 					else {
 						continue;
 					};

@@ -1580,3 +1580,15 @@ identities. Promote the source module before merging a substituted generic
 object back out of the scratch store; otherwise its application/name metadata
 can index a nonexistent local module. This applies to call-layout substitution,
 generic function-value instances and selected method argument lists.
+
+Implicit generic-to-concrete function conversions bind the same erased
+capabilities as explicit applications. JavaScript binds them once with the
+function value, preserving the task-first async entry and generic owner
+arguments; callbacks and monomorphic reference-function aliases therefore keep
+their visible argument positions. Generic type applications are static prefixes
+when selecting an associated function in JavaScript and compile-time lowering.
+Native Sync values compare canonical exact types across local/global stores.
+
+Full validation exposed interleaved hot-reload status formatting. Build the
+status text before printing it, keeping each message contiguous when stderr
+and application stdout are collected together; existing assertions stay intact.

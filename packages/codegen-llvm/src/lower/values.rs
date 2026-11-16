@@ -725,12 +725,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (Repr::Object(a), Repr::Object(b)) = (from, to) else {
 			return false;
 		};
-		if a == b {
+		if a == b || (self.same_concrete_type(a, b) && self.object_type(a) == self.object_type(b)) {
 			return true;
 		}
 		let types = self.types();
-		let names =
-			|ty: TypeId| -> Vec<_> { types.fields_of(ty).iter().map(|field| field.name).collect() };
+		let names = |ty: TypeId| -> Vec<_> {
+			types
+				.fields_of(ty)
+				.iter()
+				.map(|field| types.syms.resolve(field.name))
+				.collect()
+		};
 		names(a) == names(b) && self.object_type(a) == self.object_type(b)
 	}
 

@@ -848,12 +848,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	// ── objects ─────────────────────────────────────────────────────────
 
+	/// Field names survive promotion between the local and global stores.
+	pub(super) fn same_field_name(
+		&self,
+		left: fa_analyzer::ids::Sym,
+		right: fa_analyzer::ids::Sym,
+	) -> bool {
+		left == right || self.types().syms.resolve(left) == self.types().syms.resolve(right)
+	}
+
 	/// The shape index of a field of an object type.
 	fn field_index(&self, ty: TypeId, name: fa_analyzer::ids::Sym) -> Option<u32> {
 		self.types()
 			.fields_of(ty)
 			.iter()
-			.position(|field| field.name == name)
+			.position(|field| self.same_field_name(field.name, name))
 			.map(|index| index as u32)
 	}
 
@@ -869,7 +878,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.types()
 			.fields_of(owner)
 			.get(index as usize)
-			.is_some_and(|field| field.name == name)
+			.is_some_and(|field| self.same_field_name(field.name, name))
 		{
 			return Ok(u32::from(index));
 		}
@@ -1089,7 +1098,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.types()
 				.fields_of(from_type)
 				.iter()
-				.find(|other| other.name == field.name)
+				.find(|other| self.same_field_name(other.name, field.name))
 				.map(|other| other.ty)
 				.expect("a field");
 			let from_repr = self.repr_of(from_field, node.index())?;
@@ -1188,7 +1197,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			(TypeKind::Object(declared), TypeKind::Object(actual)) => {
 				let actual = types.shape_fields(actual);
 				for field in types.shape_fields(declared) {
-					if let Some(other) = actual.iter().find(|other| other.name == field.name) {
+					if let Some(other) = actual
+						.iter()
+						.find(|other| self.same_field_name(other.name, field.name))
+					{
 						self.match_params(field.ty, other.ty, found, depth + 1);
 					}
 				}
@@ -1455,7 +1467,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.filter(|&name| !types.syms.resolve(name).starts_with('#'))
 			.filter(|&name| self.side_repr(ty, name).is_none())
 			.filter_map(|name| {
-				let index = shape.iter().position(|field| field.name == name)?;
+				let index = shape
+					.iter()
+					.position(|field| self.same_field_name(field.name, name))?;
 				Some((
 					types.syms.resolve(name).to_string(),
 					index as u32,

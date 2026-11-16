@@ -435,6 +435,12 @@ impl Generator<'_> {
 
 	/// Whether a node names a type (`Point`, `Self`).
 	pub(crate) fn is_type_name(&self, n: NodeId) -> bool {
+		if self
+			.analysis
+			.has_flags(n, fa_analyzer::analysis::NodeFlags::TYPE_EXPR)
+		{
+			return true;
+		}
 		match self.analysis.resolution(n) {
 			Resolution::Local(symbol) => {
 				self.analysis.symbols.symbol(symbol).kind == SymbolKind::Type

@@ -122,6 +122,15 @@ The defaults run in about 0.25 to 2 seconds in Rust (see the [baseline](#trunk-b
 
 The ports preserve many scalar widths (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys/values and `UInt32` links in `lru`, `Int32` literals in `interp`, `Int32` ids in `scene`. The audit identifies remaining differences: Goose's graph ids are unsigned, its sexp/calc numbers use varints, and its words counts are `i32` rather than Fa's Integer. `calc` reuses one generator text and damages it in place with string slices (`text = text[..index] + "#" + text[index + 1..]`, edited in place natively), as its sources do. `sexp` still owns child Arrays and walks them in forward source order, whereas Goose follows reverse-order sibling links. `scene` still owns child Arrays and makes three recursive passes; Goose animates and sums with flat pool scans. Its matrix has nine Float32 fields; fixed inline `CArray<Float32, 9>` is available, but an appendable bounded list of compact child references is not specified. The current trunk compiler exposes `text.bytes()` (read in place when indexed), which these ports use; the string-redesign migration is described in the audit.
 
+The lead has deferred the pool ports to a language study (2026-11-16).
+`tree`, `binary-trees`, `interp`, `sexp`, `scene` and `calc` are **a different data
+structure from Goose's (recursive owning values), kept until Fa has pool links**.
+`graph` keeps its nested adjacency arrays until that same decision. Do not read
+their current ratios as same-pool-layout comparisons. `words` and `lru` keep
+standard Fa Map as the main rows, with the same 1.10× Goose goal; explicit-table
+variants, where expressible, are separate comparisons with the matching Rust
+open-addressing rows.
+
 #### What the ports found missing or wrong in Fa
 
 Found with `target/release/fa` at the commit of the [trunk baseline](#trunk-baseline--2026-11-16). The programs use the workaround named, and stay idiomatic otherwise.

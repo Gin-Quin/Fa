@@ -13,6 +13,15 @@ The single list of open work, in the order of [the journal's Next roadmap](journ
 - **Native conversion between recursive object types overflows the compiler's stack.** Found on `perf/aggregates`, present on trunk `864167d6`: `type Node = { value: Integer, next: Node? }`, `type Other = { value: Int8, next: Other? }`, `let converted: Node = Other { value = 1, next = Other { value = 2 } }` passes `fa check` and builds for Bun, but `fa build --target=native` aborts with a Rust stack overflow (the field conversion recurses over the type pair without a helper per pair). Emit one conversion helper per (source, target) pair, or report a diagnostic; add the program to the native fixtures. Coordinate with `feature/ownership` (copies and conversions).
 - **Review m3 refactoring.** Split the long `readonly_table`, `build_composition_body`, `lower_function_body`, `builtin_call` and `for_items` by responsibility, preserving their tested behavior. See the lead's `trunk-merge-review.md`.
 
+- **Analyzer: reject Array fields of stored references.**
+  `benchmarks/audit/ports/scene-children/main.fa` declares
+  `children: Array<SceneNode in nodes>`. It is accepted and prints 0 on native,
+  wasm and Bun after the original child changes to 2, silently storing owned
+  copies. The reference/relation rules prohibit this field: reject it with a
+  diagnostic instead of erasing its reference type. The pool-link language
+  study does not authorize this current missing rejection; do not fix it in
+  the benchmark-port task.
+
 ## 2. Language semantics
 
 ### Strings first: UTF-16 semantics over UTF-8 storage

@@ -1,6 +1,6 @@
 import unittest
 
-from compare import AUDIT, DEFAULTS, ROOT, VARIANTS, fa_source, goose_source_at_size
+from compare import AUDIT, DEFAULTS, ROOT, VARIANTS, fa_source, goose_source_at_size, plan
 
 
 class RuntimeSizes(unittest.TestCase):
@@ -30,6 +30,20 @@ class RuntimeSizes(unittest.TestCase):
 
 
 class Variants(unittest.TestCase):
+    def test_structural_variants_select_their_matching_rust_without_extra_entries(self):
+        compilers = {'fa': {'path': 'fa'}, 'rust': {'path': 'rustc'},
+                     'goose': {'path': 'goose', 'c_compiler': {'path': 'clang'},
+                               'stdlib': {'path': 'stdlib'}}}
+        main, variant = (plan(name, 64, compilers) for name in ('lru', 'lru-open'))
+        directory = ROOT / 'benchmarks' / 'lru'
+        self.assertEqual(main['inputs']['rust'], {'main.rs': (directory / 'main.rs').read_bytes()})
+        self.assertEqual(variant['inputs']['rust'], {'main.rs': (directory / 'open.rs').read_bytes()})
+        self.assertNotEqual(main['requests']['rust']['source_sha256'],
+                            variant['requests']['rust']['source_sha256'])
+        self.assertEqual(set(main['inputs']['fa']), {'main.fa'})
+        self.assertEqual(set(variant['inputs']['fa']), {'main.fa'})
+        self.assertIn(b'Fibonacci hash', variant['inputs']['fa']['main.fa'])
+
     def test_variants_use_the_programs_and_sizes_of_their_benchmark(self):
         for name, (directory, source) in VARIANTS.items():
             self.assertEqual(fa_source(name), (ROOT / "benchmarks" / directory, source))

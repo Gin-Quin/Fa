@@ -17,7 +17,7 @@ function blur = (source: Array<UInt8>, destination: Array<UInt8>, width: Integer
 	for y in 1..width - 1 {
 		for x in 1..width - 1 {
 			let i = y * width + x
-			let sum: Integer = try source[i - width - 1] + source[i - width] * 2 + source[i - width + 1]
+			let sum: UInt16 = try source[i - width - 1] + source[i - width] * 2 + source[i - width + 1]
 				+ source[i - 1] * 2 + source[i] * 4 + source[i + 1] * 2
 				+ source[i + width - 1] + source[i + width] * 2 + source[i + width + 1]
 			try destination[i] = sum // 16
@@ -26,8 +26,8 @@ function blur = (source: Array<UInt8>, destination: Array<UInt8>, width: Integer
 }
 
 let width = 3_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
-mutable a = Array<UInt8>.from([], capacity = width * width)
-mutable b = Array<UInt8>.from([], capacity = width * width)
+mutable a: Array<UInt8> = []
+mutable b: Array<UInt8> = []
 mutable state: UInt64 = 12345
 for 0..width * width {
 	state = xorshift(state)

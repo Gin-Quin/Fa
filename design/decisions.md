@@ -1520,3 +1520,27 @@ improvement. The driver has an optional `--require-control` publication policy:
 every failed control renders as `not resolved`, raw phase samples/verdicts stay
 intact, and the policy survives re-rendering of combined JSON. Its default
 historical near-threshold policy is unchanged. See the dated ports results.
+
+### Lead continuation decisions (2026-11-16)
+
+The language study owns one-way pool links, compact reference widths and bounded
+inline ordered lists. Keep tree, binary-trees, interp, graph, sexp, scene and calc
+unchanged until that study resolves their representations; do not approximate
+them with integer links in CArray fields. The recursive owning versions remain
+the main rows and are explicitly described as different structures from Goose.
+
+Words and lru keep standard Fa Map in the main row: it is the corresponding
+collection of the hand-written Goose table, and its CPU goal remains 1.10 times
+Goose. An explicit-table variant may be added only when idiomatic Fa can express
+the same slot layout/probe sequence today. Pair standard variants with
+words_hashmap.rs/lru_hashmap.rs and explicit variants with words_open.rs/lru_open.rs.
+Record missing stored borrowed string keys rather than materializing owning keys
+or encoding ranges by hand. Keep the missing Array reference-field rejection as
+an analyzer bug with the existing scene-children probe; no compiler fix here.
+
+Sum, particles and blur use unreserved Arrays in their main rows, preserving
+their reserved originals as variants; blur declares its stencil sum as UInt16.
+Respond appends escaping into one output buffer instead of returning quoted
+temporary strings. Since a primitive String parameter cannot declare mutates,
+an ordinary Output object owns that String and the helper mutates its text
+field, matching the existing documented object-field mutation model.

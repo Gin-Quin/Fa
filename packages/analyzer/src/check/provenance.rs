@@ -81,6 +81,7 @@ impl Walker<'_> {
 						origins.bounds = state.bounds.to_vec();
 						origins.readonly = state.readonly;
 					}
+					origins.readonly |= self.readonly_elements.contains(&symbol);
 					if self.a.symbols.symbol(symbol).kind == SymbolKind::Function {
 						if let Some(info) = self
 							.a

@@ -1042,6 +1042,12 @@ impl Interface {
 			let value = match layout {
 				crate::analysis::ReferenceLayout::Owner => 1,
 				crate::analysis::ReferenceLayout::General => 2,
+				crate::analysis::ReferenceLayout::Index(index) => {
+					(u128::from(index as u64) << 3) | 4
+				}
+				crate::analysis::ReferenceLayout::Entry { key, ty } => {
+					types.const_hash(key) ^ types.stable_hash(ty).rotate_left(9) ^ 5
+				}
 				crate::analysis::ReferenceLayout::Field(name) => {
 					(rustc_hash::FxBuildHasher.hash_one(types.syms.resolve(name)) as u128) << 2 | 3
 				}

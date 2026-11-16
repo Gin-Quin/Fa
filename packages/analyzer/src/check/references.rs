@@ -347,7 +347,7 @@ impl Walker<'_> {
 	}
 
 	pub(super) fn reference_result_layout(
-		&self,
+		&mut self,
 		value: NodeId,
 		owner: PlaceId,
 	) -> Option<crate::analysis::ReferenceLayout> {
@@ -388,17 +388,61 @@ impl Walker<'_> {
 		}) {
 			return Some(ReferenceLayout::Owner);
 		}
-		let mut field = None;
+		let mut layout = None;
 		for place in origins.places {
-			let Some(Step::Field(name)) = self.places.get(place).step else {
-				return Some(ReferenceLayout::General);
+			let entry = self.places.get(place);
+			let parent_is_map = entry
+				.parent
+				.and_then(|parent| self.place_type(parent))
+				.is_some_and(|ty| {
+					matches!(
+						self.s.types.kind(ty),
+						TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)
+					)
+				});
+			let map_key = entry
+				.parent
+				.and_then(|parent| self.place_type(parent))
+				.and_then(|ty| match self.s.types.kind(ty) {
+					TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, key)
+						if !matches!(
+							self.s.types.kind(key),
+							TypeKind::Param(_) | TypeKind::Unknown
+						) =>
+					{
+						Some(key)
+					}
+					_ => None,
+				});
+			let candidate = match (entry.step, map_key) {
+				(Some(Step::Field(name)), _) => ReferenceLayout::Field(name),
+				(Some(Step::Index(crate::flow::Identity::Exact(value))), Some(ty)) => {
+					ReferenceLayout::Entry {
+						key: self
+							.s
+							.types
+							.constant(crate::types::ConstValue::Int(ethnum::I256::from(value))),
+						ty,
+					}
+				}
+				(Some(Step::Index(crate::flow::Identity::Key(key))), Some(ty))
+					if !matches!(
+						self.s.types.const_value(key),
+						crate::types::ConstValue::Binding(_)
+					) =>
+				{
+					ReferenceLayout::Entry { key, ty }
+				}
+				(Some(Step::Index(crate::flow::Identity::Exact(value))), None)
+					if value >= 0 && !parent_is_map =>
+				{
+					ReferenceLayout::Index(value)
+				}
+				_ => ReferenceLayout::General,
 			};
-			if field.is_some_and(|field| field != name) {
-				return Some(ReferenceLayout::General);
-			}
-			field = Some(name);
+			layout = Some(layout.map_or(candidate, |old: ReferenceLayout| old.joined(candidate)));
 		}
-		field.map(ReferenceLayout::Field)
+		layout
 	}
 
 	/// Check dependent arguments before the call effects; publish the result

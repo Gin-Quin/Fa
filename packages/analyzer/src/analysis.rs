@@ -1276,6 +1276,11 @@ pub struct ReferenceOrigin {
 pub enum ReferenceLayout {
 	Owner,
 	Field(Sym),
+	Index(i64),
+	Entry {
+		key: crate::ids::ConstId,
+		ty: TypeId,
+	},
 	#[default]
 	General,
 }

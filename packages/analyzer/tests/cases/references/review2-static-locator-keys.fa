@@ -1,0 +1,29 @@
+type Node = { numbers: Array<Integer>, table: Map<String, Integer>, wide: Map<Int64, Integer> }
+function fixedIndex = (values: Array<Node>, index: Integer): Integer in values throws IndexError => try values[index].numbers[1]
+function fixedEntry = (values: Array<Node>, index: Integer): Integer in values throws IndexError | KeyNotFound => try values[index].table["fixed"]
+function fixedWide = (values: Array<Node>, index: Integer): Integer in values throws IndexError | KeyNotFound => try values[index].wide[-7]
+function negativeIndex = (values: Array<Node>, index: Integer): Integer in values throws IndexError => try values[index].numbers[-1]
+function fixedChoose = (values: Array<Node>, entry: Boolean): Integer in values throws IndexError | KeyNotFound => {
+ if entry { try fixedEntry(values, 0) } else { try fixedIndex(values, 0) }
+}
+type FixedChoose = (values: Array<Node>, entry: Boolean) => Integer in values throws IndexError | KeyNotFound
+function exercise = (): Array<Integer> throws IndexError | KeyNotFound => {
+ mutable values: Array<Node> = [{ numbers = [1, 2], table = [("fixed", 3)], wide = [(-7, 4)] }]
+ use indexed = try fixedIndex(values, 0)
+ indexed += 10
+ use entry = try fixedEntry(values, 0)
+ entry += 20
+ use wide = try fixedWide(values, 0)
+ wide += 30
+ use last = try negativeIndex(values, 0)
+ last += 40
+ let choose: FixedChoose = fixedChoose
+ use selected = try choose(values, false)
+ selected += 1
+ use mapped = try choose(values, true)
+ mapped += 1
+ [values[0].numbers[1], try values[0].table["fixed"], try values[0].wide[-7]]
+}
+static result = @exercise()
+console.log(result) -- prints: [53, 24, 34]
+console.log(try exercise()) -- prints: [53, 24, 34]

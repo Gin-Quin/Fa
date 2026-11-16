@@ -332,7 +332,7 @@ impl Merger<'_> {
 		MaskId(self.view.global.masks.insert(self.view.mask_bits(mask)))
 	}
 
-	fn constant(&mut self, value: ConstId) -> ConstId {
+	pub(crate) fn constant(&mut self, value: ConstId) -> ConstId {
 		if !is_local(value.0) {
 			return value;
 		}

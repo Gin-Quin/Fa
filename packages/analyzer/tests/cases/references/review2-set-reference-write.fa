@@ -17,3 +17,9 @@ function unknownResult = (nodes: Array<Node>, pick: PickKey) throws IndexError =
  use key = try pick(nodes)
  key = 9 -- error: CL031
 }
+
+mutable map: Map<String, Integer> = [("a", 1)]
+for (key, value) in map {
+ use alias = key
+ alias = "b" -- error: CL031
+}

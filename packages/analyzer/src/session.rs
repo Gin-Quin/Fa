@@ -1221,6 +1221,12 @@ fn merge_interface(
 						crate::analysis::ReferenceLayout::Field(name) => {
 							crate::analysis::ReferenceLayout::Field(merger.sym(name))
 						}
+						crate::analysis::ReferenceLayout::Entry { key, ty } => {
+							crate::analysis::ReferenceLayout::Entry {
+								key: merger.constant(key),
+								ty: merger.ty(ty),
+							}
+						}
 						other => other,
 					},
 				)

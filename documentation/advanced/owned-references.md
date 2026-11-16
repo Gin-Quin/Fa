@@ -385,7 +385,7 @@ absence uses an absent container. Reference results cannot be async, so no
 `await` can intervene.
 
 A known function additionally gets a compressed direct-call entry when all its
-reachable result places prove the same container or key. The analyzed layout
+reachable result places prove the same container or key. A fixed key can be a field name, a nonnegative array index, or a literal map key; a negative array index depends on the container length and keeps the general convention. The analyzed layout
 summary is exported and hashed with its interface, so separate compilation uses
 the same convention. For example, the following JavaScript sketches omit bounds
 checks and error propagation to show only the reference convention:
@@ -400,6 +400,11 @@ values[i] += 1;
 function left$field(values, i) { return values[i]; }
 const node = left$field(nodes, 0);
 node.left += 1;
+
+// A fixed nested index also returns only its innermost container.
+function nested$index(values, i) { return values[i].children; }
+const children = nested$index(nodes, 0);
+children[0] += 1;
 
 // Dynamic projections: return the container and publish the key.
 function choose(values, right) {

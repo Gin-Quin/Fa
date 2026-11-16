@@ -1650,3 +1650,9 @@ when its inner collection changes. Primitive local reseating uses scalar locals
 and a selector, with a container/key alternative for member places; no box or
 closure is allocated. Whole writes to optional storage replace its value, since
 its previous payload may be absent.
+
+Static result locators include literal nonnegative array indices and map keys,
+not only field names. They are exported and hashed with their key representation;
+a negative array index remains general because normalization depends on length.
+The generated matrix includes nested arrays, string and Int64 map keys, negative
+array indices and calls through function values using those functions.

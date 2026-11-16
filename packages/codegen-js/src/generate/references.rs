@@ -51,6 +51,35 @@ enum Access {
 }
 
 impl Generator<'_> {
+	fn static_reference_key(
+		&mut self,
+		node: NodeId,
+		key: fa_analyzer::ids::ConstId,
+		ty: TypeId,
+	) -> Expr {
+		use fa_analyzer::types::ConstValue;
+		match self.types.const_value(key) {
+			ConstValue::Bool(value) => Expr::primary(value.to_string()),
+			ConstValue::Int(value) => {
+				let suffix = if self.repr(self.without_none(ty)) == crate::generate::Repr::BigInt {
+					"n"
+				} else {
+					""
+				};
+				Expr::primary(format!("{value}{suffix}"))
+			}
+			ConstValue::Float(bits) => js::float_literal(f64::from_bits(bits)),
+			ConstValue::String(name) | ConstValue::Character(name) => {
+				Expr::primary(js::string_literal(self.types.syms.resolve(name)))
+			}
+			ConstValue::BigInt(name) => {
+				Expr::primary(format!("{}n", self.types.syms.resolve(name)))
+			}
+			ConstValue::EnumMember(nominal, index) => self.enum_value(nominal, index),
+			ConstValue::Binding(_) => self.unsupported(node, "a nonconstant reference key"),
+		}
+	}
+
 	pub(crate) fn returns_reference(&self) -> bool {
 		self.current_function()
 			.and_then(|node| self.analysis.function(node))
@@ -153,6 +182,8 @@ impl Generator<'_> {
 		match layout {
 			ReferenceLayout::Owner => "$key",
 			ReferenceLayout::Field(_) => "$field",
+			ReferenceLayout::Index(_) => "$index",
+			ReferenceLayout::Entry { .. } => "$entry",
 			ReferenceLayout::General => "",
 		}
 	}
@@ -625,7 +656,9 @@ impl Generator<'_> {
 	fn emit_reference_pair_return(&mut self, container: Expr, key: Expr) {
 		match self.fcx.reference_layout {
 			ReferenceLayout::Owner => self.out.line(format!("return {};", key.text)),
-			ReferenceLayout::Field(_) => self.out.line(format!("return {};", container.text)),
+			ReferenceLayout::Field(_)
+			| ReferenceLayout::Index(_)
+			| ReferenceLayout::Entry { .. } => self.out.line(format!("return {};", container.text)),
 			ReferenceLayout::General => {
 				let (result_container, result_key, label) = self
 					.fcx
@@ -684,7 +717,8 @@ impl Generator<'_> {
 			View::Call { .. } => {
 				if self.call_returns_reference(value) {
 					Some(match self.reference_call_layout(value) {
-						ReferenceLayout::Field(_) => Access::Bracket,
+						ReferenceLayout::Field(_) | ReferenceLayout::Index(_) => Access::Bracket,
+						ReferenceLayout::Entry { .. } => Access::Map,
 						_ => Access::Dynamic,
 					})
 				} else if let Some(Callee::Builtin(id)) =
@@ -1298,6 +1332,19 @@ impl Generator<'_> {
 					Some(Parts {
 						container: Some(result),
 						key: Key::Dynamic(key_value),
+						optional,
+					})
+				}
+				ReferenceLayout::Index(index) => Some(Parts {
+					container: Some(result),
+					key: Key::Index(Expr::primary(index.to_string())),
+					optional,
+				}),
+				ReferenceLayout::Entry { key, ty } => {
+					let key = self.static_reference_key(node, key, ty);
+					Some(Parts {
+						container: Some(result),
+						key: Key::Entry(key),
 						optional,
 					})
 				}

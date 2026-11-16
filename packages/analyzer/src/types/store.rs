@@ -2003,7 +2003,7 @@ impl TypeStore {
 		hasher.finish()
 	}
 
-	fn const_hash(&self, value: ConstId) -> u128 {
+	pub(crate) fn const_hash(&self, value: ConstId) -> u128 {
 		let mut hasher = StableHasher::new();
 		match self.const_value(value) {
 			ConstValue::Bool(value) => hasher.tag(0).byte(value as u8),

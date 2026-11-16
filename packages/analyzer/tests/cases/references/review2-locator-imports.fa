@@ -1,6 +1,6 @@
 -- file: library/places.fa
 export namespace = {
- type Node = { left: Integer, right: Integer }
+ type Node = { left: Integer, right: Integer, children: Array<Integer> }
  function element = (values: Array<Integer>, index: Integer): Integer in values throws IndexError => try values[index]
  function field = (values: Array<Node>, index: Integer): Integer in values throws IndexError => try values[index].left
  function choose = (values: Array<Node>, right: Boolean): Integer in values throws IndexError => {
@@ -15,8 +15,9 @@ function exercise = (): Array<Integer> throws IndexError => {
  mutable values: Array<Integer> = [1]
  use item = try places.element(values, 0)
  item = 7
- mutable nodes: Array<places.Node> = [{ left = 2, right = 3 }]
+ mutable nodes: Array<places.Node> = [{ left = 2, right = 3, children = [4] }]
  use left = try places.field(nodes, 0)
+ nodes[0].children.clear()
  left = 8
  let pick: (values: Array<places.Node>, right: Boolean) => Integer in values throws IndexError = places.choose
  use right = try pick(nodes, true)

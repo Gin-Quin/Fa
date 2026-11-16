@@ -512,6 +512,16 @@ fn generated_reference_matrix() {
 			),
 			&["MEM004"][..],
 		),
+		(
+			"readonly-results",
+			include_str!("../../../analyzer/tests/cases/references/review2-set-reference-write.fa"),
+			&["CL031", "EFF011"][..],
+		),
+		(
+			"owner-metadata",
+			include_str!("../../../analyzer/tests/cases/references/review2-owner-metadata.fa"),
+			&["REF009", "REF020"][..],
+		),
 	] {
 		let (session, file) = fa_analyzer::analyze_source(source);
 		let errors: Vec<_> = session
@@ -545,6 +555,11 @@ fn generated_reference_matrix() {
 			"[1, 1]",
 			100004,
 		),
+		(
+			include_str!("../../../analyzer/tests/cases/references/review2-static-locator-keys.fa"),
+			"[53, 24, 34]",
+			100005,
+		),
 	] {
 		let source = source
 			.split("static ")
@@ -556,7 +571,7 @@ fn generated_reference_matrix() {
 		for name in ["field", "preserve", "slot", "pick", "observe", "Pick"] {
 			source = source.replace(name, &format!("{name}{id}"));
 		}
-		let source = if matches!(id, 100002 | 100004) {
+		let source = if matches!(id, 100002 | 100004 | 100005) {
 			source.replace(
 				&format!("exercise{id} = ()"),
 				&format!("exercise{id} = (_flag: Boolean)"),

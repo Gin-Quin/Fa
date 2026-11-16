@@ -13,7 +13,7 @@ Every CPU verdict requires the same-binary control to differ by <3% on both meas
 | — | `blur` | — | unmeasured | — | — | — | — | — |
 | — | `blur-reserved` | — | unmeasured | — | — | — | — | — |
 | — | `calc` | — | unmeasured | — | — | — | — | — |
-| — | `fannkuch-redux` | — | unmeasured | — | — | — | — | — |
+| secondary | `fannkuch-redux` | 10 | 1.135 / 1.073 [1.012, 1.334] | 0.966 / 0.910 [0.888, 1.115] | 1.141 | 1.167 | 1.014/1.000 pass | within noise / goal met |
 | — | `fib` | — | unmeasured | — | — | — | — | — |
 | — | `graph` | — | unmeasured | — | — | — | — | — |
 | — | `growing-index` | — | unmeasured | — | — | — | — | — |
@@ -61,7 +61,7 @@ Wasm and Bun timings use the size shown, including process startup; errors are r
 | `blur` | — | — | — | 1000 | 92.419 / 80.964 / 100.700 | — | — | — |
 | `blur-reserved` | — | — | — | 1000 | 92.419 / 80.964 / 100.701 | — | — | — |
 | `calc` | — | — | — | 40000 | 125.644 / 109.556 / 254.351 | — | — | — |
-| `fannkuch-redux` | — | — | — | 9 | 123.533 / 108.299 / 105.879 | — | — | — |
+| `fannkuch-redux` | 0.272 / 0.240 / 0.282 | 1664 / 1920 / 1920 | 30288 / 18904 / 341704 | 9 | 123.533 / 108.299 / 105.879 | — | — | — |
 | `fib` | — | — | — | 35 | 236.888 / 236.994 / 293.224 | — | — | — |
 | `graph` | — | — | — | 10000 | 10.451 / 7.005 / 17.902 | — | — | — |
 | `growing-index` | — | — | — | 1000000 | 365.175 / 316.771 / 312.957 | — | — | — |

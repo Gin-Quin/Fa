@@ -252,7 +252,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Both halves are in bounds and disjoint; these items have no copy/drop
 	/// effects. Counter updates cannot overflow inside this proven range.
 	fn reverse_scalar_pairs(
-		&self,
+		&mut self,
 		item: Repr,
 		items: PointerValue<'ctx>,
 		(low, high): (IntValue<'ctx>, IntValue<'ctx>),
@@ -269,18 +269,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			false,
 			"reverse_pairs",
 		)?;
+		// The halves are [low, low + half) and
+		// [high - half + 1, high + 1), disjoint for this invocation.
+		let left_base = self.item_pointer(items, item, low)?;
+		let right_start = self.builder.build_int_nsw_sub(high, half, "")?;
+		let right_start =
+			self.builder
+				.build_int_nsw_add(right_start, i64.const_int(1, false), "")?;
+		let right_base = self.item_pointer(items, item, right_start)?;
+		let last = self
+			.builder
+			.build_int_nsw_sub(half, i64.const_int(1, false), "")?;
+		let scopes = self.disjoint_scopes();
+		self.declare_disjoint_scopes(scopes)?;
 		self.helper_loop(
 			&self.builder,
 			self.frame().function,
 			half,
 			|builder, offset| {
-				let left = builder.build_int_nsw_add(low, offset, "")?;
-				let right = builder.build_int_nsw_sub(high, offset, "")?;
+				let right = builder.build_int_nsw_sub(last, offset, "")?;
 				let ty = self.llvm_type(item);
-				let left =
-					unsafe { builder.build_in_bounds_gep(ty, items, &[left], "reverse_left")? };
-				let right =
-					unsafe { builder.build_in_bounds_gep(ty, items, &[right], "reverse_right")? };
+				let left = unsafe {
+					builder.build_in_bounds_gep(ty, left_base, &[offset], "reverse_left")?
+				};
+				let right = unsafe {
+					builder.build_in_bounds_gep(ty, right_base, &[right], "reverse_right")?
+				};
 				let a = builder.build_load(ty, left, "")?;
 				let b = builder.build_load(ty, right, "")?;
 				for value in [a, b] {
@@ -291,6 +305,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				self.tag(builder.build_store(left, b)?, false)?;
 				self.tag(builder.build_store(right, a)?, false)?;
+				self.tag_disjoint(
+					&[builder.get_insert_block().expect("the pair loop")],
+					(left_base, right_base),
+					scopes,
+				)?;
 				Ok(())
 			},
 		)?;

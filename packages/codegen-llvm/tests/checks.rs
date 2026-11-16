@@ -1496,6 +1496,14 @@ console.log(items, stable, words, maybe)
 			OptLevel::O0,
 		);
 		assert!(ir.contains("reverse_range:"), "{ir}");
+		let ir = optimized_ir(
+			"reversal-fannkuch-vector",
+			include_str!("../../../benchmarks/fannkuch-redux/main.fa"),
+		);
+		assert!(
+			ir.contains("shufflevector") || ir.contains("@llvm.vector.reverse."),
+			"{ir}"
+		);
 	}
 
 	#[test]

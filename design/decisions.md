@@ -1933,6 +1933,8 @@ layouts and all value assertions. No expected-skip list changes.
 - Version the loop with `0 <= low < high < length`. The inclusive span and all
   pair indices then fit i64 and stay in bounds. One typed pair loop replaces
   its checks, with final low/high written exactly as after the original rounds.
+  Its two halves are disjoint; scoped alias declarations apply once per reversal
+  invocation, allowing vectorization without claiming disjointness across flips.
   No floating-point arithmetic is introduced or reordered. The original loop
   remains the fallback, preserving negative-index normalization, error order,
   no-op ranges, copies/drops and partial mutations. No runtime or ABI change.

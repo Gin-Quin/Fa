@@ -130,6 +130,7 @@ impl Walker<'_> {
 		let params: Vec<ParamSig> = params
 			.iter()
 			.map(|&ty| ParamSig {
+				reference: None,
 				ty,
 				variadic: false,
 			})

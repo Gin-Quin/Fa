@@ -1,0 +1,15 @@
+-- References must be rejected before their type erases to an owning item.
+mutable nodes: GrowingPool<Node> = []
+type Node = { id: Int32 }
+type Ref = Node in nodes
+type Refs = Array<Ref>
+type List<Item> = Array<Item>
+type Plain = {
+	children: Array<Node in nodes> -- error: REF010
+	optional: Array<Node in nodes>? -- error: REF010
+	tuple: (Integer, Node in nodes) -- error: REF010
+	nested: Array<Array<Node in nodes>> -- error: REF010
+	alias: Refs -- error: REF010
+	generic: List<Node in nodes> -- error: REF010
+}
+-- This is the checked rejection of benchmarks/audit/ports/scene-children/main.fa.

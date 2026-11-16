@@ -460,6 +460,8 @@ pub struct DeclKeyData {
 /// A parameter of a function signature.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct ParamSig {
+	/// Dependent collection owner, independent of the erased runtime item type.
+	pub reference: Option<PathId>,
 	/// The parameter type.
 	pub ty: TypeId,
 	/// A variadic parameter (`...values: Array(T)`).
@@ -478,6 +480,10 @@ pub struct Requirement {
 /// A function signature. Parameter names are not part of the identity.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct FnSig {
+	/// Collection path of an explicitly borrowed result.
+	pub reference: Option<PathId>,
+	/// Every reachable non-none result is freshly added (direct calls only).
+	pub fresh: bool,
 	/// The parameters.
 	pub params: ParamListId,
 	/// The return type.

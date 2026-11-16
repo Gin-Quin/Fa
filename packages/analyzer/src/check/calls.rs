@@ -499,7 +499,9 @@ impl Walker<'_> {
 			let name = self.tree.text(callee.index()).to_string();
 			self.resolve_requirements(n, &name, &requires)
 		};
+		self.check_reference_arguments(n, sig);
 		self.apply_call_effects(n, callee, sig.effects);
+		self.record_reference_result(n, callee, sig);
 		self.call_providers.clear();
 		// `subscription.stop()` consumes it (reactivity.rs)
 		self.note_stop_call(n, callee);

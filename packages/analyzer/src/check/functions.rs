@@ -556,6 +556,9 @@ impl Walker<'_> {
 			self.check_params(lambda, signature.parameters, expected, owner.lenient);
 		// the parameters named by `Type(…)` are declared: the body's lambdas are not
 		self.pending_implicit.clear();
+		let reference = signature
+			.returns
+			.and_then(|returns| self.reference_contract(returns));
 		let declared_return = signature
 			.returns
 			.map(|returns| self.check_type_expr(returns));
@@ -633,6 +636,7 @@ impl Walker<'_> {
 						declared_effects,
 						&declared_requires,
 						owner.is_async,
+						reference,
 					)
 				})
 			};
@@ -719,7 +723,7 @@ impl Walker<'_> {
 		} else {
 			self.check_expression_body(body, mode)
 		};
-		let cx = self.body.functions.pop();
+		let mut cx = self.body.functions.pop();
 		if parallel_callback {
 			self.parallel.pop();
 		}
@@ -749,6 +753,10 @@ impl Walker<'_> {
 						value_node,
 						cx.as_ref().and_then(|cx| cx.ref_owner),
 					);
+					let fresh = self.reference_is_fresh(value_node);
+					if let Some(cx) = &mut cx {
+						cx.ref_fresh &= fresh;
+					}
 				}
 			}
 			// a task it returns can't use its locals (tasks.rs)
@@ -813,7 +821,7 @@ impl Walker<'_> {
 				Some(returns) => returns,
 				None if mode == TypeId::VOID => TypeId::VOID,
 				None => {
-					let returned = cx.map_or(TypeId::NEVER, |cx| cx.returned);
+					let returned = cx.as_ref().map_or(TypeId::NEVER, |cx| cx.returned);
 					let ty = if returned == TypeId::NEVER {
 						body_ty
 					} else {
@@ -833,12 +841,15 @@ impl Walker<'_> {
 					effects,
 					&all_requires,
 					owner.is_async,
+					reference,
 				)
 			}
 		});
 		if let TypeKind::Function(sig) = self.s.types.kind(ty) {
 			let mut sig = self.s.types.sig(sig);
-			if sig.throws != throws {
+			let fresh = reference.is_some() && cx.as_ref().is_some_and(|cx| cx.ref_fresh);
+			if sig.throws != throws || sig.fresh != fresh {
+				sig.fresh = fresh;
 				sig.throws = throws;
 				ty = self.s.types.function(sig);
 				self.set_type(lambda, ty);
@@ -867,11 +878,13 @@ impl Walker<'_> {
 		effects: crate::ids::EffectSetId,
 		requires: &[crate::types::Requirement],
 		is_async: bool,
+		reference: Option<crate::ids::PathId>,
 	) -> TypeId {
 		let base = self.s.types.simple_sig(&[], ret, throws);
 		let params = self.s.types.param_list(params);
 		let requires = self.s.types.req_list(requires);
 		self.s.types.function(FnSig {
+			reference,
 			params,
 			effects,
 			requires,
@@ -976,6 +989,25 @@ impl Walker<'_> {
 			let Some(symbol) = self.a.symbols.symbol_of_decl(param.node) else {
 				continue;
 			};
+			let reference = param
+				.annotation
+				.and_then(|annotation| self.reference_contract(annotation));
+			if let Some(annotation) = param.annotation {
+				if let Some(owner) = self.reference_return_owner(annotation) {
+					let place = self.places.child(
+						owner,
+						crate::flow::Step::Index(crate::flow::Identity::Unknown),
+					);
+					self.reference_parameters.insert(symbol, place);
+					let state = self
+						.facts
+						.refs
+						.state(crate::flow::refs::RefState::valid(place));
+					self.body.flow.set_ref_state(symbol, state);
+				} else if self.contains_reference_type(annotation) {
+					self.check_reference_annotation(annotation);
+				}
+			}
 			let body_ty = self.a.symbols.symbol(symbol).ty;
 			if let Some(pattern) = param.pattern {
 				let mut names = super::destructuring::PatternNames::default();
@@ -989,6 +1021,7 @@ impl Walker<'_> {
 					variadic: param.variadic,
 				},
 				ParamSig {
+					reference,
 					ty: if param.variadic { body_ty } else { ty },
 					variadic: param.variadic,
 				},
@@ -1073,6 +1106,7 @@ impl Walker<'_> {
 				variadic: false,
 			},
 			ParamSig {
+				reference: None,
 				ty,
 				variadic: false,
 			},

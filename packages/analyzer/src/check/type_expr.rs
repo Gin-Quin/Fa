@@ -547,6 +547,24 @@ impl Walker<'_> {
 		body: NodeId,
 		generics: &[crate::ids::ParamId],
 	) -> TypeId {
+		let parent = self.body.scope;
+		let scope = self
+			.a
+			.symbols
+			.scope_for(n, Some(parent), crate::symbols::ScopeKind::Function);
+		self.body.scope = scope;
+		let ty = self.function_type_expr_in_scope(n, signature, body, generics);
+		self.body.scope = parent;
+		ty
+	}
+
+	fn function_type_expr_in_scope(
+		&mut self,
+		n: NodeId,
+		signature: SignatureView<'_>,
+		body: NodeId,
+		generics: &[crate::ids::ParamId],
+	) -> TypeId {
 		if generics
 			.iter()
 			.any(|&param| self.s.types.param(param).value)
@@ -621,10 +639,39 @@ impl Walker<'_> {
 					TypeId::UNKNOWN
 				});
 			}
+			let annotation = match self.view(parameter) {
+				View::Assignment { annotation, .. } => annotation,
+				_ => None,
+			};
+			let reference = annotation.and_then(|annotation| self.reference_contract(annotation));
+			if reference.is_none()
+				&& let Some(annotation) = annotation
+			{
+				self.check_reference_annotation(annotation);
+			}
+			if let View::Assignment { target, .. } = self.view(parameter) {
+				if let View::Name(name) = self.view(target) {
+					let symbol = self.declare(
+						parameter,
+						name,
+						crate::symbols::SymbolKind::Parameter {
+							index: params.len() as u16,
+						},
+					);
+					let entry = self.a.symbols.symbol_mut(symbol);
+					entry.ty = ty;
+					entry.state = crate::symbols::DeclState::Done;
+				}
+			}
 			let ty = if variadic { self.s.types.array(ty) } else { ty };
-			params.push(ParamSig { ty, variadic });
+			params.push(ParamSig {
+				reference,
+				ty,
+				variadic,
+			});
 		}
 		let ret = self.check_type_expr(body);
+		let reference = self.reference_contract(body);
 		let throws = written_throws.map_or(TypeId::NEVER, |errors| self.check_type_expr(errors));
 		let unsupported = unsupported_clause
 			|| !signature.requires.is_empty()
@@ -656,6 +703,7 @@ impl Walker<'_> {
 			let effects = w.s.types.effect_set(&mutated, &[]);
 			let generics = w.s.types.list(&generics);
 			w.s.types.function(FnSig {
+				reference,
 				params,
 				is_async: signature.is_async,
 				effects,

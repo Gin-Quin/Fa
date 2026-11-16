@@ -699,6 +699,8 @@ pub struct Interface {
 	/// `ExternalField`), so that every file whose values may be of their
 	/// types writes and deletes them with both sides.
 	pub relations: Vec<crate::analysis::Relation>,
+	/// Aliases whose denoted type contains a reference before runtime erasure.
+	pub reference_aliases: FxHashSet<NodeId>,
 }
 
 /// The generic parameters reached by exported types, including binders
@@ -1022,6 +1024,9 @@ impl Interface {
 					0,
 				));
 			}
+		}
+		for &decl in &self.reference_aliases {
+			parts.push((14, key_hash(decl), 1, 0));
 		}
 		parts.push((4, u128::from(self.reads_target), 0, 0));
 		// the relations: their kind, types, sides and collections

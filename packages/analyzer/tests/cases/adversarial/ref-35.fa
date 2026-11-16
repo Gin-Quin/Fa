@@ -1,4 +1,3 @@
--- pending: M2 (user functions returning references; see adv-4.5-11)
 -- a reference into a temporary
 type Person = { name: String }
 function pick = (persons: Array<Person>): (Person in persons)? => persons.get(0)

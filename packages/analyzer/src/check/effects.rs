@@ -84,6 +84,8 @@ impl Walker<'_> {
 		let n = self.strip_groups(n);
 		let tree = Arc::clone(&self.tree);
 		match syntax::view(&tree, n) {
+			View::Try(inner) => self.place_of(inner),
+			View::Call { .. } => self.reference_results.get(&n).copied(),
 			View::Name(_) => {
 				let Resolution::Local(symbol) = self.a.resolution(n) else {
 					return None;
@@ -961,7 +963,7 @@ impl Walker<'_> {
 	}
 
 	/// A path of a signature and the declared type it designates.
-	fn signature_path(&mut self, node: NodeId) -> Option<(PathId, TypeId)> {
+	pub(super) fn signature_path(&mut self, node: NodeId) -> Option<(PathId, TypeId)> {
 		let tree = Arc::clone(&self.tree);
 		match syntax::view(&tree, node) {
 			View::Group(inner) => self.signature_path(inner),
@@ -1729,6 +1731,9 @@ impl Walker<'_> {
 				{
 					continue;
 				}
+				if self.declared_reference_overlap(n, from, argument) {
+					continue;
+				}
 				let changed_text = self.place_text(place);
 				let argument_text = self.tree.text(argument.index()).to_string();
 				let message = if other != place && self.may_be_at_or_below(other, place) {
@@ -1770,6 +1775,9 @@ impl Walker<'_> {
 		let mut stack = vec![body];
 		while let Some(node) = stack.pop() {
 			if let View::Name(_) = self.view(node)
+				&& !self
+					.a
+					.has_flags(node, crate::analysis::NodeFlags::TYPE_EXPR)
 				&& let Resolution::Local(symbol) = self.a.resolution(node)
 				&& self.a.symbols.symbol(symbol).kind == SymbolKind::Mutable
 				&& self.is_module_level(symbol)
@@ -1946,7 +1954,7 @@ impl Walker<'_> {
 
 	/// A callee's effect path with its root replaced by the argument's place:
 	/// the place, the argument's place, and the argument node.
-	fn substitute(
+	pub(super) fn substitute(
 		&mut self,
 		path: PathId,
 		arguments: &[Argument],

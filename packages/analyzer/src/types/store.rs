@@ -999,11 +999,14 @@ impl TypeStore {
 		let params: smallvec::SmallVec<[ParamSig; 4]> = params
 			.iter()
 			.map(|&ty| ParamSig {
+				reference: None,
 				ty,
 				variadic: false,
 			})
 			.collect();
 		FnSig {
+			reference: None,
+			fresh: false,
 			params: self.param_list(&params),
 			ret,
 			throws,
@@ -1863,9 +1866,12 @@ impl TypeStore {
 				for param in self.params(sig.params) {
 					hasher
 						.hash(self.stable_hash(param.ty))
-						.byte(param.variadic as u8);
+						.byte(param.variadic as u8)
+						.hash(param.reference.map_or(0, |path| self.path_hash(path)));
 				}
 				hasher
+					.hash(sig.reference.map_or(0, |path| self.path_hash(path)))
+					.byte(sig.fresh as u8)
 					.hash(self.stable_hash(sig.ret))
 					.hash(self.stable_hash(sig.throws));
 				for requirement in self.requirements(sig.requires) {

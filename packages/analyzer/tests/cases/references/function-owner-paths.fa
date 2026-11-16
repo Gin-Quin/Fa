@@ -1,0 +1,40 @@
+-- prints: 7
+-- prints: 9
+-- prints: 11
+-- prints: 13
+
+type Model = {
+	nodes: GrowingPool<Node> = []
+	type Node = { value: Integer }
+	function add = (self, value: Integer): Node in self.nodes mutates self.nodes.size => self.nodes.add({ value = value })
+	function set = (self, node: Node in self.nodes, value: Integer) mutates node.value => { node.value = value }
+}
+function exercise = () => {
+	mutable model: Model = {}
+	use node = model.add(3)
+	model.set(node, 7)
+	console.log(node.value)
+	mutable nested: { model: Model } = { model = {} }
+	use other = nested.model.add(8)
+	other.value = 9
+	console.log((nested.model.nodes.find((item) => true) ?? other).value)
+}
+exercise()
+
+type Node = { value: Integer }
+function add = <Item>(pool: GrowingPool<Item>, value: Item): Item in pool mutates pool.size => pool.add(copy value)
+function same = <Item>(pool: GrowingPool<Item>, node: Item in pool): Item in pool => node
+mutable nodes: GrowingPool<Node> = []
+use made = add(nodes, { value = 10 })
+use alias = same(nodes, made)
+alias.value = 11
+console.log(made.value)
+function pick = (pool: GrowingPool<Node>): (Node in pool)? => pool.find((node) => true)
+type Picker = (pool: GrowingPool<Node>) => (Node in pool)?
+function invoke = (picker: Picker, pool: GrowingPool<Node>): (Node in pool)? => picker(pool)
+let picker: Picker = pick
+use chosen = invoke(picker, nodes)
+if chosen is not none {
+	chosen.value = 13
+}
+console.log(made.value)

@@ -175,6 +175,8 @@ pub struct FnCx {
 	pub async_acc: tasks::Acc,
 	/// The owner of the reference it returns (`: T in owner`, references.rs).
 	pub ref_owner: Option<PlaceId>,
+	/// All returned reference values are fresh so far.
+	pub ref_fresh: bool,
 }
 
 impl FnCx {
@@ -206,6 +208,7 @@ impl FnCx {
 			is_async: false,
 			async_acc: tasks::Acc::new(),
 			ref_owner: None,
+			ref_fresh: true,
 		}
 	}
 }
@@ -430,6 +433,10 @@ pub struct Walker<'s> {
 	pub(crate) hoisted_blocks: rustc_hash::FxHashSet<NodeId>,
 	/// The place each `use` alias and `for` variable over a collection designates.
 	pub(crate) aliases: FxHashMap<SymbolId, PlaceId>,
+	/// Borrowed call results, recorded once after that evaluation's effects.
+	pub(crate) reference_results: FxHashMap<NodeId, PlaceId>,
+	/// Dependent parameter owners; parameter roots still name their own effects.
+	pub(crate) reference_parameters: FxHashMap<SymbolId, PlaceId>,
 	/// The collection each local iterator reads, and whether its items are
 	/// the collection's elements (`iterators.rs`).
 	pub(crate) iterator_locals: FxHashMap<SymbolId, (PlaceId, bool)>,
@@ -618,6 +625,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		implicit_write_calls: Vec::new(),
 		key_sets: key_sets::KeySetState::default(),
 		aliases: FxHashMap::default(),
+		reference_results: FxHashMap::default(),
+		reference_parameters: FxHashMap::default(),
 		foreign: foreign::ForeignState::default(),
 		std_library: std_library::StdState::default(),
 		growing_only: false,

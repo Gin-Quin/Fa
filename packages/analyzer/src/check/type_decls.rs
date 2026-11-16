@@ -356,6 +356,11 @@ impl Walker<'_> {
 				Some(ty) => Some(ty),
 				None => annotation.map(|annotation| self.check_type_expr(annotation)),
 			};
+			if relation.is_none()
+				&& let Some(annotation) = annotation
+			{
+				self.check_reference_annotation(annotation);
+			}
 			// a relation side has no initializer (REL013, reported)
 			let default = if relation.is_some() { None } else { default };
 			let field_names: Vec<&str> = items

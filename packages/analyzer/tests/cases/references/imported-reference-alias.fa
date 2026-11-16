@@ -1,0 +1,8 @@
+-- file: nodes.fa
+export mutable: GrowingPool<{ id: Integer }> = []
+-- file: Ref.fa
+export type = { id: Integer } in nodes
+-- file: Refs.fa
+export type = Array<Ref>
+-- file: main.fa
+type Holder = { children: Refs } -- error: REF010

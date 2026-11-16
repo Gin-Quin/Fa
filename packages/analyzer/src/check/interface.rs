@@ -350,6 +350,12 @@ impl Walker<'_> {
 				}
 			}
 			let used = match self.a.resolution(node) {
+				_ if self
+					.a
+					.has_flags(node, crate::analysis::NodeFlags::TYPE_EXPR) =>
+				{
+					None
+				}
 				Resolution::Local(symbol) if module_level(self, symbol) => {
 					Some(self.symbol_key(symbol))
 				}
@@ -455,7 +461,20 @@ impl Walker<'_> {
 			.collect();
 		let key_set_applications = self.foreign_key_set_applications();
 		let key_loop_params = self.key_sets.loop_params.iter().copied().collect();
+		let reference_aliases = self
+			.a
+			.type_decls
+			.keys()
+			.copied()
+			.filter(|&decl| match self.view(decl) {
+				View::TypeDecl { value, .. } | View::ExportType { value, .. } => {
+					self.contains_reference_type(value)
+				}
+				_ => false,
+			})
+			.collect();
 		let interface = &mut self.s.source_file_mut(self.file).interface;
+		interface.reference_aliases = reference_aliases;
 		interface.keys = keys;
 		interface.externs = externs;
 		interface.type_functions = type_functions;
@@ -493,6 +512,12 @@ impl Walker<'_> {
 			let mut stack = vec![work];
 			while let Some(node) = stack.pop() {
 				let used = match self.a.resolution(node) {
+					_ if self
+						.a
+						.has_flags(node, crate::analysis::NodeFlags::TYPE_EXPR) =>
+					{
+						None
+					}
 					Resolution::Local(symbol) => {
 						let data = self.a.symbols.symbol(symbol);
 						let module_level = matches!(

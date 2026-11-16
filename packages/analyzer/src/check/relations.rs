@@ -1334,12 +1334,57 @@ impl Walker<'_> {
 		}
 	}
 
-	/// Whether a type expression contains `T in c`.
+	/// Whether a type expression contains stored references before erasure.
+	/// Follow resolved alias declarations (including imported summaries), not
+	/// structural TypeIds: `Array<Node in nodes>` and `Array<Node>` erase to
+	/// the same runtime type. Record types validate their own fields.
 	pub(crate) fn contains_reference_type(&self, n: NodeId) -> bool {
 		let mut stack = vec![n];
+		let mut seen = FxHashSet::default();
 		while let Some(node) = stack.pop() {
-			if matches!(self.view(node), View::RefType { .. }) {
-				return true;
+			if !seen.insert(node) {
+				continue;
+			}
+			match self.view(node) {
+				View::RefType { .. } => return true,
+				View::Object { .. } | View::TypedObject { .. } | View::Lambda { .. } => continue,
+				View::Name(_) | View::Access { .. } => {
+					let resolved = match self.view(node) {
+						View::Access { members, .. } => members.last().unwrap_or(node),
+						_ => node,
+					};
+					if let resolution @ Resolution::External(_) = self.a.resolution(resolved) {
+						if self
+							.s
+							.external_node(resolution)
+							.is_some_and(|(module, decl)| {
+								self.s.interface(module).is_some_and(|interface| {
+									interface.reference_aliases.contains(&decl)
+								})
+							}) {
+							return true;
+						}
+					}
+					if let Resolution::Local(symbol) = self.a.resolution(resolved) {
+						if let Some((module, decl)) = self.proxy_decl(symbol) {
+							if self.s.interface(module).is_some_and(|interface| {
+								interface.reference_aliases.contains(&decl)
+							}) {
+								return true;
+							}
+						} else {
+							let entry = self.a.symbols.symbol(symbol);
+							if entry.kind == SymbolKind::Type {
+								match self.view(entry.decl_node) {
+									View::TypeDecl { value, .. }
+									| View::ExportType { value, .. } => stack.push(value),
+									_ => {}
+								}
+							}
+						}
+					}
+				}
+				_ => {}
 			}
 			stack.extend(syntax::children(&self.tree, node));
 		}
@@ -1745,7 +1790,7 @@ impl Walker<'_> {
 			let diagnostic = self.diagnostic(
 				&REF010,
 				annotation,
-				"only the fields of a relation store references: declare it with `use`, or keep an index",
+				"this type contains stored references outside a relation: borrow with `use`, declare a relation with its reverse side, or an explicit `link` field in a growing owner (links are not implemented yet)",
 			);
 			self.report(diagnostic);
 		}

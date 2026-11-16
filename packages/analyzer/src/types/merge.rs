@@ -432,6 +432,7 @@ impl Merger<'_> {
 		}
 		let data = self.view.sig(sig);
 		let merged = FnSig {
+			reference: data.reference.map(|path| self.path(path)),
 			params: self.param_list(data.params),
 			ret: self.ty(data.ret),
 			throws: self.ty(data.throws),
@@ -453,6 +454,7 @@ impl Merger<'_> {
 		let params: Vec<ParamSig> = params
 			.into_iter()
 			.map(|param| ParamSig {
+				reference: param.reference.map(|path| self.path(path)),
 				ty: self.ty(param.ty),
 				..param
 			})

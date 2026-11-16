@@ -104,6 +104,38 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn a_last_use_structure_store_with_the_same_fields_never_copies() {
+		for (suffix, method) in [
+			("plain", ""),
+			(
+				"method",
+				"\nfunction size = (self): Integer => self.items.length",
+			),
+		] {
+			let source = format!(
+				"type Box = {{ items: Array<Integer>{method}\n}}\nfunction transfer = (value: Integer): {{ items: Array<Integer> }} => {{\nlet box = Box {{ items = [value] }}\nbox\n}}\nconsole.log(transfer(7).items.length)\n"
+			);
+			for (name, target) in [
+				("move-view-native", Target::Native),
+				("move-view-wasm", Target::Wasm),
+			] {
+				let ir = ir_at_target(
+					&format!("{name}-{suffix}"),
+					&source,
+					true,
+					OptLevel::O0,
+					target,
+				);
+				let body = function(&ir, "fa.transfer");
+				assert!(
+					!body.contains("@fa.copy"),
+					"a last-use store must transfer its array: {body}"
+				);
+			}
+		}
+	}
+
+	#[test]
 	fn explicit_converting_copy_runs_one_owning_operation() {
 		let source = "function widen = (small: Array<Int8>): Array<Integer> => copy small\nlet small: Array<Int8> = [1, 2]\nconsole.log(small.length, widen(small).length)\n";
 		for (name, target) in [

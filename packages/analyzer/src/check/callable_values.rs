@@ -251,6 +251,11 @@ impl Walker<'_> {
 				.unwrap_or(self.a.symbols.symbol(symbol).ty);
 			let actual = self.narrowed_place_type(place, declared);
 			let key = (lambda, symbol);
+			let places = self.capture_places.entry(key).or_default();
+			if !places.contains(&place) {
+				places.push(place);
+				self.retention_version += 1;
+			}
 			let captured = match self.capture_types.get(&key).copied() {
 				Some(previous) if previous != actual => self.s.types.join(previous, actual),
 				_ => actual,
@@ -313,8 +318,14 @@ impl Walker<'_> {
 				| View::TypeDecl { .. }
 				| View::ExportType { .. }
 				| View::Watch(_)
-				| View::Start(_)
 				| View::Test { .. } => continue,
+				View::Do(_)
+					if self
+						.parent(node)
+						.is_some_and(|parent| matches!(self.view(parent), View::Start(_))) =>
+				{
+					continue;
+				}
 				View::Name(_) => {
 					if let Resolution::Local(symbol) = self.a.resolution(node)
 						&& let Some(declaration) = self.direct_function(symbol)

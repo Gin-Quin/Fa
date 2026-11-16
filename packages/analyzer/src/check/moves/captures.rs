@@ -7,6 +7,36 @@ use crate::syntax::{self, View};
 use crate::types::{FieldFlags, Ownership, TypeKind};
 
 impl Walker<'_> {
+	/// An owned environment reads its captures at creation, including when
+	/// the function is never called. Keep the source-place snapshot.
+	pub(super) fn capture_creation_reads(
+		&mut self,
+		reads: &mut rustc_hash::FxHashMap<NodeId, Vec<SymbolId>>,
+	) {
+		let functions: Vec<_> = self
+			.a
+			.escapes
+			.iter()
+			.filter_map(|&lambda| self.a.function(lambda))
+			.map(|info| {
+				(
+					info.lambda,
+					info.declaration.unwrap_or(info.lambda),
+					info.captures.clone(),
+				)
+			})
+			.collect();
+		for (lambda, creation, captures) in functions {
+			let mut places = Vec::new();
+			for symbol in captures {
+				if let Some(recorded) = self.capture_places.get(&(lambda, symbol)) {
+					places.extend(recorded.iter().copied());
+				}
+			}
+			self.observe_places(creation, places, reads);
+		}
+	}
+
 	pub(crate) fn check_unique_captures(&mut self, lambda: NodeId, at: NodeId) {
 		let Some(info) = self.a.function(lambda).cloned() else {
 			return;
@@ -163,6 +193,26 @@ mod tests {
 		] {
 			assert_eq!(codes(&format!("{resource}{body}")), ["MEM003"]);
 		}
+	}
+
+	#[test]
+	fn escaping_named_functions_retain_a_started_local_callee() {
+		assert_eq!(
+			codes(
+				"type Held = { name: String, function destroy = (self) => {} }\ntype Work = () => Task<Integer>\nfunction bad = (held: Held): Work => {\nfunction read = (): Integer => held.name.length\nfunction outer = (): Task<Integer> => start read()\nouter\n}\n"
+			),
+			["MEM003"]
+		);
+	}
+
+	#[test]
+	fn an_escaping_capture_reads_its_source_when_it_is_created() {
+		assert_eq!(
+			codes(
+				"type Reader = () => Integer\nfunction make = (): (Array<Integer>, Array<Reader>) => {\nlet items = [1]\nlet first = items\nlet callbacks: Array<Reader> = [() => items.length]\n(first, callbacks)\n}\n"
+			),
+			["MEM004"]
+		);
 	}
 
 	#[test]

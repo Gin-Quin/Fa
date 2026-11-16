@@ -1572,3 +1572,8 @@ The first concrete capture guard uses the lead-authorized conservative whole-bin
 ### Ownership enforcement: retained local function handles (2026-11-16)
 
 An escaping function's named local-function dependencies are handles, not an expansion of the callee's data captures. Discover references to enclosing/sibling local functions separately from the legacy data-capture list; self references, nested declarations, type syntax and module-level functions are not external environment handles. The same dependency traversal feeds escape validation and parameter-retention origins, including published module summaries. A returned sibling wrapper therefore retains the callback parameter used by its callee. This prepares declaration/self bindings and initialization checks; it does not yet change when the targets construct a named environment.
+
+
+### Ownership enforcement: capture-creation observations (2026-11-16)
+
+Owned capture creation is a runtime use even if the callback is never called. Save its designated source places alongside creation-time types and callable origins, and feed that event to the same ownership CFG as ordinary reads. Named declarations have runtime events; their bodies are still separate graphs. A store before an escaping capture cannot move its source past that creation event: MEM004 names the later creation and offers the existing explicit-copy edit at the earlier store. Named handle discovery traverses the callee/arguments evaluated by `start call()`, but a `start do` body remains a separate capture context. This observation step does not itself enable capture transfers or change named environment construction.

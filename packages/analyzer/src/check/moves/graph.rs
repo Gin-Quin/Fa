@@ -1,5 +1,5 @@
 //! Runtime control flow for ownership: source order, loop back edges and
-//! lexical failure edges. Declaration/type syntax never executes here.
+//! lexical failure edges. Type syntax and declared function bodies do not execute.
 
 use std::collections::VecDeque;
 
@@ -205,7 +205,17 @@ impl Builder<'_, '_> {
 		let tree = self.walker.tree.clone();
 		match syntax::view(&tree, node) {
 			View::TypeDecl { .. } | View::ExportType { .. } => next,
-			View::Function { .. } | View::ExportFunction { .. } => next,
+			View::Function { value, .. } | View::ExportFunction { value, .. } => {
+				let defines = self
+					.walker
+					.a
+					.symbols
+					.symbol_of_decl(node)
+					.into_iter()
+					.collect();
+				let tail = self.end(node, next, exits, defines);
+				self.expression(value, tail, exits)
+			}
 			View::Lambda { .. } | View::Watch(_) => self.end(node, next, exits, SmallVec::new()),
 			View::Module { statements } | View::Block { statements } => {
 				let tail = self.end(node, next, exits, SmallVec::new());

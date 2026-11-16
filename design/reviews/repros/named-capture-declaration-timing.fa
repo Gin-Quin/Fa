@@ -1,0 +1,12 @@
+-- Expected: 4 4. Named escaping captures belong to the declaration.
+type Reader = () => Integer
+
+function make = (seed: Integer): Reader => {
+	mutable n = seed
+	function read = (): Integer => n
+	n += 1
+	read
+}
+
+static compiled = @make(4)()
+console.log(compiled, make(4)())

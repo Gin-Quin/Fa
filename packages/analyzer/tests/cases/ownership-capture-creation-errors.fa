@@ -1,0 +1,16 @@
+-- Capture creation uses the source even if that callback is never called.
+type Reader = () => Integer
+
+function anonymous = (): (Array<Integer>, Array<Reader>) => {
+	let items = [1]
+	let first = items -- error: MEM004
+	let callbacks: Array<Reader> = [() => items.length]
+	(first, callbacks)
+}
+function alias = (): (Array<Integer>, Array<Reader>) => {
+	let items = [1]
+	use borrowed = items
+	let first = items -- error: MEM004
+	let callbacks: Array<Reader> = [() => borrowed.length]
+	(first, callbacks)
+}

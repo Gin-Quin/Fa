@@ -1,0 +1,17 @@
+-- prints: 2 1
+-- prints: 2 1
+
+type Reader = () => Integer
+
+function independent = (): (Integer, Integer) => {
+	let items = [1]
+	mutable first = copy items
+	let callbacks: Array<Reader> = [() => items.length]
+	first.push(2)
+	(first.length, callbacks[0]())
+}
+
+static compiled = @independent()
+console.log(compiled[0], compiled[1])
+let executed = independent()
+console.log(executed[0], executed[1])

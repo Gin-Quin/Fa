@@ -165,6 +165,7 @@ impl Walker<'_> {
 	/// arguments. Include globals and transitive local calls in that read.
 	fn ownership_reads(&mut self) -> FxHashMap<NodeId, Vec<SymbolId>> {
 		let mut reads = self.move_reads.clone();
+		self.capture_creation_reads(&mut reads);
 		let defaults: FxHashSet<_> = self
 			.a
 			.functions
@@ -452,7 +453,7 @@ impl Walker<'_> {
 		self.move_places.get(&node).cloned().unwrap_or_default()
 	}
 
-	fn observe_places(
+	pub(super) fn observe_places(
 		&mut self,
 		node: NodeId,
 		places: impl IntoIterator<Item = PlaceId>,

@@ -3652,6 +3652,15 @@ static void unit_slice_positions(const uint8_t *text, size_t length, size_t capa
 		                  view ? string_view_capacity(capacity, 0) : SIMPLE};
 		return;
 	}
+	if (view == 1) {
+		// Retain the two low-half bytes or the three high-half bytes. They
+		// remain inside the owner and readers expose their logical units.
+		if (!fa_virtual_string_slices) { __builtin_trap(); }
+		size_t start = first / 2 + ((first & 1) ? 2 : 0);
+		size_t stop = last / 2 + ((last & 1) ? 3 : 0);
+		*out = (FaString){text + start, stop - start, string_view_capacity(capacity, units)};
+		return;
+	}
 	if (!(first & 1) && !(last & 1)) {
 		size_t bytes = last / 2 - first / 2;
 		if (view || (string_static(capacity) && bytes > 1)) {
@@ -3838,7 +3847,7 @@ FA_EXPORT const void *fa_string_slice_view(const uint8_t *text, size_t length, s
 
 FA_EXPORT const void *fa_string_slice_region(const uint8_t *text, size_t length, size_t capacity,
                                              int64_t start, int64_t end, int8_t flags, FaString *out) {
-	const void *error = string_slice(text, length, capacity, start, end, flags, out, 1);
+	const void *error = string_slice(text, length, capacity, start, end, flags, out, 2);
 	if (!error && string_length(out) > INLINE_STRING_BYTES &&
 	    ((out->capacity & KIND_MASK) == KIND_MASK || string_counted_view(out->capacity))) {
 		*out = owned_copy_with(string_bytes(out), string_length(out), out->capacity & STRING_FLAGS);

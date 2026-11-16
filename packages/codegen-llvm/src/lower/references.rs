@@ -534,9 +534,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				)?
 				.into_pointer_value();
 			self.raise_if_error(error)?;
-			self.cleanups
-				.borrow_mut()
-				.push(super::ownership::Cleanup::Local(slot));
 			return Ok(slot);
 		}
 		if self.is_place(inner) {

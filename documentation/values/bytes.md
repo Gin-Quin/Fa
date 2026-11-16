@@ -10,6 +10,15 @@ assert greeting.length == 2
 assert greeting[0] == 104
 ```
 
+`Bytes` is a collection: keeping both an original and a second owner requires `copy`; a last use moves it. Objects, tuples, optionals and unions owning `Bytes` follow the same rule. This differs from `String`, which is an ordinary value.
+
+```fa
+mutable original = Bytes.from([1, 2])
+mutable duplicate = copy original
+duplicate[0] = 3
+console.log(original[0], duplicate[0]) -- 1 3
+```
+
 `Bytes` is a `Uint8Array` on JavaScript targets, and a block of memory natively.
 
 ## Reading and writing bytes

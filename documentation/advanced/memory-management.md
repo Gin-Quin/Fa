@@ -1,285 +1,333 @@
 # Memory management
 
-Fa compiles to JavaScript, to native code and to WebAssembly. The last two are low-level targets with no garbage collector, so memory has to be managed. To allow maximum performance and lean WebAssembly output, Fa does not come with a garbage collector either: in Fa, the compiler manages memory for you, from rules simple enough to hold in your head.
+Fa manages memory without a garbage collector on native and WebAssembly targets. Objects live inline, collections own their storage, and references name the places they designate. JavaScript has the same observable rules.
 
-Here is the whole model:
+## Copies, moves, unique values and shared handles
 
-1. **Objects** are values stored **inline**, where they are declared: in the frame of a function, inside their parent object, or in a collection slot. They are never allocated on their own.
-2. **Collections** (arrays, sets, maps, pools, columnars) own the **heap**. The only other heap allocations are made by the compiler: for [recursive types](#recursive-types), and for the [blocks listed below](#heap-blocks-made-by-the-compiler).
-3. **Every assignment is a copy**, except for the thread-safe handles (`Mutex`, atomics, `Channel`), which are shared. The compiler turns a copy into a move when the source is not used afterwards, by its name or through an alias. The difference is never observable: identity is not observable, and Fa has no destructors, except the `destroy` of the types that hold a C resource, which can't be copied (see [foreign code](/advanced/foreign-code#releasing-c-resources)).
-4. **`use` creates an alias** instead of copying. An alias cannot outlive the value it refers to.
-5. **Function parameters are immutable references**, so arguments are never copied when passed. A function that modifies a parameter declares it with the `mutates` effect.
-6. **Iterating over a collection yields references**, so iteration never copies.
-7. **Every value is destroyed at the end of its scope.**
-8. **A field holds a copy**, unless it is one side of a **relation**: a reference that names the collection its target lives in (`bestFriend: (Person in people)?`), mirrored by a declared reverse side (`bestFriendOf: Pool<people->bestFriend>`), and kept consistent by the compiler.
+Storing a value means initializing or replacing a local, a module value, a field or a collection element, returning an owned result, or putting a capture into an escaping closure. The same rules apply at every such site:
 
-You never ask *"when should I free this?"* or *"which allocator should I use?"*. The question in Fa is *"where should this object live?"*. And the answer is part of the type: a `Person` stored in the collection `persons` has the type `Person in persons` (see [owned references](/advanced/owned-references)).
+| Category | Storing a value read from a place | `copy value` |
+| --- | --- | --- |
+| Ordinary value | independent value semantics; the source remains usable | an independent value |
+| Structure | move at a proven last use; otherwise `MEM004` | an independent deep copy, leaving the source usable |
+| Unique value, or a value owning one | move; the source and its aliases become invalid | `MEM003`: cannot be copied |
+| Synchronization handle | another handle to the same state | another handle to the same state |
+
+Unique ownership takes precedence: an array of resources is unique, not a copyable collection. Shared handles are ownership boundaries: a `Mutex<Array<Integer>>` shares its state; copying its handle does not duplicate its array.
+
+### Ordinary values
+
+Numbers, booleans, `none`, ranges, enumerations, flags, strings, and nonrecursive objects, tuples, optionals and unions containing only ordinary values have value semantics. Assignment leaves both values usable. Strings are ordinary values: a string is an immutable sequence; `+=` replaces a variable's value, and never changes another string.
+
+```fa
+mutable person = { name = "Ana", age = 20 }
+let previous = person
+person.name = "Bao"
+console.log(previous.name, person.name) -- Ana Bao
+```
+
+An object whose only non-scalar fields are strings is ordinary. `String` never requires `copy`. The native cost of storing a long string is specified in the implementation notes of this page and of [strings](/values/strings).
+
+### Structures
+
+A **structure** is a collection, a value of a recursive type, or any value owning one transitively through fields, tuples, optionals or unions. Its owned data can grow without a bound given by the type, so it is never copied silently: its last use moves, and otherwise keeping two owners needs `copy` (`MEM004`). This category excludes scalars, strings, ranges, enumerations, flags, and nonrecursive objects, tuples, optionals and unions made only of those. Unique ownership still takes precedence; references borrow and shared handles keep identity rather than duplicating their payload.
+
+The collection types are `Bytes`, `Array`, `GrowingArray`, `Set`, `GrowingSet`, `Map`, `GrowingMap`, `Pool`, `GrowingPool`, `Columnar`, `GrowingColumnar` and `OrderedColumnar`. This includes tables represented by maps or columnars, and a relation collection when materialized as an owned value. A relation field itself is a link, not an owned copy of its targets.
+
+An object owns a structure when one of its data fields is a collection, a recursive value, or owns one transitively. Tuples, optionals and unions own the structures in their items or alternatives; named-union payloads follow the same rule. A union is copyable only if every remaining alternative is copyable. Narrowing to a particular alternative uses that alternative's category. A fixed inline `CArray` inherits its item category; its fixed inline storage alone does not make it an owning collection. References and shared handles stop this traversal: a reference borrows its target, a synchronization handle shares its state.
+
+```fa
+mutable original = { items = [1, 2] }
+mutable duplicate = copy original
+duplicate.items.push(3)
+console.log(original.items, duplicate.items) -- [1, 2] [1, 2, 3]
+```
+
+```fa
+let pair = ([1, 2], 3)
+let duplicatePair = copy pair
+let optional: Array<Integer>? = [4]
+let duplicateOptional = copy optional
+let choice: Array<Integer> | String = [5]
+let duplicateChoice = copy choice
+console.log(pair, duplicatePair, optional, duplicateOptional, choice, duplicateChoice)
+```
+
+`Bytes` is a collection because its items can be changed in place:
+
+```fa
+mutable bytes = "hello".toUtf8()
+mutable duplicate = copy bytes
+duplicate[0] = 72
+console.log(bytes[0], duplicate[0]) -- 104 72
+```
+
+A copy preserves contents, not spare capacity. Reserve the destination separately if it needs more room.
+
+### Explicit `copy`
+
+`copy expression` evaluates its operand once and produces a fresh, independent value of the operand's type. An expected type can narrow the stored result, as for any assignment. It is a value, never an assignable place or an alias. An explicit expected-type projection, such as `function data = (resource: Resource): Plain => copy resource`, copies only the copyable plain data fields; it does not duplicate the resource or its destructor. A retained unique field still makes that projection illegal. It recursively copies owned data, including nested collections; shared handles remain shared. It accepts ordinary values too. It cannot duplicate a Task, a resource or any owned composite containing one (`MEM003`).
+
+Access, indexing and calls bind more tightly than `copy`; arithmetic binds less tightly: `copy source.items + other` means `(copy source.items) + other`. Parenthesize a larger operand: `copy (left ?? right)`. `copy` is contextual: `copy(x)` calls a function named `copy`, `copy[0]` indexes a value named `copy`, `object.copy` names a field or method, and `let copy = 1` declares a name. A spaced prefix starts a copy; `copy - 2` remains subtraction, and `if copy { … }` tests the value named `copy`.
+
+```fa
+function duplicate = <Item>(value: Item): Item => copy value
+let source = [1, 2]
+let independent = duplicate(source)
+console.log(source, independent)
+```
+
+Generic bodies infer copy conditions on their type parameters. They are checked at each concrete instantiation, including imports, wrappers and permitted function-valued callbacks. No `Copyable` bound is written. `duplicate<Integer>` and `duplicate<Array<Integer>>` work; `duplicate<Task<Integer>>` and a resource instantiation fail with `MEM003`. Returning a borrowed generic parameter without `copy` requires an ordinary instantiation; a structure instantiation fails with `MEM004`. Merely reading or borrowing a generic parameter imposes no copy requirement.
+
+### Last uses and moves
+
+A move transfers ownership without duplicating the owned data. The last use of an owner is the last use of its parts: reading a structure field from an owner with no later use transfers that field and destroys unused siblings. Patterns (`when` and destructuring) over structures use exactly the same rules as field reads in that storage or borrowing position. The old place and every reference into it become invalid, including `use` aliases, aliases of fields or elements, and captures that still read it. Reading, writing, passing, indexing, calling a method, testing or capturing that old value counts as using it. Reading any field of a moved whole object is a use of that object.
+
+```fa
+function build = (): Array<Integer> => {
+	let values = [1, 2]
+	let result = values -- last use: moves the array
+	result
+}
+console.log(build())
+```
+
+Last use is a control-flow property, not the last textual occurrence. Mutually exclusive branches can each transfer the same owner if no later path uses it. Loop back edges count: moving an outer value on one iteration cannot leave the next iteration using it. A replacement can consume the previous value and install the new one (`values = copy values` is an explicit copy; `head = Link { next = head }` can transfer the old root). A failed operation follows the failure edge with the ownership state at that evaluation point; a lexical `catch` does not restore a moved value.
+
+```fa
+function choose = (flag: Boolean): Array<Integer> => {
+	let values = [1]
+	if flag { values } else { values }
+}
+console.log(choose(true), choose(false))
+```
+
+The compiler must prove exclusive ownership. A borrowed parameter, a `use` alias, an iteration variable, an indexed element still owned by a collection, or an imported module value cannot silently surrender its owner's storage. Use `copy` to obtain independent copyable data; use `take` to remove an element with ownership. The fields of a last-use ordinary owner, fresh or already bound, may transfer while its unused fields are destroyed. A resource's fields cannot move out from under `destroy`: transfer the whole resource, or explicitly copy a copyable data field.
+
+### Unique values
+
+A `Task`, a type declaring `destroy` (a resource), and every composite owning one are unique. The built-in move-only worker, worker-pool and socket handles retain their documented unique lifetimes. Assignment transfers ownership; using the old owner is `MEM002`. `copy` is `MEM003`. A second resource requires a new instance, such as `open`, `create` or a constructor.
+
+```fa
+let task = start do { 42 }
+let owner = task -- transfers the task
+console.log(await owner)
+```
+
+Resource parameters borrow. The callee never finalizes the caller's resource, even if it contains a Task. It may read it repeatedly or mutate it under a declared effect; it cannot return it as an owned result, store it in another owner or move one of its unique fields. Task parameters are the exception to the ordinary borrowed-parameter rule: a Task, or a plain composite owning one, is transferred to its callee and consumed there. That transfer stops at a resource or shared-handle boundary.
+
+```fa
+-- Held.foreign.fa: only foreign files may declare destroy.
+type Held = { value: Integer, function destroy = (self) => {} }
+function read = (held: Held): Integer => held.value
+let first = Held { value = 1 }
+let second = Held { value = 2 } -- a new resource, not a copy
+console.log(read(first), read(first), read(second)) -- parameters only borrow
+```
+
+An implicit function adapter cannot copy a resource result into a plain data result. Write the projection and any required `copy` visibly in the source function. A borrowed structural view can read fields for the duration of a call; it does not remove the resource's destructor.
+
+### Shared handles
+
+`Mutex`, `AtomicInteger`, `AtomicBoolean` and `Channel` handles share identity: assignment or `copy` gives access to the same state. A composite containing both a handle and a structure copies its owned data independently and retains the handle. Sharing a handle does not authorize an unprotected borrow of its payload.
+
+```fa
+use { Mutex } = std.concurrency
+mutable mutex = Mutex { value = 1 }
+mutable same = mutex
+-- Both names designate the same protected value.
+```
 
 ## Objects are stored inline
 
-An object is never allocated on its own: a local object lives in the frame of its function, a field in its parent, an element in its collection. This has three consequences worth understanding:
-
-- Heap allocation happens at the collection level, not at the object level. Allocations are few and large, rather than many and scattered, and they are released at once.
-- Objects stay small relative to collections, so copying them is cheap.
-- An object has no pointer of its own to dangle, and can't form a reference cycle, so objects are safe by construction.
-
-```fa
-mutable object = {
-	x = 12
-	hello = "world"
-	nested = {
-		y = 21
-	}
-}
-
--- unlike TypeScript, this is a deep copy, not a shared pointer
-let object2 = object
-
--- unlike Rust, there is no ownership transfer: the original is still usable
-object.hello = "you"
-
-console.log(object2.hello) -- "world" (TypeScript would print "you")
-```
-
-### Isn't copying expensive?
-
-Less than it looks, for two reasons.
-
-Fa still uses references wherever it is safe to: function parameters, iteration, aliases and relations. You only copy when a copy is what you actually meant.
-
-And because Fa is [structurally typed](/advanced/structural-typing), a function usually takes only the fields it needs rather than the whole object:
-
-```fa
-function parametersAreReferences = ({ foo: String, bar: String }) => {
-	-- `foo` and `bar` are references into the caller's object: nothing is copied
-}
-```
-
-The same code in TypeScript, destructuring the parameter, copies every destructured field. The default copy behavior costs close to nothing, and buys simplicity and memory safety.
+An ordinary object lives in its function frame, in a parent field or in a collection slot. It has no separate allocation. Heap storage belongs to collections, recursive values, task frames, escaping environments and shared handles. The physical choice of frame, static or heap storage does not change ownership.
 
 ### Recursive types
 
-An object cannot contain itself directly, because its size would be infinite:
+An object cannot contain itself directly: its size would be infinite. Recursion through a union or optional is allowed; the compiler supplies the indirection. Each value owns its children; use a pool and [relations](/advanced/relations) for a graph with shared nodes.
 
 ```fa
-type Node = {
-	value: String
-	next: Node -- error: `Node` has infinite size
-}
-```
-
-Recursion through a [union](/types/unions), including an [optional](/values/optionals) (`T?` is the union `T | None`), is allowed. The compiler stores the recursive part on the heap automatically, but it is still a copy: each value owns its children, which are copied with it and destroyed with it.
-
-```fa
-type Node = {
-	value: String
-	next: Node? -- valid: recursion through an optional
-}
-
+type Node = { value: Integer, next: Node? }
 type Tree = Union {
 	Leaf = { value: Integer }
 	Branch = { left: Tree, right: Tree }
 }
 ```
 
-There is no `Box` type, and nothing to write: the heap allocation is an implementation detail.
+A recursive value is a structure even when its leaves contain only ordinary data. Building and consuming a list use moves, including when assignment replaces the variable being read:
 
-Because each value owns its children, these structures are trees: two nodes can't share the same child. For structures where objects need to point to each other (graphs, doubly linked lists, parents and children), store the objects in a `Pool` and link them with [relations](/advanced/relations): `next: (Node in nodes)?` and its reverse side `previous: (nodes->next)?`.
+```fa
+type List = { head: Integer, tail: List? }
+mutable list: List? = none
+for head in 0..3 {
+	list = List { head = head, tail = list } -- moves the old root into tail
+}
+mutable cursor = list -- last use transfers the list
+while cursor is not none {
+	console.log(cursor.head)
+	cursor = cursor.tail -- moves the child; drops the rest of the old root
+}
+```
+
+To walk without consuming, use a reseatable reference:
+
+```fa
+type List = { head: Integer, tail: List? }
+let list = List { head = 1, tail = List { head = 2, tail = none } }
+mutable use cursor: List? = list
+while cursor is not none {
+	console.log(cursor.head)
+	reuse cursor = cursor.tail
+}
+console.log(list.head) -- the owner is still usable
+```
+
+Keeping a child as a second owner requires `copy`; a reference needs `use`:
+
+```fa
+type List = { head: Integer, tail: List? }
+let list = List { head = 1, tail = none }
+let rest = list.tail -- error: MEM004: use `use rest = list.tail` or `copy list.tail`
+console.log(list.head, rest)
+```
+
 
 ## Collections own the heap
 
-Collections are the only explicit way to use the heap in Fa. Instead of `alloc` and `realloc`, you add elements to a collection, and each collection uses the allocation strategy that suits it.
+A collection owns its elements and releases them with its storage. Construction builds fresh values directly in their final slots where possible. Passing an existing value into an insertion is a storage site and follows the category rules above.
 
 ### Heap blocks made by the compiler
 
-Besides collections and [recursive types](#recursive-types), the compiler allocates a heap block, which you never write, for:
-
-- the frame of a [task](/advanced/concurrency#tasks), which outlives the call that started it, and is freed when the task ends;
-- the environment of an escaping [closure](#closures): the copies it captured, owned by the closure, copied and destroyed with it;
-- the thread-safe handles: a [`Mutex`](/advanced/concurrency#mutexes), an [atomic](/advanced/concurrency#atomics) or a [`Channel`](/advanced/concurrency#the-channel-type).
-
-A thread-safe handle is reference-counted: copying it shares the same mutex, atomic or channel instead of creating a new one, so that several tasks and threads can use it. This is the only exception to "every assignment is a copy", and the only reference counting in Fa. The handle is destroyed when its last copy is.
-
-A collection is destroyed when its scope ends, releasing everything it holds in one step.
+The compiler also allocates recursive nodes, task frames and escaping closure environments when their lifetime requires it. Synchronization handles use reference counting. An implementation may count immutable function environments and local acquisition/subscription control blocks to release them once; this does not make resources or Tasks copyable. Ordinary objects and strings have no reference count.
 
 ### Iterating yields references
 
-Iterating over a collection yields references to its elements, so nothing is copied. When the collection is mutable, the loop variable is a mutable reference: writing to it writes into the collection.
+Iteration borrows elements. It does not copy them. A loop over a mutable array can modify its elements:
 
 ```fa
-mutable array = [1, 2, 3]
-
-for element in array {
-	element += 1 -- writes into the array
-}
-
-console.log(array) -- [2, 3, 4]
+mutable values = [1, 2, 3]
+for item in values { item += 1 }
+console.log(values) -- [2, 3, 4]
 ```
+
+Storing an ordinary element copies its value. Storing a structure element requires `copy` unless it can transfer from a last-use owner; storing a unique element requires removal by an owning operation such as `take`.
 
 ### Aliases
 
-Reading an element out of a collection copies it. To work on the stored value itself, create an alias with `use`:
+`use` designates a place, without copying or taking ownership. It cannot outlive that place. `mutable use` can later be reseated with `reuse`; it is still a reference.
 
 ```fa
-mutable people: Array<Human> = [
-	{ name = "John", age = 20 }
-	{ name = "Jane", age = 21 }
-	{ name = "Joe", age = 22 }
-]
-
--- a copy: the array is untouched
-mutable copiedHuman = people[1]
-copiedHuman.age = 23
-console.log(people[1].age) -- 21
-
--- an alias: the same value as `people[1]`
-use favoriteHuman = people[1]
-favoriteHuman.age = 23 -- exactly the same as writing `people[1].age = 23`
-console.log(people[1].age) -- 23
+mutable values = [1, 2]
+use first = values[0]
+first += 1
+console.log(values) -- [2, 2]
 ```
 
-An alias to an element of a collection is called an [owned reference](/advanced/owned-references): its type tells which collection owns it (`Human in people`), and the compiler tracks when it is invalidated. After that, it must be declared again before it is used.
-
-`use` takes a place (a value, a field, an element), or a call that returns a reference, like `pool.add` below. Anything else is an error: `use total = computeTotal()` has no place to designate, so write `let`. See [`use` and `mutable use`](/advanced/reference-checking#use-and-mutable-use).
-
-Collections that return a reference when an element is added, like [`Pool`](/collections/pools), are used with `use` too:
-
-```fa
-mutable pool: Pool<Human> = []
-
-use john = pool.add({ name = "John", age = 20 }) -- a reference to the stored human
-john.age += 1 -- modifies the human stored in the pool
-```
-
-The literal is built directly in the pool, without a temporary object to copy. Binding the result with `let` would copy the stored human out of the pool, so it is a bad practice:
-
-```fa
-let john = pool.add({ name = "John", age = 20 }) -- bad practice: `john` is a copy of the stored human
-```
+`use` needs a place or a call returning a reference, such as `pool.add`; a call returning an ordinary value has no place to alias. A relation field is a stored link managed by its collection, not an independently owned target. See [owned references](/advanced/owned-references) and [relations](/advanced/relations).
 
 ### Removing while iterating
 
-Adding or removing elements of a collection while iterating over it would invalidate the references the iteration hands out, or change what it visits, so the compiler rejects it:
-
-```fa
-mutable pool: Pool<Human> = []
-
-for human in pool {
-	if human.name == "John" {
-		pool.delete(human) -- error: `pool` is being iterated
-	}
-}
-```
-
-Use `deleteWhere` instead:
-
-```fa
-pool.deleteWhere((human) => human.name == "John")
-```
-
-The same goes for the operations that change a collection indirectly, like deleting a linked object, which also removes it from the [relations](/advanced/relations) that pointed at it. See [iteration](/advanced/reference-checking#iteration).
+An operation that invalidates an iteration's references is rejected. Use `deleteWhere` to remove matching elements, rather than deleting through a live iteration. See [iteration](/advanced/reference-checking#iteration).
 
 ## Parameters are references
 
-Parameters are immutable references: passing a value to a function never copies it. A function that modifies a parameter declares it with the `mutates` effect, and can only be called with a `mutable` value:
+Ordinary and structure parameters are borrowed, never copied at a call. A resource parameter is borrowed too. Only the explicit Task-consuming contract above transfers ownership. `mutates` permits mutation of a borrowed place and requires a mutable argument.
 
 ```fa
-function birthday = (human: Human) mutates human => {
-	human.age += 1
-}
-
-mutable john = Human { name = "John", age = 20 }
-birthday(john) -- `john` is modified in place, without any copy
+function append = (values: Array<Integer>) mutates values => values.push(3)
+mutable values = [1, 2]
+append(values)
+console.log(values) -- [1, 2, 3]
 ```
 
-A mutation keeps the mutated place valid, but replacing a value destroys what it owned: the compiler deduces from the type which references are no longer valid after the call. Writing a number invalidates nothing; writing a string invalidates its slices; mutating a whole array, as `push` does, invalidates every reference into it. A function that removes precise elements of a collection, or shifts them, declares the `invalidates` effect instead. See [owned references](/advanced/owned-references#invalidation).
+Storing a borrowed structure is different from passing it: write `copy`. Destructuring a parameter also borrows its fields. Returning a reference is allowed only when the caller already owns its target; returning owned data follows the storage rules.
 
 ## Lifetimes and destruction
 
-Every value is destroyed at the end of the scope that declared it, in reverse order of declaration.
+Owned values are destroyed in reverse order of declaration at scope exit, including error and cancellation paths. A moved source is no longer an owner and is not destroyed a second time. Replacing a mutable place destroys its previous value. A resource's exact written `destroy`, bound with its owner and generic capabilities at construction, runs once before its fields are destroyed. It is never selected by searching for an equal structural type.
 
 ```fa
-function example = () => {
-	mutable a: Array<Integer> = []
-	mutable b: Array<Integer> = []
-} -- `b` is released, then `a`
+do {
+	let first = [1]
+	let second = [2]
+	console.log(first, second)
+} -- second, then first
 ```
-
-Because references cannot outlive what they point into, and because nothing is shared implicitly, destruction never has to be deferred, counted or traced. There is no garbage collector, no reference counting (except for the [thread-safe handles](#heap-blocks-made-by-the-compiler)), and no `free`.
-
-Returning a reference out of a function is allowed only when it points into something the caller already owns. Otherwise, the value is copied out. See [owned references](/advanced/owned-references#returning-a-reference).
 
 ## Closures
 
-A closure that **escapes** (it is stored, returned, or given to a started task) captures a **copy** of each value it uses, taken when it is created, exactly like an assignment. This includes the values designated by parameters, `use` aliases and loop variables. Such a closure can be stored, returned, and sent to another thread without any lifetime question arising.
+A nonescaping closure borrows its captures. An escaping closure owns immutable captures, using the same storage rules: ordinary values copy, a structure can move at its last use, and otherwise needs an explicit independent value before capture. An escaping closure cannot own any unique value, even at its last use; there is no one-shot closure exception (`MEM003`). A `mutable use` cannot be captured. Module-level values and requirements retain their separate rules in [closures](/functions/defining-functions#closures).
 
 ```fa
-type Greeter = (name: String) => String
-
-function makeGreeter = (greeting: String): Greeter => (name) => "{greeting}, {name}!"
-
-let greetings = [makeGreeter("Hello"), makeGreeter("Hi")]
+type Reader = () => Integer
+function reader = (input: Array<Integer>): Reader => {
+	let snapshot = copy input
+	() => snapshot.length -- last use moves snapshot into the environment
+}
+console.log(reader([1, 2])())
 ```
 
-A closure that does not escape (it is called during the call it is passed to, like the callback of `map`) captures by reference instead: it sees the current values, as in JavaScript, and copies nothing. The compiler checks that the call doesn't modify what the closure reads (see [arguments that alias](/advanced/reference-checking#arguments-that-alias)). A closure can't capture a `mutable use`. See [closures](/functions/defining-functions#closures).
+Across workers, use an independent copy, a common `Mutex`, or a proven exclusive transfer invalidating the source and all its aliases. An unprotected alias or a value borrowed from `Guard.value` cannot escape its protection. A Task never crosses a worker boundary, including inside another value. See [thread safety](/advanced/concurrency#thread-safety-and-synchronization).
+
+## Diagnostics and fixes
+
+| Code | Message and rule | Fix |
+| --- | --- | --- |
+| `MEM002` | Value was moved or invalidated; it cannot be used here. Also: a borrowed resource or a field needed by its destructor cannot transfer ownership. | Use the new owner, copy copyable data before moving, acquire a new resource, or transfer the complete resource. |
+| `MEM003` | `T` owns a Task or a value with `destroy` and can't be copied; move it instead. An escaping capture cannot own it either. | Move the owner, create a new resource, or keep the closure nonescaping. `copy` cannot fix this. |
+| `MEM004` | Copying `T` duplicates a structure; write `copy value` explicitly or stop using the source so it can move. | Write `copy` at the storage site; for a capture, first create a local snapshot and capture its last use. |
+
+The following deliberately invalid example documents `MEM004`. Enforcement is a later implementation slice:
+
+```fa
+let source = [1, 2]
+let duplicate = source -- error: MEM004: write `copy source`
+console.log(source, duplicate)
+```
+
+A move invalidates aliases too (`MEM002`):
+
+```fa
+let task = start do { 1 }
+use borrowed = task
+let owner = task
+console.log(await borrowed) -- error: MEM002: use `owner`
+```
+
+An explicit copy cannot consume a unique value (`MEM003`):
+
+```fa
+function invalid = (task: Task<Integer>): Task<Integer> => copy task -- error: MEM003
+```
 
 ## References
 
-Instead of "wild" references (a number pointing at an arbitrary memory location, as in C, C++ or Go), Fa has two kinds of safe references.
-
-The danger of a wild reference is that it can dangle, and access memory that is no longer valid. Languages solve this in different ways:
-
-- JavaScript and Go use a garbage collector, at the cost of memory and throughput.
-- Swift uses reference counting and weak references, which is still unsafe when misused.
-- Rust uses ownership and borrowing, which is sound but has a steep learning curve.
-- Zig, C and C++ leave it entirely to the programmer.
-
-Fa takes a different route. Every reference names the collection it points into (`Person in people`), and comes in one of two kinds:
-
-- a **local reference** ([owned reference](/advanced/owned-references)), declared with `use` or received as a parameter, is tracked statically: after a call that invalidates it, the compiler makes you declare it again;
-- a **stored reference** is a field, and always one side of a [**relation**](/advanced/relations) whose reverse side is declared too: both sides live in stable-address collections (`Pool`, `Columnar`, `GrowingPool`, `GrowingColumnar`), every write updates both sides, and deleting an object eagerly cleans up every relation it was part of (an optional becomes `none`, a pool drops the reference).
-
-There are no weak pointers and no generation counters: neither kind can dangle, and neither requires a lifetime annotation. The exact rules of the compiler are in [reference checking](/advanced/reference-checking).
+Local references name their owner and are checked statically. Stored references are [relations](/advanced/relations), with declared reverse sides kept consistent by the compiler. Moving an owner invalidates its local references, even when the physical address stays the same. No raw pointer or lifetime annotation is needed outside foreign code. See [reference checking](/advanced/reference-checking).
 
 ## Summary
 
-| You write | What happens |
-| --- | --- |
-| `let b = a`, `mutable b = a` | copy (or move, if `a` is not used afterwards: this is never observable) |
-| `use b = a` | alias of the place `a`, no copy (`a` must be a place, or a call that returns a reference) |
-| `f(a)` | immutable reference, no copy |
-| `f(a)` where `f` declares `mutates a` | mutable reference, no copy (`a` must be `mutable`) |
-| `for item in collection` | reference, no copy |
-| `use item = pool.add({ … })` | the object is built directly in the pool, `item` is a reference to it |
-| `use item = pool.add(x)` | `x` is moved into the pool (copied without its extra fields if it has more than the element type), `item` is a reference to it |
-| `let item = pool.add(…)` | bad practice: `item` is a copy of the stored element |
-| `collection.take(index)` | the element is moved out of the collection |
-| `next: Node?` in a type | a copy: the child is stored on the heap, owned by its parent |
-| `next: (Node in nodes)?` and `previous: (nodes->next)?` in a type | a relation: both sides are kept in sync, and `next` becomes `none` when its target is deleted from `nodes` |
-| end of scope | every value declared in it is destroyed |
+`let b = a` preserves ordinary value semantics, moves a structure at its proven last use, transfers a unique owner, or shares a synchronization handle. `copy a` visibly duplicates copyable owned data. `use b = a`, borrowed calls and iteration create no copy.
 
 :::implementation
 ## Implementation details
 
 ### Native and WebAssembly
 
-The allocator reuses 64 KiB pages and returns unused pages to its free spans.
-It requests at least 2 MiB at a time on 64-bit targets, and 1 MiB on wasm32.
-The native runtime gives no huge-page advice by default: measurements found
-unpredictable synchronous memory compaction with that advice. Large blocks on
-Linux use their own mappings, which grow by moving pages. Ordinary allocations
-impose no additional size limit on values.
+A move transfers headers/pointers or inline fields and clears the source's ownership/drop state; it never walks or duplicates a collection's payload. Returned fresh aggregates build into their final destination under the existing return ABI. A mutable or escaping collection starts in suitable storage: never construct in a frame and add a hidden deep copy to rescue its escape. Scope, replacement, error and cancellation cleanup agree on which path owns each value.
 
-On 64-bit Linux, arena-allocated recursive edges use 32-bit links: the node's
-address divided by eight. Arena pages share the address range from 2 GiB to
-32 GiB, so a tree of two optional children takes eight bytes. Exhausting this
-range stops with `stop: out of memory (the range of the arenas of recursive values is full)`
-and exit code 101. wasm retains its ordinary 32-bit pointers.
+`copy` invokes the existing type-specialized copy operation: flat data copies inline; collection headers receive independent storage and every owned item is copied recursively. Shared handles retain their state; unique values have no copy operation. Copies preserve contents rather than spare capacity. Recursive copy and destruction must handle arbitrary finite depth without growing the native call stack; this is a backend obligation of the recursive ownership slices. Linked collections copied as one owner remap links to their copied targets; detached element copies lose links under the relation rules. An explicit copy of an arena-backed view must materialize independent storage before the ancestor arena dies.
+
+### Strings
+
+Strings have no reference count. At most 23 bytes are inline and copy like a scalar. Literals use static storage and are never copied merely to store their value. For a longer string, an assignment or store is a move at last use; otherwise it is a view if the destination is immutable, does not outlive the source, and no mutation of the source occurs while the view lives. Escape and lifetime facts must prove those conditions. Otherwise it makes one allocation and one block copy of the bytes. `use` rules that copy out. A mutable string first obtains writable storage before changing static or borrowed bytes. See [strings](/values/strings#implementation-details).
 
 ### JavaScript
 
-- A copy of an object or a collection is a call of the generated copy function of its type. The copy is skipped only in two cases, so that the output stays predictable: when the read is a move (the last use of the source), and when both sides are immutable for their whole lives and have the same shape.
-- Recursive references count as composite values. Recursive copies use the iterative structural copier; copying a finite, non-recursive type keeps its specialized function. Equality already uses an explicit work stack below recursive edges. Generic printing, JSON writing and in-place object assignment also use work stacks, so the JavaScript call stack does not grow with a recursive value. Ordinary recursive values need no generated destruction helper: the JavaScript engine reclaims their objects.
-- Synchronization handles are leaves of structural and relation-graph copies, including inside optionals and erased generic values. Their prototypes carry the shared-handle symbol; the copier needs only that symbol, without importing the concurrency classes or adding a field to each instance.
-- A single read transferred into a fresh object replacing the same mutable optional local consumes the previous root (`head = Link { value, next = head }`). Selecting a child to replace that root consumes the child too (`head = head.next`). The JavaScript proof excludes calls, closures, suspension and multiple reads of the root during construction; those retain their copies. This is a move, and does not change Fa's value semantics or its reference invalidation rules.
+A move is a JavaScript assignment; source invalidation is checked at compile time. Explicit `copy` uses the existing generated typed copier (or the runtime structural copy helper where required): primitive arrays use `slice`, nested owners copy recursively, synchronization handles retain identity. An ordinary object copy preserves value semantics; a Fa string is a JavaScript string. The engine manages ordinary object storage; generated cleanup still handles resources, tasks and counted handles deterministically.
+
+Copy/read/write/drop operations and binary worker codecs are generated at build time from analyzed types; generic consumers receive the required concrete operations. Execution does not compile functions, interpret Fa schemas, or serialize protected data as JSON. Recursive copies use a worklist rather than the JavaScript call stack.
+
+### Integration status
+
+The `copy` syntax and existing copy operations are available in this slice. The category predicates, `MEM004`, complete `MEM003`, alias/branch/loop moves, unique-resource borrows, portable generic/capture conditions, recursive moves and binary transport are the subsequent ownership slices. The rules above are the specification those slices must satisfy; current acceptance of a prohibited copy is not permission to rely on it.
 :::

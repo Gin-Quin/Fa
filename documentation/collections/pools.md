@@ -1,5 +1,7 @@
 # Pools
 
+Like every collection, this type moves at a proven last use; keeping both owners requires `copy value`. Storing its elements follows their own ownership category, and borrowing an element never copies it. See [structures](/advanced/memory-management#structures).
+
 A `Pool` stores unordered values with no uniqueness constraint. It is the collection to reach for when you need many objects to live somewhere and stay referenceable.
 
 > Other languages call this an *object pool*, a *slab*, a *hive* (C++26 `std::hive`) or an *arena*.

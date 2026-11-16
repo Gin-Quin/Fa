@@ -23,7 +23,7 @@ A reference is either:
 - **local**: declared with `use` or `mutable use`, received as a parameter, or returned by a function. The compiler tracks it statically, call after call. This page is about local references.
 - **stored**: a field typed `(Person in people)?` or `Pool<Person in people>`. A stored reference is always one side of a [relation](/advanced/relations), with a declared reverse side: the compiler updates both sides on every write, and when the target is deleted.
 
-A local reference can't be stored as it is: a field typed `Person` or `Person?` holds a copy. To store a reference, declare a relation. A local collection of references, like `Array<Person in people>`, is not allowed either: keep indices, or declare a relation `Pool`.
+A local reference can't be stored as it is: a field typed `Person` or `Person?` owns a value under the [storage rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles). To store a reference, declare a relation. A local collection of references, like `Array<Person in people>`, is not allowed either: keep indices, or declare a relation `Pool`.
 
 ## Invalidation
 
@@ -280,7 +280,7 @@ console.log(second.name) -- error: `second` was invalidated by `addGuest`: decla
 
 When the body of a function is a single expression, its effects are inferred. When it is a block, they must be declared: a function that calls `push` without declaring `mutates` on the array is a compile error.
 
-A place that a call mutates can't be passed as another argument of the same call, or read by a callback given to it: `guests.push(guests[0])` is an error, since `push` may move `guests[0]` while reading it. Copy the value first, with `let`. See [arguments that alias](/advanced/reference-checking#arguments-that-alias).
+A place that a call mutates can't be passed as another argument of the same call, or read by a callback given to it: `guests.push(guests[0])` is an error, since `push` may move `guests[0]` while reading it. Obtain an independent value first, with `let snapshot = copy value` for a collection owner. See [arguments that alias](/advanced/reference-checking#arguments-that-alias).
 
 ## Lifetime
 
@@ -290,7 +290,7 @@ Because every value in Fa is destroyed at the end of its scope, a reference cann
 
 ## Returning a reference
 
-Returning a reference into a collection that is local to the function is impossible, since the collection is destroyed on return. Fa copies the value out instead:
+Returning a reference into a collection that is local to the function is impossible, since the collection is destroyed on return. An ordinary result copies out; a result owning a collection requires explicit `copy`, and a unique element must be removed with an owning operation such as `take`:
 
 ```fa
 function createPerson = (): Person => {
@@ -300,7 +300,7 @@ function createPerson = (): Person => {
 }
 ```
 
-When the collection comes from the caller, the reference can be returned as it is. Say so in the return type, and make it optional if the collection may be empty. A function returns a reference only when its return type says `in`: with an inferred return type, it returns a copy.
+When the collection comes from the caller, the reference can be returned as it is. Say so in the return type, and make it optional if the collection may be empty. A function returns a reference only when its return type says `in`: with an inferred return type, it returns an owned value under those same rules.
 
 ```fa
 function firstPerson = (persons: Array<Person>): (Person in persons)? => {

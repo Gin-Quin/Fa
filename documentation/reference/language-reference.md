@@ -106,8 +106,9 @@ A type annotation is a **constraint**: `value: Type` means that `value` satisfie
 - An object literal can't have fields that the expected type lacks.
 - A parameter keeps the type of its argument, `Type<parameter>`: an unannotated copy of it keeps every field, and `(human: Human): Type<human>` returns the caller's full type.
 - A function that mutates a parameter only receives a value whose written fields have exactly the declared types. A collection of supersets (`Array<Hero>` for `Array<Human>`) is accepted only by a parameter that is not mutated; otherwise the function must be generic. `Set` elements and `Map` keys never accept supersets.
-- Compatibility and identity compare the public data fields only. Methods and defaults resolve statically, from the type written at the use site. A type with `#private` fields is nominal.
-- An anonymous union must be discriminable at runtime: its members are different kinds of values (number, string, boolean, `none`, collection, object), or objects that differ by a required field or a literal field. Otherwise, use a named `Union`, whose members carry a tag.
+- Compatibility compares public data fields. Inferred unions retain written alternatives with different methods or destructors even when their fields match; actual members select their method/finalizer. Methods and defaults resolve statically, from the type written at the use site. A type with `#private` fields is nominal.
+- Every union exposes compatible common fields/methods without narrowing. A common method has identical parameter names and types; results and effects are unions of those of the alternatives, and the actual alternative supplies the method and destructor. Otherwise narrow first; the diagnostic names the missing member or signature difference.
+- An anonymous union must be discriminable at runtime: its members are different kinds of values (number, string, boolean, `none`, collection, object), or objects that differ by a required field or a literal field. Different written methods or destructors also preserve distinguishable written alternatives despite equal fields. Otherwise, use a named `Union`, whose members carry a tag.
 
 Type operations:
 
@@ -158,7 +159,6 @@ let numbers: Set<Integer> = [1, 2, 3]
 let ages: Map<String, Integer> = [("Ana", 30), ("Bao", 25)]
 mutable humans: Pool<Human> = []
 let unique = Set.from([1, 2, 2])
-let users = Set.from(userList, key = (user) => user.id)
 mutable buffer = Array<Integer>.from([], capacity = 1000)
 buffer.reserve(500)        -- room for 500 more items
 
@@ -170,7 +170,7 @@ let maybe = items.get(10)  -- optional
 - There are no positional constructors: always `Point { x = 1, y = 2 }`. Writing the type twice is a warning. `{ id }` is short for `{ id = id }`.
 - In expression position, braces are an object, except after `=>`, `if`, `else`, `do`, `loop`, `for`, `while`, `watch`, `test` and `namespace`, where they open a block. A lambda body `=> { ... }` is a block: return an object with its type name, `=> Point { x = 1, y = 2 }`. Where a key set is expected (`Pick<User, { name }>`), braces are a key set. Anonymous objects contain only data and function pointers.
 - Indexing that the compiler cannot prove `throws IndexError`; an unproven map key `throws KeyNotFound`. `.get(index)` and `.get(key)` return an optional.
-- Every collection takes `capacity` in `from`, and has a read-only `capacity` property and `reserve(additional)`; on JavaScript, `reserve` does nothing and `capacity` is the `length` or `size`.
+- `Set` and `GrowingSet` always use their item's standard hashing and equality; `key =` is `FN023`, and separate keys use `Map`. Every growable collection takes `capacity` in `from`, and has a read-only `capacity` property and `reserve(additional)`; on JavaScript, `reserve` does nothing and `capacity` is the `length` or `size`.
 - Methods: `length` (a property: `size` for the collections without positions, `Set`, `Map`, `Pool` and `Columnar`), `includes`, `delete`, `take` (returns the removed element; an optional on `Set` and `Map`), `deleteWhere`, `sort()` (a copy, stable) and `sortInPlace()`, `reverse()` and `reverseInPlace()`, `pop()` (an optional), `getOrInsert`, `sum()`. `Set.delete` and `Map.delete` return whether something was removed. `find` returns an optional reference, which `let` copies.
 - A comparator returns a number whose sign gives the order: `sort((a, b) => b - a)`. Callbacks receive `(item, index)` on the collections with positions, `(item)` on the others, `(key, value)` on maps. `filter` keeps the kind of collection; `map` returns an `Array` (a `Map` on maps).
 - Chained methods (`filter`, `map`, `reduce`...) run step by step, as in JavaScript; the compiler fuses a chain into one pass when its callbacks are pure. `values()` gives an iterator, which runs element by element: `items.values().filter(f).firstValues(3).toArray()`. `firstValues(count = 1)` returns an iterator, never an element.
@@ -212,7 +212,7 @@ Set<Float>.from([1, 2])
 - Generic arguments are inferred from the arguments and from the expected type. An ambiguity is an error. Compile-time value parameters are never inferred.
 - Explicit generic arguments come before the call: `repeatText<3>("ab")`, `sum<Float>([1, 2])`, `makeAdder<Float>(5)(3)`. On a built-in scalar type, parentheses convert (`Int8(x)`) and angle brackets refine (`Integer<min = 0>`).
 - `<` followed by whitespace (space, tab, line break) is the comparison operator; any other `<` opens a generic list. Inside an open generic list, `>` closes it; outside, `>` is the comparison operator. A comparison inside a generic list goes in parentheses (`Choose<(count > 255), UInt16, UInt8>`), which suspend the list until they close. `<=`, `>=`, `=>` and `->` are separate tokens, never generic brackets (`Pool<people->bestFriend>`). So `count<limit` is not a comparison: write `count < limit`.
-- Generic parameters are part of a function's signature: a lambda can declare them (`<Value>(value: Value) => value`), and a function type can have them (`(transform: <Value>(value: Value) => Value) => ...`). A value of a generic function type must be known at compile time (a named function or a lambda), and the function receiving it is compiled for each one. Generic function types are never inferred.
+- A generic function type is permitted only as a parameter type of a declaration written with `function` (methods included). Pass a named function, a literal lambda, or a caller's such parameter; stored/returned generic function values, fields, collection elements, lambda parameters and nested function-type parameters are `GN030`. Generic copy/effect conditions are inferred and checked at instantiation (`MEM003`/`MEM004`); no `Copyable` bound is written.
 - A generic body is checked once, against the constraints; a union constraint binds the parameter to exactly one member. Only `@for`, `@if` and type functions are checked after substitution. A method called on a type parameter resolves on the actual type, and a constraint can require a method.
 - Deliberately left out: specialisation and overloading, higher-kinded types, variance annotations, implicit conversions to satisfy a constraint, overload resolution on the return type.
 
@@ -374,7 +374,7 @@ numbers.map((x) => x + 1)               -- lambda
 - One variadic parameter at most, in last position.
 - Parameters are immutable references. A parameter declared with `mutates` is only modified from the inside: it can't be replaced, and a parameter of a primitive type cannot be mutated.
 - The compiler knows whether a function stores (lets escape) each function parameter; this is part of its interface. Passing a callback to a parameter that doesn't escape adds the callback's effects to the call: `items.map(parse)` throws what `parse` throws.
-- A closure that doesn't escape captures by reference, like in JavaScript. A closure that escapes (stored, returned, started) captures a copy of each value it uses, taken when it is created, including the values designated by parameters and `use` aliases. A closure can't capture a `mutable use`.
+- A nonescaping closure borrows. An escaping closure owns immutable captures under the storage rules: ordinary copies, proven last-use structure moves, or explicit structure snapshots. Unique captures and `mutable use` captures are forbidden. `with` uses these capture rules and takes names from the visible signature, including function-valued fields and parameters.
 - A function type declares `async` and its effects (`async (request: Request) => Response throws HttpError`, `(player: Player) => Void mutates player`), and a function can only be stored in a function type that declares all of its effects. Parameters are matched by position (effect paths are renamed accordingly), parameters are contravariant and returns covariant, and a `=> Void` type accepts any return value. Named arguments and defaults don't go through function values.
 - A place passed to a `mutates` or `invalidates` parameter must not overlap another argument of the call, a requirement the callee uses, a module-level value it uses, or a reference captured by a callback argument.
 - A function is **pure** when it has no `throws`, no `requires`, no `mutates` or `invalidates` outside its own locals, is not `async`, reads no module-level `mutable` or reactive value, and calls no impure platform primitive (I/O, clock, randomness, `console`). The compiler infers it. See [pure functions](/functions/defining-functions).
@@ -437,7 +437,7 @@ if name is none { }
 if name is not none { }                   -- narrows `name` to `String`
 ```
 
-- `throw` exits the function with an error. A call that can fail must be preceded by `try` or followed by `catch`.
+- A `throw` inside `do … catch` is caught by that lexical handler; an uncaught error leaves the function. Ownership and mutable state join at the failure point, without restoring moved values. A call that can fail must be preceded by `try` or followed by `catch`.
 - Errors are never part of the return type, and are never falsy. There is no `!` (only `!=`) and no postfix `?`.
 - The built-in errors are `Errors` types with one member of the same name: `IndexError { index, length }`, `KeyNotFound { key }`, `DivisionByZero`, `ArithmeticError { message }`, `ParseError { input, message }`, `Utf8Error { position }` and `Cancelled`. `Error` only exposes `toString()`.
 - An optional is an absence; an error is a failure. `?.` and `??` only apply to optionals.
@@ -472,12 +472,12 @@ See [requirements](/advanced/requirements).
 
 ## Memory
 
-1. Assignment copies; the compiler turns a copy into a move when the source isn't used afterwards. A move is never observable.
-2. `use` creates an alias; function parameters and iteration give references.
+1. Ordinary values, including `String`, keep value semantics. Structures (collections including `Bytes`, recursive values, and their transitive owners) move at a proven last use; keeping both requires `copy value` (`MEM004`). A move invalidates the source and all references into it (`MEM002`).
+2. `use`, ordinary/resource parameters and iteration borrow without copying. Task-consuming parameters transfer ownership; resource parameters never finalize the caller's value, even when it owns a Task.
 3. Where data lives is part of the type: a reference into `people` has the type `Person in people`. It is inferred for a `use`, and written in full in parameters, return types and relation fields.
 4. A reference cannot outlive what it points into. After an operation that invalidates it (a mutation of what it points into, or an invalidation of its place), a local reference must be declared again before it is used (`use someone = people[0]`, `use score = scores.get("ana")`); this redeclaration is allowed in the same scope, and one inside an inner block ends with that block. There is no runtime check and no generation counter.
-5. A field typed `T` or `T?` holds a copy (recursion through a union is stored on the heap). A field holding a reference is one side of a relation.
-6. Values are destroyed at the end of their scope, in reverse order.
+5. A field typed `T` or `T?` owns its stored value and follows the same copy/move rules, transitively through tuples, optionals and unions. A relation field links its target. Task/resource owners are unique and cannot be explicitly copied (`MEM003`); synchronization handles share identity.
+6. Values still owned at scope exit are destroyed in reverse order; a moved source is not destroyed again. `copy expression` evaluates once, returns an independent value with the operand's type, and preserves shared-handle identity. It binds after access/calls and before arithmetic. `copy(x)` and an identifier named `copy` retain their meaning.
 
 There is no garbage collector and no borrow checker.
 
@@ -599,13 +599,13 @@ for parallel item, index in items {
 
 - Async is colorless: an `async function` can be called blocking, awaited or started. On JavaScript targets, it is compiled lazily into `name___sync` and `name___async` versions. Calling an async-only primitive synchronously on a target is a compile error, and so is a blocking call that reaches a channel, a lock or a started task on JavaScript. Whether a function can be called blocking on a target is part of its interface.
 - `async` is part of a function type; a lambda is async when its expected type is, and a non-async function can be stored in an async function type. `await` is only allowed in an `async function`, an async lambda, a `start do` block, a test and the top level of a standalone file. `await` takes an async call or a `Task`.
-- A started task begins at the starter's next `await` (or when it returns to the event loop). Inside a blocking call, on every target, `await` blocks and `start` runs eagerly to a finished task.
+- A started function's written arguments and omitted defaults evaluate at task creation in source order; a failing default fails the `start` expression and drops earlier owned arguments. Its body begins at the starter's next `await` (or when it returns to the event loop). Inside a blocking call, on every target, `await` blocks and `start` runs eagerly to a finished task.
 - A `Task<T> throws E` declares its errors like a function. Tasks are combined with `Task.all`, `Task.any` and `Task.settled`, plain functions that return a `Task`.
-- Tasks are structured: a `Task` can't be copied, and leaving its scope cancels it and waits for it. Cancellation happens at the next suspension point, `cancel()` waits for the task to stop, and awaiting a task that may have been cancelled can throw `Cancelled`. A `start` whose task is not kept is **detached**: it copies its arguments and what it captures, can't have `throws`, and the program waits for it before exiting.
+- Tasks are structured: a `Task` can't be copied, and leaving its scope cancels it and waits for it. Cancellation happens at the next suspension point, `cancel()` waits for the task to stop, and awaiting a task that may have been cancelled can throw `Cancelled`. A `start` whose task is not kept is **detached**: it owns arguments and captures under the storage rules (explicit structure copies unless moved, no unique captures), can't have `throws`, and the program waits for it before exiting.
 - A started function receives references: until its task is awaited or cancelled, the values it reads can't be modified, and the values it modifies can't be used. This covers its arguments, the values a `start do` captures, the module-level values of its effects and its requirements. A task can't outlive the values it uses. At each `await`, what is known about module-level mutable values is forgotten.
 - Tasks run on one thread, as in JavaScript; threads come from workers and `for parallel`.
 - Mutexes, atomics and channels are declared `mutable`. They are thread-safe handles: their methods don't declare `mutates self`, so several tasks and threads can use them at once, and a copy shares the same value. The thread-safe types are `Mutex<T>`, `AtomicInteger`, `AtomicBoolean`, `Channel<T>` (from `std.concurrency`), and objects or tuples whose fields are all thread-safe. Only thread-safe types can be shared mutably between threads.
-- Workers copy arguments and results across threads: references and relations cannot cross worker boundaries, thread-safe handles can. A worker runs one call at a time, and its handle can't be copied. `for parallel` and `parallel()` are native only.
+- Workers require independent copies, a common Mutex, or proven exclusive transfer invalidating the source and aliases; a Task never crosses. For independent collection copies, write `copy` at the transfer site: references and relations cannot cross worker boundaries, thread-safe handles can. A worker runs one call at a time, and its handle can't be copied. `for parallel` and `parallel()` are native only.
 
 See [concurrency](/advanced/concurrency).
 
@@ -659,7 +659,7 @@ export namespace = {
 - Only `*.foreign.fa` files can declare C functions (`@extern("symbol")`), call them, use `Pointer<T>` and `CString`, and declare `destroy` in a type. A value whose type contains `Pointer` or `CString` can't be used outside foreign files. They are the only code the compiler trusts instead of proving.
 - C types: the numbers, `Boolean`, `c.Int`, `c.Long`, `c.SizeT`... (`std.c`), `Pointer<T>` (never `NULL`) and `Pointer<T>?` (`none` is `NULL`), `CString`, `CStruct { ... }` (nominal, C layout; usable in every file), `CArray<T, n>`.
 - For the duration of a call, an `Array<T>` is passed as a `Pointer<T>`, a `mutable` value as its address (declared with `mutates`), a `String` as a `CString`. C must not keep these pointers.
-- A type with `destroy` (and every type containing one) is move-only; `destroy` runs when the value is destroyed.
+- A type with `destroy` (and every composite owning one) is unique: assignment moves, `copy` is `MEM003`, resource parameters borrow, and `destroy` runs once on the exact written owner. A second resource requires a new instance. No field moves out from under its destructor, and no function adapter inserts a hidden copy of its result.
 - A C function pointer parameter accepts a function known at compile time that captures nothing and can't throw.
 - `fa bind header.h` generates a foreign file once; builds never read C headers. Libraries are linked with `build.link`.
 - `build.cLibrary` builds the package as a C library with a generated header: the functions of a foreign file's export become `prefix_snake_case` C functions, errors become status codes.
@@ -792,4 +792,4 @@ test         then         throw        throws       true         try
 type         use          watch        when         while        with
 ```
 
-Contextual keywords: `skip` and `only` (after `test`). Special names: `self` (the receiver of a method) and `Self` (the type being declared).
+Contextual keywords include `skip` and `only` (after `test`), `start`, and the spaced `copy expression` prefix (`copy(x)` stays a call). Special names: `self` (the receiver of a method) and `Self` (the type being declared).

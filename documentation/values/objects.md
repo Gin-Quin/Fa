@@ -2,7 +2,7 @@
 
 Objects are containers that associate named fields with values. They can be mutable or immutable.
 
-An object is stored inline: on the stack, or inside the value that contains it (another object, a collection). Assigning an object copies it:
+An object is stored inline: on the stack, or inside the value that contains it (another object, a collection). Ordinary objects keep value semantics:
 
 ```fa
 let original = { count = 1 }
@@ -12,7 +12,7 @@ copy.count = 2
 console.log(original.count) -- 1: `copy` is a separate object
 ```
 
-To refer to an existing object without copying it, use [`use`](/values/declaring-values#references-with-use). See [memory management](/advanced/memory-management).
+A structure (a recursive object, or an object owning a collection or recursive value) instead moves at last use, or requires `copy object` to keep both owners (`MEM004`); one owning a Task or resource is unique (`MEM003`). To refer to an existing object without copying it, use [`use`](/values/declaring-values#references-with-use). See [memory management](/advanced/memory-management).
 
 ## Anonymous objects
 
@@ -64,7 +64,7 @@ Shorthand and regular fields can be mixed: `Person { name, age = 31 }`. Where a 
 
 ### Spreading a value
 
-`...` copies the fields of an existing object into a new one. A field written after the spread replaces the copied one, and must have the type of the field it replaces:
+`...` stores the fields of an existing object into a new one under the same [copy and move rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles): ordinary fields copy; structure owners require an explicit copy or proven transfer, and unique fields cannot be duplicated. A field written after the spread replaces the copied one, and must have the type of the field it replaces:
 
 ```fa
 let defaults = Settings { host = "localhost", port = 80, secure = false }

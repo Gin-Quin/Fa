@@ -58,9 +58,9 @@ logName(superHuman) -- valid: every field of Human is present in SuperHuman, wit
 
 ## What is compared
 
-Two object types are compared by their **public data fields**: their names and their types. Everything else belongs to the type that is written where the value is used:
+Two object types are compared by their **public data fields**: their names and their types. Methods and defaults belong to the type written at the use site; an inferred union preserves distinct written alternatives when their methods or finalizers differ (see [written alternatives](/types/unions#written-alternatives-with-identical-fields)):
 
-- **Methods** are not compared. A method call is resolved from the type written at the use site: after `let human: Human = animal`, `human.describe()` calls the `describe` of `Human`. In [generic code](/types/generics#checking-generic-code), it is resolved on the actual type.
+- **Methods** are not compared. A method call is resolved from the type written at the use site: after `let human: Human = animal`, `human.describe()` calls the `describe` of `Human`. In [generic code](/types/generics#checking-generic-code), it is resolved on the actual type. A union exposes compatible common members and dispatches to its actual alternative, preserving distinct written method/finalizer origins.
 - **Default values** are not compared either: they are used when an object literal of that type leaves the field out.
 - **`readonly`** is part of the field: a `readonly` field can't be passed where a writable field is mutated (see [mutating through a narrower type](#mutating-through-a-narrower-type)).
 - **`reactive`** is part of the field too: a value with [reactive](/advanced/reactivity) fields is still accepted through a narrower type, and writes through it notify the watchers.
@@ -92,7 +92,7 @@ A field and a method can't have the same name in a type.
 
 This is the one place where structural typing meets Fa's [memory model](/advanced/memory-management), and it is worth being precise about it.
 
-**Assigning** to a narrower type copies the value, and the extra fields are dropped:
+**Storing** in a narrower type keeps only its fields. The [ownership rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles) still apply: ordinary fields copy, owned collections move at last use or require `copy`, and unique fields cannot be duplicated:
 
 ```fa
 let human: Human = superHuman
@@ -115,7 +115,7 @@ logName(superHuman) -- no copy, no truncation
 
 The narrowed view is a compile-time restriction, not a runtime transformation.
 
-Narrowing is always a copy. A value is only moved (when it is not used afterwards) into a place of the same shape; moving it into a narrower place copies it and drops its extra fields, exactly like `let`.
+Narrowing selects the destination fields; it does not authorize a hidden collection copy. At a proven last use of an ordinary owner the retained fields can transfer and unused fields are destroyed. A resource retains all its fields for `destroy`, so narrowing an owned resource result cannot silently move them or copy a collection. Write an explicit data projection and the required `copy` at a visible site; implicit function adapters that would duplicate resource-owned data are rejected.
 
 ## Object literals have exactly the expected fields
 
@@ -159,7 +159,7 @@ mutable humans: Array<Human> = []
 
 humans.push(superHuman) -- a copy: the stored Human has no `powers`
 
-let copiedHumans: Array<Human> = superHumans -- copies every element, without `powers`
+let copiedHumans: Array<Human> = copy superHumans -- copies every element, without `powers`
 ```
 
 A collection of supersets can be passed to a function that only reads it:
@@ -236,7 +236,7 @@ A parameter is a reference to the argument, which can have more fields than the 
 
 ```fa
 function renamed = (human: Human, name: String): Type<human> => {
-	mutable copy = human -- a copy of the argument, of type Type<human>
+	mutable copy = copy human -- an explicit copy of the argument, of type Type<human>
 	copy.name = name
 	copy
 }
@@ -257,7 +257,7 @@ Only an annotation narrows the copy, as everywhere else:
 
 ```fa
 function nameOnly = (human: Human): Human => {
-	let copy: Human = human -- `powers` is dropped
+	let copy: Human = copy human -- `powers` is dropped
 	copy
 }
 ```

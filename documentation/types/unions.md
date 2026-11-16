@@ -16,9 +16,16 @@ type MaybeUser = User | None -- the same as User?
 
 Anonymous unions are structural: `String | Integer` and `Integer | String` are the same type, and a `String` satisfies both.
 
-A union is flattened, and a member that another member already covers disappears: `"north" | String` is `String`, `Int8 | Integer` is `Integer`, `Integer? | None` is `Integer?`, and `Never` disappears from any union. This applies to literals, ranges, `None`, enumeration and named union members, `Fields` and collections; object, tuple and function members never disappear this way: they must be [distinguishable](#members-must-be-distinguishable) instead.
+A union is flattened, and a member that another member already covers disappears: `"north" | String` is `String`, `Int8 | Integer` is `Integer`, `Integer? | None` is `Integer?`, and `Never` disappears from any union. This applies to literals, ranges, `None`, enumeration and named union members, `Fields` and collections; object, tuple and function members never disappear this way: they must be [distinguishable](#members-must-be-distinguishable), including preserved written origins as described below.
 
-A field that every object member has can be read on the union, with the union of the members' field types: `shape.kind` below is a `"circle" | "square"`. It can be written only when its type is the same in every member. A method can't be called on a union, except the built-in `toString`: narrow the value to a member first.
+A member (field or method) that every alternative has with compatible types is available on the union without narrowing. Reading a field returns the union of its alternatives' field types; writing requires a type accepted by every alternative (the same writable field type). A common method has the same parameter names and types in every alternative; its result is the union of the results, and its effects are the union of the effects. The call dispatches to the actual alternative. Otherwise narrow first: the diagnostic identifies the alternative missing the member or the differing signatures.
+
+```fa
+type Circle = { radius: Float, function area = (self): Float => self.radius * self.radius * 3.14 }
+type Square = { side: Float, function area = (self): Float => self.side * self.side }
+function area = (shape: Circle | Square): Float => shape.area()
+console.log(area(Circle { radius = 2.0 }), area(Square { side = 2.0 }))
+```
 
 ### Members must be distinguishable
 
@@ -39,6 +46,18 @@ type Person = { name: String } | { name: String, age: Integer } -- error: the fi
 ```
 
 Members that can't be told apart are an error that suggests a [named union](#named-unions), whose members carry their name at runtime. A value that satisfies several object members at once can't be stored in the union: copy it into the member type first.
+
+### Written alternatives with identical fields
+
+A join of written types with identical fields but different methods or destructors preserves those alternatives. It infers `Person | Greeting`, rather than erasing one member because its data layout matches. The actual member selects its method or destructor; destruction keeps the exact written owner even through generic calls, imports and containers. Structural assignability remains based on data fields: this rule preserves origin at a join, rather than making every named object nominal.
+
+```fa
+type Person = { name: String, function describe = (self): String => self.name }
+type Greeting = { name: String, function describe = (self): String => "Hello {self.name}" }
+function choose = (person: Person, greeting: Greeting, flag: Boolean) => if flag { person } else { greeting }
+```
+
+The result has both written alternatives. `choose(person, greeting, flag).describe()` uses the selected member's method under the common-member rule above. Destructors always belong to the actual alternative. The distinguishability error above still applies to anonymous shapes without distinct written behavior to preserve. Copyability follows every alternative: a possible unique member prevents copying until narrowed; any possible structure requires explicit `copy` unless moved.
 
 ## Named unions
 

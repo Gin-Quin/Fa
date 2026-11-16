@@ -1,5 +1,7 @@
 # Fa for Python developers
 
+The [copy and move rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles) distinguish ordinary values (including strings), structures (`copy` to keep both), unique values (move only), and shared synchronization handles.
+
 Fa is statically typed and compiled, but much of Python's readability carries over: no semicolons, no parentheses around conditions, keyword operators (`and`, `or`, `not`, `is`, `in`), keyword arguments, and string interpolation.
 
 Fa is designed for AI agents as much as for humans: code reads almost naturally, everything a function does — the errors it throws, the values it requires, the data it mutates — is written in its signature, and if the code compiles, it works.
@@ -218,7 +220,7 @@ mutable numbers = [1, 2, 3]
 numbers.push(4) -- fine
 ```
 
-And assignment copies rather than sharing a reference — no more surprise aliasing:
+A structure moves at last use. Write `copy` to keep two independent owners:
 
 ```python
 a = [1, 2]
@@ -229,7 +231,7 @@ print(a)  # [1, 2, 3]
 
 ```fa
 mutable a = [1, 2]
-mutable b = a
+mutable b = copy a
 b.push(3)
 console.log(a) -- [1, 2]
 ```

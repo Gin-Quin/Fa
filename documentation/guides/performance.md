@@ -27,11 +27,11 @@ Fa's memory model means performance work is mostly about **where your data lives
 
 ## Avoid copies you did not mean
 
-Assignment copies. That is cheap for a small object and not for a large one.
+Ordinary values keep value semantics. Structures require explicit `copy` when both values must stay usable; a last use moves instead. Strings remain ordinary: short strings copy inline, long native strings move or form proven views where possible, and otherwise allocate and copy their bytes. Use `use` when a copy must be ruled out.
 
 ```fa
 -- copies the whole report
-let report = company.annualReport
+let report = copy company.annualReport
 
 -- no copy: `report` is an alias of `company.annualReport`
 use report = company.annualReport

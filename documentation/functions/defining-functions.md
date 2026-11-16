@@ -411,7 +411,7 @@ function sumOf = (numbers: Array<Integer>): Integer => {
 }
 ```
 
-A closure that **escapes** captures a **copy** of each value it uses, taken when it is created, like an assignment. This includes the values designated by parameters, [`use`](/advanced/memory-management#aliases) aliases and loop variables. The closure owns its copies, so it can be stored, returned or sent to another thread without any lifetime question, and the copies can't be modified from inside the closure:
+A closure that **escapes** owns immutable captures, taken when it is created. Ordinary values copy; a structure moves at its last use, and otherwise requires an explicit snapshot (`MEM004`). A borrowed parameter, [`use`](/advanced/memory-management#aliases) alias or loop item cannot surrender its owner: first create `let snapshot = copy input`, then capture `snapshot` at its last use. The closure cannot modify its owned captures. Worker transfer also obeys [thread safety](/advanced/concurrency#thread-safety-and-synchronization):
 
 ```fa
 function makeGreeter = (greeting: String) => (name: String) => "{greeting}, {name}!"
@@ -438,7 +438,7 @@ function main = () => {
 
 A value that can't be copied, like a [task](/advanced/concurrency#tasks) or a value of a type with a [`destroy`](/advanced/foreign-code#releasing-c-resources) function, can't be captured by an escaping closure.
 
-Modifying a captured value is not an effect that the closure declares: the value belongs to the enclosing function, which sees the change. To share state with an escaping closure, pass it as a mutated parameter, or return the new value. The compiler skips a copy when no later write to the captured value can be observed. A closure can't capture a `mutable use` alias.
+Modifying a captured value is not an effect that the closure declares: the value belongs to the enclosing function, which sees the change. To share state with an escaping closure, pass it as a mutated parameter, or return the new value. The compiler can share immutable storage when no write or lifetime difference can be observed; this optimization never makes an otherwise forbidden collection copy legal. A closure can't capture a `mutable use` alias.
 
 Module-level values are not captured: a closure uses them directly, like any function, and declares their mutations in its effects. [Requirements](/advanced/requirements) are not captured either: they are resolved where the closure is called.
 
@@ -523,10 +523,21 @@ function ascending: Comparator = (a, b) => a - b
 `function with (name = value, ...)` builds a function that has the remaining parameters, in their order and with their defaults:
 
 - parameters are bound by name only, and a bound parameter can't be passed again,
-- the bound values are evaluated once, when the `with` expression is evaluated, and are copied into the new function, like the values captured by an escaping closure,
+- names come from the visible signature, including a function-valued parameter or field, even when an underlying function uses different names,
+- bound values are evaluated once in source order at the `with` expression, and stored under the [escaping-capture rules](/advanced/memory-management#closures): structures require `copy` unless they can move, and unique values cannot be bound (`MEM003`),
 - a parameter that the function mutates, and a variadic parameter, can't be bound,
 - the new function has the effects of the original one,
-- on a generic function, the type parameters given by the bound values are fixed, and the others remain type parameters of the new function.
+- on a generic function, type parameters fixed by the bound values are specialized; residual generic parameters are usable only in the permitted named-function or callback scope, never as stored or returned generic function values (`GN030`).
+
+For example, the visible name below is `amount`:
+
+```fa
+type Bound = () => Integer
+function increment = (value: Integer): Integer => value + 1
+function bind = (operation: (amount: Integer) => Integer): Bound => operation with (amount = 2)
+let bound = bind(increment)
+console.log(bound()) -- 3
+```
 
 `with` binds like a call: `add with (b = 1)` needs no parentheses. With runtime values, `with` gives a regular value: `let addTax = addPercent with (rate = readRate())`.
 
@@ -641,7 +652,7 @@ Rules:
 
 A method can be used as a function value through its type: `Human.describe` is a function whose first parameter is the instance, as in `humans.map(Human.describe)`. Through an instance, a method must be called: `human.describe` without parentheses is an error, write a lambda, `() => human.describe()`. There is no hidden capture of the instance.
 
-A method call is resolved at compile time, from the type written in the code for the value: a parameter typed `Human` calls the methods of `Human`, even when the argument is a `Hero` with a method of the same name. Methods are not part of [structural typing](/advanced/structural-typing): only data fields are compared. In a generic function, a method called on a value of a type parameter is resolved on the actual type, for each instantiation (see [generics](/types/generics)).
+A method call is resolved at compile time, from the type written in the code for the value: a parameter typed `Human` calls the methods of `Human`, even when the argument is a `Hero` with a method of the same name. On a union, a compatible common method is available without narrowing: parameter names and types agree, result types and effects are joined, and the actual alternative supplies the method. Otherwise narrow first. Methods are not part of [structural typing](/advanced/structural-typing): only data fields are compared. In a generic function, a method called on a value of a type parameter is resolved on the actual type, for each instantiation (see [generics](/types/generics)).
 
 ## Destructuring parameters
 

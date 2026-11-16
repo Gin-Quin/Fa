@@ -37,7 +37,7 @@ Forget one step, or delete a person without cleaning up the fields that point at
 
 ## Copies and references
 
-A field typed `Person` or `Person?` holds a **copy**: the person is stored inside the object that has the field.
+A field typed `Person` or `Person?` owns its stored person. Initialization follows the [copy and move categories](/advanced/memory-management#copies-moves-unique-values-and-shared-handles); a relation instead links an existing element.
 
 ```fa
 type Person = {
@@ -312,7 +312,7 @@ Copying an object that owns linked collections copies the links too. In the copy
 ```fa
 ana.bestFriend = bao
 
-let copiedTown = town -- copies the people and their relations
+let copiedTown = copy town -- copies the people and their relations
 -- in `copiedTown`, the copy of Ana has the copy of Bao as best friend
 ```
 
@@ -326,7 +326,7 @@ console.log(bao.bestFriendOf.size) -- 1: Ana only, the copy is not linked
 
 Adding this copy to another collection, or taking an object out of its collection with `take`, gives the same result: an object without links.
 
-The rule is the same for every copy: links are kept only between collections copied together, as fields of one copied owner. Copying a collection on its own, like `let snapshot = town.people` or a copy of a module-level `people`, gives elements without links, since the copy is not the collection the relation names.
+The rule is the same for every copy: links are kept only between collections copied together, as fields of one copied owner. Copying a collection on its own, like `let snapshot = copy town.people` or a copy of a module-level `people`, gives elements without links, since the copy is not the collection the relation names.
 
 ## Where linked objects live
 

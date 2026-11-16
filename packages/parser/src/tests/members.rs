@@ -316,7 +316,7 @@ fn namespace_declarations() {
 fn contextual_link_fields() {
 	assert_statement(
 		"{ link next: (Node in nodes)? = none }",
-		"{\n\tlink next: (Node in nodes)? = none\n}",
+		"{\n\tlink next: ((Node in nodes))? = none\n}",
 	);
 	assert_statement(
 		"{ link: Integer, link = 1 }",

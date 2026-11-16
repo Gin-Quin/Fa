@@ -803,9 +803,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		expression: NodeId,
 		handler: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		// printed by `console.log`, a `catch` has no type: its operand's
+		// Unconstrained console arguments can have no inferred catch type.
+		// Preserve both branches, rather than assuming the handler has the
+		// successful operand's representation (e.g. String catch => Integer).
 		let repr = if self.type_of(node) == TypeId::UNKNOWN {
-			self.node_repr(expression)?
+			let success = self.node_repr(expression)?;
+			let failure = self.node_repr(handler)?;
+			let empty_array = |node| matches!(self.view(self.ungrouped(node)), View::Array { items } if items.iter().next().is_none());
+			if success == failure || failure == Repr::Never || empty_array(handler) {
+				success
+			} else if success == Repr::Never || empty_array(expression) {
+				failure
+			} else if let (Repr::Int(a), Repr::Int(b)) = (success, failure) {
+				Repr::Int(a.common(b))
+			} else {
+				Repr::Union
+			}
 		} else {
 			self.node_repr(node)?
 		};

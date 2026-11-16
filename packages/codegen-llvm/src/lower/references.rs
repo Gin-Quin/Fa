@@ -39,11 +39,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		symbol: SymbolId,
 		place: Slot<'ctx>,
 	) -> Result<Slot<'ctx>, Error> {
-		if !matches!(place.repr, Repr::Str | Repr::Bytes) {
+		if !matches!(place.repr, Repr::Str | Repr::Bytes | Repr::Array(_)) {
 			return Ok(place);
 		}
 		let ty = if place.repr == Repr::Bytes {
 			self.bytes_reference_type()
+		} else if matches!(place.repr, Repr::Array(_)) {
+			self.context.struct_type(
+				&[
+					self.pointer_type().into(),
+					self.header_type().into(),
+					self.context.i64_type().into(),
+				],
+				false,
+			)
 		} else {
 			self.string_type
 		};
@@ -74,6 +83,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.call_value(
 				self.runtime.function(if place.repr == Repr::Bytes {
 					"fa_bytes_reference"
+				} else if matches!(place.repr, Repr::Array(_)) {
+					"fa_array_reference"
 				} else {
 					"fa_string_reference"
 				})?,
@@ -131,7 +142,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 
-			View::Index { target, .. } => self.is_place(target),
+			View::Index { target, index } => {
+				self.node_repr(target).ok() != Some(Repr::Str)
+					&& self.node_repr(index).ok() != Some(Repr::Range)
+					&& self.is_place(target)
+			}
 			_ => false,
 		}
 	}
@@ -498,6 +513,37 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut inner = value;
 		while let View::Group(group) | View::Try(group) = self.view(inner) {
 			inner = group;
+		}
+		if let View::Index { target, index } = self.view(inner)
+			&& let Repr::Array(item_type) = self.node_repr(target)?
+			&& self.node_repr(index)? == Repr::Range
+		{
+			let array = self.expr(target)?;
+			let range = self.expr(index)?;
+			let (start, end, flags) = self.range_parts(range)?;
+			let item = self.item_repr(item_type, inner)?;
+			let ty = self.context.struct_type(
+				&[self.header_type().into(), self.context.i64_type().into()],
+				false,
+			);
+			let descriptor = self.alloca_type(ty.into(), "array_slice_view")?;
+			let error = self
+				.call_value(
+					self.runtime.function("fa_array_slice_view")?,
+					&[
+						array.value.expect("an array").into(),
+						start.into(),
+						end.into(),
+						flags.into(),
+						self.item_size(item)?.into(),
+						descriptor.into(),
+					],
+				)?
+				.into_pointer_value();
+			self.raise_if_error(error)?;
+			let slot = self.alloca(Repr::Array(item_type), "array_slice_place")?;
+			self.builder.build_store(slot.pointer, descriptor)?;
+			return Ok(slot);
 		}
 		if let View::Index { target, index } = self.view(inner)
 			&& self.node_repr(target)? == Repr::Bytes

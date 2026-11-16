@@ -349,12 +349,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let inside =
 			self.builder
 				.build_int_compare(IntPredicate::ULT, position, byte_length, "")?;
-		let direct = self.builder.build_and(ascii, inside, "")?;
+		let checked = self
+			.flags(node)
+			.contains(fa_analyzer::analysis::NodeFlags::INDEX_CHECK);
+		let ascii_check = self.append_block("unit_ascii_check");
 		let fast = self.append_block("unit_ascii");
-		let fallback = self.append_block("unit_fallback");
+		let ascii_fallback = self.append_block("unit_ascii_fallback");
+		let unicode = self.append_block("unit_unicode");
 		let end = self.append_block("unit_read");
+		// Keep the invariant representation dispatch separate from bounds.
+		// An ASCII loop must not retain the Unicode cache-writing call.
 		self.builder
-			.build_conditional_branch(direct, fast, fallback)?;
+			.build_conditional_branch(ascii, ascii_check, unicode)?;
+		self.builder.position_at_end(ascii_check);
+		self.builder
+			.build_conditional_branch(inside, fast, ascii_fallback)?;
 		self.builder.position_at_end(fast);
 		let offset = self
 			.builder
@@ -371,28 +380,76 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_int_z_extend(byte, self.context.i16_type(), "")?;
 		self.builder.build_unconditional_branch(end)?;
-		self.builder.position_at_end(fallback);
-		let checked = self
-			.flags(node)
-			.contains(fa_analyzer::analysis::NodeFlags::INDEX_CHECK);
+		self.builder.position_at_end(ascii_fallback);
 		if checked {
-			// An ASCII miss at a nonnegative index needs no decoding helper.
-			// Keeping this edge explicit also avoids an end-of-input call in
-			// parsers that use a local catch as their sentinel.
+			let negative = self.append_block("unit_negative");
+			let missing = self.append_block("unit_missing");
 			let nonnegative = self.builder.build_int_compare(
 				IntPredicate::SGE,
 				position,
 				position.get_type().const_zero(),
 				"",
 			)?;
-			let missing = self.builder.build_and(ascii, nonnegative, "")?;
-			self.guard(missing, |this| {
-				this.raise_runtime("fa_error_index", &[position.into(), byte_length.into()])
-			})?;
+			// End-of-input is ordinary control flow for a local catch; do not
+			// give negative indexing the generic cold-error branch weight.
+			self.builder
+				.build_conditional_branch(nonnegative, missing, negative)?;
+			self.builder.position_at_end(missing);
+			self.raise_runtime("fa_error_index", &[position.into(), byte_length.into()])?;
+			self.builder.position_at_end(negative);
 		}
+		let ascii_unit = self
+			.call_value(
+				self.runtime.function("string_ascii_unit_fallback")?,
+				&[bytes.into(), length.into(), position.into()],
+			)?
+			.into_int_value();
+		let finish = |this: &mut Self,
+		              unit: IntValue<'ctx>,
+		              ascii_only: bool|
+		 -> Result<IntValue<'ctx>, Error> {
+			if checked {
+				let missing = this.builder.build_int_compare(
+					IntPredicate::SLT,
+					unit,
+					unit.get_type().const_zero(),
+					"",
+				)?;
+				this.guard(missing, |this| {
+					this.raise_runtime_with("fa_error_index", |this| {
+						let count = if ascii_only {
+							byte_length
+						} else {
+							let count = this
+								.call_value(
+									this.runtime.function("fa_string_length")?,
+									&[bytes.into(), length.into(), capacity.into()],
+								)?
+								.into_int_value();
+							this.builder.build_int_z_extend_or_bit_cast(
+								count,
+								this.context.i64_type(),
+								"",
+							)?
+						};
+						Ok(vec![position.into(), count.into()])
+					})
+				})?;
+			}
+			Ok(this
+				.builder
+				.build_int_truncate(unit, this.context.i16_type(), "")?)
+		};
+		let ascii_unit = finish(self, ascii_unit, true)?;
+		let ascii_end = self
+			.builder
+			.get_insert_block()
+			.expect("a checked ASCII fallback");
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(unicode);
 		let unit = self
 			.call_value(
-				self.runtime.function("fa_string_code_unit_fallback")?,
+				self.runtime.function("string_code_unit_slow")?,
 				&[
 					bytes.into(),
 					length.into(),
@@ -401,38 +458,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				],
 			)?
 			.into_int_value();
-		if checked {
-			let missing = self.builder.build_int_compare(
-				IntPredicate::SLT,
-				unit,
-				unit.get_type().const_zero(),
-				"",
-			)?;
-			self.guard(missing, |this| {
-				this.raise_runtime_with("fa_error_index", |this| {
-					let count = this
-						.call_value(
-							this.runtime.function("fa_string_length")?,
-							&[bytes.into(), length.into(), capacity.into()],
-						)?
-						.into_int_value();
-					let count = this.builder.build_int_z_extend_or_bit_cast(
-						count,
-						this.context.i64_type(),
-						"",
-					)?;
-					Ok(vec![position.into(), count.into()])
-				})
-			})?;
-		}
-		let unit = self
+		let unit = finish(self, unit, false)?;
+		let unicode_end = self
 			.builder
-			.build_int_truncate(unit, self.context.i16_type(), "")?;
-		let fallback_end = self.builder.get_insert_block().expect("a checked fallback");
+			.get_insert_block()
+			.expect("a checked Unicode fallback");
 		self.builder.build_unconditional_branch(end)?;
 		self.builder.position_at_end(end);
 		let result = self.builder.build_phi(self.context.i16_type(), "unit")?;
-		result.add_incoming(&[(&byte, fast), (&unit, fallback_end)]);
+		result.add_incoming(&[
+			(&byte, fast),
+			(&ascii_unit, ascii_end),
+			(&unit, unicode_end),
+		]);
 		Ok(Val::new(
 			Repr::Int(IntRepr {
 				bits: 16,
@@ -1635,6 +1673,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if value.repr == Repr::Never {
 				return Ok(Val::never());
 			}
+			// A later conversion may consume the source block before these
+			// deferred arguments are formatted. Retain an owning snapshot.
+			let value = if value.repr == Repr::Bytes {
+				self.own(value, Some(node))?
+			} else {
+				value
+			};
 			values.push((value, node, spread));
 		}
 		let separated = self.alloca(Repr::Bool, "print_separator")?;

@@ -1,0 +1,4 @@
+let bytes = "héllo".toUtf8()
+console.log(bytes.length, bytes[1], bytes, String.fromUtf8(bytes) catch error => "?") -- prints: 6 195 [104, 195, 169, 108, 108, 111] héllo
+console.log(String.fromUtf8(Bytes.from([255])) catch error => error.position) -- prints: 0
+console.log(String.fromUtf8(Bytes.from([97])) catch error => error.position) -- prints: a

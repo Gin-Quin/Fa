@@ -1091,10 +1091,44 @@ console.log(try equal("é", 0), try choose("a", 0))
 		);
 		for name in ["fa.equal", "fa.choose"] {
 			let body = function(&ir, name);
-			assert!(body.contains("@fa_string_code_unit_fallback("), "{body}");
+			assert!(body.contains("@string_ascii_unit_fallback("), "{body}");
+			assert!(body.contains("@string_code_unit_slow("), "{body}");
 			assert!(body.contains("load i8"), "{body}");
 			assert!(!body.contains("@fa_string_get("), "{body}");
 		}
+	}
+
+	#[test]
+	fn ascii_index_fallback_reads_only_its_input() {
+		let ir = complete_ir_at_target(
+			"ascii-unit-effects",
+			r#"
+let text = arguments.get(0) ?? "é😀"
+let index = Integer(arguments.get(1) ?? "0") catch _error => -1
+console.log(text.codeUnitAt(index) catch _error => 0)
+"#,
+			false,
+			OptLevel::O3,
+			Target::Native,
+		);
+		let body = function(&ir, "string_ascii_unit_fallback");
+		let attribute = body
+			.lines()
+			.next()
+			.expect("function header")
+			.split_whitespace()
+			.find(|word| word.starts_with('#'))
+			.expect("attribute group");
+		let attributes = ir
+			.lines()
+			.find(|line| line.starts_with(&format!("attributes {attribute} =")))
+			.expect("defined attributes");
+		assert!(attributes.contains("memory(argmem: read)"), "{attributes}");
+		assert!(
+			!body.contains("store ") && !body.contains("call "),
+			"{body}"
+		);
+		assert!(ir.contains("@string_code_unit_slow("), "{ir}");
 	}
 
 	#[test]

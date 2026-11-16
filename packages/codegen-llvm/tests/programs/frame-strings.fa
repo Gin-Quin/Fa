@@ -59,7 +59,7 @@ function preserveReservation = () => {
 	assert reserved >= previous
 	text += "é\r\n"
 	assert text.capacity >= reserved
-	assert text.length == 2
+	assert text.length == 3
 }
 preserveReservation()
 function returning = (count: Integer): String => {

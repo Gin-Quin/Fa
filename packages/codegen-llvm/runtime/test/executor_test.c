@@ -889,18 +889,18 @@ static void test_utf16_strings(void) {
 	CHECK(simple_flag((const uint8_t *)"\r\nx", 3) == SIMPLE);
 	const uint8_t ascii_units[] = "abc";
 	for (int64_t i = 0; i < 3; i += 1) {
-		CHECK(fa_string_code_unit_fallback(ascii_units, 3, SIMPLE, i) == ascii_units[i]);
-		CHECK(fa_string_code_unit_fallback(ascii_units, 3, SIMPLE, i - 3) == ascii_units[i]);
+		CHECK(string_ascii_unit_fallback(ascii_units, 3, i) == ascii_units[i]);
+		CHECK(string_ascii_unit_fallback(ascii_units, 3, i - 3) == ascii_units[i]);
 	}
-	CHECK(fa_string_code_unit_fallback(ascii_units, 3, SIMPLE, 3) == -1);
-	CHECK(fa_string_code_unit_fallback(ascii_units, 3, SIMPLE, -4) == -1);
-	CHECK(fa_string_code_unit_fallback(ascii_units, 3, SIMPLE, INT64_MIN) == -1);
-	CHECK(fa_string_code_unit_fallback(ascii_units, 3, SIMPLE, INT64_MAX) == -1);
-	CHECK(fa_string_code_unit_fallback(ascii_units, 0, SIMPLE, 0) == -1);
-	CHECK(fa_string_code_unit_fallback(ascii_units, 0, SIMPLE, -1) == -1);
+	CHECK(string_ascii_unit_fallback(ascii_units, 3, 3) == -1);
+	CHECK(string_ascii_unit_fallback(ascii_units, 3, -4) == -1);
+	CHECK(string_ascii_unit_fallback(ascii_units, 3, INT64_MIN) == -1);
+	CHECK(string_ascii_unit_fallback(ascii_units, 3, INT64_MAX) == -1);
+	CHECK(string_ascii_unit_fallback(ascii_units, 0, 0) == -1);
+	CHECK(string_ascii_unit_fallback(ascii_units, 0, -1) == -1);
 	for (int64_t i = 0; i < 6; i += 1) {
-		CHECK(fa_string_code_unit_fallback(text, sizeof(text) - 1, 0, i) == units[i]);
-		CHECK(fa_string_code_unit_fallback(text, sizeof(text) - 1, 0, i - 6) == units[i]);
+		CHECK(string_code_unit_slow(text, sizeof(text) - 1, 0, i) == units[i]);
+		CHECK(string_code_unit_slow(text, sizeof(text) - 1, 0, i - 6) == units[i]);
 		FaString unit;
 		CHECK(fa_string_get(text, sizeof(text) - 1, 0, i, &unit));
 		CHECK(!string_owned(unit.capacity));
@@ -913,7 +913,7 @@ static void test_utf16_strings(void) {
 			CHECK(!fa_string_slice(text, sizeof(text) - 1, 0, (int64_t)from, (int64_t)to, 3, &part));
 			CHECK(fa_string_length(string_bytes(&part), string_length(&part), part.capacity) == to - from);
 			for (size_t i = from; i < to; i += 1) {
-				CHECK(fa_string_code_unit_fallback(string_bytes(&part), string_length(&part), part.capacity, (int64_t)(i - from)) == units[i]);
+				CHECK(string_code_unit_slow(string_bytes(&part), string_length(&part), part.capacity, (int64_t)(i - from)) == units[i]);
 			}
 			if (string_owned(part.capacity)) { fa_string_free(part.bytes, part.capacity); }
 		}
@@ -1000,7 +1000,7 @@ static void test_utf16_strings(void) {
 	fa_b_reset();
 	fa_b_quoted(both_edges, sizeof both_edges);
 	fa_b_take(&result);
-	CHECK(string_length(&result) == 9 && fa_string_code_unit_fallback(string_bytes(&result), 9, result.capacity, 1) == 0xDE00);
+	CHECK(string_length(&result) == 9 && string_code_unit_slow(string_bytes(&result), 9, result.capacity, 1) == 0xDE00);
 	fa_b_reset();
 	fa_b_json_string(both_edges, sizeof both_edges);
 	fa_b_take(&result);
@@ -1069,7 +1069,7 @@ static void test_utf16_strings(void) {
 	CHECK(fa_string_encoded_length(cut.bytes, cut.length, cut.capacity) == 318);
 	CHECK(!fa_string_slice_view(cut.bytes, cut.length, cut.capacity, 0, 1, 3, &nested_cut));
 	CHECK(nested_cut.bytes == paired + 2 && nested_cut.length == 2);
-	CHECK(fa_string_code_unit_fallback(nested_cut.bytes, nested_cut.length, nested_cut.capacity, 0) == 0xDE00);
+	CHECK(string_code_unit_slow(nested_cut.bytes, nested_cut.length, nested_cut.capacity, 0) == 0xDE00);
 	CHECK(allocated == view_blocks && allocated_bytes == view_bytes);
 	// ASCII compact storage has no extra field. Unicode counts are bounded
 	// unsigned LEB128 values and preserve the full representation range.
@@ -1128,9 +1128,9 @@ static void test_utf16_strings(void) {
 	CHECK(string_owned(heap.capacity));
 	CHECK(fa_string_length(heap.bytes, bytes, heap.capacity) == count);
 	CHECK(string_header(heap.bytes)->breadcrumbs == 0);
-	CHECK(fa_string_code_unit_fallback(heap.bytes, bytes, heap.capacity, 0) == 'x');
+	CHECK(string_code_unit_slow(heap.bytes, bytes, heap.capacity, 0) == 'x');
 	CHECK(string_header(heap.bytes)->breadcrumbs == 0);
-	for (size_t i = count; i > 0; i -= 1) { CHECK(fa_string_code_unit_fallback(heap.bytes, bytes, heap.capacity, (int64_t)i - 1) == expected[i - 1]); }
+	for (size_t i = count; i > 0; i -= 1) { CHECK(string_code_unit_slow(heap.bytes, bytes, heap.capacity, (int64_t)i - 1) == expected[i - 1]); }
 	CHECK(string_header(heap.bytes)->breadcrumbs != 0);
 	size_t *old_crumbs = string_header(heap.bytes)->breadcrumbs;
 	size_t base_bytes = string_header(heap.bytes)->bytes;
@@ -1142,7 +1142,7 @@ static void test_utf16_strings(void) {
 	uint8_t ascii_tail[128];
 	__builtin_memset(ascii_tail, '!', sizeof ascii_tail);
 	fa_string_append(&heap, ascii_tail, sizeof ascii_tail, SIMPLE);
-	CHECK(fa_string_code_unit_fallback(heap.bytes, heap.length, heap.capacity, (int64_t)count + 100) == '!');
+	CHECK(string_code_unit_slow(heap.bytes, heap.length, heap.capacity, (int64_t)count + 100) == '!');
 	CHECK(string_header(heap.bytes)->breadcrumbs[0] == (count + 129) / 64 + 1);
 	CHECK(string_header(heap.bytes)->bytes == base_bytes && string_header(heap.bytes)->units == base_units);
 	fa_string_free(heap.bytes, heap.capacity);
@@ -1178,8 +1178,8 @@ static void test_utf16_strings(void) {
 	fa_string_append(&growing, string_bytes(&last_high), 3, last_high.capacity);
 	fa_string_append(&growing, string_bytes(&low), 3, low.capacity);
 	CHECK(growing.length == 20009);
-	CHECK(fa_string_code_unit_fallback(growing.bytes, growing.length, growing.capacity, -2) == 0xD83D);
-	CHECK(fa_string_code_unit_fallback(growing.bytes, growing.length, growing.capacity, -1) == 0xDE00);
+	CHECK(string_code_unit_slow(growing.bytes, growing.length, growing.capacity, -2) == 0xD83D);
+	CHECK(string_code_unit_slow(growing.bytes, growing.length, growing.capacity, -1) == 0xDE00);
 	fa_string_free(growing.bytes, growing.capacity);
 	fa_release_builder();
 	CHECK(allocated == before);
@@ -1237,8 +1237,8 @@ static void test_utf8_byte_conversions(void) {
 		CHECK(fa_string_length(string_bytes(&text), string_length(&text), text.capacity) == count / 2);
 		if (count > INLINE_LIMIT) { CHECK(text.bytes == original); }
 		if (count > 128) {
-			CHECK(fa_string_code_unit_fallback(text.bytes, count, text.capacity, 0) == 233);
-			CHECK(fa_string_code_unit_fallback(text.bytes, count, text.capacity, 1) == 0xD83D);
+			CHECK(string_code_unit_slow(text.bytes, count, text.capacity, 0) == 233);
+			CHECK(string_code_unit_slow(text.bytes, count, text.capacity, 1) == 0xD83D);
 		}
 		const uint8_t *owned = string_bytes(&text);
 		int was_owned = string_owned(text.capacity);
@@ -2714,8 +2714,32 @@ static void test_grapheme_conformance(void) {
 	fa_array_free(characters, sizeof(FaString));
 }
 
+static void test_array_view_snapshots(void) {
+	long before = allocated_bytes;
+	FaArrayHeader *owner = fa_array_new(3, 32, sizeof(int64_t));
+	int64_t *items = (int64_t *)owner->items;
+	items[0] = 1; items[1] = 2; items[2] = 3;
+	FaArrayView current;
+	CHECK(!fa_array_slice_view(owner, 0, 1, 3, sizeof(int64_t), &current));
+	FaArrayHeader *place = &current.header;
+	FaArrayReference kept;
+	FaArrayHeader **saved = fa_array_reference(&place, &kept);
+	CHECK(*saved != place && (*saved)->items == owner->items && (*saved)->length == 1);
+	CHECK(fa_array_reference(&owner, &kept) == &owner);
+	CHECK(!fa_array_slice_view(owner, 2, 3, 3, sizeof(int64_t), &current));
+	CHECK(*(int64_t *)(*saved)->items == 1 && *(int64_t *)place->items == 3);
+	const void *error = fa_array_slice_view(owner, 4, 5, 3, sizeof(int64_t), &current);
+	CHECK(error != 0);
+	fa_free((void *)error, sizeof(IndexError), sizeof(int64_t));
+	// Bounds failures must leave the previous designation untouched.
+	CHECK(*(int64_t *)place->items == 3 && place->length == 1);
+	fa_array_free(owner, sizeof(int64_t));
+	CHECK(allocated_bytes == before);
+}
+
 int main(void) {
 	test_grapheme_conformance();
+	test_array_view_snapshots();
 	test_storage_hints();
 	test_collection_destinations();
 	test_tables();

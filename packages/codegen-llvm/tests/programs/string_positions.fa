@@ -11,7 +11,8 @@ console.log(accented.indexOf("w") ?? -1, accented.lastIndexOf("l") ?? -1) -- pri
 
 -- "\r\n" is one character: a string holding a '\r' is never simple
 let lines = "a\r\nb"
-console.log(lines.length, lines[2], lines[0..1]) -- prints: 3 b a
+console.log(lines.length, lines[2], lines[0..1]) -- prints: "4 "
+-- prints: " a"
 
 -- appends keep the flag while the suffix is ASCII, and drop it otherwise
 mutable built = ""
@@ -24,7 +25,7 @@ built += "z"
 console.log(built, built.length, try built[3], try built[4], try built[1..4]) -- prints: abcéz 5 é z bcé
 mutable carriage = "x\r"
 carriage += "\ny"
-console.log(carriage.length, (try carriage[1]).length) -- prints: 3 1
+console.log(carriage.length, (try carriage[1]).length) -- prints: 4 1
 
 -- characters and code points
 let letters = "abcdefghijklmnopqrstuvwxyz"

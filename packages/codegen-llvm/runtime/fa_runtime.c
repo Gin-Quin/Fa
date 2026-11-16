@@ -3507,7 +3507,7 @@ static uint16_t unit_at_position(const uint8_t *text, size_t length, size_t posi
 	return (uint16_t)((position & 1) ? 0xDC00 + (code & 1023) : 0xD800 + (code >> 10));
 }
 
-static __attribute__((noinline)) int64_t string_code_unit_slow(const uint8_t *text,
+FA_EXPORT __attribute__((noinline)) int64_t string_code_unit_slow(const uint8_t *text,
     size_t length, size_t capacity, int64_t index) {
 	size_t count = fa_string_length(text, length, capacity);
 	if (index < 0) { index += (int64_t)count; }
@@ -3517,16 +3517,10 @@ static __attribute__((noinline)) int64_t string_code_unit_slow(const uint8_t *te
 
 /// The lowering keeps the checked ASCII load separate from this fallback,
 /// so a missing-unit sentinel never enters the successful byte path.
-static __attribute__((noinline, cold)) int64_t string_ascii_unit_fallback(const uint8_t *text,
+FA_EXPORT __attribute__((noinline, cold)) int64_t string_ascii_unit_fallback(const uint8_t *text,
     size_t length, int64_t index) {
 	if (index < 0) { index += (int64_t)length; }
 	return (uint64_t)index < length ? text[index] : -1;
-}
-
-FA_EXPORT __attribute__((always_inline)) int64_t fa_string_code_unit_fallback(const uint8_t *text,
-    size_t length, size_t capacity, int64_t index) {
-	if (capacity & SIMPLE) { return string_ascii_unit_fallback(text, length, index); }
-	return string_code_unit_slow(text, length, capacity, index);
 }
 
 static void unit_string(uint16_t unit, FaString *out) {
@@ -4322,6 +4316,7 @@ FA_EXPORT __attribute__((noinline, cold)) void fa_arguments_init(int32_t argc, c
 /// An array in a function's frame (`ARRAY_FRAME_MARKER`): its items follow
 /// its header and are dropped, its block is never freed.
 #define ARRAY_FRAME ((uint64_t)64)
+#define ARRAY_BORROWED ((uint64_t)256)
 
 static void region_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t item_size);
 void *fa_array_into_region(void *header, int64_t item_size);
@@ -4695,6 +4690,30 @@ FA_EXPORT const void *fa_array_slice(const FaArrayHeader *array, int64_t start, 
 	copy_bytes(slice->items, array->items + from * item_size, (size_t)((to - from) * item_size));
 	*out = slice;
 	return 0;
+}
+
+typedef struct { FaArrayHeader header; uint64_t marker; } FaArrayView;
+typedef struct { FaArrayHeader *value; FaArrayView view; } FaArrayReference;
+
+/// A borrowed descriptor owns neither its items nor any allocation.
+FA_EXPORT const void *fa_array_slice_view(FaArrayHeader *array, int64_t start, int64_t end,
+                                         int8_t flags, int64_t item_size, FaArrayView *out) {
+	fa_array_materialize(array);
+	int64_t from, to;
+	const void *error = slice_bounds(array->length, start, end, flags, &from, &to);
+	if (error) { return error; }
+	out->header.items = array->items + from * item_size;
+	out->header.length = out->header.capacity = to - from;
+	out->marker = ARRAY_FRAME | ARRAY_BORROWED;
+	return 0;
+}
+
+FA_EXPORT FaArrayHeader **fa_array_reference(FaArrayHeader **place, FaArrayReference *out) {
+	FaArrayHeader *array = *place;
+	if (!array || !(array_marker(array) & ARRAY_BORROWED)) { return place; }
+	out->view = *(const FaArrayView *)array;
+	out->value = &out->view.header;
+	return &out->value;
 }
 
 static int64_t storage_total(int64_t length, int64_t additional, int64_t item_size) {

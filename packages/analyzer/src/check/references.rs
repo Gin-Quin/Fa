@@ -93,7 +93,9 @@ impl Walker<'_> {
 			if self.body.flow.reachable {
 				let designated = place;
 				let places = origins.into_iter().collect();
+				let opaque = self.evaluated_origins(value).opaque;
 				let state = self.facts.refs.state(RefState {
+					opaque,
 					places,
 					..RefState::valid(designated)
 				});
@@ -292,7 +294,29 @@ impl Walker<'_> {
 		if origins.opaque || origins.owned {
 			return Some(ReferenceLayout::General);
 		}
-		if self.place_type(owner).is_some_and(|ty| match self.s.types.kind(ty) { TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, key) => self.s.types.union_members(&key).contains(&TypeId::NONE) || matches!(self.s.types.kind(key), TypeKind::Param(_) | TypeKind::Unknown), _ => false }) { return Some(ReferenceLayout::General); }
+		if self.place_type(owner).is_some_and(|ty| {
+			matches!(
+				self.s.types.kind(ty),
+				TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..)
+			)
+		}) {
+			return Some(ReferenceLayout::General);
+		}
+
+		if self
+			.place_type(owner)
+			.is_some_and(|ty| match self.s.types.kind(ty) {
+				TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, key) => {
+					self.s.types.union_members(&key).contains(&TypeId::NONE)
+						|| matches!(
+							self.s.types.kind(key),
+							TypeKind::Param(_) | TypeKind::Unknown
+						)
+				}
+				_ => false,
+			}) {
+			return Some(ReferenceLayout::General);
+		}
 		if origins.places.iter().all(|&place| {
 			self.places.get(place).parent == Some(owner)
 				&& matches!(self.places.get(place).step, Some(Step::Index(_)))
@@ -781,7 +805,9 @@ impl Walker<'_> {
 			if let Some(place) = place {
 				let designated = place;
 				let places = origins.into_iter().collect();
+				let opaque = self.evaluated_origins(value).opaque;
 				let state = self.facts.refs.state(RefState {
+					opaque,
 					places,
 					..RefState::valid(designated)
 				});

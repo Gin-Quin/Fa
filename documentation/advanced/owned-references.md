@@ -362,15 +362,67 @@ Relation-field borrows read the target address once, rather than aliasing the
 field that can later be reassigned. Columnar references keep their row locator.
 
 JavaScript passes and returns object references as the objects themselves, with
-`undefined` for an absent reference. Primitive and mixed-union places use a cached
-accessor cell per designated slot. A local alias, a parameter, a default argument
-and a returned reference forward that same cell; calls do not allocate another.
-The pool cache retains the slot index needed by deletion and retires it on
-removal. Field/array/map caches are weakly owned by the containing object. Erased
-generic code receives a representation flag per type parameter: object-only
-items keep the direct object ABI, while a mixed-union slot keeps its cell even
-when its current value is an object. Reads/writes dispatch on the internal cell
-tag. This is a call ABI, not the storage representation of a link.
+`undefined` for an absent reference. A local primitive reference is a direct
+place: evaluate its innermost container and key once, then rewrite each read or
+write to that member access. `use score = player.score; score += 1` emits
+`player.score += 1`. A mutable reference retains two locals reassigned by
+`reuse`. A map slot uses its existing `get`/`set` operations; a primitive pool
+uses its stable slot index. There are no accessor cells or reference caches.
+
+At a function boundary a primitive or mixed-union reference has two parts:
+**(innermost container, key)**. For `values[i]` these are `(values, i)`;
+for `values[i].left`, `(values[i], "left")`; for a nested collection slot,
+the inner collection and its index. A dependent primitive parameter takes two
+JavaScript arguments. Other parameters retain their ordinary argument list.
+A general result returns the container and publishes the key in the shared
+runtime module's live `faReferenceKey` binding. The caller captures both
+immediately after the call, before evaluating anything else. Publishing happens
+after the callee's cleanup. A throwing call publishes only on success; optional
+absence uses an absent container. Reference results cannot be async, so no
+`await` can intervene.
+
+A known function additionally gets a compressed direct-call entry when all its
+reachable result places prove the same container or key. The analyzed layout
+summary is exported and hashed with its interface, so separate compilation uses
+the same convention. For example, the following JavaScript sketches omit bounds
+checks and error propagation to show only the reference convention:
+
+```js
+// Every result is an element of the owner: return only the key.
+function element$key(values, i) { return i; }
+const i = element$key(values, nextIndex());
+values[i] += 1;
+
+// Every result has the static key "left": return only the container.
+function left$field(values, i) { return values[i]; }
+const node = left$field(nodes, 0);
+node.left += 1;
+
+// Dynamic projections: return the container and publish the key.
+function choose(values, right) {
+    return faReferenceResult(values[0], right ? "right" : "left");
+}
+const container = choose(nodes, condition);
+const key = faReferenceKey;
+container[key] += 1;
+
+// Function values use the general convention of their function type.
+const pick = choose;
+const selectedContainer = pick(nodes, condition);
+const selectedKey = faReferenceKey;
+selectedContainer[selectedKey] += 1;
+```
+
+The general entry remains available even when a compressed entry exists, so
+converting a known function to a function value needs no binding wrapper.
+Generic bodies specialize only representation-sensitive parameters, selecting
+bare objects or located slots from the instantiated type. Generic callbacks
+select the corresponding emitted body through static function properties.
+Ordinary generic calls and callbacks acquire neither representation flags nor
+reference binding wrappers. Mixed primitive/object unions retain the slot form
+regardless of the current member. Whole-object writes preserve the existing
+object's identity. This is a call convention, not the storage representation of
+a link.
 
 The compile-time interpreter retains evaluated places as a frame identity and
 generation, a local slot, and field/index keys evaluated once. Borrowed arguments,
@@ -382,6 +434,6 @@ as constants: only the resulting data leaves evaluation.
 
 Owner paths, effects and direct-call freshness stay compile-time facts; they
 survive callable interface merging, hashing and import substitution. Structured
-results merge addresses on native/wasm and carriers on JavaScript, with freshness
+results merge addresses on native/wasm and evaluated container/key parts on JavaScript, with freshness
 only when every reachable result is fresh.
 :::

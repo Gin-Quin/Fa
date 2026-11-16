@@ -67,6 +67,9 @@ impl Walker<'_> {
 			View::Name(_) => {
 				origins.places = self.places_of(node);
 				if let Resolution::Local(symbol) = self.a.resolution(node) {
+					if let Some(state) = self.body.flow.ref_state(symbol) {
+						origins.opaque = self.facts.refs.get(state).opaque;
+					}
 					if self.a.symbols.symbol(symbol).kind == SymbolKind::Function {
 						if let Some(info) = self
 							.a
@@ -96,6 +99,7 @@ impl Walker<'_> {
 					origins = Self::project_origins(origins, step);
 				}
 				origins.places = self.places_of(node);
+				origins.opaque = false;
 				for place in origins.places.clone() {
 					origins.closures.extend(self.stored_origins(place).closures);
 				}
@@ -105,6 +109,7 @@ impl Walker<'_> {
 				let step = Step::Index(self.identity_of(index));
 				origins = Self::project_origins(self.evaluated_origins(target), step);
 				origins.places = self.places_of(node);
+				origins.opaque = false;
 				for place in origins.places.clone() {
 					origins.closures.extend(self.stored_origins(place).closures);
 				}
@@ -151,12 +156,18 @@ impl Walker<'_> {
 				self.ensure_builtin_reference(node);
 				origins.places = self.places_of(node);
 				origins.owned = origins.places.is_empty();
-				origins.opaque = self.a.calls.get(&node).is_some_and(|call| {
-					matches!(
-						call.callee,
-						crate::analysis::Callee::Function(_) | crate::analysis::Callee::Value
-					)
-				});
+				origins.opaque = self
+					.a
+					.calls
+					.get(&node)
+					.is_some_and(|call| match call.callee {
+						crate::analysis::Callee::Function(decl) => {
+							self.a.reference_layouts.get(&decl)
+								!= Some(&crate::analysis::ReferenceLayout::Owner)
+						}
+						crate::analysis::Callee::Value => true,
+						_ => false,
+					});
 			}
 		}
 		if self.type_of(node) == TypeId::NEVER {

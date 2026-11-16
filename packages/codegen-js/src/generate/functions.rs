@@ -358,7 +358,11 @@ impl Generator<'_> {
 					if let Some(default) = param.default {
 						let omitted = g.helper("faOmitted");
 						let (lines, pair) = g.capture_at(indent + 2, |g| g.reference_pair(default));
-						let condition = if arrow { format!("if ({name} === {omitted})") } else { format!("if (arguments.length < {physical} || {name} === {omitted})") };
+						let condition = if arrow {
+							format!("if ({name} === {omitted})")
+						} else {
+							format!("if (arguments.length < {physical} || {name} === {omitted})")
+						};
 						prologue.open(condition);
 						prologue.append(lines);
 						if let Some((container, slot)) = pair {

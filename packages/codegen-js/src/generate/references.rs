@@ -23,6 +23,7 @@ enum Key {
 	Field(String),
 	Index(Expr),
 	Entry(Expr),
+	Set(Expr),
 	/// The innermost container can be an object, array or map.
 	Dynamic(Expr),
 	Value(Expr),
@@ -33,6 +34,14 @@ pub(crate) struct Parts {
 	container: Option<Expr>,
 	key: Key,
 	optional: bool,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum Access {
+	Bracket,
+	Map,
+	Set,
+	Dynamic,
 }
 
 impl Generator<'_> {
@@ -218,17 +227,22 @@ impl Generator<'_> {
 		let sig = self.types.sig(sig);
 		let (data, steps) = self.types.path_data(sig.reference?);
 		let steps = steps.to_vec();
+		let argument_type = |index: usize| match self.analysis.call(node)?.arguments.get(index)? {
+			Argument::Given(value) => Some(self.type_of(*value)),
+			Argument::Receiver(callee) => Some(self.receiver_type(*callee)),
+			_ => None,
+		};
 		let (mut value, mut ty) = match data.root {
 			PathRoot::Param(index) => (
 				self.call_arguments
 					.get(&node)?
 					.get(index as usize)?
 					.clone()?,
-				self.types.params(sig.params).get(index as usize)?.ty,
+				argument_type(index as usize)?,
 			),
 			PathRoot::SelfParam => (
 				self.call_arguments.get(&node)?.first()?.clone()?,
-				self.types.params(sig.params).first()?.ty,
+				argument_type(0)?,
 			),
 			PathRoot::ModuleValue(key) => {
 				if let Some((module, keyed)) = self.session.keyed(key) {
@@ -242,7 +256,13 @@ impl Generator<'_> {
 						let resolution = Resolution::External(key);
 						let value = self.external(resolution)?;
 						let interface = self.session.interface(module)?;
-						let ty = interface.export.iter().chain(interface.members.values()).find(|export| export.decl == keyed.node).map(|export| export.ty).unwrap_or(TypeId::UNKNOWN);
+						let ty = interface
+							.export
+							.iter()
+							.chain(interface.members.values())
+							.find(|export| export.decl == keyed.node)
+							.map(|export| export.ty)
+							.unwrap_or(TypeId::UNKNOWN);
 						(self.import(&value.path, &value.export), ty)
 					}
 				} else {
@@ -262,13 +282,26 @@ impl Generator<'_> {
 						.iter()
 						.find(|field| {
 							self.types.syms.resolve(field.name) == self.types.syms.resolve(name)
-						})?
-						.ty;
+						})
+						.map(|field| field.ty)
+						.unwrap_or(TypeId::UNKNOWN);
 				}
 				_ => return None,
 			}
 		}
-		let map = match self.types.kind(ty) { TypeKind::Collection(CollKind::Map | CollKind::GrowingMap | CollKind::Pool | CollKind::GrowingPool | CollKind::Columnar | CollKind::GrowingColumnar, ..) => Some(true), TypeKind::Collection(..) => Some(false), _ => None };
+		let map = match self.types.kind(ty) {
+			TypeKind::Collection(
+				CollKind::Map
+				| CollKind::GrowingMap
+				| CollKind::Pool
+				| CollKind::GrowingPool
+				| CollKind::Columnar
+				| CollKind::GrowingColumnar,
+				..,
+			) => Some(true),
+			TypeKind::Collection(..) => Some(false),
+			_ => None,
+		};
 		Some((Expr::primary(value), map))
 	}
 
@@ -321,7 +354,7 @@ impl Generator<'_> {
 		let optional = if parts.optional { "?." } else { "" };
 		match &parts.key {
 			Key::Whole(text, _) => Expr::primary(text.clone()),
-			Key::Value(value) => value.clone(),
+			Key::Value(value) | Key::Set(value) => value.clone(),
 			Key::Field(field) => Expr::primary(format!(
 				"{}{}.{}",
 				parts
@@ -418,7 +451,7 @@ impl Generator<'_> {
 				parts.container.clone()?,
 				Expr::primary(js::string_literal(field)),
 			)),
-			Key::Index(key) | Key::Entry(key) | Key::Dynamic(key) => {
+			Key::Index(key) | Key::Entry(key) | Key::Dynamic(key) | Key::Set(key) => {
 				Some((parts.container.clone()?, key.clone()))
 			}
 			Key::Whole(_, None) | Key::Value(_) => None,
@@ -437,25 +470,73 @@ impl Generator<'_> {
 		container
 	}
 
-	fn reference_call_generics(&self, call: NodeId, sig: fa_analyzer::types::FnSig) -> Vec<fa_analyzer::ids::ParamId> {
-		if let Some(info) = self.analysis.call(call) && let Callee::Function(declaration) = info.callee { return self.function_generics(declaration); }
-		let mut generics: Vec<_> = self.types.list_items(sig.generics).iter().filter_map(|&ty| match self.types.kind(ty) { TypeKind::Param(param) => Some(param), _ => None }).collect();
+	fn reference_call_generics(
+		&self,
+		call: NodeId,
+		sig: fa_analyzer::types::FnSig,
+	) -> Vec<fa_analyzer::ids::ParamId> {
+		if let Some(info) = self.analysis.call(call)
+			&& let Callee::Function(declaration) = info.callee
+		{
+			return self.function_generics(declaration);
+		}
+		let mut generics: Vec<_> = self
+			.types
+			.list_items(sig.generics)
+			.iter()
+			.filter_map(|&ty| match self.types.kind(ty) {
+				TypeKind::Param(param) => Some(param),
+				_ => None,
+			})
+			.collect();
 		if let View::Call { callee, .. } = self.view(call) {
-			let named = match self.view(self.strip_groups(callee)) { View::Access { members, .. } => members.last().unwrap_or(callee), _ => callee };
-			if let Resolution::External(key) = self.analysis.resolution(named) && let Some((module, declaration)) = self.session.external_node(Resolution::External(key)) {
+			let named = match self.view(self.strip_groups(callee)) {
+				View::Access { members, .. } => members.last().unwrap_or(callee),
+				_ => callee,
+			};
+			if let Resolution::External(key) = self.analysis.resolution(named)
+				&& let Some((module, declaration)) =
+					self.session.external_node(Resolution::External(key))
+			{
 				let mut owner = self.external_owner_parameters(key);
-				if let Some(summary) = self.session.interface(module).and_then(|interface| interface.generic_functions.get(&declaration)) { generics = self.types.list_items(summary.generics).iter().filter_map(|&ty| match self.types.kind(ty) { TypeKind::Param(param) => Some(param), _ => None }).collect(); }
-				owner.extend(generics); generics = owner;
+				if let Some(summary) = self
+					.session
+					.interface(module)
+					.and_then(|interface| interface.generic_functions.get(&declaration))
+				{
+					generics = self
+						.types
+						.list_items(summary.generics)
+						.iter()
+						.filter_map(|&ty| match self.types.kind(ty) {
+							TypeKind::Param(param) => Some(param),
+							_ => None,
+						})
+						.collect();
+				}
+				owner.extend(generics);
+				generics = owner;
 			}
 		}
 		generics
 	}
 
-	fn reference_bound_object(&self, call: NodeId, sig: fa_analyzer::types::FnSig, ty: TypeId) -> bool {
+	fn reference_bound_object(
+		&self,
+		call: NodeId,
+		sig: fa_analyzer::types::FnSig,
+		ty: TypeId,
+	) -> bool {
 		if let TypeKind::Param(param) = self.types.kind(self.without_none(ty)) {
 			let generics = self.reference_call_generics(call, sig);
 			let (bindings, _) = self.generic_call_bindings(call, &generics);
-			if let Some(index) = generics.iter().position(|&candidate| self.same_reference_parameter(candidate, param)) && let Some(&bound) = bindings.get(index) { return self.is_object_reference(bound); }
+			if let Some(index) = generics
+				.iter()
+				.position(|&candidate| self.same_reference_parameter(candidate, param))
+				&& let Some(&bound) = bindings.get(index)
+			{
+				return self.is_object_reference(bound);
+			}
 		}
 		self.is_object_reference(ty)
 	}
@@ -527,6 +608,93 @@ impl Generator<'_> {
 		}
 	}
 
+	fn primitive_access(&self, value: NodeId) -> Option<Access> {
+		let value = self.strip_reference(value);
+		match self.view(value) {
+			View::None => None,
+			View::Call { .. }
+				if self.analysis.call(value).is_some_and(
+					|call| matches!(call.callee, Callee::Builtin(id) if builtins::get(id).path == "Set#find"),
+				) =>
+			{
+				Some(Access::Set)
+			}
+			View::Access { .. } => Some(Access::Bracket),
+			View::Index { target, .. } => Some(
+				if matches!(
+					self.types.kind(self.type_of(target)),
+					TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)
+				) {
+					Access::Map
+				} else {
+					Access::Bracket
+				},
+			),
+			View::Name(_) => {
+				if let Resolution::Local(symbol) = self.analysis.resolution(value) {
+					Some(match self.references.get(&symbol) {
+						Some(Reference::Place(Parts {
+							key: Key::Set(_), ..
+						})) => Access::Set,
+						Some(Reference::Place(Parts {
+							key: Key::Entry(_), ..
+						})) => Access::Map,
+						Some(Reference::Place(Parts {
+							key: Key::Index(_) | Key::Field(_),
+							..
+						})) => Access::Bracket,
+						_ => Access::Dynamic,
+					})
+				} else {
+					Some(Access::Dynamic)
+				}
+			}
+			View::Call { .. } => {
+				if self.call_returns_reference(value) {
+					Some(match self.reference_call_layout(value) {
+						ReferenceLayout::Field(_) => Access::Bracket,
+						_ => Access::Dynamic,
+					})
+				} else if let Some(Callee::Builtin(id)) =
+					self.analysis.call(value).map(|call| call.callee)
+				{
+					Some(
+						if builtins::get(id).path.starts_with("Map#")
+							|| builtins::get(id).path.starts_with("Pool#")
+							|| builtins::get(id).path.starts_with("Columnar#")
+						{
+							Access::Map
+						} else {
+							Access::Bracket
+						},
+					)
+				} else {
+					Some(Access::Dynamic)
+				}
+			}
+			_ => Some(Access::Dynamic),
+		}
+	}
+
+	fn reseatable_access(&self, symbol: SymbolId, initial: NodeId) -> Access {
+		let mut access = self.primitive_access(initial);
+		for index in 0..self.tree.nodes.len() {
+			let node = NodeId::new(index);
+			if self.analysis.resolution(node) != Resolution::Local(symbol) {
+				continue;
+			}
+			if let View::Reuse { value, .. } = self.view(node)
+				&& let Some(next) = self.primitive_access(value)
+			{
+				if access.is_some_and(|old| old != next) {
+					return Access::Dynamic;
+				}
+				access = Some(next);
+			}
+		}
+		access.unwrap_or(Access::Dynamic)
+	}
+
 	pub(crate) fn use_declaration(&mut self, node: NodeId, value: NodeId, mutable: bool) {
 		let Some(symbol) = self.analysis.symbols.symbol_of_decl(node) else {
 			return;
@@ -573,10 +741,20 @@ impl Generator<'_> {
 					.line(format!("{keyword}{container_name} = {};", container.text));
 				self.out
 					.line(format!("{keyword}{key_name} = {};", key.text));
-				let key = match parts.key {
-					Key::Entry(_) => Key::Entry(Expr::name(key_name, false)),
-					Key::Dynamic(_) => Key::Dynamic(Expr::name(key_name, false)),
-					_ => Key::Index(Expr::name(key_name, false)),
+				let access = if mutable {
+					self.reseatable_access(symbol, value)
+				} else {
+					match parts.key {
+						Key::Entry(_) => Access::Map,
+						Key::Dynamic(_) => Access::Dynamic,
+						_ => Access::Bracket,
+					}
+				};
+				let key = match access {
+					Access::Map => Key::Entry(Expr::name(key_name, false)),
+					Access::Set => Key::Set(Expr::name(key_name, false)),
+					Access::Dynamic => Key::Dynamic(Expr::name(key_name, false)),
+					Access::Bracket => Key::Index(Expr::name(key_name, false)),
 				};
 				self.bind_reference_parts(
 					symbol,
@@ -616,9 +794,23 @@ impl Generator<'_> {
 			{
 				continue;
 			}
-			if let View::Name(_) = self.view(self.strip_reference(value)) && let Resolution::Local(source) = self.analysis.resolution(self.strip_reference(value)) && !matches!(self.analysis.symbols.symbol(source).kind, SymbolKind::Use | SymbolKind::MutableUse) {
+			if let View::Name(_) = self.view(self.strip_reference(value))
+				&& let Resolution::Local(source) =
+					self.analysis.resolution(self.strip_reference(value))
+				&& !matches!(
+					self.analysis.symbols.symbol(source).kind,
+					SymbolKind::Use | SymbolKind::MutableUse
+				) {
 				let text = self.name_of(source);
-				self.bind_reference_parts(symbol, Parts { container: None, key: Key::Whole(text, None), optional: false }); continue;
+				self.bind_reference_parts(
+					symbol,
+					Parts {
+						container: None,
+						key: Key::Whole(text, None),
+						optional: false,
+					},
+				);
+				continue;
 			}
 			let name = self.declare(symbol);
 			let (container, key) = (format!("{name}$container"), format!("{name}$key"));
@@ -658,7 +850,7 @@ impl Generator<'_> {
 					return;
 				};
 				let key = match parts.key {
-					Key::Index(key) | Key::Entry(key) | Key::Dynamic(key) => key,
+					Key::Index(key) | Key::Entry(key) | Key::Dynamic(key) | Key::Set(key) => key,
 					_ => {
 						self.unsupported(node, "this reuse");
 						return;
@@ -704,6 +896,7 @@ impl Generator<'_> {
 							Key::Index(key) => Key::Index(self.keep_value_part(key)),
 							Key::Entry(key) => Key::Entry(self.keep_value_part(key)),
 							Key::Dynamic(key) => Key::Dynamic(self.keep_value_part(key)),
+							Key::Set(key) => Key::Set(self.keep_value_part(key)),
 							other => other,
 						};
 						return Some(parts);
@@ -835,7 +1028,11 @@ impl Generator<'_> {
 					};
 					Some(Parts {
 						container: Some(container),
-						key: match map { Some(true) => Key::Entry(result), Some(false) => Key::Index(result), None => Key::Dynamic(result) },
+						key: match map {
+							Some(true) => Key::Entry(result),
+							Some(false) => Key::Index(result),
+							None => Key::Dynamic(result),
+						},
 						optional,
 					})
 				}
@@ -858,6 +1055,28 @@ impl Generator<'_> {
 					.collect()
 			})
 			.unwrap_or_default();
+		if path == "Set#find" {
+			let receiver = self.receiver(callee);
+			let receiver = self.keep_value_part(receiver);
+			let predicate = self.expr(*arguments.first()?);
+			let helper = self.helper("faFind");
+			let key = self.temp();
+			self.out.line(format!(
+				"const {key} = {helper}({}, {});",
+				receiver.text, predicate.text
+			));
+			let container = self.temp();
+			self.out.line(format!(
+				"const {container} = {key} === undefined ? undefined : {};",
+				receiver.text
+			));
+			return Some(Parts {
+				container: Some(Expr::name(container, true)),
+				key: Key::Set(Expr::name(key, true)),
+				optional: true,
+			});
+		}
+
 		let value_pool = matches!(
 			path,
 			"Pool#find" | "Pool#add" | "Columnar#find" | "Columnar#add"

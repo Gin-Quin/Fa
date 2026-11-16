@@ -898,3 +898,6 @@ fn analyzer_cases_print_what_they_say() {
 		failures.join("\n")
 	);
 }
+
+#[path = "programs/reference_matrix.rs"]
+mod reference_matrix;

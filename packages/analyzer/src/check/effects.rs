@@ -335,6 +335,9 @@ impl Walker<'_> {
 			return Writable::Yes;
 		};
 		let entry = self.a.symbols.symbol(symbol);
+		if self.readonly_place(place) {
+			return Writable::No(symbol);
+		}
 		if self.s.types.is_recovering(entry.ty) {
 			return Writable::Yes;
 		}
@@ -349,6 +352,30 @@ impl Walker<'_> {
 			| SymbolKind::LoopVariable { copy: false } => Writable::Yes,
 			_ => Writable::No(symbol),
 		}
+	}
+
+	pub(super) fn readonly_place(&self, mut place: PlaceId) -> bool {
+		if let Some(owner) = self
+			.place_symbol(place)
+			.and_then(|symbol| self.reference_parameters.get(&symbol))
+		{
+			place = *owner;
+		}
+		while let Some(parent) = self.places.parent(place) {
+			if matches!(
+				self.places.get(place).step,
+				Some(Step::Index(_) | Step::All)
+			) && self.place_type(parent).is_some_and(|ty| {
+				matches!(
+					self.s.types.kind(ty),
+					TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..)
+				)
+			}) {
+				return true;
+			}
+			place = parent;
+		}
+		false
 	}
 
 	// ── owners ────────────────────────────────────────────────────────────
@@ -2210,7 +2237,7 @@ impl Walker<'_> {
 	) -> bool {
 		// a set element or a map key is read-only (`CL031`, collections.rs)
 		if let Some(symbol) = self.root_symbol(node)
-			&& self.readonly_elements.contains(&symbol)
+			&& (self.readonly_elements.contains(&symbol) || self.readonly_place(base))
 		{
 			let name = self
 				.s

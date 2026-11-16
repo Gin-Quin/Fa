@@ -24,6 +24,7 @@ export function faReferenceResult(container, key) {
 export function faReferenceRead(container, key) {
 	if (container === undefined) return undefined;
 	const tag = container[Symbol.toStringTag];
+	if (container instanceof Set || tag === "fa:Set") return key;
 	return container instanceof Map || tag === "fa:ValuePool" || tag === "fa:HashMap"
 		? container.get(key)
 		: container[key];

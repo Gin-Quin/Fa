@@ -799,6 +799,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let repr = self.reference_result_repr(node, element)?;
 			return Ok(Some((Slot { pointer, repr }, optional)));
 		}
+		if let Some(reference) = self.set_reference(node)? {
+			return Ok(Some(reference));
+		}
 		if let Some(reference) = self.array_reference(node)? {
 			return Ok(Some(reference));
 		}

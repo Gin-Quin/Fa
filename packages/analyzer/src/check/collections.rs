@@ -828,7 +828,19 @@ impl Walker<'_> {
 	/// `CL031`: writing a set element or a map key (a read-only reference),
 	/// instead of `E-DECL-3`. Type part.
 	pub(super) fn report_readonly_element(&mut self, target: NodeId, symbol: SymbolId) -> bool {
-		if !self.readonly_elements.contains(&symbol) {
+		let readonly = self.readonly_elements.contains(&symbol)
+			|| self.body.flow.ref_state(symbol).is_some_and(|state| {
+				self.facts
+					.refs
+					.get(state)
+					.places
+					.iter()
+					.any(|&place| self.readonly_place(place))
+			}) || self
+			.reference_parameters
+			.get(&symbol)
+			.is_some_and(|&place| self.readonly_place(place));
+		if !readonly {
 			return false;
 		}
 		let name = self

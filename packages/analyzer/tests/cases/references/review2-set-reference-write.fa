@@ -1,0 +1,7 @@
+mutable values: Set<Integer> = [7, 9]
+use item = values.find((value) => value == 7)
+if item is not none { item = 11 } -- error: CL031
+function wrong = (values: Set<Integer>, item: Integer in values) mutates item => { -- error: EFF011
+ use target = item
+ target = 12 -- error: CL031
+}

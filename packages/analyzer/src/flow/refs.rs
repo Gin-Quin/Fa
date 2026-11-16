@@ -13,6 +13,8 @@ pub struct RefState {
 	/// The places it may designate, sorted: one, or several for a `mutable
 	/// use` moved differently in two branches.
 	pub places: SmallVec<[PlaceId; 2]>,
+	/// Its physical projection cannot be compressed to an owner-relative key.
+	pub opaque: bool,
 	/// `None` while valid; else the operation that invalidated it, and
 	/// whether only some paths did (`maybe`: `REF002`, else `REF001`).
 	pub invalidated: Option<(NodeId, bool)>,
@@ -26,6 +28,7 @@ impl RefState {
 	pub fn valid(place: PlaceId) -> Self {
 		Self {
 			places: SmallVec::from_slice(&[place]),
+			opaque: false,
 			invalidated: None,
 			reported: false,
 		}
@@ -76,6 +79,7 @@ impl RefStore {
 		};
 		self.state(RefState {
 			places,
+			opaque: left.opaque || right.opaque,
 			invalidated,
 			reported: false,
 		})

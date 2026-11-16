@@ -747,7 +747,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 		arguments: Vec<Value>,
 	) -> Result<Action, Flow> {
 		match path {
-			"Array#find" | "Pool#find" | "Columnar#find" | "OrderedColumnar#find" => {
+			"Array#find" | "Set#find" | "Pool#find" | "Columnar#find" | "OrderedColumnar#find" => {
 				let value = self.read_reference(&collection)?;
 				let keys: Vec<_> = if let Value::Pool(pool) = &value {
 					pool.slots

@@ -1078,7 +1078,7 @@ impl<'a> Lowerer<'a> {
 		matches!(
 			path,
 			"Pool#add"
-				| "Pool#find"
+				| "Set#find" | "Pool#find"
 				| "Columnar#add"
 				| "Columnar#find"
 				| "OrderedColumnar#add"

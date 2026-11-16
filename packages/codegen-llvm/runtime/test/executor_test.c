@@ -1511,6 +1511,61 @@ static void test_utf8_input(void) {
 	CHECK(allocated == before && allocated_bytes == bytes_before);
 }
 
+static void drop_test_string_parts(FaArrayHeader *parts) {
+	CHECK(parts->capacity >= 0);
+	FaString *items = (FaString *)(void *)parts->items;
+	for (int64_t index = 0; index < parts->length; index += 1) {
+		if (string_owned(items[index].capacity)) { fa_string_free(items[index].bytes, items[index].capacity); }
+	}
+	fa_array_free(parts, sizeof(FaString));
+}
+
+static void test_unicode_transform_counts(void) {
+	fa_release_builder();
+	long before = allocated;
+	uint8_t bytes[204];
+	for (size_t index = 0; index < 200; index += 2) { copy_bytes(bytes + index, (const uint8_t *)"\xC3\xA9", 2); }
+	copy_bytes(bytes + 200, (const uint8_t *)"\xF0\x9F\x98\x80", 4);
+	FaString source;
+	fa_string_from(bytes, sizeof bytes, 0, 512, &source);
+	FaString high, low;
+	unit_string(0xD83D, &high);
+	unit_string(0xDE00, &low);
+	FaArrayHeader *parts = fa_string_split_views(source.bytes, source.length, source.capacity,
+	                                             string_bytes(&low), string_length(&low));
+	CHECK(parts->length == 2);
+	FaString *items = (FaString *)(void *)parts->items;
+	CHECK(string_owned(items[0].capacity));
+	CHECK(fa_string_length(items[0].bytes, items[0].length, items[0].capacity) == 101);
+	CHECK(!fa_string_is_well_formed(items[0].bytes, items[0].length, items[0].capacity));
+	drop_test_string_parts(parts);
+	parts = fa_string_split_views(source.bytes, source.length, source.capacity, (const uint8_t *)"x", 1);
+	items = (FaString *)(void *)parts->items;
+	CHECK(parts->length == 1 && string_counted_view(items[0].capacity));
+	CHECK(items[0].bytes == source.bytes && fa_string_length(items[0].bytes, items[0].length, items[0].capacity) == 102);
+	drop_test_string_parts(parts);
+	parts = fa_string_split_views(source.bytes, source.length, source.capacity, (const uint8_t *)"", 0);
+	CHECK(parts->length == 102);
+	items = (FaString *)(void *)parts->items;
+	for (int64_t index = 0; index < parts->length; index += 1) {
+		CHECK(fa_string_length(string_bytes(items + index), string_length(items + index), items[index].capacity) == 1);
+	}
+	drop_test_string_parts(parts);
+	FaString result;
+	fa_string_replace(source.bytes, source.length, source.capacity, string_bytes(&low), string_length(&low), (const uint8_t *)"", 0, 1, &result);
+	CHECK(fa_string_length(string_bytes(&result), string_length(&result), result.capacity) == 101);
+	CHECK(!fa_string_is_well_formed(string_bytes(&result), string_length(&result), result.capacity));
+	if (string_owned(result.capacity)) { fa_string_free(result.bytes, result.capacity); }
+	fa_string_pad(string_bytes(&high), string_length(&high), high.capacity, 2, string_bytes(&low), string_length(&low), 0, &result);
+	CHECK(fa_string_equal(string_bytes(&result), string_length(&result), bytes + 200, 4));
+	CHECK(fa_string_is_well_formed(string_bytes(&result), string_length(&result), result.capacity));
+	if (string_owned(result.capacity)) { fa_string_free(result.bytes, result.capacity); }
+	CHECK(fa_string_length(source.bytes, source.length, source.capacity) == 102);
+	fa_string_free(source.bytes, source.capacity);
+	fa_release_builder();
+	CHECK(allocated == before);
+}
+
 static void test_arguments(void) {
 	char *argv[] = {"program", "one", "two"};
 	for (int32_t argc = -1; argc <= 3; argc += 1) {
@@ -2528,6 +2583,7 @@ int main(void) {
 	test_region_slice_views();
 	test_tree_regions();
 	test_utf8_input();
+	test_unicode_transform_counts();
 	test_arguments();
 	test_strict_file_text();
 	test_character_views();

@@ -3232,21 +3232,23 @@ static void split_one(void *context, size_t offset) {
 // enabled only for a single-file program without parallel or foreign code.
 int32_t fa_compact_characters = 1;
 
-static void *characters_of(const uint8_t *text, size_t length, size_t capacity) {
-	if (capacity & SIMPLE) {
-		if (!fa_compact_characters) {
-			FaArrayHeader *array = fa_array_new((int64_t)length, (int64_t)length, sizeof(FaString));
-			FaString *items = (FaString *)array->items;
-			for (size_t i = 0; i < length; i += 1) { items[i] = ascii_string(text[i]); items[i].capacity = SIMPLE; }
-			return array;
-		}
-		// An owned byte snapshot, decoded into static ASCII characters on
-		// access. Negative capacity marks this compact character collection.
-		FaArrayHeader *characters = fa_array_new((int64_t)length, (int64_t)length, 1);
-		copy_bytes(characters->items, text, length);
-		characters->capacity = -1;
-		return characters;
+static void *ascii_units(const uint8_t *text, size_t length) {
+	if (!fa_compact_characters) {
+		FaArrayHeader *array = fa_array_new((int64_t)length, (int64_t)length, sizeof(FaString));
+		FaString *items = (FaString *)array->items;
+		for (size_t i = 0; i < length; i += 1) { items[i] = ascii_string(text[i]); items[i].capacity = SIMPLE; }
+		return array;
 	}
+	// An owned byte snapshot, decoded into static ASCII characters on
+	// access. Negative capacity marks this compact character collection.
+	FaArrayHeader *characters = fa_array_new((int64_t)length, (int64_t)length, 1);
+	copy_bytes(characters->items, text, length);
+	characters->capacity = -1;
+	return characters;
+}
+
+static void *characters_of(const uint8_t *text, size_t length, size_t capacity) {
+	if (capacity & SIMPLE) { return ascii_units(text, length); }
 	void *characters = fa_array_new(0, (int64_t)fa_graphemes(text, length), sizeof(FaString));
 	for (size_t index = 0; index < length;) {
 		size_t next = next_boundary(text, length, index);
@@ -3292,7 +3294,7 @@ static void *split_text(const uint8_t *text, size_t length, size_t capacity,
 		return split_unicode(text, length, capacity, separator, separator_length, views, nonempty, 0);
 	}
 	if (separator_length == 0) {
-		return characters_of(text, length, capacity);
+		return ascii_units(text, length);
 	}
 	size_t room = 4;
 	uint64_t raw_capacity = nonempty ? room : 0;
@@ -4065,23 +4067,38 @@ FA_EXPORT size_t fa_array_join_length(void *header, const uint8_t *separator, si
 	return length;
 }
 
-/// `padStart` (`at_start` 1) and `padEnd` (0), in grapheme clusters.
-static __attribute__((noinline)) void string_pad_slow(const uint8_t *bytes, size_t length, int64_t width,
+/// Padding repeats and cuts the filler at exactly the requested UTF-16 width.
+static __attribute__((noinline)) void string_pad_slow(const uint8_t *bytes, size_t length, size_t capacity, int64_t width,
                              const uint8_t *filler, size_t filler_length, int32_t at_start,
                              FaString *out) {
-	int64_t missing = width - (int64_t)fa_graphemes(bytes, length);
+	size_t units = fa_string_length(bytes, length, capacity);
+	if ((uint64_t)width <= units || !filler_length) {
+		*out = owned_copy_with(bytes, length, capacity & STRING_FLAGS);
+		return;
+	}
+	if ((uint64_t)width >= KIND_MASK) { out_of_memory(); }
+	size_t missing = (size_t)width - units;
+	size_t filler_units = unit_count(filler, filler_length);
+	size_t repeats = missing / filler_units;
+	size_t remainder = missing % filler_units;
+	UnitReader tail = {filler, filler_length, 0, 0};
+	while (tail.units < remainder) { (void)read_unit(&tail); }
+	size_t encoded = fa_string_encoded_length(bytes, length, capacity);
+	size_t filler_encoded = fa_string_encoded_length(filler, filler_length, 0);
+	if (repeats && filler_encoded > (KIND_MASK - 1 - encoded) / repeats) { out_of_memory(); }
+	size_t tail_encoded = fa_string_encoded_length(filler, tail.position / 2, 0) + ((tail.position & 1) ? 3 : 0);
+	size_t total = fa_string_size(encoded + repeats * filler_encoded, tail_encoded);
 	fa_b_reset();
+	reserve(total);
 	if (!at_start) {
-		fa_b_bytes(bytes, length);
+		fa_b_string(bytes, length, capacity);
 	}
-	size_t position = 0;
-	for (int64_t index = 0; index < missing && filler_length > 0; index += 1) {
-		size_t next = next_boundary(filler, filler_length, position);
-		fa_b_bytes(filler + position, next - position);
-		position = next == filler_length ? 0 : next;
+	for (size_t index = 0; index < repeats; index += 1) {
+		fa_b_string(filler, filler_length, 0);
 	}
+	append_unit_range(filler, filler_length, 0, 0, tail.position);
 	if (at_start) {
-		fa_b_bytes(bytes, length);
+		fa_b_string(bytes, length, capacity);
 	}
 	fa_b_take(out);
 }
@@ -4090,8 +4107,8 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_pad(const uint8_t *bytes
                              const uint8_t *filler, size_t filler_length, int32_t at_start,
                              FaString *out) {
 	if (width <= 0) { *out = owned_copy_with(bytes, length, capacity & SIMPLE); return; }
-	if (!(capacity & SIMPLE) || filler_length != 1 || filler[0] >= 128 || filler[0] == '\r') {
-		string_pad_slow(bytes, length, width, filler, filler_length, at_start, out);
+	if (!(capacity & SIMPLE) || filler_length != 1 || filler[0] >= 128) {
+		string_pad_slow(bytes, length, capacity, width, filler, filler_length, at_start, out);
 		return;
 	}
 	if ((uint64_t)width <= length) { *out = owned_copy_with(bytes, length, SIMPLE); return; }

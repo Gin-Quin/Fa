@@ -1,0 +1,10 @@
+function lower = (text: String): String => text.toLowerCase()
+console.log(lower("ΟΣ") == "ος", lower("ΟΣΑ") == "οσα", lower("ΟΣ\u{301}.") == "ος\u{301}.") -- prints: true true true
+console.log(lower("Σ") == "σ", lower("AΣ'B") == "aσ'b", lower("AΣ'") == "aς'") -- prints: true true true
+console.log(lower("İ") == "i\u{307}", String.from("ßﬃ").toUpperCase() == "SSFFI") -- prints: true true
+let pair = String.from("😀")
+let high = try pair[0]
+console.log(("aß" + high).toUpperCase() == "ASS" + high, ("ΟΣ" + high).toLowerCase() == "ος" + high) -- prints: true true
+let spaces = String.from("\u{FEFF}\u{202F}\u{3000}\r\n x \u{A0}\u{2007}\u{2029}")
+console.log(spaces.trim() == "x", ("\u{85}x\u{200B}").trim() == "\u{85}x\u{200B}") -- prints: true true
+console.log(("\u{FEFF}" + high + "\u{FEFF}").trim() == high, (high + "\u{FEFF}").trimEnd() == high) -- prints: true true

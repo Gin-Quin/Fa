@@ -42,21 +42,7 @@ mod with_llvm {
 		opt_level: OptLevel,
 		target: Target,
 	) -> String {
-		let mut session = Session::new();
-		let file = session.set_source("main", Arc::from(source));
-		session.analyze_file(file);
-		let options = Options {
-			opt_level,
-			emit_ir: true,
-			overflow_checks,
-			..Options::default()
-		};
-		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-			.join("fa-checks")
-			.join(name);
-		let artifact = compile(&session, file, "test.fa", target, &options, &output)
-			.unwrap_or_else(|error| panic!("{name}: {error}"));
-		let ir = std::fs::read_to_string(artifact.ir.expect("the IR")).expect("the IR file");
+		let ir = complete_ir_at_target(name, source, overflow_checks, opt_level, target);
 		// keep the program's own functions
 		let mut kept = String::new();
 		let mut keep = false;
@@ -74,6 +60,30 @@ mod with_llvm {
 			}
 		}
 		kept
+	}
+
+	fn complete_ir_at_target(
+		name: &str,
+		source: &str,
+		overflow_checks: bool,
+		opt_level: OptLevel,
+		target: Target,
+	) -> String {
+		let mut session = Session::new();
+		let file = session.set_source("main", Arc::from(source));
+		session.analyze_file(file);
+		let options = Options {
+			opt_level,
+			emit_ir: true,
+			overflow_checks,
+			..Options::default()
+		};
+		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+			.join("fa-checks")
+			.join(name);
+		let artifact = compile(&session, file, "test.fa", target, &options, &output)
+			.unwrap_or_else(|error| panic!("{name}: {error}"));
+		std::fs::read_to_string(artifact.ir.expect("the IR")).expect("the IR file")
 	}
 
 	fn count(ir: &str, pattern: &str) -> usize {
@@ -1209,16 +1219,32 @@ console.log(sum("é😀"))
 
 	#[test]
 	fn ordinary_string_operations_do_not_link_grapheme_tables() {
-		let ir = ir_of(
-			"units-no-graphemes",
-			r#"
-function length = (text: String): Integer => text.length
-function read = (text: String, index: Integer): UInt16 throws IndexError => try text.codeUnitAt(index)
-console.log(length("é😀"), try read("日", 0))
-"#,
-		);
-		assert!(!ir.contains("@fa_graphemes("), "{ir}");
-		assert!(!ir.contains("@fa_next_grapheme("), "{ir}");
+		let source = r#"
+let text = arguments.get(0) ?? "é😀"
+console.log(text.length, text.split("").length)
+console.log(text.replace("é", "x").padStart(5, "0"))
+"#;
+		for target in [Target::Native, Target::Wasm] {
+			let ir = complete_ir_at_target(
+				&format!("units-no-graphemes-{}", target.name()),
+				source,
+				false,
+				OptLevel::O3,
+				target,
+			);
+			assert!(
+				!ir.contains("@fa_graphemes("),
+				"grapheme count linked on {target:?}"
+			);
+			assert!(
+				!ir.contains("@next_boundary("),
+				"segmentation linked on {target:?}"
+			);
+			assert!(
+				!ir.contains("@fa_next_grapheme("),
+				"segmentation wrapper linked on {target:?}"
+			);
+		}
 	}
 
 	#[test]

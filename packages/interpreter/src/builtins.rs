@@ -95,7 +95,7 @@ pub fn iterate(value: &Value) -> Result<Vec<Value>, Error> {
 			.collect()),
 		Value::String(text) => {
 			let mut offset = 0;
-			let mut items = Vec::new();
+			let mut items = Vec::with_capacity(text.code_point_count());
 			while let Some((point, _)) = text.next_point(&mut offset) {
 				items.push(Value::String(point));
 			}
@@ -260,6 +260,49 @@ pub(crate) fn slice_bounds(
 		None => length,
 	};
 	Ok((from, to.max(from)))
+}
+
+/// The storage an indexed read will allocate, before constructing it.
+pub fn index_size(value: &Value, index: &Value) -> Result<usize, Error> {
+	if let Value::Range {
+		start,
+		end,
+		inclusive,
+	} = index
+	{
+		let length = match value {
+			Value::String(text) => text.len(),
+			Value::Bytes(bytes) => bytes.len(),
+			Value::Array(items) => items.len(),
+			_ => return Ok(0),
+		};
+		let (from, to) = slice_bounds(*start, *end, *inclusive, length)?;
+		let count = to - from;
+		return Ok(match value {
+			Value::String(text) => count.saturating_mul(if text.is_ascii() { 2 } else { 10 }),
+			Value::Bytes(_) => count,
+			Value::Array(_) => crate::memory::values_size(count),
+			_ => 0,
+		});
+	}
+	Ok(if matches!(value, Value::String(_)) {
+		64
+	} else {
+		0
+	})
+}
+
+/// The buffers a spread or collection constructor builds while iterating.
+pub fn iteration_size(value: &Value) -> usize {
+	let count = count(value).unwrap_or(0);
+	match value {
+		Value::String(text) => crate::memory::values_size(count)
+			.saturating_add(count.saturating_mul(32))
+			.saturating_add(text.utf8_len().saturating_mul(2)),
+		Value::Map(_) => crate::memory::values_size(count.saturating_mul(3))
+			.saturating_add(count.saturating_mul(32)),
+		_ => crate::memory::values_size(count),
+	}
 }
 
 /// `value[index]`: an item, a map value, a character, a slice.
@@ -490,6 +533,12 @@ pub fn call(
 	let receiver = arguments.first().cloned().unwrap_or(Value::None);
 	let arg = |index: usize| argument(&arguments, index);
 	Ok(match path {
+		"$Json.bindDefaults" => {
+			interpreter.reserve(receiver.text_size().saturating_mul(2))?;
+			let mut schema = receiver;
+			crate::json::bind_defaults(&mut schema, arg(1)?.items().unwrap_or_default());
+			schema
+		}
 		// String operations preserve raw code units, including lone surrogates.
 		_ if path.starts_with("String") || path.starts_with("Bytes") => {
 			return crate::strings::call(interpreter, path, &arguments);
@@ -601,7 +650,7 @@ pub fn call(
 					.saturating_mul(std::mem::size_of::<crate::text::Text>())
 					.saturating_mul(2),
 			)?;
-			let mut pieces = Vec::new();
+			let mut pieces = Vec::with_capacity(items.len().saturating_mul(2));
 			for (i, item) in items.iter().enumerate() {
 				if i > 0 {
 					pieces.push(separator.clone());
@@ -698,7 +747,10 @@ pub fn call(
 		| "GrowingPool.from"
 		| "Columnar.from"
 		| "GrowingColumnar.from"
-		| "OrderedColumnar.from" => list(iterate(&receiver)?),
+		| "OrderedColumnar.from" => {
+			interpreter.reserve(iteration_size(&receiver))?;
+			list(iterate(&receiver)?)
+		}
 		"Set.from" | "GrowingSet.from" => {
 			let mut set = Vec::new();
 			for item in iterate(&receiver)? {

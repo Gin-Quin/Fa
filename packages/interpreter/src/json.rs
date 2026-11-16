@@ -280,24 +280,33 @@ impl Parser<'_> {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn json_becomes_values() {
-		let value = parse(
-			r#"{"port": 8080, "debug": false, "ratio": 0.5, "tags": ["a", "é"], "none": null}"#,
-		)
-		.unwrap();
-		assert_eq!(
-			value.to_text(),
-			"{ port = 8080, debug = false, ratio = 0.5, tags = [\"a\", \"é\"], none = none }"
-		);
-		assert!(matches!(parse("[1, 2"), Err(Error::Thrown(_))));
-		assert!(matches!(parse("{} x"), Err(Error::Thrown(_))));
-		assert_eq!(parse("-12").unwrap(), Value::int(-12));
-		assert_eq!(parse("1e2").unwrap(), Value::Float(100.0));
+/// Supplies lexical captures for lazy field defaults. The schema itself
+/// remains ordinary constant metadata, shared until this binding step.
+pub(crate) fn bind_defaults(value: &mut Value, closures: &[Value]) {
+	match value {
+		Value::Function(function) => {
+			if let Some(closure) = closures.iter().find(
+				|value| matches!(value,Value::Function(other) if other.function == function.function),
+			) {
+				*value = closure.clone();
+			}
+		}
+		Value::Array(items) | Value::Tuple(items) => {
+			for item in Arc::make_mut(items) {
+				bind_defaults(item, closures);
+			}
+		}
+		Value::Object(object) => {
+			for (_, field) in &mut Arc::make_mut(object).fields {
+				bind_defaults(field, closures);
+			}
+		}
+		Value::Member(member) => {
+			if let Some(data) = &mut Arc::make_mut(member).data {
+				bind_defaults(data, closures);
+			}
+		}
+		_ => {}
 	}
 }
 
@@ -778,4 +787,25 @@ fn convert(
 			}));
 		}
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn json_becomes_values() {
+		let value = parse(
+			r#"{"port": 8080, "debug": false, "ratio": 0.5, "tags": ["a", "é"], "none": null}"#,
+		)
+		.unwrap();
+		assert_eq!(
+			value.to_text(),
+			"{ port = 8080, debug = false, ratio = 0.5, tags = [\"a\", \"é\"], none = none }"
+		);
+		assert!(matches!(parse("[1, 2"), Err(Error::Thrown(_))));
+		assert!(matches!(parse("{} x"), Err(Error::Thrown(_))));
+		assert_eq!(parse("-12").unwrap(), Value::int(-12));
+		assert_eq!(parse("1e2").unwrap(), Value::Float(100.0));
+	}
 }

@@ -725,3 +725,31 @@ fn byte_copy_on_write_is_checked_before_allocating() {
 		Err(Error::Memory(1024))
 	);
 }
+
+#[test]
+fn composite_interpolation_preserves_raw_units_until_output() {
+	let composite = Value::array(vec![units(&[0xd800])]);
+	let formatted = run(Expr::Template(vec![Part::Value(value(composite))]), 0).unwrap();
+	assert_eq!(formatted, units(&[91, 34, 0xd800, 34, 93]));
+	assert_eq!(formatted.to_text(), "[\"�\"]");
+}
+
+#[test]
+fn slices_check_their_output_before_copying() {
+	let limits = Limits {
+		memory: 1024,
+		..Limits::default()
+	};
+	for input in [string(&"é日😀".repeat(1000)), bytes(&vec![0; 4096])] {
+		let range = Value::Range {
+			start: None,
+			end: Some(2000.into()),
+			inclusive: false,
+		};
+		let expr = Expr::Index(value(input).boxed(), value(range).boxed());
+		assert_eq!(
+			Interpreter::new(&mut NoHost, limits).evaluate(&expr, 0),
+			Err(Error::Memory(1024))
+		);
+	}
+}

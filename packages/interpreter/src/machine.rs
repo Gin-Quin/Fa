@@ -526,11 +526,16 @@ impl<'i, 'h> Machine<'i, 'h> {
 				fields: names.into_iter().zip(values).collect(),
 			}))),
 			Finish::Template => {
+				for value in &values {
+					if !matches!(value, Value::String(_)) {
+						self.interpreter.reserve_text(value.text_size())?;
+					}
+				}
 				let pieces: Vec<Text> = values
 					.into_iter()
 					.map(|value| match value {
 						Value::String(text) => text,
-						other => Text::from(other.to_text()),
+						other => other.to_text_value(),
 					})
 					.collect();
 				let bytes = pieces
@@ -573,7 +578,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 						.collect(),
 				};
 				match action {
-					PlaceAction::Read => Self::done(Self::read(self.locals(), &resolved)?),
+					PlaceAction::Read => Self::done(Self::read(
+						&self.frame().locals,
+						&resolved,
+						self.interpreter,
+					)?),
 					PlaceAction::Write(value) => {
 						self.reserve_edit(&resolved)?;
 						Self::edit(self.locals(), &resolved, |slot| {
@@ -583,7 +592,8 @@ impl<'i, 'h> Machine<'i, 'h> {
 						Self::done(Value::None)
 					}
 					PlaceAction::Mutate(path, mut arguments) if Callback::mutating(path) => {
-						let receiver = Self::read(self.locals(), &resolved)?;
+						let receiver =
+							Self::read(&self.frame().locals, &resolved, self.interpreter)?;
 						arguments.insert(0, receiver);
 						self.start_callback(path, arguments, CallbackFinish::Mutate(resolved))
 					}
@@ -683,12 +693,19 @@ impl<'i, 'h> Machine<'i, 'h> {
 		self.interpreter.reserve(bytes)
 	}
 
-	fn read(locals: &[Value], place: &ResolvedPlace) -> Result<Value, Flow> {
+	fn read(
+		locals: &[Value],
+		place: &ResolvedPlace,
+		interpreter: &Interpreter<'_>,
+	) -> Result<Value, Flow> {
 		let mut current = locals[place.slot as usize].clone();
 		for step in &place.steps {
 			current = match step {
 				PlaceStep::Field(name) => builtins::field(&current, name)?,
-				PlaceStep::Index(key) => builtins::index(&current, key)?,
+				PlaceStep::Index(key) => {
+					interpreter.reserve(builtins::index_size(&current, key)?)?;
+					builtins::index(&current, key)?
+				}
 			};
 		}
 		Ok(current)
@@ -810,9 +827,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 			};
 			self.interpreter.reserve(length.saturating_mul(64))?;
 		}
-		if let Some(receiver) = arguments.first() {
+		if path != "Json.parse"
+			&& let Some(receiver) = arguments.first()
+		{
 			self.interpreter
-				.reserve(memory::values_size(builtins::count(receiver).unwrap_or(0)))?;
+				.reserve(builtins::iteration_size(receiver))?;
 		}
 		self.callback(Callback::new(path, arguments)?, None, finish)
 	}
@@ -939,12 +958,10 @@ impl<'i, 'h> Machine<'i, 'h> {
 					}
 					Continuation::Gather(mut gather) => {
 						if gather.spread {
-							self.interpreter.reserve(memory::values_size(
-								gather
-									.values
-									.len()
-									.saturating_add(builtins::count(&value).unwrap_or(0)),
-							))?;
+							self.interpreter.reserve(
+								memory::values_size(gather.values.len())
+									.saturating_add(builtins::iteration_size(&value)),
+							)?;
 							gather
 								.values
 								.extend(builtins::iterate(&value)?.into_iter().map(Some));
@@ -1060,7 +1077,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Binary::Equals(negated) => Value::Boolean(equals(&left, &right) != negated),
 			Binary::Compare(op) => Value::Boolean(eval::compare(op, &left, &right)?),
 			Binary::IsIn(negated) => Value::Boolean(builtins::includes(&right, &left)? != negated),
-			Binary::Index => builtins::index(&left, &right)?,
+			Binary::Index => {
+				self.interpreter
+					.reserve(builtins::index_size(&left, &right)?)?;
+				builtins::index(&left, &right)?
+			}
 		})
 	}
 

@@ -43,6 +43,7 @@ static utf8Length = text.utf8Length()
 static ordered = "😀" < "\u{E000}"
 static joinedArray = [high, low].join("")
 static identity = high.toString()
+static nested = "{[high]}"
 static empty = "".isEmpty()
 static capacity = text.capacity
 
@@ -63,6 +64,7 @@ static appended = @append()
 	assert sameNumber(length, 6)
 	assert high.length == 1 and not wellFormed
 	assert cut == high and copied == high and identity == high
+	assert nested == "[\"" + high + "\"]"
 	assert (try low.codeUnitAt(0)) == numeric
 	assert joined == "😀" and appended == "😀" and joinedArray == "😀"
 	assert rest == "😀e\u{301}" and inclusive == text

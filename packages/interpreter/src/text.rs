@@ -239,8 +239,11 @@ impl Text {
 		if needle.is_empty() {
 			return Some(if reverse { self.len() } else { 0 });
 		}
-		let haystack: Vec<u16> = self.units().collect();
-		let needle: Vec<u16> = needle.units().collect();
+		let mut haystack = Vec::with_capacity(self.len());
+		haystack.extend(self.units());
+		let mut units = Vec::with_capacity(needle.len());
+		units.extend(needle.units());
+		let needle = units;
 		if reverse {
 			haystack.windows(needle.len()).rposition(|w| w == needle)
 		} else {

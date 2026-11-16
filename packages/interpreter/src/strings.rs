@@ -289,31 +289,32 @@ pub(crate) fn call(
 			path == "String#replaceAll",
 		)?,
 		"String#characters" => {
+			interpreter.reserve_text(text.utf8_len())?;
+			let view = text.to_utf8_lossy();
+			let count = view.graphemes(true).count();
 			interpreter.reserve(
-				crate::memory::values_size(text.len())
+				crate::memory::values_size(count)
+					.saturating_add(count.saturating_mul(32))
 					.saturating_add(text.len().saturating_mul(10)),
 			)?;
-			// U+FFFD and a lone surrogate both have Grapheme_Cluster_Break=Other
-			// and one UTF-16 unit. Segment the output view, then slice the original.
-			if let Some(text) = text.as_str() {
-				return Ok(list(text.graphemes(true).map(Value::string).collect()));
+			let mut parts = Vec::with_capacity(count);
+			if text.is_well_formed() {
+				parts.extend(view.graphemes(true).map(Value::string));
+			} else {
+				// U+FFFD and a lone surrogate have GCB=Other and one code unit.
+				let mut offset = 0;
+				parts.extend(view.graphemes(true).map(|g| {
+					let start = offset;
+					offset += g.encode_utf16().count();
+					Value::String(text.slice(start, offset))
+				}));
 			}
-			let view = text.to_utf8_lossy();
-			let mut offset = 0;
-			list(
-				view.graphemes(true)
-					.map(|g| {
-						let start = offset;
-						offset += g.encode_utf16().count();
-						Value::String(text.slice(start, offset))
-					})
-					.collect(),
-			)
+			list(parts)
 		}
 		"String#codePoints" => {
 			interpreter.reserve(crate::memory::values_size(text.code_point_count()))?;
 			let mut offset = 0;
-			let mut points = Vec::new();
+			let mut points = Vec::with_capacity(text.code_point_count());
 			while let Some(code) = text.next_scalar(&mut offset) {
 				points.push(Value::int(i64::from(code)));
 			}
@@ -333,6 +334,10 @@ pub(crate) fn call(
 }
 
 fn split(interpreter: &Interpreter<'_>, text: &Text, separator: &Text) -> Result<Value, Error> {
+	if separator.len() > text.len() {
+		interpreter.reserve(crate::memory::values_size(1))?;
+		return Ok(list(vec![Value::String(text.clone())]));
+	}
 	let count = if separator.is_empty() {
 		text.len()
 	} else if let (Some(text), Some(separator)) = (text.as_str(), separator.as_str()) {
@@ -340,32 +345,33 @@ fn split(interpreter: &Interpreter<'_>, text: &Text, separator: &Text) -> Result
 	} else {
 		text.len().saturating_add(1)
 	};
-	interpreter
-		.reserve(crate::memory::values_size(count).saturating_add(text.len().saturating_mul(10)))?;
+	interpreter.reserve(
+		crate::memory::values_size(count)
+			.saturating_add(count.saturating_mul(32))
+			.saturating_add(text.len().saturating_mul(10)),
+	)?;
 	if separator.is_empty() {
-		return Ok(list(
-			text.units()
-				.map(|u| Value::String(Text::from_units(&[u])))
-				.collect(),
-		));
+		let mut parts = Vec::with_capacity(count);
+		parts.extend(text.units().map(|u| Value::String(Text::from_units(&[u]))));
+		return Ok(list(parts));
 	}
 	if let (Some(text), Some(separator)) = (text.as_str(), separator.as_str()) {
 		let ascii = text.is_ascii();
-		return Ok(list(
-			text.split(separator)
-				.map(|part| {
-					if ascii {
-						Value::String(Text::from_utf8(Arc::from(part), part.len()))
-					} else {
-						Value::string(part)
-					}
-				})
-				.collect(),
-		));
+		let mut parts = Vec::with_capacity(count);
+		parts.extend(text.split(separator).map(|part| {
+			if ascii {
+				Value::String(Text::from_utf8(Arc::from(part), part.len()))
+			} else {
+				Value::string(part)
+			}
+		}));
+		return Ok(list(parts));
 	}
-	let units: Vec<u16> = text.units().collect();
-	let needle: Vec<u16> = separator.units().collect();
-	let mut parts = Vec::new();
+	let mut units = Vec::with_capacity(text.len());
+	units.extend(text.units());
+	let mut needle = Vec::with_capacity(separator.len());
+	needle.extend(separator.units());
+	let mut parts = Vec::with_capacity(count);
 	let (mut start, mut i) = (0, 0);
 	while i + needle.len() <= units.len() {
 		if units[i..].starts_with(&needle) {
@@ -414,9 +420,11 @@ fn replace(
 			},
 		));
 	}
-	let units: Vec<u16> = text.units().collect();
-	let needle: Vec<u16> = pattern.units().collect();
-	let mut output = Vec::new();
+	let mut units = Vec::with_capacity(text.len());
+	units.extend(text.units());
+	let mut needle = Vec::with_capacity(pattern.len());
+	needle.extend(pattern.units());
+	let mut output = Vec::with_capacity(maximum);
 	let mut i = 0;
 	let mut replaced = false;
 	while i <= units.len() {

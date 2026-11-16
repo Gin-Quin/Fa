@@ -1351,3 +1351,36 @@ The external Codec reference checkout was `/home/claude-dev/projects/codec`, bra
 The proposed split-aggregate optimization remains unimplemented: for a proven immutable `let parts = text.split(sep)` used only by `parts.length` and `parts.join(literal).length`, evaluate the source/separator once and retain a count and byte length when both are simple ASCII without CR, the separator is nonempty, and the join literal is also simple ASCII without CR. Otherwise keep the ordinary array. The proof excludes other reads, captures, aliases and `use`; joining computes `bytes - (count - 1) * sep.length + (count - 1) * literal.length`. Test mutated inputs after declaration, empty/non-simple strings, evaluation order and leaks. Split views already reduce the allocation cost, so measure before implementing it and revisit the proof under the string redesign.
 
 Full LLVM workspace validations share `/tmp/fa-compiler-full-suite.lock` (`flock --close`, so children do not inherit the lock), use `CARGO_BUILD_JOBS=2` and two test threads, and keep sanitizer runs outside virtual-memory caps. The current Node/web harness enforces resident memory instead: JavaScript engines reserve sparse address space, so the former resume note's virtual-memory limit is not carried forward.
+
+
+## String redesign: compile-time interpreter (2026-11-16)
+
+The interpreter's `Text` (also the string constant stored in `Analysis`) has two
+canonical representations: well-formed UTF-8 in `Arc<str>` with a cached UTF-16
+length, and `Arc<[u16]>` only for strings holding lone surrogates. Correctness
+comes first: indexing/slicing can preserve either half of a pair, and joining
+halves canonicalizes to well-formed UTF-8 again. `as_str()` returns `Option<&str>`;
+it never silently substitutes U+FFFD. Emitters must consume `units()` when it is
+`None`. Until the backend branches are integrated, such constants are explicitly
+refused at emission rather than changed.
+
+ASCII keeps one byte per unit, the existing shared text allocation, byte-based
+search/split/replace and concatenation, constant-time length, and direct indexing.
+Non-ASCII operations may walk code units or build bounded temporary unit buffers;
+the interpreter need not reproduce the native WTF-8 layout or breadcrumbs. Storing
+a UTF-16 copy of every ordinary string was rejected: it doubles the common ASCII
+payload and would duplicate ordinary text for the checker and emitters. Only a
+malformed value needs the raw-unit allocation. Strings remain copied on write by
+sharing immutable buffers. `Bytes` has its own value and runtime type test and
+stores `u8`, rather than the much larger per-item `Value` used by arrays. Preflight
+allocation checks include temporary conversions and collection outputs; the
+existing per-evaluation heap, step and depth budgets still apply.
+
+The lead confirmed that replacements are literal strings: `$` patterns have no
+special meaning. This applies to compile-time evaluation as on every target.
+
+Locale comparison is evaluated only at runtime: it depends on the locale data
+of the machine running the program. The interpreter refuses `String.compareLocale`
+with that explanation and adds no ICU dependency (lead decision, 2026-11-16).
+A malformed compile-time string infers `String`; a literal type always holds
+well-formed text, so literal-type symbols remain UTF-8 (same lead decision).

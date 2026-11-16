@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use ethnum::I256;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fa_interpreter::Value;
 use fa_interpreter::ir::{
@@ -165,11 +165,16 @@ impl<'a> Lowerer<'a> {
 		self.compile_time = false;
 		self.globals = true;
 		if let Some(expression) = super::json::default_node(node) {
+			let captures: Vec<Slot> = self
+				.default_captures(expression)
+				.into_iter()
+				.map(|symbol| self.bind(symbol))
+				.collect();
 			let body = self.expr(expression);
 			return Some(Function {
 				name: "<JSON field default>".into(),
 				params: Vec::new(),
-				captures: Vec::new(),
+				captures,
 				slots: self.next,
 				body,
 			});
@@ -227,6 +232,46 @@ impl<'a> Lowerer<'a> {
 			slots: self.next,
 			body,
 		})
+	}
+
+	/// The free values of a field default, in a stable order shared by its
+	/// synthetic function and the closure constructed at a JSON call.
+	fn default_captures(&self, expression: NodeId) -> Vec<SymbolId> {
+		let mut nodes = FxHashSet::default();
+		let mut pending = vec![expression];
+		while let Some(node) = pending.pop() {
+			if nodes.insert(node) {
+				pending.extend(syntax::children(self.tree, node));
+			}
+		}
+		let mut captures = Vec::new();
+		for &node in &nodes {
+			if !matches!(syntax::view(self.tree, node), View::Name(_)) {
+				continue;
+			}
+			let Resolution::Local(symbol) = self.a.resolution(node) else {
+				continue;
+			};
+			let data = self.a.symbols.symbol(symbol);
+			if nodes.contains(&data.decl_node) || self.is_module_level(symbol) {
+				continue;
+			}
+			match data.kind {
+				SymbolKind::Function => {
+					if let Some(info) = self.a.function(data.decl_node) {
+						captures.extend(info.captures.iter().copied());
+					}
+				}
+				SymbolKind::Static
+				| SymbolKind::Type
+				| SymbolKind::TypeParameter
+				| SymbolKind::Namespace => {}
+				_ => captures.push(symbol),
+			}
+		}
+		captures.sort_unstable_by_key(|symbol| symbol.0);
+		captures.dedup();
+		captures
 	}
 
 	fn bind(&mut self, symbol: SymbolId) -> Slot {
@@ -1527,12 +1572,33 @@ impl<'a> Lowerer<'a> {
 				if path == "Json.parse" {
 					let (schema, defaults) =
 						super::json::schema(self.types(), self.a, self.file, self.a.type_of(n));
-					values.push(Expr::Const(schema));
+					let mut expressions = Vec::new();
+					let input = self.temp();
+					expressions.push(Expr::Let(input, values.remove(0).boxed()));
+					values.push(Expr::Local(input));
+					let mut closures = Vec::new();
+					for key in defaults {
+						let expression =
+							super::json::default_node(NodeId(key.1)).expect("a JSON default key");
+						let mut captures = Vec::new();
+						for symbol in self.default_captures(expression) {
+							let read = self.read_symbol(expression, symbol);
+							let slot = self.temp();
+							expressions.push(Expr::Let(slot, read.boxed()));
+							captures.push(slot);
+						}
+						closures.push(Item::One(Expr::Closure {
+							function: key,
+							captures,
+						}));
+					}
+					values.push(Expr::Builtin(
+						"$Json.bindDefaults",
+						vec![Expr::Const(schema), Expr::Array(closures)],
+					));
 					values.push(Expr::Const(Value::Boolean(crate::comptime::is_js_target(
 						&self.session.comptime.target,
 					))));
-					let mut expressions: Vec<Expr> =
-						defaults.into_iter().map(Expr::Function).collect();
 					expressions.push(Expr::Builtin(path, values));
 					return Expr::Block(expressions);
 				}

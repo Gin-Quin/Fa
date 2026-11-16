@@ -345,6 +345,7 @@ function buffer = (data: Bytes): String throws IndexError => {
     reuse view = try original[original.length..0]
     let empty = view.toString()
     mutable rows = [changed, empty, previous.toString(), "{previous == data}", Bytes.filled(data.length, 17).toString(), Bytes.filled(0).toString()]
+    rows.push("{original == previous}:{Bytes.filled(data.length, 17) == data}:{Bytes.filled(data.length + 1, 17) == data}:{data.isEmpty()}:{data.toArray().length}")
     for range in [-data.length-1..0, 0..data.length+1, data.length..data.length, -1..0, -data.length..=-data.length, 0..=data.length, data.length..=0, 0..=-1] {
         rows.push(data[range].toString() catch _ => "error")
     }
@@ -357,6 +358,7 @@ function buffer = (data: Bytes): String throws IndexError => {
         if changed:changed[0]=255
         array=lambda value:"["+", ".join(map(str,value))+"]"
         rows=[array(changed),"[]",array(data),"true",array([17]*len(data)),"[]"]
+        rows.append(f"{str(changed==data).lower()}:{str([17]*len(data)==data).lower()}:false:{str(not data).lower()}:{len(data)}")
         n=len(data)
         for a,b,inclusive in [(-n-1,0,False),(0,n+1,False),(n,n,False),(-1,0,False),(-n,-n,True),(0,n,True),(n,0,True),(0,-1,True)]:
             valid=-n<=a<=n and -n<=b<=n-int(inclusive)
@@ -460,6 +462,9 @@ def main():
         # Every subject meets empty, surrogate-edge, and sampled ordinary needles.
         for needle in ["", "\ud83d", "\ude00", needles[rng.randrange(len(needles))]]:
             cases.append((text, needle))
+    # The decided edges that the sampled needles may miss (points 1 to 4).
+    cases += [("aaa", "aa"), ("aaaa", "aa"), ("", ","), ("", ""), ("x", "😀"), ("😀", ""),
+              ("a,b,,c", ","), ("abc", "abcd"), ("ab", "longer-than-most-inputs"), ("😀😀", "\ude00\ud83d")]
     reference = subprocess.run([bun, "-e", ORACLE], input=json.dumps(cases, ensure_ascii=True), text=True, capture_output=True, check=True).stdout.splitlines()
     write_cases(output,"semantic",PRELUDE+REPRESENTATIONS,[(literal(text),literal(needle)) for text,needle in cases],reference,"probe",32)
     storage_oracle = r'''

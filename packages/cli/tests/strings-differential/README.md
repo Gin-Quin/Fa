@@ -10,7 +10,9 @@ The standard-library Python generator runs direct JavaScript expressions under
 Bun, independently of Fa analysis, interpretation and code generation. It emits
 exact UTF-16 unit sequences, not lossy console strings or hashes. The fixed seed
 is `0xFA1616`. Every subject meets an empty needle, both surrogate halves, and
-one seeded ordinary needle; this samples the subject/needle product. Bounds
+one seeded ordinary needle; this samples the subject/needle product. Ten fixed
+pairs add the decided edges a sampled needle may miss (non-overlapping matches,
+empty texts and separators, a filler cut inside a pair, over-long searches). Bounds
 cover negative, open, inclusive, exclusive, reversed, empty and invalid ranges.
 Fa's declared deviations (negative indexing, optional searches, literal dollar
 replacements, checked bounds) are modeled explicitly. Decoder error positions
@@ -26,7 +28,7 @@ slices, encodings, decoding and interpolation, at compile time and runtime. Runt
 sampling subject/needle/form triples; separate storage probes use every subject
 in every form.
 Additional byte probes cover all 256 byte values, constructors, copies, mutable
-views and reseating; 156 decoder cases cover malformed classes at vector edges.
+views and reseating, equality and inequality, `isEmpty` and `toArray`; 156 decoder cases cover malformed classes at vector edges.
 
 Every subject also passes through owner/view/split-part/object/array/pool,
 recursive union/packed array, frame and reserved append paths, map keys, set

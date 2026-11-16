@@ -1,0 +1,24 @@
+-- Primitive reference results: writes through them, after deletes and reinsertions, on every engine.
+function slot = (values: Array<Integer>, i: Integer): Integer in values throws IndexError => try values[i]
+function entry = (values: Map<String, Integer>, key: String): (Integer in values)? => values.get(key)
+function exercise = (): Integer throws IndexError | KeyNotFound => {
+ mutable values: Array<Integer> = [1, 2, 3]
+ for i in 0..3 {
+  use cell = try slot(values, i)
+  cell += 10
+ }
+ values.delete(0)
+ use first = try slot(values, 0)
+ first += 100
+ mutable scores: Map<String, Integer> = [("a", 1), ("b", 2)]
+ use a = entry(scores, "a")
+ if a is not none { a += 5 }
+ scores.delete("a")
+ scores["a"] = 40
+ use again = entry(scores, "a")
+ if again is not none { again += 2 }
+ (try values[0]) + (try values[1]) + (try scores["a"]) + (try scores["b"])
+}
+static result = @exercise()
+console.log(result)
+console.log(try exercise())

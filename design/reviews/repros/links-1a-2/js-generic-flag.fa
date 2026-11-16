@@ -1,0 +1,8 @@
+-- JS shape: generic code without references gains a hidden flag per type parameter.
+type Box<Item> = {
+ item: Item
+ function get = (self): Item => self.item
+}
+function pair = <Left, Right>(left: Left, right: Right): (Left, Right) => (left, right)
+let box: Box<Integer> = { item = 3 }
+console.log(box.get(), pair(1, "a"))

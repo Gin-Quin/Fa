@@ -1,0 +1,14 @@
+-- Hidden cost: each primitive slot borrowed through a user function keeps a cached cell for the array's lifetime.
+function slot = (values: Array<Integer>, i: Integer): Integer in values throws IndexError => try values[i]
+function exercise = (count: Integer): Integer throws IndexError => {
+ mutable values: Array<Integer> = []
+ for i in 0..count { values.push(i) }
+ for round in 0..5 {
+  for i in 0..count {
+   use cell = try slot(values, i)
+   cell += 1
+  }
+ }
+ try values[count - 1]
+}
+console.log(try exercise(1000000))

@@ -1,0 +1,25 @@
+-- Recursive tree walk through reference parameters and results: check the JavaScript shape.
+type Tree = {
+ nodes: Array<Node> = []
+ type Node = { value: Integer, left: Integer, right: Integer }
+ function node = (self, index: Integer): Node in self.nodes throws IndexError => try self.nodes[index]
+}
+function sum = (tree: Tree, node: Tree.Node in tree.nodes): Integer throws IndexError => {
+ mutable total = node.value
+ if node.left >= 0 { total += try sum(tree, try tree.node(node.left)) }
+ if node.right >= 0 { total += try sum(tree, try tree.node(node.right)) }
+ total
+}
+function bump = (tree: Tree, node: Tree.Node in tree.nodes) mutates tree.nodes[..].value => node.value += 1
+function build = (tree: Tree, depth: Integer): Integer mutates tree.nodes => {
+ if depth == 0 { return -1 }
+ let left = build(tree, depth - 1)
+ let right = build(tree, depth - 1)
+ tree.nodes.push({ value = depth, left, right })
+ tree.nodes.length - 1
+}
+mutable tree: Tree = {}
+let root = build(tree, 10)
+use top = try tree.node(root)
+bump(tree, top)
+console.log(try sum(tree, top))

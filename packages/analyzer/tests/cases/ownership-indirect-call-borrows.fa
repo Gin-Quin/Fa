@@ -28,7 +28,7 @@ function projected = (): Integer => {
 	function read = (): Integer => snapshot.length
 	let holder = { run = read }
 	let readers = [holder.run, zero]
-	let selected = readers.get(0) ?? zero
+	let selected = readers[0]
 	let moved = items
 	selected() + moved.length
 }

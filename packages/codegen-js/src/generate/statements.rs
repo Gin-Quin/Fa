@@ -95,6 +95,20 @@ impl Generator<'_> {
 
 	/// A statement or an expression whose value goes to `dest`.
 	pub(crate) fn into(&mut self, n: NodeId, dest: Dest) {
+		if dest == Dest::Return
+			&& self.returns_reference()
+			&& matches!(
+				self.view(n),
+				View::Name(_)
+					| View::Access { .. }
+					| View::Index { .. }
+					| View::Call { .. }
+					| View::None
+			) {
+			let cell = self.reference_cell(n);
+			self.out.line(format!("return {};", cell.text));
+			return;
+		}
 		match self.view(n) {
 			View::Group(inner) | View::Try(inner) => self.into(inner, dest),
 			View::Error => {}

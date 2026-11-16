@@ -155,6 +155,8 @@ pub(crate) struct Generator<'s> {
 	pub(crate) out: Writer,
 	/// The key whose fields an unrolled `@for` over a key set reads (fields.rs).
 	pub(crate) direct_key: Option<String>,
+	/// Explicit dependent reference parameters use existing accessor cells.
+	pub(crate) reference_cells: HashMap<SymbolId, String>,
 	/// The current function.
 	fcx: FnCx,
 	/// The scope of the module.
@@ -308,6 +310,7 @@ pub(crate) fn generate_module(
 		scopes: Scopes::new(),
 		out: Writer::new(),
 		direct_key: None,
+		reference_cells: HashMap::new(),
 		fcx: FnCx::default(),
 		module_scope: None,
 		module_values: HashSet::new(),

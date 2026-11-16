@@ -541,8 +541,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut parameters: Vec<BasicMetadataTypeEnum<'ctx>> = vec![self.pointer_type().into()];
 		parameters.extend(target_parameters.iter().take(return_parameters).copied());
 		let mut at = return_parameters;
-		for (repr, has_default) in &params {
-			parameters.push(if self.borrows_parameter(*repr) {
+		for (index, (repr, has_default)) in params.iter().enumerate() {
+			parameters.push(if self.signature_borrows(function.info.ty, index, *repr) {
 				self.pointer_type().into()
 			} else {
 				self.llvm_type(*repr).into()
@@ -572,7 +572,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.collect();
 		for (index, (repr, has_default)) in params.iter().enumerate() {
 			let argument = given.next().expect("an argument");
-			if by_pointer[index] && !self.borrows_parameter(*repr) {
+			if by_pointer[index] && !self.signature_borrows(function.info.ty, index, *repr) {
 				// a parameter the target changes: a copy of the value
 				let slot = builder.build_alloca(self.llvm_type(*repr), "argument")?;
 				builder.build_store(slot, argument)?;
@@ -638,8 +638,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.types().kind(from),
 			TypeKind::Function(sig) if self.types().sig(sig).is_async
 		);
-		let adapter =
-			self.function_errors_adapter(&key, &from_params, from_ret, is_async, environment_type)?;
+		let adapter = self.function_errors_adapter(
+			&key,
+			from,
+			&from_params,
+			from_ret,
+			is_async,
+			environment_type,
+		)?;
 		let (drop, copy) = self.adapter_environment_functions(&key, from, environment_type)?;
 		// the environment: its drop, its copy, a copy of the value
 		let environment = self.allocate(size)?;
@@ -672,6 +678,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	fn function_errors_adapter(
 		&self,
 		key: &str,
+		ty: TypeId,
 		params: &[Repr],
 		ret: Repr,
 		is_async: bool,
@@ -682,10 +689,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(function);
 		}
 		let pointer = self.pointer_type();
-		let inner_type = self.indirect_type(params, ret, false);
+		let inner_type = self.indirect_reference_type(ty, params, ret, false);
 		let function = self.module.add_function(
 			&name,
-			self.indirect_type(params, ret, true),
+			self.indirect_reference_type(ty, params, ret, true),
 			Some(Linkage::Internal),
 		);
 		function.set_call_conventions(FAST_CALLING_CONVENTION);
@@ -872,8 +879,38 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		for param in self.types().params(sig.params) {
 			params.push(self.repr_of(param.ty, node.index())?);
 		}
-		let ret = self.repr_of(sig.ret, node.index())?;
+		let ret = if sig.reference.is_some() {
+			Repr::Pointer
+		} else {
+			self.repr_of(sig.ret, node.index())?
+		};
 		Ok((params, ret, sig.throws != TypeId::NEVER))
+	}
+
+	pub(crate) fn signature_borrows(&self, ty: TypeId, position: usize, repr: Repr) -> bool {
+		self.borrows_parameter(repr)
+			|| matches!(self.types().kind(ty), TypeKind::Function(sig)
+			if self.types().params(self.types().sig(sig).params).get(position).is_some_and(|param| param.reference.is_some()))
+	}
+
+	fn indirect_reference_type(
+		&self,
+		ty: TypeId,
+		params: &[Repr],
+		ret: Repr,
+		throws: bool,
+	) -> FunctionType<'ctx> {
+		let mut types: Vec<BasicMetadataTypeEnum<'ctx>> = vec![self.pointer_type().into()];
+		types.extend(params.iter().enumerate().map(
+			|(index, repr)| -> BasicMetadataTypeEnum<'ctx> {
+				if self.signature_borrows(ty, index, *repr) {
+					self.pointer_type().into()
+				} else {
+					self.llvm_type(*repr).into()
+				}
+			},
+		));
+		self.function_type_of(types, true, ret, throws).0
 	}
 
 	pub(crate) fn indirect_type(
@@ -1043,7 +1080,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// may itself be inside a conditional callback branch.
 		let mark = self.mark();
 		for (position, (repr, argument)) in params.iter().zip(arguments).enumerate() {
-			if self.borrows_parameter(*repr) {
+			if self.signature_borrows(ty, position, *repr) {
 				// a borrowed parameter: the place itself, or the value in a
 				// slot of the caller for the call
 				let pointer = match places.get(position).copied().flatten() {
@@ -1077,7 +1114,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			lowered.insert(1, pointer.into());
 			lowered.insert(2, bytes.into());
 		}
-		let fn_type = self.indirect_type(&params, ret, throws);
+		let fn_type = self.indirect_reference_type(ty, &params, ret, throws);
 		let call = self
 			.builder
 			.build_indirect_call(fn_type, function, &lowered, "")?;

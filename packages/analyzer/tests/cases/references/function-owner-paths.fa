@@ -1,6 +1,8 @@
 -- prints: 7
+-- prints: 15
 -- prints: 9
 -- prints: 11
+-- prints: 13
 -- prints: 13
 
 type Model = {
@@ -14,10 +16,13 @@ function exercise = () => {
 	use node = model.add(3)
 	model.set(node, 7)
 	console.log(node.value)
+	let make = Model.add
+	use bound = make(model, 15)
+	console.log(bound.value)
 	mutable nested: { model: Model } = { model = {} }
 	use other = nested.model.add(8)
 	other.value = 9
-	console.log((nested.model.nodes.find((item) => true) ?? other).value)
+	console.log((nested.model.nodes.find((_item) => true) ?? other).value)
 }
 exercise()
 
@@ -29,7 +34,7 @@ use made = add(nodes, { value = 10 })
 use alias = same(nodes, made)
 alias.value = 11
 console.log(made.value)
-function pick = (pool: GrowingPool<Node>): (Node in pool)? => pool.find((node) => true)
+function pick = (pool: GrowingPool<Node>): (Node in pool)? => pool.find((_node) => true)
 type Picker = (pool: GrowingPool<Node>) => (Node in pool)?
 function invoke = (picker: Picker, pool: GrowingPool<Node>): (Node in pool)? => picker(pool)
 let picker: Picker = pick
@@ -38,3 +43,9 @@ if chosen is not none {
 	chosen.value = 13
 }
 console.log(made.value)
+
+let snapshot = pick(nodes)
+if snapshot is not none {
+	made.value = 99
+	console.log(snapshot.value)
+}

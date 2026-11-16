@@ -862,7 +862,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					.collect()
 			})
 			.unwrap_or_default();
-		let ret = self.repr_of(sig.ret, node.index())?;
+		let ret = if sig.reference.is_some() {
+			Repr::Pointer
+		} else {
+			self.repr_of(sig.ret, node.index())?
+		};
 		let mut by_pointer = vec![false; params.len()];
 		let mut borrowed = vec![false; params.len()];
 		let (mutates, invalidates) = self.types().effects(sig.effects);
@@ -885,7 +889,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			if !repr.has_value() {
 				return Err(self.unsupported(node.index(), "this parameter type"));
 			}
-			if !by_pointer[position] && self.borrows_parameter(repr) {
+			if !by_pointer[position] && (self.borrows_parameter(repr) || param.reference.is_some())
+			{
 				by_pointer[position] = true;
 				borrowed[position] = true;
 			}

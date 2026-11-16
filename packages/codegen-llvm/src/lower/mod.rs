@@ -178,6 +178,8 @@ struct LoopFrame<'ctx> {
 
 /// The function being lowered.
 struct Frame<'ctx> {
+	/// Explicit borrowed result expressions use the address-return ABI.
+	reference_returns: rustc_hash::FxHashSet<NodeId>,
 	return_slot: Option<Slot<'ctx>>,
 	nrvo_local: Option<(FileId, SymbolId)>,
 	return_buffer: Option<collection_storage::CollectionBuffer<'ctx>>,
@@ -1404,7 +1406,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				return Err(self.unsupported(node.index(), "a function without a signature"));
 			};
 			let sig = self.types().sig(sig);
-			let ret = self.repr_of(sig.ret, node.index())?;
+			let ret = if sig.reference.is_some() {
+				Repr::Pointer
+			} else {
+				self.repr_of(sig.ret, node.index())?
+			};
 			let mut params = Vec::new();
 			let mut types: Vec<BasicMetadataTypeEnum> = Vec::new();
 			if lambda {
@@ -1440,7 +1446,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				// Parameters are never copied: synchronous calls, direct or through
 				// a function value, borrow aggregates instead of expanding them
 				// into registers and spilling a new copy in every callee.
-				if !by_pointer[position] && self.borrows_parameter(repr) {
+				if !by_pointer[position]
+					&& (self.borrows_parameter(repr)
+						|| self
+							.types()
+							.params(sig.params)
+							.get(position)
+							.is_some_and(|param| param.reference.is_some()))
+				{
 					by_pointer[position] = true;
 					borrowed[position] = true;
 				}
@@ -1691,6 +1704,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.saved_cleanups.push(outer);
 		let collection_budget = self.collection_budget_for(owner);
 		self.frame = Some(Frame {
+			reference_returns: rustc_hash::FxHashSet::default(),
 			return_slot: None,
 			nrvo_local: None,
 			return_buffer: None,
@@ -1780,6 +1794,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let by_reference = function.by_reference;
 		let captures = function.captures.clone();
 		self.begin_function(value, ret, Some(declaration));
+		if info
+			.sig
+			.is_some_and(|sig| self.types().sig(sig).reference.is_some())
+		{
+			self.prepare_reference_returns(info.body);
+		}
 		self.frame_mut().arena = function.arena_body.is_some();
 		self.frame_mut().throws = throws;
 		self.begin_function_task(&function)?;
@@ -2432,6 +2452,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// (`coercions`): the range check of a `SINK_CHECK` root, `Float32` →
 	/// `Float`, `Integer` ↔ `Int64`.
 	pub(crate) fn expr(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		if self.frame().reference_returns.contains(&node) {
+			return self.borrowed_result(node);
+		}
 		// a read of a reactive place is tracked before it happens
 		self.track_read(node)?;
 		let value = self.expr_inner(node)?;

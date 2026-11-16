@@ -268,7 +268,7 @@ impl Generator<'_> {
 			if required {
 				g.requirement_scopes.push(requirements);
 			}
-			for param in &info.params {
+			for (position, param) in info.params.iter().enumerate() {
 				// a destructured parameter: a temporary, its pattern bound in the body
 				if let View::DestructuredParameter { pattern, .. } = g.view(param.node) {
 					let name = g.temp();
@@ -281,6 +281,7 @@ impl Generator<'_> {
 					continue;
 				}
 				let name = g.declare(param.symbol);
+				g.bind_reference_parameter(info, position, &name);
 				if param.variadic {
 					parameters.push(format!("...{name}"));
 					// the hidden arguments come after the variadic ones: taken
@@ -349,7 +350,7 @@ impl Generator<'_> {
 			}
 			let mut expression = None;
 			let mut body = prologue;
-			if arrow && !info.block_body && body.is_empty() {
+			if arrow && !info.block_body && body.is_empty() && !g.returns_reference() {
 				let (lines, value) = g.capture_at(indent + 1, |g| g.expr(info.body));
 				if lines.is_empty() {
 					let value = if dest == Dest::Return {
@@ -812,8 +813,15 @@ impl Generator<'_> {
 				Slot::Omitted(_) => unreachable!(),
 			})
 			.collect();
-		let (lines, values) =
-			self.capture(|g| g.in_order(&nodes, |g, node| g.argument(node, detached)));
+		let (lines, values) = self.capture(|g| {
+			g.in_order(&nodes, |g, node| {
+				if g.reference_parameter(call, node) {
+					g.reference_cell(node)
+				} else {
+					g.argument(node, detached)
+				}
+			})
+		});
 		let mut first = first;
 		if !lines.is_empty() && !first.stable {
 			let temp = self.temp();

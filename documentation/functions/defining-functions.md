@@ -737,6 +737,6 @@ A small base case of a direct recursive call is evaluated at the call site when 
 
 ### Reference interfaces on every target
 
-Reference result and parameter contracts retain symbolic owner paths through methods, generic specialization, function values and imports. Resolve the caller's collection path after call effects. Native aliases borrow existing places without copying; JavaScript object results retain object identity and primitive results carry their slot into the statically known collection. Direct all-return-path freshness is interface metadata; indirect calls retain the owner contract but not freshness. Link traversal effects restart at the target collection and use the ordinary overlap engine.
+Reference result and parameter contracts retain symbolic owner paths through methods, generic specialization, function values and imports. Resolve the caller's collection path after call effects. Native aliases borrow existing places without copying; JavaScript borrowed calls use internal accessor cells for exact places, including primitive subfields and erased generic items; object `use` unwraps once and keeps the target identity. Ordinary storage copies the designated data. This is an internal call ABI, not a new source-level handle type or the storage representation of a link. Direct all-return-path freshness is interface metadata; indirect calls retain the owner contract but not freshness. Link traversal effects restart at the target collection and use the ordinary overlap engine.
 
 :::

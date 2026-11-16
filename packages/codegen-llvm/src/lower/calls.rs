@@ -31,7 +31,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			return self.optional_call(node, target, members);
 		}
-		self.call_present(node)
+		let raw = self.call_present(node)?;
+		self.read_reference_result(node, raw)
 	}
 
 	/// A call whose receiver, if any, is present.
@@ -146,9 +147,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let Argument::Given(argument) = argument else {
 						return Err(self.unsupported(node.index(), "these arguments"));
 					};
-					if changed.contains(&position) && self.is_place(*argument) {
+					if (changed.contains(&position)
+						|| matches!(self.types().kind(ty), fa_analyzer::types::TypeKind::Function(sig) if self.types().params(self.types().sig(sig).params).get(position).is_some_and(|param| param.reference.is_some())))
+						&& self.is_place(*argument)
+					{
 						let place = self.place(*argument)?;
-						if self.borrows_parameter(place.repr) {
+						if self.signature_borrows(ty, position, place.repr) {
 							arguments.push(Val::new(place.repr, self.zero_value(place.repr)));
 							places.push(Some(place.pointer));
 							continue;

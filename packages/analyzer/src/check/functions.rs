@@ -747,7 +747,9 @@ impl Walker<'_> {
 			}
 			// the value of the function is a copy, maybe a move (moves.rs)
 			if !matches!(mode, TypeId::VOID | TypeId::NEVER) {
-				self.note_copy_site(value_node);
+				if reference.is_none() {
+					self.note_copy_site(value_node);
+				}
 				if !block_body || !matches!(self.view(value_node), View::Return(_)) {
 					self.check_returned_reference(
 						value_node,
@@ -1499,8 +1501,10 @@ impl Walker<'_> {
 			Some(value) => {
 				let ty = self.check(value, Some(returns));
 				self.sink(value, ty, returns);
-				self.note_copy_site(value);
 				let owner = self.body.functions.last().and_then(|cx| cx.ref_owner);
+				if owner.is_none() {
+					self.note_copy_site(value);
+				}
 				self.check_returned_reference(value, owner);
 			}
 			None if returns == TypeId::NEVER => {

@@ -2030,6 +2030,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	pub(crate) fn place(&mut self, node: NodeId) -> Result<Slot<'ctx>, Error> {
 		match self.view(node) {
+			View::Try(inner) => self.place(inner),
+			View::Call { .. } if self.user_reference_result(node).is_some() => {
+				let (element, _) = self.user_reference_result(node).expect("checked above");
+				let raw = self.call_present(node)?;
+				let pointer = raw.value.expect("a reference address").into_pointer_value();
+				Ok(Slot {
+					pointer,
+					repr: self.repr_of(element, node.index())?,
+				})
+			}
 			View::Name(_) => {
 				let resolution = self.analysis.resolution(node);
 				if let Some(reached) = self.external(resolution)

@@ -239,21 +239,23 @@ impl Walker<'_> {
 			let crate::analysis::Argument::Given(value) = argument else {
 				continue;
 			};
-			let Some((owner, _, _)) =
-				self.substitute(path, &call.arguments, None, (n, "reference argument"))
-			else {
-				continue;
-			};
+			let owner = self
+				.substitute(path, &call.arguments, None, (n, "reference argument"))
+				.map(|(owner, _, _)| owner);
 			if matches!(self.view(self.strip_groups(*value)), View::None) {
 				continue;
 			}
 			let actual = self
 				.reference_place(*value)
 				.map(|place| self.canonical_reference_place(place));
-			if actual.is_some_and(|place| self.may_be_at_or_below(place, owner)) {
+			if owner.is_some_and(|owner| {
+				actual.is_some_and(|place| self.may_be_at_or_below(place, owner))
+			}) {
 				continue;
 			}
-			let expected = self.place_text(owner);
+			let expected = owner
+				.map(|owner| self.place_text(owner))
+				.unwrap_or_else(|| "the owner argument (a temporary)".into());
 			let actual = actual
 				.map(|place| self.place_text(place))
 				.unwrap_or_else(|| "an owned temporary".into());
@@ -319,6 +321,7 @@ impl Walker<'_> {
 		let Some(path) = sig.reference else {
 			return;
 		};
+		self.set_flag(n, NodeFlags::PLACE);
 		let Some(call) = self.a.calls.get(&n).cloned() else {
 			return;
 		};

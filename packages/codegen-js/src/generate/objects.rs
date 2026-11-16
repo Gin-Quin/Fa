@@ -1356,6 +1356,14 @@ impl Generator<'_> {
 	/// a call result is always fresh. A `mutable` local of the function, or
 	/// a `let` bound to a fresh value, is returned as is.
 	pub(crate) fn copy_returned(&mut self, node: NodeId, value: Expr) -> Expr {
+		if self
+			.current_function()
+			.and_then(|function| self.analysis.function(function))
+			.and_then(|info| info.sig)
+			.is_some_and(|sig| self.types.sig(sig).reference.is_some())
+		{
+			return value;
+		}
 		let ty = self.type_of(node);
 		if !self.is_composite(ty) || self.is_move(node) {
 			return value;

@@ -1,0 +1,26 @@
+-- prints: 21
+-- prints: 31
+-- prints: 42
+-- prints: none
+function add = <Item>(pool: GrowingPool<Item>, value: Item): Item in pool mutates pool.size => pool.add(copy value)
+function same = <Item>(pool: GrowingPool<Item>, value: Item in pool): Item in pool => value
+mutable values: GrowingPool<Integer> = []
+use made = add(values, 20)
+use aliased = same(values, made)
+aliased = 21
+console.log(made)
+type Identity = (pool: GrowingPool<Integer>, value: Integer in pool) => Integer in pool
+let identity: Identity = same
+use indirect = identity(values, made)
+indirect = 31
+console.log(made)
+type Node = { value: Integer }
+function field = (nodes: Array<Node>): Integer in nodes throws IndexError => try nodes[0].value
+mutable nodes: Array<Node> = [{ value = 1 }]
+use value = try field(nodes)
+value = 42
+console.log(nodes[0].value)
+function first = (nodes: Array<Node>): (Node in nodes)? => nodes.get(0)
+mutable empty: Array<Node> = []
+use absent = first(empty)
+console.log(absent)

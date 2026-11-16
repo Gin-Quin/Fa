@@ -14,7 +14,20 @@ impl Generator<'_> {
 	/// The JavaScript of an expression, converted for its sink when the
 	/// analyzer recorded a conversion or a range check there.
 	pub(crate) fn expr(&mut self, n: NodeId) -> Expr {
-		let value = self.expr_raw(n);
+		let value = if self.call_returns_reference(n) {
+			let View::Call { callee, arguments } = self.view(n) else {
+				unreachable!()
+			};
+			let cell = self.call(n, callee, arguments);
+			let access = if self.may_be_none(self.type_of(n)) {
+				"?."
+			} else {
+				"."
+			};
+			Expr::primary(format!("{}{access}$v", cell.primary_text()))
+		} else {
+			self.expr_raw(n)
+		};
 		self.sink(n, value)
 	}
 

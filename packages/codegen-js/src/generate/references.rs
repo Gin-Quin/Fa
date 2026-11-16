@@ -76,6 +76,163 @@ struct Parts {
 }
 
 impl Generator<'_> {
+	/// User reference functions use the existing accessor-cell representation
+	/// uniformly, including erased generic items, primitive fields and lookups.
+	/// Object aliases unwrap the cell once and retain the target object itself.
+	pub(crate) fn returns_reference(&self) -> bool {
+		self.current_function()
+			.and_then(|function| self.analysis.function(function))
+			.and_then(|info| info.sig)
+			.is_some_and(|sig| self.types.sig(sig).reference.is_some())
+	}
+
+	pub(crate) fn call_returns_reference(&self, node: NodeId) -> bool {
+		let View::Call { callee, .. } = self.view(node) else {
+			return false;
+		};
+		matches!(self.types.kind(self.type_of(callee)), TypeKind::Function(sig) if self.types.sig(sig).reference.is_some())
+	}
+
+	pub(crate) fn reference_parameter(&self, call: NodeId, value: NodeId) -> bool {
+		let View::Call { callee, .. } = self.view(call) else {
+			return false;
+		};
+		let TypeKind::Function(sig) = self.types.kind(self.type_of(callee)) else {
+			return false;
+		};
+		let params = self.types.params(self.types.sig(sig).params);
+		let Some(info) = self.analysis.call(call) else {
+			return false;
+		};
+		let skip = info.arguments.len().saturating_sub(params.len());
+		params
+			.iter()
+			.zip(info.arguments.iter().skip(skip))
+			.any(|(param, argument)| {
+				param.reference.is_some()
+					&& matches!(argument, Argument::Given(node) if *node == value)
+			})
+	}
+
+	pub(crate) fn bind_reference_parameter(&mut self, info: &FnInfo, position: usize, name: &str) {
+		let Some(sig) = info.sig else {
+			return;
+		};
+		if !self
+			.types
+			.params(self.types.sig(sig).params)
+			.get(position)
+			.is_some_and(|param| param.reference.is_some())
+		{
+			return;
+		}
+		let param = &info.params[position];
+		self.reference_cells.insert(param.symbol, name.to_string());
+		let ty = self.analysis.symbols.symbol(param.symbol).ty;
+		let access = if self.may_be_none(ty) { "?." } else { "." };
+		self.alias(param.symbol, format!("{name}{access}$v"));
+		if self.is_object_reference(ty) {
+			self.references.insert(param.symbol, Reference::Object);
+		}
+	}
+
+	/// Produce the address carrier before reading the designated value.
+	pub(crate) fn reference_cell(&mut self, value: NodeId) -> Expr {
+		let node = self.strip_reference(value);
+		if matches!(self.view(node), View::None) {
+			return Expr::constant("undefined", crate::js::Prec::Primary);
+		}
+		if let Resolution::Local(symbol) = self.analysis.resolution(node) {
+			if let Some(cell) = self.reference_cells.get(&symbol) {
+				return Expr::name(cell.clone(), true);
+			}
+		}
+		if self.call_returns_reference(node) {
+			let View::Call { callee, arguments } = self.view(node) else {
+				unreachable!()
+			};
+			return self.call(node, callee, arguments);
+		}
+		// An erased Pool.add returns either an object or a primitive slot.
+		// Dispatch at construction, retaining the target in one accessor cell.
+		if let View::Call { callee, .. } = self.view(node) {
+			if matches!(self.analysis.call(node).map(|call| call.callee), Some(Callee::Builtin(id)) if builtins::get(id).path == "Pool#add")
+				&& matches!(self.types.kind(self.receiver_type(callee)), TypeKind::Collection(_, item, _) if matches!(self.types.kind(item), TypeKind::Param(_)))
+			{
+				let receiver = self.receiver(callee);
+				let receiver = self.keep_value_part(receiver).primary_text();
+				let argument = self
+					.analysis
+					.call(node)
+					.and_then(|call| call.arguments.first())
+					.and_then(|arg| {
+						if let Argument::Given(node) = arg {
+							Some(*node)
+						} else {
+							None
+						}
+					})
+					.expect("Pool.add argument");
+				let data = self.expr(argument);
+				let data = self.copy_stored(argument, data);
+				let data = self.keep_value_part(data).text;
+				let result = self.temp();
+				let slot = self.temp();
+				let cell = format!(
+					"{{ get $v() {{ return {receiver}.get({slot}); }}, set $v(value) {{ {receiver}.set({slot}, value); }} }}"
+				);
+				// Use one expression so the lexical slot remains captured by its cell.
+				let add = self.helper("faAdd");
+				let assign = self.helper("faAssign");
+				let expression = format!(
+					"({receiver}[Symbol.toStringTag] === \"fa:ValuePool\" ? (() => {{ const {slot} = {receiver}.add({data}); return {cell}; }})() : (() => {{ const {slot} = {add}({receiver}, {data}); return {{ get $v() {{ return {slot}; }}, set $v(value) {{ {assign}({slot}, value); }} }}; }})())"
+				);
+				self.out.line(format!("const {result} = {expression};"));
+				return Expr::name(result, true);
+			}
+		}
+		if self.is_object_reference(self.type_of(node)) {
+			let target = self.expr(node);
+			let target = self.keep_value_part(target);
+			let cell = format!("{{ $v: {} }}", target.text);
+			return if self.may_be_none(self.type_of(node)) {
+				Expr::primary(format!(
+					"({} === undefined ? undefined : {cell})",
+					target.text
+				))
+			} else {
+				Expr::primary(cell)
+			};
+		}
+		let Some(parts) = self.reference_parts(node, false) else {
+			return self.unsupported(node, "this returned reference place");
+		};
+		let Some((container, key, map)) = self.pair_of(&parts) else {
+			return self.unsupported(node, "this returned reference place");
+		};
+		let container = self.keep_value_part(Expr::primary(container));
+		let key = self.keep_value_part(Expr::primary(key));
+		let read = if map {
+			format!("{}.get({})", container.text, key.text)
+		} else {
+			format!("{}[{}]", container.text, key.text)
+		};
+		let write = if map {
+			format!("{}.set({}, value)", container.text, key.text)
+		} else {
+			format!("{}[{}] = value", container.text, key.text)
+		};
+		let cell = format!("{{ get $v() {{ return {read}; }}, set $v(value) {{ {write}; }} }}");
+		if parts.optional {
+			Expr::primary(format!(
+				"({} === undefined ? undefined : {cell})",
+				container.text
+			))
+		} else {
+			Expr::primary(cell)
+		}
+	}
+
 	// ── `use`, `mutable use`, `reuse` ────────────────────────────────────
 
 	/// Whether references to values of a type are the JavaScript values
@@ -474,6 +631,18 @@ impl Generator<'_> {
 	/// `array.find(predicate)` (a primitive value: the place, `none` when
 	/// absent).
 	fn call_reference_parts(&mut self, node: NodeId, callee: NodeId) -> Option<Parts> {
+		if self.call_returns_reference(node) {
+			let View::Call { arguments, .. } = self.view(node) else {
+				return None;
+			};
+			let cell = self.call(node, callee, arguments);
+			let cell = self.keep_value_part(cell);
+			return Some(Parts {
+				container: Some(cell),
+				key: Key::Field("$v".into()),
+				optional: self.may_be_none(self.type_of(node)),
+			});
+		}
 		let path = match self.analysis.call(node).map(|info| info.callee) {
 			Some(Callee::Builtin(builtin)) => builtins::get(builtin).path,
 			_ => "",

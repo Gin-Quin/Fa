@@ -287,27 +287,74 @@ impl Walker<'_> {
 						bindings.insert(param.symbol, argument_places);
 					}
 					self.expand_callable_capture_reads(*call, &free, &mut places);
-					let body = self.ownership_read_context(*call, &defaults);
-					for &place in &places {
-						let Some(symbol) = self.place_symbol(place) else {
-							continue;
-						};
-						if self.ownership_read_context(
-							self.a.symbols.symbol(symbol).decl_node,
-							&defaults,
-						) != body
-						{
-							changed |= free.entry(body).or_default().insert(place);
-						}
-					}
-					self.observe_places(*call, places, &mut reads);
+					changed |= self
+						.observe_call_ownership(*call, places, &defaults, &mut free, &mut reads);
 				}
+				// Passing a borrowed callback uses its captured references for
+				// the duration of this call, even through a saved handle.
+				let mut places = self.borrowed_callback_argument_reads(&info.arguments, &free);
+				self.expand_callable_capture_reads(*call, &free, &mut places);
+				changed |=
+					self.observe_call_ownership(*call, places, &defaults, &mut free, &mut reads);
 			}
 			if !changed {
 				break;
 			}
 		}
 		reads
+	}
+
+	fn borrowed_callback_argument_reads(
+		&self,
+		arguments: &[Argument],
+		free: &FxHashMap<NodeId, FxHashSet<PlaceId>>,
+	) -> FxHashSet<PlaceId> {
+		let mut places = FxHashSet::default();
+		for argument in arguments {
+			let values: &[NodeId] = match argument {
+				Argument::Given(value) => std::slice::from_ref(value),
+				Argument::Variadic(values) => values,
+				_ => continue,
+			};
+			for &value in values {
+				if !self.callable_slot_type(self.a.type_of(value)) {
+					continue;
+				}
+				for function in self.callable_targets(value) {
+					if self.a.escapes.contains(&function) {
+						continue;
+					}
+					if let Some(info) = self.a.function(function) {
+						places.extend(free.get(&info.lambda).into_iter().flatten().copied());
+					}
+				}
+			}
+		}
+		places
+	}
+
+	fn observe_call_ownership(
+		&mut self,
+		call: NodeId,
+		places: FxHashSet<PlaceId>,
+		defaults: &FxHashSet<NodeId>,
+		free: &mut FxHashMap<NodeId, FxHashSet<PlaceId>>,
+		reads: &mut FxHashMap<NodeId, Vec<SymbolId>>,
+	) -> bool {
+		let body = self.ownership_read_context(call, defaults);
+		let mut changed = false;
+		for &place in &places {
+			let Some(symbol) = self.place_symbol(place) else {
+				continue;
+			};
+			if self.ownership_read_context(self.a.symbols.symbol(symbol).decl_node, defaults)
+				!= body
+			{
+				changed |= free.entry(body).or_default().insert(place);
+			}
+		}
+		self.observe_places(call, places, reads);
+		changed
 	}
 
 	/// A free callable place is a dependency on its value at this call.

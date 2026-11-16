@@ -99,6 +99,26 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn a_completed_borrowed_callback_leaves_the_array_movable() {
+		let source =
+			include_str!("../../analyzer/tests/cases/ownership-borrowed-callback-argument.fa");
+		for (name, target) in [
+			("callback-borrow-move-native", Target::Native),
+			("callback-borrow-move-wasm", Target::Wasm),
+		] {
+			let ir = ir_at_target(name, source, true, OptLevel::O0, target);
+			let independent = function(&ir, "fa.independent");
+			assert_eq!(
+				independent.matches("call ptr @fa.copy").count(),
+				1,
+				"{independent}"
+			);
+			let moved = function(&ir, "fa.afterCall");
+			assert!(!moved.contains("call ptr @fa.copy"), "{moved}");
+		}
+	}
+
+	#[test]
 	fn copying_an_owned_function_handle_only_retains_its_environment() {
 		let source =
 			include_str!("../../analyzer/tests/cases/ownership-function-handle-sharing.fa");

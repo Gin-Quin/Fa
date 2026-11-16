@@ -701,4 +701,33 @@ mod tests {
 			"{prefix}let moved = copy second\ninvoke() + moved.length\n}}\nconsole.log(demo())\n"
 		));
 	}
+
+	#[test]
+	fn a_passed_borrowed_callback_keeps_its_capture_live() {
+		let prefix = "function apply = (callback: Reader): Integer => callback()\nfunction ignore = (_callback: Reader): Integer => 0\n";
+		for callee in ["apply", "ignore"] {
+			let source = format!(
+				"{prefix}{}",
+				program(
+					"let invoke = read\nlet moved = items",
+					&format!("{callee}(invoke) + moved.length")
+				)
+			);
+			assert_eq!(codes(&source), ["MEM004"], "{callee}");
+			analyzed(&format!(
+				"{prefix}{}",
+				program(
+					"let invoke = read\nlet moved = copy items",
+					&format!("{callee}(invoke) + moved.length")
+				)
+			));
+			analyzed(&format!(
+				"{prefix}{}",
+				program(
+					&format!("let invoke = read\nlet length = {callee}(invoke)\nlet moved = items"),
+					"length + moved.length"
+				)
+			));
+		}
+	}
 }

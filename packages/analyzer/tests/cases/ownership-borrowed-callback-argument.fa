@@ -1,0 +1,26 @@
+-- prints: 2 2
+-- prints: 2 2
+type Reader = () => Integer
+function apply = (callback: Reader): Integer => callback()
+
+function independent = (): Integer => {
+	let items = [1]
+	function read = (): Integer => items.length
+	let invoke = read
+	let moved = copy items
+	apply(invoke) + moved.length
+}
+
+function afterCall = (): Integer => {
+	let items = [1]
+	function read = (): Integer => items.length
+	let invoke = read
+	let size = apply(invoke)
+	let moved = items
+	size + moved.length
+}
+
+static independentResult = @independent()
+static afterCallResult = @afterCall()
+console.log(independentResult, independent())
+console.log(afterCallResult, afterCall())

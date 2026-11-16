@@ -1,3 +1,8 @@
 -- Specification example: strings 06
-let literal = "Braces: {{ and }}" -- "Braces: { and }"
+let name = "Fa"
+let welcome = "Hello {name}"
+
+let a = 2
+let b = 3
+console.log("{a} + {b} = {a + b}") -- "2 + 3 = 5"
 

@@ -1,6 +1,3 @@
 -- Specification example: strings 07
-let user: { name: String? } = { name = none }
-type Point = { x: Integer, y: Integer }
-let label = "Name: {user.name ?? "anonymous"}"
-let origin = "Origin: {Point { x = 0, y = 0 }}"
+let literal = "Braces: {{ and }}" -- "Braces: { and }"
 

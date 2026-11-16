@@ -1,11 +1,7 @@
 -- Specification example: bytes 02
-let data = Bytes.from([1, 2, 3, 4])
-
-let first = data[0]     -- a Byte
-let last = data[-1]
-let middle = data[1..3] -- a copy: Bytes [2, 3]
-
-for byte in data {
-	console.log(byte)
-}
+-- prints: 1 3
+mutable original = Bytes.from([1, 2])
+mutable duplicate = copy original
+duplicate[0] = 3
+console.log(original[0], duplicate[0]) -- 1 3
 

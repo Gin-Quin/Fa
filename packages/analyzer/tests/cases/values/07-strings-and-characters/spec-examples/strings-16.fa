@@ -1,8 +1,9 @@
 -- Specification example: strings 16
-let face = "😀"
-let half = face[0]  -- a lone surrogate
+mutable text = "hello world"
 
-assert half.length == 1
-assert not half.isWellFormed()
-assert face[0] + face[1] == face -- the two halves make the character again
+use word = text[0..5] -- a slice: no copy
+console.log(word) -- "hello"
+
+text += "!" -- mutates `text`: it may reallocate its storage
+console.log(word) -- error: E-DECL-16 (`word` was invalidated: declare it again with `use word = text[...]`
 

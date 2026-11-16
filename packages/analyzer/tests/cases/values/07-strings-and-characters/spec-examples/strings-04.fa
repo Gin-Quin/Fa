@@ -1,5 +1,4 @@
 -- Specification example: strings 04
-let escaped = "Quote: \" Backslash: \\ Newline:\n Tab:\t Null:\0"
-let hex = "Byte: \x41"
-let unicode = "Unicode: \u{1F600}"
+let immutableValue = "You can't change me"
+mutable mutableValue = "But you can change me"
 

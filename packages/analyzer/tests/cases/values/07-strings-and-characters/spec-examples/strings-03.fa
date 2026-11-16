@@ -1,4 +1,7 @@
 -- Specification example: strings 03
-let immutableValue = "You can't change me"
-mutable mutableValue = "But you can change me"
+-- prints: Ana Ana!
+mutable name = "Ana"
+let previous = name
+name += "!"
+console.log(previous, name) -- Ana Ana!
 

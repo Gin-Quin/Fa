@@ -1,7 +1,5 @@
 -- Specification example: strings 12
-let someString = "hello"
-let middle = someString[1..3]      -- "el"  (end-exclusive)
-let inclusive = someString[1..=3]  -- "ell" (end-inclusive)
-let fromSecond = someString[1..]   -- "ello"
-let last = someString[-1]          -- "o"
+let name = "Fa"
+let first = name[0] -- "F"
+assert name[0] == "F"
 

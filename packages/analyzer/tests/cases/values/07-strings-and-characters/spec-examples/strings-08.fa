@@ -1,10 +1,6 @@
 -- Specification example: strings 08
--- warning: W-NUM-2
--- warning: W-NUM-2
--- warning: W-NUM-2
--- warning: W-NUM-2
-assert "héllo".length == 5
-assert "日本語".length == 3
-assert "😀".length == 2  -- one code point, a surrogate pair
-assert "🇫🇷".length == 4 -- two code points, one flag on screen
+let user: { name: String? } = { name = none }
+type Point = { x: Integer, y: Integer }
+let label = "Name: {user.name ?? "anonymous"}"
+let origin = "Origin: {Point { x = 0, y = 0 }}"
 

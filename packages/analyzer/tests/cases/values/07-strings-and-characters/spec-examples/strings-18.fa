@@ -1,5 +1,6 @@
 -- Specification example: strings 18
-for character, index in "a😀b" {
-	console.log("{index}: {character}") -- "0: a", "1: 😀", "3: b"
+let text = "a😀b"
+for character in text {
+	console.log(character)
 }
 

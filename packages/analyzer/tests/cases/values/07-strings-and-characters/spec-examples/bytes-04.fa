@@ -1,4 +1,6 @@
 -- Specification example: bytes 04
-let bytes = "héllo".toUtf8()         -- Bytes, 6 bytes
-let text = try String.fromUtf8(bytes) -- "héllo"
+mutable buffer = Bytes.filled(4)
+buffer[0] = 255
+
+use header = buffer[0..2] -- a slice: no copy
 

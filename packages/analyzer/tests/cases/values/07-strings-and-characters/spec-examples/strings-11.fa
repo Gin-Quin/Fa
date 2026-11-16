@@ -1,5 +1,4 @@
 -- Specification example: strings 11
-let name = "Fa"
-let first = name[0] -- "F"
-assert name[0] == "F"
+assert "héllo".utf8Length() == 6
+assert "😀".utf8Length() == 4
 

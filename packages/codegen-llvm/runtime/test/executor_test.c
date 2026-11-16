@@ -214,6 +214,31 @@ static Frame *new_frame(void (*resume)(Frame *), int id) {
 	return frame;
 }
 
+// A default can fail before a started coroutine reaches its first suspension.
+// Such a frame is already done when the caller tries to enqueue it.
+static void completed_spawn_root(Frame *frame) {
+	FaExecutor *e = executor();
+	for (int detached = 0; detached <= 1; detached += 1) {
+		long before = allocated;
+		Frame *child = new_frame(0, 0);
+		finish(child);
+		fa_task_spawn(child, detached);
+		CHECK(e->head == 0 && e->tail == 0 && e->detached == 0);
+		if (!detached) {
+			CHECK(child->resume == 0 && task_state(&child->task) == TASK_DONE);
+			fa_task_drop(child);
+		}
+		CHECK(allocated == before);
+	}
+	finish(frame);
+}
+
+static void test_completed_spawn(void) {
+	Frame *root = new_frame(completed_spawn_root, 0);
+	root->resume(root);
+	fa_run_main(root, 0);
+}
+
 // ── yields: tasks take turns in FIFO order
 
 static void yielder(Frame *frame) {
@@ -2086,6 +2111,7 @@ int main(void) {
 	test_short_copies();
 	test_string_equal();
 	printf("test_yields\n");
+	test_completed_spawn();
 	test_yields();
 	printf("test_timers\n");
 	test_timers();

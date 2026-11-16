@@ -133,6 +133,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if closure.repr == Repr::Never {
 					return Ok(closure);
 				}
+				// Arguments can replace the slot supplying the callee. Keep its
+				// environment alive through their evaluation and the invocation.
+				let closure = if self.is_temporary(closure) {
+					closure
+				} else {
+					self.fresh(self.emit_copy(closure)?)
+				};
 				let ty = match closure.repr {
 					Repr::Function(ty) => ty,
 					_ => self.type_of(callee),
@@ -349,6 +356,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// a local function using locals around it: its environment
 			let (captures, by_reference) = (function.captures.clone(), function.by_reference);
 			let environment = self.build_environment(&captures, by_reference, node)?;
+			if !by_reference {
+				let ty = self.own_function_type(&function, node);
+				let owner =
+					self.make_closure_of(self.pointer_type().const_null(), environment, ty)?;
+				self.fresh(owner);
+			}
 			arguments.push(environment.into());
 		}
 		for (position, ((repr, has_default), argument)) in

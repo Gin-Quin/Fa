@@ -318,6 +318,16 @@ mod tests {
 	}
 
 	#[test]
+	fn a_detached_call_owns_its_local_callee_environment() {
+		assert_eq!(
+			codes(
+				"type Held = { name: String, function destroy = (self) => {} }\nfunction bad = (held: Held) => {\nasync function read = () => { await Task.yield()\nconsole.log(held) }\nstart read()\n}\n"
+			),
+			["MEM003"]
+		);
+	}
+
+	#[test]
 	fn owned_structure_captures_require_independence_from_borrows_and_later_uses() {
 		for source in [
 			"type Reader = () => Integer\nfunction keep = (items: Array<Integer>): Reader => () => items.length\n",

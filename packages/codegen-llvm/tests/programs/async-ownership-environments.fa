@@ -1,0 +1,82 @@
+-- A task keeps an owned callable environment beyond its caller's scope.
+-- These cases also run on the JavaScript targets, without timers.
+-- prints: 7
+-- prints: 9
+-- prints: cancelled
+-- prints: 15
+-- prints: 23
+-- prints: cancelled after yielding
+-- prints: -1
+-- prints: detached 11
+
+use { Channel } = std.concurrency
+
+type Reader = async () => Integer
+
+function make = (seed: Integer): Reader => async () => {
+	await Task.yield()
+	seed
+}
+
+function launch = (seed: Integer): Task<Integer> => {
+	let reader = make(seed)
+	start reader()
+}
+
+let kept = launch(7)
+console.log(await kept)
+console.log(await make(9)())
+
+let cancelled = launch(99)
+cancelled.cancel()
+console.log("cancelled")
+
+function direct = (seed: Integer): Integer => {
+	function read = (): Integer => seed
+	let handles = (read, read)
+	mutable result = 0
+	for _index in 0..3 {
+		result += read()
+	}
+	result + handles[0]() - handles[1]()
+}
+console.log(direct(5))
+
+function pending = (seed: Integer, ready: Channel<Integer>): Reader => async () => {
+	await ready.send(seed) catch _error => return -1
+	for _index in 0..8 { await Task.yield() }
+	seed
+}
+
+function launchPending = (ready: Channel<Integer>): Task<Integer> => {
+	let reader = pending(23, ready)
+	start reader()
+}
+
+mutable ready = Channel<Integer> { capacity = 1 }
+let suspended = launchPending(ready)
+console.log((await ready.receive()) ?? -1)
+suspended.cancel()
+console.log("cancelled after yielding")
+
+type Failure = Errors { Stopped }
+function fail = (): Integer throws Failure => throw Failure.Stopped
+async function failingDefault = (seed: Integer): Integer => {
+	async function read = (value: Integer = try fail()): Integer throws Failure => {
+		await Task.yield()
+		seed + value
+	}
+	let _handles = (read, read)
+	let task = start read()
+	await task catch _error => -1
+}
+console.log(await failingDefault(3))
+
+function detach = (seed: Integer) => {
+	async function read = () => {
+		await Task.yield()
+		console.log("detached {seed}")
+	}
+	start read()
+}
+detach(11)

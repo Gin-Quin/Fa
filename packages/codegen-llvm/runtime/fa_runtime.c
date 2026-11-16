@@ -8583,10 +8583,18 @@ static int coop_spent(void) {
 	return 1;
 }
 
-/// Queues a task created by `start` (its frame is at its initial suspension).
+/// Queues a task created by `start`. A failed default can finish its frame
+/// before the initial suspension; kept frames stay available to their owner,
+/// and detached finished frames are destroyed without entering the queue.
 FA_EXPORT void fa_task_spawn(void *frame, int32_t detached) {
-	FaExecutor *e = executor();
 	FaTask *task = task_of(frame);
+	if (task_state(task) == TASK_DONE) {
+		if (detached) {
+			fa_destroy(frame);
+		}
+		return;
+	}
+	FaExecutor *e = executor();
 	if (detached) {
 		task->flags |= TASK_DETACHED;
 		e->detached += 1;

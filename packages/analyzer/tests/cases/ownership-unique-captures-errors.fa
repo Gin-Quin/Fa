@@ -33,6 +33,14 @@ function indirect = (held: Held): Reader => {
 	() => selected()
 }
 
+function detached = (held: Held) => {
+	async function read = () => { -- error: MEM003
+		await Task.yield()
+		console.log(held)
+	}
+	start read()
+}
+
 -- file: State.worker.fa
 export type = {
 	function run = (self, value: Integer): Integer => value

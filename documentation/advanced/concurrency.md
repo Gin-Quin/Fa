@@ -777,6 +777,8 @@ The checker requests, for each `async` function, a synchronous instance, an asyn
 - Each thread runs one executor: a ready queue of tasks. `start` pushes the task on the queue; the queue runs when the current code suspends or returns to the event loop. The program's exit waits for the detached tasks of the main thread.
 - **Cancellation** destroys the frame at its current suspension point: the generated code runs the scope-exit destruction of every live value of the frame (the same code as a normal scope exit), then cancels the tasks the frame owns. Since only one task of a thread runs at a time, `cancel()` is synchronous.
 - `Task.all`, `Task.any`, `Task.settled` are runtime functions that take ownership of the frames and register a waker on each.
+- **Callable environments**: an owned native callable environment is retained in the coroutine ramp, before captures, defaults and the first suspension. The frame releases that reference on return, failure or cancellation, including cancellation before its first turn. The caller owns a separate temporary reference for a newly constructed direct-call environment. An indirect call protects its selected handle before evaluating arguments that might replace it. Borrowed frame environments keep their no-op lifetime operations and cannot back a detached call.
+- A default that fails before initial suspension leaves a completed frame. Spawning never queues that frame: its kept owner may await or cancel it, while a detached completed frame is destroyed immediately.
 
 ### Native
 

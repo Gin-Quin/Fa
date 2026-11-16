@@ -834,14 +834,33 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.get_last_param()
 				.expect("a mode")
 				.into_int_value();
-			return self.begin_coroutine(
+			self.begin_coroutine(
 				function.ret,
 				function.throws,
 				mode,
 				instance.coop,
 				false,
 				instance.name,
-			);
+			)?;
+			// The ramp still runs under the caller's protection. Acquire a
+			// frame-owned reference before defaults or the first suspension;
+			// normal/error returns and every cancellation edge release it.
+			if function.lambda && !function.by_reference {
+				let environment = function
+					.value
+					.get_nth_param(0)
+					.expect("an environment")
+					.into_pointer_value();
+				let ty = self.own_function_type(function, function.declaration);
+				let owner =
+					self.make_closure_of(self.pointer_type().const_null(), environment, ty)?;
+				let retained = self.emit_copy(owner)?;
+				let slot = self.alloca(retained.repr, "task_environment")?;
+				self.builder
+					.build_store(slot.pointer, retained.value.expect("an environment owner"))?;
+				self.cleanups.borrow_mut().push(Cleanup::Local(slot));
+			}
+			return Ok(());
 		}
 		if !self.tasks.asynchronous || !self.is_async_function(function) {
 			return Ok(());

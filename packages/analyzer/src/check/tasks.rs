@@ -492,7 +492,7 @@ impl Walker<'_> {
 		}
 		match self.view(operand) {
 			View::Do(body) => self.check_start_do(n, operand, body, detached, expected),
-			View::Call { .. } => {
+			View::Call { callee, .. } => {
 				self.tasks.modes.insert(operand, Mode::Started);
 				self.tasks.start_errors.insert(operand, TypeId::NEVER);
 				let expected_result =
@@ -503,6 +503,11 @@ impl Walker<'_> {
 				// the places its effects change: the task changes them (A2)
 				let outer = self.tasks.collected.replace(Vec::new());
 				let result = self.check(value, expected_result);
+				if detached {
+					// The detached invocation can outlive the callee's scope,
+					// so its callable environment must own its captures too.
+					self.escape(callee, n);
+				}
 				let collected = std::mem::replace(&mut self.tasks.collected, outer);
 				if let (Some(outer), Some(inner)) = (&mut self.tasks.collected, &collected) {
 					outer.extend(inner.iter().copied());

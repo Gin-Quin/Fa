@@ -22540,45 +22540,64 @@ declare extern_weak i64 @write(i32 noundef, ptr noundef, i64 noundef) local_unna
 
 ; Function Attrs: nounwind optsize
 define void @fa_task_spawn(ptr noundef %0, i32 noundef %1) local_unnamed_addr #2 {
-  %3 = tail call fastcc ptr @executor() #52
-  %4 = icmp eq i32 %1, 0
-  %5 = getelementptr inbounds i8, ptr %0, i64 44
-  %6 = load i32, ptr %5, align 4, !tbaa !391
-  br i1 %4, label %12, label %7
+  %3 = getelementptr inbounds i8, ptr %0, i64 16
+  %4 = getelementptr inbounds i8, ptr %0, i64 40
+  %5 = load atomic i32, ptr %4 acquire, align 8
+  %6 = icmp eq i32 %5, 3
+  br i1 %6, label %7, label %10
 
 7:                                                ; preds = %2
-  %8 = or i32 %6, 1
-  %9 = getelementptr inbounds %struct.FaExecutor, ptr %3, i64 0, i32 11
-  %10 = load i64, ptr %9, align 8, !tbaa !392
-  %11 = add nsw i64 %10, 1
-  store i64 %11, ptr %9, align 8, !tbaa !392
-  br label %12
+  %8 = icmp eq i32 %1, 0
+  br i1 %8, label %34, label %9
 
-12:                                               ; preds = %2, %7
-  %13 = phi i32 [ %8, %7 ], [ %6, %2 ]
-  %14 = getelementptr inbounds i8, ptr %0, i64 16
-  %15 = getelementptr inbounds i8, ptr %0, i64 44
-  %16 = and i32 %13, -5
-  store i32 %16, ptr %15, align 4, !tbaa !391
-  %17 = getelementptr inbounds %struct.FaExecutor, ptr %3, i64 0, i32 1
-  %18 = getelementptr inbounds i8, ptr %0, i64 24
-  store ptr null, ptr %18, align 8, !tbaa !393
-  %19 = load ptr, ptr %17, align 8, !tbaa !10
-  %20 = getelementptr inbounds i8, ptr %0, i64 32
-  store ptr %19, ptr %20, align 8, !tbaa !394
-  %21 = icmp eq ptr %19, null
-  %22 = getelementptr inbounds %struct.FaTask, ptr %19, i64 0, i32 1
-  %23 = select i1 %21, ptr %3, ptr %22
-  store ptr %14, ptr %23, align 8, !tbaa !10
-  store ptr %14, ptr %17, align 8, !tbaa !10
-  %24 = getelementptr inbounds %struct.FaExecutor, ptr %3, i64 0, i32 4
-  %25 = load <2 x i64>, ptr %24, align 8, !tbaa !8
-  %26 = add nsw <2 x i64> %25, <i64 1, i64 1>
-  store <2 x i64> %26, ptr %24, align 8, !tbaa !8
-  %27 = getelementptr inbounds i8, ptr %0, i64 40
-  store atomic i32 1, ptr %27 release, align 8
+9:                                                ; preds = %7
+  tail call void @fa_destroy(ptr noundef nonnull %0) #53
+  br label %34
+
+10:                                               ; preds = %2
+  %11 = tail call fastcc ptr @executor() #52
+  %12 = icmp eq i32 %1, 0
+  %13 = getelementptr inbounds i8, ptr %0, i64 44
+  %14 = load i32, ptr %13, align 4, !tbaa !391
+  br i1 %12, label %20, label %15
+
+15:                                               ; preds = %10
+  %16 = or i32 %14, 1
+  %17 = getelementptr inbounds %struct.FaExecutor, ptr %11, i64 0, i32 11
+  %18 = load i64, ptr %17, align 8, !tbaa !392
+  %19 = add nsw i64 %18, 1
+  store i64 %19, ptr %17, align 8, !tbaa !392
+  br label %20
+
+20:                                               ; preds = %10, %15
+  %21 = phi i32 [ %16, %15 ], [ %14, %10 ]
+  %22 = getelementptr inbounds i8, ptr %0, i64 44
+  %23 = and i32 %21, -5
+  store i32 %23, ptr %22, align 4, !tbaa !391
+  %24 = getelementptr inbounds %struct.FaExecutor, ptr %11, i64 0, i32 1
+  %25 = getelementptr inbounds i8, ptr %0, i64 24
+  store ptr null, ptr %25, align 8, !tbaa !393
+  %26 = load ptr, ptr %24, align 8, !tbaa !10
+  %27 = getelementptr inbounds i8, ptr %0, i64 32
+  store ptr %26, ptr %27, align 8, !tbaa !394
+  %28 = icmp eq ptr %26, null
+  %29 = getelementptr inbounds %struct.FaTask, ptr %26, i64 0, i32 1
+  %30 = select i1 %28, ptr %11, ptr %29
+  store ptr %3, ptr %30, align 8, !tbaa !10
+  store ptr %3, ptr %24, align 8, !tbaa !10
+  %31 = getelementptr inbounds %struct.FaExecutor, ptr %11, i64 0, i32 4
+  %32 = load <2 x i64>, ptr %31, align 8, !tbaa !8
+  %33 = add nsw <2 x i64> %32, <i64 1, i64 1>
+  store <2 x i64> %33, ptr %31, align 8, !tbaa !8
+  store atomic i32 1, ptr %4 release, align 8
+  br label %34
+
+34:                                               ; preds = %7, %9, %20
   ret void
 }
+
+; Function Attrs: optsize
+declare void @fa_destroy(ptr noundef) local_unnamed_addr #3
 
 ; Function Attrs: nounwind optsize
 define internal fastcc ptr @executor() unnamed_addr #2 {
@@ -22917,9 +22936,6 @@ define internal fastcc void @ready_unlink(ptr nocapture noundef %0, ptr nocaptur
   store i64 %41, ptr %39, align 8, !tbaa !407
   ret void
 }
-
-; Function Attrs: optsize
-declare void @fa_destroy(ptr noundef) local_unnamed_addr #3
 
 ; Function Attrs: nounwind optsize
 define void @fa_task_yield(ptr noundef %0) local_unnamed_addr #2 {

@@ -1,0 +1,22 @@
+-- Evaluating an argument can replace the binding that supplied the callee.
+-- The selected callable stays alive until that invocation finishes.
+-- prints: 1 2
+-- prints: 2 3
+
+type Reader = (Integer) => Integer
+type Failure = Errors { Stopped }
+function make = (seed: Integer): Reader => (_input: Integer) => seed
+
+mutable reader = make(1)
+function replace = (): Integer mutates reader => {
+	reader = make(2)
+	0
+}
+console.log(reader(replace()), reader(0))
+
+function failingArgument = (): Integer throws Failure mutates reader => {
+	reader = make(3)
+	throw Failure.Stopped
+}
+let failed = reader(failingArgument()) catch _error => 2
+console.log(failed, reader(0))

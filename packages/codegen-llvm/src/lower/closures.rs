@@ -320,7 +320,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// A closure of a function of type `ty`: the type its entry is called
 	/// with (a value given where more errors are allowed is converted:
 	/// `adapt_function_errors`).
-	fn make_closure_of(
+	pub(super) fn make_closure_of(
 		&self,
 		function: PointerValue<'ctx>,
 		environment: PointerValue<'ctx>,
@@ -336,7 +336,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The type of the entry of a function value: the function's own type
 	/// (its errors, not those of the type it is given to).
-	fn own_function_type(&self, function: &super::Function<'ctx>, node: NodeId) -> TypeId {
+	pub(super) fn own_function_type(
+		&self,
+		function: &super::Function<'ctx>,
+		node: NodeId,
+	) -> TypeId {
 		let own = function.info.ty;
 		if own.is_unset() || matches!(self.types().kind(own), TypeKind::Unknown) {
 			self.type_of(node)

@@ -449,6 +449,15 @@ pub fn call(
 	path: &str,
 	arguments: Vec<Value>,
 ) -> Result<Value, Error> {
+	let result = call_internal(interpreter, path, arguments);
+	interpreter.publish(result)
+}
+
+pub(crate) fn call_internal(
+	interpreter: &mut Interpreter<'_>,
+	path: &str,
+	arguments: Vec<Value>,
+) -> Result<Value, Error> {
 	if crate::callbacks::Callback::handles(path) {
 		return interpreter.callback_builtin(path, arguments);
 	}
@@ -780,6 +789,18 @@ fn reserve_growth(
 /// another value shares it): the method's result. On an error, the receiver
 /// is unchanged.
 pub fn mutate(
+	interpreter: &mut Interpreter<'_>,
+	path: &str,
+	receiver: &mut Value,
+	arguments: Vec<Value>,
+) -> Result<Value, Error> {
+	let result = mutate_internal(interpreter, path, receiver, arguments);
+	// Even a failed callback may already have changed a permitted item.
+	interpreter.portable(receiver)?;
+	interpreter.publish(result)
+}
+
+pub(crate) fn mutate_internal(
 	interpreter: &mut Interpreter<'_>,
 	path: &str,
 	receiver: &mut Value,

@@ -84,6 +84,24 @@ pub struct Closure {
 	pub captured: Vec<Value>,
 	/// Arguments given in advance (`f with (y = 0)`), by parameter index.
 	pub bound: Vec<(usize, Value)>,
+	/// Machine-local captures are never published as cached values.
+	pub(crate) environment: Option<Vec<crate::loans::Loan>>,
+}
+
+impl Closure {
+	/// An owned environment, portable between evaluations.
+	pub fn new(
+		function: crate::ir::FnKey,
+		captured: Vec<Value>,
+		bound: Vec<(usize, Value)>,
+	) -> Self {
+		Self {
+			function,
+			captured,
+			bound,
+			environment: None,
+		}
+	}
 }
 
 /// A compile-time value.

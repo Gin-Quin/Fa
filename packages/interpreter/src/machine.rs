@@ -303,9 +303,25 @@ impl<'i, 'h> Machine<'i, 'h> {
 			value = match step {
 				PlaceStep::Field(name) => builtins::field_ref(value, name)?,
 				PlaceStep::Index(index) => builtins::index_ref(value, index)?,
+				PlaceStep::Capture(index) => Self::environment_value(value, *index, false)?,
+				PlaceStep::Bound(index) => Self::environment_value(value, *index, true)?,
 			};
 		}
 		Ok(value)
+	}
+
+	fn environment_value(value: &Value, index: usize, bound: bool) -> Result<&Value, Flow> {
+		let Value::Function(closure) = value else {
+			return Err(
+				Error::Stop("internal: an environment root is not a function".into()).into(),
+			);
+		};
+		let value = if bound {
+			closure.bound.get(index).map(|(_, value)| value)
+		} else {
+			closure.captured.get(index)
+		};
+		value.ok_or_else(|| Error::Stop("internal: an environment entry is missing".into()).into())
 	}
 
 	fn loan(&self, place: &ResolvedPlace) -> Result<Loan, Flow> {
@@ -350,19 +366,39 @@ impl<'i, 'h> Machine<'i, 'h> {
 				self.evaluate_after(*value, Continuation::Unary(Unary::Copy(Arc::clone(plan))))
 			}
 			Op::Global(key) => Self::done(self.interpreter.host.global(*key)?),
-			Op::Function(function) => Self::done(Value::Function(Arc::new(Closure {
-				function: *function,
-				captured: Vec::new(),
-				bound: Vec::new(),
-			}))),
-			Op::Closure(function, captures) => Self::done(Value::Function(Arc::new(Closure {
-				function: *function,
-				captured: captures
-					.iter()
-					.map(|&slot| self.value(self.frame().locals[slot as usize].clone()))
-					.collect::<Result<_, _>>()?,
-				bound: Vec::new(),
-			}))),
+			Op::Function(function) => Self::done(Value::Function(Arc::new(Closure::new(
+				*function,
+				Vec::new(),
+				Vec::new(),
+			)))),
+			Op::Closure(function, captures, borrow) => {
+				self.interpreter
+					.reserve(captures.len().saturating_mul(if *borrow {
+						size_of::<Loan>()
+					} else {
+						size_of::<Value>()
+					}))?;
+				let mut closure = Closure::new(*function, Vec::new(), Vec::new());
+				if *borrow && !captures.is_empty() {
+					closure.environment = Some(
+						captures
+							.iter()
+							.map(|&slot| {
+								self.loan(&ResolvedPlace {
+									slot,
+									steps: Vec::new(),
+								})
+							})
+							.collect::<Result<_, _>>()?,
+					);
+				} else {
+					closure.captured = captures
+						.iter()
+						.map(|&slot| self.value(self.frame().locals[slot as usize].clone()))
+						.collect::<Result<_, _>>()?;
+				}
+				Self::done(Value::Function(Arc::new(closure)))
+			}
 			Op::Let(slot, value) => {
 				self.evaluate_after(*value, Continuation::Unary(Unary::Let(*slot)))
 			}
@@ -667,7 +703,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				if Callback::handles(path) {
 					self.start_callback(path, values, CallbackFinish::Value)
 				} else {
-					Self::done(builtins::call(self.interpreter, path, values)?)
+					Self::done(builtins::call_internal(self.interpreter, path, values)?)
 				}
 			}
 			Finish::Mutate(path, place) => self.place(place, PlaceAction::Mutate(path, values)),
@@ -700,7 +736,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 						arguments.insert(0, receiver);
 						self.start_callback(path, arguments, CallbackFinish::Mutate(loan))
 					}
-					PlaceAction::Mutate(path, arguments) => Self::done(builtins::mutate(
+					PlaceAction::Mutate(path, arguments) => Self::done(builtins::mutate_internal(
 						self.interpreter,
 						path,
 						Self::locate(&mut self.frames, &loan)?,
@@ -726,6 +762,11 @@ impl<'i, 'h> Machine<'i, 'h> {
 			current = match step {
 				PlaceStep::Field(name) => builtins::field_mut(current, name)?,
 				PlaceStep::Index(key) => builtins::index_mut(current, key.clone())?,
+				PlaceStep::Capture(_) | PlaceStep::Bound(_) => {
+					return Err(
+						Error::Stop("internal: cannot modify an owned capture".into()).into(),
+					);
+				}
 			};
 		}
 		Ok(current)
@@ -736,41 +777,81 @@ impl<'i, 'h> Machine<'i, 'h> {
 		target: Target,
 		mut arguments: Vec<Option<Out>>,
 	) -> Result<Action, Flow> {
-		let (key, captured, bound) = match target {
-			Target::Function(key) => (key, Vec::new(), Vec::new()),
-			Target::Value(Value::Function(closure)) => (
-				closure.function,
-				closure.captured.clone(),
-				closure.bound.clone(),
-			),
+		let (key, closure) = match target {
+			Target::Function(key) => (key, None),
+			Target::Value(Value::Function(closure)) => (closure.function, Some(closure)),
 			Target::Value(other) => {
 				return Err(Error::Stop(format!("`{}` is not a function", other.to_text())).into());
 			}
 		};
 		let code = self.interpreter.code(key)?;
-		if !bound.is_empty() {
-			let mut given = arguments.into_iter();
-			arguments = (0..code.params.len())
-				.map(
-					|index| match bound.iter().find(|(bound, _)| *bound == index) {
-						Some((_, value)) => Some(value.clone().into()),
-						None => given.next().flatten(),
-					},
-				)
-				.collect();
-		}
 		if self.interpreter.depth >= self.interpreter.limits.depth {
 			return Err(Error::Depth(self.interpreter.limits.depth).into());
 		}
+		let extra = usize::from(closure.is_some());
+		self.interpreter.reserve(Loan::projection_bytes(
+			code.captures.len() + code.params.len(),
+		))?;
 		self.interpreter
-			.reserve((code.slots as usize).saturating_mul(size_of::<Out>()))?;
-		self.interpreter.depth += 1;
+			.reserve((code.slots as usize + extra).saturating_mul(size_of::<Out>()))?;
+		let generation = FRAME_GENERATION.fetch_add(1, Ordering::Relaxed);
+		let owner = Owner {
+			frame: self.frames.len(),
+			generation,
+			slot: code.slots,
+		};
 		let mut locals = vec![Out::Value(Value::None); code.slots as usize];
-		for (&slot, value) in code.captures.iter().zip(captured) {
-			locals[slot as usize] = value.into();
+		if let Some(closure) = closure {
+			let count = closure
+				.environment
+				.as_ref()
+				.map_or(closure.captured.len(), Vec::len);
+			if count != code.captures.len() {
+				return Err(Error::Stop(
+					"internal: a callable's capture count differs from its code".into(),
+				)
+				.into());
+			}
+			for (index, &slot) in code.captures.iter().enumerate() {
+				let loan = if let Some(environment) = &closure.environment {
+					let loan = &environment[index];
+					self.read_loan(loan)?;
+					loan.clone()
+				} else {
+					let mut loan = Loan::new(owner);
+					loan.push(PlaceStep::Capture(index));
+					loan
+				};
+				locals[slot as usize] = Out::Loan(loan);
+			}
+			if !closure.bound.is_empty() {
+				let mut given = arguments.into_iter();
+				arguments = (0..code.params.len())
+					.map(|parameter| {
+						match closure
+							.bound
+							.iter()
+							.position(|(bound, _)| *bound == parameter)
+						{
+							Some(index) => {
+								let mut loan = Loan::new(owner);
+								loan.push(PlaceStep::Bound(index));
+								Some(Out::Loan(loan))
+							}
+							None => given.next().flatten(),
+						}
+					})
+					.collect();
+			}
+			locals.push(Value::Function(closure).into());
+		} else if !code.captures.is_empty() {
+			return Err(
+				Error::Stop("internal: a capturing function has no environment".into()).into(),
+			);
 		}
+		self.interpreter.depth += 1;
 		self.frames.push(Frame {
-			generation: FRAME_GENERATION.fetch_add(1, Ordering::Relaxed),
+			generation,
 			code,
 			locals,
 		});
@@ -1201,6 +1282,117 @@ mod ownership_tests {
 		fn global(&mut self, _key: GlobalKey) -> Result<Value, Error> {
 			Err(Error::Unsupported("no global in this test".into()))
 		}
+	}
+
+	#[test]
+	fn closure_creation_and_invocation_borrow_the_original_capture() {
+		let expr = Expr::Closure {
+			function: FnKey(0, 0),
+			captures: vec![0],
+			borrow: true,
+		};
+		let code = Arc::new(Code::expression(&expr, 1, || Ok(())).unwrap());
+		let mut host = OneFunction(Arc::new(crate::ir::Function {
+			name: "capture".into(),
+			params: Vec::new(),
+			captures: vec![0],
+			slots: 1,
+			body: Expr::none(),
+		}));
+		let mut interpreter = Interpreter::new(&mut host, crate::Limits::default());
+		let mut machine = Machine::new(&mut interpreter, Arc::clone(&code)).unwrap();
+		machine.locals()[0] = Value::array(vec![Value::int(1)]).into();
+		let Action::Done(Ok(Out::Value(closure))) = machine.enter(code.body).unwrap() else {
+			panic!("a closure value")
+		};
+		machine
+			.call_function(Target::Value(closure), Vec::new())
+			.unwrap();
+		let loan = machine
+			.loan(&ResolvedPlace {
+				slot: 0,
+				steps: Vec::new(),
+			})
+			.unwrap();
+		assert_eq!(loan.owner.frame, 0);
+		let Value::Array(items) = machine.read_loan(&loan).unwrap() else {
+			panic!("a captured array")
+		};
+		assert_eq!(Arc::strong_count(items), 1);
+		let original = Arc::as_ptr(items);
+		builtins::mutate_internal(
+			machine.interpreter,
+			"Array#push",
+			Machine::locate(&mut machine.frames, &loan).unwrap(),
+			vec![Value::int(2)],
+		)
+		.unwrap();
+		let Value::Array(items) = machine.read_loan(&loan).unwrap() else {
+			panic!("a captured array")
+		};
+		assert_eq!(Arc::as_ptr(items), original);
+		assert_eq!(items.len(), 2);
+	}
+
+	#[test]
+	fn stale_capture_roots_fail_before_entering_a_call() {
+		let code = Arc::new(Code::expression(&Expr::none(), 0, || Ok(())).unwrap());
+		let mut host = OneFunction(Arc::new(crate::ir::Function {
+			name: "stale".into(),
+			params: Vec::new(),
+			captures: vec![0],
+			slots: 1,
+			body: Expr::none(),
+		}));
+		let mut closure = Closure::new(FnKey(0, 0), Vec::new(), Vec::new());
+		closure.environment = Some(vec![Loan::new(Owner {
+			frame: 0,
+			generation: 0,
+			slot: 0,
+		})]);
+		let mut interpreter = Interpreter::new(&mut host, crate::Limits::default());
+		let mut machine = Machine::new(&mut interpreter, code).unwrap();
+		assert!(
+			matches!(machine.call_function(Target::Value(Value::Function(Arc::new(closure))), Vec::new()), Err(Flow::Error(Error::Stop(message))) if message.contains("outlived"))
+		);
+		assert_eq!(machine.frames.len(), 1);
+		assert_eq!(machine.interpreter.depth, 0);
+	}
+
+	#[test]
+	fn invoking_an_owned_environment_does_not_clone_its_payload() {
+		let code = Arc::new(Code::expression(&Expr::none(), 0, || Ok(())).unwrap());
+		let mut host = OneFunction(Arc::new(crate::ir::Function {
+			name: "owned".into(),
+			params: Vec::new(),
+			captures: vec![0],
+			slots: 1,
+			body: Expr::none(),
+		}));
+		let closure = Arc::new(Closure::new(
+			FnKey(0, 0),
+			vec![Value::array(vec![Value::int(1)])],
+			Vec::new(),
+		));
+		let mut interpreter = Interpreter::new(&mut host, crate::Limits::default());
+		let mut machine = Machine::new(&mut interpreter, code).unwrap();
+		machine
+			.call_function(
+				Target::Value(Value::Function(Arc::clone(&closure))),
+				Vec::new(),
+			)
+			.unwrap();
+		let loan = machine
+			.loan(&ResolvedPlace {
+				slot: 0,
+				steps: Vec::new(),
+			})
+			.unwrap();
+		let Value::Array(items) = machine.read_loan(&loan).unwrap() else {
+			panic!("an owned capture")
+		};
+		assert_eq!(Arc::strong_count(items), 1);
+		assert!(Machine::locate(&mut machine.frames, &loan).is_err());
 	}
 
 	#[test]

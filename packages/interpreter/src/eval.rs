@@ -138,20 +138,26 @@ impl<'h> Interpreter<'h> {
 	/// Evaluates an expression lowered with `slots` locals.
 	pub fn evaluate(&mut self, expr: &Expr, slots: u32) -> Result<Value, Error> {
 		let code = Arc::new(Code::expression(expr, slots, || self.reserve(0))?);
-		match Machine::evaluate(self, code) {
+		let result = match Machine::evaluate(self, code) {
 			Ok(value) | Err(Flow::Return(value)) | Err(Flow::Break(value)) => Ok(value),
 			Err(Flow::Continue) => Ok(Value::None),
 			Err(Flow::Error(error)) => Err(error),
-		}
+		};
+		self.publish(result)
 	}
 
 	/// Calls a function value with its arguments in parameter order.
 	pub fn call_value(&mut self, callee: &Value, arguments: Vec<Value>) -> Result<Value, Error> {
-		Machine::call(
+		self.portable(callee)?;
+		for value in &arguments {
+			self.portable(value)?;
+		}
+		let result = Machine::call(
 			self,
 			callee.clone(),
 			arguments.into_iter().map(Some).collect(),
-		)
+		);
+		self.publish(result)
 	}
 
 	pub(crate) fn code(&mut self, key: FnKey) -> Result<Arc<Code>, Error> {

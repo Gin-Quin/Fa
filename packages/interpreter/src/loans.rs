@@ -16,6 +16,8 @@ pub(crate) struct Owner {
 pub(crate) enum Step {
 	Field(Arc<str>),
 	Index(Value),
+	Capture(usize),
+	Bound(usize),
 }
 
 #[derive(Clone, Default, Debug)]

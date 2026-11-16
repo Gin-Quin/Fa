@@ -432,6 +432,40 @@ mod tests {
 	}
 
 	#[test]
+	fn compile_time_closures_borrow_current_bindings_aliases_and_default_sources() {
+		let (session, file) = crate::analyze_source(include_str!(
+			"../../tests/cases/ownership-compiletime-captures.fa"
+		));
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		for (name, expected) in [
+			("sum", 6),
+			("observed", 7),
+			("alias", 9),
+			("defaultSize", 3),
+			("ownedResult", 7),
+		] {
+			let analysis = session.analysis(file);
+			let symbol = analysis
+				.symbols
+				.symbols()
+				.iter()
+				.position(|symbol| session.types.syms.resolve(symbol.name) == name)
+				.unwrap();
+			assert_eq!(
+				analysis
+					.static_values
+					.get(&crate::ids::SymbolId(symbol as u32)),
+				Some(&Value::int(expected)),
+				"{name}"
+			);
+		}
+	}
+
+	#[test]
 	fn compile_time_aliases_freeze_indices_and_reseat_only_at_runtime() {
 		let (session, file) = crate::analyze_source(include_str!(
 			"../../tests/cases/ownership-compiletime-aliases.fa"

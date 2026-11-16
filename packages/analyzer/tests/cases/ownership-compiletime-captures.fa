@@ -1,0 +1,54 @@
+-- prints: 6 6
+-- prints: 7 7
+-- prints: 9 9
+-- prints: 3 3
+-- prints: 7 7
+
+function accumulate = (): Integer => {
+	mutable total = 0
+	function add = (value: Integer) => { total += value }
+	add(1)
+	add(2)
+	add(3)
+	total
+}
+
+function current = (): Integer => {
+	mutable value = 1
+	function read = () => value
+	value = 7
+	read()
+}
+
+function capturedAlias = (): Integer => {
+	mutable values = [1]
+	use selected = values[0]
+	function update = () => { selected = 9 }
+	update()
+	values[0]
+}
+
+function defaults = (): Integer => {
+	mutable shared = [1]
+	function size = (items: Array<Integer> = shared): Integer => items.length
+	shared.push(2)
+	shared.push(3)
+	size()
+}
+
+function owned = (factor: Integer) => (value: Integer) => factor + value
+function portable = (): Integer => {
+	let apply = owned(3)
+	apply(4)
+}
+
+static ownedResult = @portable()
+static sum = @accumulate()
+static observed = @current()
+static alias = @capturedAlias()
+static defaultSize = @defaults()
+console.log(sum, accumulate())
+console.log(observed, current())
+console.log(alias, capturedAlias())
+console.log(defaultSize, defaults())
+console.log(ownedResult, portable())

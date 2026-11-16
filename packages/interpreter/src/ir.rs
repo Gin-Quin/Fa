@@ -243,11 +243,12 @@ pub enum Expr {
 	Global(GlobalKey),
 	/// A named function as a value.
 	Function(FnKey),
-	/// A lambda or local function: captures the current values of these
-	/// slots (copies), received by the function's `captures`.
+	/// A lambda or local function: borrow slots for a nonescaping
+	/// environment, otherwise own their values at the checked creation site.
 	Closure {
 		function: FnKey,
 		captures: Vec<Slot>,
+		borrow: bool,
 	},
 	/// Binds a local (a declaration): its value is `none`.
 	Let(Slot, Box<Expr>),

@@ -473,6 +473,10 @@ impl<'a> Lowerer<'a> {
 					Expr::Closure {
 						function: key,
 						captures: slots,
+						borrow: !self
+							.a
+							.escapes
+							.contains(&info.expect("a captured function").lambda),
 					}
 				}
 			}
@@ -1115,6 +1119,7 @@ impl<'a> Lowerer<'a> {
 		Expr::Closure {
 			function: fn_key(self.file, n),
 			captures: slots,
+			borrow: !self.a.escapes.contains(&n),
 		}
 	}
 

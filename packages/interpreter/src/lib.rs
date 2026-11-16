@@ -33,6 +33,7 @@ pub mod json;
 mod loans;
 mod machine;
 pub mod memory;
+mod publication;
 pub mod types;
 pub mod value;
 
@@ -483,6 +484,7 @@ mod tests {
 					function: FnKey(0, 1),
 					captured: Vec::new(),
 					bound: Vec::new(),
+					environment: None,
 				})),
 				vec![argument],
 			)
@@ -975,6 +977,7 @@ mod tests {
 					Expr::Closure {
 						function: FnKey(0, 2),
 						captures: vec![0],
+						borrow: true,
 					},
 				],
 			),
@@ -982,6 +985,36 @@ mod tests {
 		assert_eq!(
 			run(&mut host, &program, 1).map(|value| value.to_text()),
 			Ok("[3, 6]".to_string())
+		);
+	}
+
+	#[test]
+	fn an_owned_capture_created_by_one_evaluation_can_run_in_another() {
+		let mut host = Functions::default();
+		host.0.insert(
+			FnKey(0, 2),
+			Arc::new(Function {
+				name: "owned".into(),
+				params: Vec::new(),
+				captures: vec![0],
+				slots: 1,
+				body: Expr::Local(0),
+			}),
+		);
+		let program = Expr::Block(vec![
+			Expr::Let(0, int(7).boxed()),
+			Expr::Closure {
+				function: FnKey(0, 2),
+				captures: vec![0],
+				borrow: false,
+			},
+		]);
+		let cached = Interpreter::new(&mut host, Limits::default())
+			.evaluate(&program, 1)
+			.unwrap();
+		assert_eq!(
+			Interpreter::new(&mut host, Limits::default()).call_value(&cached, Vec::new()),
+			Ok(Value::int(7))
 		);
 	}
 

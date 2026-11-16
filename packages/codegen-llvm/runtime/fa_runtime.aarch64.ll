@@ -8,6 +8,7 @@ source_filename = "fa_runtime.c"
 %struct.anon.0 = type { %struct.FaSystemLock, %struct.FaSystemLock, ptr, ptr, i32, i32, [8 x i8] }
 %struct.FaSystemLock = type { [64 x i8] }
 %struct.anon.1 = type { %struct.FaSystemLock, %struct.FaSystemLock, ptr, i64, i32, i32, i32 }
+%struct.GraphemeRange = type { i32, i32, i8 }
 %struct.Range = type { i32, i32 }
 %struct.FaEpollEvent = type { i32, i64 }
 %struct.FaString = type { ptr, i64, i64 }
@@ -180,8 +181,7 @@ source_filename = "fa_runtime.c"
 @.str.43 = private unnamed_addr constant [3 x i8] c"}}\00", align 1
 @.str.44 = private unnamed_addr constant [3 x i8] c"\\x\00", align 1
 @out_of_memory.message = internal constant [21 x i8] c"stop: out of memory\0A\00", align 1
-@EXTEND = internal unnamed_addr constant [153 x %struct.Range] [%struct.Range { i32 768, i32 879 }, %struct.Range { i32 1155, i32 1161 }, %struct.Range { i32 1425, i32 1469 }, %struct.Range { i32 1471, i32 1471 }, %struct.Range { i32 1473, i32 1474 }, %struct.Range { i32 1476, i32 1477 }, %struct.Range { i32 1479, i32 1479 }, %struct.Range { i32 1552, i32 1562 }, %struct.Range { i32 1611, i32 1631 }, %struct.Range { i32 1648, i32 1648 }, %struct.Range { i32 1750, i32 1756 }, %struct.Range { i32 1759, i32 1764 }, %struct.Range { i32 1767, i32 1768 }, %struct.Range { i32 1770, i32 1773 }, %struct.Range { i32 1809, i32 1809 }, %struct.Range { i32 1840, i32 1866 }, %struct.Range { i32 1958, i32 1968 }, %struct.Range { i32 2027, i32 2035 }, %struct.Range { i32 2070, i32 2093 }, %struct.Range { i32 2137, i32 2139 }, %struct.Range { i32 2200, i32 2207 }, %struct.Range { i32 2250, i32 2273 }, %struct.Range { i32 2275, i32 2307 }, %struct.Range { i32 2362, i32 2364 }, %struct.Range { i32 2366, i32 2383 }, %struct.Range { i32 2385, i32 2391 }, %struct.Range { i32 2402, i32 2403 }, %struct.Range { i32 2433, i32 2435 }, %struct.Range { i32 2492, i32 2492 }, %struct.Range { i32 2494, i32 2509 }, %struct.Range { i32 2519, i32 2519 }, %struct.Range { i32 2530, i32 2531 }, %struct.Range { i32 2561, i32 2563 }, %struct.Range { i32 2620, i32 2641 }, %struct.Range { i32 2672, i32 2673 }, %struct.Range { i32 2677, i32 2677 }, %struct.Range { i32 2689, i32 2691 }, %struct.Range { i32 2748, i32 2748 }, %struct.Range { i32 2750, i32 2765 }, %struct.Range { i32 2786, i32 2787 }, %struct.Range { i32 2817, i32 2819 }, %struct.Range { i32 2876, i32 2876 }, %struct.Range { i32 2878, i32 2903 }, %struct.Range { i32 2914, i32 2915 }, %struct.Range { i32 2946, i32 2946 }, %struct.Range { i32 3006, i32 3021 }, %struct.Range { i32 3031, i32 3031 }, %struct.Range { i32 3072, i32 3076 }, %struct.Range { i32 3132, i32 3132 }, %struct.Range { i32 3134, i32 3158 }, %struct.Range { i32 3170, i32 3171 }, %struct.Range { i32 3201, i32 3203 }, %struct.Range { i32 3260, i32 3260 }, %struct.Range { i32 3262, i32 3286 }, %struct.Range { i32 3298, i32 3299 }, %struct.Range { i32 3328, i32 3331 }, %struct.Range { i32 3387, i32 3388 }, %struct.Range { i32 3390, i32 3405 }, %struct.Range { i32 3415, i32 3415 }, %struct.Range { i32 3426, i32 3427 }, %struct.Range { i32 3457, i32 3459 }, %struct.Range { i32 3530, i32 3551 }, %struct.Range { i32 3570, i32 3571 }, %struct.Range { i32 3633, i32 3633 }, %struct.Range { i32 3635, i32 3642 }, %struct.Range { i32 3655, i32 3662 }, %struct.Range { i32 3761, i32 3761 }, %struct.Range { i32 3763, i32 3772 }, %struct.Range { i32 3784, i32 3790 }, %struct.Range { i32 3864, i32 3865 }, %struct.Range { i32 3893, i32 3893 }, %struct.Range { i32 3895, i32 3895 }, %struct.Range { i32 3897, i32 3897 }, %struct.Range { i32 3902, i32 3903 }, %struct.Range { i32 3953, i32 3972 }, %struct.Range { i32 3974, i32 3975 }, %struct.Range { i32 3981, i32 4028 }, %struct.Range { i32 4038, i32 4038 }, %struct.Range { i32 4139, i32 4158 }, %struct.Range { i32 4182, i32 4185 }, %struct.Range { i32 4190, i32 4192 }, %struct.Range { i32 4194, i32 4196 }, %struct.Range { i32 4199, i32 4205 }, %struct.Range { i32 4209, i32 4212 }, %struct.Range { i32 4226, i32 4237 }, %struct.Range { i32 4239, i32 4239 }, %struct.Range { i32 4250, i32 4253 }, %struct.Range { i32 4957, i32 4959 }, %struct.Range { i32 5906, i32 5909 }, %struct.Range { i32 5938, i32 5940 }, %struct.Range { i32 5970, i32 5971 }, %struct.Range { i32 6002, i32 6003 }, %struct.Range { i32 6068, i32 6099 }, %struct.Range { i32 6109, i32 6109 }, %struct.Range { i32 6155, i32 6157 }, %struct.Range { i32 6159, i32 6159 }, %struct.Range { i32 6277, i32 6278 }, %struct.Range { i32 6313, i32 6313 }, %struct.Range { i32 6432, i32 6459 }, %struct.Range { i32 6679, i32 6683 }, %struct.Range { i32 6741, i32 6783 }, %struct.Range { i32 6832, i32 6911 }, %struct.Range { i32 6912, i32 6916 }, %struct.Range { i32 6964, i32 6980 }, %struct.Range { i32 7019, i32 7027 }, %struct.Range { i32 7040, i32 7042 }, %struct.Range { i32 7073, i32 7085 }, %struct.Range { i32 7142, i32 7155 }, %struct.Range { i32 7204, i32 7223 }, %struct.Range { i32 7376, i32 7378 }, %struct.Range { i32 7380, i32 7400 }, %struct.Range { i32 7405, i32 7405 }, %struct.Range { i32 7412, i32 7412 }, %struct.Range { i32 7415, i32 7417 }, %struct.Range { i32 7616, i32 7679 }, %struct.Range { i32 8204, i32 8204 }, %struct.Range { i32 8400, i32 8432 }, %struct.Range { i32 11503, i32 11505 }, %struct.Range { i32 11647, i32 11647 }, %struct.Range { i32 11744, i32 11775 }, %struct.Range { i32 12330, i32 12335 }, %struct.Range { i32 12441, i32 12442 }, %struct.Range { i32 42607, i32 42610 }, %struct.Range { i32 42612, i32 42621 }, %struct.Range { i32 42654, i32 42655 }, %struct.Range { i32 42736, i32 42737 }, %struct.Range { i32 43010, i32 43010 }, %struct.Range { i32 43014, i32 43014 }, %struct.Range { i32 43019, i32 43019 }, %struct.Range { i32 43043, i32 43047 }, %struct.Range { i32 43052, i32 43052 }, %struct.Range { i32 43136, i32 43137 }, %struct.Range { i32 43188, i32 43205 }, %struct.Range { i32 43232, i32 43249 }, %struct.Range { i32 43263, i32 43263 }, %struct.Range { i32 43302, i32 43309 }, %struct.Range { i32 43335, i32 43347 }, %struct.Range { i32 43392, i32 43395 }, %struct.Range { i32 43443, i32 43456 }, %struct.Range { i32 43561, i32 43574 }, %struct.Range { i32 43587, i32 43587 }, %struct.Range { i32 43596, i32 43597 }, %struct.Range { i32 43755, i32 43759 }, %struct.Range { i32 43765, i32 43766 }, %struct.Range { i32 44003, i32 44010 }, %struct.Range { i32 44012, i32 44013 }, %struct.Range { i32 64286, i32 64286 }, %struct.Range { i32 65024, i32 65039 }, %struct.Range { i32 65056, i32 65071 }, %struct.Range { i32 65438, i32 65439 }, %struct.Range { i32 127995, i32 127999 }, %struct.Range { i32 917536, i32 917631 }, %struct.Range { i32 917760, i32 917999 }], align 4
-@PICTOGRAPHIC = internal unnamed_addr constant [22 x %struct.Range] [%struct.Range { i32 169, i32 169 }, %struct.Range { i32 174, i32 174 }, %struct.Range { i32 8252, i32 8252 }, %struct.Range { i32 8265, i32 8265 }, %struct.Range { i32 8482, i32 8482 }, %struct.Range { i32 8505, i32 8505 }, %struct.Range { i32 8596, i32 8618 }, %struct.Range { i32 8986, i32 9215 }, %struct.Range { i32 9410, i32 9410 }, %struct.Range { i32 9642, i32 9726 }, %struct.Range { i32 9728, i32 10175 }, %struct.Range { i32 10548, i32 10549 }, %struct.Range { i32 11013, i32 11093 }, %struct.Range { i32 12336, i32 12336 }, %struct.Range { i32 12349, i32 12349 }, %struct.Range { i32 12951, i32 12951 }, %struct.Range { i32 12953, i32 12953 }, %struct.Range { i32 126976, i32 127231 }, %struct.Range { i32 127245, i32 127405 }, %struct.Range { i32 127489, i32 127994 }, %struct.Range { i32 128000, i32 129791 }, %struct.Range { i32 130048, i32 131069 }], align 4
+@FA_GRAPHEME_RANGES = internal unnamed_addr constant [833 x %struct.GraphemeRange] [%struct.GraphemeRange { i32 0, i32 9, i8 3 }, %struct.GraphemeRange { i32 10, i32 10, i8 2 }, %struct.GraphemeRange { i32 11, i32 12, i8 3 }, %struct.GraphemeRange { i32 13, i32 13, i8 1 }, %struct.GraphemeRange { i32 14, i32 31, i8 3 }, %struct.GraphemeRange { i32 127, i32 159, i8 3 }, %struct.GraphemeRange { i32 169, i32 169, i8 16 }, %struct.GraphemeRange { i32 173, i32 173, i8 3 }, %struct.GraphemeRange { i32 174, i32 174, i8 16 }, %struct.GraphemeRange { i32 768, i32 879, i8 68 }, %struct.GraphemeRange { i32 1155, i32 1161, i8 68 }, %struct.GraphemeRange { i32 1425, i32 1469, i8 68 }, %struct.GraphemeRange { i32 1471, i32 1471, i8 68 }, %struct.GraphemeRange { i32 1473, i32 1474, i8 68 }, %struct.GraphemeRange { i32 1476, i32 1477, i8 68 }, %struct.GraphemeRange { i32 1479, i32 1479, i8 68 }, %struct.GraphemeRange { i32 1536, i32 1541, i8 7 }, %struct.GraphemeRange { i32 1552, i32 1562, i8 68 }, %struct.GraphemeRange { i32 1564, i32 1564, i8 3 }, %struct.GraphemeRange { i32 1611, i32 1631, i8 68 }, %struct.GraphemeRange { i32 1648, i32 1648, i8 68 }, %struct.GraphemeRange { i32 1750, i32 1756, i8 68 }, %struct.GraphemeRange { i32 1757, i32 1757, i8 7 }, %struct.GraphemeRange { i32 1759, i32 1764, i8 68 }, %struct.GraphemeRange { i32 1767, i32 1768, i8 68 }, %struct.GraphemeRange { i32 1770, i32 1773, i8 68 }, %struct.GraphemeRange { i32 1807, i32 1807, i8 7 }, %struct.GraphemeRange { i32 1809, i32 1809, i8 68 }, %struct.GraphemeRange { i32 1840, i32 1866, i8 68 }, %struct.GraphemeRange { i32 1958, i32 1968, i8 68 }, %struct.GraphemeRange { i32 2027, i32 2035, i8 68 }, %struct.GraphemeRange { i32 2045, i32 2045, i8 68 }, %struct.GraphemeRange { i32 2070, i32 2073, i8 68 }, %struct.GraphemeRange { i32 2075, i32 2083, i8 68 }, %struct.GraphemeRange { i32 2085, i32 2087, i8 68 }, %struct.GraphemeRange { i32 2089, i32 2093, i8 68 }, %struct.GraphemeRange { i32 2137, i32 2139, i8 68 }, %struct.GraphemeRange { i32 2192, i32 2193, i8 7 }, %struct.GraphemeRange { i32 2199, i32 2207, i8 68 }, %struct.GraphemeRange { i32 2250, i32 2273, i8 68 }, %struct.GraphemeRange { i32 2274, i32 2274, i8 7 }, %struct.GraphemeRange { i32 2275, i32 2306, i8 68 }, %struct.GraphemeRange { i32 2307, i32 2307, i8 8 }, %struct.GraphemeRange { i32 2325, i32 2361, i8 32 }, %struct.GraphemeRange { i32 2362, i32 2362, i8 68 }, %struct.GraphemeRange { i32 2363, i32 2363, i8 8 }, %struct.GraphemeRange { i32 2364, i32 2364, i8 68 }, %struct.GraphemeRange { i32 2366, i32 2368, i8 8 }, %struct.GraphemeRange { i32 2369, i32 2376, i8 68 }, %struct.GraphemeRange { i32 2377, i32 2380, i8 8 }, %struct.GraphemeRange { i32 2381, i32 2381, i8 100 }, %struct.GraphemeRange { i32 2382, i32 2383, i8 8 }, %struct.GraphemeRange { i32 2385, i32 2391, i8 68 }, %struct.GraphemeRange { i32 2392, i32 2399, i8 32 }, %struct.GraphemeRange { i32 2402, i32 2403, i8 68 }, %struct.GraphemeRange { i32 2424, i32 2431, i8 32 }, %struct.GraphemeRange { i32 2433, i32 2433, i8 68 }, %struct.GraphemeRange { i32 2434, i32 2435, i8 8 }, %struct.GraphemeRange { i32 2453, i32 2472, i8 32 }, %struct.GraphemeRange { i32 2474, i32 2480, i8 32 }, %struct.GraphemeRange { i32 2482, i32 2482, i8 32 }, %struct.GraphemeRange { i32 2486, i32 2489, i8 32 }, %struct.GraphemeRange { i32 2492, i32 2492, i8 68 }, %struct.GraphemeRange { i32 2494, i32 2494, i8 68 }, %struct.GraphemeRange { i32 2495, i32 2496, i8 8 }, %struct.GraphemeRange { i32 2497, i32 2500, i8 68 }, %struct.GraphemeRange { i32 2503, i32 2504, i8 8 }, %struct.GraphemeRange { i32 2507, i32 2508, i8 8 }, %struct.GraphemeRange { i32 2509, i32 2509, i8 100 }, %struct.GraphemeRange { i32 2519, i32 2519, i8 68 }, %struct.GraphemeRange { i32 2524, i32 2525, i8 32 }, %struct.GraphemeRange { i32 2527, i32 2527, i8 32 }, %struct.GraphemeRange { i32 2530, i32 2531, i8 68 }, %struct.GraphemeRange { i32 2544, i32 2545, i8 32 }, %struct.GraphemeRange { i32 2558, i32 2558, i8 68 }, %struct.GraphemeRange { i32 2561, i32 2562, i8 68 }, %struct.GraphemeRange { i32 2563, i32 2563, i8 8 }, %struct.GraphemeRange { i32 2620, i32 2620, i8 68 }, %struct.GraphemeRange { i32 2622, i32 2624, i8 8 }, %struct.GraphemeRange { i32 2625, i32 2626, i8 68 }, %struct.GraphemeRange { i32 2631, i32 2632, i8 68 }, %struct.GraphemeRange { i32 2635, i32 2637, i8 68 }, %struct.GraphemeRange { i32 2641, i32 2641, i8 68 }, %struct.GraphemeRange { i32 2672, i32 2673, i8 68 }, %struct.GraphemeRange { i32 2677, i32 2677, i8 68 }, %struct.GraphemeRange { i32 2689, i32 2690, i8 68 }, %struct.GraphemeRange { i32 2691, i32 2691, i8 8 }, %struct.GraphemeRange { i32 2709, i32 2728, i8 32 }, %struct.GraphemeRange { i32 2730, i32 2736, i8 32 }, %struct.GraphemeRange { i32 2738, i32 2739, i8 32 }, %struct.GraphemeRange { i32 2741, i32 2745, i8 32 }, %struct.GraphemeRange { i32 2748, i32 2748, i8 68 }, %struct.GraphemeRange { i32 2750, i32 2752, i8 8 }, %struct.GraphemeRange { i32 2753, i32 2757, i8 68 }, %struct.GraphemeRange { i32 2759, i32 2760, i8 68 }, %struct.GraphemeRange { i32 2761, i32 2761, i8 8 }, %struct.GraphemeRange { i32 2763, i32 2764, i8 8 }, %struct.GraphemeRange { i32 2765, i32 2765, i8 100 }, %struct.GraphemeRange { i32 2786, i32 2787, i8 68 }, %struct.GraphemeRange { i32 2809, i32 2809, i8 32 }, %struct.GraphemeRange { i32 2810, i32 2815, i8 68 }, %struct.GraphemeRange { i32 2817, i32 2817, i8 68 }, %struct.GraphemeRange { i32 2818, i32 2819, i8 8 }, %struct.GraphemeRange { i32 2837, i32 2856, i8 32 }, %struct.GraphemeRange { i32 2858, i32 2864, i8 32 }, %struct.GraphemeRange { i32 2866, i32 2867, i8 32 }, %struct.GraphemeRange { i32 2869, i32 2873, i8 32 }, %struct.GraphemeRange { i32 2876, i32 2876, i8 68 }, %struct.GraphemeRange { i32 2878, i32 2879, i8 68 }, %struct.GraphemeRange { i32 2880, i32 2880, i8 8 }, %struct.GraphemeRange { i32 2881, i32 2884, i8 68 }, %struct.GraphemeRange { i32 2887, i32 2888, i8 8 }, %struct.GraphemeRange { i32 2891, i32 2892, i8 8 }, %struct.GraphemeRange { i32 2893, i32 2893, i8 100 }, %struct.GraphemeRange { i32 2901, i32 2903, i8 68 }, %struct.GraphemeRange { i32 2908, i32 2909, i8 32 }, %struct.GraphemeRange { i32 2911, i32 2911, i8 32 }, %struct.GraphemeRange { i32 2914, i32 2915, i8 68 }, %struct.GraphemeRange { i32 2929, i32 2929, i8 32 }, %struct.GraphemeRange { i32 2946, i32 2946, i8 68 }, %struct.GraphemeRange { i32 3006, i32 3006, i8 68 }, %struct.GraphemeRange { i32 3007, i32 3007, i8 8 }, %struct.GraphemeRange { i32 3008, i32 3008, i8 68 }, %struct.GraphemeRange { i32 3009, i32 3010, i8 8 }, %struct.GraphemeRange { i32 3014, i32 3016, i8 8 }, %struct.GraphemeRange { i32 3018, i32 3020, i8 8 }, %struct.GraphemeRange { i32 3021, i32 3021, i8 68 }, %struct.GraphemeRange { i32 3031, i32 3031, i8 68 }, %struct.GraphemeRange { i32 3072, i32 3072, i8 68 }, %struct.GraphemeRange { i32 3073, i32 3075, i8 8 }, %struct.GraphemeRange { i32 3076, i32 3076, i8 68 }, %struct.GraphemeRange { i32 3093, i32 3112, i8 32 }, %struct.GraphemeRange { i32 3114, i32 3129, i8 32 }, %struct.GraphemeRange { i32 3132, i32 3132, i8 68 }, %struct.GraphemeRange { i32 3134, i32 3136, i8 68 }, %struct.GraphemeRange { i32 3137, i32 3140, i8 8 }, %struct.GraphemeRange { i32 3142, i32 3144, i8 68 }, %struct.GraphemeRange { i32 3146, i32 3148, i8 68 }, %struct.GraphemeRange { i32 3149, i32 3149, i8 100 }, %struct.GraphemeRange { i32 3157, i32 3158, i8 68 }, %struct.GraphemeRange { i32 3160, i32 3162, i8 32 }, %struct.GraphemeRange { i32 3170, i32 3171, i8 68 }, %struct.GraphemeRange { i32 3201, i32 3201, i8 68 }, %struct.GraphemeRange { i32 3202, i32 3203, i8 8 }, %struct.GraphemeRange { i32 3260, i32 3260, i8 68 }, %struct.GraphemeRange { i32 3262, i32 3262, i8 8 }, %struct.GraphemeRange { i32 3263, i32 3264, i8 68 }, %struct.GraphemeRange { i32 3265, i32 3265, i8 8 }, %struct.GraphemeRange { i32 3266, i32 3266, i8 68 }, %struct.GraphemeRange { i32 3267, i32 3268, i8 8 }, %struct.GraphemeRange { i32 3270, i32 3272, i8 68 }, %struct.GraphemeRange { i32 3274, i32 3277, i8 68 }, %struct.GraphemeRange { i32 3285, i32 3286, i8 68 }, %struct.GraphemeRange { i32 3298, i32 3299, i8 68 }, %struct.GraphemeRange { i32 3315, i32 3315, i8 8 }, %struct.GraphemeRange { i32 3328, i32 3329, i8 68 }, %struct.GraphemeRange { i32 3330, i32 3331, i8 8 }, %struct.GraphemeRange { i32 3349, i32 3386, i8 32 }, %struct.GraphemeRange { i32 3387, i32 3388, i8 68 }, %struct.GraphemeRange { i32 3390, i32 3390, i8 68 }, %struct.GraphemeRange { i32 3391, i32 3392, i8 8 }, %struct.GraphemeRange { i32 3393, i32 3396, i8 68 }, %struct.GraphemeRange { i32 3398, i32 3400, i8 8 }, %struct.GraphemeRange { i32 3402, i32 3404, i8 8 }, %struct.GraphemeRange { i32 3405, i32 3405, i8 100 }, %struct.GraphemeRange { i32 3406, i32 3406, i8 7 }, %struct.GraphemeRange { i32 3415, i32 3415, i8 68 }, %struct.GraphemeRange { i32 3426, i32 3427, i8 68 }, %struct.GraphemeRange { i32 3457, i32 3457, i8 68 }, %struct.GraphemeRange { i32 3458, i32 3459, i8 8 }, %struct.GraphemeRange { i32 3530, i32 3530, i8 68 }, %struct.GraphemeRange { i32 3535, i32 3535, i8 68 }, %struct.GraphemeRange { i32 3536, i32 3537, i8 8 }, %struct.GraphemeRange { i32 3538, i32 3540, i8 68 }, %struct.GraphemeRange { i32 3542, i32 3542, i8 68 }, %struct.GraphemeRange { i32 3544, i32 3550, i8 8 }, %struct.GraphemeRange { i32 3551, i32 3551, i8 68 }, %struct.GraphemeRange { i32 3570, i32 3571, i8 8 }, %struct.GraphemeRange { i32 3633, i32 3633, i8 68 }, %struct.GraphemeRange { i32 3635, i32 3635, i8 8 }, %struct.GraphemeRange { i32 3636, i32 3642, i8 68 }, %struct.GraphemeRange { i32 3655, i32 3662, i8 68 }, %struct.GraphemeRange { i32 3761, i32 3761, i8 68 }, %struct.GraphemeRange { i32 3763, i32 3763, i8 8 }, %struct.GraphemeRange { i32 3764, i32 3772, i8 68 }, %struct.GraphemeRange { i32 3784, i32 3790, i8 68 }, %struct.GraphemeRange { i32 3864, i32 3865, i8 68 }, %struct.GraphemeRange { i32 3893, i32 3893, i8 68 }, %struct.GraphemeRange { i32 3895, i32 3895, i8 68 }, %struct.GraphemeRange { i32 3897, i32 3897, i8 68 }, %struct.GraphemeRange { i32 3902, i32 3903, i8 8 }, %struct.GraphemeRange { i32 3953, i32 3966, i8 68 }, %struct.GraphemeRange { i32 3967, i32 3967, i8 8 }, %struct.GraphemeRange { i32 3968, i32 3972, i8 68 }, %struct.GraphemeRange { i32 3974, i32 3975, i8 68 }, %struct.GraphemeRange { i32 3981, i32 3991, i8 68 }, %struct.GraphemeRange { i32 3993, i32 4028, i8 68 }, %struct.GraphemeRange { i32 4038, i32 4038, i8 68 }, %struct.GraphemeRange { i32 4096, i32 4138, i8 32 }, %struct.GraphemeRange { i32 4141, i32 4144, i8 68 }, %struct.GraphemeRange { i32 4145, i32 4145, i8 8 }, %struct.GraphemeRange { i32 4146, i32 4151, i8 68 }, %struct.GraphemeRange { i32 4153, i32 4153, i8 100 }, %struct.GraphemeRange { i32 4154, i32 4154, i8 68 }, %struct.GraphemeRange { i32 4155, i32 4156, i8 8 }, %struct.GraphemeRange { i32 4157, i32 4158, i8 68 }, %struct.GraphemeRange { i32 4159, i32 4159, i8 32 }, %struct.GraphemeRange { i32 4176, i32 4181, i8 32 }, %struct.GraphemeRange { i32 4182, i32 4183, i8 8 }, %struct.GraphemeRange { i32 4184, i32 4185, i8 68 }, %struct.GraphemeRange { i32 4186, i32 4189, i8 32 }, %struct.GraphemeRange { i32 4190, i32 4192, i8 68 }, %struct.GraphemeRange { i32 4193, i32 4193, i8 32 }, %struct.GraphemeRange { i32 4197, i32 4198, i8 32 }, %struct.GraphemeRange { i32 4206, i32 4208, i8 32 }, %struct.GraphemeRange { i32 4209, i32 4212, i8 68 }, %struct.GraphemeRange { i32 4213, i32 4225, i8 32 }, %struct.GraphemeRange { i32 4226, i32 4226, i8 68 }, %struct.GraphemeRange { i32 4228, i32 4228, i8 8 }, %struct.GraphemeRange { i32 4229, i32 4230, i8 68 }, %struct.GraphemeRange { i32 4237, i32 4237, i8 68 }, %struct.GraphemeRange { i32 4238, i32 4238, i8 32 }, %struct.GraphemeRange { i32 4253, i32 4253, i8 68 }, %struct.GraphemeRange { i32 4352, i32 4447, i8 9 }, %struct.GraphemeRange { i32 4448, i32 4519, i8 10 }, %struct.GraphemeRange { i32 4520, i32 4607, i8 11 }, %struct.GraphemeRange { i32 4957, i32 4959, i8 68 }, %struct.GraphemeRange { i32 5906, i32 5909, i8 68 }, %struct.GraphemeRange { i32 5938, i32 5940, i8 68 }, %struct.GraphemeRange { i32 5970, i32 5971, i8 68 }, %struct.GraphemeRange { i32 6002, i32 6003, i8 68 }, %struct.GraphemeRange { i32 6016, i32 6067, i8 32 }, %struct.GraphemeRange { i32 6068, i32 6069, i8 68 }, %struct.GraphemeRange { i32 6070, i32 6070, i8 8 }, %struct.GraphemeRange { i32 6071, i32 6077, i8 68 }, %struct.GraphemeRange { i32 6078, i32 6085, i8 8 }, %struct.GraphemeRange { i32 6086, i32 6086, i8 68 }, %struct.GraphemeRange { i32 6087, i32 6088, i8 8 }, %struct.GraphemeRange { i32 6089, i32 6097, i8 68 }, %struct.GraphemeRange { i32 6098, i32 6098, i8 100 }, %struct.GraphemeRange { i32 6099, i32 6099, i8 68 }, %struct.GraphemeRange { i32 6109, i32 6109, i8 68 }, %struct.GraphemeRange { i32 6155, i32 6157, i8 68 }, %struct.GraphemeRange { i32 6158, i32 6158, i8 3 }, %struct.GraphemeRange { i32 6159, i32 6159, i8 68 }, %struct.GraphemeRange { i32 6277, i32 6278, i8 68 }, %struct.GraphemeRange { i32 6313, i32 6313, i8 68 }, %struct.GraphemeRange { i32 6432, i32 6434, i8 68 }, %struct.GraphemeRange { i32 6435, i32 6438, i8 8 }, %struct.GraphemeRange { i32 6439, i32 6440, i8 68 }, %struct.GraphemeRange { i32 6441, i32 6443, i8 8 }, %struct.GraphemeRange { i32 6448, i32 6449, i8 8 }, %struct.GraphemeRange { i32 6450, i32 6450, i8 68 }, %struct.GraphemeRange { i32 6451, i32 6456, i8 8 }, %struct.GraphemeRange { i32 6457, i32 6459, i8 68 }, %struct.GraphemeRange { i32 6679, i32 6680, i8 68 }, %struct.GraphemeRange { i32 6681, i32 6682, i8 8 }, %struct.GraphemeRange { i32 6683, i32 6683, i8 68 }, %struct.GraphemeRange { i32 6688, i32 6740, i8 32 }, %struct.GraphemeRange { i32 6741, i32 6741, i8 8 }, %struct.GraphemeRange { i32 6742, i32 6742, i8 68 }, %struct.GraphemeRange { i32 6743, i32 6743, i8 8 }, %struct.GraphemeRange { i32 6744, i32 6750, i8 68 }, %struct.GraphemeRange { i32 6752, i32 6752, i8 100 }, %struct.GraphemeRange { i32 6754, i32 6754, i8 68 }, %struct.GraphemeRange { i32 6757, i32 6764, i8 68 }, %struct.GraphemeRange { i32 6765, i32 6770, i8 8 }, %struct.GraphemeRange { i32 6771, i32 6780, i8 68 }, %struct.GraphemeRange { i32 6783, i32 6783, i8 68 }, %struct.GraphemeRange { i32 6832, i32 6877, i8 68 }, %struct.GraphemeRange { i32 6880, i32 6891, i8 68 }, %struct.GraphemeRange { i32 6912, i32 6915, i8 68 }, %struct.GraphemeRange { i32 6916, i32 6916, i8 8 }, %struct.GraphemeRange { i32 6923, i32 6924, i8 32 }, %struct.GraphemeRange { i32 6931, i32 6963, i8 32 }, %struct.GraphemeRange { i32 6964, i32 6973, i8 68 }, %struct.GraphemeRange { i32 6974, i32 6977, i8 8 }, %struct.GraphemeRange { i32 6978, i32 6979, i8 68 }, %struct.GraphemeRange { i32 6980, i32 6980, i8 100 }, %struct.GraphemeRange { i32 6981, i32 6988, i8 32 }, %struct.GraphemeRange { i32 7019, i32 7027, i8 68 }, %struct.GraphemeRange { i32 7040, i32 7041, i8 68 }, %struct.GraphemeRange { i32 7042, i32 7042, i8 8 }, %struct.GraphemeRange { i32 7043, i32 7072, i8 32 }, %struct.GraphemeRange { i32 7073, i32 7073, i8 8 }, %struct.GraphemeRange { i32 7074, i32 7077, i8 68 }, %struct.GraphemeRange { i32 7078, i32 7079, i8 8 }, %struct.GraphemeRange { i32 7080, i32 7082, i8 68 }, %struct.GraphemeRange { i32 7083, i32 7083, i8 100 }, %struct.GraphemeRange { i32 7084, i32 7085, i8 68 }, %struct.GraphemeRange { i32 7086, i32 7087, i8 32 }, %struct.GraphemeRange { i32 7099, i32 7101, i8 32 }, %struct.GraphemeRange { i32 7142, i32 7142, i8 68 }, %struct.GraphemeRange { i32 7143, i32 7143, i8 8 }, %struct.GraphemeRange { i32 7144, i32 7145, i8 68 }, %struct.GraphemeRange { i32 7146, i32 7148, i8 8 }, %struct.GraphemeRange { i32 7149, i32 7149, i8 68 }, %struct.GraphemeRange { i32 7150, i32 7150, i8 8 }, %struct.GraphemeRange { i32 7151, i32 7155, i8 68 }, %struct.GraphemeRange { i32 7204, i32 7211, i8 8 }, %struct.GraphemeRange { i32 7212, i32 7219, i8 68 }, %struct.GraphemeRange { i32 7220, i32 7221, i8 8 }, %struct.GraphemeRange { i32 7222, i32 7223, i8 68 }, %struct.GraphemeRange { i32 7376, i32 7378, i8 68 }, %struct.GraphemeRange { i32 7380, i32 7392, i8 68 }, %struct.GraphemeRange { i32 7393, i32 7393, i8 8 }, %struct.GraphemeRange { i32 7394, i32 7400, i8 68 }, %struct.GraphemeRange { i32 7405, i32 7405, i8 68 }, %struct.GraphemeRange { i32 7412, i32 7412, i8 68 }, %struct.GraphemeRange { i32 7415, i32 7415, i8 8 }, %struct.GraphemeRange { i32 7416, i32 7417, i8 68 }, %struct.GraphemeRange { i32 7616, i32 7679, i8 68 }, %struct.GraphemeRange { i32 8203, i32 8203, i8 3 }, %struct.GraphemeRange { i32 8204, i32 8204, i8 4 }, %struct.GraphemeRange { i32 8205, i32 8205, i8 69 }, %struct.GraphemeRange { i32 8206, i32 8207, i8 3 }, %struct.GraphemeRange { i32 8232, i32 8238, i8 3 }, %struct.GraphemeRange { i32 8252, i32 8252, i8 16 }, %struct.GraphemeRange { i32 8265, i32 8265, i8 16 }, %struct.GraphemeRange { i32 8288, i32 8303, i8 3 }, %struct.GraphemeRange { i32 8400, i32 8432, i8 68 }, %struct.GraphemeRange { i32 8482, i32 8482, i8 16 }, %struct.GraphemeRange { i32 8505, i32 8505, i8 16 }, %struct.GraphemeRange { i32 8596, i32 8601, i8 16 }, %struct.GraphemeRange { i32 8617, i32 8618, i8 16 }, %struct.GraphemeRange { i32 8986, i32 8987, i8 16 }, %struct.GraphemeRange { i32 9000, i32 9000, i8 16 }, %struct.GraphemeRange { i32 9167, i32 9167, i8 16 }, %struct.GraphemeRange { i32 9193, i32 9203, i8 16 }, %struct.GraphemeRange { i32 9208, i32 9210, i8 16 }, %struct.GraphemeRange { i32 9410, i32 9410, i8 16 }, %struct.GraphemeRange { i32 9642, i32 9643, i8 16 }, %struct.GraphemeRange { i32 9654, i32 9654, i8 16 }, %struct.GraphemeRange { i32 9664, i32 9664, i8 16 }, %struct.GraphemeRange { i32 9723, i32 9726, i8 16 }, %struct.GraphemeRange { i32 9728, i32 9732, i8 16 }, %struct.GraphemeRange { i32 9742, i32 9742, i8 16 }, %struct.GraphemeRange { i32 9745, i32 9745, i8 16 }, %struct.GraphemeRange { i32 9748, i32 9749, i8 16 }, %struct.GraphemeRange { i32 9752, i32 9752, i8 16 }, %struct.GraphemeRange { i32 9757, i32 9757, i8 16 }, %struct.GraphemeRange { i32 9760, i32 9760, i8 16 }, %struct.GraphemeRange { i32 9762, i32 9763, i8 16 }, %struct.GraphemeRange { i32 9766, i32 9766, i8 16 }, %struct.GraphemeRange { i32 9770, i32 9770, i8 16 }, %struct.GraphemeRange { i32 9774, i32 9775, i8 16 }, %struct.GraphemeRange { i32 9784, i32 9786, i8 16 }, %struct.GraphemeRange { i32 9792, i32 9792, i8 16 }, %struct.GraphemeRange { i32 9794, i32 9794, i8 16 }, %struct.GraphemeRange { i32 9800, i32 9811, i8 16 }, %struct.GraphemeRange { i32 9823, i32 9824, i8 16 }, %struct.GraphemeRange { i32 9827, i32 9827, i8 16 }, %struct.GraphemeRange { i32 9829, i32 9830, i8 16 }, %struct.GraphemeRange { i32 9832, i32 9832, i8 16 }, %struct.GraphemeRange { i32 9851, i32 9851, i8 16 }, %struct.GraphemeRange { i32 9854, i32 9855, i8 16 }, %struct.GraphemeRange { i32 9874, i32 9879, i8 16 }, %struct.GraphemeRange { i32 9881, i32 9881, i8 16 }, %struct.GraphemeRange { i32 9883, i32 9884, i8 16 }, %struct.GraphemeRange { i32 9888, i32 9889, i8 16 }, %struct.GraphemeRange { i32 9895, i32 9895, i8 16 }, %struct.GraphemeRange { i32 9898, i32 9899, i8 16 }, %struct.GraphemeRange { i32 9904, i32 9905, i8 16 }, %struct.GraphemeRange { i32 9917, i32 9918, i8 16 }, %struct.GraphemeRange { i32 9924, i32 9925, i8 16 }, %struct.GraphemeRange { i32 9928, i32 9928, i8 16 }, %struct.GraphemeRange { i32 9934, i32 9935, i8 16 }, %struct.GraphemeRange { i32 9937, i32 9937, i8 16 }, %struct.GraphemeRange { i32 9939, i32 9940, i8 16 }, %struct.GraphemeRange { i32 9961, i32 9962, i8 16 }, %struct.GraphemeRange { i32 9968, i32 9973, i8 16 }, %struct.GraphemeRange { i32 9975, i32 9978, i8 16 }, %struct.GraphemeRange { i32 9981, i32 9981, i8 16 }, %struct.GraphemeRange { i32 9986, i32 9986, i8 16 }, %struct.GraphemeRange { i32 9989, i32 9989, i8 16 }, %struct.GraphemeRange { i32 9992, i32 9997, i8 16 }, %struct.GraphemeRange { i32 9999, i32 9999, i8 16 }, %struct.GraphemeRange { i32 10002, i32 10002, i8 16 }, %struct.GraphemeRange { i32 10004, i32 10004, i8 16 }, %struct.GraphemeRange { i32 10006, i32 10006, i8 16 }, %struct.GraphemeRange { i32 10013, i32 10013, i8 16 }, %struct.GraphemeRange { i32 10017, i32 10017, i8 16 }, %struct.GraphemeRange { i32 10024, i32 10024, i8 16 }, %struct.GraphemeRange { i32 10035, i32 10036, i8 16 }, %struct.GraphemeRange { i32 10052, i32 10052, i8 16 }, %struct.GraphemeRange { i32 10055, i32 10055, i8 16 }, %struct.GraphemeRange { i32 10060, i32 10060, i8 16 }, %struct.GraphemeRange { i32 10062, i32 10062, i8 16 }, %struct.GraphemeRange { i32 10067, i32 10069, i8 16 }, %struct.GraphemeRange { i32 10071, i32 10071, i8 16 }, %struct.GraphemeRange { i32 10083, i32 10084, i8 16 }, %struct.GraphemeRange { i32 10133, i32 10135, i8 16 }, %struct.GraphemeRange { i32 10145, i32 10145, i8 16 }, %struct.GraphemeRange { i32 10160, i32 10160, i8 16 }, %struct.GraphemeRange { i32 10175, i32 10175, i8 16 }, %struct.GraphemeRange { i32 10548, i32 10549, i8 16 }, %struct.GraphemeRange { i32 11013, i32 11015, i8 16 }, %struct.GraphemeRange { i32 11035, i32 11036, i8 16 }, %struct.GraphemeRange { i32 11088, i32 11088, i8 16 }, %struct.GraphemeRange { i32 11093, i32 11093, i8 16 }, %struct.GraphemeRange { i32 11503, i32 11505, i8 68 }, %struct.GraphemeRange { i32 11647, i32 11647, i8 68 }, %struct.GraphemeRange { i32 11744, i32 11775, i8 68 }, %struct.GraphemeRange { i32 12330, i32 12335, i8 68 }, %struct.GraphemeRange { i32 12336, i32 12336, i8 16 }, %struct.GraphemeRange { i32 12349, i32 12349, i8 16 }, %struct.GraphemeRange { i32 12441, i32 12442, i8 68 }, %struct.GraphemeRange { i32 12951, i32 12951, i8 16 }, %struct.GraphemeRange { i32 12953, i32 12953, i8 16 }, %struct.GraphemeRange { i32 42607, i32 42610, i8 68 }, %struct.GraphemeRange { i32 42612, i32 42621, i8 68 }, %struct.GraphemeRange { i32 42654, i32 42655, i8 68 }, %struct.GraphemeRange { i32 42736, i32 42737, i8 68 }, %struct.GraphemeRange { i32 43010, i32 43010, i8 68 }, %struct.GraphemeRange { i32 43014, i32 43014, i8 68 }, %struct.GraphemeRange { i32 43019, i32 43019, i8 68 }, %struct.GraphemeRange { i32 43043, i32 43044, i8 8 }, %struct.GraphemeRange { i32 43045, i32 43046, i8 68 }, %struct.GraphemeRange { i32 43047, i32 43047, i8 8 }, %struct.GraphemeRange { i32 43052, i32 43052, i8 68 }, %struct.GraphemeRange { i32 43136, i32 43137, i8 8 }, %struct.GraphemeRange { i32 43188, i32 43203, i8 8 }, %struct.GraphemeRange { i32 43204, i32 43205, i8 68 }, %struct.GraphemeRange { i32 43232, i32 43249, i8 68 }, %struct.GraphemeRange { i32 43263, i32 43263, i8 68 }, %struct.GraphemeRange { i32 43302, i32 43309, i8 68 }, %struct.GraphemeRange { i32 43335, i32 43345, i8 68 }, %struct.GraphemeRange { i32 43346, i32 43346, i8 8 }, %struct.GraphemeRange { i32 43347, i32 43347, i8 68 }, %struct.GraphemeRange { i32 43360, i32 43388, i8 9 }, %struct.GraphemeRange { i32 43392, i32 43394, i8 68 }, %struct.GraphemeRange { i32 43395, i32 43395, i8 8 }, %struct.GraphemeRange { i32 43401, i32 43403, i8 32 }, %struct.GraphemeRange { i32 43407, i32 43442, i8 32 }, %struct.GraphemeRange { i32 43443, i32 43443, i8 68 }, %struct.GraphemeRange { i32 43444, i32 43445, i8 8 }, %struct.GraphemeRange { i32 43446, i32 43449, i8 68 }, %struct.GraphemeRange { i32 43450, i32 43451, i8 8 }, %struct.GraphemeRange { i32 43452, i32 43453, i8 68 }, %struct.GraphemeRange { i32 43454, i32 43455, i8 8 }, %struct.GraphemeRange { i32 43456, i32 43456, i8 100 }, %struct.GraphemeRange { i32 43488, i32 43492, i8 32 }, %struct.GraphemeRange { i32 43493, i32 43493, i8 68 }, %struct.GraphemeRange { i32 43495, i32 43503, i8 32 }, %struct.GraphemeRange { i32 43514, i32 43518, i8 32 }, %struct.GraphemeRange { i32 43561, i32 43566, i8 68 }, %struct.GraphemeRange { i32 43567, i32 43568, i8 8 }, %struct.GraphemeRange { i32 43569, i32 43570, i8 68 }, %struct.GraphemeRange { i32 43571, i32 43572, i8 8 }, %struct.GraphemeRange { i32 43573, i32 43574, i8 68 }, %struct.GraphemeRange { i32 43587, i32 43587, i8 68 }, %struct.GraphemeRange { i32 43596, i32 43596, i8 68 }, %struct.GraphemeRange { i32 43597, i32 43597, i8 8 }, %struct.GraphemeRange { i32 43616, i32 43631, i8 32 }, %struct.GraphemeRange { i32 43633, i32 43635, i8 32 }, %struct.GraphemeRange { i32 43642, i32 43642, i8 32 }, %struct.GraphemeRange { i32 43644, i32 43644, i8 68 }, %struct.GraphemeRange { i32 43646, i32 43647, i8 32 }, %struct.GraphemeRange { i32 43696, i32 43696, i8 68 }, %struct.GraphemeRange { i32 43698, i32 43700, i8 68 }, %struct.GraphemeRange { i32 43703, i32 43704, i8 68 }, %struct.GraphemeRange { i32 43710, i32 43711, i8 68 }, %struct.GraphemeRange { i32 43713, i32 43713, i8 68 }, %struct.GraphemeRange { i32 43744, i32 43754, i8 32 }, %struct.GraphemeRange { i32 43755, i32 43755, i8 8 }, %struct.GraphemeRange { i32 43756, i32 43757, i8 68 }, %struct.GraphemeRange { i32 43758, i32 43759, i8 8 }, %struct.GraphemeRange { i32 43765, i32 43765, i8 8 }, %struct.GraphemeRange { i32 43766, i32 43766, i8 100 }, %struct.GraphemeRange { i32 43968, i32 43994, i8 32 }, %struct.GraphemeRange { i32 44003, i32 44004, i8 8 }, %struct.GraphemeRange { i32 44005, i32 44005, i8 68 }, %struct.GraphemeRange { i32 44006, i32 44007, i8 8 }, %struct.GraphemeRange { i32 44008, i32 44008, i8 68 }, %struct.GraphemeRange { i32 44009, i32 44010, i8 8 }, %struct.GraphemeRange { i32 44012, i32 44012, i8 8 }, %struct.GraphemeRange { i32 44013, i32 44013, i8 68 }, %struct.GraphemeRange { i32 55216, i32 55238, i8 10 }, %struct.GraphemeRange { i32 55243, i32 55291, i8 11 }, %struct.GraphemeRange { i32 64286, i32 64286, i8 68 }, %struct.GraphemeRange { i32 65024, i32 65039, i8 68 }, %struct.GraphemeRange { i32 65056, i32 65071, i8 68 }, %struct.GraphemeRange { i32 65279, i32 65279, i8 3 }, %struct.GraphemeRange { i32 65438, i32 65439, i8 68 }, %struct.GraphemeRange { i32 65520, i32 65531, i8 3 }, %struct.GraphemeRange { i32 66045, i32 66045, i8 68 }, %struct.GraphemeRange { i32 66272, i32 66272, i8 68 }, %struct.GraphemeRange { i32 66422, i32 66426, i8 68 }, %struct.GraphemeRange { i32 68096, i32 68096, i8 32 }, %struct.GraphemeRange { i32 68097, i32 68099, i8 68 }, %struct.GraphemeRange { i32 68101, i32 68102, i8 68 }, %struct.GraphemeRange { i32 68108, i32 68111, i8 68 }, %struct.GraphemeRange { i32 68112, i32 68115, i8 32 }, %struct.GraphemeRange { i32 68117, i32 68119, i8 32 }, %struct.GraphemeRange { i32 68121, i32 68149, i8 32 }, %struct.GraphemeRange { i32 68152, i32 68154, i8 68 }, %struct.GraphemeRange { i32 68159, i32 68159, i8 100 }, %struct.GraphemeRange { i32 68325, i32 68326, i8 68 }, %struct.GraphemeRange { i32 68900, i32 68903, i8 68 }, %struct.GraphemeRange { i32 68969, i32 68973, i8 68 }, %struct.GraphemeRange { i32 69291, i32 69292, i8 68 }, %struct.GraphemeRange { i32 69370, i32 69375, i8 68 }, %struct.GraphemeRange { i32 69446, i32 69456, i8 68 }, %struct.GraphemeRange { i32 69506, i32 69509, i8 68 }, %struct.GraphemeRange { i32 69632, i32 69632, i8 8 }, %struct.GraphemeRange { i32 69633, i32 69633, i8 68 }, %struct.GraphemeRange { i32 69634, i32 69634, i8 8 }, %struct.GraphemeRange { i32 69688, i32 69702, i8 68 }, %struct.GraphemeRange { i32 69744, i32 69744, i8 68 }, %struct.GraphemeRange { i32 69747, i32 69748, i8 68 }, %struct.GraphemeRange { i32 69759, i32 69761, i8 68 }, %struct.GraphemeRange { i32 69762, i32 69762, i8 8 }, %struct.GraphemeRange { i32 69808, i32 69810, i8 8 }, %struct.GraphemeRange { i32 69811, i32 69814, i8 68 }, %struct.GraphemeRange { i32 69815, i32 69816, i8 8 }, %struct.GraphemeRange { i32 69817, i32 69818, i8 68 }, %struct.GraphemeRange { i32 69821, i32 69821, i8 7 }, %struct.GraphemeRange { i32 69826, i32 69826, i8 68 }, %struct.GraphemeRange { i32 69837, i32 69837, i8 7 }, %struct.GraphemeRange { i32 69888, i32 69890, i8 68 }, %struct.GraphemeRange { i32 69891, i32 69926, i8 32 }, %struct.GraphemeRange { i32 69927, i32 69931, i8 68 }, %struct.GraphemeRange { i32 69932, i32 69932, i8 8 }, %struct.GraphemeRange { i32 69933, i32 69938, i8 68 }, %struct.GraphemeRange { i32 69939, i32 69939, i8 100 }, %struct.GraphemeRange { i32 69940, i32 69940, i8 68 }, %struct.GraphemeRange { i32 69956, i32 69956, i8 32 }, %struct.GraphemeRange { i32 69957, i32 69958, i8 8 }, %struct.GraphemeRange { i32 69959, i32 69959, i8 32 }, %struct.GraphemeRange { i32 70003, i32 70003, i8 68 }, %struct.GraphemeRange { i32 70016, i32 70017, i8 68 }, %struct.GraphemeRange { i32 70018, i32 70018, i8 8 }, %struct.GraphemeRange { i32 70067, i32 70069, i8 8 }, %struct.GraphemeRange { i32 70070, i32 70078, i8 68 }, %struct.GraphemeRange { i32 70079, i32 70079, i8 8 }, %struct.GraphemeRange { i32 70080, i32 70080, i8 68 }, %struct.GraphemeRange { i32 70082, i32 70083, i8 7 }, %struct.GraphemeRange { i32 70089, i32 70092, i8 68 }, %struct.GraphemeRange { i32 70094, i32 70094, i8 8 }, %struct.GraphemeRange { i32 70095, i32 70095, i8 68 }, %struct.GraphemeRange { i32 70188, i32 70190, i8 8 }, %struct.GraphemeRange { i32 70191, i32 70193, i8 68 }, %struct.GraphemeRange { i32 70194, i32 70195, i8 8 }, %struct.GraphemeRange { i32 70196, i32 70199, i8 68 }, %struct.GraphemeRange { i32 70206, i32 70206, i8 68 }, %struct.GraphemeRange { i32 70209, i32 70209, i8 68 }, %struct.GraphemeRange { i32 70367, i32 70367, i8 68 }, %struct.GraphemeRange { i32 70368, i32 70370, i8 8 }, %struct.GraphemeRange { i32 70371, i32 70378, i8 68 }, %struct.GraphemeRange { i32 70400, i32 70401, i8 68 }, %struct.GraphemeRange { i32 70402, i32 70403, i8 8 }, %struct.GraphemeRange { i32 70459, i32 70460, i8 68 }, %struct.GraphemeRange { i32 70462, i32 70462, i8 68 }, %struct.GraphemeRange { i32 70463, i32 70463, i8 8 }, %struct.GraphemeRange { i32 70464, i32 70464, i8 68 }, %struct.GraphemeRange { i32 70465, i32 70468, i8 8 }, %struct.GraphemeRange { i32 70471, i32 70472, i8 8 }, %struct.GraphemeRange { i32 70475, i32 70476, i8 8 }, %struct.GraphemeRange { i32 70477, i32 70477, i8 68 }, %struct.GraphemeRange { i32 70487, i32 70487, i8 68 }, %struct.GraphemeRange { i32 70498, i32 70499, i8 8 }, %struct.GraphemeRange { i32 70502, i32 70508, i8 68 }, %struct.GraphemeRange { i32 70512, i32 70516, i8 68 }, %struct.GraphemeRange { i32 70528, i32 70537, i8 32 }, %struct.GraphemeRange { i32 70539, i32 70539, i8 32 }, %struct.GraphemeRange { i32 70542, i32 70542, i8 32 }, %struct.GraphemeRange { i32 70544, i32 70581, i8 32 }, %struct.GraphemeRange { i32 70584, i32 70584, i8 68 }, %struct.GraphemeRange { i32 70585, i32 70586, i8 8 }, %struct.GraphemeRange { i32 70587, i32 70592, i8 68 }, %struct.GraphemeRange { i32 70594, i32 70594, i8 68 }, %struct.GraphemeRange { i32 70597, i32 70597, i8 68 }, %struct.GraphemeRange { i32 70599, i32 70601, i8 68 }, %struct.GraphemeRange { i32 70602, i32 70602, i8 8 }, %struct.GraphemeRange { i32 70604, i32 70605, i8 8 }, %struct.GraphemeRange { i32 70606, i32 70607, i8 68 }, %struct.GraphemeRange { i32 70608, i32 70608, i8 100 }, %struct.GraphemeRange { i32 70609, i32 70609, i8 7 }, %struct.GraphemeRange { i32 70610, i32 70610, i8 68 }, %struct.GraphemeRange { i32 70625, i32 70626, i8 68 }, %struct.GraphemeRange { i32 70709, i32 70711, i8 8 }, %struct.GraphemeRange { i32 70712, i32 70719, i8 68 }, %struct.GraphemeRange { i32 70720, i32 70721, i8 8 }, %struct.GraphemeRange { i32 70722, i32 70724, i8 68 }, %struct.GraphemeRange { i32 70725, i32 70725, i8 8 }, %struct.GraphemeRange { i32 70726, i32 70726, i8 68 }, %struct.GraphemeRange { i32 70750, i32 70750, i8 68 }, %struct.GraphemeRange { i32 70832, i32 70832, i8 68 }, %struct.GraphemeRange { i32 70833, i32 70834, i8 8 }, %struct.GraphemeRange { i32 70835, i32 70840, i8 68 }, %struct.GraphemeRange { i32 70841, i32 70841, i8 8 }, %struct.GraphemeRange { i32 70842, i32 70842, i8 68 }, %struct.GraphemeRange { i32 70843, i32 70844, i8 8 }, %struct.GraphemeRange { i32 70845, i32 70845, i8 68 }, %struct.GraphemeRange { i32 70846, i32 70846, i8 8 }, %struct.GraphemeRange { i32 70847, i32 70848, i8 68 }, %struct.GraphemeRange { i32 70849, i32 70849, i8 8 }, %struct.GraphemeRange { i32 70850, i32 70851, i8 68 }, %struct.GraphemeRange { i32 71087, i32 71087, i8 68 }, %struct.GraphemeRange { i32 71088, i32 71089, i8 8 }, %struct.GraphemeRange { i32 71090, i32 71093, i8 68 }, %struct.GraphemeRange { i32 71096, i32 71099, i8 8 }, %struct.GraphemeRange { i32 71100, i32 71101, i8 68 }, %struct.GraphemeRange { i32 71102, i32 71102, i8 8 }, %struct.GraphemeRange { i32 71103, i32 71104, i8 68 }, %struct.GraphemeRange { i32 71132, i32 71133, i8 68 }, %struct.GraphemeRange { i32 71216, i32 71218, i8 8 }, %struct.GraphemeRange { i32 71219, i32 71226, i8 68 }, %struct.GraphemeRange { i32 71227, i32 71228, i8 8 }, %struct.GraphemeRange { i32 71229, i32 71229, i8 68 }, %struct.GraphemeRange { i32 71230, i32 71230, i8 8 }, %struct.GraphemeRange { i32 71231, i32 71232, i8 68 }, %struct.GraphemeRange { i32 71339, i32 71339, i8 68 }, %struct.GraphemeRange { i32 71340, i32 71340, i8 8 }, %struct.GraphemeRange { i32 71341, i32 71341, i8 68 }, %struct.GraphemeRange { i32 71342, i32 71343, i8 8 }, %struct.GraphemeRange { i32 71344, i32 71351, i8 68 }, %struct.GraphemeRange { i32 71453, i32 71453, i8 68 }, %struct.GraphemeRange { i32 71454, i32 71454, i8 8 }, %struct.GraphemeRange { i32 71455, i32 71455, i8 68 }, %struct.GraphemeRange { i32 71458, i32 71461, i8 68 }, %struct.GraphemeRange { i32 71462, i32 71462, i8 8 }, %struct.GraphemeRange { i32 71463, i32 71467, i8 68 }, %struct.GraphemeRange { i32 71724, i32 71726, i8 8 }, %struct.GraphemeRange { i32 71727, i32 71735, i8 68 }, %struct.GraphemeRange { i32 71736, i32 71736, i8 8 }, %struct.GraphemeRange { i32 71737, i32 71738, i8 68 }, %struct.GraphemeRange { i32 71936, i32 71942, i8 32 }, %struct.GraphemeRange { i32 71945, i32 71945, i8 32 }, %struct.GraphemeRange { i32 71948, i32 71955, i8 32 }, %struct.GraphemeRange { i32 71957, i32 71958, i8 32 }, %struct.GraphemeRange { i32 71960, i32 71983, i8 32 }, %struct.GraphemeRange { i32 71984, i32 71984, i8 68 }, %struct.GraphemeRange { i32 71985, i32 71989, i8 8 }, %struct.GraphemeRange { i32 71991, i32 71992, i8 8 }, %struct.GraphemeRange { i32 71995, i32 71997, i8 68 }, %struct.GraphemeRange { i32 71998, i32 71998, i8 100 }, %struct.GraphemeRange { i32 71999, i32 71999, i8 7 }, %struct.GraphemeRange { i32 72000, i32 72000, i8 8 }, %struct.GraphemeRange { i32 72001, i32 72001, i8 7 }, %struct.GraphemeRange { i32 72002, i32 72002, i8 8 }, %struct.GraphemeRange { i32 72003, i32 72003, i8 68 }, %struct.GraphemeRange { i32 72145, i32 72147, i8 8 }, %struct.GraphemeRange { i32 72148, i32 72151, i8 68 }, %struct.GraphemeRange { i32 72154, i32 72155, i8 68 }, %struct.GraphemeRange { i32 72156, i32 72159, i8 8 }, %struct.GraphemeRange { i32 72160, i32 72160, i8 68 }, %struct.GraphemeRange { i32 72164, i32 72164, i8 8 }, %struct.GraphemeRange { i32 72192, i32 72192, i8 32 }, %struct.GraphemeRange { i32 72193, i32 72202, i8 68 }, %struct.GraphemeRange { i32 72203, i32 72242, i8 32 }, %struct.GraphemeRange { i32 72243, i32 72248, i8 68 }, %struct.GraphemeRange { i32 72249, i32 72249, i8 8 }, %struct.GraphemeRange { i32 72251, i32 72254, i8 68 }, %struct.GraphemeRange { i32 72263, i32 72263, i8 100 }, %struct.GraphemeRange { i32 72272, i32 72272, i8 32 }, %struct.GraphemeRange { i32 72273, i32 72278, i8 68 }, %struct.GraphemeRange { i32 72279, i32 72280, i8 8 }, %struct.GraphemeRange { i32 72281, i32 72283, i8 68 }, %struct.GraphemeRange { i32 72284, i32 72323, i8 32 }, %struct.GraphemeRange { i32 72324, i32 72329, i8 7 }, %struct.GraphemeRange { i32 72330, i32 72342, i8 68 }, %struct.GraphemeRange { i32 72343, i32 72343, i8 8 }, %struct.GraphemeRange { i32 72344, i32 72344, i8 68 }, %struct.GraphemeRange { i32 72345, i32 72345, i8 100 }, %struct.GraphemeRange { i32 72544, i32 72544, i8 68 }, %struct.GraphemeRange { i32 72545, i32 72545, i8 8 }, %struct.GraphemeRange { i32 72546, i32 72548, i8 68 }, %struct.GraphemeRange { i32 72549, i32 72549, i8 8 }, %struct.GraphemeRange { i32 72550, i32 72550, i8 68 }, %struct.GraphemeRange { i32 72551, i32 72551, i8 8 }, %struct.GraphemeRange { i32 72751, i32 72751, i8 8 }, %struct.GraphemeRange { i32 72752, i32 72758, i8 68 }, %struct.GraphemeRange { i32 72760, i32 72765, i8 68 }, %struct.GraphemeRange { i32 72766, i32 72766, i8 8 }, %struct.GraphemeRange { i32 72767, i32 72767, i8 68 }, %struct.GraphemeRange { i32 72850, i32 72871, i8 68 }, %struct.GraphemeRange { i32 72873, i32 72873, i8 8 }, %struct.GraphemeRange { i32 72874, i32 72880, i8 68 }, %struct.GraphemeRange { i32 72881, i32 72881, i8 8 }, %struct.GraphemeRange { i32 72882, i32 72883, i8 68 }, %struct.GraphemeRange { i32 72884, i32 72884, i8 8 }, %struct.GraphemeRange { i32 72885, i32 72886, i8 68 }, %struct.GraphemeRange { i32 73009, i32 73014, i8 68 }, %struct.GraphemeRange { i32 73018, i32 73018, i8 68 }, %struct.GraphemeRange { i32 73020, i32 73021, i8 68 }, %struct.GraphemeRange { i32 73023, i32 73029, i8 68 }, %struct.GraphemeRange { i32 73030, i32 73030, i8 7 }, %struct.GraphemeRange { i32 73031, i32 73031, i8 68 }, %struct.GraphemeRange { i32 73098, i32 73102, i8 8 }, %struct.GraphemeRange { i32 73104, i32 73105, i8 68 }, %struct.GraphemeRange { i32 73107, i32 73108, i8 8 }, %struct.GraphemeRange { i32 73109, i32 73109, i8 68 }, %struct.GraphemeRange { i32 73110, i32 73110, i8 8 }, %struct.GraphemeRange { i32 73111, i32 73111, i8 68 }, %struct.GraphemeRange { i32 73459, i32 73460, i8 68 }, %struct.GraphemeRange { i32 73461, i32 73462, i8 8 }, %struct.GraphemeRange { i32 73472, i32 73473, i8 68 }, %struct.GraphemeRange { i32 73474, i32 73474, i8 7 }, %struct.GraphemeRange { i32 73475, i32 73475, i8 8 }, %struct.GraphemeRange { i32 73476, i32 73488, i8 32 }, %struct.GraphemeRange { i32 73490, i32 73523, i8 32 }, %struct.GraphemeRange { i32 73524, i32 73525, i8 8 }, %struct.GraphemeRange { i32 73526, i32 73530, i8 68 }, %struct.GraphemeRange { i32 73534, i32 73535, i8 8 }, %struct.GraphemeRange { i32 73536, i32 73537, i8 68 }, %struct.GraphemeRange { i32 73538, i32 73538, i8 100 }, %struct.GraphemeRange { i32 73562, i32 73562, i8 68 }, %struct.GraphemeRange { i32 78896, i32 78911, i8 3 }, %struct.GraphemeRange { i32 78912, i32 78912, i8 68 }, %struct.GraphemeRange { i32 78919, i32 78933, i8 68 }, %struct.GraphemeRange { i32 90398, i32 90409, i8 68 }, %struct.GraphemeRange { i32 90410, i32 90412, i8 8 }, %struct.GraphemeRange { i32 90413, i32 90415, i8 68 }, %struct.GraphemeRange { i32 92912, i32 92916, i8 68 }, %struct.GraphemeRange { i32 92976, i32 92982, i8 68 }, %struct.GraphemeRange { i32 93539, i32 93539, i8 10 }, %struct.GraphemeRange { i32 93543, i32 93546, i8 10 }, %struct.GraphemeRange { i32 94031, i32 94031, i8 68 }, %struct.GraphemeRange { i32 94033, i32 94087, i8 8 }, %struct.GraphemeRange { i32 94095, i32 94098, i8 68 }, %struct.GraphemeRange { i32 94180, i32 94180, i8 68 }, %struct.GraphemeRange { i32 94192, i32 94193, i8 68 }, %struct.GraphemeRange { i32 113821, i32 113822, i8 68 }, %struct.GraphemeRange { i32 113824, i32 113827, i8 3 }, %struct.GraphemeRange { i32 118528, i32 118573, i8 68 }, %struct.GraphemeRange { i32 118576, i32 118598, i8 68 }, %struct.GraphemeRange { i32 119141, i32 119145, i8 68 }, %struct.GraphemeRange { i32 119149, i32 119154, i8 68 }, %struct.GraphemeRange { i32 119155, i32 119162, i8 3 }, %struct.GraphemeRange { i32 119163, i32 119170, i8 68 }, %struct.GraphemeRange { i32 119173, i32 119179, i8 68 }, %struct.GraphemeRange { i32 119210, i32 119213, i8 68 }, %struct.GraphemeRange { i32 119362, i32 119364, i8 68 }, %struct.GraphemeRange { i32 121344, i32 121398, i8 68 }, %struct.GraphemeRange { i32 121403, i32 121452, i8 68 }, %struct.GraphemeRange { i32 121461, i32 121461, i8 68 }, %struct.GraphemeRange { i32 121476, i32 121476, i8 68 }, %struct.GraphemeRange { i32 121499, i32 121503, i8 68 }, %struct.GraphemeRange { i32 121505, i32 121519, i8 68 }, %struct.GraphemeRange { i32 122880, i32 122886, i8 68 }, %struct.GraphemeRange { i32 122888, i32 122904, i8 68 }, %struct.GraphemeRange { i32 122907, i32 122913, i8 68 }, %struct.GraphemeRange { i32 122915, i32 122916, i8 68 }, %struct.GraphemeRange { i32 122918, i32 122922, i8 68 }, %struct.GraphemeRange { i32 123023, i32 123023, i8 68 }, %struct.GraphemeRange { i32 123184, i32 123190, i8 68 }, %struct.GraphemeRange { i32 123566, i32 123566, i8 68 }, %struct.GraphemeRange { i32 123628, i32 123631, i8 68 }, %struct.GraphemeRange { i32 124140, i32 124143, i8 68 }, %struct.GraphemeRange { i32 124398, i32 124399, i8 68 }, %struct.GraphemeRange { i32 124643, i32 124643, i8 68 }, %struct.GraphemeRange { i32 124646, i32 124646, i8 68 }, %struct.GraphemeRange { i32 124654, i32 124655, i8 68 }, %struct.GraphemeRange { i32 124661, i32 124661, i8 68 }, %struct.GraphemeRange { i32 125136, i32 125142, i8 68 }, %struct.GraphemeRange { i32 125252, i32 125258, i8 68 }, %struct.GraphemeRange { i32 126980, i32 126980, i8 16 }, %struct.GraphemeRange { i32 127020, i32 127023, i8 16 }, %struct.GraphemeRange { i32 127124, i32 127135, i8 16 }, %struct.GraphemeRange { i32 127151, i32 127152, i8 16 }, %struct.GraphemeRange { i32 127168, i32 127168, i8 16 }, %struct.GraphemeRange { i32 127183, i32 127184, i8 16 }, %struct.GraphemeRange { i32 127222, i32 127231, i8 16 }, %struct.GraphemeRange { i32 127344, i32 127345, i8 16 }, %struct.GraphemeRange { i32 127358, i32 127359, i8 16 }, %struct.GraphemeRange { i32 127374, i32 127374, i8 16 }, %struct.GraphemeRange { i32 127377, i32 127386, i8 16 }, %struct.GraphemeRange { i32 127406, i32 127461, i8 16 }, %struct.GraphemeRange { i32 127462, i32 127487, i8 6 }, %struct.GraphemeRange { i32 127489, i32 127503, i8 16 }, %struct.GraphemeRange { i32 127514, i32 127514, i8 16 }, %struct.GraphemeRange { i32 127535, i32 127535, i8 16 }, %struct.GraphemeRange { i32 127538, i32 127546, i8 16 }, %struct.GraphemeRange { i32 127548, i32 127551, i8 16 }, %struct.GraphemeRange { i32 127561, i32 127583, i8 16 }, %struct.GraphemeRange { i32 127590, i32 127777, i8 16 }, %struct.GraphemeRange { i32 127780, i32 127891, i8 16 }, %struct.GraphemeRange { i32 127894, i32 127895, i8 16 }, %struct.GraphemeRange { i32 127897, i32 127899, i8 16 }, %struct.GraphemeRange { i32 127902, i32 127984, i8 16 }, %struct.GraphemeRange { i32 127987, i32 127989, i8 16 }, %struct.GraphemeRange { i32 127991, i32 127994, i8 16 }, %struct.GraphemeRange { i32 127995, i32 127999, i8 68 }, %struct.GraphemeRange { i32 128000, i32 128253, i8 16 }, %struct.GraphemeRange { i32 128255, i32 128317, i8 16 }, %struct.GraphemeRange { i32 128329, i32 128334, i8 16 }, %struct.GraphemeRange { i32 128336, i32 128359, i8 16 }, %struct.GraphemeRange { i32 128367, i32 128368, i8 16 }, %struct.GraphemeRange { i32 128371, i32 128378, i8 16 }, %struct.GraphemeRange { i32 128391, i32 128391, i8 16 }, %struct.GraphemeRange { i32 128394, i32 128397, i8 16 }, %struct.GraphemeRange { i32 128400, i32 128400, i8 16 }, %struct.GraphemeRange { i32 128405, i32 128406, i8 16 }, %struct.GraphemeRange { i32 128420, i32 128421, i8 16 }, %struct.GraphemeRange { i32 128424, i32 128424, i8 16 }, %struct.GraphemeRange { i32 128433, i32 128434, i8 16 }, %struct.GraphemeRange { i32 128444, i32 128444, i8 16 }, %struct.GraphemeRange { i32 128450, i32 128452, i8 16 }, %struct.GraphemeRange { i32 128465, i32 128467, i8 16 }, %struct.GraphemeRange { i32 128476, i32 128478, i8 16 }, %struct.GraphemeRange { i32 128481, i32 128481, i8 16 }, %struct.GraphemeRange { i32 128483, i32 128483, i8 16 }, %struct.GraphemeRange { i32 128488, i32 128488, i8 16 }, %struct.GraphemeRange { i32 128495, i32 128495, i8 16 }, %struct.GraphemeRange { i32 128499, i32 128499, i8 16 }, %struct.GraphemeRange { i32 128506, i32 128591, i8 16 }, %struct.GraphemeRange { i32 128640, i32 128709, i8 16 }, %struct.GraphemeRange { i32 128715, i32 128722, i8 16 }, %struct.GraphemeRange { i32 128725, i32 128741, i8 16 }, %struct.GraphemeRange { i32 128745, i32 128745, i8 16 }, %struct.GraphemeRange { i32 128747, i32 128752, i8 16 }, %struct.GraphemeRange { i32 128755, i32 128767, i8 16 }, %struct.GraphemeRange { i32 128986, i32 129023, i8 16 }, %struct.GraphemeRange { i32 129036, i32 129039, i8 16 }, %struct.GraphemeRange { i32 129096, i32 129103, i8 16 }, %struct.GraphemeRange { i32 129114, i32 129119, i8 16 }, %struct.GraphemeRange { i32 129160, i32 129167, i8 16 }, %struct.GraphemeRange { i32 129198, i32 129199, i8 16 }, %struct.GraphemeRange { i32 129212, i32 129215, i8 16 }, %struct.GraphemeRange { i32 129218, i32 129231, i8 16 }, %struct.GraphemeRange { i32 129241, i32 129279, i8 16 }, %struct.GraphemeRange { i32 129292, i32 129338, i8 16 }, %struct.GraphemeRange { i32 129340, i32 129349, i8 16 }, %struct.GraphemeRange { i32 129351, i32 129535, i8 16 }, %struct.GraphemeRange { i32 129624, i32 129631, i8 16 }, %struct.GraphemeRange { i32 129646, i32 129791, i8 16 }, %struct.GraphemeRange { i32 130048, i32 131069, i8 16 }, %struct.GraphemeRange { i32 917504, i32 917535, i8 3 }, %struct.GraphemeRange { i32 917536, i32 917631, i8 68 }, %struct.GraphemeRange { i32 917632, i32 917759, i8 3 }, %struct.GraphemeRange { i32 917760, i32 917999, i8 68 }, %struct.GraphemeRange { i32 918000, i32 921599, i8 3 }], align 4
 @ascii_table = internal constant [128 x i8] c"\00\01\02\03\04\05\06\07\08\09\0A\0B\0C\0D\0E\0F\10\11\12\13\14\15\16\17\18\19\1A\1B\1C\1D\1E\1F !\22#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\7F", align 1
 @.str.45 = private unnamed_addr constant [3 x i8] c"SS\00", align 1
 @.str.46 = private unnamed_addr constant [4 x i8] c"\CA\BCN\00", align 1
@@ -346,6 +346,7 @@ source_filename = "fa_runtime.c"
 @.str.185 = private unnamed_addr constant [3 x i8] c"\\b\00", align 1
 @.str.186 = private unnamed_addr constant [3 x i8] c"\\f\00", align 1
 @.str.187 = private unnamed_addr constant [5 x i8] c"\\u00\00", align 1
+@switch.table.next_boundary = private unnamed_addr constant [3 x i32] [i32 1, i32 0, i32 0], align 4
 @switch.table.json_mismatch = private unnamed_addr constant [5 x ptr] [ptr @.str.25, ptr @.str.179, ptr @.str.180, ptr @.str.181, ptr @.str.164], align 8
 
 ; Function Attrs: alwaysinline mustprogress nofree norecurse nosync nounwind optsize willreturn memory(argmem: readwrite)
@@ -14692,136 +14693,176 @@ define internal fastcc i64 @next_boundary(ptr nocapture noundef readonly %0, i64
 21:                                               ; preds = %9, %18, %16
   %22 = phi i64 [ 0, %16 ], [ %20, %18 ], [ 0, %9 ]
   %23 = add i64 %22, %10
-  br label %106
+  br label %133
 
 24:                                               ; preds = %12, %3
   %25 = call fastcc i32 @decode(ptr noundef nonnull %0, i64 noundef %1, ptr noundef nonnull %4) #64
-  %26 = tail call fastcc i32 @break_kind(i32 noundef %25) #64, !range !109
-  %27 = load i64, ptr %4, align 8, !tbaa !11
-  %28 = icmp ult i64 %27, %1
-  br i1 %28, label %29, label %106
+  %26 = tail call fastcc i8 @grapheme_properties(i32 noundef %25) #64
+  %27 = zext i8 %26 to i32
+  %28 = and i32 %27, 15
+  %29 = icmp eq i32 %28, 6
+  %30 = zext i1 %29 to i32
+  %31 = lshr i32 %27, 4
+  %32 = and i32 %31, 1
+  %33 = lshr i8 %26, 5
+  %34 = add nsw i8 %33, -1
+  %35 = icmp ult i8 %34, 3
+  br i1 %35, label %36, label %40
 
-29:                                               ; preds = %24
-  %30 = icmp eq i32 %26, 7
-  %31 = zext i1 %30 to i32
-  %32 = icmp eq i32 %26, 6
-  %33 = zext i1 %32 to i32
-  br label %34
+36:                                               ; preds = %24
+  %37 = zext nneg i8 %34 to i64
+  %38 = getelementptr inbounds [3 x i32], ptr @switch.table.next_boundary, i64 0, i64 %37
+  %39 = load i32, ptr %38, align 4
+  br label %40
 
-34:                                               ; preds = %29, %101
-  %35 = phi i32 [ %104, %101 ], [ %31, %29 ]
-  %36 = phi i32 [ %103, %101 ], [ %33, %29 ]
-  %37 = phi i32 [ %40, %101 ], [ %26, %29 ]
-  %38 = phi i64 [ %102, %101 ], [ %27, %29 ]
+40:                                               ; preds = %24, %36
+  %41 = phi i32 [ %39, %36 ], [ 0, %24 ]
+  %42 = load i64, ptr %4, align 8, !tbaa !11
+  %43 = icmp ult i64 %42, %1
+  br i1 %43, label %44, label %133
+
+44:                                               ; preds = %40, %129
+  %45 = phi i8 [ %52, %129 ], [ %26, %40 ]
+  %46 = phi i32 [ %130, %129 ], [ %41, %40 ]
+  %47 = phi i1 [ %116, %129 ], [ false, %40 ]
+  %48 = phi i32 [ %121, %129 ], [ %32, %40 ]
+  %49 = phi i32 [ %113, %129 ], [ %30, %40 ]
+  %50 = phi i64 [ %131, %129 ], [ %42, %40 ]
   call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %5) #68
-  store i64 %38, ptr %5, align 8, !tbaa !11
-  %39 = call fastcc i32 @decode(ptr noundef %0, i64 noundef %1, ptr noundef nonnull %5) #64
-  %40 = tail call fastcc i32 @break_kind(i32 noundef %39) #64, !range !109
-  %41 = icmp eq i32 %37, 1
-  %42 = icmp eq i32 %40, 2
-  %43 = and i1 %41, %42
-  br i1 %43, label %86, label %44
+  store i64 %50, ptr %5, align 8, !tbaa !11
+  %51 = call fastcc i32 @decode(ptr noundef %0, i64 noundef %1, ptr noundef nonnull %5) #64
+  %52 = tail call fastcc i8 @grapheme_properties(i32 noundef %51) #64
+  %53 = and i8 %45, 15
+  %54 = zext i8 %52 to i32
+  %55 = and i32 %54, 15
+  %56 = icmp eq i8 %53, 1
+  %57 = icmp eq i32 %55, 2
+  %58 = and i1 %56, %57
+  br i1 %58, label %112, label %59
 
-44:                                               ; preds = %34
-  %45 = add nsw i32 %37, -1
-  %46 = icmp ult i32 %45, 3
-  %47 = add nsw i32 %40, -1
-  %48 = icmp ult i32 %47, 3
-  %49 = or i1 %46, %48
-  br i1 %49, label %100, label %50
+59:                                               ; preds = %44
+  %60 = add nsw i8 %53, -1
+  %61 = icmp ult i8 %60, 3
+  %62 = add nsw i32 %55, -1
+  %63 = icmp ult i32 %62, 3
+  %64 = or i1 %61, %63
+  br i1 %64, label %128, label %65
 
-50:                                               ; preds = %44
-  %51 = icmp eq i32 %37, 8
-  br i1 %51, label %52, label %53
-
-52:                                               ; preds = %50
-  switch i32 %40, label %59 [
-    i32 12, label %86
-    i32 11, label %86
-    i32 9, label %86
-    i32 8, label %86
+65:                                               ; preds = %59
+  switch i8 %53, label %75 [
+    i8 9, label %66
+    i8 12, label %72
+    i8 10, label %72
   ]
 
-53:                                               ; preds = %50
-  %54 = and i32 %37, 13
-  %55 = icmp eq i32 %54, 9
-  %56 = add nsw i32 %40, -9
-  %57 = icmp ult i32 %56, 2
-  %58 = and i1 %55, %57
-  br i1 %58, label %86, label %59
+66:                                               ; preds = %65
+  %67 = add nsw i32 %55, -9
+  %68 = icmp ult i32 %67, 2
+  %69 = and i32 %54, 14
+  %70 = icmp eq i32 %69, 12
+  %71 = or i1 %70, %68
+  br i1 %71, label %105, label %75
 
-59:                                               ; preds = %53, %52
-  %60 = icmp eq i32 %37, 12
-  %61 = icmp eq i32 %37, 10
-  %62 = or i1 %60, %61
-  %63 = icmp eq i32 %40, 10
-  %64 = and i1 %62, %63
-  %65 = and i32 %40, 14
-  %66 = icmp eq i32 %65, 4
-  %67 = or i1 %64, %66
-  br i1 %67, label %88, label %68
+72:                                               ; preds = %65, %65
+  %73 = and i32 %54, 14
+  %74 = icmp eq i32 %73, 10
+  br i1 %74, label %105, label %75
 
-68:                                               ; preds = %59
-  %69 = icmp eq i32 %37, 5
-  %70 = icmp eq i32 %40, 7
-  %71 = and i1 %69, %70
-  %72 = icmp ne i32 %35, 0
-  %73 = and i1 %72, %71
-  br i1 %73, label %74, label %76
+75:                                               ; preds = %72, %66, %65
+  %76 = icmp eq i8 %53, 13
+  %77 = icmp eq i8 %53, 11
+  %78 = or i1 %76, %77
+  %79 = icmp eq i32 %55, 11
+  %80 = and i1 %78, %79
+  br i1 %80, label %112, label %81
 
-74:                                               ; preds = %68
-  %75 = load i64, ptr %5, align 8, !tbaa !11
-  br label %101
+81:                                               ; preds = %75
+  %82 = and i32 %54, 14
+  %83 = icmp eq i32 %82, 4
+  %84 = icmp eq i32 %55, 8
+  %85 = or i1 %83, %84
+  %86 = icmp eq i8 %53, 7
+  %87 = or i1 %86, %85
+  br i1 %87, label %105, label %88
 
-76:                                               ; preds = %68
-  %77 = icmp eq i32 %37, 6
-  %78 = icmp eq i32 %40, 6
-  %79 = and i1 %77, %78
-  %80 = and i32 %36, -2147483647
-  %81 = icmp eq i32 %80, 1
-  %82 = and i1 %81, %79
-  br i1 %82, label %83, label %100
+88:                                               ; preds = %81
+  %89 = and i32 %54, 224
+  %90 = icmp eq i32 %89, 32
+  %91 = icmp eq i32 %46, 2
+  %92 = and i1 %91, %90
+  br i1 %92, label %105, label %93
 
-83:                                               ; preds = %76
-  %84 = load i64, ptr %5, align 8, !tbaa !11
-  %85 = add nuw nsw i32 %36, 1
-  br label %94
+93:                                               ; preds = %88
+  %94 = icmp eq i8 %53, 5
+  br i1 %94, label %95, label %99
 
-86:                                               ; preds = %53, %52, %52, %52, %52, %34
-  %87 = load i64, ptr %5, align 8, !tbaa !11
-  br label %94
+95:                                               ; preds = %93
+  %96 = and i32 %54, 16
+  %97 = icmp ne i32 %96, 0
+  %98 = and i1 %47, %97
+  br i1 %98, label %105, label %128
 
-88:                                               ; preds = %59
-  %89 = load i64, ptr %5, align 8, !tbaa !11
-  %90 = icmp eq i32 %40, 6
-  %91 = add nsw i32 %36, 1
-  %92 = select i1 %90, i32 %91, i32 0
-  %93 = icmp eq i32 %40, 7
-  br i1 %93, label %101, label %94
+99:                                               ; preds = %93
+  %100 = icmp eq i8 %53, 6
+  %101 = icmp eq i32 %55, 6
+  %102 = and i1 %100, %101
+  %103 = icmp ne i32 %49, 0
+  %104 = and i1 %103, %102
+  br i1 %104, label %107, label %128
 
-94:                                               ; preds = %83, %86, %88
-  %95 = phi i64 [ %87, %86 ], [ %89, %88 ], [ %84, %83 ]
-  %96 = phi i32 [ 0, %86 ], [ %92, %88 ], [ %85, %83 ]
-  %97 = add nsw i32 %40, -6
-  %98 = icmp ult i32 %97, -2
-  %99 = select i1 %98, i32 0, i32 %35
-  br label %101
+105:                                              ; preds = %95, %88, %81, %72, %66
+  %106 = icmp eq i32 %55, 6
+  br i1 %106, label %107, label %112
 
-100:                                              ; preds = %76, %44
+107:                                              ; preds = %99, %105
+  %108 = icmp ne i8 %53, 6
+  %109 = icmp eq i32 %49, 0
+  %110 = select i1 %108, i1 true, i1 %109
+  %111 = zext i1 %110 to i32
+  br label %112
+
+112:                                              ; preds = %44, %75, %105, %107
+  %113 = phi i32 [ %111, %107 ], [ 0, %105 ], [ 0, %75 ], [ 0, %44 ]
+  %114 = icmp eq i32 %55, 5
+  %115 = icmp ne i32 %48, 0
+  %116 = select i1 %114, i1 %115, i1 false
+  %117 = and i32 %54, 16
+  %118 = icmp eq i32 %117, 0
+  %119 = icmp eq i32 %55, 4
+  %120 = select i1 %119, i32 %48, i32 0
+  %121 = select i1 %118, i32 %120, i32 1
+  %122 = lshr i8 %52, 5
+  switch i8 %122, label %127 [
+    i8 1, label %129
+    i8 2, label %123
+    i8 3, label %124
+  ]
+
+123:                                              ; preds = %112
+  br label %129
+
+124:                                              ; preds = %112
+  %125 = icmp eq i32 %46, 0
+  %126 = select i1 %125, i32 0, i32 2
+  br label %129
+
+127:                                              ; preds = %112
+  br label %129
+
+128:                                              ; preds = %95, %99, %59
   call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %5) #68
-  br label %106
+  br label %133
 
-101:                                              ; preds = %74, %94, %88
-  %102 = phi i64 [ %89, %88 ], [ %95, %94 ], [ %75, %74 ]
-  %103 = phi i32 [ %92, %88 ], [ %96, %94 ], [ 0, %74 ]
-  %104 = phi i32 [ 1, %88 ], [ %99, %94 ], [ 1, %74 ]
+129:                                              ; preds = %127, %124, %123, %112
+  %130 = phi i32 [ 0, %127 ], [ %126, %124 ], [ %46, %123 ], [ 1, %112 ]
+  %131 = load i64, ptr %5, align 8, !tbaa !11
   call void @llvm.lifetime.end.p0(i64 8, ptr nonnull %5) #68
-  %105 = icmp ult i64 %102, %1
-  br i1 %105, label %34, label %106
+  %132 = icmp ult i64 %131, %1
+  br i1 %132, label %44, label %133
 
-106:                                              ; preds = %101, %24, %100, %21
-  %107 = phi i64 [ %23, %21 ], [ %38, %100 ], [ %27, %24 ], [ %102, %101 ]
-  ret i64 %107
+133:                                              ; preds = %129, %40, %128, %21
+  %134 = phi i64 [ %23, %21 ], [ %50, %128 ], [ %42, %40 ], [ %131, %129 ]
+  ret i64 %134
 }
 
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(read, argmem: readwrite, inaccessiblemem: none)
@@ -14862,7 +14903,7 @@ define i64 @fa_graphemes(ptr nocapture noundef readonly %0, i64 noundef %1) loca
   %26 = phi i64 [ %7, %13 ], [ %23, %22 ]
   %27 = phi i64 [ %21, %13 ], [ %24, %22 ]
   %28 = icmp ult i64 %26, %1
-  br i1 %28, label %4, label %29, !llvm.loop !110
+  br i1 %28, label %4, label %29, !llvm.loop !109
 
 29:                                               ; preds = %25, %2
   %30 = phi i64 [ 0, %2 ], [ %27, %25 ]
@@ -15087,12 +15128,12 @@ define internal fastcc i64 @next_byte(ptr nocapture noundef readonly %0, i64 nou
   %21 = icmp eq i64 %19, 0
   %22 = select i1 %21, i64 %20, i64 %19
   %23 = icmp eq i64 %22, 0
-  br i1 %23, label %9, label %24, !llvm.loop !111
+  br i1 %23, label %9, label %24, !llvm.loop !110
 
 24:                                               ; preds = %13
   %25 = select i1 %21, i64 8, i64 0
   %26 = add i64 %25, %10
-  %27 = tail call i64 @llvm.cttz.i64(i64 %22, i1 true), !range !112
+  %27 = tail call i64 @llvm.cttz.i64(i64 %22, i1 true), !range !111
   %28 = lshr i64 %27, 3
   %29 = add i64 %26, %28
   br label %57
@@ -15116,7 +15157,7 @@ define internal fastcc i64 @next_byte(ptr nocapture noundef readonly %0, i64 nou
   %42 = xor i64 %41, -9187201950435737472
   %43 = and i64 %42, %40
   %44 = icmp eq i64 %43, 0
-  br i1 %44, label %30, label %53, !llvm.loop !113
+  br i1 %44, label %30, label %53, !llvm.loop !112
 
 45:                                               ; preds = %34, %50
   %46 = phi i64 [ %51, %50 ], [ %31, %34 ]
@@ -15128,10 +15169,10 @@ define internal fastcc i64 @next_byte(ptr nocapture noundef readonly %0, i64 nou
 50:                                               ; preds = %45
   %51 = add nuw i64 %46, 1
   %52 = icmp ult i64 %51, %1
-  br i1 %52, label %45, label %57, !llvm.loop !114
+  br i1 %52, label %45, label %57, !llvm.loop !113
 
 53:                                               ; preds = %36
-  %54 = tail call i64 @llvm.cttz.i64(i64 %43, i1 true), !range !115
+  %54 = tail call i64 @llvm.cttz.i64(i64 %43, i1 true), !range !114
   %55 = lshr i64 %54, 3
   %56 = add i64 %55, %31
   br label %57
@@ -15234,9 +15275,9 @@ define internal fastcc i64 @find_units(ptr noundef %0, i64 noundef %1, ptr nound
   %6 = alloca %struct.UnitReader, align 8
   %7 = alloca %struct.UnitReader, align 8
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %7) #68
-  store ptr %0, ptr %7, align 8, !tbaa !116
+  store ptr %0, ptr %7, align 8, !tbaa !115
   %8 = getelementptr inbounds %struct.UnitReader, ptr %7, i64 0, i32 1
-  store i64 %1, ptr %8, align 8, !tbaa !118
+  store i64 %1, ptr %8, align 8, !tbaa !117
   %9 = getelementptr inbounds %struct.UnitReader, ptr %7, i64 0, i32 2
   %10 = getelementptr inbounds %struct.UnitReader, ptr %7, i64 0, i32 3
   store <2 x i64> zeroinitializer, ptr %9, align 8, !tbaa !11
@@ -15253,7 +15294,7 @@ define internal fastcc i64 @find_units(ptr noundef %0, i64 noundef %1, ptr nound
   br i1 %15, label %18, label %16
 
 16:                                               ; preds = %12
-  %17 = load i64, ptr %10, align 8, !tbaa !119
+  %17 = load i64, ptr %10, align 8, !tbaa !118
   br i1 %11, label %22, label %18
 
 18:                                               ; preds = %16, %12
@@ -15303,7 +15344,7 @@ define internal fastcc i64 @find_bytes(ptr nocapture noundef readonly %0, i64 no
   %24 = phi i64 [ %25, %27 ], [ 0, %18 ]
   %25 = add nuw i64 %24, 1
   %26 = icmp eq i64 %25, %3
-  br i1 %26, label %33, label %27, !llvm.loop !120
+  br i1 %26, label %33, label %27, !llvm.loop !119
 
 27:                                               ; preds = %23
   %28 = getelementptr i8, ptr %20, i64 %25
@@ -15311,7 +15352,7 @@ define internal fastcc i64 @find_bytes(ptr nocapture noundef readonly %0, i64 no
   %30 = getelementptr inbounds i8, ptr %2, i64 %25
   %31 = load i8, ptr %30, align 1, !tbaa !14
   %32 = icmp eq i8 %29, %31
-  br i1 %32, label %23, label %33, !llvm.loop !120
+  br i1 %32, label %23, label %33, !llvm.loop !119
 
 33:                                               ; preds = %27, %23
   %34 = icmp ult i64 %25, %3
@@ -15322,7 +15363,7 @@ define internal fastcc i64 @find_bytes(ptr nocapture noundef readonly %0, i64 no
   %37 = tail call fastcc i64 @next_byte(ptr noundef nonnull %0, i64 noundef %1, i64 noundef %36, i8 noundef %13) #64
   %38 = add i64 %37, %3
   %39 = icmp ugt i64 %38, %1
-  br i1 %39, label %67, label %18, !llvm.loop !121
+  br i1 %39, label %67, label %18, !llvm.loop !120
 
 40:                                               ; preds = %12
   %41 = sub i64 %1, %3
@@ -15344,7 +15385,7 @@ define internal fastcc i64 @find_bytes(ptr nocapture noundef readonly %0, i64 no
   %53 = phi i64 [ %54, %56 ], [ 0, %43 ]
   %54 = add nuw i64 %53, 1
   %55 = icmp eq i64 %54, %3
-  br i1 %55, label %62, label %56, !llvm.loop !120
+  br i1 %55, label %62, label %56, !llvm.loop !119
 
 56:                                               ; preds = %52
   %57 = getelementptr i8, ptr %46, i64 %54
@@ -15352,7 +15393,7 @@ define internal fastcc i64 @find_bytes(ptr nocapture noundef readonly %0, i64 no
   %59 = getelementptr inbounds i8, ptr %2, i64 %54
   %60 = load i8, ptr %59, align 1, !tbaa !14
   %61 = icmp eq i8 %58, %60
-  br i1 %61, label %52, label %62, !llvm.loop !120
+  br i1 %61, label %52, label %62, !llvm.loop !119
 
 62:                                               ; preds = %56, %52
   %63 = icmp ult i64 %54, %3
@@ -15361,7 +15402,7 @@ define internal fastcc i64 @find_bytes(ptr nocapture noundef readonly %0, i64 no
 64:                                               ; preds = %43, %62
   %65 = add nuw i64 %44, 1
   %66 = icmp eq i64 %44, %41
-  br i1 %66, label %67, label %43, !llvm.loop !122
+  br i1 %66, label %67, label %43, !llvm.loop !121
 
 67:                                               ; preds = %62, %64, %35, %33, %40, %14, %5, %10
   %68 = phi i64 [ %11, %10 ], [ -1, %5 ], [ -1, %14 ], [ -1, %40 ], [ -1, %35 ], [ %19, %33 ], [ %45, %62 ], [ -1, %64 ]
@@ -15381,9 +15422,9 @@ define i32 @fa_string_starts_with(ptr noundef %0, i64 noundef %1, i64 noundef %2
 
 11:                                               ; preds = %8
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %6) #68
-  store ptr %0, ptr %6, align 8, !tbaa.struct !123
+  store ptr %0, ptr %6, align 8, !tbaa.struct !122
   %12 = getelementptr inbounds i8, ptr %6, i64 8
-  store i64 %1, ptr %12, align 8, !tbaa.struct !124
+  store i64 %1, ptr %12, align 8, !tbaa.struct !123
   %13 = getelementptr inbounds i8, ptr %6, i64 16
   store <2 x i64> zeroinitializer, ptr %13, align 8
   %14 = call fastcc noundef i32 @match_unit_range(ptr noundef nonnull %6, ptr noundef %3, i64 noundef %4, ptr noundef null) #64, !range !99
@@ -15408,7 +15449,7 @@ define i32 @fa_string_starts_with(ptr noundef %0, i64 noundef %1, i64 noundef %2
   %24 = phi i64 [ %25, %27 ], [ 0, %19 ]
   %25 = add nuw i64 %24, 1
   %26 = icmp eq i64 %25, %4
-  br i1 %26, label %33, label %27, !llvm.loop !120
+  br i1 %26, label %33, label %27, !llvm.loop !119
 
 27:                                               ; preds = %23
   %28 = getelementptr i8, ptr %0, i64 %25
@@ -15416,7 +15457,7 @@ define i32 @fa_string_starts_with(ptr noundef %0, i64 noundef %1, i64 noundef %2
   %30 = getelementptr inbounds i8, ptr %3, i64 %25
   %31 = load i8, ptr %30, align 1, !tbaa !14
   %32 = icmp eq i8 %29, %31
-  br i1 %32, label %23, label %33, !llvm.loop !120
+  br i1 %32, label %23, label %33, !llvm.loop !119
 
 33:                                               ; preds = %27, %23
   %34 = icmp uge i64 %25, %4
@@ -15472,9 +15513,9 @@ define i32 @fa_string_ends_with(ptr noundef %0, i64 noundef %1, i64 noundef %2, 
   br i1 %30, label %65, label %31
 
 31:                                               ; preds = %27
-  store ptr %0, ptr %6, align 8, !tbaa !116
+  store ptr %0, ptr %6, align 8, !tbaa !115
   %32 = getelementptr inbounds %struct.UnitReader, ptr %6, i64 0, i32 1
-  store i64 %1, ptr %32, align 8, !tbaa !118
+  store i64 %1, ptr %32, align 8, !tbaa !117
   %33 = getelementptr inbounds %struct.UnitReader, ptr %6, i64 0, i32 2
   store <2 x i64> zeroinitializer, ptr %33, align 8, !tbaa !11
   %34 = icmp ult i64 %29, %28
@@ -15489,7 +15530,7 @@ define i32 @fa_string_ends_with(ptr noundef %0, i64 noundef %1, i64 noundef %2, 
   %39 = call fastcc i32 @read_unit(ptr noundef nonnull %6) #64
   %40 = add i64 %38, 1
   %41 = icmp eq i64 %40, %28
-  br i1 %41, label %35, label %37, !llvm.loop !125
+  br i1 %41, label %35, label %37, !llvm.loop !124
 
 42:                                               ; preds = %8, %5
   %43 = icmp ugt i64 %4, %1
@@ -15511,7 +15552,7 @@ define i32 @fa_string_ends_with(ptr noundef %0, i64 noundef %1, i64 noundef %2, 
   %53 = phi i64 [ %54, %56 ], [ 0, %48 ]
   %54 = add nuw i64 %53, 1
   %55 = icmp eq i64 %54, %4
-  br i1 %55, label %62, label %56, !llvm.loop !120
+  br i1 %55, label %62, label %56, !llvm.loop !119
 
 56:                                               ; preds = %52
   %57 = getelementptr i8, ptr %46, i64 %54
@@ -15519,7 +15560,7 @@ define i32 @fa_string_ends_with(ptr noundef %0, i64 noundef %1, i64 noundef %2, 
   %59 = getelementptr inbounds i8, ptr %3, i64 %54
   %60 = load i8, ptr %59, align 1, !tbaa !14
   %61 = icmp eq i8 %58, %60
-  br i1 %61, label %52, label %62, !llvm.loop !120
+  br i1 %61, label %52, label %62, !llvm.loop !119
 
 62:                                               ; preds = %56, %52
   %63 = icmp uge i64 %54, %4
@@ -15593,36 +15634,36 @@ define internal fastcc i64 @unit_count(ptr nocapture noundef readonly %0, i64 no
   %44 = add i64 %43, %40
   %45 = add nuw i64 %34, 1
   %46 = icmp eq i64 %45, %1
-  br i1 %46, label %4, label %33, !llvm.loop !126
+  br i1 %46, label %4, label %33, !llvm.loop !125
 }
 
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none)
 define internal fastcc i32 @read_unit(ptr nocapture noundef %0) unnamed_addr #30 {
   %2 = alloca i64, align 8
   %3 = getelementptr inbounds %struct.UnitReader, ptr %0, i64 0, i32 2
-  %4 = load i64, ptr %3, align 8, !tbaa !127
+  %4 = load i64, ptr %3, align 8, !tbaa !126
   %5 = lshr i64 %4, 1
   %6 = getelementptr inbounds %struct.UnitReader, ptr %0, i64 0, i32 1
-  %7 = load i64, ptr %6, align 8, !tbaa !118
+  %7 = load i64, ptr %6, align 8, !tbaa !117
   %8 = icmp eq i64 %5, %7
   br i1 %8, label %34, label %9
 
 9:                                                ; preds = %1
   call void @llvm.lifetime.start.p0(i64 8, ptr nonnull %2) #68
   store i64 %5, ptr %2, align 8, !tbaa !11
-  %10 = load ptr, ptr %0, align 8, !tbaa !116
+  %10 = load ptr, ptr %0, align 8, !tbaa !115
   %11 = call fastcc i32 @decode(ptr noundef %10, i64 noundef %7, ptr noundef nonnull %2) #64
   %12 = getelementptr inbounds %struct.UnitReader, ptr %0, i64 0, i32 3
-  %13 = load i64, ptr %12, align 8, !tbaa !119
+  %13 = load i64, ptr %12, align 8, !tbaa !118
   %14 = add i64 %13, 1
-  store i64 %14, ptr %12, align 8, !tbaa !119
+  store i64 %14, ptr %12, align 8, !tbaa !118
   %15 = icmp ult i32 %11, 65536
   br i1 %15, label %16, label %19
 
 16:                                               ; preds = %9
   %17 = load i64, ptr %2, align 8, !tbaa !11
   %18 = shl i64 %17, 1
-  store i64 %18, ptr %3, align 8, !tbaa !127
+  store i64 %18, ptr %3, align 8, !tbaa !126
   br label %32
 
 19:                                               ; preds = %9
@@ -15633,7 +15674,7 @@ define internal fastcc i32 @read_unit(ptr nocapture noundef %0) unnamed_addr #30
 22:                                               ; preds = %19
   %23 = load i64, ptr %2, align 8, !tbaa !11
   %24 = shl i64 %23, 1
-  store i64 %24, ptr %3, align 8, !tbaa !127
+  store i64 %24, ptr %3, align 8, !tbaa !126
   %25 = and i32 %11, 1023
   %26 = or disjoint i32 %25, 56320
   br label %32
@@ -15641,7 +15682,7 @@ define internal fastcc i32 @read_unit(ptr nocapture noundef %0) unnamed_addr #30
 27:                                               ; preds = %19
   %28 = add i32 %11, -65536
   %29 = or disjoint i64 %4, 1
-  store i64 %29, ptr %3, align 8, !tbaa !127
+  store i64 %29, ptr %3, align 8, !tbaa !126
   %30 = lshr i32 %28, 10
   %31 = add nuw nsw i32 %30, 55296
   br label %32
@@ -15685,7 +15726,7 @@ define i64 @fa_string_index_of(ptr noundef %0, i64 noundef %1, i64 noundef %2, p
 23:                                               ; preds = %18
   %24 = add nuw i64 %19, 1
   %25 = icmp eq i64 %24, %1
-  br i1 %25, label %28, label %18, !llvm.loop !128
+  br i1 %25, label %28, label %18, !llvm.loop !127
 
 26:                                               ; preds = %6
   %27 = tail call fastcc i64 @string_index_of(ptr noundef %0, i64 noundef %1, i64 noundef %2, ptr noundef %3, i64 noundef %4, i32 noundef %5) #64
@@ -15740,9 +15781,9 @@ define void @fa_string_replace(ptr noundef %0, i64 noundef %1, i64 noundef %2, p
 
 17:                                               ; preds = %9
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %10) #68
-  store ptr %0, ptr %10, align 8, !tbaa !116
+  store ptr %0, ptr %10, align 8, !tbaa !115
   %18 = getelementptr inbounds %struct.UnitReader, ptr %10, i64 0, i32 1
-  store i64 %1, ptr %18, align 8, !tbaa !118
+  store i64 %1, ptr %18, align 8, !tbaa !117
   %19 = getelementptr inbounds %struct.UnitReader, ptr %10, i64 0, i32 2
   store <2 x i64> zeroinitializer, ptr %19, align 8, !tbaa !11
   %20 = getelementptr inbounds %struct.UnitReader, ptr %11, i64 0, i32 2
@@ -15754,17 +15795,17 @@ define void @fa_string_replace(ptr noundef %0, i64 noundef %1, i64 noundef %2, p
   %24 = phi i64 [ 0, %17 ], [ %38, %37 ]
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %11) #68
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %12) #68
-  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %12, ptr noundef nonnull align 8 dereferenceable(32) %10, i64 32, i1 false), !tbaa.struct !123
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %12, ptr noundef nonnull align 8 dereferenceable(32) %10, i64 32, i1 false), !tbaa.struct !122
   %25 = call fastcc i32 @match_unit_range(ptr noundef nonnull %12, ptr noundef %3, i64 noundef %4, ptr noundef nonnull %11) #64, !range !99
   call void @llvm.lifetime.end.p0(i64 32, ptr nonnull %12) #68
   %26 = icmp eq i32 %25, 0
   br i1 %26, label %32, label %27
 
 27:                                               ; preds = %23
-  %28 = load i64, ptr %19, align 8, !tbaa !127
+  %28 = load i64, ptr %19, align 8, !tbaa !126
   call fastcc void @append_unit_range(ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %24, i64 noundef %28) #64
   call void @fa_b_string(ptr noundef %5, i64 noundef %6, i64 noundef 0) #64
-  %29 = load i64, ptr %20, align 8, !tbaa !127
+  %29 = load i64, ptr %20, align 8, !tbaa !126
   br i1 %21, label %30, label %31
 
 30:                                               ; preds = %27
@@ -15772,7 +15813,7 @@ define void @fa_string_replace(ptr noundef %0, i64 noundef %1, i64 noundef %2, p
   br label %41
 
 31:                                               ; preds = %27
-  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %10, ptr noundef nonnull align 8 dereferenceable(32) %11, i64 32, i1 false), !tbaa.struct !123
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %10, ptr noundef nonnull align 8 dereferenceable(32) %11, i64 32, i1 false), !tbaa.struct !122
   br i1 %22, label %32, label %37
 
 32:                                               ; preds = %31, %23
@@ -15799,21 +15840,21 @@ define void @fa_string_replace(ptr noundef %0, i64 noundef %1, i64 noundef %2, p
 
 44:                                               ; preds = %9
   call void @llvm.lifetime.start.p0(i64 48, ptr nonnull %13) #68
-  store ptr %0, ptr %13, align 8, !tbaa !129
+  store ptr %0, ptr %13, align 8, !tbaa !128
   %45 = getelementptr inbounds %struct.Replacing, ptr %13, i64 0, i32 1
-  store i64 0, ptr %45, align 8, !tbaa !131
+  store i64 0, ptr %45, align 8, !tbaa !130
   %46 = getelementptr inbounds %struct.Replacing, ptr %13, i64 0, i32 2
-  store i64 %4, ptr %46, align 8, !tbaa !132
+  store i64 %4, ptr %46, align 8, !tbaa !131
   %47 = getelementptr inbounds %struct.Replacing, ptr %13, i64 0, i32 3
-  store ptr %5, ptr %47, align 8, !tbaa !133
+  store ptr %5, ptr %47, align 8, !tbaa !132
   %48 = getelementptr inbounds %struct.Replacing, ptr %13, i64 0, i32 4
-  store i64 %6, ptr %48, align 8, !tbaa !134
+  store i64 %6, ptr %48, align 8, !tbaa !133
   %49 = getelementptr inbounds %struct.Replacing, ptr %13, i64 0, i32 5
-  store i32 %7, ptr %49, align 8, !tbaa !135
+  store i32 %7, ptr %49, align 8, !tbaa !134
   %50 = getelementptr inbounds %struct.Replacing, ptr %13, i64 0, i32 6
-  store i32 0, ptr %50, align 4, !tbaa !136
+  store i32 0, ptr %50, align 4, !tbaa !135
   call fastcc void @each_ascii_match(ptr noundef %0, i64 noundef %1, ptr noundef %3, i64 noundef %4, ptr noundef nonnull @replace_one, ptr noundef nonnull %13) #64
-  %51 = load i64, ptr %45, align 8, !tbaa !131
+  %51 = load i64, ptr %45, align 8, !tbaa !130
   %52 = getelementptr inbounds i8, ptr %0, i64 %51
   %53 = sub i64 %1, %51
   call fastcc void @reserve(i64 noundef %53) #64
@@ -15840,10 +15881,10 @@ define internal fastcc void @each_ascii_match(ptr nocapture noundef readonly %0,
 
 8:                                                ; preds = %6, %8
   %9 = phi i64 [ %10, %8 ], [ 0, %6 ]
-  tail call void %4(ptr noundef %5, i64 noundef %9) #66, !callees !137
+  tail call void %4(ptr noundef %5, i64 noundef %9) #66, !callees !136
   %10 = add i64 %9, 1
   %11 = icmp ugt i64 %10, %1
-  br i1 %11, label %46, label %8, !llvm.loop !138
+  br i1 %11, label %46, label %8, !llvm.loop !137
 
 12:                                               ; preds = %6
   %13 = load i8, ptr %2, align 1, !tbaa !14
@@ -15865,7 +15906,7 @@ define internal fastcc void @each_ascii_match(ptr nocapture noundef readonly %0,
   %25 = phi i64 [ %26, %28 ], [ 0, %17 ]
   %26 = add nuw i64 %25, 1
   %27 = icmp eq i64 %26, %3
-  br i1 %27, label %34, label %28, !llvm.loop !120
+  br i1 %27, label %34, label %28, !llvm.loop !119
 
 28:                                               ; preds = %24
   %29 = getelementptr i8, ptr %21, i64 %26
@@ -15873,14 +15914,14 @@ define internal fastcc void @each_ascii_match(ptr nocapture noundef readonly %0,
   %31 = getelementptr inbounds i8, ptr %2, i64 %26
   %32 = load i8, ptr %31, align 1, !tbaa !14
   %33 = icmp eq i8 %30, %32
-  br i1 %33, label %24, label %34, !llvm.loop !120
+  br i1 %33, label %24, label %34, !llvm.loop !119
 
 34:                                               ; preds = %28, %24
   %35 = icmp ult i64 %26, %3
   br i1 %35, label %38, label %36
 
 36:                                               ; preds = %34
-  tail call void %4(ptr noundef %5, i64 noundef %20) #66, !callees !137
+  tail call void %4(ptr noundef %5, i64 noundef %20) #66, !callees !136
   %37 = load i8, ptr %2, align 1, !tbaa !14
   br label %40
 
@@ -15894,7 +15935,7 @@ define internal fastcc void @each_ascii_match(ptr nocapture noundef readonly %0,
   %43 = tail call fastcc i64 @next_byte(ptr noundef nonnull %0, i64 noundef %1, i64 noundef %42, i8 noundef %41) #64
   %44 = add i64 %43, %3
   %45 = icmp ugt i64 %44, %1
-  br i1 %45, label %46, label %17, !llvm.loop !139
+  br i1 %45, label %46, label %17, !llvm.loop !138
 
 46:                                               ; preds = %40, %8, %12
   ret void
@@ -15903,14 +15944,14 @@ define internal fastcc void @each_ascii_match(ptr nocapture noundef readonly %0,
 ; Function Attrs: nounwind optsize
 define internal void @replace_one(ptr nocapture noundef %0, i64 noundef %1) #14 {
   %3 = getelementptr inbounds %struct.Replacing, ptr %0, i64 0, i32 6
-  %4 = load i32, ptr %3, align 4, !tbaa !136
+  %4 = load i32, ptr %3, align 4, !tbaa !135
   %5 = icmp eq i32 %4, 0
   br i1 %5, label %6, label %30
 
 6:                                                ; preds = %2
-  %7 = load ptr, ptr %0, align 8, !tbaa !129
+  %7 = load ptr, ptr %0, align 8, !tbaa !128
   %8 = getelementptr inbounds %struct.Replacing, ptr %0, i64 0, i32 1
-  %9 = load i64, ptr %8, align 8, !tbaa !131
+  %9 = load i64, ptr %8, align 8, !tbaa !130
   %10 = getelementptr inbounds i8, ptr %7, i64 %9
   %11 = sub i64 %1, %9
   tail call fastcc void @reserve(i64 noundef %11) #64
@@ -15924,19 +15965,19 @@ define internal void @replace_one(ptr nocapture noundef %0, i64 noundef %1) #14 
   %18 = add i64 %17, %11
   store i64 %18, ptr %14, align 8, !tbaa !11
   %19 = getelementptr inbounds %struct.Replacing, ptr %0, i64 0, i32 3
-  %20 = load ptr, ptr %19, align 8, !tbaa !133
+  %20 = load ptr, ptr %19, align 8, !tbaa !132
   %21 = getelementptr inbounds %struct.Replacing, ptr %0, i64 0, i32 4
-  %22 = load i64, ptr %21, align 8, !tbaa !134
+  %22 = load i64, ptr %21, align 8, !tbaa !133
   tail call void @fa_b_string(ptr noundef %20, i64 noundef %22, i64 noundef 0) #64
   %23 = getelementptr inbounds %struct.Replacing, ptr %0, i64 0, i32 2
-  %24 = load i64, ptr %23, align 8, !tbaa !132
+  %24 = load i64, ptr %23, align 8, !tbaa !131
   %25 = add i64 %24, %1
-  store i64 %25, ptr %8, align 8, !tbaa !131
+  store i64 %25, ptr %8, align 8, !tbaa !130
   %26 = getelementptr inbounds %struct.Replacing, ptr %0, i64 0, i32 5
-  %27 = load i32, ptr %26, align 8, !tbaa !135
+  %27 = load i32, ptr %26, align 8, !tbaa !134
   %28 = icmp eq i32 %27, 0
   %29 = zext i1 %28 to i32
-  store i32 %29, ptr %3, align 4, !tbaa !136
+  store i32 %29, ptr %3, align 4, !tbaa !135
   br label %30
 
 30:                                               ; preds = %2, %6
@@ -15947,55 +15988,79 @@ define internal void @replace_one(ptr nocapture noundef %0, i64 noundef %1) #14 
 define ptr @fa_string_characters(ptr nocapture noundef readonly %0, i64 noundef %1, i64 noundef %2) local_unnamed_addr #14 {
   %4 = alloca %struct.FaString, align 8
   %5 = icmp sgt i64 %2, -1
-  br i1 %5, label %8, label %6
+  br i1 %5, label %24, label %6
 
 6:                                                ; preds = %3
-  %7 = tail call fastcc ptr @ascii_units(ptr noundef %0, i64 noundef %1) #64
-  br label %32
+  %7 = tail call fastcc i64 @next_byte(ptr noundef %0, i64 noundef %1, i64 noundef 0, i8 noundef 13) #64
+  %8 = add i64 %7, 1
+  %9 = icmp ult i64 %8, %1
+  br i1 %9, label %10, label %19
 
-8:                                                ; preds = %3
-  %9 = tail call i64 @fa_graphemes(ptr noundef %0, i64 noundef %1) #64
-  %10 = tail call ptr @fa_array_new(i64 noundef 0, i64 noundef %9, i64 noundef 24) #64
-  %11 = icmp eq i64 %1, 0
-  br i1 %11, label %32, label %12
+10:                                               ; preds = %6, %15
+  %11 = phi i64 [ %17, %15 ], [ %8, %6 ]
+  %12 = getelementptr inbounds i8, ptr %0, i64 %11
+  %13 = load i8, ptr %12, align 1, !tbaa !14
+  %14 = icmp eq i8 %13, 10
+  br i1 %14, label %19, label %15
 
-12:                                               ; preds = %8
-  %13 = getelementptr inbounds %struct.FaArrayHeader, ptr %10, i64 0, i32 1
-  %14 = getelementptr inbounds %struct.FaArrayHeader, ptr %10, i64 0, i32 2
-  br label %15
+15:                                               ; preds = %10
+  %16 = tail call fastcc i64 @next_byte(ptr noundef nonnull %0, i64 noundef %1, i64 noundef %11, i8 noundef 13) #64
+  %17 = add i64 %16, 1
+  %18 = icmp ult i64 %17, %1
+  br i1 %18, label %10, label %19, !llvm.loop !139
 
-15:                                               ; preds = %23, %12
-  %16 = phi i64 [ 0, %12 ], [ %17, %23 ]
-  %17 = tail call fastcc i64 @next_boundary(ptr noundef %0, i64 noundef %1, i64 noundef %16) #64
-  %18 = load i64, ptr %13, align 8, !tbaa !24
-  %19 = load i64, ptr %14, align 8, !tbaa !3
-  %20 = icmp slt i64 %18, %19
-  br i1 %20, label %23, label %21, !prof !100
+19:                                               ; preds = %15, %10, %6
+  %20 = phi i64 [ %8, %6 ], [ %11, %10 ], [ %17, %15 ]
+  %21 = icmp ult i64 %20, %1
+  br i1 %21, label %24, label %22
 
-21:                                               ; preds = %15
-  tail call fastcc void @array_grow(ptr noundef nonnull %10, i64 noundef 24) #64
-  %22 = load i64, ptr %13, align 8, !tbaa !24
-  br label %23
+22:                                               ; preds = %19
+  %23 = tail call fastcc ptr @ascii_units(ptr noundef %0, i64 noundef %1) #64
+  br label %48
 
-23:                                               ; preds = %21, %15
-  %24 = phi i64 [ %22, %21 ], [ %18, %15 ]
-  %25 = load ptr, ptr %10, align 8, !tbaa !23
-  %26 = mul nsw i64 %24, 24
-  %27 = getelementptr inbounds i8, ptr %25, i64 %26
-  %28 = add nsw i64 %24, 1
-  store i64 %28, ptr %13, align 8, !tbaa !24
+24:                                               ; preds = %19, %3
+  %25 = tail call i64 @fa_graphemes(ptr noundef %0, i64 noundef %1) #64
+  %26 = tail call ptr @fa_array_new(i64 noundef 0, i64 noundef %25, i64 noundef 24) #64
+  %27 = icmp eq i64 %1, 0
+  br i1 %27, label %48, label %28
+
+28:                                               ; preds = %24
+  %29 = getelementptr inbounds %struct.FaArrayHeader, ptr %26, i64 0, i32 1
+  %30 = getelementptr inbounds %struct.FaArrayHeader, ptr %26, i64 0, i32 2
+  br label %31
+
+31:                                               ; preds = %39, %28
+  %32 = phi i64 [ 0, %28 ], [ %33, %39 ]
+  %33 = tail call fastcc i64 @next_boundary(ptr noundef %0, i64 noundef %1, i64 noundef %32) #64
+  %34 = load i64, ptr %29, align 8, !tbaa !24
+  %35 = load i64, ptr %30, align 8, !tbaa !3
+  %36 = icmp slt i64 %34, %35
+  br i1 %36, label %39, label %37, !prof !100
+
+37:                                               ; preds = %31
+  tail call fastcc void @array_grow(ptr noundef nonnull %26, i64 noundef 24) #64
+  %38 = load i64, ptr %29, align 8, !tbaa !24
+  br label %39
+
+39:                                               ; preds = %37, %31
+  %40 = phi i64 [ %38, %37 ], [ %34, %31 ]
+  %41 = load ptr, ptr %26, align 8, !tbaa !23
+  %42 = mul nsw i64 %40, 24
+  %43 = getelementptr inbounds i8, ptr %41, i64 %42
+  %44 = add nsw i64 %40, 1
+  store i64 %44, ptr %29, align 8, !tbaa !24
   call void @llvm.lifetime.start.p0(i64 24, ptr nonnull %4) #68
-  %29 = getelementptr inbounds i8, ptr %0, i64 %16
-  %30 = sub i64 %17, %16
-  call fastcc void @owned_copy_with(ptr dead_on_unwind nonnull writable sret(%struct.FaString) align 8 %4, ptr noundef %29, i64 noundef %30, i64 noundef 0) #64
-  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(24) %27, ptr noundef nonnull align 8 dereferenceable(24) %4, i64 24, i1 false), !tbaa.struct !9
+  %45 = getelementptr inbounds i8, ptr %0, i64 %32
+  %46 = sub i64 %33, %32
+  call fastcc void @owned_copy_with(ptr dead_on_unwind nonnull writable sret(%struct.FaString) align 8 %4, ptr noundef %45, i64 noundef %46, i64 noundef 0) #64
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(24) %43, ptr noundef nonnull align 8 dereferenceable(24) %4, i64 24, i1 false), !tbaa.struct !9
   call void @llvm.lifetime.end.p0(i64 24, ptr nonnull %4) #68
-  %31 = icmp ult i64 %17, %1
-  br i1 %31, label %15, label %32, !llvm.loop !140
+  %47 = icmp ult i64 %33, %1
+  br i1 %47, label %31, label %48, !llvm.loop !140
 
-32:                                               ; preds = %23, %6, %8
-  %33 = phi ptr [ %7, %6 ], [ %10, %8 ], [ %10, %23 ]
-  ret ptr %33
+48:                                               ; preds = %39, %22, %24
+  %49 = phi ptr [ %23, %22 ], [ %26, %24 ], [ %26, %39 ]
+  ret ptr %49
 }
 
 ; Function Attrs: nounwind optsize
@@ -18817,9 +18882,9 @@ define internal fastcc void @string_pad_slow(ptr nocapture noundef readonly %0, 
   %44 = mul i64 %43, %42
   %45 = sub i64 %41, %44
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %10) #68
-  store ptr %4, ptr %10, align 8, !tbaa !116
+  store ptr %4, ptr %10, align 8, !tbaa !115
   %46 = getelementptr inbounds %struct.UnitReader, ptr %10, i64 0, i32 1
-  store i64 %5, ptr %46, align 8, !tbaa !118
+  store i64 %5, ptr %46, align 8, !tbaa !117
   %47 = getelementptr inbounds %struct.UnitReader, ptr %10, i64 0, i32 2
   %48 = getelementptr inbounds %struct.UnitReader, ptr %10, i64 0, i32 3
   store <2 x i64> zeroinitializer, ptr %47, align 8, !tbaa !11
@@ -18828,7 +18893,7 @@ define internal fastcc void @string_pad_slow(ptr nocapture noundef readonly %0, 
 
 50:                                               ; preds = %38, %50
   %51 = call fastcc i32 @read_unit(ptr noundef nonnull %10) #64
-  %52 = load i64, ptr %48, align 8, !tbaa !119
+  %52 = load i64, ptr %48, align 8, !tbaa !118
   %53 = icmp ult i64 %52, %45
   br i1 %53, label %50, label %54, !llvm.loop !183
 
@@ -18887,7 +18952,7 @@ define internal fastcc void @string_pad_slow(ptr nocapture noundef readonly %0, 
   unreachable
 
 87:                                               ; preds = %82, %78
-  %88 = load i64, ptr %47, align 8, !tbaa !127
+  %88 = load i64, ptr %47, align 8, !tbaa !126
   %89 = lshr i64 %88, 1
   %90 = icmp ugt i64 %88, 3
   %91 = and i1 %69, %90
@@ -20318,49 +20383,49 @@ define noundef ptr @fa_array_into_region(ptr noundef %0, i64 noundef %1) local_u
 ; Function Attrs: nounwind optsize
 define noundef ptr @fa_packed_new() local_unnamed_addr #14 {
   %1 = tail call ptr @fa_alloc(i64 noundef 32, i64 noundef 8) #66
-  store ptr null, ptr %1, align 8, !tbaa !116
+  store ptr null, ptr %1, align 8, !tbaa !115
   %2 = getelementptr inbounds %struct.FaPacked, ptr %1, i64 0, i32 1
   store <2 x i64> zeroinitializer, ptr %2, align 8, !tbaa !11
   %3 = getelementptr inbounds %struct.FaPacked, ptr %1, i64 0, i32 3
-  store i64 0, ptr %3, align 8, !tbaa !119
+  store i64 0, ptr %3, align 8, !tbaa !118
   ret ptr %1
 }
 
 ; Function Attrs: alwaysinline nounwind optsize
 define ptr @fa_packed_push(ptr nocapture noundef %0, i64 noundef %1) local_unnamed_addr #11 {
   %3 = getelementptr inbounds %struct.FaPacked, ptr %0, i64 0, i32 2
-  %4 = load i64, ptr %3, align 8, !tbaa !127
+  %4 = load i64, ptr %3, align 8, !tbaa !126
   %5 = getelementptr inbounds %struct.FaPacked, ptr %0, i64 0, i32 3
-  %6 = load i64, ptr %5, align 8, !tbaa !119
+  %6 = load i64, ptr %5, align 8, !tbaa !118
   %7 = sub nsw i64 %4, %6
   %8 = icmp slt i64 %7, %1
   br i1 %8, label %9, label %11, !prof !98
 
 9:                                                ; preds = %2
   tail call fastcc void @packed_grow(ptr noundef nonnull %0, i64 noundef %1) #64
-  %10 = load i64, ptr %5, align 8, !tbaa !119
+  %10 = load i64, ptr %5, align 8, !tbaa !118
   br label %11
 
 11:                                               ; preds = %9, %2
   %12 = phi i64 [ %10, %9 ], [ %6, %2 ]
-  %13 = load ptr, ptr %0, align 8, !tbaa !116
+  %13 = load ptr, ptr %0, align 8, !tbaa !115
   %14 = getelementptr inbounds i8, ptr %13, i64 %12
   %15 = add nsw i64 %12, %1
-  store i64 %15, ptr %5, align 8, !tbaa !119
+  store i64 %15, ptr %5, align 8, !tbaa !118
   %16 = getelementptr inbounds %struct.FaPacked, ptr %0, i64 0, i32 1
-  %17 = load i64, ptr %16, align 8, !tbaa !118
+  %17 = load i64, ptr %16, align 8, !tbaa !117
   %18 = add nsw i64 %17, 1
-  store i64 %18, ptr %16, align 8, !tbaa !118
+  store i64 %18, ptr %16, align 8, !tbaa !117
   ret ptr %14
 }
 
 ; Function Attrs: noinline nounwind optsize
 define internal fastcc void @packed_grow(ptr nocapture noundef %0, i64 noundef %1) unnamed_addr #26 {
   %3 = getelementptr inbounds %struct.FaPacked, ptr %0, i64 0, i32 2
-  %4 = load i64, ptr %3, align 8, !tbaa !127
+  %4 = load i64, ptr %3, align 8, !tbaa !126
   %5 = tail call i64 @llvm.smax.i64(i64 %4, i64 64)
   %6 = getelementptr inbounds %struct.FaPacked, ptr %0, i64 0, i32 3
-  %7 = load i64, ptr %6, align 8, !tbaa !119
+  %7 = load i64, ptr %6, align 8, !tbaa !118
   %8 = sub nsw i64 %5, %7
   %9 = icmp slt i64 %8, %1
   br i1 %9, label %10, label %18
@@ -20382,7 +20447,7 @@ define internal fastcc void @packed_grow(ptr nocapture noundef %0, i64 noundef %
 
 18:                                               ; preds = %14, %2
   %19 = phi i64 [ %5, %2 ], [ %15, %14 ]
-  %20 = load ptr, ptr %0, align 8, !tbaa !116
+  %20 = load ptr, ptr %0, align 8, !tbaa !115
   %21 = icmp eq ptr %20, null
   br i1 %21, label %22, label %24
 
@@ -20411,20 +20476,20 @@ define internal fastcc void @packed_grow(ptr nocapture noundef %0, i64 noundef %
 
 32:                                               ; preds = %28, %26, %22
   %33 = phi ptr [ %23, %22 ], [ %27, %26 ], [ %29, %28 ]
-  store ptr %33, ptr %0, align 8, !tbaa !116
-  store i64 %19, ptr %3, align 8, !tbaa !127
+  store ptr %33, ptr %0, align 8, !tbaa !115
+  store i64 %19, ptr %3, align 8, !tbaa !126
   ret void
 }
 
 ; Function Attrs: nounwind optsize
 define void @fa_packed_free(ptr noundef %0) local_unnamed_addr #14 {
-  %2 = load ptr, ptr %0, align 8, !tbaa !116
+  %2 = load ptr, ptr %0, align 8, !tbaa !115
   %3 = icmp eq ptr %2, null
   br i1 %3, label %7, label %4
 
 4:                                                ; preds = %1
   %5 = getelementptr inbounds %struct.FaPacked, ptr %0, i64 0, i32 2
-  %6 = load i64, ptr %5, align 8, !tbaa !127
+  %6 = load i64, ptr %5, align 8, !tbaa !126
   tail call void @fa_free(ptr noundef nonnull %2, i64 noundef %6, i64 noundef 16) #66
   br label %7
 
@@ -22427,9 +22492,9 @@ define internal fastcc ptr @split_text_into(ptr noundef %0, i64 noundef %1, i64 
 
 26:                                               ; preds = %21
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %9) #68
-  store ptr %0, ptr %9, align 8, !tbaa !116
+  store ptr %0, ptr %9, align 8, !tbaa !115
   %27 = getelementptr inbounds %struct.UnitReader, ptr %9, i64 0, i32 1
-  store i64 %1, ptr %27, align 8, !tbaa !118
+  store i64 %1, ptr %27, align 8, !tbaa !117
   %28 = getelementptr inbounds %struct.UnitReader, ptr %9, i64 0, i32 2
   store <2 x i64> zeroinitializer, ptr %28, align 8, !tbaa !11
   br label %29
@@ -22438,7 +22503,7 @@ define internal fastcc ptr @split_text_into(ptr noundef %0, i64 noundef %1, i64 
   %30 = phi i64 [ 1, %26 ], [ %41, %40 ]
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %10) #68
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %11) #68
-  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %11, ptr noundef nonnull align 8 dereferenceable(32) %9, i64 32, i1 false), !tbaa.struct !123
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %11, ptr noundef nonnull align 8 dereferenceable(32) %9, i64 32, i1 false), !tbaa.struct !122
   %31 = call fastcc i32 @match_unit_range(ptr noundef nonnull %11, ptr noundef %3, i64 noundef %4, ptr noundef nonnull %10) #64, !range !99
   call void @llvm.lifetime.end.p0(i64 32, ptr nonnull %11) #68
   %32 = icmp eq i32 %31, 0
@@ -22450,7 +22515,7 @@ define internal fastcc ptr @split_text_into(ptr noundef %0, i64 noundef %1, i64 
   br i1 %35, label %42, label %36
 
 36:                                               ; preds = %33
-  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %9, ptr noundef nonnull align 8 dereferenceable(32) %10, i64 32, i1 false), !tbaa.struct !123
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %9, ptr noundef nonnull align 8 dereferenceable(32) %10, i64 32, i1 false), !tbaa.struct !122
   br label %40
 
 37:                                               ; preds = %29
@@ -22504,7 +22569,7 @@ define internal fastcc ptr @split_text_into(ptr noundef %0, i64 noundef %1, i64 
   %64 = phi i64 [ %65, %67 ], [ 0, %59 ]
   %65 = add nuw i64 %64, 1
   %66 = icmp eq i64 %65, %4
-  br i1 %66, label %75, label %67, !llvm.loop !120
+  br i1 %66, label %75, label %67, !llvm.loop !119
 
 67:                                               ; preds = %63
   %68 = getelementptr i8, ptr %60, i64 %65
@@ -22512,7 +22577,7 @@ define internal fastcc ptr @split_text_into(ptr noundef %0, i64 noundef %1, i64 
   %70 = getelementptr inbounds i8, ptr %3, i64 %65
   %71 = load i8, ptr %70, align 1, !tbaa !14
   %72 = icmp eq i8 %69, %71
-  br i1 %72, label %63, label %73, !llvm.loop !120
+  br i1 %72, label %63, label %73, !llvm.loop !119
 
 73:                                               ; preds = %67
   %74 = icmp ult i64 %65, %4
@@ -25888,7 +25953,7 @@ define ptr @fa_pool_add_slot(ptr nocapture noundef %0) local_unnamed_addr #14 {
   %20 = getelementptr inbounds %struct.FaPool, ptr %0, i64 0, i32 1
   %21 = load ptr, ptr %20, align 8, !tbaa !266
   %22 = shl i64 %12, 6
-  %23 = tail call i64 @llvm.cttz.i64(i64 %14, i1 true), !range !112
+  %23 = tail call i64 @llvm.cttz.i64(i64 %14, i1 true), !range !111
   %24 = and i64 %22, 4294967232
   %25 = or disjoint i64 %24, %23
   %26 = getelementptr inbounds ptr, ptr %21, i64 %25
@@ -26184,7 +26249,7 @@ define i64 @fa_pool_seek(ptr nocapture noundef readonly %0, i64 noundef %1) loca
   br i1 %32, label %38, label %33
 
 33:                                               ; preds = %23
-  %34 = tail call i64 @llvm.cttz.i64(i64 %31, i1 true), !range !112
+  %34 = tail call i64 @llvm.cttz.i64(i64 %31, i1 true), !range !111
   %35 = trunc i64 %34 to i32
   %36 = add i32 %24, %35
   %37 = icmp ult i32 %36, %21
@@ -44696,145 +44761,82 @@ define internal fastcc noundef i32 @string_equal_bytes(ptr nocapture noundef rea
 }
 
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(none)
-define internal fastcc i32 @break_kind(i32 noundef %0) unnamed_addr #58 {
-  switch i32 %0, label %3 [
-    i32 13, label %83
-    i32 10, label %2
-  ]
-
-2:                                                ; preds = %1
-  br label %83
+define internal fastcc i8 @grapheme_properties(i32 noundef %0) unnamed_addr #58 {
+  %2 = icmp ult i32 %0, 128
+  br i1 %2, label %3, label %10
 
 3:                                                ; preds = %1
-  %4 = icmp ult i32 %0, 32
-  br i1 %4, label %83, label %5
+  switch i32 %0, label %4 [
+    i32 13, label %40
+    i32 10, label %9
+  ]
 
-5:                                                ; preds = %3
-  %6 = add i32 %0, -127
-  %7 = icmp ult i32 %6, 33
-  %8 = and i32 %0, -2
-  %9 = icmp eq i32 %8, 8232
-  %10 = or i1 %7, %9
-  br i1 %10, label %83, label %11
+4:                                                ; preds = %3
+  %5 = icmp ult i32 %0, 32
+  %6 = icmp eq i32 %0, 127
+  %7 = or i1 %5, %6
+  %8 = select i1 %7, i8 3, i8 0
+  br label %40
 
-11:                                               ; preds = %5
-  %12 = icmp ult i32 %0, 768
+9:                                                ; preds = %3
+  br label %40
+
+10:                                               ; preds = %1
+  %11 = add i32 %0, -44032
+  %12 = icmp ult i32 %11, 11172
   br i1 %12, label %13, label %18
 
-13:                                               ; preds = %11
-  %14 = icmp eq i32 %0, 169
-  %15 = icmp eq i32 %0, 174
-  %16 = or i1 %14, %15
-  %17 = select i1 %16, i32 7, i32 0
-  br label %83
+13:                                               ; preds = %10
+  %14 = trunc i32 %11 to i16
+  %15 = urem i16 %14, 28
+  %16 = icmp eq i16 %15, 0
+  %17 = select i1 %16, i8 12, i8 13
+  br label %40
 
-18:                                               ; preds = %11
-  %19 = icmp eq i32 %0, 8205
-  br i1 %19, label %83, label %20
+18:                                               ; preds = %10, %36
+  %19 = phi i64 [ %38, %36 ], [ 0, %10 ]
+  %20 = phi i64 [ %37, %36 ], [ 833, %10 ]
+  %21 = sub i64 %20, %19
+  %22 = lshr i64 %21, 1
+  %23 = add i64 %22, %19
+  %24 = getelementptr inbounds [833 x %struct.GraphemeRange], ptr @FA_GRAPHEME_RANGES, i64 0, i64 %23
+  %25 = load i32, ptr %24, align 4, !tbaa !684
+  %26 = icmp ugt i32 %25, %0
+  br i1 %26, label %36, label %27
 
-20:                                               ; preds = %18
-  %21 = add i32 %0, -127462
-  %22 = icmp ult i32 %21, 26
-  br i1 %22, label %83, label %23
+27:                                               ; preds = %18
+  %28 = getelementptr inbounds [833 x %struct.GraphemeRange], ptr @FA_GRAPHEME_RANGES, i64 0, i64 %23, i32 1
+  %29 = load i32, ptr %28, align 4, !tbaa !686
+  %30 = icmp ult i32 %29, %0
+  br i1 %30, label %31, label %33
 
-23:                                               ; preds = %20
-  %24 = add i32 %0, -4352
-  %25 = icmp ult i32 %24, 96
-  %26 = add i32 %0, -43360
-  %27 = icmp ult i32 %26, 29
-  %28 = or i1 %25, %27
-  br i1 %28, label %83, label %29
+31:                                               ; preds = %27
+  %32 = add i64 %23, 1
+  br label %36
 
-29:                                               ; preds = %23
-  %30 = add i32 %0, -4448
-  %31 = icmp ult i32 %30, 72
-  %32 = add i32 %0, -55216
-  %33 = icmp ult i32 %32, 23
-  %34 = or i1 %31, %33
-  br i1 %34, label %83, label %35
+33:                                               ; preds = %27
+  %34 = getelementptr inbounds [833 x %struct.GraphemeRange], ptr @FA_GRAPHEME_RANGES, i64 0, i64 %23, i32 2
+  %35 = load i8, ptr %34, align 4, !tbaa !687
+  br label %40
 
-35:                                               ; preds = %29
-  %36 = add i32 %0, -4520
-  %37 = icmp ult i32 %36, 88
-  %38 = add i32 %0, -55243
-  %39 = icmp ult i32 %38, 49
-  %40 = or i1 %37, %39
-  br i1 %40, label %83, label %41
+36:                                               ; preds = %31, %18
+  %37 = phi i64 [ %20, %31 ], [ %23, %18 ]
+  %38 = phi i64 [ %32, %31 ], [ %19, %18 ]
+  %39 = icmp ult i64 %38, %37
+  br i1 %39, label %18, label %40, !llvm.loop !688
 
-41:                                               ; preds = %35
-  %42 = add i32 %0, -44032
-  %43 = icmp ult i32 %42, 11172
-  br i1 %43, label %44, label %49
-
-44:                                               ; preds = %41
-  %45 = trunc i32 %42 to i16
-  %46 = urem i16 %45, 28
-  %47 = icmp eq i16 %46, 0
-  %48 = select i1 %47, i32 11, i32 12
-  br label %83
-
-49:                                               ; preds = %41, %61
-  %50 = phi i64 [ %65, %61 ], [ 0, %41 ]
-  %51 = phi i64 [ %53, %61 ], [ 153, %41 ]
-  br label %52
-
-52:                                               ; preds = %55, %49
-  %53 = phi i64 [ %57, %55 ], [ %51, %49 ]
-  %54 = icmp ult i64 %50, %53
-  br i1 %54, label %55, label %66
-
-55:                                               ; preds = %52
-  %56 = add i64 %53, %50
-  %57 = lshr i64 %56, 1
-  %58 = getelementptr inbounds %struct.Range, ptr @EXTEND, i64 %57
-  %59 = load i32, ptr %58, align 4, !tbaa !163
-  %60 = icmp ugt i32 %59, %0
-  br i1 %60, label %52, label %61, !llvm.loop !165
-
-61:                                               ; preds = %55
-  %62 = getelementptr inbounds %struct.Range, ptr @EXTEND, i64 %57, i32 1
-  %63 = load i32, ptr %62, align 4, !tbaa !166
-  %64 = icmp ult i32 %63, %0
-  %65 = add nuw i64 %57, 1
-  br i1 %64, label %49, label %83, !llvm.loop !165
-
-66:                                               ; preds = %52, %78
-  %67 = phi i64 [ %82, %78 ], [ 0, %52 ]
-  %68 = phi i64 [ %70, %78 ], [ 22, %52 ]
-  br label %69
-
-69:                                               ; preds = %72, %66
-  %70 = phi i64 [ %74, %72 ], [ %68, %66 ]
-  %71 = icmp ult i64 %67, %70
-  br i1 %71, label %72, label %83
-
-72:                                               ; preds = %69
-  %73 = add i64 %70, %67
-  %74 = lshr i64 %73, 1
-  %75 = getelementptr inbounds %struct.Range, ptr @PICTOGRAPHIC, i64 %74
-  %76 = load i32, ptr %75, align 4, !tbaa !163
-  %77 = icmp ugt i32 %76, %0
-  br i1 %77, label %69, label %78, !llvm.loop !165
-
-78:                                               ; preds = %72
-  %79 = getelementptr inbounds %struct.Range, ptr @PICTOGRAPHIC, i64 %74, i32 1
-  %80 = load i32, ptr %79, align 4, !tbaa !166
-  %81 = icmp ult i32 %80, %0
-  %82 = add nuw i64 %74, 1
-  br i1 %81, label %66, label %83, !llvm.loop !165
-
-83:                                               ; preds = %61, %78, %69, %35, %29, %23, %20, %18, %3, %5, %1, %44, %13, %2
-  %84 = phi i32 [ 2, %2 ], [ %17, %13 ], [ %48, %44 ], [ 1, %1 ], [ 3, %5 ], [ 3, %3 ], [ 5, %18 ], [ 6, %20 ], [ 8, %23 ], [ 9, %29 ], [ 10, %35 ], [ 0, %69 ], [ 7, %78 ], [ 4, %61 ]
-  ret i32 %84
+40:                                               ; preds = %36, %33, %4, %9, %3, %13
+  %41 = phi i8 [ %17, %13 ], [ 1, %3 ], [ %8, %4 ], [ 2, %9 ], [ %35, %33 ], [ 0, %36 ]
+  ret i8 %41
 }
 
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none)
 define internal fastcc noundef i32 @match_unit_range(ptr nocapture noundef %0, ptr noundef %1, i64 noundef %2, ptr noundef writeonly %3) unnamed_addr #30 {
   %5 = alloca %struct.UnitReader, align 8
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %5) #68
-  store ptr %1, ptr %5, align 8, !tbaa !116
+  store ptr %1, ptr %5, align 8, !tbaa !115
   %6 = getelementptr inbounds %struct.UnitReader, ptr %5, i64 0, i32 1
-  store i64 %2, ptr %6, align 8, !tbaa !118
+  store i64 %2, ptr %6, align 8, !tbaa !117
   %7 = getelementptr inbounds %struct.UnitReader, ptr %5, i64 0, i32 2
   store <2 x i64> zeroinitializer, ptr %7, align 8, !tbaa !11
   br label %8
@@ -44847,14 +44849,14 @@ define internal fastcc noundef i32 @match_unit_range(ptr nocapture noundef %0, p
 11:                                               ; preds = %8
   %12 = tail call fastcc i32 @read_unit(ptr noundef %0) #64
   %13 = icmp eq i32 %12, %9
-  br i1 %13, label %8, label %17, !llvm.loop !684
+  br i1 %13, label %8, label %17, !llvm.loop !689
 
 14:                                               ; preds = %8
   %15 = icmp eq ptr %3, null
   br i1 %15, label %17, label %16
 
 16:                                               ; preds = %14
-  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %3, ptr noundef nonnull align 8 dereferenceable(32) %0, i64 32, i1 false), !tbaa.struct !123
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %3, ptr noundef nonnull align 8 dereferenceable(32) %0, i64 32, i1 false), !tbaa.struct !122
   br label %17
 
 17:                                               ; preds = %11, %14, %16
@@ -44887,7 +44889,7 @@ define internal fastcc noundef ptr @ascii_units(ptr nocapture noundef readonly %
   store <2 x i64> <i64 1, i64 -9223372036854775808>, ptr %16, align 8
   %17 = add nuw i64 %10, 1
   %18 = icmp eq i64 %17, %1
-  br i1 %18, label %23, label %9, !llvm.loop !685
+  br i1 %18, label %23, label %9, !llvm.loop !690
 
 19:                                               ; preds = %2
   %20 = tail call ptr @fa_array_new(i64 noundef %1, i64 noundef %1, i64 noundef 1) #64
@@ -44966,9 +44968,9 @@ define internal fastcc ptr @split_unicode(ptr noundef %0, i64 noundef %1, i64 no
   %46 = phi ptr [ %44, %43 ], [ %7, %39 ]
   %47 = phi i64 [ %41, %43 ], [ 0, %39 ]
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %9) #68
-  store ptr %0, ptr %9, align 8, !tbaa !116
+  store ptr %0, ptr %9, align 8, !tbaa !115
   %48 = getelementptr inbounds %struct.UnitReader, ptr %9, i64 0, i32 1
-  store i64 %1, ptr %48, align 8, !tbaa !118
+  store i64 %1, ptr %48, align 8, !tbaa !117
   %49 = getelementptr inbounds %struct.UnitReader, ptr %9, i64 0, i32 2
   %50 = getelementptr inbounds %struct.UnitReader, ptr %9, i64 0, i32 3
   store <2 x i64> zeroinitializer, ptr %49, align 8, !tbaa !11
@@ -44986,11 +44988,11 @@ define internal fastcc ptr @split_unicode(ptr noundef %0, i64 noundef %1, i64 no
 
 57:                                               ; preds = %54, %57
   %58 = phi i64 [ %59, %57 ], [ 0, %54 ]
-  %59 = load i64, ptr %49, align 8, !tbaa !127
+  %59 = load i64, ptr %49, align 8, !tbaa !126
   tail call fastcc void @split_unit_part(ptr noundef %46, ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %58, i64 noundef %59, i64 noundef 1, i32 noundef %5) #64
   %60 = call fastcc i32 @read_unit(ptr noundef nonnull %9) #64
   %61 = icmp sgt i32 %60, -1
-  br i1 %61, label %57, label %107, !llvm.loop !686
+  br i1 %61, label %57, label %107, !llvm.loop !691
 
 62:                                               ; preds = %51, %90
   %63 = phi i64 [ %91, %90 ], [ %47, %51 ]
@@ -44999,7 +45001,7 @@ define internal fastcc ptr @split_unicode(ptr noundef %0, i64 noundef %1, i64 no
   %66 = phi i64 [ %94, %90 ], [ 0, %51 ]
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %10) #68
   call void @llvm.lifetime.start.p0(i64 32, ptr nonnull %11) #68
-  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %11, ptr noundef nonnull align 8 dereferenceable(32) %9, i64 32, i1 false), !tbaa.struct !123
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %11, ptr noundef nonnull align 8 dereferenceable(32) %9, i64 32, i1 false), !tbaa.struct !122
   %67 = call fastcc i32 @match_unit_range(ptr noundef nonnull %11, ptr noundef %3, i64 noundef %4, ptr noundef nonnull %10) #64, !range !99
   call void @llvm.lifetime.end.p0(i64 32, ptr nonnull %11) #68
   %68 = icmp eq i32 %67, 0
@@ -45019,15 +45021,15 @@ define internal fastcc ptr @split_unicode(ptr noundef %0, i64 noundef %1, i64 no
   br i1 %79, label %83, label %80
 
 80:                                               ; preds = %69
-  %81 = load i64, ptr %49, align 8, !tbaa !127
+  %81 = load i64, ptr %49, align 8, !tbaa !126
   %82 = sub i64 %77, %66
   call fastcc void @split_unit_part(ptr noundef %46, ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %65, i64 noundef %81, i64 noundef %82, i32 noundef %5) #64
   br label %83
 
 83:                                               ; preds = %69, %80
-  %84 = load i64, ptr %52, align 8, !tbaa !127
-  %85 = load i64, ptr %53, align 8, !tbaa !119
-  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %9, ptr noundef nonnull align 8 dereferenceable(32) %10, i64 32, i1 false), !tbaa.struct !123
+  %84 = load i64, ptr %52, align 8, !tbaa !126
+  %85 = load i64, ptr %53, align 8, !tbaa !118
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(32) %9, ptr noundef nonnull align 8 dereferenceable(32) %10, i64 32, i1 false), !tbaa.struct !122
   br label %90
 
 86:                                               ; preds = %62
@@ -45053,7 +45055,7 @@ define internal fastcc ptr @split_unicode(ptr noundef %0, i64 noundef %1, i64 no
   br i1 %100, label %104, label %101
 
 101:                                              ; preds = %97
-  %102 = load i64, ptr %49, align 8, !tbaa !127
+  %102 = load i64, ptr %49, align 8, !tbaa !126
   %103 = sub i64 %98, %94
   call fastcc void @split_unit_part(ptr noundef %46, ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %93, i64 noundef %102, i64 noundef %103, i32 noundef %5) #64
   br label %104
@@ -45084,7 +45086,7 @@ define internal fastcc i64 @count_byte(ptr nocapture noundef readonly %0, i64 no
 8:                                                ; preds = %36
   %9 = sub i64 %1, %23
   %10 = icmp ugt i64 %9, 15
-  br i1 %10, label %15, label %11, !llvm.loop !687
+  br i1 %10, label %15, label %11, !llvm.loop !692
 
 11:                                               ; preds = %8, %3
   %12 = phi i64 [ 0, %3 ], [ %23, %8 ]
@@ -45117,7 +45119,7 @@ define internal fastcc i64 @count_byte(ptr nocapture noundef readonly %0, i64 no
   %33 = add nuw nsw i64 %25, 1
   %34 = add i64 %27, 16
   %35 = icmp eq i64 %33, %20
-  br i1 %35, label %22, label %24, !llvm.loop !688
+  br i1 %35, label %22, label %24, !llvm.loop !693
 
 36:                                               ; preds = %22, %36
   %37 = phi i32 [ 0, %22 ], [ %42, %36 ]
@@ -45127,7 +45129,7 @@ define internal fastcc i64 @count_byte(ptr nocapture noundef readonly %0, i64 no
   %41 = add i64 %38, %40
   %42 = add nuw nsw i32 %37, 1
   %43 = icmp eq i32 %42, 16
-  br i1 %43, label %8, label %36, !llvm.loop !689
+  br i1 %43, label %8, label %36, !llvm.loop !694
 
 44:                                               ; preds = %11, %44
   %45 = phi i64 [ %51, %44 ], [ %13, %11 ]
@@ -45139,7 +45141,7 @@ define internal fastcc i64 @count_byte(ptr nocapture noundef readonly %0, i64 no
   %51 = add i64 %45, %50
   %52 = add nuw i64 %46, 1
   %53 = icmp eq i64 %52, %1
-  br i1 %53, label %54, label %44, !llvm.loop !690
+  br i1 %53, label %54, label %44, !llvm.loop !695
 
 54:                                               ; preds = %44, %11
   %55 = phi i64 [ %13, %11 ], [ %51, %44 ]
@@ -45901,7 +45903,7 @@ define internal fastcc i64 @unit_position(ptr nocapture noundef %0, i64 noundef 
   %85 = phi i64 [ %79, %80 ], [ %79, %75 ], [ %74, %73 ]
   %86 = phi i64 [ %76, %80 ], [ %76, %75 ], [ %59, %73 ]
   %87 = icmp ult i64 %85, %1
-  br i1 %87, label %55, label %88, !llvm.loop !691
+  br i1 %87, label %55, label %88, !llvm.loop !696
 
 88:                                               ; preds = %84
   store ptr %51, ptr %29, align 8, !tbaa !29
@@ -45978,7 +45980,7 @@ define internal fastcc i64 @unit_position(ptr nocapture noundef %0, i64 noundef 
 127:                                              ; preds = %114, %125
   %128 = phi i64 [ %126, %125 ], [ %118, %114 ]
   %129 = icmp ult i64 %128, %3
-  br i1 %129, label %114, label %130, !llvm.loop !692
+  br i1 %129, label %114, label %130, !llvm.loop !697
 
 130:                                              ; preds = %127
   %131 = load i64, ptr %5, align 8, !tbaa !11
@@ -46141,7 +46143,7 @@ define internal fastcc i32 @utf8_decode(ptr nocapture noundef readonly %0, i64 n
   %53 = or disjoint i32 %48, %52
   %54 = add nuw nsw i32 %33, 1
   %55 = icmp eq i32 %54, %22
-  br i1 %55, label %57, label %32, !llvm.loop !693
+  br i1 %55, label %57, label %32, !llvm.loop !698
 
 56:                                               ; preds = %37, %32, %17
   store i32 0, ptr %3, align 4, !tbaa !19
@@ -46240,7 +46242,7 @@ define internal fastcc ptr @take_pages(i64 noundef %0) unnamed_addr #26 {
   %46 = icmp ne ptr %45, null
   %47 = icmp ult ptr %45, %40
   %48 = and i1 %46, %47
-  br i1 %48, label %43, label %49, !llvm.loop !694
+  br i1 %48, label %43, label %49, !llvm.loop !699
 
 49:                                               ; preds = %43
   store ptr %45, ptr %40, align 8, !tbaa !239
@@ -46313,7 +46315,7 @@ define internal fastcc ptr @take_arena_page() unnamed_addr #26 {
   %26 = phi i64 [ -2, %23 ], [ %18, %16 ]
   %27 = phi ptr [ %20, %23 ], [ %14, %16 ]
   %28 = getelementptr inbounds %struct.FaArenaPage, ptr %27, i64 0, i32 2
-  %29 = tail call i64 @llvm.cttz.i64(i64 %26, i1 false), !range !112
+  %29 = tail call i64 @llvm.cttz.i64(i64 %26, i1 false), !range !111
   %30 = shl nuw i64 1, %29
   %31 = xor i64 %30, -1
   %32 = and i64 %26, %31
@@ -46391,7 +46393,7 @@ define internal fastcc ptr @take_arena_page() unnamed_addr #26 {
 70:                                               ; preds = %64
   %71 = lshr i64 %65, 1
   %72 = icmp ugt i64 %65, 134217727
-  br i1 %72, label %64, label %73, !llvm.loop !695
+  br i1 %72, label %64, label %73, !llvm.loop !700
 
 73:                                               ; preds = %70
   %74 = load ptr, ptr @arena_space_end, align 8, !tbaa !10
@@ -46502,7 +46504,7 @@ define internal fastcc void @mark(ptr noundef %0) unnamed_addr #14 {
 24:                                               ; preds = %20
   store i32 1, ptr %21, align 8, !tbaa !330
   %25 = getelementptr inbounds %struct.FaSource, ptr %0, i64 0, i32 3
-  %26 = load i64, ptr %25, align 8, !tbaa !696
+  %26 = load i64, ptr %25, align 8, !tbaa !701
   %27 = icmp sgt i64 %26, 0
   br i1 %27, label %28, label %38
 
@@ -46512,14 +46514,14 @@ define internal fastcc void @mark(ptr noundef %0) unnamed_addr #14 {
 
 30:                                               ; preds = %28, %30
   %31 = phi i64 [ 0, %28 ], [ %35, %30 ]
-  %32 = load ptr, ptr %29, align 8, !tbaa !697
+  %32 = load ptr, ptr %29, align 8, !tbaa !702
   %33 = getelementptr inbounds ptr, ptr %32, i64 %31
   %34 = load ptr, ptr %33, align 8, !tbaa !10
   tail call fastcc void @mark(ptr noundef %34) #64
   %35 = add nuw nsw i64 %31, 1
-  %36 = load i64, ptr %25, align 8, !tbaa !696
+  %36 = load i64, ptr %25, align 8, !tbaa !701
   %37 = icmp slt i64 %35, %36
-  br i1 %37, label %30, label %38, !llvm.loop !698
+  br i1 %37, label %30, label %38, !llvm.loop !703
 
 38:                                               ; preds = %30, %24, %20, %5, %9, %13
   ret void
@@ -46592,7 +46594,7 @@ define internal fastcc i64 @span_word(ptr nocapture noundef readonly %0, i64 nou
   %42 = or i64 %41, %16
   %43 = add nuw nsw i64 %15, 1
   %44 = icmp eq i64 %43, %2
-  br i1 %44, label %12, label %14, !llvm.loop !699
+  br i1 %44, label %12, label %14, !llvm.loop !704
 }
 
 ; Function Attrs: optsize
@@ -46723,7 +46725,7 @@ define internal fastcc void @fire_timers(ptr nocapture noundef %0, i64 noundef %
 36:                                               ; preds = %21, %20
   %37 = load i64, ptr %4, align 8, !tbaa !446
   %38 = icmp sgt i64 %37, 0
-  br i1 %38, label %10, label %39, !llvm.loop !700
+  br i1 %38, label %10, label %39, !llvm.loop !705
 
 39:                                               ; preds = %10, %36, %2
   ret void
@@ -46991,7 +46993,7 @@ define internal fastcc noundef i32 @json_string(ptr nocapture noundef %0, ptr no
   store i8 %58, ptr %61, align 1, !tbaa !14
   %62 = add i64 %55, 1
   %63 = add nuw i64 %54, 1
-  br label %190, !llvm.loop !701
+  br label %190, !llvm.loop !706
 
 64:                                               ; preds = %52
   %65 = getelementptr i8, ptr %57, i64 1
@@ -47307,7 +47309,7 @@ define internal fastcc void @json_push(ptr nocapture noundef %0, ptr nocapture n
   %31 = phi i64 [ %4, %8 ], [ %29, %27 ]
   %32 = phi ptr [ %10, %8 ], [ %16, %27 ]
   %33 = getelementptr inbounds %struct.FaJson, ptr %32, i64 %31
-  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(72) %33, ptr noundef nonnull align 8 dereferenceable(72) %1, i64 72, i1 false), !tbaa.struct !702
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(72) %33, ptr noundef nonnull align 8 dereferenceable(72) %1, i64 72, i1 false), !tbaa.struct !707
   %34 = load i64, ptr %3, align 8, !tbaa !549
   %35 = add i64 %34, 1
   store i64 %35, ptr %3, align 8, !tbaa !549
@@ -47343,7 +47345,7 @@ define internal fastcc void @json_order(ptr nocapture noundef readonly %0, ptr n
   %21 = add i64 %12, %20
   %22 = add nuw i64 %13, 1
   %23 = icmp eq i64 %22, %4
-  br i1 %23, label %9, label %11, !llvm.loop !704
+  br i1 %23, label %9, label %11, !llvm.loop !709
 
 24:                                               ; preds = %9
   %25 = getelementptr inbounds %struct.JsonReader, ptr %0, i64 0, i32 3
@@ -47378,7 +47380,7 @@ define internal fastcc void @json_order(ptr nocapture noundef readonly %0, ptr n
 
 46:                                               ; preds = %32
   %47 = getelementptr inbounds %struct.FaJson, ptr %28, i64 %34
-  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(72) %47, ptr noundef nonnull align 8 dereferenceable(72) %37, i64 72, i1 false), !tbaa.struct !702
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(72) %47, ptr noundef nonnull align 8 dereferenceable(72) %37, i64 72, i1 false), !tbaa.struct !707
   %48 = add i64 %34, 1
   br label %66
 
@@ -47396,14 +47398,14 @@ define internal fastcc void @json_order(ptr nocapture noundef readonly %0, ptr n
 58:                                               ; preds = %49
   %59 = getelementptr inbounds %struct.FaJson, ptr %28, i64 %51
   %60 = getelementptr inbounds %struct.FaJson, ptr %28, i64 %50
-  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(72) %60, ptr noundef nonnull align 8 dereferenceable(72) %59, i64 72, i1 false), !tbaa.struct !702
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(72) %60, ptr noundef nonnull align 8 dereferenceable(72) %59, i64 72, i1 false), !tbaa.struct !707
   %61 = icmp eq i64 %51, 0
-  br i1 %61, label %62, label %49, !llvm.loop !705
+  br i1 %61, label %62, label %49, !llvm.loop !710
 
 62:                                               ; preds = %49, %58, %44
   %63 = phi i64 [ 0, %44 ], [ 0, %58 ], [ %50, %49 ]
   %64 = getelementptr inbounds %struct.FaJson, ptr %28, i64 %63
-  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(72) %64, ptr noundef nonnull align 8 dereferenceable(72) %37, i64 72, i1 false), !tbaa.struct !702
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(72) %64, ptr noundef nonnull align 8 dereferenceable(72) %37, i64 72, i1 false), !tbaa.struct !707
   %65 = add i64 %35, 1
   br label %66
 
@@ -47412,7 +47414,7 @@ define internal fastcc void @json_order(ptr nocapture noundef readonly %0, ptr n
   %68 = phi i64 [ %48, %46 ], [ %34, %62 ]
   %69 = add nuw i64 %33, 1
   %70 = icmp eq i64 %69, %4
-  br i1 %70, label %30, label %32, !llvm.loop !706
+  br i1 %70, label %30, label %32, !llvm.loop !711
 
 71:                                               ; preds = %2, %9, %30
   ret void
@@ -47423,13 +47425,13 @@ define internal fastcc ptr @json_alloc(ptr nocapture noundef %0, i64 noundef %1)
   %3 = add i64 %1, 15
   %4 = and i64 %3, -16
   %5 = getelementptr inbounds %struct.FaJsonDocument, ptr %0, i64 0, i32 3
-  %6 = load i64, ptr %5, align 8, !tbaa !707
+  %6 = load i64, ptr %5, align 8, !tbaa !712
   %7 = icmp ugt i64 %4, %6
   br i1 %7, label %11, label %8
 
 8:                                                ; preds = %2
   %9 = getelementptr inbounds %struct.FaJsonDocument, ptr %0, i64 0, i32 2
-  %10 = load ptr, ptr %9, align 8, !tbaa !708
+  %10 = load ptr, ptr %9, align 8, !tbaa !713
   br label %20
 
 11:                                               ; preds = %2
@@ -47451,9 +47453,9 @@ define internal fastcc ptr @json_alloc(ptr nocapture noundef %0, i64 noundef %1)
   %22 = phi ptr [ %10, %8 ], [ %18, %11 ]
   %23 = getelementptr inbounds %struct.FaJsonDocument, ptr %0, i64 0, i32 2
   %24 = getelementptr inbounds i8, ptr %22, i64 %4
-  store ptr %24, ptr %23, align 8, !tbaa !708
+  store ptr %24, ptr %23, align 8, !tbaa !713
   %25 = sub i64 %21, %4
-  store i64 %25, ptr %5, align 8, !tbaa !707
+  store i64 %25, ptr %5, align 8, !tbaa !712
   ret ptr %22
 }
 
@@ -47491,7 +47493,7 @@ define internal fastcc i64 @json_index(ptr nocapture noundef readonly %0, i64 no
   %22 = add i64 %21, %20
   %23 = add nuw i64 %12, 1
   %24 = icmp eq i64 %23, %1
-  br i1 %24, label %25, label %11, !llvm.loop !709
+  br i1 %24, label %25, label %11, !llvm.loop !714
 
 25:                                               ; preds = %18
   %26 = icmp slt i64 %22, 4294967295
@@ -47555,7 +47557,7 @@ define internal fastcc i32 @json_code_unit(ptr nocapture noundef readonly %0, i6
   %34 = add nuw nsw i32 %30, %33
   %35 = add nuw nsw i64 %11, 1
   %36 = icmp eq i64 %35, 4
-  br i1 %36, label %37, label %10, !llvm.loop !710
+  br i1 %36, label %37, label %10, !llvm.loop !715
 
 37:                                               ; preds = %29, %32, %25, %2
   %38 = phi i32 [ -1, %2 ], [ -1, %29 ], [ %34, %32 ], [ -1, %25 ]
@@ -47898,7 +47900,7 @@ define internal fastcc nonnull ptr @json_skip(ptr noundef readonly %0) unnamed_a
   %133 = tail call fastcc ptr @json_skip(ptr noundef nonnull %132) #64
   %134 = add nuw nsw i64 %106, 1
   %135 = icmp eq i64 %134, %103
-  br i1 %135, label %305, label %105, !llvm.loop !711
+  br i1 %135, label %305, label %105, !llvm.loop !716
 
 136:                                              ; preds = %2
   %137 = getelementptr inbounds i8, ptr %3, i64 1
@@ -47938,7 +47940,7 @@ define internal fastcc nonnull ptr @json_skip(ptr noundef readonly %0) unnamed_a
   %165 = tail call fastcc ptr @json_skip(ptr noundef nonnull %164) #64
   %166 = add nuw nsw i64 %163, 1
   %167 = icmp eq i64 %166, %160
-  br i1 %167, label %305, label %162, !llvm.loop !712
+  br i1 %167, label %305, label %162, !llvm.loop !717
 
 168:                                              ; preds = %2
   %169 = getelementptr inbounds i8, ptr %3, i64 1
@@ -48016,7 +48018,7 @@ define internal fastcc nonnull ptr @json_skip(ptr noundef readonly %0) unnamed_a
   %227 = phi ptr [ %222, %214 ], [ %225, %224 ]
   %228 = add nuw nsw i64 %195, 1
   %229 = icmp eq i64 %228, %192
-  br i1 %229, label %305, label %194, !llvm.loop !713
+  br i1 %229, label %305, label %194, !llvm.loop !718
 
 230:                                              ; preds = %2
   %231 = getelementptr inbounds i8, ptr %3, i64 1
@@ -48107,7 +48109,7 @@ define internal fastcc nonnull ptr @json_skip(ptr noundef readonly %0) unnamed_a
   %300 = add nuw nsw i64 %258, 1
   %301 = getelementptr inbounds i8, ptr %299, i64 1
   %302 = icmp eq i64 %300, %253
-  br i1 %302, label %305, label %256, !llvm.loop !714
+  br i1 %302, label %305, label %256, !llvm.loop !719
 
 303:                                              ; preds = %2
   %304 = getelementptr inbounds i8, ptr %3, i64 1
@@ -48379,7 +48381,7 @@ define internal void @job_timer_fired(ptr nocapture noundef %0) #14 {
 100:                                              ; preds = %93, %99
   %101 = add nuw nsw i64 %94, 1
   %102 = icmp eq i64 %101, %72
-  br i1 %102, label %76, label %93, !llvm.loop !715
+  br i1 %102, label %76, label %93, !llvm.loop !720
 
 103:                                              ; preds = %91
   %104 = getelementptr inbounds %struct.FaWorker, ptr %55, i64 0, i32 7
@@ -48479,7 +48481,7 @@ define internal fastcc void @channel_push(ptr nocapture noundef %0, ptr nocaptur
   %45 = add nuw nsw i64 %34, 1
   %46 = load i64, ptr %3, align 16, !tbaa !653
   %47 = icmp slt i64 %45, %46
-  br i1 %47, label %33, label %29, !llvm.loop !716
+  br i1 %47, label %33, label %29, !llvm.loop !721
 
 48:                                               ; preds = %29
   %49 = getelementptr inbounds %struct.FaChannel, ptr %0, i64 0, i32 5
@@ -48751,35 +48753,35 @@ attributes #70 = { cold noreturn optsize }
 !106 = !{!"", !8, i64 0, !20, i64 8, !20, i64 12}
 !107 = !{!106, !20, i64 8}
 !108 = distinct !{!108, !13}
-!109 = !{i32 0, i32 13}
+!109 = distinct !{!109, !13}
 !110 = distinct !{!110, !13}
-!111 = distinct !{!111, !13}
-!112 = !{i64 0, i64 65}
+!111 = !{i64 0, i64 65}
+!112 = distinct !{!112, !13}
 !113 = distinct !{!113, !13}
-!114 = distinct !{!114, !13}
-!115 = !{i64 7, i64 65}
-!116 = !{!117, !5, i64 0}
-!117 = !{!"", !5, i64 0, !8, i64 8, !8, i64 16, !8, i64 24}
-!118 = !{!117, !8, i64 8}
-!119 = !{!117, !8, i64 24}
+!114 = !{i64 7, i64 65}
+!115 = !{!116, !5, i64 0}
+!116 = !{!"", !5, i64 0, !8, i64 8, !8, i64 16, !8, i64 24}
+!117 = !{!116, !8, i64 8}
+!118 = !{!116, !8, i64 24}
+!119 = distinct !{!119, !13}
 !120 = distinct !{!120, !13}
 !121 = distinct !{!121, !13}
-!122 = distinct !{!122, !13}
-!123 = !{i64 0, i64 8, !10, i64 8, i64 8, !11, i64 16, i64 8, !11, i64 24, i64 8, !11}
-!124 = !{i64 0, i64 8, !11, i64 8, i64 8, !11, i64 16, i64 8, !11}
+!122 = !{i64 0, i64 8, !10, i64 8, i64 8, !11, i64 16, i64 8, !11, i64 24, i64 8, !11}
+!123 = !{i64 0, i64 8, !11, i64 8, i64 8, !11, i64 16, i64 8, !11}
+!124 = distinct !{!124, !13}
 !125 = distinct !{!125, !13}
-!126 = distinct !{!126, !13}
-!127 = !{!117, !8, i64 16}
-!128 = distinct !{!128, !13}
-!129 = !{!130, !5, i64 0}
-!130 = !{!"", !5, i64 0, !8, i64 8, !8, i64 16, !5, i64 24, !8, i64 32, !20, i64 40, !20, i64 44}
-!131 = !{!130, !8, i64 8}
-!132 = !{!130, !8, i64 16}
-!133 = !{!130, !5, i64 24}
-!134 = !{!130, !8, i64 32}
-!135 = !{!130, !20, i64 40}
-!136 = !{!130, !20, i64 44}
-!137 = !{ptr @replace_one, ptr @split_one}
+!126 = !{!116, !8, i64 16}
+!127 = distinct !{!127, !13}
+!128 = !{!129, !5, i64 0}
+!129 = !{!"", !5, i64 0, !8, i64 8, !8, i64 16, !5, i64 24, !8, i64 32, !20, i64 40, !20, i64 44}
+!130 = !{!129, !8, i64 8}
+!131 = !{!129, !8, i64 16}
+!132 = !{!129, !5, i64 24}
+!133 = !{!129, !8, i64 32}
+!134 = !{!129, !20, i64 40}
+!135 = !{!129, !20, i64 44}
+!136 = !{ptr @replace_one, ptr @split_one}
+!137 = distinct !{!137, !13}
 !138 = distinct !{!138, !13}
 !139 = distinct !{!139, !13}
 !140 = distinct !{!140, !13}
@@ -49326,10 +49328,10 @@ attributes #70 = { cold noreturn optsize }
 !681 = distinct !{!681, !13}
 !682 = distinct !{!682, !13}
 !683 = distinct !{!683, !13}
-!684 = distinct !{!684, !13}
-!685 = distinct !{!685, !13}
-!686 = distinct !{!686, !13}
-!687 = distinct !{!687, !13}
+!684 = !{!685, !20, i64 0}
+!685 = !{!"", !20, i64 0, !20, i64 4, !6, i64 8}
+!686 = !{!685, !20, i64 4}
+!687 = !{!685, !6, i64 8}
 !688 = distinct !{!688, !13}
 !689 = distinct !{!689, !13}
 !690 = distinct !{!690, !13}
@@ -49338,24 +49340,29 @@ attributes #70 = { cold noreturn optsize }
 !693 = distinct !{!693, !13}
 !694 = distinct !{!694, !13}
 !695 = distinct !{!695, !13}
-!696 = !{!317, !8, i64 24}
-!697 = !{!317, !5, i64 16}
+!696 = distinct !{!696, !13}
+!697 = distinct !{!697, !13}
 !698 = distinct !{!698, !13}
 !699 = distinct !{!699, !13}
 !700 = distinct !{!700, !13}
-!701 = distinct !{!701, !13}
-!702 = !{i64 0, i64 4, !19, i64 4, i64 4, !19, i64 8, i64 8, !11, i64 16, i64 8, !703, i64 24, i64 8, !10, i64 32, i64 8, !11, i64 40, i64 8, !10, i64 48, i64 8, !11, i64 56, i64 8, !10, i64 64, i64 8, !11}
-!703 = !{!527, !527, i64 0}
+!701 = !{!317, !8, i64 24}
+!702 = !{!317, !5, i64 16}
+!703 = distinct !{!703, !13}
 !704 = distinct !{!704, !13}
 !705 = distinct !{!705, !13}
 !706 = distinct !{!706, !13}
-!707 = !{!525, !8, i64 88}
-!708 = !{!525, !5, i64 80}
+!707 = !{i64 0, i64 4, !19, i64 4, i64 4, !19, i64 8, i64 8, !11, i64 16, i64 8, !708, i64 24, i64 8, !10, i64 32, i64 8, !11, i64 40, i64 8, !10, i64 48, i64 8, !11, i64 56, i64 8, !10, i64 64, i64 8, !11}
+!708 = !{!527, !527, i64 0}
 !709 = distinct !{!709, !13}
 !710 = distinct !{!710, !13}
 !711 = distinct !{!711, !13}
-!712 = distinct !{!712, !13}
-!713 = distinct !{!713, !13}
+!712 = !{!525, !8, i64 88}
+!713 = !{!525, !5, i64 80}
 !714 = distinct !{!714, !13}
 !715 = distinct !{!715, !13}
 !716 = distinct !{!716, !13}
+!717 = distinct !{!717, !13}
+!718 = distinct !{!718, !13}
+!719 = distinct !{!719, !13}
+!720 = distinct !{!720, !13}
+!721 = distinct !{!721, !13}

@@ -1281,6 +1281,21 @@ console.log(text.replace("é", "x").padStart(5, "0"))
 				!ir.contains("@fa_next_grapheme("),
 				"segmentation wrapper linked on {target:?}"
 			);
+			assert!(!ir.contains("@FA_GRAPHEME_RANGES"), "{ir}");
+		}
+	}
+
+	#[test]
+	fn explicit_characters_links_unicode_grapheme_properties() {
+		for target in [Target::Native, Target::Wasm] {
+			let ir = complete_ir_at_target(
+				&format!("explicit-graphemes-{}", target.name()),
+				"let text = arguments.get(0) ?? \"é😀\"\nconsole.log(text.characters())\n",
+				false,
+				OptLevel::O3,
+				target,
+			);
+			assert!(ir.contains("@FA_GRAPHEME_RANGES"), "{ir}");
 		}
 	}
 

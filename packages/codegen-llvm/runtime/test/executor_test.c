@@ -8,6 +8,7 @@
 //   packages/codegen-llvm/runtime/test/run.sh
 
 #include "../fa_runtime.c"
+#include "fa_grapheme_cases.h"
 
 int printf(const char *format, ...);
 int fflush(void *stream);
@@ -2689,7 +2690,32 @@ static void test_storage_hints(void) {
     CHECK(allocated == before);
 }
 
+static void test_grapheme_conformance(void) {
+	for (size_t i = 0; i < sizeof FA_GRAPHEME_CASES / sizeof FA_GRAPHEME_CASES[0]; i += 1) {
+		const GraphemeCase *test = &FA_GRAPHEME_CASES[i];
+		size_t position = 0;
+		for (size_t cluster = 0; cluster < test->count; cluster += 1) {
+			position = next_boundary(test->bytes, test->length, position);
+			if (position != test->ends[cluster]) {
+				printf("grapheme case %zu, cluster %zu: expected %u, got %zu\n", i, cluster, test->ends[cluster], position);
+				CHECK(position == test->ends[cluster]);
+			}
+		}
+		CHECK(position == test->length);
+		CHECK(fa_graphemes(test->bytes, test->length) == test->count);
+	}
+	FaArrayHeader *characters = characters_of((const uint8_t *)"a\r\nb", 4, SIMPLE);
+	CHECK(characters->length == 3 && characters->capacity >= 0);
+	FaString *items = (FaString *)characters->items;
+	CHECK(string_length(&items[1]) == 2);
+	for (int64_t i = 0; i < characters->length; i += 1) {
+		if (string_owned(items[i].capacity)) { fa_string_free(items[i].bytes, items[i].capacity); }
+	}
+	fa_array_free(characters, sizeof(FaString));
+}
+
 int main(void) {
+	test_grapheme_conformance();
 	test_storage_hints();
 	test_collection_destinations();
 	test_tables();

@@ -1514,3 +1514,7 @@ UTF-8 conversions consume only temporaries or proven last local reads; parameter
 
 The lead explicitly retains `std.json`'s existing native-freestanding AN004 restriction: float parsing/printing without libc is separate work. New JSON fixtures carry the same target annotation as the existing JSON fixtures; the string redesign does not remove this capability restriction.
 
+## Native grapheme segmentation (2026-11-16)
+
+Explicit `characters()` follows Unicode 17.0.0 extended grapheme clusters, UAX #29 revision 47. The runtime uses generated combined Grapheme_Cluster_Break, Extended_Pictographic and Indic_Conjunct_Break ranges, with algorithmic Hangul syllables. Unicode's source files and license are checked in; generation is offline and verifies their hashes. All official segmentation cases are sanitizer-tested. Ordinary string operations do not retain the tables after linking. ASCII character collections retain compact byte storage when they contain no CRLF; a CRLF is one grapheme cluster while still counting as two UTF-16 units.
+

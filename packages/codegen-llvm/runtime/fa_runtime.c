@@ -2537,60 +2537,9 @@ FA_EXPORT int32_t fa_string_compare(const uint8_t *left, size_t left_length, con
 
 // ── grapheme clusters ───────────────────────────────────────────────────
 
-// An approximation of the extended grapheme clusters of UAX #29, enough for
-// Latin, Greek, Cyrillic, CJK, Hangul, combining marks, emoji sequences and
-// flags: the full tables come with the Unicode library of the standard
-// library. ASCII text takes a fast path.
-
-typedef struct {
-	uint32_t first;
-	uint32_t last;
-} Range;
-
-// Grapheme_Cluster_Break = Extend or SpacingMark (approximated by blocks of
-// combining marks), and ZWNJ.
-static const Range EXTEND[] = {
-    {0x0300, 0x036F}, {0x0483, 0x0489}, {0x0591, 0x05BD}, {0x05BF, 0x05BF}, {0x05C1, 0x05C2},
-    {0x05C4, 0x05C5}, {0x05C7, 0x05C7}, {0x0610, 0x061A}, {0x064B, 0x065F}, {0x0670, 0x0670},
-    {0x06D6, 0x06DC}, {0x06DF, 0x06E4}, {0x06E7, 0x06E8}, {0x06EA, 0x06ED}, {0x0711, 0x0711},
-    {0x0730, 0x074A}, {0x07A6, 0x07B0}, {0x07EB, 0x07F3}, {0x0816, 0x082D}, {0x0859, 0x085B},
-    {0x0898, 0x089F}, {0x08CA, 0x08E1}, {0x08E3, 0x0903}, {0x093A, 0x093C}, {0x093E, 0x094F},
-    {0x0951, 0x0957}, {0x0962, 0x0963}, {0x0981, 0x0983}, {0x09BC, 0x09BC}, {0x09BE, 0x09CD},
-    {0x09D7, 0x09D7}, {0x09E2, 0x09E3}, {0x0A01, 0x0A03}, {0x0A3C, 0x0A51}, {0x0A70, 0x0A71},
-    {0x0A75, 0x0A75}, {0x0A81, 0x0A83}, {0x0ABC, 0x0ABC}, {0x0ABE, 0x0ACD}, {0x0AE2, 0x0AE3},
-    {0x0B01, 0x0B03}, {0x0B3C, 0x0B3C}, {0x0B3E, 0x0B57}, {0x0B62, 0x0B63}, {0x0B82, 0x0B82},
-    {0x0BBE, 0x0BCD}, {0x0BD7, 0x0BD7}, {0x0C00, 0x0C04}, {0x0C3C, 0x0C3C}, {0x0C3E, 0x0C56},
-    {0x0C62, 0x0C63}, {0x0C81, 0x0C83}, {0x0CBC, 0x0CBC}, {0x0CBE, 0x0CD6}, {0x0CE2, 0x0CE3},
-    {0x0D00, 0x0D03}, {0x0D3B, 0x0D3C}, {0x0D3E, 0x0D4D}, {0x0D57, 0x0D57}, {0x0D62, 0x0D63},
-    {0x0D81, 0x0D83}, {0x0DCA, 0x0DDF}, {0x0DF2, 0x0DF3}, {0x0E31, 0x0E31}, {0x0E33, 0x0E3A},
-    {0x0E47, 0x0E4E}, {0x0EB1, 0x0EB1}, {0x0EB3, 0x0EBC}, {0x0EC8, 0x0ECE}, {0x0F18, 0x0F19},
-    {0x0F35, 0x0F35}, {0x0F37, 0x0F37}, {0x0F39, 0x0F39}, {0x0F3E, 0x0F3F}, {0x0F71, 0x0F84},
-    {0x0F86, 0x0F87}, {0x0F8D, 0x0FBC}, {0x0FC6, 0x0FC6}, {0x102B, 0x103E}, {0x1056, 0x1059},
-    {0x105E, 0x1060}, {0x1062, 0x1064}, {0x1067, 0x106D}, {0x1071, 0x1074}, {0x1082, 0x108D},
-    {0x108F, 0x108F}, {0x109A, 0x109D}, {0x135D, 0x135F}, {0x1712, 0x1715}, {0x1732, 0x1734},
-    {0x1752, 0x1753}, {0x1772, 0x1773}, {0x17B4, 0x17D3}, {0x17DD, 0x17DD}, {0x180B, 0x180D},
-    {0x180F, 0x180F}, {0x1885, 0x1886}, {0x18A9, 0x18A9}, {0x1920, 0x193B}, {0x1A17, 0x1A1B},
-    {0x1A55, 0x1A7F}, {0x1AB0, 0x1AFF}, {0x1B00, 0x1B04}, {0x1B34, 0x1B44}, {0x1B6B, 0x1B73},
-    {0x1B80, 0x1B82}, {0x1BA1, 0x1BAD}, {0x1BE6, 0x1BF3}, {0x1C24, 0x1C37}, {0x1CD0, 0x1CD2},
-    {0x1CD4, 0x1CE8}, {0x1CED, 0x1CED}, {0x1CF4, 0x1CF4}, {0x1CF7, 0x1CF9}, {0x1DC0, 0x1DFF},
-    {0x200C, 0x200C}, {0x20D0, 0x20F0}, {0x2CEF, 0x2CF1}, {0x2D7F, 0x2D7F}, {0x2DE0, 0x2DFF},
-    {0x302A, 0x302F}, {0x3099, 0x309A}, {0xA66F, 0xA672}, {0xA674, 0xA67D}, {0xA69E, 0xA69F},
-    {0xA6F0, 0xA6F1}, {0xA802, 0xA802}, {0xA806, 0xA806}, {0xA80B, 0xA80B}, {0xA823, 0xA827},
-    {0xA82C, 0xA82C}, {0xA880, 0xA881}, {0xA8B4, 0xA8C5}, {0xA8E0, 0xA8F1}, {0xA8FF, 0xA8FF},
-    {0xA926, 0xA92D}, {0xA947, 0xA953}, {0xA980, 0xA983}, {0xA9B3, 0xA9C0}, {0xAA29, 0xAA36},
-    {0xAA43, 0xAA43}, {0xAA4C, 0xAA4D}, {0xAAEB, 0xAAEF}, {0xAAF5, 0xAAF6}, {0xABE3, 0xABEA},
-    {0xABEC, 0xABED}, {0xFB1E, 0xFB1E}, {0xFE00, 0xFE0F}, {0xFE20, 0xFE2F}, {0xFF9E, 0xFF9F},
-    {0x1F3FB, 0x1F3FF}, {0xE0020, 0xE007F}, {0xE0100, 0xE01EF},
-};
-
-// Extended_Pictographic, approximated by the emoji blocks.
-static const Range PICTOGRAPHIC[] = {
-    {0x00A9, 0x00A9}, {0x00AE, 0x00AE}, {0x203C, 0x203C}, {0x2049, 0x2049}, {0x2122, 0x2122},
-    {0x2139, 0x2139}, {0x2194, 0x21AA}, {0x231A, 0x23FF}, {0x24C2, 0x24C2}, {0x25AA, 0x25FE},
-    {0x2600, 0x27BF}, {0x2934, 0x2935}, {0x2B05, 0x2B55}, {0x3030, 0x3030}, {0x303D, 0x303D},
-    {0x3297, 0x3297}, {0x3299, 0x3299}, {0x1F000, 0x1F0FF}, {0x1F10D, 0x1F1AD}, {0x1F201, 0x1F3FA},
-    {0x1F400, 0x1FAFF}, {0x1FC00, 0x1FFFD},
-};
+// UAX #29 revision 47, Unicode 17.0.0. The generated properties are used
+// only by characters(); lengths, positions and iteration do not reference them.
+typedef struct { uint32_t first, last; } Range;
 
 static int in_ranges(uint32_t code, const Range *ranges, size_t count) {
 	size_t low = 0;
@@ -2609,59 +2558,31 @@ static int in_ranges(uint32_t code, const Range *ranges, size_t count) {
 }
 
 enum Break {
-	OTHER,
-	CR,
-	LF,
-	CONTROL,
-	EXTEND_KIND,
-	ZWJ,
-	REGIONAL,
-	PICTO,
-	HANGUL_L,
-	HANGUL_V,
-	HANGUL_T,
-	HANGUL_LV,
-	HANGUL_LVT,
+    OTHER = 0, CR, LF, CONTROL, EXTEND_KIND, ZWJ, REGIONAL, PREPEND,
+    SPACING_MARK, HANGUL_L, HANGUL_V, HANGUL_T, HANGUL_LV, HANGUL_LVT,
 };
+#define GRAPHEME_KIND 15
+#define EXTENDED_PICTOGRAPHIC 16
+#define INDIC_CONSONANT 1
+#define INDIC_EXTEND 2
+#define INDIC_LINKER 3
 
-static enum Break break_kind(uint32_t code) {
-	if (code == '\r') {
-		return CR;
-	}
-	if (code == '\n') {
-		return LF;
-	}
-	if (code < 0x20 || (code >= 0x7F && code < 0xA0) || code == 0x2028 || code == 0x2029) {
-		return CONTROL;
-	}
-	if (code < 0x300) {
-		return code == 0xA9 || code == 0xAE ? PICTO : OTHER;
-	}
-	if (code == 0x200D) {
-		return ZWJ;
-	}
-	if (code >= 0x1F1E6 && code <= 0x1F1FF) {
-		return REGIONAL;
-	}
-	if ((code >= 0x1100 && code <= 0x115F) || (code >= 0xA960 && code <= 0xA97C)) {
-		return HANGUL_L;
-	}
-	if ((code >= 0x1160 && code <= 0x11A7) || (code >= 0xD7B0 && code <= 0xD7C6)) {
-		return HANGUL_V;
-	}
-	if ((code >= 0x11A8 && code <= 0x11FF) || (code >= 0xD7CB && code <= 0xD7FB)) {
-		return HANGUL_T;
-	}
-	if (code >= 0xAC00 && code <= 0xD7A3) {
-		return (code - 0xAC00) % 28 == 0 ? HANGUL_LV : HANGUL_LVT;
-	}
-	if (in_ranges(code, EXTEND, sizeof EXTEND / sizeof EXTEND[0])) {
-		return EXTEND_KIND;
-	}
-	if (in_ranges(code, PICTOGRAPHIC, sizeof PICTOGRAPHIC / sizeof PICTOGRAPHIC[0])) {
-		return PICTO;
-	}
-	return OTHER;
+#include "fa_grapheme_tables.h"
+
+static uint8_t grapheme_properties(uint32_t code) {
+    if (code < 0x80) { return code == '\r' ? CR : code == '\n' ? LF : code < 0x20 || code == 0x7F ? CONTROL : OTHER; }
+    if (code >= 0xAC00 && code <= 0xD7A3) {
+        return (code - 0xAC00) % 28 == 0 ? HANGUL_LV : HANGUL_LVT;
+    }
+    size_t low = 0, high = sizeof FA_GRAPHEME_RANGES / sizeof FA_GRAPHEME_RANGES[0];
+    while (low < high) {
+        size_t middle = low + (high - low) / 2;
+        const GraphemeRange *range = &FA_GRAPHEME_RANGES[middle];
+        if (code < range->first) { high = middle; }
+        else if (code > range->last) { low = middle + 1; }
+        else { return range->flags; }
+    }
+    return OTHER;
 }
 
 /// Decodes the code point at `*index` (the input is valid UTF-8) and moves past it.
@@ -2823,68 +2744,62 @@ FA_EXPORT void fa_string_write_utf8(uint8_t *out, const uint8_t *bytes, size_t l
 	}
 }
 
-/// Whether two code points of these kinds stay in one cluster (GB3 to GB13),
-/// with the state of the cluster so far.
-static int joins(enum Break previous, enum Break kind, int regional_run, int emoji_sequence) {
-	if (previous == CR && kind == LF) {
-		return 1;
-	}
-	if (previous == CR || previous == LF || previous == CONTROL || kind == CR || kind == LF ||
-	    kind == CONTROL) {
-		return 0;
-	}
-	if (previous == HANGUL_L &&
-	    (kind == HANGUL_L || kind == HANGUL_V || kind == HANGUL_LV || kind == HANGUL_LVT)) {
-		return 1;
-	}
-	if ((previous == HANGUL_LV || previous == HANGUL_V) && (kind == HANGUL_V || kind == HANGUL_T)) {
-		return 1;
-	}
-	if ((previous == HANGUL_LVT || previous == HANGUL_T) && kind == HANGUL_T) {
-		return 1;
-	}
-	if (kind == EXTEND_KIND || kind == ZWJ) {
-		return 1;
-	}
-	if (previous == ZWJ && kind == PICTO && emoji_sequence) {
-		return 1;
-	}
-	return previous == REGIONAL && kind == REGIONAL && regional_run % 2 == 1;
+/// GB3--GB13, in rule order. Indic state records a preceding consonant
+/// and whether a linker has followed it through InCB Extend/Linker units.
+static int grapheme_joins(uint8_t previous, uint8_t current, int regional_odd,
+                          int emoji_zwj, int indic) {
+    unsigned before = previous & GRAPHEME_KIND, next = current & GRAPHEME_KIND;
+    if (before == CR && next == LF) { return 1; }
+    if (before == CR || before == LF || before == CONTROL || next == CR || next == LF || next == CONTROL) { return 0; }
+    if (before == HANGUL_L && (next == HANGUL_L || next == HANGUL_V || next == HANGUL_LV || next == HANGUL_LVT)) { return 1; }
+    if ((before == HANGUL_LV || before == HANGUL_V) && (next == HANGUL_V || next == HANGUL_T)) { return 1; }
+    if ((before == HANGUL_LVT || before == HANGUL_T) && next == HANGUL_T) { return 1; }
+    if (next == EXTEND_KIND || next == ZWJ || next == SPACING_MARK || before == PREPEND) { return 1; }
+    if ((current >> 5) == INDIC_CONSONANT && indic == 2) { return 1; }
+    if (before == ZWJ && (current & EXTENDED_PICTOGRAPHIC) && emoji_zwj) { return 1; }
+    return before == REGIONAL && next == REGIONAL && regional_odd;
 }
 
-/// The end of the grapheme cluster that starts at `index` (`index < length`).
+static int indic_state(int state, uint8_t properties) {
+    switch (properties >> 5) {
+    case INDIC_CONSONANT: return 1;
+    case INDIC_EXTEND: return state;
+    case INDIC_LINKER: return state ? 2 : 0;
+    default: return 0;
+    }
+}
+
+/// The end of the extended grapheme cluster starting at index.
 static size_t next_boundary(const uint8_t *bytes, size_t length, size_t index) {
-	// ASCII followed by ASCII: one cluster per byte, except "\r\n"
-	if (bytes[index] < 0x80 && (index + 1 >= length || bytes[index + 1] < 0x80)) {
-		return index + 1 + (bytes[index] == '\r' && index + 1 < length && bytes[index + 1] == '\n');
-	}
-	enum Break previous = break_kind(decode(bytes, length, &index));
-	int regional_run = previous == REGIONAL;
-	int emoji_sequence = previous == PICTO;
-	while (index < length) {
-		size_t next = index;
-		enum Break kind = break_kind(decode(bytes, length, &next));
-		if (!joins(previous, kind, regional_run, emoji_sequence)) {
-			break;
-		}
-		index = next;
-		regional_run = kind == REGIONAL ? regional_run + 1 : 0;
-		if (kind == PICTO) {
-			emoji_sequence = 1;
-		} else if (kind != EXTEND_KIND && kind != ZWJ) {
-			emoji_sequence = 0;
-		}
-		previous = kind;
-	}
-	return index;
+    if (bytes[index] < 0x80 && (index + 1 >= length || bytes[index + 1] < 0x80)) {
+        return index + 1 + (bytes[index] == '\r' && index + 1 < length && bytes[index + 1] == '\n');
+    }
+    uint8_t previous = grapheme_properties(decode(bytes, length, &index));
+    int regional_odd = (previous & GRAPHEME_KIND) == REGIONAL;
+    int emoji_run = (previous & EXTENDED_PICTOGRAPHIC) != 0, emoji_zwj = 0;
+    int indic = indic_state(0, previous);
+    while (index < length) {
+        size_t next = index;
+        uint8_t current = grapheme_properties(decode(bytes, length, &next));
+        if (!grapheme_joins(previous, current, regional_odd, emoji_zwj, indic)) { break; }
+        unsigned kind = current & GRAPHEME_KIND;
+        regional_odd = kind == REGIONAL ? ((previous & GRAPHEME_KIND) == REGIONAL ? !regional_odd : 1) : 0;
+        emoji_zwj = kind == ZWJ && emoji_run;
+        if (current & EXTENDED_PICTOGRAPHIC) { emoji_run = 1; }
+        else if (kind != EXTEND_KIND) { emoji_run = 0; }
+        indic = indic_state(indic, current);
+        previous = current;
+        index = next;
+    }
+    return index;
 }
 
-/// The end of the grapheme cluster at `index`: `for character in text`.
+/// The end of a grapheme cluster for explicit characters() consumers.
 FA_EXPORT size_t fa_next_grapheme(const uint8_t *bytes, size_t length, size_t index) {
 	return next_boundary(bytes, length, index);
 }
 
-/// `text.length`: the number of grapheme clusters.
+/// The number of extended grapheme clusters, independent of String.length.
 FA_EXPORT size_t fa_graphemes(const uint8_t *bytes, size_t length) {
 	size_t count = 0;
 	size_t index = 0;
@@ -3268,7 +3183,13 @@ static void *ascii_units(const uint8_t *text, size_t length) {
 }
 
 static void *characters_of(const uint8_t *text, size_t length, size_t capacity) {
-	if (capacity & SIMPLE) { return ascii_units(text, length); }
+	if (capacity & SIMPLE) {
+		size_t cr = next_byte(text, length, 0, '\r');
+		while (cr + 1 < length && text[cr + 1] != '\n') {
+			cr = next_byte(text, length, cr + 1, '\r');
+		}
+		if (cr + 1 >= length) { return ascii_units(text, length); }
+	}
 	void *characters = fa_array_new(0, (int64_t)fa_graphemes(text, length), sizeof(FaString));
 	for (size_t index = 0; index < length;) {
 		size_t next = next_boundary(text, length, index);

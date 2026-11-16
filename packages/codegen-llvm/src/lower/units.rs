@@ -359,6 +359,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		merger.ty(substituted)
 	}
 
+	/// Compare semantic types across the session-local and global stores.
+	pub(crate) fn same_concrete_type(&self, left: TypeId, right: TypeId) -> bool {
+		let left = self.concrete_type(left);
+		let right = self.concrete_type(right);
+		left == right
+			|| match (
+				crate::facts::stable_type_name(self.types(), left),
+				crate::facts::stable_type_name(self.types(), right),
+			) {
+				(Some(left), Some(right)) => left == right,
+				_ => false,
+			}
+	}
+
 	/// Notes the types an instance of a generic function is made for (its
 	/// type parameters' representations in it, `calls.rs`).
 	pub(crate) fn note_instance_types(

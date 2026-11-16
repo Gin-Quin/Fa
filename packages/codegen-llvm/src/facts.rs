@@ -326,7 +326,7 @@ fn map_key(types: &TypeStore, ty: TypeId) -> Option<String> {
 /// See [`REFERENCED_MAPS`]: a node of the map type in the value of a `use`,
 /// `reuse` or `provide`, in an argument of a call of a function of the
 /// program other than as the whole argument, or in a lambda.
-fn referenced_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
+pub(crate) fn referenced_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 	let types = session.types();
 	let mut found = BTreeSet::new();
 	for &file in files {
@@ -381,7 +381,7 @@ fn referenced_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 }
 
 /// See [`DELETED_WHILE_ITERATED_MAPS`].
-fn deleted_while_iterated_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
+pub(crate) fn deleted_while_iterated_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 	let types = session.types();
 	let mut found = BTreeSet::new();
 	for &file in files {

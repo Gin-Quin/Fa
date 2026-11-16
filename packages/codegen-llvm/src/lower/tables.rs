@@ -166,38 +166,37 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// values of such a map (`design/decisions.md`, "Dense maps"):
 	/// `program::unsafe_maps`.
 	pub(crate) fn dense_map(&self, ty: TypeId) -> bool {
-		// Layout facts belong to the instantiated collection, not its
-		// generic spelling: callers and callees must use the same flags.
 		let ty = self.concrete_type(ty);
+		let Some(name) = crate::facts::stable_type_name(self.types(), ty) else {
+			return false;
+		};
 		if self.whole_program {
-			return !self.unsafe_maps.contains(&ty);
+			return !self.unsafe_maps.contains(&name);
 		}
-		// per unit: the merged facts of every unit, by stable name (`facts.rs`)
 		self.program_facts.as_ref().is_some_and(|facts| {
-			crate::facts::stable_type_name(self.types(), ty).is_some_and(|name| {
-				!facts
-					.consulted(crate::facts::REFERENCED_MAPS, self.fact_log.as_deref())
-					.contains(&name)
-			})
+			!facts
+				.consulted(crate::facts::REFERENCED_MAPS, self.fact_log.as_deref())
+				.contains(&name)
 		})
 	}
 
-	/// Whether a dense map type keeps its entries out of the probe array: a
-	/// `deleteWhere` iterates over maps of that type.
+	/// A generic spelling and its instantiated map consult the same key,
+	/// including the local/global type views used by whole-program lowering.
 	fn deleted_while_iterated(&self, ty: TypeId) -> bool {
 		let ty = self.concrete_type(ty);
+		let Some(name) = crate::facts::stable_type_name(self.types(), ty) else {
+			return true;
+		};
 		if self.whole_program {
-			return self.no_inline_maps.contains(&ty);
+			return self.no_inline_maps.contains(&name);
 		}
 		self.program_facts.as_ref().is_none_or(|facts| {
-			crate::facts::stable_type_name(self.types(), ty).is_none_or(|name| {
-				facts
-					.consulted(
-						crate::facts::DELETED_WHILE_ITERATED_MAPS,
-						self.fact_log.as_deref(),
-					)
-					.contains(&name)
-			})
+			facts
+				.consulted(
+					crate::facts::DELETED_WHILE_ITERATED_MAPS,
+					self.fact_log.as_deref(),
+				)
+				.contains(&name)
 		})
 	}
 

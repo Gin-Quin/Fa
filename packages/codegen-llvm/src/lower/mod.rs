@@ -414,10 +414,10 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	pub(crate) fact_log: Option<std::sync::Arc<crate::facts::FactLog>>,
 	/// The map types the program may keep a reference into the values of
 	/// (`program::unsafe_maps`).
-	unsafe_maps: rustc_hash::FxHashSet<TypeId>,
+	unsafe_maps: std::collections::BTreeSet<String>,
 	/// The map types some `deleteWhere` iterates over while deleting: their
 	/// entries stay out of the probe array (`tables.rs`, `inline`).
-	no_inline_maps: rustc_hash::FxHashSet<TypeId>,
+	no_inline_maps: std::collections::BTreeSet<String>,
 	/// The union types whose arrays the program only builds with `push` and
 	/// reads with `for` (`packed::packable_items`).
 	packable_items: rustc_hash::FxHashSet<TypeId>,

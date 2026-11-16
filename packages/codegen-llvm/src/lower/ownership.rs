@@ -133,14 +133,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// with the bindings of the instance being lowered, since an object type
 	/// with generic parameters has the representation of its bindings.
 	pub(super) fn shape_key(&self, repr: Repr) -> String {
-		let bindings = self.bindings.borrow();
-		if bindings.is_empty() {
-			return format!("{repr:?}");
-		}
-		let mut bindings: Vec<String> = bindings
+		let mut bindings: Vec<String> = self
+			.bindings
+			.borrow()
 			.iter()
 			.map(|(param, repr)| format!("{param:?}={repr:?}"))
 			.collect();
+		bindings.extend(
+			self.type_bindings
+				.borrow()
+				.iter()
+				.map(|(param, ty)| format!("type {param:?}={ty:?}")),
+		);
+		if bindings.is_empty() {
+			return format!("{repr:?}");
+		}
 		bindings.sort();
 		format!("{repr:?}|{}", bindings.join(","))
 	}

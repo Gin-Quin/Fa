@@ -140,7 +140,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			&& let Some(owner) = self.reference_owner_type(path, roots)
 			&& let TypeKind::Collection(CollKind::Columnar | CollKind::GrowingColumnar, item, _) =
 				self.types().kind(owner)
-			&& self.types().rec_target(item).unwrap_or(item) == self.concrete_type(object)
+			&& matches!(self.repr_of(owner, 0), Ok(Repr::Columnar(_)))
+			&& self.same_concrete_type(self.types().rec_target(item).unwrap_or(item), object)
 		{
 			Repr::Row(object)
 		} else {
@@ -652,7 +653,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Array lookups return the existing slot address, including absent
 	/// optionals. Ordinary value reads keep the existing lookup lowering.
-	fn array_reference(&mut self, node: NodeId) -> Result<Option<Slot<'ctx>>, Error> {
+	fn array_reference(&mut self, node: NodeId) -> Result<Option<(Slot<'ctx>, bool)>, Error> {
 		let Some(info) = self.analysis.call(node).cloned() else {
 			return Ok(None);
 		};
@@ -660,7 +661,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(None);
 		};
 		let path = fa_analyzer::builtins::get(id).path;
-		if !matches!(path, "Array#get" | "Array#find") {
+		if !matches!(
+			path,
+			"Array#get"
+				| "Array#find"
+				| "OrderedColumnar#get"
+				| "OrderedColumnar#find"
+				| "OrderedColumnar#add"
+		) {
 			return Ok(None);
 		}
 		let array = self.receiver(node)?;
@@ -679,11 +687,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ => return Err(self.unsupported(node.index(), "this lookup")),
 		};
 		let argument_value = self.expr(argument)?;
+		if path == "OrderedColumnar#add" {
+			self.materialize_array(pointer, repr)?;
+			let index = self.array_length(array)?.int();
+			self.array_push(array, argument_value, node, Some(argument))?;
+			return Ok(Some((
+				self.array_reference_slot(array, repr, index)?,
+				false,
+			)));
+		}
 		let result = self.pointer_alloca("reference")?;
 		self.builder
 			.build_store(result, self.pointer_type().const_null())?;
 		let end = self.append_block("reference_found");
-		if path == "Array#get" {
+		if matches!(path, "Array#get" | "OrderedColumnar#get") {
 			let index = self
 				.convert(
 					argument_value,
@@ -730,7 +747,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_load(self.pointer_type(), result, "")?
 			.into_pointer_value();
-		Ok(Some(Slot { pointer, repr }))
+		Ok(Some((Slot { pointer, repr }, true)))
 	}
 
 	fn array_reference_slot(
@@ -769,8 +786,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let repr = self.reference_result_repr(node, element)?;
 			return Ok(Some((Slot { pointer, repr }, optional)));
 		}
-		if let Some(slot) = self.array_reference(node)? {
-			return Ok(Some((slot, true)));
+		if let Some(reference) = self.array_reference(node)? {
+			return Ok(Some(reference));
 		}
 		if let Some(found) = self.pool_reference(value)? {
 			return Ok(Some(found));

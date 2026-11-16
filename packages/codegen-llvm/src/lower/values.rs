@@ -991,7 +991,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// tables of the same keys and values (`GrowingMap`, literal types)
 			(Repr::Map(_), Repr::Map(_)) | (Repr::Set(_), Repr::Set(_)) => {
 				let (a, b) = (self.table_of(value.repr)?, self.table_of(to)?);
-				if a.key != b.key || a.value != b.value || a.growing != b.growing {
+				if a.key != b.key
+					|| a.value != b.value
+					|| a.growing != b.growing
+					|| a.dense != b.dense
+					|| a.inline != b.inline
+				{
 					return Err(self.unsupported(node, "converting this collection"));
 				}
 				Val::new(to, raw)

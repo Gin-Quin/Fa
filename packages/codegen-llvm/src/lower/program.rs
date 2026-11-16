@@ -658,67 +658,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 pub(crate) fn unsafe_maps(
 	session: &Session,
 	files: &[(FileId, String)],
-) -> rustc_hash::FxHashSet<TypeId> {
-	use fa_analyzer::analysis::{Argument, Callee};
-	use fa_analyzer::syntax::view;
-	use fa_analyzer::types::{CollKind, TypeKind};
-	let mut unsafe_maps = rustc_hash::FxHashSet::default();
-	let types = session.types();
-	let is_map = |ty: TypeId| matches!(types.kind(ty), TypeKind::Collection(CollKind::Map, _, _));
-	for (file, _) in files {
-		let tree = session.tree(*file);
-		let analysis = session.analysis(*file);
-		let mark = |root: NodeId,
-		            skip: Option<NodeId>,
-		            unsafe_maps: &mut rustc_hash::FxHashSet<TypeId>| {
-			let mut stack = vec![root.index()];
-			while let Some(at) = stack.pop() {
-				let node = NodeId::new(at);
-				let ty = analysis.type_of(node);
-				if Some(node) != skip && is_map(ty) {
-					unsafe_maps.insert(ty);
-				}
-				tree.nodes[at].for_each_child(|child| stack.push(child));
-			}
-		};
-		// a function's own body is no closure
-		let declared = crate::facts::declaration_lambdas(tree);
-		let parents = crate::facts::parents_of(tree);
-		for index in 0..tree.nodes.len() {
-			let node = NodeId::new(index);
-			match view(tree, node) {
-				// a reference that no change of a map can outlive is fine
-				View::Use { .. }
-					if crate::facts::short_reference(tree, analysis, types, node, &parents) => {}
-				View::Use { value, .. }
-				| View::Reuse { value, .. }
-				| View::Provide { value, .. } => {
-					mark(value, None, &mut unsafe_maps);
-				}
-				View::Lambda { .. } if !declared.contains(&node) => {
-					mark(node, None, &mut unsafe_maps)
-				}
-				View::Call { .. } => {
-					let Some(info) = analysis.call(node) else {
-						continue;
-					};
-					if matches!(
-						info.callee,
-						Callee::Builtin(_) | Callee::Conversion(_) | Callee::Member(_)
-					) {
-						continue;
-					}
-					for argument in &info.arguments {
-						if let Argument::Given(value) = argument {
-							mark(*value, Some(*value), &mut unsafe_maps);
-						}
-					}
-				}
-				_ => {}
-			}
-		}
-	}
-	unsafe_maps
+) -> std::collections::BTreeSet<String> {
+	let files: Vec<_> = files.iter().map(|(file, _)| *file).collect();
+	crate::facts::referenced_maps(session, &files)
 }
 
 /// The map types whose entries a `deleteWhere` deletes while it iterates
@@ -727,31 +669,7 @@ pub(crate) fn unsafe_maps(
 pub(crate) fn no_inline_maps(
 	session: &Session,
 	files: &[(FileId, String)],
-) -> rustc_hash::FxHashSet<TypeId> {
-	use fa_analyzer::analysis::Callee;
-	use fa_analyzer::syntax::view;
-	let mut maps = rustc_hash::FxHashSet::default();
-	for (file, _) in files {
-		let tree = session.tree(*file);
-		let analysis = session.analysis(*file);
-		for index in 0..tree.nodes.len() {
-			let node = NodeId::new(index);
-			let View::Call { callee, .. } = view(tree, node) else {
-				continue;
-			};
-			let Some(Callee::Builtin(id)) = analysis.call(node).map(|info| info.callee) else {
-				continue;
-			};
-			if !fa_analyzer::builtins::get(id)
-				.path
-				.ends_with("#deleteWhere")
-			{
-				continue;
-			}
-			if let View::Access { target, .. } = view(tree, callee) {
-				maps.insert(analysis.type_of(target));
-			}
-		}
-	}
-	maps
+) -> std::collections::BTreeSet<String> {
+	let files: Vec<_> = files.iter().map(|(file, _)| *file).collect();
+	crate::facts::deleted_while_iterated_maps(session, &files)
 }

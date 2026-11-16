@@ -706,7 +706,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.map(|(param, bound)| (*param, *bound)),
 		);
 		let saved = self.bindings.replace(merged);
+		let mut types = self.type_bindings.borrow().clone();
+		types.extend(function.types.iter().map(|(param, ty)| (*param, *ty)));
+		let saved_types = self.type_bindings.replace(types);
 		let converted = self.convert(value, repr, at);
+		self.type_bindings.replace(saved_types);
 		self.bindings.replace(saved);
 		converted
 	}

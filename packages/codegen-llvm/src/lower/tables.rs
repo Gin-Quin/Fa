@@ -777,6 +777,81 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.into_int_value();
 				builder.build_int_z_extend_or_bit_cast(hash, i64, "")?
 			}
+			Repr::Array(_) | Repr::Tuple(_)
+				if matches!(repr, Repr::Array(_))
+					|| matches!(repr, Repr::Tuple(ty) if self.inline_info(ty).is_some()) =>
+			{
+				let (item, items, length) = match repr {
+					Repr::Tuple(ty) => {
+						let (item_type, capacity) = self.inline_info(ty).expect("an inline array");
+						if capacity == 0 {
+							return Ok(i64.const_zero());
+						}
+						let item = self.item_repr(item_type, NodeId::new(0))?;
+						let slot = builder.build_alloca(self.inline_type(ty), "hash.inline")?;
+						builder.build_store(slot, value)?;
+						let items = builder.build_struct_gep(self.inline_type(ty), slot, 0, "")?;
+						let length = builder
+							.build_extract_value(value.into_struct_value(), 1, "")?
+							.into_int_value();
+						let length = builder.build_int_z_extend(length, i64, "")?;
+						(item, items, length)
+					}
+					Repr::Array(item_type) => {
+						let item = self.item_repr(item_type, NodeId::new(0))?;
+						let header = self.header_type();
+						let array = value.into_pointer_value();
+						if item == Repr::Str {
+							builder.build_call(
+								self.runtime.function("fa_array_materialize")?,
+								&[array.into()],
+								"",
+							)?;
+						}
+						let items_pointer = builder.build_struct_gep(header, array, 0, "")?;
+						let items = builder
+							.build_load(self.pointer_type(), items_pointer, "")?
+							.into_pointer_value();
+						let length_pointer = builder.build_struct_gep(header, array, 1, "")?;
+						let length = builder
+							.build_load(i64, length_pointer, "")?
+							.into_int_value();
+						(item, items, length)
+					}
+					_ => unreachable!(),
+				};
+				let accumulator = builder.build_alloca(i64, "hash")?;
+				builder.build_store(accumulator, length)?;
+				let item_type = self.llvm_type(item);
+				let before = builder.get_insert_block().expect("a block");
+				let test = self.context.append_basic_block(function, "each");
+				let body = self.context.append_basic_block(function, "each_body");
+				let end = self.context.append_basic_block(function, "each_end");
+				builder.build_unconditional_branch(test)?;
+				builder.position_at_end(test);
+				let index = builder.build_phi(i64, "index")?;
+				index.add_incoming(&[(&i64.const_zero(), before)]);
+				let current = index.as_basic_value().into_int_value();
+				let more = builder.build_int_compare(IntPredicate::SLT, current, length, "")?;
+				builder.build_conditional_branch(more, body, end)?;
+				builder.position_at_end(body);
+				let pointer =
+					unsafe { builder.build_in_bounds_gep(item_type, items, &[current], "")? };
+				let loaded = if item.has_value() {
+					builder.build_load(item_type, pointer, "")?
+				} else {
+					self.context.bool_type().const_zero().into()
+				};
+				let next = call_hash(item, loaded)?;
+				let hash = builder.build_load(i64, accumulator, "")?.into_int_value();
+				let hash = self.combine(builder, hash, next)?;
+				builder.build_store(accumulator, hash)?;
+				let following = builder.build_int_add(current, i64.const_int(1, false), "")?;
+				index.add_incoming(&[(&following, builder.get_insert_block().expect("a block"))]);
+				builder.build_unconditional_branch(test)?;
+				builder.position_at_end(end);
+				builder.build_load(i64, accumulator, "")?.into_int_value()
+			}
 			Repr::Object(_) | Repr::Tuple(_) => {
 				let fields = match repr {
 					Repr::Object(ty) => self.object_fields(ty),
@@ -830,53 +905,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let address = self.edge_address(builder, Repr::Rec(target), value)?;
 				let loaded = builder.build_load(self.llvm_type(target_repr), address, "")?;
 				call_hash(target_repr, loaded)?
-			}
-			Repr::Array(item_type) => {
-				let item = self.item_repr(item_type, NodeId::new(0))?;
-				let header = self.header_type();
-				let array = value.into_pointer_value();
-				if item == Repr::Str {
-					builder.build_call(
-						self.runtime.function("fa_array_materialize")?,
-						&[array.into()],
-						"",
-					)?;
-				}
-				let items_pointer = builder.build_struct_gep(header, array, 0, "")?;
-				let items = builder
-					.build_load(self.pointer_type(), items_pointer, "")?
-					.into_pointer_value();
-				let length_pointer = builder.build_struct_gep(header, array, 1, "")?;
-				let length = builder
-					.build_load(i64, length_pointer, "")?
-					.into_int_value();
-				let accumulator = builder.build_alloca(i64, "hash")?;
-				builder.build_store(accumulator, length)?;
-				let item_type = self.llvm_type(item);
-				let before = builder.get_insert_block().expect("a block");
-				let test = self.context.append_basic_block(function, "each");
-				let body = self.context.append_basic_block(function, "each_body");
-				let end = self.context.append_basic_block(function, "each_end");
-				builder.build_unconditional_branch(test)?;
-				builder.position_at_end(test);
-				let index = builder.build_phi(i64, "index")?;
-				index.add_incoming(&[(&i64.const_zero(), before)]);
-				let current = index.as_basic_value().into_int_value();
-				let more = builder.build_int_compare(IntPredicate::SLT, current, length, "")?;
-				builder.build_conditional_branch(more, body, end)?;
-				builder.position_at_end(body);
-				let pointer =
-					unsafe { builder.build_in_bounds_gep(item_type, items, &[current], "")? };
-				let loaded = builder.build_load(item_type, pointer, "")?;
-				let next = call_hash(item, loaded)?;
-				let hash = builder.build_load(i64, accumulator, "")?.into_int_value();
-				let hash = self.combine(builder, hash, next)?;
-				builder.build_store(accumulator, hash)?;
-				let following = builder.build_int_add(current, i64.const_int(1, false), "")?;
-				index.add_incoming(&[(&following, builder.get_insert_block().expect("a block"))]);
-				builder.build_unconditional_branch(test)?;
-				builder.position_at_end(end);
-				builder.build_load(i64, accumulator, "")?.into_int_value()
 			}
 			Repr::Range => {
 				let structure = value.into_struct_value();

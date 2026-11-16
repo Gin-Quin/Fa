@@ -191,7 +191,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 			(Value::Array(items), Repr::Tuple(inline)) if self.inline_info(inline).is_some() => {
-				let (item_type, _) = self.inline_info(inline).expect("an inline array");
+				let (item_type, capacity) = self.inline_info(inline).expect("an inline array");
+				if items.len() > capacity as usize {
+					return Err(self.unsupported(
+						node.index(),
+						"an inline-array constant exceeding its declared capacity",
+					));
+				}
 				let slot = self.alloca(repr, "inline.constant")?;
 				for (index, value) in items.iter().enumerate() {
 					let destination = self.inline_item(
@@ -525,5 +531,63 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.rev()
 			.find_map(|results| results.constants.get(&node).cloned())
 			.or_else(|| self.analysis.constant(node).cloned())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::Target;
+	use fa_analyzer::Session;
+	use fa_analyzer::types::CollKind;
+	use inkwell::context::Context;
+
+	#[test]
+	fn oversized_inline_constants_are_rejected_before_storage_writes() {
+		for target in [Target::Native, Target::Wasm, Target::NativeFreestanding] {
+			let mut session = Session::new();
+			let file = session.set_source("main", std::sync::Arc::from("none"));
+			session.analyze_file(file);
+			let capacity = session.types.int_literal(1.into());
+			let ty = session
+				.types
+				.collection(CollKind::InlineArray, TypeId::INTEGER, capacity);
+			let context = Context::create();
+			let module = context.create_module("invalid-inline-constant");
+			let function =
+				module.add_function("test", context.void_type().fn_type(&[], false), None);
+			let usize = if target == Target::Wasm {
+				context.i32_type()
+			} else {
+				context.i64_type()
+			};
+			let mut lowering = Lowering::new(
+				&session,
+				&[(file, "test.fa".into())],
+				file,
+				vec![],
+				&context,
+				&module,
+				target,
+				usize,
+			);
+			lowering
+				.builder
+				.position_at_end(context.append_basic_block(function, "entry"));
+			let result = lowering.constant_value(
+				&Value::array(vec![Value::int(7), Value::int(8)]),
+				ty,
+				NodeId::new(0),
+			);
+			assert!(
+				matches!(result, Err(Error::Unsupported { message, .. }) if message.contains("exceeding its declared capacity"))
+			);
+			assert!(
+				!module
+					.print_to_string()
+					.to_string()
+					.contains("inline.constant")
+			);
+		}
 	}
 }

@@ -374,7 +374,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Repr::Rec(target),
 				}
 			}
-			TypeKind::Collection(CollKind::InlineArray, ..) => Repr::Tuple(ty),
+			TypeKind::Collection(CollKind::InlineArray, ..) => {
+				// Unlike a heap array, this aggregate's layout must remain
+				// concrete after the instance's binding scope ends (thunks,
+				// returned values and declarations in another unit).
+				let ty = self.shared_type(self.concrete_type(ty));
+				if self.inline_info(ty).is_none() {
+					return Err(
+						self.unsupported(node, "an inline array outside a concrete instance")
+					);
+				}
+				Repr::Tuple(ty)
+			}
 			TypeKind::Collection(CollKind::Array, item, _) => Repr::Array(item),
 			TypeKind::Collection(CollKind::GrowingArray, item, _) => Repr::Growing(item),
 			// a columnar is stored like a pool for now, by rows (the column
@@ -843,6 +854,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				repr: if to.has_value() { value.repr } else { to },
 				value: if to.has_value() { value.value } else { None },
 			});
+		}
+		// Promotion to the shared type store preserves identity and storage.
+		// Rebuilding that same object would create an extra owning value.
+		if let (Repr::Object(from), Repr::Object(target)) = (value.repr, to)
+			&& self.same_type(from, target)
+		{
+			return Ok(Val { repr: to, ..value });
 		}
 		if to == Repr::Union && value.repr != Repr::Union {
 			if let Repr::Rec(target) = value.repr

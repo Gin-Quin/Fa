@@ -98,6 +98,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						.iter()
 						.any(|repr| self.needs_drop(*repr))
 			}
+			Repr::Tuple(ty) if self.inline_info(ty).is_some() => {
+				let (item, capacity) = self.inline_info(ty).expect("an inline array");
+				capacity != 0
+					&& self
+						.item_repr(item, NodeId::new(0))
+						.is_ok_and(|item| self.needs_drop(item))
+			}
 			Repr::Tuple(ty) => self
 				.tuple_reprs(ty)
 				.iter()
@@ -122,12 +129,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The representations of the items of a tuple type.
 	pub(crate) fn tuple_reprs(&self, ty: TypeId) -> Vec<Repr> {
-		if let Some((item, capacity)) = self.inline_info(ty) {
-			if capacity == 0 {
-				return vec![];
-			}
-			return vec![self.item_repr(item, NodeId::new(0)).unwrap_or(Repr::Bool)];
-		}
 		self.tuple_items(ty)
 			.iter()
 			.map(|item| self.repr_of(*item, 0).unwrap_or(Repr::Bool))
@@ -2077,6 +2078,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Ok(repr) => stack.push(repr),
 					Err(_) => return false,
 				},
+				Repr::Tuple(ty) if self.inline_info(ty).is_some() => {
+					let (item, capacity) = self.inline_info(ty).expect("an inline array");
+					if capacity != 0 {
+						match self.item_repr(item, node) {
+							Ok(item) => stack.push(item),
+							Err(_) => return false,
+						}
+					}
+				}
 				Repr::Tuple(ty) => stack.extend(self.tuple_reprs(ty)),
 				Repr::Optional(scalar) => stack.push(scalar.repr()),
 				_ if !self.needs_drop(at) => {}

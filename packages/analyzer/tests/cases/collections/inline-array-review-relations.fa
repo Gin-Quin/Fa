@@ -1,0 +1,22 @@
+type Town = {
+	people: Pool<Person> = []
+	type Person = {
+		name: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Pool<people->bestFriend>
+	}
+}
+mutable towns: InlineArray<Town, 1> = [{}]
+use town = towns[0]
+use ana = town.people.add({ name = "Ana" })
+use bao = town.people.add({ name = "Bao" })
+ana.bestFriend = bao
+console.log(ana.bestFriend?.name ?? "none", bao.bestFriendOf.size) -- prints: Bao 1
+let snapshot = copy towns
+town.people.delete(bao)
+console.log(ana.bestFriend?.name ?? "none") -- prints: none
+for saved in snapshot {
+	for person in saved.people { console.log(person.name, person.bestFriend?.name ?? "none") }
+}
+-- prints: Ana Bao
+-- prints: Bao none

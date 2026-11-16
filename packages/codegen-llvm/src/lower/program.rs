@@ -126,7 +126,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.analysis
 				.type_decls
 				.values()
-				.find(|decl| decl.ty == ty)?;
+				.find(|decl| self.same_type(decl.ty, ty))?;
 			declaration
 				.functions
 				.iter()

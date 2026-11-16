@@ -2260,8 +2260,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.pool_submit(call, &info, true)
 			}
 			// std.fs, std.net (io.rs)
-			"File.readText" | "File.read" | "File.writeText" | "TcpListener.accept"
-			| "TcpStream.connect" | "TcpStream.read" | "TcpStream.write" => self.await_io(node, name, call),
+			"File.readText" | "File.read" | "File.writeText" | "File.write"
+			| "TcpListener.accept" | "TcpStream.connect" | "TcpStream.read" | "TcpStream.write" => {
+				self.await_io(node, name, call)
+			}
 			// a call on a worker's thread
 			"worker" => {
 				self.tasks.call_modes.insert(call, CallMode::Await);

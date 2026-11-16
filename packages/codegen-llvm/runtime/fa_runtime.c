@@ -5114,7 +5114,7 @@ FA_EXPORT __attribute__((noinline)) const void *fa_string_decode_bytes(void *byt
 		FaArrayHeader *owner = bytes;
 		size_t capacity = (size_t)owner->capacity;
 		uint8_t *items = view.items;
-		int adopt = array_marker(owner) == BYTES_STRING_BLOCK;
+		int adopt = array_marker(owner) == BYTES_STRING_BLOCK && capacity < KIND_MASK;
 		if (!adopt && inline_items(owner) && !(capacity & 1)) {
 			// The combined array header becomes the prefix. On wasm the
 			// smaller prefix shifts at most 96 bytes within this same block.
@@ -11509,7 +11509,7 @@ FA_EXPORT int32_t fa_tcp_write_async(FaSocket *stream, const FaArrayHeader *byte
 
 // ── files
 
-enum { FILE_READ = 0, FILE_READ_BYTES = 1, FILE_WRITE = 2 };
+enum { FILE_READ = 0, FILE_READ_BYTES = 1, FILE_WRITE = 2, FILE_WRITE_BYTES = 3 };
 
 /// A file operation, run in place or on the blocking pool.
 typedef struct {
@@ -11525,6 +11525,19 @@ typedef struct {
 	size_t room;
 } FaFileJob;
 
+static void file_buffer_free(FaFileJob *file) {
+	if (!file->room) { return; }
+	if (file->kind < FILE_WRITE) {
+		fa_free(string_header(file->bytes), sizeof(StringHeader) + file->room, sizeof(size_t));
+	} else { fa_free(file->bytes, file->room, 16); }
+}
+
+static uint8_t *file_buffer_allocate(FaFileJob *file, size_t room) {
+	if (file->kind >= FILE_WRITE) { return fa_alloc(room, 16); }
+	if (room > SIZE_MAX - sizeof(StringHeader)) { out_of_memory(); }
+	return (uint8_t *)fa_alloc(sizeof(StringHeader) + room, sizeof(size_t)) + sizeof(StringHeader);
+}
+
 static void file_job_run(FaJob *job) {
 	FaFileJob *file = (FaFileJob *)job;
 #if !defined(__wasm__)
@@ -11532,7 +11545,7 @@ static void file_job_run(FaJob *job) {
 		file->code = E_NOSYS;
 		return;
 	}
-	if (file->kind == FILE_WRITE) {
+	if (file->kind >= FILE_WRITE) {
 		// O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC
 		int fd = open(file->path, 01 | 0100 | 01000 | 02000000, 0666);
 		if (fd < 0) {
@@ -11563,11 +11576,12 @@ static void file_job_run(FaJob *job) {
 	}
 	for (;;) {
 		if (file->length == file->room) {
+			if (file->room > (SIZE_MAX - sizeof(StringHeader)) / 2) { out_of_memory(); }
 			size_t room = file->room < 4096 ? 4096 : file->room * 2;
-			uint8_t *bytes = fa_alloc(room, 16);
+			uint8_t *bytes = file_buffer_allocate(file, room);
 			if (file->room > 0) {
 				copy_bytes(bytes, file->bytes, file->length);
-				fa_free(file->bytes, file->room, 16);
+				file_buffer_free(file);
 			}
 			file->bytes = bytes;
 			file->room = room;
@@ -11590,19 +11604,17 @@ static void file_job_run(FaJob *job) {
 	// the host's `node:fs`; what was read (or the error's text) replaces
 	// the bytes to write
 	int32_t size = 0;
-	int32_t failed = fa_host_file_run(file->kind, (const uint8_t *)file->path, file->path_length,
+	int32_t failed = fa_host_file_run(file->kind >= FILE_WRITE ? FILE_WRITE : file->kind, (const uint8_t *)file->path, file->path_length,
 	                                  file->bytes, file->length, &size);
-	if (file->room > 0) {
-		fa_free(file->bytes, file->room, 16);
-	}
+	file_buffer_free(file);
 	file->bytes = 0;
 	file->length = 0;
 	file->room = 0;
 	if (size > 0) {
-		file->bytes = fa_alloc((size_t)size, 16);
+		file->room = file->kind < FILE_WRITE ? string_block((size_t)size) : (size_t)size;
+		file->bytes = file_buffer_allocate(file, file->room);
 		fa_host_file_take(file->bytes);
 		file->length = (size_t)size;
-		file->room = (size_t)size;
 	}
 	if (failed) {
 		file->code = E_HOST;
@@ -11613,9 +11625,7 @@ static void file_job_run(FaJob *job) {
 static void file_job_release(FaJob *job) {
 	FaFileJob *file = (FaFileJob *)job;
 	fa_free(file->path, file->path_length + 1, 1);
-	if (file->room > 0) {
-		fa_free(file->bytes, file->room, 16);
-	}
+	file_buffer_free(file);
 	fa_free(file, sizeof(FaFileJob), 16);
 }
 
@@ -11638,6 +11648,10 @@ FA_EXPORT FaFileJob *fa_file_job(int32_t kind, const uint8_t *path, size_t lengt
 		fa_string_write_utf8(file->bytes, bytes, byte_count, 0);
 		file->length = encoded;
 		file->room = encoded;
+	} else if (kind == FILE_WRITE_BYTES && byte_count > 0) {
+		file->bytes = fa_alloc(byte_count, 16);
+		copy_bytes(file->bytes, bytes, byte_count);
+		file->length = file->room = byte_count;
 	}
 	return file;
 }
@@ -11670,13 +11684,21 @@ FA_EXPORT const void *fa_file_finish(FaFileJob *file, void *out) {
 			static const uint8_t message[] = "invalid UTF-8";
 			error = file_error(E_HOST, message, sizeof message - 1,
 			                   (const uint8_t *)file->path, file->path_length);
-		} else { utf8_copy_valid(file->bytes, file->length, info.units, (FaString *)out); }
-	} else if (file->kind == FILE_READ_BYTES) {
-		FaArrayHeader *array = fa_array_new((int64_t)file->length, (int64_t)file->length, 1);
-		if (file->length > 0) {
-			copy_bytes(array->items, file->bytes, file->length);
+		} else if (file->length <= INLINE_STRING_BYTES || file->room >= KIND_MASK) {
+			utf8_copy_valid(file->bytes, file->length, info.units, (FaString *)out);
+		} else {
+			size_t flags = info.units == file->length ? SIMPLE : 0;
+			if (!flags) { string_init_header(string_header(file->bytes)); }
+			*(FaString *)out = (FaString){file->bytes, file->length, file->room | flags};
+			fa_string_set_unit_count(file->bytes, file->length, file->room | flags, info.units);
+			file->bytes = 0;
+			file->room = 0;
 		}
-		*(void **)out = array;
+	} else if (file->kind == FILE_READ_BYTES) {
+		*(void **)out = file->room ? (void *)bytes_adopt_string(file->bytes, file->length, file->room)
+		                          : fa_bytes_filled(0, 0);
+		file->bytes = 0;
+		file->room = 0;
 	}
 	file_job_release(&file->job);
 	return error;
@@ -11930,6 +11952,7 @@ static int json_string(JsonReader *reader, const uint8_t **bytes, size_t *length
 	uint8_t *out = json_alloc(reader->document, at - start);
 	size_t written = 0;
 	size_t index = start;
+	int lone_surrogates = 0;
 	while (index < at) {
 		uint8_t byte = reader->text[index];
 		if (byte != '\\') {
@@ -11976,10 +11999,7 @@ static int json_string(JsonReader *reader, const uint8_t **bytes, size_t *length
 					index += 6;
 				}
 			}
-			if (code >= 0xD800 && code <= 0xDFFF) {
-				// a lone surrogate: the replacement character, as UTF-8 does
-				code = 0xFFFD;
-			}
+			lone_surrogates |= code >= 0xD800 && code <= 0xDFFF;
 			written += json_utf8(code, out + written);
 			break;
 		}
@@ -11988,6 +12008,10 @@ static int json_string(JsonReader *reader, const uint8_t **bytes, size_t *length
 		}
 	}
 	*bytes = out;
+	if (lone_surrogates) {
+		size_t flags;
+		written = string_join_pairs(out, written, &flags);
+	}
 	*length = written;
 	return 1;
 }
@@ -12891,6 +12915,22 @@ FA_EXPORT const void *fa_json_parse(const uint8_t *text, size_t length, const ui
 	return 0;
 }
 
+/// Binary JSON input is strict UTF-8. Parse the validated bytes directly;
+/// only decoded string tokens become String values.
+FA_EXPORT const void *fa_json_parse_bytes(const void *bytes, const uint8_t *schema,
+                                         FaJsonDocument **out) {
+	FaBytesView view = bytes_parts(bytes);
+	Utf8Info info = utf8_validate(view.items, view.length);
+	if (info.error != SIZE_MAX) {
+		static const uint8_t message[] = "invalid UTF-8 in JSON input";
+		MessageError *error = fa_alloc(sizeof(MessageError), sizeof(int64_t));
+		error->id = JSON_ERROR;
+		error->message = owned_copy_with(message, sizeof message - 1, SIMPLE);
+		return error;
+	}
+	return fa_json_parse(view.items, view.length, schema, out);
+}
+
 /// The member of an enumeration a value (that fits) is: its position in
 /// the schema.
 FA_EXPORT int64_t fa_json_enum(const FaJson *node, const uint8_t *schema) {
@@ -13000,11 +13040,32 @@ static void quote_json_bytes(const uint8_t *bytes, size_t length) {
 	fa_b_bytes(bytes + start, length - start);
 }
 
-FA_EXPORT void fa_b_json_string(const uint8_t *bytes, size_t length) {
+static void quote_json_surrogates(const uint8_t *bytes, size_t length) {
+	static const char hex[] = "0123456789abcdef";
+	size_t start = 0;
+	for (size_t index = 0; index + 2 < length; index += 1) {
+		if (bytes[index] != 0xED || bytes[index + 1] < 0xA0) { continue; }
+		quote_json_bytes(bytes + start, index - start);
+		uint16_t unit = (uint16_t)(0xD000 | ((bytes[index + 1] & 63) << 6) | (bytes[index + 2] & 63));
+		append_c("\\u");
+		for (int shift = 12; shift >= 0; shift -= 4) { append_byte((uint8_t)hex[(unit >> shift) & 15]); }
+		index += 2;
+		start = index + 1;
+	}
+	quote_json_bytes(bytes + start, length - start);
+}
+
+FA_EXPORT void fa_b_json_string_flags(const uint8_t *bytes, size_t length, size_t capacity) {
 	append_byte('"');
-	if (span_has_edges(bytes, length)) { string_span_parts(bytes, length, quote_json_bytes); }
+	if (!(capacity & SIMPLE) && span_has_edges(bytes, length)) {
+		string_span_parts(bytes, length, quote_json_surrogates);
+	} else if (capacity & STRING_SURROGATES) { quote_json_surrogates(bytes, length); }
 	else { quote_json_bytes(bytes, length); }
 	append_byte('"');
+}
+
+FA_EXPORT void fa_b_json_string(const uint8_t *bytes, size_t length) {
+	fa_b_json_string_flags(bytes, length, STRING_SURROGATES);
 }
 
 /// A number of `JSON.stringify`: `null` when it isn't finite.

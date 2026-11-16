@@ -1,0 +1,16 @@
+-- skip-target: native-freestanding (std.json requires libc, per lead decision)
+use { Json } = std.json
+let bytes = "{{\"name\":\"é😀\",\"count\":3}}".toUtf8()
+let record: { name: String, count: Integer } = try Json.parse(bytes)
+console.log(record.name, record.name.length, record.count, bytes.length) -- prints: é😀 3 3 27
+let padded = Bytes.from([0, 34, 195, 169, 34, 0])
+use token = padded[1..5]
+let text: String = try Json.parse(token)
+console.log(text, text.length) -- prints: é 1
+function valid = (bytes: Bytes): Boolean => {
+	let _value: String = Json.parse(bytes) catch _ => return false
+	true
+}
+console.log(valid(Bytes.from([34, 255, 34])), valid(Bytes.from([34, 237, 160, 128, 34])), valid(Bytes.from([34, 240, 159, 34]))) -- prints: false false false
+let escaped: String = try Json.parse("\"\\ud83d\"".toUtf8())
+console.log(try escaped.codeUnitAt(0), escaped.length, escaped.isWellFormed()) -- prints: 55357 1 false

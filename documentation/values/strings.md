@@ -266,6 +266,8 @@ Natively, `capacity` counts storage bytes, not UTF-16 code units: it is at least
 
 On JavaScript and during compile-time evaluation, the hints are ignored, `reserve` does nothing and `capacity` equals `length`. This keeps the property constant-time without measuring an encoding or inventing storage the engine does not expose. Use `utf8Length()` to measure an encoding, and `length` for code-unit positions. Capacity is a storage hint, not a portable limit: only `capacity >= length` holds on every target (see [capacity and reservation](/collections/arrays#capacity-and-reservation)). Copies need not preserve spare capacity.
 
+`Json.stringify` escapes every lone surrogate as lowercase `\uXXXX`, so its JSON text is well-formed and parsing it restores the original code units. `Json.parse` preserves such escapes and joins an escaped high/low pair. See [JSON](/operations/json).
+
 :::implementation
 ## Implementation details
 

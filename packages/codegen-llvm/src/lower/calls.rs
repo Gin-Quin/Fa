@@ -713,7 +713,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"Subscription#stop" => self.stop_subscription(node),
 			// std.time, std.fs, std.net (io.rs)
 			"std.time.monotonic" | "std.time.now" | "File.readText" | "File.read"
-			| "File.writeText" | "TcpListener#accept" | "TcpListener#close"
+			| "File.writeText" | "File.write" | "TcpListener#accept" | "TcpListener#close"
 			| "TcpStream.connect" | "TcpStream#read" | "TcpStream#write" | "TcpStream#close" => {
 				self.io_builtin(node, path, info)
 			}

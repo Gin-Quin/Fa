@@ -58,13 +58,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		schema.push(0);
 		let schema = self.constant_bytes(&schema);
-		let (bytes, length) = self.string_parts(text)?;
 		let out = self.alloca_type(self.pointer_type().into(), "json")?;
+		let (name, arguments): (&str, Vec<inkwell::values::BasicMetadataValueEnum<'ctx>>) =
+			if text.repr == Repr::Bytes {
+				(
+					"fa_json_parse_bytes",
+					vec![text.value.expect("Bytes").into(), schema.into(), out.into()],
+				)
+			} else {
+				let (bytes, length) = self.string_parts(text)?;
+				(
+					"fa_json_parse",
+					vec![bytes.into(), length.into(), schema.into(), out.into()],
+				)
+			};
 		let error = self
-			.call_value(
-				self.runtime.function("fa_json_parse")?,
-				&[bytes.into(), length.into(), schema.into(), out.into()],
-			)?
+			.call_value(self.runtime.function(name)?, &arguments)?
 			.into_pointer_value();
 		self.raise_if_error(error)?;
 		let document = self
@@ -943,7 +952,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Str => {
 				let (bytes, length) = self.string_parts(value)?;
-				self.call_runtime("fa_b_json_string", &[bytes.into(), length.into()])
+				let capacity = self.string_capacity(value)?;
+				self.call_runtime(
+					"fa_b_json_string_flags",
+					&[bytes.into(), length.into(), capacity.into()],
+				)
 			}
 			_ => Err(self.unsupported(call.index(), "`Json.stringify` of this value")),
 		}
@@ -1191,7 +1204,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		match key {
 			Some(key) => {
 				let (bytes, length) = self.string_parts(key)?;
-				self.call_runtime("fa_b_json_string", &[bytes.into(), length.into()])?;
+				let capacity = self.string_capacity(key)?;
+				self.call_runtime(
+					"fa_b_json_string_flags",
+					&[bytes.into(), length.into(), capacity.into()],
+				)?;
 				self.json_text(":")
 			}
 			None => {

@@ -1508,3 +1508,9 @@ Descriptor snapshots of both String and Bytes are keyed by binding and compiled 
 
 UTF-8 conversions consume only temporaries or proven last local reads; parameters and other live inputs remain borrowed. A dead canonical heap String transfers its payload block to Bytes, releasing breadcrumbs first and replacing lone surrogates in place. Large newly allocated byte payloads reserve the existing String prefix (32 bytes native, 20 wasm32), without initializing or reading it as Bytes. Strict decoding validates/counts first and only then adopts or copies. Small combined array blocks can become the prefix in place; wasm32 shifts at most 96 bytes to account for its smaller prefix. Allocation padding is never an accessible extension of Bytes length. A consuming strict failure frees the input and reports the first invalid-subpart byte in Utf8Error; lossy decoding shares the WHATWG consumption logic.
 
+## JSON preserves lone surrogates (lead decision, 2026-11-16)
+
+`Json.stringify` writes a lone surrogate as lowercase `\uXXXX`, producing well-formed JSON text. `Json.parse` restores the original unit, joining an escaped high/low pair. Round-tripping a String through JSON preserves every code unit on every target and at compile time. Replacing a lone surrogate with U+FFFD belongs only at UTF-8 output boundaries, after JSON has escaped it. A dedicated JSON page records this rule and strict byte input.
+
+The lead explicitly retains `std.json`'s existing native-freestanding AN004 restriction: float parsing/printing without libc is separate work. New JSON fixtures carry the same target annotation as the existing JSON fixtures; the string redesign does not remove this capability restriction.
+

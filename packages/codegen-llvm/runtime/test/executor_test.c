@@ -1003,7 +1003,9 @@ static void test_utf16_strings(void) {
 	fa_b_reset();
 	fa_b_json_string(both_edges, sizeof both_edges);
 	fa_b_take(&result);
-	CHECK(string_length(&result) == 9 && fa_string_code_unit_fallback(string_bytes(&result), 9, result.capacity, 3) == 0xD83D);
+	CHECK(string_length(&result) == 15);
+	CHECK(__builtin_memcmp(string_bytes(&result), "\"\\ude00x\\ud83d\"", 15) == 0);
+	CHECK(fa_string_is_well_formed(string_bytes(&result), string_length(&result), result.capacity));
 	fa_concat(both_edges, sizeof both_edges, edge_view.capacity, both_edges, sizeof both_edges, edge_view.capacity, &result);
 	CHECK(fa_string_length(string_bytes(&result), string_length(&result), result.capacity) == 6);
 	fa_string_append(&result, both_edges, sizeof both_edges, edge_view.capacity);
@@ -1734,13 +1736,16 @@ static void test_strict_file_text(void) {
 	for (size_t index = 0; index < sizeof inputs / sizeof *inputs; index += 1) {
 		size_t length = c_length(inputs[index]);
 		FaFileJob *file = fa_file_job(FILE_READ, (const uint8_t *)"path", 4, 0, 0);
-		file->bytes = fa_alloc(length, 16);
-		file->length = file->room = length;
+		file->room = length ? string_block(length) : 0;
+		file->bytes = file->room ? file_buffer_allocate(file, file->room) : 0;
+		file->length = length;
 		copy_bytes(file->bytes, (const uint8_t *)inputs[index], length);
+		const uint8_t *original = file->bytes;
 		FaString result = {0};
 		const FileErrorBox *error = fa_file_finish(file, &result);
 		if (index < 3) {
 			CHECK(!error);
+			if (length > INLINE_STRING_BYTES) { CHECK(result.bytes == original); }
 			CHECK(fa_string_length(string_bytes(&result), string_length(&result), result.capacity)
 			      == unit_count((const uint8_t *)inputs[index], length));
 			CHECK(string_equal_bytes(string_bytes(&result), (const uint8_t *)inputs[index], length));

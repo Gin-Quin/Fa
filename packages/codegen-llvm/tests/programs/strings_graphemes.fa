@@ -6,3 +6,6 @@ console.log("a\r\nb".characters()) -- prints: ["a", "\r\n", "b"]
 let emoji = "😀"
 use low = emoji[1..]
 console.log(count(low), (try low.characters()[0]) == emoji[1], count(emoji[0])) -- prints: 1 true 1
+static indicLength = @count("क्‍क")
+static carriageLength = @count("\r\n")
+console.log(indicLength, carriageLength) -- prints: 1 1

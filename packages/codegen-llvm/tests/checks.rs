@@ -1104,7 +1104,7 @@ console.log(try equal("é", 0), try choose("a", 0))
 			"ascii-unit-effects",
 			r#"
 let text = arguments.get(0) ?? "é😀"
-let index = Integer(arguments.get(1) ?? "0") catch _error => -1
+let index = Integer.parse(arguments.get(1) ?? "0") catch _error => -1
 console.log(text.codeUnitAt(index) catch _error => 0)
 "#,
 			false,

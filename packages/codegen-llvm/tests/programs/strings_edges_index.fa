@@ -4,3 +4,5 @@ function get = (text: String, index: Integer): String? => text.get(index)
 console.log(checked("a😀", -3) catch _error => 999, checked("a😀", -2) catch _error => 999, checked("a😀", -1) catch _error => 999) -- prints: 97 55357 56832
 console.log(get("a😀", -3), get("a😀", -4), get("a😀", 3), get("", -1)) -- prints: a none none none
 console.log(checked("a😀", 3) catch _error => 999, checked("a😀", -4) catch _error => 999, checked("", 0) catch _error => 999) -- prints: 999 999 999
+console.log(checked("abc", 0) catch _error => 999, checked("abc", -1) catch _error => 999, checked("abc", -3) catch _error => 999) -- prints: 97 99 97
+console.log(checked("abc", 3) catch _error => 999, checked("abc", -4) catch _error => 999, checked("", -1) catch _error => 999) -- prints: 999 999 999

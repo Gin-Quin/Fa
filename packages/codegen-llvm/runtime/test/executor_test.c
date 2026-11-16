@@ -886,6 +886,17 @@ static void test_utf16_strings(void) {
 	const uint16_t units[] = {97, 233, 0x65E5, 0xD83D, 0xDE00, 122};
 	CHECK(fa_string_length(text, sizeof(text) - 1, 0) == 6);
 	CHECK(simple_flag((const uint8_t *)"\r\nx", 3) == SIMPLE);
+	const uint8_t ascii_units[] = "abc";
+	for (int64_t i = 0; i < 3; i += 1) {
+		CHECK(fa_string_code_unit_at(ascii_units, 3, SIMPLE, i) == ascii_units[i]);
+		CHECK(fa_string_code_unit_at(ascii_units, 3, SIMPLE, i - 3) == ascii_units[i]);
+	}
+	CHECK(fa_string_code_unit_at(ascii_units, 3, SIMPLE, 3) == -1);
+	CHECK(fa_string_code_unit_at(ascii_units, 3, SIMPLE, -4) == -1);
+	CHECK(fa_string_code_unit_at(ascii_units, 3, SIMPLE, INT64_MIN) == -1);
+	CHECK(fa_string_code_unit_at(ascii_units, 3, SIMPLE, INT64_MAX) == -1);
+	CHECK(fa_string_code_unit_at(ascii_units, 0, SIMPLE, 0) == -1);
+	CHECK(fa_string_code_unit_at(ascii_units, 0, SIMPLE, -1) == -1);
 	for (int64_t i = 0; i < 6; i += 1) {
 		CHECK(fa_string_code_unit_at(text, sizeof(text) - 1, 0, i) == units[i]);
 		CHECK(fa_string_code_unit_at(text, sizeof(text) - 1, 0, i - 6) == units[i]);

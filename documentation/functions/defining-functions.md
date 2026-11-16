@@ -458,7 +458,7 @@ function main = () => {
 }
 ```
 
-A direct call before the declaration borrows the captured values at the call, so they must already be initialized. Taking an escaping function value before its declaration is an error when it captures anything: move the declaration above that use, or pass the value as a parameter. A function without captures has no environment and no such restriction. Reaching the declaration again in another loop iteration or recursive call creates a new environment for that execution.
+Before execution reaches its declaration, a local function with captures can only be called directly. That call borrows its captures, which must already be initialized. Taking it as a value there is an error, whether or not the value escapes: move the declaration above the use, or call the function directly. A function without captures has no environment and no such restriction. Reaching the declaration again in another loop iteration or recursive call creates a new environment for that execution.
 
 A value that can't be copied, like a [task](/advanced/concurrency#tasks) or a value of a type with a [`destroy`](/advanced/foreign-code#releasing-c-resources) function, can't be captured by an escaping closure.
 

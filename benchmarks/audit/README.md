@@ -28,7 +28,10 @@ Positional names select benchmarks/variants; `--suite secondary` selects own por
 and variants. The original suite is exactly `binary-trees`, `blur`, `calc`, `graph`,
 `interp`, `lru`, `particles`, `push`, `records`, `respond`, `scene`, `sexp`, `strlist`,
 `sum`, `tree`, `words`. `binary-trees` is Goose's `bintrees`, also one of the original
-ten: there are 25 unique original ports, plus growing-index and three variants.
+ten: there are 25 unique original ports, plus growing-index and four variants.
+`push-array` preserves the original reserved Array port; `push` grows an unreserved
+GrowingArray, with integer marks as prescribed by Fa's reference documentation.
+Both use the suite's sole safe Rust push row (Vec+reserve, indices).
 Use `growing-index growing-index-array --size 16` (then 1000 and 1000000) with the
 same prepare/cpu/profile workflow. Render keeps size overrides as separate rows.
 

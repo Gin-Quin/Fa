@@ -2,4 +2,4 @@
 use { Json } = std.json
 function quote = (): String => Json.stringify("😀"[0])
 static result = @quote()
-console.log(result) -- prints: "\ud83d"
+console.log(result, result.length) -- prints: "\ud83d" 8

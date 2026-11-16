@@ -17,14 +17,16 @@ replacements, checked bounds) are modeled explicitly. Decoder error positions
 come independently from Python's strict UTF-8 decoder; lossy results come from
 Bun's WHATWG TextDecoder with BOM retention.
 
-The 58 subjects cover empty/ASCII, two/three/four-byte scalars, lone high/low
+The 70 subjects cover empty/ASCII, two/three/four-byte scalars, lone high/low
 surrogates in several positions, cut and rejoined pairs, combining marks, ZWJ
 emoji, final sigma, sharp s, Turkish i, trimming, BOM, NUL, inline/frame and
 64-unit breadcrumb boundaries, and ASCII/Unicode payloads beyond 4 KiB. The
 semantic probes cover every specified pure string operation and byte reads,
-slices, encodings, decoding and interpolation, at compile time and runtime.
+slices, encodings, decoding and interpolation, at compile time and runtime. Runtime probes rotate ten storage forms,
+sampling subject/needle/form triples; separate storage probes use every subject
+in every form.
 Additional byte probes cover all 256 byte values, constructors, copies, mutable
-views and reseating; 144 decoder cases cover malformed classes at vector edges.
+views and reseating; 156 decoder cases cover malformed classes at vector edges.
 
 Every subject also passes through owner/view/split-part/object/array/pool,
 recursive union/packed array, frame and reserved append paths, map keys, set

@@ -96,16 +96,21 @@ fn generated_string_differential() {
 					};
 					let destination =
 						scratch.join(format!("{index}-{}-{opt_level:?}", target.name()));
-					let artifact = match fa_codegen_llvm::compile_file(
-						program,
-						target,
-						&options,
-						&destination,
-					) {
-						Ok(artifact) => artifact,
-						Err(error) => {
+					let compiled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+						fa_codegen_llvm::compile_file(program, target, &options, &destination)
+					}));
+					let artifact = match compiled {
+						Ok(Ok(artifact)) => artifact,
+						Ok(Err(error)) => {
 							failures.push(format!(
 								"{} on {target:?}/{opt_level:?}: {error}",
+								program.display()
+							));
+							continue;
+						}
+						Err(_) => {
+							failures.push(format!(
+								"{} on {target:?}/{opt_level:?}: compiler panicked",
 								program.display()
 							));
 							continue;

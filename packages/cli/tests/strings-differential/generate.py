@@ -44,7 +44,9 @@ def quoted(text):
 PRELUDE = r'''
 function units = (text: String): String => {
     mutable result: Array<String> = []
-    for index in 0..text.length { result.push((try text.codeUnitAt(index)).toString()) }
+    for point in text {
+        for index in 0..point.length { result.push(point.codeUnitAt(index).toString() catch _ => "unexpected-index-error") }
+    }
     result.join(",")
 }
 function strings = (values: Array<String>): String => {
@@ -67,12 +69,12 @@ function probe = (text: String, needle: String): String throws IndexError => {
             rows.push(units(try text[start..end]))
         }
     }
-    rows.push(units(try text[..]))
+    rows.push(units(text[..]))
     rows.push(units(try text[-text.length..]))
     rows.push(units(try text[..-text.length]))
     if text.length > 0 {
-        rows.push(units(try text[0..=-1]))
-        rows.push(units(try text[-1..]))
+        rows.push(units(text[0..=-1]))
+        rows.push(units(text[-1..]))
     }
     for range in [-text.length-1..0, 0..text.length+1, text.length..text.length, -1..0, -text.length..=-text.length, 0..=text.length, text.length..=0, 0..=-1] {
         rows.push(units(text[range]) catch _ => "error")
@@ -96,6 +98,8 @@ function probe = (text: String, needle: String): String throws IndexError => {
     rows.push(units(text.split(needle).join(needle)))
     rows.push(units(text.replace(needle, "$&")))
     rows.push(units(text.replaceAll(needle, "$&")))
+    rows.push(units(text.replace(needle, needle)))
+    rows.push(units(text.replaceAll(needle, needle)))
     for width in [-1, 0, text.length, text.length + 1, text.length + 3] {
         rows.push(units(text.padStart(width, needle)))
         rows.push(units(text.padEnd(width, needle)))
@@ -120,11 +124,58 @@ function probe = (text: String, needle: String): String throws IndexError => {
         rows.push(if byte is none { "999" } else { byte.toString() })
         rows.push(bytes[index].toString() catch _ => "error")
     }
-    rows.push((try bytes[..]).toString())
+    rows.push(bytes[..].toString())
     rows.push((try bytes[bytes.length..0]).toString())
     rows.push((try bytes[-bytes.length..]).toString())
-    if bytes.length > 0 { rows.push((try bytes[0..=-1]).toString()) }
+    if bytes.length > 0 { rows.push(bytes[0..=-1].toString()) }
     rows.join("|")
+}
+'''
+
+REPRESENTATIONS = r'''
+type Stored = { text: String }
+type Payload = Union { Leaf = { text: String }, Branch = { left: Payload, right: Payload } }
+function ownerProbe = (text: String, needle: String): String throws IndexError => try probe(String.from(text, capacity = 8192), needle)
+function viewProbe = (text: String, needle: String): String throws IndexError => {
+    let source = "^" + text + "!"
+    use view = try source[1..-1]
+    try probe(view, needle)
+}
+function splitProbe = (text: String, needle: String): String throws IndexError => {
+    mutable result = ""
+    for part in text.split("\u{10FFFF}\u{10FFFF}") { result = try probe(part, needle) }
+    result
+}
+function fieldProbe = (text: String, needle: String): String throws IndexError => {
+    let object = Stored { text = text }
+    try probe(object.text, needle)
+}
+function arrayProbe = (text: String, needle: String): String throws IndexError => {
+    let items = [text]
+    try probe(items[0], needle)
+}
+function poolProbe = (text: String, needle: String): String throws IndexError => {
+    mutable pool: Pool<Stored> = []
+    use item = pool.add(Stored { text = text })
+    try probe(item.text, needle)
+}
+function payloadProbe = (node: Payload, needle: String): String throws IndexError => when node is {
+    Payload.Leaf as leaf => try probe(leaf.text, needle)
+    Payload.Branch as branch => try payloadProbe(branch.left, needle)
+}
+function compactProbe = (text: String, needle: String): String throws IndexError => {
+    let tree = Payload.Branch { left = Payload.Leaf { text = text }, right = Payload.Leaf { text = text } }
+    try payloadProbe(tree, needle)
+}
+function frameProbe = (text: String, needle: String): String throws IndexError => {
+    mutable built = ""
+    for unit in text.split("") { built += unit }
+    try probe(built, needle)
+}
+function reservedProbe = (text: String, needle: String): String throws IndexError => {
+    mutable built = String.from("", capacity = 8192)
+    for unit in text.split("") { built += unit }
+    try probe(built, needle)
 }
 '''
 
@@ -167,6 +218,7 @@ function probe(text, needle) {
     rows.push(`${text.includes(needle)}:${text.startsWith(needle)}:${text.endsWith(needle)}:${text.indexOf(needle)}:${text.lastIndexOf(needle)}`);
     rows.push(strings(text.split(needle)),units(text.split(needle).join(needle)));
     rows.push(units(text.replace(needle,()=>"$&")),units(text.replaceAll(needle,()=>"$&")));
+    rows.push(units(text.replace(needle,()=>needle)),units(text.replaceAll(needle,()=>needle)));
     for (const width of [-1,0,text.length,text.length+1,text.length+3]) rows.push(units(text.padStart(Math.max(width,0),needle)),units(text.padEnd(Math.max(width,0),needle)));
     rows.push(units(text.repeat(0)),units(text.repeat(2)),units(text.trim()),units(text.trimStart()),units(text.trimEnd()),units(text.toUpperCase()),units(text.toLowerCase()),units(`<${text}>`));
     const bytes=enc.encode(text);
@@ -199,11 +251,11 @@ function storage = (text: String): String throws IndexError => {
     let container = "^" + text + "!"
     use view = try container[1..-1]
     rows.push(shape(view))
-    for part in text.split("\u{10FFFF}") { rows.push(shape(part)) }
+    for part in text.split("\u{10FFFF}\u{10FFFF}") { rows.push(shape(part)) }
     let box = Box { text = text }
     rows.push(shape(box.text))
     let array = [text]
-    rows.push(shape(try array[0]))
+    rows.push(shape(array[0]))
     mutable pool: Pool<Box> = []
     use item = pool.add(Box { text = text })
     rows.push(shape(item.text))
@@ -221,7 +273,7 @@ function storage = (text: String): String throws IndexError => {
         reserved += unit
         lengths.push("{frame.length}:{reserved.length}")
         if frame.length > 64 {
-            lengths.push((try frame.codeUnitAt(63)).toString())
+            lengths.push(frame.codeUnitAt(63).toString())
             lengths.push((try reserved.codeUnitAt(64)).toString())
         }
     }
@@ -246,7 +298,8 @@ def write_cases(output, name, prelude, cases, references, function, shard_size=1
             if compile_time:
                 source += f'\nstatic result{index} = @{function}({args})\n'
                 source += f'console.log("{index} static " + result{index})\n-- prints: {index} static {references[index]}\n'
-            source += f'console.log("{index} runtime " + (try {function}({args})))\n-- prints: {index} runtime {references[index]}\n'
+            runtime_function = ["probe","ownerProbe","viewProbe","splitProbe","fieldProbe","arrayProbe","poolProbe","compactProbe","frameProbe","reservedProbe"][index % 10] if function == "probe" else function
+            source += f'console.log("{index} runtime " + (try {runtime_function}({args})))\n-- prints: {index} runtime {references[index]}\n'
         (output / f"{name}-{shard // shard_size:02}.fa").write_text(source)
 
 
@@ -255,7 +308,7 @@ def byte_cases(output, bun):
                [0xE0,0x80,0xAF], [0xED,0xA0,0x80], [0xED,0xBF,0xBF],
                [0xE1], [0xE2,0x82], [0xF0], [0xF0,0x9F], [0xF0,0x9F,0x92],
                [0xF0,0x80,0x80,0xAF], [0xF4,0x90,0x80,0x80], [0xF5,0x80,0x80,0x80],
-               [0xF8,0x88,0x80,0x80,0x80], [0xFC], [0xFE], [0xFF], [0xE1,0x80,0x41], [0xC2,0x41]]
+               [0xF8,0x88,0x80,0x80,0x80], [0xFC], [0xFE], [0xFF], [0xE1,0x80,0x41], [0xC2,0x41], [0xF0,0x9F,0x41], [0xF0,0x9F,0x92,0x41]]
     inputs = [[0x61] * prefix + value for prefix in [0, 1, 15, 16, 31, 32] for value in invalid]
     inputs += [[], [0], [0xEF,0xBB,0xBF], [0xF4,0x8F,0xBF,0xBF], [0xED,0x9F,0xBF], [0xE0,0xA0,0x80]]
     oracle = r'''
@@ -286,8 +339,8 @@ function decode = (bytes: Bytes): String => {
 function buffer = (data: Bytes): String throws IndexError => {
     mutable original = copy data
     let previous = copy original
-    mutable use view = try original[..]
-    if view.length > 0 { try view[0] = 255 }
+    mutable use view = original[..]
+    if view.length > 0 { view[0] = 255 }
     let changed = original.toString()
     reuse view = try original[original.length..0]
     let empty = view.toString()
@@ -323,7 +376,7 @@ const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
 for(const value of values) { const json=JSON.stringify(value); console.log(units(json)+"|"+units(JSON.parse(json))+"|"+units(JSON.parse(json))); }
 '''
     reference=subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
-    prelude='-- skip-target: native-freestanding\nuse { Json } = std.json\n'+PRELUDE.split("function probe",1)[0]+r'''
+    prelude='-- skip-target: native-freestanding\nuse { Json, JsonError } = std.json\n'+PRELUDE.split("function probe",1)[0]+r'''
 function jsonProbe = (text: String): String throws JsonError => {
     let json = Json.stringify(text)
     let parsed: String = try Json.parse(json)
@@ -346,6 +399,43 @@ function parsed = (json: String): String throws JsonError => {
         want=",".join(str(int.from_bytes(encoded[i:i+2],"little")) for i in range(0,len(encoded),2))
         source+=f'\nstatic parsed{index} = @parsed({literal(document)})\nconsole.log(parsed{index})\n-- prints: {want}\n'
     (output/"json-parse.fa").write_text(source)
+    union=prelude+r'''
+function unionParse = (input: String | Bytes): String throws JsonError => {
+    let value: String = try Json.parse(input)
+    units(value)
+}
+static fromText = @unionParse("\"é\"")
+static fromBytes = @unionParse("\"😀\"".toUtf8())
+console.log(fromText, fromBytes) -- prints: 233 55357,56832
+console.log(try unionParse("\"é\""), try unionParse("\"😀\"".toUtf8())) -- prints: 233 55357,56832
+'''
+    (output/"json-union.fa").write_text(union)
+
+
+def edge_cases(output,bun):
+    cases=[]
+    values=[]
+    for prefix in [0,8,19,20,21,22,23,60,61,62,63,64,65,127,4095]:
+        source="a"*prefix+"😀é日😀z"
+        for start,end in [(prefix,prefix+1),(prefix+1,prefix+2),(prefix+1,prefix+5)]:
+            encoded=source.encode("utf-16-le")
+            text=encoded[start*2:end*2].decode("utf-16-le",errors="surrogatepass")
+            needle="\ude00" if start%2 else "\ud83d"
+            cases.append((literal(source),str(start),str(end),literal(needle)))
+            values.append((text,needle))
+    references=subprocess.run([bun,"-e",ORACLE],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    references=[value+"|1:2:1:true" for value in references]
+    prelude=PRELUDE+r'''
+function cutProbe = (source: String, start: Integer, end: Integer, needle: String): String throws IndexError => {
+    use part = try source[start..end]
+    let owner = String.from(part)
+    let map: Map<String, Integer> = [(part, 1), (owner, 2)]
+    let set: Set<String> = [part, owner]
+    (try probe(part, needle)) + "|{map.size}:{map.get(part) ?? 0}:{set.size}:{set.includes(part)}"
+}
+'''
+    write_cases(output,"cut-views",prelude,cases,references,"cutProbe",32)
+    return len(cases)
 
 
 def subjects():
@@ -353,7 +443,9 @@ def subjects():
     values += ["a" * n + "😀é日" for n in [8, 9, 10, 19, 20, 21, 22, 23, 24, 60, 61, 62, 63, 64, 65, 126, 127, 128]]
     values += ["é" * n + "😀z" for n in [10, 11, 30, 31, 32, 62, 63, 64, 65]]
     values += ["\ud83d", "\ude00", "\ud83dabc", "abc\ude00", "a\ud83db", "a\ude00b", "\ude00\ud83d", "\ud83d\ud83d", "\ude00\ude00"]
-    values += ["a" * 4097, "é日😀" * 700]
+    values += ["\u007f", "\u0080", "\u07ff", "\u0800", "\uffff", "\U00010000", "\U0010ffff", "\ud800", "\udbff", "\udc00", "\udfff"]
+    whitespace="".join(map(chr,[*range(9,14),32,160,5760,*range(8192,8203),8232,8233,8239,8287,12288,65279]))
+    values += [whitespace+"x"+whitespace, "a" * 4097, "é日😀" * 700]
     return values
 
 
@@ -369,7 +461,7 @@ def main():
         for needle in ["", "\ud83d", "\ude00", needles[rng.randrange(len(needles))]]:
             cases.append((text, needle))
     reference = subprocess.run([bun, "-e", ORACLE], input=json.dumps(cases, ensure_ascii=True), text=True, capture_output=True, check=True).stdout.splitlines()
-    write_cases(output,"semantic",PRELUDE,[(literal(text),literal(needle)) for text,needle in cases],reference,"probe",32)
+    write_cases(output,"semantic",PRELUDE+REPRESENTATIONS,[(literal(text),literal(needle)) for text,needle in cases],reference,"probe",32)
     storage_oracle = r'''
 const subjects=JSON.parse(await Bun.stdin.text());
 const enc=new TextEncoder();
@@ -406,7 +498,8 @@ async function crossing = (text: String): String throws IndexError => {
                 source.write(f'console.log("{index} await " + (try await crossing({literal(subjects()[index])})))\n-- prints: {index} await {storage_reference[index]}\n')
     decoded = byte_cases(output,bun)
     json_cases(output,bun)
-    (output / "manifest.json").write_text(json.dumps({"seed": SEED, "subjects": len(subjects()), "pairs": len(cases), "decoders":decoded,"oracle": "Bun direct JavaScript"}, indent=2) + "\n")
+    cuts=edge_cases(output,bun)
+    (output / "manifest.json").write_text(json.dumps({"seed": SEED, "subjects": len(subjects()), "pairs": len(cases), "decoders":decoded,"cut_views":cuts,"oracle": "Bun direct JavaScript"}, indent=2) + "\n")
 
 
 if __name__ == "__main__":

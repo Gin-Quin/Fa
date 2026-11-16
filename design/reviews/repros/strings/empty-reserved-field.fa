@@ -1,0 +1,6 @@
+-- The same defect through an object field and an array of two copies.
+type Box = { text: String }
+let output = String.from("", capacity = 4096)
+let box = Box { text = output }
+console.log(box.text.length, output.length)
+-- prints: 0 0

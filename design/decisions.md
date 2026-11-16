@@ -1635,3 +1635,9 @@ wrappers. Numeric, async and reference entry names compose in one selection.
 Map object replacement preserves existing identities wherever a caller may hold
 a bare reference. The deterministic pairwise test keeps explicit diagnostic and
 value oracles, plus fixed join/escape and locator regressions.
+
+Primitive pool locators retain the existing slot array directly. Separate live
+indices drive iteration, and a free list reuses dead slots; former references
+are already statically invalid, so no runtime identity generation is required.
+Native object-cache producer `reference-results-7` invalidates artifacts from
+the earlier provenance/borrow-result lowering.

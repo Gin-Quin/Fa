@@ -345,27 +345,32 @@ impl Walker<'_> {
 	}
 
 	pub(super) fn readonly_place(&self, mut place: PlaceId) -> bool {
-		if let Some(owner) = self
-			.place_symbol(place)
-			.and_then(|symbol| self.reference_parameters.get(&symbol))
-		{
+		// Inspect the complete projection before following a formal's owner. A
+		// dependent object parameter may itself contain a set field.
+		for _ in 0..=self.reference_parameters.len() {
+			while let Some(parent) = self.places.parent(place) {
+				if matches!(
+					self.places.get(place).step,
+					Some(Step::Index(_) | Step::All)
+				) && self.place_type(parent).is_some_and(|ty| {
+					matches!(
+						self.s.types.kind(ty),
+						TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..)
+					)
+				}) {
+					return true;
+				}
+				place = parent;
+			}
+			let Some(owner) = self
+				.place_symbol(place)
+				.and_then(|symbol| self.reference_parameters.get(&symbol))
+			else {
+				return false;
+			};
 			place = *owner;
 		}
-		while let Some(parent) = self.places.parent(place) {
-			if matches!(
-				self.places.get(place).step,
-				Some(Step::Index(_) | Step::All)
-			) && self.place_type(parent).is_some_and(|ty| {
-				matches!(
-					self.s.types.kind(ty),
-					TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..)
-				)
-			}) {
-				return true;
-			}
-			place = parent;
-		}
-		false
+		true
 	}
 
 	// ── owners ────────────────────────────────────────────────────────────

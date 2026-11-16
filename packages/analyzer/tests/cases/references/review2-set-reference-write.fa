@@ -5,3 +5,9 @@ function wrong = (values: Set<Integer>, item: Integer in values) mutates item =>
  use target = item
  target = 12 -- error: CL031
 }
+
+type Node = { keys: Set<Integer> }
+function nested = (nodes: Array<Node>, node: Node in nodes) mutates node.keys => { -- error: EFF011
+ use found = node.keys.find((value) => value == 7)
+ if found is not none { found = 9 } -- error: CL031
+}

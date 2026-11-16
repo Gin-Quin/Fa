@@ -7,6 +7,14 @@ use crate::ids::{NodeId, PlaceId, SymbolId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::View;
 
+/// Captures as evaluated when a function value is created.
+#[derive(Clone)]
+pub(crate) struct CapturedOrigins {
+	pub symbol: SymbolId,
+	pub places: Vec<PlaceId>,
+	pub closures: Vec<NodeId>,
+}
+
 impl Walker<'_> {
 	pub(super) fn evaluated_origins(&self, node: NodeId) -> ValueOrigins {
 		self.value_origins.get(&node).cloned().unwrap_or_default()
@@ -350,7 +358,11 @@ impl Walker<'_> {
 			{
 				closures.push(info.lambda);
 			}
-			origins.push((symbol, places, closures));
+			origins.push(CapturedOrigins {
+				symbol,
+				places,
+				closures,
+			});
 		}
 		self.capture_origins.insert(lambda, origins);
 	}

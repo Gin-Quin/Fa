@@ -1,0 +1,17 @@
+-- file: library/read.fa
+use { sleep } = std.time
+export async function = <T>(values: GrowingPool<T>, item: T in values): T => {
+ await sleep(1)
+ item
+}
+-- file: application/main.fa
+function blocking = (values: GrowingPool<Integer>, item: Integer in values): Integer => library.read(values, item)
+export async function = () => {
+ mutable numbers: GrowingPool<Integer> = []
+ use number = numbers.add(7)
+ console.log(blocking(numbers, number)) -- prints: 7
+ console.log(await library.read(numbers, number)) -- prints: 7
+ mutable nodes: GrowingPool<{ value: Integer }> = []
+ use node = nodes.add({ value = 9 })
+ console.log((await library.read(nodes, node)).value) -- prints: 9
+}

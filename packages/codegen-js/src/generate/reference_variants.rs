@@ -282,12 +282,7 @@ impl Generator<'_> {
 		let Some(info) = self.analysis.function(declaration) else {
 			return;
 		};
-		if self
-			.analysis
-			.reference_sensitive
-			.get(&declaration)
-			.is_none()
-			|| info.generics.is_empty()
+		if !self.analysis.reference_sensitive.contains_key(&declaration) || info.generics.is_empty()
 		{
 			return;
 		}

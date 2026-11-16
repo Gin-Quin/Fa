@@ -367,21 +367,30 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	pub(crate) fn external_name(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
 		let reached = self.external(self.analysis.resolution(node));
 		if let Some(reached @ (Reached::Function(..) | Reached::RemoteFunction(_))) = reached {
-			if self.is_generic_function_type(self.type_of(node)) {
-				return self.reached_generic_function_value(reached, node);
-			}
-			let function = match reached {
-				Reached::Function(file, decl) => self.function_in(file, decl, node)?,
-				Reached::RemoteFunction(key) => self.remote_function(key, node)?,
-				_ => unreachable!("a function"),
-			};
-			return self.applied_external_function_value(&function, node);
+			return self.reached_function_value(reached, node);
 		}
 		match reached.map(|reached| self.reached_slot(reached, node)) {
 			Some(Ok(Some(slot))) => self.load(slot),
 			Some(Err(error)) => Err(error),
 			_ => Err(self.unsupported(node.index(), "this name of another file")),
 		}
+	}
+
+	/// A function reached through either a name or a namespace path.
+	fn reached_function_value(
+		&mut self,
+		reached: Reached,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		if self.is_generic_function_type(self.type_of(node)) {
+			return self.reached_generic_function_value(reached, node);
+		}
+		let function = match reached {
+			Reached::Function(file, decl) => self.function_in(file, decl, node)?,
+			Reached::RemoteFunction(key) => self.remote_function(key, node)?,
+			_ => unreachable!("a function"),
+		};
+		self.applied_external_function_value(&function, node)
 	}
 
 	/// `library.counter.count`, `counter.value.field`: the value a path
@@ -396,6 +405,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let Some((reached, used)) = self.namespace_reach(target, members) else {
 			return Ok(None);
 		};
+		if used == members.len()
+			&& matches!(reached, Reached::Function(..) | Reached::RemoteFunction(_))
+		{
+			return self.reached_function_value(reached, node).map(Some);
+		}
 		let Some(slot) = self.reached_slot(reached, node)? else {
 			return Ok(None);
 		};

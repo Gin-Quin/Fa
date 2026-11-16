@@ -443,7 +443,7 @@ pub struct Walker<'s> {
 	pub(crate) reference_results: FxHashMap<NodeId, Vec<PlaceId>>,
 	/// Borrowed result leaves, captured before their branch flow is joined.
 	pub(crate) value_origins: FxHashMap<NodeId, crate::flow::values::ValueOrigins>,
-	pub(crate) capture_origins: FxHashMap<NodeId, Vec<(SymbolId, Vec<PlaceId>, Vec<NodeId>)>>,
+	pub(crate) capture_origins: FxHashMap<NodeId, Vec<provenance::CapturedOrigins>>,
 	/// Whole reference annotations in borrowing positions; nested storage is never allowed.
 	pub(crate) borrowed_type_nodes: rustc_hash::FxHashSet<NodeId>,
 	pub(crate) type_expression_root: Option<NodeId>,

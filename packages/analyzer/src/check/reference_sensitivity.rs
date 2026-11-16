@@ -79,27 +79,27 @@ impl Walker<'_> {
 							roots.push(item);
 						}
 					}
-					View::Call { callee, .. } => {
+					View::Call { callee, .. }
 						if self
 							.a
 							.calls
 							.get(&value)
-							.is_some_and(|call| matches!(call.callee, Callee::Builtin(_)))
+							.is_some_and(|call| matches!(call.callee, Callee::Builtin(_))) =>
+					{
+						if let View::Access { target, .. } = self.view(callee)
+							&& let TypeKind::Collection(
+								CollKind::Pool
+								| CollKind::GrowingPool
+								| CollKind::Columnar
+								| CollKind::GrowingColumnar,
+								item,
+								_,
+							) = self.s.types.kind(self.type_of(target))
 						{
-							if let View::Access { target, .. } = self.view(callee)
-								&& let TypeKind::Collection(
-									CollKind::Pool
-									| CollKind::GrowingPool
-									| CollKind::Columnar
-									| CollKind::GrowingColumnar,
-									item,
-									_,
-								) = self.s.types.kind(self.type_of(target))
-							{
-								roots.push(item);
-							}
+							roots.push(item);
 						}
 					}
+
 					_ => {}
 				}
 				pending.extend(crate::syntax::children(&self.tree, value));

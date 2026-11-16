@@ -410,19 +410,7 @@ impl Generator<'_> {
 					parameters.push(name);
 					continue;
 				};
-				let reference = info.sig.is_some_and(|sig| {
-					g.types
-						.params(g.types.sig(sig).params)
-						.get(position)
-						.is_some_and(|param| param.reference.is_some())
-				});
-				let (lines, value) = g.capture_at(indent + 2, |g| {
-					if reference {
-						g.expr(default)
-					} else {
-						g.expr(default)
-					}
-				});
+				let (lines, value) = g.capture_at(indent + 2, |g| g.expr(default));
 				if g.omitted_by_sentinel(param.symbol) {
 					let omitted = g.helper("faOmitted");
 					let test = if arrow {

@@ -346,26 +346,26 @@ impl Generator<'_> {
 		if !summary.suspends {
 			return None;
 		}
-		let Some(instances) = self.tasks.instances.get(&declaration) else {
-			// synchronous mode, or a function never used: one instance
-			return Some(vec![
+		let mut exports = if let Some(instances) = self.tasks.instances.get(&declaration) {
+			let main = instances
+				.promise_name
+				.as_ref()
+				.or(instances.sync_name.as_ref())
+				.or(instances.async_name.as_ref())?;
+			let mut exports = vec![format!("{main} as {export}")];
+			if let Some(sync) = &instances.sync_name {
+				exports.push(format!("{sync} as {export}$sync"));
+			}
+			if let Some(asynchronous) = &instances.async_name {
+				exports.push(format!("{asynchronous} as {export}$async"));
+			}
+			exports
+		} else {
+			vec![
 				format!("{local} as {export}"),
 				format!("{local} as {export}$sync"),
-			]);
+			]
 		};
-		let mut exports = Vec::new();
-		let main = instances
-			.promise_name
-			.as_ref()
-			.or(instances.sync_name.as_ref())
-			.or(instances.async_name.as_ref())?;
-		exports.push(format!("{main} as {export}"));
-		if let Some(sync) = &instances.sync_name {
-			exports.push(format!("{sync} as {export}$sync"));
-		}
-		if let Some(name) = &instances.async_name {
-			exports.push(format!("{name} as {export}$async"));
-		}
 		let generics = self.function_generics(declaration);
 		let base_exports = exports.clone();
 		for variant in self.reference_variants(declaration) {

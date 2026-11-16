@@ -860,7 +860,12 @@ impl Walker<'_> {
 				.get(&lambda)
 				.cloned()
 				.unwrap_or_default();
-			for (symbol, origins, closures) in captures {
+			for super::provenance::CapturedOrigins {
+				symbol,
+				places: origins,
+				closures,
+			} in captures
+			{
 				pending.extend(closures);
 				for place in origins {
 					let place = self.canonical_reference_place(place);

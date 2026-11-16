@@ -1,7 +1,16 @@
 // helpers: faFormatObject, faExit, FaStop, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
 
-const format = (value) => faFormatObject(value, [["a", String], ["z", String]]);
-const format$1 = (value) => faFormatObject(value, [["a", String], ["z", String], ["zz", String]]);
+const format = (value) =>
+	faFormatObject(value, [
+		["a", String],
+		["z", String],
+	]);
+const format$1 = (value) =>
+	faFormatObject(value, [
+		["a", String],
+		["z", String],
+		["zz", String],
+	]);
 
 function pure(x, y) {
 	return { a: y, z: x };

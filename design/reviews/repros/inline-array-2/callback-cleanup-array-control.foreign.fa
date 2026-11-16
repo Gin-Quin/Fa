@@ -3,11 +3,11 @@ type Resource = {
 	function destroy = (self) => { console.log("drop {self.name}") }
 }
 function clear = <Item, capacity: UInt32>(items: Array<Item>) mutates items => { items.clear() }
-function run = <Item, capacity: UInt32>(create: () => Item) throws CapacityError => {
+function run = <Item, capacity: UInt32>(create: () => Item) => {
 	mutable items: Array<Item> = []
-	try items.push(create())
+	items.push(create())
 	let cleanup = clear<Item, capacity>
-	cleanup(items)
+	cleanup(items) -- prints: drop callback
 	console.log(items.length) -- prints: 0
 }
-try run<Resource, 1>(() => Resource { name = "callback" }) -- prints: drop callback
+run<Resource, 1>(() => Resource { name = "callback" })

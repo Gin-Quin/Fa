@@ -7,4 +7,4 @@ async function append = <capacity: UInt32>(items: InlineArray<String, capacity>)
 mutable items: InlineArray<String, 1> = []
 let callback = append<1>
 try await callback(items)
-console.log(items) -- prints: ["entry {items.length} has a long string that must survive the callback"]
+console.log(items) -- prints: ["entry 0 has a long string that must survive the callback"]

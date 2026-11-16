@@ -5,6 +5,7 @@ Usage: python3 matrix.py FILE... [--targets bun,native,wasm,native-freestanding]
 Logs/artifacts go to /tmp/inline-array-2-matrix. LLVM uses O0/O3 + leak checks.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -28,10 +29,18 @@ def run(command, log, timeout=90):
         reason = None
         while process.poll() is None:
             try:
-                status = Path(f'/proc/{process.pid}/status').read_text()
-                rss = next((int(line.split()[1]) for line in status.splitlines()
-                            if line.startswith('VmRSS:')), 0)
-                maximum = max(maximum, rss)
+                pending = [process.pid]
+                while pending:
+                    pid = pending.pop()
+                    try:
+                        status = Path(f'/proc/{pid}/status').read_text()
+                        rss = next((int(line.split()[1]) for line in status.splitlines()
+                                    if line.startswith('VmRSS:')), 0)
+                        maximum = max(maximum, rss)
+                        children = Path(f'/proc/{pid}/task/{pid}/children').read_text()
+                        pending.extend(int(child) for child in children.split())
+                    except FileNotFoundError:
+                        pass
             except FileNotFoundError:
                 pass
             if maximum > 512 * 1024 or time.monotonic() - start > timeout:
@@ -50,9 +59,10 @@ def main():
     parser.add_argument('--targets', default='bun,native,wasm,native-freestanding')
     args = parser.parse_args()
     for file in args.files:
+        digest = hashlib.sha256((ROOT / file).read_bytes()).hexdigest()
         for target in args.targets.split(','):
             for level in ([None] if target in ('bun', 'check') else [0, 3]):
-                label = f'{Path(file).stem}-{target}-{level}'
+                label = f'{Path(file).stem}-{digest[:8]}-{target}-{level}'
                 if target in ('bun', 'check'):
                     cmd = ['target/debug/fa', 'run' if target == 'bun' else 'check', file]
                 else:
@@ -60,7 +70,7 @@ def main():
                            f'-O{level}', '--leak-check', f'--output={OUT / label}', '--run']
                 result = run(cmd, OUT / f'{label}.log')
                 with (OUT / 'results.jsonl').open('a') as stream:
-                    stream.write(json.dumps(dict(file=file, target=target, level=level, **result)) + '\n')
+                    stream.write(json.dumps(dict(file=file, sha256=digest, target=target, level=level, **result)) + '\n')
                 print(label, result['code'], result['rss_kib'], repr(result['output'][:1000]), flush=True)
 
 

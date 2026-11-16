@@ -7,7 +7,7 @@ function run = <Item, capacity: UInt32>(create: () => Item) throws CapacityError
 	mutable items: InlineArray<Item, capacity> = []
 	try items.push(create())
 	let cleanup = clear<Item, capacity>
-	cleanup(items)
+	cleanup(items) -- prints: drop callback
 	console.log(items.length) -- prints: 0
 }
-try run<Resource, 1>(() => Resource { name = "callback" }) -- prints: drop callback
+try run<Resource, 1>(() => Resource { name = "callback" })

@@ -56,3 +56,7 @@ This is the second path affected by symbolic-capacity JS lifetime dispatch.
 the other targets). Its library result crosses a compilation-unit boundary;
 the application prints `a long string crossing a compilation unit` and `2`.
 All six targets build and run correctly in the review.
+
+`ordering.fa` should be rejected by analysis: collections are not ordered.
+Instead every JS target prints `false` for `[2] < [10]`, and every LLVM target
+refuses it during emission. The ordinary Array control is rejected correctly.

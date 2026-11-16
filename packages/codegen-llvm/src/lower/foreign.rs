@@ -888,8 +888,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					&[
 						pointer.into(),
 						length.into(),
+						self.usize.const_zero().into(),
 						empty.into(),
 						self.usize.const_zero().into(),
+						self.simple_flag().into(),
 					],
 					Repr::Str,
 				)?;

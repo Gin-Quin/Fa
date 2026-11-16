@@ -4,7 +4,7 @@ let greeting = "Hello, {name}!"
 console.log(greeting)
 -- prints: Hello, Ada!
 console.log(greeting.length, "héllo".length, "🇫🇷".length)
--- prints: 11 5 1
+-- prints: 11 5 4
 let joined = name + " " + "Lovelace"
 console.log(joined)
 -- prints: Ada Lovelace

@@ -390,7 +390,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						.build_ptr_to_int(bv.into_pointer_value(), self.usize, "")?,
 				)
 			} else if index == 2 {
-				let mask = self.string_flags().const_not();
+				let mask = self.simple_flag().const_not();
 				(
 					self.builder.build_and(av.into_int_value(), mask, "")?,
 					self.builder.build_and(bv.into_int_value(), mask, "")?,
@@ -1005,7 +1005,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (b, b_length) = self.string_parts(right)?;
 		let result = self.call_with_pair(
 			"fa_concat",
-			&[a.into(), a_length.into(), b.into(), b_length.into()],
+			&[
+				a.into(),
+				a_length.into(),
+				self.string_capacity(left)?.into(),
+				b.into(),
+				b_length.into(),
+				self.string_capacity(right)?.into(),
+			],
 			Repr::Str,
 		)?;
 		Ok(self.fresh(result))

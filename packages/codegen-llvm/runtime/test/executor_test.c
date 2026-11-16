@@ -907,7 +907,7 @@ static void test_utf16_strings(void) {
 	FaString high, low, joined;
 	CHECK(fa_string_get(text, sizeof(text) - 1, 0, 3, &high));
 	CHECK(fa_string_get(text, sizeof(text) - 1, 0, 4, &low));
-	fa_concat(string_bytes(&high), 3, string_bytes(&low), 3, &joined);
+	fa_concat(string_bytes(&high), 3, high.capacity, string_bytes(&low), 3, low.capacity, &joined);
 	CHECK(string_length(&joined) == 4);
 	CHECK(fa_string_equal(string_bytes(&joined), 4, text + 6, 4));
 	fa_string_append(&high, string_bytes(&low), 3, low.capacity);
@@ -917,6 +917,17 @@ static void test_utf16_strings(void) {
 	CHECK(__builtin_memcmp(encoded, "\xef\xbf\xbd", 3) == 0);
 	CHECK(fa_string_compare((const uint8_t *)"\xf0\x90\x80\x80", 4, (const uint8_t *)"\xee\x80\x80", 3) < 0);
 	CHECK(fa_string_compare(string_bytes(&low), 3, (const uint8_t *)"\xee\x80\x80", 3) < 0);
+	// Materializing a conservative view makes the inline surrogate flag exact.
+	FaString view = {(const uint8_t *)"\xc3\xa9", 2, STRING_SURROGATES | KIND_MASK};
+	FaString materialized = {0};
+	uint8_t frame[FRAME_STRING_BYTES];
+	fa_string_assign_local(&view, frame, &materialized, 0, 0);
+	CHECK((materialized.capacity & STRING_INLINE) && !(materialized.capacity & STRING_SURROGATES));
+	FaString ascii = owned_copy_with((const uint8_t *)"abcdefghijklmnopqrstuvwxyz012345", 32, SIMPLE);
+	uint8_t *replacement = fa_string_replace_buffer(96, SIMPLE, &ascii);
+	fill_bytes(replacement, 'x', 96);
+	CHECK(string_length(&ascii) == 96 && (ascii.capacity & SIMPLE));
+	fa_string_free(ascii.bytes, ascii.capacity);
 	// A pair crosses every second breadcrumb; query both halves in reverse order.
 	uint8_t long_text[640];
 	size_t bytes = 0;

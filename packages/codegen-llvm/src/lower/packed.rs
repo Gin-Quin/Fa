@@ -495,11 +495,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let length64 = self
 						.builder
 						.build_int_z_extend_or_bit_cast(length, i64, "")?;
-					// one byte of length below 63, else a 0xFF and a word
+					// ASCII and well-formed short strings keep their one-byte header.
+					// A possible surrogate uses the extended header, with its flag.
+					let surrogates =
+						self.builder
+							.build_and(capacity, self.string_surrogates_flag(), "")?;
+					let tagged = self.builder.build_or(length, surrogates, "")?;
+					let tagged = self
+						.builder
+						.build_int_z_extend_or_bit_cast(tagged, i64, "")?;
 					let short = self.builder.build_int_compare(
 						IntPredicate::ULT,
-						length64,
-						i64.const_int(63, false),
+						tagged,
+						i64.const_int(127, false),
 						"",
 					)?;
 					let header = self.builder.build_select(
@@ -577,7 +585,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
-	/// Writes a string's length (with ASCII/surrogate flags in the low two bits) and
+	/// Writes a string's length (with the ASCII flag in the low bit; surrogates use the extended header) and
 	/// bytes at `cursor`; the address after them.
 	fn packed_store_string(
 		&self,
@@ -594,20 +602,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder
 				.build_int_compare(IntPredicate::NE, simple, usize.const_zero(), "")?;
 		let simple = self.builder.build_int_z_extend(simple, usize, "")?;
-		let surrogates = self
-			.builder
-			.build_and(capacity, self.string_surrogates_flag(), "")?;
-		let surrogates = self.builder.build_right_shift(
-			surrogates,
-			usize.const_int(u64::from(usize.get_bit_width() - 4), false),
-			false,
-			"",
-		)?;
-		let flags = self.builder.build_or(simple, surrogates, "")?;
 		let word = self
 			.builder
-			.build_left_shift(length, usize.const_int(2, false), "")?;
-		let word = self.builder.build_or(word, flags, "")?;
+			.build_left_shift(length, usize.const_int(1, false), "")?;
+		let word = self.builder.build_or(word, simple, "")?;
+
 		let short_block = self.append_block("packed_short");
 		let long_block = self.append_block("packed_long");
 		let join = self.append_block("packed_string");
@@ -629,7 +628,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.set_alignment(1)
 			.map_err(|e| Error::Llvm(e.to_string()))?;
 		let word_pointer = self.packed_offset(cursor, usize.const_int(1, false))?;
-		let store = self.builder.build_store(word_pointer, word)?;
+		let surrogates = self
+			.builder
+			.build_and(capacity, self.string_surrogates_flag(), "")?;
+		let extended = self.builder.build_or(word, surrogates, "")?;
+		let store = self.builder.build_store(word_pointer, extended)?;
 		store
 			.set_alignment(1)
 			.map_err(|e| Error::Llvm(e.to_string()))?;
@@ -669,6 +672,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(short_block);
 		let short_word = self.builder.build_int_z_extend(header, usize, "")?;
 		let short_bytes = self.packed_offset(cursor, usize.const_int(1, false))?;
+		let short_length =
+			self.builder
+				.build_right_shift(short_word, usize.const_int(1, false), false, "")?;
+		let ascii = self
+			.builder
+			.build_and(short_word, usize.const_int(1, false), "")?;
+		let ascii = self.builder.build_left_shift(
+			ascii,
+			usize.const_int(u64::from(usize.get_bit_width() - 1), false),
+			"",
+		)?;
+		let short_capacity = self.builder.build_or(ascii, self.string_kind_mask(), "")?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(long_block);
 		let word_pointer = self.packed_offset(cursor, usize.const_int(1, false))?;
@@ -677,38 +692,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.expect("a load")
 			.set_alignment(1)
 			.map_err(|e| Error::Llvm(e.to_string()))?;
+		let word = load.into_int_value();
+		let surrogates = self
+			.builder
+			.build_and(word, self.string_surrogates_flag(), "")?;
+		let payload =
+			self.builder
+				.build_and(word, self.string_surrogates_flag().const_not(), "")?;
+		let long_length =
+			self.builder
+				.build_right_shift(payload, usize.const_int(1, false), false, "")?;
+		let ascii = self
+			.builder
+			.build_and(word, usize.const_int(1, false), "")?;
+		let ascii = self.builder.build_left_shift(
+			ascii,
+			usize.const_int(u64::from(usize.get_bit_width() - 1), false),
+			"",
+		)?;
+		let encoding = self.builder.build_or(ascii, surrogates, "")?;
+		let long_capacity = self
+			.builder
+			.build_or(encoding, self.string_kind_mask(), "")?;
 		let word_size = u64::from(usize.get_bit_width() / 8);
 		let long_bytes = self.packed_offset(cursor, usize.const_int(1 + word_size, false))?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(join);
-		let word = self.builder.build_phi(usize, "")?;
-		word.add_incoming(&[(&short_word, short_block), (&load, long_block)]);
-		let word = word.as_basic_value().into_int_value();
+		let length = self.builder.build_phi(usize, "")?;
+		length.add_incoming(&[(&short_length, short_block), (&long_length, long_block)]);
+		let length = length.as_basic_value().into_int_value();
+		let capacity = self.builder.build_phi(usize, "")?;
+		capacity.add_incoming(&[(&short_capacity, short_block), (&long_capacity, long_block)]);
+		let capacity = capacity.as_basic_value().into_int_value();
 		let bytes = self.builder.build_phi(self.pointer_type(), "")?;
 		bytes.add_incoming(&[(&short_bytes, short_block), (&long_bytes, long_block)]);
 		let bytes = bytes.as_basic_value().into_pointer_value();
-		let length = self
-			.builder
-			.build_right_shift(word, usize.const_int(2, false), false, "")?;
-		// a view (`KIND_MASK`), with the `SIMPLE` flag of the low bit
-		let simple = self
-			.builder
-			.build_and(word, usize.const_int(1, false), "")?;
-		let simple = self.builder.build_left_shift(
-			simple,
-			usize.const_int(u64::from(usize.get_bit_width() - 1), false),
-			"",
-		)?;
-		let surrogates = self
-			.builder
-			.build_and(word, usize.const_int(2, false), "")?;
-		let surrogates = self.builder.build_left_shift(
-			surrogates,
-			usize.const_int(u64::from(usize.get_bit_width() - 4), false),
-			"",
-		)?;
-		let flags = self.builder.build_or(simple, surrogates, "")?;
-		let capacity = self.builder.build_or(flags, self.string_kind_mask(), "")?;
 		let mut value = self.string_type.get_undef();
 		for (index, part) in [BasicValueEnum::from(bytes), length.into(), capacity.into()]
 			.into_iter()

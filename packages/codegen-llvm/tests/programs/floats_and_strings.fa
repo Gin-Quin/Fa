@@ -1,4 +1,4 @@
--- Floats print like JavaScript's `Number::toString`; strings count UTF-16 code units.
+-- Floats print like JavaScript's `Number::toString`; strings count graphemes.
 console.log(0.1 + 0.2, 1.0 / 3.0, 2.0, 0.5) -- prints: 0.30000000000000004 0.3333333333333333 2 0.5
 console.log(1e21, 1e20, 1e-7, 0.000001, 123456789.125) -- prints: 1e+21 100000000000000000000 1e-7 0.000001 123456789.125
 console.log(-0.0, 1.0 / 0.0, -1.0 / 0.0, 0.0 / 0.0) -- prints: 0 Infinity -Infinity NaN

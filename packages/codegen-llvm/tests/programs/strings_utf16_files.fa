@@ -1,0 +1,9 @@
+-- skip-target: native-freestanding
+use { File } = std.fs
+let face = "😀"
+let path = "/tmp/fa-string-utf16-output.txt"
+try File.writeText(path, face[0] + "-" + face[1])
+let text = try File.readText(path)
+console.log(text, text.isWellFormed(), text == "�-�") -- prints: �-� true true
+try File.writeText(path, face[0] + face[1])
+console.log(try File.readText(path)) -- prints: 😀

@@ -754,10 +754,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let length = builder.build_extract_value(pair, 1, "")?.into_int_value();
 				// a literal (kind 0, whatever its `SIMPLE` flag) is shared, and
 				// so is an empty string
-				let kind = builder.build_and(capacity, self.string_flags().const_not(), "")?;
+				let shifted =
+					builder.build_left_shift(capacity, self.usize.const_int(3, false), "")?;
+				let before = builder.build_int_sub(shifted, self.usize.const_int(1, false), "")?;
 				let literal = builder.build_int_compare(
-					IntPredicate::EQ,
-					kind,
+					IntPredicate::SLT,
+					before,
 					self.usize.const_zero(),
 					"",
 				)?;
@@ -767,20 +769,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.usize.const_zero(),
 					"",
 				)?;
-				let static_tag = builder.build_and(
-					capacity,
-					self.usize
-						.const_int(1 << (self.usize.get_bit_width() - 4), false),
-					"",
-				)?;
-				let static_text = builder.build_int_compare(
-					IntPredicate::NE,
-					static_tag,
-					self.usize.const_zero(),
-					"",
-				)?;
-				let shared =
-					builder.build_or(builder.build_or(literal, static_text, "")?, empty, "")?;
+				let shared = builder.build_or(literal, empty, "")?;
 				let not_shared = builder.build_not(shared, "")?;
 				self.helper_when(builder, function, not_shared, |builder| {
 					builder.build_return(Some(&pair))?;

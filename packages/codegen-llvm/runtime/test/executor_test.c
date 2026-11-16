@@ -881,6 +881,7 @@ static void test_region_slice_views(void) {
 static void test_utf16_strings(void) {
 	fa_release_builder();
 	long before = allocated;
+	long bytes_before = allocated_bytes;
 	const uint8_t text[] = "a\xc3\xa9\xe6\x97\xa5\xf0\x9f\x98\x80z";
 	const uint16_t units[] = {97, 233, 0x65E5, 0xD83D, 0xDE00, 122};
 	CHECK(fa_string_length(text, sizeof(text) - 1, 0) == 6);
@@ -937,7 +938,7 @@ static void test_utf16_strings(void) {
 	// bytes 2..4 for a low head, bytes 0..3 for a high tail. No read may
 	// leave those physical spans, and owning copies write canonical WTF-8.
 	for (uint32_t code = 0x10000; code <= 0x10FFFF; code += 1021) {
-		uint8_t scalar[4], copied[3], expected_half[3];
+		uint8_t scalar[4], copied[4] = {0, 0, 0, 0x77}, expected_half[3];
 		CHECK(encode_point(scalar, code) == 4);
 		uint16_t high_unit = (uint16_t)(0xD800 + ((code - 0x10000) >> 10));
 		uint16_t low_unit = (uint16_t)(0xDC00 + ((code - 0x10000) & 1023));
@@ -951,6 +952,7 @@ static void test_utf16_strings(void) {
 		fa_string_copy_bytes(copied, scalar, 3, STRING_COUNTED_VIEW | 1);
 		CHECK(encode_point(expected_half, high_unit) == 3);
 		CHECK(__builtin_memcmp(copied, expected_half, 3) == 0);
+		CHECK(copied[3] == 0x77);
 		fa_string_copy_bytes(copied, scalar + 2, 2, STRING_COUNTED_VIEW | 1);
 		CHECK(encode_point(expected_half, low_unit) == 3);
 		CHECK(__builtin_memcmp(copied, expected_half, 3) == 0);
@@ -1090,7 +1092,8 @@ static void test_utf16_strings(void) {
 		copy_bytes(long_text + bytes, text + 6, 4); bytes += 4;
 		expected[count++] = 0xD83D; expected[count++] = 0xDE00;
 	}
-	FaString heap = owned_copy(long_text, bytes);
+	FaString heap;
+	fa_string_from(long_text, bytes, 0, 4096, &heap);
 	CHECK(string_owned(heap.capacity));
 	CHECK(fa_string_length(heap.bytes, bytes, heap.capacity) == count);
 	CHECK(string_header(heap.bytes)->breadcrumbs == 0);
@@ -1098,10 +1101,39 @@ static void test_utf16_strings(void) {
 	CHECK(string_header(heap.bytes)->breadcrumbs == 0);
 	for (size_t i = count; i > 0; i -= 1) { CHECK(fa_string_code_unit_at(heap.bytes, bytes, heap.capacity, (int64_t)i - 1) == expected[i - 1]); }
 	CHECK(string_header(heap.bytes)->breadcrumbs != 0);
+	size_t *old_crumbs = string_header(heap.bytes)->breadcrumbs;
+	size_t base_bytes = string_header(heap.bytes)->bytes;
+	size_t base_units = string_header(heap.bytes)->units;
 	fa_string_append(&heap, (const uint8_t *)"!", 1, SIMPLE);
 	CHECK(fa_string_length(heap.bytes, heap.length, heap.capacity) == count + 1);
-	CHECK(string_header(heap.bytes)->breadcrumbs == 0);
+	CHECK(string_header(heap.bytes)->breadcrumbs == old_crumbs);
+	CHECK(string_header(heap.bytes)->bytes == base_bytes && string_header(heap.bytes)->units == base_units);
+	uint8_t ascii_tail[128];
+	__builtin_memset(ascii_tail, '!', sizeof ascii_tail);
+	fa_string_append(&heap, ascii_tail, sizeof ascii_tail, SIMPLE);
+	CHECK(fa_string_code_unit_at(heap.bytes, heap.length, heap.capacity, (int64_t)count + 100) == '!');
+	CHECK(string_header(heap.bytes)->breadcrumbs[0] == (count + 129) / 64 + 1);
+	CHECK(string_header(heap.bytes)->bytes == base_bytes && string_header(heap.bytes)->units == base_units);
 	fa_string_free(heap.bytes, heap.capacity);
+	// Equal byte lengths can have different unit counts. A replacement
+	// publishes even when its pointer, byte length and capacity are unchanged.
+	uint8_t euros[48], accents[48];
+	for (size_t i = 0; i < sizeof euros; i += 3) { copy_bytes(euros + i, (const uint8_t *)"€", 3); }
+	for (size_t i = 0; i < sizeof accents; i += 2) { copy_bytes(accents + i, (const uint8_t *)"é", 2); }
+	FaString rewritten;
+	fa_string_from(euros, sizeof euros, 0, 128, &rewritten);
+	CHECK(fa_string_length(rewritten.bytes, 48, rewritten.capacity) == 16);
+	uint8_t *same_block = fa_string_replace_buffer(48, 0, &rewritten);
+	copy_bytes(same_block, accents, sizeof accents);
+	fa_string_finish(&rewritten);
+	CHECK(rewritten.bytes == same_block && fa_string_length(rewritten.bytes, 48, rewritten.capacity) == 24);
+	same_block = fa_string_replace_buffer(48, 0, &rewritten);
+	__builtin_memset(same_block, 'x', 48);
+	fa_string_finish(&rewritten);
+	CHECK(rewritten.capacity & SIMPLE);
+	fa_string_append(&rewritten, (const uint8_t *)"é", 2, 0);
+	CHECK(fa_string_length(rewritten.bytes, rewritten.length, rewritten.capacity) == 49);
+	fa_string_free(rewritten.bytes, rewritten.capacity);
 	// Non-ASCII appends normalize only their join, even as the block grows.
 	FaString growing = owned_copy((const uint8_t *)"é", 2);
 	for (size_t i = 0; i < 10000; i += 1) {
@@ -1120,6 +1152,7 @@ static void test_utf16_strings(void) {
 	fa_string_free(growing.bytes, growing.capacity);
 	fa_release_builder();
 	CHECK(allocated == before);
+	CHECK(allocated_bytes == bytes_before);
 }
 
 static void test_allocator_fast_paths(void) {

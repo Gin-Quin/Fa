@@ -258,18 +258,6 @@ pub struct Runtime<'ctx, 'module> {
 	declare_only: bool,
 }
 
-/// Heap UTF-16 metadata and payload never overlap a Fa String value's
-/// three-word header. Inline payloads do overlap it, so only the owned
-/// cache helper may use the complementary noalias scope.
-pub(crate) fn string_value_scope(context: &Context) -> inkwell::values::MetadataValue<'_> {
-	let domain = context.metadata_node(&[context.metadata_string("fa.string.storage").into()]);
-	let scope = context.metadata_node(&[
-		context.metadata_string("fa.string.value").into(),
-		domain.into(),
-	]);
-	context.metadata_node(&[scope.into()])
-}
-
 impl<'ctx, 'module> Runtime<'ctx, 'module> {
 	pub fn new(
 		context: &'ctx Context,
@@ -326,27 +314,6 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		runtime.set_triple(&self.module.get_triple());
 		runtime.set_data_layout(&self.module.get_data_layout());
 		self.module.link_in_module(runtime)?;
-		// The cached helper reads an owned payload and writes its private
-		// prefix. It cannot change the caller's String header. Do not mark
-		// the wrapper readonly: these cache writes remain observable to the
-		// other runtime helpers, including later length/index queries.
-		if let Some(length) = self.module.get_function("fa_string_length") {
-			for block in length.get_basic_blocks() {
-				for instruction in block.get_instructions() {
-					if let Ok(call) = inkwell::values::CallSiteValue::try_from(instruction)
-						&& call.get_called_fn_value().is_some_and(|function| {
-							function.get_name().to_bytes() == b"string_length_slow"
-						}) {
-						instruction
-							.set_metadata(
-								string_value_scope(self.context),
-								self.context.get_kind_id("noalias"),
-							)
-							.map_err(|error| Error::Llvm(error.to_string()))?;
-					}
-				}
-			}
-		}
 		// Every constructor returns a complete initialized growing header,
 		// including empty, frame and heap results. Preserve that fact when
 		// an owner slot is promoted, so conditional header loads can leave a

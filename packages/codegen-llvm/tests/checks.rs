@@ -1856,7 +1856,10 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 		);
 		let evaluate = function(&ir, "fa.evaluate");
 		assert!(evaluate.contains("union_leaf"), "{evaluate}");
-		assert!(evaluate.contains("union_base_or_call = phi i64"), "{evaluate}");
+		assert!(
+			evaluate.contains("union_base_or_call = phi i64"),
+			"{evaluate}"
+		);
 		let source = |leaf: &str| {
 			format!(
 				"type T = Union {{ One = {{ child: T }}, Leaf = {{ value: Int32 }} }}\nfunction double = (value: Integer): Integer => value * 2\nfunction read = (node: T, pass: Integer): Integer => when node is {{\n T.One as {{ child }} => read(child, pass) + 1\n T.Leaf as {{ value }} => {leaf}\n}}\nconsole.log(read(T.One {{ child = T.Leaf {{ value = 7 }} }}, 3))\n"

@@ -1784,7 +1784,10 @@ impl TypeStore {
 			TypeKind::Collection(collection, item, key) => {
 				let inherited = self.aggregate([item, key].into_iter(), F::COMPARABLE);
 				if collection == crate::types::CollKind::InlineArray {
-					self.flags(item)
+					// Storage/category follows Item; the bound still participates
+					// in substitution. Scalar capabilities don't describe a list.
+					((self.flags(item) - F::ORDERED - F::JS_BIGINT)
+						| (inherited & (F::HAS_PARAM | F::HAS_UNKNOWN)))
 						.with_runtime_kind(collection.runtime_kind())
 				} else {
 					(inherited - F::FLAT - F::TRIVIALLY_COPYABLE)

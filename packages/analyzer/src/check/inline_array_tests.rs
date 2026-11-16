@@ -128,3 +128,30 @@ fn inline_bounded_while_proves_pushes_and_the_final_index() {
 	));
 	assert!(!analysis.has_flags(node(&session, file, "values[3]"), NodeFlags::INDEX_CHECK));
 }
+
+#[test]
+fn inline_capacity_alone_is_substituted() {
+	let (session, file) = analyzed(
+		"function empty = <capacity: UInt32>(): InlineArray<Integer, capacity> => []\nmutable values = empty<2>()\nfunction append = <capacity: UInt32>(values: InlineArray<Integer, capacity>) throws CapacityError mutates values.length => { try values.push(9) }\ntry append<2>(values)\n",
+	);
+	assert_eq!(
+		symbol_type(&session, file, "values"),
+		"InlineArray<Integer, 2>"
+	);
+}
+
+#[test]
+fn inline_arrays_do_not_inherit_scalar_ordering() {
+	for item in ["Integer", "String", "Int64"] {
+		for operation in ["<", "<=", ">", ">="] {
+			let ordinary = codes(&format!(
+				"function compare = (a: Array<{item}>, b: Array<{item}>): Boolean => a {operation} b\n"
+			));
+			let inline = codes(&format!(
+				"function compare = (a: InlineArray<{item}, 2>, b: InlineArray<{item}, 2>): Boolean => a {operation} b\n"
+			));
+			assert!(!ordinary.is_empty());
+			assert_eq!(inline, ordinary, "{item} {operation}");
+		}
+	}
+}

@@ -1,0 +1,22 @@
+-- asynchronous: false
+function reverse = (items: Array<Integer>, start: Integer, end: Integer): { low: Integer, high: Integer } throws IndexError mutates items => {
+	mutable low = start
+	mutable high = end
+	while low < high {
+		let left = try items[low]
+		let right = try items[high]
+		try items[low] = right
+		try items[high] = left
+		low += 1
+		high -= 1
+	}
+	{ low, high }
+}
+mutable items = [1, 2, 3]
+reverse(items, Integer.minValue, Integer.maxValue) catch error => console.log(error) -- prints: IndexError { index = -9223372036854775808, length = 3 }
+reverse(items, 0, Integer.maxValue) catch error => console.log(error) -- prints: IndexError { index = 9223372036854775807, length = 3 }
+let empty = try reverse(items, Integer.maxValue, Integer.minValue)
+assert empty.low == Integer.maxValue
+assert empty.high == Integer.minValue
+assert items == [1, 2, 3]
+console.log("extreme reversal ok") -- prints: extreme reversal ok

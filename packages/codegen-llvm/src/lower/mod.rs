@@ -22,6 +22,7 @@
 mod aliasing;
 mod appends;
 mod arith;
+mod array_reversals;
 mod arrays;
 mod big_integers;
 pub(crate) mod c_library;
@@ -3131,6 +3132,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		condition: NodeId,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		let reversed = self.begin_array_reversal(condition, body)?;
 		let test = self.append_block("while");
 		let body_block = self.append_block("while_body");
 		let exit = self.append_block("end_while");
@@ -3152,6 +3154,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.frame_mut().loops.pop();
 		self.branch_to(test)?;
 		self.builder.position_at_end(exit);
+		if let Some(done) = reversed {
+			self.builder.build_unconditional_branch(done)?;
+			self.builder.position_at_end(done);
+		}
 		Ok(Val::void())
 	}
 

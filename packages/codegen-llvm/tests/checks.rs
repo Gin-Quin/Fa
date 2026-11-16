@@ -1452,6 +1452,53 @@ console.log(items, stable, words, maybe)
 	}
 
 	#[test]
+	fn range_reversal_versions_only_plain_scalar_swap_loops() {
+		let body = "let left = try items[low]\nlet right = try items[high]\ntry items[low] = right\ntry items[high] = left\nlow += 1\nhigh -= 1";
+		let source = |item: &str, body: &str| {
+			format!(
+				"function reverse = (items: Array<{item}>, start: Integer, end: Integer) throws IndexError mutates items => {{\nmutable low = start\nmutable high = end\nwhile low < high {{ {body} }}\n}}\nmutable items: Array<{item}> = []\ntry reverse(items, arguments.length, 100)\n"
+			)
+		};
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("reversal-{}", target.name()),
+				&source("Integer", body),
+				false,
+				OptLevel::O0,
+				target,
+			);
+			let reverse = function(&ir, "fa.reverse");
+			assert!(reverse.contains("reverse_range:"), "{reverse}");
+			assert!(reverse.contains("reverse_checked:"), "{reverse}");
+			assert!(reverse.contains("reverse_left"), "{reverse}");
+			assert_eq!(count(reverse, "@fa_error_index("), 4, "{reverse}");
+		}
+		for (name, item, body) in [
+			("managed", "String", body.to_string()),
+			(
+				"extra-effect",
+				"Integer",
+				format!("{body}\nconsole.log(low)"),
+			),
+			(
+				"different-step",
+				"Integer",
+				body.replace("low += 1", "low += 2"),
+			),
+		] {
+			let ir = ir_of(&format!("reversal-reject-{name}"), &source(item, &body));
+			assert!(!ir.contains("reverse_range:"), "{name}: {ir}");
+		}
+		let ir = ir_at(
+			"reversal-fannkuch",
+			include_str!("../../../benchmarks/fannkuch-redux/main.fa"),
+			false,
+			OptLevel::O0,
+		);
+		assert!(ir.contains("reverse_range:"), "{ir}");
+	}
+
+	#[test]
 	fn growing_scans_have_a_counted_inner_loop_per_segment() {
 		let source = "function sum = (items: GrowingArray<Integer>): Integer => { mutable total = 0\nfor item in items { total += item }\ntotal }\nmutable items: GrowingArray<Integer> = []\nfor i in 0..arguments.length { items.push(i) }\nconsole.log(sum(items))\n";
 		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {

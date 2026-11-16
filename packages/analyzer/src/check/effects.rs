@@ -626,6 +626,12 @@ impl Walker<'_> {
 		if set_covers(&self.s.types, declared, path, entry.invalidates) {
 			return;
 		}
+		let canonical = self.canonical_reference_place(entry.place);
+		if let Some(path) = self.effect_path(canonical)
+			&& set_covers(&self.s.types, declared, path, entry.invalidates)
+		{
+			return;
+		}
 		let text = path_text(&self.s.types, path, &|index| self.effect_param_name(index));
 		let root = {
 			let (data, _) = self.s.types.path_data(path);
@@ -1275,8 +1281,13 @@ impl Walker<'_> {
 		let saved = std::mem::take(&mut self.body.functions);
 		self.body.functions.push(cx.clone());
 		let mut own: Vec<(PathId, bool)> = Vec::new();
+		let mut coverage_own = Vec::new();
 		let mut captured: Vec<EffectEntry> = Vec::new();
 		for entry in &cx.effects {
+			let canonical = self.canonical_reference_place(entry.place);
+			if let Some(path) = self.effect_path(canonical) {
+				coverage_own.push((path, entry.invalidates));
+			}
 			let Some(symbol) = self.place_symbol(entry.place) else {
 				continue;
 			};
@@ -1310,6 +1321,7 @@ impl Walker<'_> {
 						})
 						.filter(|&(path, invalidates)| {
 							!covers_any(&self.s.types, path, invalidates, &own)
+								&& !covers_any(&self.s.types, path, invalidates, &coverage_own)
 						})
 						.collect();
 					for (path, invalidates) in unused {
@@ -2370,6 +2382,57 @@ impl Walker<'_> {
 		let value = self.strip_groups(value);
 		let lambda = match self.view(value) {
 			View::Copy(inner) => return self.escape(inner, at),
+			View::Block { statements } => {
+				if let Some(last) = statements.last() {
+					self.escape(last, at);
+				}
+				return;
+			}
+			View::If {
+				then_body,
+				else_body,
+				..
+			} => {
+				self.escape(then_body, at);
+				if let Some(body) = else_body {
+					self.escape(body, at);
+				}
+				return;
+			}
+			View::When { arms, .. } => {
+				let values: Vec<_> = arms.iter().map(|arm| arm.value).collect();
+				for value in values {
+					self.escape(value, at);
+				}
+				return;
+			}
+			View::Catch {
+				expression,
+				handler,
+				..
+			} => {
+				self.escape(expression, at);
+				self.escape(handler, at);
+				return;
+			}
+			View::Do(body) | View::Spread(body) => return self.escape(body, at),
+			View::Object { items } | View::Array { items } | View::Tuple { items } => {
+				let items: Vec<_> = items.iter().collect();
+				for value in items {
+					self.escape(value, at);
+				}
+				return;
+			}
+			View::TypedObject { members, .. } => {
+				let members: Vec<_> = members.iter().collect();
+				for value in members {
+					self.escape(value, at);
+				}
+				return;
+			}
+			View::Assignment {
+				value: Some(value), ..
+			} => return self.escape(value, at),
 			View::Lambda { .. } => value,
 			View::Name(_) => {
 				let Resolution::Local(symbol) = self.a.resolution(value) else {
@@ -2393,6 +2456,7 @@ impl Walker<'_> {
 	/// of what it captures.
 	pub(crate) fn escape_closure(&mut self, lambda: NodeId, at: NodeId) {
 		self.a.escapes.insert(lambda);
+		self.check_escaping_references(lambda, at);
 		// requirements are not captured (requirements.rs)
 		self.check_stored_lambda(lambda);
 		let Some(writes) = self.closure_writes.get(&lambda).cloned() else {

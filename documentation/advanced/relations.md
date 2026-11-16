@@ -488,6 +488,8 @@ first.root = node
 
 Allowed shapes are `T in path`, `(T in path)?`, `Array<T in path>` and `InlineArray<T in path, capacity>`. T is the target's complete element type. Required links must be supplied; optional/list links start empty only with an explicit `= none`/`= []`. Cycles, self-links, repeated targets and sharing are allowed. Seed cycles through initialized optional/list fields or a link-free union member, then patch or replace the element. No uninitialized element or constructor-self reference can seed an always-required cycle.
 
+A link is initialized like an ordinary field: supply a required link at construction, or write `= none` to give an optional link a default. A relation side is maintained by its collection and starts empty, so it does not take an explicit `= none` initializer.
+
 | Promise or cost | Relation | Explicit link |
 | --- | --- | --- |
 | Target | Stable relation collection, including deletable Pool | Whole element of GrowingPool/GrowingArray |
@@ -501,6 +503,37 @@ Allowed shapes are `T in path`, `(T in path)?`, `Array<T in path>` and `InlineAr
 | Complete-owner copy | Remaps jointly copied relation sides | Preserves sharing/cycles within the independent copy |
 
 Choose relations for objects that disappear individually, reverse queries or automatic partner maintenance. Choose links for graphs built and discarded together, ordered adjacency lists and low storage/write costs. A link does not promise a tree or acyclicity. A bare reference field keeps relation semantics even in GrowingPool, and absence of a reverse side remains an error. Ordinary fields cannot hide a reference in an optional, tuple, collection, alias or generic argument (`REF010`); local reference collections remain forbidden.
+
+These operations would leave a link without its target collection and are rejected:
+
+```fa
+-- Acceptance: link containment is implemented in subsequent link slices.
+use { Json } = std.json
+type Graph = {
+	nodes: GrowingPool<Node, UInt16> = []
+	link root: (Node in nodes)? = none
+	type Node = { value: Integer, link next: (Node in nodes)? = none }
+}
+mutable graph: Graph = {}
+use a = graph.nodes.add({ value = 1 })
+use b = graph.nodes.add({ value = 2, next = a })
+graph.root = b
+let detached = copy b -- error: this node has links into graph.nodes; borrow it or copy graph
+graph.nodes = [] -- error: graph.root may outlive graph.nodes; replace the complete graph
+let encoded = Json.stringify(graph) -- error: project the data and node identifiers into a separate type
+```
+
+A deletable pool needs a relation so that deleting a target can clear its incoming sides:
+
+```fa
+-- Acceptance: link target validation is implemented in subsequent link slices.
+type Wrong = {
+	nodes: Pool<Node> = []
+	type Node = {
+		link next: (Node in nodes)? = none -- error: nodes can remove elements; use GrowingPool or a relation
+	}
+}
+```
 
 Reading a scalar link with `use` binds its target; a later write does not reseat that alias. Link-list iteration and indexing bind target references, never addresses of encoded fields. Following a link restarts an effect path at its target collection. Printing, interpolation, equality and hashing omit link fields, as they omit relations: data equality is not graph-isomorphism equality. A reactive read of the list observes list writes; a read of target data observes those data writes, without a reverse-side notification.
 

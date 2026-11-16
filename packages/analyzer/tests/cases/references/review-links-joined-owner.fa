@@ -1,0 +1,13 @@
+-- Regression from the links 1a review.
+type Node = { value: Integer }
+type Model = { a: GrowingPool<Node> = [], b: GrowingPool<Node> = [] }
+function wrong = (m: Model, chooseA: Boolean): Node in m.a mutates m.a.size, m.b.size => {
+	mutable use result = m.b.add({ value = 7 })
+	if chooseA { reuse result = m.a.add({ value = 9 }) }
+	result -- error: REF009
+}
+mutable model: Model = {}
+use returned = wrong(model, false)
+model.b = []
+model.b.add({ value = 99 })
+console.log(returned.value)

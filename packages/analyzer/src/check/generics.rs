@@ -118,9 +118,10 @@ impl Walker<'_> {
 			self.set_type(target, ty);
 			// the constraint and the default may name the earlier parameters
 			self.constraint_depth += 1;
-			let constraint_ty = constraint.map_or(TypeId::UNKNOWN, |c| self.check_type_expr(c));
+			let constraint_ty =
+				constraint.map_or(TypeId::UNKNOWN, |c| self.check_owned_type_expr(c));
 			self.constraint_depth -= 1;
-			let default_ty = default.map_or(TypeId::UNSET, |d| self.check_type_expr(d));
+			let default_ty = default.map_or(TypeId::UNSET, |d| self.check_owned_type_expr(d));
 			if !default_ty.is_unset()
 				&& constraint_ty != TypeId::UNKNOWN
 				&& !self.s.types.is_recovering(default_ty)

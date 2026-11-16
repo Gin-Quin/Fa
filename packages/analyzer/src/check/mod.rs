@@ -435,6 +435,11 @@ pub struct Walker<'s> {
 	pub(crate) aliases: FxHashMap<SymbolId, PlaceId>,
 	/// Borrowed call results, recorded once after that evaluation's effects.
 	pub(crate) reference_results: FxHashMap<NodeId, PlaceId>,
+	/// Borrowed result leaves, captured before their branch flow is joined.
+	pub(crate) reference_values: FxHashMap<NodeId, Vec<PlaceId>>,
+	/// Whole reference annotations in borrowing positions; nested storage is never allowed.
+	pub(crate) borrowed_type_nodes: rustc_hash::FxHashSet<NodeId>,
+	pub(crate) type_expression_root: Option<NodeId>,
 	/// Dependent parameter owners; parameter roots still name their own effects.
 	pub(crate) reference_parameters: FxHashMap<SymbolId, PlaceId>,
 	/// The collection each local iterator reads, and whether its items are
@@ -626,6 +631,9 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		key_sets: key_sets::KeySetState::default(),
 		aliases: FxHashMap::default(),
 		reference_results: FxHashMap::default(),
+		reference_values: FxHashMap::default(),
+		borrowed_type_nodes: rustc_hash::FxHashSet::default(),
+		type_expression_root: None,
 		reference_parameters: FxHashMap::default(),
 		foreign: foreign::ForeignState::default(),
 		std_library: std_library::StdState::default(),
@@ -942,6 +950,23 @@ impl Walker<'_> {
 		if ty == TypeId::NEVER {
 			// the code after a `Never` expression is unreachable
 			self.body.flow.set_unreachable();
+		}
+		if self.body.flow.reachable
+			&& self
+				.body
+				.functions
+				.last()
+				.is_some_and(|cx| cx.ref_owner.is_some())
+			&& matches!(
+				self.view(n),
+				View::Name(_)
+					| View::Access { .. }
+					| View::Index { .. }
+					| View::Call { .. }
+					| View::Try(_)
+			) {
+			let origins = self.reference_origins(n);
+			self.reference_values.insert(n, origins);
 		}
 		ty
 	}
@@ -1338,8 +1363,11 @@ impl Walker<'_> {
 	/// `UNKNOWN`; its children are still walked (names resolve for the IDE),
 	/// with their diagnostics dropped.
 	pub fn unsupported(&mut self, n: NodeId, what: &str) -> TypeId {
+		self.unsupported_with_message(n, &format!("{what} is not supported yet by the analyzer"))
+	}
+
+	pub(super) fn unsupported_with_message(&mut self, n: NodeId, message: &str) -> TypeId {
 		self.memo(n, |w| {
-			let message = format!("{what} is not supported yet by the analyzer");
 			let diagnostic = w.diagnostic(&codes::analyzer::AN001, n, message);
 			w.report(diagnostic);
 			TypeId::UNKNOWN

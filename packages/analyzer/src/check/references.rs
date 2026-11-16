@@ -48,12 +48,13 @@ impl Walker<'_> {
 		if !mutable && self.is_module_path(value) {
 			return self.check_use_alias(n, name, value);
 		}
-		let declared = annotation.map(|annotation| self.check_type_expr(annotation));
+		let declared = annotation.map(|annotation| self.check_reference_type_expr(annotation));
 		let actual = self.check(value, declared);
 		if let Some(declared) = declared {
 			self.sink(value, actual, declared);
 		}
 		let place = self.reference_place(value);
+		let origins = self.reference_origins(value);
 		let kind = if mutable {
 			SymbolKind::MutableUse
 		} else {
@@ -91,7 +92,14 @@ impl Walker<'_> {
 			self.aliases.insert(symbol, place);
 			if self.body.flow.reachable {
 				let designated = self.canonical_reference_place(place);
-				let state = self.facts.refs.state(RefState::valid(designated));
+				let places = origins
+					.into_iter()
+					.map(|place| self.canonical_reference_place(place))
+					.collect();
+				let state = self.facts.refs.state(RefState {
+					places,
+					..RefState::valid(designated)
+				});
 				self.body.flow.set_ref_state(symbol, state);
 				// the narrowing of the place, as a fact of the alias
 				let declared_ty = self.a.symbols.symbol(symbol).ty;
@@ -144,7 +152,8 @@ impl Walker<'_> {
 					matches!(
 						entry.kind,
 						SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
-					) || self.declared_outside_functions(symbol)
+					) && entry.scope == self.body.scope
+						|| self.declared_outside_functions(symbol)
 				})
 		} else {
 			false
@@ -187,14 +196,113 @@ impl Walker<'_> {
 	}
 
 	pub(super) fn reference_is_fresh(&mut self, value: NodeId) -> bool {
-		if matches!(self.view(self.strip_groups(value)), View::None) {
-			return true;
+		self.reference_result_leaves(value)
+			.into_iter()
+			.all(|value| {
+				if matches!(self.view(self.strip_groups(value)), View::None) {
+					return true;
+				}
+				let places = self
+					.reference_values
+					.get(&value)
+					.cloned()
+					.unwrap_or_else(|| self.reference_origins(value));
+				!places.is_empty()
+					&& places.iter().all(|&place| {
+						self.place_steps(place).iter().any(|step| {
+							matches!(step, Step::Index(crate::flow::Identity::Fresh(_)))
+						})
+					})
+			})
+	}
+
+	/// The reachable values of a structured result, not its control syntax.
+	fn reference_result_leaves(&self, value: NodeId) -> Vec<NodeId> {
+		let value = self.strip_groups(value);
+		if self.type_of(value) == TypeId::NEVER {
+			return Vec::new();
 		}
-		self.reference_place(value).is_some_and(|place| {
-			self.place_steps(place)
+		match self.view(value) {
+			View::Block { statements } => statements
+				.last()
+				.map(|value| self.reference_result_leaves(value))
+				.unwrap_or_default(),
+			View::Do(body) => self.reference_result_leaves(body),
+			View::If {
+				then_body,
+				else_body,
+				..
+			} => {
+				let mut leaves = self.reference_result_leaves(then_body);
+				if let Some(body) = else_body {
+					leaves.extend(self.reference_result_leaves(body));
+				}
+				leaves
+			}
+			View::When { arms, .. } => arms
 				.iter()
-				.any(|step| matches!(step, Step::Index(crate::flow::Identity::Fresh(_))))
-		})
+				.flat_map(|arm| self.reference_result_leaves(arm.value))
+				.collect(),
+			View::Catch {
+				expression,
+				handler,
+				..
+			} => {
+				let mut leaves = self.reference_result_leaves(expression);
+				leaves.extend(self.reference_result_leaves(handler));
+				leaves
+			}
+			_ => vec![value],
+		}
+	}
+
+	/// All places reachable through an alias at this point. The syntactic
+	/// alias map is only a fallback for captures analyzed in a separate body.
+	pub(super) fn reference_origins(&mut self, value: NodeId) -> Vec<PlaceId> {
+		let value = self.strip_groups(value);
+		if let View::Try(inner) = self.view(value) {
+			return self.reference_origins(inner);
+		}
+		if let View::Access { target, members } = self.view(value) {
+			let members: Vec<_> = members.iter().collect();
+			let mut places = self.reference_origins(target);
+			if !places.is_empty() {
+				for member in members {
+					places = places
+						.into_iter()
+						.filter_map(|place| {
+							let place = self.reference_field_target(place);
+							self.member_step(place, member)
+						})
+						.collect();
+				}
+				return places
+					.into_iter()
+					.map(|place| self.reference_field_target(place))
+					.collect();
+			}
+		}
+		if let View::Index { target, index } = self.view(value) {
+			let places = self.reference_origins(target);
+			let step = if self.type_of(self.strip_groups(index)) == TypeId::RANGE {
+				Step::All
+			} else {
+				Step::Index(self.identity_of(index))
+			};
+			return places
+				.into_iter()
+				.map(|place| self.places.child(place, step))
+				.collect();
+		}
+		if let Resolution::Local(symbol) = self.a.resolution(value)
+			&& matches!(
+				self.a.symbols.symbol(symbol).kind,
+				SymbolKind::Use | SymbolKind::MutableUse
+			) && let Some(state) = self.body.flow.ref_state(symbol)
+		{
+			return self.facts.refs.get(state).places.to_vec();
+		}
+		self.reference_place(value).into_iter().collect()
 	}
 
 	/// Validate reference results with the same owner/identity paths used by
@@ -206,20 +314,34 @@ impl Walker<'_> {
 		if !self.body.flow.reachable || matches!(self.view(self.strip_groups(value)), View::None) {
 			return;
 		}
+		let leaves = self.reference_result_leaves(value);
+		if leaves.as_slice() != [self.strip_groups(value)] {
+			for leaf in leaves {
+				self.check_returned_reference(leaf, Some(owner));
+			}
+			return;
+		}
 		let fresh = self.reference_is_fresh(value);
 		if let Some(cx) = self.body.functions.last_mut()
 			&& cx.ref_owner == Some(owner)
 		{
 			cx.ref_fresh &= fresh;
 		}
-		let Some(place) = self.reference_place(value) else {
+		let places = self
+			.reference_values
+			.get(&value)
+			.cloned()
+			.unwrap_or_else(|| self.reference_origins(value));
+		if places.is_empty() {
 			let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::REF008, value,
 				"this result has no borrowed place: return a reference into the declared collection, or declare an ordinary owned result");
 			self.report_flow(diagnostic);
 			return;
-		};
-		let place = self.canonical_reference_place(place);
-		if self.may_be_at_or_below(place, owner) {
+		}
+		if places.into_iter().all(|place| {
+			let place = self.canonical_reference_place(place);
+			self.may_be_at_or_below(place, owner)
+		}) {
 			return;
 		}
 		let text = self.tree.text(value.index()).to_string();
@@ -231,6 +353,24 @@ impl Walker<'_> {
 
 	/// Check dependent arguments before the call effects; publish the result
 	/// place afterwards. Runtime item types remain erased for the engines.
+	pub(super) fn check_reference_default(&mut self, value: NodeId, owner: PlaceId) {
+		if matches!(self.view(self.strip_groups(value)), View::None) {
+			return;
+		}
+		let origins = self.reference_origins(value);
+		if !origins.is_empty()
+			&& origins.into_iter().all(|place| {
+				let place = self.canonical_reference_place(place);
+				self.may_be_at_or_below(place, owner)
+			}) {
+			return;
+		}
+		let owner = self.place_text(owner);
+		let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::REF020, value,
+			format!("this default is not a reference into `{owner}`: borrow an element of `{owner}`, or pass the reference explicitly"));
+		self.report_flow(diagnostic);
+	}
+
 	pub(super) fn check_reference_arguments(&mut self, n: NodeId, sig: crate::types::FnSig) {
 		let Some(call) = self.a.calls.get(&n).cloned() else {
 			return;
@@ -253,11 +393,16 @@ impl Walker<'_> {
 			if matches!(self.view(self.strip_groups(*value)), View::None) {
 				continue;
 			}
-			let actual = self
-				.reference_place(*value)
-				.map(|place| self.canonical_reference_place(place));
+			let origins = self.reference_origins(*value);
+			let actual: Vec<_> = origins
+				.into_iter()
+				.map(|place| self.canonical_reference_place(place))
+				.collect();
 			if owner.is_some_and(|owner| {
-				actual.is_some_and(|place| self.may_be_at_or_below(place, owner))
+				!actual.is_empty()
+					&& actual
+						.iter()
+						.all(|&place| self.may_be_at_or_below(place, owner))
 			}) {
 				continue;
 			}
@@ -265,7 +410,8 @@ impl Walker<'_> {
 				.map(|owner| self.place_text(owner))
 				.unwrap_or_else(|| "the owner argument (a temporary)".into());
 			let actual = actual
-				.map(|place| self.place_text(place))
+				.first()
+				.map(|&place| self.place_text(place))
 				.unwrap_or_else(|| "an owned temporary".into());
 			let diagnostic = self.diagnostic(
 				&crate::diagnostics::codes::advanced::REF020,
@@ -448,11 +594,14 @@ impl Walker<'_> {
 			View::Name(_) | View::Access { .. } | View::Index { .. } => self
 				.place_of(value)
 				.map(|place| self.reference_field_target(place)),
-			View::Call { callee, arguments } => self
-				.reference_results
-				.get(&value)
-				.copied()
-				.or_else(|| self.returned_reference(callee, arguments)),
+			View::Call { callee, arguments } => {
+				if let Some(&place) = self.reference_results.get(&value) {
+					return Some(place);
+				}
+				let place = self.returned_reference(callee, arguments)?;
+				self.reference_results.insert(value, place);
+				Some(place)
+			}
 			_ => None,
 		}
 	}
@@ -570,6 +719,7 @@ impl Walker<'_> {
 			.filter(|ty| !ty.is_unset());
 		let is_none = matches!(self.view(self.strip_groups(value)), View::None);
 		let actual = self.check(value, expected);
+		let origins = self.reference_origins(value);
 		let place = if is_none {
 			None
 		} else {
@@ -646,7 +796,14 @@ impl Walker<'_> {
 			let place = place.or_else(|| self.aliases.get(&symbol).copied());
 			if let Some(place) = place {
 				let designated = self.canonical_reference_place(place);
-				let state = self.facts.refs.state(RefState::valid(designated));
+				let places = origins
+					.into_iter()
+					.map(|place| self.canonical_reference_place(place))
+					.collect();
+				let state = self.facts.refs.state(RefState {
+					places,
+					..RefState::valid(designated)
+				});
 				self.body.flow.set_ref_state(symbol, state);
 				// the facts known of the old place are not the new one's
 				let own = self.places.symbol(symbol);
@@ -670,6 +827,58 @@ impl Walker<'_> {
 				return Some(parent);
 			}
 			current = parent;
+		}
+	}
+
+	/// Capturing an alias cannot extend its collection's lifetime. Check the
+	/// same collection origins as returned references, including joined aliases.
+	pub(super) fn check_escaping_references(&mut self, lambda: NodeId, at: NodeId) {
+		let captures = self
+			.a
+			.functions
+			.get(&lambda)
+			.map(|info| info.captures.clone())
+			.unwrap_or_default();
+		for symbol in captures {
+			let origins = self
+				.body
+				.flow
+				.ref_state(symbol)
+				.map(|state| self.facts.refs.get(state).places.to_vec())
+				.unwrap_or_else(|| self.aliases.get(&symbol).copied().into_iter().collect());
+			let origins = if origins.is_empty() {
+				self.reference_parameters
+					.get(&symbol)
+					.copied()
+					.into_iter()
+					.collect()
+			} else {
+				origins
+			};
+			for place in origins {
+				let place = self.canonical_reference_place(place);
+				let Some(owner) = self.owner_place(place) else {
+					continue;
+				};
+				if self
+					.place_symbol(owner)
+					.is_some_and(|root| self.declared_outside_functions(root))
+				{
+					continue;
+				}
+				if !self.reported_once.insert((at, "MEM004")) {
+					continue;
+				}
+				let owner = self.place_text(owner);
+				let name = self
+					.s
+					.types
+					.syms
+					.resolve(self.a.symbols.symbol(symbol).name);
+				let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM004, at,
+					format!("this escaping closure captures `{name}`, a reference into `{owner}`, which doesn't outlive the closure: capture the value's data instead, or keep `{owner}` in an owner that outlives the closure"));
+				self.report(diagnostic);
+			}
 		}
 	}
 
@@ -769,6 +978,12 @@ impl Walker<'_> {
 			return;
 		};
 		for symbol in captures {
+			if self.is_captured(symbol)
+				&& let Some(cx) = self.body.functions.last_mut()
+				&& !cx.captures.contains(&symbol)
+			{
+				cx.captures.push(symbol);
+			}
 			// a captured task (worker's handle, resource) moved away since
 			if self.body.flow.reachable
 				&& let Some(&(_, at)) = self

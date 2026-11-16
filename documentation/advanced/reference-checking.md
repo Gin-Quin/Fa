@@ -372,9 +372,9 @@ use ana = people.find((person) => person.name == "Ana") -- valid: `ana` may be i
 
 ## Link containment
 
-For every stored link holder H and target E, the checker proves E is an initialized whole element of the exact GrowingPool/GrowingArray instance, and every operation ending that collection incarnation also ends every surviving holder. Paths are static owner identities, with no runtime owner tag. Cross-pool links require both pools under one declared ordinary owner; independent module globals are not an enclosing owner. A direct self-linked module GrowingPool may be its own boundary. Shared handles, task frames and escaping environments stop containment: a Mutex holder cannot link into an external pool. Move/copy a complete closed owner into that payload instead.
+A stored link must point to an initialized whole element of its declared GrowingPool or GrowingArray. The collection must stay alive for as long as any field can hold a link into it. If links connect two pools, put both pools and their link holders in one record; two independent module-level variables do not supply that owner. A module-level GrowingPool can contain links between its own elements. A value inside a Mutex, task or escaping closure cannot hold links into a pool outside it: move or copy the complete owner into that value instead.
 
-The containment graph is computed from declared types/paths, not current non-null heap contents. Resetting a target is allowed if every incoming holder dies in that reset (including holders inside its own elements). A root field or sibling collection that may survive makes target-only reset/extraction invalid, even after clearing a visible root. Moving/copying requires outgoing target bindings as well as incoming holders; only the complete declared owner rebinds them. Internal holder relocation is allowed under the same binding and ordinary category rules.
+The compiler checks the fields declared by the type, rather than searching the current contents of the graph. Resetting a target is allowed if every incoming holder dies in that reset (including holders inside its own elements). A root field or sibling collection that may survive makes target-only reset/extraction invalid, even after clearing a visible root. Moving/copying requires outgoing target bindings as well as incoming holders; only the complete declared owner rebinds them. Internal holder relocation is allowed under the same binding and ordinary category rules.
 
 | Rejection | Diagnostic and fix |
 | --- | --- |
@@ -382,7 +382,7 @@ The containment graph is computed from declared types/paths, not current non-nul
 | Different owner instance | Name both full paths: expected Node in second.nodes, got Node in first.nodes. |
 | Detached holder, return, throw or escaping capture | This value contains links into model.nodes; borrow with use, project its data, or copy/move the complete model. |
 | Partial target reset/extraction | model.root / model.otherNodes[..].next may outlive model.nodes; replace/move the complete model. |
-| Broad invalidating helper | Its declared mutates model.nodes may end the target incarnation; use the complete owner or declare the precise size/capacity/data effect. |
+| Broad invalidating helper | Its declared mutates model.nodes may end the target collection’s lifetime; use the complete owner or declare the precise size/capacity/data effect. |
 | Recursive mutation only names starting node | This call may write self.nodes[..].world; declare that path. |
 | Destructor reaches dying target | The destructor/call reads a pool destroyed by this boundary; remove that access or move the resource outside the boundary. |
 
@@ -390,7 +390,7 @@ New diagnostic IDs are allocated when containment is implemented; `REF010` alrea
 
 Following a link restarts at its target collection, just like a relation: recursive traversal writes `self.nodes[..].world`. List/field writes and collection size/capacity effects do not invalidate target aliases. Replacing/removing InlineArray slots invalidates slot/payload aliases under its collection rules, while already bound link targets remain valid. Incoming links survive whole-element/tag replacement; old union payload borrows do not. A broad helper is checked by its declared effects even if its current body only appends.
 
-Destructors must not access any pool destroyed in the same boundary, directly, through module values or callees. Check their read/call summaries before admitting the resource. Destruction never follows a link. Complete-owner moves invalidate local aliases; copies create independent closed bindings. Compile-time evaluation applies the same containment rules.
+Destructors must not access any pool destroyed in the same boundary, directly, through module values or callees. Destruction never follows a link. Complete-owner moves invalidate local aliases; copies make an independent owner whose links point into its own collections. Compile-time evaluation applies the same containment rules.
 
 :::implementation
 ## Implementation details

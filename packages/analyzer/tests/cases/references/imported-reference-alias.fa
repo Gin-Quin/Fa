@@ -1,15 +1,15 @@
 -- file: nodes.fa
 export mutable: GrowingPool<{ id: Integer }> = []
 -- file: Ref.fa
-export type = { id: Integer } in nodes
+export type = { id: Integer } in nodes -- error: REF010
 -- file: Refs.fa
-export type = Array<Ref>
+export type = Array<Ref> -- error: REF010
 -- file: Default.fa
-export type<Item = Ref> = Array<Item>
+export type<Item = Ref> = Array<Item> -- error: REF010
 -- file: Box.fa
 export type<Item> = { value: Item }
 -- file: Hidden.fa
-export type = Box<Ref>
+export type = Box<Ref> -- error: REF010
 -- file: main.fa
 type Holder = { children: Refs } -- error: REF010
 type Other = { children: Default } -- error: REF010

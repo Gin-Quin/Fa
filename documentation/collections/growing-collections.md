@@ -134,6 +134,26 @@ The assignment replaces the whole collection, so, like any assignment, it invali
 
 `GrowingPool<Item, Index = UInt32>` and `GrowingArray<Item, Index = UInt32>` accept `UInt8`, `UInt16`, `UInt32` or `UInt64` as Index. This parameter belongs to the target collection and is part of its type; every stored incoming [link](/advanced/relations#links-without-a-reverse-side) uses that width. Abstract over Index with a generic parameter; collections of different widths are not interchangeable mutable views. `reserve` changes available storage, never the width or the limit.
 
+For example, this chain chooses a 16-bit index for every link into its pool:
+
+```fa
+-- Acceptance: Index and stored links are implemented in subsequent link slices.
+type Chain<Item, Index = UInt16> = {
+	nodes: GrowingPool<Node, Index> = []
+	link head: (Node in nodes)? = none
+	type Node = {
+		value: Item
+		link next: (Node in nodes)? = none
+	}
+}
+mutable chain: Chain<Integer> = {}
+use first = chain.nodes.add({ value = 7 })
+chain.head = first
+let independent = copy chain
+first.value = 9
+console.log(independent.head?.value) -- 7: its head points into its own pool
+```
+
 A link denotes an initialized **whole element**, including a whole union element after narrowing. Its target cannot be a subfield, slice, union payload, GrowingMap value or GrowingSet key. GrowingColumnar is outside this first link contract. Source holders may live in an owning Array: only the target needs stable places.
 
 The maximum count is 255 for UInt8, 65,535 for UInt16, 4,294,967,295 for UInt32, and 18,446,744,073,709,551,615 for UInt64, additionally limited by the target's usable address space. The limit counts elements, not bytes. A statically impossible size is a compile error. Otherwise `add`, `push`, `reserve` and `from` stop the program with a message naming Index and suggesting a wider type **before publishing** an unrepresentable element. This resource stop remains enabled when arithmetic overflow checks are disabled; it adds no `throws` effect and never widens silently. Test the limit yourself and throw an application error when rejection must be recoverable.

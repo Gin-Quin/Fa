@@ -1,0 +1,8 @@
+type Callback = () => Integer
+function snapshot = (): Callback => {
+	mutable values: Array<Integer> = [7]
+	use ref = values[0]
+	let data = ref
+	() => data
+}
+console.log(snapshot()()) -- prints: 7

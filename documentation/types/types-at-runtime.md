@@ -146,7 +146,7 @@ Reflection is only needed when you want the *shape* of a type as data: for schem
 
 Reflection retains a field's storage kind (ordinary, relation or explicit link), exact symbolic owner path and list shape. It also preserves InlineArray capacity and GrowingPool/GrowingArray Index. A link is never expanded into an owned recursive field. `Schema.Reference` still means a recursive **type name**, not a pool element reference. `TypeFromSchema` rejects unresolved or escaping owner paths instead of manufacturing an unbound link.
 
-Generated serializers/worker codecs use analyzed types at build time; they do not interpret schemas at runtime. A complete graph can become a compile-time immutable constant under the same containment/copy rules; exported edges are symbolic identities, never interpreter addresses. Generic print/equality/hash omit link fields. JSON conversion of graph-bearing types is rejected: project ordinary fields and identifiers explicitly.
+You can build a complete immutable graph at compile time under the same rules as at runtime. Printing, equality and hashing omit link fields; to export a graph as JSON, define a separate type containing its ordinary data and node identifiers.
 
 :::implementation
 ## Implementation details
@@ -168,6 +168,6 @@ Generated serializers/worker codecs use analyzed types at build time; they do no
 
 ### Link metadata and constants
 
-Keep storage kind, owner paths, capacity and Index in analyzed reflection metadata on every target. Reconstruction validates closed bindings before layout generation; Schema.Reference retains recursive-type semantics. Native/interpreter graph constants relocate symbolic owner/ordinal identities; JavaScript builds target objects before edges. Generated codecs/copy operations receive this metadata even in erased generic code. No runtime schema interpreter or accidental owning recursion is permitted.
+Generated serializers and worker codecs use analyzed types at build time, rather than interpreting schemas at runtime. Graph constants export symbolic owner and element identities, never interpreter addresses. Keep storage kind, owner paths, capacity and Index in analyzed reflection metadata on every target. Reconstruction validates closed bindings before layout generation; Schema.Reference retains recursive-type semantics. Native/interpreter graph constants relocate symbolic owner/ordinal identities; JavaScript builds target objects before edges. Generated codecs/copy operations receive this metadata even in erased generic code. No runtime schema interpreter or accidental owning recursion is permitted.
 
 :::

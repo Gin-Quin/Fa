@@ -1,0 +1,16 @@
+-- pending: links slices 3–7 (specified Index, copy and containment)
+-- Acceptance: Index and stored links are implemented in subsequent link slices.
+type Chain<Item, Index = UInt16> = {
+	nodes: GrowingPool<Node, Index> = []
+	link head: (Node in nodes)? = none
+	type Node = {
+		value: Item
+		link next: (Node in nodes)? = none
+	}
+}
+mutable chain: Chain<Integer> = {}
+use first = chain.nodes.add({ value = 7 })
+chain.head = first
+let independent = copy chain
+first.value = 9
+console.log(independent.head?.value) -- 7: its head points into its own pool

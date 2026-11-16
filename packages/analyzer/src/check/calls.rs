@@ -74,6 +74,7 @@ impl Walker<'_> {
 		arguments: NodeList<'_>,
 		expected: Option<TypeId>,
 	) -> TypeId {
+		self.reference_results.remove(&n);
 		// `@readFile(path)`… (comptime.rs)
 		if let Some(ty) = self.check_operation(n, callee, arguments) {
 			return ty;

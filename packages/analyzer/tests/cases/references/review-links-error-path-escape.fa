@@ -1,0 +1,8 @@
+-- Regression from the links 1a review.
+type Node = { value: Integer }
+type Failure = Errors { Missing }
+function wrong = (nodes: GrowingPool<Node>): Node in nodes => {
+	mutable local: GrowingPool<Node> = []
+	function fail = (): Node in nodes throws Failure.Missing => throw Failure.Missing -- error: REF008
+	fail() catch _error => local.add({ value = 7 }) -- error: REF008 -- error: REF009
+}

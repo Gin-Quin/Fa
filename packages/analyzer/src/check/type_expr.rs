@@ -25,13 +25,60 @@ impl Walker<'_> {
 	/// generic function type is written").
 	pub(super) fn check_parameter_type(&mut self, n: NodeId) -> TypeId {
 		self.parameter_type = true;
-		let ty = self.check_type_expr(n);
+		let ty = self.check_reference_type_expr(n);
 		self.parameter_type = false;
+		ty
+	}
+
+	/// Only a whole parameter/result/use annotation may erase a reference to
+	/// its runtime item type. A reference nested in that item is still storage.
+	pub(super) fn check_reference_type_expr(&mut self, n: NodeId) -> TypeId {
+		let mut node = n;
+		loop {
+			match self.view(node) {
+				View::Group(inner) | View::Optional(inner) => node = inner,
+				View::RefType { .. } => {
+					self.borrowed_type_nodes.insert(node);
+					break;
+				}
+				_ => break,
+			}
+		}
+		self.check_owned_type_expr(n)
+	}
+
+	pub(super) fn check_owned_type_expr(&mut self, n: NodeId) -> TypeId {
+		let saved = self.type_expression_root.take();
+		let ty = self.check_type_expr(n);
+		self.type_expression_root = saved;
 		ty
 	}
 
 	/// The type a type expression denotes.
 	pub fn check_type_expr(&mut self, n: NodeId) -> TypeId {
+		let root = self.type_expression_root.is_none();
+		if root {
+			self.type_expression_root = Some(n);
+		}
+		let ty = self.type_expr_inner(n);
+		if root {
+			self.type_expression_root = None;
+			let mut whole = n;
+			while let View::Group(inner) | View::Optional(inner) = self.view(whole) {
+				whole = inner;
+			}
+			if self.borrowed_type_nodes.contains(&whole) {
+				if let View::RefType { item, .. } = self.view(whole) {
+					self.check_reference_annotation(item);
+				}
+			} else if !matches!(self.s.types.kind(ty), TypeKind::Sync(..)) {
+				self.check_reference_annotation(n);
+			}
+		}
+		ty
+	}
+
+	fn type_expr_inner(&mut self, n: NodeId) -> TypeId {
 		let tree = Arc::clone(&self.tree);
 		// only the type written right after a parameter's name: not its parts
 		let parameter_type = std::mem::take(&mut self.parameter_type);
@@ -670,7 +717,7 @@ impl Walker<'_> {
 				variadic,
 			});
 		}
-		let ret = self.check_type_expr(body);
+		let ret = self.check_reference_type_expr(body);
 		let reference = self.reference_contract(body);
 		let throws = written_throws.map_or(TypeId::NEVER, |errors| self.check_type_expr(errors));
 		let unsupported = unsupported_clause

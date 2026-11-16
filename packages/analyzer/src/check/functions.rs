@@ -48,7 +48,7 @@ struct ParamSyntax {
 
 /// A default value, checked in the function's context: the value, its
 /// expected type, and whether it is checked quietly (`FN020`).
-type DeferredDefault = (NodeId, Option<TypeId>, bool);
+type DeferredDefault = (NodeId, Option<TypeId>, bool, Option<NodeId>);
 
 /// What is being analyzed: a `function` declaration or a lambda.
 #[derive(Copy, Clone, Debug)]
@@ -559,9 +559,21 @@ impl Walker<'_> {
 		let reference = signature
 			.returns
 			.and_then(|returns| self.reference_contract(returns));
+		if owner.is_async
+			&& reference.is_some()
+			&& let Some(returns) = signature.returns
+			&& self.reported_once.insert((returns, "REF008"))
+		{
+			let diagnostic = self.diagnostic(
+				&crate::diagnostics::codes::advanced::REF008,
+				returns,
+				"an async function can't return a reference: return an index or an owned copy instead",
+			);
+			self.report(diagnostic);
+		}
 		let declared_return = signature
 			.returns
-			.map(|returns| self.check_type_expr(returns));
+			.map(|returns| self.check_reference_type_expr(returns));
 		// errors are thrown, never returned (errors.md, `E-ERR-7`)
 		if let (Some(returns), Some(ty)) = (signature.returns, declared_return)
 			&& let Some(error) = self.error_member(ty)
@@ -709,11 +721,16 @@ impl Walker<'_> {
 		}
 		// a default value runs inside the function: its errors and effects
 		// are the function's (defining-functions.md)
-		for (default, expected, quiet) in defaults {
+		for (default, expected, quiet, annotation) in defaults {
 			self.quiet += u32::from(quiet);
 			let actual = self.check(default, expected);
 			if let Some(expected) = expected {
 				self.sink(default, actual, expected);
+			}
+			if let Some(owner) =
+				annotation.and_then(|annotation| self.reference_return_owner(annotation))
+			{
+				self.check_reference_default(default, owner);
 			}
 			self.quiet -= u32::from(quiet);
 		}
@@ -738,12 +755,7 @@ impl Walker<'_> {
 			_ => Some(body),
 		};
 		if let Some(value_node) = value_node {
-			if matches!(
-				self.view(self.strip_groups(value_node)),
-				View::Lambda { .. } | View::Copy(_)
-			) {
-				self.escape(value_node, value_node);
-			}
+			self.escape(value_node, value_node);
 			// the value of the function is a copy, maybe a move (moves.rs)
 			if !matches!(mode, TypeId::VOID | TypeId::NEVER) {
 				if reference.is_none() {
@@ -832,7 +844,7 @@ impl Walker<'_> {
 				}
 			};
 			w.check_stored_iterator_type(signature.returns.unwrap_or(lambda), ret, "returned");
-			if incomplete {
+			if incomplete || owner.is_async && reference.is_some() {
 				TypeId::UNKNOWN
 			} else {
 				w.function_type(
@@ -970,7 +982,7 @@ impl Walker<'_> {
 					.collect();
 				later_use = self.find_name_use(default, &later);
 				let expected = (!declared.is_unset()).then_some(declared);
-				defaults.push((default, expected, later_use.is_some()));
+				defaults.push((default, expected, later_use.is_some(), param.annotation));
 			}
 			let last = index + 1 == syntaxes.len();
 			let ty = self.memo(param.node, |w| {
@@ -1531,6 +1543,9 @@ impl Walker<'_> {
 				});
 			}
 			None => {}
+		}
+		if let Some(value) = value {
+			self.escape(value, value);
 		}
 		let state = self.body.flow.fork();
 		if let Some(cx) = self.body.functions.last_mut() {

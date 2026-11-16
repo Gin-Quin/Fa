@@ -1,0 +1,10 @@
+-- Regression from the links 1a review.
+type Node = { value: Integer }
+async function add = (pool: GrowingPool<Node>): Node in pool mutates pool.size => pool.add({ value = 4 }) -- error: REF008
+async function main = () => {
+	mutable pool: GrowingPool<Node> = []
+	use n = await add(pool)
+	n.value = 6
+	for x in pool { console.log(x.value) }
+}
+await main()

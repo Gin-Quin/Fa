@@ -1,0 +1,25 @@
+-- Every structured result retains each branch's place and freshness.
+function choose = (values: Array<Integer>, yes: Boolean): Integer in values throws IndexError => {
+	if yes { try values[0] } else { try values[1] }
+}
+function match = (values: Array<Integer>, yes: Boolean): Integer in values throws IndexError => {
+	when yes is { true => try values[0], else => try values[1] }
+}
+function fallback = (values: Array<Integer>): Integer in values throws IndexError => {
+	values[10] catch _error => try values[0]
+}
+function block = (values: Array<Integer>): Integer in values throws IndexError => do {
+	try values[0]
+}
+mutable values: Array<Integer> = [1, 2]
+use a = try choose(values, true)
+a = 3
+use b = try choose(values, false)
+b = 4
+use c = try match(values, false)
+c = 5
+use d = try fallback(values)
+d = 6
+use e = try block(values)
+e = 7
+console.log(values) -- prints: [7, 5]

@@ -1,10 +1,10 @@
 -- References must be rejected before their type erases to an owning item.
 mutable nodes: GrowingPool<Node> = []
 type Node = { id: Int32 }
-type Ref = Node in nodes
-type Refs = Array<Ref>
+type Ref = Node in nodes -- error: REF010
+type Refs = Array<Ref> -- error: REF010
 type List<Item> = Array<Item>
-type Default<Item = Ref> = Array<Item>
+type Default<Item = Ref> = Array<Item> -- error: REF010
 type Plain = {
 	children: Array<Node in nodes> -- error: REF010
 	optional: Array<Node in nodes>? -- error: REF010

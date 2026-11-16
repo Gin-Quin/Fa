@@ -75,7 +75,7 @@ impl Walker<'_> {
 				self.nominal_decl(n, symbol, &text, kind, members);
 			}
 			_ => {
-				let ty = self.check_type_expr(value);
+				let ty = self.check_owned_type_expr(value);
 				// `type Permissions = Fields { … }`: named in messages (fields.rs)
 				if matches!(self.s.types.kind(ty), crate::types::TypeKind::Fields(_)) {
 					self.s.types.name_type(ty, &text);
@@ -268,7 +268,7 @@ impl Walker<'_> {
 			let (field, readonly) = match syntax::view(&tree, item) {
 				View::Readonly(inner) => (inner, true),
 				View::Link(_) => {
-					self.unsupported(item, "stored link fields (not implemented yet)");
+					self.unsupported_with_message(item, "stored `link` fields are not implemented yet: use a relation with its reverse side until then");
 					parts.incomplete = true;
 					continue;
 				}

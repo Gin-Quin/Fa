@@ -65,6 +65,9 @@ for count in [0, 3, 9, 129, 2049] {
 	assert (try callback(count, stored)) == count
 	assert (try captured(count)) == count
 }
+-- Different concrete strides and an owning generic field use the same loops.
+assert (try exercise(true, 129)) == 129
+assert (try exercise("a growing tag that exceeds inline storage", 129)) == 129
 mutable stable: GrowingArray<Integer> = [1, 2, 3]
 use first = stable[0]
 for i in 3..10000 { stable.push(i + 1) }

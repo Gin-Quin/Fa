@@ -715,7 +715,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let frame = self.frame();
 		if let Some(&(block, slot, mark)) = frame.catches.last() {
 			self.drop_to(mark)?;
-			self.builder.build_store(slot, error)?;
+			if let Some(slot) = slot {
+				self.builder.build_store(slot, error)?;
+			} else {
+				self.call_drop(&self.builder, Repr::Union, error.into())?;
+			}
 			self.builder.build_unconditional_branch(block)?;
 		} else if self.frame().throws {
 			self.drop_to(0)?;
@@ -756,6 +760,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		name: &str,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
 	) -> Result<(), Error> {
+		// IndexError construction has no observable effect when the local
+		// handler never reads its payload. Its arguments were evaluated by
+		// the caller; retain all cleanups before entering that handler.
+		if name == "fa_error_index"
+			&& let Some(&(block, None, mark)) = self.frame().catches.last()
+		{
+			self.drop_to(mark)?;
+			self.builder.build_unconditional_branch(block)?;
+			self.continue_unreachable();
+			return Ok(());
+		}
 		let function = self.runtime.function(name)?;
 		let error = self.call_value(function, arguments)?.into_pointer_value();
 		self.raise(error)
@@ -779,13 +794,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			None
 		};
-		let error_slot = self.alloca(Repr::Union, "caught")?;
+		let binding = self.analysis.symbols.symbol_of_decl(node);
+		let observes_error = binding.is_some_and(|symbol| !self.uses_of(symbol).is_empty());
+		let error_slot = observes_error
+			.then(|| self.alloca(Repr::Union, "caught"))
+			.transpose()?;
 		let handler_block = self.append_block("catch");
 		let end = self.append_block("end_catch");
 		let mark = self.mark();
 		self.frame_mut()
 			.catches
-			.push((handler_block, error_slot.pointer, mark));
+			.push((handler_block, error_slot.map(|slot| slot.pointer), mark));
 		let owned = slot.is_some();
 		let target = slot.map(|slot| slot.repr);
 		let value = self.region(target, expression, |this| this.expr(expression));
@@ -801,9 +820,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let handled = self.region(target, handler, |this| {
 			// the handler owns the error
 			let scope = this.mark();
-			let error = this.load(error_slot)?;
-			let error = this.fresh(error);
-			if let Some(symbol) = this.analysis.symbols.symbol_of_decl(node) {
+			if let Some(error_slot) = error_slot {
+				let error = this.load(error_slot)?;
+				let error = this.fresh(error);
+				let symbol = binding.expect("an observed error binding");
 				let binding = this.slot_of(symbol, node)?;
 				let error = this.take(error, None)?;
 				this.store(binding, error, node)?;

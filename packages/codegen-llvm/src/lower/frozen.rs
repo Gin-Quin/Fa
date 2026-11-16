@@ -248,8 +248,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return None;
 			}
 		}
-		// a small body, with nothing that leaves early, captures, starts,
-		// references, or calls user code but methods of its `self`
+		// A small nonthrowing body: locally handled errors stay inside it.
+		// Nothing leaves early, captures, starts, references, or calls user
+		// code but methods of its `self`.
 		let mut stack = vec![function_info.body.index()];
 		let mut count = 0;
 		while let Some(at) = stack.pop() {
@@ -261,8 +262,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			match self.view(at_node) {
 				View::Return(_)
 				| View::Throw(_)
-				| View::Try(_)
-				| View::Catch { .. }
 				| View::Lambda { .. }
 				| View::Function { .. }
 				| View::Start { .. }

@@ -2033,7 +2033,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mark = self.mark();
 		self.frame_mut()
 			.catches
-			.push((handler, error_slot.pointer, mark));
+			.push((handler, Some(error_slot.pointer), mark));
 		let target = ret.has_value().then_some(ret);
 		let value = self.region(target, block, |this| this.block(block, ret.has_value()));
 		self.frame_mut().catches.pop();

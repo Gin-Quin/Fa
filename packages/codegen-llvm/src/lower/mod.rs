@@ -208,7 +208,7 @@ struct Frame<'ctx> {
 	loops: Vec<LoopFrame<'ctx>>,
 	/// The handlers of the enclosing `catch`es, innermost last, the slot of
 	/// their error, and the depth of the cleanup stack around them.
-	catches: Vec<(BasicBlock<'ctx>, PointerValue<'ctx>, usize)>,
+	catches: Vec<(BasicBlock<'ctx>, Option<PointerValue<'ctx>>, usize)>,
 	/// Whether the function throws (returns its errors).
 	throws: bool,
 	/// Its requirements (hidden parameters, pointers to what provides
@@ -2406,9 +2406,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				),
 				_ => Val::new(Repr::F64, self.context.f64_type().const_float(value)),
 			},
-			Value::String(text) => self.string_constant(text.as_str().ok_or_else(|| {
-				self.unsupported(node.index(), "a string constant with lone surrogates")
-			})?),
+			Value::String(text) => self.text_constant(&text),
 			Value::None => Val::none(),
 			value => {
 				let ty = self.type_of(node);

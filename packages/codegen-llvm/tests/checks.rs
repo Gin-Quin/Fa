@@ -1087,6 +1087,29 @@ console.log(try equal("é", 0), try choose("a", 0))
 	}
 
 	#[test]
+	fn locally_caught_unused_index_errors_need_no_payload() {
+		let ir = ir_of(
+			"caught-index-payload",
+			r#"
+function ignored = (text: String, index: Integer): UInt16 => text.codeUnitAt(index) catch _error => 0
+function observed = (text: String, index: Integer): String => {
+	let unit = text.codeUnitAt(index) catch error => return "{error}"
+	"{unit}"
+}
+console.log(ignored("a", 2), observed("a", 2))
+"#,
+		);
+		assert!(
+			!function(&ir, "fa.ignored").contains("@fa_error_index("),
+			"{ir}"
+		);
+		assert!(
+			function(&ir, "fa.observed").contains("@fa_error_index("),
+			"{ir}"
+		);
+	}
+
+	#[test]
 	fn ascii_packed_text_keeps_its_short_and_extended_headers() {
 		let source = format!(
 			r#"

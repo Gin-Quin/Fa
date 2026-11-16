@@ -1,0 +1,4 @@
+-- Lead decision 5: an empty repeated string returns before narrowing or looping.
+function repeated = (text: String, count: Integer<min = 0>): String => text.repeat(count)
+console.log(repeated("", 9007199254740991).length, repeated("😀", 0).length) -- prints: 0 0
+console.log(repeated("é😀", 1), repeated("é😀", 2)) -- prints: é😀 é😀é😀

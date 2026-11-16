@@ -14,6 +14,42 @@ use crate::lower::Lowering;
 use crate::lower::values::{IntRepr, Repr, Val};
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// Preserve every UTF-16 unit of a compile-time value. Ordinary literals
+	/// keep their UTF-8 fast path; lone surrogates use canonical WTF-8.
+	pub(crate) fn text_constant(&mut self, text: &fa_interpreter::text::Text) -> Val<'ctx> {
+		if let Some(text) = text.as_str() {
+			return self.string_constant(text);
+		}
+		let mut bytes = Vec::with_capacity(text.utf8_len());
+		for point in char::decode_utf16(text.units()) {
+			match point {
+				Ok(point) => {
+					let mut encoded = [0; 4];
+					bytes.extend_from_slice(point.encode_utf8(&mut encoded).as_bytes());
+				}
+				Err(error) => {
+					let unit = error.unpaired_surrogate();
+					bytes.extend_from_slice(&[
+						0xE0 | (unit >> 12) as u8,
+						0x80 | ((unit >> 6) & 63) as u8,
+						0x80 | (unit & 63) as u8,
+					]);
+				}
+			}
+		}
+		let pointer = self.constant_bytes(&bytes);
+		// This tag also denotes counted views. Treating malformed static
+		// data conservatively as borrowed preserves lifetime and copy rules.
+		let bits = self.usize.get_bit_width();
+		let capacity = (1u64 << (bits - 4)) | (1u64 << (bits - 2)) | text.len() as u64;
+		let value = self.string_type.const_named_struct(&[
+			pointer.into(),
+			self.usize.const_int(bytes.len() as u64, false).into(),
+			self.usize.const_int(capacity, false).into(),
+		]);
+		Val::new(Repr::Str, value)
+	}
+
 	/// A literal array's length survives immutable bindings and copies. Its
 	/// receiver is still evaluated normally, including every initializer.
 	pub(crate) fn constant_array_length(&self, mut node: NodeId) -> Option<usize> {
@@ -118,11 +154,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				repr,
 				self.context.bool_type().const_int(*value as u64, false),
 			),
-			(Value::String(text), Repr::Str) => {
-				self.string_constant(text.as_str().ok_or_else(|| {
-					self.unsupported(node.index(), "a string constant with lone surrogates")
-				})?)
-			}
+			(Value::String(text), Repr::Str) => self.text_constant(text),
 			(Value::None, Repr::None) => Val::none(),
 			(Value::None, Repr::Optional(_)) => {
 				Val::new(repr, super::zero_of(self.llvm_type(repr)))

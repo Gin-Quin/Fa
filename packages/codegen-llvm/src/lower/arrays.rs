@@ -2163,7 +2163,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let mark = self.mark();
 					self.frame_mut()
 						.catches
-						.push((failed_block, error_pointer, mark));
+						.push((failed_block, Some(error_pointer), mark));
 				}
 				let order = self.call_collection_callback(
 					closure,

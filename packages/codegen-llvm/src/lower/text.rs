@@ -304,9 +304,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		text: Val<'ctx>,
 		position: Val<'ctx>,
 	) -> Result<Val<'ctx>, Error> {
+		let index_node = match self.view(node) {
+			View::Index { index, .. } => Some(index),
+			_ => self.analysis.call(node).and_then(|call| {
+				call.arguments.iter().find_map(|argument| match argument {
+					fa_analyzer::analysis::Argument::Given(index) => Some(*index),
+					_ => None,
+				})
+			}),
+		};
 		let position = self
 			.convert(position, Repr::Int(IntRepr::I64), node.index())?
 			.int();
+		if index_node.is_some_and(|index| !self.may_be_negative(index)) {
+			let nonnegative = self.builder.build_int_compare(
+				IntPredicate::SGE,
+				position,
+				position.get_type().const_zero(),
+				"",
+			)?;
+			let assume = inkwell::intrinsics::Intrinsic::find("llvm.assume")
+				.and_then(|intrinsic| intrinsic.get_declaration(self.module, &[]))
+				.expect("llvm.assume");
+			self.builder.build_call(assume, &[nonnegative.into()], "")?;
+		}
 		let (bytes, length) = self.string_parts(text)?;
 		let capacity = self.string_capacity(text)?;
 		let unit = self

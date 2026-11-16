@@ -3372,11 +3372,11 @@ FA_EXPORT int32_t fa_string_get(const uint8_t *text, size_t length, size_t capac
 static void unit_slice(const uint8_t *text, size_t length, size_t capacity,
                        size_t from, size_t to, FaString *out, int view) {
 	if (from == to) {
-		*out = (FaString){view ? text + unit_position(text, length, capacity, from) / 2 : (const uint8_t *)"", 0, view ? string_view_capacity(capacity, 0) : SIMPLE};
+		*out = (FaString){view ? text + ((capacity & SIMPLE) ? from : unit_position(text, length, capacity, from) / 2) : (const uint8_t *)"", 0, view ? string_view_capacity(capacity, 0) : SIMPLE};
 		return;
 	}
-	size_t first = unit_position(text, length, capacity, from);
-	size_t last = unit_position(text, length, capacity, to);
+	size_t first = (capacity & SIMPLE) ? from * 2 : unit_position(text, length, capacity, from);
+	size_t last = (capacity & SIMPLE) ? to * 2 : unit_position(text, length, capacity, to);
 	if (!(first & 1) && !(last & 1)) {
 		size_t bytes = last / 2 - first / 2;
 		if (view || (string_static(capacity) && bytes > 1)) {
@@ -3632,6 +3632,13 @@ FA_EXPORT void fa_string_trim(const uint8_t *bytes, size_t length, int32_t sides
 
 /// `text.repeat(count)`.
 FA_EXPORT void fa_string_repeat(const uint8_t *bytes, size_t length, int64_t count, FaString *out) {
+	// Check the identity before any pointer-width conversion (wasm32 also
+	// accepts an Integer repetition count much wider than size_t).
+	if (length == 0 || count <= 0) {
+		*out = (FaString){(const uint8_t *)"", 0, SIMPLE};
+		return;
+	}
+	if ((uint64_t)count > (KIND_MASK - 1) / length) { out_of_memory(); }
 	fa_b_reset();
 	for (int64_t index = 0; index < count; index += 1) {
 		fa_b_bytes(bytes, length);

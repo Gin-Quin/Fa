@@ -905,6 +905,8 @@ static void test_utf16_strings(void) {
 		}
 	}
 	FaString high, low, joined;
+	fa_string_repeat((const uint8_t *)"", 0, INT64_MAX, &joined);
+	CHECK(string_length(&joined) == 0);
 	CHECK(fa_string_get(text, sizeof(text) - 1, 0, 3, &high));
 	CHECK(fa_string_get(text, sizeof(text) - 1, 0, 4, &low));
 	fa_concat(string_bytes(&high), 3, high.capacity, string_bytes(&low), 3, low.capacity, &joined);

@@ -971,7 +971,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mark = self.mark();
 		self.frame_mut()
 			.catches
-			.push((handler, error_slot.pointer, mark));
+			.push((handler, Some(error_slot.pointer), mark));
 		let result = call(self);
 		self.frame_mut().catches.pop();
 		let result = result?;

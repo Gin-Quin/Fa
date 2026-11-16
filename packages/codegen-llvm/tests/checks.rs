@@ -16,6 +16,37 @@ mod with_llvm {
 	use fa_analyzer::session::Session;
 	use fa_codegen_llvm::{OptLevel, Options, Target, compile};
 
+	#[test]
+	fn direct_code_point_counts_read_the_analyzer_fact_without_an_array() {
+		let source = include_str!("../../cli/tests/programs/review-code-point-count-array.fa");
+		for target in [Target::Native, Target::Wasm] {
+			for level in [OptLevel::O0, OptLevel::O3] {
+				let ir = ir_at_target("direct-point-count", source, false, level, target);
+				assert!(
+					!ir.contains("@fa_string_code_points("),
+					"{target:?}/{level:?}: {ir}"
+				);
+				if level == OptLevel::O0 {
+					assert!(ir.contains("@fa_string_code_point_count("), "{ir}");
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn split_views_enable_virtual_surrogate_edges() {
+		let source = include_str!("../../../design/reviews/repros/strings/split-cut-allocation.fa");
+		for target in [Target::Native, Target::Wasm] {
+			let ir = complete_ir_at_target("split-cut-views", source, false, OptLevel::O0, target);
+			assert!(ir.contains("@fa_string_split_views("), "{ir}");
+			let flag = ir
+				.lines()
+				.find(|line| line.starts_with("@fa_virtual_string_slices ="))
+				.expect("virtual span capability");
+			assert!(flag.contains("constant i32 1"), "{target:?}: {flag}");
+		}
+	}
+
 	/// The IR of the Fa functions and of `main` (the runtime functions start with `fa_`).
 	fn ir_of(name: &str, source: &str) -> String {
 		ir_with(name, source, true)

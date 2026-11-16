@@ -24,16 +24,29 @@ pub(crate) fn stringify(
 			Task::Key(text) => writer.quote(&text.into())?,
 			Task::Text(text) => writer.quote(text)?,
 			Task::Value(value, schema) => {
+				writer.tasks(&mut pending, 2)?;
 				let schema = writer.resolve(value, schema);
 				if kind(schema) == "Fields" {
 					let bits = value.as_int().unwrap_or_default();
 					writer.push("[")?;
 					let mut separator = "";
-					for entry in list_property(schema, "paths") {
+					for (index, entry) in list_property(schema, "paths").iter().enumerate() {
 						let Some(items) = entry.items() else { continue };
 						let mask = items.get(1).and_then(Value::as_int).unwrap_or_default();
-						// A path can describe a group; JSON lists its leaf flags.
-						if mask.count_ones() == 1 && bits & mask != ethnum::I256::ZERO {
+						// A one-child group also has a single bit: distinguish
+						// groups by their descendants, not by their mask width.
+						let name = items.first().and_then(Value::as_str).unwrap_or("");
+						let group = list_property(schema, "paths")
+							.get(index + 1)
+							.and_then(Value::items)
+							.and_then(|items| items.first())
+							.and_then(Value::as_str)
+							.is_some_and(|other| {
+								other
+									.strip_prefix(name)
+									.is_some_and(|rest| rest.starts_with('.'))
+							});
+						if !group && bits & mask != ethnum::I256::ZERO {
 							writer.push(separator)?;
 							if let Some(Value::String(name)) = items.first() {
 								writer.quote(name)?;
@@ -57,9 +70,10 @@ pub(crate) fn stringify(
 					}
 					Value::String(text) => writer.quote(text)?,
 					Value::Array(items) | Value::Tuple(items) | Value::Set(items) => {
-						writer
-							.interpreter
-							.reserve(crate::memory::values_size(items.len()))?;
+						writer.tasks(
+							&mut pending,
+							items.len().saturating_mul(2).saturating_add(1),
+						)?;
 						writer.push("[")?;
 						pending.push(Task::Raw("]"));
 						for (index, item) in items.iter().enumerate().rev() {
@@ -80,9 +94,10 @@ pub(crate) fn stringify(
 						writer.fields(&mut pending, &object.fields, schema, false)?;
 					}
 					Value::Map(entries) => {
-						writer
-							.interpreter
-							.reserve(crate::memory::values_size(entries.len()))?;
+						writer.tasks(
+							&mut pending,
+							entries.len().saturating_mul(4).saturating_add(1),
+						)?;
 						writer.push("{")?;
 						pending.push(Task::Raw("}"));
 						let mut separator = false;
@@ -120,6 +135,19 @@ pub(crate) fn stringify(
 						let data_schema = entry
 							.and_then(|entry| property(entry, "definition"))
 							.unwrap_or(&Value::None);
+						let literal = match kind(data_schema) {
+							"StringLiteral" | "BooleanLiteral" => property(data_schema, "value"),
+							"Integer"
+								if property(data_schema, "min") == property(data_schema, "max") =>
+							{
+								property(data_schema, "min")
+							}
+							_ => None,
+						};
+						if let Some(literal) = literal {
+							pending.push(Task::Value(literal, &Value::None));
+							continue;
+						}
 						writer.push("{\"type\":")?;
 						writer.quote(&name.into())?;
 						match member.data.as_ref() {
@@ -165,6 +193,17 @@ struct Writer<'a, 'h, 's> {
 }
 
 impl<'s> Writer<'_, '_, 's> {
+	fn tasks(&self, pending: &mut Vec<Task<'s>>, extra: usize) -> Result<(), Error> {
+		let needed = pending.len().saturating_add(extra);
+		if needed > pending.capacity() {
+			let capacity = needed.checked_next_power_of_two().unwrap_or(usize::MAX);
+			self.interpreter
+				.reserve(capacity.saturating_mul(std::mem::size_of::<Task<'s>>()))?;
+			pending.reserve_exact(capacity - pending.len());
+		}
+		Ok(())
+	}
+
 	fn push(&mut self, text: &str) -> Result<(), Error> {
 		let size = self.output.len().saturating_add(text.len());
 		self.interpreter.reserve_text(size.saturating_mul(2))?;
@@ -260,19 +299,30 @@ impl<'s> Writer<'_, '_, 's> {
 		schema: &'s Value,
 		tagged: bool,
 	) -> Result<(), Error> {
-		self.interpreter
-			.reserve(crate::memory::values_size(fields.len()))?;
+		self.tasks(pending, fields.len().saturating_mul(4).saturating_add(1))?;
 		pending.push(Task::Raw("}"));
 		let mut separator = false;
-		for (name, value) in fields.iter().rev().filter(|(_, v)| !omitted(v)) {
+		let declared = list_property(schema, "properties")
+			.iter()
+			.rev()
+			.filter_map(|field| {
+				let name = property(field, "name")?.as_str()?;
+				let (_, value) = fields.iter().find(|(f, _)| f.as_ref() == name)?;
+				Some((
+					name,
+					value,
+					property(field, "definition").unwrap_or(&Value::None),
+				))
+			});
+		let fallback = fields
+			.iter()
+			.rev()
+			.filter(|_| kind(schema) != "Object")
+			.map(|(name, value)| (name.as_ref(), value, &Value::None));
+		for (name, value, definition) in declared.chain(fallback).filter(|(_, v, _)| !omitted(v)) {
 			if separator {
 				pending.push(Task::Raw(","));
 			}
-			let definition = list_property(schema, "properties")
-				.iter()
-				.find(|p| property(p, "name").and_then(Value::as_str) == Some(name))
-				.and_then(|p| property(p, "definition"))
-				.unwrap_or(&Value::None);
 			pending.push(Task::Value(value, definition));
 			pending.push(Task::Raw(":"));
 			pending.push(Task::Key(name));
@@ -282,5 +332,72 @@ impl<'s> Writer<'_, '_, 's> {
 			self.push(",")?;
 		}
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::eval::{Host, Limits};
+	use crate::ir::{FnKey, Function, GlobalKey};
+	use std::sync::Arc;
+
+	struct NoHost;
+	impl Host for NoHost {
+		fn function(&mut self, _: FnKey) -> Result<Arc<Function>, Error> {
+			unreachable!("serialization calls no Fa function")
+		}
+		fn global(&mut self, _: GlobalKey) -> Result<Value, Error> {
+			unreachable!("serialization reads no globals")
+		}
+	}
+
+	#[test]
+	fn json_preserves_surrogates_and_omits_only_object_none() {
+		let value = Value::object(vec![
+			(
+				"raw",
+				Value::String(Text::from_units(&[0xd83d, 0, 10, 0xde00])),
+			),
+			("missing", Value::None),
+			(
+				"items",
+				Value::array(vec![
+					Value::None,
+					Value::Float(f64::INFINITY),
+					Value::Float(-0.0),
+				]),
+			),
+		]);
+		let mut host = NoHost;
+		let mut interpreter = Interpreter::new(&mut host, Limits::default());
+		let result = stringify(&mut interpreter, &value, &Value::None).unwrap();
+		assert_eq!(
+			result.as_str(),
+			Some(r#"{"raw":"\ud83d\u0000\n\ude00","items":[null,null,0]}"#)
+		);
+	}
+
+	#[test]
+	fn serialization_obeys_step_and_memory_limits() {
+		let value = Value::String("a".repeat(4096).into());
+		for limits in [
+			Limits {
+				steps: 10,
+				..Limits::default()
+			},
+			Limits {
+				memory: 1024,
+				..Limits::default()
+			},
+		] {
+			let mut host = NoHost;
+			let mut interpreter = Interpreter::new(&mut host, limits);
+			let result = stringify(&mut interpreter, &value, &Value::None);
+			assert!(
+				matches!(result, Err(Error::Steps(10) | Error::Memory(1024))),
+				"{result:?}"
+			);
+		}
 	}
 }

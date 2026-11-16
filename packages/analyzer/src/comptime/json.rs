@@ -50,6 +50,77 @@ fn decorate(
 	if depth > 64 {
 		return;
 	}
+	// Reflection describes whole nominal types; JSON also accepts a value
+	// whose inferred type is one particular member, including inside containers.
+	if let TypeKind::Member(nominal, index) | TypeKind::EnumMember(nominal, index) = types.kind(ty)
+	{
+		use super::schema::member;
+		let info = types.nominal(nominal);
+		let name = Value::string(types.member_name(nominal, index));
+		let definition = if info.kind == crate::types::NominalKind::Enum {
+			let pinned = types
+				.as_int(types.payload(nominal, index))
+				.map(|int| int.min);
+			member(
+				"Enum",
+				vec![
+					("pinned", Value::Boolean(pinned.is_some())),
+					(
+						"members",
+						Value::array(vec![Value::object(vec![
+							("name", name),
+							(
+								"value",
+								Value::Integer(pinned.unwrap_or_else(|| i64::from(index).into())),
+							),
+						])]),
+					),
+				],
+			)
+		} else {
+			let payload = types.payload(nominal, index);
+			let mut definition = if payload.is_unset() || payload == TypeId::NONE {
+				Value::None
+			} else {
+				super::schema::schema(types, payload)
+			};
+			if !matches!(definition, Value::None) {
+				decorate(
+					types,
+					analysis,
+					file,
+					payload,
+					&mut definition,
+					defaults,
+					depth + 1,
+				);
+			}
+			member(
+				"NamedUnion",
+				vec![
+					(
+						"errors",
+						Value::Boolean(info.kind == crate::types::NominalKind::Errors),
+					),
+					(
+						"members",
+						Value::array(vec![Value::object(vec![
+							("name", name),
+							("definition", definition),
+						])]),
+					),
+				],
+			)
+		};
+		*schema = member(
+			"Named",
+			vec![
+				("name", Value::string(types.decl_name(info.key))),
+				("definition", definition),
+			],
+		);
+		return;
+	}
 	if let Value::Member(member) = schema
 		&& member.name.as_ref() == "Schema.Named"
 	{
@@ -100,21 +171,22 @@ fn decorate(
 				return;
 			};
 			let properties = Arc::make_mut(properties);
-			if let Some(declaration) = declaration {
-				properties.sort_by_key(|property| match property {
-					Value::Object(object) => object
-						.get("name")
-						.and_then(Value::as_str)
-						.and_then(|name| {
-							declaration
-								.fields
-								.iter()
-								.position(|f| types.syms.resolve(f.name) == name)
-						})
-						.unwrap_or(usize::MAX),
-					_ => usize::MAX,
-				});
-			}
+			let order: Vec<_> = declaration
+				.map(|d| d.fields.iter().map(|f| f.name).collect())
+				.or_else(|| analysis.inline_field_orders.get(&ty).cloned())
+				.unwrap_or_default();
+			properties.sort_by_key(|property| match property {
+				Value::Object(object) => object
+					.get("name")
+					.and_then(Value::as_str)
+					.and_then(|name| {
+						order
+							.iter()
+							.position(|&sym| types.syms.resolve(sym) == name)
+					})
+					.unwrap_or(usize::MAX),
+				_ => usize::MAX,
+			});
 			for property in properties {
 				let Value::Object(object) = property else {
 					continue;

@@ -3985,6 +3985,9 @@ FA_EXPORT void fa_string_repeat(const uint8_t *bytes, size_t length, int64_t cou
 	size_t encoded = fa_string_encoded_length(bytes, length, 0);
 	if ((uint64_t)count > (KIND_MASK - 1) / encoded) { out_of_memory(); }
 	fa_b_reset();
+	// Fail an impossible allocation before incrementally filling the builder.
+	// This is an upper bound when repetition joins surrogate halves.
+	reserve(encoded * (size_t)count);
 	for (int64_t index = 0; index < count; index += 1) {
 		fa_b_string(bytes, length, 0);
 	}

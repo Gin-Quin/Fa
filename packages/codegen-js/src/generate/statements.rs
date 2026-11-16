@@ -12,7 +12,7 @@ use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{BindingKind, View};
 
 use crate::generate::{Dest, Generator, Kind, LoopCx};
-use crate::js::{self, Expr, Prec};
+use crate::js::{Expr, Prec};
 
 impl Generator<'_> {
 	/// A list of statements; the value of the last one goes to `dest`.

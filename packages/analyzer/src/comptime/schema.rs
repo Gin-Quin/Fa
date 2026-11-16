@@ -12,7 +12,7 @@ use fa_interpreter::value::{Member, MemberKind};
 use crate::ids::TypeId;
 use crate::types::{CollKind, FloatBits, IntStorage, TypeKind, TypeStore};
 
-fn member(name: &str, fields: Vec<(&str, Value)>) -> Value {
+pub(super) fn member(name: &str, fields: Vec<(&str, Value)>) -> Value {
 	let data = (!fields.is_empty()).then(|| Value::object(fields));
 	Value::Member(Arc::new(Member {
 		name: Arc::from(format!("Schema.{name}")),

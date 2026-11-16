@@ -6,6 +6,11 @@ fn disagreement(expected: &Expected, outcome: &Outcome) -> Option<String> {
 	if outcome.exit != expected.exit || !outcome.stderr.is_empty() && outcome.build_failed {
 		return Some(format!("exit {}: {}", outcome.exit, outcome.stderr));
 	}
+	for message in &expected.stderr {
+		if !outcome.stderr.contains(message) {
+			return Some(format!("missing stderr {message:?}: {}", outcome.stderr));
+		}
+	}
 	let actual: Vec<_> = outcome.stdout.lines().collect();
 	if actual.len() != expected.stdout.len() {
 		return Some(format!(
@@ -75,7 +80,7 @@ fn generated_string_differential() {
 					let Some((index, program)) = queue.lock().unwrap().next() else {
 						break;
 					};
-					let found = run_shard(index, program, &scratch);
+					let found = run_shard(index, program, &scratch, full);
 					eprintln!(
 						"string differential: {} ({} disagreements)",
 						program.display(),
@@ -99,7 +104,7 @@ fn generated_string_differential() {
 	fs::remove_dir_all(scratch).expect("remove successful generated corpus");
 }
 
-fn run_shard(index: usize, program: &Path, scratch: &Path) -> Vec<String> {
+fn run_shard(index: usize, program: &Path, scratch: &Path, full: bool) -> Vec<String> {
 	let mut failures = Vec::new();
 	let mut expected = expectations(&fs::read_to_string(program).expect("generated source"));
 	for target in ["bun", "node", "web"] {
@@ -131,7 +136,12 @@ fn run_shard(index: usize, program: &Path, scratch: &Path) -> Vec<String> {
 			{
 				continue;
 			}
-			for opt_level in [OptLevel::O0, OptLevel::O3] {
+			let levels: &[_] = if full {
+				&[OptLevel::O0, OptLevel::O3]
+			} else {
+				&[OptLevel::O0]
+			};
+			for &opt_level in levels {
 				let options = Options {
 					opt_level,
 					leak_check: true,

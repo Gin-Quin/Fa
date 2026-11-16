@@ -329,7 +329,7 @@ Interpolation constructors and appended interpolations check each addition of by
 - Iteration without an index is `for…of`. With an index, it is a loop that reads `codePointAt` and advances by the length of the code point.
 - `characters()` uses a shared `Intl.Segmenter` (`granularity: "grapheme"`).
 - `utf8Length()` is `Buffer.byteLength(text)` on Bun and Node, and a loop over `charCodeAt` in browsers. It is `O(n)`: this is why it is a method and not a property.
-- `toUtf8()` is the `encode` of a shared `TextEncoder`. `String.fromUtf8` is the `decode` of a shared `TextDecoder("utf-8", { fatal: true, ignoreBOM: true })`, and `String.fromUtf8Lossy` the same without `fatal`.
+- `toUtf8()` is the `encode` of a shared `TextEncoder`. Direct iteration (`for byte in text.toUtf8()`, with or without an index) encodes the receiver once into a temporary `Uint8Array`, then emits an indexed `for` loop over its length. The receiver is evaluated once before the loop; `break` and `continue` retain their usual meaning. `String.fromUtf8` is the `decode` of a shared `TextDecoder("utf-8", { fatal: true, ignoreBOM: true })`, and `String.fromUtf8Lossy` the same without `fatal`.
 - `String.from(text, capacity = n)` is `text`, `reserve` compiles to nothing (its argument is still evaluated), and `capacity` is the `length`.
 ### Compile-time interpreter
 

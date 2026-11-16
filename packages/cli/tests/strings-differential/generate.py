@@ -55,6 +55,7 @@ function strings = (values: Array<String>): String => {
     for value in values { result.push("[" + units(value) + "]") }
     result.join(",")
 }
+function identity = <Item>(value: Item): Item => value
 function probe = (text: String, needle: String): String throws IndexError => {
     mutable rows: Array<String> = []
     rows.push("{text.length}:{text.isEmpty()}:{text.isWellFormed()}:{text.utf8Length()}")
@@ -85,6 +86,7 @@ function probe = (text: String, needle: String): String throws IndexError => {
     rows.push(points.join(","))
     rows.push("{text.codePoints()}")
     rows.push(text.codePoints().length.toString())
+    rows.push("{(text.codePoints)().length}:{identity(text).codePoints().length}:{text.codePoints().length > 1}")
     rows.push(strings(text.characters()))
     rows.push("{text == needle}:{text != needle}:{text < needle}:{text <= needle}:{text > needle}:{text >= needle}")
     rows.push(units(text + needle))
@@ -119,6 +121,12 @@ function probe = (text: String, needle: String): String throws IndexError => {
     rows.push(units(String.fromUtf8Lossy(bytes)))
     mutable encoded: Array<Byte> = []
     for byte in text.toUtf8() { encoded.push(byte) }
+    mutable grouped: Array<Byte> = []
+    for byte, index in (identity(text).toUtf8)() {
+        if index < 0 { continue }
+        grouped.push(byte)
+    }
+    rows.push("{grouped}")
     rows.push("{encoded}")
     for index in [-bytes.length - 1, -1, 0, bytes.length] {
         let byte = bytes.get(index)
@@ -213,6 +221,7 @@ function probe(text, needle) {
     let index=0; const points=[];
     for (const point of text) { points.push(`${index}:[${units(point)}]`); index+=point.length; }
     rows.push(points.join(","), array(Array.from(text,s=>s.codePointAt(0))), String(Array.from(text).length));
+    rows.push(`${Array.from(text).length}:${Array.from(text).length}:${Array.from(text).length>1}`);
     rows.push(strings(Array.from(segmenter.segment(text),x=>x.segment)));
     rows.push(`${text===needle}:${text!==needle}:${text<needle}:${text<=needle}:${text>needle}:${text>=needle}`);
     rows.push(units(text+needle),units(text+needle),units(text+text));
@@ -224,6 +233,7 @@ function probe(text, needle) {
     rows.push(units(text.repeat(0)),units(text.repeat(2)),units(text.trim()),units(text.trimStart()),units(text.trimEnd()),units(text.toUpperCase()),units(text.toLowerCase()),units(`<${text}>`));
     const bytes=enc.encode(text);
     rows.push(`${bytes.length}:${bytes.length===0}:${array(bytes)}:true`,units(fatal.decode(bytes)),units(decoder.decode(bytes)),array(bytes));
+    rows.push(array(bytes));
     for (const index of [-bytes.length-1,-1,0,bytes.length]) {
         const i=index<0?bytes.length+index:index;
         const valid=i>=0&&i<bytes.length;
@@ -485,6 +495,102 @@ def subjects():
             "\u007f\u0080\u07ff\u0800\uffff\U00010000\U0010ffff"]
 
 
+
+def copy_cases(output, bun):
+    # Cross source forms with every owning destination. In particular an empty
+    # reserved owner is not interchangeable with an immortal empty literal.
+    values = subjects() + (["a" * 4097, "é日😀" * 700] if not FULL else [])
+    prelude = PRELUDE.split("function probe", 1)[0] + r"""
+type CopyBox = { text: String }
+type CopyTree = Union { Leaf = { text: String }, Branch = { left: CopyTree, right: CopyTree } }
+function shape = (text: String): String => "{text.length}:{text.utf8Length()}:{text.isWellFormed()}:[{units(text)}]"
+function copies = (text: String, capacity: Integer<min = 0>): String => {
+    mutable source = String.from(text, capacity = capacity)
+    let saved = source
+    let box = CopyBox { text = source }
+    let array = [source, source]
+    mutable pool: Pool<CopyBox> = []
+    use item = pool.add(CopyBox { text = source })
+    let tree = CopyTree.Branch { left = CopyTree.Leaf { text = source }, right = CopyTree.Leaf { text = source } }
+    let map: Map<String, Integer> = [(source, 7)]
+    let set: Set<String> = [source, saved]
+    let generic = identity(source)
+    source += "x"
+    let left = when tree is { CopyTree.Branch as branch => when branch.left is { CopyTree.Leaf as leaf => shape(leaf.text), else => "wrong" }, else => "wrong" }
+    [shape(saved), shape(box.text), shape(array[0]), shape(array[1]), shape(item.text), left, shape(generic), "{map.get(saved) ?? 0}:{set.size}:{set.includes(saved)}", shape(source)].join("|")
+}
+"""
+    oracle = r"""
+const values=JSON.parse(await Bun.stdin.text());
+const enc=new TextEncoder();
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+const shape=s=>`${s.length}:${enc.encode(s).length}:${s.isWellFormed()}:[${units(s)}]`;
+for(const [text,capacity] of values) console.log([...Array(7).fill(shape(text)),"7:1:true",shape(text+"x")].join("|"));
+"""
+    capacities = [0, 11, 12, 23, 24, 64, 4096] if FULL else [24, 4096]
+    pairs = [(text, capacity) for text in values for capacity in capacities]
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(pairs,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"copies",prelude,[(literal(t),str(c)) for t,c in pairs],references,"copies",32,False)
+
+
+def json_composites(output, bun):
+    prelude = '-- skip-target: native-freestanding\nuse { Json, JsonError } = std.json\n' + PRELUDE.split("function probe",1)[0] + r"""
+type Record = { text: String, missing: String? }
+type Message = Union { Text = String, Row = { text: String }, Tagged = { type: String, text: String }, Empty, Literal = "literal" }
+type Failure = Errors { Missing, Detail = { text: String } }
+type Color = Enum { red, blue }
+type Status = Enum { ok = 200, failed = 500 }
+type Flags = Fields { first, nested { second, third }, single { child } }
+type Node = { text: String, children: Array<Node> }
+function read = (input: String | Bytes): Record throws JsonError => try Json.parse(identity(input))
+function composite = (text: String): String throws JsonError => {
+    mutable rows: Array<String> = []
+    let record = Record { text = text, missing = none }
+    let map: Map<String, String?> = [(text, text), ("omitted", none)]
+    rows.push(units(Json.stringify(record)))
+    rows.push(units(Json.stringify([text, none, "x"])))
+    rows.push(units(Json.stringify(map)))
+    rows.push(units(Json.stringify(Message.Text(text))))
+    rows.push(units(Json.stringify(Message.Row { text = text })))
+    rows.push(units(Json.stringify(Message.Tagged { type = "data", text = text })))
+    rows.push(units(Json.stringify(Message.Empty)))
+    rows.push(units(Json.stringify(Message.Literal)))
+    rows.push(units(Json.stringify(Failure.Detail { text = text })))
+    rows.push(units(Json.stringify(Failure.Missing)))
+    rows.push(units(Json.stringify(Color.blue)))
+    rows.push(units(Json.stringify(Status.failed)))
+    rows.push(units(Json.stringify(Flags { first, nested { third }, single { child } })))
+    rows.push(units(Json.stringify(Node { text = text, children = [Node { text = text, children = [] }] })))
+    let optional: Record? = record
+    rows.push(units(Json.stringify(optional)))
+    let enumeration: Status | String = Status.failed
+    rows.push(units(Json.stringify(enumeration)))
+    let fromText: Record = try read(Json.stringify(record))
+    let fromBytes: Record = try read(Json.stringify(record).toUtf8())
+    rows.push(units(fromText.text))
+    rows.push(units(fromBytes.text))
+    rows.join("|")
+}
+"""
+    oracle = r"""
+const texts=JSON.parse(await Bun.stdin.text());
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+for(const text of texts) {
+const map=Object.fromEntries([[text,text]]);
+const values=[{text},[text,null,"x"],map,{type:"Text",value:text},{type:"Row",text},{type:"Tagged",value:{type:"data",text}},{type:"Empty"},"literal",{type:"Detail",text},{type:"Missing"},"blue",500,["first","nested.third","single.child"],{text,children:[{text,children:[]}]},{text},500];
+console.log([...values.map(v=>units(JSON.stringify(v))),units(text),units(text)].join("|"));
+}
+"""
+    values = subjects()
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(values,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"json-composites",prelude,[(literal(t),) for t in values],references,"composite",16)
+
+
+def allocation_cases(output):
+    for name, expr in [("repeat",'"abc".repeat(n)'), ("pad-start",'"abc".padStart(n, "é")'), ("pad-end",'"abc".padEnd(n, "😀")'), ("bytes",'Bytes.filled(n)')]:
+        (output/f"allocation-{name}.fa").write_text(f'function size = (n: Integer<min = 0>): Integer => {expr}.length\nconsole.log(size(9007199254740991))\n-- exit: 101\n-- stderr: stop: out of memory\n')
+
+
 def main():
     output = Path(sys.argv[1])
     output.mkdir(parents=True, exist_ok=True)
@@ -535,6 +641,9 @@ async function crossing = (text: String): String throws IndexError => {
         with path.open("a") as source:
             for index in indices:
                 source.write(f'console.log("{index} await " + (try await crossing({literal(subjects()[index])})))\n-- prints: {index} await {storage_reference[index]}\n')
+    copy_cases(output,bun)
+    json_composites(output,bun)
+    allocation_cases(output)
     decoded = byte_cases(output,bun)
     json_cases(output,bun)
     cuts=edge_cases(output,bun)

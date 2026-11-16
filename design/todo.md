@@ -30,7 +30,6 @@ The analyzer/prelude/tooling, JavaScript backend and compile-time interpreter ar
 
 - **Native integration (lead).** Review and merge `strings/native` with main current. The backend/runtime implementation, lossless constants, no-copy views, Bytes, Unicode segmentation and compiler lifetime fix are delivered there; the final validation record is `strings-2-native.md` in the lead’s reports. The intermittent LLVM block-deletion use-after-free predates the string work and is fixed without adding a target exclusion.
 - **Final lead-merge validation.** Re-run the shared T-STR/Bytes/edge-01–13 fixtures, workspace/runtime/goldens and website checks after the final merge with main. Native historical UTF-16 expectations and its dynamic-bound failure test are reconciled. Preserve the branch’s exact ratchets and the recorded +1% ASCII instruction gate; no new exclusions or pending annotations.
-- **Compile-time JSON serialization (lead decision, 2026-11-16).** The interpreter still rejects `Json.stringify` with AN001. Implement serialization with lowercase lone-surrogate escapes and lossless round trips, then exercise the new shared `json-code-units.fa` cases at compile time as well as at runtime. Native/wasm/Bun/Node/web already pass the runtime fixture. Native-freestanding keeps its existing AN004 JSON restriction; libc-free float support remains WP15.
 
 The standard library deferrals and optional bulk-loop optimization are recorded below; neither changes this redesign's current language contract.
 

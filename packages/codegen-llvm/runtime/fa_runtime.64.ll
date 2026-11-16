@@ -17989,7 +17989,7 @@ define void @fa_string_repeat(ptr nocapture noundef readonly %0, i64 noundef %1,
   store i64 0, ptr %9, align 8, !tbaa.struct !16
   %10 = getelementptr inbounds i8, ptr %3, i64 16
   store i64 -9223372036854775808, ptr %10, align 8, !tbaa.struct !17
-  br label %36
+  br label %37
 
 11:                                               ; preds = %4
   %12 = load i32, ptr @fa_virtual_string_slices, align 4, !tbaa !18
@@ -18024,20 +18024,22 @@ define void @fa_string_repeat(ptr nocapture noundef readonly %0, i64 noundef %1,
   store i64 0, ptr %29, align 8, !tbaa !10
   %30 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder_simple)
   store i64 0, ptr %30, align 8, !tbaa !10
-  br label %32
+  %31 = mul i64 %24, %2
+  tail call fastcc void @reserve(i64 noundef %31) #65
+  br label %33
 
-31:                                               ; preds = %32
+32:                                               ; preds = %33
   tail call void @fa_b_take(ptr noundef %3) #65
-  br label %36
+  br label %37
 
-32:                                               ; preds = %28, %32
-  %33 = phi i64 [ %34, %32 ], [ 0, %28 ]
+33:                                               ; preds = %28, %33
+  %34 = phi i64 [ %35, %33 ], [ 0, %28 ]
   tail call void @fa_b_string(ptr noundef %0, i64 noundef %1, i64 noundef 0) #65
-  %34 = add nuw nsw i64 %33, 1
-  %35 = icmp eq i64 %34, %2
-  br i1 %35, label %31, label %32, !llvm.loop !181
+  %35 = add nuw nsw i64 %34, 1
+  %36 = icmp eq i64 %35, %2
+  br i1 %36, label %32, label %33, !llvm.loop !181
 
-36:                                               ; preds = %31, %8
+37:                                               ; preds = %32, %8
   ret void
 }
 

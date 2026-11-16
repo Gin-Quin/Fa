@@ -150,9 +150,9 @@ def goose_source_at_size(source, size, runtime=False):
 FA_SIZE_LINE = re.compile(r"^(\s*let\s+\w+\s*=\s*)([\d_]+)(\s*--.*BENCH_N.*)$", re.M)
 
 
-def toolchain():
+def toolchain(fa_program=None):
     """Hash the actual compilers, including Fa's delegated native backend."""
-    fa = artifacts.executable_identity(os.environ.get("FA", ROOT / "target/release/fa"))
+    fa = artifacts.executable_identity(fa_program or os.environ.get("FA", ROOT / "target/release/fa"))
     fa_path = Path(fa["path"])
     with fa_path.open("rb") as executable:
         if executable.read(2) == b"#!":
@@ -357,6 +357,21 @@ def secondary(directory, name, size, compilers, expected, runs, reuse, memory_mi
     return results
 
 
+def additional_variant(name, directory, size, runtime_size, expected):
+    """Revalidate the saved compiler live, then the current benchmark's full contract."""
+    try:
+        saved = json.loads((directory / "fa/manifest.json").read_text())
+        compiler_path = saved["request"]["compiler"]["path"]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise RuntimeError(f"{directory}: missing or invalid additional Fa manifest") from error
+    compilers = toolchain(compiler_path)
+    build_plan = plan(name, size, compilers, runtime_size)
+    commands, reference, manifests = prepare(directory, build_plan, reuse=True)
+    if reference != expected:
+        raise RuntimeError(f"{name}: additional variant has a different Rust reference")
+    return commands["fa"], manifests
+
+
 def save_report(path, results):
     results["end"] = measurements.snapshot()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -383,6 +398,8 @@ def main():
     parser.add_argument("--prepare-only", action="store_true", help="Alias for --mode prepare")
     parser.add_argument("--render", type=Path, nargs="+", help="Merge phase JSON and generate Markdown")
     parser.add_argument("--markdown", type=Path)
+    parser.add_argument("--update-readme", action="store_true",
+                        help="With --render, replace only the generated README result block")
     parser.add_argument("--supplemental", action="store_true",
                         help="Retain this diagnostic series in JSON without replacing headline table rows")
     parser.add_argument("--secondary-memory-mib", type=int, default=512)
@@ -390,8 +407,10 @@ def main():
                         help="Interleave an already prepared Fa variant (one selected benchmark, CPU mode)")
     args = parser.parse_args()
     if args.render:
-        tables.render(args.render, args.report, args.markdown)
+        tables.render(args.render, args.report, args.markdown, args.update_readme)
         return
+    if args.update_readme:
+        parser.error("--update-readme requires --render")
     if not args.directory:
         parser.error("--directory is required for measurements")
     if args.profile:
@@ -451,13 +470,8 @@ def main():
                     label, separator, path = specification.partition("=")
                     if not separator or label not in DEFAULTS or label in commands:
                         raise ValueError(f"invalid or duplicate additional variant: {specification}")
-                    extra_plan = plan(label, size, compilers, args.goose_runtime_size)
-                    extra_commands, extra_expected, extra_manifests = prepare(
-                        Path(path).resolve(), extra_plan, reuse=True)
-                    if extra_expected != expected:
-                        raise RuntimeError(f"{label}: additional variant has a different Rust reference")
-                    commands[label] = extra_commands["fa"]
-                    additional[label] = extra_manifests
+                    commands[label], additional[label] = additional_variant(
+                        label, Path(path).resolve(), size, args.goose_runtime_size, expected)
                 result["additional_artifacts"] = additional
                 result["commands"] = commands
                 samples = {side: [] for side in commands}

@@ -152,5 +152,26 @@ class SuiteSelection(unittest.TestCase):
         self.assertEqual(set(compare.GOOSE_SUITE) | set(compare.SECONDARY), set(compare.DEFAULTS))
 
 
+class AdditionalCompiler(unittest.TestCase):
+    def test_saved_compiler_is_reidentified_before_contract_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / 'fa').mkdir()
+            (directory / 'fa/manifest.json').write_text(
+                '{"request":{"compiler":{"path":"/tools/parent/fa"}}}')
+            live = {'fa': {'sha256': 'live-parent'}}
+            with patch.object(compare, 'toolchain', return_value=live) as identify, \
+                 patch.object(compare, 'plan', return_value={'current': 'inputs'}) as plan, \
+                 patch.object(compare, 'prepare', return_value=({'fa': ['binary', '16']}, b'ok', {'fa': 'manifest'})) as prepare:
+                command, manifests = compare.additional_variant('growing-index', directory, 16, False, b'ok')
+                identify.assert_called_once_with('/tools/parent/fa')
+                plan.assert_called_once_with('growing-index', 16, live, False)
+                prepare.assert_called_once_with(directory, {'current': 'inputs'}, reuse=True)
+                self.assertEqual(command, ['binary', '16'])
+                self.assertEqual(manifests, {'fa': 'manifest'})
+                with self.assertRaisesRegex(RuntimeError, 'different Rust reference'):
+                    compare.additional_variant('growing-index', directory, 16, False, b'wrong')
+
+
 if __name__ == "__main__":
     unittest.main()

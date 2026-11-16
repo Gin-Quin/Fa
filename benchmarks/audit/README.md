@@ -21,7 +21,7 @@ python3 benchmarks/audit/compare.py --suite all --directory benchmarks/audit/bui
 # Secondary targets: same default inputs, three rounds, a 512 MiB RSS ceiling.
 python3 benchmarks/audit/compare.py --suite all --directory benchmarks/audit/build/secondary --default-sizes --mode secondary --runs 3 --report benchmarks/results/secondary.json
 # Optionally repeat at audit sizes in another directory for successful small-input proxies.
-python3 benchmarks/audit/compare.py --render benchmarks/results/cpu.json benchmarks/results/profiles.json benchmarks/results/secondary.json --report benchmarks/results/baseline.json --markdown benchmarks/results/baseline.md
+python3 benchmarks/audit/compare.py --render benchmarks/results/cpu.json benchmarks/results/profiles.json benchmarks/results/secondary.json --report benchmarks/results/baseline.json --markdown benchmarks/results/baseline.md --update-readme
 ```
 
 Positional names select benchmarks/variants; `--suite secondary` selects own ports
@@ -111,7 +111,8 @@ python3 benchmarks/audit/compare.py growing-index --size 16 --directory benchmar
 ```
 
 `--additional NAME=DIRECTORY` validates all three existing manifests against the
-current sources, compiler, modes, exact size and Rust reference, then adds the Fa
+current sources, flags, modes, exact size and Rust reference, and revalidates the
+saved compiler's live identity, then adds the Fa
 binary as another label. No bare unvalidated executable is accepted. The result
 retains its artifact manifests, samples, orders and `additional_pairs` (Fa divided
 by the variant, ratio of medians and paired median/quartiles). Apply the documented
@@ -125,3 +126,13 @@ retains a diagnostic series in combined JSON while excluding it from headline
 Markdown rows: parent profiles and extra variant series cannot silently replace
 trunk measurements. Native variant CPU pairs can be supplemental while the
 primary per-program series stays fixed.
+
+The additional manifest may name a different compiler (for a parent/before/after
+control). Its actual Fa executable, backend and linker are identified again;
+a changed compiler or source still invalidates reuse. Example after preparing
+`word-count` with another `FA` at default size: add
+`--additional word-count=<that-directory>/word-count` to the trunk CPU series.
+Use `--supplemental` for that diagnostic series.
+
+`--update-readme` replaces only the marked generated result block, preserves the
+rest of the README byte-for-byte, links the canonical JSON and is idempotent.

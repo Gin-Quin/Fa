@@ -2346,25 +2346,13 @@ impl Walker<'_> {
 	/// captures, so it can't write any of it (`REF021`). `value` is a lambda,
 	/// or the name of a local function; `at` where it escapes.
 	pub(crate) fn escape(&mut self, value: NodeId, at: NodeId) {
-		let value = self.strip_groups(value);
-		let lambda = match self.view(value) {
-			View::Copy(inner) => return self.escape(inner, at),
-			View::Lambda { .. } => value,
-			View::Name(_) => {
-				let Resolution::Local(symbol) = self.a.resolution(value) else {
-					return;
-				};
-				let Some(declaration) = self.direct_function(symbol) else {
-					return;
-				};
-				match self.a.functions.get(&declaration) {
-					Some(info) => info.lambda,
-					None => return,
-				}
-			}
-			_ => return,
-		};
-		self.escape_closure(lambda, at);
+		let ty = self.a.type_of(value);
+		if !ty.is_unset() && !self.callable_slot_type(ty) {
+			return;
+		}
+		for function in self.callable_source_facts(value).functions {
+			self.escape_closure(function, at);
+		}
 	}
 
 	/// A closure (a lambda node, or a `watch` node or `derived` declaration,
@@ -2393,8 +2381,13 @@ impl Walker<'_> {
 				.syms
 				.resolve(self.a.symbols.symbol(symbol).name)
 				.to_string();
+			let reason = if self.unknown_callback_escapes.contains_key(&lambda) {
+				" This callback may reach a function value whose type doesn't say whether it keeps the callback: call a known borrowing function directly, or give a callback whose captures it can own."
+			} else {
+				""
+			};
 			let message = format!(
-				"`{name}` is captured by copy, since the closure escapes (line {line}): the write would be lost. Return the new value, or keep the state in a field"
+				"`{name}` is captured by copy, since the closure escapes (line {line}): the write would be lost. Return the new value, or pass mutable state as a parameter.{reason}"
 			);
 			let diagnostic =
 				self.diagnostic(&crate::diagnostics::codes::advanced::REF021, write, message);

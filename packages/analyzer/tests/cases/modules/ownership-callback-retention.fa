@@ -1,0 +1,19 @@
+-- prints: 1 4
+-- file: library/actions.fa
+type Reader = () => Integer
+export namespace = {
+	function borrow = (callback: Reader): Integer => callback()
+	function keep = (callback: Reader): Reader => callback
+}
+-- file: application/main.fa
+export function = () => {
+	mutable calls = 0
+	library.actions.borrow(() => {
+		calls += 1
+		calls
+	})
+	mutable amount = 4
+	let kept = library.actions.keep(() => amount)
+	amount = 5
+	console.log(calls, kept())
+}

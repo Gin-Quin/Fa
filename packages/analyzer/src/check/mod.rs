@@ -475,6 +475,9 @@ pub struct Walker<'s> {
 	/// The captured locals each closure writes, with the write (by lambda
 	/// node): `REF021` if it escapes.
 	pub(crate) closure_writes: FxHashMap<NodeId, Vec<(SymbolId, NodeId)>>,
+	pub(crate) unknown_callback_escapes: FxHashMap<NodeId, NodeId>,
+	pub(crate) retention_version: u64,
+	pub(crate) retention_checked_version: Option<u64>,
 	/// The loop and function depths of each local's declaration (`moves.rs`).
 	pub(crate) declaration_depths: FxHashMap<SymbolId, (u32, u32)>,
 	/// The last use of each local so far (`moves.rs`).
@@ -676,6 +679,9 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		lifetime_ends: FxHashMap::default(),
 		effect_types: FxHashMap::default(),
 		closure_writes: FxHashMap::default(),
+		unknown_callback_escapes: FxHashMap::default(),
+		retention_version: 0,
+		retention_checked_version: None,
 		rejected_effect_roots: rustc_hash::FxHashSet::default(),
 		modules: modules::ModuleState::default(),
 		comptime_evaluated: rustc_hash::FxHashSet::default(),

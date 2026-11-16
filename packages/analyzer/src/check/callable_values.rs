@@ -163,6 +163,7 @@ impl Walker<'_> {
 			.callable_values
 			.retain(|(other, _)| !self.places.is_at_or_below(*other, place));
 		if self.body.flow.reachable && self.callable_slot_type(ty) {
+			self.retention_version += 1;
 			self.body
 				.flow
 				.callable_values
@@ -185,6 +186,9 @@ impl Walker<'_> {
 	}
 
 	pub(super) fn record_callable_call(&mut self, call: NodeId) {
+		if self.a.calls.get(&call).is_some_and(|info| info.arguments.iter().any(|argument| {
+			matches!(argument, crate::analysis::Argument::Given(value) if self.callable_slot_type(self.a.type_of(*value)))
+		})) { self.retention_version += 1; }
 		if !self.body.flow.reachable || self.body.flow.callable_values.is_empty() {
 			return;
 		}
@@ -250,6 +254,7 @@ impl Walker<'_> {
 			for source in sources {
 				if !recorded.contains(&source) {
 					recorded.push(source);
+					self.retention_version += 1;
 				}
 			}
 		}

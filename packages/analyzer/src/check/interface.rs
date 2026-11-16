@@ -247,6 +247,7 @@ impl Walker<'_> {
 					has_default,
 					only_called: index < 32 && only_called & (1 << index) != 0,
 					kept: self.a.kept_parameters.contains(&param),
+					kept_unknown: self.a.unknown_kept_parameters.contains(&param),
 				});
 			}
 			parameters.insert(decl, published);

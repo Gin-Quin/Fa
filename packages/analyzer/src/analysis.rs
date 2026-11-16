@@ -662,6 +662,8 @@ pub struct Analysis {
 	pub escapes: rustc_hash::FxHashSet<NodeId>,
 	/// Parameters whose callable data can be retained by their function.
 	pub kept_parameters: rustc_hash::FxHashSet<SymbolId>,
+	/// Retention inferred conservatively from an unknown function value.
+	pub unknown_kept_parameters: rustc_hash::FxHashSet<SymbolId>,
 	/// The `let` and `mutable` locals of blocks and functions whose value
 	/// never outlives the function's frame ([`Analysis::is_non_escaping`]).
 	pub non_escaping: rustc_hash::FxHashSet<SymbolId>,
@@ -1594,6 +1596,7 @@ impl Analysis {
 			callback_types: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
 			kept_parameters: rustc_hash::FxHashSet::default(),
+			unknown_kept_parameters: rustc_hash::FxHashSet::default(),
 			non_escaping: rustc_hash::FxHashSet::default(),
 			requirement_args: FxHashMap::default(),
 			type_decls: FxHashMap::default(),

@@ -835,6 +835,7 @@ impl Walker<'_> {
 		if let Some(symbol) = owner.symbol {
 			self.a.symbols.symbol_mut(symbol).ty = ty;
 		}
+		self.retention_version += 1;
 		ty
 	}
 

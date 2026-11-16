@@ -50,6 +50,7 @@ impl Walker<'_> {
 		if self.comptime_evaluated.contains(&n) {
 			return self.a.constants.get(&n).cloned();
 		}
+		self.finish_parameter_retention();
 		let lowered = self.with_rehydration(|w| {
 			let externals = w.externals();
 			let lowerer = Lowerer::new(&*w.s, w.file, &w.tree, &w.a).with_externals(externals);
@@ -328,6 +329,7 @@ impl Walker<'_> {
 			View::ExportValue { value, .. } => value,
 			_ => return Err(Error::Unsupported("this module-level value".into())),
 		};
+		self.finish_parameter_retention();
 		let lowered = self.with_rehydration(|w| {
 			if file == w.file {
 				let externals = w.externals();
@@ -925,6 +927,7 @@ impl Walker<'_> {
 		if self.type_of(iterable).is_unset() {
 			self.check(iterable, None);
 		}
+		self.finish_parameter_retention();
 		let lowered = self.with_rehydration(|w| {
 			let externals = w.externals();
 			let lowerer = Lowerer::new(&*w.s, w.file, &w.tree, &w.a).with_externals(externals);
@@ -1115,6 +1118,7 @@ impl Walker<'_> {
 		if !self.comptime_evaluated.insert(n) {
 			return;
 		}
+		self.finish_parameter_retention();
 		let lowered = self.with_rehydration(|w| {
 			let externals = w.externals();
 			let lowerer = Lowerer::new(&*w.s, w.file, &w.tree, &w.a).with_externals(externals);

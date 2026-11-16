@@ -41,8 +41,9 @@ impl Walker<'_> {
 				let View::Call { callee, .. } = self.view(call) else {
 					return Retention::unknown();
 				};
-				if let Some(keeps) = self.external_argument_retention(callee, index) {
+				if let Some((keeps, unknown)) = self.external_argument_retention(callee, index) {
 					retention.keeps = keeps;
+					retention.unknown = unknown;
 					return retention;
 				}
 				let facts = self.callable_source_facts(callee);
@@ -77,7 +78,11 @@ impl Walker<'_> {
 		retention
 	}
 
-	fn external_argument_retention(&self, mut callee: NodeId, index: usize) -> Option<bool> {
+	fn external_argument_retention(
+		&self,
+		mut callee: NodeId,
+		index: usize,
+	) -> Option<(bool, bool)> {
 		loop {
 			match self.view(callee) {
 				View::Group(inner) => callee = inner,
@@ -94,19 +99,29 @@ impl Walker<'_> {
 				_ => break,
 			}
 		}
-		let Resolution::External(key) = self.a.resolution(callee) else {
-			return None;
+		let (module, declaration) = match self.a.resolution(callee) {
+			Resolution::External(key) => {
+				let module = self.s.types.decl_key_data(key).module;
+				(module, self.s.interface(module)?.keys.get(&key)?.node)
+			}
+			Resolution::Local(symbol) => self.proxy_decl(symbol)?,
+			_ => return None,
 		};
-		let interface = self.s.interface(self.s.types.decl_key_data(key).module)?;
-		let declaration = interface.keys.get(&key)?.node;
-		Some(interface.parameters.get(&declaration)?.get(index)?.kept)
+		let interface = self.s.interface(module)?;
+		let parameter = interface.parameters.get(&declaration)?.get(index)?;
+		Some((parameter.kept, parameter.kept_unknown))
 	}
 
 	/// Solve local forwarding dependencies once, then publish per-parameter
 	/// booleans. A cycle that only borrows retains no parameter.
 	pub(super) fn finish_parameter_retention(&mut self) {
+		let version = self.retention_version;
+		if self.retention_checked_version == Some(version) {
+			return;
+		}
 		let mut origins = FxHashMap::default();
 		let mut kept = FxHashSet::default();
+		let mut unknown = FxHashSet::default();
 		for (value, owner) in self.retention_stores() {
 			kept.extend(
 				self.retention_origins(value, &mut origins)
@@ -140,6 +155,9 @@ impl Walker<'_> {
 			}
 		}
 		for (&call, info) in &self.a.calls {
+			if !self.retention_context_ready(call) {
+				continue;
+			}
 			for (index, argument) in info.arguments.iter().enumerate() {
 				let retention = self.may_callee_keep_argument(call, index);
 				let values = match argument {
@@ -164,20 +182,93 @@ impl Walker<'_> {
 				if retention.keeps {
 					kept.extend(sources.iter().copied());
 				}
+				if retention.unknown {
+					unknown.extend(sources.iter().copied());
+				}
 				for parameter in retention.parameters {
 					dependencies.entry(parameter).or_default().extend(&sources);
 				}
 			}
 		}
-		let mut pending: Vec<_> = kept.iter().copied().collect();
-		while let Some(parameter) = pending.pop() {
-			for &source in dependencies.get(&parameter).into_iter().flatten() {
-				if kept.insert(source) {
-					pending.push(source);
+		propagate_retention(&mut kept, &dependencies);
+		propagate_retention(&mut unknown, &dependencies);
+		self.a.kept_parameters = kept;
+		self.a.unknown_kept_parameters = unknown;
+		self.finish_retained_callback_escapes();
+		self.retention_checked_version = Some(version);
+	}
+
+	fn finish_retained_callback_escapes(&mut self) {
+		let mut values = self.retention_stores();
+		// A retained default must own its callback even when its caller is
+		// another file. It is created on each omitted-argument call.
+		for info in self.a.functions.values() {
+			for param in &info.params {
+				if self.a.kept_parameters.contains(&param.symbol)
+					&& let Some(default) = param.default
+				{
+					values.push((default, None));
 				}
 			}
 		}
-		self.a.kept_parameters = kept;
+		for (value, owner) in values {
+			for function in self.callable_source_facts(value).functions {
+				if !self
+					.a
+					.function(function)
+					.is_some_and(|info| info.sig.is_some())
+				{
+					continue;
+				}
+				if owner.is_none_or(|owner| self.ownership_body(function) == owner) {
+					self.escape_closure(function, value);
+				}
+			}
+		}
+		let mut arguments = Vec::new();
+		for (&call, info) in &self.a.calls {
+			if !self.retention_context_ready(call) {
+				continue;
+			}
+			for (index, argument) in info.arguments.iter().enumerate() {
+				let retention = self.may_callee_keep_argument(call, index);
+				let keeps = retention.keeps
+					|| retention
+						.parameters
+						.iter()
+						.any(|parameter| self.a.kept_parameters.contains(parameter));
+				if !keeps {
+					continue;
+				}
+				let unknown = retention.unknown
+					|| retention
+						.parameters
+						.iter()
+						.any(|parameter| self.a.unknown_kept_parameters.contains(parameter));
+				match argument {
+					Argument::Given(value) => arguments.push((call, *value, unknown)),
+					Argument::Variadic(values) => {
+						arguments.extend(values.iter().map(|&value| (call, value, unknown)))
+					}
+					_ => {}
+				}
+			}
+		}
+		for (call, value, unknown) in arguments {
+			for function in self.callable_source_facts(value).functions {
+				if !self
+					.a
+					.function(function)
+					.is_some_and(|info| info.sig.is_some())
+				{
+					continue;
+				}
+				if unknown {
+					self.unknown_callback_escapes.insert(function, call);
+				}
+				self.escape_closure(function, call);
+			}
+		}
 	}
 
 	fn retention_stores(&self) -> Vec<(NodeId, Option<NodeId>)> {
@@ -218,12 +309,20 @@ impl Walker<'_> {
 			self.a
 				.functions
 				.values()
+				.filter(|info| info.sig.is_some())
 				.map(|info| (info.body, Some(info.lambda))),
 		);
+		values.retain(|(value, _)| self.retention_context_ready(*value));
 		values
 	}
 
-	fn retention_target_outlives_call(&self, target: NodeId, store: NodeId) -> bool {
+	fn retention_context_ready(&self, node: NodeId) -> bool {
+		self.a
+			.function(self.ownership_body(node))
+			.is_none_or(|info| info.sig.is_some())
+	}
+
+	pub(super) fn retention_target_outlives_call(&self, target: NodeId, store: NodeId) -> bool {
 		if !matches!(self.view(target), View::Name(_)) {
 			return true;
 		}
@@ -291,6 +390,20 @@ impl Walker<'_> {
 	}
 }
 
+fn propagate_retention(
+	parameters: &mut FxHashSet<SymbolId>,
+	dependencies: &FxHashMap<SymbolId, Vec<SymbolId>>,
+) {
+	let mut pending: Vec<_> = parameters.iter().copied().collect();
+	while let Some(parameter) = pending.pop() {
+		for &source in dependencies.get(&parameter).into_iter().flatten() {
+			if parameters.insert(source) {
+				pending.push(source);
+			}
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use crate::check::test_support::analyzed;
@@ -298,6 +411,14 @@ mod tests {
 
 	fn retained(source: &str, function: &str) -> Vec<String> {
 		let (session, file) = analyzed(source);
+		retained_in(&session, file, function)
+	}
+
+	fn retained_in(
+		session: &crate::Session,
+		file: crate::ids::FileId,
+		function: &str,
+	) -> Vec<String> {
 		let analysis = session.analysis(file);
 		let symbol = analysis
 			.symbols
@@ -399,5 +520,55 @@ mod tests {
 			interface.hash(session.types()),
 			changed.hash(session.types())
 		);
+	}
+
+	#[test]
+	fn retention_summaries_cross_file_boundaries() {
+		let files = vec![
+			("library/borrow.fa".into(), "type Reader = () => Integer\nexport function = (callback: Reader): Integer => callback()\n".into()),
+			("library/keep.fa".into(), "type Reader = () => Integer\nexport function = (callback: Reader): Reader => callback\n".into()),
+			("library/wrappers.fa".into(), "type Reader = () => Integer\nexport namespace = {\nfunction uses = (callback: Reader): Integer => borrow(callback)\nfunction keeps = (callback: Reader): Reader => keep(callback)\n}\n".into()),
+		];
+		let mut session = crate::Session::new();
+		session.set_resolver(Box::new(crate::CodebaseResolver::from_texts(&files, None)));
+		let program = session.analyze_package(None);
+		for &file in &program.files {
+			let errors: Vec<_> = session
+				.diagnostics(file)
+				.into_iter()
+				.filter(|diagnostic| diagnostic.severity == crate::Severity::Error)
+				.collect();
+			assert!(errors.is_empty(), "{errors:?}");
+		}
+		let file = session.file_of_module("library/wrappers").unwrap();
+		assert!(retained_in(&session, file, "uses").is_empty());
+		assert_eq!(retained_in(&session, file, "keeps"), ["callback"]);
+	}
+
+	#[test]
+	fn a_local_callable_assignment_still_borrows_its_captures() {
+		analyzed("type Reader = () => Integer\nfunction run = (): Integer => {\nmutable count = 0\nfunction add = (): Integer => { count += 1\ncount }\nmutable invoke: Reader = add\nlet saved = invoke\ninvoke = saved\ninvoke()\ncount\n}\n");
+	}
+
+	#[test]
+	fn an_unknown_retention_diagnostic_explains_forwarded_conservatism() {
+		let source = "type Reader = () => Integer\nfunction forward = (operation: (Reader) => Integer, callback: Reader): Integer => operation(callback)\nfunction run = (operation: (Reader) => Integer): Integer => {\nmutable count = 0\nforward(operation, () => { count += 1\ncount })\n}\n";
+		let (session, file) = crate::analyze_source(source);
+		let diagnostics = session.diagnostics(file);
+		let errors: Vec<_> = diagnostics.iter().filter(|diagnostic| diagnostic.severity == crate::Severity::Error).collect();
+		assert_eq!(errors.len(), 1, "{errors:?}");
+		assert_eq!(errors[0].code.id, "REF021");
+		assert!(errors[0].message.contains("`count`"));
+		assert!(errors[0].message.contains("type doesn't say whether it keeps"));
+		assert!(errors[0].message.contains("known borrowing function"));
+	}
+
+	#[test]
+	fn retained_callback_facts_precede_compile_time_execution() {
+		let source = include_str!("../../tests/cases/ownership-retained-callback-snapshot.fa");
+		let (session, file) = analyzed(source);
+		let tree = session.tree(file);
+		let value = session.analysis(file).constants.iter().find(|(node, _)| tree.text(node.index()) == "@snapshot()").unwrap().1;
+		assert_eq!(value.to_text(), "14");
 	}
 }

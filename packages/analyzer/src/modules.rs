@@ -539,6 +539,8 @@ pub struct Parameter {
 	pub only_called: bool,
 	/// Whether the function can retain this parameter's callable data.
 	pub kept: bool,
+	/// Retention depends on a function type without a borrowing guarantee.
+	pub kept_unknown: bool,
 }
 
 /// A declaration of a file as the rest of the program sees it: the
@@ -905,7 +907,8 @@ impl Interface {
 					types.decl_hash(param.key),
 					u128::from(param.has_default)
 						| u128::from(param.only_called) << 1
-						| u128::from(param.kept) << 2,
+						| u128::from(param.kept) << 2
+						| u128::from(param.kept_unknown) << 3,
 					types.stable_hash(param.ty),
 				));
 			}

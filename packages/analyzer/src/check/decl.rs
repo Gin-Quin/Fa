@@ -659,7 +659,9 @@ impl Walker<'_> {
 		// a relation side: written through its direct side (relations.rs)
 		self.check_relation_write(n, target, value);
 		// a closure stored into a place escapes; a copy, maybe a move (moves.rs)
-		self.escape(value, n);
+		if self.retention_target_outlives_call(target, n) {
+			self.escape(value, n);
+		}
 		self.note_copy_site(value);
 		// flow: the value's facts replace the place's (numbers.rs)
 		if place.assignable

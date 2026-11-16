@@ -1,0 +1,19 @@
+-- prints: 14 14
+type Reader = () => Integer
+function borrow = (callback: Reader): Integer => callback()
+function keep = (callback: Reader): Reader => callback
+
+function snapshot = (): Integer => {
+	mutable calls = 0
+	borrow(() => {
+		calls += 1
+		calls
+	})
+	mutable amount = 4
+	let kept = keep(() => amount)
+	amount = 5
+	calls * 10 + kept()
+}
+
+static compiled = @snapshot()
+console.log(compiled, snapshot())

@@ -1565,3 +1565,9 @@ its temporary owner at the statement boundary. Native numeric-constant folding
 therefore excludes instance properties; JavaScript temporary-resource accesses
 include collection length/capacity reads. `None` items use one byte of slot
 storage with no semantic payload, so generic slot addressing retains a stride.
+
+JavaScript in-place writes of resource-containing objects and positional lists
+now drop their old contents and transfer the new ones while retaining the
+outer object/array identity required by `use` aliases. They avoid structural
+copying of unique items. Printing a None-typed effectful expression evaluates
+it before emitting the fixed text `none`, including in interpolation.

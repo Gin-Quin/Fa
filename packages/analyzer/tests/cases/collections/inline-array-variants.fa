@@ -7,6 +7,8 @@ console.log(emptyItems.pop(), emptyItems.length) -- prints: none 1
 emptyItems.delete(0)
 emptyItems.clear()
 console.log(emptyItems) -- prints: []
+emptyItems.push(none)
+console.log("{emptyItems.pop()} {emptyItems.length}") -- prints: none 0
 
 function double = (value: Integer): Integer => value * 2
 mutable callbacks: InlineArray<(Integer) => Integer, 2> = [double]

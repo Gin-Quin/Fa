@@ -72,7 +72,11 @@ impl Generator<'_> {
 			return Piece::Text(text);
 		}
 		match self.types.kind(ty) {
-			TypeKind::None => Piece::Text("none".to_string()),
+			TypeKind::None if value.pure => Piece::Text("none".to_string()),
+			TypeKind::None => Piece::Value(Expr::primary(format!(
+				"({}, \"none\")",
+				value.at(Prec::Assign)
+			))),
 			_ => Piece::Value(self.format_top(value, ty)),
 		}
 	}

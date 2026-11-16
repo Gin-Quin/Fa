@@ -59,3 +59,19 @@ partial() catch _error => console.log("literal failed")
 function temporary = (): InlineArray<Resource, 1> => [Resource { name = "temporary" }]
 console.log(temporary().capacity) -- prints: 1
 -- prints: drop temporary
+
+do {
+	mutable values: InlineArray<Resource, 2> = [Resource { name = "replaced" }]
+	values[0] = Resource { name = "replacement" } -- prints: drop replaced
+	use first = values[0]
+	values.push(Resource { name = "appended" })
+	console.log(first.name) -- prints: replacement
+} -- prints: drop replacement
+-- prints: drop appended
+
+do {
+	mutable values: InlineArray<Resource, 2> = [Resource { name = "old list" }]
+	use alias = values
+	values = [Resource { name = "new list" }] -- prints: drop old list
+	console.log(alias.length, try alias[0].name) -- prints: 1 new list
+} -- prints: drop new list

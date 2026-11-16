@@ -1673,3 +1673,10 @@ New IR tests cover firing on native/wasm and fallback for references and key
 parameters. Programs cover same-key overwrite/take/delete, the sentinel, zero,
 wraparound colliding deletion, mutable keys and named calls that clear/rehash.
 Validation and measured acceptance follow in the continuation report.
+
+Instruction checkpoint: all 36 audit rows pass exact output and unchanged-source
+checks, with none above +1% versus the accepted private-header compiler.
+Lru is 19,070,292 → 19,047,821 Ir (−0.118%); words is unchanged and word-count
+changes by −19 Ir. The complete profile is retained in
+`benchmarks/results/2026-11-16-collections-positive.{json,md}`. Full workspace
+validation is still running; controlled CPU measurements follow after it.

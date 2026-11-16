@@ -1452,3 +1452,7 @@ The shared point-08 fixture exposed that JavaScript `use` ranges of arrays were 
 ## Byte loop integration decision (2026-11-16)
 
 Keep the indexed copy/fill loops in JavaScript until their proof includes more than bounds. For source `data[0..3]` and destination `data[1..4]`, a forward indexed copy of `[1, 2, 3, 4]` gives `[1, 1, 1, 1]`; set(subarray) snapshots and gives `[1, 1, 2, 3]`. Point-08's shared fixture pins the former. A future bulk lowering needs owner/interval relationships and a disjointness or equivalence proof, stable values and no per-iteration observable effects (including calls, suspension/reactivity and zero-iteration evaluation). The missing proof contract is in the performance to-do; no speculative backend-specific proof is duplicated here. This is the explicitly permitted deferral of integration step 5, with no semantic work deferred.
+
+### Chained compile-time string views
+
+The interpreter lowerer shares receiver extraction for calls, method arguments, code-point counts and UTF-8 loops, including grouped flattened field chains. A loaded input can be counted/iterated under an 8 KiB evaluation budget without allocating a result array or encoded Bytes. The regression failed with Memory(8192) before this correction; both paths now pass. A compile-time unrolled iterable retains its ordinary precomputed-array path. No builtin, signature, type, runtime id or flag bit changes.

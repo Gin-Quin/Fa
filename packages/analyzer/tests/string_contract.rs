@@ -545,3 +545,58 @@ fn inclusive_slice_end_is_an_item_and_views_cannot_resize() {
 		NodeFlags::empty(),
 	);
 }
+
+#[test]
+fn chained_string_views_respect_a_small_evaluation_budget() {
+	use fa_analyzer::comptime::lower::Lowerer;
+	use fa_interpreter::ir::{FnKey, Function, GlobalKey};
+	use fa_interpreter::{Error, Host, Interpreter, Limits, Value};
+
+	struct NoHost;
+	impl Host for NoHost {
+		fn function(&mut self, _: FnKey) -> Result<Arc<Function>, Error> {
+			unreachable!("the expression calls only builtins")
+		}
+		fn global(&mut self, _: GlobalKey) -> Result<Value, Error> {
+			unreachable!("the expression has no globals")
+		}
+	}
+
+	let text = "a😀".repeat(2000);
+	for (expression, expected) in [
+		(
+			format!("({{ text = \"{text}\" }}.text.codePoints)().length"),
+			4000,
+		),
+		(
+			format!(
+				"do {{\nmutable total = 0\nfor byte in ({{ text = \"{text}\" }}.text.toUtf8)() {{ total += byte }}\ntotal\n}}"
+			),
+			1552000,
+		),
+	] {
+		let source = format!("let result = {expression}");
+		let (session, file) = analyze_source(&source);
+		assert!(
+			!session
+				.diagnostics(file)
+				.iter()
+				.any(|d| d.severity == Severity::Error)
+		);
+		let tree = session.tree(file);
+		let node = (0..tree.nodes.len())
+			.find(|&node| tree.text(node) == expression)
+			.unwrap();
+		let (expr, slots) = Lowerer::new(&session, file, tree, session.analysis(file))
+			.compile_time_expression(NodeId::new(node))
+			.unwrap();
+		let limits = Limits {
+			memory: 8192,
+			..Limits::default()
+		};
+		assert_eq!(
+			Interpreter::new(&mut NoHost, limits).evaluate(&expr, slots),
+			Ok(Value::int(expected))
+		);
+	}
+}

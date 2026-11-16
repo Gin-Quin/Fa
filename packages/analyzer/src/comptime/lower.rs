@@ -1222,14 +1222,19 @@ impl<'a> Lowerer<'a> {
 		if parallel {
 			return self.unsupported("`for parallel`");
 		}
-		let utf8_source = self
-			.a
-			.has_flags(iterable, NodeFlags::UTF8_ITERATION)
-			.then(|| self.string_call_receiver(iterable))
+		let unrolled = compile_time
+			.then(|| self.a.unrolled.get(&n).cloned())
 			.flatten();
-		let iterable = match (compile_time, self.a.unrolled.get(&n)) {
-			(true, Some(items)) => Expr::Const(Value::array(items.clone())),
-			_ => self.expr(utf8_source.unwrap_or(iterable)),
+		let utf8_source =
+			if unrolled.is_none() && self.a.has_flags(iterable, NodeFlags::UTF8_ITERATION) {
+				self.string_call_receiver(iterable)
+			} else {
+				None
+			};
+		let utf8 = utf8_source.is_some();
+		let iterable = match unrolled {
+			Some(items) => Expr::Const(Value::array(items)),
+			None => utf8_source.unwrap_or_else(|| self.expr(iterable)),
 		};
 		let (item, prologue) = match pattern {
 			Some(pattern) => match syntax::view(self.tree, pattern) {
@@ -1259,7 +1264,7 @@ impl<'a> Lowerer<'a> {
 			Some(prologue) => Expr::Block(vec![prologue, body]),
 			None => body,
 		};
-		if utf8_source.is_some() {
+		if utf8 {
 			Expr::ForUtf8 {
 				item,
 				index: index_slot,
@@ -1367,16 +1372,30 @@ impl<'a> Lowerer<'a> {
 		node
 	}
 
-	fn string_call_receiver(&self, call: NodeId) -> Option<NodeId> {
-		let call = self.strip_groups(call);
-		let View::Call { callee, .. } = syntax::view(self.tree, call) else {
-			return None;
-		};
-		let View::Access { target, members } = syntax::view(self.tree, self.strip_groups(callee))
+	/// The receiver prefix, including flattened field chains and grouped
+	/// direct callees. Share it with the allocation-free string views.
+	fn call_receiver(&mut self, callee: NodeId) -> Option<Expr> {
+		let callee = self.strip_groups(callee);
+		let (View::Access { target, members } | View::OptionalAccess { target, members }) =
+			syntax::view(self.tree, callee)
 		else {
 			return None;
 		};
-		(members.len() == 1).then_some(target)
+		let mut value = self.expr(target);
+		for member in members.iter().take(members.len().saturating_sub(1)) {
+			let View::Name(name) = syntax::view(self.tree, member) else {
+				return None;
+			};
+			value = Expr::Field(value.boxed(), Arc::from(self.tree.name(name)), false);
+		}
+		Some(value)
+	}
+
+	fn string_call_receiver(&mut self, call: NodeId) -> Option<Expr> {
+		let View::Call { callee, .. } = syntax::view(self.tree, self.strip_groups(call)) else {
+			return None;
+		};
+		self.call_receiver(callee)
 	}
 
 	/// `a.b.c`, `a?.b?.c`.
@@ -1390,7 +1409,7 @@ impl<'a> Lowerer<'a> {
 		if self.a.has_flags(n, NodeFlags::CODE_POINT_COUNT)
 			&& let Some(text) = self.string_call_receiver(target)
 		{
-			return Expr::Builtin("String#codePointCount", vec![self.expr(text)]);
+			return Expr::Builtin("String#codePointCount", vec![text]);
 		}
 		// a member whose value the analysis knows (`Int8.maxValue`)
 		if let Some(value) = self.literal_of(n)
@@ -1506,30 +1525,7 @@ impl<'a> Lowerer<'a> {
 		let Some(info) = self.a.call(n).cloned() else {
 			return self.unsupported(format!("`{}`", self.text(callee)));
 		};
-		// the receiver of a method: the callee without its last member
-		let receiver = |lowerer: &mut Self| -> Option<Expr> {
-			match syntax::view(lowerer.tree, callee) {
-				View::Access { target, members } | View::OptionalAccess { target, members } => {
-					if members.len() == 1 {
-						Some(lowerer.expr(target))
-					} else {
-						let mut value = lowerer.expr(target);
-						for member in members.iter().take(members.len() - 1) {
-							let View::Name(name) = syntax::view(lowerer.tree, member) else {
-								return None;
-							};
-							value = Expr::Field(
-								value.boxed(),
-								Arc::from(lowerer.tree.name(name)),
-								false,
-							);
-						}
-						Some(value)
-					}
-				}
-				_ => None,
-			}
-		};
+
 		match info.callee {
 			Callee::Function(declaration) => {
 				let args = self.arguments(&info.arguments, Some(callee));
@@ -1568,7 +1564,7 @@ impl<'a> Lowerer<'a> {
 							None => return self.unsupported(format!("`{path}` on this value")),
 						}
 					} else {
-						match receiver(self) {
+						match self.call_receiver(callee) {
 							Some(value) => values.push(value),
 							None => return self.unsupported(format!("`{path}`")),
 						}
@@ -1698,25 +1694,7 @@ impl<'a> Lowerer<'a> {
 				Argument::Default | Argument::Missing => Arg::Default,
 				Argument::Variadic(items) => Arg::Variadic(self.items(items.iter().copied())),
 				Argument::Receiver(_) => {
-					let receiver =
-						callee.and_then(|callee| match syntax::view(self.tree, callee) {
-							View::Access { target, members }
-							| View::OptionalAccess { target, members } => {
-								let mut value = self.expr(target);
-								for member in members.iter().take(members.len().saturating_sub(1)) {
-									let View::Name(name) = syntax::view(self.tree, member) else {
-										return None;
-									};
-									value = Expr::Field(
-										value.boxed(),
-										Arc::from(self.tree.name(name)),
-										false,
-									);
-								}
-								Some(value)
-							}
-							_ => None,
-						});
+					let receiver = callee.and_then(|callee| self.call_receiver(callee));
 					Arg::Value(receiver.unwrap_or_else(|| self.unsupported("this receiver")))
 				}
 			});

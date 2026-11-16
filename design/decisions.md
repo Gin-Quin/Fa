@@ -1602,3 +1602,8 @@ method selections before checking substituted constraints or creating an
 instance. Imported type-function proxies read their generic lists from the same
 published function metadata as native instances. Split cache generation
 `reference-results-6` invalidates records with the earlier producer semantics.
+
+The existing awaited-task starter regression waits for explicit completion
+through cooperative yields. Elapsed sleeps cannot establish that a detached task
+has resumed under load; all starter-order and live module-value assertions stay
+unchanged.

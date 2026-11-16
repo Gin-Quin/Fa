@@ -1,6 +1,6 @@
 -- require-split: true
 -- file: library/exercise.fa
-export function = <Tag>(tag: Tag, count: Integer<min = 0>): Integer throws IndexError => {
+export function = <Tag>(_tag: Tag, count: Integer<min = 0>): Integer throws IndexError => {
 	mutable items: GrowingArray<Integer> = []
 	for i in 0..count { items.push(i) }
 	mutable total = 0

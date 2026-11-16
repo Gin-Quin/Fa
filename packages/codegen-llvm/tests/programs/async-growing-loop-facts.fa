@@ -1,5 +1,5 @@
 use { sleep } = std.time
-async function build = <Tag>(tag: Tag): GrowingArray<Integer> => {
+async function build = <Tag>(_tag: Tag): GrowingArray<Integer> => {
 	mutable items: GrowingArray<Integer> = []
 	for i in 0..130 {
 		items.push(i)

@@ -560,7 +560,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				};
 				match action {
 					PlaceAction::Read => {
-						Self::done(Self::locate(self.locals(), &resolved)?.clone())
+						Self::done(Self::locate_read(&self.frame().locals, &resolved)?.clone())
 					}
 					PlaceAction::Write(value) => {
 						*Self::locate(self.locals(), &resolved)? = value;
@@ -583,6 +583,17 @@ impl<'i, 'h> Machine<'i, 'h> {
 				}
 			}
 		}
+	}
+
+	fn locate_read<'f>(locals: &'f [Value], place: &ResolvedPlace) -> Result<&'f Value, Flow> {
+		let mut current = &locals[place.slot as usize];
+		for step in &place.steps {
+			current = match step {
+				PlaceStep::Field(name) => builtins::field_ref(current, name)?,
+				PlaceStep::Index(key) => builtins::index_ref(current, key)?,
+			};
+		}
+		Ok(current)
 	}
 
 	fn locate<'f>(locals: &'f mut [Value], place: &ResolvedPlace) -> Result<&'f mut Value, Flow> {
@@ -990,6 +1001,67 @@ mod ownership_tests {
 		fn global(&mut self, _key: GlobalKey) -> Result<Value, Error> {
 			Err(Error::Unsupported("no global in this test".into()))
 		}
+	}
+
+	#[test]
+	fn reading_a_nested_place_preserves_shared_owner_storage() {
+		let expr = Expr::Read(crate::ir::Place {
+			slot: 0,
+			steps: vec![
+				crate::ir::Step::Field(Arc::from("child")),
+				crate::ir::Step::Field(Arc::from("count")),
+			],
+		});
+		let code = Arc::new(Code::expression(&expr, 1, || Ok(())).unwrap());
+		let body = code.body;
+		let mut host = EmptyHost;
+		let mut interpreter = Interpreter::new(&mut host, crate::Limits::default());
+		let mut machine = Machine::new(&mut interpreter, code).unwrap();
+		let child = Arc::new(Object {
+			fields: vec![(Arc::from("count"), Value::int(7))],
+		});
+		let root = Arc::new(Object {
+			fields: vec![(Arc::from("child"), Value::Object(Arc::clone(&child)))],
+		});
+		machine.locals()[0] = Value::Object(Arc::clone(&root));
+		let Ok(Action::Done(Ok(value))) = machine.enter(body) else {
+			panic!("a stored field must be readable");
+		};
+		assert_eq!(value, Value::int(7));
+		let Value::Object(current) = &machine.frame().locals[0] else {
+			panic!("the owner remains an object")
+		};
+		assert!(Arc::ptr_eq(current, &root));
+		let Value::Object(current_child) = current.get("child").unwrap() else {
+			panic!("the child remains an object")
+		};
+		assert!(Arc::ptr_eq(current_child, &child));
+	}
+
+	#[test]
+	fn reading_an_absent_map_key_throws_without_inserting_it() {
+		let code = Arc::new(Code::expression(&Expr::none(), 1, || Ok(())).unwrap());
+		let mut host = EmptyHost;
+		let mut interpreter = Interpreter::new(&mut host, crate::Limits::default());
+		let mut machine = Machine::new(&mut interpreter, code).unwrap();
+		let entries = Arc::new(Vec::new());
+		machine.locals()[0] = Value::Map(Arc::clone(&entries));
+		let result = machine.finish(
+			Finish::Place(
+				Place {
+					slot: 0,
+					steps: vec![Step::Index(0)],
+				},
+				PlaceAction::Read,
+			),
+			vec![Some(Value::String(Arc::from("missing")))],
+		);
+		assert!(matches!(result, Err(Flow::Error(Error::Thrown(_)))));
+		let Value::Map(current) = &machine.frame().locals[0] else {
+			panic!("the owner remains a map")
+		};
+		assert!(Arc::ptr_eq(current, &entries));
+		assert!(current.is_empty());
 	}
 
 	#[test]

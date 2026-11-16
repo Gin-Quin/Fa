@@ -166,10 +166,7 @@ pub fn includes(collection: &Value, value: &Value) -> Result<bool, Error> {
 /// `value.field`.
 pub fn field(value: &Value, name: &str) -> Result<Value, Error> {
 	match value {
-		Value::Object(object) => object
-			.get(name)
-			.cloned()
-			.ok_or_else(|| stop(format!("`{}` has no field `{name}`", value.to_text()))),
+		Value::Object(_) => field_ref(value, name).cloned(),
 		Value::Member(member) => match &member.data {
 			Some(data) => field(data, name),
 			None => Err(stop(format!("`{}` has no field `{name}`", value.to_text()))),
@@ -190,6 +187,25 @@ pub fn field(value: &Value, name: &str) -> Result<Value, Error> {
 		},
 		Value::None => Err(stop(format!("`none` has no field `{name}`"))),
 		other => Err(stop(format!("`{}` has no field `{name}`", other.to_text()))),
+	}
+}
+
+/// An existing stored field. Reading a place never detaches shared storage
+/// or creates an absent field, unlike the assignment walk.
+pub fn field_ref<'v>(value: &'v Value, name: &str) -> Result<&'v Value, Error> {
+	let mut current = value;
+	loop {
+		match current {
+			Value::Object(object) => {
+				return object
+					.get(name)
+					.ok_or_else(|| stop(format!("`{}` has no field `{name}`", value.to_text())));
+			}
+			Value::Member(member) if member.data.is_some() => {
+				current = member.data.as_ref().expect("the member has data");
+			}
+			_ => return Err(stop(format!("`{}` has no field `{name}`", value.to_text()))),
+		}
 	}
 }
 
@@ -273,22 +289,30 @@ pub fn index(value: &Value, index: &Value) -> Result<Value, Error> {
 		};
 	}
 	match value {
-		Value::Array(items) | Value::Tuple(items) => {
-			let index = integer(index)?;
-			Ok(items[position(index, items.len())?].clone())
-		}
-		Value::Map(entries) => map_get(entries, index).cloned().ok_or_else(|| {
-			Error::Thrown(Value::error(
-				"KeyNotFound",
-				vec![("key", Value::String(Arc::from(index.to_text())))],
-			))
-		}),
+		Value::Array(_) | Value::Tuple(_) | Value::Map(_) => index_ref(value, index).cloned(),
 		Value::String(text) => {
 			let index = integer(index)?;
 			let graphemes: Vec<&str> = text.graphemes(true).collect();
 			let position = position(index, graphemes.len())?;
 			Ok(Value::String(Arc::from(graphemes[position])))
 		}
+		other => Err(stop(format!("`{}` can't be indexed", other.to_text()))),
+	}
+}
+
+/// An existing stored item, without copying or inserting a missing key.
+pub fn index_ref<'v>(value: &'v Value, index: &Value) -> Result<&'v Value, Error> {
+	match value {
+		Value::Array(items) | Value::Tuple(items) => {
+			let index = integer(index)?;
+			Ok(&items[position(index, items.len())?])
+		}
+		Value::Map(entries) => map_get(entries, index).ok_or_else(|| {
+			Error::Thrown(Value::error(
+				"KeyNotFound",
+				vec![("key", Value::String(Arc::from(index.to_text())))],
+			))
+		}),
 		other => Err(stop(format!("`{}` can't be indexed", other.to_text()))),
 	}
 }

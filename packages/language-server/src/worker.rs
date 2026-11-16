@@ -591,6 +591,7 @@ mod tests {
 					span: SourceSpan::new(0, 1),
 					related: Vec::new(),
 					unnecessary: false,
+					fixes: Vec::new(),
 				};
 				usize::from(self.texts.contains_key(uri))
 			]

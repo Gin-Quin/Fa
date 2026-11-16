@@ -748,7 +748,7 @@ impl TypeStore {
 		}
 	}
 
-	/// Whether a nominal type declares `destroy` (a resource of foreign code).
+	/// Whether this object type declares `destroy` (not an owned child).
 	pub fn is_resource(&self, ty: TypeId) -> bool {
 		match self.kind(ty) {
 			TypeKind::Object(shape) => self
@@ -757,6 +757,60 @@ impl TypeStore {
 				.is_some_and(|nominal| self.nominal(nominal).kind == NominalKind::Resource),
 			_ => false,
 		}
+	}
+
+	/// Destructors of the possible actual root values, through aliases and
+	/// selected union payloads. Ordinary data fields are not root boundaries.
+	fn resource_roots(&self, ty: TypeId) -> Vec<NominalId> {
+		let mut resources = Vec::new();
+		let mut pending = vec![ty];
+		let mut seen = rustc_hash::FxHashSet::default();
+		while let Some(ty) = pending.pop() {
+			if ty.is_unset() || !seen.insert(ty) {
+				continue;
+			}
+			match self.kind(ty) {
+				TypeKind::Object(shape) => {
+					if let Some(nominal) = self
+						.shape(shape)
+						.nominal
+						.filter(|&n| self.nominal(n).kind == NominalKind::Resource)
+					{
+						resources.push(nominal);
+					}
+				}
+				TypeKind::Rec(_) => pending.extend(self.rec_target(ty)),
+				TypeKind::Union(list) => pending.extend(self.list_items(list)),
+				TypeKind::Member(nominal, index) => pending.push(self.payload(nominal, index)),
+				TypeKind::NamedUnion(nominal, mask) => {
+					for index in 0..self.sym_list(self.nominal(nominal).members).len() as u16 {
+						if self.mask_has(mask, index) {
+							pending.push(self.payload(nominal, index));
+						}
+					}
+				}
+				_ => {}
+			}
+		}
+		resources
+	}
+
+	/// A possible root destructor prevents field extraction until narrowing.
+	pub fn has_destroy_boundary(&self, ty: TypeId) -> bool {
+		!self.resource_roots(ty).is_empty()
+	}
+
+	/// Lifting a whole resource into a union preserves its written owner;
+	/// projecting fields into an unrelated structural value does not.
+	pub fn preserves_resource_owner(&self, actual: TypeId, target: TypeId) -> bool {
+		let targets = self.resource_roots(target);
+		self.resource_roots(actual).iter().all(|&actual| {
+			let actual = self.nominal(actual);
+			targets.iter().any(|&target| {
+				let target = self.nominal(target);
+				actual.key == target.key && actual.args == target.args
+			})
+		})
 	}
 
 	/// Whether owned data contains a resource whose bytes may all be zero.

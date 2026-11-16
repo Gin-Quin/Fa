@@ -446,22 +446,9 @@ impl Walker<'_> {
 			self.report_borrowed_move(operand, symbol);
 			true
 		});
-		// awaiting a field moves it out of its local (foreign.rs)
-		if local.is_none() && !borrowed {
+		// Awaiting transfers a Task, including an already supported field move.
+		if !borrowed {
 			self.move_handles(&[operand]);
-		}
-		// awaiting consumes the task
-		if let Some(symbol) = local
-			&& !borrowed
-			&& self.body.flow.reachable
-			&& !self
-				.body
-				.flow
-				.consumed
-				.iter()
-				.any(|&(other, _)| other == symbol)
-		{
-			self.body.flow.consumed.push((symbol, n));
 		}
 		let acc = &mut self.acc().own;
 		acc.suspends = true;
@@ -755,15 +742,7 @@ impl Walker<'_> {
 					_ => None,
 				})
 				.collect();
-			for value in given {
-				if self.s.types.is_resource(self.a.type_of(value)) {
-					let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value,
-						"this resource cannot transfer a Task-owning projection: its destructor still needs every field; pass the complete resource to a borrowing parameter instead");
-					self.report_flow(diagnostic);
-				} else {
-					self.move_handles(&[value]);
-				}
-			}
+			self.move_handles(&given);
 		}
 		// `pool.submit(task)`: the task is stored until a worker is free, so it
 		// escapes, and its captures are copies (concurrency.md)

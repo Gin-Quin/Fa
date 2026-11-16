@@ -477,6 +477,10 @@ pub struct Walker<'s> {
 	pub(crate) copy_sites: rustc_hash::FxHashSet<NodeId>,
 	/// Runtime owner reads, including references and local-call captures.
 	pub(crate) move_reads: FxHashMap<NodeId, Vec<SymbolId>>,
+	/// Places observed at each read, before later `reuse` changes an alias.
+	pub(crate) move_places: FxHashMap<NodeId, Vec<PlaceId>>,
+	/// Replacements restore ownership at their successful assignment.
+	pub(crate) move_writes: FxHashMap<NodeId, PlaceId>,
 	/// The providers of the requirements of the call being applied.
 	pub(crate) call_providers: Vec<Option<requirements::Provider>>,
 	/// The declared type of the callee's effect path being applied (advanced
@@ -656,6 +660,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		last_uses: FxHashMap::default(),
 		copy_sites: rustc_hash::FxHashSet::default(),
 		move_reads: FxHashMap::default(),
+		move_places: FxHashMap::default(),
+		move_writes: FxHashMap::default(),
 		effect_types: FxHashMap::default(),
 		closure_writes: FxHashMap::default(),
 		rejected_effect_roots: rustc_hash::FxHashSet::default(),

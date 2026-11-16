@@ -1346,7 +1346,7 @@ roots.push(build(2))
 		assert_eq!(expected.as_ref(), Some(&resolved));
 		files.push((
 			"library/escape.fa".into(),
-			"export function = (tree: model.Tree) => {\nlet box = { tree }\nconsole.log(box)\n}"
+			"export function = (tree: model.Tree) => {\nlet box = { tree = copy tree }\nconsole.log(box)\n}"
 				.into(),
 		));
 		let mut session = Session::new();
@@ -1394,7 +1394,7 @@ function build = (depth: Integer): Tree => if depth == 0 {
 	fn a_payload_shape_outside_its_member_is_an_escape() {
 		for suffix in [
 			"type Holder = { left: Tree, right: Tree }\nlet holder = Holder { left = build(0), right = build(0) }\nconsole.log(holder.left)",
-			"function pair = (tree: Tree): { left: Tree, right: Tree } => ({ left = tree, right = tree })\nconsole.log(pair(build(0)))",
+			"function pair = (tree: Tree): { left: Tree, right: Tree } => ({ left = copy tree, right = copy tree })\nconsole.log(pair(build(0)))",
 		] {
 			let (claims, resolved) = facts(&format!("{TREE}\n{suffix}\n"));
 			assert!(resolved.is_empty(), "{claims:#?}");
@@ -1425,14 +1425,14 @@ function build = (depth: Integer): Tree => if depth == 0 {
 	#[test]
 	fn a_builder_cannot_publish_children_into_an_outer_root_array() {
 		for (writes, helper) in [
-			("saved.push(child)", ""),
+			("saved.push(copy child)", ""),
 			(
 				"save(child)",
-				"function save = (tree: Tree) mutates saved => { saved.push(tree) }",
+				"function save = (tree: Tree) mutates saved => { saved.push(copy tree) }",
 			),
 			(
 				"saveInto(saved, child)",
-				"function saveInto = (array: Array<Tree>, tree: Tree) mutates array => { array.push(tree) }",
+				"function saveInto = (array: Array<Tree>, tree: Tree) mutates array => { array.push(copy tree) }",
 			),
 		] {
 			let source = format!(

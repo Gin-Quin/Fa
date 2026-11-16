@@ -706,6 +706,44 @@ impl Walker<'_> {
 		}
 	}
 
+	/// A relation stores a link to an existing element, never an owned
+	/// copy of that element's data. Ordinary owner collections still store
+	/// their inserted values under the normal ownership rule.
+	pub(crate) fn is_relation_link_store(&mut self, value: NodeId) -> bool {
+		let mut value = value;
+		while let Some(parent) = self.parent(value) {
+			match self.view(parent) {
+				View::Group(_) => value = parent,
+				View::Assignment {
+					target,
+					value: Some(stored),
+					..
+				} if stored == value => {
+					let View::Access {
+						target: holder,
+						members,
+					} = self.view(target)
+					else {
+						return false;
+					};
+					let Some(member) = members.last() else {
+						return false;
+					};
+					let holder = members.iter().rev().nth(1).unwrap_or(holder);
+					let field = self.tree.text(member.index()).to_string();
+					return self.side_of(self.type_of(holder), &field).is_some();
+				}
+				View::Call { callee, .. } => {
+					return self
+						.builtin_path(parent, callee)
+						.is_some_and(|path| path.starts_with("RelationPool#"));
+				}
+				_ => return false,
+			}
+		}
+		false
+	}
+
 	// ── pairing ──────────────────────────────────────────────────────────
 
 	/// Pairs the direct and reverse sides of the file into relations

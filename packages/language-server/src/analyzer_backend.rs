@@ -970,6 +970,7 @@ fn resolution_diagnostic(message: &str, severity: Severity) -> FileDiagnostic {
 		span: SourceSpan::new(0, 0),
 		related: Vec::new(),
 		unnecessary: false,
+		fixes: Vec::new(),
 	}
 }
 
@@ -1129,6 +1130,23 @@ impl AnalysisBackend for AnalyzerBackend {
 					.collect(),
 				// unreachable code (values brief §2.5)
 				unnecessary: diagnostic.code.id == "W-DO-2",
+				fixes: diagnostic
+					.fixes
+					.iter()
+					.filter(|fix| fix.edits.iter().all(|edit| edit.location.file == file))
+					.map(|fix| crate::backend::DiagnosticFix {
+						title: fix.title.clone(),
+						edits: fix
+							.edits
+							.iter()
+							.map(|edit| crate::backend::SourceEdit {
+								uri: uri.clone(),
+								span: span(edit.location.span),
+								new_text: edit.replacement.clone(),
+							})
+							.collect(),
+					})
+					.collect(),
 			})
 			.collect();
 		converted.extend(resolution);
@@ -1145,6 +1163,7 @@ impl AnalysisBackend for AnalyzerBackend {
 				span: SourceSpan::new(0, 0),
 				related: Vec::new(),
 				unnecessary: false,
+fixes: Vec::new(),
 			});
 		}
 		converted

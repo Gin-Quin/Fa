@@ -90,6 +90,20 @@ pub struct Location {
 	pub span: SourceSpan,
 }
 
+/// A byte-based source edit. All edits of one fix apply to the original text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextEdit {
+	pub location: Location,
+	pub replacement: String,
+}
+
+/// A complete, machine-applicable correction, never a speculative suggestion.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fix {
+	pub title: String,
+	pub edits: Vec<TextEdit>,
+}
+
 /// A diagnostic: a code, a message written to be acted upon, and related spans.
 #[derive(Clone, Debug)]
 pub struct Diagnostic {
@@ -103,6 +117,8 @@ pub struct Diagnostic {
 	pub location: Location,
 	/// Secondary spans with their notes (the declaration, the invalidating call…).
 	pub related: Vec<(Location, String)>,
+	/// Corrections that can be applied without further author input.
+	pub fixes: Vec<Fix>,
 }
 
 impl Diagnostic {
@@ -111,6 +127,11 @@ impl Diagnostic {
 	pub fn set_file(&mut self, file: crate::ids::FileId) {
 		let old = self.location.file;
 		self.location.file = file;
+		for edit in self.fixes.iter_mut().flat_map(|fix| &mut fix.edits) {
+			if edit.location.file == old {
+				edit.location.file = file;
+			}
+		}
 		for (location, _) in &mut self.related {
 			if location.file == old {
 				location.file = file;
@@ -126,12 +147,19 @@ impl Diagnostic {
 			message: message.into(),
 			location,
 			related: Vec::new(),
+			fixes: Vec::new(),
 		}
 	}
 
 	/// Adds a related span.
 	pub fn with_related(mut self, location: Location, note: impl Into<String>) -> Self {
 		self.related.push((location, note.into()));
+		self
+	}
+
+	/// Adds a complete machine-applicable correction.
+	pub fn with_fix(mut self, fix: Fix) -> Self {
+		self.fixes.push(fix);
 		self
 	}
 

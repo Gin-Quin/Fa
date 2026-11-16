@@ -36,6 +36,21 @@ pub struct FileDiagnostic {
 	pub related: Vec<RelatedInformation>,
 	/// Code that is unused or unreachable: editors fade it out.
 	pub unnecessary: bool,
+	/// Complete corrections supplied by the checker.
+	pub fixes: Vec<DiagnosticFix>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticFix {
+	pub title: String,
+	pub edits: Vec<SourceEdit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceEdit {
+	pub uri: Url,
+	pub span: SourceSpan,
+	pub new_text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,6 +173,7 @@ pub fn parser_diagnostic(uri: &Url, diagnostic: &fa_parser::Diagnostic) -> FileD
 			})
 			.collect(),
 		unnecessary: false,
+		fixes: Vec::new(),
 	}
 }
 

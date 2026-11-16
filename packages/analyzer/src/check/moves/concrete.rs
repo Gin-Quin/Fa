@@ -11,7 +11,8 @@ use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::View;
 
 impl Walker<'_> {
-	pub(super) fn finish_concrete_moves(&mut self) {
+	pub(super) fn finish_concrete_moves(&mut self) -> FxHashMap<NodeId, NodeId> {
+		let mut conflicts = FxHashMap::default();
 		self.collect_store_values();
 		let reads = self.ownership_reads();
 		let mut commits: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
@@ -21,6 +22,13 @@ impl Walker<'_> {
 		let root = NodeId::new(self.tree.root);
 		let mut bodies = vec![root];
 		bodies.extend(self.a.functions.values().map(|info| info.body));
+		bodies.extend(self.a.starts.values().filter_map(|info| info.block));
+		bodies.extend(self.a.watches.values().map(|info| info.body));
+		for index in 0..self.tree.nodes.len() {
+			if let View::Test { body, .. } = self.view(NodeId::new(index)) {
+				bodies.push(body);
+			}
+		}
 		bodies.sort_unstable();
 		bodies.dedup();
 		for body in bodies {
@@ -29,9 +37,14 @@ impl Walker<'_> {
 			for &value in graph.stores.keys() {
 				if matches!(self.view(value), View::Name(_))
 					&& let Resolution::Local(symbol) = self.a.resolution(value)
-					&& self.s.types.is_structure(self.a.type_of(value))
-					&& self.ownership_source_owned(symbol, value)
-				{
+					&& matches!(
+						self.s.types.ownership(
+							self.a
+								.coercion(value)
+								.unwrap_or_else(|| self.a.type_of(value))
+						),
+						crate::types::Ownership::Structure | crate::types::Ownership::Unique
+					) {
 					sources.entry(symbol).or_default().push(value);
 				}
 			}
@@ -39,16 +52,33 @@ impl Walker<'_> {
 				let later = graph.later_uses(symbol);
 				for value in values {
 					let positions = &graph.stores[&value];
-					if positions.iter().any(|&index| graph.reachable[index])
-						&& positions
-							.iter()
-							.all(|&index| !graph.reachable[index] || later[index].is_none())
+					let reachable = positions.iter().any(|&index| graph.reachable[index]);
+					let conflict = positions
+						.iter()
+						.filter(|&&index| graph.reachable[index])
+						.find_map(|&index| later[index]);
+					if let Some(witness) = conflict {
+						conflicts.insert(value, witness);
+					}
+					let actual = self.a.type_of(value);
+					let subject = self.a.coercion(value).unwrap_or(actual);
+					let unique = self.s.types.is_unique(subject);
+					let complete = !self.s.types.has_destroy_boundary(actual)
+						|| self.s.types.preserves_resource_owner(actual, subject);
+					if reachable
+						&& complete && self.ownership_source_owned(symbol, value)
+						&& (unique || conflict.is_none())
 					{
 						self.set_flag(value, NodeFlags::MOVE);
+						if unique {
+							self.a.moved_reads.insert(value);
+						}
 					}
 				}
 			}
+			self.check_move_validity(&graph);
 		}
+		conflicts
 	}
 
 	fn collect_store_values(&mut self) {
@@ -87,7 +117,9 @@ impl Walker<'_> {
 			}
 		}
 		for value in values {
-			self.record_copy_sources(value);
+			if !self.is_relation_link_store(value) {
+				self.record_copy_sources(value);
+			}
 		}
 	}
 
@@ -95,8 +127,15 @@ impl Walker<'_> {
 	/// borrows its nonlocal values, even if they are otherwise owned locals.
 	pub(crate) fn ownership_body(&self, mut node: NodeId) -> NodeId {
 		while let Some(parent) = self.parent(node) {
-			if matches!(self.view(parent), View::Lambda { .. } | View::Test { .. }) {
+			if matches!(
+				self.view(parent),
+				View::Lambda { .. } | View::Test { .. } | View::Watch(_)
+			) {
 				return parent;
+			}
+			if matches!(self.view(node), View::Do(_)) && matches!(self.view(parent), View::Start(_))
+			{
+				return node;
 			}
 			node = parent;
 		}

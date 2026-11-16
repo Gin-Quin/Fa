@@ -19,7 +19,9 @@ use crate::syntax::View;
 use crate::types::TypeKind;
 
 mod concrete;
+mod copies;
 mod graph;
+mod validity;
 
 /// The last use of a local seen so far.
 #[derive(Copy, Clone, Debug)]
@@ -66,6 +68,9 @@ impl Walker<'_> {
 	/// an assignment, of a `return`, an item stored by `push`/`add`.
 	pub(crate) fn note_copy_site(&mut self, value: NodeId) {
 		let value = self.strip_groups(value);
+		if self.is_relation_link_store(value) {
+			return;
+		}
 		// a resource (a type with `destroy`) is moved (foreign.rs)
 		self.note_resource_move(value);
 		self.record_copy_sources(value);
@@ -105,6 +110,22 @@ impl Walker<'_> {
 	/// The use of a name node: a local itself, or the place an alias designates.
 	pub(crate) fn note_name_use(&mut self, n: NodeId, symbol: SymbolId) {
 		let kind = self.a.symbols.symbol(symbol).kind;
+		let places = if matches!(
+			kind,
+			SymbolKind::Use | SymbolKind::MutableUse | SymbolKind::LoopVariable { copy: false }
+		) {
+			let mut places = self
+				.body
+				.flow
+				.ref_state(symbol)
+				.map(|state| self.facts.refs.get(state).places.to_vec())
+				.unwrap_or_default();
+			places.extend(self.aliases.get(&symbol).copied());
+			places
+		} else {
+			vec![self.places.symbol(symbol)]
+		};
+		self.move_places.insert(n, places);
 		match kind {
 			SymbolKind::Let | SymbolKind::Mutable => self.note_use(n, symbol),
 			SymbolKind::Parameter { .. }
@@ -155,7 +176,8 @@ impl Walker<'_> {
 
 	/// At the end of the walk: the `MOVE` flag on each last use that is a copy.
 	pub(crate) fn finish_moves(&mut self) {
-		self.finish_concrete_moves();
+		let conflicts = self.finish_concrete_moves();
+		self.finish_copy_checks(&conflicts);
 		let uses: Vec<(SymbolId, LastUse)> = self
 			.last_uses
 			.iter()

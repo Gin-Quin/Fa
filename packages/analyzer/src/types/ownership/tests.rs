@@ -49,6 +49,26 @@ fn task(types: &mut TypeStore) -> TypeId {
 }
 
 #[test]
+fn destructor_boundaries_survive_only_whole_resource_lifting() {
+	let mut types = TypeStore::new();
+	let task = task(&mut types);
+	let item = field(&mut types, "task", task);
+	let owner = nominal(&mut types, "Owner", NominalKind::Resource, &[]);
+	let resource = types.object(&[item], Some(owner));
+	let facade = types.object(&[item], None);
+	let alternative = types.union(&[resource, TypeId::NONE]);
+	let wrapped = field(&mut types, "owner", resource);
+	let wrapper = types.object(&[wrapped], None);
+	assert!(types.has_destroy_boundary(resource));
+	assert!(types.has_destroy_boundary(alternative));
+	assert!(!types.has_destroy_boundary(wrapper));
+	assert!(types.contains_resource(wrapper));
+	assert!(types.preserves_resource_owner(resource, alternative));
+	assert!(!types.preserves_resource_owner(resource, facade));
+	assert!(!types.preserves_resource_owner(resource, wrapper));
+}
+
+#[test]
 fn ordinary_scalars_literals_and_type_level_values() {
 	let mut types = TypeStore::new();
 	let text = types.string_literal("ordinary");

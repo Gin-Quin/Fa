@@ -1157,6 +1157,7 @@ The rules (memory-management page): objects inline; collections own the heap; ev
 - `MEM001` a recursive type without an indirection through a union or an optional: "`Node` has infinite size" (`next: Node`). Recursion through `T?`, a named union, a collection (`Array<Folder>`) is fine.
 - Recursion is allowed through named declarations only; polymorphic recursion is an error (types brief).
 - A move-only value (task — out of scope —, a `destroy` type, a worker handle, a `Subscription`) used after it was moved: `MEM002` "`database` was moved at line 7".
+- `MEM004` an implicit store would duplicate a structure: write `copy value`, borrow with `use`, or stop using the source so it can move.
 - `MEM005` an error payload owns a unique value: keep an identifier or a description of the resource instead (lead, 2026-11-16). Synchronization handles are allowed; open `Error` is a structure.
 - A `Void` value can't be bound with `let`.
 

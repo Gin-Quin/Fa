@@ -401,6 +401,7 @@ impl Walker<'_> {
 	/// narrows a local of a union type (values brief §14, T-NAR-8).
 	pub(crate) fn assign_value(&mut self, symbol: SymbolId, value: NodeId) {
 		self.bind_or_assign(symbol, value, true);
+		self.reset_consumed(symbol);
 	}
 
 	fn bind_or_assign(&mut self, symbol: SymbolId, value: NodeId, assignment: bool) {

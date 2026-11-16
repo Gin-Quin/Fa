@@ -275,7 +275,7 @@ fn named_union_members() {
 fn enumerations() {
 	let color = "type Color = Enum { red, green }\n";
 	let (session, file) = analyze_source(&format!(
-		"{color}let a = Color.red\nlet b: Color = .green\nlet all = Color.members\nlet name = a.toString()\n"
+		"{color}let a = Color.red\nlet b: Color = .green\nlet all = copy Color.members\nlet name = a.toString()\n"
 	));
 	assert!(
 		session.diagnostics(file).is_empty(),

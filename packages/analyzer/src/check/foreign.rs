@@ -923,8 +923,17 @@ impl Walker<'_> {
 	/// `MEM002`, saying to move the whole value.
 	fn consume_local(&mut self, value: NodeId) {
 		let value = self.strip_groups(value);
-		let ty = self.a.type_of(value);
+		let actual = self.a.type_of(value);
+		let ty = self.a.coercion(value).unwrap_or(actual);
 		if !self.body.flow.reachable || !self.s.types.is_unique(ty) {
+			return;
+		}
+		if self.s.types.has_destroy_boundary(actual)
+			&& !self.s.types.preserves_resource_owner(actual, ty)
+		{
+			let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value,
+				"this resource cannot transfer an owning projection: its destructor still needs every field; move the complete resource instead");
+			self.report_flow(diagnostic);
 			return;
 		}
 		let tree = std::sync::Arc::clone(&self.tree);
@@ -954,11 +963,8 @@ impl Walker<'_> {
 			self.report_borrowed_move(value, symbol);
 			return;
 		}
-		// the backends make the place give the value up (`moved_reads`)
-		if owned && self.s.types.is_unique(ty) {
-			self.a.moved_reads.insert(value);
-		}
 		if root == value {
+			self.a.moved_reads.insert(value);
 			if owned
 				&& !self
 					.body
@@ -977,7 +983,7 @@ impl Walker<'_> {
 			let holders = std::iter::once(root).chain(members.iter().take(count - 1));
 			let resource = holders
 				.into_iter()
-				.find(|&holder| self.s.types.is_resource(self.a.type_of(holder)));
+				.find(|&holder| self.s.types.has_destroy_boundary(self.a.type_of(holder)));
 			if let Some(resource) = resource {
 				let text = tree.text(value.index()).to_string();
 				let name = tree.text(resource.index()).to_string();
@@ -994,6 +1000,7 @@ impl Walker<'_> {
 			self.report_borrowed_move(value, symbol);
 			return;
 		}
+		self.a.moved_reads.insert(value);
 		if let Some(place) = self.place_of(value)
 			&& !self
 				.body
@@ -1100,6 +1107,11 @@ impl Walker<'_> {
 	/// A field assigned again (`holder.task = …`), or its local as a whole:
 	/// its moved fields are back.
 	pub(crate) fn restore_moved_fields(&mut self, target: NodeId) {
+		if let Some(place) = self.place_of(target)
+			&& let Some(assignment) = self.parent(target)
+		{
+			self.move_writes.insert(assignment, place);
+		}
 		if self.body.flow.moved_fields.is_empty() {
 			return;
 		}

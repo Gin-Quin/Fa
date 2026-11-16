@@ -250,6 +250,7 @@ impl Walker<'_> {
 			return;
 		}
 		let target = self.strip_groups(target);
+		self.move_handles(&[target]);
 		if let Resolution::Local(symbol) = self.a.resolution(target)
 			&& !self
 				.body
@@ -274,6 +275,18 @@ impl Walker<'_> {
 	pub(crate) fn check_consumed(&mut self, n: NodeId) {
 		if !self.body.flow.reachable {
 			return;
+		}
+		let mut target = n;
+		while let Some(parent) = self.parent(target) {
+			if matches!(self.view(parent), View::Group(_)) {
+				target = parent;
+				continue;
+			}
+			if matches!(self.view(parent), View::Assignment { target: written, .. } if written == target)
+			{
+				return;
+			}
+			break;
 		}
 		let Resolution::Local(symbol) = self.a.resolution(n) else {
 			return;

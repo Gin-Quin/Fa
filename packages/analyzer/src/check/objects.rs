@@ -880,6 +880,7 @@ impl Walker<'_> {
 		self.revalidate_fields(target, members);
 		// a field moved out of its local (foreign.rs)
 		self.check_moved_fields(n, target, false);
+		self.note_place_read(n);
 		ty
 	}
 

@@ -201,6 +201,42 @@ impl Report {
 				if let Some(target) = &entry.target {
 					let _ = write!(out, ",\"target\":{}", json_string(target));
 				}
+				let fixes: Vec<_> = diagnostic
+					.fixes
+					.iter()
+					.filter(|fix| {
+						fix.edits
+							.iter()
+							.all(|edit| edit.location.file == diagnostic.location.file)
+					})
+					.collect();
+				if !fixes.is_empty() {
+					out.push_str(",\"fixes\":[");
+					for (index, fix) in fixes.iter().enumerate() {
+						if index != 0 {
+							out.push(',');
+						}
+						let _ = write!(out, "{{\"title\":{},\"edits\":[", json_string(&fix.title));
+						for (index, edit) in fix.edits.iter().enumerate() {
+							if index != 0 {
+								out.push(',');
+							}
+							let span = edit.location.span;
+							let (start_line, start_column) = source.position(span.start);
+							let (end_line, end_column) = source.position(span.end);
+							let _ = write!(
+								out,
+								"{{\"file\":{},\"span\":{{\"start\":{},\"end\":{}}},\"range\":{{\"start\":{{\"line\":{start_line},\"column\":{start_column}}},\"end\":{{\"line\":{end_line},\"column\":{end_column}}}}},\"replacement\":{}}}",
+								json_string(&file.path),
+								span.start,
+								span.end,
+								json_string(&edit.replacement)
+							);
+						}
+						out.push_str("]}");
+					}
+					out.push(']');
+				}
 				out.push_str("}\n");
 			}
 		}
@@ -294,5 +330,25 @@ mod tests {
 		assert_eq!(summary(0, 0), None);
 		assert_eq!(summary(1, 0).as_deref(), Some("1 error"));
 		assert_eq!(summary(2, 1).as_deref(), Some("2 errors, 1 warning"));
+	}
+
+	#[test]
+	fn json_preserves_machine_applicable_copy_edits() {
+		let source = "let items = [1]\nlet duplicate = items\nconsole.log(items, duplicate)\n";
+		let (session, file) = fa_analyzer::analyze_source(source);
+		let mut report = Report::default();
+		report.file("main.fa", source, session.diagnostics(file));
+		let json = report.json();
+		assert_eq!(json.lines().count(), 1, "{json}");
+		assert!(json.contains("\"code\":\"MEM004\""), "{json}");
+		assert!(
+			json.contains("\"fixes\":[{\"title\":\"Make an independent copy of `items`\""),
+			"{json}"
+		);
+		assert!(
+			json.contains("\"file\":\"main.fa\",\"span\":{\"start\":32,\"end\":32}"),
+			"{json}"
+		);
+		assert!(json.contains("\"replacement\":\"copy \""), "{json}");
 	}
 }

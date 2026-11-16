@@ -9,16 +9,17 @@ use fa_parser::SourceSpan;
 use tokio::sync::{mpsc, oneshot};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
-	CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-	DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
-	DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-	DocumentFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FileSystemWatcher,
-	FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability, GlobPattern,
-	GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
-	HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, Location,
-	MarkupContent, MarkupKind, MessageType, OneOf, Range, Registration, SelectionRange,
-	SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
-	SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+	CodeActionParams, CodeActionProviderCapability, CodeActionResponse, CompletionOptions,
+	CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+	DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
+	DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
+	DocumentSymbolParams, DocumentSymbolResponse, FileSystemWatcher, FoldingRange,
+	FoldingRangeParams, FoldingRangeProviderCapability, GlobPattern, GotoDefinitionParams,
+	GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
+	InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent, MarkupKind,
+	MessageType, OneOf, Range, Registration, SelectionRange, SelectionRangeParams,
+	SelectionRangeProviderCapability, SemanticTokens, SemanticTokensFullOptions,
+	SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
 	SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
 	TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url,
 	WorkDoneProgressOptions,
@@ -27,7 +28,9 @@ use tower_lsp::{Client, LanguageServer, LspService};
 
 use crate::analyzer_backend::AnalyzerBackend;
 use crate::backend::AnalysisBackend;
-use crate::features::{completion, folding, formatting, selection, semantic_tokens, symbols};
+use crate::features::{
+	completion, diagnostics, folding, formatting, selection, semantic_tokens, symbols,
+};
 use crate::line_index::{LineIndex, PositionEncoding};
 use crate::worker::{self, Message, Options, Outgoing, QueryContext};
 
@@ -135,6 +138,7 @@ pub fn capabilities(encoding: PositionEncoding) -> ServerCapabilities {
 			..Default::default()
 		}),
 		document_formatting_provider: Some(OneOf::Left(true)),
+		code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
 		..Default::default()
 	}
 }
@@ -390,6 +394,27 @@ impl LanguageServer for FaLanguageServer {
 					offset,
 					names,
 				))
+			})
+			.await)
+	}
+
+	async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+		Ok(self
+			.query(params.text_document.uri, move |context| {
+				context
+					.backend
+					.diagnostics(context.uri)
+					.iter()
+					.flat_map(|diagnostic| {
+						diagnostics::code_actions(
+							diagnostic,
+							context.document,
+							params.range,
+							context.encoding,
+							|uri| context.documents.get(uri),
+						)
+					})
+					.collect()
 			})
 			.await)
 	}

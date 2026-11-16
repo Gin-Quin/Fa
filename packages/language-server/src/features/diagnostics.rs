@@ -1,8 +1,9 @@
 //! Conversion of the backend's diagnostics (byte spans) to LSP diagnostics.
 
 use tower_lsp::lsp_types::{
-	Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DiagnosticTag, Location,
-	NumberOrString, Url,
+	CodeAction, CodeActionKind, CodeActionOrCommand, Diagnostic, DiagnosticRelatedInformation,
+	DiagnosticSeverity, DiagnosticTag, Location, NumberOrString, Range, TextEdit, Url,
+	WorkspaceEdit,
 };
 
 use crate::backend::{FileDiagnostic, Severity};
@@ -54,6 +55,45 @@ pub fn to_lsp_diagnostic<'a>(
 	}
 }
 
+/// Checker-provided fixes only; the editor applies all edits as one action.
+pub fn code_actions<'a>(
+	diagnostic: &FileDiagnostic,
+	document: &Document,
+	range: Range,
+	encoding: PositionEncoding,
+	find_document: impl Fn(&Url) -> Option<&'a Document>,
+) -> Vec<CodeActionOrCommand> {
+	let converted = to_lsp_diagnostic(diagnostic, document, encoding, &find_document);
+	if converted.range.start > range.end || range.start > converted.range.end {
+		return Vec::new();
+	}
+	diagnostic
+		.fixes
+		.iter()
+		.filter_map(|fix| {
+			let mut changes = std::collections::HashMap::<Url, Vec<TextEdit>>::new();
+			for edit in &fix.edits {
+				let document = find_document(&edit.uri)?;
+				changes.entry(edit.uri.clone()).or_default().push(TextEdit {
+					range: document.range(edit.span, encoding),
+					new_text: edit.new_text.clone(),
+				});
+			}
+			Some(CodeActionOrCommand::CodeAction(CodeAction {
+				title: fix.title.clone(),
+				kind: Some(CodeActionKind::QUICKFIX),
+				diagnostics: Some(vec![converted.clone()]),
+				edit: Some(WorkspaceEdit {
+					changes: Some(changes),
+					..Default::default()
+				}),
+				is_preferred: Some(true),
+				..Default::default()
+			}))
+		})
+		.collect()
+}
+
 #[cfg(test)]
 mod tests {
 	use fa_parser::SourceSpan;
@@ -74,6 +114,7 @@ mod tests {
 			span,
 			related: Vec::new(),
 			unnecessary: false,
+			fixes: Vec::new(),
 		}
 	}
 
@@ -159,5 +200,70 @@ mod tests {
 		assert_eq!(related[1].location.uri, uri("b.fa"));
 		assert_eq!(related[1].location.range.start, Position::new(1, 0));
 		assert_eq!(converted.range.start, Position::new(1, 0));
+	}
+
+	#[test]
+	fn a_copy_fix_uses_editor_positions_and_is_filtered_by_range() {
+		use crate::backend::AnalysisBackend;
+		use std::sync::Arc;
+		let uri = uri("ownership.fa");
+		let source = "let items = [1]\nlet duplicate = items\nconsole.log(items, duplicate)\n";
+		let document = Document::new(source.into(), 1);
+		let mut backend = crate::analyzer_backend::AnalyzerBackend::new();
+		backend.set_document(&uri, Arc::from(source));
+		let diagnostics = backend.diagnostics(&uri);
+		let diagnostic = diagnostics
+			.iter()
+			.find(|diagnostic| diagnostic.code.as_deref() == Some("MEM004"))
+			.unwrap();
+		let range = Range::new(Position::new(1, 16), Position::new(1, 21));
+		let actions = code_actions(
+			diagnostic,
+			&document,
+			range,
+			PositionEncoding::Utf16,
+			|found| (found == &uri).then_some(&document),
+		);
+		let [CodeActionOrCommand::CodeAction(action)] = actions.as_slice() else {
+			panic!("{actions:?}")
+		};
+		let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri];
+		assert_eq!(
+			edits,
+			&[TextEdit {
+				range: Range::new(range.start, range.start),
+				new_text: "copy ".into()
+			}]
+		);
+		let mut fixed = source.to_string();
+		let start = document.offset(edits[0].range.start, PositionEncoding::Utf16);
+		fixed.insert_str(start, &edits[0].new_text);
+		backend.set_document(&uri, Arc::from(fixed));
+		assert!(
+			backend
+				.diagnostics(&uri)
+				.iter()
+				.all(|diagnostic| diagnostic.severity != Severity::Error)
+		);
+		assert!(
+			code_actions(
+				diagnostic,
+				&document,
+				Range::default(),
+				PositionEncoding::Utf16,
+				|_| Some(&document)
+			)
+			.is_empty()
+		);
+		assert!(
+			code_actions(
+				diagnostic,
+				&document,
+				range,
+				PositionEncoding::Utf16,
+				|_| None
+			)
+			.is_empty()
+		);
 	}
 }

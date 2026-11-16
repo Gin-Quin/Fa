@@ -1091,7 +1091,8 @@ console.log(try equal("é", 0), try choose("a", 0))
 		);
 		for name in ["fa.equal", "fa.choose"] {
 			let body = function(&ir, name);
-			assert!(body.contains("@fa_string_code_unit_at("), "{body}");
+			assert!(body.contains("@fa_string_code_unit_fallback("), "{body}");
+			assert!(body.contains("load i8"), "{body}");
 			assert!(!body.contains("@fa_string_get("), "{body}");
 		}
 	}

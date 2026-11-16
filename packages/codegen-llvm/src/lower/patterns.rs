@@ -268,12 +268,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(None);
 		};
 		let length = texts[0].len();
+		let units = texts[0].encode_utf16().count();
 		let simple = |text: &str| text.is_ascii();
 		if texts.len() != count + 1
-			|| texts
-				.iter()
-				.any(|text| text.len() != length || simple(text) != simple(texts[0]))
-		{
+			|| texts.iter().any(|text| {
+				text.len() != length
+					|| simple(text) != simple(texts[0])
+					|| text.encode_utf16().count() != units
+			}) {
 			return Ok(None);
 		}
 		let packed: String = texts.concat();
@@ -311,9 +313,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			1,
 			"",
 		)?;
-		let value = self
-			.builder
-			.build_insert_value(value, self.static_capacity(&packed), 2, "")?;
+		let value =
+			self.builder
+				.build_insert_value(value, self.static_capacity(texts[0]), 2, "")?;
 		Ok(Some(Val::new(Repr::Str, value.into_struct_value())))
 	}
 
@@ -363,7 +365,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(subject);
 		}
 		if repr == Repr::Str
-			&& subject.repr == Repr::Str
 			&& let Some(value) = self.packed_literal_choice(&list, subject)?
 		{
 			return Ok(value);

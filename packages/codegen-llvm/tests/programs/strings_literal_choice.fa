@@ -1,0 +1,10 @@
+function ascii = (index: Integer): String => when index is { 0 => " + ", 1 => " - ", else => " / " }
+function unicode = (index: Integer): String => when index is { 0 => "éé", 1 => "😀", else => "a日" }
+function differing = (index: Integer): String => when index is { 0 => "éé", 1 => "éab", else => "😀" }
+for index in -1..3 {
+	console.log(ascii(index).length, unicode(index).length, differing(index).length)
+}
+-- prints: 3 2 2
+-- prints: 3 2 2
+-- prints: 3 2 3
+-- prints: 3 2 2

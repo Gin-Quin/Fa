@@ -3594,20 +3594,17 @@ static __attribute__((noinline)) int64_t string_code_unit_slow(const uint8_t *te
 	return unit_at_position(text, length, unit_position(text, length, capacity, (size_t)index));
 }
 
-static __attribute__((noinline, cold)) int64_t string_ascii_negative_unit(const uint8_t *text,
+/// The lowering keeps the checked ASCII load separate from this fallback,
+/// so a missing-unit sentinel never enters the successful byte path.
+static __attribute__((noinline, cold)) int64_t string_ascii_unit_fallback(const uint8_t *text,
     size_t length, int64_t index) {
-	index += (int64_t)length;
+	if (index < 0) { index += (int64_t)length; }
 	return (uint64_t)index < length ? text[index] : -1;
 }
 
-/// -1 denotes a missing code unit, including a negative index before the start.
-FA_EXPORT __attribute__((always_inline)) int64_t fa_string_code_unit_at(const uint8_t *text,
+FA_EXPORT __attribute__((always_inline)) int64_t fa_string_code_unit_fallback(const uint8_t *text,
     size_t length, size_t capacity, int64_t index) {
-	if (capacity & SIMPLE) {
-		if (__builtin_expect((uint64_t)index < length, 1)) { return text[index]; }
-		if (index >= 0) { return -1; }
-		return string_ascii_negative_unit(text, length, index);
-	}
+	if (capacity & SIMPLE) { return string_ascii_unit_fallback(text, length, index); }
 	return string_code_unit_slow(text, length, capacity, index);
 }
 

@@ -16553,52 +16553,40 @@ define void @fa_string_read_arena_view(ptr noundef %0, i64 noundef %1, i64 nound
 }
 
 ; Function Attrs: alwaysinline nounwind optsize
-define i64 @fa_string_code_unit_at(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3) local_unnamed_addr #12 {
+define i64 @fa_string_code_unit_fallback(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3) local_unnamed_addr #12 {
   %5 = icmp sgt i64 %2, -1
-  br i1 %5, label %16, label %6
+  br i1 %5, label %8, label %6
 
 6:                                                ; preds = %4
-  %7 = icmp ult i64 %3, %1
-  br i1 %7, label %8, label %12, !prof !100
+  %7 = tail call fastcc i64 @string_ascii_unit_fallback(ptr noundef %0, i64 noundef %1, i64 noundef %3) #65, !range !159
+  br label %10
 
-8:                                                ; preds = %6
-  %9 = getelementptr inbounds i8, ptr %0, i64 %3
-  %10 = load i8, ptr %9, align 1, !tbaa !13
-  %11 = zext i8 %10 to i64
-  br label %18
+8:                                                ; preds = %4
+  %9 = tail call fastcc i64 @string_code_unit_slow(ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3) #64, !range !160
+  br label %10
 
-12:                                               ; preds = %6
-  %13 = icmp sgt i64 %3, -1
-  br i1 %13, label %18, label %14
-
-14:                                               ; preds = %12
-  %15 = tail call fastcc i64 @string_ascii_negative_unit(ptr noundef %0, i64 noundef %1, i64 noundef %3) #65, !range !159
-  br label %18
-
-16:                                               ; preds = %4
-  %17 = tail call fastcc i64 @string_code_unit_slow(ptr noundef %0, i64 noundef %1, i64 noundef %2, i64 noundef %3) #64, !range !160
-  br label %18
-
-18:                                               ; preds = %12, %16, %14, %8
-  %19 = phi i64 [ %11, %8 ], [ %15, %14 ], [ %17, %16 ], [ -1, %12 ]
-  ret i64 %19
+10:                                               ; preds = %8, %6
+  %11 = phi i64 [ %7, %6 ], [ %9, %8 ]
+  ret i64 %11
 }
 
 ; Function Attrs: cold mustprogress nofree noinline norecurse nosync nounwind optsize willreturn memory(argmem: read)
-define internal fastcc i64 @string_ascii_negative_unit(ptr nocapture noundef readonly %0, i64 noundef %1, i64 noundef %2) unnamed_addr #37 {
-  %4 = add nsw i64 %2, %1
-  %5 = icmp ult i64 %4, %1
-  br i1 %5, label %6, label %10
+define internal fastcc i64 @string_ascii_unit_fallback(ptr nocapture noundef readonly %0, i64 noundef %1, i64 noundef %2) unnamed_addr #37 {
+  %4 = icmp slt i64 %2, 0
+  %5 = select i1 %4, i64 %1, i64 0
+  %6 = add nsw i64 %5, %2
+  %7 = icmp ult i64 %6, %1
+  br i1 %7, label %8, label %12
 
-6:                                                ; preds = %3
-  %7 = getelementptr inbounds i8, ptr %0, i64 %4
-  %8 = load i8, ptr %7, align 1, !tbaa !13
-  %9 = zext i8 %8 to i64
-  br label %10
+8:                                                ; preds = %3
+  %9 = getelementptr inbounds i8, ptr %0, i64 %6
+  %10 = load i8, ptr %9, align 1, !tbaa !13
+  %11 = zext i8 %10 to i64
+  br label %12
 
-10:                                               ; preds = %3, %6
-  %11 = phi i64 [ %9, %6 ], [ -1, %3 ]
-  ret i64 %11
+12:                                               ; preds = %3, %8
+  %13 = phi i64 [ %11, %8 ], [ -1, %3 ]
+  ret i64 %13
 }
 
 ; Function Attrs: noinline nounwind optsize

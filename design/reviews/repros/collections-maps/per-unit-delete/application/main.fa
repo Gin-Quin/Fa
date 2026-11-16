@@ -1,0 +1,7 @@
+export function = (): Integer => {
+	mutable map: Map<Int64, Int64> = [(0, 10), (-1, 20), (9223372036854775807, 30)]
+	library.prune(map)
+	assert map.size == 0
+	console.log("per-unit ok")
+	0
+}

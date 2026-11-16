@@ -1,0 +1,16 @@
+-- asynchronous: false
+function make = (key: Int64): Map<Int64, Int64> => {
+	mutable map: Map<Int64, Int64> = [(-1, Int64.maxValue), (0, Int64.minValue)]
+	map[key] = 42
+	map.reserve(100)
+	map.delete(0)
+	map
+}
+let built = @make(Int64.minValue)
+let runtime = make(Int64.minValue)
+assert built.size == 2
+assert built.get(-1) == Int64.maxValue
+assert built.get(Int64.minValue) == Int64(42)
+assert built.get(0) is none
+assert built == runtime
+console.log("compile-time ok") -- prints: compile-time ok

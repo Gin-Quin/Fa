@@ -37,7 +37,17 @@ DEFAULTS = {
 # items never move, like Goose's `u8[>..]` arrays.
 VARIANTS = {"string-building-bytes": ("string-building", "bytes.fa"),
             "string-building-growing": ("string-building", "growing.fa"),
-            "growing-index-array": ("growing-index", "array.fa")}
+            "growing-index-array": ("growing-index", "array.fa"),
+            "push-array": ("push", "array.fa"),
+            "sum-reserved": ("sum", "reserved.fa"),
+            "particles-reserved": ("particles", "reserved.fa"),
+            "blur-reserved": ("blur", "reserved.fa"),
+            "respond-interpolation": ("respond", "interpolation.fa"),
+            "lru-open": ("lru", "open.fa"),
+            "words-wide": ("words", "wide.fa")}
+# A structural variant can have its own matching Rust row. The selected entry
+# is copied as main.rs; alternate entries never pollute another row's manifest.
+RUST_VARIANTS = {"lru-open": "open.rs", "words-wide": "wide.rs"}
 DEFAULTS.update({name: DEFAULTS[directory] for name, (directory, _) in VARIANTS.items()})
 AUDIT = {name: int(size) for name, size in
          (line.split() for line in Path(__file__).with_name("sizes.txt").read_text().splitlines())}
@@ -202,7 +212,12 @@ def plan(name, size, compilers, runtime_size=False):
     goose["main.goose"] = goose_source_at_size((source / "main.goose").read_text(),
                                               size, runtime_size).encode()
     goose_constant = SIZE_LINE.search(goose["main.goose"].decode()) is not None
-    rust = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*.rs")}
+    alternate_rust = {entry for variant, entry in RUST_VARIANTS.items()
+                      if VARIANTS[variant][0] == source.name}
+    rust = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*.rs")
+            if path.name not in alternate_rust}
+    if name in RUST_VARIANTS:
+        rust["main.rs"] = (source / RUST_VARIANTS[name]).read_bytes()
     inputs = {"fa": fa, "goose": goose, "rust": rust}
     flags = {"fa": FA_FLAGS, "goose": [*GOOSE_FLAGS, "--cc",
              compilers["goose"]["c_compiler"]["path"], "--stdlib",
@@ -400,6 +415,8 @@ def main():
     parser.add_argument("--markdown", type=Path)
     parser.add_argument("--update-readme", action="store_true",
                         help="With --render, replace only the generated README result block")
+    parser.add_argument("--require-control", action="store_true",
+                        help="With --render, require a passing control for every CPU verdict")
     parser.add_argument("--supplemental", action="store_true",
                         help="Retain this diagnostic series in JSON without replacing headline table rows")
     parser.add_argument("--secondary-memory-mib", type=int, default=512)
@@ -407,8 +424,11 @@ def main():
                         help="Interleave an already prepared Fa variant (one selected benchmark, CPU mode)")
     args = parser.parse_args()
     if args.render:
-        tables.render(args.render, args.report, args.markdown, args.update_readme)
+        tables.render(args.render, args.report, args.markdown, args.update_readme,
+                      require_control=args.require_control)
         return
+    if args.require_control:
+        parser.error("--require-control requires --render")
     if args.update_readme:
         parser.error("--update-readme requires --render")
     if not args.directory:
@@ -514,7 +534,7 @@ def main():
             elif args.mode == "profile":
                 for side in commands:
                     location = directory / ("rust-profile" if side == "rust" else side)
-                    repetitions = 3 if side == "rust" and name in ("lru", "words", "word-count") else 1
+                    repetitions = 3 if side == "rust" and name in ("lru", "words", "words-wide", "word-count") else 1
                     profiles = [profile(commands[side], location / f"run-{index}", expected)
                                 for index in range(repetitions)]
                     result[side] = sorted(profiles, key=lambda item: item["events"]["Ir"])[repetitions // 2]

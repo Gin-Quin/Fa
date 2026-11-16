@@ -8,6 +8,28 @@ import tables
 
 
 class PublishedTables(unittest.TestCase):
+    def test_strict_control_changes_only_the_published_verdict_and_survives_render(self):
+        stats = dict(ratio_of_medians=.9, median=.91, q1=.89, q3=.92, verdict='goal met')
+        cpu = dict(size=10, control=dict(ratio_of_medians=1.04, median=1, passes=False),
+                   comparisons=dict(goose=stats, rust=stats))
+        phase = dict(schema=2, mode='cpu', size_set='default', start=dict(utc='2026-11-16'),
+                     benchmarks=dict(example=cpu))
+        self.assertIn('goal met / goal met', tables.markdown(dict(series=[phase])))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, result, rendered = (root / name for name in ('phase.json', 'result.json', 'result.md'))
+            source.write_text(json.dumps(phase))
+            tables.render([source], result, rendered, require_control=True)
+            first = rendered.read_text()
+            self.assertIn('not resolved / not resolved', first)
+            self.assertNotIn('goal met / goal met', first)
+            self.assertEqual(json.loads(result.read_text())['series'], [phase])
+            tables.render([result], result, rendered)
+            self.assertEqual(rendered.read_text(), first)
+        cpu['control'] = dict(ratio_of_medians=1, median=1, passes=True)
+        output = tables.markdown(dict(series=[phase], require_control=True))
+        self.assertIn('goal met / goal met', output)
+
     def test_generated_block_is_repeatable_and_preserves_all_other_content(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

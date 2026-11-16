@@ -39,8 +39,8 @@ pub(crate) struct Table<'ctx> {
 	/// no reference into its values outlives an insertion ([`Lowering::dense_map`]).
 	pub dense: bool,
 	/// A dense map of small entries stored in its probe array itself
-	/// (`TABLE_INLINE` of the runtime): integer keys and fields of at most
-	/// 32 bits, and no `deleteWhere` on maps of its type.
+	/// (`TABLE_INLINE` of the runtime): integer keys and scalar fields of at most
+	/// 64 bits, and no `deleteWhere` on maps of its type.
 	pub inline: bool,
 }
 
@@ -48,8 +48,10 @@ pub(crate) struct Table<'ctx> {
 const TABLE_DENSE: u64 = 1 << 40;
 /// `TABLE_INLINE` of the runtime: a flag of `entry_size`.
 const TABLE_INLINE: u64 = 1 << 41;
-/// A 32-bit key occupies its own presence word (`0` in a spare slot).
+/// A 32-bit key occupies its own presence word (all ones has a spare slot).
 const TABLE_INLINE_KEY32: u64 = 1 << 42;
+/// A 64-bit key occupies its own presence word (all ones has a spare slot).
+const TABLE_INLINE_KEY64: u64 = 1 << 43;
 /// `TABLE_CHUNK_SLOTS` of the runtime: the entries of a chunk.
 pub(crate) const TABLE_CHUNK_SLOTS: u64 = 32;
 /// `storage` of a table in read-only data: nothing in it is dropped.
@@ -135,9 +137,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// whether its key is its own presence word (`inline_stride` of the
 	/// runtime).
 	pub(crate) fn inline_slot(&self, table: Table<'ctx>) -> (u64, bool) {
-		let key32 = matches!(table.key, Repr::Int(int) if int.bits == 32);
+		let own_key = matches!(table.key, Repr::Int(int) if matches!(int.bits, 32 | 64));
 		let entry = self.collection_data_size(table.entry.into());
-		(if key32 { entry } else { entry + 4 }, key32)
+		// A wide value needs an aligned entry after the 32-bit hash tag.
+		let prefix = if own_key {
+			0
+		} else if entry > 8 {
+			8
+		} else {
+			4
+		};
+		(entry + prefix, own_key)
 	}
 
 	/// The bytes of the block `fa_table_local` lays a table of `capacity`
@@ -147,8 +157,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let header = self.collection_data_size(self.table_header().into());
 		let slots = Self::table_index_slots(capacity);
 		if table.inline {
-			let (stride, key32) = self.inline_slot(table);
-			return header + (slots + u64::from(key32)) * stride;
+			let (stride, own_key) = self.inline_slot(table);
+			return header + (slots + u64::from(own_key)) * stride;
 		}
 		let chunks = capacity.div_ceil(TABLE_CHUNK_SLOTS);
 		let directory = chunks * self.collection_data_size(self.table_chunk_type().into());
@@ -161,40 +171,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		((header + slots * 8 + directory + 15) & !15) + chunks * chunk
 	}
 
-	/// Whether the entries of maps of this type are dense: the whole program
-	/// is lowered in this module, and nothing in it keeps a reference into the
-	/// values of such a map (`design/decisions.md`, "Dense maps"):
-	/// `program::unsafe_maps`.
-	pub(crate) fn dense_map(&self, ty: TypeId) -> bool {
-		if self.whole_program {
-			return !self.unsafe_maps.contains(&ty);
-		}
-		// per unit: the merged facts of every unit, by stable name (`facts.rs`)
-		self.program_facts.as_ref().is_some_and(|facts| {
-			crate::facts::stable_type_name(self.types(), ty).is_some_and(|name| {
-				!facts
-					.consulted(crate::facts::REFERENCED_MAPS, self.fact_log.as_deref())
-					.contains(&name)
-			})
+	/// Every table operation uses the same concrete type and the same
+	/// exclusions, including generic patterns (`facts::map_excluded`). A
+	/// lowering without complete program facts keeps stable chunks.
+	fn map_excluded(
+		&self,
+		ty: TypeId,
+		kind: &'static str,
+		local: &std::collections::BTreeSet<String>,
+	) -> bool {
+		crate::facts::map_excluded(self.types(), ty, |name| {
+			if self.whole_program {
+				local.contains(name)
+			} else {
+				self.program_facts.as_ref().is_none_or(|facts| {
+					facts
+						.consulted(kind, self.fact_log.as_deref())
+						.contains(name)
+				})
+			}
 		})
 	}
 
-	/// Whether a dense map type keeps its entries out of the probe array: a
-	/// `deleteWhere` iterates over maps of that type.
+	/// No reference into a map of this type outlives growth: entries may
+	/// move. The type has already been resolved by `table_of`.
+	fn dense_map(&self, ty: TypeId) -> bool {
+		!self.map_excluded(ty, crate::facts::REFERENCED_MAPS, &self.unsafe_maps)
+	}
+
+	/// A `deleteWhere` needs positions that shifting deletion cannot move.
 	fn deleted_while_iterated(&self, ty: TypeId) -> bool {
-		if self.whole_program {
-			return self.no_inline_maps.contains(&ty);
-		}
-		self.program_facts.as_ref().is_none_or(|facts| {
-			crate::facts::stable_type_name(self.types(), ty).is_none_or(|name| {
-				facts
-					.consulted(
-						crate::facts::DELETED_WHILE_ITERATED_MAPS,
-						self.fact_log.as_deref(),
-					)
-					.contains(&name)
-			})
-		})
+		self.map_excluded(
+			ty,
+			crate::facts::DELETED_WHILE_ITERATED_MAPS,
+			&self.no_inline_maps,
+		)
 	}
 
 	/// The key and value of a map or set type.
@@ -202,6 +213,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let (Repr::Map(ty) | Repr::Set(ty)) = repr else {
 			return Err(Error::Llvm(format!("{repr:?} is not a table")));
 		};
+		let ty = self.concrete_type(ty);
 		let TypeKind::Collection(kind, item, key) = self.types().kind(ty) else {
 			return Err(Error::Llvm("a table without a collection type".into()));
 		};
@@ -218,12 +230,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let dense = kind == CollKind::Map && self.dense_map(ty);
 		let small = |repr: Repr| match repr {
-			Repr::Int(int) => int.bits <= 32,
-			Repr::Bool | Repr::F32 => true,
+			Repr::Int(int) => int.bits <= 64,
+			Repr::Bool | Repr::F32 | Repr::F64 | Repr::Percentage => true,
 			_ => false,
 		};
 		let inline = dense
-			&& matches!(key, Repr::Int(int) if matches!(int.bits, 8 | 16 | 32))
+			&& matches!(key, Repr::Int(int) if matches!(int.bits, 8 | 16 | 32 | 64))
 			&& value.is_some_and(small)
 			&& !self.deleted_while_iterated(ty);
 		Ok(Table {
@@ -242,10 +254,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let size = table.entry.size_of().expect("a sized entry");
 		if table.inline {
 			let flags = TABLE_INLINE
-				| if matches!(table.key, Repr::Int(int) if int.bits == 32) {
-					TABLE_INLINE_KEY32
-				} else {
-					0
+				| match table.key {
+					Repr::Int(int) if int.bits == 32 => TABLE_INLINE_KEY32,
+					Repr::Int(int) if int.bits == 64 => TABLE_INLINE_KEY64,
+					_ => 0,
 				};
 			let flag = size.get_type().const_int(flags, false);
 			// the size is far below the flag: xor sets it
@@ -392,22 +404,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let slots = Self::table_index_slots(count);
 		let mask = slots - 1;
 		let header = if table.inline {
-			let (_, key32) = self.inline_slot(table);
+			let (stride, own_key) = self.inline_slot(table);
 			// a slot: the tag of the hash (0: empty) then the entry, or the
-			// entry alone when its 32-bit key says whether it is there (the
-			// key 0 then lives in one more slot, after the others)
-			let slot_type = if key32 {
+			// entry alone when its 32/64-bit key says whether it is there (the
+			// all-ones key then lives in one more slot, after the others)
+			let slot_type = if own_key {
 				table.entry
 			} else {
-				self.context
-					.struct_type(&[i32.into(), table.entry.into()], true)
+				let mut fields = vec![i32.into()];
+				if stride - self.collection_data_size(table.entry.into()) == 8 {
+					fields.push(i32.into());
+				}
+				fields.push(table.entry.into());
+				self.context.struct_type(&fields, true)
 			};
-			let total = slots + u64::from(key32);
+			let total = slots + u64::from(own_key);
 			let mut probe = vec![None; total as usize];
-			let mut zero = false;
+			let mut sentinel = false;
 			for ((hash, key), entry) in keys.iter().zip(entries) {
-				if key32 && *key == ConstantKey::Word(0) {
-					zero = true;
+				let sentinel_bits = match table.key {
+					Repr::Int(int) if int.bits == 32 => u64::from(u32::MAX),
+					_ => u64::MAX,
+				};
+				if own_key && *key == ConstantKey::Word(sentinel_bits) {
+					sentinel = true;
 					probe[slots as usize] = Some(entry);
 					continue;
 				}
@@ -415,22 +435,37 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				while probe[slot as usize].is_some() {
 					slot = (slot + 1) & mask;
 				}
-				probe[slot as usize] = Some(if key32 {
+				probe[slot as usize] = Some(if own_key {
 					entry
 				} else {
 					let tag = match *hash as u32 {
 						0 => 0x8000_0000,
 						tag => tag,
 					};
-					slot_type.const_named_struct(&[
-						i32.const_int(u64::from(tag), false).into(),
-						entry.into(),
-					])
+					let mut fields = vec![i32.const_int(u64::from(tag), false).into()];
+					if slot_type.count_fields() == 3 {
+						fields.push(i32.const_zero().into());
+					}
+					fields.push(entry.into());
+					slot_type.const_named_struct(&fields)
 				});
 			}
 			let probe: Vec<_> = probe
 				.into_iter()
-				.map(|slot| slot.unwrap_or_else(|| slot_type.const_zero()))
+				.map(|slot| {
+					slot.unwrap_or_else(|| {
+						if own_key {
+							let key = self.llvm_type(table.key).into_int_type().const_all_ones();
+							table.entry.const_named_struct(&[
+								key.into(),
+								self.llvm_type(table.value.expect("an inline map"))
+									.const_zero(),
+							])
+						} else {
+							slot_type.const_zero()
+						}
+					})
+				})
 				.collect();
 			let probe = self.readonly_global(
 				slot_type.const_array(&probe).into(),
@@ -440,7 +475,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				null.into(),
 				i64.const_int(count, false).into(),
 				i64.const_int(total, false).into(),
-				i64.const_int(u64::from(zero), false).into(),
+				i64.const_int(u64::from(sentinel), false).into(),
 				probe.into(),
 				i64.const_int(mask, false).into(),
 				i64.const_zero().into(),
@@ -1110,6 +1145,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
 		let key = self.convert(key, table.key, node.index())?;
+		// Inline removal reads the entry before release shifts the index, so
+		// it can consume the same guarded lookup as insertion/replacement.
+		if (name == "fa_table_find"
+			|| name == "fa_table_remove" && self.map_probe_inline_delete_supported(table))
+			&& let Some(result) = self.reuse_map_probe(pointer, table, key, node)?
+		{
+			return Ok(result);
+		}
+		self.table_lookup_uncached(name, pointer, table, key, node)
+	}
+
+	pub(super) fn table_lookup_uncached(
+		&mut self,
+		name: &str,
+		pointer: PointerValue<'ctx>,
+		table: Table<'ctx>,
+		key: Val<'ctx>,
+		_node: NodeId,
+	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
 		let hash = self.hash_of(key)?;
 		let slot = self.alloca(table.key, "key")?;
 		self.builder
@@ -1130,20 +1184,46 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let i64 = self.context.i64_type();
 		let find = self.runtime.function(name)?;
-		let position = self
-			.call_value(
-				find,
-				&[
-					pointer.into(),
-					hash.into(),
-					slot.pointer.into(),
-					equals.into(),
-					self.entry_size(table).into(),
-					i64.const_int(bitwise, false).into(),
-				],
-			)?
+		let arguments = [
+			pointer.into(),
+			hash.into(),
+			slot.pointer.into(),
+			equals.into(),
+			self.entry_size(table).into(),
+			i64.const_int(bitwise, false).into(),
+		];
+		let position =
+			if name == "fa_table_remove" && self.map_probe_inline_delete_supported(table) {
+				// Inline removal only finds the entry; release below updates a
+				// cached miss after the backward shift makes its final hole.
+				self.builder
+					.build_call(find, &arguments, "")?
+					.try_as_basic_value()
+					.basic()
+					.expect("a position")
+			} else {
+				self.call_value(find, &arguments)?
+			}
 			.into_int_value();
 		Ok((position, hash))
+	}
+
+	/// The un-hashed key for inline sentinel slots, shared by inserts and
+	/// converting copies. Other layouts ignore this argument.
+	pub(super) fn table_key_bits(
+		&self,
+		builder: &Builder<'ctx>,
+		table: Table<'ctx>,
+		key: Val<'ctx>,
+	) -> Result<IntValue<'ctx>, Error> {
+		let i64 = self.context.i64_type();
+		Ok(
+			if table.inline && matches!(table.key, Repr::Int(int) if matches!(int.bits, 32 | 64)) {
+				builder.build_int_z_extend(key.int(), i64, "")?
+			} else {
+				i64.const_zero()
+			},
+		)
 	}
 
 	/// A new entry for a key that is absent (`probe`: the result of its
@@ -1159,6 +1239,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<PointerValue<'ctx>, Error> {
 		let append = self.runtime.function("fa_table_append")?;
 		let i64 = self.context.i64_type();
+		let key_bits = self.table_key_bits(&self.builder, table, key)?;
 		let hash_at = self.hash_at_function(table.key)?;
 		let entry = self
 			.call_value(
@@ -1168,6 +1249,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					hash.into(),
 					self.entry_size(table).into(),
 					probe.unwrap_or_else(|| i64.const_zero()).into(),
+					key_bits.into(),
 					hash_at.as_global_value().as_pointer_value().into(),
 				],
 			)?
@@ -1311,6 +1393,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			self.emit_drop(key)?;
 		}
+		if self.release_inline_map_with_probe(pointer, table, position)? {
+			return Ok(kept);
+		}
+		self.invalidate_all_map_probes()?;
 		match hash {
 			Some(hash) => self.builder.build_call(
 				self.runtime.function("fa_table_kill")?,
@@ -1411,7 +1497,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else if let Some(buffer) = self.collection_stack(node, bytes)? {
 			local(self, buffer)?
 		} else {
-			self.table_new(table, capacity)?
+			self.table_new_at(node, table, capacity)?
 		};
 		let result = self.fresh(Val::new(repr, pointer));
 		for item in items.iter() {
@@ -2355,7 +2441,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => self.context.i64_type().const_zero(),
 		};
-		let result = self.table_new(table, capacity)?;
+		let result = self.table_new_at(node, table, capacity)?;
 		match source.repr {
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, node)?;

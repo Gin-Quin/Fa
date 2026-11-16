@@ -11,13 +11,14 @@ mutable integers: Array<Integer> = copy bytes
 integers.push(3)
 console.log(bytes.length, integers.length, integers[1]) -- prints: 2 3 2
 
-function select = (flag: Boolean, a: Array<Int8>, b: Array<Int16>): Array<Integer> => copy (if flag { a } else { b })
-console.log(select(true, bytes, [4, 5, 6]).length) -- prints: 2
+function select = (flag: Boolean, a: Array<Int8>, b: Array<Int16>): Array<Integer> =>
+	copy (if flag { a } else { b })
+console.log(select(true, bytes, [4, 5, 6]).length)  -- prints: 2
 console.log(select(false, bytes, [4, 5, 6]).length) -- prints: 3
 
 function fallback = (a: Array<Int8>?, b: Array<Int16>): Array<Integer> => copy (a ?? b)
 console.log(fallback(bytes, [4]).length) -- prints: 2
-console.log(fallback(none, [4]).length) -- prints: 1
+console.log(fallback(none, [4]).length)  -- prints: 1
 
 let records = [{ name = "Ada", unused = [1] }]
 let names: Array<{ name: String }> = copy records
@@ -42,6 +43,15 @@ console.log(smallSet.size, largeSet.size, largeSet.includes(2)) -- prints: 2 2 t
 let smallMap: Map<Int8, Int8> = [(1, 2)]
 let largeMap: Map<Integer, Integer> = copy smallMap
 console.log(smallMap.size, largeMap.size, largeMap.get(1)) -- prints: 1 1 2
+
+let sentinelMap: Map<Int8, Int8> = [(-1, 7), (1, 8)]
+let wideSentinelMap: Map<Integer, Integer> = copy sentinelMap
+console.log(
+	sentinelMap.size
+	wideSentinelMap.size
+	wideSentinelMap.get(-1)
+	wideSentinelMap.get(1)
+) -- prints: 2 2 7 8
 
 let points: Pool<{ x: Int8 }> = [{ x = 1 }]
 let widePoints: Pool<{ x: Integer }> = copy points

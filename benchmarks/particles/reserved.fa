@@ -1,0 +1,70 @@
+-- Particles: 200 steps of `Float32` vector math over an array of objects, written elementwise (a vector
+-- `add` method), with a bounce on the floor; then a conversion of every coordinate to an integer.
+-- Every operation is exact in binary32, so all the implementations print the same checksum.
+
+let steps = 200
+
+type Vector = {
+	x: Float32
+	y: Float32
+	z: Float32
+
+	function add = (self, other: Vector): Vector => Vector { x = self.x + other.x, y = self.y + other.y, z = self.z + other.z }
+}
+
+type Particle = {
+	position: Vector
+	velocity: Vector
+}
+
+let gravity = Vector { x = 0.0, y = -0.0625, z = 0.0 }
+
+-- The xorshift64 generator of the Goose suite.
+function xorshift = (x: UInt64): UInt64 => {
+	mutable value = x
+	value = value.bitXor(value.shiftLeft(13))
+	value = value.bitXor(value.shiftRight(7))
+	value = value.bitXor(value.shiftLeft(17))
+	value
+}
+
+-- A number between 0 and `bound` (excluded), as the Goose suite reduces its random numbers.
+function randomBelow = (x: UInt64, bound: Integer<min = 1>): Integer => Integer(x %% UInt64(bound))
+
+let n = 300_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
+mutable particles = Array<Particle>.from([], capacity = n)
+mutable state: UInt64 = 12345
+for 0..n {
+	state = xorshift(state)
+	particles.push({
+		position = {
+			x = Float32(randomBelow(state, 1024))
+			y = Float32(randomBelow(state.shiftRight(12), 1024))
+			z = Float32(randomBelow(state.shiftRight(24), 1024))
+		}
+		velocity = {
+			x = Float32(randomBelow(state.shiftRight(36), 256) - 128) / 16.0
+			y = Float32(randomBelow(state.shiftRight(44), 256) - 128) / 16.0
+			z = Float32(randomBelow(state.shiftRight(52), 256) - 128) / 16.0
+		}
+	})
+}
+
+for 0..steps {
+	for particle in particles {
+		particle.velocity = particle.velocity.add(gravity)
+		particle.position = particle.position.add(particle.velocity)
+		if particle.position.y < 0.0 {
+			particle.position.y = -particle.position.y
+			particle.velocity.y = -(particle.velocity.y * 0.5)
+		}
+	}
+}
+
+mutable total = 0
+for particle in particles {
+	let position = particle.position
+	total += try Integer.truncate(position.x * 16.0) + Integer.truncate(position.y * 16.0) + Integer.truncate(position.z * 16.0)
+}
+console.log(particles.length)
+console.log(total)

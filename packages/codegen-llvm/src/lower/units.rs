@@ -346,6 +346,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		// every unit reads (a scratch view interns, the merge publishes)
 		let module = self.session.module_id(self.file);
 		let mut merger = self.types().merger(Some(module));
+		// The scratch store has its own local ids. Publish the module with
+		// the input types before passing that identity into the scratch view.
+		let module = merger.module(module);
 		let global = merger.ty(ty);
 		let bindings = fa_analyzer::types::Bindings {
 			params: params.iter().map(|&param| merger.param(param)).collect(),

@@ -1,0 +1,129 @@
+-- A missing inline-map probe remains usable only while its index is unchanged.
+-- asynchronous: false
+-- require-split: true
+
+function append = (items: Array<UInt32>, value: UInt32) mutates items => {
+	items.push(value)
+}
+
+function insertOther = (map: Map<UInt32, UInt32>, other: UInt32) mutates map => {
+	map[other] = other
+}
+
+function throughGrowth = () => {
+	mutable map: Map<UInt32, UInt32> = []
+	mutable scratch: Array<UInt32> = []
+	for index in 0..512 {
+		let key: UInt32 = index * 4096
+		assert map.get(key) is none
+		append(scratch, key)
+		map[key] = key + 1
+	}
+	for index in 0..512 {
+		let key: UInt32 = index * 4096
+		assert map.get(key) == key + 1
+	}
+	assert map.size == 512
+	assert scratch.length == 512
+}
+
+function beforeProducerBackedge = () => {
+	mutable map: Map<UInt32, UInt32> = []
+	let key: UInt32 = 1
+	mutable turn = 0
+	loop {
+		-- This mutation precedes the first producer in lowering order but
+		-- follows it on the second runtime iteration.
+		if turn == 1 {
+			map[7] = 7
+		}
+		if turn == 0 {
+			assert map.get(key) is none
+			turn = 1
+			continue
+		}
+		map[key] = 42
+		break
+	}
+	assert map.get(key) == 42
+	assert map.get(7) == 7
+	assert map.size == 2
+}
+
+function calledMutation = () => {
+	mutable map: Map<UInt32, UInt32> = []
+	let key: UInt32 = 3
+	assert map.get(key) is none
+	insertOther(map, 7)
+	map[key] = 11
+	assert map.get(key) == 11
+	assert map.get(7) == 7
+	map.delete(7)
+	map.reserve(4096)
+	assert map.get(key) == 11
+	map.clear()
+	assert map.get(key) is none
+	map[key] = 19
+	assert map.get(key) == 19
+}
+
+function initialMap = (): Map<UInt32, UInt32> => [(0, 99), (7, 8), (63, 64), (127, 128)]
+function deletionKeepsMiss = () => {
+	mutable map = initialMap()
+	for round in 0..128 {
+		let key: UInt32 = round * 4096 + 255
+		assert map.get(key) is none
+		if round %% 2 == 0 {
+			map.delete(0)
+		} else {
+			map.delete(7)
+		}
+		map[key] = key
+		assert map.get(key) == key
+	}
+	for round in 0..128 {
+		let key: UInt32 = round * 4096 + 255
+		assert map.get(key) == key
+	}
+}
+
+type Stop = Errors { Done }
+function changeThenFail = (map: Map<UInt32, UInt32>) throws Stop.Done mutates map => {
+	map[0] = 99
+	throw Stop.Done
+}
+
+function throwingMutation = () => {
+	mutable map: Map<UInt32, UInt32> = []
+	let key: UInt32 = UInt32.maxValue
+	assert map.get(key) is none
+	let failed = do {
+		changeThenFail(map)
+		false
+	} catch _error => true
+	assert failed
+	map[key] = 42
+	assert map.get(key) == 42
+	assert map.get(0) == 99
+}
+
+function reassignedMap = () => {
+	mutable map: Map<UInt32, UInt32> = []
+	let key: UInt32 = 1
+	for turn in 0..128 {
+		assert map.get(key) is none
+		map = Map<UInt32, UInt32>.from([(7, 8)], capacity = 1024)
+		map[key] = 42
+		assert map.get(key) == 42
+		assert map.get(7) == 8
+		map = []
+	}
+}
+
+throughGrowth()
+beforeProducerBackedge()
+calledMutation()
+deletionKeepsMiss()
+throwingMutation()
+reassignedMap()
+console.log("map probes") -- prints: map probes

@@ -1,0 +1,35 @@
+-- asynchronous: false
+-- Equal scalar representations can still name maps with different reference facts.
+function duplicate = <K, V>(map: Map<K, V>): Map<K, V> => copy map
+function duplicateNested = <K, V>(maps: Array<Map<K, V>>): Array<Map<K, V>> => copy maps
+type Holder<K, V> = { map: Map<K, V> }
+function duplicateHolder = <K, V>(holder: Holder<K, V>): Holder<K, V> => copy holder
+function empty = <K, V>(): Map<K, V> => []
+function exercise = (key: Int64, other: Integer) throws IndexError => {
+	mutable stable: Map<Int64, Int64> = [(key, 11)]
+	use held = stable.getOrInsert(key, 0)
+	stable.reserve(500)
+	assert held == Int64(11)
+	let stableCopy = duplicate(stable)
+	assert stableCopy.get(key) == Int64(11)
+	let stableArray = duplicateNested([copy stable])
+	assert (try stableArray[0]).get(key) == Int64(11)
+	let stableHolder = duplicateHolder(Holder<Int64, Int64> { map = stable })
+	assert stableHolder.map.get(key) == Int64(11)
+	let compact: Map<Integer, Integer> = [(other, 22)]
+	let compactCopy = duplicate(compact)
+	assert compactCopy.get(other) == 22
+	let compactArray = duplicateNested([copy compact])
+	assert (try compactArray[0]).get(other) == 22
+	let compactHolder = duplicateHolder(Holder<Integer, Integer> { map = compact })
+	assert compactHolder.map.get(other) == 22
+	mutable stableEmpty: Map<Int64, Int64> = empty()
+	mutable compactEmpty: Map<Integer, Integer> = empty()
+	stableEmpty[key] = 33
+	compactEmpty[other] = 44
+	assert stableEmpty.get(key) == Int64(33)
+	assert compactEmpty.get(other) == 44
+	assert stableCopy.get(key) == Int64(11)
+}
+try exercise(7, 9)
+console.log("generic helpers ok") -- prints: generic helpers ok

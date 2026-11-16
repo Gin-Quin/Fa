@@ -134,13 +134,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// with generic parameters has the representation of its bindings.
 	pub(super) fn shape_key(&self, repr: Repr) -> String {
 		let bindings = self.bindings.borrow();
-		if bindings.is_empty() {
+		let types = self.type_bindings.borrow();
+		if bindings.is_empty() && types.is_empty() {
 			return format!("{repr:?}");
 		}
 		let mut bindings: Vec<String> = bindings
 			.iter()
 			.map(|(param, repr)| format!("{param:?}={repr:?}"))
 			.collect();
+		// Equal scalar representations can have different map exclusions
+		// (`Integer` and `Int64`, for example). Helpers must retain the exact
+		// instance whose table layout they compiled, also in nested owners.
+		bindings.extend(
+			types
+				.iter()
+				.map(|(param, ty)| format!("{param:?}:type={ty:?}")),
+		);
 		bindings.sort();
 		format!("{repr:?}|{}", bindings.join(","))
 	}
@@ -254,6 +263,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Drops a value (nothing for a value that owns no memory).
 	pub(crate) fn emit_drop(&self, value: Val<'ctx>) -> Result<(), Error> {
+		self.invalidate_dropped_map_probes(value.repr)?;
 		let Some(raw) = value.value else {
 			return Ok(());
 		};

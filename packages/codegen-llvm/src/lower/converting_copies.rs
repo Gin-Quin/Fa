@@ -259,7 +259,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				for (index, field) in target_fields.iter().enumerate() {
 					let position = source_fields
 						.iter()
-						.position(|input| input.name == field.name)
+						.position(|input| {
+							self.types().syms.resolve(input.name)
+								== self.types().syms.resolve(field.name)
+						})
 						.ok_or_else(|| {
 							Error::Llvm("a converting copy lost a retained field".into())
 						})?;
@@ -583,6 +586,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.call_drop(b, to.key, key)?;
 			b.build_unconditional_branch(end)?;
 			b.position_at_end(absent);
+			let key_bits = self.table_key_bits(b, to, Val::new(to.key, key))?;
 			let entry = b
 				.build_call(
 					self.runtime.function("fa_table_append")?,
@@ -591,6 +595,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						key_hash.into(),
 						self.entry_size(to).into(),
 						probe.into(),
+						key_bits.into(),
 						hash_at.into(),
 					],
 					"",

@@ -1,0 +1,27 @@
+-- Generic maps across suspension and a closure constructed in an instance.
+use { sleep } = std.time
+function readCaptured = <K, V>(map: Map<K, V>, key: K): V? => {
+	function read = () => map.get(key)
+	let closure = read
+	assert "{closure()}" == "{read()}"
+	closure()
+}
+async function change = <K, V>(map: Map<K, V>, key: K, value: V) mutates map => {
+	await sleep(1)
+	map.reserve(1000)
+	map[key] = value
+	assert map.includes(key)
+	map.deleteWhere((_key, _value) => true)
+}
+async function run = () => {
+	mutable wide: Map<Int64, UInt64> = [(-1, 18446744073709551615), (0, 1)]
+	assert readCaptured(wide, Int64(-1)) == UInt64.maxValue
+	await change(wide, Int64(7), UInt64(9))
+	assert wide.size == 0
+	mutable small: Map<UInt32, UInt32> = [(0, 1), (4294967295, 2)]
+	assert readCaptured(small, UInt32.maxValue) == 2
+	await change(small, UInt32(7), UInt32(9))
+	assert small.size == 0
+}
+await run()
+console.log("async generic maps ok") -- prints: async generic maps ok

@@ -1,0 +1,34 @@
+-- asynchronous: false
+-- Scalar refinements use the same map ABI in concrete and generic views.
+function read = (map: Map<Int64, Integer>): Integer => map.get(0) ?? 0
+function genericRead = <K>(map: Map<K, Integer>, key: K): Integer => map.get(key) ?? 0
+mutable map: Map<Int64, Integer<min = 0, max = 100>> = [(0, 11)]
+use held = map.getOrInsert(0, 0)
+map.reserve(100)
+assert held == 11
+let widened: Map<Int64, Integer> = copy map
+assert widened.get(0) == 11
+assert read(map) == 11
+assert genericRead(map, Int64(0)) == 11
+mutable optionals: Map<UInt32, Integer<min = 0, max = 100>?> = [(0, 11)]
+use optional = optionals.getOrInsert(0, none)
+optionals.reserve(100)
+assert optional == 11
+let optionalView: Map<UInt32, Integer?> = copy optionals
+assert optionalView.get(0) == 11
+
+type Tone = Enum { red, green }
+mutable tones: Map<UInt16, Tone.red> = [(0, Tone.red)]
+use tone = tones.getOrInsert(0, Tone.red)
+tones.reserve(100)
+assert tone == Tone.red
+let toneView: Map<UInt16, Tone> = copy tones
+assert toneView.get(0) == Tone.red
+
+mutable variants: Map<UInt8, Integer | String> = [(0, 11)]
+use variant = variants.getOrInsert(0, "fallback")
+variants.reserve(100)
+assert "{variant}" == "11"
+let variantView: Map<UInt8, Integer | String | Boolean> = copy variants
+assert "{variantView.get(0)}" == "11"
+console.log("ranged map views ok") -- prints: ranged map views ok

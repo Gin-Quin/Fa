@@ -1,0 +1,11 @@
+-- Representation probe, not a benchmark: Goose's one-way pool links have no
+-- reverse relation. Fa requires one even when the pool never deletes nodes.
+mutable nodes: GrowingPool<Node> = []
+
+type Node = {
+	value: Int32
+	left: (Node in nodes)?
+	right: (Node in nodes)?
+}
+
+nodes.add({ value = 1 })

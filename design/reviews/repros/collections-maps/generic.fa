@@ -1,0 +1,15 @@
+-- asynchronous: false
+function churn = <K, V>(map: Map<K, V>, key: K, value: V) mutates map => {
+	map[key] = value
+	map.reserve(500)
+	assert map.includes(key)
+	map.delete(key)
+	map[key] = value
+}
+mutable small: Map<UInt32, UInt32> = []
+mutable wide: Map<Int64, UInt64> = []
+churn(small, UInt32.maxValue, UInt32(42))
+churn(wide, Int64(-1), UInt64.maxValue)
+assert small.get(UInt32.maxValue) == 42
+assert wide.get(-1) == UInt64.maxValue
+console.log("generic ok") -- prints: generic ok

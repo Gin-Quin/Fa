@@ -1,0 +1,5 @@
+export function = (key: Int64): Map<Int64, UInt64> => {
+	mutable map = Map<Int64, UInt64>.from([(key, UInt64.maxValue)], capacity = 16)
+	map[0] = 10
+	map
+}

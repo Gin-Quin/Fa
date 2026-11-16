@@ -1,0 +1,15 @@
+-- asynchronous: false
+mutable map: Map<UInt64, Int64> = [(0, 10), (UInt64.maxValue, 20)]
+use held = map.getOrInsert(UInt64.maxValue, 0)
+for i in 1..300 { map[UInt64(i)] = Int64(i) }
+map.reserve(2000)
+held += 1
+assert held == Int64(21)
+assert map.get(UInt64.maxValue) == Int64(21)
+mutable filtered: Map<Int64, Int64> = [(-1, 10), (0, 20), (Int64.minValue, 30), (Int64.maxValue, 40)]
+filtered.deleteWhere((key, _) => key != -1)
+assert filtered.size == 1
+assert filtered.get(-1) == Int64(10)
+for (key, value) in filtered { value += 2 }
+assert filtered.get(-1) == Int64(12)
+console.log("stable ok") -- prints: stable ok

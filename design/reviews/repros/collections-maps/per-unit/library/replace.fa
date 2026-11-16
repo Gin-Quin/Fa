@@ -1,0 +1,4 @@
+export function = <K, V>(map: Map<K, V>, key: K, value: V) mutates map => {
+	map.reserve(1000)
+	map[key] = value
+}

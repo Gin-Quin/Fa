@@ -1,0 +1,21 @@
+use { sleep } = std.time
+async function change = (map: Map<UInt32, UInt32>, key: UInt32) mutates map => {
+	await sleep(1)
+	map.clear()
+	map.reserve(1000)
+	map[key] = 77
+}
+async function run = () => {
+	mutable map: Map<UInt32, UInt32> = [(0, 1)]
+	let key: UInt32 = UInt32.maxValue
+	assert map.get(key) is none
+	await change(map, key)
+	map[key] = 88
+	assert map.take(key) == 88
+	assert map.get(key) is none
+	map[key] = 99
+	await sleep(1)
+	assert map.get(key) == 99
+}
+await run()
+console.log("await ok") -- prints: await ok

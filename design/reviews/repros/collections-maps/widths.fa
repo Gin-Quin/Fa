@@ -1,0 +1,276 @@
+-- asynchronous: false
+let exact: Int64 = 9007199254740993
+function verify = (condition: Boolean) => { assert condition }
+function testInt8 = (runtime: Int8) => {
+	let literal: Map<Int8, Int64> = [(0, Int64.minValue), (-1, Int64.maxValue), (Int8.minValue, 123), (Int8.maxValue, -456)]
+	assert literal.get(0) == Int64.minValue
+	assert literal.get(-1) == Int64.maxValue
+	assert literal.get(Int8.minValue) == Int64(123)
+	assert literal.get(Int8.maxValue) == Int64(-456)
+	mutable map = copy literal
+	map.reserve(300)
+	map[runtime] = 9007199254740993
+	assert map.get(runtime) == exact
+	assert map.delete(runtime)
+	assert map.get(runtime) is none
+	map[runtime] = Int64.maxValue
+	assert map.take(runtime) == Int64.maxValue
+	map.clear()
+	assert map.size == 0
+	map[Int8.maxValue] = 42
+	assert map.get(Int8.maxValue) == Int64(42)
+	let frame: Map<Int8, Int64> = [(runtime, Int64.minValue)]
+	assert frame.get(runtime) == Int64.minValue
+	mutable flags: Map<Int8, Boolean> = []
+	flags[runtime] = true
+	flags.reserve(200)
+	assert flags.get(runtime) == true
+	mutable narrow: Map<Int8, Int16> = []
+	narrow[runtime] = Int16.minValue
+	assert narrow.get(runtime) == Int16.minValue
+	mutable floats: Map<Int8, Float> = [(runtime, -0.0)]
+	floats.reserve(300)
+	verify(floats.get(runtime) == 0.0)
+	floats[runtime] = -1.25
+	verify(floats.take(runtime) == -1.25)
+}
+testInt8(7)
+function testUInt8 = (runtime: UInt8) => {
+	let literal: Map<UInt8, Int64> = [(0, Int64.minValue), (1, Int64.maxValue), (128, 123), (UInt8.maxValue, -456)]
+	assert literal.get(0) == Int64.minValue
+	assert literal.get(1) == Int64.maxValue
+	assert literal.get(128) == Int64(123)
+	assert literal.get(UInt8.maxValue) == Int64(-456)
+	mutable map = copy literal
+	map.reserve(300)
+	map[runtime] = 9007199254740993
+	assert map.get(runtime) == exact
+	assert map.delete(runtime)
+	assert map.get(runtime) is none
+	map[runtime] = Int64.maxValue
+	assert map.take(runtime) == Int64.maxValue
+	map.clear()
+	assert map.size == 0
+	map[UInt8.maxValue] = 42
+	assert map.get(UInt8.maxValue) == Int64(42)
+	let frame: Map<UInt8, Int64> = [(runtime, Int64.minValue)]
+	assert frame.get(runtime) == Int64.minValue
+	mutable flags: Map<UInt8, Boolean> = []
+	flags[runtime] = true
+	flags.reserve(200)
+	assert flags.get(runtime) == true
+	mutable narrow: Map<UInt8, Int16> = []
+	narrow[runtime] = Int16.minValue
+	assert narrow.get(runtime) == Int16.minValue
+	mutable floats: Map<UInt8, Float> = [(runtime, -0.0)]
+	floats.reserve(300)
+	verify(floats.get(runtime) == 0.0)
+	floats[runtime] = -1.25
+	verify(floats.take(runtime) == -1.25)
+}
+testUInt8(7)
+function testInt16 = (runtime: Int16) => {
+	let literal: Map<Int16, Int64> = [(0, Int64.minValue), (-1, Int64.maxValue), (Int16.minValue, 123), (Int16.maxValue, -456)]
+	assert literal.get(0) == Int64.minValue
+	assert literal.get(-1) == Int64.maxValue
+	assert literal.get(Int16.minValue) == Int64(123)
+	assert literal.get(Int16.maxValue) == Int64(-456)
+	mutable map = copy literal
+	map.reserve(300)
+	map[runtime] = 9007199254740993
+	assert map.get(runtime) == exact
+	assert map.delete(runtime)
+	assert map.get(runtime) is none
+	map[runtime] = Int64.maxValue
+	assert map.take(runtime) == Int64.maxValue
+	map.clear()
+	assert map.size == 0
+	map[Int16.maxValue] = 42
+	assert map.get(Int16.maxValue) == Int64(42)
+	let frame: Map<Int16, Int64> = [(runtime, Int64.minValue)]
+	assert frame.get(runtime) == Int64.minValue
+	mutable flags: Map<Int16, Boolean> = []
+	flags[runtime] = true
+	flags.reserve(200)
+	assert flags.get(runtime) == true
+	mutable narrow: Map<Int16, Int16> = []
+	narrow[runtime] = Int16.minValue
+	assert narrow.get(runtime) == Int16.minValue
+	mutable floats: Map<Int16, Float> = [(runtime, -0.0)]
+	floats.reserve(300)
+	verify(floats.get(runtime) == 0.0)
+	floats[runtime] = -1.25
+	verify(floats.take(runtime) == -1.25)
+}
+testInt16(7)
+function testUInt16 = (runtime: UInt16) => {
+	let literal: Map<UInt16, Int64> = [(0, Int64.minValue), (1, Int64.maxValue), (32768, 123), (UInt16.maxValue, -456)]
+	assert literal.get(0) == Int64.minValue
+	assert literal.get(1) == Int64.maxValue
+	assert literal.get(32768) == Int64(123)
+	assert literal.get(UInt16.maxValue) == Int64(-456)
+	mutable map = copy literal
+	map.reserve(300)
+	map[runtime] = 9007199254740993
+	assert map.get(runtime) == exact
+	assert map.delete(runtime)
+	assert map.get(runtime) is none
+	map[runtime] = Int64.maxValue
+	assert map.take(runtime) == Int64.maxValue
+	map.clear()
+	assert map.size == 0
+	map[UInt16.maxValue] = 42
+	assert map.get(UInt16.maxValue) == Int64(42)
+	let frame: Map<UInt16, Int64> = [(runtime, Int64.minValue)]
+	assert frame.get(runtime) == Int64.minValue
+	mutable flags: Map<UInt16, Boolean> = []
+	flags[runtime] = true
+	flags.reserve(200)
+	assert flags.get(runtime) == true
+	mutable narrow: Map<UInt16, Int16> = []
+	narrow[runtime] = Int16.minValue
+	assert narrow.get(runtime) == Int16.minValue
+	mutable floats: Map<UInt16, Float> = [(runtime, -0.0)]
+	floats.reserve(300)
+	verify(floats.get(runtime) == 0.0)
+	floats[runtime] = -1.25
+	verify(floats.take(runtime) == -1.25)
+}
+testUInt16(7)
+function testInt32 = (runtime: Int32) => {
+	let literal: Map<Int32, Int64> = [(0, Int64.minValue), (-1, Int64.maxValue), (Int32.minValue, 123), (Int32.maxValue, -456)]
+	assert literal.get(0) == Int64.minValue
+	assert literal.get(-1) == Int64.maxValue
+	assert literal.get(Int32.minValue) == Int64(123)
+	assert literal.get(Int32.maxValue) == Int64(-456)
+	mutable map = copy literal
+	map.reserve(300)
+	map[runtime] = 9007199254740993
+	assert map.get(runtime) == exact
+	assert map.delete(runtime)
+	assert map.get(runtime) is none
+	map[runtime] = Int64.maxValue
+	assert map.take(runtime) == Int64.maxValue
+	map.clear()
+	assert map.size == 0
+	map[Int32.maxValue] = 42
+	assert map.get(Int32.maxValue) == Int64(42)
+	let frame: Map<Int32, Int64> = [(runtime, Int64.minValue)]
+	assert frame.get(runtime) == Int64.minValue
+	mutable flags: Map<Int32, Boolean> = []
+	flags[runtime] = true
+	flags.reserve(200)
+	assert flags.get(runtime) == true
+	mutable narrow: Map<Int32, Int16> = []
+	narrow[runtime] = Int16.minValue
+	assert narrow.get(runtime) == Int16.minValue
+	mutable floats: Map<Int32, Float> = [(runtime, -0.0)]
+	floats.reserve(300)
+	verify(floats.get(runtime) == 0.0)
+	floats[runtime] = -1.25
+	verify(floats.take(runtime) == -1.25)
+}
+testInt32(7)
+function testUInt32 = (runtime: UInt32) => {
+	let literal: Map<UInt32, Int64> = [(0, Int64.minValue), (1, Int64.maxValue), (2147483648, 123), (UInt32.maxValue, -456)]
+	assert literal.get(0) == Int64.minValue
+	assert literal.get(1) == Int64.maxValue
+	assert literal.get(2147483648) == Int64(123)
+	assert literal.get(UInt32.maxValue) == Int64(-456)
+	mutable map = copy literal
+	map.reserve(300)
+	map[runtime] = 9007199254740993
+	assert map.get(runtime) == exact
+	assert map.delete(runtime)
+	assert map.get(runtime) is none
+	map[runtime] = Int64.maxValue
+	assert map.take(runtime) == Int64.maxValue
+	map.clear()
+	assert map.size == 0
+	map[UInt32.maxValue] = 42
+	assert map.get(UInt32.maxValue) == Int64(42)
+	let frame: Map<UInt32, Int64> = [(runtime, Int64.minValue)]
+	assert frame.get(runtime) == Int64.minValue
+	mutable flags: Map<UInt32, Boolean> = []
+	flags[runtime] = true
+	flags.reserve(200)
+	assert flags.get(runtime) == true
+	mutable narrow: Map<UInt32, Int16> = []
+	narrow[runtime] = Int16.minValue
+	assert narrow.get(runtime) == Int16.minValue
+	mutable floats: Map<UInt32, Float> = [(runtime, -0.0)]
+	floats.reserve(300)
+	verify(floats.get(runtime) == 0.0)
+	floats[runtime] = -1.25
+	verify(floats.take(runtime) == -1.25)
+}
+testUInt32(7)
+function testInt64 = (runtime: Int64) => {
+	let literal: Map<Int64, Int64> = [(0, Int64.minValue), (-1, Int64.maxValue), (Int64.minValue, 123), (Int64.maxValue, -456)]
+	assert literal.get(0) == Int64.minValue
+	assert literal.get(-1) == Int64.maxValue
+	assert literal.get(Int64.minValue) == Int64(123)
+	assert literal.get(Int64.maxValue) == Int64(-456)
+	mutable map = copy literal
+	map.reserve(300)
+	map[runtime] = 9007199254740993
+	assert map.get(runtime) == exact
+	assert map.delete(runtime)
+	assert map.get(runtime) is none
+	map[runtime] = Int64.maxValue
+	assert map.take(runtime) == Int64.maxValue
+	map.clear()
+	assert map.size == 0
+	map[Int64.maxValue] = 42
+	assert map.get(Int64.maxValue) == Int64(42)
+	let frame: Map<Int64, Int64> = [(runtime, Int64.minValue)]
+	assert frame.get(runtime) == Int64.minValue
+	mutable flags: Map<Int64, Boolean> = []
+	flags[runtime] = true
+	flags.reserve(200)
+	assert flags.get(runtime) == true
+	mutable narrow: Map<Int64, Int16> = []
+	narrow[runtime] = Int16.minValue
+	assert narrow.get(runtime) == Int16.minValue
+	mutable floats: Map<Int64, Float> = [(runtime, -0.0)]
+	floats.reserve(300)
+	verify(floats.get(runtime) == 0.0)
+	floats[runtime] = -1.25
+	verify(floats.take(runtime) == -1.25)
+}
+testInt64(7)
+function testUInt64 = (runtime: UInt64) => {
+	let literal: Map<UInt64, Int64> = [(0, Int64.minValue), (1, Int64.maxValue), (9223372036854775808, 123), (UInt64.maxValue, -456)]
+	assert literal.get(0) == Int64.minValue
+	assert literal.get(1) == Int64.maxValue
+	assert literal.get(9223372036854775808) == Int64(123)
+	assert literal.get(UInt64.maxValue) == Int64(-456)
+	mutable map = copy literal
+	map.reserve(300)
+	map[runtime] = 9007199254740993
+	assert map.get(runtime) == exact
+	assert map.delete(runtime)
+	assert map.get(runtime) is none
+	map[runtime] = Int64.maxValue
+	assert map.take(runtime) == Int64.maxValue
+	map.clear()
+	assert map.size == 0
+	map[UInt64.maxValue] = 42
+	assert map.get(UInt64.maxValue) == Int64(42)
+	let frame: Map<UInt64, Int64> = [(runtime, Int64.minValue)]
+	assert frame.get(runtime) == Int64.minValue
+	mutable flags: Map<UInt64, Boolean> = []
+	flags[runtime] = true
+	flags.reserve(200)
+	assert flags.get(runtime) == true
+	mutable narrow: Map<UInt64, Int16> = []
+	narrow[runtime] = Int16.minValue
+	assert narrow.get(runtime) == Int16.minValue
+	mutable floats: Map<UInt64, Float> = [(runtime, -0.0)]
+	floats.reserve(300)
+	verify(floats.get(runtime) == 0.0)
+	floats[runtime] = -1.25
+	verify(floats.take(runtime) == -1.25)
+}
+testUInt64(7)
+console.log("widths ok") -- prints: widths ok

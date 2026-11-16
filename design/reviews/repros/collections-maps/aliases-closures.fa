@@ -1,0 +1,24 @@
+-- asynchronous: false
+-- Closure and reference uses force conservative storage/probe paths.
+function run = (input: UInt32) => {
+	let key = input
+	mutable map = Map<UInt32, UInt32>.from([], capacity = 16)
+	use alias = map
+	assert map.get(key) is none
+	alias[46] = 460
+	alias.reserve(1000)
+	map[key] = 42
+	assert map.get(key) == 42
+	function mutate = () => { map.clear()
+		map[key] = 99 }
+	assert map.get(key) == 42
+	mutate()
+	assert map.take(key) == 99
+	assert map.get(key) is none
+	map[key] = 100
+	function read = () => map.get(key)
+	assert read() == 100
+}
+run(91)
+run(UInt32.maxValue)
+console.log("aliases ok") -- prints: aliases ok

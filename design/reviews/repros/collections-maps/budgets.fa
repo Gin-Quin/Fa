@@ -1,0 +1,180 @@
+-- asynchronous: false
+function many = (depth: Integer, key: UInt32): Integer => {
+	mutable map0 = Map<UInt32, UInt32>.from([(key, 0)], capacity = 32)
+	map0[UInt32.maxValue] = 1
+	mutable map1 = Map<UInt32, UInt32>.from([(key, 1)], capacity = 32)
+	map1[UInt32.maxValue] = 2
+	mutable map2 = Map<UInt32, UInt32>.from([(key, 2)], capacity = 32)
+	map2[UInt32.maxValue] = 3
+	mutable map3 = Map<UInt32, UInt32>.from([(key, 3)], capacity = 32)
+	map3[UInt32.maxValue] = 4
+	mutable map4 = Map<UInt32, UInt32>.from([(key, 4)], capacity = 32)
+	map4[UInt32.maxValue] = 5
+	mutable map5 = Map<UInt32, UInt32>.from([(key, 5)], capacity = 32)
+	map5[UInt32.maxValue] = 6
+	mutable map6 = Map<UInt32, UInt32>.from([(key, 6)], capacity = 32)
+	map6[UInt32.maxValue] = 7
+	mutable map7 = Map<UInt32, UInt32>.from([(key, 7)], capacity = 32)
+	map7[UInt32.maxValue] = 8
+	mutable map8 = Map<UInt32, UInt32>.from([(key, 8)], capacity = 32)
+	map8[UInt32.maxValue] = 9
+	mutable map9 = Map<UInt32, UInt32>.from([(key, 9)], capacity = 32)
+	map9[UInt32.maxValue] = 10
+	mutable map10 = Map<UInt32, UInt32>.from([(key, 10)], capacity = 32)
+	map10[UInt32.maxValue] = 11
+	mutable map11 = Map<UInt32, UInt32>.from([(key, 11)], capacity = 32)
+	map11[UInt32.maxValue] = 12
+	mutable map12 = Map<UInt32, UInt32>.from([(key, 12)], capacity = 32)
+	map12[UInt32.maxValue] = 13
+	mutable map13 = Map<UInt32, UInt32>.from([(key, 13)], capacity = 32)
+	map13[UInt32.maxValue] = 14
+	mutable map14 = Map<UInt32, UInt32>.from([(key, 14)], capacity = 32)
+	map14[UInt32.maxValue] = 15
+	mutable map15 = Map<UInt32, UInt32>.from([(key, 15)], capacity = 32)
+	map15[UInt32.maxValue] = 16
+	mutable map16 = Map<UInt32, UInt32>.from([(key, 16)], capacity = 32)
+	map16[UInt32.maxValue] = 17
+	mutable map17 = Map<UInt32, UInt32>.from([(key, 17)], capacity = 32)
+	map17[UInt32.maxValue] = 18
+	mutable map18 = Map<UInt32, UInt32>.from([(key, 18)], capacity = 32)
+	map18[UInt32.maxValue] = 19
+	mutable map19 = Map<UInt32, UInt32>.from([(key, 19)], capacity = 32)
+	map19[UInt32.maxValue] = 20
+	mutable map20 = Map<UInt32, UInt32>.from([(key, 20)], capacity = 32)
+	map20[UInt32.maxValue] = 21
+	mutable map21 = Map<UInt32, UInt32>.from([(key, 21)], capacity = 32)
+	map21[UInt32.maxValue] = 22
+	mutable map22 = Map<UInt32, UInt32>.from([(key, 22)], capacity = 32)
+	map22[UInt32.maxValue] = 23
+	mutable map23 = Map<UInt32, UInt32>.from([(key, 23)], capacity = 32)
+	map23[UInt32.maxValue] = 24
+	mutable map24 = Map<UInt32, UInt32>.from([(key, 24)], capacity = 32)
+	map24[UInt32.maxValue] = 25
+	mutable map25 = Map<UInt32, UInt32>.from([(key, 25)], capacity = 32)
+	map25[UInt32.maxValue] = 26
+	mutable map26 = Map<UInt32, UInt32>.from([(key, 26)], capacity = 32)
+	map26[UInt32.maxValue] = 27
+	mutable map27 = Map<UInt32, UInt32>.from([(key, 27)], capacity = 32)
+	map27[UInt32.maxValue] = 28
+	mutable map28 = Map<UInt32, UInt32>.from([(key, 28)], capacity = 32)
+	map28[UInt32.maxValue] = 29
+	mutable map29 = Map<UInt32, UInt32>.from([(key, 29)], capacity = 32)
+	map29[UInt32.maxValue] = 30
+	mutable map30 = Map<UInt32, UInt32>.from([(key, 30)], capacity = 32)
+	map30[UInt32.maxValue] = 31
+	mutable map31 = Map<UInt32, UInt32>.from([(key, 31)], capacity = 32)
+	map31[UInt32.maxValue] = 32
+	mutable map32 = Map<UInt32, UInt32>.from([(key, 32)], capacity = 32)
+	map32[UInt32.maxValue] = 33
+	mutable map33 = Map<UInt32, UInt32>.from([(key, 33)], capacity = 32)
+	map33[UInt32.maxValue] = 34
+	mutable map34 = Map<UInt32, UInt32>.from([(key, 34)], capacity = 32)
+	map34[UInt32.maxValue] = 35
+	mutable map35 = Map<UInt32, UInt32>.from([(key, 35)], capacity = 32)
+	map35[UInt32.maxValue] = 36
+	mutable map36 = Map<UInt32, UInt32>.from([(key, 36)], capacity = 32)
+	map36[UInt32.maxValue] = 37
+	mutable map37 = Map<UInt32, UInt32>.from([(key, 37)], capacity = 32)
+	map37[UInt32.maxValue] = 38
+	mutable map38 = Map<UInt32, UInt32>.from([(key, 38)], capacity = 32)
+	map38[UInt32.maxValue] = 39
+	mutable map39 = Map<UInt32, UInt32>.from([(key, 39)], capacity = 32)
+	map39[UInt32.maxValue] = 40
+	mutable map40 = Map<UInt32, UInt32>.from([(key, 40)], capacity = 32)
+	map40[UInt32.maxValue] = 41
+	mutable map41 = Map<UInt32, UInt32>.from([(key, 41)], capacity = 32)
+	map41[UInt32.maxValue] = 42
+	mutable map42 = Map<UInt32, UInt32>.from([(key, 42)], capacity = 32)
+	map42[UInt32.maxValue] = 43
+	mutable map43 = Map<UInt32, UInt32>.from([(key, 43)], capacity = 32)
+	map43[UInt32.maxValue] = 44
+	mutable map44 = Map<UInt32, UInt32>.from([(key, 44)], capacity = 32)
+	map44[UInt32.maxValue] = 45
+	mutable map45 = Map<UInt32, UInt32>.from([(key, 45)], capacity = 32)
+	map45[UInt32.maxValue] = 46
+	mutable map46 = Map<UInt32, UInt32>.from([(key, 46)], capacity = 32)
+	map46[UInt32.maxValue] = 47
+	mutable map47 = Map<UInt32, UInt32>.from([(key, 47)], capacity = 32)
+	map47[UInt32.maxValue] = 48
+	let inner = 0
+	assert map0.get(key) == 0
+	assert map1.get(key) == 1
+	assert map2.get(key) == 2
+	assert map3.get(key) == 3
+	assert map4.get(key) == 4
+	assert map5.get(key) == 5
+	assert map6.get(key) == 6
+	assert map7.get(key) == 7
+	assert map8.get(key) == 8
+	assert map9.get(key) == 9
+	assert map10.get(key) == 10
+	assert map11.get(key) == 11
+	assert map12.get(key) == 12
+	assert map13.get(key) == 13
+	assert map14.get(key) == 14
+	assert map15.get(key) == 15
+	assert map16.get(key) == 16
+	assert map17.get(key) == 17
+	assert map18.get(key) == 18
+	assert map19.get(key) == 19
+	assert map20.get(key) == 20
+	assert map21.get(key) == 21
+	assert map22.get(key) == 22
+	assert map23.get(key) == 23
+	assert map24.get(key) == 24
+	assert map25.get(key) == 25
+	assert map26.get(key) == 26
+	assert map27.get(key) == 27
+	assert map28.get(key) == 28
+	assert map29.get(key) == 29
+	assert map30.get(key) == 30
+	assert map31.get(key) == 31
+	assert map32.get(key) == 32
+	assert map33.get(key) == 33
+	assert map34.get(key) == 34
+	assert map35.get(key) == 35
+	assert map36.get(key) == 36
+	assert map37.get(key) == 37
+	assert map38.get(key) == 38
+	assert map39.get(key) == 39
+	assert map40.get(key) == 40
+	assert map41.get(key) == 41
+	assert map42.get(key) == 42
+	assert map43.get(key) == 43
+	assert map44.get(key) == 44
+	assert map45.get(key) == 45
+	assert map46.get(key) == 46
+	assert map47.get(key) == 47
+	inner + map0.size + map1.size + map2.size + map3.size + map4.size + map5.size + map6.size + map7.size + map8.size + map9.size + map10.size + map11.size + map12.size + map13.size + map14.size + map15.size + map16.size + map17.size + map18.size + map19.size + map20.size + map21.size + map22.size + map23.size + map24.size + map25.size + map26.size + map27.size + map28.size + map29.size + map30.size + map31.size + map32.size + map33.size + map34.size + map35.size + map36.size + map37.size + map38.size + map39.size + map40.size + map41.size + map42.size + map43.size + map44.size + map45.size + map46.size + map47.size
+}
+function recursive = (depth: Integer, key: UInt32): Integer => {
+	mutable map0 = Map<UInt32, UInt32>.from([(key, 0)], capacity = 32)
+	map0[UInt32.maxValue] = 1
+	mutable map1 = Map<UInt32, UInt32>.from([(key, 1)], capacity = 32)
+	map1[UInt32.maxValue] = 2
+	mutable map2 = Map<UInt32, UInt32>.from([(key, 2)], capacity = 32)
+	map2[UInt32.maxValue] = 3
+	mutable map3 = Map<UInt32, UInt32>.from([(key, 3)], capacity = 32)
+	map3[UInt32.maxValue] = 4
+	mutable map4 = Map<UInt32, UInt32>.from([(key, 4)], capacity = 32)
+	map4[UInt32.maxValue] = 5
+	mutable map5 = Map<UInt32, UInt32>.from([(key, 5)], capacity = 32)
+	map5[UInt32.maxValue] = 6
+	mutable map6 = Map<UInt32, UInt32>.from([(key, 6)], capacity = 32)
+	map6[UInt32.maxValue] = 7
+	mutable map7 = Map<UInt32, UInt32>.from([(key, 7)], capacity = 32)
+	map7[UInt32.maxValue] = 8
+	let inner = if depth > 0 { recursive(depth - 1, key) } else { 0 }
+	assert map0.get(key) == 0
+	assert map1.get(key) == 1
+	assert map2.get(key) == 2
+	assert map3.get(key) == 3
+	assert map4.get(key) == 4
+	assert map5.get(key) == 5
+	assert map6.get(key) == 6
+	assert map7.get(key) == 7
+	inner + map0.size + map1.size + map2.size + map3.size + map4.size + map5.size + map6.size + map7.size
+}
+assert many(0, 7) == 96
+assert recursive(20, 7) == 336
+console.log("budgets ok") -- prints: budgets ok

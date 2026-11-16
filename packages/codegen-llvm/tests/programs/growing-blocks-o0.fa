@@ -17,7 +17,7 @@ for _ in 0..70 {
 }
 console.log(first, duplicate.length, try duplicate[139], try duplicate[-1]) -- prints: 0 210 69 59
 mutable count = 0
-for byte in copy {
+for byte in duplicate {
 	if byte == 59 {
 		count += 1
 	}

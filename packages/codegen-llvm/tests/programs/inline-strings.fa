@@ -24,15 +24,15 @@ for length in 0..30 {
 }
 let duplicate = words
 try words[1] = "changed"
-for word, i in copy {
+for word, i in duplicate {
 	assert word == "a".repeat(i)
 }
 
 mutable counts: Map<String, Integer> = []
-for word, i in copy {
+for word, i in duplicate {
 	counts[word] = i
 }
-for word, i in copy {
+for word, i in duplicate {
 	assert counts.get(word) == i
 }
 

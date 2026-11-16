@@ -33,6 +33,7 @@
 use fa_analyzer::ids::NodeId;
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
+use fa_interpreter::Value;
 use inkwell::IntPredicate;
 use inkwell::basic_block::BasicBlock;
 use inkwell::values::IntValue;
@@ -431,8 +432,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
-	/// `for _ in a..b { target.push(constant) }`, on an array of bytes: the
-	/// `push` and the byte. Every round pushes the same byte and does nothing
+	/// `for _ in a..b { target.push(constant) }`, on an array of bytes or
+	/// booleans (stored as the bytes 0/1): the `push` and the byte.
+	/// Every round pushes the same byte and does nothing
 	/// else, so the loop appends `b - a` copies of it at once
 	/// (`fa_array_fill`). The target is found as for a copy (see the module).
 	pub(crate) fn fill_loop(
@@ -473,28 +475,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		else {
 			return Ok(None);
 		};
-		let Repr::Int(int) = self.item_repr(item_type, push)? else {
-			return Ok(None);
-		};
-		if int.bits != 8 {
-			return Ok(None);
-		}
 		let argument = self.ungrouped(argument);
 		let value = match self.view(argument) {
-			View::Integer(value) => Some(value),
-			_ => match self.comptime_value(argument) {
-				Some(fa_interpreter::Value::Integer(value)) => Some(value),
-				_ => None,
-			},
+			View::Integer(value) => Some(Value::Integer(value)),
+			View::Boolean(value) => Some(Value::Boolean(value)),
+			_ => self.comptime_value(argument),
 		};
-		let Some(value) = value else {
-			return Ok(None);
+		let byte = match (self.item_repr(item_type, push)?, value) {
+			(Repr::Bool, Some(Value::Boolean(value))) => u64::from(value),
+			(Repr::Int(int), Some(Value::Integer(value))) if int.bits == 8 => {
+				// A value the item can't hold is a range check of every push: keep them.
+				let (low, high) = if int.signed { (-128, 127) } else { (0, 255) };
+				if value < ethnum::I256::from(low) || value > ethnum::I256::from(high) {
+					return Ok(None);
+				}
+				value.as_i64() as u8 as u64
+			}
+			_ => return Ok(None),
 		};
-		// a value the item can't hold is a range check of every push: keep them
-		let (low, high) = if int.signed { (-128, 127) } else { (0, 255) };
-		if value < ethnum::I256::from(low) || value > ethnum::I256::from(high) {
-			return Ok(None);
-		}
 		let mut stack = vec![iterable.index(), body.index()];
 		while let Some(node) = stack.pop() {
 			let id = NodeId::new(node);
@@ -505,7 +503,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			self.tree.nodes[node].for_each_child(|child| stack.push(child));
 		}
-		Ok(Some((push, value.as_i64() as u8 as u64)))
+		Ok(Some((push, byte)))
 	}
 
 	/// `fa_array_fill(target, rounds, byte)`, the rounds of `start..end`

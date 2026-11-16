@@ -1790,6 +1790,19 @@ Part 2 remains unimplemented at this completed-item context boundary.
 
 ## Arrays and arithmetic performance (implementation, 2026-11-16)
 
+- **Boolean block fills (item 2):** extend the existing byte-fill recognizer
+  to `Repr::Bool` with a Boolean literal or analyzer compile-time value,
+  encoded as the canonical byte 0/1. Both contiguous and segmented arrays
+  use their existing fill runtime; the storage layout and ABI do not change.
+  The single-push body, plain receiver, finite range, reactive and coroutine
+  restrictions remain. Runtime values (including ordinary named constants
+  not supplied by compile-time evaluation), non-byte representations and
+  additional effects keep their original rounds. O0 IR checks cover firing
+  and fallback on all three LLVM targets; generic instances, function values,
+  callbacks, captures, async suspension and whole/split packages execute with
+  leak checks. Bounds still evaluate left to right once, appends retain
+  existing items, and empty ranges do nothing. Measurements and final
+  validation follow in the lead's `reports/perf-arrays.md`.
 - **Constant remainder:** an exact positive immutable divisor declared outside
   the innermost loop can use the existing guarded unsigned reciprocal for a
   64-bit signed `%%` on native/freestanding targets. The singleton type, use

@@ -1328,6 +1328,108 @@ console.log(moduleConstant(-17), localConstant(-17), negative(-17), quotient(-17
 	}
 
 	#[test]
+	fn boolean_fills_require_a_constant_single_byte_and_no_other_effect() {
+		let source = r#"
+let disabled = false
+function yes = (items: Array<Boolean>, n: Integer) mutates items => {
+	for 0..n { items.push(true) }
+}
+function no = (items: GrowingArray<Boolean>, n: Integer) mutates items => {
+	for -2..=n { items.push(false) }
+}
+function named = (items: Array<Boolean>, n: Integer) mutates items => {
+	for 0..n { items.push(disabled) }
+}
+function dynamic = (items: Array<Boolean>, n: Integer, value: Boolean) mutates items => {
+	for 0..n { items.push(value) }
+}
+function indexed = (items: Array<Boolean>, n: Integer) mutates items => {
+	for index in 0..n { items.push(index == 0) }
+}
+function effects = (items: Array<Boolean>, n: Integer) mutates items => {
+	for 0..n {
+		items.push(true)
+		items.push(false)
+	}
+}
+function wide = (items: Array<UInt16>, n: Integer) mutates items => {
+	for 0..n { items.push(1) }
+}
+function optional = (items: Array<Boolean?>, n: Integer) mutates items => {
+	for 0..n { items.push(true) }
+}
+mutable items: Array<Boolean> = []
+mutable stable: GrowingArray<Boolean> = []
+mutable words: Array<UInt16> = []
+mutable maybe: Array<Boolean?> = []
+yes(items, arguments.length)
+no(stable, arguments.length)
+named(items, arguments.length)
+dynamic(items, arguments.length, arguments.length == 0)
+indexed(items, arguments.length)
+effects(items, arguments.length)
+wide(words, arguments.length)
+optional(maybe, arguments.length)
+console.log(items, stable, words, maybe)
+"#;
+		for target in [Target::Native, Target::NativeFreestanding, Target::Wasm] {
+			let ir = ir_at_target(
+				&format!("boolean-fills-{}", target.name()),
+				source,
+				true,
+				OptLevel::O0,
+				target,
+			);
+			let yes = function(&ir, "fa.yes");
+			assert_eq!(count(yes, "@fa_array_fill("), 1, "{yes}");
+			assert!(yes.contains("i32 1)"), "{yes}");
+			assert!(!yes.contains("for_body:"), "{yes}");
+			let no = function(&ir, "fa.no");
+			assert_eq!(count(no, "@fa_segmented_fill("), 1, "{no}");
+			assert!(no.contains("i32 0, i32 6)"), "{no}");
+			assert!(!no.contains("for_body:"), "{no}");
+			for name in ["named", "dynamic", "indexed", "effects", "wide", "optional"] {
+				let body = function(&ir, &format!("fa.{name}"));
+				assert!(!body.contains("@fa_array_fill("), "{body}");
+				assert!(body.contains("for_body:"), "{body}");
+			}
+		}
+	}
+
+	#[test]
+	fn boolean_fills_cover_generic_captured_and_coroutine_bodies() {
+		let ir = ir_of(
+			"boolean-fills-call-boundaries",
+			include_str!("../../cli/tests/programs/boolean-fill.fa"),
+		);
+		// Both concrete generic layouts and the captured function must batch.
+		let generic: Vec<_> = ir
+			.split("define ")
+			.filter(|body| {
+				body.lines()
+					.next()
+					.is_some_and(|line| line.contains("@fa.generic"))
+			})
+			.collect();
+		assert_eq!(generic.len(), 2, "{ir}");
+		for body in generic {
+			assert_eq!(count(body, "@fa_array_fill("), 2, "{body}");
+		}
+		let captured = function(&ir, "fa.build");
+		assert_eq!(count(captured, "@fa_array_fill("), 1, "{captured}");
+		let asynchronous = ir_of(
+			"boolean-fills-coroutine-fallback",
+			include_str!("programs/async-boolean-fill.fa"),
+		);
+		assert!(!asynchronous.contains("@fa_array_fill("), "{asynchronous}");
+		assert!(
+			!asynchronous.contains("@fa_segmented_fill("),
+			"{asynchronous}"
+		);
+		assert!(asynchronous.contains("for_body:"), "{asynchronous}");
+	}
+
+	#[test]
 	fn consecutive_pushes_keep_the_header_in_registers() {
 		// only the cold paths that grow the array read it again (enough
 		// pushes for `many` to stay a function of its own)

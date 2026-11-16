@@ -396,6 +396,33 @@ mod tests {
 	}
 
 	#[test]
+	fn an_empty_reference_snapshot_stays_empty_after_its_source_is_reseated() {
+		let mut host = Functions::default();
+		let body = Expr::Block(vec![
+			Expr::Let(2, Expr::Array(vec![Item::One(int(7))]).boxed()),
+			Expr::Bind(0, Expr::none().boxed()),
+			Expr::Bind(
+				1,
+				Expr::Lend(Place {
+					slot: 0,
+					steps: Vec::new(),
+				})
+				.boxed(),
+			),
+			Expr::Bind(
+				0,
+				Expr::Lend(Place {
+					slot: 2,
+					steps: vec![Step::Index(int(0))],
+				})
+				.boxed(),
+			),
+			Expr::Local(1),
+		]);
+		assert_eq!(run(&mut host, &body, 3), Ok(Value::None));
+	}
+
+	#[test]
 	fn a_reference_result_keeps_the_callers_place() {
 		let mut host = Functions::default();
 		host.0.insert(

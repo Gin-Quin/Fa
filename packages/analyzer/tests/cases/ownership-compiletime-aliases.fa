@@ -1,0 +1,50 @@
+-- prints: 10 10
+-- prints: 10 10
+-- prints: 20 20
+-- prints: 10 10
+-- prints: 21 21
+
+function frozen = (values: Array<Integer>, start: Integer): Integer => do {
+	mutable index = start
+	use selected = values[index]
+	index += 1
+	selected
+} catch _error => -1
+
+function selected = (values: Array<Integer>, change: Boolean): Integer => do {
+	mutable use cursor = values[0]
+	if change { reuse cursor = values[1] }
+	cursor
+} catch _error => -1
+
+function snapshot = (values: Array<Integer>): Integer => do {
+	mutable use cursor = values[0]
+	use fixed = cursor
+	reuse cursor = values[1]
+	fixed
+} catch _error => -1
+
+function next = (state: { index: Integer }): Integer mutates state.index => {
+	let previous = state.index
+	state.index += 1
+	previous
+}
+
+function once = (values: Array<Integer>): Integer => do {
+	mutable state = { index = 0 }
+	use chosen = values[next(state)]
+	let first = chosen
+	let second = chosen
+	first + second + state.index
+} catch _error => -1
+
+static first = @frozen([10, 20], 0)
+static unchanged = @selected([10, 20], false)
+static changed = @selected([10, 20], true)
+static fixed = @snapshot([10, 20])
+static onlyOnce = @once([10, 20])
+console.log(first, frozen([10, 20], 0))
+console.log(unchanged, selected([10, 20], false))
+console.log(changed, selected([10, 20], true))
+console.log(fixed, snapshot([10, 20]))
+console.log(onlyOnce, once([10, 20]))

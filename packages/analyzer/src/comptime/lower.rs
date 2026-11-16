@@ -99,7 +99,7 @@ pub struct Lowerer<'a> {
 	/// Arithmetic follows JavaScript's numbers (a JavaScript target).
 	js: bool,
 	slots: FxHashMap<SymbolId, Slot>,
-	aliases: FxHashMap<SymbolId, Place>,
+	borrowed_symbols: FxHashSet<SymbolId>,
 	borrowed_results: FxHashSet<NodeId>,
 	next: Slot,
 	/// Lowering a compile-time expression: no enclosing function's frame.
@@ -131,7 +131,7 @@ impl<'a> Lowerer<'a> {
 			a,
 			js: super::is_js_target(session.target()),
 			slots: FxHashMap::default(),
-			aliases: FxHashMap::default(),
+			borrowed_symbols: FxHashSet::default(),
 			borrowed_results: FxHashSet::default(),
 			next: 0,
 			compile_time: true,
@@ -185,6 +185,12 @@ impl<'a> Lowerer<'a> {
 		let mut params = Vec::with_capacity(info.params.len());
 		for param in &info.params {
 			let slot = self.bind(param.symbol);
+			if !self
+				.types()
+				.parameter_can_be_consumed(self.a.symbols.symbol(param.symbol).ty)
+			{
+				self.borrowed_symbols.insert(param.symbol);
+			}
 			params.push(Param {
 				slot,
 				default: None,
@@ -193,7 +199,10 @@ impl<'a> Lowerer<'a> {
 		let captures: Vec<Slot> = info
 			.captures
 			.iter()
-			.map(|&symbol| self.bind(symbol))
+			.map(|&symbol| {
+				self.borrowed_symbols.insert(symbol);
+				self.bind(symbol)
+			})
 			.collect();
 		// the defaults, then the patterns of destructured parameters
 		for (index, param) in info.params.iter().enumerate() {
@@ -427,11 +436,10 @@ impl<'a> Lowerer<'a> {
 
 	/// The read of a symbol of this file.
 	fn read_symbol(&mut self, n: NodeId, symbol: SymbolId) -> Expr {
-		if let Some(place) = self.aliases.get(&symbol) {
-			return Expr::Read(place.clone());
-		}
 		if let Some(&slot) = self.slots.get(&symbol) {
-			return if self.a.has_flags(n, NodeFlags::MOVE) || self.a.moved_reads.contains(&n) {
+			return if !self.borrowed_symbols.contains(&symbol)
+				&& (self.a.has_flags(n, NodeFlags::MOVE) || self.a.moved_reads.contains(&n))
+			{
 				Expr::Move(slot)
 			} else {
 				Expr::Local(slot)
@@ -785,10 +793,11 @@ impl<'a> Lowerer<'a> {
 			View::Use { value, .. } => self.use_binding(n, value),
 			View::Reuse { name: _, value } => match self.a.resolution(n) {
 				Resolution::Local(symbol) => {
-					if let Some(place) = self.place(value) {
-						self.aliases.insert(symbol, place);
-					}
-					Expr::none()
+					let Some(&slot) = self.slots.get(&symbol) else {
+						return self.unsupported("an unbound reseatable reference");
+					};
+					self.borrowed_symbols.insert(symbol);
+					Expr::Bind(slot, self.bound(value).boxed())
 				}
 				_ => Expr::none(),
 			},
@@ -1033,18 +1042,9 @@ impl<'a> Lowerer<'a> {
 		let Some(symbol) = self.a.symbols.symbol_of_decl(n) else {
 			return Expr::none();
 		};
-		match self.place(value) {
-			Some(place) => {
-				self.aliases.insert(symbol, place);
-				Expr::none()
-			}
-			None => {
-				// a temporary: bound once
-				let value = self.expr(value);
-				let slot = self.bind(symbol);
-				Expr::Let(slot, value.boxed())
-			}
-		}
+		let slot = self.bind(symbol);
+		self.borrowed_symbols.insert(symbol);
+		Expr::Bind(slot, self.bound(value).boxed())
 	}
 
 	/// `target = value`.
@@ -1274,15 +1274,10 @@ impl<'a> Lowerer<'a> {
 		match syntax::view(self.tree, n) {
 			View::Group(inner) => self.place(inner),
 			View::Name(_) => match self.a.resolution(n) {
-				Resolution::Local(symbol) => {
-					if let Some(place) = self.aliases.get(&symbol) {
-						return Some(place.clone());
-					}
-					self.slots.get(&symbol).map(|&slot| Place {
-						slot,
-						steps: Vec::new(),
-					})
-				}
+				Resolution::Local(symbol) => self.slots.get(&symbol).map(|&slot| Place {
+					slot,
+					steps: Vec::new(),
+				}),
 				_ => None,
 			},
 			View::Access { target, members } => {

@@ -1041,6 +1041,15 @@ impl<'i, 'h> Machine<'i, 'h> {
 	fn unary(&mut self, op: Unary, value: Out) -> Result<Action, Flow> {
 		match op {
 			Unary::Bind(slot) => {
+				// An empty optional reference has no designated place. Keep it
+				// empty when the source reference is subsequently reseated.
+				let value = if let Out::Loan(loan) = &value
+					&& matches!(self.read_loan(loan)?, Value::None)
+				{
+					Value::None.into()
+				} else {
+					value
+				};
 				self.locals()[slot as usize] = value;
 				return Self::done(Value::None);
 			}

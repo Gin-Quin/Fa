@@ -432,6 +432,60 @@ mod tests {
 	}
 
 	#[test]
+	fn compile_time_aliases_freeze_indices_and_reseat_only_at_runtime() {
+		let (session, file) = crate::analyze_source(include_str!(
+			"../../tests/cases/ownership-compiletime-aliases.fa"
+		));
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		for name in ["first", "unchanged", "fixed", "changed", "onlyOnce"] {
+			let expected = match name {
+				"changed" => 20,
+				"onlyOnce" => 21,
+				_ => 10,
+			};
+			let analysis = session.analysis(file);
+			let symbol = analysis
+				.symbols
+				.symbols()
+				.iter()
+				.enumerate()
+				.find(|(_, symbol)| {
+					session.types().syms.resolve(symbol.name) == name
+						&& matches!(symbol.kind, crate::symbols::SymbolKind::Static)
+				})
+				.unwrap()
+				.0;
+			assert_eq!(
+				analysis
+					.static_values
+					.get(&crate::ids::SymbolId(symbol as u32)),
+				Some(&Value::int(expected)),
+				"{name}: {:?}", session.comptime.functions.values().find(|function| function.name == "selected")
+			);
+		}
+	}
+
+	#[test]
+	fn a_borrowed_ordinary_parameter_never_consumes_its_slot() {
+		let (mut session, file) = crate::analyze_source(
+			"function same = (text: String): String => text\nfunction run = (): String => { let message = \"hello\"\nsame(message) }\nexport = run()\n",
+		);
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		assert_eq!(
+			host::evaluate_export(&mut session, file).unwrap(),
+			Value::string("hello")
+		);
+	}
+
+	#[test]
 	fn exact_types_of_values() {
 		let mut types = TypeStore::new();
 		let value = Value::object(vec![

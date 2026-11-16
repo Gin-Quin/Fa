@@ -460,6 +460,8 @@ function main = () => {
 
 Before execution reaches its declaration, a local function with captures can only be called directly. That call borrows its captures, which must already be initialized. Taking it as a value there is an error, whether or not the value escapes: move the declaration above the use, or call the function directly. A function without captures has no environment and no such restriction. Reaching the declaration again in another loop iteration or recursive call creates a new environment for that execution.
 
+Calling another local function from an escaping function's body captures that function's handle. If the callee has captures, its declaration must have been reached when the escaping caller is declared: declare the callee first. Two local functions that both capture and call each other cannot both escape; pass their captured data as parameters, or make them methods of one object. Direct calls between nonescaping local functions still borrow at the call; there is no deferred environment initialization.
+
 A value that can't be copied, like a [task](/advanced/concurrency#tasks) or a value of a type with a [`destroy`](/advanced/foreign-code#releasing-c-resources) function, can't be captured by an escaping closure.
 
 Modifying a captured value is not an effect that the closure declares: the value belongs to the enclosing function, which sees the change. To share state with an escaping closure, pass it as a mutated parameter, or return the new value. The compiler can share immutable storage when no write or lifetime difference can be observed; this optimization never makes an otherwise forbidden collection copy legal. A closure can't capture a `mutable use` alias.

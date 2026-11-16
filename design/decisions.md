@@ -1803,6 +1803,14 @@ Part 2 remains unimplemented at this completed-item context boundary.
   leak checks. Bounds still evaluate left to right once, appends retain
   existing items, and empty ranges do nothing. Measurements and final
   validation follow in the lead's `reports/perf-arrays.md`.
+- **Item 2 instruction gate:** all 40 comparisons pass +1%, with unchanged
+  sources, flags and exact outputs. Sieve's main loses the 10 M-instruction
+  initialization loop, but libc's repeated byte stores contribute 10 M Ir:
+  whole-process counts are 203,737,011 before and 203,737,139 after. Its hot
+  marking loop is unchanged. This is a block-fill code-generation change,
+  not an instruction-count speedup. CPU acceptance is measured separately.
+  The largest other increase is 36 Ir on words (+0.000127%). Full native,
+  freestanding and wasm executable/leak corpora pass (829/740/808 programs).
 - **Constant remainder:** an exact positive immutable divisor declared outside
   the innermost loop can use the existing guarded unsigned reciprocal for a
   64-bit signed `%%` on native/freestanding targets. The singleton type, use

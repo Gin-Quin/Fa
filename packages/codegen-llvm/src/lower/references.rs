@@ -47,10 +47,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			self.string_type
 		};
-		let snapshot = match self.content_view_slots.get(&symbol) {
+		let shared = self.shared.contains_key(&symbol) || self.frame().owner.is_none();
+		let key = (symbol, (!shared).then_some(self.frame().function));
+		let snapshot = match self.content_view_slots.get(&key) {
 			Some(&slot) => slot,
 			None => {
-				let slot = if self.shared.contains_key(&symbol) || self.frame().owner.is_none() {
+				let slot = if shared {
 					let global = self.module.add_global(ty, None, "fa.content_view");
 					global.set_initializer(&ty.const_zero());
 					global.set_linkage(inkwell::module::Linkage::Internal);
@@ -64,7 +66,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						repr: place.repr,
 					}
 				};
-				self.content_view_slots.insert(symbol, slot);
+				self.content_view_slots.insert(key, slot);
 				slot
 			}
 		};

@@ -340,8 +340,10 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The `mutable use` references: the slot holding the address of the
 	/// place they designate, and its representation.
 	references: FxHashMap<SymbolId, (PointerValue<'ctx>, Repr)>,
-	/// Independent descriptor storage for copied String content designations.
-	content_view_slots: FxHashMap<SymbolId, Slot<'ctx>>,
+	/// Descriptor snapshots per binding and compiled function instance;
+	/// module-level designations use no function key.
+	content_view_slots:
+		FxHashMap<(SymbolId, Option<inkwell::values::FunctionValue<'ctx>>), Slot<'ctx>>,
 	/// The places of the `provide` statements lowered so far.
 	provided: FxHashMap<NodeId, Slot<'ctx>>,
 	/// The receiver of the method call being lowered when it is already

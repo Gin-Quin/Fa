@@ -44,7 +44,8 @@ pub(crate) struct FileState<'a, 'ctx> {
 	slots: FxHashMap<SymbolId, Slot<'ctx>>,
 	owned_locals: FxHashMap<SymbolId, Slot<'ctx>>,
 	references: FxHashMap<SymbolId, (inkwell::values::PointerValue<'ctx>, Repr)>,
-	content_view_slots: FxHashMap<SymbolId, Slot<'ctx>>,
+	content_view_slots:
+		FxHashMap<(SymbolId, Option<inkwell::values::FunctionValue<'ctx>>), Slot<'ctx>>,
 	provided: FxHashMap<NodeId, Slot<'ctx>>,
 	symbol_functions: FxHashMap<SymbolId, NodeId>,
 	local_uses: std::cell::RefCell<FxHashMap<SymbolId, Vec<NodeId>>>,

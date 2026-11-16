@@ -1632,3 +1632,11 @@ Three new IR tests pass, including firing/escaping/copy/shared initializer cases
 and all six pointer-width/budget cases. C ASan/UBSan passes with repeated local
 header growth, reserve, copy, clear and free. Full workspace, all-target fixtures
 and measurement acceptance follow in the lead report.
+
+Header instruction checkpoint: lru is 19,070,292 Ir, +1.764% versus probe reuse
+alone, despite 181,188 fewer data reads. Extra register moves/stores offset the
+saved metadata loads. Do not call this a CPU gain or regression before its
+control series; CPU is the acceptance metric. The named-versus-literal LLVM
+header type produces identical optimized main IR in a scratch diagnostic and
+is not the cause. The partial profile checkpoint retains all completed rows;
+full workspace and final profile/CPU results remain pending.

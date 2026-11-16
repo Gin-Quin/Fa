@@ -48,7 +48,7 @@ pub(crate) struct Table<'ctx> {
 const TABLE_DENSE: u64 = 1 << 40;
 /// `TABLE_INLINE` of the runtime: a flag of `entry_size`.
 const TABLE_INLINE: u64 = 1 << 41;
-/// A 32-bit key occupies its own presence word (`0` in a spare slot).
+/// A 32-bit key occupies its own presence word (all ones has a spare slot).
 const TABLE_INLINE_KEY32: u64 = 1 << 42;
 /// `TABLE_CHUNK_SLOTS` of the runtime: the entries of a chunk.
 pub(crate) const TABLE_CHUNK_SLOTS: u64 = 32;
@@ -395,7 +395,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let (_, key32) = self.inline_slot(table);
 			// a slot: the tag of the hash (0: empty) then the entry, or the
 			// entry alone when its 32-bit key says whether it is there (the
-			// key 0 then lives in one more slot, after the others)
+			// all-ones key then lives in one more slot, after the others)
 			let slot_type = if key32 {
 				table.entry
 			} else {
@@ -404,10 +404,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			};
 			let total = slots + u64::from(key32);
 			let mut probe = vec![None; total as usize];
-			let mut zero = false;
+			let mut sentinel = false;
 			for ((hash, key), entry) in keys.iter().zip(entries) {
-				if key32 && *key == ConstantKey::Word(0) {
-					zero = true;
+				if key32 && *key == ConstantKey::Word(u64::from(u32::MAX)) {
+					sentinel = true;
 					probe[slots as usize] = Some(entry);
 					continue;
 				}
@@ -430,7 +430,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			let probe: Vec<_> = probe
 				.into_iter()
-				.map(|slot| slot.unwrap_or_else(|| slot_type.const_zero()))
+				.map(|slot| {
+					slot.unwrap_or_else(|| {
+						if key32 {
+							let key = self.llvm_type(table.key).into_int_type().const_all_ones();
+							table.entry.const_named_struct(&[
+								key.into(),
+								self.llvm_type(table.value.expect("an inline map"))
+									.const_zero(),
+							])
+						} else {
+							slot_type.const_zero()
+						}
+					})
+				})
 				.collect();
 			let probe = self.readonly_global(
 				slot_type.const_array(&probe).into(),
@@ -440,7 +453,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				null.into(),
 				i64.const_int(count, false).into(),
 				i64.const_int(total, false).into(),
-				i64.const_int(u64::from(zero), false).into(),
+				i64.const_int(u64::from(sentinel), false).into(),
 				probe.into(),
 				i64.const_int(mask, false).into(),
 				i64.const_zero().into(),
@@ -1110,6 +1123,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
 		let key = self.convert(key, table.key, node.index())?;
+		if name == "fa_table_find"
+			&& let Some(result) = self.reuse_map_probe(pointer, table, key, node)?
+		{
+			return Ok(result);
+		}
+		self.table_lookup_uncached(name, pointer, table, key, node)
+	}
+
+	pub(super) fn table_lookup_uncached(
+		&mut self,
+		name: &str,
+		pointer: PointerValue<'ctx>,
+		table: Table<'ctx>,
+		key: Val<'ctx>,
+		_node: NodeId,
+	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
 		let hash = self.hash_of(key)?;
 		let slot = self.alloca(table.key, "key")?;
 		self.builder
@@ -1130,18 +1159,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let i64 = self.context.i64_type();
 		let find = self.runtime.function(name)?;
-		let position = self
-			.call_value(
-				find,
-				&[
-					pointer.into(),
-					hash.into(),
-					slot.pointer.into(),
-					equals.into(),
-					self.entry_size(table).into(),
-					i64.const_int(bitwise, false).into(),
-				],
-			)?
+		let arguments = [
+			pointer.into(),
+			hash.into(),
+			slot.pointer.into(),
+			equals.into(),
+			self.entry_size(table).into(),
+			i64.const_int(bitwise, false).into(),
+		];
+		let position =
+			if name == "fa_table_remove" && self.map_probe_inline_delete_supported(table) {
+				// Inline removal only finds the entry; release below updates a
+				// cached miss after the backward shift makes its final hole.
+				self.builder
+					.build_call(find, &arguments, "")?
+					.try_as_basic_value()
+					.basic()
+					.expect("a position")
+			} else {
+				self.call_value(find, &arguments)?
+			}
 			.into_int_value();
 		Ok((position, hash))
 	}
@@ -1159,6 +1196,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<PointerValue<'ctx>, Error> {
 		let append = self.runtime.function("fa_table_append")?;
 		let i64 = self.context.i64_type();
+		let key_bits = if table.inline && matches!(table.key, Repr::Int(int) if int.bits == 32) {
+			key.int()
+		} else {
+			self.context.i32_type().const_zero()
+		};
 		let hash_at = self.hash_at_function(table.key)?;
 		let entry = self
 			.call_value(
@@ -1168,6 +1210,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					hash.into(),
 					self.entry_size(table).into(),
 					probe.unwrap_or_else(|| i64.const_zero()).into(),
+					key_bits.into(),
 					hash_at.as_global_value().as_pointer_value().into(),
 				],
 			)?
@@ -1311,6 +1354,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			self.emit_drop(key)?;
 		}
+		if self.release_inline_map_with_probe(pointer, table, position)? {
+			return Ok(kept);
+		}
+		self.invalidate_all_map_probes()?;
 		match hash {
 			Some(hash) => self.builder.build_call(
 				self.runtime.function("fa_table_kill")?,

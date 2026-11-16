@@ -272,7 +272,9 @@ between two folds (bijective) and compared bitwise in the probe loop; the other
 keys use their generated `==`. Iteration currently tests the occupancy bit of
 each slot rather than using `tzcnt`; the randomized hash seed remains planned.
 
-- **Compact integer slots.** An inline map with 32-bit integer keys and values of at most 32 bits stores 8 bytes per slot. Zero has one extra slot and a separate presence bit, so every key and value bit pattern remains available. Copies, growth, reserve and shifting deletion preserve the zero entry. Other integer widths retain their existing layouts.
+- **Compact integer slots.** An inline map with 32-bit integer keys and values of at most 32 bits stores 8 bytes per slot. The all-ones key has one extra slot and a separate presence bit, so every key and value bit pattern remains available. Copies, growth, reserve, read-only/frame literals and shifting deletion preserve that entry. Other integer widths retain their existing layouts.
+
+- **Private negative probes.** A synchronous closed function may retain one private inline map's failed lookup for a following lookup/insertion of the same local key. Table and key identity are checked on the executed path. Insertions, reserve, clear, replacement/drop and unknown map effects invalidate it. Backward-shift deletion keeps a miss by selecting the earlier of its former empty slot and the final new hole, measured cyclically from the key's home. Captures, references, callbacks, generics, external/multi-file and asynchronous programs retain ordinary lookup. The raw 32-bit key accompanies append so LLVM can eliminate a sentinel test excluded by its range.
 
 - **Dense entries.** When the program keeps no reference into the values of maps of a type, entries live in one array that can move on growth: a lookup needs no chunk-directory read. A short reference ending before any map write or program call does not prevent this layout. Each compilation unit publishes its reference uses so every unit agrees. `GrowingMap` retains stable chunks.
 

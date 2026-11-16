@@ -1565,3 +1565,29 @@ identical kernels; the corrected ports do not establish a speedup. Profiles
 prioritize String field append/return costs, explicit-table checked operations
 and standard Map short-key probe work. No compiler optimization is part of this
 continuation; the implementation and language gaps remain separate TODOs.
+
+## Collections performance (implementation, 2026-11-16)
+
+### Ported private negative map probes
+
+Port the proof of `1e3a91d7` onto trunk's storage ABI, without changing map
+semantics or the eager reservation contract. One function-local private inline
+Map/32-bit-key pair can retain a failed lookup. A runtime valid bit plus table
+pointer and raw-key equality protect joins and backedges; ordinary lookup is the
+fallback. Index-changing runtime calls, potentially map-mutating named calls and
+map-owning drops invalidate the hint. Calls proved to mutate only map-free data
+can keep it. Closed synchronous whole-program compilation excludes callbacks,
+generics, external code, captures and reference uses. This deliberately retains
+the validated optimization's conservative scope.
+
+An inline backward shift adds exactly one empty slot and leaves former empty
+slots empty. Update a missing key's probe to the earlier of its old empty slot
+and that hole, in cyclic order from its home. The separate all-ones-key slot
+cannot affect a run. Append receives raw key bits, allowing the sentinel guard
+to disappear when range facts exclude it. Read-only literal construction and
+`fa_table_local` use the same all-ones marker as heap slots; explicit copies,
+reserve/growth, clear, iteration and deletion keep every 32-bit key available.
+Bump the object-cache version for the changed append ABI.
+
+Validation and measurement are recorded incrementally in the lead report;
+acceptance results will be added after the complete comparison.

@@ -254,6 +254,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Drops a value (nothing for a value that owns no memory).
 	pub(crate) fn emit_drop(&self, value: Val<'ctx>) -> Result<(), Error> {
+		self.invalidate_dropped_map_probes(value.repr)?;
 		let Some(raw) = value.value else {
 			return Ok(());
 		};

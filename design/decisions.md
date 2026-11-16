@@ -1935,7 +1935,10 @@ layouts and all value assertions. No expected-skip list changes.
   header: only direct indexing, iteration, measurement, replacement and known
   direct push/reserve calls are accepted globally. Within the loop replacement
   and reserve are rejected. Exports, references, shared/reactive owners and
-  foreign-file uncertainty reject the proof. The invariant contiguous mode is
+  foreign-file uncertainty reject the private-owner proof. Parameters may
+  instead use the existing no-reference hoisting proof only when the body has
+  no calls at all: an aliased GrowingArray parameter may push without
+  invalidating item references. The invariant contiguous mode is
   available to LLVM's existing loop unswitching, preserving the segmented path.
 - If that loop pushes, cursor/end/length use private scalar slots promoted by
   LLVM, with write-through stores on every push. Cold segment growth refreshes

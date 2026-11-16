@@ -1744,3 +1744,9 @@ identical kernels; the corrected ports do not establish a speedup. Profiles
 prioritize String field append/return costs, explicit-table checked operations
 and standard Map short-key probe work. No compiler optimization is part of this
 continuation; the implementation and language gaps remain separate TODOs.
+
+## String redesign and faithful trunk ports (2026-11-16)
+
+The trunk merge starts every benchmark main and variant from main cbe3c5a6. Its byte parsers keep Byte and their existing sentinel behavior: the old bytes() access becomes toUtf8(), including direct get/index reads and iteration. A byte parser is not changed into a UTF-16 parser. The backend retains its lazy UTF-8 byte reads, so immediate access does not construct a Bytes allocation. UTF-16 numeric access remains codeUnitAt where the program requests code units. No algorithm, counter width, reservation or Rust pairing changes as part of this migration.
+
+The comparison uses separately frozen release executables for unmodified trunk and the merged redesign, with compiler-source revisions and hashes recorded by the trunk audit driver. Instructions cover all audit rows and variants; CPU conclusions use the eight requested default-size rows, 21 interleaved rounds and their identical-binary controls on CPU5. Builds and tests stay on CPUs0–4; CPU timing waits for all builds, tests and profilers. Keep the first controlled series, including unresolved results, and preserve the trunk profile as a supplemental baseline rather than replacing it with candidate data.

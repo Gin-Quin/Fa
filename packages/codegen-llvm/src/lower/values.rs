@@ -712,6 +712,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// pools too (a generic `Pool<Item>` parameter of another file)
 			(Repr::Array(a), Repr::Array(b))
 			| (Repr::Growing(a), Repr::Growing(b))
+			| (Repr::Columnar(a), Repr::Columnar(b))
 			| (Repr::Pool(a), Repr::Pool(b)) => {
 				return match (self.repr_of(a, 0), self.repr_of(b, 0)) {
 					(Ok(a), Ok(b)) => a == b || self.same_layout(a, b),

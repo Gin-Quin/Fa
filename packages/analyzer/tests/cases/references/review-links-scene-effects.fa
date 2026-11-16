@@ -15,7 +15,7 @@ type Scene = {
   node.world.translation.x = x
  }
 }
-function exercise = (): Float32 => {
+function exercise = (): Integer => {
  mutable scene: Scene = {}
  use node = scene.add()
  let world = Transform {
@@ -24,7 +24,7 @@ function exercise = (): Float32 => {
  }
  scene.update(node, world)
  scene.narrow(node, 9.0)
- node.world.translation.x
+ if node.world.translation.x == 9.0 { 9 } else { 0 }
 }
 static result = @exercise()
 console.log(result) -- prints: 9

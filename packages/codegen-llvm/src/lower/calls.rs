@@ -280,6 +280,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Set(ty)
 			| Repr::Growing(ty)
 			| Repr::Pool(ty)
+			| Repr::Columnar(ty)
 			| Repr::Sync(ty)
 			| Repr::Task(ty)
 				if !function.bindings.is_empty()
@@ -650,6 +651,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Set(ty)
 			| Repr::Growing(ty)
 			| Repr::Pool(ty)
+			| Repr::Columnar(ty)
 				if !function.bindings.is_empty()
 					&& self
 						.types()

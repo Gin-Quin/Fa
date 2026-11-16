@@ -166,6 +166,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// values of such a map (`design/decisions.md`, "Dense maps"):
 	/// `program::unsafe_maps`.
 	pub(crate) fn dense_map(&self, ty: TypeId) -> bool {
+		// Layout facts belong to the instantiated collection, not its
+		// generic spelling: callers and callees must use the same flags.
+		let ty = self.concrete_type(ty);
 		if self.whole_program {
 			return !self.unsafe_maps.contains(&ty);
 		}
@@ -182,6 +185,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Whether a dense map type keeps its entries out of the probe array: a
 	/// `deleteWhere` iterates over maps of that type.
 	fn deleted_while_iterated(&self, ty: TypeId) -> bool {
+		let ty = self.concrete_type(ty);
 		if self.whole_program {
 			return self.no_inline_maps.contains(&ty);
 		}

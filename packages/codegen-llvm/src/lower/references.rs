@@ -103,15 +103,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let result = self.type_of(node);
 		let members = self.types().union_members(&result);
 		let optional = members.contains(&fa_analyzer::ids::TypeId::NONE);
-		let element = if optional {
-			members
-				.iter()
-				.copied()
-				.find(|&ty| ty != fa_analyzer::ids::TypeId::NONE)?
-		} else {
-			result
-		};
-		Some((element, optional))
+		Some((result, optional))
 	}
 
 	/// Locate the collection's type without evaluating any argument again.
@@ -161,7 +153,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 		element: TypeId,
 	) -> Result<Repr, Error> {
-		let repr = self.repr_of(element, node.index())?;
+		let repr = match self.repr_of(element, node.index())? {
+			// Keep the complete item representation of an optional reference,
+			// including every member of an anonymous union. Selecting one
+			// member would read or write the slot with the wrong layout.
+			Repr::Optional(item) => item.repr(),
+			repr => repr,
+		};
 		let View::Call { callee, .. } = self.view(node) else {
 			return Ok(repr);
 		};

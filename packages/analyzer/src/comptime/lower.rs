@@ -1074,6 +1074,22 @@ impl<'a> Lowerer<'a> {
 		matches!(self.types().kind(self.a.type_of(callee)), TypeKind::Function(sig) if self.types().sig(sig).reference.is_some())
 	}
 
+	fn builtin_borrows(path: &str) -> bool {
+		matches!(
+			path,
+			"Pool#add"
+				| "Pool#find"
+				| "Columnar#add"
+				| "Columnar#find"
+				| "OrderedColumnar#add"
+				| "OrderedColumnar#find"
+				| "OrderedColumnar#get"
+				| "Array#get"
+				| "Array#find"
+				| "Map#get" | "Map#getOrInsert"
+		)
+	}
+
 	fn mark_reference_result(&mut self, value: NodeId) {
 		match syntax::view(self.tree, value) {
 			View::Group(inner) | View::Try(inner) | View::Do(inner) | View::Return(Some(inner)) => {
@@ -1144,6 +1160,7 @@ impl<'a> Lowerer<'a> {
 			View::Call { callee, .. } => {
 				if let Some(info) = self.a.call(value)
 					&& let Callee::Builtin(builtin) = info.callee
+					&& Self::builtin_borrows(builtins::get(builtin).path)
 				{
 					let values = info
 						.arguments
@@ -1209,10 +1226,26 @@ impl<'a> Lowerer<'a> {
 					),
 				])
 			}
-			_ => self.unsupported(format!(
-				"a reference to `{}` at compile time",
-				self.text(value)
-			)),
+			_ => {
+				// A builtin may borrow an owned receiver temporary, e.g.
+				// `[value].find(predicate)`. Keep it until its result is read.
+				let marked = self.borrowed_values.remove(&value);
+				let data = self.expr(value);
+				if marked {
+					self.borrowed_values.insert(value);
+				}
+				let slot = self.temp();
+				Expr::Block(vec![
+					Expr::Let(slot, data.boxed()),
+					Expr::Borrow(
+						Place {
+							slot,
+							steps: Vec::new(),
+						},
+						false,
+					),
+				])
+			}
 		}
 	}
 
@@ -1683,15 +1716,7 @@ impl<'a> Lowerer<'a> {
 				if builtins::std_library::impurity(path).is_some() {
 					return self.impure(path);
 				}
-				if matches!(
-					path,
-					"Pool#add"
-						| "Pool#find" | "Columnar#add"
-						| "Columnar#find" | "OrderedColumnar#add"
-						| "OrderedColumnar#find"
-						| "Array#get" | "Array#find"
-						| "Map#get" | "Map#getOrInsert"
-				) {
+				if Self::builtin_borrows(path) {
 					let values = info
 						.arguments
 						.iter()

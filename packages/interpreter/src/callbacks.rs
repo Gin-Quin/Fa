@@ -9,10 +9,11 @@ use ethnum::I256;
 use crate::builtins;
 use crate::eval::{self, Error};
 use crate::ir::CompareOp;
-use crate::value::{Value, contains};
+use crate::value::{Pool, Value, contains};
 
 enum Container {
 	Array,
+	Pool,
 	Set,
 	Map,
 }
@@ -47,6 +48,12 @@ pub(crate) enum Progress {
 
 impl Callback {
 	pub fn handles(path: &str) -> bool {
+		if let Some(("Pool" | "Columnar" | "OrderedColumnar", operation)) = path.split_once('#') {
+			return matches!(
+				operation,
+				"find" | "filter" | "map" | "every" | "some" | "reduce"
+			);
+		}
 		matches!(
 			path,
 			"Array#find"
@@ -73,7 +80,14 @@ impl Callback {
 	}
 
 	pub fn mutating(path: &str) -> bool {
-		matches!(path, "Array#sortInPlace" | "Array#deleteWhere")
+		matches!(
+			path,
+			"Array#sortInPlace"
+				| "Array#deleteWhere"
+				| "Pool#deleteWhere"
+				| "Columnar#deleteWhere"
+				| "OrderedColumnar#deleteWhere"
+		)
 	}
 
 	pub fn new(path: &str, arguments: Vec<Value>) -> Result<Box<Self>, Error> {
@@ -86,6 +100,7 @@ impl Callback {
 		};
 		let container = match receiver {
 			Value::Set(_) => Container::Set,
+			Value::Pool(_) => Container::Pool,
 			Value::Map(_) => Container::Map,
 			_ => Container::Array,
 		};
@@ -96,7 +111,7 @@ impl Callback {
 		} else if path.ends_with("#filter") {
 			Kind::Filter(container, false)
 		} else if path.ends_with("#deleteWhere") {
-			Kind::Filter(Container::Array, true)
+			Kind::Filter(container, true)
 		} else if path.ends_with("#map") {
 			Kind::Map(matches!(receiver, Value::Set(_)))
 		} else if path.ends_with("#every") {
@@ -195,6 +210,7 @@ impl Callback {
 			Kind::Quantifier(every) => Value::Boolean(every),
 			Kind::Reduce => self.total,
 			Kind::Filter(Container::Set, _) => Value::Set(Arc::new(self.output)),
+			Kind::Filter(Container::Pool, _) => Value::Pool(Arc::new(Pool::new(self.output))),
 			Kind::Map(true) => {
 				let mut set = Vec::new();
 				for value in self.output {

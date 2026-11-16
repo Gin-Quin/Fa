@@ -1,0 +1,31 @@
+-- The scene's composite world update with only the implemented reference features.
+type Vector = { x: Float32, y: Float32, z: Float32 }
+type Transform = { matrix: CArray<Float32, 9>, translation: Vector }
+type Scene = {
+ nodes: GrowingPool<Node> = []
+ type Node = { world: Transform }
+ function add = (self): Node in self.nodes mutates self.nodes.size => self.nodes.add({ world = {
+  matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+  translation = { x = 0.0, y = 0.0, z = 0.0 }
+ } })
+ function update = (self, node: Node in self.nodes, world: Transform) mutates self.nodes[..].world => {
+  node.world = world
+ }
+ function narrow = (self, node: Node in self.nodes, x: Float32) mutates node.world.translation.x => {
+  node.world.translation.x = x
+ }
+}
+function exercise = (): Float32 => {
+ mutable scene: Scene = {}
+ use node = scene.add()
+ let world = Transform {
+  matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+  translation = { x = 7.0, y = 0.0, z = 0.0 }
+ }
+ scene.update(node, world)
+ scene.narrow(node, 9.0)
+ node.world.translation.x
+}
+static result = @exercise()
+console.log(result) -- prints: 9
+console.log(exercise()) -- prints: 9

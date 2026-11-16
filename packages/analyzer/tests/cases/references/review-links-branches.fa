@@ -11,15 +11,20 @@ function fallback = (values: Array<Integer>): Integer in values throws IndexErro
 function block = (values: Array<Integer>): Integer in values throws IndexError => do {
 	try values[0]
 }
-mutable values: Array<Integer> = [1, 2]
-use a = try choose(values, true)
-a = 3
-use b = try choose(values, false)
-b = 4
-use c = try match(values, false)
-c = 5
-use d = try fallback(values)
-d = 6
-use e = try block(values)
-e = 7
-console.log(values) -- prints: [7, 5]
+function exercise = (): Array<Integer> throws IndexError => {
+	mutable values: Array<Integer> = [1, 2]
+	use a = try choose(values, true)
+	a = 3
+	use b = try choose(values, false)
+	b = 4
+	use c = try match(values, false)
+	c = 5
+	use d = try fallback(values)
+	d = 6
+	use e = try block(values)
+	e = 7
+	values
+}
+static result = @exercise()
+console.log(result) -- prints: [7, 5]
+console.log(try exercise()) -- prints: [7, 5]

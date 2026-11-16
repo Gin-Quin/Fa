@@ -872,10 +872,13 @@ impl Walker<'_> {
 				let Some(owner) = self.owner_place(place) else {
 					continue;
 				};
-				if self
-					.place_symbol(owner)
-					.is_some_and(|root| self.declared_outside_functions(root))
-				{
+				if self.place_symbol(owner).is_some_and(|root| {
+					self.declared_outside_functions(root)
+						&& matches!(
+							self.a.symbols.symbol(root).kind,
+							SymbolKind::Let | SymbolKind::Static
+						)
+				}) {
 					continue;
 				}
 				if !self.reported_once.insert((at, "MEM004")) {
@@ -888,7 +891,7 @@ impl Walker<'_> {
 					.syms
 					.resolve(self.a.symbols.symbol(symbol).name);
 				let diagnostic = self.diagnostic(&crate::diagnostics::codes::advanced::MEM004, at,
-					format!("this escaping closure captures `{name}`, a reference into `{owner}`, which doesn't outlive the closure: capture the value's data instead, or keep `{owner}` in an owner that outlives the closure"));
+					format!("this escaping closure captures `{name}`, a reference into `{owner}`, whose elements may not outlive the closure: capture the value's data instead, or keep `{owner}` in an owner that outlives the closure"));
 				self.report(diagnostic);
 			}
 		}

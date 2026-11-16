@@ -172,7 +172,7 @@ impl Generator<'_> {
 	}
 
 	fn cell_from_parts(&mut self, node: NodeId, parts: &Parts) -> Expr {
-		let Some((container, key, map)) = self.pair_of(&parts) else {
+		let Some((container, key, map)) = self.pair_of(parts) else {
 			return self.unsupported(node, "this returned reference place");
 		};
 		let container = self.keep_value_part(Expr::primary(container));
@@ -193,60 +193,51 @@ impl Generator<'_> {
 		}
 	}
 
-	/// An erased Pool.add returns either an object or a primitive slot.
-	/// Dispatch once at insertion and retain the exact target in the cell.
+	/// Retain either the direct object or the exact slot through erased
+	/// pool/columnar insertion and lookup, including ordered columns.
 	pub(crate) fn generic_pool_reference(&mut self, node: NodeId) -> Option<Expr> {
-		if let View::Call { callee, .. } = self.view(node)
-			&& matches!(self.analysis.call(node).map(|call| call.callee), Some(Callee::Builtin(id)) if builtins::get(id).path == "Pool#find")
-			&& matches!(self.types.kind(self.receiver_type(callee)), TypeKind::Collection(_, item, _) if matches!(self.types.kind(item), TypeKind::Param(_)))
-		{
-			let receiver = self.receiver(callee);
-			let receiver = self.keep_value_part(receiver);
-			let predicate = self
-				.analysis
-				.call(node)?
-				.arguments
-				.iter()
-				.find_map(|argument| match argument {
-					Argument::Given(node) => Some(*node),
-					_ => None,
-				})?;
-			let predicate = self.expr(predicate);
-			let find = self.helper("faFindReference");
-			return Some(js::call(find, &[receiver.text, predicate.text]));
+		let View::Call { callee, .. } = self.view(node) else {
+			return None;
+		};
+		let Some(Callee::Builtin(id)) = self.analysis.call(node).map(|call| call.callee) else {
+			return None;
+		};
+		let path = builtins::get(id).path;
+		let ("Pool" | "Columnar" | "OrderedColumnar", method @ ("add" | "find")) =
+			path.split_once('#')?
+		else {
+			return None;
+		};
+		let TypeKind::Collection(_, item, _) = self.types.kind(self.receiver_type(callee)) else {
+			return None;
+		};
+		if !matches!(self.types.kind(item), TypeKind::Param(_)) {
+			return None;
 		}
-		if let View::Call { callee, .. } = self.view(node)
-			&& matches!(self.analysis.call(node).map(|call| call.callee), Some(Callee::Builtin(id)) if builtins::get(id).path == "Pool#add")
-			&& matches!(self.types.kind(self.receiver_type(callee)), TypeKind::Collection(_, item, _) if matches!(self.types.kind(item), TypeKind::Param(_)))
-		{
-			let receiver = self.receiver(callee);
-			let receiver = self.keep_value_part(receiver).primary_text();
-			let argument = self
-				.analysis
-				.call(node)
-				.and_then(|call| call.arguments.first())
-				.and_then(|arg| {
-					if let Argument::Given(node) = arg {
-						Some(*node)
-					} else {
-						None
-					}
-				})
-				.expect("Pool.add argument");
-			let data = self.expr(argument);
-			let data = self.copy_stored(argument, data);
-			let data = self.keep_value_part(data).text;
-			let result = self.temp();
-			let borrow = self.helper("faBorrowSlot");
-			let add = self.helper("faAdd");
-			let expression = format!(
-				"({receiver}[Symbol.toStringTag] === \"fa:ValuePool\" ? {borrow}({receiver}, {receiver}.add({data}), true, false) : {add}({receiver}, {data}))"
-			);
-
-			self.out.line(format!("const {result} = {expression};"));
-			return Some(Expr::name(result, true));
-		}
-		None
+		let receiver = self.receiver(callee);
+		let receiver = self.keep_value_part(receiver);
+		let argument = self
+			.analysis
+			.call(node)?
+			.arguments
+			.iter()
+			.find_map(|argument| match argument {
+				Argument::Given(node) => Some(*node),
+				_ => None,
+			})?;
+		let value = self.expr(argument);
+		let value = if method == "add" {
+			self.copy_stored(argument, value)
+		} else {
+			value
+		};
+		let flag = self.reference_object_flag(item);
+		let helper = self.helper(if method == "add" {
+			"faAddReference"
+		} else {
+			"faFindReference"
+		});
+		Some(js::call(helper, &[receiver.text, value.text, flag]))
 	}
 
 	// ── `use`, `mutable use`, `reuse` ────────────────────────────────────

@@ -786,7 +786,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 					collection.child(Key::Index(Value::int(index as i64))),
 				)))
 			}
-			"Array#get" | "Map#get" | "Map#getOrInsert" => {
+			"Array#get" | "OrderedColumnar#get" | "Map#get" | "Map#getOrInsert" => {
 				let key = arguments
 					.first()
 					.cloned()

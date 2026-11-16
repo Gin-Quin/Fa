@@ -418,13 +418,14 @@ impl Generator<'_> {
 		if self.is_value_pool(receiver_type) {
 			return self.value_pool_call(n, callee, name, arguments);
 		}
+		if owner == "OrderedColumnar" && name != "add" {
+			return self.array_method(n, callee, &format!("Array#{name}"), arguments);
+		}
+
 		if let TypeKind::Collection(_, item, _) = self.types.kind(receiver_type)
 			&& matches!(self.types.kind(item), TypeKind::Param(_))
 		{
 			return self.erased_pool_call(n, callee, name, arguments);
-		}
-		if owner == "OrderedColumnar" && name != "add" {
-			return self.array_method(n, callee, &format!("Array#{name}"), arguments);
 		}
 		let receiver = self.receiver(callee);
 		let nodes: Vec<NodeId> = arguments
@@ -507,11 +508,11 @@ impl Generator<'_> {
 		name: &str,
 		arguments: &[Argument],
 	) -> Expr {
-		if matches!(name, "add" | "find") {
-			if let Some(reference) = self.generic_pool_reference(n) {
-				let read = self.helper("faReferenceValue");
-				return js::call(read, &[reference.text]);
-			}
+		if matches!(name, "add" | "find")
+			&& let Some(reference) = self.generic_pool_reference(n)
+		{
+			let read = self.helper("faReferenceValue");
+			return js::call(read, &[reference.text]);
 		}
 		let receiver = self.receiver(callee);
 		let nodes: Vec<_> = arguments

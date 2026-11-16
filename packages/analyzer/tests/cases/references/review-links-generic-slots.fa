@@ -12,11 +12,11 @@ function check = (): Integer throws IndexError => {
  mutable nodes: Array<Node> = [Node { value = 7 }]
  try replace(nodes, Node { value = 9 })
  use node = try first(nodes)
- mutable entries: Map<String, Integer | Node> = ["key": Node { value = 7 }]
+ mutable entries: Map<String, Integer | Node> = [("key", Node { value = 7 })]
  use item = entry(entries)
  if item is not none { item = 9 }
- let a = try values[0]
- let b = entries["key"] catch _ => 0
+ let a = values[0]
+ let b = entries["key"]
  if a is Integer and b is Integer { a + b + node.value - 18 } else { 0 }
 }
 static result = @check()

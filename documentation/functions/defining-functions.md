@@ -419,7 +419,7 @@ function sumOf = (numbers: Array<Integer>): Integer => {
 }
 ```
 
-A closure that **escapes** owns immutable captures, taken when it is created. Ordinary values copy; a structure moves at its last use, and otherwise requires an explicit snapshot (`MEM004`). A borrowed parameter, [`use`](/advanced/memory-management#aliases) alias or loop item cannot surrender its owner: first create `let snapshot = copy input`, then capture `snapshot` at its last use. An escaping closure cannot retain an element reference into a collection local to the function that returns it (`MEM004`). Capture the element's data instead, or keep the collection in an owner that outlives the closure. The closure cannot modify its owned captures. Worker transfer also obeys [thread safety](/advanced/concurrency#thread-safety-and-synchronization):
+A closure that **escapes** owns immutable captures, taken when it is created. Ordinary values copy; a structure moves at its last use, and otherwise requires an explicit snapshot (`MEM004`). A borrowed parameter, [`use`](/advanced/memory-management#aliases) alias or loop item cannot surrender its owner: first create `let snapshot = copy input`, then capture `snapshot` at its last use. An escaping closure cannot retain an element reference into a collection that can be destroyed or replaced before the closure is called (`MEM004`). Capture the element's data instead, or keep the collection in an owner that outlives the closure. The closure cannot modify its owned captures. Worker transfer also obeys [thread safety](/advanced/concurrency#thread-safety-and-synchronization):
 
 ```fa
 function makeGreeter = (greeting: String) => (name: String) => "{greeting}, {name}!"

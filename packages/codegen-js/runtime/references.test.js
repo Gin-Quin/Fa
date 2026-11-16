@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
 
 import { FaValuePool } from "./collections.js";
-import { faBorrowSlot, faReferenceValue, faReferenceWrite } from "./references.js";
+import {
+	faAddReference,
+	faBorrowSlot,
+	faFindReference,
+	faReferenceValue,
+	faReferenceWrite,
+} from "./references.js";
 
 test("primitive slot carriers are reused across calls and forward writes", () => {
 	const values = [7, 7];
@@ -59,4 +65,17 @@ test("a union slot keeps its carrier while its value changes representation", ()
 	expect(values).toEqual([9]);
 	expect(faReferenceValue(reference)).toBe(9);
 	expect(faBorrowSlot(values, 0, false, false)).toBe(reference);
+});
+
+test("erased ordered insertions and lookups preserve direct objects and primitive slots", () => {
+	const object = { value: 9 };
+	const objects = [];
+	expect(faAddReference(objects, object, true)).toBe(object);
+	expect(faFindReference(objects, () => true, true)).toBe(object);
+	const numbers = [];
+	const reference = faAddReference(numbers, 7, false);
+	expect(faFindReference(numbers, () => true, false)).toBe(reference);
+	faReferenceWrite(reference, 9);
+	expect(numbers).toEqual([9]);
+	expect(faFindReference(numbers, () => false, false)).toBeUndefined();
 });

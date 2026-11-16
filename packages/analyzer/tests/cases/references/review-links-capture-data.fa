@@ -6,3 +6,7 @@ function snapshot = (): Callback => {
 	() => data
 }
 console.log(snapshot()()) -- prints: 7
+
+function check = (): Integer => snapshot()()
+static result = @check()
+console.log(result) -- prints: 7

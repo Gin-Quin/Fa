@@ -10,3 +10,13 @@ function check = (): Integer => {
 static result = @check()
 console.log(result) -- prints: 9
 console.log(check()) -- prints: 9
+
+type Callback = () => Integer
+function readLater = (): Callback => {
+ use value = first()
+ () => value
+}
+function readCaptured = (): Integer => readLater()()
+static captured = @readCaptured()
+console.log(captured) -- prints: 9
+console.log(readCaptured()) -- prints: 9

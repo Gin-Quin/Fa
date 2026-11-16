@@ -23,3 +23,21 @@ values.delete(kept)
 console.log(values) -- prints: [1]
 values.clear()
 console.log(values.size) -- prints: 0
+
+function exercise = (): Array<Integer> => {
+ mutable objects: Pool<Node> = []
+ use node = add(objects, Node { value = 1 })
+ use alias = same(objects, node)
+ replace(objects, node, Node { value = 9 })
+ mutable values: Pool<Integer> = []
+ use first = add(values, 1)
+ use second = add(values, 1)
+ use kept = same(values, second)
+ replace(values, kept, 9)
+ let before = kept
+ values.delete(kept)
+ [alias.value, before, values.size]
+}
+static result = @exercise()
+console.log(result) -- prints: [9, 9, 1]
+console.log(exercise()) -- prints: [9, 9, 1]

@@ -1,0 +1,10 @@
+-- Module storage can also be replaced before an escaping closure is called.
+type Callback = () => Integer
+mutable values: GrowingPool<Integer> = []
+function escaped = (): Callback mutates values.size => {
+ use value = values.add(7)
+ () => value -- error: MEM004
+}
+let read = escaped()
+values = []
+console.log(read())

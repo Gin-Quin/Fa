@@ -1,4 +1,4 @@
-import { faDeleteWhere, faFind, faSetFilter, faSetTake } from "./collections.js";
+import { faAdd, faDeleteWhere, faFind, faSetFilter, faSetTake } from "./collections.js";
 import { faAssign } from "./copy.js";
 
 // @fa-helper faReferenceCellTag
@@ -27,14 +27,19 @@ export function faReferenceWrite(reference, value) {
 	else faAssign(reference, value);
 }
 
-// @fa-helper faFindReference deps: faFind
+// @fa-helper faFindReference deps: faFind faBorrowSlot
 /**
  * A generic pool lookup preserves the object or the exact primitive slot.
  * @param {any} collection
  * @param {(value: any) => boolean} predicate
+ * @param {boolean} [object]
  * @returns {any}
  */
-export function faFindReference(collection, predicate) {
+export function faFindReference(collection, predicate, object = true) {
+	if (Array.isArray(collection)) {
+		const index = collection.findIndex(predicate);
+		return index < 0 ? undefined : faBorrowSlot(collection, index, false, object);
+	}
 	if (collection[Symbol.toStringTag] !== "fa:ValuePool") return faFind(collection, predicate);
 	const slot = collection.slotOf(predicate);
 	return slot === undefined ? undefined : collection.reference(slot);
@@ -52,9 +57,8 @@ export function faFindReference(collection, predicate) {
  * @returns {any}
  */
 export function faBorrowSlot(container, key, map, object = false) {
-	const value = map ? container.get(key) : container[key];
 	if (container[Symbol.toStringTag] === "fa:ValuePool") return container.reference(key);
-	if (object) return value;
+	if (object) return map ? container.get(key) : container[key];
 	const state = /** @type {any} */ (faBorrowSlot);
 	state.cache ??= new WeakMap();
 	let slots = state.cache.get(container);
@@ -110,4 +114,23 @@ export function faErasedPoolFilter(collection, predicate, remove) {
 	if (collection[Symbol.toStringTag] === "fa:ValuePool")
 		return remove ? collection.deleteWhere(predicate) : collection.filter(predicate);
 	return remove ? faDeleteWhere(collection, predicate) : faSetFilter(collection, predicate);
+}
+
+// @fa-helper faAddReference deps: faBorrowSlot faAdd
+/**
+ * Insert through an erased pool or columnar without boxing object results.
+ * @param {any} collection
+ * @param {any} value
+ * @param {boolean} object
+ * @returns {any}
+ */
+export function faAddReference(collection, value, object) {
+	if (collection[Symbol.toStringTag] === "fa:ValuePool")
+		return collection.reference(collection.add(value));
+	if (!object && Array.isArray(collection)) {
+		const index = collection.length;
+		collection.push(value);
+		return faBorrowSlot(collection, index, false, false);
+	}
+	return faAdd(collection, value);
 }

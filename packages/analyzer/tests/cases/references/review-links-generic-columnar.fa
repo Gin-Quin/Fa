@@ -1,0 +1,16 @@
+type Node = { value: Integer }
+function add = <Item>(nodes: GrowingColumnar<Item>, value: Item): Item in nodes mutates nodes.size => nodes.add(copy value)
+function find = <Item>(nodes: GrowingColumnar<Item>): (Item in nodes)? => nodes.find((_node) => true)
+function ordered = <Item>(nodes: OrderedColumnar<Item>, value: Item): Item in nodes mutates nodes => nodes.add(copy value)
+function exercise = (): Integer => {
+ mutable nodes: GrowingColumnar<Node> = []
+ use node = add(nodes, Node { value = 7 })
+ node.value = 9
+ use found = find(nodes)
+ mutable orderedNodes: OrderedColumnar<Node> = []
+ use last = ordered(orderedNodes, Node { value = 9 })
+ (found?.value ?? 0) + last.value - 9
+}
+static result = @exercise()
+console.log(result) -- prints: 9
+console.log(exercise()) -- prints: 9

@@ -666,10 +666,12 @@ pub fn call(
 			Value::Map(entries) => Value::int(entries.len() as i64),
 			_ => Value::int(0),
 		},
-		"Array#isEmpty" | "Set#isEmpty" | "Map#isEmpty" => Value::Boolean(match &receiver {
-			Value::Map(entries) => entries.is_empty(),
-			other => other.items().is_none_or(<[Value]>::is_empty),
-		}),
+		"Array#isEmpty"
+		| "Set#isEmpty"
+		| "Map#isEmpty"
+		| "Pool#isEmpty"
+		| "Columnar#isEmpty"
+		| "OrderedColumnar#isEmpty" => Value::Boolean(count(&receiver).unwrap_or(0) == 0),
 		"Array#get" => {
 			let index = integer(arg(1)?)?;
 			let items = receiver.items().unwrap_or(&[]);
@@ -682,9 +684,12 @@ pub fn call(
 			Value::Map(entries) => map_get(entries, arg(1)?).cloned().unwrap_or(Value::None),
 			_ => Value::None,
 		},
-		"Array#includes" | "Set#includes" | "Map#includes" => {
-			Value::Boolean(includes(&receiver, arg(1)?)?)
-		}
+		"Array#includes"
+		| "Set#includes"
+		| "Map#includes"
+		| "Pool#includes"
+		| "Columnar#includes"
+		| "OrderedColumnar#includes" => Value::Boolean(includes(&receiver, arg(1)?)?),
 		"Array#indexOf" => {
 			let value = arg(1)?;
 			match receiver
@@ -697,7 +702,10 @@ pub fn call(
 				None => Value::None,
 			}
 		}
-		"Array#sum" | "Set#sum" => sum(receiver.items().unwrap_or(&[]))?,
+		"Array#sum" | "Set#sum" | "Pool#sum" | "Columnar#sum" | "OrderedColumnar#sum" => {
+			sum(&iterate(&receiver)?)?
+		}
+		"Pool#values" | "Columnar#values" | "OrderedColumnar#values" => list(iterate(&receiver)?),
 		"Array#reverse" => {
 			let mut items = receiver.items().unwrap_or(&[]).to_vec();
 			items.reverse();

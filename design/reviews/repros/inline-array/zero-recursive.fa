@@ -1,0 +1,4 @@
+type Node = { name: String, children: InlineArray<Node, 0> = [] }
+let node = Node { name = "zero recursive owned node" }
+let other = copy node
+console.log(other.name, other.children) -- expected: zero recursive owned node []

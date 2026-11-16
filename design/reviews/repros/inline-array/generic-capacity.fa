@@ -1,0 +1,5 @@
+function empty = <capacity: UInt32>(): InlineArray<Integer, capacity> => []
+mutable values = empty<2>()
+console.log(values.capacity) -- expected: 2
+try values.push(1)
+console.log(values) -- expected: [1]

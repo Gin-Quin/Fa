@@ -37,9 +37,9 @@ use missing = items.find((item) => item.name == "nobody")
 console.log(missing?.name ?? "nobody found") -- prints: nobody found
 
 -- a copy is independent
-mutable copy = items
-copy.clear()
-console.log(copy.size, items.size, copy.isEmpty()) -- prints: 0 7856 true
+mutable duplicate = items
+duplicate.clear()
+console.log(duplicate.size, items.size, duplicate.isEmpty()) -- prints: 0 7856 true
 
 -- large elements: chunks of several pages
 mutable bigs: Pool<Big> = []

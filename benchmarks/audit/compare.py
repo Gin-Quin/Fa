@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
-"""Reproducible native Fa/Goose comparison, with optional dynamic instruction counts.
+"""Checked Fa/Goose/Rust build, paired CPU/control, profile and secondary-target driver.
 
-Builds both languages, retains optimized LLVM IR/C/assembly, checks against Rust,
-then alternates timed runs. Outputs live under the ignored audit/build directory.
-Use --directory to retain a baseline before rebuilding the compiler. VARIANTS names other
-Fa versions of a benchmark (`string-building-bytes`), compared with the same Goose and Rust.
+See audit/README.md for the four phases and schema-2 JSON/Markdown generation.
 """
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
 import platform
 import re
-import resource
 import shutil
 import statistics
 import subprocess
@@ -22,6 +17,8 @@ import sys
 import time
 
 import artifacts
+import measurements
+import tables
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -40,13 +37,20 @@ DEFAULTS = {
 # items never move, like Goose's `u8[>..]` arrays.
 VARIANTS = {"string-building-bytes": ("string-building", "bytes.fa"),
             "string-building-growing": ("string-building", "growing.fa"),
-            "growing-index-array": ("growing-index", "array.fa")}
+            "growing-index-array": ("growing-index", "array.fa"),
+            "push-array": ("push", "array.fa"),
+            "sum-reserved": ("sum", "reserved.fa"),
+            "particles-reserved": ("particles", "reserved.fa"),
+            "blur-reserved": ("blur", "reserved.fa"),
+            "respond-interpolation": ("respond", "interpolation.fa"),
+            "lru-open": ("lru", "open.fa"),
+            "words-wide": ("words", "wide.fa")}
+# A structural variant can have its own matching Rust row. The selected entry
+# is copied as main.rs; alternate entries never pollute another row's manifest.
+RUST_VARIANTS = {"lru-open": "open.rs", "words-wide": "wide.rs"}
 DEFAULTS.update({name: DEFAULTS[directory] for name, (directory, _) in VARIANTS.items()})
-AUDIT = {name: max(1, size // 10) for name, size in DEFAULTS.items()}
-AUDIT.update({"binary-trees": 14, "fib": 35, "interp": 17, "scene": 9,
-              "tree": 17, "fannkuch-redux": 9, "words": 100000,
-              "blur": 1000, "mandelbrot": 1000, "spectral-norm": 1000,
-              "growing-index": 1000000, "growing-index-array": 1000000})
+AUDIT = {name: int(size) for name, size in
+         (line.split() for line in Path(__file__).with_name("sizes.txt").read_text().splitlines())}
 GOOSE_SUITE = ("binary-trees", "blur", "calc", "graph", "interp", "lru", "particles",
                "push", "records", "respond", "scene", "sexp", "strlist", "sum", "tree", "words")
 SECONDARY = tuple(sorted(DEFAULTS.keys() - set(GOOSE_SUITE)))
@@ -69,28 +73,40 @@ def execute(command, log=None, **kwargs):
     return result.stdout
 
 
-def timed(command, expected):
-    before = resource.getrusage(resource.RUSAGE_CHILDREN)
-    start = time.perf_counter()
-    actual = execute(command)
-    wall = time.perf_counter() - start
-    after = resource.getrusage(resource.RUSAGE_CHILDREN)
-    cpu = after.ru_utime + after.ru_stime - before.ru_utime - before.ru_stime
-    if actual != expected:
-        raise RuntimeError(f"{command[0]}: timed output differs from Rust")
-    return {"wall": wall, "cpu": cpu}
-
-
 def profile(command, directory, expected):
-    # VALGRIND should name the real executable, not a wrapper tied to $HOME.
-    output = execute([os.environ.get("VALGRIND", "valgrind"), "--tool=callgrind",
-             "--dump-instr=yes", f"--callgrind-out-file={directory / 'callgrind.out'}",
-             *command], directory / "callgrind.log")
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "callgrind.out"
+    output = execute([os.environ.get("VALGRIND", str(Path.home() / ".local/bin/valgrind")),
+             "--tool=callgrind", "--dump-instr=yes", "--cache-sim=yes", "--branch-sim=yes",
+             "--I1=32768,8,64", "--D1=32768,8,64", "--LL=8388608,16,64",
+             f"--callgrind-out-file={path}", *command], directory / "callgrind.log")
     if output != expected:
         raise RuntimeError(f"{command[0]}: profiled output differs from Rust")
-    match = re.search(r"^summary:\s+(\d+)",
-                      (directory / "callgrind.out").read_text(), re.M)
-    return int(match[1])
+    text = path.read_text()
+    events = re.search(r"^events: (.*)$", text, re.M)[1].split()
+    totals = [int(value) for value in re.search(r"^summary: (.*)$", text, re.M)[1].split()]
+    assembly = Path(command[0]).with_suffix(".s")
+    hot = execute([sys.executable, Path(__file__).with_name("hot.py"), path, assembly,
+                   "--calls", "--top", "20"])
+    if hot.startswith(b"total self cost 0 "):
+        raise RuntimeError(f"{command[0]}: no executable instruction addresses matched the profile")
+    (directory / "hot.txt").write_bytes(hot)
+    cache = {}
+    for event in ("D1mr", "D1mw", "DLmr", "DLmw"):
+        annotation = execute([sys.executable, Path(__file__).with_name("hot.py"), path,
+                              assembly, "--event", event, "--top", "8"])
+        (directory / f"hot-{event}.txt").write_bytes(annotation)
+        cache[event] = annotation.decode()
+    annotations = {}
+    annotate = Path.home() / ".local/valgrind/usr/bin/callgrind_annotate"
+    for inclusive in (False, True):
+        report = execute([annotate, f"--inclusive={'yes' if inclusive else 'no'}", path])
+        (directory / ("inclusive.txt" if inclusive else "self.txt")).write_bytes(report)
+        annotations["inclusive" if inclusive else "exclusive"] = report.decode()
+    return {"events": dict(zip(events, totals)), "callgrind": str(path),
+            "profile_sha256": artifacts.file_hash(path), "hot_assembly": hot.decode(),
+            "hot_cache_assembly": cache, "function_profiles": annotations,
+            "annotation": str(directory / "self.txt")}
 
 
 SIZE_LINE = re.compile(r"^(\s*let\s+)(\w+)(\s*=\s*)(\d+)(\s*;.*BENCH_N.*)$", re.M)
@@ -144,9 +160,9 @@ def goose_source_at_size(source, size, runtime=False):
 FA_SIZE_LINE = re.compile(r"^(\s*let\s+\w+\s*=\s*)([\d_]+)(\s*--.*BENCH_N.*)$", re.M)
 
 
-def toolchain():
+def toolchain(fa_program=None):
     """Hash the actual compilers, including Fa's delegated native backend."""
-    fa = artifacts.executable_identity(os.environ.get("FA", ROOT / "target/release/fa"))
+    fa = artifacts.executable_identity(fa_program or os.environ.get("FA", ROOT / "target/release/fa"))
     fa_path = Path(fa["path"])
     with fa_path.open("rb") as executable:
         if executable.read(2) == b"#!":
@@ -196,7 +212,12 @@ def plan(name, size, compilers, runtime_size=False):
     goose["main.goose"] = goose_source_at_size((source / "main.goose").read_text(),
                                               size, runtime_size).encode()
     goose_constant = SIZE_LINE.search(goose["main.goose"].decode()) is not None
-    rust = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*.rs")}
+    alternate_rust = {entry for variant, entry in RUST_VARIANTS.items()
+                      if VARIANTS[variant][0] == source.name}
+    rust = {str(path.relative_to(source)): path.read_bytes() for path in source.rglob("*.rs")
+            if path.name not in alternate_rust}
+    if name in RUST_VARIANTS:
+        rust["main.rs"] = (source / RUST_VARIANTS[name]).read_bytes()
     inputs = {"fa": fa, "goose": goose, "rust": rust}
     flags = {"fa": FA_FLAGS, "goose": [*GOOSE_FLAGS, "--cc",
              compilers["goose"]["c_compiler"]["path"], "--stdlib",
@@ -293,95 +314,247 @@ def prepare(directory, build_plan, reuse=False, rebuild_fa=False):
     manifests["goose"], _ = operation(directory, "goose", build_plan, expected)
     manifests["fa"], _ = (build_side if rebuild_fa else operation)(
         directory, "fa", build_plan, expected)
-    return {side: command(directory, side, build_plan) for side in ("fa", "goose")}, expected, manifests
+    return {side: command(directory, side, build_plan) for side in ("fa", "goose", "rust")}, expected, manifests
+
+
+def secondary(directory, name, size, compilers, expected, runs, reuse, memory_mib):
+    build_plan = plan(name, size, compilers)
+    results = {}
+    for target in ("wasm", "bun"):
+        destination = directory / target
+        destination.mkdir(parents=True, exist_ok=True)
+        flags = [flag.replace("--target=native", f"--target={target}")
+                 for flag in FA_FLAGS if flag != "--emit-ir"]
+        requested = artifacts.request(name, target, size, build_plan["inputs"]["fa"],
+            compilers["fa"], flags, {"target": target, "asynchronous": False,
+            "overflow_checks": False}, build_plan["requests"]["fa"]["environment"])
+        manifest_path = "manifest.json"
+        try:
+            if not reuse:
+                for file, data in build_plan["inputs"]["fa"].items():
+                    path = destination / file
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(data)
+                execute([compilers["fa"]["path"], flags[0], destination / "main.fa", *flags[1:],
+                         f"--output={destination}"], destination / "build.log")
+            loaders = sorted((destination / target).glob("*.js")) + sorted((destination / target).glob("*.mjs"))
+            if len(loaders) != 1:
+                raise RuntimeError(f"{target}: expected one JavaScript loader, found {loaders}")
+            relative = str(loaders[0].relative_to(destination))
+            command = [os.environ.get("BUN", str(Path.home() / ".bun/bin/bun")),
+                       str(loaders[0]), str(size)]
+            if reuse:
+                manifest, _ = artifacts.load(destination, manifest_path, requested, relative,
+                    [str(size)], "stdout.txt", expected)
+                for file, data in build_plan["inputs"]["fa"].items():
+                    if (destination / file).read_bytes() != data:
+                        raise RuntimeError("secondary saved source differs")
+                if target == "wasm" and artifacts.file_hash(destination / manifest["wasm"]) != manifest["wasm_sha256"]:
+                    raise RuntimeError("wasm artifact hash differs")
+            else:
+                # Validate before publishing any reuse manifest.
+                measurements.sample(command, expected, max_rss_kib=memory_mib * 1024)
+                manifest = artifacts.save(destination, manifest_path, requested, relative,
+                    [str(size)], "stdout.txt", expected, expected)
+                if target == "wasm":
+                    wasm = list((destination / target).glob("*.wasm"))
+                    if len(wasm) != 1:
+                        raise RuntimeError("expected one wasm artifact")
+                    manifest.update(wasm=str(wasm[0].relative_to(destination)),
+                                    wasm_sha256=artifacts.file_hash(wasm[0]))
+                    (destination / manifest_path).write_text(json.dumps(manifest, indent=2) + "\n")
+            samples = [measurements.sample(command, expected, max_rss_kib=memory_mib * 1024)
+                       for _ in range(runs)]
+            results[target] = {"samples": samples, "cpu": statistics.median(s["cpu"] for s in samples),
+                               "wall": statistics.median(s["wall"] for s in samples), "artifact": manifest}
+        except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+            results[target] = {"error": str(error)}
+    return results
+
+
+def additional_variant(name, directory, size, runtime_size, expected):
+    """Revalidate the saved compiler live, then the current benchmark's full contract."""
+    try:
+        saved = json.loads((directory / "fa/manifest.json").read_text())
+        compiler_path = saved["request"]["compiler"]["path"]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise RuntimeError(f"{directory}: missing or invalid additional Fa manifest") from error
+    compilers = toolchain(compiler_path)
+    build_plan = plan(name, size, compilers, runtime_size)
+    commands, reference, manifests = prepare(directory, build_plan, reuse=True)
+    if reference != expected:
+        raise RuntimeError(f"{name}: additional variant has a different Rust reference")
+    return commands["fa"], manifests
+
+
+def save_report(path, results):
+    results["end"] = measurements.snapshot()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(results, indent=2) + "\n")
+    temporary.replace(path)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("names", nargs="*", choices=sorted(DEFAULTS))
-    parser.add_argument("--suite", choices=("goose", "secondary", "all"), default="goose",
-                        help="Default selection: the 16 original Goose benchmarks")
-    parser.add_argument("--directory", type=Path, required=True)
-    parser.add_argument("--runs", type=int, default=7)
+    parser.add_argument("--suite", choices=("goose", "secondary", "all"), default="goose")
+    parser.add_argument("--directory", type=Path)
+    parser.add_argument("--mode", choices=("prepare", "cpu", "profile", "secondary"), default="cpu")
+    parser.add_argument("--runs", type=int, default=21)
     parser.add_argument("--default-sizes", action="store_true")
-    parser.add_argument("--size", type=int, help="Override the selected sizes (growing-index: 16, 1000 or 1000000)")
-    parser.add_argument("--profile", action="store_true")
-    parser.add_argument("--goose-runtime-size", action="store_true",
-                        help="Read BENCH_N from argv in generated Goose copies, keeping checkfree")
-    parser.add_argument("--cpu", type=int, help="Pin this process and its children to one CPU")
-    parser.add_argument("--reuse", action="store_true", help="Time existing builds")
-    parser.add_argument("--rebuild-fa", action="store_true", help="With --reuse, rebuild only Fa")
-    parser.add_argument("--report", default="results.json", help="JSON filename inside --directory")
-    parser.add_argument("--prepare-only", action="store_true", help="Build and validate without timing")
+    parser.add_argument("--size", type=int)
+    parser.add_argument("--profile", action="store_true", help="Alias for --mode profile")
+    parser.add_argument("--goose-runtime-size", action="store_true")
+    parser.add_argument("--cpu", type=int, default=1)
+    parser.add_argument("--reuse", action="store_true")
+    parser.add_argument("--rebuild-fa", action="store_true")
+    parser.add_argument("--report", type=Path, help="JSON output, default benchmarks/results/<mode>.json")
+    parser.add_argument("--prepare-only", action="store_true", help="Alias for --mode prepare")
+    parser.add_argument("--render", type=Path, nargs="+", help="Merge phase JSON and generate Markdown")
+    parser.add_argument("--markdown", type=Path)
+    parser.add_argument("--update-readme", action="store_true",
+                        help="With --render, replace only the generated README result block")
+    parser.add_argument("--require-control", action="store_true",
+                        help="With --render, require a passing control for every CPU verdict")
+    parser.add_argument("--supplemental", action="store_true",
+                        help="Retain this diagnostic series in JSON without replacing headline table rows")
+    parser.add_argument("--secondary-memory-mib", type=int, default=512)
+    parser.add_argument("--additional", action="append", default=[], metavar="NAME=DIRECTORY",
+                        help="Interleave an already prepared Fa variant (one selected benchmark, CPU mode)")
     args = parser.parse_args()
-    if args.size is not None and args.size < 1:
-        parser.error("--size must be positive")
-    if args.runs < 1:
-        parser.error("--runs must be positive")
+    if args.render:
+        tables.render(args.render, args.report, args.markdown, args.update_readme,
+                      require_control=args.require_control)
+        return
+    if args.require_control:
+        parser.error("--require-control requires --render")
+    if args.update_readme:
+        parser.error("--update-readme requires --render")
+    if not args.directory:
+        parser.error("--directory is required for measurements")
+    if args.profile:
+        args.mode = "profile"
+    if args.prepare_only:
+        args.mode = "prepare"
+    if args.size is not None and args.size < 1 or args.runs < 1 or args.secondary_memory_mib < 1:
+        parser.error("size, runs and memory limit must be positive")
+    if args.additional and (args.mode != "cpu" or len(args.names) != 1):
+        parser.error("--additional requires CPU mode and exactly one selected benchmark")
     if args.rebuild_fa and not args.reuse:
         parser.error("--rebuild-fa requires --reuse")
-    if args.cpu is not None:
-        try:
-            os.sched_setaffinity(0, {args.cpu})
-        except (AttributeError, OSError) as error:
-            parser.error(f"cannot select CPU {args.cpu}: {error}")
+    try:
+        os.sched_setaffinity(0, {args.cpu})
+    except (AttributeError, OSError) as error:
+        parser.error(f"cannot select CPU {args.cpu}: {error}")
     args.directory = args.directory.resolve()
     args.directory.mkdir(parents=True, exist_ok=True)
-    try:
-        compilers = toolchain()
-    except (RuntimeError, OSError) as error:
-        parser.error(str(error))
+    compilers = toolchain()
     cpu = next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines()
                 if line.startswith("model name")), platform.processor())
-    results = {"machine": platform.platform(), "cpu": cpu,
-               "cpu_affinity": sorted(os.sched_getaffinity(0)),
-               "date": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-               "revision": execute(["git", "-c", f"safe.directory={ROOT}", "rev-parse", "HEAD"])
-               .decode().strip(), "working_tree_dirty": bool(execute(
-                   ["git", "-c", f"safe.directory={ROOT}", "status", "--porcelain"])),
-               "runs": args.runs, "measurements": "preparation" if args.prepare_only else "timing",
-               "size_set": "override" if args.size is not None
-               else "default" if args.default_sizes else "audit", "benchmarks": {}}
-    results["command_line"] = sys.argv
-    results["runner_source_sha256"] = artifacts.source_hash({
-        path.name: path.read_bytes() for path in (Path(__file__), Path(artifacts.__file__))})
-    names = args.names or {"goose": GOOSE_SUITE, "secondary": SECONDARY,
-                           "all": sorted(DEFAULTS)}[args.suite]
+    results = {"schema": 2, "mode": args.mode, "start": measurements.snapshot(),
+               "machine": platform.platform(), "cpu": cpu, "cpu_affinity": sorted(os.sched_getaffinity(0)),
+               "revision": execute(["git", "-C", ROOT, "rev-parse", "HEAD"]).decode().strip(),
+               "working_tree_dirty": bool(execute(["git", "-C", ROOT, "status", "--porcelain"])),
+               "runs": args.runs, "size_set": "override" if args.size is not None
+               else "default" if args.default_sizes else "audit", "benchmarks": {},
+               "command_line": sys.argv, "compilers": compilers,
+               "runner_source_sha256": artifacts.source_hash({
+                   path.name: path.read_bytes() for path in (Path(__file__), Path(artifacts.__file__),
+                   Path(measurements.__file__), Path(tables.__file__),
+                   Path(__file__).with_name("sizes.txt"), Path(__file__).with_name("hot.py"))})}
+    results["compiler_source_revision"] = os.environ.get("FA_SOURCE_REVISION")
+    results["supplemental"] = args.supplemental
+    if args.mode == "secondary":
+        results["secondary_memory_limit_mib"] = args.secondary_memory_mib
+        results["runtime"] = artifacts.executable_identity(os.environ.get("BUN", str(Path.home() / ".bun/bin/bun")))
+    names = args.names or {"goose": GOOSE_SUITE, "secondary": SECONDARY, "all": sorted(DEFAULTS)}[args.suite]
     results["selection"] = list(names)
-    results["compilers"] = compilers
+    report = args.report or ROOT / "benchmarks/results" / f"{args.mode}.json"
+    if not report.is_absolute():
+        report = ROOT / report
     for name in names:
         size = args.size if args.size is not None else (DEFAULTS if args.default_sizes else AUDIT)[name]
         directory = args.directory / name
+        start = measurements.snapshot()
         try:
             build_plan = plan(name, size, compilers, args.goose_runtime_size)
             commands, expected, manifests = prepare(directory, build_plan, args.reuse, args.rebuild_fa)
-            result = {"size": size, "output_sha256": artifacts.sha256(expected), "artifacts": manifests}
-            result["goose_size"] = ("constant" if len(commands["goose"]) == 1 else "runtime")
-            if args.prepare_only:
-                results["benchmarks"][name] = result
-                print(f"{name:16} n={size:9} outputs and manifests verified", flush=True)
-                (args.directory / args.report).write_text(json.dumps(results, indent=2) + "\n")
-                continue
-            samples = {"fa": [], "goose": []}
-            for run in range(args.runs):
-                for side in (["fa", "goose"] if run % 2 == 0 else ["goose", "fa"]):
-                    samples[side].append(timed(commands[side], expected))
-            for side in samples:
-                result[side] = {"samples": samples[side], **{
-                    key: statistics.median(sample[key] for sample in samples[side])
-                    for key in ("wall", "cpu")}}
-                result[side]["binary_sha256"] = hashlib.sha256(Path(commands[side][0]).read_bytes()).hexdigest()
-                if args.profile:
-                    result[side]["instructions"] = profile(commands[side], directory / side, expected)
+            result = {"size": size, "suite": "goose" if name in GOOSE_SUITE else "secondary",
+                      "output_sha256": artifacts.sha256(expected),
+                      "artifacts": manifests, "start": start}
+            if args.mode == "cpu":
+                commands["fa_control"] = commands["fa"]
+                additional = {}
+                for specification in args.additional:
+                    label, separator, path = specification.partition("=")
+                    if not separator or label not in DEFAULTS or label in commands:
+                        raise ValueError(f"invalid or duplicate additional variant: {specification}")
+                    commands[label], additional[label] = additional_variant(
+                        label, Path(path).resolve(), size, args.goose_runtime_size, expected)
+                result["additional_artifacts"] = additional
+                result["commands"] = commands
+                samples = {side: [] for side in commands}
+                orders = []
+                for run in range(args.runs):
+                    order = measurements.order_for_round(list(commands), run)
+                    orders.append(order)
+                    for side in order:
+                        samples[side].append(measurements.sample(commands[side], expected))
+                for side, series in samples.items():
+                    result[side] = {"samples": series, **{
+                        key: statistics.median(sample[key] for sample in series)
+                        for key in ("cpu", "wall", "peak_rss_kib")}}
+                cpu_series = {side: [s["cpu"] for s in series] for side, series in samples.items()}
+                result["control"] = measurements.paired(cpu_series["fa"], cpu_series["fa_control"])
+                result["control"]["passes"] = measurements.control_passes(result["control"])
+                result["control"]["binary_sha256"] = manifests["fa"]["binary_sha256"]
+                result["comparisons"] = {}
+                result["acceptance_eligible"] = args.runs >= 21
+                for side, threshold in (("goose", 1.10), ("rust", 1.0)):
+                    comparison = measurements.paired(cpu_series["fa"], cpu_series[side])
+                    comparison["threshold"] = threshold
+                    comparison["verdict"] = (measurements.verdict(comparison, threshold, result["control"])
+                                             if result["acceptance_eligible"] else "within noise")
+                    result["comparisons"][side] = comparison
+                result["additional_pairs"] = {
+                    label: measurements.paired(cpu_series["fa"], cpu_series[label])
+                    for label in additional}
+                result["orders"] = orders
+                for side in ("fa", "goose", "rust"):
+                    location = directory / ("rust-profile" if side == "rust" else side)
+                    location.mkdir(parents=True, exist_ok=True)
+                    result[side]["gnu_peak_rss_kib"] = measurements.gnu_rss(commands[side], expected, location)
+                    binary = Path(commands[side][0])
+                    stripped = binary.with_suffix(".stripped")
+                    shutil.copy2(binary, stripped)
+                    execute(["strip", stripped])
+                    result[side]["executable_bytes"] = binary.stat().st_size
+                    result[side]["stripped_bytes"] = stripped.stat().st_size
+            elif args.mode == "profile":
+                for side in commands:
+                    location = directory / ("rust-profile" if side == "rust" else side)
+                    repetitions = 3 if side == "rust" and name in ("lru", "words", "words-wide", "word-count") else 1
+                    profiles = [profile(commands[side], location / f"run-{index}", expected)
+                                for index in range(repetitions)]
+                    result[side] = sorted(profiles, key=lambda item: item["events"]["Ir"])[repetitions // 2]
+                    result[side]["repeated_events"] = [item["events"] for item in profiles]
+                    result[side]["randomized_hasher"] = repetitions > 1
+            elif args.mode == "secondary":
+                result["targets"] = secondary(directory, name, size, compilers, expected, args.runs, args.reuse,
+                                               args.secondary_memory_mib)
+            result["end"] = measurements.snapshot()
             results["benchmarks"][name] = result
-            print(f"{name:16} n={size:9} CPU Fa/Goose "
-                  f"{result['fa']['cpu']:.6f}/{result['goose']['cpu']:.6f} "
-                  f"({result['fa']['cpu'] / result['goose']['cpu']:.2f}x)", flush=True)
-        except (RuntimeError, OSError) as error:
-            results["benchmarks"][name] = {"error": str(error), "size": size}
+            detail = (" ".join(f"Fa/{side}={value['ratio_of_medians']:.3f} ({value['verdict']})"
+                      for side, value in result["comparisons"].items()) if "comparisons" in result else args.mode)
+            print(f"{name:24} n={size:9} {detail}", flush=True)
+        except (RuntimeError, OSError, subprocess.SubprocessError, ValueError) as error:
+            results["benchmarks"][name] = {"error": str(error), "size": size, "start": start,
+                                           "end": measurements.snapshot()}
             print(f"{name}: {error}", flush=True)
-        (args.directory / args.report).write_text(json.dumps(results, indent=2) + "\n")
-    if any("error" in result for result in results["benchmarks"].values()):
+        save_report(report, results)
+    if any("error" in result or any("error" in target for target in result.get("targets", {}).values())
+           for result in results["benchmarks"].values()):
         raise SystemExit(1)
 
 

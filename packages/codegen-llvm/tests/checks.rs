@@ -1366,7 +1366,7 @@ console.log(text.replace("é", "x").padStart(5, "0"))
 	fn recursive_optionals_have_no_separate_presence_word() {
 		let ir = ir_of(
 			"nullable-edges",
-			"type Node = { value: Integer, next: Node? }\nlet list = Node { value = 1, next = Node { value = 2 } }\nmutable copy = list\ncopy.next = none\nconsole.log(list.next?.value ?? 0, copy.next?.value ?? 0)\n",
+			"type Node = { value: Integer, next: Node? }\nlet list = Node { value = 1, next = Node { value = 2 } }\nmutable duplicate = list\nduplicate.next = none\nconsole.log(list.next?.value ?? 0, duplicate.next?.value ?? 0)\n",
 		);
 		assert!(!ir.contains("{ i1, ptr }"), "{ir}");
 		assert!(ir.contains("{ ptr, i64 }"), "{ir}");
@@ -1454,15 +1454,37 @@ console.log(text.replace("é", "x").padStart(5, "0"))
 
 	#[test]
 	fn empty_array_fields_reserve_before_the_loop_without_omitting_push_checks() {
-		let ir = ir_of(
-			"reserve-array-fields",
-			"type Bucket = { items: Array<Integer> }\nfunction fill = (count: Integer): Bucket => { mutable bucket = Bucket { items = [] }\nfor index in 0..count { bucket.items.push(index) }\nbucket }\nconsole.log(fill(9))\n",
-		);
-		let fill = function(&ir, "fa.fill");
-		let reserve = fill.find("@fa_array_room(").expect("a reservation");
-		let body = fill.find("for_body:").expect("a counted loop");
-		assert!(reserve < body, "{fill}");
-		assert!(fill[body..].contains("@fa_array_grow("), "{fill}");
+		let source = "type Bucket = { items: Array<Integer> }\nfunction fill = (count: Integer): Bucket => { mutable bucket = Bucket { items = [] }\nfor index in 0..count { bucket.items.push(index) }\nbucket }\nmutable result = fill(9)\nconsole.log(result)\n";
+		for (name, suffix, exact) in [
+			("unobserved", "", true),
+			("observed", "console.log(result.items.capacity)\n", false),
+			(
+				"alias",
+				"let alias = result.items\nconsole.log(alias.capacity)\n",
+				false,
+			),
+		] {
+			for (target_name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
+				let ir = ir_at_target(
+					&format!("reserve-array-fields-{name}-{target_name}"),
+					&format!("{source}{suffix}"),
+					true,
+					OptLevel::O0,
+					target,
+				);
+				let fill = function(&ir, "fa.fill");
+				let expected = if exact {
+					"@fa_array_reserve("
+				} else {
+					"@fa_array_room("
+				};
+				let reserve = fill.find(expected).expect("a reservation");
+				let body = fill.find("for_body:").expect("a counted loop");
+				assert!(reserve < body, "{fill}");
+				assert!(fill[body..].contains("@fa_array_grow("), "{fill}");
+				assert_eq!(fill.contains("@fa_array_reserve("), exact, "{fill}");
+			}
+		}
 	}
 
 	/// A program with the loops that `lower/copies.rs` turns into block
@@ -1908,7 +1930,7 @@ console.log(text.replace("é", "x").padStart(5, "0"))
 	fn non_escaping_strings_have_independent_frame_buffers() {
 		let ir = ir_of(
 			"frame-strings",
-			"function check = (prefix: String) => {\n mutable text = \"\"\n text += prefix\n let copy = text\n text = \"changed\"\n console.log(copy, text)\n}\ncheck(\"123456789012345678901234567890\")\n",
+			"function check = (prefix: String) => {\n mutable text = \"\"\n text += prefix\n let duplicate = text\n text = \"changed\"\n console.log(duplicate, text)\n}\ncheck(\"123456789012345678901234567890\")\n",
 		);
 		assert!(ir.contains("alloca [64 x i8]"), "{ir}");
 		assert!(ir.contains("@fa_string_assign_local("), "{ir}");
@@ -2119,6 +2141,34 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 "#,
 		);
 		assert!(!ranged.contains("union_leaf"), "{ranged}");
+	}
+
+	#[test]
+	fn an_arithmetic_union_leaf_of_any_arm_is_tested_at_recursive_calls() {
+		let ir = ir_of(
+			"union-leaf-arithmetic",
+			include_str!("programs/union-leaf-arithmetic.fa"),
+		);
+		let evaluate = function(&ir, "fa.evaluate");
+		assert!(evaluate.contains("union_leaf"), "{evaluate}");
+		assert!(
+			evaluate.contains("union_base_or_call = phi i64"),
+			"{evaluate}"
+		);
+		let source = |leaf: &str| {
+			format!(
+				"type T = Union {{ One = {{ child: T }}, Leaf = {{ value: Int32 }} }}\nfunction double = (value: Integer): Integer => value * 2\nfunction read = (node: T, pass: Integer): Integer => when node is {{\n T.One as {{ child }} => read(child, pass) + 1\n T.Leaf as {{ value }} => {leaf}\n}}\nconsole.log(read(T.One {{ child = T.Leaf {{ value = 7 }} }}, 3))\n"
+			)
+		};
+		let calling = ir_of("calling-union-leaf", &source("double(value) + pass"));
+		assert!(!calling.contains("union_leaf"), "{calling}");
+		let local = ir_of(
+			"local-union-leaf",
+			&source("{\n  let twice = value * 2\n  twice + pass\n }"),
+		);
+		assert!(!local.contains("union_leaf"), "{local}");
+		let inlined = ir_of("arithmetic-union-leaf", &source("-(value * 2) + pass"));
+		assert!(inlined.contains("union_leaf"), "{inlined}");
 	}
 
 	#[test]

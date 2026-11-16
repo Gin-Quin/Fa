@@ -53,11 +53,10 @@ let floats = Set<Float>.from([1, 2, 3])
 `from` also accepts the options of the collection:
 
 ```fa
-let users = Set.from(userList, key = (user) => user.id)
 mutable buffer = Array<Integer>.from([], capacity = 1000)
 ```
 
-The options are `capacity`, a storage hint for every collection, the growing variants and `OrderedColumnar` included (see [capacity and reservation](#capacity-and-reservation)), and `key`, for `Set` and `GrowingSet` (see [custom key](/collections/sets#custom-key)). Any other option is an error.
+The option is `capacity`, a storage hint for every collection, the growing variants and `OrderedColumnar` included (see [capacity and reservation](#capacity-and-reservation)). `Set` and `GrowingSet` use [standard hashing and equality](/collections/sets#standard-hashing-and-equality); a separate key belongs in a `Map`. Any other option is an error (`FN023`).
 
 There is one form per situation: using `from` where the context already gives the type (and no option is passed) is a warning, and the formatter rewrites it into a plain literal.
 
@@ -177,6 +176,8 @@ Adding or removing items of an array while iterating over it is a compile error.
 
 ## Slicing and copying
 
+Assigning an existing array moves it at last use. To keep both arrays, write `let duplicate = copy original`. This is the general structure rule, including recursive values and elements owning structures. `get`, indexing and iteration borrow elements; storing a borrowed structure element requires `copy`. See [memory management](/advanced/memory-management).
+
 Indexing with a [range](/values/ranges) copies the selected items into a new array. `..` excludes the upper bound, `..=` includes it.
 
 ```fa
@@ -185,10 +186,29 @@ let data = [1, 2, 3, 4, 5]
 let middle = data[1..4] -- copies the items at indices 1, 2 and 3: [2, 3, 4]
 let same = data[1..=3]  -- [2, 3, 4]
 let tail = data[2..]    -- [3, 4, 5]
-let copy = data[..]     -- a full copy
+let duplicate = copy data -- a full copy
 ```
 
-With `let` or `mutable`, a slice is a copy: modifying it never modifies the original array.
+Because a slice constructs an independent array, modifying it never modifies the original array. Construction copies ordinary items as values. Every stored structure item is a store like any other: it moves from a last-use owner or requires `copy` on the source (`MEM004`); unique items cannot be duplicated (`MEM003`). A callback always borrows its parameters, including structure items: `nested.some((item) => item.length > 0)` copies nothing. The word `copy` alone authorizes deep copying, never a method name.
+
+### Construction with structure items
+
+The same rule covers range slices, `filter`, `map`, concatenation with spreads, `Array.from` and other collection conversions, iterator `toArray`, array/object spreads and rest patterns. An in-place operation or a reference avoids creating another owner. The explicit copy of a source supplies independent items that can be transferred into the new construction:
+
+```fa
+let matrix = [[1], [2]]
+let slice = (copy matrix)[0..1]
+let filtered = (copy matrix).filter((row) => row.length > 0)
+let mapped = matrix.map((row) => copy row)
+let concatenated = [...copy matrix, ...copy matrix]
+let converted = Array.from(copy matrix)
+let collected = (copy matrix).values().toArray()
+let spread = [...copy matrix]
+let [first, ...rest] = copy matrix
+console.log(matrix, slice, filtered, mapped, concatenated, converted, collected, spread, first, rest)
+```
+
+Without those copies, retaining `matrix` while storing its nested arrays is `MEM004`. `matrix.some((row) => row.length > 0)` still borrows and needs no copy. The same item rule applies to set algebra (`union`, `intersection`, `difference`, `symmetricDifference`), non-in-place `sort`/`reverse`, map keys and values, and constructors building other collection kinds.
 
 `use` keeps a view of the range instead. For example, `mutable use part = items[0..2]` refers to those items without copying them. You can assign its items through a mutable view, or reseat the reference with `reuse`. You cannot assign the view as a whole: `part = [7, 7]` is an error even when the lengths match. Assign the items in a loop to copy a range, or use `reuse part = items[2..4]` to change what the reference designates. An ordinary `mutable` copy of a slice remains assignable.
 
@@ -351,12 +371,12 @@ The shared slice proof checks normalized endpoints, with an inclusive end strict
 
 - **Reviewed storage limits.** The collection byte budget is 2 KiB; the total is 4 KiB per non-recursive frame and 512 bytes in a resolved direct-call cycle (including methods and generic instances). Literals reserve their exact aligned size. Non-recursive calls receive at most `min(2 KiB, remaining frame budget)`. In a direct-call cycle, all call-result offers share 128 bytes per frame inside the 512-byte total: each receives `min(128 − offer bytes reserved, 512 − collection bytes reserved)`, with no offer below 64 bytes. Exact literals count against the total in either lowering order; forwarded offers reserve no frame bytes. The inclusive 2× per-frame gate covers call-result offers (one and four live splits): unchecked depths must satisfy `baseline_depth ≤ 2 × final_depth + 8`, with eight frames for fixed setup overhead and native measurements under a 256 KiB stack limit. Leak-checked depths are informational; exact literals are excluded. Indirect recursion is not detected. Larger objects/tuples use caller output slots; a layout with at most two scalar leaves and 16 bytes on 64-bit targets, or exactly one scalar leaf on wasm32, returns by value. Small throwing results keep `{ value, error }`; register results store directly into their final owner. An output marked `noalias` is unreachable from arguments, captures and globals during the call. Native x86-64/aarch64 functions probe crossed stack pages.
 
-- **Immutable literals.** Literal `let` arrays whose supported items are constant use read-only globals, including nested arrays and objects of constants. Other local `let` literals use a fixed entry-block buffer when their header and items fit 2 KiB and the non-recursive function stays within its 4 KiB collection budget. Captured values, asynchronous programs and larger constructions keep the heap path. The word following the header marks static or frame storage; it is independent of the negative capacity used for compact string arrays. Static drops do nothing; frame drops destroy owned items without freeing the buffer. Static storage copies when another owner needs independent storage. Runtime literals with owning or unknown uses start on the heap and retain ordinary moves; a frame address is never copied out to rescue an escape. Nonempty-separator `split` can construct directly in a proven non-escaping local’s fixed caller buffer, with a heap choice before construction when it does not fit; other input-sized constructors and value slices keep their existing paths.
+- **Immutable literals.** Literal `let` arrays whose supported items are constant use read-only globals, including nested arrays and objects of constants. Other local `let` literals use a fixed entry-block buffer when their header and items fit 2 KiB and the non-recursive function stays within its 4 KiB collection budget. Captured values, asynchronous programs and larger constructions keep the heap path. The word following the header marks static or frame storage; it is independent of the negative capacity used for compact string arrays. Static drops do nothing; frame drops destroy owned items without freeing the buffer. An explicit copy of static storage constructs independent storage for its new owner. Runtime literals with owning or unknown uses start on the heap and retain ordinary moves; a frame address is never copied out to rescue an escape. Nonempty-separator `split` can construct directly in a proven non-escaping local’s fixed caller buffer, with a heap choice before construction when it does not fit; other input-sized constructors and value slices keep their existing paths.
 
 - **Caller destinations.** `map` and `filter` can build a proven immutable local directly in its fixed caller buffer, using the input length as a capacity bound and selecting the heap before construction if it does not fit. Callback errors drop the completed prefix. `Array.from` of a live borrowed array without an explicit capacity hint constructs its required value copy directly in the same bounded storage; already owned or movable arrays keep their storage. Explicit capacity hints retain the existing snapshot-before-hint path.
 - **Layout.** An array value is a pointer to a header `{ pointer, length, capacity }`. Small item buffers share the header's allocation; larger buffers use a separate block from `fa_alloc`. An empty array allocates its header only.
 - **Recursive items.** A collection supplies storage for its object items, including recursive objects: each object is stored directly in its slot, without an additional box. Direct recursive fields inside that object, including optionals, retain an owning box when their inline expansion would cycle. The same rule applies to map entries, set elements, growing arrays, pools and columnars. Copies still recursively copy owned payloads; moving the array's items follows the same reference invalidation rules.
-- **Growth.** The capacity doubles, starting at 4 items. Growth allocates a larger buffer, relocates the items bytewise, and frees the old buffer. Before a counted loop that always pushes one item to an empty array field, the compiler can reserve the loop's item count. It keeps the normal capacity checks: calls through aliases may add further items. A nonempty field is not reserved early, so references to its existing items remain valid until the actual push.
+- **Growth.** The capacity doubles, starting at 4 items. Growth allocates a larger buffer, relocates the items bytewise, and frees the old buffer. Before a counted loop that always pushes one item to an empty array field, the compiler can reserve the loop's item count. A closed analyzer proof that no module observes any array capacity permits reserving that count without geometric rounding. Missing module contributions, generic or deferred bodies, key-loop snapshots and foreign code withhold the permission; a capacity read through any type or alias removes it. Per-unit builds log the fact for object-cache invalidation. The array keeps its header address and the normal push checks: calls through aliases may add further items. A nonempty field is not reserved early, so references to its existing items remain valid until the actual push. Local arrays keep geometric reservation to amortize repeated append loops.
 - **Capacity.** `from(…, capacity = n)` allocates `n` items up front; `reserve(additional)` grows the buffer to at least `length + additional` items (doubling when that is more), so a `reserve` in a loop stays constant on average. `capacity` reads the header.
 - **`push`** has an inline fast path (`length < capacity`: store, then increment) and a cold call to the growth function. An object literal is stored field by field straight into the new slot, never built in a temporary and copied; a value with more fields than the item type is copied without them.
 - **`insert` and `delete(index)`** are a `memmove` of the tail. `deleteWhere` compacts in place in one pass, with a read index and a write index, and drops the deleted items.

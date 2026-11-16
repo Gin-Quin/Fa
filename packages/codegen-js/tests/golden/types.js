@@ -24,9 +24,9 @@ function describe(shape) {
 function main() {
 	let point = { x: 1, y: 2 };
 	point.x = faCheckInteger(point.x + 1, "types.fa:19:1");
-	const copy = copy$Point(point);
+	const duplicate = copy$Point(point);
 	const color = 1;
-	console.log(`${Point$length2(point)} ${format(copy)} ${describe({ $t: "Shape.Label", $v: "hi" })} ${describe(Shape$Empty)} ${Color$names[color]}`);
+	console.log(`${Point$length2(point)} ${format(duplicate)} ${describe({ $t: "Shape.Label", $v: "hi" })} ${describe(Shape$Empty)} ${Color$names[color]}`);
 	let items = [1, 2];
 	items.push(3);
 	for (let index = 0; index < items.length; index++) {

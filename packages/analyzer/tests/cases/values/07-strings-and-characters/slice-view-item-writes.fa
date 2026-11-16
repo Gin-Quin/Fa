@@ -20,8 +20,8 @@ for item in nestedPart {
 	item = [9]
 }
 -- Owned slice copies and aliases of whole collection slots stay assignable.
-mutable copy = bytes[0..2]
-copy = Bytes.filled(3)
+mutable duplicate = bytes[0..2]
+duplicate = Bytes.filled(3)
 mutable arrayCopy = items[0..2]
 arrayCopy = [0]
 mutable use whole = bytes
@@ -29,4 +29,4 @@ whole = Bytes.filled(1)
 mutable text = "abcd"
 mutable use word = text[0..2]
 reuse word = text[2..4]
-console.log(bytes, items, nested, copy, arrayCopy, word)
+console.log(bytes, items, nested, duplicate, arrayCopy, word)

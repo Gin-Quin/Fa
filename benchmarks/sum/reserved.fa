@@ -1,0 +1,32 @@
+-- Control: a flat array of `Int32` filled from a random generator, then scanned eight times.
+-- Nothing here plays to a strength of Fa: the data is contiguous in every language, and the scan
+-- is the same loop over integers.
+
+let passes = 8
+
+-- The xorshift64 generator of the Goose suite (`rng.goose`).
+function xorshift = (x: UInt64): UInt64 => {
+	mutable v = x
+	v = v.bitXor(v.shiftLeft(13))
+	v = v.bitXor(v.shiftRight(7))
+	v.bitXor(v.shiftLeft(17))
+}
+
+let n = 32_000_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
+
+mutable data = Array<Int32>.from([], capacity = n)
+mutable r: UInt64 = 12345
+for 0..n {
+	r = xorshift(r)
+	data.push(Int32(r %% 1000))
+}
+
+mutable total = 0
+for pass in 0..passes {
+	-- The `bitXor` keeps the passes from collapsing into one multiplication.
+	for value in data {
+		total += value.bitXor(pass)
+	}
+}
+console.log(data.length)
+console.log(total)

@@ -8,6 +8,6 @@ export type = {
 -- file: main.fa
 async function main = () => {
 	mutable counter = Counter { start = 1 }
-	mutable copy = counter
+	mutable duplicate = counter
 	console.log(await counter.next()) -- error: MEM002
 }

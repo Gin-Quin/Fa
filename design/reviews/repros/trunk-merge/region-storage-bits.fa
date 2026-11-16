@@ -46,9 +46,9 @@ mutable kept: Array<Array<Byte>> = []
 for depth in 0..5 {
 	let tree = build(depth)
 	console.log(sum(tree))
-	mutable copy = firstBytes(tree)
-	copy.push(200)
-	kept.push(copy)
+	mutable duplicate = firstBytes(tree)
+	duplicate.push(200)
+	kept.push(duplicate)
 }
 for bytes in kept { console.log(bytes.length, bytes.get(bytes.length - 1) ?? 0) }
 -- prints: 78

@@ -10,13 +10,13 @@
 -- prints: [7, 7, 7]
 -- prints: [7, 7]
 mutable data = Bytes.from([1, 2, 3, 4])
-let copy = data[0..2]
+let duplicate = data[0..2]
 use view = data[0..2]
 data[2] = 9
-console.log(copy, view, data)
+console.log(duplicate, view, data)
 mutable use writable = data[0..2]
 try writable[0] = 255
-console.log(writable, copy, data)
+console.log(writable, duplicate, data)
 mutable second = data
 second[0] = 1
 console.log(data, second)

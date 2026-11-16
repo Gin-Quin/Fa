@@ -1,0 +1,22 @@
+-- file: package.fa
+export = { name = "arrayReservation" }
+-- file: library/model.fa
+export namespace = {
+	type Tree = { value: Integer, children: Array<Tree> }
+}
+-- file: library/build.fa
+export function = (depth: Integer, count: Integer): model.Tree => {
+	mutable node = model.Tree { value = depth, children = [] }
+	if depth == 0 { return node }
+	for index in 0..count { node.children.push(build(depth - 1, index)) }
+	node
+}
+-- file: application/main.fa
+export function = () => {
+	mutable tree = library.build(2, 3)
+	let original = tree
+	tree.children.push(library.build(0, 0))
+	assert original.children.length == 3
+	assert tree.children.length == 4
+	console.log("split array reservation ok") -- prints: split array reservation ok
+}

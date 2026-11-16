@@ -2347,6 +2347,7 @@ impl Walker<'_> {
 	pub(crate) fn escape(&mut self, value: NodeId, at: NodeId) {
 		let value = self.strip_groups(value);
 		let lambda = match self.view(value) {
+			View::Copy(inner) => return self.escape(inner, at),
 			View::Lambda { .. } => value,
 			View::Name(_) => {
 				let Resolution::Local(symbol) = self.a.resolution(value) else {

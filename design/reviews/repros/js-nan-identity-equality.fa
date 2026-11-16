@@ -1,10 +1,10 @@
 type P = { v: Float }
 let nan = 0.0 / 0.0
 let values = [1.0, nan]
-let copy = values
+let duplicate = values
 let p = P { v = nan }
 let q = p
 let o: Float? = nan
 let points = [p]
-console.log(values == copy, p == q, o == o, points == points, nan == nan)
+console.log(values == duplicate, p == q, o == o, points == points, nan == nan)
 console.log(values.includes(nan))

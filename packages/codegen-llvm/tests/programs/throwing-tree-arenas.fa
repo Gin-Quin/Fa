@@ -27,9 +27,9 @@ let text = "a" + "\u{301}".repeat(20)
 let symbol = try text[0]
 for 0..5 {
 	let root = try build(5, symbol, false)
-	let copy = duplicate(root)
+	let duplicate = duplicate(root)
 	assert count(root, symbol) == 32
-	assert count(copy, symbol) == 32
+	assert count(duplicate, symbol) == 32
 	let failed = build(5, symbol, true) catch error => none
 	assert failed == none
 }

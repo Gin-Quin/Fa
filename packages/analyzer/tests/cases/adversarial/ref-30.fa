@@ -6,5 +6,5 @@ function appendTwice = (list: Array<Integer>, value: Integer) mutates list => {
 mutable numbers = [1, 2, 3]
 use first = numbers[0]
 appendTwice(numbers, first) -- error: REF013
-let copy = try numbers[0]
-appendTwice(numbers, copy)
+let duplicate = try numbers[0]
+appendTwice(numbers, duplicate)

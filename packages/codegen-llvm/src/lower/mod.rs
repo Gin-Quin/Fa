@@ -286,6 +286,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	frozen_reads: Vec<frozen::FrozenRead<'ctx>>,
 	frozen_string_parts: Vec<frozen::FrozenParts<'ctx>>,
 	written_fields: std::cell::OnceCell<Option<std::collections::BTreeSet<String>>>,
+	array_capacities_unobserved: std::cell::OnceCell<bool>,
 	/// The `text += character` of a counted loop with room reserved before
 	/// it (`appends.rs`): the loop's counter slot, its end and whether it is
 	/// inclusive, to keep the room for the rounds left after a longer append.
@@ -547,6 +548,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			frozen_reads: Vec::new(),
 			frozen_string_parts: Vec::new(),
 			written_fields: std::cell::OnceCell::new(),
+			array_capacities_unobserved: std::cell::OnceCell::new(),
 			reserved_appends: FxHashMap::default(),
 			frame: None,
 			small_mutable_strings: FxHashMap::default(),
@@ -2805,6 +2807,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Unsupported(name) => Err(self.unsupported(node.index(), name)),
 			// design/async.md §3 (`tasks.rs`)
 			View::Await(operand) => self.await_expression(node, operand),
+			View::Copy(operand) => {
+				let value = self.expr(operand)?;
+				let copied = self.emit_copy(value)?;
+				Ok(self.fresh(copied))
+			}
 			View::Start(operand) => self.start_expression(node, operand),
 			other => Err(self.unsupported(node.index(), &format!("`{}`", variant_name(&other)))),
 		}

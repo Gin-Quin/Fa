@@ -25,6 +25,29 @@ pub(crate) const ARRAY_STATIC_MARKER: u64 = 32;
 pub(crate) const ARRAY_FRAME_MARKER: u64 = 64;
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	fn array_capacities_unobserved(&self) -> bool {
+		if self.c_library.is_some() {
+			return false;
+		}
+		if let Some(facts) = &self.program_facts {
+			return facts
+				.consulted(crate::facts::ARRAY_CAPACITIES, self.fact_log.as_deref())
+				.contains(fa_analyzer::capacities::UNOBSERVED);
+		}
+		*self.array_capacities_unobserved.get_or_init(|| {
+			if !self.whole_program {
+				return false;
+			}
+			let mut files: Vec<_> = self.other_files.keys().copied().collect();
+			files.push(self.file);
+			fa_analyzer::capacities::resolve_claims(fa_analyzer::capacities::unit_claims(
+				self.session,
+				&files,
+			))
+			.contains(fa_analyzer::capacities::UNOBSERVED)
+		})
+	}
+
 	/// Compact ASCII character collections materialize only when actual
 	/// string slots (mutation, references, generic iteration) are needed.
 	pub(crate) fn materialize_array(
@@ -2947,9 +2970,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			} else {
 				None
 			};
-			// room grown geometrically, as the pushes would: a loop nested in
-			// another one doesn't reallocate at every outer round
-			self.call_runtime("fa_array_room", &[array.into(), rounds.into(), size.into()])?;
+			// An empty field has no live item references. Under the closed
+			// capacity proof, avoid geometric slack; retain its header address
+			// and each push's check in case a call reaches an alias. Locals
+			// keep geometric growth for loops nested in repeated appends.
+			let reserve = if end_reserve.is_some() && self.array_capacities_unobserved() {
+				"fa_array_reserve"
+			} else {
+				"fa_array_room"
+			};
+			self.call_runtime(reserve, &[array.into(), rounds.into(), size.into()])?;
 			if let Some(end) = end_reserve {
 				self.builder.build_unconditional_branch(end)?;
 				self.builder.position_at_end(end);

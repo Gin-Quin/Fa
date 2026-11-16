@@ -6,15 +6,15 @@ export namespace = {
 	function keep = <Record>(record: Record): Record => record
 	function readTemporary = <Record: { value: Integer }>(record: Record): Integer => keep(record).value
 	function change = <Record: { value: Integer }>(record: Record, value: Integer): Record => {
-		mutable copy = record
-		copy.value = value
-		copy
+		mutable duplicate = record
+		duplicate.value = value
+		duplicate
 	}
 	function readNested = <Record: { child: { value: Integer } }>(record: Record): Integer => record.child.value
 	function changeNested = <Record: { child: { value: Integer } }>(record: Record, value: Integer): Record => {
-		mutable copy = record
-		copy.child.value = value
-		copy
+		mutable duplicate = record
+		duplicate.child.value = value
+		duplicate
 	}
 	function append = <Record: { items: Array<Integer> }>(record: Record) mutates record => {
 		for value in 0..3 { record.items.push(value) }

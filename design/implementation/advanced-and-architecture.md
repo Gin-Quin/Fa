@@ -1223,8 +1223,8 @@ type Node = {
 ```fa
 type Node = { value: String, next: Node? }
 let list = Node { value = "a", next = Node { value = "b", next = none } }
-mutable copy = list
-copy.next = none
+mutable duplicate = list
+duplicate.next = none
 console.log(list.next?.value ?? "none") -- prints: b
 ```
 
@@ -1247,8 +1247,8 @@ mutable head: Link? = none
 for index in 0..1_000_000 {
 	head = Link { value = index, next = head }
 }
-let copy = head
-console.log(copy?.value ?? -1) -- prints: 999999
+let duplicate = head
+console.log(duplicate?.value ?? -1) -- prints: 999999
 ```
 
 ```fa
@@ -1998,7 +1998,7 @@ A literal written where a type is expected must have exactly the fields of that 
 - `let human: Human = superHuman` copies `Human`'s fields only (a narrowing copy). Moving is possible only into the same shape.
 - `use human: Human = superHuman` aliases; `human.powers` is a type error (`powers` is not part of `Human`); nothing is dropped.
 - Parameters are references: passing a `SuperHuman` to a `Human` parameter copies nothing.
-- A parameter keeps the type of its argument, `Type<parameter>`: `mutable copy = human` (no annotation) copies every field of the argument; `function same = (human: Human) => human` returns `Type<human>`. `use` aliases and loop variables keep the type of what they designate. `Type<human>` is a hidden generic parameter.
+- A parameter keeps the type of its argument, `Type<parameter>`: `mutable duplicate = human` (no annotation) copies every field of the argument; `function same = (human: Human) => human` returns `Type<human>`. `use` aliases and loop variables keep the type of what they designate. `Type<human>` is a hidden generic parameter.
 - A collection stores the layout of its element type: `humans.push(superHuman)` narrows; `let copied: Array<Human> = superHumans` copies every element narrowed.
 
 ### 10.5 Mutation through a narrower type
@@ -2131,9 +2131,9 @@ countTags(heroes) -- error STR006
 type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }
 function renamed = (human: Human, name: String): Type<human> => {
-	mutable copy = human
-	copy.name = name
-	copy
+	mutable duplicate = human
+	duplicate.name = name
+	duplicate
 }
 let clark = renamed(SuperHuman { name = "Kal", powers = "flight" }, "Clark")
 console.log(clark.powers) -- prints: flight
@@ -2750,9 +2750,9 @@ export namespace = {
 	function sort: (base: Pointer<Void>, count: c.SizeT, size: c.SizeT, compare: (a: Pointer<Void>, b: Pointer<Void>) => c.Int) => Void mutates base = @extern("qsort")
 	function compareInts = (a: Pointer<Void>, b: Pointer<Void>): c.Int => ...
 	function sorted = (values: Array<Int32>): Array<Int32> => {
-		mutable copy = values
-		sort(copy, copy.length, 4, compareInts)
-		copy
+		mutable duplicate = values
+		sort(duplicate, duplicate.length, 4, compareInts)
+		duplicate
 	}
 }
 -- main.fa

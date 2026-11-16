@@ -103,9 +103,9 @@ function binary(input, index) {
 	let data = new Uint8Array(3);
 	console.log(faFormatBytes(Uint8Array.from(input)));
 	data[0] = 255;
-	const copy = data.slice(0, 2);
+	const duplicate = data.slice(0, 2);
 	const view = data.subarray(0, 1);
-	console.log(`${data.length} ${format(data.at(index))} ${format$2(Array.from(data))} ${faFormatBytes(data)} ${faBytesEqual(data, copy)} ${faFormatBytes(view)}`);
+	console.log(`${data.length} ${format(data.at(index))} ${format$2(Array.from(data))} ${faFormatBytes(data)} ${faBytesEqual(data, duplicate)} ${faFormatBytes(view)}`);
 	let $t0;
 	try {
 		$t0 = faFromUtf8(data);

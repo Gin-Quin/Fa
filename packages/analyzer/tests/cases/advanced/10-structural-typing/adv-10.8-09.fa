@@ -1,9 +1,9 @@
 type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }
 function renamed = (human: Human, name: String): Type<human> => {
-	mutable copy = human
-	copy.name = name
-	copy
+	mutable duplicate = human
+	duplicate.name = name
+	duplicate
 }
 let clark = renamed(SuperHuman { name = "Kal", powers = "flight" }, "Clark")
 console.log(clark.powers) -- prints: flight

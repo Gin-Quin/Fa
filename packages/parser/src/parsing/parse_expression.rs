@@ -263,6 +263,9 @@ fn parse_left_expression<'source>(
 		TokenKind::Await => parse_prefix(context, Priority::TryAwaitStart, stop_at, |right| {
 			Node::Await { right }
 		}),
+		TokenKind::Copy => parse_prefix(context, Priority::Prefix, stop_at, |right| Node::Copy {
+			right,
+		}),
 		TokenKind::Start => parse_prefix(context, Priority::TryAwaitStart, stop_at, |right| {
 			Node::Start { right }
 		}),

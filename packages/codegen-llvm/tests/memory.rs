@@ -32,8 +32,8 @@ for index in 0..100_000 {
 	if index %% 2 == 0 {
 		continue
 	}
-	let copy = parts
-	total += copy.length
+	let duplicate = parts
+	total += duplicate.length
 }
 console.log(total)
 "#;

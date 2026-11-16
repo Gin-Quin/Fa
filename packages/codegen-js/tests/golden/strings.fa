@@ -25,9 +25,9 @@ function binary = (input: Array<Byte>, index: Integer) => {
 	mutable data = Bytes.filled(3)
 	console.log(Bytes.from(input))
 	data[0] = 255
-	let copy = data[0..2]
+	let duplicate = data[0..2]
 	use view = data[0..1]
-	console.log(data.length, data.get(index), data.toArray(), data.toString(), data == copy, view)
+	console.log(data.length, data.get(index), data.toArray(), data.toString(), data == duplicate, view)
 	console.log(String.fromUtf8(data) catch error => "{error.position}", String.fromUtf8Lossy(data))
 	console.log(Bytes.filled(3), Bytes.filled(3, 7))
 }

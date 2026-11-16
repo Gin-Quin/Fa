@@ -1,12 +1,12 @@
 -- Each check twice: where the analyzer asks for it, and where it proved it
 -- needless (no check in the JavaScript).
 function indices = (items: Array<Integer>, i: Integer): Integer throws IndexError => {
-	mutable copy = items
-	for j in 0..copy.length {
-		copy[j] = copy[j] + 1
+	mutable duplicate = items
+	for j in 0..duplicate.length {
+		duplicate[j] = duplicate[j] + 1
 	}
-	try copy[i] = 0
-	(try copy[i]) + copy.length
+	try duplicate[i] = 0
+	(try duplicate[i]) + duplicate.length
 }
 function shifts = (x: Int32, amount: Int32): Int32 throws ArithmeticError => {
 	let proven = x.shiftLeft(3)

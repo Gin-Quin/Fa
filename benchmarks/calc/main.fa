@@ -2,17 +2,17 @@
 -- descent into a short-lived tree of recursive union values and evaluated, with errors thrown
 -- from deep inside the recursion (`throws` and `try`) and handled per input (`catch`).
 
--- The code units the parser looks for (ASCII).
-let end: UInt16 = 0
-let space: UInt16 = 32
-let open: UInt16 = 40
-let close: UInt16 = 41
-let star: UInt16 = 42
-let plus: UInt16 = 43
-let minus: UInt16 = 45
-let slash: UInt16 = 47
-let digitZero: UInt16 = 48
-let digitNine: UInt16 = 57
+-- The bytes the parser looks for (ASCII).
+let end: Byte = 0
+let space: Byte = 32
+let open: Byte = 40
+let close: Byte = 41
+let star: Byte = 42
+let plus: Byte = 43
+let minus: Byte = 45
+let slash: Byte = 47
+let digitZero: Byte = 48
+let digitNine: Byte = 57
 
 -- xorshift64, the generator of the Goose suite: `UInt64` arithmetic that drops the bits
 -- shifted out.
@@ -27,7 +27,7 @@ function xorshift = (seed: UInt64): UInt64 => {
 function below = (random: UInt64, bound: Integer<min = 1>): Integer => random %% bound
 
 -- The value of a decimal digit, `none` for any other byte.
-function digitValue = (byte: UInt16): Integer? => if byte >= digitZero and byte <= digitNine {
+function digitValue = (byte: Byte): Integer? => if byte >= digitZero and byte <= digitNine {
 	byte - digitZero
 } else {
 	none
@@ -101,17 +101,18 @@ type Expression = Union {
 	Number = { value: UInt64 }
 	Negation = { operand: Expression }
 	Parenthesized = { inner: Expression }
-	Binary = { operator: UInt16, left: Expression, right: Expression }
+	Binary = { operator: Byte, left: Expression, right: Expression }
 }
 
--- Reads numeric UTF-16 code units directly; the grammar is ASCII.
+-- Reads the UTF-8 bytes of the text in place, as Goose's parser does: indexing them is constant-time,
+-- and the syntax is ASCII.
 type Parser = {
 	text: String
 	position: Integer
 	nodes: Integer -- every node built, bad inputs included
 
-	-- The code unit at the position, or zero at the end of the text.
-	function current = (self): UInt16 => self.text.codeUnitAt(self.position) catch _error => end
+	-- The byte at the position, or a null byte at the end of the text.
+	function current = (self): Byte => self.text.toUtf8().get(self.position) ?? end
 
 	function skipSpaces = (self) mutates self => {
 		while self.current() == space {
@@ -195,7 +196,7 @@ type Parser = {
 	function run = (self): UInt64 throws CalcError mutates self => {
 		let root = try self.expression()
 		self.skipSpaces()
-		if self.position != self.text.length {
+		if self.position != self.text.toUtf8().length {
 			throw CalcError.UnexpectedToken
 		}
 		try evaluate(root)

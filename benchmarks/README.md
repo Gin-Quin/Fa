@@ -2,7 +2,7 @@
 
 The same programs written in Fa (`<name>/main.fa`), in Rust (`<name>/main.rs`) and in [Goose](https://github.com/aardappel/goose) (`<name>/main.goose`), and a runner that builds them, checks that they print the same output, and reports their run time and binary size: Fa native against Rust and Goose, Fa compiled to WebAssembly, and Fa compiled to JavaScript and run on Bun.
 
-Fifteen of the benchmarks come from [Goose's benchmark suite](https://aardappel.github.io/goose/bench/results.html) (see [the Goose benchmarks](#the-goose-benchmarks)); the [three-way comparison](#fa-rust-and-goose) is at the end.
+Sixteen of the benchmarks come from [Goose's benchmark suite](https://aardappel.github.io/goose/bench/results.html) (see [the Goose benchmarks](#the-goose-benchmarks)); the [trunk baseline](#trunk-baseline--2026-11-16) is at the end.
 
 ## Running
 
@@ -51,7 +51,7 @@ goose build -O2 --standalone -o build/<name>/goose/main build/<name>/goose/main.
 
 which compiles the program to C, then the C (with the Goose runtime, `--standalone`) with a C compiler at `-O2`: `GOOSE_CC` if set (the runs below use `GOOSE_CC=~/.local/llvm18/usr/bin/clang-18`, the LLVM of Fa's native backend), else the one `goose toolchain` finds (`cc`, gcc here). The size is the stripped executable. Goose has no overflow checks outside `--debug` (which also turns off the C optimizations), and keeps the bounds checks it can't prove, like Rust.
 
-A program taken from the Goose suite has its size on a `let N = …; // BENCH_N` line, as in Goose's own harness (Goose programs have no preprocessor): the runner rewrites the number for `--size` and `--quick`, and doesn't pass arguments. Their Fa ports do the same (decided: ports match their sources): their size is a module constant on a `let n = … -- BENCH_N` line, which the runner (and `audit/build.sh`) rewrites the same way, so that a division by a size is by a constant on both sides. The Goose versions of the other benchmarks read their size from their arguments (`args()`, `parse_int`), like the Fa and Rust ones.
+A program taken from the Goose suite has its size on a `let N = …; // BENCH_N` line, as in Goose's own harness (Goose programs have no preprocessor): the runner rewrites the number for `--size` and `--quick`, and doesn't pass arguments. Their Fa ports do the same (decided: ports match their sources): their size is a module constant on a `let n = … -- BENCH_N` line, which the runner (and `audit/compare.py`) rewrites the same way, so that a division by a size is by a constant on both sides. The Goose versions of the other benchmarks read their size from their arguments (`args()`, `parse_int`), like the Fa and Rust ones.
 
 ### The Fa side
 
@@ -93,7 +93,7 @@ From the Goose suite (the Fa and Rust versions print what the Goose program prin
 | Benchmark | What it stresses | Default size |
 | --- | --- | --- |
 | `sum` | the control: an `Array(Int32)` filled from a generator, scanned eight times | 32,000,000 |
-| `push` | pushing small objects, keeping the index of every 64th one across the growth | 32,000,000 |
+| `push` | an unreserved `GrowingArray` of small objects, keeping every 64th index across growth (`push-array`: the original reserved `Array`) | 32,000,000 |
 | `strlist` | a text built character by character, split into a list of owned strings, scanned four times | 2,000,000 words |
 | `records` | a log of variant records (a named union, one member with a `String`), aggregated four times with `when` | 4,000,000 |
 | `tree` | a complete binary tree of `Node?` children (one heap allocation per node), summed eight times | depth 21 |
@@ -108,25 +108,49 @@ From the Goose suite (the Fa and Rust versions print what the Goose program prin
 | `respond` | building and rendering JSON responses (interpolation, escaping), checksummed with 64-bit FNV-1a | 400,000 responses |
 | `blur` | 16 passes of a 3x3 blur over a W×W `Array(UInt8)`, indices computed from `y * width + x` | W = 3,000 |
 
-The defaults run in about 0.25 to 2 seconds in Rust (see the [baseline](#rust-baseline)).
+The defaults run in about 0.25 to 2 seconds in Rust (see the [baseline](#trunk-baseline--2026-11-16)).
 
 ### The Goose benchmarks
 
 [Goose](https://github.com/aardappel/goose) is a systems language that compiles to C, with inline data structures, data stacks instead of an allocator, and relative references. Its suite (`bench/goose/`, `bench/rust/`, `bench/cpp/` and the manifest `bench/run_bench.py` of its repository, explained in `bench/design.md`) has sixteen benchmarks. Each was ported here:
 
 - **`main.goose` is the headline Goose implementation, verbatim** (the first `goose=` row of the manifest: `records_var.goose` for `records`, `graph.goose`, `particles.goose`, `respond.goose`, `blur.goose`, …), with only the number of its `// BENCH_N` line changed to our default size. It imports `rng.goose`, the suite's xorshift64, kept in `benchmarks/goose/`.
-- **`main.rs`** is adapted from the Goose repository's Rust row whose data structure matches the Fa port (written in each file's header): `Vec` (`sum`, `push`, `graph` nested, `blur` flat indexing), `Vec<String>` (`strlist`), `enum` + `String` (`records`), `Box` nodes (`tree`, `interp`, `sexp`, `calc`, `scene` with `Vec` children), `HashMap` (`words`, `lru`), the DTO (`respond`), elementwise `particles`. The Goose page compares Goose with the fastest safe Rust row, often an index arena, which Fa has no reason to imitate; the rows here are the ones that do the same work as the Fa program.
-- **`main.fa`** is an idiomatic Fa port: recursive values through optionals and unions where Goose links nodes with relative references, arrays of objects with integer indices where Goose keeps typed references into a grow-only array (`push`, `lru`), `Map` where Goose uses its open-addressing table or `dictionary`. The generator is `UInt64` with `bitXor`, `shiftLeft` and `shiftRight`, so it is a JavaScript `BigInt` on Bun and wasm's loader: exact, but slow there.
+- **`main.rs`** is adapted from the Goose repository's Rust row whose data structure matches the current Fa port (written in each file's header): `Vec` (`sum`, `push`, `graph` nested, `blur` flat indexing), `Vec<String>` (`strlist`), `enum` + `String` (`records`), `Box` nodes (`tree`, `interp`, `sexp`, `calc`, `scene` with `Vec` children), `HashMap` (`words`, `lru`), the DTO (`respond`), elementwise `particles`. When a Fa port becomes a pool implementation, pair it with Goose's corresponding Rust arena row; keep the Box row with the recursive variant. For `push`, the suite supplies only safe Rust `Vec+reserve` with indices: it matches the payload and marks, but has a different allocation policy from Fa's segmented GrowingArray.
+- **`main.fa`** must use the documented Fa collection corresponding to Goose's, with the same construction and traversal order. The [port audit](audit/ports/README.md) records all sixteen representations, passes, source-line evidence, intended Rust pairings and remaining gaps. Several existing mains still use owning recursive values where Goose uses pool links; their checksum agreement is not a same-structure comparison. Keep these implementations as named variants when faithful replacements become expressible. `push` now uses an unreserved GrowingArray and integer marks, the alternative explicitly prescribed by Fa's local-reference documentation. The generator is `UInt64` with `bitXor`, `shiftLeft` and `shiftRight`, so it is a JavaScript `BigInt` on Bun and wasm's loader: exact, but slow there.
 - **`bintrees` is `binary-trees`**: the same Benchmarks Game program. `binary-trees/main.goose` is Goose's `bintrees.goose` with the output of `main.rs`. `words` stays separate from `word-count`: same idea, but a different generator, text and output.
 - The other ten benchmarks got a Goose version written for them (`main.goose`, a direct port of `main.rs` reading its size from its arguments): inline `u8[..8]` strings where the words fit (`word-count`, `sort-objects`), `dictionary` for the maps, `sort` with a block for the comparator.
 
-The ports use the integer widths of their sources (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys, values and `UInt32` links in `lru`, `Int32` vertex ids and distances in `graph`, `Int32` numbers in `interp` and `sexp`, `Int32` ids in `scene`; `calc` reuses one generator text and damages it in place with string slices (`text = text[..index] + "#" + text[index + 1..]`, edited in place natively), as its sources do. Deviations: `sexp` keeps the children of a list in an `Array` (Rust: `Vec<Node>`) instead of Goose's first-child and next-sibling links; `scene` writes the 3x3 matrix as nine `Float32` fields (Fa has no fixed-size arrays); `respond`, `strlist`, `records`, `words`, `sexp` and `calc` use explicit UTF-8 encoding where they need binary bytes, as Goose reads its `u8` buffers: the parsers of `calc` and `sexp` read numeric UTF-16 units with `self.text.codeUnitAt(position)` instead of an `Array<String>`, and `sexp` slices its symbols out of the text.
+The ports preserve many scalar widths (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys/values and `UInt32` links in `lru`, `Int32` literals in `interp`, `Int32` ids in `scene`. The audit identifies remaining differences: Goose's graph ids are unsigned, its sexp/calc numbers use varints, while `words` now matches Goose's `i32` counts (`words-wide` preserves the original Integer counters). `calc` reuses one generator text and damages it in place with string slices (`text = text[..index] + "#" + text[index + 1..]`, edited in place natively), as its sources do. `sexp` still owns child Arrays and walks them in forward source order, whereas Goose follows reverse-order sibling links. `scene` still owns child Arrays and makes three recursive passes; Goose animates and sums with flat pool scans. Its matrix has nine Float32 fields; fixed inline `CArray<Float32, 9>` is available, but an appendable bounded list of compact child references is not specified. The current trunk compiler exposes `text.bytes()` (read in place when indexed), which these ports use; the string-redesign migration is described in the audit.
+
+The lead has deferred the pool ports to a language study (2026-11-16).
+`tree`, `binary-trees`, `interp`, `sexp`, `scene` and `calc` are **a different data
+structure from Goose's (recursive owning values), kept until Fa has pool links**.
+`graph` keeps its nested adjacency arrays until that same decision. Do not read
+their current ratios as same-pool-layout comparisons. `words` and `lru` keep
+standard Fa Map as the main rows, with the same 1.10× Goose goal; explicit-table
+variants, where expressible, are separate comparisons with the matching Rust
+open-addressing rows.
+
+The [continuation results](results/2026-11-16-ports-2.md) record all twelve
+new mains and controls, with [raw samples and profiles](results/2026-11-16-ports-2.json).
+In the first 21-round CPU-5 series, unreserved `sum` and `blur` meet the 1.10×
+Goose goal. `particles`, `respond`, `words` and `lru` remain **not resolved**
+because their same-binary controls fail; favorable point estimates do not pass
+that gate. Of the retained variants, `sum-reserved` passes and
+`respond-interpolation` is behind with a passing control; the other four are
+unresolved. These are source and pairing corrections, without a demonstrated
+speedup over the preserved forms. Profiles identify String field appends/returns
+in `respond`, checked explicit-table operations in `lru-open`, and short-key
+hash/probe/compare in standard Map as follow-ups. No compiler changes are included.
+The historical trunk baseline below remains unchanged.
 
 #### What the ports found missing or wrong in Fa
 
-Found with `target/release/fa` at the commit of the [three-way comparison](#fa-rust-and-goose). The programs use the workaround named, and stay idiomatic otherwise.
+Found with `target/release/fa` at the commit of the [trunk baseline](#trunk-baseline--2026-11-16). The programs use the workaround named, and stay idiomatic otherwise.
 
-String migration (2026-11-15): `String` positions count UTF-16 units; the ASCII lexers use `codeUnitAt`, and binary output uses `toUtf8(): Bytes`. The backend implementations are being updated together on `feature/strings`; the historical timings below predate this contract.
+Wrong results:
+
+- **`c is ")"` on a `Character` (or `Character?`) is true for any character**, natively and on Bun: it compiles to a type test (`typeof x === "string"` in JavaScript) instead of comparing the value. `calc` and `sexp` use `==`.
 
 Not implemented:
 
@@ -138,16 +162,17 @@ Rejected although the documentation allows it:
 
 - **A `while` guard is forgotten when the array grows in the loop**: `while head < queue.length { let v = queue[head]; head += 1; queue.push(x) }` gives ``E-ERR-3: `queue[head]` can fail with `IndexError` `` (without the `push`, it is accepted). `graph` writes `try queue[head]`.
 - **`throws IndexError | DivisionByZero`**: a `try` of either error gives `E-ERR-4` ("doesn't declare … `IndexError.IndexError | DivisionByZero.DivisionByZero`"). `calc` catches the division error where it happens.
-- **Narrowing**: a field is not narrowed by `if node.key < 0 { break }` (then `walk.wrappingAdd(node.key)` gives `E-NUM-14`; copied to a local first).
+- **Narrowing**: `c == " "` with `c: Character?` gives `E-CMP-1` even after `if c is none { return }`; a field is not narrowed by `if node.key < 0 { break }` (then `walk.wrappingAdd(node.key)` gives `E-NUM-14`; copied to a local first); `is not "+" | "-"` doesn't narrow a `Character` to the remaining literals.
+- **`if p { aString } else { aCharacter }`** gives `E-IF-2` (a `String` and a `Character` "don't make a valid union").
 
 Misleading diagnostics:
 
 - `W-NUM-1` on `Integer(value).bitXor(pass)` (`value: Int32`) says the conversion "does nothing", but without it `value.bitXor(pass)` fails with `E-NUM-14` (`pass` doesn't fit in an `Int32`).
 - `W-ERR-1` says a string slice "can't fail", while the documentation says it throws `IndexError`.
 
-~~Missing in the library: **a cheap way to read a character's code or a string's bytes**~~: `text.toUtf8()` (`design/decisions.md`, "Strings: byte access"), read in place when only indexed, measured or iterated.
+~~Missing in the library: **a cheap way to read a character's code or a string's bytes**~~: `text.bytes()` (`design/decisions.md`, "Strings: byte access"), read in place when only indexed, measured or iterated.
 
-Slow (the [comparison](#fa-rust-and-goose) has the numbers), and what the fifth native shift did about it (`design/decisions.md`, "Simple strings" and the entries after it):
+Slow (the [comparison](#trunk-baseline--2026-11-16) has the numbers), and what the fifth native shift did about it (`design/decisions.md`, "Simple strings" and the entries after it):
 
 - **Indexing a string natively was linear**: it is constant time on an ASCII string (the `SIMPLE` flag of the capacity word), and a character of an ASCII string is one of 128 static strings, so `text.characters()` no longer allocates per character either. The parsers still read `text.characters()` once, as written.
 - **Appending one character at a time** (`text += letters[…]`): no allocation for the character nor the template any more, an inlined append into the block (`strlist` 3.05 s → 0.56 s of CPU).
@@ -157,18 +182,55 @@ Slow (the [comparison](#fa-rust-and-goose) has the numbers), and what the fifth 
 
 ## Native performance audit
 
-[`audit/`](audit/README.md) holds the tools that compare Fa's native executables with Goose's (CPU time against the same binaries, Goose given its size at run time, callgrind profiles, hot instruction runs). What the native backend changed for the Goose suite, under which conditions, what it gained and what remains is in `design/llvm-backend-plan.md` ("Native representations of the Goose work").
+[`audit/`](audit/README.md) documents the single checked-manifest driver for native
+CPU, paired ratios/quartiles, a same-binary control, Rust, Callgrind/cache profiles,
+RSS, executable sizes and secondary-target timings. Use it for acceptance claims;
+the `run.ts` runner above is a quick wall-time smoke check.
 
-`string-building/bytes.fa` is a second Fa version of `string-building`, written like
-the Goose port: growable byte buffers (`Array<Byte>`, with `Bytes` for fixed-length binary data),
-`split` as ranges into the text and `join` into a new buffer, integers formatted by
-hand. It prints the same output. `string-building/growing.fa` is the same program with
-`GrowingArray<Byte>` buffers, whose items never move, like Goose's `u8[>..]` arrays. The
-audit measures them as `string-building-bytes` and `string-building-growing`, against
-the same Goose and Rust programs:
-`python3 benchmarks/audit/compare.py string-building string-building-bytes string-building-growing --directory … --default-sizes`,
-and `audit/variants.py` times several of these builds against each other.
-The runner of this page (`run.ts`) only builds the `main.fa` of each benchmark.
+`string-building/bytes.fa` uses `Array<Byte>` buffers, split ranges and hand-written
+integer formatting, like the Goose port. `string-building/growing.fa` uses
+`GrowingArray<Byte>` buffers with stable item addresses. Both print the reference
+output and are measured as `string-building-bytes` and `string-building-growing`
+against the same Rust and Goose sources. `growing-index-array` is the `Array`
+control for `growing-index` (see the indexing methodology below).
+
+`push-array` keeps the original `push/array.fa` (reserved Array plus integer marks).
+The main `push` row uses an unreserved GrowingArray. Both use the suite's only
+safe Rust push row (reserved Vec plus indices), and the same Goose source.
+Select either name with `audit/compare.py`; `run.ts` runs the main only.
+The [port audit](audit/ports/README.md) explains the remaining differences and
+which recursive mains await language representation decisions.
+
+The continuation keeps `sum`, `particles` and `blur` as unreserved Array mains;
+`sum-reserved`, `particles-reserved` and `blur-reserved` retain the original
+sources, including the old Integer stencil sum. Main `blur` uses UInt16, as
+Goose and Rust do. `respond` emits escaping directly into one output buffer;
+`respond-interpolation` retains the original temporary quoted strings. These
+variants keep the same Rust rows: sum.rs (collect), particles.rs (elementwise),
+blur_index.rs (flat indexing), and respond_dto.rs (the DTO, not streaming).
+
+`lru-open` is the explicit 8-byte Int32-key/UInt32-index slot table with Goose's
+Fibonacci hash, linear probing and backward-shift deletion; it uses the separate
+Rust `lru/open.rs`, adapted from lru_open.rs with zero as its empty marker.
+The main `lru` keeps standard Map and lru_hashmap.rs. Main `words` keeps standard
+Map with Int32 counts to match Goose; `words-wide` preserves the original Fa and
+Rust rows with 64-bit counts. Both are paired with words_hashmap.rs in the
+corresponding width. The requested borrowed-key words table is **blocked**:
+`audit/ports/words-slice-key/main.fa` gets REL001/REL002 for storing a String slice
+reference in a slot. No owning-key or encoded-range substitute is measured.
+
+The [2026-11-16 push checkpoint](results/2026-11-16-ports.md)
+([raw samples and provenance](results/2026-11-16-ports.json)) measures both forms
+with the current compiler. Main push is 1.119 / 1.143 [1.024, 1.196] times Goose
+CPU at 32 million items, with a passing control; audit instructions at 3.2 million
+items are 155.50 M versus Goose 121.47 M. Its GrowingArray scan stays scalar
+(25.60 M instructions versus 12.00 M for Goose's vectorized scan), and append
+reloads/writes cursor and length metadata. The separate push-array CPU series
+fails its control and is **not resolved** under this task's stricter rule; its
+generated table uses `--require-control`, preserving raw phase verdicts in JSON.
+The direct paired GrowingArray/Array estimates straddle equality (1.078 / 0.995),
+so they establish no CPU direction. The historical trunk baseline below is
+unchanged. No compiler optimization is included in this port checkpoint.
 
 ## Fairness rules
 
@@ -203,288 +265,97 @@ Indexing uses the forms the [range analysis](../documentation/values/numbers.md#
 
 Every `main.fa` parses with the current parser (`cargo build -p fa-parser`, then `target/debug/fa-parser benchmarks/<name>/main.fa`).
 
-## Rust baseline
-
-Measured on 2026-11-01 with `bun benchmarks/run.ts` (3 runs, median), rustc 1.99.1, Linux 6.8 on a 6-core AMD EPYC virtual machine. The machine was shared with other jobs (load average around 7), so the times vary by up to 40% between runs: `nbody`, `sieve` and `word-count` even ran faster with overflow checks than without. Use them as orders of magnitude, and compare runs made on the same machine at the same time.
-
-| Benchmark | Rust | Rust ovf | Rust size | Rust default (stripped) | Rust default (unstripped) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `binary-trees` | 0.93 s | 0.85 s | 332.6 KiB | 334.9 KiB | 4.33 MiB |
-| `fannkuch-redux` | 0.24 s | 0.24 s | 332.1 KiB | 333.7 KiB | 4.33 MiB |
-| `fib` | 0.94 s | 1.38 s | 331.0 KiB | 332.5 KiB | 4.33 MiB |
-| `mandelbrot` | 1.15 s | 1.16 s | 331.4 KiB | 332.9 KiB | 4.33 MiB |
-| `nbody` | 1.78 s | 1.32 s | 335.9 KiB | 338.6 KiB | 4.34 MiB |
-| `sieve` | 1.44 s | 0.95 s | 331.6 KiB | 333.1 KiB | 4.33 MiB |
-| `sort-objects` | 0.91 s | 0.92 s | 350.4 KiB | 352.3 KiB | 4.36 MiB |
-| `spectral-norm` | 1.07 s | 1.27 s | 333.7 KiB | 335.4 KiB | 4.34 MiB |
-| `string-building` | 0.88 s | 0.96 s | 336.4 KiB | 338.1 KiB | 4.34 MiB |
-| `word-count` | 2.25 s | 1.39 s | 348.1 KiB | 350.7 KiB | 4.36 MiB |
-
-The outputs, which every Fa target must reproduce, are in `benchmarks/build/<name>/expected.txt` after a run. Known values check the Rust versions: `fannkuch-redux` prints `73196` and `Pfannkuchen(10) = 38`, `nbody` ends at an energy of `-169083134 (x 1e-9)` after 5,000,000 steps, and the sieve finds 5,761,455 primes below 100,000,000.
-
-Most of a Rust binary is its standard library (formatting, panics, the allocator): about 330 KiB stripped whatever the program, which is the bar for Fa's "tiny runtime".
-
-## Fa, Rust and Goose
-
-Measured on 2026-11-02 with `GOOSE_CC=~/.local/llvm18/usr/bin/clang-18 bun benchmarks/run.ts --runs 3` (one runner process, every benchmark at its default size, under `ulimit -v 4000000`; `binary-trees`, `blur` and `calc` run again alone after a transient build failure): rustc 1.99.1, Bun 1.4.4, `fa` built with LLVM 18 at the end of the fifth native shift (`b0f6659`), Goose `eadca40` (its C compiled by clang 18.1.3 at `-O2`), on the 6-core AMD EPYC virtual machine of the [Rust baseline](#rust-baseline). **The machine was busy** (load average 10 to 16 on 6 cores from other jobs): a time can be off by 50% (Rust's `blur` took 92 ms in the midpoint run and 198 ms here), so the CPU times of the [Goose suite](#against-goose-on-its-own-suite) below are the better guide. The fourth shift's run (`bcbefe4`) had Fa / Rust 2.16x and Fa / Goose 3.96x on the Goose suite.
-
-All the implementations of a benchmark printed the same output: the runner compares every one with Rust's before timing it.
-
-| Benchmark | Rust | Fa native | Goose | Fa / Rust | Goose / Rust | Fa / Goose | Rust ovf | Fa ovf | Fa wasm | Fa Bun | Rust size | Fa size | Goose size |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `fib` | 1.16 s | 1.36 s | 1.60 s | 1.17x | 1.37x | 0.85x | 2.11 s | 1.97 s | 2.81 s | 3.84 s | 331.0 KiB | 22.3 KiB | 18.4 KiB |
-| `nbody` | 1.17 s | 1.42 s | 2.05 s | 1.21x | 1.75x | 0.69x | 1.17 s | 1.77 s | 2.64 s | 4.96 s | 335.9 KiB | 28.2 KiB | 18.5 KiB |
-| `spectral-norm` | 1.19 s | 1.24 s | 1.02 s | 1.04x | 0.86x | 1.21x | 1.78 s | 1.22 s | 1.48 s | 2.27 s | 333.7 KiB | 25.9 KiB | 22.5 KiB |
-| `mandelbrot` | 1.55 s | 1.34 s | 1.24 s | 0.86x | 0.80x | 1.08x | 1.29 s | 1.52 s | 1.41 s | 1.71 s | 331.4 KiB | 26.5 KiB | 18.4 KiB |
-| `fannkuch-redux` | 0.28 s | 0.28 s | 0.49 s | 1.00x | 1.78x | 0.57x | 0.31 s | 0.35 s | 0.52 s | 0.57 s | 332.1 KiB | 27.0 KiB | 18.5 KiB |
-| `binary-trees` | 1.98 s | 1.03 s | 0.24 s | 0.52x | 0.12x | 4.21x | 1.70 s | 1.04 s | 1.59 s | 1.72 s | 332.6 KiB | 31.9 KiB | 18.4 KiB |
-| `string-building` | 1.29 s | 0.80 s | 0.16 s | 0.62x | 0.12x | 4.95x | 1.41 s | 0.68 s | 1.17 s | 1.56 s | 336.4 KiB | 46.8 KiB | 18.5 KiB |
-| `word-count` | 1.92 s | 0.90 s | 0.46 s | 0.47x | 0.24x | 1.98x | 1.18 s | 1.15 s | 1.89 s | 4.86 s | 348.1 KiB | 34.8 KiB | 22.5 KiB |
-| `sort-objects` | 1.14 s | 1.00 s | 0.40 s | 0.88x | 0.35x | 2.50x | 0.91 s | 1.20 s | 1.70 s | 4.32 s | 350.4 KiB | 37.8 KiB | 34.5 KiB |
-| `sieve` | 0.95 s | 0.91 s | 1.02 s | 0.96x | 1.08x | 0.89x | 0.87 s | 0.94 s | 1.11 s | 1.32 s | 331.6 KiB | 24.7 KiB | 18.5 KiB |
-| `sum` | 0.28 s | 0.38 s | 0.45 s | 1.36x | 1.61x | 0.84x | 0.49 s | 0.74 s | 0.63 s | 15.78 s | 332.7 KiB | 22.1 KiB | 18.4 KiB |
-| `push` | 0.69 s | 0.59 s | 0.66 s | 0.84x | 0.96x | 0.88x | 0.57 s | 0.57 s | 2.33 s | failed¹ | 332.4 KiB | 22.3 KiB | 18.4 KiB |
-| `strlist` | 0.42 s | 0.38 s | 0.23 s | 0.90x | 0.56x | 1.62x | 0.43 s | 0.40 s | 0.74 s | 15.93 s | 333.2 KiB | 29.2 KiB | 18.4 KiB |
-| `records` | 0.67 s | 0.55 s | 0.21 s | 0.83x | 0.32x | 2.58x | 0.65 s | 0.44 s | 5.65 s | 10.18 s | 333.5 KiB | 26.5 KiB | 18.4 KiB |
-| `tree` | 0.63 s | 0.73 s | 0.48 s | 1.15x | 0.76x | 1.52x | 0.85 s | 0.50 s | 8.00 s | 7.47 s | 331.7 KiB | 21.4 KiB | 18.4 KiB |
-| `interp` | 0.14 s | 0.07 s | 0.04 s | 0.53x | 0.32x | 1.63x | 0.20 s | 0.09 s | 0.24 s | 2.25 s | 332.1 KiB | 21.9 KiB | 18.4 KiB |
-| `graph` | 0.26 s | 0.26 s | 0.50 s | 0.99x | 1.90x | 0.52x | 0.30 s | 0.32 s | 0.89 s | 1.83 s | 333.8 KiB | 23.0 KiB | 18.4 KiB |
-| `words` | 0.30 s | 0.20 s | 0.08 s | 0.65x | 0.26x | 2.52x | 0.38 s | 0.32 s | 0.57 s | 2.21 s | 346.9 KiB | 32.9 KiB | 18.5 KiB |
-| `particles` | 0.21 s | 0.25 s | 0.28 s | 1.15x | 1.32x | 0.88x | 0.26 s | 0.20 s | 0.58 s | 20.88 s | 332.2 KiB | 23.0 KiB | 18.4 KiB |
-| `sexp` | 0.41 s | 0.98 s | 0.22 s | 2.41x | 0.53x | 4.54x | 0.39 s | 0.62 s | 9.09 s | 11.18 s | 334.6 KiB | 35.4 KiB | 18.5 KiB |
-| `lru` | 0.54 s | 0.81 s | 0.25 s | 1.50x | 0.45x | 3.30x | 0.57 s | 0.94 s | 1.83 s | 6.12 s | 346.8 KiB | 27.8 KiB | 18.5 KiB |
-| `scene` | 0.17 s | 0.21 s | 0.04 s | 1.23x | 0.23x | 5.37x | 0.18 s | 0.14 s | 0.26 s | 0.84 s | 334.3 KiB | 27.2 KiB | 18.5 KiB |
-| `calc` | 0.52 s | 0.85 s | 0.29 s | 1.63x | 0.54x | 2.99x | 0.54 s | 0.97 s | 1.97 s | 22.66 s | 335.1 KiB | 45.1 KiB | 22.5 KiB |
-| `respond` | 0.62 s | 0.60 s | 0.32 s | 0.97x | 0.51x | 1.91x | 0.61 s | 0.87 s | 0.91 s | 43.35 s | 336.8 KiB | 43.1 KiB | 22.4 KiB |
-| `blur` | 0.20 s | 0.23 s | 0.14 s | 1.19x | 0.69x | 1.73x | 1.40 s | 1.13 s | 1.49 s | 6.83 s | 334.5 KiB | 27.2 KiB | 18.4 KiB |
-| geometric mean | | | | 0.97x | 0.59x | 1.65x | | | | | | | |
-
-¹ Bun crashed on `push` (32 M objects under the 4 GB address-space cap: a `RangeError: Out of memory` in the earlier run). The other Bun times of the Goose-suite programs are dominated by the `UInt64` generator, a `BigInt` there.
-
-Ratios are of times: below 1, the first one is faster. Sizes are stripped executables (Rust: `-C panic=abort -C strip=symbols`). Goose has no overflow checks in an optimized build, so it has no "ovf" column.
-
-What it says:
-
-- **Fa native is as fast as Rust** overall (geometric mean 0.97x): 0.88x on the original ten and 1.03x on the Goose suite (2.16x before the fifth shift). The shift closed the gaps of `blur` (31x → about Rust: it vectorizes), `strlist` (6.7x → 0.9x), `sexp` (5.7x → 1.7 to 2.4x), `tree` (3.8x → about 1x), `records` (3.5x → 0.8x) and `calc` (3.3x → 1.6x). Fa is ahead of Rust where Rust pays for its allocator and formatting (`binary-trees`, `string-building`, `word-count`, `words`).
-- **Goose is the fastest of the three** on most programs: 0.59x Rust overall, 0.54x on its own suite against the Rust rows matching the Fa ports. Its wins are its design (no allocator, no teardown, inline strings, arenas, 32-bit references): `binary-trees` and `string-building` 6 to 8x faster than Rust, `scene` and `interp` 3 to 4x. It is slower than Rust on `graph`, `particles` and `sieve`.
-- **Fa is 1.65x slower than Goose** overall (2.8x before the shift), 1.90x on the Goose suite (3.96x before) and 1.28x on the original ten. Fa is ahead of or level with Goose on `sum`, `push`, `tree`, `graph`, `particles`, `blur`, `fib`, `nbody`, `fannkuch-redux` and `sieve`; behind where Goose's design avoids allocations and indirections (see below).
-- **Size**: Fa's native executables (15 to 45 KiB) and Goose's (18 to 35 KiB, runtime included with `--standalone`) are both an order of magnitude below Rust's 330 KiB.
-
-### After the native costs of the minimalism audit
-
-Measured on 2026-11-04 with the same command (`--runs 3`, `ulimit -v 8000000`), `fa` at `102d4ee` (before the `toUtf8()` ports): the native-goose work (inline strings and unions, arenas, borrowed parameters) and the follow-ups of [the minimalism audit](../design/minimalism-audit.md) (size-class string blocks, templates appended in place, in-place `+`, one-byte appends in registers, parameters never copied, module constants, `capacity`/`reserve`, presized maps in `lru` and `words`). The machine was busy again (load average 5 to 7): `respond` took 818 ms without overflow checks and 440 ms with them, so read the times as ±30%.
-
-| Benchmark | Fa native | Goose | Fa / Goose | | Benchmark | Fa native | Goose | Fa / Goose |
-| --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: |
-| `binary-trees` | 238 ms | 164 ms | 1.46x | | `records` | 343 ms | 248 ms | 1.38x |
-| `blur` | 186 ms | 82 ms | 2.26x | | `respond` | 818 ms | 269 ms | 3.05x |
-| `calc` | 520 ms | 255 ms | 2.04x | | `scene` | 22 ms | 22 ms | 0.97x |
-| `fannkuch-redux` | 441 ms | 470 ms | 0.94x | | `sexp` | 321 ms | 196 ms | 1.64x |
-| `fib` | 1.49 s | 1.59 s | 0.94x | | `sieve` | 914 ms | 1.17 s | 0.78x |
-| `graph` | 228 ms | 670 ms | 0.34x | | `sort-objects` | 437 ms | 368 ms | 1.19x |
-| `interp` | 70 ms | 49 ms | 1.43x | | `spectral-norm` | 1.01 s | 1.14 s | 0.89x |
-| `lru` | 813 ms | 289 ms | 2.82x | | `string-building` | 557 ms | 149 ms | 3.74x |
-| `mandelbrot` | 1.30 s | 1.31 s | 0.99x | | `strlist` | 344 ms | 181 ms | 1.91x |
-| `nbody` | 1.14 s | 1.22 s | 0.94x | | `sum` | 272 ms | 255 ms | 1.07x |
-| `particles` | 191 ms | 173 ms | 1.11x | | `tree` | 125 ms | 330 ms | 0.38x |
-| `push` | 385 ms | 435 ms | 0.88x | | `word-count` | 570 ms | 361 ms | 1.58x |
-| | | | | | `words` | 129 ms | 69 ms | 1.86x |
-
-Fa / Goose is 1.26x in geometric mean (1.65x on 2026-11-02). The instructions executed (callgrind, the audit sizes of `benchmarks/audit/sizes.txt`) are steadier than these times; Fa / Goose:
-
-| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| audit (2026-11-02) | 2.22 | 1.83 | 2.73 | 1.15 | 2.14 | 2.08 | 4.19 | 3.09 | 2.39 | 1.63 |
-| `compiler` with `toUtf8()` (`da95d6f`) | 1.80 | 1.88 | 1.84 | 0.98 | 2.03 | 2.38 | 2.23 | 1.48 | 1.22 | 1.17 |
-| and the follow-ups above | 1.70 | 1.89 | 1.69 | 0.98 | 1.92 | 2.22 | 2.24 | 1.49 | 1.22 | 1.17 |
-
-The times above predate the ports reading `toUtf8()` (`calc` and `sexp` still parsed an array of grapheme strings then); the instructions are on top of them. `lru` pays three map probes per miss and unproven index checks; `strlist` and `words` copy every word out of `split`.
-
-### Against Goose on its own suite
-
-The goal set for the native backend is to be faster than Goose on Goose's own benchmarks (release builds: `fa build`, overflow checks off). CPU time (user + system, median of 7, Fa and Goose executables run one after the other at their default sizes) on 2026-11-04, `compiler` with the merged `perf/native-goose` work and `toUtf8()` (the sixth native shift), on the same busy machine (load average 6 to 8; two passes differ by up to 40% on the shortest programs). The fifth shift's column is the previous version of this table.
-
-| Benchmark | Fa | Goose | Fa / Goose | Fifth shift | What Goose still does that Fa doesn't |
-| --- | ---: | ---: | ---: | ---: | --- |
-| `sum` | 0.30 s | 0.27 s | 1.13x | 1.37x | nothing: the same loops (within noise) |
-| `push` | 0.40 s | 0.36 s | 1.11x | 1.12x | nothing (within noise) |
-| `strlist` | 0.37 s | 0.19 s | 1.97x | 2.13x | one character appended per step from registers; words as slices of the text |
-| `records` | 0.38 s | 0.22 s | 1.75x | 1.64x | variable-size records inline in one buffer (Fa boxes the larger events) |
-| `tree` | 0.18 s | 0.42 s | 0.42x | 0.86x | nothing (Fa faster) |
-| `interp` | 0.03 s | 0.04 s | 0.68x | 2.66x | nothing (Fa faster) |
-| `graph` | 0.16 s | 0.38 s | 0.43x | 0.59x | nothing (Fa faster) |
-| `words` | 0.11 s | 0.06 s | 1.83x | 2.71x | slices as map keys (the split copies each word); the map itself is now a small share |
-| `particles` | 0.12 s | 0.14 s | 0.89x | 1.00x | nothing (Fa level) |
-| `sexp` | 0.24 s | 0.19 s | 1.26x | 3.61x | first-child/next-sibling links, inline symbols; the port now parses `codeUnitAt` positions |
-| `lru` | 0.65 s | 0.24 s | 2.70x | 2.91x | 16-byte nodes (`i32` fields): its 8 MB fit the 8 MB L3, Fa's 32-byte nodes plus the stable map entries (16 MB) don't; `unlink` inlined |
-| `scene` | 0.02 s | 0.02 s | 1.07x | 5.47x | nothing (children inline in their arrays now) |
-| `calc` | 0.45 s | 0.22 s | 1.99x | 3.33x | text edited in place, number templates appended without growth; the port now parses `codeUnitAt` positions |
-| `respond` | 0.62 s | 0.27 s | 2.29x | 2.44x | one byte buffer per response (Fa grows strings and builds templates) |
-| `blur` | 0.09 s | 0.10 s | 0.96x | 1.12x | nothing (Fa vectorizes, Goose doesn't) |
-| `binary-trees` | 0.15 s | 0.12 s | 1.24x | 3.83x | 32-bit relative links (Fa's arenas hold 16-byte nodes of two pointers) |
-| geometric mean | | | 1.19x | 1.94x | |
-
-The `lru` and `words` rows were measured again after the map work, on the ports presized since (`Map.from([], capacity = …)`; median of 21, Fa and Goose alternated, load average 6 to 7): each index slot holds a 32-bit hash tag and the entry's position (a mismatch never reads an entry), the entries are `{ key, value }` with the occupancy bits in the chunk directory (16 bytes per `Map(Integer, Integer)` entry instead of 32), deletion shifts the probe run back instead of leaving tombstones, integer keys are hashed with one multiplication and compared bitwise, and `delete` takes the key out in the walk that finds it (`documentation/collections/maps.md`, implementation section). Against the previous compiler on the same machine and program: `lru` 1.12x faster (38.7 M instructions instead of 42.1 M at the audit size; 4.2 M last-level misses instead of 5.9 M in cachegrind with an 8 MB L3); `words` unchanged (its map is about 15% of its instructions and its probe got about 8% cheaper, within the noise of the rest). `lru` now asks for `capacity` entries, the most it holds, instead of twice as many: a `Map` keeps twice as many index slots by itself, as Goose's table. What remains of `lru` is outside the map: Goose's working set fits the cache (0.13 M misses), `unlink` is a call with four bounds checks, and the values of a Fa `Map` stay in stable slots (a reference into a map survives insertions), one more cache line per hit than Goose's slot.
-
-Fa is ahead of or level with Goose on `tree`, `interp`, `graph`, `particles`, `blur`, `push`, `sum` and `scene`, and behind on string building (`strlist`, `respond`, `calc`, `records`) and maps (`lru`, `words`). What changed since the fifth shift: inline strings, nullable recursive edges, root arenas, inline recursive collection items, borrowed parameters and module constants (`perf/native-goose`, `design/llvm-backend-plan.md`), and direct text access instead of an array of grapheme strings. With the string redesign, `calc` and `sexp` parse numeric code units through `codeUnitAt`; the other ports use `toUtf8()` where Goose reads bytes.
-
-The full three-way table below (`run.ts`, wall times) was not run again; a run on 2026-11-04 (wall times, three runs, busier machine) gave Fa / Goose 1.21x on `binary-trees`, 1.48x on `calc`, 1.58x on `sexp`, 1.89x on `strlist`, 1.83x on `records`, 1.82x on `respond`, 3.95x on `lru`, 1.12x on `scene`, 0.43x on `words`, and Fa native at 0.16x (`binary-trees`) to 1.62x (`lru`) Rust on the Goose suite.
-
-### After the native gaps work
-
-Measured on 2026-11-04 on `compiler` with the native gaps work on top (split parts as views of an unchanged text, one-byte separators presized, `filter` of a temporary in place, short string equality without a call, only inline strings snapshotted when their bytes are read, characters of a literal as views, leaf functions of up to 64 nodes inlined, reciprocals of invariant divisors computed at their declaration). CPU time (user + system), median of 7, Fa and Goose alternated, at the default sizes, executables built by `GOOSE_CC=~/.local/llvm18/usr/bin/clang-18 bun run.ts --runs 3` (all outputs equal to Rust's); load average 4 to 9.
-
-| Benchmark | Fa | Goose | Fa / Goose | Before |
-| --- | ---: | ---: | ---: | ---: |
-| `sum` | 0.26 s | 0.27 s | 0.98x | 1.13x |
-| `push` | 0.33 s | 0.31 s | 1.06x | 1.11x |
-| `strlist` | 0.25 s | 0.19 s | 1.34x | 1.97x |
-| `records` | 0.31 s | 0.21 s | 1.48x | 1.75x |
-| `tree` | 0.12 s | 0.37 s | 0.33x | 0.42x |
-| `interp` | 0.04 s | 0.05 s | 0.79x | 0.68x |
-| `graph` | 0.19 s | 0.39 s | 0.50x | 0.43x |
-| `words` | 0.10 s | 0.07 s | 1.54x | 1.83x |
-| `particles` | 0.13 s | 0.13 s | 0.99x | 0.89x |
-| `sexp` | 0.22 s | 0.20 s | 1.09x | 1.26x |
-| `lru` | 0.66 s | 0.28 s | 2.36x | 2.70x |
-| `scene` | 0.02 s | 0.03 s | 0.91x | 1.07x |
-| `calc` | 0.41 s | 0.22 s | 1.85x | 1.99x |
-| `respond` | 0.44 s | 0.27 s | 1.66x | 2.29x |
-| `blur` | 0.09 s | 0.09 s | 0.97x | 0.96x |
-| `binary-trees` | 0.15 s | 0.13 s | 1.20x | 1.24x |
-| geometric mean | | | 1.08x | 1.19x |
-
-"Before" is the table above (same machine, other days and loads; the `compiler` commits merged in between count too). Instructions at the audit sizes (`benchmarks/audit/profile.sh`, callgrind), Fa / Goose before this work, and Fa after (the `strlist`, `words`, `lru` and `calc` builds at the start of this work executed 153.7, 43.5, 38.7 and 231.9 M):
-
-| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| before (last row of the instruction table of "After the native costs…") | 1.70 | 1.89 | 1.69 | 0.98 | 1.92 | 2.22 | 2.24 | 1.49 | 1.22 | 1.17 |
-| after (M instructions) | 125.5 | 134.4 | 286.0 | 17.2 | 38.3 | 36.1 | 220.3 | 105.9 | 156.0 | 9.3 |
-| Fa / Goose after | 1.71 | 1.66 | 1.51 | 0.98 | 1.71 | 2.02 | 2.01 | 1.37 | 1.22 | 1.17 |
-
-Peak RSS at the audit sizes: `strlist` 22.2 → 14.4 MB, `words` 14.2 → 7.8 MB (Goose 7.4 and 5.6). What remains:
-
-- **`lru`** (2.4x): memory-bound, 32-byte nodes and a stable map entry per key against Goose's 16-byte nodes. Narrowing `previous`/`next` to 32 bits, or proving `unlink`'s indices, needs an invariant the analyzer doesn't have (every value stored into those fields, `free` and the map's values is an index of `nodes`, which never shrinks: `design/todo.md`); `key` and `value` can't narrow (run-time size, `+= 1`). `unlink` is inlined now.
-- **`calc`, `respond`** (1.7–1.9x): building strings: the generator's templates and `self.text +=` grow strings and keep a 300-byte frame per recursive call; `respond` grows a string per template.
-- **`strlist`, `words`, `records`** (1.3–1.5x): the character-by-character text building (a capacity check per byte, not unrolled) and, for `strlist`, 45 instructions per word in the scan (the inline/heap tests of a part, the two bounds checks) against Goose's 12.
-
-### Source widths, reserved appends, templates
-
-Measured on 2026-11-04 after the ports took the integer widths of their sources (`lru`: `Int32`/`UInt32` fields and `Map(Int32, UInt32)`, 16-byte nodes; `graph`, `interp`, `sexp`, `scene`: `Int32`) and `calc` reused its generator's text as its sources do, with: counted loops of one-character appends reserving their room (`src/lower/appends.rs`: one store per byte, no check), strings leaving their inline room for a 64-byte block, one append spill slot per function (`calc`'s generator frame 312 → 184 bytes), string lengths known non-negative, and a field of a local object read alone (an `Int32` field had made LLVM pass `scene`'s nodes by value). Instructions at the audit sizes (callgrind), Fa (M) and Fa / Goose, before (the previous section) and after:
-
-| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| before (M) | 125.5 | 134.4 | 286.0 | 17.2 | 38.3 | 36.1 | 220.3 | 105.9 | 156.0 | 9.3 |
-| after (M) | 86.9 | 114.9 | 285.4 | 17.3 | 34.9 | 34.0 | 191.3 | 105.7 | 156.0 | 9.4 |
-| Fa / Goose | 1.18 | 1.42 | 1.50 | 0.99 | 1.56 | 1.90 | 1.75 | 1.36 | 1.22 | 1.18 |
-
-CPU time (median of 11, alternated, default sizes; load average 9 to 16, so ±30% on the memory-heavy programs: the same `tree` executable took 0.25 s and 0.61 s): `lru` 2.19x (1.93x in a quieter pass), `calc` 1.26x, `strlist` 1.29x, `records` 1.29x, `words` 1.45x, `respond` 1.53x, `sexp` 1.18x; `graph` 0.43x, `interp` 0.67x, `scene` 0.96x, `blur` 0.91x, `particles` 0.93x, `push` 0.96x.
-
-What remains: `lru`'s map keeps its values in stable chunks (one more cache line per hit than Goose's 8-byte slots); `respond` builds each `quoted()` string apart before copying it into its template (Goose escapes into the response directly); `strlist`'s scan still tests the representation of each part (about 38 instructions per word against Goose's 12: a part known statically to be a view would need none).
-
-### Views known statically, destination passing
-
-Measured on 2026-11-04 (instructions at the audit sizes, callgrind). The parts of a split are now always views, an inline text's included (views of its snapshot in the frame), and a `for` over the parts of a split by a non-empty literal knows they are never inline: reading a part tests nothing (`src/lower/views.rs`). A function that builds its string result in a `mutable` accumulator and is appended to a string (`out += "…{quoted(name)}…"`) is expanded at the call with the accumulator standing for the destination (`src/lower/destination.rs`).
-
-| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| before (M) | 86.9 | 114.9 | 285.4 | 17.3 | 34.9 | 34.0 | 191.3 | 105.7 | 156.0 | 9.4 |
-| after (M) | 86.9 | 95.7 | 273.9 | 17.3 | 32.6 | 34.0 | 191.3 | 105.7 | 156.0 | 9.4 |
-| Fa / Goose | 1.18 | 1.18 | 1.44 | 0.99 | 1.45 | 1.90 | 1.75 | 1.36 | 1.22 | 1.18 |
-
-`strlist`'s word scan is now about 10 instructions per word (Goose: 12); what remains is building the text (24 instructions per letter against Goose's 16: Goose unrolls by two). `lru`'s remaining instructions, against Goose's: the key computation (a run-time divisor where Goose's is a constant of the program: about 37 instructions per operation against 25), the map's lookup (a probe slot, then the chunk directory and the entry: about 45 instructions per hit against 15, the values of a `Map` staying in stable chunks), the hit path's six bounds checks (`unlink` and `linkFront` read indices from fields, which nothing proves in bounds) and the deletions' backward shifts (4 M against 1.3 M).
-
-### Never-negative places, in-place integers
-
-Measured on 2026-11-05 (instructions at the audit sizes, callgrind; "before" is `compiler` at `5ed2fc7`, built and profiled the same day). A field, local or parameter whose every store is non-negative (counted up by steps of one in a release build) is never counted from the end (`src/proofs.rs`: `calc`'s `current()`, `sexp`); integers below 10^4 are appended in place, one case per number of digits, and one digit per round in a counted loop; an append's fast path checks one comparison and stores only the length; a choice of literals of one length (`when … { 0 => " + " … }`) is appended with a constant length and nothing to drop; a loop over an array reserves the literal parts of the templates its block appends; loops over characters nested in other loops are versioned for simple text (`respond`'s `quoted()` expanded into its destination).
-
-| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| before (M) | 87.8 | 95.1 | 273.9 | 17.3 | 31.4 | 25.6 | 191.4 | 105.7 | 156.0 | 9.4 |
-| after (M) | 87.8 | 95.7 | 227.3 | 17.3 | 31.4 | 25.6 | 159.1 | 96.3 | 156.0 | 9.4 |
-| Fa / Goose before | 1.20 | 1.17 | 1.44 | 0.99 | 1.40 | 1.43 | 1.75 | 1.36 | 1.22 | 1.18 |
-| Fa / Goose after | 1.20 | 1.18 | 1.20 | 0.99 | 1.40 | 1.43 | 1.45 | 1.24 | 1.22 | 1.18 |
-
-CPU time (`audit/compare.py --default-sizes --runs 7`, median, busy machine): `calc` 0.27 s against 0.23 s (1.20x), `respond` 0.33 s against 0.26 s (1.29x), `sexp` 0.26 s against 0.18 s (1.45x, noisy: its instructions are 1.24x).
-
-What remains of `calc` (159 M against Goose's 110 M): the generator (47 M against 32 M: six registers saved per call where Goose saves one, the call being a leaf four times in five), `edited` (about 15 M: the port copies the text a character at a time where Goose edits a byte in place; string slices compiled natively would make it a few copies) and the parser (67 M against 59 M: the inline-or-heap test of `self.text` at each byte read). `respond` (227 M against 190 M): the heap block of each `sku` (reserved for its four digits, then freed with its item; Goose keeps it inline in the item) and the growths of `out` beyond the reserved literal parts.
-
-### Slices edited in place
-
-Measured on 2026-11-05 after the section above. `calc`'s port damages its generator's text in place with slices (`self.text = self.text[..index] + "#" + self.text[index + 1..]`, `self.text = self.text[..length // 2]`) instead of copying it a character at a time; natively, a string replaced by slices of itself writes the replacement over the replaced bytes, or shortens its length, when it owns its block, is simple and the replacement has the replaced bytes' length (`src/lower/edits.rs`). The check of an append's room is back to two comparisons with 64-bit constants (the shifted form cost `strlist` an instruction per word and saved no register in `calc`). Instructions (M) and Fa / Goose:
-
-| | `strlist` | `respond` | `calc` |
-| --- | ---: | ---: | ---: |
-| before (previous section) | 95.7 (1.18) | 227.3 (1.20) | 159.1 (1.45) |
-| after | 95.1 (1.17) | 225.3 (1.19) | 141.5 (1.29) |
-
-An append to a string in memory (a field, an item) now leaves its slow path to one cold runtime call (`fa_string_append_cold`) instead of the inline-string and snapshot code: `calc`'s generator frame is 40 bytes instead of 120, 141.5 M → 139.2 M instructions (1.27x). It still saves six registers per call: the hoisted 64-bit masks of the room check and the values kept across the recursive calls (tail-recursion elimination puts the leaf path inside the loop, so the prologue can't be shrink-wrapped; marking the self-call `notail` changed nothing). The parser's inline-or-heap test per byte read of `self.text` stays: hoisting it needs the field to be known unchanged across the recursive calls.
-
-A counted loop with a known number of rounds that fits an inline string (`for 0..4 { sku += "{digit}" }`) keeps an inline string inline (its bytes stored in the value, its tag counting one more) instead of moving it to a heap block before the loop (`src/lower/appends.rs`): `respond`'s `sku` no longer allocates, 225.3 M → 208.0 M instructions (1.10x Goose).
-
-### Fields set once, constant divisors
-
-Measured on 2026-11-05 (instructions at the audit sizes, callgrind; "before" is `compiler` at `335e776`, built and profiled the same day). A field that no code writes after the literal building its object (`design/decisions.md`, "Fields never written after construction") is read once by a method, a string with its bytes and length, and the small methods it calls on `self` are expanded into it (`src/lower/frozen.rs`): `calc`'s parser tests whether `self.text` is inline once per call instead of once per byte, and now runs as many instructions as Goose's (`factor`, `term`, `expression`: 59.2 M against 59.3 M). A `let` divisor whose value the analysis knows is divided by LLVM as a constant rather than through its run-time reciprocal (`lru`'s and `words`' key computations), and integer keys of at most 32 bits are hashed with one multiplication.
-
-| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| before (M) | 87.8 | 95.1 | 208.0 | 17.3 | 31.4 | 25.6 | 139.2 | 94.8 | 156.0 | 9.4 |
-| after (M) | 87.8 | 95.1 | 208.0 | 17.3 | 31.0 | 23.2 | 130.7 | 91.0 | 156.0 | 9.4 |
-| Goose (M) | 73.4 | 81.1 | 189.7 | 17.6 | 22.4 | 17.9 | 109.6 | 77.5 | 128.1 | 7.9 |
-| Fa / Goose | 1.20 | 1.17 | 1.10 | 0.99 | 1.38 | 1.30 | 1.19 | 1.17 | 1.22 | 1.18 |
-| CPU, Fa / Goose | 1.96 | 1.23 | 1.19 | 0.69 | 1.29 | 1.36 | 1.13 | 2.13 | 1.31 | 1.09 |
-
-CPU time: `audit/compare.py --default-sizes --runs 7`, medians, on a loaded machine (`records` and `sexp` at their default sizes are dominated by memory traffic, which the instruction counts don't see).
-
-What remains, measured: `calc`'s generator (43.0 M against Goose's 32.1 M) saves six registers per call. The room checks' 64-bit masks are not the cause alone: with the check rewritten as signed comparisons without constants, LLVM keeps the addresses of the operator literals in the freed registers instead (calc 130.7 M → 131.4 M, `strlist` +0.4 M, `respond` −3.3 M; reverted; a single comparison is unsound, the length word of an inline string holding bytes). The position-independent code is what costs them: the same IR compiled without PIC saves three registers. Marking the self-calls `notail` (no tail-recursion elimination) also saves three, but the calls it adds cost more (130.6 M → 130.9 M). `lru` (23.2 M against 17.9 M): the deletions' backward shifts (3.0 M against Goose's 0.9 M) and the probe of the index (a tag compared, then the key); `words` (31.0 M against 22.4 M): the map lookup of a string key copies an inline key of the entry to the stack to compare it.
-
-### Memory: packed arrays, mapped blocks, compact lists
-
-Measured on 2026-11-05 (instructions at the audit sizes, callgrind; cache figures from callgrind `--cache-sim=yes` with an 8 MB L3 at the default sizes; CPU from `audit/compare.py --default-sizes --runs 9`, medians, load average 25 to 29). The CPU gaps far larger than the instruction gaps were memory: `records` used 125 MB (Goose 38 MB) and missed the last level 10.6 M times (Goose 2.9 M), `sexp` 84 MB (27 MB) and 6.0 M misses (1.6 M), `binary-trees` twice the first-level misses. What changed (`design/decisions.md`, "Packed arrays" and the four entries after it):
-
-- **Packed arrays**: `records`' log stores each event as its member's byte and its data without padding (a word as its length and letters), 38 MB like Goose's, no box per event, the event built on the stack by the push.
-- **Large blocks have their own mapping** (native Linux, 1 MiB and more) and grow with `mremap`: `records` 9.4 k page faults instead of 25.5 k, `strlist` 8.7 k instead of 25.6 k (Goose 13.8 k).
-- **Small arrays wrapped into a value are compacted** next to their header: `sexp`'s lists take one block each, 0.6 M fewer last-level misses for 2.6 M more instructions.
-- **Sibling recursive fields share one arena allocation**: `binary-trees` 1.45 G → 1.27 G instructions at its default size (Goose 1.19 G).
-- **String keys compare in place** in the probe (`words` 31.0 M → 30.5 M); the inline map's backward shift reads its slots from a local base.
-
-| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| before (M) | 87.8 | 95.1 | 208.0 | 17.3 | 31.0 | 23.2 | 130.7 | 91.0 | 156.0 | 9.4 |
-| after (M) | 83.7 | 94.7 | 207.7 | 17.3 | 30.5 | 23.2 | 130.9 | 93.6 | 136.8 | 9.4 |
-| Fa / Goose | 1.14 | 1.17 | 1.09 | 0.99 | 1.36 | 1.29 | 1.19 | 1.21 | 1.07 | 1.19 |
-| CPU, Fa / Goose before | 1.96 | 1.23 | 1.19 | 0.69 | 1.29 | 1.36 | 1.13 | 2.13 | 1.31 | 1.09 |
-| CPU, Fa / Goose after | 1.16 | 1.00 | 1.18 | 0.81 | 1.14 | 1.33 | 1.00 | 1.89 | 1.22 | 1.12 |
-
-Peak RSS after: `records` 38 MB (Goose 38 MB), `strlist` 73 MB (57 MB: 24-byte string values against Goose's 16-byte slices), `sexp` 80 MB (27 MB).
-
-What remains, measured: `sexp`'s nodes are 32-byte inline unions (an 8-byte tag and a 24-byte string or array header pointer) against Goose's variable-size pool items of about 11 bytes, and its walk still misses 3.6 M times (Goose 0.9 M); its system time varies from 0.04 s to 0.57 s between runs of the same executable on this loaded machine, in the faults of the advised huge-page spans of the small-block heap (`defrag` is `madvise`: synchronous compaction), which Goose's `malloc` doesn't ask for. Since then the heap gives no huge-page advice (lead's decision): `sexp`'s system time is 0.07 to 0.10 s over 7 runs (Goose 0.02 to 0.04 s: a third of the pages). A packed layout for recursive unions (`List` data being an array header) and a decision on huge pages under memory pressure are the next steps. `binary-trees` keeps 16-byte nodes of two pointers against Goose's 8-byte nodes of two 32-bit pool indices: 32-bit links need every node of a root in one 4 GiB region (a reserved range for the arenas), a representation decision left to the lead. `lru`'s deletions are short runs (1.4 slots on average); its gap is the hit path and 12-byte inline map slots against Goose's 8. `calc`'s packed literal choice (`base + length * index`) is not done.
-
-### Against Goose's published results
-
-[Goose's results page](https://aardappel.github.io/goose/bench/results.html) (2026-10-16; Ryzen 9 9950X3D, Windows 11, clang-cl 22 `/O2`, rustc 1.98 `-O -C codegen-units=1`) compares Goose with the fastest safe Rust row of each benchmark at its large size (the "vs rust (clang)" column, inverted here into a ratio of times). This run uses the Rust row whose data structure matches the Fa port, at our default size, on Linux with clang 18:
-
-| Benchmark | Goose / Rust, published | Goose / Rust, here | Rust row here | Fa / Rust, here | Fa / Goose, here |
-| --- | ---: | ---: | --- | ---: | ---: |
-| `sum` | 1.02x | 1.61x | `Vec`, collect | 1.36x | 0.84x |
-| `push` | 0.93x | 0.96x | `Vec` + reserve, indices | 0.84x | 0.88x |
-| `strlist` | 0.82x | 0.56x | `Vec<String>` | 0.90x | 1.62x |
-| `records` | 0.50x | 0.32x | enum + `String` | 0.83x | 2.58x |
-| `tree` | 0.97x | 0.76x | `Box` nodes | 1.15x | 1.52x |
-| `interp` | 0.78x | 0.32x | enum + `Box` | 0.53x | 1.63x |
-| `graph` | 0.76x | 1.90x | `Vec<Vec>` | 0.99x | 0.52x |
-| `words` | 0.57x | 0.26x | `HashMap<&str>` | 0.65x | 2.52x |
-| `particles` | 0.97x | 1.32x | AoS, elementwise | 1.15x | 0.88x |
-| `sexp` | 0.86x | 0.53x | enum + `Box` + `String` | 2.41x | 4.54x |
-| `lru` | 0.92x | 0.45x | `HashMap` + arena | 1.50x | 3.30x |
-| `scene` | 0.98x | 0.23x | `Vec` children | 1.23x | 5.37x |
-| `calc` | 1.12x | 0.54x | `Box` + `Result` | 1.63x | 2.99x |
-| `bintrees` (`binary-trees`) | 0.86x | 0.12x | `Option<Box>` (ours) | 0.52x | 4.21x |
-| `respond` | 0.74x | 0.51x | DTO + `String` | 0.97x | 1.91x |
-| `blur` | 0.89x | 0.69x | flat indexing | 1.19x | 1.73x |
-| geometric mean | 0.84x | 0.54x | | 1.03x | 1.90x |
-
-Goose's page finds Goose faster than the best safe Rust by 1.2x (geometric mean, Goose / Rust 0.84x); here it is 1.8x faster (0.57x), mostly because several Rust rows here are the owning-pointer ones (`Box`, `HashMap` with its default hasher, `Vec<String>`) rather than index arenas and open addressing, and because the default sizes are the page's small or medium ones. The exceptions point the other way: `graph` (Goose 3x slower than nested `Vec`s here, 1.3x faster than the best Rust row there at 2 M vertices) and `blur` (2x slower here: Rust and Fa vectorize the kernel, Goose's C doesn't).
+<a id="rust-baseline"></a>
+<a id="fa-rust-and-goose"></a>
+
+<!-- BEGIN GENERATED TRUNK BASELINE -->
+## Trunk baseline — 2026-11-16
+
+[Measurements and provenance](results/2026-11-16-trunk.json).
+
+Generated by `audit/compare.py --render` from schema-2 JSON; times are CPU seconds.
+Native CPU/RSS sizes and round counts are recorded per series in JSON. Instructions/cache: audit sizes.
+Each ratio cell is ratio of medians / paired median [Q1, Q3]. Near-threshold CPU gates
+require the same-binary control to differ by <3% on both measures. `within noise` is unresolved.
+
+| Suite | Benchmark | CPU size | Fa / Goose CPU | Fa / Rust CPU | Fa / Goose Ir | Fa / Rust Ir | Control | Goose / Rust goal |
+| --- | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| goose | `binary-trees` | 17 | 0.972 / 0.988 [0.893, 1.068] | 0.117 / 0.118 [0.113, 0.128] | 0.894 | 0.137 | 1.005/1.019 pass | goal met / goal met |
+| goose | `blur` | 3000 | 1.007 / 1.020 [0.873, 1.122] | 0.984 / 0.968 [0.793, 1.142] | 1.141 | 0.918 | 1.023/0.985 pass | goal met / goal met |
+| goose | `calc` | 400000 | 1.035 / 1.061 [0.999, 1.180] | 0.590 / 0.611 [0.542, 0.676] | 1.147 | 0.494 | 0.992/1.010 pass | goal met / goal met |
+| secondary | `fannkuch-redux` | 10 | 1.085 / 1.082 [1.011, 1.169] | 1.009 / 1.007 [0.976, 1.038] | 1.262 | 1.291 | 0.997/1.017 pass | goal met / behind |
+| secondary | `fib` | 42 | 1.002 / 0.964 [0.875, 1.057] | 0.930 / 0.930 [0.870, 0.996] | 1.000 | 0.808 | 0.954/0.951 fail | goal met / goal met |
+| goose | `graph` | 100000 | 0.553 / 0.579 [0.526, 0.614] | 0.984 / 1.040 [0.791, 1.166] | 1.492 | 0.584 | 0.980/0.995 pass | goal met / within noise |
+| secondary | `growing-index` | 1000000 | 1.127 / 1.105 [1.036, 1.279] | 1.170 / 1.204 [1.121, 1.268] | 1.320 | 1.336 | 0.966/0.982 fail | within noise / behind |
+| secondary | `growing-index-array` | 1000000 | 1.072 / 1.051 [0.991, 1.123] | 1.106 / 1.066 [0.901, 1.195] | 1.063 | 1.076 | 1.009/0.969 fail | within noise / behind |
+| secondary | `growing-index-array@1000` | 1000 | 1.059 / 1.015 [0.952, 1.496] | 1.099 / 1.062 [0.929, 1.196] | 1.066 | 1.095 | 1.090/1.096 fail | within noise / behind |
+| secondary | `growing-index-array@16` | 16 | 1.038 / 1.058 [0.930, 1.234] | 0.938 / 0.982 [0.875, 1.289] | 1.066 | 1.095 | 0.901/0.958 fail | within noise / within noise |
+| secondary | `growing-index@1000` | 1000 | 1.087 / 1.087 [1.010, 1.170] | 1.054 / 1.079 [0.843, 1.164] | 1.293 | 1.328 | 1.013/1.058 fail | within noise / behind |
+| secondary | `growing-index@16` | 16 | 1.046 / 1.049 [0.963, 1.128] | 1.003 / 0.992 [0.942, 1.060] | 1.293 | 1.328 | 1.008/1.016 pass | goal met / within noise |
+| goose | `interp` | 21 | 1.428 / 1.432 [1.137, 1.604] | 0.450 / 0.449 [0.411, 0.535] | 1.097 | 0.519 | 1.038/1.024 fail | behind / goal met |
+| goose | `lru` | 2000000 | 1.106 / 1.117 [1.006, 1.319] | 0.544 / 0.551 [0.444, 0.618] | 1.131 | 0.376 | 0.989/0.983 pass | behind / goal met |
+| secondary | `mandelbrot` | 4000 | 1.032 / 1.021 [0.901, 1.101] | 1.021 / 1.005 [0.934, 1.112] | 0.999 | 1.001 | 1.015/0.993 pass | goal met / behind |
+| secondary | `nbody` | 15000000 | 0.899 / 0.888 [0.869, 0.951] | 1.208 / 1.176 [1.110, 1.279] | 0.995 | 1.204 | 0.962/0.984 fail | goal met / behind |
+| goose | `particles` | 300000 | 0.969 / 0.980 [0.881, 1.030] | 1.028 / 1.037 [0.894, 1.096] | 0.996 | 0.997 | 1.025/1.018 pass | goal met / behind |
+| goose | `push` | 32000000 | 1.034 / 1.024 [0.978, 1.110] | 0.984 / 1.021 [0.923, 1.088] | 1.112 | 0.935 | 0.925/0.968 fail | goal met / within noise |
+| goose | `records` | 4000000 | 1.193 / 1.158 [1.082, 1.266] | 0.586 / 0.584 [0.549, 0.650] | 1.091 | 0.615 | 1.066/1.073 fail | behind / goal met |
+| goose | `respond` | 400000 | 1.292 / 1.222 [1.060, 1.376] | 0.602 / 0.632 [0.529, 0.708] | 1.079 | 0.490 | 1.128/1.023 fail | behind / goal met |
+| goose | `scene` | 12 | 2.762 / 2.780 [2.368, 3.007] | 0.470 / 0.435 [0.396, 0.535] | 1.208 | 1.033 | 0.926/0.942 fail | behind / goal met |
+| goose | `sexp` | 20000 | 1.456 / 1.438 [1.349, 1.679] | 0.837 / 0.841 [0.797, 0.916] | 1.049 | 0.686 | 1.030/1.032 fail | behind / goal met |
+| secondary | `sieve` | 100000000 | 1.136 / 1.141 [1.009, 1.195] | 1.113 / 1.109 [0.959, 1.202] | 0.816 | 0.999 | 1.094/1.078 fail | within noise / behind |
+| secondary | `sort-objects` | 1000000 | 1.187 / 1.161 [1.066, 1.273] | 0.485 / 0.495 [0.418, 0.511] | 1.481 | 0.856 | 0.969/0.997 fail | behind / goal met |
+| secondary | `spectral-norm` | 4000 | 0.951 / 0.934 [0.873, 1.019] | 0.884 / 0.904 [0.830, 0.994] | 0.881 | 0.775 | 0.987/1.014 pass | goal met / goal met |
+| secondary | `string-building` | 3000000 | 1.626 / 1.697 [1.598, 1.779] | 0.274 / 0.274 [0.262, 0.300] | 1.596 | 0.272 | 0.913/0.968 fail | behind / goal met |
+| secondary | `string-building-bytes` | 3000000 | 1.155 / 1.122 [1.040, 1.209] | 0.180 / 0.175 [0.167, 0.190] | 1.178 | 0.201 | 1.025/0.995 pass | behind / goal met |
+| secondary | `string-building-growing` | 3000000 | 1.162 / 1.203 [0.978, 1.312] | 0.179 / 0.182 [0.168, 0.193] | 1.256 | 0.214 | 0.962/0.965 fail | behind / goal met |
+| goose | `strlist` | 2000000 | 1.060 / 1.027 [0.891, 1.150] | 0.454 / 0.463 [0.399, 0.504] | 1.072 | 0.446 | 1.066/1.145 fail | within noise / goal met |
+| goose | `sum` | 32000000 | 1.037 / 1.020 [0.954, 1.119] | 0.998 / 0.965 [0.908, 1.084] | 1.134 | 1.082 | 1.019/0.965 fail | goal met / within noise |
+| goose | `tree` | 21 | 0.474 / 0.525 [0.430, 0.546] | 0.458 / 0.456 [0.416, 0.508] | 0.998 | 0.404 | 0.996/1.028 pass | goal met / goal met |
+| secondary | `word-count` | 5000000 | 1.925 / 1.795 [1.648, 1.985] | 0.714 / 0.684 [0.639, 0.799] | 1.605 | 0.616 | 1.081/1.026 fail | behind / goal met |
+| goose | `words` | 500000 | 1.174 / 1.139 [1.022, 1.378] | 0.446 / 0.461 [0.357, 0.536] | 1.266 | 0.456 | 1.112/1.037 fail | within noise / goal met |
+
+### Absolute measurements
+
+RSS is a separate GNU-time run, in KiB; stripped executable size is in bytes.
+Wasm and Bun timings use the size shown, including process startup; errors are retained.
+
+| Benchmark | CPU Fa / Goose / Rust (s) | RSS Fa / Goose / Rust (KiB) | Size Fa / Goose / Rust (bytes) | Ir size | Ir Fa / Goose / Rust (M) | Secondary size | Wasm (s) | Bun (s) |
+| --- | --- | --- | --- | ---: | --- | ---: | --- | --- |
+| `binary-trees` | 0.122 / 0.125 / 1.042 | 5888 / 8064 / 18304 | 34808 / 18888 / 342920 | 14 | 114.535 / 128.146 / 836.867 | 17 | 0.310 | 0.864 |
+| `blur` | 0.097 / 0.097 / 0.099 | 19200 / 19584 / 19584 | 20976 / 18864 / 344120 | 1000 | 92.416 / 80.963 / 100.698 | 3000 | 0.681 | 5.897 |
+| `calc` | 0.237 / 0.229 / 0.401 | 1792 / 1792 / 1920 | 45336 / 23000 / 346000 | 40000 | 125.641 / 109.553 / 254.348 | 400000 | 0.455 | 14.436 |
+| `fannkuch-redux` | 0.262 / 0.241 / 0.259 | 1664 / 2048 / 1920 | 30256 / 18904 / 341752 | 9 | 136.695 / 108.296 / 105.878 | 10 | 0.338 | 0.481 |
+| `fib` | 1.038 / 1.036 / 1.116 | 1664 / 1792 / 1920 | 25072 / 18888 / 340480 | 35 | 236.885 / 236.991 / 293.224 | 42 | 1.641 | 2.777 |
+| `graph` | 0.224 / 0.406 / 0.228 | 12032 / 9728 / 12032 | 21760 / 18888 / 343688 | 10000 | 10.448 / 7.002 / 17.901 | 100000 | 0.330 | 1.815 |
+| `growing-index` | 0.249 / 0.221 / 0.212 | 9472 / 9856 / 9856 | 29488 / 18888 / 341984 | 1000000 | 418.170 / 316.768 / 312.957 | 1000000 | 0.377 | 2.082 |
+| `growing-index-array` | 0.238 / 0.222 / 0.215 | 9472 / 9856 / 9856 | 30592 / 18888 / 341984 | 1000000 | 336.665 / 316.768 / 312.957 | 1000000 | 0.334 | 1.879 |
+| `growing-index-array@1000` | 0.069 / 0.065 / 0.063 | 1664 / 2048 / 1920 | 30592 / 18888 / 341984 | 1000 | 320.195 / 300.301 / 292.343 | 1000 | 0.146 | 0.631 |
+| `growing-index-array@16` | 0.065 / 0.062 / 0.069 | 1664 / 1920 / 1920 | 30592 / 18888 / 341984 | 16 | 320.179 / 300.285 / 292.322 | 16 | 0.151 | 0.772 |
+| `growing-index@1000` | 0.067 / 0.061 / 0.063 | 1664 / 2048 / 2048 | 29488 / 18888 / 341984 | 1000 | 388.210 / 300.301 / 292.343 | 1000 | 0.137 | 0.688 |
+| `growing-index@16` | 0.070 / 0.067 / 0.070 | 1664 / 1920 / 1920 | 29488 / 18888 / 341984 | 16 | 388.179 / 300.285 / 292.321 | 16 | 0.146 | 0.766 |
+| `interp` | 0.063 / 0.044 / 0.141 | 5888 / 5376 / 18432 | 13704 / 18864 / 342480 | 17 | 19.286 / 17.588 / 37.149 | 21 | 0.134 | 1.708 |
+| `lru` | 0.290 / 0.262 / 0.533 | 10752 / 9984 / 12416 | 18944 / 18896 / 357136 | 200000 | 20.238 / 17.886 / 53.799 | 2000000 | 0.459 | 5.137 |
+| `mandelbrot` | 1.264 / 1.225 / 1.239 | 1664 / 1920 / 1920 | 27632 / 18888 / 340912 | 1000 | 441.162 / 441.516 / 440.804 | 4000 | 1.452 | 1.342 |
+| `nbody` | 1.120 / 1.246 / 0.927 | 1664 / 2048 / 2048 | 32872 / 18912 / 346712 | 1500000 | 867.181 / 871.786 / 720.319 | 15000000 | 1.587 | 3.027 |
+| `particles` | 0.132 / 0.136 / 0.128 | 8576 / 8960 / 8832 | 23872 / 18880 / 341712 | 30000 | 105.167 / 105.577 / 105.519 | 300000 | 0.198 | 17.081 |
+| `push` | 0.363 / 0.351 / 0.369 | 256640 / 255872 / 255872 | 20072 / 18864 / 341992 | 3200000 | 135.092 / 121.470 / 144.457 | 32000000 | 0.661 | > 512 MiB |
+| `records` | 0.262 / 0.220 / 0.448 | 38784 / 38144 / 158080 | 23048 / 18888 / 343208 | 400000 | 80.085 / 73.386 / 130.258 | 4000000 | 0.367 | > 512 MiB |
+| `respond` | 0.390 / 0.302 / 0.648 | 1664 / 1920 / 2048 | 47760 / 22976 / 347112 | 40000 | 204.714 / 189.703 / 417.976 | 400000 | 0.535 | 27.448 |
+| `scene` | 0.060 / 0.022 / 0.127 | 9984 / 6656 / 10240 | 31176 / 18896 / 344112 | 9 | 9.538 / 7.896 / 9.232 | 12 | 0.140 | 0.872 |
+| `sexp` | 0.293 / 0.201 / 0.350 | 57856 / 27136 / 102784 | 31904 / 18904 / 345032 | 2000 | 81.320 / 77.534 / 118.519 | 20000 | 0.442 | > 512 MiB |
+| `sieve` | 1.242 / 1.093 / 1.116 | 99328 / 99584 / 99456 | 26848 / 18904 / 341096 | 10000000 | 203.734 / 249.542 / 203.878 | 100000000 | 1.372 | 1.716 |
+| `sort-objects` | 0.461 / 0.389 / 0.950 | 80896 / 34176 / 91648 | 48840 / 35288 / 360784 | 100000 | 176.809 / 119.372 / 206.574 | 1000000 | 0.651 | 5.027 |
+| `spectral-norm` | 1.003 / 1.055 / 1.135 | 1664 / 1920 / 2048 | 32208 / 23016 / 343424 | 1000 | 535.728 / 608.312 / 691.207 | 4000 | 1.130 | 2.067 |
+| `string-building` | 0.262 / 0.161 / 0.954 | 1664 / 2048 / 2176 | 52024 / 18896 / 346296 | 300000 | 237.268 / 148.695 / 872.492 | 3000000 | 0.573 | 1.292 |
+| `string-building-bytes` | 0.178 / 0.154 / 0.990 | 1664 / 1920 / 2176 | 44904 / 18896 / 346296 | 300000 | 175.141 / 148.695 / 872.492 | 3000000 | 0.569 | refused E-NUM-19 |
+| `string-building-growing` | 0.187 / 0.161 / 1.043 | 1664 / 2048 / 2176 | 49528 / 18896 / 346296 | 300000 | 186.738 / 148.695 / 872.492 | 3000000 | 0.495 | refused E-NUM-19 |
+| `strlist` | 0.196 / 0.185 / 0.433 | 73984 / 56704 / 135680 | 31896 / 18888 / 343208 | 200000 | 86.933 / 81.082 / 195.018 | 2000000 | 0.307 | > 512 MiB |
+| `sum` | 0.286 / 0.276 / 0.287 | 126592 / 126976 / 126848 | 14752 / 18864 / 342304 | 3200000 | 161.779 / 142.684 / 149.520 | 32000000 | 0.357 | > 512 MiB |
+| `tree` | 0.168 / 0.355 / 0.368 | 71552 / 51072 / 132992 | 12600 / 18864 / 341664 | 17 | 56.684 / 56.773 / 140.311 | 21 | 0.222 | 6.747 |
+| `word-count` | 0.862 / 0.448 / 1.208 | 6528 / 7296 / 5732 | 44632 / 23000 / 359136 | 500000 | 235.015 / 146.465 / 381.265 | 5000000 | 0.940 | 4.765 |
+| `words` | 0.094 / 0.080 / 0.211 | 22528 / 18816 / 19572 | 41568 / 18904 / 357328 | 100000 | 28.380 / 22.411 / 62.219 | 500000 | 0.237 | 1.788 |
+
+<!-- END GENERATED TRUNK BASELINE -->
 
 ## Compiler
 
@@ -642,13 +513,15 @@ modulo 1,000,000,007. Initialization and the final sequential checksum are
 included. No version announces capacity. Every intermediate stays below 2^53
 at these sizes.
 
+Use the same driver for each size, preserving distinct build directories and
+reports. For example (repeat with 1000 and 1000000):
+
 ```bash
-python3 benchmarks/audit/compare.py growing-index growing-index-array --size 16 --directory benchmarks/audit/build/index-small --profile
-python3 benchmarks/audit/compare.py growing-index growing-index-array --size 1000 --directory benchmarks/audit/build/index-cache --profile
-python3 benchmarks/audit/compare.py growing-index growing-index-array --size 1000000 --directory benchmarks/audit/build/index-large --profile
+python3 benchmarks/audit/compare.py growing-index growing-index-array --size 16 --directory benchmarks/audit/build/index-16 --mode prepare
+python3 benchmarks/audit/compare.py growing-index growing-index-array --size 16 --directory benchmarks/audit/build/index-16 --reuse --mode cpu --runs 21 --cpu 1 --report benchmarks/results/index-16-cpu.json
+python3 benchmarks/audit/compare.py growing-index growing-index-array --size 16 --directory benchmarks/audit/build/index-16 --reuse --mode profile --report benchmarks/results/index-16-profile.json
 ```
 
-Use `benchmarks/audit/variants.py` for 21 alternating runs of all three
-executables together, pinned to CPU 1, with user plus system CPU time. Pass
-Rust's output through `--expected` and `--profile-expected`; both `--size`
-and `--profile-size` are 16, 1,000 or 1,000,000 for the three rows.
+Both implementations share the safe Rust `Vec` oracle and Goose reference. The
+native CPU series includes its own interleaved same-binary control; no separate
+variant timing script is needed.

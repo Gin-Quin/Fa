@@ -24,9 +24,9 @@ export function = (count: Integer<min = 0, max = 100>): Array<Choice> => {
 }
 -- file: main.fa
 let choices = collect(20)
-let copy = choices
+let duplicate = choices
 mutable total = 0
-for choice, index in copy {
+for choice, index in duplicate {
 	let text = describe(choice)
 	total += text.length
 	if index %% 3 == 1 { assert text == "x".repeat(index // 3 * 10) }

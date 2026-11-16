@@ -132,6 +132,14 @@ Whether a function can be called blocking on a target is part of its **interface
 
 ## Tasks
 
+`start` evaluates the written arguments and omitted parameter defaults when the task is created, in source order; only its body waits for the task's first turn. An error from a default is an error of the `start` expression, and already evaluated owned arguments are destroyed if creation fails. Cancelling before the first turn does not undo defaults that already ran.
+
+```fa
+async function greet = (name: String = "Ana"): String => name
+let task = start greet() -- binds the default now; runs the body on its first turn
+console.log(await task)
+```
+
 A `Task` is the handle of a computation started with `start`. Its type declares its result and its errors, like a function type: starting `fetchData` gives a `Task<Response> throws HttpError`.
 
 ```fa
@@ -149,7 +157,7 @@ A task is **structured**:
 - A task can't be copied: assigning it, passing it to `Task.all` or storing it in a collection moves it, and the previous name can't be used anymore.
 - `await task` waits for the result and consumes the task.
 - **Leaving its scope cancels a task and waits for it.** A task that is still running when the value holding it is destroyed is cancelled, so nothing keeps running unnoticed.
-- A `start` whose task is not kept (a `start` statement) is **detached**: it runs to its end, independently of the scope that started it. Since nobody awaits it, it can't have `throws` (handle its errors with `catch` inside), and like an [escaping closure](/functions/defining-functions#closures), it receives copies of its arguments and of the values it captures. So it uses no local value and no requirement, and doesn't reserve the module-level values it modifies: other code sees its changes after each `await`. The program waits for its detached tasks before it exits.
+- A `start` whose task is not kept (a `start` statement) is **detached**: it runs to its end, independently of the scope that started it. Since nobody awaits it, it can't have `throws` (handle its errors with `catch` inside), and like an [escaping closure](/functions/defining-functions#closures), it owns its arguments and captures under the [storage rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles): ordinary values copy, collections move at last use or require explicit `copy`, and unique captures are forbidden (`MEM003`). So it uses no local value and no requirement, and doesn't reserve the module-level values it modifies: other code sees its changes after each `await`. The program waits for its detached tasks before it exits.
 
 ### Cancelling a task
 
@@ -404,7 +412,7 @@ async function main = () => {
 
 The rules:
 
-- The value the caller holds is a **handle** to the worker. Like a task, it can't be copied, only moved.
+- The value the caller holds is a **unique handle** to the worker. It moves, `copy` is `MEM003`, and a parameter borrows it (unlike a Task-consuming parameter). WorkerPool, socket/listener, guard and subscription owners follow the same unique lifetime rule. Only Mutex, Channel and atomics share identity when copied.
 - **Calls are queued**: a worker runs one call at a time, in the order the calls were made, so its state is never accessed by two threads at once. A method declared with `mutates self` modifies the worker's state, and needs a `mutable` handle.
 - The caller can't read or write the fields of a worker: it only calls its methods. The fields are given when the worker is created.
 - A started call uses the handle, like any started call uses its arguments: the worker can't be stopped or moved until the task is awaited or cancelled.
@@ -415,7 +423,7 @@ The rules:
 
 #### Values are copied across threads
 
-Arguments and results are **copied** across the thread boundary. This is not a special rule for concurrency: it is Fa's ordinary copy-on-assignment rule (see [memory management](/advanced/memory-management)), and it makes workers safe by construction, since two threads never share the same data.
+Arguments and results crossing a worker boundary require an independent value, a common `Mutex` protecting shared state, or a proven exclusive transfer invalidating the source and its aliases. Keeping a collection usable on both sides requires `copy` at the visible transfer site. Unique resources can transfer only with an exclusivity proof; a Task never crosses, even inside a resource, a shared payload or a closure (`CONC008`). There is no automatic field locking. A value borrowed from `Guard.value` cannot escape its protection, nor can an older unprotected alias bypass that protection. See [memory management](/advanced/memory-management#closures).
 
 [References](/advanced/owned-references) and [relations](/advanced/relations) cannot cross a worker boundary: passing one to a worker method is a compile error. [Requirements](/advanced/requirements) do not cross worker boundaries either.
 
@@ -445,7 +453,8 @@ async function main = () => {
 	-- Submit the tasks to the pool
 	mutable pending: Array<Task<Array<Integer>> throws WorkerTimeout> = []
 	for data in inputs {
-		pending.push(await workers.submit((worker) => await worker.process(data)))
+		let snapshot = copy data
+		pending.push(await workers.submit((worker) => await worker.process(snapshot)))
 	}
 
 	-- Wait for all the tasks to complete
@@ -457,9 +466,9 @@ async function main = () => {
 }
 ```
 
-`state` is the initial state of each worker: every worker of the pool starts with its own copy of it. It may be left out when every field of the worker type has a default value, and the workers then start from `DataProcessor {}`.
+`state` is the initial state of each worker: every worker of the pool starts with its own independent copy of it. This is a repeated-copy operation, including after a restart: unique state is forbidden (`MEM003`). An existing collection-valued state needs an explicit `copy` at construction (`MEM004`); the pool's documented per-worker copies are then part of that operation, never a one-time transfer. It may be left out when every field of the worker type has a default value, and the workers then start from `DataProcessor {}`.
 
-`submit` takes an async function that receives a free worker of the pool, and gives its task. It is `async`: it waits while the pool's queue is full (`maxQueueSize`), so `await workers.submit(…)` gives the task, not its result; called without `await`, it waits on the calling thread. The function is stored until a worker is free, so it captures copies of the values it uses, like any [escaping closure](/functions/defining-functions#closures).
+`submit` takes an async function that receives a free worker of the pool, and gives its task. It is `async`: it waits while the pool's queue is full (`maxQueueSize`), so `await workers.submit(…)` gives the task, not its result; called without `await`, it waits on the calling thread. The function is stored until a worker is free, so it owns immutable captures under the [escaping-closure rules](/functions/defining-functions#closures), with explicit copies for borrowed structure data and no unique captures.
 
 A pool accepts more options:
 
@@ -588,7 +597,7 @@ Immutable values need none of this: a value that no thread modifies can be read 
 
 ### Mutexes
 
-A `Mutex` protects a value. `lock()` waits until the value is available, and returns a guard giving access to it:
+A `Mutex` protects a value. Its handle is shared, but each guard returned by `lock()` or `tryLock()` is a unique owner of that acquisition: it moves, cannot be copied, and is borrowed in a parameter. `lock()` waits until the value is available, and returns a guard giving access to it:
 
 ```fa
 use { Mutex } = std.concurrency
@@ -758,13 +767,13 @@ The strategy is detailed in `design/compilation-with-llvm.md`, and decided for a
 ### JavaScript
 
 - **Async instance**: `name___async`, an `async function` of JavaScript taking its task first (`name___async($task, …)`); `await` becomes `await`. **Sync instance**: `name___sync`, a plain function. Each is emitted only when a call needs it, and a function with one instance keeps its plain name; an exported one is also a Promise API (`name`) for JavaScript callers, and the other modules import `name$sync` and `name$async`. On `bun` and `node`, the blocking primitives map to the synchronous APIs (`readFileSync`) or, for timers, to `Atomics.wait` on a private `SharedArrayBuffer`. An `await` of a mutex or a channel that is ready doesn't `await` at all.
-- **`start`** begins the task in a microtask, not synchronously like a JavaScript `async` call (`faStart($task, name___async, …)`, the arguments evaluated at once). The `Task` object holds its outcome (a value, a Fa error, or cancelled), the end of its current wait, and the tasks it owns.
-- **Detached calls** copy borrowed argument values at the `start`, including fields, indexed values, spread elements and method receivers, unless the analysis marks them moved. Only the started call copies: nested calls evaluating its arguments retain ordinary borrowing. Worker transport already snapshots its arguments and needs no additional copy. A `start do` uses the analysis's capture list. Synchronization handles keep their shared identity; module-level values are read by the block rather than captured.
+- **`start`** binds written arguments and omitted defaults immediately in source order, with cleanup if binding fails; only the body begins in a microtask (`faStart`). A synchronous default-entry/portable owner recipe keeps defaults separate from the scheduled body. This is the specified creation timing on every target; the legacy JavaScript binder must be updated in ownership slice O24. The `Task` object holds its outcome (a value, a Fa error, or cancelled), the end of its current wait, and the tasks it owns.
+- **Detached calls** store arguments and captures at the `start`, including fields, indexed values, spread elements and method receivers. Ordinary values copy, structures move or need visible `copy`, and unique captures are forbidden. Only the started call owns these stored values: nested calls evaluating its arguments retain ordinary borrowing. Worker transport already snapshots its arguments and needs no additional copy. A `start do` uses the analysis's capture list. Synchronization handles keep their shared identity; module-level values are read by the block rather than captured.
 - **Guards** bound to locals unlock at block exit. An awaited `lock()` or a `tryLock()` used temporarily, including as a positional or named argument, unlocks at the end of its statement. A generated `try`/`finally` also releases it if evaluation throws or leaves the scope; a binding initialized inside that `try` is declared outside it. A fresh guard result whose value is discarded is passed directly to `faUnlock` at the discard point.
 - **Cancellation**: `cancel()` marks the task, ends its current wait (a timer is cleared, a place in a line is left) and cancels the tasks it owns, synchronously; the waits of the runtime check the mark when they resume and throw a signal that no `catch` keeps, so that only the `finally` blocks of the task (its scope exits) run. Errors are Fa values, never rejected promises.
 - **Coop budget**: an `await` that resolves without waiting counts, and every 128 of them a macrotask lets timers and I/O run; the loops of async instances check the clock every 128 iterations and give the thread back once the current macrotask lasted 4 ms.
 - **WebAssembly**: the same coroutines as natively; the host's event loop drives the executor (`fa_run`, run from a macrotask while tasks are ready, and when the timer the program asked for with `fa.timer` fires).
-- **Workers**: Web Workers on `web`, `worker_threads` on `node`, `Worker` on `bun`; each worker file is a separate bundle. Arguments and results are copied with the generated copy functions (never `structuredClone` on Fa objects, whose layout it doesn't know). A channel, mutex or atomic shared with a worker lives in a `SharedArrayBuffer`. Channels store their queue as JSON behind a lock and a version word: a task waits with `Atomics.waitAsync`, a blocking worker with `Atomics.wait`, and updates notify waiters. Mutexes use the same locking scheme.
+- **Workers**: Web Workers on `web`, `worker_threads` on `node`, `Worker` on `bun`; each worker file is a separate bundle. Arguments and results use generated independent-copy or exclusive-transfer operations; no Task is transferable. Shared synchronization handles retain category identity (never `structuredClone` on Fa objects). A channel, mutex or atomic shared with a worker lives in a `SharedArrayBuffer`. Production payloads use build-time generated binary codecs and category ownership operations behind a lock and a version word: a task waits with `Atomics.waitAsync`, a blocking worker with `Atomics.wait`, and updates notify waiters. Mutexes use the same locking scheme. The legacy JSON payload path is superseded and is replaced by ownership slices O30–O32; no runtime schema interpretation or function compilation is permitted.
 - **Queued worker cancellation**: sending a call snapshots its arguments immediately in a prepared message. The caller commits one live call at a time, from a microtask, after the previous answer. Cancelling before that commit discards the prepared call; cancelling during an import is checked again before entering the method. This uses no extra argument copy or shared memory, and a method already executing may finish with its result discarded.
 - `for parallel` and `parallel()` don't exist on JavaScript.
 

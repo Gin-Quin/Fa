@@ -737,7 +737,7 @@ impl Walker<'_> {
 		if let Some(value_node) = value_node {
 			if matches!(
 				self.view(self.strip_groups(value_node)),
-				View::Lambda { .. }
+				View::Lambda { .. } | View::Copy(_)
 			) {
 				self.escape(value_node, value_node);
 			}

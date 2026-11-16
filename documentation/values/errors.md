@@ -86,7 +86,17 @@ When you do not want an error, use the methods that return an [optional](/values
 
 A function that can fail declares its errors after its return type, with `throws`. Several error types are separated by `|`.
 
-Use the `throw` keyword to fail with an error. `throw` exits the current function, like `return`.
+Use `throw` to fail with an error. A `throw` written inside `do … catch` is caught by that lexical `catch`, including a direct `throw` in the block. Without an enclosing handler in the function, the error leaves the function. A handler can throw again to propagate it. A `return` still exits the function.
+
+```fa
+type Failure = Errors { Bad }
+function handled = (): Integer => do {
+	throw Failure.Bad
+} catch _error => 7
+console.log(handled()) -- 7
+```
+
+Ownership and mutable state on entering the handler are those at the failure point: a value moved before the throw stays moved. Error cleanup destroys only the values still owned on that path.
 
 ```fa
 function loadScore = (): Integer throws ApiError.AuthenticationError => {

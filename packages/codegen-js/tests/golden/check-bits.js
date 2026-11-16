@@ -1,12 +1,12 @@
 // helpers: faQuote, faFormatError, FaError, faCaught, FaStop, faStop, faOverflow, faCheckInteger, faCheckRange, DivisionByZero, faFloorQuotient, faFloorDivide, ArithmeticError, faPower, faConvertInteger, faFloatToIntegerResult, faRound, faIntegerRound, faWrap, faWrapBig, faFromBig64, faShiftAmount, faBitwiseResult, faShiftLeft, IndexError, faNormalizeIndex, faIndex, faIndexSet, faExit, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
 
 function indices(items, i) {
-	let copy = items.slice();
-	for (let j = 0, $t0 = copy.length; j < $t0; j++) {
-		copy[j] = faCheckInteger(copy[j] + 1, "check-bits.fa:6:13");
+	let duplicate = items.slice();
+	for (let j = 0, $t0 = duplicate.length; j < $t0; j++) {
+		duplicate[j] = faCheckInteger(duplicate[j] + 1, "check-bits.fa:6:18");
 	}
-	faIndexSet(copy, i, 0);
-	return faCheckInteger(faIndex(copy, i) + copy.length, "check-bits.fa:9:2");
+	faIndexSet(duplicate, i, 0);
+	return faCheckInteger(faIndex(duplicate, i) + duplicate.length, "check-bits.fa:9:2");
 }
 
 function shifts(x, amount) {

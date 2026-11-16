@@ -10,7 +10,7 @@ console.log(tools.run(() => 2), tools.run(fail) catch error => -1)
 export namespace = {
 	function run = (f: () => Integer): Integer => f() + 0
 	function keep = (f: () => Integer): Integer => {
-		let copy = f
-		copy()
+		let duplicate = f
+		duplicate()
 	}
 }

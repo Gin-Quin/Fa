@@ -16,19 +16,19 @@ function optional = (tree: Tree): Tree? => tree
 
 for 0..3 {
 	let root = Tree.build(12)
-	let copy = duplicate(root)
+	let duplicate = duplicate(root)
 	assert root.count() == 8191
-	assert copy.count() == 8191
+	assert duplicate.count() == 8191
 	do {
 		let subtree = root.left
 		assert subtree?.count() == 4095
 	}
-	let boxed = optional(copy)
+	let boxed = optional(duplicate)
 	assert boxed?.count() == 8191
 	let moved: Tree? = Tree.build(8)
 	assert moved?.count() == 511
 	assert root.right?.count() == 4095
-	assert copy.count() == 8191
+	assert duplicate.count() == 8191
 }
 console.log("tree arenas ok")
 -- prints: tree arenas ok

@@ -942,3 +942,20 @@ fn generic_brackets() {
 		],
 	);
 }
+
+#[test]
+fn copy_is_a_reserved_prefix_like_await() {
+	for (word, kind) in [("await", TokenKind::Await), ("copy", TokenKind::Copy)] {
+		assert_tokens(&format!("{word}\nvalue"), vec![kind, TokenKind::Identifier]);
+		assert_tokens(
+			&format!("let {word} = 1"),
+			vec![TokenKind::Let, kind, TokenKind::Equal, TokenKind::Integer],
+		);
+		assert_tokens(
+			&format!("source.{word}"),
+			vec![TokenKind::Identifier, TokenKind::Dot, kind],
+		);
+		assert!(!kind.ends_operand());
+		assert!(kind.skips_newlines_after());
+	}
+}

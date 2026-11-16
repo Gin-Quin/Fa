@@ -54,16 +54,16 @@ type Chain = {
 
 for round in 0..3 {
 	let root = Tree.build(10, 1)
-	let copy = root
+	let duplicate = root
 	assert root.count() == 2047
-	assert copy.sum() == root.sum()
-	assert copy == root
+	assert duplicate.sum() == root.sum()
+	assert duplicate == root
 	let left = root.left
 	assert left?.count() == 1023
 	assert root.left?.left?.value == 4
 	assert root.right?.right?.value == 7
 	assert root.leftmost() == 1024
-	let both = Tree.graft(copy, 3)
+	let both = Tree.graft(duplicate, 3)
 	assert both.count() == 2047 + 15 + 1
 	assert both.left == root
 	assert both.right != root

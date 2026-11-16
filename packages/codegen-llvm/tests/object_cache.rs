@@ -369,6 +369,65 @@ fn a_remote_capacity_read_invalidates_a_consulted_fact() {
 }
 
 #[test]
+fn a_remote_observer_rebuilds_exact_array_field_reservations() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let directory =
+		PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fa-array-field-capacity-object-cache");
+	let _ = std::fs::remove_dir_all(&directory);
+	std::fs::create_dir_all(&directory).unwrap();
+	let mut files: Vec<(String, String)> = [
+		("package.fa", "export = { name = \"fieldCapacityCache\" }"),
+		("library/model.fa", "export namespace = { type Bucket = { items: Array<Integer> } }"),
+		("library/build.fa", "export function = (count: Integer): model.Bucket => { mutable bucket = model.Bucket { items = [] }\nfor index in 0..count { bucket.items.push(index) }\nbucket }"),
+		("library/read.fa", "export function = (bucket: model.Bucket): Integer => bucket.items.length"),
+		("library/double.fa", "export function = (value: Integer): Integer => value * 2"),
+		("application/main.fa", "export function = () => { console.log(library.read(library.build(3)))\nconsole.log(library.double(2)) }"),
+	].into_iter().map(|(path, text)| (path.into(), text.into())).collect();
+	let names = ["model", "build", "read", "double", "main"];
+	let run = |expected| {
+		let output = std::process::Command::new(directory.join("main"))
+			.output()
+			.unwrap();
+		assert!(output.status.success(), "{output:?}");
+		assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+		assert!(output.stderr.is_empty(), "{output:?}");
+	};
+	let first = build_files(&directory, &files, &names);
+	run("3\n4\n");
+	let exact = std::fs::read_dir(directory.join("objects"))
+		.unwrap()
+		.flatten()
+		.any(|entry| {
+			let name = entry.file_name().to_string_lossy().into_owned();
+			name.ends_with(".o")
+				&& name.contains("build")
+				&& std::fs::read(entry.path())
+					.unwrap()
+					.windows(b"fa_array_reserve".len())
+					.any(|window| window == b"fa_array_reserve")
+		});
+	assert!(exact, "the builder must actually use exact reservation");
+	std::thread::sleep(std::time::Duration::from_millis(20));
+	let again = build_files(&directory, &files, &names);
+	assert!(rebuilt(&first, &again).is_empty());
+	let (_, reader) = files
+		.iter_mut()
+		.find(|(path, _)| path == "library/read.fa")
+		.unwrap();
+	*reader = reader.replace("items.length", "items.capacity");
+	std::thread::sleep(std::time::Duration::from_millis(20));
+	let observed = build_files(&directory, &files, &names);
+	let changed = rebuilt(&again, &observed);
+	assert!(changed.iter().any(|unit| unit == "build"), "{changed:?}");
+	assert!(!changed.iter().any(|unit| unit == "double"), "{changed:?}");
+	// A stale exact reservation would expose 3 through the new reader.
+	run("4\n4\n");
+}
+
+#[test]
 fn a_remote_capacity_read_rebuilds_compact_array_payloads() {
 	if !fa_codegen_llvm::llvm_available() {
 		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);

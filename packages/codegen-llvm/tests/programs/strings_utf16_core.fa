@@ -1,5 +1,5 @@
 -- Core UTF-16 operations over native WTF-8 storage.
-function copy = (text: String): String => text
+function identity = (text: String): String => text
 let text = "aé日😀z"
 console.log(text.length, text.utf8Length(), text.codeUnitAt(3), text.codeUnitAt(-2)) -- prints: 6 11 55357 56832
 console.log(text[1], text[2], text[3].length, text[3].isWellFormed(), text[4].isWellFormed()) -- prints: é 日 1 false false
@@ -20,7 +20,7 @@ console.log(when text[1] is { "a" => 1, "é" => 2, else => 3 }) -- prints: 2
 mutable pair = text[3]
 pair += text[4]
 console.log(pair, pair.length, pair == "😀", pair.isWellFormed()) -- prints: 😀 2 true true
-mutable frame = copy("é日")
+mutable frame = identity("é日")
 frame += text[3]
 frame += text[4]
 console.log(frame, frame.length, frame.isWellFormed()) -- prints: é日😀 4 true
@@ -30,7 +30,7 @@ heap += text[4]
 console.log(heap, heap.length, heap.isWellFormed(), heap.capacity >= 256) -- prints: é日😀 4 true true
 let empty = ""
 console.log(empty.length, empty[0..0].length, empty.get(0)) -- prints: 0 0 none
-console.log(copy("\r\nx").length, (try copy("\r\nx")[0..1]) == "\r") -- prints: 3 true
+console.log(identity("\r\nx").length, (try identity("\r\nx")[0..1]) == "\r") -- prints: 3 true
 
 mutable source = String.from("aé日😀z", capacity = 256)
 use borrowed = try source[1..3]

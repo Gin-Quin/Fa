@@ -142,14 +142,14 @@ type Logged = { logged: Boolean }
 -- Each middleware returns its input enriched with new properties
 function addTimestamp = <Context: Request>(request: Context): { ...Context, ...Timestamp } => {
 	{
-		...request
+		...copy request
 		timestamp = getCurrentTime()
 	}
 }
 
 function addAuthHeader = <Context: Request>(request: Context): { ...Context, ...Auth } => {
 	{
-		...request
+		...copy request
 		auth = getAuthToken()
 	}
 }
@@ -157,7 +157,7 @@ function addAuthHeader = <Context: Request>(request: Context): { ...Context, ...
 function logRequest = <Context: { ...Request, ...Timestamp }>(request: Context): { ...Context, ...Logged } => {
 	console.log("Logging request at {request.timestamp}")
 	{
-		...request
+		...copy request
 		logged = true
 	}
 }
@@ -187,12 +187,13 @@ The same pattern can be used to build plugin systems, where each plugin extends 
 type App = { name: String, version: String }
 type Config = { config: AppConfig }
 type Router = { router: AppRouter }
-type Database = { database: DatabaseConnection }
+use { Mutex } = std.concurrency
+type Database = { database: Mutex<DatabaseConnection> }
 
 -- Core application setup
 function setupConfig = <Application: App>(app: Application): { ...Application, ...Config } => {
 	{
-		...app
+		...copy app
 		config = loadConfiguration()
 	}
 }
@@ -200,15 +201,15 @@ function setupConfig = <Application: App>(app: Application): { ...Application, .
 -- Database plugin
 function addDatabase = <Application: { ...App, ...Config }>(app: Application): { ...Application, ...Database } => {
 	{
-		...app
-		database = connectToDatabase(app.config.databaseUrl)
+		...copy app
+		database = Mutex<DatabaseConnection> { value = connectToDatabase(app.config.databaseUrl) }
 	}
 }
 
 -- Router plugin
 function addRouter = <Application: { ...App, ...Config }>(app: Application): { ...Application, ...Router } => {
 	{
-		...app
+		...copy app
 		router = createRouter(app.config.routes)
 	}
 }
@@ -221,7 +222,7 @@ let app = createApp(App { name = "MyApp", version = "1.0.0" })
 -- app now has the `config`, `database` and `router` properties
 ```
 
-Plugins can be added, removed or reordered while the whole chain stays type-safe.
+Plugins can be added, removed or reordered while the whole chain stays type-safe. The explicit source copies preserve independent copyable structure fields; generic copy conditions reject unique fields. A database connection has one lifetime owner behind the shared Mutex, so extending the application copies its handle rather than the connection.
 
 ### Data migrations
 

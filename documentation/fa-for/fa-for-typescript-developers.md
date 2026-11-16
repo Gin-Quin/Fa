@@ -1,5 +1,7 @@
 # Fa for TypeScript developers
 
+The [copy and move rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles) distinguish ordinary values (including strings), structures (`copy` to keep both), unique values (move only), and shared synchronization handles.
+
 Fa will feel familiar: structural typing, arrow functions, unions, generics. Its syntax sits between TypeScript and Rust. The differences are where Fa does things TypeScript cannot, because TypeScript has to remain a superset of JavaScript.
 
 Fa is designed for AI agents as much as for humans: types are 100% safe — if the code compiles, it works — and everything a function does (the errors it throws, the values it requires, the data it mutates) is written in its signature, like with [Effect](https://effect.website), but in the syntax.
@@ -103,7 +105,7 @@ if name is not none {
 
 Conditions only accept a `Boolean`. `if (name)` does not compile: write `if name is not none`, or `if name.length > 0`. `and`, `or` and `not` only take booleans as well, so `a || "default"` becomes `a ?? "default"` on an optional.
 
-## Assignment copies
+## Values, copies and moves
 
 This is the biggest change. TypeScript objects are references; Fa objects are values, stored inline where they are declared.
 
@@ -238,5 +240,5 @@ Other things you will enjoy:
 | `try` around a block | `try` or `catch` on each call that can fail |
 | `value as User` (type assertion) | does not exist: narrow with `if value is User`; `as` only renames |
 | `new User("Ada")` | `User { name = "Ada" }` |
-| Spreading to copy (`{...a}`) | assignment already copies |
+| Spreading to copy (`{...a}`) | ordinary object assignment, or `copy a` for structure owners |
 | `const f = () => ...` | `function f = () => ...`; lambdas are only written where a value is expected |

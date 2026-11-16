@@ -999,7 +999,7 @@ mod tests {
 			"console.log(log[0])\n",
 			"console.log(log)\n",
 			"function count = (events: Array<Event>): Integer => events.length\nconsole.log(count(log))\n",
-			"let copy = log\nconsole.log(copy.length)\n",
+			"let duplicate = log\nconsole.log(duplicate.length)\n",
 			"log = []\n",
 			"mutable other: Array<Event> = [Event.Tick]\nother.push(Event.Tick)\n",
 			// captured by a closure

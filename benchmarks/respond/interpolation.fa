@@ -1,0 +1,136 @@
+-- JSON responses: for each request, a response object with a `String` and an `Array` of objects
+-- holding a `String` each, rendered with interpolation and string escaping into a new string,
+-- checksummed with 64-bit FNV-1a, then destroyed: many small strings and objects.
+
+let lowercase = "abcdefghijklmnopqrstuvwxyz"
+let uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+-- xorshift64, the generator of the Goose suite: `UInt64` arithmetic that drops the bits
+-- shifted out.
+function xorshift = (seed: UInt64): UInt64 => {
+	mutable x = seed
+	x = x.bitXor(x.shiftLeft(13))
+	x = x.bitXor(x.shiftRight(7))
+	x.bitXor(x.shiftLeft(17))
+}
+
+-- A number in `0..bound`: the remainder of the unsigned random number.
+function below = (random: UInt64, bound: Integer<min = 1>): Integer => random %% bound
+
+type Item = {
+	sku: String
+	quantity: Integer
+	price: Integer
+}
+
+type Response = {
+	id: Integer
+	user: String
+	items: Array<Item>
+}
+
+-- A user name of 3 to 10 letters; one in eight carries a quote or a backslash, so that the
+-- escaping path of the renderer is taken.
+function userName = (seed: UInt64): String => {
+	mutable name = ""
+	mutable random = xorshift(seed)
+	let length = 3 + below(random, 8)
+	let odd = below(random.shiftRight(8), 8) == 0
+	for index in 0..length {
+		random = xorshift(random)
+		if odd and index == 1 {
+			name += if below(random, 2) == 0 { "\"" } else { "\\" }
+		} else {
+			name += lowercase[random %% 26]
+		}
+	}
+	name
+}
+
+-- A stock keeping unit: two letters and four digits.
+function sku = (seed: UInt64): String => {
+	mutable random = xorshift(seed)
+	mutable text = uppercase[random %% 26] + uppercase[random.shiftRight(8) %% 26]
+	for 0..4 {
+		random = xorshift(random)
+		text += "{below(random, 10)}"
+	}
+	text
+}
+
+function makeItems = (seed: UInt64, count: Integer): Array<Item> => {
+	mutable items: Array<Item> = []
+	mutable random = seed
+	for 0..count {
+		random = xorshift(random)
+		items.push({
+			sku = sku(random)
+			quantity = 1 + below(random.shiftRight(8), 5)
+			price = 100 + below(random.shiftRight(16), 99900)
+		})
+	}
+	items
+}
+
+-- The JSON string of a text: quotes and backslashes are escaped.
+function quoted = (text: String): String => {
+	mutable result = "\""
+	for character in text {
+		if character == "\"" or character == "\\" {
+			result += "\\"
+		}
+		result += character
+	}
+	result + "\""
+}
+
+function render = (response: Response): String => {
+	mutable out = "{{\"id\":{response.id},\"user\":{quoted(response.user)},\"items\":["
+	mutable total = 0
+	for item, index in response.items {
+		if index > 0 {
+			out += ","
+		}
+		out += "{{\"sku\":{quoted(item.sku)},\"qty\":{item.quantity},\"price\":{item.price}}}"
+		total += item.quantity * item.price
+	}
+	out += "],\"total\":{total}}}"
+	out
+}
+
+-- 64-bit FNV-1a over the UTF-8 bytes of the text.
+function fnv1a = (text: String): UInt64 => {
+	mutable hash: UInt64 = 14695981039346656037
+	for byte in text.toUtf8() {
+		hash = hash.bitXor(byte).wrappingMul(1099511628211)
+	}
+	hash
+}
+
+-- One request: the response object and its rendering are both local values.
+function handle = (seed: UInt64): Tuple<UInt64, Integer> => {
+	let random = xorshift(seed)
+	let response = Response {
+		id = below(random.shiftRight(4), 1000000)
+		user = userName(random.shiftRight(8))
+		items = makeItems(random.shiftRight(16), 1 + below(random, 8))
+	}
+	let out = render(response)
+	(fnv1a(out), out.length)
+}
+
+let n = 400_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
+
+mutable seed: UInt64 = 12345
+mutable hash: UInt64 = 0
+mutable bytes = 0
+for index in 0..n {
+	seed = xorshift(seed)
+	let (responseHash, length) = handle(seed)
+	hash = hash.bitXor(responseHash.wrappingMul(31).wrappingAdd(index))
+	bytes += length
+}
+
+console.log(n)
+console.log(bytes)
+console.log(hash)

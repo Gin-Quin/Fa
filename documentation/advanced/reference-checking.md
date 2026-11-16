@@ -138,7 +138,7 @@ The checker walks the structured code once, applying the effects of each operati
 - **Branches** (`if`, `when`, `catch` handlers, the right side of `and`, `or` and `??`): after the branches, a reference is invalidated if it is invalidated in any branch. A reference that is only maybe invalidated counts as invalidated. A `mutable use` may designate any place it designates in one of the branches.
 - A branch that ends with `return`, `throw`, `break` or `continue` doesn't reach the code after the branches.
 - **Loops** (`for`, `while`, `loop`) are analysed to a fixpoint: the state at the start of the body joins the state before the loop and the state at the end of every iteration (and every `continue`); the state after the loop joins the exits and every `break`. The state is finite (identities follow the widening of [range analysis](/values/numbers#range-analysis)), so the fixpoint is reached.
-- A **non-escaping closure** runs during the call it is passed to: its effects are effects of that call, and the references it captures are used during that call (see [arguments that alias](#arguments-that-alias)). An escaping closure captures copies, and holds no reference (see [closures](/functions/defining-functions#closures)).
+- A **non-escaping closure** runs during the call it is passed to: its effects are effects of that call, and the references it captures are used during that call (see [arguments that alias](#arguments-that-alias)). An escaping closure owns immutable captures under the copy/move rules (explicit snapshots for borrowed collections, no unique captures), and holds no reference (see [closures](/functions/defining-functions#closures)).
 
 ### Declaring again
 

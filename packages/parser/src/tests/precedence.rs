@@ -5,6 +5,75 @@ use crate::nodes::Node;
 use crate::parsing::parse_single_statement::parse_single_statement;
 
 #[test]
+fn explicit_copy_binds_after_access_and_before_arithmetic() {
+	assert_statement("copy values[0]", "(copy values[0])");
+	assert_statement("copy source.items + other", "((copy source.items) + other)");
+	assert_statement("copy (left ?? right)", "(copy ((left ?? right)))");
+	assert_statement("copy copy value", "(copy (copy value))");
+}
+
+#[test]
+fn reserved_copy_accepts_every_operand_spelling() {
+	assert_statement("copy(value)", "(copy (value))");
+	assert_statement("copy (value)", "(copy (value))");
+	assert_statement("copy[0]", "(copy [0])");
+	assert_statement("copy [1, 2]", "(copy [1, 2])");
+	assert_statement("copy -value", "(copy (-value))");
+	assert_statement("copy -2", "(copy -2)");
+	assert_statement("copy - 2", "(copy (-2))");
+	assert_statement("copy\nvalues[0]", "(copy values[0])");
+	assert_statement("copy source.items()[0]", "(copy source.items()[0])");
+}
+
+#[test]
+fn copy_member_names_follow_await() {
+	for keyword in ["await", "copy"] {
+		let member = format!("source.{keyword}(value)");
+		assert_statement(&member, &member);
+		let optional = format!("source?.{keyword}");
+		assert_statement(&optional, &optional);
+		assert_has_error(&format!("let source = {{ {keyword} = 1 }}"));
+	}
+}
+
+#[test]
+fn reserved_copy_cannot_be_a_declared_name() {
+	for source in [
+		"let copy = 1",
+		"mutable copy = 1",
+		"use copy = source",
+		"static copy = 1",
+		"function copy = () => 1",
+		"type copy = Integer",
+		"namespace copy = {}",
+		"reactive copy = 1",
+		"derived copy = 1",
+		"function apply = (copy: Integer) => 1",
+		"function apply = (copy) => 1",
+		"function apply = (...copy: Integer) => 1",
+		"let [copy] = [1]",
+		"let { field as copy } = source",
+		"for copy in values {}",
+		"for item, copy in values {}",
+		"read() catch copy => 0",
+		"reuse copy = source",
+		"type Record = { copy: Integer }",
+		"function generic = <copy>(item: Integer) => item",
+	] {
+		let tree = crate::parse(source);
+		assert!(
+			tree.diagnostics.iter().any(|diagnostic| {
+				diagnostic.code == Some("E-LEX-3")
+					&& diagnostic.message.contains("`copy items`")
+					&& diagnostic.message.contains("choose another name")
+			}),
+			"{source}: {:?}",
+			tree.diagnostics
+		);
+	}
+}
+
+#[test]
 fn not_binds_tighter_than_or() {
 	assert_statement("not a or b", "((not a) or b)");
 }

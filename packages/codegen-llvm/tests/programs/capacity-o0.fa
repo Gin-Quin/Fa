@@ -22,9 +22,9 @@ let segmentCapacity = segmented.capacity
 for i in 0..3000 { segmented.push(i) }
 assert segmented.capacity == segmentCapacity
 assert first == 0
-let copy = segmented
-assert copy.capacity >= copy.length
-assert try copy[200] == 130
+let duplicate = segmented
+assert duplicate.capacity >= duplicate.length
+assert try duplicate[200] == 130
 segmented = []
 assert segmented.capacity == segmentCapacity
 segmented.push(9)

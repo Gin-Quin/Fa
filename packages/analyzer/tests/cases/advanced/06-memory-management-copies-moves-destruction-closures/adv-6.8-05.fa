@@ -4,5 +4,5 @@ mutable head: Link? = none
 for index in 0..1_000_000 {
 	head = Link { value = index, next = head }
 }
-let copy = head
-console.log(copy?.value ?? -1) -- prints: 999999
+let duplicate = head
+console.log(duplicate?.value ?? -1) -- prints: 999999

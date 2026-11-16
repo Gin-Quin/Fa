@@ -13,8 +13,8 @@ static flags = when schema is {
 console.log(flags) -- prints: ["foo: 0", "bar: 0", "nested: 2"]
 
 type Copy = TypeFromSchema<@typeToSchema(MyFields)>
-let copy: Copy = MyFields { foo, nested { baz2 } }
-console.log(Integer(copy)) -- prints: 9
+let duplicate: Copy = MyFields { foo, nested { baz2 } }
+console.log(Integer(duplicate)) -- prints: 9
 
 type Built = TypeFromSchema<Schema.Fields {
 	flags = [

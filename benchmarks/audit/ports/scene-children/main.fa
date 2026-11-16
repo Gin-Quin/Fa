@@ -1,0 +1,14 @@
+-- Representation probe, not a benchmark: stored ordered child references are
+-- forbidden by the relation rules. The checker currently accepts it and copies
+-- the child (prints 0 on all targets). An owning Array<SceneNode> changes the work.
+mutable nodes: GrowingPool<SceneNode> = []
+
+type SceneNode = {
+	id: Int32
+	children: Array<SceneNode in nodes>
+}
+
+use child = nodes.add({ id = 0, children = [] })
+use parent = nodes.add({ id = 1, children = [child] })
+child.id = 2
+console.log(try parent.children[0].id)

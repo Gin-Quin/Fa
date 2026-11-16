@@ -432,7 +432,7 @@ This is the generic machinery that explicit generics need anyway: `function read
 
 ### 4. `Type<parameter>`: when the full type matters
 
-Decided: inside a function, a parameter keeps the type of its argument, `Type<human>`, which only exposes the fields of `Human`. So `let copy = human` copies every field of the argument, and only an annotation (`let copy: Human = human`) narrows.
+Decided: inside a function, a parameter keeps the type of its argument, `Type<human>`, which only exposes the fields of `Human`. So `let duplicate = human` copies every field of the argument, and only an annotation (`let duplicate: Human = human`) narrows.
 
 A function that copies a parameter without annotation, returns `Type<human>` or reflects on it needs more than the view: the size and alignment of `S`, and its `copy` and `drop` functions. Such a parameter is specialized on the **full type** `S`, exactly like an explicit generic parameter; its result is constructed in the caller's destination, which knows `S`. A parameter that is only read or written field by field keeps a view key, which shares more instances. The checker records, per function and per parameter, which of the two keys it needs.
 
@@ -962,7 +962,7 @@ Decided: tasks are scoped. See [async, workers and `for parallel`](#async-worker
 
 ### Q15. An unannotated copy of a parameter
 
-Decided: `let copy = human` has the type of the argument, `Type<human>`, and keeps every field. See [`Type<parameter>`](#4-typeparameter-when-the-full-type-matters).
+Decided: `let duplicate = human` has the type of the argument, `Type<human>`, and keeps every field. See [`Type<parameter>`](#4-typeparameter-when-the-full-type-matters).
 
 ### Q16. Copying a parameter in JavaScript
 

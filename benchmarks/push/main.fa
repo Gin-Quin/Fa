@@ -1,6 +1,7 @@
--- Pushing records while keeping a way back to every 64th one: an array of small objects that
--- grows, and indices kept across the growth (a local collection can't hold references into an
--- array, whose `push` may move its items).
+-- Pushing records into a growing collection, without reserving the final size, as Goose does.
+-- Items keep their addresses across growth. Fa's local collections can't hold references, so
+-- the marks are indices, as prescribed by the reference documentation and the safe Rust row.
+-- `array.fa` keeps the original reserved Array version as the `push-array` audit variant.
 
 type Item = {
 	key: Int32
@@ -17,7 +18,7 @@ function xorshift = (x: UInt64): UInt64 => {
 
 let n = 32_000_000 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
 
-mutable items = Array<Item>.from([], capacity = n)
+mutable items: GrowingArray<Item> = []
 mutable marks: Array<Integer> = []
 mutable r: UInt64 = 12345
 for i in 0..n {

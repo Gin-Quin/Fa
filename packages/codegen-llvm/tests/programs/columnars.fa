@@ -51,15 +51,15 @@ console.log(people.some((human) => human.name == "person 5"), people.every((huma
 
 -- holes are filled, copies are deep
 people.add({ name = "Zoe", age = 1, tags = ["z"], home = { x = 0, y = 0 } })
-mutable copy = people
-use zoe = copy.find((human) => human.name == "Zoe")
+mutable duplicate = people
+use zoe = duplicate.find((human) => human.name == "Zoe")
 if zoe is not none {
 	zoe.tags.push("copy")
 	console.log(zoe.tags) -- prints: ["z", "copy"]
 }
-console.log(copy.size, people.find((human) => human.name == "Zoe")?.tags ?? []) -- prints: 560 ["z"]
-copy.clear()
-console.log(copy.size, people.size) -- prints: 0 560
+console.log(duplicate.size, people.find((human) => human.name == "Zoe")?.tags ?? []) -- prints: 560 ["z"]
+duplicate.clear()
+console.log(duplicate.size, people.size) -- prints: 0 560
 
 -- a function that changes an element
 function birthday = (human: Human) mutates human => {

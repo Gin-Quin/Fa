@@ -86,11 +86,7 @@ fn parse_pattern_inner(context: &mut Context<'_>) -> usize {
 			let message = format!(
 				"Expected a name or a destructuring pattern, like `{{ a, b }}` or `[first, second]`, found {found}"
 			);
-			if context.token_is_keyword() {
-				context.error_at_token_with_code("E-LEX-3", message);
-			} else {
-				context.error_at_token(message);
-			}
+			context.error_expected_name(message);
 			context.insert_missing()
 		}
 	}
@@ -147,7 +143,7 @@ fn parse_rest<'source>(context: &mut Context<'source>) -> PatternItem {
 		context.go_to_next_token();
 		PatternItem::Rest(context.insert(Node::Identifier { name }, token.start, token.end))
 	} else {
-		context.error_at_token("Expected a name after `...`, like `...rest`");
+		context.error_expected_name("Expected a name after `...`, like `...rest`");
 		PatternItem::Invalid
 	}
 }
@@ -159,7 +155,7 @@ fn parse_object_item<'source>(context: &mut Context<'source>) -> PatternItem {
 
 	if context.kind() != TokenKind::Identifier {
 		let found = context.describe_token();
-		context.error_at_token(format!(
+		context.error_expected_name(format!(
 			"Expected a field name in the pattern, found {found}"
 		));
 		return PatternItem::Invalid;
@@ -184,7 +180,7 @@ fn parse_object_item<'source>(context: &mut Context<'source>) -> PatternItem {
 			field.alias = Some(context.name());
 			context.go_to_next_token();
 		} else {
-			context.error_at_token(format!(
+			context.error_expected_name(format!(
 				"Expected a name after `as`, like `{name_text} as other`"
 			));
 		}

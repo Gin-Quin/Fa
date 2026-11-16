@@ -130,7 +130,7 @@ let userId: UserId = 12
 let count: Integer = userId -- valid: UserId is Integer
 ```
 
-Two object types are the same type when their public data fields have the same names and types; methods and default values don't count. See [what is compared](/advanced/structural-typing#what-is-compared).
+Object types with the same public data field names and types are structurally compatible; methods and defaults do not affect that comparison. Inferred unions still preserve distinct written alternatives when their methods or destructors differ, and dispatch to the actual alternative. See [what is compared](/advanced/structural-typing#what-is-compared).
 
 If you need two distinct types with the same shape, add a distinguishing field, or use a single-member union:
 

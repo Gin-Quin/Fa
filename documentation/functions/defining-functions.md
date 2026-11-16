@@ -111,7 +111,7 @@ A default value is evaluated at each call that doesn't pass the argument, like i
 function slice = (text: String, start: Integer = 0, end: Integer = text.length) => ...
 ```
 
-A default value runs inside the function: its effects, like the errors it may throw, are effects of the function, declared in its signature when the body is a block.
+A default value runs during call binding, before the body. For `start`, binding happens when the task is created, with the written arguments in source order; only the body waits for the task's first turn. Its effects, including errors, belong to that call and are declared in the function's signature when the body is a block. A failing started default fails the `start` expression and releases previously evaluated owned arguments.
 
 The parameters and the top-level declarations of the body share one scope: declaring a value with the name of a parameter is an error.
 
@@ -133,7 +133,7 @@ move(x = 1, 2) -- error: a positional argument can't follow a named argument
 move(1, 2, x = 3) -- error: `x` is already given
 ```
 
-Named arguments and default values belong to the declaration: they work in direct calls, not through a value of a [function type](#function-types).
+Named arguments and default values belong to the declaration: they work in direct calls, not through a value of a [function type](#function-types). Defaults come from the exact written declaration, including across files and generic instantiations; structural type equality never selects another declaration's defaults. When an anonymous nested annotation has no written default owner, supply the argument explicitly.
 
 ### Variadic parameters
 
@@ -411,7 +411,7 @@ function sumOf = (numbers: Array<Integer>): Integer => {
 }
 ```
 
-A closure that **escapes** captures a **copy** of each value it uses, taken when it is created, like an assignment. This includes the values designated by parameters, [`use`](/advanced/memory-management#aliases) aliases and loop variables. The closure owns its copies, so it can be stored, returned or sent to another thread without any lifetime question, and the copies can't be modified from inside the closure:
+A closure that **escapes** owns immutable captures, taken when it is created. Ordinary values copy; a structure moves at its last use, and otherwise requires an explicit snapshot (`MEM004`). A borrowed parameter, [`use`](/advanced/memory-management#aliases) alias or loop item cannot surrender its owner: first create `let snapshot = copy input`, then capture `snapshot` at its last use. The closure cannot modify its owned captures. Worker transfer also obeys [thread safety](/advanced/concurrency#thread-safety-and-synchronization):
 
 ```fa
 function makeGreeter = (greeting: String) => (name: String) => "{greeting}, {name}!"
@@ -438,7 +438,7 @@ function main = () => {
 
 A value that can't be copied, like a [task](/advanced/concurrency#tasks) or a value of a type with a [`destroy`](/advanced/foreign-code#releasing-c-resources) function, can't be captured by an escaping closure.
 
-Modifying a captured value is not an effect that the closure declares: the value belongs to the enclosing function, which sees the change. To share state with an escaping closure, pass it as a mutated parameter, or return the new value. The compiler skips a copy when no later write to the captured value can be observed. A closure can't capture a `mutable use` alias.
+Modifying a captured value is not an effect that the closure declares: the value belongs to the enclosing function, which sees the change. To share state with an escaping closure, pass it as a mutated parameter, or return the new value. The compiler can share immutable storage when no write or lifetime difference can be observed; this optimization never makes an otherwise forbidden collection copy legal. A closure can't capture a `mutable use` alias.
 
 Module-level values are not captured: a closure uses them directly, like any function, and declares their mutations in its effects. [Requirements](/advanced/requirements) are not captured either: they are resolved where the closure is called.
 
@@ -523,10 +523,21 @@ function ascending: Comparator = (a, b) => a - b
 `function with (name = value, ...)` builds a function that has the remaining parameters, in their order and with their defaults:
 
 - parameters are bound by name only, and a bound parameter can't be passed again,
-- the bound values are evaluated once, when the `with` expression is evaluated, and are copied into the new function, like the values captured by an escaping closure,
+- names come from the visible signature, including a function-valued parameter or field, even when an underlying function uses different names,
+- bound values are evaluated once in source order at the `with` expression, and stored under the [escaping-capture rules](/advanced/memory-management#closures): structures require `copy` unless they can move, and unique values cannot be bound (`MEM003`),
 - a parameter that the function mutates, and a variadic parameter, can't be bound,
 - the new function has the effects of the original one,
-- on a generic function, the type parameters given by the bound values are fixed, and the others remain type parameters of the new function.
+- on a generic function, type parameters fixed by the bound values are specialized; residual generic parameters are usable only in the permitted named-function or callback scope, never as stored or returned generic function values (`GN030`).
+
+For example, the visible name below is `amount`:
+
+```fa
+type Bound = () => Integer
+function increment = (value: Integer): Integer => value + 1
+function bind = (operation: (amount: Integer) => Integer): Bound => operation with (amount = 2)
+let bound = bind(increment)
+console.log(bound()) -- 3
+```
 
 `with` binds like a call: `add with (b = 1)` needs no parentheses. With runtime values, `with` gives a regular value: `let addTax = addPercent with (rate = readRate())`.
 
@@ -641,7 +652,7 @@ Rules:
 
 A method can be used as a function value through its type: `Human.describe` is a function whose first parameter is the instance, as in `humans.map(Human.describe)`. Through an instance, a method must be called: `human.describe` without parentheses is an error, write a lambda, `() => human.describe()`. There is no hidden capture of the instance.
 
-A method call is resolved at compile time, from the type written in the code for the value: a parameter typed `Human` calls the methods of `Human`, even when the argument is a `Hero` with a method of the same name. Methods are not part of [structural typing](/advanced/structural-typing): only data fields are compared. In a generic function, a method called on a value of a type parameter is resolved on the actual type, for each instantiation (see [generics](/types/generics)).
+A method call is resolved at compile time, from the type written in the code for the value: a parameter typed `Human` calls the methods of `Human`, even when the argument is a `Hero` with a method of the same name. On a union, a compatible common method is available without narrowing: parameter names and types agree, result types and effects are joined, and the actual alternative supplies the method. Otherwise narrow first. Methods are not part of [structural typing](/advanced/structural-typing): only data fields are compared. In a generic function, a method called on a value of a type parameter is resolved on the actual type, for each instantiation (see [generics](/types/generics)).
 
 ## Destructuring parameters
 
@@ -710,7 +721,11 @@ function readPoint = (point: Point) => {
 :::implementation
 ## Implementation details
 
+### Default and callable ownership
+
+Visible names, default owners, written parameter origins and finalizer/method capabilities use one portable callable metadata graph. Written declarations publish a stable owner recipe with exact generic bindings; an anonymous nested annotation without such an owner retains the explicit-argument diagnostic. A started call binds defaults at creation through the synchronous default entry on every target, with cleanup of earlier owned arguments on failure. Do not add defaults to structural function-type identity or look them up by an equal type.
+
 ### Native and WebAssembly recursion
 
-A small base case of a direct recursive call is evaluated at the call site when its guard and result use only scalar parameters and operations; an empty node of an arena, whose optional fields are all `none`, is also such a base case. Arguments are evaluated once, in order. In speed builds, an integer sum through a final optional recursive call (`prefix + (child?.walk() ?? 0)`) exposes both return paths to LLVM's tail-recursion elimination, so that the last recursive edge can become an accumulator loop. Other effects and calls keep their evaluation order.
+A small base case of a direct recursive call is evaluated at the call site when its guard and result use only scalar parameters and operations; an empty node of an arena, whose optional fields are all `none`, is also such a base case. A function whose body is a `when` over a union parameter has the same shortcut for a member whose fields are all scalar: at each recursive call, the member is tested on the evaluated argument and its arm (scalar arithmetic over its fields, the parameters and constants, without calls or `try`) is computed in place; the arms before it may only test other members. Arguments are evaluated once, in order. In speed builds, an integer sum through a final optional recursive call (`prefix + (child?.walk() ?? 0)`) exposes both return paths to LLVM's tail-recursion elimination, so that the last recursive edge can become an accumulator loop. Other effects and calls keep their evaluation order.
 :::

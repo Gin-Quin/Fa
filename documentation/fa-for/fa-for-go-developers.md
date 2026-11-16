@@ -1,5 +1,7 @@
 # Fa for Go developers
 
+The [copy and move rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles) distinguish ordinary values (including strings), structures (`copy` to keep both), unique values (move only), and shared synchronization handles.
+
 Go and Fa share a taste for small languages, one obvious way to write things, and explicit error handling. Fa keeps all three, adds a real type system, and removes the garbage collector.
 
 Fa is designed for AI agents as much as for humans: everything a function does — the errors it throws, the values it requires, the data it mutates — is written in its signature, and if the code compiles, it works.
@@ -73,7 +75,7 @@ let data = load() catch error => when error is {
 }
 ```
 
-Errors are values, returned to the caller as in Go — `throw` exits the function like `return`, and `try` propagates at each level. There is no `panic`/`recover`: there is no panic that can be caught. A runtime check that the compiler couldn't prove away, like a possible integer overflow, stops the program when it fails, and nothing can recover from it. And there is no way to ignore an error with `_`. See [errors](/values/errors).
+Errors are values, returned to the caller as in Go — `throw` enters its lexical `do … catch`, or leaves the function if uncaught, and `try` propagates at each level. There is no `panic`/`recover`: there is no panic that can be caught. A runtime check that the compiler couldn't prove away, like a possible integer overflow, stops the program when it fails, and nothing can recover from it. And there is no way to ignore an error with `_`. See [errors](/values/errors).
 
 ## No nil pointer dereferences
 
@@ -106,7 +108,7 @@ type Config = {
 
 Objects are stored inline; collections own the heap; every value is released at the end of its scope. There is no GC, no pauses, and no runtime.
 
-The trade-off is that assignment copies:
+Ordinary values such as points keep value semantics:
 
 ```fa
 mutable a = Point { x = 1, y = 2 }
@@ -185,7 +187,7 @@ while let item = await channel.receive() {
 }
 ```
 
-Data races are impossible by construction: values crossing a thread boundary are copied, references cannot cross at all, and only thread-safe types (channels, mutexes, atomics) can be shared mutably. `go vet` has nothing left to find.
+Data races are impossible by construction: worker boundaries require an independent copy, a common Mutex or proven exclusive transfer; a Task never crosses, references cannot cross at all, and only thread-safe types (channels, mutexes, atomics) can be shared mutably. `go vet` has nothing left to find.
 
 For CPU-bound work, `for parallel` beats hand-rolled worker goroutines:
 
@@ -228,6 +230,6 @@ A `#` prefix is Fa's lowercase: `#helper` is private to its namespace. To shorte
 | `_` to ignore an error | not allowed; handle it with `catch` or propagate it with `try` |
 | `defer` | scope-based release: every value is freed at the end of its block |
 | `panic`/`recover` | errors are typed values: `throws`, `try`, `catch`; a failed runtime check stops the program and can't be recovered |
-| Slices sharing an array | slicing an array copies (`xs[1..4]`), and so does assignment; only a string slice can be a reference (`use word = text[0..5]`) |
+| Slices sharing an array | slicing an array copies (`xs[1..4]`), use `copy xs` to duplicate an array; only a string slice can be a reference (`use word = text[0..5]`) |
 | `append` in a loop | reserve with `Array<T>.from([], capacity = n)` |
 | Labeled `break` | there are no labeled loops |

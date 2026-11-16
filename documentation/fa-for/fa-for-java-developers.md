@@ -1,5 +1,7 @@
 # Fa for Java developers
 
+The [copy and move rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles) distinguish ordinary values (including strings), structures (`copy` to keep both), unique values (move only), and shared synchronization handles.
+
 Fa is statically typed and compiled, like Java, but it has no classes, no inheritance, no exceptions and no garbage collector. Most Java patterns have a shorter equivalent.
 
 Fa is designed for AI agents as much as for humans: everything a function does — the errors it throws, the services it requires, the data it mutates — is written in its signature, and if the code compiles, it works.
@@ -219,7 +221,7 @@ See [requirements](/advanced/requirements).
 
 Objects are stored inline and collections own the heap, all released at the end of their scope. No GC, no pauses, no tuning flags.
 
-The cost is that assignment copies rather than sharing a reference:
+Ordinary objects keep value semantics rather than sharing a reference:
 
 ```fa
 mutable a = Point { x = 1, y = 2 }
@@ -240,7 +242,7 @@ for parallel item, index in items {
 }
 ```
 
-An `async` function can also be called synchronously, so there is no `CompletableFuture` plumbing and no reactive-streams library. Data races are impossible: values crossing a thread boundary are copied, references cannot cross, and only thread-safe types (mutexes, atomics, channels) can be shared mutably. See [concurrency](/advanced/concurrency).
+An `async` function can also be called synchronously, so there is no `CompletableFuture` plumbing and no reactive-streams library. Data races are impossible: worker boundaries require an independent copy, a common Mutex or proven exclusive transfer; a Task never crosses, references cannot cross, and only thread-safe types (mutexes, atomics, channels) can be shared mutably. See [concurrency](/advanced/concurrency).
 
 ## Modules
 

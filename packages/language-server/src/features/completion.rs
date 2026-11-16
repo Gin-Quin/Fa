@@ -14,6 +14,7 @@ pub const KEYWORDS: &[&str] = &[
 	"break",
 	"catch",
 	"continue",
+	"copy",
 	"derived",
 	"do",
 	"else",

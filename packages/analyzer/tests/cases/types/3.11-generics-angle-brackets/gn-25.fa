@@ -2,9 +2,9 @@
 -- brief: ✓ gn-25: Type(parameter) keeps the full type → "unlimited"
 -- context: declarations reused from gn-24
 function renamed = (human: { name: String }, name: String): Type<human> => {
-	mutable copy = human
-	copy.name = name
-	copy
+	mutable duplicate = human
+	duplicate.name = name
+	duplicate
 }
 type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }

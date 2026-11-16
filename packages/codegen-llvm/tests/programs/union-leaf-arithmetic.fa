@@ -1,0 +1,33 @@
+-- A scalar leaf computed from its fields, parameters and constants is tested
+-- at the recursive calls of a function that doesn't throw, also when it isn't
+-- the first arm of the `when`.
+-- asynchronous: false
+let modulus = 1000
+
+type Expression = Union {
+	Add = { left: Expression, right: Expression }
+	Negate = { operand: Expression }
+	Literal = { value: Int32 }
+}
+
+function build = (depth: Integer, value: Int32): Expression => if depth == 0 {
+	Expression.Literal { value }
+} else if depth %% 3 == 0 {
+	Expression.Negate { operand = build(depth - 1, value + 1) }
+} else {
+	Expression.Add { left = build(depth - 1, value + 2), right = build(depth - 1, value - 5) }
+}
+
+function evaluate = (expression: Expression, pass: Integer): Integer => when expression is {
+	Expression.Add as { left, right } => (evaluate(left, pass) + evaluate(right, pass)) %% modulus
+	Expression.Negate as { operand } => modulus - evaluate(operand, pass)
+	Expression.Literal as literal => (literal.value * 3 - pass) %% modulus
+}
+
+let root = build(7, 4)
+assert evaluate(Expression.Literal { value = -2 }, 1) == 993
+mutable total = 0
+for pass in 0..4 {
+	total += evaluate(root, pass)
+}
+console.log(total) -- prints: 3232

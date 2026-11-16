@@ -9,7 +9,7 @@ let kept = tools.keep(fail) -- error: E-TYPE-1
 export namespace = {
 	function run = (f: () => Integer): Integer => f() + 0
 	function keep = (f: () => Integer): Integer => {
-		let copy = f
-		copy()
+		let duplicate = f
+		duplicate()
 	}
 }

@@ -2,9 +2,9 @@
 -- wrapper and a local import alias.
 -- file: library/renamed.fa
 export function = (human: { name: String }, name: String): Type<human> => {
-	mutable copy = human
-	copy.name = name
-	copy
+	mutable duplicate = human
+	duplicate.name = name
+	duplicate
 }
 -- file: library/rename.fa
 export function = (human: { name: String }, name: String): Type<human> => renamed(human, name)

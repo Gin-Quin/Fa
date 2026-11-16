@@ -1,5 +1,7 @@
 # Fa for C# developers
 
+The [copy and move rules](/advanced/memory-management#copies-moves-unique-values-and-shared-handles) distinguish ordinary values (including strings), structures (`copy` to keep both), unique values (move only), and shared synchronization handles.
+
 C# and Fa overlap more than most pairs: records, pattern matching, nullable reference types, `async`, LINQ-style chaining, even `throw`, `try` and `catch`. Fa takes each of those further, and drops classes, exceptions and the garbage collector.
 
 Fa is designed for AI agents as much as for humans: everything a function does — the errors it throws, the services it requires, the data it mutates — is written in its signature, and if the code compiles, it works.

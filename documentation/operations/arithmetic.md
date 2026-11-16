@@ -204,7 +204,7 @@ From tightest to loosest:
 | --- | --- |
 | 1 | access and call: `a.b`, `a?.b`, `a(b)`, `a[b]`, and partial application `a with (b = 1)` |
 | 2 | postfix `%` |
-| 3 | prefix `-` |
+| 3 | prefix `-`, `copy` |
 | 4 | `**` (right-associative) |
 | 5 | `*`, `/`, `//`, `%%` |
 | 6 | `+`, `-` |

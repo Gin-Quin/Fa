@@ -17,9 +17,9 @@ function describe = (shape: Shape): String => when shape is {
 }
 mutable point = Point { y = 2, x = 1 }
 point.x += 1
-let copy = point
+let duplicate = point
 let color: Color = .green
-console.log(point.length2(), copy, describe(Shape.Label("hi")), describe(Shape.Empty), color)
+console.log(point.length2(), duplicate, describe(Shape.Label("hi")), describe(Shape.Empty), color)
 mutable items = [1, 2]
 items.push(3)
 for item, index in items {

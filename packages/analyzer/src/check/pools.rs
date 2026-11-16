@@ -264,7 +264,7 @@ impl Walker<'_> {
 			.map(|node| self.type_of(node))
 	}
 
-	/// `WCL002`: `let copy = pool.add(…)` copies the stored element; the
+	/// `WCL002`: `let duplicate = pool.add(…)` copies the stored element; the
 	/// reference is kept with `use`. Type part of a declaration.
 	pub(crate) fn warn_copied_add(&mut self, value: NodeId) {
 		let value = self.strip_groups(value);

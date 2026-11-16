@@ -40,15 +40,15 @@ for event in log {
 console.log(describe(kept)) -- prints: move 6 7 -8
 
 -- a copy of an item outlives the array's block: it owns its text
-mutable copy: Event = Event.Tick
+mutable duplicate: Event = Event.Tick
 mutable total = 0
 for event, index in log {
 	total += index
 	if index == 3 {
-		copy = event
+		duplicate = event
 	}
 }
-console.log(total, describe(copy)) -- prints: 21 say 3 a text longer than the inline strings and than one hundred and twenty-seven bytes, so that its length takes a whole word: abcdefghijklmnopqrstuvwxyz0123456789 false 158
+console.log(total, describe(duplicate)) -- prints: 21 say 3 a text longer than the inline strings and than one hundred and twenty-seven bytes, so that its length takes a whole word: abcdefghijklmnopqrstuvwxyz0123456789 false 158
 
 -- many items: the block grows
 mutable many: Array<Event> = []

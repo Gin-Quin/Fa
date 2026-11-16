@@ -717,7 +717,7 @@ mod tests {
 	}
 
 	#[test]
-	fn callback_builtins_preserve_results_and_atomic_mutations() {
+	fn callback_builtins_preserve_results_and_completed_deletions() {
 		let mut host = Functions::default();
 		let predicate = Expr::Equals(
 			Expr::Arith(ArithOp::Remainder, INTEGER, local(0), int(2).boxed()).boxed(),
@@ -844,7 +844,7 @@ mod tests {
 			slot: 0,
 			steps: Vec::new(),
 		};
-		let unchanged = Expr::Block(vec![
+		let interrupted = Expr::Block(vec![
 			Expr::Let(0, values().boxed()),
 			Expr::Catch {
 				body: Expr::Mutate("Array#deleteWhere", place.clone(), vec![callback(23)]).boxed(),
@@ -854,8 +854,8 @@ mod tests {
 			Expr::Read(place.clone()),
 		]);
 		assert_eq!(
-			run(&mut host, &unchanged, 1).map(|value| value.to_text()),
-			Ok("[1, 2, 3, 4]".into())
+			run(&mut host, &interrupted, 1).map(|value| value.to_text()),
+			Ok("[2, 3, 4]".into())
 		);
 		let changed = Expr::Block(vec![
 			Expr::Let(0, values().boxed()),

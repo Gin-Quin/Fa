@@ -1774,7 +1774,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let callback_node = arguments[0];
 				self.for_each_index(length, |this, index| {
 					let slot = this.array_item_slot(array, item, index)?;
-					let value = this.load(slot)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
 					let delete = this.callback_with_fixup(
 						callback_node,
@@ -1809,6 +1808,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 							Ok(())
 						},
 					)?;
+					// The callback borrows this slot and may have changed its fields.
+					let value = this.load(slot)?;
 					let keep = this.append_block("delete_keep");
 					let drop = this.append_block("delete_drop");
 					let next = this.append_block("delete_next");

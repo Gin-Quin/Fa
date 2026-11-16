@@ -1,0 +1,18 @@
+-- Completed deletions, callback writes and the unvisited tail survive an error.
+type Person = { score: Integer }
+function inspect = (text: String): Array<Integer> => {
+	mutable items: Pool<Person> = [{ score = 0 }, { score = 0 }, { score = 0 }]
+	mutable examined = 0
+	do {
+		items.deleteWhere((item) => {
+			examined += 1
+			item.score += 1
+			if examined == 2 { let _number = try Integer.parse(text) }
+			true
+		})
+	} catch _error => {}
+	mutable result: Array<Integer> = []
+	for item in items { result.push(item.score) }
+	result.sort()
+}
+console.log(inspect("bad")) -- prints: [0, 1]

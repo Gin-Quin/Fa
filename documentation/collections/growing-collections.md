@@ -33,6 +33,8 @@ They are created like any other collection, from a list literal typed by the con
 
 The methods are identical, minus the ones that remove or move elements: no `delete`, no `take`, no `deleteWhere`, no `pop`, no `clear`, and for `GrowingArray` no `insert`, `sortInPlace` or `reverseInPlace`. None of the remaining methods declares the `invalidates` effect, and adding an element only declares `mutates self.length` (`GrowingArray`) or `mutates self.size` (the others), which invalidates nothing.
 
+Growing collections have no in-place callback method that removes or reorders items. Their callbacks still follow the general rule that errors [never roll back effects](/values/errors#effects-before-an-error).
+
 | Collection | Operation | Effect |
 | --- | --- | --- |
 | `GrowingArray` | `push` | `mutates self.length` |

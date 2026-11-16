@@ -83,6 +83,8 @@ Removing values during a loop over the pool is a compile error, because it would
 pool.deleteWhere((human) => human.name == "John")
 ```
 
+`deleteWhere` removes each match immediately. If its predicate throws, earlier matches stay removed, the throwing item and unvisited items remain, and callback mutations remain visible; errors [never roll back effects](/values/errors#effects-before-an-error).
+
 ## Stable references
 
 This is what distinguishes a pool from a set or an array:

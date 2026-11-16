@@ -942,25 +942,17 @@ export function faSetIsSubsetOf(a, b) {
  * @returns {void}
  */
 export function faDeleteWhere(collection, predicate) {
-	const removed = [];
-	try {
-		if (collection instanceof Map || collection instanceof FaHashMap) {
-			for (const [key, value] of collection) {
-				if (predicate(key, value)) {
-					removed.push(key);
-				}
-			}
-		} else {
-			for (const value of collection) {
-				if (predicate(value, undefined)) {
-					removed.push(value);
-				}
+	if (collection instanceof Map || collection instanceof FaHashMap) {
+		for (const [key, value] of collection) {
+			if (predicate(key, value)) {
+				collection.delete(key);
 			}
 		}
-	} finally {
-		// an error of the predicate: the entries it matched before are deleted
-		for (const item of removed) {
-			collection.delete(item);
+	} else {
+		for (const value of collection) {
+			if (predicate(value, undefined)) {
+				collection.delete(value);
+			}
 		}
 	}
 }

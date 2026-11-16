@@ -451,6 +451,7 @@ mod tests {
 			("survived", 22),
 			("earlyArgument", 1),
 			("growingReference", 35),
+			("delayedFailure", 2133),
 			("maps", 216),
 			("duplicates", 2),
 		] {

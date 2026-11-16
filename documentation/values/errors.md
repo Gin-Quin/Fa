@@ -235,6 +235,12 @@ function printScore = () throws ApiError.AuthenticationError | ApiError.NetworkE
 
 Errors are not "falsy": a condition only accepts a `Boolean`, so the result of a call is never tested with `if result { ... }` to detect a failure. A failure is handled with `try` or `catch`.
 
+### Effects before an error
+
+An error never rolls back work already done: writes, removals and moves stay applied. A collection method runs its callback as it goes. If the callback throws, its own mutations remain and the method leaves the collection in its specified valid state. In `deleteWhere`, earlier matches stay removed, while the throwing item and the unvisited items remain in order. A failure does not restore a moved value.
+
+When an operation has no specified intermediate state, failure preserves its original arrangement instead. A failing `sortInPlace` keeps the original item order, while mutations by its comparator remain. The compiler stages the order only when the comparator's type can throw; a comparator that cannot throw sorts in place without that buffer. The same distinction applies to any in-place operation: a specified prefix keeps completed effects; otherwise an operation that may fail applies its arrangement only on success.
+
 ## Stops
 
 Some failures are not errors: they mean that the program is wrong, and there is nothing sensible for its caller to do. When a runtime check that the compiler couldn't prove away fails, the program **stops**:

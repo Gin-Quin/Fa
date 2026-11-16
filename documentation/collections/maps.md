@@ -187,6 +187,8 @@ use score = scores.get("ana") -- declared again
 
 `deleteWhere` and `clear` declare `mutates self`: they invalidate every reference into the map.
 
+`deleteWhere` applies each deletion as its predicate succeeds. If it throws, earlier matches stay removed, the throwing entry and unvisited entries remain, and callback mutations remain visible; errors [never roll back effects](/values/errors#effects-before-an-error).
+
 | Operation | Effect |
 | --- | --- |
 | `map[key] = value` | `mutates self[key], self.size` |

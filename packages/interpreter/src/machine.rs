@@ -8,6 +8,7 @@ use ethnum::I256;
 
 use crate::callbacks::{
 	Argument as CallbackArgument, Callback, Container, Output as CallbackOutput, Progress,
+	compact_item, finish_deletions,
 };
 use crate::code::{Argument, Call, Code, Item, Node, Op, Part, Place, Step};
 use crate::eval::{self, Error, Interpreter};
@@ -1030,10 +1031,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 			PlaceView::Value(Value::Map(entries)) => (Container::Map, entries.len()),
 			_ => return Err(Error::Stop("a callback receiver must be a collection".into()).into()),
 		};
-		let buffers = if path.contains("#sort")
-			|| path.ends_with("#deleteWhere")
-			|| path.ends_with("#filter")
-		{
+		let buffers = if path.contains("#sort") || path.ends_with("#filter") {
 			length.saturating_mul(2 * size_of::<usize>())
 		} else if path.ends_with("#map") {
 			memory::values_size(length)
@@ -1089,6 +1087,37 @@ impl<'i, 'h> Machine<'i, 'h> {
 				}
 			};
 			match progress {
+				Progress::Delete {
+					position,
+					kept,
+					delete,
+					next,
+				} => {
+					match Self::locate(&mut self.frames, &state.source)? {
+						Value::Array(items) | Value::Set(items) => compact_item(
+							Arc::make_mut(items).as_mut_slice(),
+							position,
+							kept,
+							delete,
+							Value::None,
+						),
+						Value::Map(entries) => compact_item(
+							Arc::make_mut(entries).as_mut_slice(),
+							position,
+							kept,
+							delete,
+							(Value::None, Value::None),
+						),
+						_ => {
+							return Err(Error::Stop(
+								"a deleting callback requires a collection".into(),
+							)
+							.into());
+						}
+					}
+					callback = next;
+					value = None;
+				}
 				Progress::Call {
 					function,
 					arguments,
@@ -1181,7 +1210,7 @@ impl<'i, 'h> Machine<'i, 'h> {
 				}
 				Ok(Value::Map(Arc::new(entries)).into())
 			}
-			CallbackOutput::Selected(container, positions) if !state.mutating => {
+			CallbackOutput::Selected(container, positions) => {
 				self.interpreter
 					.reserve(memory::values_size(positions.len().saturating_mul(
 						if matches!(container, Container::Map) {
@@ -1208,20 +1237,23 @@ impl<'i, 'h> Machine<'i, 'h> {
 				}
 				.into())
 			}
-			CallbackOutput::Selected(_, positions) => {
-				let Value::Array(items) = Self::locate(&mut self.frames, &state.source)? else {
-					return Err(Error::Stop("a mutating callback requires an array".into()).into());
-				};
-				let mut position = 0;
-				let mut selected = positions.into_iter().peekable();
-				Arc::make_mut(items).retain(|_| {
-					let keep = selected.peek() == Some(&position);
-					if keep {
-						selected.next();
+			CallbackOutput::Deleted { kept, unvisited } => {
+				match Self::locate(&mut self.frames, &state.source)? {
+					Value::Array(items) | Value::Set(items) => {
+						finish_deletions(Arc::make_mut(items), kept, unvisited, || Value::None)
 					}
-					position += 1;
-					keep
-				});
+					Value::Map(entries) => {
+						finish_deletions(Arc::make_mut(entries), kept, unvisited, || {
+							(Value::None, Value::None)
+						})
+					}
+					_ => {
+						return Err(Error::Stop(
+							"a deleting callback requires a collection".into(),
+						)
+						.into());
+					}
+				}
 				Ok(Value::None.into())
 			}
 			CallbackOutput::Sorted(permutation) if !state.mutating => {
@@ -1254,6 +1286,19 @@ impl<'i, 'h> Machine<'i, 'h> {
 				Ok(Value::None.into())
 			}
 		}
+	}
+
+	fn interrupted_callback(
+		&mut self,
+		callback: Box<Callback>,
+		state: CallbackState,
+		flow: Flow,
+	) -> Result<Action, Flow> {
+		let result = match callback.interrupted() {
+			Some(output) => self.callback_output(output, &state).and(Err(flow)),
+			None => Err(flow),
+		};
+		Ok(Action::Done(self.release_root(state.temporary, result)))
 	}
 
 	fn resume(&mut self, continuation: Continuation, result: Eval) -> Result<Action, Flow> {
@@ -1307,9 +1352,9 @@ impl<'i, 'h> Machine<'i, 'h> {
 			Continuation::Callback(callback, state) => match result {
 				Ok(value) => match self.value(value) {
 					Ok(value) => self.callback(callback, Some(value), state),
-					Err(flow) => Ok(Action::Done(self.release_root(state.temporary, Err(flow)))),
+					Err(flow) => self.interrupted_callback(callback, state, flow),
 				},
-				Err(flow) => Ok(Action::Done(self.release_root(state.temporary, Err(flow)))),
+				Err(flow) => self.interrupted_callback(callback, state, flow),
 			},
 			Continuation::Catch(slot, handler) => match result {
 				Err(Flow::Error(Error::Thrown(error))) => {

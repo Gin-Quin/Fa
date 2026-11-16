@@ -1,0 +1,21 @@
+-- Completed deletions, callback writes and the unvisited tail survive an error.
+type Person = { score: Integer }
+function inspect = (text: String): Array<Integer> => {
+	mutable items: Set<Integer> = [1, 2, 3]
+	mutable failed = 0
+	mutable examined = 0
+	do {
+		items.deleteWhere((item) => {
+			examined += 1
+			failed = item
+			if examined == 2 { let _number = try Integer.parse(text) }
+			true
+		})
+	} catch _error => {}
+	mutable result: Array<Integer> = []
+	for item in items { result.push(if item == failed { 1 } else { 0 }) }
+	result.sort()
+}
+static checked = @inspect("bad")
+console.log(checked)        -- prints: [0, 1]
+console.log(inspect("bad")) -- prints: [0, 1]

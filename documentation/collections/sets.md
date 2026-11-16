@@ -68,6 +68,8 @@ if tags.add("fa") {
 
 `add`, `delete`, `take`, `deleteWhere` and `clear` require a `mutable` set, and declare the `mutates self` effect (see [stable references](#stable-references)). `take(value)` removes a value and returns it, or `none` when it is absent.
 
+`deleteWhere` applies each deletion as its predicate succeeds. If it throws, earlier matches stay removed and the throwing item and unvisited items remain; errors [never roll back effects](/values/errors#effects-before-an-error).
+
 | Operation | Effect |
 | --- | --- |
 | `add`, `delete`, `take`, `deleteWhere`, `clear` | `mutates self` |

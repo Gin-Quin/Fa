@@ -64,6 +64,8 @@ Unlike a pool, a reference into a columnar points at fields spread across severa
 
 `delete` takes a reference, and declares `invalidates element`: like in a [pool](/collections/pools#removing), it invalidates the references that may designate the deleted element, and only them. `deleteWhere` and `clear` declare `mutates self`: every local reference into the columnar must be declared again before it is used.
 
+`deleteWhere` removes each match as its predicate succeeds, for both `Columnar` and `OrderedColumnar`. If it throws, earlier matches stay removed, the throwing item and unvisited items remain, and callback mutations remain visible; errors [never roll back effects](/values/errors#effects-before-an-error).
+
 | Operation | Effect |
 | --- | --- |
 | `add` | `mutates self.size`: returns a reference, distinct from every existing one |

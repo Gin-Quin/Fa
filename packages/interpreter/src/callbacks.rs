@@ -15,7 +15,8 @@ pub(crate) enum Container {
 
 enum Kind {
 	Find,
-	Filter(bool),
+	Filter,
+	Delete,
 	Map,
 	Quantifier(bool),
 	Reduce,
@@ -33,11 +34,18 @@ pub(crate) enum Output {
 	Value(Out),
 	Found(Option<usize>),
 	Selected(Container, Vec<usize>),
+	Deleted { kept: usize, unvisited: usize },
 	Sorted(Vec<usize>),
 	Mapped(Container, Vec<Value>),
 }
 
 pub(crate) enum Progress {
+	Delete {
+		position: usize,
+		kept: usize,
+		delete: bool,
+		next: Box<Callback>,
+	},
 	Call {
 		function: Value,
 		arguments: Vec<Argument>,
@@ -62,6 +70,7 @@ pub(crate) struct Callback {
 	total: Out,
 	permutation: Vec<usize>,
 	sort_position: usize,
+	kept: usize,
 }
 
 impl Callback {
@@ -88,7 +97,10 @@ impl Callback {
 	}
 
 	pub fn mutating(path: &str) -> bool {
-		matches!(path, "Array#sortInPlace" | "Array#deleteWhere")
+		matches!(
+			path,
+			"Array#sortInPlace" | "Array#deleteWhere" | "Map#deleteWhere" | "Set#deleteWhere"
+		)
 	}
 
 	pub fn new(
@@ -105,9 +117,9 @@ impl Callback {
 		let kind = if path.ends_with("#find") {
 			Kind::Find
 		} else if path.ends_with("#filter") {
-			Kind::Filter(false)
+			Kind::Filter
 		} else if path.ends_with("#deleteWhere") {
-			Kind::Filter(true)
+			Kind::Delete
 		} else if path.ends_with("#map") {
 			Kind::Map
 		} else if path.ends_with("#every") {
@@ -130,7 +142,7 @@ impl Callback {
 		} else {
 			Value::None.into()
 		};
-		let selected = if matches!(kind, Kind::Filter(_)) {
+		let selected = if matches!(kind, Kind::Filter) {
 			Vec::with_capacity(length)
 		} else {
 			Vec::new()
@@ -155,6 +167,7 @@ impl Callback {
 				Vec::new()
 			},
 			sort_position: 1,
+			kept: 0,
 		}))
 	}
 
@@ -169,10 +182,23 @@ impl Callback {
 						return Ok(Progress::Done(Output::Found(Some(self.position))));
 					}
 				}
-				Kind::Filter(inverse) => {
-					if boolean(value)? != inverse {
+				Kind::Filter => {
+					if boolean(value)? {
 						self.selected.push(self.position);
 					}
+				}
+				Kind::Delete => {
+					let delete = boolean(value)?;
+					let position = self.position;
+					let kept = self.kept;
+					self.position += 1;
+					self.kept += usize::from(!delete);
+					return Ok(Progress::Delete {
+						position,
+						kept,
+						delete,
+						next: self,
+					});
 				}
 				Kind::Map => self.output.push(value),
 				Kind::Quantifier(every) => {
@@ -203,7 +229,7 @@ impl Callback {
 			}
 			Container::Array => {
 				arguments.push(Argument::Item(self.position));
-				if !matches!(self.kind, Kind::Filter(true)) {
+				if !matches!(self.kind, Kind::Delete) {
 					arguments.push(Argument::Value(Value::int(self.position as i64).into()));
 				}
 			}
@@ -221,11 +247,27 @@ impl Callback {
 			Kind::Find => Output::Found(None),
 			Kind::Quantifier(every) => Output::Value(Value::Boolean(every).into()),
 			Kind::Reduce => Output::Value(self.total),
-			Kind::Filter(_) => Output::Selected(self.container, self.selected),
+			Kind::Filter => Output::Selected(self.container, self.selected),
+			Kind::Delete => Output::Deleted {
+				kept: self.kept,
+				unvisited: self.position,
+			},
 			Kind::Map => Output::Mapped(self.container, self.output),
 			Kind::Sort => unreachable!(),
 		};
 		Ok(Progress::Done(output))
+	}
+
+	/// Completed deletions survive a predicate failure; the failing item
+	/// and the unvisited tail remain after the retained prefix.
+	pub fn interrupted(self: Box<Self>) -> Option<Output> {
+		if !matches!(self.kind, Kind::Delete) {
+			return None;
+		}
+		Some(Output::Deleted {
+			kept: self.kept,
+			unvisited: self.position,
+		})
 	}
 
 	fn sort(mut self: Box<Self>, returned: Option<Value>) -> Result<Progress, Error> {
@@ -272,4 +314,33 @@ fn boolean(value: Value) -> Result<bool, Error> {
 	value
 		.as_bool()
 		.ok_or_else(|| Error::Stop(format!("`{}` is not a `Boolean`", value.to_text())))
+}
+
+/// Compaction consumes the original slot; no retained item is cloned.
+pub(crate) fn compact_item<T>(
+	items: &mut [T],
+	position: usize,
+	kept: usize,
+	delete: bool,
+	empty: T,
+) {
+	if delete {
+		items[position] = empty;
+	} else if position != kept {
+		items[kept] = std::mem::replace(&mut items[position], empty);
+	}
+}
+
+pub(crate) fn finish_deletions<T>(
+	items: &mut Vec<T>,
+	kept: usize,
+	unvisited: usize,
+	empty: impl Fn() -> T,
+) {
+	if kept != unvisited {
+		for position in unvisited..items.len() {
+			compact_item(items, position, kept + position - unvisited, false, empty());
+		}
+	}
+	items.truncate(kept + items.len() - unvisited);
 }

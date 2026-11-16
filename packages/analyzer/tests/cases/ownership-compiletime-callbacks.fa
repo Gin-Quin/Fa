@@ -6,6 +6,7 @@
 -- prints: 22 22
 -- prints: 1 1
 -- prints: 35 35
+-- prints: 2133 2133
 -- prints: 216 216
 -- prints: 2 2
 
@@ -79,6 +80,20 @@ function growingAlias = (): Integer => {
 	if found == none { people[0].score * 10 + people[1].score + 1 } else { -1 }
 }
 
+function laterFailure = (text: String): Integer => {
+	mutable people = [Person { score = 10 }, Person { score = 20 }, Person { score = 30 }]
+	do {
+		people.deleteWhere((person) => {
+			person.score += 1
+			if person.score == 31 { let _number = try Integer.parse(text) }
+			person.score == 11
+		})
+	} catch _error => {}
+	if people.length == 2 {
+		people[0].score * 100 + people[1].score + people.length
+	} else { -1 }
+}
+
 function mapCallbacks = (): Integer => {
 	let values: Map<String, Integer> = [("a", 1), ("b", 2)]
 	let mapped = values.map((key, value) => value + key.length)
@@ -105,6 +120,7 @@ static valueArgument = @argumentResult()
 static survived = @failed("bad")
 static earlyArgument = @earlyArgumentResult()
 static growingReference = @growingAlias()
+static delayedFailure = @laterFailure("bad")
 static maps = @mapCallbacks()
 static duplicates = @setMapping()
 console.log(inspected, inspect())
@@ -115,5 +131,6 @@ console.log(valueArgument, argumentResult())
 console.log(survived, failed("bad"))
 console.log(earlyArgument, earlyArgumentResult())
 console.log(growingReference, growingAlias())
+console.log(delayedFailure, laterFailure("bad"))
 console.log(maps, mapCallbacks())
 console.log(duplicates, setMapping())

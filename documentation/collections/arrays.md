@@ -280,6 +280,8 @@ numbers.deleteWhere((n) => n < 2) -- deletes the matching items: [3, 2]
 
 `deleteWhere` is the way to remove items while examining them: removing items of an array during a loop over it is a compile error.
 
+If its predicate throws, the items already matched stay deleted; the throwing item and the unvisited tail stay after the retained items. Mutations performed by the callback remain visible. A failing `sortInPlace` comparator keeps the original order, with its item mutations still visible. Only a comparator whose type can throw needs a staged permutation; a non-throwing comparator sorts in place without a staging buffer. `reverseInPlace` calls no callback and cannot throw, so it reverses in place without staging. See [effects before an error](/values/errors#effects-before-an-error).
+
 Chained calls whose callbacks are [pure](/functions/defining-functions#pure-functions) are fused into a single pass. See [iterating with methods](/control-flow/loops#iterating-with-methods).
 
 ### Effects of the methods

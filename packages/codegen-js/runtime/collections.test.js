@@ -177,6 +177,21 @@ describe("insert, delete, take, deleteWhere", () => {
 		faArrayDeleteWhere(items, () => true);
 		expect(items).toEqual([]);
 	});
+
+	test("deleteWhere keeps completed deletions and callback writes on failure", () => {
+		const items = [{ score: 10 }, { score: 20 }, { score: 30 }, { score: 40 }];
+		const failure = new Error("predicate failed");
+		expect(
+			errorOf(() =>
+				faArrayDeleteWhere(items, (item) => {
+					item.score += 1;
+					if (item.score === 31) throw failure;
+					return item.score === 11;
+				}),
+			),
+		).toBe(failure);
+		expect(items).toEqual([{ score: 21 }, { score: 31 }, { score: 40 }]);
+	});
 });
 
 describe("sorting (D35)", () => {
@@ -482,6 +497,52 @@ describe("map helpers", () => {
 		const plain = new Set([1, 2, 3]);
 		faDeleteWhere(plain, (value) => value > 1);
 		expect([...plain]).toEqual([1]);
+	});
+
+	test("map and set deleteWhere apply deletions before the next callback", () => {
+		const failure = new Error("predicate failed");
+		for (const map of [
+			new Map([
+				[1, 10],
+				[2, 20],
+				[3, 30],
+			]),
+			new FaHashMap([
+				[1, 10],
+				[2, 20],
+				[3, 30],
+			]),
+		]) {
+			expect(
+				errorOf(() =>
+					faDeleteWhere(map, (key) => {
+						if (key === 2) {
+							expect(map.has(1)).toBe(false);
+							throw failure;
+						}
+						return true;
+					}),
+				),
+			).toBe(failure);
+			expect([...map]).toEqual([
+				[2, 20],
+				[3, 30],
+			]);
+		}
+		for (const set of [new Set([1, 2, 3]), new FaSet([1, 2, 3])]) {
+			expect(
+				errorOf(() =>
+					faDeleteWhere(set, (item) => {
+						if (item === 2) {
+							expect(set.has(1)).toBe(false);
+							throw failure;
+						}
+						return true;
+					}),
+				),
+			).toBe(failure);
+			expect([...set]).toEqual([2, 3]);
+		}
 	});
 });
 

@@ -36,6 +36,15 @@ Every CPU verdict requires the same-binary control to differ by <3% on both meas
 | — | `sort-objects` | — | unmeasured | — | — | — | — | — |
 | — | `spectral-norm` | — | unmeasured | — | — | — | — | — |
 | — | `string-building` | — | unmeasured | — | — | — | — | — |
+| — | `string-building-bytes` | — | unmeasured | — | — | — | — | — |
+| — | `string-building-growing` | — | unmeasured | — | — | — | — | — |
+| — | `strlist` | — | unmeasured | — | — | — | — | — |
+| — | `sum` | — | unmeasured | — | — | — | — | — |
+| — | `sum-reserved` | — | unmeasured | — | — | — | — | — |
+| — | `tree` | — | unmeasured | — | — | — | — | — |
+| — | `word-count` | — | unmeasured | — | — | — | — | — |
+| — | `words` | — | unmeasured | — | — | — | — | — |
+| — | `words-wide` | — | unmeasured | — | — | — | — | — |
 
 ### Absolute measurements
 
@@ -71,3 +80,12 @@ Wasm and Bun timings use the size shown, including process startup; errors are r
 | `sort-objects` | — | — | — | 100000 | 176.812 / 119.373 / 206.578 | — | — | — |
 | `spectral-norm` | — | — | — | 1000 | 535.731 / 608.315 / 691.207 | — | — | — |
 | `string-building` | — | — | — | 300000 | 237.271 / 148.698 / 872.518 | — | — | — |
+| `string-building-bytes` | — | — | — | 300000 | 175.144 / 148.698 / 872.518 | — | — | — |
+| `string-building-growing` | — | — | — | 300000 | 186.741 / 148.698 / 872.518 | — | — | — |
+| `strlist` | — | — | — | 200000 | 86.936 / 81.084 / 195.021 | — | — | — |
+| `sum` | — | — | — | 3200000 | 161.783 / 142.684 / 149.521 | — | — | — |
+| `sum-reserved` | — | — | — | 3200000 | 161.783 / 142.684 / 149.521 | — | — | — |
+| `tree` | — | — | — | 17 | 56.687 / 56.779 / 140.314 | — | — | — |
+| `word-count` | — | — | — | 500000 | 235.018 / 146.468 / 381.588 | — | — | — |
+| `words` | — | — | — | 100000 | 28.383 / 22.414 / 62.226 | — | — | — |
+| `words-wide` | — | — | — | 100000 | 28.383 / 22.414 / 62.223 | — | — | — |

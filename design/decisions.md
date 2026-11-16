@@ -1734,3 +1734,11 @@ call case is a separately recorded proof follow-up, so this item must not be
 reported as solving word-count even if a noisy CPU point estimate improves.
 
 Item 3 checkpoint: 27/36 instruction profiles completed, all within +1%; lru 19,047,821 → 19,153,936 Ir (+0.557%). Complete validation and remaining profiles/CPU phases are pending. Preserve these partial rows as the work checkpoint, not an acceptance claim. Full Bun/Node/web program suites and multi-file packages pass. Manual O0 native/wasm IR confirms KEY64 frame payload 232 bytes rounded to an aligned 240-byte buffer.
+
+Complete instruction phase: all 36 audit rows pass the +1% gate versus the
+successful-probe compiler, with exact unchanged source hashes and outputs.
+Lru is 19,047,821 → 19,153,936 Ir (+0.5571%), words is unchanged at 28,382,794,
+word-count is 235,017,839 → 235,017,865 (+26 Ir). The 27 checkpoint records are
+identical in the complete profile. No instruction win on these map benchmarks
+is claimed. Canonical scalar64 results now contain the complete instruction
+phase; full workspace and controlled CPU acceptance remain pending.

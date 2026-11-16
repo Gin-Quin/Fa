@@ -1,0 +1,35 @@
+-- prints: 2 2
+-- prints: 2 2
+-- prints: 2 2
+
+function append = (items: Array<Integer>) mutates items => items.push(2)
+
+function computed = (): Integer => {
+	mutable items = [1]
+	append(items)
+	items.length
+}
+
+function projected = (): Integer => {
+	mutable holder = { items = [1] }
+	append(holder.items)
+	holder.items.length
+}
+
+type Bag = {
+	items: Array<Integer>
+	function append = (self) mutates self.items => self.items.push(2)
+}
+
+function receiver = (): Integer => {
+	mutable holder = { bag = Bag { items = [1] } }
+	holder.bag.append()
+	holder.bag.items.length
+}
+
+static direct = @computed()
+static field = @projected()
+static method = @receiver()
+console.log(direct, computed())
+console.log(field, projected())
+console.log(method, receiver())

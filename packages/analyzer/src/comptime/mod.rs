@@ -363,6 +363,73 @@ fn visit_argument(argument: &fa_interpreter::ir::Arg, f: &mut dyn FnMut(&Expr)) 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::ids::NodeId;
+
+	#[test]
+	fn compile_time_arguments_borrow_the_callers_places() {
+		let (session, file) = crate::analyze_source(include_str!(
+			"../../tests/cases/ownership-compiletime-borrows.fa"
+		));
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		let tree = session.tree(file);
+		for text in ["@computed()", "@projected()", "@receiver()"] {
+			let node = (0..tree.nodes.len())
+				.find(|&node| tree.text(node) == text)
+				.unwrap();
+			assert_eq!(
+				session.analysis(file).constant(NodeId::new(node)),
+				Some(&Value::int(2)),
+				"{text}"
+			);
+		}
+	}
+
+	#[test]
+	fn existing_defaults_lower_as_loans_and_constructed_defaults_keep_their_values() {
+		use fa_interpreter::ir::Expr;
+		let (session, file) = crate::analyze_source(
+			"function existing = (source: Array<Integer>, items: Array<Integer> = source): Integer => items.length\nfunction fresh = (items: Array<Integer> = [1]): Integer => items.length\nfunction explicit = (source: Array<Integer>, items: Array<Integer> = copy source): Integer => items.length\n",
+		);
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
+		let tree = session.tree(file);
+		let analysis = session.analysis(file);
+		for name in ["existing", "fresh", "explicit"] {
+			let info = analysis
+				.functions
+				.values()
+				.find(|info| {
+					info.symbol.is_some_and(|symbol| {
+						session
+							.types()
+							.syms
+							.resolve(analysis.symbols.symbol(symbol).name)
+							== name
+					})
+				})
+				.unwrap();
+			let function = lower::Lowerer::new(&session, file, tree, analysis)
+				.function(info.lambda)
+				.unwrap();
+			let default = function.params.last().unwrap().default.as_ref().unwrap();
+			assert!(
+				match name {
+					"existing" => matches!(default, Expr::Lend(_)),
+					"fresh" => matches!(default, Expr::Array(_)),
+					"explicit" => matches!(default, Expr::Copy(..)),
+					_ => unreachable!(),
+				},
+				"{name}: {default:?}"
+			);
+		}
+	}
 
 	#[test]
 	fn exact_types_of_values() {

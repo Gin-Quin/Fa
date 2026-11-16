@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use ethnum::I256;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fa_interpreter::Value;
 use fa_interpreter::ir::{
@@ -40,6 +40,9 @@ use crate::types::{CollKind, FloatBits, IntStorage, NominalKind, TypeKind, TypeS
 
 #[path = "copy_plans.rs"]
 mod copies;
+
+#[path = "borrows.rs"]
+mod borrows;
 
 thread_local! {
 	/// The modules a lowering needed that the session doesn't hold.
@@ -97,6 +100,7 @@ pub struct Lowerer<'a> {
 	js: bool,
 	slots: FxHashMap<SymbolId, Slot>,
 	aliases: FxHashMap<SymbolId, Place>,
+	borrowed_results: FxHashSet<NodeId>,
 	next: Slot,
 	/// Lowering a compile-time expression: no enclosing function's frame.
 	compile_time: bool,
@@ -128,6 +132,7 @@ impl<'a> Lowerer<'a> {
 			js: super::is_js_target(session.target()),
 			slots: FxHashMap::default(),
 			aliases: FxHashMap::default(),
+			borrowed_results: FxHashSet::default(),
 			next: 0,
 			compile_time: true,
 			globals: false,
@@ -192,7 +197,7 @@ impl<'a> Lowerer<'a> {
 			.collect();
 		// the defaults, then the patterns of destructured parameters
 		for (index, param) in info.params.iter().enumerate() {
-			params[index].default = param.default.map(|default| self.expr(default));
+			params[index].default = param.default.map(|default| self.bound_argument(default));
 		}
 		let mut prologue = Vec::new();
 		for param in &info.params {
@@ -594,6 +599,16 @@ impl<'a> Lowerer<'a> {
 
 	/// Lowers an expression or a statement.
 	pub fn expr(&mut self, n: NodeId) -> Expr {
+		if self.borrowed_results.contains(&n)
+			&& !self
+				.a
+				.copy_inputs
+				.get(&n)
+				.is_some_and(|input| input.produces)
+			&& let Some(place) = self.borrowable_place(n)
+		{
+			return Expr::Lend(place);
+		}
 		let value = self.expr_raw(n);
 		if let Some(input) = self.a.copy_inputs.get(&n).filter(|input| input.produces) {
 			return Expr::Copy(self.copy_plan(input.source, input.target), value.boxed());
@@ -1466,11 +1481,7 @@ impl<'a> Lowerer<'a> {
 				let place = if method {
 					// the effects table of the built-ins (one source, `builtins/array.rs`)
 					if crate::builtins::effects::changes_receiver(path) {
-						let target = match syntax::view(self.tree, callee) {
-							View::Access { target, members } if members.len() == 1 => Some(target),
-							_ => None,
-						};
-						match target.and_then(|target| self.place(target)) {
+						match self.borrowed_receiver(callee) {
 							Some(place) => Some(place),
 							None => return self.unsupported(format!("`{path}` on this value")),
 						}
@@ -1573,15 +1584,18 @@ impl<'a> Lowerer<'a> {
 		let mut args = Vec::with_capacity(arguments.len());
 		for argument in arguments {
 			args.push(match argument {
-				Argument::Given(value) => Arg::Value(self.expr(*value)),
+				Argument::Given(value) => Arg::Value(self.bound_argument(*value)),
 				Argument::Default | Argument::Missing => Arg::Default,
 				Argument::Variadic(items) => Arg::Variadic(self.items(items.iter().copied())),
 				Argument::Receiver(_) => {
-					let receiver =
-						callee.and_then(|callee| match syntax::view(self.tree, callee) {
+					let receiver = callee.and_then(|callee| {
+						if let Some(place) = self.borrowed_receiver(callee) {
+							return Some(Expr::Lend(place));
+						}
+						match syntax::view(self.tree, callee) {
 							View::Access { target, members }
 							| View::OptionalAccess { target, members } => {
-								let mut value = self.expr(target);
+								let mut value = self.bound(target);
 								for member in members.iter().take(members.len().saturating_sub(1)) {
 									let View::Name(name) = syntax::view(self.tree, member) else {
 										return None;
@@ -1595,7 +1609,8 @@ impl<'a> Lowerer<'a> {
 								Some(value)
 							}
 							_ => None,
-						});
+						}
+					});
 					Arg::Value(receiver.unwrap_or_else(|| self.unsupported("this receiver")))
 				}
 			});

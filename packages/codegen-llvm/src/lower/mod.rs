@@ -798,15 +798,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		// accept virtual views from other code; closed programs can erase it.
 		let virtual_views = !self.whole_program
 			|| self.c_library.is_some()
-			|| ["fa_string_slice_view", "fa_string_split_views"]
-				.into_iter()
-				.filter_map(|name| self.module.get_function(name))
-				.any(|function| {
-					inkwell::values::BasicValue::get_first_use(
-						&function.as_global_value().as_pointer_value(),
-					)
-					.is_some()
-				});
+			|| [
+				"fa_string_slice_view",
+				"fa_string_split_views",
+				"fa_string_split_nonempty_views",
+				"fa_string_split_views_into",
+			]
+			.into_iter()
+			.filter_map(|name| self.module.get_function(name))
+			.any(|function| {
+				inkwell::values::BasicValue::get_first_use(
+					&function.as_global_value().as_pointer_value(),
+				)
+				.is_some()
+			});
 		if let Some(flag) = self.module.get_global("fa_virtual_string_slices") {
 			flag.set_initializer(
 				&self

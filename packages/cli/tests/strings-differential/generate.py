@@ -603,6 +603,32 @@ console.log([...values.map(v=>units(JSON.stringify(v))),units(text),units(text)]
 
 
 
+
+def split_cases(output, bun):
+    needles = ["", "\ud83d", "\ude00", ","]
+    pairs = [(text, needles[index % 4]) for index, text in enumerate(subjects())]
+    pairs += [("é" * 80 + "😀x", needle) for needle in needles]
+    prelude = PRELUDE.split("function probe", 1)[0] + r"""
+function splitForms = (text: String, needle: String): String => {
+    let source = String.from(text, capacity = 4096)
+    let parts = source.split(needle)
+    let filtered = source.split(needle).filter((part) => not part.isEmpty())
+    mutable rows: Array<String> = []
+    for part in parts { rows.push("[" + units(part) + "]") }
+    rows.join(",") + "|" + strings(filtered)
+}
+"""
+    oracle = r"""
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
+const strings=a=>a.map(s=>"["+units(s)+"]").join(",");
+for(const [text,needle] of JSON.parse(await Bun.stdin.text())) {
+    const parts=text.split(needle);
+    console.log(strings(parts)+"|"+strings(parts.filter(s=>s.length!==0)));
+}
+"""
+    references = subprocess.run([bun,"-e",oracle],input=json.dumps(pairs,ensure_ascii=True),text=True,capture_output=True,check=True).stdout.splitlines()
+    write_cases(output,"split-storage",prelude,[(literal(text),literal(needle)) for text,needle in pairs],references,"splitForms",16)
+
 def large_cases(output, bun):
     # The quick tier includes the large payload classes at compile time too,
     # without repeating every expensive conversion of the semantic probe.
@@ -692,6 +718,7 @@ async function crossing = (text: String): String throws IndexError => {
     json_composites(output,bun)
     allocation_cases(output)
     large_cases(output,bun)
+    split_cases(output,bun)
     decoded = byte_cases(output,bun)
     json_cases(output,bun)
     cuts=edge_cases(output,bun)

@@ -36,6 +36,10 @@ optional searches, literal dollar replacements and checked bounds are modeled
 explicitly. Strict decoder error positions come from Python's UTF-8 decoder;
 lossy results come from WHATWG TextDecoder with BOM retention.
 
+Split-storage probes keep the source live while reading ordinary and filtered
+parts; native IR pins all three split-view constructors, including arrays in
+caller storage.
+
 Storage probes exercise owners, views, split parts, object fields, arrays,
 pools, recursive unions, packed arrays, frame and reserved append paths, map
 keys, sets, sorting and await boundaries. Copy probes cross every subject and

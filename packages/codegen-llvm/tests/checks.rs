@@ -35,15 +35,34 @@ mod with_llvm {
 
 	#[test]
 	fn split_views_enable_virtual_surrogate_edges() {
-		let source = include_str!("../../../design/reviews/repros/strings/split-cut-allocation.fa");
+		let cases = [
+			(
+				"fa_string_split_views",
+				include_str!("../../../design/reviews/repros/strings/split-cut-allocation.fa"),
+			),
+			(
+				"fa_string_split_nonempty_views",
+				"function run = (text: String): Integer => {\nmutable source = text\nlet parts = source.split(\"😀\"[1]).filter((part) => not part.isEmpty())\nparts.length\n}\nconsole.log(run(\"é😀x\"))\n",
+			),
+			(
+				"fa_string_split_views_into",
+				"function run = (text: String): Integer => {\nmutable source = text\nlet parts = source.split(\"😀\"[1])\nparts.length\n}\nconsole.log(run(\"é😀x\"))\n",
+			),
+		];
 		for target in [Target::Native, Target::Wasm] {
-			let ir = complete_ir_at_target("split-cut-views", source, false, OptLevel::O0, target);
-			assert!(ir.contains("@fa_string_split_views("), "{ir}");
-			let flag = ir
-				.lines()
-				.find(|line| line.starts_with("@fa_virtual_string_slices ="))
-				.expect("virtual span capability");
-			assert!(flag.contains("constant i32 1"), "{target:?}: {flag}");
+			for (helper, source) in cases {
+				let ir =
+					complete_ir_at_target("split-cut-views", source, false, OptLevel::O0, target);
+				assert!(ir.contains(&format!("@{helper}(")), "{helper}: {ir}");
+				let flag = ir
+					.lines()
+					.find(|line| line.starts_with("@fa_virtual_string_slices ="))
+					.expect("virtual span capability");
+				assert!(
+					flag.contains("constant i32 1"),
+					"{target:?}/{helper}: {flag}"
+				);
+			}
 		}
 	}
 

@@ -16,12 +16,12 @@ Every CPU verdict requires the same-binary control to differ by <3% on both meas
 | — | `fannkuch-redux` | — | unmeasured | — | — | — | — | — |
 | — | `fib` | — | unmeasured | — | — | — | — | — |
 | — | `graph` | — | unmeasured | — | — | — | — | — |
-| — | `growing-index` | — | unmeasured | — | — | — | — | — |
-| — | `growing-index-array` | — | unmeasured | — | — | — | — | — |
-| — | `growing-index-array@1000` | — | unmeasured | — | — | — | — | — |
-| — | `growing-index-array@16` | — | unmeasured | — | — | — | — | — |
-| — | `growing-index@1000` | — | unmeasured | — | — | — | — | — |
-| — | `growing-index@16` | — | unmeasured | — | — | — | — | — |
+| secondary | `growing-index` | 1000000 | 0.999 / 0.987 [0.861, 1.261] | 0.982 / 1.042 [0.835, 1.255] | 1.244 | 1.260 | 0.975/0.967 fail | not resolved / not resolved |
+| secondary | `growing-index-array` | 1000000 | 0.933 / 0.926 [0.770, 1.080] | 1.058 / 1.059 [0.928, 1.230] | 0.992 | 1.004 | 1.019/0.993 pass | goal met / behind |
+| secondary | `growing-index-array@1000` | 1000 | 0.893 / 0.946 [0.723, 1.043] | 0.841 / 0.988 [0.766, 1.059] | 1.000 | 1.027 | 0.999/1.010 pass | goal met / goal met |
+| secondary | `growing-index-array@16` | 16 | 1.103 / 1.040 [0.837, 1.279] | 1.132 / 1.053 [0.942, 1.414] | 1.000 | 1.027 | 1.061/0.980 fail | not resolved / not resolved |
+| secondary | `growing-index@1000` | 1000 | 1.081 / 1.048 [0.927, 1.330] | 1.110 / 1.048 [0.755, 1.124] | 1.226 | 1.260 | 1.031/1.014 fail | not resolved / not resolved |
+| secondary | `growing-index@16` | 16 | 1.053 / 1.025 [0.969, 1.329] | 1.070 / 1.102 [0.970, 1.299] | 1.226 | 1.260 | 0.981/0.985 pass | goal met / behind |
 | — | `interp` | — | unmeasured | — | — | — | — | — |
 | — | `lru` | — | unmeasured | — | — | — | — | — |
 | — | `lru-open` | — | unmeasured | — | — | — | — | — |
@@ -64,12 +64,12 @@ Wasm and Bun timings use the size shown, including process startup; errors are r
 | `fannkuch-redux` | — | — | — | 9 | 136.698 / 108.299 / 105.879 | — | — | — |
 | `fib` | — | — | — | 35 | 236.888 / 236.994 / 293.224 | — | — | — |
 | `graph` | — | — | — | 10000 | 10.451 / 7.005 / 17.902 | — | — | — |
-| `growing-index` | — | — | — | 1000000 | 394.173 / 316.771 / 312.957 | — | — | — |
-| `growing-index-array` | — | — | — | 1000000 | 314.168 / 316.771 / 312.957 | — | — | — |
-| `growing-index-array@1000` | — | — | — | 1000 | 300.196 / 300.304 / 292.344 | — | — | — |
-| `growing-index-array@16` | — | — | — | 16 | 300.182 / 300.288 / 292.322 | — | — | — |
-| `growing-index@1000` | — | — | — | 1000 | 368.210 / 300.304 / 292.344 | — | — | — |
-| `growing-index@16` | — | — | — | 16 | 368.182 / 300.288 / 292.322 | — | — | — |
+| `growing-index` | 0.224 / 0.224 / 0.228 | 9472 / 9856 / 9728 | 29744 / 18888 / 341920 | 1000000 | 394.173 / 316.771 / 312.957 | — | — | — |
+| `growing-index-array` | 0.217 / 0.233 / 0.205 | 9472 / 9856 / 9856 | 30640 / 18888 / 341920 | 1000000 | 314.168 / 316.771 / 312.957 | — | — | — |
+| `growing-index-array@1000` | 0.061 / 0.068 / 0.072 | 1664 / 1920 / 2048 | 30640 / 18888 / 341920 | 1000 | 300.196 / 300.304 / 292.344 | — | — | — |
+| `growing-index-array@16` | 0.069 / 0.063 / 0.061 | 1664 / 1920 / 1920 | 30640 / 18888 / 341920 | 16 | 300.182 / 300.288 / 292.322 | — | — | — |
+| `growing-index@1000` | 0.068 / 0.063 / 0.061 | 1664 / 2048 / 2048 | 29760 / 18888 / 341920 | 1000 | 368.210 / 300.304 / 292.344 | — | — | — |
+| `growing-index@16` | 0.066 / 0.063 / 0.062 | 1664 / 1920 / 1920 | 29744 / 18888 / 341920 | 16 | 368.182 / 300.288 / 292.322 | — | — | — |
 | `interp` | — | — | — | 17 | 18.857 / 17.593 / 37.150 | — | — | — |
 | `lru` | — | — | — | 200000 | 19.154 / 17.889 / 53.722 | — | — | — |
 | `lru-open` | — | — | — | 200000 | 20.953 / 17.889 / 21.916 | — | — | — |

@@ -1803,6 +1803,21 @@ Part 2 remains unimplemented at this completed-item context boundary.
   endpoints, generic instances, callbacks/function values, captured constants,
   suspension and whole-program/per-unit package compilation. Measurements and
   final validation are recorded in the lead's `reports/perf-arrays.md`.
+- **Item 1 acceptance:** all 40 instruction comparisons pass +1% (the 36
+  audit rows plus indexing at 16 and 1,000 items). At one million items,
+  GrowingArray falls from 418,172,759 to 394,172,782 Ir; Array from
+  336,668,459 to 314,168,479. Maximum other increase is 0.685642% on
+  string-building-bytes; String lowering is unchanged. The first six 21-round
+  CPU series retain 693 samples and all controls. The large Array control
+  passes: after/before 0.848 / 0.860 (ratio of medians / paired median),
+  after/Goose 0.933 / 0.926, after/Rust 1.058 / 1.059. It meets the Goose
+  goal and remains behind Rust. GrowingArray at one million and 1,000 items
+  and Array at 16 fail their controls: their CPU effects stay unresolved.
+  Keep the wide quartiles and the other controlled results in
+  `benchmarks/results/2026-11-16-arrays-remainder.{json,md}`. No universal
+  hardware speedup or GrowingArray layout verdict follows from this series.
+  Full LLVM-enabled validation: 1,389 passed, zero failed, eight existing
+  ignored, including 98 IR tests and nine new O0/leak executions.
 
 ## Collection map review fixes (2026-11-16)
 

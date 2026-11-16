@@ -1,0 +1,11 @@
+-- Lead decision 7: normalized endpoints and an existing inclusive last item.
+function slice = (text: String, start: Integer, end: Integer): String throws IndexError => try text[start..end]
+function inclusive = (text: String, start: Integer, end: Integer): String throws IndexError => try text[start..=end]
+console.log(slice("a😀z", -3, -1) catch _error => "error", (slice("ab", 2, 2) catch _error => "error").length, (slice("ab", 2, 0) catch _error => "error").length) -- prints: 😀 0 0
+console.log(inclusive("ab", 0, 2) catch _error => "error", inclusive("ab", 0, -1) catch _error => "error") -- prints: error ab
+console.log((slice("", 0, 0) catch _error => "error").length, inclusive("", 0, 0) catch _error => "error") -- prints: 0 error
+let empty = ""
+console.log(empty[..].length) -- prints: 0
+function arraySlice = (items: Array<Integer>, start: Integer, end: Integer): Array<Integer> throws IndexError => try items[start..end]
+function arrayInclusive = (items: Array<Integer>, start: Integer, end: Integer): Array<Integer> throws IndexError => try items[start..=end]
+console.log(arraySlice([1, 2], -2, -1) catch _error => [], arraySlice([1, 2], 2, 0) catch _error => [], arrayInclusive([1, 2], 0, 2) catch _error => []) -- prints: [1] [] []

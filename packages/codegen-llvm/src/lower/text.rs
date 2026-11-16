@@ -264,7 +264,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			)?;
 			offset = self.builder.build_int_add(offset, length, "")?;
 		}
-		self.call_runtime("fa_string_finish", &[result.pointer.into()])?;
+		self.call_runtime(
+			"fa_string_finish_known",
+			&[result.pointer.into(), simple.into()],
+		)?;
 		if destination.is_some() {
 			return Ok(Some(Val::void()));
 		}

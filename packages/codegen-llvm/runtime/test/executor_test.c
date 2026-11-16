@@ -950,6 +950,22 @@ static void test_utf16_strings(void) {
 	CHECK(fa_string_length(heap.bytes, heap.length, heap.capacity) == count + 1);
 	CHECK(string_header(heap.bytes)->breadcrumbs == 0);
 	fa_string_free(heap.bytes, heap.capacity);
+	// Non-ASCII appends normalize only their join, even as the block grows.
+	FaString growing = owned_copy((const uint8_t *)"é", 2);
+	for (size_t i = 0; i < 10000; i += 1) {
+		fa_string_append(&growing, (const uint8_t *)"é", 2, 0);
+	}
+	CHECK(fa_string_length(growing.bytes, growing.length, growing.capacity) == 10001);
+	fa_string_append(&growing, string_bytes(&low), 3, low.capacity);
+	CHECK(!fa_string_is_well_formed(growing.bytes, growing.length, growing.capacity));
+	FaString last_high;
+	CHECK(fa_string_get(text, sizeof(text) - 1, 0, 3, &last_high));
+	fa_string_append(&growing, string_bytes(&last_high), 3, last_high.capacity);
+	fa_string_append(&growing, string_bytes(&low), 3, low.capacity);
+	CHECK(growing.length == 20009);
+	CHECK(fa_string_code_unit_at(growing.bytes, growing.length, growing.capacity, -2) == 0xD83D);
+	CHECK(fa_string_code_unit_at(growing.bytes, growing.length, growing.capacity, -1) == 0xDE00);
+	fa_string_free(growing.bytes, growing.capacity);
 	CHECK(allocated == before);
 }
 

@@ -38,6 +38,8 @@ console.log(borrowed, borrowed.length) -- prints: é日 2
 use half = try source[3..4]
 console.log(half, half.length, half.isWellFormed()) -- prints: � 1 false
 console.log("{text[3]}{text[4]}" == "😀") -- prints: true
+console.log("{text[3]}{text[4]}") -- prints: 😀
+console.log("{text[3]}{""}{text[4]}") -- prints: 😀
 function checked = (value: String, index: Integer): UInt16 throws IndexError => try value.codeUnitAt(index)
 console.log(checked("é😀", -1) catch _error => 0, checked("", 0) catch _error => 999, checked("x", -2) catch _error => 999) -- prints: 56832 999 999
 

@@ -672,18 +672,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(short_block);
 		let short_word = self.builder.build_int_z_extend(header, usize, "")?;
 		let short_bytes = self.packed_offset(cursor, usize.const_int(1, false))?;
-		let short_length =
-			self.builder
-				.build_right_shift(short_word, usize.const_int(1, false), false, "")?;
-		let ascii = self
-			.builder
-			.build_and(short_word, usize.const_int(1, false), "")?;
-		let ascii = self.builder.build_left_shift(
-			ascii,
-			usize.const_int(u64::from(usize.get_bit_width() - 1), false),
-			"",
-		)?;
-		let short_capacity = self.builder.build_or(ascii, self.string_kind_mask(), "")?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(long_block);
 		let word_pointer = self.packed_offset(cursor, usize.const_int(1, false))?;
@@ -692,41 +680,37 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.expect("a load")
 			.set_alignment(1)
 			.map_err(|e| Error::Llvm(e.to_string()))?;
-		let word = load.into_int_value();
+		let long_word = load.into_int_value();
+		let word_size = u64::from(usize.get_bit_width() / 8);
+		let long_bytes = self.packed_offset(cursor, usize.const_int(1 + word_size, false))?;
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(join);
+		// Merge the encoded word before decoding. Keeping the masks after
+		// the phi proves these borrowed views are never inline or literal.
+		let word = self.builder.build_phi(usize, "")?;
+		word.add_incoming(&[(&short_word, short_block), (&long_word, long_block)]);
+		let bytes = self.builder.build_phi(self.pointer_type(), "")?;
+		bytes.add_incoming(&[(&short_bytes, short_block), (&long_bytes, long_block)]);
+		let bytes = bytes.as_basic_value().into_pointer_value();
+		let word = word.as_basic_value().into_int_value();
 		let surrogates = self
 			.builder
 			.build_and(word, self.string_surrogates_flag(), "")?;
 		let payload =
 			self.builder
 				.build_and(word, self.string_surrogates_flag().const_not(), "")?;
-		let long_length =
+		let length =
 			self.builder
 				.build_right_shift(payload, usize.const_int(1, false), false, "")?;
-		let ascii = self
-			.builder
-			.build_and(word, usize.const_int(1, false), "")?;
 		let ascii = self.builder.build_left_shift(
-			ascii,
+			word,
 			usize.const_int(u64::from(usize.get_bit_width() - 1), false),
 			"",
 		)?;
 		let encoding = self.builder.build_or(ascii, surrogates, "")?;
-		let long_capacity = self
+		let capacity = self
 			.builder
 			.build_or(encoding, self.string_kind_mask(), "")?;
-		let word_size = u64::from(usize.get_bit_width() / 8);
-		let long_bytes = self.packed_offset(cursor, usize.const_int(1 + word_size, false))?;
-		self.builder.build_unconditional_branch(join)?;
-		self.builder.position_at_end(join);
-		let length = self.builder.build_phi(usize, "")?;
-		length.add_incoming(&[(&short_length, short_block), (&long_length, long_block)]);
-		let length = length.as_basic_value().into_int_value();
-		let capacity = self.builder.build_phi(usize, "")?;
-		capacity.add_incoming(&[(&short_capacity, short_block), (&long_capacity, long_block)]);
-		let capacity = capacity.as_basic_value().into_int_value();
-		let bytes = self.builder.build_phi(self.pointer_type(), "")?;
-		bytes.add_incoming(&[(&short_bytes, short_block), (&long_bytes, long_block)]);
-		let bytes = bytes.as_basic_value().into_pointer_value();
 		let mut value = self.string_type.get_undef();
 		for (index, part) in [BasicValueEnum::from(bytes), length.into(), capacity.into()]
 			.into_iter()

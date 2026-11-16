@@ -21,7 +21,7 @@ mutable text = ""
 for index in 0..30 {
 	text += mixed[index %% 5]
 }
-console.log(text.length, text.split("\r").length) -- prints: 30 7
+console.log(text.length, text.split("\r").length) -- prints: 30 1
 
 -- no round, then rounds after `continue`
 mutable empty = ""

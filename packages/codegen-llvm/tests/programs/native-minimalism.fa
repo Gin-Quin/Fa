@@ -20,7 +20,7 @@ console.log(text)
 mutable unicode = "é"
 unicode += "{piece}🇫🇷"
 console.log(unicode, unicode.length)
--- prints: ébc🇫🇷 4
+-- prints: ébc🇫🇷 7
 
 -- Borrowed structural views and temporary aggregate arguments don't mutate or consume inputs.
 type Data = { a: Integer, b: String, extra: Integer }

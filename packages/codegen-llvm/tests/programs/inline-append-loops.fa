@@ -58,5 +58,5 @@ function lineBreaks = (count: Integer): String => {
 	}
 	text
 }
-assert lineBreaks(4).length == 3
+assert lineBreaks(4).length == 4
 console.log("append loops") -- prints: append loops

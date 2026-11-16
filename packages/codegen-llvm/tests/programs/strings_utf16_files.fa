@@ -1,7 +1,8 @@
 -- skip-target: native-freestanding
 use { File } = std.fs
+use { monotonic } = std.time
 let face = "😀"
-let path = "/tmp/fa-string-utf16-output.txt"
+let path = "/tmp/fa-string-utf16-{monotonic()}.txt"
 try File.writeText(path, face[0] + "-" + face[1])
 let text = try File.readText(path)
 console.log(text, text.isWellFormed(), text == "�-�") -- prints: �-� true true

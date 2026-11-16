@@ -910,7 +910,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	pub(crate) fn string_inline_flag(&self) -> IntValue<'ctx> {
 		self.usize
-			.const_int(1 << (self.usize.get_bit_width() - 2), false)
+			.const_int(1 << (self.usize.get_bit_width() - 3), false)
 	}
 
 	pub(crate) fn string_kind_mask(&self) -> IntValue<'ctx> {
@@ -932,12 +932,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	pub(crate) fn string_surrogates_flag(&self) -> IntValue<'ctx> {
 		self.usize
-			.const_int(1 << (self.usize.get_bit_width() - 3), false)
+			.const_int(1 << (self.usize.get_bit_width() - 2), false)
 	}
 
 	pub(crate) fn string_flags(&self) -> IntValue<'ctx> {
 		self.usize
-			.const_int(5 << (self.usize.get_bit_width() - 3), false)
+			.const_int(3 << (self.usize.get_bit_width() - 2), false)
 	}
 
 	/// The site of a runtime check: two NUL-terminated strings, the subject

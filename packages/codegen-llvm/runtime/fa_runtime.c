@@ -107,8 +107,8 @@ typedef struct {
 } FaString;
 
 #define SIMPLE ((size_t)1 << (sizeof(size_t) * 8 - 1))
-#define STRING_INLINE ((size_t)1 << (sizeof(size_t) * 8 - 2))
-#define STRING_SURROGATES ((size_t)1 << (sizeof(size_t) * 8 - 3))
+#define STRING_INLINE ((size_t)1 << (sizeof(size_t) * 8 - 3))
+#define STRING_SURROGATES ((size_t)1 << (sizeof(size_t) * 8 - 2))
 #define STRING_LITERAL ((size_t)1 << (sizeof(size_t) * 8 - 4))
 #define STRING_FLAGS (SIMPLE | STRING_SURROGATES)
 #define KIND_MASK (~(SIMPLE | STRING_INLINE | STRING_SURROGATES | STRING_LITERAL))
@@ -127,7 +127,11 @@ static size_t string_length(const FaString *string) {
 }
 
 static void inline_string_tag(FaString *string, size_t length, size_t simple) {
-	((uint8_t *)string)[sizeof(FaString) - 1] = (uint8_t)(0x40 | ((simple & SIMPLE) ? 0x80 : 0) | ((simple & STRING_SURROGATES) ? 0x20 : 0) | length);
+	// Constructors initialize the payload first. Store a complete word so
+	// LLVM can forward its encoding bits into subsequent representation tests;
+	// a byte store followed by a capacity-word load loses that information.
+	size_t payload = string->capacity & (((size_t)1 << INLINE_LENGTH_SHIFT) - 1);
+	string->capacity = payload | STRING_INLINE | (simple & STRING_FLAGS) | (length << INLINE_LENGTH_SHIFT);
 }
 
 /// Whether a string with this capacity word owns its heap block.
@@ -197,16 +201,21 @@ static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length);
 /// A block of `old` bytes replaced by one of `size` bytes holding its first
 /// `used` bytes: a large block by `fa_grow` (which moves the pages of a
 /// mapped block), a small one by a new block and a copy, as before.
-static __attribute__((always_inline)) inline void *grow_block(void *bytes, size_t old, size_t used, size_t size, size_t align) {
+static __attribute__((always_inline)) inline void *grow_block_at(void *bytes, size_t old, size_t offset,
+                                                               size_t used, size_t size, size_t align) {
 	if (old < ((size_t)1 << 20)) {
 		uint8_t *grown = fa_alloc(size, align);
-		copy_bytes(grown, bytes, used);
+		copy_bytes(grown + offset, (const uint8_t *)bytes + offset, used);
 		fa_free(bytes, old, align);
 		return grown;
 	}
-	void *grown = fa_grow(bytes, old, used, size);
+	void *grown = fa_grow(bytes, old, offset + used, size);
 	if (grown == 0) { out_of_memory(); }
 	return grown;
+}
+
+static __attribute__((always_inline)) inline void *grow_block(void *bytes, size_t old, size_t used, size_t size, size_t align) {
+	return grow_block_at(bytes, old, 0, used, size, align);
 }
 
 static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length) {
@@ -325,13 +334,13 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_free(const uint8_t *byte
 	fa_free(header, sizeof(StringHeader) + (capacity & KIND_MASK), sizeof(size_t));
 }
 
-static uint8_t *string_grow_block(const uint8_t *bytes, size_t old_capacity, size_t used,
+static __attribute__((always_inline)) uint8_t *string_grow_block(const uint8_t *bytes, size_t old_capacity, size_t used,
                                  size_t *capacity, size_t flags) {
 	StringHeader *header = string_header(bytes);
-	if (!(old_capacity & SIMPLE)) { string_clear(header); }
-	header = grow_block(header, sizeof(StringHeader) + (old_capacity & KIND_MASK), sizeof(StringHeader) + used,
+	if (!(old_capacity & SIMPLE)) { string_free_metadata(header); }
+	header = grow_block_at(header, sizeof(StringHeader) + (old_capacity & KIND_MASK), sizeof(StringHeader), used,
 	                    sizeof(StringHeader) + *capacity, sizeof(size_t));
-	if ((old_capacity & SIMPLE) && !(flags & SIMPLE)) {
+	if (!(flags & SIMPLE)) {
 		header->bytes = SIZE_MAX;
 		header->lock = 0;
 	}
@@ -400,8 +409,12 @@ FA_EXPORT FA_NORETURN void fa_terminate(int32_t code) {
 }
 
 static void string_finish_slow(FaString *string);
+static size_t string_join_pairs(uint8_t *bytes, size_t length, size_t *flags);
+FA_EXPORT __attribute__((always_inline)) void fa_string_finish_known(FaString *string, size_t flags) {
+	if (!(flags & SIMPLE)) { string_finish_slow(string); }
+}
 FA_EXPORT __attribute__((always_inline)) void fa_string_finish(FaString *string) {
-	if (!(string->capacity & SIMPLE)) { string_finish_slow(string); }
+	fa_string_finish_known(string, string->capacity);
 }
 FA_EXPORT void fa_string_write_utf8(uint8_t *out, const uint8_t *bytes, size_t length, size_t capacity);
 
@@ -488,8 +501,15 @@ static void append_byte(uint8_t byte) {
 
 /// Appends a new line and writes the line to `fd` (1: stdout, 2: stderr).
 FA_EXPORT void fa_b_line(int32_t fd) {
+	int ascii = builder_simple == builder_length;
 	append_byte('\n');
-	fa_string_write_utf8(builder, builder, builder_length, builder_flag());
+	if (!ascii) {
+		// Interpolations can put two individually lone halves next to each
+		// other. Normalize their join before encoding the line for output.
+		size_t flags;
+		builder_length = string_join_pairs(builder, builder_length, &flags);
+		fa_string_write_utf8(builder, builder, builder_length, flags);
+	}
 	fa_out(fd, builder, builder_length);
 	builder_length = 0;
 	builder_simple = 0;
@@ -555,8 +575,9 @@ FA_EXPORT void fa_string_own(const uint8_t *bytes, size_t length, size_t capacit
 
 /// The built text as a new string.
 FA_EXPORT void fa_b_take(FaString *out) {
-	*out = owned_copy_with(builder, builder_length, builder_flag());
-	fa_string_finish(out);
+	size_t flags = builder_flag();
+	*out = owned_copy_with(builder, builder_length, flags);
+	fa_string_finish_known(out, flags);
 	builder_length = 0;
 	builder_simple = 0;
 }
@@ -1631,7 +1652,7 @@ FA_EXPORT __attribute__((always_inline)) void fa_concat(const uint8_t *left, siz
 		copy_bytes((uint8_t *)&small + left_length, right, right_length);
 		inline_string_tag(&small, length, flags);
 		*out = small;
-		fa_string_finish(out);
+		fa_string_finish_known(out, flags);
 		return;
 	}
 	size_t block = string_block(length);
@@ -1641,7 +1662,7 @@ FA_EXPORT __attribute__((always_inline)) void fa_concat(const uint8_t *left, siz
 	out->bytes = bytes;
 	out->length = length;
 	out->capacity = block | flags;
-	fa_string_finish(out);
+	fa_string_finish_known(out, flags);
 }
 
 /// A checked byte count for concatenation, bounded by the string layout.
@@ -1773,7 +1794,7 @@ static __attribute__((always_inline)) void join_strings(const FaString *parts, s
 	if (length <= INLINE_STRING_BYTES) { inline_string_tag(&result, length, simple); }
 	else { result.bytes = target; result.length = length; result.capacity = block | simple; }
 	*out = result;
-	fa_string_finish(out);
+	fa_string_finish_known(out, simple);
 }
 
 FA_EXPORT __attribute__((always_inline)) void fa_strings_join(const FaString *parts, size_t count, FaString *out) {
@@ -1815,6 +1836,27 @@ static __attribute__((noinline)) void string_grow(FaString *string, const uint8_
 	string->capacity = grown | simple;
 }
 
+/// Canonical operands can form a new surrogate pair only at their join.
+/// Heap flags may remain conservative; inline flags are recomputed exactly.
+static void string_finish_append(FaString *string, size_t boundary) {
+	if (string->capacity & STRING_INLINE) { fa_string_finish(string); return; }
+	size_t length = string->length;
+	uint8_t *bytes = (uint8_t *)(void *)string->bytes;
+	if (boundary < 3 || length - boundary < 3 || bytes[boundary - 3] != 0xED ||
+	    bytes[boundary - 2] < 0xA0 || bytes[boundary - 2] > 0xAF ||
+	    bytes[boundary] != 0xED || bytes[boundary + 1] < 0xB0 || bytes[boundary + 1] > 0xBF) { return; }
+	uint32_t high = ((uint32_t)(bytes[boundary - 2] & 15) << 6) | (bytes[boundary - 1] & 63);
+	uint32_t low = ((uint32_t)(bytes[boundary + 1] & 15) << 6) | (bytes[boundary + 2] & 63);
+	uint32_t code = 0x10000 + (high << 10) + low;
+	uint8_t *pair = bytes + boundary - 3;
+	pair[0] = (uint8_t)(0xF0 | (code >> 18));
+	pair[1] = (uint8_t)(0x80 | ((code >> 12) & 63));
+	pair[2] = (uint8_t)(0x80 | ((code >> 6) & 63));
+	pair[3] = (uint8_t)(0x80 | (code & 63));
+	__builtin_memmove(pair + 4, bytes + boundary + 3, length - boundary - 3);
+	string->length = length - 2;
+}
+
 /// `text += suffix`: appends in place to the block of an owned string,
 /// which grows geometrically, so that a loop of appends is linear. The
 /// suffix may be a view of the text itself: it is copied before the old
@@ -1840,7 +1882,7 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
 		string->length = needed;
 		string->capacity = (capacity & KIND_MASK) | simple;
-		fa_string_finish(string);
+		string_finish_append(string, old_length);
 		return;
 	}
 	if (needed <= INLINE_STRING_BYTES) {
@@ -1855,11 +1897,11 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 			if (string_owned(capacity)) { fa_string_free(string->bytes, capacity); }
 			*string = small;
 		}
-		fa_string_finish(string);
+		string_finish_append(string, old_length);
 		return;
 	}
 	string_grow(string, bytes, length, simple);
-	fa_string_finish(string);
+	string_finish_append(string, old_length);
 }
 
 FA_EXPORT __attribute__((always_inline)) void fa_string_append(FaString *string, const uint8_t *bytes, size_t length,
@@ -2383,6 +2425,30 @@ static size_t encode_point(uint8_t *out, uint32_t code) {
 	return 4;
 }
 
+/// Normalize a writable byte sequence, including joins across builder parts.
+static size_t string_join_pairs(uint8_t *bytes, size_t length, size_t *flags) {
+	size_t read = 0, written = 0;
+	*flags = 0;
+	while (read < length) {
+		size_t start = read;
+		uint32_t code = decode(bytes, length, &read);
+		if (code >= 0xD800 && code <= 0xDBFF && read < length) {
+			size_t next = read;
+			uint32_t low = decode(bytes, length, &next);
+			if (low >= 0xDC00 && low <= 0xDFFF) {
+				written += encode_point(bytes + written, 0x10000 + ((code - 0xD800) << 10) + low - 0xDC00);
+				read = next;
+				continue;
+			}
+		}
+		if (code >= 0xD800 && code <= 0xDFFF) { *flags = STRING_SURROGATES; }
+		__builtin_memmove(bytes + written, bytes + start, read - start);
+		written += read - start;
+	}
+	*flags |= simple_flag(bytes, written);
+	return written;
+}
+
 /// Canonical WTF-8 joins adjacent surrogate halves. Only a result being
 /// written is passed here; borrowed static storage is never modified.
 static __attribute__((noinline, cold)) void string_finish_slow(FaString *string) {
@@ -2396,25 +2462,8 @@ static __attribute__((noinline, cold)) void string_finish_slow(FaString *string)
 		}
 		return;
 	}
-	size_t read = 0, written = 0;
-	size_t flags = 0;
-	while (read < length) {
-		size_t start = read;
-		uint32_t code = decode(bytes, length, &read);
-		if (code >= 0xD800 && code <= 0xDBFF && read < length) {
-			size_t next = read;
-			uint32_t low = decode(bytes, length, &next);
-			if (low >= 0xDC00 && low <= 0xDFFF) {
-				written += encode_point(bytes + written, 0x10000 + ((code - 0xD800) << 10) + low - 0xDC00);
-				read = next;
-				continue;
-			}
-		}
-		if (code >= 0xD800 && code <= 0xDFFF) { flags = STRING_SURROGATES; }
-		__builtin_memmove(bytes + written, bytes + start, read - start);
-		written += read - start;
-	}
-	flags |= simple_flag(bytes, written);
+	size_t flags;
+	size_t written = string_join_pairs(bytes, length, &flags);
 	if (string->capacity & STRING_INLINE) {
 		__builtin_memset(bytes + written, 0, INLINE_STRING_BYTES - written);
 		inline_string_tag(string, written, flags);
@@ -2432,7 +2481,7 @@ FA_EXPORT int32_t fa_string_is_well_formed(const uint8_t *bytes, size_t length, 
 
 /// Output has the same byte length: each lone surrogate becomes U+FFFD.
 FA_EXPORT void fa_string_write_utf8(uint8_t *out, const uint8_t *bytes, size_t length, size_t capacity) {
-	copy_bytes(out, bytes, length);
+	if (out != bytes) { copy_bytes(out, bytes, length); }
 	if (capacity & SIMPLE) { return; }
 	for (size_t i = 0; i + 2 < length; i += 1) {
 		if (out[i] == 0xED && out[i + 1] >= 0xA0) {
@@ -3051,7 +3100,7 @@ FA_EXPORT int64_t fa_string_code_point_count(const uint8_t *text, size_t length,
 }
 
 /// Counts UTF-16 code units directly in WTF-8, with no Unicode tables.
-static size_t unit_count(const uint8_t *text, size_t length) {
+static __attribute__((noinline)) size_t unit_count(const uint8_t *text, size_t length) {
 	size_t count = 0;
 	for (size_t i = 0; i < length; i += 1) {
 		count += (text[i] & 0xC0) != 0x80;
@@ -3074,16 +3123,19 @@ static StringHeader *string_metadata(const uint8_t *text, size_t length, size_t 
 }
 
 static __attribute__((noinline)) size_t string_length_slow(const uint8_t *text, size_t length, size_t capacity) {
-	if (!(capacity & STRING_INLINE) && (capacity & STRING_LITERAL)) { return capacity & KIND_MASK; }
 	StringHeader *header = string_metadata(text, length, capacity);
-	if (!header) { return unit_count(text, length); }
 	size_t count = header->units;
 	spin_unlock(&header->lock);
 	return count;
 }
 
 FA_EXPORT __attribute__((always_inline)) size_t fa_string_length(const uint8_t *text, size_t length, size_t capacity) {
-	return capacity & SIMPLE ? length : string_length_slow(text, length, capacity);
+	if (capacity & SIMPLE) { return length; }
+	if (!(capacity & STRING_INLINE) && (capacity & STRING_LITERAL)) { return capacity & KIND_MASK; }
+	// A borrowed view has no cache to mutate. Keep that fact visible to
+	// callers, so a length query cannot obscure their representation.
+	return string_owned(capacity) ? string_length_slow(text, length, capacity & ~STRING_SURROGATES)
+	                              : unit_count(text, length);
 }
 
 /// A position is twice its byte offset, plus one for the low half of an

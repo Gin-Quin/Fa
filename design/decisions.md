@@ -1451,3 +1451,12 @@ cover passive mutation, later structural-mutation fallback, exact literal growth
 whole-root and ordinary-forest copies, escaping subtrees, external buffers and
 per-unit builds. The complete scene prints its original output with the leak
 check enabled. Full-suite validation and measurements follow before acceptance.
+
+Conversions into an object root are excluded by inventory, not by coercion
+entries: `analysis.coercions` does not record every path (optional narrowing,
+an adapted function-value return, mutator views). Any other object layout of the
+complete program whose fields include every structural field of the root may be
+assignable to it, so its presence rejects the root (every value's type is in the
+inventory of its file, closed over fields, items and signatures). The recorded
+coercions remain checked for conversions out of the root. A layout that lacks
+one root field converts nothing and keeps the proof.

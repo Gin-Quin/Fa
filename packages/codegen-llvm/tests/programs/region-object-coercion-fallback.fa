@@ -12,9 +12,17 @@ function build = (depth: Integer): Tree => {
 
 function leaf = (value: Integer): Leaf => Leaf { value, children = [] }
 
+function maybe = (value: Integer): Leaf | None => if value > 0 { leaf(value) } else { none }
+
 -- A temporary structural value has no root-region ownership proof.
 let converted: Tree = leaf(arguments.length)
 assert converted.value == arguments.length
 assert converted.children.length == 0
+-- Optional narrowing and an adapted function return convert without a
+-- recorded coercion: the inventory of layouts keeps ordinary ownership.
+let narrowed: Tree | None = maybe(arguments.length + 1)
+assert narrowed?.value == arguments.length + 1
+let make: (value: Integer) => Tree = leaf
+assert make(3).children.length == 0
 assert build(1).value == 1
 console.log("structural root fallback") -- prints: structural root fallback

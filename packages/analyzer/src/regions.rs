@@ -616,6 +616,31 @@ impl<'a> RegionFile<'a> {
 		root.nominal.is_none() && !self.contains(ty, root.ty) && self.passive(ty, false)
 	}
 
+	/// Another object layout that has every structural field of an object root
+	/// may be assignable to it, through a coercion recorded or not (optional
+	/// narrowing, adapted callable returns, mutator views). Its owning fields
+	/// were never built in the region: the whole program keeps ordinary
+	/// ownership. Every value's type is in the inventory of its file.
+	fn convertible_into(&self, ty: TypeId, root: &Root) -> bool {
+		if root.nominal.is_some()
+			|| ty == root.ty
+			|| self.types.rec_target(ty) == Some(root.ty)
+			|| !matches!(self.types.kind(ty), TypeKind::Object(_))
+		{
+			return false;
+		}
+		let fields = self.types.fields_of(ty);
+		self.types
+			.fields_of(root.ty)
+			.iter()
+			.filter(|field| {
+				!field
+					.flags
+					.intersects(FieldFlags::PRIVATE | FieldFlags::METHOD)
+			})
+			.all(|expected| fields.iter().any(|field| field.name == expected.name))
+	}
+
 	fn unproven_conversion(&self, node: NodeId, root: &Root) -> bool {
 		let Some(&target) = self.analysis.coercions.get(&node) else {
 			return false;
@@ -787,7 +812,9 @@ impl<'a> RegionFile<'a> {
 			for function in &builders {
 				claims.insert(builder_key(&self.function_names[function], &root.name));
 			}
-			if mentioned.iter().any(|&ty| self.embedded(ty, &root))
+			if mentioned
+				.iter()
+				.any(|&ty| self.embedded(ty, &root) || self.convertible_into(ty, &root))
 				|| self.analysis.functions.values().any(|info| {
 					info.captures.iter().any(|&symbol| {
 						self.contains(self.analysis.symbols.symbol(symbol).ty, root.ty)
@@ -1547,6 +1574,30 @@ console.log(saved)
 			"../../codegen-llvm/tests/programs/region-object-coercion-fallback.fa"
 		));
 		assert!(resolved.is_empty(), "{claims:#?}");
+	}
+
+	/// Conversions without a recorded coercion entry: the inventory of object
+	/// layouts rejects the root whatever path converts the value.
+	#[test]
+	fn convertible_object_layouts_keep_ordinary_ownership() {
+		let tree = "type Tree = { value: Integer, children: Array<Tree> }\ntype Leaf = { value: Integer, children: Array<Never> }\nfunction build = (depth: Integer): Tree => { mutable tree = Tree { value = depth, children = [] }\nif depth > 0 { for index in 0..2 { tree.children.push(build(depth - 1)) } }\ntree }\nfunction leaf = (value: Integer): Leaf => Leaf { value, children = [] }\nconsole.log(build(1))\n";
+		for suffix in [
+			"function maybe = (value: Integer): Leaf | None => if value > 0 { leaf(value) } else { none }\nlet converted: Tree | None = maybe(1)\nconsole.log(converted)",
+			"let make: (value: Integer) => Tree = leaf\nconsole.log(make(1))",
+			"type Wide = { value: Integer, children: Array<Tree>, extra: Integer }\nfunction wider = (value: Integer): Wide => Wide { value, children = [], extra = 1 }\nconsole.log(wider(1))",
+		] {
+			let (claims, resolved) = facts(&format!("{tree}{suffix}\n"));
+			assert!(resolved.is_empty(), "{suffix}: {claims:#?}");
+		}
+		let (claims, resolved) = facts(&format!(
+			"{}console.log(leaf(1))\n",
+			tree.replace("type Leaf = { value: Integer, children: Array<Never> }", "type Leaf = { value: Integer }")
+				.replace("Leaf { value, children = [] }", "Leaf { value }")
+		));
+		assert!(
+			resolved.iter().any(|key| key.starts_with("type\u{1f}")),
+			"a layout without the root's fields converts nothing: {claims:#?}"
+		);
 	}
 
 	#[test]

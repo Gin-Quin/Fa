@@ -1195,7 +1195,7 @@ console.log(items.length)
 	fn recursive_optionals_have_no_separate_presence_word() {
 		let ir = ir_of(
 			"nullable-edges",
-			"type Node = { value: Integer, next: Node? }\nlet list = Node { value = 1, next = Node { value = 2 } }\nmutable duplicate = list\nduplicate.next = none\nconsole.log(list.next?.value ?? 0, duplicate.next?.value ?? 0)\n",
+			"type Node = { value: Integer, next: Node? }\nlet list = Node { value = 1, next = Node { value = 2 } }\nmutable duplicate = copy list\nduplicate.next = none\nconsole.log(list.next?.value ?? 0, duplicate.next?.value ?? 0)\n",
 		);
 		assert!(!ir.contains("{ i1, ptr }"), "{ir}");
 		assert!(ir.contains("{ ptr, i64 }"), "{ir}");
@@ -1221,7 +1221,7 @@ console.log(items.length)
 	fn collection_slots_inline_objects_with_other_direct_recursive_edges() {
 		let ir = ir_of(
 			"mixed-recursive-items",
-			"type Node = { value: Integer, next: Node?, children: Array<Node> }\nfunction append = (node: Node, child: Node): Void mutates node => { node.children.push(child) }\nmutable root = Node { value = 0, children = [] }\nappend(root, Node { value = 1, children = [] })\nconsole.log(root.children.length)\n",
+			"type Node = { value: Integer, next: Node?, children: Array<Node> }\nfunction append = (node: Node, child: Node): Void mutates node => { node.children.push(copy child) }\nmutable root = Node { value = 0, children = [] }\nappend(root, Node { value = 1, children = [] })\nconsole.log(root.children.length)\n",
 		);
 		let append = function(&ir, "fa.append");
 		assert!(append.contains("store { ptr, ptr, i64 }"), "{append}");
@@ -1289,7 +1289,7 @@ console.log(items.length)
 			("observed", "console.log(result.items.capacity)\n", false),
 			(
 				"alias",
-				"let alias = result.items\nconsole.log(alias.capacity)\n",
+				"let alias = copy result.items\nconsole.log(alias.capacity)\n",
 				false,
 			),
 		] {
@@ -1413,7 +1413,7 @@ console.log(items.length)
 				"replace",
 				"items = GrowingArray<Integer>.from([1, 2], capacity = 100)",
 			),
-			("copy", "let other = items\nconsole.log(other)"),
+			("copy", "let other = copy items\nconsole.log(other)"),
 		] {
 			let ir = ir_of(
 				&format!("growing-default-reject-{name}"),
@@ -1490,15 +1490,21 @@ console.log(items.length)
 	}
 
 	#[test]
-	fn references_and_captures_keep_early_returns_on_the_copy_path() {
+	fn dead_borrows_do_not_force_a_copy_on_an_owning_return() {
 		let ir = ir_of(
 			"return-aliased-local",
 			include_str!("programs/return-local-ownership.fa"),
 		);
 		for name in ["fa.referenced", "fa.captured"] {
 			let body = function(&ir, name);
-			assert!(body.contains("@fa.copy"), "{body}");
+			assert!(!body.contains("@fa.copy"), "{body}");
 		}
+		let explicit = function(&ir, "fa.copied");
+		assert_eq!(
+			explicit.matches("call ptr @fa.copy").count(),
+			2,
+			"{explicit}"
+		);
 	}
 
 	#[test]
@@ -2153,10 +2159,17 @@ mod drop_flags {
 		// `destroy` calls `usleep` with the descriptor: one call per drop
 		let head = "function release: (microseconds: UInt32) => Int32 = @extern(\"usleep\")\ntype Handle = {\n\tdescriptor: UInt32\n\tfunction destroy = (self) => {\n\t\trelease(self.descriptor)\n\t}\n}\nfunction close = (handle: Handle) => console.log(\"closing\")\n";
 		let cases = [
-			// moved on every path: destroyed by `close` only, no flag
+			// A resource argument borrows: its owner still destroys it, no flag.
+			(
+				"borrowed",
+				"do {\n\tlet handle = Handle { descriptor = 1 }\n\tclose(handle)\n\tconsole.log(\"after\")\n}\n",
+				1,
+				false,
+			),
+			// An owning local store moves; only the new owner destroys it.
 			(
 				"moved",
-				"do {\n\tlet handle = Handle { descriptor = 1 }\n\tclose(handle)\n\tconsole.log(\"after\")\n}\n",
+				"do {\n\tlet handle = Handle { descriptor = 1 }\n\tdo { let moved = handle\nconsole.log(moved.descriptor) }\n\tconsole.log(\"after\")\n}\n",
 				1,
 				false,
 			),
@@ -2167,17 +2180,24 @@ mod drop_flags {
 				1,
 				false,
 			),
-			// moved on one path: destroyed by `close` or at the end, by its flag
+			// A conditional borrow never changes the caller's ownership.
+			(
+				"maybe-borrowed",
+				"do {\n\tlet handle = Handle { descriptor = 3 }\n\tif arguments.length > 1 {\n\t\tclose(handle)\n\t}\n\tconsole.log(\"after\")\n}\n",
+				1,
+				false,
+			),
+			// Moved on one path: destroy the moved local or the original owner.
 			(
 				"maybe",
-				"do {\n\tlet handle = Handle { descriptor = 3 }\n\tif arguments.length > 1 {\n\t\tclose(handle)\n\t}\n\tconsole.log(\"after\")\n}\n",
+				"do {\n\tlet handle = Handle { descriptor = 3 }\n\tif arguments.length > 1 {\n\t\tlet moved = handle\n\t\tconsole.log(moved.descriptor)\n\t}\n\tconsole.log(\"after\")\n}\n",
 				2,
 				true,
 			),
 			// a field moved out, then assigned again: no flag either
 			(
 				"field",
-				"type Holder = { label: String, handle: Handle }\ndo {\n\tmutable holder = Holder { label = \"h\", handle = Handle { descriptor = 4 } }\n\tclose(holder.handle)\n\tholder.handle = Handle { descriptor = 5 }\n\tconsole.log(holder.label)\n}\n",
+				"type Holder = { label: String, handle: Handle }\ndo {\n\tmutable holder = Holder { label = \"h\", handle = Handle { descriptor = 4 } }\n\tlet moved = holder.handle\n\tconsole.log(moved.descriptor)\n\tholder.handle = Handle { descriptor = 5 }\n\tconsole.log(holder.label)\n}\n",
 				2,
 				false,
 			),

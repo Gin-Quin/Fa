@@ -19,8 +19,8 @@ function sum = (node: Tree): Integer => when node is {
 	Tree.Branch as { left, right } => sum(left) + sum(right)
 }
 function extract = (): Tree => {
-	let root: Tree.Branch = Tree.Branch { left = build(2), right = build(1) }
-	root.left
+	let root = Tree.Branch { left = build(2), right = build(1) }
+	copy root.left
 }
 function branch = (): Tree.Branch => Tree.Branch { left = build(2), right = build(1) }
 -- This function returns a scalar, so no builder arena may keep the inner
@@ -28,17 +28,17 @@ function branch = (): Tree.Branch => Tree.Branch { left = build(2), right = buil
 function readChild = (): Integer => {
 	let child = do {
 		let parent: Tree.Branch = branch()
-		parent.left
+		copy parent.left
 	}
 	sum(child)
 }
 let original = build(3)
-let duplicate = original
+let duplicate = copy original
 assert original == duplicate
 assert sum(original) == 7
 assert sum(duplicate) == 7
 let extracted = extract()
-let extractedCopy = extracted
+let extractedCopy = copy extracted
 assert sum(extracted) == 7
 assert sum(extractedCopy) == 7
 assert extracted == extractedCopy

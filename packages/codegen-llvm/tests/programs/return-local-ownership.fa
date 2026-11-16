@@ -22,7 +22,7 @@ function fromLoop = (early: Boolean): String => {
 assert fromLoop(true) == "a long owning string which cannot fit inline"
 assert fromLoop(false) == "a long owning string which cannot fit inline!!!"
 
--- References and closures keep the conservative copy path on early exits.
+-- A borrow used only on another path does not prevent the owning return move.
 function referenced = (early: Boolean): Array<Integer> => {
 	mutable items = [1, 2]
 	use first = items[0]
@@ -46,5 +46,17 @@ function captured = (early: Boolean): Array<Integer> => {
 }
 assert captured(true) == [1, 2]
 assert captured(false) == [1, 2, 3]
+
+-- An explicit copy still materializes its value, even on an owning return.
+function copied = (early: Boolean): Array<Integer> => {
+	mutable items = [1, 2]
+	if early {
+		return copy items
+	}
+	items.push(3)
+	copy items
+}
+assert copied(true) == [1, 2]
+assert copied(false) == [1, 2, 3]
 console.log("return ownership ok")
 -- prints: return ownership ok

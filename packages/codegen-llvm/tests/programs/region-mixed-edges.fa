@@ -38,7 +38,7 @@ function sum = (node: Tree): Integer => when node is {
 	}
 }
 let original = build(4)
-let duplicate = original
+let duplicate = copy original
 function same = (left: Tree, right: Tree): Boolean => left == right
 assert same(original, duplicate)
 assert sum(original) == 35

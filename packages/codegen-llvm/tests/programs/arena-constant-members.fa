@@ -5,7 +5,8 @@ type List = Union {
 	Cell = { head: Integer, tail: List }
 }
 
-function build = (n: Integer): List => if n == 0 { List.Empty } else { List.Cell { head = n, tail = build(n - 1) } }
+function build = (n: Integer): List =>
+	if n == 0 { List.Empty } else { List.Cell { head = n, tail = build(n - 1) } }
 function sum = (list: List): Integer => when list is {
 	List.Empty => 0
 	List.Cell as { head, tail } => head + sum(tail)
@@ -17,13 +18,13 @@ function churn = (): Integer => {
 }
 let empty = build(0)
 let three = build(3)
-let duplicate = three
+let duplicate = copy three
 assert churn() == 4 * 125250
 assert sum(empty) == 0
 assert sum(three) == 6
 assert sum(duplicate) == 6
 function tailOf = (list: List): List => when list is {
-	List.Cell as { tail } => tail
+	List.Cell as { tail } => copy tail
 	List.Empty => list
 }
 let tail = tailOf(three)

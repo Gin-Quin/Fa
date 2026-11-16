@@ -135,6 +135,8 @@ Ranked by the sum of CPU gap budgets over the 25 distinct ports at default sizes
 
 ## 5. fa check and the three project shapes
 
+- **Formatter preserves nominal constructors.** Its initializer rewrite turns `let root: Tree.Branch = Tree.Branch { ... }` into a plain literal, which TY056 rejects for a named union member. The rewrite is unchanged from ff63f472. Keep the member constructor (or remove the redundant annotation); make the W-OBJ-1 suggestion distinguish nominal members too. Reproduced while formatting the ownership migration of region-direct-edges.fa; that fixture now uses the constructor with inferred type. Add a format-then-analyze regression rather than relying on normalized parser trees alone.
+
 - **Diagnostic registry generation drift.** Reconcile `extract-codes.py` with the current briefs and active registry before regenerating it wholesale: a baseline run drops active E-GEN-1/E-GEN-2/DEP010 and changes unrelated aliases/summaries. The ownership change adds only its generated MEM005 row; preserve existing active codes while repairing the sources.
 - **Diagnostic clarity.** Audit every message/fix, duplicate/cascade reports (ref-duplicate-report, ref-error-cascade) and nested-call/stack limits (stack-overflow-chain-1500 and the undocumented compile-time depth limit). Obtain the missing W-ERR-1 slice repro; it is not reproduced, and proven/unproven bounds currently behave as specified.
 - **Checker speed.** Compare fa check with bun check on the same frozen 1,000-file package, retaining CPU, wall, RSS and deterministic diagnostics; pass reduction is O35, after semantics.

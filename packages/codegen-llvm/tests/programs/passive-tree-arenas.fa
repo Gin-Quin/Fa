@@ -4,10 +4,15 @@ type Tree = Union {
 	Branch = { left: Tree, right: Tree }
 }
 
-function build = (depth: Integer, text: String, names: Array<String>, fail: Boolean): Tree throws Failure => {
+function build = (
+	depth: Integer
+	text: String
+	names: Array<String>
+	fail: Boolean
+): Tree throws Failure => {
 	if depth == 0 {
 		if fail { throw Failure.Stop }
-		return Tree.Leaf { text, data = { names, extra = text } }
+		return Tree.Leaf { text, data = { names = copy names, extra = text } }
 	}
 	let left = try build(depth - 1, text, names, false)
 	let right = try build(depth - 1, text, names, fail)
@@ -25,7 +30,7 @@ function count = (tree: Tree, expected: String): Integer => when tree is {
 	Tree.Branch as { left, right } => count(left, expected) + count(right, expected)
 }
 
-function duplicate = (tree: Tree): Tree => tree
+function duplicate = (tree: Tree): Tree => copy tree
 function detached = (text: String): Tree throws Failure => {
 	let root = try build(3, text, [text, "short"], false)
 	duplicate(root)

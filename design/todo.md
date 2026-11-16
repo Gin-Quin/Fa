@@ -23,6 +23,9 @@ The analyzer, prelude and tooling contract is implemented on `feature/strings` (
 
 The analyzer review (2026-11-16) adds grouped-method recognition, precise diagnostics, exact-node fact tests and cases for every example on the three pages. Shared `literal-replacements`, `utf16-grouped-methods`, `utf8-decoding` and `utf16-mutation` fixtures cover the lead's literal-replacement decision, invalid UTF-8/BOMs and indexed values across mutation. The remaining method edge cases need the lead's decision (empty searches, padding, locale/Unicode rules, inclusive slice endpoints and indexed/slice assignment); the review report lists the options. Implement the decided literal `$` replacement semantics on every target, including compile time (`operations/string`).
 
+- **After the interpreter merge:** enforce the well-formed string literal type decision at schema reconstruction, known `Schema.StringLiteral` construction and a `static` used as a type; malformed compile-time values widen to `String`. The review report supplies the exact source cases, diagnostics and spans. The current UTF-8-only value representation cannot exercise these paths; no test is marked pending to hide that dependency.
+- **Locale comparison (standard library pass):** `String.compareLocale` is now refused at compile time. Native currently ignores `locale` and compares code units; implement locale-aware collation in the standard library pass, preserving the runtime-only rule.
+
 - **Native runtime and codegen** (`packages/codegen-llvm`, `runtime/fa_runtime.c` then `runtime/generate.sh`):
   - replace the grapheme scans (`length`, indexing, `faSliceBounds`, searches) by code unit arithmetic: cached UTF-16 length, breadcrumbs every 64th code unit, positions inside a four-byte sequence;
   - the ASCII flag (`SIMPLE`) no longer excludes `'\r'`; **slices carry the ASCII flag** of their string (`{ ptr, byte length }` has no flag today: take a bit of the length, or keep the flag statically);

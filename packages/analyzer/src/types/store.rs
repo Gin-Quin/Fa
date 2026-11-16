@@ -653,6 +653,9 @@ impl TypeStore {
 		}
 	}
 
+	/// A well-formed literal type. `str` keeps this invariant by construction;
+	/// compile-time strings with lone surrogates must widen to `String` before
+	/// reaching this entry point, or be rejected when a literal type is required.
 	pub fn string_literal(&mut self, text: &str) -> TypeId {
 		let sym = self.syms.intern(text);
 		self.intern(TypeKind::StringLit(sym))

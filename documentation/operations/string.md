@@ -110,7 +110,7 @@ No method changes the string it is called on, except `reserve`: a `mutable` stri
 | `codePoints()` | `Array<UInt32>`; `text.codePoints().length` counts the code points without building the array |
 | `toUtf8()` | [`Bytes`](/values/bytes), the string encoded in UTF-8; iterating it without keeping it (`for byte in text.toUtf8()`) doesn't build it |
 | `toString()` | the string itself |
-| `String.compareLocale(a: String, b: String, locale: String? = none)` | `Integer`: negative, zero or positive |
+| `String.compareLocale(a: String, b: String, locale: String? = none)` | `Integer`: negative, zero or positive; runtime only, never evaluated at compile time |
 | `String.fromUtf8(bytes: Bytes)` | `String`, decoded from UTF-8; `throws Utf8Error` when the bytes are not valid UTF-8 |
 | `String.fromUtf8Lossy(bytes: Bytes)` | `String`, where each invalid sequence becomes `U+FFFD` |
 | `String.from(text: String, capacity = n)` | `String`: a copy of `text` with room for at least `n` bytes |
@@ -157,6 +157,8 @@ assert "Abc".toLowerCase() == "abc"
 ```
 
 Comparison is by UTF-16 code unit, as in JavaScript, not by locale. It is the order of the code points, except that the characters outside the Basic Multilingual Plane (most emoji) come before the characters from `U+E000` to `U+FFFF`. For locale-aware ordering, use `String.compareLocale(a, b)`, which returns a negative integer when `a` comes first, zero when they are equivalent, and a positive integer otherwise.
+
+`String.compareLocale` cannot be evaluated at compile time: its result depends on the locale data of the machine running the program.
 
 :::implementation
 ## Implementation details

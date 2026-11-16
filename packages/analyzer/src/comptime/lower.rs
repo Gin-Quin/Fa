@@ -248,6 +248,22 @@ impl<'a> Lowerer<'a> {
 		Expr::Impure(Arc::from(what.into()))
 	}
 
+	/// Locale comparison reads machine data at evaluation time, without
+	/// changing the runtime purity rules for reactive expressions.
+	fn builtin_impurity(&self, path: &str) -> Option<Expr> {
+		if path == "String.compareLocale" {
+			Some(
+				self.impure(
+					"the machine's locale data (`String.compareLocale`; call it at runtime)",
+				),
+			)
+		} else if builtins::std_library::impurity(path).is_some() {
+			Some(self.impure(path))
+		} else {
+			None
+		}
+	}
+
 	// ── numbers ──────────────────────────────────────────────────────────
 
 	/// The kind of number of a type, with the range of the target (D49):
@@ -510,10 +526,9 @@ impl<'a> Lowerer<'a> {
 					"Float.epsilon" => Expr::Const(Value::Float(f64::EPSILON)),
 					_ => match self.literal_of(n) {
 						Some(value) => Expr::Const(value),
-						None if builtins::std_library::impurity(path).is_some() => {
-							self.impure(path)
-						}
-						None => self.unsupported(format!("`{path}`")),
+						None => self
+							.builtin_impurity(path)
+							.unwrap_or_else(|| self.unsupported(format!("`{path}`"))),
 					},
 				}
 			}
@@ -1442,8 +1457,8 @@ impl<'a> Lowerer<'a> {
 			}
 			Callee::Builtin(id) => {
 				let path = builtins::get(id).path;
-				if builtins::std_library::impurity(path).is_some() {
-					return self.impure(path);
+				if let Some(impure) = self.builtin_impurity(path) {
+					return impure;
 				}
 				let method = path.contains('#');
 				let mut values = Vec::new();

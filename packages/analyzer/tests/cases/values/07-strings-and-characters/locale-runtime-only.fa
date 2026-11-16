@@ -1,0 +1,10 @@
+function compare = (a: String, b: String): Integer => String.compareLocale(a, b)
+let runtime: Integer = compare("a", "b")
+static throughFunction = @compare("a", "b") -- error: META002
+static direct = String.compareLocale("a", "b") -- error: META002
+static grouped = (String.compareLocale)("a", "b") -- error: META002
+static throughValue = do { -- error: META002
+	let compareValue = String.compareLocale
+	compareValue("a", "b", none)
+}
+console.log(runtime)

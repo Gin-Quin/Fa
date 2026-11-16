@@ -42,6 +42,8 @@ Supported escape sequences:
 
 A literal is always well-formed Unicode: `\x80` to `\xFF` are errors (use `\u{...}`), and so is a `\u{...}` that is not a Unicode scalar value (a surrogate, from `D800` to `DFFF`, or a value above `10FFFF`). Any other character after a backslash is an error.
 
+A string literal **type** also always holds a well-formed string. A compile-time string value containing a lone surrogate has the type `String`; its exact literal type is not kept. Trying to use that value as a literal type, directly or through `Schema.StringLiteral` and `TypeFromSchema`, is an error: use `String`, or make the value well-formed first.
+
 ## Template strings
 
 Any string can interpolate expressions with `{}`:
@@ -227,6 +229,8 @@ It is the only string operation that depends on the Unicode tables: the segmenta
 
 The string API is the JavaScript `String` API, with a few differences that don't change what a position means: an unproven index throws instead of giving `undefined`, `indexOf` returns an optional instead of `-1`, and no value is converted to a string implicitly. See [string operations](/operations/string) for the list of methods.
 
+`String.compareLocale` is available only at runtime: it depends on the locale data of the machine running the program and cannot be evaluated at compile time.
+
 ## Capacity and reservation
 
 A `mutable` string that grows, with `+=`, keeps room for more bytes: its **capacity**, like the capacity of a [collection](/collections/arrays#capacity-and-reservation). When you know how long a string will get, reserve the room up front.
@@ -252,6 +256,8 @@ On JavaScript and during compile-time evaluation, the hints are ignored, `reserv
 ## Implementation details
 
 The semantics are UTF-16 code units; the native storage is UTF-8. Text arrives and leaves as UTF-8 (files, the network, C), so nothing is transcoded at these boundaries, and ASCII text, the common case, pays nothing: one byte is one code unit.
+
+String literal types store well-formed UTF-8. An exact compile-time value containing a lone surrogate widens to `String`; schema reconstruction or using that value as a literal type must diagnose it rather than replace or encode away the surrogate.
 
 ### Native
 

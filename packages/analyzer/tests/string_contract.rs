@@ -289,6 +289,22 @@ fn new_diagnostics_explain_the_fix_at_the_rejected_expression() {
 }
 
 #[test]
+fn locale_data_is_refused_at_compile_time_with_a_runtime_fix() {
+	assert_diagnostic(
+		"static order = String.compareLocale(\"a\", \"b\")",
+		"META002",
+		"String.compareLocale(\"a\", \"b\")",
+		&["locale data", "runtime"],
+	);
+	assert_flags(
+		"let order = String.compareLocale(\"a\", \"b\")\nconsole.log(order)",
+		"String.compareLocale(\"a\", \"b\")",
+		NodeFlags::empty(),
+		NodeFlags::CAN_FAIL,
+	);
+}
+
+#[test]
 fn compile_time_operations_keep_semantic_flags_without_runtime_errors() {
 	assert_flags(
 		"static unit = \"ab\"[0]\nconsole.log(unit)",

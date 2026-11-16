@@ -25,9 +25,22 @@ impl Generator<'_> {
 			return self.constant_value(n, &value, self.type_of(n));
 		}
 		let value = self.expr_value(n);
+		// A grouped value can own the contextual instantiation. Its child
+		// may own one instead: bind the capabilities exactly once.
+		let mut source = n;
+		while let View::Group(inner) = self.view(source) {
+			if self.analysis.instantiation(inner).is_some() {
+				source = inner;
+				break;
+			}
+			source = inner;
+		}
 		let value = if self.analysis.instantiation(n).is_some()
-			&& matches!(self.view(n), View::Name(_) | View::Access { .. })
-		{
+			&& (source == n || self.analysis.instantiation(source).is_none())
+			&& matches!(
+				self.view(source),
+				View::Name(_) | View::Access { .. } | View::Lambda { .. }
+			) {
 			self.specialized_function_value(n, value)
 		} else {
 			value

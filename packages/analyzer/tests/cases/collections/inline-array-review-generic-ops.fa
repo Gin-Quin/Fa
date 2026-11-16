@@ -67,8 +67,15 @@ try wideValues.push(Int64(7))
 console.log(wideValues) -- prints: [7]
 
 function identity = <Item>(values: InlineArray<Item, 2>): InlineArray<Item, 2> => values
+function applyInline = (
+	transform: (InlineArray<Integer, 2>) => InlineArray<Integer, 2>
+): InlineArray<Integer, 2> => transform([3])
 function inferred = (): InlineArray<Integer, 2> => {
 	let relay: (InlineArray<Integer, 2>) => InlineArray<Integer, 2> = identity
+	let literal = applyInline(<Item>(values: InlineArray<Item, 2>) => values)
+	let grouped: (InlineArray<Integer, 2>) => InlineArray<Integer, 2> = ((identity))
+	assert literal.get(0) == 3
+	assert grouped([4]).get(0) == 4
 	relay([5])
 }
 console.log(inferred()) -- prints: [5]

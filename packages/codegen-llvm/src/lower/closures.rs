@@ -434,6 +434,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		let node = self.function_value_site(node);
 		// `function f = g then h` (compose.rs)
 		if let fa_analyzer::syntax::View::Function { value, .. } = self.view(declaration)
 			&& self.analysis.compositions.contains_key(&value)
@@ -1145,6 +1146,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.map(|function| function.info.params.len());
 		}
 		None
+	}
+
+	/// Contextual specialization can belong to the parentheses around a name.
+	fn function_value_site(&self, node: NodeId) -> NodeId {
+		let mut current = node;
+		loop {
+			if self.analysis.instantiation(current).is_some() {
+				return current;
+			}
+			let Some(&parent) = self.parents().get(current.index()) else {
+				return node;
+			};
+			if parent == usize::MAX
+				|| !matches!(
+					self.view(NodeId::new(parent)),
+					fa_analyzer::syntax::View::Group(_)
+				) {
+				return node;
+			}
+			current = NodeId::new(parent);
+		}
 	}
 
 	/// The function value of a name: a lambda's, or a declaration's thunk.

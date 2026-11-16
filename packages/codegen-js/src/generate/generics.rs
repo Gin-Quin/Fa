@@ -289,6 +289,9 @@ impl Generator<'_> {
 			) {
 			return self.signature_hidden_arguments(inner, call);
 		}
+		if matches!(self.view(callee), View::Lambda { .. }) {
+			return self.hidden_arguments(callee, call);
+		}
 		let named = match self.view(callee) {
 			View::Access { members, .. } | View::OptionalAccess { members, .. } => {
 				members.last().unwrap_or(callee)

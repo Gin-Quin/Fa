@@ -1754,3 +1754,12 @@ No expected-skip changes. All other outputs in all three targets matched.
 Focused corrected fixtures pass all LLVM targets/leak checks (4/4), fmt and
 Clippy pass; the whole workspace is rerun. Compiler sources remain identical
 to 1f8e7118, so existing instruction profiles and archived binaries are valid.
+
+Scalar64 validation checkpoint after correcting the two order assumptions:
+37 complete workspace result groups, 706 passed,
+zero failed so far; all 95 IR checks, packages, Bun/Node/web, C-library,
+object-cache and memory groups pass. The full LLVM program corpus is still
+active; final workspace acceptance and CPU phases remain pending. Compiler
+sources remain unchanged from the archived 1f8e7118 build. The GCC sanitizer
+runtime harness independently ran and passed (1/1) rather than relying on the
+Clang environment's unavailable ASan probe. No additional skip was introduced.

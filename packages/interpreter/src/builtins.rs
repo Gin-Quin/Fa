@@ -432,6 +432,15 @@ pub fn call(
 	let receiver = arguments.first().cloned().unwrap_or(Value::None);
 	let arg = |index: usize| argument(&arguments, index);
 	Ok(match path {
+		"Function#bind" => {
+			let Value::Function(mut function) = receiver else {
+				return Err(stop("only a function can bind generic arguments"));
+			};
+			Arc::make_mut(&mut function)
+				.bound
+				.extend(arguments.iter().skip(1).cloned().enumerate());
+			Value::Function(function)
+		}
 		// ── strings ──
 		"String#length" => Value::int(grapheme_count(text(&receiver)?) as i64),
 		// the room of a string is its JavaScript length at compile time, as on JavaScript:

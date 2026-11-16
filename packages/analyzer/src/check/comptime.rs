@@ -616,8 +616,14 @@ impl Walker<'_> {
 	pub(super) fn is_at_callee(&self, callee: NodeId) -> bool {
 		let mut node = callee;
 		// `@tables.squares(5)`: through a namespace
-		while let View::Access { target, .. } = self.view(node) {
-			node = target;
+		loop {
+			node = match self.view(node) {
+				View::Access { target, .. } => target,
+				View::Call { callee, .. } if syntax::is_angle_application(&self.tree, node) => {
+					callee
+				}
+				_ => break,
+			};
 		}
 		matches!(self.view(node), View::Name(name) if self.tree.name(name).starts_with('@'))
 	}

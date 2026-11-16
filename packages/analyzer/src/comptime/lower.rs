@@ -1394,19 +1394,17 @@ impl<'a> Lowerer<'a> {
 	/// direct callees. Share it with the allocation-free string views.
 	fn call_receiver(&mut self, callee: NodeId) -> Option<Expr> {
 		let callee = self.strip_groups(callee);
-		let (View::Access { target, members } | View::OptionalAccess { target, members }) =
-			syntax::view(self.tree, callee)
-		else {
-			return None;
+		let (target, members, optional) = match syntax::view(self.tree, callee) {
+			View::Access { target, members } => (target, members, false),
+			View::OptionalAccess { target, members } => (target, members, true),
+			_ => return None,
 		};
-		let mut value = self.expr(target);
-		for member in members.iter().take(members.len().saturating_sub(1)) {
-			let View::Name(name) = syntax::view(self.tree, member) else {
-				return None;
-			};
-			value = Expr::Field(value.boxed(), Arc::from(self.tree.name(name)), false);
-		}
-		Some(value)
+		Some(self.access(
+			callee,
+			target,
+			members.take(members.len().saturating_sub(1)),
+			optional,
+		))
 	}
 
 	fn string_call_receiver(&mut self, call: NodeId) -> Option<Expr> {

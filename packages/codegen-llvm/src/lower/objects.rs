@@ -2129,6 +2129,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(slot)
 			}
 			View::Group(inner) => self.place(inner),
+			View::Index { target, index } if self.analysis.key_reads.contains(&node) => {
+				self.key_place(node, target, index)
+			}
 			View::Index { target, index } => match self.tuple_place(node, target, index)? {
 				Some(slot) => Ok(slot),
 				None if matches!(self.node_repr(target)?, Repr::Map(_)) => {

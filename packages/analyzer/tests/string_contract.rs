@@ -566,13 +566,17 @@ fn chained_string_views_respect_a_small_evaluation_budget() {
 	for (expression, expected) in [
 		(
 			format!("({{ text = \"{text}\" }}.text.codePoints)().length"),
-			4000,
+			Value::int(4000),
+		),
+		(
+			format!("({{ text = \"{text}\" }}.text.codePoints)().length.toString()"),
+			Value::string("4000"),
 		),
 		(
 			format!(
 				"do {{\nmutable total = 0\nfor byte in ({{ text = \"{text}\" }}.text.toUtf8)() {{ total += byte }}\ntotal\n}}"
 			),
-			1552000,
+			Value::int(1552000),
 		),
 	] {
 		let source = format!("let result = {expression}");
@@ -596,7 +600,7 @@ fn chained_string_views_respect_a_small_evaluation_budget() {
 		};
 		assert_eq!(
 			Interpreter::new(&mut NoHost, limits).evaluate(&expr, slots),
-			Ok(Value::int(expected))
+			Ok(expected)
 		);
 	}
 }

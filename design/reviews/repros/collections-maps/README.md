@@ -5,6 +5,8 @@ Full report: `/home/claude-dev/fa-lead/reports/review-collections-maps.md`.
 
 Run from the repository root, with LLVM 18 and Bun installed as in AGENTS.
 Every command belongs on CPUs 0–4; no benchmark timing is needed here.
+The standalone runner uses `target/debug/fa` and `target/debug/examples/build`;
+build them with LLVM enabled first if the warm artifacts are absent.
 
 ```sh
 taskset -c 0-4 python3 design/reviews/repros/collections-maps/run.py
@@ -49,3 +51,8 @@ error cleanup, references, owner methods, closures, await, moves/copies/returns,
 frame budget overflow and recursion, every signed/unsigned integer width with
 64-bit and narrow values, stable references, deleteWhere, deterministic collision
 stress and compile-time evaluation.
+
+`verification.json` retains the final 105 standalone executions, 18 per-unit
+outcomes, 28 IR controls, instruction rows and fixture hashes. The six failing
+standalone LLVM runs are C1. The package failures distinguish C1 from the two
+pre-existing issues; none is suppressed as an expected skip.

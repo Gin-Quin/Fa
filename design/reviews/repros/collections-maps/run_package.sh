@@ -26,10 +26,11 @@ fa-analyzer = {{ path = {quote(root / "packages/analyzer")} }}
 fa-codegen-llvm = {{ path = {quote(root / "packages/codegen-llvm")} }}
 ''')
 PY
+cp "$REVIEW_ROOT/Cargo.lock" "$REVIEW_SCRATCH/runner/Cargo.lock"
 export CARGO_BUILD_JOBS=2
 export LLVM_SYS_181_PREFIX="${LLVM_SYS_181_PREFIX:-$HOME/.local/llvm18/usr/lib/llvm-18}"
 export CC="${CC:-$HOME/.local/llvm18/usr/bin/clang-18}"
 export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"
 export CARGO_TARGET_DIR="$REVIEW_ROOT/target"
-cargo run --manifest-path "$REVIEW_SCRATCH/runner/Cargo.toml" -- \
+cargo run --offline --manifest-path "$REVIEW_SCRATCH/runner/Cargo.toml" -- \
 	"$REVIEW_DIRECTORY" "$REVIEW_SCRATCH/output"

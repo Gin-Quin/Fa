@@ -1035,7 +1035,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.builder.build_conditional_branch(is, taken, next)?;
 					self.builder.position_at_end(taken);
 					let item_repr = self.repr_of(item, call.index())?;
-					let data = self.unbox(value, item_repr)?;
+					let data = self.narrow_to(value, item_repr, call)?;
 					self.json_write(data, item, call)?;
 					self.builder.build_unconditional_branch(join)?;
 					self.builder.position_at_end(next);

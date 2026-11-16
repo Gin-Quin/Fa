@@ -559,6 +559,9 @@ type Status = Enum { ok = 200, failed = 500 }
 type Flags = Fields { first, nested { second, third }, single { child } }
 type Node = { text: String, children: Array<Node> }
 function read = (input: String | Bytes): Record throws JsonError => try Json.parse(identity(input))
+type Twin = Union { Row = { value: String } }
+type TaggedEnvelope = { items: Array<Message.Row | Twin.Row>, maybe: (Message.Row | Twin.Row)? }
+function tagged = (value: Message.Row | Twin.Row): String => Json.stringify(value)
 type Forward = { kind: "forward", z: String, a: String }
 type Reverse = { a: String, z: String, kind: "reverse" }
 function variant = (value: Forward | Reverse): String => Json.stringify(value)
@@ -589,6 +592,10 @@ function composite = (text: String): String throws JsonError => {
     rows.push(units(Json.stringify(Flags { first, nested { third }, single { child } })))
     rows.push(units(Json.stringify(Node { text = text, children = [Node { text = text, children = [] }] })))
     rows.push(units(scoped(text)))
+    rows.push(units(tagged(Message.Row { text = text })))
+    rows.push(units(tagged(Twin.Row { value = text })))
+    rows.push(units(Json.stringify(TaggedEnvelope { items = [Message.Row { text = text }, Twin.Row { value = text }], maybe = Twin.Row { value = text } })))
+    rows.push(units(Json.stringify(TaggedEnvelope { items = [], maybe = none })))
     rows.push(units(variant(Forward { kind = "forward", z = text, a = "a" })))
     rows.push(units(variant(Reverse { a = "a", z = text, kind = "reverse" })))
     rows.push(units(distinct({ z = text })))
@@ -609,7 +616,7 @@ const texts=JSON.parse(await Bun.stdin.text());
 const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)).join(",");
 for(const text of texts) {
 const map=Object.fromEntries([[text,text]]);
-const values=[{text},[text,null,"x"],map,{type:"Text",value:text},{type:"Row",text},{type:"Tagged",value:{type:"data",text}},{type:"Empty"},"literal",{type:"Detail",text},{type:"Missing"},"blue",500,["first","nested.third","single.child"],{text,children:[{text,children:[]}]},{outside:{text,children:[{text,children:[]}]},inside:{item:text,next:{item:text}}},{kind:"forward",z:text,a:"a"},{a:"a",z:text,kind:"reverse"},{z:text},{a:text},{text},500];
+const values=[{text},[text,null,"x"],map,{type:"Text",value:text},{type:"Row",text},{type:"Tagged",value:{type:"data",text}},{type:"Empty"},"literal",{type:"Detail",text},{type:"Missing"},"blue",500,["first","nested.third","single.child"],{text,children:[{text,children:[]}]},{outside:{text,children:[{text,children:[]}]},inside:{item:text,next:{item:text}}},{type:"Row",text},{type:"Row",value:text},{items:[{type:"Row",text},{type:"Row",value:text}],maybe:{type:"Row",value:text}},{items:[]},{kind:"forward",z:text,a:"a"},{a:"a",z:text,kind:"reverse"},{z:text},{a:text},{text},500];
 console.log([...values.map(v=>units(JSON.stringify(v))),units(text),units(text)].join("|"));
 }
 """
@@ -688,8 +695,7 @@ type Root = { right: Leaf, left: Leaf }
 function keys = <Item, fields: DeepKeys<Item>>(value: Item): String => {
     mutable rows: Array<String> = []
     @for key in fields { rows.push(key + "=[" + units(value[key]) + "]") }
-    rows.sort()
-    rows.join("|")
+    rows.sort().join("|")
 }
 function keyProbe = (text: String): String => {
     let owned = String.from(text, capacity = 4096)

@@ -300,6 +300,15 @@ impl<'s> Writer<'_, '_, 's> {
 	}
 
 	fn matches(&mut self, value: &Value, schema: &'s Value) -> bool {
+		// Nominal unions may reuse a member name (`First.Row`, `Second.Row`).
+		// Their enclosing named schema, not just the leaf, selects the payload.
+		if matches!(kind(schema), "Named" | "Reference")
+			&& let Value::Member(member) = value
+			&& let Some(owner) = property(schema, "name").and_then(Value::as_str)
+			&& member.name.split('.').next() != Some(owner)
+		{
+			return false;
+		}
 		let names = self.names.len();
 		let schema = self.resolve(value, schema);
 		let matched = match kind(schema) {

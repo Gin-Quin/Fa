@@ -1,0 +1,10 @@
+type Node = { value: Integer }
+mutable nodes: GrowingPool<Node> = []
+type Box<T> = { children: Array<T> }
+type Make = (n: Node in nodes) => Box<Node in nodes>
+function make = (n: Node in nodes): Box<Node in nodes> => ({ children = [n] })
+let f: Make = make
+use a = nodes.add({ value = 1 })
+let b = f(a)
+a.value = 5
+console.log(try b.children[0].value)

@@ -1,0 +1,7 @@
+type Node = { value: Integer }
+mutable nodes: GrowingPool<Node> = []
+function pair = (n: Node in nodes): (Node in nodes, Integer) => (n, 1)
+use a = nodes.add({ value = 1 })
+let p = pair(a)
+a.value = 5
+console.log(p[0].value)

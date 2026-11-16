@@ -2072,6 +2072,33 @@ console.log(try read(T.One { child = T.Leaf { value = 7 } }, false))
 	}
 
 	#[test]
+	fn generic_readonly_maps_keep_separate_chunked_and_inline_headers() {
+		let source = include_str!("../../cli/tests/programs/map-generic-readonly.fa");
+		for (name, target, extension) in [
+			("native", Target::Native, "ll"),
+			("wasm", Target::Wasm, "wasm.ll"),
+		] {
+			let name = format!("map-generic-readonly-{name}");
+			ir_at_target(&name, source, false, OptLevel::O0, target);
+			let full = std::fs::read_to_string(
+				PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+					.join("fa-checks")
+					.join(format!("{name}.{extension}")),
+			)
+			.unwrap();
+			assert_eq!(
+				full.lines()
+					.filter(|line| line.starts_with("@fa.collection.static"))
+					.count(),
+				2,
+				"{full}"
+			);
+			assert!(full.contains("[9 x { i32, i16 }]"), "{full}");
+			assert!(full.contains("[32 x { i32, i64 }]"), "{full}");
+		}
+	}
+
+	#[test]
 	fn generic_map_instances_share_the_callers_layout_policy() {
 		for (name, target) in [("native", Target::Native), ("wasm", Target::Wasm)] {
 			for (key, flags) in [

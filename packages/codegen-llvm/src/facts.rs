@@ -314,6 +314,24 @@ pub use fa_analyzer::stable_names::stable_type_name;
 /// component's identity. This intentionally ignores parameter constraints
 /// and correlations: exclusions may be conservative, never incomplete.
 fn map_component(types: &TypeStore, ty: TypeId) -> Option<String> {
+	// Scalar refinements can pass through a map view without conversion.
+	// Their storage, rather than their current range/literal, names the ABI.
+	let ty = match types.kind(ty) {
+		TypeKind::Int(id) => TypeId::of_storage(types.int(id).storage),
+		// Union payloads may widen without changing their erased native
+		// representation. Conservatively share exclusions across that family,
+		// including optional scalars and nominal member subsets.
+		TypeKind::Union(_) | TypeKind::NamedUnion(..) | TypeKind::Member(..) => {
+			return Some("*".to_string());
+		}
+		TypeKind::Enum(nominal, _) | TypeKind::EnumMember(nominal, _) => {
+			return Some(fa_analyzer::stable_names::stable_decl_name(
+				types,
+				types.nominal(nominal).key,
+			));
+		}
+		_ => types.widen(ty),
+	};
 	let name = stable_type_name(types, ty)?;
 	Some(
 		if types

@@ -1817,11 +1817,26 @@ indexing also registers generic type methods before their child lambdas and
 defers local named closures to their enclosing instance. These retain accepted
 generic methods and captured-map code while avoiding eager erased layouts.
 
+An additional view boundary used the same scalar storage with different
+range spellings: `Map<Int64,Integer<min=0,max=100>>` could be read as
+`Map<Int64,Integer>`, losing the source reference exclusion and reading the
+wrong value. Scalar fact components now use their storage type; literal
+components widen to their base type. Union/optional refinements conservatively
+use a wildcard, and enum member subsets share their nominal identity. This
+keeps erased scalar views on the same side of the layout rule.
+
 Cache logs query all matching concrete/wildcard exclusions, including their
 absence; the object ABI version changes. Copies, drops, callbacks, readonly
 literals and frame constructors all pass through `table_of`; private headers
 and lookup hints retain their narrower separate proofs. M1 (split freestanding
 O0 runtime linking) is independent and remains a documented follow-up.
+
+A generic constant constructor with a local `let` literal independently
+reproduced a crash when its Int64/chunked and Int16/inline instances reused
+one static header. The static-cache fix is guarded by native/wasm IR checks
+requiring both a chunked 32-entry block and a nine-slot inline block, plus
+leak-checked O0/O3 execution. Scalar-range, optional, union and enum views
+have shared runtime regressions too.
 
 Validation is in progress; results and fixtures are appended to the engineer
 report. No benchmark source/runtime C/String code changes are involved.

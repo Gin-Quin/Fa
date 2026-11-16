@@ -17,6 +17,8 @@ fn generic_map_layouts_at_o0() {
 			("delete-direct", "generic delete ok"),
 			("delete", "generic delete ok"),
 			("reference", "generic reference ok"),
+			("ranged-view", "ranged map views ok"),
+			("readonly", "readonly generic ok"),
 			("operations", "generic operations ok"),
 			("helper-layouts", "generic helpers ok"),
 			("async", "async generic maps ok"),

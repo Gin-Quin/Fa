@@ -223,7 +223,6 @@ impl Walker<'_> {
 		members: NodeList<'_>,
 	) -> TypeId {
 		let ty = self.literal_target_type(target);
-		self.check_reference_annotation(target);
 		// `Permissions { read, write }` (fields.rs)
 		if self.is_fields(ty) {
 			return self.check_fields_literal(n, ty, members, false);
@@ -243,6 +242,7 @@ impl Walker<'_> {
 			let built = self.check_typed_object_inner(n, target, members, ty);
 			return self.worker_created(n, target, built);
 		}
+		self.check_reference_annotation(target);
 		self.check_typed_object_inner(n, target, members, ty)
 	}
 
